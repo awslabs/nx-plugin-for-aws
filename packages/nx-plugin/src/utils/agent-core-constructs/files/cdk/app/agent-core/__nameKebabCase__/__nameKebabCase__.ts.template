@@ -1,6 +1,17 @@
-import { Fn, Lazy, Names, Stack } from 'aws-cdk-lib';
+import { Fn, Lazy, Names<%_ if (session === 's3') { _%>, RemovalPolicy<%_ } _%>, Stack } from 'aws-cdk-lib';
 import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { Connections, IConnectable } from 'aws-cdk-lib/aws-ec2';
+<%_ if (session === 's3') { _%>
+import { BlockPublicAccess, Bucket, BucketEncryption } from 'aws-cdk-lib/aws-s3';
+import { Key } from 'aws-cdk-lib/aws-kms';
+import {
+  CfnDelivery,
+  CfnDeliveryDestination,
+  CfnDeliverySource,
+  LogGroup,
+  RetentionDays,
+} from 'aws-cdk-lib/aws-logs';
+<%_ } _%>
 import { Construct } from 'constructs';
 import * as path from 'path';
 import * as url from 'url';
@@ -13,9 +24,12 @@ import {
   RuntimeAuthorizerConfiguration,
 <%_ } _%>
 } from 'aws-cdk-lib/aws-bedrockagentcore';
-import { <%_ if (serverProtocol !== 'mcp') { _%>PolicyStatement, <%_ } _%>IGrantable, IPrincipal<%_ if (auth === 'iam') { _%>, Grant<%_ } _%> } from 'aws-cdk-lib/aws-iam';
+import { <%_ if (serverProtocol !== 'mcp') { _%>PolicyStatement, <%_ } _%><%_ if (session === 's3') { _%>Effect, ServicePrincipal, <%_ } _%>IGrantable, IPrincipal<%_ if (auth === 'iam') { _%>, Grant<%_ } _%> } from 'aws-cdk-lib/aws-iam';
 <%_ if (auth === 'cognito') { _%>
 import { IUserPool, IUserPoolClient } from 'aws-cdk-lib/aws-cognito';
+<%_ } _%>
+<%_ if (session === 's3') { _%>
+import { suppressRules } from '../../../core/checkov<% if (esm) { %>.js<% } %>';
 <%_ } _%>
 import { RuntimeConfig } from '../../../core/runtime-config<% if (esm) { %>.js<% } %>';
 import { findWorkspaceRoot } from '../../../core/workspace<% if (esm) { %>.js<% } %>';
@@ -73,6 +87,111 @@ export class <%- nameClassName %> extends Construct implements IGrantable, IConn
     const { identity, ...restProps } = props;
 
 <%_ } _%>
+<%_ if (session === 's3') { _%>
+    const sessionKey = new Key(this, 'SessionKey', {
+      enableKeyRotation: true,
+    });
+
+    // Allow CloudWatch Logs to use the session key for server access log delivery.
+    const stack = Stack.of(this);
+    sessionKey.addToResourcePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        principals: [new ServicePrincipal(`logs.${stack.region}.amazonaws.com`)],
+        actions: [
+          'kms:Encrypt',
+          'kms:Decrypt',
+          'kms:ReEncrypt*',
+          'kms:GenerateDataKey*',
+          'kms:DescribeKey',
+        ],
+        resources: ['*'],
+        conditions: {
+          ArnLike: {
+            'kms:EncryptionContext:aws:logs:arn': `arn:aws:logs:${stack.region}:${stack.account}:log-group:*`,
+          },
+        },
+      }),
+    );
+
+    const sessionAccessLogs = new LogGroup(this, 'SessionAccessLogs', {
+      retention: RetentionDays.ONE_YEAR,
+      encryptionKey: sessionKey,
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+
+    const sessionBucket = new Bucket(this, 'SessionBucket', {
+      enforceSSL: true,
+      removalPolicy: RemovalPolicy.RETAIN,
+      encryption: BucketEncryption.KMS,
+      encryptionKey: sessionKey,
+      blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+    });
+    suppressRules(
+      sessionBucket,
+      ['CKV_AWS_21'],
+      'Session data does not need versioning enabled',
+    );
+    suppressRules(
+      sessionBucket,
+      ['CKV2_AWS_61'],
+      'Lifecycle configuration not required for session data',
+    );
+    suppressRules(
+      sessionBucket,
+      ['CKV_AWS_144'],
+      'Cross-region replication not required for session data',
+    );
+    suppressRules(
+      sessionBucket,
+      ['CKV2_AWS_62'],
+      'Event notifications not required for session data',
+    );
+    suppressRules(
+      sessionBucket,
+      ['CKV_AWS_18'],
+      'Server access logs are delivered to CloudWatch Logs',
+    );
+
+    const sessionAccessLogsSource: CfnDeliverySource = new CfnDeliverySource(
+      this,
+      'SessionAccessLogsSource',
+      {
+        name: Lazy.string({
+          produce: () =>
+            Names.uniqueResourceName(sessionAccessLogsSource, {
+              maxLength: 60,
+            }),
+        }),
+        logType: 'S3_SERVER_ACCESS_LOGS',
+        resourceArn: sessionBucket.bucketArn,
+      },
+    );
+    const sessionBucketPolicy = sessionBucket.policy;
+    if (sessionBucketPolicy) {
+      sessionAccessLogsSource.node.addDependency(sessionBucketPolicy);
+    }
+    const sessionAccessLogsDestination: CfnDeliveryDestination =
+      new CfnDeliveryDestination(this, 'SessionAccessLogsDestination', {
+        name: Lazy.string({
+          produce: () =>
+            Names.uniqueResourceName(sessionAccessLogsDestination, {
+              maxLength: 60,
+            }),
+        }),
+        destinationResourceArn: sessionAccessLogs.logGroupArn,
+      });
+    const sessionAccessLogsDelivery = new CfnDelivery(
+      this,
+      'SessionAccessLogsDelivery',
+      {
+        deliverySourceName: sessionAccessLogsSource.name,
+        deliveryDestinationArn: sessionAccessLogsDestination.attrArn,
+      },
+    );
+    sessionAccessLogsDelivery.addDependency(sessionAccessLogsSource);
+
+<%_ } _%>
     this.agentCoreRuntime = new Runtime(this, '<%- nameClassName %>', {
       runtimeName: Lazy.string({
         produce: () =>
@@ -115,11 +234,20 @@ export class <%- nameClassName %> extends Construct implements IGrantable, IConn
     );
 
 <%_ } _%>
+<%_ if (session === 's3') { _%>
+    sessionBucket.grantReadWrite(this.agentCoreRuntime);
+
+<%_ } _%>
     rc.grantReadAppConfig(this.agentCoreRuntime);
 
     rc.set('agentcore', 'agentRuntimes', {
       ...rc.get('agentcore').agentRuntimes,
-      <%- nameClassName %>: this.agentCoreRuntime.agentRuntimeArn,
+      <%- nameClassName %>: {
+        arn: this.agentCoreRuntime.agentRuntimeArn,
+<%_ if (session === 's3') { _%>
+        session: { bucketName: sessionBucket.bucketName },
+<%_ } _%>
+      },
     });
   }
 

@@ -226,6 +226,10 @@ export const pyAgentGenerator = async (
 
   const auth = options.auth ?? 'iam';
 
+  // Only 'in-memory' is currently supported for Python agents (session manager
+  // support for Python is not yet implemented).
+  const session = options.session ?? 'in-memory';
+
   // Ensure the shared agent-connection project exists so the server entry
   // point can import `session_id_context` and propagate the AgentCore
   // session ID to any downstream MCP / A2A clients a later connection
@@ -394,6 +398,7 @@ export const pyAgentGenerator = async (
       iac,
       projectName: project.name,
       auth,
+      session,
       serverProtocol: infraProtocol,
       containers,
     });

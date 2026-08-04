@@ -49,13 +49,14 @@ import {
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
 import { sortObjectKeys } from '../../utils/object';
+import { getRelativePathToRootByDirectory } from '../../utils/paths';
 import { assignPort } from '../../utils/port';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
 } from '../../utils/shared-constructs';
 import type { IacMetadata } from '../../utils/shared-constructs-constants';
-import { BASE_IMAGES, TS_VERSIONS, withVersions } from '../../utils/versions';
+import { BASE_IMAGES, TS_VERSIONS } from '../../utils/versions';
 import type { TsAgentGeneratorSchema } from './schema';
 
 /** The metadata this generator records, which its predicates read. */
@@ -64,6 +65,7 @@ export interface TsAgentMetadata extends IacMetadata {
   readonly rc: string;
   readonly auth: string;
   readonly protocol: string;
+  readonly session: string;
 }
 
 // Each entry names the branch it belongs to, so the same declaration drives both
@@ -76,6 +78,7 @@ export const DEPENDENCIES = declareDependencies<TsAgentMetadata>()({
     { name: '@aws-sdk/client-appconfigdata' },
     { name: '@aws-lambda-powertools/parameters' },
     { name: '@modelcontextprotocol/sdk' },
+    { name: '@aws-sdk/client-s3', when: (m) => m.session === 's3' },
     { name: 'express', when: (m) => m.protocol !== 'http' },
     { name: '@a2a-js/sdk', when: (m) => m.protocol === 'a2a' },
     { name: '@ag-ui/aws-strands', when: (m) => m.protocol === 'ag-ui' },
@@ -164,6 +167,25 @@ export const tsAgentGenerator = async (
 
   const auth = options.auth ?? 'iam';
 
+  const session = options.session ?? 's3';
+
+  if (infra === 'none' && session !== 'in-memory') {
+    console.warn(
+      'Warning: session is ignored when no infrastructure is configured (no infrastructure is generated)',
+    );
+  }
+
+  // Local-dev session storage lives at the workspace root
+  // (`tmp/agents/strands/<agent-name>`), not inside the project, so each agent
+  // gets its own storage directory. The `-dev`/`-serve` targets run with
+  // cwd={projectRoot}, so compute that directory relative to the project root
+  // here rather than resolving it at runtime (e.g. via import.meta.url),
+  // which would need an extra runtime helper.
+  const localSessionsDir = joinPathFragments(
+    getRelativePathToRootByDirectory(project.root),
+    `tmp/agents/strands/${name}`,
+  );
+
   // Ensure the shared agent-connection project exists so the server entry
   // point can import `runWithSessionId` and propagate the AgentCore session
   // ID to any downstream MCP / A2A clients a later connection generator
@@ -177,6 +199,9 @@ export const tsAgentGenerator = async (
     name,
     agentNameClassName,
     distDir,
+    protocol,
+    session,
+    localSessionsDir,
     agentConnectionImport: `@${getNpmScope(tree)}/agent-connection`,
     ...esmVars(tree),
   };
@@ -290,6 +315,7 @@ export const tsAgentGenerator = async (
       dockerOutputDir,
       iac,
       auth,
+      session,
       serverProtocol: infraProtocol,
       containers,
     });
@@ -309,6 +335,7 @@ export const tsAgentGenerator = async (
     rc: agentNameClassName,
     auth,
     protocol,
+    session,
     ...(iac ? { iac } : {}),
   };
 

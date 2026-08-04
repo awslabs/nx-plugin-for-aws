@@ -55,6 +55,8 @@ export const AGENT_CORE_CONSTRUCTS_DEPENDENCIES = [
 
 export type AgentCoreAuth = 'iam' | 'cognito';
 
+export type AgentCoreSession = 's3' | 'in-memory';
+
 export interface AddAgentCoreInfraProps {
   nameClassName: string;
   nameKebabCase: string;
@@ -64,6 +66,8 @@ export interface AddAgentCoreInfraProps {
   appDirectory: string;
   serverProtocol: 'mcp' | 'http' | 'a2a';
   auth: AgentCoreAuth;
+  /** How this runtime's session should be persisted. MCP servers have no session, so pass 'in-memory'. */
+  session: AgentCoreSession;
   containers: Containers;
 }
 
@@ -194,7 +198,7 @@ const addAgentCoreTerraformInfra = (
       'app',
       options.appDirectory,
     ),
-    options,
+    { ...options, ...terraformProviderVersions() },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
@@ -228,6 +232,8 @@ export const addMcpServerInfra = async (
     serverProtocol: 'mcp',
     iac: options.iac,
     auth: options.auth,
+    // MCP servers are stateless (no conversation session to persist).
+    session: 'in-memory',
     containers: options.containers,
   });
 };
@@ -239,6 +245,7 @@ export interface AddAgentInfraProps {
   dockerImageTag: string;
   dockerOutputDir: string;
   auth: AgentCoreAuth;
+  session: AgentCoreSession;
   serverProtocol?: 'http' | 'a2a';
   containers: Containers;
 }
@@ -257,6 +264,7 @@ export const addAgentInfra = async (
     dockerImageTag: options.dockerImageTag,
     dockerOutputDir: options.dockerOutputDir,
     appDirectory: 'agents',
+    session: options.session,
     serverProtocol: options.serverProtocol ?? 'http',
     iac: options.iac,
     auth: options.auth,

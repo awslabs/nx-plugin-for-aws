@@ -163,6 +163,12 @@ describe('ts#agent generator', () => {
     expect(projectPackageJson.dependencies['@modelcontextprotocol/sdk']).toBe(
       'catalog:',
     );
+    // Default session is 's3'; S3Storage lazily imports this at runtime, so
+    // it must be declared for the bundler to inline it into the deployed
+    // container.
+    expect(projectPackageJson.dependencies['@aws-sdk/client-s3']).toBe(
+      'catalog:',
+    );
     expect(projectPackageJson.devDependencies['@types/ws']).toBe('catalog:');
     expect(projectPackageJson.devDependencies['@types/cors']).toBe('catalog:');
 
@@ -872,6 +878,7 @@ describe('ts#agent generator', () => {
     expect(projectConfig.metadata.components[0].name).toBe('agent');
     expect(projectConfig.metadata.components[0].port).toBeDefined();
     expect(typeof projectConfig.metadata.components[0].port).toBe('number');
+    expect(projectConfig.metadata.components[0].session).toBe('s3');
   });
 
   it('should add component generator metadata with custom name', async () => {
@@ -1307,12 +1314,127 @@ describe('ts#agent generator', () => {
       name: 'no-warn-agent',
       infra: 'none',
       auth: 'iam',
+      session: 'in-memory',
       iac: 'cdk',
     });
 
     expect(warnSpy).not.toHaveBeenCalled();
 
     warnSpy.mockRestore();
+  });
+
+  it('should warn when session is not explicitly disabled with infra=none', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await tsAgentGenerator(tree, {
+      project: 'test-project',
+      name: 'session-warn-agent',
+      infra: 'none',
+      iac: 'cdk',
+    });
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      'Warning: session is ignored when no infrastructure is configured (no infrastructure is generated)',
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it('should not warn when session is explicitly in-memory with infra=none', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await tsAgentGenerator(tree, {
+      project: 'test-project',
+      name: 'session-none-agent',
+      infra: 'none',
+      session: 'in-memory',
+      iac: 'cdk',
+    });
+
+    expect(warnSpy).not.toHaveBeenCalled();
+
+    warnSpy.mockRestore();
+  });
+
+  it('should not add the @aws-sdk/client-s3 dependency when session is in-memory', async () => {
+    await tsAgentGenerator(tree, {
+      project: 'test-project',
+      infra: 'none',
+      session: 'in-memory',
+      iac: 'cdk',
+    });
+
+    const projectPackageJson = JSON.parse(
+      tree.read('apps/test-project/package.json', 'utf-8'),
+    );
+    expect(
+      projectPackageJson.dependencies['@aws-sdk/client-s3'],
+    ).toBeUndefined();
+  });
+
+  it('should generate session.ts using S3 storage by default', async () => {
+    await tsAgentGenerator(tree, {
+      project: 'test-project',
+      infra: 'none',
+      iac: 'cdk',
+    });
+
+    const sessionContent = tree.read(
+      'apps/test-project/src/agent/session.ts',
+      'utf-8',
+    );
+    expect(sessionContent).toMatchSnapshot('session.ts (s3)');
+  });
+
+  it('should generate session.ts using in-memory storage when session is in-memory', async () => {
+    await tsAgentGenerator(tree, {
+      project: 'test-project',
+      infra: 'none',
+      session: 'in-memory',
+      iac: 'cdk',
+    });
+
+    const sessionContent = tree.read(
+      'apps/test-project/src/agent/session.ts',
+      'utf-8',
+    );
+    expect(sessionContent).toMatchSnapshot('session.ts (in-memory)');
+  });
+
+  it('should not create session bucket infrastructure when session is in-memory', async () => {
+    await tsAgentGenerator(tree, {
+      project: 'test-project',
+      name: 'in-memory-agent',
+      infra: 'agentcore',
+      session: 'in-memory',
+      iac: 'cdk',
+    });
+
+    const agentConstructContent = tree.read(
+      'packages/common/constructs/src/app/agents/in-memory-agent/in-memory-agent.ts',
+      'utf-8',
+    );
+    expect(agentConstructContent).toMatchSnapshot(
+      'agent-construct.ts (in-memory)',
+    );
+  });
+
+  it('should not create session bucket infrastructure when session is in-memory (Terraform)', async () => {
+    await tsAgentGenerator(tree, {
+      project: 'test-project',
+      name: 'in-memory-terraform-agent',
+      infra: 'agentcore',
+      session: 'in-memory',
+      iac: 'terraform',
+    });
+
+    const agentTerraformContent = tree.read(
+      'packages/common/terraform/src/app/agents/in-memory-terraform-agent/in-memory-terraform-agent.tf',
+      'utf-8',
+    );
+    expect(agentTerraformContent).toMatchSnapshot(
+      'terraform-agent.tf (in-memory)',
+    );
   });
 
   it('should generate with infra=none then upgrade to infra=agentcore', async () => {
