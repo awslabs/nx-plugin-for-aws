@@ -232,6 +232,7 @@ describe('scaffold catalog integration', () => {
   const constrainedOptions = (
     key: string,
     side: 'source' | 'target',
+    endpointType: string,
   ): Record<string, string> => {
     const constraints: readonly ConnectionConstraint[] =
       (
@@ -244,6 +245,28 @@ describe('scaffold catalog integration', () => {
     for (const constraint of constraints.filter((c) => c.side === side)) {
       if (constraint.equals !== undefined) {
         options[constraint.option] = constraint.equals;
+      } else if (constraint.notEquals !== undefined) {
+        // The rejected value may be the schema default, so pick the first
+        // enum value the constraint allows — as a user drawing the graph
+        // would have to.
+        const recipe = (SCAFFOLD_RECIPES as Record<string, any>)[endpointType];
+        const schema = JSON.parse(
+          readFileSync(
+            join(
+              import.meta.dirname,
+              '..',
+              '..',
+              (GeneratorsJson.generators as Record<string, { schema: string }>)[
+                recipe.generator
+              ].schema,
+            ),
+            'utf-8',
+          ),
+        );
+        const allowed = (
+          schema.properties[constraint.option].enum as string[]
+        ).find((value) => value !== constraint.notEquals);
+        options[constraint.option] = allowed!;
       }
     }
     return options;
@@ -293,12 +316,12 @@ describe('scaffold catalog integration', () => {
       await SCAFFOLDS[source](
         tree,
         sourceName,
-        constrainedOptions(key, 'source'),
+        constrainedOptions(key, 'source', source),
       );
       await SCAFFOLDS[target](
         tree,
         targetName,
-        constrainedOptions(key, 'target'),
+        constrainedOptions(key, 'target', target),
       );
 
       const sourceRef = reference(tree, source, sourceName);

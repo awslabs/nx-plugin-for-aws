@@ -213,15 +213,26 @@ export function Main() {
     ).rejects.toThrow(/http-protocol gateways/);
   });
 
-  it('throws when the gateway has no agents attached', async () => {
+  it('connects a gateway with no agents attached, warning instead of failing', async () => {
     addWebsite();
     addGateway();
 
-    await expect(
-      agentcoreGatewayReactConnectionGenerator(tree, {
-        sourceProject: 'frontend',
-        targetProject: '@proj/my-gateway',
+    // No agent clients yet, but the gateway URL is still published and the
+    // dev target wired — re-running after attaching agents adds their clients.
+    await agentcoreGatewayReactConnectionGenerator(tree, {
+      sourceProject: 'frontend',
+      targetProject: '@proj/my-gateway',
+    });
+
+    const config = readProjectConfiguration(tree, 'frontend');
+    expect(config.targets?.['dev'].dependsOn).toContainEqual(
+      expect.objectContaining({
+        projects: ['@proj/my-gateway'],
+        target: 'dev',
       }),
-    ).rejects.toThrow(/no AG-UI or HTTP agents attached/);
+    );
+    expect(tree.exists('apps/frontend/src/hooks/useAguiMyAgent.tsx')).toBe(
+      false,
+    );
   });
 });

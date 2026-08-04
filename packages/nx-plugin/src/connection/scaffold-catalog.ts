@@ -350,6 +350,22 @@ const GATEWAY_TO_MCP: readonly ConnectionConstraint[] = [
   },
 ];
 
+const GATEWAY_TO_AGENT: readonly ConnectionConstraint[] = [
+  {
+    side: 'source',
+    option: 'protocol',
+    equals: 'http',
+    reason:
+      'Agent runtime targets can only be attached to an http-protocol gateway.',
+  },
+  {
+    side: 'target',
+    option: 'auth',
+    equals: 'iam',
+    reason: 'The gateway signs requests to its agent targets with IAM.',
+  },
+];
+
 /**
  * The option-level requirements each connection places on its endpoints.
  *
@@ -369,6 +385,26 @@ export const CONNECTION_CONSTRAINTS = {
   'py#agent -> py#mcp-server': AGENT_TO_MCP,
   'ts#agent -> agentcore-gateway': AGENT_TO_GATEWAY,
   'py#agent -> agentcore-gateway': AGENT_TO_GATEWAY,
+  'ts#react-website -> agentcore-gateway': [
+    {
+      side: 'target',
+      option: 'protocol',
+      equals: 'http',
+      reason:
+        'A website connects to an http-protocol gateway, which proxies requests to its agent targets.',
+    },
+  ],
+  'agentcore-gateway -> ts#agent': [
+    ...GATEWAY_TO_AGENT,
+    {
+      side: 'target',
+      option: 'protocol',
+      notEquals: 'http',
+      reason:
+        'A TypeScript http agent serves tRPC over WebSocket, which AgentCore Gateway does not support. Use the ag-ui or a2a protocol.',
+    },
+  ],
+  'agentcore-gateway -> py#agent': GATEWAY_TO_AGENT,
   'agentcore-gateway -> ts#mcp-server': GATEWAY_TO_MCP,
   'agentcore-gateway -> py#mcp-server': GATEWAY_TO_MCP,
   'agentcore-gateway -> agentcore-gateway': [

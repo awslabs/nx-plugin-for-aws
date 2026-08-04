@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { getProjects, type Tree } from '@nx/devkit';
+import { getProjects, logger, type Tree } from '@nx/devkit';
 import { addGatewayTargetToLocalDev } from '../../connection/agent-local-dev';
 import { addGatewayUrlToConnectionNamespace } from '../../connection/gateway-runtime-config';
 import { PY_AGENT_GENERATOR_INFO } from '../../py/agent/generator';
@@ -65,14 +65,17 @@ export const agentcoreGatewayReactConnectionGenerator = async (
   }
 
   // A2A targets speak agent-to-agent JSON-RPC, not a browser protocol, so
-  // the website only connects to the gateway's AG-UI / HTTP agents.
+  // the website only connects to the gateway's AG-UI / HTTP agents. A gateway
+  // with none attached yet still gets its URL published and dev wiring —
+  // re-running this connection after attaching agents generates their
+  // website clients.
   const agents = frontedAgents(tree, gatewayProject.name).filter(
     (agent) =>
       ((agent.component.protocol as string) ?? '').toLowerCase() !== 'a2a',
   );
   if (agents.length === 0) {
-    throw new Error(
-      `Gateway '${gateway.name}' has no AG-UI or HTTP agents attached. Connect an agent to the gateway first.`,
+    logger.warn(
+      `Gateway '${gateway.name}' has no AG-UI or HTTP agents attached, so no website clients were generated. Connect agents to the gateway, then re-run this connection to generate their clients.`,
     );
   }
 
