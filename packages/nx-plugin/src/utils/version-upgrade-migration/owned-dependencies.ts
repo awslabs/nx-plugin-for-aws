@@ -11,6 +11,11 @@ import {
   ownedDependencyEntries,
 } from '../declared-dependencies';
 import { buildGeneratorInfoList } from '../generators';
+import {
+  PACKAGES_DIR,
+  SHARED_CONSTRUCTS_DIR,
+  SHARED_TERRAFORM_DIR,
+} from '../shared-constructs-constants';
 
 /** Directory holding `generators.json`, which maps ids to their modules. */
 export const PLUGIN_ROOT = path.resolve(import.meta.dirname, '..', '..', '..');
@@ -150,22 +155,42 @@ export const ownedDependencies = async (
 };
 
 /**
- * The dependencies owned by whichever project a file belongs to, or the
- * workspace-wide union when it belongs to none.
+ * Roots of the projects every generator contributes into, rather than one
+ * generator owning outright.
+ *
+ * `sharedConstructsGenerator` creates these and each infra generator writes its
+ * own module into them — the Terraform modules carrying the `uv run --with` pins
+ * come from the agent-core, api, identity and website helpers alike. Both are
+ * registered projects, so scoping a file here to the generator that created the
+ * project would strand every pin the others put there.
+ */
+const SHARED_PROJECT_ROOTS = [
+  `${PACKAGES_DIR}/${SHARED_CONSTRUCTS_DIR}`,
+  `${PACKAGES_DIR}/${SHARED_TERRAFORM_DIR}`,
+];
+
+/**
+ * The dependencies owned where a file sits: those of the project it belongs to,
+ * or the workspace-wide union for a file in a shared project or under none.
  *
  * Used for the pins embedded in a generated file, so a version is only rewritten
  * where the generator that pins it actually ran: a `Dockerfile` under one
  * project's root is not upgraded because a sibling project owns the package.
  *
  * The longest matching root wins, since a nested project's root is a prefix of
- * nothing else but its own files. A file under no project — the shared Terraform
- * modules every infra generator writes into, say — falls back to the union,
- * because it is exactly the place several generators legitimately contribute to.
+ * nothing else but its own files.
  */
 export const ownedForFile = (
   owned: OwnedDependencies,
   filePath: string,
 ): { ts: ReadonlySet<string>; py: ReadonlySet<string> } => {
+  if (
+    SHARED_PROJECT_ROOTS.some(
+      (root) => filePath === root || filePath.startsWith(`${root}/`),
+    )
+  ) {
+    return owned;
+  }
   let best: { ts: ReadonlySet<string>; py: ReadonlySet<string> } | undefined;
   let bestLength = -1;
   for (const [root, scoped] of owned.byProject) {
