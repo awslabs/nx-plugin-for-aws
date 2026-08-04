@@ -1064,25 +1064,52 @@ export const getAgent = async () => {
   // the sync reads the metadata rather than the generator, so a connection recorded
   // now is picked up the moment its generator starts owning packages — otherwise a
   // later release needs a second backfill for workspaces this one already ran on.
-  it('should cover every connection generator', () => {
-    // `connection` is the dispatcher that delegates to the others, not a
-    // connection that is itself recorded. Connections whose generators shipped
-    // after this backfill are excluded — they have always recorded their own
-    // metadata, so there is nothing to recover.
-    const POSTDATES_BACKFILL = new Set([
-      'agentcore-gateway#agent-connection',
-      'agentcore-gateway#react-connection',
-    ]);
-    const expected = Object.keys(generatorsJson.generators)
-      .filter(
-        (id) =>
-          id.endsWith('-connection') &&
-          id !== 'connection' &&
-          !POSTDATES_BACKFILL.has(id),
-      )
-      .sort();
-    const covered = CONNECTION_KINDS.map((kind) => kind.id).sort();
+  it('should cover exactly the connection generators that predate this backfill', () => {
+    // The backfill is point-in-time: it recovers metadata for connections
+    // made by generators that shipped before it. Every generator since
+    // records its own metadata, so this pinned list never grows — a new
+    // connection generator must NOT be added here or to CONNECTION_KINDS.
+    const BACKFILLED_CONNECTION_GENERATORS = [
+      'agentcore-gateway#gateway-connection',
+      'agentcore-gateway#mcp-connection',
+      'py#agent#a2a-connection',
+      'py#agent#gateway-connection',
+      'py#agent#mcp-connection',
+      'py#agent#react-connection',
+      'py#dynamodb#agent-connection',
+      'py#dynamodb#fast-api-connection',
+      'py#dynamodb#mcp-server-connection',
+      'py#fast-api#react-connection',
+      'py#rdb#agent-connection',
+      'py#rdb#fast-api-connection',
+      'py#rdb#mcp-server-connection',
+      'smithy#react-connection',
+      'ts#agent#a2a-connection',
+      'ts#agent#gateway-connection',
+      'ts#agent#mcp-connection',
+      'ts#agent#react-connection',
+      'ts#dynamodb#agent-connection',
+      'ts#dynamodb#mcp-server-connection',
+      'ts#dynamodb#smithy-connection',
+      'ts#dynamodb#trpc-connection',
+      'ts#rdb#agent-connection',
+      'ts#rdb#mcp-server-connection',
+      'ts#rdb#smithy-connection',
+      'ts#rdb#trpc-connection',
+      'ts#trpc-api#react-connection',
+    ];
+    // Each backfilled generator must still exist under the id the metadata
+    // records (`connection` is the dispatcher, not itself recorded).
+    const registered = new Set(
+      Object.keys(generatorsJson.generators).filter(
+        (id) => id.endsWith('-connection') && id !== 'connection',
+      ),
+    );
+    for (const id of BACKFILLED_CONNECTION_GENERATORS) {
+      expect(registered).toContain(id);
+    }
 
-    expect(covered).toEqual(expected);
+    const covered = CONNECTION_KINDS.map((kind) => kind.id).sort();
+    expect(covered).toEqual([...BACKFILLED_CONNECTION_GENERATORS].sort());
   });
 });
