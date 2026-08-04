@@ -255,10 +255,6 @@ ${GRIT_INSERT_PLACEHOLDER}\``,
     nextSteps.push(divergedMessage);
     return;
   }
-
-  nextSteps.push(
-    `${GATEWAY_CONSTRUCT_FILE}: the AgentCoreGateway construct now supports agent runtime targets — create an http-protocol gateway (protocol: 'http') and attach agents with addAgent()/addAgentTarget().`,
-  );
 };
 
 /**

@@ -25,14 +25,7 @@ Before using this generator, ensure you have:
 1. An <Link path="guides/agentcore-gateway">`agentcore-gateway`</Link> project generated with `protocol: http`
 2. An agent component (<Link path="guides/ts-agent">`ts#agent`</Link> or <Link path="guides/py-agent">`py#agent`</Link>) created with `infra: agentcore` and `auth: iam`
 
-The following agent protocols can be fronted by a Gateway:
-
-| Agent | `ag-ui` | `http` | `a2a` |
-| ----- | ------- | ------ | ----- |
-| `ts#agent` | ✅ | ❌ | ✅ |
-| `py#agent` | ✅ | ✅ | ✅ |
-
-:::note[TypeScript HTTP agents]
+:::caution[TypeScript HTTP agents]
 A TypeScript `http` agent serves tRPC over WebSocket, and AgentCore Gateway does not support WebSocket or bidirectional streaming — the generator rejects this combination. Generate the agent with the `ag-ui` protocol instead.
 :::
 
@@ -86,6 +79,21 @@ myGateway.addAgent(myAgent, { gatewayTargetName: 'my-target' });
 ```
 
 The construct grants the Gateway's execution role invoke access to the agent runtime and configures the target with the `GATEWAY_IAM_ROLE` credential provider, so the Gateway signs outbound calls with its own role.
+
+:::tip[Deploying agents into a VPC]
+Fronting an agent with a Gateway is what makes a VPC-deployed agent reachable: callers talk to the Gateway's public endpoint, and the Gateway reaches the runtime internally. Pass a VPC network configuration to the agent construct:
+
+```ts
+import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
+
+const myAgent = new MyAgent(this, 'MyAgent', {
+  networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
+    vpc,
+    vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+  }),
+});
+```
+:::
 </Fragment>
 <Fragment slot="terraform">
 In the Terraform file where you instantiate the Gateway, wire the agent target in:
@@ -140,18 +148,28 @@ resource "aws_bedrockagentcore_gateway_target" "my_agent" {
   }
 }
 ```
-</Fragment>
-</Infrastructure>
 
 :::tip[Deploying agents into a VPC]
-Fronting an agent with a Gateway is what makes a VPC-deployed agent reachable: callers talk to the Gateway's public endpoint, and the Gateway reaches the runtime internally. Configure the agent runtime's network settings on its construct/module (the Terraform module exposes `enable_vpc`, `vpc_id` and `subnet_ids`; the CDK construct accepts the runtime's network props).
+Fronting an agent with a Gateway is what makes a VPC-deployed agent reachable: callers talk to the Gateway's public endpoint, and the Gateway reaches the runtime internally. Set the agent module's VPC variables:
+
+```hcl
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+
+  enable_vpc = true
+  vpc_id     = aws_vpc.my_vpc.id
+  subnet_ids = [aws_subnet.private_a.id, aws_subnet.private_b.id]
+}
+```
 :::
+</Fragment>
+</Infrastructure>
 
 ## Invoking the agent through the Gateway
 
 Requests to `<gatewayUrl origin>/<targetName>/invocations` are forwarded to the agent runtime without protocol translation, so callers use the same request shape they'd use against the runtime directly — SSE streams (AG-UI), JSON streaming (Python HTTP) and A2A JSON-RPC all proxy through. Callers authenticate with the Gateway (IAM SigV4 or Cognito JWT depending on the Gateway's `auth`) rather than with the agent.
 
-To connect a website to the Gateway's agents, use the <Link path="guides/connection/react-agentcore-gateway">React website to AgentCore Gateway connection generator</Link>.
+To connect a website to the Gateway's agents, use the <Link path="guides/connection/react-agentcore-gateway">`connection` generator</Link>.
 
 ## Local Development
 

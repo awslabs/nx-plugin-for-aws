@@ -1066,9 +1066,20 @@ export const getAgent = async () => {
   // later release needs a second backfill for workspaces this one already ran on.
   it('should cover every connection generator', () => {
     // `connection` is the dispatcher that delegates to the others, not a
-    // connection that is itself recorded.
+    // connection that is itself recorded. Connections whose generators shipped
+    // after this backfill are excluded — they have always recorded their own
+    // metadata, so there is nothing to recover.
+    const POSTDATES_BACKFILL = new Set([
+      'agentcore-gateway#agent-connection',
+      'agentcore-gateway#react-connection',
+    ]);
     const expected = Object.keys(generatorsJson.generators)
-      .filter((id) => id.endsWith('-connection') && id !== 'connection')
+      .filter(
+        (id) =>
+          id.endsWith('-connection') &&
+          id !== 'connection' &&
+          !POSTDATES_BACKFILL.has(id),
+      )
       .sort();
     const covered = CONNECTION_KINDS.map((kind) => kind.id).sort();
 

@@ -72,7 +72,7 @@ export const agentcoreGatewayReactConnectionGenerator = async (
   );
   if (agents.length === 0) {
     throw new Error(
-      `Gateway '${gateway.name}' has no AG-UI or HTTP agents attached. Connect an agent to the gateway first (nx g @aws/nx-plugin:connection --sourceProject=${gatewayProject.name} --targetProject=<agent project>).`,
+      `Gateway '${gateway.name}' has no AG-UI or HTTP agents attached. Connect an agent to the gateway first.`,
     );
   }
 

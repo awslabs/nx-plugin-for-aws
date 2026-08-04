@@ -13,11 +13,9 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { AGENTCORE_GATEWAY_AGENT_CONNECTION_GENERATOR_INFO } from '../../../agentcore-gateway/agent-connection/generator';
 import { AGENTCORE_GATEWAY_GATEWAY_CONNECTION_GENERATOR_INFO } from '../../../agentcore-gateway/gateway-connection/generator';
 import { AGENTCORE_GATEWAY_GENERATOR_INFO } from '../../../agentcore-gateway/generator';
 import { AGENTCORE_GATEWAY_MCP_CONNECTION_GENERATOR_INFO } from '../../../agentcore-gateway/mcp-connection/generator';
-import { AGENTCORE_GATEWAY_REACT_CONNECTION_GENERATOR_INFO } from '../../../agentcore-gateway/react-connection/generator';
 import { PY_AGENT_A2A_CONNECTION_GENERATOR_INFO } from '../../../py/agent/a2a-connection/generator';
 import { PY_AGENT_GATEWAY_CONNECTION_GENERATOR_INFO } from '../../../py/agent/gateway-connection/generator';
 import { PY_AGENT_GENERATOR_INFO } from '../../../py/agent/generator';
@@ -742,10 +740,6 @@ export const CONNECTION_KINDS: readonly ConnectionKind[] = [
         AGENTCORE_GATEWAY_GATEWAY_CONNECTION_GENERATOR_INFO.id,
         [AGENTCORE_GATEWAY_GENERATOR_INFO.id],
       ],
-      [
-        AGENTCORE_GATEWAY_AGENT_CONNECTION_GENERATOR_INFO.id,
-        [TS_AGENT_GENERATOR_INFO.id, PY_AGENT_GENERATOR_INFO.id],
-      ],
     ] as const
   ).map(([id, targetGenerators]) => ({
     id,
@@ -762,31 +756,6 @@ export const CONNECTION_KINDS: readonly ConnectionKind[] = [
         ? target.projectRoot
         : undefined,
   })),
-
-  // Website to gateway: overrides the gateway's runtime config entry in the
-  // website's RuntimeConfig provider to point at the local gateway.
-  {
-    id: AGENTCORE_GATEWAY_REACT_CONNECTION_GENERATOR_INFO.id,
-    sourceGenerator: REACT_WEBSITE_APP_GENERATOR_INFO.id,
-    targetGenerators: [AGENTCORE_GATEWAY_GENERATOR_INFO.id],
-    evidence: async ({ tree, project, target }: ConnectionContext) => {
-      const sourceRoot =
-        project.sourceRoot ?? joinPathFragments(project.root, 'src');
-      const provider = joinPathFragments(
-        sourceRoot,
-        'components',
-        'RuntimeConfig',
-        'index.tsx',
-      );
-      return (await matchGritQL(
-        tree,
-        provider,
-        `\`runtimeConfig.gateways.${target.className} = $_\``,
-      ))
-        ? target.projectRoot
-        : undefined;
-    },
-  },
 ];
 
 /**

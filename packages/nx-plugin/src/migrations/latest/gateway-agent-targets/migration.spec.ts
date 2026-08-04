@@ -156,9 +156,9 @@ describe('gateway-agent-targets migration', () => {
     expect(contents).toContain('public addAgent(');
     expect(contents).toContain('public addAgentTarget(props: {');
     expect(contents).toContain('agentcoreRuntime');
-    expect(result.nextSteps).toEqual([
-      expect.stringContaining('agent runtime targets'),
-    ]);
+    // A cleanly-applied transform reports nothing — nextSteps is for manual
+    // follow-up actions only.
+    expect(result.nextSteps).toEqual([]);
     expect(contents).toMatchSnapshot();
   });
 
