@@ -77,6 +77,9 @@ export const GraphBuilder = () => {
   const [graph, setGraph] = useState<Graph>(EMPTY_GRAPH);
   // Ordered so the last-clicked node is the one the inspector shows.
   const [selection, setSelection] = useState<readonly string[]>([]);
+  // An edge is selected on its own, not alongside nodes: the two have different
+  // delete semantics, and selecting one clears the other.
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | undefined>();
   const [pendingType, setPendingType] = useState<string | undefined>();
   const [emitOptions, setEmitOptions] =
     useState<EmitOptions>(DEFAULT_EMIT_OPTIONS);
@@ -153,6 +156,7 @@ export const GraphBuilder = () => {
         ],
       }));
       setSelection([id]);
+      setSelectedEdgeId(undefined);
     },
     [commit],
   );
@@ -243,9 +247,16 @@ export const GraphBuilder = () => {
         ...current,
         edges: current.edges.filter((edge) => edge.id !== id),
       }));
+      setSelectedEdgeId((current) => (current === id ? undefined : current));
     },
     [commit],
   );
+
+  /** Select an edge, clearing any node selection so Delete is unambiguous. */
+  const selectEdge = useCallback((id: string | undefined) => {
+    setSelectedEdgeId(id);
+    if (id !== undefined) setSelection([]);
+  }, []);
 
   const updateNode = useCallback(
     (id: string, patch: Partial<GraphNode>) => {
@@ -281,6 +292,7 @@ export const GraphBuilder = () => {
       // fully in view rather than running off the right edge.
       commit(() => buildPresetGraph(preset, canvasWidthRef.current));
       setSelection([]);
+      setSelectedEdgeId(undefined);
     },
     [commit],
   );
@@ -294,10 +306,11 @@ export const GraphBuilder = () => {
   const clear = useCallback(() => {
     commit(() => EMPTY_GRAPH);
     setSelection([]);
+    setSelectedEdgeId(undefined);
   }, [commit]);
 
-  // Undo/redo shortcuts, ignored while a text field has focus so they don't
-  // fight the browser's own undo in the name and option inputs.
+  // Undo/redo and delete shortcuts, ignored while a text field has focus so they
+  // don't fight the browser's own undo in the name and option inputs.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -308,6 +321,18 @@ export const GraphBuilder = () => {
           target.tagName === 'SELECT' ||
           target.isContentEditable);
       if (editing) return;
+
+      // A selected edge deletes from anywhere on the page, matching how a
+      // focused node responds to the same key.
+      if (
+        selectedEdgeId &&
+        (event.key === 'Delete' || event.key === 'Backspace')
+      ) {
+        event.preventDefault();
+        deleteEdge(selectedEdgeId);
+        return;
+      }
+
       if (
         !(event.metaKey || event.ctrlKey) ||
         event.key.toLowerCase() !== 'z'
@@ -320,7 +345,7 @@ export const GraphBuilder = () => {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [undo, redo]);
+  }, [undo, redo, selectedEdgeId, deleteEdge]);
 
   const issues = useMemo(() => validate(graph), [graph]);
   // The inspector edits one node: the last one clicked, of those still present.
@@ -333,6 +358,7 @@ export const GraphBuilder = () => {
    */
   const selectNode = useCallback(
     (id: string | undefined, { additive = false } = {}) => {
+      setSelectedEdgeId(undefined);
       if (id === undefined) {
         setSelection([]);
         return;
@@ -447,8 +473,10 @@ export const GraphBuilder = () => {
           graph={graph}
           issues={issues}
           selectedIds={selectedIds}
+          selectedEdgeId={selectedEdgeId}
           pendingType={pendingType}
           onSelect={selectNode}
+          onSelectEdge={selectEdge}
           onMoveNodes={moveNodes}
           onAddNodeAt={addNodeAt}
           onConnect={connect}

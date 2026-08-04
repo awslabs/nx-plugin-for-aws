@@ -28,9 +28,12 @@ interface Props {
   issues: readonly Issue[];
   /** Every selected node; a group moves and deletes together. */
   selectedIds: ReadonlySet<string>;
+  /** The selected edge, if one is selected instead of nodes. */
+  selectedEdgeId: string | undefined;
   /** The palette type being dragged in, so drop targets can be previewed. */
   pendingType: string | undefined;
   onSelect: (id: string | undefined, options?: { additive?: boolean }) => void;
+  onSelectEdge: (id: string | undefined) => void;
   onMoveNodes: (moves: readonly { id: string; x: number; y: number }[]) => void;
   onAddNodeAt: (typeId: string, x: number, y: number) => void;
   onConnect: (sourceId: string, targetId: string) => void;
@@ -86,8 +89,10 @@ export const Canvas = ({
   graph,
   issues,
   selectedIds,
+  selectedEdgeId,
   pendingType,
   onSelect,
+  onSelectEdge,
   onMoveNodes,
   onAddNodeAt,
   onConnect,
@@ -355,9 +360,10 @@ export const Canvas = ({
         // Only the background pans. Nodes and edge controls are interactive in
         // their own right, so a press that lands on one is left to them.
         const target = event.target as HTMLElement;
-        if (target.closest('.gb-node, .gb-edge-remove')) return;
+        if (target.closest('.gb-node, .gb-edge-remove, .gb-edge-hit')) return;
 
         onSelect(undefined);
+        onSelectEdge(undefined);
         const surface = surfaceRef.current;
         if (!surface) return;
         panRef.current = {
@@ -435,9 +441,16 @@ export const Canvas = ({
             return (
               <g
                 key={edge.id}
-                className={`gb-edge${severity ? ` gb-edge--${severity}` : ''}${active ? ' is-active' : ''}`}
+                className={`gb-edge${severity ? ` gb-edge--${severity}` : ''}${active ? ' is-active' : ''}${selectedEdgeId === edge.id ? ' is-selected' : ''}`}
               >
-                <path className="gb-edge-hit" d={path} />
+                <path
+                  className="gb-edge-hit"
+                  d={path}
+                  onPointerDown={(event) => {
+                    event.stopPropagation();
+                    onSelectEdge(edge.id);
+                  }}
+                />
                 <path
                   className="gb-edge-line"
                   d={path}
@@ -479,11 +492,23 @@ export const Canvas = ({
             <button
               key={`remove-${edge.id}`}
               type="button"
-              className="gb-edge-remove"
+              className={`gb-edge-remove${selectedEdgeId === edge.id ? ' is-selected' : ''}`}
               style={{ left: midpoint.x, top: midpoint.y }}
-              aria-label={`Remove connection from ${source.name} to ${target.name}`}
-              onPointerDown={(event) => event.stopPropagation()}
+              aria-label={`Connection from ${source.name} to ${target.name}. Press Delete to remove it.`}
+              aria-pressed={selectedEdgeId === edge.id}
+              // Stops the press reaching the canvas, which would pan and clear
+              // the selection this click is making.
+              onPointerDown={(event) => {
+                event.stopPropagation();
+                onSelectEdge(edge.id);
+              }}
               onClick={() => onDeleteEdge(edge.id)}
+              onKeyDown={(event) => {
+                if (event.key === 'Delete' || event.key === 'Backspace') {
+                  event.preventDefault();
+                  onDeleteEdge(edge.id);
+                }
+              }}
             >
               <svg viewBox="0 0 20 20" aria-hidden="true">
                 <path d="M 6.5 6.5 L 13.5 13.5 M 13.5 6.5 L 6.5 13.5" />
