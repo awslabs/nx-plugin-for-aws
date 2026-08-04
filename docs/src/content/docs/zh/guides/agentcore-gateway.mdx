@@ -15,7 +15,12 @@ import Link from '@components/link.astro';
 import NxCommands from '@components/nx-commands.astro';
 import OptionFilter from '@components/option-filter.astro';
 
-生成一个 [Amazon Bedrock AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) 项目。AgentCore Gateway 是一个托管的入口点，它将一个或多个 MCP 服务器目标聚合在单个 MCP 端点后面，对入站请求进行身份验证（IAM 或 Cognito），针对 [Cedar 策略引擎](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html)评估每个工具调用，并使用 IAM SigV4 对发往 MCP 服务器的出站流量进行签名。
+生成一个 [Amazon Bedrock AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) 项目。AgentCore Gateway 是一个位于您的 MCP 服务器或代理前面的托管入口点，对入站请求进行身份验证（IAM 或 Cognito），并使用 IAM SigV4 对发往其目标的出站流量进行签名。
+
+`protocol` 选项选择 Gateway 前置的内容：
+
+- **`mcp`**（默认）— 将一个或多个 MCP 服务器目标聚合在单个 MCP 端点后面，并针对 [Cedar 策略引擎](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html)评估每个工具调用。
+- **`http`** — 通过基于路径的路由（`/<targetName>/invocations`）直接代理请求到 [AgentCore Runtime 目标](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-target-http-runtime.html)（您的代理），无需聚合或协议转换。使用此选项可以使用单个受治理的端点来前置代理——例如，使网站可以通过 Gateway 访问部署在 VPC 内的代理。
 
 ## 用法
 
@@ -33,10 +38,10 @@ import OptionFilter from '@components/option-filter.astro';
 
 <FileTree>
   - packages/\<name>/
-    - policies/ Cedar 策略源文件（当 `cedarPolicy: false` 时省略）
-      - permit-all.cedar 默认的 Cedar 策略，允许已认证的调用者（来自同一 AWS 账户的 IAM 调用者，或任何 Cognito 用户——参见 [Authentication](#authentication)）
+    - policies/ Cedar 策略源文件（仅限 `mcp` 协议；当 `cedarPolicy: false` 时省略）
+      - permit-all.cedar 默认的 Cedar 策略，允许已认证的调用者
       - README.md 编写 Cedar 策略的参考文档
-    - local-dev.ts 用于本地开发的本地网关，聚合附加的 MCP 服务器
+    - local-dev.ts 用于本地开发的本地网关 — 聚合附加的 MCP 服务器（`mcp`）或代理附加的代理（`http`）
     - project.json 添加 `serve` 和 `dev` 目标
 </FileTree>
 
@@ -71,9 +76,9 @@ import OptionFilter from '@components/option-filter.astro';
 
 生成的构造创建以下 AWS 资源：
 
-- 一个为 MCP 协议配置的 `AgentCore::Gateway`，使用入站 IAM 身份验证（默认）或 Cognito JWT 身份验证（参见 <a href="#authentication">Authentication</a>）
-- 一个以 `ENFORCE` 模式运行的 `AgentCore::PolicyEngine`，附加到 Gateway（当 `cedarPolicy: false` 时省略）
-- `policies/` 中每个 `.cedar` 文件对应一个 `AgentCore::Policy`
+- 一个使用入站 IAM 身份验证（默认）或 Cognito JWT 身份验证（参见 <a href="#authentication">Authentication</a>）的 `AgentCore::Gateway`。`mcp` 网关配置为 MCP 协议；`http` 网关没有协议类型，这是 AgentCore 对其运行时目标的要求
+- 一个以 `ENFORCE` 模式运行的 `AgentCore::PolicyEngine`，附加到 Gateway（仅限 `mcp` 网关；当 `cedarPolicy: false` 时省略）
+- `policies/` 中每个 `.cedar` 文件对应一个 `AgentCore::Policy`（仅限 `mcp` 网关）
 - 与 Gateway 关联的 AWS WAFv2 Web ACL，并将请求日志记录到 CloudWatch（默认启用——参见 <a href="#aws-waf">AWS WAF</a>）
 
 Gateway URL 会自动注册到 <Link path="guides/runtime-config">运行时配置</Link>的 `agentcore.gateways.<ClassName>` 命名空间中，以便代理可以在运行时发现它。
@@ -347,9 +352,13 @@ forbid (
 
 ## 本地开发
 
-生成器向 Gateway 项目添加一个 `dev` 目标，该目标运行 `local-dev.ts`：一个本地网关，公开单个 MCP 端点，聚合每个附加的 MCP 服务器（通过 <Link path="guides/connection/agentcore-gateway-mcp">`agentcore-gateway#mcp-connection` 生成器</Link>连接），工具前缀为 `<target>___<tool>` 以匹配已部署的 Gateway。运行它会一起启动本地网关和所有附加的 MCP 服务器：
+生成器向 Gateway 项目添加一个 `dev` 目标，该目标运行 `local-dev.ts`。运行它会一起启动本地网关和每个附加的目标：
 
 <NxCommands commands={["dev <name>"]} />
+
+对于 `mcp` 网关，本地网关公开单个 MCP 端点，聚合每个附加的 MCP 服务器（通过 <Link path="guides/connection/agentcore-gateway-mcp">`agentcore-gateway#mcp-connection` 生成器</Link>连接），工具前缀为 `<target>___<tool>` 以匹配已部署的 Gateway。
+
+对于 `http` 网关，本地网关将 `/<targetName>/...` 路径代理到每个附加代理的本地服务器（通过 <Link path="guides/connection/agentcore-gateway-agent">`agentcore-gateway#agent-connection` 生成器</Link>连接），匹配已部署 Gateway 的基于路径的路由。
 
 有关完整的本地开发故事，请参阅连接指南。
 
@@ -458,6 +467,20 @@ module "my_gateway" {
     href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-gateway`}
     source="strands"
     sourceBadge="python"
+    target="agentcore"
+  />
+  <ConnectionCard
+    title="AgentCore Gateway to Agent"
+    description="使用 AgentCore Gateway 作为运行时目标来前置代理"
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/agentcore-gateway-agent`}
+    source="agentcore"
+    target="strands"
+  />
+  <ConnectionCard
+    title="React Website to AgentCore Gateway"
+    description="通过 AgentCore Gateway 将 React 网站连接到代理"
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-agentcore-gateway`}
+    source="react"
     target="agentcore"
   />
 </CardGrid>

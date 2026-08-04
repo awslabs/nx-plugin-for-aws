@@ -1,0 +1,112 @@
+---
+title: React WebサイトからAgentCore Gatewayへ
+description: AgentCore Gatewayを通じてReact Webサイトをエージェントに接続する
+when:
+  sourceType: ts#react-website
+  targetType: agentcore-gateway
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection`ジェネレーターは、<Link path="guides/react-website">React Webサイト</Link>を、`protocol: http`で生成された<Link path="guides/agentcore-gateway">AgentCore Gateway</Link>によってフロントされるエージェントに接続できます。
+
+ブラウザはGatewayとのみ通信します — `<gatewayUrl>/<targetName>/invocations`へのリクエストは、その背後にあるエージェントランタイムにプロキシされます。WebサイトがランタイムへのアクセスをGatewayを介してのみ行うため、エージェントはVPC内にデプロイでき、Gatewayが認証と可観測性を提供する単一の管理されたエントリーポイントとなります。
+
+## 前提条件
+
+このジェネレーターを使用する前に、以下を確認してください：
+
+1. <Link path="guides/react-website">React Webサイト</Link>プロジェクト
+2. `protocol: http`で生成された<Link path="guides/agentcore-gateway">`agentcore-gateway`</Link>プロジェクト
+3. <Link path="guides/connection/agentcore-gateway-agent">Gatewayからエージェントへのコネクションジェネレーター</Link>を介してGatewayに接続された少なくとも1つのAG-UIまたはHTTPエージェント
+
+ジェネレーターは、Gatewayに接続された**各**AG-UIまたはHTTPエージェントに対してWebサイトクライアントを作成します（A2Aターゲットはスキップされます — これらはエージェント間JSON-RPCを使用し、ブラウザプロトコルではありません）。Webサイトを各エージェントに直接接続する場合と同じクライアントを生成します（AG-UIエージェントの場合は<Link path="guides/connection/react-agui">AG-UI/CopilotKit</Link>、Python HTTPエージェントの場合は<Link path="guides/connection/react-py-agent">OpenAPIクライアント</Link>）が、ランタイムではなくGatewayを経由してルーティングされます。
+
+:::note[認証]
+ブラウザは、エージェントではなく**Gateway**で認証します：IAM Gatewayの場合はSigV4（Webサイトのcognito identity poolを介して）、Cognito Gatewayの場合はJWTベアラートークンを使用します。
+:::
+
+## 使用方法
+
+### ジェネレーターの実行
+
+<RunGenerator generator="connection" />
+
+ソースとしてWebサイトプロジェクトを、ターゲットとしてGatewayプロジェクトを選択します。
+
+### オプション
+
+<GeneratorParameters generator="connection" />
+
+## ジェネレーターの出力
+
+フロントされた各AG-UIエージェントに対して、<Link path="guides/connection/react-agui">ReactからAG-UIエージェントへの接続</Link>と同じファイルが生成されます（`AguiProvider`、`useAgui<Agent>`フック、テーマ付きCopilotKitコンポーネントモジュール）。フックはランタイム設定からGatewayのURLを読み取ります：
+
+<FileTree>
+
+- packages/\<website>/src
+  - components
+    - AguiProvider.tsx 各エージェントを登録するCopilotKitプロバイダー
+    - copilot/ テーマ付きチャットコンポーネント
+  - hooks
+    - useAgui\<Agent>.tsx Gatewayの`/<targetName>/invocations`ルートを介してエージェントに接続
+
+</FileTree>
+
+フロントされた各Python HTTPエージェントに対して、<Link path="guides/connection/react-py-agent">ReactからPythonエージェントへの接続</Link>と同じファイルが生成されます（型安全なOpenAPIクライアント、フック、プロバイダー）。クライアントのベースURLはGatewayを経由してルーティングされます。
+
+GatewayのURLは<Link path="guides/runtime-config">ランタイム設定</Link>の`connection.gateways.<GatewayClassName>`名前空間に登録されるため、Webサイトの`runtime-config.json`に公開されます。
+
+## Webサイトユーザーへのアクセス許可
+
+Webサイトの認証済みユーザーにGatewayを呼び出す権限を付与します：
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts title="packages/infra/src/stacks/application-stack.ts" {6}
+const identity = new UserIdentity(this, 'UserIdentity');
+new Website(this, 'Website');
+
+const myGateway = new MyGateway(this, 'MyGateway');
+myGateway.addAgent(myAgent);
+myGateway.grantInvokeAccess(identity.identityPool.authenticatedRole);
+```
+</Fragment>
+<Fragment slot="terraform">
+```hcl title="packages/infra/src/main.tf"
+resource "aws_iam_policy" "gateway_invoke_policy" {
+  name = "GatewayInvokePolicy"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["bedrock-agentcore:InvokeGateway"]
+        Resource = [module.my_gateway.gateway_arn]
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "authenticated_gateway_access" {
+  role       = module.user_identity.authenticated_role_name
+  policy_arn = aws_iam_policy.gateway_invoke_policy.arn
+}
+```
+</Fragment>
+</Infrastructure>
+
+## ローカル開発
+
+Webサイトの`dev`ターゲットは、Gatewayプロジェクトの`dev`ターゲットに依存関係を持ち、ローカルゲートウェイと接続されたすべてのエージェントを起動します。Webサイトのランタイム設定は`local-dev`モードでオーバーライドされ、GatewayのURLがローカルゲートウェイを指すようになるため、ブラウザはローカルで同じ`/<targetName>/invocations`ルートを実行します：
+
+<NxCommands commands={["dev <website-name>"]} />
+
+## 新しいエージェントの接続
+
+ジェネレーターは、**実行時に**Gatewayに接続されているエージェントにWebサイトを接続します。Gatewayに別のエージェントを接続した後、コネクションジェネレーターを再実行してそのWebサイトクライアントを生成してください — 既存のクライアントはそのまま残ります。

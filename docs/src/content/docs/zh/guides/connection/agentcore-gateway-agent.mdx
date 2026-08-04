@@ -1,0 +1,162 @@
+---
+title: AgentCore Gateway 到 Agent
+description: 使用 AgentCore Gateway 作为运行时目标来前置代理
+when:
+  sourceType: agentcore-gateway
+  targetType:
+    - ts#agent
+    - py#agent
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection` 生成器可以将代理（<Link path="guides/ts-agent">TypeScript</Link> 或 <Link path="guides/py-agent">Python</Link>）注册为使用 `protocol: http` 生成的 <Link path="guides/agentcore-gateway">AgentCore Gateway</Link> 的 [AgentCore 运行时目标](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-target-http-runtime.html)。
+
+连接后，Gateway 会在 `<gatewayUrl>/<targetName>/invocations` 下代理对代理的请求，使用 IAM SigV4 对发往运行时的出站流量进行签名。这为您的代理提供了一个统一的受管入口点——由于调用者只需访问 Gateway，代理运行时本身可以部署在其后的 VPC 内部。
+
+## 前置条件
+
+在使用此生成器之前，请确保您具备：
+
+1. 使用 `protocol: http` 生成的 <Link path="guides/agentcore-gateway">`agentcore-gateway`</Link> 项目
+2. 使用 `infra: agentcore` 和 `auth: iam` 创建的代理组件（<Link path="guides/ts-agent">`ts#agent`</Link> 或 <Link path="guides/py-agent">`py#agent`</Link>）
+
+以下代理协议可以由 Gateway 前置：
+
+| Agent | `ag-ui` | `http` | `a2a` |
+| ----- | ------- | ------ | ----- |
+| `ts#agent` | ✅ | ❌ | ✅ |
+| `py#agent` | ✅ | ✅ | ✅ |
+
+:::note[TypeScript HTTP 代理]
+TypeScript `http` 代理通过 WebSocket 提供 tRPC 服务，而 AgentCore Gateway 不支持 WebSocket 或双向流——生成器会拒绝此组合。请改用 `ag-ui` 协议生成代理。
+:::
+
+## 使用方法
+
+### 运行生成器
+
+<RunGenerator generator="connection" />
+
+选择 Gateway 项目作为源，选择代理项目作为目标。如果代理项目包含多个组件，请指定 `targetComponent` 以消除歧义。
+
+### 选项
+
+<GeneratorParameters generator="connection" />
+
+## 生成器输出
+
+生成器将现有项目连接在一起，而不是生成新的源文件。以下文件会被修改：
+
+<FileTree>
+
+- packages/\<gateway>
+  - project.json Gateway 的 `dev` 目标获得对代理的 `<agent>-dev` 的依赖
+  - local-dev.ts `ATTACHED_AGENTS` 已更新，以便本地网关代理到代理
+
+</FileTree>
+
+## 将代理目标添加到您的堆栈
+
+生成器**无法**自动将代理目标连接到您的基础设施中，因为它不知道哪个堆栈或模块实例化了 Gateway。您需要自己添加一个对 `gateway.addAgent(agent)` 的调用。
+
+<Infrastructure>
+<Fragment slot="cdk">
+在实例化 Gateway 的堆栈中，将代理注册为目标：
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {5-8}
+const myAgent = new MyAgent(this, 'MyAgent');
+const myGateway = new MyGateway(this, 'MyGateway');
+
+// 将代理注册为 Gateway 的运行时目标。目标名称
+// 默认为代理的 `agentName`（其类名的 kebab-case 形式，
+// 例如 `MyAgent` -> `my-agent`），并构成目标的调用路径：
+// <gatewayUrl>/my-agent/invocations
+myGateway.addAgent(myAgent);
+```
+
+要覆盖默认目标名称，请传递 `gatewayTargetName`：
+
+```ts
+myGateway.addAgent(myAgent, { gatewayTargetName: 'my-target' });
+```
+
+该构造授予 Gateway 的执行角色对代理运行时的调用访问权限，并使用 `GATEWAY_IAM_ROLE` 凭证提供程序配置目标，以便 Gateway 使用自己的角色对出站调用进行签名。
+</Fragment>
+<Fragment slot="terraform">
+在实例化 Gateway 的 Terraform 文件中，连接代理目标：
+
+```hcl title="packages/infra/src/main.tf" {9-20,24-40}
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+  # ...
+}
+
+module "my_gateway" {
+  source = "../../common/terraform/src/app/gateways/my-gateway"
+
+  # Gateway 使用自己的角色对运行时的出站调用进行签名，并在
+  # 目标创建时验证访问权限，因此它首先需要调用访问权限。
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = [
+        "bedrock-agentcore:InvokeAgentRuntime",
+        "bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream",
+        # A2A 目标还通过网关提供其代理卡
+        "bedrock-agentcore:GetAgentCard",
+      ]
+      Resource = [
+        module.my_agent.agent_core_runtime_arn,
+        "${module.my_agent.agent_core_runtime_arn}/*",
+      ]
+    }
+  ]
+}
+
+# 将代理注册为 Gateway 的运行时目标。目标名称
+# 构成调用路径：<gatewayUrl>/my-agent/invocations
+resource "aws_bedrockagentcore_gateway_target" "my_agent" {
+  gateway_identifier = module.my_gateway.gateway_id
+  name               = "my-agent"
+  # AgentCore 在未设置描述时会填充一个描述，提供程序会
+  # 将其报告为应用后的不一致结果——因此始终设置一个。
+  description = "Agent runtime target my-agent"
+
+  target_configuration {
+    http {
+      agentcore_runtime {
+        arn = module.my_agent.agent_core_runtime_arn
+      }
+    }
+  }
+
+  credential_provider_configuration {
+    gateway_iam_role {}
+  }
+}
+```
+</Fragment>
+</Infrastructure>
+
+:::tip[将代理部署到 VPC 中]
+使用 Gateway 前置代理是使 VPC 部署的代理可访问的方式：调用者与 Gateway 的公共端点通信，Gateway 在内部访问运行时。在其构造/模块上配置代理运行时的网络设置（Terraform 模块公开 `enable_vpc`、`vpc_id` 和 `subnet_ids`；CDK 构造接受运行时的网络属性）。
+:::
+
+## 通过 Gateway 调用代理
+
+对 `<gatewayUrl origin>/<targetName>/invocations` 的请求会被转发到代理运行时，无需协议转换，因此调用者使用与直接针对运行时相同的请求形式——SSE 流（AG-UI）、JSON 流（Python HTTP）和 A2A JSON-RPC 都可以代理通过。调用者使用 Gateway 进行身份验证（根据 Gateway 的 `auth` 使用 IAM SigV4 或 Cognito JWT），而不是与代理进行身份验证。
+
+要将网站连接到 Gateway 的代理，请使用 <Link path="guides/connection/react-agentcore-gateway">React 网站到 AgentCore Gateway 连接生成器</Link>。
+
+## 本地开发
+
+使用以下命令在本地运行 Gateway：
+
+<NxCommands commands={["dev <gateway-name>"]} />
+
+启动本地网关以及每个附加代理在其分配的本地端口上。本地网关将 `/<targetName>/...` 路径代理到每个代理的本地服务器，与已部署的 Gateway 的基于路径的路由相匹配。

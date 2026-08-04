@@ -1,0 +1,162 @@
+---
+title: AgentCore Gateway to Agent
+description: AgentCore Gateway をランタイムターゲットとしてエージェントの前段に配置する
+when:
+  sourceType: agentcore-gateway
+  targetType:
+    - ts#agent
+    - py#agent
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection` ジェネレーターは、エージェント（<Link path="guides/ts-agent">TypeScript</Link> または <Link path="guides/py-agent">Python</Link>）を、`protocol: http` で生成された <Link path="guides/agentcore-gateway">AgentCore Gateway</Link> の [AgentCore Runtime ターゲット](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-target-http-runtime.html)として登録できます。
+
+接続されると、Gateway は `<gatewayUrl>/<targetName>/invocations` の下でエージェントへのリクエストをプロキシし、IAM SigV4 でランタイムへのアウトバウンドトラフィックに署名します。これにより、エージェントに単一の管理されたエントリーポイントが提供されます。また、呼び出し元は Gateway にのみ到達すればよいため、エージェントランタイム自体は Gateway の背後の VPC 内にデプロイできます。
+
+## 前提条件
+
+このジェネレーターを使用する前に、以下を確認してください：
+
+1. `protocol: http` で生成された <Link path="guides/agentcore-gateway">`agentcore-gateway`</Link> プロジェクト
+2. `infra: agentcore` および `auth: iam` で作成されたエージェントコンポーネント（<Link path="guides/ts-agent">`ts#agent`</Link> または <Link path="guides/py-agent">`py#agent`</Link>）
+
+以下のエージェントプロトコルが Gateway の前段に配置できます：
+
+| Agent | `ag-ui` | `http` | `a2a` |
+| ----- | ------- | ------ | ----- |
+| `ts#agent` | ✅ | ❌ | ✅ |
+| `py#agent` | ✅ | ✅ | ✅ |
+
+:::note[TypeScript HTTP エージェント]
+TypeScript の `http` エージェントは WebSocket 上で tRPC を提供しますが、AgentCore Gateway は WebSocket や双方向ストリーミングをサポートしていません。ジェネレーターはこの組み合わせを拒否します。代わりに `ag-ui` プロトコルでエージェントを生成してください。
+:::
+
+## 使用方法
+
+### ジェネレーターの実行
+
+<RunGenerator generator="connection" />
+
+Gateway プロジェクトをソースとして、エージェントプロジェクトをターゲットとして選択します。エージェントプロジェクトに複数のコンポーネントが含まれている場合は、`targetComponent` を指定して明確にしてください。
+
+### オプション
+
+<GeneratorParameters generator="connection" />
+
+## ジェネレーターの出力
+
+ジェネレーターは、新しいソースファイルを生成するのではなく、既存のプロジェクトを接続します。以下のファイルが変更されます：
+
+<FileTree>
+
+- packages/\<gateway>
+  - project.json Gateway の `dev` ターゲットがエージェントの `<agent>-dev` への依存関係を獲得
+  - local-dev.ts `ATTACHED_AGENTS` が更新され、ローカル gateway がエージェントにプロキシ
+
+</FileTree>
+
+## スタックへのエージェントターゲットの追加
+
+ジェネレーターは、Gateway をインスタンス化するスタックやモジュールを知らないため、インフラストラクチャにエージェントターゲットを自動的に接続**できません**。`gateway.addAgent(agent)` の呼び出しを自分で追加してください。
+
+<Infrastructure>
+<Fragment slot="cdk">
+Gateway をインスタンス化するスタックで、エージェントをターゲットとして登録します：
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {5-8}
+const myAgent = new MyAgent(this, 'MyAgent');
+const myGateway = new MyGateway(this, 'MyGateway');
+
+// エージェントを Gateway のランタイムターゲットとして登録します。ターゲット名は
+// デフォルトでエージェントの `agentName`（クラス名をケバブケースにしたもの、
+// 例：`MyAgent` -> `my-agent`）になり、ターゲットの呼び出しパスを形成します：
+// <gatewayUrl>/my-agent/invocations
+myGateway.addAgent(myAgent);
+```
+
+デフォルトのターゲット名を上書きするには、`gatewayTargetName` を渡します：
+
+```ts
+myGateway.addAgent(myAgent, { gatewayTargetName: 'my-target' });
+```
+
+コンストラクトは、Gateway の実行ロールにエージェントランタイムへの呼び出しアクセスを付与し、`GATEWAY_IAM_ROLE` 認証情報プロバイダーでターゲットを構成するため、Gateway は自身のロールでアウトバウンド呼び出しに署名します。
+</Fragment>
+<Fragment slot="terraform">
+Gateway をインスタンス化する Terraform ファイルで、エージェントターゲットを接続します：
+
+```hcl title="packages/infra/src/main.tf" {9-20,24-40}
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+  # ...
+}
+
+module "my_gateway" {
+  source = "../../common/terraform/src/app/gateways/my-gateway"
+
+  # Gateway は自身のロールでランタイムへのアウトバウンド呼び出しに署名し、
+  # ターゲット作成時にアクセスを検証するため、最初に呼び出しアクセスが必要です。
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = [
+        "bedrock-agentcore:InvokeAgentRuntime",
+        "bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream",
+        # A2A ターゲットは追加で gateway 経由でエージェントカードを提供します
+        "bedrock-agentcore:GetAgentCard",
+      ]
+      Resource = [
+        module.my_agent.agent_core_runtime_arn,
+        "${module.my_agent.agent_core_runtime_arn}/*",
+      ]
+    }
+  ]
+}
+
+# エージェントを Gateway のランタイムターゲットとして登録します。ターゲット名は
+# 呼び出しパスを形成します：<gatewayUrl>/my-agent/invocations
+resource "aws_bedrockagentcore_gateway_target" "my_agent" {
+  gateway_identifier = module.my_gateway.gateway_id
+  name               = "my-agent"
+  # AgentCore は設定されていない場合に説明を埋めますが、プロバイダーは
+  # apply 後に一貫性のない結果として報告するため、常に設定してください。
+  description = "Agent runtime target my-agent"
+
+  target_configuration {
+    http {
+      agentcore_runtime {
+        arn = module.my_agent.agent_core_runtime_arn
+      }
+    }
+  }
+
+  credential_provider_configuration {
+    gateway_iam_role {}
+  }
+}
+```
+</Fragment>
+</Infrastructure>
+
+:::tip[VPC へのエージェントのデプロイ]
+Gateway でエージェントを前段に配置することで、VPC にデプロイされたエージェントに到達可能になります。呼び出し元は Gateway のパブリックエンドポイントと通信し、Gateway は内部的にランタイムに到達します。エージェントランタイムのネットワーク設定は、そのコンストラクト/モジュールで構成します（Terraform モジュールは `enable_vpc`、`vpc_id`、`subnet_ids` を公開し、CDK コンストラクトはランタイムのネットワークプロパティを受け入れます）。
+:::
+
+## Gateway を介したエージェントの呼び出し
+
+`<gatewayUrl origin>/<targetName>/invocations` へのリクエストは、プロトコル変換なしでエージェントランタイムに転送されるため、呼び出し元はランタイムに直接使用するのと同じリクエスト形式を使用します。SSE ストリーム（AG-UI）、JSON ストリーミング（Python HTTP）、A2A JSON-RPC はすべてプロキシを通過します。呼び出し元は、エージェントではなく Gateway で認証します（Gateway の `auth` に応じて IAM SigV4 または Cognito JWT）。
+
+Web サイトを Gateway のエージェントに接続するには、<Link path="guides/connection/react-agentcore-gateway">React website to AgentCore Gateway 接続ジェネレーター</Link>を使用してください。
+
+## ローカル開発
+
+以下のコマンドで Gateway をローカルで実行します：
+
+<NxCommands commands={["dev <gateway-name>"]} />
+
+これにより、ローカル gateway と、割り当てられたローカルポート上のすべての接続されたエージェントが起動します。ローカル gateway は `/<targetName>/...` パスを各エージェントのローカルサーバーにプロキシし、デプロイされた Gateway のパスベースルーティングと一致します。

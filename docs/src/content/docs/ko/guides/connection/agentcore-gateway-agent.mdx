@@ -1,0 +1,162 @@
+---
+title: AgentCore Gateway에서 Agent로
+description: AgentCore Gateway를 런타임 대상으로 사용하여 에이전트를 프론트
+when:
+  sourceType: agentcore-gateway
+  targetType:
+    - ts#agent
+    - py#agent
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection` 제너레이터는 에이전트(<Link path="guides/ts-agent">TypeScript</Link> 또는 <Link path="guides/py-agent">Python</Link>)를 `protocol: http`로 생성된 <Link path="guides/agentcore-gateway">AgentCore Gateway</Link>의 [AgentCore Runtime target](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-target-http-runtime.html)으로 등록할 수 있습니다.
+
+연결되면 Gateway는 `<gatewayUrl>/<targetName>/invocations` 경로로 에이전트에 대한 요청을 프록시하며, IAM SigV4로 런타임에 대한 아웃바운드 트래픽에 서명합니다. 이를 통해 에이전트에 단일 관리 진입점을 제공하며, 호출자는 Gateway에만 도달하면 되므로 에이전트 런타임 자체는 Gateway 뒤의 VPC 내부에 배포할 수 있습니다.
+
+## 사전 요구 사항
+
+이 제너레이터를 사용하기 전에 다음을 확인하세요:
+
+1. `protocol: http`로 생성된 <Link path="guides/agentcore-gateway">`agentcore-gateway`</Link> 프로젝트
+2. `infra: agentcore` 및 `auth: iam`으로 생성된 에이전트 컴포넌트(<Link path="guides/ts-agent">`ts#agent`</Link> 또는 <Link path="guides/py-agent">`py#agent`</Link>)
+
+다음 에이전트 프로토콜은 Gateway로 프론트할 수 있습니다:
+
+| Agent | `ag-ui` | `http` | `a2a` |
+| ----- | ------- | ------ | ----- |
+| `ts#agent` | ✅ | ❌ | ✅ |
+| `py#agent` | ✅ | ✅ | ✅ |
+
+:::note[TypeScript HTTP 에이전트]
+TypeScript `http` 에이전트는 WebSocket을 통해 tRPC를 제공하며, AgentCore Gateway는 WebSocket 또는 양방향 스트리밍을 지원하지 않습니다. 제너레이터는 이 조합을 거부합니다. 대신 `ag-ui` 프로토콜로 에이전트를 생성하세요.
+:::
+
+## 사용법
+
+### 제너레이터 실행
+
+<RunGenerator generator="connection" />
+
+Gateway 프로젝트를 소스로, 에이전트 프로젝트를 대상으로 선택합니다. 에이전트 프로젝트에 여러 컴포넌트가 포함된 경우 `targetComponent`를 지정하여 명확히 구분하세요.
+
+### 옵션
+
+<GeneratorParameters generator="connection" />
+
+## 제너레이터 출력
+
+제너레이터는 새 소스 파일을 생성하는 대신 기존 프로젝트를 연결합니다. 다음 파일이 수정됩니다:
+
+<FileTree>
+
+- packages/\<gateway>
+  - project.json Gateway의 `dev` 대상이 에이전트의 `<agent>-dev`에 대한 종속성을 얻습니다
+  - local-dev.ts `ATTACHED_AGENTS`가 업데이트되어 로컬 게이트웨이가 에이전트로 프록시합니다
+
+</FileTree>
+
+## 스택에 에이전트 대상 추가하기
+
+제너레이터는 Gateway를 인스턴스화하는 스택이나 모듈을 알 수 없기 때문에 에이전트 대상을 인프라에 자동으로 연결할 수 **없습니다**. `gateway.addAgent(agent)` 호출을 직접 추가하세요.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Gateway를 인스턴스화하는 스택에서 에이전트를 대상으로 등록합니다:
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {5-8}
+const myAgent = new MyAgent(this, 'MyAgent');
+const myGateway = new MyGateway(this, 'MyGateway');
+
+// 에이전트를 Gateway의 런타임 대상으로 등록합니다. 대상 이름은
+// 기본적으로 에이전트의 `agentName`(케밥 케이스의 클래스 이름,
+// 예: `MyAgent` -> `my-agent`)이며, 대상의 호출 경로를 형성합니다:
+// <gatewayUrl>/my-agent/invocations
+myGateway.addAgent(myAgent);
+```
+
+기본 대상 이름을 재정의하려면 `gatewayTargetName`을 전달하세요:
+
+```ts
+myGateway.addAgent(myAgent, { gatewayTargetName: 'my-target' });
+```
+
+구성은 Gateway의 실행 역할에 에이전트 런타임에 대한 호출 액세스 권한을 부여하고 `GATEWAY_IAM_ROLE` 자격 증명 공급자로 대상을 구성하므로 Gateway는 자체 역할로 아웃바운드 호출에 서명합니다.
+</Fragment>
+<Fragment slot="terraform">
+Gateway를 인스턴스화하는 Terraform 파일에서 에이전트 대상을 연결합니다:
+
+```hcl title="packages/infra/src/main.tf" {9-20,24-40}
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+  # ...
+}
+
+module "my_gateway" {
+  source = "../../common/terraform/src/app/gateways/my-gateway"
+
+  # Gateway는 자체 역할로 런타임에 대한 아웃바운드 호출에 서명하고
+  # 대상 생성 시 액세스를 검증하므로 먼저 호출 액세스가 필요합니다.
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = [
+        "bedrock-agentcore:InvokeAgentRuntime",
+        "bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream",
+        # A2A 대상은 게이트웨이를 통해 에이전트 카드도 제공합니다
+        "bedrock-agentcore:GetAgentCard",
+      ]
+      Resource = [
+        module.my_agent.agent_core_runtime_arn,
+        "${module.my_agent.agent_core_runtime_arn}/*",
+      ]
+    }
+  ]
+}
+
+# 에이전트를 Gateway의 런타임 대상으로 등록합니다. 대상 이름은
+# 호출 경로를 형성합니다: <gatewayUrl>/my-agent/invocations
+resource "aws_bedrockagentcore_gateway_target" "my_agent" {
+  gateway_identifier = module.my_gateway.gateway_id
+  name               = "my-agent"
+  # AgentCore는 설정되지 않은 경우 설명을 채우며, 이는 공급자가
+  # 적용 후 일관되지 않은 결과로 보고하므로 항상 설정하세요.
+  description = "Agent runtime target my-agent"
+
+  target_configuration {
+    http {
+      agentcore_runtime {
+        arn = module.my_agent.agent_core_runtime_arn
+      }
+    }
+  }
+
+  credential_provider_configuration {
+    gateway_iam_role {}
+  }
+}
+```
+</Fragment>
+</Infrastructure>
+
+:::tip[VPC에 에이전트 배포하기]
+Gateway로 에이전트를 프론트하는 것은 VPC에 배포된 에이전트를 접근 가능하게 만드는 방법입니다: 호출자는 Gateway의 공개 엔드포인트와 통신하고, Gateway는 내부적으로 런타임에 도달합니다. 에이전트 런타임의 네트워크 설정을 구성/모듈에서 구성하세요(Terraform 모듈은 `enable_vpc`, `vpc_id` 및 `subnet_ids`를 노출하고, CDK 구성은 런타임의 네트워크 속성을 허용합니다).
+:::
+
+## Gateway를 통해 에이전트 호출하기
+
+`<gatewayUrl origin>/<targetName>/invocations`에 대한 요청은 프로토콜 변환 없이 에이전트 런타임으로 전달되므로, 호출자는 런타임에 직접 사용하는 것과 동일한 요청 형태를 사용합니다. SSE 스트림(AG-UI), JSON 스트리밍(Python HTTP) 및 A2A JSON-RPC가 모두 프록시를 통과합니다. 호출자는 에이전트가 아닌 Gateway로 인증합니다(Gateway의 `auth`에 따라 IAM SigV4 또는 Cognito JWT).
+
+웹사이트를 Gateway의 에이전트에 연결하려면 <Link path="guides/connection/react-agentcore-gateway">React 웹사이트에서 AgentCore Gateway로 연결 제너레이터</Link>를 사용하세요.
+
+## 로컬 개발
+
+다음 명령으로 Gateway를 로컬에서 실행하면:
+
+<NxCommands commands={["dev <gateway-name>"]} />
+
+로컬 게이트웨이와 할당된 로컬 포트의 모든 연결된 에이전트가 시작됩니다. 로컬 게이트웨이는 `/<targetName>/...` 경로를 각 에이전트의 로컬 서버로 프록시하여 배포된 Gateway의 경로 기반 라우팅과 일치합니다.
