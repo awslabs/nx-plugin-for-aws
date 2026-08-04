@@ -1,0 +1,1143 @@
+/* ============================================================
+ * Graph builder
+ *
+ * Uses the site's Starlight tokens (--sl-color-*, --brand-*) so it tracks the
+ * docs theme and the light/dark switch, with a small set of local tokens for the
+ * surfaces the canvas needs.
+ * ============================================================ */
+
+.gb-root {
+  --gb-surface: var(--sl-color-black);
+  --gb-panel: var(--sl-color-gray-7, #17191e);
+  --gb-raised: var(--sl-color-gray-6);
+  --gb-border: var(--sl-color-gray-5);
+  --gb-border-soft: color-mix(
+    in oklab,
+    var(--sl-color-gray-5) 60%,
+    transparent
+  );
+  --gb-text: var(--sl-color-white);
+  --gb-muted: var(--sl-color-gray-3);
+  --gb-accent: var(--sl-color-accent);
+  --gb-accent-soft: color-mix(
+    in oklab,
+    var(--sl-color-accent) 18%,
+    transparent
+  );
+  --gb-danger: oklch(0.63 0.23 25);
+  --gb-warning: oklch(0.75 0.16 75);
+  --gb-radius: 12px;
+  --gb-radius-sm: 8px;
+
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  font-size: 0.875rem;
+  color: var(--gb-text);
+}
+
+/* Starlight's --sl-color-white / --sl-color-black already swap between themes,
+ * so the tokens above track the light/dark switch without an override. */
+
+/* A graph needs more room than the prose column. Widen the content column on
+ * the page hosting the builder rather than pulling the builder out of it, so it
+ * still sits inside Starlight's layout and can't overlap the sidebar. */
+:root:has(.gb-full-bleed) {
+  --sl-content-width: 82rem;
+}
+
+.gb-full-bleed {
+  margin-block: 2rem;
+}
+
+/* ---------- Loading ---------- */
+
+/* Stands in while the client-only island hydrates, sized to the workspace so the
+ * page doesn't jump when the builder appears. */
+.gb-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.9rem;
+  height: clamp(30rem, 66vh, 44rem);
+  background: var(--sl-color-gray-7, #17191e);
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 12px;
+  color: var(--sl-color-gray-3);
+}
+
+.gb-loading p {
+  margin: 0;
+  font-size: 0.875rem;
+}
+
+.gb-spinner {
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 50%;
+  border: 2px solid var(--sl-color-gray-5);
+  border-top-color: var(--sl-color-accent);
+  animation: gb-spin 700ms linear infinite;
+}
+
+@keyframes gb-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+/* A spinner conveys "working" by motion alone, so hold it still and let the
+ * caption carry the message when motion is unwelcome. */
+@media (prefers-reduced-motion: reduce) {
+  .gb-spinner {
+    animation: none;
+  }
+}
+
+/* ---------- Toolbar ---------- */
+
+.gb-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.gb-toolbar-presets,
+.gb-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.gb-toolbar-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--gb-muted);
+  margin-right: 0.25rem;
+}
+
+.gb-chip {
+  font: inherit;
+  line-height: 1;
+  padding: 0.45rem 0.85rem;
+  border-radius: 9999px;
+  border: 1px solid var(--gb-border);
+  background: transparent;
+  color: var(--gb-muted);
+  cursor: pointer;
+  transition:
+    color 150ms ease,
+    border-color 150ms ease,
+    background-color 150ms ease;
+}
+
+.gb-chip:hover:not(:disabled) {
+  color: var(--gb-text);
+  border-color: var(--gb-accent);
+  background: var(--gb-accent-soft);
+}
+
+.gb-chip:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.gb-chip--danger:hover:not(:disabled) {
+  color: var(--gb-danger);
+  border-color: var(--gb-danger);
+  background: color-mix(in oklab, var(--gb-danger) 12%, transparent);
+}
+
+.gb-stat {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.78rem;
+  color: var(--gb-muted);
+  padding-inline: 0.25rem;
+}
+
+.gb-stat--error {
+  color: var(--gb-danger);
+  font-weight: 500;
+}
+
+.gb-stat--accent {
+  color: var(--sl-color-text-accent);
+  font-weight: 500;
+}
+
+/* ---------- Workspace layout ---------- */
+
+.gb-workspace {
+  display: grid;
+  grid-template-areas: 'palette canvas inspector';
+  grid-template-columns: 13.5rem minmax(0, 1fr) 16rem;
+  gap: 0.75rem;
+  /* A fixed height keeps the builder a self-contained workspace: the palette and
+   * inspector scroll within their panes rather than stretching the page. */
+  height: clamp(30rem, 66vh, 44rem);
+}
+
+.gb-pane--palette {
+  grid-area: palette;
+}
+
+.gb-canvas {
+  grid-area: canvas;
+}
+
+.gb-pane--inspector {
+  grid-area: inspector;
+}
+
+/* Where three columns would squeeze the canvas, drop the inspector below it so
+ * the graph keeps the width — the canvas is what needs the room. */
+@media (max-width: 78rem) {
+  .gb-workspace {
+    grid-template-areas:
+      'palette canvas'
+      'inspector inspector';
+    grid-template-columns: 13.5rem minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+    height: auto;
+  }
+
+  .gb-pane--palette,
+  .gb-canvas {
+    height: clamp(26rem, 56vh, 38rem);
+  }
+
+  .gb-pane--inspector {
+    max-height: 22rem;
+  }
+}
+
+@media (max-width: 48rem) {
+  .gb-workspace {
+    grid-template-areas:
+      'palette'
+      'canvas'
+      'inspector';
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+  }
+
+  .gb-pane--palette {
+    height: 16rem;
+  }
+}
+
+.gb-pane {
+  background: var(--gb-panel);
+  border: 1px solid var(--gb-border);
+  border-radius: var(--gb-radius);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* ---------- Palette ---------- */
+
+.gb-palette {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+
+.gb-palette-search {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--gb-border-soft);
+  color: var(--gb-muted);
+}
+
+.gb-palette-search svg {
+  width: 0.95rem;
+  height: 0.95rem;
+  flex-shrink: 0;
+}
+
+.gb-palette-search input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  color: var(--gb-text);
+  font: inherit;
+  padding: 0;
+}
+
+.gb-palette-search input:focus {
+  outline: none;
+}
+
+.gb-palette-search input::-webkit-search-cancel-button {
+  filter: grayscale(1);
+}
+
+.gb-palette-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.5rem;
+  overscroll-behavior: contain;
+}
+
+.gb-palette-group + .gb-palette-group {
+  margin-top: 0.75rem;
+}
+
+.gb-palette-group-title {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--gb-muted);
+  margin: 0 0 0.35rem 0.4rem;
+}
+
+.gb-palette-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.gb-palette-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid transparent;
+  border-radius: var(--gb-radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: grab;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.gb-palette-item:hover {
+  background: var(--gb-raised);
+  border-color: var(--gb-border);
+}
+
+.gb-palette-item:active {
+  cursor: grabbing;
+}
+
+/* A type that can connect to the current selection — a hint at what's next. */
+.gb-palette-item.is-compatible {
+  border-color: var(--gb-accent-soft);
+  background: color-mix(in oklab, var(--sl-color-accent) 8%, transparent);
+}
+
+.gb-palette-item-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.gb-palette-item-label {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gb-palette-item-meta {
+  font-size: 0.7rem;
+  color: var(--gb-muted);
+}
+
+.gb-palette-empty {
+  color: var(--gb-muted);
+  padding: 1rem 0.5rem;
+  margin: 0;
+}
+
+/* ---------- Logos ---------- */
+
+.gb-logo {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  flex-shrink: 0;
+}
+
+.gb-logo img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+/* The A2A mark is solid black; invert it so it reads in dark mode. */
+:root[data-theme='dark'] .gb-logo--a2a img {
+  filter: invert(1);
+}
+
+.gb-logo-badge {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  width: 0.8rem;
+  height: 0.8rem;
+  display: inline-flex;
+}
+
+.gb-logo-badge img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* ---------- Canvas ---------- */
+
+.gb-canvas {
+  position: relative;
+  overflow: auto;
+  border: 1px solid var(--gb-border);
+  border-radius: var(--gb-radius);
+  background-color: var(--gb-surface);
+  /* Dot grid, sized to the snap step so nodes visibly land on it. */
+  background-image: radial-gradient(
+    circle at 1px 1px,
+    var(--gb-border) 1px,
+    transparent 0
+  );
+  background-size: 24px 24px;
+  transition: border-color 150ms ease;
+  touch-action: none;
+}
+
+.gb-canvas.is-drop-target {
+  border-color: var(--gb-accent);
+  box-shadow: 0 0 0 3px var(--gb-accent-soft) inset;
+}
+
+.gb-canvas.is-connecting {
+  cursor: crosshair;
+}
+
+/* Grab affordance for panning the background. */
+.gb-canvas {
+  cursor: grab;
+}
+
+.gb-canvas.is-panning {
+  cursor: grabbing;
+}
+
+.gb-canvas.is-connecting,
+.gb-canvas.is-connecting.is-panning {
+  cursor: crosshair;
+}
+
+.gb-canvas-extent {
+  position: relative;
+}
+
+.gb-edges {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.gb-edge {
+  pointer-events: auto;
+}
+
+.gb-edge-hit {
+  fill: none;
+  stroke: transparent;
+  stroke-width: 16;
+}
+
+.gb-edge-line {
+  fill: none;
+  stroke: var(--sl-color-gray-4);
+  stroke-width: 2;
+  transition:
+    stroke 150ms ease,
+    stroke-width 150ms ease;
+}
+
+.gb-edge:hover .gb-edge-line,
+.gb-edge.is-active .gb-edge-line {
+  stroke: var(--gb-accent);
+  stroke-width: 2.5;
+}
+
+/* A selected edge reads as the current delete target, so it stands out more than
+ * the incidental highlight a hover or a selected endpoint gives. */
+.gb-edge.is-selected .gb-edge-line {
+  stroke: var(--gb-accent);
+  stroke-width: 3.5;
+}
+
+.gb-edge-hit {
+  cursor: pointer;
+}
+
+.gb-edge--error .gb-edge-line {
+  stroke: var(--gb-danger);
+  stroke-dasharray: 6 4;
+}
+
+.gb-edge--warning .gb-edge-line {
+  stroke: var(--gb-warning);
+  stroke-dasharray: 6 4;
+}
+
+/* A real button in the DOM layer above the (aria-hidden) edge drawing, centred on
+ * the edge's midpoint. Revealed on hover of the canvas or on keyboard focus. */
+.gb-edge-remove {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--gb-border);
+  background: var(--gb-panel);
+  color: var(--gb-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity 120ms ease,
+    color 120ms ease,
+    border-color 120ms ease;
+  /* Hidden until wanted, so it can't intercept a pan that starts near an edge. */
+  pointer-events: none;
+}
+
+.gb-canvas:hover .gb-edge-remove,
+.gb-edge-remove:focus-visible,
+.gb-edge-remove.is-selected {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.gb-edge-remove.is-selected {
+  color: var(--gb-danger);
+  border-color: var(--gb-danger);
+}
+
+.gb-edge-remove svg {
+  width: 0.7rem;
+  height: 0.7rem;
+}
+
+.gb-edge-remove svg path {
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  fill: none;
+}
+
+.gb-edge-remove:hover {
+  color: var(--gb-danger);
+  border-color: var(--gb-danger);
+}
+
+.gb-edge-remove:focus-visible {
+  outline: 2px solid var(--gb-accent);
+  outline-offset: 2px;
+}
+
+.gb-edge-draft {
+  fill: none;
+  stroke: var(--sl-color-gray-4);
+  stroke-width: 2;
+  stroke-dasharray: 5 5;
+  pointer-events: none;
+}
+
+.gb-edge-draft.is-valid {
+  stroke: var(--gb-accent);
+  stroke-dasharray: none;
+}
+
+/* ---------- Nodes ---------- */
+
+.gb-node {
+  position: absolute;
+  box-sizing: border-box;
+  width: 208px;
+  height: 76px;
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  padding: 0 0.85rem;
+  background: var(--gb-panel);
+  border: 1px solid var(--gb-border);
+  border-radius: var(--gb-radius);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.16),
+    0 8px 20px -14px rgb(0 0 0 / 0.5);
+  cursor: grab;
+  user-select: none;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    opacity 150ms ease;
+}
+
+.gb-node:hover {
+  border-color: var(--sl-color-gray-4);
+}
+
+.gb-node.is-selected {
+  border-color: var(--gb-accent);
+  box-shadow:
+    0 0 0 3px var(--gb-accent-soft),
+    0 8px 20px -14px rgb(0 0 0 / 0.5);
+}
+
+.gb-node.is-dragging {
+  cursor: grabbing;
+  /* Lift the dragged node above its neighbours and the edge layer. */
+  z-index: 3;
+  box-shadow:
+    0 0 0 3px var(--gb-accent-soft),
+    0 18px 32px -16px rgb(0 0 0 / 0.6);
+}
+
+.gb-node.is-drop-valid {
+  border-color: var(--gb-accent);
+  box-shadow: 0 0 0 3px var(--gb-accent-soft);
+}
+
+/* Dim nodes that can't take the connection being drawn. */
+.gb-node.is-dimmed {
+  opacity: 0.35;
+}
+
+.gb-node--error {
+  border-color: var(--gb-danger);
+}
+
+.gb-node--warning {
+  border-color: var(--gb-warning);
+}
+
+.gb-node:focus-visible {
+  outline: 2px solid var(--gb-accent);
+  outline-offset: 3px;
+}
+
+.gb-node-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.gb-node-name {
+  font-weight: 600;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gb-node-type {
+  font-size: 0.72rem;
+  color: var(--gb-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.gb-port {
+  position: absolute;
+  top: 50%;
+  width: 0.7rem;
+  height: 0.7rem;
+  margin: 0;
+  padding: 0;
+  transform: translateY(-50%);
+  border-radius: 50%;
+  border: 2px solid var(--gb-border);
+  background: var(--gb-surface);
+  transition:
+    border-color 120ms ease,
+    transform 120ms ease;
+}
+
+.gb-port--in {
+  left: -0.35rem;
+}
+
+.gb-port--out {
+  right: -0.35rem;
+  cursor: crosshair;
+}
+
+.gb-node:hover .gb-port,
+.gb-node.is-selected .gb-port {
+  border-color: var(--gb-accent);
+}
+
+.gb-port--out:hover {
+  border-color: var(--gb-accent);
+  background: var(--gb-accent);
+  transform: translateY(-50%) scale(1.35);
+}
+
+.gb-port--out:focus-visible {
+  outline: 2px solid var(--gb-accent);
+  outline-offset: 2px;
+}
+
+.gb-canvas-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  text-align: center;
+  pointer-events: none;
+  padding: 1.5rem;
+}
+
+.gb-canvas-empty-title {
+  margin: 0;
+  font-weight: 600;
+  color: var(--gb-text);
+}
+
+.gb-canvas-empty-body {
+  margin: 0;
+  max-width: 26rem;
+  color: var(--gb-muted);
+}
+
+/* ---------- Inspector ---------- */
+
+.gb-inspector {
+  padding: 0.85rem;
+  overflow-y: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  overscroll-behavior: contain;
+}
+
+.gb-inspector--empty {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--gb-muted);
+}
+
+.gb-inspector--empty p {
+  margin: 0;
+  max-width: 14rem;
+}
+
+.gb-inspector-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--gb-border-soft);
+}
+
+.gb-inspector-header > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.gb-inspector-header h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.gb-inspector-header code {
+  font-size: 0.7rem;
+  color: var(--gb-muted);
+  background: transparent;
+  padding: 0;
+}
+
+.gb-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  flex-shrink: 0;
+  border-radius: var(--gb-radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--gb-muted);
+  cursor: pointer;
+  transition: all 120ms ease;
+}
+
+.gb-icon-btn svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.gb-icon-btn--danger:hover {
+  color: var(--gb-danger);
+  border-color: var(--gb-danger);
+  background: color-mix(in oklab, var(--gb-danger) 12%, transparent);
+}
+
+.gb-inspector-issues {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.gb-issue {
+  font-size: 0.78rem;
+  line-height: 1.45;
+  padding: 0.45rem 0.6rem;
+  border-radius: var(--gb-radius-sm);
+  border-left: 3px solid;
+}
+
+.gb-issue--error {
+  color: var(--gb-danger);
+  border-left-color: var(--gb-danger);
+  background: color-mix(in oklab, var(--gb-danger) 10%, transparent);
+}
+
+.gb-issue--warning {
+  color: var(--gb-warning);
+  border-left-color: var(--gb-warning);
+  background: color-mix(in oklab, var(--gb-warning) 10%, transparent);
+}
+
+/* ---------- Fields ---------- */
+
+.gb-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.gb-field > label,
+.gb-field-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--gb-muted);
+}
+
+.gb-field input[type='text'],
+.gb-field select {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  padding: 0.4rem 0.55rem;
+  border-radius: var(--gb-radius-sm);
+  border: 1px solid var(--gb-border);
+  background: var(--gb-raised);
+  color: var(--gb-text);
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.gb-field input[type='text']:focus,
+.gb-field select:focus {
+  outline: none;
+  border-color: var(--gb-accent);
+  box-shadow: 0 0 0 3px var(--gb-accent-soft);
+}
+
+.gb-field-hint {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: var(--gb-muted);
+}
+
+.gb-field-hint code {
+  font-size: 0.7rem;
+  background: transparent;
+  padding: 0;
+}
+
+.gb-field--switch > label {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 0.82rem;
+  color: var(--gb-text);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.gb-field--switch input[type='checkbox'] {
+  accent-color: var(--gb-accent);
+  width: 0.95rem;
+  height: 0.95rem;
+  margin: 0;
+}
+
+/* ---------- Segmented control ---------- */
+
+/* Options wrap onto further rows rather than being squeezed into equal columns:
+ * a long value like `rest-lambda` stays fully readable, and nothing overflows
+ * the panel. The rounded rect (rather than a pill) keeps multi-row groups tidy. */
+.gb-segmented {
+  display: flex;
+  flex-wrap: wrap;
+  width: 100%;
+  padding: 3px;
+  border-radius: var(--gb-radius-sm);
+  border: 1px solid var(--gb-border);
+  background: var(--gb-raised);
+  gap: 3px;
+}
+
+/* In the output bar the controls sit inline beside each other, so they size to
+ * their content instead of filling the row. */
+.gb-output-controls .gb-segmented {
+  width: auto;
+  flex-wrap: nowrap;
+  border-radius: 9999px;
+}
+
+.gb-segment {
+  font: inherit;
+  font-size: 0.76rem;
+  /* A line box tall enough for descenders, so the label sits optically centred
+   * rather than riding high in the pill. */
+  line-height: 1.35;
+  padding: 0.3rem 0.55rem;
+  border: none;
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--gb-muted);
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+  /* Each option shows its full label; the group wraps instead of truncating. */
+  flex: 1 1 auto;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.gb-segment:hover {
+  color: var(--gb-text);
+}
+
+.gb-segment.is-active {
+  background: var(--sl-color-accent-low);
+  color: var(--sl-color-accent-high);
+  font-weight: 500;
+}
+
+.gb-segment:focus-visible {
+  outline: 2px solid var(--gb-accent);
+  outline-offset: 1px;
+}
+
+/* Pill corners inside the output bar's rounded control. */
+.gb-output-controls .gb-segment {
+  border-radius: 9999px;
+}
+
+/* ---------- Output ---------- */
+
+.gb-output {
+  background: var(--gb-panel);
+  border: 1px solid var(--gb-border);
+  border-radius: var(--gb-radius);
+  overflow: hidden;
+}
+
+.gb-output-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.65rem 0.85rem;
+  border-bottom: 1px solid var(--gb-border-soft);
+}
+
+.gb-output-controls,
+.gb-output-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.gb-inline-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.gb-inline-field span {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--gb-muted);
+}
+
+.gb-inline-field input {
+  font: inherit;
+  width: 9rem;
+  padding: 0.3rem 0.5rem;
+  border-radius: var(--gb-radius-sm);
+  border: 1px solid var(--gb-border);
+  background: var(--gb-raised);
+  color: var(--gb-text);
+}
+
+.gb-inline-field input:focus {
+  outline: none;
+  border-color: var(--gb-accent);
+  box-shadow: 0 0 0 3px var(--gb-accent-soft);
+}
+
+.gb-inline-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  color: var(--gb-muted);
+  cursor: pointer;
+}
+
+.gb-inline-check input {
+  accent-color: var(--gb-accent);
+  margin: 0;
+}
+
+.gb-copy-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 500;
+  padding: 0.4rem 0.85rem;
+  border-radius: 9999px;
+  border: 1px solid var(--gb-accent);
+  background: var(--sl-color-accent-low);
+  color: var(--sl-color-accent-high);
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+
+.gb-copy-btn:hover:not(:disabled) {
+  background: var(--gb-accent);
+  color: var(--sl-color-white);
+}
+
+.gb-copy-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.gb-copy-icon {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+.gb-copy-icon--check {
+  display: none;
+}
+
+.gb-copy-btn.is-copied .gb-copy-icon--copy {
+  display: none;
+}
+
+.gb-copy-btn.is-copied .gb-copy-icon--check {
+  display: inline;
+}
+
+.gb-output-issues {
+  list-style: none;
+  margin: 0;
+  padding: 0.65rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  border-bottom: 1px solid var(--gb-border-soft);
+}
+
+.gb-script {
+  margin: 0;
+  padding: 0.9rem 1rem;
+  max-height: 22rem;
+  overflow: auto;
+  background: var(--gb-surface);
+  font-family: var(--__sl-font-mono), ui-monospace, monospace;
+  font-size: 0.8rem;
+  line-height: 1.7;
+  white-space: pre;
+  tab-size: 2;
+}
+
+.gb-script code {
+  background: transparent;
+  padding: 0;
+  font-size: inherit;
+  color: var(--gb-text);
+}
+
+.gb-output-note {
+  margin: 0;
+  padding: 0.6rem 0.85rem;
+  font-size: 0.78rem;
+  color: var(--gb-muted);
+  border-top: 1px solid var(--gb-border-soft);
+}
+
+/* Respect a reduced-motion preference: keep the state changes, drop the easing. */
+@media (prefers-reduced-motion: reduce) {
+  .gb-root *,
+  .gb-root *::before,
+  .gb-root *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

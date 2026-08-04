@@ -325,6 +325,20 @@ Finally, verify the outcome:
 
 Worth repeating with a *customised* workspace: hand-edit the files your migration touches first, then check it leaves your edits alone and reports them via `nextSteps` / `agentContext` instead of clobbering them.
 
+### Connection Generators and the Graph Builder
+
+The docs site has a [Graph Builder](https://awslabs.github.io/nx-plugin-for-aws/en/get_started/graph-builder) where users sketch a workspace and copy the commands that scaffold it. It derives itself from the plugin's metadata, so a new generator mostly appears in it for free — but a generator that takes part in a **connection** needs three small things.
+
+1. **Declare the connection** in `packages/nx-plugin/src/connection/supported-connections.ts`. This is the source of truth for both the generator and the builder's palette and edges.
+
+2. **Give the generator's `schema.json` an `x-label`** — the short noun the palette shows, e.g. `"x-label": "MCP Server"`. Without one, a node is labelled with its raw generator id. `title` and `description` aren't used here: they're prose written for CLI prompts.
+
+3. **Record anything the connection requires of its endpoints' options** in `CONNECTION_CONSTRAINTS` in `packages/nx-plugin/src/connection/scaffold-catalog.ts`. If your connection generator throws when (say) the target isn't IAM-authenticated, add the matching constraint so the builder can tell the user while they're drawing rather than when the command fails.
+
+Everything else is inferred — whether the generator creates a project or adds a component, which project hosts a component, and which public generator selects a hidden one. `scaffold-catalog.spec.ts` fails with a specific message if a connection names a generator it can't work out how to run, so you'll be told rather than left with a silently missing palette entry.
+
+Finally, add the node's artwork and palette grouping to `PRESENTATION` in `docs/src/lib/graph-builder/catalog.ts`, alongside a logo in `docs/src/content/docs/assets/logos/`. A type without an entry still appears, just under "Other" with a generic mark.
+
 ### End to End Tests
 
 The end to end tests run our generators and check that generated projects function correctly (usually by performing a build).

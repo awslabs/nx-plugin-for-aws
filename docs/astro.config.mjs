@@ -343,16 +343,16 @@ export default defineConfig({
           ],
         },
         {
-          label: 'Generator guides',
+          label: 'Generators',
           translations: {
-            jp: 'ガイド',
-            ko: '가이드',
-            fr: 'Guides',
-            it: 'Guide',
-            es: 'Guías',
-            pt: 'Guias',
-            zh: '指南',
-            vi: 'Hướng dẫn trình tạo',
+            jp: 'ジェネレーター',
+            ko: '제너레이터',
+            fr: 'Générateurs',
+            it: 'Generatori',
+            es: 'Generadores',
+            pt: 'Geradores',
+            zh: '生成器',
+            vi: 'Trình tạo',
           },
           items: [
             {
@@ -367,6 +367,7 @@ export default defineConfig({
                 zh: '智能体',
                 vi: 'Tác nhân',
               },
+              collapsed: true,
               items: [
                 { label: 'ts#agent', link: '/guides/ts-agent' },
                 { label: 'py#agent', link: '/guides/py-agent' },
@@ -391,6 +392,7 @@ export default defineConfig({
                 zh: 'API',
                 vi: 'API',
               },
+              collapsed: true,
               items: [
                 {
                   label: 'ts#api',
@@ -436,6 +438,7 @@ export default defineConfig({
                 zh: '事件',
                 vi: 'Sự kiện',
               },
+              collapsed: true,
               items: [
                 {
                   label: 'ts#lambda-function',
@@ -459,6 +462,7 @@ export default defineConfig({
                 zh: '数据库',
                 vi: 'Cơ sở dữ liệu',
               },
+              collapsed: true,
               items: [
                 { label: 'ts#dynamodb', link: '/guides/ts-dynamodb' },
                 { label: 'py#dynamodb', link: '/guides/py-dynamodb' },
@@ -478,6 +482,7 @@ export default defineConfig({
                 zh: '前端',
                 vi: 'Giao diện',
               },
+              collapsed: true,
               items: [
                 {
                   label: 'ts#website',
@@ -523,6 +528,7 @@ export default defineConfig({
                 zh: '基础设施',
                 vi: 'Hạ tầng',
               },
+              collapsed: true,
               items: [
                 {
                   label: 'ts#infra',
@@ -546,6 +552,7 @@ export default defineConfig({
                 zh: '工具',
                 vi: 'Công cụ',
               },
+              collapsed: true,
               items: [
                 { label: 'license', link: '/guides/license' },
                 { label: 'ts#nx-plugin', link: '/guides/ts-nx-plugin' },
@@ -565,6 +572,7 @@ export default defineConfig({
                 zh: '基础',
                 vi: 'Nền tảng',
               },
+              collapsed: true,
               items: [
                 { label: 'ts#project', link: '/guides/typescript-project' },
                 { label: 'py#project', link: '/guides/python-project' },
@@ -582,6 +590,7 @@ export default defineConfig({
                 zh: '连接项目',
                 vi: 'Kết nối dự án',
               },
+              collapsed: true,
               items: [
                 {
                   label: 'connection',
@@ -682,6 +691,35 @@ export default defineConfig({
                 vi: 'Docker',
               },
               link: '/troubleshooting/docker',
+            },
+          ],
+        },
+        {
+          label: 'Tools',
+          translations: {
+            jp: 'ツール',
+            ko: '도구',
+            fr: 'Outils',
+            it: 'Strumenti',
+            es: 'Herramientas',
+            pt: 'Ferramentas',
+            zh: '工具',
+            vi: 'Công cụ',
+          },
+          items: [
+            {
+              label: 'Graph Builder',
+              link: '/get_started/graph-builder',
+              translations: {
+                jp: 'グラフビルダー',
+                ko: '그래프 빌더',
+                fr: 'Constructeur de graphe',
+                it: 'Costruttore di grafi',
+                es: 'Constructor de grafos',
+                pt: 'Construtor de grafos',
+                zh: '图形构建器',
+                vi: 'Trình tạo đồ thị',
+              },
             },
           ],
         },
