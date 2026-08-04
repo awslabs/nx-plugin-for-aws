@@ -1215,6 +1215,17 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     // attached agent, so one boot covers all five supported protocol
     // permutations: ts ag-ui + a2a, py ag-ui + http + a2a.
     await startAndWait('@local-dev-test/agent-gateway:dev', ports.agentGateway);
+    // The local gateway binds before its attached agents finish booting —
+    // wait for each agent's own port so the proxy has live upstreams.
+    for (const port of [
+      ports.tsAgui,
+      ports.pyAgui,
+      ports.pyAgent,
+      ports.tsA2a,
+      ports.pyA2a,
+    ]) {
+      await waitForPort(port, STARTUP_TIMEOUT_MS);
+    }
     const gatewayUrl = `http://127.0.0.1:${ports.agentGateway}`;
 
     // AG-UI targets (ts + py): SSE stream from POST /<target>/invocations.
@@ -1309,6 +1320,17 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     expect(unknownRes.status).toBe(404);
 
     await stopLast();
+    // Later tests boot these same agents individually; wait for their ports
+    // to be released so the next chain doesn't hit EADDRINUSE.
+    for (const port of [
+      ports.tsAgui,
+      ports.pyAgui,
+      ports.pyAgent,
+      ports.tsA2a,
+      ports.pyA2a,
+    ]) {
+      await waitForPortFree(port, STARTUP_TIMEOUT_MS);
+    }
   });
 
   it('TS A2A Agent - card + streaming message', async () => {
