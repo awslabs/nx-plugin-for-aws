@@ -11,6 +11,11 @@ import {
   ownedDependencyEntries,
 } from '../declared-dependencies';
 import { buildGeneratorInfoList } from '../generators';
+import {
+  PACKAGES_DIR,
+  SHARED_CONSTRUCTS_DIR,
+  SHARED_TERRAFORM_DIR,
+} from '../shared-constructs-constants';
 
 /** Directory holding `generators.json`, which maps ids to their modules. */
 export const PLUGIN_ROOT = path.resolve(import.meta.dirname, '..', '..', '..');
@@ -25,6 +30,15 @@ export const PLUGIN_ROOT = path.resolve(import.meta.dirname, '..', '..', '..');
 export interface OwnedDependencies {
   readonly ts: ReadonlySet<string>;
   readonly py: ReadonlySet<string>;
+  /**
+   * The same, split by the root of the project that owns it, for scoping a pin
+   * embedded in a generated file to the project it sits in. Keyed by project
+   * root; read through {@link ownedForFile}.
+   */
+  readonly byProject: ReadonlyMap<
+    string,
+    { readonly ts: ReadonlySet<string>; readonly py: ReadonlySet<string> }
+  >;
 }
 
 /**
@@ -36,6 +50,8 @@ export interface OwnedDependencies {
 export interface GeneratorOccurrence {
   readonly id: string;
   readonly metadata: DependencyMetadata;
+  /** Root of the project this ran against, for scoping what it owns to it. */
+  readonly projectRoot?: string;
 }
 
 /**
@@ -63,11 +79,19 @@ export const generatorOccurrences = (
       | undefined;
     if (metadata?.generator) {
       const { components, ...ownMetadata } = metadata;
-      occurrences.push({ id: metadata.generator, metadata: ownMetadata });
+      occurrences.push({
+        id: metadata.generator,
+        metadata: ownMetadata,
+        projectRoot: project.root,
+      });
     }
     for (const component of metadata?.components ?? []) {
       if (component.generator) {
-        occurrences.push({ id: component.generator, metadata: component });
+        occurrences.push({
+          id: component.generator,
+          metadata: component,
+          projectRoot: project.root,
+        });
       }
     }
   }
@@ -96,6 +120,7 @@ export const ownedDependencies = async (
   const occurrences = generatorOccurrences(tree);
   const ts = new Set<string>();
   const py = new Set<string>();
+  const byProject = new Map<string, { ts: Set<string>; py: Set<string> }>();
 
   for (const info of buildGeneratorInfoList(PLUGIN_ROOT)) {
     const matching = occurrences.filter(
@@ -108,17 +133,76 @@ export const ownedDependencies = async (
     if (!declaration) {
       continue;
     }
-    for (const { metadata } of matching) {
+    for (const { metadata, projectRoot } of matching) {
+      const scoped = projectRoot
+        ? (byProject.get(projectRoot) ??
+          byProject
+            .set(projectRoot, { ts: new Set(), py: new Set() })
+            .get(projectRoot)!)
+        : undefined;
       for (const entry of ownedDependencyEntries(declaration.ts, metadata)) {
         ts.add(entry.name as string);
+        scoped?.ts.add(entry.name as string);
       }
       for (const entry of ownedDependencyEntries(declaration.py, metadata)) {
         py.add(entry.name as string);
+        scoped?.py.add(entry.name as string);
       }
     }
   }
 
-  return { ts, py };
+  return { ts, py, byProject };
+};
+
+/**
+ * Roots of the projects every generator contributes into, rather than one
+ * generator owning outright.
+ *
+ * `sharedConstructsGenerator` creates these and each infra generator writes its
+ * own module into them — the Terraform modules carrying the `uv run --with` pins
+ * come from the agent-core, api, identity and website helpers alike. Both are
+ * registered projects, so scoping a file here to the generator that created the
+ * project would strand every pin the others put there.
+ */
+const SHARED_PROJECT_ROOTS = [
+  `${PACKAGES_DIR}/${SHARED_CONSTRUCTS_DIR}`,
+  `${PACKAGES_DIR}/${SHARED_TERRAFORM_DIR}`,
+];
+
+/**
+ * The dependencies owned where a file sits: those of the project it belongs to,
+ * or the workspace-wide union for a file in a shared project or under none.
+ *
+ * Used for the pins embedded in a generated file, so a version is only rewritten
+ * where the generator that pins it actually ran: a `Dockerfile` under one
+ * project's root is not upgraded because a sibling project owns the package.
+ *
+ * The longest matching root wins, since a nested project's root is a prefix of
+ * nothing else but its own files.
+ */
+export const ownedForFile = (
+  owned: OwnedDependencies,
+  filePath: string,
+): { ts: ReadonlySet<string>; py: ReadonlySet<string> } => {
+  if (
+    SHARED_PROJECT_ROOTS.some(
+      (root) => filePath === root || filePath.startsWith(`${root}/`),
+    )
+  ) {
+    return owned;
+  }
+  let best: { ts: ReadonlySet<string>; py: ReadonlySet<string> } | undefined;
+  let bestLength = -1;
+  for (const [root, scoped] of owned.byProject) {
+    if (
+      (filePath === root || filePath.startsWith(`${root}/`)) &&
+      root.length > bestLength
+    ) {
+      best = scoped;
+      bestLength = root.length;
+    }
+  }
+  return best ?? owned;
 };
 
 /**

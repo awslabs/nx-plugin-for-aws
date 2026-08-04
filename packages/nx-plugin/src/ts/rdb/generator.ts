@@ -26,6 +26,7 @@ import {
 import {
   addDockerScanTarget,
   DOCKER_DEPENDENCIES,
+  NODE_IMAGE_DEPENDENCIES,
   nodeImageVersions,
 } from '../../utils/docker';
 import { formatFilesInSubtree } from '../../utils/format';
@@ -92,6 +93,7 @@ export const DEPENDENCIES = declareDependencies<TsRdbMetadata>()({
     ...ownedElsewhere(DOCKER_DEPENDENCIES),
     ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
     ...ownedElsewhere(SHARED_RDB_SCRIPTS_DEPENDENCIES),
+    ...ownedElsewhere(NODE_IMAGE_DEPENDENCIES),
   ],
 });
 

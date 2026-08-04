@@ -23,7 +23,10 @@ import {
 } from '../../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { resolveIac } from '../../../utils/iac';
-import { addIdentityInfra } from '../../../utils/identity-constructs/identity-constructs';
+import {
+  addIdentityInfra,
+  IDENTITY_CONSTRUCTS_PY_DEPENDENCIES,
+} from '../../../utils/identity-constructs/identity-constructs';
 import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { getNpmScope } from '../../../utils/npm-scope';
@@ -59,6 +62,7 @@ export const DEPENDENCIES = declareDependencies()({
     { name: 'react-oidc-context' },
     ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
   ],
+  py: ownedElsewhere(IDENTITY_CONSTRUCTS_PY_DEPENDENCIES),
 });
 
 export const COGNITO_AUTH_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(

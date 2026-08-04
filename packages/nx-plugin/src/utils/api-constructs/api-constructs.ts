@@ -12,6 +12,7 @@ import {
 } from '@nx/devkit';
 import { addStarExport } from '../ast';
 import {
+  type DeclaredPyDependency,
   type DeclaredTsDependency,
   type DependencyDeclaration,
   forDependencies,
@@ -23,12 +24,14 @@ import { esmVars } from '../module-format';
 import { addDependencyToTargetIfNotPresent } from '../nx';
 import {
   generatedInfrastructure,
+  generatedTerraform,
   type IacMetadata,
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants';
 import {
+  type IPyDepVersion,
   type ITsDepVersion,
   PY_VERSIONS,
   terraformProviderVersions,
@@ -48,6 +51,18 @@ export const API_CONSTRUCTS_DEPENDENCIES = [
   { name: '@trpc/server', when: generatedInfrastructure },
 ] as const satisfies readonly DeclaredTsDependency<
   ITsDepVersion,
+  IacMetadata
+>[];
+
+/**
+ * Python version the generated Terraform pins in the account module's inline
+ * `uv run --with` script. Nothing installs it, so it is declared for its version
+ * alone, and only on the Terraform branch that writes the script.
+ */
+export const API_CONSTRUCTS_PY_DEPENDENCIES = [
+  { name: 'boto3', when: generatedTerraform },
+] as const satisfies readonly DeclaredPyDependency<
+  IPyDepVersion,
   IacMetadata
 >[];
 

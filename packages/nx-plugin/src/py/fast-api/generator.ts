@@ -15,6 +15,7 @@ import {
 import { addPyDependencies } from '../../utils/add-dependencies';
 import {
   API_CONSTRUCTS_DEPENDENCIES,
+  API_CONSTRUCTS_PY_DEPENDENCIES,
   addApiGatewayInfra,
 } from '../../utils/api-constructs/api-constructs';
 import { addSharedConstructsOpenApiMetadataGenerateTarget } from '../../utils/api-constructs/open-api-metadata';
@@ -70,6 +71,7 @@ export const DEPENDENCIES = declareDependencies<PyFastApiMetadata>()({
     },
     // `fastapi dev` runs the local server.
     { name: 'fastapi[standard]', group: 'dev' },
+    ...ownedElsewhere(API_CONSTRUCTS_PY_DEPENDENCIES),
   ],
 });
 

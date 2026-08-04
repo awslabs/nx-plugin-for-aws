@@ -15,6 +15,7 @@ import {
 import { addTsDependencies } from '../utils/add-dependencies';
 import {
   AGENT_CORE_CONSTRUCTS_DEPENDENCIES,
+  AGENT_CORE_CONSTRUCTS_PY_DEPENDENCIES,
   addAgentCoreGatewayInfra,
 } from '../utils/agent-core-constructs/agent-core-constructs';
 import {
@@ -58,6 +59,7 @@ export const DEPENDENCIES = declareDependencies<AgentCoreGatewayMetadata>()({
     ...ownedElsewhere(AGENT_CORE_CONSTRUCTS_DEPENDENCIES),
     ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
   ],
+  py: ownedElsewhere(AGENT_CORE_CONSTRUCTS_PY_DEPENDENCIES),
 });
 
 export const AGENTCORE_GATEWAY_GENERATOR_INFO: NxGeneratorInfo =

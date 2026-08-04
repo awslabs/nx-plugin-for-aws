@@ -52,7 +52,10 @@ import {
   SHADCN_DEPENDENCIES,
   sharedShadcnGenerator,
 } from '../../../utils/shared-shadcn';
-import { addWebsiteInfra } from '../../../utils/website-constructs/website-constructs';
+import {
+  addWebsiteInfra,
+  WEBSITE_CONSTRUCTS_PY_DEPENDENCIES,
+} from '../../../utils/website-constructs/website-constructs';
 import { configureTsProject } from '../../lib/ts-project-utils';
 import { VITEST_DEPENDENCIES } from '../../lib/vitest';
 // typescript factory imports removed — now using GritQL for vite config transforms
@@ -134,6 +137,7 @@ export const DEPENDENCIES = declareDependencies<TsReactWebsiteMetadata>()({
     ...ownedElsewhere(VITEST_DEPENDENCIES),
     ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
   ],
+  py: ownedElsewhere(WEBSITE_CONSTRUCTS_PY_DEPENDENCIES),
 });
 
 export const SUPPORTED_UX_PROVIDERS = ['none', 'cloudscape', 'shadcn'] as const;

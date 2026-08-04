@@ -14,7 +14,7 @@ import {
 } from './declared-dependencies';
 import { FS_DEPENDENCIES, FsCommands } from './fs';
 import { addDependencyToTargetIfNotPresent } from './nx';
-import { CONTAINER_VERSIONS, TS_VERSIONS } from './versions';
+import { containerImage, type ITsDepVersion, TS_VERSIONS } from './versions';
 
 /** Dependencies a caller must declare to add a Docker scan target. */
 export const DOCKER_DEPENDENCIES = [...FS_DEPENDENCIES] as const;
@@ -34,6 +34,31 @@ export const nodeImageVersions = () => ({
   npmVersion: TS_VERSIONS.npm,
   minimatchVersion: TS_VERSIONS.minimatch,
 });
+
+/**
+ * Packages a vended Node `Dockerfile` pins, which every generator writing one
+ * must declare so the version sync keeps those pins current.
+ *
+ * Spread through `ownedElsewhere`: the pin lives in the image build rather than
+ * in any manifest, so nothing is installed into the workspace. Left undeclared
+ * these would be the only vended versions never upgraded — and they are
+ * precisely the ones held at a version clear of a known HIGH/CRITICAL
+ * vulnerability.
+ */
+export const NODE_IMAGE_DEPENDENCIES = [
+  { name: 'npm' },
+  { name: 'minimatch' },
+] as const satisfies readonly { name: ITsDepVersion }[];
+
+/**
+ * Packages the AWS Distro for OpenTelemetry install in a vended `Dockerfile`
+ * pins, for the images that auto-instrument with it. Spread through
+ * `ownedElsewhere` for the same reason as {@link NODE_IMAGE_DEPENDENCIES}.
+ */
+export const ADOT_IMAGE_DEPENDENCIES = [
+  { name: '@aws/aws-distro-opentelemetry-node-autoinstrumentation' },
+  { name: '@opentelemetry/propagator-jaeger' },
+] as const satisfies readonly { name: ITsDepVersion }[];
 
 export interface DockerScanTargetOptions {
   /**
@@ -96,7 +121,7 @@ export const addDockerScanTarget = <const D extends DependencyDeclaration>(
   // per target, so it makes a stable, collision-free key.
   const scanKey = imageTags[0].replace(/[^a-zA-Z0-9-]/g, '-');
   const scanDir = joinPathFragments('dist', projectRoot, 'trivy', scanKey);
-  const trivyImage = `public.ecr.aws/aquasecurity/trivy:${CONTAINER_VERSIONS.trivy}`;
+  const trivyImage = containerImage('trivy');
 
   const fs = new FsCommands(
     tree,

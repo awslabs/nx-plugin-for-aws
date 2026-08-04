@@ -135,6 +135,8 @@ export const TS_VERSIONS = {
   'react-dom': '19.2.7',
   rimraf: '6.1.3',
   rolldown: '1.2.0',
+  'rolldown-plugin-dts': '0.28.0',
+  '@rollup/plugin-esm-shim': '0.1.8',
   'simple-git': '3.36.0',
   'source-map-support': '0.5.21',
   'starlight-blog': '0.28.0',
@@ -287,6 +289,20 @@ export const CONTAINER_VERSIONS = {
   // ECR-hosted Trivy image used to scan built images during the build.
   trivy: '0.72.0',
 } as const;
+
+/**
+ * Repository each pinned tool image is pulled from, keyed as
+ * {@link CONTAINER_VERSIONS}. Kept beside the versions so a tool added here is
+ * one entry rather than a reference built somewhere else, which is also what
+ * lets the version sync find these pins wherever a target command runs them.
+ */
+export const CONTAINER_REPOSITORIES = {
+  trivy: 'public.ecr.aws/aquasecurity/trivy',
+} as const satisfies Record<keyof typeof CONTAINER_VERSIONS, string>;
+
+/** The pinned reference for a tool image, as a target command runs it. */
+export const containerImage = (tool: keyof typeof CONTAINER_VERSIONS): string =>
+  `${CONTAINER_REPOSITORIES[tool]}:${CONTAINER_VERSIONS[tool]}`;
 
 /**
  * Exact versions for Terraform providers used by generated `.tf` modules.
