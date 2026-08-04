@@ -589,6 +589,30 @@ COPY --from=builder /out /
       },
     );
 
+    // `uvxCommand` can add packages to the tool's environment as well as pinning
+    // the tool itself, so both shapes of a `uvx` invocation are synced.
+    it('should upgrade the packages a uvx command adds with --with', async () => {
+      writeJson(tree, 'packages/infra/project.json', {
+        name: 'infra',
+        targets: {
+          checkov: {
+            executor: 'nx:run-commands',
+            options: {
+              command:
+                'uvx --from checkov==3.2.0 --with boto3==1.40.0 --with httpx==0.27.0 checkov -d .',
+            },
+          },
+        },
+      });
+
+      await syncVendedVersions(tree);
+
+      const projectJson = tree.read('packages/infra/project.json', 'utf-8')!;
+      expect(projectJson).toContain(`uvx --from checkov==${VENDED_CHECKOV}`);
+      expect(projectJson).toContain(`--with boto3==${VENDED_BOTO3}`);
+      expect(projectJson).toContain(`--with httpx==${VENDED_HTTPX}`);
+    });
+
     it('should leave a checkov version the user raised alone', async () => {
       writeJson(tree, 'packages/infra/project.json', {
         name: 'infra',
