@@ -9,9 +9,9 @@ import {
   CONNECTION_CONSTRAINTS,
   CONNECTION_ENDPOINT_TYPES,
   deriveScaffoldRecipe,
-  SCAFFOLD_RECIPES,
   SELF_CONNECTION_DISALLOWED,
 } from './scaffold-catalog';
+import { nodeSchemaResolver, SCAFFOLD_RECIPES } from './schema-resolver';
 import { SUPPORTED_CONNECTIONS } from './supported-connections';
 
 /**
@@ -48,7 +48,9 @@ describe('scaffold catalog', () => {
     // hidden one has a public wrapper, a component has a host), so a generator
     // shaped unexpectedly fails here with a specific message.
     for (const type of CONNECTION_ENDPOINT_TYPES) {
-      expect(() => deriveScaffoldRecipe(type)).not.toThrow();
+      expect(() =>
+        deriveScaffoldRecipe(type, nodeSchemaResolver),
+      ).not.toThrow();
     }
   });
 
@@ -149,10 +151,25 @@ describe('scaffold catalog', () => {
     });
   });
 
+  it('should give every connectable generator an x-label', () => {
+    // The palette shows this; without one a node would be labelled with its raw
+    // generator id.
+    for (const type of CONNECTION_ENDPOINT_TYPES) {
+      const label = readSchema(type)['x-label'];
+      expect(label, `${type}'s schema.json has no x-label`).toBeTruthy();
+      expect(label).not.toEqual(type);
+    }
+  });
+
+  it('should take each label from the schema rather than the generator id', () => {
+    expect(SCAFFOLD_RECIPES['ts#trpc-api'].label).toBe('tRPC API');
+    expect(SCAFFOLD_RECIPES['py#mcp-server'].label).toBe('MCP Server');
+  });
+
   it('should reject an endpoint type that is not a generator', () => {
-    expect(() => deriveScaffoldRecipe('ts#not-a-generator')).toThrow(
-      /is not a generator id/,
-    );
+    expect(() =>
+      deriveScaffoldRecipe('ts#not-a-generator', nodeSchemaResolver),
+    ).toThrow(/is not a generator id/);
   });
 
   it('should run the public wrapper rather than a hidden generator', () => {

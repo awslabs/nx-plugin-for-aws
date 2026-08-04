@@ -2,8 +2,6 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { readFileSync } from 'node:fs';
-import * as path from 'node:path';
 import GeneratorsJson from '../../generators.json' with { type: 'json' };
 import {
   type ConnectionKey,
@@ -27,10 +25,12 @@ import {
  *   enum values against the type's name (`ts#trpc-api` ← `ts#api
  *   --framework=trpc`). A visible generator is run directly.
  *
+ * - **label** — the generator schema's own `x-label`.
+ *
  * The result is that adding a generator and a connection for it needs no edit
- * here at all. Only the two things the metadata genuinely does not carry are
- * declared below: display labels, and the option constraints that live as
- * imperative guards inside each connection generator.
+ * here at all. The one thing still declared below is the option constraints,
+ * which live as imperative guards inside each connection generator and so cannot
+ * be read from metadata.
  */
 
 /**
@@ -81,6 +81,12 @@ export interface ScaffoldRecipe {
 type GeneratorEntry = { schema: string; hidden?: boolean };
 /** The subset of JSON Schema the catalogue and the docs builder read. */
 export type GeneratorSchema = {
+  /**
+   * Short display name for the thing this generator produces, used by the docs
+   * graph builder's palette. Set it on any generator that can take part in a
+   * connection.
+   */
+  'x-label'?: string;
   properties?: Record<
     string,
     {
@@ -98,48 +104,25 @@ type Schema = GeneratorSchema;
 
 const GENERATORS = GeneratorsJson.generators as Record<string, GeneratorEntry>;
 
-/** Parsed schemas, keyed by generator id — each file is read at most once. */
-const schemaCache = new Map<string, Schema>();
-
 /**
- * A generator's JSON schema, by generator id.
+ * Resolves a generator's JSON schema by generator id.
  *
- * Read from disk relative to this module, the same way the MCP server resolves
- * its schemas. `import.meta.glob` would be neater but is a Vite feature, and this
- * module is also compiled by `tsc` for the published package.
- *
- * Exported because the docs graph builder derives its property fields from the
- * same schemas — a second lookup would be a second chance to resolve the wrong
- * path.
+ * Injected rather than fixed because the two callers load files differently: the
+ * plugin reads from disk (see `./schema-resolver`), while the docs site bundles
+ * the schemas for the browser, where `node:fs` does not exist. Keeping this
+ * module free of `node:fs` is what lets the browser import it at all.
  */
-export const schemaOf = (generatorId: string): Schema => {
-  const cached = schemaCache.get(generatorId);
-  if (cached) return cached;
+export type SchemaResolver = (generatorId: string) => Schema;
 
+/** The path `generators.json` records for a generator, relative to the plugin root. */
+export const schemaPathOf = (generatorId: string): string => {
   const entry = GENERATORS[generatorId];
   if (!entry) {
     throw new Error(
       `Scaffold catalog: '${generatorId}' is not in generators.json`,
     );
   }
-  // generators.json paths are plugin-root relative ('./src/ts/api/schema.json'),
-  // and this module lives at src/connection/, so resolve from two levels up.
-  const schemaPath = path.resolve(
-    import.meta.dirname,
-    '..',
-    '..',
-    entry.schema,
-  );
-  let schema: Schema;
-  try {
-    schema = JSON.parse(readFileSync(schemaPath, 'utf-8'));
-  } catch (error) {
-    throw new Error(
-      `Scaffold catalog: could not read the schema for '${generatorId}' at ${schemaPath}: ${error}`,
-    );
-  }
-  schemaCache.set(generatorId, schema);
-  return schema;
+  return entry.schema;
 };
 
 /** The language prefix of a generator id: `ts` for `ts#agent`, `` for `license`. */
@@ -161,6 +144,7 @@ const alike = (a: string, b: string): boolean =>
  */
 const findWrapper = (
   endpointType: string,
+  schemaOf: SchemaResolver,
 ): { generator: string; options: Record<string, string> } | undefined => {
   const language = languageOf(endpointType);
   const name = endpointType.slice(endpointType.indexOf('#') + 1);
@@ -187,32 +171,13 @@ const findWrapper = (
 };
 
 /**
- * Display labels. The one thing the metadata cannot supply: schema `title` and
- * `description` are prose aimed at CLI prompts ("Create a relational database
- * project"), not the short noun a palette entry needs. A type with no entry
- * falls back to its generator id, so a new endpoint type still appears.
- */
-const LABELS: Readonly<Record<string, string>> = {
-  'ts#trpc-api': 'tRPC API',
-  'ts#smithy-api': 'Smithy API',
-  'py#fast-api': 'FastAPI',
-  'ts#react-website': 'React Website',
-  'ts#rdb': 'Relational Database',
-  'py#rdb': 'Relational Database',
-  'ts#dynamodb': 'DynamoDB',
-  'py#dynamodb': 'DynamoDB',
-  'agentcore-gateway': 'AgentCore Gateway',
-  'ts#agent': 'Agent',
-  'py#agent': 'Agent',
-  'ts#mcp-server': 'MCP Server',
-  'py#mcp-server': 'MCP Server',
-};
-
-/**
  * Derive the recipe for one endpoint type. Exported so a test can assert the
  * derivation against every type the plugin supports.
  */
-export const deriveScaffoldRecipe = (endpointType: string): ScaffoldRecipe => {
+export const deriveScaffoldRecipe = (
+  endpointType: string,
+  schemaOf: SchemaResolver,
+): ScaffoldRecipe => {
   const own = GENERATORS[endpointType];
   if (!own) {
     throw new Error(
@@ -222,7 +187,7 @@ export const deriveScaffoldRecipe = (endpointType: string): ScaffoldRecipe => {
 
   // A hidden generator is an implementation detail reached through its public
   // wrapper, which is what a user would actually run.
-  const wrapper = own.hidden ? findWrapper(endpointType) : undefined;
+  const wrapper = own.hidden ? findWrapper(endpointType, schemaOf) : undefined;
   if (own.hidden && !wrapper) {
     throw new Error(
       `Scaffold catalog: '${endpointType}' is hidden and no public generator selects it`,
@@ -246,7 +211,11 @@ export const deriveScaffoldRecipe = (endpointType: string): ScaffoldRecipe => {
   }
 
   return {
-    label: LABELS[endpointType] ?? endpointType,
+    // `x-label` is the short noun a palette entry needs; `title` and
+    // `description` are prose aimed at CLI prompts ("Create a relational database
+    // project"). A generator without one falls back to its id, so a new endpoint
+    // type still appears rather than being dropped.
+    label: schemaOf(endpointType)['x-label'] ?? endpointType,
     generator: wrapper?.generator ?? endpointType,
     ...(wrapper ? { options: wrapper.options } : {}),
     kind,
@@ -290,9 +259,14 @@ export const CONNECTION_ENDPOINT_TYPES: readonly string[] = [
  * metadata. A connection added to `SUPPORTED_CONNECTIONS` appears here with no
  * edit to this file.
  */
-export const SCAFFOLD_RECIPES: Readonly<Record<string, ScaffoldRecipe>> =
+export const buildScaffoldRecipes = (
+  schemaOf: SchemaResolver,
+): Readonly<Record<string, ScaffoldRecipe>> =>
   Object.fromEntries(
-    CONNECTION_ENDPOINT_TYPES.map((type) => [type, deriveScaffoldRecipe(type)]),
+    CONNECTION_ENDPOINT_TYPES.map((type) => [
+      type,
+      deriveScaffoldRecipe(type, schemaOf),
+    ]),
   );
 
 /**

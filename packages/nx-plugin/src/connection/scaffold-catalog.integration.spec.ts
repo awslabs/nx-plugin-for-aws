@@ -36,8 +36,8 @@ import { createTreeUsingTsSolutionSetup } from '../utils/test';
 import {
   CONNECTION_CONSTRAINTS,
   type ConnectionConstraint,
-  SCAFFOLD_RECIPES,
 } from './scaffold-catalog';
+import { nodeSchemaResolver, SCAFFOLD_RECIPES } from './schema-resolver';
 import { SUPPORTED_CONNECTIONS } from './supported-connections';
 
 /**

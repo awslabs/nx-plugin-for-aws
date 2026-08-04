@@ -204,7 +204,7 @@ export const emitCommands = (
     ];
     commands.push({
       command: generatorCommand(type.generator, args),
-      comment: `Create ${node.name} — a ${type.label} project`,
+      comment: `Create ${node.name} (${type.label})`,
       nodeId: node.id,
     });
   }
@@ -222,7 +222,7 @@ export const emitCommands = (
     ];
     commands.push({
       command: generatorCommand(type.generator, args),
-      comment: `Add ${node.name} — a ${type.label} — to ${reference.project}`,
+      comment: `Add ${node.name} (${type.label}) to ${reference.project}`,
       nodeId: node.id,
     });
   }

@@ -3,12 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
+  buildScaffoldRecipes,
   CONNECTION_CONSTRAINTS,
   type ConnectionConstraint,
   type GeneratorSchema,
-  SCAFFOLD_RECIPES,
+  type SchemaResolver,
   SELF_CONNECTION_DISALLOWED,
-  schemaOf,
+  schemaPathOf,
 } from '../../../../packages/nx-plugin/src/connection/scaffold-catalog';
 import { SUPPORTED_CONNECTIONS } from '../../../../packages/nx-plugin/src/connection/supported-connections';
 
@@ -78,6 +79,35 @@ export interface EdgeType {
 }
 
 type RawSchema = GeneratorSchema;
+
+/**
+ * Every generator's schema, bundled at build time. The plugin reads these from
+ * disk, which the browser cannot do, so the docs site supplies its own resolver
+ * over the same files and shares the plugin's derivation.
+ */
+const SCHEMA_MODULES = import.meta.glob<{ default: RawSchema }>(
+  '../../../../packages/nx-plugin/src/**/schema.json',
+  { eager: true },
+);
+
+const schemaOf: SchemaResolver = (generatorId: string): RawSchema => {
+  // `generators.json` records plugin-root relative paths ('./src/x/schema.json');
+  // the glob keys are docs relative. Match on the full recorded path so
+  // `ts/api/schema.json` cannot be confused with `smithy/ts/api/schema.json`.
+  const suffix = schemaPathOf(generatorId).replace(/^\./, '');
+  const found = Object.entries(SCHEMA_MODULES).find(([file]) =>
+    file.endsWith(`packages/nx-plugin${suffix}`),
+  );
+  if (!found) {
+    throw new Error(
+      `Graph builder: no bundled schema for '${generatorId}' (${suffix})`,
+    );
+  }
+  return found[1].default;
+};
+
+/** The recipes, resolved against the bundled schemas. */
+const SCAFFOLD_RECIPES = buildScaffoldRecipes(schemaOf);
 
 /**
  * Options every generator takes that the builder drives itself, and which the

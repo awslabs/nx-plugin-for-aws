@@ -343,16 +343,16 @@ export default defineConfig({
           ],
         },
         {
-          label: 'Generator guides',
+          label: 'Generators',
           translations: {
-            jp: 'ガイド',
-            ko: '가이드',
-            fr: 'Guides',
-            it: 'Guide',
-            es: 'Guías',
-            pt: 'Guias',
-            zh: '指南',
-            vi: 'Hướng dẫn trình tạo',
+            jp: 'ジェネレーター',
+            ko: '제너레이터',
+            fr: 'Générateurs',
+            it: 'Generatori',
+            es: 'Generadores',
+            pt: 'Geradores',
+            zh: '生成器',
+            vi: 'Trình tạo',
           },
           items: [
             {
