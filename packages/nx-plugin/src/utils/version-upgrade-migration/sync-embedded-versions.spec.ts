@@ -24,6 +24,7 @@ const VENDED_BOTO3 = PY_VERSIONS.boto3.replace('==', '');
 const VENDED_HTTPX = PY_VERSIONS.httpx.replace('==', '');
 const VENDED_MCP = PY_VERSIONS.mcp.replace('==', '');
 const VENDED_TRIVY = CONTAINER_VERSIONS.trivy;
+const VENDED_CHECKOV = PY_VERSIONS.checkov.replace('==', '');
 
 /** The tag part of a pinned base image reference. */
 const imageTag = (image: string): string =>
@@ -554,6 +555,55 @@ COPY --from=builder /out /
 
       expect(tree.read('packages/agent/project.json', 'utf-8')).toContain(
         'trivy:99.0.0',
+      );
+    });
+
+    // `checkov` is pinned the same way, for the security scan every infra project
+    // runs — the CDK one through `infra#app` and the Terraform one through
+    // `terraform#project`.
+    it.each([
+      [
+        'a cdk infra project',
+        'checkov.yml --directory dist/{projectRoot}/cdk.out',
+      ],
+      ['a terraform project', '--directory . -o cli -o json'],
+    ])(
+      'should upgrade the checkov a scan target on %s runs',
+      async (_, args) => {
+        writeJson(tree, 'packages/infra/project.json', {
+          name: 'infra',
+          targets: {
+            checkov: {
+              executor: 'nx:run-commands',
+              options: { command: `uvx --from checkov==3.2.0 checkov ${args}` },
+            },
+          },
+        });
+
+        await syncVendedVersions(tree);
+
+        const projectJson = tree.read('packages/infra/project.json', 'utf-8')!;
+        expect(projectJson).toContain(`uvx --from checkov==${VENDED_CHECKOV}`);
+        // The rest of the command is untouched.
+        expect(projectJson).toContain(args.split(' ')[0]);
+      },
+    );
+
+    it('should leave a checkov version the user raised alone', async () => {
+      writeJson(tree, 'packages/infra/project.json', {
+        name: 'infra',
+        targets: {
+          checkov: {
+            executor: 'nx:run-commands',
+            options: { command: 'uvx --from checkov==99.0.0 checkov -d .' },
+          },
+        },
+      });
+
+      await syncVendedVersions(tree);
+
+      expect(tree.read('packages/infra/project.json', 'utf-8')).toContain(
+        'checkov==99.0.0',
       );
     });
   });

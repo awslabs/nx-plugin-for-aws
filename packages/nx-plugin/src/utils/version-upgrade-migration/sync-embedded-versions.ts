@@ -332,15 +332,20 @@ const syncTerraformScriptPins = async (
 };
 
 /**
- * Sync the pinned tooling images a `project.json` target command runs.
+ * Sync the pinned tools a `project.json` target command runs: a container image,
+ * and a Python tool `uvx --from` pins for a one-off invocation.
  *
- * The reference is built into the command string rather than declared as a
- * dependency, so nothing else reaches it. Driven off `CONTAINER_REPOSITORIES`,
- * so a second tool image pinned in a target command later is covered by adding
- * it there — the same property the Dockerfile and Terraform paths get from the
- * owned set.
+ * Both are built into the command string rather than declared as a dependency, so
+ * nothing else reaches them. The images are driven off `CONTAINER_REPOSITORIES`
+ * and the Python tools off `PY_VERSIONS`, so a tool pinned in a target command
+ * later is covered without a change here — the same property the Dockerfile and
+ * Terraform paths get from the owned set.
+ *
+ * Unscoped, unlike the file-body pins: a `uvx --from` invocation installs nothing
+ * into the project, so there is no dependency for a generator to own. The pin is
+ * only rewritten where this release vends that exact tool at a higher version.
  */
-const syncTargetToolImages = async (tree: Tree): Promise<string[]> => {
+const syncTargetToolPins = async (tree: Tree): Promise<string[]> => {
   const projectJsons: string[] = [];
 
   visitNotIgnoredFiles(tree, '.', (path) => {
@@ -349,13 +354,24 @@ const syncTargetToolImages = async (tree: Tree): Promise<string[]> => {
     }
   });
 
-  const pins: EmbeddedPin[] = Object.entries(CONTAINER_REPOSITORIES).map(
-    ([tool, repository]) => ({
+  const pins: EmbeddedPin[] = [
+    ...Object.entries(CONTAINER_REPOSITORIES).map(([tool, repository]) => ({
       // A command string is JSON here, so a quote ends the reference too.
       pattern: `${escapeRegExp(repository)}:([^${VERSION_TERMINATORS}']+)`,
       vended: CONTAINER_VERSIONS[tool as keyof typeof CONTAINER_VERSIONS],
+    })),
+    ...Object.keys(PY_VERSIONS).flatMap((name) => {
+      const vended = vendedPyVersion(name);
+      return vended
+        ? [
+            {
+              pattern: `uvx --from ${escapeRegExp(name)}==([^${VERSION_TERMINATORS}']+)`,
+              vended,
+            },
+          ]
+        : [];
     }),
-  );
+  ];
 
   const skipped: string[] = [];
   for (const path of projectJsons) {
@@ -383,5 +399,5 @@ export const syncEmbeddedVersions = async (
 ): Promise<string[]> => [
   ...(await syncDockerfiles(tree, owned)),
   ...(await syncTerraformScriptPins(tree, owned)),
-  ...(await syncTargetToolImages(tree)),
+  ...(await syncTargetToolPins(tree)),
 ];
