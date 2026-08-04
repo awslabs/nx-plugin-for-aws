@@ -81,9 +81,24 @@ const DOWNGRADE: readonly [RegExp, string][] = [
     'autoinstrumentation@0.11.0',
   ],
   [new RegExp(`prisma@${TS_VERSIONS.prisma}`, 'g'), 'prisma@6.1.0'],
+  // `rolldown-plugin-dts` first, since `rolldown@` is a prefix of it.
+  [
+    new RegExp(
+      `rolldown-plugin-dts@${TS_VERSIONS['rolldown-plugin-dts']}`,
+      'g',
+    ),
+    'rolldown-plugin-dts@0.16.5',
+  ],
   [
     new RegExp(`rolldown@${TS_VERSIONS.rolldown}`, 'g'),
     'rolldown@1.0.0-beta.38',
+  ],
+  [
+    new RegExp(
+      `@rollup/plugin-esm-shim@${TS_VERSIONS['@rollup/plugin-esm-shim']}`,
+      'g',
+    ),
+    '@rollup/plugin-esm-shim@0.1.0',
   ],
   [
     new RegExp(BASE_IMAGES.node, 'g'),
@@ -179,9 +194,8 @@ describe.each(['cdk', 'terraform'] as const)(
       expect(files.length).toBeGreaterThan(3);
 
       // The baseline is a freshly generated workspace *after* a sync, not raw
-      // generator output: a template may itself pin a version behind what this
-      // release vends — the smithy `build.Dockerfile` writes `rolldown` as a
-      // literal — and the migration is expected to move that too.
+      // generator output: a template is free to pin a version behind what this
+      // release vends, and the migration is expected to move that too.
       await syncVendedVersions(tree);
       const fresh = new Map(
         files.map((file) => [file, tree.read(file, 'utf-8')!]),

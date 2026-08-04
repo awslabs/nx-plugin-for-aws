@@ -5,6 +5,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { addProjectConfiguration, type Tree } from '@nx/devkit';
+import { smithyProjectGenerator } from '../../smithy/project/generator';
 import { createTreeUsingTsSolutionSetup } from '../test';
 import { BASE_IMAGES, TS_VERSIONS } from '../versions';
 import { ownedDependencies, ownedForFile } from './owned-dependencies';
@@ -17,9 +18,9 @@ const PLUGIN_SRC = path.resolve(import.meta.dirname, '..', '..');
  * Every vended pin a template's text carries, whether it is substituted through
  * an EJS var or written as a literal.
  *
- * Scanning the literals matters as much as the vars: `build.Dockerfile` pins
- * `rolldown@1.0.0-beta.38` with no EJS at all, so a check keyed only on var names
- * is blind to it — which is exactly how it went unowned.
+ * Scanning the literals matters as much as the vars: a template is free to write
+ * a pin out in full, and a check keyed only on var names is blind to it — which
+ * is how the smithy `build.Dockerfile`'s pins went unowned.
  */
 const vendedPinsIn = (contents: string): string[] => {
   const found = new Set<string>();
@@ -169,38 +170,40 @@ describe('template pin ownership', () => {
   });
 });
 
-// The smithy `build.Dockerfile` is the one template whose pins are all literals,
-// and it carries both a package pin the sync must move and a build-stage base
-// image it must not touch. Run the migration over the real file to hold both at
-// once — a rewritten builder base swaps in a slim image without curl or unzip,
-// which fails the build with exit 127.
+// The smithy `build.Dockerfile` carries both package pins the sync must move and
+// a build-stage base image it must not touch. Run the migration over the file the
+// real generator renders to hold both at once — a rewritten builder base swaps in
+// a slim image without curl or unzip, which fails the build with exit 127.
 describe('the real smithy build.Dockerfile', () => {
-  const TEMPLATE = path.join(
-    PLUGIN_SRC,
-    'smithy/project/files/service/build.Dockerfile.template',
-  );
-
   it('should sync its package pins and leave its builder base image alone', async () => {
     const tree: Tree = createTreeUsingTsSolutionSetup();
-    addProjectConfiguration(tree, 'api-model', {
-      root: 'packages/api/model',
-      metadata: { generator: 'smithy#project' } as never,
-    });
-    // Written verbatim: this template substitutes nothing.
-    const original = fs.readFileSync(TEMPLATE, 'utf-8');
-    tree.write('packages/api/model/build.Dockerfile', original);
+    await smithyProjectGenerator(tree, { name: 'api' });
+    const path = 'api/build.Dockerfile';
+    const fresh = tree.read(path, 'utf-8')!;
+
+    // Wound back to the pins an older release rendered, so the sync has
+    // something to move.
+    const older = fresh
+      .replace(`rolldown@${TS_VERSIONS.rolldown}`, 'rolldown@1.0.0-beta.38')
+      .replace(
+        `rolldown-plugin-dts@${TS_VERSIONS['rolldown-plugin-dts']}`,
+        'rolldown-plugin-dts@0.16.5',
+      );
+    expect(older).not.toEqual(fresh);
+    tree.write(path, older);
 
     await syncVendedVersions(tree);
 
-    const synced = tree.read('packages/api/model/build.Dockerfile', 'utf-8')!;
+    // Every pin back where a fresh workspace has it, and nothing else moved.
+    expect(tree.read(path, 'utf-8')).toEqual(fresh);
+    const synced = tree.read(path, 'utf-8')!;
     expect(synced).toContain(`rolldown@${TS_VERSIONS.rolldown}`);
+    expect(synced).toContain(
+      `rolldown-plugin-dts@${TS_VERSIONS['rolldown-plugin-dts']}`,
+    );
     // The builder stage keeps the tag it chose, and the runtime tag never
     // reaches this file.
     expect(synced).toContain('node:24 AS builder');
     expect(synced).not.toContain(BASE_IMAGES.node);
-    // Everything else is untouched.
-    expect(
-      synced.replace(`rolldown@${TS_VERSIONS.rolldown}`, 'rolldown@X'),
-    ).toEqual(original.replace(/rolldown@[^\s]+/, 'rolldown@X'));
   });
 });
