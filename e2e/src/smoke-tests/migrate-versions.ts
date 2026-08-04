@@ -51,11 +51,42 @@ export const releasedVersionsDescending = (): string[] =>
     .sort((a, b) => compareVersions(b, a));
 
 /**
- * Released versions to migrate from, newest first.
+ * Cross-machine sharding for the migrate lane, from `NX_E2E_SHARD=<index>/<total>`
+ * (1-based). Defaults to `1/1` — every hop on one machine.
+ *
+ * Malformed values throw rather than falling back: a shard spec that parses to
+ * `NaN` would select no hops at all, and a lane that runs nothing still exits 0.
+ */
+export const migrateShard = (): { index: number; total: number } => {
+  const spec = process.env.NX_E2E_SHARD ?? '1/1';
+  const [index, total] = spec.split('/').map(Number);
+  if (
+    !Number.isInteger(index) ||
+    !Number.isInteger(total) ||
+    total < 1 ||
+    index < 1 ||
+    index > total
+  ) {
+    throw new Error(
+      `Invalid NX_E2E_SHARD "${spec}" — expected <index>/<total> with 1 <= index <= total.`,
+    );
+  }
+  return { index, total };
+};
+
+/**
+ * Released versions this shard migrates from, newest first.
  *
  * Read from git tags rather than the registry so the set matches the repo the
  * test runs against, and so a hop is only attempted for a release whose
  * `migrations.json` history is resolvable.
+ *
+ * Sharded round-robin over that list: a hop creates a workspace on a release,
+ * scaffolds the full test matrix into it, then migrates, syncs and builds it, so
+ * the lane's wall clock is the sum of its hops and parallelism has to come from
+ * spreading them across machines. Sliced here rather than in the spec so
+ * `publishForMigrateSmokeTest` mirrors only the releases this shard starts from
+ * instead of all of them on every machine.
  */
 export const migrateStartVersions = (): string[] => {
   const count = Number(
@@ -67,7 +98,10 @@ export const migrateStartVersions = (): string[] => {
       'No release tags found — the migrate smoke test cannot pick a start version. Fetch tags (git fetch --tags) and retry.',
     );
   }
-  return released.slice(0, Math.max(1, count));
+  const { index, total } = migrateShard();
+  return released
+    .slice(0, Math.max(1, count))
+    .filter((_, i) => i % total === index - 1);
 };
 
 /**
