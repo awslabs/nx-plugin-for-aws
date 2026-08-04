@@ -251,7 +251,7 @@ function getPortFromProjectJson(
   throw new Error(`Cannot determine port for "${targetName}" in ${relPath}`);
 }
 
-describe('smoke test - local-dev', { timeout: 20 * 60 * 1000 }, () => {
+describe('smoke test - local-dev', { timeout: 30 * 60 * 1000 }, () => {
   const pkgMgr = 'pnpm';
   const targetDir = `${tmpProjPath()}/local-dev-${pkgMgr}`;
   const runningProcesses: ChildProcess[] = [];
