@@ -73,7 +73,13 @@ const REFERENCE_PROTOCOL =
  * It ships none for bun, and without one it rewrites the reference to a literal
  * version, severing the catalog — so bun's references are synced directly.
  */
-const isSyncableSpecifier = (tree: Tree, declared: string): boolean => {
+const isSyncableSpecifier = (tree: Tree, declared: unknown): boolean => {
+  // A manifest is the user's file and may hold anything. A version that isn't a
+  // string is not one this can reason about, and throwing here would abort the
+  // whole `nx migrate` over a file the sync only meant to skip.
+  if (typeof declared !== 'string') {
+    return false;
+  }
   if (REFERENCE_PROTOCOL.test(declared)) {
     return false;
   }
@@ -650,7 +656,7 @@ export const syncVendedVersions = async (
   const overrides = syncOverrides(tree, owned);
   const pyProjects = syncPyProjects(tree, owned);
   const terraformFiles = await syncTerraformProviders(tree);
-  await syncEmbeddedVersions(tree, owned);
+  const skippedEmbedded = await syncEmbeddedVersions(tree, owned);
   await syncMetricsVersion(tree);
 
   // Lock files are left to the user: `nx migrate` only installs when the root
@@ -672,10 +678,14 @@ export const syncVendedVersions = async (
       `Terraform provider versions were updated in ${terraformFiles.length} file(s). Run \`terraform init -upgrade\` in each Terraform project to update its lock file.`,
     );
   }
-  // The embedded pins need no next step: a Dockerfile pin, an inline script's
-  // pin and a target's tool image are all read the next time the thing that
-  // holds them runs, so there is no lock file to reconcile and nothing left for
-  // the user to do by hand.
+  // A synced embedded pin needs no next step — it is read the next time the thing
+  // holding it runs. A file the sync left alone does: its versions are still the
+  // old ones, and only the user can reconcile that.
+  if (skippedEmbedded.length > 0) {
+    nextSteps.push(
+      `Version pins were left as they are in ${skippedEmbedded.join(', ')}, which repeat a pin more times than this migration rewrites at once. Update them by hand.`,
+    );
+  }
 
   // Without this the workspace's own format check fails on the migrated files.
   await formatFilesInSubtree(tree);

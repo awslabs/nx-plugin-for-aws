@@ -82,34 +82,60 @@ const declaredVersions = (contents: string, pattern: string): string[] => {
 };
 
 /**
+ * Occurrences of one pin a single rewrite will handle.
+ *
+ * GritQL rewrites each match separately, so its cost grows with how many a
+ * pattern matches — ~10ms an occurrence, which a hand-authored file with hundreds
+ * of `RUN npm install` lines turns into minutes of an unattended `nx migrate`.
+ * Past this the file is left alone and reported, since a wrong version the user
+ * can see and fix beats an upgrade that appears to hang.
+ */
+const MAX_OCCURRENCES_PER_PIN = 100;
+
+/**
  * Apply the pins whose declared version this release moves forward.
  *
  * A single rewrite covers every occurrence of a pin in the file, so each pin is
- * applied once.
+ * applied once. Reports whether anything changed, and whether a pin was left
+ * alone for exceeding {@link MAX_OCCURRENCES_PER_PIN}.
  */
 const applyPins = async (
   tree: Tree,
   path: string,
   pins: readonly EmbeddedPin[],
-): Promise<boolean> => {
+): Promise<{ changed: boolean; skipped: boolean }> => {
+  // Read once and re-read only after a rewrite: a rewrite parses the whole file,
+  // and there is a pin per owned package, so re-reading per pin would scale the
+  // cost of a large file with the size of the owned set.
+  let contents = tree.read(path, 'utf-8') ?? '';
   let changed = false;
+  let skipped = false;
+
   for (const { pattern, vended, kind = 'version' } of pins) {
-    const contents = tree.read(path, 'utf-8') ?? '';
     const declared = declaredVersions(contents, pattern);
+    if (declared.length === 0) {
+      continue;
+    }
+    if (declared.length > MAX_OCCURRENCES_PER_PIN) {
+      skipped = true;
+      continue;
+    }
     const outOfDate =
       kind === 'tag'
         ? (tag: string) => tag !== vended
         : (version: string) => isVendedUpgrade(vended, version);
-    // Rewriting replaces every occurrence at once, so this must hold for all of
+    // A rewrite replaces every occurrence at once, so this must hold for all of
     // them — a pin already at or beyond the vended version is left as it is.
-    if (declared.length === 0 || !declared.every(outOfDate)) {
+    if (!declared.every(outOfDate)) {
       continue;
     }
-    changed =
-      (await applyGritQL(tree, path, rewriteCapture(pattern, vended))) ||
-      changed;
+    if (await applyGritQL(tree, path, rewriteCapture(pattern, vended))) {
+      contents = tree.read(path, 'utf-8') ?? '';
+      changed = true;
+    }
   }
-  return changed;
+
+  return { changed, skipped };
 };
 
 /**
@@ -227,7 +253,7 @@ export const isDockerfile = (filePath: string): boolean => {
 const syncDockerfiles = async (
   tree: Tree,
   owned: OwnedDependencies,
-): Promise<void> => {
+): Promise<string[]> => {
   const dockerfiles: string[] = [];
 
   visitNotIgnoredFiles(tree, '.', (path) => {
@@ -236,9 +262,18 @@ const syncDockerfiles = async (
     }
   });
 
+  const skipped: string[] = [];
   for (const path of dockerfiles) {
-    await applyPins(tree, path, dockerfilePins(ownedForFile(owned, path)));
+    const result = await applyPins(
+      tree,
+      path,
+      dockerfilePins(ownedForFile(owned, path)),
+    );
+    if (result.skipped) {
+      skipped.push(path);
+    }
   }
+  return skipped;
 };
 
 /** The `uv run --with` pins to apply, for the Python packages owned where a file sits. */
@@ -273,7 +308,7 @@ const terraformScriptPins = (owned: {
 const syncTerraformScriptPins = async (
   tree: Tree,
   owned: OwnedDependencies,
-): Promise<void> => {
+): Promise<string[]> => {
   const terraformFiles: string[] = [];
 
   visitNotIgnoredFiles(tree, '.', (path) => {
@@ -282,9 +317,18 @@ const syncTerraformScriptPins = async (
     }
   });
 
+  const skipped: string[] = [];
   for (const path of terraformFiles) {
-    await applyPins(tree, path, terraformScriptPins(ownedForFile(owned, path)));
+    const result = await applyPins(
+      tree,
+      path,
+      terraformScriptPins(ownedForFile(owned, path)),
+    );
+    if (result.skipped) {
+      skipped.push(path);
+    }
   }
+  return skipped;
 };
 
 /**
@@ -296,7 +340,7 @@ const syncTerraformScriptPins = async (
  * it there — the same property the Dockerfile and Terraform paths get from the
  * owned set.
  */
-const syncTargetToolImages = async (tree: Tree): Promise<void> => {
+const syncTargetToolImages = async (tree: Tree): Promise<string[]> => {
   const projectJsons: string[] = [];
 
   visitNotIgnoredFiles(tree, '.', (path) => {
@@ -313,9 +357,13 @@ const syncTargetToolImages = async (tree: Tree): Promise<void> => {
     }),
   );
 
+  const skipped: string[] = [];
   for (const path of projectJsons) {
-    await applyPins(tree, path, pins);
+    if ((await applyPins(tree, path, pins)).skipped) {
+      skipped.push(path);
+    }
   }
+  return skipped;
 };
 
 /**
@@ -323,14 +371,17 @@ const syncTargetToolImages = async (tree: Tree): Promise<void> => {
  * the Python pins in Terraform inline scripts, and the tooling images
  * `project.json` target commands run.
  *
- * Reports nothing: each of these is read the next time the thing holding it runs,
- * so there is no lock file to reconcile and no follow-up left for the user.
+ * Reports only the files left for the user: a pin that takes effect the next time
+ * the thing holding it runs needs no follow-up, but one this skipped for holding
+ * more occurrences than it will rewrite at once does.
+ *
+ * @returns paths whose pins were left as they were
  */
 export const syncEmbeddedVersions = async (
   tree: Tree,
   owned: OwnedDependencies,
-): Promise<void> => {
-  await syncDockerfiles(tree, owned);
-  await syncTerraformScriptPins(tree, owned);
-  await syncTargetToolImages(tree);
-};
+): Promise<string[]> => [
+  ...(await syncDockerfiles(tree, owned)),
+  ...(await syncTerraformScriptPins(tree, owned)),
+  ...(await syncTargetToolImages(tree)),
+];
