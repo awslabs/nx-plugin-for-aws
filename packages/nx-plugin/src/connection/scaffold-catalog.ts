@@ -2,6 +2,8 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+import { readFileSync } from 'node:fs';
+import * as path from 'node:path';
 import GeneratorsJson from '../../generators.json' with { type: 'json' };
 import {
   type ConnectionKey,
@@ -96,39 +98,48 @@ type Schema = GeneratorSchema;
 
 const GENERATORS = GeneratorsJson.generators as Record<string, GeneratorEntry>;
 
-/**
- * Each generator's JSON schema, keyed by generator id. Globbed eagerly so the
- * catalogue resolves without any per-generator wiring; the plugin and the docs
- * site both bundle these, so no filesystem access is needed at runtime.
- */
-const SCHEMAS = import.meta.glob<{ default: Schema }>('../**/schema.json', {
-  eager: true,
-});
+/** Parsed schemas, keyed by generator id — each file is read at most once. */
+const schemaCache = new Map<string, Schema>();
 
 /**
- * A generator's JSON schema, by generator id. Exported because the docs graph
- * builder derives its property fields from the same schemas — a second lookup
- * would be a second chance to resolve the wrong path.
+ * A generator's JSON schema, by generator id.
+ *
+ * Read from disk relative to this module, the same way the MCP server resolves
+ * its schemas. `import.meta.glob` would be neater but is a Vite feature, and this
+ * module is also compiled by `tsc` for the published package.
+ *
+ * Exported because the docs graph builder derives its property fields from the
+ * same schemas — a second lookup would be a second chance to resolve the wrong
+ * path.
  */
 export const schemaOf = (generatorId: string): Schema => {
+  const cached = schemaCache.get(generatorId);
+  if (cached) return cached;
+
   const entry = GENERATORS[generatorId];
   if (!entry) {
     throw new Error(
       `Scaffold catalog: '${generatorId}' is not in generators.json`,
     );
   }
-  // generators.json paths are plugin-root relative ('./src/ts/api/schema.json');
-  // the glob keys are relative to this file ('../ts/api/schema.json'). Rewrite to
-  // the glob's form and match exactly — a suffix match would confuse
-  // `ts/api/schema.json` with `smithy/ts/api/schema.json`.
-  const key = entry.schema.replace(/^\.\/src\//, '../');
-  const schema = SCHEMAS[key];
-  if (!schema) {
+  // generators.json paths are plugin-root relative ('./src/ts/api/schema.json'),
+  // and this module lives at src/connection/, so resolve from two levels up.
+  const schemaPath = path.resolve(
+    import.meta.dirname,
+    '..',
+    '..',
+    entry.schema,
+  );
+  let schema: Schema;
+  try {
+    schema = JSON.parse(readFileSync(schemaPath, 'utf-8'));
+  } catch (error) {
     throw new Error(
-      `Scaffold catalog: no schema found for '${generatorId}' at ${entry.schema} (looked for ${key})`,
+      `Scaffold catalog: could not read the schema for '${generatorId}' at ${schemaPath}: ${error}`,
     );
   }
-  return schema.default;
+  schemaCache.set(generatorId, schema);
+  return schema;
 };
 
 /** The language prefix of a generator id: `ts` for `ts#agent`, `` for `license`. */
