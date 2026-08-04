@@ -784,7 +784,11 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
       };
       console.log('Ports discovered:', ports);
     },
-    15 * 60 * 1000,
+    // Scaffolds ~24 projects, installs (npm + uv), pulls the Playwright browser
+    // and its apt system libraries, then lints and builds everything. On a slow
+    // runner or apt mirror this legitimately approaches 20 minutes, so budget
+    // generously to avoid tipping over the hook timeout mid-setup.
+    30 * 60 * 1000,
   );
 
   afterAll(async () => {
