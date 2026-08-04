@@ -135,6 +135,8 @@ export const TS_VERSIONS = {
   'react-dom': '19.2.7',
   rimraf: '6.1.3',
   rolldown: '1.2.0',
+  'rolldown-plugin-dts': '0.28.0',
+  '@rollup/plugin-esm-shim': '0.1.8',
   'simple-git': '3.36.0',
   'source-map-support': '0.5.21',
   'starlight-blog': '0.28.0',

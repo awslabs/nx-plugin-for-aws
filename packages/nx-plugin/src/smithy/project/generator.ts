@@ -12,7 +12,10 @@ import {
 } from '@nx/devkit';
 import { getTsLibDetails } from '../../ts/lib/generator';
 import { resolveContainers } from '../../utils/containers';
-import { declareDependencies } from '../../utils/declared-dependencies';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs';
 import { installDependencies } from '../../utils/install';
@@ -25,10 +28,23 @@ import {
   type NxGeneratorInfo,
   projectExists,
 } from '../../utils/nx';
+import { type ITsDepVersion, TS_VERSIONS } from '../../utils/versions';
 import type { SmithyProjectGeneratorSchema } from './schema';
 
+/**
+ * Packages `build.Dockerfile` installs into the build image to bundle the Smithy
+ * SSDK. Pinned in the file body rather than declared in a manifest, so declaring
+ * them here — never installed into the workspace — is what keeps the version sync
+ * moving them forward.
+ */
+export const SSDK_BUNDLE_DEPENDENCIES = [
+  { name: 'rolldown' },
+  { name: 'rolldown-plugin-dts' },
+  { name: '@rollup/plugin-esm-shim' },
+] as const satisfies readonly { name: ITsDepVersion }[];
+
 export const DEPENDENCIES = declareDependencies()({
-  ts: [...FS_DEPENDENCIES],
+  ts: [...FS_DEPENDENCIES, ...ownedElsewhere(SSDK_BUNDLE_DEPENDENCIES)],
 });
 
 export const SMITHY_PROJECT_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
@@ -92,6 +108,9 @@ export const smithyProjectGenerator = async (
       serviceNameClassName,
       serviceNameKebabCase,
       scope,
+      rolldownVersion: TS_VERSIONS.rolldown,
+      rolldownDtsVersion: TS_VERSIONS['rolldown-plugin-dts'],
+      esmShimVersion: TS_VERSIONS['@rollup/plugin-esm-shim'],
     },
     {
       // Smithy models are user-owned — a re-run must not discard edits
