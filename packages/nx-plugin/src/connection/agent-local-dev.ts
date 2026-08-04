@@ -83,9 +83,8 @@ export const addAgentTargetToLocalDev = async (
   updateProjectConfiguration(tree, sourceProject.name, sourceProject);
 
   await addLocalDevRuntimeConfigOverride(tree, sourceProject, {
-    namespace: options.runtimeConfigNamespace,
-    key: options.agentNameClassName,
-    localUrl: options.localUrl,
+    statement: `runtimeConfig.${options.runtimeConfigNamespace}.${options.agentNameClassName} = '${options.localUrl}';`,
+    marker: `runtimeConfig.${options.runtimeConfigNamespace}.${options.agentNameClassName}`,
   });
 };
 
@@ -139,21 +138,24 @@ export const addGatewayTargetToLocalDev = async (
   }
   updateProjectConfiguration(tree, sourceProject.name, sourceProject);
 
+  // Spread rather than member assignment: the provider's fetch-failure
+  // fallback config carries no `gateways` key, so assigning into it would
+  // throw and leave the site stuck on the loading spinner.
   await addLocalDevRuntimeConfigOverride(tree, sourceProject, {
-    namespace: 'gateways',
-    key: options.gatewayClassName,
-    localUrl: `http://localhost:${options.port}`,
+    statement: `runtimeConfig.gateways = { ...runtimeConfig.gateways, ${options.gatewayClassName}: 'http://localhost:${options.port}' };`,
+    marker: `runtimeConfig.gateways`,
   });
 };
 
 /**
- * Add an override to the source project's RuntimeConfig provider so the dev
- * target uses the local url. Idempotent.
+ * Add an override statement to the source project's RuntimeConfig provider so
+ * the dev target uses local urls. `marker` guards idempotency: the statement
+ * is only inserted when the overrides don't already contain it. Idempotent.
  */
 const addLocalDevRuntimeConfigOverride = async (
   tree: Tree,
   sourceProject: { root: string },
-  options: { namespace: string; key: string; localUrl: string },
+  options: { statement: string; marker: string },
 ) => {
   const runtimeConfigProvider = joinPathFragments(
     sourceProject.root,
@@ -166,7 +168,7 @@ const addLocalDevRuntimeConfigOverride = async (
     await applyGritQL(
       tree,
       runtimeConfigProvider,
-      `\`if ($cond) { $stmts }\` => raw\`if ($cond) {\n    $stmts\n    runtimeConfig.${options.namespace}.${options.key} = '${options.localUrl}';\n  }\` where { $cond <: contains \`'local-dev'\`, $stmts <: within \`const applyOverrides = $_\`, $stmts <: not contains \`runtimeConfig.${options.namespace}.${options.key}\` }`,
+      `\`if ($cond) { $stmts }\` => raw\`if ($cond) {\n    $stmts\n    ${options.statement}\n  }\` where { $cond <: contains \`'local-dev'\`, $stmts <: within \`const applyOverrides = $_\`, $stmts <: not contains \`${options.marker}\` }`,
     );
   }
 };

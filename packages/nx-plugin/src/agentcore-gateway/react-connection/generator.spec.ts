@@ -143,8 +143,11 @@ export function Main() {
       'apps/frontend/src/components/RuntimeConfig/index.tsx',
       'utf-8',
     );
-    expect(runtimeConfig).toContain(
-      `runtimeConfig.gateways.MyGateway = 'http://localhost:8100'`,
+    // Spread rather than member assignment, so the fetch-failure fallback
+    // config (which has no gateways key) doesn't throw. Matched with
+    // flexible whitespace since the formatter may wrap the object literal.
+    expect(runtimeConfig.replace(/\s+/g, ' ')).toContain(
+      `runtimeConfig.gateways = { ...runtimeConfig.gateways, MyGateway: 'http://localhost:8100', }`,
     );
   });
 
