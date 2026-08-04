@@ -1254,31 +1254,26 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
       expect(body).toContain('data:');
     }
 
-    // Python HTTP target: JSONL stream from POST /<target>/invocations. The
-    // agent can serve an empty stream while its first LLM/MCP round-trip is
-    // still warming up, so retry until chunks arrive.
-    let httpChunks: { content?: string }[] = [];
-    for (let attempt = 0; attempt < 5 && httpChunks.length === 0; attempt++) {
-      if (attempt > 0) {
-        await new Promise((resolve) => setTimeout(resolve, 10_000));
-      }
-      const httpRes = await fetch(`${gatewayUrl}/my-py-agent/invocations`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: 'What is 3 times 5?' }),
-      });
-      expect(httpRes.status).toBe(200);
-      httpChunks = (await httpRes.text())
-        .trim()
-        .split('\n')
-        .filter(Boolean)
-        .map((l) => JSON.parse(l));
-      console.log(
-        `Gateway -> my-py-agent (HTTP) streamed ${httpChunks.length} chunks (attempt ${attempt + 1})`,
-      );
-    }
-    expect(httpChunks.length).toBeGreaterThan(0);
-    expect(httpChunks[0]).toHaveProperty('content');
+    // Python HTTP target: the agent serves /ping alongside /invocations, so
+    // GET /<target>/ping proves the proxy routes to the right upstream and
+    // passes the response through, without depending on the LLM mock's
+    // stream contents (the deployed e2e covers content end-to-end).
+    const pingRes = await fetch(`${gatewayUrl}/my-py-agent/ping`);
+    const ping = await pingRes.json();
+    console.log(`Gateway -> my-py-agent (HTTP) /ping:`, ping);
+    expect(pingRes.status).toBe(200);
+    expect(ping).toHaveProperty('status');
+
+    // The invocation body passes through the proxy: a 200 means FastAPI
+    // parsed the proxied JSON body (a mangled body would 422).
+    const httpRes = await fetch(`${gatewayUrl}/my-py-agent/invocations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'What is 3 times 5?' }),
+    });
+    await httpRes.text();
+    console.log(`Gateway -> my-py-agent (HTTP) invoke:`, httpRes.status);
+    expect(httpRes.status).toBe(200);
 
     // A2A targets (ts + py): the deployed gateway maps `/invocations/...`
     // onto the agent container's root, so the card is served under
