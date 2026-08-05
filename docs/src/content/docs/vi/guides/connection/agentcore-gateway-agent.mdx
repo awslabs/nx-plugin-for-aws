@@ -86,6 +86,23 @@ myGateway.addAgent(myAgent, { gatewayTargetName: 'my-target' });
 ```
 
 Construct cấp quyền invoke cho execution role của Gateway đến agent runtime và cấu hình target với credential provider `GATEWAY_IAM_ROLE`, do đó Gateway ký các lệnh gọi đi ra bằng role của chính nó.
+
+:::tip[Triển khai agents vào VPC]
+Đặt một agent phía sau Gateway là điều giúp một agent được triển khai trong VPC có thể truy cập được: người gọi giao tiếp với endpoint công khai của Gateway, và Gateway truy cập runtime bên trong. Truyền cấu hình mạng VPC cho agent construct:
+
+```ts
+import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
+
+const myAgent = new MyAgent(this, 'MyAgent', {
+  networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
+    vpc,
+    vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+  }),
+});
+```
+
+Sử dụng **private subnet với egress**, không phải private isolated subnet: runtime cần truy cập internet đi ra để kết nối với Bedrock và đọc cấu hình của nó từ AWS AppConfig.
+:::
 </Fragment>
 <Fragment slot="terraform">
 Trong tệp Terraform nơi bạn khởi tạo Gateway, hãy kết nối agent target vào:
@@ -140,29 +157,30 @@ resource "aws_bedrockagentcore_gateway_target" "my_agent" {
   }
 }
 ```
-</Fragment>
-</Infrastructure>
 
 :::tip[Triển khai agents vào VPC]
-Đặt một agent phía sau Gateway là điều giúp một agent được triển khai trong VPC có thể truy cập được: người gọi giao tiếp với endpoint công khai của Gateway, và Gateway truy cập runtime bên trong. Cấu hình các thiết lập mạng của agent runtime trên construct/module của nó (module Terraform cung cấp `enable_vpc`, `vpc_id` và `subnet_ids`; construct CDK chấp nhận các network props của runtime).
+Đặt một agent phía sau Gateway là điều giúp một agent được triển khai trong VPC có thể truy cập được: người gọi giao tiếp với endpoint công khai của Gateway, và Gateway truy cập runtime bên trong. Đặt các biến VPC của agent module:
+
+```hcl
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+
+  enable_vpc = true
+  vpc_id     = aws_vpc.my_vpc.id
+  subnet_ids = [aws_subnet.private_a.id, aws_subnet.private_b.id]
+}
+```
+
+Sử dụng private subnet với egress (một route đến NAT gateway), không phải private isolated subnet: runtime cần truy cập internet đi ra để kết nối với Bedrock và đọc cấu hình của nó từ AWS AppConfig.
 :::
+</Fragment>
+</Infrastructure>
 
 ## Gọi agent thông qua Gateway
 
 Các yêu cầu đến `<gatewayUrl origin>/<targetName>/invocations` được chuyển tiếp đến agent runtime mà không có chuyển đổi giao thức, do đó người gọi sử dụng cùng hình thức yêu cầu như khi họ gọi trực tiếp đến runtime — SSE streams (AG-UI), JSON streaming (Python HTTP) và A2A JSON-RPC đều proxy qua. Người gọi xác thực với Gateway (IAM SigV4 hoặc Cognito JWT tùy thuộc vào `auth` của Gateway) thay vì với agent.
 
 Để kết nối một website với các agent của Gateway, hãy sử dụng <Link path="guides/connection/react-agentcore-gateway">`connection` generator</Link>.
-
-## Phát triển cục bộ
-
-Chạy Gateway cục bộ với:
-
-<NxCommands commands={["dev <gateway-name>"]} />
-
-khởi động một local gateway cùng với mọi agent được gắn kết trên cổng cục bộ được chỉ định của nó. Local gateway proxy các đường dẫn `/<targetName>/...` đến server cục bộ của mỗi agent, khớp với định tuyến dựa trên đường dẫn của Gateway đã triển khai.
-vì với agent.
-
-Để kết nối một website với các agent của Gateway, hãy sử dụng <Link path="guides/connection/react-agentcore-gateway">generator kết nối React website đến AgentCore Gateway</Link>.
 
 ## Phát triển cục bộ
 

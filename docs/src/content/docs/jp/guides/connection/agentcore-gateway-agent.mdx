@@ -140,16 +140,39 @@ resource "aws_bedrockagentcore_gateway_target" "my_agent" {
   }
 }
 ```
-</Fragment>
-</Infrastructure>
 
 :::tip[VPC へのエージェントのデプロイ]
-Gateway でエージェントを前段に配置することで、VPC にデプロイされたエージェントに到達可能になります。呼び出し元は Gateway のパブリックエンドポイントと通信し、Gateway は内部的にランタイムに到達します。エージェントランタイムのネットワーク設定は、そのコンストラクト/モジュールで構成します（Terraform モジュールは `enable_vpc`、`vpc_id`、`subnet_ids` を公開し、CDK コンストラクトはランタイムのネットワークプロパティを受け入れます）。
+Gateway でエージェントを前段に配置することで、VPC にデプロイされたエージェントに到達可能になります。呼び出し元は Gateway のパブリックエンドポイントと通信し、Gateway は内部的にランタイムに到達します。エージェントモジュールの VPC 変数を設定します：
+
+```hcl
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+
+  enable_vpc = true
+  vpc_id     = aws_vpc.my_vpc.id
+  subnet_ids = [aws_subnet.private_a.id, aws_subnet.private_b.id]
+}
+```
+
+プライベート分離サブネットではなく、エグレス付きのプライベートサブネット（NAT ゲートウェイへのルート）を使用してください。ランタイムは Bedrock に到達し、AWS AppConfig から設定を読み取るために、アウトバウンドインターネットアクセスが必要です。
 :::
+</Fragment>
+</Infrastructure>
 
 ## Gateway を介したエージェントの呼び出し
 
 `<gatewayUrl origin>/<targetName>/invocations` へのリクエストは、プロトコル変換なしでエージェントランタイムに転送されるため、呼び出し元はランタイムに直接使用するのと同じリクエスト形式を使用します。SSE ストリーム（AG-UI）、JSON ストリーミング（Python HTTP）、A2A JSON-RPC はすべてプロキシを通過します。呼び出し元は、エージェントではなく Gateway で認証します（Gateway の `auth` に応じて IAM SigV4 または Cognito JWT）。
+
+Web サイトを Gateway のエージェントに接続するには、<Link path="guides/connection/react-agentcore-gateway">`connection` ジェネレーター</Link>を使用してください。
+
+## ローカル開発
+
+以下のコマンドで Gateway をローカルで実行します：
+
+<NxCommands commands={["dev <gateway-name>"]} />
+
+これにより、ローカル gateway と、割り当てられたローカルポート上のすべての接続されたエージェントが起動します。ローカル gateway は `/<targetName>/...` パスを各エージェントのローカルサーバーにプロキシし、デプロイされた Gateway のパスベースルーティングと一致します。
+ JWT）。
 
 Web サイトを Gateway のエージェントに接続するには、<Link path="guides/connection/react-agentcore-gateway">`connection` ジェネレーター</Link>を使用してください。
 

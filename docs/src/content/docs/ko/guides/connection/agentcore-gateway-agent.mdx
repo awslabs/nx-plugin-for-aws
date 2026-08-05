@@ -25,14 +25,7 @@ import Infrastructure from '@components/infrastructure.astro';
 1. `protocol: http`로 생성된 <Link path="guides/agentcore-gateway">`agentcore-gateway`</Link> 프로젝트
 2. `infra: agentcore` 및 `auth: iam`으로 생성된 에이전트 컴포넌트(<Link path="guides/ts-agent">`ts#agent`</Link> 또는 <Link path="guides/py-agent">`py#agent`</Link>)
 
-다음 에이전트 프로토콜은 Gateway로 프론트할 수 있습니다:
-
-| Agent | `ag-ui` | `http` | `a2a` |
-| ----- | ------- | ------ | ----- |
-| `ts#agent` | ✅ | ❌ | ✅ |
-| `py#agent` | ✅ | ✅ | ✅ |
-
-:::note[TypeScript HTTP 에이전트]
+:::caution[TypeScript HTTP 에이전트]
 TypeScript `http` 에이전트는 WebSocket을 통해 tRPC를 제공하며, AgentCore Gateway는 WebSocket 또는 양방향 스트리밍을 지원하지 않습니다. 제너레이터는 이 조합을 거부합니다. 대신 `ag-ui` 프로토콜로 에이전트를 생성하세요.
 :::
 
@@ -86,6 +79,23 @@ myGateway.addAgent(myAgent, { gatewayTargetName: 'my-target' });
 ```
 
 구성은 Gateway의 실행 역할에 에이전트 런타임에 대한 호출 액세스 권한을 부여하고 `GATEWAY_IAM_ROLE` 자격 증명 공급자로 대상을 구성하므로 Gateway는 자체 역할로 아웃바운드 호출에 서명합니다.
+
+:::tip[VPC에 에이전트 배포하기]
+Gateway로 에이전트를 프론트하는 것은 VPC에 배포된 에이전트를 접근 가능하게 만드는 방법입니다: 호출자는 Gateway의 공개 엔드포인트와 통신하고, Gateway는 내부적으로 런타임에 도달합니다. VPC 네트워크 구성을 에이전트 구성에 전달하세요:
+
+```ts
+import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
+
+const myAgent = new MyAgent(this, 'MyAgent', {
+  networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
+    vpc,
+    vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+  }),
+});
+```
+
+**egress가 있는 프라이빗 서브넷**을 사용하고, 프라이빗 격리 서브넷은 사용하지 마세요: 런타임은 Bedrock에 도달하고 AWS AppConfig에서 구성을 읽기 위해 아웃바운드 인터넷 액세스가 필요합니다.
+:::
 </Fragment>
 <Fragment slot="terraform">
 Gateway를 인스턴스화하는 Terraform 파일에서 에이전트 대상을 연결합니다:
@@ -140,30 +150,29 @@ resource "aws_bedrockagentcore_gateway_target" "my_agent" {
   }
 }
 ```
+:::tip[VPC에 에이전트 배포하기]
+Gateway로 에이전트를 프론트하는 것은 VPC에 배포된 에이전트를 접근 가능하게 만드는 방법입니다: 호출자는 Gateway의 공개 엔드포인트와 통신하고, Gateway는 내부적으로 런타임에 도달합니다. 에이전트 모듈의 VPC 변수를 설정하세요:
+
+```hcl
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+
+  enable_vpc = true
+  vpc_id     = aws_vpc.my_vpc.id
+  subnet_ids = [aws_subnet.private_a.id, aws_subnet.private_b.id]
+}
+```
+
+egress가 있는 프라이빗 서브넷(NAT 게이트웨이로의 라우트)을 사용하고, 프라이빗 격리 서브넷은 사용하지 마세요: 런타임은 Bedrock에 도달하고 AWS AppConfig에서 구성을 읽기 위해 아웃바운드 인터넷 액세스가 필요합니다.
+:::
 </Fragment>
 </Infrastructure>
-
-:::tip[VPC에 에이전트 배포하기]
-Gateway로 에이전트를 프론트하는 것은 VPC에 배포된 에이전트를 접근 가능하게 만드는 방법입니다: 호출자는 Gateway의 공개 엔드포인트와 통신하고, Gateway는 내부적으로 런타임에 도달합니다. 에이전트 런타임의 네트워크 설정을 구성/모듈에서 구성하세요(Terraform 모듈은 `enable_vpc`, `vpc_id` 및 `subnet_ids`를 노출하고, CDK 구성은 런타임의 네트워크 속성을 허용합니다).
-:::
 
 ## Gateway를 통해 에이전트 호출하기
 
 `<gatewayUrl origin>/<targetName>/invocations`에 대한 요청은 프로토콜 변환 없이 에이전트 런타임으로 전달되므로, 호출자는 런타임에 직접 사용하는 것과 동일한 요청 형태를 사용합니다. SSE 스트림(AG-UI), JSON 스트리밍(Python HTTP) 및 A2A JSON-RPC가 모두 프록시를 통과합니다. 호출자는 에이전트가 아닌 Gateway로 인증합니다(Gateway의 `auth`에 따라 IAM SigV4 또는 Cognito JWT).
 
 웹사이트를 Gateway의 에이전트에 연결하려면 <Link path="guides/connection/react-agentcore-gateway">`connection` 제너레이터</Link>를 사용하세요.
-
-## 로컬 개발
-
-다음 명령으로 Gateway를 로컬에서 실행하면:
-
-<NxCommands commands={["dev <gateway-name>"]} />
-
-로컬 게이트웨이와 할당된 로컬 포트의 모든 연결된 에이전트가 시작됩니다. 로컬 게이트웨이는 `/<targetName>/...` 경로를 각 에이전트의 로컬 서버로 프록시하여 배포된 Gateway의 경로 기반 라우팅과 일치합니다.
-록시하여 배포된 Gateway의 경로 기반 라우팅과 일치합니다.
-WT).
-
-웹사이트를 Gateway의 에이전트에 연결하려면 <Link path="guides/connection/react-agentcore-gateway">React 웹사이트에서 AgentCore Gateway로 연결 제너레이터</Link>를 사용하세요.
 
 ## 로컬 개발
 

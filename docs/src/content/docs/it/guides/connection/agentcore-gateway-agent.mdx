@@ -79,6 +79,23 @@ myGateway.addAgent(myAgent, { gatewayTargetName: 'my-target' });
 ```
 
 Il costrutto concede al ruolo di esecuzione del Gateway l'accesso di invocazione al runtime dell'agent e configura il target con il provider di credenziali `GATEWAY_IAM_ROLE`, in modo che il Gateway firmi le chiamate in uscita con il proprio ruolo.
+
+:::tip[Distribuire agent in un VPC]
+Mettere un agent dietro un Gateway è ciò che rende raggiungibile un agent distribuito in un VPC: i chiamanti parlano con l'endpoint pubblico del Gateway, e il Gateway raggiunge il runtime internamente. Passa una configurazione di rete VPC al costrutto dell'agent:
+
+```ts
+import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
+
+const myAgent = new MyAgent(this, 'MyAgent', {
+  networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
+    vpc,
+    vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+  }),
+});
+```
+
+Usa una **subnet privata con egress**, non una subnet privata isolata: il runtime necessita di accesso internet in uscita per raggiungere Bedrock e leggere la sua configurazione da AWS AppConfig.
+:::
 </Fragment>
 <Fragment slot="terraform">
 Nel file Terraform in cui istanzi il Gateway, collega il target agent:
@@ -137,25 +154,24 @@ resource "aws_bedrockagentcore_gateway_target" "my_agent" {
 </Infrastructure>
 
 :::tip[Distribuire agent in un VPC]
-Mettere un agent dietro un Gateway è ciò che rende raggiungibile un agent distribuito in un VPC: i chiamanti parlano con l'endpoint pubblico del Gateway, e il Gateway raggiunge il runtime internamente. Configura le impostazioni di rete del runtime dell'agent sul suo costrutto/modulo (il modulo Terraform espone `enable_vpc`, `vpc_id` e `subnet_ids`; il costrutto CDK accetta le proprietà di rete del runtime).
+Mettere un agent dietro un Gateway è ciò che rende raggiungibile un agent distribuito in un VPC: i chiamanti parlano con l'endpoint pubblico del Gateway, e il Gateway raggiunge il runtime internamente. Imposta le variabili VPC del modulo agent:
+
+```hcl
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+
+  enable_vpc = true
+  vpc_id     = aws_vpc.my_vpc.id
+  subnet_ids = [aws_subnet.private_a.id, aws_subnet.private_b.id]
+}
+```
+
+Usa subnet private con egress (una route verso un NAT gateway), non subnet private isolate: il runtime necessita di accesso internet in uscita per raggiungere Bedrock e leggere la sua configurazione da AWS AppConfig.
 :::
 
 ## Invocare l'agent attraverso il Gateway
 
 Le richieste a `<gatewayUrl origin>/<targetName>/invocations` vengono inoltrate al runtime dell'agent senza traduzione del protocollo, quindi i chiamanti utilizzano la stessa forma di richiesta che userebbero direttamente contro il runtime — stream SSE (AG-UI), streaming JSON (Python HTTP) e A2A JSON-RPC passano tutti attraverso il proxy. I chiamanti si autenticano con il Gateway (IAM SigV4 o Cognito JWT a seconda dell'`auth` del Gateway) piuttosto che con l'agent.
-
-Per connettere un sito web agli agent del Gateway, utilizza il <Link path="guides/connection/react-agentcore-gateway">generatore di connessione da sito web React ad AgentCore Gateway</Link>.
-
-## Sviluppo Locale
-
-Eseguendo il Gateway localmente con:
-
-<NxCommands commands={["dev <gateway-name>"]} />
-
-avvia un gateway locale più ogni agent collegato sulla sua porta locale assegnata. Il gateway locale inoltra i percorsi `/<targetName>/...` al server locale di ciascun agent, corrispondendo al routing basato su percorso del Gateway distribuito.
-ta. Il gateway locale inoltra i percorsi `/<targetName>/...` al server locale di ciascun agent, corrispondendo al routing basato su percorso del Gateway distribuito.
-di ciascun agent, corrispondendo al routing basato su percorso del Gateway distribuito.
-'agent.
 
 Per connettere un sito web agli agent del Gateway, utilizza il <Link path="guides/connection/react-agentcore-gateway">generatore di connessione da sito web React ad AgentCore Gateway</Link>.
 

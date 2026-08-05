@@ -25,14 +25,7 @@ Antes de usar este gerador, certifique-se de ter:
 1. Um projeto <Link path="guides/agentcore-gateway">`agentcore-gateway`</Link> gerado com `protocol: http`
 2. Um componente de agente (<Link path="guides/ts-agent">`ts#agent`</Link> ou <Link path="guides/py-agent">`py#agent`</Link>) criado com `infra: agentcore` e `auth: iam`
 
-Os seguintes protocolos de agente podem ser colocados atrás de um Gateway:
-
-| Agent | `ag-ui` | `http` | `a2a` |
-| ----- | ------- | ------ | ----- |
-| `ts#agent` | ✅ | ❌ | ✅ |
-| `py#agent` | ✅ | ✅ | ✅ |
-
-:::note[Agentes HTTP TypeScript]
+:::caution[Agentes HTTP TypeScript]
 Um agente `http` TypeScript serve tRPC sobre WebSocket, e o AgentCore Gateway não suporta WebSocket ou streaming bidirecional — o gerador rejeita essa combinação. Gere o agente com o protocolo `ag-ui` em vez disso.
 :::
 
@@ -86,6 +79,23 @@ myGateway.addAgent(myAgent, { gatewayTargetName: 'my-target' });
 ```
 
 O construtor concede à função de execução do Gateway acesso de invocação ao runtime do agente e configura o destino com o provedor de credenciais `GATEWAY_IAM_ROLE`, para que o Gateway assine chamadas de saída com sua própria função.
+
+:::tip[Implantando agentes em uma VPC]
+Colocar um agente atrás de um Gateway é o que torna um agente implantado em VPC acessível: os chamadores se comunicam com o endpoint público do Gateway, e o Gateway alcança o runtime internamente. Passe uma configuração de rede VPC para o construtor do agente:
+
+```ts
+import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
+
+const myAgent = new MyAgent(this, 'MyAgent', {
+  networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
+    vpc,
+    vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+  }),
+});
+```
+
+Use uma **sub-rede privada com egress**, não uma sub-rede privada isolada: o runtime precisa de acesso de saída à internet para alcançar o Bedrock e ler sua configuração do AWS AppConfig.
+:::
 </Fragment>
 <Fragment slot="terraform">
 No arquivo Terraform onde você instancia o Gateway, conecte o destino do agente:
@@ -153,6 +163,8 @@ module "my_agent" {
   subnet_ids = [aws_subnet.private_a.id, aws_subnet.private_b.id]
 }
 ```
+
+Use sub-redes privadas com egress (uma rota para um NAT gateway), não sub-redes privadas isoladas: o runtime precisa de acesso de saída à internet para alcançar o Bedrock e ler sua configuração do AWS AppConfig.
 :::
 </Fragment>
 </Infrastructure>
@@ -161,18 +173,7 @@ module "my_agent" {
 
 Requisições para `<gatewayUrl origin>/<targetName>/invocations` são encaminhadas para o runtime do agente sem tradução de protocolo, então os chamadores usam a mesma forma de requisição que usariam diretamente contra o runtime — streams SSE (AG-UI), streaming JSON (Python HTTP) e A2A JSON-RPC todos fazem proxy. Os chamadores se autenticam com o Gateway (IAM SigV4 ou Cognito JWT dependendo do `auth` do Gateway) em vez de com o agente.
 
-Para conectar um website aos agentes do Gateway, use o <Link path="guides/connection/react-agentcore-gateway">gerador de conexão de website React para AgentCore Gateway</Link>.
-
-## Desenvolvimento Local
-
-Executar o Gateway localmente com:
-
-<NxCommands commands={["dev <gateway-name>"]} />
-
-inicia um gateway local mais cada agente anexado em sua porta local atribuída. O gateway local faz proxy dos caminhos `/<targetName>/...` para o servidor local de cada agente, correspondendo ao roteamento baseado em caminho do Gateway implantado.
- de com o agente.
-
-Para conectar um website aos agentes do Gateway, use o <Link path="guides/connection/react-agentcore-gateway">gerador de conexão de website React para AgentCore Gateway</Link>.
+Para conectar um website aos agentes do Gateway, use o <Link path="guides/connection/react-agentcore-gateway">gerador `connection`</Link>.
 
 ## Desenvolvimento Local
 
