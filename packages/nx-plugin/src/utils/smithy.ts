@@ -22,6 +22,16 @@ import { SMITHY_VERSIONS } from './versions';
  */
 
 /**
+ * Where `mise` lands in a workspace, for a target command to invoke.
+ *
+ * Called by path rather than by name: only pnpm and npm put a `mise` shim in
+ * `node_modules/.bin`, so `mise` alone is not on `PATH` under yarn — while every
+ * package manager lays the package itself out here, pnpm by symlink. Written with
+ * forward slashes, which Windows accepts too.
+ */
+const MISE_BIN = 'node_modules/mise/bin/mise';
+
+/**
  * The prefix a target command runs the Smithy CLI through.
  *
  * Pinned via `mise exec` off Windows, where the version travels in the command
@@ -29,7 +39,9 @@ import { SMITHY_VERSIONS } from './versions';
  * there is no version to pin — {@link warnIfSmithyMissing} checks it is there.
  */
 export const smithyCliCommand = (): string =>
-  isWindows() ? 'smithy' : `mise exec smithy@${SMITHY_VERSIONS.cli} -- smithy`;
+  isWindows()
+    ? 'smithy'
+    : `${MISE_BIN} exec smithy@${SMITHY_VERSIONS.cli} -- smithy`;
 
 /**
  * Whether the workspace this generator runs in targets Windows, where the Smithy

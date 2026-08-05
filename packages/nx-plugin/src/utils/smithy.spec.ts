@@ -33,7 +33,7 @@ describe('smithyCliCommand', () => {
   it('should resolve the pinned cli through mise off windows', () => {
     onPlatform('linux', () => {
       expect(smithyCliCommand()).toBe(
-        `mise exec smithy@${SMITHY_VERSIONS.cli} -- smithy`,
+        `node_modules/mise/bin/mise exec smithy@${SMITHY_VERSIONS.cli} -- smithy`,
       );
     });
   });

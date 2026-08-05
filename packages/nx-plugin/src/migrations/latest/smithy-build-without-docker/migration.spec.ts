@@ -85,7 +85,7 @@ describe('smithy-build-without-docker migration', () => {
     const { targets } = readJson(tree, 'test-api/project.json');
     const commands: string[] = targets.compile.options.commands;
     expect(commands).toContain(
-      `mise exec smithy@${SMITHY_VERSIONS.cli} -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy`,
+      `node_modules/mise/bin/mise exec smithy@${SMITHY_VERSIONS.cli} -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy`,
     );
     expect(commands.join('\n')).not.toContain('docker');
     expect(commands.join('\n')).not.toContain('build.Dockerfile');
@@ -243,14 +243,34 @@ describe('smithy-build-without-docker migration', () => {
     ]);
   });
 
+  /**
+   * The migrate smoke test re-runs every migration and fails on any diff, so this
+   * has to hold for every file touched — not just the target. A dependency or
+   * allowlist entry written back in a different order would pass a `project.json`
+   * check and still fail CI.
+   */
   it('should be idempotent', async () => {
-    await generateOldWorkspace(tree);
+    await generateOldWorkspace(tree, { name: 'test-api', type: 'service' });
+    await generateOldWorkspace(tree, { name: 'test-shapes', type: 'shapes' });
 
     await migration(tree);
-    const afterFirst = tree.read('test-api/project.json', 'utf-8');
+    const touched = [
+      'test-api/project.json',
+      'test-api/smithy-build.json',
+      'test-api/ssdk.rolldown.config.mjs',
+      'test-shapes/project.json',
+      'package.json',
+      'pnpm-workspace.yaml',
+    ];
+    const afterFirst = Object.fromEntries(
+      touched.map((path) => [path, tree.read(path, 'utf-8')]),
+    );
+
     const { nextSteps } = await migration(tree);
 
-    expect(tree.read('test-api/project.json', 'utf-8')).toEqual(afterFirst);
+    for (const path of touched) {
+      expect(tree.read(path, 'utf-8'), path).toEqual(afterFirst[path]);
+    }
     expect(nextSteps).toEqual([]);
   });
 

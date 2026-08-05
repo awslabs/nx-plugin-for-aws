@@ -56,7 +56,7 @@ describe('smithyProjectGenerator', () => {
       'rimraf dist/{projectRoot}/build',
       'rimraf dist/{projectRoot}/smithy',
       'make-dir dist/{projectRoot}/build',
-      `mise exec smithy@${SMITHY_VERSIONS.cli} -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy`,
+      `node_modules/mise/bin/mise exec smithy@${SMITHY_VERSIONS.cli} -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy`,
       'cpy "dist/{projectRoot}/smithy/source/openapi/*.openapi.json" dist/{projectRoot}/build/openapi --flat --rename=openapi.json',
       'npm install --prefix dist/{projectRoot}/smithy/source/typescript-ssdk-codegen --ignore-scripts --no-audit --no-fund',
       'rolldown -c {projectRoot}/ssdk.rolldown.config.mjs',
@@ -245,7 +245,7 @@ describe('smithyProjectGenerator', () => {
     // The CLI version travels in the command, which is what the version sync
     // reaches to move it forward.
     expect(commands).toContain(
-      `mise exec smithy@${SMITHY_VERSIONS.cli} -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy`,
+      `node_modules/mise/bin/mise exec smithy@${SMITHY_VERSIONS.cli} -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy`,
     );
     expect(commands.join('\n')).not.toContain('docker');
 
@@ -444,7 +444,7 @@ describe('smithyProjectGenerator', () => {
         'rimraf dist/{projectRoot}/build',
         'rimraf dist/{projectRoot}/smithy',
         'make-dir dist/{projectRoot}/build',
-        `mise exec smithy@${SMITHY_VERSIONS.cli} -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy`,
+        `node_modules/mise/bin/mise exec smithy@${SMITHY_VERSIONS.cli} -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy`,
         'ncp dist/{projectRoot}/smithy/source/model/model.json dist/{projectRoot}/build/model.json',
       ]);
     });

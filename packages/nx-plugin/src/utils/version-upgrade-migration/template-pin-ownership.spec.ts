@@ -217,7 +217,7 @@ describe('the real smithy project pins', () => {
 
     expect(tree.read(path, 'utf-8')).toEqual(fresh);
     expect(tree.read(path, 'utf-8')).toContain(
-      `mise exec smithy@${SMITHY_VERSIONS.cli}`,
+      `node_modules/mise/bin/mise exec smithy@${SMITHY_VERSIONS.cli}`,
     );
   });
 
