@@ -63,7 +63,7 @@ structure Customer {
 }
 ```
 
-Vì một thư viện shape không có dịch vụ, `smithy-build.json` của nó không cấu hình việc tạo mã — việc build nó sẽ xác thực mô hình và tập hợp nó thành một tệp mô hình JSON duy nhất tại `dist/<my-shapes>/build/model/model.json`.
+Vì một thư viện shape không có dịch vụ, `smithy-build.json` của nó không cấu hình việc tạo mã — việc build nó sẽ xác thực mô hình và tập hợp nó thành một tệp mô hình JSON duy nhất tại `dist/<my-shapes>/build/model.json`.
 
 </OptionFilter>
 
@@ -79,7 +79,7 @@ Vì một thư viện shape không có dịch vụ, `smithy-build.json` của n�
       - operations
         - echo.smithy Một hoạt động ví dụ
     - smithy-build.json Cấu hình build Smithy, bao gồm tạo mã
-    - build.Dockerfile Build mô hình, đặc tả OpenAPI và TypeScript Server SDK
+    - ssdk.rolldown.config.mjs Đóng gói TypeScript Server SDK đã tạo
     - project.json Cấu hình dự án và các target build
 
 </FileTree>
@@ -109,39 +109,36 @@ Việc build một dự án service tạo ra một đặc tả OpenAPI và một
 
 ## Build
 
-Các dự án Smithy build bằng [Docker](https://www.docker.com/), chạy [Smithy CLI](https://smithy.io/2.0/guides/smithy-cli/index.html) để xác thực mô hình của bạn:
+Các dự án Smithy build bằng [Smithy CLI](https://smithy.io/2.0/guides/smithy-cli/index.html), công cụ này xác thực mô hình của bạn:
 
 <NxCommands commands={['build my-shapes']} />
 
+CLI được giải quyết bởi [mise](https://mise.jdx.dev/), được thêm vào workspace của bạn như một dev dependency, vì vậy không cần cài đặt gì — nó tải xuống và lưu cache phiên bản đã được ghim lần đầu tiên bạn build.
+
+:::caution[Windows]
+`mise` không xuất bản gói Windows lên npm, vì vậy hãy làm theo [hướng dẫn cài đặt Smithy CLI](https://smithy.io/2.0/guides/smithy-cli/cli_installation.html) để tự cài đặt trước khi build.
+:::
+
 ## Phụ thuộc vào một Thư viện Shape
 
-Việc build một thư viện shape ghi một mô hình được tập hợp vào `dist/<my-shapes>/build/model/model.json`. Tệp duy nhất này chứa mọi shape mà thư viện định nghĩa, cùng với bất kỳ shape nào mà nó phụ thuộc vào, vì vậy một consumer chỉ cần khai báo các thư viện mà nó tham chiếu trực tiếp.
+Việc build một thư viện shape ghi một mô hình được tập hợp vào `dist/<my-shapes>/build/model.json`. Tệp duy nhất này chứa mọi shape mà thư viện định nghĩa, cùng với bất kỳ shape nào mà nó phụ thuộc vào, vì vậy một consumer chỉ cần khai báo các thư viện mà nó tham chiếu trực tiếp.
 
-Để phụ thuộc vào một thư viện shape từ một dự án Smithy khác, hãy thực hiện ba thay đổi đối với dự án consumer:
+Để phụ thuộc vào một thư viện shape từ một dự án Smithy khác, hãy thực hiện hai thay đổi đối với dự án consumer:
 
 <Steps>
 
-1. Các dự án Smithy build bên trong một container, và quá trình build được cung cấp workspace root như một build context được đặt tên. Thêm một `COPY` vào `build.Dockerfile` của dự án consumer, bên cạnh nơi các nguồn của chính nó được sao chép vào:
-
-   ```dockerfile ins={4}
-   # Copy project files
-   COPY smithy-build.json .
-   COPY src src
-   COPY --from=workspace dist/packages/my-shapes/build/model/model.json deps/my-shapes.json
-   ```
-
-2. Thêm tệp đã sao chép vào `imports` trong `smithy-build.json` của dự án consumer:
+1. Thêm mô hình đã build của thư viện vào `imports` trong `smithy-build.json` của dự án consumer. Các đường dẫn là tương đối với tệp đó, vì vậy số lượng phân đoạn `../` khớp với độ sâu lồng nhau của dự án consumer — ba cho `packages/my-api/model` bên dưới:
 
    ```json ins={4}
    {
      "version": "1.0",
      "sources": ["src/"],
-     "imports": ["deps/my-shapes.json"],
+     "imports": ["../../../dist/packages/my-shapes/build/model.json"],
      ...
    }
    ```
 
-3. Thêm target `build` của thư viện như một dependency của target `compile` của dự án consumer trong `project.json` của nó, để mô hình tồn tại trước khi consumer build:
+2. Thêm target `build` của thư viện như một dependency của target `compile` của dự án consumer trong `project.json` của nó, để mô hình tồn tại trước khi consumer build:
 
    ```json ins={4}
    {

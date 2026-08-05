@@ -63,7 +63,7 @@ structure Customer {
 }
 ```
 
-Puisqu'une bibliothèque de formes n'a pas de service, son `smithy-build.json` ne configure aucune génération de code — la construire valide le modèle et l'assemble dans un seul fichier de modèle JSON à `dist/<my-shapes>/build/model/model.json`.
+Puisqu'une bibliothèque de formes n'a pas de service, son `smithy-build.json` ne configure aucune génération de code — la construire valide le modèle et l'assemble dans un seul fichier de modèle JSON à `dist/<my-shapes>/build/model.json`.
 
 </OptionFilter>
 
@@ -79,7 +79,7 @@ Puisqu'une bibliothèque de formes n'a pas de service, son `smithy-build.json` n
       - operations
         - echo.smithy Un exemple d'opération
     - smithy-build.json Configuration de build Smithy, incluant la génération de code
-    - build.Dockerfile Construit le modèle, la spécification OpenAPI et le SDK serveur TypeScript
+    - ssdk.rolldown.config.mjs Bundle le SDK serveur TypeScript généré
     - project.json Configuration du projet et cibles de build
 
 </FileTree>
@@ -109,39 +109,36 @@ La construction d'un projet de service génère une spécification OpenAPI et un
 
 ## Construction
 
-Les projets Smithy se construisent en utilisant [Docker](https://www.docker.com/), qui exécute la [CLI Smithy](https://smithy.io/2.0/guides/smithy-cli/index.html) pour valider votre modèle :
+Les projets Smithy se construisent avec la [CLI Smithy](https://smithy.io/2.0/guides/smithy-cli/index.html), qui valide votre modèle :
 
 <NxCommands commands={['build my-shapes']} />
 
+La CLI est résolue par [mise](https://mise.jdx.dev/), ajouté à votre espace de travail en tant que dépendance de développement, donc il n'y a rien à installer — il télécharge et met en cache la version épinglée la première fois que vous construisez.
+
+:::caution[Windows]
+`mise` ne publie aucun package Windows sur npm, donc suivez le [guide d'installation de la CLI Smithy](https://smithy.io/2.0/guides/smithy-cli/cli_installation.html) pour l'installer vous-même avant de construire.
+:::
+
 ## Dépendre d'une bibliothèque de formes
 
-La construction d'une bibliothèque de formes écrit un modèle assemblé dans `dist/<my-shapes>/build/model/model.json`. Ce fichier unique contient chaque forme que la bibliothèque définit, ainsi que toutes celles dont elle dépend, de sorte qu'un consommateur ne déclare jamais que les bibliothèques qu'il référence directement.
+La construction d'une bibliothèque de formes écrit un modèle assemblé dans `dist/<my-shapes>/build/model.json`. Ce fichier unique contient chaque forme que la bibliothèque définit, ainsi que toutes celles dont elle dépend, de sorte qu'un consommateur ne déclare jamais que les bibliothèques qu'il référence directement.
 
-Pour dépendre d'une bibliothèque de formes depuis un autre projet Smithy, apportez trois modifications au projet consommateur :
+Pour dépendre d'une bibliothèque de formes depuis un autre projet Smithy, apportez deux modifications au projet consommateur :
 
 <Steps>
 
-1. Les projets Smithy se construisent à l'intérieur d'un conteneur, et le build reçoit la racine de l'espace de travail comme contexte de build nommé. Ajoutez un `COPY` au `build.Dockerfile` du projet consommateur, à côté de l'endroit où ses propres sources sont copiées :
-
-   ```dockerfile ins={4}
-   # Copy project files
-   COPY smithy-build.json .
-   COPY src src
-   COPY --from=workspace dist/packages/my-shapes/build/model/model.json deps/my-shapes.json
-   ```
-
-2. Ajoutez le fichier copié à `imports` dans le `smithy-build.json` du projet consommateur :
+1. Ajoutez le modèle construit de la bibliothèque à `imports` dans le `smithy-build.json` du projet consommateur. Les chemins sont relatifs à ce fichier, donc le nombre de segments `../` correspond à la profondeur d'imbrication du projet consommateur — trois pour `packages/my-api/model` ci-dessous :
 
    ```json ins={4}
    {
      "version": "1.0",
      "sources": ["src/"],
-     "imports": ["deps/my-shapes.json"],
+     "imports": ["../../../dist/packages/my-shapes/build/model.json"],
      ...
    }
    ```
 
-3. Ajoutez la cible `build` de la bibliothèque comme dépendance de la cible `compile` du projet consommateur dans son `project.json`, afin que le modèle existe avant que le consommateur ne se construise :
+2. Ajoutez la cible `build` de la bibliothèque comme dépendance de la cible `compile` du projet consommateur dans son `project.json`, afin que le modèle existe avant que le consommateur ne se construise :
 
    ```json ins={4}
    {
@@ -157,23 +154,6 @@ Pour dépendre d'une bibliothèque de formes depuis un autre projet Smithy, appo
 </Steps>
 
 Votre modèle peut maintenant référencer les formes de la bibliothèque avec `use` :
-
-```smithy
-$version: "2.0"
-
-namespace com.example.api
-
-use com.example.shared#Customer
-
-structure GetCustomerOutput {
-    @required
-    customer: Customer
-}
-```
-
-Les bibliothèques de formes peuvent dépendre d'autres bibliothèques de formes de la même manière. Puisque le modèle construit de chaque bibliothèque contient déjà ses propres dépendances, vous n'avez besoin de répéter ces étapes que pour les bibliothèques que vous référencez directement. Une bibliothèque atteinte par plus d'un chemin est résolue une seule fois — Smithy ignore les définitions de formes dupliquées mais équivalentes.
-iquées mais équivalentes.
- :
 
 ```smithy
 $version: "2.0"
