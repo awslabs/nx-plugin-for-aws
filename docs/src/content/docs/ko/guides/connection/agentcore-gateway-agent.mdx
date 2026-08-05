@@ -87,14 +87,22 @@ Gateway로 에이전트를 프론트하는 것은 VPC에 배포된 에이전트�
 import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
 
 const myAgent = new MyAgent(this, 'MyAgent', {
-  networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
-    vpc,
-    vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
-  }),
+  // 각 에이전트에 네트워크 구성을 위한 자체 스코프를 제공합니다 — usingVpc는
+  // 전달한 스코프 아래에 `SecurityGroup`이라는 이름의 보안 그룹을 생성하므로,
+  // 둘 이상의 에이전트에 대해 `this`를 전달하면 구성 ID가 충돌합니다.
+  networkConfiguration: RuntimeNetworkConfiguration.usingVpc(
+    new Construct(this, 'MyAgentNetwork'),
+    {
+      vpc,
+      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+    },
+  ),
 });
 ```
 
 **egress가 있는 프라이빗 서브넷**을 사용하고, 프라이빗 격리 서브넷은 사용하지 마세요: 런타임은 Bedrock에 도달하고 AWS AppConfig에서 구성을 읽기 위해 아웃바운드 인터넷 액세스가 필요합니다.
+
+AgentCore Runtime VPC 배포는 특정 가용 영역에서만 지원됩니다. `subnets are in unsupported availability zones` 오류로 배포가 실패하는 경우, VPC(또는 서브넷 선택)를 해당 리전의 지원되는 영역으로 제한하세요.
 :::
 </Fragment>
 <Fragment slot="terraform">
