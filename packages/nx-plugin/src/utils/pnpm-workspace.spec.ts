@@ -38,7 +38,7 @@ describe('registerBuiltDependencies', () => {
    * from the tree marker; the others come from `detectPackageManager`, which reads
    * the real filesystem and so has to be stood in for.
    */
-  const asPackageManager = (pm: 'pnpm' | 'bun' | 'npm') => {
+  const asPackageManager = (pm: 'pnpm' | 'bun' | 'npm' | 'yarn') => {
     if (pm !== 'pnpm') {
       tree.delete('pnpm-workspace.yaml');
     }
@@ -103,7 +103,47 @@ describe('registerBuiltDependencies', () => {
     expect(tree.read('package.json', 'utf-8')).toEqual(afterFirst);
   });
 
-  // npm and yarn run install scripts, so there is no list to keep.
+  // Yarn Berry disables build scripts unless the package opts in via
+  // `dependenciesMeta`; yarn classic ignores the field, so one write covers both.
+  it('should mark the dependency built on yarn', () => {
+    asPackageManager('yarn');
+
+    registerBuiltDependencies(tree, { mise: true });
+
+    expect(readJson(tree, 'package.json').dependenciesMeta).toEqual({
+      mise: { built: true },
+    });
+  });
+
+  it('should keep other dependenciesMeta yarn already has', () => {
+    asPackageManager('yarn');
+    tree.write(
+      'package.json',
+      JSON.stringify({
+        name: 'w',
+        dependenciesMeta: { theirs: { built: true }, mise: { optional: true } },
+      }),
+    );
+
+    registerBuiltDependencies(tree, { mise: true });
+
+    expect(readJson(tree, 'package.json').dependenciesMeta).toEqual({
+      theirs: { built: true },
+      mise: { optional: true, built: true },
+    });
+  });
+
+  it('should be idempotent on yarn', () => {
+    asPackageManager('yarn');
+
+    registerBuiltDependencies(tree, { mise: true });
+    const afterFirst = tree.read('package.json', 'utf-8');
+    registerBuiltDependencies(tree, { mise: true });
+
+    expect(tree.read('package.json', 'utf-8')).toEqual(afterFirst);
+  });
+
+  // npm runs install scripts, so there is no list to keep.
   it('should leave an npm workspace alone', () => {
     asPackageManager('npm');
     const before = tree.read('package.json', 'utf-8');

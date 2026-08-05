@@ -73,15 +73,15 @@ export const registerPnpmBuiltDependencies = (
  * Allow a dependency's install scripts to run, whichever package manager the
  * workspace uses.
  *
- * pnpm and bun both refuse install scripts by default and each has its own
- * allowlist; npm and yarn run them, so there is nothing to record. A package
- * that fetches its own binary in a `preinstall` — `mise` does — is otherwise
- * installed with no binary at all, which only surfaces when a build target
- * tries to run it.
+ * pnpm, bun and yarn Berry all refuse install scripts by default, and each keeps
+ * its allowlist somewhere different; only npm and yarn classic run them with
+ * nothing recorded. A package that fetches its own binary in a `preinstall` —
+ * `mise` does — is otherwise installed with no binary at all, and bun and yarn
+ * both fail *silently*, so it surfaces only when a build target runs it.
  *
  * @param entries package -> whether to run its scripts. A `false` entry is
- *   recorded for pnpm (a reviewed dep we deliberately don't build) and simply
- *   omitted for bun, whose allowlist has no equivalent.
+ *   recorded for pnpm (a reviewed dep we deliberately don't build); the other
+ *   managers have no equivalent, so it is simply omitted there.
  */
 export const registerBuiltDependencies = (
   tree: Tree,
@@ -89,6 +89,54 @@ export const registerBuiltDependencies = (
 ): void => {
   registerPnpmBuiltDependencies(tree, entries);
   registerBunTrustedDependencies(tree, entries);
+  registerYarnBuiltDependencies(tree, entries);
+};
+
+/** The packages an entry set opts into building. */
+const builtPackages = (entries: Record<string, boolean>): string[] =>
+  Object.entries(entries)
+    .filter(([, decision]) => decision)
+    .map(([pkg]) => pkg);
+
+/**
+ * Mark dependencies as built in the root package.json's `dependenciesMeta`.
+ * No-op for non-yarn workspaces.
+ *
+ * Yarn Berry disables every package's build scripts unless it is opted in here.
+ * Yarn classic runs them regardless and ignores the field, so recording it is
+ * harmless there and saves branching on the major version.
+ */
+const registerYarnBuiltDependencies = (
+  tree: Tree,
+  entries: Record<string, boolean>,
+): void => {
+  if (detectWorkspacePackageManager(tree) !== 'yarn') {
+    return;
+  }
+  if (!tree.exists('package.json')) {
+    return;
+  }
+
+  const built = builtPackages(entries);
+  if (built.length === 0) {
+    return;
+  }
+
+  updateJson(tree, 'package.json', (packageJson) => {
+    const meta = { ...(packageJson.dependenciesMeta ?? {}) };
+    let changed = false;
+    for (const pkg of built) {
+      if (meta[pkg]?.built !== true) {
+        meta[pkg] = { ...meta[pkg], built: true };
+        changed = true;
+      }
+    }
+    // Only rewrite when something is actually new, so a re-run is a no-op.
+    if (changed) {
+      packageJson.dependenciesMeta = meta;
+    }
+    return packageJson;
+  });
 };
 
 /**
@@ -110,9 +158,7 @@ const registerBunTrustedDependencies = (
     return;
   }
 
-  const trusted = Object.entries(entries)
-    .filter(([, decision]) => decision)
-    .map(([pkg]) => pkg);
+  const trusted = builtPackages(entries);
   if (trusted.length === 0) {
     return;
   }
