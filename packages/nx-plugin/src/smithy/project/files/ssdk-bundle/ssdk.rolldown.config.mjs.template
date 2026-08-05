@@ -5,29 +5,32 @@ import esmShim from '@rollup/plugin-esm-shim';
 import { dts } from 'rolldown-plugin-dts';
 
 /**
- * Paths are handed to rolldown with forward slashes on every platform.
+ * Every path handed to rolldown is relative to the workspace root, with forward
+ * slashes, on every platform.
  *
- * A module's identity is its resolved path, and rolldown reaches this project's
- * files two ways: the entry it is given, and the relative imports it follows from
- * there. On Windows `path.join` produces backslashes, so an entry spelled that way
- * and an import resolved the other spell the same file differently — it is then
- * loaded twice, and the second copy sees the first's declarations as imports. The
- * generated Server SDK merges an `interface` with a `namespace`, whose emitted
- * assignment then looks like a write to an import and fails the build with
- * ASSIGN_TO_IMPORT.
+ * A module's identity is its resolved path. rolldown reaches this project's files
+ * two ways — the entry it is given, and the relative imports it follows from there
+ * — and it spells the second form relative to its working directory. Handing it an
+ * absolute entry (which on Windows also carries a drive letter) makes those two
+ * spellings differ, so the same file is loaded twice and the second copy reads the
+ * first's declarations as imports. The generated Server SDK merges an `interface`
+ * with a `namespace`, whose emitted assignment then looks like a write to an
+ * import, failing the build with ASSIGN_TO_IMPORT.
+ *
+ * The compile target runs from the workspace root, so these resolve there.
  */
 const posix = (...segments) => path.join(...segments).split(path.sep).join('/');
 
 // The Smithy CLI generates the Server SDK under dist, along with its own
 // dependencies, so paths are resolved from there rather than this project.
 const ssdkDir = posix(
-  import.meta.dirname,
-  '<%- relativePathToWorkspaceRoot %>',
   'dist',
   '<%- projectRoot %>',
   'smithy/source/typescript-ssdk-codegen',
 );
-const require = createRequire(path.join(ssdkDir, 'package.json'));
+const require = createRequire(
+  path.resolve(process.cwd(), ssdkDir, 'package.json'),
+);
 
 // Bundle the re2-wasm wasm file as part of the module
 const re2WasmPlugin = () => ({
@@ -62,23 +65,12 @@ const re2WasmPlugin = () => ({
 
 const input = posix(ssdkDir, 'src/index.ts');
 const tsconfigFilename = posix(ssdkDir, 'tsconfig.es.json');
-const outDir = posix(
-  import.meta.dirname,
-  '<%- relativePathToWorkspaceRoot %>',
-  'dist',
-  '<%- projectRoot %>',
-  'build/ssdk',
-);
+const outDir = posix('dist', '<%- projectRoot %>', 'build/ssdk');
 
 /**
- * The module and its type declaration are built in separate passes.
- *
- * `rolldown-plugin-dts` loads the same sources a second time to build the
- * declaration. Sharing one pass with the module build makes those two views of a
- * file collide on Windows: the generated Server SDK merges an `interface` with a
- * `namespace`, and the namespace's emitted assignment is then read as a write to
- * an imported binding, failing with ASSIGN_TO_IMPORT. Kept apart, each pass sees
- * each file once.
+ * The module and its type declaration are built in separate passes, so each sees
+ * every file once — `rolldown-plugin-dts` loads the same sources a second time to
+ * build the declaration.
  */
 export default [
   {

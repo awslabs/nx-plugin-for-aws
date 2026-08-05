@@ -151,11 +151,9 @@ export const writeSsdkBundleConfig = (tree: Tree, projectRoot: string): void =>
     tree,
     joinPathFragments(import.meta.dirname, 'files', 'ssdk-bundle'),
     projectRoot,
-    {
-      projectRoot,
-      relativePathToWorkspaceRoot:
-        getRelativePathToRootByDirectory(projectRoot),
-    },
+    // The config's paths are workspace-root relative, so it needs only the
+    // project's root — the compile target runs from the workspace root.
+    { projectRoot },
     // Generated configuration rather than anything the user edits, so a re-run
     // refreshes it — unlike the models beside it.
     { overwriteStrategy: OverwriteStrategy.Overwrite },
