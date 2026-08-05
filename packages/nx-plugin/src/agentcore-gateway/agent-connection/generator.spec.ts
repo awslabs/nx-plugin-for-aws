@@ -229,7 +229,7 @@ describe('agentcore-gateway#agent-connection generator', () => {
     ).resolves.toBeDefined();
   });
 
-  it('throws for a non-iam agent', async () => {
+  it('connects a cognito agent (fronted via JWT passthrough)', async () => {
     const gw = addGateway();
     const project = addAgentProject();
 
@@ -239,7 +239,20 @@ describe('agentcore-gateway#agent-connection generator', () => {
         targetProject: project,
         targetComponent: agentComponent({ auth: 'cognito' }) as any,
       }),
-    ).rejects.toThrow(/IAM authentication/);
+    ).resolves.toBeDefined();
+  });
+
+  it('throws for an agent whose auth a gateway cannot front', async () => {
+    const gw = addGateway();
+    const project = addAgentProject();
+
+    await expect(
+      agentcoreGatewayAgentConnectionGenerator(tree, {
+        sourceProject: `@proj/${gw.name}`,
+        targetProject: project,
+        targetComponent: agentComponent({ auth: 'apikey' }) as any,
+      }),
+    ).rejects.toThrow(/gateway cannot front/);
   });
 
   it('throws when the target has no agent component metadata', async () => {

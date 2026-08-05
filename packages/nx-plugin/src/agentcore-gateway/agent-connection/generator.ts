@@ -86,9 +86,14 @@ export const agentcoreGatewayAgentConnectionGenerator = async (
           : `. Supported protocols: ${supportedProtocols.join(', ')}.`),
     );
   }
-  if (agentComponent.auth && agentComponent.auth !== 'iam') {
+  // Both IAM and Cognito agents can be fronted. An IAM agent is invoked with
+  // the gateway's own role (GATEWAY_IAM_ROLE); a Cognito agent has the caller's
+  // JWT forwarded to it (JWT_PASSTHROUGH) so it authorizes on the token. The
+  // vended `addAgent` picks the credential from the agent's `auth`.
+  const agentAuth = (agentComponent.auth as string | undefined) ?? 'iam';
+  if (agentAuth !== 'iam' && agentAuth !== 'cognito') {
     throw new Error(
-      `Agent '${agentComponent.name}' uses auth='${agentComponent.auth}'. Gateway->agent connections currently require the agent to use IAM authentication.`,
+      `Agent '${agentComponent.name}' uses auth='${agentAuth}', which a gateway cannot front. Supported: iam, cognito.`,
     );
   }
 
