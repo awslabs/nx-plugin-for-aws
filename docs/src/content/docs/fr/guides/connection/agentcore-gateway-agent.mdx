@@ -25,14 +25,7 @@ Avant d'utiliser ce générateur, assurez-vous d'avoir :
 1. Un projet <Link path="guides/agentcore-gateway">`agentcore-gateway`</Link> généré avec `protocol: http`
 2. Un composant agent (<Link path="guides/ts-agent">`ts#agent`</Link> ou <Link path="guides/py-agent">`py#agent`</Link>) créé avec `infra: agentcore` et `auth: iam`
 
-Les protocoles d'agent suivants peuvent être placés derrière une Gateway :
-
-| Agent | `ag-ui` | `http` | `a2a` |
-| ----- | ------- | ------ | ----- |
-| `ts#agent` | ✅ | ❌ | ✅ |
-| `py#agent` | ✅ | ✅ | ✅ |
-
-:::note[Agents HTTP TypeScript]
+:::caution[Agents HTTP TypeScript]
 Un agent `http` TypeScript sert tRPC sur WebSocket, et AgentCore Gateway ne prend pas en charge WebSocket ou le streaming bidirectionnel — le générateur rejette cette combinaison. Générez l'agent avec le protocole `ag-ui` à la place.
 :::
 
@@ -86,6 +79,23 @@ myGateway.addAgent(myAgent, { gatewayTargetName: 'my-target' });
 ```
 
 Le construct accorde au rôle d'exécution de la Gateway l'accès d'invocation à l'exécution de l'agent et configure la cible avec le fournisseur d'identifiants `GATEWAY_IAM_ROLE`, de sorte que la Gateway signe les appels sortants avec son propre rôle.
+
+:::tip[Déployer des agents dans un VPC]
+Placer une Gateway devant un agent est ce qui rend joignable un agent déployé dans un VPC : les appelants s'adressent au point de terminaison public de la Gateway, et la Gateway atteint l'exécution en interne. Passez une configuration réseau VPC au construct de l'agent :
+
+```ts
+import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
+
+const myAgent = new MyAgent(this, 'MyAgent', {
+  networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
+    vpc,
+    vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+  }),
+});
+```
+
+Utilisez un **sous-réseau privé avec sortie**, pas un sous-réseau privé isolé : l'exécution a besoin d'un accès Internet sortant pour atteindre Bedrock et lire sa configuration depuis AWS AppConfig.
+:::
 </Fragment>
 <Fragment slot="terraform">
 Dans le fichier Terraform où vous instanciez la Gateway, câblez la cible agent :

@@ -25,14 +25,7 @@ import Infrastructure from '@components/infrastructure.astro';
 1. `protocol: http` で生成された <Link path="guides/agentcore-gateway">`agentcore-gateway`</Link> プロジェクト
 2. `infra: agentcore` および `auth: iam` で作成されたエージェントコンポーネント（<Link path="guides/ts-agent">`ts#agent`</Link> または <Link path="guides/py-agent">`py#agent`</Link>）
 
-以下のエージェントプロトコルが Gateway の前段に配置できます：
-
-| Agent | `ag-ui` | `http` | `a2a` |
-| ----- | ------- | ------ | ----- |
-| `ts#agent` | ✅ | ❌ | ✅ |
-| `py#agent` | ✅ | ✅ | ✅ |
-
-:::note[TypeScript HTTP エージェント]
+:::caution[TypeScript HTTP エージェント]
 TypeScript の `http` エージェントは WebSocket 上で tRPC を提供しますが、AgentCore Gateway は WebSocket や双方向ストリーミングをサポートしていません。ジェネレーターはこの組み合わせを拒否します。代わりに `ag-ui` プロトコルでエージェントを生成してください。
 :::
 
@@ -86,6 +79,23 @@ myGateway.addAgent(myAgent, { gatewayTargetName: 'my-target' });
 ```
 
 コンストラクトは、Gateway の実行ロールにエージェントランタイムへの呼び出しアクセスを付与し、`GATEWAY_IAM_ROLE` 認証情報プロバイダーでターゲットを構成するため、Gateway は自身のロールでアウトバウンド呼び出しに署名します。
+
+:::tip[エージェントを VPC にデプロイする]
+エージェントの前に Gateway を配置することで、VPC にデプロイされたエージェントに到達できるようになります。呼び出し元は Gateway のパブリックエンドポイントと通信し、Gateway が内部でランタイムに到達します。エージェントの construct に VPC ネットワーク設定を渡してください:
+
+```ts
+import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
+
+const myAgent = new MyAgent(this, 'MyAgent', {
+  networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
+    vpc,
+    vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+  }),
+});
+```
+
+プライベート分離サブネットではなく、**エグレス付きのプライベートサブネット**を使用してください。ランタイムは Bedrock に到達し、AWS AppConfig から設定を読み取るために、アウトバウンドのインターネットアクセスを必要とします。
+:::
 </Fragment>
 <Fragment slot="terraform">
 Gateway をインスタンス化する Terraform ファイルで、エージェントターゲットを接続します：
