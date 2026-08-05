@@ -20,7 +20,7 @@ import {
 import { addTsDependencies } from '../../../utils/add-dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { FsCommands } from '../../../utils/fs';
-import { registerPnpmBuiltDependencies } from '../../../utils/pnpm-workspace';
+import { registerBuiltDependencies } from '../../../utils/pnpm-workspace';
 import { isWindows } from '../../../utils/smithy';
 
 /**
@@ -194,7 +194,7 @@ export default async function migration(
   if (migrated.length > 0 && !isWindows()) {
     // `mise` fetches its own binary in a `preinstall`, which pnpm 11 refuses to
     // run unless the workspace allows it.
-    registerPnpmBuiltDependencies(tree, { mise: true });
+    registerBuiltDependencies(tree, { mise: true });
   }
 
   await formatFilesInSubtree(tree);

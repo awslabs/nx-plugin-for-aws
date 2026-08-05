@@ -324,15 +324,33 @@ exports[`smithyProjectGenerator > should generate smithy project with default op
 `;
 
 exports[`smithyProjectGenerator > should generate smithy project with default options > ssdk.rolldown.config.mjs 1`] = `
-"import { createRequire } from 'node:module';
-import fs from 'node:fs';
+"import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import esmShim from '@rollup/plugin-esm-shim';
 import { dts } from 'rolldown-plugin-dts';
 
+/**
+ * Paths are handed to rolldown with forward slashes on every platform.
+ *
+ * A module's identity is its resolved path, and rolldown reaches this project's
+ * files two ways: the entry it is given, and the relative imports it follows from
+ * there. On Windows \`path.join\` produces backslashes, so an entry spelled that way
+ * and an import resolved the other spell the same file differently — it is then
+ * loaded twice, and the second copy sees the first's declarations as imports. The
+ * generated Server SDK merges an \`interface\` with a \`namespace\`, whose emitted
+ * assignment then looks like a write to an import and fails the build with
+ * ASSIGN_TO_IMPORT.
+ */
+const posix = (...segments) =>
+  path
+    .join(...segments)
+    .split(path.sep)
+    .join('/');
+
 // The Smithy CLI generates the Server SDK under dist, along with its own
 // dependencies, so paths are resolved from there rather than this project.
-const ssdkDir = path.join(
+const ssdkDir = posix(
   import.meta.dirname,
   '../',
   'dist',
@@ -347,13 +365,13 @@ const re2WasmPlugin = () => ({
   resolveId: (id) => {
     if (!(id === 're2-wasm' || id.endsWith('/re2-wasm'))) return null;
     try {
-      const dir = path.join(
+      const dir = posix(
         path.dirname(require.resolve('re2-wasm/package.json')),
         'build/wasm',
       );
       return fs.existsSync(path.join(dir, 're2.wasm')) &&
         fs.existsSync(path.join(dir, 're2.js'))
-        ? path.join(dir, 're2.js')
+        ? posix(dir, 're2.js')
         : null;
     } catch {
       return null;
@@ -373,21 +391,15 @@ const re2WasmPlugin = () => ({
 });
 
 export default {
-  input: path.join(ssdkDir, 'src/index.ts'),
+  input: posix(ssdkDir, 'src/index.ts'),
   plugins: [re2WasmPlugin(), dts({ resolve: true }), esmShim()],
   output: [
     {
-      dir: path.join(
-        import.meta.dirname,
-        '../',
-        'dist',
-        'test-api',
-        'build/ssdk',
-      ),
+      dir: posix(import.meta.dirname, '../', 'dist', 'test-api', 'build/ssdk'),
       format: 'es',
     },
   ],
-  resolve: { tsconfigFilename: path.join(ssdkDir, 'tsconfig.es.json') },
+  resolve: { tsconfigFilename: posix(ssdkDir, 'tsconfig.es.json') },
   platform: 'node',
 };
 "

@@ -29,7 +29,7 @@ import {
   projectExists,
 } from '../../utils/nx';
 import { getRelativePathToRootByDirectory } from '../../utils/paths';
-import { registerPnpmBuiltDependencies } from '../../utils/pnpm-workspace';
+import { registerBuiltDependencies } from '../../utils/pnpm-workspace';
 import {
   isWindows,
   smithyCliCommand,
@@ -255,7 +255,7 @@ export const smithyProjectGenerator = async (
     // `mise` fetches its own binary in a `preinstall`, and pnpm 11 fails the
     // install outright for a build script it skipped. Only where it is installed
     // — on Windows the CLI is a prerequisite and `mise` is never added.
-    registerPnpmBuiltDependencies(tree, { mise: true });
+    registerBuiltDependencies(tree, { mise: true });
   }
 
   await addGeneratorMetricsIfApplicable(tree, [SMITHY_PROJECT_GENERATOR_INFO]);
