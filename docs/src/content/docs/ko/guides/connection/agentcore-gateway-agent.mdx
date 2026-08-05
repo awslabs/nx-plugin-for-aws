@@ -174,6 +174,104 @@ egress가 있는 프라이빗 서브넷(NAT 게이트웨이로의 라우트)을 
 
 웹사이트를 Gateway의 에이전트에 연결하려면 <Link path="guides/connection/react-agentcore-gateway">`connection` 제너레이터</Link>를 사용하세요.
 
+## 호출자 신원을 런타임으로 전달하기
+
+기본적으로 Gateway는 자체 IAM 역할(`GATEWAY_IAM_ROLE` 자격 증명 공급자)로 아웃바운드 호출에 서명하므로 런타임은 호출자가 아닌 _Gateway의_ 신원을 봅니다. 에이전트가 호출자를 기반으로 권한을 부여하도록 하려면(예: 사용자의 `sub` 또는 `scope` 클레임을 읽기 위해) Gateway는 대신 호출자의 JWT를 변경하지 않고 런타임으로 전달할 수 있습니다. 이를 위해서는 세 가지 변경이 필요합니다:
+
+1. **Gateway가 JWT를 수락합니다.** Gateway를 `auth: cognito`로 생성하여 인바운드 권한 부여자가 Cognito(또는 다른 OIDC) 베어러 토큰을 검증하도록 합니다.
+2. **런타임이 동일한 JWT를 수락합니다.** 에이전트를 `auth: cognito`(동일한 사용자 풀)로 생성하여 런타임이 전달된 토큰을 재검증하도록 합니다.
+3. **대상이 `GATEWAY_IAM_ROLE` 대신 `JWT_PASSTHROUGH` 자격 증명 공급자를 사용하고**, **런타임이 `Authorization` 헤더를 허용 목록에 추가**하여 에이전트 코드에 도달하도록 합니다. 허용 목록이 없으면 AgentCore는 토큰을 검증하지만 컨테이너 이전에 헤더를 제거합니다.
+
+그러면 호출자는 `Authorization: Bearer <jwt>`(SigV4 없음)로 Gateway를 호출하고, 에이전트는 `Authorization` 헤더에서 클레임을 읽습니다. 런타임의 인바운드 권한 부여자가 이미 토큰을 검증했으므로 서명 검증을 건너뜁니다:
+
+```python title="packages/py_project/.../my_agent/main.py"
+import jwt  # PyJWT
+
+@app.post('/invocations')
+async def invoke(input: InvokeInput, request: Request):
+    token = request.headers['authorization'].removeprefix('Bearer ')
+    claims = jwt.decode(token, options={'verify_signature': False})
+    # authorize on claims['sub'], claims['scope'], ...
+```
+
+<Infrastructure>
+<Fragment slot="cdk">
+에이전트에 `requestHeaderConfiguration`을 전달하여 런타임이 헤더를 수신하도록 하고, `JWT_PASSTHROUGH` 자격 증명 공급자로 대상을 직접 생성합니다(`gateway.addAgent(agent)` 대신):
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {5-7,17-19}
+import { CfnGatewayTarget } from 'aws-cdk-lib/aws-bedrockagentcore';
+import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
+
+const myAgent = new MyAgent(this, 'MyAgent', {
+  identity,
+  // 런타임이 전달된 Authorization 헤더를 수신하도록 합니다.
+  requestHeaderConfiguration: { allowlistedHeaders: ['Authorization'] },
+});
+const myGateway = new MyGateway(this, 'MyGateway', { identity });
+
+const target = new CfnGatewayTarget(this, 'Target-my-agent', {
+  gatewayIdentifier: myGateway.gateway.gatewayId,
+  name: myAgent.agentName,
+  targetConfiguration: {
+    http: { agentcoreRuntime: { arn: myAgent.agentCoreRuntime.agentRuntimeArn } },
+  },
+  // 호출자의 검증된 JWT를 변경하지 않고 런타임으로 전달합니다.
+  credentialProviderConfigurations: [
+    { credentialProviderType: 'JWT_PASSTHROUGH' },
+  ],
+});
+
+// Gateway 역할은 여전히 런타임에 대한 호출 액세스가 필요합니다.
+myGateway.gateway.role.addToPrincipalPolicy(
+  new PolicyStatement({
+    actions: ['bedrock-agentcore:InvokeAgentRuntime'],
+    resources: [
+      myAgent.agentCoreRuntime.agentRuntimeArn,
+      `${myAgent.agentCoreRuntime.agentRuntimeArn}/*`,
+    ],
+  }),
+);
+```
+</Fragment>
+<Fragment slot="terraform">
+런타임이 헤더를 수신하도록 런타임에 `request_header_configuration` 블록을 추가하고, `JWT_PASSTHROUGH` 자격 증명 공급자로 대상을 구성합니다(`gateway_iam_role {}` 대신):
+
+```hcl title="packages/infra/src/main.tf" {5-7,20-22}
+# 런타임이 전달된 Authorization 헤더를 수신하도록 합니다. 이 블록을
+# 에이전트 모듈의 런타임 리소스에 추가합니다(packages/common/terraform/...).
+resource "aws_bedrockagentcore_agent_runtime" "agent_runtime" {
+  # ...
+  request_header_configuration {
+    request_header_allowlist = ["Authorization"]
+  }
+}
+
+resource "aws_bedrockagentcore_gateway_target" "my_agent" {
+  gateway_identifier = module.my_gateway.gateway_id
+  name               = "my-agent"
+  description        = "Agent runtime target my-agent"
+
+  target_configuration {
+    http {
+      agentcore_runtime {
+        arn = module.my_agent.agent_core_runtime_arn
+      }
+    }
+  }
+
+  # 호출자의 검증된 JWT를 변경하지 않고 런타임으로 전달합니다.
+  credential_provider_configuration {
+    credential_provider_type = "JWT_PASSTHROUGH"
+  }
+}
+```
+</Fragment>
+</Infrastructure>
+
+:::note
+`JWT_PASSTHROUGH`는 토큰 대상이 이미 런타임을 포함하는 단일 신원 공급자에 적합합니다. 하나의 Gateway가 여러 테넌트 또는 대상에 걸쳐 에이전트를 프론트하는 경우 대신 OAuth [on-behalf-of 토큰 교환](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-building-adding-targets-authorization.html)을 사용하세요.
+:::
+
 ## 로컬 개발
 
 다음 명령으로 Gateway를 로컬에서 실행하면:

@@ -173,7 +173,105 @@ module "my_agent" {
 
 对 `<gatewayUrl origin>/<targetName>/invocations` 的请求会被转发到代理运行时，无需协议转换，因此调用者使用与直接针对运行时相同的请求形式——SSE 流（AG-UI）、JSON 流（Python HTTP）和 A2A JSON-RPC 都可以代理通过。调用者使用 Gateway 进行身份验证（根据 Gateway 的 `auth` 使用 IAM SigV4 或 Cognito JWT），而不是与代理进行身份验证。
 
-要将网站连接到 Gateway 的代理，请使用 <Link path="guides/connection/react-agentcore-gateway">React 网站到 AgentCore Gateway 连接生成器</Link>。
+要将网站连接到 Gateway 的代理，请使用 <Link path="guides/connection/react-agentcore-gateway">`connection` 生成器</Link>。
+
+## 将调用者身份转发到运行时
+
+默认情况下，Gateway 使用自己的 IAM 角色（`GATEWAY_IAM_ROLE` 凭证提供程序）对出站调用进行签名，因此运行时看到的是 _Gateway 的_身份，而不是调用者的身份。如果您希望代理基于调用者进行授权——例如读取用户的 `sub` 或 `scope` 声明——Gateway 可以将调用者的 JWT 原封不动地转发到运行时。这需要三个更改：
+
+1. **Gateway 接受 JWT。** 使用 `auth: cognito` 生成 Gateway，以便其入站授权器验证 Cognito（或其他 OIDC）bearer 令牌。
+2. **运行时接受相同的 JWT。** 使用 `auth: cognito`（相同的用户池）生成代理，以便运行时重新验证转发的令牌。
+3. **目标使用 `JWT_PASSTHROUGH` 凭证提供程序**而不是 `GATEWAY_IAM_ROLE`，并且**运行时将 `Authorization` 标头列入允许列表**，以便它到达您的代理代码。如果没有允许列表，AgentCore 会验证令牌但在到达您的容器之前剥离标头。
+
+然后，调用者使用 `Authorization: Bearer <jwt>`（无 SigV4）调用 Gateway，代理从 `Authorization` 标头读取声明——跳过签名验证，因为运行时的入站授权器已经验证了令牌：
+
+```python title="packages/py_project/.../my_agent/main.py"
+import jwt  # PyJWT
+
+@app.post('/invocations')
+async def invoke(input: InvokeInput, request: Request):
+    token = request.headers['authorization'].removeprefix('Bearer ')
+    claims = jwt.decode(token, options={'verify_signature': False})
+    # authorize on claims['sub'], claims['scope'], ...
+```
+
+<Infrastructure>
+<Fragment slot="cdk">
+将 `requestHeaderConfiguration` 传递给代理，以便运行时接收标头，并自己创建目标（而不是 `gateway.addAgent(agent)`），使用 `JWT_PASSTHROUGH` 凭证提供程序：
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {5-7,17-19}
+import { CfnGatewayTarget } from 'aws-cdk-lib/aws-bedrockagentcore';
+import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
+
+const myAgent = new MyAgent(this, 'MyAgent', {
+  identity,
+  // Let the runtime receive the forwarded Authorization header.
+  requestHeaderConfiguration: { allowlistedHeaders: ['Authorization'] },
+});
+const myGateway = new MyGateway(this, 'MyGateway', { identity });
+
+const target = new CfnGatewayTarget(this, 'Target-my-agent', {
+  gatewayIdentifier: myGateway.gateway.gatewayId,
+  name: myAgent.agentName,
+  targetConfiguration: {
+    http: { agentcoreRuntime: { arn: myAgent.agentCoreRuntime.agentRuntimeArn } },
+  },
+  // Forward the caller's validated JWT to the runtime unchanged.
+  credentialProviderConfigurations: [
+    { credentialProviderType: 'JWT_PASSTHROUGH' },
+  ],
+});
+
+// The Gateway role still needs invoke access to the runtime.
+myGateway.gateway.role.addToPrincipalPolicy(
+  new PolicyStatement({
+    actions: ['bedrock-agentcore:InvokeAgentRuntime'],
+    resources: [
+      myAgent.agentCoreRuntime.agentRuntimeArn,
+      `${myAgent.agentCoreRuntime.agentRuntimeArn}/*`,
+    ],
+  }),
+);
+```
+</Fragment>
+<Fragment slot="terraform">
+将 `request_header_configuration` 块添加到运行时，以便它接收标头，并使用 `JWT_PASSTHROUGH` 凭证提供程序配置目标（而不是 `gateway_iam_role {}`）：
+
+```hcl title="packages/infra/src/main.tf" {5-7,20-22}
+# Let the runtime receive the forwarded Authorization header. Add this block
+# to the runtime resource in the agent module (packages/common/terraform/...).
+resource "aws_bedrockagentcore_agent_runtime" "agent_runtime" {
+  # ...
+  request_header_configuration {
+    request_header_allowlist = ["Authorization"]
+  }
+}
+
+resource "aws_bedrockagentcore_gateway_target" "my_agent" {
+  gateway_identifier = module.my_gateway.gateway_id
+  name               = "my-agent"
+  description        = "Agent runtime target my-agent"
+
+  target_configuration {
+    http {
+      agentcore_runtime {
+        arn = module.my_agent.agent_core_runtime_arn
+      }
+    }
+  }
+
+  # Forward the caller's validated JWT to the runtime unchanged.
+  credential_provider_configuration {
+    credential_provider_type = "JWT_PASSTHROUGH"
+  }
+}
+```
+</Fragment>
+</Infrastructure>
+
+:::note
+`JWT_PASSTHROUGH` 适用于单个身份提供程序，其令牌受众已经覆盖运行时。如果一个 Gateway 前置跨多个租户或受众的代理，请改用 OAuth [代表令牌交换](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-building-adding-targets-authorization.html)。
+:::
 
 ## 本地开发
 

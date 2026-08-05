@@ -175,6 +175,104 @@ Các yêu cầu đến `<gatewayUrl origin>/<targetName>/invocations` được c
 
 Để kết nối một website với các agent của Gateway, hãy sử dụng <Link path="guides/connection/react-agentcore-gateway">`connection` generator</Link>.
 
+## Chuyển tiếp danh tính người gọi đến runtime
+
+Theo mặc định, Gateway ký các lệnh gọi đi ra bằng IAM role của chính nó (credential provider `GATEWAY_IAM_ROLE`), do đó runtime thấy danh tính của _Gateway_, không phải của người gọi. Nếu bạn muốn agent ủy quyền dựa trên người gọi — ví dụ để đọc các claim `sub` hoặc `scope` của người dùng — Gateway có thể chuyển tiếp JWT của người gọi đến runtime mà không thay đổi. Điều này yêu cầu ba thay đổi:
+
+1. **Gateway chấp nhận JWT.** Tạo Gateway với `auth: cognito` để inbound authorizer của nó xác thực bearer token Cognito (hoặc OIDC khác).
+2. **Runtime chấp nhận cùng JWT.** Tạo agent với `auth: cognito` (cùng user pool) để runtime xác thực lại token được chuyển tiếp.
+3. **Target sử dụng credential provider `JWT_PASSTHROUGH`** thay vì `GATEWAY_IAM_ROLE`, và **runtime cho phép header `Authorization`** để nó đến được mã agent của bạn. Không có allowlist, AgentCore xác thực token nhưng loại bỏ header trước khi đến container của bạn.
+
+Sau đó người gọi invoke Gateway với `Authorization: Bearer <jwt>` (không có SigV4), và agent đọc các claim từ header `Authorization` — bỏ qua xác thực chữ ký, vì inbound authorizer của runtime đã xác minh token:
+
+```python title="packages/py_project/.../my_agent/main.py"
+import jwt  # PyJWT
+
+@app.post('/invocations')
+async def invoke(input: InvokeInput, request: Request):
+    token = request.headers['authorization'].removeprefix('Bearer ')
+    claims = jwt.decode(token, options={'verify_signature': False})
+    # authorize on claims['sub'], claims['scope'], ...
+```
+
+<Infrastructure>
+<Fragment slot="cdk">
+Truyền `requestHeaderConfiguration` cho agent để runtime nhận được header, và tự tạo target (thay vì `gateway.addAgent(agent)`) với credential provider `JWT_PASSTHROUGH`:
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {5-7,17-19}
+import { CfnGatewayTarget } from 'aws-cdk-lib/aws-bedrockagentcore';
+import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
+
+const myAgent = new MyAgent(this, 'MyAgent', {
+  identity,
+  // Let the runtime receive the forwarded Authorization header.
+  requestHeaderConfiguration: { allowlistedHeaders: ['Authorization'] },
+});
+const myGateway = new MyGateway(this, 'MyGateway', { identity });
+
+const target = new CfnGatewayTarget(this, 'Target-my-agent', {
+  gatewayIdentifier: myGateway.gateway.gatewayId,
+  name: myAgent.agentName,
+  targetConfiguration: {
+    http: { agentcoreRuntime: { arn: myAgent.agentCoreRuntime.agentRuntimeArn } },
+  },
+  // Forward the caller's validated JWT to the runtime unchanged.
+  credentialProviderConfigurations: [
+    { credentialProviderType: 'JWT_PASSTHROUGH' },
+  ],
+});
+
+// The Gateway role still needs invoke access to the runtime.
+myGateway.gateway.role.addToPrincipalPolicy(
+  new PolicyStatement({
+    actions: ['bedrock-agentcore:InvokeAgentRuntime'],
+    resources: [
+      myAgent.agentCoreRuntime.agentRuntimeArn,
+      `${myAgent.agentCoreRuntime.agentRuntimeArn}/*`,
+    ],
+  }),
+);
+```
+</Fragment>
+<Fragment slot="terraform">
+Thêm block `request_header_configuration` vào runtime để nó nhận được header, và cấu hình target với credential provider `JWT_PASSTHROUGH` (thay vì `gateway_iam_role {}`):
+
+```hcl title="packages/infra/src/main.tf" {5-7,20-22}
+# Let the runtime receive the forwarded Authorization header. Add this block
+# to the runtime resource in the agent module (packages/common/terraform/...).
+resource "aws_bedrockagentcore_agent_runtime" "agent_runtime" {
+  # ...
+  request_header_configuration {
+    request_header_allowlist = ["Authorization"]
+  }
+}
+
+resource "aws_bedrockagentcore_gateway_target" "my_agent" {
+  gateway_identifier = module.my_gateway.gateway_id
+  name               = "my-agent"
+  description        = "Agent runtime target my-agent"
+
+  target_configuration {
+    http {
+      agentcore_runtime {
+        arn = module.my_agent.agent_core_runtime_arn
+      }
+    }
+  }
+
+  # Forward the caller's validated JWT to the runtime unchanged.
+  credential_provider_configuration {
+    credential_provider_type = "JWT_PASSTHROUGH"
+  }
+}
+```
+</Fragment>
+</Infrastructure>
+
+:::note
+`JWT_PASSTHROUGH` phù hợp với một identity provider duy nhất có token audience đã bao phủ runtime. Nếu một Gateway đứng trước các agent trên nhiều tenant hoặc audience, hãy sử dụng OAuth [on-behalf-of token exchange](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-building-adding-targets-authorization.html) thay thế.
+:::
+
 ## Phát triển cục bộ
 
 Chạy Gateway cục bộ với:
