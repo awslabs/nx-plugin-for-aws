@@ -29,6 +29,8 @@ import { compare, valid } from 'semver';
  */
 
 export interface MigrationsJson {
+  $schema?: string;
+  name?: string;
   generators?: Record<
     string,
     { version?: string; everyMigration?: boolean } & Record<string, unknown>

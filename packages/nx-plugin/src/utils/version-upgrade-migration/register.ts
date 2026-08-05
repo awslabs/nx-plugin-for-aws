@@ -2,19 +2,21 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { type Tree, updateJson } from '@nx/devkit';
+import { type Tree, writeJson } from '@nx/devkit';
+import { LATEST_MIGRATIONS_DIR } from '../migration-versions';
 import {
-  LATEST_MIGRATIONS_DIR,
-  type MigrationsJson,
-} from '../migration-versions';
-import { nxPackageJsonUpdates } from './nx-package-updates';
+  nxPackageJsonUpdates,
+  type PackageJsonUpdates,
+} from './nx-package-updates';
 
-const MIGRATIONS_JSON_PATH = 'packages/nx-plugin/migrations.json';
+const PACKAGE_JSON_UPDATES_PATH = 'packages/nx-plugin/packageJsonUpdates.json';
 
 /**
- * Register the nx bump a version update needs, in `migrations.json`. Call only
- * when an nx package actually moved.
+ * Register the nx bump a version update needs, in `packageJsonUpdates.json`. Call
+ * only when an nx package actually moved.
  *
+ * The bumps live in their own committed file, assembled into `migrations.json`
+ * at build time, so this weekly-bot edit never conflicts with a migration PR.
  * The version sync migration itself is a committed `everyMigration` entry, so
  * only the nx packages need registering per update: they go through
  * `packageJsonUpdates` rather than a migration (see `nx-package-updates.ts`).
@@ -36,18 +38,19 @@ export const registerNxPackageUpdates = (
   tree: Tree,
   nxVersion?: string,
 ): string[] => {
-  updateJson<MigrationsJson>(tree, MIGRATIONS_JSON_PATH, (migrations) => ({
-    ...migrations,
-    // Recorded under `latest` until stamping resolves the version it ships with.
-    packageJsonUpdates: {
-      ...Object.fromEntries(
-        Object.entries(migrations.packageJsonUpdates ?? {}).filter(
-          ([, entry]) => entry.version !== LATEST_MIGRATIONS_DIR,
-        ),
-      ),
-      ...nxPackageJsonUpdates(LATEST_MIGRATIONS_DIR, nxVersion),
-    },
-  }));
+  const existing: PackageJsonUpdates = tree.exists(PACKAGE_JSON_UPDATES_PATH)
+    ? JSON.parse(tree.read(PACKAGE_JSON_UPDATES_PATH, 'utf-8'))
+    : {};
 
-  return [MIGRATIONS_JSON_PATH];
+  writeJson(tree, PACKAGE_JSON_UPDATES_PATH, {
+    // Recorded under `latest` until stamping resolves the version it ships with.
+    ...Object.fromEntries(
+      Object.entries(existing).filter(
+        ([, entry]) => entry.version !== LATEST_MIGRATIONS_DIR,
+      ),
+    ),
+    ...nxPackageJsonUpdates(LATEST_MIGRATIONS_DIR, nxVersion),
+  });
+
+  return [PACKAGE_JSON_UPDATES_PATH];
 };
