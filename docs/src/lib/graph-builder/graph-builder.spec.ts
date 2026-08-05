@@ -5,8 +5,12 @@
 import { describe, expect, it } from 'vitest';
 import { SUPPORTED_CONNECTIONS } from '../../../../packages/nx-plugin/src/connection/supported-connections';
 import {
+  edgePath,
   NODE_HEIGHT,
   NODE_WIDTH,
+  sourceAnchor,
+  targetAnchor,
+  transposePositions,
 } from '../../components/graph-builder/geometry';
 import {
   buildPresetGraph,
@@ -126,6 +130,140 @@ describe('catalog', () => {
       if (type.kind !== 'component') continue;
       expect(type.host, `${type.id} has no host`).toBeDefined();
     }
+  });
+});
+
+describe('orientation', () => {
+  const at = (id: string, x: number, y: number) => ({ id, x, y });
+
+  it('should put the ports on the side edges when flowing horizontally', () => {
+    const node = { x: 100, y: 200 };
+    expect(sourceAnchor(node, 'horizontal').y).toBe(200 + NODE_HEIGHT / 2);
+    // Anchors sit on the port's centre, 1px inside the node's edge.
+    expect(sourceAnchor(node, 'horizontal').x).toBe(100 + NODE_WIDTH - 1);
+    expect(targetAnchor(node, 'horizontal').x).toBe(101);
+  });
+
+  it('should put the ports on the top and bottom edges when flowing vertically', () => {
+    const node = { x: 100, y: 200 };
+    expect(sourceAnchor(node, 'vertical').x).toBe(100 + NODE_WIDTH / 2);
+    expect(sourceAnchor(node, 'vertical').y).toBe(200 + NODE_HEIGHT - 1);
+    expect(targetAnchor(node, 'vertical').x).toBe(100 + NODE_WIDTH / 2);
+    expect(targetAnchor(node, 'vertical').y).toBe(201);
+  });
+
+  it('should curve along the flow axis', () => {
+    // Horizontal control points share the endpoints' y; vertical ones share x.
+    // The control offset is 60% of the gap, capped at 160 — here 300 * 0.6 = 180
+    // clamps to 160.
+    const from = { x: 0, y: 50 };
+    const to = { x: 300, y: 50 };
+    expect(edgePath(from, to, 'horizontal')).toBe(
+      'M 0 50 C 160 50, 140 50, 300 50',
+    );
+
+    const down = { x: 50, y: 0 };
+    const below = { x: 50, y: 300 };
+    expect(edgePath(down, below, 'vertical')).toBe(
+      'M 50 0 C 50 160, 50 140, 50 300',
+    );
+  });
+
+  it('should transpose a horizontal chain into a vertical one', () => {
+    const nodes = [at('a', 24, 24), at('b', 352, 24), at('c', 680, 24)];
+    const moved = transposePositions(nodes, 'vertical');
+    // One lane each, so they stack: same x, increasing y.
+    expect(new Set(moved.map((m) => m.x)).size).toBe(1);
+    expect(moved.map((m) => m.y)).toEqual(
+      [...moved.map((m) => m.y)].sort((p, q) => p - q),
+    );
+  });
+
+  it('should transpose a vertical chain back into a horizontal one', () => {
+    const nodes = [at('a', 24, 24), at('b', 24, 160), at('c', 24, 296)];
+    const moved = transposePositions(nodes, 'horizontal', 900);
+    expect(new Set(moved.map((m) => m.y)).size).toBe(1);
+    expect(moved.map((m) => m.x)).toEqual(
+      [...moved.map((m) => m.x)].sort((p, q) => p - q),
+    );
+  });
+
+  it('should be stable across repeated swaps', () => {
+    // The point of normalising to lanes: swapping back and forth must not drift.
+    let nodes = [at('a', 24, 24), at('b', 352, 24), at('c', 680, 24)];
+    const firstVertical = transposePositions(nodes, 'vertical', 900);
+    nodes = firstVertical.map((m) => at(m.id, m.x, m.y));
+    const firstHorizontal = transposePositions(nodes, 'horizontal', 900);
+    nodes = firstHorizontal.map((m) => at(m.id, m.x, m.y));
+    const secondVertical = transposePositions(nodes, 'vertical', 900);
+    expect(secondVertical).toEqual(firstVertical);
+
+    nodes = secondVertical.map((m) => at(m.id, m.x, m.y));
+    expect(transposePositions(nodes, 'horizontal', 900)).toEqual(
+      firstHorizontal,
+    );
+  });
+
+  it('should keep a branching graph on separate lanes', () => {
+    // `a` feeds both `b` and `c`, which sit in one lane together.
+    const nodes = [at('a', 24, 24), at('b', 352, 24), at('c', 352, 160)];
+    const moved = transposePositions(nodes, 'vertical', 900);
+    const byId = new Map(moved.map((m) => [m.id, m]));
+    // b and c share a row below a, at different x.
+    expect(byId.get('b')!.y).toBe(byId.get('c')!.y);
+    expect(byId.get('b')!.x).not.toBe(byId.get('c')!.x);
+    expect(byId.get('a')!.y).toBeLessThan(byId.get('b')!.y);
+  });
+
+  it('should never place a node at a negative coordinate', () => {
+    const nodes = [at('a', 24, 24), at('b', 352, 160)];
+    for (const to of ['vertical', 'horizontal'] as const) {
+      for (const move of transposePositions(nodes, to, 900)) {
+        expect(move.x).toBeGreaterThanOrEqual(0);
+        expect(move.y).toBeGreaterThanOrEqual(0);
+      }
+    }
+  });
+
+  it('should not overlap nodes in either orientation', () => {
+    const nodes = [
+      at('a', 24, 24),
+      at('b', 352, 24),
+      at('c', 352, 160),
+      at('d', 680, 24),
+    ];
+    for (const to of ['vertical', 'horizontal'] as const) {
+      const moved = transposePositions(nodes, to, 900);
+      for (let i = 0; i < moved.length; i += 1) {
+        for (let j = i + 1; j < moved.length; j += 1) {
+          const overlapping =
+            Math.abs(moved[i].x - moved[j].x) < NODE_WIDTH &&
+            Math.abs(moved[i].y - moved[j].y) < NODE_HEIGHT;
+          expect(
+            overlapping,
+            `${to}: ${moved[i].id} overlaps ${moved[j].id}`,
+          ).toBe(false);
+        }
+      }
+    }
+  });
+
+  it('should fit a horizontal layout in the width it is given', () => {
+    // Five lanes cannot fit 400px at any spacing, so they wrap rather than
+    // running off the edge.
+    const nodes = [0, 1, 2, 3, 4].map((i) => at(`n${i}`, 24 + i * 328, 24));
+    for (const width of [900, 560, 400]) {
+      for (const move of transposePositions(nodes, 'horizontal', width)) {
+        expect(
+          move.x + NODE_WIDTH,
+          `a node overflows a ${width}px canvas`,
+        ).toBeLessThanOrEqual(width);
+      }
+    }
+  });
+
+  it('should handle an empty graph', () => {
+    expect(transposePositions([], 'vertical')).toEqual([]);
   });
 });
 

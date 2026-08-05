@@ -13,9 +13,11 @@ import {
 import {
   edgeMidpoint,
   edgePath,
+  loopMidpoint,
   loopPath,
   NODE_HEIGHT,
   NODE_WIDTH,
+  type Orientation,
   type Point,
   snap,
   sourceAnchor,
@@ -32,6 +34,8 @@ interface Props {
   selectedEdgeId: string | undefined;
   /** The palette type being dragged in, so drop targets can be previewed. */
   pendingType: string | undefined;
+  /** Which way the graph flows, which decides where the ports sit. */
+  orientation: Orientation;
   onSelect: (id: string | undefined, options?: { additive?: boolean }) => void;
   onSelectEdge: (id: string | undefined) => void;
   onMoveNodes: (moves: readonly { id: string; x: number; y: number }[]) => void;
@@ -91,6 +95,7 @@ export const Canvas = ({
   selectedIds,
   selectedEdgeId,
   pendingType,
+  orientation,
   onSelect,
   onSelectEdge,
   onMoveNodes,
@@ -432,9 +437,11 @@ export const Canvas = ({
             if (!source || !target) return null;
 
             const isLoop = source.id === target.id;
-            const from = sourceAnchor(source);
-            const to = targetAnchor(target);
-            const path = isLoop ? loopPath(source) : edgePath(from, to);
+            const from = sourceAnchor(source, orientation);
+            const to = targetAnchor(target, orientation);
+            const path = isLoop
+              ? loopPath(source, orientation)
+              : edgePath(from, to, orientation);
             const severity = edgeIssueSeverity(edge.id);
             const active =
               selectedIds.has(edge.source) || selectedIds.has(edge.target);
@@ -467,11 +474,17 @@ export const Canvas = ({
               const target = edgeDraft.hoverTargetId
                 ? nodeById.get(edgeDraft.hoverTargetId)
                 : undefined;
-              const to = target ? targetAnchor(target) : edgeDraft.to;
+              const to = target
+                ? targetAnchor(target, orientation)
+                : edgeDraft.to;
               return (
                 <path
                   className={`gb-edge-draft${edgeDraft.hoverTargetId ? ' is-valid' : ''}`}
-                  d={edgePath(sourceAnchor(source), to)}
+                  d={edgePath(
+                    sourceAnchor(source, orientation),
+                    to,
+                    orientation,
+                  )}
                   markerEnd="url(#gb-arrow)"
                 />
               );
@@ -486,8 +499,11 @@ export const Canvas = ({
           if (!source || !target) return null;
           const midpoint =
             source.id === target.id
-              ? { x: source.x + NODE_WIDTH / 2, y: source.y - 34 }
-              : edgeMidpoint(sourceAnchor(source), targetAnchor(target));
+              ? loopMidpoint(source, orientation)
+              : edgeMidpoint(
+                  sourceAnchor(source, orientation),
+                  targetAnchor(target, orientation),
+                );
           return (
             <button
               key={`remove-${edge.id}`}
@@ -618,19 +634,22 @@ export const Canvas = ({
               </span>
 
               {type.roles.includes('target') && (
-                <span className="gb-port gb-port--in" aria-hidden="true" />
+                <span
+                  className={`gb-port gb-port--in gb-port--in-${orientation}`}
+                  aria-hidden="true"
+                />
               )}
               {type.roles.includes('source') && (
                 <button
                   type="button"
-                  className="gb-port gb-port--out"
+                  className={`gb-port gb-port--out gb-port--out-${orientation}`}
                   aria-label={`Draw a connection from ${node.name || type.label}`}
                   onPointerDown={(event) => {
                     event.stopPropagation();
                     event.preventDefault();
                     setEdgeDraft({
                       sourceId: node.id,
-                      to: sourceAnchor(node),
+                      to: sourceAnchor(node, orientation),
                     });
                   }}
                 />
