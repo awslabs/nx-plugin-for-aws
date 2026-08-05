@@ -12,6 +12,7 @@ import {
 } from '../../lib/graph-builder/catalog';
 import type { EmitOptions } from '../../lib/graph-builder/commands';
 import {
+  autoFixesForConnection,
   type Graph,
   type GraphNode,
   validate,
@@ -225,8 +226,31 @@ export const GraphBuilder = () => {
           (edge) => edge.source === sourceId && edge.target === targetId,
         );
         if (exists) return current;
+
+        // Some connections only work against one setting — a website reaches an
+        // agent over AG-UI, an agent reaches another over A2A. Switch to it as the
+        // edge is drawn, rather than drawing it and reporting an error, but leave
+        // any option the user chose themselves alone.
+        const fixes = autoFixesForConnection(source, target);
+        const nodes = fixes.length
+          ? current.nodes.map((node) => {
+              const forNode = fixes.filter((fix) => fix.nodeId === node.id);
+              if (forNode.length === 0) return node;
+              return {
+                ...node,
+                options: {
+                  ...node.options,
+                  ...Object.fromEntries(
+                    forNode.map((fix) => [fix.option, fix.value]),
+                  ),
+                },
+              };
+            })
+          : current.nodes;
+
         return {
           ...current,
+          nodes,
           edges: [
             ...current.edges,
             {

@@ -8,6 +8,7 @@ import GeneratorsJson from '../../generators.json' with { type: 'json' };
 import {
   CONNECTION_CONSTRAINTS,
   CONNECTION_ENDPOINT_TYPES,
+  CONNECTION_PREFERENCES,
   deriveScaffoldRecipe,
   SELF_CONNECTION_DISALLOWED,
 } from './scaffold-catalog';
@@ -290,6 +291,81 @@ describe('scaffold catalog', () => {
         (key) => !connectionKeys.includes(key),
       );
       expect(unknown).toEqual([]);
+    });
+
+    it('should only prefer options for supported connections', () => {
+      const unknown = Object.keys(CONNECTION_PREFERENCES).filter(
+        (key) => !connectionKeys.includes(key),
+      );
+      expect(unknown).toEqual([]);
+    });
+
+    it('should prefer values the constrained option can actually hold', () => {
+      for (const [key, preferences] of Object.entries(
+        CONNECTION_PREFERENCES as Record<
+          string,
+          readonly {
+            side: 'source' | 'target';
+            option: string;
+            value: string;
+          }[]
+        >,
+      )) {
+        const [source, target] = key.split(' -> ');
+        for (const preference of preferences) {
+          const type = preference.side === 'source' ? source : target;
+          const recipe = (SCAFFOLD_RECIPES as Record<string, any>)[type];
+          const property = readSchema(recipe.generator).properties?.[
+            preference.option
+          ];
+          expect(
+            property,
+            `${key} prefers ${preference.side}.${preference.option}, absent from ${recipe.generator}'s schema`,
+          ).toBeDefined();
+          expect(
+            property.enum,
+            `${key} prefers ${preference.option}='${preference.value}', not in its enum`,
+          ).toContain(preference.value);
+        }
+      }
+    });
+
+    it('should not prefer a value a constraint forbids', () => {
+      // A preference that contradicts the rule it sits beside would auto-fix a
+      // graph straight into a validation error.
+      for (const [key, preferences] of Object.entries(
+        CONNECTION_PREFERENCES as Record<
+          string,
+          readonly { side: string; option: string; value: string }[]
+        >,
+      )) {
+        const constraints =
+          (
+            CONNECTION_CONSTRAINTS as Record<
+              string,
+              readonly {
+                side: string;
+                option: string;
+                equals?: string;
+                notEquals?: string;
+              }[]
+            >
+          )[key] ?? [];
+        for (const preference of preferences) {
+          for (const constraint of constraints) {
+            if (
+              constraint.side !== preference.side ||
+              constraint.option !== preference.option
+            ) {
+              continue;
+            }
+            if (constraint.equals !== undefined) {
+              expect(preference.value).toBe(constraint.equals);
+            }
+            expect(preference.value).not.toBe(constraint.notEquals);
+          }
+        }
+      }
     });
 
     it('should only disallow self-connection for supported connections', () => {
