@@ -1,0 +1,149 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`gateway-cognito-passthrough migration > adds auth=cognito and the Authorization allowlist to a Cognito agent 1`] = `
+"import {
+  Runtime,
+  RuntimeAuthorizerConfiguration,
+} from 'aws-cdk-lib/aws-bedrockagentcore';
+import { Construct } from 'constructs';
+
+export class MyCognitoAgent extends Construct {
+  public readonly agentCoreRuntime: Runtime;
+  /** Default Gateway target name for this agent. */
+  public readonly agentName = 'my-cognito-agent';
+  /** Inbound auth — a fronting Gateway uses this to pick its outbound credential. */
+  public readonly auth = 'cognito';
+
+  constructor(scope: Construct, id: string, props: MyCognitoAgentProps) {
+    super(scope, id);
+    const { identity } = props;
+    this.agentCoreRuntime = new Runtime(this, 'MyCognitoAgent', {
+      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingCognito(
+        identity.userPool,
+        [identity.userPoolClient],
+      ),
+      // Receive the caller's Authorization header (validated by the authorizer).
+      requestHeaderConfiguration: {
+        allowlistedHeaders: ['Authorization'],
+      },
+    });
+  }
+}
+"
+`;
+
+exports[`gateway-cognito-passthrough migration > adds the request_header_configuration block to the terraform runtime 1`] = `
+"resource "aws_bedrockagentcore_agent_runtime" "agent_runtime" {
+  agent_runtime_name = "test"
+
+  dynamic "authorizer_configuration" {
+    for_each = var.authorizer_configuration != null && try(var.authorizer_configuration.custom_jwt_authorizer, null) != null ? [var.authorizer_configuration.custom_jwt_authorizer] : []
+    content {
+      custom_jwt_authorizer {
+        discovery_url    = authorizer_configuration.value.discovery_url
+        allowed_audience = authorizer_configuration.value.allowed_audience
+        allowed_clients  = authorizer_configuration.value.allowed_clients
+      }
+    }
+  }
+
+  # Receive the caller's Authorization header (validated by the JWT authorizer).
+  dynamic "request_header_configuration" {
+    for_each = var.authorizer_configuration != null && try(var.authorizer_configuration.custom_jwt_authorizer, null) != null ? [1] : []
+    content {
+      request_header_allowlist = ["Authorization"]
+    }
+  }
+
+  network_configuration {
+    network_mode = "PUBLIC"
+  }
+}
+"
+`;
+
+exports[`gateway-cognito-passthrough migration > makes the gateway pick the target credential from the agent auth 1`] = `
+"import * as agentcore from 'aws-cdk-lib/aws-bedrockagentcore';
+import * as iam from 'aws-cdk-lib/aws-iam';
+import { Construct } from 'constructs';
+
+export class AgentCoreGateway extends Construct implements iam.IGrantable {
+  public addAgent(
+    agent: Construct & {
+      readonly agentCoreRuntime: agentcore.Runtime;
+      readonly agentName: string;
+      readonly auth?: 'iam' | 'cognito';
+    },
+    props?: {
+      gatewayTargetName?: string;
+    },
+  ): agentcore.CfnGatewayTarget {
+    return this.addAgentTarget({
+      gatewayTargetName: props?.gatewayTargetName ?? agent.agentName,
+      agentRuntimeArn: agent.agentCoreRuntime.agentRuntimeArn,
+      credentials: agent.auth === 'cognito' ? 'jwt-passthrough' : 'gateway-iam',
+    });
+  }
+
+  public addAgentTarget(props: {
+    gatewayTargetName: string;
+    agentRuntimeArn: string;
+    credentials?: 'gateway-iam' | 'jwt-passthrough';
+  }): agentcore.CfnGatewayTarget {
+    const target = new agentcore.CfnGatewayTarget(
+      this,
+      \`Target-\${props.gatewayTargetName}\`,
+      {
+        gatewayIdentifier: this.gateway.gatewayId,
+        name: props.gatewayTargetName,
+        targetConfiguration: {
+          http: {
+            agentcoreRuntime: {
+              arn: props.agentRuntimeArn,
+              qualifier: 'DEFAULT',
+            },
+          },
+        },
+        // The bare gateway IAM role credential: runtime targets reject the
+        // iamCredentialProvider detail MCP targets carry.
+        credentialProviderConfigurations: [
+          {
+            credentialProviderType:
+              props.credentials === 'jwt-passthrough'
+                ? 'JWT_PASSTHROUGH'
+                : 'GATEWAY_IAM_ROLE',
+          },
+        ],
+      },
+    );
+    return target;
+  }
+
+  public addMcpServerTarget(props: {
+    gatewayTargetName: string;
+    mcpServerRuntimeArn: string;
+  }): agentcore.CfnGatewayTarget {
+    const target = new agentcore.CfnGatewayTarget(
+      this,
+      \`Target-\${props.gatewayTargetName}\`,
+      {
+        gatewayIdentifier: this.gateway.gatewayId,
+        name: props.gatewayTargetName,
+        targetConfiguration: {
+          mcp: { openApiSchema: { inlinePayload: 'x' } },
+        },
+        credentialProviderConfigurations: [
+          {
+            credentialProviderType: 'GATEWAY_IAM_ROLE',
+            credentialProvider: {
+              iamCredentialProvider: { service: 'bedrock-agentcore' },
+            },
+          },
+        ],
+      },
+    );
+    return target;
+  }
+}
+"
+`;

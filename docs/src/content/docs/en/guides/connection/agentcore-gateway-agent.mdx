@@ -23,7 +23,7 @@ Once connected, the Gateway proxies requests for the agent under `<gatewayUrl>/<
 Before using this generator, ensure you have:
 
 1. An <Link path="guides/agentcore-gateway">`agentcore-gateway`</Link> project generated with `protocol: http`
-2. An agent component (<Link path="guides/ts-agent">`ts#agent`</Link> or <Link path="guides/py-agent">`py#agent`</Link>) created with `infra: agentcore` and `auth: iam`
+2. An agent component (<Link path="guides/ts-agent">`ts#agent`</Link> or <Link path="guides/py-agent">`py#agent`</Link>) created with `infra: agentcore`. Either `auth: iam` (the Gateway invokes it with its own role) or `auth: cognito` (the Gateway forwards the caller's JWT — see [Forwarding caller identity](#forwarding-caller-identity-to-the-runtime)) works.
 
 :::caution[TypeScript HTTP agents]
 A TypeScript `http` agent serves tRPC over WebSocket, and AgentCore Gateway does not support WebSocket or bidirectional streaming — the generator rejects this combination. Generate the agent with the `ag-ui` protocol instead.
@@ -177,13 +177,19 @@ To connect a website to the Gateway's agents, use the <Link path="guides/connect
 
 ## Forwarding caller identity to the runtime
 
-By default the Gateway signs outbound calls with its own IAM role (the `GATEWAY_IAM_ROLE` credential provider), so the runtime sees the _Gateway's_ identity, not the caller's. If you want the agent to authorize on the caller — for example to read the user's `sub` or `scope` claims — the Gateway can instead forward the caller's JWT to the runtime unchanged. This requires three changes:
+By default the Gateway signs outbound calls with its own IAM role (the `GATEWAY_IAM_ROLE` credential provider), so the runtime sees the _Gateway's_ identity, not the caller's. If instead you want the agent to authorize on the caller — for example to read the user's `sub` or `scope` claims — front a **Cognito** agent with a **Cognito** Gateway. The Gateway then forwards the caller's JWT to the runtime unchanged (the `JWT_PASSTHROUGH` credential provider), and the runtime revalidates it.
 
-1. **The Gateway accepts JWTs.** Generate the Gateway with `auth: cognito` so its inbound authorizer validates a Cognito (or other OIDC) bearer token.
-2. **The runtime accepts the same JWTs.** Generate the agent with `auth: cognito` (same user pool) so the runtime revalidates the forwarded token.
-3. **The target uses the `JWT_PASSTHROUGH` credential provider** instead of `GATEWAY_IAM_ROLE`, and the **runtime allowlists the `Authorization` header** so it reaches your agent code. Without the allowlist, AgentCore validates the token but strips the header before your container.
+Generate both ends with `auth: cognito` and connect them as above:
 
-Callers then invoke the Gateway with `Authorization: Bearer <jwt>` (no SigV4), and the agent reads the claims from the `Authorization` header — skipping signature validation, since the runtime's inbound authorizer has already verified the token:
+- an agent (<Link path="guides/ts-agent">`ts#agent`</Link> or <Link path="guides/py-agent">`py#agent`</Link>) created with `auth: cognito`, and
+- a Gateway created with `auth: cognito` fronting the **same** Cognito user pool.
+
+Everything else is automatic — `gateway.addAgent(agent)` (CDK) and the generated Terraform runtime module handle the wiring for you based on the agent's `auth`:
+
+- the target is created with the `JWT_PASSTHROUGH` credential provider (rather than `GATEWAY_IAM_ROLE`), and
+- the runtime allowlists the `Authorization` header so the forwarded token reaches your agent code. Without this allowlist AgentCore validates the token but strips the header before your container.
+
+Callers invoke the Gateway with `Authorization: Bearer <jwt>` (no SigV4), and the agent reads the claims from the `Authorization` header — skipping signature validation, since the runtime's inbound authorizer has already verified the token:
 
 ```python title="packages/py_project/.../my_agent/main.py"
 import jwt  # PyJWT
@@ -195,82 +201,8 @@ async def invoke(input: InvokeInput, request: Request):
     # authorize on claims['sub'], claims['scope'], ...
 ```
 
-<Infrastructure>
-<Fragment slot="cdk">
-Pass `requestHeaderConfiguration` to the agent so the runtime receives the header, and create the target yourself (instead of `gateway.addAgent(agent)`) with the `JWT_PASSTHROUGH` credential provider:
-
-```ts title="packages/infra/src/stacks/application-stack.ts" {5-7,17-19}
-import { CfnGatewayTarget } from 'aws-cdk-lib/aws-bedrockagentcore';
-import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
-
-const myAgent = new MyAgent(this, 'MyAgent', {
-  identity,
-  // Let the runtime receive the forwarded Authorization header.
-  requestHeaderConfiguration: { allowlistedHeaders: ['Authorization'] },
-});
-const myGateway = new MyGateway(this, 'MyGateway', { identity });
-
-const target = new CfnGatewayTarget(this, 'Target-my-agent', {
-  gatewayIdentifier: myGateway.gateway.gatewayId,
-  name: myAgent.agentName,
-  targetConfiguration: {
-    http: { agentcoreRuntime: { arn: myAgent.agentCoreRuntime.agentRuntimeArn } },
-  },
-  // Forward the caller's validated JWT to the runtime unchanged.
-  credentialProviderConfigurations: [
-    { credentialProviderType: 'JWT_PASSTHROUGH' },
-  ],
-});
-
-// The Gateway role still needs invoke access to the runtime.
-myGateway.gateway.role.addToPrincipalPolicy(
-  new PolicyStatement({
-    actions: ['bedrock-agentcore:InvokeAgentRuntime'],
-    resources: [
-      myAgent.agentCoreRuntime.agentRuntimeArn,
-      `${myAgent.agentCoreRuntime.agentRuntimeArn}/*`,
-    ],
-  }),
-);
-```
-</Fragment>
-<Fragment slot="terraform">
-Add a `request_header_configuration` block to the runtime so it receives the header, and configure the target with the `JWT_PASSTHROUGH` credential provider (instead of `gateway_iam_role {}`):
-
-```hcl title="packages/infra/src/main.tf" {5-7,20-22}
-# Let the runtime receive the forwarded Authorization header. Add this block
-# to the runtime resource in the agent module (packages/common/terraform/...).
-resource "aws_bedrockagentcore_agent_runtime" "agent_runtime" {
-  # ...
-  request_header_configuration {
-    request_header_allowlist = ["Authorization"]
-  }
-}
-
-resource "aws_bedrockagentcore_gateway_target" "my_agent" {
-  gateway_identifier = module.my_gateway.gateway_id
-  name               = "my-agent"
-  description        = "Agent runtime target my-agent"
-
-  target_configuration {
-    http {
-      agentcore_runtime {
-        arn = module.my_agent.agent_core_runtime_arn
-      }
-    }
-  }
-
-  # Forward the caller's validated JWT to the runtime unchanged.
-  credential_provider_configuration {
-    credential_provider_type = "JWT_PASSTHROUGH"
-  }
-}
-```
-</Fragment>
-</Infrastructure>
-
 :::note
-`JWT_PASSTHROUGH` suits a single identity provider whose token audience already covers the runtime. If one Gateway fronts agents across multiple tenants or audiences, use OAuth [on-behalf-of token exchange](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-building-adding-targets-authorization.html) instead.
+JWT passthrough suits a single identity provider whose token audience already covers the runtime. If one Gateway fronts agents across multiple tenants or audiences, use OAuth [on-behalf-of token exchange](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-building-adding-targets-authorization.html) instead.
 :::
 
 ## Local Development
