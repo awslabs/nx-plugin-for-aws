@@ -67,8 +67,10 @@ describe('warnIfSmithyMissing', () => {
     onPlatform('win32', () => warnIfSmithyMissing(() => false));
 
     expect(warn).toHaveBeenCalledTimes(1);
-    // Names the install the docs point at, so the message is actionable.
-    expect(vi.mocked(warn).mock.calls[0][0]).toContain('scoop install');
+    // Points at the install guide, so the message is actionable.
+    expect(vi.mocked(warn).mock.calls[0][0]).toContain(
+      'smithy.io/2.0/guides/smithy-cli/cli_installation.html',
+    );
   });
 
   it('should stay quiet on windows when the cli is installed', () => {

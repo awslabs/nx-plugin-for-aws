@@ -61,18 +61,7 @@ export const INIT_DEPENDENCIES = [
 // pnpm 11 reads `allowBuilds` instead. Any dep NOT in this allowlist will
 // have its install scripts skipped with a warning — matching pnpm 10's
 // default behaviour. The user can opt-in later via `pnpm approve-builds`.
-//
-// `mise` is here for the Smithy generators: it fetches its own binary in a
-// `preinstall`, and pnpm fails the install outright (ERR_PNPM_IGNORED_BUILDS)
-// for a script it skipped. Listed unconditionally so adding a Smithy project to
-// an existing workspace doesn't have to repair the allowlist first.
-export const PNPM_BUILT_DEPENDENCIES = [
-  '@swc/core',
-  'esbuild',
-  'mise',
-  'nx',
-  'sharp',
-];
+export const PNPM_BUILT_DEPENDENCIES = ['@swc/core', 'esbuild', 'nx', 'sharp'];
 
 /**
  * Options controlling how the workspace is initialised. These mirror the

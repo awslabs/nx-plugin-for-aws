@@ -66,11 +66,6 @@ export const warnIfSmithyMissing = (
     return;
   }
   logger.warn(
-    `The Smithy CLI was not found on your PATH. Smithy projects build with it directly on Windows, so install it before building:
-
-  scoop bucket add smithy-lang https://github.com/smithy-lang/scoop-bucket
-  scoop install smithy-lang/smithy-cli
-
-See https://smithy.io/2.0/guides/smithy-cli/cli_installation.html for other options.`,
+    `The Smithy CLI was not found on your PATH. Smithy projects build with it directly on Windows, so install it before building: https://smithy.io/2.0/guides/smithy-cli/cli_installation.html`,
   );
 };

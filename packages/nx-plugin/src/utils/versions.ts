@@ -285,6 +285,12 @@ export const VENDORED_VERSIONS = {
  * must hold the same version: the CLI refuses a model built against a newer
  * `smithy-model` than it can parse. The TypeScript codegen artifact versions
  * independently.
+ *
+ * The codegen artifact is behind its latest release: 0.51.0 generates a server
+ * importing `ServerInterceptor` from `@aws-smithy/server-common`, which no
+ * published release of that package exports, so the generated SDK fails to
+ * bundle. Deliberately not pinned back in the version update, which proposes the
+ * latest and lets the e2e tests catch a release that doesn't build.
  */
 export const SMITHY_VERSIONS = {
   cli: '1.72.1',
@@ -295,22 +301,6 @@ export const SMITHY_VERSIONS = {
   'software.amazon.smithy.typescript:smithy-aws-typescript-codegen': '0.50.0',
 } as const;
 export type ISmithyVersion = keyof typeof SMITHY_VERSIONS;
-
-/**
- * Smithy artifacts held below their latest release, and why.
- *
- * The weekly version update proposes anything below the ceiling and stops there,
- * so the hold is visible in one place rather than buried in a rejection list —
- * and lifting it is deleting an entry once the blocking release lands.
- */
-export const SMITHY_VERSION_CEILINGS: Partial<Record<ISmithyVersion, string>> =
-  {
-    // 0.51.0 generates a server importing `ServerInterceptor` from
-    // `@aws-smithy/server-common`, which its latest release (1.0.0-alpha.10) does
-    // not export — the generated SSDK then fails to bundle. Lift once a
-    // `server-common` exporting it ships.
-    'software.amazon.smithy.typescript:smithy-aws-typescript-codegen': '0.50.0',
-  };
 
 /**
  * The Maven coordinates a generated `smithy-build.json` declares, keyed as

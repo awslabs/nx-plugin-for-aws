@@ -20,6 +20,8 @@ import {
 import { addTsDependencies } from '../../../utils/add-dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { FsCommands } from '../../../utils/fs';
+import { registerPnpmBuiltDependencies } from '../../../utils/pnpm-workspace';
+import { isWindows } from '../../../utils/smithy';
 
 /**
  * Move Smithy projects off the container build onto the Smithy CLI.
@@ -187,6 +189,12 @@ export default async function migration(
   // go to the root manifest, so repeating one is a no-op.
   for (const metadata of migrated) {
     addTsDependencies(tree, DEPENDENCIES, { metadata });
+  }
+
+  if (migrated.length > 0 && !isWindows()) {
+    // `mise` fetches its own binary in a `preinstall`, which pnpm 11 refuses to
+    // run unless the workspace allows it.
+    registerPnpmBuiltDependencies(tree, { mise: true });
   }
 
   await formatFilesInSubtree(tree);

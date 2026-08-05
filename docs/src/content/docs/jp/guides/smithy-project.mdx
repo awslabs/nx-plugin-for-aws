@@ -116,55 +116,33 @@ Smithyプロジェクトは[Docker](https://www.docker.com/)を使用してビ�
 
 ## シェイプライブラリへの依存
 
-シェイプライブラリをビルドすると、組み立てられたモデルが`dist/<my-shapes>/build/model.json`に書き込まれます。この単一ファイルには、ライブラリが定義するすべてのシェイプと、それが依存するすべてのシェイプが含まれているため、コンシューマーは直接参照するライブラリのみを宣言すればよいことになります。
+シェイプライブラリをビルドすると、組み立てられたモデルが`dist/<my-shapes>/build/model/model.json`に書き込まれます。この単一ファイルには、ライブラリが定義するすべてのシェイプと、それが依存するすべてのシェイプが含まれているため、コンシューマーは直接参照するライブラリのみを宣言すればよいことになります。
 
-別のSmithyプロジェクトからシェイプライブラリに依存するには、コンシューマープロジェクトに2つの変更を加えます：
+別のSmithyプロジェクトからシェイプライブラリに依存するには、コンシューマープロジェクトに3つの変更を加えます：
 
 <Steps>
 
-1. ライブラリのビルドされたモデルをコンシューマープロジェクトの`smithy-build.json`の`imports`に追加します。パスはそのファイルからの相対パスなので、`../`セグメントの数はコンシューマープロジェクトのネストの深さと一致します — 以下の`packages/my-api/model`の場合は3つです：
+1. Smithyプロジェクトはコンテナ内でビルドされ、ビルドには名前付きビルドコンテキストとしてワークスペースルートが与えられます。コンシューマープロジェクトの`build.Dockerfile`に、独自のソースがコピーされる場所と並んで`COPY`を追加します：
+
+   ```dockerfile ins={4}
+   # Copy project files
+   COPY smithy-build.json .
+   COPY src src
+   COPY --from=workspace dist/packages/my-shapes/build/model/model.json deps/my-shapes.json
+   ```
+
+2. コピーしたファイルをコンシューマープロジェクトの`smithy-build.json`の`imports`に追加します：
 
    ```json ins={4}
    {
      "version": "1.0",
      "sources": ["src/"],
-     "imports": ["../../../dist/packages/my-shapes/build/model.json"],
+     "imports": ["deps/my-shapes.json"],
      ...
    }
    ```
 
-2. ライブラリの`build`ターゲットを、コンシューマープロジェクトの`project.json`内の`compile`ターゲットの依存関係として追加し、コンシューマーがビルドする前にモデルが存在するようにします：
-
-   ```json ins={4}
-   {
-     "targets": {
-       "compile": {
-         "dependsOn": ["@my-scope/my-shapes:build"],
-         ...
-       }
-     }
-   }
-   ```
-
-</Steps>
-
-これで、モデルは`use`でライブラリのシェイプを参照できるようになります：
-
-```smithy
-$version: "2.0"
-
-namespace com.example.api
-
-use com.example.shared#Customer
-
-structure GetCustomerOutput {
-    @required
-    customer: Customer
-}
-```
-
-シェイプライブラリは、同じ方法で他のシェイプライブラリに依存できます。各ライブラリのビルドされたモデルには既に独自の依存関係が含まれているため、直接参照するライブラリに対してのみこれらの手順を繰り返す必要があります。複数のパスから到達するライブラリは一度だけ解決されます — Smithyは重複しているが同等のシェイプ定義を無視します。
-��モデルが存在するようにします：
+3. ライブラリの`build`ターゲットを、コンシューマープロジェクトの`project.json`内の`compile`ターゲットの依存関係として追加し、コンシューマーがビルドする前にモデルが存在するようにします：
 
    ```json ins={4}
    {

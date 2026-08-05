@@ -5,6 +5,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { addProjectConfiguration, readJson, type Tree } from '@nx/devkit';
+import yaml from 'js-yaml';
 import {
   SMITHY_PROJECT_GENERATOR_INFO,
   smithyProjectGenerator,
@@ -121,6 +122,20 @@ describe('smithy-build-without-docker migration', () => {
     // Bundles the generated server SDK, which the image used to do.
     expect(devDependencies).toHaveProperty('rolldown');
     expect(devDependencies).toHaveProperty('rolldown-plugin-dts');
+  });
+
+  // pnpm 11 fails the whole install for a build script it skipped, so a migrated
+  // workspace — which newly gains `mise` — has to allow it.
+  it('should allow the mise build script the migrated build needs', async () => {
+    await generateOldWorkspace(tree);
+
+    await migration(tree);
+
+    const workspace = yaml.load(
+      tree.read('pnpm-workspace.yaml', 'utf-8')!,
+    ) as Record<string, any>;
+    expect(workspace.allowBuilds.mise).toBe(true);
+    expect(workspace.onlyBuiltDependencies).toContain('mise');
   });
 
   /**

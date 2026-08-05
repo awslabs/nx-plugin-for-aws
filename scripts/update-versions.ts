@@ -27,7 +27,6 @@ import {
   type ISmithyVersion,
   PY_VERSIONS,
   SMITHY_MAVEN_ARTIFACTS,
-  SMITHY_VERSION_CEILINGS,
   SMITHY_VERSIONS,
   TERRAFORM_VERSIONS,
   TS_VERSIONS,
@@ -421,13 +420,6 @@ const updateSmithyVersions = async (tree: FsTree): Promise<VersionChange[]> => {
   const versionsFilePath = 'packages/nx-plugin/src/utils/versions.ts';
 
   const rewrite = async (key: ISmithyVersion, from: string, to: string) => {
-    const ceiling = SMITHY_VERSION_CEILINGS[key];
-    if (ceiling && compareSemver(to, ceiling) > 0) {
-      console.log(
-        `Holding ${key} at ${ceiling}: ${to} is above its ceiling (see SMITHY_VERSION_CEILINGS)`,
-      );
-      return;
-    }
     if (from === to) {
       return;
     }
