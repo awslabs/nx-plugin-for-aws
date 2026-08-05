@@ -128,6 +128,43 @@ export const PRESETS: readonly Preset[] = [
       ['gateway', 'tools'],
     ],
   },
+  {
+    id: 'gateway-fronted-agents',
+    label: 'Gateway-fronted agents',
+    description:
+      'A React website reaching agents through an AgentCore Gateway, so the agent runtimes can sit inside a VPC.',
+    nodes: [
+      { type: 'ts#react-website', name: 'website', column: 0, row: 0 },
+      {
+        type: 'agentcore-gateway',
+        name: 'gateway',
+        options: { protocol: 'http' },
+        column: 1,
+        row: 0,
+      },
+      {
+        type: 'ts#agent',
+        name: 'chat-agent',
+        hostName: 'agents',
+        options: { protocol: 'ag-ui' },
+        column: 2,
+        row: 0,
+      },
+      {
+        type: 'py#agent',
+        name: 'research-agent',
+        hostName: 'py-agents',
+        options: { protocol: 'ag-ui' },
+        column: 2,
+        row: 1,
+      },
+    ],
+    edges: [
+      ['gateway', 'chat-agent'],
+      ['gateway', 'research-agent'],
+      ['website', 'gateway'],
+    ],
+  },
 ];
 
 /** Comfortable spacing between columns, used when the canvas is wide enough. */
