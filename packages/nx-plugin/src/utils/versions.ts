@@ -107,6 +107,7 @@ export const TS_VERSIONS = {
   'class-variance-authority': '0.7.1',
   clsx: '2.1.1',
   commander: '15.0.0',
+  'cpy-cli': '7.0.0',
   electrodb: '3.9.1',
   esbuild: '0.28.1',
   'event-source-polyfill': '1.0.31',
@@ -124,6 +125,7 @@ export const TS_VERSIONS = {
   '@types/fs-extra': '11.0.4',
   'make-dir-cli': '4.0.0',
   mariadb: '3.5.3',
+  mise: '2026.8.1',
   ncp: '2.0.0',
   npm: '12.0.2',
   'npm-check-updates': '22.2.9',
@@ -270,6 +272,81 @@ const assertDeclared = (
 export const VENDORED_VERSIONS = {
   'git-secrets': '1.3.0',
 } as const;
+
+/**
+ * The Smithy CLI version generated Smithy projects build with, and the Maven
+ * artifacts their `smithy-build.json` resolves.
+ *
+ * The CLI is run through `mise exec smithy@<version>`, so nothing is installed
+ * into the workspace and the pin travels in the `project.json` target command —
+ * which is what the version sync reaches to move it forward.
+ *
+ * `cli` and the `software.amazon.smithy:*` artifacts are released together and
+ * must hold the same version: the CLI refuses a model built against a newer
+ * `smithy-model` than it can parse. The TypeScript codegen artifact versions
+ * independently.
+ */
+export const SMITHY_VERSIONS = {
+  cli: '1.72.1',
+  'software.amazon.smithy:smithy-model': '1.72.1',
+  'software.amazon.smithy:smithy-aws-traits': '1.72.1',
+  'software.amazon.smithy:smithy-validation-model': '1.72.1',
+  'software.amazon.smithy:smithy-openapi': '1.72.1',
+  'software.amazon.smithy.typescript:smithy-aws-typescript-codegen': '0.50.0',
+} as const;
+export type ISmithyVersion = keyof typeof SMITHY_VERSIONS;
+
+/**
+ * Smithy artifacts held below their latest release, and why.
+ *
+ * The weekly version update proposes anything below the ceiling and stops there,
+ * so the hold is visible in one place rather than buried in a rejection list —
+ * and lifting it is deleting an entry once the blocking release lands.
+ */
+export const SMITHY_VERSION_CEILINGS: Partial<Record<ISmithyVersion, string>> =
+  {
+    // 0.51.0 generates a server importing `ServerInterceptor` from
+    // `@aws-smithy/server-common`, which its latest release (1.0.0-alpha.10) does
+    // not export — the generated SSDK then fails to bundle. Lift once a
+    // `server-common` exporting it ships.
+    'software.amazon.smithy.typescript:smithy-aws-typescript-codegen': '0.50.0',
+  };
+
+/**
+ * The Maven coordinates a generated `smithy-build.json` declares, keyed as
+ * {@link SMITHY_VERSIONS} less the CLI. Kept beside the versions so the sync can
+ * find these pins by coordinate wherever a `smithy-build.json` lists them.
+ */
+export const SMITHY_MAVEN_ARTIFACTS = Object.keys(SMITHY_VERSIONS).filter(
+  (key): key is Exclude<ISmithyVersion, 'cli'> => key !== 'cli',
+);
+
+/** A Maven coordinate as a `smithy-build.json` dependency names it. */
+export const smithyMavenDependency = (
+  artifact: Exclude<ISmithyVersion, 'cli'>,
+): string => `${artifact}:${SMITHY_VERSIONS[artifact]}`;
+
+/**
+ * Substitution variables exposing the Smithy Maven pins to the generated
+ * `smithy-build.json` templates.
+ */
+export const smithyMavenVersions = () => ({
+  smithyModelDependency: smithyMavenDependency(
+    'software.amazon.smithy:smithy-model',
+  ),
+  smithyAwsTraitsDependency: smithyMavenDependency(
+    'software.amazon.smithy:smithy-aws-traits',
+  ),
+  smithyValidationModelDependency: smithyMavenDependency(
+    'software.amazon.smithy:smithy-validation-model',
+  ),
+  smithyOpenApiDependency: smithyMavenDependency(
+    'software.amazon.smithy:smithy-openapi',
+  ),
+  smithyTypeScriptCodegenDependency: smithyMavenDependency(
+    'software.amazon.smithy.typescript:smithy-aws-typescript-codegen',
+  ),
+});
 
 /**
  * Base container images used by generated Dockerfiles. Pinned exactly so

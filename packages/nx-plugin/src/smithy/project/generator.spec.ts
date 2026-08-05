@@ -10,6 +10,7 @@ import {
   sharedConstructsGenerator,
 } from '../../utils/shared-constructs';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import { SMITHY_VERSIONS, smithyMavenDependency } from '../../utils/versions';
 import {
   SMITHY_PROJECT_GENERATOR_INFO,
   smithyProjectGenerator,
@@ -34,9 +35,11 @@ describe('smithyProjectGenerator', () => {
     // Verify directory structure
     expect(tree.exists('test-api/src/main.smithy')).toBeTruthy();
     expect(tree.exists('test-api/src/operations/echo.smithy')).toBeTruthy();
-    expect(tree.exists('test-api/build.Dockerfile')).toBeTruthy();
+    expect(tree.exists('test-api/ssdk.rolldown.config.mjs')).toBeTruthy();
     expect(tree.exists('test-api/smithy-build.json')).toBeTruthy();
     expect(tree.exists('test-api/project.json')).toBeTruthy();
+    // Builds on the machine, so no image build is involved
+    expect(tree.exists('test-api/build.Dockerfile')).toBeFalsy();
 
     // Verify project configuration
     const projectConfig = readJson(tree, 'test-api/project.json');
@@ -50,8 +53,12 @@ describe('smithyProjectGenerator', () => {
     expect(projectConfig.targets.compile.executor).toBe('nx:run-commands');
     expect(projectConfig.targets.compile.options.commands).toEqual([
       'rimraf dist/{projectRoot}/build',
+      'rimraf dist/{projectRoot}/smithy',
       'make-dir dist/{projectRoot}/build',
-      'docker build -f {projectRoot}/build.Dockerfile --build-context workspace=. --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}',
+      'mise exec smithy@1.72.1 -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy',
+      'cpy "dist/{projectRoot}/smithy/source/openapi/*.openapi.json" dist/{projectRoot}/build/openapi --flat --rename=openapi.json',
+      'npm install --prefix dist/{projectRoot}/smithy/source/typescript-ssdk-codegen --ignore-scripts --no-audit --no-fund',
+      'rolldown -c {projectRoot}/ssdk.rolldown.config.mjs',
     ]);
     expect(projectConfig.targets.compile.outputs).toEqual([
       '{workspaceRoot}/dist/{projectRoot}/build',
@@ -65,9 +72,9 @@ describe('smithyProjectGenerator', () => {
     expect(
       tree.read('test-api/src/operations/echo.smithy', 'utf-8'),
     ).toMatchSnapshot('echo.smithy');
-    expect(tree.read('test-api/build.Dockerfile', 'utf-8')).toMatchSnapshot(
-      'build.Dockerfile',
-    );
+    expect(
+      tree.read('test-api/ssdk.rolldown.config.mjs', 'utf-8'),
+    ).toMatchSnapshot('ssdk.rolldown.config.mjs');
     expect(tree.read('test-api/smithy-build.json', 'utf-8')).toMatchSnapshot(
       'smithy-build.json',
     );
@@ -226,22 +233,53 @@ describe('smithyProjectGenerator', () => {
     expect(smithyBuild).toMatchSnapshot('kebab-case-smithy-build.json');
   });
 
-  it('should generate valid Docker build configuration', async () => {
+  it('should build with the pinned smithy cli rather than a container', async () => {
     await smithyProjectGenerator(tree, {
       name: 'test-api',
     });
 
-    const dockerfile = tree.read('test-api/build.Dockerfile', 'utf-8');
-    expect(dockerfile).toContain(
-      'FROM public.ecr.aws/docker/library/node:24 AS builder',
-    );
-    expect(dockerfile).toMatchSnapshot('dockerfile');
-
     const projectConfig = readJson(tree, 'test-api/project.json');
-    const dockerCommand = projectConfig.targets.compile.options.commands[2];
-    expect(dockerCommand).toBe(
-      'docker build -f {projectRoot}/build.Dockerfile --build-context workspace=. --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}',
+    const commands: string[] = projectConfig.targets.compile.options.commands;
+
+    // The CLI version travels in the command, which is what the version sync
+    // reaches to move it forward.
+    expect(commands).toContain(
+      `mise exec smithy@${SMITHY_VERSIONS.cli} -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy`,
     );
+    expect(commands.join('\n')).not.toContain('docker');
+
+    // Every path the build writes to is under `dist`, so a build leaves the
+    // project's own directory untouched. `{projectRoot}` is only ever read from —
+    // the config and model the CLI is pointed at.
+    expect(projectConfig.targets.compile.options.cwd).toBe('{workspaceRoot}');
+    const written = commands.flatMap((command) =>
+      [
+        ...command.matchAll(
+          /(?:^|\s)(?!dist\/)([^\s"]*\{projectRoot\}[^\s"]*)/g,
+        ),
+      ].map(([, path]) => path),
+    );
+    expect(written).toEqual([
+      '{projectRoot}/smithy-build.json',
+      '{projectRoot}/ssdk.rolldown.config.mjs',
+    ]);
+  });
+
+  it('should pin the smithy maven dependencies it vends', async () => {
+    await smithyProjectGenerator(tree, {
+      name: 'test-api',
+    });
+
+    const smithyBuild = readJson(tree, 'test-api/smithy-build.json');
+    expect(smithyBuild.maven.dependencies).toEqual([
+      smithyMavenDependency('software.amazon.smithy:smithy-model'),
+      smithyMavenDependency('software.amazon.smithy:smithy-aws-traits'),
+      smithyMavenDependency('software.amazon.smithy:smithy-validation-model'),
+      smithyMavenDependency('software.amazon.smithy:smithy-openapi'),
+      smithyMavenDependency(
+        'software.amazon.smithy.typescript:smithy-aws-typescript-codegen',
+      ),
+    ]);
   });
 
   it('should configure proper build dependencies', async () => {
@@ -319,7 +357,9 @@ describe('smithyProjectGenerator', () => {
 
       expect(tree.exists('test-shapes/src/main.smithy')).toBeTruthy();
       expect(tree.exists('test-shapes/smithy-build.json')).toBeTruthy();
-      expect(tree.exists('test-shapes/build.Dockerfile')).toBeTruthy();
+      expect(tree.exists('test-shapes/build.Dockerfile')).toBeFalsy();
+      // A shape library generates no server SDK, so it has nothing to bundle
+      expect(tree.exists('test-shapes/ssdk.rolldown.config.mjs')).toBeFalsy();
 
       // A shape library defines no service and no operations
       expect(tree.exists('test-shapes/src/operations/echo.smithy')).toBeFalsy();
@@ -331,9 +371,6 @@ describe('smithyProjectGenerator', () => {
       expect(
         tree.read('test-shapes/smithy-build.json', 'utf-8'),
       ).toMatchSnapshot('shapes-smithy-build.json');
-      expect(
-        tree.read('test-shapes/build.Dockerfile', 'utf-8'),
-      ).toMatchSnapshot('shapes-build.Dockerfile');
       expect(tree.read('test-shapes/project.json', 'utf-8')).toMatchSnapshot(
         'shapes-project.json',
       );
@@ -381,7 +418,7 @@ describe('smithyProjectGenerator', () => {
       );
     });
 
-    it('should build the shape library with the same docker target as a service', async () => {
+    it('should assemble the model and stop, with no server SDK to bundle', async () => {
       await smithyProjectGenerator(tree, {
         name: 'test-shapes',
         type: 'shapes',
@@ -389,9 +426,13 @@ describe('smithyProjectGenerator', () => {
 
       const projectConfig = readJson(tree, 'test-shapes/project.json');
       expect(projectConfig.targets.build.dependsOn).toEqual(['compile']);
-      expect(projectConfig.targets.compile.options.commands[2]).toBe(
-        'docker build -f {projectRoot}/build.Dockerfile --build-context workspace=. --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}',
-      );
+      expect(projectConfig.targets.compile.options.commands).toEqual([
+        'rimraf dist/{projectRoot}/build',
+        'rimraf dist/{projectRoot}/smithy',
+        'make-dir dist/{projectRoot}/build',
+        `mise exec smithy@${SMITHY_VERSIONS.cli} -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy`,
+        'ncp dist/{projectRoot}/smithy/source/model/model.json dist/{projectRoot}/build/model.json',
+      ]);
     });
 
     it('should be idempotent when re-run with same options', async () => {

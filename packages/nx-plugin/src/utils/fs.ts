@@ -16,6 +16,7 @@ export const FS_DEPENDENCIES = [
   { name: 'ncp' },
   { name: 'rimraf' },
   { name: 'make-dir-cli' },
+  { name: 'cpy-cli' },
 ] as const satisfies readonly { name: ITsDepVersion }[];
 
 /**
@@ -47,6 +48,16 @@ export class FsCommands<D extends DependencyDeclaration> {
   public mkdir(dir: string) {
     this.add('make-dir-cli');
     return `make-dir ${dir}`;
+  }
+
+  /**
+   * Copy the single file a glob matches to `dst`, for an artifact whose producer
+   * names it — the Smithy OpenAPI plugin writes `<ServiceShape>.openapi.json`.
+   * Fails rather than silently doing nothing when the glob matches nothing.
+   */
+  public cpGlobToFile(srcGlob: string, dstDir: string, dstFileName: string) {
+    this.add('cpy-cli');
+    return `cpy "${srcGlob}" ${dstDir} --flat --rename=${dstFileName}`;
   }
 
   private add(dep: (typeof FS_DEPENDENCIES)[number]['name']) {

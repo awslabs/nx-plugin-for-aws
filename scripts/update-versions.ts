@@ -24,7 +24,11 @@ import { applyGritQL } from '../packages/nx-plugin/src/utils/ast';
 import { isNxPackage } from '../packages/nx-plugin/src/utils/version-upgrade-migration/nx-package-updates';
 import { registerNxPackageUpdates } from '../packages/nx-plugin/src/utils/version-upgrade-migration/register';
 import {
+  type ISmithyVersion,
   PY_VERSIONS,
+  SMITHY_MAVEN_ARTIFACTS,
+  SMITHY_VERSION_CEILINGS,
+  SMITHY_VERSIONS,
   TERRAFORM_VERSIONS,
   TS_VERSIONS,
   VENDORED_VERSIONS,
@@ -352,6 +356,134 @@ const updateGitSecrets = async (
   };
 };
 
+/**
+ * The latest Smithy CLI version `mise` can install.
+ *
+ * Asked of mise rather than of GitHub, so the version this vends is one the tool
+ * that resolves it can actually install — a release mise's registry hasn't picked
+ * up yet would leave every Smithy build failing to resolve the CLI. `mise` is a
+ * workspace dev dependency, so it runs from `node_modules`.
+ */
+const getLatestSmithyCliVersion = (): string | undefined => {
+  try {
+    const latest = execSync('mise latest smithy', {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    return /^\d+\.\d+\.\d+$/.test(latest) ? latest : undefined;
+  } catch (error) {
+    console.warn('Could not resolve the latest Smithy CLI via mise:', error);
+    return undefined;
+  }
+};
+
+/**
+ * The latest release of a Maven artifact, from its `maven-metadata.xml` on Maven
+ * Central.
+ *
+ * The metadata document rather than the search API: the latter's index lags well
+ * behind (it reported smithy-model 1.58.0 while 1.72.1 was current), which would
+ * silently hold these pins back.
+ */
+const getLatestMavenVersion = async (
+  coordinate: string,
+): Promise<string | undefined> => {
+  const [group, artifact] = coordinate.split(':');
+  const response = await fetch(
+    `https://repo1.maven.org/maven2/${group.replace(/\./g, '/')}/${artifact}/maven-metadata.xml`,
+  );
+  if (!response.ok) {
+    console.warn(`Could not fetch Maven metadata for ${coordinate}`);
+    return undefined;
+  }
+  const metadata = await response.text();
+  // `<release>` is the latest non-snapshot; fall back to the last listed version
+  // for an artifact whose metadata omits it.
+  const release = /<release>([^<]+)<\/release>/.exec(metadata)?.[1];
+  const versions = [...metadata.matchAll(/<version>([^<]+)<\/version>/g)].map(
+    ([, version]) => version,
+  );
+  return release ?? versions.at(-1);
+};
+
+/**
+ * Move the Smithy CLI and the Maven artifacts a generated `smithy-build.json`
+ * resolves onto their latest releases.
+ *
+ * The CLI and the `software.amazon.smithy:*` artifacts are released in lockstep
+ * and must stay on the same version — the CLI cannot load a model built against a
+ * newer `smithy-model` than it knows. So the CLI version mise offers is what those
+ * artifacts take, and an artifact missing that release holds the whole set back
+ * rather than splitting it. The TypeScript codegen artifact versions on its own.
+ */
+const updateSmithyVersions = async (tree: FsTree): Promise<VersionChange[]> => {
+  const changes: VersionChange[] = [];
+  const versionsFilePath = 'packages/nx-plugin/src/utils/versions.ts';
+
+  const rewrite = async (key: ISmithyVersion, from: string, to: string) => {
+    const ceiling = SMITHY_VERSION_CEILINGS[key];
+    if (ceiling && compareSemver(to, ceiling) > 0) {
+      console.log(
+        `Holding ${key} at ${ceiling}: ${to} is above its ceiling (see SMITHY_VERSION_CEILINGS)`,
+      );
+      return;
+    }
+    if (from === to) {
+      return;
+    }
+    try {
+      await applyGritQL(
+        tree,
+        versionsFilePath,
+        `\`'${key}': '${from}'\` => \`'${key}': '${to}'\``,
+      );
+      changes.push({ name: key, oldVersion: from, newVersion: to });
+      console.log(`Updated ${key} to ${to}`);
+    } catch (error) {
+      console.warn(`Could not update ${key}:`, error);
+    }
+  };
+
+  const latestCli = getLatestSmithyCliVersion();
+  const smithyArtifacts = SMITHY_MAVEN_ARTIFACTS.filter((artifact) =>
+    artifact.startsWith('software.amazon.smithy:'),
+  );
+
+  if (latestCli) {
+    // Only move the set once every artifact has published the CLI's version.
+    const published = await Promise.all(
+      smithyArtifacts.map(async (artifact) => {
+        const response = await fetch(
+          `https://repo1.maven.org/maven2/${artifact
+            .split(':')[0]
+            .replace(/\./g, '/')}/${artifact.split(':')[1]}/${latestCli}/`,
+        );
+        return response.ok;
+      }),
+    );
+    if (published.every(Boolean)) {
+      await rewrite('cli', SMITHY_VERSIONS.cli, latestCli);
+      for (const artifact of smithyArtifacts) {
+        await rewrite(artifact, SMITHY_VERSIONS[artifact], latestCli);
+      }
+    } else {
+      console.log(
+        `Holding the Smithy set at ${SMITHY_VERSIONS.cli}: not every artifact has published ${latestCli}`,
+      );
+    }
+  }
+
+  // The TypeScript codegen artifact tracks its own releases.
+  const codegen =
+    'software.amazon.smithy.typescript:smithy-aws-typescript-codegen';
+  const latestCodegen = await getLatestMavenVersion(codegen);
+  if (latestCodegen) {
+    await rewrite(codegen, SMITHY_VERSIONS[codegen], latestCodegen);
+  }
+
+  return changes;
+};
+
 const main = async () => {
   // Parse command line arguments
   const isDryRun = process.argv.includes('--dry-run');
@@ -404,6 +536,10 @@ const main = async () => {
       'TERRAFORM_VERSIONS',
     );
 
+    // Move the Smithy CLI and the Maven artifacts a generated smithy-build.json
+    // resolves. Neither appears in any manifest, so nothing else reaches them.
+    const smithyChanges = await updateSmithyVersions(tree);
+
     // Update vendored git-secrets
     const gitSecretsChange = await updateGitSecrets(tree);
     const vendoredChanges: VersionChange[] = gitSecretsChange
@@ -434,6 +570,7 @@ const main = async () => {
       { title: 'TypeScript Dependencies', changes: tsChanges },
       { title: 'Python Dependencies', changes: pyChanges },
       { title: 'Terraform Providers', changes: terraformChanges },
+      { title: 'Smithy', changes: smithyChanges },
       ...(vendoredChanges.length > 0
         ? [{ title: 'Vendored Tools', changes: vendoredChanges }]
         : []),

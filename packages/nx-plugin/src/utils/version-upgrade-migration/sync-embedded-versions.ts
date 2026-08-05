@@ -10,6 +10,8 @@ import {
   CONTAINER_REPOSITORIES,
   CONTAINER_VERSIONS,
   PY_VERSIONS,
+  SMITHY_MAVEN_ARTIFACTS,
+  SMITHY_VERSIONS,
   TS_VERSIONS,
 } from '../versions';
 import { type OwnedDependencies, ownedForFile } from './owned-dependencies';
@@ -371,6 +373,12 @@ const syncTargetToolPins = async (tree: Tree): Promise<string[]> => {
       pattern: `${escapeRegExp(repository)}:([^${VERSION_TERMINATORS}']+)`,
       vended: CONTAINER_VERSIONS[tool as keyof typeof CONTAINER_VERSIONS],
     })),
+    // The Smithy CLI a Smithy project's compile target runs through `mise exec`.
+    // Nothing installs it, so this command is the only place its version sits.
+    {
+      pattern: `mise exec smithy@([^${VERSION_TERMINATORS}']+)`,
+      vended: SMITHY_VERSIONS.cli,
+    },
     ...Object.keys(PY_VERSIONS).flatMap((name) => {
       const vended = vendedPyVersion(name);
       return vended
@@ -392,9 +400,44 @@ const syncTargetToolPins = async (tree: Tree): Promise<string[]> => {
 };
 
 /**
+ * Sync the Maven coordinates a generated `smithy-build.json` resolves.
+ *
+ * These are Java artifacts the Smithy CLI downloads, so they appear in no
+ * manifest the dependency sync reads — this file is the only place they sit. Each
+ * is matched by its `group:artifact` prefix so only the version is rewritten,
+ * leaving any coordinate the user added alone.
+ *
+ * Unscoped like the target tool pins: nothing is installed into the project, so
+ * there is no dependency for a generator to own.
+ */
+const syncSmithyMavenPins = async (tree: Tree): Promise<string[]> => {
+  const smithyBuilds: string[] = [];
+
+  visitNotIgnoredFiles(tree, '.', (path) => {
+    if (path.endsWith('smithy-build.json')) {
+      smithyBuilds.push(path);
+    }
+  });
+
+  const pins: EmbeddedPin[] = SMITHY_MAVEN_ARTIFACTS.map((artifact) => ({
+    // A coordinate is a JSON string here, so a quote ends the version.
+    pattern: `${escapeRegExp(artifact)}:([^${VERSION_TERMINATORS}']+)`,
+    vended: SMITHY_VERSIONS[artifact],
+  }));
+
+  const skipped: string[] = [];
+  for (const path of smithyBuilds) {
+    if ((await applyPins(tree, path, pins)).skipped) {
+      skipped.push(path);
+    }
+  }
+  return skipped;
+};
+
+/**
  * Sync the vended versions baked into generated file bodies: `Dockerfile` pins,
- * the Python pins in Terraform inline scripts, and the tooling images
- * `project.json` target commands run.
+ * the Python pins in Terraform inline scripts, the tooling `project.json` target
+ * commands run, and the Maven coordinates a `smithy-build.json` resolves.
  *
  * Reports only the files left for the user: a pin that takes effect the next time
  * the thing holding it runs needs no follow-up, but one this skipped for holding
@@ -409,4 +452,5 @@ export const syncEmbeddedVersions = async (
   ...(await syncDockerfiles(tree, owned)),
   ...(await syncTerraformScriptPins(tree, owned)),
   ...(await syncTargetToolPins(tree)),
+  ...(await syncSmithyMavenPins(tree)),
 ];
