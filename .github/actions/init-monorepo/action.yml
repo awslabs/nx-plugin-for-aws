@@ -26,9 +26,9 @@ inputs:
     required: false
     default: 'true'
   setup-smithy:
-    description: 'Install the Smithy CLI on Windows, where it is a prerequisite rather than resolved by mise. No effect on other runners.'
+    description: 'Install the Smithy CLI on Windows, where it is a prerequisite rather than resolved by mise. Off by default — only the jobs that build a Smithy project need it. No effect on other runners.'
     required: false
-    default: 'true'
+    default: 'false'
   smithy-version:
     description: 'Smithy CLI version to install on Windows. Keep in step with SMITHY_VERSIONS.cli in packages/nx-plugin/src/utils/versions.ts.'
     required: false
@@ -180,14 +180,19 @@ runs:
         # Unpacked to a fixed directory rather than installed, so it lands on a
         # PATH that Nx's run-commands executor (a cmd.exe subprocess) can see —
         # the same reason terraform is installed manually above.
+        $ErrorActionPreference = "Stop"
         $version = "${{ inputs.smithy-version }}"
         $smithyDir = "C:\smithy"
         $url = "https://github.com/smithy-lang/smithy/releases/download/${version}/smithy-cli-windows-x64.zip"
         $zip = "$env:RUNNER_TEMP\smithy.zip"
+        $extract = "$env:RUNNER_TEMP\smithy-extract"
         Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
-        Expand-Archive -Path $zip -DestinationPath $env:RUNNER_TEMP -Force
-        New-Item -ItemType Directory -Path $smithyDir -Force | Out-Null
-        Copy-Item "$env:RUNNER_TEMP\smithy-cli-windows-x64\*" $smithyDir -Recurse -Force
+        # Extracted to its own directory and moved into place, so a re-run cannot
+        # nest the payload inside a previous copy.
+        Remove-Item $extract -Recurse -Force -ErrorAction SilentlyContinue
+        Expand-Archive -Path $zip -DestinationPath $extract -Force
+        Remove-Item $smithyDir -Recurse -Force -ErrorAction SilentlyContinue
+        Move-Item "$extract\smithy-cli-windows-x64" $smithyDir
         echo "$smithyDir\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
         $env:PATH = "$smithyDir\bin;$env:PATH"
         smithy --version
