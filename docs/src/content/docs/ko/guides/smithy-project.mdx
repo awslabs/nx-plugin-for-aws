@@ -116,39 +116,55 @@ Smithy 프로젝트는 [Docker](https://www.docker.com/)를 사용하여 빌드�
 
 ## Shape Library에 의존하기
 
-shape 라이브러리를 빌드하면 조립된 모델이 `dist/<my-shapes>/build/model/model.json`에 작성됩니다. 이 단일 파일에는 라이브러리가 정의하는 모든 shape과 의존하는 모든 shape이 포함되어 있으므로 소비자는 직접 참조하는 라이브러리만 선언하면 됩니다.
+shape 라이브러리를 빌드하면 조립된 모델이 `dist/<my-shapes>/build/model.json`에 작성됩니다. 이 단일 파일에는 라이브러리가 정의하는 모든 shape과 의존하는 모든 shape이 포함되어 있으므로 소비자는 직접 참조하는 라이브러리만 선언하면 됩니다.
 
-다른 Smithy 프로젝트에서 shape 라이브러리에 의존하려면 소비 프로젝트에 세 가지 변경을 수행하세요:
+다른 Smithy 프로젝트에서 shape 라이브러리에 의존하려면 소비 프로젝트에 두 가지 변경을 수행하세요:
 
 <Steps>
 
-1. Smithy 프로젝트는 컨테이너 내부에서 빌드되며, 빌드에는 작업 공간 루트가 명명된 빌드 컨텍스트로 제공됩니다. 소비 프로젝트의 `build.Dockerfile`에 자체 소스가 복사되는 위치와 함께 `COPY`를 추가하세요:
-
-   ```dockerfile ins={4}
-   # Copy project files
-   COPY smithy-build.json .
-   COPY src src
-   COPY --from=workspace dist/packages/my-shapes/build/model/model.json deps/my-shapes.json
-   ```
-
-2. 소비 프로젝트의 `smithy-build.json`에서 복사된 파일을 `imports`에 추가하세요:
+1. 소비 프로젝트의 `smithy-build.json`에서 라이브러리의 빌드된 모델을 `imports`에 추가하세요. 경로는 해당 파일을 기준으로 상대적이므로 `../` 세그먼트의 수는 소비 프로젝트가 중첩된 깊이와 일치합니다 — 아래 `packages/my-api/model`의 경우 세 개입니다:
 
    ```json ins={4}
    {
      "version": "1.0",
      "sources": ["src/"],
-     "imports": ["deps/my-shapes.json"],
+     "imports": ["../../../dist/packages/my-shapes/build/model.json"],
      ...
    }
    ```
 
-3. 소비자가 빌드되기 전에 모델이 존재하도록 `project.json`의 소비 프로젝트 `compile` 타겟의 의존성으로 라이브러리의 `build` 타겟을 추가하세요:
+2. 소비자가 빌드되기 전에 모델이 존재하도록 `project.json`의 소비 프로젝트 `compile` 타겟의 의존성으로 라이브러리의 `build` 타겟을 추가하세요:
 
    ```json ins={4}
    {
      "targets": {
        "compile": {
          "dependsOn": ["@my-scope/my-shapes:build"],
+         ...
+       }
+     }
+   }
+   ```
+
+</Steps>
+
+이제 모델에서 `use`를 사용하여 라이브러리의 shape을 참조할 수 있습니다:
+
+```smithy
+$version: "2.0"
+
+namespace com.example.api
+
+use com.example.shared#Customer
+
+structure GetCustomerOutput {
+    @required
+    customer: Customer
+}
+```
+
+shape 라이브러리는 같은 방식으로 다른 shape 라이브러리에 의존할 수 있습니다. 각 라이브러리의 빌드된 모델에는 이미 자체 의존성이 포함되어 있으므로 직접 참조하는 라이브러리에 대해서만 이러한 단계를 반복하면 됩니다. 둘 이상의 경로로 도달하는 라이브러리는 한 번만 해결됩니다 — Smithy는 중복되지만 동등한 shape 정의를 무시합니다.
+],
          ...
        }
      }
