@@ -5,7 +5,9 @@
 import {
   buildScaffoldRecipes,
   CONNECTION_CONSTRAINTS,
+  CONNECTION_PREFERENCES,
   type ConnectionConstraint,
+  type ConnectionPreference,
   type GeneratorSchema,
   type SchemaResolver,
   SELF_CONNECTION_DISALLOWED,
@@ -74,6 +76,8 @@ export interface EdgeType {
   /** `<source> -> <target>`, the plugin's own connection key. */
   readonly key: string;
   readonly constraints: readonly ConnectionConstraint[];
+  /** Option values this connection prefers but does not require. */
+  readonly preferences: readonly ConnectionPreference[];
   /** Whether both ends must be distinct projects. */
   readonly disallowSelf: boolean;
 }
@@ -279,6 +283,10 @@ export const EDGE_TYPES: readonly EdgeType[] = SUPPORTED_CONNECTIONS.map(
       key,
       constraints:
         (CONNECTION_CONSTRAINTS as Record<string, ConnectionConstraint[]>)[
+          key
+        ] ?? [],
+      preferences:
+        (CONNECTION_PREFERENCES as Record<string, ConnectionPreference[]>)[
           key
         ] ?? [],
       disallowSelf: (SELF_CONNECTION_DISALLOWED as readonly string[]).includes(

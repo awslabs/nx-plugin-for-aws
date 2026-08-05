@@ -385,6 +385,86 @@ export const CONNECTION_CONSTRAINTS = {
 >;
 
 /**
+ * A generator run automatically after an endpoint is scaffolded, adding something
+ * that endpoint should always have.
+ *
+ * A website is only useful with authentication in front of it, and `ts#website`
+ * does not add it — `ts#website#auth` is a separate follow-up generator. Declared
+ * here so the docs graph builder emits it without hardcoding the pairing.
+ */
+export interface FollowUpGenerator {
+  /** The generator id to run after the endpoint's own. */
+  readonly generator: string;
+  /** Options to pass, beyond the `--project` naming the endpoint. */
+  readonly options?: Readonly<Record<string, string>>;
+  /** What it adds, for the emitted command's comment. */
+  readonly adds: string;
+}
+
+/**
+ * Generators run automatically after an endpoint type is scaffolded, keyed by
+ * endpoint type.
+ */
+export const ENDPOINT_FOLLOW_UPS: Readonly<
+  Record<string, readonly FollowUpGenerator[]>
+> = {
+  'ts#react-website': [
+    {
+      generator: 'ts#website#auth',
+      // `cognitoDomain` is derived from the npm scope and project name when
+      // omitted, so the command stays short.
+      adds: 'Cognito authentication',
+    },
+  ],
+};
+
+/**
+ * An option value a connection works best against, without requiring it.
+ *
+ * Distinct from `CONNECTION_CONSTRAINTS`: a constraint is a rule the connection
+ * generator enforces, whereas a preference is the setting most users want. A
+ * React website can call an `http` agent perfectly well, but AG-UI is the
+ * protocol built for driving a frontend, so that is what a new connection picks.
+ *
+ * A caller applies these only where the user has not chosen the option, so a
+ * preference never overrides a deliberate decision.
+ */
+export interface ConnectionPreference {
+  readonly side: 'source' | 'target';
+  readonly option: string;
+  readonly value: string;
+  /** Why this is the better default, phrased for the user. */
+  readonly reason: string;
+}
+
+/**
+ * Preferred option values per connection. Keyed by `ConnectionKey`, so a key that
+ * no longer names a supported connection is a compile error.
+ */
+export const CONNECTION_PREFERENCES = {
+  'ts#react-website -> ts#agent': [
+    {
+      side: 'target',
+      option: 'protocol',
+      value: 'ag-ui',
+      reason:
+        'AG-UI is the protocol built for driving a frontend, so a website connection selects it.',
+    },
+  ],
+  'ts#react-website -> py#agent': [
+    {
+      side: 'target',
+      option: 'protocol',
+      value: 'ag-ui',
+      reason:
+        'AG-UI is the protocol built for driving a frontend, so a website connection selects it.',
+    },
+  ],
+} as const satisfies Partial<
+  Record<ConnectionKey, readonly ConnectionPreference[]>
+>;
+
+/**
  * Connections whose source and target must be distinct projects, because the
  * connection generator refuses to wire a project to itself.
  */

@@ -314,6 +314,66 @@ const findCycles = (graph: Graph): Issue[] => {
 };
 
 /** Whether a node can be dragged onto an edge as its source. */
+/**
+ * Option values a new connection requires of its endpoints, for options the user
+ * has not chosen themselves.
+ *
+ * Several connections only work against one setting: a website reaches an agent
+ * over AG-UI, and an agent reaches another agent over A2A. Rather than drawing the
+ * edge and immediately reporting a validation error, the option is switched to
+ * the value the connection needs — but only where the user has left it alone, so
+ * a deliberate choice is never overwritten.
+ *
+ * Derived from the same `CONNECTION_CONSTRAINTS` the validator checks, so a
+ * connection that gains a requirement gets this behaviour without further work.
+ */
+export const autoFixesForConnection = (
+  source: GraphNode,
+  target: GraphNode,
+): { nodeId: string; option: string; value: string }[] => {
+  const edgeType = findEdgeType(source.type, target.type);
+  if (!edgeType) return [];
+
+  const fixes: { nodeId: string; option: string; value: string }[] = [];
+
+  // A constraint pinning one value says what the option must be; a preference
+  // says what it should be. A `notEquals` constraint rules a value out without
+  // naming a replacement, so it cannot drive a fix — the validator reports it.
+  const wanted: { side: 'source' | 'target'; option: string; value: string }[] =
+    [
+      ...edgeType.constraints.flatMap((constraint) =>
+        constraint.equals === undefined
+          ? []
+          : [
+              {
+                side: constraint.side,
+                option: constraint.option,
+                value: constraint.equals,
+              },
+            ],
+      ),
+      ...edgeType.preferences,
+    ];
+
+  for (const constraint of wanted) {
+    const node = constraint.side === 'source' ? source : target;
+    // An option the user has set is theirs to keep — the validator will flag it.
+    if (constraint.option in node.options) continue;
+    const type = nodeType(node.type);
+    const property = type.properties.find((p) => p.name === constraint.option);
+    // Nothing to switch if the option doesn't exist, or already reads this way.
+    if (!property) continue;
+    if (property.default === constraint.value) continue;
+    if (!(property.enum ?? []).includes(constraint.value)) continue;
+    fixes.push({
+      nodeId: node.id,
+      option: constraint.option,
+      value: constraint.value,
+    });
+  }
+  return fixes;
+};
+
 export const canConnect = (source: GraphNode, target: GraphNode): boolean => {
   const edgeType = findEdgeType(source.type, target.type);
   if (!edgeType) return false;

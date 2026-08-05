@@ -20,7 +20,12 @@ import {
   nodeType,
 } from './catalog';
 import { type EmitOptions, emitCommands, toScript } from './commands';
-import { type Graph, type GraphNode, validate } from './model';
+import {
+  autoFixesForConnection,
+  type Graph,
+  type GraphNode,
+  validate,
+} from './model';
 
 const EMIT: EmitOptions = {
   packageManager: 'pnpm',
@@ -128,7 +133,7 @@ describe('commands', () => {
   it('should emit the workspace command first', () => {
     const commands = emitCommands(graph([]), EMIT);
     expect(commands[0].command).toBe(
-      'pnpm create @aws/nx-workspace my-project --iac=cdk',
+      'pnpm create @aws/nx-workspace my-project --iac=cdk --interactive=false',
     );
   });
 
@@ -138,7 +143,7 @@ describe('commands', () => {
       EMIT,
     );
     expect(commands.map((c) => c.command)).toEqual([
-      'pnpm create @aws/nx-workspace my-project --iac=cdk',
+      'pnpm create @aws/nx-workspace my-project --iac=cdk --interactive=false',
       'nx g @aws/nx-plugin:ts#api my-api --framework=trpc',
       'nx g @aws/nx-plugin:ts#dynamodb my-table',
       `nx g @aws/nx-plugin:ts#infra ${INFRA_PROJECT_NAME}`,
@@ -151,7 +156,7 @@ describe('commands', () => {
       EMIT,
     );
     expect(commands.map((c) => c.command)).toEqual([
-      'pnpm create @aws/nx-workspace my-project --iac=cdk',
+      'pnpm create @aws/nx-workspace my-project --iac=cdk --interactive=false',
       'nx g @aws/nx-plugin:ts#project app',
       'nx g @aws/nx-plugin:ts#agent --project=app --name=agent',
       `nx g @aws/nx-plugin:ts#infra ${INFRA_PROJECT_NAME}`,
@@ -295,6 +300,63 @@ describe('commands', () => {
     expect(commands[0].command).toContain('--iac=terraform');
   });
 
+  describe('follow-up generators', () => {
+    it('should add auth to a website', () => {
+      const commands = emitCommands(
+        graph([node('website', 'ts#react-website')]),
+        EMIT,
+      );
+      expect(commands.map((c) => c.command)).toContain(
+        'nx g @aws/nx-plugin:ts#website#auth --project=website',
+      );
+    });
+
+    it('should add auth immediately after creating the website', () => {
+      const commands = emitCommands(
+        graph([node('website', 'ts#react-website')]),
+        EMIT,
+      );
+      const create = commands.findIndex((c) =>
+        c.command.includes(':ts#website '),
+      );
+      const auth = commands.findIndex((c) =>
+        c.command.includes(':ts#website#auth'),
+      );
+      expect(auth).toBe(create + 1);
+    });
+
+    it('should add auth to every website in the graph', () => {
+      const commands = emitCommands(
+        graph([
+          node('one', 'ts#react-website'),
+          node('two', 'ts#react-website'),
+        ]),
+        EMIT,
+      );
+      expect(
+        commands.filter((c) => c.command.includes(':ts#website#auth')),
+      ).toHaveLength(2);
+    });
+
+    it('should attribute the auth command to its website node', () => {
+      const commands = emitCommands(
+        graph([node('website', 'ts#react-website')]),
+        EMIT,
+      );
+      const auth = commands.find((c) => c.command.includes(':ts#website#auth'));
+      expect(auth?.nodeId).toBe('website');
+    });
+
+    it('should not add follow-ups to types that have none', () => {
+      const commands = emitCommands(
+        graph([node('my-api', 'ts#trpc-api'), node('db', 'ts#rdb')]),
+        EMIT,
+      );
+      // Workspace, the two projects, and infra — nothing extra.
+      expect(commands).toHaveLength(4);
+    });
+  });
+
   describe('infrastructure project', () => {
     it('should append a CDK infra project last', () => {
       const commands = emitCommands(
@@ -354,6 +416,99 @@ describe('commands', () => {
       const commands = emitCommands(graph([]), EMIT);
       expect(commands).toHaveLength(1);
     });
+  });
+});
+
+describe('autoFixesForConnection', () => {
+  it('should switch an agent to ag-ui when a website connects to it', () => {
+    const website = node('w', 'ts#react-website');
+    const agent = node('a', 'ts#agent', { hostName: 'app' });
+    expect(autoFixesForConnection(website, agent)).toEqual([
+      { nodeId: 'a', option: 'protocol', value: 'ag-ui' },
+    ]);
+  });
+
+  it('should switch the target agent to a2a when an agent connects to it', () => {
+    const source = node('a', 'ts#agent', { hostName: 'app' });
+    const target = node('b', 'ts#agent', { hostName: 'app' });
+    const fixes = autoFixesForConnection(source, target);
+    // Only the target changes: the source keeps whatever protocol it serves on.
+    expect(fixes).toContainEqual({
+      nodeId: 'b',
+      option: 'protocol',
+      value: 'a2a',
+    });
+    expect(fixes.every((fix) => fix.nodeId === 'b')).toBe(true);
+  });
+
+  it('should switch a python target agent to a2a too', () => {
+    const source = node('a', 'ts#agent', { hostName: 'app' });
+    const target = node('b', 'py#agent', { hostName: 'py-app' });
+    expect(autoFixesForConnection(source, target)).toContainEqual({
+      nodeId: 'b',
+      option: 'protocol',
+      value: 'a2a',
+    });
+  });
+
+  it('should not overwrite a protocol the user chose', () => {
+    const website = node('w', 'ts#react-website');
+    const agent = node('a', 'ts#agent', {
+      hostName: 'app',
+      options: { protocol: 'http' },
+    });
+    expect(autoFixesForConnection(website, agent)).toEqual([]);
+  });
+
+  it('should not fix an option already at the required default', () => {
+    // `auth` defaults to iam, which is what the connection needs, so there is
+    // nothing to change.
+    const agent = node('a', 'ts#agent', { hostName: 'app' });
+    const mcp = node('m', 'ts#mcp-server', { hostName: 'app' });
+    expect(
+      autoFixesForConnection(agent, mcp).some((fix) => fix.option === 'auth'),
+    ).toBe(false);
+  });
+
+  it('should not fix anything for an unsupported connection', () => {
+    const website = node('w', 'ts#react-website');
+    const db = node('d', 'ts#rdb');
+    expect(autoFixesForConnection(website, db)).toEqual([]);
+  });
+
+  it('should not fix anything for a connection with no pinned constraint', () => {
+    const website = node('w', 'ts#react-website');
+    const api = node('a', 'ts#trpc-api');
+    expect(autoFixesForConnection(website, api)).toEqual([]);
+  });
+
+  it('should leave a graph valid once its fixes are applied', () => {
+    // The point of the fix: what would have been a validation error becomes a
+    // graph that scaffolds.
+    const source = node('a', 'ts#agent', { hostName: 'app', name: 'one' });
+    const target = node('b', 'ts#agent', { hostName: 'app', name: 'two' });
+    const before = graph(
+      [source, target],
+      [{ id: 'e1', source: 'a', target: 'b' }],
+    );
+    expect(validate(before).length).toBeGreaterThan(0);
+
+    const fixes = autoFixesForConnection(source, target);
+    const after = graph(
+      [source, target].map((n) => ({
+        ...n,
+        options: {
+          ...n.options,
+          ...Object.fromEntries(
+            fixes
+              .filter((f) => f.nodeId === n.id)
+              .map((f) => [f.option, f.value]),
+          ),
+        },
+      })),
+      [{ id: 'e1', source: 'a', target: 'b' }],
+    );
+    expect(validate(after)).toEqual([]);
   });
 });
 

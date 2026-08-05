@@ -2,6 +2,8 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+
+import { ENDPOINT_FOLLOW_UPS } from '../../../../packages/nx-plugin/src/connection/scaffold-catalog';
 import {
   buildCreateNxWorkspaceCommand,
   buildPackageManagerExecCommand,
@@ -149,6 +151,30 @@ const generatorCommand = (generator: string, args: readonly string[]): string =>
   `nx g ${NAMESPACE}:${generator} ${args.join(' ')}`;
 
 /**
+ * The generators run straight after a node's own, adding what that kind of
+ * project should always have — authentication on a website, for instance. The
+ * pairing is declared in the plugin, so nothing here is hardcoded per type.
+ */
+const followUpCommands = (
+  node: GraphNode,
+  type: NodeType,
+  projectReferenceOverride?: string,
+): EmittedCommand[] => {
+  const followUps = ENDPOINT_FOLLOW_UPS[type.id] ?? [];
+  const project =
+    projectReferenceOverride ??
+    projectReference(node.name, type.generator.startsWith('py#'));
+  return followUps.map((followUp) => ({
+    command: generatorCommand(followUp.generator, [
+      `--project=${project}`,
+      ...Object.entries(followUp.options ?? {}).map(([k, v]) => flag(k, v)),
+    ]),
+    comment: `Add ${followUp.adds} to ${node.name}`,
+    nodeId: node.id,
+  }));
+};
+
+/**
  * Emit the commands scaffolding the graph, in dependency order: the workspace,
  * then host projects, then projects and the components they host, then the
  * connections that wire them together.
@@ -164,6 +190,12 @@ export const emitCommands = (
       options.packageManager,
       kebabCase(options.workspace) || 'my-project',
       options.iac,
+      undefined,
+      undefined,
+      // The whole script is meant to run unattended, so the workspace create
+      // skips its prompts too. `create-nx-workspace` spells this
+      // `--interactive=false` rather than the generators' `--no-interactive`.
+      '--interactive=false',
     ),
     comment: `Create the workspace, managing infrastructure with ${options.iac === 'cdk' ? 'CDK' : 'Terraform'}`,
   });
@@ -207,6 +239,7 @@ export const emitCommands = (
       comment: `Create ${node.name} (${type.label})`,
       nodeId: node.id,
     });
+    commands.push(...followUpCommands(node, type));
   }
 
   for (const node of componentNodes) {
@@ -225,6 +258,7 @@ export const emitCommands = (
       comment: `Add ${node.name} (${type.label}) to ${reference.project}`,
       nodeId: node.id,
     });
+    commands.push(...followUpCommands(node, type, reference.project));
   }
 
   const references = nodeReferences(graph);
