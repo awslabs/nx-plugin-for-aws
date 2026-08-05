@@ -5,43 +5,38 @@
 
 import * as childProcess from 'node:child_process';
 import { logger } from '@nx/devkit';
-import { SMITHY_VERSIONS } from './versions';
+import { SMITHY_VERSIONS, TS_VERSIONS } from './versions';
 
 /**
  * How a generated Smithy project runs the Smithy CLI.
  *
- * Everywhere `mise` runs, the CLI is resolved by `mise exec smithy@<version>`,
- * which downloads and caches the pinned version on first use — so a Smithy build
- * needs no tool installed beyond the workspace's own dependencies.
+ * `mise` resolves the pinned CLI, downloading and caching it on first use, so a
+ * Smithy build needs no tool installed on the machine.
  *
- * On Windows `mise` is not available as a workspace dependency: the `mise` npm
- * package is a stub whose `preinstall` fetches a platform package, and no Windows
- * platform package is published. A root dependency on it would fail every install
- * on Windows rather than just Smithy builds, so Windows users install the Smithy
- * CLI themselves and the target invokes `smithy` directly.
- */
-
-/**
- * Where `mise` lands in a workspace, for a target command to invoke.
+ * mise itself is fetched by `npx` rather than added as a workspace dependency. The
+ * `mise` npm package is a stub that fetches its real binary in a `preinstall`, and
+ * every package manager gates install scripts differently: pnpm, bun and yarn
+ * Berry each need their own allowlist entry, bun and yarn fail silently when it is
+ * missing, and `nx migrate` installs with `--ignore-scripts` — so a migrated
+ * workspace ends up with the package present and no binary. `npx` sidesteps all of
+ * it: it runs the package's own bin, resolving from `node_modules` when it happens
+ * to be there and fetching it otherwise. A warm cache costs about a second.
  *
- * Called by path rather than by name: only pnpm and npm put a `mise` shim in
- * `node_modules/.bin`, so `mise` alone is not on `PATH` under yarn — while every
- * package manager lays the package itself out here, pnpm by symlink. Written with
- * forward slashes, which Windows accepts too.
+ * On Windows mise publishes no platform package at all, so there the Smithy CLI is
+ * a documented prerequisite and the target invokes `smithy` directly.
  */
-const MISE_BIN = 'node_modules/mise/bin/mise';
 
 /**
  * The prefix a target command runs the Smithy CLI through.
  *
- * Pinned via `mise exec` off Windows, where the version travels in the command
- * for the sync to move forward. On Windows the CLI comes from the user's PATH, so
- * there is no version to pin — {@link warnIfSmithyMissing} checks it is there.
+ * Both mise and the CLI are pinned in the command off Windows, so the version sync
+ * can move them forward. On Windows the CLI comes from the user's PATH, so there is
+ * no version to pin — {@link warnIfSmithyMissing} checks it is there.
  */
 export const smithyCliCommand = (): string =>
   isWindows()
     ? 'smithy'
-    : `${MISE_BIN} exec smithy@${SMITHY_VERSIONS.cli} -- smithy`;
+    : `npx -y mise@${TS_VERSIONS.mise} exec smithy@${SMITHY_VERSIONS.cli} -- smithy`;
 
 /**
  * Whether the workspace this generator runs in targets Windows, where the Smithy

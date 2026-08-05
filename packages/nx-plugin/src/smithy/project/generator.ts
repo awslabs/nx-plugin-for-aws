@@ -29,12 +29,7 @@ import {
   projectExists,
 } from '../../utils/nx';
 import { getRelativePathToRootByDirectory } from '../../utils/paths';
-import { registerBuiltDependencies } from '../../utils/pnpm-workspace';
-import {
-  isWindows,
-  smithyCliCommand,
-  warnIfSmithyMissing,
-} from '../../utils/smithy';
+import { smithyCliCommand, warnIfSmithyMissing } from '../../utils/smithy';
 import { smithyMavenVersions } from '../../utils/versions';
 import type { SmithyProjectGeneratorSchema } from './schema';
 
@@ -56,15 +51,14 @@ const isService = (metadata: SmithyProjectMetadata) =>
  * Everything a Smithy build runs, all of it workspace tooling in the root
  * manifest rather than anything the model itself imports.
  *
- * The Smithy CLI is not among them: it is resolved by `mise exec`, which
- * downloads the pinned version on demand. `mise` itself is only added where it
- * has a binary to install — see `utils/smithy.ts`.
+ * Neither the Smithy CLI nor `mise` is among them: the compile target fetches mise
+ * with `npx` and mise resolves the CLI, so neither is a workspace dependency — see
+ * `utils/smithy.ts`.
  */
 export const DEPENDENCIES = declareDependencies<SmithyProjectMetadata>()({
   ts: [
     // Added to the root by `FsCommands` as it builds each command.
     ...ownedElsewhere(FS_DEPENDENCIES),
-    { name: 'mise', dev: true, root: true, when: () => !isWindows() },
     { name: 'rolldown', dev: true, root: true, when: isService },
     { name: 'rolldown-plugin-dts', dev: true, root: true, when: isService },
     { name: '@rollup/plugin-esm-shim', dev: true, root: true, when: isService },
@@ -250,13 +244,6 @@ export const smithyProjectGenerator = async (
   // dependency here is workspace tooling the build runs rather than anything the
   // model imports.
   addTsDependencies(tree, DEPENDENCIES, { metadata });
-
-  if (!isWindows()) {
-    // `mise` fetches its own binary in a `preinstall`, and pnpm 11 fails the
-    // install outright for a build script it skipped. Only where it is installed
-    // — on Windows the CLI is a prerequisite and `mise` is never added.
-    registerBuiltDependencies(tree, { mise: true });
-  }
 
   await addGeneratorMetricsIfApplicable(tree, [SMITHY_PROJECT_GENERATOR_INFO]);
 

@@ -4,7 +4,7 @@
  */
 import { logger } from '@nx/devkit';
 import { smithyCliCommand, warnIfSmithyMissing } from './smithy';
-import { SMITHY_VERSIONS } from './versions';
+import { SMITHY_VERSIONS, TS_VERSIONS } from './versions';
 
 /**
  * The Windows behaviour, which CI cannot exercise from a Linux runner: `mise`
@@ -33,7 +33,7 @@ describe('smithyCliCommand', () => {
   it('should resolve the pinned cli through mise off windows', () => {
     onPlatform('linux', () => {
       expect(smithyCliCommand()).toBe(
-        `node_modules/mise/bin/mise exec smithy@${SMITHY_VERSIONS.cli} -- smithy`,
+        `npx -y mise@${TS_VERSIONS.mise} exec smithy@${SMITHY_VERSIONS.cli} -- smithy`,
       );
     });
   });

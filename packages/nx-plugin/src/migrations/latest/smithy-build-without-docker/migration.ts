@@ -20,8 +20,6 @@ import {
 import { addTsDependencies } from '../../../utils/add-dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { FsCommands } from '../../../utils/fs';
-import { registerBuiltDependencies } from '../../../utils/pnpm-workspace';
-import { isWindows } from '../../../utils/smithy';
 
 /**
  * Move Smithy projects off the container build onto the Smithy CLI.
@@ -181,20 +179,14 @@ export default async function migration(
     migrated.push({ smithyType: type, namespace: metadata.namespace ?? '' });
   }
 
-  // The build now runs these itself rather than inside the image: `mise` to
-  // resolve the pinned CLI, and — for a service — the bundler for its SDK.
+  // A service's SDK bundler, which the image used to carry. The Smithy CLI needs
+  // nothing here — the target fetches mise with `npx`.
   //
   // Added per migrated project rather than once for the workspace, so a mix of
   // services and shape libraries gets the union of what each needs. All of these
   // go to the root manifest, so repeating one is a no-op.
   for (const metadata of migrated) {
     addTsDependencies(tree, DEPENDENCIES, { metadata });
-  }
-
-  if (migrated.length > 0 && !isWindows()) {
-    // `mise` fetches its own binary in a `preinstall`, which pnpm 11 refuses to
-    // run unless the workspace allows it.
-    registerBuiltDependencies(tree, { mise: true });
   }
 
   await formatFilesInSubtree(tree);

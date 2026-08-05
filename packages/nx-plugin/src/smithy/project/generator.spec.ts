@@ -3,7 +3,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { getProjects, readJson, type Tree } from '@nx/devkit';
-import yaml from 'js-yaml';
 import { declareDependencies } from '../../utils/declared-dependencies';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
 import {
@@ -11,7 +10,11 @@ import {
   sharedConstructsGenerator,
 } from '../../utils/shared-constructs';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { SMITHY_VERSIONS, smithyMavenDependency } from '../../utils/versions';
+import {
+  SMITHY_VERSIONS,
+  smithyMavenDependency,
+  TS_VERSIONS,
+} from '../../utils/versions';
 import {
   SMITHY_PROJECT_GENERATOR_INFO,
   smithyProjectGenerator,
@@ -56,7 +59,7 @@ describe('smithyProjectGenerator', () => {
       'rimraf dist/{projectRoot}/build',
       'rimraf dist/{projectRoot}/smithy',
       'make-dir dist/{projectRoot}/build',
-      `node_modules/mise/bin/mise exec smithy@${SMITHY_VERSIONS.cli} -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy`,
+      `npx -y mise@${TS_VERSIONS.mise} exec smithy@${SMITHY_VERSIONS.cli} -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy`,
       'cpy "dist/{projectRoot}/smithy/source/openapi/*.openapi.json" dist/{projectRoot}/build/openapi --flat --rename=openapi.json',
       'npm install --prefix dist/{projectRoot}/smithy/source/typescript-ssdk-codegen --ignore-scripts --no-audit --no-fund',
       'rolldown -c {projectRoot}/ssdk.rolldown.config.mjs',
@@ -245,7 +248,7 @@ describe('smithyProjectGenerator', () => {
     // The CLI version travels in the command, which is what the version sync
     // reaches to move it forward.
     expect(commands).toContain(
-      `node_modules/mise/bin/mise exec smithy@${SMITHY_VERSIONS.cli} -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy`,
+      `npx -y mise@${TS_VERSIONS.mise} exec smithy@${SMITHY_VERSIONS.cli} -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy`,
     );
     expect(commands.join('\n')).not.toContain('docker');
 
@@ -281,19 +284,6 @@ describe('smithyProjectGenerator', () => {
         'software.amazon.smithy.typescript:smithy-aws-typescript-codegen',
       ),
     ]);
-  });
-
-  // `mise` fetches its own binary in a `preinstall`, and pnpm 11 fails the whole
-  // install for a build script it skipped — so generating a Smithy project has to
-  // allow it, rather than every workspace carrying the entry up front.
-  it('should allow the mise build script it needs', async () => {
-    await smithyProjectGenerator(tree, { name: 'test-api' });
-
-    const workspace = yaml.load(
-      tree.read('pnpm-workspace.yaml', 'utf-8')!,
-    ) as Record<string, any>;
-    expect(workspace.allowBuilds.mise).toBe(true);
-    expect(workspace.onlyBuiltDependencies).toContain('mise');
   });
 
   it('should configure proper build dependencies', async () => {
@@ -444,7 +434,7 @@ describe('smithyProjectGenerator', () => {
         'rimraf dist/{projectRoot}/build',
         'rimraf dist/{projectRoot}/smithy',
         'make-dir dist/{projectRoot}/build',
-        `node_modules/mise/bin/mise exec smithy@${SMITHY_VERSIONS.cli} -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy`,
+        `npx -y mise@${TS_VERSIONS.mise} exec smithy@${SMITHY_VERSIONS.cli} -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy`,
         'ncp dist/{projectRoot}/smithy/source/model/model.json dist/{projectRoot}/build/model.json',
       ]);
     });

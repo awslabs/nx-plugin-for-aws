@@ -5,13 +5,12 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { addProjectConfiguration, readJson, type Tree } from '@nx/devkit';
-import yaml from 'js-yaml';
 import {
   SMITHY_PROJECT_GENERATOR_INFO,
   smithyProjectGenerator,
 } from '../../../smithy/project/generator';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import { SMITHY_VERSIONS } from '../../../utils/versions';
+import { SMITHY_VERSIONS, TS_VERSIONS } from '../../../utils/versions';
 import migration from './migration';
 
 /**
@@ -85,7 +84,7 @@ describe('smithy-build-without-docker migration', () => {
     const { targets } = readJson(tree, 'test-api/project.json');
     const commands: string[] = targets.compile.options.commands;
     expect(commands).toContain(
-      `node_modules/mise/bin/mise exec smithy@${SMITHY_VERSIONS.cli} -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy`,
+      `npx -y mise@${TS_VERSIONS.mise} exec smithy@${SMITHY_VERSIONS.cli} -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy`,
     );
     expect(commands.join('\n')).not.toContain('docker');
     expect(commands.join('\n')).not.toContain('build.Dockerfile');
@@ -117,25 +116,11 @@ describe('smithy-build-without-docker migration', () => {
     await migration(tree);
 
     const { devDependencies } = readJson(tree, 'package.json');
-    // Resolves the pinned CLI the target invokes.
-    expect(devDependencies).toHaveProperty('mise');
-    // Bundles the generated server SDK, which the image used to do.
+    // Bundles the generated server SDK, which the image used to do. The Smithy
+    // CLI needs nothing: the target fetches mise with `npx`.
+    expect(devDependencies).not.toHaveProperty('mise');
     expect(devDependencies).toHaveProperty('rolldown');
     expect(devDependencies).toHaveProperty('rolldown-plugin-dts');
-  });
-
-  // pnpm 11 fails the whole install for a build script it skipped, so a migrated
-  // workspace — which newly gains `mise` — has to allow it.
-  it('should allow the mise build script the migrated build needs', async () => {
-    await generateOldWorkspace(tree);
-
-    await migration(tree);
-
-    const workspace = yaml.load(
-      tree.read('pnpm-workspace.yaml', 'utf-8')!,
-    ) as Record<string, any>;
-    expect(workspace.allowBuilds.mise).toBe(true);
-    expect(workspace.onlyBuiltDependencies).toContain('mise');
   });
 
   /**
@@ -150,7 +135,6 @@ describe('smithy-build-without-docker migration', () => {
     await migration(tree);
 
     const { devDependencies } = readJson(tree, 'package.json');
-    expect(devDependencies).toHaveProperty('mise');
     expect(devDependencies).toHaveProperty('rolldown');
     expect(devDependencies).toHaveProperty('rolldown-plugin-dts');
     expect(devDependencies).toHaveProperty('@rollup/plugin-esm-shim');

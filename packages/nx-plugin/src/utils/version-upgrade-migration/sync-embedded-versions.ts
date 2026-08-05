@@ -373,11 +373,16 @@ const syncTargetToolPins = async (tree: Tree): Promise<string[]> => {
       pattern: `${escapeRegExp(repository)}:([^${VERSION_TERMINATORS}']+)`,
       vended: CONTAINER_VERSIONS[tool as keyof typeof CONTAINER_VERSIONS],
     })),
-    // The Smithy CLI a Smithy project's compile target runs through `mise exec`.
-    // Nothing installs it, so this command is the only place its version sits.
+    // The Smithy CLI a Smithy project's compile target runs, and the `mise` that
+    // resolves it. Neither is installed into the workspace — the target fetches
+    // mise with `npx` — so this command is the only place either version sits.
     {
-      pattern: `mise exec smithy@([^${VERSION_TERMINATORS}']+)`,
+      pattern: `exec smithy@([^${VERSION_TERMINATORS}']+)`,
       vended: SMITHY_VERSIONS.cli,
+    },
+    {
+      pattern: `npx -y mise@([^${VERSION_TERMINATORS}']+)`,
+      vended: TS_VERSIONS.mise,
     },
     ...Object.keys(PY_VERSIONS).flatMap((name) => {
       const vended = vendedPyVersion(name);

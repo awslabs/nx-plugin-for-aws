@@ -277,7 +277,7 @@ export const VENDORED_VERSIONS = {
  * The Smithy CLI version generated Smithy projects build with, and the Maven
  * artifacts their `smithy-build.json` resolves.
  *
- * The CLI is run through `mise exec smithy@<version>`, so nothing is installed
+ * The CLI is run through `npx mise exec smithy@<version>`, so nothing is installed
  * into the workspace and the pin travels in the `project.json` target command —
  * which is what the version sync reaches to move it forward.
  *

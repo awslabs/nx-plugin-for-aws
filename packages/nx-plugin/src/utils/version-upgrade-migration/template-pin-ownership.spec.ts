@@ -198,7 +198,7 @@ describe('the real smithy project pins', () => {
       contents,
     );
 
-  it('should sync the smithy cli pinned in the compile target', async () => {
+  it('should sync the smithy cli and mise pinned in the compile target', async () => {
     const tree: Tree = createTreeUsingTsSolutionSetup();
     await smithyProjectGenerator(tree, { name: 'api' });
     const path = 'api/project.json';
@@ -206,18 +206,18 @@ describe('the real smithy project pins', () => {
 
     // Matched on the pin rather than the version rendered today, so winding back
     // keeps working as the vended version moves.
-    const older = fresh.replace(
-      /mise exec smithy@[^ ]+/,
-      `mise exec smithy@${OLD_SMITHY}`,
-    );
+    const older = fresh
+      .replace(/exec smithy@[^ ]+/, `exec smithy@${OLD_SMITHY}`)
+      .replace(/mise@[^ ]+/, 'mise@2026.1.1');
     expect(older).not.toEqual(fresh);
     tree.write(path, older);
 
     await syncVendedVersions(tree);
 
     expect(tree.read(path, 'utf-8')).toEqual(fresh);
+    // Both the CLI and the mise that resolves it move forward.
     expect(tree.read(path, 'utf-8')).toContain(
-      `node_modules/mise/bin/mise exec smithy@${SMITHY_VERSIONS.cli}`,
+      `npx -y mise@${TS_VERSIONS.mise} exec smithy@${SMITHY_VERSIONS.cli}`,
     );
   });
 
