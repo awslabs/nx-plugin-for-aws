@@ -390,18 +390,42 @@ const re2WasmPlugin = () => ({
   },
 });
 
-export default {
-  input: posix(ssdkDir, 'src/index.ts'),
-  plugins: [re2WasmPlugin(), dts({ resolve: true }), esmShim()],
-  output: [
-    {
-      dir: posix(import.meta.dirname, '../', 'dist', 'test-api', 'build/ssdk'),
-      format: 'es',
-    },
-  ],
-  resolve: { tsconfigFilename: posix(ssdkDir, 'tsconfig.es.json') },
-  platform: 'node',
-};
+const input = posix(ssdkDir, 'src/index.ts');
+const tsconfigFilename = posix(ssdkDir, 'tsconfig.es.json');
+const outDir = posix(
+  import.meta.dirname,
+  '../',
+  'dist',
+  'test-api',
+  'build/ssdk',
+);
+
+/**
+ * The module and its type declaration are built in separate passes.
+ *
+ * \`rolldown-plugin-dts\` loads the same sources a second time to build the
+ * declaration. Sharing one pass with the module build makes those two views of a
+ * file collide on Windows: the generated Server SDK merges an \`interface\` with a
+ * \`namespace\`, and the namespace's emitted assignment is then read as a write to
+ * an imported binding, failing with ASSIGN_TO_IMPORT. Kept apart, each pass sees
+ * each file once.
+ */
+export default [
+  {
+    input,
+    plugins: [re2WasmPlugin(), esmShim()],
+    output: [{ dir: outDir, format: 'es' }],
+    resolve: { tsconfigFilename },
+    platform: 'node',
+  },
+  {
+    input,
+    plugins: [dts({ resolve: true, emitDtsOnly: true })],
+    output: [{ dir: outDir, format: 'es' }],
+    resolve: { tsconfigFilename },
+    platform: 'node',
+  },
+];
 "
 `;
 
