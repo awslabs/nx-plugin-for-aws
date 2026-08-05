@@ -3,16 +3,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { readFileSync, writeFileSync } from 'node:fs';
+import { assembleMigrations } from '../packages/nx-plugin/src/utils/migration-manifest';
 import {
   isValidVersion,
-  type MigrationsJson,
   readShippedMigrationVersions,
   stampMigrationVersions,
 } from '../packages/nx-plugin/src/utils/migration-versions';
 import {
+  discoverMigrations,
+  readPackageJsonUpdates,
+} from './utils/migration-folders';
+import {
   readReleasedMigrations,
   releasedVersionsDescending,
-  SOURCE_MIGRATIONS_PATH,
 } from './utils/migration-release-tags';
 
 /**
@@ -24,8 +27,9 @@ import {
  * version.
  *
  * Runs in the release job once `nx release version` has written the version
- * about to publish into the dist manifests, and stamps from *source*
- * `migrations.json` so it is safe to re-run.
+ * about to publish into the dist manifests, and stamps a manifest assembled
+ * from source (the migration folders and `packageJsonUpdates.json`) so it is
+ * safe to re-run.
  *
  * Usage: tsx scripts/stamp-migrations.ts --pending-version <x.y.z> [--out <path>]
  *
@@ -71,8 +75,13 @@ const main = () => {
   const pendingVersion = readPendingVersion(argv);
   const outPath = readOutPath(argv);
 
-  const migrations: MigrationsJson = JSON.parse(
-    readFileSync(SOURCE_MIGRATIONS_PATH, 'utf-8'),
+  const { name } = JSON.parse(
+    readFileSync('packages/nx-plugin/package.json', 'utf-8'),
+  );
+  const migrations = assembleMigrations(
+    name,
+    discoverMigrations(),
+    readPackageJsonUpdates(),
   );
 
   const versions = releasedVersionsDescending();

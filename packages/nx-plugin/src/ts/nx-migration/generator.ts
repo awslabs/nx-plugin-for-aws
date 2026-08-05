@@ -122,33 +122,47 @@ export const tsNxMigrationGenerator = async (
     tree.delete(joinPathFragments(migrationDir, 'prompt.md'));
   }
 
-  // Register the migration under its folder-prefixed key. The fields present
-  // discriminate the kind for nx, and paths are relative to migrations.json.
-  // No version is written, but an already-stamped one is preserved.
-  const migrationsJsonPath = joinPathFragments(plugin.root, 'migrations.json');
-  const migrationsJson = tree.exists(migrationsJsonPath)
-    ? readJson(tree, migrationsJsonPath)
-    : {
-        $schema: 'http://json-schema.org/schema',
-        name: readJson(tree, pluginPackageJsonPath).name ?? plugin.name,
-        generators: {},
-      };
-  writeJson(tree, migrationsJsonPath, {
-    ...migrationsJson,
-    generators: sortObjectKeys({
-      ...migrationsJson.generators,
-      [key]: {
-        ...(migrationsJson.generators?.[key]?.version
-          ? { version: migrationsJson.generators[key].version }
-          : {}),
-        description,
-        ...(hasImplementation
-          ? { implementation: `./${migrationPath}/migration` }
-          : {}),
-        ...(hasPrompt ? { prompt: `./${migrationPath}/prompt.md` } : {}),
-      },
-    }),
-  });
+  if (isNxPluginForAws) {
+    // In the plugin's own repo migrations.json is assembled from these folders
+    // at build time (see utils/migration-manifest.ts), so registration is just
+    // the description beside the code — its kind comes from the files present.
+    // Two migration PRs then touch disjoint files rather than one shared manifest.
+    const metadataPath = joinPathFragments(migrationDir, 'metadata.json');
+    if (!tree.exists(metadataPath)) {
+      writeJson(tree, metadataPath, { description });
+    }
+  } else {
+    // Elsewhere, register the migration under its folder-prefixed key. The fields
+    // present discriminate the kind for nx, and paths are relative to
+    // migrations.json. No version is written, but an already-stamped one is kept.
+    const migrationsJsonPath = joinPathFragments(
+      plugin.root,
+      'migrations.json',
+    );
+    const migrationsJson = tree.exists(migrationsJsonPath)
+      ? readJson(tree, migrationsJsonPath)
+      : {
+          $schema: 'http://json-schema.org/schema',
+          name: readJson(tree, pluginPackageJsonPath).name ?? plugin.name,
+          generators: {},
+        };
+    writeJson(tree, migrationsJsonPath, {
+      ...migrationsJson,
+      generators: sortObjectKeys({
+        ...migrationsJson.generators,
+        [key]: {
+          ...(migrationsJson.generators?.[key]?.version
+            ? { version: migrationsJson.generators[key].version }
+            : {}),
+          description,
+          ...(hasImplementation
+            ? { implementation: `./${migrationPath}/migration` }
+            : {}),
+          ...(hasPrompt ? { prompt: `./${migrationPath}/prompt.md` } : {}),
+        },
+      }),
+    });
+  }
 
   // Codemods import @nx/devkit and the @aws/nx-plugin SDK, both of which must
   // resolve for nx to run them
