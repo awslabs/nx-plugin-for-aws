@@ -360,12 +360,16 @@ const updateGitSecrets = async (
  *
  * Asked of mise rather than of GitHub, so the version this vends is one the tool
  * that resolves it can actually install — a release mise's registry hasn't picked
- * up yet would leave every Smithy build failing to resolve the CLI. `mise` is a
- * workspace dev dependency, so it runs from `node_modules`.
+ * up yet would leave every Smithy build failing to resolve the CLI.
+ *
+ * Run through `pnpm dlx` rather than added to this repo's dependencies: the `mise`
+ * npm package fetches its own binary in a `preinstall` and publishes nothing for
+ * Windows, so depending on it would fail `pnpm i` on every Windows CI job. This
+ * script only ever runs on Linux.
  */
 const getLatestSmithyCliVersion = (): string | undefined => {
   try {
-    const latest = execSync('mise latest smithy', {
+    const latest = execSync(`pnpm dlx mise@${TS_VERSIONS.mise} latest smithy`, {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
