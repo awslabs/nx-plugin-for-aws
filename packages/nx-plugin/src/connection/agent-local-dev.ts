@@ -140,10 +140,13 @@ export const addGatewayTargetToLocalDev = async (
 
   // Spread rather than member assignment: the provider's fetch-failure
   // fallback config carries no `gateways` key, so assigning into it would
-  // throw and leave the site stuck on the loading spinner.
+  // throw and leave the site stuck on the loading spinner. The marker is
+  // this gateway's own local URL (its port is unique per gateway and stable
+  // across re-runs), not the shared `gateways` key, so a website connected to
+  // several gateways gets one override statement per gateway.
   await addLocalDevRuntimeConfigOverride(tree, sourceProject, {
     statement: `runtimeConfig.gateways = { ...runtimeConfig.gateways, ${options.gatewayClassName}: 'http://localhost:${options.port}' };`,
-    marker: `runtimeConfig.gateways`,
+    marker: `'http://localhost:${options.port}'`,
   });
 };
 

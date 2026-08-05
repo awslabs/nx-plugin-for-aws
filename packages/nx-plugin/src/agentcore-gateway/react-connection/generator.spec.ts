@@ -151,6 +151,83 @@ export function Main() {
     );
   });
 
+  it('adds a local-dev override per gateway when connected to several', async () => {
+    addWebsite();
+    addAguiAgent();
+    addGateway({ components: [agentConnectionComponent] });
+
+    // A second gateway on its own port, fronting a second agent.
+    addProjectConfiguration(tree, 'ts-project-2', {
+      name: 'ts-project-2',
+      root: 'packages/ts-project-2',
+      sourceRoot: 'packages/ts-project-2/src',
+      targets: { 'other-agent-dev': { continuous: true } },
+      metadata: {
+        components: [
+          {
+            generator: 'ts#agent',
+            name: 'other-agent',
+            rc: 'OtherAgent',
+            path: 'src/other-agent',
+            protocol: 'ag-ui',
+            auth: 'iam',
+            port: 8082,
+          },
+        ],
+      } as any,
+    });
+    addProjectConfiguration(tree, '@proj/other-gateway', {
+      name: '@proj/other-gateway',
+      root: 'packages/other-gateway',
+      projectType: 'library',
+      sourceRoot: 'packages/other-gateway',
+      targets: {
+        dev: {
+          executor: 'nx:run-commands',
+          continuous: true,
+          options: { commands: ['tsx local-dev.ts'] },
+          dependsOn: [],
+        },
+      },
+      metadata: {
+        generator: 'agentcore-gateway',
+        name: 'other-gateway',
+        rc: 'OtherGateway',
+        protocol: 'http',
+        auth: 'iam',
+        port: 8101,
+        components: [
+          {
+            generator: 'agentcore-gateway#agent-connection',
+            path: 'packages/ts-project-2',
+            name: 'other-agent',
+          },
+        ],
+      } as any,
+    });
+
+    await agentcoreGatewayReactConnectionGenerator(tree, {
+      sourceProject: 'frontend',
+      targetProject: '@proj/my-gateway',
+    });
+    await agentcoreGatewayReactConnectionGenerator(tree, {
+      sourceProject: 'frontend',
+      targetProject: '@proj/other-gateway',
+    });
+
+    // Both gateways get their own override — the second connection must not be
+    // skipped by an idempotency guard keyed on the shared `gateways` object.
+    const runtimeConfig = tree
+      .read('apps/frontend/src/components/RuntimeConfig/index.tsx', 'utf-8')!
+      .replace(/\s+/g, ' ');
+    expect(runtimeConfig).toContain(
+      `runtimeConfig.gateways = { ...runtimeConfig.gateways, MyGateway: 'http://localhost:8100', }`,
+    );
+    expect(runtimeConfig).toContain(
+      `runtimeConfig.gateways = { ...runtimeConfig.gateways, OtherGateway: 'http://localhost:8101', }`,
+    );
+  });
+
   it('records connection metadata on the website project', async () => {
     addWebsite();
     addAguiAgent();
