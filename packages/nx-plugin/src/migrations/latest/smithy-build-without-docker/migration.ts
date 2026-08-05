@@ -13,6 +13,7 @@ import {
 import {
   DEPENDENCIES,
   SMITHY_PROJECT_GENERATOR_INFO,
+  type SmithyProjectMetadata,
   smithyCompileCommands,
   writeSsdkBundleConfig,
 } from '../../../smithy/project/generator';
@@ -38,10 +39,13 @@ import { FsCommands } from '../../../utils/fs';
 /** Where a consuming project's Dockerfile brought in a shape library's model. */
 const WORKSPACE_CONTEXT_COPY = /COPY\s+--from=workspace\s+(\S+)\s+\S+/g;
 
-/** The metadata a Smithy model project records. */
-interface SmithyMetadata {
+/**
+ * The metadata a Smithy model project records, as a workspace on an older release
+ * may hold it — `smithyType` predates neither the generator nor this migration, so
+ * it may be absent.
+ */
+interface SmithyMetadata extends Partial<SmithyProjectMetadata> {
   readonly generator?: string;
-  readonly smithyType?: 'service' | 'shapes';
 }
 
 const smithyMetadata = (
@@ -122,8 +126,7 @@ export default async function migration(
   tree: Tree,
 ): Promise<MigrationReturnObject> {
   const nextSteps: string[] = [];
-  let migratedService = false;
-  let migratedAny = false;
+  const migrated: SmithyProjectMetadata[] = [];
 
   for (const [name, project] of getProjects(tree)) {
     const metadata = smithyMetadata(project);
@@ -172,17 +175,18 @@ export default async function migration(
 
     if (type === 'service') {
       writeSsdkBundleConfig(tree, project.root);
-      migratedService = true;
     }
-    migratedAny = true;
+    migrated.push({ smithyType: type, namespace: metadata.namespace ?? '' });
   }
 
-  if (migratedAny) {
-    // The build now runs these itself rather than inside the image: `mise` to
-    // resolve the pinned CLI, and — for a service — the bundler for its SDK.
-    addTsDependencies(tree, DEPENDENCIES, {
-      metadata: { smithyType: migratedService ? 'service' : 'shapes' },
-    });
+  // The build now runs these itself rather than inside the image: `mise` to
+  // resolve the pinned CLI, and — for a service — the bundler for its SDK.
+  //
+  // Added per migrated project rather than once for the workspace, so a mix of
+  // services and shape libraries gets the union of what each needs. All of these
+  // go to the root manifest, so repeating one is a no-op.
+  for (const metadata of migrated) {
+    addTsDependencies(tree, DEPENDENCIES, { metadata });
   }
 
   await formatFilesInSubtree(tree);

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { execSync } from 'node:child_process';
+import * as childProcess from 'node:child_process';
 import { logger } from '@nx/devkit';
 import { SMITHY_VERSIONS } from './versions';
 
@@ -43,7 +43,7 @@ export const isWindows = (): boolean => process.platform === 'win32';
 /** Whether a Smithy CLI is resolvable on the PATH. */
 const isSmithyOnPath = (): boolean => {
   try {
-    execSync('where smithy', { stdio: 'ignore' });
+    childProcess.execSync('where smithy', { stdio: 'ignore' });
     return true;
   } catch {
     return false;
@@ -55,9 +55,14 @@ const isSmithyOnPath = (): boolean => {
  *
  * A warning rather than an error: the project is still generated correctly, and
  * the CLI can be installed before the first build.
+ *
+ * @param onPath overrides the PATH probe, so a test can cover the Windows branch
+ *   from any runner — ESM module namespaces cannot be spied on.
  */
-export const warnIfSmithyMissing = (): void => {
-  if (!isWindows() || isSmithyOnPath()) {
+export const warnIfSmithyMissing = (
+  onPath: () => boolean = isSmithyOnPath,
+): void => {
+  if (!isWindows() || onPath()) {
     return;
   }
   logger.warn(

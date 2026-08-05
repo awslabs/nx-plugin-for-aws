@@ -123,6 +123,24 @@ describe('smithy-build-without-docker migration', () => {
     expect(devDependencies).toHaveProperty('rolldown-plugin-dts');
   });
 
+  /**
+   * A shape library needs only the CLI, a service the bundler too. Whichever
+   * order they are visited in, the workspace has to end up with the union — the
+   * service's bundler must not be dropped because a shape library came last.
+   */
+  it('should add the union of dependencies across mixed project types', async () => {
+    await generateOldWorkspace(tree, { name: 'test-shapes', type: 'shapes' });
+    await generateOldWorkspace(tree, { name: 'test-api', type: 'service' });
+
+    await migration(tree);
+
+    const { devDependencies } = readJson(tree, 'package.json');
+    expect(devDependencies).toHaveProperty('mise');
+    expect(devDependencies).toHaveProperty('rolldown');
+    expect(devDependencies).toHaveProperty('rolldown-plugin-dts');
+    expect(devDependencies).toHaveProperty('@rollup/plugin-esm-shim');
+  });
+
   it('should migrate a shape library with no sdk to bundle', async () => {
     await generateOldWorkspace(tree, { name: 'test-shapes', type: 'shapes' });
 
