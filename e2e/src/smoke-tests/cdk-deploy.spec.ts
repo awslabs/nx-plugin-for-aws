@@ -9,9 +9,13 @@ import { CloudFormation, StackStatus } from '@aws-sdk/client-cloudformation';
 import { ensureDirSync } from 'fs-extra';
 import { runCLI, tmpProjPath } from '../utils';
 import {
+  buildGatewayTargetUrl,
   invokeAgentCoreA2a,
+  invokeAgentCoreA2aUrl,
   invokeAgentCoreAgent,
+  invokeAgentCoreAgentUrl,
   invokeAgentCoreAgUi,
+  invokeAgentCoreAgUiUrl,
   invokeAgentCoreGatewayNoAuthDenied,
   invokeAgentCoreGatewayTool,
   invokeAgentCoreMcp,
@@ -359,6 +363,34 @@ describe('smoke test - cdk-deploy', () => {
         '3',
       );
 
+      // HTTP-protocol gateway fronting agent runtime targets — invoke every
+      // fronted agent through its `/<target>/invocations` gateway route,
+      // covering all supported protocol permutations (ts ag-ui + a2a,
+      // py ag-ui + http + a2a). A successful round-trip proves the gateway
+      // proxies each protocol (SSE for AG-UI, JSON streaming for HTTP,
+      // JSON-RPC for A2A) to the runtime behind it.
+      const agentGatewayUrl = findOutput('AgentGatewayUrl');
+      await invokeAgentCoreAgUiUrl(
+        buildGatewayTargetUrl(agentGatewayUrl, 'my-ts-agui-agent'),
+        'Gateway -> TS AG-UI Agent',
+      );
+      await invokeAgentCoreAgUiUrl(
+        buildGatewayTargetUrl(agentGatewayUrl, 'my-py-agui-agent'),
+        'Gateway -> PY AG-UI Agent',
+      );
+      await invokeAgentCoreAgentUrl(
+        buildGatewayTargetUrl(agentGatewayUrl, 'my-agent'),
+        'Gateway -> PY HTTP Agent',
+      );
+      await invokeAgentCoreA2aUrl(
+        `${buildGatewayTargetUrl(agentGatewayUrl, 'my-ts-a2a-agent')}/`,
+        'Gateway -> TS A2A Agent',
+      );
+      await invokeAgentCoreA2aUrl(
+        `${buildGatewayTargetUrl(agentGatewayUrl, 'my-py-a2a-agent')}/`,
+        'Gateway -> PY A2A Agent',
+      );
+
       // AgentCore runtimes and gateway — unsigned (no SigV4) requests must be
       // denied across every MCP server, agent (HTTP/AG-UI/tRPC), A2A runtime
       // and the gateway.
@@ -401,6 +433,10 @@ describe('smoke test - cdk-deploy', () => {
       await invokeAgentCoreGatewayNoAuthDenied(
         findOutput('ParentGatewayUrl'),
         'Parent Gateway',
+      );
+      await invokeAgentCoreGatewayNoAuthDenied(
+        buildGatewayTargetUrl(agentGatewayUrl, 'my-agent'),
+        'Agent Gateway',
       );
 
       // Lambda functions

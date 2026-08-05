@@ -82,7 +82,84 @@ export const addAgentTargetToLocalDev = async (
   }
   updateProjectConfiguration(tree, sourceProject.name, sourceProject);
 
-  // Add an override to runtime-config for the dev target to use the local url
+  await addLocalDevRuntimeConfigOverride(tree, sourceProject, {
+    statement: `runtimeConfig.${options.runtimeConfigNamespace}.${options.agentNameClassName} = '${options.localUrl}';`,
+    marker: `runtimeConfig.${options.runtimeConfigNamespace}.${options.agentNameClassName}`,
+  });
+};
+
+export interface GatewayLocalDevOptions {
+  gatewayClassName: string;
+  /** Local port the gateway project's dev target listens on. */
+  port: number;
+  /**
+   * Additional targets to add as dev dependencies.
+   */
+  additionalDependencyTargets?: string[];
+}
+
+/**
+ * Adds an AgentCore Gateway project's dev target as a dependency of the
+ * source project's dev target (transitively starting the gateway's attached
+ * agents), and updates the RuntimeConfig provider to point the gateway's
+ * runtime config entry at the local gateway.
+ */
+export const addGatewayTargetToLocalDev = async (
+  tree: Tree,
+  sourceProjectName: string,
+  gatewayProjectName: string,
+  options: GatewayLocalDevOptions,
+) => {
+  const sourceProject = readProjectConfigurationUnqualified(
+    tree,
+    sourceProjectName,
+  );
+  const gatewayProject = readProjectConfigurationUnqualified(
+    tree,
+    gatewayProjectName,
+  );
+
+  // A gateway is its own standalone project, so it exposes plain dev
+  if (
+    !(
+      gatewayProject.targets?.['dev']?.continuous &&
+      sourceProject.targets?.['dev']
+    )
+  ) {
+    return;
+  }
+
+  addDependencyToTargetIfNotPresent(sourceProject, 'dev', {
+    projects: [gatewayProject.name],
+    target: 'dev',
+  });
+  for (const additional of options.additionalDependencyTargets ?? []) {
+    addDependencyToTargetIfNotPresent(sourceProject, 'dev', additional);
+  }
+  updateProjectConfiguration(tree, sourceProject.name, sourceProject);
+
+  // Spread rather than member assignment: the provider's fetch-failure
+  // fallback config carries no `gateways` key, so assigning into it would
+  // throw and leave the site stuck on the loading spinner. The marker is
+  // this gateway's own local URL (its port is unique per gateway and stable
+  // across re-runs), not the shared `gateways` key, so a website connected to
+  // several gateways gets one override statement per gateway.
+  await addLocalDevRuntimeConfigOverride(tree, sourceProject, {
+    statement: `runtimeConfig.gateways = { ...runtimeConfig.gateways, ${options.gatewayClassName}: 'http://localhost:${options.port}' };`,
+    marker: `'http://localhost:${options.port}'`,
+  });
+};
+
+/**
+ * Add an override statement to the source project's RuntimeConfig provider so
+ * the dev target uses local urls. `marker` guards idempotency: the statement
+ * is only inserted when the overrides don't already contain it. Idempotent.
+ */
+const addLocalDevRuntimeConfigOverride = async (
+  tree: Tree,
+  sourceProject: { root: string },
+  options: { statement: string; marker: string },
+) => {
   const runtimeConfigProvider = joinPathFragments(
     sourceProject.root,
     'src',
@@ -94,7 +171,7 @@ export const addAgentTargetToLocalDev = async (
     await applyGritQL(
       tree,
       runtimeConfigProvider,
-      `\`if ($cond) { $stmts }\` => raw\`if ($cond) {\n    $stmts\n    runtimeConfig.${options.runtimeConfigNamespace}.${options.agentNameClassName} = '${options.localUrl}';\n  }\` where { $cond <: contains \`'local-dev'\`, $stmts <: within \`const applyOverrides = $_\`, $stmts <: not contains \`runtimeConfig.${options.runtimeConfigNamespace}.${options.agentNameClassName}\` }`,
+      `\`if ($cond) { $stmts }\` => raw\`if ($cond) {\n    $stmts\n    ${options.statement}\n  }\` where { $cond <: contains \`'local-dev'\`, $stmts <: within \`const applyOverrides = $_\`, $stmts <: not contains \`${options.marker}\` }`,
     );
   }
 };

@@ -3,7 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { ENDPOINT_FOLLOW_UPS } from '../../../../packages/nx-plugin/src/connection/scaffold-catalog';
+import {
+  CONNECTION_ORDERING,
+  ENDPOINT_FOLLOW_UPS,
+} from '../../../../packages/nx-plugin/src/connection/scaffold-catalog';
 import {
   buildCreateNxWorkspaceCommand,
   buildPackageManagerExecCommand,
@@ -13,7 +16,7 @@ import {
   snakeCase,
 } from '../../../../packages/nx-plugin/src/utils/names';
 import { INFRA_PROJECT_NAME, type NodeType, nodeType } from './catalog';
-import type { Graph, GraphNode } from './model';
+import type { Graph, GraphEdge, GraphNode } from './model';
 
 /**
  * Turn a graph into the commands that scaffold it: one to create the workspace,
@@ -151,6 +154,44 @@ const generatorCommand = (generator: string, args: readonly string[]): string =>
   `nx g ${NAMESPACE}:${generator} ${args.join(' ')}`;
 
 /**
+ * The graph's edges in the order their connection generators must run.
+ *
+ * Most connections are independent, but some read state an earlier one records —
+ * `CONNECTION_ORDERING` names those. A stable sort keeps everything else in the
+ * order the user drew it, so only the constrained edges move.
+ */
+const orderedEdges = (graph: Graph): GraphEdge[] => {
+  const keyOf = (edge: GraphEdge): string | undefined => {
+    const source = graph.nodes.find((n) => n.id === edge.source);
+    const target = graph.nodes.find((n) => n.id === edge.target);
+    if (!source || !target) return undefined;
+    return `${source.type} -> ${target.type}`;
+  };
+
+  // An edge waits on any edge in the graph whose key it must follow.
+  const presentKeys = new Set(
+    graph.edges.map(keyOf).filter((key): key is string => key !== undefined),
+  );
+  const rank = (edge: GraphEdge): number => {
+    const key = keyOf(edge);
+    if (!key) return 0;
+    const ordering = (
+      CONNECTION_ORDERING as Record<
+        string,
+        { after: readonly string[] } | undefined
+      >
+    )[key];
+    if (!ordering) return 0;
+    return ordering.after.some((after) => presentKeys.has(after)) ? 1 : 0;
+  };
+
+  return [...graph.edges]
+    .map((edge, index) => ({ edge, index, rank: rank(edge) }))
+    .sort((a, b) => a.rank - b.rank || a.index - b.index)
+    .map(({ edge }) => edge);
+};
+
+/**
  * The generators run straight after a node's own, adding what that kind of
  * project should always have — authentication on a website, for instance. The
  * pairing is declared in the plugin, so nothing here is hardcoded per type.
@@ -263,7 +304,7 @@ export const emitCommands = (
 
   const references = nodeReferences(graph);
   const emittedPairs = new Set<string>();
-  for (const edge of graph.edges) {
+  for (const edge of orderedEdges(graph)) {
     const source = graph.nodes.find((n) => n.id === edge.source);
     const target = graph.nodes.find((n) => n.id === edge.target);
     if (!source || !target) continue;

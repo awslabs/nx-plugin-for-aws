@@ -42,6 +42,18 @@ function buildAgentCoreUrl(arn: string): string {
 }
 
 /**
+ * The invocation URL for an agent runtime target on an http-protocol
+ * gateway, which proxies `/<targetName>/invocations` to the runtime. The
+ * gateway URL attribute may carry a path suffix, so only its origin is used.
+ */
+export function buildGatewayTargetUrl(
+  gatewayUrl: string,
+  targetName: string,
+): string {
+  return `${new URL(gatewayUrl).origin}/${targetName}/invocations`;
+}
+
+/**
  * Stage invoke URLs come back in two shapes:
  * - REST  → `https://{id}.execute-api.{region}.amazonaws.com/prod`  (no trailing slash)
  * - HTTP  → `https://{id}.execute-api.{region}.amazonaws.com/`      (trailing slash for `$default` stage)
@@ -147,14 +159,26 @@ export async function invokeAgentCoreAgent(
   agentName: string,
   prompt = 'what is 3 + 5 - 2?',
 ): Promise<string> {
+  return invokeAgentCoreAgentUrl(buildAgentCoreUrl(arn), agentName, prompt);
+}
+
+/**
+ * Invoke a deployed HTTP (JSON-streaming) agent at the given invocation URL —
+ * either its runtime URL or a gateway target URL fronting it.
+ */
+export async function invokeAgentCoreAgentUrl(
+  url: string,
+  agentName: string,
+  prompt = 'what is 3 + 5 - 2?',
+): Promise<string> {
   const aws = await createAwsClient('bedrock-agentcore');
-  console.log(`Testing ${agentName} with ARN ${arn}`);
+  console.log(`Testing ${agentName} at ${url}`);
 
   // Retry on 424/429/5xx — these typically come from AgentCore cold starts
   // where the runtime is still pulling the container image on first invoke.
   const maxAttempts = 4;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const response = await aws.fetch(buildAgentCoreUrl(arn), {
+    const response = await aws.fetch(url, {
       method: 'POST',
       body: JSON.stringify({ prompt }),
       headers: {
@@ -220,14 +244,26 @@ export async function invokeAgentCoreAgUi(
   agentName: string,
   message = 'What is 3 times 5?',
 ): Promise<string> {
+  return invokeAgentCoreAgUiUrl(buildAgentCoreUrl(arn), agentName, message);
+}
+
+/**
+ * Invoke a deployed AG-UI agent at the given invocation URL — either its
+ * runtime URL or a gateway target URL fronting it.
+ */
+export async function invokeAgentCoreAgUiUrl(
+  url: string,
+  agentName: string,
+  message = 'What is 3 times 5?',
+): Promise<string> {
   const aws = await createAwsClient('bedrock-agentcore');
-  console.log(`Testing ${agentName} (AG-UI) with ARN ${arn}`);
+  console.log(`Testing ${agentName} (AG-UI) at ${url}`);
 
   // Retry on 424/429/5xx — AgentCore cold starts pull the container image on
   // first invoke and can transiently fail before the runtime is ready.
   const maxAttempts = 4;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const response = await aws.fetch(buildAgentCoreUrl(arn), {
+    const response = await aws.fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -310,6 +346,23 @@ export async function invokeAgentCoreA2a(
   arn: string,
   agentName: string,
 ): Promise<void> {
+  const region = getRegion();
+  const encodedArn = encodeURIComponent(arn);
+  // AgentCore mounts A2A at the `/invocations/` root (trailing slash matters).
+  return invokeAgentCoreA2aUrl(
+    `https://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodedArn}/invocations/`,
+    agentName,
+  );
+}
+
+/**
+ * Invoke a deployed A2A agent at the given base URL — either its runtime URL
+ * or a gateway target URL fronting it.
+ */
+export async function invokeAgentCoreA2aUrl(
+  baseUrl: string,
+  agentName: string,
+): Promise<void> {
   // Lazy imports so these SDKs are only required in tests that need them
   const {
     ClientFactory,
@@ -318,12 +371,9 @@ export async function invokeAgentCoreA2a(
     JsonRpcTransportFactory,
   } = await import('@a2a-js/sdk/client');
 
-  console.log(`Testing ${agentName} with ARN ${arn}`);
+  console.log(`Testing ${agentName} (A2A) at ${baseUrl}`);
 
   const region = getRegion();
-  const encodedArn = encodeURIComponent(arn);
-  // AgentCore mounts A2A at the `/invocations/` root (trailing slash matters).
-  const baseUrl = `https://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodedArn}/invocations/`;
 
   const credentialsProvider = fromNodeProviderChain();
   const sigv4Fetch: typeof fetch = async (input, init) => {

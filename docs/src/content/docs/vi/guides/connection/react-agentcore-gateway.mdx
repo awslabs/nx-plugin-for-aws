@@ -1,0 +1,112 @@
+---
+title: Trang Web React đến AgentCore Gateway
+description: Kết nối trang web React với các agent thông qua AgentCore Gateway
+when:
+  sourceType: ts#react-website
+  targetType: agentcore-gateway
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+Trình tạo `connection` có thể kết nối một <Link path="guides/react-website">trang web React</Link> với các agent được đặt phía trước bởi một <Link path="guides/agentcore-gateway">AgentCore Gateway</Link> được tạo với `protocol: http`.
+
+Trình duyệt chỉ giao tiếp với Gateway — các yêu cầu đến `<gatewayUrl>/<targetName>/invocations` được proxy đến runtime của agent phía sau nó. Vì trang web không bao giờ cần truy cập trực tiếp vào các runtime, các agent có thể được triển khai bên trong VPC, với Gateway là điểm vào duy nhất được quản lý cung cấp xác thực và khả năng quan sát.
+
+## Điều kiện tiên quyết
+
+Trước khi sử dụng trình tạo này, hãy đảm bảo bạn có:
+
+1. Một dự án <Link path="guides/react-website">trang web React</Link>
+2. Một dự án <Link path="guides/agentcore-gateway">`agentcore-gateway`</Link> được tạo với `protocol: http`
+3. Ít nhất một agent AG-UI hoặc HTTP được gắn vào Gateway thông qua <Link path="guides/connection/agentcore-gateway-agent">trình tạo kết nối Gateway đến agent</Link>
+
+Trình tạo tạo một client trang web cho **mỗi** agent AG-UI hoặc HTTP được gắn vào Gateway (các target A2A bị bỏ qua — chúng sử dụng JSON-RPC agent-to-agent, không phải giao thức trình duyệt). Nó tạo ra các client giống như khi kết nối trang web trực tiếp với từng agent (<Link path="guides/connection/react-agui">AG-UI/CopilotKit</Link> cho các agent AG-UI, một <Link path="guides/connection/react-py-agent">client OpenAPI</Link> cho các agent Python HTTP), được định tuyến qua Gateway thay vì tại runtime.
+
+:::note[Xác thực]
+Trình duyệt xác thực với **Gateway**, không phải với các agent: SigV4 cho IAM Gateway (thông qua identity pool Cognito của trang web), hoặc JWT bearer token cho Cognito Gateway.
+:::
+
+## Cách sử dụng
+
+### Chạy Trình tạo
+
+<RunGenerator generator="connection" />
+
+Chọn dự án trang web làm nguồn và dự án Gateway làm đích.
+
+### Tùy chọn
+
+<GeneratorParameters generator="connection" />
+
+## Kết quả của Trình tạo
+
+Đối với mỗi agent AG-UI được đặt phía trước, các tệp giống như <Link path="guides/connection/react-agui">kết nối React đến agent AG-UI</Link> được tạo ra (một `AguiProvider`, một hook `useAgui<Agent>` và một module component CopilotKit có chủ đề), với hook đọc URL của Gateway từ cấu hình runtime:
+
+<FileTree>
+
+- packages/\<website>/src
+  - components
+    - AguiProvider.tsx CopilotKit provider đăng ký mỗi agent
+    - copilot/ Các component chat có chủ đề
+  - hooks
+    - useAgui\<Agent>.tsx Kết nối với agent thông qua route `/<targetName>/invocations` của Gateway
+
+</FileTree>
+
+Đối với mỗi agent Python HTTP được đặt phía trước, các tệp giống như <Link path="guides/connection/react-py-agent">kết nối React đến agent Python</Link> được tạo ra (một client OpenAPI an toàn kiểu, các hook và một provider), với URL cơ sở của client được định tuyến qua Gateway.
+
+URL của Gateway được đăng ký trong namespace `connection.gateways.<GatewayClassName>` của <Link path="guides/runtime-config">Runtime Configuration</Link>, do đó nó được xuất bản vào `runtime-config.json` của trang web.
+
+## Cấp quyền truy cập cho người dùng trang web
+
+Đối với **IAM** Gateway, cấp cho người dùng đã xác thực của trang web quyền gọi nó (**Cognito** Gateway không cần cấp quyền — trình duyệt xác thực bằng JWT bearer token thay thế):
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts title="packages/infra/src/stacks/application-stack.ts" {6}
+const identity = new UserIdentity(this, 'UserIdentity');
+new Website(this, 'Website');
+
+const myGateway = new MyGateway(this, 'MyGateway');
+myGateway.addAgent(myAgent);
+myGateway.grantInvokeAccess(identity.identityPool.authenticatedRole);
+```
+</Fragment>
+<Fragment slot="terraform">
+```hcl title="packages/infra/src/main.tf"
+resource "aws_iam_policy" "gateway_invoke_policy" {
+  name = "GatewayInvokePolicy"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["bedrock-agentcore:InvokeGateway"]
+        Resource = [module.my_gateway.gateway_arn]
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "authenticated_gateway_access" {
+  role       = module.user_identity.authenticated_role_name
+  policy_arn = aws_iam_policy.gateway_invoke_policy.arn
+}
+```
+</Fragment>
+</Infrastructure>
+
+## Phát triển Cục bộ
+
+Target `dev` của trang web có thêm phụ thuộc vào target `dev` của dự án Gateway, target này khởi động gateway cục bộ cùng với mọi agent được gắn vào. Cấu hình runtime của trang web được ghi đè trong chế độ `local-dev` để trỏ URL của Gateway đến gateway cục bộ, do đó trình duyệt thực thi các route `/<targetName>/invocations` giống nhau ở cục bộ:
+
+<NxCommands commands={["dev <website-name>"]} />
+
+## Kết nối các agent mới
+
+Trình tạo kết nối trang web với các agent được gắn vào Gateway **tại thời điểm nó chạy**. Sau khi gắn thêm một agent khác vào Gateway, hãy chạy lại trình tạo kết nối để tạo client trang web của nó — các client hiện có không bị ảnh hưởng.

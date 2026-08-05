@@ -253,6 +253,58 @@ describe('commands', () => {
     ).not.toContain('--protocol');
   });
 
+  // The website→gateway generator publishes a route per agent already attached
+  // to the gateway, so it has to run after the gateway→agent connections
+  // regardless of the order the user drew them in.
+  it('should emit a website-to-gateway connection after the gateway-to-agent ones', () => {
+    const commands = emitCommands(
+      graph(
+        [
+          node('website', 'ts#react-website'),
+          node('gateway', 'agentcore-gateway', {
+            options: { protocol: 'http' },
+          }),
+          node('chat', 'ts#agent', {
+            hostName: 'agents',
+            options: { protocol: 'ag-ui' },
+          }),
+        ],
+        [
+          // Drawn website-first, which is the wrong order to generate in.
+          { id: 'e1', source: 'website', target: 'gateway' },
+          { id: 'e2', source: 'gateway', target: 'chat' },
+        ],
+      ),
+      EMIT,
+    );
+    const connections = commands.filter((c) =>
+      c.command.includes(':connection'),
+    );
+    expect(connections.map((c) => c.edgeId)).toEqual(['e2', 'e1']);
+  });
+
+  it('should keep the drawn order for connections with no ordering rule', () => {
+    const commands = emitCommands(
+      graph(
+        [
+          node('website', 'ts#react-website'),
+          node('my-api', 'ts#trpc-api'),
+          node('my-table', 'ts#dynamodb'),
+        ],
+        [
+          { id: 'e1', source: 'my-api', target: 'my-table' },
+          { id: 'e2', source: 'website', target: 'my-api' },
+        ],
+      ),
+      EMIT,
+    );
+    expect(
+      commands
+        .filter((c) => c.command.includes(':connection'))
+        .map((c) => c.edgeId),
+    ).toEqual(['e1', 'e2']);
+  });
+
   it('should emit each connection once even when drawn twice', () => {
     const commands = emitCommands(
       graph(
@@ -509,6 +561,62 @@ describe('autoFixesForConnection', () => {
       [{ id: 'e1', source: 'a', target: 'b' }],
     );
     expect(validate(after)).toEqual([]);
+  });
+
+  // A gateway serves one protocol or the other, and what it fronts decides
+  // which: whichever kind of target is attached first settles it.
+  it('should switch a gateway to http when an agent is attached', () => {
+    const gateway = node('g', 'agentcore-gateway');
+    const agent = node('a', 'ts#agent', { hostName: 'app' });
+    expect(autoFixesForConnection(gateway, agent)).toContainEqual({
+      nodeId: 'g',
+      option: 'protocol',
+      value: 'http',
+    });
+  });
+
+  it('should switch a gateway to http for a python agent too', () => {
+    const gateway = node('g', 'agentcore-gateway');
+    const agent = node('a', 'py#agent', { hostName: 'py-app' });
+    expect(autoFixesForConnection(gateway, agent)).toContainEqual({
+      nodeId: 'g',
+      option: 'protocol',
+      value: 'http',
+    });
+  });
+
+  it('should leave a gateway on mcp when an MCP server is attached', () => {
+    // `mcp` is the schema default, so there is nothing to change — and nothing
+    // should push it to http.
+    const gateway = node('g', 'agentcore-gateway');
+    const mcp = node('m', 'ts#mcp-server', { hostName: 'app' });
+    expect(
+      autoFixesForConnection(gateway, mcp).some(
+        (fix) => fix.nodeId === 'g' && fix.option === 'protocol',
+      ),
+    ).toBe(false);
+  });
+
+  it('should switch a gateway to http when a website connects to it', () => {
+    const website = node('w', 'ts#react-website');
+    const gateway = node('g', 'agentcore-gateway');
+    expect(autoFixesForConnection(website, gateway)).toContainEqual({
+      nodeId: 'g',
+      option: 'protocol',
+      value: 'http',
+    });
+  });
+
+  it('should not switch a gateway protocol the user chose', () => {
+    const gateway = node('g', 'agentcore-gateway', {
+      options: { protocol: 'mcp' },
+    });
+    const agent = node('a', 'ts#agent', { hostName: 'app' });
+    expect(
+      autoFixesForConnection(gateway, agent).some(
+        (fix) => fix.nodeId === 'g' && fix.option === 'protocol',
+      ),
+    ).toBe(false);
   });
 });
 

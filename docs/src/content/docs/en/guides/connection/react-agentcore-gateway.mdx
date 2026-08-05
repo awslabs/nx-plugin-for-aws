@@ -1,0 +1,112 @@
+---
+title: React Website to AgentCore Gateway
+description: Connect a React website to agents through an AgentCore Gateway
+when:
+  sourceType: ts#react-website
+  targetType: agentcore-gateway
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+The `connection` generator can connect a <Link path="guides/react-website">React website</Link> to the agents fronted by an <Link path="guides/agentcore-gateway">AgentCore Gateway</Link> generated with `protocol: http`.
+
+The browser talks only to the Gateway — requests to `<gatewayUrl>/<targetName>/invocations` are proxied to the agent runtime behind it. Because the website never needs to reach the runtimes directly, the agents can be deployed inside a VPC, with the Gateway as the single governed entry point providing authentication and observability.
+
+## Prerequisites
+
+Before using this generator, ensure you have:
+
+1. A <Link path="guides/react-website">React website</Link> project
+2. An <Link path="guides/agentcore-gateway">`agentcore-gateway`</Link> project generated with `protocol: http`
+3. At least one AG-UI or HTTP agent attached to the Gateway via the <Link path="guides/connection/agentcore-gateway-agent">Gateway to agent connection generator</Link>
+
+The generator creates a website client for **each** AG-UI or HTTP agent attached to the Gateway (A2A targets are skipped — they speak agent-to-agent JSON-RPC, not a browser protocol). It generates the same clients as connecting the website to each agent directly (<Link path="guides/connection/react-agui">AG-UI/CopilotKit</Link> for AG-UI agents, an <Link path="guides/connection/react-py-agent">OpenAPI client</Link> for Python HTTP agents), routed through the Gateway rather than at the runtime.
+
+:::note[Authentication]
+The browser authenticates with the **Gateway**, not the agents: SigV4 for an IAM Gateway (via the website's Cognito identity pool), or a JWT bearer token for a Cognito Gateway.
+:::
+
+## Usage
+
+### Run the Generator
+
+<RunGenerator generator="connection" />
+
+Select the website project as the source and the Gateway project as the target.
+
+### Options
+
+<GeneratorParameters generator="connection" />
+
+## Generator Output
+
+For each fronted AG-UI agent, the same files as the <Link path="guides/connection/react-agui">React to AG-UI agent connection</Link> are generated (an `AguiProvider`, a `useAgui<Agent>` hook and a themed CopilotKit component module), with the hook reading the Gateway's URL from runtime configuration:
+
+<FileTree>
+
+- packages/\<website>/src
+  - components
+    - AguiProvider.tsx CopilotKit provider registering each agent
+    - copilot/ Themed chat components
+  - hooks
+    - useAgui\<Agent>.tsx Connects to the agent via the Gateway's `/<targetName>/invocations` route
+
+</FileTree>
+
+For each fronted Python HTTP agent, the same files as the <Link path="guides/connection/react-py-agent">React to Python agent connection</Link> are generated (a type-safe OpenAPI client, hooks, and a provider), with the client's base URL routed through the Gateway.
+
+The Gateway's URL is registered in the `connection.gateways.<GatewayClassName>` namespace of <Link path="guides/runtime-config">Runtime Configuration</Link>, so it is published to the website's `runtime-config.json`.
+
+## Granting website users access
+
+For an **IAM** Gateway, grant the website's authenticated users permission to invoke it (a **Cognito** Gateway needs no grant — the browser authenticates with its JWT bearer token instead):
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts title="packages/infra/src/stacks/application-stack.ts" {6}
+const identity = new UserIdentity(this, 'UserIdentity');
+new Website(this, 'Website');
+
+const myGateway = new MyGateway(this, 'MyGateway');
+myGateway.addAgent(myAgent);
+myGateway.grantInvokeAccess(identity.identityPool.authenticatedRole);
+```
+</Fragment>
+<Fragment slot="terraform">
+```hcl title="packages/infra/src/main.tf"
+resource "aws_iam_policy" "gateway_invoke_policy" {
+  name = "GatewayInvokePolicy"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["bedrock-agentcore:InvokeGateway"]
+        Resource = [module.my_gateway.gateway_arn]
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "authenticated_gateway_access" {
+  role       = module.user_identity.authenticated_role_name
+  policy_arn = aws_iam_policy.gateway_invoke_policy.arn
+}
+```
+</Fragment>
+</Infrastructure>
+
+## Local Development
+
+The website's `dev` target gains a dependency on the Gateway project's `dev` target, which starts the local gateway plus every attached agent. The website's runtime configuration is overridden in `local-dev` mode to point the Gateway's URL at the local gateway, so the browser exercises the same `/<targetName>/invocations` routes locally:
+
+<NxCommands commands={["dev <website-name>"]} />
+
+## Connecting new agents
+
+The generator connects the website to the agents attached to the Gateway **at the time it runs**. After attaching another agent to the Gateway, re-run the connection generator to generate its website client — existing clients are left untouched.

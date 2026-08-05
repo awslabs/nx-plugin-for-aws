@@ -1,0 +1,282 @@
+---
+title: AgentCore Gateway para Agent
+description: Coloque um agente atrás de um AgentCore Gateway como um destino de runtime
+when:
+  sourceType: agentcore-gateway
+  targetType:
+    - ts#agent
+    - py#agent
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+O gerador `connection` pode registrar um agente (<Link path="guides/ts-agent">TypeScript</Link> ou <Link path="guides/py-agent">Python</Link>) como um [destino de Runtime do AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-target-http-runtime.html) de um <Link path="guides/agentcore-gateway">AgentCore Gateway</Link> gerado com `protocol: http`.
+
+Uma vez conectado, o Gateway faz proxy das requisições para o agente em `<gatewayUrl>/<targetName>/invocations`, assinando o tráfego de saída para o runtime com IAM SigV4. Isso fornece aos seus agentes um único ponto de entrada governado — e como os chamadores só precisam alcançar o Gateway, os runtimes dos agentes podem ser implantados dentro de uma VPC atrás dele.
+
+## Pré-requisitos
+
+Antes de usar este gerador, certifique-se de ter:
+
+1. Um projeto <Link path="guides/agentcore-gateway">`agentcore-gateway`</Link> gerado com `protocol: http`
+2. Um componente de agente (<Link path="guides/ts-agent">`ts#agent`</Link> ou <Link path="guides/py-agent">`py#agent`</Link>) criado com `infra: agentcore` e `auth: iam`
+
+:::caution[Agentes HTTP TypeScript]
+Um agente `http` TypeScript serve tRPC sobre WebSocket, e o AgentCore Gateway não suporta WebSocket ou streaming bidirecional — o gerador rejeita essa combinação. Gere o agente com o protocolo `ag-ui` em vez disso.
+:::
+
+## Uso
+
+### Executar o Gerador
+
+<RunGenerator generator="connection" />
+
+Selecione o projeto Gateway como origem e o projeto do agente como destino. Se o projeto do agente contiver múltiplos componentes, especifique `targetComponent` para desambiguar.
+
+### Opções
+
+<GeneratorParameters generator="connection" />
+
+## Saída do Gerador
+
+O gerador conecta projetos existentes em vez de emitir novos arquivos de origem. Os seguintes arquivos são modificados:
+
+<FileTree>
+
+- packages/\<gateway>
+  - project.json o destino `dev` do Gateway ganha uma dependência no `<agent>-dev` do agente
+  - local-dev.ts `ATTACHED_AGENTS` atualizado para que o gateway local faça proxy para o agente
+
+</FileTree>
+
+## Adicionando o destino do agente à sua stack
+
+O gerador **não pode** conectar automaticamente o destino do agente à sua infraestrutura porque ele não sabe qual stack ou módulo instancia o Gateway. Adicione uma única chamada para `gateway.addAgent(agent)` você mesmo.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Na stack onde você instancia o Gateway, registre o agente como um destino:
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {5-8}
+const myAgent = new MyAgent(this, 'MyAgent');
+const myGateway = new MyGateway(this, 'MyGateway');
+
+// Register the agent as a runtime target of the Gateway. The target name
+// defaults to the agent's `agentName` (its class name in kebab-case,
+// e.g. `MyAgent` -> `my-agent`), and forms the target's invocation path:
+// <gatewayUrl>/my-agent/invocations
+myGateway.addAgent(myAgent);
+```
+
+Para substituir o nome de destino padrão, passe `gatewayTargetName`:
+
+```ts
+myGateway.addAgent(myAgent, { gatewayTargetName: 'my-target' });
+```
+
+O construtor concede à função de execução do Gateway acesso de invocação ao runtime do agente e configura o destino com o provedor de credenciais `GATEWAY_IAM_ROLE`, para que o Gateway assine chamadas de saída com sua própria função.
+
+:::tip[Implantando agentes em uma VPC]
+Colocar um agente atrás de um Gateway é o que torna um agente implantado em VPC acessível: os chamadores se comunicam com o endpoint público do Gateway, e o Gateway alcança o runtime internamente. Passe uma configuração de rede VPC para o construtor do agente:
+
+```ts
+import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
+
+const myAgent = new MyAgent(this, 'MyAgent', {
+  networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
+    vpc,
+    vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+  }),
+});
+```
+
+Use uma **sub-rede privada com egress**, não uma sub-rede privada isolada: o runtime precisa de acesso de saída à internet para alcançar o Bedrock e ler sua configuração do AWS AppConfig.
+:::
+</Fragment>
+<Fragment slot="terraform">
+No arquivo Terraform onde você instancia o Gateway, conecte o destino do agente:
+
+```hcl title="packages/infra/src/main.tf" {9-20,24-40}
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+  # ...
+}
+
+module "my_gateway" {
+  source = "../../common/terraform/src/app/gateways/my-gateway"
+
+  # The Gateway signs outbound calls to the runtime with its own role and
+  # validates access at target creation, so it needs invoke access first.
+  additional_iam_policy_statements = [
+    {
+      Effect = "Allow"
+      Action = [
+        "bedrock-agentcore:InvokeAgentRuntime",
+        "bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream",
+        # A2A targets additionally serve their agent card via the gateway
+        "bedrock-agentcore:GetAgentCard",
+      ]
+      Resource = [
+        module.my_agent.agent_core_runtime_arn,
+        "${module.my_agent.agent_core_runtime_arn}/*",
+      ]
+    }
+  ]
+}
+
+# Register the agent as a runtime target of the Gateway. The target name
+# forms the invocation path: <gatewayUrl>/my-agent/invocations
+resource "aws_bedrockagentcore_gateway_target" "my_agent" {
+  gateway_identifier = module.my_gateway.gateway_id
+  name               = "my-agent"
+  # AgentCore fills in a description when none is set, which the provider
+  # reports as an inconsistent result after apply — so always set one.
+  description = "Agent runtime target my-agent"
+
+  target_configuration {
+    http {
+      agentcore_runtime {
+        arn = module.my_agent.agent_core_runtime_arn
+      }
+    }
+  }
+
+  credential_provider_configuration {
+    gateway_iam_role {}
+  }
+}
+```
+
+:::tip[Implantando agentes em uma VPC]
+Colocar um agente atrás de um Gateway é o que torna um agente implantado em VPC acessível: os chamadores se comunicam com o endpoint público do Gateway, e o Gateway alcança o runtime internamente. Defina as variáveis VPC do módulo do agente:
+
+```hcl
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+
+  enable_vpc = true
+  vpc_id     = aws_vpc.my_vpc.id
+  subnet_ids = [aws_subnet.private_a.id, aws_subnet.private_b.id]
+}
+```
+
+Use sub-redes privadas com egress (uma rota para um NAT gateway), não sub-redes privadas isoladas: o runtime precisa de acesso de saída à internet para alcançar o Bedrock e ler sua configuração do AWS AppConfig.
+:::
+</Fragment>
+</Infrastructure>
+
+## Invocando o agente através do Gateway
+
+Requisições para `<gatewayUrl origin>/<targetName>/invocations` são encaminhadas para o runtime do agente sem tradução de protocolo, então os chamadores usam a mesma forma de requisição que usariam diretamente contra o runtime — streams SSE (AG-UI), streaming JSON (Python HTTP) e A2A JSON-RPC todos fazem proxy. Os chamadores se autenticam com o Gateway (IAM SigV4 ou Cognito JWT dependendo do `auth` do Gateway) em vez de com o agente.
+
+Para conectar um website aos agentes do Gateway, use o <Link path="guides/connection/react-agentcore-gateway">gerador `connection`</Link>.
+
+## Encaminhando a identidade do chamador para o runtime
+
+Por padrão, o Gateway assina chamadas de saída com sua própria função IAM (o provedor de credenciais `GATEWAY_IAM_ROLE`), então o runtime vê a identidade do _Gateway_, não a do chamador. Se você quiser que o agente autorize com base no chamador — por exemplo, para ler as claims `sub` ou `scope` do usuário — o Gateway pode, em vez disso, encaminhar o JWT do chamador para o runtime sem alterações. Isso requer três mudanças:
+
+1. **O Gateway aceita JWTs.** Gere o Gateway com `auth: cognito` para que seu autorizador de entrada valide um token bearer do Cognito (ou outro OIDC).
+2. **O runtime aceita os mesmos JWTs.** Gere o agente com `auth: cognito` (mesmo user pool) para que o runtime revalide o token encaminhado.
+3. **O destino usa o provedor de credenciais `JWT_PASSTHROUGH`** em vez de `GATEWAY_IAM_ROLE`, e o **runtime coloca o cabeçalho `Authorization` na lista de permissões** para que ele chegue ao código do seu agente. Sem a lista de permissões, o AgentCore valida o token mas remove o cabeçalho antes do seu contêiner.
+
+Os chamadores então invocam o Gateway com `Authorization: Bearer <jwt>` (sem SigV4), e o agente lê as claims do cabeçalho `Authorization` — pulando a validação de assinatura, já que o autorizador de entrada do runtime já verificou o token:
+
+```python title="packages/py_project/.../my_agent/main.py"
+import jwt  # PyJWT
+
+@app.post('/invocations')
+async def invoke(input: InvokeInput, request: Request):
+    token = request.headers['authorization'].removeprefix('Bearer ')
+    claims = jwt.decode(token, options={'verify_signature': False})
+    # authorize on claims['sub'], claims['scope'], ...
+```
+
+<Infrastructure>
+<Fragment slot="cdk">
+Passe `requestHeaderConfiguration` para o agente para que o runtime receba o cabeçalho, e crie o destino você mesmo (em vez de `gateway.addAgent(agent)`) com o provedor de credenciais `JWT_PASSTHROUGH`:
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {5-7,17-19}
+import { CfnGatewayTarget } from 'aws-cdk-lib/aws-bedrockagentcore';
+import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
+
+const myAgent = new MyAgent(this, 'MyAgent', {
+  identity,
+  // Let the runtime receive the forwarded Authorization header.
+  requestHeaderConfiguration: { allowlistedHeaders: ['Authorization'] },
+});
+const myGateway = new MyGateway(this, 'MyGateway', { identity });
+
+const target = new CfnGatewayTarget(this, 'Target-my-agent', {
+  gatewayIdentifier: myGateway.gateway.gatewayId,
+  name: myAgent.agentName,
+  targetConfiguration: {
+    http: { agentcoreRuntime: { arn: myAgent.agentCoreRuntime.agentRuntimeArn } },
+  },
+  // Forward the caller's validated JWT to the runtime unchanged.
+  credentialProviderConfigurations: [
+    { credentialProviderType: 'JWT_PASSTHROUGH' },
+  ],
+});
+
+// The Gateway role still needs invoke access to the runtime.
+myGateway.gateway.role.addToPrincipalPolicy(
+  new PolicyStatement({
+    actions: ['bedrock-agentcore:InvokeAgentRuntime'],
+    resources: [
+      myAgent.agentCoreRuntime.agentRuntimeArn,
+      `${myAgent.agentCoreRuntime.agentRuntimeArn}/*`,
+    ],
+  }),
+);
+```
+</Fragment>
+<Fragment slot="terraform">
+Adicione um bloco `request_header_configuration` ao runtime para que ele receba o cabeçalho, e configure o destino com o provedor de credenciais `JWT_PASSTHROUGH` (em vez de `gateway_iam_role {}`):
+
+```hcl title="packages/infra/src/main.tf" {5-7,20-22}
+# Let the runtime receive the forwarded Authorization header. Add this block
+# to the runtime resource in the agent module (packages/common/terraform/...).
+resource "aws_bedrockagentcore_agent_runtime" "agent_runtime" {
+  # ...
+  request_header_configuration {
+    request_header_allowlist = ["Authorization"]
+  }
+}
+
+resource "aws_bedrockagentcore_gateway_target" "my_agent" {
+  gateway_identifier = module.my_gateway.gateway_id
+  name               = "my-agent"
+  description        = "Agent runtime target my-agent"
+
+  target_configuration {
+    http {
+      agentcore_runtime {
+        arn = module.my_agent.agent_core_runtime_arn
+      }
+    }
+  }
+
+  # Forward the caller's validated JWT to the runtime unchanged.
+  credential_provider_configuration {
+    credential_provider_type = "JWT_PASSTHROUGH"
+  }
+}
+```
+</Fragment>
+</Infrastructure>
+
+:::note
+`JWT_PASSTHROUGH` é adequado para um único provedor de identidade cujo audience do token já cobre o runtime. Se um Gateway frontaliza agentes em múltiplos tenants ou audiences, use a [troca de token on-behalf-of](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-building-adding-targets-authorization.html) do OAuth em vez disso.
+:::
+
+## Desenvolvimento Local
+
+Executar o Gateway localmente com:
+
+<NxCommands commands={["dev <gateway-name>"]} />
+
+inicia um gateway local mais cada agente anexado em sua porta local atribuída. O gateway local faz proxy dos caminhos `/<targetName>/...` para o servidor local de cada agente, correspondendo ao roteamento baseado em caminho do Gateway implantado.

@@ -79,6 +79,17 @@ export interface AgUiReactConnectionOptions {
   agentNameClassName: string;
   /** Auth scheme used by the agent */
   auth: AgUiAuth;
+  /**
+   * When set, the generated hook reads the gateway's URL from
+   * runtimeConfig.gateways and routes to the agent via the gateway's
+   * path-based `/<targetName>/invocations` route instead of invoking the
+   * runtime directly. The gateway publishes its own URL to the website, so
+   * the agent's construct is left unpatched.
+   */
+  gatewayRoute?: {
+    gatewayClassName: string;
+    targetName: string;
+  };
 }
 
 /**
@@ -97,8 +108,13 @@ export const addAgUiReactConnection = async (
   tree: Tree,
   options: AgUiReactConnectionOptions,
 ) => {
-  const { frontendProjectConfig, agentName, agentNameClassName, auth } =
-    options;
+  const {
+    frontendProjectConfig,
+    agentName,
+    agentNameClassName,
+    auth,
+    gatewayRoute,
+  } = options;
 
   const theme = resolveAgUiTheme(frontendProjectConfig);
   // The values the declaration's predicates read. Callers record the same pair,
@@ -113,7 +129,7 @@ export const addAgUiReactConnection = async (
     tree,
     joinPathFragments(import.meta.dirname, 'files', 'common'),
     frontendProjectConfig.root,
-    { agentName, agentNameClassName, auth },
+    { agentName, agentNameClassName, auth, gatewayRoute },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
@@ -185,11 +201,14 @@ export const addAgUiReactConnection = async (
   // Agents only publish their runtime ARN to the 'agentcore' namespace by
   // default, which isn't exposed to the website. Patch the agent's CDK/TF
   // construct to also publish under 'connection' so the browser can read it
-  // from runtime-config.json.
-  await addAgentRuntimeToConnectionNamespace(tree, {
-    agentNameKebabCase: kebabCase(agentNameClassName),
-    agentNameClassName,
-  });
+  // from runtime-config.json. When routing via a gateway, the gateway
+  // publishes its own URL instead.
+  if (!gatewayRoute) {
+    await addAgentRuntimeToConnectionNamespace(tree, {
+      agentNameKebabCase: kebabCase(agentNameClassName),
+      agentNameClassName,
+    });
+  }
 };
 
 /**

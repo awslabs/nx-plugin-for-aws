@@ -1,0 +1,112 @@
+---
+title: React 웹사이트에서 AgentCore Gateway로
+description: React 웹사이트를 AgentCore Gateway를 통해 에이전트에 연결
+when:
+  sourceType: ts#react-website
+  targetType: agentcore-gateway
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection` 생성기는 <Link path="guides/react-website">React 웹사이트</Link>를 `protocol: http`로 생성된 <Link path="guides/agentcore-gateway">AgentCore Gateway</Link>가 앞단에 있는 에이전트에 연결할 수 있습니다.
+
+브라우저는 Gateway하고만 통신합니다 — `<gatewayUrl>/<targetName>/invocations`에 대한 요청은 그 뒤에 있는 에이전트 런타임으로 프록시됩니다. 웹사이트가 런타임에 직접 도달할 필요가 없기 때문에, 에이전트는 VPC 내부에 배포될 수 있으며, Gateway가 인증 및 관찰성을 제공하는 단일 관리 진입점 역할을 합니다.
+
+## 사전 요구 사항
+
+이 생성기를 사용하기 전에 다음을 확인하세요:
+
+1. <Link path="guides/react-website">React 웹사이트</Link> 프로젝트
+2. `protocol: http`로 생성된 <Link path="guides/agentcore-gateway">`agentcore-gateway`</Link> 프로젝트
+3. <Link path="guides/connection/agentcore-gateway-agent">Gateway에서 에이전트로의 연결 생성기</Link>를 통해 Gateway에 연결된 하나 이상의 AG-UI 또는 HTTP 에이전트
+
+생성기는 Gateway에 연결된 **각** AG-UI 또는 HTTP 에이전트에 대한 웹사이트 클라이언트를 생성합니다(A2A 대상은 건너뜁니다 — 이들은 브라우저 프로토콜이 아닌 에이전트 간 JSON-RPC를 사용합니다). 웹사이트를 각 에이전트에 직접 연결하는 것과 동일한 클라이언트를 생성하지만(<Link path="guides/connection/react-agui">AG-UI/CopilotKit</Link>은 AG-UI 에이전트용, <Link path="guides/connection/react-py-agent">OpenAPI 클라이언트</Link>는 Python HTTP 에이전트용), 런타임이 아닌 Gateway를 통해 라우팅됩니다.
+
+:::note[인증]
+브라우저는 에이전트가 아닌 **Gateway**로 인증합니다: IAM Gateway의 경우 SigV4(웹사이트의 Cognito identity pool을 통해), Cognito Gateway의 경우 JWT bearer 토큰을 사용합니다.
+:::
+
+## 사용법
+
+### 생성기 실행
+
+<RunGenerator generator="connection" />
+
+소스로 웹사이트 프로젝트를 선택하고 대상으로 Gateway 프로젝트를 선택하세요.
+
+### 옵션
+
+<GeneratorParameters generator="connection" />
+
+## 생성기 출력
+
+각 프론트엔드 AG-UI 에이전트에 대해 <Link path="guides/connection/react-agui">React에서 AG-UI 에이전트로의 연결</Link>과 동일한 파일이 생성되며(`AguiProvider`, `useAgui<Agent>` 훅 및 테마가 적용된 CopilotKit 컴포넌트 모듈), 훅은 런타임 구성에서 Gateway의 URL을 읽습니다:
+
+<FileTree>
+
+- packages/\<website>/src
+  - components
+    - AguiProvider.tsx 각 에이전트를 등록하는 CopilotKit 프로바이더
+    - copilot/ 테마가 적용된 채팅 컴포넌트
+  - hooks
+    - useAgui\<Agent>.tsx Gateway의 `/<targetName>/invocations` 경로를 통해 에이전트에 연결
+
+</FileTree>
+
+각 프론트엔드 Python HTTP 에이전트에 대해 <Link path="guides/connection/react-py-agent">React에서 Python 에이전트로의 연결</Link>과 동일한 파일이 생성되며(타입 안전 OpenAPI 클라이언트, 훅 및 프로바이더), 클라이언트의 기본 URL은 Gateway를 통해 라우팅됩니다.
+
+Gateway의 URL은 <Link path="guides/runtime-config">런타임 구성</Link>의 `connection.gateways.<GatewayClassName>` 네임스페이스에 등록되므로 웹사이트의 `runtime-config.json`에 게시됩니다.
+
+## 웹사이트 사용자에게 액세스 권한 부여
+
+**IAM** Gateway의 경우, 웹사이트의 인증된 사용자에게 호출 권한을 부여하세요(**Cognito** Gateway는 권한 부여가 필요 없습니다 — 브라우저가 JWT bearer 토큰으로 인증하기 때문입니다):
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts title="packages/infra/src/stacks/application-stack.ts" {6}
+const identity = new UserIdentity(this, 'UserIdentity');
+new Website(this, 'Website');
+
+const myGateway = new MyGateway(this, 'MyGateway');
+myGateway.addAgent(myAgent);
+myGateway.grantInvokeAccess(identity.identityPool.authenticatedRole);
+```
+</Fragment>
+<Fragment slot="terraform">
+```hcl title="packages/infra/src/main.tf"
+resource "aws_iam_policy" "gateway_invoke_policy" {
+  name = "GatewayInvokePolicy"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["bedrock-agentcore:InvokeGateway"]
+        Resource = [module.my_gateway.gateway_arn]
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "authenticated_gateway_access" {
+  role       = module.user_identity.authenticated_role_name
+  policy_arn = aws_iam_policy.gateway_invoke_policy.arn
+}
+```
+</Fragment>
+</Infrastructure>
+
+## 로컬 개발
+
+웹사이트의 `dev` 대상은 Gateway 프로젝트의 `dev` 대상에 대한 종속성을 갖게 되며, 이는 로컬 게이트웨이와 연결된 모든 에이전트를 시작합니다. 웹사이트의 런타임 구성은 `local-dev` 모드에서 Gateway의 URL이 로컬 게이트웨이를 가리키도록 재정의되므로, 브라우저는 로컬에서 동일한 `/<targetName>/invocations` 경로를 사용합니다:
+
+<NxCommands commands={["dev <website-name>"]} />
+
+## 새 에이전트 연결
+
+생성기는 **실행 시점에** Gateway에 연결된 에이전트에 웹사이트를 연결합니다. Gateway에 다른 에이전트를 연결한 후, 연결 생성기를 다시 실행하여 해당 웹사이트 클라이언트를 생성하세요 — 기존 클라이언트는 그대로 유지됩니다.

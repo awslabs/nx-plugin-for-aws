@@ -251,7 +251,7 @@ function getPortFromProjectJson(
   throw new Error(`Cannot determine port for "${targetName}" in ${relPath}`);
 }
 
-describe('smoke test - local-dev', { timeout: 20 * 60 * 1000 }, () => {
+describe('smoke test - local-dev', { timeout: 30 * 60 * 1000 }, () => {
   const pkgMgr = 'pnpm';
   const targetDir = `${tmpProjPath()}/local-dev-${pkgMgr}`;
   const runningProcesses: ChildProcess[] = [];
@@ -430,6 +430,14 @@ describe('smoke test - local-dev', { timeout: 20 * 60 * 1000 }, () => {
         `generate @aws/nx-plugin:agentcore-gateway --name=parent-gateway --no-interactive`,
         opts,
       );
+      // An http-protocol gateway fronting agent runtime targets — its local
+      // gateway is a path-routing proxy (`/<target>/...`) rather than an MCP
+      // aggregator, covering every supported protocol permutation (ts ag-ui +
+      // a2a, py ag-ui + http + a2a) via the agents generated above.
+      await runCLI(
+        `generate @aws/nx-plugin:agentcore-gateway --name=agent-gateway --protocol=http --no-interactive`,
+        opts,
+      );
 
       // Connections
       await runCLI(
@@ -537,6 +545,28 @@ describe('smoke test - local-dev', { timeout: 20 * 60 * 1000 }, () => {
       // my-gateway's (already prefixed) tools under a second prefix.
       await runCLI(
         `generate @aws/nx-plugin:connection --sourceProject=parent-gateway --targetProject=my-gateway --no-interactive`,
+        opts,
+      );
+      // agent-gateway -> agents: every supported protocol permutation is
+      // proxied by the http local gateway under `/<target>/...`.
+      await runCLI(
+        `generate @aws/nx-plugin:connection --sourceProject=agent-gateway --targetProject=ts-project --targetComponent=my-agui-agent --no-interactive`,
+        opts,
+      );
+      await runCLI(
+        `generate @aws/nx-plugin:connection --sourceProject=agent-gateway --targetProject=ts-project --targetComponent=my-a2a-agent --no-interactive`,
+        opts,
+      );
+      await runCLI(
+        `generate @aws/nx-plugin:connection --sourceProject=agent-gateway --targetProject=py_project --targetComponent=my-py-agui-agent --no-interactive`,
+        opts,
+      );
+      await runCLI(
+        `generate @aws/nx-plugin:connection --sourceProject=agent-gateway --targetProject=py_project --targetComponent=my-py-agent --no-interactive`,
+        opts,
+      );
+      await runCLI(
+        `generate @aws/nx-plugin:connection --sourceProject=agent-gateway --targetProject=py_project --targetComponent=my-py-a2a-agent --no-interactive`,
         opts,
       );
 
@@ -774,6 +804,11 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
         gateway: getPortFromProjectJson(
           projectRoot,
           'packages/my-gateway/project.json',
+          'dev',
+        ),
+        agentGateway: getPortFromProjectJson(
+          projectRoot,
+          'packages/agent-gateway/project.json',
           'dev',
         ),
         parentGateway: getPortFromProjectJson(
@@ -1171,6 +1206,134 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
       await client.close();
     }
     await stopLast();
+  });
+
+  it('AgentCore Gateway (http) - local gateway proxies agent runtime targets', async () => {
+    // The http gateway's local gateway is a path-routing proxy
+    // (`/<target>/...`) rather than an MCP aggregator, mirroring the deployed
+    // Gateway's AgentCore Runtime target routing. Its dev target boots every
+    // attached agent, so one boot covers all five supported protocol
+    // permutations: ts ag-ui + a2a, py ag-ui + http + a2a.
+    await startAndWait('@local-dev-test/agent-gateway:dev', ports.agentGateway);
+    // The local gateway binds before its attached agents finish booting —
+    // wait for each agent's own port so the proxy has live upstreams.
+    for (const port of [
+      ports.tsAgui,
+      ports.pyAgui,
+      ports.pyAgent,
+      ports.tsA2a,
+      ports.pyA2a,
+    ]) {
+      await waitForPort(port, STARTUP_TIMEOUT_MS);
+    }
+    const gatewayUrl = `http://127.0.0.1:${ports.agentGateway}`;
+
+    // AG-UI targets (ts + py): SSE stream from POST /<target>/invocations.
+    for (const target of ['my-agui-agent', 'my-py-agui-agent']) {
+      const res = await fetch(`${gatewayUrl}/${target}/invocations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          threadId: 'test-thread',
+          runId: 'test-run',
+          messages: [
+            { id: 'msg-1', role: 'user', content: 'What is 3 times 5?' },
+          ],
+          state: {},
+          tools: [],
+          context: [],
+          forwardedProps: {},
+        }),
+      });
+      const body = await res.text();
+      console.log(
+        `Gateway -> ${target} (AG-UI) response (${res.status}):`,
+        body.slice(0, 200),
+      );
+      expect(res.status).toBe(200);
+      expect(body).toContain('data:');
+    }
+
+    // Python HTTP target: the agent serves /ping alongside /invocations, so
+    // GET /<target>/ping proves the proxy routes to the right upstream and
+    // passes the response through, without depending on the LLM mock's
+    // stream contents (the deployed e2e covers content end-to-end).
+    const pingRes = await fetch(`${gatewayUrl}/my-py-agent/ping`);
+    const ping = await pingRes.text();
+    console.log(`Gateway -> my-py-agent (HTTP) /ping:`, ping);
+    expect(pingRes.status).toBe(200);
+    expect(ping).toContain('Healthy');
+
+    // The invocation body passes through the proxy: a 200 means FastAPI
+    // parsed the proxied JSON body (a mangled body would 422).
+    const httpRes = await fetch(`${gatewayUrl}/my-py-agent/invocations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prompt: 'What is 3 times 5?' }),
+    });
+    await httpRes.text();
+    console.log(`Gateway -> my-py-agent (HTTP) invoke:`, httpRes.status);
+    expect(httpRes.status).toBe(200);
+
+    // A2A targets (ts + py): the deployed gateway maps `/invocations/...`
+    // onto the agent container's root, so the card is served under
+    // `/<target>/invocations/.well-known/agent-card.json`.
+    for (const target of ['my-a2a-agent', 'my-py-a2a-agent']) {
+      const cardRes = await fetch(
+        `${gatewayUrl}/${target}/invocations/.well-known/agent-card.json`,
+      );
+      const card = await cardRes.json();
+      console.log(`Gateway -> ${target} (A2A) card:`, card.name);
+      expect(card.name).toBeDefined();
+
+      const streamRes = await fetch(`${gatewayUrl}/${target}/invocations/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'text/event-stream',
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: '1',
+          method: 'message/stream',
+          params: {
+            message: {
+              messageId: 'msg-1',
+              role: 'user',
+              parts: [{ kind: 'text', text: 'What is 3 times 5?' }],
+            },
+          },
+        }),
+      });
+      const streamBody = await streamRes.text();
+      console.log(
+        `Gateway -> ${target} (A2A) stream (${streamRes.status}):`,
+        streamBody.slice(0, 200),
+      );
+      expect(streamRes.status).toBe(200);
+      expect(streamBody).toContain('data:');
+    }
+
+    // Unknown targets are rejected with a 404 rather than proxied.
+    const unknownRes = await fetch(`${gatewayUrl}/not-a-target/invocations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    expect(unknownRes.status).toBe(404);
+
+    await stopLast();
+    // Later tests boot these same agents individually; wait for their ports
+    // to be released so the next chain doesn't hit EADDRINUSE.
+    for (const port of [
+      ports.tsAgui,
+      ports.pyAgui,
+      ports.pyAgent,
+      ports.tsA2a,
+      ports.pyA2a,
+    ]) {
+      await waitForPortFree(port, STARTUP_TIMEOUT_MS);
+    }
   });
 
   it('TS A2A Agent - card + streaming message', async () => {

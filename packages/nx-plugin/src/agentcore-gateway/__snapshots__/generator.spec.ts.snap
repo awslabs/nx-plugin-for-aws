@@ -1,0 +1,273 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`agentcore-gateway generator > protocol: http > omits protocol_type from the Terraform gateway > my-gateway.tf 1`] = `
+"terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "6.57.1"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "3.9.0"
+    }
+  }
+}
+
+variable "additional_iam_policy_statements" {
+  description = "Additional IAM policy statements to attach to the gateway service role. Connection generators (e.g. agentcore-gateway#mcp-connection) append \`InvokeAgentRuntime*\` entries here."
+  type = list(object({
+    Effect   = string
+    Action   = list(string)
+    Resource = list(string)
+  }))
+  default = []
+}
+
+
+variable "enable_waf" {
+  description = "Associate a regional WAFv2 web ACL (default AWS managed rule groups) with the gateway to inspect inbound requests."
+  type        = bool
+  default     = true
+}
+
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+locals {
+  aws_account_id = data.aws_caller_identity.current.account_id
+  aws_region     = data.aws_region.current.id
+}
+
+resource "random_id" "unique_suffix" {
+  byte_length = 4
+}
+
+# IAM role for the gateway service
+resource "aws_iam_role" "gateway_role" {
+  name = "MyGateway-GatewayRole-\${random_id.unique_suffix.hex}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AgentCoreGatewayAssumeRolePolicy"
+        Effect = "Allow"
+        Principal = {
+          Service = "bedrock-agentcore.amazonaws.com"
+        }
+        Action = "sts:AssumeRole"
+        Condition = {
+          StringEquals = {
+            "aws:SourceAccount" = local.aws_account_id
+          }
+          ArnLike = {
+            "aws:SourceArn" = "arn:aws:bedrock-agentcore:\${local.aws_region}:\${local.aws_account_id}:*"
+          }
+        }
+      }
+    ]
+  })
+}
+
+# Inline policy for statements appended by connection generators
+# (e.g. InvokeAgentRuntime*)
+resource "aws_iam_role_policy" "gateway_role_policy" {
+  count = length(var.additional_iam_policy_statements) > 0 ? 1 : 0
+  name  = "MyGateway-GatewayPolicy"
+  role  = aws_iam_role.gateway_role.id
+
+  policy = jsonencode({
+    Version   = "2012-10-17"
+    Statement = var.additional_iam_policy_statements
+  })
+}
+
+resource "aws_bedrockagentcore_gateway" "this" {
+  # Cap the name so the 11-char service suffix keeps the gateway id within its
+  # 50-char limit (30 prefix + "-<8 hex>" + 11 = 50).
+  name        = "\${substr("MyGateway", 0, 30)}-\${random_id.unique_suffix.hex}"
+  description = "AgentCore Gateway for MyGateway"
+  role_arn    = aws_iam_role.gateway_role.arn
+
+  # No protocol type: AgentCore Runtime targets require a gateway without one.
+  # The gateway proxies requests to its runtime targets via path-based routing
+  # (\`/<targetName>/invocations\`).
+
+  authorizer_type = "AWS_IAM"
+}
+
+# WAFv2 protection for the gateway. AgentCore Gateway requires a REGIONAL web
+# ACL; CloudFront (global) is not supported.
+resource "aws_wafv2_web_acl" "gateway_waf" {
+  #checkov:skip=CKV2_AWS_31:Logging configuration is defined below in aws_wafv2_web_acl_logging_configuration.gateway_waf_logging; Checkov does not resolve the separate resource
+  count = var.enable_waf ? 1 : 0
+
+  name  = "MyGateway-waf-\${random_id.unique_suffix.hex}"
+  scope = "REGIONAL"
+
+  default_action {
+    allow {}
+  }
+
+  rule {
+    name     = "CRSRule"
+    priority = 0
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesCommonRuleSet"
+        vendor_name = "AWS"
+
+        # Count instead of Block: the CRS 8 KB body limit is too restrictive
+        # for typical MCP tool payloads.
+        rule_action_override {
+          name = "SizeRestrictions_BODY"
+          action_to_use {
+            count {}
+          }
+        }
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "MyGatewayWebAcl-CRS"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  rule {
+    name     = "KnownBadInputsRule"
+    priority = 1
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesKnownBadInputsRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "MyGatewayWebAcl-KnownBadInputs"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  visibility_config {
+    cloudwatch_metrics_enabled = true
+    metric_name                = "MyGatewayWebAcl"
+    sampled_requests_enabled   = true
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "aws_wafv2_web_acl_association" "gateway_waf" {
+  count = var.enable_waf ? 1 : 0
+
+  resource_arn = aws_bedrockagentcore_gateway.this.gateway_arn
+  web_acl_arn  = aws_wafv2_web_acl.gateway_waf[0].arn
+}
+
+# WAF request logs. WAFv2 requires the \`aws-waf-logs-\` name prefix.
+resource "aws_cloudwatch_log_group" "gateway_waf_logs" {
+  #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
+  #checkov:skip=CKV_AWS_338:Log retention set to one year which is sufficient for WAF logs
+  count = var.enable_waf ? 1 : 0
+
+  name              = "aws-waf-logs-my-gateway-\${random_id.unique_suffix.hex}"
+  retention_in_days = 365
+}
+
+resource "aws_wafv2_web_acl_logging_configuration" "gateway_waf_logging" {
+  count = var.enable_waf ? 1 : 0
+
+  log_destination_configs = [aws_cloudwatch_log_group.gateway_waf_logs[0].arn]
+  resource_arn            = aws_wafv2_web_acl.gateway_waf[0].arn
+}
+
+
+# Add gateway URL to runtime config
+module "add_gateway_url_to_runtime_config" {
+  source = "../../../core/runtime-config/entry"
+
+  namespace = "agentcore"
+  key       = "gateways"
+  value     = { "MyGateway" = aws_bedrockagentcore_gateway.this.gateway_url }
+
+  depends_on = [aws_bedrockagentcore_gateway.this]
+}
+
+output "gateway_id" {
+  description = "ID of the Bedrock AgentCore Gateway"
+  value       = aws_bedrockagentcore_gateway.this.gateway_id
+}
+
+output "gateway_arn" {
+  description = "ARN of the Bedrock AgentCore Gateway"
+  value       = aws_bedrockagentcore_gateway.this.gateway_arn
+}
+
+output "gateway_url" {
+  description = "Endpoint URL of the Bedrock AgentCore Gateway. Runtime targets are served under \`<gateway_url minus /mcp>/<targetName>/invocations\`."
+  value       = aws_bedrockagentcore_gateway.this.gateway_url
+}
+
+output "gateway_role_arn" {
+  description = "ARN of the IAM role assumed by the gateway service"
+  value       = aws_iam_role.gateway_role.arn
+}
+
+output "waf_web_acl_arn" {
+  description = "ARN of the WAFv2 web ACL associated with the gateway, or null if WAF is disabled"
+  value       = var.enable_waf ? aws_wafv2_web_acl.gateway_waf[0].arn : null
+}
+"
+`;
+
+exports[`agentcore-gateway generator > protocol: http > wires the CDK construct with the http protocol > my-gateway.ts 1`] = `
+"import { Construct } from 'constructs';
+import {
+  AgentCoreGateway,
+  AgentCoreGatewayProps,
+} from '../../../core/agentcore-gateway/agentcore-gateway.js';
+import { RuntimeConfig } from '../../../core/runtime-config.js';
+
+export type MyGatewayProps = Omit<AgentCoreGatewayProps, 'protocol'>;
+
+/**
+ * AgentCore Gateway wired for HTTP proxying of agent runtime targets with IAM inbound auth.
+ */
+export class MyGateway extends AgentCoreGateway {
+  /** Default Gateway target name when added to another Gateway. */
+  public readonly gatewayName = 'my-gateway';
+
+  constructor(scope: Construct, id: string, props?: MyGatewayProps) {
+    super(scope, id, {
+      protocol: 'http',
+      ...props,
+    });
+
+    const rc = RuntimeConfig.ensure(this);
+    rc.set('agentcore', 'gateways', {
+      ...rc.get('agentcore').gateways,
+      MyGateway: this.gateway.gatewayUrl,
+    });
+  }
+}
+"
+`;

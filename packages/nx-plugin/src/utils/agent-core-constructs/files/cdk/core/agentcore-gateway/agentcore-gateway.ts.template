@@ -42,12 +42,24 @@ export interface AgentCoreGatewayProps {
    * @default GatewayAuthorizer.usingAwsIam()
    */
   readonly authorizer?: agentcore.IGatewayAuthorizerConfig;
+  /**
+   * The gateway's protocol. An `mcp` gateway aggregates MCP server targets
+   * into a single MCP endpoint. An `http` gateway has no protocol type and
+   * proxies requests to AgentCore Runtime targets via path-based routing
+   * (`/<targetName>/invocations`) — the target type AgentCore only allows on
+   * gateways without a protocol type.
+   *
+   * @default 'mcp'
+   */
+  readonly protocol?: 'mcp' | 'http';
 }
 
 /**
- * AgentCore Gateway wired for MCP protocol, exposing attached MCP servers'
- * tools under `<targetName>___<toolName>` names. Inbound auth defaults to IAM
- * (SigV4); pass an `authorizer` to use Cognito/JWT instead.
+ * AgentCore Gateway. With the default `mcp` protocol it exposes attached MCP
+ * servers' tools under `<targetName>___<toolName>` names; with the `http`
+ * protocol it proxies AgentCore Runtime targets under
+ * `/<targetName>/invocations`. Inbound auth defaults to IAM (SigV4); pass an
+ * `authorizer` to use Cognito/JWT instead.
  */
 export class AgentCoreGateway extends Construct implements iam.IGrantable {
   public readonly gateway: agentcore.Gateway;
@@ -57,9 +69,12 @@ export class AgentCoreGateway extends Construct implements iam.IGrantable {
   private readonly policies: agentcore.CfnPolicy[] = [];
   private targetReadinessProbe?: triggers.TriggerFunction;
   private readonly targetRuntimeArns: string[] = [];
+  private readonly protocol: 'mcp' | 'http';
 
   constructor(scope: Construct, id: string, props?: AgentCoreGatewayProps) {
     super(scope, id);
+
+    this.protocol = props?.protocol ?? 'mcp';
 
     this.gateway = new agentcore.Gateway(this, 'Gateway', {
       // Cap at 39 chars so the 11-char service suffix keeps the gateway id
@@ -72,6 +87,15 @@ export class AgentCoreGateway extends Construct implements iam.IGrantable {
       authorizerConfiguration:
         props?.authorizer ?? agentcore.GatewayAuthorizer.usingAwsIam(),
     });
+
+    if (this.protocol === 'http') {
+      // AgentCore Runtime targets require a gateway without a protocol type,
+      // which the Gateway L2 cannot express — it always renders MCP — so
+      // remove the protocol from the underlying CloudFormation resource.
+      const cfnGateway = this.gateway.node.defaultChild as agentcore.CfnGateway;
+      cfnGateway.addPropertyDeletionOverride('ProtocolType');
+      cfnGateway.addPropertyDeletionOverride('ProtocolConfiguration');
+    }
 
     if (props?.cedarPolicyPath) {
       this.policyEngine = new agentcore.CfnPolicyEngine(this, 'PolicyEngine', {
@@ -421,6 +445,93 @@ export class AgentCoreGateway extends Construct implements iam.IGrantable {
   }
 
   /**
+   * Add an agent runtime construct as a target of this Gateway. Requires the
+   * `http` protocol — the gateway proxies requests for the agent under
+   * `<gatewayUrl>/<targetName>/invocations`, without protocol translation.
+   *
+   * The target name defaults to the agent construct's `agentName` (its
+   * project's class name in kebab-case, e.g. `MyAgent` -> `my-agent`). It
+   * forms the target's invocation path, so renaming it later is a breaking
+   * change for consumers.
+   */
+  public addAgent(
+    agent: Construct & {
+      readonly agentCoreRuntime: agentcore.Runtime;
+      readonly agentName: string;
+    },
+    props?: {
+      gatewayTargetName?: string;
+    },
+  ): agentcore.CfnGatewayTarget {
+    return this.addAgentTarget({
+      gatewayTargetName: props?.gatewayTargetName ?? agent.agentName,
+      agentRuntimeArn: agent.agentCoreRuntime.agentRuntimeArn,
+    });
+  }
+
+  /**
+   * Register an agent runtime ARN as a Gateway target. Prefer
+   * {@link addAgent} when the construct is in scope.
+   */
+  public addAgentTarget(props: {
+    gatewayTargetName: string;
+    agentRuntimeArn: string;
+  }): agentcore.CfnGatewayTarget {
+    if (this.protocol !== 'http') {
+      throw new Error(
+        `Agent runtime targets require an http-protocol gateway, but this gateway uses '${this.protocol}'.`,
+      );
+    }
+
+    // The construct id is derived from the target name so the two change
+    // together — target names are unique per gateway, and replacing a target
+    // under an unchanged name fails with AlreadyExists.
+    const target = new agentcore.CfnGatewayTarget(
+      this,
+      `Target-${props.gatewayTargetName}`,
+      {
+        gatewayIdentifier: this.gateway.gatewayId,
+        name: props.gatewayTargetName,
+        targetConfiguration: {
+          http: {
+            agentcoreRuntime: {
+              arn: props.agentRuntimeArn,
+              qualifier: 'DEFAULT',
+            },
+          },
+        },
+        // The bare gateway IAM role credential: runtime targets reject the
+        // iamCredentialProvider detail MCP targets carry.
+        credentialProviderConfigurations: [
+          {
+            credentialProviderType: 'GATEWAY_IAM_ROLE',
+          },
+        ],
+      },
+    );
+
+    // Grant the gateway role invoke access to the target runtime before the
+    // target is created — AgentCore validates access to the runtime during
+    // target creation.
+    const grant = this.gateway.role.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: [
+          'bedrock-agentcore:InvokeAgentRuntime',
+          'bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream',
+          // A2A targets additionally serve their agent card via the gateway.
+          'bedrock-agentcore:GetAgentCard',
+        ],
+        resources: [props.agentRuntimeArn, `${props.agentRuntimeArn}/*`],
+      }),
+    );
+    if (grant.policyDependable) {
+      target.node.addDependency(grant.policyDependable);
+    }
+
+    return target;
+  }
+
+  /**
    * Create a Gateway target for an MCP endpoint, with outbound calls signed
    * using this gateway's own execution role.
    */
@@ -428,6 +539,11 @@ export class AgentCoreGateway extends Construct implements iam.IGrantable {
     gatewayTargetName: string,
     endpoint: string,
   ): agentcore.CfnGatewayTarget {
+    if (this.protocol !== 'mcp') {
+      throw new Error(
+        `MCP targets require an mcp-protocol gateway, but this gateway uses '${this.protocol}'.`,
+      );
+    }
     // The construct id is derived from the target name so the two change
     // together — target names are unique per gateway, and replacing a target
     // under an unchanged name fails with AlreadyExists.

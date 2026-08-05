@@ -8,7 +8,7 @@ export interface AgentcoreGatewayGeneratorSchema {
   name: string;
   directory?: string;
   subDirectory?: string;
-  protocol?: 'mcp';
+  protocol?: 'mcp' | 'http';
   auth?: 'iam' | 'cognito';
   cedarPolicy?: boolean;
   infra?: 'agentcore' | 'none';

@@ -8,6 +8,7 @@ import GeneratorsJson from '../../generators.json' with { type: 'json' };
 import {
   CONNECTION_CONSTRAINTS,
   CONNECTION_ENDPOINT_TYPES,
+  CONNECTION_ORDERING,
   CONNECTION_PREFERENCES,
   deriveScaffoldRecipe,
   SELF_CONNECTION_DISALLOWED,
@@ -365,6 +366,24 @@ describe('scaffold catalog', () => {
             expect(preference.value).not.toBe(constraint.notEquals);
           }
         }
+      }
+    });
+
+    it('should only order supported connections', () => {
+      const unknown = [
+        ...Object.keys(CONNECTION_ORDERING),
+        ...Object.values(
+          CONNECTION_ORDERING as Record<string, { after: readonly string[] }>,
+        ).flatMap(({ after }) => after),
+      ].filter((key) => !connectionKeys.includes(key));
+      expect(unknown).toEqual([]);
+    });
+
+    it('should not order a connection after itself', () => {
+      for (const [key, { after }] of Object.entries(
+        CONNECTION_ORDERING as Record<string, { after: readonly string[] }>,
+      )) {
+        expect(after, `${key} cannot depend on itself`).not.toContain(key);
       }
     });
 

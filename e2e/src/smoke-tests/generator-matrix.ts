@@ -326,6 +326,42 @@ export const runGeneratorMatrix = async (
     opts,
   );
 
+  // An http-protocol gateway fronting agent runtime targets (every supported
+  // protocol permutation: ts ag-ui + a2a, py ag-ui + http + a2a), plus the
+  // website -> gateway connection so the browser reaches the fronted AG-UI
+  // agent through the gateway.
+  await runCLI(
+    `generate @aws/nx-plugin:agentcore-gateway --name=agent-gateway --protocol=http --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/agent-gateway --targetProject=ts-project --targetComponent=my-ts-agui-agent --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/agent-gateway --targetProject=ts-project --targetComponent=my-ts-a2a-agent --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/agent-gateway --targetProject=py_project --targetComponent=my-py-agui-agent --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/agent-gateway --targetProject=py_project --targetComponent=my-agent --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/agent-gateway --targetProject=py_project --targetComponent=my-py-a2a-agent --no-interactive${deferFlag}`,
+    opts,
+  );
+  // website-no-router rather than website: the latter already connects to the
+  // AG-UI agents directly, so its hooks exist and would be kept as-is; a
+  // fresh website generates the gateway-routed hooks.
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/website-no-router --targetProject=@e2e-test/agent-gateway --no-interactive${deferFlag}`,
+    opts,
+  );
+
   // Website -> agent connections (TypeScript HTTP, TypeScript AG-UI, Python HTTP, Python AG-UI/CopilotKit)
   await runCLI(
     `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/website --targetProject=ts-project --targetComponent=agent --no-interactive${deferFlag}`,

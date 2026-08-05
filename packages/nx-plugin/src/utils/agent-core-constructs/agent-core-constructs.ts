@@ -299,6 +299,11 @@ export interface AddAgentCoreGatewayInfraProps {
   projectDirectory: string;
   cedarPolicy: boolean;
   auth: AgentCoreAuth;
+  /**
+   * The gateway's protocol: mcp aggregates MCP server targets, http proxies
+   * agent runtime targets via path-based routing.
+   */
+  protocol: 'mcp' | 'http';
 }
 
 export const addAgentCoreGatewayInfra = async <
@@ -386,6 +391,7 @@ const addAgentCoreGatewayCDKInfra = async (
       projectDirectory: options.projectDirectory,
       cedarPolicy: options.cedarPolicy,
       auth: options.auth,
+      protocol: options.protocol,
       ...esmVars(tree),
     },
     {
@@ -492,6 +498,7 @@ const addAgentCoreGatewayTerraformInfra = (
       projectDirectory: options.projectDirectory,
       cedarPolicy: options.cedarPolicy,
       auth: options.auth,
+      protocol: options.protocol,
       boto3Version: PY_VERSIONS.boto3,
       httpxVersion: PY_VERSIONS.httpx,
       mcpVersion: PY_VERSIONS.mcp,
