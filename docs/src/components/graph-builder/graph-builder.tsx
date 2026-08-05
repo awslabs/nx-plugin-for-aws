@@ -477,18 +477,30 @@ export const GraphBuilder = () => {
     <div className="gb-root" data-graph-builder>
       <div className="gb-toolbar">
         <div className="gb-toolbar-presets">
-          <span className="gb-toolbar-label">Start from</span>
-          {PRESETS.map((preset) => (
-            <button
-              key={preset.id}
-              type="button"
-              className="gb-chip"
-              onClick={() => loadPreset(preset.id)}
-              title={preset.description}
-            >
-              {preset.label}
-            </button>
-          ))}
+          <label className="gb-toolbar-label" htmlFor="gb-preset">
+            Start from
+          </label>
+          <select
+            id="gb-preset"
+            className="gb-select"
+            // Held at the placeholder rather than the last choice, so picking the
+            // same preset again reloads it instead of being a no-op.
+            value=""
+            onChange={(event) => {
+              if (event.target.value) loadPreset(event.target.value);
+            }}
+          >
+            <option value="">Choose an example…</option>
+            {PRESETS.map((preset) => (
+              <option
+                key={preset.id}
+                value={preset.id}
+                title={preset.description}
+              >
+                {preset.label}
+              </option>
+            ))}
+          </select>
         </div>
         <div className="gb-toolbar-actions">
           <span className="gb-stat">
