@@ -15,6 +15,8 @@ import {
   SMITHY_PROJECT_GENERATOR_INFO,
   type SmithyProjectMetadata,
   smithyCompileCommands,
+  smithyCompileOutputs,
+  smithyGenerateSsdkTarget,
   writeSsdkBundleConfig,
 } from '../../../smithy/project/generator';
 import { addTsDependencies } from '../../../utils/add-dependencies';
@@ -160,17 +162,31 @@ export default async function migration(
     );
     tree.delete(dockerfilePath);
 
-    // Built from the same helper the generator uses, so the target a migrated
+    // Built from the same helpers the generator uses, so the targets a migrated
     // project gets cannot drift from a freshly generated one.
     const cmd = new FsCommands(tree, DEPENDENCIES);
     project.targets ??= {};
     project.targets.compile = {
       ...project.targets.compile,
+      outputs: smithyCompileOutputs(type),
       options: {
         ...project.targets.compile?.options,
         commands: smithyCompileCommands(cmd, type),
       },
     };
+
+    // A service's Server SDK moves to its own target, so the model build and the
+    // SDK build cache separately.
+    if (type === 'service') {
+      project.targets['generate-ssdk'] = {
+        ...project.targets['generate-ssdk'],
+        ...smithyGenerateSsdkTarget(),
+      };
+      project.targets.build = {
+        ...project.targets.build,
+        dependsOn: ['compile', 'generate-ssdk'],
+      };
+    }
     updateProjectConfiguration(tree, name, project);
 
     if (type === 'service') {

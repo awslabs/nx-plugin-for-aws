@@ -11,8 +11,8 @@ import {
 } from '../../utils/shared-constructs';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import {
-  SMITHY_VERSIONS,
-  smithyMavenDependency,
+  javaMavenDependency,
+  MISE_VERSIONS,
   TS_VERSIONS,
 } from '../../utils/versions';
 import {
@@ -53,23 +53,42 @@ describe('smithyProjectGenerator', () => {
     expect(projectConfig.targets.build).toBeDefined();
     expect(projectConfig.targets.compile).toBeDefined();
 
-    // Verify compile target configuration
+    // Verify compile target configuration: the model build only
     expect(projectConfig.targets.compile.executor).toBe('nx:run-commands');
     expect(projectConfig.targets.compile.options.commands).toEqual([
       'rimraf dist/{projectRoot}/build',
       'rimraf dist/{projectRoot}/smithy',
       'make-dir dist/{projectRoot}/build',
-      `npx -y mise@${TS_VERSIONS.mise} exec smithy@${SMITHY_VERSIONS.cli} -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy`,
+      `npx -y mise@${TS_VERSIONS.mise} exec smithy@${MISE_VERSIONS.smithy} -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy`,
       'cpy "dist/{projectRoot}/smithy/source/openapi/*.openapi.json" dist/{projectRoot}/build/openapi --flat --rename=openapi.json',
+    ]);
+    // Per artifact rather than the whole build dir, which generate-ssdk shares
+    expect(projectConfig.targets.compile.outputs).toEqual([
+      '{workspaceRoot}/dist/{projectRoot}/smithy',
+      '{workspaceRoot}/dist/{projectRoot}/build/openapi',
+    ]);
+
+    // Verify generate-ssdk target configuration: the Server SDK only
+    expect(projectConfig.targets['generate-ssdk'].executor).toBe(
+      'nx:run-commands',
+    );
+    expect(projectConfig.targets['generate-ssdk'].options.commands).toEqual([
       'npm install --prefix dist/{projectRoot}/smithy/source/typescript-ssdk-codegen --include=dev --ignore-scripts --no-audit --no-fund',
       'node dist/{projectRoot}/smithy/source/typescript-ssdk-codegen/node_modules/typescript/bin/tsc -p dist/{projectRoot}/smithy/source/typescript-ssdk-codegen/tsconfig.es.json',
       'node dist/{projectRoot}/smithy/source/typescript-ssdk-codegen/node_modules/typescript/bin/tsc -p dist/{projectRoot}/smithy/source/typescript-ssdk-codegen/tsconfig.types.json',
       'rolldown -c {projectRoot}/ssdk.rolldown.config.mjs',
     ]);
-    expect(projectConfig.targets.compile.outputs).toEqual([
-      '{workspaceRoot}/dist/{projectRoot}/build',
+    expect(projectConfig.targets['generate-ssdk'].outputs).toEqual([
+      '{workspaceRoot}/dist/{projectRoot}/build/ssdk',
     ]);
-    expect(projectConfig.targets.build.dependsOn).toEqual(['compile']);
+    // Reads what the model build leaves behind
+    expect(projectConfig.targets['generate-ssdk'].dependsOn).toEqual([
+      'compile',
+    ]);
+    expect(projectConfig.targets.build.dependsOn).toEqual([
+      'compile',
+      'generate-ssdk',
+    ]);
 
     // Create snapshots of generated files
     expect(tree.read('test-api/src/main.smithy', 'utf-8')).toMatchSnapshot(
@@ -245,12 +264,15 @@ describe('smithyProjectGenerator', () => {
     });
 
     const projectConfig = readJson(tree, 'test-api/project.json');
-    const commands: string[] = projectConfig.targets.compile.options.commands;
+    const commands: string[] = [
+      ...projectConfig.targets.compile.options.commands,
+      ...projectConfig.targets['generate-ssdk'].options.commands,
+    ];
 
     // The CLI version travels in the command, which is what the version sync
     // reaches to move it forward.
     expect(commands).toContain(
-      `npx -y mise@${TS_VERSIONS.mise} exec smithy@${SMITHY_VERSIONS.cli} -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy`,
+      `npx -y mise@${TS_VERSIONS.mise} exec smithy@${MISE_VERSIONS.smithy} -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy`,
     );
     expect(commands.join('\n')).not.toContain('docker');
 
@@ -258,6 +280,9 @@ describe('smithyProjectGenerator', () => {
     // project's own directory untouched. `{projectRoot}` is only ever read from —
     // the config and model the CLI is pointed at.
     expect(projectConfig.targets.compile.options.cwd).toBe('{workspaceRoot}');
+    expect(projectConfig.targets['generate-ssdk'].options.cwd).toBe(
+      '{workspaceRoot}',
+    );
     const written = commands.flatMap((command) =>
       [
         ...command.matchAll(
@@ -278,11 +303,11 @@ describe('smithyProjectGenerator', () => {
 
     const smithyBuild = readJson(tree, 'test-api/smithy-build.json');
     expect(smithyBuild.maven.dependencies).toEqual([
-      smithyMavenDependency('software.amazon.smithy:smithy-model'),
-      smithyMavenDependency('software.amazon.smithy:smithy-aws-traits'),
-      smithyMavenDependency('software.amazon.smithy:smithy-validation-model'),
-      smithyMavenDependency('software.amazon.smithy:smithy-openapi'),
-      smithyMavenDependency(
+      javaMavenDependency('software.amazon.smithy:smithy-model'),
+      javaMavenDependency('software.amazon.smithy:smithy-aws-traits'),
+      javaMavenDependency('software.amazon.smithy:smithy-validation-model'),
+      javaMavenDependency('software.amazon.smithy:smithy-openapi'),
+      javaMavenDependency(
         'software.amazon.smithy.typescript:smithy-aws-typescript-codegen',
       ),
     ]);
@@ -436,7 +461,7 @@ describe('smithyProjectGenerator', () => {
         'rimraf dist/{projectRoot}/build',
         'rimraf dist/{projectRoot}/smithy',
         'make-dir dist/{projectRoot}/build',
-        `npx -y mise@${TS_VERSIONS.mise} exec smithy@${SMITHY_VERSIONS.cli} -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy`,
+        `npx -y mise@${TS_VERSIONS.mise} exec smithy@${MISE_VERSIONS.smithy} -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy`,
         'ncp dist/{projectRoot}/smithy/source/model/model.json dist/{projectRoot}/build/model.json',
       ]);
     });
