@@ -193,6 +193,10 @@ Do not add a `version` field to `migrations.json` entries — versions arrive on
 
 A version already recorded in source always wins, so the backfilled values are stable and the release only has to reason about entries that are still unversioned.
 
+##### Order within a release
+
+Migrations shipped together share a version — a batch stamped with the same pending release, or a whole `v<x.y.z>/` folder replayed on a big version jump. `nx migrate` sorts the run ascending by version and keeps the manifest's order among equal versions, so **within a version, migrations run in the order they were committed**: stamping ranks each by the commit that added its folder (`scripts/utils/migration-commit-order.ts`) and emits them in that order. An earlier-authored migration therefore runs before a later one in the same release, so you can land a batch of dependent changes across separate commits without worrying about ordering — commit the migration a later one relies on first. Two migrations added in the same commit (a squashed PR) share a rank and fall back to alphabetical order, so if one depends on the other, split them across commits. The `everyMigration` sync entry always runs last regardless (see below). Ordering follows the folder through the `latest/` → `v<x.y.z>/` move — `git log --follow` walks the rename back to the original add — so a migration keeps its place once a release claims it.
+
 #### Vended dependency versions
 
 Version bumps ship themselves, and everything that makes that work lives in `utils/version-upgrade-migration/`. The weekly `update-versions` PR rewrites the vended versions in `utils/versions.ts` and nothing else needs authoring or generating per bump: `migrations.json` carries one committed `sync-vended-versions` entry marked `everyMigration: true`, pointing at `migration.ts`. That delegates to `syncVendedVersions` (`sync-vended-versions.ts`), which syncs TypeScript dependencies (catalogs and direct ranges), Python `pyproject.toml` pins, Terraform provider versions and the plugin version the metrics files report.
