@@ -1,0 +1,57 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`waf-log-group-removal migration > should add a DESTROY removal policy and import to the rest api WAF log group 1`] = `
+"import { IAspect, Stack, RemovalPolicy } from 'aws-cdk-lib';
+import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
+import { Key } from 'aws-cdk-lib/aws-kms';
+import { CfnLoggingConfiguration } from 'aws-cdk-lib/aws-wafv2';
+import { Construct } from 'constructs';
+
+export class RestApi extends Construct {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+    const logsKey = new Key(this, 'WebAclLogsKey', { enableKeyRotation: true });
+    // The construct has another log group sharing the encryptionKey shape, so
+    // the migration must scope its rewrite to the WAF log group only.
+    const accessLogs = new LogGroup(this, 'AccessLogs', {
+      retention: RetentionDays.ONE_YEAR,
+      encryptionKey: logsKey,
+    });
+    const wafLogGroup = new LogGroup(this, 'WebAclLogs', {
+      logGroupName: \`aws-waf-logs-\${apiName}-\${this.node.addr.slice(-8)}\`,
+      retention: RetentionDays.ONE_YEAR,
+      encryptionKey: logsKey,
+      // The log group name is deterministic, so retaining it on delete would
+      // orphan it and block re-creation (e.g. after a rolled-back deploy).
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+  }
+}
+"
+`;
+
+exports[`waf-log-group-removal migration > should add a DESTROY removal policy to the gateway WAF log group 1`] = `
+"import * as cdk from 'aws-cdk-lib';
+import * as kms from 'aws-cdk-lib/aws-kms';
+import * as logs from 'aws-cdk-lib/aws-logs';
+import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
+import { Construct } from 'constructs';
+
+export class AgentCoreGateway extends Construct {
+  private createWebAcl(metricPrefix: string): wafv2.CfnWebACL {
+    const logsKey = new kms.Key(this, 'WebAclLogsKey', {
+      enableKeyRotation: true,
+    });
+    const wafLogGroup = new logs.LogGroup(this, 'WebAclLogs', {
+      logGroupName: \`aws-waf-logs-\${metricPrefix}-\${this.node.addr.slice(-8)}\`,
+      retention: logs.RetentionDays.ONE_YEAR,
+      encryptionKey: logsKey,
+      // The log group name is deterministic, so retaining it on delete would
+      // orphan it and block re-creation (e.g. after a rolled-back deploy).
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+    return undefined as any;
+  }
+}
+"
+`;

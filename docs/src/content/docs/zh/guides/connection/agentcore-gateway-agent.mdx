@@ -87,14 +87,22 @@ myGateway.addAgent(myAgent, { gatewayTargetName: 'my-target' });
 import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
 
 const myAgent = new MyAgent(this, 'MyAgent', {
-  networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
-    vpc,
-    vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
-  }),
+  // 为每个代理提供自己的网络配置作用域 — usingVpc
+  // 在您传递的作用域下创建一个名为 `SecurityGroup` 的安全组，
+  // 因此为多个代理传递 `this` 会在构造 ID 上发生冲突。
+  networkConfiguration: RuntimeNetworkConfiguration.usingVpc(
+    new Construct(this, 'MyAgentNetwork'),
+    {
+      vpc,
+      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+    },
+  ),
 });
 ```
 
 请使用**具有出口的私有子网**，而不是私有隔离子网：运行时需要出站互联网访问以访问 Bedrock 并从 AWS AppConfig 读取其配置。
+
+AgentCore Runtime VPC 部署仅在某些可用区中受支持。如果部署失败并显示 `subnets are in unsupported availability zones`，请将 VPC（或子网选择）限制为您所在区域的受支持区域。
 :::
 </Fragment>
 <Fragment slot="terraform">

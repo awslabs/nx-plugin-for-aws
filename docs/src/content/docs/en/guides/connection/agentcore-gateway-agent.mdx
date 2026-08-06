@@ -87,14 +87,22 @@ Fronting an agent with a Gateway is what makes a VPC-deployed agent reachable: c
 import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
 
 const myAgent = new MyAgent(this, 'MyAgent', {
-  networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
-    vpc,
-    vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
-  }),
+  // Give each agent its own scope for the network configuration — usingVpc
+  // creates a security group named `SecurityGroup` under the scope you pass,
+  // so passing `this` for more than one agent collides on the construct id.
+  networkConfiguration: RuntimeNetworkConfiguration.usingVpc(
+    new Construct(this, 'MyAgentNetwork'),
+    {
+      vpc,
+      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
+    },
+  ),
 });
 ```
 
 Use a **private subnet with egress**, not a private isolated subnet: the runtime needs outbound internet access to reach Bedrock and read its configuration from AWS AppConfig.
+
+AgentCore Runtime VPC deployments are only supported in certain availability zones. If a deploy fails with `subnets are in unsupported availability zones`, restrict the VPC (or the subnet selection) to the supported zones for your region.
 :::
 </Fragment>
 <Fragment slot="terraform">
