@@ -16,6 +16,7 @@ import {
   backfillMigrationVersions,
   readShippedMigrationVersions,
 } from '../packages/nx-plugin/src/utils/migration-versions';
+import { readMigrationCommitRanks } from './utils/migration-commit-order';
 import {
   discoverMigrations,
   PACKAGE_JSON_UPDATES_PATH,
@@ -55,9 +56,10 @@ const main = () => {
   const { name } = JSON.parse(
     readFileSync(join(PLUGIN_ROOT, 'package.json'), 'utf-8'),
   );
+  const discovered = discoverMigrations();
   const migrations = assembleMigrations(
     name,
-    discoverMigrations(),
+    discovered,
     readPackageJsonUpdates(),
   );
 
@@ -75,6 +77,9 @@ const main = () => {
   } = backfillMigrationVersions(
     migrations,
     readShippedMigrationVersions(migrations, versions, readReleasedMigrations),
+    // Beds each release's migrations into folder order by the commit that added
+    // them, so their order no longer depends on git once they are versioned.
+    readMigrationCommitRanks(discovered),
   );
 
   if (backfilled.length === 0) {

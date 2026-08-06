@@ -205,6 +205,18 @@ export const migrationKey = (dir: string, name: string) => `${dir}-${name}`;
 
 const LATEST_KEY_PREFIX = `${LATEST_MIGRATIONS_DIR}-`;
 
+/** Digits in the zero-padded order prefix a bedded-in migration folder carries. */
+const ORDER_PREFIX_WIDTH = 4;
+
+/**
+ * Format a 1-based order into the folder-name prefix that beds it in. Backfill
+ * prefixes a released migration's folder with its commit order within the
+ * release (`0001-foo`), so the folder name alone sorts a version's migrations
+ * into commit order — stamping doesn't have to re-read git for them.
+ */
+export const orderPrefix = (order: number): string =>
+  String(order).padStart(ORDER_PREFIX_WIDTH, '0');
+
 /** A migration directory move the caller needs to make on disk. */
 export interface MigrationDirMove {
   name: string;
@@ -213,11 +225,22 @@ export interface MigrationDirMove {
   to: string;
 }
 
+/** The base migration name a `latest` key carries, without its folder prefix. */
+const latestKeyName = (key: string): string =>
+  key.startsWith(LATEST_KEY_PREFIX) ? key.slice(LATEST_KEY_PREFIX.length) : key;
+
 /**
  * Record the release that shipped each migration on entries without a version,
  * re-keying them and re-pointing their paths at that release's folder, and
  * return the collection alongside the keys that changed and the directory moves
  * to make on disk.
+ *
+ * A backfilled migration's new folder name is prefixed with its commit order
+ * within the release (`0001-foo`), so the folder layout beds in the order the
+ * release ran them: `assembleMigrations` sorts by key, so the prefix alone puts
+ * a version's migrations in commit order and stamping never has to re-read git
+ * for a released migration. Migrations sharing a commit (a squashed PR) fall
+ * back to alphabetical order, matching stamping.
  *
  * Unlike `stampMigrationVersions` this only records already-released versions,
  * leaving the release to decide what a net-new migration gets.
@@ -225,10 +248,13 @@ export interface MigrationDirMove {
  * @param migrations parsed migrations.json to backfill
  * @param shippedVersions migration key -> version of the earliest release tag
  *   that registers it (absent for migrations that haven't shipped)
+ * @param commitRanks migration key -> rank of the commit that added it (lower is
+ *   earlier), used to order the migrations bedded into each release
  */
 export const backfillMigrationVersions = (
   migrations: MigrationsJson,
   shippedVersions: Record<string, string>,
+  commitRanks: Record<string, number> = {},
 ): {
   migrations: MigrationsJson;
   backfilled: string[];
@@ -246,20 +272,51 @@ export const backfillMigrationVersions = (
     )
     .map(([key]) => key);
 
+  const toBackfill = Object.entries(migrations.generators ?? {}).filter(
+    // Pinning an every-migration entry would stop it running on later upgrades.
+    ([key, entry]) =>
+      !entry.version && !entry.everyMigration && shippedVersions[key],
+  );
+
+  // The order prefix is a migration's position within its release, so number
+  // each version's migrations together, in commit order (alphabetical among a
+  // shared commit). All of a release's migrations are backfilled in one run —
+  // they sat in `latest` until it shipped — so a version is numbered from 1 here.
+  const orderByKey = new Map<string, number>();
+  const byVersion = new Map<string, string[]>();
+  for (const [key] of toBackfill) {
+    const version = shippedVersions[key];
+    const keys = byVersion.get(version) ?? [];
+    keys.push(key);
+    byVersion.set(version, keys);
+  }
+  for (const keys of byVersion.values()) {
+    const ordered = keys.sort((a, b) => {
+      const rankDiff =
+        (commitRanks[a] ?? Number.MAX_SAFE_INTEGER) -
+        (commitRanks[b] ?? Number.MAX_SAFE_INTEGER);
+      return rankDiff !== 0
+        ? rankDiff
+        : latestKeyName(a).localeCompare(latestKeyName(b));
+    });
+    ordered.forEach((key, index) => {
+      orderByKey.set(key, index + 1);
+    });
+  }
+
   for (const [key, entry] of Object.entries(migrations.generators ?? {})) {
     const version = shippedVersions[key];
-    // Pinning an every-migration entry would stop it running on later upgrades.
     if (entry.version || !version || entry.everyMigration) {
       generators[key] = entry;
       continue;
     }
 
-    const name = key.startsWith(LATEST_KEY_PREFIX)
-      ? key.slice(LATEST_KEY_PREFIX.length)
-      : key;
+    const name = latestKeyName(key);
+    // The commit-order prefix beds the run order into the folder name.
+    const prefixedName = `${orderPrefix(orderByKey.get(key) ?? 1)}-${name}`;
     const versionDir = versionMigrationsDir(version);
     const latestSegment = `/${LATEST_MIGRATIONS_DIR}/${name}/`;
-    const versionSegment = `/${versionDir}/${name}/`;
+    const versionSegment = `/${versionDir}/${prefixedName}/`;
 
     // Re-point each path field at the version folder, recording the move the
     // caller needs to make on disk the first time one is found.
@@ -283,7 +340,10 @@ export const backfillMigrationVersions = (
       }
     }
 
-    generators[migrationKey(versionDir, name)] = { version, ...repointed };
+    generators[migrationKey(versionDir, prefixedName)] = {
+      version,
+      ...repointed,
+    };
     backfilled.push(key);
   }
 

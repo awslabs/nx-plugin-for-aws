@@ -5,22 +5,25 @@
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import type { DiscoveredMigration } from '../../packages/nx-plugin/src/utils/migration-manifest';
-import { migrationKey } from '../../packages/nx-plugin/src/utils/migration-versions';
+import {
+  LATEST_MIGRATIONS_DIR,
+  migrationKey,
+} from '../../packages/nx-plugin/src/utils/migration-versions';
 import { MIGRATIONS_DIR } from './migration-folders';
 
 /**
- * Resolves the commit order of the migration folders, so release-time stamping
- * can order migrations sharing a version by when they were committed (see
- * `migration-versions.ts` for how that order becomes the `nx migrate` run order).
+ * Resolves the commit order of the unreleased (`latest`) migration folders, so
+ * they can be ordered by when they were committed (see `migration-versions.ts`
+ * for how that order becomes the `nx migrate` run order). Only `latest`
+ * migrations are read: a released migration's order is bedded into its folder
+ * name (the `NNNN-` prefix backfill assigns), so its order needs no git.
  *
  * `main` is linear (the repo squash- and rebase-merges), so a migration's rank
- * is the position on `main` of the commit that first added its folder. A later
- * `git mv` into a `v<x.y.z>` folder at release time doesn't reset that — `git log
- * --follow` walks through the rename back to the original add — so a migration
- * keeps its rank once a release claims it.
+ * is the position on `main` of the commit that first added its folder.
  *
- * Requires full history; the release job and the migrate smoke test that call
- * the stamping script both check out `fetch-depth: 0`.
+ * Requires history back to when the `latest` migrations were committed; the
+ * release job, the weekly update job and the migrate smoke test that call this
+ * all check out `fetch-depth: 0`.
  */
 
 /** Run a git command from the repo root, returning trimmed stdout or undefined. */
@@ -64,9 +67,10 @@ const commitRank = (commit: string): number | undefined => {
 
 /**
  * Map of migration key -> rank of the commit that added its folder, for the
- * migrations that resolve to one. A migration with no history (unlikely outside
- * a shallow checkout) is absent, and stamping falls back to the manifest order
- * for it.
+ * unreleased (`latest`) migrations that resolve to one. Released migrations are
+ * skipped — their order lives in the folder name — and a migration with no
+ * history (unlikely outside a shallow checkout) is absent, so the caller falls
+ * back to alphabetical order for it.
  *
  * @param migrations migration folders discovered under `src/migrations`
  * @param migrationsDir where those folders live, relative to the repo root
@@ -77,8 +81,11 @@ export const readMigrationCommitRanks = (
 ): Record<string, number> => {
   const ranks: Record<string, number> = {};
   for (const migration of migrations) {
-    // metadata.json is present for every migration and moves with the folder,
-    // so it is a stable anchor for the folder's history across the release move.
+    if (migration.dir !== LATEST_MIGRATIONS_DIR) {
+      continue;
+    }
+    // metadata.json is present for every migration, so it is a stable anchor
+    // for the folder's history.
     const metadataPath = join(
       migrationsDir,
       migration.dir,

@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import {
   backfillMigrationVersions,
   type MigrationsJson,
+  orderPrefix,
   readShippedMigrationVersions,
   stampMigrationVersions,
 } from './migration-versions';
@@ -351,11 +352,13 @@ describe('migration versions', () => {
         { generators: { 'latest-shipped': { description: 'shipped' } } },
         { 'latest-shipped': '1.1.0' },
       );
-      expect(migrations.generators?.['v1.1.0-shipped'].version).toBe('1.1.0');
+      expect(migrations.generators?.['v1.1.0-0001-shipped'].version).toBe(
+        '1.1.0',
+      );
       expect(backfilled).toEqual(['latest-shipped']);
     });
 
-    it('should move a released migration out of latest into its version folder', () => {
+    it('should move a released migration out of latest into its order-prefixed version folder', () => {
       const { migrations, moves } = backfillMigrationVersions(
         {
           generators: {
@@ -369,11 +372,11 @@ describe('migration versions', () => {
         { 'latest-shipped': '1.1.0' },
       );
       expect(migrations.generators).toEqual({
-        'v1.1.0-shipped': {
+        'v1.1.0-0001-shipped': {
           version: '1.1.0',
           description: 'shipped',
-          implementation: './src/migrations/v1.1.0/shipped/migration',
-          prompt: './src/migrations/v1.1.0/shipped/prompt.md',
+          implementation: './src/migrations/v1.1.0/0001-shipped/migration',
+          prompt: './src/migrations/v1.1.0/0001-shipped/prompt.md',
         },
       });
       expect(moves).toEqual([
@@ -381,19 +384,89 @@ describe('migration versions', () => {
           name: 'shipped',
           version: '1.1.0',
           from: 'src/migrations/latest/shipped',
-          to: 'src/migrations/v1.1.0/shipped',
+          to: 'src/migrations/v1.1.0/0001-shipped',
         },
       ]);
+    });
+
+    it('should order a release`s migrations by commit rank in their folder prefix', () => {
+      const { migrations, moves } = backfillMigrationVersions(
+        {
+          generators: {
+            // Keyed alphabetically, but committed in the reverse order.
+            'latest-alpha': {
+              description: 'alpha, committed last',
+              implementation: './src/migrations/latest/alpha/migration',
+            },
+            'latest-bravo': {
+              description: 'bravo, committed first',
+              implementation: './src/migrations/latest/bravo/migration',
+            },
+          },
+        },
+        { 'latest-alpha': '2.0.0', 'latest-bravo': '2.0.0' },
+        { 'latest-bravo': 1, 'latest-alpha': 2 },
+      );
+      expect(migrations.generators?.['v2.0.0-0001-bravo']).toBeDefined();
+      expect(migrations.generators?.['v2.0.0-0002-alpha']).toBeDefined();
+      expect(moves).toEqual(
+        expect.arrayContaining([
+          {
+            name: 'bravo',
+            version: '2.0.0',
+            from: 'src/migrations/latest/bravo',
+            to: 'src/migrations/v2.0.0/0001-bravo',
+          },
+          {
+            name: 'alpha',
+            version: '2.0.0',
+            from: 'src/migrations/latest/alpha',
+            to: 'src/migrations/v2.0.0/0002-alpha',
+          },
+        ]),
+      );
+    });
+
+    it('should fall back to alphabetical order for migrations sharing a commit', () => {
+      const { migrations } = backfillMigrationVersions(
+        {
+          generators: {
+            'latest-bravo': { description: 'bravo' },
+            'latest-alpha': { description: 'alpha' },
+          },
+        },
+        { 'latest-alpha': '2.0.0', 'latest-bravo': '2.0.0' },
+        // Same commit rank — the tiebreak is the migration name.
+        { 'latest-alpha': 7, 'latest-bravo': 7 },
+      );
+      expect(migrations.generators?.['v2.0.0-0001-alpha']).toBeDefined();
+      expect(migrations.generators?.['v2.0.0-0002-bravo']).toBeDefined();
+    });
+
+    it('should number each release independently', () => {
+      const { migrations } = backfillMigrationVersions(
+        {
+          generators: {
+            'latest-first': { description: 'first release' },
+            'latest-second': { description: 'second release' },
+          },
+        },
+        { 'latest-first': '1.1.0', 'latest-second': '1.2.0' },
+        { 'latest-first': 1, 'latest-second': 2 },
+      );
+      expect(migrations.generators?.['v1.1.0-0001-first']).toBeDefined();
+      expect(migrations.generators?.['v1.2.0-0001-second']).toBeDefined();
     });
 
     it('should keep migrations of the same name shipped by different releases', () => {
       const { migrations } = backfillMigrationVersions(
         {
           generators: {
-            'v1.1.0-rename-target': {
+            'v1.1.0-0001-rename-target': {
               version: '1.1.0',
               description: 'first time round',
-              implementation: './src/migrations/v1.1.0/rename-target/migration',
+              implementation:
+                './src/migrations/v1.1.0/0001-rename-target/migration',
             },
             'latest-rename-target': {
               description: 'again, for a later rename',
@@ -404,16 +477,16 @@ describe('migration versions', () => {
         { 'latest-rename-target': '2.0.0' },
       );
       expect(Object.keys(migrations.generators ?? {})).toEqual([
-        'v1.1.0-rename-target',
-        'v2.0.0-rename-target',
+        'v1.1.0-0001-rename-target',
+        'v2.0.0-0001-rename-target',
       ]);
-      expect(migrations.generators?.['v1.1.0-rename-target'].description).toBe(
-        'first time round',
-      );
-      expect(migrations.generators?.['v2.0.0-rename-target']).toEqual({
+      expect(
+        migrations.generators?.['v1.1.0-0001-rename-target'].description,
+      ).toBe('first time round');
+      expect(migrations.generators?.['v2.0.0-0001-rename-target']).toEqual({
         version: '2.0.0',
         description: 'again, for a later rename',
-        implementation: './src/migrations/v2.0.0/rename-target/migration',
+        implementation: './src/migrations/v2.0.0/0001-rename-target/migration',
       });
     });
 
@@ -541,7 +614,9 @@ describe('migration versions', () => {
         { 'v1.0.0-recorded': '1.0.0', 'latest-shipped': '1.1.0' },
       );
       expect(migrations.generators?.['v1.0.0-recorded'].version).toBe('1.0.0');
-      expect(migrations.generators?.['v1.1.0-shipped'].version).toBe('1.1.0');
+      expect(migrations.generators?.['v1.1.0-0001-shipped'].version).toBe(
+        '1.1.0',
+      );
       expect(migrations.generators?.['latest-net-new'].version).toBeUndefined();
       expect(backfilled).toEqual(['latest-shipped']);
     });
@@ -564,10 +639,10 @@ describe('migration versions', () => {
         $schema: 'http://json-schema.org/schema',
         name: '@aws/nx-plugin',
       });
-      expect(migrations.generators?.['v1.2.3-my-migration']).toEqual({
+      expect(migrations.generators?.['v1.2.3-0001-my-migration']).toEqual({
         version: '1.2.3',
         description: 'a migration',
-        implementation: './src/migrations/v1.2.3/my-migration/migration',
+        implementation: './src/migrations/v1.2.3/0001-my-migration/migration',
       });
     });
 
@@ -588,6 +663,17 @@ describe('migration versions', () => {
       expect(second.migrations).toEqual(first.migrations);
       expect(second.backfilled).toEqual([]);
       expect(second.moves).toEqual([]);
+    });
+  });
+
+  describe('orderPrefix', () => {
+    it('should zero-pad to a fixed width so prefixes sort lexically', () => {
+      expect(orderPrefix(1)).toBe('0001');
+      expect(orderPrefix(12)).toBe('0012');
+      expect([orderPrefix(2), orderPrefix(10)].sort()).toEqual([
+        '0002',
+        '0010',
+      ]);
     });
   });
 });
