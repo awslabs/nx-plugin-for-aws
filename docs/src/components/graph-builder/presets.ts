@@ -35,6 +35,50 @@ export interface Preset {
 
 export const PRESETS: readonly Preset[] = [
   {
+    id: 'dungeon-adventure',
+    label: 'Dungeon Adventure',
+    description:
+      'The full-stack agentic game from the Dungeon Adventure tutorial: a React website, a tRPC API, a Python story agent, an inventory MCP server, and a DynamoDB table.',
+    nodes: [
+      { type: 'ts#react-website', name: 'game-ui', column: 0, row: 0 },
+      { type: 'ts#trpc-api', name: 'game-api', column: 1, row: 0 },
+      {
+        type: 'py#agent',
+        name: 'story-agent',
+        hostName: 'story',
+        options: { protocol: 'ag-ui', auth: 'cognito' },
+        column: 1,
+        row: 1,
+      },
+      {
+        type: 'ts#mcp-server',
+        name: 'inventory-server',
+        hostName: 'inventory',
+        column: 2,
+        row: 1,
+      },
+      { type: 'ts#dynamodb', name: 'dungeon-db', column: 3, row: 0 },
+    ],
+    edges: [
+      ['game-ui', 'game-api'],
+      ['game-ui', 'story-agent'],
+      ['game-api', 'dungeon-db'],
+      ['story-agent', 'inventory-server'],
+      ['inventory-server', 'dungeon-db'],
+    ],
+  },
+  {
+    id: 'quick-start',
+    label: 'Quick start',
+    description:
+      'The full-stack starter from the Quick Start guide: a React website with Cognito authentication calling a type-safe tRPC API.',
+    nodes: [
+      { type: 'ts#react-website', name: 'demo-website', column: 0, row: 0 },
+      { type: 'ts#trpc-api', name: 'demo-api', column: 1, row: 0 },
+    ],
+    edges: [['demo-website', 'demo-api']],
+  },
+  {
     id: 'trpc-web-app',
     label: 'tRPC web app',
     description: 'A React website calling a type-safe tRPC API.',

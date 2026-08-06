@@ -357,20 +357,29 @@ export const emitCommands = (
  * The emitted commands as a copyable shell script: the workspace command, then a
  * `cd` into it, then each generator command prefixed for the chosen package
  * manager and run non-interactively.
+ *
+ * `skipWorkspace` drops the workspace-create and `cd` lines, emitting only the
+ * generator commands — for a page that has already had the reader create the
+ * workspace, so the copied commands run straight inside it.
  */
 export const toScript = (
   graph: Graph,
   options: EmitOptions,
-  { annotate }: { annotate: boolean } = { annotate: false },
+  {
+    annotate,
+    skipWorkspace,
+  }: { annotate?: boolean; skipWorkspace?: boolean } = {},
 ): string => {
   const commands = emitCommands(graph, options);
   const [create, ...rest] = commands;
   const workspace = kebabCase(options.workspace) || 'my-project';
 
   const lines: string[] = [];
-  if (annotate) lines.push(`# ${create.comment}`);
-  lines.push(create.command);
-  lines.push(`cd ${workspace}`);
+  if (!skipWorkspace) {
+    if (annotate) lines.push(`# ${create.comment}`);
+    lines.push(create.command);
+    lines.push(`cd ${workspace}`);
+  }
 
   for (const command of rest) {
     if (annotate) lines.push('', `# ${command.comment}`);
@@ -382,5 +391,7 @@ export const toScript = (
     );
   }
 
-  return lines.join('\n');
+  // With the workspace lines dropped, the first command would otherwise be
+  // preceded by a leading blank line from the annotation spacing.
+  return lines.join('\n').replace(/^\n/, '');
 };
