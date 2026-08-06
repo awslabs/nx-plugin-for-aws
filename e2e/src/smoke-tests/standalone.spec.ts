@@ -87,8 +87,8 @@ const { standalone, components } = categorizeGenerators();
 // covered on the Linux standalone leg and the windows-latest dungeon-adventure
 // test.
 //
-// Smithy is not among them: it builds with the Smithy CLI rather than a container,
-// which the runner installs (see .github/actions/init-monorepo).
+// Smithy is not among them: it builds with the Smithy CLI, which mise resolves on
+// demand, rather than in a container.
 const CODEBUILD_WINDOWS = process.env.NX_E2E_CODEBUILD_WINDOWS === 'true';
 
 const CODEBUILD_WINDOWS_UNSUPPORTED = new Set([

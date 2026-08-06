@@ -25,14 +25,6 @@ inputs:
     description: 'Install Terraform. Disable for jobs that do not run Terraform.'
     required: false
     default: 'true'
-  setup-smithy:
-    description: 'Install the Smithy CLI on Windows, where it is a prerequisite rather than resolved by mise. Off by default — only the jobs that build a Smithy project need it. No effect on other runners.'
-    required: false
-    default: 'false'
-  smithy-version:
-    description: 'Smithy CLI version to install on Windows. Keep in step with SMITHY_VERSIONS.cli in packages/nx-plugin/src/utils/versions.ts.'
-    required: false
-    default: '1.72.1'
 
 runs:
   using: 'composite'
@@ -167,35 +159,6 @@ runs:
         echo "$tfDir" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
         $env:PATH = "$tfDir;$env:PATH"
         terraform version
-    - name: Set up the Smithy CLI (Windows)
-      if: ${{ runner.os == 'Windows' && inputs.setup-smithy == 'true' }}
-      shell: pwsh
-      run: |
-        # Smithy projects build with the Smithy CLI directly rather than in a
-        # container. Everywhere else it is resolved on demand by `mise`, a
-        # workspace dev dependency — but mise publishes no Windows package to
-        # npm, so the CLI is a prerequisite there and CI installs it the same way
-        # a user would.
-        #
-        # Unpacked to a fixed directory rather than installed, so it lands on a
-        # PATH that Nx's run-commands executor (a cmd.exe subprocess) can see —
-        # the same reason terraform is installed manually above.
-        $ErrorActionPreference = "Stop"
-        $version = "${{ inputs.smithy-version }}"
-        $smithyDir = "C:\smithy"
-        $url = "https://github.com/smithy-lang/smithy/releases/download/${version}/smithy-cli-windows-x64.zip"
-        $zip = "$env:RUNNER_TEMP\smithy.zip"
-        $extract = "$env:RUNNER_TEMP\smithy-extract"
-        Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
-        # Extracted to its own directory and moved into place, so a re-run cannot
-        # nest the payload inside a previous copy.
-        Remove-Item $extract -Recurse -Force -ErrorAction SilentlyContinue
-        Expand-Archive -Path $zip -DestinationPath $extract -Force
-        Remove-Item $smithyDir -Recurse -Force -ErrorAction SilentlyContinue
-        Move-Item "$extract\smithy-cli-windows-x64" $smithyDir
-        echo "$smithyDir\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-        $env:PATH = "$smithyDir\bin;$env:PATH"
-        smithy --version
     - name: Get pnpm store directory
       id: pnpm-cache
       shell: bash
