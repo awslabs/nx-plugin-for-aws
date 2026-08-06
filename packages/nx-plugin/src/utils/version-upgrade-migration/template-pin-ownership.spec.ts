@@ -9,8 +9,8 @@ import { smithyProjectGenerator } from '../../smithy/project/generator';
 import { createTreeUsingTsSolutionSetup } from '../test';
 import {
   BASE_IMAGES,
-  SMITHY_MAVEN_ARTIFACTS,
-  SMITHY_VERSIONS,
+  JAVA_ARTIFACTS,
+  MISE_VERSIONS,
   TS_VERSIONS,
 } from '../versions';
 import { ownedDependencies, ownedForFile } from './owned-dependencies';
@@ -187,7 +187,7 @@ describe('the real smithy project pins', () => {
   const OLD_CODEGEN = '0.34.1';
 
   const windBack = (contents: string): string =>
-    SMITHY_MAVEN_ARTIFACTS.reduce(
+    JAVA_ARTIFACTS.reduce(
       (text, artifact) =>
         text.replace(
           new RegExp(`${artifact.replace(/[.$]/g, '\\$&')}:[^"]+`),
@@ -217,7 +217,7 @@ describe('the real smithy project pins', () => {
     expect(tree.read(path, 'utf-8')).toEqual(fresh);
     // Both the CLI and the mise that resolves it move forward.
     expect(tree.read(path, 'utf-8')).toContain(
-      `npx -y mise@${TS_VERSIONS.mise} exec smithy@${SMITHY_VERSIONS.cli}`,
+      `npx -y mise@${TS_VERSIONS.mise} exec smithy@${MISE_VERSIONS.smithy}`,
     );
   });
 

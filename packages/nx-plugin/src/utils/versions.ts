@@ -274,66 +274,66 @@ export const VENDORED_VERSIONS = {
 } as const;
 
 /**
- * The Smithy CLI version generated Smithy projects build with, and the Maven
- * artifacts their `smithy-build.json` resolves.
+ * Versions of Java dependencies added by generators, keyed by Maven coordinate.
  *
- * The CLI is run through `npx mise exec smithy@<version>`, so nothing is installed
- * into the workspace and the pin travels in the `project.json` target command —
- * which is what the version sync reaches to move it forward.
+ * Every entry is resolved from Maven Central by the version update, and lands in a
+ * generated `smithy-build.json` as `<group>:<artifact>:<version>`.
  *
- * `cli` and the `software.amazon.smithy:*` artifacts are released together and
- * must hold the same version: the CLI refuses a model built against a newer
- * `smithy-model` than it can parse. The TypeScript codegen artifact versions
- * independently.
- *
- * The codegen artifact is behind its latest release: 0.51.0 generates a server
- * importing `ServerInterceptor` from `@aws-smithy/server-common`, which no
- * published release of that package exports, so the generated SDK fails to
- * bundle. Deliberately not pinned back in the version update, which proposes the
- * latest and lets the e2e tests catch a release that doesn't build.
+ * The TypeScript codegen artifact sits behind its latest release: 0.51.0 generates
+ * a server importing `ServerInterceptor` from `@aws-smithy/server-common`, which no
+ * published release of that package exports, so the generated SDK fails to bundle.
+ * Nothing pins it back — the version update proposes the latest and the e2e tests
+ * catch a release that doesn't build.
  */
-export const SMITHY_VERSIONS = {
-  cli: '1.72.1',
+export const JAVA_VERSIONS = {
   'software.amazon.smithy:smithy-model': '1.72.1',
   'software.amazon.smithy:smithy-aws-traits': '1.72.1',
   'software.amazon.smithy:smithy-validation-model': '1.72.1',
   'software.amazon.smithy:smithy-openapi': '1.72.1',
   'software.amazon.smithy.typescript:smithy-aws-typescript-codegen': '0.50.0',
 } as const;
-export type ISmithyVersion = keyof typeof SMITHY_VERSIONS;
+export type IJavaVersion = keyof typeof JAVA_VERSIONS;
 
-/**
- * The Maven coordinates a generated `smithy-build.json` declares, keyed as
- * {@link SMITHY_VERSIONS} less the CLI. Kept beside the versions so the sync can
- * find these pins by coordinate wherever a `smithy-build.json` lists them.
- */
-export const SMITHY_MAVEN_ARTIFACTS = Object.keys(SMITHY_VERSIONS).filter(
-  (key): key is Exclude<ISmithyVersion, 'cli'> => key !== 'cli',
-);
+/** The Maven coordinates the version update resolves, in declaration order. */
+export const JAVA_ARTIFACTS = Object.keys(JAVA_VERSIONS) as IJavaVersion[];
 
 /** A Maven coordinate as a `smithy-build.json` dependency names it. */
-export const smithyMavenDependency = (
-  artifact: Exclude<ISmithyVersion, 'cli'>,
-): string => `${artifact}:${SMITHY_VERSIONS[artifact]}`;
+export const javaMavenDependency = (artifact: IJavaVersion): string =>
+  `${artifact}:${JAVA_VERSIONS[artifact]}`;
+
+/**
+ * Versions of tools resolved by mise, keyed by the tool name mise knows.
+ *
+ * Every entry is checked with `mise latest <tool>` by the version update. Nothing
+ * is installed into the workspace: the pin travels in the `project.json` target
+ * command, which is what the version sync reaches to move it forward.
+ */
+export const MISE_VERSIONS = {
+  smithy: '1.72.1',
+} as const;
+export type IMiseVersion = keyof typeof MISE_VERSIONS;
+
+/** The tools the version update resolves through mise, in declaration order. */
+export const MISE_TOOLS = Object.keys(MISE_VERSIONS) as IMiseVersion[];
 
 /**
  * Substitution variables exposing the Smithy Maven pins to the generated
  * `smithy-build.json` templates.
  */
 export const smithyMavenVersions = () => ({
-  smithyModelDependency: smithyMavenDependency(
+  smithyModelDependency: javaMavenDependency(
     'software.amazon.smithy:smithy-model',
   ),
-  smithyAwsTraitsDependency: smithyMavenDependency(
+  smithyAwsTraitsDependency: javaMavenDependency(
     'software.amazon.smithy:smithy-aws-traits',
   ),
-  smithyValidationModelDependency: smithyMavenDependency(
+  smithyValidationModelDependency: javaMavenDependency(
     'software.amazon.smithy:smithy-validation-model',
   ),
-  smithyOpenApiDependency: smithyMavenDependency(
+  smithyOpenApiDependency: javaMavenDependency(
     'software.amazon.smithy:smithy-openapi',
   ),
-  smithyTypeScriptCodegenDependency: smithyMavenDependency(
+  smithyTypeScriptCodegenDependency: javaMavenDependency(
     'software.amazon.smithy.typescript:smithy-aws-typescript-codegen',
   ),
 });

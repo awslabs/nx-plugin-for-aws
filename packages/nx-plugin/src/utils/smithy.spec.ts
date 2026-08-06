@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { smithyCliCommand } from './smithy';
-import { SMITHY_VERSIONS, TS_VERSIONS } from './versions';
+import { MISE_VERSIONS, TS_VERSIONS } from './versions';
 
 describe('smithyCliCommand', () => {
   it('should resolve the pinned cli through mise', () => {
     expect(smithyCliCommand()).toBe(
-      `npx -y mise@${TS_VERSIONS.mise} exec smithy@${SMITHY_VERSIONS.cli} -- smithy`,
+      `npx -y mise@${TS_VERSIONS.mise} exec smithy@${MISE_VERSIONS.smithy} -- smithy`,
     );
   });
 
@@ -20,6 +20,6 @@ describe('smithyCliCommand', () => {
     const command = smithyCliCommand();
 
     expect(command).toContain(`mise@${TS_VERSIONS.mise}`);
-    expect(command).toContain(`smithy@${SMITHY_VERSIONS.cli}`);
+    expect(command).toContain(`smithy@${MISE_VERSIONS.smithy}`);
   });
 });

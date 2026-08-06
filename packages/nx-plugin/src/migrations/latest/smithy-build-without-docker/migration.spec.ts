@@ -10,7 +10,7 @@ import {
   smithyProjectGenerator,
 } from '../../../smithy/project/generator';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import { SMITHY_VERSIONS, TS_VERSIONS } from '../../../utils/versions';
+import { MISE_VERSIONS, TS_VERSIONS } from '../../../utils/versions';
 import migration from './migration';
 
 /**
@@ -65,6 +65,13 @@ const generateOldWorkspace = async (
     ...RC58_COMPILE_COMMANDS.slice(0, -1),
     dockerBuildCommand(engine),
   ];
+  // The image build published everything, so there was one target writing one
+  // directory and no separate SDK build.
+  projectJson.targets.compile.outputs = [
+    '{workspaceRoot}/dist/{projectRoot}/build',
+  ];
+  projectJson.targets.build.dependsOn = ['compile'];
+  delete projectJson.targets['generate-ssdk'];
   tree.write(`${name}/project.json`, JSON.stringify(projectJson, null, 2));
   return name;
 };
@@ -84,11 +91,63 @@ describe('smithy-build-without-docker migration', () => {
     const { targets } = readJson(tree, 'test-api/project.json');
     const commands: string[] = targets.compile.options.commands;
     expect(commands).toContain(
-      `npx -y mise@${TS_VERSIONS.mise} exec smithy@${SMITHY_VERSIONS.cli} -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy`,
+      `npx -y mise@${TS_VERSIONS.mise} exec smithy@${MISE_VERSIONS.smithy} -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy`,
     );
     expect(commands.join('\n')).not.toContain('docker');
     expect(commands.join('\n')).not.toContain('build.Dockerfile');
     expect(nextSteps).toEqual([]);
+  });
+
+  /**
+   * The invariant that matters: whatever this migration produces, a workspace that
+   * upgrades must end up indistinguishable from one generated fresh — otherwise a
+   * later migration keyed on the generated shape passes over it.
+   */
+  it('should leave a migrated project with the targets a fresh one gets', async () => {
+    await generateOldWorkspace(tree, { name: 'migrated' });
+    await migration(tree);
+
+    const fresh = createTreeUsingTsSolutionSetup();
+    await smithyProjectGenerator(fresh, { name: 'migrated' });
+
+    expect(readJson(tree, 'migrated/project.json').targets).toEqual(
+      readJson(fresh, 'migrated/project.json').targets,
+    );
+  });
+
+  it('should split the server sdk out of the model build', async () => {
+    await generateOldWorkspace(tree);
+
+    await migration(tree);
+
+    const { targets } = readJson(tree, 'test-api/project.json');
+    // The model build no longer touches the SDK...
+    expect(targets.compile.options.commands.join('\n')).not.toContain(
+      'rolldown',
+    );
+    // ...and the SDK is built from what it leaves behind.
+    expect(targets['generate-ssdk'].dependsOn).toEqual(['compile']);
+    expect(targets['generate-ssdk'].options.commands.join('\n')).toContain(
+      'rolldown -c {projectRoot}/ssdk.rolldown.config.mjs',
+    );
+    expect(targets.build.dependsOn).toEqual(['compile', 'generate-ssdk']);
+    // Each target owns its own outputs, so restoring one cannot discard the other
+    expect(targets.compile.outputs).not.toContain(
+      '{workspaceRoot}/dist/{projectRoot}/build',
+    );
+    expect(targets['generate-ssdk'].outputs).toEqual([
+      '{workspaceRoot}/dist/{projectRoot}/build/ssdk',
+    ]);
+  });
+
+  it('should leave a shape library with no server sdk target', async () => {
+    await generateOldWorkspace(tree, { name: 'my-shapes', type: 'shapes' });
+
+    await migration(tree);
+
+    const { targets } = readJson(tree, 'my-shapes/project.json');
+    expect(targets['generate-ssdk']).toBeUndefined();
+    expect(targets.build.dependsOn).toEqual(['compile']);
   });
 
   it('should delete the build.Dockerfile it no longer needs', async () => {

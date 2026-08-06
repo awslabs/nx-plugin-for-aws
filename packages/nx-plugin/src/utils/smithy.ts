@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { SMITHY_VERSIONS, TS_VERSIONS } from './versions';
+import { MISE_VERSIONS, TS_VERSIONS } from './versions';
 
 /**
  * The prefix a target command runs the Smithy CLI through.
@@ -24,4 +24,4 @@ import { SMITHY_VERSIONS, TS_VERSIONS } from './versions';
  * forward.
  */
 export const smithyCliCommand = (): string =>
-  `npx -y mise@${TS_VERSIONS.mise} exec smithy@${SMITHY_VERSIONS.cli} -- smithy`;
+  `npx -y mise@${TS_VERSIONS.mise} exec smithy@${MISE_VERSIONS.smithy} -- smithy`;

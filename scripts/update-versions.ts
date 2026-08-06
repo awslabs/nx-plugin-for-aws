@@ -24,10 +24,11 @@ import { applyGritQL } from '../packages/nx-plugin/src/utils/ast';
 import { isNxPackage } from '../packages/nx-plugin/src/utils/version-upgrade-migration/nx-package-updates';
 import { registerNxPackageUpdates } from '../packages/nx-plugin/src/utils/version-upgrade-migration/register';
 import {
-  type ISmithyVersion,
+  JAVA_ARTIFACTS,
+  JAVA_VERSIONS,
+  MISE_TOOLS,
+  MISE_VERSIONS,
   PY_VERSIONS,
-  SMITHY_MAVEN_ARTIFACTS,
-  SMITHY_VERSIONS,
   TERRAFORM_VERSIONS,
   TS_VERSIONS,
   VENDORED_VERSIONS,
@@ -356,26 +357,29 @@ const updateGitSecrets = async (
 };
 
 /**
- * The latest Smithy CLI version `mise` can install.
+ * The latest version of a tool that `mise` can install.
  *
- * Asked of mise rather than of GitHub, so the version this vends is one the tool
- * that resolves it can actually install — a release mise's registry hasn't picked
- * up yet would leave every Smithy build failing to resolve the CLI.
+ * Asked of mise rather than of the tool's own releases, so the version this vends
+ * is one the tool that resolves it can actually install — a release mise's registry
+ * hasn't picked up yet would leave every build failing to resolve it.
  *
  * Run through `pnpm dlx` rather than added to this repo's dependencies: the `mise`
  * npm package fetches its own binary in a `preinstall` and publishes nothing for
  * Windows, so depending on it would fail `pnpm i` on every Windows CI job. This
  * script only ever runs on Linux.
  */
-const getLatestSmithyCliVersion = (): string | undefined => {
+const getLatestMiseVersion = (tool: string): string | undefined => {
   try {
-    const latest = execSync(`pnpm dlx mise@${TS_VERSIONS.mise} latest smithy`, {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
+    const latest = execSync(
+      `pnpm dlx mise@${TS_VERSIONS.mise} latest ${tool}`,
+      {
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      },
+    ).trim();
     return /^\d+\.\d+\.\d+$/.test(latest) ? latest : undefined;
   } catch (error) {
-    console.warn('Could not resolve the latest Smithy CLI via mise:', error);
+    console.warn(`Could not resolve the latest ${tool} via mise:`, error);
     return undefined;
   }
 };
@@ -409,76 +413,25 @@ const getLatestMavenVersion = async (
   return release ?? versions.at(-1);
 };
 
-/**
- * Move the Smithy CLI and the Maven artifacts a generated `smithy-build.json`
- * resolves onto their latest releases.
- *
- * The CLI and the `software.amazon.smithy:*` artifacts are released in lockstep
- * and must stay on the same version — the CLI cannot load a model built against a
- * newer `smithy-model` than it knows. So the CLI version mise offers is what those
- * artifacts take, and an artifact missing that release holds the whole set back
- * rather than splitting it. The TypeScript codegen artifact versions on its own.
- */
-const updateSmithyVersions = async (tree: FsTree): Promise<VersionChange[]> => {
-  const changes: VersionChange[] = [];
-  const versionsFilePath = 'packages/nx-plugin/src/utils/versions.ts';
-
-  const rewrite = async (key: ISmithyVersion, from: string, to: string) => {
-    if (from === to) {
-      return;
-    }
-    try {
-      await applyGritQL(
-        tree,
-        versionsFilePath,
-        `\`'${key}': '${from}'\` => \`'${key}': '${to}'\``,
-      );
-      changes.push({ name: key, oldVersion: from, newVersion: to });
-      console.log(`Updated ${key} to ${to}`);
-    } catch (error) {
-      console.warn(`Could not update ${key}:`, error);
-    }
-  };
-
-  const latestCli = getLatestSmithyCliVersion();
-  const smithyArtifacts = SMITHY_MAVEN_ARTIFACTS.filter((artifact) =>
-    artifact.startsWith('software.amazon.smithy:'),
+/** The latest release of every Maven coordinate in {@link JAVA_VERSIONS}. */
+const getUpdatedJavaVersions = async (): Promise<Record<string, string>> =>
+  Object.fromEntries(
+    await Promise.all(
+      JAVA_ARTIFACTS.map(async (artifact) => [
+        artifact,
+        (await getLatestMavenVersion(artifact)) ?? JAVA_VERSIONS[artifact],
+      ]),
+    ),
   );
 
-  if (latestCli) {
-    // Only move the set once every artifact has published the CLI's version.
-    const published = await Promise.all(
-      smithyArtifacts.map(async (artifact) => {
-        const response = await fetch(
-          `https://repo1.maven.org/maven2/${artifact
-            .split(':')[0]
-            .replace(/\./g, '/')}/${artifact.split(':')[1]}/${latestCli}/`,
-        );
-        return response.ok;
-      }),
-    );
-    if (published.every(Boolean)) {
-      await rewrite('cli', SMITHY_VERSIONS.cli, latestCli);
-      for (const artifact of smithyArtifacts) {
-        await rewrite(artifact, SMITHY_VERSIONS[artifact], latestCli);
-      }
-    } else {
-      console.log(
-        `Holding the Smithy set at ${SMITHY_VERSIONS.cli}: not every artifact has published ${latestCli}`,
-      );
-    }
-  }
-
-  // The TypeScript codegen artifact tracks its own releases.
-  const codegen =
-    'software.amazon.smithy.typescript:smithy-aws-typescript-codegen';
-  const latestCodegen = await getLatestMavenVersion(codegen);
-  if (latestCodegen) {
-    await rewrite(codegen, SMITHY_VERSIONS[codegen], latestCodegen);
-  }
-
-  return changes;
-};
+/** The latest version mise can install of every tool in {@link MISE_VERSIONS}. */
+const getUpdatedMiseVersions = (): Record<string, string> =>
+  Object.fromEntries(
+    MISE_TOOLS.map((tool) => [
+      tool,
+      getLatestMiseVersion(tool) ?? MISE_VERSIONS[tool],
+    ]),
+  );
 
 const main = async () => {
   // Parse command line arguments
@@ -532,9 +485,29 @@ const main = async () => {
       'TERRAFORM_VERSIONS',
     );
 
-    // Move the Smithy CLI and the Maven artifacts a generated smithy-build.json
-    // resolves. Neither appears in any manifest, so nothing else reaches them.
-    const smithyChanges = await updateSmithyVersions(tree);
+    // Get updated Java versions from Maven Central
+    const updatedJavaVersions = await getUpdatedJavaVersions();
+
+    // Apply updated Java versions to the versions file
+    const javaChanges = await applyUpdatedVersions(
+      tree,
+      JAVA_VERSIONS,
+      updatedJavaVersions,
+      'packages/nx-plugin/src/utils/versions.ts',
+      'JAVA_VERSIONS',
+    );
+
+    // Get the latest versions of the tools mise resolves
+    const updatedMiseVersions = getUpdatedMiseVersions();
+
+    // Apply updated mise tool versions to the versions file
+    const miseChanges = await applyUpdatedVersions(
+      tree,
+      MISE_VERSIONS,
+      updatedMiseVersions,
+      'packages/nx-plugin/src/utils/versions.ts',
+      'MISE_VERSIONS',
+    );
 
     // Update vendored git-secrets
     const gitSecretsChange = await updateGitSecrets(tree);
@@ -566,7 +539,8 @@ const main = async () => {
       { title: 'TypeScript Dependencies', changes: tsChanges },
       { title: 'Python Dependencies', changes: pyChanges },
       { title: 'Terraform Providers', changes: terraformChanges },
-      { title: 'Smithy', changes: smithyChanges },
+      { title: 'Java Dependencies', changes: javaChanges },
+      { title: 'mise Tools', changes: miseChanges },
       ...(vendoredChanges.length > 0
         ? [{ title: 'Vendored Tools', changes: vendoredChanges }]
         : []),

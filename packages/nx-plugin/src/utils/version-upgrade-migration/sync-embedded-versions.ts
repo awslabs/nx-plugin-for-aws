@@ -9,9 +9,10 @@ import {
   BASE_IMAGES,
   CONTAINER_REPOSITORIES,
   CONTAINER_VERSIONS,
+  JAVA_ARTIFACTS,
+  JAVA_VERSIONS,
+  MISE_VERSIONS,
   PY_VERSIONS,
-  SMITHY_MAVEN_ARTIFACTS,
-  SMITHY_VERSIONS,
   TS_VERSIONS,
 } from '../versions';
 import { type OwnedDependencies, ownedForFile } from './owned-dependencies';
@@ -378,7 +379,7 @@ const syncTargetToolPins = async (tree: Tree): Promise<string[]> => {
     // mise with `npx` — so this command is the only place either version sits.
     {
       pattern: `exec smithy@([^${VERSION_TERMINATORS}']+)`,
-      vended: SMITHY_VERSIONS.cli,
+      vended: MISE_VERSIONS.smithy,
     },
     {
       pattern: `npx -y mise@([^${VERSION_TERMINATORS}']+)`,
@@ -424,10 +425,10 @@ const syncSmithyMavenPins = async (tree: Tree): Promise<string[]> => {
     }
   });
 
-  const pins: EmbeddedPin[] = SMITHY_MAVEN_ARTIFACTS.map((artifact) => ({
+  const pins: EmbeddedPin[] = JAVA_ARTIFACTS.map((artifact) => ({
     // A coordinate is a JSON string here, so a quote ends the version.
     pattern: `${escapeRegExp(artifact)}:([^${VERSION_TERMINATORS}']+)`,
-    vended: SMITHY_VERSIONS[artifact],
+    vended: JAVA_VERSIONS[artifact],
   }));
 
   const skipped: string[] = [];
