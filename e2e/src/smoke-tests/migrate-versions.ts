@@ -35,6 +35,19 @@ export const MIGRATE_PACKAGES = [
 ] as const;
 
 /**
+ * Released versions the migrate test must not start from, even though a `v*` tag
+ * exists for them. A release whose publish partially failed leaves some
+ * `MIGRATE_PACKAGES` unpublished on npm, so the "before" workspace can't be
+ * mirrored and the hop can't run. Skipping keeps the lane green on the releases
+ * that did publish cleanly.
+ *
+ * `1.0.0-rc.61` published `@aws/nx-plugin` and `@aws/create-nx-workspace` but its
+ * `@aws/nx-plugin-mcp` publish failed on a Sigstore transparency-log conflict, so
+ * `@aws/nx-plugin-mcp@1.0.0-rc.61` never reached npm.
+ */
+export const MIGRATE_SKIP_START_VERSIONS = new Set<string>(['1.0.0-rc.61']);
+
+/**
  * Number of previous releases to migrate from, newest first — so a migration is
  * exercised against every workspace shape still in the supported range, not just
  * the one a user upgrading today happens to start from. Override with
@@ -92,7 +105,9 @@ export const migrateStartVersions = (): string[] => {
   const count = Number(
     process.env.NX_E2E_MIGRATE_VERSIONS ?? DEFAULT_START_VERSION_COUNT,
   );
-  const released = releasedVersionsDescending();
+  const released = releasedVersionsDescending().filter(
+    (version) => !MIGRATE_SKIP_START_VERSIONS.has(version),
+  );
   if (released.length === 0) {
     throw new Error(
       'No release tags found — the migrate smoke test cannot pick a start version. Fetch tags (git fetch --tags) and retry.',
@@ -245,20 +260,35 @@ export const publishForMigrateSmokeTest = (localRegistry: string) => {
     // entry wins over `--registry`, so a plain `--registry` fetch would ask
     // verdaccio for a version only npmjs has.
     for (const startVersion of migrateStartVersions()) {
+      // Mirror each package independently so one that a release failed to
+      // publish (a partial release leaving a sibling behind on npm) skips only
+      // that package rather than aborting the whole setup and failing every hop.
+      // A start version that would leave a package behind should be listed in
+      // MIGRATE_SKIP_START_VERSIONS so the hop isn't attempted at all.
+      const skipped: string[] = [];
       for (const pkg of MIGRATE_PACKAGES) {
-        const packed = JSON.parse(
+        try {
+          const packed = JSON.parse(
+            execSync(
+              `npm pack ${pkg}@${startVersion} --@aws:registry=${PUBLIC_REGISTRY} --json`,
+              { cwd: stageDir, encoding: 'utf-8', env: process.env },
+            ),
+          );
           execSync(
-            `npm pack ${pkg}@${startVersion} --@aws:registry=${PUBLIC_REGISTRY} --json`,
-            { cwd: stageDir, encoding: 'utf-8', env: process.env },
-          ),
-        );
-        execSync(
-          `npm publish ${packed[0].filename} --tag ${MIGRATE_START_DIST_TAG} --registry ${localRegistry}`,
-          { env: process.env, cwd: stageDir },
-        );
+            `npm publish ${packed[0].filename} --tag ${MIGRATE_START_DIST_TAG} --registry ${localRegistry}`,
+            { env: process.env, cwd: stageDir },
+          );
+        } catch (err) {
+          skipped.push(pkg);
+          console.warn(
+            `Could not mirror ${pkg}@${startVersion} into the local registry — skipping it: ${err}`,
+          );
+        }
       }
       console.info(
-        `Mirrored @aws/* ${startVersion} into the local registry for the migrate smoke test`,
+        `Mirrored @aws/* ${startVersion} into the local registry for the migrate smoke test${
+          skipped.length > 0 ? ` (skipped: ${skipped.join(', ')})` : ''
+        }`,
       );
     }
   } catch (err) {

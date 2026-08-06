@@ -344,8 +344,24 @@ jobs:
 
           pnpm nx release --skip-publish "${RELEASE_ARGS[@]}"
           # Publish the release candidate to "latest" so the default install
-          # path resolves to it.
-          pnpm nx release publish --tag latest
+          # path resolves to it. Wrapped so a retry-safe npm error (a Sigstore
+          # transparency-log conflict, an already-published version) doesn't fail
+          # a release whose packages did go out, and so a package a previous
+          # release left unpublished is backfilled from its tag.
+          pnpm exec tsx ./scripts/release-publish.ts
+      # Fill in any package a recent release failed to publish, building each
+      # from its git tag (so no new version is cut from a stale tree). Runs on a
+      # push whenever the Release step above did not — a commit that doesn't cut a
+      # release (e.g. `ci:`/`docs:`, so `skip_release`), or a rerun of an older
+      # commit's CI once HEAD has moved on. Either way a partial release is
+      # repaired without waiting for the next feat/fix. The Release step already
+      # backfills, so this is its complement, never a duplicate.
+      - name: Backfill missing releases
+        if: ${{ github.event_name == 'push' && (steps.should_skip_release.outputs.skip_release == 'true' || steps.git_remote.outputs.latest_commit != github.sha) }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN }}
+          HUSKY: "0"
+        run: pnpm exec tsx ./scripts/release-publish.ts --backfill-only
   deploy_docs:
     name: Deploy Docs
     runs-on: ubuntu-latest
