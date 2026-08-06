@@ -14,27 +14,22 @@ import { MISE_VERSIONS, TS_VERSIONS } from '../../../utils/versions';
 import migration from './migration';
 
 /**
- * The `build.Dockerfile` a v1.0.0-rc.58 service project holds, and the
- * `docker build` its compile target ran.
+ * The `build.Dockerfile` a legacy container-building service project holds, and
+ * the `docker build` its compile target ran.
  *
- * Snapshots of that release rather than the generator's output: the generator now
- * vends neither, so there is nothing to render. This migration only ever runs
- * against a workspace still on the container build, whose files are fixed.
+ * A snapshot rather than the generator's output: the generator now vends neither,
+ * so there is nothing to render. This migration only ever runs against a workspace
+ * still on the container build, whose files are fixed.
  */
-const RC58_BUILD_DOCKERFILE = readFileSync(
-  join(
-    import.meta.dirname,
-    '..',
-    'smithy-ssdk-bundle-pins',
-    'rc57-service.Dockerfile.fixture',
-  ),
+const LEGACY_BUILD_DOCKERFILE = readFileSync(
+  join(import.meta.dirname, 'legacy-service.Dockerfile.fixture'),
   'utf-8',
 );
 
 const dockerBuildCommand = (engine: 'docker' | 'finch' = 'docker') =>
   `${engine} build -f {projectRoot}/build.Dockerfile --build-context workspace=. --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}`;
 
-const RC58_COMPILE_COMMANDS = [
+const LEGACY_COMPILE_COMMANDS = [
   'rimraf dist/{projectRoot}/build',
   'make-dir dist/{projectRoot}/build',
   dockerBuildCommand(),
@@ -57,12 +52,12 @@ const generateOldWorkspace = async (
   const { name, type = 'service', engine = 'docker' } = options;
   await smithyProjectGenerator(tree, { name, type });
 
-  tree.write(`${name}/build.Dockerfile`, RC58_BUILD_DOCKERFILE);
+  tree.write(`${name}/build.Dockerfile`, LEGACY_BUILD_DOCKERFILE);
   tree.delete(`${name}/ssdk.rolldown.config.mjs`);
 
   const projectJson = readJson(tree, `${name}/project.json`);
   projectJson.targets.compile.options.commands = [
-    ...RC58_COMPILE_COMMANDS.slice(0, -1),
+    ...LEGACY_COMPILE_COMMANDS.slice(0, -1),
     dockerBuildCommand(engine),
   ];
   // The image build published everything, so there was one target writing one
@@ -257,7 +252,7 @@ describe('smithy-build-without-docker migration', () => {
     await generateOldWorkspace(tree, { name: 'test-api' });
     tree.write(
       'test-api/build.Dockerfile',
-      `${RC58_BUILD_DOCKERFILE}\nCOPY --from=workspace dist/packages/my-shapes/build/model/model.json deps/my-shapes.json\n`,
+      `${LEGACY_BUILD_DOCKERFILE}\nCOPY --from=workspace dist/packages/my-shapes/build/model/model.json deps/my-shapes.json\n`,
     );
 
     await migration(tree);
@@ -275,7 +270,7 @@ describe('smithy-build-without-docker migration', () => {
     tree.write('test-api/smithy-build.json', JSON.stringify(smithyBuild));
     tree.write(
       'test-api/build.Dockerfile',
-      `${RC58_BUILD_DOCKERFILE}\nCOPY --from=workspace dist/packages/my-shapes/build/model/model.json deps/my-shapes.json\n`,
+      `${LEGACY_BUILD_DOCKERFILE}\nCOPY --from=workspace dist/packages/my-shapes/build/model/model.json deps/my-shapes.json\n`,
     );
 
     await migration(tree);

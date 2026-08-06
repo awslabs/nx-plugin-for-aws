@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { MISE_VERSIONS, TS_VERSIONS } from './versions';
+import { javaMavenDependency, MISE_VERSIONS, TS_VERSIONS } from './versions';
 
 /**
  * The prefix a target command runs the Smithy CLI through.
@@ -25,3 +25,25 @@ import { MISE_VERSIONS, TS_VERSIONS } from './versions';
  */
 export const smithyCliCommand = (): string =>
   `npx -y mise@${TS_VERSIONS.mise} exec smithy@${MISE_VERSIONS.smithy} -- smithy`;
+
+/**
+ * Substitution variables exposing the Smithy Maven pins to the generated
+ * `smithy-build.json` templates.
+ */
+export const smithyMavenVersions = () => ({
+  smithyModelDependency: javaMavenDependency(
+    'software.amazon.smithy:smithy-model',
+  ),
+  smithyAwsTraitsDependency: javaMavenDependency(
+    'software.amazon.smithy:smithy-aws-traits',
+  ),
+  smithyValidationModelDependency: javaMavenDependency(
+    'software.amazon.smithy:smithy-validation-model',
+  ),
+  smithyOpenApiDependency: javaMavenDependency(
+    'software.amazon.smithy:smithy-openapi',
+  ),
+  smithyTypeScriptCodegenDependency: javaMavenDependency(
+    'software.amazon.smithy.typescript:smithy-aws-typescript-codegen',
+  ),
+});

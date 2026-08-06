@@ -276,14 +276,8 @@ export const VENDORED_VERSIONS = {
 /**
  * Versions of Java dependencies added by generators, keyed by Maven coordinate.
  *
- * Every entry is resolved from Maven Central by the version update, and lands in a
- * generated `smithy-build.json` as `<group>:<artifact>:<version>`.
- *
- * The TypeScript codegen artifact sits behind its latest release: 0.51.0 generates
- * a server importing `ServerInterceptor` from `@aws-smithy/server-common`, which no
- * published release of that package exports, so the generated SDK fails to bundle.
- * Nothing pins it back — the version update proposes the latest and the e2e tests
- * catch a release that doesn't build.
+ * Every entry is resolved from Maven Central by the version update and named
+ * `<group>:<artifact>:<version>` where a generator writes it.
  */
 export const JAVA_VERSIONS = {
   'software.amazon.smithy:smithy-model': '1.72.1',
@@ -297,7 +291,7 @@ export type IJavaVersion = keyof typeof JAVA_VERSIONS;
 /** The Maven coordinates the version update resolves, in declaration order. */
 export const JAVA_ARTIFACTS = Object.keys(JAVA_VERSIONS) as IJavaVersion[];
 
-/** A Maven coordinate as a `smithy-build.json` dependency names it. */
+/** A Maven coordinate as a dependency names it: `<group>:<artifact>:<version>`. */
 export const javaMavenDependency = (artifact: IJavaVersion): string =>
   `${artifact}:${JAVA_VERSIONS[artifact]}`;
 
@@ -315,28 +309,6 @@ export type IMiseVersion = keyof typeof MISE_VERSIONS;
 
 /** The tools the version update resolves through mise, in declaration order. */
 export const MISE_TOOLS = Object.keys(MISE_VERSIONS) as IMiseVersion[];
-
-/**
- * Substitution variables exposing the Smithy Maven pins to the generated
- * `smithy-build.json` templates.
- */
-export const smithyMavenVersions = () => ({
-  smithyModelDependency: javaMavenDependency(
-    'software.amazon.smithy:smithy-model',
-  ),
-  smithyAwsTraitsDependency: javaMavenDependency(
-    'software.amazon.smithy:smithy-aws-traits',
-  ),
-  smithyValidationModelDependency: javaMavenDependency(
-    'software.amazon.smithy:smithy-validation-model',
-  ),
-  smithyOpenApiDependency: javaMavenDependency(
-    'software.amazon.smithy:smithy-openapi',
-  ),
-  smithyTypeScriptCodegenDependency: javaMavenDependency(
-    'software.amazon.smithy.typescript:smithy-aws-typescript-codegen',
-  ),
-});
 
 /**
  * Base container images used by generated Dockerfiles. Pinned exactly so

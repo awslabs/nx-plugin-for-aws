@@ -260,4 +260,26 @@ describe('the real smithy project pins', () => {
       `software.amazon.smithy:smithy-model:${ahead}`,
     );
   });
+
+  // Scoped by the recorded generator id, so a smithy-build.json a user wrote in a
+  // project we didn't generate keeps the coordinates they chose.
+  it('should leave a smithy-build.json outside a generated project alone', async () => {
+    const tree: Tree = createTreeUsingTsSolutionSetup();
+    addProjectConfiguration(tree, 'theirs', { root: 'packages/theirs' });
+    const path = 'packages/theirs/smithy-build.json';
+    tree.write(
+      path,
+      JSON.stringify({
+        version: '1.0',
+        maven: { dependencies: ['software.amazon.smithy:smithy-model:1.61.0'] },
+      }),
+    );
+
+    await syncVendedVersions(tree);
+
+    // Their coordinate keeps the version they chose, not the one this release vends.
+    expect(tree.read(path, 'utf-8')).toContain(
+      'software.amazon.smithy:smithy-model:1.61.0',
+    );
+  });
 });

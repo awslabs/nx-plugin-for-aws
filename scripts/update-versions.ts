@@ -24,6 +24,8 @@ import { applyGritQL } from '../packages/nx-plugin/src/utils/ast';
 import { isNxPackage } from '../packages/nx-plugin/src/utils/version-upgrade-migration/nx-package-updates';
 import { registerNxPackageUpdates } from '../packages/nx-plugin/src/utils/version-upgrade-migration/register';
 import {
+  type IJavaVersion,
+  type IMiseVersion,
   JAVA_ARTIFACTS,
   JAVA_VERSIONS,
   MISE_TOOLS,
@@ -368,7 +370,7 @@ const updateGitSecrets = async (
  * Windows, so depending on it would fail `pnpm i` on every Windows CI job. This
  * script only ever runs on Linux.
  */
-const getLatestMiseVersion = (tool: string): string | undefined => {
+const getLatestMiseVersion = (tool: IMiseVersion): string | undefined => {
   try {
     const latest = execSync(
       `pnpm dlx mise@${TS_VERSIONS.mise} latest ${tool}`,
@@ -393,7 +395,7 @@ const getLatestMiseVersion = (tool: string): string | undefined => {
  * silently hold these pins back.
  */
 const getLatestMavenVersion = async (
-  coordinate: string,
+  coordinate: IJavaVersion,
 ): Promise<string | undefined> => {
   const [group, artifact] = coordinate.split(':');
   const response = await fetch(

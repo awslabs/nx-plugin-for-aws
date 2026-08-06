@@ -2,8 +2,13 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import type { Tree } from '@nx/devkit';
-import { visitNotIgnoredFiles } from '@nx/devkit';
+import type { ProjectConfiguration, Tree } from '@nx/devkit';
+import {
+  getProjects,
+  joinPathFragments,
+  visitNotIgnoredFiles,
+} from '@nx/devkit';
+import { SMITHY_PROJECT_GENERATOR_INFO } from '../../smithy/project/generator';
 import { applyGritQL } from '../ast';
 import {
   BASE_IMAGES,
@@ -413,17 +418,24 @@ const syncTargetToolPins = async (tree: Tree): Promise<string[]> => {
  * is matched by its `group:artifact` prefix so only the version is rewritten,
  * leaving any coordinate the user added alone.
  *
- * Unscoped like the target tool pins: nothing is installed into the project, so
- * there is no dependency for a generator to own.
+ * Scoped to the projects `smithy#project` generated: a `smithy-build.json` a user
+ * wrote themselves keeps the versions they chose.
  */
 const syncSmithyMavenPins = async (tree: Tree): Promise<string[]> => {
-  const smithyBuilds: string[] = [];
+  const isGeneratedSmithyProject = (project: ProjectConfiguration): boolean =>
+    (project.metadata as { generator?: string } | undefined)?.generator ===
+    SMITHY_PROJECT_GENERATOR_INFO.id;
 
-  visitNotIgnoredFiles(tree, '.', (path) => {
-    if (path.endsWith('smithy-build.json')) {
+  const smithyBuilds: string[] = [];
+  for (const [, project] of getProjects(tree)) {
+    if (!isGeneratedSmithyProject(project)) {
+      continue;
+    }
+    const path = joinPathFragments(project.root, 'smithy-build.json');
+    if (tree.exists(path)) {
       smithyBuilds.push(path);
     }
-  });
+  }
 
   const pins: EmbeddedPin[] = JAVA_ARTIFACTS.map((artifact) => ({
     // A coordinate is a JSON string here, so a quote ends the version.

@@ -29,8 +29,7 @@ import {
   projectExists,
 } from '../../utils/nx';
 import { getRelativePathToRootByDirectory } from '../../utils/paths';
-import { smithyCliCommand } from '../../utils/smithy';
-import { smithyMavenVersions } from '../../utils/versions';
+import { smithyCliCommand, smithyMavenVersions } from '../../utils/smithy';
 import type { SmithyProjectGeneratorSchema } from './schema';
 
 /** The metadata this generator records, which its predicates read. */
