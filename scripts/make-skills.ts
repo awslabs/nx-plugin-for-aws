@@ -21,16 +21,23 @@ interface GeneratorsJsonSchema {
 const ROOT = join(__dirname, '..');
 
 /**
- * Read required-prerequisites.mdx and strip frontmatter
+ * Read a prerequisites snippet and strip its frontmatter, so its bullets can be
+ * inlined into the generated skill.
  */
-const getPrerequisites = (): string => {
+const readPrerequisites = (snippet: string): string => {
   const content = readFileSync(
-    join(ROOT, 'docs/src/content/docs/en/snippets/required-prerequisites.mdx'),
+    join(ROOT, `docs/src/content/docs/en/snippets/${snippet}.mdx`),
     'utf-8',
   );
   // Remove YAML frontmatter (--- ... ---)
   return content.replace(/^---[\s\S]*?---\n/, '').trim();
 };
+
+const getRequiredPrerequisites = (): string =>
+  readPrerequisites('required-prerequisites');
+
+const getRecommendedPrerequisites = (): string =>
+  readPrerequisites('recommended-prerequisites');
 
 /**
  * Build the create workspace command using pnpm as the default
@@ -86,7 +93,8 @@ const tree = new FsTree(ROOT, false);
 const templateDir = joinPathFragments(__dirname, 'skill-templates');
 
 const sharedVariables = {
-  prerequisites: getPrerequisites(),
+  requiredPrerequisites: getRequiredPrerequisites(),
+  recommendedPrerequisites: getRecommendedPrerequisites(),
   createNxWorkspaceCommand: getCreateNxWorkspaceCommand(),
   generators: getGeneratorsTable(),
 };
