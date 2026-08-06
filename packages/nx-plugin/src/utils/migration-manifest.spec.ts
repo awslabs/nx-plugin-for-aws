@@ -95,6 +95,19 @@ describe('assembleMigrations', () => {
     ]);
   });
 
+  it('should order a release`s migrations by their folder prefix, not their name', () => {
+    // Committed bravo-then-alpha, so backfill numbered them 0001/0002 — the
+    // prefix, not the name, is what sorts them into commit order.
+    const { generators } = assembleMigrations('@aws/nx-plugin', [
+      migration({ dir: 'v1.2.3', name: '0002-alpha' }),
+      migration({ dir: 'v1.2.3', name: '0001-bravo' }),
+    ]);
+    const versioned = Object.keys(generators ?? {}).filter((key) =>
+      key.startsWith('v1.2.3-'),
+    );
+    expect(versioned).toEqual(['v1.2.3-0001-bravo', 'v1.2.3-0002-alpha']);
+  });
+
   it('should include packageJsonUpdates only when present', () => {
     expect(
       assembleMigrations('@aws/nx-plugin', []).packageJsonUpdates,
