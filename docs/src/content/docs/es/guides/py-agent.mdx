@@ -129,8 +129,8 @@ Para desplegar tu Agente, se generan los siguientes archivos:
 </Infrastructure>
 </OptionFilter>
 
-<OptionFilter when={{ infra: 'none' }} description="No infrastructure is vended for infra=None">
-Si seleccionaste `None` para `infra`, no se generan constructos CDK ni módulos Terraform — el Agente solo puede ejecutarse localmente. La opción `auth` se ignora en este modo ya que no hay un endpoint alojado para autenticar.
+<OptionFilter when={{ infra: 'none' }} description="No infrastructure is vended for infra=none">
+Si seleccionaste `none` para `infra`, no se generan constructos CDK ni módulos Terraform — el Agente solo puede ejecutarse localmente. La opción `auth` se ignora en este modo ya que no hay un endpoint alojado para autenticar.
 </OptionFilter>
 
 #### Arquitectura
@@ -364,10 +364,10 @@ Existe una [solicitud de característica abierta para soporte nativo en FastAPI]
 
 El generador incluye una dependencia del [SDK Python de Bedrock AgentCore](https://github.com/aws/bedrock-agentcore-sdk-python) para las constantes `PingStatus`. Si lo deseas, es sencillo usar `BedrockAgentCoreApp` en lugar de FastAPI, sin embargo ten en cuenta que se pierde la seguridad de tipos.
 
-Puedes encontrar detalles sobre las capacidades del SDK en la [documentación](https://aws.github.io/bedrock-agentcore-starter-toolkit/user-guide/runtime/quickstart.html).
+Puedes encontrar más detalles sobre las capacidades del SDK en la [documentación aquí](https://aws.github.io/bedrock-agentcore-starter-toolkit/user-guide/runtime/quickstart.html).
 
 :::note[Infraestructura como código]
-Como el generador provee infraestructura CDK/Terraform para desplegar tu agente, no necesitas usar el `bedrock-agentcore-starter-toolkit` mencionado en los docs.
+Dado que el generador provee infraestructura CDK o Terraform que gestiona el despliegue de tu agente, no necesitas utilizar el `bedrock-agentcore-starter-toolkit` que mencionan los documentos para desplegar tu agente.
 :::
 
 <OptionFilter when={{ protocol: 'a2a' }} description="A2A server details">
@@ -383,8 +383,8 @@ La mayoría de los usuarios no necesitarán modificar este archivo; edita `agent
 
 El `main.py` generado expone un único endpoint POST que transmite eventos de [AG-UI](https://docs.ag-ui.com/) mediante Server-Sent Events (SSE), así como `/ping` para la verificación de salud del runtime de AgentCore. La configuración depende del framework:
 
-- **Strands**: envuelve tu `Agent` en un `ag_ui_strands.StrandsAgent` y crea la aplicación FastAPI mediante `create_strands_app()`.
-- **LangChain**: envuelve el grafo compilado en un `ag_ui_langgraph.LangGraphAgent` y lo sirve desde un bucle FastAPI `/invocations` hecho a mano.
+- **Strands**: envuelve tu `Agent` en un `ag_ui_strands.StrandsAgent`, construido dentro de un manejador `lifespan` de FastAPI (para que la construcción ocurra al inicio del contenedor/sesión en lugar de en el momento de importación), y servido desde un bucle FastAPI `/invocations` hecho a mano.
+- **LangChain**: envuelve el grafo compilado en un `ag_ui_langgraph.LangGraphAgent`, construido de la misma manera dentro de `lifespan`, y servido desde un bucle FastAPI `/invocations` hecho a mano.
 
 La mayoría de los usuarios no necesitarán modificar este archivo — edita `agent.py` para cambiar herramientas o el prompt del sistema.
 
@@ -430,7 +430,7 @@ Para agentes **HTTP**, el script de chat usa un cliente TypeScript con tipos gen
 Cuando personalizas la forma de entrada del agente (por ejemplo, añades nuevos campos a `InvokeInput`), actualiza `chat.ts` para pasar los nuevos campos al invocar el agente y el resto funciona automáticamente.
 
 <OptionFilter when={{ infra: 'agentcore' }} description="Deployed agent chat details">
-#### Chat with your deployed agent
+#### Chatear con tu agente desplegado
 
 Para chatear con tu agente desplegado en Bedrock AgentCore, establece la variable de entorno `RUNTIME_CONFIG_APP_ID` al id de aplicación de AppConfig del despliegue (salida como `RuntimeConfigApplicationId` por el stack desplegado). El script de chat resuelve el ARN de runtime de tu agente desde la configuración de runtime y se conecta al endpoint desplegado:
 
@@ -468,23 +468,24 @@ aws cognito-idp admin-initiate-auth \
 
 ### Targets de Bundle y Docker
 
-Para construir tu Agente para Bedrock AgentCore Runtime, se añade un target `bundle` que:
-- Exporta dependencias Python a `requirements.txt` usando `uv export`
-- Instala dependencias para la plataforma objetivo (`aarch64-manylinux_2_28`) con `uv pip install`
+Para construir tu Agente para Bedrock AgentCore Runtime, se añade un target `bundle` a tu proyecto, que:
+
+- Exporta tus dependencias Python a un archivo `requirements.txt` usando `uv export`
+- Instala dependencias para la plataforma objetivo (`aarch64-manylinux_2_28`) usando `uv pip install`
 
 También se añade un target `docker` específico de tu Agente, que copia el `Dockerfile` y los artefactos empaquetados en un directorio de contexto docker. Esto co-localiza el `Dockerfile` con la salida construida, permitiendo a CDK construir la imagen Docker directamente usando `AgentRuntimeArtifact.fromAsset`.
 
-### Image Scanning
+### Escaneo de Imagen
 
 <Snippet name="trivy-image-scan" parentHeading="Image Scanning" />
 
 ### Observabilidad
 
-Tu agente se configura automáticamente con observabilidad usando [AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT), mediante auto-instrumentación en tu `Dockerfile`.
+Tu agente se configura automáticamente con observabilidad usando el [AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT), configurando auto-instrumentación en tu `Dockerfile`.
 
-Puedes encontrar trazas en CloudWatch seleccionando "GenAI Observability". Para ver trazas, habilita [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html).
+Puedes encontrar trazas en la Consola AWS de CloudWatch, seleccionando "GenAI Observability" en el menú. Ten en cuenta que para que las trazas se completen necesitarás habilitar [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html).
 
-Para más detalles, consulta la [documentación de observabilidad de AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html).
+Para más detalles, consulta la [documentación de AgentCore sobre observabilidad](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html).
 </OptionFilter>
 
 ## Invocando tu Agente

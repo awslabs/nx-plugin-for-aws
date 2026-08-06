@@ -609,6 +609,7 @@ exports[`py#agent generator > langchain framework > should match snapshot for la
 "import logging
 import time
 import uuid
+from contextlib import asynccontextmanager
 
 from ag_ui.core import EventType, RunAgentInput, RunErrorEvent
 from ag_ui.encoder import EventEncoder
@@ -625,13 +626,16 @@ logging.basicConfig(level=logging.INFO)
 
 SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
 
-_graph = get_agent()
 
-agui_agent = LangGraphAgent(
-    name="SnapshotAgent",
-    graph=_graph,
-    description="A LangChain/LangGraph Agent exposed via the AG-UI protocol.",
-)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    graph = get_agent()
+    app.state.agui_agent = LangGraphAgent(
+        name="SnapshotAgent",
+        graph=graph,
+        description="A LangChain/LangGraph Agent exposed via the AG-UI protocol.",
+    )
+    yield
 
 
 class _SessionIdMiddleware(BaseHTTPMiddleware):
@@ -643,7 +647,7 @@ class _SessionIdMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
 
-app = FastAPI(title="SnapshotAgent")
+app = FastAPI(title="SnapshotAgent", lifespan=lifespan)
 # Allow browser-based AG-UI clients (e.g. a connected React website) to call
 # this agent cross-origin, including the CORS preflight.
 app.add_middleware(
@@ -682,7 +686,7 @@ async def invocations(request: Request):
         # Re-bind the session: the streaming body runs outside the middleware.
         with session_id_context(session_id or str(uuid.uuid4())):
             try:
-                async for event in agui_agent.run(input_data):
+                async for event in request.app.state.agui_agent.run(input_data):
                     yield encoder.encode(event)
             except Exception as e:
                 yield encoder.encode(
