@@ -113,9 +113,15 @@ export const readShippedMigrationVersions = (
 /**
  * Rank a migration ships under, lower running first. Unranked entries (no commit
  * history for them, or an every-migration entry with no folder) sort after every
- * ranked one, so a ranked migration always precedes an unranked peer.
+ * ranked one, so a ranked migration always precedes an unranked peer. Shared by
+ * stamping and backfill so the two order unranked entries the same way.
  */
 const UNRANKED = Number.MAX_SAFE_INTEGER;
+
+/** Commit-rank comparator, ordering unranked entries last (see `UNRANKED`). */
+const byCommitRank =
+  (commitRanks: Record<string, number>) => (keyA: string, keyB: string) =>
+    (commitRanks[keyA] ?? UNRANKED) - (commitRanks[keyB] ?? UNRANKED);
 
 /**
  * Return a copy of the migrations collection with a `version` stamped onto
@@ -158,9 +164,7 @@ export const stampMigrationVersions = (
         }
         // Equal ranks (same commit, or both unranked) fall through to a stable
         // sort, keeping the manifest's key order the assembly already imposed.
-        return (
-          (commitRanks[keyA] ?? UNRANKED) - (commitRanks[keyB] ?? UNRANKED)
-        );
+        return byCommitRank(commitRanks)(keyA, keyB);
       })
       .map(([name, entry]) => {
         // Source-only marker, stripped from what nx reads.
@@ -292,9 +296,7 @@ export const backfillMigrationVersions = (
   }
   for (const keys of byVersion.values()) {
     const ordered = keys.sort((a, b) => {
-      const rankDiff =
-        (commitRanks[a] ?? Number.MAX_SAFE_INTEGER) -
-        (commitRanks[b] ?? Number.MAX_SAFE_INTEGER);
+      const rankDiff = byCommitRank(commitRanks)(a, b);
       return rankDiff !== 0
         ? rankDiff
         : latestKeyName(a).localeCompare(latestKeyName(b));
