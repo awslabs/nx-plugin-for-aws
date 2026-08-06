@@ -224,6 +224,86 @@ describe('migration versions', () => {
       ]);
     });
 
+    it('should order migrations sharing a version by commit rank', () => {
+      const stamped = stampMigrationVersions(
+        {
+          generators: {
+            'latest-authored-second': { description: 'second' },
+            'latest-authored-first': { description: 'first' },
+          },
+        },
+        {},
+        '1.3.0',
+        // Keys aren't in commit order — the ranks are what orders them.
+        { 'latest-authored-first': 1, 'latest-authored-second': 2 },
+      );
+      expect(Object.keys(stamped.generators ?? {})).toEqual([
+        'latest-authored-first',
+        'latest-authored-second',
+      ]);
+    });
+
+    it('should keep every-migration entries last regardless of commit rank', () => {
+      const stamped = stampMigrationVersions(
+        {
+          generators: {
+            'sync-vended-versions': {
+              description: 'runs every migration',
+              everyMigration: true,
+            },
+            'latest-code-change': { description: 'a code migration' },
+          },
+        },
+        {},
+        '1.3.0',
+        // A high rank on the code migration must not float it past the
+        // every-migration entry, which carries no rank.
+        { 'latest-code-change': 99 },
+      );
+      expect(Object.keys(stamped.generators ?? {})).toEqual([
+        'latest-code-change',
+        'sync-vended-versions',
+      ]);
+    });
+
+    it('should sort ranked migrations ahead of unranked ones', () => {
+      const stamped = stampMigrationVersions(
+        {
+          generators: {
+            'latest-unranked': { description: 'no history' },
+            'latest-ranked': { description: 'has history' },
+          },
+        },
+        {},
+        '1.3.0',
+        { 'latest-ranked': 5 },
+      );
+      expect(Object.keys(stamped.generators ?? {})).toEqual([
+        'latest-ranked',
+        'latest-unranked',
+      ]);
+    });
+
+    it('should fall back to manifest key order for equal ranks', () => {
+      const stamped = stampMigrationVersions(
+        {
+          generators: {
+            'latest-alpha': { description: 'alpha' },
+            'latest-bravo': { description: 'bravo' },
+          },
+        },
+        {},
+        '1.3.0',
+        // Added in the same commit (squash merge), so the same rank — the stable
+        // sort leaves the manifest's key order in place.
+        { 'latest-alpha': 3, 'latest-bravo': 3 },
+      );
+      expect(Object.keys(stamped.generators ?? {})).toEqual([
+        'latest-alpha',
+        'latest-bravo',
+      ]);
+    });
+
     it('should strip the source-only everyMigration flag', () => {
       const stamped = stampMigrationVersions(
         {

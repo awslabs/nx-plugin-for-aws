@@ -9,6 +9,7 @@ import {
   readShippedMigrationVersions,
   stampMigrationVersions,
 } from '../packages/nx-plugin/src/utils/migration-versions';
+import { readMigrationCommitRanks } from './utils/migration-commit-order';
 import {
   discoverMigrations,
   readPackageJsonUpdates,
@@ -78,9 +79,10 @@ const main = () => {
   const { name } = JSON.parse(
     readFileSync('packages/nx-plugin/package.json', 'utf-8'),
   );
+  const discovered = discoverMigrations();
   const migrations = assembleMigrations(
     name,
-    discoverMigrations(),
+    discovered,
     readPackageJsonUpdates(),
   );
 
@@ -95,6 +97,10 @@ const main = () => {
     migrations,
     readShippedMigrationVersions(migrations, versions, readReleasedMigrations),
     pendingVersion,
+    // Order migrations sharing a version by the commit that added them, so an
+    // earlier-committed one runs first and a later one in the same batch can
+    // depend on it.
+    readMigrationCommitRanks(discovered),
   );
 
   writeFileSync(outPath, `${JSON.stringify(stamped, null, 2)}\n`, 'utf-8');

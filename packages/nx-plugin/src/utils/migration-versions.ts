@@ -111,31 +111,57 @@ export const readShippedMigrationVersions = (
 };
 
 /**
+ * Rank a migration ships under, lower running first. Unranked entries (no commit
+ * history for them, or an every-migration entry with no folder) sort after every
+ * ranked one, so a ranked migration always precedes an unranked peer.
+ */
+const UNRANKED = Number.MAX_SAFE_INTEGER;
+
+/**
  * Return a copy of the migrations collection with a `version` stamped onto
  * every generator entry, preserving any already present, and the pending version
  * recorded on any `packageJsonUpdates` entry still holding `latest`.
+ *
+ * `nx migrate` sorts the run ascending by version and keeps the manifest's order
+ * among equal versions, so the order entries are emitted in is the run order
+ * within a release. Migrations sharing a version (a batch shipped together, or a
+ * whole `v<x.y.z>` folder replayed on a big version jump) are therefore ordered
+ * here by the commit that added them — an earlier-committed migration runs
+ * first — so a later migration can depend on an earlier one in the same batch.
+ * Every-migration entries are emitted last regardless, so they run after the
+ * release's own migrations (letting one add a dependency this then brings up to
+ * date). Entries with no rank fall back to the manifest's order, which
+ * `assembleMigrations` already sorts by key.
  *
  * @param migrations parsed migrations.json to stamp
  * @param shippedVersions migration key -> version of the earliest release
  *   tag that registers it (absent for migrations that haven't shipped)
  * @param pendingVersion version the release is about to publish, stamped onto
  *   unshipped migrations so their version is one that really shipped
+ * @param commitRanks migration key -> rank of the commit that added it (lower is
+ *   earlier); absent entries fall back to the manifest's order
  */
 export const stampMigrationVersions = (
   migrations: MigrationsJson,
   shippedVersions: Record<string, string>,
   pendingVersion: string,
+  commitRanks: Record<string, number> = {},
 ): MigrationsJson => ({
   ...migrations,
   generators: Object.fromEntries(
-    // `nx migrate` sorts the run ascending by version and preserves the
-    // manifest's order among equal versions, so emitting the every-migration
-    // entries last is what makes them run after the release's own migrations.
     Object.entries(migrations.generators ?? {})
-      .sort(
-        ([, a], [, b]) =>
-          Number(a.everyMigration ?? false) - Number(b.everyMigration ?? false),
-      )
+      .sort(([keyA, a], [keyB, b]) => {
+        const everyDiff =
+          Number(a.everyMigration ?? false) - Number(b.everyMigration ?? false);
+        if (everyDiff !== 0) {
+          return everyDiff;
+        }
+        // Equal ranks (same commit, or both unranked) fall through to a stable
+        // sort, keeping the manifest's key order the assembly already imposed.
+        return (
+          (commitRanks[keyA] ?? UNRANKED) - (commitRanks[keyB] ?? UNRANKED)
+        );
+      })
       .map(([name, entry]) => {
         // Source-only marker, stripped from what nx reads.
         const { everyMigration, version: sourceVersion, ...published } = entry;
