@@ -112,7 +112,9 @@ exports[`smithyProjectGenerator > should generate smithy project with all custom
           "make-dir dist/{projectRoot}/build",
           "npx -y mise@2026.8.1 exec smithy@1.72.1 -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy",
           "cpy \\"dist/{projectRoot}/smithy/source/openapi/*.openapi.json\\" dist/{projectRoot}/build/openapi --flat --rename=openapi.json",
-          "npm install --prefix dist/{projectRoot}/smithy/source/typescript-ssdk-codegen --ignore-scripts --no-audit --no-fund",
+          "npm install --prefix dist/{projectRoot}/smithy/source/typescript-ssdk-codegen --include=dev --ignore-scripts --no-audit --no-fund",
+          "node dist/{projectRoot}/smithy/source/typescript-ssdk-codegen/node_modules/typescript/bin/tsc -p dist/{projectRoot}/smithy/source/typescript-ssdk-codegen/tsconfig.es.json",
+          "node dist/{projectRoot}/smithy/source/typescript-ssdk-codegen/node_modules/typescript/bin/tsc -p dist/{projectRoot}/smithy/source/typescript-ssdk-codegen/tsconfig.types.json",
           "rolldown -c {projectRoot}/ssdk.rolldown.config.mjs"
         ],
         "parallel": false,
@@ -151,7 +153,9 @@ exports[`smithyProjectGenerator > should generate smithy project with custom dir
           "make-dir dist/{projectRoot}/build",
           "npx -y mise@2026.8.1 exec smithy@1.72.1 -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy",
           "cpy \\"dist/{projectRoot}/smithy/source/openapi/*.openapi.json\\" dist/{projectRoot}/build/openapi --flat --rename=openapi.json",
-          "npm install --prefix dist/{projectRoot}/smithy/source/typescript-ssdk-codegen --ignore-scripts --no-audit --no-fund",
+          "npm install --prefix dist/{projectRoot}/smithy/source/typescript-ssdk-codegen --include=dev --ignore-scripts --no-audit --no-fund",
+          "node dist/{projectRoot}/smithy/source/typescript-ssdk-codegen/node_modules/typescript/bin/tsc -p dist/{projectRoot}/smithy/source/typescript-ssdk-codegen/tsconfig.es.json",
+          "node dist/{projectRoot}/smithy/source/typescript-ssdk-codegen/node_modules/typescript/bin/tsc -p dist/{projectRoot}/smithy/source/typescript-ssdk-codegen/tsconfig.types.json",
           "rolldown -c {projectRoot}/ssdk.rolldown.config.mjs"
         ],
         "parallel": false,
@@ -282,7 +286,9 @@ exports[`smithyProjectGenerator > should generate smithy project with default op
           "make-dir dist/{projectRoot}/build",
           "npx -y mise@2026.8.1 exec smithy@1.72.1 -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy",
           "cpy \\"dist/{projectRoot}/smithy/source/openapi/*.openapi.json\\" dist/{projectRoot}/build/openapi --flat --rename=openapi.json",
-          "npm install --prefix dist/{projectRoot}/smithy/source/typescript-ssdk-codegen --ignore-scripts --no-audit --no-fund",
+          "npm install --prefix dist/{projectRoot}/smithy/source/typescript-ssdk-codegen --include=dev --ignore-scripts --no-audit --no-fund",
+          "node dist/{projectRoot}/smithy/source/typescript-ssdk-codegen/node_modules/typescript/bin/tsc -p dist/{projectRoot}/smithy/source/typescript-ssdk-codegen/tsconfig.es.json",
+          "node dist/{projectRoot}/smithy/source/typescript-ssdk-codegen/node_modules/typescript/bin/tsc -p dist/{projectRoot}/smithy/source/typescript-ssdk-codegen/tsconfig.types.json",
           "rolldown -c {projectRoot}/ssdk.rolldown.config.mjs"
         ],
         "parallel": false,
@@ -330,37 +336,15 @@ import path from 'node:path';
 import esmShim from '@rollup/plugin-esm-shim';
 import { dts } from 'rolldown-plugin-dts';
 
-/**
- * Every path handed to rolldown is relative to the workspace root, with forward
- * slashes, on every platform.
- *
- * A module's identity is its resolved path. rolldown reaches this project's files
- * two ways — the entry it is given, and the relative imports it follows from there
- * — and it spells the second form relative to its working directory. Handing it an
- * absolute entry (which on Windows also carries a drive letter) makes those two
- * spellings differ, so the same file is loaded twice and the second copy reads the
- * first's declarations as imports. The generated Server SDK merges an \`interface\`
- * with a \`namespace\`, whose emitted assignment then looks like a write to an
- * import, failing the build with ASSIGN_TO_IMPORT.
- *
- * The compile target runs from the workspace root, so these resolve there.
- */
-const posix = (...segments) =>
-  path
-    .join(...segments)
-    .split(path.sep)
-    .join('/');
-
 // The Smithy CLI generates the Server SDK under dist, along with its own
-// dependencies, so paths are resolved from there rather than this project.
-const ssdkDir = posix(
+// dependencies, so paths are resolved from there rather than this project. The
+// compile target runs from the workspace root, so these resolve there.
+const ssdkDir = path.resolve(
   'dist',
   'test-api',
   'smithy/source/typescript-ssdk-codegen',
 );
-const require = createRequire(
-  path.resolve(process.cwd(), ssdkDir, 'package.json'),
-);
+const require = createRequire(path.join(ssdkDir, 'package.json'));
 
 // Bundle the re2-wasm wasm file as part of the module
 const re2WasmPlugin = () => ({
@@ -368,13 +352,13 @@ const re2WasmPlugin = () => ({
   resolveId: (id) => {
     if (!(id === 're2-wasm' || id.endsWith('/re2-wasm'))) return null;
     try {
-      const dir = posix(
+      const dir = path.join(
         path.dirname(require.resolve('re2-wasm/package.json')),
         'build/wasm',
       );
-      return fs.existsSync(path.join(dir, 're2.wasm')) &&
-        fs.existsSync(path.join(dir, 're2.js'))
-        ? posix(dir, 're2.js')
+      const entry = path.join(dir, 're2.js');
+      return fs.existsSync(path.join(dir, 're2.wasm')) && fs.existsSync(entry)
+        ? entry
         : null;
     } catch {
       return null;
@@ -393,28 +377,24 @@ const re2WasmPlugin = () => ({
   },
 });
 
-const input = posix(ssdkDir, 'src/index.ts');
-const tsconfigFilename = posix(ssdkDir, 'tsconfig.es.json');
-const outDir = posix('dist', 'test-api', 'build/ssdk');
+const outDir = path.resolve('dist', 'test-api', 'build/ssdk');
 
 /**
- * The module and its type declaration are built in separate passes, so each sees
- * every file once — \`rolldown-plugin-dts\` loads the same sources a second time to
- * build the declaration.
+ * The Server SDK's own TypeScript compiles it before this runs, so both passes
+ * bundle emitted JavaScript and declarations rather than the generated sources —
+ * see the compile target's commands for why.
  */
 export default [
   {
-    input,
+    input: path.join(ssdkDir, 'dist-es/index.js'),
     plugins: [re2WasmPlugin(), esmShim()],
     output: [{ dir: outDir, format: 'es' }],
-    resolve: { tsconfigFilename },
     platform: 'node',
   },
   {
-    input,
+    input: path.join(ssdkDir, 'dist-types/index.d.ts'),
     plugins: [dts({ resolve: true, emitDtsOnly: true })],
     output: [{ dir: outDir, format: 'es' }],
-    resolve: { tsconfigFilename },
     platform: 'node',
   },
 ];
@@ -448,7 +428,9 @@ exports[`smithyProjectGenerator > should generate smithy project with subdirecto
           "make-dir dist/{projectRoot}/build",
           "npx -y mise@2026.8.1 exec smithy@1.72.1 -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy",
           "cpy \\"dist/{projectRoot}/smithy/source/openapi/*.openapi.json\\" dist/{projectRoot}/build/openapi --flat --rename=openapi.json",
-          "npm install --prefix dist/{projectRoot}/smithy/source/typescript-ssdk-codegen --ignore-scripts --no-audit --no-fund",
+          "npm install --prefix dist/{projectRoot}/smithy/source/typescript-ssdk-codegen --include=dev --ignore-scripts --no-audit --no-fund",
+          "node dist/{projectRoot}/smithy/source/typescript-ssdk-codegen/node_modules/typescript/bin/tsc -p dist/{projectRoot}/smithy/source/typescript-ssdk-codegen/tsconfig.es.json",
+          "node dist/{projectRoot}/smithy/source/typescript-ssdk-codegen/node_modules/typescript/bin/tsc -p dist/{projectRoot}/smithy/source/typescript-ssdk-codegen/tsconfig.types.json",
           "rolldown -c {projectRoot}/ssdk.rolldown.config.mjs"
         ],
         "parallel": false,

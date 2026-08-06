@@ -29,7 +29,7 @@ import {
   projectExists,
 } from '../../utils/nx';
 import { getRelativePathToRootByDirectory } from '../../utils/paths';
-import { smithyCliCommand, warnIfSmithyMissing } from '../../utils/smithy';
+import { smithyCliCommand } from '../../utils/smithy';
 import { smithyMavenVersions } from '../../utils/versions';
 import type { SmithyProjectGeneratorSchema } from './schema';
 
@@ -134,8 +134,21 @@ export const smithyCompileCommands = (
     // `npm` regardless of the workspace's package manager: this installs a
     // generated package under `dist` that is not a workspace member, and npm
     // ships with Node so it is always present. It reads the user's `.npmrc`, so a
-    // private registry still applies.
-    `npm install --prefix ${SSDK_CODEGEN_DIR} --ignore-scripts --no-audit --no-fund`,
+    // private registry still applies. `--include=dev` because the compiler below is
+    // among the generated package's devDependencies, which `NODE_ENV=production`
+    // would otherwise omit.
+    `npm install --prefix ${SSDK_CODEGEN_DIR} --include=dev --ignore-scripts --no-audit --no-fund`,
+    // The Server SDK is compiled by its own TypeScript before it is bundled,
+    // using the config and compiler the codegen pinned. This keeps the bundler off
+    // the sources: the SDK merges an `interface` with a `namespace`, and it also
+    // has an import cycle between an operation and its protocol, which together
+    // make the namespace's emitted assignment look like a write to an import
+    // (ASSIGN_TO_IMPORT) depending on which side of the cycle the bundler enters.
+    // `tsc` resolves the merge to a plain local binding, so the cycle stops
+    // mattering. `-p` resolves the config's paths relative to itself, so both run
+    // from the workspace root.
+    `node ${SSDK_CODEGEN_DIR}/node_modules/typescript/bin/tsc -p ${SSDK_CODEGEN_DIR}/tsconfig.es.json`,
+    `node ${SSDK_CODEGEN_DIR}/node_modules/typescript/bin/tsc -p ${SSDK_CODEGEN_DIR}/tsconfig.types.json`,
     `rolldown -c {projectRoot}/ssdk.rolldown.config.mjs`,
   ];
 };
@@ -165,8 +178,6 @@ export const smithyProjectGenerator = async (
 ): Promise<GeneratorCallback> => {
   const cmd = new FsCommands(tree, DEPENDENCIES);
   const type = options.type ?? 'service';
-
-  warnIfSmithyMissing();
 
   // Create project.json
   const { fullyQualifiedName, dir } = getTsLibDetails(tree, options);

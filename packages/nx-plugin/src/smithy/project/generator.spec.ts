@@ -61,7 +61,9 @@ describe('smithyProjectGenerator', () => {
       'make-dir dist/{projectRoot}/build',
       `npx -y mise@${TS_VERSIONS.mise} exec smithy@${SMITHY_VERSIONS.cli} -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy`,
       'cpy "dist/{projectRoot}/smithy/source/openapi/*.openapi.json" dist/{projectRoot}/build/openapi --flat --rename=openapi.json',
-      'npm install --prefix dist/{projectRoot}/smithy/source/typescript-ssdk-codegen --ignore-scripts --no-audit --no-fund',
+      'npm install --prefix dist/{projectRoot}/smithy/source/typescript-ssdk-codegen --include=dev --ignore-scripts --no-audit --no-fund',
+      'node dist/{projectRoot}/smithy/source/typescript-ssdk-codegen/node_modules/typescript/bin/tsc -p dist/{projectRoot}/smithy/source/typescript-ssdk-codegen/tsconfig.es.json',
+      'node dist/{projectRoot}/smithy/source/typescript-ssdk-codegen/node_modules/typescript/bin/tsc -p dist/{projectRoot}/smithy/source/typescript-ssdk-codegen/tsconfig.types.json',
       'rolldown -c {projectRoot}/ssdk.rolldown.config.mjs',
     ]);
     expect(projectConfig.targets.compile.outputs).toEqual([
