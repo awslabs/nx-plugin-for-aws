@@ -18,14 +18,16 @@ const PACKAGE_MANAGERS = ['pnpm', 'npm', 'yarn', 'bun'] as const;
 
 export const Output = ({ graph, issues, options, onOptionsChange }: Props) => {
   const [annotate, setAnnotate] = useState(true);
+  const [createWorkspace, setCreateWorkspace] = useState(true);
   const [copied, setCopied] = useState(false);
 
   const errors = issues.filter((issue) => issue.severity === 'error');
   const warnings = issues.filter((issue) => issue.severity === 'warning');
 
   const script = useMemo(
-    () => toScript(graph, options, { annotate }),
-    [graph, options, annotate],
+    () =>
+      toScript(graph, options, { annotate, skipWorkspace: !createWorkspace }),
+    [graph, options, annotate, createWorkspace],
   );
 
   useEffect(() => {
@@ -92,14 +94,22 @@ export const Output = ({ graph, issues, options, onOptionsChange }: Props) => {
         </div>
 
         <div className="gb-output-actions">
-          <label className="gb-inline-check">
-            <input
-              type="checkbox"
-              checked={annotate}
-              onChange={(event) => setAnnotate(event.target.checked)}
-            />
-            <span>Comments</span>
-          </label>
+          <button
+            type="button"
+            className={`gb-toggle-pill${createWorkspace ? ' is-active' : ''}`}
+            aria-pressed={createWorkspace}
+            onClick={() => setCreateWorkspace((value) => !value)}
+          >
+            Create workspace
+          </button>
+          <button
+            type="button"
+            className={`gb-toggle-pill${annotate ? ' is-active' : ''}`}
+            aria-pressed={annotate}
+            onClick={() => setAnnotate((value) => !value)}
+          >
+            Comments
+          </button>
           <button
             type="button"
             className={`gb-copy-btn${copied ? ' is-copied' : ''}`}
@@ -149,7 +159,11 @@ export const Output = ({ graph, issues, options, onOptionsChange }: Props) => {
         </ul>
       )}
 
-      <section aria-label="Generated commands">
+      <section className="gb-terminal" aria-label="Generated commands">
+        <div className="gb-terminal-titlebar">
+          <span className="gb-terminal-dots" aria-hidden="true" />
+          <span className="sr-only">Terminal window</span>
+        </div>
         <pre className="gb-script">
           <code>
             {graph.nodes.length === 0

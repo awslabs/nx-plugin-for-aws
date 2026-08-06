@@ -470,6 +470,25 @@ describe('commands', () => {
     );
   });
 
+  it('should omit the workspace create and cd when skipWorkspace is set', () => {
+    const script = toScript(graph([node('my-api', 'ts#trpc-api')]), EMIT, {
+      skipWorkspace: true,
+    }).split('\n');
+    expect(script[0]).not.toContain('create @aws/nx-workspace');
+    expect(script.some((line) => line === 'cd my-project')).toBe(false);
+    expect(script[0]).toBe(
+      'pnpm nx g @aws/nx-plugin:ts#api my-api --framework=trpc --no-interactive',
+    );
+  });
+
+  it('should not lead with a blank line when annotating without the workspace', () => {
+    const script = toScript(graph([node('my-api', 'ts#trpc-api')]), EMIT, {
+      annotate: true,
+      skipWorkspace: true,
+    }).split('\n');
+    expect(script[0]).toBe('# Create my-api (tRPC API)');
+  });
+
   it('should prefix generator commands per package manager', () => {
     const single = graph([node('my-api', 'ts#trpc-api')]);
     expect(toScript(single, { ...EMIT, packageManager: 'npm' })).toContain(
