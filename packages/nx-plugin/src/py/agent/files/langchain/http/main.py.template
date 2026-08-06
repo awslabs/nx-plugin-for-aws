@@ -5,19 +5,11 @@ from bedrock_agentcore.runtime.models import PingStatus
 from fastapi import Request
 from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
-from <%- agentConnectionModuleName %> import session_id_context, with_session_id
+from <%- agentConnectionModuleName %> import get_current_session_id, session_id_context
 
-from .agent import get_agent
 from .init import JsonStreamingResponse, app
 
 SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
-
-_agent_ctx = with_session_id(
-    get_agent,
-    name="<%= agentNameClassName %>",
-    description="A Strands Agent exposed via HTTP streaming.",
-)
-_agent = _agent_ctx.__enter__()
 
 
 class InvokeInput(BaseModel):
@@ -28,15 +20,32 @@ class StreamChunk(BaseModel):
     content: str
 
 
-async def handle_invoke(input: InvokeInput):
+def _text(content) -> str:
+    # ChatBedrockConverse streams content as a list of blocks, not a plain string.
+    if isinstance(content, str):
+        return content
+    return "".join(
+        block.get("text", "")
+        for block in content
+        if isinstance(block, dict) and block.get("type") == "text"
+    )
+
+
+async def handle_invoke(input: InvokeInput, session_id: str):
     """Streaming handler for agent invocation"""
-    stream = _agent.stream_async(input.prompt)
-    async for event in stream:
-        text = event.get("event", {}).get("contentBlockDelta", {}).get("delta", {}).get("text")
-        if text is not None:
-            yield StreamChunk(content=text)
-        elif event.get("event", {}).get("messageStop") is not None:
-            yield StreamChunk(content="\n")
+    # The session id is the LangGraph thread id, so the checkpointer keeps memory per session.
+    config = {"configurable": {"thread_id": session_id}}
+    # Re-bind the session: the streaming body runs outside the middleware scope.
+    with session_id_context(session_id):
+        stream = app.state.graph.astream(
+            {"messages": [{"role": "user", "content": input.prompt}]},
+            config,
+            stream_mode="messages",
+        )
+        async for message_chunk, _metadata in stream:
+            text = _text(message_chunk.content)
+            if text:
+                yield StreamChunk(content=text)
 
 
 @app.post(
@@ -46,7 +55,8 @@ async def handle_invoke(input: InvokeInput):
 )
 async def invoke(input: InvokeInput) -> JsonStreamingResponse:
     """Entry point for agent invocation"""
-    return JsonStreamingResponse(handle_invoke(input))
+    session_id = get_current_session_id() or str(uuid.uuid4())
+    return JsonStreamingResponse(handle_invoke(input, session_id))
 
 
 class _SessionIdMiddleware(BaseHTTPMiddleware):
