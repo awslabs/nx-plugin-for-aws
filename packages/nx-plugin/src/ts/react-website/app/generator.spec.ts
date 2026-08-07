@@ -602,8 +602,8 @@ describe('react-website generator', () => {
     });
   });
 
-  describe('load:runtime-config target', () => {
-    it('should configure load:runtime-config target for CDK provider', async () => {
+  describe('load-runtime-config target', () => {
+    it('should configure load-runtime-config target for CDK provider', async () => {
       await tsReactWebsiteGenerator(tree, {
         ...options,
         iac: 'cdk',
@@ -611,7 +611,7 @@ describe('react-website generator', () => {
 
       const projectConfig = readJson(tree, 'test-app/project.json');
       const loadRuntimeConfigTarget =
-        projectConfig.targets['load:runtime-config'];
+        projectConfig.targets['load-runtime-config'];
 
       expect(loadRuntimeConfigTarget).toBeDefined();
       expect(loadRuntimeConfigTarget.executor).toBe('nx:run-commands');
@@ -627,7 +627,7 @@ describe('react-website generator', () => {
       );
     });
 
-    it('should configure load:runtime-config target for Terraform provider', async () => {
+    it('should configure load-runtime-config target for Terraform provider', async () => {
       await tsReactWebsiteGenerator(tree, {
         ...options,
         iac: 'terraform',
@@ -635,7 +635,7 @@ describe('react-website generator', () => {
 
       const projectConfig = readJson(tree, 'test-app/project.json');
       const loadRuntimeConfigTarget =
-        projectConfig.targets['load:runtime-config'];
+        projectConfig.targets['load-runtime-config'];
 
       expect(loadRuntimeConfigTarget).toBeDefined();
       expect(loadRuntimeConfigTarget.executor).toBe('nx:run-commands');
@@ -659,7 +659,7 @@ describe('react-website generator', () => {
       ).rejects.toThrow('Unsupported iac UnknownProvider');
     });
 
-    it('should configure load:runtime-config target with custom directory for Terraform', async () => {
+    it('should configure load-runtime-config target with custom directory for Terraform', async () => {
       await tsReactWebsiteGenerator(tree, {
         ...options,
         directory: 'custom-dir',
@@ -668,7 +668,7 @@ describe('react-website generator', () => {
 
       const projectConfig = readJson(tree, 'custom-dir/test-app/project.json');
       const loadRuntimeConfigTarget =
-        projectConfig.targets['load:runtime-config'];
+        projectConfig.targets['load-runtime-config'];
 
       expect(loadRuntimeConfigTarget).toBeDefined();
       expect(loadRuntimeConfigTarget.options.env.SRC_FILE).toBe(
@@ -682,7 +682,7 @@ describe('react-website generator', () => {
       );
     });
 
-    it('should configure load:runtime-config target with scoped npm prefix for CDK', async () => {
+    it('should configure load-runtime-config target with scoped npm prefix for CDK', async () => {
       // Set up package.json with a scope
       tree.write(
         'package.json',
@@ -699,7 +699,7 @@ describe('react-website generator', () => {
 
       const projectConfig = readJson(tree, 'test-app/project.json');
       const loadRuntimeConfigTarget =
-        projectConfig.targets['load:runtime-config'];
+        projectConfig.targets['load-runtime-config'];
 
       expect(loadRuntimeConfigTarget.options.command).toContain('test-scope-');
       expect(loadRuntimeConfigTarget.options.command).toContain(
@@ -789,7 +789,7 @@ describe('react-website generator', () => {
       const projectJson = JSON.parse(
         tree.read('test-app/project.json', 'utf-8'),
       );
-      expect(projectJson.targets['load:runtime-config']).toBeUndefined();
+      expect(projectJson.targets['load-runtime-config']).toBeUndefined();
       expect(tree.exists('packages/common/constructs')).toBeFalsy();
 
       await tsReactWebsiteGenerator(tree, {
@@ -800,7 +800,7 @@ describe('react-website generator', () => {
       const updatedProjectJson = JSON.parse(
         tree.read('test-app/project.json', 'utf-8'),
       );
-      expect(updatedProjectJson.targets['load:runtime-config']).toBeDefined();
+      expect(updatedProjectJson.targets['load-runtime-config']).toBeDefined();
       expect(tree.exists('packages/common/constructs')).toBeTruthy();
     });
   });

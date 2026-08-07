@@ -237,21 +237,21 @@ export async function tsReactWebsiteGenerator(
 
   const infra = schema.infra ?? 'cloudfront-s3';
 
-  // Configure load:runtime-config target based on IaC provider (only when infra is not none)
+  // Configure load-runtime-config target based on IaC provider (only when infra is not none)
   const iac = infra !== 'none' ? await resolveIac(tree, schema.iac) : undefined;
 
   if (iac === 'cdk') {
-    targets['load:runtime-config'] = {
+    targets['load-runtime-config'] = {
       executor: 'nx:run-commands',
       metadata: {
-        description: `Load runtime config from your deployed stack for dev purposes. You must set your AWS CLI credentials whilst calling '${getPackageManagerDisplayCommands().exec} nx run ${fullyQualifiedName}:load:runtime-config'`,
+        description: `Load runtime config from your deployed stack for dev purposes. You must set your AWS CLI credentials whilst calling '${getPackageManagerDisplayCommands().exec} nx load-runtime-config ${fullyQualifiedName}'`,
       },
       options: {
         command: `aws s3 cp s3://\`aws cloudformation describe-stacks --query "Stacks[?starts_with(StackName, '${kebabCase(npmScopePrefix)}-')][].Outputs[] | [?contains(OutputKey, '${websiteNameClassName}WebsiteBucketName')].OutputValue" --output text\`/runtime-config.json "{projectRoot}/public/runtime-config.json"`,
       },
     };
   } else if (iac === 'terraform') {
-    targets['load:runtime-config'] = {
+    targets['load-runtime-config'] = {
       executor: 'nx:run-commands',
       metadata: {
         description:
