@@ -77,7 +77,7 @@ ${PACKAGE_MANAGERS.map((pm) => buildNxCommand('<options>', pm)).join(' - \n')}
 - Carefully examine the files that have been generated and always refer back to the generator guide when working in a generated project
 - Generate all projects into the \`packages/\` directory
 - After making changes to your projects, fix linting issues, then run a full build
-- When it's time to start testing a project, suggest to the user that infrastructure is deployed to AWS. For websites, if a runtime-config.json is needed, use the load:runtime-config target after a deployment to point a local website at a sandbox stack.
+- When it's time to start testing a project, suggest to the user that infrastructure is deployed to AWS. For websites, if a runtime-config.json is needed, use the load-runtime-config target after a deployment to point a local website at a sandbox stack.
 
 ## Batching Generators
 
