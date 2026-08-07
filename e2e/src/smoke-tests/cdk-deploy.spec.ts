@@ -81,6 +81,7 @@ async function deleteLeftoverStacks(cdkStageName: string): Promise<void> {
           StackStatus.CREATE_COMPLETE,
           StackStatus.UPDATE_COMPLETE,
           StackStatus.ROLLBACK_COMPLETE,
+          StackStatus.DELETE_FAILED,
         ],
       });
       const leftoverStacks = (stacks.StackSummaries ?? []).filter((s) =>
