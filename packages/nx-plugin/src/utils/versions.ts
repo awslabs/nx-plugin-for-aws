@@ -125,7 +125,7 @@ export const TS_VERSIONS = {
   '@types/fs-extra': '11.0.4',
   'make-dir-cli': '4.0.0',
   mariadb: '3.5.3',
-  mise: '2026.8.1',
+  mise: '2026.8.3',
   ncp: '2.0.0',
   npm: '12.0.2',
   'npm-check-updates': '22.2.9',
