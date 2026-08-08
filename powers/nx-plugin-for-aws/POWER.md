@@ -131,6 +131,7 @@ Add capabilities to existing projects:
 | `py#mcp-server`      | Generate a Python Model Context Protocol (MCP) server for providing context to Large Language Models               |
 | `py#project`         | Generates a Python project                                                                                         |
 | `py#agent`           | Add an AI Agent to a Python project                                                                                |
+| `smithy#project`     | Generate a Smithy model project, either defining a service or a library of reusable shapes                         |
 | `terraform#project`  | Generates a Terraform project                                                                                      |
 | `ts#docs`            | Generates a documentation site                                                                                     |
 | `ts#infra`           | Generates a cdk application                                                                                        |

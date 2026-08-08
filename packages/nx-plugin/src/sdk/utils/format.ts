@@ -3,4 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export { formatFilesInSubtree } from '../../utils/format';
+export {
+  type FormatFilesInSubtreeOptions,
+  formatFilesInSubtree,
+} from '../../utils/format';

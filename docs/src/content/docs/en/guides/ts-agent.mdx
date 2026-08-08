@@ -60,6 +60,7 @@ The generator will add the following files to your existing TypeScript project. 
         - init.ts tRPC initialization
         - router.ts tRPC router with agent procedures
         - agent.ts Main agent definition with sample tools
+        - session.ts Resolves the SessionManager used to persist conversation state
         - client.ts Vended client for invoking your agent
         - agent-core-trpc-client.ts Client factory for connecting to agents on AgentCore Runtime
         - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
@@ -79,6 +80,7 @@ The entry point uses the [Strands A2A Express Server](https://strandsagents.com/
       - agent/ (or custom name if specified)
         - index.ts A2A Express server entry point
         - agent.ts Main agent definition with sample tools
+        - session.ts Resolves the SessionManager used to persist conversation state
         - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
     - package.json Updated with Strands and Express dependencies
     - project.json Updated with agent serve targets
@@ -96,6 +98,7 @@ The entry point uses [`@ag-ui/aws-strands`](https://www.npmjs.com/package/@ag-ui
       - agent/ (or custom name if specified)
         - index.ts AG-UI server entry point (Express + SSE)
         - agent.ts Main agent definition with sample tools
+        - session.ts Resolves the SessionManager used to persist conversation state
         - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
     - package.json Updated with Strands and AG-UI dependencies
     - project.json Updated with agent serve targets
@@ -185,7 +188,7 @@ const letterCounter = tool({
 });
 
 // Add tools to your agent
-export const getAgent = async (sessionId: string) => {
+export const getAgent = async () => {
   return new Agent({
     systemPrompt: 'You are a helpful assistant with access to various tools.',
     tools: [letterCounter],
@@ -347,6 +350,29 @@ Your agent is automatically configured with observability using the [AWS Distro 
 You can find traces in the CloudWatch AWS Console, by selecting "GenAI Observability" in the menu. Note that for traces to be populated you will need to enable [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html).
 
 For more details, refer to the [AgentCore documentation on observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html).
+
+### Session Management
+
+The `session` option controls how your agent persists conversation state (message history, tool state, etc.) across invocations, using the Strands SDK's [SessionManager](https://strandsagents.com/docs/user-guide/concepts/agents/session-management/):
+
+- **`s3`** (default): The CDK/Terraform infrastructure provisions a dedicated S3 bucket for session data, encrypted with a dedicated KMS key and with all public access blocked; server access logs are delivered to a CloudWatch Logs log group via the same key. The agent's IAM role is granted read/write/list/delete access to the bucket and decrypt/generate-data-key access to the key, and the bucket name is registered alongside the agent's ARN in AppConfig runtime configuration.
+- **`in-memory`**: No bucket is provisioned. Conversation state is kept in memory only for the lifetime of the running process and does not survive restarts or scale-in.
+
+This is implemented in the generated `session.ts`, which exports a `getSessionManager()` function resolving a `SessionManager` for the current session.
+
+<OptionFilter when={{ protocol: 'ag-ui' }} description="AG-UI session wiring">
+Since AG-UI clones a template agent per conversation thread, `getSessionManager` is wired in as a `sessionManagerProvider` on the `StrandsAgent` config in `index.ts`, so a fresh `SessionManager` is resolved for each thread rather than baked into the shared template agent.
+</OptionFilter>
+
+<OptionFilter when={{ protocol: ['http', 'a2a'] }} description="HTTP/A2A session wiring">
+Since `withSessionId` already caches one `Agent` instance per session, `getSessionManager` is called directly inside `getAgent`'s `new Agent({ sessionManager: await getSessionManager() })` call in `agent.ts`.
+</OptionFilter>
+
+The session ID itself comes from the AgentCore Runtime session (propagated via the `x-amzn-bedrock-agentcore-runtime-session-id` header for A2A/AG-UI, or the WebSocket connection context for HTTP/tRPC) and is bound to an [`AsyncLocalStorage`](https://nodejs.org/api/async_context.html#class-asynclocalstorage)-based context so `getCurrentSessionId()` can resolve it anywhere in the request — including in any downstream MCP or A2A clients wired up via the <Link path="/guides/connection">`connection` generator</Link>, so the whole call chain shares a consistent session.
+
+:::note[Local Development]
+When running locally (`LOCAL_DEV=true`, set automatically by the `-dev` target), session data is always stored on disk under `tmp/agents/strands/<agent-name>` at the workspace root, regardless of the configured `session` option, for convenience.
+:::
 </OptionFilter>
 
 ## Invoking your Agent

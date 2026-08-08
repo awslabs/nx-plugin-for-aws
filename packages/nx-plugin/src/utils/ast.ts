@@ -320,6 +320,35 @@ export const captureGritQL = async (
 };
 
 /**
+ * Like `captureGritQL`, but returns one metavariable's binding (e.g. `mod`
+ * for `$mod`) instead of the whole matched node.
+ */
+export const captureGritQLVariable = async (
+  tree: Tree,
+  filePath: string,
+  pattern: string,
+  variableName: string,
+): Promise<string | undefined> => {
+  if (!tree.exists(filePath)) return undefined;
+  ensureGritDir(tree);
+  const source = tree.read(filePath)!.toString();
+  // The underlying binding lookup requires the `$` sigil.
+  const name = variableName.startsWith('$') ? variableName : `$${variableName}`;
+  let captured: string | undefined;
+  try {
+    const query = new QueryBuilder(pattern);
+    query.filter((node) => {
+      captured ??= node.var(name) ?? undefined;
+      return true;
+    });
+    await query.applyToFile({ path: filePath, content: source });
+  } catch {
+    return undefined;
+  }
+  return captured;
+};
+
+/**
  * Return the text of every node matching the GritQL pattern, in document order.
  */
 export const captureAllGritQL = async (

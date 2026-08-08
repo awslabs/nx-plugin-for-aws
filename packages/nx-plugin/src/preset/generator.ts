@@ -16,13 +16,18 @@ import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
 } from '../utils/config/utils';
+import { declareDependencies } from '../utils/declared-dependencies';
 import { addDependenciesToPackageJson } from '../utils/dependencies';
 import { formatFilesInSubtree } from '../utils/format';
-import { applyWorkspaceInit } from '../utils/init';
+import { applyWorkspaceInit, INIT_DEPENDENCIES } from '../utils/init';
 import { installDependencies } from '../utils/install';
 import { getGeneratorInfo, type NxGeneratorInfo } from '../utils/nx';
 import { withVersions } from '../utils/versions';
 import type { PresetGeneratorSchema } from './schema';
+
+export const DEPENDENCIES = declareDependencies()({
+  ts: [{ name: 'husky' }, ...INIT_DEPENDENCIES],
+});
 
 export const PRESET_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
@@ -110,7 +115,7 @@ const setUpGitSecrets = (tree: Tree) => {
     },
   }));
 
-  addDependenciesToPackageJson(tree, {}, withVersions(['husky']));
+  addDependenciesToPackageJson(tree, {}, withVersions(DEPENDENCIES, ['husky']));
 };
 
 export const presetGenerator = async (
@@ -158,14 +163,18 @@ export const presetGenerator = async (
 
   // Apply the deterministic workspace configuration shared with the `init`
   // generator. The preset owns the README of a greenfield workspace.
-  await applyWorkspaceInit(tree, {
-    iac,
-    containers,
-    mcp,
-    catalogs: catalog ?? true,
-    readmeOverwriteStrategy: OverwriteStrategy.Overwrite,
-    overwriteScripts: true,
-  });
+  await applyWorkspaceInit(
+    tree,
+    {
+      iac,
+      containers,
+      mcp,
+      catalogs: catalog ?? true,
+      readmeOverwriteStrategy: OverwriteStrategy.Overwrite,
+      overwriteScripts: true,
+    },
+    DEPENDENCIES,
+  );
 
   tree.delete('apps/.gitkeep');
   tree.delete('libs/.gitkeep');

@@ -231,6 +231,14 @@ export const runGeneratorMatrix = async (
     opts,
   );
 
+  // Smithy shape library. Depending on one is a documented set of edits to the
+  // consuming project rather than a generator, so the matrix covers generating
+  // and building a library; `smithy-api` covers consuming one.
+  await runCLI(
+    `generate @aws/nx-plugin:smithy#project --name=my-shapes --type=shapes --no-interactive${deferFlag}`,
+    opts,
+  );
+
   // Agent <-> MCP server connections.
   await runCLI(
     `generate @aws/nx-plugin:connection --sourceProject=ts-project --sourceComponent=agent --targetProject=ts-project --targetComponent=hosted-mcp-server --no-interactive${deferFlag}`,

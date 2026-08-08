@@ -10,22 +10,65 @@ import {
   type Tree,
 } from '@nx/devkit';
 import { addAgentRuntimeToConnectionNamespace } from '../../../connection/agent-runtime-config';
+import { addTsDependencies } from '../../../utils/add-dependencies';
 import {
   addDestructuredImport,
   addSingleImport,
   applyGritQL,
 } from '../../../utils/ast';
-import { addDependenciesToPackageJson } from '../../../utils/dependencies';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../../../utils/declared-dependencies';
 import { kebabCase } from '../../../utils/names';
 import { getNpmScopePrefix } from '../../../utils/npm-scope';
 import { registerPnpmBuiltDependencies } from '../../../utils/pnpm-workspace';
-import { sharedShadcnGenerator } from '../../../utils/shared-shadcn';
-import { withVersions } from '../../../utils/versions';
+import {
+  SHADCN_DEPENDENCIES,
+  sharedShadcnGenerator,
+} from '../../../utils/shared-shadcn';
 import { runtimeConfigGenerator } from '../runtime-config/generator';
+
+/**
+ * The values this helper's predicates read. Its callers record them, so the
+ * theme and auth branches taken here can be confirmed at upgrade time.
+ */
+export interface AgUiMetadata {
+  readonly theme: string;
+  readonly auth: string;
+}
+
+// Each entry names the theme or auth branch it belongs to, so the same
+// declaration drives both adding and the version sync.
+export const DEPENDENCIES = declareDependencies<AgUiMetadata>()({
+  ts: [
+    { name: '@copilotkit/react-core' },
+    { name: '@ag-ui/client' },
+    {
+      name: '@cloudscape-design/chat-components',
+      when: (m) => m.theme === 'cloudscape',
+    },
+    { name: 'lucide-react', when: (m) => m.theme === 'shadcn' },
+    { name: 'oidc-client-ts', when: (m) => m.auth === 'iam' },
+    { name: 'aws4fetch', when: (m) => m.auth === 'iam' },
+    {
+      name: '@aws-sdk/credential-provider-cognito-identity',
+      when: (m) => m.auth === 'iam',
+    },
+    {
+      name: 'react-oidc-context',
+      when: (m) => m.auth === 'iam' || m.auth === 'cognito',
+    },
+    { name: '@smithy/types', when: (m) => m.auth === 'iam', dev: true },
+    // `sharedShadcnGenerator` adds these to the shared shadcn project it
+    // creates, not to the website.
+    ...ownedElsewhere(SHADCN_DEPENDENCIES),
+  ],
+});
 
 export type AgUiAuth = 'iam' | 'cognito' | 'none';
 
-type AgUiTheme = 'cloudscape' | 'shadcn' | 'default';
+export type AgUiTheme = 'cloudscape' | 'shadcn' | 'default';
 
 export interface AgUiReactConnectionOptions {
   /** The React website project to connect FROM */
@@ -58,6 +101,9 @@ export const addAgUiReactConnection = async (
     options;
 
   const theme = resolveAgUiTheme(frontendProjectConfig);
+  // The values the declaration's predicates read. Callers record the same pair,
+  // so what is added here is exactly what the version sync owns.
+  const metadata: AgUiMetadata = { theme, auth };
   const scopeAlias = getNpmScopePrefix(tree);
 
   // Generates `src/components/AguiProvider.tsx` (if absent) and
@@ -73,7 +119,7 @@ export const addAgUiReactConnection = async (
 
   // Shadcn theme imports from the shared shadcn library, so it must exist.
   if (theme === 'shadcn') {
-    await sharedShadcnGenerator(tree);
+    await sharedShadcnGenerator(tree, DEPENDENCIES);
   }
   generateFiles(
     tree,
@@ -131,28 +177,10 @@ export const addAgUiReactConnection = async (
   // knows we've seen it and will skip it instead of erroring.
   registerPnpmBuiltDependencies(tree, { '@scarf/scarf': false });
 
-  addDependenciesToPackageJson(
-    tree,
-    withVersions([
-      '@copilotkit/react-core',
-      '@ag-ui/client',
-      ...((theme === 'cloudscape'
-        ? ['@cloudscape-design/chat-components']
-        : []) as any),
-      ...((theme === 'shadcn' ? ['lucide-react'] : []) as any),
-      ...((auth === 'iam'
-        ? [
-            'oidc-client-ts',
-            'aws4fetch',
-            '@aws-sdk/credential-provider-cognito-identity',
-            'react-oidc-context',
-          ]
-        : []) as any),
-      ...((auth === 'cognito' ? ['react-oidc-context'] : []) as any),
-    ]),
-    withVersions([...((auth === 'iam' ? ['@smithy/types'] : []) as any)]),
-    joinPathFragments(frontendProjectConfig.root, 'package.json'),
-  );
+  addTsDependencies(tree, DEPENDENCIES, {
+    metadata,
+    projectRoot: frontendProjectConfig.root,
+  });
 
   // Agents only publish their runtime ARN to the 'agentcore' namespace by
   // default, which isn't exposed to the website. Patch the agent's CDK/TF
@@ -164,7 +192,12 @@ export const addAgUiReactConnection = async (
   });
 };
 
-const resolveAgUiTheme = (
+/**
+ * The theme module this helper vends, from the website's `metadata.ux`. Callers
+ * record the resolved value, so the theme predicates read what the code branches
+ * on.
+ */
+export const resolveAgUiTheme = (
   frontendProjectConfig: ProjectConfiguration,
 ): AgUiTheme => {
   const ux = (

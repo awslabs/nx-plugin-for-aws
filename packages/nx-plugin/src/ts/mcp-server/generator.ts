@@ -15,13 +15,29 @@ import {
 } from '@nx/devkit';
 import { ensureLicenseExceptions } from '../../license/config';
 import { MCP_INSPECTOR_EXCEPTIONS } from '../../license/known-exceptions';
-import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
-import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
+import { addTsDependencies } from '../../utils/add-dependencies';
+import {
+  AGENT_CORE_CONSTRUCTS_PY_DEPENDENCIES,
+  addMcpServerInfra,
+} from '../../utils/agent-core-constructs/agent-core-constructs';
+import {
+  addTypeScriptBundleTarget,
+  BUNDLE_DEPENDENCIES,
+} from '../../utils/bundle/bundle';
 import { resolveContainers } from '../../utils/containers';
-import { addDependenciesToPackageJson } from '../../utils/dependencies';
-import { addDockerScanTarget, nodeImageVersions } from '../../utils/docker';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../../utils/declared-dependencies';
+import {
+  ADOT_IMAGE_DEPENDENCIES,
+  addDockerScanTarget,
+  DOCKER_DEPENDENCIES,
+  NODE_IMAGE_DEPENDENCIES,
+  nodeImageVersions,
+} from '../../utils/docker';
 import { formatFilesInSubtree } from '../../utils/format';
-import { FsCommands } from '../../utils/fs';
+import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs';
 import { resolveIac } from '../../utils/iac';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
@@ -38,9 +54,41 @@ import {
 } from '../../utils/nx';
 import { sortObjectKeys } from '../../utils/object';
 import { assignPort } from '../../utils/port';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
-import { BASE_IMAGES, TS_VERSIONS, withVersions } from '../../utils/versions';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../utils/shared-constructs';
+import type { IacMetadata } from '../../utils/shared-constructs-constants';
+import { BASE_IMAGES, TS_VERSIONS } from '../../utils/versions';
 import type { TsMcpServerGeneratorSchema } from './schema';
+
+/** The metadata this generator records, which its predicates read. */
+export interface TsMcpServerMetadata extends IacMetadata {
+  readonly port: number;
+  readonly rc: string;
+  readonly auth: string;
+}
+
+export const DEPENDENCIES = declareDependencies<TsMcpServerMetadata>()({
+  ts: [
+    { name: '@modelcontextprotocol/sdk' },
+    { name: 'zod' },
+    { name: 'express' },
+    { name: '@aws-lambda-powertools/parameters' },
+    { name: '@aws-sdk/client-appconfigdata' },
+    { name: '@types/express', dev: true },
+    // tsx (local dev) and the MCP inspector are shared tooling.
+    { name: 'tsx', dev: true, root: true },
+    { name: '@modelcontextprotocol/inspector', dev: true, root: true },
+    ...ownedElsewhere(FS_DEPENDENCIES),
+    ...ownedElsewhere(BUNDLE_DEPENDENCIES),
+    ...ownedElsewhere(DOCKER_DEPENDENCIES),
+    ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
+    ...ownedElsewhere(NODE_IMAGE_DEPENDENCIES),
+    ...ownedElsewhere(ADOT_IMAGE_DEPENDENCIES),
+  ],
+  py: ownedElsewhere(AGENT_CORE_CONSTRUCTS_PY_DEPENDENCIES),
+});
 
 export const TS_MCP_SERVER_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
@@ -74,6 +122,12 @@ export const tsMcpServerGenerator = async (
   const distDir = joinPathFragments('dist', project.root);
 
   const infra = options.infra ?? 'agentcore';
+
+  // Recorded in the metadata below so the version sync can tell a CDK
+  // project from a Terraform one; undefined when no infrastructure was
+  // generated, in which case neither provider's packages were added.
+  const iac =
+    infra !== 'none' ? await resolveIac(tree, options.iac) : undefined;
 
   if (infra === 'none' && options.auth && options.auth !== 'iam') {
     console.warn(
@@ -112,28 +166,21 @@ export const tsMcpServerGenerator = async (
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
-  // Add dependencies
-  const deps = withVersions([
-    '@modelcontextprotocol/sdk',
-    'zod',
-    'express',
-    '@aws-lambda-powertools/parameters',
-    '@aws-sdk/client-appconfigdata',
-  ]);
-  const devDeps = withVersions(['@types/express']);
-  // tsx (local dev) and the MCP inspector are shared tooling.
-  const rootDevDeps = withVersions(['tsx', '@modelcontextprotocol/inspector']);
-
   // Add hosting based on infra
   if (infra === 'agentcore') {
     const containers = await resolveContainers(tree, 'inherit');
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
 
     // Add bundle target
-    await addTypeScriptBundleTarget(tree, project, {
-      targetFilePath: `${targetSourceDirRelativeToProjectRoot}/http.ts`,
-      bundleOutputDir: joinPathFragments('mcp', name),
-    });
+    await addTypeScriptBundleTarget(
+      tree,
+      project,
+      {
+        targetFilePath: `${targetSourceDirRelativeToProjectRoot}/http.ts`,
+        bundleOutputDir: joinPathFragments('mcp', name),
+      },
+      DEPENDENCIES,
+    );
 
     const dockerOutputDir = joinPathFragments(
       'dist',
@@ -144,7 +191,7 @@ export const tsMcpServerGenerator = async (
     );
     const dockerTargetName = `${mcpTargetPrefix}-docker`;
 
-    const fs = new FsCommands(tree);
+    const fs = new FsCommands(tree, DEPENDENCIES);
     project.targets[dockerTargetName] = {
       cache: true,
       outputs: [`{workspaceRoot}/${dockerOutputDir}/Dockerfile`],
@@ -165,17 +212,20 @@ export const tsMcpServerGenerator = async (
     addDependencyToTargetIfNotPresent(project, 'docker', dockerTargetName);
     addDependencyToTargetIfNotPresent(project, 'build', 'docker');
 
-    addDockerScanTarget(tree, {
-      project,
-      containerEngine: containers,
-      trivyTargetName: `${mcpTargetPrefix}-trivy`,
-      dockerTargetName,
-      imageTags: [dockerImageTag],
-    });
+    addDockerScanTarget(
+      tree,
+      {
+        project,
+        containerEngine: containers,
+        trivyTargetName: `${mcpTargetPrefix}-trivy`,
+        dockerTargetName,
+        imageTags: [dockerImageTag],
+      },
+      DEPENDENCIES,
+    );
 
     // Add shared constructs
-    const iac = await resolveIac(tree, options.iac);
-    await sharedConstructsGenerator(tree, { iac });
+    await sharedConstructsGenerator(tree, { iac }, DEPENDENCIES);
 
     // Add the construct to deploy the mcp server
     await addMcpServerInfra(tree, {
@@ -193,21 +243,21 @@ export const tsMcpServerGenerator = async (
     tree.delete(joinPathFragments(targetSourceDir, 'Dockerfile'));
   }
 
-  // Runtime deps go in the project manifest; shared tooling goes to the root.
-  addDependenciesToPackageJson(tree, deps, devDeps, projectPackageJsonPath);
-  addDependenciesToPackageJson(tree, {}, rootDevDeps);
-
   // @modelcontextprotocol/sdk declares zod as a peer dependency with a wide range
   // (^3.25 || ^4.0). Yarn does not dedupe the peer to the workspace's pinned zod, so
   // without a resolution it installs a separate zod under the SDK's own node_modules.
   // The two zod copies have structurally incompatible types, which breaks type
   // inference for registerTool inputSchema. Scope the resolution to the SDK so
   // other consumers (e.g. @tanstack/router-generator pinning zod@3) are unaffected.
+  // Classic yarn only honours the `**/`-prefixed descriptor in a workspace, and
+  // berry only the bare one — it deletes a glob descriptor on install — so
+  // declare both.
   if (detectPackageManager() === 'yarn') {
     updateJson(tree, 'package.json', (packageJson) => {
       packageJson.resolutions = {
         ...packageJson.resolutions,
         '**/@modelcontextprotocol/sdk/zod': TS_VERSIONS['zod'],
+        '@modelcontextprotocol/sdk/zod': TS_VERSIONS['zod'],
       };
       return packageJson;
     });
@@ -215,6 +265,20 @@ export const tsMcpServerGenerator = async (
 
   const localDevPort = assignPort(tree, project, 8000, {
     component: { info: TS_MCP_SERVER_GENERATOR_INFO, name: mcpTargetPrefix },
+  });
+
+  // Recorded below and read by the declaration's predicates, so the packages
+  // added here are exactly the ones the version sync will own.
+  const metadata: TsMcpServerMetadata = {
+    port: localDevPort,
+    rc: mcpServerNameClassName,
+    auth,
+    ...(iac ? { iac } : {}),
+  };
+
+  addTsDependencies(tree, DEPENDENCIES, {
+    metadata,
+    projectRoot: project.root,
   });
 
   const mcpTargets = {
@@ -293,11 +357,7 @@ export const tsMcpServerGenerator = async (
     TS_MCP_SERVER_GENERATOR_INFO,
     targetSourceDirRelativeToProjectRoot,
     mcpTargetPrefix,
-    {
-      port: localDevPort,
-      rc: mcpServerNameClassName,
-      auth,
-    },
+    metadata,
   );
 
   await addGeneratorMetricsIfApplicable(tree, [TS_MCP_SERVER_GENERATOR_INFO]);

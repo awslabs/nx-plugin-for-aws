@@ -3,10 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
+import { declareDependencies } from '../../utils/declared-dependencies';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import { expectTypeScriptToCompile } from '../../utils/test/ts.spec';
 import tsProjectGenerator from './generator';
-import { configureVitest } from './vitest';
+import { configureVitest, VITEST_DEPENDENCIES } from './vitest';
+
+const declaration = declareDependencies()({ ts: [...VITEST_DEPENDENCIES] });
 
 // A local defineConfig stub keeps the generated config self-contained so it can
 // be type-checked without loading the vite/vitest dependencies. The grit
@@ -31,10 +34,14 @@ describe('vitest utils', () => {
   });
 
   it('should configure vitest to pass with no tests', async () => {
-    await configureVitest(tree, {
-      dir: 'test',
-      fullyQualifiedName: 'test',
-    });
+    await configureVitest(
+      tree,
+      {
+        dir: 'test',
+        fullyQualifiedName: 'test',
+      },
+      declaration,
+    );
     const content = tree.read('test/vitest.config.mts', 'utf8');
     expect(content).toContain('passWithNoTests: true');
   });
@@ -79,10 +86,14 @@ describe('vitest utils', () => {
     async ({ testBlock }) => {
       tree.write('test/vitest.config.mts', wrapConfig(testBlock));
 
-      await configureVitest(tree, {
-        dir: 'test',
-        fullyQualifiedName: 'test',
-      });
+      await configureVitest(
+        tree,
+        {
+          dir: 'test',
+          fullyQualifiedName: 'test',
+        },
+        declaration,
+      );
 
       const content = tree.read('test/vitest.config.mts', 'utf8')!;
       expect(content).toContain('passWithNoTests: true');
@@ -99,10 +110,14 @@ describe('vitest utils', () => {
   },`),
     );
 
-    await configureVitest(tree, {
-      dir: 'test',
-      fullyQualifiedName: 'test',
-    });
+    await configureVitest(
+      tree,
+      {
+        dir: 'test',
+        fullyQualifiedName: 'test',
+      },
+      declaration,
+    );
 
     const content = tree.read('test/vitest.config.mts', 'utf8')!;
     expect(content.match(/passWithNoTests/g)).toHaveLength(1);

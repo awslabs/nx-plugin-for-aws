@@ -34,6 +34,18 @@ describe('ts#dcr-proxy generator', () => {
     expect(tree.exists(`${constructDir}/my-proxy.ts`)).toBe(true);
   });
 
+  // Recorded over the `ts#project` id the underlying generator writes, so the
+  // version sync attributes this project's dependencies to this generator.
+  it('records itself as the generator that created the handler project', async () => {
+    await tsDcrProxyGenerator(tree, { name: 'my-proxy', iac: 'cdk' });
+
+    const projectJson = JSON.parse(
+      tree.read(`${handlerProjectDir}/project.json`, 'utf-8'),
+    );
+
+    expect(projectJson.metadata.generator).toBe(TS_DCR_PROXY_GENERATOR_INFO.id);
+  });
+
   it('defaults the name to dcr-proxy when none is given', async () => {
     await tsDcrProxyGenerator(tree, { iac: 'cdk' });
 

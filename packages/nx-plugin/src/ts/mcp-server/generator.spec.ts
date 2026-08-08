@@ -15,14 +15,22 @@ import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
 } from '../../utils/config/utils';
+import { declareDependencies } from '../../utils/declared-dependencies';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../utils/shared-constructs';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import { CONTAINER_VERSIONS } from '../../utils/versions';
 import {
   TS_MCP_SERVER_GENERATOR_INFO,
   tsMcpServerGenerator,
 } from './generator';
+
+const sharedConstructsDeclaration = declareDependencies()({
+  ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
+});
 
 describe('ts#mcp-server generator', () => {
   let tree: Tree;
@@ -699,7 +707,11 @@ describe('ts#mcp-server generator', () => {
   });
 
   it('should add generator metric to app.ts', async () => {
-    await sharedConstructsGenerator(tree, { iac: 'cdk' });
+    await sharedConstructsGenerator(
+      tree,
+      { iac: 'cdk' },
+      sharedConstructsDeclaration,
+    );
 
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
@@ -1112,9 +1124,14 @@ describe('ts#mcp-server generator', () => {
     const yarnRc = yaml.load(tree.read('.yarnrc.yml', 'utf-8')) as {
       catalog: Record<string, string>;
     };
+    // Classic yarn honours the `**/` form, berry the bare one — and berry deletes
+    // a glob descriptor on install, so both must be declared.
     expect(
       rootPackageJson.resolutions?.['**/@modelcontextprotocol/sdk/zod'],
     ).toBe(yarnRc.catalog.zod);
+    expect(rootPackageJson.resolutions?.['@modelcontextprotocol/sdk/zod']).toBe(
+      yarnRc.catalog.zod,
+    );
   });
 
   it.each(['pnpm', 'npm', 'bun'] as const)(

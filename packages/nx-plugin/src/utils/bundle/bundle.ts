@@ -12,13 +12,23 @@ import {
   type Tree,
 } from '@nx/devkit';
 import { applyGritQL } from '../ast';
+import {
+  type DependencyDeclaration,
+  forDependencies,
+  type MustDeclare,
+} from '../declared-dependencies';
 import { addDependenciesToPackageJson } from '../dependencies';
 import {
   addDependencyToTargetIfNotPresent,
   normalizeTargetKeyOrder,
 } from '../nx';
 import { getRelativePathToRoot } from '../paths';
-import { withVersions } from '../versions';
+import { type ITsDepVersion, withVersions } from '../versions';
+
+/** Dependencies a caller must declare to add a TypeScript bundle target. */
+export const BUNDLE_DEPENDENCIES = [
+  { name: 'rolldown' },
+] as const satisfies readonly { name: ITsDepVersion }[];
 
 export interface AddPythonBundleTargetOptions {
   /**
@@ -127,10 +137,13 @@ export interface AddTypeScriptBundleTargetOptions {
 /**
  * Add a TypeScript bundle target using rolldown
  */
-export const addTypeScriptBundleTarget = async (
+export const addTypeScriptBundleTarget = async <
+  const D extends DependencyDeclaration,
+>(
   tree: Tree,
   project: ProjectConfiguration,
   opts: AddTypeScriptBundleTargetOptions,
+  declaration: D & MustDeclare<typeof BUNDLE_DEPENDENCIES, D>,
 ) => {
   project.targets ??= {};
 
@@ -218,5 +231,11 @@ export const addTypeScriptBundleTarget = async (
     }
   }
 
-  addDependenciesToPackageJson(tree, {}, withVersions(['rolldown']));
+  addDependenciesToPackageJson(
+    tree,
+    {},
+    withVersions(forDependencies<typeof BUNDLE_DEPENDENCIES>(declaration), [
+      'rolldown',
+    ]),
+  );
 };

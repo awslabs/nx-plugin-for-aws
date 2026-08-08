@@ -65,6 +65,8 @@ describe('trpc backend generator', () => {
       integrationPattern: 'isolated',
       generator: TRPC_BACKEND_GENERATOR_INFO.id,
       ports: [2022],
+      // Recorded so the version sync can tell a CDK project from a Terraform one.
+      iac: 'cdk',
     });
   });
 

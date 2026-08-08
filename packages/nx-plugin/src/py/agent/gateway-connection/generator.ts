@@ -11,7 +11,10 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { readAgentCoreGatewayMetadata } from '../../../agentcore-gateway/generator';
+import { addPyDependencies } from '../../../utils/add-dependencies';
 import {
+  AGENT_CONNECTION_PY_DEPENDENCIES,
+  type AgentFramework,
   addPythonCoreClient,
   addPythonReExport,
   ensurePythonAgentConnectionProject,
@@ -22,21 +25,45 @@ import {
   resolveAgentFramework,
 } from '../../../utils/agent-connection/agent-connection';
 import { addPythonDestructuredImport } from '../../../utils/ast';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { snakeCase } from '../../../utils/names';
 import {
+  addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
-import {
-  addDependenciesToPyProjectToml,
-  addWorkspaceDependencyToPyProject,
-} from '../../../utils/py';
+import { toProjectRelativePath } from '../../../utils/paths';
+import { addWorkspaceDependencyToPyProject } from '../../../utils/py';
 import type { PyAgentGatewayConnectionGeneratorSchema } from './schema';
+
+/** The metadata this generator records, which its predicates read. */
+export interface PyAgentGatewayConnectionMetadata {
+  readonly framework: AgentFramework;
+}
+
+// The framework picks the MCP client's extra deps, so it names its branch here.
+export const DEPENDENCIES =
+  declareDependencies<PyAgentGatewayConnectionMetadata>()({
+    py: [
+      { name: 'boto3' },
+      { name: 'httpx' },
+      { name: 'mcp' },
+      // Backs the LangChain client; it must not pull Strands in.
+      {
+        name: 'langchain-mcp-adapters',
+        when: (m) => m.framework === 'langchain',
+      },
+      ...ownedElsewhere(AGENT_CONNECTION_PY_DEPENDENCIES),
+    ],
+  });
 
 export const PY_AGENT_GATEWAY_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(import.meta.filename);
@@ -91,20 +118,23 @@ export const pyAgentGatewayConnectionGenerator = async (
   const framework = resolveAgentFramework(agentComponent.framework);
   const connection = PY_MCP_FAMILY_CONNECTIONS[framework];
 
-  await ensurePythonAgentConnectionProject(tree);
-  await addPythonCoreClient(tree, 'gateway', framework);
+  // Recorded below and read by the declaration's predicates, so the packages
+  // added here are exactly the ones the version sync will own.
+  const metadata: PyAgentGatewayConnectionMetadata = { framework };
+
+  await ensurePythonAgentConnectionProject(tree, DEPENDENCIES);
+  await addPythonCoreClient(tree, 'gateway', DEPENDENCIES, framework);
 
   const agentConnectionProjectDir = getPythonAgentConnectionProjectDir(tree);
   const agentConnectionModuleName = getPythonAgentConnectionModuleName(tree);
 
   // Shared MCP transport + signed httpx auth deps, plus whatever extra deps the
   // framework's MCP client needs (e.g. langchain-mcp-adapters for LangChain).
-  addDependenciesToPyProjectToml(tree, agentConnectionProjectDir, [
-    'boto3',
-    'httpx',
-    'mcp',
-    ...connection.deps,
-  ]);
+  // These belong to the shared agent-connection project, which holds the client.
+  addPyDependencies(tree, DEPENDENCIES, {
+    metadata,
+    projectRoot: agentConnectionProjectDir,
+  });
 
   const appDir = joinPathFragments(
     agentConnectionProjectDir,
@@ -197,6 +227,18 @@ export const pyAgentGatewayConnectionGenerator = async (
   if (projectConfigChanged) {
     updateProjectConfiguration(tree, sourceProject.name, sourceProject);
   }
+
+  // Recorded so the version sync knows this connection's dependencies are ours.
+  addComponentGeneratorMetadata(
+    tree,
+    sourceProject.name,
+    PY_AGENT_GATEWAY_CONNECTION_GENERATOR_INFO,
+    toProjectRelativePath(sourceProject, agentFilePath),
+    gatewayClassName,
+    // `sourcePath` names the source component this connection is made from, so
+    // the pair is identifiable rather than just the two projects.
+    { ...metadata, sourcePath: options.sourceComponent?.path },
+  );
 
   await addGeneratorMetricsIfApplicable(tree, [
     PY_AGENT_GATEWAY_CONNECTION_GENERATOR_INFO,

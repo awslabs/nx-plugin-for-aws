@@ -179,6 +179,7 @@ These apply to any `implementation`, whether it stands alone or forms the determ
 
 - **Transform source code with GritQL.** Any codemod that edits source — TypeScript, Python, HCL — must use the GritQL helpers in `utils/ast.ts` (`applyGritQL`, `matchGritQL`, `captureGritQL`, `insertViaGritQL`, `addDestructuredImport` and friends), the same way generators do. GritQL matches the AST, so one pattern holds across the formatting, whitespace, quoting and member ordering a user's copy will have drifted into. Regexes and string replacements are brittle by comparison: they match text that merely looks right, miss equivalent code written differently, and silently corrupt files — they are not acceptable for source transforms. Parse-able config is the exception, where a real parser beats both: `updateJson` for JSON, and the matching parser for other structured formats. Reserve textual edits for formats GritQL can't parse (e.g. Dockerfiles), and anchor them as tightly as you can.
 - **Pattern-match before writing.** Confirm the target still matches the shape the generator produced. If it doesn't, skip it and report it via `nextSteps` — plus `agentContext` in a hybrid, so the paired prompt can pick it up (both are `MigrationReturnObject` fields). Never rewrite what you don't recognise. `matchGritQL` is the natural way to make that check.
+- **`nextSteps` are work left for the user, not a log of what you did.** Nx prints them as the follow-up actions the user has to perform, so every entry must be something they need to do by hand: reconcile a file the codemod skipped, or finish something outside the migration's reach (`sync-vended-versions` asking for a package manager install to refresh the lock file, say). A note describing an edit the migration already made successfully is noise — it asks nothing of the user, and buries the entries that do among a list they have to read through. The migration's description already says what it changes, and `git diff` shows exactly what it did. So when a transform applies cleanly, add nothing; only the skipped and the not-yet-done get an entry. Don't add blanket advice that would apply to every migration either (redeploy, re-run the build) — that's noise for the same reason.
 - **Idempotent.** Re-running the migration must be a no-op, mirroring the generator idempotency principle above. As with generators, guard GritQL rewrites that inject code with a `where { ... <: not contains ... }` clause so a second run doesn't append a duplicate.
 - **Never destroy user intent.** The same rule as generators: unrecognised code is reported on, not rewritten.
 - **Format what you write.** Finish with `await formatFilesInSubtree(tree)`. `updateJson` / `writeJson` re-serialise the whole file and expand inline arrays, which the vended `format` target rejects — without this a clean migration run leaves the user's `build` failing.
@@ -192,9 +193,81 @@ Do not add a `version` field to `migrations.json` entries — versions arrive on
 
 A version already recorded in source always wins, so the backfilled values are stable and the release only has to reason about entries that are still unversioned.
 
+#### Vended dependency versions
+
+Version bumps ship themselves, and everything that makes that work lives in `utils/version-upgrade-migration/`. The weekly `update-versions` PR rewrites the vended versions in `utils/versions.ts` and nothing else needs authoring or generating per bump: `migrations.json` carries one committed `sync-vended-versions` entry marked `everyMigration: true`, pointing at `migration.ts`. That delegates to `syncVendedVersions` (`sync-vended-versions.ts`), which syncs TypeScript dependencies (catalogs and direct ranges), Python `pyproject.toml` pins, Terraform provider versions and the plugin version the metrics files report.
+
+An `everyMigration` entry is never backfilled or pinned — stamping re-writes its version to each pending release — so it runs on every upgrade, and always **last** in the run. Both fall out of the same mechanism: `nx migrate` gates a migration on `installed < version` and sorts the run ascending by version, so an entry carrying the pending version is always eligible and always sorts above the code migrations. Running last is what lets a code migration add a dependency that this then brings up to date. Target versions come from the installed plugin's own tables, so there is nothing release-specific to register. The flag is source-only and stripped from the published manifest.
+
+##### Declaring the dependencies a generator owns
+
+Only dependencies **this plugin added** are synced, so a package the user installed themselves keeps the version they chose. Every generator declares what it may add:
+
+```ts
+/** The metadata this generator records, which its predicates read. */
+export interface TsMcpServerMetadata {
+  readonly port: number;
+  readonly auth: string;
+}
+
+export const DEPENDENCIES = declareDependencies<TsMcpServerMetadata>()({
+  ts: [
+    { name: '@modelcontextprotocol/sdk' },
+    { name: 'express', when: (m) => m.auth === 'iam' },
+    ...SHARED_CONSTRUCTS_DEPENDENCIES,
+  ],
+  py: [{ name: 'mcp' }, { name: 'boto3' }],
+});
+```
+
+The declaration is passed to `withVersions` / `withPyVersions` and to every helper that adds dependencies, which is what enforces it: adding an undeclared package is a type error, and a helper's signature rejects a caller whose declaration doesn't cover what the helper adds — naming the missing packages. `MustDeclare` does that check, and a runtime guard catches anything that reaches it past the type checker.
+
+Consequences for authoring a generator:
+
+- **Declare every branch.** A declaration is static, so every conditional dependency appears; `when` decides which apply.
+- **Spread the helpers you call.** A helper publishes a `*_DEPENDENCIES` constant (`FS_DEPENDENCIES`, `SHARED_CONSTRUCTS_DEPENDENCIES`) covering what it adds, including its own nested helpers, so spreading one constant covers the whole chain.
+- **Name the export `DEPENDENCIES`.** The migration reads it by that name.
+- **Cover what you delegate to.** A helper taken through `MustDeclare` is checked by the compiler, but one that merely exports its own `DEPENDENCIES` (the AG-UI react connection, for instance) is not — spread it, as `ts#agent#react-connection` does.
+- **Wrap a spread the caller doesn't install.** A helper adds its packages to the project it owns, so a generator that spreads the constant to claim ownership must not also install it: wrap with `ownedElsewhere(...)`. Ownership is unaffected — the sync still upgrades those packages wherever they sit; only the install is skipped. If the helper is called down one branch only, wrap with `onlyWhen(..., predicate)` first, which keeps each entry's own condition as well as the branch:
+
+  ```ts
+  ...ownedElsewhere(onlyWhen(AGUI_DEPENDENCIES.ts, isAgUi)),
+  ```
+- **Record the generator against a project.** `addGeneratorMetadata` / `addComponentGeneratorMetadata` is what makes the declaration discoverable; without it the dependencies are never recognised as ours. Connection generators record too, even the ones that add no dependencies today, so adding one later is owned automatically.
+- **Add dependencies from the declaration, not a second list.** Call `addTsDependencies` / `addPyDependencies` with the declaration and the metadata; the call site names no packages. Gate anything option-specific with a `when` predicate, and flag entries with `dev`, `root` (workspace root manifest), `group` (pyproject dependency group) or `versionOnly` (owned so its pinned version stays current, but never installed here):
+
+  ```ts
+  addTsDependencies(tree, DEPENDENCIES, { metadata, projectRoot: project.root });
+  addPyDependencies(tree, DEPENDENCIES, { metadata, projectRoot: project.root });
+  ```
+
+  Both take the same options, so the two calls read alike. Omitting `projectRoot` targets the workspace root, which is also where `root: true` entries go regardless.
+
+- **Build the metadata once and use it twice.** Pass the very object recorded via `addGeneratorMetadata` / `addComponentGeneratorMetadata` to the dependency call, so what the generator adds and what the migration owns cannot drift. If a recorded value is computed later (an assigned port, say), move the dependency call below it rather than duplicating the literal.
+- **Only read recorded fields in a predicate.** The migration replays predicates against project metadata, so a field the generator never records can never match — the dependency would silently stop being upgraded. A predicate that reads absent metadata (or throws) counts as not applying: the migration will not claim a branch it cannot confirm. A test enforces that every field a predicate reads is a member of the generator's metadata interface.
+
+At upgrade time the sync reads the declarations of the generators the workspace has run and moves only those versions, always upwards. Ownership is per workspace, not per manifest: if a generator that owns `zod` has run anywhere, every `zod` in the workspace is synced.
+
+Two things follow for a generator author:
+
+- **Write an override in both yarn descriptor forms.** A generator pins a package under an override when a dependency's own range would otherwise resolve a second, incompatible copy (`ts#mcp-server`'s `zod`, `ts#rdb`'s `@types/pg`). Classic yarn honours only the `**/`-prefixed descriptor in a workspace, while berry honours only the bare one and *deletes* a glob descriptor on install (`YN0057`) — so writing one form alone leaves the dedupe silently inert under the other major. The sync keeps whichever fields the workspace's package manager reads up to date.
+- **Leave the nx packages alone.** They move through `packageJsonUpdates` rather than the sync, so `nx migrate` still collects Nx's own migrations for that hop. `TS_VERSIONS.nx` (`NX_VERSION`) is the single source of truth, and a test guards that every nx package matches it — a workspace nx even a patch apart hoists a second nested nx and the two deadlock `nx sync`.
+
 #### Testing
 
 Every migration needs a `migration.spec.ts` alongside it using `createTreeUsingTsSolutionSetup()`, covering: the migration applies to the vended shape, skips (and reports) code it doesn't recognise, and is idempotent.
+
+The `migrate` e2e test then covers every migration together: it creates a workspace on a released version, scaffolds it with that version's own generators, and upgrades it to the local build with the real `nx migrate` cycle — asserting re-running the migrations changes nothing and the workspace still builds. Run it with:
+
+```bash
+pnpm nx run @aws/nx-plugin-e2e:smoke-test --name=migrate
+```
+
+It does that once per recent release, so locally it runs every hop back to back. CI spreads them across machines with `NX_E2E_SHARD=<index>/<total>`, which is also how you run a single hop:
+
+```bash
+NX_E2E_SHARD=1/5 pnpm nx run @aws/nx-plugin-e2e:smoke-test --name=migrate
+```
 
 Unit tests only prove the migration does what you wrote it to do. Also **test the migration manually against a real workspace generated by the latest published version**, since that is the state your users are upgrading from. The goal is to confirm the migrated workspace matches what today's generators would produce.
 
@@ -252,9 +325,28 @@ Finally, verify the outcome:
 
 Worth repeating with a *customised* workspace: hand-edit the files your migration touches first, then check it leaves your edits alone and reports them via `nextSteps` / `agentContext` instead of clobbering them.
 
+### Connection Generators and the Graph Builder
+
+The docs site has a [Graph Builder](https://awslabs.github.io/nx-plugin-for-aws/en/get_started/graph-builder) where users sketch a workspace and copy the commands that scaffold it. It derives itself from the plugin's metadata, so a new generator mostly appears in it for free — but a generator that takes part in a **connection** needs three small things.
+
+1. **Declare the connection** in `packages/nx-plugin/src/connection/supported-connections.ts`. This is the source of truth for both the generator and the builder's palette and edges.
+
+2. **Give the generator's `schema.json` an `x-label`** — the short noun the palette shows, e.g. `"x-label": "MCP Server"`. Without one, a node is labelled with its raw generator id. `title` and `description` aren't used here: they're prose written for CLI prompts.
+
+3. **Record anything the connection requires of its endpoints' options** in `CONNECTION_CONSTRAINTS` in `packages/nx-plugin/src/connection/scaffold-catalog.ts`. If your connection generator throws when (say) the target isn't IAM-authenticated, add the matching constraint so the builder can tell the user while they're drawing rather than when the command fails.
+
+Everything else is inferred — whether the generator creates a project or adds a component, which project hosts a component, and which public generator selects a hidden one. `scaffold-catalog.spec.ts` fails with a specific message if a connection names a generator it can't work out how to run, so you'll be told rather than left with a silently missing palette entry.
+
+Finally, add the node's artwork and palette grouping to `PRESENTATION` in `docs/src/lib/graph-builder/catalog.ts`, alongside a logo in `docs/src/content/docs/assets/logos/`. A type without an entry still appears, just under "Other" with a generic mark.
+
 ### End to End Tests
 
 The end to end tests run our generators and check that generated projects function correctly (usually by performing a build).
+
+A new generator must be added to **both** generator matrices:
+
+- `e2e/src/smoke-tests/generator-matrix.ts` — runs each generator through the CLI, one invocation at a time, as a user would. This is what the package manager and IaC provider smoke tests scaffold with.
+- `packages/nx-plugin/src/internal/test-matrix/generator.ts` — a hidden generator which composes all the others for testing migrations between versions.
 
 First ensure you have at least compiled the Nx Plugin (`pnpm nx compile nx-plugin`)
 

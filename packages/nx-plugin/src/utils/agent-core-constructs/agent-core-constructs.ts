@@ -12,16 +12,28 @@ import {
 } from '@nx/devkit';
 import { addStarExport } from '../ast';
 import type { Containers } from '../containers';
+import {
+  type DeclaredPyDependency,
+  type DeclaredTsDependency,
+  type DependencyDeclaration,
+  forDependencies,
+  type MustDeclare,
+} from '../declared-dependencies';
 import { addDependenciesToPackageJson } from '../dependencies';
 import type { Iac } from '../iac';
 import { esmVars } from '../module-format';
 import { addDependencyToTargetIfNotPresent } from '../nx';
 import {
+  generatedInfrastructure,
+  generatedTerraform,
+  type IacMetadata,
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants';
 import {
+  type IPyDepVersion,
+  type ITsDepVersion,
   PY_VERSIONS,
   terraformProviderVersions,
   withVersions,
@@ -29,7 +41,41 @@ import {
 
 type IACProvider = { iac: Iac };
 
+/**
+ * Dependencies a caller must declare to add an AgentCore Gateway construct.
+ *
+ * Gated on infrastructure having been generated, since the construct helpers only
+ * run on that branch.
+ */
+export const AGENT_CORE_CONSTRUCTS_DEPENDENCIES = [
+  { name: 'ejs', when: generatedInfrastructure },
+  { name: '@aws-sdk/client-bedrock-agentcore', when: generatedInfrastructure },
+  { name: '@types/ejs', when: generatedInfrastructure },
+] as const satisfies readonly DeclaredTsDependency<
+  ITsDepVersion,
+  IacMetadata
+>[];
+
+/**
+ * Python versions the generated Terraform pins in an inline `uv run --with`
+ * script, rather than in any `pyproject.toml`.
+ *
+ * Spread through `ownedElsewhere` because nothing installs them into the
+ * workspace — the pin is owned so the version sync keeps it current, and gated on
+ * Terraform since the CDK branch writes no such script.
+ */
+export const AGENT_CORE_CONSTRUCTS_PY_DEPENDENCIES = [
+  { name: 'boto3', when: generatedTerraform },
+  { name: 'httpx', when: generatedTerraform },
+  { name: 'mcp', when: generatedTerraform },
+] as const satisfies readonly DeclaredPyDependency<
+  IPyDepVersion,
+  IacMetadata
+>[];
+
 export type AgentCoreAuth = 'iam' | 'cognito';
+
+export type AgentCoreSession = 's3' | 'in-memory';
 
 export interface AddAgentCoreInfraProps {
   nameClassName: string;
@@ -40,6 +86,8 @@ export interface AddAgentCoreInfraProps {
   appDirectory: string;
   serverProtocol: 'mcp' | 'http' | 'a2a';
   auth: AgentCoreAuth;
+  /** How this runtime's session should be persisted. MCP servers have no session, so pass 'in-memory'. */
+  session: AgentCoreSession;
   containers: Containers;
 }
 
@@ -170,7 +218,7 @@ const addAgentCoreTerraformInfra = (
       'app',
       options.appDirectory,
     ),
-    options,
+    { ...options, ...terraformProviderVersions() },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
@@ -204,6 +252,8 @@ export const addMcpServerInfra = async (
     serverProtocol: 'mcp',
     iac: options.iac,
     auth: options.auth,
+    // MCP servers are stateless (no conversation session to persist).
+    session: 'in-memory',
     containers: options.containers,
   });
 };
@@ -215,6 +265,7 @@ export interface AddAgentInfraProps {
   dockerImageTag: string;
   dockerOutputDir: string;
   auth: AgentCoreAuth;
+  session: AgentCoreSession;
   serverProtocol?: 'http' | 'a2a';
   containers: Containers;
 }
@@ -233,6 +284,7 @@ export const addAgentInfra = async (
     dockerImageTag: options.dockerImageTag,
     dockerOutputDir: options.dockerOutputDir,
     appDirectory: 'agents',
+    session: options.session,
     serverProtocol: options.serverProtocol ?? 'http',
     iac: options.iac,
     auth: options.auth,
@@ -249,13 +301,16 @@ export interface AddAgentCoreGatewayInfraProps {
   auth: AgentCoreAuth;
 }
 
-export const addAgentCoreGatewayInfra = async (
+export const addAgentCoreGatewayInfra = async <
+  const D extends DependencyDeclaration,
+>(
   tree: Tree,
   options: AddAgentCoreGatewayInfraProps & IACProvider,
+  declaration: D & MustDeclare<typeof AGENT_CORE_CONSTRUCTS_DEPENDENCIES, D>,
 ) => {
   switch (options.iac) {
     case 'cdk':
-      await addAgentCoreGatewayCDKInfra(tree, options);
+      await addAgentCoreGatewayCDKInfra(tree, options, declaration);
       break;
     case 'terraform':
       addAgentCoreGatewayTerraformInfra(tree, options);
@@ -283,6 +338,7 @@ export const addAgentCoreGatewayInfra = async (
 const addAgentCoreGatewayCDKInfra = async (
   tree: Tree,
   options: AddAgentCoreGatewayInfraProps,
+  declaration: DependencyDeclaration,
 ) => {
   // Generic gateway construct (readiness probe, policy engine, Cedar policy
   // loading) shared by all gateways
@@ -376,8 +432,14 @@ const addAgentCoreGatewayCDKInfra = async (
   // probe uses the AgentCore SDK client; declare both so the lint passes.
   addDependenciesToPackageJson(
     tree,
-    withVersions(['ejs', '@aws-sdk/client-bedrock-agentcore']),
-    withVersions(['@types/ejs']),
+    withVersions(
+      forDependencies<typeof AGENT_CORE_CONSTRUCTS_DEPENDENCIES>(declaration),
+      ['ejs', '@aws-sdk/client-bedrock-agentcore'],
+    ),
+    withVersions(
+      forDependencies<typeof AGENT_CORE_CONSTRUCTS_DEPENDENCIES>(declaration),
+      ['@types/ejs'],
+    ),
     joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'package.json'),
   );
 };

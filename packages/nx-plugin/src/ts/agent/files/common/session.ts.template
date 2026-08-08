@@ -1,0 +1,43 @@
+import { SessionManager } from '@strands-agents/sdk';
+import { LocalFileStorage<% if (session === 's3') { %>, S3Storage<% } else { %>, InMemoryStorage<% } %> } from '@strands-agents/sdk/storage';
+import {
+  getCurrentSessionId,
+<%_ if (session === 's3') { _%>
+  getAgentCoreRuntimeConfig,
+<%_ } _%>
+} from '<%- agentConnectionImport %>';
+
+/**
+ * Returns a SessionManager for persisting conversation state across
+ * invocations. Local development always uses local file storage for
+ * convenience, regardless of the configured session option. Without a
+ * configured session option, conversation state is kept in memory only and
+ * does not survive process restarts.
+ */
+export const getSessionManager = async (): Promise<SessionManager> => {
+  const sessionId = getCurrentSessionId();
+  if (!sessionId) {
+    throw new Error(
+      'No current session id — cannot resolve a SessionManager outside of a request scope.',
+    );
+  }
+  if (process.env.LOCAL_DEV === 'true') {
+    return new SessionManager({
+      sessionId,
+      storage: new LocalFileStorage('<%- localSessionsDir %>'),
+    });
+  }
+<%_ if (session === 's3') { _%>
+  const config = await getAgentCoreRuntimeConfig();
+  const bucketName =
+    config.agentRuntimes?.['<%- agentNameClassName %>']?.session?.bucketName;
+  if (!bucketName) {
+    throw new Error(
+      "No S3 bucket configured for this agent's session in runtime configuration.",
+    );
+  }
+  return new SessionManager({ sessionId, storage: new S3Storage(bucketName) });
+<%_ } else { _%>
+  return new SessionManager({ sessionId, storage: new InMemoryStorage() });
+<%_ } _%>
+};

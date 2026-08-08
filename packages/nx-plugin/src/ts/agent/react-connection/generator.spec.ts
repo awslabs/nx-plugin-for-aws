@@ -3,8 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { type Tree, updateJson } from '@nx/devkit';
+import { declareDependencies } from '../../../utils/declared-dependencies';
 import { expectHasMetricTags } from '../../../utils/metrics.spec';
-import { sharedConstructsGenerator } from '../../../utils/shared-constructs';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../../utils/shared-constructs';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
 import { tsProjectGenerator } from '../../lib/generator';
 import { tsReactWebsiteGenerator } from '../../react-website/app/generator';
@@ -13,6 +17,10 @@ import {
   TS_AGENT_REACT_CONNECTION_GENERATOR_INFO,
   tsAgentReactConnectionGenerator,
 } from './generator';
+
+const sharedConstructsDeclaration = declareDependencies()({
+  ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
+});
 
 describe('ts strands agent react connection generator', () => {
   let tree: Tree;
@@ -283,7 +291,11 @@ export function Main() {
   });
 
   it('should add generator metric to app.ts', async () => {
-    await sharedConstructsGenerator(tree, { iac: 'cdk' });
+    await sharedConstructsGenerator(
+      tree,
+      { iac: 'cdk' },
+      sharedConstructsDeclaration,
+    );
 
     await tsAgentReactConnectionGenerator(tree, {
       sourceProject: 'frontend',

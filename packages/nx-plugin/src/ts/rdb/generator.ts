@@ -4,6 +4,7 @@
  */
 import { relative } from 'node:path';
 import {
+  detectPackageManager,
   type GeneratorCallback,
   generateFiles,
   joinPathFragments,
@@ -12,12 +13,24 @@ import {
   updateJson,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
+import { addTsDependencies } from '../../utils/add-dependencies';
+import {
+  addTypeScriptBundleTarget,
+  BUNDLE_DEPENDENCIES,
+} from '../../utils/bundle/bundle';
 import { resolveContainers } from '../../utils/containers';
-import { addDependenciesToPackageJson } from '../../utils/dependencies';
-import { addDockerScanTarget, nodeImageVersions } from '../../utils/docker';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../../utils/declared-dependencies';
+import {
+  addDockerScanTarget,
+  DOCKER_DEPENDENCIES,
+  NODE_IMAGE_DEPENDENCIES,
+  nodeImageVersions,
+} from '../../utils/docker';
 import { formatFilesInSubtree } from '../../utils/format';
-import { FsCommands } from '../../utils/fs';
+import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs';
 import { updateGitIgnore } from '../../utils/git';
 import { resolveIac } from '../../utils/iac';
 import { installDependencies } from '../../utils/install';
@@ -35,15 +48,54 @@ import { getRelativePathToRootByDirectory } from '../../utils/paths';
 import { registerPnpmBuiltDependencies } from '../../utils/pnpm-workspace';
 import { assignPort } from '../../utils/port';
 import { addRdbInfra } from '../../utils/rdb-constructs/rdb-constructs';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../utils/shared-constructs';
+import {
+  type IacMetadata,
   PACKAGES_DIR,
   SHARED_SCRIPTS_DIR,
 } from '../../utils/shared-constructs-constants';
-import { sharedRdbScriptsGenerator } from '../../utils/shared-rdb-scripts';
-import { TS_VERSIONS, withVersions } from '../../utils/versions';
+import {
+  SHARED_RDB_SCRIPTS_DEPENDENCIES,
+  sharedRdbScriptsGenerator,
+} from '../../utils/shared-rdb-scripts';
+import { TS_VERSIONS } from '../../utils/versions';
 import tsProjectGenerator, { getTsLibDetails } from '../lib/generator';
 import type { TsRdbGeneratorSchema } from './schema';
+
+/** The metadata this generator records, which its predicates read. */
+export interface TsRdbMetadata extends IacMetadata {
+  readonly engine: TsRdbGeneratorSchema['engine'];
+}
+
+// Each entry names the engine branch it belongs to, so the same declaration
+// drives both adding and the version sync.
+export const DEPENDENCIES = declareDependencies<TsRdbMetadata>()({
+  ts: [
+    { name: '@aws-lambda-powertools/parameters' },
+    { name: '@aws-sdk/client-appconfigdata' },
+    { name: '@aws-sdk/client-secrets-manager' },
+    { name: '@aws-sdk/rds-signer' },
+    { name: '@prisma/client' },
+    { name: '@prisma/adapter-mariadb', when: (m) => m.engine === 'mysql' },
+    { name: 'mariadb', when: (m) => m.engine === 'mysql' },
+    { name: '@prisma/adapter-pg', when: (m) => m.engine !== 'mysql' },
+    { name: 'pg', when: (m) => m.engine !== 'mysql' },
+    { name: '@types/aws-lambda', dev: true },
+    { name: '@types/pg', when: (m) => m.engine !== 'mysql', dev: true },
+    // The prisma CLI and tsx run migration/seed scripts from the root.
+    { name: 'prisma', dev: true, root: true },
+    { name: 'tsx', dev: true, root: true },
+    ...ownedElsewhere(BUNDLE_DEPENDENCIES),
+    ...ownedElsewhere(FS_DEPENDENCIES),
+    ...ownedElsewhere(DOCKER_DEPENDENCIES),
+    ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
+    ...ownedElsewhere(SHARED_RDB_SCRIPTS_DEPENDENCIES),
+    ...ownedElsewhere(NODE_IMAGE_DEPENDENCIES),
+  ],
+});
 
 export const TS_RDB_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
@@ -131,7 +183,7 @@ export const tsRdbGenerator = async (
     templateOptions,
   );
   updateGitIgnore(tree, dir, (patterns) => [...patterns, 'generated/prisma']);
-  await sharedRdbScriptsGenerator(tree, options.engine);
+  await sharedRdbScriptsGenerator(tree, options.engine, DEPENDENCIES);
   const waitForDbScript =
     options.engine === 'mysql'
       ? 'wait-for-mysql-db.ts'
@@ -143,7 +195,7 @@ export const tsRdbGenerator = async (
   const relativePathToRoot = getRelativePathToRootByDirectory(
     projectConfig.root,
   );
-  const fs = new FsCommands(tree);
+  const fs = new FsCommands(tree, DEPENDENCIES);
   const migrationBundleDir = joinPathFragments(
     'dist',
     projectConfig.root,
@@ -153,14 +205,24 @@ export const tsRdbGenerator = async (
   const migrationDockerImageTag = `${getNpmScope(tree)}-${kebabCase(options.name)}-migration:latest`;
 
   if (options.infra !== 'none') {
-    await addTypeScriptBundleTarget(tree, projectConfig, {
-      targetFilePath: 'src/migration-handler.ts',
-      bundleOutputDir: 'migration',
-    });
-    await addTypeScriptBundleTarget(tree, projectConfig, {
-      targetFilePath: 'src/create-db-user-handler.ts',
-      bundleOutputDir: 'create-db-user',
-    });
+    await addTypeScriptBundleTarget(
+      tree,
+      projectConfig,
+      {
+        targetFilePath: 'src/migration-handler.ts',
+        bundleOutputDir: 'migration',
+      },
+      DEPENDENCIES,
+    );
+    await addTypeScriptBundleTarget(
+      tree,
+      projectConfig,
+      {
+        targetFilePath: 'src/create-db-user-handler.ts',
+        bundleOutputDir: 'create-db-user',
+      },
+      DEPENDENCIES,
+    );
     const bundleTarget = projectConfig.targets['bundle'];
     // The bundle target starts with a single rolldown `command`. Wrap it with
     // the migration asset copy steps, unless it has already been transformed
@@ -234,8 +296,13 @@ export const tsRdbGenerator = async (
       },
     },
   };
+  // Recorded in the metadata below so the version sync can tell a CDK project
+  // from a Terraform one; undefined when no infrastructure was generated, in
+  // which case neither provider's packages were added.
+  const iac =
+    options.infra !== 'none' ? await resolveIac(tree, options.iac) : undefined;
+
   if (options.infra !== 'none') {
-    const iac = await resolveIac(tree, options.iac);
     if (iac === 'terraform') {
       projectConfig.targets['docker'] = {
         cache: true,
@@ -247,25 +314,38 @@ export const tsRdbGenerator = async (
       };
       addDependencyToTargetIfNotPresent(projectConfig, 'build', 'docker');
 
-      addDockerScanTarget(tree, {
-        project: projectConfig,
-        containerEngine,
-        trivyTargetName: 'trivy',
-        dockerTargetName: 'docker',
-        imageTags: [migrationDockerImageTag],
-      });
+      addDockerScanTarget(
+        tree,
+        {
+          project: projectConfig,
+          containerEngine,
+          trivyTargetName: 'trivy',
+          dockerTargetName: 'docker',
+          imageTags: [migrationDockerImageTag],
+        },
+        DEPENDENCIES,
+      );
     }
     addDependencyToTargetIfNotPresent(projectConfig, 'build', 'bundle');
   }
   addDependencyToTargetIfNotPresent(projectConfig, 'compile', 'generate');
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfig);
-  addGeneratorMetadata(tree, fullyQualifiedName, TS_RDB_GENERATOR_INFO, {
+  // Recorded here and read by the declaration's predicates, so the packages
+  // added below are exactly the ones the version sync will own.
+  const metadata: TsRdbMetadata = {
     engine: options.engine,
-  });
+    ...(iac ? { iac } : {}),
+  };
+  addGeneratorMetadata(
+    tree,
+    fullyQualifiedName,
+    TS_RDB_GENERATOR_INFO,
+    metadata,
+  );
 
   if (options.infra !== 'none') {
     const iac = await resolveIac(tree, options.iac);
-    await sharedConstructsGenerator(tree, { iac });
+    await sharedConstructsGenerator(tree, { iac }, DEPENDENCIES);
     await addRdbInfra(tree, {
       iac,
       projectName: fullyQualifiedName,
@@ -289,28 +369,29 @@ export const tsRdbGenerator = async (
     });
   }
 
-  addDependenciesToPackageJson(
-    tree,
-    withVersions([
-      '@aws-lambda-powertools/parameters',
-      '@aws-sdk/client-appconfigdata',
-      '@aws-sdk/client-secrets-manager',
-      '@aws-sdk/rds-signer',
-      '@prisma/client',
-      ...(options.engine === 'mysql'
-        ? (['@prisma/adapter-mariadb', 'mariadb'] as const)
-        : (['@prisma/adapter-pg', 'pg'] as const)),
-    ]),
-    withVersions([
-      '@types/aws-lambda',
-      ...(options.engine === 'mysql'
-        ? ([] as const)
-        : (['@types/pg'] as const)),
-    ]),
-    joinPathFragments(projectConfig.root, 'package.json'),
-  );
-  // The prisma CLI and tsx run migration/seed scripts from the root.
-  addDependenciesToPackageJson(tree, {}, withVersions(['prisma', 'tsx']));
+  addTsDependencies(tree, DEPENDENCIES, {
+    metadata,
+    projectRoot: projectConfig.root,
+  });
+
+  // @prisma/adapter-pg depends on @types/pg ^8.16.0. Yarn does not dedupe it to
+  // the workspace's pinned @types/pg, so it installs a separate copy under the
+  // adapter's own node_modules whenever a newer @types/pg is published. The two
+  // copies declare structurally incompatible Pool types, so passing our `new
+  // Pool(...)` to `new PrismaPg(...)` fails to compile. Scope the resolution to
+  // the adapter so other @types/pg consumers are unaffected. Classic yarn only
+  // honours the `**/`-prefixed descriptor in a workspace and berry only the
+  // bare one, so declare both.
+  if (options.engine === 'postgres' && detectPackageManager() === 'yarn') {
+    updateJson(tree, 'package.json', (packageJson) => {
+      packageJson.resolutions = {
+        ...packageJson.resolutions,
+        '**/@prisma/adapter-pg/@types/pg': TS_VERSIONS['@types/pg'],
+        '@prisma/adapter-pg/@types/pg': TS_VERSIONS['@types/pg'],
+      };
+      return packageJson;
+    });
+  }
 
   registerPnpmBuiltDependencies(tree, {
     '@prisma/engines': false,

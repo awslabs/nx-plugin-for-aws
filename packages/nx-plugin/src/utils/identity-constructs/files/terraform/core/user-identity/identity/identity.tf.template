@@ -44,6 +44,14 @@ variable "logout_urls" {
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
+locals {
+  # Local dev server origins permitted to complete the sign-in redirect
+  local_callback_urls = [
+    "http://localhost:4200",
+    "http://localhost:4300"
+  ]
+}
+
 # Random suffix for resource names
 resource "random_id" "unique_suffix" {
   byte_length = 4
@@ -260,6 +268,21 @@ resource "aws_wafv2_web_acl" "user_pool_waf" {
       managed_rule_group_statement {
         name        = "AWSManagedRulesCommonRuleSet"
         vendor_name = "AWS"
+
+        # EC2MetaDataSSRF_QUERYARGUMENTS treats the loopback redirect_uri the
+        # Hosted UI receives during local sign-in as an SSRF attempt. Counted
+        # only while a local callback URL is allowed; every other rule blocks.
+        dynamic "rule_action_override" {
+          for_each = length(local.local_callback_urls) > 0 ? [1] : []
+
+          content {
+            name = "EC2MetaDataSSRF_QUERYARGUMENTS"
+
+            action_to_use {
+              count {}
+            }
+          }
+        }
       }
     }
 
@@ -349,15 +372,9 @@ resource "aws_cognito_user_pool_client" "web_client" {
   allowed_oauth_scopes = ["email", "openid", "profile"]
 
   # OAuth-dependent URLs - set after OAuth configuration
-  callback_urls = concat([
-    "http://localhost:4200",
-    "http://localhost:4300"
-  ], var.callback_urls)
+  callback_urls = concat(local.local_callback_urls, var.callback_urls)
 
-  logout_urls = concat([
-    "http://localhost:4200",
-    "http://localhost:4300"
-  ], var.logout_urls)
+  logout_urls = concat(local.local_callback_urls, var.logout_urls)
 
   # Security settings
   prevent_user_existence_errors = "ENABLED"

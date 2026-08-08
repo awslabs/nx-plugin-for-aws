@@ -12,11 +12,20 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { addApiGatewayInfra } from '../../utils/api-constructs/api-constructs';
+import { addPyDependencies } from '../../utils/add-dependencies';
+import {
+  API_CONSTRUCTS_DEPENDENCIES,
+  API_CONSTRUCTS_PY_DEPENDENCIES,
+  addApiGatewayInfra,
+} from '../../utils/api-constructs/api-constructs';
 import { addSharedConstructsOpenApiMetadataGenerateTarget } from '../../utils/api-constructs/open-api-metadata';
 import { addPythonBundleTarget } from '../../utils/bundle/bundle';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
-import { FsCommands } from '../../utils/fs';
+import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs';
 import { resolveIac } from '../../utils/iac';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
@@ -29,13 +38,42 @@ import {
 import { sortObjectKeys } from '../../utils/object';
 import { assignPort } from '../../utils/port';
 import {
-  addDependenciesToDependencyGroupInPyProjectToml,
-  addDependenciesToPyProjectToml,
-} from '../../utils/py';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../utils/shared-constructs';
+import type { IacMetadata } from '../../utils/shared-constructs-constants';
 import pyProjectGenerator, { getPyProjectDetails } from '../project/generator';
 import { addOpenApiGeneration } from './react/open-api';
 import type { PyFastApiProjectGeneratorSchema } from './schema';
+
+/** The metadata this generator records, which its predicates read. */
+export interface PyFastApiMetadata extends IacMetadata {
+  readonly apiName: string;
+  readonly apiType: string;
+  readonly auth: PyFastApiProjectGeneratorSchema['auth'];
+}
+
+export const DEPENDENCIES = declareDependencies<PyFastApiMetadata>()({
+  ts: [
+    ...ownedElsewhere(FS_DEPENDENCIES),
+    ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
+    ...ownedElsewhere(API_CONSTRUCTS_DEPENDENCIES),
+  ],
+  py: [
+    { name: 'fastapi' },
+    { name: 'uvicorn' },
+    { name: 'aws-lambda-powertools' },
+    { name: 'aws-lambda-powertools[tracer]' },
+    // The custom authorizer handler parses its event with the parser extra.
+    {
+      name: 'aws-lambda-powertools[parser]',
+      when: (m) => m.auth === 'custom',
+    },
+    // `fastapi dev` runs the local server.
+    { name: 'fastapi[standard]', group: 'dev' },
+    ...ownedElsewhere(API_CONSTRUCTS_PY_DEPENDENCIES),
+  ],
+});
 
 export const FAST_API_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
@@ -88,7 +126,7 @@ export const pyFastApiProjectGenerator = async (
     addPythonBundleTarget(projectConfig);
 
   // Add a command to copy run.sh to the bundle output for Lambda Web Adapter
-  const fs = new FsCommands(tree);
+  const fs = new FsCommands(tree, DEPENDENCIES);
   const bundleTarget = projectConfig.targets[bundleTargetName];
   const copyRunShCommand = fs.cp(
     `{projectRoot}/run.sh`,
@@ -121,11 +159,24 @@ export const pyFastApiProjectGenerator = async (
     },
   };
 
-  projectConfig.metadata = {
-    ...projectConfig.metadata,
+  // Recorded in the metadata below so the version sync can tell a CDK
+  // project from a Terraform one; undefined when no infrastructure was
+  // generated, in which case neither provider's packages were added.
+  const iac =
+    schema.infra !== 'none' ? await resolveIac(tree, schema.iac) : undefined;
+
+  // Recorded below and read by the declaration's predicates, so the packages
+  // added here are exactly the ones the version sync will own.
+  const metadata: PyFastApiMetadata = {
     apiName: schema.name,
     apiType: 'fast-api',
     auth: schema.auth,
+    ...(iac ? { iac } : {}),
+  };
+
+  projectConfig.metadata = {
+    ...projectConfig.metadata,
+    ...metadata,
   } as any;
 
   projectConfig.targets = sortObjectKeys(projectConfig.targets);
@@ -156,11 +207,13 @@ export const pyFastApiProjectGenerator = async (
   );
 
   if (schema.infra !== 'none') {
-    const iac = await resolveIac(tree, schema.iac);
-
-    await sharedConstructsGenerator(tree, {
-      iac,
-    });
+    await sharedConstructsGenerator(
+      tree,
+      {
+        iac,
+      },
+      DEPENDENCIES,
+    );
 
     if (schema.auth === 'custom') {
       const authorizerType = schema.infra === 'http-lambda' ? 'http' : 'rest';
@@ -185,20 +238,24 @@ export const pyFastApiProjectGenerator = async (
     }
 
     // Add the CDK construct to deploy the FastAPI to shared constructs
-    await addApiGatewayInfra(tree, {
-      apiProjectName: projectConfig.name,
-      apiNameClassName,
-      apiNameKebabCase,
-      constructType: schema.infra === 'http-lambda' ? 'http' : 'rest',
-      backend: {
-        type: 'fastapi',
-        moduleName: normalizedModuleName,
-        bundleOutputDir,
-        integrationPattern,
+    await addApiGatewayInfra(
+      tree,
+      {
+        apiProjectName: projectConfig.name,
+        apiNameClassName,
+        apiNameKebabCase,
+        constructType: schema.infra === 'http-lambda' ? 'http' : 'rest',
+        backend: {
+          type: 'fastapi',
+          moduleName: normalizedModuleName,
+          bundleOutputDir,
+          integrationPattern,
+        },
+        auth: schema.auth,
+        iac,
       },
-      auth: schema.auth,
-      iac,
-    });
+      DEPENDENCIES,
+    );
 
     addSharedConstructsOpenApiMetadataGenerateTarget(tree, {
       iac,
@@ -208,18 +265,7 @@ export const pyFastApiProjectGenerator = async (
     });
   }
 
-  addDependenciesToPyProjectToml(tree, dir, [
-    'fastapi',
-    'uvicorn',
-    'aws-lambda-powertools',
-    'aws-lambda-powertools[tracer]',
-    ...(schema.auth === 'custom'
-      ? (['aws-lambda-powertools[parser]'] as const)
-      : []),
-  ]);
-  addDependenciesToDependencyGroupInPyProjectToml(tree, dir, 'dev', [
-    'fastapi[standard]',
-  ]);
+  addPyDependencies(tree, DEPENDENCIES, { metadata, projectRoot: dir });
 
   addGeneratorMetadata(tree, fullyQualifiedName, FAST_API_GENERATOR_INFO);
 

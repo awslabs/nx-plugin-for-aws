@@ -13,11 +13,27 @@ import {
 import { addTargetToLocalDev } from '../../../connection/local-dev';
 import runtimeConfigGenerator from '../../../ts/react-website/runtime-config/generator';
 import { addSingleImport, applyGritQL } from '../../ast';
+import {
+  type DependencyDeclaration,
+  forDependencies,
+  type MustDeclare,
+} from '../../declared-dependencies';
 import { addDependenciesToPackageJson } from '../../dependencies';
 import { updateGitIgnore } from '../../git';
 import { kebabCase, toClassName } from '../../names';
 import { sortObjectKeys } from '../../object';
-import { withVersions } from '../../versions';
+import { type ITsDepVersion, withVersions } from '../../versions';
+
+/** Dependencies a caller must declare to add an OpenAPI React client. */
+export const OPEN_API_REACT_DEPENDENCIES = [
+  { name: 'oidc-client-ts' },
+  { name: 'react-oidc-context' },
+  { name: '@aws-sdk/credential-provider-cognito-identity' },
+  { name: 'aws4fetch' },
+  { name: '@tanstack/react-query' },
+  { name: '@tanstack/react-query-devtools' },
+  { name: '@smithy/types' },
+] as const satisfies readonly { name: ITsDepVersion }[];
 
 export interface AddOpenApiReactClientOptions {
   /**
@@ -69,7 +85,9 @@ export interface AddOpenApiReactClientOptions {
 /**
  * Adds an OpenAPI React client to the frontend project along with supporting build targets
  */
-export const addOpenApiReactClient = async (
+export const addOpenApiReactClient = async <
+  const D extends DependencyDeclaration,
+>(
   tree: Tree,
   {
     apiName,
@@ -83,6 +101,7 @@ export const addOpenApiReactClient = async (
     isAgentRuntime = false,
     skipLocalDev = false,
   }: AddOpenApiReactClientOptions,
+  declaration: D & MustDeclare<typeof OPEN_API_REACT_DEPENDENCIES, D>,
 ) => {
   const clientGenTarget = `generate:${kebabCase(apiName)}-client`;
   const clientGenWatchTarget = `watch-${clientGenTarget}`;
@@ -257,20 +276,26 @@ export const addOpenApiReactClient = async (
 
   addDependenciesToPackageJson(
     tree,
-    withVersions([
-      ...((auth === 'iam'
-        ? [
-            'oidc-client-ts',
-            'react-oidc-context',
-            '@aws-sdk/credential-provider-cognito-identity',
-            'aws4fetch',
-          ]
-        : []) as any),
-      ...((auth === 'cognito' ? ['react-oidc-context'] : []) as any),
-      '@tanstack/react-query',
-      '@tanstack/react-query-devtools',
-    ]),
-    withVersions(['@smithy/types']),
+    withVersions(
+      forDependencies<typeof OPEN_API_REACT_DEPENDENCIES>(declaration),
+      [
+        ...((auth === 'iam'
+          ? [
+              'oidc-client-ts',
+              'react-oidc-context',
+              '@aws-sdk/credential-provider-cognito-identity',
+              'aws4fetch',
+            ]
+          : []) as any),
+        ...((auth === 'cognito' ? ['react-oidc-context'] : []) as any),
+        '@tanstack/react-query',
+        '@tanstack/react-query-devtools',
+      ],
+    ),
+    withVersions(
+      forDependencies<typeof OPEN_API_REACT_DEPENDENCIES>(declaration),
+      ['@smithy/types'],
+    ),
     joinPathFragments(frontendProjectConfig.root, 'package.json'),
   );
 };

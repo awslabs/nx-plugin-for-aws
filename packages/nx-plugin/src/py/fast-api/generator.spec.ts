@@ -340,6 +340,8 @@ describe('fastapi project generator', () => {
       auth: 'iam',
       generator: FAST_API_GENERATOR_INFO.id,
       ports: [8000],
+      // Recorded so the version sync can tell a CDK project from a Terraform one.
+      iac: 'cdk',
     });
   });
 

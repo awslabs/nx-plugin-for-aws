@@ -1,6 +1,6 @@
 ---
-title: "TypeScript Strands 代理"
-description: "生成用于构建带工具的 AI 代理的 TypeScript Strands 代理,并部署到 Amazon Bedrock AgentCore Runtime"
+title: TypeScript Agent
+description: 生成用于构建带工具的 AI 代理的 TypeScript Agent,并部署到 Amazon Bedrock AgentCore Runtime
 generator: ts#agent
 ---
 
@@ -16,7 +16,7 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import PackageManagerExecCommand from '@components/package-manager-exec-command.astro';
 import OptionFilter from '@components/option-filter.astro';
 
-生成一个 TypeScript [Agent](https://strandsagents.com/) 用于构建带有工具的 AI 代理,并可选择将其部署到 [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/)。默认情况下,该生成器使用基于 WebSocket 的 [tRPC](https://trpc.io/) 来利用 [AgentCore 的双向流支持](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html),实现实时、类型安全的通信。或者,您可以选择 [Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) 协议,以实现与其他 A2A 兼容代理的互操作性,或者选择 [AG-UI](https://docs.ag-ui.com/) 协议,通过 [CopilotKit](https://docs.copilotkit.ai/aws-strands) 实现直接的前端集成。
+生成一个 TypeScript [Strands Agent](https://strandsagents.com/) 用于构建带有工具的 AI 代理,并可选择将其部署到 [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/)。默认情况下,该生成器使用基于 WebSocket 的 [tRPC](https://trpc.io/) 来利用 [AgentCore 的双向流支持](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-get-started-websocket.html),实现实时、类型安全的通信。或者,您可以选择 [Agent-to-Agent (A2A)](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) 协议,以实现与其他 A2A 兼容代理的互操作性,或者选择 [AG-UI](https://docs.ag-ui.com/) 协议,通过 [CopilotKit](https://docs.copilotkit.ai/aws-strands) 实现直接的前端集成。
 
 ## 什么是 Strands?
 
@@ -55,11 +55,12 @@ import OptionFilter from '@components/option-filter.astro';
 <FileTree>
   - your-project/
     - src/
-      - agent/ (如果指定,则为自定义名称)
+      - agent/ (或自定义名称,如果指定)
         - index.ts Bedrock AgentCore Runtime 的入口点(tRPC/WebSocket 服务器)
         - init.ts tRPC 初始化
         - router.ts 带有代理过程的 tRPC 路由器
         - agent.ts 带有示例工具的主代理定义
+        - session.ts 解析用于持久化会话状态的 SessionManager
         - client.ts 用于调用代理的客户端
         - agent-core-trpc-client.ts 用于连接到 AgentCore Runtime 上的代理的客户端工厂
         - Dockerfile 托管代理的入口点(当 `infra` 设置为 `None` 时排除)
@@ -76,9 +77,10 @@ import OptionFilter from '@components/option-filter.astro';
 <FileTree>
   - your-project/
     - src/
-      - agent/ (如果指定,则为自定义名称)
+      - agent/ (或自定义名称,如果指定)
         - index.ts A2A Express 服务器入口点
         - agent.ts 带有示例工具的主代理定义
+        - session.ts 解析用于持久化会话状态的 SessionManager
         - Dockerfile 托管代理的入口点(当 `infra` 设置为 `None` 时排除)
     - package.json 已更新 Strands 和 Express 依赖项
     - project.json 已更新代理服务目标
@@ -93,9 +95,10 @@ import OptionFilter from '@components/option-filter.astro';
 <FileTree>
   - your-project/
     - src/
-      - agent/ (如果指定,则为自定义名称)
+      - agent/ (或自定义名称,如果指定)
         - index.ts AG-UI 服务器入口点(Express + SSE)
         - agent.ts 带有示例工具的主代理定义
+        - session.ts 解析用于持久化会话状态的 SessionManager
         - Dockerfile 托管代理的入口点(当 `infra` 设置为 `None` 时排除)
     - package.json 已更新 Strands 和 AG-UI 依赖项
     - project.json 已更新代理服务目标
@@ -134,8 +137,8 @@ import OptionFilter from '@components/option-filter.astro';
 </Infrastructure>
 </OptionFilter>
 
-<OptionFilter when={{ infra: 'none' }} description="No infrastructure is vended for infra=None">
-如果您为 `infra` 选择了 `None`,则不会生成 CDK 构造或 Terraform 模块 — Agent 只能在本地运行。在此模式下,`auth` 选项会被忽略,因为没有需要进行身份验证的托管端点。
+<OptionFilter when={{ infra: 'none' }} description="No infrastructure is vended for infra=none">
+如果您为 `infra` 选择了 `none`,则不会生成 CDK 构造或 Terraform 模块 — Agent 只能在本地运行。在此模式下,`auth` 选项会被忽略,因为没有需要进行身份验证的托管端点。
 </OptionFilter>
 
 #### 架构
@@ -167,7 +170,7 @@ TypeScript Agent 使用基于 WebSocket 的 [tRPC](https://trpc.io/),利用 [Age
 工具是 AI 代理可以调用以执行操作的函数。您可以在 `agent.ts` 文件中添加新工具:
 
 ```typescript
-import { Agent, tool } from '@agents/sdk';
+import { Agent, tool } from '@strands-agents/sdk';
 import { z } from 'zod';
 
 const letterCounter = tool({
@@ -185,7 +188,7 @@ const letterCounter = tool({
 });
 
 // Add tools to your agent
-export const getAgent = async (sessionId: string) => {
+export const getAgent = async () => {
   return new Agent({
     systemPrompt: 'You are a helpful assistant with access to various tools.',
     tools: [letterCounter],
@@ -203,9 +206,9 @@ Strands 框架自动处理:
 默认情况下,Strands 代理使用 Claude 4 Sonnet,但您可以轻松切换模型提供商:
 
 ```typescript
-import { Agent } from '@agents/sdk';
-import { BedrockModel } from '@agents/sdk/models/bedrock';
-import { OpenAIModel } from '@agents/sdk/models/openai';
+import { Agent } from '@strands-agents/sdk';
+import { BedrockModel } from '@strands-agents/sdk/models/bedrock';
+import { OpenAIModel } from '@strands-agents/sdk/models/openai';
 
 // Use Bedrock
 const bedrockModel = new BedrockModel({
@@ -288,7 +291,7 @@ AG-UI 代理设计为直接由前端使用。使用 <Link path="/guides/connecti
 生成器为每个协议生成一个 `scripts/<your-agent-name>/chat.ts` 文件。您可以在演进代理的输入形状时对其进行自定义。默认情况下它连接到本地代理,或者在设置 `RUNTIME_CONFIG_APP_ID` 时连接到已部署的代理(请参阅下面的[与已部署的代理聊天](#chat-with-your-deployed-agent))。
 
 <OptionFilter when={{ infra: 'agentcore' }} description="Deployed agent chat details">
-#### Chat with your deployed agent
+#### 与已部署的代理聊天
 
 要与部署到 Bedrock AgentCore 的代理聊天,请将 `RUNTIME_CONFIG_APP_ID` 环境变量设置为部署的 AppConfig 应用程序 ID(由已部署堆栈输出为 `RuntimeConfigApplicationId`)。聊天脚本从运行时配置中解析代理的运行时 ARN 并连接到已部署的端点:
 
@@ -347,6 +350,29 @@ bundle 目标使用 `index.ts` 作为在 Bedrock AgentCore Runtime 上托管的 
 您可以在 CloudWatch AWS 控制台中找到追踪,方法是在菜单中选择"GenAI Observability"。请注意,要填充追踪,您需要启用 [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html)。
 
 有关更多详细信息,请参阅 [AgentCore 关于可观测性的文档](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html)。
+
+### 会话管理
+
+`session` 选项控制您的代理如何在调用之间持久化会话状态(消息历史、工具状态等),使用 Strands SDK 的 [SessionManager](https://strandsagents.com/docs/user-guide/concepts/agents/session-management/):
+
+- **`s3`**(默认): CDK/Terraform 基础设施为会话数据提供专用的 S3 存储桶,使用专用的 KMS 密钥加密并阻止所有公共访问;服务器访问日志通过同一密钥传送到 CloudWatch Logs 日志组。代理的 IAM 角色被授予对存储桶的读/写/列表/删除访问权限以及对密钥的解密/生成数据密钥访问权限,存储桶名称与代理的 ARN 一起注册在 AppConfig 运行时配置中。
+- **`in-memory`**: 不提供存储桶。会话状态仅在运行进程的生命周期内保存在内存中,不会在重启或缩容后保留。
+
+这在生成的 `session.ts` 中实现,它导出一个 `getSessionManager()` 函数,为当前会话解析 `SessionManager`。
+
+<OptionFilter when={{ protocol: 'ag-ui' }} description="AG-UI session wiring">
+由于 AG-UI 为每个会话线程克隆一个模板代理,`getSessionManager` 在 `index.ts` 中作为 `sessionManagerProvider` 连接到 `StrandsAgent` 配置中,因此为每个线程解析一个新的 `SessionManager`,而不是烘焙到共享的模板代理中。
+</OptionFilter>
+
+<OptionFilter when={{ protocol: ['http', 'a2a'] }} description="HTTP/A2A session wiring">
+由于 `withSessionId` 已经为每个会话缓存一个 `Agent` 实例,`getSessionManager` 在 `agent.ts` 中的 `getAgent` 的 `new Agent({ sessionManager: await getSessionManager() })` 调用中直接调用。
+</OptionFilter>
+
+会话 ID 本身来自 AgentCore Runtime 会话(通过 A2A/AG-UI 的 `x-amzn-bedrock-agentcore-runtime-session-id` 标头传播,或 HTTP/tRPC 的 WebSocket 连接上下文),并绑定到基于 [`AsyncLocalStorage`](https://nodejs.org/api/async_context.html#class-asynclocalstorage) 的上下文,因此 `getCurrentSessionId()` 可以在请求中的任何位置解析它 — 包括通过 <Link path="/guides/connection">`connection` 生成器</Link>连接的任何下游 MCP 或 A2A 客户端,因此整个调用链共享一致的会话。
+
+:::note[本地开发]
+在本地运行时(`LOCAL_DEV=true`,由 `-dev` 目标自动设置),无论配置的 `session` 选项如何,会话数据始终存储在工作区根目录的 `tmp/agents/strands/<agent-name>` 下的磁盘上,以方便使用。
+:::
 </OptionFilter>
 
 ## 调用您的 Agent
@@ -366,7 +392,7 @@ import { AgentClient } from '../packages/<project>/src/agent/client.js';
 
 const client = AgentClient.local({ url: 'http://localhost:8081/ws' });
 
-client.invoke.subscribe({ message: 'what is 1 plus 1?' }, { onData: console.log });
+client.invoke.subscribe({ prompt: 'what is 1 plus 1?' }, { onData: console.log });
 ```
 
 :::tip[快速测试]
@@ -400,7 +426,7 @@ const client = AgentClient.withIamAuth({
   agentRuntimeArn: 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent',
 });
 
-client.invoke.subscribe({ message: 'what is 1 plus 1?' }, {
+client.invoke.subscribe({ prompt: 'what is 1 plus 1?' }, {
   onData: (message) => console.log(message),
   onError: (error) => console.error(error),
   onComplete: () => console.log('Done'),

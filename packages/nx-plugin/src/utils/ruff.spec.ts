@@ -6,8 +6,11 @@
 import { execFileSync } from 'child_process';
 import { createRequire } from 'module';
 import { describe, expect, it } from 'vitest';
+import { declareDependencies } from './declared-dependencies';
 import { FIXABLE_RULES, RUFF_WASM_VERSION, ruffFixAndFormat } from './ruff';
 import { PY_VERSIONS, withPyVersions } from './versions';
+
+const declaration = declareDependencies()({ py: [{ name: 'ruff' }] });
 
 const require = createRequire(import.meta.url);
 
@@ -42,7 +45,7 @@ describe('ruff wasm version', () => {
     const documentedUnsafe: Record<string, string> = {
       F401: 'unsafe only in `__init__.py`, where F401 is made unfixable',
     };
-    const [ruff] = withPyVersions(['ruff']);
+    const [ruff] = withPyVersions(declaration, ['ruff']);
     const docs = execFileSync(
       'uvx',
       ['--from', ruff, 'ruff', 'rule', '--all', '--output-format', 'json'],

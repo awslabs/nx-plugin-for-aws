@@ -11,6 +11,8 @@ export type AgentProtocol = 'http' | 'a2a' | 'ag-ui';
 
 export type PyAgentAuth = 'iam' | 'cognito';
 
+export type PyAgentSession = 'in-memory';
+
 export interface PyAgentGeneratorSchema {
   project: string;
   framework?: PyAgentFramework;
@@ -18,6 +20,7 @@ export interface PyAgentGeneratorSchema {
   infra?: PyAgentInfra;
   auth?: PyAgentAuth;
   protocol?: AgentProtocol;
+  session?: PyAgentSession;
   iac: IacOption;
   preferInstallDependencies?: boolean;
 }

@@ -11,7 +11,8 @@ import {
   type ProjectConfiguration,
   type Tree,
 } from '@nx/devkit';
-import { addDependenciesToPackageJson } from '../../utils/dependencies';
+import { addTsDependencies } from '../../utils/add-dependencies';
+import { declareDependencies } from '../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
@@ -26,8 +27,32 @@ import {
 } from '../../utils/nx';
 import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
 import { ensureProjectPackageJson } from '../../utils/project-package-json';
-import { type ITsDepVersion, withVersions } from '../../utils/versions';
 import type { TsAstroDocsGeneratorSchema } from './schema';
+
+/** The metadata this generator records, which its predicates read. */
+export interface TsAstroDocsMetadata {
+  readonly framework: string;
+  readonly includeTranslation: boolean;
+  readonly includeBlog: boolean;
+}
+
+// Each entry names the branch it belongs to, so the same declaration drives both
+// adding and the version sync.
+export const DEPENDENCIES = declareDependencies<TsAstroDocsMetadata>()({
+  ts: [
+    { name: 'astro' },
+    { name: '@astrojs/starlight' },
+    { name: 'starlight-blog', when: (m) => m.includeBlog },
+    { name: '@strands-agents/sdk', when: (m) => m.includeTranslation },
+    { name: 'commander', when: (m) => m.includeTranslation },
+    { name: 'fast-glob', when: (m) => m.includeTranslation },
+    { name: 'fs-extra', when: (m) => m.includeTranslation },
+    { name: 'simple-git', when: (m) => m.includeTranslation },
+    { name: '@types/fs-extra', when: (m) => m.includeTranslation, dev: true },
+    // The translate target runs its script from the workspace root via tsx.
+    { name: 'tsx', when: (m) => m.includeTranslation, dev: true, root: true },
+  ],
+});
 
 export const TS_ASTRO_DOCS_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
@@ -148,37 +173,21 @@ export const tsAstroDocsGenerator = async (
     );
   }
 
-  addGeneratorMetadata(tree, fullyQualifiedName, TS_ASTRO_DOCS_GENERATOR_INFO, {
+  // Recorded here and read by the declaration's predicates, so the packages
+  // added below are exactly the ones the version sync will own.
+  const metadata: TsAstroDocsMetadata = {
     framework: 'astro',
     includeTranslation,
     includeBlog,
-  });
-
-  const dependencies: ITsDepVersion[] = ['astro', '@astrojs/starlight'];
-  const devDependencies: ITsDepVersion[] = [];
-
-  if (includeBlog) {
-    dependencies.push('starlight-blog');
-  }
-
-  if (includeTranslation) {
-    dependencies.push(
-      '@strands-agents/sdk',
-      'commander',
-      'fast-glob',
-      'fs-extra',
-      'simple-git',
-    );
-    devDependencies.push('@types/fs-extra');
-    addDependenciesToPackageJson(tree, {}, withVersions(['tsx']));
-  }
-
-  addDependenciesToPackageJson(
+  };
+  addGeneratorMetadata(
     tree,
-    withVersions(dependencies),
-    withVersions(devDependencies),
-    joinPathFragments(dir, 'package.json'),
+    fullyQualifiedName,
+    TS_ASTRO_DOCS_GENERATOR_INFO,
+    metadata,
   );
+
+  addTsDependencies(tree, DEPENDENCIES, { metadata, projectRoot: dir });
 
   await addGeneratorMetricsIfApplicable(tree, [TS_ASTRO_DOCS_GENERATOR_INFO]);
 

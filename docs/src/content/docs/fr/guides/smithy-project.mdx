@@ -1,0 +1,175 @@
+---
+title: Projets Smithy
+description: Documentation de référence pour le générateur de projet Smithy
+generator: smithy#project
+---
+import { FileTree, Steps } from '@astrojs/starlight/components';
+import RunGenerator from '@components/run-generator.astro';
+import Link from '@components/link.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import OptionFilter from '@components/option-filter.astro';
+
+[Smithy](https://smithy.io/) est un langage de définition d'interface pour décrire les services et les données qu'ils échangent. Le générateur de projet Smithy crée un projet contenant un modèle Smithy.
+
+Il existe deux types de projet Smithy :
+
+- **Service** (`--type=service`) — un modèle qui définit un service et ses opérations. C'est ce que le <Link path="guides/ts-smithy-api">générateur `ts#api --framework=smithy`</Link> crée pour vous aux côtés d'une implémentation TypeScript.
+- **Bibliothèque de formes** (`--type=shapes`) — un modèle qui définit des formes réutilisables mais aucun service. Connectez une bibliothèque de formes à vos projets Smithy pour partager des formes entre eux, plutôt que de dupliquer les définitions dans chacun.
+
+:::tip
+Si vous voulez une API avec une implémentation, utilisez plutôt le <Link path="guides/ts-smithy-api">générateur `ts#api`</Link>. Il crée un projet de modèle Smithy _et_ un serveur TypeScript qui l'implémente.
+:::
+
+## Utilisation
+
+### Générer un projet Smithy
+
+<RunGenerator generator="smithy#project" requiredParameters={{ name: 'my-shapes' }} />
+
+### Options
+
+<GeneratorParameters generator="smithy#project" />
+
+## Sortie du générateur
+
+<OptionFilter when={{ type: 'shapes' }} description="Bibliothèque de formes : un modèle sans service">
+
+### Bibliothèque de formes
+
+<FileTree>
+
+  - my-shapes
+    - src
+      - main.smithy Vos définitions de formes partagées
+    - smithy-build.json Configuration de build Smithy
+    - build.Dockerfile Construit et valide le modèle
+    - project.json Configuration du projet et cibles de build
+
+</FileTree>
+
+Une bibliothèque de formes définit des formes et rien d'autre :
+
+```smithy
+$version: "2.0"
+
+namespace com.example
+
+structure Customer {
+    @required
+    id: String
+
+    name: String
+    email: String
+}
+```
+
+Puisqu'une bibliothèque de formes n'a pas de service, son `smithy-build.json` ne configure aucune génération de code — la construire valide le modèle et l'assemble dans un seul fichier de modèle JSON à `dist/<my-shapes>/build/model/model.json`.
+
+</OptionFilter>
+
+<OptionFilter when={{ type: 'service' }} description="Service : un modèle qui définit un service et ses opérations">
+
+### Service
+
+<FileTree>
+
+  - my-service
+    - src
+      - main.smithy Votre définition de service
+      - operations
+        - echo.smithy Un exemple d'opération
+    - smithy-build.json Configuration de build Smithy, incluant la génération de code
+    - build.Dockerfile Construit le modèle, la spécification OpenAPI et le SDK serveur TypeScript
+    - project.json Configuration du projet et cibles de build
+
+</FileTree>
+
+Un modèle de service définit une forme de service et les opérations qu'il expose :
+
+```smithy
+$version: "2.0"
+
+namespace com.example
+
+use aws.protocols#restJson1
+
+@title("MyService")
+@restJson1
+service MyService {
+    version: "1.0.0"
+    operations: [
+        Echo
+    ]
+}
+```
+
+La construction d'un projet de service génère une spécification OpenAPI et un SDK serveur TypeScript dans `dist/<my-service>/build/`.
+
+</OptionFilter>
+
+## Construction
+
+Les projets Smithy se construisent en utilisant [Docker](https://www.docker.com/), qui exécute la [CLI Smithy](https://smithy.io/2.0/guides/smithy-cli/index.html) pour valider votre modèle :
+
+<NxCommands commands={['build my-shapes']} />
+
+## Dépendre d'une bibliothèque de formes
+
+La construction d'une bibliothèque de formes écrit un modèle assemblé dans `dist/<my-shapes>/build/model/model.json`. Ce fichier unique contient chaque forme que la bibliothèque définit, ainsi que toutes celles dont elle dépend, de sorte qu'un consommateur ne déclare jamais que les bibliothèques qu'il référence directement.
+
+Pour dépendre d'une bibliothèque de formes depuis un autre projet Smithy, apportez trois modifications au projet consommateur :
+
+<Steps>
+
+1. Les projets Smithy se construisent à l'intérieur d'un conteneur, et le build reçoit la racine de l'espace de travail comme contexte de build nommé. Ajoutez un `COPY` au `build.Dockerfile` du projet consommateur, à côté de l'endroit où ses propres sources sont copiées :
+
+   ```dockerfile ins={4}
+   # Copy project files
+   COPY smithy-build.json .
+   COPY src src
+   COPY --from=workspace dist/packages/my-shapes/build/model/model.json deps/my-shapes.json
+   ```
+
+2. Ajoutez le fichier copié à `imports` dans le `smithy-build.json` du projet consommateur :
+
+   ```json ins={4}
+   {
+     "version": "1.0",
+     "sources": ["src/"],
+     "imports": ["deps/my-shapes.json"],
+     ...
+   }
+   ```
+
+3. Ajoutez la cible `build` de la bibliothèque comme dépendance de la cible `compile` du projet consommateur dans son `project.json`, afin que le modèle existe avant que le consommateur ne se construise :
+
+   ```json ins={4}
+   {
+     "targets": {
+       "compile": {
+         "dependsOn": ["@my-scope/my-shapes:build"],
+         ...
+       }
+     }
+   }
+   ```
+
+</Steps>
+
+Votre modèle peut maintenant référencer les formes de la bibliothèque avec `use` :
+
+```smithy
+$version: "2.0"
+
+namespace com.example.api
+
+use com.example.shared#Customer
+
+structure GetCustomerOutput {
+    @required
+    customer: Customer
+}
+```
+
+Les bibliothèques de formes peuvent dépendre d'autres bibliothèques de formes de la même manière. Puisque le modèle construit de chaque bibliothèque contient déjà ses propres dépendances, vous n'avez besoin de répéter ces étapes que pour les bibliothèques que vous référencez directement. Une bibliothèque atteinte par plus d'un chemin est résolue une seule fois — Smithy ignore les définitions de formes dupliquées mais équivalentes.

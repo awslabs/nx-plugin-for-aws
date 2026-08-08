@@ -10,9 +10,20 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import tsProjectGenerator from '../../ts/lib/generator';
-import { addApiGatewayInfra } from '../../utils/api-constructs/api-constructs';
-import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
-import { addDependenciesToPackageJson } from '../../utils/dependencies';
+import { addTsDependencies } from '../../utils/add-dependencies';
+import {
+  API_CONSTRUCTS_DEPENDENCIES,
+  API_CONSTRUCTS_PY_DEPENDENCIES,
+  addApiGatewayInfra,
+} from '../../utils/api-constructs/api-constructs';
+import {
+  addTypeScriptBundleTarget,
+  BUNDLE_DEPENDENCIES,
+} from '../../utils/bundle/bundle';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { resolveIac } from '../../utils/iac';
 import { installDependencies } from '../../utils/install';
@@ -30,9 +41,51 @@ import {
 import { sortObjectKeys } from '../../utils/object';
 import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
 import { assignPort } from '../../utils/port';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
-import { withVersions } from '../../utils/versions';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../utils/shared-constructs';
+import type { IacMetadata } from '../../utils/shared-constructs-constants';
 import type { TsTrpcApiGeneratorSchema } from './schema';
+
+/** The metadata this generator records, which its predicates read. */
+export interface TsTrpcApiMetadata extends IacMetadata {
+  readonly apiName: string;
+  readonly apiType: string;
+  readonly auth: TsTrpcApiGeneratorSchema['auth'];
+  readonly infra: TsTrpcApiGeneratorSchema['infra'];
+  readonly integrationPattern: 'isolated' | 'shared';
+}
+
+// Each entry names the branch it belongs to, so the same declaration drives both
+// adding and the version sync.
+export const DEPENDENCIES = declareDependencies<TsTrpcApiMetadata>()({
+  ts: [
+    { name: 'aws-xray-sdk-core' },
+    { name: 'zod' },
+    { name: '@aws-lambda-powertools/logger' },
+    { name: '@aws-lambda-powertools/metrics' },
+    { name: '@aws-lambda-powertools/parameters' },
+    { name: '@aws-lambda-powertools/tracer' },
+    { name: '@aws-sdk/client-appconfigdata' },
+    { name: '@trpc/server' },
+    { name: '@trpc/client' },
+    { name: 'aws4fetch' },
+    { name: '@aws-sdk/credential-providers' },
+    // The custom authorizer handler wraps itself with middy and parses its event.
+    { name: '@middy/core', when: (m) => m.auth === 'custom' },
+    { name: '@aws-lambda-powertools/parser', when: (m) => m.auth === 'custom' },
+    { name: '@types/aws-lambda', dev: true },
+    { name: 'cors', dev: true },
+    { name: '@types/cors', dev: true },
+    // tsx runs the local server from the workspace root.
+    { name: 'tsx', dev: true, root: true },
+    ...ownedElsewhere(API_CONSTRUCTS_DEPENDENCIES),
+    ...ownedElsewhere(BUNDLE_DEPENDENCIES),
+    ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
+  ],
+  py: ownedElsewhere(API_CONSTRUCTS_PY_DEPENDENCIES),
+});
 
 export const TRPC_BACKEND_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
@@ -51,6 +104,12 @@ export async function tsTrpcApiGenerator(
   tree: Tree,
   options: TsTrpcApiGeneratorSchema,
 ) {
+  // Recorded in the metadata below so the version sync can tell a CDK
+  // project from a Terraform one; undefined when no infrastructure was
+  // generated, in which case neither provider's packages were added.
+  const iac =
+    options.infra !== 'none' ? await resolveIac(tree, options.iac) : undefined;
+
   if (options.infra !== 'none') {
     validateTrpcInfraAndIntegrationPatternCombination(options);
   }
@@ -101,43 +160,56 @@ export async function tsTrpcApiGenerator(
   };
 
   if (options.infra !== 'none') {
-    const iac = await resolveIac(tree, options.iac);
-
-    await sharedConstructsGenerator(tree, {
-      iac,
-    });
-
-    await addApiGatewayInfra(tree, {
-      apiProjectName: backendProjectName,
-      apiNameClassName,
-      apiNameKebabCase,
-      constructType: options.infra === 'http-lambda' ? 'http' : 'rest',
-      backend: {
-        type: 'trpc',
-        projectAlias: enhancedOptions.backendProjectAlias,
-        bundleOutputDir: joinPathFragments('dist', backendRoot, 'bundle'),
-        integrationPattern: getIntegrationPattern(options),
-        ...(options.auth === 'custom' && {
-          authorizerBundleOutputDir: joinPathFragments(
-            'dist',
-            backendRoot,
-            'bundle',
-            'authorizer',
-          ),
-        }),
+    await sharedConstructsGenerator(
+      tree,
+      {
+        iac,
       },
-      auth: options.auth,
-      iac,
-    });
+      DEPENDENCIES,
+    );
+
+    await addApiGatewayInfra(
+      tree,
+      {
+        apiProjectName: backendProjectName,
+        apiNameClassName,
+        apiNameKebabCase,
+        constructType: options.infra === 'http-lambda' ? 'http' : 'rest',
+        backend: {
+          type: 'trpc',
+          projectAlias: enhancedOptions.backendProjectAlias,
+          bundleOutputDir: joinPathFragments('dist', backendRoot, 'bundle'),
+          integrationPattern: getIntegrationPattern(options),
+          ...(options.auth === 'custom' && {
+            authorizerBundleOutputDir: joinPathFragments(
+              'dist',
+              backendRoot,
+              'bundle',
+              'authorizer',
+            ),
+          }),
+        },
+        auth: options.auth,
+        iac,
+      },
+      DEPENDENCIES,
+    );
   }
 
-  projectConfig.metadata = {
-    ...projectConfig.metadata,
+  // Recorded on the project below and read by the declaration's predicates, so
+  // the packages added here are exactly the ones the version sync will own.
+  const metadata: TsTrpcApiMetadata = {
     apiName: options.name,
     apiType: 'trpc',
     auth: options.auth,
     infra: options.infra,
     integrationPattern: getIntegrationPattern(options),
+    ...(iac ? { iac } : {}),
+  };
+
+  projectConfig.metadata = {
+    ...projectConfig.metadata,
+    ...metadata,
   } as unknown;
 
   projectConfig.targets.serve = {
@@ -161,17 +233,27 @@ export async function tsTrpcApiGenerator(
   };
 
   if (options.infra !== 'none') {
-    await addTypeScriptBundleTarget(tree, projectConfig, {
-      targetFilePath: 'src/handler.ts',
-      external: [/@aws-sdk\/.*/], // lambda runtime provides aws sdk
-    });
+    await addTypeScriptBundleTarget(
+      tree,
+      projectConfig,
+      {
+        targetFilePath: 'src/handler.ts',
+        external: [/@aws-sdk\/.*/], // lambda runtime provides aws sdk
+      },
+      DEPENDENCIES,
+    );
 
     if (options.auth === 'custom') {
-      await addTypeScriptBundleTarget(tree, projectConfig, {
-        targetFilePath: 'src/authorizer.ts',
-        bundleOutputDir: 'authorizer',
-        external: [/@aws-sdk\/.*/],
-      });
+      await addTypeScriptBundleTarget(
+        tree,
+        projectConfig,
+        {
+          targetFilePath: 'src/authorizer.ts',
+          bundleOutputDir: 'authorizer',
+          external: [/@aws-sdk\/.*/],
+        },
+        DEPENDENCIES,
+      );
     }
 
     addDependencyToTargetIfNotPresent(projectConfig, 'build', 'bundle');
@@ -223,29 +305,16 @@ export async function tsTrpcApiGenerator(
     );
   }
 
-  addDependenciesToPackageJson(
+  addTsDependencies(tree, DEPENDENCIES, {
+    metadata,
+    projectRoot: backendRoot,
+  });
+  addGeneratorMetadata(
     tree,
-    withVersions([
-      'aws-xray-sdk-core',
-      'zod',
-      '@aws-lambda-powertools/logger',
-      '@aws-lambda-powertools/metrics',
-      '@aws-lambda-powertools/parameters',
-      '@aws-lambda-powertools/tracer',
-      '@aws-sdk/client-appconfigdata',
-      '@trpc/server',
-      '@trpc/client',
-      'aws4fetch',
-      '@aws-sdk/credential-providers',
-      ...(options.auth === 'custom'
-        ? (['@middy/core', '@aws-lambda-powertools/parser'] as const)
-        : []),
-    ]),
-    withVersions(['@types/aws-lambda', 'cors', '@types/cors']),
-    joinPathFragments(backendRoot, 'package.json'),
+    backendName,
+    TRPC_BACKEND_GENERATOR_INFO,
+    metadata,
   );
-  addDependenciesToPackageJson(tree, {}, withVersions(['tsx']));
-  addGeneratorMetadata(tree, backendName, TRPC_BACKEND_GENERATOR_INFO);
 
   await addGeneratorMetricsIfApplicable(tree, [TRPC_BACKEND_GENERATOR_INFO]);
 

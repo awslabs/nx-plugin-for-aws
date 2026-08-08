@@ -16,6 +16,7 @@ import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { toClassName, toSnakeCase } from '../../../utils/names';
 import { getNpmScope } from '../../../utils/npm-scope';
 import {
+  addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
   type NxGeneratorInfo,
@@ -64,6 +65,15 @@ export const pyRdbFastApiConnectionGenerator = async (
     sourceProject.root,
     { databasePackageAlias, rdbNameSnake, rdbNameClassName, apiModuleName },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
+  );
+
+  // Recorded so the version sync can identify this connection.
+  addComponentGeneratorMetadata(
+    tree,
+    sourceProject.name,
+    PY_RDB_FAST_API_CONNECTION_GENERATOR_INFO,
+    joinPathFragments(apiModuleName, 'dependencies', `${rdbNameSnake}.py`),
+    rdbNameSnake,
   );
 
   await addGeneratorMetricsIfApplicable(tree, [

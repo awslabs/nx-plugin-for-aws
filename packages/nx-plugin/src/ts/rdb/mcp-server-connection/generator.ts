@@ -13,11 +13,13 @@ import { formatFilesInSubtree } from '../../../utils/format';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { pascalCase } from '../../../utils/names';
 import {
+  addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
+import { toProjectRelativePath } from '../../../utils/paths';
 import { injectRdsCaBundleIntoDockerfile } from '../utils';
 import type { TsRdbMcpServerConnectionGeneratorSchema } from './schema';
 
@@ -97,6 +99,18 @@ export const tsRdbMcpServerConnectionGenerator = async (
       tree.write(serverPath, content.replace(dbDecl, `${dbDecl}\n  ${onCall}`));
     }
   }
+
+  // Recorded so the version sync can identify this connection.
+  addComponentGeneratorMetadata(
+    tree,
+    sourceProject.name,
+    TS_RDB_MCP_SERVER_CONNECTION_GENERATOR_INFO,
+    toProjectRelativePath(sourceProject, serverPath),
+    `${mcpServerName}-${rdbNameCamel}`,
+    // The source component this connection is made from, so the pair is
+    // identifiable rather than just the two projects.
+    { sourcePath: options.sourceComponent?.path },
+  );
 
   await addGeneratorMetricsIfApplicable(tree, [
     TS_RDB_MCP_SERVER_CONNECTION_GENERATOR_INFO,

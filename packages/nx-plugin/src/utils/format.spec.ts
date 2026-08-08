@@ -138,6 +138,46 @@ describe('format utils', () => {
       // Verify
       expect(tree.exists('src/test.ts')).toBe(false);
     });
+    it('should leave ignored files untouched', async () => {
+      // Files another tool owns the formatting of are left in that tool's shape:
+      // formatting them makes generation non-idempotent, since the tool rewrites
+      // them on the next run. Only the listed paths are skipped — a same-named
+      // file under another project is still formatted.
+      const unformatted = "import { Route } from './routes/__root'\n";
+      tree.write('packages/website/src/routeTree.gen.ts', unformatted);
+      tree.write('packages/other/src/routeTree.gen.ts', unformatted);
+      // Execute
+      await formatFilesInSubtree(tree, 'packages', {
+        ignore: ['packages/website/src/routeTree.gen.ts'],
+      });
+      // Verify
+      expect(
+        tree.read('packages/website/src/routeTree.gen.ts')?.toString(),
+      ).toBe(unformatted);
+      expect(tree.read('packages/other/src/routeTree.gen.ts')?.toString()).toBe(
+        "import { Route } from './routes/__root';\n",
+      );
+    });
+    it('should keep ignoring a file on later calls for the same tree', async () => {
+      // A call formats every change pending in the tree, not only its caller's,
+      // so generators composing on one tree would otherwise reformat a file an
+      // earlier generator excluded — the non-idempotency all over again.
+      const unformatted = "import { Route } from './routes/__root'\n";
+      tree.write('packages/website/src/routeTree.gen.ts', unformatted);
+      await formatFilesInSubtree(tree, undefined, {
+        ignore: ['packages/website/src/routeTree.gen.ts'],
+      });
+      // Execute - a later generator formats the same tree, listing no paths
+      tree.write('packages/website/src/other.ts', 'const x=1;');
+      await formatFilesInSubtree(tree);
+      // Verify
+      expect(
+        tree.read('packages/website/src/routeTree.gen.ts')?.toString(),
+      ).toBe(unformatted);
+      expect(tree.read('packages/website/src/other.ts')?.toString()).toBe(
+        'const x = 1;\n',
+      );
+    });
     it('should format all changed files when no directory is given', async () => {
       // Setup
       tree.write('src/test.ts', 'const x=1;');

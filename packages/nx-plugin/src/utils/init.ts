@@ -14,7 +14,6 @@ import {
 import { initGenerator } from '@nx/js';
 import { readFileSync } from 'fs';
 import yaml from 'js-yaml';
-import { readModulePackageJson } from 'nx/src/utils/package-json';
 import GeneratorsJson from '../../generators.json' with { type: 'json' };
 import { SYNC_GENERATOR_NAME as TS_SYNC_GENERATOR_NAME } from '../ts/sync/generator';
 import { BASE_TSCONFIG_COMPILER_OPTIONS } from './base-tsconfig';
@@ -23,6 +22,11 @@ import {
   updateAwsNxPluginConfig,
 } from './config/utils';
 import { type Containers, inferContainers } from './containers';
+import {
+  type DependencyDeclaration,
+  forDependencies,
+  type MustDeclare,
+} from './declared-dependencies';
 import {
   addDependenciesToPackageJson,
   detectWorkspacePackageManager,
@@ -38,10 +42,19 @@ import {
 } from './nx';
 import { getPackageManagerDisplayCommands } from './pkg-manager';
 import { workspaceGlobs } from './project-package-json';
-import { withVersions } from './versions';
+import { type ITsDepVersion, withVersions } from './versions';
 
 const WORKSPACES = ['packages/*'];
 const NX_TYPESCRIPT_SYNC_GENERATOR = '@nx/js:typescript-sync';
+
+/** Dependencies a caller must declare to apply the workspace init. */
+export const INIT_DEPENDENCIES = [
+  { name: 'nx' },
+  { name: '@nx/js' },
+  { name: '@nx/workspace' },
+  { name: 'typescript' },
+  { name: '@biomejs/biome' },
+] as const satisfies readonly { name: ITsDepVersion }[];
 
 // Built dependencies whose install scripts the generated workspace trusts.
 // `onlyBuiltDependencies` is the pnpm 10 key (silently ignored by pnpm 11);
@@ -239,7 +252,7 @@ const ensureRootTsConfig = (tree: Tree) => {
  * existing projects — those are decisions for the user (see the "add to an
  * existing workspace" guide).
  */
-export const applyWorkspaceInit = async (
+export const applyWorkspaceInit = async <const D extends DependencyDeclaration>(
   tree: Tree,
   {
     iac,
@@ -249,6 +262,7 @@ export const applyWorkspaceInit = async (
     overwriteScripts = false,
     catalogs = true,
   }: ApplyWorkspaceInitOptions,
+  declaration: D & MustDeclare<typeof INIT_DEPENDENCIES, D>,
 ) => {
   const resolvedContainers =
     !containers || containers === 'infer' ? inferContainers() : containers;
@@ -330,15 +344,19 @@ export const applyWorkspaceInit = async (
   // `@nx/js` must be a root dependency for the `@nx/js:typescript-sync`
   // generator registered in nx.json to resolve (npm doesn't hoist the
   // plugin's own copy reliably).
-  const nxVersion = readModulePackageJson('@nx/js').packageJson.version;
   addDependenciesToPackageJson(
     tree,
     {},
     {
-      nx: nxVersion,
-      '@nx/js': nxVersion,
-      '@nx/workspace': nxVersion,
-      ...withVersions(['typescript', '@biomejs/biome']),
+      ...withVersions(forDependencies<typeof INIT_DEPENDENCIES>(declaration), [
+        'nx',
+        '@nx/js',
+        '@nx/workspace',
+      ]),
+      ...withVersions(forDependencies<typeof INIT_DEPENDENCIES>(declaration), [
+        'typescript',
+        '@biomejs/biome',
+      ]),
       // Declare the plugin the generators are running from, plus the MCP server
       // package the vended config runs, so both are pinned in the workspace's
       // lockfile and upgrading them upgrades what the agents use.

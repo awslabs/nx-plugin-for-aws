@@ -8,6 +8,7 @@ import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { kebabCase } from '../../utils/names';
 import {
+  addComponentGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
@@ -75,6 +76,15 @@ export const agentcoreGatewayMcpConnectionGenerator = async (
     upstreamProjectName: targetProject.name,
     upstreamDevTargetName: `${mcpComponentName}-dev`,
   });
+
+  // Recorded so the version sync can identify this connection.
+  addComponentGeneratorMetadata(
+    tree,
+    sourceProject.name,
+    AGENTCORE_GATEWAY_MCP_CONNECTION_GENERATOR_INFO,
+    targetProject.root,
+    mcpTargetName,
+  );
 
   await addGeneratorMetricsIfApplicable(tree, [
     AGENTCORE_GATEWAY_MCP_CONNECTION_GENERATOR_INFO,

@@ -17,7 +17,11 @@ import {
 } from '@nx/devkit';
 import { join, relative } from 'path';
 import { getTsLibDetails } from '../../ts/lib/generator';
-import { addDependenciesToPackageJson } from '../../utils/dependencies';
+import { addTsDependencies } from '../../utils/add-dependencies';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../../utils/declared-dependencies';
 import { updateGitIgnore } from '../../utils/git';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
@@ -32,11 +36,31 @@ import { sortObjectKeys } from '../../utils/object';
 import { uvxCommand } from '../../utils/py';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs';
 import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
   SHARED_TERRAFORM_DIR,
   SHARED_TERRAFORM_NAME,
 } from '../../utils/shared-constructs-constants';
 import { terraformProviderVersions, withVersions } from '../../utils/versions';
 import type { TerraformProjectGeneratorSchema } from './schema';
+
+// Terraform projects carry no package.json, so their build tooling and the AWS
+// SDK the vended deploy scripts import are declared at the workspace root. This
+// generator records no metadata, so nothing a predicate could read.
+export const DEPENDENCIES = declareDependencies()({
+  ts: [
+    { name: '@nx-extend/terraform', dev: true, root: true },
+    { name: 'make-dir-cli', dev: true, root: true },
+    { name: 'tsx', dev: true, root: true },
+    { name: '@aws-sdk/client-s3', dev: true, root: true },
+    { name: '@aws-sdk/client-sts', dev: true, root: true },
+    { name: '@aws-sdk/credential-providers', dev: true, root: true },
+    { name: '@smithy/config-resolver', dev: true, root: true },
+    { name: '@smithy/node-config-provider', dev: true, root: true },
+    // Declared for its pinned version, which goes into npm's `overrides` below.
+    { name: '@nx/devkit', versionOnly: true },
+    ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
+  ],
+});
 
 const NX_EXTEND_PLUGIN = '@nx-extend/terraform';
 export const TERRAFORM_PROJECT_GENERATOR_INFO: NxGeneratorInfo =
@@ -245,10 +269,12 @@ export async function terraformProjectGenerator(
   if (!projectExists(tree, lib.fullyQualifiedName)) {
     addProjectConfiguration(tree, lib.fullyQualifiedName, projectConfiguration);
   }
+  // This generator IS the Terraform project, so the provider is fixed.
   addGeneratorMetadata(
     tree,
     lib.fullyQualifiedName,
     TERRAFORM_PROJECT_GENERATOR_INFO,
+    { iac: 'terraform' },
   );
 
   generateFiles(
@@ -279,29 +305,14 @@ export async function terraformProjectGenerator(
   }
 
   // Ensure shared constructs for Terraform are created
-  await sharedConstructsGenerator(tree, { iac: 'terraform' });
+  await sharedConstructsGenerator(tree, { iac: 'terraform' }, DEPENDENCIES);
 
   // Add Terraform metrics
   await addGeneratorMetricsIfApplicable(tree, [
     TERRAFORM_PROJECT_GENERATOR_INFO,
   ]);
 
-  // Terraform projects carry no package.json, so their build tooling and the
-  // AWS SDK the vended deploy scripts import are declared at the workspace root.
-  addDependenciesToPackageJson(
-    tree,
-    {},
-    withVersions([
-      '@nx-extend/terraform',
-      'make-dir-cli',
-      'tsx',
-      '@aws-sdk/client-s3',
-      '@aws-sdk/client-sts',
-      '@aws-sdk/credential-providers',
-      '@smithy/config-resolver',
-      '@smithy/node-config-provider',
-    ]),
-  );
+  addTsDependencies(tree, DEPENDENCIES);
 
   // @nx-extend/terraform has a peer dependency on @nx/devkit ^21.0.0 which causes
   // npm install to fail, so for NPM we add a resolution
@@ -310,7 +321,7 @@ export async function terraformProjectGenerator(
     updateJson(tree, 'package.json', (packageJson) => {
       packageJson.overrides = {
         ...packageJson.overrides,
-        ...withVersions(['@nx/devkit']),
+        ...withVersions(DEPENDENCIES, ['@nx/devkit']),
       };
       return packageJson;
     });

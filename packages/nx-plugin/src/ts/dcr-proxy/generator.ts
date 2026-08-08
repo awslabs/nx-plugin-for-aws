@@ -11,13 +11,20 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import tsProjectGenerator from '../../ts/lib/generator';
-import { addTypeScriptBundleTarget } from '../../utils/bundle/bundle';
+import { addTsDependencies } from '../../utils/add-dependencies';
+import {
+  addTypeScriptBundleTarget,
+  BUNDLE_DEPENDENCIES,
+} from '../../utils/bundle/bundle';
 import {
   addDcrProxyInfra,
   DCR_PROXY_HANDLERS,
   type DcrProxyHandler,
 } from '../../utils/dcr-proxy-constructs/dcr-proxy-constructs';
-import { addDependenciesToPackageJson } from '../../utils/dependencies';
+import {
+  declareDependencies,
+  ownedElsewhere,
+} from '../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { resolveIac } from '../../utils/iac';
 import { installDependencies } from '../../utils/install';
@@ -25,14 +32,28 @@ import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { kebabCase, toClassName } from '../../utils/names';
 import { getNpmScopePrefix } from '../../utils/npm-scope';
 import {
+  addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
 import { sortObjectKeys } from '../../utils/object';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
-import { withVersions } from '../../utils/versions';
+import {
+  SHARED_CONSTRUCTS_DEPENDENCIES,
+  sharedConstructsGenerator,
+} from '../../utils/shared-constructs';
 import type { TsDcrProxyGeneratorSchema } from './schema';
+
+export const DEPENDENCIES = declareDependencies()({
+  ts: [
+    // Handler imports: @aws-sdk/client-secrets-manager (token handler) and
+    // @types/aws-lambda (handler signatures).
+    { name: '@aws-sdk/client-secrets-manager' },
+    { name: '@types/aws-lambda', dev: true },
+    ...ownedElsewhere(BUNDLE_DEPENDENCIES),
+    ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
+  ],
+});
 
 export const TS_DCR_PROXY_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
@@ -94,27 +115,32 @@ export const tsDcrProxyGenerator = async (
     },
   );
 
-  // Handler imports: @aws-sdk/client-secrets-manager (token handler) and
-  // @types/aws-lambda (handler signatures).
-  addDependenciesToPackageJson(
-    tree,
-    withVersions(['@aws-sdk/client-secrets-manager']),
-    withVersions(['@types/aws-lambda']),
-    joinPathFragments(proxyRoot, 'package.json'),
-  );
+  addTsDependencies(tree, DEPENDENCIES, { projectRoot: proxyRoot });
 
   // Bundle each handler independently to dist/<root>/bundle/<handler>/index.js
   for (const handler of DCR_PROXY_HANDLERS) {
-    await addTypeScriptBundleTarget(tree, projectConfig, {
-      targetFilePath: `src/handlers/${handler}.ts`,
-      bundleOutputDir: handler,
-      external: [/@aws-sdk\/.*/], // lambda runtime provides the aws sdk
-      platform: 'node',
-    });
+    await addTypeScriptBundleTarget(
+      tree,
+      projectConfig,
+      {
+        targetFilePath: `src/handlers/${handler}.ts`,
+        bundleOutputDir: handler,
+        external: [/@aws-sdk\/.*/], // lambda runtime provides the aws sdk
+        platform: 'node',
+      },
+      DEPENDENCIES,
+    );
   }
 
   projectConfig.targets = sortObjectKeys(projectConfig.targets);
   updateProjectConfiguration(tree, projectConfig.name, projectConfig);
+
+  // Recorded over the `ts#project` id the underlying generator wrote, so the
+  // version sync attributes this project's dependencies to this generator.
+  // After the write above, which would otherwise revert it.
+  addGeneratorMetadata(tree, projectConfig.name, TS_DCR_PROXY_GENERATOR_INFO, {
+    iac,
+  });
 
   const bundlePathsFromRoot = Object.fromEntries(
     DCR_PROXY_HANDLERS.map((handler) => [
@@ -123,7 +149,7 @@ export const tsDcrProxyGenerator = async (
     ]),
   ) as Record<DcrProxyHandler, string>;
 
-  await sharedConstructsGenerator(tree, { iac });
+  await sharedConstructsGenerator(tree, { iac }, DEPENDENCIES);
 
   await addDcrProxyInfra(tree, {
     dcrProxyNameClassName: nameClassName,

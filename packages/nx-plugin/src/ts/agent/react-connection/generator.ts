@@ -11,25 +11,75 @@ import {
 } from '@nx/devkit';
 import { addAgentRuntimeToConnectionNamespace } from '../../../connection/agent-runtime-config';
 import type { ResolvedConnectionOptions } from '../../../connection/generator';
+import { addTsDependencies } from '../../../utils/add-dependencies';
 import { addSingleImport, applyGritQL } from '../../../utils/ast';
-import { addDependenciesToPackageJson } from '../../../utils/dependencies';
+import {
+  declareDependencies,
+  onlyWhen,
+  ownedElsewhere,
+} from '../../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { kebabCase, toClassName } from '../../../utils/names';
 import {
+  addComponentGeneratorMetadata,
   type ComponentMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
-import { withVersions } from '../../../utils/versions';
+import { toProjectRelativePath } from '../../../utils/paths';
 import {
+  DEPENDENCIES as AGUI_DEPENDENCIES,
   type AgUiAuth,
   addAgUiReactConnection,
+  resolveAgUiTheme,
 } from '../../react-website/agui/generator';
 import { runtimeConfigGenerator } from '../../react-website/runtime-config/generator';
 import { addTsAgentTargetToLocalDev } from './local-dev';
+
+/** The metadata this generator records, which its predicates read. */
+export interface TsAgentReactConnectionMetadata {
+  readonly auth: string;
+  readonly protocol: string;
+  /** The AG-UI theme module, which the website's `ux` selects. */
+  readonly theme: string;
+}
+
+/** The tRPC-over-HTTP path, which the AG-UI path takes none of. */
+const isHttp = (m: TsAgentReactConnectionMetadata) => m.protocol !== 'ag-ui';
+
+/** The AG-UI path, whose packages `addAgUiReactConnection` adds. */
+const isAgUi = (m: TsAgentReactConnectionMetadata) => !isHttp(m);
+
+// Each entry names the protocol path it belongs to: the HTTP path's client and
+// auth packages are added here, the AG-UI path's by `addAgUiReactConnection` on
+// this generator's behalf.
+export const DEPENDENCIES =
+  declareDependencies<TsAgentReactConnectionMetadata>()({
+    ts: [
+      { name: '@trpc/client', when: isHttp },
+      { name: '@tanstack/react-query', when: isHttp },
+      { name: '@tanstack/react-query-devtools', when: isHttp },
+      { name: '@trpc/tanstack-react-query', when: isHttp },
+      { name: 'oidc-client-ts', when: (m) => isHttp(m) && m.auth === 'iam' },
+      { name: 'aws4fetch', when: (m) => isHttp(m) && m.auth === 'iam' },
+      {
+        name: '@aws-sdk/credential-provider-cognito-identity',
+        when: (m) => isHttp(m) && m.auth === 'iam',
+      },
+      {
+        name: 'react-oidc-context',
+        when: (m) => isHttp(m) && (m.auth === 'iam' || m.auth === 'cognito'),
+      },
+      { name: '@smithy/types', when: isHttp, dev: true },
+      // `addAgUiReactConnection` adds these itself, so they are declared for
+      // ownership only. Gated on the AG-UI path, and within it on each entry's
+      // own theme or auth condition, which the metadata below records.
+      ...ownedElsewhere(onlyWhen(AGUI_DEPENDENCIES.ts, isAgUi)),
+    ],
+  });
 
 export const TS_AGENT_REACT_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(import.meta.filename);
@@ -59,6 +109,14 @@ export async function tsAgentReactConnectionGenerator(
   const agentProjectAlias = agentProjectConfig.name;
   const agentPath = targetComponent?.path ?? 'src/agent';
 
+  // Recorded below and read by the declaration's predicates, so the packages
+  // added here are exactly the ones the version sync will own.
+  const connectionMetadata: TsAgentReactConnectionMetadata = {
+    auth,
+    protocol: targetComponent?.protocol ?? 'http',
+    theme: resolveAgUiTheme(frontendProjectConfig),
+  };
+
   if ((targetComponent?.protocol ?? '').toLowerCase() === 'a2a') {
     throw new Error(
       `Cannot connect a React website to an A2A agent. ` +
@@ -84,6 +142,23 @@ export async function tsAgentReactConnectionGenerator(
         port: agentPort,
         targetComponent,
       },
+    );
+
+    // Recorded so the version sync knows this connection's dependencies are ours.
+    addComponentGeneratorMetadata(
+      tree,
+      frontendProjectConfig.name,
+      TS_AGENT_REACT_CONNECTION_GENERATOR_INFO,
+      toProjectRelativePath(
+        frontendProjectConfig,
+        joinPathFragments(
+          frontendProjectConfig.sourceRoot,
+          'hooks',
+          `useAgui${agentNameClassName}`,
+        ),
+      ),
+      agentNameClassName,
+      connectionMetadata,
     );
 
     await addGeneratorMetricsIfApplicable(tree, [
@@ -209,25 +284,26 @@ export async function tsAgentReactConnectionGenerator(
     agentNameClassName,
   });
 
-  addDependenciesToPackageJson(
+  addTsDependencies(tree, DEPENDENCIES, {
+    metadata: connectionMetadata,
+    projectRoot: frontendProjectConfig.root,
+  });
+
+  // Recorded so the version sync knows this connection's dependencies are ours.
+  addComponentGeneratorMetadata(
     tree,
-    withVersions([
-      '@trpc/client',
-      '@tanstack/react-query',
-      '@tanstack/react-query-devtools',
-      '@trpc/tanstack-react-query',
-      ...((auth === 'iam'
-        ? [
-            'oidc-client-ts',
-            'aws4fetch',
-            '@aws-sdk/credential-provider-cognito-identity',
-            'react-oidc-context',
-          ]
-        : []) as any),
-      ...((auth === 'cognito' ? ['react-oidc-context'] : []) as any),
-    ]),
-    withVersions(['@smithy/types']),
-    joinPathFragments(frontendProjectConfig.root, 'package.json'),
+    frontendProjectConfig.name,
+    TS_AGENT_REACT_CONNECTION_GENERATOR_INFO,
+    toProjectRelativePath(
+      frontendProjectConfig,
+      joinPathFragments(
+        frontendProjectConfig.sourceRoot,
+        'components',
+        clientProviderName,
+      ),
+    ),
+    agentNameClassName,
+    connectionMetadata,
   );
 
   await addGeneratorMetricsIfApplicable(tree, [

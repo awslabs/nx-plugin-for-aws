@@ -153,7 +153,7 @@ describe('agentcore-harness generator', () => {
       expect(config.targets).toEqual({ chat: CHAT_TARGET });
     });
 
-    it('records exactly the four metadata fields', async () => {
+    it('records exactly the four metadata fields when no infra is written', async () => {
       await agentcoreHarnessGenerator(tree, {
         name: 'my-harness',
         infra: 'none',
@@ -167,6 +167,25 @@ describe('agentcore-harness generator', () => {
         auth: 'iam',
       });
     });
+
+    // The recorded provider is what the declaration's predicates read, so the
+    // version sync claims exactly the shared constructs packages this project
+    // caused to be added.
+    it.each(['cdk', 'terraform'] as const)(
+      'records the resolved provider for iac: %s',
+      async (iac) => {
+        await agentcoreHarnessGenerator(tree, { name: 'my-harness', iac });
+
+        const config = readProjectConfiguration(tree, PROJECT_NAME);
+        expect(config.metadata as any).toEqual({
+          generator: AGENTCORE_HARNESS_GENERATOR_INFO.id,
+          name: 'my-harness',
+          rc: 'MyHarness',
+          auth: 'iam',
+          iac,
+        });
+      },
+    );
 
     it('adds the generator metric tag', async () => {
       await agentcoreHarnessGenerator(tree, {
@@ -582,8 +601,13 @@ describe('agentcore-harness generator', () => {
         expect(tree.exists(path), path).toBe(false);
       }
 
+      // project.json is held out of the byte comparison: recording the newly
+      // resolved provider is what the upgrade is for. Its targets and every
+      // user-owned content file are still expected untouched.
       const recorded = recordBytes(
-        projectFiles.map((file) => `${PROJECT_ROOT}/${file}`),
+        projectFiles
+          .filter((file) => file !== 'project.json')
+          .map((file) => `${PROJECT_ROOT}/${file}`),
       );
       // An explicit iac is required: resolveIac throws on `inherit` without an
       // aws-nx-plugin.config.mts.
@@ -600,8 +624,15 @@ describe('agentcore-harness generator', () => {
       );
       // The upgrade adds infrastructure without disturbing the project.
       expectBytesPreserved(recorded);
-      expect(readProjectConfiguration(tree, PROJECT_NAME).targets).toEqual({
-        chat: CHAT_TARGET,
+      const upgraded = readProjectConfiguration(tree, PROJECT_NAME);
+      expect(upgraded.targets).toEqual({ chat: CHAT_TARGET });
+      // The sole project.json change is the provider the upgrade resolved.
+      expect(upgraded.metadata as any).toEqual({
+        generator: AGENTCORE_HARNESS_GENERATOR_INFO.id,
+        name: 'my-harness',
+        rc: 'MyHarness',
+        auth: 'iam',
+        iac: 'cdk',
       });
     });
   });

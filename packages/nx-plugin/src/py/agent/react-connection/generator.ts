@@ -12,25 +12,62 @@ import {
 import { addAgentRuntimeToConnectionNamespace } from '../../../connection/agent-runtime-config';
 import type { ResolvedConnectionOptions } from '../../../connection/generator';
 import {
+  DEPENDENCIES as AGUI_DEPENDENCIES,
   type AgUiAuth,
   addAgUiReactConnection,
+  resolveAgUiTheme,
 } from '../../../ts/react-website/agui/generator';
-import { addOpenApiReactClient } from '../../../utils/connection/open-api/react';
+import {
+  addOpenApiReactClient,
+  OPEN_API_REACT_DEPENDENCIES,
+} from '../../../utils/connection/open-api/react';
+import {
+  declareDependencies,
+  onlyWhen,
+} from '../../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { installDependencies } from '../../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { kebabCase, toClassName, toSnakeCase } from '../../../utils/names';
 import {
+  addComponentGeneratorMetadata,
   type ComponentMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
 import { sortObjectKeys } from '../../../utils/object';
+import { toProjectRelativePath } from '../../../utils/paths';
 import {
   addPyAgentTargetToLocalDev,
   openApiClientLocalDevDeps,
 } from './local-dev';
+
+/** The metadata this generator records, which its predicates read. */
+export interface PyAgentReactConnectionMetadata {
+  readonly protocol: string;
+  readonly auth: string;
+  /** The AG-UI theme module, which the website's `ux` selects. */
+  readonly theme: string;
+}
+
+/** The OpenAPI-over-HTTP path, which the AG-UI path takes none of. */
+const isHttp = (m: PyAgentReactConnectionMetadata) => m.protocol !== 'ag-ui';
+
+/** The AG-UI path, whose packages `addAgUiReactConnection` adds. */
+const isAgUi = (m: PyAgentReactConnectionMetadata) => !isHttp(m);
+
+// Each entry names the protocol path it belongs to: the HTTP path's OpenAPI
+// client packages are added by `addOpenApiReactClient`, the AG-UI path's by
+// `addAgUiReactConnection`, both on this generator's behalf. The AG-UI entries
+// keep their own theme and auth conditions, which the metadata below records.
+export const DEPENDENCIES =
+  declareDependencies<PyAgentReactConnectionMetadata>()({
+    ts: [
+      ...onlyWhen(OPEN_API_REACT_DEPENDENCIES, isHttp),
+      ...onlyWhen(AGUI_DEPENDENCIES.ts, isAgUi),
+    ],
+  });
 
 export const PY_AGENT_REACT_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(import.meta.filename);
@@ -58,6 +95,14 @@ export const pyAgentReactConnectionGenerator = async (
   const agentPort = targetComponent?.port ?? metadata?.ports?.[0] ?? 8081;
   const auth = (targetComponent?.auth ?? metadata?.auth ?? 'iam').toLowerCase();
   const protocol = (targetComponent?.protocol ?? 'http').toLowerCase();
+
+  // Recorded below and read by the declaration's predicates, so the packages
+  // added here are exactly the ones the version sync will own.
+  const connectionMetadata: PyAgentReactConnectionMetadata = {
+    protocol,
+    auth,
+    theme: resolveAgUiTheme(frontendProjectConfig),
+  };
 
   if (protocol === 'a2a') {
     throw new Error(
@@ -125,18 +170,22 @@ export const pyAgentReactConnectionGenerator = async (
 
     // Use the shared OpenAPI react client utility for hooks, providers, and build targets.
     // The dev target is handled separately below using the agent-specific dev target.
-    await addOpenApiReactClient(tree, {
-      apiName: agentNameClassName,
-      frontendProjectConfig,
-      backendProjectConfig: agentProjectConfig,
-      specBuildProject: agentProjectConfig,
-      specPath,
-      specBuildTargetName: `${agentProjectConfig.name}:${openApiTargetName}`,
-      auth,
-      port: agentPort,
-      isAgentRuntime: true,
-      skipLocalDev: true,
-    });
+    await addOpenApiReactClient(
+      tree,
+      {
+        apiName: agentNameClassName,
+        frontendProjectConfig,
+        backendProjectConfig: agentProjectConfig,
+        specBuildProject: agentProjectConfig,
+        specPath,
+        specBuildTargetName: `${agentProjectConfig.name}:${openApiTargetName}`,
+        auth,
+        port: agentPort,
+        isAgentRuntime: true,
+        skipLocalDev: true,
+      },
+      DEPENDENCIES,
+    );
 
     additionalLocalDevDeps = openApiClientLocalDevDeps(agentNameClassName);
 
@@ -161,6 +210,29 @@ export const pyAgentReactConnectionGenerator = async (
       targetComponent,
       additionalDependencyTargets: additionalLocalDevDeps,
     },
+  );
+
+  // Recorded so the version sync knows this connection's dependencies are ours.
+  addComponentGeneratorMetadata(
+    tree,
+    frontendProjectConfig.name,
+    PY_AGENT_REACT_CONNECTION_GENERATOR_INFO,
+    toProjectRelativePath(
+      frontendProjectConfig,
+      protocol === 'ag-ui'
+        ? joinPathFragments(
+            frontendProjectConfig.sourceRoot,
+            'hooks',
+            `useAgui${agentNameClassName}`,
+          )
+        : joinPathFragments(
+            frontendProjectConfig.sourceRoot,
+            'components',
+            `${agentNameClassName}Provider`,
+          ),
+    ),
+    agentNameClassName,
+    connectionMetadata,
   );
 
   await addGeneratorMetricsIfApplicable(tree, [

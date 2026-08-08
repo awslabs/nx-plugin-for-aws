@@ -2,30 +2,33 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+
+import { execSync } from 'child_process';
 import {
-  TS_VERSIONS,
-  PY_VERSIONS,
-  VENDORED_VERSIONS,
-  TERRAFORM_VERSIONS,
-} from '../packages/nx-plugin/src/utils/versions';
-import {
+  cpSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
-  writeFileSync,
-  cpSync,
   rmSync,
-  mkdirSync,
+  writeFileSync,
 } from 'fs';
+import { FsTree, flushChanges } from 'nx/src/generators/tree';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { execSync } from 'child_process';
-import { flushChanges, FsTree } from 'nx/src/generators/tree';
-import { applyGritQL } from '../packages/nx-plugin/src/utils/ast';
 import {
+  type ProjectNameRequirement,
   parsePipRequirementsLine,
-  ProjectNameRequirement,
   VersionOperator,
 } from 'pip-requirements-js';
+import { applyGritQL } from '../packages/nx-plugin/src/utils/ast';
+import { isNxPackage } from '../packages/nx-plugin/src/utils/version-upgrade-migration/nx-package-updates';
+import { registerNxPackageUpdates } from '../packages/nx-plugin/src/utils/version-upgrade-migration/register';
+import {
+  PY_VERSIONS,
+  TERRAFORM_VERSIONS,
+  TS_VERSIONS,
+  VENDORED_VERSIONS,
+} from '../packages/nx-plugin/src/utils/versions';
 import { refreshShadcnTemplates } from './update-versions/shadcn';
 
 interface VersionChange {
@@ -409,6 +412,18 @@ const main = async () => {
 
     const updatedShadcnTemplateFiles = refreshShadcnTemplates(tree, tmpDir);
 
+    // Ship the bumps to existing workspaces. Only the nx packages need
+    // registering: everything else moves through the version sync migration,
+    // which is committed once and runs on every upgrade.
+    //
+    // The version comes from the change just applied rather than `NX_VERSION`:
+    // rewriting `versions.ts` on the tree cannot change what this process
+    // imported at load, so the constant still holds the version being replaced.
+    const nxChange = tsChanges.find((change) => isNxPackage(change.name));
+    const migrationFiles = nxChange
+      ? registerNxPackageUpdates(tree, nxChange.newVersion)
+      : [];
+
     // Only apply changes if not a dry run
     if (!isDryRun) {
       flushChanges(tree.root, tree.listChanges());
@@ -430,6 +445,10 @@ const main = async () => {
             },
           ]
         : []),
+      {
+        title: 'Migration',
+        changes: migrationFiles.map((path) => ({ path })),
+      },
     ]);
   } catch (error) {
     console.error('Error updating versions:', error);

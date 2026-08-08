@@ -17,11 +17,13 @@ import { formatFilesInSubtree } from '../../../utils/format';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
 import { pascalCase } from '../../../utils/names';
 import {
+  addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx';
+import { toProjectRelativePath } from '../../../utils/paths';
 import type { TsRdbSmithyConnectionGeneratorSchema } from './schema';
 
 export const TS_RDB_SMITHY_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
@@ -140,6 +142,15 @@ export const tsRdbSmithyConnectionGenerator = async (
       }`,
     );
   }
+
+  // Recorded so the version sync can identify this connection.
+  addComponentGeneratorMetadata(
+    tree,
+    sourceProject.name,
+    TS_RDB_SMITHY_CONNECTION_GENERATOR_INFO,
+    toProjectRelativePath(sourceProject, contextPath),
+    rdbNameCamel,
+  );
 
   await addGeneratorMetricsIfApplicable(tree, [
     TS_RDB_SMITHY_CONNECTION_GENERATOR_INFO,

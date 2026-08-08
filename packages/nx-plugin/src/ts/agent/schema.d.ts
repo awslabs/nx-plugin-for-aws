@@ -11,6 +11,8 @@ export type AgentProtocol = 'http' | 'a2a' | 'ag-ui';
 
 export type TsAgentAuth = 'iam' | 'cognito';
 
+export type TsAgentSession = 's3' | 'in-memory';
+
 export interface TsAgentGeneratorSchema {
   project: string;
   framework?: TsAgentFramework;
@@ -18,6 +20,7 @@ export interface TsAgentGeneratorSchema {
   infra?: TsAgentInfra;
   auth?: TsAgentAuth;
   protocol?: AgentProtocol;
+  session?: TsAgentSession;
   iac: IacOption;
   preferInstallDependencies?: boolean;
 }
