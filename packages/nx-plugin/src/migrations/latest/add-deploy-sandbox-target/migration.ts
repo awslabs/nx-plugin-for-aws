@@ -84,13 +84,13 @@ export default async function migration(
 
     if (typeof command !== 'string') {
       nextSteps.push(
-        `Add a '${TARGET}' target to ${projectName} by hand — its 'deploy' target no longer matches the shape the generator produced.`,
+        `Add a '${TARGET}' target to ${projectName} by hand if necessary — its 'deploy' target no longer matches the shape the generator produced.`,
       );
       continue;
     }
     if (!stageId) {
       nextSteps.push(
-        `Add a '${TARGET}' target to ${projectName} by hand — no sandbox stage was found in ${mainPath}.`,
+        `Add a '${TARGET}' target to ${projectName} by hand if necessary — no sandbox stage was found in ${mainPath}.`,
       );
       continue;
     }
