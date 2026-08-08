@@ -45,40 +45,30 @@ const re2WasmPlugin = () => ({
   },
 });
 
-// On Windows the Smithy code generator writes a module that imports its own
-// exports from itself — `Echo.ts` opens with `import { Echo, ... } from "./Echo"`
-// for names the same file also declares. tsc tolerated it by merging the two, but
-// its emit was then wrong; bundling the sources directly, the redundant import
-// collides with the local declarations (a namespace assigned to an import). The
-// names are all declared locally, so the self-import is dropped before bundling,
-// which matches what the generator emits on other platforms.
-const stripSelfImports = () => ({
-  name: 'strip-self-imports',
-  transform: (code, id) => {
-    if (!id.endsWith('.ts')) return null;
-    const self = path.basename(id).replace(/\.[cm]?ts$/, '');
-    const withoutSelfImport = code.replace(
-      new RegExp(`^\\s*import\\s+[^;]*?from\\s+["']\\./${self}["'];?\\s*$`, 'gm'),
-      '',
-    );
-    return withoutSelfImport === code
-      ? null
-      : { code: withoutSelfImport, map: null };
-  },
+// Drop any import whose specifier resolves to the importing module itself. A
+// module cannot import its own exports — the Smithy CLI's Windows codegen writes
+// exactly that, which the bundler rejects as an assignment to an import.
+const dropSelfImports = () => ({
+  name: 'drop-self-imports',
+  transform: (code, id) => ({
+    code: code.replace(
+      /^import\s+[^;]*?\s+from\s+["'](\.[^"']*)["'];?\s*$/gm,
+      (line, specifier) =>
+        path.resolve(path.dirname(id), specifier) === id.replace(/\.[cm]?tsx?$/, '')
+          ? ''
+          : line,
+    ),
+    map: null,
+  }),
 });
 
 const outDir = path.resolve('dist', '<%- projectRoot %>', 'build/ssdk');
 
-/**
- * Bundle the Server SDK straight from the generated TypeScript sources, emitting
- * the module and its declarations in one pass. The sources rather than a `tsc`
- * pre-pass: the SDK merges an `interface` with a `namespace` and a `class` across
- * an operation↔service import cycle, which tsc mis-resolved on a case-insensitive
- * filesystem, emitting a module that imported a name from itself.
- */
+// Bundle from the generated TypeScript sources, emitting the module and its
+// declarations in one pass.
 export default {
   input: path.join(ssdkDir, 'src/index.ts'),
-  plugins: [stripSelfImports(), re2WasmPlugin(), esmShim(), dts({ resolve: true })],
+  plugins: [dropSelfImports(), re2WasmPlugin(), esmShim(), dts({ resolve: true })],
   output: [{ dir: outDir, format: 'es' }],
   platform: 'node',
 };
