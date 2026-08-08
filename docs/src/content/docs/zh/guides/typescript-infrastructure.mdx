@@ -97,9 +97,13 @@ new ApplicationStage(app, 'my-app-sandbox', {
     region: process.env.CDK_DEFAULT_REGION,
   },
 });
+
+// Define other instances of stages, such as beta and prod, below
 ```
 
 `env` 属性告诉 CDK 要部署到哪个 AWS 账户和区域。`CDK_DEFAULT_ACCOUNT` 和 `CDK_DEFAULT_REGION` 由 CDK CLI 从您的活动 AWS 凭证中自动解析。有关更多详细信息，请参阅 [CDK 环境文档](https://docs.aws.amazon.com/cdk/v2/guide/environments.html)。
+
+沙箱阶段是 <Link path="guides/typescript-infrastructure#deploying-your-sandbox-stage">`deploy-sandbox` 目标</Link> 部署的阶段。
 
 如果您使用 `stageConfig` 生成，`main.ts` 会从集中式配置文件中读取账户和区域，当未设置配置时会回退到环境变量：
 
@@ -372,33 +376,41 @@ npx cdk bootstrap aws://<account-id>/<region>
 
 ## 部署到 AWS
 
-构建完成后，可通过 `deploy` 目标将基础设施部署到 AWS。
+您的项目有三个部署目标，每个都适用于不同的情况：
 
-:::caution[CI部署]
-在 CI/CD 流水线中部署时，请使用 `deploy-ci` 目标。详见下文。
-:::
+| 目标             | 用途                                                                       |
+| ---------------- | -------------------------------------------------------------------------------- |
+| `deploy-sandbox` | 在开发期间部署您自己的沙箱阶段。无需阶段参数。    |
+| `deploy`         | 通过命名阶段或堆栈来部署任何阶段。                      |
+| `deploy-ci`      | 从 CI/CD 流水线部署，使用预合成的云装配。          |
 
 首先，确保已配置 AWS 凭证。如果您使用 `stageConfig` 生成并在 `packages/common/infra-config/src/stages.config.ts` 中配置了阶段凭证，部署命令将自动解析并应用目标阶段的正确凭证。否则，请确保在您的环境中设置了 AWS 凭证（例如，通过 `AWS_PROFILE` 或环境变量）。有关可用选项，请参阅 [AWS 凭证文档](https://docs.aws.amazon.com/sdkref/latest/guide/access.html)。
 
-然后运行部署目标：
+### 部署您的沙箱阶段
 
-<NxCommands commands={['deploy <my-infra> <my-infra>-sandbox/*']} />
+`deploy-sandbox` 目标部署 `main.ts` 声明的沙箱阶段，因此您无需记住其阶段名称：
+
+<NxCommands commands={['deploy-sandbox <my-infra>']} />
+
+这是在开发时让您自己的应用程序副本在 AWS 中运行的最快方法。
 
 :::tip[快速模式以加快部署速度]
-`deploy` 目标默认等待资源完全稳定，优先考虑一致性而非速度。要在开发期间加快迭代速度，可以通过传递 CDK 的 `--express` 标志来选择使用 [CloudFormation 快速模式](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html)：
+部署目标默认等待资源完全稳定，优先考虑一致性而非速度。要在开发期间加快迭代速度，可以通过传递 CDK 的 `--express` 标志来选择使用 [CloudFormation 快速模式](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html)：
 
-<NxCommands commands={['deploy <my-infra> <my-infra>-sandbox/* --express']} />
+<NxCommands commands={['deploy-sandbox <my-infra> --express']} />
 
 快速模式在确认资源配置已应用后即完成，而不是等待完全稳定，传播会在后台继续进行，从而显著加快迭代周期。它适用于开发和迭代。
 :::
 
-:::tip[选择性堆栈部署]
-上述命令部署 `<my-infra>-sandbox` 阶段的 _所有_ 堆栈。只要阶段在 `main.ts` 中定义，您也可以指定其他阶段。
+### 部署特定阶段
 
-您还可以通过指定完整堆栈名称来部署单个堆栈，例如：
+`deploy` 目标部署您命名的任何阶段或堆栈。将其用于沙箱以外的阶段，或部署单个堆栈：
+
+<NxCommands commands={['deploy <my-infra> <my-infra>-sandbox/*']} />
+
+只要阶段在 `main.ts` 中定义，您就可以指定任何阶段。要部署单个堆栈，请提供完整的堆栈名称：
 
 <NxCommands commands={['deploy <my-infra> <my-infra>-sandbox/Application']} />
-:::
 
 ## 在 CI/CD 流水线中部署到 AWS
 

@@ -136,6 +136,9 @@ export async function tsInfraGenerator(
   const npmScopePrefix = getNpmScopePrefix(tree);
   const scopeAlias = npmScopePrefix;
   const fullyQualifiedName = `${npmScopePrefix}${schema.name}`;
+  const namespace = kebabCase(fullyQualifiedName);
+  // The stage instantiated in main.ts. Quoted so the shell does not glob `*`.
+  const sandboxStagePattern = `"${namespace}-sandbox/*"`;
   tree.delete(joinPathFragments(libraryRoot, 'src'));
 
   generateFiles(
@@ -145,7 +148,7 @@ export async function tsInfraGenerator(
     {
       synthDir: synthDirFromProject,
       scopeAlias: scopeAlias,
-      namespace: kebabCase(fullyQualifiedName),
+      namespace,
       fullyQualifiedName,
       pkgMgrCmd: getPackageManagerDisplayCommands().exec,
       dir: lib.dir,
@@ -202,6 +205,18 @@ export async function tsInfraGenerator(
           : withCdkEnv({
               cwd: '{projectRoot}',
               command: 'cdk deploy --require-approval=never',
+            }),
+      };
+      config.targets['deploy-sandbox'] = {
+        executor: 'nx:run-commands',
+        dependsOn: ['^build', 'compile'],
+        options: stageConfig
+          ? withCdkEnv({
+              command: `tsx packages/common/scripts/src/infra/infra-deploy.ts ${libraryRoot} ${sandboxStagePattern}`,
+            })
+          : withCdkEnv({
+              cwd: '{projectRoot}',
+              command: `cdk deploy --require-approval=never ${sandboxStagePattern}`,
             }),
       };
       config.targets['deploy-ci'] = {
