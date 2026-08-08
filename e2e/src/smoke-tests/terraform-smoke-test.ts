@@ -25,7 +25,7 @@ import { runTerraformPlanTest } from './terraform-plan-test';
  * consistency check. The header is rejected if declared explicitly, so there
  * is no configuration that reconciles it. Cedar stays covered by `cdk-deploy`,
  * which CloudFormation applies without an equivalent check. Restore the policy
- * engine here once the provider marks the block `Computed`.
+ * engine here once the provider marks the block `Computed` — tracked in #1065.
  */
 export const runTerraformSmokeTest = async (
   dir: string,
