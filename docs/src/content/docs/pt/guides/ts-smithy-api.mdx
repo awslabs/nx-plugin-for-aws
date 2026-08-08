@@ -49,7 +49,7 @@ O gerador cria dois projetos relacionados no diretório `<directory>/<api-name>`
   - package.json Manifesto do projeto definindo o nome do pacote e dependências do projeto
   - project.json Configuração do projeto e targets de build
   - smithy-build.json Configuração de build Smithy
-  - build.Dockerfile Configuração Docker para construir artefatos Smithy
+  - ssdk.rolldown.config.mjs Empacota o TypeScript Server SDK gerado
   - src/
     - main.smithy Definição principal do serviço
     - operations/
@@ -576,9 +576,11 @@ export const Echo: EchoOperation<ServiceContext> = async (input, ctx) => {
 
 ## Build e Geração de Código
 
-O projeto de modelo Smithy usa [Docker](https://www.docker.com/) para construir os artefatos Smithy e gerar o TypeScript Server SDK:
+O projeto de modelo Smithy usa o [Smithy CLI](https://smithy.io/2.0/guides/smithy-cli/index.html) para construir os artefatos Smithy e gerar o TypeScript Server SDK:
 
 <NxCommands commands={['build <model-project>']} />
+
+No macOS e Linux, a CLI é resolvida pelo [mise](https://mise.jdx.dev/), que o build busca sob demanda, então não há nada para instalar — ele baixa e armazena em cache a versão fixada na primeira vez que você faz o build.
 
 Este processo:
 
@@ -590,6 +592,39 @@ Este processo:
 O projeto backend copia automaticamente o SDK gerado durante a compilação:
 
 <NxCommands commands={['copy-ssdk <backend-project>']} />
+
+### Building no Windows
+
+`mise` não publica nenhum pacote Windows para npm, então no Windows a Smithy CLI é um pré-requisito que você instala por conta própria. Instale-a uma vez seguindo o [guia de instalação da Smithy CLI](https://smithy.io/2.0/guides/smithy-cli/cli_installation.html) (por exemplo `winget install smithy` ou `scoop install smithy`), e certifique-se de que `smithy` está no seu `PATH`. Um projeto Smithy gerado no Windows executa `smithy` diretamente em vez de através do `mise`.
+
+:::caution[Atualizando a CLI]
+Como a CLI é instalada globalmente em vez de fixada no seu workspace, atualizar o workspace com `nx migrate` **não** a atualiza. Quando uma migração move as dependências Smithy para frente, atualize sua Smithy CLI global para uma versão correspondente você mesmo.
+:::
+
+Alternativamente, desenvolva dentro do [WSL](https://learn.microsoft.com/en-us/windows/wsl/install), onde o build executa o caminho Linux e `mise` resolve a CLI para você — nada para instalar.
+
+Um projeto gerado no Windows faz commit de um target `compile` que invoca `smithy` diretamente, então qualquer outra pessoa trabalhando nele — incluindo no macOS ou Linux — precisa da Smithy CLI no `PATH` também. Para fazer essas máquinas resolverem a CLI através do `mise`, mude o target para o comando `mise` como [descrito abaixo](#choosing-how-the-cli-is-resolved).
+
+### Escolhendo como a CLI é resolvida
+
+macOS e Linux resolvem a CLI através do `mise` e Windows usa uma CLI instalada globalmente, mas você pode escolher qualquer uma em qualquer plataforma editando o comando do target `compile` no `project.json` do projeto de modelo.
+
+Para usar uma Smithy CLI instalada globalmente em vez do `mise`, substitua o prefixo `mise` por um `smithy` simples:
+
+```json title="project.json" del={5} ins={6}
+{
+  "targets": {
+    "compile": {
+      "options": {
+        "commands": ["... npx -y mise@<version> exec smithy@<version> -- smithy build ..."]
+        "commands": ["... smithy build ..."]
+      }
+    }
+  }
+}
+```
+
+Para voltar ao `mise` resolvendo a CLI, restaure o prefixo `npx -y mise@<version> exec smithy@<version> --`.
 
 ### Target de Bundle
 

@@ -1,0 +1,74 @@
+import fs from 'node:fs';
+import { createRequire } from 'node:module';
+import path from 'node:path';
+import esmShim from '@rollup/plugin-esm-shim';
+import { dts } from 'rolldown-plugin-dts';
+
+// The Smithy CLI generates the Server SDK under dist, along with its own
+// dependencies, so paths are resolved from there rather than this project. The
+// compile target runs from the workspace root, so these resolve there.
+const ssdkDir = path.resolve(
+  'dist',
+  '<%- projectRoot %>',
+  'smithy/source/typescript-ssdk-codegen',
+);
+const require = createRequire(path.join(ssdkDir, 'package.json'));
+
+// Bundle the re2-wasm wasm file as part of the module
+const re2WasmPlugin = () => ({
+  name: 're2-wasm-plugin',
+  resolveId: (id) => {
+    if (!(id === 're2-wasm' || id.endsWith('/re2-wasm'))) return null;
+    try {
+      const dir = path.join(
+        path.dirname(require.resolve('re2-wasm/package.json')),
+        'build/wasm',
+      );
+      const entry = path.join(dir, 're2.js');
+      return fs.existsSync(path.join(dir, 're2.wasm')) && fs.existsSync(entry)
+        ? entry
+        : null;
+    } catch {
+      return null;
+    }
+  },
+  load: (id) => {
+    if (!(id.endsWith('re2.js') && id.includes('re2-wasm'))) return null;
+    try {
+      const wasmPath = path.join(path.dirname(id), 're2.wasm');
+      return fs.existsSync(wasmPath) && fs.existsSync(id)
+        ? `var Module = { wasmBinary: Buffer.from("${fs.readFileSync(wasmPath).toString('base64')}", "base64") }\n${fs.readFileSync(id, 'utf8')}`
+        : null;
+    } catch {
+      return null;
+    }
+  },
+});
+
+// Drop any import whose specifier resolves to the importing module itself. A
+// module cannot import its own exports — the Smithy CLI's Windows codegen writes
+// exactly that, which the bundler rejects as an assignment to an import.
+const dropSelfImports = () => ({
+  name: 'drop-self-imports',
+  transform: (code, id) => ({
+    code: code.replace(
+      /^import\s+[^;]*?\s+from\s+["'](\.[^"']*)["'];?\s*$/gm,
+      (line, specifier) =>
+        path.resolve(path.dirname(id), specifier) === id.replace(/\.[cm]?tsx?$/, '')
+          ? ''
+          : line,
+    ),
+    map: null,
+  }),
+});
+
+const outDir = path.resolve('dist', '<%- projectRoot %>', 'build/ssdk');
+
+// Bundle from the generated TypeScript sources, emitting the module and its
+// declarations in one pass.
+export default {
+  input: path.join(ssdkDir, 'src/index.ts'),
+  plugins: [dropSelfImports(), re2WasmPlugin(), esmShim(), dts({ resolve: true })],
+  output: [{ dir: outDir, format: 'es' }],
+  platform: 'node',
+};
