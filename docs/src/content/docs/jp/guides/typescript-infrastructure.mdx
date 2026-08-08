@@ -97,17 +97,22 @@ new ApplicationStage(app, 'my-app-sandbox', {
     region: process.env.CDK_DEFAULT_REGION,
   },
 });
+
+// betaやprodなど、他のステージのインスタンスを以下に定義
 ```
 
 `env`プロパティは、デプロイ先のAWSアカウントとリージョンをCDKに指示します。`CDK_DEFAULT_ACCOUNT`と`CDK_DEFAULT_REGION`は、アクティブなAWS認証情報からCDK CLIによって自動的に解決されます。詳細は[CDK環境ドキュメント](https://docs.aws.amazon.com/cdk/v2/guide/environments.html)を参照してください。
 
+sandboxステージは<Link path="guides/typescript-infrastructure#deploying-your-sandbox-stage">`deploy-sandbox`ターゲット</Link>がデプロイするステージです。
+
 `stageConfig`で生成した場合、`main.ts`は集中設定ファイルからアカウントとリージョンを読み取り、設定がない場合は環境変数にフォールバックします:
 
 ```ts title="src/main.ts (stageConfigの場合)"
-import stagesConfig from ':my-scope/common-infra-config';
+import { resolveStage } from '@my-scope/common-infra-config';
 
-const projectStages = stagesConfig.projects?.['packages/infra']?.stages ?? {};
-const sandboxConfig = projectStages['my-app-sandbox'];
+// このプロジェクト（packages/infra）配下のステージを検索し、
+// 共有ステージにフォールバックします。ステージの設定が存在しない場合はundefinedを返します。
+const sandboxConfig = resolveStage('packages/infra', 'my-app-sandbox');
 
 new ApplicationStage(app, 'my-app-sandbox', {
   env: {
@@ -371,32 +376,40 @@ npx cdk bootstrap aws://<account-id>/<region>
 
 ## AWSへのデプロイ
 
-ビルド後、`deploy`ターゲットを使用してインフラストラクチャをAWSにデプロイできます。
+プロジェクトには3つのデプロイターゲットがあり、それぞれ異なる状況に適しています:
 
-:::caution[CIデプロイ]
-CI/CDパイプラインでのデプロイには`deploy-ci`ターゲットを使用してください。詳細は後述します。
-:::
+| ターゲット       | 用途                                                                             |
+| ---------------- | -------------------------------------------------------------------------------- |
+| `deploy-sandbox` | 開発中に自分のsandboxステージをデプロイ。ステージ引数は不要。                     |
+| `deploy`         | 任意のステージをデプロイ。デプロイしたいステージまたはスタックを指定。             |
+| `deploy-ci`      | CI/CDパイプラインからのデプロイ。事前合成済みのクラウドアセンブリを使用。         |
 
 まず、AWS認証情報が設定されていることを確認してください。`stageConfig`で生成し、`packages/common/infra-config/src/stages.config.ts`でステージ認証情報を設定している場合、デプロイコマンドはターゲットステージに対して正しい認証情報を自動的に解決して適用します。それ以外の場合は、環境にAWS認証情報が設定されていることを確認してください（例: `AWS_PROFILE`または環境変数経由）。利用可能なオプションについては、[AWS認証情報ドキュメント](https://docs.aws.amazon.com/sdkref/latest/guide/access.html)を参照してください。
 
-次にデプロイターゲットを実行します:
+### Sandboxステージのデプロイ
+
+`deploy-sandbox`ターゲットは`main.ts`で宣言されているsandboxステージをデプロイするため、ステージ名を覚えておく必要はありません:
+
+<NxCommands commands={['deploy-sandbox <my-infra>']} />
+
+これは、開発中にアプリケーションの自分用のコピーをAWSで実行する最も迅速な方法です。
+
+### 特定のステージのデプロイ
+
+`deploy`ターゲットは、指定したステージまたはスタックをデプロイします。sandbox以外のステージや、単一のスタックをデプロイする場合に使用します:
 
 <NxCommands commands={['deploy <my-infra> <my-infra>-sandbox/*']} />
 
-:::tip[より高速なデプロイのためのExpressモード]
-`deploy`ターゲットは、デフォルトで完全なリソース安定化を待機し、速度よりも一貫性を優先します。開発中のイテレーションを高速化するには、CDKの`--express`フラグを渡して[CloudFormation expressモード](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html)をオプトインしてください:
-
-<NxCommands commands={['deploy <my-infra> <my-infra>-sandbox/* --express']} />
-
-Expressモードは、完全な安定化を待つのではなく、リソース設定が適用されたことが確認されると終了し、伝播はバックグラウンドで継続されるため、イテレーションサイクルが大幅に高速化されます。これは開発とイテレーションを目的としています。
-:::
-
-:::tip[選択的スタックデプロイ]
-上記のコマンドは`<my-infra>-sandbox`ステージの*すべて*のスタックをデプロイします。`main.ts`で定義されている他のステージを指定できます。
-
-完全なスタック名を指定して個別のスタックをデプロイすることも可能です:
+`main.ts`で定義されている任意のステージを指定できます。個別のスタックをデプロイするには、完全なスタック名を指定します:
 
 <NxCommands commands={['deploy <my-infra> <my-infra>-sandbox/Application']} />
+
+:::tip[より高速なデプロイのためのExpressモード]
+デプロイターゲットは、デフォルトで完全なリソース安定化を待機し、速度よりも一貫性を優先します。開発中のイテレーションを高速化するには、CDKの`--express`フラグを渡して[CloudFormation expressモード](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html)をオプトインしてください:
+
+<NxCommands commands={['deploy-sandbox <my-infra> --express']} />
+
+Expressモードは、完全な安定化を待つのではなく、リソース設定が適用されたことが確認されると終了し、伝播はバックグラウンドで継続されるため、イテレーションサイクルが大幅に高速化されます。これは開発とイテレーションを目的としています。
 :::
 
 ## CI/CDパイプラインでのAWSデプロイ

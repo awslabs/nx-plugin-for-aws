@@ -97,9 +97,13 @@ new ApplicationStage(app, 'my-app-sandbox', {
     region: process.env.CDK_DEFAULT_REGION,
   },
 });
+
+// Define other instances of stages, such as beta and prod, below
 ```
 
 Thuộc tính `env` cho CDK biết tài khoản AWS và region nào để triển khai. `CDK_DEFAULT_ACCOUNT` và `CDK_DEFAULT_REGION` được CDK CLI tự động phân giải từ thông tin xác thực AWS đang hoạt động của bạn. Xem [tài liệu về môi trường CDK](https://docs.aws.amazon.com/cdk/v2/guide/environments.html) để biết thêm chi tiết.
+
+Stage sandbox là stage mà <Link path="guides/typescript-infrastructure#deploying-your-sandbox-stage">target `deploy-sandbox`</Link> triển khai.
 
 Nếu bạn tạo với `enableStageConfig`, tệp `main.ts` sẽ đọc account và region từ một tệp cấu hình tập trung thay vì vậy, và quay lại sử dụng biến môi trường khi không có cấu hình được đặt:
 
@@ -372,32 +376,40 @@ npx cdk bootstrap aws://<account-id>/<region>
 
 ## Triển khai lên AWS
 
-Sau khi build, bạn có thể triển khai cơ sở hạ tầng của mình lên AWS bằng target `deploy`.
+Dự án của bạn có ba target triển khai, mỗi target phù hợp với một tình huống khác nhau:
 
-:::caution[Triển khai CI]
-Sử dụng target `deploy-ci` nếu triển khai trong một pipeline CI/CD. Xem bên dưới để biết thêm chi tiết.
-:::
+| Target           | Sử dụng cho                                                                       |
+| ---------------- | -------------------------------------------------------------------------------- |
+| `deploy-sandbox` | Triển khai stage sandbox của riêng bạn trong quá trình phát triển. Không cần đối số stage.    |
+| `deploy`         | Triển khai bất kỳ stage nào, bằng cách đặt tên stage hoặc stack bạn muốn.                      |
+| `deploy-ci`      | Triển khai từ pipeline CI/CD, sử dụng cloud assembly đã được tổng hợp trước.          |
 
 Đầu tiên, đảm bảo rằng bạn đã cấu hình thông tin xác thực AWS. Nếu bạn tạo với `stageConfig` và đã cấu hình thông tin xác thực stage trong `packages/common/infra-config/src/stages.config.ts`, lệnh deploy sẽ tự động phân giải và áp dụng thông tin xác thực chính xác cho stage đích. Nếu không, hãy đảm bảo thông tin xác thực AWS của bạn được đặt trong môi trường của bạn (ví dụ: thông qua `AWS_PROFILE` hoặc biến môi trường). Xem [tài liệu thông tin xác thực AWS](https://docs.aws.amazon.com/sdkref/latest/guide/access.html) để biết các tùy chọn có sẵn.
 
-Sau đó chạy target deploy:
+### Triển khai Stage Sandbox của bạn
+
+Target `deploy-sandbox` triển khai stage sandbox mà `main.ts` khai báo, vì vậy bạn không cần nhớ tên stage của nó:
+
+<NxCommands commands={['deploy-sandbox <my-infra>']} />
+
+Đây là cách nhanh nhất để có bản sao ứng dụng của riêng bạn chạy trên AWS trong khi bạn phát triển.
+
+### Triển khai một Stage cụ thể
+
+Target `deploy` triển khai bất kỳ stage hoặc stack nào bạn đặt tên. Sử dụng nó cho các stage khác ngoài sandbox của bạn, hoặc để triển khai một stack duy nhất:
 
 <NxCommands commands={['deploy <my-infra> <my-infra>-sandbox/*']} />
 
-:::tip[Chế độ Express để triển khai nhanh hơn]
-Target `deploy` chờ đợi ổn định tài nguyên hoàn toàn theo mặc định, ưu tiên tính nhất quán hơn tốc độ. Để tăng tốc độ lặp trong quá trình phát triển, hãy chọn sử dụng [chế độ express của CloudFormation](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html) bằng cách truyền cờ `--express` của CDK:
-
-<NxCommands commands={['deploy <my-infra> <my-infra>-sandbox/* --express']} />
-
-Chế độ express hoàn thành ngay khi cấu hình tài nguyên được xác nhận đã áp dụng thay vì chờ đợi ổn định hoàn toàn, với việc lan truyền tiếp tục ở chế độ nền, giúp chu kỳ lặp nhanh hơn đáng kể. Nó được thiết kế cho phát triển và lặp lại.
-:::
-
-:::tip[Triển khai stack chọn lọc]
-Lệnh trên triển khai _tất cả_ các stack cho stage `<my-infra>-sandbox`. Bạn có thể chỉ định các stage khác miễn là chúng được định nghĩa trong `main.ts`.
-
-Bạn cũng có thể triển khai các stack riêng lẻ bằng cách chỉ định tên stack đầy đủ, ví dụ:
+Bạn có thể chỉ định bất kỳ stage nào miễn là nó được định nghĩa trong `main.ts`. Để triển khai một stack riêng lẻ, hãy cung cấp tên stack đầy đủ:
 
 <NxCommands commands={['deploy <my-infra> <my-infra>-sandbox/Application']} />
+
+:::tip[Chế độ Express để triển khai nhanh hơn]
+Các target triển khai chờ đợi ổn định tài nguyên hoàn toàn theo mặc định, ưu tiên tính nhất quán hơn tốc độ. Để tăng tốc độ lặp trong quá trình phát triển, hãy chọn sử dụng [chế độ express của CloudFormation](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html) bằng cách truyền cờ `--express` của CDK:
+
+<NxCommands commands={['deploy-sandbox <my-infra> --express']} />
+
+Chế độ express hoàn thành ngay khi cấu hình tài nguyên được xác nhận đã áp dụng thay vì chờ đợi ổn định hoàn toàn, với việc lan truyền tiếp tục ở chế độ nền, giúp chu kỳ lặp nhanh hơn đáng kể. Nó được thiết kế cho phát triển và lặp lại.
 :::
 
 ## Triển khai lên AWS trong một pipeline CI/CD

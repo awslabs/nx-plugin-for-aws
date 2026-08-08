@@ -97,9 +97,13 @@ new ApplicationStage(app, 'my-app-sandbox', {
     region: process.env.CDK_DEFAULT_REGION,
   },
 });
+
+// Define other instances of stages, such as beta and prod, below
 ```
 
 `env` 속성은 CDK에게 배포할 AWS 계정과 리전을 알려줍니다. `CDK_DEFAULT_ACCOUNT`와 `CDK_DEFAULT_REGION`은 활성 AWS 자격 증명에서 CDK CLI에 의해 자동으로 확인됩니다. 자세한 내용은 [CDK 환경 문서](https://docs.aws.amazon.com/cdk/v2/guide/environments.html)를 참조하세요.
+
+샌드박스 스테이지는 <Link path="guides/typescript-infrastructure#deploying-your-sandbox-stage">`deploy-sandbox` 타겟</Link>이 배포하는 스테이지입니다.
 
 `stageConfig`로 생성한 경우, `main.ts`는 중앙 집중식 구성 파일에서 계정과 리전을 읽으며, 구성이 설정되지 않은 경우 환경 변수로 폴백합니다:
 
@@ -371,32 +375,40 @@ npx cdk bootstrap aws://<account-id>/<region>
 
 ## AWS에 배포하기
 
-빌드 후 `deploy` 타겟을 사용하여 인프라를 AWS에 배포할 수 있습니다.
+프로젝트에는 각각 다른 상황에 적합한 세 가지 배포 타겟이 있습니다:
 
-:::caution[CI 배포]
-CI/CD 파이프라인 배포 시 `deploy-ci` 타겟을 사용하세요. 자세한 내용은 아래를 참조하세요.
-:::
+| 타겟             | 사용 용도                                                                        |
+| ---------------- | -------------------------------------------------------------------------------- |
+| `deploy-sandbox` | 개발 중 자신의 샌드박스 스테이지를 배포합니다. 스테이지 인수가 필요하지 않습니다.    |
+| `deploy`         | 원하는 스테이지 또는 스택의 이름을 지정하여 모든 스테이지를 배포합니다.              |
+| `deploy-ci`      | 사전 합성된 클라우드 어셈블리를 사용하여 CI/CD 파이프라인에서 배포합니다.            |
 
 먼저 AWS 자격 증명이 구성되어 있는지 확인하세요. `stageConfig`로 생성하고 `packages/common/infra-config/src/stages.config.ts`에 스테이지 자격 증명을 구성한 경우, 배포 명령이 대상 스테이지에 대한 올바른 자격 증명을 자동으로 확인하고 적용합니다. 그렇지 않으면 환경에 AWS 자격 증명이 설정되어 있는지 확인하세요(예: `AWS_PROFILE` 또는 환경 변수를 통해). 사용 가능한 옵션은 [AWS 자격 증명 문서](https://docs.aws.amazon.com/sdkref/latest/guide/access.html)를 참조하세요.
 
-그런 다음 배포 타겟을 실행합니다:
+### 샌드박스 스테이지 배포하기
+
+`deploy-sandbox` 타겟은 `main.ts`가 선언하는 샌드박스 스테이지를 배포하므로 스테이지 이름을 기억할 필요가 없습니다:
+
+<NxCommands commands={['deploy-sandbox <my-infra>']} />
+
+이것은 개발하는 동안 AWS에서 애플리케이션의 자체 복사본을 실행하는 가장 빠른 방법입니다.
+
+### 특정 스테이지 배포하기
+
+`deploy` 타겟은 지정한 스테이지 또는 스택을 배포합니다. 샌드박스 이외의 스테이지나 단일 스택을 배포하는 데 사용하세요:
 
 <NxCommands commands={['deploy <my-infra> <my-infra>-sandbox/*']} />
 
-:::tip[더 빠른 배포를 위한 Express 모드]
-`deploy` 타겟은 기본적으로 전체 리소스 안정화를 기다리며, 속도보다 일관성을 우선시합니다. 개발 중 반복 속도를 높이려면 CDK의 `--express` 플래그를 전달하여 [CloudFormation express 모드](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html)를 선택할 수 있습니다:
-
-<NxCommands commands={['deploy <my-infra> <my-infra>-sandbox/* --express']} />
-
-Express 모드는 전체 안정화를 기다리지 않고 리소스 구성이 적용된 것으로 확인되면 완료되며, 전파는 백그라운드에서 계속 진행되어 반복 주기가 훨씬 빨라집니다. 이는 개발 및 반복 작업을 위한 것입니다.
-:::
-
-:::tip[선택적 스택 배포]
-위 명령은 `<my-infra>-sandbox` 스테이지의 _모든_ 스택을 배포합니다. `main.ts`에 정의된 다른 스테이지를 지정할 수 있습니다.
-
-전체 스택 이름을 지정하여 개별 스택을 배포할 수도 있습니다. 예시:
+`main.ts`에 정의된 모든 스테이지를 지정할 수 있습니다. 개별 스택을 배포하려면 전체 스택 이름을 제공하세요:
 
 <NxCommands commands={['deploy <my-infra> <my-infra>-sandbox/Application']} />
+
+:::tip[더 빠른 배포를 위한 Express 모드]
+배포 타겟은 기본적으로 전체 리소스 안정화를 기다리며, 속도보다 일관성을 우선시합니다. 개발 중 반복 속도를 높이려면 CDK의 `--express` 플래그를 전달하여 [CloudFormation express 모드](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html)를 선택할 수 있습니다:
+
+<NxCommands commands={['deploy-sandbox <my-infra> --express']} />
+
+Express 모드는 전체 안정화를 기다리지 않고 리소스 구성이 적용된 것으로 확인되면 완료되며, 전파는 백그라운드에서 계속 진행되어 반복 주기가 훨씬 빨라집니다. 이는 개발 및 반복 작업을 위한 것입니다.
 :::
 
 ## CI/CD 파이프라인에서 AWS 배포

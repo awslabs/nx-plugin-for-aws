@@ -97,9 +97,13 @@ new ApplicationStage(app, 'my-app-sandbox', {
     region: process.env.CDK_DEFAULT_REGION,
   },
 });
+
+// Define other instances of stages, such as beta and prod, below
 ```
 
 A propriedade `env` informa ao CDK em qual conta AWS e região implantar. `CDK_DEFAULT_ACCOUNT` e `CDK_DEFAULT_REGION` são resolvidos automaticamente pelo CDK CLI a partir de suas credenciais AWS ativas. Consulte a [documentação de ambientes do CDK](https://docs.aws.amazon.com/cdk/v2/guide/environments.html) para mais detalhes.
+
+O estágio sandbox é aquele que o <Link path="guides/typescript-infrastructure#deploying-your-sandbox-stage">target `deploy-sandbox`</Link> implanta.
 
 Se você gerou com `stageConfig`, o `main.ts` lê conta e região de um arquivo de configuração centralizado, recorrendo a variáveis de ambiente quando nenhuma configuração está definida:
 
@@ -371,32 +375,40 @@ Para mais detalhes, consulte a [documentação de bootstrapping do CDK](https://
 
 ## Implantando na AWS
 
-Após um build, você pode implantar sua infraestrutura na AWS usando o target `deploy`.
+Seu projeto tem três targets de implantação, cada um adequado para uma situação diferente:
 
-:::caution[Implantação CI]
-Use o target `deploy-ci` se estiver implantando em um pipeline CI/CD. Veja abaixo para mais detalhes.
-:::
+| Target           | Use para                                                                         |
+| ---------------- | -------------------------------------------------------------------------------- |
+| `deploy-sandbox` | Implantar seu próprio estágio sandbox durante o desenvolvimento. Nenhum argumento de estágio necessário. |
+| `deploy`         | Implantar qualquer estágio, nomeando o estágio ou stacks que você deseja.       |
+| `deploy-ci`      | Implantar a partir de um pipeline CI/CD, usando uma cloud assembly pré-sintetizada. |
 
 Primeiro, certifique-se de ter credenciais AWS configuradas. Se você gerou com `stageConfig` e configurou credenciais de estágio em `packages/common/infra-config/src/stages.config.ts`, o comando deploy resolverá e aplicará automaticamente as credenciais corretas para o estágio alvo. Caso contrário, certifique-se de que suas credenciais AWS estejam definidas no seu ambiente (por exemplo, via `AWS_PROFILE` ou variáveis de ambiente). Consulte a [documentação de credenciais AWS](https://docs.aws.amazon.com/sdkref/latest/guide/access.html) para as opções disponíveis.
 
-Em seguida, execute o target deploy:
+### Implantando seu Estágio Sandbox
+
+O target `deploy-sandbox` implanta o estágio sandbox que `main.ts` declara, então você não precisa lembrar o nome do estágio:
+
+<NxCommands commands={['deploy-sandbox <my-infra>']} />
+
+Esta é a maneira mais rápida de ter sua própria cópia da aplicação rodando na AWS enquanto você desenvolve.
+
+### Implantando um Estágio Específico
+
+O target `deploy` implanta qualquer estágio ou stacks que você nomear. Use-o para estágios diferentes do seu sandbox, ou para implantar uma única stack:
 
 <NxCommands commands={['deploy <my-infra> <my-infra>-sandbox/*']} />
 
-:::tip[Modo Express para Implantações Mais Rápidas]
-O target `deploy` aguarda a estabilização completa dos recursos por padrão, favorecendo consistência em vez de velocidade. Para acelerar a iteração durante o desenvolvimento, opte pelo [modo express do CloudFormation](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html) passando a flag `--express` do CDK:
-
-<NxCommands commands={['deploy <my-infra> <my-infra>-sandbox/* --express']} />
-
-O modo express finaliza assim que a configuração do recurso é confirmada como aplicada, em vez de esperar pela estabilização completa, com a propagação continuando em segundo plano, para ciclos de iteração significativamente mais rápidos. Ele é destinado ao desenvolvimento e iteração.
-:::
-
-:::tip[Implantação seletiva de stacks]
-O comando acima implanta _todas_ as stacks do estágio `<my-infra>-sandbox`. Você pode especificar outros estágios desde que estejam definidos em `main.ts`.
-
-Você também pode implantar stacks individuais especificando o nome completo da stack, por exemplo:
+Você pode especificar qualquer estágio desde que esteja definido em `main.ts`. Para implantar uma stack individual, forneça o nome completo da stack:
 
 <NxCommands commands={['deploy <my-infra> <my-infra>-sandbox/Application']} />
+
+:::tip[Modo Express para Implantações Mais Rápidas]
+Os targets de implantação aguardam a estabilização completa dos recursos por padrão, favorecendo consistência em vez de velocidade. Para acelerar a iteração durante o desenvolvimento, opte pelo [modo express do CloudFormation](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html) passando a flag `--express` do CDK:
+
+<NxCommands commands={['deploy-sandbox <my-infra> --express']} />
+
+O modo express finaliza assim que a configuração do recurso é confirmada como aplicada, em vez de esperar pela estabilização completa, com a propagação continuando em segundo plano, para ciclos de iteração significativamente mais rápidos. Ele é destinado ao desenvolvimento e iteração.
 :::
 
 ## Implantando na AWS em um Pipeline CI/CD

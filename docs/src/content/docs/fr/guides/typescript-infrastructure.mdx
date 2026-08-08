@@ -97,13 +97,17 @@ new ApplicationStage(app, 'my-app-sandbox', {
     region: process.env.CDK_DEFAULT_REGION,
   },
 });
+
+// Define other instances of stages, such as beta and prod, below
 ```
 
 La propriété `env` indique à CDK vers quel compte AWS et quelle région déployer. `CDK_DEFAULT_ACCOUNT` et `CDK_DEFAULT_REGION` sont résolus automatiquement par la CLI CDK à partir de vos credentials AWS actifs. Consultez la [documentation CDK sur les environnements](https://docs.aws.amazon.com/cdk/v2/guide/environments.html) pour plus de détails.
 
-Si vous avez généré avec `enableStageConfig`, le `main.ts` lit le compte et la région depuis un fichier de configuration centralisé, avec un repli sur les variables d'environnement lorsqu'aucune config n'est définie :
+Le stage sandbox est celui que la <Link path="guides/typescript-infrastructure#deploying-your-sandbox-stage">cible `deploy-sandbox`</Link> déploie.
 
-```ts title="src/main.ts (avec enableStageConfig)"
+Si vous avez généré avec `stageConfig`, le `main.ts` lit le compte et la région depuis un fichier de configuration centralisé, avec un repli sur les variables d'environnement lorsqu'aucune config n'est définie :
+
+```ts title="src/main.ts (avec stageConfig)"
 import stagesConfig from ':my-scope/common-infra-config';
 
 const projectStages = stagesConfig.projects?.['packages/infra']?.stages ?? {};
@@ -371,32 +375,40 @@ Pour plus de détails, veuillez vous référer à la [documentation CDK sur le b
 
 ## Déploiement sur AWS
 
-Après un build, vous pouvez déployer votre infrastructure sur AWS en utilisant la cible `deploy`.
+Votre projet dispose de trois cibles de déploiement, chacune adaptée à une situation différente :
 
-:::caution[Déploiement CI]
-Utilisez la cible `deploy-ci` si vous déployez dans un pipeline CI/CD. Voir ci-dessous pour plus de détails.
-:::
+| Cible            | À utiliser pour                                                                                  |
+| ---------------- | ------------------------------------------------------------------------------------------------ |
+| `deploy-sandbox` | Déployer votre propre stage sandbox pendant le développement. Aucun argument de stage nécessaire. |
+| `deploy`         | Déployer n'importe quel stage, en nommant le stage ou les stacks que vous souhaitez.             |
+| `deploy-ci`      | Déployer depuis un pipeline CI/CD, en utilisant une assembly cloud pré-synthétisée.              |
 
 Tout d'abord, assurez-vous d'avoir configuré les credentials AWS. Si vous avez généré avec `stageConfig` et avez configuré les credentials de stage dans `packages/common/infra-config/src/stages.config.ts`, la commande de déploiement résoudra et appliquera automatiquement les credentials corrects pour le stage cible. Sinon, assurez-vous que vos credentials AWS sont définis dans votre environnement (par exemple, via `AWS_PROFILE` ou des variables d'environnement). Consultez la [documentation AWS sur les credentials](https://docs.aws.amazon.com/sdkref/latest/guide/access.html) pour les options disponibles.
 
-Ensuite, exécutez la cible de déploiement :
+### Déploiement de votre Stage Sandbox
+
+La cible `deploy-sandbox` déploie le stage sandbox que `main.ts` déclare, vous n'avez donc pas besoin de vous souvenir de son nom de stage :
+
+<NxCommands commands={['deploy-sandbox <my-infra>']} />
+
+C'est le moyen le plus rapide d'obtenir votre propre copie de l'application fonctionnant dans AWS pendant que vous développez.
+
+### Déploiement d'un Stage Spécifique
+
+La cible `deploy` déploie le stage ou les stacks que vous nommez. Utilisez-la pour des stages autres que votre sandbox, ou pour déployer une seule stack :
 
 <NxCommands commands={['deploy <my-infra> <my-infra>-sandbox/*']} />
 
-:::tip[Mode Express pour des déploiements plus rapides]
-La cible `deploy` attend la stabilisation complète des ressources par défaut, privilégiant la cohérence à la vitesse. Pour accélérer l'itération pendant le développement, optez pour le [mode express CloudFormation](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html) en passant le flag `--express` de CDK :
-
-<NxCommands commands={['deploy <my-infra> <my-infra>-sandbox/* --express']} />
-
-Le mode express se termine une fois que la configuration des ressources est confirmée comme appliquée plutôt que d'attendre la stabilisation complète, la propagation se poursuivant en arrière-plan, pour des cycles d'itération nettement plus rapides. Il est destiné au développement et à l'itération.
-:::
-
-:::tip[Déploiement sélectif de stacks]
-La commande ci-dessus déploie _toutes_ les stacks du stage `<my-infra>-sandbox`. Vous pouvez spécifier d'autres stages tant qu'ils sont définis dans `main.ts`.
-
-Vous pouvez également déployer des stacks individuelles en spécifiant le nom complet de la stack, par exemple :
+Vous pouvez spécifier n'importe quel stage tant qu'il est défini dans `main.ts`. Pour déployer une stack individuelle, donnez le nom complet de la stack :
 
 <NxCommands commands={['deploy <my-infra> <my-infra>-sandbox/Application']} />
+
+:::tip[Mode Express pour des déploiements plus rapides]
+Les cibles de déploiement attendent la stabilisation complète des ressources par défaut, privilégiant la cohérence à la vitesse. Pour accélérer l'itération pendant le développement, optez pour le [mode express CloudFormation](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html) en passant le flag `--express` de CDK :
+
+<NxCommands commands={['deploy-sandbox <my-infra> --express']} />
+
+Le mode express se termine une fois que la configuration des ressources est confirmée comme appliquée plutôt que d'attendre la stabilisation complète, la propagation se poursuivant en arrière-plan, pour des cycles d'itération nettement plus rapides. Il est destiné au développement et à l'itération.
 :::
 
 ## Déploiement sur AWS dans un pipeline CI/CD
