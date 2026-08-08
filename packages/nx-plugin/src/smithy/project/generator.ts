@@ -29,7 +29,11 @@ import {
   projectExists,
 } from '../../utils/nx';
 import { getRelativePathToRootByDirectory } from '../../utils/paths';
-import { smithyCliCommand, smithyMavenVersions } from '../../utils/smithy';
+import {
+  smithyCliCommand,
+  smithyMavenVersions,
+  warnIfSmithyMissing,
+} from '../../utils/smithy';
 import type { SmithyProjectGeneratorSchema } from './schema';
 
 /** The metadata this generator records, which its predicates read. */
@@ -289,6 +293,10 @@ export const smithyProjectGenerator = async (
   addTsDependencies(tree, DEPENDENCIES, { metadata });
 
   await addGeneratorMetricsIfApplicable(tree, [SMITHY_PROJECT_GENERATOR_INFO]);
+
+  // On Windows the build runs the Smithy CLI from the PATH rather than through
+  // mise, so flag a missing prerequisite while the project is still being set up.
+  warnIfSmithyMissing();
 
   await formatFilesInSubtree(tree);
   return () =>

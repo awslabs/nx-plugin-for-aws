@@ -86,6 +86,9 @@ const { standalone, components } = categorizeGenerators();
 // Docker image) and can't run checkov (ts#infra and terraform#project). These stay
 // covered on the Linux standalone leg and the windows-latest dungeon-adventure
 // test.
+//
+// Smithy is not among them: it builds with the Smithy CLI rather than a container,
+// which the runner installs (see .github/actions/init-monorepo).
 const CODEBUILD_WINDOWS = process.env.NX_E2E_CODEBUILD_WINDOWS === 'true';
 
 const CODEBUILD_WINDOWS_UNSUPPORTED = new Set([

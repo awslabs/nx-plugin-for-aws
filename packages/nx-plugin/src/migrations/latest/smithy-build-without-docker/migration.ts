@@ -22,6 +22,7 @@ import {
 import { addTsDependencies } from '../../../utils/add-dependencies';
 import { formatFilesInSubtree } from '../../../utils/format';
 import { FsCommands } from '../../../utils/fs';
+import { warnIfSmithyMissing } from '../../../utils/smithy';
 
 /**
  * Move Smithy projects off the container build onto the Smithy CLI.
@@ -203,6 +204,12 @@ export default async function migration(
   // go to the root manifest, so repeating one is a no-op.
   for (const metadata of migrated) {
     addTsDependencies(tree, DEPENDENCIES, { metadata });
+  }
+
+  // On Windows the migrated build runs the Smithy CLI from the PATH rather than
+  // through mise, so flag a missing prerequisite when a project was moved across.
+  if (migrated.length > 0) {
+    warnIfSmithyMissing();
   }
 
   await formatFilesInSubtree(tree);
