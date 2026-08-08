@@ -2,6 +2,11 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+
+import {
+  CONNECTION_ORDERING,
+  ENDPOINT_FOLLOW_UPS,
+} from '../../../../packages/nx-plugin/src/connection/scaffold-catalog';
 import {
   buildCreateNxWorkspaceCommand,
   buildPackageManagerExecCommand,
@@ -11,7 +16,7 @@ import {
   snakeCase,
 } from '../../../../packages/nx-plugin/src/utils/names';
 import { INFRA_PROJECT_NAME, type NodeType, nodeType } from './catalog';
-import type { Graph, GraphNode } from './model';
+import type { Graph, GraphEdge, GraphNode } from './model';
 
 /**
  * Turn a graph into the commands that scaffold it: one to create the workspace,
@@ -149,6 +154,68 @@ const generatorCommand = (generator: string, args: readonly string[]): string =>
   `nx g ${NAMESPACE}:${generator} ${args.join(' ')}`;
 
 /**
+ * The graph's edges in the order their connection generators must run.
+ *
+ * Most connections are independent, but some read state an earlier one records —
+ * `CONNECTION_ORDERING` names those. A stable sort keeps everything else in the
+ * order the user drew it, so only the constrained edges move.
+ */
+const orderedEdges = (graph: Graph): GraphEdge[] => {
+  const keyOf = (edge: GraphEdge): string | undefined => {
+    const source = graph.nodes.find((n) => n.id === edge.source);
+    const target = graph.nodes.find((n) => n.id === edge.target);
+    if (!source || !target) return undefined;
+    return `${source.type} -> ${target.type}`;
+  };
+
+  // An edge waits on any edge in the graph whose key it must follow.
+  const presentKeys = new Set(
+    graph.edges.map(keyOf).filter((key): key is string => key !== undefined),
+  );
+  const rank = (edge: GraphEdge): number => {
+    const key = keyOf(edge);
+    if (!key) return 0;
+    const ordering = (
+      CONNECTION_ORDERING as Record<
+        string,
+        { after: readonly string[] } | undefined
+      >
+    )[key];
+    if (!ordering) return 0;
+    return ordering.after.some((after) => presentKeys.has(after)) ? 1 : 0;
+  };
+
+  return [...graph.edges]
+    .map((edge, index) => ({ edge, index, rank: rank(edge) }))
+    .sort((a, b) => a.rank - b.rank || a.index - b.index)
+    .map(({ edge }) => edge);
+};
+
+/**
+ * The generators run straight after a node's own, adding what that kind of
+ * project should always have — authentication on a website, for instance. The
+ * pairing is declared in the plugin, so nothing here is hardcoded per type.
+ */
+const followUpCommands = (
+  node: GraphNode,
+  type: NodeType,
+  projectReferenceOverride?: string,
+): EmittedCommand[] => {
+  const followUps = ENDPOINT_FOLLOW_UPS[type.id] ?? [];
+  const project =
+    projectReferenceOverride ??
+    projectReference(node.name, type.generator.startsWith('py#'));
+  return followUps.map((followUp) => ({
+    command: generatorCommand(followUp.generator, [
+      `--project=${project}`,
+      ...Object.entries(followUp.options ?? {}).map(([k, v]) => flag(k, v)),
+    ]),
+    comment: `Add ${followUp.adds} to ${node.name}`,
+    nodeId: node.id,
+  }));
+};
+
+/**
  * Emit the commands scaffolding the graph, in dependency order: the workspace,
  * then host projects, then projects and the components they host, then the
  * connections that wire them together.
@@ -164,6 +231,12 @@ export const emitCommands = (
       options.packageManager,
       kebabCase(options.workspace) || 'my-project',
       options.iac,
+      undefined,
+      undefined,
+      // The whole script is meant to run unattended, so the workspace create
+      // skips its prompts too. `create-nx-workspace` spells this
+      // `--interactive=false` rather than the generators' `--no-interactive`.
+      '--interactive=false',
     ),
     comment: `Create the workspace, managing infrastructure with ${options.iac === 'cdk' ? 'CDK' : 'Terraform'}`,
   });
@@ -207,6 +280,7 @@ export const emitCommands = (
       comment: `Create ${node.name} (${type.label})`,
       nodeId: node.id,
     });
+    commands.push(...followUpCommands(node, type));
   }
 
   for (const node of componentNodes) {
@@ -225,11 +299,12 @@ export const emitCommands = (
       comment: `Add ${node.name} (${type.label}) to ${reference.project}`,
       nodeId: node.id,
     });
+    commands.push(...followUpCommands(node, type, reference.project));
   }
 
   const references = nodeReferences(graph);
   const emittedPairs = new Set<string>();
-  for (const edge of graph.edges) {
+  for (const edge of orderedEdges(graph)) {
     const source = graph.nodes.find((n) => n.id === edge.source);
     const target = graph.nodes.find((n) => n.id === edge.target);
     if (!source || !target) continue;
@@ -282,20 +357,29 @@ export const emitCommands = (
  * The emitted commands as a copyable shell script: the workspace command, then a
  * `cd` into it, then each generator command prefixed for the chosen package
  * manager and run non-interactively.
+ *
+ * `skipWorkspace` drops the workspace-create and `cd` lines, emitting only the
+ * generator commands — for a page that has already had the reader create the
+ * workspace, so the copied commands run straight inside it.
  */
 export const toScript = (
   graph: Graph,
   options: EmitOptions,
-  { annotate }: { annotate: boolean } = { annotate: false },
+  {
+    annotate,
+    skipWorkspace,
+  }: { annotate?: boolean; skipWorkspace?: boolean } = {},
 ): string => {
   const commands = emitCommands(graph, options);
   const [create, ...rest] = commands;
   const workspace = kebabCase(options.workspace) || 'my-project';
 
   const lines: string[] = [];
-  if (annotate) lines.push(`# ${create.comment}`);
-  lines.push(create.command);
-  lines.push(`cd ${workspace}`);
+  if (!skipWorkspace) {
+    if (annotate) lines.push(`# ${create.comment}`);
+    lines.push(create.command);
+    lines.push(`cd ${workspace}`);
+  }
 
   for (const command of rest) {
     if (annotate) lines.push('', `# ${command.comment}`);
@@ -307,5 +391,7 @@ export const toScript = (
     );
   }
 
-  return lines.join('\n');
+  // With the workspace lines dropped, the first command would otherwise be
+  // preceded by a leading blank line from the annotation spacing.
+  return lines.join('\n').replace(/^\n/, '');
 };

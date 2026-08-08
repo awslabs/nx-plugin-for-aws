@@ -75,6 +75,15 @@ export interface AddOpenApiReactClientOptions {
    */
   isAgentRuntime?: boolean;
   /**
+   * When set, the generated provider reads the gateway's URL from
+   * runtimeConfig.gateways and routes to the agent via the gateway's
+   * path-based `/<targetName>` route instead of invoking the runtime directly.
+   */
+  gatewayRoute?: {
+    gatewayClassName: string;
+    targetName: string;
+  };
+  /**
    * When true, skips the dev target setup. Use this when the caller
    * handles dev target configuration separately (e.g. agent connections
    * that use a component-specific dev target instead of 'serve').
@@ -99,6 +108,7 @@ export const addOpenApiReactClient = async <
     auth,
     port,
     isAgentRuntime = false,
+    gatewayRoute,
     skipLocalDev = false,
   }: AddOpenApiReactClientOptions,
   declaration: D & MustDeclare<typeof OPEN_API_REACT_DEPENDENCIES, D>,
@@ -219,6 +229,7 @@ export const addOpenApiReactClient = async <
       apiNameClassName,
       generatedClientDir,
       isAgentRuntime,
+      gatewayRoute,
     },
   );
 

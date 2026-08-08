@@ -84,9 +84,23 @@ export const DEPENDENCIES =
 export const TS_AGENT_REACT_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(import.meta.filename);
 
+/**
+ * Options for routing the website's requests to the agent through an
+ * AgentCore Gateway rather than invoking the runtime directly. The gateway
+ * react-connection generator dispatches here once per fronted agent.
+ */
+export interface AgentGatewayRoute {
+  /** The gateway's class name, keying its URL in runtime config. */
+  gatewayClassName: string;
+  /** The agent's gateway target name, forming its path on the gateway. */
+  targetName: string;
+  /** The gateway's inbound auth, which is what the browser authenticates with. */
+  gatewayAuth: string;
+}
+
 export async function tsAgentReactConnectionGenerator(
   tree: Tree,
-  options: ResolvedConnectionOptions,
+  options: ResolvedConnectionOptions & { gatewayRoute?: AgentGatewayRoute },
 ) {
   const frontendProjectConfig = readProjectConfigurationUnqualified(
     tree,
@@ -105,7 +119,13 @@ export async function tsAgentReactConnectionGenerator(
   const agentName = targetComponent?.name ?? 'agent';
   const agentNameClassName = targetComponent?.rc ?? toClassName(agentName);
   const agentPort = targetComponent?.port ?? metadata?.ports?.[0] ?? 8081;
-  const auth = (targetComponent?.auth ?? metadata?.auth ?? 'iam').toLowerCase();
+  // Behind a gateway the browser authenticates with the gateway, not the agent.
+  const auth = (
+    options.gatewayRoute?.gatewayAuth ??
+    targetComponent?.auth ??
+    metadata?.auth ??
+    'iam'
+  ).toLowerCase();
   const agentProjectAlias = agentProjectConfig.name;
   const agentPath = targetComponent?.path ?? 'src/agent';
 
@@ -124,25 +144,40 @@ export async function tsAgentReactConnectionGenerator(
     );
   }
 
+  // A TypeScript HTTP agent serves tRPC over WebSocket, which AgentCore
+  // Gateway does not support, so only AG-UI agents can be reached via a
+  // gateway route.
+  if (options.gatewayRoute && targetComponent?.protocol !== 'ag-ui') {
+    throw new Error(
+      `Cannot connect a React website to agent '${agentName}' via a gateway: a TypeScript HTTP agent serves tRPC over WebSocket, which AgentCore Gateway does not support. Consider the ag-ui protocol instead.`,
+    );
+  }
+
   if (targetComponent?.protocol === 'ag-ui') {
     await addAgUiReactConnection(tree, {
       frontendProjectConfig,
       agentName,
       agentNameClassName,
       auth: auth as AgUiAuth,
+      gatewayRoute: options.gatewayRoute,
     });
 
-    await addTsAgentTargetToLocalDev(
-      tree,
-      frontendProjectConfig.name,
-      agentProjectConfig.name,
-      {
-        agentName,
-        agentNameClassName,
-        port: agentPort,
-        targetComponent,
-      },
-    );
+    // When routing via a gateway, the gateway react-connection wires the
+    // website's dev target to the local gateway (which proxies to the agent)
+    // instead of to the agent directly.
+    if (!options.gatewayRoute) {
+      await addTsAgentTargetToLocalDev(
+        tree,
+        frontendProjectConfig.name,
+        agentProjectConfig.name,
+        {
+          agentName,
+          agentNameClassName,
+          port: agentPort,
+          targetComponent,
+        },
+      );
+    }
 
     // Recorded so the version sync knows this connection's dependencies are ours.
     addComponentGeneratorMetadata(

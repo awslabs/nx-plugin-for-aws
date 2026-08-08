@@ -15,7 +15,12 @@ import Link from '@components/link.astro';
 import NxCommands from '@components/nx-commands.astro';
 import OptionFilter from '@components/option-filter.astro';
 
-Genera un progetto [Amazon Bedrock AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html). Un AgentCore Gateway è un punto di ingresso gestito che aggrega uno o più target di server MCP dietro un singolo endpoint MCP, autentica le richieste in ingresso (IAM o Cognito), valuta ogni chiamata di strumento rispetto a un [motore di policy Cedar](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html) e firma il traffico in uscita verso i server MCP con IAM SigV4.
+Genera un progetto [Amazon Bedrock AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html). Un AgentCore Gateway è un punto di ingresso gestito davanti ai tuoi server MCP o agenti, che autentica le richieste in ingresso (IAM o Cognito) e firma il traffico in uscita verso i suoi target con IAM SigV4.
+
+L'opzione `protocol` seleziona cosa il Gateway fronteggia:
+
+- **`mcp`** (predefinito) — aggrega uno o più target di server MCP dietro un singolo endpoint MCP, e valuta ogni chiamata di strumento rispetto a un [motore di policy Cedar](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html).
+- **`http`** — inoltra le richieste direttamente ai [target AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-target-http-runtime.html) (i tuoi agenti) tramite routing basato sul percorso (`/<targetName>/invocations`), senza aggregazione o traduzione di protocollo. Usa questo per fronteggiare gli agenti con un singolo endpoint governato — ad esempio in modo che un sito web possa raggiungere agenti distribuiti all'interno di un VPC attraverso il Gateway.
 
 ## Utilizzo
 
@@ -33,10 +38,10 @@ Il generatore crea un nuovo progetto in `packages/<name>/`, più un costrutto CD
 
 <FileTree>
   - packages/\<name>/
-    - policies/ File sorgente delle policy Cedar (omessi quando `cedarPolicy: false`)
-      - permit-all.cedar Policy Cedar predefinita che permette ai chiamanti autenticati (chiamanti IAM dallo stesso account AWS, o qualsiasi utente Cognito — vedi [Autenticazione](#authentication))
+    - policies/ File sorgente delle policy Cedar (solo protocollo `mcp`; omessi quando `cedarPolicy: false`)
+      - permit-all.cedar Policy Cedar predefinita che permette ai chiamanti autenticati
       - README.md Riferimento per scrivere policy Cedar
-    - local-dev.ts Gateway locale che aggrega i server MCP collegati per lo sviluppo locale
+    - local-dev.ts Gateway locale per lo sviluppo locale — aggrega i server MCP collegati (`mcp`) o inoltra gli agenti collegati (`http`)
     - project.json Aggiunge i target `serve` e `dev`
 </FileTree>
 
@@ -71,9 +76,9 @@ L'infrastruttura viene generata quando `infra` è `agentcore` (l'impostazione pr
 
 Il costrutto generato crea le seguenti risorse AWS:
 
-- Un `AgentCore::Gateway` configurato per il protocollo MCP con autenticazione IAM in ingresso (predefinita) o autenticazione JWT Cognito (vedi <a href="#authentication">Autenticazione</a>)
-- Un `AgentCore::PolicyEngine` in esecuzione in modalità `ENFORCE`, collegato al Gateway (omesso quando `cedarPolicy: false`)
-- Una `AgentCore::Policy` per ogni file `.cedar` in `policies/`
+- Un `AgentCore::Gateway` con autenticazione IAM in ingresso (predefinita) o autenticazione JWT Cognito (vedi <a href="#authentication">Autenticazione</a>). Un gateway `mcp` è configurato per il protocollo MCP; un gateway `http` non ha tipo di protocollo, come richiesto da AgentCore per i suoi target runtime
+- Un `AgentCore::PolicyEngine` in esecuzione in modalità `ENFORCE`, collegato al Gateway (solo gateway `mcp`; omesso quando `cedarPolicy: false`)
+- Una `AgentCore::Policy` per ogni file `.cedar` in `policies/` (solo gateway `mcp`)
 - Un AWS WAFv2 Web ACL associato al Gateway, con registrazione delle richieste su CloudWatch (abilitato per impostazione predefinita — vedi <a href="#aws-waf">AWS WAF</a>)
 
 L'URL del Gateway viene automaticamente registrato nel namespace `agentcore.gateways.<ClassName>` della <Link path="guides/runtime-config">Configurazione Runtime</Link> in modo che gli agenti possano scoprirlo a runtime.
@@ -146,7 +151,7 @@ export class ApplicationStack extends Stack {
 <Fragment slot="terraform">
 Il modulo generato richiede le variabili `user_pool_id` e `user_pool_client_ids`:
 
-```hcl {6-7} title="packages/infra/src/main.tf"
+```hcl {7-8} title="packages/infra/src/main.tf"
 module "user_identity" {
   source = "../../common/terraform/src/core/user-identity"
 }
@@ -207,7 +212,7 @@ Aggiungi nuove variabili dove le policy vengono renderizzate, ad esempio per pas
 <Fragment slot="cdk">
 In `packages/common/constructs/src/app/gateways/<name>/<name>.ts`, passa `cedarPolicyVariables` al costrutto condiviso:
 
-```ts {4-6}
+```ts {5-6}
 super(scope, id, {
   cedarPolicyPath: path.join(
     ...
@@ -347,11 +352,19 @@ Questo nega al ruolo agente Python la chiamata a `ts-mcp___divide` lasciando il 
 
 ## Sviluppo locale
 
-Il generatore aggiunge un target `dev` al progetto Gateway, che esegue `local-dev.ts`: un gateway locale che espone un singolo endpoint MCP che aggrega ogni server MCP collegato (connesso tramite il <Link path="guides/connection/agentcore-gateway-mcp">generatore `agentcore-gateway#mcp-connection`</Link>), con strumenti prefissati `<target>___<tool>` per corrispondere al Gateway distribuito. Eseguendolo si avviano insieme il gateway locale e tutti i server MCP collegati:
+Il generatore aggiunge un target `dev` al progetto Gateway, che esegue `local-dev.ts`. Eseguendolo si avviano insieme il gateway locale e ogni target collegato:
 
 <NxCommands commands={["dev <name>"]} />
 
-Consulta la guida alla connessione per la storia completa dello sviluppo locale.
+<OptionFilter when={{ protocol: 'mcp' }} description="MCP aggregator local gateway">
+Il gateway locale espone un singolo endpoint MCP che aggrega ogni server MCP collegato (connesso tramite il <Link path="guides/connection/agentcore-gateway-mcp">generatore `agentcore-gateway#mcp-connection`</Link>), con strumenti prefissati `<target>___<tool>` per corrispondere al Gateway distribuito.
+</OptionFilter>
+
+<OptionFilter when={{ protocol: 'http' }} description="Path-routing proxy local gateway">
+Il gateway locale inoltra i percorsi `/<targetName>/...` al server locale di ciascun agente collegato (connesso tramite il <Link path="guides/connection/agentcore-gateway-agent">generatore `agentcore-gateway#agent-connection`</Link>), corrispondendo al routing basato sul percorso del Gateway distribuito.
+</OptionFilter>
+
+Consulta le guide alla connessione per la storia completa dello sviluppo locale.
 
 ## Distribuire il tuo AgentCore Gateway
 
@@ -458,6 +471,20 @@ Usa il generatore <Link path="guides/connection">`connection`</Link> per integra
     href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-gateway`}
     source="strands"
     sourceBadge="python"
+    target="agentcore"
+  />
+  <ConnectionCard
+    title="AgentCore Gateway to Agent"
+    description="Fronteggia un agente con un AgentCore Gateway come target runtime"
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/agentcore-gateway-agent`}
+    source="agentcore"
+    target="strands"
+  />
+  <ConnectionCard
+    title="React Website to AgentCore Gateway"
+    description="Collega un sito web React agli agenti attraverso un AgentCore Gateway"
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-agentcore-gateway`}
+    source="react"
     target="agentcore"
   />
 </CardGrid>

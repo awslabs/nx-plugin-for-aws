@@ -1,0 +1,112 @@
+---
+title: React 网站连接到 AgentCore Gateway
+description: 通过 AgentCore Gateway 将 React 网站连接到代理
+when:
+  sourceType: ts#react-website
+  targetType: agentcore-gateway
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import Infrastructure from '@components/infrastructure.astro';
+
+`connection` 生成器可以将 <Link path="guides/react-website">React 网站</Link>连接到由使用 `protocol: http` 生成的 <Link path="guides/agentcore-gateway">AgentCore Gateway</Link> 前置的代理。
+
+浏览器仅与 Gateway 通信——对 `<gatewayUrl>/<targetName>/invocations` 的请求会被代理到其后的代理运行时。由于网站永远不需要直接访问运行时，代理可以部署在 VPC 内部，Gateway 作为单一受管控的入口点提供身份验证和可观测性。
+
+## 前置条件
+
+在使用此生成器之前，请确保您具备：
+
+1. 一个 <Link path="guides/react-website">React 网站</Link>项目
+2. 一个使用 `protocol: http` 生成的 <Link path="guides/agentcore-gateway">`agentcore-gateway`</Link> 项目
+3. 至少一个通过 <Link path="guides/connection/agentcore-gateway-agent">Gateway 到代理连接生成器</Link>附加到 Gateway 的 AG-UI 或 HTTP 代理
+
+生成器为附加到 Gateway 的**每个** AG-UI 或 HTTP 代理创建一个网站客户端（A2A 目标会被跳过——它们使用代理到代理的 JSON-RPC 协议，而不是浏览器协议）。它生成与直接将网站连接到每个代理相同的客户端（对于 AG-UI 代理生成 <Link path="guides/connection/react-agui">AG-UI/CopilotKit</Link>，对于 Python HTTP 代理生成 <Link path="guides/connection/react-py-agent">OpenAPI 客户端</Link>），通过 Gateway 路由而不是直接访问运行时。
+
+:::note[身份验证]
+浏览器与 **Gateway** 进行身份验证，而不是与代理：对于 IAM Gateway 使用 SigV4（通过网站的 Cognito 身份池），对于 Cognito Gateway 使用 JWT bearer token。
+:::
+
+## 使用方法
+
+### 运行生成器
+
+<RunGenerator generator="connection" />
+
+选择网站项目作为源，Gateway 项目作为目标。
+
+### 选项
+
+<GeneratorParameters generator="connection" />
+
+## 生成器输出
+
+对于每个前置的 AG-UI 代理，会生成与 <Link path="guides/connection/react-agui">React 到 AG-UI 代理连接</Link>相同的文件（一个 `AguiProvider`、一个 `useAgui<Agent>` hook 和一个主题化的 CopilotKit 组件模块），hook 从运行时配置中读取 Gateway 的 URL：
+
+<FileTree>
+
+- packages/\<website>/src
+  - components
+    - AguiProvider.tsx 注册每个代理的 CopilotKit provider
+    - copilot/ 主题化的聊天组件
+  - hooks
+    - useAgui\<Agent>.tsx 通过 Gateway 的 `/<targetName>/invocations` 路由连接到代理
+
+</FileTree>
+
+对于每个前置的 Python HTTP 代理，会生成与 <Link path="guides/connection/react-py-agent">React 到 Python 代理连接</Link>相同的文件（一个类型安全的 OpenAPI 客户端、hooks 和一个 provider），客户端的基础 URL 通过 Gateway 路由。
+
+Gateway 的 URL 注册在 <Link path="guides/runtime-config">运行时配置</Link>的 `connection.gateways.<GatewayClassName>` 命名空间中，因此会发布到网站的 `runtime-config.json`。
+
+## 授予网站用户访问权限
+
+对于 **IAM** Gateway，授予网站的已认证用户调用它的权限（**Cognito** Gateway 不需要授权——浏览器使用其 JWT bearer token 进行身份验证）：
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts title="packages/infra/src/stacks/application-stack.ts" {6}
+const identity = new UserIdentity(this, 'UserIdentity');
+new Website(this, 'Website');
+
+const myGateway = new MyGateway(this, 'MyGateway');
+myGateway.addAgent(myAgent);
+myGateway.grantInvokeAccess(identity.identityPool.authenticatedRole);
+```
+</Fragment>
+<Fragment slot="terraform">
+```hcl title="packages/infra/src/main.tf"
+resource "aws_iam_policy" "gateway_invoke_policy" {
+  name = "GatewayInvokePolicy"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["bedrock-agentcore:InvokeGateway"]
+        Resource = [module.my_gateway.gateway_arn]
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "authenticated_gateway_access" {
+  role       = module.user_identity.authenticated_role_name
+  policy_arn = aws_iam_policy.gateway_invoke_policy.arn
+}
+```
+</Fragment>
+</Infrastructure>
+
+## 本地开发
+
+网站的 `dev` 目标获得对 Gateway 项目的 `dev` 目标的依赖，该目标会启动本地 gateway 以及每个附加的代理。网站的运行时配置在 `local-dev` 模式下被覆盖，将 Gateway 的 URL 指向本地 gateway，因此浏览器在本地执行相同的 `/<targetName>/invocations` 路由：
+
+<NxCommands commands={["dev <website-name>"]} />
+
+## 连接新代理
+
+生成器将网站连接到**运行时**附加到 Gateway 的代理。在将另一个代理附加到 Gateway 后，重新运行连接生成器以生成其网站客户端——现有客户端保持不变。

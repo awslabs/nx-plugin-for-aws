@@ -106,7 +106,7 @@ it('should be idempotent when re-run with same options', async () => {
 
 A migration's job is to carry an existing workspace to the state it would be in **had the user generated it from today's generators**. That is a higher bar than "keep it building": any change to a generator's output is a candidate for a migration, because otherwise a workspace generated last month silently diverges from one generated today. Ship a migration so `nx migrate @aws/nx-plugin` closes that gap automatically.
 
-Migrations live under `packages/nx-plugin/src/migrations/<version>/<name>/` — grouped by the release that ships them, so their order stays visible as the collection grows — and are registered in `packages/nx-plugin/migrations.json`. A new migration lands in `latest/`; the weekly `update-versions` PR moves it into `v<x.y.z>/` once a release has shipped it.
+Migrations live under `packages/nx-plugin/src/migrations/<version>/<name>/` — grouped by the release that ships them, so their order stays visible as the collection grows — and are registered in `packages/nx-plugin/migrations.json`. A new migration lands in `latest/`; the weekly `update-versions` PR moves it into `v<x.y.z>/` once a release has shipped it, prefixing its folder with its commit order in that release (`0001-<name>`) so a released migration's run order is bedded into the folder layout (see [Order within a release](#order-within-a-release)).
 
 #### The three kinds of migration
 
@@ -188,10 +188,16 @@ These apply to any `implementation`, whether it stands alone or forms the determ
 
 Do not add a `version` field to `migrations.json` entries — versions arrive on their own:
 
-- At release time the workflow runs `nx release version` (no tag, no commit) to write the pending version into the dist manifests, then passes it to `scripts/stamp-migrations.ts --pending-version`, which stamps it into the compiled `migrations.json` before the release tags and publishes. Both steps share one set of release flags, and the version itself is resolved from the latest git tag, so a net-new migration carries the version that actually shipped it. One that already shipped keeps the version of the first release tag that included it.
+- At release time `scripts/release.ts` runs `nx release version` (no tag, no commit) to write the pending version into the dist manifests, then stamps it into the compiled `migrations.json` (`stampMigrationsFile` in `scripts/stamp-migrations.ts`) before the release tags and publishes. The version is resolved from the latest git tag, so a net-new migration carries the version that actually shipped it. One that already shipped keeps the version of the first release tag that included it.
 - The weekly `update-versions` PR records the version of the release that shipped each migration, moves it out of `latest/` into that release's `v<x.y.z>/` folder and re-keys it to match (`scripts/backfill-migration-versions.ts`), so `migrations.json` in `main` converges on the versions of everything already released. Only released migrations are touched; one that hasn't shipped stays in `latest/`.
 
 A version already recorded in source always wins, so the backfilled values are stable and the release only has to reason about entries that are still unversioned.
+
+##### Order within a release
+
+Migrations shipped together share a version — a batch stamped with the same pending release, or a whole `v<x.y.z>/` folder replayed on a big version jump. `nx migrate` sorts the run ascending by version and keeps the manifest's order among equal versions, and the manifest is assembled in key order, so **within a version, migrations run in the order they were committed**. An earlier-authored migration therefore runs before a later one in the same release, so you can land a batch of dependent changes across separate commits without worrying about ordering — commit the migration a later one relies on first. Two migrations added in the same commit (a squashed PR) share a rank and fall back to alphabetical order, so if one depends on the other, split them across commits. The `everyMigration` sync entry always runs last regardless (see below).
+
+That order is resolved from git only while a migration is unreleased. Commit order is read (`scripts/utils/migration-commit-order.ts`) for the `latest/` migrations, whose order isn't settled yet. Once a release ships them, the weekly `update-versions` backfill beds that order into the folder name — it moves each into `v<x.y.z>/` with a zero-padded `NNNN-` prefix giving its commit order in the release (`0001-<name>`), so the folder name alone sorts the version's migrations and their order no longer depends on git history. A released migration's order is fixed and inspectable in the tree; only the handful still in `latest/` are ranked from git on each release.
 
 #### Vended dependency versions
 

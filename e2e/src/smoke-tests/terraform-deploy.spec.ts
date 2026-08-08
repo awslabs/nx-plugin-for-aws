@@ -9,9 +9,13 @@ import { ensureDirSync } from 'fs-extra';
 
 import { runCLI, tmpProjPath } from '../utils';
 import {
+  buildGatewayTargetUrl,
   invokeAgentCoreA2a,
+  invokeAgentCoreA2aUrl,
   invokeAgentCoreAgent,
+  invokeAgentCoreAgentUrl,
   invokeAgentCoreAgUi,
+  invokeAgentCoreAgUiUrl,
   invokeAgentCoreGatewayNoAuthDenied,
   invokeAgentCoreGatewayTool,
   invokeAgentCoreHarness,
@@ -305,8 +309,7 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
           // Python (`my-mcp-server`) MCP servers as targets. Prompt each agent
           // to call a gateway-prefixed tool (`<target>___<tool>`) for each
           // upstream server. A successful round-trip proves agent -> deployed
-          // Gateway (Cedar ENFORCE + SigV4) -> MCP server works end-to-end for
-          // both languages.
+          // Gateway (SigV4) -> MCP server works end-to-end for both languages.
           expect(
             await invokeTrpcAgentCoreAgent(
               outputs.ts_agent_arn,
@@ -339,14 +342,47 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
           // Chained gateways — the parent gateway fronts my_gateway via the
           // gateway -> gateway connection, re-exposing its tools under a
           // second prefix. Listing tools on the parent and calling one proves
-          // the parent -> my_gateway (SigV4 + Cedar at both hops) -> MCP
-          // server chain works end-to-end.
+          // the parent -> my_gateway (SigV4 at both hops) -> MCP server chain
+          // works end-to-end.
           await invokeAgentCoreGatewayTool(
             outputs.parent_gateway_url,
             'Parent Gateway -> Gateway -> TS MCP',
             'my-gateway___hosted-mcp-server___divide',
             { a: 6, b: 2 },
             '3',
+          );
+
+          // HTTP-protocol gateway fronting agent runtime targets — invoke
+          // every fronted agent through its `/<target>/invocations` gateway
+          // route, covering all supported protocol permutations (ts ag-ui +
+          // a2a, py ag-ui + http + a2a). A successful round-trip proves the
+          // gateway proxies each protocol (SSE for AG-UI, JSON streaming for
+          // HTTP, JSON-RPC for A2A) to the runtime behind it.
+          await invokeAgentCoreAgUiUrl(
+            buildGatewayTargetUrl(
+              outputs.agent_gateway_url,
+              'my-ts-agui-agent',
+            ),
+            'Gateway -> TS AG-UI Agent',
+          );
+          await invokeAgentCoreAgUiUrl(
+            buildGatewayTargetUrl(
+              outputs.agent_gateway_url,
+              'my-py-agui-agent',
+            ),
+            'Gateway -> PY AG-UI Agent',
+          );
+          await invokeAgentCoreAgentUrl(
+            buildGatewayTargetUrl(outputs.agent_gateway_url, 'my-agent'),
+            'Gateway -> PY HTTP Agent',
+          );
+          await invokeAgentCoreA2aUrl(
+            `${buildGatewayTargetUrl(outputs.agent_gateway_url, 'my-ts-a2a-agent')}/`,
+            'Gateway -> TS A2A Agent',
+          );
+          await invokeAgentCoreA2aUrl(
+            `${buildGatewayTargetUrl(outputs.agent_gateway_url, 'my-py-a2a-agent')}/`,
+            'Gateway -> PY A2A Agent',
           );
 
           // AgentCore runtimes and gateway — unsigned (no SigV4) requests must
@@ -391,6 +427,10 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
           await invokeAgentCoreGatewayNoAuthDenied(
             outputs.parent_gateway_url,
             'Parent Gateway',
+          );
+          await invokeAgentCoreGatewayNoAuthDenied(
+            buildGatewayTargetUrl(outputs.agent_gateway_url, 'my-agent'),
+            'Agent Gateway',
           );
 
           // Lambda functions

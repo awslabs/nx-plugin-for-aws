@@ -60,8 +60,11 @@ dev-dependencies = []
       'utf-8',
     );
     expect(mainContent).toContain('ag_ui_strands');
-    expect(mainContent).toContain('create_strands_app');
     expect(mainContent).toContain('StrandsAgent');
+    // The agent is built inside a `lifespan` handler (not at import time), so
+    // the AgentCore container startup, not module import, owns construction.
+    expect(mainContent).toContain('async def lifespan(app: FastAPI)');
+    expect(mainContent).toContain('app.state.agui_agent');
 
     // AG-UI must bind the inbound AgentCore session ID into the ContextVar
     // so downstream MCP / A2A connection clients forward it on outbound
@@ -437,8 +440,8 @@ dev-dependencies = []
         iac: 'cdk',
       });
 
-      // The langchain http main.py drives the compiled LangGraph graph and
-      // reuses the framework-agnostic init.py (app + JsonStreamingResponse).
+      // The langchain http main.py drives the compiled LangGraph graph via
+      // `app.state.graph`, built by init.py's lifespan at startup.
       const mainContent = tree.read(
         'apps/test-project/proj_test_project/agent/main.py',
         'utf-8',
@@ -446,7 +449,7 @@ dev-dependencies = []
       expect(mainContent).toContain(
         'from .init import JsonStreamingResponse, app',
       );
-      expect(mainContent).toContain('get_agent');
+      expect(mainContent).toContain('app.state.graph');
       expect(mainContent).toContain('astream');
       expect(mainContent).toContain('/invocations');
       // No Strands streaming shape leaked in.
@@ -454,13 +457,15 @@ dev-dependencies = []
       expect(mainContent).not.toContain('with_session_id');
       expect(mainContent).not.toContain('from strands');
 
-      // The shared framework-agnostic init.py is emitted alongside it.
+      // init.py owns the app + lifespan that builds the graph at startup.
       const initContent = tree.read(
         'apps/test-project/proj_test_project/agent/init.py',
         'utf-8',
       );
       expect(initContent).toContain('class JsonStreamingResponse');
       expect(initContent).toContain('app = FastAPI(');
+      expect(initContent).toContain('async def lifespan(app: FastAPI)');
+      expect(initContent).toContain('get_agent');
 
       // The agent.py builds a compiled LangGraph graph, not a Strands agent.
       const agentContent = tree.read(

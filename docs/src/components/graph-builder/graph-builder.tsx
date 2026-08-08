@@ -12,15 +12,23 @@ import {
 } from '../../lib/graph-builder/catalog';
 import type { EmitOptions } from '../../lib/graph-builder/commands';
 import {
+  autoFixesForConnection,
   type Graph,
   type GraphNode,
   validate,
 } from '../../lib/graph-builder/model';
 import { Canvas } from './canvas';
-import { NODE_HEIGHT, NODE_WIDTH, snap } from './geometry';
+import {
+  NODE_HEIGHT,
+  NODE_WIDTH,
+  type Orientation,
+  snap,
+  transposePositions,
+} from './geometry';
 import { Inspector } from './inspector';
 import { Output } from './output';
 import { Palette } from './palette';
+import { PresetPicker } from './preset-picker';
 import { buildPresetGraph, PRESETS } from './presets';
 
 const EMPTY_GRAPH: Graph = { nodes: [], edges: [] };
@@ -81,6 +89,9 @@ export const GraphBuilder = () => {
   // delete semantics, and selecting one clears the other.
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | undefined>();
   const [pendingType, setPendingType] = useState<string | undefined>();
+  // Which way the graph flows. Swapping it re-lays the nodes rather than just
+  // moving the ports, so the graph still reads along its new axis.
+  const [orientation, setOrientation] = useState<Orientation>('horizontal');
   const [emitOptions, setEmitOptions] =
     useState<EmitOptions>(DEFAULT_EMIT_OPTIONS);
 
@@ -225,8 +236,31 @@ export const GraphBuilder = () => {
           (edge) => edge.source === sourceId && edge.target === targetId,
         );
         if (exists) return current;
+
+        // Some connections only work against one setting — a website reaches an
+        // agent over AG-UI, an agent reaches another over A2A. Switch to it as the
+        // edge is drawn, rather than drawing it and reporting an error, but leave
+        // any option the user chose themselves alone.
+        const fixes = autoFixesForConnection(source, target);
+        const nodes = fixes.length
+          ? current.nodes.map((node) => {
+              const forNode = fixes.filter((fix) => fix.nodeId === node.id);
+              if (forNode.length === 0) return node;
+              return {
+                ...node,
+                options: {
+                  ...node.options,
+                  ...Object.fromEntries(
+                    forNode.map((fix) => [fix.option, fix.value]),
+                  ),
+                },
+              };
+            })
+          : current.nodes;
+
         return {
           ...current,
+          nodes,
           edges: [
             ...current.edges,
             {
@@ -290,11 +324,30 @@ export const GraphBuilder = () => {
       if (!preset) return;
       // Lay the preset out for the canvas as it is now, so its widest row lands
       // fully in view rather than running off the right edge.
-      commit(() => buildPresetGraph(preset, canvasWidthRef.current));
+      commit(() => {
+        const built = buildPresetGraph(preset, canvasWidthRef.current);
+        if (orientation === 'horizontal') return built;
+        // Presets are authored on a left-to-right grid, so transpose one loaded
+        // while the canvas is running top-to-bottom.
+        const moves = new Map(
+          transposePositions(
+            built.nodes,
+            orientation,
+            canvasWidthRef.current,
+          ).map((m) => [m.id, m]),
+        );
+        return {
+          ...built,
+          nodes: built.nodes.map((node) => {
+            const move = moves.get(node.id);
+            return move ? { ...node, x: move.x, y: move.y } : node;
+          }),
+        };
+      });
       setSelection([]);
       setSelectedEdgeId(undefined);
     },
-    [commit],
+    [commit, orientation],
   );
 
   // Stable identity, so the canvas's resize observer isn't torn down and
@@ -302,6 +355,34 @@ export const GraphBuilder = () => {
   const handleCanvasResize = useCallback((width: number) => {
     canvasWidthRef.current = width;
   }, []);
+
+  /**
+   * Flip the flow axis, transposing the layout so the graph reads along it. The
+   * transpose normalises to lanes rather than swapping raw coordinates, so
+   * swapping back and forth stays tidy instead of drifting.
+   */
+  const toggleOrientation = useCallback(() => {
+    setOrientation((current) => {
+      const next: Orientation =
+        current === 'horizontal' ? 'vertical' : 'horizontal';
+      commit((graph) => {
+        if (graph.nodes.length === 0) return graph;
+        const moves = new Map(
+          transposePositions(graph.nodes, next, canvasWidthRef.current).map(
+            (move) => [move.id, move],
+          ),
+        );
+        return {
+          ...graph,
+          nodes: graph.nodes.map((node) => {
+            const move = moves.get(node.id);
+            return move ? { ...node, x: move.x, y: move.y } : node;
+          }),
+        };
+      });
+      return next;
+    });
+  }, [commit]);
 
   const clear = useCallback(() => {
     commit(() => EMPTY_GRAPH);
@@ -397,18 +478,10 @@ export const GraphBuilder = () => {
     <div className="gb-root" data-graph-builder>
       <div className="gb-toolbar">
         <div className="gb-toolbar-presets">
-          <span className="gb-toolbar-label">Start from</span>
-          {PRESETS.map((preset) => (
-            <button
-              key={preset.id}
-              type="button"
-              className="gb-chip"
-              onClick={() => loadPreset(preset.id)}
-              title={preset.description}
-            >
-              {preset.label}
-            </button>
-          ))}
+          <label className="gb-toolbar-label" htmlFor="gb-preset">
+            Start from
+          </label>
+          <PresetPicker options={PRESETS} onPick={loadPreset} />
         </div>
         <div className="gb-toolbar-actions">
           <span className="gb-stat">
@@ -427,6 +500,47 @@ export const GraphBuilder = () => {
               {errorCount} issue{errorCount === 1 ? '' : 's'}
             </span>
           )}
+          <button
+            type="button"
+            className="gb-chip gb-chip--icon"
+            onClick={toggleOrientation}
+            aria-label={
+              orientation === 'horizontal'
+                ? 'Lay the graph out top to bottom'
+                : 'Lay the graph out left to right'
+            }
+            title={
+              orientation === 'horizontal'
+                ? 'Lay out top to bottom'
+                : 'Lay out left to right'
+            }
+          >
+            <svg
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.75"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              {orientation === 'horizontal' ? (
+                // Two stacked boxes joined vertically: what pressing this gives.
+                <>
+                  <rect x="7" y="2.5" width="10" height="6" rx="1.5" />
+                  <rect x="7" y="15.5" width="10" height="6" rx="1.5" />
+                  <line x1="12" y1="8.5" x2="12" y2="15.5" />
+                </>
+              ) : (
+                <>
+                  <rect x="2.5" y="9" width="6" height="6" rx="1.5" />
+                  <rect x="15.5" y="9" width="6" height="6" rx="1.5" />
+                  <line x1="8.5" y1="12" x2="15.5" y2="12" />
+                </>
+              )}
+            </svg>
+            {orientation === 'horizontal' ? 'Vertical' : 'Horizontal'}
+          </button>
           <button
             type="button"
             className="gb-chip"
@@ -475,6 +589,7 @@ export const GraphBuilder = () => {
           selectedIds={selectedIds}
           selectedEdgeId={selectedEdgeId}
           pendingType={pendingType}
+          orientation={orientation}
           onSelect={selectNode}
           onSelectEdge={selectEdge}
           onMoveNodes={moveNodes}

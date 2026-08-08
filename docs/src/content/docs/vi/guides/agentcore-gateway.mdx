@@ -15,7 +15,12 @@ import Link from '@components/link.astro';
 import NxCommands from '@components/nx-commands.astro';
 import OptionFilter from '@components/option-filter.astro';
 
-Tạo một dự án [Amazon Bedrock AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html). AgentCore Gateway là một điểm vào được quản lý, tập hợp một hoặc nhiều mục tiêu MCP server phía sau một endpoint MCP duy nhất, xác thực các yêu cầu đầu vào (IAM hoặc Cognito), đánh giá mọi lời gọi công cụ dựa trên [công cụ chính sách Cedar](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html), và ký lưu lượng truy cập đi ra đến các MCP server bằng IAM SigV4.
+Tạo một dự án [Amazon Bedrock AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html). AgentCore Gateway là một điểm vào được quản lý đặt trước các MCP server hoặc agent của bạn, xác thực các yêu cầu đầu vào (IAM hoặc Cognito) và ký lưu lượng truy cập đi ra đến các mục tiêu của nó bằng IAM SigV4.
+
+Tùy chọn `protocol` chọn những gì Gateway đặt trước:
+
+- **`mcp`** (mặc định) — tập hợp một hoặc nhiều mục tiêu MCP server phía sau một endpoint MCP duy nhất, và đánh giá mọi lời gọi công cụ dựa trên [công cụ chính sách Cedar](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html).
+- **`http`** — proxy các yêu cầu trực tiếp đến [mục tiêu AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-target-http-runtime.html) (các agent của bạn) thông qua định tuyến dựa trên đường dẫn (`/<targetName>/invocations`), không có tổng hợp hoặc chuyển đổi giao thức. Sử dụng tùy chọn này để đặt các agent trước một endpoint được quản lý duy nhất — ví dụ để một trang web có thể truy cập các agent được triển khai bên trong VPC thông qua Gateway.
 
 ## Cách sử dụng
 
@@ -33,10 +38,10 @@ Generator tạo một dự án mới tại `packages/<name>/`, cùng với một
 
 <FileTree>
   - packages/\<name>/
-    - policies/ Các tệp nguồn chính sách Cedar (bỏ qua khi `cedarPolicy: false`)
-      - permit-all.cedar Chính sách Cedar mặc định cho phép người gọi đã xác thực (người gọi IAM từ cùng tài khoản AWS, hoặc bất kỳ người dùng Cognito nào — xem [Authentication](#authentication))
+    - policies/ Các tệp nguồn chính sách Cedar (chỉ giao thức `mcp`; bỏ qua khi `cedarPolicy: false`)
+      - permit-all.cedar Chính sách Cedar mặc định cho phép người gọi đã xác thực
       - README.md Tài liệu tham khảo để viết chính sách Cedar
-    - local-dev.ts Gateway cục bộ tập hợp các MCP server đính kèm cho phát triển cục bộ
+    - local-dev.ts Gateway cục bộ cho phát triển cục bộ — tập hợp các MCP server đính kèm (`mcp`) hoặc proxy các agent đính kèm (`http`)
     - project.json Thêm các target `serve` và `dev`
 </FileTree>
 
@@ -71,9 +76,9 @@ Cơ sở hạ tầng được tạo khi `infra` là `agentcore` (mặc định).
 
 Construct được tạo ra sẽ tạo các tài nguyên AWS sau:
 
-- Một `AgentCore::Gateway` được cấu hình cho giao thức MCP với xác thực IAM đầu vào (mặc định) hoặc xác thực JWT Cognito (xem <a href="#authentication">Authentication</a>)
-- Một `AgentCore::PolicyEngine` chạy ở chế độ `ENFORCE`, được gắn vào Gateway (bỏ qua khi `cedarPolicy: false`)
-- Một `AgentCore::Policy` cho mỗi tệp `.cedar` trong `policies/`
+- Một `AgentCore::Gateway` với xác thực IAM đầu vào (mặc định) hoặc xác thực JWT Cognito (xem <a href="#authentication">Authentication</a>). Gateway `mcp` được cấu hình cho giao thức MCP; gateway `http` không có loại giao thức, điều mà AgentCore yêu cầu cho các mục tiêu runtime của nó
+- Một `AgentCore::PolicyEngine` chạy ở chế độ `ENFORCE`, được gắn vào Gateway (chỉ gateway `mcp`; bỏ qua khi `cedarPolicy: false`)
+- Một `AgentCore::Policy` cho mỗi tệp `.cedar` trong `policies/` (chỉ gateway `mcp`)
 - Một AWS WAFv2 Web ACL được liên kết với Gateway, với ghi log yêu cầu vào CloudWatch (được bật theo mặc định — xem <a href="#aws-waf">AWS WAF</a>)
 
 URL của Gateway được tự động đăng ký trong namespace `agentcore.gateways.<ClassName>` của <Link path="guides/runtime-config">Runtime Configuration</Link> để các agent có thể khám phá nó tại runtime.
@@ -127,7 +132,7 @@ Cơ sở hạ tầng được tạo ra sử dụng Cognito user pool và client 
 <Fragment slot="cdk">
 Construct được tạo ra yêu cầu prop `identity` cung cấp user pool và client:
 
-```ts {6-9} title="packages/infra/src/stacks/application-stack.ts"
+```ts {7,9-11} title="packages/infra/src/stacks/application-stack.ts"
 import { MyGateway, UserIdentity } from ':my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
@@ -149,7 +154,7 @@ export class ApplicationStack extends Stack {
 <Fragment slot="terraform">
 Module được tạo ra yêu cầu các biến `user_pool_id` và `user_pool_client_ids`:
 
-```hcl {6-7} title="packages/infra/src/main.tf"
+```hcl {7-8} title="packages/infra/src/main.tf"
 module "user_identity" {
   source = "../../common/terraform/src/core/user-identity"
 }
@@ -210,7 +215,7 @@ Thêm biến mới tại nơi các chính sách được render, ví dụ để 
 <Fragment slot="cdk">
 Trong `packages/common/constructs/src/app/gateways/<name>/<name>.ts`, truyền `cedarPolicyVariables` qua shared construct:
 
-```ts {4-6}
+```ts {5-6}
 super(scope, id, {
   cedarPolicyPath: path.join(
     ...
@@ -350,11 +355,19 @@ forbid (
 
 ## Phát triển cục bộ
 
-Generator thêm target `dev` vào dự án Gateway, chạy `local-dev.ts`: một gateway cục bộ cung cấp một endpoint MCP duy nhất tập hợp mọi MCP server đính kèm (được kết nối thông qua <Link path="guides/connection/agentcore-gateway-mcp">generator `agentcore-gateway#mcp-connection`</Link>), với các công cụ có tiền tố `<target>___<tool>` để khớp với Gateway đã triển khai. Chạy nó sẽ khởi động gateway cục bộ và tất cả các MCP server đính kèm cùng nhau:
+Generator thêm target `dev` vào dự án Gateway, chạy `local-dev.ts`. Chạy nó sẽ khởi động gateway cục bộ và mọi mục tiêu đính kèm cùng nhau:
 
 <NxCommands commands={["dev <name>"]} />
 
-Xem hướng dẫn kết nối để biết toàn bộ câu chuyện phát triển cục bộ.
+<OptionFilter when={{ protocol: 'mcp' }} description="MCP aggregator local gateway">
+Gateway cục bộ cung cấp một endpoint MCP duy nhất tập hợp mọi MCP server đính kèm (được kết nối thông qua <Link path="guides/connection/agentcore-gateway-mcp">generator `agentcore-gateway#mcp-connection`</Link>), với các công cụ có tiền tố `<target>___<tool>` để khớp với Gateway đã triển khai.
+</OptionFilter>
+
+<OptionFilter when={{ protocol: 'http' }} description="Path-routing proxy local gateway">
+Gateway cục bộ proxy các đường dẫn `/<targetName>/...` đến máy chủ cục bộ của mỗi agent đính kèm (được kết nối thông qua <Link path="guides/connection/agentcore-gateway-agent">generator `agentcore-gateway#agent-connection`</Link>), khớp với định tuyến dựa trên đường dẫn của Gateway đã triển khai.
+</OptionFilter>
+
+Xem các hướng dẫn kết nối để biết toàn bộ câu chuyện phát triển cục bộ.
 
 ## Triển khai AgentCore Gateway của bạn
 
@@ -461,6 +474,20 @@ Sử dụng generator <Link path="guides/connection">`connection`</Link> để t
     href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-gateway`}
     source="strands"
     sourceBadge="python"
+    target="agentcore"
+  />
+  <ConnectionCard
+    title="AgentCore Gateway to Agent"
+    description="Đặt agent trước AgentCore Gateway như một mục tiêu runtime"
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/agentcore-gateway-agent`}
+    source="agentcore"
+    target="strands"
+  />
+  <ConnectionCard
+    title="React Website to AgentCore Gateway"
+    description="Kết nối trang web React với các agent thông qua AgentCore Gateway"
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-agentcore-gateway`}
+    source="react"
     target="agentcore"
   />
 </CardGrid>

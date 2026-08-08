@@ -17,10 +17,18 @@ import { useMemo } from 'react';
 import { useRuntimeConfig } from './useRuntimeConfig';
 <%_ } _%>
 
+<%_ if (gatewayRoute) { _%>
+// The agent sits behind an AgentCore Gateway, which proxies
+// `/<targetName>/invocations` to the agent runtime.
+function buildGatewayUrl(gatewayUrl: string): string {
+  return `${new URL(gatewayUrl).origin}/<%= gatewayRoute.targetName %>/invocations`;
+}
+<%_ } else { _%>
 function buildAgentCoreUrl(agentRuntimeArn: string): string {
   const region = agentRuntimeArn.split(':')[3];
   return `https://bedrock-agentcore.${region}.amazonaws.com/runtimes/${encodeURIComponent(agentRuntimeArn)}/invocations?qualifier=DEFAULT`;
 }
+<%_ } _%>
 
 // AgentCore session ids must be at least 33 characters.
 function agentCoreSessionId(input: RunAgentInput): string {
@@ -98,13 +106,20 @@ class AgentCoreHttpAgent extends HttpAgent {
 
 export const useAgui<%= agentNameClassName %> = (): Record<string, AbstractAgent> => {
   const runtimeConfig = useRuntimeConfig();
+<%_ if (gatewayRoute) { _%>
+  const gatewayUrl = runtimeConfig.gateways.<%= gatewayRoute.gatewayClassName %>;
+<%_ } else { _%>
   const agentRuntimeValue = runtimeConfig.agentRuntimes.<%= agentNameClassName %>;
+<%_ } _%>
   <%_ if (auth === 'iam') { _%>
   const sigv4 = useSigV4();
   <%_ } else if (auth === 'cognito') { _%>
   const auth = useAuth();
   <%_ } _%>
 
+<%_ if (gatewayRoute) { _%>
+  const url = useMemo(() => buildGatewayUrl(gatewayUrl), [gatewayUrl]);
+<%_ } else { _%>
   const url = useMemo(
     () =>
       agentRuntimeValue.startsWith('arn:')
@@ -112,6 +127,7 @@ export const useAgui<%= agentNameClassName %> = (): Record<string, AbstractAgent
         : agentRuntimeValue,
     [agentRuntimeValue],
   );
+<%_ } _%>
 
   return useMemo((): Record<string, AbstractAgent> => {
     <%_ if (auth === 'iam') { _%>

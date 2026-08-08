@@ -53,6 +53,11 @@ export const ensureAwsNxPluginConfig = async (
  * resolution — imports from @aws/nx-plugin/* resolve via alias, and any
  * third-party imports resolve from the workspace's node_modules. Synchronous,
  * since `jiti.evalModule` runs in-memory.
+ *
+ * The on-disk transform cache is off: jiti keys it by file path, but the source
+ * here comes from the Tree, so one path holds different content as generators
+ * mutate the config — and every test Tree shares the `/virtual` root, making
+ * concurrent workers collide on a single cache file.
  */
 export const readAwsNxPluginConfig = (
   tree: Tree,
@@ -65,6 +70,7 @@ export const readAwsNxPluginConfig = (
 
   const jiti = createJiti(import.meta.filename, {
     alias: AWS_NX_PLUGIN_JITI_ALIASES,
+    fsCache: false,
   });
 
   const mod = jiti.evalModule(source, { filename: configFilePath });

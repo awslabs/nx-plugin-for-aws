@@ -1,0 +1,91 @@
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import Any
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel
+from starlette.middleware.exceptions import ExceptionMiddleware
+
+from .agent import get_agent
+
+
+class InternalServerErrorDetails(BaseModel):
+    detail: str
+
+
+class JsonStreamingResponse(StreamingResponse):
+    """A streaming response that serializes items to JSON Lines format."""
+
+    media_type = "application/jsonl"
+
+    def __init__(
+        self,
+        content: AsyncIterator[BaseModel],
+        status_code: int = 200,
+        headers: dict[str, str] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Stream json lines from an async iterator yielding Pydantic models"""
+        super().__init__(
+            content=self._serialize(content),
+            status_code=status_code,
+            headers=headers,
+            media_type=self.media_type,
+            **kwargs,
+        )
+
+    @staticmethod
+    async def _serialize(
+        content: AsyncIterator[BaseModel],
+    ) -> AsyncIterator[bytes]:
+        """Serialize Pydantic models to JSON Lines format."""
+        async for item in content:
+            yield (item.model_dump_json() + "\n").encode("utf-8")
+
+    @staticmethod
+    def openapi_response(
+        item_model: type[BaseModel],
+        description: str = "Streaming response",
+    ) -> dict[str, Any]:
+        """Generate an OpenAPI application/jsonl response for a stream of the given model"""
+        return {
+            "description": description,
+            "content": {
+                "application/jsonl": {
+                    "itemSchema": {"$ref": f"#/components/schemas/{item_model.__name__}"},
+                }
+            },
+            # Include the model so FastAPI registers the schema in components/schemas
+            "model": item_model,
+        }
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    app.state.graph = get_agent()
+    yield
+
+
+app = FastAPI(
+    title="<%= agentNameClassName %>",
+    responses={500: {"model": InternalServerErrorDetails}},
+    generate_unique_id_function=lambda route: route.name,
+    lifespan=lifespan,
+)
+
+# Add cors middleware
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+# Add exception middleware(s)
+app.add_middleware(ExceptionMiddleware, handlers=app.exception_handlers)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request, err):
+    logging.exception("Unhandled exception while handling request")
+    return JSONResponse(
+        status_code=500, content=InternalServerErrorDetails(detail="Internal Server Error").model_dump()
+    )

@@ -246,8 +246,16 @@ module "ts_agui_agent" {
 }
 
 # ---------------------------------------------------------------------------
-# AgentCore Gateway (Cedar policy engine + IAM-authenticated MCP endpoint)
+# AgentCore Gateway (IAM-authenticated MCP endpoint)
 # ---------------------------------------------------------------------------
+
+# The gateways here are generated without a Cedar policy engine. AgentCore
+# injects a server-managed `metadata_configuration.allowed_request_headers` on
+# targets of a policy-engine gateway, which the AWS provider declares
+# `Optional` rather than `Computed`, so every apply fails its post-apply
+# consistency check; declaring the header explicitly is rejected as restricted.
+# cdk-deploy still covers Cedar. Restore it once the provider fixes the block —
+# tracked in #1065.
 
 # The gateway signs outbound calls to its MCP server targets with its own
 # role and fetches each target's tools at creation time, so it needs invoke
@@ -258,11 +266,6 @@ module "my_gateway" {
   additional_iam_policy_statements = [
     local.invoke_py_mcp_server_statement,
     local.invoke_ts_mcp_server_statement,
-  ]
-
-  policy_dependencies = [
-    aws_bedrockagentcore_gateway_target.ts_mcp_server.target_id,
-    aws_bedrockagentcore_gateway_target.py_mcp_server.target_id,
   ]
 
   # Aggregated by parent_gateway, so its gateway_url must not be consumed
@@ -277,9 +280,9 @@ module "my_gateway" {
 # Register both MCP servers as targets of the Gateway — the Terraform
 # analogue of `myGateway.addMcpServer(...)` in the CDK template. Target
 # names match the local-dev registrations (kebab-cased MCP project class
-# name) so Cedar action prefixes are identical locally and deployed. The
-# runtime ARNs flow through each runtime's readiness probe, so targets are
-# created only once the runtimes serve MCP.
+# name) so tool prefixes are identical locally and deployed. The runtime ARNs
+# flow through each runtime's readiness probe, so targets are created only
+# once the runtimes serve MCP.
 resource "aws_bedrockagentcore_gateway_target" "ts_mcp_server" {
   gateway_identifier = module.my_gateway.gateway_id
   name               = "hosted-mcp-server"
@@ -333,10 +336,6 @@ module "parent_gateway" {
       Resource = [module.my_gateway.gateway_arn]
     }
   ]
-
-  policy_dependencies = [
-    aws_bedrockagentcore_gateway_target.my_gateway.target_id,
-  ]
 }
 
 # Register my_gateway as a target of the parent gateway — the Terraform
@@ -365,6 +364,56 @@ resource "aws_bedrockagentcore_gateway_target" "my_gateway" {
     aws_bedrockagentcore_gateway_target.ts_mcp_server,
     aws_bedrockagentcore_gateway_target.py_mcp_server,
   ]
+}
+
+# HTTP-protocol gateway fronting agent runtime targets across every supported
+# protocol permutation (ts ag-ui + a2a, py ag-ui + http + a2a). The gateway
+# signs outbound calls to its runtime targets with its own role and validates
+# access at target creation, so it needs invoke access to every fronted agent.
+module "agent_gateway" {
+  source = "../../common/terraform/src/app/gateways/agent-gateway"
+
+  additional_iam_policy_statements = [
+    local.invoke_ts_agui_agent_statement,
+    local.invoke_py_agui_agent_statement,
+    local.invoke_py_agent_statement,
+    local.invoke_ts_a2a_agent_statement,
+    local.invoke_py_a2a_agent_statement,
+  ]
+}
+
+# Register the agents as runtime targets of the agent gateway — the Terraform
+# analogue of `agentGateway.addAgent(...)` in the CDK template. Target names
+# match the local-dev registrations (kebab-cased agent class name) so the
+# `/<target>/invocations` paths are identical locally and deployed.
+resource "aws_bedrockagentcore_gateway_target" "agent_gateway_targets" {
+  for_each = {
+    "my-ts-agui-agent" = module.ts_agui_agent.agent_core_runtime_arn
+    "my-ts-a2a-agent"  = module.ts_a2a_agent.agent_core_runtime_arn
+    "my-py-agui-agent" = module.py_agui_agent.agent_core_runtime_arn
+    "my-agent"         = module.py_agent.agent_core_runtime_arn
+    "my-py-a2a-agent"  = module.py_a2a_agent.agent_core_runtime_arn
+  }
+
+  gateway_identifier = module.agent_gateway.gateway_id
+  name               = each.key
+  # AgentCore fills in a description when none is set, which the provider
+  # reports as an inconsistent result after apply — so always set one.
+  description = "Agent runtime target ${each.key}"
+
+  target_configuration {
+    http {
+      agentcore_runtime {
+        arn = each.value
+      }
+    }
+  }
+
+  # The bare gateway IAM role credential: runtime targets reject the
+  # service detail MCP targets carry.
+  credential_provider_configuration {
+    gateway_iam_role {}
+  }
 }
 
 # ---------------------------------------------------------------------------
@@ -434,6 +483,45 @@ locals {
     Resource = [
       module.py_a2a_agent.agent_core_runtime_arn,
       "${module.py_a2a_agent.agent_core_runtime_arn}/*",
+    ]
+  }
+
+  invoke_ts_agui_agent_statement = {
+    Effect = "Allow"
+    Action = [
+      "bedrock-agentcore:InvokeAgentRuntime",
+      "bedrock-agentcore:InvokeAgentRuntimeForUser",
+      "bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream",
+    ]
+    Resource = [
+      module.ts_agui_agent.agent_core_runtime_arn,
+      "${module.ts_agui_agent.agent_core_runtime_arn}/*",
+    ]
+  }
+
+  invoke_py_agui_agent_statement = {
+    Effect = "Allow"
+    Action = [
+      "bedrock-agentcore:InvokeAgentRuntime",
+      "bedrock-agentcore:InvokeAgentRuntimeForUser",
+      "bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream",
+    ]
+    Resource = [
+      module.py_agui_agent.agent_core_runtime_arn,
+      "${module.py_agui_agent.agent_core_runtime_arn}/*",
+    ]
+  }
+
+  invoke_py_agent_statement = {
+    Effect = "Allow"
+    Action = [
+      "bedrock-agentcore:InvokeAgentRuntime",
+      "bedrock-agentcore:InvokeAgentRuntimeForUser",
+      "bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream",
+    ]
+    Resource = [
+      module.py_agent.agent_core_runtime_arn,
+      "${module.py_agent.agent_core_runtime_arn}/*",
     ]
   }
 
@@ -568,6 +656,7 @@ module "runtime_config_appconfig_deployment" {
     module.my_gateway,
     module.parent_gateway,
     module.my_harness,
+    module.agent_gateway,
   ]
 }
 
@@ -710,6 +799,10 @@ output "parent_gateway_url" {
 
 output "my_harness_arn" {
   value = module.my_harness.harness_arn
+}
+
+output "agent_gateway_url" {
+  value = module.agent_gateway.gateway_url
 }
 
 # Cognito identifiers — used by the browser-driven website integration test to

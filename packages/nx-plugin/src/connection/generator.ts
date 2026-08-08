@@ -7,9 +7,11 @@ import {
   type ProjectConfiguration,
   type Tree,
 } from '@nx/devkit';
+import agentcoreGatewayAgentConnectionGenerator from '../agentcore-gateway/agent-connection/generator';
 import agentcoreGatewayGatewayConnectionGenerator from '../agentcore-gateway/gateway-connection/generator';
 import { AGENTCORE_GATEWAY_GENERATOR_INFO } from '../agentcore-gateway/generator';
 import agentcoreGatewayMcpConnectionGenerator from '../agentcore-gateway/mcp-connection/generator';
+import agentcoreGatewayReactConnectionGenerator from '../agentcore-gateway/react-connection/generator';
 import pyAgentA2aConnectionGenerator from '../py/agent/a2a-connection/generator';
 import pyAgentGatewayConnectionGenerator from '../py/agent/gateway-connection/generator';
 import pyAgentMcpConnectionGenerator from '../py/agent/mcp-connection/generator';
@@ -148,6 +150,12 @@ const CONNECTION_GENERATORS = {
     tsAgentGatewayConnectionGenerator(tree, options),
   'py#agent -> agentcore-gateway': (tree, options) =>
     pyAgentGatewayConnectionGenerator(tree, options),
+  'ts#react-website -> agentcore-gateway': (tree, options) =>
+    agentcoreGatewayReactConnectionGenerator(tree, options),
+  'agentcore-gateway -> ts#agent': (tree, options) =>
+    agentcoreGatewayAgentConnectionGenerator(tree, options),
+  'agentcore-gateway -> py#agent': (tree, options) =>
+    agentcoreGatewayAgentConnectionGenerator(tree, options),
   'agentcore-gateway -> ts#mcp-server': (tree, options) =>
     agentcoreGatewayMcpConnectionGenerator(tree, options),
   'agentcore-gateway -> py#mcp-server': (tree, options) =>

@@ -11,11 +11,11 @@ terraform {
       source  = "hashicorp/external"
       version = "<%- externalProviderVersion %>"
     }
+<%_ } _%>
     time = {
       source  = "hashicorp/time"
       version = "<%- timeProviderVersion %>"
     }
-<%_ } _%>
     random = {
       source  = "hashicorp/random"
       version = "<%- randomProviderVersion %>"
@@ -33,11 +33,13 @@ variable "additional_iam_policy_statements" {
   default = []
 }
 
+<%_ if (protocol === 'mcp') { _%>
 variable "tool_dependencies" {
   description = "Target ids whose tools must be queryable before `gateway_url` is consumable. Set this to the gateway's own target ids (e.g. from agentcore-gateway#mcp-connection) when another gateway aggregates this one: the readiness probe waits until this gateway serves those tools, since a parent gateway fetches them at target creation."
   type        = list(string)
   default     = []
 }
+<%_ } _%>
 
 variable "enable_waf" {
   description = "Associate a regional WAFv2 web ACL (default AWS managed rule groups) with the gateway to inspect inbound requests."
@@ -166,6 +168,22 @@ resource "aws_iam_role_policy" "gateway_role_policy" {
     Statement = var.additional_iam_policy_statements
   })
 }
+
+# IAM is eventually consistent, and the gateway assumes this role to reach its
+# targets — an MCP target fetches tools at creation time. Without this wait the
+# fetch intermittently runs before the policy above has propagated and the
+# target lands in FAILED with an authorization error.
+resource "time_sleep" "gateway_role_policy_propagation" {
+  count = length(var.additional_iam_policy_statements) > 0 ? 1 : 0
+
+  depends_on = [aws_iam_role_policy.gateway_role_policy]
+
+  create_duration = "30s"
+
+  triggers = {
+    policy = aws_iam_role_policy.gateway_role_policy[0].policy
+  }
+}
 <%_ } _%>
 <%_ if (cedarPolicy) { _%>
 
@@ -183,6 +201,7 @@ resource "aws_bedrockagentcore_gateway" "this" {
   description = "AgentCore Gateway for <%- nameClassName %>"
   role_arn    = aws_iam_role.gateway_role.arn
 
+<%_ if (protocol === 'mcp') { _%>
   protocol_type = "MCP"
   protocol_configuration {
     mcp {
@@ -190,6 +209,11 @@ resource "aws_bedrockagentcore_gateway" "this" {
       supported_versions = ["2025-03-26"]
     }
   }
+<%_ } else { _%>
+  # No protocol type: AgentCore Runtime targets require a gateway without one.
+  # The gateway proxies requests to its runtime targets via path-based routing
+  # (`/<targetName>/invocations`).
+<%_ } _%>
 
   authorizer_type = "<%- auth === 'cognito' ? 'CUSTOM_JWT' : 'AWS_IAM' %>"
 <%_ if (auth === 'cognito') { _%>
@@ -207,9 +231,9 @@ resource "aws_bedrockagentcore_gateway" "this" {
     arn  = aws_bedrockagentcore_policy_engine.this.policy_engine_arn
     mode = "ENFORCE"
   }
+<%_ } _%>
 
   depends_on = [time_sleep.gateway_role_policy_propagation]
-<%_ } _%>
 }
 
 # WAFv2 protection for the gateway. AgentCore Gateway requires a REGIONAL web
@@ -364,6 +388,7 @@ resource "aws_bedrockagentcore_policy" "policies" {
 }
 <%_ } _%>
 
+<%_ if (protocol === 'mcp') { _%>
 # A parent gateway fetches this gateway's tools when it registers it as a
 # target, so this gateway must already serve them — its own targets register
 # their tools asynchronously after creation. Probe `tools/list` over SigV4
@@ -448,6 +473,7 @@ print(f'Gateway {gateway_url} is serving tools')
     }
   }
 }
+<%_ } _%>
 
 # Add gateway URL to runtime config
 module "add_gateway_url_to_runtime_config" {
@@ -470,12 +496,19 @@ output "gateway_arn" {
   value       = aws_bedrockagentcore_gateway.this.gateway_arn
 }
 
+<%_ if (protocol === 'mcp') { _%>
 output "gateway_url" {
   description = "MCP endpoint URL of the Bedrock AgentCore Gateway. When `tool_dependencies` is set, this value flows through the readiness probe so consumers (e.g. a parent gateway target) wait until the gateway serves its aggregated tools."
   value = length(var.tool_dependencies) > 0 ? (
     null_resource.gateway_ready[0].triggers.gateway_url
   ) : aws_bedrockagentcore_gateway.this.gateway_url
 }
+<%_ } else { _%>
+output "gateway_url" {
+  description = "Endpoint URL of the Bedrock AgentCore Gateway. Runtime targets are served under `<gateway_url minus /mcp>/<targetName>/invocations`."
+  value       = aws_bedrockagentcore_gateway.this.gateway_url
+}
+<%_ } _%>
 
 output "gateway_role_arn" {
   description = "ARN of the IAM role assumed by the gateway service"

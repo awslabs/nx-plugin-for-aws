@@ -25,16 +25,21 @@ interface RunCliOpts {
  * Pass `{ preferInstallDependencies: true }` to install after every generator
  * instead — the idempotency test needs this so lockfiles (including `uv.lock`)
  * are fully synced before it snapshots the workspace.
+ *
+ * Pass `{ cedarPolicy: false }` to scaffold the MCP gateways without a Cedar
+ * policy engine — see the comment on the Terraform caller for why it opts out.
  */
 export const runGeneratorMatrix = async (
   opts: RunCliOpts,
   {
     preferInstallDependencies = false,
-  }: { preferInstallDependencies?: boolean } = {},
+    cedarPolicy = true,
+  }: { preferInstallDependencies?: boolean; cedarPolicy?: boolean } = {},
 ) => {
   const deferFlag = preferInstallDependencies
     ? ''
     : ' --prefer-install-dependencies=false';
+  const cedarFlag = cedarPolicy ? '' : ' --cedarPolicy=false';
   // Websites (with and without TanStack Router), plus auth on each.
   await runCLI(
     `generate @aws/nx-plugin:ts#website --name=website --no-interactive${deferFlag}`,
@@ -290,7 +295,7 @@ export const runGeneratorMatrix = async (
   // gateway -> ts/py mcp-server) so each smoke test exercises a deployable
   // gateway with multiple MCP server targets fronting both agent runtimes.
   await runCLI(
-    `generate @aws/nx-plugin:agentcore-gateway --name=my-gateway --no-interactive${deferFlag}`,
+    `generate @aws/nx-plugin:agentcore-gateway --name=my-gateway --no-interactive${cedarFlag}${deferFlag}`,
     opts,
   );
   await runCLI(
@@ -318,7 +323,7 @@ export const runGeneratorMatrix = async (
   // A parent gateway fronting my-gateway, exercising the
   // gateway -> gateway connection edge (chained gateways).
   await runCLI(
-    `generate @aws/nx-plugin:agentcore-gateway --name=parent-gateway --no-interactive${deferFlag}`,
+    `generate @aws/nx-plugin:agentcore-gateway --name=parent-gateway --no-interactive${cedarFlag}${deferFlag}`,
     opts,
   );
   await runCLI(
@@ -333,6 +338,42 @@ export const runGeneratorMatrix = async (
   // not part of the matrix yet.
   await runCLI(
     `generate @aws/nx-plugin:agentcore-harness --name=my-harness --no-interactive${deferFlag}`,
+    opts,
+  );
+
+  // An http-protocol gateway fronting agent runtime targets (every supported
+  // protocol permutation: ts ag-ui + a2a, py ag-ui + http + a2a), plus the
+  // website -> gateway connection so the browser reaches the fronted AG-UI
+  // agent through the gateway.
+  await runCLI(
+    `generate @aws/nx-plugin:agentcore-gateway --name=agent-gateway --protocol=http --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/agent-gateway --targetProject=ts-project --targetComponent=my-ts-agui-agent --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/agent-gateway --targetProject=ts-project --targetComponent=my-ts-a2a-agent --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/agent-gateway --targetProject=py_project --targetComponent=my-py-agui-agent --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/agent-gateway --targetProject=py_project --targetComponent=my-agent --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/agent-gateway --targetProject=py_project --targetComponent=my-py-a2a-agent --no-interactive${deferFlag}`,
+    opts,
+  );
+  // website-no-router rather than website: the latter already connects to the
+  // AG-UI agents directly, so its hooks exist and would be kept as-is; a
+  // fresh website generates the gateway-routed hooks.
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/website-no-router --targetProject=@e2e-test/agent-gateway --no-interactive${deferFlag}`,
     opts,
   );
 

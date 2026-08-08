@@ -262,55 +262,36 @@ export const pyAgentGenerator = async (
   // dir. The package __init__.py is framework-agnostic (it stays in `common`).
   generateFiles(
     tree,
-    joinPathFragments(
-      import.meta.dirname,
-      'files',
-      framework === 'langchain' ? 'common-langchain' : 'common',
-    ),
+    joinPathFragments(import.meta.dirname, 'files', framework, 'common'),
     targetSourceDir,
     templateContext,
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
   if (framework === 'langchain') {
-    // common-langchain only carries agent.py; the empty package __init__.py is
-    // framework-agnostic, so emit it from the shared `common` dir.
+    // langchain/common only carries agent.py; the empty package __init__.py is
+    // framework-agnostic, so emit it from the strands `common` dir.
     generateFiles(
       tree,
-      joinPathFragments(import.meta.dirname, 'files', 'common'),
+      joinPathFragments(import.meta.dirname, 'files', 'strands', 'common'),
       targetSourceDir,
       templateContext,
       { overwriteStrategy: OverwriteStrategy.KeepExisting },
     );
   }
 
-  // Generate protocol-specific files. Each protocol's server entry point is
+  // Generate protocol-specific files. Each protocol's server entry point (and,
+  // for HTTP, its init.py building the FastAPI app + lifespan) is
   // framework-specific (Strands yields a contextmanaged Agent; LangChain drives
-  // a compiled create_agent graph), so it comes from a per-framework dir
-  // `<protocol>-langchain` for LangChain, or `<protocol>` for Strands.
+  // a compiled create_agent graph), so it comes from a per-framework,
+  // per-protocol dir: `files/<framework>/<protocol>`.
   const protocolLower = protocol.toLowerCase();
-  const protocolTemplateDir =
-    framework === 'langchain' ? `${protocolLower}-langchain` : protocolLower;
   generateFiles(
     tree,
-    joinPathFragments(import.meta.dirname, 'files', protocolTemplateDir),
+    joinPathFragments(import.meta.dirname, 'files', framework, protocolLower),
     targetSourceDir,
     templateContext,
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
-  // The HTTP server's init.py (the FastAPI app + JsonStreamingResponse) is
-  // framework-agnostic and the LangChain http main.py reuses it, so emit it
-  // from the shared `http` dir. Emitted after the langchain main.py above so
-  // KeepExisting preserves that main.py and only adds init.py (the shared dir's
-  // own Strands main.py is skipped).
-  if (protocolLower === 'http' && framework === 'langchain') {
-    generateFiles(
-      tree,
-      joinPathFragments(import.meta.dirname, 'files', 'http'),
-      targetSourceDir,
-      templateContext,
-      { overwriteStrategy: OverwriteStrategy.KeepExisting },
-    );
-  }
 
   if (infra === 'agentcore') {
     const containers = await resolveContainers(tree, 'inherit');

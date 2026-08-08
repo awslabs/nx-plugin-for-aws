@@ -1,0 +1,89 @@
+import logging
+import uuid
+from contextlib import asynccontextmanager
+
+from ag_ui.core import EventType, RunAgentInput, RunErrorEvent
+from ag_ui.encoder import EventEncoder
+from ag_ui_strands import StrandsAgent
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+from <%- agentConnectionModuleName %> import get_current_session_id, session_id_context
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from .agent import get_agent
+
+logging.basicConfig(level=logging.INFO)
+
+SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    with get_agent() as agent:
+        app.state.agui_agent = StrandsAgent(
+            agent=agent,
+            name="<%= agentNameClassName %>",
+            description="A Strands Agent exposed via the AG-UI protocol.",
+        )
+        yield
+
+
+class _SessionIdMiddleware(BaseHTTPMiddleware):
+    """Bind the session ID for this request so downstream MCP / A2A clients forward it on outbound calls."""
+
+    async def dispatch(self, request: Request, call_next):
+        session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
+        with session_id_context(session_id):
+            return await call_next(request)
+
+
+app = FastAPI(title="AWS Strands - <%= agentNameClassName %>", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+app.add_middleware(_SessionIdMiddleware)
+
+
+@app.post("/invocations")
+async def invocations(request: Request):
+    # Validate the body manually since AgentCore may omit Content-Type.
+    encoder = EventEncoder(accept=request.headers.get("accept") or "")
+    raw = await request.body()
+    try:
+        input_data = RunAgentInput.model_validate_json(raw)
+    except Exception as exc:
+        message = f"Invalid RunAgentInput: {str(exc)[:200]}"
+
+        async def _bad():
+            yield encoder.encode(RunErrorEvent(type=EventType.RUN_ERROR, message=message, code="BAD_REQUEST"))
+
+        return StreamingResponse(_bad(), media_type=encoder.get_content_type())
+
+    session_id = request.headers.get(SESSION_ID_HEADER) or get_current_session_id()
+
+    async def event_generator():
+        # Re-bind the session: the streaming body runs outside the middleware.
+        with session_id_context(session_id or str(uuid.uuid4())):
+            async for event in request.app.state.agui_agent.run(input_data):
+                try:
+                    yield encoder.encode(event)
+                except Exception as e:
+                    error_event = RunErrorEvent(
+                        type=EventType.RUN_ERROR,
+                        message=f"Encoding error: {e}",
+                        code="ENCODING_ERROR",
+                    )
+                    yield encoder.encode(error_event)
+                    break
+
+    return StreamingResponse(event_generator(), media_type=encoder.get_content_type())
+
+
+@app.get("/ping")
+async def ping():
+    return {"status": "healthy"}

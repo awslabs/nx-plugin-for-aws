@@ -3,6 +3,13 @@
 exports[`py#agent generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > agent-Dockerfile 1`] = `
 "FROM public.ecr.aws/docker/library/python:3.14-slim
 
+# Remove the base image's pip: the agent runs from the bundled environment and
+# never needs it at runtime, and pip's vendored packages carry known
+# HIGH/CRITICAL vulnerabilities flagged by the image scan.
+RUN python -m pip uninstall -y pip && \\
+    rm -rf /usr/local/lib/python*/site-packages/pip \\
+           /usr/local/lib/python*/site-packages/pip-*.dist-info
+
 WORKDIR /app
 
 # Copy bundled package
@@ -55,6 +62,10 @@ export class SnapshotBedrockAgent
 {
   public readonly dockerImage: AgentRuntimeArtifact;
   public readonly agentCoreRuntime: Runtime;
+  /** Default Gateway target name for this agent. */
+  public readonly agentName = 'snapshot-bedrock-agent';
+  /** Inbound auth — a fronting Gateway uses this to pick its outbound credential. */
+  public readonly auth = 'iam';
 
   constructor(scope: Construct, id: string, props?: SnapshotBedrockAgentProps) {
     super(scope, id);
@@ -216,21 +227,13 @@ exports[`py#agent generator > should match snapshot for generated files > agent-
 import uvicorn
 from bedrock_agentcore.runtime.models import PingStatus
 from fastapi import Request
-from proj_agent_connection import session_id_context, with_session_id
+from proj_agent_connection import session_id_context
 from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from .agent import get_agent
 from .init import JsonStreamingResponse, app
 
 SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
-
-_agent_ctx = with_session_id(
-    get_agent,
-    name="SnapshotAgent",
-    description="A Strands Agent exposed via HTTP streaming.",
-)
-_agent = _agent_ctx.__enter__()
 
 
 class InvokeInput(BaseModel):
@@ -243,7 +246,7 @@ class StreamChunk(BaseModel):
 
 async def handle_invoke(input: InvokeInput):
     """Streaming handler for agent invocation"""
-    stream = _agent.stream_async(input.prompt)
+    stream = app.state.agent.stream_async(input.prompt)
     async for event in stream:
         text = (
             event.get("event", {})

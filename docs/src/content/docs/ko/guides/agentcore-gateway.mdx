@@ -15,7 +15,12 @@ import Link from '@components/link.astro';
 import NxCommands from '@components/nx-commands.astro';
 import OptionFilter from '@components/option-filter.astro';
 
-[Amazon Bedrock AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) 프로젝트를 생성합니다. AgentCore Gateway는 하나 이상의 MCP 서버 대상을 단일 MCP 엔드포인트 뒤에 집계하고, 인바운드 요청을 인증하며(IAM 또는 Cognito), [Cedar 정책 엔진](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html)에 대해 모든 도구 호출을 평가하고, MCP 서버로의 아웃바운드 트래픽에 IAM SigV4로 서명하는 관리형 진입점입니다.
+[Amazon Bedrock AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) 프로젝트를 생성합니다. AgentCore Gateway는 MCP 서버 또는 에이전트 앞에 있는 관리형 진입점으로, 인바운드 요청을 인증하고(IAM 또는 Cognito) 대상으로의 아웃바운드 트래픽에 IAM SigV4로 서명합니다.
+
+`protocol` 옵션은 Gateway가 무엇을 앞에 두는지 선택합니다:
+
+- **`mcp`** (기본값) — 하나 이상의 MCP 서버 대상을 단일 MCP 엔드포인트 뒤에 집계하고, [Cedar 정책 엔진](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html)에 대해 모든 도구 호출을 평가합니다.
+- **`http`** — 경로 기반 라우팅(`/<targetName>/invocations`)을 통해 [AgentCore Runtime 대상](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-target-http-runtime.html)(에이전트)으로 요청을 직접 프록시하며, 집계나 프로토콜 변환 없이 수행됩니다. 이를 사용하여 단일 관리형 엔드포인트로 에이전트를 앞에 두세요 — 예를 들어 웹사이트가 Gateway를 통해 VPC 내부에 배포된 에이전트에 도달할 수 있도록 합니다.
 
 ## 사용법
 
@@ -33,10 +38,10 @@ import OptionFilter from '@components/option-filter.astro';
 
 <FileTree>
   - packages/\<name>/
-    - policies/ Cedar 정책 소스 파일 (`cedarPolicy: false`일 때 생략됨)
+    - policies/ Cedar 정책 소스 파일 (`mcp` 프로토콜 전용; `cedarPolicy: false`일 때 생략됨)
       - permit-all.cedar 인증된 호출자를 허용하는 기본 Cedar 정책
       - README.md Cedar 정책 작성 참조
-    - local-dev.ts 로컬 개발을 위해 연결된 MCP 서버를 집계하는 로컬 게이트웨이
+    - local-dev.ts 로컬 개발을 위한 로컬 게이트웨이 — 연결된 MCP 서버를 집계(`mcp`)하거나 연결된 에이전트를 프록시(`http`)
     - project.json `serve` 및 `dev` 대상 추가
 </FileTree>
 
@@ -71,9 +76,9 @@ import OptionFilter from '@components/option-filter.astro';
 
 생성된 구성 요소는 다음 AWS 리소스를 생성합니다:
 
-- MCP 프로토콜용으로 구성된 `AgentCore::Gateway`로 인바운드 IAM 인증(기본값) 또는 Cognito JWT 인증 사용 (<a href="#authentication">인증</a> 참조)
-- Gateway에 연결되어 `ENFORCE` 모드로 실행되는 `AgentCore::PolicyEngine` (`cedarPolicy: false`일 때 생략됨)
-- `policies/`의 `.cedar` 파일당 하나의 `AgentCore::Policy`
+- 인바운드 IAM 인증(기본값) 또는 Cognito JWT 인증을 사용하는 `AgentCore::Gateway` (<a href="#authentication">인증</a> 참조). `mcp` 게이트웨이는 MCP 프로토콜용으로 구성되며, `http` 게이트웨이는 프로토콜 유형이 없으며, 이는 AgentCore가 런타임 대상에 필요로 합니다
+- Gateway에 연결되어 `ENFORCE` 모드로 실행되는 `AgentCore::PolicyEngine` (`mcp` 게이트웨이 전용; `cedarPolicy: false`일 때 생략됨)
+- `policies/`의 `.cedar` 파일당 하나의 `AgentCore::Policy` (`mcp` 게이트웨이 전용)
 - Gateway와 연결된 AWS WAFv2 Web ACL, CloudWatch로의 요청 로깅 포함 (기본적으로 활성화됨 — <a href="#aws-waf">AWS WAF</a> 참조)
 
 Gateway URL은 <Link path="guides/runtime-config">런타임 구성</Link>의 `agentcore.gateways.<ClassName>` 네임스페이스에 자동으로 등록되어 에이전트가 런타임에 이를 발견할 수 있습니다.
@@ -146,7 +151,7 @@ export class ApplicationStack extends Stack {
 <Fragment slot="terraform">
 생성된 모듈은 `user_pool_id` 및 `user_pool_client_ids` 변수가 필요합니다:
 
-```hcl {6-7} title="packages/infra/src/main.tf"
+```hcl {7-8} title="packages/infra/src/main.tf"
 module "user_identity" {
   source = "../../common/terraform/src/core/user-identity"
 }
@@ -207,7 +212,7 @@ permit (
 <Fragment slot="cdk">
 `packages/common/constructs/src/app/gateways/<name>/<name>.ts`에서 공유 구성 요소에 `cedarPolicyVariables`를 전달하세요:
 
-```ts {4-6}
+```ts {5-6}
 super(scope, id, {
   cedarPolicyPath: path.join(
     ...
@@ -347,9 +352,17 @@ forbid (
 
 ## 로컬 개발
 
-생성기는 Gateway 프로젝트에 `dev` 대상을 추가하며, 이는 `local-dev.ts`를 실행합니다: 배포된 Gateway와 일치하도록 도구에 `<target>___<tool>` 접두사가 붙은 모든 연결된 MCP 서버(<Link path="guides/connection/agentcore-gateway-mcp">`agentcore-gateway#mcp-connection` 생성기</Link>를 통해 연결됨)를 집계하는 단일 MCP 엔드포인트를 노출하는 로컬 게이트웨이입니다. 이를 실행하면 로컬 게이트웨이와 모든 연결된 MCP 서버가 함께 시작됩니다:
+생성기는 Gateway 프로젝트에 `dev` 대상을 추가하며, 이는 `local-dev.ts`를 실행합니다. 이를 실행하면 로컬 게이트웨이와 모든 연결된 대상이 함께 시작됩니다:
 
 <NxCommands commands={["dev <name>"]} />
+
+<OptionFilter when={{ protocol: 'mcp' }} description="MCP aggregator local gateway">
+로컬 게이트웨이는 배포된 Gateway와 일치하도록 도구에 `<target>___<tool>` 접두사가 붙은 모든 연결된 MCP 서버(<Link path="guides/connection/agentcore-gateway-mcp">`agentcore-gateway#mcp-connection` 생성기</Link>를 통해 연결됨)를 집계하는 단일 MCP 엔드포인트를 노출합니다.
+</OptionFilter>
+
+<OptionFilter when={{ protocol: 'http' }} description="Path-routing proxy local gateway">
+로컬 게이트웨이는 배포된 Gateway의 경로 기반 라우팅과 일치하도록 `/<targetName>/...` 경로를 각 연결된 에이전트의 로컬 서버(<Link path="guides/connection/agentcore-gateway-agent">`agentcore-gateway#agent-connection` 생성기</Link>를 통해 연결됨)로 프록시합니다.
+</OptionFilter>
 
 전체 로컬 개발 스토리는 연결 가이드를 참조하세요.
 
@@ -458,6 +471,20 @@ module "my_gateway" {
     href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-gateway`}
     source="strands"
     sourceBadge="python"
+    target="agentcore"
+  />
+  <ConnectionCard
+    title="AgentCore Gateway to Agent"
+    description="AgentCore Gateway를 런타임 대상으로 에이전트 앞에 두기"
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/agentcore-gateway-agent`}
+    source="agentcore"
+    target="strands"
+  />
+  <ConnectionCard
+    title="React Website to AgentCore Gateway"
+    description="AgentCore Gateway를 통해 React 웹사이트를 에이전트에 연결하기"
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-agentcore-gateway`}
+    source="react"
     target="agentcore"
   />
 </CardGrid>

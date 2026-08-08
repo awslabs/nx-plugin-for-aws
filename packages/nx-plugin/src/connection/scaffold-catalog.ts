@@ -343,10 +343,33 @@ const AGENT_TO_GATEWAY: readonly ConnectionConstraint[] = [
 
 const GATEWAY_TO_MCP: readonly ConnectionConstraint[] = [
   {
+    side: 'source',
+    option: 'protocol',
+    equals: 'mcp',
+    reason:
+      'MCP server targets can only be attached to an mcp-protocol gateway.',
+  },
+  {
     side: 'target',
     option: 'auth',
     equals: 'iam',
     reason: 'A gateway reaches an MCP server target with IAM authentication.',
+  },
+];
+
+const GATEWAY_TO_AGENT: readonly ConnectionConstraint[] = [
+  {
+    side: 'source',
+    option: 'protocol',
+    equals: 'http',
+    reason:
+      'Agent runtime targets can only be attached to an http-protocol gateway.',
+  },
+  {
+    side: 'target',
+    option: 'auth',
+    equals: 'iam',
+    reason: 'The gateway signs requests to its agent targets with IAM.',
   },
 ];
 
@@ -369,9 +392,43 @@ export const CONNECTION_CONSTRAINTS = {
   'py#agent -> py#mcp-server': AGENT_TO_MCP,
   'ts#agent -> agentcore-gateway': AGENT_TO_GATEWAY,
   'py#agent -> agentcore-gateway': AGENT_TO_GATEWAY,
+  'ts#react-website -> agentcore-gateway': [
+    {
+      side: 'target',
+      option: 'protocol',
+      equals: 'http',
+      reason:
+        'A website connects to an http-protocol gateway, which proxies requests to its agent targets.',
+    },
+  ],
+  'agentcore-gateway -> ts#agent': [
+    ...GATEWAY_TO_AGENT,
+    {
+      side: 'target',
+      option: 'protocol',
+      notEquals: 'http',
+      reason:
+        'A TypeScript http agent serves tRPC over WebSocket, which AgentCore Gateway does not support. Use the ag-ui or a2a protocol.',
+    },
+  ],
+  'agentcore-gateway -> py#agent': GATEWAY_TO_AGENT,
   'agentcore-gateway -> ts#mcp-server': GATEWAY_TO_MCP,
   'agentcore-gateway -> py#mcp-server': GATEWAY_TO_MCP,
   'agentcore-gateway -> agentcore-gateway': [
+    {
+      side: 'source',
+      option: 'protocol',
+      equals: 'mcp',
+      reason:
+        'A gateway is aggregated into another as an MCP target, so both must be mcp-protocol gateways.',
+    },
+    {
+      side: 'target',
+      option: 'protocol',
+      equals: 'mcp',
+      reason:
+        'A gateway is aggregated into another as an MCP target, so both must be mcp-protocol gateways.',
+    },
     {
       side: 'target',
       option: 'auth',
@@ -382,6 +439,145 @@ export const CONNECTION_CONSTRAINTS = {
   ],
 } as const satisfies Partial<
   Record<ConnectionKey, readonly ConnectionConstraint[]>
+>;
+
+/**
+ * A generator run automatically after an endpoint is scaffolded, adding something
+ * that endpoint should always have.
+ *
+ * A website is only useful with authentication in front of it, and `ts#website`
+ * does not add it — `ts#website#auth` is a separate follow-up generator. Declared
+ * here so the docs graph builder emits it without hardcoding the pairing.
+ */
+export interface FollowUpGenerator {
+  /** The generator id to run after the endpoint's own. */
+  readonly generator: string;
+  /** Options to pass, beyond the `--project` naming the endpoint. */
+  readonly options?: Readonly<Record<string, string>>;
+  /** What it adds, for the emitted command's comment. */
+  readonly adds: string;
+}
+
+/**
+ * Generators run automatically after an endpoint type is scaffolded, keyed by
+ * endpoint type.
+ */
+export const ENDPOINT_FOLLOW_UPS: Readonly<
+  Record<string, readonly FollowUpGenerator[]>
+> = {
+  'ts#react-website': [
+    {
+      generator: 'ts#website#auth',
+      // `cognitoDomain` is derived from the npm scope and project name when
+      // omitted, so the command stays short.
+      adds: 'Cognito authentication',
+    },
+  ],
+};
+
+/**
+ * An option value a connection works best against, without requiring it.
+ *
+ * Distinct from `CONNECTION_CONSTRAINTS`: a constraint is a rule the connection
+ * generator enforces, whereas a preference is the setting most users want. A
+ * React website can call an `http` agent perfectly well, but AG-UI is the
+ * protocol built for driving a frontend, so that is what a new connection picks.
+ *
+ * A caller applies these only where the user has not chosen the option, so a
+ * preference never overrides a deliberate decision.
+ */
+export interface ConnectionPreference {
+  readonly side: 'source' | 'target';
+  readonly option: string;
+  readonly value: string;
+  /** Why this is the better default, phrased for the user. */
+  readonly reason: string;
+}
+
+/** An agent target only attaches to an http gateway, an MCP server only to an mcp one. */
+const GATEWAY_PREFERS_HTTP: ConnectionPreference = {
+  side: 'source',
+  option: 'protocol',
+  value: 'http',
+  reason:
+    'Agent runtime targets are proxied by an http gateway, so attaching an agent selects that protocol.',
+};
+
+const GATEWAY_PREFERS_MCP: ConnectionPreference = {
+  side: 'source',
+  option: 'protocol',
+  value: 'mcp',
+  reason:
+    'MCP server targets are aggregated by an mcp gateway, so attaching an MCP server selects that protocol.',
+};
+
+/**
+ * Preferred option values per connection. Keyed by `ConnectionKey`, so a key that
+ * no longer names a supported connection is a compile error.
+ */
+export const CONNECTION_PREFERENCES = {
+  'ts#react-website -> ts#agent': [
+    {
+      side: 'target',
+      option: 'protocol',
+      value: 'ag-ui',
+      reason:
+        'AG-UI is the protocol built for driving a frontend, so a website connection selects it.',
+    },
+  ],
+  'ts#react-website -> py#agent': [
+    {
+      side: 'target',
+      option: 'protocol',
+      value: 'ag-ui',
+      reason:
+        'AG-UI is the protocol built for driving a frontend, so a website connection selects it.',
+    },
+  ],
+  // A gateway's protocol is decided by what it fronts, and the two are mutually
+  // exclusive: agent runtime targets need an http gateway, MCP server targets an
+  // mcp one. The gateway schema defaults to mcp, so only the agent side needs a
+  // preference — but both are stated, so whichever target the user attaches
+  // first settles the protocol.
+  'agentcore-gateway -> ts#agent': [GATEWAY_PREFERS_HTTP],
+  'agentcore-gateway -> py#agent': [GATEWAY_PREFERS_HTTP],
+  'agentcore-gateway -> ts#mcp-server': [GATEWAY_PREFERS_MCP],
+  'agentcore-gateway -> py#mcp-server': [GATEWAY_PREFERS_MCP],
+  'ts#react-website -> agentcore-gateway': [
+    {
+      side: 'target',
+      option: 'protocol',
+      value: 'http',
+      reason:
+        'A website reaches a gateway’s agent targets over path-based http routing, so the gateway serves the http protocol.',
+    },
+  ],
+} as const satisfies Partial<
+  Record<ConnectionKey, readonly ConnectionPreference[]>
+>;
+
+/**
+ * Connections that must be generated after another, because the generator reads
+ * state the earlier one records.
+ *
+ * The website→gateway generator publishes a route per agent already attached to
+ * the gateway, reading them from the gateway project's connection metadata. Run
+ * before the gateway→agent connections, it finds none and wires up nothing.
+ *
+ * Keyed by `ConnectionKey`, so a key that no longer names a supported connection
+ * is a compile error.
+ */
+export const CONNECTION_ORDERING = {
+  'ts#react-website -> agentcore-gateway': {
+    after: ['agentcore-gateway -> ts#agent', 'agentcore-gateway -> py#agent'],
+    reason:
+      'The website connection publishes a route per agent attached to the gateway, so the gateway’s agents must be attached first.',
+  },
+} as const satisfies Partial<
+  Record<
+    ConnectionKey,
+    { readonly after: readonly ConnectionKey[]; readonly reason: string }
+  >
 >;
 
 /**

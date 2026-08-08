@@ -7,6 +7,7 @@ import {
   type GeneratorCallback,
   generateFiles,
   joinPathFragments,
+  logger,
   OverwriteStrategy,
   type ProjectConfiguration,
   type Tree,
@@ -44,11 +45,12 @@ import {
 import type { IacMetadata } from '../utils/shared-constructs-constants';
 import type { AgentcoreGatewayGeneratorSchema } from './schema';
 
-// The gateway's local-dev server and Cedar policy rendering need these whatever
-// the protocol or auth, so no entry is conditional.
+// The gateway's local-dev server and Cedar policy rendering need these
+// whatever the auth; only the MCP SDK is protocol-specific (the http local
+// gateway is a plain proxy).
 export const DEPENDENCIES = declareDependencies<AgentCoreGatewayMetadata>()({
   ts: [
-    { name: '@modelcontextprotocol/sdk' },
+    { name: '@modelcontextprotocol/sdk', when: (m) => m.protocol === 'mcp' },
     { name: 'express' },
     { name: '@types/express', dev: true },
     // ejs renders the Cedar policy in the shared gateway construct.
@@ -76,15 +78,25 @@ export const agentcoreGatewayGenerator = async (
   const projectRoot = joinPathFragments(parentDir, subDir);
   const fullyQualifiedName = `${getNpmScopePrefix(tree)}${name}`;
 
-  // Protocol is fixed to mcp — the enum accepts only this value, but we still
-  // persist the resolved value in metadata so connection generators can read
-  // it uniformly (and future additions are non-breaking).
+  // Protocol is mcp (aggregate MCP server targets into one MCP endpoint) or
+  // http (proxy agent runtime targets via path-based routing). Persisted in
+  // metadata so connection generators can validate it.
   const protocol = options.protocol ?? 'mcp';
   // Inbound auth is iam (default) or cognito. Persisted in metadata so
   // connection generators can validate it (agent -> gateway connections
   // require an IAM gateway).
   const auth = options.auth ?? 'iam';
-  const cedarPolicy = options.cedarPolicy ?? true;
+  // Cedar policies authorize MCP tool actions, which an http gateway has none
+  // of — its runtime targets are plain proxied endpoints — so the policy
+  // engine only applies to mcp gateways. cedarPolicy defaults to true in the
+  // schema, so an http gateway quietly drops it rather than requiring
+  // --cedarPolicy=false.
+  if (protocol === 'http' && options.cedarPolicy) {
+    logger.warn(
+      'Cedar policies authorize MCP tool actions, so cedarPolicy is ignored for http-protocol gateways.',
+    );
+  }
+  const cedarPolicy = protocol === 'mcp' && (options.cedarPolicy ?? true);
   const infra = options.infra ?? 'agentcore';
 
   // local-dev.ts is the local gateway: a continuous MCP aggregator chaining
@@ -140,9 +152,15 @@ export const agentcoreGatewayGenerator = async (
   // Scaffold the gateway project: local-dev.ts (+ Cedar policies if requested)
   generateFiles(
     tree,
-    joinPathFragments(import.meta.dirname, 'files', 'project'),
+    joinPathFragments(import.meta.dirname, 'files', 'project', protocol),
     projectRoot,
-    { nameClassName, nameKebabCase: name, port, attachedMcpServers: [] },
+    {
+      nameClassName,
+      nameKebabCase: name,
+      port,
+      attachedMcpServers: [],
+      attachedAgents: [],
+    },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
   if (cedarPolicy) {
@@ -199,6 +217,7 @@ export const agentcoreGatewayGenerator = async (
         projectDirectory: projectRoot,
         cedarPolicy,
         auth,
+        protocol,
         iac,
       },
       DEPENDENCIES,
