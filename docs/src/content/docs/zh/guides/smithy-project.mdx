@@ -43,7 +43,6 @@ Smithy 项目有两种类型：
     - src
       - main.smithy 您的共享形状定义
     - smithy-build.json Smithy 构建配置
-    - build.Dockerfile 构建和验证模型
     - project.json 项目配置和构建目标
 
 </FileTree>
@@ -64,7 +63,7 @@ structure Customer {
 }
 ```
 
-由于形状库没有服务，其 `smithy-build.json` 不配置代码生成 — 构建它会验证模型并将其组装成位于 `dist/<my-shapes>/build/model/model.json` 的单个 JSON 模型文件。
+由于形状库没有服务，其 `smithy-build.json` 不配置代码生成 — 构建它会验证模型并将其组装成位于 `dist/<my-shapes>/build/model.json` 的单个 JSON 模型文件。
 
 </OptionFilter>
 
@@ -80,7 +79,7 @@ structure Customer {
       - operations
         - echo.smithy 示例操作
     - smithy-build.json Smithy 构建配置，包括代码生成
-    - build.Dockerfile 构建模型、OpenAPI 规范和 TypeScript Server SDK
+    - ssdk.rolldown.config.mjs 打包生成的 TypeScript Server SDK
     - project.json 项目配置和构建目标
 
 </FileTree>
@@ -114,70 +113,28 @@ Smithy 项目使用 [Smithy CLI](https://smithy.io/2.0/guides/smithy-cli/index.h
 
 <NxCommands commands={['build my-shapes']} />
 
-在 macOS 和 Linux 上，CLI 由 [mise](https://mise.jdx.dev/) 解析，构建会按需获取它，因此无需安装 — 它会在您第一次构建时下载并缓存固定版本。
-
-### 在 Windows 上构建
-
-`mise` 没有向 npm 发布 Windows 包，因此在 Windows 上，Smithy CLI 是您需要自行安装的先决条件。按照 [Smithy CLI 安装指南](https://smithy.io/2.0/guides/smithy-cli/cli_installation.html)一次性安装它（例如 `winget install smithy` 或 `scoop install smithy`），并确保 `smithy` 在您的 `PATH` 中。在 Windows 上生成的 Smithy 项目直接运行 `smithy`，而不是通过 `mise`。
-
-:::caution[升级 CLI]
-由于 CLI 是全局安装而不是固定在工作区中，因此使用 `nx migrate` 升级工作区**不会**升级它。当迁移将 Smithy 依赖项向前移动时，请自行将全局 Smithy CLI 升级到匹配的版本 — CLI 无法加载针对较新 `smithy-model` 构建的模型。
-:::
-
-### 直接使用 Smithy CLI
-
-默认情况下，macOS 和 Linux 通过 `mise` 解析 CLI，而 Windows 使用全局安装的 CLI，但您可以通过编辑项目的 `project.json` 中 `compile` 目标的命令，在任何平台上选择任一方法。
-
-要使用全局安装的 Smithy CLI 而不是 `mise`，请将 `mise` 前缀替换为单独的 `smithy`：
-
-```json title="packages/my-shapes/project.json" del={5} ins={6}
-{
-  "targets": {
-    "compile": {
-      "options": {
-        "commands": ["... npx -y mise@<version> exec smithy@<version> -- smithy build ..."]
-        "commands": ["... smithy build ..."]
-      }
-    }
-  }
-}
-```
-
-要恢复使用 `mise` 解析 CLI，请恢复 `npx -y mise@<version> exec smithy@<version> --` 前缀。
-
-:::caution
-当您直接调用 CLI 时，其版本不再固定在工作区中，因此 `nx migrate` 无法将其向前移动 — 在升级工作区时独立升级您的全局 Smithy CLI。
-:::
+在 macOS 和 Linux 上，CLI 由 [mise](https://mise.jdx.dev/) 解析，构建会按需获取它，因此无需安装 — 它会在您第一次构建时下载并缓存固定版本。在 Windows 上，它是您需要自行安装的先决条件 — 请参阅<Link path="guides/ts-smithy-api#building-on-windows">在 Windows 上构建</Link>。
 
 ## 依赖形状库
 
-构建形状库会将组装的模型写入 `dist/<my-shapes>/build/model/model.json`。这个单一文件包含库定义的每个形状，以及它依赖的任何形状，因此消费者只需声明它直接引用的库。
+构建形状库会将组装的模型写入 `dist/<my-shapes>/build/model.json`。这个单一文件包含库定义的每个形状，以及它依赖的任何形状，因此消费者只需声明它直接引用的库。
 
-要从另一个 Smithy 项目依赖形状库，需要对消费项目进行三处更改：
+要从另一个 Smithy 项目依赖形状库，需要对消费项目进行两处更改：
 
 <Steps>
 
-1. Smithy 项目在容器内构建，构建时会将工作区根目录作为命名构建上下文提供。在消费项目的 `build.Dockerfile` 中添加 `COPY`，与复制其自身源代码的位置并列：
-
-   ```dockerfile ins={4}
-   # Copy project files
-   COPY smithy-build.json .
-   COPY src src
-   COPY --from=workspace dist/packages/my-shapes/build/model/model.json deps/my-shapes.json
-   ```
-
-2. 将复制的文件添加到消费项目的 `smithy-build.json` 中的 `imports`：
+1. 将库的构建模型添加到消费项目的 `smithy-build.json` 中的 `imports`。路径相对于该文件，因此 `../` 段的数量与消费项目的嵌套深度相匹配 — 对于下面的 `packages/my-api/model` 是三个：
 
    ```json ins={4}
    {
      "version": "1.0",
      "sources": ["src/"],
-     "imports": ["deps/my-shapes.json"],
+     "imports": ["../../../dist/packages/my-shapes/build/model.json"],
      ...
    }
    ```
 
-3. 将库的 `build` 目标添加为消费项目的 `compile` 目标的依赖项（在其 `project.json` 中），以便在消费者构建之前模型已存在：
+2. 将库的 `build` 目标添加为消费项目的 `compile` 目标的依赖项（在其 `project.json` 中），以便在消费者构建之前模型已存在：
 
    ```json ins={4}
    {
