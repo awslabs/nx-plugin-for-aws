@@ -211,6 +211,14 @@ describe('ts#astro-docs generator', () => {
     expect(astroConfig).not.toContain('starlight-blog');
     expect(astroConfig).not.toContain('starlightBlog(');
 
+    const contentConfig = tree.read('docs/src/content.config.ts', 'utf-8');
+    expect(contentConfig).not.toContain('starlight-blog');
+    expect(contentConfig).not.toContain('blogSchema');
+    expect(contentConfig).toMatchSnapshot('content.config.ts');
+
+    const index = tree.read('docs/src/content/docs/en/index.mdx', 'utf-8');
+    expect(index).not.toContain('Blog');
+
     const packageJson = readJson(tree, 'package.json');
     const deps = {
       ...(packageJson.dependencies ?? {}),
