@@ -11,11 +11,11 @@ terraform {
       source  = "hashicorp/external"
       version = "<%- externalProviderVersion %>"
     }
+<%_ } _%>
     time = {
       source  = "hashicorp/time"
       version = "<%- timeProviderVersion %>"
     }
-<%_ } _%>
     random = {
       source  = "hashicorp/random"
       version = "<%- randomProviderVersion %>"
@@ -168,6 +168,22 @@ resource "aws_iam_role_policy" "gateway_role_policy" {
     Statement = var.additional_iam_policy_statements
   })
 }
+
+# IAM is eventually consistent, and the gateway assumes this role to reach its
+# targets — an MCP target fetches tools at creation time. Without this wait the
+# fetch intermittently runs before the policy above has propagated and the
+# target lands in FAILED with an authorization error.
+resource "time_sleep" "gateway_role_policy_propagation" {
+  count = length(var.additional_iam_policy_statements) > 0 ? 1 : 0
+
+  depends_on = [aws_iam_role_policy.gateway_role_policy]
+
+  create_duration = "30s"
+
+  triggers = {
+    policy = aws_iam_role_policy.gateway_role_policy[0].policy
+  }
+}
 <%_ } _%>
 <%_ if (cedarPolicy) { _%>
 
@@ -215,9 +231,9 @@ resource "aws_bedrockagentcore_gateway" "this" {
     arn  = aws_bedrockagentcore_policy_engine.this.policy_engine_arn
     mode = "ENFORCE"
   }
+<%_ } _%>
 
   depends_on = [time_sleep.gateway_role_policy_propagation]
-<%_ } _%>
 }
 
 # WAFv2 protection for the gateway. AgentCore Gateway requires a REGIONAL web

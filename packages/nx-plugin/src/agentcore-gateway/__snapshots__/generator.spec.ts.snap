@@ -9,6 +9,10 @@ exports[`agentcore-gateway generator > protocol: http > omits protocol_type from
       source  = "hashicorp/aws"
       version = "6.57.1"
     }
+    time = {
+      source  = "hashicorp/time"
+      version = "0.14.0"
+    }
     random = {
       source  = "hashicorp/random"
       version = "3.9.0"
@@ -85,6 +89,22 @@ resource "aws_iam_role_policy" "gateway_role_policy" {
   })
 }
 
+# IAM is eventually consistent, and the gateway assumes this role to reach its
+# targets — an MCP target fetches tools at creation time. Without this wait the
+# fetch intermittently runs before the policy above has propagated and the
+# target lands in FAILED with an authorization error.
+resource "time_sleep" "gateway_role_policy_propagation" {
+  count = length(var.additional_iam_policy_statements) > 0 ? 1 : 0
+
+  depends_on = [aws_iam_role_policy.gateway_role_policy]
+
+  create_duration = "30s"
+
+  triggers = {
+    policy = aws_iam_role_policy.gateway_role_policy[0].policy
+  }
+}
+
 resource "aws_bedrockagentcore_gateway" "this" {
   # Cap the name so the 11-char service suffix keeps the gateway id within its
   # 50-char limit (30 prefix + "-<8 hex>" + 11 = 50).
@@ -97,6 +117,8 @@ resource "aws_bedrockagentcore_gateway" "this" {
   # (\`/<targetName>/invocations\`).
 
   authorizer_type = "AWS_IAM"
+
+  depends_on = [time_sleep.gateway_role_policy_propagation]
 }
 
 # WAFv2 protection for the gateway. AgentCore Gateway requires a REGIONAL web
