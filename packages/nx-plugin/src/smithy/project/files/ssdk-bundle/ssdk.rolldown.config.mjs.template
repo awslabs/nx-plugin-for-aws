@@ -48,21 +48,18 @@ const re2WasmPlugin = () => ({
 const outDir = path.resolve('dist', '<%- projectRoot %>', 'build/ssdk');
 
 /**
- * The Server SDK's own TypeScript compiles it before this runs, so both passes
- * bundle emitted JavaScript and declarations rather than the generated sources —
- * see the compile target's commands for why.
+ * Bundle the Server SDK straight from the generated TypeScript sources, emitting
+ * the module and its declarations in one pass.
+ *
+ * The SDK has an import cycle between an operation and its service, and merges an
+ * `interface` with a `namespace` and a `class`. Compiling it with `tsc` first
+ * mis-resolved that on a case-insensitive filesystem — the emitted module imported
+ * a name from itself — so rolldown resolves the sources directly instead, which it
+ * does consistently across platforms.
  */
-export default [
-  {
-    input: path.join(ssdkDir, 'dist-es/index.js'),
-    plugins: [re2WasmPlugin(), esmShim()],
-    output: [{ dir: outDir, format: 'es' }],
-    platform: 'node',
-  },
-  {
-    input: path.join(ssdkDir, 'dist-types/index.d.ts'),
-    plugins: [dts({ resolve: true, emitDtsOnly: true })],
-    output: [{ dir: outDir, format: 'es' }],
-    platform: 'node',
-  },
-];
+export default {
+  input: path.join(ssdkDir, 'src/index.ts'),
+  plugins: [re2WasmPlugin(), esmShim(), dts({ resolve: true })],
+  output: [{ dir: outDir, format: 'es' }],
+  platform: 'node',
+};

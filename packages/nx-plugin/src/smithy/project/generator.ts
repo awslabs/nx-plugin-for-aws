@@ -138,27 +138,12 @@ export const smithyGenerateSsdkCommands = (): string[] => [
   // `npm` regardless of the workspace's package manager: this installs a generated
   // package under `dist` that is not a workspace member, and npm ships with Node so
   // it is always present. It reads the user's `.npmrc`, so a private registry still
-  // applies. `--include=dev` because the compiler below is among the generated
+  // applies. `--include=dev` because the bundler resolves types from the generated
   // package's devDependencies, which `NODE_ENV=production` would otherwise omit.
   `npm install --prefix ${SSDK_CODEGEN_DIR} --include=dev --ignore-scripts --no-audit --no-fund`,
-  // The Server SDK is compiled by its own TypeScript before it is bundled, using
-  // the config and compiler the codegen pinned. This keeps the bundler off the
-  // sources: the SDK merges an `interface` with a `namespace`, and it also has an
-  // import cycle between an operation and its protocol, which together make the
-  // namespace's emitted assignment look like a write to an import
-  // (ASSIGN_TO_IMPORT) depending on which side of the cycle the bundler enters.
-  // `tsc` resolves the merge to a plain local binding, so the cycle stops
-  // mattering. `-p` resolves the config's paths relative to itself, so both run
-  // from the workspace root.
-  //
-  // `--noCheck` on both: the codegen's own config already sets it for the JS pass,
-  // and the declaration pass needs it too. On a case-insensitive filesystem the
-  // operation↔service import cycle makes tsc conflate an imported name with the
-  // local declaration it is merged with (TS2440/TS2395); the emit is unaffected —
-  // it still writes the same declarations — so the check is skipped rather than
-  // relied on, the same way the JS pass does.
-  `node ${SSDK_CODEGEN_DIR}/node_modules/typescript/bin/tsc -p ${SSDK_CODEGEN_DIR}/tsconfig.es.json`,
-  `node ${SSDK_CODEGEN_DIR}/node_modules/typescript/bin/tsc -p ${SSDK_CODEGEN_DIR}/tsconfig.types.json --noCheck`,
+  // Bundled straight from the generated TypeScript sources, emitting the module and
+  // its declarations together — see ssdk.rolldown.config.mjs for why the sources
+  // rather than a `tsc` pre-pass.
   `rolldown -c {projectRoot}/ssdk.rolldown.config.mjs`,
 ];
 
