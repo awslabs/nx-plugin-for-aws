@@ -150,8 +150,15 @@ export const smithyGenerateSsdkCommands = (): string[] => [
   // `tsc` resolves the merge to a plain local binding, so the cycle stops
   // mattering. `-p` resolves the config's paths relative to itself, so both run
   // from the workspace root.
+  //
+  // `--noCheck` on both: the codegen's own config already sets it for the JS pass,
+  // and the declaration pass needs it too. On a case-insensitive filesystem the
+  // operation↔service import cycle makes tsc conflate an imported name with the
+  // local declaration it is merged with (TS2440/TS2395); the emit is unaffected —
+  // it still writes the same declarations — so the check is skipped rather than
+  // relied on, the same way the JS pass does.
   `node ${SSDK_CODEGEN_DIR}/node_modules/typescript/bin/tsc -p ${SSDK_CODEGEN_DIR}/tsconfig.es.json`,
-  `node ${SSDK_CODEGEN_DIR}/node_modules/typescript/bin/tsc -p ${SSDK_CODEGEN_DIR}/tsconfig.types.json`,
+  `node ${SSDK_CODEGEN_DIR}/node_modules/typescript/bin/tsc -p ${SSDK_CODEGEN_DIR}/tsconfig.types.json --noCheck`,
   `rolldown -c {projectRoot}/ssdk.rolldown.config.mjs`,
 ];
 

@@ -75,7 +75,7 @@ describe('smithyProjectGenerator', () => {
     expect(projectConfig.targets['generate-ssdk'].options.commands).toEqual([
       'npm install --prefix dist/{projectRoot}/smithy/source/typescript-ssdk-codegen --include=dev --ignore-scripts --no-audit --no-fund',
       'node dist/{projectRoot}/smithy/source/typescript-ssdk-codegen/node_modules/typescript/bin/tsc -p dist/{projectRoot}/smithy/source/typescript-ssdk-codegen/tsconfig.es.json',
-      'node dist/{projectRoot}/smithy/source/typescript-ssdk-codegen/node_modules/typescript/bin/tsc -p dist/{projectRoot}/smithy/source/typescript-ssdk-codegen/tsconfig.types.json',
+      'node dist/{projectRoot}/smithy/source/typescript-ssdk-codegen/node_modules/typescript/bin/tsc -p dist/{projectRoot}/smithy/source/typescript-ssdk-codegen/tsconfig.types.json --noCheck',
       'rolldown -c {projectRoot}/ssdk.rolldown.config.mjs',
     ]);
     expect(projectConfig.targets['generate-ssdk'].outputs).toEqual([
