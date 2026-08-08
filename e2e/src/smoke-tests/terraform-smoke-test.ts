@@ -17,6 +17,15 @@ import { runTerraformPlanTest } from './terraform-plan-test';
  * that `terraform` and `terraform-deploy` smoke tests both verify the same
  * generators, options and connection permutations under the Terraform IaC
  * provider.
+ *
+ * The MCP gateways are scaffolded without a Cedar policy engine: AgentCore
+ * injects a server-managed `metadata_configuration.allowed_request_headers`
+ * on targets of a policy-engine gateway, and the AWS provider declares that
+ * block `Optional` rather than `Computed`, so every apply fails the post-apply
+ * consistency check. The header is rejected if declared explicitly, so there
+ * is no configuration that reconciles it. Cedar stays covered by `cdk-deploy`,
+ * which CloudFormation applies without an equivalent check. Restore the policy
+ * engine here once the provider marks the block `Computed`.
  */
 export const runTerraformSmokeTest = async (
   dir: string,
@@ -52,7 +61,7 @@ export const runTerraformSmokeTest = async (
     opts,
   );
 
-  await runGeneratorMatrix(opts);
+  await runGeneratorMatrix(opts, { cedarPolicy: false });
 
   // Since the smoke tests don't run in a git repo, we need to exclude some
   // patterns for the license sync.

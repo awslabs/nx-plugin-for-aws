@@ -671,6 +671,11 @@ describe('agentcore-gateway generator', () => {
       expect(module).not.toContain('policy_engine');
       expect(module).not.toContain('render-cedar');
       expect(module).toContain('aws_bedrockagentcore_gateway');
+      // policy_dependencies orders Cedar policies against target registration,
+      // so it goes with the policy engine; tool_dependencies gates gateway_url
+      // on target readiness and applies to any mcp gateway.
+      expect(module).not.toContain('policy_dependencies');
+      expect(module).toContain('tool_dependencies');
       expect(
         tree.exists(
           'packages/common/terraform/src/app/gateways/my-gateway/render-cedar.cjs',
