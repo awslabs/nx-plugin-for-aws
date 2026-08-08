@@ -9,6 +9,7 @@ import {
   type Tree,
 } from '@nx/devkit';
 import { expectHasMetricTags } from '../../utils/metrics.spec';
+import { toKebabCase } from '../../utils/names';
 import {
   createTreeUsingTsSolutionSetup,
   snapshotTreeDir,
@@ -85,6 +86,14 @@ describe('infra generator', () => {
       options: {
         cwd: '{projectRoot}',
         command: 'cdk deploy --require-approval=never',
+      },
+      dependsOn: ['^build', 'compile'],
+    });
+    expect(config.targets['deploy-sandbox']).toMatchObject({
+      executor: 'nx:run-commands',
+      options: {
+        cwd: '{projectRoot}',
+        command: 'cdk deploy --require-approval=never "proj-test-sandbox/*"',
       },
       dependsOn: ['^build', 'compile'],
     });
@@ -311,6 +320,71 @@ describe('infra generator', () => {
     expect(mainTs).toContain('process.env.CDK_DEFAULT_REGION');
   });
 
+  it('should invite further stages below the sandbox stage in main.ts', async () => {
+    await tsInfraGenerator(tree, options);
+    const mainTs = tree.read('packages/test/src/main.ts').toString();
+    expect(mainTs).toContain(
+      '// Define other instances of stages, such as beta and prod, below',
+    );
+    // The comment sits after the sandbox stage and before app.synth().
+    expect(
+      mainTs.indexOf('// Define other instances of stages'),
+    ).toBeGreaterThan(
+      mainTs.indexOf("new ApplicationStage(app, 'proj-test-sandbox'"),
+    );
+    expect(mainTs.indexOf('// Define other instances of stages')).toBeLessThan(
+      mainTs.indexOf('app.synth()'),
+    );
+  });
+
+  describe('deploy-sandbox target', () => {
+    // The stage pattern must match the stage main.ts instantiates, otherwise
+    // cdk deploys nothing. Derived from the scope-prefixed project name.
+    it.each([
+      { name: 'test', subDirectory: undefined, stage: 'proj-test-sandbox' },
+      { name: 'infra', subDirectory: undefined, stage: 'proj-infra-sandbox' },
+      {
+        name: 'myInfra',
+        subDirectory: undefined,
+        stage: 'proj-my-infra-sandbox',
+      },
+      { name: 'test', subDirectory: 'nested', stage: 'proj-test-sandbox' },
+    ])(
+      'should target the stage main.ts declares for $name in $subDirectory',
+      async ({ name, subDirectory, stage }) => {
+        await tsInfraGenerator(tree, { ...options, name, subDirectory });
+        // The project name is the kebab-cased name under the workspace scope.
+        const config = readProjectConfiguration(
+          tree,
+          `@proj/${toKebabCase(name)}`,
+        );
+        const mainTs = tree.read(`${config.root}/src/main.ts`).toString();
+
+        expect(mainTs).toContain(`new ApplicationStage(app, '${stage}'`);
+        expect(config.targets['deploy-sandbox'].options.command).toBe(
+          `cdk deploy --require-approval=never "${stage}/*"`,
+        );
+      },
+    );
+
+    it('should quote the stage pattern so the shell does not glob it', async () => {
+      await tsInfraGenerator(tree, options);
+      const config = readProjectConfiguration(tree, '@proj/test');
+      expect(config.targets['deploy-sandbox'].options.command).toContain(
+        '"proj-test-sandbox/*"',
+      );
+    });
+
+    it('should build before deploying, like the deploy target', async () => {
+      await tsInfraGenerator(tree, options);
+      const config = readProjectConfiguration(tree, '@proj/test');
+      expect(config.targets['deploy-sandbox'].dependsOn).toEqual([
+        '^build',
+        'compile',
+      ]);
+    });
+  });
+
   it('should not add infra-config tsconfig reference by default', async () => {
     await tsInfraGenerator(tree, options);
     const tsConfig = readJson(tree, 'packages/test/tsconfig.lib.json');
@@ -335,6 +409,20 @@ describe('infra generator', () => {
       expect(config.targets.destroy.options.command).toBe(
         'tsx packages/common/scripts/src/infra/infra-destroy.ts packages/test',
       );
+    });
+
+    it('should pass the sandbox stage to infra-deploy for deploy-sandbox', async () => {
+      await tsInfraGenerator(tree, stageConfigOptions);
+      const config = readProjectConfiguration(tree, '@proj/test');
+      // The stage is the first positional arg after the project path, which is
+      // where infra-deploy looks it up in stages.config.ts.
+      expect(config.targets['deploy-sandbox'].options.command).toBe(
+        'tsx packages/common/scripts/src/infra/infra-deploy.ts packages/test "proj-test-sandbox/*"',
+      );
+      expect(config.targets['deploy-sandbox'].dependsOn).toEqual([
+        '^build',
+        'compile',
+      ]);
     });
 
     it('should generate infra-config package with stages types and config', async () => {
