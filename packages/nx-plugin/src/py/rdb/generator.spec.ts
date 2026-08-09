@@ -63,6 +63,13 @@ describe('py#rdb generator', () => {
     expect(pyproject).toContain(withPyVersions(DEPENDENCIES, ['alembic'])[0]);
     expect(pyproject).toContain(withPyVersions(DEPENDENCIES, ['asyncpg'])[0]);
     expect(pyproject).not.toContain('psycopg');
+
+    // A wildcard import raises F403, not F401, so suppressing F401 as well is
+    // dead — and ruff's own RUF100 rule reports it as unused.
+    expect(tree.read('packages/db/migrations/env.py', 'utf-8')).toContain(
+      'import *  # noqa: F403',
+    );
+
     expect(projectConfig.targets['bundle-arm']).toEqual({
       cache: true,
       inputs: ['default', '^production'],
