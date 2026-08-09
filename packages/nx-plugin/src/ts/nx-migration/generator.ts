@@ -20,6 +20,7 @@ import {
   LATEST_MIGRATIONS_DIR,
   migrationKey,
 } from '../../utils/migration-versions';
+import { isEsmWorkspace } from '../../utils/module-format';
 import { kebabCase } from '../../utils/names';
 import {
   getGeneratorInfo,
@@ -104,6 +105,10 @@ export const tsNxMigrationGenerator = async (
   const testImportPath = isNxPluginForAws
     ? '../../../utils/test'
     : `${PackageJson.name}/sdk/utils/test`;
+  // A generated workspace resolves with `nodenext`, which needs the explicit
+  // extension on the spec's sibling import; this repo resolves with `bundler`,
+  // which takes it extensionless.
+  const esm = !isNxPluginForAws && isEsmWorkspace(tree);
 
   // One template set covers all kinds — scaffold it, then prune what this kind
   // doesn't use.
@@ -111,7 +116,14 @@ export const tsNxMigrationGenerator = async (
     tree,
     joinPathFragments(import.meta.dirname, 'files'),
     migrationDir,
-    { name, description, isHybrid, formatImportPath, testImportPath },
+    {
+      name,
+      description,
+      isHybrid,
+      formatImportPath,
+      testImportPath,
+      esm,
+    },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
   if (!hasImplementation) {
