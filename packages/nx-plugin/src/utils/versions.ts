@@ -95,7 +95,7 @@ export const TS_VERSIONS = {
   '@vitest/coverage-v8': '4.1.10',
   '@vitest/ui': '4.1.10',
   '@astrojs/react': '6.0.2',
-  '@astrojs/starlight': '0.41.7',
+  '@astrojs/starlight': '0.41.3',
   astro: '7.2.0',
   aws4fetch: '1.0.20',
   'aws-cdk': '2.1135.1',
@@ -283,7 +283,7 @@ export const JAVA_VERSIONS = {
   'software.amazon.smithy:smithy-aws-traits': '1.72.1',
   'software.amazon.smithy:smithy-validation-model': '1.72.1',
   'software.amazon.smithy:smithy-openapi': '1.72.1',
-  'software.amazon.smithy.typescript:smithy-aws-typescript-codegen': '0.51.0',
+  'software.amazon.smithy.typescript:smithy-aws-typescript-codegen': '0.50.0',
 } as const;
 export type IJavaVersion = keyof typeof JAVA_VERSIONS;
 
