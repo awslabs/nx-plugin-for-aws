@@ -324,7 +324,9 @@ export default defineConfig([
       );
 
       expect(configContent).toContain("format: 'cjs'");
-      expect(configContent).toContain('inlineDynamicImports: true');
+      // A single-file bundle, which rolldown asks for as `codeSplitting: false`
+      // — the `inlineDynamicImports` spelling is deprecated and warns.
+      expect(configContent).toContain('codeSplitting: false');
     });
 
     it('should work with nested project structure', async () => {

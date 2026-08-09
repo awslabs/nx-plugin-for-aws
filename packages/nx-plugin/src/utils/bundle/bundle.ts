@@ -198,7 +198,7 @@ export const addTypeScriptBundleTarget = async <
   const entry = `{
     tsconfig: 'tsconfig.lib.json',
     input: '${opts.targetFilePath}',
-    output: { file: '${outputFile}', format: 'cjs', inlineDynamicImports: true },
+    output: { file: '${outputFile}', format: 'cjs', codeSplitting: false },
     platform: '${opts.platform ?? 'node'}',
     ${external ? `external: [${external}],` : ''}
   }`;
