@@ -46,6 +46,22 @@ describe('vitest utils', () => {
     expect(content).toContain('passWithNoTests: true');
   });
 
+  it('should resolve the config root from import.meta.dirname', async () => {
+    await configureVitest(
+      tree,
+      {
+        dir: 'test',
+        fullyQualifiedName: 'test',
+      },
+      declaration,
+    );
+    const content = tree.read('test/vitest.config.mts', 'utf8');
+    // `@nx/js` writes `root: __dirname`, which Vite warns about under
+    // `configLoader: 'native'` and will reject once that becomes the default.
+    expect(content).toContain('root: import.meta.dirname');
+    expect(content).not.toContain('root: __dirname');
+  });
+
   it('should generate a valid vitest.config.mts without a double comma', () => {
     const content = tree.read('test/vitest.config.mts', 'utf8');
     // Guards against the grit transform emitting `},,` when the matched

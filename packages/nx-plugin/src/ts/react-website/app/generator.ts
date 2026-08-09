@@ -519,7 +519,7 @@ export async function tsReactWebsiteGenerator(
       await applyGritQL(
         tree,
         viteConfigPath,
-        "`plugins: [$items]` => `plugins: [tanstackRouter({ routesDirectory: resolve(__dirname, 'src/routes'), generatedRouteTree: resolve(__dirname, 'src/routeTree.gen.ts') }), $items]` where { $items <: within `defineConfig($_)`, $items <: not contains `tanstackRouter` }",
+        "`plugins: [$items]` => `plugins: [tanstackRouter({ routesDirectory: resolve(import.meta.dirname, 'src/routes'), generatedRouteTree: resolve(import.meta.dirname, 'src/routeTree.gen.ts') }), $items]` where { $items <: within `defineConfig($_)`, $items <: not contains `tanstackRouter` }",
       );
     }
 
