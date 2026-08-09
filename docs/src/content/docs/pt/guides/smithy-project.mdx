@@ -43,7 +43,6 @@ Se você deseja uma API com uma implementação, use o gerador <Link path="guide
     - src
       - main.smithy Suas definições de formas compartilhadas
     - smithy-build.json Configuração de build do Smithy
-    - build.Dockerfile Constrói e valida o modelo
     - project.json Configuração do projeto e alvos de build
 
 </FileTree>
@@ -64,7 +63,7 @@ structure Customer {
 }
 ```
 
-Como uma biblioteca de formas não tem serviço, seu `smithy-build.json` não configura geração de código — construí-la valida o modelo e o monta em um único arquivo de modelo JSON em `dist/<my-shapes>/build/model/model.json`.
+Como uma biblioteca de formas não tem serviço, seu `smithy-build.json` não configura geração de código — construí-la valida o modelo e o monta em um único arquivo de modelo JSON em `dist/<my-shapes>/build/model.json`.
 
 </OptionFilter>
 
@@ -80,7 +79,7 @@ Como uma biblioteca de formas não tem serviço, seu `smithy-build.json` não co
       - operations
         - echo.smithy Uma operação de exemplo
     - smithy-build.json Configuração de build do Smithy, incluindo geração de código
-    - build.Dockerfile Constrói o modelo, especificação OpenAPI e TypeScript Server SDK
+    - ssdk.rolldown.config.mjs Empacota o TypeScript Server SDK gerado
     - project.json Configuração do projeto e alvos de build
 
 </FileTree>
@@ -110,39 +109,32 @@ Construir um projeto de serviço gera uma especificação OpenAPI e um TypeScrip
 
 ## Construção
 
-Projetos Smithy são construídos usando [Docker](https://www.docker.com/), que executa a [Smithy CLI](https://smithy.io/2.0/guides/smithy-cli/index.html) para validar seu modelo:
+Projetos Smithy são construídos com a [Smithy CLI](https://smithy.io/2.0/guides/smithy-cli/index.html), que valida seu modelo:
 
 <NxCommands commands={['build my-shapes']} />
 
+No macOS e Linux, a CLI é resolvida pelo [mise](https://mise.jdx.dev/), que o build busca sob demanda, então não há nada para instalar — ele baixa e armazena em cache a versão fixada na primeira vez que você constrói. No Windows, é um pré-requisito que você instala por conta própria — veja <Link path="guides/ts-smithy-api#building-on-windows">Construindo no Windows</Link>.
+
 ## Dependendo de uma Shape Library
 
-Construir uma biblioteca de formas escreve um modelo montado em `dist/<my-shapes>/build/model/model.json`. Este único arquivo contém todas as formas que a biblioteca define, junto com quaisquer das quais ela depende, então um consumidor só precisa declarar as bibliotecas que referencia diretamente.
+Construir uma biblioteca de formas escreve um modelo montado em `dist/<my-shapes>/build/model.json`. Este único arquivo contém todas as formas que a biblioteca define, junto com quaisquer das quais ela depende, então um consumidor só precisa declarar as bibliotecas que referencia diretamente.
 
-Para depender de uma biblioteca de formas de outro projeto Smithy, faça três alterações no projeto consumidor:
+Para depender de uma biblioteca de formas de outro projeto Smithy, faça duas alterações no projeto consumidor:
 
 <Steps>
 
-1. Projetos Smithy são construídos dentro de um contêiner, e o build recebe a raiz do workspace como um contexto de build nomeado. Adicione um `COPY` ao `build.Dockerfile` do projeto consumidor, ao lado de onde suas próprias fontes são copiadas:
-
-   ```dockerfile ins={4}
-   # Copy project files
-   COPY smithy-build.json .
-   COPY src src
-   COPY --from=workspace dist/packages/my-shapes/build/model/model.json deps/my-shapes.json
-   ```
-
-2. Adicione o arquivo copiado a `imports` no `smithy-build.json` do projeto consumidor:
+1. Adicione o modelo construído da biblioteca a `imports` no `smithy-build.json` do projeto consumidor. Os caminhos são relativos a esse arquivo, então o número de segmentos `../` corresponde à profundidade de aninhamento do projeto consumidor — três para `packages/my-api/model` abaixo:
 
    ```json ins={4}
    {
      "version": "1.0",
      "sources": ["src/"],
-     "imports": ["deps/my-shapes.json"],
+     "imports": ["../../../dist/packages/my-shapes/build/model.json"],
      ...
    }
    ```
 
-3. Adicione o alvo `build` da biblioteca como uma dependência do alvo `compile` do projeto consumidor em seu `project.json`, para que o modelo exista antes que o consumidor seja construído:
+2. Adicione o alvo `build` da biblioteca como uma dependência do alvo `compile` do projeto consumidor em seu `project.json`, para que o modelo exista antes que o consumidor seja construído:
 
    ```json ins={4}
    {

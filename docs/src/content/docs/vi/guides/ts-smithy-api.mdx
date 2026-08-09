@@ -49,7 +49,7 @@ Trình tạo tạo hai dự án liên quan trong thư mục `<directory>/<api-na
   - package.json Tệp kê khai dự án định nghĩa tên package và các dependencies của dự án
   - project.json Cấu hình dự án và build targets
   - smithy-build.json Cấu hình build Smithy
-  - build.Dockerfile Cấu hình Docker để build các artifact Smithy
+  - ssdk.rolldown.config.mjs Đóng gói TypeScript Server SDK được tạo
   - src/
     - main.smithy Định nghĩa dịch vụ chính
     - operations/
@@ -576,9 +576,11 @@ export const Echo: EchoOperation<ServiceContext> = async (input, ctx) => {
 
 ## Building và Tạo Mã
 
-Dự án mô hình Smithy sử dụng [Docker](https://www.docker.com/) để build các artifact Smithy và tạo TypeScript Server SDK:
+Dự án mô hình Smithy sử dụng [Smithy CLI](https://smithy.io/2.0/guides/smithy-cli/index.html) để build các artifact Smithy và tạo TypeScript Server SDK:
 
 <NxCommands commands={['build <model-project>']} />
+
+Trên macOS và Linux, CLI được giải quyết bởi [mise](https://mise.jdx.dev/), mà quá trình build tải về theo yêu cầu, vì vậy không có gì cần cài đặt — nó tải xuống và lưu vào bộ nhớ cache phiên bản đã được ghim lần đầu tiên bạn build.
 
 Quá trình này:
 
@@ -590,6 +592,39 @@ Quá trình này:
 Dự án backend tự động sao chép SDK được tạo trong quá trình biên dịch:
 
 <NxCommands commands={['copy-ssdk <backend-project>']} />
+
+### Building on Windows
+
+`mise` không xuất bản gói Windows lên npm, vì vậy trên Windows, Smithy CLI là một điều kiện tiên quyết mà bạn tự cài đặt. Cài đặt nó một lần theo [hướng dẫn cài đặt Smithy CLI](https://smithy.io/2.0/guides/smithy-cli/cli_installation.html) (ví dụ `winget install smithy` hoặc `scoop install smithy`), và đảm bảo `smithy` nằm trong `PATH` của bạn. Một dự án Smithy được tạo trên Windows chạy `smithy` trực tiếp thay vì thông qua `mise`.
+
+:::caution[Nâng cấp CLI]
+Vì CLI được cài đặt toàn cục thay vì được ghim trong workspace của bạn, việc nâng cấp workspace với `nx migrate` **không** nâng cấp nó. Khi một migration di chuyển các dependency Smithy về phía trước, hãy tự nâng cấp Smithy CLI toàn cục của bạn lên phiên bản phù hợp.
+:::
+
+Ngoài ra, phát triển bên trong [WSL](https://learn.microsoft.com/en-us/windows/wsl/install), nơi quá trình build chạy đường dẫn Linux và `mise` giải quyết CLI cho bạn — không cần cài đặt gì.
+
+Một dự án được tạo trên Windows commit một target `compile` gọi `smithy` trực tiếp, vì vậy bất kỳ ai khác làm việc trên nó — bao gồm trên macOS hoặc Linux — cũng cần Smithy CLI trong `PATH` của họ. Để các máy đó giải quyết CLI thông qua `mise` thay thế, hãy chuyển target sang lệnh `mise` như [mô tả bên dưới](#choosing-how-the-cli-is-resolved).
+
+### Choosing how the CLI is resolved
+
+macOS và Linux giải quyết CLI thông qua `mise` và Windows sử dụng CLI được cài đặt toàn cục, nhưng bạn có thể chọn một trong hai trên bất kỳ nền tảng nào bằng cách chỉnh sửa lệnh của target `compile` trong `project.json` của dự án mô hình.
+
+Để sử dụng Smithy CLI được cài đặt toàn cục thay vì `mise`, thay thế tiền tố `mise` bằng `smithy` đơn giản:
+
+```json title="project.json" del={5} ins={6}
+{
+  "targets": {
+    "compile": {
+      "options": {
+        "commands": ["... npx -y mise@<version> exec smithy@<version> -- smithy build ..."]
+        "commands": ["... smithy build ..."]
+      }
+    }
+  }
+}
+```
+
+Để quay lại việc `mise` giải quyết CLI, khôi phục tiền tố `npx -y mise@<version> exec smithy@<version> --`.
 
 ### Bundle Target
 

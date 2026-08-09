@@ -576,9 +576,11 @@ export const Echo: EchoOperation<ServiceContext> = async (input, ctx) => {
 
 ## ビルドとコード生成
 
-Smithyモデルプロジェクトは[Docker](https://www.docker.com/)を使用してSmithyアーティファクトをビルドし、TypeScript Server SDKを生成します：
+Smithyモデルプロジェクトは[Smithy CLI](https://smithy.io/2.0/guides/smithy-cli/index.html)を使用してSmithyアーティファクトをビルドし、TypeScript Server SDKを生成します：
 
 <NxCommands commands={['build <model-project>']} />
+
+macOSとLinuxでは、CLIは[mise](https://mise.jdx.dev/)によって解決され、ビルドがオンデマンドで取得するため、インストールする必要はありません。初回ビルド時に固定されたバージョンをダウンロードしてキャッシュします。
 
 このプロセスでは：
 
@@ -590,6 +592,39 @@ Smithyモデルプロジェクトは[Docker](https://www.docker.com/)を使用�
 バックエンドプロジェクトはコンパイル時に生成されたSDKを自動コピーします：
 
 <NxCommands commands={['copy-ssdk <backend-project>']} />
+
+### Windowsでのビルド
+
+`mise`はWindowsパッケージをnpmに公開していないため、WindowsではSmithyCLIは自分でインストールする前提条件です。[Smithy CLIインストールガイド](https://smithy.io/2.0/guides/smithy-cli/cli_installation.html)に従って一度インストールし（例：`winget install smithy`または`scoop install smithy`）、`smithy`が`PATH`に含まれていることを確認してください。Windowsで生成されたSmithyプロジェクトは、`mise`を経由せず`smithy`を直接実行します。
+
+:::caution[CLIのアップグレード]
+CLIはワークスペースに固定されるのではなくグローバルにインストールされるため、`nx migrate`でワークスペースをアップグレードしてもCLIはアップグレード**されません**。マイグレーションがSmithyの依存関係を更新した場合は、グローバルなSmithyCLIを自分で対応するバージョンにアップグレードしてください。
+:::
+
+または、[WSL](https://learn.microsoft.com/en-us/windows/wsl/install)内で開発することもできます。その場合、ビルドはLinuxパスを実行し、`mise`がCLIを解決するため、インストールは不要です。
+
+Windowsで生成されたプロジェクトは、`smithy`を直接呼び出す`compile`ターゲットをコミットするため、macOSやLinuxを含む他の作業者も`PATH`にSmithyCLIが必要です。これらのマシンで代わりに`mise`を通じてCLIを解決するには、[以下で説明する](#choosing-how-the-cli-is-resolved)ように、ターゲットを`mise`コマンドに切り替えてください。
+
+### CLIの解決方法の選択
+
+macOSとLinuxは`mise`を通じてCLIを解決し、WindowsはグローバルにインストールされたCLIを使用しますが、モデルプロジェクトの`project.json`で`compile`ターゲットのコマンドを編集することで、どのプラットフォームでもどちらかを選択できます。
+
+`mise`の代わりにグローバルにインストールされたSmithyCLIを使用するには、`mise`プレフィックスを単なる`smithy`に置き換えます：
+
+```json title="project.json" del={5} ins={6}
+{
+  "targets": {
+    "compile": {
+      "options": {
+        "commands": ["... npx -y mise@<version> exec smithy@<version> -- smithy build ..."]
+        "commands": ["... smithy build ..."]
+      }
+    }
+  }
+}
+```
+
+`mise`がCLIを解決するように戻すには、`npx -y mise@<version> exec smithy@<version> --`プレフィックスを復元してください。
 
 ### バンドルターゲット
 

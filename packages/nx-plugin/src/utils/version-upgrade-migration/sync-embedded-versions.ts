@@ -2,13 +2,21 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import type { Tree } from '@nx/devkit';
-import { visitNotIgnoredFiles } from '@nx/devkit';
+import type { ProjectConfiguration, Tree } from '@nx/devkit';
+import {
+  getProjects,
+  joinPathFragments,
+  visitNotIgnoredFiles,
+} from '@nx/devkit';
+import { SMITHY_PROJECT_GENERATOR_INFO } from '../../smithy/project/generator';
 import { applyGritQL } from '../ast';
 import {
   BASE_IMAGES,
   CONTAINER_REPOSITORIES,
   CONTAINER_VERSIONS,
+  JAVA_ARTIFACTS,
+  JAVA_VERSIONS,
+  MISE_VERSIONS,
   PY_VERSIONS,
   TS_VERSIONS,
 } from '../versions';
@@ -371,6 +379,17 @@ const syncTargetToolPins = async (tree: Tree): Promise<string[]> => {
       pattern: `${escapeRegExp(repository)}:([^${VERSION_TERMINATORS}']+)`,
       vended: CONTAINER_VERSIONS[tool as keyof typeof CONTAINER_VERSIONS],
     })),
+    // The Smithy CLI a Smithy project's compile target runs, and the `mise` that
+    // resolves it. Neither is installed into the workspace — the target fetches
+    // mise with `npx` — so this command is the only place either version sits.
+    {
+      pattern: `exec smithy@([^${VERSION_TERMINATORS}']+)`,
+      vended: MISE_VERSIONS.smithy,
+    },
+    {
+      pattern: `npx -y mise@([^${VERSION_TERMINATORS}']+)`,
+      vended: TS_VERSIONS.mise,
+    },
     ...Object.keys(PY_VERSIONS).flatMap((name) => {
       const vended = vendedPyVersion(name);
       return vended
@@ -392,9 +411,51 @@ const syncTargetToolPins = async (tree: Tree): Promise<string[]> => {
 };
 
 /**
+ * Sync the Maven coordinates a generated `smithy-build.json` resolves.
+ *
+ * These are Java artifacts the Smithy CLI downloads, so they appear in no
+ * manifest the dependency sync reads — this file is the only place they sit. Each
+ * is matched by its `group:artifact` prefix so only the version is rewritten,
+ * leaving any coordinate the user added alone.
+ *
+ * Scoped to the projects `smithy#project` generated: a `smithy-build.json` a user
+ * wrote themselves keeps the versions they chose.
+ */
+const syncSmithyMavenPins = async (tree: Tree): Promise<string[]> => {
+  const isGeneratedSmithyProject = (project: ProjectConfiguration): boolean =>
+    (project.metadata as { generator?: string } | undefined)?.generator ===
+    SMITHY_PROJECT_GENERATOR_INFO.id;
+
+  const smithyBuilds: string[] = [];
+  for (const [, project] of getProjects(tree)) {
+    if (!isGeneratedSmithyProject(project)) {
+      continue;
+    }
+    const path = joinPathFragments(project.root, 'smithy-build.json');
+    if (tree.exists(path)) {
+      smithyBuilds.push(path);
+    }
+  }
+
+  const pins: EmbeddedPin[] = JAVA_ARTIFACTS.map((artifact) => ({
+    // A coordinate is a JSON string here, so a quote ends the version.
+    pattern: `${escapeRegExp(artifact)}:([^${VERSION_TERMINATORS}']+)`,
+    vended: JAVA_VERSIONS[artifact],
+  }));
+
+  const skipped: string[] = [];
+  for (const path of smithyBuilds) {
+    if ((await applyPins(tree, path, pins)).skipped) {
+      skipped.push(path);
+    }
+  }
+  return skipped;
+};
+
+/**
  * Sync the vended versions baked into generated file bodies: `Dockerfile` pins,
- * the Python pins in Terraform inline scripts, and the tooling images
- * `project.json` target commands run.
+ * the Python pins in Terraform inline scripts, the tooling `project.json` target
+ * commands run, and the Maven coordinates a `smithy-build.json` resolves.
  *
  * Reports only the files left for the user: a pin that takes effect the next time
  * the thing holding it runs needs no follow-up, but one this skipped for holding
@@ -409,4 +470,5 @@ export const syncEmbeddedVersions = async (
   ...(await syncDockerfiles(tree, owned)),
   ...(await syncTerraformScriptPins(tree, owned)),
   ...(await syncTargetToolPins(tree)),
+  ...(await syncSmithyMavenPins(tree)),
 ];

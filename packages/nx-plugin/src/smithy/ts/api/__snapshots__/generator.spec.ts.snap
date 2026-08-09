@@ -1751,17 +1751,36 @@ exports[`tsSmithyApiGenerator > should generate smithy ts api with default optio
   },
   "targets": {
     "build": {
-      "dependsOn": ["compile"]
+      "dependsOn": ["compile", "generate-ssdk"]
     },
     "compile": {
       "cache": true,
-      "outputs": ["{workspaceRoot}/dist/{projectRoot}/build"],
+      "outputs": [
+        "{workspaceRoot}/dist/{projectRoot}/smithy",
+        "{workspaceRoot}/dist/{projectRoot}/build/openapi"
+      ],
       "executor": "nx:run-commands",
       "options": {
         "commands": [
           "rimraf dist/{projectRoot}/build",
+          "rimraf dist/{projectRoot}/smithy",
           "make-dir dist/{projectRoot}/build",
-          "docker build -f {projectRoot}/build.Dockerfile --build-context workspace=. --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}"
+          "npx -y mise@2026.8.3 exec smithy@1.72.1 -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy",
+          "cpy \\"dist/{projectRoot}/smithy/source/openapi/*.openapi.json\\" dist/{projectRoot}/build/openapi --flat --rename=openapi.json"
+        ],
+        "parallel": false,
+        "cwd": "{workspaceRoot}"
+      }
+    },
+    "generate-ssdk": {
+      "cache": true,
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}/build/ssdk"],
+      "executor": "nx:run-commands",
+      "dependsOn": ["compile"],
+      "options": {
+        "commands": [
+          "npm install --prefix dist/{projectRoot}/smithy/source/typescript-ssdk-codegen --include=dev --ignore-scripts --no-audit --no-fund",
+          "rolldown -c {projectRoot}/ssdk.rolldown.config.mjs"
         ],
         "parallel": false,
         "cwd": "{workspaceRoot}"

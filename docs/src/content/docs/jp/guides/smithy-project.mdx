@@ -43,7 +43,6 @@ Smithyプロジェクトには2種類あります：
     - src
       - main.smithy 共有シェイプ定義
     - smithy-build.json Smithyビルド設定
-    - build.Dockerfile モデルをビルドして検証
     - project.json プロジェクト設定とビルドターゲット
 
 </FileTree>
@@ -64,7 +63,7 @@ structure Customer {
 }
 ```
 
-シェイプライブラリにはサービスがないため、その`smithy-build.json`はコード生成を設定しません — ビルドするとモデルを検証し、`dist/<my-shapes>/build/model/model.json`に単一のJSONモデルファイルとして組み立てます。
+シェイプライブラリにはサービスがないため、その`smithy-build.json`はコード生成を設定しません — ビルドするとモデルを検証し、`dist/<my-shapes>/build/model.json`に単一のJSONモデルファイルとして組み立てます。
 
 </OptionFilter>
 
@@ -80,7 +79,7 @@ structure Customer {
       - operations
         - echo.smithy 操作の例
     - smithy-build.json コード生成を含むSmithyビルド設定
-    - build.Dockerfile モデル、OpenAPI仕様、TypeScript Server SDKをビルド
+    - ssdk.rolldown.config.mjs 生成されたTypeScript Server SDKをバンドル
     - project.json プロジェクト設定とビルドターゲット
 
 </FileTree>
@@ -110,39 +109,32 @@ service MyService {
 
 ## ビルド
 
-Smithyプロジェクトは[Docker](https://www.docker.com/)を使用してビルドされ、[Smithy CLI](https://smithy.io/2.0/guides/smithy-cli/index.html)を実行してモデルを検証します：
+Smithyプロジェクトは[Smithy CLI](https://smithy.io/2.0/guides/smithy-cli/index.html)でビルドされ、モデルを検証します：
 
 <NxCommands commands={['build my-shapes']} />
 
+macOSとLinuxでは、CLIは[mise](https://mise.jdx.dev/)によって解決され、ビルドがオンデマンドで取得するため、インストールする必要はありません — 初回ビルド時に固定されたバージョンをダウンロードしてキャッシュします。Windowsでは自分でインストールする前提条件です — <Link path="guides/ts-smithy-api#building-on-windows">Windowsでのビルド</Link>を参照してください。
+
 ## シェイプライブラリへの依存
 
-シェイプライブラリをビルドすると、組み立てられたモデルが`dist/<my-shapes>/build/model/model.json`に書き込まれます。この単一ファイルには、ライブラリが定義するすべてのシェイプと、それが依存するすべてのシェイプが含まれているため、コンシューマーは直接参照するライブラリのみを宣言すればよいことになります。
+シェイプライブラリをビルドすると、組み立てられたモデルが`dist/<my-shapes>/build/model.json`に書き込まれます。この単一ファイルには、ライブラリが定義するすべてのシェイプと、それが依存するすべてのシェイプが含まれているため、コンシューマーは直接参照するライブラリのみを宣言すればよいことになります。
 
-別のSmithyプロジェクトからシェイプライブラリに依存するには、コンシューマープロジェクトに3つの変更を加えます：
+別のSmithyプロジェクトからシェイプライブラリに依存するには、コンシューマープロジェクトに2つの変更を加えます：
 
 <Steps>
 
-1. Smithyプロジェクトはコンテナ内でビルドされ、ビルドには名前付きビルドコンテキストとしてワークスペースルートが与えられます。コンシューマープロジェクトの`build.Dockerfile`に、独自のソースがコピーされる場所と並んで`COPY`を追加します：
-
-   ```dockerfile ins={4}
-   # Copy project files
-   COPY smithy-build.json .
-   COPY src src
-   COPY --from=workspace dist/packages/my-shapes/build/model/model.json deps/my-shapes.json
-   ```
-
-2. コピーしたファイルをコンシューマープロジェクトの`smithy-build.json`の`imports`に追加します：
+1. ライブラリのビルドされたモデルをコンシューマープロジェクトの`smithy-build.json`の`imports`に追加します。パスはそのファイルからの相対パスなので、`../`セグメントの数はコンシューマープロジェクトのネストの深さと一致します — 以下の`packages/my-api/model`の場合は3つです：
 
    ```json ins={4}
    {
      "version": "1.0",
      "sources": ["src/"],
-     "imports": ["deps/my-shapes.json"],
+     "imports": ["../../../dist/packages/my-shapes/build/model.json"],
      ...
    }
    ```
 
-3. ライブラリの`build`ターゲットを、コンシューマープロジェクトの`project.json`内の`compile`ターゲットの依存関係として追加し、コンシューマーがビルドする前にモデルが存在するようにします：
+2. ライブラリの`build`ターゲットを、コンシューマープロジェクトの`project.json`内の`compile`ターゲットの依存関係として追加し、コンシューマーがビルドする前にモデルが存在するようにします：
 
    ```json ins={4}
    {

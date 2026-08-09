@@ -1,42 +1,5 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`smithyProjectGenerator > shape libraries > should generate a shape library without a service > shapes-build.Dockerfile 1`] = `
-"FROM public.ecr.aws/docker/library/node:24 AS builder
-ENV CI=true
-
-# Output directory
-RUN mkdir /out
-
-# Install Smithy CLI
-# https://smithy.io/2.0/guides/smithy-cli/cli_installation.html
-WORKDIR /smithy
-ARG TARGETPLATFORM
-RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then ARCH="aarch64"; else ARCH="x86_64"; fi && \\
-    mkdir -p smithy-install/smithy && \\
-    curl -L https://github.com/smithy-lang/smithy/releases/download/1.61.0/smithy-cli-linux-$ARCH.zip -o smithy-install/smithy-cli-linux-$ARCH.zip && \\
-    unzip -qo smithy-install/smithy-cli-linux-$ARCH.zip -d smithy-install && \\
-    mv smithy-install/smithy-cli-linux-$ARCH/* smithy-install/smithy
-RUN smithy-install/smithy/install
-
-# Copy project files
-WORKDIR /project
-COPY smithy-build.json .
-COPY src src
-
-# Validate the model and assemble it into a single JSON model file
-RUN --mount=type=cache,target=/root/.m2/repository,id=maven-cache \\
-    smithy build
-
-# Copy the assembled model to the output location
-RUN mkdir -p /out/model
-RUN cp /project/build/smithy/source/model/model.json /out/model/model.json
-
-# Export the /out directory
-FROM scratch AS export
-COPY --from=builder /out /
-"
-`;
-
 exports[`smithyProjectGenerator > shape libraries > should generate a shape library without a service > shapes-main.smithy 1`] = `
 "$version: "2.0"
 
@@ -69,13 +32,18 @@ exports[`smithyProjectGenerator > shape libraries > should generate a shape libr
     },
     "compile": {
       "cache": true,
-      "outputs": ["{workspaceRoot}/dist/{projectRoot}/build"],
+      "outputs": [
+        "{workspaceRoot}/dist/{projectRoot}/smithy",
+        "{workspaceRoot}/dist/{projectRoot}/build/model.json"
+      ],
       "executor": "nx:run-commands",
       "options": {
         "commands": [
           "rimraf dist/{projectRoot}/build",
+          "rimraf dist/{projectRoot}/smithy",
           "make-dir dist/{projectRoot}/build",
-          "docker build -f {projectRoot}/build.Dockerfile --build-context workspace=. --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}"
+          "npx -y mise@2026.8.3 exec smithy@1.72.1 -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy",
+          "ncp dist/{projectRoot}/smithy/source/model/model.json dist/{projectRoot}/build/model.json"
         ],
         "parallel": false,
         "cwd": "{workspaceRoot}"
@@ -91,7 +59,7 @@ exports[`smithyProjectGenerator > shape libraries > should generate a shape libr
   "version": "1.0",
   "sources": ["src/"],
   "maven": {
-    "dependencies": ["software.amazon.smithy:smithy-model:1.61.0"]
+    "dependencies": ["software.amazon.smithy:smithy-model:1.72.1"]
   }
 }
 "
@@ -134,17 +102,36 @@ exports[`smithyProjectGenerator > should generate smithy project with all custom
   },
   "targets": {
     "build": {
-      "dependsOn": ["compile"]
+      "dependsOn": ["compile", "generate-ssdk"]
     },
     "compile": {
       "cache": true,
-      "outputs": ["{workspaceRoot}/dist/{projectRoot}/build"],
+      "outputs": [
+        "{workspaceRoot}/dist/{projectRoot}/smithy",
+        "{workspaceRoot}/dist/{projectRoot}/build/openapi"
+      ],
       "executor": "nx:run-commands",
       "options": {
         "commands": [
           "rimraf dist/{projectRoot}/build",
+          "rimraf dist/{projectRoot}/smithy",
           "make-dir dist/{projectRoot}/build",
-          "docker build -f {projectRoot}/build.Dockerfile --build-context workspace=. --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}"
+          "npx -y mise@2026.8.3 exec smithy@1.72.1 -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy",
+          "cpy \\"dist/{projectRoot}/smithy/source/openapi/*.openapi.json\\" dist/{projectRoot}/build/openapi --flat --rename=openapi.json"
+        ],
+        "parallel": false,
+        "cwd": "{workspaceRoot}"
+      }
+    },
+    "generate-ssdk": {
+      "cache": true,
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}/build/ssdk"],
+      "executor": "nx:run-commands",
+      "dependsOn": ["compile"],
+      "options": {
+        "commands": [
+          "npm install --prefix dist/{projectRoot}/smithy/source/typescript-ssdk-codegen --include=dev --ignore-scripts --no-audit --no-fund",
+          "rolldown -c {projectRoot}/ssdk.rolldown.config.mjs"
         ],
         "parallel": false,
         "cwd": "{workspaceRoot}"
@@ -169,17 +156,36 @@ exports[`smithyProjectGenerator > should generate smithy project with custom dir
   },
   "targets": {
     "build": {
-      "dependsOn": ["compile"]
+      "dependsOn": ["compile", "generate-ssdk"]
     },
     "compile": {
       "cache": true,
-      "outputs": ["{workspaceRoot}/dist/{projectRoot}/build"],
+      "outputs": [
+        "{workspaceRoot}/dist/{projectRoot}/smithy",
+        "{workspaceRoot}/dist/{projectRoot}/build/openapi"
+      ],
       "executor": "nx:run-commands",
       "options": {
         "commands": [
           "rimraf dist/{projectRoot}/build",
+          "rimraf dist/{projectRoot}/smithy",
           "make-dir dist/{projectRoot}/build",
-          "docker build -f {projectRoot}/build.Dockerfile --build-context workspace=. --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}"
+          "npx -y mise@2026.8.3 exec smithy@1.72.1 -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy",
+          "cpy \\"dist/{projectRoot}/smithy/source/openapi/*.openapi.json\\" dist/{projectRoot}/build/openapi --flat --rename=openapi.json"
+        ],
+        "parallel": false,
+        "cwd": "{workspaceRoot}"
+      }
+    },
+    "generate-ssdk": {
+      "cache": true,
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}/build/ssdk"],
+      "executor": "nx:run-commands",
+      "dependsOn": ["compile"],
+      "options": {
+        "commands": [
+          "npm install --prefix dist/{projectRoot}/smithy/source/typescript-ssdk-codegen --include=dev --ignore-scripts --no-audit --no-fund",
+          "rolldown -c {projectRoot}/ssdk.rolldown.config.mjs"
         ],
         "parallel": false,
         "cwd": "{workspaceRoot}"
@@ -233,105 +239,6 @@ service CustomService {
         ValidationException
     ]
 }
-"
-`;
-
-exports[`smithyProjectGenerator > should generate smithy project with default options > build.Dockerfile 1`] = `
-"FROM public.ecr.aws/docker/library/node:24 AS builder
-ENV CI=true
-
-# Output directory
-RUN mkdir /out
-
-# Install Smithy CLI
-# https://smithy.io/2.0/guides/smithy-cli/cli_installation.html
-WORKDIR /smithy
-ARG TARGETPLATFORM
-RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then ARCH="aarch64"; else ARCH="x86_64"; fi && \\
-    mkdir -p smithy-install/smithy && \\
-    curl -L https://github.com/smithy-lang/smithy/releases/download/1.61.0/smithy-cli-linux-$ARCH.zip -o smithy-install/smithy-cli-linux-$ARCH.zip && \\
-    unzip -qo smithy-install/smithy-cli-linux-$ARCH.zip -d smithy-install && \\
-    mv smithy-install/smithy-cli-linux-$ARCH/* smithy-install/smithy
-RUN smithy-install/smithy/install
-
-# Add node dependencies for bundling
-WORKDIR /project
-RUN npm i -g pnpm@11.1.1 rolldown@1.2.2
-
-# Copy project files
-COPY smithy-build.json .
-COPY src src
-
-# Smithy build with Maven cache mount
-RUN --mount=type=cache,target=/root/.m2/repository,id=maven-cache \\
-    smithy build
-
-# Copy OpenAPI specification to output location
-RUN mkdir -p /out/openapi
-RUN cp /project/build/smithy/source/openapi/*.openapi.json /out/openapi/openapi.json
-
-WORKDIR /project/build/smithy/source/typescript-ssdk-codegen
-
-# Install SSDK dependencies with pnpm cache mount
-RUN --mount=type=cache,target=/root/.local/share/pnpm/store,id=pnpm-store \\
-    pnpm install --prefer-offline
-
-# Install rolldown plugins with pnpm cache mount
-RUN --mount=type=cache,target=/root/.local/share/pnpm/store,id=pnpm-store \\
-    pnpm add -D rolldown-plugin-dts@0.28.0 @rollup/plugin-esm-shim@0.1.8
-
-RUN cat <<EOF > rolldown.config.js
-import { dts } from 'rolldown-plugin-dts';
-import esmShim from '@rollup/plugin-esm-shim';
-import fs from 'fs';
-import path from 'path';
-
-// Bundle the re2-wasm wasm file as part of the module
-const re2WasmPlugin = () => ({
-  name: 're2-wasm-plugin',
-  resolveId: (id) => {
-    if (!(id === 're2-wasm' || id.endsWith('/re2-wasm'))) return null;
-    try {
-      const dir = path.join(path.dirname(require.resolve('re2-wasm/package.json')), 'build/wasm');
-      return fs.existsSync(path.join(dir, 're2.wasm')) && fs.existsSync(path.join(dir, 're2.js')) ? path.join(dir, 're2.js') : null;
-    } catch { return null; }
-  },
-  load: (id) => {
-    if (!(id.endsWith('re2.js') && id.includes('re2-wasm'))) return null;
-    try {
-      const wasmPath = path.join(path.dirname(id), 're2.wasm');
-      return fs.existsSync(wasmPath) && fs.existsSync(id) ? \\\`var Module = { wasmBinary: Buffer.from("\\\${fs.readFileSync(wasmPath).toString('base64')}", "base64") }\\n\\\${fs.readFileSync(id, 'utf8')}\\\` : null;
-    } catch { return null; }
-  }
-});
-
-export default {
-  input: './src/index.ts',
-  plugins: [
-    re2WasmPlugin(),
-    dts({ resolve: true }),
-    esmShim(),
-  ],
-  output: [{
-    dir: 'dist',
-    format: 'es',
-  }],
-  resolve: {
-    tsconfigFilename: 'tsconfig.es.json',
-  },
-  platform: 'node',
-};
-EOF
-
-# Create SSDK bundle with rolldown
-RUN rolldown -c
-
-RUN mkdir -p /out/ssdk
-RUN cp dist/* /out/ssdk/
-
-# Export the /out directory
-FROM scratch AS export
-COPY --from=builder /out /
 "
 `;
 
@@ -395,17 +302,36 @@ exports[`smithyProjectGenerator > should generate smithy project with default op
   },
   "targets": {
     "build": {
-      "dependsOn": ["compile"]
+      "dependsOn": ["compile", "generate-ssdk"]
     },
     "compile": {
       "cache": true,
-      "outputs": ["{workspaceRoot}/dist/{projectRoot}/build"],
+      "outputs": [
+        "{workspaceRoot}/dist/{projectRoot}/smithy",
+        "{workspaceRoot}/dist/{projectRoot}/build/openapi"
+      ],
       "executor": "nx:run-commands",
       "options": {
         "commands": [
           "rimraf dist/{projectRoot}/build",
+          "rimraf dist/{projectRoot}/smithy",
           "make-dir dist/{projectRoot}/build",
-          "docker build -f {projectRoot}/build.Dockerfile --build-context workspace=. --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}"
+          "npx -y mise@2026.8.3 exec smithy@1.72.1 -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy",
+          "cpy \\"dist/{projectRoot}/smithy/source/openapi/*.openapi.json\\" dist/{projectRoot}/build/openapi --flat --rename=openapi.json"
+        ],
+        "parallel": false,
+        "cwd": "{workspaceRoot}"
+      }
+    },
+    "generate-ssdk": {
+      "cache": true,
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}/build/ssdk"],
+      "executor": "nx:run-commands",
+      "dependsOn": ["compile"],
+      "options": {
+        "commands": [
+          "npm install --prefix dist/{projectRoot}/smithy/source/typescript-ssdk-codegen --include=dev --ignore-scripts --no-audit --no-fund",
+          "rolldown -c {projectRoot}/ssdk.rolldown.config.mjs"
         ],
         "parallel": false,
         "cwd": "{workspaceRoot}"
@@ -434,14 +360,71 @@ exports[`smithyProjectGenerator > should generate smithy project with default op
   },
   "maven": {
     "dependencies": [
-      "software.amazon.smithy:smithy-model:1.61.0",
-      "software.amazon.smithy:smithy-aws-traits:1.61.0",
-      "software.amazon.smithy:smithy-validation-model:1.61.0",
-      "software.amazon.smithy:smithy-openapi:1.61.0",
-      "software.amazon.smithy.typescript:smithy-aws-typescript-codegen:0.34.1"
+      "software.amazon.smithy:smithy-model:1.72.1",
+      "software.amazon.smithy:smithy-aws-traits:1.72.1",
+      "software.amazon.smithy:smithy-validation-model:1.72.1",
+      "software.amazon.smithy:smithy-openapi:1.72.1",
+      "software.amazon.smithy.typescript:smithy-aws-typescript-codegen:0.50.0"
     ]
   }
 }
+"
+`;
+
+exports[`smithyProjectGenerator > should generate smithy project with default options > ssdk.rolldown.config.mjs 1`] = `
+"import fs from 'node:fs';
+import path from 'node:path';
+import { dts } from 'rolldown-plugin-dts';
+
+// The Smithy CLI generates the Server SDK under dist, along with its own
+// dependencies, so paths are resolved from there rather than this project. The
+// compile target runs from the workspace root, so these resolve there.
+const ssdkDir = path.resolve(
+  'dist',
+  'test-api',
+  'smithy/source/typescript-ssdk-codegen',
+);
+
+// Embed the re2 wasm binary in its emscripten glue module (\`Module.wasmBinary\`),
+// so the bundle stays a single self-contained file. \`__dirname\` is what the
+// glue's on-disk fallback would read, which an ES module doesn't define.
+const inlineRe2Wasm = () => ({
+  name: 'inline-re2-wasm',
+  load: (id) => {
+    if (!/re2-wasm.*[\\\\/]wasm[\\\\/]re2\\.js$/.test(id)) return null;
+    const wasm = fs.readFileSync(path.join(path.dirname(id), 're2.wasm'));
+    return \`var __dirname = '';\\nvar Module = { wasmBinary: Buffer.from("\${wasm.toString('base64')}", "base64") };\\n\${fs.readFileSync(id, 'utf8')}\`;
+  },
+});
+
+// Drop any import whose specifier resolves to the importing module itself. A
+// module cannot import its own exports — the Smithy CLI's Windows codegen writes
+// exactly that, which the bundler rejects as an assignment to an import.
+const dropSelfImports = () => ({
+  name: 'drop-self-imports',
+  transform: (code, id) => ({
+    code: code.replace(
+      /^import\\s+[^;]*?\\s+from\\s+["'](\\.[^"']*)["'];?\\s*$/gm,
+      (line, specifier) =>
+        path.resolve(path.dirname(id), specifier) ===
+        id.replace(/\\.[cm]?tsx?$/, '')
+          ? ''
+          : line,
+    ),
+    map: null,
+  }),
+});
+
+const outDir = path.resolve('dist', 'test-api', 'build/ssdk');
+
+// Bundle from the generated TypeScript sources, emitting the module and its
+// declarations in one pass.
+export default {
+  input: path.join(ssdkDir, 'src/index.ts'),
+  plugins: [dropSelfImports(), inlineRe2Wasm(), dts({ resolve: true })],
+  output: [{ dir: outDir, format: 'es' }],
+  platform: 'node',
+};
 "
 `;
 
@@ -459,17 +442,36 @@ exports[`smithyProjectGenerator > should generate smithy project with subdirecto
   },
   "targets": {
     "build": {
-      "dependsOn": ["compile"]
+      "dependsOn": ["compile", "generate-ssdk"]
     },
     "compile": {
       "cache": true,
-      "outputs": ["{workspaceRoot}/dist/{projectRoot}/build"],
+      "outputs": [
+        "{workspaceRoot}/dist/{projectRoot}/smithy",
+        "{workspaceRoot}/dist/{projectRoot}/build/openapi"
+      ],
       "executor": "nx:run-commands",
       "options": {
         "commands": [
           "rimraf dist/{projectRoot}/build",
+          "rimraf dist/{projectRoot}/smithy",
           "make-dir dist/{projectRoot}/build",
-          "docker build -f {projectRoot}/build.Dockerfile --build-context workspace=. --target export --output type=local,dest=dist/{projectRoot}/build {projectRoot}"
+          "npx -y mise@2026.8.3 exec smithy@1.72.1 -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy",
+          "cpy \\"dist/{projectRoot}/smithy/source/openapi/*.openapi.json\\" dist/{projectRoot}/build/openapi --flat --rename=openapi.json"
+        ],
+        "parallel": false,
+        "cwd": "{workspaceRoot}"
+      }
+    },
+    "generate-ssdk": {
+      "cache": true,
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}/build/ssdk"],
+      "executor": "nx:run-commands",
+      "dependsOn": ["compile"],
+      "options": {
+        "commands": [
+          "npm install --prefix dist/{projectRoot}/smithy/source/typescript-ssdk-codegen --include=dev --ignore-scripts --no-audit --no-fund",
+          "rolldown -c {projectRoot}/ssdk.rolldown.config.mjs"
         ],
         "parallel": false,
         "cwd": "{workspaceRoot}"
@@ -477,105 +479,6 @@ exports[`smithyProjectGenerator > should generate smithy project with subdirecto
     }
   }
 }
-"
-`;
-
-exports[`smithyProjectGenerator > should generate valid Docker build configuration > dockerfile 1`] = `
-"FROM public.ecr.aws/docker/library/node:24 AS builder
-ENV CI=true
-
-# Output directory
-RUN mkdir /out
-
-# Install Smithy CLI
-# https://smithy.io/2.0/guides/smithy-cli/cli_installation.html
-WORKDIR /smithy
-ARG TARGETPLATFORM
-RUN if [ "$TARGETPLATFORM" = "linux/arm64" ]; then ARCH="aarch64"; else ARCH="x86_64"; fi && \\
-    mkdir -p smithy-install/smithy && \\
-    curl -L https://github.com/smithy-lang/smithy/releases/download/1.61.0/smithy-cli-linux-$ARCH.zip -o smithy-install/smithy-cli-linux-$ARCH.zip && \\
-    unzip -qo smithy-install/smithy-cli-linux-$ARCH.zip -d smithy-install && \\
-    mv smithy-install/smithy-cli-linux-$ARCH/* smithy-install/smithy
-RUN smithy-install/smithy/install
-
-# Add node dependencies for bundling
-WORKDIR /project
-RUN npm i -g pnpm@11.1.1 rolldown@1.2.2
-
-# Copy project files
-COPY smithy-build.json .
-COPY src src
-
-# Smithy build with Maven cache mount
-RUN --mount=type=cache,target=/root/.m2/repository,id=maven-cache \\
-    smithy build
-
-# Copy OpenAPI specification to output location
-RUN mkdir -p /out/openapi
-RUN cp /project/build/smithy/source/openapi/*.openapi.json /out/openapi/openapi.json
-
-WORKDIR /project/build/smithy/source/typescript-ssdk-codegen
-
-# Install SSDK dependencies with pnpm cache mount
-RUN --mount=type=cache,target=/root/.local/share/pnpm/store,id=pnpm-store \\
-    pnpm install --prefer-offline
-
-# Install rolldown plugins with pnpm cache mount
-RUN --mount=type=cache,target=/root/.local/share/pnpm/store,id=pnpm-store \\
-    pnpm add -D rolldown-plugin-dts@0.28.0 @rollup/plugin-esm-shim@0.1.8
-
-RUN cat <<EOF > rolldown.config.js
-import { dts } from 'rolldown-plugin-dts';
-import esmShim from '@rollup/plugin-esm-shim';
-import fs from 'fs';
-import path from 'path';
-
-// Bundle the re2-wasm wasm file as part of the module
-const re2WasmPlugin = () => ({
-  name: 're2-wasm-plugin',
-  resolveId: (id) => {
-    if (!(id === 're2-wasm' || id.endsWith('/re2-wasm'))) return null;
-    try {
-      const dir = path.join(path.dirname(require.resolve('re2-wasm/package.json')), 'build/wasm');
-      return fs.existsSync(path.join(dir, 're2.wasm')) && fs.existsSync(path.join(dir, 're2.js')) ? path.join(dir, 're2.js') : null;
-    } catch { return null; }
-  },
-  load: (id) => {
-    if (!(id.endsWith('re2.js') && id.includes('re2-wasm'))) return null;
-    try {
-      const wasmPath = path.join(path.dirname(id), 're2.wasm');
-      return fs.existsSync(wasmPath) && fs.existsSync(id) ? \\\`var Module = { wasmBinary: Buffer.from("\\\${fs.readFileSync(wasmPath).toString('base64')}", "base64") }\\n\\\${fs.readFileSync(id, 'utf8')}\\\` : null;
-    } catch { return null; }
-  }
-});
-
-export default {
-  input: './src/index.ts',
-  plugins: [
-    re2WasmPlugin(),
-    dts({ resolve: true }),
-    esmShim(),
-  ],
-  output: [{
-    dir: 'dist',
-    format: 'es',
-  }],
-  resolve: {
-    tsconfigFilename: 'tsconfig.es.json',
-  },
-  platform: 'node',
-};
-EOF
-
-# Create SSDK bundle with rolldown
-RUN rolldown -c
-
-RUN mkdir -p /out/ssdk
-RUN cp dist/* /out/ssdk/
-
-# Export the /out directory
-FROM scratch AS export
-COPY --from=builder /out /
 "
 `;
 
@@ -643,11 +546,11 @@ exports[`smithyProjectGenerator > should handle kebab-case conversion for servic
   },
   "maven": {
     "dependencies": [
-      "software.amazon.smithy:smithy-model:1.61.0",
-      "software.amazon.smithy:smithy-aws-traits:1.61.0",
-      "software.amazon.smithy:smithy-validation-model:1.61.0",
-      "software.amazon.smithy:smithy-openapi:1.61.0",
-      "software.amazon.smithy.typescript:smithy-aws-typescript-codegen:0.34.1"
+      "software.amazon.smithy:smithy-model:1.72.1",
+      "software.amazon.smithy:smithy-aws-traits:1.72.1",
+      "software.amazon.smithy:smithy-validation-model:1.72.1",
+      "software.amazon.smithy:smithy-openapi:1.72.1",
+      "software.amazon.smithy.typescript:smithy-aws-typescript-codegen:0.50.0"
     ]
   }
 }

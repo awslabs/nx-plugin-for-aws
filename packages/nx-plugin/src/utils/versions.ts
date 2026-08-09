@@ -107,6 +107,7 @@ export const TS_VERSIONS = {
   'class-variance-authority': '0.7.1',
   clsx: '2.1.1',
   commander: '15.0.0',
+  'cpy-cli': '7.0.0',
   electrodb: '3.9.1',
   esbuild: '0.28.1',
   'event-source-polyfill': '1.0.31',
@@ -124,6 +125,7 @@ export const TS_VERSIONS = {
   '@types/fs-extra': '11.0.4',
   'make-dir-cli': '4.0.0',
   mariadb: '3.5.3',
+  mise: '2026.8.3',
   ncp: '2.0.0',
   npm: '12.0.2',
   'npm-check-updates': '22.2.9',
@@ -136,7 +138,6 @@ export const TS_VERSIONS = {
   rimraf: '6.1.3',
   rolldown: '1.2.2',
   'rolldown-plugin-dts': '0.28.0',
-  '@rollup/plugin-esm-shim': '0.1.8',
   'simple-git': '3.36.0',
   'source-map-support': '0.5.21',
   'starlight-blog': '0.28.0',
@@ -270,6 +271,43 @@ const assertDeclared = (
 export const VENDORED_VERSIONS = {
   'git-secrets': '1.3.0',
 } as const;
+
+/**
+ * Versions of Java dependencies added by generators, keyed by Maven coordinate.
+ *
+ * Every entry is resolved from Maven Central by the version update and named
+ * `<group>:<artifact>:<version>` where a generator writes it.
+ */
+export const JAVA_VERSIONS = {
+  'software.amazon.smithy:smithy-model': '1.72.1',
+  'software.amazon.smithy:smithy-aws-traits': '1.72.1',
+  'software.amazon.smithy:smithy-validation-model': '1.72.1',
+  'software.amazon.smithy:smithy-openapi': '1.72.1',
+  'software.amazon.smithy.typescript:smithy-aws-typescript-codegen': '0.50.0',
+} as const;
+export type IJavaVersion = keyof typeof JAVA_VERSIONS;
+
+/** The Maven coordinates the version update resolves, in declaration order. */
+export const JAVA_ARTIFACTS = Object.keys(JAVA_VERSIONS) as IJavaVersion[];
+
+/** A Maven coordinate as a dependency names it: `<group>:<artifact>:<version>`. */
+export const javaMavenDependency = (artifact: IJavaVersion): string =>
+  `${artifact}:${JAVA_VERSIONS[artifact]}`;
+
+/**
+ * Versions of tools resolved by mise, keyed by the tool name mise knows.
+ *
+ * Every entry is checked with `mise latest <tool>` by the version update. Nothing
+ * is installed into the workspace: the pin travels in the `project.json` target
+ * command, which is what the version sync reaches to move it forward.
+ */
+export const MISE_VERSIONS = {
+  smithy: '1.72.1',
+} as const;
+export type IMiseVersion = keyof typeof MISE_VERSIONS;
+
+/** The tools the version update resolves through mise, in declaration order. */
+export const MISE_TOOLS = Object.keys(MISE_VERSIONS) as IMiseVersion[];
 
 /**
  * Base container images used by generated Dockerfiles. Pinned exactly so

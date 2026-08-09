@@ -7,7 +7,12 @@ import * as path from 'node:path';
 import { addProjectConfiguration, type Tree } from '@nx/devkit';
 import { smithyProjectGenerator } from '../../smithy/project/generator';
 import { createTreeUsingTsSolutionSetup } from '../test';
-import { BASE_IMAGES, TS_VERSIONS } from '../versions';
+import {
+  BASE_IMAGES,
+  JAVA_ARTIFACTS,
+  MISE_VERSIONS,
+  TS_VERSIONS,
+} from '../versions';
 import { ownedDependencies, ownedForFile } from './owned-dependencies';
 import { isDockerfile } from './sync-embedded-versions';
 import { syncVendedVersions } from './sync-vended-versions';
@@ -170,40 +175,111 @@ describe('template pin ownership', () => {
   });
 });
 
-// The smithy `build.Dockerfile` carries both package pins the sync must move and
-// a build-stage base image it must not touch. Run the migration over the file the
-// real generator renders to hold both at once — a rewritten builder base swaps in
-// a slim image without curl or unzip, which fails the build with exit 127.
-describe('the real smithy build.Dockerfile', () => {
-  it('should sync its package pins and leave its builder base image alone', async () => {
+// A Smithy project's versions sit in two places nothing else reaches: the CLI
+// pinned in its compile target command, and the Maven coordinates its
+// `smithy-build.json` resolves. Neither appears in a manifest, so leaving them
+// behind strands a workspace on the Smithy release it was generated with. Run the
+// sync over the files the real generator renders rather than fixtures, so a
+// template whose shape moves is caught here.
+describe('the real smithy project pins', () => {
+  // The versions an older release rendered.
+  const OLD_SMITHY = '1.61.0';
+  const OLD_CODEGEN = '0.34.1';
+
+  const windBack = (contents: string): string =>
+    JAVA_ARTIFACTS.reduce(
+      (text, artifact) =>
+        text.replace(
+          new RegExp(`${artifact.replace(/[.$]/g, '\\$&')}:[^"]+`),
+          `${artifact}:${
+            artifact.includes('typescript') ? OLD_CODEGEN : OLD_SMITHY
+          }`,
+        ),
+      contents,
+    );
+
+  it('should sync the smithy cli and mise pinned in the compile target', async () => {
     const tree: Tree = createTreeUsingTsSolutionSetup();
     await smithyProjectGenerator(tree, { name: 'api' });
-    const path = 'api/build.Dockerfile';
+    const path = 'api/project.json';
     const fresh = tree.read(path, 'utf-8')!;
 
-    // Wound back to the pins an older release rendered, so the sync has
-    // something to move.
+    // Matched on the pin rather than the version rendered today, so winding back
+    // keeps working as the vended version moves.
     const older = fresh
-      .replace(`rolldown@${TS_VERSIONS.rolldown}`, 'rolldown@1.0.0-beta.38')
-      .replace(
-        `rolldown-plugin-dts@${TS_VERSIONS['rolldown-plugin-dts']}`,
-        'rolldown-plugin-dts@0.16.5',
-      );
+      .replace(/exec smithy@[^ ]+/, `exec smithy@${OLD_SMITHY}`)
+      .replace(/mise@[^ ]+/, 'mise@2026.1.1');
     expect(older).not.toEqual(fresh);
     tree.write(path, older);
 
     await syncVendedVersions(tree);
 
-    // Every pin back where a fresh workspace has it, and nothing else moved.
     expect(tree.read(path, 'utf-8')).toEqual(fresh);
-    const synced = tree.read(path, 'utf-8')!;
-    expect(synced).toContain(`rolldown@${TS_VERSIONS.rolldown}`);
-    expect(synced).toContain(
-      `rolldown-plugin-dts@${TS_VERSIONS['rolldown-plugin-dts']}`,
+    // Both the CLI and the mise that resolves it move forward.
+    expect(tree.read(path, 'utf-8')).toContain(
+      `npx -y mise@${TS_VERSIONS.mise} exec smithy@${MISE_VERSIONS.smithy}`,
     );
-    // The builder stage keeps the tag it chose, and the runtime tag never
-    // reaches this file.
-    expect(synced).toContain('node:24 AS builder');
-    expect(synced).not.toContain(BASE_IMAGES.node);
+  });
+
+  it.each(['service', 'shapes'] as const)(
+    'should sync the maven coordinates a %s smithy-build.json resolves',
+    async (type) => {
+      const tree: Tree = createTreeUsingTsSolutionSetup();
+      await smithyProjectGenerator(tree, { name: 'api', type });
+      const path = 'api/smithy-build.json';
+      const fresh = tree.read(path, 'utf-8')!;
+
+      const older = windBack(fresh);
+      expect(older).not.toEqual(fresh);
+      tree.write(path, older);
+
+      await syncVendedVersions(tree);
+
+      expect(tree.read(path, 'utf-8')).toEqual(fresh);
+    },
+  );
+
+  it('should leave a coordinate the user pinned past this release alone', async () => {
+    const tree: Tree = createTreeUsingTsSolutionSetup();
+    await smithyProjectGenerator(tree, { name: 'api', type: 'shapes' });
+    const path = 'api/smithy-build.json';
+    const ahead = '9.9.9';
+    tree.write(
+      path,
+      tree
+        .read(path, 'utf-8')!
+        .replace(
+          /software\.amazon\.smithy:smithy-model:[^"]+/,
+          `software.amazon.smithy:smithy-model:${ahead}`,
+        ),
+    );
+
+    await syncVendedVersions(tree);
+
+    expect(tree.read(path, 'utf-8')).toContain(
+      `software.amazon.smithy:smithy-model:${ahead}`,
+    );
+  });
+
+  // Scoped by the recorded generator id, so a smithy-build.json a user wrote in a
+  // project we didn't generate keeps the coordinates they chose.
+  it('should leave a smithy-build.json outside a generated project alone', async () => {
+    const tree: Tree = createTreeUsingTsSolutionSetup();
+    addProjectConfiguration(tree, 'theirs', { root: 'packages/theirs' });
+    const path = 'packages/theirs/smithy-build.json';
+    tree.write(
+      path,
+      JSON.stringify({
+        version: '1.0',
+        maven: { dependencies: ['software.amazon.smithy:smithy-model:1.61.0'] },
+      }),
+    );
+
+    await syncVendedVersions(tree);
+
+    // Their coordinate keeps the version they chose, not the one this release vends.
+    expect(tree.read(path, 'utf-8')).toContain(
+      'software.amazon.smithy:smithy-model:1.61.0',
+    );
   });
 });

@@ -2,6 +2,8 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { addProjectConfiguration, type Tree } from '@nx/devkit';
 import { smithyProjectGenerator } from '../../../smithy/project/generator';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
@@ -21,25 +23,23 @@ const OLD_ROLLDOWN = '1.0.0-beta.38';
 const OLD_DTS = '0.16.5';
 
 /**
- * A `build.Dockerfile` as an older release generated it: the real template,
- * rendered by the real generator, with only the pins wound back. Asserting
- * against a hand-written fixture would pass even if the template's shape moved
- * out from under the migration.
+ * The `build.Dockerfile` a v1.0.0-rc.57 workspace holds.
+ *
+ * A snapshot of that release's rendered template rather than the generator's
+ * output: Smithy projects now build with the Smithy CLI on the machine and vend no
+ * Dockerfile at all, so there is nothing left to render. This migration exists
+ * only for a workspace still on the container build, and the file it has is fixed
+ * — pinning the input here is what it actually runs against.
  */
+const RC57_BUILD_DOCKERFILE = readFileSync(
+  join(import.meta.dirname, 'rc57-service.Dockerfile.fixture'),
+  'utf-8',
+);
+
+/** A Smithy service project as v1.0.0-rc.57 left it. */
 const generateOldWorkspace = async (tree: Tree): Promise<void> => {
   await smithyProjectGenerator(tree, { name: 'test-api' });
-  const current = tree.read(BUILD_DOCKERFILE, 'utf-8') ?? '';
-  tree.write(
-    BUILD_DOCKERFILE,
-    current
-      // Matched on the pin name rather than the version the template renders
-      // today, so winding back keeps working as the vended versions move.
-      .replace(/rolldown@[^\s\\]+/, `rolldown@${OLD_ROLLDOWN}`)
-      .replace(
-        /rolldown-plugin-dts@[^\s\\]+/,
-        `rolldown-plugin-dts@${OLD_DTS}`,
-      ),
-  );
+  tree.write(BUILD_DOCKERFILE, RC57_BUILD_DOCKERFILE);
 };
 
 describe('smithy-ssdk-bundle-pins migration', () => {
@@ -78,11 +78,15 @@ describe('smithy-ssdk-bundle-pins migration', () => {
 
   it('should leave a workspace already on the fixed versions untouched', async () => {
     await smithyProjectGenerator(tree, { name: 'test-api' });
-    const before = tree.read(BUILD_DOCKERFILE, 'utf-8');
+    const onTarget = RC57_BUILD_DOCKERFILE.replace(
+      /rolldown@[^\s\\]+/,
+      `rolldown@${ROLLDOWN}`,
+    ).replace(/rolldown-plugin-dts@[^\s\\]+/, `rolldown-plugin-dts@${DTS}`);
+    tree.write(BUILD_DOCKERFILE, onTarget);
 
     const { nextSteps } = await migration(tree);
 
-    expect(tree.read(BUILD_DOCKERFILE, 'utf-8')).toEqual(before);
+    expect(tree.read(BUILD_DOCKERFILE, 'utf-8')).toEqual(onTarget);
     expect(nextSteps).toEqual([]);
   });
 
@@ -90,9 +94,10 @@ describe('smithy-ssdk-bundle-pins migration', () => {
   // migration still runs on the way through — it must not wind them back.
   it('should leave a pin a later release moved past the target alone', async () => {
     await smithyProjectGenerator(tree, { name: 'test-api' });
-    const newer = (tree.read(BUILD_DOCKERFILE, 'utf-8') ?? '')
-      .replace(/rolldown@[^\s\\]+/, 'rolldown@9.9.9')
-      .replace(/rolldown-plugin-dts@[^\s\\]+/, 'rolldown-plugin-dts@9.9.9');
+    const newer = RC57_BUILD_DOCKERFILE.replace(
+      /rolldown@[^\s\\]+/,
+      'rolldown@9.9.9',
+    ).replace(/rolldown-plugin-dts@[^\s\\]+/, 'rolldown-plugin-dts@9.9.9');
     tree.write(BUILD_DOCKERFILE, newer);
 
     const { nextSteps } = await migration(tree);
@@ -114,7 +119,9 @@ describe('smithy-ssdk-bundle-pins migration', () => {
   // The shapes type builds the model alone and pins none of this.
   it('should leave a shapes project alone', async () => {
     await smithyProjectGenerator(tree, { name: 'test-shapes', type: 'shapes' });
-    const before = tree.read('test-shapes/build.Dockerfile', 'utf-8');
+    // A rc.57 shape library's Dockerfile, which pins the CLI but nothing else.
+    const before = `FROM public.ecr.aws/docker/library/node:24 AS builder\nRUN npm i -g rolldown@${OLD_ROLLDOWN}\n`;
+    tree.write('test-shapes/build.Dockerfile', before);
 
     await migration(tree);
 
