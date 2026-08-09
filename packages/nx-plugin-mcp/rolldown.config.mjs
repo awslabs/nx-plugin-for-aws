@@ -15,7 +15,6 @@ export default defineConfig({
     entryFileNames: 'aws-nx-mcp.js',
     format: 'cjs',
     // Keep the bundle self-contained — the published binary ships alone.
-    inlineDynamicImports: true,
     codeSplitting: false,
   },
   platform: 'node',
