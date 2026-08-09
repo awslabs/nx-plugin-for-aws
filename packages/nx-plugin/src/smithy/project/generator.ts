@@ -64,7 +64,6 @@ export const DEPENDENCIES = declareDependencies<SmithyProjectMetadata>()({
     ...ownedElsewhere(FS_DEPENDENCIES),
     { name: 'rolldown', dev: true, root: true, when: isService },
     { name: 'rolldown-plugin-dts', dev: true, root: true, when: isService },
-    { name: '@rollup/plugin-esm-shim', dev: true, root: true, when: isService },
     // Resolved by `rolldown-plugin-dts` to emit the bundled declaration.
     { name: 'typescript', dev: true, root: true, when: isService },
   ],

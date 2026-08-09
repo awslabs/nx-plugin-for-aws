@@ -1,7 +1,5 @@
 import fs from 'node:fs';
-import { createRequire } from 'node:module';
 import path from 'node:path';
-import esmShim from '@rollup/plugin-esm-shim';
 import { dts } from 'rolldown-plugin-dts';
 
 // The Smithy CLI generates the Server SDK under dist, along with its own
@@ -12,36 +10,16 @@ const ssdkDir = path.resolve(
   '<%- projectRoot %>',
   'smithy/source/typescript-ssdk-codegen',
 );
-const require = createRequire(path.join(ssdkDir, 'package.json'));
 
-// Bundle the re2-wasm wasm file as part of the module
-const re2WasmPlugin = () => ({
-  name: 're2-wasm-plugin',
-  resolveId: (id) => {
-    if (!(id === 're2-wasm' || id.endsWith('/re2-wasm'))) return null;
-    try {
-      const dir = path.join(
-        path.dirname(require.resolve('re2-wasm/package.json')),
-        'build/wasm',
-      );
-      const entry = path.join(dir, 're2.js');
-      return fs.existsSync(path.join(dir, 're2.wasm')) && fs.existsSync(entry)
-        ? entry
-        : null;
-    } catch {
-      return null;
-    }
-  },
+// Embed the re2 wasm binary in its emscripten glue module (`Module.wasmBinary`),
+// so the bundle stays a single self-contained file. `__dirname` is what the
+// glue's on-disk fallback would read, which an ES module doesn't define.
+const inlineRe2Wasm = () => ({
+  name: 'inline-re2-wasm',
   load: (id) => {
-    if (!(id.endsWith('re2.js') && id.includes('re2-wasm'))) return null;
-    try {
-      const wasmPath = path.join(path.dirname(id), 're2.wasm');
-      return fs.existsSync(wasmPath) && fs.existsSync(id)
-        ? `var Module = { wasmBinary: Buffer.from("${fs.readFileSync(wasmPath).toString('base64')}", "base64") }\n${fs.readFileSync(id, 'utf8')}`
-        : null;
-    } catch {
-      return null;
-    }
+    if (!/re2-wasm.*[\\/]wasm[\\/]re2\.js$/.test(id)) return null;
+    const wasm = fs.readFileSync(path.join(path.dirname(id), 're2.wasm'));
+    return `var __dirname = '';\nvar Module = { wasmBinary: Buffer.from("${wasm.toString('base64')}", "base64") };\n${fs.readFileSync(id, 'utf8')}`;
   },
 });
 
@@ -68,7 +46,7 @@ const outDir = path.resolve('dist', '<%- projectRoot %>', 'build/ssdk');
 // declarations in one pass.
 export default {
   input: path.join(ssdkDir, 'src/index.ts'),
-  plugins: [dropSelfImports(), re2WasmPlugin(), esmShim(), dts({ resolve: true })],
+  plugins: [dropSelfImports(), inlineRe2Wasm(), dts({ resolve: true })],
   output: [{ dir: outDir, format: 'es' }],
   platform: 'node',
 };

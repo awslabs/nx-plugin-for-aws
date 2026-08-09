@@ -191,7 +191,7 @@ describe('smithy-build-without-docker migration', () => {
     const { devDependencies } = readJson(tree, 'package.json');
     expect(devDependencies).toHaveProperty('rolldown');
     expect(devDependencies).toHaveProperty('rolldown-plugin-dts');
-    expect(devDependencies).toHaveProperty('@rollup/plugin-esm-shim');
+    expect(devDependencies).toHaveProperty('typescript');
   });
 
   it('should migrate a shape library with no sdk to bundle', async () => {
