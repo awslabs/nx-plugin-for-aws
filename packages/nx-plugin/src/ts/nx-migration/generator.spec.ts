@@ -436,6 +436,39 @@ describe('nx-migration generator', () => {
       );
     });
 
+    it('should import the migration with a .js extension in an ESM workspace', async () => {
+      await tsNxMigrationGenerator(tree, {
+        project: PROJECT,
+        name: 'rename-foo-target',
+        description: 'Rename the foo target to bar',
+        preferInstallDependencies: false,
+      });
+
+      // `nodenext` resolution requires the explicit extension, so an
+      // extensionless relative import fails `typecheck` with TS2835.
+      expect(tree.read(dir('migration.spec.ts'), 'utf-8')).toContain(
+        "import migration from './migration.js';",
+      );
+    });
+
+    it('should import the migration without an extension in a CommonJS workspace', async () => {
+      writeJson(tree, 'package.json', {
+        name: '@myorg/monorepo',
+        type: 'commonjs',
+      });
+
+      await tsNxMigrationGenerator(tree, {
+        project: PROJECT,
+        name: 'rename-foo-target',
+        description: 'Rename the foo target to bar',
+        preferInstallDependencies: false,
+      });
+
+      expect(tree.read(dir('migration.spec.ts'), 'utf-8')).toContain(
+        "import migration from './migration';",
+      );
+    });
+
     it('should add @aws/nx-plugin so the SDK format util resolves', async () => {
       await tsNxMigrationGenerator(tree, {
         project: PROJECT,
