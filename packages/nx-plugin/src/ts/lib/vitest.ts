@@ -21,6 +21,19 @@ const readGritPattern = (name: string): string =>
     'utf-8',
   ).trim();
 
+/**
+ * Resolve the config's `root` from `import.meta.dirname`.
+ *
+ * `@nx/js` writes `root: __dirname`, which Vite's native config loader does not
+ * provide — it warns today and will reject once `configLoader: 'native'` becomes
+ * the default. Scoped with `some` to a direct property of the object the config
+ * factory returns, so a nested `root` (a `test.alias` entry, say) is untouched.
+ */
+const ROOT_IMPORT_META_DIRNAME = `\`defineConfig(() => ({ $props }))\` where {
+  $props <: some \`root: __dirname\` as $root,
+  $root => \`root: import.meta.dirname\`
+}`;
+
 /** Dependencies a caller must declare to configure vitest. */
 export const VITEST_DEPENDENCIES = [
   { name: 'vite' },
@@ -45,6 +58,8 @@ export const configureVitest = async <const D extends DependencyDeclaration>(
       configPath,
       readGritPattern('vitest-pass-with-no-tests'),
     );
+
+    await applyGritQL(tree, configPath, ROOT_IMPORT_META_DIRNAME);
 
     const nxJson = readNxJson(tree);
     updateNxJson(tree, {
