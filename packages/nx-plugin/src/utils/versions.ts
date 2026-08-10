@@ -35,8 +35,8 @@ export const TS_VERSIONS = {
   '@aws-sdk/credential-provider-cognito-identity': '3.972.66',
   '@aws-sdk/client-secrets-manager': '3.1106.0',
   '@aws-sdk/rds-signer': '3.1106.0',
-  '@aws-smithy/server-apigateway': '1.0.0-alpha.10',
-  '@aws-smithy/server-node': '1.0.0-alpha.10',
+  '@smithy/server-apigateway': '0.2.0',
+  '@smithy/server-node': '0.2.0',
   '@aws-lambda-powertools/logger': '2.34.0',
   '@aws-lambda-powertools/metrics': '2.34.0',
   '@aws-lambda-powertools/parameters': '2.34.0',
@@ -283,7 +283,7 @@ export const JAVA_VERSIONS = {
   'software.amazon.smithy:smithy-aws-traits': '1.72.1',
   'software.amazon.smithy:smithy-validation-model': '1.72.1',
   'software.amazon.smithy:smithy-openapi': '1.72.1',
-  'software.amazon.smithy.typescript:smithy-aws-typescript-codegen': '0.50.0',
+  'software.amazon.smithy.typescript:smithy-aws-typescript-codegen': '0.52.0',
 } as const;
 export type IJavaVersion = keyof typeof JAVA_VERSIONS;
 

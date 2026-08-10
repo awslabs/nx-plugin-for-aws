@@ -381,9 +381,9 @@ describe('tsSmithyApiGenerator', () => {
 
     // Verify runtime dependencies
     expect(packageJson.dependencies).toHaveProperty(
-      '@aws-smithy/server-apigateway',
+      '@smithy/server-apigateway',
     );
-    expect(packageJson.dependencies).toHaveProperty('@aws-smithy/server-node');
+    expect(packageJson.dependencies).toHaveProperty('@smithy/server-node');
     expect(packageJson.dependencies).toHaveProperty('@middy/core');
 
     // Powertools

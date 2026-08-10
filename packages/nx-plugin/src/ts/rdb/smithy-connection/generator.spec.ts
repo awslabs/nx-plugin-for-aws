@@ -50,7 +50,7 @@ export interface ServiceContext {
     tree.write(
       `packages/${name}/src/local-server.ts`,
       `import { IncomingMessage, ServerResponse, createServer } from 'http';
-import { convertRequest, writeResponse } from '@aws-smithy/server-node';
+import { convertRequest, writeResponse } from '@smithy/server-node';
 import { Tracer } from '@aws-lambda-powertools/tracer';
 import { Logger } from '@aws-lambda-powertools/logger';
 import { Metrics } from '@aws-lambda-powertools/metrics';
@@ -78,7 +78,7 @@ server.listen(3000);
     );
     tree.write(
       `packages/${name}/src/handler.ts`,
-      `import { convertEvent, convertVersion1Response } from '@aws-smithy/server-apigateway';
+      `import { convertEvent, convertVersion1Response } from '@smithy/server-apigateway';
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { Tracer } from '@aws-lambda-powertools/tracer';
 import { Logger } from '@aws-lambda-powertools/logger';
