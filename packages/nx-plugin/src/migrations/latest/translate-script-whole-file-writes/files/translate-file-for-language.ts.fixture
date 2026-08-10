@@ -1,0 +1,61 @@
+async function translateFileForLanguage(
+  file: FileToTranslate,
+  targetLang: string,
+): Promise<void> {
+  const targetAbsPath = path.join(DOCS_DIR, targetLang, file.relativePath);
+
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= TRANSLATE_MAX_ATTEMPTS; attempt++) {
+    const agent = new Agent({
+      model: new BedrockModel({
+        modelId: config.modelId,
+        region: process.env.AWS_REGION ?? config.awsRegion,
+        maxTokens: 64_000,
+        temperature: 0.2,
+        // Translating a long file can stream for several minutes, well past the
+        // AWS SDK's two-minute default socket timeout.
+        clientConfig: { requestHandler: { requestTimeout: 15 * 60_000 } },
+      }),
+      systemPrompt: buildSystemPrompt(targetLang),
+      tools: [fileEditor],
+      printer: !!options.verbose,
+    });
+    agent.addHook(BeforeToolCallEvent, rejectOutsideDocsDir);
+
+    try {
+      const result = await agent.invoke(buildUserPrompt(file, targetLang));
+      if (result.stopReason !== 'endTurn') {
+        log.warn(
+          `agent stopped with reason=${result.stopReason} while translating ${file.relativePath} → ${targetLang} — inspect output above`,
+        );
+      }
+      lastError = undefined;
+    } catch (err) {
+      lastError = err;
+    }
+
+    // Judge the file on disk rather than on whether the agent wrote it: the
+    // stream often drops after a successful write, and an agent handed an
+    // already-correct translation may rightly decide there is nothing to do.
+    if (fs.existsSync(targetAbsPath)) {
+      try {
+        assertFrontmatterIsParseable(await fs.readFile(targetAbsPath, 'utf-8'));
+        await restoreCodeBlocks(file.sourceAbsPath, targetAbsPath);
+        return;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+    lastError ??= new Error('no translation exists at the target path');
+
+    if (attempt < TRANSLATE_MAX_ATTEMPTS) {
+      const delayMs = 2000 * attempt;
+      log.warn(
+        `translation attempt ${attempt}/${TRANSLATE_MAX_ATTEMPTS} for ${file.relativePath} → ${targetLang} failed (${lastError instanceof Error ? lastError.message : String(lastError)}); retrying in ${delayMs}ms`,
+      );
+      await sleep(delayMs);
+    }
+  }
+
+  throw lastError;
+}
