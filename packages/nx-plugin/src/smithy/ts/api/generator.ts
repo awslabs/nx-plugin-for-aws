@@ -62,8 +62,8 @@ export interface TsSmithyApiMetadata extends IacMetadata {
 // adding and the version sync.
 export const DEPENDENCIES = declareDependencies<TsSmithyApiMetadata>()({
   ts: [
-    { name: '@aws-smithy/server-apigateway' },
-    { name: '@aws-smithy/server-node' },
+    { name: '@smithy/server-apigateway' },
+    { name: '@smithy/server-node' },
     { name: '@middy/core' },
     { name: '@aws-lambda-powertools/logger' },
     { name: '@aws-lambda-powertools/parameters' },
