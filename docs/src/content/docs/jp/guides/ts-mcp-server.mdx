@@ -1,6 +1,6 @@
 ---
-title: "TypeScriptのMCPサーバー"
-description: "大規模言語モデルにコンテキストを提供するTypeScript モデルコンテキストプロトコル（MCP）サーバーを生成"
+title: TypeScript MCP Server
+description: 大規模言語モデルにコンテキストを提供するための TypeScript Model Context Protocol (MCP) サーバーを生成します
 generator: ts#mcp-server
 ---
 
@@ -14,49 +14,49 @@ import Snippet from '@components/snippet.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import OptionFilter from '@components/option-filter.astro';
 
-大規模言語モデル（LLM）にコンテキストを提供するTypeScript [Model Context Protocol（MCP）](https://modelcontextprotocol.io/)サーバーを生成し、オプションで[Amazon Bedrock AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/)にデプロイします。
+大規模言語モデル（LLM）にコンテキストを提供するための TypeScript [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) サーバーを生成し、オプションで [Amazon Bedrock AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/) にデプロイします。
 
-## MCPとは？
+## MCP とは？
 
-[Model Context Protocol（MCP）](https://modelcontextprotocol.io/)は、AIアシスタントが外部ツールやリソースと相互作用するためのオープンスタンダードです。LLMが以下を一貫した方法で行えるようにします：
+[Model Context Protocol (MCP)](https://modelcontextprotocol.io/) は、AI アシスタントが外部ツールやリソースと対話できるようにするオープン標準です。LLM が以下を行うための一貫した方法を提供します：
 
-- アクション実行や情報取得のためのツール（関数）を実行
-- コンテキストやデータを提供するリソースにアクセス
+- アクションを実行したり情報を取得したりするツール（関数）を実行する
+- コンテキストやデータを提供するリソースにアクセスする
 
 ## 使用方法
 
-### MCPサーバーの生成
+### MCP サーバーの生成
 
-TypeScript MCPサーバーは2つの方法で生成できます：
+TypeScript MCP サーバーは 2 つの方法で生成できます：
 
 <RunGenerator generator="ts#mcp-server" />
 
 :::tip[プロジェクトの前提条件]
-最初に<Link path="/guides/typescript-project">`ts#project`</Link>ジェネレータを使用して、MCPサーバーを追加するプロジェクトを作成してください。
+まず <Link path="/guides/typescript-project">`ts#project`</Link> ジェネレーターを使用して、MCP サーバーを追加するプロジェクトを作成してください。
 :::
 
 ### オプション
 
 <GeneratorParameters generator="ts#mcp-server" />
 
-## ジェネレータの出力
+## ジェネレーターの出力
 
-ジェネレータは既存のTypeScriptプロジェクトに以下のファイルを追加します：
+ジェネレーターは、既存の TypeScript プロジェクトに以下のファイルを追加します：
 
 <FileTree>
   - your-project/
     - src/
-      - mcp-server/ （カスタム名を指定した場合はそれを使用）
-        - index.ts サーバーのエクスポート
-        - server.ts メインサーバー定義
-        - stdio.ts STDIOトランスポート用エントリポイント（簡易ローカルMCPサーバー向け）
-        - http.ts ストリーミング可能なHTTPトランスポート用エントリポイント（MCPサーバーホスティング向け）
+      - mcp-server/ (or custom name if specified)
+        - index.ts Exports your server
+        - server.ts Main server definition
+        - stdio.ts Entry point for STDIO transport, useful for simple local MCP servers
+        - http.ts Entry point for Streamable HTTP transport, useful for hosting your MCP server
         - tools/
-          - divide.ts サンプルツール
+          - divide.ts Sample tool
         - resources/
-          - sample-guidance.ts サンプルリソース
-        - Dockerfile MCPサーバーホスティング用エントリポイント（`infra`が`None`の場合は除外）
-    - project.json MCPサーバーserveターゲットを更新
+          - sample-guidance.ts Sample resource
+        - Dockerfile Entry point for hosting your MCP server (excluded when `infra` is set to `None`)
+    - project.json Updated with MCP server serve target
 </FileTree>
 
 ### インフラストラクチャ
@@ -67,49 +67,62 @@ TypeScript MCPサーバーは2つの方法で生成できます：
 <Snippet name="mcp/shared-constructs" />
 </OptionFilter>
 
-<OptionFilter when={{ infra: 'none' }} description="No infrastructure is vended for infra=None">
-`infra`に`None`を選択した場合、CDKコンストラクトやTerraformモジュールは生成されません — MCPサーバーはローカルのSTDIO / HTTPでの使用のみに設定されています。ホストされたエンドポイントが存在しないため、このモードでは`auth`オプションは無視されます。
+<OptionFilter when={{ infra: 'none' }} description="No infrastructure is vended for infra=none">
+`infra` に `none` を選択した場合、CDK コンストラクトや Terraform モジュールは生成されません — MCP サーバーはローカルの STDIO / HTTP 使用のみに設定されます。この モードでは、認証するホストされたエンドポイントがないため、`auth` オプションは無視されます。
 </OptionFilter>
 
 #### アーキテクチャ
 
 <Snippet name="mcp/architecture" />
 
-## MCPサーバーの操作
+## MCP サーバーの操作
 
 ### ツールの追加
 
-ツールはAIアシスタントが呼び出せるアクション実行関数です。`server.ts`ファイルに新しいツールを追加できます：
+ツールは、AI アシスタントがアクションを実行するために呼び出すことができる関数です。各ツールは `tools/` 配下の独自のファイルに存在し、`register<Name>Tool` 関数をエクスポートします。その後、`server.ts` からその関数を呼び出します。例えば、`tools/my-tool.ts` を追加します：
 
-```typescript
-server.registerTool("toolName", {
-  description: "ツールの説明",
-  inputSchema: { param1: z.string(), param2: z.number() } // Zodを使用した入力スキーマ
-},
-  async ({ param1, param2 }) => {
-    // ツールの実装
-    return {
-      content: [{ type: "text", text: "結果" }]
-    };
-  }
-);
+```typescript title="tools/my-tool.ts"
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z } from 'zod';
+
+export const registerMyTool = (server: McpServer) => {
+  server.registerTool("toolName", {
+    description: "tool description",
+    inputSchema: { param1: z.string(), param2: z.number() } // Input schema using Zod
+  },
+    async ({ param1, param2 }) => {
+      // Tool implementation
+      return {
+        content: [{ type: "text", text: "Result" }]
+      };
+    }
+  );
+};
+```
+
+次に、`server.ts` に登録します：
+
+```typescript title="server.ts"
+import { registerMyTool } from './tools/my-tool.js';
+
+registerMyTool(server);
 ```
 
 ### リソースの追加
 
-リソースはAIアシスタントにコンテキストを提供します。ツールと同様に、各リソースは`resources/`配下の独自のファイルに配置され、`register<Name>Resource`関数をエクスポートし、それを`server.ts`から呼び出します。ファイルからの静的リソースや動的リソースを追加できます：
+リソースは AI アシスタントにコンテキストを提供します。ツールと同様に、各リソースは `resources/` 配下の独自のファイルに存在し、`server.ts` から呼び出される `register<Name>Resource` 関数をエクスポートします。ファイルから静的リソースを追加したり、動的リソースを追加したりできます：
 
 ```typescript title="resources/my-resource.ts"
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
 export const registerMyResource = (server: McpServer) => {
-  const exampleContext = '返されるコンテキスト';
+  const exampleContext = 'some context to return';
 
   server.registerResource('resource-name', 'example://resource', {}, async (uri) => ({
     contents: [{ uri: uri.href, text: exampleContext }],
   }));
 
-  // 動的リソース
+  // Dynamic resource
   server.registerResource('dynamic-resource', 'dynamic://resource', {}, async (uri) => {
     const data = await fetchSomeData();
     return {
@@ -119,86 +132,86 @@ export const registerMyResource = (server: McpServer) => {
 };
 ```
 
-## AIアシスタントとの連携設定
+## AI アシスタントでの設定
 
-<Snippet name="mcp/configuration-ts" parentHeading="AIアシスタントとの連携設定" />
+<Snippet name="mcp/configuration-ts" parentHeading="AI アシスタントでの設定" />
 
-## MCPサーバーの実行
+## MCP サーバーの実行
 
 ### ローカル開発
 
-MCPサーバー（およびローカルデータベースなど、それに接続されているすべてのもの）をローカルで実行するには、プロジェクトの`dev`ターゲットを使用します：
+MCP サーバー（およびローカルデータベースなど、それに接続されているすべてのもの）をローカルで実行するには、プロジェクトの `dev` ターゲットを使用します：
 
 <NxCommands commands={['dev your-project']} />
 
-プロジェクトに複数のコンポーネント（MCPサーバー、エージェントなど）を追加している場合、これによりすべてが起動します。このMCPサーバーのみを実行するには、その`<your-server-name>-dev`ターゲットを指定します：
+プロジェクトに複数のコンポーネント（MCP サーバー、エージェントなど）を追加している場合、これによりすべてが起動します。この MCP サーバーのみを実行するには、その `<your-server-name>-dev` ターゲットを指定します：
 
 <NxCommands commands={['your-server-name-dev your-project']} />
 
-### インスペクタ
+### Inspector
 
-ジェネレータは`<your-server-name>-inspect`ターゲットを設定し、MCPサーバーをローカルで起動し（`<your-server-name>-dev`ターゲット経由で、ローカルデータベースなどの接続された依存関係を含む）、[MCP Inspector](https://github.com/modelcontextprotocol/inspector)をストリーミング可能HTTPトランスポートで接続するように事前設定して起動します。
+ジェネレーターは `<your-server-name>-inspect` という名前のターゲットを設定します。これは MCP サーバーをローカルで起動し（`<your-server-name>-dev` ターゲット経由で、ローカルデータベースなどの接続された依存関係を含む）、Streamable HTTP トランスポート経由で接続するように事前設定された [MCP Inspector](https://github.com/modelcontextprotocol/inspector) を起動します。
 
 <NxCommands commands={['your-server-name-inspect your-project']} />
 
-これにより`http://localhost:6274`でインスペクタが起動します。「Connect」ボタンから開始してください。
+これにより、インスペクターが `http://localhost:6274` で起動します。「Connect」ボタンをクリックして開始してください。
 
 :::tip
-代わりにSTDIOトランスポートを使用してサーバーを検査するには、`<your-server-name>-inspect-stdio`ターゲットを使用してください。これはサーバーのSTDIOインスタンスに対してインスペクタを起動します。
+代わりに STDIO トランスポートを使用してサーバーを検査するには、`<your-server-name>-inspect-stdio` ターゲットを使用します。これは、サーバーの STDIO インスタンスに対してインスペクターを起動します。
 :::
 
 ### STDIO
 
-MCPサーバーをテストする最も簡単な方法は、インスペクタを使用するかAIアシスタントと連携させることです（上記参照）。
+MCP サーバーをテストして使用する最も簡単な方法は、インスペクターを使用するか、AI アシスタントで設定する（上記のように）ことです。
 
-[STDIOトランスポート](https://modelcontextprotocol.io/docs/concepts/transports#standard-input%2Foutput-stdio)で直接サーバーを実行するには、`<your-server-name>-serve-stdio`ターゲットを使用します。
+ただし、`<your-server-name>-serve-stdio` ターゲットを使用して、[STDIO トランスポート](https://modelcontextprotocol.io/docs/concepts/transports#standard-input%2Foutput-stdio) でサーバーを直接実行することもできます。
 
 <NxCommands commands={['your-server-name-serve-stdio your-project']} />
 
-このコマンドは`tsx --watch`を使用し、ファイル変更時にサーバーを自動再起動します。
+このコマンドは `tsx --watch` を使用して、ファイルが変更されたときにサーバーを自動的に再起動します。
 
-### ストリーミング可能HTTP
+### Streamable HTTP
 
-[ストリーミング可能HTTPトランスポート](https://modelcontextprotocol.io/docs/concepts/transports#streamable-http)でローカルにMCPサーバーを実行するには、`<your-server-name>-serve`ターゲットを使用します。
+[Streamable HTTP トランスポート](https://modelcontextprotocol.io/docs/concepts/transports#streamable-http) を使用して MCP サーバーをローカルで実行したい場合は、`<your-server-name>-serve` ターゲットを使用できます。
 
 <NxCommands commands={['your-server-name-serve your-project']} />
 
-このコマンドは`tsx --watch`を使用し、ファイル変更時にサーバーを自動再起動します。
+このコマンドは `tsx --watch` を使用して、ファイルが変更されたときにサーバーを自動的に再起動します。
 
 <OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment details">
-## Bedrock AgentCore RuntimeへのMCPサーバーデプロイ
+## MCP サーバーを Bedrock AgentCore Runtime にデプロイする
 
-<Snippet name="mcp/bedrock-deployment" parentHeading="Bedrock AgentCore RuntimeへのMCPサーバーデプロイ" />
+<Snippet name="mcp/bedrock-deployment" parentHeading="MCP サーバーを Bedrock AgentCore Runtime にデプロイする" />
 
-### バンドルターゲット
+### Bundle ターゲット
 
 <Snippet name="ts-bundle" />
 
-バンドルターゲットはBedrock AgentCore RuntimeでホストするストリーミングHTTP MCPサーバーのエントリポイントとして`http.ts`を使用します。
+bundle ターゲットは、Bedrock AgentCore Runtime でホストする Streamable HTTP MCP サーバーのエントリーポイントとして `http.ts` を使用します。
 
-### Dockerターゲット
+### Docker ターゲット
 
-ジェネレータは`<your-server-name>-docker`ターゲットを設定し、MCPサーバーのソースディレクトリから`Dockerfile`をバンドル出力ディレクトリにコピーします。これにより`Dockerfile`がバンドルされた成果物と同じ場所に配置され、CDKが`AgentRuntimeArtifact.fromAsset`を使用してDockerイメージを直接ビルドできるようになります。
+ジェネレーターは `<your-server-name>-docker` ターゲットを設定します。これは、MCP サーバーのソースディレクトリから `Dockerfile` をバンドル出力ディレクトリにコピーします。これにより、`Dockerfile` がバンドルされたアーティファクトと同じ場所に配置され、CDK が `AgentRuntimeArtifact.fromAsset` を使用して Docker イメージを直接ビルドできるようになります。
 
-複数のMCPサーバーを定義している場合、すべてのMCPサーバーのdockerコンテキストを準備する`docker`ターゲットも生成されます。
+複数の MCP サーバーが定義されている場合、すべての MCP サーバーの Docker コンテキストを準備する `docker` ターゲットも生成されます。
 
 ### イメージスキャン
 
-<Snippet name="trivy-image-scan" parentHeading="Image Scanning" />
+<Snippet name="trivy-image-scan" parentHeading="イメージスキャン" />
 
-### オブザーバビリティ
+### 可観測性
 
-<Snippet name="mcp/observability" parentHeading="オブザーバビリティ" />
+<Snippet name="mcp/observability" parentHeading="可観測性" />
 </OptionFilter>
 
 ## 接続
 
-<Link path="guides/connection">`connection`</Link>ジェネレータを使用して、このプロジェクトをワークスペース内の他のプロジェクトと統合できます。このプロジェクトに関連する接続は以下の通りです：
+<Link path="guides/connection">`connection`</Link> ジェネレーターを使用して、このプロジェクトをワークスペース内の他のプロジェクトと統合します。このプロジェクトに関連する接続は以下の通りです：
 
 <CardGrid>
   <ConnectionCard
     title="TypeScript Agent to MCP"
-    description="TypeScript AgentをMCPサーバーに接続する"
+    description="Connect a TypeScript Agent to an MCP server"
     href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/ts-agent-mcp`}
     source="strands"
     sourceBadge="typescript"
@@ -206,7 +219,7 @@ MCPサーバーをテストする最も簡単な方法は、インスペクタ�
   />
   <ConnectionCard
     title="Python Agent to MCP"
-    description="Python AgentをMCPサーバーに接続する"
+    description="Connect a Python Agent to an MCP server"
     href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-mcp`}
     source="strands"
     sourceBadge="python"
@@ -214,21 +227,21 @@ MCPサーバーをテストする最も簡単な方法は、インスペクタ�
   />
   <ConnectionCard
     title="MCP Server to Relational Database"
-    description="TypeScript MCP ServerをAuroraリレーショナルデータベースに接続する"
+    description="Connect a TypeScript MCP Server to an Aurora relational database"
     href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/ts-mcp-server-rdb`}
     source="mcp"
     target="aurora"
   />
   <ConnectionCard
     title="MCP Server to TypeScript DynamoDB"
-    description="TypeScript MCP ServerをDynamoDBテーブルに接続する"
+    description="Connect a TypeScript MCP Server to a DynamoDB table"
     href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/ts-mcp-server-dynamodb`}
     source="mcp"
     target="dynamodb"
   />
   <ConnectionCard
     title="AgentCore Gateway to MCP Server"
-    description="AgentCore GatewayでMCPサーバーを集約する"
+    description="Aggregate an MCP server behind an AgentCore Gateway"
     href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/agentcore-gateway-mcp`}
     source="agentcore"
     target="mcp"

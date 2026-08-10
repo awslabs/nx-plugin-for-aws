@@ -16,7 +16,7 @@ import Infrastructure from '@components/infrastructure.astro';
 
 `connection` 生成器可以将 MCP 服务器（<Link path="guides/ts-mcp-server">TypeScript</Link> 或 <Link path="guides/py-mcp-server">Python</Link>）注册为 <Link path="guides/agentcore-gateway">AgentCore Gateway</Link> 的目标。
 
-连接后，Gateway 会将 MCP 服务器的工具聚合到其单一的 MCP 端点中，根据其 Cedar 策略引擎评估调用，并使用 IAM SigV4 对发往 MCP 服务器的出站流量进行签名。
+连接后，Gateway 将 MCP 服务器的工具聚合到其单一的 MCP 端点中，根据其 Cedar 策略引擎评估调用，并使用 IAM SigV4 对发往 MCP 服务器的出站流量进行签名。
 
 ## 前置条件
 
@@ -25,7 +25,7 @@ import Infrastructure from '@components/infrastructure.astro';
 1. 一个 <Link path="guides/agentcore-gateway">`agentcore-gateway`</Link> 项目
 2. 一个使用 `infra: agentcore` 和 `auth: iam` 创建的 MCP 服务器组件（<Link path="guides/ts-mcp-server">`ts#mcp-server`</Link> 或 <Link path="guides/py-mcp-server">`py#mcp-server`</Link>）
 
-Gateway 必须具有 `protocol: mcp`，MCP 服务器必须具有 `auth: iam` — 生成器会验证这两者。非 IAM MCP 服务器无法附加，因为 Gateway 使用 SigV4 对出站流量进行签名。
+Gateway 必须具有 `protocol: mcp`，MCP 服务器必须具有 `auth: iam` — 生成器会验证这两者。无法附加非 IAM 的 MCP 服务器，因为 Gateway 使用 SigV4 对出站流量进行签名。
 
 ## 使用方法
 
@@ -47,15 +47,15 @@ Gateway 必须具有 `protocol: mcp`，MCP 服务器必须具有 `auth: iam` —
 
 - packages/\<gateway>
   - project.json Gateway 的 `dev` 目标获得对 MCP 服务器的 `<mcp>-dev` 的依赖
-  - local-dev.ts `ATTACHED_MCP_SERVERS` 更新，以便本地 gateway 聚合 MCP 服务器
+  - local-dev.ts `ATTACHED_MCP_SERVERS` 已更新，以便本地 gateway 聚合 MCP 服务器
 
 </FileTree>
 
-Gateway 项目的 `<gateway>-dev` 目标获得对 MCP 服务器的 `<mcp>-dev` 目标的依赖，因此在本地运行 Gateway 时也会启动 MCP 服务器。MCP 服务器还会在 Gateway 项目的 `local-dev.ts` 中注册，以便本地 gateway 聚合其工具。
+Gateway 项目的 `dev` 目标获得对 MCP 服务器的 `<mcp>-dev` 目标的依赖，因此在本地运行 Gateway 时也会启动 MCP 服务器。MCP 服务器还会在 Gateway 项目的 `local-dev.ts` 中注册，以便本地 gateway 聚合其工具。
 
 ## 将 MCP 服务器目标添加到您的堆栈
 
-生成器**无法**自动将 MCP 服务器目标连接到您的基础设施，因为它不知道哪个堆栈或模块实例化了 Gateway。您需要自己添加一个对 `gateway.addMcpServer(server)` 的调用。
+生成器**无法**自动将 MCP 服务器目标连接到您的基础设施中，因为它不知道哪个堆栈或模块实例化了 Gateway。您需要自己添加一个对 `gateway.addMcpServer(server)` 的调用。
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -66,11 +66,12 @@ const myMcpServer = new MyMcpServer(this, 'MyMcpServer');
 const myGateway = new MyGateway(this, 'MyGateway');
 
 // Register the MCP server as a target of the Gateway. The target name
-// defaults to the MCP server construct's id in kebab-case (`my-mcp-server`).
+// defaults to the MCP server's `mcpServerName` (its class name in
+// kebab-case, e.g. `MyMcpServer` -> `my-mcp-server`).
 myGateway.addMcpServer(myMcpServer);
 ```
 
-Gateway 目标名称（默认为 MCP 服务器的 `mcpServerName`）用作 Cedar 操作名称的前缀 — 操作格式为 ``AgentCore::Action::"<targetName>___<toolName>"``。请参阅 <Link path="guides/agentcore-gateway">编写策略部分</Link>。保持目标名称简短且稳定；稍后更改它会使引用旧名称的任何 Cedar 策略失效。
+Gateway 目标名称（默认为 MCP 服务器的 `mcpServerName`）用作 Cedar 操作名称的前缀 — 操作格式为 ``AgentCore::Action::"<targetName>___<toolName>"``。请参阅<Link path="guides/agentcore-gateway">编写策略部分</Link>。保持目标名称简短且稳定；稍后更改它会使引用旧名称的任何 Cedar 策略失效。
 
 要覆盖默认目标名称，请传递 `gatewayTargetName`：
 
@@ -114,7 +115,7 @@ resource "aws_bedrockagentcore_gateway_target" "my_mcp_server" {
 }
 ```
 
-目标 `name`（上面的 `my-mcp-server`）用作 Cedar 操作名称的前缀 — 请参阅 <Link path="guides/agentcore-gateway">编写策略部分</Link>。`policy_dependencies` 确保引用此目标操作的 Cedar 策略在目标注册它们之后创建。
+目标 `name`（上面的 `my-mcp-server`）用作 Cedar 操作名称的前缀 — 请参阅<Link path="guides/agentcore-gateway">编写策略部分</Link>。`policy_dependencies` 确保引用此目标操作的 Cedar 策略在目标注册它们之后创建。
 </Fragment>
 </Infrastructure>
 
@@ -124,10 +125,10 @@ resource "aws_bedrockagentcore_gateway_target" "my_mcp_server" {
 
 <NxCommands commands={["dev <gateway-name>"]} />
 
-会启动一个本地 gateway 以及在其分配的本地端口上的每个附加的 MCP 服务器。本地 gateway 公开一个单一的 MCP 端点，该端点聚合附加服务器的工具。通过 <Link path="guides/connection/ts-agent-gateway">TypeScript</Link> 或 <Link path="guides/connection/py-agent-gateway">Python</Link> gateway-connection 生成器连接到 Gateway 的代理在使用 `SERVE_LOCAL=true` 运行时会指向它。
+启动本地 gateway 以及每个附加的 MCP 服务器在其分配的本地端口上。本地 gateway 公开一个单一的 MCP 端点，该端点聚合附加服务器的工具。通过 <Link path="guides/connection/ts-agent-gateway">TypeScript</Link> 或 <Link path="guides/connection/py-agent-gateway">Python</Link> gateway-connection 生成器连接到 Gateway 的 Agent 在使用 `LOCAL_DEV=true` 运行时会指向它。
 
 :::caution[本地保真度]
-本地开发使用**本地替代 gateway** — 由 Gateway 项目启动的轻量级 MCP 聚合器，而不是 AgentCore Gateway 服务。因此，**Cedar 策略不会在本地评估**。每个代理都能看到每个附加 MCP 服务器上的每个工具。要执行 Cedar 策略，请改为运行代理的 `serve` 目标（请参阅 <Link path="guides/connection/ts-agent-gateway">TypeScript</Link> / <Link path="guides/connection/py-agent-gateway">Python</Link> agent-connection 指南），以便本地运行的代理调用已部署的 Gateway。
+本地开发使用**本地替代 gateway** — 由 Gateway 项目启动的轻量级 MCP 聚合器，而不是 AgentCore Gateway 服务。因此，**Cedar 策略不会在本地评估**。每个 agent 都能看到每个附加 MCP 服务器上的每个工具。要执行 Cedar 策略，请改为运行 agent 的 `serve` 目标（请参阅 <Link path="guides/connection/ts-agent-gateway">TypeScript</Link> / <Link path="guides/connection/py-agent-gateway">Python</Link> agent-connection 指南），以便本地运行的 agent 调用已部署的 Gateway。
 
-工具名称在本地仍以 `<target-name>___<tool-name>` 为前缀，以匹配已部署 Gateway 的命名空间，因此代理的系统提示和您引用的 Cedar 操作名称在本地和已部署运行中保持一致。
+工具名称在本地仍以 `<target-name>___<tool-name>` 为前缀，以匹配已部署 Gateway 的命名空间，因此 agent 的系统提示和您引用的 Cedar 操作名称在本地和已部署运行中保持一致。
 :::

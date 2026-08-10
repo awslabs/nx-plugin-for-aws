@@ -1,6 +1,6 @@
 ---
-title: "Construir la UI"
-description: "Un tutorial de cómo construir un juego de aventuras de mazmorra con IA agéntica usando @aws/nx-plugin."
+title: Construir la interfaz de usuario
+description: Un tutorial sobre cómo construir un juego de aventuras de mazmorras impulsado por IA agéntica usando @aws/nx-plugin.
 ---
 
 import { Aside, Code, FileTree, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
@@ -23,18 +23,18 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 ## Tarea 1: Ejecutar todo localmente
 
-Inicia el stack local completo — el servidor de desarrollo game-ui junto con una Game API local y un Story Agent AG-UI local (que a su vez arranca el servidor MCP de Inventario) — con un solo comando:
+Inicia el stack local completo — el servidor de desarrollo de game-ui junto con una Game API local y un AG-UI Story Agent local (que a su vez arranca el servidor Inventory MCP) — con un solo comando:
 
 <NxCommands commands={["dev game-ui"]} />
 
-El target `dev` en `game-ui` tiene `dependsOn` en `game-api:dev` y `dungeon_adventure.story:agent-dev`, por lo que Nx inicia el servidor local de cada proyecto en paralelo. A través de las conexiones que configuramos en el Módulo 1, estos a su vez arrancan el servidor MCP de Inventario y DynamoDB Local. Asegúrate de que tu motor de contenedores esté en ejecución, luego abre el servidor de desarrollo en un navegador.
+El target `dev` en `game-ui` tiene `dependsOn` en `game-api:dev` y `dungeon_adventure.story:agent-dev`, por lo que Nx inicia el servidor local de cada proyecto en paralelo. A través de las conexiones que configuramos en el Módulo 1, estos a su vez arrancan el servidor Inventory MCP y DynamoDB Local. Asegúrate de que tu motor de contenedores esté en ejecución, luego abre el servidor de desarrollo en un navegador.
 
 <Aside type="tip" title="Sin inicio de sesión localmente">
-En modo `local-dev` el componente `CognitoAuth` omite el flujo de inicio de sesión de Cognito (no hay un user pool ejecutándose localmente), por lo que llegarás directamente al juego sin iniciar sesión. Crearás una cuenta real cuando despleguemos a AWS al final de este módulo.
+En modo `local-dev`, el componente `CognitoAuth` omite el flujo de inicio de sesión de Cognito (no hay un user pool ejecutándose localmente), por lo que llegarás directamente al juego sin iniciar sesión. Crearás una cuenta real cuando despleguemos a AWS al final de este módulo.
 </Aside>
 
-<Aside type="caution" title="Mantener el servidor de desarrollo activo">
-Deja el servidor de desarrollo en ejecución durante el resto de este módulo — recarga automáticamente cada cambio a continuación.
+<Aside type="caution" title="Mantén el servidor de desarrollo en ejecución">
+Deja el servidor de desarrollo en ejecución durante el resto de este módulo — recarga en caliente cada cambio a continuación.
 </Aside>
 
 ## Tarea 2: Dónde CopilotKit ya está conectado
@@ -53,7 +53,7 @@ Cuando ejecutaste el generador `connection` para `game-ui → story` en el <Link
   - main.tsx Wraps `<App />` in `<AguiProvider>`
 </FileTree>
 
-Todo lo que necesitamos hacer es colocar un `<CopilotChat agentId="agent" threadId={...} />` en una ruta. Para más detalles sobre cómo se ensambla la integración, consulta la <Link path="guides/connection/react-agui">guía de conexión React → AG-UI</Link>.
+Todo lo que necesitamos hacer es colocar un `<CopilotChat agentId="agent" threadId={...} />` en una ruta. Para más detalles sobre cómo se construye la integración, consulta la <Link path="guides/connection/react-agui">guía de conexión React → AG-UI</Link>.
 
 ## Tarea 3: Rediseñar para la mazmorra
 
@@ -63,34 +63,34 @@ Reemplaza `packages/game-ui/src/styles.css` — este es el *único* archivo que 
 
 ## Tarea 4: Crear las rutas del juego
 
-Necesitamos dos rutas — una para elegir un héroe, otra para jugar. Ambas usan componentes de shadcn y el chat de CopilotKit; no hay una interfaz de chat hecha a mano.
+Necesitamos dos rutas — una para elegir un héroe, otra para jugar. Ambas usan componentes shadcn y el chat de CopilotKit; no hay una interfaz de chat hecha a mano.
 
 <Tabs>
 <TabItem label="routes/index.tsx">
 <E2EDiff before="dungeon-adventure/4/routes/index.tsx.old.template" after="dungeon-adventure/4/routes/index.tsx.template" lang="tsx" />
 
-Este es el selector de juego: formulario de nuevo juego (shadcn `Input` + `Button` + `Card`) más una lista de "Continuar" alimentada por `useGameApi().games.query` con `useInfiniteQuery` — un `<div>` centinela inferior observado por un `IntersectionObserver` llama automáticamente a `fetchNextPage()` cuando se desplaza a la vista, y los spinners junto al encabezado y debajo de la lista muestran el estado de carga. Iniciar un juego guarda con `saveGame` el par `(playerName, genre)` (para que aparezca la próxima vez) y navega a la ruta de juego.
+Este es el selector de juego: formulario de nuevo juego (shadcn `Input` + `Button` + `Card`) más una lista "Continuar" alimentada por `useGameApi().games.query` con `useInfiniteQuery` — un `<div>` centinela inferior observado por un `IntersectionObserver` llama automáticamente a `fetchNextPage()` cuando se desplaza a la vista, y los spinners junto al encabezado y debajo de la lista muestran el estado de carga. Iniciar un juego hace `saveGame` del par `(playerName, genre)` (para que aparezca la próxima vez) y navega a la ruta de juego.
 </TabItem>
 <TabItem label="routes/game/$playerName.tsx">
 <E2ECode path="dungeon-adventure/4/routes/game/$playerName.tsx.template" lang="tsx" />
 
-Esta es la ruta de juego. Construye el `threadId` determinístico (``{player}-{genre}`` rellenado a 33 caracteres — el hook AG-UI lo enviará tal cual como el id de sesión de AgentCore), renderiza `<CopilotChat agentId="agent" threadId={threadId} />`, y superpone el inventario de `useGameApi().inventory.query` encima. Al montarse, `useGameApi().actions.query({ sessionId: threadId })` lee el historial de conversación que el agente ha almacenado en S3 y — si hay alguno — llama a `agent.setMessages(...)` para rehidratar el chat; de lo contrario, envía un mensaje de usuario de preparación para iniciar la historia. `agent.messages` está suscrito mediante `useAgent({ updates: [OnMessagesChanged] })` por lo que cada nuevo turno también vuelve a obtener la consulta del inventario (las llamadas a herramientas MCP mutan DynamoDB directamente).
+Esta es la ruta de juego. Construye el `threadId` determinístico (``{player}-{genre}`` rellenado a 33 caracteres — el hook AG-UI lo enviará tal cual como el id de sesión de AgentCore), renderiza `<CopilotChat agentId="agent" threadId={threadId} />`, y superpone el inventario de `useGameApi().inventory.query` encima. Al montar, `useGameApi().actions.query({ sessionId: threadId })` lee el historial de conversación que el agente ha almacenado en S3 y — si hay alguno — llama a `agent.setMessages(...)` para rehidratar el chat; de lo contrario, envía un mensaje de usuario de preparación para iniciar la historia. `agent.messages` está suscrito a través de `useAgent({ updates: [OnMessagesChanged] })` por lo que cada nuevo turno también vuelve a obtener la consulta del inventario (las llamadas a herramientas MCP mutan DynamoDB directamente).
 
-<Aside type="tip" title="Espera `isFetching`, no `isLoading`">
-El caché predeterminado de React Query retiene el primer resultado durante 5 minutos, por lo que una visita de retorno inicialmente ve la lista vacía obsoleta de la primera carga. Establecemos `staleTime: 0` + `refetchOnMount: 'always'` y protegemos el `useEffect` de hidratación con `!isFetching && isSuccess` para que la ruta de re-preparación solo se active en un hilo genuinamente vacío.
+<Aside type="tip" title="Espera por `isFetching`, no `isLoading`">
+El caché predeterminado de React Query retiene el primer resultado durante 5 minutos, por lo que una visita de retorno inicialmente ve la lista vacía obsoleta de la primera carga. Establecemos `staleTime: 0` + `refetchOnMount: 'always'` y protegemos el `useEffect` de hidratación en `!isFetching && isSuccess` para que la ruta de re-preparación solo se active en un hilo genuinamente vacío.
 </Aside>
 
 <Aside type="tip" title="Los threadIds determinísticos hacen que /game/$playerName?genre=... sea compartible">
-Volver a visitar la misma URL — ya sea después de una recarga, un redespliegue o en otro dispositivo — se resuelve al mismo `threadId`, por lo que el agente sigue contando la misma historia.
+Volver a visitar la misma URL — ya sea después de una recarga, un redespliegue, o en otro dispositivo — se resuelve al mismo `threadId`, por lo que el agente sigue contando la misma historia.
 </Aside>
 
 <Aside type="tip" title="Parámetros de ruta">
-La sintaxis `$playerName` indica a `@tanstack/react-router` que trate `playerName` como un [parámetro de ruta](https://tanstack.com/router/v1/docs/framework/react/guide/path-params). `validateSearch` hace que `genre` esté fuertemente tipado contra nuestro enum.
+La sintaxis `$playerName` le dice a `@tanstack/react-router` que trate `playerName` como un [parámetro de ruta](https://tanstack.com/router/v1/docs/framework/react/guide/path-params). `validateSearch` hace que `genre` esté fuertemente tipado contra nuestro enum.
 </Aside>
 </TabItem>
 </Tabs>
 
-Una vez guardado, el servidor de desarrollo en `http://localhost:4200/` ahora debería permitirte iniciar una aventura y chatear con el Agente de Historia.
+Una vez guardado, el servidor de desarrollo en `http://localhost:4200/` ahora debería permitirte iniciar una aventura y chatear con el Story Agent.
 
 <Image src={gameSelectPng} alt="game-select.png" width="600" height="309" />
 <div style="margin-top: -100px; margin-left: 100px;">
@@ -101,11 +101,11 @@ Una vez guardado, el servidor de desarrollo en `http://localhost:4200/` ahora de
 
 Tu juego está completo y has probado cada pieza localmente. Ahora vamos a desplegarlo a AWS para que puedas jugarlo desde cualquier lugar.
 
-### Compilar tu código
+### Construir tu código
 
 <PackageManagerShortCommand commands={["build"]} />
 
-### Implementar tu aplicación
+### Desplegar tu aplicación
 
 <NxCommands commands={['deploy-sandbox infra']} />
 
@@ -117,7 +117,7 @@ Si este es el primer despliegue de CDK en tu cuenta/región de AWS, primero haz 
 
 El target `deploy-sandbox` despliega el stage sandbox definido en `packages/infra/src/main.ts`.
 
-Tu primer despliegue tomará alrededor de 6 minutos en completarse ya que espera a que todos los recursos se estabilicen completamente. Los despliegues posteriores son más rápidos. Para acelerar la iteración durante el desarrollo, puedes optar por el [modo express de CloudFormation](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html) pasando la bandera `--express`, que completa cada operación de recurso tan pronto como se aplica su configuración en lugar de esperar la estabilización completa.
+Tu primer despliegue tomará alrededor de 6 minutos en completarse mientras espera a que todos los recursos se estabilicen completamente. Los despliegues posteriores son más rápidos. Para acelerar la iteración durante el desarrollo, puedes optar por el [modo express de CloudFormation](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html) pasando la bandera `--express`, que completa cada operación de recurso tan pronto como se aplica su configuración en lugar de esperar la estabilización completa.
 
 Una vez que el despliegue se complete, verás salidas similares a las siguientes:
 
@@ -144,22 +144,21 @@ Navega a tu URL de CloudFront (`GameUIDistributionDomainName` de las salidas de 
 
 ## Tarea 6: Mezclar componentes locales y desplegados
 
-Has visto dos extremos del espectro: todo local (`serve-local`) y todo desplegado. Durante el desarrollo diario a menudo es útil mezclar ambos — por ejemplo, iterar en el código del sitio web contra la API y el agente *reales* desplegados, o ejecutar la API localmente contra la tabla *real* de DynamoDB.
+Has visto dos extremos del espectro: todo local (`dev`) y todo desplegado. Durante el desarrollo diario, a menudo es útil mezclar los dos — por ejemplo, iterar en el código del sitio web contra la API y el agente *reales* desplegados, o ejecutar la API localmente contra la tabla DynamoDB *real*.
 
-La clave es la variable de entorno `RUNTIME_CONFIG_APP_ID`. Cuando un proyecto se ejecuta **sin** `SERVE_LOCAL=true`, las búsquedas de configuración en tiempo de ejecución obtienen su configuración de AWS AppConfig usando este id de aplicación — el valor `RuntimeConfigApplicationId` de tus salidas de CDK.
+La clave es la variable de entorno `RUNTIME_CONFIG_APP_ID`. Cuando un proyecto se ejecuta **sin** `LOCAL_DEV=true`, las búsquedas de configuración en tiempo de ejecución obtienen su configuración de AWS AppConfig usando este id de aplicación — el valor `RuntimeConfigApplicationId` de tus salidas de CDK.
 
 Cada sitio web tiene un target `load-runtime-config` que descarga el `runtime-config.json` desplegado (pool de Cognito, endpoints de API, ARN del agente) en el servidor de desarrollo local. Algunas combinaciones útiles:
 
-- **Sitio web local → backend desplegado.** Descarga la configuración desplegada una vez, luego ejecuta el target `serve` simple para que la UI se comunique con la API y el agente desplegados:
+- **Sitio web local → backend desplegado.** Descarga la configuración desplegada una vez, luego ejecuta el target `serve` simple para que la interfaz de usuario hable con la API y el agente desplegados:
 
   <NxCommands commands={["load-runtime-config game-ui"]} />
   <NxCommands commands={["serve game-ui"]} />
 
-- **API local → tabla real de DynamoDB.** Ejecuta el target `serve` simple con `RUNTIME_CONFIG_APP_ID` configurado al id de aplicación desplegado:
+- **API local → tabla DynamoDB real.** Ejecuta el target `serve` simple con `RUNTIME_CONFIG_APP_ID` establecido al id de aplicación desplegado:
 
   <NxCommands env={{RUNTIME_CONFIG_APP_ID:"<RuntimeConfigApplicationId from CDK outputs>"}} commands={["serve game-api"]} />
 
-Esta flexibilidad te permite probar exactamente la parte en la que estás trabajando, contra los componentes — locales o desplegados — que tengan sentido.
+Esta flexibilidad te permite probar exactamente la porción en la que estás trabajando, contra los componentes — locales o desplegados — que tengan sentido.
 
-¡Felicitaciones! Has construido, probado y desplegado tu Juego de Aventuras de Mazmorra Agéntico. 🎉🎉🎉
-���
+¡Felicitaciones! Has construido, probado y desplegado tu Agentic Dungeon Adventure Game!  🎉🎉🎉���

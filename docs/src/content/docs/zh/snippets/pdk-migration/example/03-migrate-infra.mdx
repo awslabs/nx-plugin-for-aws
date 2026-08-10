@@ -1,9 +1,6 @@
 ---
-title: "迁移基础设施"
+title: 迁移基础设施
 ---
-
-
-
 import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
 import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
 import RunGenerator from '@components/run-generator.astro';
@@ -12,40 +9,40 @@ import NxCommands from '@components/nx-commands.astro';
 import Drawer from '@components/drawer.astro';
 import InstallCommand from '@components/install-command.astro';
 
-我们购物清单应用需要迁移的最后一个项目是`InfrastructureTsProject`。这是一个TypeScript CDK项目，对应的Nx Plugin for AWS等效生成器是<Link path="/guides/typescript-infrastructure">`ts#infra`生成器</Link>。
+我们需要为购物清单应用程序迁移的最后一个项目是 `InfrastructureTsProject`。这是一个 TypeScript CDK 项目，Nx Plugin for AWS 的等效项是 <Link path="/guides/typescript-infrastructure">`ts#infra` 生成器</Link>。
 
-与Projen项目类似，PDK还提供了这些项目所依赖的CDK构造。我们也将从这些CDK构造迁移购物清单应用，转而使用Nx Plugin for AWS生成的构造。
+除了 Projen 项目之外，PDK 还提供了这些项目所依赖的 CDK 构造。我们也将把购物清单应用程序从这些 CDK 构造迁移出来，转而使用 Nx Plugin for AWS 生成的构造。
 
 :::tip
-Nx Plugin for AWS相较于PDK的一大优势在于，它提供的CDK构造是以源代码形式添加到项目中，而非通过第三方包导入。这使您能够自由定制这些构造，突破了PDK原有的限制。
+Nx Plugin for AWS 相对于 PDK 的一大优势是，它提供的 CDK 构造是添加到项目中的源代码，而不是通过第三方包导入。这使您能够控制和灵活地自定义它们，超越了 PDK 所支持的范围。
 :::
 
-#### 生成TypeScript CDK基础设施项目
+#### 生成 TypeScript CDK 基础设施项目
 
-运行<Link path="/guides/typescript-infrastructure">`ts#infra`生成器</Link>在`packages/infra`目录下创建基础设施项目：
+运行 <Link path="/guides/typescript-infrastructure">`ts#infra` 生成器</Link>在 `packages/infra` 中设置您的基础设施项目：
 
 <RunGenerator generator="ts#infra" noInteractive requiredParameters={{ name: 'infra' }} />
 
-#### 迁移CDK基础设施
+#### 迁移 CDK 基础设施
 
-PDK购物清单应用在CDK应用栈中实例化了以下构造：
+PDK 购物清单应用程序在 CDK 应用程序堆栈中实例化了以下构造：
 
-- 存储购物清单的DynamoDB表`DatabaseConstruct`
-- 从PDK直接导入Cognito资源的`UserIdentity`
-- 部署Smithy API的`MyApi`，使用生成的TypeScript CDK构造实现类型安全集成，底层依赖PDK的`TypeSafeRestApi` CDK构造
-- 部署网站的`Website`，封装了PDK的`StaticWebsite` CDK构造
+- `DatabaseConstruct` 用于存储购物清单的 DynamoDB 表
+- `UserIdentity` 用于 Cognito 资源，直接从 PDK 导入
+- `MyApi` 用于部署 Smithy API，它使用生成的 TypeScript CDK 构造和类型安全集成，底层依赖于 PDK 的 `TypeSafeRestApi` CDK 构造。
+- `Website` 用于部署网站，包装了 PDK 的 `StaticWebsite` CDK 构造。
 
-接下来我们将逐一迁移这些构造。
+接下来，我们将把这些构造迁移到新项目中。
 
-##### 复制应用栈
+##### 复制应用程序堆栈
 
-将PDK购物清单应用中的`packages/infra/src/stacks/application-stack.ts`复制到新项目的相同位置。您会看到一些TypeScript错误，我们将在后续步骤中解决。
+从 PDK 购物清单应用程序中复制 `packages/infra/src/stacks/application-stack.ts` 到新项目中的完全相同位置。您会看到一些 TypeScript 错误，我们将在下面解决。
 
 ##### 复制数据库构造
 
-PDK购物清单应用在`packages/src/constructs/database.ts`中有一个`Database`构造。将其复制到新项目的相同位置。
+PDK 购物清单应用程序在 `packages/src/constructs/database.ts` 中有一个 `Database` 构造。将其复制到新项目中的完全相同位置。
 
-由于Nx Plugin for AWS使用[Checkov](https://www.checkov.io/)进行安全检查（比PDK Nag更严格），我们需要添加抑制规则：
+由于 Nx Plugin for AWS 使用 [Checkov](https://www.checkov.io/) 进行安全测试，它比 PDK Nag 稍微严格一些，我们还需要添加一些抑制规则：
 
 ```diff lang="ts"
 // constructs/database.ts
@@ -58,7 +55,7 @@ PDK购物清单应用在`packages/src/constructs/database.ts`中有一个`Databa
 +);
 ```
 
-在`application-stack.ts`中更新`DatabaseConstruct`的导入语法为ESM格式：
+在 `application-stack.ts` 中，更新 `DatabaseConstruct` 的导入以使用 ESM 语法：
 
 ```diff lang="ts"
 // stacks/application-stack.ts
@@ -66,9 +63,9 @@ PDK购物清单应用在`packages/src/constructs/database.ts`中有一个`Databa
 +import { DatabaseConstruct } from '../constructs/database.js';
 ```
 
-##### 迁移用户身份构造
+##### 迁移 UserIdentity 构造
 
-`UserIdentity`构造通常只需调整导入路径即可直接替换：
+`UserIdentity` 构造通常可以通过调整导入来直接替换，无需更改。
 
 ```diff lang="ts"
 -import { UserIdentity } from "@aws/pdk/identity";
@@ -77,19 +74,21 @@ PDK购物清单应用在`packages/src/constructs/database.ts`中有一个`Databa
 const userIdentity = new UserIdentity(this, `${id}UserIdentity`);
 ```
 
-注意新的`UserIdentity`构造底层直接使用`aws-cdk-lib`中的构造，而PDK使用的是`@aws-cdk/aws-cognito-identitypool-alpha`。
+请注意，新的 `UserIdentity` 构造使用的底层构造直接来自 `aws-cdk-lib`，而 PDK 使用的是 `@aws-cdk/aws-cognito-identitypool-alpha`。
 
-##### 迁移API构造
+##### 迁移 API 构造
 
-PDK购物清单应用在`constructs/apis/myapi.ts`中有一个构造，用于实例化从Smithy模型生成的Type Safe API CDK构造。
+PDK 购物清单应用程序在 `constructs/apis/myapi.ts` 中有一个构造，它实例化了 Type Safe API 从您的 Smithy 模型生成的 CDK 构造。
 
-由于PDK项目使用`@handler`特性，还生成了Lambda函数CDK构造。Nx Plugin for AWS通过更简洁灵活的方式实现类型安全集成——仅生成最小化的"元数据"，由`packages/common/constructs/src/app/apis/api.ts`通用处理。更多细节请参考<Link path="/guides/ts-smithy-api">`ts#smithy-api`生成器指南</Link>。
+除了这个构造之外，由于 PDK 项目使用了 `@handler` 特性，还生成了 lambda 函数 CDK 构造。
 
-迁移步骤如下：
+与 Type Safe API 一样，Nx Plugin for AWS 基于您的 Smithy 模型为集成提供类型安全，但它以更简单、更灵活的方式实现。它不是在构建时生成整个 CDK 构造，而是只生成最少的"元数据"，`packages/common/constructs/src/app/apis/api.ts` 以通用方式使用这些元数据。您可以在 <Link path="/guides/ts-smithy-api">`ts#smithy-api` 生成器指南</Link>中了解更多关于如何使用该构造的信息。
+
+按照以下步骤操作：
 
 <Steps>
 
-1. 在`application-stack.ts`中实例化`Api`构造
+1. 在 `application-stack.ts` 中实例化 `Api` 构造
 
     ```diff lang="ts"
     // stacks/application-stack.ts
@@ -105,15 +104,15 @@ PDK购物清单应用在`constructs/apis/myapi.ts`中有一个构造，用于实
     +});
     ```
 
-    这里使用`Api.defaultIntegrations(this).build()`默认会为API中的每个操作创建Lambda函数，与原有`myapi.ts`的行为一致。
+    注意这里我们使用 `Api.defaultIntegrations(this).build()` - 默认行为是为 API 中的每个操作创建一个 lambda 函数，这与我们在 `myapi.ts` 中的行为相同。
 
-2. 授予Lambda函数访问DynamoDB表的权限
+1. 授予 lambda 函数访问 DynamoDB 表的权限。
 
-    在PDK应用中，`DatabaseConstruct`被传入`MyApi`并管理权限。现在直接在`application-stack.ts`中通过`Api`构造的`integrations`属性实现：
+    在 PDK 购物清单应用程序中，`DatabaseConsruct` 被传递到 `MyApi` 中，它管理向每个生成的函数构造添加相关权限。我们将通过访问 `Api` 构造的类型安全 `integrations` 属性，直接在 `application-stack.ts` 文件中执行此操作：
 
     ```ts
     // stacks/application-stack.ts
-    // 授予Lambda函数细粒度Dynamo访问权限
+    // Grant our lambda functions scoped access to call Dynamo
     databaseConstruct.shoppingListTable.grantReadData(
       api.integrations.getShoppingLists.handler,
     );
@@ -123,9 +122,9 @@ PDK购物清单应用在`constructs/apis/myapi.ts`中有一个构造，用于实
     ].forEach((f) => databaseConstruct.shoppingListTable.grantWriteData(f));
     ```
 
-3. 授予认证用户调用API的权限
+1. 授予已认证用户调用 API 的权限。
 
-    在PDK的`myapi.ts`中，认证用户被授予API调用权限。现在在应用栈中实现等效操作：
+    在 PDK 应用程序的 `myapi.ts` 中，已认证用户也被授予了调用 API 的 IAM 权限。我们将在 `application-stack.ts` 中执行等效操作：
 
     ```ts
     // stacks/application-stack.ts
@@ -134,9 +133,9 @@ PDK购物清单应用在`constructs/apis/myapi.ts`中有一个构造，用于实
 
 </Steps>
 
-##### 迁移网站构造
+##### 迁移 Website 构造
 
-最后，将`packages/common/constructs/src/app/static-websites/website.ts`中的`Website`构造添加到`application-stack.ts`，替代原有PDK项目中的`packages/infra/src/constructs/websites/website.ts`。
+最后，我们将 `packages/common/constructs/src/app/static-websites/website.ts` 中的 `Website` 构造添加到 `application-stack.ts`，因为这相当于 PDK 购物清单应用程序的 `packages/infra/src/constructs/websites/website.ts`。
 
 ```diff lang="ts"
 -import { Website } from "../constructs/websites/website";
@@ -149,14 +148,14 @@ PDK购物清单应用在`constructs/apis/myapi.ts`中有一个构造，用于实
 +new Website(this, 'Website');
 ```
 
-注意不再传递身份或API参数——Nx Plugin for AWS的构造会自行管理运行时配置，`UserIdentity`和`Api`注册必要值，`Website`负责部署到静态网站的`/runtime-config.json`。
+请注意，我们不会将身份或 API 传递给网站 - 运行时配置在 Nx Plugin for AWS 提供的每个构造中管理，其中 `UserIdentity` 和 `Api` 注册必要的值，`Website` 管理将其部署到静态网站上的 `/runtime-config.json`。
 
-完成所有代码迁移后，现在可以构建项目：
+现在我们已经将代码库的所有相关部分迁移到新项目中，让我们构建项目。
 
 <NxCommands commands={["run-many --target build"]} />
 
 :::caution
-可能会遇到lint错误，通常可自动修复：
+您可能会看到由于 lint 问题导致的构建失败。这些通常可以自动修复：
 
 <NxCommands commands={["run-many --target lint --fix"]} />
 :::

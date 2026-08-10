@@ -14,7 +14,7 @@ import Snippet from '@components/snippet.astro';
 
 DCR Proxy 생성기는 Amazon Cognito User Pool 앞에 OAuth [Dynamic Client Registration (DCR)](https://datatracker.ietf.org/doc/html/rfc7591) 프록시를 생성합니다.
 
-MCP 클라이언트(Claude Code, Kiro CLI 또는 MCP Inspector 등)는 Dynamic Client Registration 및 메타데이터 검색을 지원하는 OAuth 인증 서버에 대해 인증할 것으로 예상합니다. Amazon Cognito는 DCR을 기본적으로 지원하지 않으며, App Client 시크릿은 절대 공개 클라이언트에 노출되어서는 안 됩니다. 이 프록시는 그 격차를 메웁니다: Cognito Hosted UI 플로우를 그대로 유지하고, DCR을 구현하며, 토큰 교환 중 서버 측에서 App Client 시크릿을 주입하고, MCP 트래픽을 업스트림 MCP 서버로 전달합니다.
+MCP 클라이언트(Claude Code, Kiro CLI 또는 MCP Inspector 등)는 Dynamic Client Registration 및 메타데이터 검색을 지원하는 OAuth 인증 서버에 대해 인증할 것으로 예상합니다. Amazon Cognito는 DCR을 기본적으로 지원하지 않으며, App Client 시크릿은 절대 공개 클라이언트에 노출되어서는 안 됩니다. 이 프록시는 이러한 격차를 메웁니다: Cognito Hosted UI 플로우를 그대로 유지하고, DCR을 구현하며, 토큰 교환 중에 서버 측에서 App Client 시크릿을 주입하고, MCP 트래픽을 업스트림 MCP 서버로 전달합니다.
 
 ## 사용법
 
@@ -28,19 +28,19 @@ MCP 클라이언트(Claude Code, Kiro CLI 또는 MCP Inspector 등)는 Dynamic C
 
 ## 생성기 출력
 
-생성기는 Lambda 핸들러를 포함하는 독립형 <Link path="/guides/typescript-project">TypeScript 프로젝트</Link>와 선택한 `iac`를 기반으로 배포할 인프라를 생성합니다.
+생성기는 Lambda 핸들러를 포함하는 독립형 <Link path="/ko/guides/typescript-project">TypeScript 프로젝트</Link>와 선택한 `iac`를 기반으로 배포할 인프라를 생성합니다.
 
 <FileTree>
 
 - \<dcr-proxy-name>
   - src/
     - handlers/
-      - authorization-server-metadata.ts `/.well-known/oauth-authorization-server` 및 `/.well-known/openid-configuration` 제공
-      - protected-resource-metadata.ts `/.well-known/oauth-protected-resource` 제공
+      - authorization-server-metadata.ts Serves `/.well-known/oauth-authorization-server` and `/.well-known/openid-configuration`
+      - protected-resource-metadata.ts Serves `/.well-known/oauth-protected-resource`
       - register.ts RFC 7591 Dynamic Client Registration
-      - authorize.ts Cognito Hosted UI로 리디렉션
-      - token.ts App Client 시크릿을 주입하고 토큰 교환
-      - mcp-proxy.ts `/mcp` 요청을 업스트림 MCP 서버로 프록시
+      - authorize.ts Redirects to the Cognito Hosted UI
+      - token.ts Injects the App Client secret and exchanges the token
+      - mcp-proxy.ts Proxies `/mcp` requests to the upstream MCP server
 
 </FileTree>
 
@@ -59,7 +59,7 @@ MCP 클라이언트(Claude Code, Kiro CLI 또는 MCP Inspector 등)는 Dynamic C
     - app
       - dcr-proxies
         - \<dcr-proxy-name>
-          - \<dcr-proxy-name>.ts 프록시를 배포하는 CDK 구성
+          - \<dcr-proxy-name>.ts CDK construct which deploys the proxy
 </FileTree>
 </Fragment>
 <Fragment slot="terraform">
@@ -68,32 +68,32 @@ MCP 클라이언트(Claude Code, Kiro CLI 또는 MCP Inspector 등)는 Dynamic C
     - app
       - dcr-proxies
         - \<dcr-proxy-name>
-          - \<dcr-proxy-name>.tf 프록시를 배포하는 Terraform 모듈
+          - \<dcr-proxy-name>.tf Terraform module which deploys the proxy
 </FileTree>
 </Fragment>
 </Infrastructure>
 
-인프라는 다음 라우트가 있는 API Gateway HTTP API를 프로비저닝합니다:
+인프라는 다음 라우트를 가진 API Gateway HTTP API를 프로비저닝합니다:
 
 | 라우트 | 설명 |
 | --- | --- |
-| `GET /.well-known/oauth-protected-resource` | 보호된 리소스 메타데이터 |
-| `GET /.well-known/oauth-authorization-server` | 인증 서버 메타데이터 |
-| `GET /.well-known/openid-configuration` | OpenID 구성 (인증 서버 메타데이터 핸들러에서 제공) |
+| `GET /.well-known/oauth-protected-resource` | Protected resource metadata |
+| `GET /.well-known/oauth-authorization-server` | Authorization server metadata |
+| `GET /.well-known/openid-configuration` | OpenID configuration (served by the authorization server metadata handler) |
 | `POST /register` | Dynamic Client Registration |
-| `GET /authorize` | 인증 (Cognito Hosted UI로 리디렉션) |
-| `POST /oauth/token` | 토큰 교환 (App Client 시크릿 주입) |
-| `ANY /mcp` | 업스트림 MCP 서버로 프록시 |
+| `GET /authorize` | Authorization (redirects to the Cognito Hosted UI) |
+| `POST /oauth/token` | Token exchange (injects the App Client secret) |
+| `ANY /mcp` | Proxy to the upstream MCP server |
 
 토큰 핸들러만 Secrets Manager의 Cognito App Client 시크릿에 대한 읽기 액세스 권한이 부여됩니다.
 
 ## DCR Proxy 배포
 
-프록시는 Cognito 리소스나 MCP 서버를 생성하지 않습니다. 대신, 다른 곳에서 관리되는 리소스의 식별자를 주입합니다(이 플러그인에서 생성되었든 별도로 프로비저닝되었든). 이를 통해 프록시가 해당 리소스가 프로비저닝되는 방식과 분리됩니다.
+프록시는 Cognito 리소스나 MCP 서버를 생성하지 않습니다. 대신, 다른 곳에서 관리되는 리소스(이 플러그인에서 생성되었든 별도로 프로비저닝되었든)의 식별자를 주입하여 프록시를 해당 리소스가 프로비저닝되는 방식과 분리합니다.
 
 다음을 제공해야 합니다:
 
-- Cognito User Pool id 및 App Client id
+- Cognito User Pool ID 및 App Client ID
 - App Client 시크릿을 보유하는 Secrets Manager 시크릿의 ARN. 토큰 핸들러는 런타임에 이를 읽으며, 값은 클라이언트에 절대 노출되지 않습니다.
 - Cognito Hosted UI 도메인의 기본 URL
 - 업스트림 MCP 서버의 전체 URL
@@ -137,16 +137,16 @@ module "dcr_proxy" {
 </Infrastructure>
 
 :::note
-`/mcp` 프록시는 API Gateway HTTP API 통합을 사용하며, 하드 29초 타임아웃이 있습니다. 장기 실행 업스트림 요청은 스트리밍되지 않고 프록시에 의해 버퍼링됩니다.
+`/mcp` 프록시는 API Gateway HTTP API 통합을 사용하며, 이는 29초의 하드 타임아웃을 가집니다. 장기 실행 업스트림 요청은 스트리밍되지 않고 프록시에 의해 버퍼링됩니다.
 :::
 
 :::tip[기존 User Pool 재사용]
-<Link path="guides/react-website-auth">`ts#website#auth`</Link> 생성기에서 이미 User Pool이 있는 경우, 동일한 웹사이트 사용자를 위해 MCP 서버를 앞에 배치할 수 있습니다. 아래 <Link path="guides/ts-dcr-proxy#reusing-a-useridentity-user-pool">UserIdentity User Pool 재사용</Link>을 참조하세요.
+<Link path="ko/guides/react-website-auth">`ts#website#auth`</Link> 생성기에서 이미 User Pool이 있는 경우, 동일한 웹사이트 사용자를 위한 MCP 서버를 프론트할 수 있습니다. 아래의 <Link path="ko/guides/ts-dcr-proxy#reusing-a-useridentity-user-pool">UserIdentity User Pool 재사용</Link>을 참조하세요.
 :::
 
-### MCP 서버 앞에 배치
+### MCP 서버 프론팅
 
-`--auth cognito`를 사용하여 <Link path="guides/ts-mcp-server">`ts#mcp-server`</Link> (또는 <Link path="guides/py-mcp-server">`py#mcp-server`</Link>) 생성기로 생성된 MCP 서버를 앞에 배치하려면, MCP 서버와 프록시 모두에 **동일한** User Pool 및 App Client를 전달하고, MCP 서버 구성의 `invocationUrl`을 프록시의 `upstreamUrl`로 사용합니다.
+`--auth cognito`를 사용하여 <Link path="ko/guides/ts-mcp-server">`ts#mcp-server`</Link>(또는 <Link path="ko/guides/py-mcp-server">`py#mcp-server`</Link>) 생성기로 생성된 MCP 서버를 프론트하려면, MCP 서버와 프록시 모두에 **동일한** User Pool 및 App Client를 전달하고, MCP 서버 구성의 `invocationUrl`을 프록시의 `upstreamUrl`로 사용합니다.
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -161,8 +161,8 @@ import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 
 const identity = new UserIdentity(this, 'Identity');
 
-// 프록시가 토큰 교환에 사용하는 기밀 App Client. 클라이언트가 사용하는
-// 콜백 URL을 등록합니다 (아래 참조).
+// A confidential App Client the proxy uses for the token exchange. Register the
+// callback URLs your clients use (see below).
 const proxyClient = identity.userPool.addClient('DcrProxyClient', {
   generateSecret: true,
   oAuth: {
@@ -170,18 +170,18 @@ const proxyClient = identity.userPool.addClient('DcrProxyClient', {
     scopes: [OAuthScope.OPENID, OAuthScope.EMAIL, OAuthScope.PROFILE],
     callbackUrls: [
       'http://localhost:41100/callback',
-      // Claude Desktop에서 사용하는 콜백
+      // Callback used by Claude Desktop
       'https://claude.ai/api/mcp/auth_callback',
     ],
   },
 });
 
-// 토큰 핸들러가 읽을 수 있도록 Secrets Manager에 App Client 시크릿 저장
+// Store the App Client secret in Secrets Manager for the token handler to read
 const clientSecret = new secretsmanager.Secret(this, 'ClientSecret', {
   secretStringValue: proxyClient.userPoolClientSecret,
 });
 
-// 동일한 App Client에 대해 발급된 JWT를 승인하는 MCP 서버
+// The MCP server, authorizing JWTs issued for the same App Client
 const mcpServer = new MyProjectMcpServer(this, 'MyProjectMcpServer', {
   identity: {
     userPool: identity.userPool,
@@ -194,15 +194,15 @@ new DcrProxy(this, 'DcrProxy', {
   userPoolClientId: proxyClient.userPoolClientId,
   cognitoClientSecretArn: clientSecret.secretArn,
   cognitoHostedUiBase: identity.userPoolDomain.baseUrl(),
-  // 하드코딩하지 않고 MCP 서버 구성의 호출 URL 사용
+  // Use the MCP server construct's invocation URL rather than hardcoding it
   upstreamUrl: mcpServer.invocationUrl,
 });
 ```
 </Fragment>
 <Fragment slot="terraform">
 ```hcl
-# 프록시가 토큰 교환에 사용하는 기밀 App Client. 클라이언트가 사용하는
-# 콜백 URL을 등록합니다 (아래 참조).
+# A confidential App Client the proxy uses for the token exchange. Register the
+# callback URLs your clients use (see below).
 resource "aws_cognito_user_pool_client" "dcr_proxy" {
   name                                 = "dcr-proxy-client"
   user_pool_id                         = module.user_identity.user_pool_id
@@ -212,12 +212,12 @@ resource "aws_cognito_user_pool_client" "dcr_proxy" {
   allowed_oauth_scopes                 = ["openid", "email", "profile"]
   callback_urls = [
     "http://localhost:41100/callback",
-    # Claude Desktop에서 사용하는 콜백
+    # Callback used by Claude Desktop
     "https://claude.ai/api/mcp/auth_callback",
   ]
 }
 
-# 토큰 핸들러가 읽을 수 있도록 Secrets Manager에 App Client 시크릿 저장
+# Store the App Client secret in Secrets Manager for the token handler to read
 resource "aws_secretsmanager_secret" "client_secret" {
   name = "my-dcr-proxy-client-secret"
 }
@@ -227,7 +227,7 @@ resource "aws_secretsmanager_secret_version" "client_secret" {
   secret_string = aws_cognito_user_pool_client.dcr_proxy.client_secret
 }
 
-# 동일한 App Client에 대해 발급된 JWT를 승인하는 MCP 서버
+# The MCP server, authorizing JWTs issued for the same App Client
 module "my_project_mcp_server" {
   source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
 
@@ -244,7 +244,7 @@ module "dcr_proxy" {
   user_pool_client_id       = aws_cognito_user_pool_client.dcr_proxy.id
   cognito_client_secret_arn = aws_secretsmanager_secret.client_secret.arn
   cognito_hosted_ui_base    = "https://${module.user_identity.user_pool_domain}.auth.${data.aws_region.current.region}.amazoncognito.com"
-  # 하드코딩하지 않고 MCP 서버 모듈의 호출 URL 사용
+  # Use the MCP server module's invocation URL rather than hardcoding it
   upstream_url              = module.my_project_mcp_server.invocation_url
   asset_bucket_name         = module.asset_bucket.bucket_name
 }
@@ -252,12 +252,12 @@ module "dcr_proxy" {
 </Fragment>
 </Infrastructure>
 
-### AgentCore Gateway 앞에 배치
+### AgentCore Gateway 프론팅
 
-`--auth cognito`를 사용하여 <Link path="guides/agentcore-gateway">`agentcore-gateway`</Link> 생성기로 생성된 [AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html)를 앞에 배치하려면, 게이트웨이와 프록시 모두에 **동일한** User Pool 및 App Client를 전달하고, 게이트웨이 구성의 `gatewayUrl`을 프록시의 `upstreamUrl`로 사용합니다.
+`--auth cognito`를 사용하여 <Link path="ko/guides/agentcore-gateway">`agentcore-gateway`</Link> 생성기로 생성된 [AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html)를 프론트하려면, 게이트웨이와 프록시 모두에 **동일한** User Pool 및 App Client를 전달하고, 게이트웨이 구성의 `gatewayUrl`을 프록시의 `upstreamUrl`로 사용합니다.
 
 :::caution
-프록시의 OAuth 플로우에는 Cognito 인증 게이트웨이가 필요합니다. `--auth cognito`로 게이트웨이를 생성하세요. 기본 IAM 인증 게이트웨이는 프록시와 호환되지 않습니다.
+프록시의 OAuth 플로우는 Cognito 인증 게이트웨이가 필요합니다. `--auth cognito`로 게이트웨이를 생성하세요. 기본 IAM 인증 게이트웨이는 프록시와 호환되지 않습니다.
 :::
 
 <Infrastructure>
@@ -273,8 +273,8 @@ import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 
 const identity = new UserIdentity(this, 'Identity');
 
-// 프록시가 토큰 교환에 사용하는 기밀 App Client. 클라이언트가 사용하는
-// 콜백 URL을 등록합니다 (아래 참조).
+// A confidential App Client the proxy uses for the token exchange. Register the
+// callback URLs your clients use (see below).
 const proxyClient = identity.userPool.addClient('DcrProxyClient', {
   generateSecret: true,
   oAuth: {
@@ -282,18 +282,18 @@ const proxyClient = identity.userPool.addClient('DcrProxyClient', {
     scopes: [OAuthScope.OPENID, OAuthScope.EMAIL, OAuthScope.PROFILE],
     callbackUrls: [
       'http://localhost:41100/callback',
-      // Claude Desktop에서 사용하는 콜백
+      // Callback used by Claude Desktop
       'https://claude.ai/api/mcp/auth_callback',
     ],
   },
 });
 
-// 토큰 핸들러가 읽을 수 있도록 Secrets Manager에 App Client 시크릿 저장
+// Store the App Client secret in Secrets Manager for the token handler to read
 const clientSecret = new secretsmanager.Secret(this, 'ClientSecret', {
   secretStringValue: proxyClient.userPoolClientSecret,
 });
 
-// 동일한 App Client에 대해 발급된 JWT를 승인하는 게이트웨이
+// The gateway, authorizing JWTs issued for the same App Client
 const gateway = new MyGateway(this, 'MyGateway', {
   identity: {
     userPool: identity.userPool,
@@ -306,15 +306,15 @@ new DcrProxy(this, 'DcrProxy', {
   userPoolClientId: proxyClient.userPoolClientId,
   cognitoClientSecretArn: clientSecret.secretArn,
   cognitoHostedUiBase: identity.userPoolDomain.baseUrl(),
-  // 하드코딩하지 않고 게이트웨이 구성의 URL 사용
+  // Use the gateway construct's URL rather than hardcoding it
   upstreamUrl: gateway.gateway.gatewayUrl,
 });
 ```
 </Fragment>
 <Fragment slot="terraform">
 ```hcl
-# 프록시가 토큰 교환에 사용하는 기밀 App Client. 클라이언트가 사용하는
-# 콜백 URL을 등록합니다 (아래 참조).
+# A confidential App Client the proxy uses for the token exchange. Register the
+# callback URLs your clients use (see below).
 resource "aws_cognito_user_pool_client" "dcr_proxy" {
   name                                 = "dcr-proxy-client"
   user_pool_id                         = module.user_identity.user_pool_id
@@ -324,12 +324,12 @@ resource "aws_cognito_user_pool_client" "dcr_proxy" {
   allowed_oauth_scopes                 = ["openid", "email", "profile"]
   callback_urls = [
     "http://localhost:41100/callback",
-    # Claude Desktop에서 사용하는 콜백
+    # Callback used by Claude Desktop
     "https://claude.ai/api/mcp/auth_callback",
   ]
 }
 
-# 토큰 핸들러가 읽을 수 있도록 Secrets Manager에 App Client 시크릿 저장
+# Store the App Client secret in Secrets Manager for the token handler to read
 resource "aws_secretsmanager_secret" "client_secret" {
   name = "my-dcr-proxy-client-secret"
 }
@@ -339,7 +339,7 @@ resource "aws_secretsmanager_secret_version" "client_secret" {
   secret_string = aws_cognito_user_pool_client.dcr_proxy.client_secret
 }
 
-# 동일한 App Client에 대해 발급된 JWT를 승인하는 게이트웨이
+# The gateway, authorizing JWTs issued for the same App Client
 module "my_gateway" {
   source = "../../common/terraform/src/app/agentcore-gateway/my-gateway"
 
@@ -354,7 +354,7 @@ module "dcr_proxy" {
   user_pool_client_id       = aws_cognito_user_pool_client.dcr_proxy.id
   cognito_client_secret_arn = aws_secretsmanager_secret.client_secret.arn
   cognito_hosted_ui_base    = "https://${module.user_identity.user_pool_domain}.auth.${data.aws_region.current.region}.amazoncognito.com"
-  # 하드코딩하지 않고 게이트웨이 모듈의 URL 사용
+  # Use the gateway module's URL rather than hardcoding it
   upstream_url              = module.my_gateway.gateway_url
   asset_bucket_name         = module.asset_bucket.bucket_name
 }
@@ -364,9 +364,9 @@ module "dcr_proxy" {
 
 ### 클라이언트 리디렉션 URI 허용
 
-프록시는 Dynamic Client Registration을 가상으로 구현하기 때문에 — 클라이언트별 Cognito App Client가 없습니다 — 모든 MCP 클라이언트는 프록시에 전달하는 **단일 App Client**를 통해 인증합니다. OAuth 플로우 중에 프록시는 클라이언트의 `redirect_uri`를 변경하지 않고 Cognito Hosted UI로 전달하므로 Cognito가 권한 있는 검사를 수행합니다: 콜백은 **해당 App Client의 콜백 URL**로 등록되어야 하며, 그렇지 않으면 Cognito가 로그인을 거부합니다.
+프록시는 Dynamic Client Registration을 가상으로 구현하기 때문에 — 클라이언트별 Cognito App Client가 없습니다 — 모든 MCP 클라이언트는 프록시에 전달하는 **단일 App Client**를 통해 인증합니다. OAuth 플로우 중에 프록시는 클라이언트의 `redirect_uri`를 변경 없이 Cognito Hosted UI로 전달하므로 Cognito가 권위 있는 검사를 수행합니다: 콜백은 **해당 App Client의 콜백 URL로 등록**되어야 하며, 그렇지 않으면 Cognito가 로그인을 거부합니다.
 
-이것은 가상 DCR 설계의 부작용입니다. 클라이언트는 프록시에 모든 `redirect_uri`를 등록할 수 있지만, 해당 정확한 URL이 App Client의 콜백 URL 중 하나인 경우에만 로그인이 성공합니다. Cognito는 포트를 포함하여 콜백 URL을 정확히 일치시키므로 임의의 임시 포트에서 수신 대기하는 클라이언트는 와일드카드로 처리할 수 없습니다 — 각 클라이언트를 고정 콜백 URL에 고정하고 해당 정확한 URL을 App Client에 등록해야 합니다.
+이는 가상 DCR 설계의 부작용입니다. 클라이언트는 프록시에 모든 `redirect_uri`를 등록할 수 있지만, 해당 정확한 URL이 App Client의 콜백 URL 중 하나인 경우에만 로그인이 성공합니다. Cognito는 포트를 포함하여 콜백 URL을 정확히 일치시키므로, 임의의 임시 포트에서 수신 대기하는 클라이언트는 와일드카드로 커버할 수 없습니다 — 각 클라이언트를 고정 콜백 URL에 고정하고 해당 정확한 URL을 App Client에 등록해야 합니다.
 
 App Client를 생성할 때 클라이언트가 사용하는 콜백 URL을 추가합니다:
 
@@ -378,9 +378,9 @@ const userPoolClient = userPool.addClient('DcrProxyClient', {
   oAuth: {
     flows: { authorizationCodeGrant: true },
     callbackUrls: [
-      // 로컬 클라이언트: 기본 포트가 아닌 고정된 일반적이지 않은 포트에 고정
+      // Local clients: pin to a fixed, uncommon port rather than a default one
       'http://localhost:41100/callback',
-      // Claude Desktop에서 사용하는 콜백
+      // Callback used by Claude Desktop
       'https://claude.ai/api/mcp/auth_callback',
     ],
   },
@@ -395,9 +395,9 @@ resource "aws_cognito_user_pool_client" "dcr_proxy" {
   allowed_oauth_flows                 = ["code"]
   allowed_oauth_flows_user_pool_client = true
   callback_urls = [
-    # 로컬 클라이언트: 기본 포트가 아닌 고정된 일반적이지 않은 포트에 고정
+    # Local clients: pin to a fixed, uncommon port rather than a default one
     "http://localhost:41100/callback",
-    # Claude Desktop에서 사용하는 콜백
+    # Callback used by Claude Desktop
     "https://claude.ai/api/mcp/auth_callback",
   ]
 }
@@ -406,22 +406,22 @@ resource "aws_cognito_user_pool_client" "dcr_proxy" {
 </Infrastructure>
 
 :::caution
-신뢰할 수 있는 콜백 URL만 등록하십시오 — 이러한 URL 중 하나로 브라우저를 유도할 수 있는 모든 클라이언트는 User Pool에 대한 로그인을 완료할 수 있습니다.
+신뢰할 수 있는 콜백 URL만 등록하세요 — 이러한 URL 중 하나로 브라우저를 유도할 수 있는 모든 클라이언트는 User Pool에 대한 로그인을 완료할 수 있습니다.
 :::
 
 ## 프록시된 MCP 서버 사용
 
-프록시를 사용하면 MCP 클라이언트가 프록시 URL 외에 클라이언트별 구성 없이 Cognito User Pool에 대해 인증할 수 있습니다. 클라이언트가 `/mcp` 엔드포인트에 연결하면 OAuth 메타데이터를 검색하고(`/.well-known/oauth-protected-resource` 및 `/.well-known/oauth-authorization-server`를 통해), 동적으로 자신을 등록하고, 사용자를 Cognito Hosted UI 로그인으로 안내합니다. 프록시는 토큰 교환 중에 App Client 시크릿을 주입하므로 클라이언트는 이를 필요로 하지 않습니다.
+프록시를 사용하면 MCP 클라이언트가 프록시 URL 외에 클라이언트별 구성 없이 Cognito User Pool에 대해 인증할 수 있습니다. 클라이언트가 `/mcp` 엔드포인트에 연결하면 OAuth 메타데이터(`/.well-known/oauth-protected-resource` 및 `/.well-known/oauth-authorization-server`를 통해)를 검색하고, 동적으로 자신을 등록하며, 사용자를 Cognito Hosted UI 로그인으로 안내합니다. 프록시는 토큰 교환 중에 App Client 시크릿을 주입하므로 클라이언트는 이를 필요로 하지 않습니다.
 
 클라이언트를 연결하려면 프록시의 `mcpUrl`(즉, `<proxyUrl>/mcp`)을 가리킵니다. 아래 예제는 프록시가 `https://my-proxy.example.com`에 배포되었다고 가정합니다.
 
 :::note
-각 클라이언트는 OAuth 플로우 중에 콜백 URL을 사용합니다. 포트를 포함한 정확한 URL은 [Cognito App Client의 콜백 URL](#allowing-client-redirect-uris)로 등록되어야 하며, 그렇지 않으면 로그인이 실패합니다. 클라이언트가 임의의 포트를 선택하는 경우 고정 값에 고정하고 해당 값을 등록합니다.
+각 클라이언트는 OAuth 플로우 중에 콜백 URL을 사용합니다. 포트를 포함한 정확한 URL은 [Cognito App Client의 콜백 URL로 등록](#allowing-client-redirect-uris)되어야 하며, 그렇지 않으면 로그인이 실패합니다. 클라이언트가 임의의 포트를 선택하는 경우, 고정 값으로 고정하고 해당 값을 등록하세요.
 :::
 
 ### Claude Code
 
-[`claude mcp add`](https://code.claude.com/docs/en/mcp) 명령을 사용하여 HTTP 전송을 사용하는 프록시된 서버를 추가합니다. 기본적으로 Claude Code는 임의의 콜백 포트에서 수신 대기합니다. `--callback-port`를 전달하여 App Client에 등록된 포트(`41100`, 위 예제)에 고정합니다. Claude Code는 항상 `/callback` 경로를 사용하므로 결과 리디렉션 URI는 `http://localhost:41100/callback`입니다:
+HTTP 전송을 사용하여 [`claude mcp add`](https://code.claude.com/docs/en/mcp) 명령으로 프록시된 서버를 추가합니다. 기본적으로 Claude Code는 임의의 콜백 포트에서 수신 대기합니다. `--callback-port`를 전달하여 App Client에 등록된 포트(`위 예제에서 41100`)로 고정합니다. Claude Code는 항상 `/callback` 경로를 사용하므로 결과 리디렉션 URI는 `http://localhost:41100/callback`입니다:
 
 ```bash
 claude mcp add --transport http --callback-port 41100 my-proxied-server https://my-proxy.example.com/mcp
@@ -447,7 +447,7 @@ HTTP 전송을 사용하여 [Kiro CLI](https://kiro.dev/docs/cli/mcp/) MCP 구�
 }
 ```
 
-Kiro CLI는 처음 사용할 때 Cognito Hosted UI 로그인을 트리거하고 후속 요청을 위해 결과 토큰을 관리합니다.
+Kiro CLI는 처음 사용 시 Cognito Hosted UI 로그인을 트리거하고 후속 요청을 위해 결과 토큰을 관리합니다.
 
 :::tip
 OAuth 인증 및 Dynamic Client Registration과 함께 Streamable HTTP 전송을 지원하는 모든 MCP 클라이언트는 동일한 방식으로 프록시에 연결할 수 있습니다 — `/mcp` URL을 제공하면 클라이언트가 검색, 등록 및 로그인을 처리합니다.
@@ -455,9 +455,9 @@ OAuth 인증 및 Dynamic Client Registration과 함께 Streamable HTTP 전송을
 
 ## UserIdentity User Pool 재사용
 
-<Link path="guides/react-website-auth">`ts#website#auth`</Link> 생성기(`UserIdentity` 구성)에서 이미 User Pool이 있는 경우, 웹사이트에 로그인하는 **동일한 사용자**를 위해 MCP 서버를 앞에 배치할 수 있습니다. `userPool`을 재사용하되, 프록시를 위한 **별도의 App Client**를 추가하세요: 웹사이트의 클라이언트는 시크릿이 없는 공개 클라이언트인 반면, DCR 프록시는 토큰 교환 중에 토큰 핸들러가 시크릿을 주입하는 기밀 클라이언트(`generateSecret: true`)가 필요합니다.
+<Link path="ko/guides/react-website-auth">`ts#website#auth`</Link> 생성기에서 이미 User Pool이 있는 경우(`UserIdentity` 구성), 웹사이트에 로그인하는 **동일한 사용자**를 위한 MCP 서버를 프론트할 수 있습니다. `userPool`을 재사용하되, 프록시를 위한 **별도의 App Client**를 추가합니다: 웹사이트의 클라이언트는 시크릿이 없는 공개 클라이언트인 반면, DCR 프록시는 토큰 핸들러가 토큰 교환 중에 시크릿을 주입하는 기밀 클라이언트(`generateSecret: true`)가 필요합니다.
 
-`UserIdentity`는 [Managed Login (version 2)](https://docs.aws.amazon.com/cognito/latest/developerguide/managed-login.html)로 User Pool 도메인을 구성합니다. Managed Login은 **App Client당 브랜딩 스타일**이 필요하므로 새 프록시 클라이언트에 대해 하나를 생성해야 합니다 — 그렇지 않으면 호스팅된 로그인 페이지가 `403`을 반환합니다.
+`UserIdentity`는 [Managed Login (version 2)](https://docs.aws.amazon.com/cognito/latest/developerguide/managed-login.html)로 User Pool 도메인을 구성합니다. Managed Login은 **App Client당 브랜딩 스타일**이 필요하므로 새 프록시 클라이언트를 위한 브랜딩 스타일을 생성해야 합니다 — 그렇지 않으면 호스팅된 로그인 페이지가 `403`을 반환합니다.
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -470,10 +470,10 @@ import {
 import { OAuthScope, CfnManagedLoginBranding } from 'aws-cdk-lib/aws-cognito';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 
-// ts#website#auth로 웹사이트 사용자를 위해 생성된 User Pool
+// The user pool created by ts#website#auth for your website users
 const identity = new UserIdentity(this, 'Identity');
 
-// DCR 프록시를 위한 동일한 User Pool의 기밀 App Client
+// A confidential App Client on the SAME user pool for the DCR proxy
 const proxyClient = identity.userPool.addClient('DcrProxyClient', {
   generateSecret: true,
   oAuth: {
@@ -483,7 +483,7 @@ const proxyClient = identity.userPool.addClient('DcrProxyClient', {
   },
 });
 
-// Managed Login은 새 클라이언트에 대한 브랜딩 스타일이 필요합니다
+// Managed Login needs a branding style for the new client
 new CfnManagedLoginBranding(this, 'DcrProxyClientBranding', {
   userPoolId: identity.userPool.userPoolId,
   clientId: proxyClient.userPoolClientId,
@@ -505,7 +505,7 @@ new DcrProxy(this, 'DcrProxy', {
   userPoolId: identity.userPool.userPoolId,
   userPoolClientId: proxyClient.userPoolClientId,
   cognitoClientSecretArn: clientSecret.secretArn,
-  // UserIdentity 구성은 항상 도메인을 생성합니다
+  // The UserIdentity construct always creates a domain
   cognitoHostedUiBase: identity.userPoolDomain.baseUrl(),
   upstreamUrl: mcpServer.invocationUrl,
 });
@@ -513,12 +513,12 @@ new DcrProxy(this, 'DcrProxy', {
 </Fragment>
 <Fragment slot="terraform">
 ```hcl
-# ts#website#auth로 웹사이트 사용자를 위해 생성된 User Pool 모듈
+# The user pool module created by ts#website#auth for your website users
 module "user_identity" {
   source = "../../common/terraform/src/core/user-identity"
 }
 
-# DCR 프록시를 위한 동일한 User Pool의 기밀 App Client
+# A confidential App Client on the SAME user pool for the DCR proxy
 resource "aws_cognito_user_pool_client" "dcr_proxy" {
   name                                 = "dcr-proxy-client"
   user_pool_id                         = module.user_identity.user_pool_id
@@ -529,7 +529,7 @@ resource "aws_cognito_user_pool_client" "dcr_proxy" {
   callback_urls                        = ["http://localhost:41100/callback"]
 }
 
-# Managed Login은 새 클라이언트에 대한 브랜딩 스타일이 필요합니다
+# Managed Login needs a branding style for the new client
 resource "aws_cognito_managed_login_branding" "dcr_proxy" {
   user_pool_id                = module.user_identity.user_pool_id
   client_id                   = aws_cognito_user_pool_client.dcr_proxy.id

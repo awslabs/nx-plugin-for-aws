@@ -48,12 +48,12 @@ El generador modifica dos archivos en el directorio de origen de tu servidor MCP
 
 Además, el objetivo `<mcp-server-name>-dev` se actualiza para depender del objetivo `dev` de la base de datos.
 
-## Usando la Base de Datos en Herramientas MCP
+## Usar la Base de Datos en Herramientas MCP
 
 El cliente Prisma se obtiene dentro de `createServer` y está disponible para todas las herramientas y recursos registrados allí:
 
 ```ts title="packages/my-service/src/my-mcp/server.ts" {1,4}
-import { getPrisma as getMyDb } from ':my-scope/my-db';
+import { getPrisma as getMyDb } from '@my-scope/my-db';
 
 export const createServer = async () => {
   const myDb = await getMyDb();
@@ -79,7 +79,7 @@ export const createServer = async () => {
 
 ## Infraestructura
 
-El constructo del servidor MCP generado implementa `IGrantable` e `IConnectable`, por lo que puedes otorgar acceso de red e IAM a la base de datos directamente en el constructo.
+El constructo de servidor MCP generado implementa `IGrantable` e `IConnectable`, por lo que puedes otorgar acceso de red e IAM a la base de datos directamente en el constructo.
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -107,24 +107,25 @@ db.grantConnect(myMcpServer);
 
 `allowDefaultPortFrom` abre la regla del grupo de seguridad para que el tiempo de ejecución del servidor MCP pueda alcanzar el puerto de la base de datos. `grantConnect` otorga el permiso IAM `rds-db:connect` al rol de ejecución del servidor.
 
+
 </Fragment>
 <Fragment slot="terraform">
 
-Ejecuta el servidor MCP dentro de la misma VPC que la base de datos, otórgale `rds-db:connect` a través de `additional_iam_policy_statements`, y abre la ruta de red con un par de reglas de grupo de seguridad:
+Ejecuta el servidor MCP dentro de la misma VPC que la base de datos, otórgale `rds-db:connect` a través de `additional_iam_policy_statements`, y abre la ruta de red con un par de reglas de grupo de seguridad. Los recursos `aws_vpc.main` y `aws_subnet` están definidos en la guía de implementación de la base de datos:
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
   source              = "../../common/terraform/src/app/dbs/my-database"
-  vpc_id              = module.vpc.vpc_id
-  database_subnet_ids = module.vpc.private_isolated_subnet_ids
-  lambda_subnet_ids   = module.vpc.private_subnet_ids
+  vpc_id              = aws_vpc.main.id
+  database_subnet_ids = aws_subnet.database[*].id
+  lambda_subnet_ids   = aws_subnet.private[*].id
 }
 
 module "my_mcp_server" {
   source     = "../../common/terraform/src/app/mcp-servers/my-mcp-server"
   enable_vpc = true
-  vpc_id     = module.vpc.vpc_id
-  subnet_ids = module.vpc.private_subnet_ids
+  vpc_id     = aws_vpc.main.id
+  subnet_ids = aws_subnet.private[*].id
 
   appconfig_application_id  = module.runtime_config_appconfig.application_id
   appconfig_application_arn = module.runtime_config_appconfig.application_arn
@@ -141,6 +142,7 @@ module "my_mcp_server" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "mcp_server_to_database" {
+  description                  = "Allow the MCP server runtime to connect to the database"
   security_group_id            = module.my_database.security_group_id
   referenced_security_group_id = module.my_mcp_server.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -149,6 +151,7 @@ resource "aws_vpc_security_group_ingress_rule" "mcp_server_to_database" {
 }
 
 resource "aws_vpc_security_group_egress_rule" "mcp_server_to_database" {
+  description                  = "Allow outbound traffic from the MCP server runtime to the database"
   security_group_id            = module.my_mcp_server.security_group_id
   referenced_security_group_id = module.my_database.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -157,14 +160,23 @@ resource "aws_vpc_security_group_egress_rule" "mcp_server_to_database" {
 }
 ```
 
-`appconfig_application_id`/`appconfig_application_arn` provienen de la aplicación AppConfig de <Link path="guides/runtime-config">configuración de tiempo de ejecución</Link> compartida declarada una vez en tu módulo raíz, no del módulo de base de datos.
+`appconfig_application_id`/`appconfig_application_arn` provienen de la aplicación AppConfig de <Link path="guides/runtime-config">configuración de tiempo de ejecución</Link> compartida declarada una vez en tu módulo raíz, no del módulo de base de datos. Incluye el espacio de nombres `database` al instanciarla para que se implemente la entrada de configuración de tiempo de ejecución del módulo de base de datos:
+
+```hcl title="packages/infra/src/main.tf"
+module "runtime_config_appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+  application_name = "my-app-runtime-config"
+  namespaces       = ["connection", "agentcore", "database"]
+}
+```
 
 </Fragment>
 </Infrastructure>
 
-### Requisitos de SSL al Conectar sin RDS Proxy
+### Requisitos SSL al Conectarse sin RDS Proxy
 
-<Snippet name="connection/ts-mcp-server-rdb-ssl-requirements" parentHeading="Requisitos de SSL al Conectar sin RDS Proxy" />
+<Snippet name="connection/ts-mcp-server-rdb-ssl-requirements" parentHeading="Requisitos SSL al Conectarse sin RDS Proxy" />
 
 ## Desarrollo Local
 

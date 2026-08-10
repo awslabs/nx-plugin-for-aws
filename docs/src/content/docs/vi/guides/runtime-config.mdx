@@ -1,29 +1,28 @@
 ---
-title: "Cấu Hình Runtime"
-description: "Cách cấu hình runtime kết nối các dự án được tạo của bạn bằng AWS AppConfig"
+title: Cấu Hình Runtime
+description: Cách cấu hình runtime kết nối các dự án được tạo của bạn bằng AWS AppConfig
 ---
-
 import { Tabs, TabItem, Steps } from '@astrojs/starlight/components';
 import Infrastructure from '@components/infrastructure.astro';
 import Link from '@components/link.astro';
 
-Cấu hình runtime là cơ chế được Nx Plugin for AWS sử dụng để truyền các giá trị thời điểm triển khai giữa các dự án và thành phần được tạo để chúng có thể kết nối với nhau. Ví dụ, khi bạn tạo một API, URL của nó sẽ tự động được đăng ký trong cấu hình runtime để một website được kết nối có thể khám phá nó.
+Cấu hình runtime là cơ chế được Nx Plugin for AWS sử dụng để truyền các giá trị tại thời điểm triển khai giữa các dự án và thành phần được tạo để chúng có thể kết nối với nhau. Ví dụ, khi bạn tạo một API, URL của nó sẽ tự động được đăng ký trong cấu hình runtime để một website được kết nối có thể khám phá nó.
 
 ## Cách Hoạt Động
 
-Cấu hình runtime được tổ chức thành các **namespaces**. Mỗi namespace là một nhóm logic của các giá trị cấu hình liên quan. Tại thời điểm triển khai, tất cả các namespaces được lưu trữ trong **AWS AppConfig** dưới dạng Configuration Profiles.
+Cấu hình runtime được tổ chức thành các **namespace**. Mỗi namespace là một nhóm logic của các giá trị cấu hình liên quan. Tại thời điểm triển khai, tất cả các namespace được lưu trữ trong **AWS AppConfig** dưới dạng Configuration Profiles.
 
-Hai namespaces được tích hợp sẵn được sử dụng bởi các constructs được tạo:
+Hai namespace tích hợp sẵn được sử dụng bởi các construct được tạo:
 
 - **`connection`** — cấu hình cho phép các dự án được tạo kết nối với nhau:
-  - **API URLs** — được đăng ký tự động bởi các API constructs
-  - **Cognito settings** — được đăng ký tự động bởi UserIdentity construct
-  - **Agent runtime ARNs** — được thêm bởi connection generator khi bạn kết nối một React website với một Agent
-- **`agentcore`** — AgentCore runtime ARNs cho agents và MCP servers. Được đăng ký tự động bởi các agent/MCP constructs và được sử dụng cho khám phá phía server (agent → agent qua A2A, agent → MCP server).
+  - **API URLs** — được đăng ký tự động bởi các construct API
+  - **Cognito settings** — được đăng ký tự động bởi construct UserIdentity
+  - **Agent runtime ARNs** — được thêm bởi trình tạo kết nối khi bạn kết nối một website React với một Agent
+- **`agentcore`** — AgentCore runtime ARNs cho các agent và MCP server. Được đăng ký tự động bởi các construct agent/MCP và được sử dụng để khám phá phía server (agent → agent qua A2A, agent → MCP server).
 
-Namespace `connection` cũng được triển khai dưới dạng tệp `runtime-config.json` vào S3 bucket của website, cho phép khám phá các tài nguyên backend từ phía client. Namespace `agentcore` chỉ dành cho phía server (qua AppConfig) nên các agent runtime ARNs không được tiết lộ cho frontend trừ khi bạn kết nối một website với một agent một cách rõ ràng.
+Namespace `connection` cũng được triển khai dưới dạng file `runtime-config.json` vào S3 bucket của website của bạn, cho phép khám phá các tài nguyên backend từ phía client. Namespace `agentcore` chỉ dành cho phía server (qua AppConfig) nên các agent runtime ARN không được tiết lộ cho frontend trừ khi bạn kết nối rõ ràng một website với một agent.
 
-Bạn có thể định nghĩa bao nhiêu namespace bổ sung tùy thích, cung cấp một giải pháp thay thế thuận tiện cho các biến môi trường để truyền các giá trị thời điểm triển khai như tên bảng DynamoDB đến các Lambda functions hoặc tài nguyên tính toán khác.
+Bạn có thể định nghĩa bao nhiêu namespace bổ sung tùy thích, cung cấp một giải pháp thay thế thuận tiện cho các biến môi trường để truyền các giá trị tại thời điểm triển khai như tên bảng DynamoDB cho các hàm Lambda hoặc tài nguyên tính toán khác của bạn.
 
 ```d2
 direction: down
@@ -60,15 +59,15 @@ appconfig.agentcore -> server: Powertools getAppConfig
 appconfig.custom -> server
 ```
 
-## Hạ Tầng
+## Infrastructure
 
 ### Ghi Cấu Hình
 
-Các constructs được tạo tự động ghi cấu hình liên quan vào namespace `connection`. Bạn cũng có thể ghi các giá trị của riêng mình vào bất kỳ namespace nào.
+Các construct được tạo tự động ghi cấu hình liên quan vào namespace `connection`. Bạn cũng có thể ghi các giá trị của riêng mình vào bất kỳ namespace nào.
 
 <Infrastructure>
 <Fragment slot="cdk">
-CDK construct `RuntimeConfig` là một singleton có phạm vi stage. Sử dụng `set()` để ghi một key vào namespace:
+Construct CDK `RuntimeConfig` là một singleton có phạm vi stage. Sử dụng `set()` để ghi một key vào một namespace:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
 import { RuntimeConfig } from '@my-scope/common-constructs';
@@ -91,14 +90,14 @@ rc.set('tables', 'users', {
 Tại thời điểm synth/deploy, `RuntimeConfig` tạo một ứng dụng **AWS AppConfig** chứa:
 - Một **Configuration Profile** cho mỗi namespace
 - Một **Hosted Configuration Version** với dữ liệu JSON cho mỗi profile
-- Một **Deployment** tức thì đến môi trường `default`
+- Một **Deployment** tức thì vào môi trường `default`
 </Fragment>
 <Fragment slot="terraform">
-Terraform kết nối cấu hình runtime qua ba modules `core/runtime-config/*`. Khai báo chúng theo thứ tự sau trong root module của bạn:
+Terraform kết nối cấu hình runtime qua ba module `core/runtime-config/*`. Khai báo chúng theo thứ tự sau trong root module của bạn:
 
 <Steps>
 
-1. **`core/runtime-config/appconfig`** — khai báo một lần, gần đầu root module. Tạo ứng dụng AppConfig, environment, deployment strategy và một configuration profile cho mỗi namespace. Các outputs `application_id` và `application_arn` của nó được truyền vào mọi module đọc cấu hình runtime tại runtime (agents, MCP servers, Lambda functions, v.v.).
+1. **`core/runtime-config/appconfig`** — được khai báo một lần, gần đầu root module. Tạo ứng dụng AppConfig, môi trường, chiến lược triển khai và một configuration profile cho mỗi namespace. Các output `application_id` và `application_arn` của nó được truyền vào mọi module đọc cấu hình runtime tại runtime (agent, MCP server, hàm Lambda, v.v.).
 
    ```hcl title="packages/infra/src/main.tf"
    module "runtime_config_appconfig" {
@@ -108,7 +107,7 @@ Terraform kết nối cấu hình runtime qua ba modules `core/runtime-config/*`
    }
    ```
 
-2. **`core/runtime-config/entry`** — một lần gọi cho mỗi đóng góp. Các modules API, agent và MCP được tạo gọi nó nội bộ để xuất bản URLs và ARNs của chúng. Gọi trực tiếp để xuất bản cấu hình tùy chỉnh.
+2. **`core/runtime-config/entry`** — một lần gọi cho mỗi đóng góp. Các module API, agent và MCP được tạo gọi nó nội bộ để xuất bản URL và ARN của chúng. Gọi trực tiếp để xuất bản cấu hình tùy chỉnh.
 
    ```hcl title="packages/infra/src/main.tf"
    # Automatic — done inside generated modules
@@ -133,7 +132,7 @@ Terraform kết nối cấu hình runtime qua ba modules `core/runtime-config/*`
    }
    ```
 
-3. **`core/runtime-config/appconfig-deployment`** — khai báo một lần, ở cuối root module, với `depends_on` bao gồm mọi module đóng góp một entry. Tổng hợp các entries đã đóng góp thành một JSON cho mỗi namespace và tạo hosted configuration version + deployment đối với ứng dụng được chia sẻ.
+3. **`core/runtime-config/appconfig-deployment`** — được khai báo một lần, ở cuối root module, với `depends_on` bao gồm mọi module đóng góp một entry. Tổng hợp các entry được đóng góp thành một JSON cho mỗi namespace và tạo hosted configuration version + deployment đối với ứng dụng được chia sẻ.
 
    ```hcl title="packages/infra/src/main.tf"
    module "runtime_config_appconfig_deployment" {
@@ -159,7 +158,7 @@ Terraform kết nối cấu hình runtime qua ba modules `core/runtime-config/*`
 
 ### Đọc Cấu Hình
 
-Các consumers phía server cần **AppConfig Application ID** và quyền IAM để đọc cấu hình tại runtime. Các constructs được tạo xử lý điều này tự động.
+Các consumer phía server cần **AppConfig Application ID** và quyền IAM để đọc cấu hình tại runtime. Các construct được tạo xử lý điều này tự động.
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -183,12 +182,12 @@ const myFunction = new Function(this, 'MyFunction', {
 rc.grantReadAppConfig(myFunction);
 ```
 
-:::note[Đăng ký tự động]
-Các API và agent constructs được tạo làm điều này tự động — bạn chỉ cần làm thủ công nếu bạn tạo các Lambda functions hoặc tài nguyên tính toán của riêng mình cần đọc cấu hình runtime.
+:::note[Đăng Ký Tự Động]
+Các construct API và agent được tạo thực hiện điều này tự động — bạn chỉ cần làm thủ công nếu bạn tạo các hàm Lambda hoặc tài nguyên tính toán của riêng mình cần đọc cấu hình runtime.
 :::
 </Fragment>
 <Fragment slot="terraform">
-Tham chiếu output `application_id` của module `runtime_config_appconfig` được chia sẻ để lấy AppConfig Application ID, và thêm các câu lệnh IAM policy phù hợp:
+Tham chiếu output `application_id` của module `runtime_config_appconfig` được chia sẻ để lấy AppConfig Application ID, và thêm các câu lệnh IAM policy thích hợp:
 
 ```hcl title="packages/infra/src/main.tf"
 # Pass the AppConfig Application ID as an environment variable
@@ -218,21 +217,21 @@ resource "aws_iam_policy" "appconfig_read" {
 }
 ```
 
-:::note[Đăng ký tự động]
-Các agent và MCP modules được tạo chấp nhận các inputs `appconfig_application_id` + `appconfig_application_arn` — truyền các outputs `runtime_config_appconfig` được chia sẻ và chúng sẽ thiết lập biến môi trường và quyền IAM cho bạn. Bạn chỉ cần làm thủ công cho các Lambda functions hoặc tài nguyên tính toán tùy chỉnh.
+:::note[Đăng Ký Tự Động]
+Các module agent và MCP được tạo chấp nhận các input `appconfig_application_id` + `appconfig_application_arn` — truyền các output `runtime_config_appconfig` được chia sẻ và chúng sẽ kết nối biến môi trường và quyền IAM cho bạn. Bạn chỉ cần làm thủ công cho các hàm Lambda hoặc tài nguyên tính toán tùy chỉnh.
 :::
 </Fragment>
 </Infrastructure>
 
 :::tip[Phát Triển Cục Bộ]
-Nếu bạn sử dụng runtime config với các namespace tùy chỉnh (ví dụ: `tables`, `features`), bạn chỉ cần định nghĩa một biến môi trường `RUNTIME_CONFIG_APP_ID` duy nhất ở local để trỏ đến ứng dụng AppConfig đã triển khai của bạn. Điều này cho phép các APIs hoặc agents local của bạn truy xuất cùng một cấu hình như môi trường đã triển khai mà không cần sao chép tất cả các biến môi trường riêng lẻ.
+Nếu bạn sử dụng runtime config với các namespace tùy chỉnh (ví dụ: `tables`, `features`), bạn chỉ cần định nghĩa một biến môi trường `RUNTIME_CONFIG_APP_ID` duy nhất cục bộ để trỏ đến ứng dụng AppConfig đã triển khai của bạn. Điều này cho phép các API hoặc agent cục bộ của bạn truy xuất cùng cấu hình như môi trường đã triển khai mà không cần sao chép tất cả các biến môi trường riêng lẻ.
 :::
 
 ## Truy Cập Phía Server qua AppConfig
 
-Các consumers phía server như Lambda functions và agents có thể truy xuất cấu hình runtime từ **AWS AppConfig** bằng cách sử dụng [AWS Lambda Powertools](https://docs.aws.amazon.com/powertools/).
+Các consumer phía server như hàm Lambda và agent có thể truy xuất cấu hình runtime từ **AWS AppConfig** bằng cách sử dụng [AWS Lambda Powertools](https://docs.aws.amazon.com/powertools/).
 
-Tất cả các API và agent constructs được tạo đều tự động được cấu hình với:
+Tất cả các construct API và agent được tạo đều được cấu hình tự động với:
 - Biến môi trường `RUNTIME_CONFIG_APP_ID` (AppConfig Application ID)
 - Quyền IAM để đọc từ AppConfig
 
@@ -310,4 +309,4 @@ users_table_name = tables_config.get("users", {}).get("tableName")
 
 ## Truy Cập Phía Client
 
-Đối với các websites, namespace `connection` được triển khai dưới dạng tệp `runtime-config.json` vào S3 bucket. Xem hướng dẫn <Link path="guides/react-website#runtime-configuration">React Website Runtime Configuration</Link> để biết chi tiết về cách truy cập các giá trị này từ code frontend của bạn.
+Đối với các website, namespace `connection` được triển khai dưới dạng file `runtime-config.json` vào S3 bucket. Xem hướng dẫn <Link path="guides/react-website#runtime-configuration">React Website Runtime Configuration</Link> để biết chi tiết về cách truy cập các giá trị này từ mã frontend của bạn.

@@ -1,6 +1,6 @@
 ---
-title: Agente Python a Gateway
-description: Conectar un Agente Python a un Gateway AgentCore
+title: Python Agent a Gateway
+description: Conectar un Python Agent a un AgentCore Gateway
 when:
   sourceType: py#agent
   targetType: agentcore-gateway
@@ -12,9 +12,9 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
 
-El generador `connection` puede conectar tu <Link path="guides/py-agent">Agente Python</Link> a un <Link path="guides/agentcore-gateway">Gateway AgentCore</Link>.
+El generador `connection` puede conectar tu <Link path="guides/py-agent">Python Agent</Link> a un <Link path="guides/agentcore-gateway">AgentCore Gateway</Link>.
 
-El generador configura el agente para que se autentique en el Gateway con IAM SigV4 (mediante firma de solicitudes `httpx`) cuando se despliega, y se conecta al gateway local iniciado por el proyecto Gateway cuando se ejecuta localmente.
+El generador configura el agente para que se autentique en el Gateway con IAM SigV4 (mediante la firma de solicitudes `httpx`) cuando se despliega, y se conecte al gateway local iniciado por el proyecto Gateway cuando se ejecuta localmente.
 
 ## Requisitos previos
 
@@ -23,7 +23,7 @@ Antes de usar este generador, asegúrate de tener:
 1. Un proyecto Python con un componente <Link path="guides/py-agent">Agent</Link> (`infra: agentcore`)
 2. Un proyecto <Link path="guides/agentcore-gateway">`agentcore-gateway`</Link> con `auth: iam`
 
-El Gateway debe usar autenticación IAM: el agente firma sus solicitudes con SigV4 usando su propio rol de ejecución. El generador rechaza gateways autenticados con Cognito.
+El Gateway debe usar autenticación IAM — el agente firma sus solicitudes con SigV4 usando su propio rol de ejecución. El generador rechaza gateways autenticados con Cognito.
 
 ## Uso
 
@@ -31,7 +31,7 @@ El Gateway debe usar autenticación IAM: el agente firma sus solicitudes con Sig
 
 <RunGenerator generator="connection" />
 
-Selecciona el proyecto del agente como origen y el proyecto del Gateway como destino.
+Selecciona el proyecto del agente como origen y el proyecto Gateway como destino.
 
 ### Opciones
 
@@ -39,7 +39,7 @@ Selecciona el proyecto del agente como origen y el proyecto del Gateway como des
 
 ## Salida del generador
 
-El generador emite módulos compartidos de core-gateway en tu proyecto Python `agent_connection`, además de un envoltorio por Gateway, y modifica tu agente:
+El generador emite módulos compartidos de core-gateway en tu proyecto Python `agent_connection`, además de un wrapper por Gateway, y modifica tu agente:
 
 <FileTree>
 
@@ -47,12 +47,12 @@ El generador emite módulos compartidos de core-gateway en tu proyecto Python `a
   - \<scope>\_agent\_connection
     - core/
       - agentcore\_endpoints.py Resolución de ARN/URL independiente del framework
-      - agentcore\_gateway\_mcp\_transport.py Transporte MCP Gateway independiente del framework
-      - agentcore\_gateway\_mcp\_client\_\<framework>.py Cliente MCP Gateway para el framework de tu agente
-      - auth/ `httpx.Auth` SigV4 / reenvío de sesión independiente del framework
+      - agentcore\_gateway\_mcp\_transport.py Transporte MCP de Gateway independiente del framework
+      - agentcore\_gateway\_mcp\_client\_\<framework>.py Cliente MCP de Gateway para el framework de tu agente
+      - auth/ `httpx.Auth` de SigV4 / reenvío de sesión independiente del framework
     - app/
-      - \<gateway\_snake>\_client\_\<framework>.py Envoltorio de cliente por Gateway
-    - \_\_init\_\_.py Re-exporta el cliente del Gateway
+      - \<gateway\_snake>\_client\_\<framework>.py Wrapper de cliente por Gateway
+    - \_\_init\_\_.py Re-exporta el cliente Gateway
 
 </FileTree>
 
@@ -60,16 +60,16 @@ El sufijo del cliente coincide con el framework de tu agente (`_strands` o `_lan
 
 Además, el generador:
 
-- Modifica el `agent.py` de tu agente para importar el cliente del Gateway y registrar sus herramientas en `tools`
-- Agrega `agent_connection` como dependencia del espacio de trabajo del agente
-- Conecta el objetivo `<agent>-dev` del agente para que dependa del objetivo `dev` del Gateway
+- Modifica el `agent.py` de tu agente para importar el cliente Gateway y registrar sus herramientas en `tools`
+- Agrega `agent_connection` como dependencia de workspace del agente
+- Conecta el target `<agent>-dev` del agente para que dependa del target `dev` del Gateway
 
 ## Usar el Gateway conectado
 
-El generador transforma el `agent.py` de tu agente para usar el cliente del Gateway:
+El generador transforma el `agent.py` de tu agente para usar el cliente Gateway:
 
-<Tabs syncKey="framework">
-<TabItem label="Strands">
+<Tabs syncKey="agent-framework">
+<TabItem label="Strands" _filter={{ framework: 'strands' }}>
 ```python title="packages/example/example/my_agent/agent.py" {4,8,9-13}
 from contextlib import contextmanager
 from strands import Agent
@@ -88,7 +88,7 @@ def get_agent():
         )
 ```
 
-`MyGatewayClientStrands.create()` devuelve un único `MCPClient` administrable por contexto cuyo `list_tools_sync()` produce cada herramienta disponible a través del Gateway.
+`MyGatewayClientStrands.create()` devuelve un único `MCPClient` gestionable por contexto cuyo `list_tools_sync()` produce cada herramienta disponible a través del Gateway.
 </TabItem>
 <TabItem label="LangChain" _filter={{ framework: 'langchain' }}>
 ```python title="packages/example/example/my_agent/agent.py" {4,7,11}
@@ -112,10 +112,10 @@ def get_agent():
 
 En ambos casos, el cliente se comporta de la misma manera según el modo:
 
-- **Modo desplegado** (`LOCAL_DEV` no establecido): herramientas apuntando al endpoint MCP del Gateway, firmado con SigV4.
-- **Modo local** (`LOCAL_DEV=true`): herramientas HTTP simples apuntando al gateway local iniciado por el objetivo `dev` del proyecto Gateway.
+- **Modo desplegado** (`LOCAL_DEV` no establecido): herramientas apuntando al endpoint MCP del Gateway, firmadas con SigV4.
+- **Modo local** (`LOCAL_DEV=true`): herramientas HTTP simples apuntando al gateway local iniciado por el target `dev` del proyecto Gateway.
 
-El ID de sesión se propaga automáticamente a los servidores MCP descendentes a través del encabezado `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`.
+El ID de sesión se propaga automáticamente a los servidores MCP descendentes mediante el encabezado `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`.
 
 ## Infraestructura
 
@@ -131,7 +131,7 @@ const myAgent = new MyAgent(this, 'MyAgent');
 gateway.grantInvokeAccess(myAgent);
 ```
 
-La URL del Gateway se registra automáticamente en el espacio de nombres `agentcore.gateways.<ClassName>` de <Link path="guides/runtime-config">Runtime Configuration</Link> por el constructo CDK generado, para que el agente pueda descubrirlo en tiempo de ejecución.
+La URL del Gateway se registra automáticamente en el namespace `agentcore.gateways.<ClassName>` de <Link path="guides/runtime-config">Runtime Configuration</Link> por el constructo CDK generado, para que el agente pueda descubrirla en tiempo de ejecución.
 </Fragment>
 <Fragment slot="terraform">
 ```hcl title="packages/infra/src/main.tf" {8-13}
@@ -151,13 +151,13 @@ module "my_agent" {
 }
 ```
 
-La URL del Gateway se registra automáticamente en el espacio de nombres `agentcore.gateways.<ClassName>` de <Link path="guides/runtime-config">Runtime Configuration</Link> por el módulo Terraform generado, para que el agente pueda descubrirlo en tiempo de ejecución.
+La URL del Gateway se registra automáticamente en el namespace `agentcore.gateways.<ClassName>` de <Link path="guides/runtime-config">Runtime Configuration</Link> por el módulo Terraform generado, para que el agente pueda descubrirla en tiempo de ejecución.
 </Fragment>
 </Infrastructure>
 
 ## Desarrollo local
 
-El generador configura el objetivo `dev` del agente para:
+El generador configura el target `dev` del agente para:
 
 1. Iniciar el gateway local del Gateway conectado y cada servidor MCP adjunto
 2. Establecer `LOCAL_DEV=true` para que el cliente generado apunte al gateway local en lugar del Gateway desplegado
@@ -166,7 +166,7 @@ Ejecuta el agente localmente con:
 
 <NxCommands commands={["<agent-name>-dev <project-name>"]} />
 
-Para ejecutar el agente localmente **contra el Gateway desplegado** en su lugar (por ejemplo, para ejercitar políticas Cedar), usa el objetivo `serve` del agente. Sin `LOCAL_DEV` establecido, el cliente resuelve la URL del Gateway desplegado desde la configuración de tiempo de ejecución y firma las solicitudes con SigV4 usando tus credenciales AWS locales:
+Para ejecutar el agente localmente **contra el Gateway desplegado** en su lugar (por ejemplo, para ejercitar políticas Cedar), usa el target `serve` del agente. Sin `LOCAL_DEV` establecido, el cliente resuelve la URL del Gateway desplegado desde la configuración de tiempo de ejecución y firma las solicitudes con SigV4 usando tus credenciales locales de AWS:
 
 <NxCommands commands={["<agent-name>-serve <project-name>"]} />
 
@@ -174,6 +174,5 @@ Para ejecutar el agente localmente **contra el Gateway desplegado** en su lugar 
 
 El gateway local sustituye al Gateway desplegado, por lo que:
 
-- **Sin evaluación de políticas Cedar.** Cada herramienta es visible para el agente independientemente de las políticas. Usa el objetivo `serve` para ejercitar políticas contra el Gateway desplegado.
+- **Sin evaluación de políticas Cedar.** Cada herramienta es visible para el agente independientemente de las políticas. Usa el target `serve` para ejercitar políticas contra el Gateway desplegado.
 - **Se preserva el prefijo de nombres de herramientas.** Las herramientas de cada servidor MCP local se exponen como `<target-name>___<tool-name>`, coincidiendo con lo que emite el Gateway desplegado. Esto mantiene el prompt del sistema del agente y los nombres de acción Cedar que referencias consistentes entre ejecuciones locales y desplegadas.
-

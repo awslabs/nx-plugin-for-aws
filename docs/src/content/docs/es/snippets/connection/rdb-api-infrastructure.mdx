@@ -34,7 +34,7 @@ Object.entries(api.integrations).forEach(([operation, integration]) => {
 Despliega las funciones Lambda de la API en una **subred privada con salida**, no en una subred privada aislada. En tiempo de ejecución, `getPrisma()` recupera los detalles de conexión de la base de datos desde AWS AppConfig, que es un endpoint de servicio público de AWS que requiere acceso a internet saliente.
 
 :::note
-Este ejemplo otorga acceso a todos los manejadores de tu API, pero si solo algunos manejadores necesitan acceso es mejor configurarlos individualmente.
+Este ejemplo otorga acceso a todos los manejadores en tu API, pero si solo algunos manejadores necesitan acceso es mejor configurarlos individualmente.
 :::
 
 </Fragment>
@@ -56,6 +56,9 @@ module "api" {
   vpc_id     = aws_vpc.main.id
   subnet_ids = aws_subnet.private[*].id
 
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
   additional_iam_policy_statements = [
     {
       Effect = "Allow"
@@ -63,22 +66,8 @@ module "api" {
       Resource = [
         "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"
       ]
-    },
-    {
-      Effect = "Allow"
-      Action = [
-        "appconfig:StartConfigurationSession",
-        "appconfig:GetLatestConfiguration"
-      ]
-      Resource = [
-        "${module.runtime_config_appconfig.application_arn}/*"
-      ]
     }
   ]
-
-  env = {
-    RUNTIME_CONFIG_APP_ID = module.runtime_config_appconfig.application_id
-  }
 }
 
 resource "aws_vpc_security_group_ingress_rule" "api_to_database" {
@@ -100,7 +89,7 @@ resource "aws_vpc_security_group_egress_rule" "api_to_database" {
 }
 ```
 
-Despliega las funciones Lambda de la API en **subredes privadas con salida**, no en subredes privadas aisladas. `appconfig_application_id`/`appconfig_application_arn` provienen de la aplicación AppConfig de <Link path="guides/runtime-config">configuración en tiempo de ejecución</Link> compartida declarada una vez en tu módulo raíz, no del módulo de base de datos — pasarlos establece `RUNTIME_CONFIG_APP_ID` en las funciones Lambda y les otorga acceso de lectura a la aplicación. Incluye el namespace `database` al instanciarlo para que se despliegue la entrada de configuración en tiempo de ejecución del módulo de base de datos:
+Despliega las funciones Lambda de la API en **subredes privadas con salida**, no en subredes privadas aisladas. `appconfig_application_id`/`appconfig_application_arn` provienen de la aplicación AppConfig de <Link path="guides/runtime-config">configuración en tiempo de ejecución</Link> compartida declarada una vez en tu módulo raíz, no del módulo de base de datos — pasarlos establece `RUNTIME_CONFIG_APP_ID` en las funciones Lambda y les otorga acceso de lectura a la aplicación. Incluye el namespace `database` al instanciarla para que se despliegue la entrada de configuración en tiempo de ejecución del módulo de base de datos:
 
 ```hcl title="packages/infra/src/main.tf"
 module "runtime_config_appconfig" {

@@ -9,7 +9,7 @@ Para permitir que sua API se conecte ao banco de dados em tempo de execução, a
 <Infrastructure>
 <Fragment slot="cdk">
 
-No stack da sua aplicação, implante a API na mesma VPC que o banco de dados, depois chame `allowDefaultPortFrom` e `grantConnect` para abrir o caminho de rede e conceder permissão IAM `rds-db:connect` a cada handler Lambda:
+No stack da sua aplicação, implante a API na mesma VPC que o banco de dados, depois chame `allowDefaultPortFrom` e `grantConnect` para abrir o caminho de rede e conceder permissão IAM `rds-db:connect` a cada manipulador Lambda:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
 import { MyDatabase } from '@my-scope/common-constructs';
@@ -31,16 +31,16 @@ Object.entries(api.integrations).forEach(([operation, integration]) => {
 });
 ```
 
-Implante as funções Lambda da API em uma **sub-rede privada com egress**, não em uma sub-rede privada isolada. Em tempo de execução, `getPrisma()` recupera os detalhes de conexão do banco de dados do AWS AppConfig, que é um endpoint de serviço público da AWS que requer acesso à internet de saída.
+Implante as funções Lambda da API em uma **sub-rede privada com saída**, não em uma sub-rede privada isolada. Em tempo de execução, `getPrisma()` recupera os detalhes de conexão do banco de dados do AWS AppConfig, que é um endpoint de serviço público da AWS que requer acesso à internet de saída.
 
 :::note
-Este exemplo concede acesso a todos os handlers da sua API, mas se apenas alguns handlers precisarem de acesso, é melhor configurar individualmente.
+Este exemplo concede acesso a todos os manipuladores na sua API, mas se apenas alguns manipuladores precisarem de acesso, é melhor configurar individualmente.
 :::
 
 </Fragment>
 <Fragment slot="terraform">
 
-Implante a API na mesma VPC que o banco de dados, conceda `rds-db:connect` via `additional_iam_policy_statements`, e abra o caminho de rede com um par de regras de grupo de segurança. Os recursos `aws_vpc.main` e `aws_subnet` são definidos no guia de implantação do banco de dados:
+Implante a API na mesma VPC que o banco de dados, conceda a ela `rds-db:connect` via `additional_iam_policy_statements`, e abra o caminho de rede com um par de regras de grupo de segurança. Os recursos `aws_vpc.main` e `aws_subnet` são definidos no guia de implantação do banco de dados:
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
@@ -56,6 +56,9 @@ module "api" {
   vpc_id     = aws_vpc.main.id
   subnet_ids = aws_subnet.private[*].id
 
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
   additional_iam_policy_statements = [
     {
       Effect = "Allow"
@@ -63,22 +66,8 @@ module "api" {
       Resource = [
         "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"
       ]
-    },
-    {
-      Effect = "Allow"
-      Action = [
-        "appconfig:StartConfigurationSession",
-        "appconfig:GetLatestConfiguration"
-      ]
-      Resource = [
-        "${module.runtime_config_appconfig.application_arn}/*"
-      ]
     }
   ]
-
-  env = {
-    RUNTIME_CONFIG_APP_ID = module.runtime_config_appconfig.application_id
-  }
 }
 
 resource "aws_vpc_security_group_ingress_rule" "api_to_database" {
@@ -100,7 +89,7 @@ resource "aws_vpc_security_group_egress_rule" "api_to_database" {
 }
 ```
 
-Implante as funções Lambda da API em **sub-redes privadas com egress**, não em sub-redes privadas isoladas. `appconfig_application_id`/`appconfig_application_arn` vêm da aplicação AppConfig de <Link path="guides/runtime-config">configuração de tempo de execução</Link> compartilhada declarada uma vez no seu módulo raiz, não do módulo do banco de dados — passá-los define `RUNTIME_CONFIG_APP_ID` nas funções Lambda e concede a elas acesso de leitura à aplicação. Inclua o namespace `database` ao instanciá-lo para que a entrada de configuração de tempo de execução do módulo do banco de dados seja implantada:
+Implante as funções Lambda da API em **sub-redes privadas com saída**, não em sub-redes privadas isoladas. `appconfig_application_id`/`appconfig_application_arn` vêm da <Link path="guides/runtime-config">configuração de tempo de execução</Link> compartilhada da aplicação AppConfig declarada uma vez no seu módulo raiz, não do módulo do banco de dados — passá-los define `RUNTIME_CONFIG_APP_ID` nas funções Lambda e concede a elas acesso de leitura à aplicação. Inclua o namespace `database` ao instanciá-la para que a entrada de configuração de tempo de execução do módulo do banco de dados seja implantada:
 
 ```hcl title="packages/infra/src/main.tf"
 module "runtime_config_appconfig" {

@@ -16,7 +16,7 @@ la localisation, les extraits de contenu réutilisables, les liens internes sens
 plugin [`starlight-blog`](https://starlight-blog-docs.vercel.app/) par défaut.
 
 Par défaut, il crée également un pipeline de traduction automatisé propulsé par un
-[Agent Strands](https://strandsagents.com/) sur
+[Strands Agent](https://strandsagents.com/) sur
 [Amazon Bedrock](https://aws.amazon.com/bedrock/).
 
 ## Utilisation
@@ -37,29 +37,29 @@ Par défaut, le générateur crée la structure de projet suivante dans `docs/` 
 racine de l'espace de travail (configurable via les options `name`, `directory` et `subDirectory`) :
 
 <FileTree>
-  - astro.config.mjs Configuration Astro + Starlight (locales, barre latérale, plugin blog)
-  - tsconfig.json Étend astro/tsconfigs/strict avec des alias de chemin @components / @assets
-  - project.json Projet Nx avec les cibles `build`, `start`, `preview` (et `translate` si activé)
+  - astro.config.mjs Astro + Starlight configuration (locales, sidebar, blog plugin)
+  - tsconfig.json Extends astro/tsconfigs/strict with @components / @assets path aliases
+  - project.json Nx project with `build`, `start`, `preview` (and `translate` if enabled) targets
   - scripts
-    - translate.ts Pilote de traduction — un agent Strands avec un outil d'édition de fichiers délimité (omis avec `--noTranslation`)
-    - translate.config.json Locales source/cible, motifs glob, id du modèle, région (omis avec `--noTranslation`)
+    - translate.ts Translation driver — a Strands agent with a scoped file-editor tool (omitted with `--noTranslation`)
+    - translate.config.json Source/target locales, glob patterns, model id, region (omitted with `--noTranslation`)
   - src
     - components
-      - link.astro Composant de lien sensible à la locale (résout les chemins par rapport à la locale actuelle)
-      - snippet.astro Composant de chargement d'extraits sensible à la locale
+      - link.astro Locale-aware link component (resolves paths against the current locale)
+      - snippet.astro Locale-aware snippet loader component
     - content
       - docs
         - en
-          - index.mdx Page d'accueil
+          - index.mdx Landing page
           - guides
-            - getting-started.mdx Guide d'exemple référençant les composants link et snippet
+            - getting-started.mdx Sample guide referencing the link and snippet components
           - blog
-            - welcome.mdx Article de blog d'exemple (omis avec `--noBlog`)
+            - welcome.mdx Sample blog post (omitted with `--noBlog`)
           - snippets
-            - example.mdx Extrait réutilisable d'exemple
+            - example.mdx Sample reusable snippet
     - styles
-      - custom.css Personnalisations du thème Starlight
-  - README.md README du projet
+      - custom.css Starlight theme overrides
+  - README.md Project README
 </FileTree>
 
 ### Localisation
@@ -86,6 +86,14 @@ Lorsqu'il est exécuté sans `--all`, le script ne traduit que les fichiers qui 
 depuis le dernier commit de traduction sur la branche actuelle — ce qui signifie que vous pouvez
 le réexécuter en toute sécurité sur chaque PR de documentation sans retraduire l'ensemble du site.
 
+Les traductions dont le fichier source n'existe plus sont supprimées, donc renommer ou
+supprimer une page ne laisse pas de copies obsolètes dans chaque locale.
+
+Chaque traduction est écrite comme un fichier complet. L'agent reçoit la source, la
+traduction existante et un diff de ce qui a changé, et réutilise la formulation existante
+pour les sections que le diff n'a pas touchées — ainsi seule la prose touchée par le diff est
+retraduite, et les blocs de code sont copiés de la source tels quels.
+
 ### Configuration de la traduction
 
 Modifiez `scripts/translate.config.json` pour changer :
@@ -104,8 +112,8 @@ Modifiez `scripts/translate.config.json` pour changer :
 
 ### Liens internes sensibles à la locale
 
-Le générateur fournit un composant `Link` qui résout automatiquement les chemins
-de documentation internes par rapport à la locale actuelle, de sorte qu'une seule source de vérité produit
+Le générateur fournit un composant `Link` qui résout automatiquement les chemins de
+documentation internes par rapport à la locale actuelle, de sorte qu'une seule source de vérité produit
 la bonne URL dans chaque langue :
 
 ```mdx
@@ -132,13 +140,12 @@ Aucun workflow CI n'est généré par défaut — ajoutez-en un qui :
 
 1. Configure les identifiants AWS avec la permission d'invoquer Bedrock `InvokeModel` sur
    le modèle configuré.
-2. Exécute la cible `translate` sur les pull requests qui touchent votre documentation en langue source :
+2. Exécute la cible `translate` sur les pull requests qui touchent vos documents en langue source :
 
    <NxCommands commands={['translate docs']} />
 
 3. Commit les traductions résultantes dans la branche de la PR. Le message de commit
    doit correspondre à la valeur `translationCommitMessage` dans
-   `scripts/translate.config.json` (par défaut `docs: update translations`) afin que
-   les exécutions incrémentielles ultérieures puissent détecter le commit de base et ne
+   `scripts/translate.config.json` (par défaut `docs: update translations`) afin que les
+   exécutions incrémentielles ultérieures puissent détecter le commit de référence et ne
    retraduire que les fichiers qui ont changé depuis.
-

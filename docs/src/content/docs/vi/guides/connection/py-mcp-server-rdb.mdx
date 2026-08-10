@@ -1,5 +1,5 @@
 ---
-title: Kết nối Python MCP Server với Cơ sở dữ liệu Quan hệ
+title: Python MCP Server tới Cơ sở dữ liệu Quan hệ
 description: Kết nối Python MCP Server với Cơ sở dữ liệu Quan hệ
 when:
   sourceType: py#mcp-server
@@ -12,7 +12,7 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
 
-Generator `connection` kết nối một <Link path="guides/py-mcp-server">Python MCP Server</Link> với dự án <Link path="guides/py-rdb">Python Relational Database</Link>, làm cho phiên cơ sở dữ liệu có sẵn cho tất cả các công cụ được đăng ký trong server.
+Generator `connection` kết nối một <Link path="guides/py-mcp-server">Python MCP Server</Link> với một dự án <Link path="guides/py-rdb">Python Relational Database</Link>, làm cho database session có sẵn cho tất cả các công cụ được đăng ký trong server.
 
 ## Điều kiện tiên quyết
 
@@ -38,17 +38,17 @@ Chọn dự án MCP server của bạn làm nguồn và dự án cơ sở dữ l
 <FileTree>
 
 - packages/my\_service
-  - project.json Thêm dependency từ `my_mcp_server-dev` vào target `dev` của cơ sở dữ liệu
-  - pyproject.toml Thêm gói cơ sở dữ liệu làm dependency workspace
+  - project.json Thêm một dependency từ `my_mcp_server-dev` vào target `dev` của database
+  - pyproject.toml Thêm package database như một workspace dependency
   - my\_service
     - my\_mcp\_server
-      - Dockerfile Thêm gói RDS CA được sử dụng cho các kết nối Aurora trực tiếp
+      - Dockerfile Thêm RDS CA bundle được sử dụng cho các kết nối Aurora trực tiếp
 
 </FileTree>
 
-## Sử dụng Cơ sở dữ liệu trong MCP Tools
+## Sử dụng Database trong MCP Tools
 
-Import `session_context` từ gói cơ sở dữ liệu của bạn và sử dụng nó bên trong các công cụ MCP server của bạn:
+Import `session_context` từ package database của bạn và sử dụng nó bên trong các công cụ MCP server của bạn:
 
 ```python title="packages/my_service/my_service/my_mcp_server/server.py"
 from sqlmodel import select
@@ -63,9 +63,9 @@ async def list_examples() -> str:
         return str([item.model_dump() for item in items])
 ```
 
-## Nhiều Cơ sở dữ liệu
+## Nhiều Database
 
-Chạy generator lại với một target khác sẽ thêm cơ sở dữ liệu thứ hai bên cạnh cơ sở dữ liệu đầu tiên. Cả hai session context đều có sẵn cho tất cả các công cụ:
+Chạy generator lại với một target khác sẽ thêm database thứ hai cùng với database đầu tiên. Cả hai session context đều có sẵn cho tất cả các công cụ:
 
 ```python title="packages/my_service/my_service/my_mcp_server/server.py"
 from my_scope.my_db import session_context as my_db_session_context
@@ -74,7 +74,7 @@ from my_scope.other_db import session_context as other_db_session_context
 
 ## Hạ tầng
 
-Construct MCP server được tạo triển khai `IGrantable` và `IConnectable`, vì vậy bạn có thể cấp quyền truy cập mạng và IAM cho cơ sở dữ liệu trực tiếp trên construct.
+Construct MCP server được tạo ra triển khai `IGrantable` và `IConnectable`, vì vậy bạn có thể cấp quyền truy cập mạng và IAM cho database trực tiếp trên construct.
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -100,13 +100,13 @@ db.allowDefaultPortFrom(myMcpServer);
 db.grantConnect(myMcpServer);
 ```
 
-`allowDefaultPortFrom` mở quy tắc security group để runtime MCP server có thể truy cập cổng cơ sở dữ liệu. `grantConnect` cấp quyền IAM `rds-db:connect` cho execution role của server.
+`allowDefaultPortFrom` mở quy tắc security group để MCP server runtime có thể truy cập cổng database. `grantConnect` cấp quyền IAM `rds-db:connect` cho execution role của server.
 
 
 </Fragment>
 <Fragment slot="terraform">
 
-Chạy MCP server bên trong cùng VPC với cơ sở dữ liệu, cấp cho nó quyền `rds-db:connect` thông qua `additional_iam_policy_statements`, và mở đường dẫn mạng với một cặp quy tắc security group. Các tài nguyên `aws_vpc.main` và `aws_subnet` được định nghĩa trong hướng dẫn triển khai cơ sở dữ liệu:
+Chạy MCP server bên trong cùng VPC với database, cấp cho nó quyền `rds-db:connect` thông qua `additional_iam_policy_statements`, và mở đường dẫn mạng với một cặp quy tắc security group. Các tài nguyên `aws_vpc.main` và `aws_subnet` được định nghĩa trong hướng dẫn triển khai database:
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
@@ -155,7 +155,7 @@ resource "aws_vpc_security_group_egress_rule" "mcp_server_to_database" {
 }
 ```
 
-`appconfig_application_id`/`appconfig_application_arn` đến từ ứng dụng AppConfig <Link path="guides/runtime-config">cấu hình runtime</Link> được chia sẻ được khai báo một lần trong root module của bạn, không phải từ module cơ sở dữ liệu. Bao gồm namespace `database` khi khởi tạo nó để mục cấu hình runtime của module cơ sở dữ liệu được triển khai:
+`appconfig_application_id`/`appconfig_application_arn` đến từ ứng dụng <Link path="guides/runtime-config">runtime configuration</Link> AppConfig được chia sẻ được khai báo một lần trong root module của bạn, không phải từ database module. Bao gồm namespace `database` khi khởi tạo nó để entry runtime configuration của database module được triển khai:
 
 ```hcl title="packages/infra/src/main.tf"
 module "runtime_config_appconfig" {
@@ -169,19 +169,19 @@ module "runtime_config_appconfig" {
 </Fragment>
 </Infrastructure>
 
-### Yêu cầu SSL khi Kết nối mà không có RDS Proxy
+### Yêu cầu SSL khi Kết nối Không có RDS Proxy
 
-Khi MCP server kết nối trực tiếp với Aurora cluster (không có RDS Proxy), connection generator cập nhật Dockerfile MCP server được tạo để cài đặt gói Amazon RDS CA vào system trust store:
+Khi MCP server kết nối trực tiếp với Aurora cluster (không có RDS Proxy), connection generator cập nhật Dockerfile MCP server được tạo ra để cài đặt Amazon RDS CA bundle vào system trust store:
 
 ```dockerfile
 ADD https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /usr/local/share/ca-certificates/rds-global-bundle.crt
 RUN update-ca-certificates
 ```
 
-Khi sử dụng RDS Proxy, bạn không cần cấu hình gói RDS CA trong runtime MCP server.
+Khi sử dụng RDS Proxy, bạn không cần cấu hình RDS CA bundle trong MCP server runtime.
 
 ## Phát triển Cục bộ
 
 <NxCommands commands={["<mcp-server-name>-dev <project-name>"]} />
 
-Lệnh này khởi động MCP server và tất cả các cơ sở dữ liệu được kết nối. Biến môi trường `LOCAL_DEV=true` khiến database client kết nối với cơ sở dữ liệu Docker cục bộ của nó thay vì Aurora.
+Điều này khởi động MCP server và tất cả các database được kết nối. Biến môi trường `LOCAL_DEV=true` khiến database client kết nối với Docker database cục bộ của nó thay vì Aurora.

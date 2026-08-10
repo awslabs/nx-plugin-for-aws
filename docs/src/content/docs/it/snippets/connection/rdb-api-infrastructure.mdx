@@ -4,12 +4,12 @@ title: Infrastruttura API RDB
 import Infrastructure from '@components/infrastructure.astro';
 import Link from '@components/link.astro';
 
-Per consentire alla tua API di connettersi al database a runtime, le funzioni Lambda dell'API devono essere distribuite nello stesso VPC del database e devono avere accesso di rete e IAM.
+Per consentire alla tua API di connettersi al database in fase di runtime, le funzioni Lambda dell'API devono essere distribuite nello stesso VPC del database e devono avere accesso di rete e IAM.
 
 <Infrastructure>
 <Fragment slot="cdk">
 
-Nel tuo stack applicativo, distribuisci l'API nello stesso VPC del database, quindi chiama `allowDefaultPortFrom` e `grantConnect` per aprire il percorso di rete e concedere il permesso IAM `rds-db:connect` a ciascun handler Lambda:
+Nel tuo stack dell'applicazione, distribuisci l'API nello stesso VPC del database, quindi chiama `allowDefaultPortFrom` e `grantConnect` per aprire il percorso di rete e concedere il permesso IAM `rds-db:connect` a ciascun handler Lambda:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
 import { MyDatabase } from '@my-scope/common-constructs';
@@ -31,16 +31,16 @@ Object.entries(api.integrations).forEach(([operation, integration]) => {
 });
 ```
 
-Distribuisci le funzioni Lambda dell'API in una **subnet privata con egress**, non in una subnet privata isolata. A runtime, `getPrisma()` recupera i dettagli di connessione al database da AWS AppConfig, che è un endpoint pubblico del servizio AWS che richiede accesso internet in uscita.
+Distribuisci le funzioni Lambda dell'API in una **subnet privata con egress**, non in una subnet privata isolata. In fase di runtime, `getPrisma()` recupera i dettagli di connessione al database da AWS AppConfig, che è un endpoint di servizio AWS pubblico che richiede accesso a Internet in uscita.
 
 :::note
-Questo esempio concede l'accesso a tutti gli handler nella tua API, ma se solo alcuni handler necessitano di accesso è meglio configurarli individualmente.
+Questo esempio concede l'accesso a ogni handler nella tua API, ma se solo alcuni handler necessitano di accesso è meglio configurarli individualmente.
 :::
 
 </Fragment>
 <Fragment slot="terraform">
 
-Distribuisci l'API nello stesso VPC del database, concedigli `rds-db:connect` tramite `additional_iam_policy_statements`, e apri il percorso di rete con una coppia di regole di security group. Le risorse `aws_vpc.main` e `aws_subnet` sono definite nella guida di distribuzione del database:
+Distribuisci l'API nello stesso VPC del database, concedigli `rds-db:connect` tramite `additional_iam_policy_statements` e apri il percorso di rete con una coppia di regole del security group. Le risorse `aws_vpc.main` e `aws_subnet` sono definite nella guida alla distribuzione del database:
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
@@ -56,6 +56,9 @@ module "api" {
   vpc_id     = aws_vpc.main.id
   subnet_ids = aws_subnet.private[*].id
 
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
   additional_iam_policy_statements = [
     {
       Effect = "Allow"
@@ -63,22 +66,8 @@ module "api" {
       Resource = [
         "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.my_database.connect_resource_id}/${module.my_database.database_runtime_user}"
       ]
-    },
-    {
-      Effect = "Allow"
-      Action = [
-        "appconfig:StartConfigurationSession",
-        "appconfig:GetLatestConfiguration"
-      ]
-      Resource = [
-        "${module.runtime_config_appconfig.application_arn}/*"
-      ]
     }
   ]
-
-  env = {
-    RUNTIME_CONFIG_APP_ID = module.runtime_config_appconfig.application_id
-  }
 }
 
 resource "aws_vpc_security_group_ingress_rule" "api_to_database" {
@@ -100,7 +89,7 @@ resource "aws_vpc_security_group_egress_rule" "api_to_database" {
 }
 ```
 
-Distribuisci le funzioni Lambda dell'API in **subnet private con egress**, non in subnet private isolate. `appconfig_application_id`/`appconfig_application_arn` provengono dall'applicazione AppConfig di <Link path="guides/runtime-config">configurazione runtime</Link> condivisa dichiarata una volta nel tuo modulo root, non dal modulo database — passarli imposta `RUNTIME_CONFIG_APP_ID` sulle funzioni Lambda e concede loro accesso in lettura all'applicazione. Includi il namespace `database` quando lo istanzi in modo che venga distribuita la voce di configurazione runtime del modulo database:
+Distribuisci le funzioni Lambda dell'API in **subnet private con egress**, non in subnet private isolate. `appconfig_application_id`/`appconfig_application_arn` provengono dall'applicazione <Link path="guides/runtime-config">runtime configuration</Link> AppConfig condivisa dichiarata una volta nel tuo modulo root, non dal modulo del database — passarli imposta `RUNTIME_CONFIG_APP_ID` sulle funzioni Lambda e concede loro l'accesso in lettura all'applicazione. Includi il namespace `database` quando lo istanzi in modo che l'entry di configurazione runtime del modulo del database venga distribuita:
 
 ```hcl title="packages/infra/src/main.tf"
 module "runtime_config_appconfig" {
@@ -113,4 +102,3 @@ module "runtime_config_appconfig" {
 
 </Fragment>
 </Infrastructure>
-

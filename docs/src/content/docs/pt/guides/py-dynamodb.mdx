@@ -30,23 +30,23 @@ O gerador cria a seguinte estrutura de projeto no diretório `<directory>/<name>
 
 <FileTree>
   - \<name>
-    - \_\_init\_\_.py Exportações do pacote
-    - client.py Cliente DynamoDB e resolução de nome da tabela
+    - \_\_init\_\_.py Package exports
+    - client.py DynamoDB client and table name resolution
     - entities
-      - base.py Modelo base PynamoDB com declarações GSI
-      - example.py Definição de entidade de exemplo
-      - \_\_init\_\_.py Exportações de entidades
-  - config.json Configuração da tabela incluindo definições GSI e configurações de desenvolvimento local
-  - project.json Configuração do projeto e alvos de build
+      - base.py Base PynamoDB model with GSI declarations
+      - example.py Example entity definition
+      - \_\_init\_\_.py Entity exports
+  - config.json Table configuration including GSI definitions and local development settings
+  - project.json Project configuration and build targets
 </FileTree>
 
 Os scripts de desenvolvimento local são compartilhados entre todos os projetos DynamoDB (tanto TypeScript quanto Python) e gerados uma vez em:
 
 <FileTree>
   - packages/common/scripts/src/dynamodb
-    - create-local-table.ts Cria a tabela DynamoDB na instância local do DynamoDB Local
-    - pull-image.ts Baixa a imagem do DynamoDB Local
-    - start-container.ts Inicia o contêiner do DynamoDB Local
+    - create-local-table.ts Creates the DynamoDB table in the local DynamoDB Local instance
+    - pull-image.ts Pulls the DynamoDB Local image
+    - start-container.ts Starts the DynamoDB Local container
 </FileTree>
 
 ### Infraestrutura
@@ -61,9 +61,9 @@ Os scripts de desenvolvimento local são compartilhados entre todos os projetos 
 
 ### Modelagem de Dados
 
-O projeto gerado usa [PynamoDB](https://pynamodb.readthedocs.io/) para modelagem de entidades. Todas as entidades **devem** herdar do `BaseModel` gerado — ele resolve o nome correto da tabela DynamoDB em tempo de execução, lendo do AWS AppConfig quando implantado ou de `config.json` quando executado localmente via DynamoDB Local. Sem isso, o PynamoDB não saberá qual tabela usar. `BaseModel` também usa [suporte a polimorfismo do PynamoDB](https://pynamodb.readthedocs.io/en/stable/polymorphism.html) para armazenar múltiplos tipos de entidades em uma única tabela, seguindo o [design de tabela única do DynamoDB](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/data-modeling-foundations.html).
+O projeto gerado usa [PynamoDB](https://pynamodb.readthedocs.io/) para modelagem de entidades. Todas as entidades **devem** herdar do `BaseModel` gerado — ele resolve o nome correto da tabela DynamoDB em tempo de execução, lendo do AWS AppConfig quando implantado ou do `config.json` quando executado localmente via DynamoDB Local. Sem isso, o PynamoDB não saberá qual tabela usar. O `BaseModel` também usa [suporte a polimorfismo do PynamoDB](https://pynamodb.readthedocs.io/en/stable/polymorphism.html) para armazenar múltiplos tipos de entidades em uma única tabela, seguindo o [design de tabela única do DynamoDB](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/data-modeling-foundations.html).
 
-Adicione ou atualize arquivos de entidade em `<name>/entities/`, usando a entidade de exemplo gerada como ponto de partida:
+Adicione ou atualize arquivos de entidades em `<name>/entities/`, usando a entidade de exemplo gerada como ponto de partida:
 
 ```python title="packages/my_table/my_table/entities/example.py"
 from collections.abc import Iterator
@@ -141,7 +141,7 @@ O `ExampleModel` gerado demonstra isso para três padrões:
 - **Listar por categoria** — `gsi1`, `pk=CATEGORY#<category>`
 - **Listar por data de criação** — `gsi2`, `pk=EXAMPLE`, chave de ordenação entre timestamps ISO
 
-A convenção de **prefixo de tipo** (por exemplo, `EXAMPLE#`, `CATEGORY#`) é deliberada: torna os itens autodescritivos ao navegar pela tabela, previne colisões acidentais de chaves entre tipos de entidades que compartilham um índice e permite filtragem de prefixo de chave de ordenação usando `begins_with`.
+A convenção de **prefixo de tipo** (por exemplo, `EXAMPLE#`, `CATEGORY#`) é deliberada: torna os itens autodescritivos ao navegar pela tabela, previne colisões acidentais de chaves entre tipos de entidades que compartilham um índice, e permite filtragem de prefixo de chave de ordenação usando `begins_with`.
 
 Antes de escrever uma nova entidade, defina seus padrões de chave antecipadamente em uma docstring. O `OrderModel` na próxima seção segue essa convenção:
 
@@ -162,8 +162,8 @@ O `DiscriminatorAttribute` do PynamoDB armazena um rótulo de tipo (`entity_type
 :::caution[PynamoDB não foi projetado especificamente para design de tabela única]
 O `DiscriminatorAttribute` do PynamoDB foi projetado para polimorfismo de hierarquia de classes dentro de uma única tabela homogênea — não para armazenar tipos de entidades estruturalmente diferentes em uma tabela. O padrão usado aqui funciona, mas tenha essas ressalvas em mente:
 
-- **Colisão de chaves é sua responsabilidade.** PynamoDB não impede que dois tipos de entidades escrevam o mesmo par `pk`/`sk`. Sempre use prefixos de tipo únicos (por exemplo, `ORDER#`, `USER#`).
-- **Consultas entre entidades requerem `BaseModel`.** PynamoDB adiciona automaticamente um filtro discriminador ao consultar uma subclasse específica, então itens de outros tipos de entidades na mesma chave nunca serão retornados. Para recuperar uma mistura de tipos de uma chave de partição GSI compartilhada, sempre consulte via `BaseModel`.
+- **Colisão de chaves é sua responsabilidade.** O PynamoDB não impede que dois tipos de entidades escrevam o mesmo par `pk`/`sk`. Sempre use prefixos de tipo únicos (por exemplo, `ORDER#`, `USER#`).
+- **Consultas entre entidades requerem `BaseModel`.** O PynamoDB adiciona automaticamente um filtro discriminador ao consultar uma subclasse específica, então itens de outros tipos de entidades na mesma chave nunca serão retornados. Para recuperar uma mistura de tipos de uma chave de partição GSI compartilhada, sempre consulte via `BaseModel`.
 - **Configurações de tabela compartilhadas.** Todas as entidades compartilham a configuração `Meta` (nome da tabela, região, credenciais) definida em `BaseModel`.
 :::
 
@@ -280,12 +280,12 @@ from .example import ExampleModel
 
 #### Sobrecarga de GSI
 
-`BaseModel` fornece dois GSIs compartilhados (`gsi1_index`, `gsi2_index`). Tanto `UserModel` quanto `OrderModel` acima escrevem em `gsi2` — mas com valores `gsi2pk` diferentes (`USER` vs `ORDER`). Isso é **sobrecarga de GSI**: reutilizar um único índice físico para servir múltiplos padrões de acesso independentes sem consumir capacidade extra de GSI.
+O `BaseModel` fornece dois GSIs compartilhados (`gsi1_index`, `gsi2_index`). Tanto `UserModel` quanto `OrderModel` acima escrevem em `gsi2` — mas com valores `gsi2pk` diferentes (`USER` vs `ORDER`). Isso é **sobrecarga de GSI**: reutilizar um único índice físico para servir múltiplos padrões de acesso independentes sem consumir capacidade extra de GSI.
 
 - **`UserModel`** — `gsi2pk=USER`, `gsi2sk=<created_at>` → listar todos os usuários por data
 - **`OrderModel`** — `gsi2pk=ORDER`, `gsi2sk=<created_at>` → listar todos os pedidos por data
 
-`gsi1` também pode ser sobrecarregado quando múltiplos tipos de entidades compartilham o mesmo pai. Se você adicionar posteriormente um `ReviewModel` que também pertence a um usuário, pode atribuir a ele `gsi1pk=USER#<user_id>` com uma chave de ordenação `REVIEW#<id>` — nenhum GSI adicional necessário. Consultar `gsi1` via `BaseModel` então retorna tanto pedidos quanto avaliações para aquele usuário em uma única requisição, com PynamoDB instanciando cada item como sua subclasse correta:
+O `gsi1` também pode ser sobrecarregado quando múltiplos tipos de entidades compartilham o mesmo pai. Se você adicionar posteriormente um `ReviewModel` que também pertence a um usuário, você pode atribuir a ele `gsi1pk=USER#<user_id>` com uma chave de ordenação `REVIEW#<id>` — nenhum GSI adicional necessário. Consultar `gsi1` via `BaseModel` então retorna tanto pedidos quanto avaliações para aquele usuário em uma requisição, com o PynamoDB instanciando cada item como sua subclasse correta:
 
 ```python
 from .base import BaseModel
@@ -310,12 +310,12 @@ orders_only = list(BaseModel.gsi1_index.query(
 
 #### Relacionamentos Um-para-Muitos
 
-Em um relacionamento **um-para-muitos**, a entidade filha armazena uma referência ao seu pai em uma chave de partição GSI, tornando o relacionamento navegável em ambas as direções sem duplicar dados. O exemplo `UserModel` / `OrderModel` acima é exatamente esse padrão:
+Em um relacionamento **um-para-muitos** a entidade filha armazena uma referência ao seu pai em uma chave de partição GSI, tornando o relacionamento navegável em ambas as direções sem duplicar dados. O exemplo `UserModel` / `OrderModel` acima é exatamente esse padrão:
 
 - **Obter um único pedido por ID** — tabela primária: `pk=ORDER#<id>`, `sk=ORDER#<id>`
 - **Listar todos os pedidos de um usuário** — `gsi1`: `pk=USER#<user_id>`
 
-Uma alternativa às buscas baseadas em GSI é o padrão de **coleção de itens**: dê aos itens filhos o mesmo `pk` que seu pai e use a chave de ordenação para diferenciá-los. Isso permite recuperar o pai e todos os seus filhos em uma única consulta à tabela primária, sem um GSI:
+Uma alternativa às consultas baseadas em GSI é o padrão de **coleção de itens**: dê aos itens filhos o mesmo `pk` que seu pai e use a chave de ordenação para diferenciá-los. Isso permite recuperar o pai e todos os seus filhos em uma única consulta à tabela primária, sem um GSI:
 
 ```python title="packages/my_table/my_table/entities/order.py (variante de coleção de itens)"
 class OrderModel(BaseModel, discriminator='OrderModel'):
@@ -327,14 +327,14 @@ class OrderModel(BaseModel, discriminator='OrderModel'):
 ```
 
 ```python
-# Recuperar o usuário e todos os seus pedidos em uma única consulta à tabela primária
-# BaseModel despacha cada item para sua subclasse correta via DiscriminatorAttribute
+# Retrieve the user and all their orders in one primary-table query
+# BaseModel dispatches each item to its correct subclass via DiscriminatorAttribute
 items = list(BaseModel.query(f'USER#{user_id}'))
 user   = next(i for i in items if isinstance(i, UserModel))
 orders = [i for i in items if isinstance(i, OrderModel)]
 ```
 
-O trade-off: coleções de itens colocam todos os filhos sob uma única chave de partição, o que é ideal para a maioria das cargas de trabalho, mas pode criar uma partição quente em throughput de escrita extremo. A abordagem GSI (usada nos exemplos acima) mantém cada entidade em sua própria partição e geralmente é mais segura para começar.
+A compensação: coleções de itens colocam todos os filhos sob uma única chave de partição, o que é ideal para a maioria das cargas de trabalho, mas pode criar uma partição quente em throughput de escrita extremo. A abordagem GSI (usada nos exemplos acima) mantém cada entidade em sua própria partição e geralmente é mais segura para começar.
 
 #### Relacionamentos Muitos-para-Muitos
 
@@ -409,20 +409,20 @@ O `client.py` gerado exporta dois utilitários principais:
 - `is_local()` — retorna `True` quando `LOCAL_DEV=true`, usado para alternar entre comportamento local e AWS.
 - `get_table_name()` — retorna o nome da tabela DynamoDB. Quando `LOCAL_DEV=true`, lê o nome da tabela de `localDev.tableName` em `config.json`; caso contrário, busca o nome do AWS AppConfig usando a variável de ambiente `RUNTIME_CONFIG_APP_ID` e o armazena em cache para chamadas subsequentes.
 
-`BaseModel` em `entities/base.py` usa ambos para configurar o PynamoDB automaticamente:
+O `BaseModel` em `entities/base.py` usa ambos para configurar o PynamoDB automaticamente:
 
-- **Conexão** — `BaseModel.Meta` define `host` de `config.json` e codifica `region`, `aws_access_key_id` e `aws_secret_access_key` quando `is_local()` é `True`, apontando o PynamoDB para a instância local do DynamoDB. Na AWS, estes são deixados indefinidos para que o PynamoDB use a cadeia de credenciais padrão.
-- **Nome da tabela** — `BaseModel._get_connection()` chama `get_table_name()` antes de cada operação, para que a tabela correta seja resolvida em tempo de execução sem qualquer configuração manual.
+- **Conexão** — `BaseModel.Meta` define `host` de `config.json` e codifica `region`, `aws_access_key_id` e `aws_secret_access_key` quando `is_local()` é `True`, apontando o PynamoDB para a instância local do DynamoDB. Na AWS, esses são deixados indefinidos para que o PynamoDB use a cadeia de credenciais padrão.
+- **Nome da tabela** — `BaseModel._get_connection()` chama `get_table_name()` antes de cada operação, então a tabela correta é resolvida em tempo de execução sem qualquer configuração manual.
 
 ### Parando o DynamoDB Local
 
 <Snippet name="dynamodb/local-dev-windows" />
 
-## Adicionar/Remover Índices Secundários Globais
+## Adicionando/Removendo Índices Secundários Globais
 
-GSIs são definidos em `config.json` na raiz do projeto sob a chave `tableConfig.globalSecondaryIndexes`. Adicione uma entrada para cada GSI e, em seguida, reflita a mudança em `BaseModel` adicionando ou removendo a classe `GlobalSecondaryIndex` correspondente e os atributos em `<name>/entities/base.py`:
+GSIs são definidos em `config.json` na raiz do projeto sob a chave `tableConfig.globalSecondaryIndexes`. Adicione uma entrada para cada GSI, depois reflita a mudança em `BaseModel` adicionando ou removendo a classe `GlobalSecondaryIndex` correspondente e atributos em `<name>/entities/base.py`:
 
-<Snippet name="dynamodb/gsi-config" parentHeading="Adicionar/Remover Índices Secundários Globais" />
+<Snippet name="dynamodb/gsi-config" parentHeading="Adicionando/Removendo Índices Secundários Globais" />
 
 ## Conectando à Tabela
 
@@ -448,16 +448,16 @@ Use o gerador <Link path="guides/connection">`connection`</Link> para integrar e
 
 <CardGrid>
   <ConnectionCard
-    title="FastAPI para Python DynamoDB"
-    description="Conecte uma FastAPI a uma tabela DynamoDB"
+    title="FastAPI to Python DynamoDB"
+    description="Connect a FastAPI to a DynamoDB table"
     href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-fast-api-dynamodb`}
     source="fastapi"
     target="dynamodb"
     targetBadge="python"
   />
   <ConnectionCard
-    title="Python Agent para Python DynamoDB"
-    description="Conecte um Python Agent a uma tabela DynamoDB"
+    title="Python Agent to Python DynamoDB"
+    description="Connect a Python Agent to a DynamoDB table"
     href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-dynamodb`}
     source="strands"
     sourceBadge="python"
@@ -465,8 +465,8 @@ Use o gerador <Link path="guides/connection">`connection`</Link> para integrar e
     targetBadge="python"
   />
   <ConnectionCard
-    title="Python MCP Server para Python DynamoDB"
-    description="Conecte um Python MCP Server a uma tabela DynamoDB"
+    title="Python MCP Server to Python DynamoDB"
+    description="Connect a Python MCP Server to a DynamoDB table"
     href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-mcp-server-dynamodb`}
     source="mcp"
     sourceBadge="python"

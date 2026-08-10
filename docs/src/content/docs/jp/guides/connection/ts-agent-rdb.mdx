@@ -1,6 +1,6 @@
 ---
-title: TypeScript Agent から Relational Database への接続
-description: TypeScript Agent を Relational Database に接続する
+title: TypeScript Agent からリレーショナルデータベースへの接続
+description: TypeScript Agent をリレーショナルデータベースに接続する
 when:
   sourceType: ts#agent
   targetType: ts#rdb
@@ -13,7 +13,7 @@ import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
 
-`connection` ジェネレーターは、<Link path="guides/ts-agent">TypeScript Agent</Link> を <Link path="guides/ts-rdb">Relational Database</Link> プロジェクトに接続し、エージェントファクトリー内で Prisma クライアントを利用可能にします。
+`connection` ジェネレーターは、<Link path="guides/ts-agent">TypeScript Agent</Link> を <Link path="guides/ts-rdb">リレーショナルデータベース</Link> プロジェクトに接続し、エージェントファクトリー内で Prisma クライアントを利用できるようにします。
 
 ## 前提条件
 
@@ -41,8 +41,8 @@ Agent プロジェクトをソースとして、リレーショナルデータ�
 <FileTree>
 
 - packages/my-service/src/my-agent
-  - agent.ts `getAgent` 内で取得され、ツールで利用可能な Prisma クライアント
-  - Dockerfile Aurora への SSL 接続用に RDS CA バンドルがインストールされる
+  - agent.ts Prisma client fetched inside `getAgent` and available to tools
+  - Dockerfile RDS CA bundle installed for SSL connections to Aurora
 
 </FileTree>
 
@@ -50,10 +50,10 @@ Agent プロジェクトをソースとして、リレーショナルデータ�
 
 ## エージェントツールでのデータベースの使用
 
-Prisma クライアントは `getAgent()` 内でインスタンス化されます。`ts#agent` ジェネレーターはセッションごとに単一の Agent を設定するため、クライアントもセッションの存続期間中再利用されます：
+Prisma クライアントは `getAgent()` 内でインスタンス化されます。`ts#agent` ジェネレーターはセッションごとに単一の Agent を構成するため、クライアントもセッションの存続期間中再利用されます：
 
 ```ts title="packages/my-service/src/my-agent/agent.ts" {1,4}
-import { getPrisma as getMyDb } from ':my-scope/my-db';
+import { getPrisma as getMyDb } from '@my-scope/my-db';
 
 export const getAgent = async () => {
   const myDb = await getMyDb();
@@ -64,11 +64,11 @@ export const getAgent = async () => {
 
 ## 複数のデータベース
 
-異なるターゲットで再度ジェネレーターを実行すると、最初のデータベースと並んで2番目のデータベースが追加されます：
+異なるターゲットでジェネレーターを再度実行すると、最初のデータベースと並んで2番目のデータベースが追加されます：
 
 ```ts title="packages/my-service/src/my-agent/agent.ts" {1,2,5,6}
-import { getPrisma as getMyDb } from ':my-scope/my-db';
-import { getPrisma as getOtherDb } from ':my-scope/other-db';
+import { getPrisma as getMyDb } from '@my-scope/my-db';
+import { getPrisma as getOtherDb } from '@my-scope/other-db';
 
 export const getAgent = async () => {
   const myDb = await getMyDb();
@@ -86,8 +86,9 @@ export const getAgent = async () => {
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
+import { SecurityGroup } from 'aws-cdk-lib/aws-ec2';
 import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
-import { MyDatabase } from ':my-scope/common-constructs';
+import { MyDatabase } from '@my-scope/common-constructs';
 
 const db = new MyDatabase(this, 'Db', { vpc, ... });
 
@@ -95,6 +96,9 @@ const myAgent = new MyAgent(this, 'MyAgent', {
   networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
     vpc,
     vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    securityGroups: [
+      new SecurityGroup(this, 'MyAgentSecurityGroup', { vpc, allowAllOutbound: true }),
+    ],
   }),
 });
 
@@ -104,24 +108,25 @@ db.grantConnect(myAgent);
 
 `allowDefaultPortFrom` は、エージェントランタイムがデータベースポートに到達できるようにセキュリティグループルールを開きます。`grantConnect` は、エージェントの実行ロールに IAM `rds-db:connect` 権限を付与します。
 
+
 </Fragment>
 <Fragment slot="terraform">
 
-エージェントをデータベースと同じ VPC 内で実行し、`additional_iam_policy_statements` を介して `rds-db:connect` を付与し、セキュリティグループルールのペアでネットワークパスを開きます：
+エージェントをデータベースと同じ VPC 内で実行し、`additional_iam_policy_statements` を介して `rds-db:connect` を付与し、セキュリティグループルールのペアでネットワークパスを開きます。`aws_vpc.main` と `aws_subnet` リソースは、データベースデプロイメントガイドで定義されています：
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
   source              = "../../common/terraform/src/app/dbs/my-database"
-  vpc_id              = module.vpc.vpc_id
-  database_subnet_ids = module.vpc.private_isolated_subnet_ids
-  lambda_subnet_ids   = module.vpc.private_subnet_ids
+  vpc_id              = aws_vpc.main.id
+  database_subnet_ids = aws_subnet.database[*].id
+  lambda_subnet_ids   = aws_subnet.private[*].id
 }
 
 module "my_agent" {
   source     = "../../common/terraform/src/app/agents/my-agent"
   enable_vpc = true
-  vpc_id     = module.vpc.vpc_id
-  subnet_ids = module.vpc.private_subnet_ids
+  vpc_id     = aws_vpc.main.id
+  subnet_ids = aws_subnet.private[*].id
 
   appconfig_application_id  = module.runtime_config_appconfig.application_id
   appconfig_application_arn = module.runtime_config_appconfig.application_arn
@@ -138,6 +143,7 @@ module "my_agent" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "agent_to_database" {
+  description                  = "Allow the agent runtime to connect to the database"
   security_group_id            = module.my_database.security_group_id
   referenced_security_group_id = module.my_agent.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -146,6 +152,7 @@ resource "aws_vpc_security_group_ingress_rule" "agent_to_database" {
 }
 
 resource "aws_vpc_security_group_egress_rule" "agent_to_database" {
+  description                  = "Allow outbound traffic from the agent runtime to the database"
   security_group_id            = module.my_agent.security_group_id
   referenced_security_group_id = module.my_database.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -154,14 +161,23 @@ resource "aws_vpc_security_group_egress_rule" "agent_to_database" {
 }
 ```
 
-`appconfig_application_id`/`appconfig_application_arn` は、データベースモジュールからではなく、ルートモジュールで一度宣言された共有 <Link path="guides/runtime-config">ランタイム設定</Link> AppConfig アプリケーションから取得されます。
+`appconfig_application_id`/`appconfig_application_arn` は、データベースモジュールからではなく、ルートモジュールで一度宣言された共有 <Link path="guides/runtime-config">ランタイム構成</Link> AppConfig アプリケーションから取得されます。データベースモジュールのランタイム構成エントリがデプロイされるように、インスタンス化時に `database` 名前空間を含めてください：
+
+```hcl title="packages/infra/src/main.tf"
+module "runtime_config_appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+  application_name = "my-app-runtime-config"
+  namespaces       = ["connection", "agentcore", "database"]
+}
+```
 
 </Fragment>
 </Infrastructure>
 
 ### RDS Proxy を使用せずに接続する場合の SSL 要件
 
-<Snippet name="connection/strands-agent-rdb-ssl-requirements" parentHeading="SSL Requirements When Connecting Without RDS Proxy" />
+<Snippet name="connection/strands-agent-rdb-ssl-requirements" parentHeading="RDS Proxy を使用せずに接続する場合の SSL 要件" />
 
 ## ローカル開発
 

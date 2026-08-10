@@ -1,6 +1,6 @@
 ---
 title: AgentCore Gateway
-description: Tạo dự án AgentCore Gateway
+description: Tạo một dự án AgentCore Gateway
 generator: agentcore-gateway
 ---
 
@@ -15,12 +15,12 @@ import Link from '@components/link.astro';
 import NxCommands from '@components/nx-commands.astro';
 import OptionFilter from '@components/option-filter.astro';
 
-Tạo một dự án [Amazon Bedrock AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html). AgentCore Gateway là một điểm vào được quản lý đặt trước các MCP server hoặc agent của bạn, xác thực các yêu cầu đầu vào (IAM hoặc Cognito) và ký lưu lượng truy cập đi ra đến các mục tiêu của nó bằng IAM SigV4.
+Tạo một dự án [Amazon Bedrock AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html). AgentCore Gateway là một điểm vào được quản lý đặt trước các MCP server hoặc agent của bạn, xác thực các yêu cầu đến (IAM hoặc Cognito) và ký lưu lượng đi đến các target của nó bằng IAM SigV4.
 
-Tùy chọn `protocol` chọn những gì Gateway đặt trước:
+Tùy chọn `protocol` chọn những gì Gateway đứng trước:
 
-- **`mcp`** (mặc định) — tập hợp một hoặc nhiều mục tiêu MCP server phía sau một endpoint MCP duy nhất, và đánh giá mọi lời gọi công cụ dựa trên [công cụ chính sách Cedar](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html).
-- **`http`** — proxy các yêu cầu trực tiếp đến [mục tiêu AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-target-http-runtime.html) (các agent của bạn) thông qua định tuyến dựa trên đường dẫn (`/<targetName>/invocations`), không có tổng hợp hoặc chuyển đổi giao thức. Sử dụng tùy chọn này để đặt các agent trước một endpoint được quản lý duy nhất — ví dụ để một trang web có thể truy cập các agent được triển khai bên trong VPC thông qua Gateway.
+- **`mcp`** (mặc định) — tổng hợp một hoặc nhiều MCP server target đằng sau một endpoint MCP duy nhất, và đánh giá mọi lời gọi tool dựa trên [Cedar policy engine](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html).
+- **`http`** — proxy các yêu cầu trực tiếp đến [AgentCore Runtime targets](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-target-http-runtime.html) (các agent của bạn) thông qua định tuyến dựa trên đường dẫn (`/<targetName>/invocations`), không có tổng hợp hoặc chuyển đổi giao thức. Sử dụng điều này để đặt các agent trước một endpoint được quản lý duy nhất — ví dụ để một trang web có thể truy cập các agent được triển khai bên trong VPC thông qua Gateway.
 
 ## Cách sử dụng
 
@@ -34,14 +34,14 @@ Tùy chọn `protocol` chọn những gì Gateway đặt trước:
 
 ## Kết quả của Generator
 
-Generator tạo một dự án mới tại `packages/<name>/`, cùng với một CDK construct hoặc Terraform module cho cơ sở hạ tầng:
+Generator tạo một dự án mới tại `packages/<name>/`, cộng với một CDK construct hoặc Terraform module cho cơ sở hạ tầng:
 
 <FileTree>
   - packages/\<name>/
-    - policies/ Các tệp nguồn chính sách Cedar (chỉ giao thức `mcp`; bỏ qua khi `cedarPolicy: false`)
-      - permit-all.cedar Chính sách Cedar mặc định cho phép người gọi đã xác thực
-      - README.md Tài liệu tham khảo để viết chính sách Cedar
-    - local-dev.ts Gateway cục bộ cho phát triển cục bộ — tập hợp các MCP server đính kèm (`mcp`) hoặc proxy các agent đính kèm (`http`)
+    - policies/ Các file nguồn Cedar policy (chỉ giao thức `mcp`; bỏ qua khi `cedarPolicy: false`)
+      - permit-all.cedar Cedar policy mặc định cho phép các caller đã xác thực
+      - README.md Tài liệu tham khảo để viết Cedar policies
+    - local-dev.ts Gateway cục bộ cho phát triển local — tổng hợp các MCP server đã gắn (`mcp`) hoặc proxy các agent đã gắn (`http`)
     - project.json Thêm các target `serve` và `dev`
 </FileTree>
 
@@ -74,18 +74,18 @@ Cơ sở hạ tầng được tạo khi `infra` là `agentcore` (mặc định).
   </Fragment>
 </Infrastructure>
 
-Construct được tạo ra sẽ tạo các tài nguyên AWS sau:
+Construct được tạo tạo ra các tài nguyên AWS sau:
 
-- Một `AgentCore::Gateway` với xác thực IAM đầu vào (mặc định) hoặc xác thực JWT Cognito (xem <a href="#authentication">Authentication</a>). Gateway `mcp` được cấu hình cho giao thức MCP; gateway `http` không có loại giao thức, điều mà AgentCore yêu cầu cho các mục tiêu runtime của nó
+- Một `AgentCore::Gateway` với xác thực IAM đến (mặc định) hoặc xác thực Cognito JWT (xem <a href="#authentication">Xác thực</a>). Gateway `mcp` được cấu hình cho giao thức MCP; gateway `http` không có loại giao thức, điều mà AgentCore yêu cầu cho các runtime target của nó
 - Một `AgentCore::PolicyEngine` chạy ở chế độ `ENFORCE`, được gắn vào Gateway (chỉ gateway `mcp`; bỏ qua khi `cedarPolicy: false`)
-- Một `AgentCore::Policy` cho mỗi tệp `.cedar` trong `policies/` (chỉ gateway `mcp`)
+- Một `AgentCore::Policy` cho mỗi file `.cedar` trong `policies/` (chỉ gateway `mcp`)
 - Một AWS WAFv2 Web ACL được liên kết với Gateway, với ghi log yêu cầu vào CloudWatch (được bật theo mặc định — xem <a href="#aws-waf">AWS WAF</a>)
 
 URL của Gateway được tự động đăng ký trong namespace `agentcore.gateways.<ClassName>` của <Link path="guides/runtime-config">Runtime Configuration</Link> để các agent có thể khám phá nó tại runtime.
 
 #### Kiến trúc
 
-Gateway đã triển khai có kiến trúc sau, với [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACL ở phía trước Gateway, định tuyến đến các mục tiêu MCP server phía sau của nó:
+Gateway được triển khai có kiến trúc sau, với một [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACL đặt trước Gateway, định tuyến đến các MCP server target phía sau:
 
 ```d2 inline=true
 direction: right
@@ -114,23 +114,23 @@ waf -> gateway
 gateway -> targets
 ```
 
-## Authentication
+## Xác thực
 
-Tùy chọn `auth` cấu hình cách Gateway xác thực các yêu cầu đầu vào. Chọn giữa `IAM` (mặc định) và `Cognito`.
+Tùy chọn `auth` cấu hình cách Gateway xác thực các yêu cầu đến. Chọn giữa `iam` (mặc định) và `cognito`.
 
 ### IAM
 
-Theo mặc định, Gateway được cấu hình với `GatewayAuthorizer.usingAwsIam()`. Người gọi ký các yêu cầu bằng SigV4, và danh tính IAM của người gọi có sẵn cho các chính sách Cedar dưới dạng principal `AgentCore::IamEntity`. Đây là tùy chọn được khuyến nghị khi người gọi của bạn là các agent hoặc dịch vụ chạy trong AWS — ví dụ một <Link path="/guides/ts-agent">agent</Link> được kết nối thông qua <Link path="guides/connection/ts-agent-gateway">generator kết nối agent với Gateway</Link>, ký các lời gọi của nó bằng vai trò thực thi của chính nó.
+Theo mặc định, Gateway được cấu hình với `GatewayAuthorizer.usingAwsIam()`. Các caller ký yêu cầu bằng SigV4, và danh tính IAM của caller có sẵn cho các Cedar policy dưới dạng principal `AgentCore::IamEntity`. Đây là tùy chọn được khuyến nghị khi các caller của bạn là các agent hoặc dịch vụ chạy trong AWS — ví dụ một <Link path="/guides/ts-agent">agent</Link> được kết nối qua <Link path="guides/connection/ts-agent-gateway">agent to Gateway connection generator</Link>, ký các lời gọi của nó bằng execution role riêng của nó.
 
 ### Cognito
 
-Khi bạn chọn `cognito`, Gateway được cấu hình với Custom JWT authorizer trỏ đến Cognito user pool. Người gọi xác thực bằng cách trình bày JWT bearer token, và claim `sub` của token có sẵn cho các chính sách Cedar dưới dạng principal `AgentCore::OAuthUser`. Sử dụng tùy chọn này khi người gọi của bạn xác thực thông qua Cognito — ví dụ: một trang web hoặc một coding agent kết nối thông qua <Link path="guides/ts-dcr-proxy">generator `ts#dcr-proxy`</Link>.
+Khi bạn chọn `cognito`, Gateway được cấu hình với Custom JWT authorizer trỏ đến một Cognito user pool. Các caller xác thực bằng cách trình bày JWT bearer token, và claim `sub` của token có sẵn cho các Cedar policy dưới dạng principal `AgentCore::OAuthUser`. Sử dụng điều này khi các caller của bạn xác thực thông qua Cognito — ví dụ một trang web hoặc một coding agent kết nối qua <Link path="guides/ts-dcr-proxy">`ts#dcr-proxy` generator</Link>.
 
-Cơ sở hạ tầng được tạo ra sử dụng Cognito user pool và client hiện có — nó không tạo chúng. Bạn có thể tạo `UserIdentity` bằng cách sử dụng <Link path="/guides/react-website-auth">generator `ts#website#auth`</Link>, hoặc cung cấp của riêng bạn.
+Cơ sở hạ tầng được tạo sử dụng một Cognito user pool và client hiện có — nó không tạo chúng. Bạn có thể tạo một `UserIdentity` bằng cách sử dụng <Link path="/guides/react-website-auth">`ts#website#auth` generator</Link>, hoặc cung cấp của riêng bạn.
 
 <Infrastructure>
 <Fragment slot="cdk">
-Construct được tạo ra yêu cầu prop `identity` cung cấp user pool và client:
+Construct được tạo yêu cầu một prop `identity` cung cấp user pool và client:
 
 ```ts {7,9-11} title="packages/infra/src/stacks/application-stack.ts"
 import { MyGateway, UserIdentity } from ':my-scope/common-constructs';
@@ -142,17 +142,14 @@ export class ApplicationStack extends Stack {
     const identity = new UserIdentity(this, 'Identity');
 
     new MyGateway(this, 'MyGateway', {
-      identity: {
-        userPool: identity.userPool,
-        userPoolClient: identity.userPoolClient,
-      },
+      identity,
     });
   }
 }
 ```
 </Fragment>
 <Fragment slot="terraform">
-Module được tạo ra yêu cầu các biến `user_pool_id` và `user_pool_client_ids`:
+Module được tạo yêu cầu các biến `user_pool_id` và `user_pool_client_ids`:
 
 ```hcl {7-8} title="packages/infra/src/main.tf"
 module "user_identity" {
@@ -169,22 +166,22 @@ module "my_gateway" {
 </Infrastructure>
 
 :::note[Nhà cung cấp OIDC tùy chỉnh]
-Để xác thực với nhà cung cấp OIDC không phải Cognito, hãy sửa đổi trực tiếp construct Gateway hoặc module Terraform được tạo — thay thế URL khám phá và các client được phép của authorizer cho nhà cung cấp của bạn. Các generator kết nối agent với Gateway chỉ hỗ trợ các gateway được xác thực bằng `IAM`, vì các agent ký các lời gọi của chúng bằng SigV4.
+Để xác thực với nhà cung cấp OIDC không phải Cognito, sửa đổi Gateway construct hoặc Terraform module được tạo trực tiếp — thay thế URL khám phá của authorizer và các client được phép cho nhà cung cấp của bạn. Các agent to Gateway connection generator chỉ hỗ trợ gateway được xác thực bằng `IAM`, vì các agent ký các lời gọi của chúng bằng SigV4.
 :::
 
-## Viết chính sách
+## Viết Policies
 
-<OptionFilter when={{ cedarPolicy: true }} description="Chính sách Cedar — chỉ khi cedarPolicy: true">
+<OptionFilter when={{ cedarPolicy: true }} description="Cedar policies — chỉ cedarPolicy: true">
 
-Cedar là ngôn ngữ chính sách được AgentCore Gateway sử dụng để ủy quyền các lời gọi công cụ. Mọi yêu cầu `tools/list` và `tools/call` đi qua Gateway đều được đánh giá dựa trên tập chính sách đính kèm, và người gọi phải có ít nhất một câu lệnh `permit` khớp (và không có `forbid` khớp) để yêu cầu thành công.
+Cedar là ngôn ngữ policy được AgentCore Gateway sử dụng để ủy quyền các lời gọi tool. Mọi yêu cầu `tools/list` và `tools/call` chảy qua Gateway đều được đánh giá dựa trên tập policy đã gắn, và caller phải có ít nhất một câu lệnh `permit` khớp (và không có `forbid` khớp) để yêu cầu thành công.
 
-Tham khảo [tài liệu AWS về chính sách AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html) để biết tài liệu tham khảo đầy đủ, bao gồm [các mẫu chính sách phổ biến](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy-common-patterns.html).
+Tham khảo [tài liệu AWS về AgentCore Gateway policies](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html) để biết tài liệu tham khảo đầy đủ, bao gồm [các mẫu policy phổ biến](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy-common-patterns.html).
 
-### Thêm một chính sách
+### Thêm một policy
 
-Để thêm một chính sách, hãy tạo một tệp `.cedar` mới bên cạnh `permit-all.cedar`. Mỗi tệp `.cedar` trong `policies/` phải chứa chính xác **một** câu lệnh `permit` hoặc `forbid` và được triển khai dưới dạng một tài nguyên `AWS::BedrockAgentCore::Policy` duy nhất. Tên của tài nguyên chính sách được lấy từ tên tệp: `permit-all.cedar` trở thành `PermitAll` (kebab/snake-case được chuyển đổi thành PascalCase). Các tệp chứa nhiều câu lệnh sẽ tạo ra lỗi `unexpected token 'forbid'` tại thời điểm triển khai — hãy tách chúng thành các tệp riêng biệt.
+Để thêm một policy, tạo một file `.cedar` mới bên cạnh `permit-all.cedar`. Mỗi file `.cedar` trong `policies/` phải chứa chính xác **một** câu lệnh `permit` hoặc `forbid` và được triển khai dưới dạng một tài nguyên `AWS::BedrockAgentCore::Policy` duy nhất. Tên của tài nguyên policy được lấy từ tên file: `permit-all.cedar` trở thành `PermitAll` (kebab/snake-case được chuyển đổi thành PascalCase). Các file chứa nhiều câu lệnh tạo ra lỗi `unexpected token 'forbid'` tại thời điểm triển khai — tách chúng thành các file riêng biệt.
 
-Ví dụ, để chỉ cho phép một vai trò agent cụ thể gọi một công cụ cụ thể, hãy tạo:
+Ví dụ, để chỉ cho phép một agent role cụ thể gọi một tool cụ thể, tạo:
 
 ```cedar title="packages/<name>/policies/ts-agent-divide.cedar"
 permit (
@@ -194,22 +191,22 @@ permit (
 );
 ```
 
-Truyền tên vai trò vào dưới dạng biến template (xem <a href="#template-variables">Biến template</a> bên dưới) thay vì hard-code nó. Chạy lại synth hoặc plan để triển khai chính sách mới.
+Truyền tên role vào dưới dạng biến template (xem <a href="#template-variables">Biến template</a> bên dưới) thay vì hard-code nó. Chạy lại synth hoặc plan để triển khai policy mới.
 
 ### Biến template
 
-Các chính sách là template [EJS](https://ejs.co/) được render tại thời điểm synth/plan để chúng có thể di chuyển giữa các tài khoản và triển khai lại Gateway:
+Các policy là các template [EJS](https://ejs.co/) được render tại thời điểm synth/plan để chúng có thể di chuyển được qua các tài khoản và triển khai lại Gateway:
 
-| Biến                 | Được thay thế bằng                                   |
-| -------------------- | ---------------------------------------------------- |
-| `<%= gatewayArn %>`  | ARN của Gateway đã triển khai                        |
-| `<%= accountId %>`   | Tài khoản AWS mà Gateway này được triển khai vào     |
+| Biến                 | Được thay thế bằng                                  |
+| -------------------- | --------------------------------------------------- |
+| `<%= gatewayArn %>`  | ARN của Gateway đã triển khai                       |
+| `<%= accountId %>`   | Tài khoản AWS mà Gateway này được triển khai vào    |
 
 Luôn tham chiếu các biến này thay vì hard-code các giá trị.
 
 #### Thêm biến của riêng bạn
 
-Thêm biến mới tại nơi các chính sách được render, ví dụ để truyền tên vai trò thực thi của agent vào ví dụ `ts-agent-divide.cedar` ở trên:
+Thêm các biến mới nơi các policy được render, ví dụ để truyền tên execution role của agent vào ví dụ `ts-agent-divide.cedar` ở trên:
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -242,20 +239,20 @@ query = {
 
 ### Chế độ ENFORCE và default-deny
 
-`PolicyEngine` chạy ở chế độ `ENFORCE`, có nghĩa là ngữ nghĩa **default-deny** được áp dụng: nếu không có câu lệnh `permit` nào khớp với bộ ba (principal, action, resource), yêu cầu sẽ bị từ chối. Các lời gọi công cụ bị từ chối sẽ trả về:
+`PolicyEngine` chạy ở chế độ `ENFORCE`, có nghĩa là ngữ nghĩa **default-deny** được áp dụng: nếu không có câu lệnh `permit` nào khớp với tuple (principal, action, resource), yêu cầu bị từ chối. Các lời gọi tool bị từ chối trả về:
 
 ```
 Tool Execution Denied: Tool call not allowed due to policy enforcement
 [No policy applies to the request (denied by default).]
 ```
 
-Ngoài ra, Gateway lọc phản hồi của `tools/list` để người gọi chỉ thấy các công cụ mà họ có ít nhất một `permit` khớp: nếu một agent thiếu quyền cho một công cụ nhất định, công cụ đó sẽ bị ẩn hoàn toàn thay vì xuất hiện và thất bại tại thời điểm gọi.
+Ngoài ra, Gateway lọc phản hồi của `tools/list` để các caller chỉ thấy các tool mà họ có ít nhất một `permit` khớp: nếu một agent thiếu quyền cho một tool nhất định, tool đó bị ẩn hoàn toàn thay vì xuất hiện và thất bại tại thời điểm gọi.
 
 ### `permit-all.cedar` mặc định
 
-Generator cung cấp một chính sách mặc định được giới hạn theo loại xác thực của Gateway.
+Generator cung cấp một policy mặc định được giới hạn theo loại xác thực của Gateway.
 
-Đối với Gateway **IAM**, nó cho phép bất kỳ người gọi IAM nào từ tài khoản AWS mà Gateway được triển khai vào:
+Đối với Gateway **IAM**, nó cho phép bất kỳ IAM caller nào từ tài khoản AWS mà Gateway được triển khai vào:
 
 ```cedar title="packages/<name>/policies/permit-all.cedar"
 permit (
@@ -267,7 +264,7 @@ permit (
 };
 ```
 
-Đối với Gateway **Cognito**, nó cho phép bất kỳ người dùng OAuth đã xác thực nào (JWT authorizer đã xác thực user pool và client của token trước khi các chính sách được đánh giá):
+Đối với Gateway **Cognito**, nó cho phép bất kỳ OAuth user đã xác thực nào (JWT authorizer đã xác thực user pool và client của token trước khi các policy được đánh giá):
 
 ```cedar title="packages/<name>/policies/permit-all.cedar"
 permit (
@@ -277,19 +274,19 @@ permit (
 );
 ```
 
-Để khóa chặt hơn, hãy thêm các chính sách hẹp hơn bên cạnh nó. Luôn giữ lại ít nhất một `permit` khớp trong tập chính sách, nếu không default-deny sẽ chặn mọi lời gọi.
+Để khóa chặt hơn, thêm các policy hẹp hơn bên cạnh nó. Luôn giữ ít nhất một `permit` khớp trong tập policy, nếu không default-deny sẽ chặn mọi lời gọi.
 
-### Tài liệu tham khảo phạm vi chính sách
+### Tài liệu tham khảo phạm vi policy
 
-Loại principal phụ thuộc vào cách Gateway xác thực người gọi (xem <a href="#authentication">Authentication</a>).
+Loại principal phụ thuộc vào cách Gateway xác thực các caller (xem <a href="#authentication">Xác thực</a>).
 
-Đối với Gateway **IAM**, người gọi là IAM principal:
+Đối với Gateway **IAM**, các caller là các IAM principal:
 
 ```
 principal is AgentCore::IamEntity
 ```
 
-Người gọi được đánh giá dưới dạng STS assumed-role ARN với tên session bị loại bỏ, vì vậy một vai trò có thể được khớp chính xác — không cần wildcard:
+Các caller được đánh giá dưới dạng ARN assumed-role STS với tên session bị loại bỏ, vì vậy một role có thể được khớp chính xác — không cần ký tự đại diện:
 
 ```cedar
 principal == AgentCore::IamEntity::"arn:aws:sts::<%= accountId %>:assumed-role/<%= myAgentRoleName %>"
@@ -297,7 +294,7 @@ principal == AgentCore::IamEntity::"arn:aws:sts::<%= accountId %>:assumed-role/<
 
 Cùng một giá trị có sẵn dưới dạng `principal.id` cho các mệnh đề `when`. Dành `like` cho các mẫu thực sự, chẳng hạn như khớp toàn tài khoản trong `permit-all.cedar` mặc định.
 
-Đối với Gateway **Cognito**, người gọi là người dùng OAuth được xây dựng từ claim `sub` của JWT token, và các claim JWT (username, scope, v.v.) có sẵn dưới dạng các tag principal:
+Đối với Gateway **Cognito**, các caller là các OAuth user được xây dựng từ claim `sub` của JWT token, và các claim JWT (username, scope, v.v.) có sẵn dưới dạng principal tag:
 
 ```
 principal is AgentCore::OAuthUser
@@ -315,13 +312,13 @@ permit (
 };
 ```
 
-Các lời gọi công cụ đến policy engine dưới dạng action với định dạng:
+Các lời gọi tool đến policy engine dưới dạng các action với dạng:
 
 ```
 AgentCore::Action::"<target-name>___<tool-name>"
 ```
 
-trong đó `<target-name>` là tên target Gateway (`mcpServerName` của MCP server theo mặc định khi sử dụng `gateway.addMcpServer(...)`, được lấy từ tên class của dự án MCP ở dạng kebab-case — ví dụ `TsMcp` → `ts-mcp`), `<tool-name>` là tên công cụ MCP, và dấu phân cách là `___` (ba dấu gạch dưới). Cedar không hỗ trợ wildcard trên action — khớp chính xác action, hoặc bỏ qua `action ==` để khớp tất cả action.
+trong đó `<target-name>` là tên Gateway target (mặc định là `mcpServerName` của MCP server khi sử dụng `gateway.addMcpServer(...)`, được lấy từ tên class của dự án MCP ở dạng kebab-case — ví dụ `TsMcp` → `ts-mcp`), `<tool-name>` là tên của MCP tool, và dấu phân cách là `___` (ba dấu gạch dưới). Cedar không hỗ trợ ký tự đại diện trên các action — khớp các action chính xác, hoặc bỏ qua `action ==` để khớp tất cả các action.
 
 Resource luôn là chính Gateway:
 
@@ -329,15 +326,15 @@ Resource luôn là chính Gateway:
 resource == AgentCore::Gateway::"<%= gatewayArn %>"
 ```
 
-### Các cân nhắc về xác thực
+### Cân nhắc về xác thực
 
-Cơ sở hạ tầng được tạo ra tạo các chính sách với `IGNORE_ALL_FINDINGS`: trình phân tích Cedar của AgentCore (`FAIL_ON_ANY_FINDINGS`, mặc định của dịch vụ) từ chối nhiều chính sách hợp lệ — ví dụ, một `forbid` vô hiệu hóa một công cụ duy nhất cho mọi người gọi bị từ chối là "Overly Restrictive", ngay cả khi được giới hạn bằng mệnh đề `when`. Việc thực thi không bị ảnh hưởng; nó được cấu hình bởi chế độ `ENFORCE` của policy engine.
+Cơ sở hạ tầng được tạo tạo các policy với `IGNORE_ALL_FINDINGS`: Cedar analyzer của AgentCore (`FAIL_ON_ANY_FINDINGS`, mặc định của dịch vụ) từ chối nhiều policy hợp lệ — ví dụ, một `forbid` vô hiệu hóa một tool duy nhất cho mọi caller bị từ chối là "Overly Restrictive", ngay cả khi được giới hạn bằng mệnh đề `when`. Việc thực thi không bị ảnh hưởng; nó được cấu hình bởi chế độ `ENFORCE` của policy engine.
 
-Một ràng buộc về thứ tự vẫn áp dụng: một chính sách tham chiếu `AgentCore::Action::"<target>___<tool>"` chỉ xác thực sau khi target đã đăng ký công cụ đó với Gateway, đó là lý do tại sao cơ sở hạ tầng được tạo ra tạo các chính sách sau các target Gateway.
+Một ràng buộc về thứ tự vẫn áp dụng: một policy tham chiếu `AgentCore::Action::"<target>___<tool>"` chỉ xác thực khi target đã đăng ký tool đó với Gateway, đó là lý do tại sao cơ sở hạ tầng được tạo tạo các policy sau Gateway target.
 
-Nếu một chính sách không triển khai được, CloudFormation hiển thị từ chối dưới dạng lỗi `Resource stabilization failed` không rõ ràng — chạy `aws bedrock-agentcore-control list-policies --policy-engine-id <id>` để lấy `statusReasons` của validator, chứa lý do thực tế.
+Nếu một policy không triển khai được, CloudFormation hiển thị việc từ chối dưới dạng lỗi `Resource stabilization failed` mơ hồ — chạy `aws bedrock-agentcore-control list-policies --policy-engine-id <id>` để lấy `statusReasons` của validator, chứa lý do thực sự.
 
-### Ví dụ: forbid một công cụ trong khi giữ permit rộng hơn
+### Ví dụ: forbid một tool trong khi giữ permit rộng hơn
 
 Ghép một `forbid` hẹp với một `permit` rộng hơn (Cedar đánh giá `forbid` trước `permit`):
 
@@ -349,33 +346,33 @@ forbid (
 );
 ```
 
-Điều này từ chối vai trò agent Python gọi `ts-mcp___divide` trong khi vẫn giữ `permit-all.cedar` rộng hơn cho tất cả người gọi khác.
+Điều này từ chối Python agent role gọi `ts-mcp___divide` trong khi để `permit-all.cedar` rộng hơn tại chỗ cho tất cả các caller khác.
 
 </OptionFilter>
 
-## Phát triển cục bộ
+## Phát triển Local
 
-Generator thêm target `dev` vào dự án Gateway, chạy `local-dev.ts`. Chạy nó sẽ khởi động gateway cục bộ và mọi mục tiêu đính kèm cùng nhau:
+Generator thêm một target `dev` vào dự án Gateway, chạy `local-dev.ts`. Chạy nó sẽ khởi động local gateway và mọi target đã gắn cùng nhau:
 
 <NxCommands commands={["dev <name>"]} />
 
 <OptionFilter when={{ protocol: 'mcp' }} description="MCP aggregator local gateway">
-Gateway cục bộ cung cấp một endpoint MCP duy nhất tập hợp mọi MCP server đính kèm (được kết nối thông qua <Link path="guides/connection/agentcore-gateway-mcp">generator `agentcore-gateway#mcp-connection`</Link>), với các công cụ có tiền tố `<target>___<tool>` để khớp với Gateway đã triển khai.
+Local gateway hiển thị một endpoint MCP duy nhất tổng hợp mọi MCP server đã gắn (được kết nối qua <Link path="guides/connection/agentcore-gateway-mcp">`agentcore-gateway#mcp-connection` generator</Link>), với các tool có tiền tố `<target>___<tool>` để khớp với Gateway đã triển khai.
 </OptionFilter>
 
 <OptionFilter when={{ protocol: 'http' }} description="Path-routing proxy local gateway">
-Gateway cục bộ proxy các đường dẫn `/<targetName>/...` đến máy chủ cục bộ của mỗi agent đính kèm (được kết nối thông qua <Link path="guides/connection/agentcore-gateway-agent">generator `agentcore-gateway#agent-connection`</Link>), khớp với định tuyến dựa trên đường dẫn của Gateway đã triển khai.
+Local gateway proxy các đường dẫn `/<targetName>/...` đến local server của mỗi agent đã gắn (được kết nối qua <Link path="guides/connection/agentcore-gateway-agent">`agentcore-gateway#agent-connection` generator</Link>), khớp với định tuyến dựa trên đường dẫn của Gateway đã triển khai.
 </OptionFilter>
 
-Xem các hướng dẫn kết nối để biết toàn bộ câu chuyện phát triển cục bộ.
+Xem các hướng dẫn kết nối để biết câu chuyện phát triển local đầy đủ.
 
 ## Triển khai AgentCore Gateway của bạn
 
-Generator AgentCore Gateway tạo mã cơ sở hạ tầng CDK hoặc Terraform dựa trên `iac` bạn đã chọn. Bạn có thể sử dụng điều này để triển khai Gateway của mình.
+AgentCore Gateway generator tạo mã cơ sở hạ tầng CDK hoặc Terraform dựa trên `iac` đã chọn của bạn. Bạn có thể sử dụng điều này để triển khai Gateway của bạn.
 
 <Infrastructure>
 <Fragment slot="cdk">
-CDK construct để triển khai Gateway của bạn nằm trong thư mục `common/constructs`. Bạn có thể sử dụng nó trong một ứng dụng CDK, ví dụ:
+CDK construct để triển khai Gateway của bạn nằm trong thư mục `common/constructs`. Bạn có thể sử dụng điều này trong một ứng dụng CDK, ví dụ:
 
 ```ts {7} title="packages/infra/src/stacks/application-stack.ts"
 import { MyGateway } from '@my-scope/common-constructs';
@@ -389,10 +386,10 @@ export class ApplicationStack extends Stack {
 }
 ```
 
-Điều này thiết lập cơ sở hạ tầng Gateway của bạn, bao gồm `AgentCore::Gateway`, `PolicyEngine` Cedar của nó, và AWS WAF Web ACL (xem [AWS WAF](#aws-waf) bên dưới). Đăng ký các target MCP server với `gateway.addMcpServer(...)` — xem <Link path="guides/connection/agentcore-gateway-mcp">hướng dẫn kết nối MCP server</Link>.
+Điều này thiết lập cơ sở hạ tầng Gateway của bạn, bao gồm `AgentCore::Gateway`, Cedar `PolicyEngine` của nó, và AWS WAF Web ACL (xem [AWS WAF](#aws-waf) bên dưới). Đăng ký các MCP server target với `gateway.addMcpServer(...)` — xem <Link path="guides/connection/agentcore-gateway-mcp">hướng dẫn kết nối MCP server</Link>.
 </Fragment>
 <Fragment slot="terraform">
-Terraform module để triển khai Gateway của bạn nằm trong thư mục `common/terraform`. Bạn có thể sử dụng nó trong cấu hình Terraform, ví dụ:
+Terraform module để triển khai Gateway của bạn nằm trong thư mục `common/terraform`. Bạn có thể sử dụng điều này trong một cấu hình Terraform, ví dụ:
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_gateway" {
@@ -400,25 +397,25 @@ module "my_gateway" {
 }
 ```
 
-Điều này thiết lập cơ sở hạ tầng Gateway của bạn, bao gồm `aws_bedrockagentcore_gateway`, policy engine Cedar của nó, và AWS WAF Web ACL (xem [AWS WAF](#aws-waf) bên dưới). Đăng ký các target MCP server với tài nguyên `aws_bedrockagentcore_gateway_target` — xem <Link path="guides/connection/agentcore-gateway-mcp">hướng dẫn kết nối MCP server</Link>.
+Điều này thiết lập cơ sở hạ tầng Gateway của bạn, bao gồm `aws_bedrockagentcore_gateway`, Cedar policy engine của nó, và AWS WAF Web ACL (xem [AWS WAF](#aws-waf) bên dưới). Đăng ký các MCP server target với một tài nguyên `aws_bedrockagentcore_gateway_target` — xem <Link path="guides/connection/agentcore-gateway-mcp">hướng dẫn kết nối MCP server</Link>.
 </Fragment>
 </Infrastructure>
 
 ### AWS WAF
 
-Theo mặc định, construct được tạo ra liên kết một [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACL với Gateway. AWS WAF kiểm tra mọi yêu cầu đầu vào inline _trước khi_ nó đến đích, bảo vệ Gateway của bạn khỏi các khai thác web, lưu lượng bot và các cuộc tấn công theo khối lượng. Web ACL sử dụng bộ quy tắc mặc định được quản lý bởi AWS ([`AWSManagedRulesCommonRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-crs) và [`AWSManagedRulesKnownBadInputsRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-known-bad-inputs)), cung cấp bảo vệ chống lại các khai thác web phổ biến bao gồm OWASP Top 10. Log yêu cầu WAF được ghi vào nhóm CloudWatch Logs.
+Theo mặc định, construct được tạo liên kết một [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACL với Gateway. AWS WAF kiểm tra mọi yêu cầu đến inline _trước khi_ nó đến target, bảo vệ Gateway của bạn khỏi các khai thác web, lưu lượng bot và các cuộc tấn công volumetric. Web ACL sử dụng bộ quy tắc mặc định được quản lý bởi AWS ([`AWSManagedRulesCommonRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-crs) và [`AWSManagedRulesKnownBadInputsRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-known-bad-inputs)), cung cấp bảo vệ chống lại các khai thác web phổ biến bao gồm OWASP Top 10. Log yêu cầu WAF được ghi vào một CloudWatch Logs group.
 
-Web ACL là `REGIONAL` và được tạo trong vùng của Gateway, theo yêu cầu cho các liên kết AgentCore Gateway.
+Web ACL là `REGIONAL` và được tạo trong region của Gateway, như yêu cầu cho các liên kết AgentCore Gateway.
 
 :::caution[Sai lệch SizeRestrictions_BODY so với mặc định]
-Quy tắc `SizeRestrictions_BODY` từ `AWSManagedRulesCommonRuleSet` được ghi đè thành `Count` thay vì `Block`, vì giới hạn 8 KB của quy tắc quá hạn chế đối với các payload công cụ MCP điển hình. Các yêu cầu quá khổ vẫn sẽ được ghi lại dưới dạng số liệu để bạn có thể theo dõi chúng. Xem hướng dẫn [giới hạn kích thước body của AWS WAF](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-oversize-handling.html) để biết thêm chi tiết.
+Quy tắc `SizeRestrictions_BODY` từ `AWSManagedRulesCommonRuleSet` được ghi đè thành `Count` thay vì `Block`, vì giới hạn 8 KB của quy tắc quá hạn chế cho các payload tool MCP điển hình. Các yêu cầu quá khổ vẫn sẽ được ghi lại dưới dạng metric để bạn có thể giám sát chúng. Xem hướng dẫn [AWS WAF body size limits](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-oversize-handling.html) để biết thêm chi tiết.
 :::
 
-Bạn có thể chỉnh sửa construct Gateway được tạo để thêm, xóa hoặc điều chỉnh các quy tắc (ví dụ: để thêm [quy tắc dựa trên tốc độ](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-type-rate-based.html) hoặc các nhóm quy tắc được quản lý bổ sung).
+Bạn có thể chỉnh sửa Gateway construct được tạo để thêm, xóa hoặc điều chỉnh các quy tắc (ví dụ, để thêm [rate-based rules](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-type-rate-based.html) hoặc các nhóm quy tắc được quản lý bổ sung).
 
 <Infrastructure>
 <Fragment slot="cdk">
-Để từ chối (ví dụ: để đính kèm Web ACL của riêng bạn), đặt `enableWaf` thành `false` khi bạn khởi tạo construct Gateway:
+Để từ chối (ví dụ, để gắn Web ACL của riêng bạn), đặt `enableWaf` thành `false` khi bạn khởi tạo Gateway construct:
 
 ```ts {2}
 new MyGateway(this, 'MyGateway', {
@@ -429,7 +426,7 @@ new MyGateway(this, 'MyGateway', {
 Construct hiển thị Web ACL đã tạo dưới dạng `webAcl` để cấu hình thêm.
 </Fragment>
 <Fragment slot="terraform">
-Để từ chối (ví dụ: để đính kèm Web ACL của riêng bạn), đặt `enable_waf` thành `false` trên module Gateway:
+Để từ chối (ví dụ, để gắn Web ACL của riêng bạn), đặt `enable_waf` thành `false` trên Gateway module:
 
 ```hcl {2}
 module "my_gateway" {
@@ -443,26 +440,26 @@ Module xuất ARN của Web ACL đã tạo dưới dạng `waf_web_acl_arn` đ�
 
 ## Kết nối
 
-Sử dụng generator <Link path="guides/connection">`connection`</Link> để tích hợp dự án này với các dự án khác trong workspace của bạn. Các kết nối sau liên quan đến dự án này:
+Sử dụng <Link path="guides/connection">`connection`</Link> generator để tích hợp dự án này với các dự án khác trong workspace của bạn. Các kết nối sau liên quan đến dự án này:
 
 <CardGrid>
   <ConnectionCard
     title="AgentCore Gateway to MCP Server"
-    description="Tổng hợp MCP server phía sau AgentCore Gateway"
+    description="Tổng hợp một MCP server đằng sau một AgentCore Gateway"
     href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/agentcore-gateway-mcp`}
     source="agentcore"
     target="mcp"
   />
   <ConnectionCard
     title="AgentCore Gateway to AgentCore Gateway"
-    description="Tổng hợp AgentCore Gateway phía sau một AgentCore Gateway khác"
+    description="Tổng hợp một AgentCore Gateway đằng sau một AgentCore Gateway khác"
     href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/agentcore-gateway-gateway`}
     source="agentcore"
     target="agentcore"
   />
   <ConnectionCard
     title="TypeScript Agent to AgentCore Gateway"
-    description="Kết nối TypeScript Agent với AgentCore Gateway"
+    description="Kết nối một TypeScript Agent với một AgentCore Gateway"
     href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/ts-agent-gateway`}
     source="strands"
     sourceBadge="typescript"
@@ -470,7 +467,7 @@ Sử dụng generator <Link path="guides/connection">`connection`</Link> để t
   />
   <ConnectionCard
     title="Python Agent to AgentCore Gateway"
-    description="Kết nối Python Agent với AgentCore Gateway"
+    description="Kết nối một Python Agent với một AgentCore Gateway"
     href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-gateway`}
     source="strands"
     sourceBadge="python"
@@ -478,14 +475,14 @@ Sử dụng generator <Link path="guides/connection">`connection`</Link> để t
   />
   <ConnectionCard
     title="AgentCore Gateway to Agent"
-    description="Đặt agent trước AgentCore Gateway như một mục tiêu runtime"
+    description="Đặt một agent trước một AgentCore Gateway dưới dạng runtime target"
     href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/agentcore-gateway-agent`}
     source="agentcore"
     target="strands"
   />
   <ConnectionCard
     title="React Website to AgentCore Gateway"
-    description="Kết nối trang web React với các agent thông qua AgentCore Gateway"
+    description="Kết nối một React website với các agent thông qua một AgentCore Gateway"
     href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-agentcore-gateway`}
     source="react"
     target="agentcore"

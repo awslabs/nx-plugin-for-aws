@@ -12,7 +12,7 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
 
-El generador `connection` puede registrar un <Link path="guides/agentcore-gateway">AgentCore Gateway</Link> como destino de otro AgentCore Gateway. Esto te permite componer gateways jerárquicamente — por ejemplo, un gateway a nivel de equipo que agrega varios gateways de dominio, cada uno de los cuales sirve de fachada para sus propios servidores MCP.
+El generador `connection` puede registrar un <Link path="guides/agentcore-gateway">AgentCore Gateway</Link> como destino de otro AgentCore Gateway. Esto te permite componer gateways jerárquicamente — por ejemplo, un gateway a nivel de equipo que agrega varios gateways de dominio, cada uno de los cuales sirve sus propios servidores MCP.
 
 Una vez conectado, el Gateway de origen agrega las herramientas del Gateway de destino en su único endpoint MCP. Dado que el Gateway de destino ya prefija sus herramientas con sus propios nombres de destino, las herramientas aparecen a través del Gateway de origen como `<gateway-target-name>___<target-name>___<tool-name>` — cada gateway en la cadena agrega un prefijo. Ambos gateways evalúan sus propias políticas Cedar: el Gateway de origen autoriza al llamador para la acción prefijada, luego el Gateway de destino autoriza el rol de ejecución del Gateway de origen para la acción interna.
 
@@ -43,12 +43,12 @@ El generador conecta proyectos existentes en lugar de emitir nuevos archivos fue
 <FileTree>
 
 - packages/\<source-gateway>
-  - project.json el target `dev` del Gateway de origen obtiene una dependencia en el target `dev` del gateway de destino
+  - project.json el destino `dev` del Gateway de origen gana una dependencia en el destino `dev` del gateway de destino
   - local-dev.ts `ATTACHED_MCP_SERVERS` actualizado para que el gateway local agregue el gateway de destino
 
 </FileTree>
 
-El target `dev` del proyecto Gateway de origen obtiene una dependencia en el target `dev` del Gateway de destino, por lo que ejecutar el Gateway de origen localmente también inicia el gateway de destino (y, transitivamente, cada servidor MCP conectado a él). El gateway de destino también se registra en el `local-dev.ts` del proyecto Gateway de origen para que el gateway local agregue sus herramientas.
+El destino `dev` del proyecto Gateway de origen gana una dependencia en el destino `dev` del Gateway de destino, por lo que ejecutar el Gateway de origen localmente también inicia el gateway de destino (y, transitivamente, cada servidor MCP conectado a él). El gateway de destino también se registra en el `local-dev.ts` del proyecto Gateway de origen para que el gateway local agregue sus herramientas.
 
 ## Agregar el destino del gateway a tu stack
 
@@ -84,6 +84,10 @@ En el archivo Terraform donde instancias los Gateways, conecta el destino del ga
 ```hcl title="packages/infra/src/main.tf" {4-6,11,13-19,22-40}
 module "inner_gateway" {
   source = "../../common/terraform/src/app/gateways/inner-gateway"
+
+  # Target ids of the inner gateway's own targets (e.g. its MCP servers), so
+  # its gateway_url is not consumed until it serves their tools.
+  tool_dependencies = [aws_bedrockagentcore_gateway_target.my_mcp_server.target_id]
 }
 
 module "outer_gateway" {
@@ -135,7 +139,7 @@ Cada gateway en la cadena evalúa su propio conjunto de políticas:
 1. El **gateway de origen** evalúa al llamador original (por ejemplo, el rol de ejecución de un agente) contra la acción prefijada, por ejemplo `AgentCore::Action::"inner-gateway___my-mcp___add"`.
 2. El **gateway de destino** evalúa el rol de ejecución del gateway de origen contra la acción interna, por ejemplo `AgentCore::Action::"my-mcp___add"`.
 
-Esto significa que una llamada de herramienta a través de una cadena de gateways debe ser permitida en cada salto. El `permit-all.cedar` predeterminado permite cualquier llamador en la misma cuenta de AWS, lo que incluye el rol del gateway de origen; si escribes políticas más estrictas en el gateway de destino, recuerda que el principal que ve es el rol del *gateway de origen*, no el llamador original.
+Esto significa que una llamada de herramienta a través de una cadena de gateway debe ser permitida en cada salto. El `permit-all.cedar` predeterminado permite cualquier llamador en la misma cuenta de AWS, lo que incluye el rol del gateway de origen; si escribes políticas más estrictas en el gateway de destino, recuerda que el principal que ve es el rol del *gateway de origen*, no el llamador original.
 
 ## Desarrollo local
 
@@ -146,5 +150,5 @@ Ejecutar el Gateway de origen localmente con:
 inicia el gateway de origen local, el gateway de destino local y cada servidor MCP conectado a cualquiera de ellos, cada uno en su puerto local asignado. Los nombres de herramientas se prefijan en cada salto exactamente como se despliegan (`<gateway-target-name>___<target-name>___<tool-name>`), por lo que los prompts del agente y los nombres de acción Cedar permanecen consistentes entre ejecuciones locales y desplegadas.
 
 :::caution[Fidelidad local]
-El desarrollo local utiliza **gateways locales sustitutos** — agregadores MCP ligeros iniciados por cada proyecto Gateway, no el servicio AgentCore Gateway. Como consecuencia, **las políticas Cedar no se evalúan localmente** en ningún salto. Para ejercitar las políticas Cedar, ejecuta el target `serve` del agente en su lugar (consulta las guías de conexión de agentes <Link path="guides/connection/ts-agent-gateway">TypeScript</Link> / <Link path="guides/connection/py-agent-gateway">Python</Link>) para que el agente que se ejecuta localmente llame al Gateway desplegado.
+El desarrollo local usa **gateways sustitutos locales** — agregadores MCP ligeros iniciados por cada proyecto Gateway, no el servicio AgentCore Gateway. Como consecuencia, **las políticas Cedar no se evalúan localmente** en ningún salto. Para ejercitar las políticas Cedar, ejecuta el destino `serve` del agente en su lugar (consulta las guías de conexión de agentes <Link path="guides/connection/ts-agent-gateway">TypeScript</Link> / <Link path="guides/connection/py-agent-gateway">Python</Link>) para que el agente que se ejecuta localmente llame al Gateway desplegado.
 :::

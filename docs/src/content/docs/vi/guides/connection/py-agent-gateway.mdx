@@ -1,5 +1,5 @@
 ---
-title: Python Agent tới Gateway
+title: Python Agent đến Gateway
 description: Kết nối Python Agent với AgentCore Gateway
 when:
   sourceType: py#agent
@@ -14,7 +14,7 @@ import Infrastructure from '@components/infrastructure.astro';
 
 Trình tạo `connection` có thể kết nối <Link path="guides/py-agent">Python Agent</Link> của bạn với <Link path="guides/agentcore-gateway">AgentCore Gateway</Link>.
 
-Trình tạo sẽ cấu hình agent để xác thực với Gateway bằng IAM SigV4 (thông qua ký yêu cầu `httpx`) khi triển khai, và kết nối với gateway cục bộ được khởi động bởi dự án Gateway khi chạy cục bộ.
+Trình tạo kết nối agent để nó xác thực với Gateway bằng IAM SigV4 (thông qua ký yêu cầu `httpx`) khi triển khai, và kết nối với gateway cục bộ được khởi động bởi dự án Gateway khi chạy cục bộ.
 
 ## Điều kiện tiên quyết
 
@@ -27,7 +27,7 @@ Gateway phải sử dụng xác thực IAM — agent ký các yêu cầu của n
 
 ## Cách sử dụng
 
-### Chạy trình tạo
+### Chạy Trình tạo
 
 <RunGenerator generator="connection" />
 
@@ -37,26 +37,26 @@ Chọn dự án agent làm nguồn và dự án Gateway làm đích.
 
 <GeneratorParameters generator="connection" />
 
-## Kết quả đầu ra của trình tạo
+## Kết quả của Trình tạo
 
-Trình tạo tạo ra các module core-gateway được chia sẻ vào dự án Python `agent_connection` của bạn, cộng với một wrapper cho mỗi Gateway, và sửa đổi agent của bạn:
+Trình tạo phát ra các mô-đun core-gateway được chia sẻ vào dự án Python `agent_connection` của bạn, cộng với một wrapper cho mỗi Gateway, và sửa đổi agent của bạn:
 
 <FileTree>
 
 - packages/common/agent\_connection
   - \<scope>\_agent\_connection
     - core/
-      - agentcore\_endpoints.py Phân giải ARN/URL không phụ thuộc framework
-      - agentcore\_gateway\_mcp\_transport.py Gateway MCP transport không phụ thuộc framework
-      - agentcore\_gateway\_mcp\_client\_\<framework>.py Gateway MCP client cho framework của agent
-      - auth/ SigV4 / chuyển tiếp session `httpx.Auth` không phụ thuộc framework
+      - agentcore\_endpoints.py Framework-agnostic ARN/URL resolution
+      - agentcore\_gateway\_mcp\_transport.py Framework-agnostic Gateway MCP transport
+      - agentcore\_gateway\_mcp\_client\_\<framework>.py Gateway MCP client for your agent's framework
+      - auth/ Framework-agnostic SigV4 / session-forwarding `httpx.Auth`
     - app/
-      - \<gateway\_snake>\_client\_\<framework>.py Wrapper client cho mỗi Gateway
-    - \_\_init\_\_.py Xuất lại Gateway client
+      - \<gateway\_snake>\_client\_\<framework>.py Per-Gateway client wrapper
+    - \_\_init\_\_.py Re-exports the Gateway client
 
 </FileTree>
 
-Hậu tố client khớp với framework của agent (`_strands` hoặc `_langchain`).
+Hậu tố client khớp với framework của agent của bạn (`_strands` hoặc `_langchain`).
 
 Ngoài ra, trình tạo:
 
@@ -88,7 +88,7 @@ def get_agent():
         )
 ```
 
-`MyGatewayClientStrands.create()` trả về một `MCPClient` có thể quản lý ngữ cảnh duy nhất mà `list_tools_sync()` của nó cung cấp mọi công cụ có sẵn thông qua Gateway.
+`MyGatewayClientStrands.create()` trả về một `MCPClient` duy nhất có thể quản lý context mà `list_tools_sync()` của nó cung cấp mọi công cụ có sẵn thông qua Gateway.
 </TabItem>
 <TabItem label="LangChain" _filter={{ framework: 'langchain' }}>
 ```python title="packages/example/example/my_agent/agent.py" {4,7,11}
@@ -106,16 +106,16 @@ def get_agent():
     )
 ```
 
-`MyGatewayClientLangChain.create()` trả về một danh sách các công cụ được tải thông qua [`langchain-mcp-adapters`](https://docs.langchain.com/oss/python/langchain/mcp). Mỗi công cụ mở một session mới cho mỗi lần gọi, do đó không cần khối `with`.
+`MyGatewayClientLangChain.create()` trả về một danh sách các công cụ được tải thông qua [`langchain-mcp-adapters`](https://docs.langchain.com/oss/python/langchain/mcp). Mỗi công cụ mở một phiên mới cho mỗi lần gọi, vì vậy không cần khối `with`.
 </TabItem>
 </Tabs>
 
 Trong cả hai trường hợp, client hoạt động theo cùng một cách cho mỗi chế độ:
 
-- **Chế độ triển khai** (`LOCAL_DEV` không được đặt): các công cụ trỏ đến điểm cuối MCP của Gateway, được ký SigV4.
-- **Chế độ cục bộ** (`LOCAL_DEV=true`): các công cụ HTTP thuần trỏ đến gateway cục bộ được khởi động bởi target `dev` của dự án Gateway.
+- **Chế độ triển khai** (`LOCAL_DEV` không được đặt): các công cụ trỏ đến điểm cuối MCP của Gateway, được ký bằng SigV4.
+- **Chế độ cục bộ** (`LOCAL_DEV=true`): các công cụ HTTP thuần túy trỏ đến gateway cục bộ được khởi động bởi target `dev` của dự án Gateway.
 
-Session ID được truyền tự động đến các máy chủ MCP downstream thông qua header `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`.
+ID phiên được truyền tự động đến các máy chủ MCP downstream thông qua header `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`.
 
 ## Cơ sở hạ tầng
 
@@ -151,11 +151,11 @@ module "my_agent" {
 }
 ```
 
-URL Gateway được tự động đăng ký trong namespace `agentcore.gateways.<ClassName>` của <Link path="guides/runtime-config">Runtime Configuration</Link> bởi module Terraform được tạo, để agent có thể khám phá nó tại runtime.
+URL Gateway được tự động đăng ký trong namespace `agentcore.gateways.<ClassName>` của <Link path="guides/runtime-config">Runtime Configuration</Link> bởi mô-đun Terraform được tạo, để agent có thể khám phá nó tại runtime.
 </Fragment>
 </Infrastructure>
 
-## Phát triển cục bộ
+## Phát triển Cục bộ
 
 Trình tạo cấu hình target `dev` của agent để:
 
@@ -166,13 +166,13 @@ Chạy agent cục bộ với:
 
 <NxCommands commands={["<agent-name>-dev <project-name>"]} />
 
-Để chạy agent cục bộ **với Gateway đã triển khai** thay thế (ví dụ: để thực thi các chính sách Cedar), hãy sử dụng target `serve` của agent. Khi không đặt `LOCAL_DEV`, client sẽ phân giải URL Gateway đã triển khai từ cấu hình runtime và ký SigV4 các yêu cầu với thông tin xác thực AWS cục bộ của bạn:
+Để chạy agent cục bộ **đối với Gateway đã triển khai** thay thế (ví dụ: để thực thi các chính sách Cedar), hãy sử dụng target `serve` của agent. Không có `LOCAL_DEV` được đặt, client phân giải URL Gateway đã triển khai từ cấu hình runtime và ký yêu cầu bằng SigV4 với thông tin xác thực AWS cục bộ của bạn:
 
 <NxCommands commands={["<agent-name>-serve <project-name>"]} />
 
 ### Độ trung thực cục bộ
 
-Gateway cục bộ thay thế cho Gateway đã triển khai, do đó:
+Gateway cục bộ thay thế cho Gateway đã triển khai, vì vậy:
 
-- **Không đánh giá chính sách Cedar.** Mọi công cụ đều hiển thị với agent bất kể chính sách. Sử dụng target `serve` để thực thi chính sách với Gateway đã triển khai.
-- **Tiền tố tên công cụ được giữ nguyên.** Các công cụ của mỗi máy chủ MCP cục bộ được hiển thị dưới dạng `<target-name>___<tool-name>`, khớp với những gì Gateway đã triển khai phát ra. Điều này giữ cho system prompt của agent và tên hành động Cedar mà bạn tham chiếu nhất quán giữa các lần chạy cục bộ và đã triển khai.
+- **Không đánh giá chính sách Cedar.** Mọi công cụ đều hiển thị với agent bất kể chính sách. Sử dụng target `serve` để thực thi các chính sách đối với Gateway đã triển khai.
+- **Tiền tố tên công cụ được bảo toàn.** Các công cụ của mỗi máy chủ MCP cục bộ được hiển thị dưới dạng `<target-name>___<tool-name>`, khớp với những gì Gateway đã triển khai phát ra. Điều này giữ cho system prompt của agent và tên hành động Cedar mà bạn tham chiếu nhất quán giữa các lần chạy cục bộ và đã triển khai.

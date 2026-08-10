@@ -10,17 +10,17 @@ import NxCommands from '@components/nx-commands.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import Link from '@components/link.astro';
 
-为 Nx 插件添加 [Nx Migration](https://nx.dev/docs/kb/migration-generators)。当你进行破坏性更改时（重命名目标、更改提供的配置或需要伴随代码更改的依赖项升级），迁移可以让 `nx migrate` 自动更新由插件先前版本生成的项目。
+为 Nx 插件添加 [Nx Migration](https://nx.dev/docs/kb/migration-generators)。Migration 让 `nx migrate` 能够在你进行破坏性更改时自动更新由插件早期版本生成的项目——重命名的目标、更改的配置，或需要伴随代码更改的依赖升级。
 
-该生成器会搭建迁移脚手架，在插件的 `migrations.json` 中注册它，并将 `nx-migrations` 字段连接到插件的 `package.json`（如果它们不存在则创建）。
+该生成器会搭建 migration 脚手架，在插件的 `migrations.json` 中注册它，并将 `nx-migrations` 字段连接到插件的 `package.json`（如果它们尚不存在则创建）。
 
 :::tip[推荐设置]
-我们建议使用 <Link path="/zh/guides/ts-nx-plugin">`ts#nx-plugin`</Link> 生成器作为迁移的基础项目，因为它配置了一个用于发布生成器和迁移的插件项目。
+我们推荐使用 <Link path="/zh/guides/ts-nx-plugin">`ts#nx-plugin`</Link> 生成器作为 migration 的基础项目，因为它配置了一个用于发布生成器和 migration 的插件项目。
 :::
 
 ## 用法
 
-### 生成迁移
+### 生成 Migration
 
 <RunGenerator generator="ts#nx-migration" />
 
@@ -28,34 +28,34 @@ import Link from '@components/link.astro';
 
 <GeneratorParameters generator="ts#nx-migration" />
 
-## 三种迁移类型
+## 三种 migration 类型
 
-迁移有三种形式，由 `migrations.json` 条目携带的字段区分。传递 `--kind` 来选择（默认为 `deterministic`）：
+Migration 有三种形式，通过 `migrations.json` 条目携带的字段来区分。传递 `--kind` 来选择（默认为 `deterministic`）：
 
-- **确定性（Deterministic）**（`implementation`）— 具有精确前后状态的代码修改。无人值守运行，包括在 CI 和非交互式终端中。当更改具有可以在任何出现的地方可靠匹配的形状时，单独使用它。
-- **代理式（Agentic）**（`prompt`）— 通过 Nx 的代理式 `nx migrate` 流程由用户的本地编码代理应用的 markdown 指令文件。当没有机械的前后状态时单独使用它，因为正确的编辑取决于用户构建的内容。当没有代理运行时（CI、未安装代理、拒绝同意），Nx 将提示显示为手动说明 — 因此将提示编写为独立的、人类可操作的步骤。
-- **混合式（Hybrid）**（`implementation` + `prompt`）— 一个更改的两个部分，通常是正确的选择。你的生成器提供的所有内容都是用户拥有的代码，可能已被修改，因此代码修改会尽可能安全地匹配并返回描述它更改*和跳过*内容的 `agentContext`；Nx 将该上下文传递给配对的 `prompt`，后者将代理引导到其余部分。
+- **Deterministic**（`implementation`）— 具有精确前后状态的代码修改，也是首选方式。它无人值守运行，包括在 CI 和非交互式终端中，并对每个用户应用相同的修改。当更改具有可以在任何地方可靠匹配的形状时单独使用它，通过 `nextSteps` 报告任何跳过的内容。
+- **Hybrid**（`implementation` + `prompt`）— 一个更改的两个部分。当更改是破坏性的且无法完全机械应用时使用它：代码修改尽可能安全地匹配并返回 `agentContext` 描述它更改了什么*以及跳过了什么*；Nx 将该上下文传递给配对的 `prompt`，后者指导 agent 处理其余部分。当剩余的编辑跨越太多形状而无法进行代码修改时，prompt 可以防止工作区处于损坏状态。
+- **Agentic**（`prompt`）— 由用户的本地编码 agent 通过 Nx 的 agentic `nx migrate` 流程应用的 markdown 指令文件。当根本没有机械的前后状态时单独使用它，因为正确的编辑取决于用户构建的内容。当没有 agent 运行时（CI、未安装 agent、拒绝同意），Nx 将 prompt 作为手动说明呈现——因此将 prompt 编写为独立的、人类可操作的步骤。
 
 ## 生成器输出
 
-根据选择的 `kind`，生成器在插件项目的源文件夹下创建以下文件：
+生成器会在插件项目的源文件夹下创建以下文件，具体取决于选择的 `kind`：
 
 <FileTree>
   - src/migrations/latest/\<name>/
-    - migration.ts 代码修改实现（确定性和混合式）
-    - migration.spec.ts 迁移测试（确定性和混合式）
-    - prompt.md 代理/人工指令（代理式和混合式）
-  - migrations.json 创建或更新以注册你的迁移
+    - migration.ts 代码修改实现（deterministic 和 hybrid）
+    - migration.spec.ts migration 的测试（deterministic 和 hybrid）
+    - prompt.md Agent/人类指令（agentic 和 hybrid）
+  - migrations.json 创建或更新以注册你的 migration
   - package.json 创建或更新以添加 "nx-migrations" 条目
 </FileTree>
 
-新迁移放在 `latest/` 中。按发布版本对迁移进行分组可以在集合增长时保持其顺序一目了然 — 当你分配版本时，将迁移移动到 `v<x.y.z>/` 文件夹中（并在 `migrations.json` 中更新其路径）。
+新的 migration 位于 `latest/` 中。按发布它们的版本对 migration 进行分组，可以在集合增长时一目了然地看到它们的顺序——当你分配版本时，将 migration 移动到 `v<x.y.z>/` 文件夹中（并在 `migrations.json` 中更新其路径）。
 
-它在 `migrations.json` 中注册迁移，包含其类型的字段但没有 `version` — 请参阅下面的[版本控制](#versioning)。注册的键以迁移所在的文件夹为前缀（`latest-<name>`），因此为后续更改重用名称不会静默覆盖已发布的迁移。
+它在 `migrations.json` 中注册 migration，包含其类型的字段但没有 `version`——请参阅下面的[版本控制](#versioning)。注册的键以 migration 所在的文件夹为前缀（`latest-<name>`），因此为后续更改重用名称不会静默覆盖已发布的 migration。
 
-## 实现迁移
+## 实现 Migration
 
-确定性（或混合式）迁移是一个修改虚拟文件系统（`Tree`）的函数，返回 [`MigrationReturnObject`](https://nx.dev/docs/reference/devkit/MigrationReturnObject)。这是一个混合式迁移，它返回两者：
+deterministic（或 hybrid）migration 是一个修改虚拟文件系统（`Tree`）的函数，返回 [`MigrationReturnObject`](https://nx.dev/docs/reference/devkit/MigrationReturnObject)。这是一个 hybrid 示例，它返回两者：
 
 ```ts
 import { type MigrationReturnObject, type Tree } from '@nx/devkit';
@@ -75,23 +75,24 @@ export default async function migration(
 }
 ```
 
-- **`nextSteps`** — 在 `nx migrate` 运行后向用户显示的工作区范围的注释。使用这些来报告你跳过的文件（参见下面的防护栏）或迁移无法执行的手动后续操作。
-- **`agentContext`**（仅混合式）— 代码修改更改内容的摘要，当它在 Nx 的代理式流程下运行时传递给配对的 `prompt`，以便代理可以专注于用户拥有的部分。
+- **`nextSteps`** — `nx migrate` 运行后 Nx 为用户打印的后续操作。每个条目都应该是他们需要手动完成的事情：协调你跳过的文件（请参阅下面的防护措施），或完成 migration 无法触及的内容，例如安装以刷新锁文件。它们不是你更改内容的日志——当转换干净地应用时，不要添加任何内容，否则确实需要操作的条目会被掩埋。
+- **`agentContext`**（仅限 hybrid）— 代码修改更改内容的摘要，当在 Nx 的 agentic 流程下运行时传递给配对的 `prompt`，以便 agent 可以专注于用户拥有的部分。
 
-对于你可以在迁移中执行的一些示例操作（生成文件、使用 GritQL 修改现有文件、读取和更新 JSON），请参阅 <Link path="/zh/guides/nx-generator">Nx Generator 指南</Link>。
+有关可以在 migration 中执行的一些示例操作（生成文件、使用 GritQL 修改现有文件、读取和更新 JSON），请参阅 <Link path="/zh/guides/nx-generator">Nx Generator 指南</Link>。
 
-### 防护栏
+### 防护措施
 
-迁移针对你无法控制的工作区运行，因此建议遵守以下规则（脚手架骨架已包含这些规则）：
+Migration 针对你无法控制的工作区运行，因此建议遵守以下规则（脚手架骨架已内置这些规则）：
 
-- **使用 GritQL 转换源代码。** 使用 <Link path="/zh/guides/nx-generator">GritQL 辅助函数</Link>（`applyGritQL`、`matchGritQL`）来编辑源代码，而不是正则表达式或字符串替换。GritQL 匹配 AST，因此一个模式可以适用于用户副本可能偏离的格式、空白和引号，而文本匹配会悄悄地错过等效代码或损坏文件。对 JSON 使用 `updateJson`，对其他结构化配置使用匹配的解析器。
-- **写入前进行模式匹配。** 如果目标文件偏离了你的生成器产生的形状，请跳过它并通过 `nextSteps` 报告它，或考虑混合式迁移，而不是覆盖用户的更改。`matchGritQL` 是进行该检查的便捷方式。
-- **幂等性。** 重新运行迁移必须是无操作的。使用 `where { ... <: not contains ... }` 子句保护注入代码的 GritQL 重写，以便第二次运行不会追加重复项。
-- **格式化你写入的内容。** 使用 `formatFilesInSubtree(tree)` 完成，以便迁移写入的文件格式正确。
+- **使用 GritQL 转换源代码。** 使用 <Link path="/zh/guides/nx-generator">GritQL 辅助函数</Link>（`applyGritQL`、`matchGritQL`）来编辑源代码，而不是正则表达式或字符串替换。GritQL 匹配 AST，因此一个模式可以跨越用户副本可能偏离的格式、空格和引号，而文本匹配会悄悄地错过等效代码或损坏文件。对 JSON 使用 `updateJson`，对其他结构化配置使用匹配的解析器。
+- **写入前进行模式匹配。** 如果目标文件已偏离生成器生成的形状，请跳过它并通过 `nextSteps` 报告，或考虑 hybrid migration，而不是覆盖用户的更改。`matchGritQL` 是进行该检查的便捷方式。
+- **仅报告剩余要做的事情。** `nextSteps` 用于用户必须接手的工作，而不是你所做编辑的记录——这些已经在他们的 `git diff` 中了。
+- **幂等性。** 重新运行 migration 必须是无操作的。使用 `where { ... <: not contains ... }` 子句保护注入代码的 GritQL 重写，这样第二次运行不会追加重复项。
+- **格式化你写入的内容。** 以 `formatFilesInSubtree(tree)` 结束，以便 migration 写入的文件格式正确。
 
-### 测试你的迁移
+### 测试你的 Migration
 
-脚手架的 `migration.spec.ts` 使用 `createTreeUsingTsSolutionSetup()` 来构建与我们的预设生成的形状匹配的虚拟工作区。测试迁移将工作区从"之前"状态转换到目标状态、跳过（并报告）它无法识别的代码以及是幂等的：
+脚手架的 `migration.spec.ts` 使用 `createTreeUsingTsSolutionSetup()` 构建与我们的预设生成的形状匹配的虚拟工作区。测试 migration 将工作区从"之前"状态带到目标状态，跳过（并报告）它无法识别的代码，并且是幂等的：
 
 ```ts
 import type { Tree } from '@nx/devkit';
@@ -120,13 +121,13 @@ describe('my migration', () => {
 });
 ```
 
-单元测试只能证明迁移执行了你编写的操作。还要针对由插件**已发布**版本生成的工作区进行测试 — 即用户升级前的状态 — 并确认结果与你的生成器今天产生的内容匹配：检查差异，将相同的项目生成到新工作区中并进行比较，检查工作区是否仍然构建，然后重新运行迁移以确认它没有更改任何内容。使用你首先自定义的工作区重复此操作，以检查迁移是否保留你的编辑并报告它们。
+单元测试只能证明 migration 执行了你编写的内容。还要针对由插件**已发布**版本生成的工作区测试它——用户升级的状态——并确认结果与你的生成器今天生成的内容匹配：检查差异，将相同的项目生成到新工作区中并进行比较，检查工作区是否仍然构建，然后重新运行 migration 以确认它没有更改任何内容。使用你首先自定义的工作区重复此操作，以检查 migration 是否保留你的编辑并报告它们。
 
 ## 版本控制
 
-当用户安装的插件版本低于迁移的 `version` 时，Nx 会运行迁移。此生成器**不**写入 `version` 字段 — 当你发布包含迁移的版本时分配它（或从发布流程中标记它），以便它为从早期版本升级的每个人运行。
+当用户安装的插件版本低于 migration 的 `version` 时，Nx 会运行 migration。此生成器**不**写入 `version` 字段——在你发布包含 migration 的版本时分配它（或从发布流程中标记它），以便它为从早期版本升级的每个人运行。
 
-一旦你分配了版本，注册每种类型的一个迁移的 `migrations.json` 如下所示：
+一旦分配版本，注册每种类型的一个 migration 的 `migrations.json` 如下所示：
 
 ```json
 {
@@ -153,12 +154,12 @@ describe('my migration', () => {
 }
 ```
 
-## 运行迁移
+## 运行 Migration
 
-用户通过两步 `nx migrate` 流程应用你的插件迁移 — 生成待处理的迁移、安装，然后运行它们：
+用户使用两步 `nx migrate` 流程应用插件的 migration——生成待处理的 migration，安装，然后运行它们：
 
 <NxCommands commands={['migrate my-plugin@latest', 'migrate --run-migrations']} />
 
-当有可用的本地编码代理时，代理式和混合式迁移会在 `nx migrate --run-migrations` 期间由用户的本地编码代理应用。
+当有可用的本地编码 agent 时，agentic 和 hybrid migration 会在 `nx migrate --run-migrations` 期间由用户的本地编码 agent 应用。
 
-有关从升级用户角度的完整流程 — 包括确定性和代理式迁移的示例输出 — 请参阅 <Link path="get_started/upgrading">升级你的工作区</Link>。
+有关从升级用户角度的完整流程——包括 deterministic 和 agentic migration 的示例输出——请参阅<Link path="/zh/get_started/upgrading">升级你的工作区</Link>。

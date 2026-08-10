@@ -41,7 +41,7 @@ import Snippet from '@components/snippet.astro';
 
 - packages/api/src
   - middleware
-    - \<db-name>.ts 在过程上下文中公开 Prisma 客户端的 tRPC 插件
+    - \<db-name>.ts tRPC 插件，在过程上下文中暴露 Prisma 客户端
 
 </FileTree>
 
@@ -51,7 +51,7 @@ import Snippet from '@components/snippet.astro';
 
 ### 注册插件
 
-将生成的插件添加到您的 tRPC 路由器，以便所有使用它的过程都能访问数据库：
+将生成的插件添加到您的 tRPC 路由器，这样所有使用它的过程都可以访问数据库：
 
 ```ts title="packages/api/src/router.ts" {2,5}
 import { t } from './init.js';
@@ -72,14 +72,14 @@ import { authenticatedProcedure } from '../router.js';
 export const listUsers = authenticatedProcedure
   .output(z.array(z.object({ id: z.string(), name: z.string() })))
   .query(async ({ ctx }) => {
-    // ctx.myDb 是 Prisma 客户端 — 类型为 Awaited<ReturnType<typeof getPrisma>>
+    // ctx.myDb is the Prisma client — typed as Awaited<ReturnType<typeof getPrisma>>
     return await ctx.myDb!.user.findMany();
   });
 ```
 
 ### MySQL：每次请求后断开连接
 
-当目标数据库使用 MySQL 引擎时，生成的中间件会将 `opts.next()` 包装在调用 `$disconnect()` 的 `try/finally` 块中：
+当目标数据库使用 MySQL 引擎时，生成的中间件会将 `opts.next()` 包装在一个 `try/finally` 块中，该块会调用 `$disconnect()`：
 
 ```ts title="packages/api/src/middleware/my-db.ts" {6}
 return t.procedure.use(async (opts) => {
@@ -92,12 +92,12 @@ return t.procedure.use(async (opts) => {
 });
 ```
 
-这解决了 MySQL 适配器在查询后保持 Node.js 事件循环打开的问题，否则会阻止 Lambda 刷新流式响应。在 `finally` 中断开连接会释放事件循环，以便响应可以完成。详情请参阅 <Link path="guides/ts-rdb#mysql-api-gateway-streaming-mode">MySQL: API Gateway 流式模式</Link>。
+这解决了 MySQL 适配器在查询后保持 Node.js 事件循环打开的问题，否则会阻止 Lambda 刷新流式响应。在 `finally` 中断开连接会释放事件循环，以便响应可以完成。详情请参阅 <Link path="guides/ts-rdb#mysql-api-gateway-streaming-mode">MySQL：API Gateway 流式模式</Link>。
 
-PostgreSQL 不需要这样做 — 其适配器使用配置了 `allowExitOnIdle: true` 的连接池。
+PostgreSQL 不需要这样做——其适配器使用配置了 `allowExitOnIdle: true` 的连接池。
 
 :::caution[MySQL：IAM 令牌过期]
-RDS IAM 令牌在 **15 分钟**后过期。MySQL 适配器在连接时捕获令牌。如果您的 Lambda 保持温暖的时间足够长以至于令牌过期，新的连接尝试可能会失败。检查连接错误并再次调用 `getPrisma()` 以获取带有新令牌的新客户端。详情和解决方法请参阅 <Link path="guides/ts-rdb#mysql-iam-token-expiry">MySQL：IAM 令牌过期</Link>。
+RDS IAM 令牌在 **15 分钟**后过期。MySQL 适配器在连接时捕获令牌。如果您的 Lambda 保持温暖的时间足够长，令牌过期后，新的连接尝试可能会失败。检查连接错误并再次调用 `getPrisma()` 以获取带有新令牌的新客户端。详情和解决方法请参阅 <Link path="guides/ts-rdb#mysql-iam-token-expiry">MySQL：IAM 令牌过期</Link>。
 :::
 
 ## 多个数据库
@@ -112,11 +112,11 @@ export const dbProcedure = t.procedure
 
 ## 基础设施
 
-<Snippet name="connection/rdb-api-infrastructure" parentHeading="Infrastructure" />
+<Snippet name="connection/rdb-api-infrastructure" parentHeading="基础设施" />
 
 ### 不使用 RDS Proxy 连接时的 SSL 要求
 
-<Snippet name="connection/ts-lambda-rdb-ssl-requirements" parentHeading="SSL Requirements When Connecting Without RDS Proxy" />
+<Snippet name="connection/ts-lambda-rdb-ssl-requirements" parentHeading="不使用 RDS Proxy 连接时的 SSL 要求" />
 
 ## 本地开发
 
