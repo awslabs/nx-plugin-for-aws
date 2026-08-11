@@ -355,7 +355,8 @@ describe('agentcore-harness generator', () => {
     });
 
     it('emits the construct, exports it, and inlines the model id and prompt read', () => {
-      expect(construct).toContain('export class MyHarness extends Construct');
+      expect(construct).toContain('export class MyHarness');
+      expect(construct).toContain('extends Construct');
       // ESM workspace, so addStarExport keeps the `.js` specifier suffix.
       expect(tree.read(CDK_HARNESSES_INDEX_PATH, 'utf-8')).toContain(
         "export * from './my-harness/my-harness.js';",
@@ -413,6 +414,39 @@ describe('agentcore-harness generator', () => {
       expect(construct).toContain(
         "allowedTools?: agentcore.CfnHarnessProps['allowedTools'];",
       );
+    });
+
+    // IConnectable, so a VPC resource can grant the Harness port access with
+    // the same `connections` idiom every other construct uses.
+    it('implements IConnectable for a Harness placed in a VPC', () => {
+      expect(construct).toContain(
+        "import * as ec2 from 'aws-cdk-lib/aws-ec2';",
+      );
+      expect(construct).toContain(
+        'implements iam.IGrantable, ec2.IConnectable',
+      );
+      expect(construct).toContain(
+        'public get connections(): ec2.Connections {',
+      );
+
+      // The three placement props, and a security group created only when the
+      // caller does not bring their own.
+      for (const prop of [
+        'vpc?: ec2.IVpc;',
+        'vpcSubnets?: ec2.SubnetSelection;',
+        'securityGroups?: ec2.ISecurityGroup[];',
+      ]) {
+        expect(construct, prop).toContain(prop);
+      }
+      expect(construct).toContain(
+        "new ec2.SecurityGroup(this, 'SecurityGroup'",
+      );
+      expect(construct).toContain('ec2.SubnetType.PRIVATE_WITH_EGRESS');
+
+      // Rendered lazily, so a security group added through `connections` after
+      // construction still reaches the resource.
+      expect(construct).toContain('Lazy.any({');
+      expect(construct).toContain("networkMode: 'VPC',");
     });
   });
 

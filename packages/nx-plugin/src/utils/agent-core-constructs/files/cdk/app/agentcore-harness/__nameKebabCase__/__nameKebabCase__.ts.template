@@ -1,8 +1,9 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as url from 'node:url';
-import { CfnOutput, Names, Stack } from 'aws-cdk-lib';
+import { CfnOutput, Lazy, Names, Stack } from 'aws-cdk-lib';
 import * as agentcore from 'aws-cdk-lib/aws-bedrockagentcore';
+import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import { Construct, IConstruct } from 'constructs';
 import { suppressRules } from '../../../core/checkov<% if (esm) { %>.js<% } %>';
@@ -36,12 +37,26 @@ export interface <%- nameClassName %>Props
   modelResourceArns?: string[];
   /** Tools the Harness may use. Deploys with none unless supplied here. */
   allowedTools?: agentcore.CfnHarnessProps['allowedTools'];
+  /**
+   * Run the Harness in a VPC so it can reach private resources. Selects private
+   * subnets with egress unless `vpcSubnets` narrows it, and creates a security
+   * group unless `securityGroups` supplies them.
+   */
+  vpc?: ec2.IVpc;
+  /** Subnets to place the Harness in. Requires `vpc`. */
+  vpcSubnets?: ec2.SubnetSelection;
+  /** Security groups for the Harness. Requires `vpc`. */
+  securityGroups?: ec2.ISecurityGroup[];
 }
 
 /** A managed Amazon Bedrock AgentCore Harness, using IAM inbound auth. */
-export class <%- nameClassName %> extends Construct implements iam.IGrantable {
+export class <%- nameClassName %>
+  extends Construct
+  implements iam.IGrantable, ec2.IConnectable
+{
   public readonly harness: agentcore.CfnHarness;
   public readonly executionRole: iam.IRole;
+  private readonly _connections?: ec2.Connections;
 
   constructor(scope: Construct, id: string, props?: <%- nameClassName %>Props) {
     super(scope, id);
@@ -53,8 +68,28 @@ export class <%- nameClassName %> extends Construct implements iam.IGrantable {
         `arn:${stack.partition}:bedrock:*::foundation-model/*`,
         `arn:${stack.partition}:bedrock:${stack.region}:${stack.account}:*`,
       ],
+      vpc,
+      vpcSubnets,
+      securityGroups,
       ...harnessProps
     } = props ?? {};
+
+    if (!vpc && (vpcSubnets || securityGroups)) {
+      throw new Error(
+        'vpcSubnets and securityGroups require vpc to be supplied.',
+      );
+    }
+
+    if (vpc) {
+      this._connections = new ec2.Connections({
+        securityGroups: securityGroups ?? [
+          new ec2.SecurityGroup(this, 'SecurityGroup', {
+            vpc,
+            description: `Harness ${id}`,
+          }),
+        ],
+      });
+    }
 
     // Harness names allow ASCII letters, digits and underscores, must start
     // with a letter, and are at most 40 characters.
@@ -206,6 +241,38 @@ export class <%- nameClassName %> extends Construct implements iam.IGrantable {
       );
     }
 
+    // Rendered lazily so security groups added through `connections` after
+    // construction are still picked up.
+    const environment: agentcore.CfnHarnessProps['environment'] | undefined = vpc
+      ? Lazy.any({
+          produce: () => ({
+            ...(harnessProps.environment as
+              | agentcore.CfnHarness.HarnessEnvironmentProviderProperty
+              | undefined),
+            agentCoreRuntimeEnvironment: {
+              ...(
+                harnessProps.environment as
+                  | agentcore.CfnHarness.HarnessEnvironmentProviderProperty
+                  | undefined
+              )?.agentCoreRuntimeEnvironment,
+              networkConfiguration: {
+                networkMode: 'VPC',
+                networkModeConfig: {
+                  subnets: vpc.selectSubnets(
+                    vpcSubnets ?? {
+                      subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS,
+                    },
+                  ).subnetIds,
+                  securityGroups: this._connections!.securityGroups.map(
+                    (group) => group.securityGroupId,
+                  ),
+                },
+              },
+            },
+          }),
+        })
+      : harnessProps.environment;
+
     this.harness = new agentcore.CfnHarness(this, 'Harness', {
       model: {
         bedrockModelConfig: {
@@ -218,6 +285,9 @@ export class <%- nameClassName %> extends Construct implements iam.IGrantable {
       // execution role's workload-identity resource pattern.
       harnessName,
       executionRoleArn: this.executionRole.roleArn,
+      // Carries the VPC network configuration when `vpc` is supplied, and is
+      // the caller's own `environment` otherwise.
+      environment,
     });
 
     // The Harness provisions managed memory unless `memory` is supplied, and
@@ -255,6 +325,19 @@ export class <%- nameClassName %> extends Construct implements iam.IGrantable {
 
   public get grantPrincipal(): iam.IPrincipal {
     return this.executionRole.grantPrincipal;
+  }
+
+  /**
+   * Network connections for this Harness, for granting access to resources such
+   * as a database. Only available when the Harness runs in a VPC.
+   */
+  public get connections(): ec2.Connections {
+    if (!this._connections) {
+      throw new Error(
+        'Connections are only available when the Harness runs in a VPC. Supply the vpc prop.',
+      );
+    }
+    return this._connections;
   }
 
   /** The deployed Harness ARN. */
