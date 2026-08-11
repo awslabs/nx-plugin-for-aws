@@ -129,48 +129,7 @@ Deploy with your Terraform project's plan/apply workflow as usual — see the <L
 Your infrastructure reads `packages/<name>/src/PROMPT.md` when you synthesize (CDK) or plan (Terraform), so the prompt is deployment configuration rather than secret storage: its contents appear in the synthesized CloudFormation template or in Terraform state.
 :::
 
-## Execution Role Permissions
-
-When you do not supply your own role, the generated execution role trusts `bedrock-agentcore.amazonaws.com` (scoped by `aws:SourceAccount` and `aws:SourceArn` conditions) and grants the baseline permissions from the [Harness security guidance](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-security.html):
-
-- Bedrock model invocation (`bedrock:InvokeModel`, `bedrock:InvokeModelWithResponseStream`) — defaults to all foundation models plus your account's Bedrock resources in the deployment Region; narrow it with `modelResourceArns` (CDK) or `model_resource_arns` (Terraform)
-- Amazon ECR Public authorization token access for the environment image
-- X-Ray tracing, CloudWatch Logs scoped to AgentCore runtime log groups, and CloudWatch metrics in the `bedrock-agentcore` namespace
-- AgentCore workload identity token access
-- The AWS-owned default Browser and Code Interpreter
-
-The defaults deliberately exclude `bedrock-agentcore:InvokeAgentRuntimeCommand` and all access to customer-owned resources: Gateways, memory, custom browsers, custom code interpreters, skills, secrets, and VPC resources. When you configure one of these capabilities, grant it least-privilege access explicitly:
-
-<Infrastructure>
-  <Fragment slot="cdk">
-```ts
-harness.addToRolePolicy(
-  new iam.PolicyStatement({
-    actions: ['secretsmanager:GetSecretValue'],
-    resources: [toolSecret.secretArn],
-  }),
-);
-```
-  </Fragment>
-  <Fragment slot="terraform">
-```hcl
-module "my_harness" {
-  source = "../../common/terraform/src/app/harnesses/my-harness"
-
-  additional_execution_role_policy_statements = [
-    {
-      Sid      = "ReadToolSecret"
-      Effect   = "Allow"
-      Action   = ["secretsmanager:GetSecretValue"]
-      Resource = [aws_secretsmanager_secret.tool.arn]
-    }
-  ]
-}
-```
-  </Fragment>
-</Infrastructure>
-
-### Invocation permissions
+## Granting access to invoke the harness
 
 You can grant a caller permissions to invoke the harness as follows:
 
@@ -264,7 +223,7 @@ Add an `allowed_tools` variable to the module if you would rather set it as a mo
   </Fragment>
 </Infrastructure>
 
-Narrow `@builtin` to specific patterns such as `@builtin/file_operations` to restrict what the agent loop can do. Tools that reach customer-owned resources also need execution role permissions — see <a href="#execution-role-permissions">Execution Role Permissions</a>.
+Narrow `@builtin` to specific patterns such as `@builtin/file_operations` to restrict what the agent loop can do. See [Harness tools](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-tools.html) for the built-in tools you can add.
 
 ### Per-invocation overrides
 

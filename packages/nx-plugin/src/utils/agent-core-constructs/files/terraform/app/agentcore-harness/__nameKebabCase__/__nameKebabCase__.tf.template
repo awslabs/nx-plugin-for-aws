@@ -50,15 +50,12 @@ locals {
   partition  = data.aws_partition.current.partition
   region     = data.aws_region.current.region
 
-  # The prefix is generated with a leading ASCII letter and capped at 31
-  # characters, so the "_" separator plus the eight-hex suffix keeps the
-  # deployed Harness name within its 40-character limit.
+  # Capped at 31 characters so the suffix keeps the deployed Harness name
+  # within its 40-character limit.
   harness_name_prefix = "<%- harnessNamePrefix %>"
   harness_name        = "${local.harness_name_prefix}_${random_id.unique_suffix.hex}"
 
-  # Default model access spans every foundation model plus this account's
-  # Bedrock resources (e.g. inference profiles) in the deployment region;
-  # set var.model_resource_arns to narrow it.
+  # Set var.model_resource_arns to narrow the default model access.
   model_resource_arns = var.model_resource_arns != null ? var.model_resource_arns : [
     "arn:${local.partition}:bedrock:*::foundation-model/*",
     "arn:${local.partition}:bedrock:${local.region}:${local.account_id}:*",
@@ -66,8 +63,6 @@ locals {
 }
 
 resource "aws_iam_role" "execution_role" {
-  # Truncated prefix + 13-character literal + 8-hex suffix is at most 52
-  # characters, within the 64-character IAM role name limit.
   name = "${local.harness_name_prefix}-HarnessRole-${random_id.unique_suffix.hex}"
 
   assume_role_policy = jsonencode({
@@ -189,9 +184,8 @@ resource "aws_iam_role_policy" "execution_role" {
           "arn:${local.partition}:bedrock-agentcore:${local.region}:${local.account_id}:workload-identity-directory/default/workload-identity/harness_${local.harness_name}-*",
         ]
       },
-      # The service derives the managed memory name from a truncated harness
-      # name plus a generated suffix, so this is scoped by name prefix; narrow
-      # it to the exact memory ARN once deployed, or for a BYO instance.
+      # The service names the managed memory from a truncated harness name plus
+      # a generated suffix, so this scopes to that prefix.
       {
         Sid    = "AgentCoreManagedMemory"
         Effect = "Allow"
@@ -203,7 +197,7 @@ resource "aws_iam_role_policy" "execution_role" {
           "bedrock-agentcore:RetrieveMemoryRecords",
         ]
         Resource = [
-          "arn:${local.partition}:bedrock-agentcore:${local.region}:${local.account_id}:memory/harness_*",
+          "arn:${local.partition}:bedrock-agentcore:${local.region}:${local.account_id}:memory/harness_${substr(local.harness_name, 0, 34)}_*",
         ]
       },
       {
@@ -237,17 +231,15 @@ resource "aws_iam_role_policy" "execution_role" {
         ]
       },
       ], [
-      # Optional Sid/Condition fields are dropped when null so the rendered
-      # policy JSON contains only the keys each statement actually sets.
+      # Null Sid/Condition fields are dropped from the rendered policy.
       for statement in var.additional_execution_role_policy_statements :
       { for key, value in statement : key => value if value != null }
     ])
   })
 }
 
-# The AgentCore Harness. Omitting authorizer_configuration means the Harness
-# uses IAM inbound authorization; add a custom_jwt_authorizer block to change
-# that.
+# Omitting authorizer_configuration uses IAM inbound authorization; add a
+# custom_jwt_authorizer block to change that.
 resource "aws_bedrockagentcore_harness" "this" {
   harness_name       = local.harness_name
   execution_role_arn = aws_iam_role.execution_role.arn
@@ -258,8 +250,7 @@ resource "aws_bedrockagentcore_harness" "this" {
     }
   }
 
-  # The system prompt is read from the Harness Project at plan time; the walk
-  # up from path.module reaches the workspace root.
+  # Read at plan time; the walk up from path.module reaches the workspace root.
   system_prompt {
     text = file("${path.module}/../../../../../../../<%- promptPathFromTerraform %>")
   }

@@ -22,6 +22,8 @@ import { formatFilesInSubtree } from '../utils/format';
 import { resolveIac } from '../utils/iac';
 import { installDependencies } from '../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../utils/metrics';
+import { kebabCase, toClassName } from '../utils/names';
+import { getNpmScopePrefix } from '../utils/npm-scope';
 import {
   addGeneratorMetadata,
   getGeneratorInfo,
@@ -34,7 +36,6 @@ import {
   sharedConstructsGenerator,
 } from '../utils/shared-constructs';
 import type { IacMetadata } from '../utils/shared-constructs-constants';
-import { resolveAgentcoreHarnessOptions } from './resolve-options';
 import type { AgentcoreHarnessGeneratorSchema } from './schema';
 
 // scripts/chat.ts needs all of these whatever the infrastructure choice, so no
@@ -60,17 +61,13 @@ export const agentcoreHarnessGenerator = async (
   tree: Tree,
   options: AgentcoreHarnessGeneratorSchema,
 ): Promise<GeneratorCallback> => {
-  // Validate every schema predicate and resolve defaults before any tree
-  // mutation, so a rejected option terminates generation without invoking
-  // infrastructure helpers.
-  const resolved = resolveAgentcoreHarnessOptions(tree, options);
-  const {
-    nameKebabCase,
-    nameClassName,
-    fullyQualifiedProjectName,
-    projectRoot,
-    infra,
-  } = resolved;
+  const nameKebabCase = kebabCase(options.name);
+  const nameClassName = toClassName(nameKebabCase);
+  const parentDir = options.directory ?? 'packages';
+  const subDir = options.subDirectory ?? nameKebabCase;
+  const projectRoot = joinPathFragments(parentDir, subDir);
+  const fullyQualifiedProjectName = `${getNpmScopePrefix(tree)}${nameKebabCase}`;
+  const infra = options.infra ?? 'agentcore';
 
   // AgentCore harness names must start with an ASCII letter and stay within 40
   // characters once the "_<8 hex>" suffix is appended, so cap the prefix at 31.
@@ -132,7 +129,7 @@ export const agentcoreHarnessGenerator = async (
   // declaration's predicates read; undefined when no infrastructure is written,
   // in which case neither provider's packages were added.
   const iac =
-    infra === 'agentcore' ? await resolveIac(tree, resolved.iac) : undefined;
+    infra === 'agentcore' ? await resolveIac(tree, options.iac) : undefined;
 
   // Record only what cannot drift once the user owns the generated
   // infrastructure: the project identity, its runtime config key, its auth mode
@@ -140,7 +137,7 @@ export const agentcoreHarnessGenerator = async (
   const metadata: Omit<AgentCoreHarnessMetadata, 'generator'> = {
     name: nameKebabCase,
     rc: nameClassName,
-    auth: resolved.auth,
+    auth: 'iam',
     ...(iac ? { iac } : {}),
   };
 
@@ -173,7 +170,7 @@ export const agentcoreHarnessGenerator = async (
 
   await formatFilesInSubtree(tree);
   return () =>
-    installDependencies(tree, resolved.preferInstallDependencies, {
+    installDependencies(tree, options.preferInstallDependencies, {
       languages: ['typescript'],
     });
 };

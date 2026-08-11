@@ -121,8 +121,6 @@ describe('agentcore-harness generator', () => {
   });
 
   describe('common behaviour', () => {
-    // Property 3: Generated project surface.
-    // Validates: Requirements 6.6, 10.1, 10.7, 10.8, 10.9
     it('generates exactly the four harness project files', async () => {
       await agentcoreHarnessGenerator(tree, {
         name: 'my-harness',
@@ -195,8 +193,6 @@ describe('agentcore-harness generator', () => {
       expectHasMetricTags(tree, AGENTCORE_HARNESS_GENERATOR_INFO.metric);
     });
 
-    // Property 5: Prompt path resolvability.
-    // Validates: Requirements 8.3, 8.4, 8.6, 8.7, 8.10
     it.each([
       { placement: {}, root: PROJECT_ROOT },
       {
@@ -259,7 +255,6 @@ describe('agentcore-harness generator', () => {
   });
 
   describe('dependencies and schema', () => {
-    // Validates: Requirements 10.10
     it('adds exactly the dependencies scripts/chat.ts needs', async () => {
       const before = rootDependencyKeys(tree);
 
@@ -294,7 +289,6 @@ describe('agentcore-harness generator', () => {
       }
     });
 
-    // Validates: Requirements 10.10
     it('adds no typescript dependency: no generated target runs tsc', async () => {
       await agentcoreHarnessGenerator(tree, {
         name: 'my-harness',
@@ -305,11 +299,10 @@ describe('agentcore-harness generator', () => {
       expect(dependencies).not.toContain('typescript');
       expect(devDependencies).not.toContain('typescript');
       // TS_VERSIONS keeps its typescript entry: workspace init and sibling
-      // generators read it. R10.10 governs the harness's added deps only.
+      // generators read it.
       expect(TS_VERSIONS.typescript).toBeDefined();
     });
 
-    // Validates: Requirements 5.1, 5.2, 5.3
     it('exposes exactly the six retained options', () => {
       // Equality, so a reintroduced modelId or systemPrompt fails.
       expect(Object.keys(harnessSchema.properties)).toEqual(SCHEMA_OPTIONS);
@@ -330,7 +323,6 @@ describe('agentcore-harness generator', () => {
       construct = tree.read(CDK_CONSTRUCT_PATH, 'utf-8') ?? '';
     });
 
-    // Validates: Requirements 5.7, 8.3, 9.1
     it('emits the construct, exports it, and inlines the model id and prompt read', () => {
       expect(construct).toContain('export class MyHarness extends Construct');
       // ESM workspace, so addStarExport keeps the `.js` specifier suffix.
@@ -352,14 +344,13 @@ describe('agentcore-harness generator', () => {
       expect(construct).toContain('systemPrompt: [{ text: systemPrompt }],');
     });
 
-    // Validates: Requirements 11.6, 11.7, 11.8, 11.9
     it('suppresses the three unscopeable IAM statements on the role policy', () => {
       // App-level specifier: the construct sits three directories below core/.
       expect(construct).toContain(
         "import { suppressRules } from '../../../core/checkov.js';",
       );
       expect(construct).toContain(
-        "const WILDCARD_IAM_RULES = ['CKV_AWS_111', 'CKV_AWS_356'];",
+        "const WILDCARD_IAM_RULES = ['CKV_AWS_107', 'CKV_AWS_111', 'CKV_AWS_356'];",
       );
       // suppressRules targets a CfnResource, so the suppression lands on the
       // role's policy and each sid stays traceable in its reason.
@@ -376,8 +367,6 @@ describe('agentcore-harness generator', () => {
       }
     });
 
-    // Property 6: No tools by default.
-    // Validates: Requirements 9.1, 9.2
     it('configures no tools on the resource but exposes allowedTools as props', () => {
       // From the resource literal onwards, so an allowedTools assignment
       // anywhere in the resource or after it fails.
@@ -408,13 +397,12 @@ describe('agentcore-harness generator', () => {
       tf = tree.read(TF_MODULE_PATH, 'utf-8') ?? '';
     });
 
-    // Validates: Requirements 5.8, 8.4
     it('emits the module, inlines the model id, and vends no CDK construct', () => {
       expect(tf).toContain('resource "aws_bedrockagentcore_harness" "this" {');
       expect(tf).toContain(
         'default     = "global.anthropic.claude-sonnet-4-6"',
       );
-      // Read at plan time; Property 5 pins the interpolated path itself.
+      // Read at plan time.
       expect(tf).toMatch(
         /system_prompt \{\s+text = file\("\$\{path\.module\}\//,
       );
@@ -423,8 +411,6 @@ describe('agentcore-harness generator', () => {
       expect(tree.exists(CDK_HARNESSES_INDEX_PATH)).toBe(false);
     });
 
-    // Property 6: No tools by default (Terraform side).
-    // Validates: Requirements 8.5, 9.3
     it('declares only the three retained input variables', () => {
       // Set equality, so a reintroduced system_prompt, allowed_tools,
       // max_iterations, max_tokens or timeout_seconds variable fails.
@@ -442,7 +428,6 @@ describe('agentcore-harness generator', () => {
       expect(tf).not.toContain('allowed_tools');
     });
 
-    // Validates: Requirements 11.2, 11.10
     it('justifies every wildcard IAM statement inline', () => {
       for (const skip of TF_CHECKOV_SKIPS) {
         expect(tf, skip).toContain(`#checkov:skip=${skip}`);
@@ -452,8 +437,6 @@ describe('agentcore-harness generator', () => {
       expect(tf).not.toContain('Advanced extension region');
     });
 
-    // Property 4: Harness name prefix validity.
-    // Validates: Requirements 11.1, 11.3, 11.4
     it.each([
       { label: 'an ordinary name', name: 'my-harness', prefix: 'MyHarness' },
       {
@@ -491,7 +474,8 @@ describe('agentcore-harness generator', () => {
     });
 
     it('computes the name prefix in TypeScript, not HCL', () => {
-      expect(tf).not.toContain('substr(');
+      // A plain quoted literal: no interpolation or function call.
+      expect(tf).toMatch(/harness_name_prefix = "[^"$]*"/);
       expect(tf).not.toContain('regexall(');
     });
   });
@@ -535,10 +519,7 @@ describe('agentcore-harness generator', () => {
         .map((line) => line.trim())
         .filter((line) => line === HARNESS_EXPORT_LINE);
 
-    // Property 1: User-owned file preservation. The only unit-level proof of
-    // it — R3.3 deleted the e2e test and R6.3 removed preflight's re-run
-    // rejection, leaving KeepExisting and `??=` as the whole guarantee.
-    // Validates: Requirements 6.7, 3.3
+    // KeepExisting and `??=` are the whole preservation guarantee.
     it('preserves an edited project file and vended construct byte-for-byte', async () => {
       await agentcoreHarnessGenerator(tree, CDK_OPTIONS);
 
@@ -557,7 +538,6 @@ describe('agentcore-harness generator', () => {
       expect(harnessExportLines()).toEqual([HARNESS_EXPORT_LINE]);
     });
 
-    // Validates: Requirements 6.7
     it('restores exactly one harness export after the user deletes it', async () => {
       await agentcoreHarnessGenerator(tree, CDK_OPTIONS);
       expect(harnessExportLines()).toEqual([HARNESS_EXPORT_LINE]);
@@ -577,7 +557,6 @@ describe('agentcore-harness generator', () => {
       expect(harnessExportLines()).toEqual([HARNESS_EXPORT_LINE]);
     });
 
-    // Validates: Requirements 1.6
     it('emits no infrastructure, then adds it on an infra: agentcore re-run', async () => {
       await agentcoreHarnessGenerator(tree, {
         name: 'my-harness',
@@ -641,7 +620,6 @@ describe('agentcore-harness generator', () => {
     // The project directory only. The vended construct and Terraform module
     // stay out: they are long and churn for reasons unrelated to this
     // generator, so the blocks above cover them with targeted assertions.
-    // Validates: Requirements 1.3, 1.4, 1.5, 1.6, 16.3
     it('snapshots the four rendered harness project files', async () => {
       await agentcoreHarnessGenerator(tree, {
         name: 'my-harness',

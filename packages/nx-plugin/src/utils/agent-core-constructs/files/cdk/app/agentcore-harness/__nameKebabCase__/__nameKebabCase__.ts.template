@@ -10,10 +10,10 @@ import { RuntimeConfig } from '../../../core/runtime-config<% if (esm) { %>.js<%
 import { findWorkspaceRoot } from '../../../core/workspace<% if (esm) { %>.js<% } %>';
 
 // Checkov rules flagging IAM statements whose resource cannot be scoped.
-const WILDCARD_IAM_RULES = ['CKV_AWS_111', 'CKV_AWS_356'];
+const WILDCARD_IAM_RULES = ['CKV_AWS_107', 'CKV_AWS_111', 'CKV_AWS_356'];
 
-// The system prompt is read from the Harness Project at synth time. Anchoring
-// on the workspace root keeps this correct once this file compiles to dist/.
+// Read at synth time, anchored on the workspace root so it still resolves once
+// this file compiles to dist/.
 const systemPrompt = fs.readFileSync(
   path.join(
     findWorkspaceRoot(url.fileURLToPath(new URL(<% if (esm) { %>import.meta.url<% } else { %>require('url').pathToFileURL(__filename).href<% } %>))),
@@ -23,15 +23,8 @@ const systemPrompt = fs.readFileSync(
 );
 
 /**
- * Properties for the <%- nameClassName %> Harness.
- *
- * Every native Harness Configuration field of the pinned
- * `aws-cdk-lib/aws-bedrockagentcore` module (alternate model providers,
- * tools, memory, skills, environment configuration, truncation,
- * authorization and execution limits) can be supplied here and takes
- * precedence over the generated defaults. The execution role ARN is always
- * derived from the supplied or generated role, so it cannot be overridden
- * as a raw string.
+ * Properties for the <%- nameClassName %> Harness. Any native Harness field
+ * supplied here takes precedence over the generated defaults.
  */
 export interface <%- nameClassName %>Props
   extends Partial<
@@ -41,20 +34,11 @@ export interface <%- nameClassName %>Props
   executionRole?: iam.IRole;
   /** Model resources the generated execution role may invoke. */
   modelResourceArns?: string[];
-  /**
-   * Tools the Harness may use. The Harness deploys with no tools unless they
-   * are supplied here.
-   */
+  /** Tools the Harness may use. Deploys with none unless supplied here. */
   allowedTools?: agentcore.CfnHarnessProps['allowedTools'];
 }
 
-/**
- * A managed Amazon Bedrock AgentCore Harness.
- *
- * Omitting `authorizerConfiguration` (the default) means the Harness uses
- * IAM inbound authorization; supply a custom JWT authorizer through the
- * native property to change that.
- */
+/** A managed Amazon Bedrock AgentCore Harness, using IAM inbound auth. */
 export class <%- nameClassName %> extends Construct implements iam.IGrantable {
   public readonly harness: agentcore.CfnHarness;
   public readonly executionRole: iam.IRole;
@@ -72,10 +56,8 @@ export class <%- nameClassName %> extends Construct implements iam.IGrantable {
       ...harnessProps
     } = props ?? {};
 
-    // Harness names must start with an ASCII letter, contain only ASCII
-    // letters, digits or underscores, and be at most 40 characters long.
-    // One character is reserved for the leading 'H' applied when the
-    // path-derived unique name would not start with a letter.
+    // Harness names allow ASCII letters, digits and underscores, must start
+    // with a letter, and are at most 40 characters.
     const uniqueName = Names.uniqueResourceName(this, {
       maxLength: 39,
       separator: '_',
@@ -101,10 +83,6 @@ export class <%- nameClassName %> extends Construct implements iam.IGrantable {
     if (!executionRole) {
       // Baseline permissions from the AgentCore Harness security guidance:
       // https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-security.html
-      // The managed memory grant is added after the Harness below, since it
-      // scopes to a service-generated ARN. Access to other customer-owned
-      // resources (Gateways, BYO memory, custom browsers/code interpreters,
-      // skills, secrets, VPCs) is an explicit extension via addToRolePolicy.
       [
         new iam.PolicyStatement({
           sid: 'BedrockModelInvocation',
@@ -206,9 +184,7 @@ export class <%- nameClassName %> extends Construct implements iam.IGrantable {
         this.executionRole.addToPrincipalPolicy(statement),
       );
 
-      // The three statements below take no resource-level permission, so
-      // their suppressions land on the role's policy with each statement
-      // identifier named in its reason.
+      // These statements take no resource-level permission.
       const isPolicy = (c: IConstruct) => c instanceof iam.Policy;
       suppressRules(
         this.executionRole,
@@ -231,34 +207,21 @@ export class <%- nameClassName %> extends Construct implements iam.IGrantable {
     }
 
     this.harness = new agentcore.CfnHarness(this, 'Harness', {
-      // Generated defaults. No tools are configured, so the deployed Harness
-      // carries the least capability until tools are supplied by the caller.
       model: {
         bedrockModelConfig: {
           modelId: 'global.anthropic.claude-sonnet-4-6',
         },
       },
       systemPrompt: [{ text: systemPrompt }],
-      // Caller-supplied native properties take precedence over the
-      // generated defaults above.
       ...harnessProps,
-      // The deployed name always equals the effective harnessName above so
-      // the execution role's workload-identity resource pattern
-      // (harness_<name>-*) cannot diverge from the deployed Harness. A
-      // caller-supplied harnessName still wins because it feeds the
-      // effective name.
+      // Set after harnessProps so the deployed name always matches the
+      // execution role's workload-identity resource pattern.
       harnessName,
-      // The execution role ARN always tracks the exposed executionRole.
       executionRoleArn: this.executionRole.roleArn,
     });
 
-    // The Harness provisions a managed AgentCore Memory instance unless the
-    // caller overrides `memory` with a BYO instance or disables it, and the
-    // agent loop reads and writes that memory on every invocation. The
-    // service names the managed memory itself, so its ARN is only available
-    // as a Harness attribute — scope the grant to that ARN rather than a
-    // name pattern derived from harnessName. A caller-supplied `memory`
-    // owns its own permissions via addToRolePolicy.
+    // The Harness provisions managed memory unless `memory` is supplied, and
+    // the service names it, so the grant scopes to the resulting ARN.
     if (!executionRole && harnessProps.memory === undefined) {
       this.executionRole.addToPrincipalPolicy(
         new iam.PolicyStatement({
@@ -283,12 +246,8 @@ export class <%- nameClassName %> extends Construct implements iam.IGrantable {
       <%- nameClassName %>: this.harness.attrArn,
     });
 
-    // Reading appConfigApplicationId materialises the Runtime Configuration
-    // AppConfig resources, which also emits the stack's
-    // RuntimeConfigApplicationId output. A Harness has no compute of its own
-    // that reads configuration, so without this read the entry set above is
-    // never deployed and the Invocation Client's RUNTIME_CONFIG_APP_ID
-    // lookup has nothing to resolve.
+    // Materialises the AppConfig resources so the entry above is deployed and
+    // the chat script's RUNTIME_CONFIG_APP_ID lookup resolves.
     void rc.appConfigApplicationId;
 
     new CfnOutput(this, 'HarnessArn', { value: this.harness.attrArn });
