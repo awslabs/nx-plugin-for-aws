@@ -1,0 +1,234 @@
+---
+title: AgentCore Harness
+description: 创建 Amazon Bedrock AgentCore Harness 项目
+generator: agentcore-harness
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Snippet from '@components/snippet.astro';
+
+生成一个 [Amazon Bedrock AgentCore Harness](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness.html) 项目。Harness 是由 Strands Agents 提供支持的托管代理循环：它拥有模型、系统提示、工具、内存、技能、环境、截断、授权和执行限制的部署默认值，而服务接受支持字段的每次调用覆盖。重用相同的 Runtime Session ID 会继续相同的 Harness 会话。
+
+## 用法
+
+### 生成 AgentCore Harness
+
+<RunGenerator generator="agentcore-harness" />
+
+### 选项
+
+<GeneratorParameters generator="agentcore-harness" />
+
+## 生成器输出
+
+生成器在 `packages/<name>/` 创建一个独立项目。因为 AWS 为您运行代理循环，所以该项目仅包含塑造它的提示和与之交互的脚本：
+
+<FileTree>
+  - packages/\<name>/
+    - src/PROMPT.md Harness 系统提示
+    - scripts/chat.ts 已部署 Harness 的多轮对话客户端
+    - project.json 添加 `chat` 目标
+    - README.md 对话和自定义说明
+</FileTree>
+
+### 基础设施
+
+当 `infra` 为 `agentcore`（默认值）时生成基础设施。使用 `infra: none` 时不生成基础设施 — 设置 `HARNESS_ARN` 以调用在其他地方管理的 Harness，稍后使用 `infra: agentcore` 重新运行生成器以添加基础设施；现有项目文件（包括您的编辑）将被保留。
+
+<Snippet name="shared-constructs" />
+
+<Infrastructure>
+  <Fragment slot="cdk">
+    <FileTree>
+      - packages/common/constructs/src/app/harnesses/\<name>/
+        - \<name>.ts 包含 Harness 和执行角色的 CDK 构造
+    </FileTree>
+  </Fragment>
+  <Fragment slot="terraform">
+    <FileTree>
+      - packages/common/terraform/src/app/harnesses/\<name>/
+        - \<name>.tf 包含 Harness 和执行角色的 Terraform 模块
+    </FileTree>
+  </Fragment>
+</Infrastructure>
+
+生成的基础设施通过原生资源（CDK `aws_bedrockagentcore.CfnHarness`、Terraform `aws_bedrockagentcore_harness`）使用您生成的默认值管理 Harness，创建具有下述基线权限的 IAM 执行角色，并使用 IAM 入站授权（默认情况下未配置自定义 JWT 授权器）。
+
+Harness ARN 在 <Link path="guides/runtime-config">运行时配置</Link> 中注册为 `agentcore.harnesses.<ClassName>`，保留任何现有条目。
+
+## 部署您的 AgentCore Harness
+
+生成器根据您选择的 `iac` 提供程序创建 CDK 或 Terraform 基础设施即代码。您可以使用它通过常规基础设施工作流部署您的 Harness。
+
+<Infrastructure>
+  <Fragment slot="cdk">
+用于部署 Harness 的 CDK 构造位于 `common/constructs` 文件夹中。从 CDK 应用程序实例化它：
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyHarness } from '@my-scope/common-constructs';
+import { Stack, type StackProps } from 'aws-cdk-lib';
+import type { Construct } from 'constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    new MyHarness(this, 'MyHarness');
+  }
+}
+```
+
+构造的 props 接口（`MyHarnessProps`）扩展了 `Partial<Omit<CfnHarnessProps, 'executionRoleArn' | 'allowedTools'>>`，因此可以提供任何原生 Harness 属性，并优先于生成的默认值：
+
+```ts
+const harness = new MyHarness(this, 'MyHarness', {
+  maxIterations: 20,
+  timeoutSeconds: 600,
+});
+```
+
+构造还接受：
+
+- `allowedTools` — Harness 可以使用的工具。除非您提供工具，否则 Harness 部署时不带任何工具，请参阅<a href="#configuring-tools">配置工具</a>。
+- `executionRole` — 要使用的现有 IAM 角色，而不是生成的角色。提供的角色按原样使用：不会向其添加基线权限，其 ARN 始终提供给 Harness（原始 `executionRoleArn` 字符串无法被覆盖）。
+- `modelResourceArns` — 生成的执行角色可以调用的 Bedrock 模型和推理配置文件 ARN，替换默认列表。
+
+其公共成员包括 `harness`（`CfnHarness`）、`executionRole`、`grantPrincipal`、`harnessArn` getter、用于执行角色扩展的 `addToRolePolicy(statement)` 以及用于授权调用者的 `grantInvokeAccess(grantee)`。
+
+像往常一样使用您的基础设施项目部署堆栈 — 请参阅 <Link path="guides/typescript-infrastructure">CDK 基础设施指南</Link>。
+  </Fragment>
+  <Fragment slot="terraform">
+用于部署 Harness 的 Terraform 模块位于 `common/terraform` 文件夹中。从 Terraform 配置引用它：
+
+```hcl title="packages/infra/src/main.tf"
+module "my_harness" {
+  source = "../../common/terraform/src/app/harnesses/my-harness"
+}
+```
+
+该模块公开三个变量：
+
+- `model_id` — Harness 默认使用的 Bedrock 模型或推理配置文件。
+- `model_resource_arns` — 执行角色可以调用的 Bedrock 模型和推理配置文件 ARN，替换默认列表。
+- `additional_execution_role_policy_statements` — 附加到执行角色策略的 IAM 语句对象列表（`Effect`、`Action`、`Resource`、可选的 `Sid` 和 `Condition`）。
+
+其他所有内容都在模块本身生成的 `aws_bedrockagentcore_harness` 资源上配置。
+
+该模块输出 `harness_id`、`harness_arn` 和 `execution_role_arn`。
+
+像往常一样使用 Terraform 项目的 plan/apply 工作流进行部署 — 请参阅 <Link path="guides/terraform-project">Terraform 项目指南</Link>。
+  </Fragment>
+</Infrastructure>
+
+:::note[系统提示可见性]
+您的基础设施在合成（CDK）或计划（Terraform）时读取 `packages/<name>/src/PROMPT.md`，因此提示是部署配置而不是秘密存储：其内容出现在合成的 CloudFormation 模板或 Terraform 状态中。
+:::
+
+## 授予调用 harness 的访问权限
+
+您可以按如下方式授予调用者调用 harness 的权限：
+
+<Infrastructure>
+  <Fragment slot="cdk">
+```ts
+const harness = new MyHarness(this, 'MyHarness');
+
+harness.grantInvokeAccess(caller);
+```
+  </Fragment>
+  <Fragment slot="terraform">
+```hcl
+# Attach to the calling principal's role
+resource "aws_iam_role_policy" "invoke_my_harness" {
+  name = "InvokeMyHarness"
+  role = aws_iam_role.caller.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "bedrock-agentcore:InvokeHarness",
+        "bedrock-agentcore:InvokeAgentRuntime",
+      ]
+      Resource = [module.my_harness.harness_arn]
+    }]
+  })
+}
+```
+  </Fragment>
+</Infrastructure>
+
+调用者需要在 Harness ARN 上同时拥有 `bedrock-agentcore:InvokeHarness` 和 `bedrock-agentcore:InvokeAgentRuntime`，这正是 `grantInvokeAccess` 授予的内容。
+
+## 与您的 Harness 对话
+
+生成的 `chat` 目标运行 `scripts/chat.ts`，让您进入与已部署 Harness 的交互式终端对话：
+
+<NxCommands commands={['run <project>:chat']} />
+
+一次运行的每一轮共享一个会话，因此 Harness 会保留对话上下文直到您退出。凭证来自标准 AWS SDK 凭证提供程序链，AWS 区域从 Harness ARN 派生。
+
+Harness ARN 按以下顺序解析：
+
+1. `HARNESS_ARN`（非空）：直接使用，无需读取运行时配置：
+
+   <NxCommands commands={['run <project>:chat']} env={{ HARNESS_ARN: '<harness-arn>' }} />
+
+2. `RUNTIME_CONFIG_APP_ID`：从已部署基础设施发布的 `agentcore.harnesses.<ClassName>` 条目解析 ARN：
+
+   <NxCommands commands={['run <project>:chat']} env={{ RUNTIME_CONFIG_APP_ID: '<application-id>' }} />
+
+如果两者都未设置，脚本将失败并显示命名两个选项的错误。
+
+## 自定义您的 Harness
+
+`src/PROMPT.md` 是 Harness 系统提示：编辑它并重新部署以更改 Harness 的行为。其他所有内容都在您实例化基础设施的位置配置，或通过直接编辑生成的构造或模块进行配置。重新运行生成器永远不会覆盖现有文件（它只添加缺失的文件并合并项目元数据），因此您对提示和生成的基础设施的编辑将被保留。
+
+<Infrastructure>
+  <Fragment slot="cdk">
+固定的 `aws-cdk-lib/aws-bedrockagentcore` 模块的每个原生 Harness 属性都可以通过构造的 props 使用 — 备用模型提供程序、工具定义、内存、技能、环境配置、截断、自定义 JWT 授权和执行限制 — 显式 props 优先于生成的默认值。或者，编辑 `packages/common/constructs/src/app/harnesses/<name>/<name>.ts` 中生成的构造。
+  </Fragment>
+  <Fragment slot="terraform">
+生成的模块保持原生 `aws_bedrockagentcore_harness` 资源直接可编辑，因此提供程序原生字段 — 备用模型提供程序（`gemini_model_config`、`openai_model_config`）、`tool` 块、`memory`、`skill` 块、环境（`environment`、`environment_variables`、`environment_artifact`）、`truncation` 和带有 `custom_jwt_authorizer` 的 `authorizer_configuration` — 通过编辑 `packages/common/terraform/src/app/harnesses/<name>/<name>.tf` 进行配置。
+  </Fragment>
+</Infrastructure>
+
+省略授权器配置（默认）意味着 IAM 入站授权；通过原生字段配置自定义 JWT 授权器以更改该设置。
+
+### 配置工具
+
+Harness 部署时不带任何工具，因此它以最少的功能开始。选择加入它可以使用的工具：
+
+<Infrastructure>
+  <Fragment slot="cdk">
+```ts
+new MyHarness(this, 'Harness', { allowedTools: ['@builtin'] });
+```
+  </Fragment>
+  <Fragment slot="terraform">
+```hcl title="packages/common/terraform/src/app/harnesses/my-harness/my-harness.tf"
+resource "aws_bedrockagentcore_harness" "this" {
+  # ...
+  allowed_tools = ["@builtin"]
+}
+```
+
+如果您希望在引用模块的位置将其设置为模块参数，请向模块添加 `allowed_tools` 变量。
+  </Fragment>
+</Infrastructure>
+
+将 `@builtin` 缩小到特定模式（如 `@builtin/file_operations`）以限制代理循环可以执行的操作。有关可以添加的内置工具，请参阅 [Harness 工具](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-tools.html)。
+
+### 每次调用覆盖
+
+在基础设施中配置的值是部署默认值。该服务还接受 `InvokeHarness` 请求中支持的 Harness 字段（如模型、工具和技能）的每次调用覆盖；部署默认值适用于未覆盖字段的任何位置。
+
+:::caution[验证调用覆盖]
+每次调用覆盖是服务边界处的受信任输入：任何授权的调用者都可以覆盖支持的字段。如果不受信任的用户可以访问将覆盖转发到 `InvokeHarness` 的应用程序，请在应用程序层验证和授权它们（例如，允许列表模型和工具），将执行角色限定为所需资源，并且除非您特别需要，否则不要授予 `bedrock-agentcore:InvokeAgentRuntimeCommand`。
+:::

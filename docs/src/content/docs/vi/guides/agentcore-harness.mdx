@@ -1,0 +1,234 @@
+---
+title: AgentCore Harness
+description: Tạo một dự án Amazon Bedrock AgentCore Harness
+generator: agentcore-harness
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Snippet from '@components/snippet.astro';
+
+Tạo một dự án [Amazon Bedrock AgentCore Harness](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness.html). Harness là một vòng lặp agent được quản lý, được hỗ trợ bởi Strands Agents: nó sở hữu các giá trị mặc định triển khai cho model, system prompt, tools, memory, skills, environments, truncation, authorization và execution limits, trong khi dịch vụ chấp nhận các ghi đè theo từng lần gọi cho các trường được hỗ trợ. Sử dụng lại cùng một Runtime Session ID sẽ tiếp tục cùng một phiên Harness.
+
+## Cách sử dụng
+
+### Tạo một AgentCore Harness
+
+<RunGenerator generator="agentcore-harness" />
+
+### Tùy chọn
+
+<GeneratorParameters generator="agentcore-harness" />
+
+## Đầu ra của Generator
+
+Generator tạo một dự án độc lập tại `packages/<name>/`. Vì AWS chạy vòng lặp agent cho bạn, dự án chỉ chứa prompt định hình nó và một script để giao tiếp với nó:
+
+<FileTree>
+  - packages/\<name>/
+    - src/PROMPT.md The Harness system prompt
+    - scripts/chat.ts Multi-turn chat client for the deployed Harness
+    - project.json Adds the `chat` target
+    - README.md Chat and customization instructions
+</FileTree>
+
+### Hạ tầng
+
+Hạ tầng được tạo khi `infra` là `agentcore` (mặc định). Với `infra: none`, không có hạ tầng nào được tạo — đặt `HARNESS_ARN` để gọi một Harness được quản lý ở nơi khác, và chạy lại generator với `infra: agentcore` sau để thêm hạ tầng; các tệp dự án hiện có (bao gồm các chỉnh sửa của bạn) được bảo toàn.
+
+<Snippet name="shared-constructs" />
+
+<Infrastructure>
+  <Fragment slot="cdk">
+    <FileTree>
+      - packages/common/constructs/src/app/harnesses/\<name>/
+        - \<name>.ts CDK construct containing the Harness and execution role
+    </FileTree>
+  </Fragment>
+  <Fragment slot="terraform">
+    <FileTree>
+      - packages/common/terraform/src/app/harnesses/\<name>/
+        - \<name>.tf Terraform module containing the Harness and execution role
+    </FileTree>
+  </Fragment>
+</Infrastructure>
+
+Hạ tầng được tạo quản lý Harness thông qua tài nguyên gốc (CDK `aws_bedrockagentcore.CfnHarness`, Terraform `aws_bedrockagentcore_harness`) với các giá trị mặc định được tạo của bạn, tạo một IAM execution role với các quyền cơ bản được mô tả bên dưới, và sử dụng IAM inbound authorization (không có custom JWT authorizer nào được cấu hình theo mặc định).
+
+Harness ARN được đăng ký tại `agentcore.harnesses.<ClassName>` trong <Link path="guides/runtime-config">Runtime Configuration</Link>, bảo toàn mọi mục hiện có.
+
+## Triển khai AgentCore Harness của bạn
+
+Generator tạo CDK hoặc Terraform infrastructure as code dựa trên nhà cung cấp `iac` bạn đã chọn. Bạn có thể sử dụng điều này để triển khai Harness của mình thông qua quy trình hạ tầng thông thường của bạn.
+
+<Infrastructure>
+  <Fragment slot="cdk">
+CDK construct để triển khai Harness của bạn nằm trong thư mục `common/constructs`. Khởi tạo nó từ một ứng dụng CDK:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyHarness } from '@my-scope/common-constructs';
+import { Stack, type StackProps } from 'aws-cdk-lib';
+import type { Construct } from 'constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    new MyHarness(this, 'MyHarness');
+  }
+}
+```
+
+Giao diện props của construct (`MyHarnessProps`) mở rộng `Partial<Omit<CfnHarnessProps, 'executionRoleArn' | 'allowedTools'>>`, vì vậy bất kỳ thuộc tính Harness gốc nào cũng có thể được cung cấp và được ưu tiên hơn các giá trị mặc định được tạo:
+
+```ts
+const harness = new MyHarness(this, 'MyHarness', {
+  maxIterations: 20,
+  timeoutSeconds: 600,
+});
+```
+
+Construct cũng chấp nhận:
+
+- `allowedTools` — các công cụ mà Harness có thể sử dụng. Harness triển khai mà không có công cụ nào trừ khi bạn cung cấp chúng, xem <a href="#configuring-tools">Configuring tools</a>.
+- `executionRole` — một IAM role hiện có để sử dụng thay vì role được tạo. Một role được cung cấp được sử dụng nguyên trạng: các quyền cơ bản không được thêm vào nó, và ARN của nó luôn cung cấp cho Harness (chuỗi `executionRoleArn` thô không thể bị ghi đè).
+- `modelResourceArns` — các ARN của Bedrock model và inference-profile mà execution role được tạo có thể gọi, thay thế danh sách mặc định.
+
+Các thành viên công khai của nó là `harness` (`CfnHarness`), `executionRole`, `grantPrincipal`, getter `harnessArn`, `addToRolePolicy(statement)` cho các mở rộng execution role, và `grantInvokeAccess(grantee)` để ủy quyền cho người gọi.
+
+Triển khai stack với dự án hạ tầng của bạn như thường lệ — xem <Link path="guides/typescript-infrastructure">hướng dẫn hạ tầng CDK</Link>.
+  </Fragment>
+  <Fragment slot="terraform">
+Module Terraform để triển khai Harness của bạn nằm trong thư mục `common/terraform`. Tham chiếu nó từ một cấu hình Terraform:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_harness" {
+  source = "../../common/terraform/src/app/harnesses/my-harness"
+}
+```
+
+Module hiển thị ba biến:
+
+- `model_id` — Bedrock model hoặc inference profile mà Harness sử dụng theo mặc định.
+- `model_resource_arns` — các ARN của Bedrock model và inference-profile mà execution role có thể gọi, thay thế danh sách mặc định.
+- `additional_execution_role_policy_statements` — một danh sách các đối tượng IAM statement (`Effect`, `Action`, `Resource`, `Sid` và `Condition` tùy chọn) được thêm vào execution role policy.
+
+Mọi thứ khác được cấu hình trên tài nguyên `aws_bedrockagentcore_harness` được tạo trong chính module.
+
+Module xuất ra `harness_id`, `harness_arn`, và `execution_role_arn`.
+
+Triển khai với quy trình plan/apply của dự án Terraform của bạn như thường lệ — xem <Link path="guides/terraform-project">hướng dẫn dự án Terraform</Link>.
+  </Fragment>
+</Infrastructure>
+
+:::note[Khả năng hiển thị system prompt]
+Hạ tầng của bạn đọc `packages/<name>/src/PROMPT.md` khi bạn synthesize (CDK) hoặc plan (Terraform), vì vậy prompt là cấu hình triển khai chứ không phải lưu trữ bí mật: nội dung của nó xuất hiện trong template CloudFormation được tổng hợp hoặc trong Terraform state.
+:::
+
+## Cấp quyền truy cập để gọi harness
+
+Bạn có thể cấp cho người gọi quyền để gọi harness như sau:
+
+<Infrastructure>
+  <Fragment slot="cdk">
+```ts
+const harness = new MyHarness(this, 'MyHarness');
+
+harness.grantInvokeAccess(caller);
+```
+  </Fragment>
+  <Fragment slot="terraform">
+```hcl
+# Attach to the calling principal's role
+resource "aws_iam_role_policy" "invoke_my_harness" {
+  name = "InvokeMyHarness"
+  role = aws_iam_role.caller.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "bedrock-agentcore:InvokeHarness",
+        "bedrock-agentcore:InvokeAgentRuntime",
+      ]
+      Resource = [module.my_harness.harness_arn]
+    }]
+  })
+}
+```
+  </Fragment>
+</Infrastructure>
+
+Người gọi cần cả `bedrock-agentcore:InvokeHarness` và `bedrock-agentcore:InvokeAgentRuntime` trên Harness ARN, đó chính xác là những gì `grantInvokeAccess` cấp.
+
+## Trò chuyện với Harness của bạn
+
+Target `chat` được tạo chạy `scripts/chat.ts`, đưa bạn vào một cuộc trò chuyện terminal tương tác với Harness đã triển khai của bạn:
+
+<NxCommands commands={['run <project>:chat']} />
+
+Mỗi lượt của một lần chạy chia sẻ một phiên, vì vậy Harness giữ ngữ cảnh cuộc trò chuyện cho đến khi bạn thoát. Thông tin xác thực đến từ chuỗi nhà cung cấp thông tin xác thực AWS SDK tiêu chuẩn, và AWS Region được lấy từ Harness ARN.
+
+Harness ARN được giải quyết theo thứ tự này:
+
+1. `HARNESS_ARN` (không rỗng): được sử dụng trực tiếp, không đọc Runtime Configuration:
+
+   <NxCommands commands={['run <project>:chat']} env={{ HARNESS_ARN: '<harness-arn>' }} />
+
+2. `RUNTIME_CONFIG_APP_ID`: giải quyết ARN từ mục `agentcore.harnesses.<ClassName>` được xuất bản bởi hạ tầng đã triển khai:
+
+   <NxCommands commands={['run <project>:chat']} env={{ RUNTIME_CONFIG_APP_ID: '<application-id>' }} />
+
+Nếu không đặt cả hai, script sẽ thất bại với lỗi nêu tên cả hai tùy chọn.
+
+## Tùy chỉnh Harness của bạn
+
+`src/PROMPT.md` là system prompt của Harness: chỉnh sửa nó và triển khai lại để thay đổi cách Harness hoạt động. Mọi thứ khác được cấu hình nơi bạn khởi tạo hạ tầng, hoặc bằng cách chỉnh sửa construct hoặc module được tạo trực tiếp. Chạy lại generator không bao giờ ghi đè các tệp hiện có (nó chỉ thêm các tệp bị thiếu và hợp nhất metadata dự án), vì vậy các chỉnh sửa của bạn đối với prompt và hạ tầng được tạo được bảo toàn.
+
+<Infrastructure>
+  <Fragment slot="cdk">
+Mọi thuộc tính Harness gốc của module `aws-cdk-lib/aws-bedrockagentcore` được ghim đều có sẵn thông qua props của construct — các nhà cung cấp model thay thế, định nghĩa công cụ, memory, skills, cấu hình environment, truncation, custom JWT authorization và execution limits — và các props rõ ràng được ưu tiên hơn các giá trị mặc định được tạo. Ngoài ra, chỉnh sửa construct được tạo trong `packages/common/constructs/src/app/harnesses/<name>/<name>.ts`.
+  </Fragment>
+  <Fragment slot="terraform">
+Module được tạo giữ tài nguyên `aws_bedrockagentcore_harness` gốc có thể chỉnh sửa trực tiếp, vì vậy các trường gốc của nhà cung cấp — các nhà cung cấp model thay thế (`gemini_model_config`, `openai_model_config`), các khối `tool`, `memory`, các khối `skill`, environments (`environment`, `environment_variables`, `environment_artifact`), `truncation`, và `authorizer_configuration` với `custom_jwt_authorizer` — được cấu hình bằng cách chỉnh sửa `packages/common/terraform/src/app/harnesses/<name>/<name>.tf`.
+  </Fragment>
+</Infrastructure>
+
+Bỏ qua cấu hình authorizer (mặc định) có nghĩa là IAM inbound authorization; cấu hình custom JWT authorizer thông qua trường gốc để thay đổi điều đó.
+
+### Cấu hình công cụ
+
+Harness triển khai mà không có công cụ nào, vì vậy nó bắt đầu với khả năng tối thiểu. Chọn tham gia các công cụ mà nó có thể sử dụng:
+
+<Infrastructure>
+  <Fragment slot="cdk">
+```ts
+new MyHarness(this, 'Harness', { allowedTools: ['@builtin'] });
+```
+  </Fragment>
+  <Fragment slot="terraform">
+```hcl title="packages/common/terraform/src/app/harnesses/my-harness/my-harness.tf"
+resource "aws_bedrockagentcore_harness" "this" {
+  # ...
+  allowed_tools = ["@builtin"]
+}
+```
+
+Thêm một biến `allowed_tools` vào module nếu bạn muốn đặt nó làm đối số module nơi bạn tham chiếu module.
+  </Fragment>
+</Infrastructure>
+
+Thu hẹp `@builtin` thành các mẫu cụ thể như `@builtin/file_operations` để hạn chế những gì vòng lặp agent có thể làm. Xem [Harness tools](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-tools.html) cho các công cụ tích hợp sẵn mà bạn có thể thêm.
+
+### Ghi đè theo từng lần gọi
+
+Các giá trị được cấu hình trong hạ tầng là các giá trị mặc định triển khai. Dịch vụ cũng chấp nhận các ghi đè theo từng lần gọi cho các trường Harness được hỗ trợ (như models, tools và skills) trong yêu cầu `InvokeHarness`; các giá trị mặc định triển khai áp dụng bất cứ nơi nào một trường không bị ghi đè.
+
+:::caution[Xác thực các ghi đè lời gọi]
+Các ghi đè theo từng lần gọi là đầu vào đáng tin cậy tại ranh giới dịch vụ: bất kỳ người gọi được ủy quyền nào cũng có thể ghi đè các trường được hỗ trợ. Nếu người dùng không đáng tin cậy có thể tiếp cận một ứng dụng chuyển tiếp các ghi đè đến `InvokeHarness`, hãy xác thực và ủy quyền chúng ở lớp ứng dụng (ví dụ: danh sách cho phép models và tools), giữ execution role được giới hạn trong các tài nguyên cần thiết, và không cấp `bedrock-agentcore:InvokeAgentRuntimeCommand` trừ khi bạn cần nó cụ thể.
+:::

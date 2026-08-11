@@ -1,0 +1,234 @@
+---
+title: AgentCore Harness
+description: Amazon Bedrock AgentCore Harness 프로젝트 생성
+generator: agentcore-harness
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Snippet from '@components/snippet.astro';
+
+[Amazon Bedrock AgentCore Harness](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness.html) 프로젝트를 생성합니다. Harness는 Strands Agents로 구동되는 관리형 에이전트 루프입니다. 모델, 시스템 프롬프트, 도구, 메모리, 스킬, 환경, 잘림, 권한 부여 및 실행 제한에 대한 배포 기본값을 소유하며, 서비스는 지원되는 필드에 대한 호출별 재정의를 허용합니다. 동일한 Runtime Session ID를 재사용하면 동일한 Harness 세션이 계속됩니다.
+
+## 사용법
+
+### AgentCore Harness 생성
+
+<RunGenerator generator="agentcore-harness" />
+
+### 옵션
+
+<GeneratorParameters generator="agentcore-harness" />
+
+## 생성기 출력
+
+생성기는 `packages/<name>/`에 독립 실행형 프로젝트를 생성합니다. AWS가 에이전트 루프를 실행하므로 프로젝트는 이를 형성하는 프롬프트와 이와 대화하기 위한 스크립트만 포함합니다:
+
+<FileTree>
+  - packages/\<name>/
+    - src/PROMPT.md Harness 시스템 프롬프트
+    - scripts/chat.ts 배포된 Harness를 위한 다중 턴 채팅 클라이언트
+    - project.json `chat` 타겟 추가
+    - README.md 채팅 및 사용자 정의 지침
+</FileTree>
+
+### 인프라
+
+인프라는 `infra`가 `agentcore`(기본값)일 때 생성됩니다. `infra: none`을 사용하면 인프라가 생성되지 않습니다 — 다른 곳에서 관리되는 Harness를 호출하려면 `HARNESS_ARN`을 설정하고, 나중에 `infra: agentcore`로 생성기를 다시 실행하여 인프라를 추가할 수 있습니다. 기존 프로젝트 파일(편집 내용 포함)은 보존됩니다.
+
+<Snippet name="shared-constructs" />
+
+<Infrastructure>
+  <Fragment slot="cdk">
+    <FileTree>
+      - packages/common/constructs/src/app/harnesses/\<name>/
+        - \<name>.ts Harness와 실행 역할을 포함하는 CDK 구성
+    </FileTree>
+  </Fragment>
+  <Fragment slot="terraform">
+    <FileTree>
+      - packages/common/terraform/src/app/harnesses/\<name>/
+        - \<name>.tf Harness와 실행 역할을 포함하는 Terraform 모듈
+    </FileTree>
+  </Fragment>
+</Infrastructure>
+
+생성된 인프라는 네이티브 리소스(CDK `aws_bedrockagentcore.CfnHarness`, Terraform `aws_bedrockagentcore_harness`)를 통해 생성된 기본값으로 Harness를 관리하고, 아래에 설명된 기본 권한으로 IAM 실행 역할을 생성하며, IAM 인바운드 권한 부여를 사용합니다(기본적으로 사용자 정의 JWT 권한 부여자가 구성되지 않음).
+
+Harness ARN은 <Link path="guides/runtime-config">Runtime Configuration</Link>의 `agentcore.harnesses.<ClassName>`에 등록되며, 기존 항목은 보존됩니다.
+
+## AgentCore Harness 배포
+
+생성기는 선택한 `iac` 공급자에 따라 CDK 또는 Terraform 인프라 코드를 생성합니다. 이를 사용하여 일반적인 인프라 워크플로를 통해 Harness를 배포할 수 있습니다.
+
+<Infrastructure>
+  <Fragment slot="cdk">
+Harness를 배포하기 위한 CDK 구성은 `common/constructs` 폴더에 있습니다. CDK 애플리케이션에서 인스턴스화하세요:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyHarness } from '@my-scope/common-constructs';
+import { Stack, type StackProps } from 'aws-cdk-lib';
+import type { Construct } from 'constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    new MyHarness(this, 'MyHarness');
+  }
+}
+```
+
+구성의 props 인터페이스(`MyHarnessProps`)는 `Partial<Omit<CfnHarnessProps, 'executionRoleArn' | 'allowedTools'>>`를 확장하므로 모든 네이티브 Harness 속성을 제공할 수 있으며 생성된 기본값보다 우선합니다:
+
+```ts
+const harness = new MyHarness(this, 'MyHarness', {
+  maxIterations: 20,
+  timeoutSeconds: 600,
+});
+```
+
+구성은 다음도 허용합니다:
+
+- `allowedTools` — Harness가 사용할 수 있는 도구. 제공하지 않으면 Harness는 도구 없이 배포됩니다. <a href="#configuring-tools">도구 구성</a>을 참조하세요.
+- `executionRole` — 생성된 역할 대신 사용할 기존 IAM 역할. 제공된 역할은 있는 그대로 사용됩니다: 기본 권한이 추가되지 않으며, 해당 ARN은 항상 Harness에 제공됩니다(원시 `executionRoleArn` 문자열은 재정의할 수 없음).
+- `modelResourceArns` — 생성된 실행 역할이 호출할 수 있는 Bedrock 모델 및 추론 프로필 ARN으로, 기본 목록을 대체합니다.
+
+공개 멤버는 `harness`(`CfnHarness`), `executionRole`, `grantPrincipal`, `harnessArn` getter, 실행 역할 확장을 위한 `addToRolePolicy(statement)`, 호출자 권한 부여를 위한 `grantInvokeAccess(grantee)`입니다.
+
+평소와 같이 인프라 프로젝트로 스택을 배포하세요 — <Link path="guides/typescript-infrastructure">CDK 인프라 가이드</Link>를 참조하세요.
+  </Fragment>
+  <Fragment slot="terraform">
+Harness를 배포하기 위한 Terraform 모듈은 `common/terraform` 폴더에 있습니다. Terraform 구성에서 참조하세요:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_harness" {
+  source = "../../common/terraform/src/app/harnesses/my-harness"
+}
+```
+
+모듈은 세 가지 변수를 노출합니다:
+
+- `model_id` — Harness가 기본적으로 사용하는 Bedrock 모델 또는 추론 프로필.
+- `model_resource_arns` — 실행 역할이 호출할 수 있는 Bedrock 모델 및 추론 프로필 ARN으로, 기본 목록을 대체합니다.
+- `additional_execution_role_policy_statements` — 실행 역할 정책에 추가되는 IAM 문 객체 목록(`Effect`, `Action`, `Resource`, 선택적 `Sid` 및 `Condition`).
+
+그 외의 모든 것은 모듈 자체의 생성된 `aws_bedrockagentcore_harness` 리소스에서 구성됩니다.
+
+모듈은 `harness_id`, `harness_arn`, `execution_role_arn`을 출력합니다.
+
+평소와 같이 Terraform 프로젝트의 plan/apply 워크플로로 배포하세요 — <Link path="guides/terraform-project">Terraform 프로젝트 가이드</Link>를 참조하세요.
+  </Fragment>
+</Infrastructure>
+
+:::note[시스템 프롬프트 가시성]
+인프라는 합성(CDK) 또는 계획(Terraform) 시 `packages/<name>/src/PROMPT.md`를 읽으므로 프롬프트는 비밀 저장소가 아닌 배포 구성입니다: 그 내용은 합성된 CloudFormation 템플릿 또는 Terraform 상태에 나타납니다.
+:::
+
+## harness 호출 액세스 권한 부여
+
+다음과 같이 호출자에게 harness를 호출할 수 있는 권한을 부여할 수 있습니다:
+
+<Infrastructure>
+  <Fragment slot="cdk">
+```ts
+const harness = new MyHarness(this, 'MyHarness');
+
+harness.grantInvokeAccess(caller);
+```
+  </Fragment>
+  <Fragment slot="terraform">
+```hcl
+# Attach to the calling principal's role
+resource "aws_iam_role_policy" "invoke_my_harness" {
+  name = "InvokeMyHarness"
+  role = aws_iam_role.caller.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "bedrock-agentcore:InvokeHarness",
+        "bedrock-agentcore:InvokeAgentRuntime",
+      ]
+      Resource = [module.my_harness.harness_arn]
+    }]
+  })
+}
+```
+  </Fragment>
+</Infrastructure>
+
+호출자는 Harness ARN에 대해 `bedrock-agentcore:InvokeHarness`와 `bedrock-agentcore:InvokeAgentRuntime` 둘 다 필요하며, 이것이 정확히 `grantInvokeAccess`가 부여하는 것입니다.
+
+## Harness와 채팅하기
+
+생성된 `chat` 타겟은 `scripts/chat.ts`를 실행하여 배포된 Harness와 대화형 터미널 채팅을 시작합니다:
+
+<NxCommands commands={['run <project>:chat']} />
+
+실행의 모든 턴은 하나의 세션을 공유하므로 Harness는 종료할 때까지 대화 컨텍스트를 유지합니다. 자격 증명은 표준 AWS SDK 자격 증명 공급자 체인에서 가져오며, AWS 리전은 Harness ARN에서 파생됩니다.
+
+Harness ARN은 다음 순서로 확인됩니다:
+
+1. `HARNESS_ARN`(비어 있지 않음): Runtime Configuration을 읽지 않고 직접 사용됩니다:
+
+   <NxCommands commands={['run <project>:chat']} env={{ HARNESS_ARN: '<harness-arn>' }} />
+
+2. `RUNTIME_CONFIG_APP_ID`: 배포된 인프라에서 게시한 `agentcore.harnesses.<ClassName>` 항목에서 ARN을 확인합니다:
+
+   <NxCommands commands={['run <project>:chat']} env={{ RUNTIME_CONFIG_APP_ID: '<application-id>' }} />
+
+둘 다 설정되지 않으면 스크립트는 두 옵션을 모두 명명하는 오류와 함께 실패합니다.
+
+## Harness 사용자 정의
+
+`src/PROMPT.md`는 Harness 시스템 프롬프트입니다: 편집하고 재배포하여 Harness의 동작을 변경하세요. 그 외의 모든 것은 인프라를 인스턴스화하는 곳에서 구성되거나 생성된 구성 또는 모듈을 직접 편집하여 구성됩니다. 생성기를 다시 실행해도 기존 파일을 덮어쓰지 않으므로(누락된 파일만 추가하고 프로젝트 메타데이터를 병합함) 프롬프트 및 생성된 인프라에 대한 편집 내용이 보존됩니다.
+
+<Infrastructure>
+  <Fragment slot="cdk">
+고정된 `aws-cdk-lib/aws-bedrockagentcore` 모듈의 모든 네이티브 Harness 속성은 구성의 props를 통해 사용할 수 있습니다 — 대체 모델 공급자, 도구 정의, 메모리, 스킬, 환경 구성, 잘림, 사용자 정의 JWT 권한 부여 및 실행 제한 — 명시적 props는 생성된 기본값보다 우선합니다. 또는 `packages/common/constructs/src/app/harnesses/<name>/<name>.ts`에서 생성된 구성을 편집하세요.
+  </Fragment>
+  <Fragment slot="terraform">
+생성된 모듈은 네이티브 `aws_bedrockagentcore_harness` 리소스를 직접 편집 가능하게 유지하므로 공급자 네이티브 필드 — 대체 모델 공급자(`gemini_model_config`, `openai_model_config`), `tool` 블록, `memory`, `skill` 블록, 환경(`environment`, `environment_variables`, `environment_artifact`), `truncation`, `custom_jwt_authorizer`가 있는 `authorizer_configuration` — 은 `packages/common/terraform/src/app/harnesses/<name>/<name>.tf`를 편집하여 구성됩니다.
+  </Fragment>
+</Infrastructure>
+
+권한 부여자 구성을 생략하면(기본값) IAM 인바운드 권한 부여를 의미합니다. 네이티브 필드를 통해 사용자 정의 JWT 권한 부여자를 구성하여 변경하세요.
+
+### 도구 구성
+
+Harness는 도구 없이 배포되므로 최소한의 기능으로 시작합니다. 사용할 수 있는 도구를 선택하세요:
+
+<Infrastructure>
+  <Fragment slot="cdk">
+```ts
+new MyHarness(this, 'Harness', { allowedTools: ['@builtin'] });
+```
+  </Fragment>
+  <Fragment slot="terraform">
+```hcl title="packages/common/terraform/src/app/harnesses/my-harness/my-harness.tf"
+resource "aws_bedrockagentcore_harness" "this" {
+  # ...
+  allowed_tools = ["@builtin"]
+}
+```
+
+모듈을 참조하는 곳에서 모듈 인수로 설정하려면 모듈에 `allowed_tools` 변수를 추가하세요.
+  </Fragment>
+</Infrastructure>
+
+`@builtin`을 `@builtin/file_operations`와 같은 특정 패턴으로 좁혀 에이전트 루프가 수행할 수 있는 작업을 제한하세요. 추가할 수 있는 내장 도구는 [Harness tools](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-tools.html)를 참조하세요.
+
+### 호출별 재정의
+
+인프라에서 구성된 값은 배포 기본값입니다. 서비스는 `InvokeHarness` 요청에서 지원되는 Harness 필드(예: 모델, 도구 및 스킬)에 대한 호출별 재정의도 허용합니다. 배포 기본값은 필드가 재정의되지 않은 곳에 적용됩니다.
+
+:::caution[호출 재정의 검증]
+호출별 재정의는 서비스 경계에서 신뢰할 수 있는 입력입니다: 권한이 부여된 모든 호출자는 지원되는 필드를 재정의할 수 있습니다. 신뢰할 수 없는 사용자가 `InvokeHarness`에 재정의를 전달하는 애플리케이션에 도달할 수 있는 경우, 애플리케이션 계층에서 검증하고 권한을 부여하고(예: 모델 및 도구 허용 목록), 실행 역할을 필요한 리소스로 범위를 지정하며, 특별히 필요하지 않은 한 `bedrock-agentcore:InvokeAgentRuntimeCommand`를 부여하지 마세요.
+:::
