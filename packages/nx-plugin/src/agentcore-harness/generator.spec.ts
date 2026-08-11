@@ -4,6 +4,10 @@
  */
 import { readJson, readProjectConfiguration, type Tree } from '@nx/devkit';
 import yaml from 'js-yaml';
+import {
+  ensureAwsNxPluginConfig,
+  updateAwsNxPluginConfig,
+} from '../utils/config/utils';
 import { expectHasMetricTags } from '../utils/metrics.spec';
 import { createTreeUsingTsSolutionSetup, snapshotTreeDir } from '../utils/test';
 import { TS_VERSIONS } from '../utils/versions';
@@ -184,6 +188,33 @@ describe('agentcore-harness generator', () => {
         });
       },
     );
+
+    // The generator reads `options.iac` straight through to resolveIac, so
+    // these defaults are what make a CLI run that passes neither flag vend
+    // infrastructure for the workspace's configured provider.
+    it('defaults infra to agentcore and iac to inherit', () => {
+      expect(harnessSchema.properties.infra.default).toBe('agentcore');
+      expect(harnessSchema.properties.iac.default).toBe('inherit');
+    });
+
+    // The `inherit` path itself, which the schema default selects.
+    it('vends infrastructure for the inherited provider', async () => {
+      await ensureAwsNxPluginConfig(tree);
+      await updateAwsNxPluginConfig(tree, { iac: { provider: 'cdk' } });
+
+      await agentcoreHarnessGenerator(tree, {
+        name: 'my-harness',
+        iac: 'inherit',
+      });
+
+      expect(tree.exists(CDK_CONSTRUCT_PATH)).toBe(true);
+      expect(tree.read(CDK_HARNESSES_INDEX_PATH, 'utf-8')).toContain(
+        "export * from './my-harness/my-harness.js';",
+      );
+      expect(
+        (readProjectConfiguration(tree, PROJECT_NAME).metadata as any).iac,
+      ).toBe('cdk');
+    });
 
     it('adds the generator metric tag', async () => {
       await agentcoreHarnessGenerator(tree, {
