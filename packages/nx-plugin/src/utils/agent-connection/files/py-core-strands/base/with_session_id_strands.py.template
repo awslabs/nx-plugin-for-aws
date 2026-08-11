@@ -1,4 +1,4 @@
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from contextlib import AbstractContextManager, ExitStack, contextmanager
 from typing import Any
 
@@ -11,7 +11,7 @@ def with_session_id(
     *,
     name: str,
     description: str,
-) -> Iterator[Any]:
+) -> Generator[Any]:
     """Wrap an agent factory so each session gets its own cached Agent."""
     stack = ExitStack()
     agents: dict[str, Any] = {}
