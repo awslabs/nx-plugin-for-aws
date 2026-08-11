@@ -1,6 +1,6 @@
 ---
-title: Agent TypeScript Strands vers Base de Données Relationnelle
-description: Connecter un Agent TypeScript Strands à une Base de Données Relationnelle
+title: Agent TypeScript vers Base de Données Relationnelle
+description: Connecter un Agent TypeScript à une Base de Données Relationnelle
 when:
   sourceType: ts#agent
   targetType: ts#rdb
@@ -13,7 +13,7 @@ import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
 
-Le générateur `connection` connecte un <Link path="guides/ts-agent">Agent TypeScript Strands</Link> à un projet de <Link path="guides/ts-rdb">Base de Données Relationnelle</Link>, rendant un client Prisma disponible à l'intérieur de votre factory d'agent.
+Le générateur `connection` relie un <Link path="guides/ts-agent">Agent TypeScript</Link> à un projet de <Link path="guides/ts-rdb">Base de Données Relationnelle</Link>, rendant un client Prisma disponible à l'intérieur de votre factory d'agent.
 
 ## Prérequis
 
@@ -48,12 +48,12 @@ Le générateur modifie deux fichiers dans le répertoire source de votre agent 
 
 De plus, la cible `<agent-name>-dev` de l'agent est mise à jour pour dépendre de la cible `dev` de la base de données.
 
-## Utilisation de la Base de Données dans les Outils de l'Agent
+## Utiliser la Base de Données dans les Outils de l'Agent
 
-Le client Prisma est instancié à l'intérieur de `getAgent()`. Étant donné que le générateur `ts#agent` configure un seul Agent par session, le client est également réutilisé pour la durée de vie de la session :
+Le client Prisma est instancié à l'intérieur de `getAgent()`. Étant donné que le générateur `ts#agent` configure un seul Agent par session, le client est également réutilisé pendant toute la durée de vie de la session :
 
 ```ts title="packages/my-service/src/my-agent/agent.ts" {1,4}
-import { getPrisma as getMyDb } from ':my-scope/my-db';
+import { getPrisma as getMyDb } from '@my-scope/my-db';
 
 export const getAgent = async () => {
   const myDb = await getMyDb();
@@ -64,11 +64,11 @@ export const getAgent = async () => {
 
 ## Bases de Données Multiples
 
-Exécuter le générateur à nouveau avec une cible différente ajoute la deuxième base de données à côté de la première :
+Exécuter à nouveau le générateur avec une cible différente ajoute la deuxième base de données à côté de la première :
 
 ```ts title="packages/my-service/src/my-agent/agent.ts" {1,2,5,6}
-import { getPrisma as getMyDb } from ':my-scope/my-db';
-import { getPrisma as getOtherDb } from ':my-scope/other-db';
+import { getPrisma as getMyDb } from '@my-scope/my-db';
+import { getPrisma as getOtherDb } from '@my-scope/other-db';
 
 export const getAgent = async () => {
   const myDb = await getMyDb();
@@ -86,8 +86,9 @@ Le construct d'agent généré implémente `IGrantable` et `IConnectable`, vous 
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
+import { SecurityGroup } from 'aws-cdk-lib/aws-ec2';
 import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
-import { MyDatabase } from ':my-scope/common-constructs';
+import { MyDatabase } from '@my-scope/common-constructs';
 
 const db = new MyDatabase(this, 'Db', { vpc, ... });
 
@@ -95,6 +96,9 @@ const myAgent = new MyAgent(this, 'MyAgent', {
   networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
     vpc,
     vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    securityGroups: [
+      new SecurityGroup(this, 'MyAgentSecurityGroup', { vpc, allowAllOutbound: true }),
+    ],
   }),
 });
 
@@ -103,6 +107,7 @@ db.grantConnect(myAgent);
 ```
 
 `allowDefaultPortFrom` ouvre la règle du groupe de sécurité afin que le runtime de l'agent puisse atteindre le port de la base de données. `grantConnect` accorde la permission IAM `rds-db:connect` au rôle d'exécution de l'agent.
+
 
 </Fragment>
 <Fragment slot="terraform">
@@ -156,7 +161,7 @@ resource "aws_vpc_security_group_egress_rule" "agent_to_database" {
 }
 ```
 
-`appconfig_application_id`/`appconfig_application_arn` proviennent de l'application <Link path="guides/runtime-config">configuration d'exécution</Link> AppConfig partagée déclarée une fois dans votre module racine, et non du module de base de données. Incluez le namespace `database` lors de son instanciation afin que l'entrée de configuration d'exécution du module de base de données soit déployée :
+`appconfig_application_id`/`appconfig_application_arn` proviennent de l'application AppConfig de <Link path="guides/runtime-config">configuration d'exécution</Link> partagée déclarée une fois dans votre module racine, et non du module de base de données. Incluez l'espace de noms `database` lors de son instanciation afin que l'entrée de configuration d'exécution du module de base de données soit déployée :
 
 ```hcl title="packages/infra/src/main.tf"
 module "runtime_config_appconfig" {
@@ -172,7 +177,7 @@ module "runtime_config_appconfig" {
 
 ### Exigences SSL lors de la Connexion sans RDS Proxy
 
-<Snippet name="connection/strands-agent-rdb-ssl-requirements" parentHeading="SSL Requirements When Connecting Without RDS Proxy" />
+<Snippet name="connection/strands-agent-rdb-ssl-requirements" parentHeading="Exigences SSL lors de la Connexion sans RDS Proxy" />
 
 ## Développement Local
 

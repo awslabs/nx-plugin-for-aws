@@ -1,6 +1,6 @@
 ---
-title: "Agente Python a Agente A2A"
-description: "Conecta un Agente Python a un agente A2A remoto"
+title: Agente Python a Agente A2A
+description: Conectar un Agente Python a un agente A2A remoto
 when:
   sourceType: py#agent
   targetType:
@@ -14,21 +14,21 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Snippet from '@components/snippet.astro';
 
-El generador `connection` puede conectar tu <Link path="guides/py-agent">Python Agent</Link> a un agente [A2A](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) remoto — ya sea <Link path="guides/ts-agent">TypeScript</Link> o <Link path="guides/py-agent">Python</Link> — para que tu agente pueda delegar a otro agente como una herramienta.
+El generador `connection` puede conectar tu <Link path="guides/py-agent">Agente Python</Link> a un agente [A2A](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) remoto — ya sea <Link path="guides/ts-agent">TypeScript</Link> o <Link path="guides/py-agent">Python</Link> — para que tu agente pueda delegar a otro agente como una herramienta.
 
-El generador configura todo el cableado necesario para que tu agente pueda descubrir e invocar al agente A2A remoto, tanto cuando se despliega en AWS (a través de Bedrock AgentCore) como cuando se ejecuta localmente.
+El generador configura todo el cableado necesario para que tu agente pueda descubrir e invocar el agente A2A remoto, tanto cuando se despliega en AWS (a través de Bedrock AgentCore) como cuando se ejecuta localmente.
 
 ## Requisitos previos
 
 Antes de usar este generador, asegúrate de tener:
 
-1. Un proyecto Python con un componente <Link path="guides/py-agent">Python Agent</Link> (Strands o LangChain)
+1. Un proyecto Python con un componente <Link path="guides/py-agent">Agente Python</Link> (Strands o LangChain)
 2. Un proyecto con un componente Agent generado con `--protocol=a2a` y `--auth=iam` (ya sea <Link path="guides/ts-agent">`ts#agent`</Link> o <Link path="guides/py-agent">`py#agent`</Link>)
 3. Ambos componentes creados con `infra: agentcore`
 
 ## Uso
 
-### Ejecutar el generador
+### Ejecutar el Generador
 
 <RunGenerator generator="connection" />
 
@@ -38,9 +38,9 @@ Selecciona tu proyecto de agente anfitrión como origen y tu proyecto de agente 
 
 <GeneratorParameters generator="connection" />
 
-## Salida del generador
+## Salida del Generador
 
-El generador crea un proyecto Python compartido `agent_connection` en `packages/common/agent_connection/` (si aún no existe). Los módulos de cliente por conexión se generan en este proyecto compartido:
+El generador crea un proyecto Python compartido `agent_connection` en `packages/common/agent_connection/` (si no existe ya). Los módulos de cliente por conexión se generan en este proyecto compartido:
 
 <FileTree>
 
@@ -51,20 +51,20 @@ El generador crea un proyecto Python compartido `agent_connection` en `packages/
       - agentcore\_endpoints.py Resolución de ARN/URL independiente del framework
       - agentcore\_a2a\_client\_config.py Configuración de cliente A2A independiente del framework (`ClientConfig` firmado)
       - agentcore\_a2a\_client\_\<framework>.py Cliente A2A que envuelve la configuración para el framework de tu agente
-      - auth/ `httpx.Auth` independiente del framework para SigV4 / reenvío de sesión
+      - auth/ `httpx.Auth` de SigV4 / reenvío de sesión independiente del framework
     - app
       - \<target\_agent\_name>\_client\_\<framework>.py Cliente A2A por conexión para cada agente A2A
 
 </FileTree>
 
-El sufijo del cliente coincide con el framework de tu agente (`_strands` o `_langchain`). Ambos envuelven el mismo `ClientConfig` firmado independiente del framework: el cliente Strands envuelve un `A2AAgent` de Strands, mientras que el cliente LangChain utiliza el [a2a SDK](https://pypi.org/project/a2a-sdk/) directamente, por lo que un agente LangChain no incluye ninguna dependencia de Strands.
+El sufijo del cliente coincide con el framework de tu agente (`_strands` o `_langchain`). Ambos envuelven el mismo `ClientConfig` firmado independiente del framework: el cliente Strands envuelve un `A2AAgent` de Strands, mientras que el cliente LangChain maneja el [a2a SDK](https://pypi.org/project/a2a-sdk/) directamente.
 
 Además, el generador:
 - Transforma el `agent.py` de tu agente para registrar el agente A2A remoto como una herramienta usando `@tool`
-- Agrega el proyecto `agent_connection` como una dependencia de espacio de trabajo de tu proyecto de agente
-- Actualiza el objetivo `serve-local` del agente para que dependa del objetivo `serve-local` del agente de destino
+- Agrega el proyecto `agent_connection` como una dependencia de workspace de tu proyecto de agente
+- Actualiza el target `dev` del agente para depender del target `dev` del agente destino
 
-## Usar el agente A2A conectado
+## Usar el Agente A2A Conectado
 
 El generador transforma el `agent.py` de tu agente para envolver el agente A2A remoto como una herramienta. El agente remoto se registra con un delegado decorado con `@tool` — la importación del decorador y el constructor del agente difieren según el framework:
 
@@ -116,18 +116,18 @@ def get_agent():
 </TabItem>
 </Tabs>
 
-Ambos clientes son directamente invocables, devolviendo la respuesta del agente remoto, y envuelven un `httpx.AsyncClient` que firma solicitudes con SigV4 cuando se despliega en AWS y utiliza un endpoint simple `http://localhost:<port>/` cuando `SERVE_LOCAL=true`. El cliente Strands envuelve un `A2AAgent` de Strands; el cliente LangChain utiliza el a2a SDK directamente.
+Ambos clientes son directamente invocables, devolviendo la respuesta del agente remoto, y envuelven un `httpx.AsyncClient` que firma solicitudes con SigV4 cuando se despliega en AWS y usa un endpoint simple `http://localhost:<port>/` cuando `LOCAL_DEV=true`. El cliente Strands envuelve un `A2AAgent` de Strands; el cliente LangChain maneja el a2a SDK directamente.
 
-El ID de sesión de AgentCore se propaga automáticamente al agente remoto a través del encabezado `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`, independientemente del framework: el servidor del agente vincula la sesión de la solicitud entrante en un contexto asíncrono, y el `httpx.Auth` firmado del cliente de conexión lo estampa en cada llamada saliente — asegurando consistencia para [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
+El ID de sesión de AgentCore se propaga al agente remoto automáticamente a través del encabezado `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`, independientemente del framework: el servidor del agente vincula la sesión de la solicitud entrante en un contexto asíncrono, y el `httpx.Auth` firmado del cliente de conexión lo estampa en cada llamada saliente — asegurando consistencia para [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
 
 ## Infraestructura
 
-<Snippet name="connection/a2a-infrastructure" parentHeading="Infrastructure" />
+<Snippet name="connection/a2a-infrastructure" parentHeading="Infraestructura" />
 
-## Desarrollo local
+## Desarrollo Local
 
-El generador configura el objetivo `dev` del agente anfitrión para:
-1. Iniciar los agentes A2A conectados automáticamente
+El generador configura el target `dev` del agente anfitrión para:
+1. Iniciar el/los agente(s) A2A conectado(s) automáticamente
 2. Establecer `LOCAL_DEV=true` para que el cliente generado se conecte directamente a `http://localhost:<port>/` en lugar de AgentCore
 
 Ejecuta el agente localmente con:
@@ -135,4 +135,3 @@ Ejecuta el agente localmente con:
 <NxCommands commands={["<agent-name>-dev <project-name>"]} />
 
 Esto iniciará tanto el agente anfitrión como todos los agentes A2A conectados, con el agente anfitrión llamando a los agentes remotos a través de HTTP simple en sus puertos locales asignados.
-gnados.

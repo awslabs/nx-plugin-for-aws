@@ -1,0 +1,96 @@
+async function getFilesToTranslate(): Promise<FileToTranslate[]> {
+  const sourceLangRoot = `${DOCS_DIR}/${config.sourceLanguage}`;
+  const includePatterns = config.include.map((p) => `${sourceLangRoot}/${p}`);
+  const ignorePatterns = config.exclude.map((p) => `${sourceLangRoot}/${p}`);
+
+  if (options.all) {
+    log.info('Translating all source documentation files');
+    const files = await glob(includePatterns, { ignore: ignorePatterns });
+    return files.map((file) => ({
+      relativePath: path.relative(sourceLangRoot, file),
+      sourceAbsPath: file,
+    }));
+  }
+
+  const git = simpleGit();
+  // git reports paths relative to the repo root, which is not necessarily the
+  // directory this script runs from.
+  const repoRoot = (await git.revparse(['--show-toplevel'])).trim();
+
+  let currentBranch: string;
+  let mainBranch: string;
+  if (process.env.GITHUB_HEAD_REF) {
+    currentBranch = `origin/${process.env.GITHUB_HEAD_REF}`;
+    mainBranch = 'origin/main';
+  } else {
+    currentBranch = (await git.branch()).current;
+    mainBranch = 'main';
+  }
+
+  try {
+    await git.raw(['rev-parse', '--verify', mainBranch]);
+  } catch {
+    log.warn(`Could not find "${mainBranch}"; falling back to --all behaviour`);
+    options.all = true;
+    return getFilesToTranslate();
+  }
+
+  const mergeBase = (
+    await git.raw(['merge-base', mainBranch, currentBranch])
+  ).trim();
+
+  const translationCommits = (
+    await git.log({ from: mergeBase, to: 'HEAD' })
+  ).all.filter((c) => c.message.includes(TRANSLATION_COMMIT_MESSAGE));
+
+  const baseCommit =
+    translationCommits.length > 0 ? translationCommits[0].hash : mergeBase;
+
+  log.info(
+    translationCommits.length > 0
+      ? `Detecting changed files since last translation commit ${baseCommit.substring(0, 7)}`
+      : `Detecting changed files since branch creation ${baseCommit.substring(0, 7)}`,
+  );
+
+  const diffNames = (
+    await git.diff([`${baseCommit}..HEAD`, '--name-only', '--diff-filter=d'])
+  )
+    .split('\n')
+    .filter(Boolean);
+
+  const { files: uncommitted } = await git.status();
+  const uncommittedNames = uncommitted.map((f) => f.path);
+
+  const allCandidates = [...new Set([...diffNames, ...uncommittedNames])].map(
+    (p) => path.resolve(repoRoot, p),
+  );
+
+  // Filter to files inside the source language dir that match include/exclude
+  const includedGlob = await glob(includePatterns, {
+    ignore: ignorePatterns,
+  });
+  const includedSet = new Set(includedGlob.map((p) => path.resolve(p)));
+
+  const changed = allCandidates.filter((abs) => includedSet.has(abs));
+
+  if (changed.length === 0) {
+    log.warn('No changed source documentation files detected');
+    return [];
+  }
+
+  return Promise.all(
+    changed.map(async (file) => {
+      const relativePath = path.relative(sourceLangRoot, file);
+      const diff = await git.diff([
+        `${baseCommit}..HEAD`,
+        '--',
+        path.relative(repoRoot, file),
+      ]);
+      return {
+        relativePath,
+        sourceAbsPath: file,
+        diffPath: diff ? await writeDiff(relativePath, diff) : undefined,
+      };
+    }),
+  );
+}

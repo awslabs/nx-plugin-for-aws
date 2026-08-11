@@ -12,7 +12,7 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
 
-Il generatore `connection` collega una <Link path="guides/fastapi">FastAPI</Link> a un progetto <Link path="guides/py-rdb">Python Relational Database</Link>, iniettando una sessione SQLModel tipizzata nei tuoi gestori di route tramite una dipendenza FastAPI.
+Il generatore `connection` collega un progetto <Link path="guides/fastapi">FastAPI</Link> a un progetto <Link path="guides/py-rdb">Python Relational Database</Link>, iniettando una sessione SQLModel tipizzata nei tuoi gestori di route tramite una dipendenza FastAPI.
 
 ## Prerequisiti
 
@@ -40,7 +40,7 @@ Il generatore modifica il tuo progetto FastAPI:
 <FileTree>
 
 - packages/my_api
-  - project.json Aggiunge una dipendenza da `dev` al target `dev` del database
+  - project.json Aggiunge una dipendenza da `dev` sul target `dev` del database
   - pyproject.toml Aggiunge il pacchetto del database come dipendenza del workspace
   - my_api
     - dependencies
@@ -50,7 +50,7 @@ Il generatore modifica il tuo progetto FastAPI:
 
 ## Utilizzo del Database nei Gestori di Route
 
-Questo generatore configura una [Dipendenza FastAPI](https://fastapi.tiangolo.com/tutorial/dependencies/) iniettabile che puoi utilizzare nei tuoi gestori di route:
+Questo generatore configura una [FastAPI Dependency](https://fastapi.tiangolo.com/tutorial/dependencies/) iniettabile che puoi utilizzare nei tuoi gestori di route:
 
 ```python title="packages/my_api/my_api/api.py" {2,6,10}
 from sqlmodel import select
@@ -110,21 +110,26 @@ Questo esempio concede l'accesso a ogni gestore nella tua API, ma se solo alcuni
 </Fragment>
 <Fragment slot="terraform">
 
-Distribuisci l'API nello stesso VPC del database, concedi il permesso `rds-db:connect` tramite `additional_iam_policy_statements` e apri il percorso di rete con una coppia di regole del security group:
+Distribuisci l'API nello stesso VPC del database, concedigli `rds-db:connect` tramite `additional_iam_policy_statements` e apri il percorso di rete con una coppia di regole di security group:
+
+L'esempio seguente fa riferimento alle risorse VPC dalla guida di distribuzione <Link path="guides/py-rdb">Python Relational Database</Link>: le subnet `aws_subnet.database` non hanno route internet, mentre le subnet `aws_subnet.private` hanno egress NAT.
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
   source              = "../../common/terraform/src/app/dbs/my-database"
-  vpc_id              = module.vpc.vpc_id
-  database_subnet_ids = module.vpc.private_isolated_subnet_ids
-  lambda_subnet_ids   = module.vpc.private_subnet_ids
+  vpc_id              = aws_vpc.main.id
+  database_subnet_ids = aws_subnet.database[*].id
+  lambda_subnet_ids   = aws_subnet.private[*].id
 }
 
 module "api" {
-  source     = "..."
+  source     = "../../common/terraform/src/app/apis/my-api"
   enable_vpc = true
-  vpc_id     = module.vpc.vpc_id
-  subnet_ids = module.vpc.private_subnet_ids
+  vpc_id     = aws_vpc.main.id
+  subnet_ids = aws_subnet.private[*].id
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
 
   additional_iam_policy_statements = [
     {
@@ -135,13 +140,10 @@ module "api" {
       ]
     }
   ]
-
-  env = {
-    RUNTIME_CONFIG_APP_ID = module.runtime_config_appconfig.application_id
-  }
 }
 
 resource "aws_vpc_security_group_ingress_rule" "api_to_database" {
+  description                  = "Allow the API Lambda functions to connect to the database"
   security_group_id            = module.my_database.security_group_id
   referenced_security_group_id = module.api.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -150,6 +152,7 @@ resource "aws_vpc_security_group_ingress_rule" "api_to_database" {
 }
 
 resource "aws_vpc_security_group_egress_rule" "api_to_database" {
+  description                  = "Allow outbound traffic from the API Lambda functions to the database"
   security_group_id            = module.api.security_group_id
   referenced_security_group_id = module.my_database.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -158,7 +161,18 @@ resource "aws_vpc_security_group_egress_rule" "api_to_database" {
 }
 ```
 
-Distribuisci le funzioni Lambda dell'API in **subnet private con egress**, non in subnet private isolate. `RUNTIME_CONFIG_APP_ID` dovrebbe puntare all'applicazione AppConfig di <Link path="guides/runtime-config">configurazione runtime</Link> condivisa, non a un output del modulo database.
+Distribuisci le funzioni Lambda dell'API in **subnet private con egress**, non in subnet private isolate. `appconfig_application_id`/`appconfig_application_arn` provengono dall'applicazione AppConfig di <Link path="guides/runtime-config">configurazione runtime</Link> condivisa dichiarata una volta nel tuo modulo root, non dal modulo del database — passarli imposta `RUNTIME_CONFIG_APP_ID` sulle funzioni Lambda e concede loro l'accesso in lettura all'applicazione.
+
+L'applicazione AppConfig deve esporre il namespace `database` in modo che la voce di configurazione runtime del modulo del database venga distribuita. Includilo nei `namespaces` quando istanzi il modulo `runtime-config/appconfig`:
+
+```hcl title="packages/infra/src/main.tf"
+module "runtime_config_appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+  application_name = "my-app-runtime-config"
+  namespaces       = ["connection", "agentcore", "database"]
+}
+```
 
 </Fragment>
 </Infrastructure>

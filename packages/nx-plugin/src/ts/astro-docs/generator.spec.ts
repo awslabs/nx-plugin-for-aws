@@ -153,6 +153,21 @@ describe('ts#astro-docs generator', () => {
     verifier.expectTypeScriptToCompile(tree, ['docs/scripts/translate.ts']);
   });
 
+  it('should vend a translate script that writes whole files rather than editing in place', async () => {
+    await tsAstroDocsGenerator(tree, {
+      name: 'docs',
+      preferInstallDependencies: false,
+    });
+
+    // A partial str_replace against a translated file silently duplicates or
+    // splices sections, so the agent is told to write whole files instead.
+    // Backticks are escaped in the script's template literal.
+    const translateScript = tree.read('docs/scripts/translate.ts', 'utf-8');
+    expect(translateScript).toContain(
+      'Write the finished file in one \\`create\\` call, and never with \\`str_replace\\`',
+    );
+  });
+
   it('should use the project name as the site title', async () => {
     await tsAstroDocsGenerator(tree, {
       name: 'my-cool-docs',

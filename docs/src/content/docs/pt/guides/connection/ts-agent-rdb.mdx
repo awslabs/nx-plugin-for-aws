@@ -1,6 +1,6 @@
 ---
 title: TypeScript Agent para Banco de Dados Relacional
-description: Conectar um TypeScript Agent a um Banco de Dados Relacional
+description: Conecte um TypeScript Agent a um Banco de Dados Relacional
 when:
   sourceType: ts#agent
   targetType: ts#rdb
@@ -13,7 +13,7 @@ import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
 
-O gerador `connection` conecta um <Link path="guides/ts-agent">TypeScript Agent</Link> a um projeto de <Link path="guides/ts-rdb">Banco de Dados Relacional</Link>, disponibilizando um cliente Prisma dentro da sua fábrica de agente.
+O gerador `connection` conecta um <Link path="guides/ts-agent">TypeScript Agent</Link> a um projeto de <Link path="guides/ts-rdb">Banco de Dados Relacional</Link>, disponibilizando um cliente Prisma dentro da sua factory de agente.
 
 ## Pré-requisitos
 
@@ -24,7 +24,7 @@ Antes de usar este gerador, certifique-se de ter:
 
 ## Uso
 
-### Executar o Gerador
+### Execute o Gerador
 
 <RunGenerator generator="connection" />
 
@@ -41,19 +41,19 @@ O gerador modifica dois arquivos no diretório de origem do seu agente:
 <FileTree>
 
 - packages/my-service/src/my-agent
-  - agent.ts Cliente Prisma buscado dentro de `getAgent` e disponível para ferramentas
-  - Dockerfile Pacote CA do RDS instalado para conexões SSL ao Aurora
+  - agent.ts Cliente Prisma obtido dentro de `getAgent` e disponível para ferramentas
+  - Dockerfile Pacote CA do RDS instalado para conexões SSL com Aurora
 
 </FileTree>
 
-Além disso, o alvo `<agent-name>-dev` do agente é atualizado para depender do alvo `dev` do banco de dados.
+Além disso, o target `<agent-name>-dev` do agente é atualizado para depender do target `dev` do banco de dados.
 
 ## Usando o Banco de Dados nas Ferramentas do Agente
 
-O cliente Prisma é instanciado dentro de `getAgent()`. Como o gerador `ts#agent` configura um único Agent por sessão, o cliente também é reutilizado durante o tempo de vida da sessão:
+O cliente Prisma é instanciado dentro de `getAgent()`. Como o gerador `ts#agent` configura um único Agent por sessão, o cliente também é reutilizado durante toda a vida útil da sessão:
 
 ```ts title="packages/my-service/src/my-agent/agent.ts" {1,4}
-import { getPrisma as getMyDb } from ':my-scope/my-db';
+import { getPrisma as getMyDb } from '@my-scope/my-db';
 
 export const getAgent = async () => {
   const myDb = await getMyDb();
@@ -61,13 +61,14 @@ export const getAgent = async () => {
   return new Agent({ /* use myDb in tools */ });
 };
 ```
+
 ## Múltiplos Bancos de Dados
 
 Executar o gerador novamente com um destino diferente adiciona o segundo banco de dados junto com o primeiro:
 
 ```ts title="packages/my-service/src/my-agent/agent.ts" {1,2,5,6}
-import { getPrisma as getMyDb } from ':my-scope/my-db';
-import { getPrisma as getOtherDb } from ':my-scope/other-db';
+import { getPrisma as getMyDb } from '@my-scope/my-db';
+import { getPrisma as getOtherDb } from '@my-scope/other-db';
 
 export const getAgent = async () => {
   const myDb = await getMyDb();
@@ -85,8 +86,9 @@ O construto de agente gerado implementa `IGrantable` e `IConnectable`, então vo
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
+import { SecurityGroup } from 'aws-cdk-lib/aws-ec2';
 import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
-import { MyDatabase } from ':my-scope/common-constructs';
+import { MyDatabase } from '@my-scope/common-constructs';
 
 const db = new MyDatabase(this, 'Db', { vpc, ... });
 
@@ -94,6 +96,9 @@ const myAgent = new MyAgent(this, 'MyAgent', {
   networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
     vpc,
     vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    securityGroups: [
+      new SecurityGroup(this, 'MyAgentSecurityGroup', { vpc, allowAllOutbound: true }),
+    ],
   }),
 });
 
@@ -101,7 +106,8 @@ db.allowDefaultPortFrom(myAgent);
 db.grantConnect(myAgent);
 ```
 
-`allowDefaultPortFrom` abre a regra do grupo de segurança para que o runtime do agente possa alcançar a porta do banco de dados. `grantConnect` concede permissão IAM `rds-db:connect` à função de execução do agente.
+`allowDefaultPortFrom` abre a regra do grupo de segurança para que o runtime do agente possa alcançar a porta do banco de dados. `grantConnect` concede permissão IAM `rds-db:connect` ao papel de execução do agente.
+
 
 </Fragment>
 <Fragment slot="terraform">
@@ -119,8 +125,8 @@ module "my_database" {
 module "my_agent" {
   source     = "../../common/terraform/src/app/agents/my-agent"
   enable_vpc = true
-  vpc_id     = module.vpc.vpc_id
-  subnet_ids = module.vpc.private_subnet_ids
+  vpc_id     = aws_vpc.main.id
+  subnet_ids = aws_subnet.private[*].id
 
   appconfig_application_id  = module.runtime_config_appconfig.application_id
   appconfig_application_arn = module.runtime_config_appconfig.application_arn
@@ -155,7 +161,7 @@ resource "aws_vpc_security_group_egress_rule" "agent_to_database" {
 }
 ```
 
-`appconfig_application_id`/`appconfig_application_arn` vêm da aplicação AppConfig de <Link path="guides/runtime-config">configuração de runtime</Link> compartilhada declarada uma vez no seu módulo raiz, não do módulo do banco de dados. Inclua o namespace `database` ao instanciá-la para que a entrada de configuração de runtime do módulo do banco de dados seja implantada:
+`appconfig_application_id`/`appconfig_application_arn` vêm da <Link path="guides/runtime-config">configuração de runtime</Link> compartilhada da aplicação AppConfig declarada uma vez no seu módulo raiz, não do módulo do banco de dados. Inclua o namespace `database` ao instanciá-lo para que a entrada de configuração de runtime do módulo do banco de dados seja implantada:
 
 ```hcl title="packages/infra/src/main.tf"
 module "runtime_config_appconfig" {
@@ -169,9 +175,9 @@ module "runtime_config_appconfig" {
 </Fragment>
 </Infrastructure>
 
-### Requisitos SSL ao Conectar Sem RDS Proxy
+### Requisitos de SSL ao Conectar Sem RDS Proxy
 
-<Snippet name="connection/strands-agent-rdb-ssl-requirements" parentHeading="SSL Requirements When Connecting Without RDS Proxy" />
+<Snippet name="connection/strands-agent-rdb-ssl-requirements" parentHeading="Requisitos de SSL ao Conectar Sem RDS Proxy" />
 
 ## Desenvolvimento Local
 

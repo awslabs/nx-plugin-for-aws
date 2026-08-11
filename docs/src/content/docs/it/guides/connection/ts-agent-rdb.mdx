@@ -13,7 +13,7 @@ import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
 
-Il generatore `connection` collega un <Link path="guides/ts-agent">TypeScript Agent</Link> a un progetto <Link path="guides/ts-rdb">Relational Database</Link>, rendendo disponibile un client Prisma all'interno della tua agent factory.
+Il generatore `connection` collega un progetto <Link path="guides/ts-agent">TypeScript Agent</Link> a un progetto <Link path="guides/ts-rdb">Relational Database</Link>, rendendo disponibile un client Prisma all'interno della tua factory di agent.
 
 ## Prerequisiti
 
@@ -24,7 +24,7 @@ Prima di utilizzare questo generatore, assicurati di avere:
 
 ## Utilizzo
 
-### Eseguire il Generatore
+### Esegui il Generatore
 
 <RunGenerator generator="connection" />
 
@@ -41,19 +41,19 @@ Il generatore modifica due file nella directory sorgente del tuo agent:
 <FileTree>
 
 - packages/my-service/src/my-agent
-  - agent.ts Client Prisma recuperato all'interno di `getAgent` e disponibile per i tools
-  - Dockerfile Bundle CA RDS installato per connessioni SSL ad Aurora
+  - agent.ts Prisma client recuperato all'interno di `getAgent` e disponibile per i tool
+  - Dockerfile RDS CA bundle installato per connessioni SSL ad Aurora
 
 </FileTree>
 
 Inoltre, il target `<agent-name>-dev` dell'agent viene aggiornato per dipendere dal target `dev` del database.
 
-## Utilizzo del Database negli Strumenti dell'Agent
+## Utilizzo del Database nei Tool dell'Agent
 
-Il client Prisma viene istanziato all'interno di `getAgent()`. Poiché il generatore `ts#agent` configura un singolo Agent per sessione, il client viene anche riutilizzato per la durata della sessione:
+Il client Prisma viene istanziato all'interno di `getAgent()`. Poiché il generatore `ts#agent` configura un singolo Agent per sessione, il client viene anche riutilizzato per tutta la durata della sessione:
 
 ```ts title="packages/my-service/src/my-agent/agent.ts" {1,4}
-import { getPrisma as getMyDb } from ':my-scope/my-db';
+import { getPrisma as getMyDb } from '@my-scope/my-db';
 
 export const getAgent = async () => {
   const myDb = await getMyDb();
@@ -67,8 +67,8 @@ export const getAgent = async () => {
 Eseguire nuovamente il generatore con una destinazione diversa aggiunge il secondo database accanto al primo:
 
 ```ts title="packages/my-service/src/my-agent/agent.ts" {1,2,5,6}
-import { getPrisma as getMyDb } from ':my-scope/my-db';
-import { getPrisma as getOtherDb } from ':my-scope/other-db';
+import { getPrisma as getMyDb } from '@my-scope/my-db';
+import { getPrisma as getOtherDb } from '@my-scope/other-db';
 
 export const getAgent = async () => {
   const myDb = await getMyDb();
@@ -86,8 +86,9 @@ Il costrutto agent generato implementa `IGrantable` e `IConnectable`, quindi puo
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
+import { SecurityGroup } from 'aws-cdk-lib/aws-ec2';
 import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
-import { MyDatabase } from ':my-scope/common-constructs';
+import { MyDatabase } from '@my-scope/common-constructs';
 
 const db = new MyDatabase(this, 'Db', { vpc, ... });
 
@@ -95,6 +96,9 @@ const myAgent = new MyAgent(this, 'MyAgent', {
   networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
     vpc,
     vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    securityGroups: [
+      new SecurityGroup(this, 'MyAgentSecurityGroup', { vpc, allowAllOutbound: true }),
+    ],
   }),
 });
 
@@ -104,10 +108,11 @@ db.grantConnect(myAgent);
 
 `allowDefaultPortFrom` apre la regola del security group in modo che il runtime dell'agent possa raggiungere la porta del database. `grantConnect` concede il permesso IAM `rds-db:connect` al ruolo di esecuzione dell'agent.
 
+
 </Fragment>
 <Fragment slot="terraform">
 
-Esegui l'agent all'interno dello stesso VPC del database, concedigli `rds-db:connect` tramite `additional_iam_policy_statements` e apri il percorso di rete con una coppia di regole del security group. Le risorse `aws_vpc.main` e `aws_subnet` sono definite nella guida di deployment del database:
+Esegui l'agent all'interno dello stesso VPC del database, concedigli `rds-db:connect` tramite `additional_iam_policy_statements` e apri il percorso di rete con una coppia di regole di security group. Le risorse `aws_vpc.main` e `aws_subnet` sono definite nella guida di deployment del database:
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
@@ -156,7 +161,7 @@ resource "aws_vpc_security_group_egress_rule" "agent_to_database" {
 }
 ```
 
-`appconfig_application_id`/`appconfig_application_arn` provengono dall'applicazione <Link path="guides/runtime-config">runtime configuration</Link> AppConfig condivisa dichiarata una volta nel tuo modulo root, non dal modulo database. Includi il namespace `database` quando la istanzi in modo che la voce di configurazione runtime del modulo database venga distribuita:
+`appconfig_application_id`/`appconfig_application_arn` provengono dall'applicazione AppConfig di <Link path="guides/runtime-config">configurazione runtime</Link> condivisa dichiarata una volta nel tuo modulo root, non dal modulo del database. Includi il namespace `database` quando la istanzi in modo che l'entry di configurazione runtime del modulo del database venga distribuita:
 
 ```hcl title="packages/infra/src/main.tf"
 module "runtime_config_appconfig" {
@@ -172,7 +177,7 @@ module "runtime_config_appconfig" {
 
 ### Requisiti SSL per la Connessione Senza RDS Proxy
 
-<Snippet name="connection/strands-agent-rdb-ssl-requirements" parentHeading="SSL Requirements When Connecting Without RDS Proxy" />
+<Snippet name="connection/strands-agent-rdb-ssl-requirements" parentHeading="Requisiti SSL per la Connessione Senza RDS Proxy" />
 
 ## Sviluppo Locale
 

@@ -1,0 +1,57 @@
+async function runWithConcurrency<T>(
+  tasks: Array<() => Promise<T>>,
+  limit: number,
+): Promise<T[]> {
+  const results: T[] = new Array(tasks.length);
+  let next = 0;
+  async function worker() {
+    while (true) {
+      const i = next++;
+      if (i >= tasks.length) return;
+      results[i] = await tasks[i]();
+    }
+  }
+  const workers = Array.from({ length: Math.min(limit, tasks.length) }, worker);
+  await Promise.all(workers);
+  return results;
+}
+
+/**
+ * Delete translated files whose source document no longer exists. Without this
+ * a source file that is renamed or removed leaves its translations behind in
+ * every locale, where they still resolve as snippets and pages.
+ */
+async function pruneOrphanedTranslations(
+  targetLanguages: string[],
+): Promise<void> {
+  const sourceLangRoot = `${DOCS_DIR}/${config.sourceLanguage}`;
+  const sourceFiles = new Set(
+    (
+      await glob(
+        config.include.map((p) => `${sourceLangRoot}/${p}`),
+        { ignore: config.exclude.map((p) => `${sourceLangRoot}/${p}`) },
+      )
+    ).map((p) => path.relative(sourceLangRoot, p)),
+  );
+
+  for (const lang of targetLanguages) {
+    const langRoot = path.join(DOCS_DIR, lang);
+    if (!fs.existsSync(langRoot)) continue;
+    const translated = await glob(
+      config.include.map((p) => `${langRoot}/${p}`),
+      { ignore: config.exclude.map((p) => `${langRoot}/${p}`) },
+    );
+    for (const abs of translated) {
+      const rel = path.relative(langRoot, abs);
+      if (sourceFiles.has(rel)) continue;
+      if (options.dryRun) {
+        log.info(`[dry-run] would delete orphaned ${lang}/${rel}`);
+      } else {
+        log.info(
+          `Deleting orphaned ${lang}/${rel} (no ${config.sourceLanguage} source)`,
+        );
+        await fs.remove(abs);
+      }
+    }
+  }
+}

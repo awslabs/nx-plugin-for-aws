@@ -1,6 +1,6 @@
 ---
-title: "Game APIとInventory MCPサーバーの実装"
-description: "@aws/nx-pluginを使用したエージェント型AI搭載のダンジョン冒険ゲームの作り方のチュートリアル"
+title: Game API と Inventory MCP サーバーの実装
+description: "@aws/nx-plugin を使用してエージェント AI 駆動のダンジョンアドベンチャーゲームを構築する方法のウォークスルー。"
 ---
 
 import { Aside, Code, FileTree, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
@@ -24,35 +24,35 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 import { getDungeonAdventureElectroDbDependencies } from '../../../../../../../../e2e/src/utils';
 
-## タスク1: ゲームAPIの実装
+## タスク 1: Game API の実装
 
-このセクションでは以下のAPIを実装します:
+このセクションでは、以下の API を実装します：
 
-1. `saveGame` - ゲームの作成または更新
-2. `queryGames` - 保存済みゲームのページネーション付きリストを返す
-3. `queryInventory` - プレイヤーのインベントリ内アイテムのページネーション付きリストを返す
-4. `queryActions` - 指定されたゲームの会話履歴を返す
+1. `saveGame` - ゲームを作成または更新します。
+2. `queryGames` - 以前に保存されたゲームのページネーション付きリストを返します。
+3. `queryInventory` - プレイヤーのインベントリ内のアイテムのページネーション付きリストを返します。
+4. `queryActions` - 指定されたゲームの会話履歴を返します。
 
-:::note[各状態データの保存場所]
-- `games`と`inventory`は**DynamoDB**（ElectroDB経由）に保存 — Game API lambdaとInventory MCPサーバーがこれらを読み書きします。
-- `actions`（チャット記録）は**S3**に保存 — Story Agentの`S3SessionManager`がターンごとに1つのJSONブロブを書き込み、Game APIの`queryActions`がそれを読み取ることで、UIがページリロード時に履歴を再生できます。`saveAction`プロシージャは存在せず、エージェントのみが書き込みを行います。
+:::note[各状態の保存場所]
+- `games` と `inventory` は **DynamoDB**（ElectroDB 経由）にあります — Game API の Lambda と Inventory MCP サーバーがそれらを読み書きします。
+- `actions`（チャットトランスクリプト）は **S3** にあります — Story Agent の `S3SessionManager` がターンごとに 1 つの JSON ブロブを書き込み、Game API の `queryActions` がそれらを読み戻すことで、UI がページリロード時に履歴を再生できます。`saveAction` プロシージャはありません。エージェントが唯一の書き込み者です。
 :::
 
-### APIスキーマ
+### API スキーマ
 
-APIの入力と出力を定義するため、`packages/game-api/src/schema/index.ts`ファイル内で[Zod](https://zod.dev/)を使用してスキーマを作成します:
+API の入力と出力を定義するために、`packages/game-api/src/schema/index.ts` ファイル内で [Zod](https://zod.dev/) を使用してスキーマを作成しましょう：
 
 <E2EDiff lang="typescript" before="dungeon-adventure/2/schema/index.ts.old.template" after="dungeon-adventure/2/schema/index.ts.template" />
 
-このプロジェクトで使用しないため、`packages/game-api/src/schema/echo.ts`ファイルを削除してください。
+このプロジェクトでは使用しないため、`packages/game-api/src/schema/echo.ts` ファイルを削除してください。
 
 <Aside type="tip" title="自動型推論">
-Zodで定義した各スキーマに対して`z.TypeOf`構文を使用してインターフェースをエクスポートしています。これにより、重複作業なしにZod定義をTypeScriptインターフェースに変換できます。
+Zod で定義する各スキーマについて、`z.TypeOf` 構文を使用してインターフェースもエクスポートします。これにより、労力を重複させることなく、Zod の定義を TypeScript インターフェースに変換できます。
 </Aside>
 
 ### エンティティモデリング
 
-これがアプリケーションのER図です。
+これがアプリケーションの ER 図です。
 
 ```d2
 direction: right
@@ -76,27 +76,27 @@ item: Item {
 game -> item: 1..*
 ```
 
-`ts#dynamodb`ジェネレーターは[ElectroDB](https://electrodb.dev/en/core-concepts/introduction/)をセットアップしており、これを使用してデータをモデリングします。会話履歴はS3に保存するため、S3クライアントへの依存関係を追加します:
+`ts#dynamodb` ジェネレーターは [ElectroDB](https://electrodb.dev/en/core-concepts/introduction/) をセットアップしており、これを使用してデータをモデル化します。会話履歴は S3 に保存するため、S3 クライアントへの依存関係を追加します：
 
 <InstallCommand pkg={getDungeonAdventureElectroDbDependencies()} project="@dungeon-adventure/game-api" />
 
-<Aside title="プロジェクト依存関係">
-S3クライアントは`game-api`プロジェクト自身の`package.json`に追加されます。これはそのプロジェクトのソースがそれをインポートするためです。バージョンはパッケージマネージャーの依存関係カタログ（サポートされている場合）を介してワークスペース全体で整合性が保たれます（[シングルバージョンポリシー](https://nx.dev/concepts/decisions/dependency-management#single-version-policy)）。詳細は<Link path="guides/typescript-project#dependencies">ts#projectガイド</Link>を参照してください。
+<Aside title="プロジェクトの依存関係">
+S3 クライアントは `game-api` プロジェクト自身の `package.json` に追加されます。これは、そのプロジェクトのソースがそれをインポートするためです。バージョンは、パッケージマネージャーの依存関係カタログ（サポートされている場合）を介してワークスペース全体で整合性が保たれます（[単一バージョンポリシー](https://nx.dev/concepts/decisions/dependency-management#single-version-policy)）。詳細については、<Link path="guides/typescript-project#dependencies">ts#project ガイド</Link>を参照してください。
 </Aside>
 
-`packages/dungeon-db/src/entities/index.ts`の生成されたサンプルエンティティを`Game`と`Inventory`エンティティに置き換え、`packages/dungeon-db/src/entities/example.ts`を削除します:
+`packages/dungeon-db/src/entities/index.ts` で生成されたサンプルエンティティを `Game` と `Inventory` エンティティに置き換え、`packages/dungeon-db/src/entities/example.ts` を削除します：
 
 <E2ECode lang="typescript" path="dungeon-adventure/2/dungeon-db/entities/index.ts.template" />
 
-ElectroDBでは型定義だけでなく、タイムスタンプなどの特定の値にデフォルト値を設定できます。またElectroDBはDynamoDB使用時のベストプラクティスである[シングルテーブル設計](https://electrodb.dev/en/core-concepts/single-table-relationships/)に従います。
+ElectroDB を使用すると、型を定義するだけでなく、タイムスタンプなどの特定の値にデフォルトを提供することもできます。さらに、ElectroDB は [シングルテーブル設計](https://electrodb.dev/en/core-concepts/single-table-relationships/)に従っており、これは DynamoDB を使用する際のベストプラクティスです。
 
 <Aside title="ElectroDB コレクション">
-ElectroDBは[コレクション](https://electrodb.dev/en/modeling/collections/)をサポートしていますが、このチュートリアルでは簡略化のため使用しません。
+ElectroDB は[コレクション](https://electrodb.dev/en/modeling/collections/)をサポートしていますが、このチュートリアルでは簡潔さのためにそれらを使用しないことにしました。
 </Aside>
 
 ### プロシージャの定義
 
-APIメソッドを実装するため、`packages/game-api/src/procedures`内で以下の変更を加えます:
+API メソッドを実装するために、`packages/game-api/src/procedures` 内で以下の変更を行います：
 
 <Tabs>
   <TabItem label="games.ts">
@@ -110,11 +110,11 @@ APIメソッドを実装するため、`packages/game-api/src/procedures`内で�
   </TabItem>
 </Tabs>
 
-このプロジェクトで使用しないため、`echo.ts`ファイル（`packages/game-api/src/procedures`内）を削除してください。
+このプロジェクトでは使用しないため、`echo.ts` ファイル（`packages/game-api/src/procedures` から）を削除してください。
 
-### ルーター設定
+### ルーターのセットアップ
 
-プロシージャを定義した後、APIに接続するため、以下のファイルを更新します:
+プロシージャを定義した後、それらを API に接続するために、以下のファイルを更新します：
 
 <Tabs>
   <TabItem label="packages/game-api/src/router.ts">
@@ -122,17 +122,17 @@ APIメソッドを実装するため、`packages/game-api/src/procedures`内で�
 </TabItem>
 </Tabs>
 
-## タスク2: インベントリMCPサーバーの作成
+## タスク 2: Inventory MCP サーバーの作成
 
-エージェントがプレイヤーのインベントリのアイテムを管理できるMCPサーバーを作成します。
+エージェントがプレイヤーのインベントリ内のアイテムを管理できるようにする MCP サーバーを作成しましょう。
 
-エージェント用に以下のツールを定義します:
+エージェント用に以下のツールを定義します：
 
-- `list-inventory-items` - プレイヤーの現在のインベントリアイテムを取得
-- `add-to-inventory` - プレイヤーのインベントリにアイテムを追加
-- `remove-from-inventory` - プレイヤーのインベントリからアイテムを削除
+- `list-inventory-items` - プレイヤーの現在のインベントリアイテムを取得します
+- `add-to-inventory` - プレイヤーのインベントリにアイテムを追加します
+- `remove-from-inventory` - プレイヤーのインベントリからアイテムを削除します
 
-時間節約のため、すべてのツールをインラインで定義します:
+時間を節約するために、すべてのツールをインラインで定義します：
 
 <Tabs>
   <TabItem label="packages/inventory/src/mcp-server/server.ts">
@@ -140,65 +140,65 @@ APIメソッドを実装するため、`packages/game-api/src/procedures`内で�
 </TabItem>
 </Tabs>
 
-ツール数が増えた場合、必要に応じて別ファイルにリファクタリングできます。
+ツールの数が増えるにつれて、必要に応じて別のファイルにリファクタリングできます。
 
-`packages/inventory/src/mcp-server`内の`tools`と`resources`ディレクトリは使用しないため削除してください。
+このプロジェクトでは使用しないため、`packages/inventory/src/mcp-server` の `tools` と `resources` ディレクトリを削除してください。
 
-## タスク3: インフラストラクチャの更新
+## タスク 3: インフラストラクチャの更新
 
-`ts#dynamodb`ジェネレーターで生成された`DungeonDb`コンストラクトは既にテーブルをプロビジョニングしているため、スタックでインスタンス化し、Game APIとInventory MCPサーバーに必要な権限を付与するだけです。`packages/infra/src/stacks/application-stack.ts`を以下のように更新します:
+`ts#dynamodb` によって生成された `DungeonDb` コンストラクトは既にテーブルをプロビジョニングしているため、スタック内でそれをインスタンス化し、Game API と Inventory MCP サーバーに必要な権限を付与するだけです。`packages/infra/src/stacks/application-stack.ts` を以下のように更新します：
 
 <E2EDiff lang="typescript" before="dungeon-adventure/1/application-stack.ts.template" after="dungeon-adventure/2/stacks/application-stack.ts.template" />
 
 :::note[分離されたプロシージャ]
-各プロシージャは個別のLambda関数で提供されるため、最小権限の原則に従い、プロシージャの実装に基づいて必要な読み取り/書き込み権限のみを割り当てられます。
+ここで注目すべきは、各プロシージャが個別の Lambda 関数によって提供されるため、最小権限の原則に従い、プロシージャの実装に基づいて必要な読み取り/書き込み権限のみを割り当てることができる点です。
 :::
 
 :::tip[ランタイム設定]
-`DungeonDb`コンストラクトは、デプロイされたテーブル名を<Link path="guides/runtime-config">ランタイム設定</Link>の`dynamodb`名前空間に登録し、AWS AppConfigに保存します。Game APIとInventory MCPサーバーは、環境変数として渡す必要なく、Lambda Powertoolsを使用して実行時にこれを取得します。このアプローチの利点は、テーブルや他のインフラストラクチャ識別子の数が増えても、デプロイされたインフラストラクチャに対して実行する際に必要な環境変数は`RUNTIME_CONFIG_APP_ID`の1つだけで済むことです。
+`DungeonDb` コンストラクトは、デプロイされたテーブル名を AWS AppConfig に保存される `dynamodb` 名前空間の下の<Link path="guides/runtime-config">ランタイム設定</Link>に登録します。Game API と Inventory MCP サーバーは、環境変数として渡される必要なく、Lambda Powertools を使用して実行時にそれを取得します。このアプローチの利点は、テーブルや他のインフラストラクチャ識別子の数が増えても、デプロイされたインフラストラクチャに対して実行する際に必要な環境変数は `RUNTIME_CONFIG_APP_ID` 1 つだけであることです。
 :::
 
-## タスク4: Game APIをローカルでテスト
+## タスク 4: Game API のローカルテスト
 
-AWSにデプロイせずにAPIを試すことができます。`dev`ターゲットは[DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html)に対してGame APIを実行します。モジュール1でGame APIを`DungeonDb`プロジェクトに接続したため、このターゲットはDynamoDB Localも自動的に起動します。
+API を試すために AWS にデプロイする必要はありません — `dev` ターゲットは [DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html) に対して Game API を実行します。モジュール 1 で Game API を `DungeonDb` プロジェクトに接続したため、このターゲットは DynamoDB Local も自動的に起動します。
 
-まず、リンターの問題を修正します:
+まず、lint の問題を修正します：
 
 <PackageManagerShortCommand commands={["lint"]} />
 
-次にコードベースをビルドします:
+次に、コードベースをビルドします：
 
 <PackageManagerShortCommand commands={["build"]} />
 
 ### ローカルサーバーの起動
 
-`dev`ターゲットでGame APIをローカルで起動します。これによりDynamoDB Localも起動されます:
+`dev` ターゲットで Game API をローカルで起動します。これにより DynamoDB Local も起動されます：
 
 <NxCommands commands={["dev game-api"]} />
 
 <Aside type="tip" title="初回実行">
-初回実行時はDynamoDB Localコンテナイメージをプルするため、少し時間がかかる場合があります。このターミナルでサーバーを実行したまま、以下の`curl`コマンド用に2つ目のターミナルを開いてください。
+初回実行時は DynamoDB Local コンテナイメージをプルするため、少し時間がかかる場合があります。このターミナルでサーバーを実行したままにして、以下の `curl` コマンド用に 2 つ目のターミナルを開いてください。
 </Aside>
 
-### APIのテスト
+### API のテスト
 
-サーバーが起動したら、（空の）ゲームリストをクエリします:
+サーバーが起動して実行されたら、（空の）ゲームリストをクエリします：
 
 ```bash
 curl -X GET 'http://localhost:2022/games.query?input=%7B%7D'
 ```
 
-:::note[URLエンコーディング]
-APIテストで渡す`%7B%7D`はURIエンコードされた空のJSONオブジェクト（`{}`）です。
+:::note[URL エンコーディング]
+API をテストするために渡す `%7B%7D` は、URI エンコードされた空の JSON オブジェクト（`{}`）です。
 :::
 
-空のリストが表示されます:
+空のリストが表示されます：
 
 ```json
 {"result":{"data":{"items":[],"cursor":null}}}
 ```
 
-次にゲームを保存します:
+次に、ゲームを保存します：
 
 ```bash
 curl -X POST 'http://localhost:2022/games.save' \
@@ -206,32 +206,32 @@ curl -X POST 'http://localhost:2022/games.save' \
   -d '{"playerName":"Alice","genre":"zombie"}'
 ```
 
-保存は永続化されたゲームを返します（エンティティが設定する`lastUpdated`タイムスタンプ付き）:
+保存すると、永続化されたゲームが返されます（エンティティが設定する `lastUpdated` タイムスタンプ付き）：
 
 ```json
 {"result":{"data":{"playerName":"Alice","genre":"zombie","lastUpdated":"..."}}}
 ```
 
-再度クエリしてDynamoDB Localに永続化されていることを確認します:
+再度クエリして、DynamoDB Local に永続化されていることを確認します：
 
 ```bash
 curl -X GET 'http://localhost:2022/games.query?input=%7B%7D'
 ```
 
-このレスポンスには保存されたゲームが含まれます:
+このレスポンスには、保存されたゲームが含まれるようになりました：
 
 ```json
 {"result":{"data":{"items":[{"playerName":"Alice","genre":"zombie","lastUpdated":"..."}],"cursor":null}}}
 ```
 
-完了したらローカルサーバーを停止できます（`Ctrl+C`）。
+完了したら、ローカルサーバーを停止できます（`Ctrl+C`）。
 
-## タスク5: Inventory MCPサーバーをローカルでテスト
+## タスク 5: Inventory MCP サーバーのローカルテスト
 
-生成された`mcp-server-inspect`ターゲットを使用して、[MCP Inspector](https://github.com/modelcontextprotocol/inspector)でMCPサーバーのツールを試すことができます:
+生成された `mcp-server-inspect` ターゲットを使用して、[MCP Inspector](https://github.com/modelcontextprotocol/inspector) で MCP サーバーのツールを試すことができます：
 
 <NxCommands commands={["mcp-server-inspect inventory"]} />
 
-これによりMCPサーバーがローカルで提供され（DynamoDB Localも起動されます）、MCP Inspectorが`http://localhost:6274`で起動し、接続するように事前設定されます。**Connect**をクリックし、**Tools**タブに切り替え、**List Tools**をクリックし、`add-to-inventory`（例: `playerName: Alice`、`itemName: Rusty Sword`、`emoji: ⚔️`）を試した後、`list-inventory-items`でDynamoDB Localに永続化されていることを確認します。完了したらサーバーを停止します（`Ctrl+C`）。
+これにより、MCP サーバーがローカルで提供され（DynamoDB Local も起動されます）、`http://localhost:6274` で MCP Inspector が起動し、事前設定された状態で接続されます。**Connect** をクリックし、**Tools** タブに切り替え、**List Tools** をクリックして、`add-to-inventory`（例：`playerName: Alice`、`itemName: Rusty Sword`、`emoji: ⚔️`）を試し、続いて `list-inventory-items` を実行して DynamoDB Local に永続化されていることを確認します。完了したら、サーバーを停止します（`Ctrl+C`）。
 
-おめでとうございます！ローカルのDynamoDBテーブルに対して、最初のtRPC APIとMCPサーバーの構築とテストに成功しました！ 🎉🎉🎉🎉🎉
+おめでとうございます！ローカル DynamoDB テーブルに対して最初の tRPC API と MCP サーバーを構築してテストしました！🎉🎉🎉

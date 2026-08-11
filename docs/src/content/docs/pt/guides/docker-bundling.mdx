@@ -1,6 +1,6 @@
 ---
-title: "Empacotamento Docker"
-description: "Construa e implante imagens Docker para projetos TypeScript e Python em um workspace Nx Plugin for AWS."
+title: Docker Bundling
+description: Construa e implante imagens Docker para projetos TypeScript e Python em um workspace Nx Plugin for AWS.
 ---
 
 import { FileTree, Tabs, TabItem, Code } from '@astrojs/starlight/components';
@@ -33,10 +33,10 @@ export const trivyTarget = `{
   }
 }`;
 
-Vários geradores (como <Link path="/guides/ts-agent">`ts#agent`</Link> e <Link path="/guides/py-agent">`py#agent`</Link>) produzem uma imagem Docker que é enviada para o Amazon ECR e consumida pela infraestrutura AWS. Este guia descreve o padrão que eles seguem para que você possa aplicá-lo a outros casos de uso — por exemplo, executar um projeto <Link path="/guides/fastapi">FastAPI</Link> no Amazon ECS, ou implantar um servidor Express containerizado.
+Vários geradores (como <Link path="/pt/guides/ts-agent">`ts#agent`</Link> e <Link path="/pt/guides/py-agent">`py#agent`</Link>) produzem uma imagem Docker que é enviada para o Amazon ECR e consumida pela infraestrutura AWS. Este guia descreve o padrão que eles seguem para que você possa aplicá-lo a outros casos de uso — por exemplo, executar um projeto <Link path="/pt/guides/fastapi">FastAPI</Link> no Amazon ECS, ou implantar um servidor Express containerizado.
 
 :::tip[Docker ou Finch]
-O motor de container usado para construir imagens é escolhido no momento da criação do workspace através da flag `--containers` (`docker`, `finch`, ou `infer` — o padrão — que detecta automaticamente o que está instalado). [Finch](https://runfinch.com/) é uma alternativa open-source e drop-in para o Docker. A seleção é registrada em `aws-nx-plugin.config.mts` e aplicada a todos os geradores que emitem comandos de construção de container. As construções de assets de imagem do CDK respeitam a escolha através da variável de ambiente `CDK_DOCKER`.
+O mecanismo de contêiner usado para construir imagens é escolhido no momento da criação do workspace através da flag `--containers` (`docker`, `finch`, ou `infer` — o padrão — que detecta automaticamente o que está instalado). [Finch](https://runfinch.com/) é uma alternativa open-source e drop-in para o Docker. A seleção é registrada em `aws-nx-plugin.config.mts` e aplicada a todos os geradores que emitem comandos de construção de contêiner. As construções de image asset do CDK respeitam a escolha através da variável de ambiente `CDK_DOCKER`.
 :::
 
 ## O Padrão
@@ -59,17 +59,17 @@ dockerfile -> ctx
 
 O padrão recomendado tem três partes:
 
-1. **Um target `bundle`** no seu projeto que produz um diretório autocontido de artefatos de runtime. Para TypeScript, isso é um bundle JavaScript de arquivo único com tree-shaking produzido pelo [Rolldown](https://rolldown.rs/); para Python, isso é um `requirements.txt` e dependências instaladas produzidos pelo [uv](https://docs.astral.sh/uv/).
-2. **Um `Dockerfile` mínimo** que simplesmente faz `COPY` da saída do bundle para uma imagem base. Como o bundling já lidou com tree-shaking e instalação de dependências, o `Dockerfile` não precisa executar `npm install` ou `uv sync`.
-3. **Um target `docker`** que copia o `Dockerfile` junto com a saída do bundle (para que o contexto de build do Docker contenha apenas arquivos necessários em runtime), e então executa `docker build`.
+1. **Um target `bundle`** no seu projeto que produz um diretório autocontido de artefatos de runtime. Para TypeScript, isso é um bundle JavaScript de arquivo único com tree-shaking produzido pelo [Rolldown](https://rolldown.rs/); para Python, isso é um `requirements.txt` e dependências instaladas produzidas pelo [uv](https://docs.astral.sh/uv/).
+2. **Um `Dockerfile` mínimo** que simplesmente faz `COPY` da saída do bundle para uma imagem base. Como o bundling já tratou do tree-shaking e da instalação de dependências, o `Dockerfile` não precisa executar `npm install` ou `uv sync`.
+3. **Um target `docker`** que copia o `Dockerfile` junto com a saída do bundle (para que o contexto de build do Docker contenha apenas os arquivos necessários em runtime), e então executa `docker build`.
 
-O contexto de build do Docker é escrito na pasta `dist` do seu projeto. Sua infraestrutura como código (CDK ou Terraform) então aponta para esse diretório para enviar a imagem para o ECR.
+O contexto de build do Docker é escrito na pasta `dist` do seu projeto. Seu código de infraestrutura (CDK ou Terraform) então aponta para esse diretório para enviar a imagem para o ECR.
 
 :::tip[Por que fazer bundle fora do Dockerfile?]
 Manter a etapa de bundle no Nx (em vez de dentro do `Dockerfile`) significa:
 
 - O Nx pode fazer **cache** do target bundle, então builds repetidos são rápidos.
-- O `Dockerfile` não precisa de acesso ao seu monorepo, registros privados ou segredos de tempo de build.
+- O `Dockerfile` não precisa de acesso ao seu monorepo, registros privados ou segredos de build.
 - A camada da imagem é minúscula — um único `COPY` de artefatos já construídos, sem `node_modules` transitivos ou toolchain de build.
 :::
 
@@ -77,7 +77,7 @@ Manter a etapa de bundle no Nx (em vez de dentro do `Dockerfile`) significa:
 
 ### Bundle Target
 
-Configure um target `bundle` que invoca o Rolldown. Se você está começando de um <Link path="/guides/typescript-project">`ts#project`</Link>, adicione o seguinte ao seu `project.json`:
+Configure um target `bundle` que invoca o Rolldown. Se você está começando de um <Link path="/pt/guides/typescript-project">`ts#project`</Link>, adicione o seguinte ao seu `project.json`:
 
 ```json
 {
@@ -133,7 +133,7 @@ Alguns pacotes npm não podem ser empacotados porque dependem de `require` dinâ
 
 ### Dockerfile
 
-Crie um `Dockerfile` no diretório de origem do seu projeto. O arquivo não faz nada além de `COPY` do bundle para uma imagem base Node, além de `npm install` de quaisquer pacotes `external` que não puderam ser empacotados. Coloque a etapa `RUN npm install` **antes** do `COPY`, para que o Docker possa fazer cache da camada `node_modules` instalada e só re-executá-la quando a lista de dependências realmente mudar:
+Crie um `Dockerfile` no diretório de origem do seu projeto. O arquivo não faz nada além de fazer `COPY` do bundle para uma imagem base Node, mais `npm install` de quaisquer pacotes `external` que não puderam ser empacotados. Coloque a etapa `RUN npm install` **antes** do `COPY`, para que o Docker possa fazer cache da camada `node_modules` instalada e só executá-la novamente quando a lista de dependências realmente mudar:
 
 ```dockerfile
 FROM public.ecr.aws/docker/library/node:lts
@@ -153,7 +153,7 @@ CMD ["node", "index.js"]
 ```
 
 :::tip[Fixe suas dependências]
-Fixe cada dependência instalada dentro do `Dockerfile` a uma versão exata (como acima) — caso contrário, `npm install` silenciosamente pegará uma versão mais recente na próxima vez que você construir, produzindo imagens que se comportam de forma diferente dependendo de quando foram construídas.
+Fixe cada dependência instalada dentro do `Dockerfile` em uma versão exata (como acima) — caso contrário, `npm install` silenciosamente pegará uma versão mais recente na próxima vez que você construir, produzindo imagens que se comportam de forma diferente dependendo de quando foram construídas.
 :::
 
 ### Docker Target
@@ -190,17 +190,17 @@ Executar este target produz uma imagem local com tag `my-scope-my-project:latest
 
 <NxCommands commands={['docker my-project']} />
 
-:::note[CDK constrói a imagem ele mesmo]
-Se você está implantando apenas com CDK, o comando `docker build` acima é opcional — o `DockerImageAsset` do CDK (mostrado em [Infrastructure](#infrastructure)) construirá a imagem para você no momento do synth. Você ainda precisa copiar o `Dockerfile` para o diretório de contexto de build para que o CDK possa encontrá-lo. Os geradores mantêm a etapa local `docker build` para dar a você uma maneira rápida de fazer smoke-test da imagem com `docker run`.
+:::note[CDK constrói a imagem por si só]
+Se você está apenas implantando com CDK, o comando `docker build` acima é opcional — o `DockerImageAsset` do CDK (mostrado em [Infraestrutura](#infraestrutura)) construirá a imagem para você no momento do synth. Você ainda precisa copiar o `Dockerfile` para o diretório de contexto de build para que o CDK possa encontrá-lo. Os geradores mantêm a etapa local `docker build` para dar a você uma maneira rápida de testar a imagem com `docker run`.
 
-Para Terraform, a etapa `docker build` é obrigatória — o padrão `null_resource` abaixo envia uma imagem com tag local.
+Para Terraform, a etapa `docker build` é necessária — o padrão `null_resource` abaixo envia uma imagem com tag local.
 :::
 
 ## Python
 
 ### Bundle Target
 
-Configure um target `bundle` que usa `uv` para exportar e instalar dependências para sua plataforma alvo. O gerador <Link path="/guides/python-project">`py#project`</Link> e o gerador <Link path="/guides/python-lambda-function">`py#lambda-function`</Link> configuram isso para você. A configuração do target se parece com:
+Configure um target `bundle` que usa `uv` para exportar e instalar dependências para sua plataforma alvo. O gerador <Link path="/pt/guides/python-project">`py#project`</Link> e o gerador <Link path="/pt/guides/python-lambda-function">`py#lambda-function`</Link> configuram isso para você. A configuração do target se parece com:
 
 ```json
 {
@@ -223,7 +223,7 @@ Configure um target `bundle` que usa `uv` para exportar e instalar dependências
 ```
 
 :::tip[Arquitetura alvo]
-Mude `--python-platform` para `x86_64-manylinux_2_28` se sua imagem Docker for executada em x86_64.
+Mude `--python-platform` para `x86_64-manylinux_2_28` se sua imagem Docker for executar em x86_64.
 :::
 
 Executar `nx bundle my-project` produz `dist/packages/my-project/bundle-arm/` contendo o código-fonte do seu projeto, suas dependências e um `requirements.txt` — tudo que a imagem precisa em runtime.
@@ -282,7 +282,7 @@ Isso limpa o diretório de saída, e então copia tanto o conteúdo do bundle qu
 
 É uma boa prática escanear suas imagens em busca de vulnerabilidades conhecidas. Os geradores que seguem este padrão adicionam um target `trivy` que escaneia a imagem construída com [Trivy](https://trivy.dev/), executando a partir da [imagem Trivy hospedada no ECR](https://gallery.ecr.aws/aquasecurity/trivy), e sai com código diferente de zero em descobertas `HIGH` ou `CRITICAL`.
 
-Adicione um target `trivy` que `dependsOn` do seu target `docker`. Ele salva a imagem construída em um tarball e a escaneia através de um bind mount relativo ao workspace, para que o mesmo comando funcione tanto com `docker` quanto com `finch`:
+Adicione um target `trivy` que depende (`dependsOn`) do seu target `docker`. Ele salva a imagem construída em um tarball e a escaneia através de um bind mount relativo ao workspace, para que o mesmo comando funcione tanto com `docker` quanto com `finch`:
 
 <Code lang="json" code={trivyTarget} />
 
@@ -290,10 +290,10 @@ Os targets de escaneamento por imagem de cada projeto são agregados sob um targ
 
 <PackageManagerShortCommand commands={['trivy']} />
 
-:::tip[Execute o Trivy no CI]
-O escaneamento é intencionalmente não conectado ao `build`, pois isso pode introduzir atrito desnecessário ao iterar durante o desenvolvimento, já que o banco de dados de vulnerabilidades do Trivy é continuamente atualizado com novos CVEs.
+:::tip[Execute Trivy no CI]
+O escaneamento intencionalmente não está conectado ao `build`, pois isso pode introduzir atrito desnecessário ao iterar durante o desenvolvimento, já que o banco de dados de vulnerabilidades do Trivy é continuamente atualizado com novos CVEs.
 
-Em vez disso, recomendamos executar o comando acima como uma etapa dedicada em seu pipeline de CI antes da implantação em ambientes de produção.
+Em vez disso, recomendamos executar o comando acima como uma etapa dedicada em seu pipeline de CI antes da implantação em estágios de produção.
 :::
 
 :::tip[Cache pula imagens não alteradas]
@@ -301,12 +301,12 @@ Como a imagem é totalmente determinada pelo código-fonte do seu projeto, decla
 :::
 
 :::note[Suprimindo descobertas]
-O Trivy lê um arquivo `.trivyignore` (uma lista de IDs de vulnerabilidade, um por linha) da raiz do seu projeto. `--ignore-unfixed` pula vulnerabilidades sem correção disponível, então o escaneamento só falha em problemas que você pode resolver atualizando ferramentas em seu `Dockerfile`. Veja a [documentação de filtragem do Trivy](https://trivy.dev/latest/docs/configuration/filtering/#by-finding-ids) para detalhes.
+O Trivy lê um arquivo `.trivyignore` (uma lista de IDs de vulnerabilidade, um por linha) da raiz do seu projeto. `--ignore-unfixed` pula vulnerabilidades sem correção disponível, então o escaneamento só falha em problemas que você pode resolver atualizando ferramentas no seu `Dockerfile`. Veja a [documentação de filtragem do Trivy](https://trivy.dev/latest/docs/configuration/filtering/#by-finding-ids) para detalhes.
 :::
 
-## Infrastructure
+## Infraestrutura
 
-Conectar o diretório de contexto de build resultante à infraestrutura como código é o mesmo tanto para TypeScript quanto para Python — apenas o caminho para o diretório de contexto de build difere (`dist/packages/my-project/bundle` para TypeScript, `dist/packages/my-project/docker` para Python).
+Conectar o diretório de contexto de build resultante ao código de infraestrutura é o mesmo para TypeScript e Python — apenas o caminho para o diretório de contexto de build difere (`dist/packages/my-project/bundle` para TypeScript, `dist/packages/my-project/docker` para Python).
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -342,7 +342,7 @@ infra.asset -> ecr: cdk deploy\nbuilds + pushes
 
 ```ts
 import { DockerImageAsset, Platform } from 'aws-cdk-lib/aws-ecr-assets';
-import { findWorkspaceRoot } from ':my-scope/common-constructs';
+import { findWorkspaceRoot } from '@my-scope/common-constructs';
 import * as path from 'path';
 import * as url from 'url';
 
@@ -356,20 +356,20 @@ const image = new DockerImageAsset(this, 'MyImage', {
 });
 ```
 
-O helper `findWorkspaceRoot` é gerado pelo gerador <Link path="/guides/typescript-infrastructure">`ts#infra`</Link> e exportado de `@my-scope/common-constructs`. Se você não está usando constructs compartilhados, você pode codificar o caminho para o diretório `dist` relativo a onde `cdk` é invocado — tipicamente a raiz do workspace — e omitir completamente a chamada `findWorkspaceRoot`.
+O helper `findWorkspaceRoot` é gerado pelo gerador <Link path="/pt/guides/typescript-infrastructure">`ts#infra`</Link> e exportado de `@my-scope/common-constructs`. Se você não está usando constructs compartilhados, você pode codificar o caminho para o diretório `dist` relativo a onde `cdk` é invocado — tipicamente a raiz do workspace — e omitir completamente a chamada `findWorkspaceRoot`.
 
 :::note[Executando bundle antes do synth]
-O CDK não executa os targets `bundle`/`docker` automaticamente — você deve executar `nx build my-project` (ou configurar o target deploy para depender de `build`) antes de `cdk deploy`. Os geradores que usam este padrão declaram `docker` e `bundle` como dependências de `build` para que isso aconteça de forma transparente.
+O CDK não executa os targets `bundle`/`docker` automaticamente — você deve executar `nx build my-project` (ou conectar o target deploy para depender de `build`) antes de `cdk deploy`. Os geradores que usam este padrão declaram `docker` e `bundle` como dependências de `build` para que isso aconteça de forma transparente.
 :::
 
-Use o `DockerImageAsset` com qualquer construct AWS que aceite uma imagem de container, por exemplo `aws_ecs.ContainerImage.fromDockerImageAsset(image)`.
+Use o `DockerImageAsset` com qualquer construct AWS que aceite uma imagem de contêiner, por exemplo `aws_ecs.ContainerImage.fromDockerImageAsset(image)`.
 </Fragment>
 <Fragment slot="terraform">
-O provider AWS do Terraform não tem um recurso de primeira classe para "construir e enviar uma imagem Docker". O padrão usado pelos geradores é:
+O provider AWS do Terraform não tem um recurso de primeira classe "construir e enviar uma imagem Docker". O padrão usado pelos geradores é:
 
 1. O target `build` do projeto executa `docker build`, produzindo uma imagem local com tag `my-scope-my-project:latest`.
 2. Um `aws_ecr_repository` para armazenar a imagem.
-3. Um `null_resource` com um provisioner `local-exec` que autentica no ECR, re-tageia a imagem construída localmente com seu digest de conteúdo e a envia.
+3. Um `null_resource` com um provisioner `local-exec` que autentica no ECR, re-tageia a imagem construída localmente com seu digest de conteúdo, e a envia.
 4. O recurso downstream (por exemplo, `aws_ecs_task_definition`) referencia a imagem por sua tag imutável baseada em digest.
 
 ```d2
@@ -444,7 +444,7 @@ resource "null_resource" "docker_publish" {
 }
 ```
 
-O bloco `data.external.docker_digest` garante que o `null_resource` seja re-executado sempre que o hash da imagem local mudar, disparando um novo push a cada mudança significativa no código. A imagem é enviada sob uma tag imutável baseada em conteúdo derivada de seu digest, para que o repositório ECR possa usar mutabilidade de tag `IMMUTABLE` e rejeitar qualquer tentativa de sobrescrever uma tag existente.
+O bloco `data.external.docker_digest` garante que o `null_resource` seja executado novamente sempre que o hash da imagem local mudar, acionando um novo push em cada mudança significativa de código. A imagem é enviada sob uma tag imutável baseada em conteúdo derivada de seu digest, então o repositório ECR pode usar mutabilidade de tag `IMMUTABLE` e rejeitar qualquer tentativa de sobrescrever uma tag existente.
 
 :::note[Executando bundle antes do apply]
 `nx apply <project>` requer que a tag de imagem `my-scope-my-project:latest` já exista localmente. Execute `nx build my-project` (ou `nx docker my-project`) antes de `nx apply <project>`.
@@ -454,7 +454,7 @@ O bloco `data.external.docker_digest` garante que o `null_resource` seja re-exec
 
 ## Leitura Adicional
 
-- <Link path="/guides/ts-agent">gerador `ts#agent`</Link> — um exemplo completo deste padrão para um agente TypeScript implantado no Bedrock AgentCore Runtime.
-- <Link path="/guides/py-agent">gerador `py#agent`</Link> — o equivalente para Python.
+- <Link path="/pt/guides/ts-agent">Gerador `ts#agent`</Link> — um exemplo completo deste padrão para um agente TypeScript implantado no Bedrock AgentCore Runtime.
+- <Link path="/pt/guides/py-agent">Gerador `py#agent`</Link> — o equivalente para Python.
 - [Documentação do Rolldown](https://rolldown.rs/) — referência de configuração para o bundler TypeScript.
 - [Documentação do `uv`](https://docs.astral.sh/uv/) — referência para exportação e instalação de dependências Python.

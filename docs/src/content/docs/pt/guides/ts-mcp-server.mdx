@@ -1,6 +1,6 @@
 ---
-title: "Servidor MCP em TypeScript"
-description: "Gerar um servidor de Protocolo de Contexto de Modelo (MCP) em TypeScript para fornecer contexto a Modelos de Linguagem de Grande Escala"
+title: TypeScript MCP Server
+description: Gere um servidor TypeScript Model Context Protocol (MCP) para fornecer contexto a Large Language Models
 generator: ts#mcp-server
 ---
 
@@ -14,25 +14,25 @@ import Snippet from '@components/snippet.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import OptionFilter from '@components/option-filter.astro';
 
-Gere um servidor TypeScript do [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) para fornecer contexto a Large Language Models (LLMs), e opcionalmente implante-o no [Amazon Bedrock AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/).
+Gere um servidor TypeScript [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) para fornecer contexto a Large Language Models (LLMs), e opcionalmente implante-o no [Amazon Bedrock AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/).
 
-## O que é o MCP?
+## O que é MCP?
 
-O [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) é um padrão aberto que permite a assistentes de IA interagirem com ferramentas e recursos externos. Ele fornece uma maneira consistente para LLMs:
+O [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) é um padrão aberto que permite que assistentes de IA interajam com ferramentas e recursos externos. Ele fornece uma maneira consistente para LLMs:
 
 - Executar ferramentas (funções) que realizam ações ou recuperam informações
 - Acessar recursos que fornecem contexto ou dados
 
-## Utilização
+## Uso
 
-### Gerar um servidor MCP
+### Gerar um MCP Server
 
-Você pode gerar um servidor MCP em TypeScript de duas formas:
+Você pode gerar um servidor MCP TypeScript de duas maneiras:
 
 <RunGenerator generator="ts#mcp-server" />
 
-:::tip[Pré-requisito do projeto]
-Primeiro use o gerador <Link path="/guides/typescript-project">`ts#project`</Link> para criar um projeto onde adicionar seu servidor MCP.
+:::tip[Pré-requisito do Projeto]
+Primeiro use o gerador <Link path="/guides/typescript-project">`ts#project`</Link> para criar um projeto ao qual adicionar seu servidor MCP.
 :::
 
 ### Opções
@@ -46,141 +46,158 @@ O gerador adicionará os seguintes arquivos ao seu projeto TypeScript existente:
 <FileTree>
   - your-project/
     - src/
-      - mcp-server/ (ou nome personalizado se especificado)
-        - index.ts Exporta seu servidor
-        - server.ts Definição principal do servidor
-        - stdio.ts Ponto de entrada para transporte STDIO, útil para servidores MCP locais simples
-        - http.ts Ponto de entrada para transporte HTTP Streamable, útil para hospedar seu servidor MCP
+      - mcp-server/ (or custom name if specified)
+        - index.ts Exports your server
+        - server.ts Main server definition
+        - stdio.ts Entry point for STDIO transport, useful for simple local MCP servers
+        - http.ts Entry point for Streamable HTTP transport, useful for hosting your MCP server
         - tools/
-          - divide.ts Exemplo de ferramenta
+          - divide.ts Sample tool
         - resources/
-          - sample-guidance.ts Exemplo de recurso
-        - Dockerfile Ponto de entrada para hospedar seu servidor MCP (excluído quando `infra` é definido como `None`)
-    - project.json Atualizado com alvo de serviço do servidor MCP
+          - sample-guidance.ts Sample resource
+        - Dockerfile Entry point for hosting your MCP server (excluded when `infra` is set to `None`)
+    - project.json Updated with MCP server serve target
 </FileTree>
 
 ### Infraestrutura
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment">
+<OptionFilter when={{ infra: 'agentcore' }} description="Implantação do Bedrock AgentCore Runtime">
 <Snippet name="shared-constructs" />
 
 <Snippet name="mcp/shared-constructs" />
 </OptionFilter>
 
-<OptionFilter when={{ infra: 'none' }} description="No infrastructure is vended for infra=None">
-Se você selecionou `None` para `infra`, nenhum construto CDK ou módulo Terraform é gerado — o servidor MCP está configurado apenas para uso local STDIO / HTTP. A opção `auth` é ignorada neste modo, pois não há endpoint hospedado para autenticar.
+<OptionFilter when={{ infra: 'none' }} description="Nenhuma infraestrutura é fornecida para infra=none">
+Se você selecionou `none` para `infra`, nenhum construto CDK ou módulo Terraform é gerado — o servidor MCP é configurado apenas para uso local STDIO / HTTP. A opção `auth` é ignorada neste modo, pois não há endpoint hospedado para autenticar.
 </OptionFilter>
 
 #### Arquitetura
 
 <Snippet name="mcp/architecture" />
 
-## Trabalhando com Seu Servidor MCP
+## Trabalhando com Seu MCP Server
 
 ### Adicionando Ferramentas
 
-Ferramentas são funções que o assistente de IA pode chamar para realizar ações. Você pode adicionar novas ferramentas no arquivo `server.ts`:
+Ferramentas são funções que o assistente de IA pode chamar para realizar ações. Cada ferramenta fica em seu próprio arquivo em `tools/` que exporta uma função `register<Name>Tool`, que você então chama de `server.ts`. Por exemplo, adicione `tools/my-tool.ts`:
 
-```typescript
-server.registerTool("toolName", {
-  description: "tool description",
-  inputSchema: { param1: z.string(), param2: z.number() } // Esquema de entrada usando Zod
-},
-  async ({ param1, param2 }) => {
-    // Implementação da ferramenta
-    return {
-      content: [{ type: "text", text: "Result" }]
-    };
-  }
-);
+```typescript title="tools/my-tool.ts"
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z } from 'zod';
+
+export const registerMyTool = (server: McpServer) => {
+  server.registerTool("toolName", {
+    description: "tool description",
+    inputSchema: { param1: z.string(), param2: z.number() } // Input schema using Zod
+  },
+    async ({ param1, param2 }) => {
+      // Tool implementation
+      return {
+        content: [{ type: "text", text: "Result" }]
+      };
+    }
+  );
+};
+```
+
+Em seguida, registre-a em `server.ts`:
+
+```typescript title="server.ts"
+import { registerMyTool } from './tools/my-tool.js';
+
+registerMyTool(server);
 ```
 
 ### Adicionando Recursos
 
-Recursos fornecem contexto ao assistente de IA. Você pode adicionar recursos estáticos de arquivos ou recursos dinâmicos:
+Recursos fornecem contexto ao assistente de IA. Como ferramentas, cada recurso fica em seu próprio arquivo em `resources/` que exporta uma função `register<Name>Resource` chamada de `server.ts`. Você pode adicionar recursos estáticos de arquivos ou recursos dinâmicos:
 
-```typescript
-const exampleContext = 'algum contexto para retornar';
+```typescript title="resources/my-resource.ts"
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
-server.registerResource('resource-name', 'example://resource', {}, async (uri) => ({
-  contents: [{ uri: uri.href, text: exampleContext }],
-}));
+export const registerMyResource = (server: McpServer) => {
+  const exampleContext = 'some context to return';
 
-// Recurso dinâmico
-server.registerResource('dynamic-resource', 'dynamic://resource', {}, async (uri) => {
-  const data = await fetchSomeData();
-  return {
-    contents: [{ uri: uri.href, text: data }],
-  };
-});
+  server.registerResource('resource-name', 'example://resource', {}, async (uri) => ({
+    contents: [{ uri: uri.href, text: exampleContext }],
+  }));
+
+  // Dynamic resource
+  server.registerResource('dynamic-resource', 'dynamic://resource', {}, async (uri) => {
+    const data = await fetchSomeData();
+    return {
+      contents: [{ uri: uri.href, text: data }],
+    };
+  });
+};
 ```
 
-## Configurando com Assistente de IA
+## Configurando com Assistentes de IA
 
-<Snippet name="mcp/configuration-ts" parentHeading="Configurando com Assistente de IA" />
+<Snippet name="mcp/configuration-ts" parentHeading="Configurando com Assistentes de IA" />
 
-## Executando Seu Servidor MCP
+## Executando Seu MCP Server
 
 ### Desenvolvimento Local
 
-Para executar seu servidor MCP (e tudo conectado a ele, como um banco de dados local) localmente, use o alvo `dev` do projeto:
+Para executar seu servidor MCP (e tudo conectado a ele, como um banco de dados local) localmente, use o target `dev` do projeto:
 
 <NxCommands commands={['dev your-project']} />
 
-Se você adicionou vários componentes ao seu projeto (servidores MCP, agentes, etc.), isso inicia todos eles. Para executar apenas este servidor MCP, direcione seu alvo `<your-server-name>-dev`:
+Se você adicionou vários componentes ao seu projeto (servidores MCP, agentes, etc.), isso inicia todos eles. Para executar apenas este servidor MCP, direcione seu target `<your-server-name>-dev`:
 
 <NxCommands commands={['your-server-name-dev your-project']} />
 
 ### Inspector
 
-O gerador configura um alvo chamado `<your-server-name>-inspect`, que inicia seu servidor MCP localmente (através do alvo `<your-server-name>-dev`, incluindo quaisquer dependências conectadas, como um banco de dados local) e lança o [MCP Inspector](https://github.com/modelcontextprotocol/inspector) pré-configurado para conectar a ele através do transporte HTTP Streamable.
+O gerador configura um target chamado `<your-server-name>-inspect`, que inicia seu servidor MCP localmente (via target `<your-server-name>-dev`, incluindo quaisquer dependências conectadas, como um banco de dados local) e lança o [MCP Inspector](https://github.com/modelcontextprotocol/inspector) pré-configurado para se conectar a ele via transporte Streamable HTTP.
 
 <NxCommands commands={['your-server-name-inspect your-project']} />
 
 Isso iniciará o inspector em `http://localhost:6274`. Comece clicando no botão "Connect".
 
 :::tip
-Para inspecionar o servidor usando transporte STDIO, use o alvo `<your-server-name>-inspect-stdio`, que lança o inspector contra uma instância STDIO do seu servidor.
+Para inspecionar o servidor usando transporte STDIO, use o target `<your-server-name>-inspect-stdio`, que lança o inspector contra uma instância STDIO do seu servidor.
 :::
 
 ### STDIO
 
 A maneira mais fácil de testar e usar um servidor MCP é usando o inspector ou configurando-o com um assistente de IA (como acima).
 
-Você também pode executar seu servidor com [transporte STDIO](https://modelcontextprotocol.io/docs/concepts/transports#standard-input%2Foutput-stdio) diretamente usando o alvo `<your-server-name>-serve-stdio`.
+No entanto, você pode executar seu servidor com [transporte STDIO](https://modelcontextprotocol.io/docs/concepts/transports#standard-input%2Foutput-stdio) diretamente usando o target `<your-server-name>-serve-stdio`.
 
 <NxCommands commands={['your-server-name-serve-stdio your-project']} />
 
-Este comando usa `tsx --watch` para reiniciar automaticamente o servidor quando arquivos mudarem.
+Este comando usa `tsx --watch` para reiniciar automaticamente o servidor quando os arquivos mudam.
 
-### HTTP Streamable
+### Streamable HTTP
 
-Se você deseja executar seu servidor MCP localmente usando [transporte HTTP Streamable](https://modelcontextprotocol.io/docs/concepts/transports#streamable-http), pode usar o alvo `<your-server-name>-serve`.
+Se você quiser executar seu servidor MCP localmente usando [transporte Streamable HTTP](https://modelcontextprotocol.io/docs/concepts/transports#streamable-http), você pode usar o target `<your-server-name>-serve`.
 
 <NxCommands commands={['your-server-name-serve your-project']} />
 
-Este comando usa `tsx --watch` para reiniciar automaticamente o servidor quando arquivos mudarem.
+Este comando usa `tsx --watch` para reiniciar automaticamente o servidor quando os arquivos mudam.
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment details">
-## Implantando Seu Servidor MCP no Bedrock AgentCore Runtime
+<OptionFilter when={{ infra: 'agentcore' }} description="Detalhes de implantação do Bedrock AgentCore Runtime">
+## Implantando Seu MCP Server no Bedrock AgentCore Runtime
 
-<Snippet name="mcp/bedrock-deployment" parentHeading="Implantando Seu Servidor MCP no Bedrock AgentCore Runtime" />
+<Snippet name="mcp/bedrock-deployment" parentHeading="Implantando Seu MCP Server no Bedrock AgentCore Runtime" />
 
-### Alvo de Bundle
+### Bundle Target
 
 <Snippet name="ts-bundle" />
 
-O alvo de bundle usa `http.ts` como ponto de entrada para o servidor MCP HTTP Streamable hospedado no Bedrock AgentCore Runtime.
+O bundle target usa `http.ts` como ponto de entrada para o servidor MCP Streamable HTTP hospedar no Bedrock AgentCore Runtime.
 
-### Alvo Docker
+### Docker Target
 
-O gerador configura um alvo `<your-server-name>-docker` que copia o `Dockerfile` do diretório de origem do servidor MCP para o diretório de saída do bundle. Isso coloca o `Dockerfile` junto com os artefatos empacotados, permitindo que o CDK construa a imagem Docker diretamente usando `AgentRuntimeArtifact.fromAsset`.
+O gerador configura um target `<your-server-name>-docker` que copia o `Dockerfile` do diretório de origem do seu servidor MCP para o diretório de saída do bundle. Isso coloca o `Dockerfile` junto com os artefatos empacotados, permitindo que o CDK construa a imagem Docker diretamente usando `AgentRuntimeArtifact.fromAsset`.
 
-Um alvo `docker` também é gerado para preparar o contexto docker para todos servidores MCP se você tiver múltiplos definidos.
+Um target `docker` também é gerado, que prepara o contexto docker para todos os servidores MCP se você tiver vários definidos.
 
-### Verificação de Imagem
+### Image Scanning
 
-<Snippet name="trivy-image-scan" parentHeading="Verificação de Imagem" />
+<Snippet name="trivy-image-scan" parentHeading="Image Scanning" />
 
 ### Observabilidade
 
@@ -193,41 +210,40 @@ Use o gerador <Link path="guides/connection">`connection`</Link> para integrar e
 
 <CardGrid>
   <ConnectionCard
-    title="TypeScript Agent para MCP"
-    description="Conecte um TypeScript Agent a um servidor MCP"
+    title="TypeScript Agent to MCP"
+    description="Connect a TypeScript Agent to an MCP server"
     href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/ts-agent-mcp`}
     source="strands"
     sourceBadge="typescript"
     target="mcp"
   />
   <ConnectionCard
-    title="Python Agent para MCP"
-    description="Conecte um Python Agent a um servidor MCP"
+    title="Python Agent to MCP"
+    description="Connect a Python Agent to an MCP server"
     href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-mcp`}
     source="strands"
     sourceBadge="python"
     target="mcp"
   />
   <ConnectionCard
-    title="Servidor MCP para Banco de Dados Relacional"
-    description="Conecte um Servidor MCP TypeScript a um banco de dados relacional Aurora"
+    title="MCP Server to Relational Database"
+    description="Connect a TypeScript MCP Server to an Aurora relational database"
     href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/ts-mcp-server-rdb`}
     source="mcp"
     target="aurora"
   />
   <ConnectionCard
-    title="Servidor MCP para TypeScript DynamoDB"
-    description="Conecte um Servidor MCP TypeScript a uma tabela DynamoDB"
+    title="MCP Server to TypeScript DynamoDB"
+    description="Connect a TypeScript MCP Server to a DynamoDB table"
     href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/ts-mcp-server-dynamodb`}
     source="mcp"
     target="dynamodb"
   />
   <ConnectionCard
-    title="AgentCore Gateway para Servidor MCP"
-    description="Agregue um servidor MCP atrás de um AgentCore Gateway"
+    title="AgentCore Gateway to MCP Server"
+    description="Aggregate an MCP server behind an AgentCore Gateway"
     href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/agentcore-gateway-mcp`}
     source="agentcore"
     target="mcp"
   />
 </CardGrid>
-rdGrid>

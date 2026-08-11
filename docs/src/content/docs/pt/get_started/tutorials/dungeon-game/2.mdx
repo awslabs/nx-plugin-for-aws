@@ -1,6 +1,6 @@
 ---
-title: "Implementar a API do Jogo e o servidor MCP de Inventário"
-description: "Um guia passo a passo de como construir um jogo de aventura de dungeon com IA agêntica usando o @aws/nx-plugin."
+title: Implementar a API do Jogo e o servidor MCP de Inventário
+description: Um passo a passo de como construir um jogo de aventura em masmorra com IA agêntica usando o @aws/nx-plugin.
 ---
 
 import { Aside, Code, FileTree, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
@@ -34,20 +34,20 @@ Vamos implementar as seguintes APIs nesta seção:
 4. `queryActions` - retornar o histórico de conversação para um determinado jogo.
 
 :::note[Onde cada parte do estado reside]
-- `games` e `inventory` estão no **DynamoDB** (via ElectroDB) — as lambdas da Game API e o servidor MCP de Inventário os leem/escrevem.
-- `actions` (transcrição do chat) está no **S3** — o `S3SessionManager` do Story Agent escreve um blob JSON por turno, e `queryActions` na Game API os lê de volta para que a UI possa reproduzir o histórico ao recarregar a página. Não há procedimento `saveAction`; o agente é o único escritor.
+- `games` e `inventory` estão no **DynamoDB** (via ElectroDB) — os lambdas da API do Jogo e o servidor MCP de Inventário os leem/escrevem.
+- `actions` (transcrição do chat) está no **S3** — o `S3SessionManager` do Story Agent escreve um blob JSON por turno, e `queryActions` na API do Jogo os lê de volta para que a UI possa reproduzir o histórico ao recarregar a página. Não há procedimento `saveAction`; o agente é o único escritor.
 :::
 
-### Esquema da API
+### Schema da API
 
-Para definir as entradas e saídas da nossa API, vamos criar nosso esquema usando [Zod](https://zod.dev/) no arquivo `packages/game-api/src/schema/index.ts` da seguinte forma:
+Para definir nossas entradas e saídas da API, vamos criar nosso schema usando [Zod](https://zod.dev/) dentro do arquivo `packages/game-api/src/schema/index.ts` da seguinte forma:
 
 <E2EDiff lang="typescript" before="dungeon-adventure/2/schema/index.ts.old.template" after="dungeon-adventure/2/schema/index.ts.template" />
 
 Exclua o arquivo `packages/game-api/src/schema/echo.ts` pois não o usaremos neste projeto.
 
-<Aside type="tip" title="Inferência automática de tipos">
-Para cada esquema que definimos no Zod, também exportamos uma interface usando a sintaxe `z.TypeOf`. Isso converte nossa definição Zod em uma interface TypeScript sem duplicação de esforço.
+<Aside type="tip" title="Inferência Automática de Tipos">
+Para cada um dos schemas que definimos no Zod, também exportamos uma interface usando a sintaxe `z.TypeOf`. Isso converte nossa definição Zod em uma interface Typescript sem ter que duplicar esforços.
 </Aside>
 
 ### Modelagem de entidades
@@ -81,17 +81,17 @@ O gerador `ts#dynamodb` configurou o [ElectroDB](https://electrodb.dev/en/core-c
 <InstallCommand pkg={getDungeonAdventureElectroDbDependencies()} project="@dungeon-adventure/game-api" />
 
 <Aside title="Dependências do Projeto">
-O cliente S3 é adicionado ao `package.json` do próprio projeto `game-api`, já que o código-fonte desse projeto o importa. As versões ainda são alinhadas em todo o workspace através do catálogo de dependências do gerenciador de pacotes (onde suportado) ([política de versão única](https://nx.dev/concepts/decisions/dependency-management#single-version-policy)). Para mais informações, consulte o <Link path="guides/typescript-project#dependencies">guia ts#project</Link>.
+O cliente S3 é adicionado ao `package.json` do próprio projeto `game-api`, já que o código-fonte desse projeto o importa. As versões ainda são alinhadas em todo o workspace através do catálogo de dependências do gerenciador de pacotes (quando suportado) ([política de versão única](https://nx.dev/concepts/decisions/dependency-management#single-version-policy)). Para mais informações, consulte o <Link path="guides/typescript-project#dependencies">guia ts#project</Link>.
 </Aside>
 
 Substitua a entidade de exemplo gerada em `packages/dungeon-db/src/entities/index.ts` por nossas entidades `Game` e `Inventory`, e exclua `packages/dungeon-db/src/entities/example.ts`:
 
 <E2ECode lang="typescript" path="dungeon-adventure/2/dungeon-db/entities/index.ts.template" />
 
-O ElectroDB nos permite não apenas definir nossos tipos, mas também fornecer valores padrão para certos campos como timestamps. Além disso, o ElectroDB segue o [design de tabela única](https://electrodb.dev/en/core-concepts/single-table-relationships/), que é a melhor prática ao usar DynamoDB.
+O ElectroDB nos permite não apenas definir nossos tipos, mas também pode fornecer valores padrão para certos valores como timestamps. Além disso, o ElectroDB segue o [design de tabela única](https://electrodb.dev/en/core-concepts/single-table-relationships/) que é a melhor prática ao usar DynamoDB.
 
-<Aside title="Coleções ElectroDB">
-Embora o ElectroDB suporte [coleções](https://electrodb.dev/en/modeling/collections/), optamos por não usá-las neste tutorial para simplificar.
+<Aside title="Coleções do ElectroDB">
+Embora o ElectroDB suporte [coleções](https://electrodb.dev/en/modeling/collections/), optamos por não usá-las neste tutorial por simplicidade.
 </Aside>
 
 ### Definindo nossos procedimentos
@@ -114,7 +114,7 @@ Exclua o arquivo `echo.ts` (de `packages/game-api/src/procedures`) pois não o u
 
 ### Configuração do roteador
 
-Depois de definir nossos procedimentos, para conectá-los à nossa API, atualize o seguinte arquivo:
+Depois de definirmos nossos procedimentos, para conectá-los à nossa API, atualize o seguinte arquivo:
 
 <Tabs>
   <TabItem label="packages/game-api/src/router.ts">
@@ -126,7 +126,7 @@ Depois de definir nossos procedimentos, para conectá-los à nossa API, atualize
 
 Vamos criar um servidor MCP que permitirá ao nosso agente gerenciar itens no inventário de um jogador.
 
-Definiremos as seguintes ferramentas para nosso agente:
+Vamos definir as seguintes ferramentas para nosso agente:
 
 - `list-inventory-items` para recuperar os itens atuais do inventário do jogador
 - `add-to-inventory` para adicionar itens ao inventário do jogador
@@ -140,49 +140,49 @@ Para economizar tempo, vamos definir todas as ferramentas inline:
 </TabItem>
 </Tabs>
 
-Conforme o número de ferramentas crescer, você pode refatorá-las em arquivos separados se preferir.
+À medida que o número de ferramentas cresce, você pode refatorá-las em arquivos separados se desejar.
 
-Exclua os diretórios `tools` e `resources` em `packages/inventory/src/mcp-server` pois não serão utilizados.
+Exclua os diretórios `tools` e `resources` em `packages/inventory/src/mcp-server` pois estes não serão usados.
 
 ## Tarefa 3: Atualizar a infraestrutura
 
-O construto `DungeonDb` gerado pelo `ts#dynamodb` já provisiona nossa tabela, então só precisamos instanciá-lo em nossa stack e conceder à Game API e ao servidor MCP de Inventário as permissões necessárias. Atualize `packages/infra/src/stacks/application-stack.ts` conforme segue:
+O construto `DungeonDb` gerado por `ts#dynamodb` já provisiona nossa tabela, então só precisamos instanciá-lo em nossa stack e conceder à API do Jogo e ao servidor MCP de Inventário as permissões necessárias. Atualize `packages/infra/src/stacks/application-stack.ts` da seguinte forma:
 
 <E2EDiff lang="typescript" before="dungeon-adventure/1/application-stack.ts.template" after="dungeon-adventure/2/stacks/application-stack.ts.template" />
 
-:::note[Procedimentos isolados]
-Observe que como cada procedimento é atendido por uma função lambda individual, podemos seguir o princípio de menor privilégio e atribuir apenas as permissões de leitura/escrita necessárias com base na implementação do procedimento.
+:::note[Procedimentos Isolados]
+Observe aqui que, como cada procedimento é servido por uma função lambda individual, podemos seguir o princípio do menor privilégio e atribuir apenas as permissões de leitura/escrita necessárias com base na implementação do procedimento.
 :::
 
 :::tip[Configuração de Runtime]
-O construto `DungeonDb` registra o nome da tabela implantada na <Link path="guides/runtime-config">Configuração de Runtime</Link> sob o namespace `dynamodb`, armazenado no AWS AppConfig. A Game API e o servidor MCP de Inventário o recuperam em tempo de execução usando Lambda Powertools, em vez de precisar ser passado como uma variável de ambiente. Um benefício dessa abordagem é que, à medida que o número de tabelas ou outros identificadores de infraestrutura cresce, você precisa apenas de uma única variável de ambiente `RUNTIME_CONFIG_APP_ID` ao executar contra a infraestrutura implantada.
+O construto `DungeonDb` registra o nome da tabela implantada na <Link path="guides/runtime-config">Configuração de Runtime</Link> sob o namespace `dynamodb`, armazenado no AWS AppConfig. A API do Jogo e o servidor MCP de Inventário o recuperam em tempo de execução usando Lambda Powertools, em vez de precisar que seja passado como uma variável de ambiente. Um benefício dessa abordagem é que, à medida que o número de tabelas ou outros identificadores de infraestrutura cresce, você só precisa de uma única variável de ambiente `RUNTIME_CONFIG_APP_ID` ao executar contra infraestrutura implantada.
 :::
 
-## Tarefa 4: Testar a Game API localmente
+## Tarefa 4: Testar a API do Jogo localmente
 
-Não há necessidade de implantar na AWS para testar nossa API — o target `serve-local` executa a Game API contra o [DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html). Como conectamos a Game API ao projeto `DungeonDb` no Módulo 1, este target também inicia o DynamoDB Local automaticamente.
+Não há necessidade de implantar na AWS para experimentar nossa API — o target `dev` executa a API do Jogo contra o [DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html). Como conectamos a API do Jogo ao projeto `DungeonDb` no Módulo 1, este target também inicia o DynamoDB Local automaticamente.
 
 Primeiro, corrija quaisquer problemas de lint:
 
 <PackageManagerShortCommand commands={["lint"]} />
 
-Depois construa a base de código:
+Em seguida, compile a base de código:
 
 <PackageManagerShortCommand commands={["build"]} />
 
 ### Iniciar o servidor local
 
-Inicie a Game API localmente com o target `dev`, que também inicializa o DynamoDB Local:
+Inicie a API do Jogo localmente com o target `dev`, que também inicializa o DynamoDB Local:
 
 <NxCommands commands={["dev game-api"]} />
 
 <Aside type="tip" title="Primeira execução">
-A primeira execução baixa a imagem de contêiner do DynamoDB Local, o que pode levar um momento. Deixe o servidor em execução neste terminal e abra um segundo terminal para os comandos `curl` abaixo.
+A primeira execução baixa a imagem do container do DynamoDB Local, o que pode levar um momento. Deixe o servidor rodando neste terminal e abra um segundo terminal para os comandos `curl` abaixo.
 </Aside>
 
 ### Testar a API
 
-Assim que seu servidor estiver em execução, consulte a lista (vazia) de jogos:
+Uma vez que seu servidor esteja funcionando, consulte a lista (vazia) de jogos:
 
 ```bash
 curl -X GET 'http://localhost:2022/games.query?input=%7B%7D'
@@ -228,7 +228,7 @@ Você pode parar o servidor local (`Ctrl+C`) quando terminar.
 
 ## Tarefa 5: Testar o servidor MCP de Inventário localmente
 
-Podemos testar as ferramentas do servidor MCP com o [MCP Inspector](https://github.com/modelcontextprotocol/inspector) usando o target `mcp-server-inspect` gerado:
+Podemos experimentar as ferramentas do servidor MCP com o [MCP Inspector](https://github.com/modelcontextprotocol/inspector) usando o target `mcp-server-inspect` gerado:
 
 <NxCommands commands={["mcp-server-inspect inventory"]} />
 

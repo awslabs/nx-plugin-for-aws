@@ -1,9 +1,7 @@
 ---
-title: "Distribuisci"
+title: Deploy
+description: Deploy
 ---
-
-
-
 import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
 import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
 import RunGenerator from '@components/run-generator.astro';
@@ -12,17 +10,18 @@ import NxCommands from '@components/nx-commands.astro';
 import Drawer from '@components/drawer.astro';
 import InstallCommand from '@components/install-command.astro';
 
-Ora che abbiamo la nostra codebase completamente migrata, possiamo procedere con la distribuzione. A questo punto abbiamo due strade percorribili.
 
-#### Risorse Completamente Nuove (Semplice)
+Ora che abbiamo la nostra codebase completamente migrata, possiamo occuparci del deploy. Ci sono due percorsi che possiamo seguire a questo punto.
 
-L'approccio più semplice è trattare questa come un'applicazione completamente nuova, il che significa che "ricominceremo" con una nuova tabella DynamoDB e un nuovo User Pool Cognito - perdendo tutti gli utenti e le loro liste della spesa. Per questo approccio, basta:
+#### Tutte Nuove Risorse (Semplice)
+
+L'approccio più semplice è trattare questa come un'applicazione completamente nuova, il che significa che "ricominceremo da capo" con una nuova tabella DynamoDB e un nuovo Cognito User Pool - perdendo tutti gli utenti e le loro liste della spesa. Per questo approccio, semplicemente:
 
 <Steps>
 
 1. Elimina la tabella DynamoDB denominata `shopping_list`
 
-1. Distribuisci la nuova applicazione:
+1. Esegui il deploy della nuova applicazione:
 
     <NxCommands commands={["deploy infra shopping-list-infra-sandbox/*"]} />
 
@@ -30,25 +29,25 @@ L'approccio più semplice è trattare questa come un'applicazione completamente 
 
 🎉 E abbiamo finito! 🎉
 
-#### Migrare le Risorse Esistenti con Stato Senza Interruzioni (Più Complesso)
+#### Migrare le Risorse Stateful Esistenti senza Interruzioni (Più Complesso)
 
-Nella realtà, è più probabile che tu voglia migrare le risorse AWS esistenti in modo che siano gestite dalla nuova codebase, evitando nel contempo qualsiasi interruzione del servizio per i clienti.
+In realtà, è più probabile che tu voglia migrare le risorse AWS esistenti in modo che siano gestite dalla nuova codebase, evitando al contempo qualsiasi downtime per i tuoi clienti.
 
 :::danger
-Questo approccio è più articolato e complesso, e trattandosi solo di un esempio, è FORTEMENTE consigliato esercitarsi in un ambiente non di produzione (idealmente creando un nuovo stack sandbox) e documentare i passaggi esatti per la tua applicazione. Si raccomanda inoltre di preparare piani di contingenza/rollback nel caso in cui i passaggi falliscano o producano risultati imprevisti.
+Questo approccio è un po' più sfumato e complesso, e questo è solo un esempio, quindi è FORTEMENTE raccomandato fare pratica in un ambiente non di produzione (idealmente creare un nuovo stack sandbox) e documentare i passaggi esatti per la tua applicazione. Si raccomanda inoltre di preparare piani di contingenza/rollback in caso di fallimento dei passaggi o risultati imprevisti.
 :::
 
 :::note
-La nostra applicazione PDK per le liste della spesa non definiva domini personalizzati o DNS. Nella pratica è probabile che tu abbia domini configurati per il sito web e l'API. Ai fini di questa sezione della guida, supporremo di aver configurato Route53 con nomi DNS personalizzati per il sito web e l'API.
+La nostra applicazione shopping list PDK non definiva alcun dominio personalizzato o DNS. In pratica avresti molto probabilmente domini configurati per il tuo sito web e API. Ai fini di questa sezione della guida, assumeremo di aver configurato Route53 con nomi DNS personalizzati per il sito web e l'API.
 :::
 
-Per la nostra applicazione delle liste della spesa, le risorse con stato che ci interessano sono la tabella DynamoDB che contiene le liste della spesa degli utenti e l'User Pool che contiene i dettagli di tutti gli utenti registrati. Il nostro piano ad alto livello sarà mantenere queste due risorse chiave e spostarle in modo che siano gestite dal nuovo stack, per poi aggiornare il DNS per puntare al nuovo sito web (e all'API se esposta ai clienti).
+Per la nostra applicazione shopping list, le risorse stateful che ci interessano sono la tabella DynamoDB che contiene le liste della spesa dei nostri utenti e lo User Pool che contiene i dettagli di tutti i nostri utenti registrati. Il nostro piano ad alto livello sarà quello di mantenere queste due risorse chiave e spostarle in modo che siano gestite dal nostro nuovo stack, quindi aggiornare il DNS per puntare al nostro nuovo sito web (e API se esposta ai clienti).
 
 <Steps>
 
-1. Aggiorna la nuova applicazione per riferirsi alle risorse esistenti che desideri mantenere.
+1. Aggiorna la tua nuova applicazione per fare riferimento alle risorse esistenti che desideri mantenere.
 
-    Per l'applicazione delle liste della spesa, facciamo questo per la tabella DynamoDB
+    Per l'applicazione shopping list, lo facciamo per la tabella DynamoDB
 
     ```diff lang="ts"
     // constructs/database.ts
@@ -61,7 +60,7 @@ Per la nostra applicazione delle liste della spesa, le risorse con stato che ci 
     +);
     ```
 
-    E per l'User Pool Cognito
+    E per il Cognito User Pool
 
     ```diff lang="ts"
     // packages/common/constructs/src/core/user-identity.ts
@@ -73,17 +72,17 @@ Per la nostra applicazione delle liste della spesa, le risorse con stato che ci 
     +);
     ```
 
-1. Compila e distribuisci la nuova applicazione:
+1. Esegui il build e il deploy della nuova applicazione:
 
     <NxCommands commands={["run-many --target build"]} />
 
     <NxCommands commands={["deploy infra shopping-list-infra-sandbox/*"]} />
 
-    Ora abbiamo la nuova applicazione attiva che fa riferimento alle risorse esistenti, ma non ancora in produzione.
+    Ora abbiamo la nostra nuova applicazione attiva che fa riferimento alle risorse esistenti, non ancora in ricezione di traffico.
 
-1. Esegui test di integrazione completi per verificare che la nuova applicazione funzioni come previsto. Per l'applicazione delle liste della spesa, carica il sito web e verifica di poter accedere, creare, visualizzare, modificare ed eliminare liste.
+1. Esegui test di integrazione completi per assicurarti che la nuova applicazione funzioni come previsto. Per l'applicazione shopping list, carica il sito web e verifica di poter accedere e creare, visualizzare, modificare ed eliminare liste della spesa.
 
-1. Ripristina le modifiche che fanno riferimento alle risorse esistenti nella nuova applicazione, ma non distribuirle ancora.
+1. Ripristina le modifiche che fanno riferimento alle risorse esistenti nella tua nuova applicazione, ma non eseguire ancora il deploy.
 
     ```diff lang="ts"
     // constructs/database.ts
@@ -96,7 +95,7 @@ Per la nostra applicazione delle liste della spesa, le risorse con stato che ci 
     -);
     ```
 
-    E per l'User Pool Cognito
+    E per il Cognito User Pool
 
     ```diff lang="ts"
     // packages/common/constructs/src/core/user-identity.ts
@@ -108,28 +107,28 @@ Per la nostra applicazione delle liste della spesa, le risorse con stato che ci 
     -);
     ```
 
-    E poi esegui una compilazione
+    E poi esegui un build
 
     <NxCommands commands={["run-many --target build"]} />
 
-1. Usa `cdk import` nella cartella `packages/infra` della nuova applicazione per vedere quali risorse verranno proposte per l'importazione.
+1. Usa `cdk import` nella cartella `packages/infra` della tua nuova applicazione per vedere quali risorse ci verrà richiesto di importare.
 
-    ```bash title="Nuova Applicazione"
+    ```bash title="New Application"
     cd packages/infra
     pnpm exec cdk import shopping-list-infra-sandbox/Application --force
     ```
 
-    Procedi attraverso le richieste premendo invio. L'importazione fallirà perché le risorse sono gestite da un altro stack - è previsto, abbiamo fatto questo passaggio solo per confermare quali risorse dovremo mantenere. Vedrai un output simile a questo:
+    Procedi attraverso i prompt premendo invio. L'importazione fallirà perché le risorse sono gestite da un altro stack - questo è previsto, abbiamo fatto questo passaggio solo per confermare quali risorse dovremo mantenere. Vedrai un output come questo:
 
     ```bash wrap
-    shopping-list-infra-sandbox/Application/ApplicationUserIdentity/UserPool/smsRole/Resource (AWS::IAM::Role): inserisci RoleName (vuoto per saltare)
-    shopping-list-infra-sandbox/Application/ApplicationUserIdentity/UserPool/Resource (AWS::Cognito::UserPool): inserisci UserPoolId (vuoto per saltare)
-    shopping-list-infra-sandbox/Application/Database/ShoppingList/Resource (AWS::DynamoDB::Table): importa con TableName=shopping_list (y/n) y
+    shopping-list-infra-sandbox/Application/ApplicationUserIdentity/UserPool/smsRole/Resource (AWS::IAM::Role): enter RoleName (empty to skip)
+    shopping-list-infra-sandbox/Application/ApplicationUserIdentity/UserPool/Resource (AWS::Cognito::UserPool): enter UserPoolId (empty to skip)
+    shopping-list-infra-sandbox/Application/Database/ShoppingList/Resource (AWS::DynamoDB::Table): import with TableName=shopping_list (y/n) y
     ```
 
-    Questo ci dice che in realtà ci sono 3 risorse da importare nel nuovo stack.
+    Questo ci dice che ci sono in realtà 3 risorse che dovremo importare nel nostro nuovo stack.
 
-1. Aggiorna il tuo vecchio progetto PDK per impostare `RemovalPolicy` su `RETAIN` per le risorse individuate nel passaggio precedente. Al momento della stesura questa è l'impostazione predefinita sia per l'User Pool che per la tabella DynamoDB, ma dobbiamo aggiornarla per il ruolo SMS individuato sopra:
+1. Aggiorna il tuo vecchio progetto PDK per impostare `RemovalPolicy` su `RETAIN` per le risorse scoperte dal passaggio precedente. Al momento della scrittura questo è il default sia per lo User Pool che per la tabella DynamoDB, ma dobbiamo aggiornarlo per l'SMS Role che abbiamo scoperto sopra:
 
     ```diff lang="ts"
     // application-stack.ts
@@ -143,19 +142,19 @@ Per la nostra applicazione delle liste della spesa, le risorse con stato che ci 
     +smsRole.applyRemovalPolicy(RemovalPolicy.RETAIN);
     ```
 
-1. Distribuisci il progetto PDK per applicare le politiche di rimozione
+1. Esegui il deploy del tuo progetto PDK in modo che le removal policy vengano applicate
 
-    ```bash title="Applicazione PDK"
+    ```bash title="PDK Application"
     cd packages/infra
     npx projen deploy
     ```
 
-1. Controlla la console CloudFormation e registra i valori richiesti nel passaggio `cdk import` precedente
+1. Dai un'occhiata alla console CloudFormation e registra i valori che ti sono stati richiesti nel passaggio `cdk import` sopra
 
-    1. L'ID dell'User Pool, es. `us-west-2_XXXXX`
-    2. Il nome del ruolo SMS, es. `infra-sandbox-UserIdentityUserPoolsmsRoleXXXXXX`
+    1. L'ID dello User Pool, ad es. `us-west-2_XXXXX`
+    2. Il nome dell'SMS Role, ad es. `infra-sandbox-UserIdentityUserPoolsmsRoleXXXXXX`
 
-1. Aggiorna il progetto PDK per riferirsi alle risorse esistenti invece di crearne di nuove
+1. Aggiorna il tuo progetto PDK per fare riferimento alle risorse esistenti invece di crearle
 
     ```diff lang="ts"
     // constructs/database.ts
@@ -168,7 +167,7 @@ Per la nostra applicazione delle liste della spesa, le risorse con stato che ci 
     +);
     ```
 
-    E per l'User Pool Cognito
+    E per il Cognito User Pool
 
     ```diff lang="ts"
     // application-stack.ts
@@ -178,40 +177,40 @@ Per la nostra applicazione delle liste della spesa, le risorse con stato che ci 
     +  '<your-user-pool-id>',
     +);
     const userIdentity = new UserIdentity(this, `${id}UserIdentity`, {
-    +  // Il costrutto PDK accetta UserPool non IUserPool, ma funziona comunque!
+    +  // PDK construct accepts UserPool not IUserPool, but this still works!
     +  userPool: userPool as any,
     });
     ```
 
-1. Distribuisci nuovamente il progetto PDK, questo significa che le risorse non saranno più gestite dallo stack CloudFormation del progetto PDK.
+1. Esegui nuovamente il deploy del tuo progetto PDK, questo significherà che le risorse non sono più gestite dallo stack CloudFormation del nostro progetto PDK.
 
-    ```bash title="Applicazione PDK"
+    ```bash title="PDK Application"
     cd packages/infra
     npx projen deploy
     ```
 
-1. Ora che le risorse non sono gestite, possiamo eseguire `cdk import` nella nuova applicazione per completare l'importazione:
+1. Ora che le risorse non sono gestite, possiamo eseguire `cdk import` nella nostra nuova applicazione per eseguire effettivamente l'importazione:
 
-    ```bash title="Nuova Applicazione"
+    ```bash title="New Application"
     cd packages/infra
     pnpm exec cdk import shopping-list-infra-sandbox/Application --force
     ```
 
     Inserisci i valori quando richiesto, l'importazione dovrebbe completarsi con successo.
 
-1. Distribuisci nuovamente la nuova applicazione per assicurarti che eventuali modifiche a queste risorse esistenti (ora gestite dal nuovo stack) vengano applicate:
+1. Esegui nuovamente il deploy della nuova applicazione per assicurarti che vengano apportate eventuali modifiche a queste risorse esistenti (ora gestite dal tuo nuovo stack):
 
     <NxCommands commands={["deploy infra shopping-list-infra-sandbox/*"]} />
 
-1. Esegui nuovamente un test completo della nuova applicazione
+1. Esegui un test completo della tua nuova applicazione ancora una volta
 
-1. Aggiorna i record DNS per puntare al nuovo sito web (e all'API se necessario).
+1. Aggiorna i record DNS per puntare al tuo nuovo sito web (e API se necessario).
 
-    Raccomandiamo un approccio graduale usando il [Routing Ponderato](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/routing-policy-weighted.html) di Route53, dove inizialmente una frazione delle richieste viene indirizzata alla nuova applicazione. Monitorando le metriche, puoi aumentare gradualmente il peso per la nuova applicazione finché tutto il traffico non viene indirizzato lì.
+    Raccomandiamo un approccio graduale utilizzando il [Weighted Routing](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/routing-policy-weighted.html) di Route53, per cui una frazione delle richieste viene inizialmente indirizzata alla nuova applicazione. Man mano che monitori le tue metriche puoi aumentare il peso per la nuova applicazione fino a quando nessun traffico viene inviato alla tua vecchia applicazione PDK.
 
-    Se non hai DNS e hai usato i domini auto-generati per sito web e API, puoi considerare il proxy delle richieste (es. tramite un [origine HTTP CloudFront](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_cloudfront_origins-readme.html#from-an-http-endpoint) o [integrazioni HTTP API Gateway](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_apigateway.HttpIntegration.html)).
+    Se non hai alcun DNS e hai utilizzato i domini generati automaticamente per il sito web e l'API, puoi sempre considerare di fare il proxy delle richieste (ad es. tramite un [CloudFront HTTP origin](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_cloudfront_origins-readme.html#from-an-http-endpoint) o [API Gateway HTTP integration(s)](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_apigateway.HttpIntegration.html)).
 
-1. Monitora le metriche dell'applicazione PDK per assicurarti che non ci sia traffico residuo, infine elimina il vecchio stack CloudFormation:
+1. Monitora le metriche dell'applicazione PDK per assicurarti che non ci sia traffico e infine distruggi il vecchio stack CloudFormation:
 
     ```bash
     cd packages/infra
@@ -220,12 +219,12 @@ Per la nostra applicazione delle liste della spesa, le risorse con stato che ci 
 
 </Steps>
 
-È stato piuttosto articolato, ma abbiamo migrato gli utenti in modo trasparente alla nuova applicazione! 🎉🎉🎉
+È stato un po' più complesso, ma abbiamo migrato con successo i nostri utenti senza interruzioni alla nuova applicazione! 🎉🎉🎉
 
 Ora abbiamo i nuovi vantaggi di Nx Plugin for AWS rispetto a PDK:
 
 - Build più veloci
-- Supporto allo sviluppo locale delle API
-- Una codebase amichevole per il vibe-coding (<Link path="/get_started/building-with-ai">prova il nostro server MCP!</Link>)
+- Supporto per lo sviluppo locale dell'API
+- Una codebase adatta al vibe-coding (<Link path="/it/get_started/building-with-ai">prova il nostro server MCP!</Link>)
 - Codice client/server type-safe più intuitivo
-- E altro ancora!
+- E molto altro!

@@ -1,0 +1,79 @@
+async function main() {
+  const requestedLanguages: string[] = options.languages
+    ? options.languages
+        .split(',')
+        .map((l: string) => l.trim())
+        .filter(Boolean)
+    : config.targetLanguages;
+
+  const targetLanguages = requestedLanguages.filter(
+    (l) => l !== config.sourceLanguage,
+  );
+
+  if (targetLanguages.length === 0) {
+    log.error('No target languages configured');
+    process.exit(1);
+  }
+
+  log.info(`Source: ${config.sourceLanguage}`);
+  log.info(`Targets: ${targetLanguages.join(', ')}`);
+
+  await pruneOrphanedTranslations(targetLanguages);
+
+  const files = await getFilesToTranslate();
+
+  if (files.length === 0) {
+    log.info('No documentation files to translate.');
+    return;
+  }
+
+  log.info(`Files to translate: ${files.length}`);
+  for (const f of files) {
+    log.verbose(
+      `  - ${f.relativePath}${f.diffPath ? ' (changed)' : ' (full)'}`,
+    );
+  }
+
+  if (options.dryRun) {
+    for (const lang of targetLanguages) {
+      for (const f of files) {
+        log.info(`[dry-run] would translate ${f.relativePath} → ${lang}`);
+      }
+    }
+    log.info('Done (dry-run).');
+    return;
+  }
+
+  // Build one task per (file × target language) — each is a fresh agent invocation,
+  // so context windows stay small no matter how big the docs site is. A single
+  // failing translation records its error rather than aborting the whole run, so
+  // every other (file × language) still completes and gets written to disk.
+  const failures: string[] = [];
+  const tasks = targetLanguages.flatMap((lang) =>
+    files.map((file) => async () => {
+      log.info(`  ${file.relativePath} → ${lang}`);
+      try {
+        await translateFileForLanguage(file, lang);
+      } catch (err) {
+        log.error(
+          `${file.relativePath} → ${lang}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        failures.push(`${file.relativePath} → ${lang}`);
+      }
+    }),
+  );
+
+  const concurrency = Math.max(1, config.concurrency ?? 5);
+  log.info(
+    `Running ${tasks.length} translation(s) with concurrency=${concurrency}`,
+  );
+  await runWithConcurrency(tasks, concurrency);
+
+  if (failures.length > 0) {
+    throw new Error(
+      `${failures.length} translation(s) failed after retries:\n  ${failures.join('\n  ')}`,
+    );
+  }
+
+  log.info('Done.');
+}
