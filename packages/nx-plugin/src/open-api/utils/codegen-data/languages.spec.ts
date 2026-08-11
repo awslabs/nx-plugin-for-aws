@@ -183,9 +183,7 @@ describe('languages', () => {
         toPythonAnnotation(createModel({ type: 'string', export: 'generic' })),
       ).toBe('str');
       expect(
-        toPythonAnnotation(
-          createModel({ type: 'integer', export: 'generic' }),
-        ),
+        toPythonAnnotation(createModel({ type: 'integer', export: 'generic' })),
       ).toBe('int');
     });
 

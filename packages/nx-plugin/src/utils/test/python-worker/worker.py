@@ -16,12 +16,17 @@ import sys
 import tempfile
 import traceback
 import types
+import warnings
 from typing import Any, Callable
 
 import httpx
 
 
 # ─── Mock httpx transport ────────────────────────────────────────────────
+class NoMockMatched(Exception):
+    """Raised when a request matches no mock entry, so the test fails loudly."""
+
+
 class _MockMatch:
     """Matches a mock entry against a live httpx.Request."""
 
@@ -71,7 +76,9 @@ class _MockTransport(httpx.BaseTransport, httpx.AsyncBaseTransport):
 
     def _build_response(self, spec: dict) -> httpx.Response:
         status = spec.get("status", 200)
-        headers = spec.get("headers", {})
+        # Copied because the defaults applied below would otherwise persist onto
+        # the caller's spec and leak into a later replay of the same entry.
+        headers = dict(spec.get("headers", {}))
         if "jsonl_lines" in spec:
             body = ("\n".join(spec["jsonl_lines"]) + "\n").encode("utf-8")
             headers.setdefault("content-type", "application/jsonl")
@@ -92,12 +99,11 @@ class _MockTransport(httpx.BaseTransport, httpx.AsyncBaseTransport):
         self._record(request)
         for entry in self.entries:
             if entry.matches(request):
+                entry.used = True
                 return self._build_response(entry.response)
-        # Default 404 when nothing matches — makes tests fail loudly.
-        return httpx.Response(
-            status_code=599,
-            content=f"No mock matched {request.method} {request.url}".encode("utf-8"),
-        )
+        # A request no mock describes is a mistake in the test, not a response
+        # the client should interpret: raise so it can't be mistaken for one.
+        raise NoMockMatched(f"No mock matched {request.method} {request.url}")
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
         return self._match(request)
@@ -188,32 +194,73 @@ def handle_compile(req: dict) -> dict:
 
 
 def _resolve_invoke(module_kind: str, mod: types.ModuleType) -> tuple[Any, str]:
-    """Locate the generated client class and its Config inside the package."""
+    """Locate the generated client class and its Config inside the package.
+
+    Selection is by defining module rather than by name, so a spec whose title
+    starts with "Async" still resolves to the right client.
+    """
     is_async = module_kind == "async"
+    wanted_module = "async_client_gen" if is_async else "client_gen"
     for name in getattr(mod, "__all__", []) or dir(mod):
         if not isinstance(name, str):
             continue
         obj = getattr(mod, name, None)
-        if not isinstance(obj, type):
+        if not isinstance(obj, type) or name.endswith("Config"):
             continue
-        if name.endswith("Config"):
+        defining_module = getattr(obj, "__module__", "")
+        if not defining_module.endswith(wanted_module):
             continue
-        if is_async and name.startswith("Async"):
-            return obj, name
-        if not is_async and not name.startswith("Async"):
-            # Filter to classes defined inside this package (not imported types).
-            if getattr(obj, "__module__", "").endswith("client_gen"):
-                return obj, name
+        # `client_gen` also ends `async_client_gen`, so the sync client is the
+        # one whose module isn't the async module.
+        if not is_async and defining_module.endswith("async_client_gen"):
+            continue
+        return obj, name
     raise RuntimeError(
         f"Could not locate {'async ' if is_async else ''}client class in {mod.__name__}"
     )
 
 
-def _build_mock_client(kind: str, entries: list[dict]) -> tuple[Any, _MockTransport]:
+class _BodyDigestAuth(httpx.Auth):
+    """Signs each request with a digest of its body.
+
+    Standing in for a real signer (SigV4, say): a generated client that bypassed
+    the auth flow, or that sent a body other than the one asserted on, could not
+    produce the expected header.
+    """
+
+    requires_request_body = True
+
+    def auth_flow(self, request: httpx.Request):
+        request.headers["x-body-digest"] = (
+            request.content.decode("utf-8") if request.content else ""
+        )
+        yield request
+
+
+def _build_mock_client(
+    kind: str,
+    entries: list[dict],
+    client_kwargs: dict | None = None,
+    auth: str | None = None,
+    event_hook_header: str | None = None,
+) -> tuple[Any, _MockTransport]:
     transport = _MockTransport(entries)
+    kwargs: dict[str, Any] = {
+        "transport": transport,
+        "base_url": "http://mock",
+        **(client_kwargs or {}),
+    }
+    if auth == "body-digest":
+        kwargs["auth"] = _BodyDigestAuth()
+    if event_hook_header:
+
+        def _hook(request: httpx.Request) -> None:
+            request.headers[event_hook_header] = "yes"
+
+        kwargs["event_hooks"] = {"request": [_hook]}
     if kind == "sync":
-        return httpx.Client(transport=transport, base_url="http://mock"), transport
-    return httpx.AsyncClient(transport=transport, base_url="http://mock"), transport
+        return httpx.Client(**kwargs), transport
+    return httpx.AsyncClient(**kwargs), transport
 
 
 def _to_jsonable(value: Any) -> Any:
@@ -239,7 +286,13 @@ def handle_invoke(req: dict) -> dict:
     client_cls, cls_name = _resolve_invoke(module_kind, pkg)
     config_cls = getattr(pkg, f"{cls_name}Config")
 
-    httpx_client, transport = _build_mock_client(module_kind, req.get("mock", []))
+    httpx_client, transport = _build_mock_client(
+        module_kind,
+        req.get("mock", []),
+        req.get("httpx_client_kwargs") or {},
+        req.get("auth"),
+        req.get("event_hook_header"),
+    )
     client = client_cls(
         config_cls(
             url=req.get("base_url", "http://mock"),
@@ -250,6 +303,12 @@ def handle_invoke(req: dict) -> dict:
 
     args = req.get("args", [])
     kwargs = req.get("kwargs", {})
+    # The client doesn't own the httpx client here, so closing it must leave the
+    # caller's client usable for the call that follows.
+    if req.get("close_then_reuse"):
+        closer = getattr(client, "close", None)
+        if callable(closer):
+            closer()
 
     def _resolve_method(obj: Any, dotted: str) -> Callable[..., Any]:
         for part in dotted.split("."):
@@ -284,10 +343,15 @@ def handle_invoke(req: dict) -> dict:
                 pass
 
     try:
-        if module_kind == "sync":
-            result = _invoke_sync()
-        else:
-            result = asyncio.run(_invoke_async())
+        with warnings.catch_warnings():
+            # A deprecation the generated code triggers is a defect callers would
+            # see, so a test can ask for it to fail the call.
+            if req.get("error_on_warning"):
+                warnings.simplefilter("error")
+            if module_kind == "sync":
+                result = _invoke_sync()
+            else:
+                result = asyncio.run(_invoke_async())
     except Exception as exc:  # noqa: BLE001
         exc_info: dict[str, Any] = {
             "type": type(exc).__name__,
@@ -298,6 +362,12 @@ def handle_invoke(req: dict) -> dict:
             exc_info["error"] = _to_jsonable(error_payload)
         if hasattr(exc, "status"):
             exc_info["status"] = getattr(exc, "status")
+        catch_as = req.get("catch_as")
+        if catch_as:
+            expected = getattr(pkg, catch_as, None)
+            exc_info["caught_as"] = isinstance(expected, type) and isinstance(
+                exc, expected
+            )
         return {
             "ok": False,
             "error": f"{type(exc).__name__}: {exc}",
@@ -306,11 +376,17 @@ def handle_invoke(req: dict) -> dict:
             "calls": transport.calls,
         }
 
-    return {
+    response = {
         "ok": True,
         "value": _to_jsonable(result),
+        "py_type": type(result).__name__,
         "calls": transport.calls,
     }
+    # The Python type of each element, so a list parsed as a single scalar (or
+    # with the wrong element type) is distinguishable from a correct one.
+    if isinstance(result, (list, tuple)):
+        response["py_element_types"] = [type(item).__name__ for item in result]
+    return response
 
 
 # ─── Dispatch loop ───────────────────────────────────────────────────────

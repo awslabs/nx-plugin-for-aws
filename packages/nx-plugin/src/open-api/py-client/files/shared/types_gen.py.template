@@ -1,9 +1,14 @@
 <%_
-const pyEnumValue = (member) => {
-  if (typeof member.value === 'string') return `"${member.value.replace(/"/g, '\\"')}"`;
-  if (member.value === null) return 'None';
-  return String(member.value);
-};
+const pyEnumValue = (member) => toPythonLiteral(member.value);
+/**
+ * A discriminated subtype's tag property. pydantic dispatches a tagged union
+ * on a bare `Literal` field that every member declares, so the tag is emitted
+ * as required whether or not the schema lists it in `required`: its value is
+ * fixed by union membership, and a missing tag is a request the server always
+ * rejects.
+ */
+const isDiscriminatorTag = (prop) => !!prop.discriminatorValue;
+
 const fieldAnnotation = (prop) => {
   let base;
   if (prop.isEnum && Array.isArray(prop.enum) && prop.enum.length > 0) {
@@ -11,6 +16,7 @@ const fieldAnnotation = (prop) => {
   } else {
     base = prop.pythonAnnotation || prop.pythonType || 'Any';
   }
+  if (isDiscriminatorTag(prop)) return base;
   if (!prop.isRequired || prop.isNullable) return `Optional[${base}]`;
   return base;
 };
@@ -25,7 +31,9 @@ const fieldCallFor = (property) => {
   const snake = property.pythonName || property.name;
   const aliasNeeded = snake !== property.name;
   const args = [];
-  const needsDefault = !property.isRequired || property.isNullable;
+  const needsDefault =
+    !isDiscriminatorTag(property) &&
+    (!property.isRequired || property.isNullable);
   if (needsDefault) args.push('default=None');
   if (aliasNeeded) args.push(`alias="${property.name}"`);
   if (property.description) {
@@ -46,7 +54,9 @@ const renderProperty = (property) => {
   const snake = property.pythonName || property.name;
   const typeAnnotation = fieldAnnotation(property);
   const fieldCall = fieldCallFor(property);
-  const needsDefault = !property.isRequired || property.isNullable;
+  const needsDefault =
+    !isDiscriminatorTag(property) &&
+    (!property.isRequired || property.isNullable);
   if (fieldCall) {
     return `    ${snake}: ${typeAnnotation} = ${fieldCall}`;
   }
@@ -100,15 +110,9 @@ _%>
   if (classifyModel(model) !== 'class') return;
 _%>
 <%_ if (model.export === 'all-of') {
-  const flattened = [];
-  const seen = new Set();
-  for (const c of (model.composedModels || [])) {
-    for (const p of (c.properties || [])) {
-      if (seen.has(p.name)) continue;
-      seen.add(p.name);
-      flattened.push(p);
-    }
-  }
+  // `effectiveProperties` is the shared flattening of the composition,
+  // recursing through members that are themselves allOf composites.
+  const flattened = model.effectiveProperties || [];
 _%>
 
 class <%- model.pythonClassName %>(BaseModel):
@@ -142,23 +146,45 @@ class <%- model.pythonClassName %>(BaseModel):
 
 <%_
 /* ────── Pass 2: all non-class aliases ──────
- * Emit in dependency order so later aliases can reference earlier ones
- * (aliases are module-level expressions evaluated at import time — unlike
- * class-body annotations, `from __future__ import annotations` doesn't
- * help here).  Enums reference nothing.  Collections and composites can
- * reference classes (already defined above) and enums; composites can
- * also reference other composites in rare cases, but topological sort on
- * the full alias set is overkill for the shapes that appear in practice.
- *
- * Order: enum → array/tuple → dictionary → one-of/any-of.
+ * An alias is a module-level expression evaluated at import time, so unlike a
+ * class-body annotation (which `from __future__ import annotations` defers)
+ * every alias it references must already be bound. Emit them in dependency
+ * order via a topological sort: an alias that names another alias follows it.
+ * Classes are all defined above, so only alias-to-alias edges matter.
  */
-const aliasOrder = { 'enum': 0, 'array': 1, 'tuple': 1, 'dictionary': 2, 'any-of': 3, 'one-of': 3 };
-const aliasModels = models
-  .filter((m) => classifyModel(m) === 'alias')
+const aliasModels = models.filter((m) => classifyModel(m) === 'alias');
+const aliasByClassName = new Map(aliasModels.map((m) => [m.pythonClassName, m]));
+/** The aliases the given alias's rendered type expression names. */
+const aliasDependencies = (model) => {
+  const rendered = model.export === 'enum'
+    ? ''
+    : [model.pythonType || '', ...(model.properties || []).map((p) => p.pythonType || '')].join(' ');
+  const found = new Set();
+  for (const identifier of rendered.match(/[A-Za-z_][A-Za-z0-9_]*/g) || []) {
+    const dependency = aliasByClassName.get(identifier);
+    if (dependency && dependency !== model) found.add(dependency);
+  }
+  return found;
+};
+const sortedAliasModels = [];
+const aliasState = new Map();
+const visitAlias = (model) => {
+  // 'visiting' marks a cycle: emit it where first reached and let the reference
+  // that closed the loop resolve against the earlier binding.
+  if (aliasState.get(model)) return;
+  aliasState.set(model, 'visiting');
+  for (const dependency of aliasDependencies(model)) {
+    visitAlias(dependency);
+  }
+  aliasState.set(model, 'done');
+  sortedAliasModels.push(model);
+};
+aliasModels
   .slice()
-  .sort((a, b) => (aliasOrder[a.export] - aliasOrder[b.export]) || a.name.localeCompare(b.name));
+  .sort((a, b) => a.name.localeCompare(b.name))
+  .forEach(visitAlias);
 _%>
-<%_ aliasModels.forEach((model) => { _%>
+<%_ sortedAliasModels.forEach((model) => { _%>
 
 <%_ if (model.export === 'enum') { _%>
 <%- model.pythonClassName %> = Literal[<%_ model.enum.forEach((m, i) => { _%><%- i > 0 ? ', ' : '' %><%- pyEnumValue(m) %><%_ }); _%>]
@@ -174,14 +200,15 @@ _%>
        dispatches directly to the matching branch (never merging branches).
        Requires every member to carry the discriminator as a Literal-typed
        field; otherwise fall back to a plain Union. */ _%>
-<%_ /* pydantic requires the tag to be a required Literal field on every
-       member, else TypeAdapter construction fails at import time. */
+<%_ /* pydantic requires the tag to be a bare Literal field on every member,
+       else TypeAdapter construction fails at import time. `renderProperty`
+       emits a tag that way whether or not the schema requires it. */
     const memberModels = (model.composedModels || []);
     const isTagged = model.discriminator && memberModels.length > 0
       && memberModels.length === model.properties.filter(p => !p.isPrimitive).length
       && (model.composedPrimitives || []).length === 0
       && memberModels.every(m => (m.properties || []).some(p =>
-           p.name === model.discriminator.propertyName && p.discriminatorValue && p.isRequired)); _%>
+           p.name === model.discriminator.propertyName && p.discriminatorValue)); _%>
 <%_ if (isTagged) { _%>
 <%- model.pythonClassName %> = Annotated[Union[<%_ model.properties.forEach((p, i) => { _%><%- i > 0 ? ', ' : '' %><%- p.pythonType || 'Any' %><%_ }); _%>], Field(discriminator="<%- model.discriminator.pythonPropertyName %>")]
 <%_ } else { _%>

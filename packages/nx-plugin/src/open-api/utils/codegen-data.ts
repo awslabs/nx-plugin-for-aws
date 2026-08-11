@@ -112,6 +112,9 @@ export const buildOpenApiCodeGenData = (inSpec: Spec): CodeGenData => {
     groupOperationsByTag(allOperations);
 
   annotateAllOfFlattening(data.models);
+  for (const model of data.models) {
+    assertNoClashingPythonNames(model);
+  }
   for (const op of allOperations) {
     annotateRequestAndErrorShapes(op, modelsByName);
   }
@@ -141,20 +144,41 @@ export const buildOpenApiCodeGenData = (inSpec: Spec): CodeGenData => {
  * (`isInlinedByAllOf`) so templates can skip emitting them separately.
  */
 const annotateAllOfFlattening = (models: Model[]): void => {
-  for (const model of models) {
-    if (model.export !== 'all-of') continue;
-    const flattened: Model[] = [];
-    const seen = new Set<string>();
+  /**
+   * Collect a composed model's own properties, recursing through a member that
+   * is itself an `all-of` so a nested composition contributes the leaf
+   * properties rather than the composite itself (which has no property name).
+   * `visiting` breaks a cycle in a self-referential composition.
+   */
+  const collect = (
+    model: Model,
+    into: Model[],
+    seen: Set<string>,
+    visiting: Set<Model>,
+  ): void => {
+    if (visiting.has(model)) return;
+    visiting.add(model);
     for (const composed of model.composedModels ?? []) {
       if (composed.vendorExtensions?.['x-aws-nx-hoisted']) {
         composed.isInlinedByAllOf = model.name;
       }
+      if (composed.export === 'all-of') {
+        collect(composed, into, seen, visiting);
+        continue;
+      }
       for (const prop of composed.properties ?? []) {
         if (!prop.name || seen.has(prop.name)) continue;
         seen.add(prop.name);
-        flattened.push(prop);
+        into.push(prop);
       }
     }
+    visiting.delete(model);
+  };
+
+  for (const model of models) {
+    if (model.export !== 'all-of') continue;
+    const flattened: Model[] = [];
+    collect(model, flattened, new Set<string>(), new Set<Model>());
     model.effectiveProperties = flattened;
   }
 };
@@ -326,7 +350,10 @@ const annotateRequestAndErrorShapes = (
   for (const parameter of op.parameters ?? []) {
     annotateReferencedCollectionKind(parameter, modelsByName);
   }
-  annotateReferencedCollectionKind(op.parametersBody ?? undefined, modelsByName);
+  annotateReferencedCollectionKind(
+    op.parametersBody ?? undefined,
+    modelsByName,
+  );
   for (const response of op.responses ?? []) {
     annotateReferencedCollectionKind(response, modelsByName);
   }
@@ -337,6 +364,68 @@ const annotateRequestAndErrorShapes = (
 };
 
 const TYPES_GEN_PREFIX = 'types_gen.';
+
+/**
+ * Attributes and methods the generated Python client defines on itself. An
+ * operation or tag whose name would land on one of these is suffixed, so a
+ * spec can't silently replace the client's own plumbing — an operation called
+ * `close` would otherwise shadow the method that releases the httpx client.
+ */
+const PYTHON_CLIENT_MEMBERS = new Set([
+  'aclose',
+  'close',
+  'config',
+  'url',
+  'query',
+  'query_string',
+  'headers',
+  'cookies',
+  'deep_object',
+  'dump',
+  'error',
+  'error_payload',
+  'client',
+  'base_url',
+  'owns_client',
+  'parent',
+]);
+
+/**
+ * A Python member name for an operation or tag that cannot collide with the
+ * client's own members, nor with another operation or tag on the same client.
+ */
+const uniquePythonMemberName = (name: string, taken: Set<string>): string => {
+  // A leading underscore is how the client marks its own internals, so an
+  // operation that snake-cases onto one is pushed out of that namespace too.
+  let candidate = PYTHON_CLIENT_MEMBERS.has(name.replace(/^_+/, ''))
+    ? `${name.replace(/^_+/, '')}_op`
+    : name;
+  while (taken.has(candidate)) {
+    candidate = `${candidate}_`;
+  }
+  taken.add(candidate);
+  return candidate;
+};
+
+/**
+ * Resolve the Python member name of every operation and tag, keeping them
+ * distinct from each other and from the client's own members.
+ */
+const annotatePythonMemberNames = (data: CodeGenData): void => {
+  const taken = new Set<string>();
+  data.pythonTagNames = Object.fromEntries(
+    Object.keys(data.operationsByTag).map((tag) => [
+      tag,
+      uniquePythonMemberName(toPythonName('property', tag), taken),
+    ]),
+  );
+  for (const op of data.allOperations) {
+    op.pythonMethodName = uniquePythonMemberName(
+      op.operationIdSnakeCase ?? toPythonName('operation', op.name),
+      taken,
+    );
+  }
+};
 
 /**
  * Attach `pythonClientType` to a typed entry — the bare `pythonType`
@@ -360,6 +449,8 @@ const annotatePythonClientType = (entry: Model | undefined): void => {
  *  - `pythonClassName` / `pythonClientType`
  *  - `requestShape.inputs[*].pythonName` / `.pythonAnnotation` (kwargs)
  *  - `errorShape.exceptionClassName` / `.unionTypeName` / per-entry names
+ *  - `pythonMethodName` per operation and `pythonTagNames` per tag, escaped
+ *    clear of the members the generated client defines
  *
  * Runs for every spec — the resulting fields are only read by the py-client
  * templates, so there's no cost to TypeScript consumers.
@@ -368,6 +459,7 @@ const annotatePythonData = (
   data: CodeGenData,
   modelsByName: ModelsByName,
 ): void => {
+  annotatePythonMemberNames(data);
   for (const model of data.models) {
     model.pythonClassName = toPythonClassName(model.name);
     model.pythonType = toPythonType(model);
@@ -856,6 +948,31 @@ const assertNoClashingPropertyNames = (model: Model): void => {
       );
     }
     seen.set(property.typescriptName!, property.name);
+  }
+};
+
+/**
+ * The Python counterpart of {@link assertNoClashingPropertyNames}, run over the
+ * flattened property list an `all-of` composite emits. Two members whose wire
+ * names snake_case alike (`fooBar` and `foo_bar`) would emit the same field
+ * twice, silently keeping only the last, so fail fast instead.
+ *
+ * Only the flattened list needs checking: a single object's properties are
+ * already covered by the TypeScript assertion, which rejects any pair that also
+ * collapses in Python.
+ */
+const assertNoClashingPythonNames = (model: Model): void => {
+  const seen = new Map<string, string>();
+  for (const property of model.effectiveProperties ?? []) {
+    if (!property.name) continue;
+    const pythonName = toPythonName('property', property.name);
+    const existing = seen.get(pythonName);
+    if (existing !== undefined && existing !== property.name) {
+      throw new Error(
+        `Property name conflict in "${model.name}": "${existing}" and "${property.name}" both map to the Python name "${pythonName}". Please rename one of these in your OpenAPI specification.`,
+      );
+    }
+    seen.set(pythonName, property.name);
   }
 };
 
