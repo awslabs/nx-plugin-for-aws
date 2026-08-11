@@ -97,8 +97,9 @@ const harness = new MyHarness(this, 'MyHarness', {
 - `allowedTools` — Harness가 사용할 수 있는 도구. 제공하지 않으면 Harness는 도구 없이 배포됩니다. <a href="#configuring-tools">도구 구성</a>을 참조하세요.
 - `executionRole` — 생성된 역할 대신 사용할 기존 IAM 역할. 제공된 역할은 있는 그대로 사용됩니다: 기본 권한이 추가되지 않으며, 해당 ARN은 항상 Harness에 제공됩니다(원시 `executionRoleArn` 문자열은 재정의할 수 없음).
 - `modelResourceArns` — 생성된 실행 역할이 호출할 수 있는 Bedrock 모델 및 추론 프로필 ARN으로, 기본 목록을 대체합니다.
+- `vpc`, `vpcSubnets` 및 `securityGroups` — VPC에서 Harness를 실행하여 프라이빗 리소스에 도달할 수 있도록 합니다. <a href="#running-in-a-vpc">VPC에서 실행</a>을 참조하세요.
 
-공개 멤버는 `harness`(`CfnHarness`), `executionRole`, `grantPrincipal`, `harnessArn` getter, 실행 역할 확장을 위한 `addToRolePolicy(statement)`, 호출자 권한 부여를 위한 `grantInvokeAccess(grantee)`입니다.
+공개 멤버는 `harness`(`CfnHarness`), `executionRole`, `grantPrincipal`, `harnessArn` getter, `connections`(VPC에서), 실행 역할 확장을 위한 `addToRolePolicy(statement)`, 호출자 권한 부여를 위한 `grantInvokeAccess(grantee)`입니다.
 
 평소와 같이 인프라 프로젝트로 스택을 배포하세요 — <Link path="guides/typescript-infrastructure">CDK 인프라 가이드</Link>를 참조하세요.
   </Fragment>
@@ -224,6 +225,46 @@ resource "aws_bedrockagentcore_harness" "this" {
 </Infrastructure>
 
 `@builtin`을 `@builtin/file_operations`와 같은 특정 패턴으로 좁혀 에이전트 루프가 수행할 수 있는 작업을 제한하세요. 추가할 수 있는 내장 도구는 [Harness tools](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-tools.html)를 참조하세요.
+
+### VPC에서 실행
+
+<Infrastructure>
+  <Fragment slot="cdk">
+`vpc`를 제공하여 Harness를 그 안에서 실행하면 데이터베이스와 같은 프라이빗 리소스에 도달할 수 있습니다. 구성은 `IConnectable`을 구현하므로 해당 리소스는 다른 리소스와 동일한 방식으로 액세스 권한을 부여합니다:
+
+```ts
+const harness = new MyHarness(this, 'MyHarness', { vpc });
+
+database.connections.allowDefaultPortFrom(harness, 'Harness to database');
+```
+
+Harness는 VPC의 프라이빗 서브넷에 배치되며, 이를 위해 생성된 보안 그룹에 배치됩니다. `vpcSubnets` 및 `securityGroups`로 둘 중 하나를 재정의할 수 있습니다. 둘 다 `vpc`가 필요하며, `connections`는 Harness가 VPC에서 실행될 때만 사용할 수 있습니다.
+  </Fragment>
+  <Fragment slot="terraform">
+생성된 `aws_bedrockagentcore_harness` 리소스의 `environment.agent_core_runtime_environment`에 `network_configuration` 블록을 추가한 다음, 다른 리소스의 규칙에서 배치한 보안 그룹을 참조하세요:
+
+```hcl title="packages/common/terraform/src/app/harnesses/my-harness/my-harness.tf"
+resource "aws_security_group" "harness" {
+  vpc_id = var.vpc_id
+}
+
+resource "aws_bedrockagentcore_harness" "this" {
+  # ...
+  environment {
+    agent_core_runtime_environment {
+      network_configuration {
+        network_mode = "VPC"
+        network_mode_config {
+          security_groups = [aws_security_group.harness.id]
+          subnets         = var.subnet_ids
+        }
+      }
+    }
+  }
+}
+```
+  </Fragment>
+</Infrastructure>
 
 ### 호출별 재정의
 
