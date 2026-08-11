@@ -229,9 +229,16 @@ def _type_check(root: str, pkg_name: str) -> list[str]:
 
 
 # ─── Command handlers ────────────────────────────────────────────────────
+# The files and package name last type checked. A suite that regenerates the
+# same client for each of its tests would otherwise re-run `ty` over identical
+# input every time, which is the bulk of its cost.
+_last_type_checked: tuple[str, str] | None = None
+
+
 def handle_compile(req: dict) -> dict:
     pkg_name = req.get("package", "generated")
-    root = _write_files(req["files"], pkg_name)
+    files = req["files"]
+    root = _write_files(files, pkg_name)
     errors = _compile_all(root)
     if errors:
         return {"ok": False, "error": "compile_failed", "details": errors}
@@ -244,13 +251,17 @@ def handle_compile(req: dict) -> dict:
             "traceback": traceback.format_exc(),
         }
     if req.get("type_check"):
-        diagnostics = _type_check(root, pkg_name)
-        if diagnostics:
-            return {
-                "ok": False,
-                "error": "type_check_failed",
-                "details": diagnostics,
-            }
+        global _last_type_checked
+        fingerprint = (pkg_name, json.dumps(files, sort_keys=True))
+        if fingerprint != _last_type_checked:
+            diagnostics = _type_check(root, pkg_name)
+            if diagnostics:
+                return {
+                    "ok": False,
+                    "error": "type_check_failed",
+                    "details": diagnostics,
+                }
+            _last_type_checked = fingerprint
     return {"ok": True, "value": None}
 
 
