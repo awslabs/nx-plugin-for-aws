@@ -97,8 +97,9 @@ Construct cũng chấp nhận:
 - `allowedTools` — các công cụ mà Harness có thể sử dụng. Harness triển khai mà không có công cụ nào trừ khi bạn cung cấp chúng, xem <a href="#configuring-tools">Configuring tools</a>.
 - `executionRole` — một IAM role hiện có để sử dụng thay vì role được tạo. Một role được cung cấp được sử dụng nguyên trạng: các quyền cơ bản không được thêm vào nó, và ARN của nó luôn cung cấp cho Harness (chuỗi `executionRoleArn` thô không thể bị ghi đè).
 - `modelResourceArns` — các ARN của Bedrock model và inference-profile mà execution role được tạo có thể gọi, thay thế danh sách mặc định.
+- `vpc`, `vpcSubnets` và `securityGroups` — chạy Harness trong một VPC để nó có thể tiếp cận các tài nguyên riêng tư, xem <a href="#running-in-a-vpc">Running in a VPC</a>.
 
-Các thành viên công khai của nó là `harness` (`CfnHarness`), `executionRole`, `grantPrincipal`, getter `harnessArn`, `addToRolePolicy(statement)` cho các mở rộng execution role, và `grantInvokeAccess(grantee)` để ủy quyền cho người gọi.
+Các thành viên công khai của nó là `harness` (`CfnHarness`), `executionRole`, `grantPrincipal`, getter `harnessArn`, `connections` (trong một VPC), `addToRolePolicy(statement)` cho các mở rộng execution role, và `grantInvokeAccess(grantee)` để ủy quyền cho người gọi.
 
 Triển khai stack với dự án hạ tầng của bạn như thường lệ — xem <Link path="guides/typescript-infrastructure">hướng dẫn hạ tầng CDK</Link>.
   </Fragment>
@@ -224,6 +225,46 @@ Thêm một biến `allowed_tools` vào module nếu bạn muốn đặt nó là
 </Infrastructure>
 
 Thu hẹp `@builtin` thành các mẫu cụ thể như `@builtin/file_operations` để hạn chế những gì vòng lặp agent có thể làm. Xem [Harness tools](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-tools.html) cho các công cụ tích hợp sẵn mà bạn có thể thêm.
+
+### Chạy trong một VPC
+
+<Infrastructure>
+  <Fragment slot="cdk">
+Cung cấp một `vpc` để chạy Harness bên trong nó, để nó có thể tiếp cận các tài nguyên riêng tư như cơ sở dữ liệu. Construct triển khai `IConnectable`, vì vậy các tài nguyên đó cấp quyền truy cập cho nó theo cách tương tự như bất kỳ tài nguyên nào khác:
+
+```ts
+const harness = new MyHarness(this, 'MyHarness', { vpc });
+
+database.connections.allowDefaultPortFrom(harness, 'Harness to database');
+```
+
+Harness được đặt trong các subnet riêng tư của VPC với egress, trong một security group được tạo cho nó. Ghi đè một trong hai với `vpcSubnets` và `securityGroups`. Cả hai đều yêu cầu `vpc`, và `connections` chỉ khả dụng khi Harness chạy trong một VPC.
+  </Fragment>
+  <Fragment slot="terraform">
+Thêm một khối `network_configuration` vào `environment.agent_core_runtime_environment` của tài nguyên `aws_bedrockagentcore_harness` được tạo, sau đó tham chiếu security group mà bạn đặt nó vào từ các quy tắc của các tài nguyên khác của bạn:
+
+```hcl title="packages/common/terraform/src/app/harnesses/my-harness/my-harness.tf"
+resource "aws_security_group" "harness" {
+  vpc_id = var.vpc_id
+}
+
+resource "aws_bedrockagentcore_harness" "this" {
+  # ...
+  environment {
+    agent_core_runtime_environment {
+      network_configuration {
+        network_mode = "VPC"
+        network_mode_config {
+          security_groups = [aws_security_group.harness.id]
+          subnets         = var.subnet_ids
+        }
+      }
+    }
+  }
+}
+```
+  </Fragment>
+</Infrastructure>
 
 ### Ghi đè theo từng lần gọi
 

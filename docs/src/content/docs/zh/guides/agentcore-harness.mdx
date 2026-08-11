@@ -97,8 +97,9 @@ const harness = new MyHarness(this, 'MyHarness', {
 - `allowedTools` — Harness 可以使用的工具。除非您提供工具，否则 Harness 部署时不带任何工具，请参阅<a href="#configuring-tools">配置工具</a>。
 - `executionRole` — 要使用的现有 IAM 角色，而不是生成的角色。提供的角色按原样使用：不会向其添加基线权限，其 ARN 始终提供给 Harness（原始 `executionRoleArn` 字符串无法被覆盖）。
 - `modelResourceArns` — 生成的执行角色可以调用的 Bedrock 模型和推理配置文件 ARN，替换默认列表。
+- `vpc`、`vpcSubnets` 和 `securityGroups` — 在 VPC 中运行 Harness，以便它可以访问私有资源，请参阅<a href="#running-in-a-vpc">在 VPC 中运行</a>。
 
-其公共成员包括 `harness`（`CfnHarness`）、`executionRole`、`grantPrincipal`、`harnessArn` getter、用于执行角色扩展的 `addToRolePolicy(statement)` 以及用于授权调用者的 `grantInvokeAccess(grantee)`。
+其公共成员包括 `harness`（`CfnHarness`）、`executionRole`、`grantPrincipal`、`harnessArn` getter、`connections`（在 VPC 中）、用于执行角色扩展的 `addToRolePolicy(statement)` 以及用于授权调用者的 `grantInvokeAccess(grantee)`。
 
 像往常一样使用您的基础设施项目部署堆栈 — 请参阅 <Link path="guides/typescript-infrastructure">CDK 基础设施指南</Link>。
   </Fragment>
@@ -224,6 +225,46 @@ resource "aws_bedrockagentcore_harness" "this" {
 </Infrastructure>
 
 将 `@builtin` 缩小到特定模式（如 `@builtin/file_operations`）以限制代理循环可以执行的操作。有关可以添加的内置工具，请参阅 [Harness 工具](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-tools.html)。
+
+### 在 VPC 中运行
+
+<Infrastructure>
+  <Fragment slot="cdk">
+提供 `vpc` 以在其中运行 Harness，以便它可以访问私有资源（如数据库）。该构造实现了 `IConnectable`，因此这些资源以与其他资源相同的方式授予它访问权限：
+
+```ts
+const harness = new MyHarness(this, 'MyHarness', { vpc });
+
+database.connections.allowDefaultPortFrom(harness, 'Harness to database');
+```
+
+Harness 被放置在 VPC 的具有出口的私有子网中，位于为其创建的安全组中。使用 `vpcSubnets` 和 `securityGroups` 覆盖任一项。两者都需要 `vpc`，并且 `connections` 仅在 Harness 在 VPC 中运行时可用。
+  </Fragment>
+  <Fragment slot="terraform">
+将 `network_configuration` 块添加到生成的 `aws_bedrockagentcore_harness` 资源的 `environment.agent_core_runtime_environment`，然后从其他资源的规则中引用您放置它的安全组：
+
+```hcl title="packages/common/terraform/src/app/harnesses/my-harness/my-harness.tf"
+resource "aws_security_group" "harness" {
+  vpc_id = var.vpc_id
+}
+
+resource "aws_bedrockagentcore_harness" "this" {
+  # ...
+  environment {
+    agent_core_runtime_environment {
+      network_configuration {
+        network_mode = "VPC"
+        network_mode_config {
+          security_groups = [aws_security_group.harness.id]
+          subnets         = var.subnet_ids
+        }
+      }
+    }
+  }
+}
+```
+  </Fragment>
+</Infrastructure>
 
 ### 每次调用覆盖
 

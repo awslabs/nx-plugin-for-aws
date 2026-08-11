@@ -97,8 +97,9 @@ const harness = new MyHarness(this, 'MyHarness', {
 - `allowedTools` — Harnessが使用できるツール。指定しない限り、Harnessはツールなしでデプロイされます。<a href="#configuring-tools">ツールの構成</a>を参照してください。
 - `executionRole` — 生成されたロールの代わりに使用する既存のIAMロール。指定されたロールはそのまま使用されます。ベースライン権限は追加されず、そのARNは常にHarnessに供給されます（生の`executionRoleArn`文字列はオーバーライドできません）。
 - `modelResourceArns` — 生成された実行ロールが呼び出せるBedrockモデルおよび推論プロファイルARN。デフォルトリストを置き換えます。
+- `vpc`、`vpcSubnets`、`securityGroups` — HarnessをVPC内で実行し、プライベートリソースに到達できるようにします。<a href="#running-in-a-vpc">VPCでの実行</a>を参照してください。
 
-パブリックメンバーは、`harness`（`CfnHarness`）、`executionRole`、`grantPrincipal`、`harnessArn`ゲッター、実行ロール拡張用の`addToRolePolicy(statement)`、呼び出し元を認証するための`grantInvokeAccess(grantee)`です。
+パブリックメンバーは、`harness`（`CfnHarness`）、`executionRole`、`grantPrincipal`、`harnessArn`ゲッター、`connections`（VPC内）、実行ロール拡張用の`addToRolePolicy(statement)`、呼び出し元を認証するための`grantInvokeAccess(grantee)`です。
 
 通常どおりインフラストラクチャプロジェクトでスタックをデプロイします。<Link path="guides/typescript-infrastructure">CDKインフラストラクチャガイド</Link>を参照してください。
   </Fragment>
@@ -224,6 +225,46 @@ resource "aws_bedrockagentcore_harness" "this" {
 </Infrastructure>
 
 `@builtin`を`@builtin/file_operations`などの特定のパターンに絞り込んで、エージェントループができることを制限します。追加できる組み込みツールについては、[Harnessツール](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-tools.html)を参照してください。
+
+### VPCでの実行
+
+<Infrastructure>
+  <Fragment slot="cdk">
+`vpc`を指定してHarnessをその中で実行すると、データベースなどのプライベートリソースに到達できるようになります。コンストラクトは`IConnectable`を実装しているため、これらのリソースは他のリソースと同じ方法でアクセスを許可します。
+
+```ts
+const harness = new MyHarness(this, 'MyHarness', { vpc });
+
+database.connections.allowDefaultPortFrom(harness, 'Harness to database');
+```
+
+Harnessは、VPCのプライベートサブネット（エグレス付き）に配置され、専用のセキュリティグループに入れられます。`vpcSubnets`と`securityGroups`でいずれかをオーバーライドできます。両方とも`vpc`が必要で、`connections`はHarnessがVPC内で実行されている場合にのみ利用可能です。
+  </Fragment>
+  <Fragment slot="terraform">
+生成された`aws_bedrockagentcore_harness`リソースの`environment.agent_core_runtime_environment`に`network_configuration`ブロックを追加し、配置したセキュリティグループを他のリソースのルールから参照します。
+
+```hcl title="packages/common/terraform/src/app/harnesses/my-harness/my-harness.tf"
+resource "aws_security_group" "harness" {
+  vpc_id = var.vpc_id
+}
+
+resource "aws_bedrockagentcore_harness" "this" {
+  # ...
+  environment {
+    agent_core_runtime_environment {
+      network_configuration {
+        network_mode = "VPC"
+        network_mode_config {
+          security_groups = [aws_security_group.harness.id]
+          subnets         = var.subnet_ids
+        }
+      }
+    }
+  }
+}
+```
+  </Fragment>
+</Infrastructure>
 
 ### 呼び出しごとのオーバーライド
 

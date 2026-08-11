@@ -97,8 +97,9 @@ El constructo también acepta:
 - `allowedTools` — las herramientas que el Harness puede usar. El Harness se implementa sin ninguna a menos que las proporciones, consulta <a href="#configurar-herramientas">Configurar herramientas</a>.
 - `executionRole` — un rol IAM existente para usar en lugar del rol generado. Un rol proporcionado se usa tal cual: los permisos básicos no se le agregan, y su ARN siempre alimenta el Harness (la cadena `executionRoleArn` sin procesar no se puede anular).
 - `modelResourceArns` — los ARN del modelo de Bedrock y del perfil de inferencia que el rol de ejecución generado puede invocar, reemplazando la lista predeterminada.
+- `vpc`, `vpcSubnets` y `securityGroups` — ejecuta el Harness en una VPC para que pueda alcanzar recursos privados, consulta <a href="#ejecutar-en-una-vpc">Ejecutar en una VPC</a>.
 
-Sus miembros públicos son `harness` (el `CfnHarness`), `executionRole`, `grantPrincipal`, el getter `harnessArn`, `addToRolePolicy(statement)` para extensiones del rol de ejecución, y `grantInvokeAccess(grantee)` para autorizar llamadores.
+Sus miembros públicos son `harness` (el `CfnHarness`), `executionRole`, `grantPrincipal`, el getter `harnessArn`, `connections` (en una VPC), `addToRolePolicy(statement)` para extensiones del rol de ejecución, y `grantInvokeAccess(grantee)` para autorizar llamadores.
 
 Implementa el stack con tu proyecto de infraestructura como de costumbre — consulta la <Link path="guides/typescript-infrastructure">guía de infraestructura CDK</Link>.
   </Fragment>
@@ -224,6 +225,46 @@ Agrega una variable `allowed_tools` al módulo si prefieres establecerla como un
 </Infrastructure>
 
 Reduce `@builtin` a patrones específicos como `@builtin/file_operations` para restringir lo que el bucle de agente puede hacer. Consulta [Herramientas de Harness](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-tools.html) para las herramientas integradas que puedes agregar.
+
+### Ejecutar en una VPC
+
+<Infrastructure>
+  <Fragment slot="cdk">
+Proporciona una `vpc` para ejecutar el Harness dentro de ella, de modo que pueda alcanzar recursos privados como una base de datos. El constructo implementa `IConnectable`, por lo que esos recursos le otorgan acceso de la misma manera que lo harían con cualquier otro:
+
+```ts
+const harness = new MyHarness(this, 'MyHarness', { vpc });
+
+database.connections.allowDefaultPortFrom(harness, 'Harness to database');
+```
+
+El Harness se coloca en las subredes privadas de la VPC con salida, en un grupo de seguridad creado para él. Anula cualquiera de los dos con `vpcSubnets` y `securityGroups`. Ambos requieren `vpc`, y `connections` solo está disponible cuando el Harness se ejecuta en una VPC.
+  </Fragment>
+  <Fragment slot="terraform">
+Agrega un bloque `network_configuration` al `environment.agent_core_runtime_environment` del recurso `aws_bedrockagentcore_harness` generado, luego referencia el grupo de seguridad en el que lo colocas desde las reglas de tus otros recursos:
+
+```hcl title="packages/common/terraform/src/app/harnesses/my-harness/my-harness.tf"
+resource "aws_security_group" "harness" {
+  vpc_id = var.vpc_id
+}
+
+resource "aws_bedrockagentcore_harness" "this" {
+  # ...
+  environment {
+    agent_core_runtime_environment {
+      network_configuration {
+        network_mode = "VPC"
+        network_mode_config {
+          security_groups = [aws_security_group.harness.id]
+          subnets         = var.subnet_ids
+        }
+      }
+    }
+  }
+}
+```
+  </Fragment>
+</Infrastructure>
 
 ### Anulaciones por invocación
 
