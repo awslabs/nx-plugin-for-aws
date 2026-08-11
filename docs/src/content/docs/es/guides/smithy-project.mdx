@@ -14,11 +14,11 @@ import OptionFilter from '@components/option-filter.astro';
 
 Hay dos tipos de proyecto Smithy:
 
-- **Service** (`--type=service`) — un modelo que define un servicio y sus operaciones. Esto es lo que el <Link path="guides/ts-smithy-api">generador `ts#api --framework=smithy`</Link> crea para ti junto con una implementación TypeScript.
-- **Shape library** (`--type=shapes`) — un modelo que define formas reutilizables pero ningún servicio. Conecta una biblioteca de formas a tus proyectos Smithy para compartir formas entre ellos, en lugar de duplicar las definiciones en cada uno.
+- **Servicio** (`--type=service`) — un modelo que define un servicio y sus operaciones. Esto es lo que el <Link path="guides/ts-smithy-api">generador `ts#api --framework=smithy`</Link> crea para ti junto con una implementación TypeScript.
+- **Biblioteca de formas** (`--type=shapes`) — un modelo que define formas reutilizables pero ningún servicio. Conecta una biblioteca de formas a tus proyectos Smithy para compartir formas entre ellos, en lugar de duplicar las definiciones en cada uno.
 
 :::tip
-Si deseas una API con una implementación, usa el <Link path="guides/ts-smithy-api">generador `ts#api`</Link> en su lugar. Crea un proyecto de modelo Smithy _y_ un servidor TypeScript que lo implementa.
+Si quieres una API con una implementación, usa el <Link path="guides/ts-smithy-api">generador `ts#api`</Link> en su lugar. Crea un proyecto de modelo Smithy _y_ un servidor TypeScript que lo implementa.
 :::
 
 ## Uso
@@ -41,10 +41,9 @@ Si deseas una API con una implementación, usa el <Link path="guides/ts-smithy-a
 
   - my-shapes
     - src
-      - main.smithy Tus definiciones de formas compartidas
-    - smithy-build.json Configuración de compilación de Smithy
-    - build.Dockerfile Compila y valida el modelo
-    - project.json Configuración del proyecto y objetivos de compilación
+      - main.smithy Your shared shape definitions
+    - smithy-build.json Smithy build configuration
+    - project.json Project configuration and build targets
 
 </FileTree>
 
@@ -64,7 +63,7 @@ structure Customer {
 }
 ```
 
-Dado que una biblioteca de formas no tiene servicio, su `smithy-build.json` no configura generación de código — compilarla valida el modelo y lo ensambla en un único archivo de modelo JSON en `dist/<my-shapes>/build/model/model.json`.
+Dado que una biblioteca de formas no tiene servicio, su `smithy-build.json` no configura generación de código — construirla valida el modelo y lo ensambla en un único archivo de modelo JSON en `dist/<my-shapes>/build/model.json`.
 
 </OptionFilter>
 
@@ -76,12 +75,12 @@ Dado que una biblioteca de formas no tiene servicio, su `smithy-build.json` no c
 
   - my-service
     - src
-      - main.smithy Tu definición de servicio
+      - main.smithy Your service definition
       - operations
-        - echo.smithy Una operación de ejemplo
-    - smithy-build.json Configuración de compilación de Smithy, incluyendo generación de código
-    - build.Dockerfile Compila el modelo, especificación OpenAPI y TypeScript Server SDK
-    - project.json Configuración del proyecto y objetivos de compilación
+        - echo.smithy An example operation
+    - smithy-build.json Smithy build configuration, including code generation
+    - ssdk.rolldown.config.mjs Bundles the generated TypeScript Server SDK
+    - project.json Project configuration and build targets
 
 </FileTree>
 
@@ -104,45 +103,38 @@ service MyService {
 }
 ```
 
-Compilar un proyecto de servicio genera una especificación OpenAPI y un TypeScript Server SDK en `dist/<my-service>/build/`.
+Construir un proyecto de servicio genera una especificación OpenAPI y un TypeScript Server SDK en `dist/<my-service>/build/`.
 
 </OptionFilter>
 
-## Compilación
+## Construcción
 
-Los proyectos Smithy se compilan usando [Docker](https://www.docker.com/), que ejecuta el [Smithy CLI](https://smithy.io/2.0/guides/smithy-cli/index.html) para validar tu modelo:
+Los proyectos Smithy se construyen con el [Smithy CLI](https://smithy.io/2.0/guides/smithy-cli/index.html), que valida tu modelo:
 
 <NxCommands commands={['build my-shapes']} />
 
+En macOS y Linux, el CLI se resuelve mediante [mise](https://mise.jdx.dev/), que la construcción obtiene bajo demanda, por lo que no hay nada que instalar — descarga y almacena en caché la versión fijada la primera vez que construyes. En Windows es un prerrequisito que instalas tú mismo — consulta <Link path="guides/ts-smithy-api#building-on-windows">Construcción en Windows</Link>.
+
 ## Dependiendo de una Biblioteca de Formas
 
-Compilar una biblioteca de formas escribe un modelo ensamblado en `dist/<my-shapes>/build/model/model.json`. Este único archivo contiene cada forma que la biblioteca define, junto con cualquiera de la que dependa, por lo que un consumidor solo declara las bibliotecas que referencia directamente.
+Construir una biblioteca de formas escribe un modelo ensamblado en `dist/<my-shapes>/build/model.json`. Este único archivo contiene cada forma que la biblioteca define, junto con cualquiera de la que dependa, por lo que un consumidor solo declara las bibliotecas que referencia directamente.
 
-Para depender de una biblioteca de formas desde otro proyecto Smithy, realiza tres cambios en el proyecto consumidor:
+Para depender de una biblioteca de formas desde otro proyecto Smithy, realiza dos cambios en el proyecto consumidor:
 
 <Steps>
 
-1. Los proyectos Smithy se compilan dentro de un contenedor, y la compilación recibe la raíz del espacio de trabajo como un contexto de compilación nombrado. Agrega un `COPY` al `build.Dockerfile` del proyecto consumidor, junto a donde se copian sus propias fuentes:
-
-   ```dockerfile ins={4}
-   # Copy project files
-   COPY smithy-build.json .
-   COPY src src
-   COPY --from=workspace dist/packages/my-shapes/build/model/model.json deps/my-shapes.json
-   ```
-
-2. Agrega el archivo copiado a `imports` en el `smithy-build.json` del proyecto consumidor:
+1. Agrega el modelo construido de la biblioteca a `imports` en el `smithy-build.json` del proyecto consumidor. Las rutas son relativas a ese archivo, por lo que el número de segmentos `../` coincide con cuán profundamente está anidado el proyecto consumidor — tres para `packages/my-api/model` a continuación:
 
    ```json ins={4}
    {
      "version": "1.0",
      "sources": ["src/"],
-     "imports": ["deps/my-shapes.json"],
+     "imports": ["../../../dist/packages/my-shapes/build/model.json"],
      ...
    }
    ```
 
-3. Agrega el objetivo `build` de la biblioteca como una dependencia del objetivo `compile` del proyecto consumidor en su `project.json`, para que el modelo exista antes de que el consumidor compile:
+2. Agrega el objetivo `build` de la biblioteca como una dependencia del objetivo `compile` del proyecto consumidor en su `project.json`, para que el modelo exista antes de que el consumidor construya:
 
    ```json ins={4}
    {
@@ -172,4 +164,4 @@ structure GetCustomerOutput {
 }
 ```
 
-Las bibliotecas de formas pueden depender de otras bibliotecas de formas de la misma manera. Dado que el modelo compilado de cada biblioteca ya contiene sus propias dependencias, solo necesitas repetir estos pasos para las bibliotecas que referencias directamente. Una biblioteca alcanzada por más de una ruta se resuelve una vez — Smithy ignora definiciones de formas duplicadas pero equivalentes.
+Las bibliotecas de formas pueden depender de otras bibliotecas de formas de la misma manera. Dado que el modelo construido de cada biblioteca ya contiene sus propias dependencias, solo necesitas repetir estos pasos para las bibliotecas que referencias directamente. Una biblioteca alcanzada por más de una ruta se resuelve una vez — Smithy ignora las definiciones de formas duplicadas pero equivalentes.

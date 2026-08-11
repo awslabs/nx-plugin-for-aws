@@ -43,7 +43,6 @@ If you want an API with an implementation, use the <Link path="guides/ts-smithy-
     - src
       - main.smithy Your shared shape definitions
     - smithy-build.json Smithy build configuration
-    - build.Dockerfile Builds and validates the model
     - project.json Project configuration and build targets
 
 </FileTree>
@@ -64,7 +63,7 @@ structure Customer {
 }
 ```
 
-Since a shape library has no service, its `smithy-build.json` configures no code generation — building it validates the model and assembles it into a single JSON model file at `dist/<my-shapes>/build/model/model.json`.
+Since a shape library has no service, its `smithy-build.json` configures no code generation — building it validates the model and assembles it into a single JSON model file at `dist/<my-shapes>/build/model.json`.
 
 </OptionFilter>
 
@@ -80,7 +79,7 @@ Since a shape library has no service, its `smithy-build.json` configures no code
       - operations
         - echo.smithy An example operation
     - smithy-build.json Smithy build configuration, including code generation
-    - build.Dockerfile Builds the model, OpenAPI spec and TypeScript Server SDK
+    - ssdk.rolldown.config.mjs Bundles the generated TypeScript Server SDK
     - project.json Project configuration and build targets
 
 </FileTree>
@@ -110,39 +109,32 @@ Building a service project generates an OpenAPI specification and a TypeScript S
 
 ## Building
 
-Smithy projects build using [Docker](https://www.docker.com/), which runs the [Smithy CLI](https://smithy.io/2.0/guides/smithy-cli/index.html) to validate your model:
+Smithy projects build with the [Smithy CLI](https://smithy.io/2.0/guides/smithy-cli/index.html), which validates your model:
 
 <NxCommands commands={['build my-shapes']} />
 
+On macOS and Linux the CLI is resolved by [mise](https://mise.jdx.dev/), which the build fetches on demand, so there is nothing to install — it downloads and caches the pinned version the first time you build. On Windows it is a prerequisite you install yourself — see <Link path="guides/ts-smithy-api#building-on-windows">Building on Windows</Link>.
+
 ## Depending on a Shape Library
 
-Building a shape library writes an assembled model to `dist/<my-shapes>/build/model/model.json`. This single file contains every shape the library defines, along with any it depends on, so a consumer only ever declares the libraries it references directly.
+Building a shape library writes an assembled model to `dist/<my-shapes>/build/model.json`. This single file contains every shape the library defines, along with any it depends on, so a consumer only ever declares the libraries it references directly.
 
-To depend on a shape library from another Smithy project, make three changes to the consuming project:
+To depend on a shape library from another Smithy project, make two changes to the consuming project:
 
 <Steps>
 
-1. Smithy projects build inside a container, and the build is given the workspace root as a named build context. Add a `COPY` to the consuming project's `build.Dockerfile`, alongside where its own sources are copied in:
-
-   ```dockerfile ins={4}
-   # Copy project files
-   COPY smithy-build.json .
-   COPY src src
-   COPY --from=workspace dist/packages/my-shapes/build/model/model.json deps/my-shapes.json
-   ```
-
-2. Add the copied file to `imports` in the consuming project's `smithy-build.json`:
+1. Add the library's built model to `imports` in the consuming project's `smithy-build.json`. Paths are relative to that file, so the number of `../` segments matches how deeply the consuming project is nested — three for `packages/my-api/model` below:
 
    ```json ins={4}
    {
      "version": "1.0",
      "sources": ["src/"],
-     "imports": ["deps/my-shapes.json"],
+     "imports": ["../../../dist/packages/my-shapes/build/model.json"],
      ...
    }
    ```
 
-3. Add the library's `build` target as a dependency of the consuming project's `compile` target in its `project.json`, so the model exists before the consumer builds:
+2. Add the library's `build` target as a dependency of the consuming project's `compile` target in its `project.json`, so the model exists before the consumer builds:
 
    ```json ins={4}
    {

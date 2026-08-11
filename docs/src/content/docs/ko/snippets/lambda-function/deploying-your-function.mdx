@@ -1,42 +1,39 @@
 ---
-title: "함수 배포하기"
+title: 함수 배포하기
 ---
-
-
-
 import Infrastructure from '@components/infrastructure.astro';
 
-이 생성기는 선택한 `iac` 기반으로 CDK 또는 Terraform 인프라 코드를 생성합니다. 이를 통해 함수를 배포할 수 있습니다.
+이 생성기는 선택한 `iac`를 기반으로 CDK 또는 Terraform 인프라 코드를 생성합니다. 이를 사용하여 함수를 배포할 수 있습니다.
 
 <Infrastructure>
 <Fragment slot="cdk">
-이 생성자는 `common/constructs` 폴더에 함수 배포를 위한 CDK 구문을 생성합니다. CDK 애플리케이션에서 다음과 같이 사용할 수 있습니다:
+이 생성기는 `common/constructs` 폴더에 함수를 배포하기 위한 CDK 구성을 생성합니다. CDK 애플리케이션에서 다음과 같이 사용할 수 있습니다:
 
 ```typescript {1, 6}
 import { MyProjectMyFunction } from '@my-scope/common-constructs';
 
 export class ExampleStack extends Stack {
   constructor(scope: Construct, id: string) {
-    // 스택에 함수 추가
+    // Add the function to your stack
     const fn = new MyProjectMyFunction(this, 'MyFunction');
   }
 }
 ```
 
-다음 리소스가 설정됩니다:
+다음과 같이 설정됩니다:
 
 1. AWS Lambda 함수
 2. CloudWatch 로그 그룹
-3. X-Ray 트레이싱 구성
+3. X-Ray 추적 구성
 4. CloudWatch 메트릭 네임스페이스
 
-이 함수는 람다 [이벤트 소스](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/)의 대상으로 사용될 수 있습니다:
+이 함수는 모든 람다 [이벤트 소스](https://docs.powertools.aws.dev/lambda/typescript/latest/utilities/parser/)의 대상으로 사용할 수 있습니다:
 
-:::note[이벤트 소스 매칭]
-핸들러 함수 내에서 이벤트가 올바르게 처리되도록 선택한 `event` 옵션과 이벤트 소스가 일치하는지 확인하세요.
+:::note[이벤트 소스 일치]
+핸들러 함수 내에서 이벤트가 올바르게 처리되도록 이벤트 소스가 선택한 `event` 옵션과 일치하는지 확인하세요.
 :::
 
-다음 예제는 EventBridge를 사용해 일정에 따라 람다 함수를 호출하는 CDK 코드를 보여줍니다:
+아래 예제는 EventBridge를 사용하여 일정에 따라 람다 함수를 호출하는 CDK 코드를 보여줍니다:
 
 ```typescript
 import { Rule, Schedule } from 'aws-cdk-lib/aws-events';
@@ -45,10 +42,10 @@ import { MyProjectMyFunction } from '@my-scope/common-constructs';
 
 export class ExampleStack extends Stack {
   constructor(scope: Construct, id: string) {
-    // 스택에 함수 추가
+    // Add the function to your stack
     const fn = new MyProjectMyFunction(this, 'MyFunction');
 
-    // EventBridge 스케줄 규칙에 함수 추가
+    // Add the function to an EventBridge scheduled rule
     const eventRule = new Rule(this, 'MyFunctionScheduleRule', {
       schedule: Schedule.cron({ minute: '15' }),
       targets: [new LambdaFunction(fn)],
@@ -58,7 +55,7 @@ export class ExampleStack extends Stack {
 ```
 </Fragment>
 <Fragment slot="terraform">
-이 생성기는 `common/terraform` 폴더에 함수 배포를 위한 Terraform 모듈을 생성합니다. 배포당 한 번 공유 `core/asset-bucket` 모듈을 인스턴스화하고 `asset_bucket_name` 입력에 `bucket_name`을 전달하세요:
+이 생성기는 `common/terraform` 폴더에 함수를 배포하기 위한 Terraform 모듈을 생성합니다. 배포당 한 번씩 공유 `core/asset-bucket` 모듈을 인스턴스화하고 해당 `bucket_name`을 `asset_bucket_name` 입력으로 전달하세요:
 
 ```hcl
 module "asset_bucket" {
@@ -80,31 +77,31 @@ module "my_project_my_function" {
 }
 ```
 
-다음 리소스가 설정됩니다:
+다음과 같이 설정됩니다:
 
 1. AWS Lambda 함수
 2. CloudWatch 로그 그룹
-3. X-Ray 트레이싱 구성
+3. X-Ray 추적 구성
 4. CloudWatch 메트릭 네임스페이스
 
-이 함수는 모든 람다 이벤트 소스의 대상으로 사용될 수 있습니다. 다음 예제는 EventBridge를 사용해 일정에 따라 람다 함수를 호출하는 Terraform 코드를 보여줍니다:
+이 함수는 모든 람다 이벤트 소스의 대상으로 사용할 수 있습니다. 아래 예제는 EventBridge를 사용하여 일정에 따라 람다 함수를 호출하는 Terraform 코드를 보여줍니다:
 
 ```hcl
-# 예약 실행을 위한 EventBridge 규칙
+# EventBridge rule for scheduled execution
 resource "aws_cloudwatch_event_rule" "my_function_schedule" {
   name                = "my-function-schedule"
-  description         = "15분마다 함수 트리거"
+  description         = "Trigger my function every 15 minutes"
   schedule_expression = "cron(15 * * * ? *)"
 }
 
-# EventBridge 타겟
+# EventBridge target
 resource "aws_cloudwatch_event_target" "lambda_target" {
   rule      = aws_cloudwatch_event_rule.my_function_schedule.name
   target_id = "MyFunctionTarget"
   arn       = module.my_project_my_function.function_arn
 }
 
-# EventBridge가 Lambda 함수 호출을 허용하는 권한
+# Permission for EventBridge to invoke the Lambda function
 resource "aws_lambda_permission" "allow_eventbridge" {
   statement_id  = "AllowExecutionFromEventBridge"
   action        = "lambda:InvokeFunction"
@@ -114,8 +111,8 @@ resource "aws_lambda_permission" "allow_eventbridge" {
 }
 ```
 
-:::note[이벤트 소스 매칭]
-핸들러 함수 내에서 이벤트가 올바르게 처리되도록 선택한 `event` 옵션과 이벤트 소스가 일치하는지 확인하세요.
+:::note[이벤트 소스 일치]
+핸들러 함수 내에서 이벤트가 올바르게 처리되도록 이벤트 소스가 선택한 `event` 옵션과 일치하는지 확인하세요.
 :::
 </Fragment>
 </Infrastructure>

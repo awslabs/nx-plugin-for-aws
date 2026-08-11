@@ -1,0 +1,96 @@
+function buildUserPrompt(file: FileToTranslate, targetLang: string): string {
+  const targetAbsPath = path.join(DOCS_DIR, targetLang, file.relativePath);
+
+  if (!file.diffPath) {
+    return `Translate \`${file.sourceAbsPath}\` into locale \`${targetLang}\` and write it to \`${targetAbsPath}\`.
+
+Read the source, then write the whole translated file with \`create\`. Always write it, even if a translation is already there — it may be out of date.`;
+  }
+
+  return `Update the \`${targetLang}\` translation of \`${file.sourceAbsPath}\`.
+
+- Source: \`${file.sourceAbsPath}\`
+- Existing translation to update: \`${targetAbsPath}\`
+- Diff of what changed in the source: \`${file.diffPath}\`
+
+Read all three. Retranslate only what the diff touched, keep the existing translated wording everywhere else, then write the whole file back with \`create\`.`;
+}
+
+const FENCE_RE = /^\s*(?:`{3,}|~{3,})/;
+
+/**
+ * Split a document into alternating prose and fenced-code segments.
+ */
+function splitOnFences(text: string): { prose: string[]; code: string[] } {
+  const prose: string[] = [];
+  const code: string[] = [];
+  let current: string[] = [];
+  let inFence = false;
+  for (const line of text.split('\n')) {
+    if (FENCE_RE.test(line)) {
+      (inFence ? code : prose).push(current.concat(line).join('\n'));
+      current = [];
+      inFence = !inFence;
+      continue;
+    }
+    current.push(line);
+  }
+  (inFence ? code : prose).push(current.join('\n'));
+  return { prose, code };
+}
+
+/**
+ * YAML frontmatter must still parse after translation. A value that begins with
+ * a character YAML reserves — most often a title starting with \`@aws/...\` —
+ * breaks the docs build, so reject it here and let the retry quote it.
+ */
+function assertFrontmatterIsParseable(text: string): void {
+  const lines = text.split('\n');
+  if (lines[0]?.trim() !== '---') return;
+  for (let i = 1; i < lines.length && lines[i].trim() !== '---'; i++) {
+    const value = lines[i].match(/^[A-Za-z0-9_-]+:\s+(\S)/)?.[1];
+    if (value && '@*&%!|>'.includes(value)) {
+      throw new Error(
+        `frontmatter line ${i + 1} starts with the reserved YAML character "${value}" and must be quoted: ${lines[i].trim()}`,
+      );
+    }
+  }
+}
+
+/**
+ * Copy the source's code blocks over the translated file's. The prompt tells the
+ * agent to reproduce them verbatim, but it occasionally translates a comment
+ * anyway, which would ship stale or broken code.
+ *
+ * A differing block count means the translation lost the document's shape —
+ * usually a section duplicated or dropped — so this throws rather than stitching
+ * mismatched blocks together, letting the caller retry.
+ */
+async function restoreCodeBlocks(
+  sourceAbsPath: string,
+  targetAbsPath: string,
+): Promise<void> {
+  const source = splitOnFences(await fs.readFile(sourceAbsPath, 'utf-8'));
+  const target = splitOnFences(await fs.readFile(targetAbsPath, 'utf-8'));
+
+  if (source.code.length !== target.code.length) {
+    throw new Error(
+      `translation has ${target.code.length} code block(s) but the source has ${source.code.length}`,
+    );
+  }
+  if (source.code.length === 0) return;
+
+  const merged = target.prose.flatMap((chunk, i) =>
+    i < source.code.length ? [chunk, source.code[i]] : [chunk],
+  );
+  await fs.writeFile(targetAbsPath, merged.join('\n'), 'utf-8');
+}
+
+/**
+ * Number of times to retry a single (file x language) translation. Large files
+ * occasionally hit transient Bedrock streaming errors; a fresh agent invocation
+ * re-reads the files from disk, so retries are idempotent.
+ */
+const TRANSLATE_MAX_ATTEMPTS = 4;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));

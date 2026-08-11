@@ -1,0 +1,52 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { dts } from 'rolldown-plugin-dts';
+
+// The Smithy CLI generates the Server SDK under dist, along with its own
+// dependencies, so paths are resolved from there rather than this project. The
+// compile target runs from the workspace root, so these resolve there.
+const ssdkDir = path.resolve(
+  'dist',
+  '<%- projectRoot %>',
+  'smithy/source/typescript-ssdk-codegen',
+);
+
+// Embed the re2 wasm binary in its emscripten glue module (`Module.wasmBinary`),
+// so the bundle stays a single self-contained file. `__dirname` is what the
+// glue's on-disk fallback would read, which an ES module doesn't define.
+const inlineRe2Wasm = () => ({
+  name: 'inline-re2-wasm',
+  load: (id) => {
+    if (!/re2-wasm.*[\\/]wasm[\\/]re2\.js$/.test(id)) return null;
+    const wasm = fs.readFileSync(path.join(path.dirname(id), 're2.wasm'));
+    return `var __dirname = '';\nvar Module = { wasmBinary: Buffer.from("${wasm.toString('base64')}", "base64") };\n${fs.readFileSync(id, 'utf8')}`;
+  },
+});
+
+// Drop any import whose specifier resolves to the importing module itself. A
+// module cannot import its own exports — the Smithy CLI's Windows codegen writes
+// exactly that, which the bundler rejects as an assignment to an import.
+const dropSelfImports = () => ({
+  name: 'drop-self-imports',
+  transform: (code, id) => ({
+    code: code.replace(
+      /^import\s+[^;]*?\s+from\s+["'](\.[^"']*)["'];?\s*$/gm,
+      (line, specifier) =>
+        path.resolve(path.dirname(id), specifier) === id.replace(/\.[cm]?tsx?$/, '')
+          ? ''
+          : line,
+    ),
+    map: null,
+  }),
+});
+
+const outDir = path.resolve('dist', '<%- projectRoot %>', 'build/ssdk');
+
+// Bundle from the generated TypeScript sources, emitting the module and its
+// declarations in one pass.
+export default {
+  input: path.join(ssdkDir, 'src/index.ts'),
+  plugins: [dropSelfImports(), inlineRe2Wasm(), dts({ resolve: true })],
+  output: [{ dir: outDir, format: 'es' }],
+  platform: 'node',
+};

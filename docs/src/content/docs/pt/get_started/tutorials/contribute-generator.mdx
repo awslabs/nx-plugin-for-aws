@@ -1,6 +1,6 @@
 ---
-title: "Contribua com um Gerador"
-description: "Um guia passo a passo de como criar um gerador usando o @aws/nx-plugin."
+title: Contribuir com um Gerador
+description: Um passo a passo de como construir um gerador usando o @aws/nx-plugin.
 ---
 
 import {
@@ -26,13 +26,13 @@ import nxGraphPng from '@assets/nx-graph.png';
 import gameSelectPng from '@assets/game-select.png';
 import gameConversationPng from '@assets/game-conversation.png';
 
-:::tip[Aprendendo por exemplos]
-Este tutorial orienta você através da contribuição de um gerador para o Nx Plugin for AWS com um exemplo prático. Ele também pode servir como uma referência útil para formas de pensar e testar geradores. Você pode pular para a seção de orientação geral para algumas dicas importantes para trabalhar com geradores.
+:::tip[Aprendendo com Exemplos]
+Este tutorial guia você através da contribuição de um gerador para o Nx Plugin for AWS com um exemplo prático. Ele também pode servir como uma referência útil para formas de pensar e testar geradores. Você pode pular para a seção de orientação geral para algumas dicas importantes para trabalhar com geradores.
 :::
 
 Vamos criar um novo gerador para contribuir com o `@aws/nx-plugin`. Nosso objetivo será gerar um novo procedimento para uma API tRPC.
 
-### Clonar o Plugin
+### Fazer Checkout do Plugin
 
 Primeiro, vamos clonar o plugin:
 
@@ -40,7 +40,7 @@ Primeiro, vamos clonar o plugin:
 git clone git@github.com:awslabs/nx-plugin-for-aws.git
 ```
 
-Em seguida, instalar e construir:
+Em seguida, instale e compile:
 
 ```bash
 cd nx-plugin-for-aws
@@ -52,24 +52,24 @@ pnpm nx run-many --target build --all
 
 Vamos criar o novo gerador em `packages/nx-plugin/src/trpc/procedure`.
 
-Fornecemos um gerador para criar novos geradores, permitindo que você scaffold seu novo gerador rapidamente! Execute este gerador com:
+Fornecemos um gerador para criar novos geradores para que você possa rapidamente estruturar seu novo gerador! Você pode executar este gerador da seguinte forma:
 
 <RunGenerator generator="ts#nx-generator" requiredParameters={{ pluginProject: '@aws/nx-plugin', name: 'ts#trpc-api#procedure', directory: 'trpc/procedure', description: 'Adds a procedure to a tRPC API' }} />
 
-Os seguintes arquivos serão gerados para você:
+Você notará que os seguintes arquivos foram gerados para você:
 
 <FileTree>
   - packages/nx-plugin/src/trpc/procedure
-    - schema.json Define as entradas do gerador
-    - schema.d.ts Interface TypeScript correspondente ao schema
-    - generator.ts Função executada pelo Nx como gerador
+    - schema.json Define a entrada para o gerador
+    - schema.d.ts Uma interface typescript que corresponde ao schema
+    - generator.ts Função que o Nx executa como o gerador
     - generator.spec.ts Testes para o gerador
   - docs/src/content/docs/guides/
-    - trpc-procedure.mdx Documentação do gerador
+    - trpc-procedure.mdx Documentação para o gerador
   - packages/nx-plugin/generators.json Atualizado para incluir o gerador
 </FileTree>
 
-Vamos atualizar o schema para adicionar as propriedades necessárias:
+Vamos atualizar o schema para adicionar as propriedades que precisaremos para o gerador:
 
 <Tabs>
   <TabItem label="schema.json">
@@ -117,11 +117,11 @@ Vamos atualizar o schema para adicionar as propriedades necessárias:
   </TabItem>
 </Tabs>
 
-:::note[Sistema de arquivos virtual]
-Observe que o gerador recebe uma `Tree` como entrada, além das opções definidas no schema. A `Tree` é essencialmente um sistema de arquivos virtual que podemos ler e escrever para criar/atualizar arquivos. Não modificamos o sistema de arquivos diretamente para evitar alterações quando usuários executam o gerador em modo "dry-run".
+:::note[Sistema de Arquivos Virtual]
+Observe que o gerador recebe uma `Tree` como entrada, assim como as opções que definimos em nosso schema. A `Tree` é essencialmente um sistema de arquivos virtual do qual podemos ler e escrever para criar ou atualizar arquivos do projeto. Não queremos tocar o sistema de arquivos diretamente, pois não queremos fazer nenhuma alteração se os usuários executarem o gerador no modo "dry-run".
 :::
 
-O gerador já está configurado em `packages/nx-plugin/generators.json`:
+Você notará que o gerador já foi conectado em `packages/nx-plugin/generators.json`:
 
 ```json
  ...
@@ -138,14 +138,16 @@ O gerador já está configurado em `packages/nx-plugin/generators.json`:
 
 ### Implementar o Gerador
 
-Para adicionar um procedimento a uma API tRPC, precisamos:
+Para adicionar um procedimento a uma API tRPC, precisamos fazer duas coisas:
 
 1. Criar um arquivo TypeScript para o novo procedimento
-2. Adicionar o procedimento ao router
+2. Adicionar o procedimento ao roteador
 
-#### Criar o Novo Procedimento
+#### Criar o novo Procedimento
 
-Usaremos o utilitário `generateFiles` com um template EJS para gerar o arquivo:
+Para criar o arquivo TypeScript para o novo procedimento, usaremos um utilitário chamado `generateFiles`. Usando isso, podemos definir um template [EJS](https://ejs.co/) que podemos renderizar em nosso gerador com variáveis baseadas nas opções selecionadas pelo usuário.
+
+Primeiro, definiremos o template em `packages/nx-plugin/src/trpc/procedure/files/procedures/__procedureNameKebabCase__.ts.template`:
 
 ```ts title="files/procedures/__procedureNameKebabCase__.ts.template"
 import { publicProcedure } from '../init.js';
@@ -164,11 +166,21 @@ export const <%- procedureNameCamelCase %> = publicProcedure
   });
 ```
 
-:::tip[Substituições de template]
-O `generateFiles` substitui `__<variável>__` em nomes de arquivos/diretórios e remove `.template`. O conteúdo usa sintaxe EJS com `<% ... %>`.
+:::tip[Substituições de Template]
+Quando `generateFiles` consome o template, ele substituirá referências a `__<variable>__` em nomes de arquivos/diretórios pelos valores fornecidos, além de remover o `.template` do nome do arquivo.
+
+O conteúdo do template é [EJS](https://ejs.co/), onde as variáveis são referenciadas usando a sintaxe `<% ... %>`.
 :::
 
-Atualizamos o gerador para passar as variáveis necessárias:
+No template, referenciamos três variáveis:
+
+- `procedureNameCamelCase`
+- `procedureNameKebabCase`
+- `procedureType`
+
+Então precisaremos garantir que passamos essas para `generateFiles`, assim como o diretório para gerar arquivos, ou seja, a localização dos arquivos fonte (i.e. `sourceRoot`) para o projeto tRPC que o usuário selecionou como entrada para o gerador, que podemos extrair da configuração do projeto.
+
+Vamos atualizar o gerador para fazer isso:
 
 ```ts title="procedure/generator.ts" {16-30}
 import {
@@ -208,15 +220,15 @@ export const trpcProcedureGenerator = async (
 export default trpcProcedureGenerator;
 ```
 
-:::tip[Formatação de arquivos]
+:::tip[Formatação de Arquivos]
 Também chamamos `formatFilesInSubtree` no final do gerador, o que garante que quaisquer arquivos que criamos ou modificamos sejam formatados de acordo com a configuração [Biome](https://biomejs.dev/) do workspace.
 :::
 
-#### Adicionar o Procedimento ao Router
+#### Adicionar o Procedimento ao Roteador
 
-Em seguida, queremos que o gerador conecte o novo procedimento ao router. Isso significa ler e atualizar o código-fonte do usuário!
+Em seguida, queremos que o gerador conecte o novo procedimento ao roteador. Isso significa ler e atualizar o código fonte do usuário!
 
-Usamos [GritQL](https://docs.grit.io/) para buscar e transformar código-fonte de forma declarativa. O helper `addDestructuredImport` adiciona imports nomeados, e `applyGritQL` aplica um padrão GritQL para adicionar o procedimento ao objeto literal do router.
+Usamos [GritQL](https://docs.grit.io/) para buscar e transformar código fonte de forma declarativa. O helper `addDestructuredImport` adiciona imports nomeados, e `applyGritQL` aplica um padrão GritQL para adicionar o procedimento ao objeto literal do roteador.
 
 ```ts title="procedure/generator.ts" {11, 33-46}
 import {
@@ -275,7 +287,7 @@ export default trpcProcedureGenerator;
 :::tip[Padrões GritQL]
 No trecho de código acima, `applyGritQL` usa um padrão [GritQL](https://docs.grit.io/) para encontrar a chamada `router({ ... })` e adicionar o novo procedimento ao seu objeto literal. A cláusula `where` garante idempotência — se o procedimento já estiver presente, nenhuma alteração é feita.
 
-Você pode experimentar padrões GritQL no [Playground GritQL](https://docs.grit.io/playground), ou instalar o CLI GritQL para testar padrões localmente:
+Você pode experimentar padrões GritQL no [GritQL Playground](https://docs.grit.io/playground), ou instalar a CLI GritQL para testar padrões localmente:
 
 ```bash
 npm install -g @getgrit/cli
@@ -283,20 +295,20 @@ grit apply '`router({ $props })` => `router({ $props, myProcedure })`' --dry-run
 ```
 :::
 
-Agora que implementamos o gerador, vamos compilá-lo para garantir que esteja disponível para testarmos em nosso projeto:
+Agora que implementamos o gerador, vamos compilá-lo para garantir que esteja disponível para testarmos em nosso projeto de aventura na masmorra.
 
 ```bash
 pnpm nx compile @aws/nx-plugin
 ```
 
-### Testar o Gerador
+### Testando o Gerador
 
 Para testar o gerador, vamos vincular nosso Nx Plugin for AWS local a uma base de código existente.
 
 #### Criar um Projeto de Teste com uma API tRPC
 
-:::note[Usando seu próprio projeto]
-Se você completou o <Link path="get_started/tutorials/dungeon-game/overview">tutorial da aventura na masmorra</Link>, ou já tem outro workspace Nx existente que usa uma API tRPC, você pode pular esta etapa.
+:::note[Usando Seu Próprio Projeto]
+Se você completou o <Link path="get_started/tutorials/dungeon-game/overview">tutorial de aventura na masmorra</Link>, ou já tem outro workspace Nx existente que usa uma API tRPC, você pode pular esta etapa.
 :::
 
 Em um diretório separado, crie um novo workspace de teste:
@@ -317,23 +329,23 @@ Em sua base de código, vamos vincular nosso `@aws/nx-plugin` local:
   projectPath="path/to/trpc-generator-test"
 />
 
-:::note[Caminho do plugin compilado]
-Observe acima que vinculamos ao plugin compilado em `dist/packages/nx-plugin` em vez do código-fonte.
+:::note[Caminho do Plugin Compilado]
+Observe acima que vinculamos ao plugin compilado em `dist/packages/nx-plugin` em vez do código fonte.
 :::
 
 #### Executar o novo Gerador
 
-Vamos testar o novo gerador:
+Vamos experimentar o novo gerador:
 
 <RunGenerator generator="ts#trpc-api#procedure" />
 
-:::note[Gerador não aparece]
+:::note[Gerador Não Aparecendo]
 Se você não vir o novo gerador na lista no VSCode, pode ser necessário atualizar o workspace Nx:
 
 <NxCommands commands={['reset']} />
 :::
 
-Se bem-sucedido, devemos ter gerado um novo procedimento e adicionado o procedimento ao nosso router em `router.ts`.
+Se bem-sucedido, devemos ter gerado um novo procedimento e adicionado o procedimento ao nosso roteador em `router.ts`.
 
 ### Exercícios
 
@@ -341,56 +353,56 @@ Se você chegou até aqui e ainda tem algum tempo para experimentar com geradore
 
 #### 1. Operações Aninhadas
 
-Tente atualizar o gerador para suportar routers aninhados:
+Tente atualizar o gerador para suportar roteadores aninhados:
 
-- Aceitando notação com pontos para a entrada `procedure` (ex: `games.query`)
-- Gerando um procedimento com um nome baseado na notação invertida (ex: `queryGames`)
-- Adicionando o router aninhado apropriado (ou atualizando-o se já existir!)
+- Aceitando notação de ponto para a entrada `procedure` (por exemplo, `games.query`)
+- Gerando um procedimento com um nome baseado em notação de ponto reversa (por exemplo, `queryGames`)
+- Adicionando o roteador aninhado apropriado (ou atualizando-o se já existir!)
 
 #### 2. Validação
 
-Nosso gerador deve se defender contra possíveis problemas, como um usuário selecionando um `project` que não é uma API tRPC. Dê uma olhada no gerador `connection` para um exemplo disso.
+Nosso gerador deve se defender contra problemas potenciais, como um usuário selecionando um `project` que não é uma API tRPC. Dê uma olhada no gerador `connection` para um exemplo disso.
 
 #### 3. Testes Unitários
 
 Escreva alguns testes unitários para o gerador. Eles são bastante diretos de implementar, e a maioria segue o fluxo geral:
 
-1. Criar um workspace tree vazio usando `createTreeUsingTsSolutionSetup()`
-2. Adicionar quaisquer arquivos que já devem existir na tree (ex: `project.json` e `src/router.ts` para um backend tRPC)
+1. Criar uma árvore de workspace vazia usando `createTreeUsingTsSolutionSetup()`
+2. Adicionar quaisquer arquivos que já devem existir na árvore (por exemplo, `project.json` e `src/router.ts` para um backend tRPC)
 3. Executar o gerador em teste
-4. Validar que as alterações esperadas foram feitas na tree
+4. Validar que as alterações esperadas são feitas na árvore
 
 #### 4. Testes End to End
 
-Temos um conjunto de "smoke tests" que executam geradores em um workspace novo e garantem que tudo seja construído. No mínimo, seu novo gerador deve ser adicionado a **ambas** as matrizes de geradores para que seja exercitado pelos smoke tests:
+Temos uma suíte de "smoke tests" que executam geradores em um workspace novo e garantem que tudo compila. No mínimo, seu novo gerador deve ser adicionado a **ambas** as matrizes de geradores para que seja exercitado pelos smoke tests:
 
 - `e2e/src/smoke-tests/generator-matrix.ts` — executa cada gerador através da CLI, uma invocação por vez, exatamente como um usuário faria.
 - `packages/nx-plugin/src/internal/test-matrix/generator.ts` — um gerador oculto que compõe todos os outros para testar migrações entre versões.
 
-Observe que a matriz de geradores apenas executa os geradores e constrói o workspace — ela não instancia nenhuma infraestrutura. Para geradores que implantam infraestrutura, considere estender os testes e2e de implantação (`e2e/src/smoke-tests/cdk-deploy.spec.ts` e `terraform-deploy.spec.ts`) para realmente implantar seus recursos (via `cdk deploy` / `terraform apply`), e então adicione uma asserção a `deploy-invocations.ts` que invoca o recurso implantado e verifica se ele se comporta conforme esperado.
+Observe que a matriz de geradores apenas executa os geradores e compila o workspace — ela não instancia nenhuma infraestrutura. Para geradores que implantam infraestrutura, considere estender os testes e2e de implantação (`e2e/src/smoke-tests/cdk-deploy.spec.ts` e `terraform-deploy.spec.ts`) para realmente implantar seus recursos (via `cdk deploy` / `terraform apply`), depois adicione uma asserção a `deploy-invocations.ts` que invoca o recurso implantado e verifica se ele se comporta como esperado.
 
 Se seu gerador fornece um servidor de desenvolvimento local, considere adicioná-lo ao teste e2e de desenvolvimento local (`e2e/src/smoke-tests/local-dev.spec.ts`), que inicia o target `dev` e exercita o servidor em execução.
 
-### Orientação Geral para Acelerar Contribuições
+### Orientação Geral para Acelerar a Contribuição
 
 Esta seção contém algumas orientações gerais que podem ajudar ao trabalhar no Nx Plugin for AWS.
 
 #### Trabalhe de trás para frente a partir de um projeto real
 
-Uma forma útil de construir novos geradores ou adicionar recursos/correções a um gerador existente é _construí-lo de verdade primeiro_. Dessa forma, você pode validar suas ideias e iterar rapidamente para alcançar a funcionalidade necessária. Depois de definir o resultado desejado, você pode então atualizar o gerador.
+Uma maneira útil de construir novos geradores ou adicionar recursos/correções a um gerador existente é _construí-lo de verdade primeiro_. Dessa forma, você pode validar suas ideias e iterar rapidamente para alcançar a funcionalidade que precisa. Depois de ter decidido sobre o resultado desejado, você pode então atualizar o gerador.
 
-Na prática, este processo pode ser assim:
+Na prática, este processo pode parecer com:
 
 <Steps>
 
-1. Crie um novo workspace
+1. Criar um novo workspace
 
     <CreateNxWorkspaceCommand workspace="my-project" />
   
-1. Execute quaisquer geradores que possam ser pré-requisitos para seu novo gerador/recurso/correção
-1. Faça commit das suas alterações (`git commit`)
-1. Faça as alterações desejadas e teste-as conforme necessário
-1. Use o `git diff` das suas alterações para informar quais mudanças devem ser feitas no Nx Plugin for AWS
-1. Execute um teste final end-to-end (vinculando seu `@aws/nx-plugin`) para garantir que seu gerador gera as alterações necessárias
+1. Executar quaisquer geradores que possam ser pré-requisitos para seu novo gerador/recurso/correção
+1. Fazer commit de suas alterações (`git commit`)
+1. Fazer suas alterações desejadas e testá-las conforme necessário
+1. Usar o `git diff` de suas alterações para informar quais alterações devem ser feitas no Nx Plugin for AWS
+1. Realizar um teste final end to end (vinculando seu `@aws/nx-plugin`) para garantir que seu gerador forneça as alterações que você precisa
 
 </Steps>

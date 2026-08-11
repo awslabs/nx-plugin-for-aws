@@ -15,12 +15,12 @@ import Link from '@components/link.astro';
 import NxCommands from '@components/nx-commands.astro';
 import OptionFilter from '@components/option-filter.astro';
 
-[Amazon Bedrock AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) 프로젝트를 생성합니다. AgentCore Gateway는 MCP 서버 또는 에이전트 앞에 있는 관리형 진입점으로, 인바운드 요청을 인증하고(IAM 또는 Cognito) 대상으로의 아웃바운드 트래픽에 IAM SigV4로 서명합니다.
+[Amazon Bedrock AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) 프로젝트를 생성합니다. AgentCore Gateway는 MCP 서버 또는 에이전트 앞에 있는 관리형 진입점으로, 인바운드 요청을 인증하고(IAM 또는 Cognito) 대상으로 가는 아웃바운드 트래픽에 IAM SigV4로 서명합니다.
 
 `protocol` 옵션은 Gateway가 무엇을 앞에 두는지 선택합니다:
 
-- **`mcp`** (기본값) — 하나 이상의 MCP 서버 대상을 단일 MCP 엔드포인트 뒤에 집계하고, [Cedar 정책 엔진](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html)에 대해 모든 도구 호출을 평가합니다.
-- **`http`** — 경로 기반 라우팅(`/<targetName>/invocations`)을 통해 [AgentCore Runtime 대상](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-target-http-runtime.html)(에이전트)으로 요청을 직접 프록시하며, 집계나 프로토콜 변환 없이 수행됩니다. 이를 사용하여 단일 관리형 엔드포인트로 에이전트를 앞에 두세요 — 예를 들어 웹사이트가 Gateway를 통해 VPC 내부에 배포된 에이전트에 도달할 수 있도록 합니다.
+- **`mcp`** (기본값) — 하나 이상의 MCP 서버 대상을 단일 MCP 엔드포인트 뒤에 집계하고, 모든 도구 호출을 [Cedar 정책 엔진](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html)에 대해 평가합니다.
+- **`http`** — 경로 기반 라우팅(`/<targetName>/invocations`)을 통해 [AgentCore Runtime 대상](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway-target-http-runtime.html)(사용자의 에이전트)으로 요청을 직접 프록시하며, 집계나 프로토콜 변환 없이 수행합니다. 이를 사용하여 단일 관리형 엔드포인트로 에이전트를 앞에 두세요 — 예를 들어 웹사이트가 Gateway를 통해 VPC 내부에 배포된 에이전트에 도달할 수 있도록 합니다.
 
 ## 사용법
 
@@ -34,15 +34,15 @@ import OptionFilter from '@components/option-filter.astro';
 
 ## 생성기 출력
 
-생성기는 `packages/<name>/`에 새 프로젝트를 생성하며, 인프라를 위한 CDK 구성 요소 또는 Terraform 모듈을 추가합니다:
+생성기는 `packages/<name>/`에 새 프로젝트를 생성하고, 인프라를 위한 CDK 구성 요소 또는 Terraform 모듈을 추가합니다:
 
 <FileTree>
   - packages/\<name>/
-    - policies/ Cedar 정책 소스 파일 (`mcp` 프로토콜 전용; `cedarPolicy: false`일 때 생략됨)
+    - policies/ Cedar 정책 소스 파일 (`mcp` 프로토콜만 해당; `cedarPolicy: false`일 때 생략됨)
       - permit-all.cedar 인증된 호출자를 허용하는 기본 Cedar 정책
       - README.md Cedar 정책 작성 참조
-    - local-dev.ts 로컬 개발을 위한 로컬 게이트웨이 — 연결된 MCP 서버를 집계(`mcp`)하거나 연결된 에이전트를 프록시(`http`)
-    - project.json `serve` 및 `dev` 대상 추가
+    - local-dev.ts 로컬 개발을 위한 로컬 게이트웨이 — 연결된 MCP 서버(`mcp`) 집계 또는 연결된 에이전트(`http`) 프록시
+    - project.json `serve` 및 `dev` 타겟 추가
 </FileTree>
 
 ### 인프라
@@ -76,16 +76,16 @@ import OptionFilter from '@components/option-filter.astro';
 
 생성된 구성 요소는 다음 AWS 리소스를 생성합니다:
 
-- 인바운드 IAM 인증(기본값) 또는 Cognito JWT 인증을 사용하는 `AgentCore::Gateway` (<a href="#authentication">인증</a> 참조). `mcp` 게이트웨이는 MCP 프로토콜용으로 구성되며, `http` 게이트웨이는 프로토콜 유형이 없으며, 이는 AgentCore가 런타임 대상에 필요로 합니다
-- Gateway에 연결되어 `ENFORCE` 모드로 실행되는 `AgentCore::PolicyEngine` (`mcp` 게이트웨이 전용; `cedarPolicy: false`일 때 생략됨)
-- `policies/`의 `.cedar` 파일당 하나의 `AgentCore::Policy` (`mcp` 게이트웨이 전용)
-- Gateway와 연결된 AWS WAFv2 Web ACL, CloudWatch로의 요청 로깅 포함 (기본적으로 활성화됨 — <a href="#aws-waf">AWS WAF</a> 참조)
+- 인바운드 IAM 인증(기본값) 또는 Cognito JWT 인증(<a href="#authentication">인증</a> 참조)이 있는 `AgentCore::Gateway`. `mcp` 게이트웨이는 MCP 프로토콜로 구성되며, `http` 게이트웨이는 프로토콜 유형이 없으며, 이는 AgentCore가 런타임 대상에 필요로 합니다
+- `ENFORCE` 모드에서 실행되는 `AgentCore::PolicyEngine`, Gateway에 연결됨 (`mcp` 게이트웨이만 해당; `cedarPolicy: false`일 때 생략됨)
+- `policies/`의 `.cedar` 파일당 하나의 `AgentCore::Policy` (`mcp` 게이트웨이만 해당)
+- Gateway와 연결된 AWS WAFv2 Web ACL, CloudWatch로 요청 로깅 (기본적으로 활성화됨 — <a href="#aws-waf">AWS WAF</a> 참조)
 
-Gateway URL은 <Link path="guides/runtime-config">런타임 구성</Link>의 `agentcore.gateways.<ClassName>` 네임스페이스에 자동으로 등록되어 에이전트가 런타임에 이를 발견할 수 있습니다.
+Gateway URL은 <Link path="guides/runtime-config">런타임 구성</Link>의 `agentcore.gateways.<ClassName>` 네임스페이스에 자동으로 등록되어 에이전트가 런타임에 이를 검색할 수 있습니다.
 
 #### 아키텍처
 
-배포된 Gateway는 다음 아키텍처를 가지며, Gateway 앞에 [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACL이 있고, 다운스트림 MCP 서버 대상으로 라우팅됩니다:
+배포된 Gateway는 다음 아키텍처를 가지며, Gateway 앞에 [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACL이 있고, 다운스트림 MCP 서버 대상으로 라우팅합니다:
 
 ```d2 inline=true
 direction: right
@@ -116,15 +116,15 @@ gateway -> targets
 
 ## 인증
 
-`auth` 옵션은 Gateway가 인바운드 요청을 인증하는 방법을 구성합니다. `iam`(기본값)과 `cognito` 중에서 선택할 수 있습니다.
+`auth` 옵션은 Gateway가 인바운드 요청을 인증하는 방법을 구성합니다. `iam`(기본값)과 `cognito` 중에서 선택하세요.
 
 ### IAM
 
-기본적으로 Gateway는 `GatewayAuthorizer.usingAwsIam()`으로 구성됩니다. 호출자는 SigV4로 요청에 서명하며, 호출자의 IAM ID는 Cedar 정책에서 `AgentCore::IamEntity` 주체로 사용할 수 있습니다. 이는 호출자가 AWS에서 실행되는 에이전트 또는 서비스인 경우 권장되는 옵션입니다 — 예를 들어 <Link path="guides/connection/ts-agent-gateway">에이전트와 Gateway 연결 생성기</Link>를 통해 연결된 <Link path="/guides/ts-agent">에이전트</Link>는 자체 실행 역할로 호출에 서명합니다.
+기본적으로 Gateway는 `GatewayAuthorizer.usingAwsIam()`으로 구성됩니다. 호출자는 SigV4로 요청에 서명하고, 호출자의 IAM 자격 증명은 `AgentCore::IamEntity` 주체로 Cedar 정책에서 사용할 수 있습니다. 이는 호출자가 AWS에서 실행되는 에이전트 또는 서비스일 때 권장되는 옵션입니다 — 예를 들어 <Link path="guides/connection/ts-agent-gateway">에이전트에서 Gateway로의 연결 생성기</Link>를 통해 연결된 <Link path="/guides/ts-agent">에이전트</Link>는 자체 실행 역할로 호출에 서명합니다.
 
 ### Cognito
 
-`cognito`를 선택하면 Gateway는 Cognito 사용자 풀을 가리키는 Custom JWT 권한 부여자로 구성됩니다. 호출자는 JWT 베어러 토큰을 제시하여 인증하며, 토큰의 `sub` 클레임은 Cedar 정책에서 `AgentCore::OAuthUser` 주체로 사용할 수 있습니다. 호출자가 Cognito를 통해 인증하는 경우 이 옵션을 사용하세요 — 예를 들어 웹사이트 또는 <Link path="guides/ts-dcr-proxy">`ts#dcr-proxy` 생성기</Link>를 통해 연결되는 코딩 에이전트.
+`cognito`를 선택하면 Gateway는 Cognito 사용자 풀을 가리키는 Custom JWT 권한 부여자로 구성됩니다. 호출자는 JWT 베어러 토큰을 제시하여 인증하고, 토큰의 `sub` 클레임은 `AgentCore::OAuthUser` 주체로 Cedar 정책에서 사용할 수 있습니다. 호출자가 Cognito를 통해 인증할 때 이를 사용하세요 — 예를 들어 <Link path="guides/ts-dcr-proxy">`ts#dcr-proxy` 생성기</Link>를 통해 연결하는 웹사이트 또는 코딩 에이전트.
 
 생성된 인프라는 기존 Cognito 사용자 풀과 클라이언트를 사용합니다 — 생성하지 않습니다. <Link path="/guides/react-website-auth">`ts#website#auth` 생성기</Link>를 사용하여 `UserIdentity`를 생성하거나 직접 제공할 수 있습니다.
 
@@ -166,20 +166,20 @@ module "my_gateway" {
 </Infrastructure>
 
 :::note[사용자 정의 OIDC 제공자]
-Cognito가 아닌 OIDC 제공자로 인증하려면 생성된 Gateway 구성 요소 또는 Terraform 모듈을 직접 수정하세요 — 권한 부여자의 검색 URL과 허용된 클라이언트를 제공자의 것으로 교체하세요. 에이전트와 Gateway 연결 생성기는 에이전트가 SigV4로 호출에 서명하므로 `IAM` 인증 게이트웨이만 지원합니다.
+Cognito가 아닌 OIDC 제공자로 인증하려면 생성된 Gateway 구성 요소 또는 Terraform 모듈을 직접 수정하세요 — 권한 부여자의 검색 URL과 허용된 클라이언트를 제공자의 것으로 교체합니다. 에이전트에서 Gateway로의 연결 생성기는 `IAM` 인증 게이트웨이만 지원합니다. 에이전트가 SigV4로 호출에 서명하기 때문입니다.
 :::
 
 ## 정책 작성
 
-<OptionFilter when={{ cedarPolicy: true }} description="Cedar 정책 — cedarPolicy: true 전용">
+<OptionFilter when={{ cedarPolicy: true }} description="Cedar 정책 — cedarPolicy: true만 해당">
 
-Cedar는 AgentCore Gateway가 도구 호출을 승인하는 데 사용하는 정책 언어입니다. Gateway를 통과하는 모든 `tools/list` 및 `tools/call` 요청은 연결된 정책 세트에 대해 평가되며, 요청이 성공하려면 호출자에게 최소한 하나의 일치하는 `permit` 문(그리고 일치하는 `forbid`가 없어야 함)이 있어야 합니다.
+Cedar는 AgentCore Gateway가 도구 호출을 승인하는 데 사용하는 정책 언어입니다. Gateway를 통과하는 모든 `tools/list` 및 `tools/call` 요청은 연결된 정책 세트에 대해 평가되며, 호출자는 요청이 성공하려면 일치하는 `permit` 문이 하나 이상 있어야 합니다(그리고 일치하는 `forbid`가 없어야 함).
 
-[공통 정책 패턴](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy-common-patterns.html)을 포함한 전체 참조는 [AgentCore Gateway 정책에 대한 AWS 문서](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html)를 참조하세요.
+전체 참조는 [AgentCore Gateway 정책에 대한 AWS 문서](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy.html)를 참조하세요. [일반적인 정책 패턴](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/policy-common-patterns.html)도 포함되어 있습니다.
 
 ### 정책 추가
 
-정책을 추가하려면 `permit-all.cedar` 옆에 새 `.cedar` 파일을 생성하세요. `policies/`의 각 `.cedar` 파일은 정확히 **하나**의 `permit` 또는 `forbid` 문을 포함해야 하며 단일 `AWS::BedrockAgentCore::Policy` 리소스로 배포됩니다. 정책 리소스의 이름은 파일 이름에서 파생됩니다: `permit-all.cedar`는 `PermitAll`이 됩니다(kebab/snake-case는 PascalCase로 변환됨). 여러 문을 포함하는 파일은 배포 시 `unexpected token 'forbid'` 오류를 생성하므로 별도의 파일로 분할하세요.
+정책을 추가하려면 `permit-all.cedar` 옆에 새 `.cedar` 파일을 생성하세요. `policies/`의 각 `.cedar` 파일은 정확히 **하나**의 `permit` 또는 `forbid` 문을 포함해야 하며 단일 `AWS::BedrockAgentCore::Policy` 리소스로 배포됩니다. 정책 리소스의 이름은 파일 이름에서 파생됩니다: `permit-all.cedar`는 `PermitAll`이 됩니다(kebab/snake-case는 PascalCase로 변환됨). 여러 문을 포함하는 파일은 배포 시 `unexpected token 'forbid'` 오류를 생성합니다 — 별도의 파일로 분할하세요.
 
 예를 들어, 특정 에이전트 역할만 특정 도구를 호출하도록 허용하려면 다음을 생성하세요:
 
@@ -191,22 +191,22 @@ permit (
 );
 ```
 
-역할 이름을 하드코딩하지 말고 템플릿 변수로 전달하세요(아래 <a href="#template-variables">템플릿 변수</a> 참조). 새 정책을 배포하려면 재합성(re-synth) 또는 재계획(re-plan)하세요.
+역할 이름을 하드코딩하는 대신 템플릿 변수로 전달하세요(아래 <a href="#template-variables">템플릿 변수</a> 참조). 새 정책을 배포하려면 재합성 또는 재계획하세요.
 
 ### 템플릿 변수
 
-정책은 계정 및 Gateway 재배포 간에 이식 가능하도록 합성/계획 시점에 렌더링되는 [EJS](https://ejs.co/) 템플릿입니다:
+정책은 [EJS](https://ejs.co/) 템플릿으로, 합성/계획 시점에 렌더링되어 계정 및 Gateway 재배포 간에 이식 가능하게 유지됩니다:
 
-| 변수                 | 치환 대상                              |
-| -------------------- | ------------------------------------- |
-| `<%= gatewayArn %>`  | 배포된 Gateway의 ARN                   |
-| `<%= accountId %>`   | 이 Gateway가 배포된 AWS 계정           |
+| 변수                 | 대체되는 값                              |
+| -------------------- | --------------------------------------------- |
+| `<%= gatewayArn %>`  | 배포된 Gateway의 ARN                    |
+| `<%= accountId %>`   | 이 Gateway가 배포된 AWS 계정 |
 
-값을 하드코딩하지 말고 항상 이러한 변수를 참조하세요.
+항상 하드코딩된 값 대신 이러한 변수를 참조하세요.
 
 #### 자체 변수 추가
 
-위의 `ts-agent-divide.cedar` 예제에 에이전트의 실행 역할 이름을 전달하는 등 정책이 렌더링되는 위치에 새 변수를 추가하세요:
+정책이 렌더링되는 위치에 새 변수를 추가하세요. 예를 들어 위의 `ts-agent-divide.cedar` 예제에 에이전트의 실행 역할 이름을 전달하려면:
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -239,18 +239,18 @@ query = {
 
 ### ENFORCE 모드 및 기본 거부
 
-`PolicyEngine`은 `ENFORCE` 모드로 실행되며, 이는 **기본 거부** 의미론이 적용됨을 의미합니다: (principal, action, resource) 튜플과 일치하는 `permit` 문이 없으면 요청이 거부됩니다. 거부된 도구 호출은 다음을 반환합니다:
+`PolicyEngine`은 `ENFORCE` 모드에서 실행되며, 이는 **기본 거부** 의미론이 적용됨을 의미합니다: (principal, action, resource) 튜플과 일치하는 `permit` 문이 없으면 요청이 거부됩니다. 거부된 도구 호출은 다음을 반환합니다:
 
 ```
 Tool Execution Denied: Tool call not allowed due to policy enforcement
 [No policy applies to the request (denied by default).]
 ```
 
-또한 Gateway는 `tools/list`의 응답을 필터링하여 호출자가 최소한 하나의 일치하는 `permit`이 있는 도구만 볼 수 있도록 합니다: 에이전트가 특정 도구에 대한 권한이 없으면 도구가 나타나서 호출 시 실패하는 대신 완전히 숨겨집니다.
+또한 Gateway는 `tools/list`의 응답을 필터링하여 호출자가 일치하는 `permit`이 하나 이상 있는 도구만 볼 수 있도록 합니다: 에이전트가 특정 도구에 대한 권한이 없으면 도구가 나타나서 호출 시 실패하는 대신 완전히 숨겨집니다.
 
 ### 기본 `permit-all.cedar`
 
-생성기는 Gateway의 인증 유형에 맞춰진 기본 정책을 제공합니다.
+생성기는 Gateway의 인증 유형에 범위가 지정된 기본 정책을 제공합니다.
 
 **IAM** Gateway의 경우, Gateway가 배포된 AWS 계정의 모든 IAM 호출자를 허용합니다:
 
@@ -274,11 +274,11 @@ permit (
 );
 ```
 
-더 엄격하게 제한하려면 그 옆에 더 좁은 정책을 추가하세요. 정책 세트에 최소한 하나의 일치하는 `permit`을 항상 유지하세요. 그렇지 않으면 기본 거부가 모든 호출을 차단합니다.
+더 엄격하게 잠그려면 그 옆에 더 좁은 정책을 추가하세요. 정책 세트에 일치하는 `permit`을 하나 이상 항상 유지하세요. 그렇지 않으면 기본 거부가 모든 호출을 차단합니다.
 
 ### 정책 범위 참조
 
-주체 유형은 Gateway가 호출자를 인증하는 방법에 따라 다릅니다(<a href="#authentication">인증</a> 참조).
+주체 유형은 Gateway가 호출자를 인증하는 방법에 따라 달라집니다(<a href="#authentication">인증</a> 참조).
 
 **IAM** Gateway의 경우, 호출자는 IAM 주체입니다:
 
@@ -292,9 +292,9 @@ principal is AgentCore::IamEntity
 principal == AgentCore::IamEntity::"arn:aws:sts::<%= accountId %>:assumed-role/<%= myAgentRoleName %>"
 ```
 
-동일한 값이 `when` 절에서 `principal.id`로 사용 가능합니다. 기본 `permit-all.cedar`의 계정 전체 일치와 같은 실제 패턴에 대해서는 `like`를 예약하세요.
+동일한 값은 `when` 절에 대해 `principal.id`로 사용할 수 있습니다. 기본 `permit-all.cedar`의 계정 전체 일치와 같은 실제 패턴에 대해 `like`를 예약하세요.
 
-**Cognito** Gateway의 경우, 호출자는 JWT 토큰의 `sub` 클레임에서 생성된 OAuth 사용자이며, JWT 클레임(사용자 이름, 범위 등)은 주체 태그로 사용할 수 있습니다:
+**Cognito** Gateway의 경우, 호출자는 JWT 토큰의 `sub` 클레임에서 구축된 OAuth 사용자이며, JWT 클레임(사용자 이름, 범위 등)은 주체 태그로 사용할 수 있습니다:
 
 ```
 principal is AgentCore::OAuthUser
@@ -318,7 +318,7 @@ permit (
 AgentCore::Action::"<target-name>___<tool-name>"
 ```
 
-여기서 `<target-name>`은 Gateway 대상 이름(`gateway.addMcpServer(...)`를 사용할 때 기본적으로 MCP 서버의 `mcpServerName`이며, MCP 프로젝트의 클래스 이름에서 kebab-case로 파생됨 — 예: `TsMcp` → `ts-mcp`)이고, `<tool-name>`은 MCP 도구의 이름이며, 구분자는 `___`(밑줄 3개)입니다. Cedar는 작업에 대한 와일드카드를 지원하지 않습니다 — 정확한 작업을 일치시키거나 `action ==`을 생략하여 모든 작업을 일치시키세요.
+여기서 `<target-name>`은 Gateway 대상 이름입니다(`gateway.addMcpServer(...)`를 사용할 때 기본적으로 MCP 서버의 `mcpServerName`, MCP 프로젝트의 클래스 이름에서 kebab-case로 파생됨 — 예: `TsMcp` → `ts-mcp`), `<tool-name>`은 MCP 도구의 이름이며, 구분자는 `___`(밑줄 3개)입니다. Cedar는 작업에 대한 와일드카드를 지원하지 않습니다 — 정확한 작업을 일치시키거나 `action ==`을 생략하여 모든 작업을 일치시키세요.
 
 리소스는 항상 Gateway 자체입니다:
 
@@ -326,17 +326,17 @@ AgentCore::Action::"<target-name>___<tool-name>"
 resource == AgentCore::Gateway::"<%= gatewayArn %>"
 ```
 
-### 검증 고려사항
+### 검증 고려 사항
 
-생성된 인프라는 `IGNORE_ALL_FINDINGS`로 정책을 생성합니다: AgentCore의 Cedar 분석기(서비스 기본값인 `FAIL_ON_ANY_FINDINGS`)는 많은 정당한 정책을 거부합니다 — 예를 들어, 모든 호출자에 대해 단일 도구를 비활성화하는 `forbid`는 `when` 절로 범위가 지정되어 있어도 "Overly Restrictive"로 거부됩니다. 적용(enforcement)은 영향을 받지 않으며, 정책 엔진의 `ENFORCE` 모드로 구성됩니다.
+생성된 인프라는 `IGNORE_ALL_FINDINGS`로 정책을 생성합니다: AgentCore의 Cedar 분석기(`FAIL_ON_ANY_FINDINGS`, 서비스 기본값)는 많은 합법적인 정책을 거부합니다 — 예를 들어, 모든 호출자에 대해 단일 도구를 비활성화하는 `forbid`는 `when` 절로 범위가 지정되어 있어도 "Overly Restrictive"로 거부됩니다. 적용은 영향을 받지 않습니다. 정책 엔진의 `ENFORCE` 모드로 구성됩니다.
 
-한 가지 순서 제약 조건이 여전히 적용됩니다: `AgentCore::Action::"<target>___<tool>"`을 참조하는 정책은 대상이 Gateway에 해당 도구를 등록한 후에만 검증되므로, 생성된 인프라는 Gateway 대상 이후에 정책을 생성합니다.
+한 가지 순서 제약 조건이 여전히 적용됩니다: `AgentCore::Action::"<target>___<tool>"`을 참조하는 정책은 대상이 해당 도구를 Gateway에 등록한 후에만 검증됩니다. 이것이 생성된 인프라가 Gateway 대상 이후에 정책을 생성하는 이유입니다.
 
-정책 배포가 실패하면 CloudFormation은 거부를 불투명한 `Resource stabilization failed` 오류로 표시합니다 — `aws bedrock-agentcore-control list-policies --policy-engine-id <id>`를 실행하여 실제 이유를 포함하는 검증기의 `statusReasons`를 검색하세요.
+정책 배포에 실패하면 CloudFormation은 거부를 불투명한 `Resource stabilization failed` 오류로 표시합니다 — `aws bedrock-agentcore-control list-policies --policy-engine-id <id>`를 실행하여 실제 이유를 포함하는 검증기의 `statusReasons`를 검색하세요.
 
-### 예제: 더 광범위한 허용을 유지하면서 하나의 도구 금지
+### 예제: 더 넓은 허용을 유지하면서 하나의 도구 금지
 
-좁은 `forbid`를 더 광범위한 `permit`과 쌍을 이루세요(Cedar는 `permit`보다 `forbid`를 우선 평가함):
+더 좁은 `forbid`를 더 넓은 `permit`와 쌍으로 사용하세요(Cedar는 `permit`보다 `forbid`를 평가합니다):
 
 ```cedar title="packages/<name>/policies/forbid-divide-for-py-agent.cedar"
 forbid (
@@ -346,22 +346,22 @@ forbid (
 );
 ```
 
-이것은 Python 에이전트 역할이 `ts-mcp___divide`를 호출하는 것을 거부하면서 다른 모든 호출자를 위해 더 광범위한 `permit-all.cedar`를 그대로 둡니다.
+이것은 Python 에이전트 역할이 `ts-mcp___divide`를 호출하는 것을 거부하면서 다른 모든 호출자에 대해 더 넓은 `permit-all.cedar`를 그대로 유지합니다.
 
 </OptionFilter>
 
 ## 로컬 개발
 
-생성기는 Gateway 프로젝트에 `dev` 대상을 추가하며, 이는 `local-dev.ts`를 실행합니다. 이를 실행하면 로컬 게이트웨이와 모든 연결된 대상이 함께 시작됩니다:
+생성기는 Gateway 프로젝트에 `dev` 타겟을 추가하며, 이는 `local-dev.ts`를 실행합니다. 이를 실행하면 로컬 게이트웨이와 연결된 모든 대상이 함께 시작됩니다:
 
 <NxCommands commands={["dev <name>"]} />
 
-<OptionFilter when={{ protocol: 'mcp' }} description="MCP aggregator local gateway">
-로컬 게이트웨이는 배포된 Gateway와 일치하도록 도구에 `<target>___<tool>` 접두사가 붙은 모든 연결된 MCP 서버(<Link path="guides/connection/agentcore-gateway-mcp">`agentcore-gateway#mcp-connection` 생성기</Link>를 통해 연결됨)를 집계하는 단일 MCP 엔드포인트를 노출합니다.
+<OptionFilter when={{ protocol: 'mcp' }} description="MCP 집계기 로컬 게이트웨이">
+로컬 게이트웨이는 연결된 모든 MCP 서버(<Link path="guides/connection/agentcore-gateway-mcp">`agentcore-gateway#mcp-connection` 생성기</Link>를 통해 연결됨)를 집계하는 단일 MCP 엔드포인트를 노출하며, 도구는 배포된 Gateway와 일치하도록 `<target>___<tool>`로 접두사가 붙습니다.
 </OptionFilter>
 
-<OptionFilter when={{ protocol: 'http' }} description="Path-routing proxy local gateway">
-로컬 게이트웨이는 배포된 Gateway의 경로 기반 라우팅과 일치하도록 `/<targetName>/...` 경로를 각 연결된 에이전트의 로컬 서버(<Link path="guides/connection/agentcore-gateway-agent">`agentcore-gateway#agent-connection` 생성기</Link>를 통해 연결됨)로 프록시합니다.
+<OptionFilter when={{ protocol: 'http' }} description="경로 라우팅 프록시 로컬 게이트웨이">
+로컬 게이트웨이는 `/<targetName>/...` 경로를 각 연결된 에이전트의 로컬 서버(<Link path="guides/connection/agentcore-gateway-agent">`agentcore-gateway#agent-connection` 생성기</Link>를 통해 연결됨)로 프록시하며, 배포된 Gateway의 경로 기반 라우팅과 일치합니다.
 </OptionFilter>
 
 전체 로컬 개발 스토리는 연결 가이드를 참조하세요.
@@ -403,12 +403,12 @@ module "my_gateway" {
 
 ### AWS WAF
 
-기본적으로 생성된 구성 요소는 [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACL을 Gateway와 연결합니다. AWS WAF는 대상에 도달하기 _전에_ 모든 인바운드 요청을 인라인으로 검사하여 웹 익스플로잇, 봇 트래픽 및 대량 공격으로부터 Gateway를 보호합니다. Web ACL은 AWS 관리형 기본 규칙 세트([`AWSManagedRulesCommonRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-crs) 및 [`AWSManagedRulesKnownBadInputsRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-known-bad-inputs))를 사용하여 OWASP Top 10을 포함한 일반적인 웹 익스플로잇에 대한 보호를 제공합니다. WAF 요청 로그는 CloudWatch Logs 그룹에 기록됩니다.
+기본적으로 생성된 구성 요소는 [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACL을 Gateway와 연결합니다. AWS WAF는 대상에 도달하기 _전에_ 모든 인바운드 요청을 인라인으로 검사하여 웹 익스플로잇, 봇 트래픽 및 볼륨 공격으로부터 Gateway를 보호합니다. Web ACL은 AWS 관리형 기본 규칙 세트([`AWSManagedRulesCommonRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-crs) 및 [`AWSManagedRulesKnownBadInputsRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-known-bad-inputs))를 사용하여 OWASP Top 10을 포함한 일반적인 웹 익스플로잇에 대한 보호를 제공합니다. WAF 요청 로그는 CloudWatch Logs 그룹에 기록됩니다.
 
 Web ACL은 `REGIONAL`이며 AgentCore Gateway 연결에 필요한 대로 Gateway의 리전에 생성됩니다.
 
 :::caution[기본값과 다른 SizeRestrictions_BODY]
-`AWSManagedRulesCommonRuleSet`의 `SizeRestrictions_BODY` 규칙은 `Block`이 아닌 `Count`로 재정의됩니다. 규칙의 8 KB 제한이 일반적인 MCP 도구 페이로드에 너무 제한적이기 때문입니다. 초과 크기 요청은 여전히 메트릭으로 기록되므로 모니터링할 수 있습니다. 자세한 내용은 [AWS WAF 본문 크기 제한](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-oversize-handling.html) 가이드를 참조하세요.
+`AWSManagedRulesCommonRuleSet`의 `SizeRestrictions_BODY` 규칙은 `Block` 대신 `Count`로 재정의됩니다. 규칙의 8 KB 제한이 일반적인 MCP 도구 페이로드에 대해 너무 제한적이기 때문입니다. 초과 크기 요청은 여전히 메트릭으로 기록되므로 모니터링할 수 있습니다. 자세한 내용은 [AWS WAF 본문 크기 제한](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-oversize-handling.html) 가이드를 참조하세요.
 :::
 
 생성된 Gateway 구성 요소를 편집하여 규칙을 추가, 제거 또는 조정할 수 있습니다(예: [속도 기반 규칙](https://docs.aws.amazon.com/waf/latest/developerguide/waf-rule-statement-type-rate-based.html) 또는 추가 관리형 규칙 그룹 추가).
@@ -440,51 +440,53 @@ module "my_gateway" {
 
 ## 연결
 
-<Link path="guides/connection">`connection`</Link> 생성기를 사용하여 이 프로젝트를 워크스페이스의 다른 프로젝트와 통합할 수 있습니다. 다음은 이 프로젝트와 관련된 연결입니다:
+<Link path="guides/connection">`connection`</Link> 생성기를 사용하여 이 프로젝트를 워크스페이스의 다른 프로젝트와 통합하세요. 다음 연결은 이 프로젝트와 관련이 있습니다:
 
 <CardGrid>
   <ConnectionCard
     title="AgentCore Gateway to MCP Server"
-    description="AgentCore Gateway 뒤에 MCP 서버 집계하기"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/agentcore-gateway-mcp`}
+    description="AgentCore Gateway 뒤에 MCP 서버 집계"
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'ko'}/guides/connection/agentcore-gateway-mcp`}
     source="agentcore"
     target="mcp"
   />
   <ConnectionCard
     title="AgentCore Gateway to AgentCore Gateway"
-    description="다른 AgentCore Gateway 뒤에 AgentCore Gateway 집계하기"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/agentcore-gateway-gateway`}
+    description="다른 AgentCore Gateway 뒤에 AgentCore Gateway 집계"
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'ko'}/guides/connection/agentcore-gateway-gateway`}
     source="agentcore"
     target="agentcore"
   />
   <ConnectionCard
     title="TypeScript Agent to AgentCore Gateway"
-    description="TypeScript Agent를 AgentCore Gateway에 연결하기"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/ts-agent-gateway`}
+    description="TypeScript Agent를 AgentCore Gateway에 연결"
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'ko'}/guides/connection/ts-agent-gateway`}
     source="strands"
     sourceBadge="typescript"
     target="agentcore"
   />
   <ConnectionCard
     title="Python Agent to AgentCore Gateway"
-    description="Python Agent를 AgentCore Gateway에 연결하기"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-gateway`}
+    description="Python Agent를 AgentCore Gateway에 연결"
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'ko'}/guides/connection/py-agent-gateway`}
     source="strands"
     sourceBadge="python"
     target="agentcore"
   />
   <ConnectionCard
     title="AgentCore Gateway to Agent"
-    description="AgentCore Gateway를 런타임 대상으로 에이전트 앞에 두기"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/agentcore-gateway-agent`}
+    description="런타임 대상으로 AgentCore Gateway로 에이전트 앞에 두기"
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'ko'}/guides/connection/agentcore-gateway-agent`}
     source="agentcore"
     target="strands"
   />
   <ConnectionCard
     title="React Website to AgentCore Gateway"
-    description="AgentCore Gateway를 통해 React 웹사이트를 에이전트에 연결하기"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-agentcore-gateway`}
+    description="AgentCore Gateway를 통해 React 웹사이트를 에이전트에 연결"
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'ko'}/guides/connection/react-agentcore-gateway`}
     source="react"
     target="agentcore"
   />
 </CardGrid>
+
+

@@ -1,21 +1,20 @@
 ---
-title: "类型安全的API集成"
+title: Type-Safe API 集成
 ---
-
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 import Infrastructure from '@components/infrastructure.astro';
 
-REST/HTTP API 的 CDK 构造被配置为提供类型安全接口，用于为每个操作定义集成。
+REST/HTTP API CDK 构造被配置为提供类型安全的接口，用于为每个操作定义集成。
 
 <Infrastructure>
 <Fragment slot="cdk">
-CDK 构造提供如下所述完整的类型安全集成支持。
+CDK 构造提供完整的类型安全集成支持，如下所述。
 </Fragment>
 <Fragment slot="terraform">
 :::note[路由器模式]
-Terraform 模块使用"路由模式"，单个 Lambda 函数处理所有操作。不支持类型安全集成 - 模块会创建一个处理所有 API 请求的 Lambda 函数。
+Terraform 模块使用"路由器模式"，通过单个 Lambda 函数服务所有操作。不支持类型安全集成 - 该模块创建一个处理所有 API 请求的 Lambda 函数。
 
-如需在 Terraform 中实现按操作显式集成，您需要手动创建独立的 Lambda 函数和 API Gateway 路由。具体示例请参见[显式集成](#explicit-integrations)章节。
+如果要在 Terraform 中使用显式的每个操作集成，您需要手动创建单独的 Lambda 函数和 API Gateway 路由。请参阅[显式集成](#explicit-integrations)部分的示例。
 :::
 </Fragment>
 </Infrastructure>
@@ -24,7 +23,7 @@ Terraform 模块使用"路由模式"，单个 Lambda 函数处理所有操作。
 
 <Infrastructure>
 <Fragment slot="cdk">
-您可以使用静态方法 `defaultIntegrations` 来应用默认模式，这会为每个操作定义独立的 AWS Lambda 函数：
+您可以使用静态方法 `defaultIntegrations` 来使用默认模式，该模式为每个操作定义一个单独的 AWS Lambda 函数：
 
 ```ts {2}
 new MyApi(this, 'MyApi', {
@@ -33,7 +32,7 @@ new MyApi(this, 'MyApi', {
 ```
 </Fragment>
 <Fragment slot="terraform">
-Terraform 模块自动使用路由模式与单个 Lambda 函数，无需额外配置：
+Terraform 模块自动使用路由器模式和单个 Lambda 函数。无需额外配置：
 
 ```hcl
 module "my_api" {
@@ -41,8 +40,8 @@ module "my_api" {
 
   asset_bucket_name = module.asset_bucket.bucket_name
 
-  # 模块自动创建处理所有 API 操作的
-  # 单个 Lambda 函数
+  # The module automatically creates a single Lambda function
+  # that handles all API operations
   tags = local.common_tags
 }
 ```
@@ -53,14 +52,14 @@ module "my_api" {
 
 <Infrastructure>
 <Fragment slot="cdk">
-您可以通过 API 构造的 `integrations` 属性以类型安全的方式访问底层 AWS Lambda 函数。例如，如果您的 API 定义了名为 `sayHello` 的操作，并需要为此函数添加权限：
+您可以通过 API 构造的 `integrations` 属性以类型安全的方式访问底层的 AWS Lambda 函数。例如，如果您的 API 定义了一个名为 `sayHello` 的操作，并且您需要向该函数添加一些权限，可以按如下方式操作：
 
 ```ts {6}
 const api = new MyApi(this, 'MyApi', {
   integrations: MyApi.defaultIntegrations(this).build(),
 });
 
-// sayHello 的类型与 API 中定义的操作相匹配
+// sayHello is typed to the operations defined in your API
 api.integrations.sayHello.handler.addToRolePolicy(new PolicyStatement({
   effect: Effect.ALLOW,
   actions: [...],
@@ -68,7 +67,7 @@ api.integrations.sayHello.handler.addToRolePolicy(new PolicyStatement({
 }));
 ```
 
-如果您的 API 使用 `shared` 模式，共享路由 Lambda 函数通过 `api.integrations.$router` 暴露：
+如果您的 API 使用 `shared` 模式，共享的路由器 Lambda 将作为 `api.integrations.$router` 公开：
 
 ```ts {5}
 const api = new MyApi(this, 'MyApi', {
@@ -79,10 +78,10 @@ api.integrations.$router.handler.addEnvironment('LOG_LEVEL', 'DEBUG');
 ```
 </Fragment>
 <Fragment slot="terraform">
-在 Terraform 的路由模式下，只有一个 Lambda 函数。可通过模块输出来访问：
+使用 Terraform 的路由器模式，只有一个 Lambda 函数。您可以通过模块输出访问它：
 
 ```hcl
-# 为单个 Lambda 函数授予额外权限
+# Grant additional permissions to the single Lambda function
 resource "aws_iam_role_policy" "additional_permissions" {
   name = "additional-api-permissions"
   role = module.my_api.lambda_execution_role_name
@@ -109,7 +108,7 @@ resource "aws_iam_role_policy" "additional_permissions" {
 
 <Infrastructure>
 <Fragment slot="cdk">
-如需自定义创建 Lambda 函数时的默认选项，可使用 `withDefaultOptions` 方法。例如为所有 Lambda 函数配置 VPC：
+如果您想自定义创建每个默认集成的 Lambda 函数时使用的选项，可以使用 `withDefaultOptions` 方法。例如，如果您希望所有 Lambda 函数都驻留在 Vpc 中：
 
 ```ts {5-7}
 const vpc = new Vpc(this, 'Vpc', ...);
@@ -126,28 +125,28 @@ new MyApi(this, 'MyApi', {
 
 </Fragment>
 <Fragment slot="terraform">
-要自定义 VPC 等配置，需要修改生成的 Terraform 模块。例如为所有 Lambda 函数添加 VPC 支持：
+要自定义诸如 VPC 配置之类的选项，您需要编辑生成的 Terraform 模块。例如，要为所有 Lambda 函数添加 VPC 支持：
 
 ```hcl
 # packages/common/terraform/src/app/apis/my-api/my-api.tf
-# 添加 VPC 变量
+# Add VPC variables
 variable "vpc_subnet_ids" {
-  description = "Lambda 函数的 VPC 子网 ID 列表"
+  description = "List of VPC subnet IDs for Lambda function"
   type        = list(string)
   default     = []
 }
 
 variable "vpc_security_group_ids" {
-  description = "Lambda 函数的 VPC 安全组 ID 列表"
+  description = "List of VPC security group IDs for Lambda function"
   type        = list(string)
   default     = []
 }
 
-# 更新 Lambda 函数资源
+# Update the Lambda function resource
 resource "aws_lambda_function" "api_lambda" {
-  # ... 现有配置 ...
+  # ... existing configuration ...
 
-  # 添加 VPC 配置
+  # Add VPC configuration
   vpc_config {
     subnet_ids         = var.vpc_subnet_ids
     security_group_ids = var.vpc_security_group_ids
@@ -155,7 +154,7 @@ resource "aws_lambda_function" "api_lambda" {
 }
 ```
 
-使用带 VPC 配置的模块：
+然后使用带有 VPC 配置的模块：
 
 ```hcl
 module "my_api" {
@@ -163,7 +162,7 @@ module "my_api" {
 
   asset_bucket_name = module.asset_bucket.bucket_name
 
-  # VPC 配置
+  # VPC configuration
   vpc_subnet_ids         = [aws_subnet.private_a.id, aws_subnet.private_b.id]
   vpc_security_group_ids = [aws_security_group.lambda_sg.id]
 
@@ -173,11 +172,11 @@ module "my_api" {
 </Fragment>
 </Infrastructure>
 
-#### 自定义每个操作的选项
+#### 按操作自定义选项
 
 <Infrastructure>
 <Fragment slot="cdk">
-要为_特定_操作自定义创建默认集成时使用的选项（而不影响其他操作），可以使用 `withOperationOptions` 方法。例如，如果您只想增加一个操作的 Lambda 函数超时时间：
+要自定义用于创建_特定_操作的默认集成的选项（而不影响其他操作），可以使用 `withOperationOptions` 方法。例如，如果您想仅为一个操作增加 Lambda 函数超时时间：
 
 ```ts {4-6}
 const api = new MyApi(this, 'MyApi', {
@@ -190,17 +189,17 @@ const api = new MyApi(this, 'MyApi', {
     .build(),
 });
 
-// 选定的操作仍然是默认集成，因此它们仍然具有相应的类型：
+// The selected operations remain default integrations, so they're still typed accordingly:
 api.integrations.sayHello.handler.addToRolePolicy(new PolicyStatement({ ... }));
 ```
 
-您指定的选项会与默认集成选项（以及通过 `withDefaultOptions` 设置的任何选项）合并。请注意，您不能为通过 `withOverrides` 替换的操作指定选项，因为这些操作不再使用默认集成。
+您指定的选项将与默认集成选项（以及通过 `withDefaultOptions` 设置的任何选项）合并。请注意，您不能为通过 `withOverrides` 替换的操作指定选项，因为这些操作不再使用默认集成。
 
-如果同一操作同时被 `withOperationOptions` 和 `withOverrides` 指定，无论调用顺序如何，都会遇到类型错误。
+如果同一操作同时被 `withOperationOptions` 和 `withOverrides` 针对，无论您调用它们的顺序如何，都会遇到类型错误。
 
 </Fragment>
 <Fragment slot="terraform">
-要在 Terraform 中为特定操作自定义选项，需要编辑生成的 Terraform 模块以为每个操作配置独立的 Lambda 函数（参见下方[显式集成](#explicit-integrations)章节）。
+要使用 Terraform 为特定操作自定义选项，您需要编辑生成的 Terraform 模块以配置每个操作的单独 Lambda 函数（请参阅下面的[显式集成](#explicit-integrations)部分）。
 </Fragment>
 </Infrastructure>
 
@@ -208,7 +207,7 @@ api.integrations.sayHello.handler.addToRolePolicy(new PolicyStatement({ ... }));
 
 <Infrastructure>
 <Fragment slot="cdk">
-使用 `withOverrides` 方法可以覆盖特定操作的集成。每个覆盖必须指定 `integration` 属性，其类型对应 HTTP 或 REST API 的相应 CDK 集成构造。`withOverrides` 方法也是类型安全的。例如将 `getDocumentation` API 指向外部网站托管的文档：
+您还可以使用 `withOverrides` 方法覆盖特定操作的集成。每个覆盖必须指定一个 `integration` 属性，该属性的类型对应于 HTTP 或 REST API 的适当 CDK 集成构造。`withOverrides` 方法也是类型安全的。例如，如果您想覆盖 `getDocumentation` API 以指向某个外部网站托管的文档，可以按如下方式实现：
 
 ```ts
 new MyApi(this, 'MyApi', {
@@ -222,9 +221,9 @@ new MyApi(this, 'MyApi', {
 });
 ```
 
-覆盖后的集成通过 `api.integrations.getDocumentation` 访问时将不再具有 `handler` 属性。
+您还会注意到，当通过 `api.integrations.getDocumentation` 访问时，被覆盖的集成不再具有 `handler` 属性。
 
-您可以为集成添加额外属性以实现类型安全的抽象。例如为 REST API 创建 S3 集成后引用存储桶：
+您可以向集成添加额外的属性，这些属性也将相应地进行类型化，从而允许其他类型的集成被抽象但保持类型安全。例如，如果您为 REST API 创建了 S3 集成，并且稍后希望引用特定操作的存储桶，可以按如下方式操作：
 
 ```ts {13, 41}
 const storageBucket = new Bucket(this, 'Bucket', { ... });
@@ -265,15 +264,16 @@ const api = new MyApi(this, 'MyApi', {
     .build(),
 });
 
-// 后续可类型安全地访问我们定义的 bucket 属性
+// Later, perhaps in another file, you can access the bucket property we defined
+// in a type-safe manner
 api.integrations.getFile.bucket.grantRead(...);
 ```
 </Fragment>
 <Fragment slot="terraform">
 :::note[集成覆盖]
-Terraform 模块不支持覆盖特定集成，因其使用路由模式。所有操作均由单个 Lambda 函数处理。
+Terraform 模块不支持覆盖特定集成，因为它们使用路由器模式。所有操作都由单个 Lambda 函数处理。
 
-如需实现不同类型的按操作集成，需手动配置显式集成（参见下方[显式集成](#explicit-integrations)章节）。
+如果要为每个操作使用不同的集成类型，您需要手动实现显式集成（请参阅下面的[显式集成](#explicit-integrations)部分）。
 :::
 </Fragment>
 </Infrastructure>
@@ -282,7 +282,7 @@ Terraform 模块不支持覆盖特定集成，因其使用路由模式。所有�
 
 <Infrastructure>
 <Fragment slot="cdk">
-可在集成中提供 `options` 来覆盖特定方法选项，例如为 `getDocumentation` 操作使用 Cognito 认证：
+您还可以在集成中提供 `options` 来覆盖特定的方法选项，例如授权器。例如，如果您希望为 `getDocumentation` 操作使用 Cognito 身份验证：
 
 ```ts
 new MyApi(this, 'MyApi', {
@@ -291,7 +291,7 @@ new MyApi(this, 'MyApi', {
       getDocumentation: {
         integration: new HttpIntegration('https://example.com/documentation'),
         options: {
-          authorizer: new CognitoUserPoolsAuthorizer(...) // REST API 使用，HTTP API 使用 HttpUserPoolAuthorizer
+          authorizer: new CognitoUserPoolsAuthorizer(...) // for REST, or HttpUserPoolAuthorizer for an HTTP API
         }
       },
     })
@@ -301,9 +301,9 @@ new MyApi(this, 'MyApi', {
 </Fragment>
 <Fragment slot="terraform">
 :::note[授权器覆盖]
-Terraform 模块不支持按操作覆盖授权器。整个 API 使用生成时指定的认证方式（IAM、Cognito 或 Custom）。
+Terraform 模块不支持按操作覆盖授权器。整个 API 使用生成 API 时指定的身份验证方法（IAM、Cognito 或自定义）。
 
-如需按操作授权，需按下方示例手动实现显式集成。
+如果要使用按操作授权，您需要按如下所示手动实现显式集成。
 :::
 </Fragment>
 </Infrastructure>
@@ -312,7 +312,7 @@ Terraform 模块不支持按操作覆盖授权器。整个 API 使用生成时�
 
 <Infrastructure>
 <Fragment slot="cdk">
-您可以选择不使用默认集成，直接为每个操作提供集成。这在需要不同集成类型或希望在添加新操作时收到类型错误提示时非常有用：
+如果您愿意，可以选择不使用默认集成，而是直接为每个操作提供一个集成。这在以下情况下很有用，例如，每个操作需要使用不同类型的集成，或者您希望在添加新操作时收到类型错误：
 
 ```ts
 new MyApi(this, 'MyApi', {
@@ -328,13 +328,13 @@ new MyApi(this, 'MyApi', {
 ```
 </Fragment>
 <Fragment slot="terraform">
-在 Terraform 中实现显式集成，需修改生成的应用特定模块，将默认代理集成替换为每个操作的特定集成。
+对于使用 Terraform 的显式每个操作集成，您应该修改生成的应用程序特定模块，以用每个操作的特定集成替换默认代理集成。
 
 编辑 `packages/common/terraform/src/app/apis/my-api/my-api.tf`：
 
-1. **移除默认代理路由**（如 `resource "aws_apigatewayv2_route" "proxy_routes"`）
-2. **替换单个 Lambda 函数**为各操作独立函数
-3. **为每个操作创建具体集成和路由**，复用相同 ZIP 包：
+1. **删除默认代理路由**（例如，`resource "aws_apigatewayv2_route" "proxy_routes"`）
+2. **用每个操作的单独函数替换单个 Lambda 函数**
+3. **为每个操作创建特定的集成和路由**，重用相同的 ZIP 包：
 
 <Tabs syncKey="http-rest">
 <TabItem label="HTTP API" _filter={{ infra: 'http-lambda' }}>
@@ -342,7 +342,7 @@ new MyApi(this, 'MyApi', {
 ```diff
 # packages/common/terraform/src/app/apis/my-api/my-api.tf
 
-# 移除默认单个 Lambda 函数
+# Remove the default single Lambda function
 - resource "aws_lambda_function" "api_lambda" {
 -   filename         = data.archive_file.lambda_zip.output_path
 -   function_name    = "MyApiHandler"
@@ -350,32 +350,32 @@ new MyApi(this, 'MyApi', {
 -   handler         = "index.handler"
 -   runtime         = "nodejs22.x"
 -   timeout         = 30
--   # ... 其余配置
+-   # ... rest of configuration
 - }
 
-# 移除默认代理集成
+# Remove the default proxy integration
 - resource "aws_apigatewayv2_integration" "lambda_integration" {
 -   api_id           = module.http_api.api_id
 -   integration_type = "AWS_PROXY"
 -   integration_uri  = aws_lambda_function.api_lambda.invoke_arn
--   # ... 其余配置
+-   # ... rest of configuration
 - }
 
-# 移除默认代理路由
+# Remove the default proxy routes
 - resource "aws_apigatewayv2_route" "proxy_routes" {
 -   for_each = toset(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"])
 -   api_id    = module.http_api.api_id
 -   route_key = "${each.key} /{proxy+}"
 -   target    = "integrations/${aws_apigatewayv2_integration.lambda_integration.id}"
--   # ... 其余配置
+-   # ... rest of configuration
 - }
 
-# 为每个操作添加独立 Lambda 函数，使用相同的包
+# Add individual Lambda functions for each operation using the same bundle
 + resource "aws_lambda_function" "say_hello_handler" {
 +   filename         = data.archive_file.lambda_zip.output_path
 +   function_name    = "MyApi-SayHello"
 +   role            = aws_iam_role.lambda_execution_role.arn
-+   handler         = "sayHello.handler"  # 此操作的特定处理器
++   handler         = "sayHello.handler"  # Specific handler for this operation
 +   runtime         = "nodejs22.x"
 +   timeout         = 30
 +   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
@@ -395,7 +395,7 @@ new MyApi(this, 'MyApi', {
 +   filename         = data.archive_file.lambda_zip.output_path
 +   function_name    = "MyApi-GetDocumentation"
 +   role            = aws_iam_role.lambda_execution_role.arn
-+   handler         = "getDocumentation.handler"  # 此操作的特定处理器
++   handler         = "getDocumentation.handler"  # Specific handler for this operation
 +   runtime         = "nodejs22.x"
 +   timeout         = 30
 +   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
@@ -411,7 +411,7 @@ new MyApi(this, 'MyApi', {
 +   tags = var.tags
 + }
 
-# 为每个操作添加特定集成
+# Add specific integrations for each operation
 + resource "aws_apigatewayv2_integration" "say_hello_integration" {
 +   api_id           = module.http_api.api_id
 +   integration_type = "AWS_PROXY"
@@ -427,7 +427,7 @@ new MyApi(this, 'MyApi', {
 +   integration_method = "GET"
 + }
 
-# 为每个操作添加特定路由
+# Add specific routes for each operation
 + resource "aws_apigatewayv2_route" "say_hello_route" {
 +   api_id    = module.http_api.api_id
 +   route_key = "POST /sayHello"
@@ -442,7 +442,7 @@ new MyApi(this, 'MyApi', {
 +   authorization_type = "NONE"
 + }
 
-# 为每个函数添加 Lambda 权限
+# Add Lambda permissions for each function
 + resource "aws_lambda_permission" "say_hello_permission" {
 +   statement_id  = "AllowExecutionFromAPIGateway-SayHello"
 +   action        = "lambda:InvokeFunction"
@@ -465,7 +465,7 @@ new MyApi(this, 'MyApi', {
 ```diff
 # packages/common/terraform/src/app/apis/my-api/my-api.tf
 
-# 移除默认单个 Lambda 函数
+# Remove the default single Lambda function
 - resource "aws_lambda_function" "api_lambda" {
 -   filename         = data.archive_file.lambda_zip.output_path
 -   function_name    = "MyApiHandler"
@@ -473,32 +473,32 @@ new MyApi(this, 'MyApi', {
 -   handler         = "index.handler"
 -   runtime         = "nodejs22.x"
 -   timeout         = 30
--   # ... 其余配置
+-   # ... rest of configuration
 - }
 
-# 移除默认代理集成
+# Remove the default proxy integration
 - resource "aws_apigatewayv2_integration" "lambda_integration" {
 -   api_id           = module.http_api.api_id
 -   integration_type = "AWS_PROXY"
 -   integration_uri  = aws_lambda_function.api_lambda.invoke_arn
--   # ... 其余配置
+-   # ... rest of configuration
 - }
 
-# 移除默认代理路由
+# Remove the default proxy routes
 - resource "aws_apigatewayv2_route" "proxy_routes" {
 -   for_each = toset(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"])
 -   api_id    = module.http_api.api_id
 -   route_key = "${each.key} /{proxy+}"
 -   target    = "integrations/${aws_apigatewayv2_integration.lambda_integration.id}"
--   # ... 其余配置
+-   # ... rest of configuration
 - }
 
-# 为每个操作添加独立 Lambda 函数，使用相同的包
+# Add individual Lambda functions for each operation using the same bundle
 + resource "aws_lambda_function" "say_hello_handler" {
 +   filename         = data.archive_file.lambda_zip.output_path
 +   function_name    = "MyApi-SayHello"
 +   role            = aws_iam_role.lambda_execution_role.arn
-+   handler         = "sayHello.handler"  # 此操作的特定处理器
++   handler         = "sayHello.handler"  # Specific handler for this operation
 +   runtime         = "nodejs22.x"
 +   timeout         = 30
 +   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
@@ -518,7 +518,7 @@ new MyApi(this, 'MyApi', {
 +   filename         = data.archive_file.lambda_zip.output_path
 +   function_name    = "MyApi-GetDocumentation"
 +   role            = aws_iam_role.lambda_execution_role.arn
-+   handler         = "getDocumentation.handler"  # 此操作的特定处理器
++   handler         = "getDocumentation.handler"  # Specific handler for this operation
 +   runtime         = "nodejs22.x"
 +   timeout         = 30
 +   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
@@ -534,7 +534,7 @@ new MyApi(this, 'MyApi', {
 +   tags = var.tags
 + }
 
-# 为每个操作添加特定资源和方法
+# Add specific resources and methods for each operation
 + resource "aws_api_gateway_resource" "say_hello_resource" {
 +   rest_api_id = module.rest_api.api_id
 +   parent_id   = module.rest_api.api_root_resource_id
@@ -581,7 +581,7 @@ new MyApi(this, 'MyApi', {
 +   uri                    = "https://example.com/documentation"
 + }
 
-# 更新部署以依赖新集成
+# Update deployment to depend on new integrations
 ~ resource "aws_api_gateway_deployment" "api_deployment" {
     rest_api_id = module.rest_api.api_id
 
@@ -603,7 +603,7 @@ new MyApi(this, 'MyApi', {
 +   }
   }
 
-# 为每个函数添加 Lambda 权限
+# Add Lambda permissions for each function
 + resource "aws_lambda_permission" "say_hello_permission" {
 +   statement_id  = "AllowExecutionFromAPIGateway-SayHello"
 +   action        = "lambda:InvokeFunction"
@@ -633,12 +633,12 @@ new MyApi(this, 'MyApi', {
 
 生成的 CDK API 构造支持两种集成模式：
 
-- `isolated` 为每个操作创建一个 Lambda 函数。这是生成 API 的默认模式。
-- `shared` 创建单个默认路由 Lambda 函数并在所有操作中复用，除非您覆盖特定集成。
+- `isolated` 为每个操作创建一个 Lambda 函数。这是生成的 API 的默认设置。
+- `shared` 创建一个默认路由器 Lambda 并将其重用于每个操作，除非您覆盖特定集成。
 
-`isolated` 为每个操作提供更细粒度的权限和配置。`shared` 减少 Lambda 和 API Gateway 集成的数量，同时仍允许选择性覆盖。
+`isolated` 为您提供更细粒度的每个操作权限和配置。`shared` 减少了 Lambda 和 API Gateway 集成的扩散，同时仍允许选择性覆盖。
 
-例如，将 `pattern` 设置为 `'shared'` 会创建单个函数而不是为每个集成创建一个：
+例如，将 `pattern` 设置为 `'shared'` 会创建一个函数，而不是每个集成一个函数：
 
 ```ts {6}
 // packages/common/constructs/src/app/apis/my-api.ts
@@ -655,18 +655,18 @@ export class MyApi<...> extends ... {
 ```
 </Fragment>
 <Fragment slot="terraform">
-Terraform 模块自动使用路由模式 - 这是默认且唯一支持的方式。生成的模块创建单个 Lambda 函数处理所有 API 操作。
+Terraform 模块自动使用路由器模式 - 这是默认且唯一支持的方法。生成的模块创建一个处理所有 API 操作的单个 Lambda 函数。
 
-您只需实例化默认模块即可获得路由模式：
+您可以简单地实例化默认模块以获得路由器模式：
 
 ```hcl
-# 默认路由模式 - 单个 Lambda 函数处理所有操作
+# Default router pattern - single Lambda function for all operations
 module "my_api" {
   source = "../../common/terraform/src/app/apis/my-api"
 
   asset_bucket_name = module.asset_bucket.bucket_name
 
-  # 单个 Lambda 函数自动处理所有操作
+  # Single Lambda function handles all operations automatically
   tags = local.common_tags
 }
 ```

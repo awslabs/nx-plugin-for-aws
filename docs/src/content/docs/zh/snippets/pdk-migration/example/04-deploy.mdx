@@ -1,9 +1,6 @@
 ---
-title: "部署"
+title: 部署
 ---
-
-
-
 import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
 import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
 import RunGenerator from '@components/run-generator.astro';
@@ -12,43 +9,44 @@ import NxCommands from '@components/nx-commands.astro';
 import Drawer from '@components/drawer.astro';
 import InstallCommand from '@components/install-command.astro';
 
-现在我们已经完成了代码库的完全迁移，接下来可以着手部署。此时有两种路径可供选择。
 
-#### 全新资源（简单方案）
+现在我们已经完成了代码库的完整迁移，可以开始部署了。此时我们有两条路径可以选择。
 
-最简单的处理方式是将其视为一个全新的应用，即通过全新的 DynamoDB 表和 Cognito 用户池"重新开始"——但会丢失所有用户及其购物清单。采用此方案只需：
+#### 全新资源（简单）
+
+最简单的方法是将其视为一个全新的应用程序，这意味着我们将使用全新的 DynamoDB 表和 Cognito 用户池"重新开始"——丢失所有用户及其购物清单。对于这种方法，只需：
 
 <Steps>
 
 1. 删除名为 `shopping_list` 的 DynamoDB 表
 
-1. 部署新应用：
+1. 部署新应用程序：
 
     <NxCommands commands={["deploy infra shopping-list-infra-sandbox/*"]} />
 
 </Steps>
 
-🎉 大功告成！🎉
+🎉 完成了！🎉
 
-#### 无中断迁移现有有状态资源（复杂方案）
+#### 无中断迁移现有有状态资源（更复杂）
 
-实际场景中，更可能需要将现有 AWS 资源迁移至新代码库管理，同时避免用户服务中断。
+实际上，您更可能希望迁移现有的 AWS 资源，使其由新代码库管理，同时避免客户遇到任何停机时间。
 
 :::danger
-此方案涉及较多细节且复杂度较高，由于本文仅为示例，强烈建议在非生产环境（最好新建沙盒环境）中演练，并为具体应用记录详细步骤。同时应制定应急回滚计划以应对步骤失败或意外结果。
+这种方法更加细致和复杂，而且这只是一个示例，因此强烈建议在非生产环境中进行练习（最好创建一个新的沙箱堆栈）并记录应用程序的确切步骤。还建议制定应急/回滚计划，以防步骤失败或产生意外结果。
 :::
 
 :::note
-我们的 PDK 购物清单应用未配置自定义域名或 DNS。实际应用中通常需要为网站和 API 配置域名。本节指南假设已通过 Route53 为网站和 API 设置自定义 DNS。
+我们的 PDK 购物清单应用程序没有定义任何自定义域或 DNS。实际上，您很可能已经为网站和 API 配置了域。为了本指南这一部分的目的，我们假设已经为网站和 API 设置了带有自定义 DNS 名称的 Route53。
 :::
 
-对于购物清单应用，需重点关注的有状态资源是存储用户购物清单的 DynamoDB 表和包含注册用户信息的 Cognito 用户池。我们的核心策略是保留这两个关键资源并将其迁移至新堆栈管理，然后更新 DNS 指向新网站（及面向客户的 API）。
+对于我们的购物清单应用程序，我们关心的有状态资源是包含用户购物清单的 DynamoDB 表，以及包含所有注册用户详细信息的用户池。我们的高层计划是保留这两个关键资源并将它们移动到由新堆栈管理，然后更新 DNS 以指向我们的新网站（以及 API，如果向客户公开）。
 
 <Steps>
 
-1. 更新新应用以引用需保留的现有资源
+1. 更新新应用程序以引用您希望保留的现有资源。
 
-    针对购物清单应用的 DynamoDB 表：
+    对于购物清单应用程序，我们对 DynamoDB 表执行此操作
 
     ```diff lang="ts"
     // constructs/database.ts
@@ -61,7 +59,7 @@ import InstallCommand from '@components/install-command.astro';
     +);
     ```
 
-    针对 Cognito 用户池：
+    对于 Cognito 用户池
 
     ```diff lang="ts"
     // packages/common/constructs/src/core/user-identity.ts
@@ -73,17 +71,17 @@ import InstallCommand from '@components/install-command.astro';
     +);
     ```
 
-1. 构建并部署新应用：
+1. 构建并部署新应用程序：
 
     <NxCommands commands={["run-many --target build"]} />
 
     <NxCommands commands={["deploy infra shopping-list-infra-sandbox/*"]} />
 
-    此时新应用已部署完成，引用现有资源但尚未接收流量。
+    现在我们的新应用程序已经启动并引用现有资源，尚未接收任何流量。
 
-1. 执行完整集成测试确保新应用功能正常。对于购物清单应用，需验证登录及购物清单的增删改查功能。
+1. 执行完整的集成测试以确保新应用程序按预期工作。对于购物清单应用程序，加载网站并检查您是否可以登录并创建、查看、编辑和删除购物清单。
 
-1. 还原新应用中引用现有资源的修改（暂不部署）：
+1. 恢复在新应用程序中引用现有资源的更改，但暂时不要部署它们。
 
     ```diff lang="ts"
     // constructs/database.ts
@@ -96,7 +94,7 @@ import InstallCommand from '@components/install-command.astro';
     -);
     ```
 
-    针对 Cognito 用户池：
+    对于 Cognito 用户池
 
     ```diff lang="ts"
     // packages/common/constructs/src/core/user-identity.ts
@@ -108,28 +106,28 @@ import InstallCommand from '@components/install-command.astro';
     -);
     ```
 
-    随后执行构建：
+    然后运行构建
 
     <NxCommands commands={["run-many --target build"]} />
 
-1. 在新应用的 `packages/infra` 目录执行 `cdk import` 查看需导入的资源：
+1. 在新应用程序的 `packages/infra` 文件夹中使用 `cdk import` 查看我们将被提示导入哪些资源。
 
-    ```bash title="新应用"
+    ```bash title="New Application"
     cd packages/infra
     pnpm exec cdk import shopping-list-infra-sandbox/Application --force
     ```
 
-    按回车逐步确认。由于资源仍由旧堆栈管理，导入会失败——这符合预期，此步骤仅用于确认需保留的资源。输出示例如下：
+    通过按回车键逐步完成提示。导入将失败，因为资源由另一个堆栈管理——这是预期的，我们执行此步骤只是为了确认需要保留哪些资源。您将看到如下输出：
 
     ```bash wrap
-    shopping-list-infra-sandbox/Application/ApplicationUserIdentity/UserPool/smsRole/Resource (AWS::IAM::Role): 输入 RoleName（留空跳过）
-    shopping-list-infra-sandbox/Application/ApplicationUserIdentity/UserPool/Resource (AWS::Cognito::UserPool): 输入 UserPoolId（留空跳过）
-    shopping-list-infra-sandbox/Application/Database/ShoppingList/Resource (AWS::DynamoDB::Table): 使用 TableName=shopping_list 导入 (y/n) y
+    shopping-list-infra-sandbox/Application/ApplicationUserIdentity/UserPool/smsRole/Resource (AWS::IAM::Role): enter RoleName (empty to skip)
+    shopping-list-infra-sandbox/Application/ApplicationUserIdentity/UserPool/Resource (AWS::Cognito::UserPool): enter UserPoolId (empty to skip)
+    shopping-list-infra-sandbox/Application/Database/ShoppingList/Resource (AWS::DynamoDB::Table): import with TableName=shopping_list (y/n) y
     ```
 
-    这表明实际需导入 3 个资源至新堆栈。
+    这告诉我们实际上有 3 个资源需要导入到新堆栈中。
 
-1. 更新旧 PDK 项目，为上步发现的资源设置 `RemovalPolicy` 为 `RETAIN`。当前 DynamoDB 表和用户池默认保留策略，但需为发现的 SMS 角色更新策略：
+1. 更新旧的 PDK 项目，为从上一步发现的资源设置 `RemovalPolicy` 为 `RETAIN`。在撰写本文时，这是用户池和 DynamoDB 表的默认设置，但我们需要为上面发现的 SMS 角色更新它：
 
     ```diff lang="ts"
     // application-stack.ts
@@ -143,19 +141,19 @@ import InstallCommand from '@components/install-command.astro';
     +smsRole.applyRemovalPolicy(RemovalPolicy.RETAIN);
     ```
 
-1. 部署 PDK 项目以应用保留策略：
+1. 部署您的 PDK 项目以应用删除策略
 
-    ```bash title="PDK 应用"
+    ```bash title="PDK Application"
     cd packages/infra
     npx projen deploy
     ```
 
-1. 查看 CloudFormation 控制台，记录 `cdk import` 步骤提示的信息：
+1. 查看 CloudFormation 控制台并记录上述 `cdk import` 步骤中提示您输入的值
 
-    1. 用户池 ID，如 `us-west-2_XXXXX`
-    2. SMS 角色名称，如 `infra-sandbox-UserIdentityUserPoolsmsRoleXXXXXX`
+    1. 用户池 ID，例如 `us-west-2_XXXXX`
+    2. SMS 角色名称，例如 `infra-sandbox-UserIdentityUserPoolsmsRoleXXXXXX`
 
-1. 更新 PDK 项目以引用现有资源：
+1. 更新您的 PDK 项目以引用现有资源而不是创建它们
 
     ```diff lang="ts"
     // constructs/database.ts
@@ -168,7 +166,7 @@ import InstallCommand from '@components/install-command.astro';
     +);
     ```
 
-    针对 Cognito 用户池：
+    对于 Cognito 用户池
 
     ```diff lang="ts"
     // application-stack.ts
@@ -178,40 +176,40 @@ import InstallCommand from '@components/install-command.astro';
     +  '<your-user-pool-id>',
     +);
     const userIdentity = new UserIdentity(this, `${id}UserIdentity`, {
-    +  // PDK 构造接受 UserPool 而非 IUserPool，此处仍有效！
+    +  // PDK construct accepts UserPool not IUserPool, but this still works!
     +  userPool: userPool as any,
     });
     ```
 
-1. 再次部署 PDK 项目，使资源脱离原 CloudFormation 堆栈管理：
+1. 再次部署您的 PDK 项目，这意味着资源将不再由我们的 PDK 项目的 CloudFormation 堆栈管理。
 
-    ```bash title="PDK 应用"
+    ```bash title="PDK Application"
     cd packages/infra
     npx projen deploy
     ```
 
-1. 资源解除托管后，在新应用中执行 `cdk import` 完成实际导入：
+1. 现在资源已不受管理，我们可以在新应用程序中运行 `cdk import` 来实际执行导入：
 
-    ```bash title="新应用"
+    ```bash title="New Application"
     cd packages/infra
     pnpm exec cdk import shopping-list-infra-sandbox/Application --force
     ```
 
-    输入记录的值，导入应成功完成。
+    在提示时输入值，导入应该成功完成。
 
-1. 再次部署新应用以确保对现有资源（现由新堆栈管理）的变更生效：
+1. 再次部署新应用程序，以确保对这些现有资源（现在由新堆栈管理）进行任何更改：
 
     <NxCommands commands={["deploy infra shopping-list-infra-sandbox/*"]} />
 
-1. 再次全面测试新应用
+1. 再次对新应用程序执行完整测试
 
-1. 更新 DNS 记录指向新网站（及 API 如需要）
+1. 更新 DNS 记录以指向新网站（以及 API，如果需要）。
 
-    建议采用 Route53 [加权路由](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/routing-policy-weighted.html)逐步切换流量。初始阶段将部分请求导向新应用，通过监控指标逐步增加新应用权重，直至旧 PDK 应用无流量。
+    我们建议使用 Route53 [加权路由](https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/routing-policy-weighted.html)的渐进方法，首先将一小部分请求定向到新应用程序。在监控指标时，您可以增加新应用程序的权重，直到没有流量发送到旧的 PDK 应用程序。
 
-    若未配置 DNS 且使用自动生成域名，可通过 [CloudFront HTTP 源站](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_cloudfront_origins-readme.html#from-an-http-endpoint)或 [API Gateway HTTP 集成](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_apigateway.HttpIntegration.html)代理请求。
+    如果您没有任何 DNS 并使用了网站和 API 的自动生成域，您始终可以考虑代理请求（例如通过 [CloudFront HTTP 源](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_cloudfront_origins-readme.html#from-an-http-endpoint)或 [API Gateway HTTP 集成](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_apigateway.HttpIntegration.html)）。
 
-1. 监控 PDK 应用指标确认无流量后，销毁旧 CloudFormation 堆栈：
+1. 监控 PDK 应用程序指标以确保没有流量，最后销毁旧的 CloudFormation 堆栈：
 
     ```bash
     cd packages/infra
@@ -220,12 +218,12 @@ import InstallCommand from '@components/install-command.astro';
 
 </Steps>
 
-虽然过程复杂，但我们成功实现了用户的无缝迁移！🎉🎉🎉
+这涉及的内容相当多，但我们成功地将用户无缝迁移到了新应用程序！🎉🎉🎉
 
-现在，我们已获得 Nx Plugin for AWS 相较于 PDK 的新优势：
+我们现在拥有了 Nx Plugin for AWS 相对于 PDK 的新优势：
 
 - 更快的构建速度
 - 本地 API 开发支持
-- 更友好的编码体验（<Link path="/get_started/building-with-ai">试试我们的 MCP 服务！</Link>）
-- 更直观的类型安全客户端/服务端代码
+- 对 AI 编码友好的代码库（<Link path="/get_started/building-with-ai">试试我们的 MCP 服务器！</Link>）
+- 更直观的类型安全客户端/服务器代码
 - 以及更多！

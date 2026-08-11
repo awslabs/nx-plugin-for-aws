@@ -1,9 +1,6 @@
 ---
-title: "インフラストラクチャーを移行する"
+title: インフラストラクチャの移行
 ---
-
-
-
 import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
 import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
 import RunGenerator from '@components/run-generator.astro';
@@ -12,44 +9,44 @@ import NxCommands from '@components/nx-commands.astro';
 import Drawer from '@components/drawer.astro';
 import InstallCommand from '@components/install-command.astro';
 
-ショッピングリストアプリケーションで最後に移行が必要なプロジェクトが `InfrastructureTsProject` です。これはTypeScript CDKプロジェクトであり、Nx Plugin for AWSの同等機能は<Link path="/guides/typescript-infrastructure">`ts#infra` ジェネレータ</Link>です。
+ショッピングリストアプリケーションで移行する必要がある最後のプロジェクトは `InfrastructureTsProject` です。これは TypeScript CDK プロジェクトであり、Nx Plugin for AWS の同等のものは <Link path="/guides/typescript-infrastructure">`ts#infra` ジェネレーター</Link>です。
 
-PDKはProjenプロジェクトに加えて、これらのプロジェクトが依存するCDKコンストラクトも提供していました。私たちはこれらのCDKコンストラクトからもショッピングリストアプリケーションを移行し、Nx Plugin for AWSが生成するコンストラクトを採用します。
+Projen プロジェクトと同様に、PDK はこれらのプロジェクトが依存する CDK コンストラクトも提供していました。ショッピングリストアプリケーションをこれらの CDK コンストラクトからも移行し、Nx Plugin for AWS によって生成されるものを使用します。
 
 :::tip
-PDKと比較したNx Plugin for AWSの大きな利点は、提供するCDKコンストラクトがサードパーティパッケージを介してインポートされるのではなく、プロジェクトに直接追加されるソースコードである点です。これにより、PDKがサポートしていた範囲を超えたカスタマイズが可能になります。
+Nx Plugin for AWS が PDK よりも優れている大きな利点は、提供される CDK コンストラクトがサードパーティパッケージ経由でインポートされるのではなく、プロジェクトに追加されるソースコードであることです。これにより、PDK がサポートしていた範囲を超えてカスタマイズする制御と柔軟性が得られます。
 :::
 
-#### TypeScript CDKインフラストラクチャプロジェクトの生成
+#### TypeScript CDK インフラストラクチャプロジェクトの生成
 
-`packages/infra` にインフラプロジェクトをセットアップするため、<Link path="/guides/typescript-infrastructure">`ts#infra` ジェネレータ</Link>を実行します：
+<Link path="/guides/typescript-infrastructure">`ts#infra` ジェネレーター</Link>を実行して、`packages/infra` にインフラストラクチャプロジェクトをセットアップします：
 
 <RunGenerator generator="ts#infra" noInteractive requiredParameters={{ name: 'infra' }} />
 
-#### CDKインフラストラクチャの移行
+#### CDK インフラストラクチャの移行
 
-PDKショッピングリストアプリケーションは、CDKアプリケーションスタック内で以下のコンストラクトをインスタンス化していました：
+PDK ショッピングリストアプリケーションは、CDK アプリケーションスタック内で以下のコンストラクトをインスタンス化していました：
 
-- ショッピングリストを保存するDynamoDBテーブルのための `DatabaseConstruct`
-- PDKから直接インポートしたCognitoリソース用の `UserIdentity`
-- Smithy APIをデプロイするための `MyApi`（PDKの `TypeSafeRestApi` CDKコンストラクトを使用したタイプセーフな統合）
-- PDKの `StaticWebsite` CDKコンストラクトをラップしたウェブサイトデプロイ用の `Website`
+- ショッピングリストを保存する DynamoDB テーブル用の `DatabaseConstruct`
+- PDK から直接インポートされた Cognito リソース用の `UserIdentity`
+- Smithy API をデプロイするための `MyApi`。これは、生成された TypeScript CDK コンストラクトを型安全な統合で使用し、内部的に PDK の `TypeSafeRestApi` CDK コンストラクトに依存していました。
+- Website をデプロイするための `Website`。PDK の `StaticWebsite` CDK コンストラクトをラップしていました。
 
-次に、これらを新しいプロジェクトに移行します。
+次に、これらのそれぞれを新しいプロジェクトに移行します。
 
 ##### アプリケーションスタックのコピー
 
-PDKショッピングリストアプリケーションの `packages/infra/src/stacks/application-stack.ts` を新しいプロジェクトの同じ場所にコピーします。TypeScriptエラーが表示されますが、後で対応します。
+PDK ショッピングリストアプリケーションから `packages/infra/src/stacks/application-stack.ts` を新しいプロジェクトの全く同じ場所にコピーします。TypeScript エラーが表示されますが、以下で対処します。
 
 ##### データベースコンストラクトのコピー
 
-PDKアプリケーションの `packages/src/constructs/database.ts` にある `Database` コンストラクトを新しいプロジェクトの同じ場所にコピーします。
+PDK ショッピングリストアプリケーションには、`packages/src/constructs/database.ts` に `Database` コンストラクトがありました。これを新しいプロジェクトの全く同じ場所にコピーします。
 
-Nx Plugin for AWSはPDK Nagよりも厳格な[Checkov](https://www.checkov.io/)を使用するため、以下の抑制ルールを追加します：
+Nx Plugin for AWS はセキュリティテストに [Checkov](https://www.checkov.io/) を使用しており、PDK Nag よりも少し厳格であるため、いくつかの抑制を追加する必要があります：
 
 ```diff lang="ts"
 // constructs/database.ts
-+import { suppressRules } from ':shopping-list/common-constructs';
++import { suppressRules } from '@shopping-list/common-constructs';
 ...
 +suppressRules(
 +  this.shoppingListTable,
@@ -58,7 +55,7 @@ Nx Plugin for AWSはPDK Nagよりも厳格な[Checkov](https://www.checkov.io/)�
 +);
 ```
 
-`application-stack.ts` で `DatabaseConstruct` のインポートをESM構文に更新します：
+`application-stack.ts` で、`DatabaseConstruct` のインポートを ESM 構文を使用するように更新します：
 
 ```diff lang="ts"
 // stacks/application-stack.ts
@@ -66,9 +63,9 @@ Nx Plugin for AWSはPDK Nagよりも厳格な[Checkov](https://www.checkov.io/)�
 +import { DatabaseConstruct } from '../constructs/database.js';
 ```
 
-##### UserIdentityコンストラクトの移行
+##### UserIdentity コンストラクトの移行
 
-`UserIdentity` コンストラクトは基本的にインポートを変更するだけで置換可能です：
+`UserIdentity` コンストラクトは、一般的にインポートを調整することで変更なしで置き換えることができます。
 
 ```diff lang="ts"
 -import { UserIdentity } from "@aws/pdk/identity";
@@ -77,19 +74,21 @@ Nx Plugin for AWSはPDK Nagよりも厳格な[Checkov](https://www.checkov.io/)�
 const userIdentity = new UserIdentity(this, `${id}UserIdentity`);
 ```
 
-新しい `UserIdentity` コンストラクトが使用する基盤リソースは `aws-cdk-lib` から直接提供され、PDKでは `@aws-cdk/aws-cognito-identitypool-alpha` を使用していました。
+新しい `UserIdentity` コンストラクトで使用される基礎となるコンストラクトは `aws-cdk-lib` から直接提供されることに注意してください。PDK は `@aws-cdk/aws-cognito-identitypool-alpha` を使用していました。
 
-##### APIコンストラクトの移行
+##### API コンストラクトの移行
 
-PDKアプリケーションの `constructs/apis/myapi.ts` には、Smithyモデルから生成されたタイプセーフなCDKコンストラクトをインスタンス化するコードがありました。
+PDK ショッピングリストアプリケーションには、`constructs/apis/myapi.ts` にコンストラクトがあり、Smithy モデルから Type Safe API が生成した CDK コンストラクトをインスタンス化していました。
 
-Nx Plugin for AWSもSmithyモデルに基づいたタイプセーフな統合を提供しますが、よりシンプルで柔軟な方法を採用しています。`packages/common/constructs/src/app/apis/api.ts` が使用する最小限のメタデータを生成し、詳細は<Link path="/guides/ts-smithy-api">`ts#smithy-api` ガイド</Link>で確認できます。
+このコンストラクトに加えて、PDK プロジェクトは `@handler` トレイトを使用していたため、生成された Lambda 関数 CDK コンストラクトも生成されていました。
 
-以下の手順で移行します：
+Type Safe API と同様に、Nx Plugin for AWS は Smithy モデルに基づいて統合の型安全性を提供しますが、はるかにシンプルで柔軟な方法で実現されています。ビルド時に CDK コンストラクト全体を生成する代わりに、最小限の「メタデータ」のみが生成され、`packages/common/constructs/src/app/apis/api.ts` がそれを汎用的な方法で使用します。コンストラクトの使用方法の詳細については、<Link path="/guides/ts-smithy-api">`ts#smithy-api` ジェネレーターガイド</Link>を参照してください。
+
+以下の手順に従ってください：
 
 <Steps>
 
-1. `application-stack.ts` で `Api` コンストラクトをインスタンス化
+1. `application-stack.ts` で `Api` コンストラクトをインスタンス化します
 
     ```diff lang="ts"
     // stacks/application-stack.ts
@@ -105,12 +104,15 @@ Nx Plugin for AWSもSmithyモデルに基づいたタイプセーフな統合を
     +});
     ```
 
-    `Api.defaultIntegrations(this).build()` はAPIの各操作に対してLambda関数を作成するデフォルト動作です。
+    ここで `Api.defaultIntegrations(this).build()` を使用していることに注目してください - デフォルトの動作は API の各オペレーションに対して Lambda 関数を作成することで、これは `myapi.ts` で持っていたのと同じ動作です。
 
-1. Lambda関数にDynamoDBテーブルへのアクセス権限を付与
+1. Lambda 関数に DynamoDB テーブルへのアクセス権限を付与します。
+
+    PDK ショッピングリストアプリケーションでは、`DatabaseConsruct` が `MyApi` に渡され、生成された各関数コンストラクトに関連する権限を追加していました。`Api` コンストラクトの型安全な `integrations` プロパティにアクセスすることで、`application-stack.ts` ファイル内で直接これを行います：
 
     ```ts
     // stacks/application-stack.ts
+    // Grant our lambda functions scoped access to call Dynamo
     databaseConstruct.shoppingListTable.grantReadData(
       api.integrations.getShoppingLists.handler,
     );
@@ -120,7 +122,9 @@ Nx Plugin for AWSもSmithyモデルに基づいたタイプセーフな統合を
     ].forEach((f) => databaseConstruct.shoppingListTable.grantWriteData(f));
     ```
 
-1. 認証ユーザーにAPI呼び出し権限を付与
+1. 認証されたユーザーに API を呼び出す権限を付与します。
+
+    PDK アプリケーションの `myapi.ts` 内では、認証されたユーザーにも API を呼び出すための IAM 権限が付与されていました。`application-stack.ts` で同等のことを行います：
 
     ```ts
     // stacks/application-stack.ts
@@ -129,9 +133,9 @@ Nx Plugin for AWSもSmithyモデルに基づいたタイプセーフな統合を
 
 </Steps>
 
-##### ウェブサイトコンストラクトの移行
+##### Website コンストラクトの移行
 
-最後に、`Website` コンストラクトを `application-stack.ts` に追加します：
+最後に、`packages/common/constructs/src/app/static-websites/website.ts` から `Website` コンストラクトを `application-stack.ts` に追加します。これは PDK ショッピングリストアプリケーションの `packages/infra/src/constructs/websites/website.ts` と同等です。
 
 ```diff lang="ts"
 -import { Website } from "../constructs/websites/website";
@@ -144,14 +148,14 @@ Nx Plugin for AWSもSmithyモデルに基づいたタイプセーフな統合を
 +new Website(this, 'Website');
 ```
 
-Nx Plugin for AWSのコンストラクトでは、ランタイム設定が各コンストラクト内で管理され、`/runtime-config.json` に自動デプロイされます。
+ID や API を Website に渡していないことに注意してください - ランタイム設定は Nx Plugin for AWS によって提供される各コンストラクト内で管理され、`UserIdentity` と `Api` が必要な値を登録し、`Website` が静的ウェブサイトの `/runtime-config.json` へのデプロイを管理します。
 
-すべてのコードを移行したら、プロジェクトをビルドします：
+コードベースの関連部分をすべて新しいプロジェクトに移行したので、プロジェクトをビルドしましょう。
 
 <NxCommands commands={["run-many --target build"]} />
 
 :::caution
-リンターエラーが発生する場合、以下のコマンドで自動修正可能です：
+lint の問題によりビルドが失敗する場合があります。これらは通常、自動的に修正できます：
 
 <NxCommands commands={["run-many --target lint --fix"]} />
 :::

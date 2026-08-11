@@ -1,6 +1,6 @@
 ---
-title: "实现游戏API和库存MCP服务器"
-description: "使用 @aws/nx-plugin 构建代理式AI驱动的地牢冒险游戏的演练"
+title: 实现游戏 API 和库存 MCP 服务器
+description: 使用 @aws/nx-plugin 构建由代理 AI 驱动的地牢冒险游戏的演练。
 ---
 
 import { Aside, Code, FileTree, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
@@ -29,30 +29,30 @@ import { getDungeonAdventureElectroDbDependencies } from '../../../../../../../.
 我们将在本节中实现以下 API：
 
 1. `saveGame` - 创建或更新游戏。
-2. `queryGames` - 返回分页的历史游戏列表。
-3. `queryInventory` - 返回分页的玩家库存物品列表。
-4. `queryActions` - 返回给定游戏的对话历史。
+2. `queryGames` - 返回先前保存的游戏的分页列表。
+3. `queryInventory` - 返回玩家库存中物品的分页列表。
+4. `queryActions` - 返回给定游戏的对话历史记录。
 
-:::note[各部分状态的存储位置]
-- `games` 和 `inventory` 存储在 **DynamoDB**（通过 ElectroDB）—— 游戏 API 的 Lambda 函数和库存 MCP 服务器读写它们。
-- `actions`（聊天记录）存储在 **S3** —— 故事智能体的 `S3SessionManager` 在每轮对话时写入一个 JSON 文件，游戏 API 中的 `queryActions` 读取它们，以便 UI 在页面重新加载时能够重放历史记录。没有 `saveAction` 流程；智能体是唯一的写入者。
+:::note[每个状态片段的存储位置]
+- `games` 和 `inventory` 存储在 **DynamoDB** 中（通过 ElectroDB）— 游戏 API lambda 和库存 MCP 服务器读写它们。
+- `actions`（聊天记录）存储在 **S3** 中 — Story Agent 的 `S3SessionManager` 每回合写入一个 JSON blob，游戏 API 中的 `queryActions` 读取它们，以便 UI 可以在页面重新加载时重放历史记录。没有 `saveAction` 过程；代理是唯一的写入者。
 :::
 
-### API 模式定义
+### API 模式
 
-使用 [Zod](https://zod.dev/) 在 `packages/game-api/src/schema/index.ts` 文件中定义 API 输入输出模式：
+为了定义我们的 API 输入和输出，让我们在 `packages/game-api/src/schema/index.ts` 文件中使用 [Zod](https://zod.dev/) 创建我们的模式，如下所示：
 
 <E2EDiff lang="typescript" before="dungeon-adventure/2/schema/index.ts.old.template" after="dungeon-adventure/2/schema/index.ts.template" />
 
-删除 `packages/game-api/src/schema/echo.ts` 文件，因为本项目不会使用它。
+删除 `packages/game-api/src/schema/echo.ts` 文件，因为我们在这个项目中不会使用它。
 
 <Aside type="tip" title="自动类型推断">
-我们为每个 Zod 模式定义都使用 `z.TypeOf` 语法导出了接口类型。这让我们无需重复工作就能将 Zod 定义转换为 TypeScript 接口。
+对于我们在 Zod 中定义的每个模式，我们还使用 `z.TypeOf` 语法导出一个接口。这将我们的 Zod 定义转换为 Typescript 接口，而无需重复工作。
 </Aside>
 
 ### 实体建模
 
-这是应用的实体关系图。
+这是我们应用程序的 ER 图。
 
 ```d2
 direction: right
@@ -76,27 +76,27 @@ item: Item {
 game -> item: 1..*
 ```
 
-`ts#dynamodb` 生成器设置了 [ElectroDB](https://electrodb.dev/en/core-concepts/introduction/)，我们将使用它来建模数据。我们将对话历史持久化到 S3，因此添加 S3 客户端依赖：
+`ts#dynamodb` 生成器设置了 [ElectroDB](https://electrodb.dev/en/core-concepts/introduction/)，我们将使用它来建模我们的数据。我们将在 S3 中持久化对话历史记录，因此我们添加对 S3 客户端的依赖：
 
 <InstallCommand pkg={getDungeonAdventureElectroDbDependencies()} project="@dungeon-adventure/game-api" />
 
 <Aside title="项目依赖">
-S3 客户端被添加到 `game-api` 项目自己的 `package.json` 中，因为该项目的源代码导入了它。版本仍然通过包管理器的依赖目录（如果支持）在工作区中保持一致（[单一版本策略](https://nx.dev/concepts/decisions/dependency-management#single-version-policy)）。更多信息请参考<Link path="guides/typescript-project#dependencies">TypeScript 项目指南</Link>。
+S3 客户端被添加到 `game-api` 项目自己的 `package.json` 中，因为该项目的源代码导入了它。版本仍然通过包管理器的依赖目录（在支持的情况下）在整个工作空间中保持一致（[单一版本策略](https://nx.dev/concepts/decisions/dependency-management#single-version-policy)）。有关更多信息，请参阅 <Link path="guides/typescript-project#dependencies">ts#project 指南</Link>。
 </Aside>
 
 用我们的 `Game` 和 `Inventory` 实体替换 `packages/dungeon-db/src/entities/index.ts` 中生成的示例实体，并删除 `packages/dungeon-db/src/entities/example.ts`：
 
 <E2ECode lang="typescript" path="dungeon-adventure/2/dungeon-db/entities/index.ts.template" />
 
-ElectroDB 不仅可以定义类型，还能为时间戳等字段提供默认值。此外，ElectroDB 遵循 DynamoDB 最佳实践的[单表设计](https://electrodb.dev/en/core-concepts/single-table-relationships/)。
+ElectroDB 不仅允许我们定义类型，还可以为某些值（如时间戳）提供默认值。此外，ElectroDB 遵循[单表设计](https://electrodb.dev/en/core-concepts/single-table-relationships/)，这是使用 DynamoDB 时的最佳实践。
 
 <Aside title="ElectroDB 集合">
-虽然 ElectroDB 支持[集合](https://electrodb.dev/en/modeling/collections/)，但本教程为简化起见暂不使用。
+虽然 ElectroDB 确实支持[集合](https://electrodb.dev/en/modeling/collections/)，但为了简单起见，我们在本教程中选择不使用它们。
 </Aside>
 
-### 定义操作流程
+### 定义我们的过程
 
-要实现 API 方法，在 `packages/game-api/src/procedures` 目录下进行以下修改：
+要实现 API 方法，请在 `packages/game-api/src/procedures` 中进行以下更改：
 
 <Tabs>
   <TabItem label="games.ts">
@@ -110,11 +110,11 @@ ElectroDB 不仅可以定义类型，还能为时间戳等字段提供默认值�
   </TabItem>
 </Tabs>
 
-删除 `packages/game-api/src/procedures` 中的 `echo.ts` 文件，因为本项目不会使用。
+删除 `echo.ts` 文件（来自 `packages/game-api/src/procedures`），因为我们在这个项目中不会使用它。
 
-### 路由配置
+### 路由器设置
 
-完成操作流程定义后，要将其接入 API，更新以下文件：
+在我们定义过程之后，要将它们连接到我们的 API，请更新以下文件：
 
 <Tabs>
   <TabItem label="packages/game-api/src/router.ts">
@@ -122,17 +122,17 @@ ElectroDB 不仅可以定义类型，还能为时间戳等字段提供默认值�
 </TabItem>
 </Tabs>
 
-## 任务 2：创建库存 MCP 服务
+## 任务 2：创建库存 MCP 服务器
 
-现在创建 MCP 服务，使智能体能管理玩家库存物品。
+让我们创建一个 MCP 服务器，它将允许我们的代理管理玩家库存中的物品。
 
-我们将为智能体定义以下工具：
+我们将为我们的代理定义以下工具：
 
-- `list-inventory-items` 获取玩家当前库存物品
-- `add-to-inventory` 向库存添加物品
-- `remove-from-inventory` 从库存移除物品
+- `list-inventory-items` 用于检索玩家当前的库存物品
+- `add-to-inventory` 用于向玩家的库存添加物品
+- `remove-from-inventory` 用于从玩家的库存中移除物品
 
-为节省时间，我们将内联定义所有工具：
+为了节省时间，我们将内联定义所有工具：
 
 <Tabs>
   <TabItem label="packages/inventory/src/mcp-server/server.ts">
@@ -140,29 +140,29 @@ ElectroDB 不仅可以定义类型，还能为时间戳等字段提供默认值�
 </TabItem>
 </Tabs>
 
-随着工具数量增加，可以按需将其重构到独立文件中。
+随着工具数量的增长，如果您愿意，可以将它们重构到单独的文件中。
 
 删除 `packages/inventory/src/mcp-server` 中的 `tools` 和 `resources` 目录，因为这些不会被使用。
 
 ## 任务 3：更新基础设施
 
-`ts#dynamodb` 生成器生成的 `DungeonDb` 构造已经配置了我们的表，因此我们只需要在堆栈中实例化它并授予游戏 API 和库存 MCP 服务器所需的权限。按以下方式更新 `packages/infra/src/stacks/application-stack.ts`：
+由 `ts#dynamodb` 生成的 `DungeonDb` 构造已经配置了我们的表，因此我们只需要在堆栈中实例化它，并授予游戏 API 和库存 MCP 服务器所需的权限。按如下方式更新 `packages/infra/src/stacks/application-stack.ts`：
 
 <E2EDiff lang="typescript" before="dungeon-adventure/1/application-stack.ts.template" after="dungeon-adventure/2/stacks/application-stack.ts.template" />
 
-:::note[隔离过程]
-注意此处每个操作流程由独立 Lambda 函数处理，因此可以遵循最小权限原则，根据具体实现分配读写权限。
+:::note[隔离的过程]
+请注意，由于每个过程都由单独的 lambda 函数提供服务，我们可以遵循最小权限原则，并根据过程的实现仅分配所需的读/写权限。
 :::
 
 :::tip[运行时配置]
-`DungeonDb` 构造在<Link path="guides/runtime-config">运行时配置</Link>中的 `dynamodb` 命名空间下注册已部署的表名，存储在 AWS AppConfig 中。游戏 API 和库存 MCP 服务器在运行时使用 Lambda Powertools 检索表名，而无需通过环境变量传递。这种方法的好处是，随着表或其他基础设施标识符数量的增加，在针对已部署基础设施运行时只需要一个 `RUNTIME_CONFIG_APP_ID` 环境变量。
+`DungeonDb` 构造在 <Link path="guides/runtime-config">运行时配置</Link> 中的 `dynamodb` 命名空间下注册已部署的表名，存储在 AWS AppConfig 中。游戏 API 和库存 MCP 服务器在运行时使用 Lambda Powertools 检索它，而不需要将其作为环境变量传递。这种方法的一个好处是，随着表或其他基础设施标识符数量的增长，在针对已部署的基础设施运行时，您只需要一个 `RUNTIME_CONFIG_APP_ID` 环境变量。
 :::
 
-## 任务 4：本地测试游戏 API
+## 任务 4：在本地测试游戏 API
 
-无需部署到 AWS 即可试用我们的 API——`dev` 目标针对 [DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html) 运行游戏 API。因为我们在模块 1 中将游戏 API 连接到了 `DungeonDb` 项目，此目标也会自动启动 DynamoDB Local。
+无需部署到 AWS 即可试用我们的 API — `dev` 目标针对 [DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html) 运行游戏 API。因为我们在模块 1 中将游戏 API 连接到 `DungeonDb` 项目，所以此目标也会自动启动 DynamoDB Local。
 
-首先修复 lint 问题：
+首先，修复任何 lint 问题：
 
 <PackageManagerShortCommand commands={["lint"]} />
 
@@ -172,24 +172,24 @@ ElectroDB 不仅可以定义类型，还能为时间戳等字段提供默认值�
 
 ### 启动本地服务器
 
-使用 `dev` 目标在本地启动游戏 API，这也会启动 DynamoDB Local：
+使用 `dev` 目标在本地启动游戏 API，它也会启动 DynamoDB Local：
 
 <NxCommands commands={["dev game-api"]} />
 
 <Aside type="tip" title="首次运行">
-首次运行会拉取 DynamoDB Local 容器镜像，可能需要一些时间。让服务器在此终端中保持运行，并为下面的 `curl` 命令打开第二个终端。
+首次运行会拉取 DynamoDB Local 容器镜像，这可能需要一些时间。让服务器在此终端中保持运行，并打开第二个终端用于下面的 `curl` 命令。
 </Aside>
 
 ### 测试 API
 
-服务器启动并运行后，查询（空的）游戏列表：
+一旦您的服务器启动并运行，查询（空的）游戏列表：
 
 ```bash
 curl -X GET 'http://localhost:2022/games.query?input=%7B%7D'
 ```
 
-:::note[URL编码]
-测试 API 时传递的 `%7B%7D` 是 URI 编码的空 JSON 对象（`{}`）。
+:::note[URL 编码]
+我们传递给测试 API 的 `%7B%7D` 是 URI 编码的空 JSON 对象（`{}`）。
 :::
 
 您将看到一个空列表：
@@ -224,14 +224,14 @@ curl -X GET 'http://localhost:2022/games.query?input=%7B%7D'
 {"result":{"data":{"items":[{"playerName":"Alice","genre":"zombie","lastUpdated":"..."}],"cursor":null}}}
 ```
 
-完成后可以停止本地服务器（`Ctrl+C`）。
+完成后，您可以停止本地服务器（`Ctrl+C`）。
 
-## 任务 5：本地测试库存 MCP 服务器
+## 任务 5：在本地测试库存 MCP 服务器
 
-我们可以使用生成的 `mcp-server-inspect` 目标通过 [MCP Inspector](https://github.com/modelcontextprotocol/inspector) 试用 MCP 服务器的工具：
+我们可以使用 [MCP Inspector](https://github.com/modelcontextprotocol/inspector) 通过生成的 `mcp-server-inspect` 目标试用 MCP 服务器的工具：
 
 <NxCommands commands={["mcp-server-inspect inventory"]} />
 
-这会在本地提供 MCP 服务器（同时启动 DynamoDB Local），并在 `http://localhost:6274` 启动预配置好的 MCP Inspector。点击 **Connect**，切换到 **Tools** 选项卡，点击 **List Tools**，然后尝试 `add-to-inventory`（例如 `playerName: Alice`、`itemName: Rusty Sword`、`emoji: ⚔️`），然后使用 `list-inventory-items` 查看它已持久化到 DynamoDB Local。完成后停止服务器（`Ctrl+C`）。
+这会在本地提供 MCP 服务器（也会启动 DynamoDB Local）并在 `http://localhost:6274` 启动 MCP Inspector，预配置为连接到它。点击 **Connect**，切换到 **Tools** 选项卡，点击 **List Tools**，然后尝试 `add-to-inventory`（例如 `playerName: Alice`、`itemName: Rusty Sword`、`emoji: ⚔️`），然后使用 `list-inventory-items` 查看它已持久化到 DynamoDB Local。完成后停止服务器（`Ctrl+C`）。
 
-恭喜，您已成功针对本地 DynamoDB 表构建并测试了第一个 tRPC API 和 MCP 服务器！🎉🎉🎉🎉🎉
+恭喜，您已经构建并测试了您的第一个针对本地 DynamoDB 表的 tRPC API 和 MCP 服务器！🎉🎉🎉

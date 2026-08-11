@@ -572,6 +572,37 @@ describe('nx-generator generator', () => {
       ).toMatchSnapshot('local-generator.spec.ts');
     });
 
+    it('should import the generator with a .js extension in an ESM workspace', async () => {
+      await tsNxGeneratorGenerator(tree, {
+        project: '@test/plugin',
+        name: 'foo#bar',
+        description: 'Some description',
+      });
+
+      // `nodenext` resolution requires the explicit extension, so an
+      // extensionless relative import fails `typecheck` with TS2835.
+      expect(
+        tree.read('tools/plugin/src/foo-bar/generator.spec.ts', 'utf-8'),
+      ).toContain(`from './generator.js'`);
+    });
+
+    it('should import the generator without an extension in a CommonJS workspace', async () => {
+      writeJson(tree, 'package.json', {
+        name: '@myorg/monorepo',
+        type: 'commonjs',
+      });
+
+      await tsNxGeneratorGenerator(tree, {
+        project: '@test/plugin',
+        name: 'foo#bar',
+        description: 'Some description',
+      });
+
+      expect(
+        tree.read('tools/plugin/src/foo-bar/generator.spec.ts', 'utf-8'),
+      ).toContain(`from './generator'`);
+    });
+
     it('should support a nested directory', async () => {
       await tsNxGeneratorGenerator(tree, {
         project: '@test/plugin',

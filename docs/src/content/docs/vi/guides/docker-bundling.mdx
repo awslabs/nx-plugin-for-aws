@@ -1,6 +1,6 @@
 ---
-title: "Đóng gói Docker"
-description: "Xây dựng và triển khai Docker images cho các dự án TypeScript và Python trong workspace Nx Plugin for AWS."
+title: Docker Bundling
+description: Xây dựng và triển khai Docker images cho các dự án TypeScript và Python trong workspace Nx Plugin for AWS.
 ---
 
 import { FileTree, Tabs, TabItem, Code } from '@astrojs/starlight/components';
@@ -33,13 +33,13 @@ export const trivyTarget = `{
   }
 }`;
 
-Một số generator (như <Link path="/guides/ts-agent">`ts#agent`</Link> và <Link path="/guides/py-agent">`py#agent`</Link>) tạo ra Docker image được đẩy lên Amazon ECR và được sử dụng bởi hạ tầng AWS. Hướng dẫn này mô tả mẫu thiết kế mà chúng tuân theo để bạn có thể áp dụng cho các trường hợp sử dụng khác — ví dụ, chạy dự án <Link path="/guides/fastapi">FastAPI</Link> trên Amazon ECS, hoặc triển khai máy chủ Express được container hóa.
+Một số generators (như <Link path="/vi/guides/ts-agent">`ts#agent`</Link> và <Link path="/vi/guides/py-agent">`py#agent`</Link>) tạo ra một Docker image được đẩy lên Amazon ECR và được sử dụng bởi hạ tầng AWS. Hướng dẫn này mô tả mẫu mà chúng tuân theo để bạn có thể áp dụng nó cho các trường hợp sử dụng khác — ví dụ, chạy một dự án <Link path="/vi/guides/fastapi">FastAPI</Link> trên Amazon ECS, hoặc triển khai một Express server được container hóa.
 
 :::tip[Docker hoặc Finch]
-Container engine được sử dụng để build image được chọn tại thời điểm tạo workspace thông qua flag `--containers` (`docker`, `finch`, hoặc `infer` — mặc định — tự động phát hiện những gì đã được cài đặt). [Finch](https://runfinch.com/) là một giải pháp thay thế mã nguồn mở, thay thế trực tiếp cho Docker. Lựa chọn được ghi lại trong `aws-nx-plugin.config.mts` và áp dụng cho mọi generator phát ra các lệnh build container. CDK image asset builds tôn trọng lựa chọn này thông qua biến môi trường `CDK_DOCKER`.
+Container engine được sử dụng để xây dựng images được chọn tại thời điểm tạo workspace thông qua cờ `--containers` (`docker`, `finch`, hoặc `infer` — mặc định — tự động phát hiện những gì đã được cài đặt). [Finch](https://runfinch.com/) là một giải pháp thay thế mã nguồn mở, thay thế trực tiếp cho Docker. Lựa chọn được ghi lại trong `aws-nx-plugin.config.mts` và áp dụng cho mọi generator phát ra các lệnh xây dựng container. Các bản build image asset của CDK tôn trọng lựa chọn này thông qua biến môi trường `CDK_DOCKER`.
 :::
 
-## Mẫu Thiết Kế
+## Mẫu
 
 ```d2
 direction: right
@@ -57,27 +57,27 @@ src -> bundle -> ctx
 dockerfile -> ctx
 ```
 
-Mẫu thiết kế được khuyến nghị có ba phần:
+Mẫu được khuyến nghị có ba phần:
 
-1. **Target `bundle`** trên dự án của bạn tạo ra một thư mục độc lập chứa các artifact runtime. Đối với TypeScript, đây là một JavaScript bundle đơn file đã được tree-shaken do [Rolldown](https://rolldown.rs/) tạo ra; đối với Python, đây là `requirements.txt` và các dependency đã cài đặt do [uv](https://docs.astral.sh/uv/) tạo ra.
-2. **`Dockerfile` tối giản** chỉ đơn giản `COPY` đầu ra bundle vào base image. Vì việc bundling đã xử lý tree-shaking và cài đặt dependency, `Dockerfile` không cần chạy `npm install` hoặc `uv sync`.
-3. **Target `docker`** sao chép `Dockerfile` cùng với đầu ra bundle (để Docker build context chỉ chứa các file cần thiết tại runtime), sau đó chạy `docker build`.
+1. **Một `bundle` target** trên dự án của bạn tạo ra một thư mục tự chứa các artifact runtime. Đối với TypeScript, đây là một JavaScript bundle đơn file, được tree-shaken, được tạo ra bởi [Rolldown](https://rolldown.rs/); đối với Python, đây là một `requirements.txt` và các dependencies đã cài đặt được tạo ra bởi [uv](https://docs.astral.sh/uv/).
+2. **Một `Dockerfile` tối thiểu** chỉ đơn giản `COPY` đầu ra bundle vào một base image. Vì bundling đã xử lý tree-shaking và cài đặt dependencies, `Dockerfile` không cần chạy `npm install` hoặc `uv sync`.
+3. **Một `docker` target** sao chép `Dockerfile` cùng với đầu ra bundle (để Docker build context chỉ chứa các file cần thiết tại runtime), sau đó chạy `docker build`.
 
-Docker build context được ghi vào thư mục `dist` của dự án. Infrastructure as code của bạn (CDK hoặc Terraform) sau đó trỏ đến thư mục đó để đẩy image lên ECR.
+Docker build context được ghi vào thư mục `dist` của dự án bạn. Infrastructure as code của bạn (CDK hoặc Terraform) sau đó trỏ đến thư mục đó để đẩy image lên ECR.
 
 :::tip[Tại sao bundle bên ngoài Dockerfile?]
 Giữ bước bundle trong Nx (thay vì bên trong `Dockerfile`) có nghĩa là:
 
-- Nx có thể **cache** target bundle, do đó các lần build lặp lại sẽ nhanh.
-- `Dockerfile` không cần truy cập vào monorepo, private registry, hoặc build-time secrets của bạn.
-- Image layer rất nhỏ — chỉ một lệnh `COPY` duy nhất các artifact đã được build, không có `node_modules` bắc cầu hoặc build toolchain.
+- Nx có thể **cache** bundle target, do đó các bản build lặp lại sẽ nhanh.
+- `Dockerfile` không cần truy cập vào monorepo của bạn, private registries, hoặc build-time secrets.
+- Image layer rất nhỏ — một `COPY` duy nhất của các artifact đã được xây dựng, không có `node_modules` bắc cầu hoặc build toolchain.
 :::
 
 ## TypeScript
 
 ### Bundle Target
 
-Cấu hình target `bundle` gọi Rolldown. Nếu bạn bắt đầu từ <Link path="/guides/typescript-project">`ts#project`</Link>, thêm phần sau vào `project.json` của bạn:
+Cấu hình một `bundle` target gọi Rolldown. Nếu bạn đang bắt đầu từ một <Link path="/vi/guides/typescript-project">`ts#project`</Link>, thêm phần sau vào `project.json` của bạn:
 
 ```json
 {
@@ -96,7 +96,7 @@ Cấu hình target `bundle` gọi Rolldown. Nếu bạn bắt đầu từ <Link 
 }
 ```
 
-Và một file `rolldown.config.ts` tại thư mục gốc của dự án:
+Và một `rolldown.config.ts` tại thư mục gốc của dự án bạn:
 
 ```ts
 // rolldown.config.ts
@@ -109,7 +109,7 @@ export default defineConfig([
     output: {
       file: '../../dist/packages/my-project/bundle/index.js',
       format: 'cjs',
-      inlineDynamicImports: true,
+      codeSplitting: false,
     },
     platform: 'node',
   },
@@ -120,8 +120,8 @@ Chạy target bundle để tạo ra `dist/packages/my-project/bundle/index.js`:
 
 <NxCommands commands={['bundle my-project']} />
 
-:::tip[Dependency không thể bundle]
-Một số npm package không thể được bundle vì chúng phụ thuộc vào `require` động, native binding, hoặc runtime file-path resolution. Thêm chúng vào mảng `external` trong `rolldown.config.ts` để chúng được giữ lại dưới dạng lời gọi `require()` tại runtime, và cài đặt chúng bên trong `Dockerfile` thay thế (xem bên dưới):
+:::tip[Dependencies không thể bundle]
+Một số npm packages không thể được bundle vì chúng dựa vào `require` động, native bindings, hoặc runtime file-path resolution. Thêm chúng vào mảng `external` trong `rolldown.config.ts` để chúng được giữ lại dưới dạng các lời gọi `require()` runtime, và cài đặt chúng bên trong `Dockerfile` thay thế (xem bên dưới):
 
 ```ts
 {
@@ -133,7 +133,7 @@ Một số npm package không thể được bundle vì chúng phụ thuộc và
 
 ### Dockerfile
 
-Tạo `Dockerfile` trong thư mục source của dự án. File này chỉ làm việc `COPY` bundle vào Node base image, cộng với `npm install` bất kỳ package `external` nào không thể được bundle. Đặt bước `RUN npm install` **trước** lệnh `COPY`, để Docker có thể cache layer `node_modules` đã cài đặt và chỉ chạy lại khi danh sách dependency thực sự thay đổi:
+Tạo một `Dockerfile` trong thư mục nguồn dự án của bạn. File này không làm gì nhiều hơn là `COPY` bundle vào một Node base image, cộng với `npm install` bất kỳ packages `external` nào không thể được bundle. Đặt bước `RUN npm install` **trước** `COPY`, để Docker có thể cache layer `node_modules` đã cài đặt và chỉ chạy lại nó khi danh sách dependencies thực sự thay đổi:
 
 ```dockerfile
 FROM public.ecr.aws/docker/library/node:lts
@@ -152,8 +152,8 @@ EXPOSE 8080
 CMD ["node", "index.js"]
 ```
 
-:::tip[Cố định phiên bản dependency]
-Cố định mọi dependency được cài đặt bên trong `Dockerfile` với một phiên bản chính xác (như trên) — nếu không `npm install` sẽ âm thầm lấy phiên bản mới hơn vào lần build tiếp theo, tạo ra các image hoạt động khác nhau tùy thuộc vào thời điểm chúng được build.
+:::tip[Ghim các dependencies của bạn]
+Ghim mọi dependency được cài đặt bên trong `Dockerfile` vào một phiên bản chính xác (như trên) — nếu không `npm install` sẽ âm thầm chọn một bản phát hành mới hơn vào lần build tiếp theo, tạo ra các images hoạt động khác nhau tùy thuộc vào thời điểm chúng được xây dựng.
 :::
 
 ### Docker Target
@@ -183,24 +183,24 @@ Thêm target `docker` để:
 ```
 
 :::tip[Sao chép file đa nền tảng]
-Package `ncp` cung cấp lệnh sao chép file/thư mục đa nền tảng, tránh sử dụng `cp` (không khả dụng trên Windows). Cài đặt nó tại thư mục gốc workspace với `pnpm add -D -w ncp`.
+Package `ncp` cung cấp lệnh sao chép file/thư mục đa nền tảng, tránh `cp` (không khả dụng trên Windows). Cài đặt nó tại thư mục gốc của workspace với `pnpm add -D -w ncp`.
 :::
 
-Chạy target này tạo ra image local được tag `my-scope-my-project:latest`, được build từ context tối giản tại `dist/packages/my-project/bundle/`:
+Chạy target này tạo ra một local image được gắn thẻ `my-scope-my-project:latest`, được xây dựng từ context tối thiểu tại `dist/packages/my-project/bundle/`:
 
 <NxCommands commands={['docker my-project']} />
 
-:::note[CDK tự build image]
-Nếu bạn chỉ triển khai với CDK, lệnh `docker build` ở trên là tùy chọn — `DockerImageAsset` của CDK (được hiển thị trong phần [Infrastructure](#infrastructure)) sẽ build image cho bạn tại thời điểm synth. Bạn vẫn cần sao chép `Dockerfile` vào thư mục build-context để CDK có thể tìm thấy nó. Các generator giữ bước `docker build` local để cung cấp cho bạn cách nhanh chóng để smoke-test image bằng `docker run`.
+:::note[CDK tự xây dựng image]
+Nếu bạn chỉ triển khai với CDK, lệnh `docker build` ở trên là tùy chọn — `DockerImageAsset` của CDK (được hiển thị trong [Infrastructure](#infrastructure)) sẽ xây dựng image cho bạn tại thời điểm synth. Bạn vẫn cần sao chép `Dockerfile` vào thư mục build-context để CDK có thể tìm thấy nó. Các generators giữ bước `docker build` cục bộ để cung cấp cho bạn một cách nhanh chóng để smoke-test image với `docker run`.
 
-Đối với Terraform, bước `docker build` là bắt buộc — mẫu `null_resource` bên dưới đẩy một image được tag locally.
+Đối với Terraform, bước `docker build` là bắt buộc — mẫu `null_resource` bên dưới đẩy một locally-tagged image.
 :::
 
 ## Python
 
 ### Bundle Target
 
-Cấu hình target `bundle` sử dụng `uv` để export và cài đặt dependency cho nền tảng đích của bạn. Generator <Link path="/guides/python-project">`py#project`</Link> và generator <Link path="/guides/python-lambda-function">`py#lambda-function`</Link> đều cấu hình điều này cho bạn. Cấu hình target trông như sau:
+Cấu hình một `bundle` target sử dụng `uv` để export và cài đặt dependencies cho nền tảng mục tiêu của bạn. Generator <Link path="/vi/guides/python-project">`py#project`</Link> và generator <Link path="/vi/guides/python-lambda-function">`py#lambda-function`</Link> đều cấu hình điều này cho bạn. Cấu hình target trông như sau:
 
 ```json
 {
@@ -222,11 +222,11 @@ Cấu hình target `bundle` sử dụng `uv` để export và cài đặt depend
 }
 ```
 
-:::tip[Kiến trúc đích]
+:::tip[Kiến trúc mục tiêu]
 Thay đổi `--python-platform` thành `x86_64-manylinux_2_28` nếu Docker image của bạn sẽ chạy trên x86_64.
 :::
 
-Chạy `nx bundle my-project` tạo ra `dist/packages/my-project/bundle-arm/` chứa source của dự án, các dependency, và `requirements.txt` — mọi thứ image cần tại runtime.
+Chạy `nx bundle my-project` tạo ra `dist/packages/my-project/bundle-arm/` chứa nguồn dự án của bạn, các dependencies của nó, và một `requirements.txt` — mọi thứ image cần tại runtime.
 
 ### Dockerfile
 
@@ -250,7 +250,7 @@ CMD ["python", "-m", "my_project.main"]
 
 ### Docker Target
 
-Thêm target `docker` sao chép `Dockerfile` vào thư mục đầu ra bundle, sau đó chạy `docker build`:
+Thêm một `docker` target sao chép `Dockerfile` vào thư mục đầu ra bundle, sau đó chạy `docker build`:
 
 ```json
 {
@@ -278,39 +278,39 @@ Thêm target `docker` sao chép `Dockerfile` vào thư mục đầu ra bundle, s
 
 <NxCommands commands={['docker my-project']} />
 
-## Quét Image với Trivy
+## Quét Images với Trivy
 
-Việc quét image của bạn để tìm các lỗ hổng đã biết là một thực hành tốt. Các generator tuân theo mẫu này thêm target `trivy` để quét image đã build bằng [Trivy](https://trivy.dev/), chạy từ [Trivy image được host trên ECR](https://gallery.ecr.aws/aquasecurity/trivy), và thoát với mã khác không khi phát hiện các lỗ hổng `HIGH` hoặc `CRITICAL`.
+Thực hành tốt là quét images của bạn để tìm các lỗ hổng đã biết. Các generators tuân theo mẫu này thêm một `trivy` target quét built image với [Trivy](https://trivy.dev/), chạy từ [ECR-hosted Trivy image](https://gallery.ecr.aws/aquasecurity/trivy), và thoát với mã khác không khi có phát hiện `HIGH` hoặc `CRITICAL`.
 
-Thêm target `trivy` có `dependsOn` target `docker` của bạn. Nó lưu image đã build vào một tarball và quét nó thông qua bind mount tương đối với workspace, do đó cùng một lệnh hoạt động dưới cả `docker` và `finch`:
+Thêm một `trivy` target `dependsOn` `docker` target của bạn. Nó lưu built image vào một tarball và quét nó thông qua một bind mount tương đối với workspace, do đó cùng một lệnh hoạt động dưới cả `docker` và `finch`:
 
 <Code lang="json" code={trivyTarget} />
 
-Target quét từng image của mỗi dự án được tổng hợp dưới một target `trivy` toàn workspace, mà script `trivy` gốc được cung cấp sẽ chạy (`nx run-many --target trivy`).
+Các scan targets per-image của mỗi dự án được tổng hợp dưới một `trivy` target toàn workspace, mà script gốc `trivy` được cung cấp chạy (`nx run-many --target trivy`).
 
 <PackageManagerShortCommand commands={['trivy']} />
 
 :::tip[Chạy Trivy trong CI]
-Quá trình quét được cố ý không kết nối vào `build` vì điều này có thể gây ra ma sát không cần thiết khi lặp lại trong quá trình phát triển, do cơ sở dữ liệu lỗ hổng của Trivy được cập nhật liên tục với các CVE mới.
+Scan cố ý không được kết nối vào `build` vì điều này có thể gây ra ma sát không cần thiết khi lặp lại trong quá trình phát triển, vì cơ sở dữ liệu lỗ hổng của Trivy được cập nhật liên tục với các CVE mới.
 
-Thay vào đó, chúng tôi khuyến nghị chạy lệnh trên như một bước riêng biệt trong CI pipeline của bạn trước khi triển khai lên các giai đoạn production.
+Thay vào đó, chúng tôi khuyến nghị chạy lệnh trên như một bước riêng biệt trong CI pipeline của bạn trước khi triển khai đến các giai đoạn production.
 :::
 
-:::tip[Caching bỏ qua các image không thay đổi]
-Vì image được xác định hoàn toàn bởi source code dự án của bạn, việc khai báo `inputs` (ở đây là `default` và `^production`, khớp với target `bundle`) cho phép Nx cache quá trình quét và bỏ qua việc quét lại một image không thay đổi. Cố định phiên bản Trivy image (ví dụ <code>trivy:<TrivyVersion /></code>) để các lần quét có thể tái tạo được.
+:::tip[Caching bỏ qua các images không thay đổi]
+Vì image được xác định hoàn toàn bởi nguồn dự án của bạn, khai báo `inputs` (ở đây là `default` và `^production`, khớp với `bundle` target) cho phép Nx cache scan và bỏ qua việc quét lại một image không thay đổi. Ghim phiên bản Trivy image (ví dụ: <code>trivy:<TrivyVersion /></code>) để các lần quét có thể tái tạo.
 :::
 
-:::note[Loại bỏ các phát hiện]
-Trivy đọc file `.trivyignore` (danh sách các ID lỗ hổng, mỗi ID một dòng) từ thư mục gốc của dự án. `--ignore-unfixed` bỏ qua các lỗ hổng không có bản sửa lỗi, do đó quá trình quét chỉ thất bại trên các vấn đề bạn có thể hành động bằng cách nâng cấp công cụ trong `Dockerfile` của bạn. Xem [tài liệu lọc Trivy](https://trivy.dev/latest/docs/configuration/filtering/#by-finding-ids) để biết chi tiết.
+:::note[Ngăn chặn các phát hiện]
+Trivy đọc một file `.trivyignore` (một danh sách các ID lỗ hổng, một ID mỗi dòng) từ thư mục gốc của dự án bạn. `--ignore-unfixed` bỏ qua các lỗ hổng không có bản sửa lỗi khả dụng, do đó scan chỉ thất bại trên các vấn đề bạn có thể hành động bằng cách nâng cấp tooling trong `Dockerfile` của bạn. Xem [tài liệu lọc Trivy](https://trivy.dev/latest/docs/configuration/filtering/#by-finding-ids) để biết chi tiết.
 :::
 
 ## Infrastructure
 
-Kết nối thư mục build-context kết quả với infrastructure as code là giống nhau cho cả TypeScript và Python — chỉ có đường dẫn đến thư mục build-context khác nhau (`dist/packages/my-project/bundle` cho TypeScript, `dist/packages/my-project/docker` cho Python).
+Kết nối thư mục build-context kết quả với infrastructure as code giống nhau cho cả TypeScript và Python — chỉ đường dẫn đến thư mục build-context khác nhau (`dist/packages/my-project/bundle` cho TypeScript, `dist/packages/my-project/docker` cho Python).
 
 <Infrastructure>
 <Fragment slot="cdk">
-Sử dụng [`DockerImageAsset`](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_ecr_assets.DockerImageAsset.html) của CDK trỏ đến thư mục build-context. CDK sẽ build image và publish nó lên CDK asset ECR repository tại thời điểm deploy:
+Sử dụng [`DockerImageAsset`](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.aws_ecr_assets.DockerImageAsset.html) của CDK trỏ đến thư mục build-context. CDK sẽ xây dựng image và xuất bản nó lên CDK asset ECR repository tại thời điểm deploy:
 
 ```d2
 direction: right
@@ -342,7 +342,7 @@ infra.asset -> ecr: cdk deploy\nbuilds + pushes
 
 ```ts
 import { DockerImageAsset, Platform } from 'aws-cdk-lib/aws-ecr-assets';
-import { findWorkspaceRoot } from ':my-scope/common-constructs';
+import { findWorkspaceRoot } from '@my-scope/common-constructs';
 import * as path from 'path';
 import * as url from 'url';
 
@@ -356,21 +356,21 @@ const image = new DockerImageAsset(this, 'MyImage', {
 });
 ```
 
-Helper `findWorkspaceRoot` được tạo bởi generator <Link path="/guides/typescript-infrastructure">`ts#infra`</Link> và được export từ `@my-scope/common-constructs`. Nếu bạn không sử dụng shared constructs, bạn có thể hardcode đường dẫn đến thư mục `dist` tương đối với nơi `cdk` được gọi từ đó — thường là workspace root — và bỏ qua hoàn toàn lời gọi `findWorkspaceRoot`.
+Helper `findWorkspaceRoot` được tạo ra bởi generator <Link path="/vi/guides/typescript-infrastructure">`ts#infra`</Link> và được export từ `@my-scope/common-constructs`. Nếu bạn không sử dụng shared constructs, bạn có thể hardcode đường dẫn đến thư mục `dist` tương đối với nơi `cdk` được gọi từ — thường là workspace root — và bỏ qua hoàn toàn lời gọi `findWorkspaceRoot`.
 
-:::note[Chạy bundle trước khi synth]
-CDK không tự động chạy các target `bundle`/`docker` — bạn phải chạy `nx build my-project` (hoặc cấu hình target deploy phụ thuộc vào `build`) trước `cdk deploy`. Các generator sử dụng mẫu này khai báo `docker` và `bundle` là dependency của `build` nên điều này diễn ra một cách minh bạch.
+:::note[Chạy bundle trước synth]
+CDK không tự động chạy các `bundle`/`docker` targets — bạn phải chạy `nx build my-project` (hoặc kết nối deploy target để phụ thuộc vào `build`) trước `cdk deploy`. Các generators sử dụng mẫu này khai báo `docker` và `bundle` là dependencies của `build` để điều này xảy ra một cách minh bạch.
 :::
 
 Sử dụng `DockerImageAsset` với bất kỳ AWS construct nào chấp nhận container image, ví dụ `aws_ecs.ContainerImage.fromDockerImageAsset(image)`.
 </Fragment>
 <Fragment slot="terraform">
-AWS provider của Terraform không có resource "build and push a Docker image" cấp một. Mẫu được sử dụng bởi các generator là:
+AWS provider của Terraform không có resource "build and push a Docker image" hạng nhất. Mẫu được sử dụng bởi các generators là:
 
-1. Target `build` của dự án chạy `docker build`, tạo ra một local image được tag `my-scope-my-project:latest`.
-2. Một `aws_ecr_repository` để lưu trữ image.
-3. Một `null_resource` với provisioner `local-exec` xác thực với ECR, re-tag image được build locally với content digest của nó, và đẩy nó lên.
-4. Resource downstream (ví dụ `aws_ecs_task_definition`) tham chiếu image bằng tag bất biến, dựa trên digest.
+1. `build` target của dự án chạy `docker build`, tạo ra một local image được gắn thẻ `my-scope-my-project:latest`.
+2. Một `aws_ecr_repository` để giữ image.
+3. Một `null_resource` với một `local-exec` provisioner xác thực với ECR, gắn lại thẻ locally-built image với content digest của nó, và đẩy nó.
+4. Resource downstream (ví dụ: `aws_ecs_task_definition`) tham chiếu image bằng thẻ bất biến, dựa trên digest của nó.
 
 ```d2
 direction: down
@@ -444,17 +444,17 @@ resource "null_resource" "docker_publish" {
 }
 ```
 
-Block `data.external.docker_digest` đảm bảo `null_resource` chạy lại bất cứ khi nào hash của local image thay đổi, kích hoạt push mới cho mỗi thay đổi code có ý nghĩa. Image được đẩy lên dưới một tag bất biến, dựa trên nội dung được lấy từ digest của nó, do đó ECR repository có thể sử dụng tính bất biến tag `IMMUTABLE` và từ chối bất kỳ nỗ lực nào ghi đè một tag hiện có.
+Block `data.external.docker_digest` đảm bảo `null_resource` chạy lại bất cứ khi nào local image hash thay đổi, kích hoạt một push mới trên mọi thay đổi code có ý nghĩa. Image được đẩy dưới một thẻ bất biến, dựa trên nội dung được lấy từ digest của nó, do đó ECR repository có thể sử dụng `IMMUTABLE` tag mutability và từ chối bất kỳ nỗ lực nào ghi đè một thẻ hiện có.
 
-:::note[Chạy bundle trước khi apply]
-`nx apply <project>` yêu cầu image tag `my-scope-my-project:latest` đã tồn tại locally. Chạy `nx build my-project` (hoặc `nx docker my-project`) trước `nx apply <project>`.
+:::note[Chạy bundle trước apply]
+`nx apply <project>` yêu cầu image tag `my-scope-my-project:latest` đã tồn tại cục bộ. Chạy `nx build my-project` (hoặc `nx docker my-project`) trước `nx apply <project>`.
 :::
 </Fragment>
 </Infrastructure>
 
 ## Đọc Thêm
 
-- <Link path="/guides/ts-agent">`ts#agent` generator</Link> — một ví dụ hoàn chỉnh về mẫu này cho TypeScript agent được triển khai lên Bedrock AgentCore Runtime.
-- <Link path="/guides/py-agent">`py#agent` generator</Link> — tương đương cho Python.
+- <Link path="/vi/guides/ts-agent">Generator `ts#agent`</Link> — một ví dụ hoàn chỉnh về mẫu này cho một TypeScript agent được triển khai đến Bedrock AgentCore Runtime.
+- <Link path="/vi/guides/py-agent">Generator `py#agent`</Link> — tương đương cho Python.
 - [Tài liệu Rolldown](https://rolldown.rs/) — tham chiếu cấu hình cho TypeScript bundler.
 - [Tài liệu `uv`](https://docs.astral.sh/uv/) — tham chiếu cho Python dependency export và install.

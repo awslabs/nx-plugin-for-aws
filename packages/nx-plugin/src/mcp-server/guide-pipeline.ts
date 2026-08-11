@@ -56,7 +56,7 @@ export interface PipelineOptions {
 }
 
 // unified v11 is ESM-only and this package is CJS; dynamic import + rolldown's
-// inlineDynamicImports bundles everything into the published MCP binary.
+// `codeSplitting: false` bundles everything into the published MCP binary.
 interface RemarkDeps {
   unified: typeof import('unified').unified;
   remarkParse: typeof import('remark-parse').default;

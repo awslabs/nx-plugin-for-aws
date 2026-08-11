@@ -45,9 +45,11 @@ describe('tsSmithyApiGenerator', () => {
     expect(
       tree.exists('test-api/model/src/operations/echo.smithy'),
     ).toBeTruthy();
-    expect(tree.exists('test-api/model/build.Dockerfile')).toBeTruthy();
+    expect(tree.exists('test-api/model/ssdk.rolldown.config.mjs')).toBeTruthy();
     expect(tree.exists('test-api/model/smithy-build.json')).toBeTruthy();
     expect(tree.exists('test-api/model/project.json')).toBeTruthy();
+    // The model builds with the Smithy CLI, not a container image
+    expect(tree.exists('test-api/model/build.Dockerfile')).toBeFalsy();
 
     // Verify backend project structure
     expect(tree.exists('test-api/backend')).toBeTruthy();
@@ -379,9 +381,9 @@ describe('tsSmithyApiGenerator', () => {
 
     // Verify runtime dependencies
     expect(packageJson.dependencies).toHaveProperty(
-      '@aws-smithy/server-apigateway',
+      '@smithy/server-apigateway',
     );
-    expect(packageJson.dependencies).toHaveProperty('@aws-smithy/server-node');
+    expect(packageJson.dependencies).toHaveProperty('@smithy/server-node');
     expect(packageJson.dependencies).toHaveProperty('@middy/core');
 
     // Powertools

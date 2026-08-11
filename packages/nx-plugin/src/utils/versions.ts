@@ -24,28 +24,28 @@ export const TS_VERSIONS = {
   // as fixed. Overriding brace-expansion directly is not viable — 5.x drops the
   // CommonJS default export that minimatch 9 calls.
   minimatch: '10.2.6',
-  '@aws-sdk/client-dynamodb': '3.1101.0',
-  '@aws-sdk/client-api-gateway': '3.1101.0',
-  '@aws-sdk/client-iam': '3.1101.0',
-  '@aws-sdk/client-bedrock-agentcore': '3.1101.0',
-  '@aws-sdk/client-bedrock-runtime': '3.1101.0',
-  '@aws-sdk/client-s3': '3.1101.0',
-  '@aws-sdk/client-sts': '3.1101.0',
-  '@aws-sdk/credential-providers': '3.1101.0',
-  '@aws-sdk/credential-provider-cognito-identity': '3.972.64',
-  '@aws-sdk/client-secrets-manager': '3.1101.0',
-  '@aws-sdk/rds-signer': '3.1101.0',
-  '@aws-smithy/server-apigateway': '1.0.0-alpha.10',
-  '@aws-smithy/server-node': '1.0.0-alpha.10',
+  '@aws-sdk/client-dynamodb': '3.1106.0',
+  '@aws-sdk/client-api-gateway': '3.1106.0',
+  '@aws-sdk/client-iam': '3.1106.0',
+  '@aws-sdk/client-bedrock-agentcore': '3.1106.0',
+  '@aws-sdk/client-bedrock-runtime': '3.1106.0',
+  '@aws-sdk/client-s3': '3.1106.0',
+  '@aws-sdk/client-sts': '3.1106.0',
+  '@aws-sdk/credential-providers': '3.1106.0',
+  '@aws-sdk/credential-provider-cognito-identity': '3.972.66',
+  '@aws-sdk/client-secrets-manager': '3.1106.0',
+  '@aws-sdk/rds-signer': '3.1106.0',
+  '@smithy/server-apigateway': '0.2.0',
+  '@smithy/server-node': '0.2.0',
   '@aws-lambda-powertools/logger': '2.34.0',
   '@aws-lambda-powertools/metrics': '2.34.0',
   '@aws-lambda-powertools/parameters': '2.34.0',
   '@aws-lambda-powertools/tracer': '2.34.0',
   '@aws-lambda-powertools/parser': '2.34.0',
-  '@aws-sdk/client-appconfigdata': '3.1101.0',
+  '@aws-sdk/client-appconfigdata': '3.1106.0',
   '@middy/core': '7.7.2',
   '@nxlv/python': '22.2.2',
-  '@nx-extend/terraform': '10.3.0',
+  '@nx-extend/terraform': '10.4.1',
   // These must all hold the same version — see NX_PACKAGES.
   nx: '23.1.1',
   '@nx/devkit': '23.1.1',
@@ -65,27 +65,27 @@ export const TS_VERSIONS = {
   '@ag-ui/core': '0.0.57',
   '@ag-ui/encoder': '0.0.57',
   'agent-chat-cli': '0.3.0',
-  '@copilotkit/react-core': '1.65.0',
+  '@copilotkit/react-core': '1.66.4',
   rxjs: '7.8.2',
-  '@strands-agents/sdk': '1.11.2',
-  '@tanstack/react-router': '1.170.18',
-  '@tanstack/router-plugin': '1.168.23',
-  '@tanstack/router-generator': '1.167.21',
+  '@strands-agents/sdk': '1.12.0',
+  '@tanstack/react-router': '1.170.23',
+  '@tanstack/router-plugin': '1.168.27',
+  '@tanstack/router-generator': '1.167.25',
   '@tanstack/virtual-file-routes': '1.162.0',
   '@tanstack/router-utils': '1.162.2',
-  '@cloudscape-design/board-components': '3.0.212',
-  '@cloudscape-design/chat-components': '1.0.156',
-  '@cloudscape-design/components': '3.0.1340',
+  '@cloudscape-design/board-components': '3.0.213',
+  '@cloudscape-design/chat-components': '1.0.157',
+  '@cloudscape-design/components': '3.0.1342',
   '@cloudscape-design/global-styles': '1.0.65',
   '@tanstack/react-query': '5.101.4',
   '@tanstack/react-query-devtools': '5.101.4',
   '@trpc/tanstack-react-query': '11.18.0',
   '@trpc/client': '11.18.0',
   '@trpc/server': '11.18.0',
-  '@types/node': '26.1.2',
+  '@types/node': '26.2.0',
   '@types/aws-lambda': '8.10.162',
   '@types/cors': '2.8.19',
-  '@types/pg': '8.20.3',
+  '@types/pg': '8.21.0',
   '@types/ws': '8.18.1',
   '@types/express': '5.0.6',
   '@smithy/config-resolver': '4.6.16',
@@ -98,20 +98,21 @@ export const TS_VERSIONS = {
   '@astrojs/starlight': '0.41.3',
   astro: '7.1.1',
   aws4fetch: '1.0.20',
-  'aws-cdk': '2.1135.0',
+  'aws-cdk': '2.1135.1',
   'aws-cdk-lib': '2.263.0',
   'aws-xray-sdk-core': '3.12.0',
-  constructs: '10.8.0',
+  constructs: '10.8.1',
   cors: '2.8.6',
   chalk: '5.6.2',
   'class-variance-authority': '0.7.1',
   clsx: '2.1.1',
   commander: '15.0.0',
-  electrodb: '3.9.1',
-  esbuild: '0.28.1',
+  'cpy-cli': '7.0.0',
+  electrodb: '3.9.2',
+  esbuild: '0.28.2',
   'event-source-polyfill': '1.0.31',
   '@types/event-source-polyfill': '1.0.5',
-  '@biomejs/biome': '2.5.6',
+  '@biomejs/biome': '2.5.7',
   '@prisma/adapter-mariadb': '7.9.1',
   '@prisma/adapter-pg': '7.9.1',
   '@prisma/client': '7.9.1',
@@ -124,35 +125,35 @@ export const TS_VERSIONS = {
   '@types/fs-extra': '11.0.4',
   'make-dir-cli': '4.0.0',
   mariadb: '3.5.3',
+  mise: '2026.8.3',
   ncp: '2.0.0',
   npm: '12.0.2',
   'npm-check-updates': '22.2.9',
   'oidc-client-ts': '3.5.0',
-  pg: '8.22.0',
+  pg: '8.23.0',
   prisma: '7.9.1',
   'react-oidc-context': '3.3.1',
   react: '19.2.8',
   'react-dom': '19.2.8',
   rimraf: '6.1.3',
-  rolldown: '1.2.2',
+  rolldown: '1.2.3',
   'rolldown-plugin-dts': '0.28.0',
-  '@rollup/plugin-esm-shim': '0.1.8',
   'simple-git': '3.36.0',
   'source-map-support': '0.5.21',
   'starlight-blog': '0.28.0',
   tailwindcss: '4.3.3',
   '@tailwindcss/vite': '4.3.3',
-  tsx: '4.23.5',
-  'lucide-react': '1.28.0',
+  tsx: '4.23.11',
+  'lucide-react': '1.30.0',
   'radix-ui': '1.6.7',
-  shadcn: '4.16.1',
+  shadcn: '4.16.2',
   'tw-animate-css': '1.4.0',
   'tailwind-merge': '3.6.0',
-  vite: '8.2.0',
+  vite: '8.2.1',
   typescript: '6.0.3',
   vitest: '4.1.10',
   zod: '4.4.3',
-  ws: '8.21.1',
+  ws: '8.21.3',
 } as const;
 export type ITsDepVersion = keyof typeof TS_VERSIONS;
 
@@ -207,28 +208,28 @@ export const PY_VERSIONS = {
   'aws-lambda-powertools[tracer]': '==3.31.1',
   'aws-lambda-powertools[parser]': '==3.31.1',
   'aws-opentelemetry-distro': '==0.19.0',
-  'bedrock-agentcore': '==1.19.0',
-  boto3: '==1.43.63',
+  'bedrock-agentcore': '==1.21.0',
+  boto3: '==1.43.67',
   checkov: '==3.3.9',
   fastapi: '==0.141.1',
   'fastapi[standard]': '==0.141.1',
   httpx: '==0.28.1',
   langchain: '==1.3.14',
-  'langchain-aws': '==1.6.4',
-  'langchain-mcp-adapters': '==0.3.1',
+  'langchain-aws': '==1.7.0',
+  'langchain-mcp-adapters': '==0.3.2',
   langgraph: '==1.2.10',
   mcp: '==1.28.1',
   'pip-check-updates': '==0.29.0',
   'pip-licenses': '==5.5.5',
-  ruff: '==0.16.1',
-  'strands-agents': '==1.50.2',
-  'strands-agents[a2a]': '==1.50.2',
-  'strands-agents-tools': '==0.8.5',
-  ty: '==0.0.66',
+  ruff: '==0.16.2',
+  'strands-agents': '==1.51.0',
+  'strands-agents[a2a]': '==1.51.0',
+  'strands-agents-tools': '==0.8.6',
+  ty: '==0.0.69',
   pynamodb: '==6.1.0',
   uvicorn: '==0.52.1',
   sqlmodel: '==0.0.39',
-  alembic: '==1.18.5',
+  alembic: '==1.19.1',
   aiomysql: '==0.3.2',
   asyncpg: '==0.31.0',
   // Pinned explicitly: SQLAlchemy's async engine pulls greenlet transitively,
@@ -272,6 +273,43 @@ export const VENDORED_VERSIONS = {
 } as const;
 
 /**
+ * Versions of Java dependencies added by generators, keyed by Maven coordinate.
+ *
+ * Every entry is resolved from Maven Central by the version update and named
+ * `<group>:<artifact>:<version>` where a generator writes it.
+ */
+export const JAVA_VERSIONS = {
+  'software.amazon.smithy:smithy-model': '1.72.1',
+  'software.amazon.smithy:smithy-aws-traits': '1.72.1',
+  'software.amazon.smithy:smithy-validation-model': '1.72.1',
+  'software.amazon.smithy:smithy-openapi': '1.72.1',
+  'software.amazon.smithy.typescript:smithy-aws-typescript-codegen': '0.52.0',
+} as const;
+export type IJavaVersion = keyof typeof JAVA_VERSIONS;
+
+/** The Maven coordinates the version update resolves, in declaration order. */
+export const JAVA_ARTIFACTS = Object.keys(JAVA_VERSIONS) as IJavaVersion[];
+
+/** A Maven coordinate as a dependency names it: `<group>:<artifact>:<version>`. */
+export const javaMavenDependency = (artifact: IJavaVersion): string =>
+  `${artifact}:${JAVA_VERSIONS[artifact]}`;
+
+/**
+ * Versions of tools resolved by mise, keyed by the tool name mise knows.
+ *
+ * Every entry is checked with `mise latest <tool>` by the version update. Nothing
+ * is installed into the workspace: the pin travels in the `project.json` target
+ * command, which is what the version sync reaches to move it forward.
+ */
+export const MISE_VERSIONS = {
+  smithy: '1.72.1',
+} as const;
+export type IMiseVersion = keyof typeof MISE_VERSIONS;
+
+/** The tools the version update resolves through mise, in declaration order. */
+export const MISE_TOOLS = Object.keys(MISE_VERSIONS) as IMiseVersion[];
+
+/**
  * Base container images used by generated Dockerfiles. Pinned exactly so
  * generated images are reproducible, and chosen to be free of known
  * HIGH/CRITICAL vulnerabilities at time of generation.
@@ -309,7 +347,7 @@ export const containerImage = (tool: keyof typeof CONTAINER_VERSIONS): string =>
  * Pinned exactly (no range operator) so generated infrastructure is reproducible.
  */
 export const TERRAFORM_VERSIONS = {
-  aws: '6.57.1',
+  aws: '6.58.0',
   random: '3.9.0',
   null: '3.3.0',
   archive: '2.8.0',

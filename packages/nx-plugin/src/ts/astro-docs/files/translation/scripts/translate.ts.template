@@ -8,10 +8,10 @@
  *   <%= pkgMgrCmd %> nx translate <%= fullyQualifiedName %> -- --all
  *   <%= pkgMgrCmd %> nx translate <%= fullyQualifiedName %>            # only files changed since last translate commit
  *
- * The driver gathers the set of changed source docs + their git diffs and hands
- * them to an agent that has read/write access (scoped to the docs directory)
- * via a wrapped version of the built-in `fileEditor` tool. The agent decides
- * how to translate each file and writes the output itself.
+ * The driver works out which source docs to translate and spawns one Strands
+ * agent per (file × target language). Each agent gets the `fileEditor` tool and
+ * the paths it needs — the source file, the target file, and a diff of what
+ * changed — then reads, translates and writes the file itself.
  */
 import { Command } from 'commander';
 import fs from 'fs-extra';
@@ -76,9 +76,12 @@ function rejectOutsideDocsDir(event: BeforeToolCallEvent): void {
 interface FileToTranslate {
   relativePath: string;
   sourceAbsPath: string;
-  sourceContent: string;
-  /** Empty when this is a newly-added file. */
-  diff: string;
+  /**
+   * Path to a file holding the source diff, or undefined when there is no prior
+   * translation to update. Passed to the agent as a path rather than inlined
+   * into the prompt, so it reads only as much of it as it needs.
+   */
+  diffPath?: string;
 }
 
 const program = new Command();
@@ -102,36 +105,42 @@ const log = {
   info: (m: string) => console.log(`[translate] ${m}`),
   warn: (m: string) => console.warn(`[translate] ${m}`),
   error: (m: string) => console.error(`[translate] ERROR ${m}`),
-  verbose: (m: string) =>
-    options.verbose && console.log(`[translate] ${m}`),
+  verbose: (m: string) => options.verbose && console.log(`[translate] ${m}`),
 };
+
+/**
+ * Diffs live under the docs directory so the agent's file access — which is
+ * scoped to that directory — can read them. Removed when the run finishes.
+ */
+const DIFF_DIR = path.join(DOCS_DIR, '.translate-diffs');
+
+async function writeDiff(relativePath: string, diff: string): Promise<string> {
+  const diffPath = path.join(DIFF_DIR, `${relativePath}.diff`);
+  await fs.outputFile(diffPath, diff, 'utf-8');
+  return diffPath;
+}
 
 /**
  * Gather the set of source-language files to translate, with their diffs.
  */
 async function getFilesToTranslate(): Promise<FileToTranslate[]> {
   const sourceLangRoot = `${DOCS_DIR}/${config.sourceLanguage}`;
-  const includePatterns = config.include.map(
-    (p) => `${sourceLangRoot}/${p}`,
-  );
-  const ignorePatterns = config.exclude.map(
-    (p) => `${sourceLangRoot}/${p}`,
-  );
+  const includePatterns = config.include.map((p) => `${sourceLangRoot}/${p}`);
+  const ignorePatterns = config.exclude.map((p) => `${sourceLangRoot}/${p}`);
 
   if (options.all) {
     log.info('Translating all source documentation files');
     const files = await glob(includePatterns, { ignore: ignorePatterns });
-    return Promise.all(
-      files.map(async (file) => ({
-        relativePath: path.relative(sourceLangRoot, file),
-        sourceAbsPath: file,
-        sourceContent: await fs.readFile(file, 'utf-8'),
-        diff: '',
-      })),
-    );
+    return files.map((file) => ({
+      relativePath: path.relative(sourceLangRoot, file),
+      sourceAbsPath: file,
+    }));
   }
 
   const git = simpleGit();
+  // git reports paths relative to the repo root, which is not necessarily the
+  // directory this script runs from.
+  const repoRoot = (await git.revparse(['--show-toplevel'])).trim();
 
   let currentBranch: string;
   let mainBranch: string;
@@ -146,9 +155,7 @@ async function getFilesToTranslate(): Promise<FileToTranslate[]> {
   try {
     await git.raw(['rev-parse', '--verify', mainBranch]);
   } catch {
-    log.warn(
-      `Could not find "${mainBranch}"; falling back to --all behaviour`,
-    );
+    log.warn(`Could not find "${mainBranch}"; falling back to --all behaviour`);
     options.all = true;
     return getFilesToTranslate();
   }
@@ -162,9 +169,7 @@ async function getFilesToTranslate(): Promise<FileToTranslate[]> {
   ).all.filter((c) => c.message.includes(TRANSLATION_COMMIT_MESSAGE));
 
   const baseCommit =
-    translationCommits.length > 0
-      ? translationCommits[0].hash
-      : mergeBase;
+    translationCommits.length > 0 ? translationCommits[0].hash : mergeBase;
 
   log.info(
     translationCommits.length > 0
@@ -173,11 +178,7 @@ async function getFilesToTranslate(): Promise<FileToTranslate[]> {
   );
 
   const diffNames = (
-    await git.diff([
-      `${baseCommit}..HEAD`,
-      '--name-only',
-      '--diff-filter=d',
-    ])
+    await git.diff([`${baseCommit}..HEAD`, '--name-only', '--diff-filter=d'])
   )
     .split('\n')
     .filter(Boolean);
@@ -185,9 +186,9 @@ async function getFilesToTranslate(): Promise<FileToTranslate[]> {
   const { files: uncommitted } = await git.status();
   const uncommittedNames = uncommitted.map((f) => f.path);
 
-  const allCandidates = [
-    ...new Set([...diffNames, ...uncommittedNames]),
-  ].map((p) => path.resolve(process.cwd(), p));
+  const allCandidates = [...new Set([...diffNames, ...uncommittedNames])].map(
+    (p) => path.resolve(repoRoot, p),
+  );
 
   // Filter to files inside the source language dir that match include/exclude
   const includedGlob = await glob(includePatterns, {
@@ -204,135 +205,202 @@ async function getFilesToTranslate(): Promise<FileToTranslate[]> {
 
   return Promise.all(
     changed.map(async (file) => {
-      const sourceContent = await fs.readFile(file, 'utf-8');
-      let diff = '';
-      try {
-        diff = await git.diff([
-          `${baseCommit}..HEAD`,
-          '--',
-          path.relative(process.cwd(), file),
-        ]);
-      } catch {
-        // treat as new file
-      }
+      const relativePath = path.relative(sourceLangRoot, file);
+      const diff = await git.diff([
+        `${baseCommit}..HEAD`,
+        '--',
+        path.relative(repoRoot, file),
+      ]);
       return {
-        relativePath: path.relative(sourceLangRoot, file),
+        relativePath,
         sourceAbsPath: file,
-        sourceContent,
-        diff,
+        diffPath: diff ? await writeDiff(relativePath, diff) : undefined,
       };
     }),
   );
 }
 
 function buildSystemPrompt(targetLang: string): string {
-  return `You are an expert technical-documentation translator. Your job is to translate a single MDX documentation file from the source locale \`${config.sourceLanguage}\` into the target locale \`${targetLang}\`.
+  return `You are an expert technical-documentation translator. You translate MDX documentation files from the source locale \`${config.sourceLanguage}\` into the target locale \`${targetLang}\`.
 
-Both values are locale codes (e.g. ISO 639-1 / BCP-47 style, or common short forms like \`jp\`, \`zh\`, \`pt\`). Interpret them yourself and translate naturally into the language they identify. If a code is ambiguous, prefer the most widely used written form.
+Both are locale codes (ISO 639-1 / BCP-47 style, or short forms like \`jp\`, \`zh\`, \`pt\`). Translate naturally into the language the target code identifies.
 
-You have one tool available: \`fileEditor\`. Use it to:
-- Read the source file (\`command: "view"\`). For large files you can read a portion at a time using \`view_range\`, then request the next range.
-- Read the existing translation if one is provided (\`command: "view"\`).
-- Write the translated file (\`command: "create"\` — it overwrites).
+Use the \`fileEditor\` tool to read the files you are given and to write your translation. Read a long file in slices with \`view_range\`. Use the absolute paths exactly as given — write to the target path verbatim, never to a variation of it.
 
-Translation rules:
-1. Translate natural-language prose into the target language. Keep technical accuracy.
-2. DO NOT translate:
-   - Code blocks and inline code (text inside backticks)
-   - URLs, link paths, and HTML/JSX/MDX tag names and attributes
-   - \`import\` statements, component names, and frontmatter keys
-   - Proper names of people, products, or AWS services
-3. Preserve every aspect of the MDX structure exactly: frontmatter delimiters, headings, lists, code blocks, MDX components, JSX, whitespace, blank lines.
-4. For frontmatter:
-   - Translate only string values for the \`title\` and \`description\` keys.
-   - Leave \`date\`, \`authors\`, \`template\`, \`slug\`, and all other keys untouched.
-5. If any localised link paths embed the source locale (e.g. \`/${config.sourceLanguage}/foo\`), rewrite them to the target locale (\`/${targetLang}/foo\`).
-6. Efficiency rule: if an existing translation is provided AND a diff is provided, reuse the existing translation verbatim for any section of the document that is NOT touched by the diff. Only retranslate sections that actually changed. Still emit the complete final file.
-7. If no existing translation exists, translate the whole file.
-8. Never wrap the file output in triple backticks.
-9. Always use absolute paths with \`fileEditor\`.
+Translate the prose. Everything else is copied from the source exactly as it is:
 
-When the translated file has been written, reply with a one-line summary and stop.`;
+- Code blocks. Reproduce each one character for character: the language and \`title\` on the opening fence, and every line of the body. Comments inside code are code — a \`# Creates a new subsegment\` stays in English. Never translate anything between the fences.
+- Inline code, URLs, link paths, \`import\` statements, component names, JSX attributes, and \`<Snippet name="..." />\` values.
+- Product, service, and people's names, and package names such as \`@aws/nx-plugin\` — translate no part of them, even where they appear in prose or in a \`title\`.
+- The MDX structure itself: frontmatter delimiters, heading levels, lists, and the blank lines between blocks. Add none and remove none.
+
+Two things do change:
+
+- In frontmatter, translate only \`title\` and \`description\`. Leave every other key and value alone. Frontmatter is YAML, so wrap a value in double quotes whenever it would otherwise begin with a character YAML reserves — for example a title starting with \`@aws/nx-plugin\` must be written as \`"@aws/nx-plugin ..."\`.
+- Rewrite link paths that embed the source locale (\`/${config.sourceLanguage}/foo\` becomes \`/${targetLang}/foo\`), and make a \`parentHeading\` match the translated heading it sits under.
+
+Write the finished file in one \`create\` call, and never with \`str_replace\` — a partial replacement silently duplicates or splices sections. Do not wrap the file in triple backticks.
+
+When the file is written, reply with a one-line summary and stop.`;
 }
 
-function buildUserPrompt(
-  file: FileToTranslate,
-  targetLang: string,
-): string {
-  const targetLangRoot = path.join(DOCS_DIR, targetLang);
-  const targetAbsPath = path.join(targetLangRoot, file.relativePath);
-  const existingTranslationExists = fs.existsSync(targetAbsPath);
+function buildUserPrompt(file: FileToTranslate, targetLang: string): string {
+  const targetAbsPath = path.join(DOCS_DIR, targetLang, file.relativePath);
 
-  const diffBlock = file.diff
-    ? `Git diff showing what changed in the source since the last translation:\n\`\`\`diff\n${file.diff.slice(0, 40_000)}\n\`\`\``
-    : 'There is no prior diff for this file — treat it as new content and translate in full.';
+  if (!file.diffPath) {
+    return `Translate \`${file.sourceAbsPath}\` into locale \`${targetLang}\` and write it to \`${targetAbsPath}\`.
 
-  const existingBlock = existingTranslationExists
-    ? `An existing translation for locale \`${targetLang}\` already lives at:\n  \`${targetAbsPath}\`\nRead it with \`fileEditor\` (\`command: "view"\`) before writing so you can reuse any sections that have not changed.`
-    : `No existing translation exists yet — you will create it fresh.`;
+Read the source, then write the whole translated file with \`create\`. Always write it, even if a translation is already there — it may be out of date.`;
+  }
 
-  return `Translate one file from source locale \`${config.sourceLanguage}\` into target locale \`${targetLang}\`.
+  return `Update the \`${targetLang}\` translation of \`${file.sourceAbsPath}\`.
 
-- Source file (read from here): \`${file.sourceAbsPath}\`
-- Target file (write the translation here, absolute path): \`${targetAbsPath}\`
+- Source: \`${file.sourceAbsPath}\`
+- Existing translation to update: \`${targetAbsPath}\`
+- Diff of what changed in the source: \`${file.diffPath}\`
 
-${existingBlock}
-
-${diffBlock}
-
-Steps:
-1. Read the source file. If it is long, read it in slices using \`view_range\`.
-2. If an existing translation is present, read it first so you can reuse unchanged sections.
-3. Write the full translated file to the target path using \`command: "create"\`.
-4. Reply with a single short confirmation line.`;
+Read all three. Retranslate only what the diff touched, keep the existing translated wording everywhere else, then write the whole file back with \`create\`.`;
 }
+
+const FENCE_RE = /^\s*(?:`{3,}|~{3,})/;
+
+/**
+ * Split a document into alternating prose and fenced-code segments.
+ */
+function splitOnFences(text: string): { prose: string[]; code: string[] } {
+  const prose: string[] = [];
+  const code: string[] = [];
+  let current: string[] = [];
+  let inFence = false;
+  for (const line of text.split('\n')) {
+    if (FENCE_RE.test(line)) {
+      (inFence ? code : prose).push(current.concat(line).join('\n'));
+      current = [];
+      inFence = !inFence;
+      continue;
+    }
+    current.push(line);
+  }
+  (inFence ? code : prose).push(current.join('\n'));
+  return { prose, code };
+}
+
+/**
+ * YAML frontmatter must still parse after translation. A value that begins with
+ * a character YAML reserves — most often a title starting with \`@aws/...\` —
+ * breaks the docs build, so reject it here and let the retry quote it.
+ */
+function assertFrontmatterIsParseable(text: string): void {
+  const lines = text.split('\n');
+  if (lines[0]?.trim() !== '---') return;
+  for (let i = 1; i < lines.length && lines[i].trim() !== '---'; i++) {
+    const value = lines[i].match(/^[A-Za-z0-9_-]+:\s+(\S)/)?.[1];
+    if (value && '@*&%!|>'.includes(value)) {
+      throw new Error(
+        `frontmatter line ${i + 1} starts with the reserved YAML character "${value}" and must be quoted: ${lines[i].trim()}`,
+      );
+    }
+  }
+}
+
+/**
+ * Copy the source's code blocks over the translated file's. The prompt tells the
+ * agent to reproduce them verbatim, but it occasionally translates a comment
+ * anyway, which would ship stale or broken code.
+ *
+ * A differing block count means the translation lost the document's shape —
+ * usually a section duplicated or dropped — so this throws rather than stitching
+ * mismatched blocks together, letting the caller retry.
+ */
+async function restoreCodeBlocks(
+  sourceAbsPath: string,
+  targetAbsPath: string,
+): Promise<void> {
+  const source = splitOnFences(await fs.readFile(sourceAbsPath, 'utf-8'));
+  const target = splitOnFences(await fs.readFile(targetAbsPath, 'utf-8'));
+
+  if (source.code.length !== target.code.length) {
+    throw new Error(
+      `translation has ${target.code.length} code block(s) but the source has ${source.code.length}`,
+    );
+  }
+  if (source.code.length === 0) return;
+
+  const merged = target.prose.flatMap((chunk, i) =>
+    i < source.code.length ? [chunk, source.code[i]] : [chunk],
+  );
+  await fs.writeFile(targetAbsPath, merged.join('\n'), 'utf-8');
+}
+
+/**
+ * Number of times to retry a single (file x language) translation. Large files
+ * occasionally hit transient Bedrock streaming errors; a fresh agent invocation
+ * re-reads the files from disk, so retries are idempotent.
+ */
+const TRANSLATE_MAX_ATTEMPTS = 4;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function translateFileForLanguage(
   file: FileToTranslate,
   targetLang: string,
 ): Promise<void> {
-  const targetAbsPath = path.join(
-    DOCS_DIR,
-    targetLang,
-    file.relativePath,
-  );
-  const beforeMtimeMs = fs.existsSync(targetAbsPath)
-    ? (await fs.stat(targetAbsPath)).mtimeMs
-    : 0;
+  const targetAbsPath = path.join(DOCS_DIR, targetLang, file.relativePath);
 
-  const agent = new Agent({
-    model: new BedrockModel({
-      modelId: config.modelId,
-      region: process.env.AWS_REGION ?? config.awsRegion,
-      maxTokens: 64_000,
-      temperature: 0.2,
-    }),
-    systemPrompt: buildSystemPrompt(targetLang),
-    tools: [fileEditor],
-    printer: !!options.verbose,
-  });
-  agent.addHook(BeforeToolCallEvent, rejectOutsideDocsDir);
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= TRANSLATE_MAX_ATTEMPTS; attempt++) {
+    const agent = new Agent({
+      model: new BedrockModel({
+        modelId: config.modelId,
+        region: process.env.AWS_REGION ?? config.awsRegion,
+        maxTokens: 64_000,
+        temperature: 0.2,
+        // Translating a long file can stream for several minutes, well past the
+        // AWS SDK's two-minute default socket timeout.
+        clientConfig: { requestHandler: { requestTimeout: 15 * 60_000 } },
+      }),
+      systemPrompt: buildSystemPrompt(targetLang),
+      tools: [fileEditor],
+      printer: !!options.verbose,
+    });
+    agent.addHook(BeforeToolCallEvent, rejectOutsideDocsDir);
 
-  const result = await agent.invoke(buildUserPrompt(file, targetLang));
+    try {
+      const result = await agent.invoke(buildUserPrompt(file, targetLang));
+      if (result.stopReason !== 'endTurn') {
+        log.warn(
+          `agent stopped with reason=${result.stopReason} while translating ${file.relativePath} → ${targetLang} — inspect output above`,
+        );
+      }
+      lastError = undefined;
+    } catch (err) {
+      lastError = err;
+    }
 
-  if (result.stopReason !== 'endTurn') {
-    log.warn(
-      `agent stopped with reason=${result.stopReason} while translating ${file.relativePath} → ${targetLang} — inspect output above`,
-    );
+    // Judge the file on disk rather than on whether the agent wrote it: the
+    // stream often drops after a successful write, and an agent handed an
+    // already-correct translation may rightly decide there is nothing to do.
+    if (fs.existsSync(targetAbsPath)) {
+      try {
+        assertFrontmatterIsParseable(await fs.readFile(targetAbsPath, 'utf-8'));
+        await restoreCodeBlocks(file.sourceAbsPath, targetAbsPath);
+        return;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+    lastError ??= new Error('no translation exists at the target path');
+
+    if (attempt < TRANSLATE_MAX_ATTEMPTS) {
+      const delayMs = 2000 * attempt;
+      log.warn(
+        `translation attempt ${attempt}/${TRANSLATE_MAX_ATTEMPTS} for ${file.relativePath} → ${targetLang} failed (${lastError instanceof Error ? lastError.message : String(lastError)}); retrying in ${delayMs}ms`,
+      );
+      await sleep(delayMs);
+    }
   }
 
-  // Sanity check: the target file should now exist and have been written during this run.
-  if (!fs.existsSync(targetAbsPath)) {
-    throw new Error(
-      `agent did not write target file ${targetAbsPath} for ${file.relativePath} → ${targetLang}`,
-    );
-  }
-  const afterMtimeMs = (await fs.stat(targetAbsPath)).mtimeMs;
-  if (afterMtimeMs <= beforeMtimeMs) {
-    log.warn(
-      `target ${file.relativePath} → ${targetLang} was not updated (mtime unchanged) — the agent may have decided no change was needed`,
-    );
-  }
+  throw lastError;
 }
 
 /**
@@ -356,6 +424,46 @@ async function runWithConcurrency<T>(
   return results;
 }
 
+/**
+ * Delete translated files whose source document no longer exists. Without this
+ * a source file that is renamed or removed leaves its translations behind in
+ * every locale, where they still resolve as snippets and pages.
+ */
+async function pruneOrphanedTranslations(
+  targetLanguages: string[],
+): Promise<void> {
+  const sourceLangRoot = `${DOCS_DIR}/${config.sourceLanguage}`;
+  const sourceFiles = new Set(
+    (
+      await glob(
+        config.include.map((p) => `${sourceLangRoot}/${p}`),
+        { ignore: config.exclude.map((p) => `${sourceLangRoot}/${p}`) },
+      )
+    ).map((p) => path.relative(sourceLangRoot, p)),
+  );
+
+  for (const lang of targetLanguages) {
+    const langRoot = path.join(DOCS_DIR, lang);
+    if (!fs.existsSync(langRoot)) continue;
+    const translated = await glob(
+      config.include.map((p) => `${langRoot}/${p}`),
+      { ignore: config.exclude.map((p) => `${langRoot}/${p}`) },
+    );
+    for (const abs of translated) {
+      const rel = path.relative(langRoot, abs);
+      if (sourceFiles.has(rel)) continue;
+      if (options.dryRun) {
+        log.info(`[dry-run] would delete orphaned ${lang}/${rel}`);
+      } else {
+        log.info(
+          `Deleting orphaned ${lang}/${rel} (no ${config.sourceLanguage} source)`,
+        );
+        await fs.remove(abs);
+      }
+    }
+  }
+}
+
 async function main() {
   const requestedLanguages: string[] = options.languages
     ? options.languages
@@ -376,17 +484,19 @@ async function main() {
   log.info(`Source: ${config.sourceLanguage}`);
   log.info(`Targets: ${targetLanguages.join(', ')}`);
 
+  await pruneOrphanedTranslations(targetLanguages);
+
   const files = await getFilesToTranslate();
 
   if (files.length === 0) {
-    log.info('Nothing to translate.');
+    log.info('No documentation files to translate.');
     return;
   }
 
   log.info(`Files to translate: ${files.length}`);
   for (const f of files) {
     log.verbose(
-      `  - ${f.relativePath}${f.diff ? ' (changed)' : ' (full)'}`,
+      `  - ${f.relativePath}${f.diffPath ? ' (changed)' : ' (full)'}`,
     );
   }
 
@@ -401,7 +511,10 @@ async function main() {
   }
 
   // Build one task per (file × target language) — each is a fresh agent invocation,
-  // so context windows stay small no matter how big the docs site is.
+  // so context windows stay small no matter how big the docs site is. A single
+  // failing translation records its error rather than aborting the whole run, so
+  // every other (file × language) still completes and gets written to disk.
+  const failures: string[] = [];
   const tasks = targetLanguages.flatMap((lang) =>
     files.map((file) => async () => {
       log.info(`  ${file.relativePath} → ${lang}`);
@@ -411,7 +524,7 @@ async function main() {
         log.error(
           `${file.relativePath} → ${lang}: ${err instanceof Error ? err.message : String(err)}`,
         );
-        throw err;
+        failures.push(`${file.relativePath} → ${lang}`);
       }
     }),
   );
@@ -422,10 +535,18 @@ async function main() {
   );
   await runWithConcurrency(tasks, concurrency);
 
+  if (failures.length > 0) {
+    throw new Error(
+      `${failures.length} translation(s) failed after retries:\n  ${failures.join('\n  ')}`,
+    );
+  }
+
   log.info('Done.');
 }
 
-main().catch((err) => {
-  log.error(err instanceof Error ? err.message : String(err));
-  process.exit(1);
-});
+main()
+  .finally(() => fs.remove(DIFF_DIR))
+  .catch((err) => {
+    log.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  });

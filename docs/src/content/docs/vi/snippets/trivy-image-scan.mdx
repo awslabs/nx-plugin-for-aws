@@ -1,32 +1,32 @@
 ---
-title: Quét Image Container
+title: Quét Container Image
 ---
 
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 
-Docker image được xây dựng cho dự án này có thể được quét các lỗ hổng bảo mật bằng cách sử dụng [Trivy](https://trivy.dev/), chạy từ [ECR-hosted Trivy image](https://gallery.ecr.aws/aquasecurity/trivy).
+Docker image được xây dựng cho dự án này có thể được quét để tìm các lỗ hổng bảo mật bằng cách sử dụng [Trivy](https://trivy.dev/), chạy từ [ECR-hosted Trivy image](https://gallery.ecr.aws/aquasecurity/trivy).
 
-Một target `trivy` được thêm vào dự án của bạn để quét built image và **thoát với mã khác không** nếu phát hiện bất kỳ lỗ hổng bảo mật mức độ nghiêm trọng `HIGH` hoặc `CRITICAL` nào. `Dockerfile` được tạo ra sử dụng base image không có lỗ hổng bảo mật có thể sửa chữa được biết đến với các mức độ nghiêm trọng này tại thời điểm tạo, và nâng cấp các công cụ đi kèm (như `npm`) để duy trì trạng thái đó.
+Một target `trivy` được thêm vào dự án của bạn để quét image đã xây dựng và **thoát với mã khác không** nếu phát hiện bất kỳ lỗ hổng bảo mật mức độ nghiêm trọng `HIGH` hoặc `CRITICAL` nào. `Dockerfile` được tạo ra sử dụng một base image không có lỗ hổng bảo mật có thể sửa chữa nào ở các mức độ nghiêm trọng này tại thời điểm tạo, và nâng cấp các công cụ đi kèm (chẳng hạn như `npm`) để duy trì trạng thái đó.
 
-Quá trình quét sử dụng cùng container engine với quá trình build image của bạn (`docker` hoặc `finch`), do đó không cần thêm công cụ nào khác. Vì quá trình quét chỉ được chạy lại khi image thay đổi, một image không thay đổi sẽ không bị quét lại. Script gốc `trivy` được cung cấp quét mọi image trong workspace:
+Quá trình quét sử dụng cùng container engine với quá trình xây dựng image của bạn (`docker` hoặc `finch`), do đó không cần công cụ bổ sung nào. Vì quá trình quét chỉ được chạy lại khi image thay đổi, một image không thay đổi sẽ không được quét lại. Script root `trivy` được cung cấp sẽ quét mọi image trong workspace:
 
 <PackageManagerShortCommand commands={['trivy']} />
 
 :::tip[Chạy Trivy trong CI]
-Quá trình quét cố ý không được tích hợp vào `build` vì điều này có thể gây ra ma sát không cần thiết khi lặp lại trong quá trình phát triển, do cơ sở dữ liệu lỗ hổng bảo mật của Trivy được cập nhật liên tục với các CVE mới.
+Quá trình quét cố ý không được kết nối vào `build` vì điều này có thể gây ra ma sát không cần thiết khi lặp lại trong quá trình phát triển, do cơ sở dữ liệu lỗ hổng bảo mật của Trivy được cập nhật liên tục với các CVE mới.
 
-Thay vào đó, chúng tôi khuyến nghị chạy lệnh trên như một bước riêng biệt trong CI pipeline của bạn trước khi triển khai lên các môi trường production.
+Thay vào đó, chúng tôi khuyến nghị chạy lệnh trên như một bước riêng biệt trong CI pipeline của bạn trước khi triển khai đến các giai đoạn production.
 :::
 
-:::caution[Các lỗ hổng không thể sửa chữa được bỏ qua]
-Quá trình quét chạy với `--ignore-unfixed`, do đó các lỗ hổng không có bản vá sẵn có sẽ không làm thất bại build, vì chúng không thể được xử lý bằng cách nâng cấp công cụ trong `Dockerfile` của bạn — chúng không được báo cáo trong kết quả quét của build. Khi các lỗ hổng mới được công bố, kết quả quét có thể thay đổi theo thời gian, do đó hãy xem xét image định kỳ bằng cách chạy `trivy image <your-image>` mà không có flag, và rebuild lại với base image mới hơn (hoặc thêm các bước container để áp dụng các bản vá có sẵn) khi có bản vá được phát hành.
+:::caution[Các lỗ hổng không thể sửa chữa bị bỏ qua]
+Quá trình quét chạy với `--ignore-unfixed`, do đó các lỗ hổng bảo mật không có bản sửa lỗi khả dụng sẽ không làm thất bại quá trình build, vì chúng không thể được xử lý bằng cách nâng cấp công cụ trong `Dockerfile` của bạn — chúng không được báo cáo trong kết quả quét của build. Khi các lỗ hổng bảo mật mới được công bố, kết quả quét có thể thay đổi theo thời gian, vì vậy hãy xem xét image định kỳ bằng cách chạy `trivy image <your-image>` mà không có flag này, và xây dựng lại với base image mới hơn (hoặc thêm các bước container để áp dụng các bản vá khả dụng) khi một bản sửa lỗi được phát hành.
 :::
 
-#### Loại Trừ Các Phát Hiện Của Trivy
+#### Loại Bỏ Các Phát Hiện Của Trivy
 
-Có thể có những trường hợp bạn muốn loại trừ một lỗ hổng cụ thể, ví dụ khi chưa có bản vá và bạn đã đánh giá rủi ro là chấp nhận được.
+Có thể có những trường hợp bạn muốn loại bỏ một lỗ hổng bảo mật cụ thể, ví dụ như khi chưa có bản sửa lỗi và bạn đã đánh giá rủi ro là có thể chấp nhận được.
 
-Thêm ID lỗ hổng (mỗi dòng một ID) vào file `.trivyignore` trong thư mục gốc của dự án (tức là bên cạnh `project.json` của bạn):
+Thêm ID lỗ hổng bảo mật (mỗi dòng một ID) vào file `.trivyignore` trong thư mục gốc của dự án (tức là bên cạnh `project.json` của bạn):
 
 ```gitignore
 # .trivyignore
@@ -34,4 +34,4 @@ Thêm ID lỗ hổng (mỗi dòng một ID) vào file `.trivyignore` trong thư 
 CVE-2024-XXXXX
 ```
 
-Để biết thêm chi tiết về việc lọc các phát hiện, tham khảo [tài liệu lọc của Trivy](https://trivy.dev/latest/docs/configuration/filtering/#by-finding-ids).
+Để biết thêm chi tiết về việc lọc các phát hiện, hãy tham khảo [tài liệu lọc của Trivy](https://trivy.dev/latest/docs/configuration/filtering/#by-finding-ids).

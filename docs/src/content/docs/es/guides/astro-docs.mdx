@@ -15,7 +15,7 @@ y el tema de documentación [Starlight](https://starlight.astro.build/). Configu
 localización, fragmentos de contenido reutilizables, enlaces internos conscientes de la configuración regional y un
 plugin [`starlight-blog`](https://starlight-blog-docs.vercel.app/) por defecto.
 
-Por defecto, también crea un pipeline de traducción automatizado impulsado por un
+Por defecto también crea un pipeline de traducción automatizado impulsado por un
 [Strands Agent](https://strandsagents.com/) en
 [Amazon Bedrock](https://aws.amazon.com/bedrock/).
 
@@ -34,32 +34,32 @@ Puedes generar un nuevo sitio de documentación Astro de dos maneras:
 ## Salida del Generador
 
 Por defecto, el generador crea la siguiente estructura de proyecto en `docs/` en la
-raíz del espacio de trabajo (configurable mediante las opciones `name`, `directory` y `subDirectory`):
+raíz del workspace (configurable a través de las opciones `name`, `directory` y `subDirectory`):
 
 <FileTree>
-  - astro.config.mjs Configuración de Astro + Starlight (locales, sidebar, plugin de blog)
-  - tsconfig.json Extiende astro/tsconfigs/strict con alias de ruta @components / @assets
-  - project.json Proyecto Nx con objetivos `build`, `start`, `preview` (y `translate` si está habilitado)
+  - astro.config.mjs Astro + Starlight configuration (locales, sidebar, blog plugin)
+  - tsconfig.json Extends astro/tsconfigs/strict with @components / @assets path aliases
+  - project.json Nx project with `build`, `start`, `preview` (and `translate` if enabled) targets
   - scripts
-    - translate.ts Controlador de traducción — un agente Strands con una herramienta de edición de archivos con alcance (omitido con `--noTranslation`)
-    - translate.config.json Locales de origen/destino, patrones glob, id del modelo, región (omitido con `--noTranslation`)
+    - translate.ts Translation driver — a Strands agent with a scoped file-editor tool (omitted with `--noTranslation`)
+    - translate.config.json Source/target locales, glob patterns, model id, region (omitted with `--noTranslation`)
   - src
     - components
-      - link.astro Componente de enlace consciente de la configuración regional (resuelve rutas contra la configuración regional actual)
-      - snippet.astro Componente cargador de fragmentos consciente de la configuración regional
+      - link.astro Locale-aware link component (resolves paths against the current locale)
+      - snippet.astro Locale-aware snippet loader component
     - content
       - docs
         - en
-          - index.mdx Página de inicio
+          - index.mdx Landing page
           - guides
-            - getting-started.mdx Guía de ejemplo que hace referencia a los componentes link y snippet
+            - getting-started.mdx Sample guide referencing the link and snippet components
           - blog
-            - welcome.mdx Publicación de blog de ejemplo (omitida con `--noBlog`)
+            - welcome.mdx Sample blog post (omitted with `--noBlog`)
           - snippets
-            - example.mdx Fragmento reutilizable de ejemplo
+            - example.mdx Sample reusable snippet
     - styles
-      - custom.css Anulaciones del tema Starlight
-  - README.md README del proyecto
+      - custom.css Starlight theme overrides
+  - README.md Project README
 </FileTree>
 
 ### Localización
@@ -69,12 +69,12 @@ ella. Para agregar más idiomas:
 
 1. Agrega una entrada bajo `locales` en `astro.config.mjs` (por ejemplo `ko: { label: '한국어' }`).
 2. Crea un directorio correspondiente bajo `src/content/docs/<locale>/`.
-3. Complétalo manualmente, o usa el objetivo de traducción descrito a continuación.
+3. Complétalo manualmente, o usa el target de traducción descrito a continuación.
 
 ## Traducción
 
-A menos que hayas pasado `--noTranslation`, el generador agrega un objetivo `translate` a
-`project.json`, para que puedas ejecutar:
+A menos que hayas pasado `--noTranslation`, el generador agrega un target `translate` a
+`project.json`, por lo que puedes ejecutar:
 
 <NxCommands commands={[
   'translate docs -- --all',
@@ -82,9 +82,17 @@ A menos que hayas pasado `--noTranslation`, el generador agrega un objetivo `tra
   'translate docs -- --dry-run',
 ]} />
 
-Cuando se ejecuta sin `--all`, el script solo traduce los archivos que han cambiado
+Cuando se ejecuta sin `--all`, el script solo traduce archivos que han cambiado
 desde el último commit de traducción en la rama actual — lo que significa que puedes
 volver a ejecutarlo de forma segura en cada PR de documentación sin volver a traducir todo el sitio.
+
+Las traducciones cuyo archivo fuente ya no existe se eliminan, por lo que renombrar o
+eliminar una página no deja copias obsoletas en cada configuración regional.
+
+Cada traducción se escribe como un archivo completo. El agente recibe el fuente, la
+traducción existente y un diff de lo que cambió, y reutiliza la redacción existente
+para las secciones que el diff dejó intactas — por lo que solo se vuelve a traducir la prosa que el diff tocó,
+y los bloques de código se copian del fuente tal cual.
 
 ### Configurar la traducción
 
@@ -92,20 +100,20 @@ Edita `scripts/translate.config.json` para cambiar:
 
 | Campo | Propósito |
 | --- | --- |
-| `sourceLanguage` | Configuración regional **desde** la cual traducir (por defecto `en`). |
-| `targetLanguages` | Configuraciones regionales **a** las cuales traducir. Vacío por defecto. Por ejemplo `["fr", "de", "es", "ja", "ko"]`. |
+| `sourceLanguage` | Configuración regional desde la cual traducir (por defecto `en`). |
+| `targetLanguages` | Configuraciones regionales a las cuales traducir. Vacío por defecto. Por ejemplo `["fr", "de", "es", "ja", "ko"]`. |
 | `docsDir` | Ruta al directorio de contenido de documentación, relativa a la raíz del proyecto. |
 | `include` | Patrones glob (relativos a `<docsDir>/<sourceLanguage>`) para archivos a traducir. |
 | `exclude` | Patrones glob a omitir. |
 | `modelId` | Modelo de Bedrock a usar para las traducciones. |
-| `awsRegion` | Región de AWS con la que está configurado el cliente de Bedrock. También se puede establecer mediante `AWS_REGION`. |
+| `awsRegion` | Región de AWS con la que se configura el cliente de Bedrock. También se puede establecer mediante `AWS_REGION`. |
 | `concurrency` | Número máximo de invocaciones de agente concurrentes. |
 | `translationCommitMessage` | Marcador de mensaje de commit para commits de traducción (por defecto `docs: update translations`). |
 
 ### Enlaces internos conscientes de la configuración regional
 
-El generador incluye un componente `Link` que resuelve automáticamente las
-rutas de documentación internas contra la configuración regional actual, de modo que una única fuente de verdad produce
+El generador incluye un componente `Link` que resuelve automáticamente las rutas internas
+de documentación contra la configuración regional actual, por lo que una única fuente de verdad produce
 la URL correcta en cada idioma:
 
 ```mdx
@@ -130,13 +138,13 @@ import Snippet from '@components/snippet.astro';
 
 No se genera ningún flujo de trabajo de CI de forma predeterminada — agrega uno que:
 
-1. Configure las credenciales de AWS con permiso para invocar `InvokeModel` de Bedrock en
+1. Configure credenciales de AWS con permiso para invocar `InvokeModel` de Bedrock en
    el modelo configurado.
-2. Ejecute el objetivo `translate` en solicitudes de extracción que toquen tu documentación en el idioma de origen:
+2. Ejecute el target `translate` en pull requests que toquen tus documentos en el idioma fuente:
 
    <NxCommands commands={['translate docs']} />
 
-3. Confirme las traducciones resultantes de vuelta a la rama del PR. El mensaje de commit
+3. Haga commit de las traducciones resultantes de vuelta a la rama del PR. El mensaje de commit
    debe coincidir con el valor `translationCommitMessage` en
    `scripts/translate.config.json` (por defecto `docs: update translations`) para que
    las ejecuciones incrementales posteriores puedan detectar el commit de referencia y solo

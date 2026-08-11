@@ -1,29 +1,28 @@
 ---
-title: "Configurazione Runtime"
-description: "Come la configurazione runtime connette i tuoi progetti generati utilizzando AWS AppConfig"
+title: Configurazione Runtime
+description: Come la configurazione runtime connette i tuoi progetti generati utilizzando AWS AppConfig
 ---
-
 import { Tabs, TabItem, Steps } from '@astrojs/starlight/components';
 import Infrastructure from '@components/infrastructure.astro';
 import Link from '@components/link.astro';
 
-La configurazione runtime è il meccanismo utilizzato da Nx Plugin for AWS per passare valori al momento del deploy tra progetti e componenti generati in modo che possano connettersi tra loro. Ad esempio, quando generi un'API, il suo URL viene automaticamente registrato nella configurazione runtime in modo che un sito web connesso possa scoprirlo.
+La configurazione runtime è il meccanismo utilizzato da Nx Plugin for AWS per passare valori di deploy-time tra progetti e componenti generati in modo che possano connettersi tra loro. Ad esempio, quando generi un'API, il suo URL viene automaticamente registrato nella configurazione runtime in modo che un sito web connesso possa scoprirlo.
 
 ## Come Funziona
 
-La configurazione runtime è organizzata in **namespace**. Ogni namespace è un raggruppamento logico di valori di configurazione correlati. Al momento del deploy, tutti i namespace vengono memorizzati in **AWS AppConfig** come Configuration Profiles.
+La configurazione runtime è organizzata in **namespace**. Ogni namespace è un raggruppamento logico di valori di configurazione correlati. Al momento del deploy, tutti i namespace vengono memorizzati in **AWS AppConfig** come Configuration Profile.
 
-Due namespace integrati vengono utilizzati dai construct generati:
+Due namespace integrati vengono utilizzati dai costrutti generati:
 
 - **`connection`** — configurazione che consente ai progetti generati di connettersi tra loro:
-  - **URL delle API** — registrati automaticamente dai construct API
-  - **Impostazioni Cognito** — registrate automaticamente dal construct UserIdentity
-  - **ARN runtime degli agenti** — aggiunti dal generatore di connessione quando connetti un sito web React a uno Agent
-- **`agentcore`** — ARN runtime di AgentCore per agenti e server MCP. Registrati automaticamente dai construct agent/MCP e utilizzati per la scoperta lato server (agent → agent tramite A2A, agent → server MCP).
+  - **URL delle API** — registrati automaticamente dai costrutti API
+  - **Impostazioni Cognito** — registrate automaticamente dal costrutto UserIdentity
+  - **ARN runtime degli Agent** — aggiunti dal generatore di connessioni quando connetti un sito web React a un Agent
+- **`agentcore`** — ARN runtime di AgentCore per agent e server MCP. Registrati automaticamente dai costrutti agent/MCP e utilizzati per la scoperta lato server (agent → agent tramite A2A, agent → server MCP).
 
-Il namespace `connection` viene anche distribuito come file `runtime-config.json` nel bucket S3 del tuo sito web, abilitando la scoperta lato client delle risorse backend. Il namespace `agentcore` è solo lato server (tramite AppConfig) quindi gli ARN runtime degli agenti non vengono esposti al frontend a meno che non connetti esplicitamente un sito web a un agente.
+Il namespace `connection` viene anche distribuito come file `runtime-config.json` nel bucket S3 del tuo sito web, consentendo la scoperta lato client delle risorse backend. Il namespace `agentcore` è solo lato server (tramite AppConfig) quindi gli ARN runtime degli agent non vengono esposti al frontend a meno che tu non connetta esplicitamente un sito web a un agent.
 
-Puoi definire tutti i namespace aggiuntivi che desideri, fornendo un'alternativa conveniente alle variabili d'ambiente per passare valori al momento del deploy come i nomi delle tabelle DynamoDB alle tue funzioni Lambda o ad altre risorse di calcolo.
+Puoi definire tutti i namespace aggiuntivi che desideri, fornendo una comoda alternativa alle variabili d'ambiente per passare valori di deploy-time come nomi di tabelle DynamoDB alle tue funzioni Lambda o ad altre risorse di calcolo.
 
 ```d2
 direction: down
@@ -64,11 +63,11 @@ appconfig.custom -> server
 
 ### Scrittura della Configurazione
 
-I construct generati scrivono automaticamente la configurazione rilevante nel namespace `connection`. Puoi anche scrivere i tuoi valori in qualsiasi namespace.
+I costrutti generati scrivono automaticamente la configurazione rilevante nel namespace `connection`. Puoi anche scrivere i tuoi valori in qualsiasi namespace.
 
 <Infrastructure>
 <Fragment slot="cdk">
-Il construct CDK `RuntimeConfig` è un singleton con scope di stage. Usa `set()` per scrivere una chiave in un namespace:
+Il costrutto CDK `RuntimeConfig` è un singleton con scope di stage. Usa `set()` per scrivere una chiave in un namespace:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
 import { RuntimeConfig } from '@my-scope/common-constructs';
@@ -91,14 +90,14 @@ rc.set('tables', 'users', {
 Al momento di synth/deploy, `RuntimeConfig` crea un'applicazione **AWS AppConfig** contenente:
 - Un **Configuration Profile** per ogni namespace
 - Una **Hosted Configuration Version** con i dati JSON per ogni profilo
-- Un **Deployment** istantaneo all'ambiente `default`
+- Un **Deployment** istantaneo nell'ambiente `default`
 </Fragment>
 <Fragment slot="terraform">
 Terraform collega la configurazione runtime attraverso tre moduli `core/runtime-config/*`. Dichiarali nel seguente ordine nel tuo modulo root:
 
 <Steps>
 
-1. **`core/runtime-config/appconfig`** — dichiarato una volta, vicino all'inizio del modulo root. Crea l'applicazione AppConfig, l'ambiente, la strategia di deployment e un profilo di configurazione per namespace. I suoi output `application_id` e `application_arn` vengono passati a ogni modulo che legge la configurazione runtime a runtime (agenti, server MCP, funzioni Lambda, ecc.).
+1. **`core/runtime-config/appconfig`** — dichiarato una volta, vicino all'inizio del modulo root. Crea l'applicazione AppConfig, l'ambiente, la strategia di deployment e un profilo di configurazione per namespace. I suoi output `application_id` e `application_arn` vengono passati in ogni modulo che legge la configurazione runtime a runtime (agent, server MCP, funzioni Lambda, ecc.).
 
    ```hcl title="packages/infra/src/main.tf"
    module "runtime_config_appconfig" {
@@ -111,7 +110,7 @@ Terraform collega la configurazione runtime attraverso tre moduli `core/runtime-
 2. **`core/runtime-config/entry`** — un'invocazione per contributo. I moduli API, agent e MCP generati chiamano questo internamente per pubblicare i loro URL e ARN. Chiamalo direttamente per pubblicare configurazioni personalizzate.
 
    ```hcl title="packages/infra/src/main.tf"
-   # Automatico — fatto all'interno dei moduli generati
+   # Automatic — done inside generated modules
    module "add_api_url" {
      source = "../../common/terraform/src/core/runtime-config/entry"
 
@@ -120,7 +119,7 @@ Terraform collega la configurazione runtime attraverso tre moduli `core/runtime-
      value     = { "MyApi" = module.my_api.api_url }
    }
 
-   # Namespace personalizzato per la configurazione lato server
+   # Custom namespace for server-side configuration
    module "add_table_config" {
      source = "../../common/terraform/src/core/runtime-config/entry"
 
@@ -133,7 +132,7 @@ Terraform collega la configurazione runtime attraverso tre moduli `core/runtime-
    }
    ```
 
-3. **`core/runtime-config/appconfig-deployment`** — dichiarato una volta, alla fine del modulo root, con `depends_on` che copre ogni modulo che contribuisce con una entry. Aggrega le entry contribuite in un JSON per namespace e crea la versione di configurazione ospitata + deployment contro l'applicazione condivisa.
+3. **`core/runtime-config/appconfig-deployment`** — dichiarato una volta, alla fine del modulo root, con `depends_on` che copre ogni modulo che contribuisce con una voce. Aggrega le voci contribuite in un JSON per namespace e crea la versione di configurazione ospitata + deployment contro l'applicazione condivisa.
 
    ```hcl title="packages/infra/src/main.tf"
    module "runtime_config_appconfig_deployment" {
@@ -148,7 +147,7 @@ Terraform collega la configurazione runtime attraverso tre moduli `core/runtime-
      depends_on = [
        module.my_api,
        module.add_table_config,
-       # ...ogni modulo che contribuisce con una entry
+       # ...every module that contributes an entry
      ]
    }
    ```
@@ -159,7 +158,7 @@ Terraform collega la configurazione runtime attraverso tre moduli `core/runtime-
 
 ### Lettura della Configurazione
 
-I consumer lato server necessitano dell'**AppConfig Application ID** e delle autorizzazioni IAM per leggere la configurazione a runtime. I construct generati gestiscono questo automaticamente.
+I consumatori lato server necessitano dell'**AppConfig Application ID** e dei permessi IAM per leggere la configurazione a runtime. I costrutti generati gestiscono questo automaticamente.
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -183,8 +182,8 @@ const myFunction = new Function(this, 'MyFunction', {
 rc.grantReadAppConfig(myFunction);
 ```
 
-:::note[Registrazione automatica]
-I construct API e agent generati fanno questo automaticamente — devi farlo manualmente solo se crei le tue funzioni Lambda o risorse di calcolo che necessitano di leggere la configurazione runtime.
+:::note[Registrazione Automatica]
+I costrutti API e agent generati fanno questo automaticamente — devi farlo manualmente solo se crei le tue funzioni Lambda o risorse di calcolo che devono leggere la configurazione runtime.
 :::
 </Fragment>
 <Fragment slot="terraform">
@@ -218,21 +217,21 @@ resource "aws_iam_policy" "appconfig_read" {
 }
 ```
 
-:::note[Registrazione automatica]
-I moduli agent e MCP generati accettano gli input `appconfig_application_id` + `appconfig_application_arn` — passa gli output del modulo condiviso `runtime_config_appconfig` e collegheranno la variabile d'ambiente e i permessi IAM per te. Devi farlo manualmente solo per funzioni Lambda personalizzate o risorse di calcolo.
+:::note[Registrazione Automatica]
+I moduli agent e MCP generati accettano input `appconfig_application_id` + `appconfig_application_arn` — passa gli output condivisi di `runtime_config_appconfig` e collegheranno la variabile d'ambiente e i permessi IAM per te. Devi farlo manualmente solo per funzioni Lambda personalizzate o risorse di calcolo.
 :::
 </Fragment>
 </Infrastructure>
 
 :::tip[Sviluppo Locale]
-Se utilizzi la configurazione runtime con namespace personalizzati (ad es. `tables`, `features`), devi solo definire una singola variabile d'ambiente `RUNTIME_CONFIG_APP_ID` localmente per puntare alla tua applicazione AppConfig distribuita. Questo consente alle tue API o agenti locali di recuperare la stessa configurazione dell'ambiente distribuito senza dover replicare tutte le singole variabili d'ambiente.
+Se utilizzi la configurazione runtime con namespace personalizzati (ad es. `tables`, `features`), devi solo definire una singola variabile d'ambiente `RUNTIME_CONFIG_APP_ID` localmente per puntare alla tua applicazione AppConfig distribuita. Questo consente alle tue API o agent locali di recuperare la stessa configurazione dell'ambiente distribuito senza dover replicare tutte le singole variabili d'ambiente.
 :::
 
 ## Accesso Lato Server tramite AppConfig
 
-I consumer lato server come le funzioni Lambda e gli agenti possono recuperare la configurazione runtime da **AWS AppConfig** utilizzando [AWS Lambda Powertools](https://docs.aws.amazon.com/powertools/).
+I consumatori lato server come funzioni Lambda e agent possono recuperare la configurazione runtime da **AWS AppConfig** utilizzando [AWS Lambda Powertools](https://docs.aws.amazon.com/powertools/).
 
-Tutti i construct API e agent generati sono automaticamente configurati con:
+Tutti i costrutti API e agent generati sono automaticamente configurati con:
 - La variabile d'ambiente `RUNTIME_CONFIG_APP_ID` (l'AppConfig Application ID)
 - Permessi IAM per leggere da AppConfig
 
@@ -310,4 +309,4 @@ users_table_name = tables_config.get("users", {}).get("tableName")
 
 ## Accesso Lato Client
 
-Per i siti web, il namespace `connection` viene distribuito come file `runtime-config.json` nel bucket S3. Consulta la guida <Link path="guides/react-website#runtime-configuration">React Website Runtime Configuration</Link> per i dettagli su come accedere a questi valori dal tuo codice frontend.
+Per i siti web, il namespace `connection` viene distribuito come file `runtime-config.json` nel bucket S3. Consulta la guida <Link path="guides/react-website#runtime-configuration">Configurazione Runtime del Sito Web React</Link> per dettagli su come accedere a questi valori dal tuo codice frontend.

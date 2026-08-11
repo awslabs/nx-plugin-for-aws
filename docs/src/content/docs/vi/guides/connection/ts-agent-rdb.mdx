@@ -1,6 +1,6 @@
 ---
-title: TypeScript Agent tới Cơ sở dữ liệu quan hệ
-description: Kết nối TypeScript Agent với Cơ sở dữ liệu quan hệ
+title: TypeScript Agent đến Cơ sở dữ liệu Quan hệ
+description: Kết nối TypeScript Agent với Cơ sở dữ liệu Quan hệ
 when:
   sourceType: ts#agent
   targetType: ts#rdb
@@ -13,7 +13,7 @@ import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
 
-Generator `connection` kết nối một <Link path="guides/ts-agent">TypeScript Agent</Link> với dự án <Link path="guides/ts-rdb">Relational Database</Link>, làm cho Prisma client có sẵn bên trong agent factory của bạn.
+Generator `connection` kết nối một <Link path="guides/ts-agent">TypeScript Agent</Link> với một dự án <Link path="guides/ts-rdb">Relational Database</Link>, cung cấp Prisma client bên trong agent factory của bạn.
 
 ## Điều kiện tiên quyết
 
@@ -36,24 +36,24 @@ Chọn dự án Agent của bạn làm nguồn và dự án cơ sở dữ liệu
 
 ## Kết quả của Generator
 
-Generator sửa đổi hai file trong thư mục nguồn của agent của bạn:
+Generator sửa đổi hai file trong thư mục nguồn của agent:
 
 <FileTree>
 
 - packages/my-service/src/my-agent
-  - agent.ts Prisma client được lấy bên trong `getAgent` và có sẵn cho các công cụ
-  - Dockerfile RDS CA bundle được cài đặt cho kết nối SSL tới Aurora
+  - agent.ts Prisma client được lấy bên trong `getAgent` và có sẵn cho các tool
+  - Dockerfile RDS CA bundle được cài đặt cho kết nối SSL đến Aurora
 
 </FileTree>
 
 Ngoài ra, target `<agent-name>-dev` của agent được cập nhật để phụ thuộc vào target `dev` của cơ sở dữ liệu.
 
-## Sử dụng cơ sở dữ liệu trong Agent Tools
+## Sử dụng Cơ sở dữ liệu trong Agent Tools
 
 Prisma client được khởi tạo bên trong `getAgent()`. Vì generator `ts#agent` cấu hình một Agent duy nhất cho mỗi phiên, client cũng được tái sử dụng trong suốt vòng đời của phiên:
 
 ```ts title="packages/my-service/src/my-agent/agent.ts" {1,4}
-import { getPrisma as getMyDb } from ':my-scope/my-db';
+import { getPrisma as getMyDb } from '@my-scope/my-db';
 
 export const getAgent = async () => {
   const myDb = await getMyDb();
@@ -62,13 +62,13 @@ export const getAgent = async () => {
 };
 ```
 
-## Nhiều cơ sở dữ liệu
+## Nhiều Cơ sở dữ liệu
 
-Chạy generator lần nữa với một đích khác sẽ thêm cơ sở dữ liệu thứ hai bên cạnh cơ sở dữ liệu đầu tiên:
+Chạy generator lần nữa với một target khác sẽ thêm cơ sở dữ liệu thứ hai cùng với cơ sở dữ liệu đầu tiên:
 
 ```ts title="packages/my-service/src/my-agent/agent.ts" {1,2,5,6}
-import { getPrisma as getMyDb } from ':my-scope/my-db';
-import { getPrisma as getOtherDb } from ':my-scope/other-db';
+import { getPrisma as getMyDb } from '@my-scope/my-db';
+import { getPrisma as getOtherDb } from '@my-scope/other-db';
 
 export const getAgent = async () => {
   const myDb = await getMyDb();
@@ -78,7 +78,7 @@ export const getAgent = async () => {
 };
 ```
 
-## Cơ sở hạ tầng
+## Hạ tầng
 
 Construct agent được tạo ra triển khai `IGrantable` và `IConnectable`, vì vậy bạn có thể cấp quyền truy cập mạng và IAM cho cơ sở dữ liệu trực tiếp trên construct.
 
@@ -86,8 +86,9 @@ Construct agent được tạo ra triển khai `IGrantable` và `IConnectable`, 
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
+import { SecurityGroup } from 'aws-cdk-lib/aws-ec2';
 import { RuntimeNetworkConfiguration } from 'aws-cdk-lib/aws-bedrockagentcore';
-import { MyDatabase } from ':my-scope/common-constructs';
+import { MyDatabase } from '@my-scope/common-constructs';
 
 const db = new MyDatabase(this, 'Db', { vpc, ... });
 
@@ -95,6 +96,9 @@ const myAgent = new MyAgent(this, 'MyAgent', {
   networkConfiguration: RuntimeNetworkConfiguration.usingVpc(this, {
     vpc,
     vpcSubnets: { subnetType: SubnetType.PRIVATE_WITH_EGRESS },
+    securityGroups: [
+      new SecurityGroup(this, 'MyAgentSecurityGroup', { vpc, allowAllOutbound: true }),
+    ],
   }),
 });
 
@@ -104,10 +108,11 @@ db.grantConnect(myAgent);
 
 `allowDefaultPortFrom` mở quy tắc security group để agent runtime có thể truy cập cổng cơ sở dữ liệu. `grantConnect` cấp quyền IAM `rds-db:connect` cho execution role của agent.
 
+
 </Fragment>
 <Fragment slot="terraform">
 
-Chạy agent bên trong cùng VPC với cơ sở dữ liệu, cấp cho nó quyền `rds-db:connect` thông qua `additional_iam_policy_statements`, và mở đường dẫn mạng bằng một cặp quy tắc security group. Các tài nguyên `aws_vpc.main` và `aws_subnet` được định nghĩa trong hướng dẫn triển khai cơ sở dữ liệu:
+Chạy agent bên trong cùng VPC với cơ sở dữ liệu, cấp cho nó quyền `rds-db:connect` thông qua `additional_iam_policy_statements`, và mở đường dẫn mạng với một cặp quy tắc security group. Các tài nguyên `aws_vpc.main` và `aws_subnet` được định nghĩa trong hướng dẫn triển khai cơ sở dữ liệu:
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
@@ -156,7 +161,7 @@ resource "aws_vpc_security_group_egress_rule" "agent_to_database" {
 }
 ```
 
-`appconfig_application_id`/`appconfig_application_arn` đến từ ứng dụng AppConfig <Link path="guides/runtime-config">runtime configuration</Link> được chia sẻ được khai báo một lần trong root module của bạn, không phải từ database module. Bao gồm namespace `database` khi khởi tạo nó để mục cấu hình runtime của database module được triển khai:
+`appconfig_application_id`/`appconfig_application_arn` đến từ ứng dụng <Link path="guides/runtime-config">runtime configuration</Link> AppConfig được chia sẻ được khai báo một lần trong root module của bạn, không phải từ database module. Bao gồm namespace `database` khi khởi tạo nó để entry runtime configuration của database module được triển khai:
 
 ```hcl title="packages/infra/src/main.tf"
 module "runtime_config_appconfig" {
@@ -170,11 +175,11 @@ module "runtime_config_appconfig" {
 </Fragment>
 </Infrastructure>
 
-### Yêu cầu SSL khi kết nối không qua RDS Proxy
+### Yêu cầu SSL Khi Kết nối Không có RDS Proxy
 
-<Snippet name="connection/strands-agent-rdb-ssl-requirements" parentHeading="SSL Requirements When Connecting Without RDS Proxy" />
+<Snippet name="connection/strands-agent-rdb-ssl-requirements" parentHeading="Yêu cầu SSL Khi Kết nối Không có RDS Proxy" />
 
-## Phát triển cục bộ
+## Phát triển Cục bộ
 
 <NxCommands commands={["<agent-name>-dev <project-name>"]} />
 

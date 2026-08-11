@@ -12,18 +12,18 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
 
-`connection` 제너레이터는 <Link path="guides/fastapi">FastAPI</Link>를 <Link path="guides/py-rdb">Python 관계형 데이터베이스</Link> 프로젝트에 연결하여, FastAPI 의존성을 통해 타입이 지정된 SQLModel 세션을 라우트 핸들러에 주입합니다.
+`connection` 생성기는 <Link path="guides/fastapi">FastAPI</Link>를 <Link path="guides/py-rdb">Python 관계형 데이터베이스</Link> 프로젝트에 연결하여, FastAPI 의존성을 통해 타입이 지정된 SQLModel 세션을 라우트 핸들러에 주입합니다.
 
 ## 사전 요구 사항
 
-이 제너레이터를 사용하기 전에 다음이 필요합니다:
+이 생성기를 사용하기 전에 다음이 필요합니다:
 
 1. FastAPI 프로젝트 (`py#api --framework=fastapi`로 생성), <Link path="guides/fastapi">`py#api`</Link> 가이드 참조
 2. <Link path="guides/py-rdb">`py#rdb`</Link> 프로젝트
 
 ## 사용법
 
-### 제너레이터 실행
+### 생성기 실행
 
 <RunGenerator generator="connection" />
 
@@ -33,15 +33,15 @@ FastAPI 프로젝트를 소스로, 관계형 데이터베이스 프로젝트를 
 
 <GeneratorParameters generator="connection" />
 
-## 제너레이터 출력
+## 생성기 출력
 
-제너레이터는 FastAPI 프로젝트를 수정합니다:
+생성기는 FastAPI 프로젝트를 수정합니다:
 
 <FileTree>
 
 - packages/my_api
-  - project.json `dev`가 데이터베이스의 `dev` 타겟에 의존성 추가
-  - pyproject.toml 데이터베이스 패키지를 워크스페이스 종속성으로 추가
+  - project.json 데이터베이스의 `dev` 타겟에 대한 `dev` 의존성 추가
+  - pyproject.toml 워크스페이스 의존성으로 데이터베이스 패키지 추가
   - my_api
     - dependencies
       - my_db.py 데이터베이스 세션을 위한 FastAPI `MyDbSession` 의존성
@@ -50,7 +50,7 @@ FastAPI 프로젝트를 소스로, 관계형 데이터베이스 프로젝트를 
 
 ## 라우트 핸들러에서 데이터베이스 사용
 
-이 제너레이터는 라우트 핸들러에서 사용할 수 있는 주입 가능한 [FastAPI Dependency](https://fastapi.tiangolo.com/tutorial/dependencies/)를 구성합니다:
+이 생성기는 라우트 핸들러에서 사용할 수 있는 주입 가능한 [FastAPI Dependency](https://fastapi.tiangolo.com/tutorial/dependencies/)를 구성합니다:
 
 ```python title="packages/my_api/my_api/api.py" {2,6,10}
 from sqlmodel import select
@@ -70,7 +70,7 @@ async def create_example(name: str, my_db: MyDbSession):
     return item
 ```
 
-FastAPI는 요청당 새 세션을 자동으로 열고 핸들러가 반환될 때 닫습니다.
+FastAPI는 요청당 자동으로 새 세션을 열고 핸들러가 반환될 때 닫습니다.
 
 ## 인프라
 
@@ -79,7 +79,7 @@ FastAPI는 요청당 새 세션을 자동으로 열고 핸들러가 반환될 �
 <Infrastructure>
 <Fragment slot="cdk">
 
-애플리케이션 스택에서 API를 데이터베이스와 동일한 VPC에 배포한 다음, `allowDefaultPortFrom` 및 `grantConnect`를 호출하여 네트워크 경로를 열고 Lambda 핸들러에 IAM `rds-db:connect` 권한을 부여하세요:
+애플리케이션 스택에서 API를 데이터베이스와 동일한 VPC에 배포한 다음, `allowDefaultPortFrom` 및 `grantConnect`를 호출하여 네트워크 경로를 열고 Lambda 핸들러에 IAM `rds-db:connect` 권한을 부여합니다:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
 import { MyDatabase } from '@my-scope/common-constructs';
@@ -110,21 +110,26 @@ API Lambda 함수를 프라이빗 격리 서브넷이 아닌 **이그레스가 �
 </Fragment>
 <Fragment slot="terraform">
 
-데이터베이스와 동일한 VPC에 API를 배포하고, `additional_iam_policy_statements`를 통해 `rds-db:connect` 권한을 부여하며, 보안 그룹 규칙 쌍으로 네트워크 경로를 여세요:
+API를 데이터베이스와 동일한 VPC에 배포하고, `additional_iam_policy_statements`를 통해 `rds-db:connect`를 부여하며, 보안 그룹 규칙 쌍으로 네트워크 경로를 엽니다:
+
+아래 예제는 <Link path="guides/py-rdb">Python 관계형 데이터베이스</Link> 배포 가이드의 VPC 리소스를 참조합니다: `aws_subnet.database` 서브넷은 인터넷 라우트가 없고, `aws_subnet.private` 서브넷은 NAT 이그레스가 있습니다.
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
   source              = "../../common/terraform/src/app/dbs/my-database"
-  vpc_id              = module.vpc.vpc_id
-  database_subnet_ids = module.vpc.private_isolated_subnet_ids
-  lambda_subnet_ids   = module.vpc.private_subnet_ids
+  vpc_id              = aws_vpc.main.id
+  database_subnet_ids = aws_subnet.database[*].id
+  lambda_subnet_ids   = aws_subnet.private[*].id
 }
 
 module "api" {
-  source     = "..."
+  source     = "../../common/terraform/src/app/apis/my-api"
   enable_vpc = true
-  vpc_id     = module.vpc.vpc_id
-  subnet_ids = module.vpc.private_subnet_ids
+  vpc_id     = aws_vpc.main.id
+  subnet_ids = aws_subnet.private[*].id
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
 
   additional_iam_policy_statements = [
     {
@@ -135,13 +140,10 @@ module "api" {
       ]
     }
   ]
-
-  env = {
-    RUNTIME_CONFIG_APP_ID = module.runtime_config_appconfig.application_id
-  }
 }
 
 resource "aws_vpc_security_group_ingress_rule" "api_to_database" {
+  description                  = "Allow the API Lambda functions to connect to the database"
   security_group_id            = module.my_database.security_group_id
   referenced_security_group_id = module.api.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -150,6 +152,7 @@ resource "aws_vpc_security_group_ingress_rule" "api_to_database" {
 }
 
 resource "aws_vpc_security_group_egress_rule" "api_to_database" {
+  description                  = "Allow outbound traffic from the API Lambda functions to the database"
   security_group_id            = module.api.security_group_id
   referenced_security_group_id = module.my_database.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -158,7 +161,18 @@ resource "aws_vpc_security_group_egress_rule" "api_to_database" {
 }
 ```
 
-API Lambda 함수를 프라이빗 격리 서브넷이 아닌 **이그레스가 있는 프라이빗 서브넷**에 배포하세요. `RUNTIME_CONFIG_APP_ID`는 데이터베이스 모듈의 출력이 아닌 공유 <Link path="guides/runtime-config">런타임 구성</Link> AppConfig 애플리케이션을 가리켜야 합니다.
+API Lambda 함수를 프라이빗 격리 서브넷이 아닌 **이그레스가 있는 프라이빗 서브넷**에 배포하세요. `appconfig_application_id`/`appconfig_application_arn`은 데이터베이스 모듈이 아닌 루트 모듈에서 한 번 선언된 공유 <Link path="guides/runtime-config">런타임 구성</Link> AppConfig 애플리케이션에서 가져옵니다. 이를 전달하면 Lambda 함수에 `RUNTIME_CONFIG_APP_ID`가 설정되고 애플리케이션에 대한 읽기 액세스 권한이 부여됩니다.
+
+AppConfig 애플리케이션은 데이터베이스 모듈의 런타임 구성 항목이 배포되도록 `database` 네임스페이스를 노출해야 합니다. `runtime-config/appconfig` 모듈을 인스턴스화할 때 `namespaces`에 포함하세요:
+
+```hcl title="packages/infra/src/main.tf"
+module "runtime_config_appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+  application_name = "my-app-runtime-config"
+  namespaces       = ["connection", "agentcore", "database"]
+}
+```
 
 </Fragment>
 </Infrastructure>
@@ -167,4 +181,4 @@ API Lambda 함수를 프라이빗 격리 서브넷이 아닌 **이그레스가 �
 
 <NxCommands commands={["dev <project-name>"]} />
 
-이렇게 하면 FastAPI와 연결된 모든 데이터베이스가 시작됩니다. `LOCAL_DEV=true` 환경 변수는 데이터베이스 클라이언트가 Aurora 대신 로컬 Docker 데이터베이스에 연결하도록 합니다.
+이는 FastAPI와 연결된 모든 데이터베이스를 시작합니다. `LOCAL_DEV=true` 환경 변수는 데이터베이스 클라이언트가 Aurora 대신 로컬 Docker 데이터베이스에 연결하도록 합니다.

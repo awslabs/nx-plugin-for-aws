@@ -14,7 +14,7 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
 
-O gerador `connection` pode registrar um servidor MCP (seja <Link path="guides/ts-mcp-server">TypeScript</Link> ou <Link path="guides/py-mcp-server">Python</Link>) como um destino de um <Link path="guides/agentcore-gateway">AgentCore Gateway</Link>.
+O gerador `connection` pode registrar um servidor MCP (seja <Link path="guides/ts-mcp-server">TypeScript</Link> ou <Link path="guides/py-mcp-server">Python</Link>) como destino de um <Link path="guides/agentcore-gateway">AgentCore Gateway</Link>.
 
 Uma vez conectado, o Gateway agrega as ferramentas do servidor MCP em seu único endpoint MCP, avalia chamadas contra seu mecanismo de políticas Cedar e assina o tráfego de saída para o servidor MCP com IAM SigV4.
 
@@ -46,8 +46,8 @@ O gerador conecta projetos existentes em vez de emitir novos arquivos de origem.
 <FileTree>
 
 - packages/\<gateway>
-  - project.json `<gateway>-serve-local` ganha uma dependência no `<mcp>-serve-local` do servidor MCP
-  - serve-local.ts `ATTACHED_MCP_SERVERS` atualizado para que o gateway local agregue o servidor MCP
+  - project.json o destino `dev` do Gateway ganha uma dependência no `<mcp>-dev` do servidor MCP
+  - local-dev.ts `ATTACHED_MCP_SERVERS` atualizado para que o gateway local agregue o servidor MCP
 
 </FileTree>
 
@@ -55,18 +55,19 @@ O destino `dev` do projeto Gateway ganha uma dependência no destino `<mcp>-dev`
 
 ## Adicionando o destino do servidor MCP à sua stack
 
-O gerador **não pode** conectar automaticamente o destino do servidor MCP à sua infraestrutura porque ele não sabe qual stack ou módulo instancia o Gateway. Adicione uma única chamada para `gateway.addMcpServer(server)` você mesmo.
+O gerador **não pode** conectar automaticamente o destino do servidor MCP à sua infraestrutura porque ele não sabe qual stack ou módulo instancia o Gateway. Adicione uma única chamada a `gateway.addMcpServer(server)` você mesmo.
 
 <Infrastructure>
 <Fragment slot="cdk">
-Na stack onde você instancia o Gateway, registre o servidor MCP como um destino:
+Na stack onde você instancia o Gateway, registre o servidor MCP como destino:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {4-7}
 const myMcpServer = new MyMcpServer(this, 'MyMcpServer');
 const myGateway = new MyGateway(this, 'MyGateway');
 
 // Register the MCP server as a target of the Gateway. The target name
-// defaults to the MCP server construct's id in kebab-case (`my-mcp-server`).
+// defaults to the MCP server's `mcpServerName` (its class name in
+// kebab-case, e.g. `MyMcpServer` -> `my-mcp-server`).
 myGateway.addMcpServer(myMcpServer);
 ```
 
@@ -78,7 +79,7 @@ Para substituir o nome do destino padrão, passe `gatewayTargetName`:
 myGateway.addMcpServer(myMcpServer, { gatewayTargetName: 'my-mcp' });
 ```
 
-O construto configura o destino com `iamCredentialProvider.service = 'bedrock-agentcore'` para que o Gateway assine chamadas de saída usando sua própria função de execução.
+O construtor configura o destino com `iamCredentialProvider.service = 'bedrock-agentcore'` para que o Gateway assine chamadas de saída usando sua própria função de execução.
 </Fragment>
 <Fragment slot="terraform">
 No arquivo Terraform onde você instancia o Gateway, conecte o destino do servidor MCP:
@@ -114,7 +115,7 @@ resource "aws_bedrockagentcore_gateway_target" "my_mcp_server" {
 }
 ```
 
-O `name` do destino (`my-mcp-server` acima) é usado como prefixo para nomes de ações Cedar — veja a <Link path="guides/agentcore-gateway">seção Escrevendo Políticas</Link>. `policy_dependencies` garante que as políticas Cedar que referenciam as ações deste destino sejam criadas após o destino ter registrado essas ações.
+O `name` do destino (`my-mcp-server` acima) é usado como prefixo para nomes de ações Cedar — veja a <Link path="guides/agentcore-gateway">seção Escrevendo Políticas</Link>. `policy_dependencies` garante que as políticas Cedar que referenciam as ações deste destino sejam criadas após o destino ter registrado-as.
 </Fragment>
 </Infrastructure>
 
@@ -124,12 +125,10 @@ Executar o Gateway localmente com:
 
 <NxCommands commands={["dev <gateway-name>"]} />
 
-inicia um gateway local mais cada servidor MCP anexado em sua porta local atribuída. O gateway local expõe um único endpoint MCP que agrega as ferramentas dos servidores anexados. Agentes conectados ao Gateway via os geradores de conexão de gateway <Link path="guides/connection/ts-agent-gateway">TypeScript</Link> ou <Link path="guides/connection/py-agent-gateway">Python</Link> apontam para ele ao executar com `LOCAL_DEV=true`.
+inicia um gateway local mais cada servidor MCP anexado em sua porta local atribuída. O gateway local expõe um único endpoint MCP que agrega as ferramentas dos servidores anexados. Agentes conectados ao Gateway através dos geradores de conexão de gateway <Link path="guides/connection/ts-agent-gateway">TypeScript</Link> ou <Link path="guides/connection/py-agent-gateway">Python</Link> apontam para ele ao executar com `LOCAL_DEV=true`.
 
 :::caution[Fidelidade local]
-O desenvolvimento local usa um **gateway substituto local** — um agregador MCP leve iniciado pelo projeto Gateway, não o serviço AgentCore Gateway. Como consequência, **as políticas Cedar não são avaliadas localmente**. Cada agente vê todas as ferramentas em todos os servidores MCP anexados. Para exercitar as políticas Cedar, execute o destino `serve` do agente (veja os guias de conexão de agente <Link path="guides/connection/ts-agent-gateway">TypeScript</Link> / <Link path="guides/connection/py-agent-gateway">Python</Link>) para que o agente em execução local chame o Gateway implantado.
+O desenvolvimento local usa um **gateway substituto local** — um agregador MCP leve iniciado pelo projeto Gateway, não o serviço AgentCore Gateway. Como consequência, **as políticas Cedar não são avaliadas localmente**. Cada agente vê todas as ferramentas em cada servidor MCP anexado. Para exercitar as políticas Cedar, execute o destino `serve` do agente em vez disso (veja os guias de conexão de agente <Link path="guides/connection/ts-agent-gateway">TypeScript</Link> / <Link path="guides/connection/py-agent-gateway">Python</Link>) para que o agente em execução local chame o Gateway implantado.
 
 Os nomes das ferramentas ainda são prefixados localmente como `<target-name>___<tool-name>` para corresponder ao namespace do Gateway implantado, então o prompt do sistema de um agente e os nomes de ações Cedar que você referencia permanecem consistentes entre execuções locais e implantadas.
-:::
-s e implantadas.
 :::

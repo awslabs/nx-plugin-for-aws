@@ -41,7 +41,7 @@ O gerador modifica seu projeto FastAPI:
 
 - packages/my_api
   - project.json Adiciona uma dependência de `dev` no target `dev` do banco de dados
-  - pyproject.toml Adiciona o pacote do banco de dados como uma dependência do workspace
+  - pyproject.toml Adiciona o pacote do banco de dados como uma dependência de workspace
   - my_api
     - dependencies
       - my_db.py Dependência FastAPI `MyDbSession` para a sessão do banco de dados
@@ -101,7 +101,7 @@ Object.entries(api.integrations).forEach(([operation, integration]) => {
 });
 ```
 
-Implante as funções Lambda da API em uma **sub-rede privada com saída**, não em uma sub-rede isolada privada. Em tempo de execução, `session_context()` recupera a configuração do banco de dados do AWS AppConfig, que é um endpoint de serviço AWS público que requer acesso à internet de saída.
+Implante as funções Lambda da API em uma **sub-rede privada com saída**, não em uma sub-rede privada isolada. Em tempo de execução, `session_context()` recupera a configuração do banco de dados do AWS AppConfig, que é um endpoint de serviço AWS público que requer acesso à internet de saída.
 
 :::note
 Este exemplo concede acesso a todos os manipuladores em sua API, mas se apenas alguns manipuladores precisarem de acesso, é melhor configurar individualmente.
@@ -110,21 +110,26 @@ Este exemplo concede acesso a todos os manipuladores em sua API, mas se apenas a
 </Fragment>
 <Fragment slot="terraform">
 
-Implante a API na mesma VPC que o banco de dados, conceda `rds-db:connect` via `additional_iam_policy_statements`, e abra o caminho de rede com um par de regras de grupo de segurança:
+Implante a API na mesma VPC que o banco de dados, conceda a ela `rds-db:connect` via `additional_iam_policy_statements`, e abra o caminho de rede com um par de regras de grupo de segurança:
+
+O exemplo abaixo referencia os recursos VPC do guia de implantação do <Link path="guides/py-rdb">Banco de Dados Relacional Python</Link>: as sub-redes `aws_subnet.database` não têm rota de internet, enquanto as sub-redes `aws_subnet.private` têm saída NAT.
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_database" {
   source              = "../../common/terraform/src/app/dbs/my-database"
-  vpc_id              = module.vpc.vpc_id
-  database_subnet_ids = module.vpc.private_isolated_subnet_ids
-  lambda_subnet_ids   = module.vpc.private_subnet_ids
+  vpc_id              = aws_vpc.main.id
+  database_subnet_ids = aws_subnet.database[*].id
+  lambda_subnet_ids   = aws_subnet.private[*].id
 }
 
 module "api" {
-  source     = "..."
+  source     = "../../common/terraform/src/app/apis/my-api"
   enable_vpc = true
-  vpc_id     = module.vpc.vpc_id
-  subnet_ids = module.vpc.private_subnet_ids
+  vpc_id     = aws_vpc.main.id
+  subnet_ids = aws_subnet.private[*].id
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
 
   additional_iam_policy_statements = [
     {
@@ -135,13 +140,10 @@ module "api" {
       ]
     }
   ]
-
-  env = {
-    RUNTIME_CONFIG_APP_ID = module.runtime_config_appconfig.application_id
-  }
 }
 
 resource "aws_vpc_security_group_ingress_rule" "api_to_database" {
+  description                  = "Allow the API Lambda functions to connect to the database"
   security_group_id            = module.my_database.security_group_id
   referenced_security_group_id = module.api.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -150,6 +152,7 @@ resource "aws_vpc_security_group_ingress_rule" "api_to_database" {
 }
 
 resource "aws_vpc_security_group_egress_rule" "api_to_database" {
+  description                  = "Allow outbound traffic from the API Lambda functions to the database"
   security_group_id            = module.api.security_group_id
   referenced_security_group_id = module.my_database.security_group_id
   from_port                    = module.my_database.cluster_port
@@ -158,7 +161,18 @@ resource "aws_vpc_security_group_egress_rule" "api_to_database" {
 }
 ```
 
-Implante as funções Lambda da API em **sub-redes privadas com saída**, não em sub-redes isoladas privadas. `RUNTIME_CONFIG_APP_ID` deve apontar para a aplicação AppConfig de <Link path="guides/runtime-config">configuração de tempo de execução</Link> compartilhada, não para uma saída do módulo do banco de dados.
+Implante as funções Lambda da API em **sub-redes privadas com saída**, não em sub-redes privadas isoladas. `appconfig_application_id`/`appconfig_application_arn` vêm da aplicação AppConfig de <Link path="guides/runtime-config">configuração de tempo de execução</Link> compartilhada declarada uma vez em seu módulo raiz, não do módulo do banco de dados — passá-los define `RUNTIME_CONFIG_APP_ID` nas funções Lambda e concede a elas acesso de leitura à aplicação.
+
+A aplicação AppConfig deve expor o namespace `database` para que a entrada de configuração de tempo de execução do módulo do banco de dados seja implantada. Inclua-o nos `namespaces` ao instanciar o módulo `runtime-config/appconfig`:
+
+```hcl title="packages/infra/src/main.tf"
+module "runtime_config_appconfig" {
+  source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+  application_name = "my-app-runtime-config"
+  namespaces       = ["connection", "agentcore", "database"]
+}
+```
 
 </Fragment>
 </Infrastructure>
