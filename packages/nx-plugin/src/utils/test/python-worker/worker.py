@@ -12,6 +12,7 @@ import json
 import os
 import py_compile
 import shutil
+import subprocess
 import sys
 import tempfile
 import traceback
@@ -20,6 +21,7 @@ import warnings
 from typing import Any, Callable
 
 import httpx
+import pydantic
 
 
 # ─── Mock httpx transport ────────────────────────────────────────────────
@@ -175,6 +177,57 @@ def _load_generated(root: str, pkg_name: str = "generated") -> types.ModuleType:
     return importlib.import_module(pkg_name)
 
 
+def _site_packages_paths() -> list[str]:
+    """The directories holding this worker's third-party packages.
+
+    `uv run --with` layers packages in from its cache rather than installing
+    them under `sys.prefix`, so the directories are derived from the imported
+    modules themselves — that way `ty` resolves the same versions the code
+    under test runs against.
+    """
+    paths: list[str] = []
+    for module in (httpx, pydantic):
+        directory = os.path.dirname(os.path.dirname(module.__file__ or ""))
+        if directory and directory not in paths:
+            paths.append(directory)
+    return paths
+
+
+def _type_check(root: str, pkg_name: str) -> list[str]:
+    """Type check the package with `ty`, returning one message per diagnostic.
+
+    `ty` is the checker the plugin's Python projects run, so a generated client
+    is held to what a consumer's own `typecheck` target would report.
+    """
+    ty = shutil.which("ty")
+    if not ty:
+        return ["ty is not available on PATH"]
+    search_paths: list[str] = []
+    for directory in _site_packages_paths():
+        search_paths += ["--extra-search-path", directory]
+    result = subprocess.run(  # noqa: S603
+        [
+            ty,
+            "check",
+            "--python",
+            sys.prefix,
+            *search_paths,
+            "--output-format",
+            "concise",
+            pkg_name,
+        ],
+        capture_output=True,
+        text=True,
+        cwd=root,
+    )
+    if result.returncode == 0:
+        return []
+    output = (result.stdout + result.stderr).strip().splitlines()
+    return [
+        line for line in output if ": error[" in line or ": warning[" in line
+    ] or output
+
+
 # ─── Command handlers ────────────────────────────────────────────────────
 def handle_compile(req: dict) -> dict:
     pkg_name = req.get("package", "generated")
@@ -190,7 +243,33 @@ def handle_compile(req: dict) -> dict:
             "error": f"{type(exc).__name__}: {exc}",
             "traceback": traceback.format_exc(),
         }
+    if req.get("type_check"):
+        diagnostics = _type_check(root, pkg_name)
+        if diagnostics:
+            return {
+                "ok": False,
+                "error": "type_check_failed",
+                "details": diagnostics,
+            }
     return {"ok": True, "value": None}
+
+
+def handle_type_check_usage(req: dict) -> dict:
+    """Type check a caller-supplied module against the compiled package.
+
+    Returns the diagnostics rather than failing, so a test can assert that
+    intentionally-wrong usage is rejected as well as that valid usage is not.
+    """
+    if not _PACKAGE_DIR:
+        raise RuntimeError("no files loaded — compile first")
+    pkg_name = req.get("package", "generated")
+    usage_path = os.path.join(_PACKAGE_DIR, pkg_name, "_usage_probe.py")
+    with open(usage_path, "w", encoding="utf-8") as f:
+        f.write(req["usage"])
+    try:
+        return {"ok": True, "diagnostics": _type_check(_PACKAGE_DIR, pkg_name)}
+    finally:
+        os.remove(usage_path)
 
 
 def _resolve_invoke(module_kind: str, mod: types.ModuleType) -> tuple[Any, str]:
@@ -393,6 +472,7 @@ def handle_invoke(req: dict) -> dict:
 HANDLERS: dict[str, Callable[[dict], dict]] = {
     "compile": handle_compile,
     "invoke": handle_invoke,
+    "type_check_usage": handle_type_check_usage,
 }
 
 

@@ -8,7 +8,8 @@ import path from 'path';
 import { createInterface, type Interface } from 'readline';
 import { OPEN_API_PY_CLIENT_DEPENDENCIES } from '../../open-api/py-client/generator';
 import { declaredNames } from '../declared-dependencies';
-import { withPyVersions } from '../versions';
+import { createTreeUsingTsSolutionSetup } from '../test';
+import { PY_VERSIONS, withPyVersions } from '../versions';
 
 const WORKER_PATH = path.join(
   import.meta.dirname,
@@ -73,9 +74,18 @@ export interface InvokeOptions {
   errorOnWarning?: boolean;
 }
 
+export interface CompileOptions {
+  /** Name of the generated package directory (default "generated"). */
+  pkg?: string;
+  /** Type check the package with `ty` as well (default true). */
+  typeCheck?: boolean;
+}
+
 export interface InvokeResult {
   ok: boolean;
   value?: unknown;
+  /** `ty` diagnostics, from `typeCheckUsage`. */
+  diagnostics?: string[];
   /**
    * The Python type name of the returned value. A float where the spec declares
    * an integer is JSON-equal to it, so only the type tells them apart.
@@ -115,11 +125,15 @@ export class PythonVerifier {
   private ensureStarted(): ChildProcessWithoutNullStreams {
     if (this.started && this.process) return this.process;
     // Use the same pinned versions the generator declares so the test
-    // environment matches what consumers get at runtime.
+    // environment matches what consumers get at runtime. `ty` joins them so it
+    // resolves the client's imports against that same environment — it is the
+    // checker the plugin's Python projects run.
     const deps = withPyVersions(
       OPEN_API_PY_CLIENT_DEPENDENCIES,
       declaredNames(OPEN_API_PY_CLIENT_DEPENDENCIES.py),
-    ).flatMap((spec) => ['--with', spec]);
+    )
+      .concat(`ty${PY_VERSIONS.ty}`)
+      .flatMap((spec) => ['--with', spec]);
     const proc = spawn('uv', ['run', ...deps, 'python', '-u', WORKER_PATH], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -168,33 +182,62 @@ export class PythonVerifier {
   }
 
   /**
-   * Write the given files into a tmpdir and py_compile+import them.
-   * `basePath` is stripped from each tree path so that the remainder becomes
-   * the file's location inside the generated package.
+   * Verify that the given Python files in the tree compile, import and type
+   * check, and load them so they can be invoked.
+   *
+   * `basePath` is stripped from each tree path so the remainder becomes the
+   * file's location inside the generated package. Pass `typeCheck: false` to
+   * assert only that a spec generates importable code — for one whose types are
+   * asserted separately, or which is expected to be diagnosed.
    */
   async expectPythonToCompile(
     tree: Tree,
     paths: string[],
     basePath = '',
-    pkg = 'generated',
+    { pkg = 'generated', typeCheck = true }: CompileOptions = {},
   ): Promise<void> {
     const files: Record<string, string> = {};
-    const prefix = basePath ? basePath.replace(/\/$/, '') + '/' : '';
+    const prefix = basePath ? `${basePath.replace(/\/$/, '')}/` : '';
     for (const rel of paths) {
       const body = tree.read(rel, 'utf-8');
       if (body === null) throw new Error(`file not in tree: ${rel}`);
       const inPkg = rel.startsWith(prefix) ? rel.slice(prefix.length) : rel;
       files[inPkg] = body;
     }
-    const res = await this.request({ cmd: 'compile', files, package: pkg });
+    const res = await this.request({
+      cmd: 'compile',
+      files,
+      package: pkg,
+      type_check: typeCheck,
+    });
     if (!res.ok) {
       const details = res.details
         ? `\n  ${JSON.stringify(res.details, null, 2)}`
         : '';
       throw new Error(
-        `Python compile failed: ${res.error}${details}\n${res.traceback ?? ''}`,
+        `Python ${res.error === 'type_check_failed' ? 'type check' : 'compile'} failed:${details}\n${res.traceback ?? ''}`,
       );
     }
+  }
+
+  /**
+   * Type check a module written against the compiled client, returning `ty`'s
+   * diagnostics. Assumes `expectPythonToCompile` has been called.
+   *
+   * Returning rather than throwing lets a test assert both that valid usage
+   * produces nothing and that wrong usage is rejected — the latter is what
+   * proves the generated types constrain callers at all.
+   */
+  async typeCheckUsage(usage: string, pkg = 'generated'): Promise<string[]> {
+    const res = await this.request({
+      cmd: 'type_check_usage',
+      usage,
+      package: pkg,
+    });
+    if (!res.ok) {
+      throw new Error(`Could not type check usage: ${res.error}`);
+    }
+    return res.diagnostics ?? [];
   }
 
   /**
@@ -262,18 +305,146 @@ export const expectPythonToCompile = async (
   tree: Tree,
   paths: string[],
   basePath = '',
+  options: CompileOptions = {},
 ): Promise<void> => {
   const verifier = new PythonVerifier();
   try {
-    await verifier.expectPythonToCompile(tree, paths, basePath);
+    await verifier.expectPythonToCompile(tree, paths, basePath, options);
   } finally {
     await verifier.shutdown();
   }
 };
 
+// A few tests for the test utility as a sanity check, mirroring ts.spec.ts.
 describe('PythonVerifier', () => {
-  it('needs a test to be a .spec.ts file', () => {
-    // The file name ends in .spec.ts so vitest picks it up as a test file but we
-    // only want to export helpers.  Mirrors ts.spec.ts.
+  let tree: Tree;
+  let verifier: PythonVerifier;
+
+  beforeAll(() => {
+    verifier = new PythonVerifier();
+  });
+
+  afterAll(async () => {
+    await verifier.shutdown();
+  });
+
+  beforeEach(() => {
+    tree = createTreeUsingTsSolutionSetup();
+  });
+
+  const writePackage = (body: string, module = 'thing.py') => {
+    tree.write(
+      'pkg/__init__.py',
+      `from .${module.replace('.py', '')} import *`,
+    );
+    tree.write(`pkg/${module}`, body);
+    return ['pkg/__init__.py', `pkg/${module}`];
+  };
+
+  it('should not throw for valid Python', async () => {
+    const paths = writePackage('MY_NUMBER: int = 1\n');
+    await verifier.expectPythonToCompile(tree, paths, 'pkg', { pkg: 'pkg' });
+  });
+
+  it('should throw for Python that does not parse', async () => {
+    const paths = writePackage('def broken(:\n');
+    await expect(
+      verifier.expectPythonToCompile(tree, paths, 'pkg', { pkg: 'pkg' }),
+    ).rejects.toThrow(/compile failed/);
+  });
+
+  it('should throw for Python that fails to import', async () => {
+    const paths = writePackage('raise RuntimeError("boom")\n');
+    await expect(
+      verifier.expectPythonToCompile(tree, paths, 'pkg', { pkg: 'pkg' }),
+    ).rejects.toThrow(/boom/);
+  });
+
+  // Type errors parse and import fine, so only the type check catches them.
+  it('should throw for Python that does not type check', async () => {
+    const paths = writePackage('MY_NUMBER: int = "a string"\n');
+    await expect(
+      verifier.expectPythonToCompile(tree, paths, 'pkg', { pkg: 'pkg' }),
+    ).rejects.toThrow(/type check failed/);
+  });
+
+  it('should not type check when asked not to', async () => {
+    const paths = writePackage('MY_NUMBER: int = "a string"\n');
+    await verifier.expectPythonToCompile(tree, paths, 'pkg', {
+      pkg: 'pkg',
+      typeCheck: false,
+    });
+  });
+
+  // The dependencies a generated client imports resolve, so a type error
+  // involving them is caught rather than dismissed as an unresolved import.
+  it('should resolve the vended dependencies when type checking', async () => {
+    const paths = writePackage(
+      [
+        'import httpx',
+        'from pydantic import BaseModel',
+        '',
+        '',
+        'class Thing(BaseModel):',
+        '    name: str',
+        '',
+        '',
+        'def build() -> httpx.Client:',
+        '    return httpx.Client()',
+        '',
+      ].join('\n'),
+    );
+    await verifier.expectPythonToCompile(tree, paths, 'pkg', { pkg: 'pkg' });
+  });
+
+  describe('typeCheckUsage', () => {
+    beforeEach(async () => {
+      const paths = writePackage(
+        [
+          'from pydantic import BaseModel',
+          '',
+          '',
+          'class Thing(BaseModel):',
+          '    name: str',
+          '',
+          '',
+          'def take(thing: Thing) -> str:',
+          '    return thing.name',
+          '',
+        ].join('\n'),
+      );
+      await verifier.expectPythonToCompile(tree, paths, 'pkg', { pkg: 'pkg' });
+    });
+
+    it('should report no diagnostics for valid usage', async () => {
+      const diagnostics = await verifier.typeCheckUsage(
+        [
+          'from .thing import Thing, take',
+          '',
+          '',
+          'def usage() -> None:',
+          '    _name: str = take(Thing(name="a"))',
+          '',
+        ].join('\n'),
+        'pkg',
+      );
+      expect(diagnostics).toEqual([]);
+    });
+
+    it('should report diagnostics for invalid usage', async () => {
+      const diagnostics = await verifier.typeCheckUsage(
+        [
+          'from .thing import take',
+          '',
+          '',
+          'def usage() -> None:',
+          '    _name: int = take("not a Thing")',
+          '',
+        ].join('\n'),
+        'pkg',
+      );
+      expect(diagnostics.join('\n')).toMatch(/invalid-argument-type/);
+      expect(diagnostics.join('\n')).toMatch(/invalid-assignment/);
+    });
   });
 });

@@ -2,25 +2,13 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { execFile } from 'child_process';
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
-import { promisify } from 'util';
 import { PythonVerifier } from '../../utils/test/py.spec';
 import type { Spec } from '../utils/types';
-import {
-  createTree,
-  generateAndRead,
-  generatedPythonFiles,
-} from './generator.utils.spec';
-
-const execFileP = promisify(execFile);
+import { createTree, generateAndRead } from './generator.utils.spec';
 
 /**
  * A spec exercising every feature whose type-safety we care about.  The spec
- * is deliberately dense so a single pyright invocation can assert full
- * parity with the ts-client side.
+ * is deliberately dense so one generated client covers every signal.
  */
 const parityMatrixSpec: Spec = {
   openapi: '3.1.0',
@@ -306,16 +294,19 @@ const parityMatrixSpec: Spec = {
   },
 };
 
-/** Probe file mixing valid usage (must produce no errors) with deliberate errors. */
-const probeUsage = `"""Type-safety probe against the generated client."""
+/**
+ * Usage that must type check cleanly. A false positive here would mean the
+ * generated types reject a caller doing the right thing.
+ */
+const validUsage = `"""Valid usage of the generated client."""
 
 from __future__ import annotations
 
 import datetime
 
-from demo_client import types_gen as t
-from demo_client.client_gen import TypeSafetyApi, TypeSafetyApiConfig
-from demo_client.errors import AddPetApiError, ApiError
+from . import types_gen as t
+from .client_gen import TypeSafetyApi, TypeSafetyApiConfig
+from .errors import AddPetApiError, ApiError
 
 
 def valid_usage(api: TypeSafetyApi) -> None:
@@ -365,227 +356,135 @@ def valid_usage(api: TypeSafetyApi) -> None:
         api.pet.add_pet(name="r")
     except ApiError:
         pass
-
-
-def expected_errors(api: TypeSafetyApi) -> None:
-    # E1
-    api.pet.add_pet()
-    # E2
-    api.pet.add_pet(name=42)
-    # E3
-    api.pet.add_pet(name="r", nom="r")
-    # E4
-    api.pet.list_pets(status=["unknown"], x_api_key="k")
-    # E5
-    _bad: dict[str, int] = api.pet.add_pet(name="rex")
-    # E6
-    api.unknown_method()
-    # E7
-    api.pet.delete_pet(pet_id="forty-two")
-    # E8
-    api.create_event(day="2026-04-18", moment=datetime.datetime.now())
-    # E9
-    api.union(value=[1, 2])
-    # E10
-    try:
-        api.pet.add_pet(name="r")
-    except AddPetApiError as e:
-        _x: str = e.error.detail
-    # E11
-    api.pet.batch_create([{"name": "a"}])
-    # E12
-    api.pet.delete_pet()
-    # E13
-    api.pet.list_pets(status=["available"], x_api_key="k", limit="ten")
-    # E14
-    _chunks: list[str] = list(api.stream())
-    # E15
-    TypeSafetyApiConfig()
 `;
 
-const expectedDiagnostics = [
+/**
+ * Each misuse the generated types must reject, with the `ty` rule that catches
+ * it. One case per entry, checked on its own line, so a signal that stops
+ * firing fails rather than being masked by another entry's diagnostic.
+ */
+const rejectedUsage: Array<{ label: string; code: string; rule: string }> = [
   {
-    label: 'E1 missing required kwarg',
-    pattern: /Argument missing for parameter "name"/i,
+    label: 'missing required kwarg',
+    code: 'api.pet.add_pet()',
+    rule: 'missing-argument',
   },
   {
-    label: 'E2 wrong kwarg type',
-    pattern: /"Literal\[42\]" is not assignable to "str"/,
-  },
-  { label: 'E3 unknown kwarg', pattern: /No parameter named "nom"/ },
-  {
-    label: 'E4 array-literal enum unknown value',
-    pattern: /"Literal\['unknown'\]"|"Literal\["unknown"\]"/,
+    label: 'wrong kwarg type',
+    code: 'api.pet.add_pet(name=42)',
+    rule: 'invalid-argument-type',
   },
   {
-    label: 'E5 return-type mismatch',
-    pattern: /"Pet" is not assignable to "dict\[str, int\]"/,
+    label: 'unknown kwarg',
+    code: 'api.pet.add_pet(name="r", nom="r")',
+    rule: 'unknown-argument',
   },
   {
-    label: 'E6 unknown method',
-    pattern: /Cannot access attribute "unknown_method"/,
+    label: 'value outside an enum',
+    code: 'api.pet.list_pets(status=["unknown"], x_api_key="k")',
+    rule: 'invalid-argument-type',
   },
   {
-    label: 'E7 wrong path-param type',
-    pattern: /"Literal\['forty-two'\]".*not assignable.*"int"/s,
+    label: 'return type mismatch',
+    code: '_bad: dict[str, int] = api.pet.add_pet(name="rex")',
+    rule: 'invalid-assignment',
   },
   {
-    label: 'E8 date field wrong type',
-    pattern: /"Literal\['2026-04-18'\]"|"str".*not assignable.*"date"/s,
+    label: 'unknown method',
+    code: 'api.unknown_method()',
+    rule: 'unresolved-attribute',
   },
   {
-    label: 'E9 union rejects non-member type',
-    pattern: /"list\[int\]" cannot be assigned to parameter "value"/,
+    label: 'wrong path parameter type',
+    code: 'api.pet.delete_pet(pet_id="forty-two")',
+    rule: 'invalid-argument-type',
   },
   {
-    label: 'E10 unnarrowed error access',
-    pattern: /Cannot access attribute "detail"/,
+    label: 'string where a date is declared',
+    code: 'api.create_event(day="2026-04-18", moment=datetime.datetime.now())',
+    rule: 'invalid-argument-type',
   },
   {
-    label: 'E11 batch body wrong type',
-    pattern: /"list\[dict\[str, str\]\]".*"list\[Pet\]"/s,
+    label: 'type outside a union',
+    code: 'api.union(value=[1, 2])',
+    rule: 'invalid-argument-type',
   },
   {
-    label: 'E12 missing path param',
-    pattern: /Argument missing for parameter "pet_id"/,
+    label: 'wrong body element type',
+    code: 'api.pet.batch_create([{"name": "a"}])',
+    rule: 'invalid-argument-type',
   },
   {
-    label: 'E13 wrong query param type',
-    pattern: /"Literal\['ten'\]".*not assignable.*"int"/s,
+    label: 'missing path parameter',
+    code: 'api.pet.delete_pet()',
+    rule: 'missing-argument',
   },
   {
-    label: 'E14 streaming return mismatch',
-    pattern: /"list\[Chunk\]" is not assignable to "list\[str\]"/,
+    label: 'wrong query parameter type',
+    code: 'api.pet.list_pets(status=["available"], x_api_key="k", limit="ten")',
+    rule: 'invalid-argument-type',
   },
   {
-    label: 'E15 Config url required',
-    pattern: /Argument missing for parameter "url"/,
+    label: 'streaming element type mismatch',
+    code: '_chunks: list[str] = list(api.stream())',
+    rule: 'invalid-assignment',
+  },
+  {
+    label: 'config without a url',
+    code: 'TypeSafetyApiConfig()',
+    rule: 'missing-argument',
+  },
+  {
+    label: 'error accessed without narrowing',
+    code: [
+      'try:',
+      '        api.pet.add_pet(name="r")',
+      '    except AddPetApiError as e:',
+      '        _x: str = e.error.detail',
+    ].join('\n'),
+    rule: 'unresolved-attribute',
   },
 ];
 
-describe('openApiPyClientGenerator - type-safety parity matrix', () => {
+/** Wrap a snippet in a module that imports the client. */
+const usageModule = (body: string) =>
+  [
+    '"""Rejected usage of the generated client."""',
+    '',
+    'from __future__ import annotations',
+    '',
+    'import datetime',
+    '',
+    'from . import types_gen as t  # noqa: F401',
+    'from .client_gen import TypeSafetyApi, TypeSafetyApiConfig',
+    'from .errors import AddPetApiError, ApiError  # noqa: F401',
+    '',
+    '',
+    'def usage(api: TypeSafetyApi) -> None:',
+    `    ${body}`,
+    '',
+  ].join('\n');
+
+describe('openApiPyClientGenerator - type safety', () => {
   let verifier: PythonVerifier;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     verifier = new PythonVerifier();
+    // Compiling also type checks the client itself; these tests then check what
+    // it lets a caller do.
+    await generateAndRead(verifier, createTree(), parityMatrixSpec);
   });
 
   afterAll(async () => {
     await verifier.shutdown();
   });
 
-  it('matches ts-client type safety under pyright across 15 diagnostic signals', async () => {
-    const tree = createTree();
-    const { types, client } = await generateAndRead(
-      verifier,
-      tree,
-      parityMatrixSpec,
-    );
-    // Guard: without the enum-in-collection fix the list[Literal[...]] is
-    // just list[str], which would make E4 silently pass.
-    expect(client).toMatch(/Literal\["available"/);
+  it('accepts valid usage with no diagnostics', async () => {
+    expect(await verifier.typeCheckUsage(validUsage)).toEqual([]);
+  });
 
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'py-parity-'));
-    try {
-      const pkgDir = path.join(tmp, 'demo_client');
-      fs.mkdirSync(pkgDir, { recursive: true });
-      for (const generated of generatedPythonFiles(tree)) {
-        fs.writeFileSync(
-          path.join(pkgDir, path.basename(generated)),
-          tree.read(generated, 'utf-8') ?? '',
-        );
-      }
-      fs.writeFileSync(path.join(tmp, 'usage.py'), probeUsage);
-      fs.writeFileSync(
-        path.join(tmp, 'pyrightconfig.json'),
-        JSON.stringify({
-          include: ['usage.py'],
-          extraPaths: ['.'],
-          typeCheckingMode: 'standard',
-        }),
-      );
-
-      // Run pyright through `uv run --with pyright` so the test does not
-      // depend on any pre-provisioned venv.  Pyright exits non-zero when
-      // there are diagnostics, so we ignore the exit code and parse the
-      // JSON output.
-      let stdout = '';
-      try {
-        const result = await execFileP(
-          'uv',
-          [
-            'run',
-            '--with',
-            'pyright==1.1.405',
-            '--with',
-            'pydantic',
-            '--with',
-            'httpx',
-            'pyright',
-            '--outputjson',
-            'usage.py',
-          ],
-          { cwd: tmp, maxBuffer: 16 * 1024 * 1024 },
-        );
-        stdout = result.stdout;
-      } catch (err: any) {
-        stdout = err.stdout ?? '';
-      }
-
-      if (!stdout) {
-        throw new Error(
-          'pyright produced no output — is uv available on PATH?',
-        );
-      }
-      const report = JSON.parse(stdout);
-      const diagnostics = (report.generalDiagnostics ?? []) as Array<{
-        severity: string;
-        message: string;
-        range: { start: { line: number } };
-      }>;
-      const errorMessages = diagnostics
-        .filter((d) => d.severity === 'error')
-        .map((d) => d.message);
-
-      for (const { label, pattern } of expectedDiagnostics) {
-        const matched = errorMessages.some((m) => pattern.test(m));
-        if (!matched) {
-          throw new Error(
-            `Missing type-safety check [${label}].\nAll errors:\n` +
-              errorMessages
-                .map((m) => `  - ${m.replace(/\n/g, ' ')}`)
-                .join('\n'),
-          );
-        }
-      }
-
-      const validStart = probeUsage
-        .split('\n')
-        .findIndex((line) => line.startsWith('def valid_usage'));
-      const validEnd = probeUsage
-        .split('\n')
-        .findIndex((line) => line.startsWith('def expected_errors'));
-      const falsePositives = diagnostics.filter(
-        (d) =>
-          d.severity === 'error' &&
-          d.range.start.line >= validStart &&
-          d.range.start.line < validEnd,
-      );
-      if (falsePositives.length > 0) {
-        throw new Error(
-          `valid_usage block produced ${falsePositives.length} unexpected errors:\n` +
-            falsePositives
-              .map(
-                (d) =>
-                  `  line ${d.range.start.line + 1}: ${d.message.replace(/\n/g, ' ')}`,
-              )
-              .join('\n'),
-        );
-      }
-
-      expect(types).toBeDefined();
-    } finally {
-      fs.rmSync(tmp, { recursive: true, force: true });
-    }
-  }, 120_000);
+  it.each(rejectedUsage)('rejects $label', async ({ code, rule }) => {
+    const diagnostics = await verifier.typeCheckUsage(usageModule(code));
+    expect(diagnostics.join('\n')).toContain(`error[${rule}]`);
+  });
 });
