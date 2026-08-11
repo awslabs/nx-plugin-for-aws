@@ -1,0 +1,234 @@
+---
+title: AgentCore Harness
+description: Create an Amazon Bedrock AgentCore Harness project
+generator: agentcore-harness
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Snippet from '@components/snippet.astro';
+
+Generate an [Amazon Bedrock AgentCore Harness](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness.html) project. A Harness is a managed agent loop powered by Strands Agents: it owns deployment defaults for the model, system prompt, tools, memory, skills, environments, truncation, authorization, and execution limits, while the service accepts per-invocation overrides for supported fields. Reusing the same Runtime Session ID continues the same Harness session.
+
+## Usage
+
+### Generate an AgentCore Harness
+
+<RunGenerator generator="agentcore-harness" />
+
+### Options
+
+<GeneratorParameters generator="agentcore-harness" />
+
+## Generator Output
+
+The generator creates a standalone project at `packages/<name>/`. Because AWS runs the agent loop for you, the project holds only the prompt that shapes it and a script for talking to it:
+
+<FileTree>
+  - packages/\<name>/
+    - src/PROMPT.md The Harness system prompt
+    - scripts/chat.ts Multi-turn chat client for the deployed Harness
+    - project.json Adds the `chat` target
+    - README.md Chat and customization instructions
+</FileTree>
+
+### Infrastructure
+
+Infrastructure is generated when `infra` is `agentcore` (the default). With `infra: none` no infrastructure is generated — set `HARNESS_ARN` to invoke a Harness managed elsewhere, and re-run the generator with `infra: agentcore` later to add infrastructure; existing project files (including your edits) are preserved.
+
+<Snippet name="shared-constructs" />
+
+<Infrastructure>
+  <Fragment slot="cdk">
+    <FileTree>
+      - packages/common/constructs/src/app/harnesses/\<name>/
+        - \<name>.ts CDK construct containing the Harness and execution role
+    </FileTree>
+  </Fragment>
+  <Fragment slot="terraform">
+    <FileTree>
+      - packages/common/terraform/src/app/harnesses/\<name>/
+        - \<name>.tf Terraform module containing the Harness and execution role
+    </FileTree>
+  </Fragment>
+</Infrastructure>
+
+The generated infrastructure manages the Harness through the native resource (CDK `aws_bedrockagentcore.CfnHarness`, Terraform `aws_bedrockagentcore_harness`) with your generated defaults, creates an IAM execution role with the baseline permissions described below, and uses IAM inbound authorization (no custom JWT authorizer is configured by default).
+
+The Harness ARN is registered at `agentcore.harnesses.<ClassName>` in <Link path="guides/runtime-config">Runtime Configuration</Link>, preserving any existing entries.
+
+## Deploying your AgentCore Harness
+
+The generator creates CDK or Terraform infrastructure as code based on your selected `iac` provider. You can use this to deploy your Harness through your usual infrastructure workflow.
+
+<Infrastructure>
+  <Fragment slot="cdk">
+The CDK construct for deploying your Harness lives in the `common/constructs` folder. Instantiate it from a CDK application:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyHarness } from '@my-scope/common-constructs';
+import { Stack, type StackProps } from 'aws-cdk-lib';
+import type { Construct } from 'constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    new MyHarness(this, 'MyHarness');
+  }
+}
+```
+
+The construct's props interface (`MyHarnessProps`) extends `Partial<Omit<CfnHarnessProps, 'executionRoleArn' | 'allowedTools'>>`, so any native Harness property can be supplied and takes precedence over the generated defaults:
+
+```ts
+const harness = new MyHarness(this, 'MyHarness', {
+  maxIterations: 20,
+  timeoutSeconds: 600,
+});
+```
+
+The construct also accepts:
+
+- `allowedTools` — the tools the Harness may use. The Harness deploys with none unless you supply them, see <a href="#configuring-tools">Configuring tools</a>.
+- `executionRole` — an existing IAM role to use instead of the generated role. A supplied role is used as-is: the baseline permissions are not added to it, and its ARN always feeds the Harness (the raw `executionRoleArn` string cannot be overridden).
+- `modelResourceArns` — the Bedrock model and inference-profile ARNs the generated execution role may invoke, replacing the default list.
+
+Its public members are `harness` (the `CfnHarness`), `executionRole`, `grantPrincipal`, the `harnessArn` getter, `addToRolePolicy(statement)` for execution role extensions, and `grantInvokeAccess(grantee)` for authorizing callers.
+
+Deploy the stack with your infrastructure project as usual — see the <Link path="guides/typescript-infrastructure">CDK infrastructure guide</Link>.
+  </Fragment>
+  <Fragment slot="terraform">
+The Terraform module for deploying your Harness is in the `common/terraform` folder. Reference it from a Terraform configuration:
+
+```hcl title="packages/infra/src/main.tf"
+module "my_harness" {
+  source = "../../common/terraform/src/app/harnesses/my-harness"
+}
+```
+
+The module exposes three variables:
+
+- `model_id` — the Bedrock model or inference profile the Harness uses by default.
+- `model_resource_arns` — the Bedrock model and inference-profile ARNs the execution role may invoke, replacing the default list.
+- `additional_execution_role_policy_statements` — a list of IAM statement objects (`Effect`, `Action`, `Resource`, optional `Sid` and `Condition`) appended to the execution role policy.
+
+Everything else is configured on the generated `aws_bedrockagentcore_harness` resource in the module itself.
+
+The module outputs `harness_id`, `harness_arn`, and `execution_role_arn`.
+
+Deploy with your Terraform project's plan/apply workflow as usual — see the <Link path="guides/terraform-project">Terraform project guide</Link>.
+  </Fragment>
+</Infrastructure>
+
+:::note[System prompt visibility]
+Your infrastructure reads `packages/<name>/src/PROMPT.md` when you synthesize (CDK) or plan (Terraform), so the prompt is deployment configuration rather than secret storage: its contents appear in the synthesized CloudFormation template or in Terraform state.
+:::
+
+## Granting access to invoke the harness
+
+You can grant a caller permissions to invoke the harness as follows:
+
+<Infrastructure>
+  <Fragment slot="cdk">
+```ts
+const harness = new MyHarness(this, 'MyHarness');
+
+harness.grantInvokeAccess(caller);
+```
+  </Fragment>
+  <Fragment slot="terraform">
+```hcl
+# Attach to the calling principal's role
+resource "aws_iam_role_policy" "invoke_my_harness" {
+  name = "InvokeMyHarness"
+  role = aws_iam_role.caller.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "bedrock-agentcore:InvokeHarness",
+        "bedrock-agentcore:InvokeAgentRuntime",
+      ]
+      Resource = [module.my_harness.harness_arn]
+    }]
+  })
+}
+```
+  </Fragment>
+</Infrastructure>
+
+A caller needs both `bedrock-agentcore:InvokeHarness` and `bedrock-agentcore:InvokeAgentRuntime` on the Harness ARN, which is exactly what `grantInvokeAccess` grants.
+
+## Chatting with your Harness
+
+The generated `chat` target runs `scripts/chat.ts`, dropping you into an interactive terminal chat with your deployed Harness:
+
+<NxCommands commands={['run <project>:chat']} />
+
+Every turn of a run shares one session, so the Harness keeps the conversation context until you exit. Credentials come from the standard AWS SDK credential provider chain, and the AWS Region is derived from the Harness ARN.
+
+The Harness ARN is resolved in this order:
+
+1. `HARNESS_ARN` (non-empty): used directly, without reading Runtime Configuration:
+
+   <NxCommands commands={['run <project>:chat']} env={{ HARNESS_ARN: '<harness-arn>' }} />
+
+2. `RUNTIME_CONFIG_APP_ID`: resolves the ARN from the `agentcore.harnesses.<ClassName>` entry published by the deployed infrastructure:
+
+   <NxCommands commands={['run <project>:chat']} env={{ RUNTIME_CONFIG_APP_ID: '<application-id>' }} />
+
+With neither set, the script fails with an error naming both options.
+
+## Customizing your Harness
+
+`src/PROMPT.md` is the Harness system prompt: edit it and redeploy to change how the Harness behaves. Everything else is configured where you instantiate the infrastructure, or by editing the generated construct or module directly. Re-running the generator never overwrites existing files (it only adds missing files and merges project metadata), so your edits to the prompt and to the generated infrastructure are preserved.
+
+<Infrastructure>
+  <Fragment slot="cdk">
+Every native Harness property of the pinned `aws-cdk-lib/aws-bedrockagentcore` module is available through the construct's props — alternate model providers, tool definitions, memory, skills, environment configuration, truncation, custom JWT authorization, and execution limits — and explicit props take precedence over the generated defaults. Alternatively, edit the generated construct in `packages/common/constructs/src/app/harnesses/<name>/<name>.ts`.
+  </Fragment>
+  <Fragment slot="terraform">
+The generated module keeps the native `aws_bedrockagentcore_harness` resource directly editable, so provider-native fields — alternate model providers (`gemini_model_config`, `openai_model_config`), `tool` blocks, `memory`, `skill` blocks, environments (`environment`, `environment_variables`, `environment_artifact`), `truncation`, and `authorizer_configuration` with a `custom_jwt_authorizer` — are configured by editing `packages/common/terraform/src/app/harnesses/<name>/<name>.tf`.
+  </Fragment>
+</Infrastructure>
+
+Omitting authorizer configuration (the default) means IAM inbound authorization; configure a custom JWT authorizer through the native field to change that.
+
+### Configuring tools
+
+The Harness deploys with no tools, so it starts with the least capability. Opt in to the tools it may use:
+
+<Infrastructure>
+  <Fragment slot="cdk">
+```ts
+new MyHarness(this, 'Harness', { allowedTools: ['@builtin'] });
+```
+  </Fragment>
+  <Fragment slot="terraform">
+```hcl title="packages/common/terraform/src/app/harnesses/my-harness/my-harness.tf"
+resource "aws_bedrockagentcore_harness" "this" {
+  # ...
+  allowed_tools = ["@builtin"]
+}
+```
+
+Add an `allowed_tools` variable to the module if you would rather set it as a module argument where you reference the module.
+  </Fragment>
+</Infrastructure>
+
+Narrow `@builtin` to specific patterns such as `@builtin/file_operations` to restrict what the agent loop can do. See [Harness tools](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-tools.html) for the built-in tools you can add.
+
+### Per-invocation overrides
+
+The values configured in infrastructure are deployment defaults. The service also accepts per-invocation overrides for supported Harness fields (such as models, tools, and skills) in the `InvokeHarness` request; deployment defaults apply wherever a field is not overridden.
+
+:::caution[Validate invocation overrides]
+Per-invocation overrides are trusted inputs at the service boundary: any authorized caller can override supported fields. If untrusted users can reach an application that forwards overrides to `InvokeHarness`, validate and authorize them at the application layer (for example, allowlist models and tools), keep the execution role scoped to required resources, and do not grant `bedrock-agentcore:InvokeAgentRuntimeCommand` unless you specifically need it.
+:::

@@ -1,0 +1,234 @@
+---
+title: AgentCore Harness
+description: Amazon Bedrock AgentCore Harnessプロジェクトを作成する
+generator: agentcore-harness
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Snippet from '@components/snippet.astro';
+
+[Amazon Bedrock AgentCore Harness](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness.html)プロジェクトを生成します。Harnessは、Strands Agentsによって駆動されるマネージドエージェントループです。モデル、システムプロンプト、ツール、メモリ、スキル、環境、トランケーション、認証、実行制限のデプロイメントデフォルトを所有し、サービスはサポートされているフィールドに対する呼び出しごとのオーバーライドを受け入れます。同じRuntime Session IDを再利用すると、同じHarnessセッションが継続されます。
+
+## 使用方法
+
+### AgentCore Harnessを生成する
+
+<RunGenerator generator="agentcore-harness" />
+
+### オプション
+
+<GeneratorParameters generator="agentcore-harness" />
+
+## ジェネレーターの出力
+
+ジェネレーターは`packages/<name>/`にスタンドアロンプロジェクトを作成します。AWSがエージェントループを実行するため、プロジェクトにはそれを形成するプロンプトと、それと対話するためのスクリプトのみが含まれます。
+
+<FileTree>
+  - packages/\<name>/
+    - src/PROMPT.md Harnessシステムプロンプト
+    - scripts/chat.ts デプロイされたHarness用のマルチターンチャットクライアント
+    - project.json `chat`ターゲットを追加
+    - README.md チャットとカスタマイズの手順
+</FileTree>
+
+### インフラストラクチャ
+
+`infra`が`agentcore`（デフォルト）の場合、インフラストラクチャが生成されます。`infra: none`の場合、インフラストラクチャは生成されません。別の場所で管理されているHarnessを呼び出すには`HARNESS_ARN`を設定し、後で`infra: agentcore`でジェネレーターを再実行してインフラストラクチャを追加できます。既存のプロジェクトファイル（編集内容を含む）は保持されます。
+
+<Snippet name="shared-constructs" />
+
+<Infrastructure>
+  <Fragment slot="cdk">
+    <FileTree>
+      - packages/common/constructs/src/app/harnesses/\<name>/
+        - \<name>.ts Harnessと実行ロールを含むCDKコンストラクト
+    </FileTree>
+  </Fragment>
+  <Fragment slot="terraform">
+    <FileTree>
+      - packages/common/terraform/src/app/harnesses/\<name>/
+        - \<name>.tf Harnessと実行ロールを含むTerraformモジュール
+    </FileTree>
+  </Fragment>
+</Infrastructure>
+
+生成されたインフラストラクチャは、ネイティブリソース（CDK `aws_bedrockagentcore.CfnHarness`、Terraform `aws_bedrockagentcore_harness`）を通じて生成されたデフォルトでHarnessを管理し、以下で説明するベースライン権限を持つIAM実行ロールを作成し、IAMインバウンド認証を使用します（デフォルトではカスタムJWT認証は構成されません）。
+
+Harness ARNは<Link path="guides/runtime-config">ランタイム構成</Link>の`agentcore.harnesses.<ClassName>`に登録され、既存のエントリは保持されます。
+
+## AgentCore Harnessをデプロイする
+
+ジェネレーターは、選択した`iac`プロバイダーに基づいてCDKまたはTerraformのインフラストラクチャコードを作成します。これを使用して、通常のインフラストラクチャワークフローを通じてHarnessをデプロイできます。
+
+<Infrastructure>
+  <Fragment slot="cdk">
+HarnessをデプロイするためのCDKコンストラクトは`common/constructs`フォルダにあります。CDKアプリケーションからインスタンス化します。
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyHarness } from '@my-scope/common-constructs';
+import { Stack, type StackProps } from 'aws-cdk-lib';
+import type { Construct } from 'constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    new MyHarness(this, 'MyHarness');
+  }
+}
+```
+
+コンストラクトのpropsインターフェース（`MyHarnessProps`）は`Partial<Omit<CfnHarnessProps, 'executionRoleArn' | 'allowedTools'>>`を拡張しているため、任意のネイティブHarnessプロパティを指定でき、生成されたデフォルトよりも優先されます。
+
+```ts
+const harness = new MyHarness(this, 'MyHarness', {
+  maxIterations: 20,
+  timeoutSeconds: 600,
+});
+```
+
+コンストラクトは以下も受け入れます。
+
+- `allowedTools` — Harnessが使用できるツール。指定しない限り、Harnessはツールなしでデプロイされます。<a href="#configuring-tools">ツールの構成</a>を参照してください。
+- `executionRole` — 生成されたロールの代わりに使用する既存のIAMロール。指定されたロールはそのまま使用されます。ベースライン権限は追加されず、そのARNは常にHarnessに供給されます（生の`executionRoleArn`文字列はオーバーライドできません）。
+- `modelResourceArns` — 生成された実行ロールが呼び出せるBedrockモデルおよび推論プロファイルARN。デフォルトリストを置き換えます。
+
+パブリックメンバーは、`harness`（`CfnHarness`）、`executionRole`、`grantPrincipal`、`harnessArn`ゲッター、実行ロール拡張用の`addToRolePolicy(statement)`、呼び出し元を認証するための`grantInvokeAccess(grantee)`です。
+
+通常どおりインフラストラクチャプロジェクトでスタックをデプロイします。<Link path="guides/typescript-infrastructure">CDKインフラストラクチャガイド</Link>を参照してください。
+  </Fragment>
+  <Fragment slot="terraform">
+HarnessをデプロイするためのTerraformモジュールは`common/terraform`フォルダにあります。Terraform構成から参照します。
+
+```hcl title="packages/infra/src/main.tf"
+module "my_harness" {
+  source = "../../common/terraform/src/app/harnesses/my-harness"
+}
+```
+
+モジュールは3つの変数を公開します。
+
+- `model_id` — Harnessがデフォルトで使用するBedrockモデルまたは推論プロファイル。
+- `model_resource_arns` — 実行ロールが呼び出せるBedrockモデルおよび推論プロファイルARN。デフォルトリストを置き換えます。
+- `additional_execution_role_policy_statements` — 実行ロールポリシーに追加されるIAMステートメントオブジェクト（`Effect`、`Action`、`Resource`、オプションの`Sid`と`Condition`）のリスト。
+
+その他すべては、モジュール自体の生成された`aws_bedrockagentcore_harness`リソースで構成されます。
+
+モジュールは`harness_id`、`harness_arn`、`execution_role_arn`を出力します。
+
+通常どおりTerraformプロジェクトのplan/applyワークフローでデプロイします。<Link path="guides/terraform-project">Terraformプロジェクトガイド</Link>を参照してください。
+  </Fragment>
+</Infrastructure>
+
+:::note[システムプロンプトの可視性]
+インフラストラクチャは、合成（CDK）またはプラン（Terraform）時に`packages/<name>/src/PROMPT.md`を読み取るため、プロンプトはシークレットストレージではなくデプロイメント構成です。その内容は、合成されたCloudFormationテンプレートまたはTerraformステートに表示されます。
+:::
+
+## harnessを呼び出すためのアクセスを許可する
+
+次のように、呼び出し元にharnessを呼び出す権限を付与できます。
+
+<Infrastructure>
+  <Fragment slot="cdk">
+```ts
+const harness = new MyHarness(this, 'MyHarness');
+
+harness.grantInvokeAccess(caller);
+```
+  </Fragment>
+  <Fragment slot="terraform">
+```hcl
+# Attach to the calling principal's role
+resource "aws_iam_role_policy" "invoke_my_harness" {
+  name = "InvokeMyHarness"
+  role = aws_iam_role.caller.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "bedrock-agentcore:InvokeHarness",
+        "bedrock-agentcore:InvokeAgentRuntime",
+      ]
+      Resource = [module.my_harness.harness_arn]
+    }]
+  })
+}
+```
+  </Fragment>
+</Infrastructure>
+
+呼び出し元は、Harness ARNに対して`bedrock-agentcore:InvokeHarness`と`bedrock-agentcore:InvokeAgentRuntime`の両方が必要です。これはまさに`grantInvokeAccess`が付与するものです。
+
+## Harnessとチャットする
+
+生成された`chat`ターゲットは`scripts/chat.ts`を実行し、デプロイされたHarnessとのインタラクティブなターミナルチャットに入ります。
+
+<NxCommands commands={['run <project>:chat']} />
+
+実行の各ターンは1つのセッションを共有するため、Harnessは終了するまで会話コンテキストを保持します。認証情報は標準のAWS SDK認証情報プロバイダーチェーンから取得され、AWSリージョンはHarness ARNから派生します。
+
+Harness ARNは次の順序で解決されます。
+
+1. `HARNESS_ARN`（空でない場合）：ランタイム構成を読み取らずに直接使用されます。
+
+   <NxCommands commands={['run <project>:chat']} env={{ HARNESS_ARN: '<harness-arn>' }} />
+
+2. `RUNTIME_CONFIG_APP_ID`：デプロイされたインフラストラクチャによって公開された`agentcore.harnesses.<ClassName>`エントリからARNを解決します。
+
+   <NxCommands commands={['run <project>:chat']} env={{ RUNTIME_CONFIG_APP_ID: '<application-id>' }} />
+
+どちらも設定されていない場合、スクリプトは両方のオプションを示すエラーで失敗します。
+
+## Harnessをカスタマイズする
+
+`src/PROMPT.md`はHarnessシステムプロンプトです。編集して再デプロイすると、Harnessの動作が変更されます。その他すべては、インフラストラクチャをインスタンス化する場所、または生成されたコンストラクトまたはモジュールを直接編集することで構成されます。ジェネレーターを再実行しても既存のファイルは上書きされません（不足しているファイルの追加とプロジェクトメタデータのマージのみ）。そのため、プロンプトと生成されたインフラストラクチャへの編集は保持されます。
+
+<Infrastructure>
+  <Fragment slot="cdk">
+固定された`aws-cdk-lib/aws-bedrockagentcore`モジュールのすべてのネイティブHarnessプロパティは、コンストラクトのpropsを通じて利用可能です。代替モデルプロバイダー、ツール定義、メモリ、スキル、環境構成、トランケーション、カスタムJWT認証、実行制限などがあり、明示的なpropsは生成されたデフォルトよりも優先されます。または、`packages/common/constructs/src/app/harnesses/<name>/<name>.ts`で生成されたコンストラクトを編集します。
+  </Fragment>
+  <Fragment slot="terraform">
+生成されたモジュールは、ネイティブ`aws_bedrockagentcore_harness`リソースを直接編集可能に保つため、プロバイダーネイティブフィールド（代替モデルプロバイダー（`gemini_model_config`、`openai_model_config`）、`tool`ブロック、`memory`、`skill`ブロック、環境（`environment`、`environment_variables`、`environment_artifact`）、`truncation`、`custom_jwt_authorizer`を持つ`authorizer_configuration`）は、`packages/common/terraform/src/app/harnesses/<name>/<name>.tf`を編集することで構成されます。
+  </Fragment>
+</Infrastructure>
+
+認証構成を省略する（デフォルト）と、IAMインバウンド認証を意味します。ネイティブフィールドを通じてカスタムJWT認証を構成して変更します。
+
+### ツールの構成
+
+Harnessはツールなしでデプロイされるため、最小限の機能で開始されます。使用できるツールをオプトインします。
+
+<Infrastructure>
+  <Fragment slot="cdk">
+```ts
+new MyHarness(this, 'Harness', { allowedTools: ['@builtin'] });
+```
+  </Fragment>
+  <Fragment slot="terraform">
+```hcl title="packages/common/terraform/src/app/harnesses/my-harness/my-harness.tf"
+resource "aws_bedrockagentcore_harness" "this" {
+  # ...
+  allowed_tools = ["@builtin"]
+}
+```
+
+モジュールを参照する場所でモジュール引数として設定したい場合は、`allowed_tools`変数をモジュールに追加します。
+  </Fragment>
+</Infrastructure>
+
+`@builtin`を`@builtin/file_operations`などの特定のパターンに絞り込んで、エージェントループができることを制限します。追加できる組み込みツールについては、[Harnessツール](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-tools.html)を参照してください。
+
+### 呼び出しごとのオーバーライド
+
+インフラストラクチャで構成された値はデプロイメントデフォルトです。サービスは、`InvokeHarness`リクエストでサポートされているHarnessフィールド（モデル、ツール、スキルなど）に対する呼び出しごとのオーバーライドも受け入れます。フィールドがオーバーライドされていない場合は、デプロイメントデフォルトが適用されます。
+
+:::caution[呼び出しオーバーライドの検証]
+呼び出しごとのオーバーライドは、サービス境界での信頼された入力です。認証された呼び出し元は、サポートされているフィールドをオーバーライドできます。信頼されていないユーザーが`InvokeHarness`にオーバーライドを転送するアプリケーションに到達できる場合は、アプリケーション層で検証および認証し（たとえば、モデルとツールを許可リストに登録）、実行ロールを必要なリソースにスコープし、特に必要でない限り`bedrock-agentcore:InvokeAgentRuntimeCommand`を付与しないでください。
+:::

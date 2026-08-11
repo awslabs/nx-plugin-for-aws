@@ -331,6 +331,16 @@ export const runGeneratorMatrix = async (
     opts,
   );
 
+  // AgentCore Harness — standalone invocation project + native Harness
+  // infrastructure (inherited IaC provider, so both the CDK and Terraform
+  // smoke tests compile/validate the generated output). Harness -> Gateway
+  // and Harness -> MCP connections are follow-up generators and intentionally
+  // not part of the matrix yet.
+  await runCLI(
+    `generate @aws/nx-plugin:agentcore-harness --name=my-harness --no-interactive${deferFlag}`,
+    opts,
+  );
+
   // An http-protocol gateway fronting agent runtime targets (every supported
   // protocol permutation: ts ag-ui + a2a, py ag-ui + http + a2a), plus the
   // website -> gateway connection so the browser reaches the fronted AG-UI

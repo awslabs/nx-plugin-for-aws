@@ -1,0 +1,83 @@
+# <%- fullyQualifiedName %>
+
+An [Amazon Bedrock AgentCore Harness](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness.html)
+project generated with [@aws/nx-plugin](https://github.com/awslabs/nx-plugin-for-aws/).
+A Harness is a managed agent loop that AWS runs for you, so this project
+holds only the prompt that shapes it and a script for talking to it:
+
+- `src/PROMPT.md` — the system prompt
+- `scripts/chat.ts` — a multi-turn chat client for the deployed Harness
+- `project.json` — declares the `chat` target
+- `README.md` — this file
+
+The Harness itself is deployed by the generated CDK construct or Terraform
+module through your usual infrastructure workflow.
+
+## The system prompt
+
+`src/PROMPT.md` is the Harness system prompt. Your infrastructure reads the
+file when you synthesize (CDK) or plan (Terraform), so edit it and redeploy
+to change how the Harness behaves.
+
+The prompt is deployment configuration rather than secret storage: its
+contents appear in the synthesized CloudFormation template or in Terraform
+state.
+
+## Chatting with your Harness
+
+```bash
+pnpm nx run <%- fullyQualifiedName %>:chat
+```
+
+Every turn of a run shares one session, so the Harness keeps the
+conversation context until you exit.
+
+The Harness ARN is resolved in this order:
+
+1. `HARNESS_ARN`, used directly:
+
+   ```bash
+   HARNESS_ARN=<harness-arn> pnpm nx run <%- fullyQualifiedName %>:chat
+   ```
+
+2. `RUNTIME_CONFIG_APP_ID`, which reads the
+   `agentcore.harnesses.<%- nameClassName %>` entry your deployed
+   infrastructure publishes:
+
+   ```bash
+   RUNTIME_CONFIG_APP_ID=<application-id> pnpm nx run <%- fullyQualifiedName %>:chat
+   ```
+
+With neither set, the script fails with an error naming both. The AWS Region
+is derived from the Harness ARN, and credentials come from the standard AWS
+SDK credential provider chain.
+
+A caller needs `bedrock-agentcore:InvokeHarness` and
+`bedrock-agentcore:InvokeAgentRuntime` on the Harness ARN. The CDK
+construct's `grantInvokeAccess` grants exactly those two actions.
+
+## Customizing your Harness
+
+Edit `src/PROMPT.md` for the system prompt. Everything else is configured
+where you instantiate the infrastructure — including tools, which the
+Harness deploys without:
+
+- CDK construct props, for example
+  `new <%- nameClassName %>(this, '<%- nameClassName %>', { allowedTools: ['@builtin'] })`
+- Terraform, by setting `allowed_tools = ["@builtin"]` on the module's
+  `aws_bedrockagentcore_harness` resource, or by adding an `allowed_tools`
+  variable if you would rather set it as a module argument
+
+The generated infrastructure is also yours to edit directly:
+
+- `packages/common/constructs/src/app/harnesses/<%- nameKebabCase %>/<%- nameKebabCase %>.ts`
+- `packages/common/terraform/src/app/harnesses/<%- nameKebabCase %>/<%- nameKebabCase %>.tf`
+
+Re-running the generator only adds missing files, so your edits to these
+files and to `src/PROMPT.md` are preserved.
+
+## Further reading
+
+- [AgentCore Harness guide](https://awslabs.github.io/nx-plugin-for-aws/guides/agentcore-harness/)
+- [Amazon Bedrock AgentCore Harness documentation](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness.html)
+- [Learn more about Nx](https://nx.dev/getting-started/intro)

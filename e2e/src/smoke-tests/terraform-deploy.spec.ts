@@ -18,6 +18,7 @@ import {
   invokeAgentCoreAgUiUrl,
   invokeAgentCoreGatewayNoAuthDenied,
   invokeAgentCoreGatewayTool,
+  invokeAgentCoreHarness,
   invokeAgentCoreMcp,
   invokeAgentCoreNoAuthDenied,
   invokeCustomAuthApi,
@@ -258,6 +259,13 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
           await invokeAgentCoreAgent(
             outputs.py_langchain_http_agent_arn,
             'Python LangChain Agent (HTTP)',
+          );
+
+          // AgentCore Harness — a managed agent loop with no runtime
+          // invocation endpoint, so it goes through the InvokeHarness API.
+          await invokeAgentCoreHarness(
+            outputs.my_harness_arn,
+            'AgentCore Harness',
           );
 
           // A2A (direct)

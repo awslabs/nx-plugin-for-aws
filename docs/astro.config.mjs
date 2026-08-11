@@ -377,6 +377,10 @@ export default defineConfig({
                   label: 'agentcore-gateway',
                   link: '/guides/agentcore-gateway',
                 },
+                {
+                  label: 'agentcore-harness',
+                  link: '/guides/agentcore-harness',
+                },
                 { label: 'ts#dcr-proxy', link: '/guides/ts-dcr-proxy' },
               ],
             },

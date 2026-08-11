@@ -18,6 +18,7 @@ import {
   invokeAgentCoreAgUiUrl,
   invokeAgentCoreGatewayNoAuthDenied,
   invokeAgentCoreGatewayTool,
+  invokeAgentCoreHarness,
   invokeAgentCoreMcp,
   invokeAgentCoreNoAuthDenied,
   invokeCustomAuthApi,
@@ -273,6 +274,13 @@ describe('smoke test - cdk-deploy', () => {
       await invokeAgentCoreAgent(
         findOutput('PyLangchainHttpAgentArn'),
         'Python LangChain Agent (HTTP)',
+      );
+
+      // AgentCore Harness — a managed agent loop with no runtime invocation
+      // endpoint, so it goes through the InvokeHarness API.
+      await invokeAgentCoreHarness(
+        findOutput('MyHarnessArn'),
+        'AgentCore Harness',
       );
 
       // A2A agents — invoke via the A2A JSON-RPC message/send method over

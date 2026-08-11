@@ -1,0 +1,99 @@
+// Chat CLI for <%- nameClassName %>. Invokes the deployed Harness with InvokeHarness.
+import { randomUUID } from 'node:crypto';
+import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
+import {
+  BedrockAgentCoreClient,
+  InvokeHarnessCommand,
+} from '@aws-sdk/client-bedrock-agentcore';
+import { chatLoop, type ChatAdapter } from 'agent-chat-cli';
+
+// The deployed infrastructure publishes the Harness ARN at
+// `agentcore.harnesses.<%- nameClassName %>`.
+const HARNESS_RUNTIME_CONFIG_KEY = '<%- nameClassName %>';
+
+// One session id per run, so every turn continues the same Harness session.
+const SESSION_ID = randomUUID();
+
+// Empty strings count as absent, so `HARNESS_ARN= nx run ...` still discovers.
+const isPresent = (value: string | undefined): value is string =>
+  value !== undefined && value !== '';
+
+// `HARNESS_ARN` wins; `RUNTIME_CONFIG_APP_ID` reads the runtime configuration.
+const resolveHarnessArn = async (): Promise<string> => {
+  if (isPresent(process.env.HARNESS_ARN)) {
+    return process.env.HARNESS_ARN;
+  }
+  const application = process.env.RUNTIME_CONFIG_APP_ID;
+  if (!isPresent(application)) {
+    throw new Error(
+      'No Harness ARN source is configured. Set HARNESS_ARN to the deployed ' +
+        'Harness ARN directly, or set RUNTIME_CONFIG_APP_ID to the AppConfig ' +
+        'application ID emitted by your infrastructure stack.',
+    );
+  }
+  const config = (await getAppConfig('agentcore', {
+    application,
+    environment: 'default',
+    transform: 'json',
+  })) as { harnesses?: Record<string, string | undefined> };
+  const harnessArn = config?.harnesses?.[HARNESS_RUNTIME_CONFIG_KEY];
+  if (!harnessArn) {
+    throw new Error(
+      `Runtime configuration for application '${application}' has no value ` +
+        `at 'agentcore.harnesses.${HARNESS_RUNTIME_CONFIG_KEY}'. Deploy the ` +
+        'Harness infrastructure first, or set HARNESS_ARN directly.',
+    );
+  }
+  return harnessArn;
+};
+
+const HARNESS_ARN = await resolveHarnessArn();
+
+// Region comes from the ARN, and credentials from the standard AWS SDK
+// default provider chain, so no Region is embedded in this project.
+const client = new BedrockAgentCoreClient({
+  region: HARNESS_ARN.split(':')[3],
+});
+
+class HarnessAdapter implements ChatAdapter {
+  async connect() {
+    return { agentName: '<%- nameClassName %>' };
+  }
+
+  async *sendMessage(text: string): AsyncIterable<string> {
+    const { stream } = await client.send(
+      new InvokeHarnessCommand({
+        harnessArn: HARNESS_ARN,
+        runtimeSessionId: SESSION_ID,
+        messages: [{ role: 'user', content: [{ text }] }],
+      }),
+    );
+    if (!stream) {
+      throw new Error(
+        'AgentCore returned no event stream for the invocation. Confirm the ' +
+          'Harness is deployed and the caller has the ' +
+          'bedrock-agentcore:InvokeHarness permission.',
+      );
+    }
+    for await (const event of stream) {
+      const serviceError =
+        event.internalServerException ??
+        event.validationException ??
+        event.runtimeClientError;
+      if (serviceError) {
+        const detail = [serviceError.name, serviceError.message]
+          .filter(Boolean)
+          .join(': ');
+        throw new Error(
+          `Harness invocation failed: ${detail || JSON.stringify(serviceError)}`,
+        );
+      }
+      const chunk = event.contentBlockDelta?.delta?.text;
+      if (chunk) {
+        yield chunk;
+      }
+    }
+  }
+}
+
+await chatLoop(new HarnessAdapter(), '');
