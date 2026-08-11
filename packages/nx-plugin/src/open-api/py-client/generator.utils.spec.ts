@@ -2,17 +2,17 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
-import { openApiPyClientGenerator } from './generator';
-import {
-  MockEntry,
-  PythonVerifier,
-  InvokeResult,
-  MockResponseSpec,
-} from '../../utils/test/py.spec';
-import { OpenApiPyClientGeneratorSchema } from './schema';
-import { Spec } from '../utils/types';
+import type { Tree } from '@nx/devkit';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import type {
+  InvokeResult,
+  MockEntry,
+  MockResponseSpec,
+  PythonVerifier,
+} from '../../utils/test/py.spec';
+import type { Spec } from '../utils/types';
+import { openApiPyClientGenerator } from './generator';
+import type { OpenApiPyClientGeneratorSchema } from './schema';
 
 /**
  * Base URL the generated client points at inside tests — the mock transport
@@ -27,58 +27,54 @@ export const baseUrl = 'https://example.com';
 export const outputPath = 'src/generated';
 
 /**
- * Paths to the files emitted by the generator for the default `both`
- * `clientType`.  Pass to `expectPythonToCompile`.
+ * Every Python file the generator emitted, so a test compiles whatever the
+ * generator actually produced rather than a list that can fall out of date.
  */
-export const generatedFilesForSync = [
-  `${outputPath}/__init__.py`,
-  `${outputPath}/types_gen.py`,
-  `${outputPath}/client_gen.py`,
-];
-
-export const generatedFilesForAsync = [
-  `${outputPath}/__init__.py`,
-  `${outputPath}/types_gen.py`,
-  `${outputPath}/async_client_gen.py`,
-];
-
-/** Files emitted for the default `clientType: 'both'`. */
-export const generatedFilesForBoth = [
-  `${outputPath}/__init__.py`,
-  `${outputPath}/types_gen.py`,
-  `${outputPath}/client_gen.py`,
-  `${outputPath}/async_client_gen.py`,
-];
+export const generatedPythonFiles = (
+  tree: Tree,
+  dir: string = outputPath,
+): string[] =>
+  tree
+    .children(dir)
+    .filter((child) => child.endsWith('.py'))
+    .map((child) => `${dir}/${child}`)
+    .sort();
 
 /**
- * Generate and compile-check a client for the given spec.  Reads the two
- * main artefact files from the tree and returns their text so the caller
- * can snapshot them.
+ * Generate and compile-check a client for the given spec, returning the text of
+ * each emitted module so the caller can snapshot or assert on it.
  */
 export const generateAndRead = async (
   verifier: PythonVerifier,
   tree: Tree,
   spec: Spec,
   options: Partial<OpenApiPyClientGeneratorSchema> = {},
-): Promise<{ types: string; client: string; asyncClient: string }> => {
+): Promise<{
+  types: string;
+  client: string;
+  asyncClient: string;
+  errors: string;
+  init: string;
+}> => {
   tree.write('openapi.json', JSON.stringify(spec));
   await openApiPyClientGenerator(tree, {
     openApiSpecPath: 'openapi.json',
     outputPath,
     ...options,
   });
-  const clientType = options.clientType ?? 'both';
-  const paths =
-    clientType === 'sync'
-      ? generatedFilesForSync
-      : clientType === 'async'
-        ? generatedFilesForAsync
-        : generatedFilesForBoth;
-  await verifier.expectPythonToCompile(tree, paths, outputPath);
+  await verifier.expectPythonToCompile(
+    tree,
+    generatedPythonFiles(tree),
+    outputPath,
+  );
+  const read = (file: string) =>
+    tree.read(`${outputPath}/${file}`, 'utf-8') ?? '';
   return {
-    types: tree.read(`${outputPath}/types_gen.py`, 'utf-8') ?? '',
-    client: tree.read(`${outputPath}/client_gen.py`, 'utf-8') ?? '',
-    asyncClient: tree.read(`${outputPath}/async_client_gen.py`, 'utf-8') ?? '',
+    types: read('types_gen.py'),
+    client: read('client_gen.py'),
+    asyncClient: read('async_client_gen.py'),
+    errors: read('errors.py'),
+    init: read('__init__.py'),
   };
 };
 
@@ -93,6 +89,8 @@ export const callGeneratedClient = async (
   kwargs: Record<string, unknown>,
   mock: MockResponseSpec | MockEntry[],
   args: unknown[] = [],
+  /** Extra kwargs for the generated client's own Config dataclass. */
+  configKwargs: Record<string, unknown> = {},
 ): Promise<InvokeResult> =>
   verifier.invoke({
     module: 'sync',
@@ -100,6 +98,7 @@ export const callGeneratedClient = async (
     args,
     kwargs,
     mock: normaliseMock(mock),
+    clientKwargs: configKwargs,
   });
 
 /** Async variant of `callGeneratedClient`. */
@@ -159,6 +158,47 @@ export const mockJsonlResponse = (
   status,
   jsonl_lines: jsonlLines,
 });
+
+/**
+ * The single request the client made, failing with the recorded calls when the
+ * count isn't one. Asserting on the request is how a test pins the wire form
+ * the client produced rather than only what it returned.
+ */
+export const expectSingleRequest = (
+  result: InvokeResult,
+): NonNullable<InvokeResult['calls']>[number] => {
+  const calls = result.calls ?? [];
+  if (calls.length !== 1) {
+    throw new Error(
+      `expected exactly one request, got ${calls.length}: ${JSON.stringify(calls, null, 2)}` +
+        (result.ok
+          ? ''
+          : `\nclient error: ${result.error}\n${result.traceback}`),
+    );
+  }
+  return calls[0];
+};
+
+/** Assert the client called the expected HTTP method and path. */
+export const expectRequestTarget = (
+  result: InvokeResult,
+  method: string,
+  path: string,
+): void => {
+  const call = expectSingleRequest(result);
+  expect(call.method).toBe(method);
+  expect(new URL(call.url).pathname).toBe(path);
+};
+
+/** The parsed JSON request body of the single request the client made. */
+export const requestJsonBody = (result: InvokeResult): unknown => {
+  const { body } = expectSingleRequest(result);
+  return body === null ? null : JSON.parse(body);
+};
+
+/** The query string of the single request the client made, without the `?`. */
+export const requestQuery = (result: InvokeResult): string =>
+  new URL(expectSingleRequest(result).url).search.replace(/^\?/, '');
 
 /**
  * Create a fresh empty nx workspace tree.  Re-exported so topic files can

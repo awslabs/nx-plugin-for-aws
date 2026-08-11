@@ -2,9 +2,9 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
-import { Spec } from '../utils/types';
+import type { Tree } from '@nx/devkit';
 import { PythonVerifier } from '../../utils/test/py.spec';
+import type { Spec } from '../utils/types';
 import {
   callGeneratedClient,
   callGeneratedClientAsync,
@@ -110,14 +110,71 @@ describe('openApiPyClientGenerator - errors', () => {
   };
 
   it('emits per-op exception class + discriminated error union', async () => {
-    const { types, client } = await generateAndRead(verifier, tree, errorSpec);
+    const { types, client, errors } = await generateAndRead(
+      verifier,
+      tree,
+      errorSpec,
+    );
     expect(types).toMatchSnapshot('types_gen.py');
     expect(client).toMatchSnapshot('client_gen.py');
-    expect(client).toContain('class GetPetApiError(ApiError)');
+    expect(errors).toContain('class GetPetApiError(ApiError)');
     expect(types).toContain('class GetPet404Error(BaseModel)');
     expect(types).toContain('class GetPet5XXError(BaseModel)');
     expect(types).toContain('class GetPetDefaultError(BaseModel)');
     expect(types).toMatch(/GetPetError = Union\[/);
+  });
+
+  // Both clients raise from one hierarchy, so a caller catching `ApiError`
+  // (or the per-operation subclass) handles either client's failures.
+  it('shares one exception hierarchy between the sync and async clients', async () => {
+    await generateAndRead(verifier, tree, errorSpec);
+    for (const module of ['sync', 'async'] as const) {
+      const res = await verifier.invoke({
+        module,
+        method: 'get_pet',
+        kwargs: { pet_id: 1 },
+        mock: [{ response: { status: 404, json: { detail: 'no pet' } } }],
+        catchAs: 'ApiError',
+      });
+      expect(res.ok).toBe(false);
+      expect(res.exception?.type).toBe('GetPetApiError');
+      expect(res.exception?.caught_as).toBe(true);
+    }
+  });
+
+  // A body that doesn't match the schema the spec declares still raises the
+  // typed exception, carrying whatever the server actually sent.
+  it('raises the typed error even when the body does not match the schema', async () => {
+    await generateAndRead(verifier, tree, errorSpec);
+    const res = await callGeneratedClient(
+      verifier,
+      'get_pet',
+      { pet_id: 1 },
+      { status: 404, json: { unexpected: 'shape' } },
+    );
+    expect(res.ok).toBe(false);
+    expect(res.exception?.type).toBe('GetPetApiError');
+    expect(res.exception?.error_type).toBe('GetPet404Error');
+    expect(res.exception?.error).toMatchObject({
+      status: 404,
+      error: { unexpected: 'shape' },
+    });
+  });
+
+  it('raises the typed error when the body is not JSON at all', async () => {
+    await generateAndRead(verifier, tree, errorSpec);
+    const res = await callGeneratedClient(
+      verifier,
+      'get_pet',
+      { pet_id: 1 },
+      { status: 503, text: '<html>gateway timeout</html>' },
+    );
+    expect(res.ok).toBe(false);
+    expect(res.exception?.type).toBe('GetPetApiError');
+    expect(res.exception?.status).toBe(503);
+    expect(res.exception?.error).toMatchObject({
+      error: '<html>gateway timeout</html>',
+    });
   });
 
   it('raises GetPet404Error on a declared 404 response', async () => {

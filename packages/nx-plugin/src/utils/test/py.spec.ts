@@ -2,11 +2,13 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
-import { ChildProcessWithoutNullStreams, spawn } from 'child_process';
+import type { Tree } from '@nx/devkit';
+import { type ChildProcessWithoutNullStreams, spawn } from 'child_process';
 import path from 'path';
-import { createInterface, Interface } from 'readline';
-import { OPEN_API_PY_CLIENT_PYTHON_DEP_SPECS } from '../../open-api/py-client/generator';
+import { createInterface, type Interface } from 'readline';
+import { OPEN_API_PY_CLIENT_DEPENDENCIES } from '../../open-api/py-client/generator';
+import { declaredNames } from '../declared-dependencies';
+import { withPyVersions } from '../versions';
 
 const WORKER_PATH = path.join(
   import.meta.dirname,
@@ -42,11 +44,45 @@ export interface InvokeOptions {
   clientKwargs?: Record<string, unknown>;
   /** Name of the package directory (default "generated"). */
   packageName?: string;
+  /**
+   * Name of an exception class exported by the generated package. When the call
+   * raises, `exception.caught_as` reports whether it is an instance of it, so a
+   * test can assert the hierarchy a caller would catch on.
+   */
+  catchAs?: string;
+  /**
+   * Extra kwargs for the `httpx.Client` / `httpx.AsyncClient` the generated
+   * client is handed, so a test can pin what the caller's own client
+   * contributes (headers, params, timeouts).
+   */
+  httpxClientKwargs?: Record<string, unknown>;
+  /**
+   * Attach an `httpx.Auth` to the caller's client. `body-digest` signs each
+   * request with a digest of its body, so a client that bypassed the auth flow
+   * or altered the body cannot produce the expected header.
+   */
+  auth?: 'body-digest';
+  /** Register a request event hook on the caller's client setting this header. */
+  eventHookHeader?: string;
+  /**
+   * Close the generated client before invoking, proving a caller-supplied httpx
+   * client outlives it and stays usable.
+   */
+  closeThenReuse?: boolean;
+  /** Turn Python warnings into errors, so a deprecation fails the call. */
+  errorOnWarning?: boolean;
 }
 
 export interface InvokeResult {
   ok: boolean;
   value?: unknown;
+  /**
+   * The Python type name of the returned value. A float where the spec declares
+   * an integer is JSON-equal to it, so only the type tells them apart.
+   */
+  pyType?: string;
+  /** The Python type name of each element, when the value is a sequence. */
+  pyElementTypes?: string[];
   error?: string;
   traceback?: string;
   details?: unknown;
@@ -56,6 +92,8 @@ export interface InvokeResult {
     error_type?: string;
     error?: unknown;
     status?: number;
+    /** Whether the raised exception is an instance of `catchAs`. */
+    caught_as?: boolean;
   };
   calls?: Array<{
     method: string;
@@ -73,16 +111,15 @@ export class PythonVerifier {
   private stdout?: Interface;
   private queue: Array<(r: InvokeResult) => void> = [];
   private started = false;
-  private startupError?: Error;
 
   private ensureStarted(): ChildProcessWithoutNullStreams {
     if (this.started && this.process) return this.process;
-    // Use the same pinned versions the generator advertises so the test
+    // Use the same pinned versions the generator declares so the test
     // environment matches what consumers get at runtime.
-    const deps = OPEN_API_PY_CLIENT_PYTHON_DEP_SPECS.flatMap((spec) => [
-      '--with',
-      spec,
-    ]);
+    const deps = withPyVersions(
+      OPEN_API_PY_CLIENT_DEPENDENCIES,
+      declaredNames(OPEN_API_PY_CLIENT_DEPENDENCIES.py),
+    ).flatMap((spec) => ['--with', spec]);
     const proc = spawn('uv', ['run', ...deps, 'python', '-u', WORKER_PATH], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -93,7 +130,7 @@ export class PythonVerifier {
       if (!resolver) return;
       try {
         resolver(JSON.parse(line));
-      } catch (err) {
+      } catch {
         resolver({ ok: false, error: `Invalid JSON from worker: ${line}` });
       }
     });
@@ -101,20 +138,25 @@ export class PythonVerifier {
       // Forward to test output — helps diagnose worker crashes.
       process.stderr.write(chunk);
     });
+    // Without this, a missing `uv` raises an uncaught exception rather than
+    // failing the test that asked for the worker.
+    proc.on('error', (err) => this.fail(`Could not start worker: ${err}`));
     proc.on('exit', (code, signal) => {
-      if (this.queue.length > 0) {
-        this.queue.forEach((r) =>
-          r({
-            ok: false,
-            error: `Worker exited (code=${code} signal=${signal}) with ${this.queue.length} pending requests`,
-          }),
-        );
-        this.queue = [];
-      }
+      this.fail(`Worker exited (code=${code} signal=${signal})`);
       this.process = undefined;
+      this.started = false;
     });
     this.started = true;
     return proc;
+  }
+
+  /** Settle every pending request with the same failure. */
+  private fail(error: string): void {
+    const pending = this.queue;
+    this.queue = [];
+    for (const resolve of pending) {
+      resolve({ ok: false, error: `${error} with ${pending.length} pending` });
+    }
   }
 
   private request(payload: Record<string, unknown>): Promise<InvokeResult> {
@@ -170,24 +212,46 @@ export class PythonVerifier {
       base_url: options.baseUrl ?? 'http://mock',
       client_kwargs: options.clientKwargs ?? {},
       package: options.packageName ?? 'generated',
+      catch_as: options.catchAs ?? null,
+      httpx_client_kwargs: options.httpxClientKwargs ?? {},
+      auth: options.auth ?? null,
+      event_hook_header: options.eventHookHeader ?? null,
+      close_then_reuse: !!options.closeThenReuse,
+      error_on_warning: !!options.errorOnWarning,
     });
-    return res;
+    // The worker speaks snake_case; expose the type fields camelCased alongside.
+    const raw = res as InvokeResult & {
+      py_type?: string;
+      py_element_types?: string[];
+    };
+    return {
+      ...res,
+      ...(raw.py_type === undefined ? {} : { pyType: raw.py_type }),
+      ...(raw.py_element_types === undefined
+        ? {}
+        : { pyElementTypes: raw.py_element_types }),
+    };
   }
 
   async shutdown(): Promise<void> {
-    if (this.process) {
-      try {
-        this.process.stdin.end();
-      } catch {
-        // ignore
-      }
-      await new Promise<void>((resolve) => {
-        this.process?.once('exit', () => resolve());
-        setTimeout(resolve, 2000).unref();
-      });
-      this.process = undefined;
-      this.started = false;
+    const proc = this.process;
+    if (!proc) return;
+    try {
+      proc.stdin.end();
+    } catch {
+      // Already gone; the exit wait below settles immediately.
     }
+    const exited = await new Promise<boolean>((resolve) => {
+      proc.once('exit', () => resolve(true));
+      setTimeout(() => resolve(false), 2000).unref();
+    });
+    // Closing stdin normally ends the worker's read loop; kill one that ignored
+    // it rather than leaving the process behind for the rest of the run.
+    if (!exited) {
+      proc.kill('SIGKILL');
+    }
+    this.process = undefined;
+    this.started = false;
   }
 }
 

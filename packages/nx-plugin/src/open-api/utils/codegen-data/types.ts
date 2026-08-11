@@ -352,6 +352,11 @@ export interface Operation {
   dotNotationName?: string;
   operationIdPascalCase?: string;
   operationIdSnakeCase?: string;
+  /**
+   * The Python method name for this operation, kept distinct from the
+   * generated client's own members and from every other operation and tag.
+   */
+  pythonMethodName?: string;
   /** The generated request type name (e.g. `FooRequest`). */
   requestTypeName?: string;
 
@@ -418,6 +423,11 @@ export interface CodeGenData extends ClientData {
   operationsByTag: { [tag: string]: Operation[] };
   untaggedOperations: Operation[];
   vendorExtensions: VendorExtensions;
+  /**
+   * The Python attribute name for each key of `operationsByTag`, kept distinct
+   * from the generated client's own members and from every operation.
+   */
+  pythonTagNames?: { [tag: string]: string };
 }
 
 /**

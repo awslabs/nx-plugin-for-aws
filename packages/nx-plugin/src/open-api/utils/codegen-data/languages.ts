@@ -219,19 +219,32 @@ const toPythonPrimitive = (property: Model): string => {
   return toPythonClassName(property.type);
 };
 
+/**
+ * Render a value as a Python literal expression: a quoted string with anything
+ * that would break out of the quotes escaped, `None` for null, and the bare
+ * value for numbers.
+ */
+export const toPythonLiteral = (value: unknown): string => {
+  if (typeof value === 'string') {
+    // Backslash first, so the escapes added below aren't escaped again.
+    const escaped = value
+      .replace(/\\/g, '\\\\')
+      .replace(/"/g, '\\"')
+      .replace(/\n/g, '\\n')
+      .replace(/\r/g, '\\r')
+      .replace(/\t/g, '\\t');
+    return `"${escaped}"`;
+  }
+  if (value === null || value === undefined) return 'None';
+  if (typeof value === 'boolean') return value ? 'True' : 'False';
+  return String(value);
+};
+
 /** Render an enum's values as a Python `Literal[...]` expression. */
 const toPythonEnumLiteral = (property: Model): string => {
   const members = property.enum;
   if (!members || members.length === 0) return toPythonPrimitive(property);
-  const rendered = members
-    .map((m) => {
-      if (typeof m.value === 'string')
-        return `"${m.value.replace(/"/g, '\\"')}"`;
-      if (m.value === null) return 'None';
-      return String(m.value);
-    })
-    .join(', ');
-  return `Literal[${rendered}]`;
+  return `Literal[${members.map((m) => toPythonLiteral(m.value)).join(', ')}]`;
 };
 
 /**
@@ -450,6 +463,17 @@ const PYTHON_KEYWORDS = new Set([
   'await',
 ]);
 
+/**
+ * Names pydantic reserves on a `BaseModel`. A field called `model_dump` or
+ * `model_config` would either shadow the method callers rely on or replace the
+ * `ConfigDict` the generated class sets, so they are escaped like a keyword.
+ *
+ * `model_` is pydantic's protected namespace, so anything in it is escaped
+ * rather than only the members that exist today.
+ */
+const isPydanticReservedName = (name: string): boolean =>
+  name.startsWith('model_') || name === 'model_fields' || name === 'schema';
+
 export const toPythonName = (
   namedEntity: 'model' | 'property' | 'operation',
   name: string,
@@ -461,7 +485,15 @@ export const toPythonName = (
   // form — snakeCase strips trailing underscores, so `from_` becomes `from`
   // and would otherwise slip through.
   const rawStripped = name.startsWith('_') ? name.slice(1) : name;
-  if (PYTHON_KEYWORDS.has(rawStripped) || PYTHON_KEYWORDS.has(nameSnakeCase)) {
+  const isPydanticReserved =
+    namedEntity === 'property' &&
+    (isPydanticReservedName(rawStripped) ||
+      isPydanticReservedName(nameSnakeCase));
+  if (
+    isPydanticReserved ||
+    PYTHON_KEYWORDS.has(rawStripped) ||
+    PYTHON_KEYWORDS.has(nameSnakeCase)
+  ) {
     const nameSuffix = `_${nameSnakeCase}`;
     switch (namedEntity) {
       case 'model':

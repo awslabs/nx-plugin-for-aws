@@ -6,154 +6,56 @@ exports[`openApiPyClientGenerator - petstore > should generate valid Python for 
 from __future__ import annotations
 
 import datetime
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, TypeVar
 from urllib.parse import quote
 
 import httpx
-from pydantic import BaseModel, TypeAdapter
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from . import types_gen
+from .errors import AddPetApiError as AddPetApiError
+from .errors import ApiError as ApiError
+from .errors import CreateUserApiError as CreateUserApiError
+from .errors import CreateUsersWithListInputApiError as CreateUsersWithListInputApiError
+from .errors import DeleteOrderApiError as DeleteOrderApiError
+from .errors import DeletePetApiError as DeletePetApiError
+from .errors import DeleteUserApiError as DeleteUserApiError
+from .errors import FindPetsByStatusApiError as FindPetsByStatusApiError
+from .errors import FindPetsByTagsApiError as FindPetsByTagsApiError
+from .errors import GetInventoryApiError as GetInventoryApiError
+from .errors import GetOrderByIdApiError as GetOrderByIdApiError
+from .errors import GetPetByIdApiError as GetPetByIdApiError
+from .errors import GetUserByNameApiError as GetUserByNameApiError
+from .errors import LoginUserApiError as LoginUserApiError
+from .errors import LogoutUserApiError as LogoutUserApiError
+from .errors import PlaceOrderApiError as PlaceOrderApiError
+from .errors import UpdatePetApiError as UpdatePetApiError
+from .errors import UpdatePetWithFormApiError as UpdatePetWithFormApiError
+from .errors import UpdateUserApiError as UpdateUserApiError
+from .errors import UploadFileApiError as UploadFileApiError
 
-
-class ApiError(Exception):
-    """Base class for all API errors.
-
-    Subclasses are generated per-operation so \`error\` can be narrowed by the
-    type checker via \`isinstance\` or \`match\`.  Catch \`ApiError\` to handle
-    any unexpected status code across operations.
-    """
-
-    status: int
-    error: Any
-
-    def __init__(self, status: int, error: Any = None) -> None:
-        super().__init__(f"API returned status {status}")
-        self.status = status
-        self.error = error
-
-
-class AddPetApiError(ApiError):
-    """Raised when \`add_pet\` returns a non-success status."""
-
-    error: types_gen.AddPetError
-
-
-class CreateUserApiError(ApiError):
-    """Raised when \`create_user\` returns a non-success status."""
-
-    error: types_gen.CreateUserError
-
-
-class CreateUsersWithListInputApiError(ApiError):
-    """Raised when \`create_users_with_list_input\` returns a non-success status."""
-
-    error: types_gen.CreateUsersWithListInputError
-
-
-class DeleteOrderApiError(ApiError):
-    """Raised when \`delete_order\` returns a non-success status."""
-
-    error: types_gen.DeleteOrderError
-
-
-class DeletePetApiError(ApiError):
-    """Raised when \`delete_pet\` returns a non-success status."""
-
-    error: types_gen.DeletePetError
-
-
-class DeleteUserApiError(ApiError):
-    """Raised when \`delete_user\` returns a non-success status."""
-
-    error: types_gen.DeleteUserError
-
-
-class FindPetsByStatusApiError(ApiError):
-    """Raised when \`find_pets_by_status\` returns a non-success status."""
-
-    error: types_gen.FindPetsByStatusError
-
-
-class FindPetsByTagsApiError(ApiError):
-    """Raised when \`find_pets_by_tags\` returns a non-success status."""
-
-    error: types_gen.FindPetsByTagsError
-
-
-class GetInventoryApiError(ApiError):
-    """Raised when \`get_inventory\` returns a non-success status."""
-
-    error: types_gen.GetInventoryError
-
-
-class GetOrderByIdApiError(ApiError):
-    """Raised when \`get_order_by_id\` returns a non-success status."""
-
-    error: types_gen.GetOrderByIdError
-
-
-class GetPetByIdApiError(ApiError):
-    """Raised when \`get_pet_by_id\` returns a non-success status."""
-
-    error: types_gen.GetPetByIdError
-
-
-class GetUserByNameApiError(ApiError):
-    """Raised when \`get_user_by_name\` returns a non-success status."""
-
-    error: types_gen.GetUserByNameError
-
-
-class LoginUserApiError(ApiError):
-    """Raised when \`login_user\` returns a non-success status."""
-
-    error: types_gen.LoginUserError
-
-
-class LogoutUserApiError(ApiError):
-    """Raised when \`logout_user\` returns a non-success status."""
-
-    error: types_gen.LogoutUserError
-
-
-class PlaceOrderApiError(ApiError):
-    """Raised when \`place_order\` returns a non-success status."""
-
-    error: types_gen.PlaceOrderError
-
-
-class UpdatePetApiError(ApiError):
-    """Raised when \`update_pet\` returns a non-success status."""
-
-    error: types_gen.UpdatePetError
-
-
-class UpdatePetWithFormApiError(ApiError):
-    """Raised when \`update_pet_with_form\` returns a non-success status."""
-
-    error: types_gen.UpdatePetWithFormError
-
-
-class UpdateUserApiError(ApiError):
-    """Raised when \`update_user\` returns a non-success status."""
-
-    error: types_gen.UpdateUserError
-
-
-class UploadFileApiError(ApiError):
-    """Raised when \`upload_file\` returns a non-success status."""
-
-    error: types_gen.UploadFileError
+_ErrorT = TypeVar("_ErrorT", bound=BaseModel)
 
 
 @dataclass
 class AsyncSwaggerPetstoreOpenAPI30Config:
-    """Configuration for the async client."""
+    """Client configuration for AsyncSwaggerPetstoreOpenAPI30."""
 
+    #: Base URL for the API.
     url: str
+    #: Client used for every request. Supply your own to add authentication or
+    #: any other middleware — an \`\`httpx.Auth\`\` (e.g. a SigV4 signer), an event
+    #: hook, a custom transport, timeouts, retries or a proxy all apply, and the
+    #: client's own headers and query params are sent alongside each operation's.
+    #: A supplied client is never closed by this one, so it can be shared.
     httpx_client: Optional[httpx.AsyncClient] = None
+    #: Headers added to every request, where the operation sets none itself.
     headers: dict[str, str] = field(default_factory=dict)
+    #: By default the client sends a Content-Type header set to the media type
+    #: the OpenAPI specification declares for the request. Set this to omit it.
     omit_content_type_header: bool = False
 
 
@@ -192,22 +94,24 @@ class AsyncSwaggerPetstoreOpenAPI30:
                 # RFC 6570 path-style expansion: ;key=a,b (explode: ;key=a;key=b)
                 if explode:
                     rendered = "".join(
-                        ";" + key + "=" + quote(str(v), safe="") for v in values
+                        ";" + key + "=" + quote(self._scalar(v), safe="")
+                        for v in values
                     )
                 else:
                     rendered = (
                         ";"
                         + key
                         + "="
-                        + ",".join(quote(str(v), safe="") for v in values)
+                        + ",".join(quote(self._scalar(v), safe="") for v in values)
                     )
             elif style == "label":
                 # RFC 6570 label expansion: .a,b (explode: .a.b)
                 rendered = "." + ("." if explode else ",").join(
-                    quote(str(v), safe="") for v in values
+                    quote(self._scalar(v), safe="") for v in values
                 )
             else:
-                rendered = quote(str(value), safe="")
+                # RFC 6570 simple expansion: a list renders comma-separated.
+                rendered = ",".join(quote(self._scalar(v), safe="") for v in values)
             path = path.replace("{" + key + "}", rendered)
         return self._base_url + path
 
@@ -220,6 +124,18 @@ class AsyncSwaggerPetstoreOpenAPI30:
         elif value is not None:
             out[key] = value
 
+    _COLLECTION_DELIMITERS = {"csv": ",", "ssv": " ", "pipes": "|"}
+
+    def _scalar(self, value: Any) -> str:
+        # The wire form of a single parameter value: JSON spellings for bools,
+        # ISO-8601 for dates, and the model's own wire shape for anything else.
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value, (datetime.date, datetime.datetime)):
+            return value.isoformat()
+        dumped = self._dump(value)
+        return dumped if isinstance(dumped, str) else str(dumped)
+
     def _query(
         self,
         query_params: dict[str, Any],
@@ -229,20 +145,17 @@ class AsyncSwaggerPetstoreOpenAPI30:
         for key, value in query_params.items():
             if value is None:
                 continue
-            if (collection_formats or {}).get(key) == "deepObject":
+            fmt = (collection_formats or {}).get(key)
+            if fmt == "deepObject":
                 self._deep_object(key, value, out)
             elif isinstance(value, list):
-                fmt = (collection_formats or {}).get(key, "multi")
-                if fmt == "csv":
-                    out[key] = ",".join(str(v) for v in value)
+                delimiter = self._COLLECTION_DELIMITERS.get(fmt or "multi")
+                if delimiter is None:
+                    out[key] = [self._scalar(v) for v in value]
                 else:
-                    out[key] = [str(v) for v in value]
-            elif isinstance(value, bool):
-                out[key] = "true" if value else "false"
-            elif isinstance(value, (datetime.date, datetime.datetime)):
-                out[key] = value.isoformat()
+                    out[key] = delimiter.join(self._scalar(v) for v in value)
             else:
-                out[key] = value
+                out[key] = self._scalar(value)
         return out
 
     def _headers(
@@ -250,23 +163,32 @@ class AsyncSwaggerPetstoreOpenAPI30:
         header_params: dict[str, Any],
         collection_formats: Optional[dict[str, str]] = None,
     ) -> list[tuple[str, str]]:
-        out: list[tuple[str, str]] = [(k, v) for k, v in self._config.headers.items()]
+        out: list[tuple[str, str]] = []
         for key, value in header_params.items():
             if value is None:
                 continue
             if isinstance(value, list):
                 fmt = (collection_formats or {}).get(key, "csv")
-                if fmt == "multi":
+                delimiter = self._COLLECTION_DELIMITERS.get(fmt)
+                if delimiter is None:
                     for item in value:
-                        out.append((key, str(item)))
+                        out.append((key, self._scalar(item)))
                 else:
-                    out.append((key, ",".join(str(v) for v in value)))
+                    out.append((key, delimiter.join(self._scalar(v) for v in value)))
             else:
-                out.append((key, str(value)))
+                out.append((key, self._scalar(value)))
+        # A config header only applies where the operation didn't set one:
+        # httpx comma-joins repeated names, which would corrupt the value.
+        operation_headers = {key.lower() for key, _ in out}
+        out.extend(
+            (key, value)
+            for key, value in self._config.headers.items()
+            if key.lower() not in operation_headers
+        )
         return out
 
     def _cookies(self, cookie_params: dict[str, Any]) -> dict[str, str]:
-        return {k: str(v) for k, v in cookie_params.items() if v is not None}
+        return {k: self._scalar(v) for k, v in cookie_params.items() if v is not None}
 
     def _dump(self, value: Any) -> Any:
         if value is None:
@@ -280,6 +202,89 @@ class AsyncSwaggerPetstoreOpenAPI30:
         if isinstance(value, (datetime.date, datetime.datetime)):
             return value.isoformat()
         return value
+
+    async def _send_with_url(self, final_url: str, **kwargs: Any) -> httpx.Response:
+        # \`request()\` lets httpx rebuild the query from the client's params,
+        # discarding a hand-built one. Building the request first and overriding
+        # the URL keeps it, while auth and event hooks still run on send.
+        request = self._client.build_request(**kwargs)
+        request.url = httpx.URL(final_url)
+        return await self._client.send(request)
+
+    @asynccontextmanager
+    async def _stream_with_url(
+        self, final_url: str, **kwargs: Any
+    ) -> AsyncIterator[httpx.Response]:
+        # The streaming counterpart of \`_send_with_url\`: \`stream()\` would rebuild
+        # the query from the client's params and percent-encode a hand-built one.
+        request = self._client.build_request(**kwargs)
+        request.url = httpx.URL(final_url)
+        response = await self._client.send(request, stream=True)
+        try:
+            yield response
+        finally:
+            await response.aclose()
+
+    def _is_file_part(self, value: Any) -> bool:
+        return hasattr(value, "read") or isinstance(value, (bytes, bytearray, tuple))
+
+    def _multipart(
+        self,
+        fields: dict[str, Any],
+        part_content_types: Optional[dict[str, str]] = None,
+    ) -> list[tuple[str, Any]]:
+        # Every field becomes an httpx \`files=\` part: binary values stream as
+        # file parts (one per element for a list) and everything else is sent as
+        # text, with structured values JSON encoded. Text fields go through
+        # \`files=\` rather than \`data=\` because httpx only chooses multipart when
+        # a file part is present, and only \`files=\` carries a per-part content
+        # type from the request body's \`encoding\` object.
+        parts: list[tuple[str, Any]] = []
+        for key, value in fields.items():
+            content_type = (part_content_types or {}).get(key)
+            values = value if isinstance(value, list) else [value]
+            if any(self._is_file_part(item) for item in values):
+                parts.extend(
+                    (key, item if content_type is None else (None, item, content_type))
+                    for item in values
+                )
+                continue
+            for item in values:
+                text = self._part_text(self._dump(item))
+                parts.append(
+                    (
+                        key,
+                        (None, text)
+                        if content_type is None
+                        else (None, text, content_type),
+                    )
+                )
+        return parts
+
+    def _part_text(self, value: Any) -> str:
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value, str):
+            return value
+        if value is None or isinstance(value, (int, float)):
+            return "" if value is None else str(value)
+        return json.dumps(value, separators=(",", ":"))
+
+    def _error_payload(self, response: httpx.Response) -> Any:
+        # An error body is whatever the server actually sent, which need not be
+        # the JSON the spec declares (a proxy's HTML page, say).
+        try:
+            return response.json()
+        except ValueError:
+            return response.text
+
+    def _error(self, wrapper: type[_ErrorT], status: int, payload: Any) -> _ErrorT:
+        # Coerce to the declared error type, falling back to the raw payload so
+        # a body that doesn't match the spec still raises the typed exception.
+        try:
+            return wrapper.model_validate({"status": status, "error": payload})
+        except ValidationError:
+            return wrapper.model_construct(status=status, error=payload)
 
     async def _add_pet(
         self,
@@ -296,7 +301,8 @@ class AsyncSwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: Optional[dict[str, str]] = None
+        query_formats: Optional[dict[str, str]] = None
+        header_formats: Optional[dict[str, str]] = None
         _body_fields: dict[str, Any] = {}
         _body_fields["name"] = name
         _body_fields["photoUrls"] = photo_urls
@@ -318,9 +324,8 @@ class AsyncSwaggerPetstoreOpenAPI30:
         response = await self._client.request(
             "POST",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -328,26 +333,17 @@ class AsyncSwaggerPetstoreOpenAPI30:
         if response.status_code == 400:
             raise AddPetApiError(
                 response.status_code,
-                types_gen.AddPet400Error(
-                    status=400,
-                    error=None,
-                ),
+                self._error(types_gen.AddPet400Error, 400, None),
             )
         if response.status_code == 422:
             raise AddPetApiError(
                 response.status_code,
-                types_gen.AddPet422Error(
-                    status=422,
-                    error=None,
-                ),
+                self._error(types_gen.AddPet422Error, 422, None),
             )
         if True:
             raise AddPetApiError(
                 response.status_code,
-                types_gen.AddPetDefaultError(
-                    status=response.status_code,
-                    error=None,
-                ),
+                self._error(types_gen.AddPetDefaultError, response.status_code, None),
             )
         raise AddPetApiError(response.status_code, None)
 
@@ -368,7 +364,8 @@ class AsyncSwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: Optional[dict[str, str]] = None
+        query_formats: Optional[dict[str, str]] = None
+        header_formats: Optional[dict[str, str]] = None
         _body_fields: dict[str, Any] = {}
         if id is not None:
             _body_fields["id"] = id
@@ -396,9 +393,8 @@ class AsyncSwaggerPetstoreOpenAPI30:
         response = await self._client.request(
             "POST",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -406,9 +402,8 @@ class AsyncSwaggerPetstoreOpenAPI30:
         if True:
             raise CreateUserApiError(
                 response.status_code,
-                types_gen.CreateUserDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.CreateUserDefaultError, response.status_code, None
                 ),
             )
         raise CreateUserApiError(response.status_code, None)
@@ -422,7 +417,8 @@ class AsyncSwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: Optional[dict[str, str]] = None
+        query_formats: Optional[dict[str, str]] = None
+        header_formats: Optional[dict[str, str]] = None
         body = self._dump(body)
         request_kwargs: dict[str, Any] = {"json": body}
         if body is not None and not self._config.omit_content_type_header:
@@ -431,9 +427,8 @@ class AsyncSwaggerPetstoreOpenAPI30:
         response = await self._client.request(
             "POST",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -441,9 +436,10 @@ class AsyncSwaggerPetstoreOpenAPI30:
         if True:
             raise CreateUsersWithListInputApiError(
                 response.status_code,
-                types_gen.CreateUsersWithListInputDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.CreateUsersWithListInputDefaultError,
+                    response.status_code,
+                    None,
                 ),
             )
         raise CreateUsersWithListInputApiError(response.status_code, None)
@@ -458,16 +454,16 @@ class AsyncSwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: Optional[dict[str, str]] = None
+        query_formats: Optional[dict[str, str]] = None
+        header_formats: Optional[dict[str, str]] = None
         body = None
         request_kwargs: dict[str, Any] = {}
         _request_url = self._url("/store/order/{orderId}", path_params)
         response = await self._client.request(
             "DELETE",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -475,25 +471,18 @@ class AsyncSwaggerPetstoreOpenAPI30:
         if response.status_code == 400:
             raise DeleteOrderApiError(
                 response.status_code,
-                types_gen.DeleteOrder400Error(
-                    status=400,
-                    error=None,
-                ),
+                self._error(types_gen.DeleteOrder400Error, 400, None),
             )
         if response.status_code == 404:
             raise DeleteOrderApiError(
                 response.status_code,
-                types_gen.DeleteOrder404Error(
-                    status=404,
-                    error=None,
-                ),
+                self._error(types_gen.DeleteOrder404Error, 404, None),
             )
         if True:
             raise DeleteOrderApiError(
                 response.status_code,
-                types_gen.DeleteOrderDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.DeleteOrderDefaultError, response.status_code, None
                 ),
             )
         raise DeleteOrderApiError(response.status_code, None)
@@ -509,16 +498,16 @@ class AsyncSwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {}
         header_params: dict[str, Any] = {"api_key": api_key}
         cookie_params: dict[str, Any] = {}
-        collection_formats: dict[str, str] = {"api_key": "csv"}
+        query_formats: Optional[dict[str, str]] = None
+        header_formats: Optional[dict[str, str]] = {"api_key": "csv"}
         body = None
         request_kwargs: dict[str, Any] = {}
         _request_url = self._url("/pet/{petId}", path_params)
         response = await self._client.request(
             "DELETE",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -526,17 +515,13 @@ class AsyncSwaggerPetstoreOpenAPI30:
         if response.status_code == 400:
             raise DeletePetApiError(
                 response.status_code,
-                types_gen.DeletePet400Error(
-                    status=400,
-                    error=None,
-                ),
+                self._error(types_gen.DeletePet400Error, 400, None),
             )
         if True:
             raise DeletePetApiError(
                 response.status_code,
-                types_gen.DeletePetDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.DeletePetDefaultError, response.status_code, None
                 ),
             )
         raise DeletePetApiError(response.status_code, None)
@@ -551,16 +536,16 @@ class AsyncSwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: Optional[dict[str, str]] = None
+        query_formats: Optional[dict[str, str]] = None
+        header_formats: Optional[dict[str, str]] = None
         body = None
         request_kwargs: dict[str, Any] = {}
         _request_url = self._url("/user/{username}", path_params)
         response = await self._client.request(
             "DELETE",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -568,25 +553,18 @@ class AsyncSwaggerPetstoreOpenAPI30:
         if response.status_code == 400:
             raise DeleteUserApiError(
                 response.status_code,
-                types_gen.DeleteUser400Error(
-                    status=400,
-                    error=None,
-                ),
+                self._error(types_gen.DeleteUser400Error, 400, None),
             )
         if response.status_code == 404:
             raise DeleteUserApiError(
                 response.status_code,
-                types_gen.DeleteUser404Error(
-                    status=404,
-                    error=None,
-                ),
+                self._error(types_gen.DeleteUser404Error, 404, None),
             )
         if True:
             raise DeleteUserApiError(
                 response.status_code,
-                types_gen.DeleteUserDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.DeleteUserDefaultError, response.status_code, None
                 ),
             )
         raise DeleteUserApiError(response.status_code, None)
@@ -601,16 +579,16 @@ class AsyncSwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {"status": status}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: dict[str, str] = {"status": "multi"}
+        query_formats: Optional[dict[str, str]] = {"status": "multi"}
+        header_formats: Optional[dict[str, str]] = None
         body = None
         request_kwargs: dict[str, Any] = {}
         _request_url = self._url("/pet/findByStatus", path_params)
         response = await self._client.request(
             "GET",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -618,17 +596,13 @@ class AsyncSwaggerPetstoreOpenAPI30:
         if response.status_code == 400:
             raise FindPetsByStatusApiError(
                 response.status_code,
-                types_gen.FindPetsByStatus400Error(
-                    status=400,
-                    error=None,
-                ),
+                self._error(types_gen.FindPetsByStatus400Error, 400, None),
             )
         if True:
             raise FindPetsByStatusApiError(
                 response.status_code,
-                types_gen.FindPetsByStatusDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.FindPetsByStatusDefaultError, response.status_code, None
                 ),
             )
         raise FindPetsByStatusApiError(response.status_code, None)
@@ -643,16 +617,16 @@ class AsyncSwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {"tags": tags}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: dict[str, str] = {"tags": "multi"}
+        query_formats: Optional[dict[str, str]] = {"tags": "multi"}
+        header_formats: Optional[dict[str, str]] = None
         body = None
         request_kwargs: dict[str, Any] = {}
         _request_url = self._url("/pet/findByTags", path_params)
         response = await self._client.request(
             "GET",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -660,17 +634,13 @@ class AsyncSwaggerPetstoreOpenAPI30:
         if response.status_code == 400:
             raise FindPetsByTagsApiError(
                 response.status_code,
-                types_gen.FindPetsByTags400Error(
-                    status=400,
-                    error=None,
-                ),
+                self._error(types_gen.FindPetsByTags400Error, 400, None),
             )
         if True:
             raise FindPetsByTagsApiError(
                 response.status_code,
-                types_gen.FindPetsByTagsDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.FindPetsByTagsDefaultError, response.status_code, None
                 ),
             )
         raise FindPetsByTagsApiError(response.status_code, None)
@@ -683,16 +653,16 @@ class AsyncSwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: Optional[dict[str, str]] = None
+        query_formats: Optional[dict[str, str]] = None
+        header_formats: Optional[dict[str, str]] = None
         body = None
         request_kwargs: dict[str, Any] = {}
         _request_url = self._url("/store/inventory", path_params)
         response = await self._client.request(
             "GET",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -702,9 +672,8 @@ class AsyncSwaggerPetstoreOpenAPI30:
         if True:
             raise GetInventoryApiError(
                 response.status_code,
-                types_gen.GetInventoryDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.GetInventoryDefaultError, response.status_code, None
                 ),
             )
         raise GetInventoryApiError(response.status_code, None)
@@ -719,16 +688,16 @@ class AsyncSwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: Optional[dict[str, str]] = None
+        query_formats: Optional[dict[str, str]] = None
+        header_formats: Optional[dict[str, str]] = None
         body = None
         request_kwargs: dict[str, Any] = {}
         _request_url = self._url("/store/order/{orderId}", path_params)
         response = await self._client.request(
             "GET",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -736,25 +705,18 @@ class AsyncSwaggerPetstoreOpenAPI30:
         if response.status_code == 400:
             raise GetOrderByIdApiError(
                 response.status_code,
-                types_gen.GetOrderById400Error(
-                    status=400,
-                    error=None,
-                ),
+                self._error(types_gen.GetOrderById400Error, 400, None),
             )
         if response.status_code == 404:
             raise GetOrderByIdApiError(
                 response.status_code,
-                types_gen.GetOrderById404Error(
-                    status=404,
-                    error=None,
-                ),
+                self._error(types_gen.GetOrderById404Error, 404, None),
             )
         if True:
             raise GetOrderByIdApiError(
                 response.status_code,
-                types_gen.GetOrderByIdDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.GetOrderByIdDefaultError, response.status_code, None
                 ),
             )
         raise GetOrderByIdApiError(response.status_code, None)
@@ -769,16 +731,16 @@ class AsyncSwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: Optional[dict[str, str]] = None
+        query_formats: Optional[dict[str, str]] = None
+        header_formats: Optional[dict[str, str]] = None
         body = None
         request_kwargs: dict[str, Any] = {}
         _request_url = self._url("/pet/{petId}", path_params)
         response = await self._client.request(
             "GET",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -786,25 +748,18 @@ class AsyncSwaggerPetstoreOpenAPI30:
         if response.status_code == 400:
             raise GetPetByIdApiError(
                 response.status_code,
-                types_gen.GetPetById400Error(
-                    status=400,
-                    error=None,
-                ),
+                self._error(types_gen.GetPetById400Error, 400, None),
             )
         if response.status_code == 404:
             raise GetPetByIdApiError(
                 response.status_code,
-                types_gen.GetPetById404Error(
-                    status=404,
-                    error=None,
-                ),
+                self._error(types_gen.GetPetById404Error, 404, None),
             )
         if True:
             raise GetPetByIdApiError(
                 response.status_code,
-                types_gen.GetPetByIdDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.GetPetByIdDefaultError, response.status_code, None
                 ),
             )
         raise GetPetByIdApiError(response.status_code, None)
@@ -819,16 +774,16 @@ class AsyncSwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: Optional[dict[str, str]] = None
+        query_formats: Optional[dict[str, str]] = None
+        header_formats: Optional[dict[str, str]] = None
         body = None
         request_kwargs: dict[str, Any] = {}
         _request_url = self._url("/user/{username}", path_params)
         response = await self._client.request(
             "GET",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -836,25 +791,18 @@ class AsyncSwaggerPetstoreOpenAPI30:
         if response.status_code == 400:
             raise GetUserByNameApiError(
                 response.status_code,
-                types_gen.GetUserByName400Error(
-                    status=400,
-                    error=None,
-                ),
+                self._error(types_gen.GetUserByName400Error, 400, None),
             )
         if response.status_code == 404:
             raise GetUserByNameApiError(
                 response.status_code,
-                types_gen.GetUserByName404Error(
-                    status=404,
-                    error=None,
-                ),
+                self._error(types_gen.GetUserByName404Error, 404, None),
             )
         if True:
             raise GetUserByNameApiError(
                 response.status_code,
-                types_gen.GetUserByNameDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.GetUserByNameDefaultError, response.status_code, None
                 ),
             )
         raise GetUserByNameApiError(response.status_code, None)
@@ -870,34 +818,33 @@ class AsyncSwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {"username": username, "password": password}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: dict[str, str] = {"username": "multi", "password": "multi"}
+        query_formats: Optional[dict[str, str]] = {
+            "username": "multi",
+            "password": "multi",
+        }
+        header_formats: Optional[dict[str, str]] = None
         body = None
         request_kwargs: dict[str, Any] = {}
         _request_url = self._url("/user/login", path_params)
         response = await self._client.request(
             "GET",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
-            return TypeAdapter(str).validate_python(response.json())
+            return response.json()
         if response.status_code == 400:
             raise LoginUserApiError(
                 response.status_code,
-                types_gen.LoginUser400Error(
-                    status=400,
-                    error=None,
-                ),
+                self._error(types_gen.LoginUser400Error, 400, None),
             )
         if True:
             raise LoginUserApiError(
                 response.status_code,
-                types_gen.LoginUserDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.LoginUserDefaultError, response.status_code, None
                 ),
             )
         raise LoginUserApiError(response.status_code, None)
@@ -910,16 +857,16 @@ class AsyncSwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: Optional[dict[str, str]] = None
+        query_formats: Optional[dict[str, str]] = None
+        header_formats: Optional[dict[str, str]] = None
         body = None
         request_kwargs: dict[str, Any] = {}
         _request_url = self._url("/user/logout", path_params)
         response = await self._client.request(
             "GET",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -927,9 +874,8 @@ class AsyncSwaggerPetstoreOpenAPI30:
         if True:
             raise LogoutUserApiError(
                 response.status_code,
-                types_gen.LogoutUserDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.LogoutUserDefaultError, response.status_code, None
                 ),
             )
         raise LogoutUserApiError(response.status_code, None)
@@ -949,7 +895,8 @@ class AsyncSwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: Optional[dict[str, str]] = None
+        query_formats: Optional[dict[str, str]] = None
+        header_formats: Optional[dict[str, str]] = None
         _body_fields: dict[str, Any] = {}
         if id is not None:
             _body_fields["id"] = id
@@ -973,9 +920,8 @@ class AsyncSwaggerPetstoreOpenAPI30:
         response = await self._client.request(
             "POST",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -983,25 +929,18 @@ class AsyncSwaggerPetstoreOpenAPI30:
         if response.status_code == 400:
             raise PlaceOrderApiError(
                 response.status_code,
-                types_gen.PlaceOrder400Error(
-                    status=400,
-                    error=None,
-                ),
+                self._error(types_gen.PlaceOrder400Error, 400, None),
             )
         if response.status_code == 422:
             raise PlaceOrderApiError(
                 response.status_code,
-                types_gen.PlaceOrder422Error(
-                    status=422,
-                    error=None,
-                ),
+                self._error(types_gen.PlaceOrder422Error, 422, None),
             )
         if True:
             raise PlaceOrderApiError(
                 response.status_code,
-                types_gen.PlaceOrderDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.PlaceOrderDefaultError, response.status_code, None
                 ),
             )
         raise PlaceOrderApiError(response.status_code, None)
@@ -1021,7 +960,8 @@ class AsyncSwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: Optional[dict[str, str]] = None
+        query_formats: Optional[dict[str, str]] = None
+        header_formats: Optional[dict[str, str]] = None
         _body_fields: dict[str, Any] = {}
         _body_fields["name"] = name
         _body_fields["photoUrls"] = photo_urls
@@ -1043,9 +983,8 @@ class AsyncSwaggerPetstoreOpenAPI30:
         response = await self._client.request(
             "PUT",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -1053,33 +992,23 @@ class AsyncSwaggerPetstoreOpenAPI30:
         if response.status_code == 400:
             raise UpdatePetApiError(
                 response.status_code,
-                types_gen.UpdatePet400Error(
-                    status=400,
-                    error=None,
-                ),
+                self._error(types_gen.UpdatePet400Error, 400, None),
             )
         if response.status_code == 404:
             raise UpdatePetApiError(
                 response.status_code,
-                types_gen.UpdatePet404Error(
-                    status=404,
-                    error=None,
-                ),
+                self._error(types_gen.UpdatePet404Error, 404, None),
             )
         if response.status_code == 422:
             raise UpdatePetApiError(
                 response.status_code,
-                types_gen.UpdatePet422Error(
-                    status=422,
-                    error=None,
-                ),
+                self._error(types_gen.UpdatePet422Error, 422, None),
             )
         if True:
             raise UpdatePetApiError(
                 response.status_code,
-                types_gen.UpdatePetDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.UpdatePetDefaultError, response.status_code, None
                 ),
             )
         raise UpdatePetApiError(response.status_code, None)
@@ -1096,16 +1025,16 @@ class AsyncSwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {"name": name, "status": status}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: dict[str, str] = {"name": "multi", "status": "multi"}
+        query_formats: Optional[dict[str, str]] = {"name": "multi", "status": "multi"}
+        header_formats: Optional[dict[str, str]] = None
         body = None
         request_kwargs: dict[str, Any] = {}
         _request_url = self._url("/pet/{petId}", path_params)
         response = await self._client.request(
             "POST",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -1113,17 +1042,13 @@ class AsyncSwaggerPetstoreOpenAPI30:
         if response.status_code == 400:
             raise UpdatePetWithFormApiError(
                 response.status_code,
-                types_gen.UpdatePetWithForm400Error(
-                    status=400,
-                    error=None,
-                ),
+                self._error(types_gen.UpdatePetWithForm400Error, 400, None),
             )
         if True:
             raise UpdatePetWithFormApiError(
                 response.status_code,
-                types_gen.UpdatePetWithFormDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.UpdatePetWithFormDefaultError, response.status_code, None
                 ),
             )
         raise UpdatePetWithFormApiError(response.status_code, None)
@@ -1139,7 +1064,8 @@ class AsyncSwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: Optional[dict[str, str]] = None
+        query_formats: Optional[dict[str, str]] = None
+        header_formats: Optional[dict[str, str]] = None
         body = self._dump(body)
         request_kwargs: dict[str, Any] = {"json": body}
         if body is not None and not self._config.omit_content_type_header:
@@ -1148,9 +1074,8 @@ class AsyncSwaggerPetstoreOpenAPI30:
         response = await self._client.request(
             "PUT",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -1158,25 +1083,18 @@ class AsyncSwaggerPetstoreOpenAPI30:
         if response.status_code == 400:
             raise UpdateUserApiError(
                 response.status_code,
-                types_gen.UpdateUser400Error(
-                    status=400,
-                    error=None,
-                ),
+                self._error(types_gen.UpdateUser400Error, 400, None),
             )
         if response.status_code == 404:
             raise UpdateUserApiError(
                 response.status_code,
-                types_gen.UpdateUser404Error(
-                    status=404,
-                    error=None,
-                ),
+                self._error(types_gen.UpdateUser404Error, 404, None),
             )
         if True:
             raise UpdateUserApiError(
                 response.status_code,
-                types_gen.UpdateUserDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.UpdateUserDefaultError, response.status_code, None
                 ),
             )
         raise UpdateUserApiError(response.status_code, None)
@@ -1193,7 +1111,8 @@ class AsyncSwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {"additionalMetadata": additional_metadata}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: dict[str, str] = {"additionalMetadata": "multi"}
+        query_formats: Optional[dict[str, str]] = {"additionalMetadata": "multi"}
+        header_formats: Optional[dict[str, str]] = None
         body = body
         request_kwargs: dict[str, Any] = {"content": body}
         if body is not None and not self._config.omit_content_type_header:
@@ -1202,9 +1121,8 @@ class AsyncSwaggerPetstoreOpenAPI30:
         response = await self._client.request(
             "POST",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -1212,25 +1130,18 @@ class AsyncSwaggerPetstoreOpenAPI30:
         if response.status_code == 400:
             raise UploadFileApiError(
                 response.status_code,
-                types_gen.UploadFile400Error(
-                    status=400,
-                    error=None,
-                ),
+                self._error(types_gen.UploadFile400Error, 400, None),
             )
         if response.status_code == 404:
             raise UploadFileApiError(
                 response.status_code,
-                types_gen.UploadFile404Error(
-                    status=404,
-                    error=None,
-                ),
+                self._error(types_gen.UploadFile404Error, 404, None),
             )
         if True:
             raise UploadFileApiError(
                 response.status_code,
-                types_gen.UploadFileDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.UploadFileDefaultError, response.status_code, None
                 ),
             )
         raise UploadFileApiError(response.status_code, None)
@@ -1484,154 +1395,56 @@ exports[`openApiPyClientGenerator - petstore > should generate valid Python for 
 from __future__ import annotations
 
 import datetime
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, TypeVar
 from urllib.parse import quote
 
 import httpx
-from pydantic import BaseModel, TypeAdapter
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from . import types_gen
+from .errors import AddPetApiError as AddPetApiError
+from .errors import ApiError as ApiError
+from .errors import CreateUserApiError as CreateUserApiError
+from .errors import CreateUsersWithListInputApiError as CreateUsersWithListInputApiError
+from .errors import DeleteOrderApiError as DeleteOrderApiError
+from .errors import DeletePetApiError as DeletePetApiError
+from .errors import DeleteUserApiError as DeleteUserApiError
+from .errors import FindPetsByStatusApiError as FindPetsByStatusApiError
+from .errors import FindPetsByTagsApiError as FindPetsByTagsApiError
+from .errors import GetInventoryApiError as GetInventoryApiError
+from .errors import GetOrderByIdApiError as GetOrderByIdApiError
+from .errors import GetPetByIdApiError as GetPetByIdApiError
+from .errors import GetUserByNameApiError as GetUserByNameApiError
+from .errors import LoginUserApiError as LoginUserApiError
+from .errors import LogoutUserApiError as LogoutUserApiError
+from .errors import PlaceOrderApiError as PlaceOrderApiError
+from .errors import UpdatePetApiError as UpdatePetApiError
+from .errors import UpdatePetWithFormApiError as UpdatePetWithFormApiError
+from .errors import UpdateUserApiError as UpdateUserApiError
+from .errors import UploadFileApiError as UploadFileApiError
 
-
-class ApiError(Exception):
-    """Base class for all API errors.
-
-    Subclasses are generated per-operation so \`error\` can be narrowed by the
-    type checker via \`isinstance\` or \`match\`.  Catch \`ApiError\` to handle
-    any unexpected status code across operations.
-    """
-
-    status: int
-    error: Any
-
-    def __init__(self, status: int, error: Any = None) -> None:
-        super().__init__(f"API returned status {status}")
-        self.status = status
-        self.error = error
-
-
-class AddPetApiError(ApiError):
-    """Raised when \`add_pet\` returns a non-success status."""
-
-    error: types_gen.AddPetError
-
-
-class CreateUserApiError(ApiError):
-    """Raised when \`create_user\` returns a non-success status."""
-
-    error: types_gen.CreateUserError
-
-
-class CreateUsersWithListInputApiError(ApiError):
-    """Raised when \`create_users_with_list_input\` returns a non-success status."""
-
-    error: types_gen.CreateUsersWithListInputError
-
-
-class DeleteOrderApiError(ApiError):
-    """Raised when \`delete_order\` returns a non-success status."""
-
-    error: types_gen.DeleteOrderError
-
-
-class DeletePetApiError(ApiError):
-    """Raised when \`delete_pet\` returns a non-success status."""
-
-    error: types_gen.DeletePetError
-
-
-class DeleteUserApiError(ApiError):
-    """Raised when \`delete_user\` returns a non-success status."""
-
-    error: types_gen.DeleteUserError
-
-
-class FindPetsByStatusApiError(ApiError):
-    """Raised when \`find_pets_by_status\` returns a non-success status."""
-
-    error: types_gen.FindPetsByStatusError
-
-
-class FindPetsByTagsApiError(ApiError):
-    """Raised when \`find_pets_by_tags\` returns a non-success status."""
-
-    error: types_gen.FindPetsByTagsError
-
-
-class GetInventoryApiError(ApiError):
-    """Raised when \`get_inventory\` returns a non-success status."""
-
-    error: types_gen.GetInventoryError
-
-
-class GetOrderByIdApiError(ApiError):
-    """Raised when \`get_order_by_id\` returns a non-success status."""
-
-    error: types_gen.GetOrderByIdError
-
-
-class GetPetByIdApiError(ApiError):
-    """Raised when \`get_pet_by_id\` returns a non-success status."""
-
-    error: types_gen.GetPetByIdError
-
-
-class GetUserByNameApiError(ApiError):
-    """Raised when \`get_user_by_name\` returns a non-success status."""
-
-    error: types_gen.GetUserByNameError
-
-
-class LoginUserApiError(ApiError):
-    """Raised when \`login_user\` returns a non-success status."""
-
-    error: types_gen.LoginUserError
-
-
-class LogoutUserApiError(ApiError):
-    """Raised when \`logout_user\` returns a non-success status."""
-
-    error: types_gen.LogoutUserError
-
-
-class PlaceOrderApiError(ApiError):
-    """Raised when \`place_order\` returns a non-success status."""
-
-    error: types_gen.PlaceOrderError
-
-
-class UpdatePetApiError(ApiError):
-    """Raised when \`update_pet\` returns a non-success status."""
-
-    error: types_gen.UpdatePetError
-
-
-class UpdatePetWithFormApiError(ApiError):
-    """Raised when \`update_pet_with_form\` returns a non-success status."""
-
-    error: types_gen.UpdatePetWithFormError
-
-
-class UpdateUserApiError(ApiError):
-    """Raised when \`update_user\` returns a non-success status."""
-
-    error: types_gen.UpdateUserError
-
-
-class UploadFileApiError(ApiError):
-    """Raised when \`upload_file\` returns a non-success status."""
-
-    error: types_gen.UploadFileError
+_ErrorT = TypeVar("_ErrorT", bound=BaseModel)
 
 
 @dataclass
 class SwaggerPetstoreOpenAPI30Config:
     """Client configuration for SwaggerPetstoreOpenAPI30."""
 
+    #: Base URL for the API.
     url: str
+    #: Client used for every request. Supply your own to add authentication or
+    #: any other middleware — an \`\`httpx.Auth\`\` (e.g. a SigV4 signer), an event
+    #: hook, a custom transport, timeouts, retries or a proxy all apply, and the
+    #: client's own headers and query params are sent alongside each operation's.
+    #: A supplied client is never closed by this one, so it can be shared.
     httpx_client: Optional[httpx.Client] = None
+    #: Headers added to every request, where the operation sets none itself.
     headers: dict[str, str] = field(default_factory=dict)
+    #: By default the client sends a Content-Type header set to the media type
+    #: the OpenAPI specification declares for the request. Set this to omit it.
     omit_content_type_header: bool = False
 
 
@@ -1670,22 +1483,24 @@ class SwaggerPetstoreOpenAPI30:
                 # RFC 6570 path-style expansion: ;key=a,b (explode: ;key=a;key=b)
                 if explode:
                     rendered = "".join(
-                        ";" + key + "=" + quote(str(v), safe="") for v in values
+                        ";" + key + "=" + quote(self._scalar(v), safe="")
+                        for v in values
                     )
                 else:
                     rendered = (
                         ";"
                         + key
                         + "="
-                        + ",".join(quote(str(v), safe="") for v in values)
+                        + ",".join(quote(self._scalar(v), safe="") for v in values)
                     )
             elif style == "label":
                 # RFC 6570 label expansion: .a,b (explode: .a.b)
                 rendered = "." + ("." if explode else ",").join(
-                    quote(str(v), safe="") for v in values
+                    quote(self._scalar(v), safe="") for v in values
                 )
             else:
-                rendered = quote(str(value), safe="")
+                # RFC 6570 simple expansion: a list renders comma-separated.
+                rendered = ",".join(quote(self._scalar(v), safe="") for v in values)
             path = path.replace("{" + key + "}", rendered)
         return self._base_url + path
 
@@ -1698,6 +1513,18 @@ class SwaggerPetstoreOpenAPI30:
         elif value is not None:
             out[key] = value
 
+    _COLLECTION_DELIMITERS = {"csv": ",", "ssv": " ", "pipes": "|"}
+
+    def _scalar(self, value: Any) -> str:
+        # The wire form of a single parameter value: JSON spellings for bools,
+        # ISO-8601 for dates, and the model's own wire shape for anything else.
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value, (datetime.date, datetime.datetime)):
+            return value.isoformat()
+        dumped = self._dump(value)
+        return dumped if isinstance(dumped, str) else str(dumped)
+
     def _query(
         self,
         query_params: dict[str, Any],
@@ -1707,20 +1534,17 @@ class SwaggerPetstoreOpenAPI30:
         for key, value in query_params.items():
             if value is None:
                 continue
-            if (collection_formats or {}).get(key) == "deepObject":
+            fmt = (collection_formats or {}).get(key)
+            if fmt == "deepObject":
                 self._deep_object(key, value, out)
             elif isinstance(value, list):
-                fmt = (collection_formats or {}).get(key, "multi")
-                if fmt == "csv":
-                    out[key] = ",".join(str(v) for v in value)
+                delimiter = self._COLLECTION_DELIMITERS.get(fmt or "multi")
+                if delimiter is None:
+                    out[key] = [self._scalar(v) for v in value]
                 else:
-                    out[key] = [str(v) for v in value]
-            elif isinstance(value, bool):
-                out[key] = "true" if value else "false"
-            elif isinstance(value, (datetime.date, datetime.datetime)):
-                out[key] = value.isoformat()
+                    out[key] = delimiter.join(self._scalar(v) for v in value)
             else:
-                out[key] = value
+                out[key] = self._scalar(value)
         return out
 
     def _headers(
@@ -1728,23 +1552,32 @@ class SwaggerPetstoreOpenAPI30:
         header_params: dict[str, Any],
         collection_formats: Optional[dict[str, str]] = None,
     ) -> list[tuple[str, str]]:
-        out: list[tuple[str, str]] = [(k, v) for k, v in self._config.headers.items()]
+        out: list[tuple[str, str]] = []
         for key, value in header_params.items():
             if value is None:
                 continue
             if isinstance(value, list):
                 fmt = (collection_formats or {}).get(key, "csv")
-                if fmt == "multi":
+                delimiter = self._COLLECTION_DELIMITERS.get(fmt)
+                if delimiter is None:
                     for item in value:
-                        out.append((key, str(item)))
+                        out.append((key, self._scalar(item)))
                 else:
-                    out.append((key, ",".join(str(v) for v in value)))
+                    out.append((key, delimiter.join(self._scalar(v) for v in value)))
             else:
-                out.append((key, str(value)))
+                out.append((key, self._scalar(value)))
+        # A config header only applies where the operation didn't set one:
+        # httpx comma-joins repeated names, which would corrupt the value.
+        operation_headers = {key.lower() for key, _ in out}
+        out.extend(
+            (key, value)
+            for key, value in self._config.headers.items()
+            if key.lower() not in operation_headers
+        )
         return out
 
     def _cookies(self, cookie_params: dict[str, Any]) -> dict[str, str]:
-        return {k: str(v) for k, v in cookie_params.items() if v is not None}
+        return {k: self._scalar(v) for k, v in cookie_params.items() if v is not None}
 
     def _dump(self, value: Any) -> Any:
         if value is None:
@@ -1758,6 +1591,89 @@ class SwaggerPetstoreOpenAPI30:
         if isinstance(value, (datetime.date, datetime.datetime)):
             return value.isoformat()
         return value
+
+    def _send_with_url(self, final_url: str, **kwargs: Any) -> httpx.Response:
+        # \`request()\` lets httpx rebuild the query from the client's params,
+        # discarding a hand-built one. Building the request first and overriding
+        # the URL keeps it, while auth and event hooks still run on send.
+        request = self._client.build_request(**kwargs)
+        request.url = httpx.URL(final_url)
+        return self._client.send(request)
+
+    @contextmanager
+    def _stream_with_url(
+        self, final_url: str, **kwargs: Any
+    ) -> Iterator[httpx.Response]:
+        # The streaming counterpart of \`_send_with_url\`: \`stream()\` would rebuild
+        # the query from the client's params and percent-encode a hand-built one.
+        request = self._client.build_request(**kwargs)
+        request.url = httpx.URL(final_url)
+        response = self._client.send(request, stream=True)
+        try:
+            yield response
+        finally:
+            response.close()
+
+    def _is_file_part(self, value: Any) -> bool:
+        return hasattr(value, "read") or isinstance(value, (bytes, bytearray, tuple))
+
+    def _multipart(
+        self,
+        fields: dict[str, Any],
+        part_content_types: Optional[dict[str, str]] = None,
+    ) -> list[tuple[str, Any]]:
+        # Every field becomes an httpx \`files=\` part: binary values stream as
+        # file parts (one per element for a list) and everything else is sent as
+        # text, with structured values JSON encoded. Text fields go through
+        # \`files=\` rather than \`data=\` because httpx only chooses multipart when
+        # a file part is present, and only \`files=\` carries a per-part content
+        # type from the request body's \`encoding\` object.
+        parts: list[tuple[str, Any]] = []
+        for key, value in fields.items():
+            content_type = (part_content_types or {}).get(key)
+            values = value if isinstance(value, list) else [value]
+            if any(self._is_file_part(item) for item in values):
+                parts.extend(
+                    (key, item if content_type is None else (None, item, content_type))
+                    for item in values
+                )
+                continue
+            for item in values:
+                text = self._part_text(self._dump(item))
+                parts.append(
+                    (
+                        key,
+                        (None, text)
+                        if content_type is None
+                        else (None, text, content_type),
+                    )
+                )
+        return parts
+
+    def _part_text(self, value: Any) -> str:
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value, str):
+            return value
+        if value is None or isinstance(value, (int, float)):
+            return "" if value is None else str(value)
+        return json.dumps(value, separators=(",", ":"))
+
+    def _error_payload(self, response: httpx.Response) -> Any:
+        # An error body is whatever the server actually sent, which need not be
+        # the JSON the spec declares (a proxy's HTML page, say).
+        try:
+            return response.json()
+        except ValueError:
+            return response.text
+
+    def _error(self, wrapper: type[_ErrorT], status: int, payload: Any) -> _ErrorT:
+        # Coerce to the declared error type, falling back to the raw payload so
+        # a body that doesn't match the spec still raises the typed exception.
+        try:
+            return wrapper.model_validate({"status": status, "error": payload})
+        except ValidationError:
+            return wrapper.model_construct(status=status, error=payload)
 
     def _add_pet(
         self,
@@ -1774,7 +1690,8 @@ class SwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: Optional[dict[str, str]] = None
+        query_formats: Optional[dict[str, str]] = None
+        header_formats: Optional[dict[str, str]] = None
         _body_fields: dict[str, Any] = {}
         _body_fields["name"] = name
         _body_fields["photoUrls"] = photo_urls
@@ -1796,9 +1713,8 @@ class SwaggerPetstoreOpenAPI30:
         response = self._client.request(
             "POST",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -1806,26 +1722,17 @@ class SwaggerPetstoreOpenAPI30:
         if response.status_code == 400:
             raise AddPetApiError(
                 response.status_code,
-                types_gen.AddPet400Error(
-                    status=400,
-                    error=None,
-                ),
+                self._error(types_gen.AddPet400Error, 400, None),
             )
         if response.status_code == 422:
             raise AddPetApiError(
                 response.status_code,
-                types_gen.AddPet422Error(
-                    status=422,
-                    error=None,
-                ),
+                self._error(types_gen.AddPet422Error, 422, None),
             )
         if True:
             raise AddPetApiError(
                 response.status_code,
-                types_gen.AddPetDefaultError(
-                    status=response.status_code,
-                    error=None,
-                ),
+                self._error(types_gen.AddPetDefaultError, response.status_code, None),
             )
         raise AddPetApiError(response.status_code, None)
 
@@ -1846,7 +1753,8 @@ class SwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: Optional[dict[str, str]] = None
+        query_formats: Optional[dict[str, str]] = None
+        header_formats: Optional[dict[str, str]] = None
         _body_fields: dict[str, Any] = {}
         if id is not None:
             _body_fields["id"] = id
@@ -1874,9 +1782,8 @@ class SwaggerPetstoreOpenAPI30:
         response = self._client.request(
             "POST",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -1884,9 +1791,8 @@ class SwaggerPetstoreOpenAPI30:
         if True:
             raise CreateUserApiError(
                 response.status_code,
-                types_gen.CreateUserDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.CreateUserDefaultError, response.status_code, None
                 ),
             )
         raise CreateUserApiError(response.status_code, None)
@@ -1900,7 +1806,8 @@ class SwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: Optional[dict[str, str]] = None
+        query_formats: Optional[dict[str, str]] = None
+        header_formats: Optional[dict[str, str]] = None
         body = self._dump(body)
         request_kwargs: dict[str, Any] = {"json": body}
         if body is not None and not self._config.omit_content_type_header:
@@ -1909,9 +1816,8 @@ class SwaggerPetstoreOpenAPI30:
         response = self._client.request(
             "POST",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -1919,9 +1825,10 @@ class SwaggerPetstoreOpenAPI30:
         if True:
             raise CreateUsersWithListInputApiError(
                 response.status_code,
-                types_gen.CreateUsersWithListInputDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.CreateUsersWithListInputDefaultError,
+                    response.status_code,
+                    None,
                 ),
             )
         raise CreateUsersWithListInputApiError(response.status_code, None)
@@ -1936,16 +1843,16 @@ class SwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: Optional[dict[str, str]] = None
+        query_formats: Optional[dict[str, str]] = None
+        header_formats: Optional[dict[str, str]] = None
         body = None
         request_kwargs: dict[str, Any] = {}
         _request_url = self._url("/store/order/{orderId}", path_params)
         response = self._client.request(
             "DELETE",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -1953,25 +1860,18 @@ class SwaggerPetstoreOpenAPI30:
         if response.status_code == 400:
             raise DeleteOrderApiError(
                 response.status_code,
-                types_gen.DeleteOrder400Error(
-                    status=400,
-                    error=None,
-                ),
+                self._error(types_gen.DeleteOrder400Error, 400, None),
             )
         if response.status_code == 404:
             raise DeleteOrderApiError(
                 response.status_code,
-                types_gen.DeleteOrder404Error(
-                    status=404,
-                    error=None,
-                ),
+                self._error(types_gen.DeleteOrder404Error, 404, None),
             )
         if True:
             raise DeleteOrderApiError(
                 response.status_code,
-                types_gen.DeleteOrderDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.DeleteOrderDefaultError, response.status_code, None
                 ),
             )
         raise DeleteOrderApiError(response.status_code, None)
@@ -1987,16 +1887,16 @@ class SwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {}
         header_params: dict[str, Any] = {"api_key": api_key}
         cookie_params: dict[str, Any] = {}
-        collection_formats: dict[str, str] = {"api_key": "csv"}
+        query_formats: Optional[dict[str, str]] = None
+        header_formats: Optional[dict[str, str]] = {"api_key": "csv"}
         body = None
         request_kwargs: dict[str, Any] = {}
         _request_url = self._url("/pet/{petId}", path_params)
         response = self._client.request(
             "DELETE",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -2004,17 +1904,13 @@ class SwaggerPetstoreOpenAPI30:
         if response.status_code == 400:
             raise DeletePetApiError(
                 response.status_code,
-                types_gen.DeletePet400Error(
-                    status=400,
-                    error=None,
-                ),
+                self._error(types_gen.DeletePet400Error, 400, None),
             )
         if True:
             raise DeletePetApiError(
                 response.status_code,
-                types_gen.DeletePetDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.DeletePetDefaultError, response.status_code, None
                 ),
             )
         raise DeletePetApiError(response.status_code, None)
@@ -2029,16 +1925,16 @@ class SwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: Optional[dict[str, str]] = None
+        query_formats: Optional[dict[str, str]] = None
+        header_formats: Optional[dict[str, str]] = None
         body = None
         request_kwargs: dict[str, Any] = {}
         _request_url = self._url("/user/{username}", path_params)
         response = self._client.request(
             "DELETE",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -2046,25 +1942,18 @@ class SwaggerPetstoreOpenAPI30:
         if response.status_code == 400:
             raise DeleteUserApiError(
                 response.status_code,
-                types_gen.DeleteUser400Error(
-                    status=400,
-                    error=None,
-                ),
+                self._error(types_gen.DeleteUser400Error, 400, None),
             )
         if response.status_code == 404:
             raise DeleteUserApiError(
                 response.status_code,
-                types_gen.DeleteUser404Error(
-                    status=404,
-                    error=None,
-                ),
+                self._error(types_gen.DeleteUser404Error, 404, None),
             )
         if True:
             raise DeleteUserApiError(
                 response.status_code,
-                types_gen.DeleteUserDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.DeleteUserDefaultError, response.status_code, None
                 ),
             )
         raise DeleteUserApiError(response.status_code, None)
@@ -2079,16 +1968,16 @@ class SwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {"status": status}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: dict[str, str] = {"status": "multi"}
+        query_formats: Optional[dict[str, str]] = {"status": "multi"}
+        header_formats: Optional[dict[str, str]] = None
         body = None
         request_kwargs: dict[str, Any] = {}
         _request_url = self._url("/pet/findByStatus", path_params)
         response = self._client.request(
             "GET",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -2096,17 +1985,13 @@ class SwaggerPetstoreOpenAPI30:
         if response.status_code == 400:
             raise FindPetsByStatusApiError(
                 response.status_code,
-                types_gen.FindPetsByStatus400Error(
-                    status=400,
-                    error=None,
-                ),
+                self._error(types_gen.FindPetsByStatus400Error, 400, None),
             )
         if True:
             raise FindPetsByStatusApiError(
                 response.status_code,
-                types_gen.FindPetsByStatusDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.FindPetsByStatusDefaultError, response.status_code, None
                 ),
             )
         raise FindPetsByStatusApiError(response.status_code, None)
@@ -2121,16 +2006,16 @@ class SwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {"tags": tags}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: dict[str, str] = {"tags": "multi"}
+        query_formats: Optional[dict[str, str]] = {"tags": "multi"}
+        header_formats: Optional[dict[str, str]] = None
         body = None
         request_kwargs: dict[str, Any] = {}
         _request_url = self._url("/pet/findByTags", path_params)
         response = self._client.request(
             "GET",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -2138,17 +2023,13 @@ class SwaggerPetstoreOpenAPI30:
         if response.status_code == 400:
             raise FindPetsByTagsApiError(
                 response.status_code,
-                types_gen.FindPetsByTags400Error(
-                    status=400,
-                    error=None,
-                ),
+                self._error(types_gen.FindPetsByTags400Error, 400, None),
             )
         if True:
             raise FindPetsByTagsApiError(
                 response.status_code,
-                types_gen.FindPetsByTagsDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.FindPetsByTagsDefaultError, response.status_code, None
                 ),
             )
         raise FindPetsByTagsApiError(response.status_code, None)
@@ -2161,16 +2042,16 @@ class SwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: Optional[dict[str, str]] = None
+        query_formats: Optional[dict[str, str]] = None
+        header_formats: Optional[dict[str, str]] = None
         body = None
         request_kwargs: dict[str, Any] = {}
         _request_url = self._url("/store/inventory", path_params)
         response = self._client.request(
             "GET",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -2180,9 +2061,8 @@ class SwaggerPetstoreOpenAPI30:
         if True:
             raise GetInventoryApiError(
                 response.status_code,
-                types_gen.GetInventoryDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.GetInventoryDefaultError, response.status_code, None
                 ),
             )
         raise GetInventoryApiError(response.status_code, None)
@@ -2197,16 +2077,16 @@ class SwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: Optional[dict[str, str]] = None
+        query_formats: Optional[dict[str, str]] = None
+        header_formats: Optional[dict[str, str]] = None
         body = None
         request_kwargs: dict[str, Any] = {}
         _request_url = self._url("/store/order/{orderId}", path_params)
         response = self._client.request(
             "GET",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -2214,25 +2094,18 @@ class SwaggerPetstoreOpenAPI30:
         if response.status_code == 400:
             raise GetOrderByIdApiError(
                 response.status_code,
-                types_gen.GetOrderById400Error(
-                    status=400,
-                    error=None,
-                ),
+                self._error(types_gen.GetOrderById400Error, 400, None),
             )
         if response.status_code == 404:
             raise GetOrderByIdApiError(
                 response.status_code,
-                types_gen.GetOrderById404Error(
-                    status=404,
-                    error=None,
-                ),
+                self._error(types_gen.GetOrderById404Error, 404, None),
             )
         if True:
             raise GetOrderByIdApiError(
                 response.status_code,
-                types_gen.GetOrderByIdDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.GetOrderByIdDefaultError, response.status_code, None
                 ),
             )
         raise GetOrderByIdApiError(response.status_code, None)
@@ -2247,16 +2120,16 @@ class SwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: Optional[dict[str, str]] = None
+        query_formats: Optional[dict[str, str]] = None
+        header_formats: Optional[dict[str, str]] = None
         body = None
         request_kwargs: dict[str, Any] = {}
         _request_url = self._url("/pet/{petId}", path_params)
         response = self._client.request(
             "GET",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -2264,25 +2137,18 @@ class SwaggerPetstoreOpenAPI30:
         if response.status_code == 400:
             raise GetPetByIdApiError(
                 response.status_code,
-                types_gen.GetPetById400Error(
-                    status=400,
-                    error=None,
-                ),
+                self._error(types_gen.GetPetById400Error, 400, None),
             )
         if response.status_code == 404:
             raise GetPetByIdApiError(
                 response.status_code,
-                types_gen.GetPetById404Error(
-                    status=404,
-                    error=None,
-                ),
+                self._error(types_gen.GetPetById404Error, 404, None),
             )
         if True:
             raise GetPetByIdApiError(
                 response.status_code,
-                types_gen.GetPetByIdDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.GetPetByIdDefaultError, response.status_code, None
                 ),
             )
         raise GetPetByIdApiError(response.status_code, None)
@@ -2297,16 +2163,16 @@ class SwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: Optional[dict[str, str]] = None
+        query_formats: Optional[dict[str, str]] = None
+        header_formats: Optional[dict[str, str]] = None
         body = None
         request_kwargs: dict[str, Any] = {}
         _request_url = self._url("/user/{username}", path_params)
         response = self._client.request(
             "GET",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -2314,25 +2180,18 @@ class SwaggerPetstoreOpenAPI30:
         if response.status_code == 400:
             raise GetUserByNameApiError(
                 response.status_code,
-                types_gen.GetUserByName400Error(
-                    status=400,
-                    error=None,
-                ),
+                self._error(types_gen.GetUserByName400Error, 400, None),
             )
         if response.status_code == 404:
             raise GetUserByNameApiError(
                 response.status_code,
-                types_gen.GetUserByName404Error(
-                    status=404,
-                    error=None,
-                ),
+                self._error(types_gen.GetUserByName404Error, 404, None),
             )
         if True:
             raise GetUserByNameApiError(
                 response.status_code,
-                types_gen.GetUserByNameDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.GetUserByNameDefaultError, response.status_code, None
                 ),
             )
         raise GetUserByNameApiError(response.status_code, None)
@@ -2348,34 +2207,33 @@ class SwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {"username": username, "password": password}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: dict[str, str] = {"username": "multi", "password": "multi"}
+        query_formats: Optional[dict[str, str]] = {
+            "username": "multi",
+            "password": "multi",
+        }
+        header_formats: Optional[dict[str, str]] = None
         body = None
         request_kwargs: dict[str, Any] = {}
         _request_url = self._url("/user/login", path_params)
         response = self._client.request(
             "GET",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
-            return TypeAdapter(str).validate_python(response.json())
+            return response.json()
         if response.status_code == 400:
             raise LoginUserApiError(
                 response.status_code,
-                types_gen.LoginUser400Error(
-                    status=400,
-                    error=None,
-                ),
+                self._error(types_gen.LoginUser400Error, 400, None),
             )
         if True:
             raise LoginUserApiError(
                 response.status_code,
-                types_gen.LoginUserDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.LoginUserDefaultError, response.status_code, None
                 ),
             )
         raise LoginUserApiError(response.status_code, None)
@@ -2388,16 +2246,16 @@ class SwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: Optional[dict[str, str]] = None
+        query_formats: Optional[dict[str, str]] = None
+        header_formats: Optional[dict[str, str]] = None
         body = None
         request_kwargs: dict[str, Any] = {}
         _request_url = self._url("/user/logout", path_params)
         response = self._client.request(
             "GET",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -2405,9 +2263,8 @@ class SwaggerPetstoreOpenAPI30:
         if True:
             raise LogoutUserApiError(
                 response.status_code,
-                types_gen.LogoutUserDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.LogoutUserDefaultError, response.status_code, None
                 ),
             )
         raise LogoutUserApiError(response.status_code, None)
@@ -2427,7 +2284,8 @@ class SwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: Optional[dict[str, str]] = None
+        query_formats: Optional[dict[str, str]] = None
+        header_formats: Optional[dict[str, str]] = None
         _body_fields: dict[str, Any] = {}
         if id is not None:
             _body_fields["id"] = id
@@ -2451,9 +2309,8 @@ class SwaggerPetstoreOpenAPI30:
         response = self._client.request(
             "POST",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -2461,25 +2318,18 @@ class SwaggerPetstoreOpenAPI30:
         if response.status_code == 400:
             raise PlaceOrderApiError(
                 response.status_code,
-                types_gen.PlaceOrder400Error(
-                    status=400,
-                    error=None,
-                ),
+                self._error(types_gen.PlaceOrder400Error, 400, None),
             )
         if response.status_code == 422:
             raise PlaceOrderApiError(
                 response.status_code,
-                types_gen.PlaceOrder422Error(
-                    status=422,
-                    error=None,
-                ),
+                self._error(types_gen.PlaceOrder422Error, 422, None),
             )
         if True:
             raise PlaceOrderApiError(
                 response.status_code,
-                types_gen.PlaceOrderDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.PlaceOrderDefaultError, response.status_code, None
                 ),
             )
         raise PlaceOrderApiError(response.status_code, None)
@@ -2499,7 +2349,8 @@ class SwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: Optional[dict[str, str]] = None
+        query_formats: Optional[dict[str, str]] = None
+        header_formats: Optional[dict[str, str]] = None
         _body_fields: dict[str, Any] = {}
         _body_fields["name"] = name
         _body_fields["photoUrls"] = photo_urls
@@ -2521,9 +2372,8 @@ class SwaggerPetstoreOpenAPI30:
         response = self._client.request(
             "PUT",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -2531,33 +2381,23 @@ class SwaggerPetstoreOpenAPI30:
         if response.status_code == 400:
             raise UpdatePetApiError(
                 response.status_code,
-                types_gen.UpdatePet400Error(
-                    status=400,
-                    error=None,
-                ),
+                self._error(types_gen.UpdatePet400Error, 400, None),
             )
         if response.status_code == 404:
             raise UpdatePetApiError(
                 response.status_code,
-                types_gen.UpdatePet404Error(
-                    status=404,
-                    error=None,
-                ),
+                self._error(types_gen.UpdatePet404Error, 404, None),
             )
         if response.status_code == 422:
             raise UpdatePetApiError(
                 response.status_code,
-                types_gen.UpdatePet422Error(
-                    status=422,
-                    error=None,
-                ),
+                self._error(types_gen.UpdatePet422Error, 422, None),
             )
         if True:
             raise UpdatePetApiError(
                 response.status_code,
-                types_gen.UpdatePetDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.UpdatePetDefaultError, response.status_code, None
                 ),
             )
         raise UpdatePetApiError(response.status_code, None)
@@ -2574,16 +2414,16 @@ class SwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {"name": name, "status": status}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: dict[str, str] = {"name": "multi", "status": "multi"}
+        query_formats: Optional[dict[str, str]] = {"name": "multi", "status": "multi"}
+        header_formats: Optional[dict[str, str]] = None
         body = None
         request_kwargs: dict[str, Any] = {}
         _request_url = self._url("/pet/{petId}", path_params)
         response = self._client.request(
             "POST",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -2591,17 +2431,13 @@ class SwaggerPetstoreOpenAPI30:
         if response.status_code == 400:
             raise UpdatePetWithFormApiError(
                 response.status_code,
-                types_gen.UpdatePetWithForm400Error(
-                    status=400,
-                    error=None,
-                ),
+                self._error(types_gen.UpdatePetWithForm400Error, 400, None),
             )
         if True:
             raise UpdatePetWithFormApiError(
                 response.status_code,
-                types_gen.UpdatePetWithFormDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.UpdatePetWithFormDefaultError, response.status_code, None
                 ),
             )
         raise UpdatePetWithFormApiError(response.status_code, None)
@@ -2617,7 +2453,8 @@ class SwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: Optional[dict[str, str]] = None
+        query_formats: Optional[dict[str, str]] = None
+        header_formats: Optional[dict[str, str]] = None
         body = self._dump(body)
         request_kwargs: dict[str, Any] = {"json": body}
         if body is not None and not self._config.omit_content_type_header:
@@ -2626,9 +2463,8 @@ class SwaggerPetstoreOpenAPI30:
         response = self._client.request(
             "PUT",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -2636,25 +2472,18 @@ class SwaggerPetstoreOpenAPI30:
         if response.status_code == 400:
             raise UpdateUserApiError(
                 response.status_code,
-                types_gen.UpdateUser400Error(
-                    status=400,
-                    error=None,
-                ),
+                self._error(types_gen.UpdateUser400Error, 400, None),
             )
         if response.status_code == 404:
             raise UpdateUserApiError(
                 response.status_code,
-                types_gen.UpdateUser404Error(
-                    status=404,
-                    error=None,
-                ),
+                self._error(types_gen.UpdateUser404Error, 404, None),
             )
         if True:
             raise UpdateUserApiError(
                 response.status_code,
-                types_gen.UpdateUserDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.UpdateUserDefaultError, response.status_code, None
                 ),
             )
         raise UpdateUserApiError(response.status_code, None)
@@ -2671,7 +2500,8 @@ class SwaggerPetstoreOpenAPI30:
         query_params: dict[str, Any] = {"additionalMetadata": additional_metadata}
         header_params: dict[str, Any] = {}
         cookie_params: dict[str, Any] = {}
-        collection_formats: dict[str, str] = {"additionalMetadata": "multi"}
+        query_formats: Optional[dict[str, str]] = {"additionalMetadata": "multi"}
+        header_formats: Optional[dict[str, str]] = None
         body = body
         request_kwargs: dict[str, Any] = {"content": body}
         if body is not None and not self._config.omit_content_type_header:
@@ -2680,9 +2510,8 @@ class SwaggerPetstoreOpenAPI30:
         response = self._client.request(
             "POST",
             _request_url,
-            params=self._query(query_params, collection_formats),
-            headers=self._headers(header_params, collection_formats),
-            cookies=self._cookies(cookie_params),
+            params=self._query(query_params, query_formats),
+            headers=self._headers(header_params, header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -2690,25 +2519,18 @@ class SwaggerPetstoreOpenAPI30:
         if response.status_code == 400:
             raise UploadFileApiError(
                 response.status_code,
-                types_gen.UploadFile400Error(
-                    status=400,
-                    error=None,
-                ),
+                self._error(types_gen.UploadFile400Error, 400, None),
             )
         if response.status_code == 404:
             raise UploadFileApiError(
                 response.status_code,
-                types_gen.UploadFile404Error(
-                    status=404,
-                    error=None,
-                ),
+                self._error(types_gen.UploadFile404Error, 404, None),
             )
         if True:
             raise UploadFileApiError(
                 response.status_code,
-                types_gen.UploadFileDefaultError(
-                    status=response.status_code,
-                    error=None,
+                self._error(
+                    types_gen.UploadFileDefaultError, response.status_code, None
                 ),
             )
         raise UploadFileApiError(response.status_code, None)
@@ -3182,13 +3004,13 @@ class User(BaseModel):
     )
 
 
+GetInventory200Response = dict[str, int]
+
 OrderStatus = Literal["placed", "approved", "delivered"]
 """Order Status"""
 
 PetStatus = Literal["available", "pending", "sold"]
 """pet status in the store"""
-
-GetInventory200Response = dict[str, int]
 
 
 class AddPetRequest(TypedDict):

@@ -2,9 +2,9 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
-import { Spec } from '../utils/types';
+import type { Tree } from '@nx/devkit';
 import { PythonVerifier } from '../../utils/test/py.spec';
+import type { Spec } from '../utils/types';
 import {
   callGeneratedClient,
   createTree,
@@ -199,19 +199,21 @@ describe('openApiPyClientGenerator - reserved keywords', () => {
     // References to the schema must use the renamed form.
     expect(types).not.toMatch(/\berror:\s+Error\b/);
     expect(types).toContain('error: _Error');
+    // Neither client may name the un-renamed class, which doesn't exist.
     expect(client).not.toMatch(/\btypes_gen\.Error\b/);
-    expect(client).toContain('types_gen._Error');
-    expect(asyncClient).toContain('types_gen._Error');
+    expect(asyncClient).not.toMatch(/\btypes_gen\.Error\b/);
 
+    // The renamed class is what the raised error actually carries.
     const res = await callGeneratedClient(
       verifier,
       'list_items',
       {},
-      { status: 400, json: { code: 'BAD' } },
+      { status: 400, json: { code: 'bad' } },
     );
     expect(res.ok).toBe(false);
     expect(res.exception?.type).toBe('ListItemsApiError');
-    expect(res.exception?.error?.error).toEqual({ code: 'BAD' });
+    expect(res.exception?.error_type).toBe('ListItems400Error');
+    expect(res.exception?.error).toMatchObject({ error: { code: 'bad' } });
   });
 
   it('should rename properties whose name clashes with typing/pydantic utilities (e.g. schema)', async () => {

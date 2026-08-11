@@ -7,12 +7,12 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { promisify } from 'util';
-import { Spec } from '../utils/types';
 import { PythonVerifier } from '../../utils/test/py.spec';
+import type { Spec } from '../utils/types';
 import {
   createTree,
   generateAndRead,
-  outputPath,
+  generatedPythonFiles,
 } from './generator.utils.spec';
 
 const execFileP = promisify(execFile);
@@ -314,12 +314,8 @@ from __future__ import annotations
 import datetime
 
 from demo_client import types_gen as t
-from demo_client.client_gen import (
-    AddPetApiError,
-    ApiError,
-    TypeSafetyApi,
-    TypeSafetyApiConfig,
-)
+from demo_client.client_gen import TypeSafetyApi, TypeSafetyApiConfig
+from demo_client.errors import AddPetApiError, ApiError
 
 
 def valid_usage(api: TypeSafetyApi) -> None:
@@ -493,15 +489,10 @@ describe('openApiPyClientGenerator - type-safety parity matrix', () => {
     try {
       const pkgDir = path.join(tmp, 'demo_client');
       fs.mkdirSync(pkgDir, { recursive: true });
-      for (const f of [
-        '__init__.py',
-        'types_gen.py',
-        'client_gen.py',
-        'async_client_gen.py',
-      ]) {
+      for (const generated of generatedPythonFiles(tree)) {
         fs.writeFileSync(
-          path.join(pkgDir, f),
-          tree.read(`${outputPath}/${f}`, 'utf-8') ?? '',
+          path.join(pkgDir, path.basename(generated)),
+          tree.read(generated, 'utf-8') ?? '',
         );
       }
       fs.writeFileSync(path.join(tmp, 'usage.py'), probeUsage);
