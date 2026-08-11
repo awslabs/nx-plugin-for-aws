@@ -509,6 +509,16 @@ describe('agentcore-harness generator', () => {
       expect(tf).toMatch(/harness_name_prefix = "[^"$]*"/);
       expect(tf).not.toContain('regexall(');
     });
+
+    it('scopes the managed memory statement to the name the service assigns', () => {
+      // The service names the managed memory `<harness_name>-<10 chars>`, so it
+      // carries neither the runtime's `harness_` prefix nor an `_` separator.
+      // The provider exposes no memory ARN attribute, hence the wildcard.
+      expect(tf).toContain(
+        'Resource = [\n          "arn:${local.partition}:bedrock-agentcore:${local.region}:${local.account_id}:memory/${local.harness_name}-*",',
+      );
+      expect(tf).not.toContain(':memory/harness_');
+    });
   });
 
   describe('idempotency and infra: none', () => {
