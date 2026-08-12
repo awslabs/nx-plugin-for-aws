@@ -1,0 +1,254 @@
+---
+title: OpenAPI Python 客户端
+description: OpenAPI Python 客户端生成器的参考文档
+generator: open-api#py-client
+---
+import { FileTree } from '@astrojs/starlight/components';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Drawer from '@components/drawer.astro';
+
+为任何 OpenAPI 规范生成类型安全的 Python 客户端，基于 [httpx](https://www.python-httpx.org/) 和 [pydantic](https://docs.pydantic.dev/) 构建。
+
+该客户端是 `open-api#ts-client` 生成器的 Python 对应版本：每个 API 一个类、仅关键字参数的方法、可以缩窄的类型化错误，以及一个扩展点——你自己的 `httpx` 客户端——用于身份验证和其他任何你需要在网络层面处理的事情。
+
+## 用法
+
+<RunGenerator generator="open-api#py-client" />
+
+### 选项
+
+<GeneratorParameters generator="open-api#py-client" />
+
+## 生成器输出
+
+<FileTree>
+
+- \<outputPath>
+  - \_\_init\_\_.py 导出客户端、`ApiError` 和 `types` 模块
+  - types.py 规范中每个模式的 pydantic 模型
+  - errors.py `ApiError` 和每个操作的子类
+  - client.py 同步客户端，使用 `httpx.Client`
+  - async_client.py 异步客户端，使用 `httpx.AsyncClient`
+
+</FileTree>
+
+传递 `--clientType=sync` 或 `--clientType=async` 以仅生成两个客户端中的一个。
+
+:::tip[Git 中的生成客户端]
+默认情况下，客户端会从版本控制中忽略，因为它是从规范重新生成的。从你的 `.gitignore` 中删除该条目以将其签入——但请注意，任何手动编辑都将在下次生成时被覆盖。
+:::
+
+### 依赖项
+
+生成的代码导入 `httpx` 和 `pydantic`，因此将两者都添加到你生成的项目中：
+
+```toml
+# pyproject.toml
+dependencies = [
+  "httpx>=0.28.1",
+  "pydantic>=2.13.4",
+]
+```
+
+不需要其他任何东西——没有自己的运行时，也没有需要采用的框架。
+
+## 使用生成的客户端
+
+使用 API 的基础 URL 实例化客户端：
+
+```python
+from my_api import MyApi, MyApiConfig
+
+api = MyApi(MyApiConfig(url="https://api.example.com"))
+
+pet = api.pet.add_pet(name="rex", status="available")
+print(pet.id, pet.name)
+```
+
+方法是**仅关键字参数**的，因此调用的读法与规范一致，必需参数排在前面：
+
+```python
+pets = api.pet.list_pets(status=["available"], limit=10)
+pet = api.pet.get_pet_by_id(pet_id=42)
+api.pet.delete_pet(pet_id=42)
+```
+
+规范中标记的操作被分组到命名空间中——上面的 `api.pet.add_pet(...)` 来自 `pet` 标签。未标记的操作直接位于客户端上，如 `api.health()`。
+
+主体为对象的操作会将其字段展平到调用中，因此无需构造包装器。当主体是列表或字典时，它会以位置参数的方式传递：
+
+```python
+created = api.pet.batch_create([types.Pet(name="a"), types.Pet(name="b")])
+```
+
+### 类型
+
+每个模式都成为 `types` 中的 pydantic 模型，因此结果会被验证，你的编辑器知道它们的形状：
+
+```python
+from my_api import types
+
+pet = api.pet.add_pet(name="rex", owner=types.Owner(name="ann"))
+
+reveal_type(pet)         # types.Pet
+reveal_type(pet.owner)   # types.Owner | None
+```
+
+枚举成为 `Literal` 类型，因此无效值是类型错误而不是失败的请求：
+
+```python
+api.pet.list_pets(status=["available"])   # ok
+api.pet.list_pets(status=["on-mars"])     # rejected before it is sent
+```
+
+日期和日期时间在输入和输出时是 `datetime.date` / `datetime.datetime`——客户端处理 ISO-8601 转换：
+
+```python
+event = api.create_event(day=datetime.date(2026, 4, 18))
+reveal_type(event.day)   # datetime.date
+```
+
+### 错误
+
+非成功响应会引发异常。捕获 `ApiError` 以处理来自任一客户端的任何失败：
+
+```python
+from my_api import ApiError
+
+try:
+    pet = api.pet.get_pet_by_id(pet_id=42)
+except ApiError as e:
+    print(e.status, e.error)
+```
+
+每个操作也有自己的子类，其 `.error` 缩窄到该操作声明的响应。`isinstance` 挑选出一个状态：
+
+```python {8,11}
+from my_api import types
+from my_api.errors import GetPetByIdApiError
+
+try:
+    pet = api.pet.get_pet_by_id(pet_id=42)
+except GetPetByIdApiError as e:
+    if isinstance(e.error, types.GetPetById404Error):
+        print("no such pet:", e.error.error.detail)
+    elif isinstance(e.error, types.GetPetById5XXError):
+        print("server error:", e.error.error.message)
+```
+
+与规范声明的模式不匹配的主体仍然会引发类型化异常，携带服务器实际发送的内容——因此代理的 HTML 错误页面会作为错误而不是错误处理程序内部的验证失败出现。
+
+### 流式传输
+
+流式传输的操作返回已解析项的迭代器，因此你可以在响应到达时使用它：
+
+```python
+for chunk in api.stream_chunks(count=4):
+    print(chunk.index, chunk.message)
+```
+
+### 异步
+
+异步客户端镜像同步客户端，方法对方法：
+
+```python
+from my_api import AsyncMyApi, AsyncMyApiConfig
+
+async with AsyncMyApi(AsyncMyApiConfig(url=url)) as api:
+    pet = await api.pet.add_pet(name="rex")
+
+    async for chunk in api.stream_chunks(count=4):
+        print(chunk.message)
+```
+
+两个客户端都从同一层次结构引发，因此 `except ApiError` 可以捕获任一客户端。
+
+## 身份验证
+
+身份验证是每个 API 都不同的一件事，因此客户端不会为其发明抽象。提供你自己的 `httpx` 客户端，你在其上配置的任何内容都适用于每个请求：
+
+```python {6}
+import httpx
+from my_api import MyApi, MyApiConfig
+
+with httpx.Client(auth=MyAuth()) as http:
+    api = MyApi(MyApiConfig(url=url, httpx_client=http))
+    pet = api.pet.add_pet(name="rex")
+```
+
+这是将自定义 `fetch` 传递给 TypeScript 客户端的 Python 等效方式。[`httpx.Auth`](https://www.python-httpx.org/advanced/authentication/)、事件钩子、自定义传输、超时、重试、代理、HTTP/2 以及客户端自己的标头和查询参数都适用——包括在多部分上传和流式响应上。
+
+你提供的客户端永远不会被生成的客户端关闭，因此在多个客户端之间共享是安全的。
+
+<Drawer title="使用 AWS SigV4 签名请求" trigger="点击此处查看使用 AWS IAM 凭证签名请求的示例。">
+
+`httpx.Auth` 是签名者所需的全部。对于 IAM 身份验证后面的 API：
+
+```python
+import hashlib
+from collections.abc import Generator
+
+import boto3
+import httpx
+from botocore.auth import SigV4Auth
+from botocore.awsrequest import AWSRequest
+
+from my_api import MyApi, MyApiConfig
+
+
+class SigV4HTTPXAuth(httpx.Auth):
+    requires_request_body = True
+
+    def __init__(self, credentials, service: str, region: str):
+        self.signer = SigV4Auth(credentials, service, region)
+
+    def auth_flow(
+        self, request: httpx.Request
+    ) -> Generator[httpx.Request, httpx.Response]:
+        headers = dict(request.headers)
+        headers.pop("connection", None)
+        headers["x-amz-content-sha256"] = hashlib.sha256(
+            request.content or b""
+        ).hexdigest()
+
+        aws_request = AWSRequest(
+            method=request.method,
+            url=str(request.url),
+            data=request.content,
+            headers=headers,
+        )
+        self.signer.add_auth(aws_request)
+
+        request.headers.clear()
+        request.headers.update(dict(aws_request.headers))
+        yield request
+
+
+session = boto3.Session()
+auth = SigV4HTTPXAuth(session.get_credentials(), "execute-api", session.region_name)
+
+with httpx.Client(auth=auth) as http:
+    api = MyApi(MyApiConfig(url=url, httpx_client=http))
+    pet = api.pet.add_pet(name="rex")
+```
+
+</Drawer>
+
+### 其他配置
+
+`Config` 除了 URL 和客户端之外还携带少量选项：
+
+```python
+api = MyApi(
+    MyApiConfig(
+        url=url,
+        # Sent with every request, where the operation sets no header of its own
+        headers={"x-tenant-id": "acme"},
+        # Omit the Content-Type the specification declares for each request
+        omit_content_type_header=False,
+    )
+)
+```
+
+操作设置的标头始终优先于此处的相同标头，因此每次调用的值永远不会合并到配置的值中。
