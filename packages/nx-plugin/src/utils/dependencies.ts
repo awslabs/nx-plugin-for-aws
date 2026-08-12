@@ -158,19 +158,6 @@ export const addDependenciesToPackageJson = (
   return callback;
 };
 
-// Nx generators read these versions from the root manifest and coerce without
-// a null guard; Nx ships no bun catalog manager, so an unresolved `catalog:`
-// crashes them. Keep direct ranges on bun (react-dom pinned with react).
-const BUN_INTROSPECTED_PACKAGES = new Set<string>([
-  'vite',
-  'react',
-  'react-dom',
-]);
-
-const isCatalogExcluded = (tree: Tree, packageName: string): boolean =>
-  detectWorkspacePackageManager(tree) === 'bun' &&
-  BUN_INTROSPECTED_PACKAGES.has(packageName);
-
 // Convert direct version ranges to `catalog:` references in a single manifest
 // and record the range in the workspace catalog. Protocol specifiers
 // (catalog:/workspace:/...) are left alone.
@@ -185,11 +172,7 @@ const convertDependenciesToCatalog = (
     for (const field of ['dependencies', 'devDependencies'] as const) {
       for (const packageName of packageNames) {
         const version = json[field]?.[packageName];
-        if (
-          version &&
-          !version.includes(':') &&
-          !isCatalogExcluded(tree, packageName)
-        ) {
+        if (version && !version.includes(':')) {
           catalogUpdates[packageName] = version;
           json[field][packageName] = 'catalog:';
         }
