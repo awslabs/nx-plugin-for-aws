@@ -1,0 +1,254 @@
+---
+title: OpenAPI Python Client
+description: OpenAPI Pythonクライアントジェネレーターのリファレンスドキュメント
+generator: open-api#py-client
+---
+import { FileTree } from '@astrojs/starlight/components';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Drawer from '@components/drawer.astro';
+
+[httpx](https://www.python-httpx.org/)と[pydantic](https://docs.pydantic.dev/)をベースに構築された、任意のOpenAPI仕様に対応する型安全なPythonクライアントを生成します。
+
+このクライアントは`open-api#ts-client`ジェネレーターのPython版です：API毎に1つのクラス、キーワード専用メソッド、絞り込み可能な型付きエラー、そして単一の拡張ポイント（独自の`httpx`クライアント）により、認証やその他の通信に必要なものを実現します。
+
+## 使用方法
+
+<RunGenerator generator="open-api#py-client" />
+
+### オプション
+
+<GeneratorParameters generator="open-api#py-client" />
+
+## ジェネレーターの出力
+
+<FileTree>
+
+- \<outputPath>
+  - \_\_init\_\_.py クライアント、`ApiError`、`types`モジュールをエクスポート
+  - types.py 仕様内のすべてのスキーマに対応するpydanticモデル
+  - errors.py `ApiError`と操作毎のサブクラス
+  - client.py `httpx.Client`を使用する同期クライアント
+  - async_client.py `httpx.AsyncClient`を使用する非同期クライアント
+
+</FileTree>
+
+`--clientType=sync`または`--clientType=async`を渡すと、2つのクライアントのうち1つだけを出力します。
+
+:::tip[Gitでの生成クライアント]
+クライアントは仕様から再生成されるため、デフォルトではバージョン管理から除外されます。代わりにチェックインするには、`.gitignore`からエントリを削除してください。ただし、手動で編集した内容は次回の生成時に上書きされることに注意してください。
+:::
+
+### 依存関係
+
+生成されたコードは`httpx`と`pydantic`をインポートするため、生成先のプロジェクトに両方を追加してください：
+
+```toml
+# pyproject.toml
+dependencies = [
+  "httpx>=0.28.1",
+  "pydantic>=2.13.4",
+]
+```
+
+それ以外は何も必要ありません。独自のランタイムも、採用すべきフレームワークもありません。
+
+## 生成されたクライアントの使用
+
+APIのベースURLでクライアントをインスタンス化します：
+
+```python
+from my_api import MyApi, MyApiConfig
+
+api = MyApi(MyApiConfig(url="https://api.example.com"))
+
+pet = api.pet.add_pet(name="rex", status="available")
+print(pet.id, pet.name)
+```
+
+メソッドは**キーワード専用**なので、呼び出しは仕様と同じように読め、必須パラメーターが最初に来ます：
+
+```python
+pets = api.pet.list_pets(status=["available"], limit=10)
+pet = api.pet.get_pet_by_id(pet_id=42)
+api.pet.delete_pet(pet_id=42)
+```
+
+仕様でタグ付けされた操作は名前空間にグループ化されます。上記の`api.pet.add_pet(...)`は`pet`タグから来ています。タグなしの操作は`api.health()`のようにクライアント上に直接配置されます。
+
+ボディがオブジェクトである操作は、そのフィールドが呼び出しにフラット化されるため、ラッパーを構築する必要はありません。ボディがリストまたは辞書の場合は、代わりに位置引数として渡されます：
+
+```python
+created = api.pet.batch_create([types.Pet(name="a"), types.Pet(name="b")])
+```
+
+### 型
+
+すべてのスキーマは`types`内のpydanticモデルになるため、結果は検証され、エディターがその形状を認識します：
+
+```python
+from my_api import types
+
+pet = api.pet.add_pet(name="rex", owner=types.Owner(name="ann"))
+
+reveal_type(pet)         # types.Pet
+reveal_type(pet.owner)   # types.Owner | None
+```
+
+列挙型は`Literal`型になるため、無効な値は失敗したリクエストではなく型エラーになります：
+
+```python
+api.pet.list_pets(status=["available"])   # ok
+api.pet.list_pets(status=["on-mars"])     # rejected before it is sent
+```
+
+日付と日時は入出力時に`datetime.date` / `datetime.datetime`になります。クライアントがISO-8601変換を処理します：
+
+```python
+event = api.create_event(day=datetime.date(2026, 4, 18))
+reveal_type(event.day)   # datetime.date
+```
+
+### エラー
+
+成功以外のレスポンスは例外を発生させます。`ApiError`をキャッチして、どちらのクライアントからの失敗も処理します：
+
+```python
+from my_api import ApiError
+
+try:
+    pet = api.pet.get_pet_by_id(pet_id=42)
+except ApiError as e:
+    print(e.status, e.error)
+```
+
+各操作には独自のサブクラスもあり、その`.error`はその操作が宣言するレスポンスに絞り込まれます。`isinstance`で1つのステータスを選び出します：
+
+```python {8,11}
+from my_api import types
+from my_api.errors import GetPetByIdApiError
+
+try:
+    pet = api.pet.get_pet_by_id(pet_id=42)
+except GetPetByIdApiError as e:
+    if isinstance(e.error, types.GetPetById404Error):
+        print("no such pet:", e.error.error.detail)
+    elif isinstance(e.error, types.GetPetById5XXError):
+        print("server error:", e.error.error.message)
+```
+
+仕様が宣言するスキーマと一致しないボディでも、型付き例外が発生し、サーバーが実際に送信したものを運びます。そのため、プロキシのHTMLエラーページは、エラーハンドラー内の検証失敗ではなく、エラーとして表面化します。
+
+### ストリーミング
+
+ストリーミングする操作は、解析されたアイテムのイテレーターを返すため、到着したレスポンスを消費できます：
+
+```python
+for chunk in api.stream_chunks(count=4):
+    print(chunk.index, chunk.message)
+```
+
+### 非同期
+
+非同期クライアントは同期クライアントをメソッド毎にミラーリングします：
+
+```python
+from my_api import AsyncMyApi, AsyncMyApiConfig
+
+async with AsyncMyApi(AsyncMyApiConfig(url=url)) as api:
+    pet = await api.pet.add_pet(name="rex")
+
+    async for chunk in api.stream_chunks(count=4):
+        print(chunk.message)
+```
+
+両方のクライアントは同じ階層から発生するため、`except ApiError`はどちらもキャッチします。
+
+## 認証
+
+認証はすべてのAPIが異なる方法で行うものなので、クライアントはそのための抽象化を発明しません。独自の`httpx`クライアントを提供すると、そこで設定したものがすべてのリクエストに適用されます：
+
+```python {6}
+import httpx
+from my_api import MyApi, MyApiConfig
+
+with httpx.Client(auth=MyAuth()) as http:
+    api = MyApi(MyApiConfig(url=url, httpx_client=http))
+    pet = api.pet.add_pet(name="rex")
+```
+
+これはTypeScriptクライアントにカスタム`fetch`を渡すのと同等のPython版です。[`httpx.Auth`](https://www.python-httpx.org/advanced/authentication/)、イベントフック、カスタムトランスポート、タイムアウト、リトライ、プロキシ、HTTP/2、およびクライアント独自のヘッダーとクエリパラメーターがすべて適用されます。マルチパートアップロードやストリーミングレスポンスでも同様です。
+
+提供したクライアントは生成されたクライアントによって閉じられることはないため、複数のクライアント間で安全に共有できます。
+
+<Drawer title="AWS SigV4でリクエストに署名する" trigger="AWS IAM認証情報でリクエストに署名する例については、ここをクリックしてください。">
+
+`httpx.Auth`は署名者が必要とするすべてです。IAM認証の背後にあるAPIの場合：
+
+```python
+import hashlib
+from collections.abc import Generator
+
+import boto3
+import httpx
+from botocore.auth import SigV4Auth
+from botocore.awsrequest import AWSRequest
+
+from my_api import MyApi, MyApiConfig
+
+
+class SigV4HTTPXAuth(httpx.Auth):
+    requires_request_body = True
+
+    def __init__(self, credentials, service: str, region: str):
+        self.signer = SigV4Auth(credentials, service, region)
+
+    def auth_flow(
+        self, request: httpx.Request
+    ) -> Generator[httpx.Request, httpx.Response]:
+        headers = dict(request.headers)
+        headers.pop("connection", None)
+        headers["x-amz-content-sha256"] = hashlib.sha256(
+            request.content or b""
+        ).hexdigest()
+
+        aws_request = AWSRequest(
+            method=request.method,
+            url=str(request.url),
+            data=request.content,
+            headers=headers,
+        )
+        self.signer.add_auth(aws_request)
+
+        request.headers.clear()
+        request.headers.update(dict(aws_request.headers))
+        yield request
+
+
+session = boto3.Session()
+auth = SigV4HTTPXAuth(session.get_credentials(), "execute-api", session.region_name)
+
+with httpx.Client(auth=auth) as http:
+    api = MyApi(MyApiConfig(url=url, httpx_client=http))
+    pet = api.pet.add_pet(name="rex")
+```
+
+</Drawer>
+
+### その他の設定
+
+`Config`は、URLとクライアント以外にも少数のオプションを持ちます：
+
+```python
+api = MyApi(
+    MyApiConfig(
+        url=url,
+        # Sent with every request, where the operation sets no header of its own
+        headers={"x-tenant-id": "acme"},
+        # Omit the Content-Type the specification declares for each request
+        omit_content_type_header=False,
+    )
+)
+```
+
+操作が設定するヘッダーは常にここの同じヘッダーに優先するため、呼び出し毎の値が設定された値にマージされることはありません。
