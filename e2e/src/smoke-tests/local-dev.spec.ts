@@ -24,6 +24,14 @@ const STARTUP_TIMEOUT_MS = 120_000;
 const HEALTH_CHECK_INTERVAL_MS = 2_000;
 const LLM_MOCK_PORT = 19823;
 
+// Exact versions for the OpenAI clients the agents are patched onto below. These
+// are pinned because the latest releases are not mutually resolvable: the npm
+// `openai` 7.x major is outside the `@strands-agents/sdk` peer range, and the
+// PyPI `openai` 3.x major is outside the range `langchain-openai` accepts.
+const OPENAI_NPM_VERSION = '6.49.0';
+const OPENAI_PY_VERSION = '2.54.0';
+const LANGCHAIN_OPENAI_PY_VERSION = '1.4.3';
+
 // The APIs the dev website is connected to, with the class names
 // matching their vended `use<ClassName>Client` hooks.
 const WEBSITE_APIS: ApiSpec[] = [
@@ -689,13 +697,16 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
 
       // Install openai dep for agents. TS projects declare their dependencies
       // at the workspace root, so install it there.
-      await runCLI(`pnpm add openai -w`, {
+      await runCLI(`pnpm add openai@${OPENAI_NPM_VERSION} -w`, {
         cwd: projectRoot,
         prefixWithPackageManagerCmd: false,
       });
-      await runCLI(`run local_dev_test.py_project:add -- openai`, opts);
       await runCLI(
-        `run local_dev_test.py_project:add -- langchain-openai`,
+        `run local_dev_test.py_project:add -- openai==${OPENAI_PY_VERSION}`,
+        opts,
+      );
+      await runCLI(
+        `run local_dev_test.py_project:add -- langchain-openai==${LANGCHAIN_OPENAI_PY_VERSION}`,
         opts,
       );
 
