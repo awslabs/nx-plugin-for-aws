@@ -2,9 +2,9 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
-import { Spec } from '../utils/types';
+import type { Tree } from '@nx/devkit';
 import { PythonVerifier } from '../../utils/test/py.spec';
+import type { Spec } from '../utils/types';
 import {
   callGeneratedClient,
   callGeneratedClientAsync,
@@ -80,8 +80,8 @@ describe('openApiPyClientGenerator - requests', () => {
       },
     };
     const { types, client } = await generateAndRead(verifier, tree, spec);
-    expect(types).toMatchSnapshot('types_gen.py');
-    expect(client).toMatchSnapshot('client_gen.py');
+    expect(types).toMatchSnapshot('types.py');
+    expect(client).toMatchSnapshot('client.py');
 
     const res = await callGeneratedClient(
       verifier,

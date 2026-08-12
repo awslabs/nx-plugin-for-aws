@@ -290,7 +290,7 @@ def _resolve_invoke(module_kind: str, mod: types.ModuleType) -> tuple[Any, str]:
     starts with "Async" still resolves to the right client.
     """
     is_async = module_kind == "async"
-    wanted_module = "async_client_gen" if is_async else "client_gen"
+    wanted_module = "async_client" if is_async else "client"
     for name in getattr(mod, "__all__", []) or dir(mod):
         if not isinstance(name, str):
             continue
@@ -300,9 +300,9 @@ def _resolve_invoke(module_kind: str, mod: types.ModuleType) -> tuple[Any, str]:
         defining_module = getattr(obj, "__module__", "")
         if not defining_module.endswith(wanted_module):
             continue
-        # `client_gen` also ends `async_client_gen`, so the sync client is the
+        # `client` also ends `async_client`, so the sync client is the
         # one whose module isn't the async module.
-        if not is_async and defining_module.endswith("async_client_gen"):
+        if not is_async and defining_module.endswith("async_client"):
             continue
         return obj, name
     raise RuntimeError(

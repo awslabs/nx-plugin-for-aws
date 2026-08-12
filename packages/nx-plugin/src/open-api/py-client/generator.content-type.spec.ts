@@ -2,9 +2,9 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
-import { Spec } from '../utils/types';
+import type { Tree } from '@nx/devkit';
 import { PythonVerifier } from '../../utils/test/py.spec';
+import type { Spec } from '../utils/types';
 import {
   callGeneratedClient,
   createTree,
@@ -109,7 +109,7 @@ describe('openApiPyClientGenerator - content types', () => {
   });
 
   it('routes multipart/form-data bodies through httpx `files=`/`data=`', async () => {
-    // Regression: multipart bodies used to emit `body: types_gen.unknown`
+    // Regression: multipart bodies used to emit `body: types.unknown`
     // (non-existent type) with a JSON-encoded body.  They must produce a
     // single `body` kwarg whose contents are routed through httpx's
     // multipart machinery so the wire payload is actually multipart.
@@ -141,8 +141,8 @@ describe('openApiPyClientGenerator - content types', () => {
       },
     };
     const { client } = await generateAndRead(verifier, tree, spec);
-    // Must not reference the phantom `types_gen.unknown`/`types_gen.Unknown`.
-    expect(client).not.toMatch(/types_gen\.[Uu]nknown/);
+    // Must not reference the phantom `types.unknown`/`types.Unknown`.
+    expect(client).not.toMatch(/types\.[Uu]nknown/);
     // Must not JSON-encode a multipart body.
     expect(client).not.toMatch(/"json": body[\s\S]*?multipart\/form-data/);
     // Must route the body through `files=`/`data=` (the multipart branch).

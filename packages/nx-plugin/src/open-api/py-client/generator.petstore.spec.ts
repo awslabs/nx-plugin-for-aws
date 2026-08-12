@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
+import type { Tree } from '@nx/devkit';
 import { PythonVerifier } from '../../utils/test/py.spec';
 import { PET_STORE_SPEC } from '../ts-client/generator.petstore.spec';
 import {
@@ -34,9 +34,9 @@ describe('openApiPyClientGenerator - petstore', () => {
       tree,
       PET_STORE_SPEC,
     );
-    expect(types).toMatchSnapshot('types_gen.py');
-    expect(client).toMatchSnapshot('client_gen.py');
-    expect(asyncClient).toMatchSnapshot('async_client_gen.py');
+    expect(types).toMatchSnapshot('types.py');
+    expect(client).toMatchSnapshot('client.py');
+    expect(asyncClient).toMatchSnapshot('async_client.py');
   });
 
   it('should surface tag namespaces for addPet, findPetsByStatus, deletePet', async () => {

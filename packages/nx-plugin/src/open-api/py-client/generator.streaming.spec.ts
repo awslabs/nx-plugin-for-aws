@@ -76,9 +76,9 @@ describe('openApiPyClientGenerator - streaming', () => {
 
   it('should detect and handle application/jsonl with itemSchema', async () => {
     const { types, client } = await generateAndRead(verifier, tree, jsonlSpec);
-    expect(types).toMatchSnapshot('types_gen.py');
-    expect(client).toMatchSnapshot('client_gen.py');
-    expect(client).toContain('Iterator[types_gen.Chunk]');
+    expect(types).toMatchSnapshot('types.py');
+    expect(client).toMatchSnapshot('client.py');
+    expect(client).toContain('Iterator[types.Chunk]');
     expect(client).toContain('model_validate_json');
 
     const res = await callGeneratedClientStreaming(
@@ -132,7 +132,7 @@ describe('openApiPyClientGenerator - streaming', () => {
       },
     };
     const { client } = await generateAndRead(verifier, tree, spec);
-    expect(client).toContain('Iterator[types_gen.Chunk]');
+    expect(client).toContain('Iterator[types.Chunk]');
 
     const res = await callGeneratedClientStreaming(
       verifier,
@@ -165,7 +165,7 @@ describe('openApiPyClientGenerator - streaming', () => {
 
   it('should emit AsyncIterator on the async client', async () => {
     const { asyncClient } = await generateAndRead(verifier, tree, jsonlSpec);
-    expect(asyncClient).toContain('AsyncIterator[types_gen.Chunk]');
+    expect(asyncClient).toContain('AsyncIterator[types.Chunk]');
   });
 
   // A primitive item schema has no `model_validate_json`, so it goes through a
@@ -253,7 +253,7 @@ describe('openApiPyClientGenerator - streaming', () => {
       },
     };
     const { client } = await generateAndRead(verifier, tree, spec);
-    expect(client).toContain('Iterator[types_gen.Chunk]');
+    expect(client).toContain('Iterator[types.Chunk]');
 
     const models = await callGeneratedClientStreaming(
       verifier,

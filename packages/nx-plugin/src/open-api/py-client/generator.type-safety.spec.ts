@@ -304,8 +304,8 @@ from __future__ import annotations
 
 import datetime
 
-from . import types_gen as t
-from .client_gen import TypeSafetyApi, TypeSafetyApiConfig
+from . import types as t
+from .client import TypeSafetyApi, TypeSafetyApiConfig
 from .errors import AddPetApiError, ApiError
 
 
@@ -455,8 +455,8 @@ const usageModule = (body: string) =>
     '',
     'import datetime',
     '',
-    'from . import types_gen as t  # noqa: F401',
-    'from .client_gen import TypeSafetyApi, TypeSafetyApiConfig',
+    'from . import types as t  # noqa: F401',
+    'from .client import TypeSafetyApi, TypeSafetyApiConfig',
     'from .errors import AddPetApiError, ApiError  # noqa: F401',
     '',
     '',
