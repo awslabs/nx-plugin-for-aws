@@ -2,9 +2,14 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+import { execFileSync } from 'node:child_process';
+import { join } from 'node:path';
 import { logger } from '@nx/devkit';
 import { smithyCliCommand, warnIfSmithyMissing } from './smithy';
 import { MISE_VERSIONS, TS_VERSIONS } from './versions';
+
+/** Repo root, from `packages/nx-plugin/src/utils`. */
+const REPO_ROOT = join(__dirname, '../../../..');
 
 /**
  * The Windows behaviour, which CI cannot exercise from a Linux runner: `mise`
@@ -49,6 +54,24 @@ describe('smithyCliCommand', () => {
       expect(command).toContain(`mise@${TS_VERSIONS.mise}`);
       expect(command).toContain(`smithy@${MISE_VERSIONS.smithy}`);
     });
+  });
+
+  /**
+   * CI prepares the Smithy CLI before running any build, reading both pins out
+   * of `versions.ts` with `.github/scripts/tool-pins.mjs` (it runs before
+   * `pnpm i`, so it cannot import the module). That parse is by regex, so a
+   * reshape of either declaration would leave CI silently preparing nothing —
+   * caught here rather than by a flaky Smithy compile.
+   */
+  it('should expose both pins to the ci tool-pin script', () => {
+    const output = execFileSync(
+      process.execPath,
+      [join(REPO_ROOT, '.github/scripts/tool-pins.mjs')],
+      { cwd: REPO_ROOT, encoding: 'utf-8' },
+    );
+
+    expect(output).toContain(`smithy-version=${MISE_VERSIONS.smithy}\n`);
+    expect(output).toContain(`mise-version=${TS_VERSIONS.mise}\n`);
   });
 
   it('should invoke the cli directly on windows', () => {
