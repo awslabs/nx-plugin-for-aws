@@ -377,6 +377,13 @@ dev-dependencies = []
       'utf-8',
     );
     expect(mainContent).toContain('A2AServer');
+    expect(mainContent).toContain('async def lifespan(app: FastAPI)');
+    expect(mainContent).toContain('with_session_id(');
+    expect(mainContent).toContain('app.state.agent = agent');
+    expect(mainContent).toContain(
+      'agent_factory=lambda _context_id: getattr(app.state, "agent", _card_placeholder)',
+    );
+    expect(mainContent).not.toContain('agent=_agent');
     expect(mainContent).toContain('to_fastapi_app');
     expect(mainContent).toContain('AGENTCORE_RUNTIME_URL');
     expect(mainContent).toContain('http_url');
