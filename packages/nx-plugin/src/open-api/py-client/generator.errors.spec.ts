@@ -115,8 +115,8 @@ describe('openApiPyClientGenerator - errors', () => {
       tree,
       errorSpec,
     );
-    expect(types).toMatchSnapshot('types_gen.py');
-    expect(client).toMatchSnapshot('client_gen.py');
+    expect(types).toMatchSnapshot('types.py');
+    expect(client).toMatchSnapshot('client.py');
     expect(errors).toContain('class GetPetApiError(ApiError)');
     expect(types).toContain('class GetPet404Error(BaseModel)');
     expect(types).toContain('class GetPet5XXError(BaseModel)');

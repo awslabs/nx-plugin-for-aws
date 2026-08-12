@@ -363,7 +363,7 @@ const annotateRequestAndErrorShapes = (
   op.errorShape = buildErrorShape(op);
 };
 
-const TYPES_GEN_PREFIX = 'types_gen.';
+const TYPES_GEN_PREFIX = 'types.';
 
 /**
  * Attributes and methods the generated Python client defines on itself. An
@@ -429,7 +429,7 @@ const annotatePythonMemberNames = (data: CodeGenData): void => {
 
 /**
  * Attach `pythonClientType` to a typed entry — the bare `pythonType`
- * qualified with `types_gen.` so client templates can reference model
+ * qualified with `types.` so client templates can reference model
  * classes through a single import.
  */
 const annotatePythonClientType = (entry: Model | undefined): void => {

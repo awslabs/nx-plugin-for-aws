@@ -51,38 +51,38 @@ describe('openApiPyClientGenerator', () => {
       outputPath: 'src/generated',
     });
     expect(tree.exists('src/generated/__init__.py')).toBe(true);
-    expect(tree.exists('src/generated/types_gen.py')).toBe(true);
-    expect(tree.exists('src/generated/client_gen.py')).toBe(true);
-    expect(tree.exists('src/generated/async_client_gen.py')).toBe(true);
+    expect(tree.exists('src/generated/types.py')).toBe(true);
+    expect(tree.exists('src/generated/client.py')).toBe(true);
+    expect(tree.exists('src/generated/async_client.py')).toBe(true);
   });
 
-  it('omits async_client_gen.py when clientType is "sync"', async () => {
+  it('omits async_client.py when clientType is "sync"', async () => {
     tree.write('openapi.json', JSON.stringify(trivialSpec));
     await openApiPyClientGenerator(tree, {
       openApiSpecPath: 'openapi.json',
       outputPath: 'src/generated',
       clientType: 'sync',
     });
-    expect(tree.exists('src/generated/client_gen.py')).toBe(true);
-    expect(tree.exists('src/generated/async_client_gen.py')).toBe(false);
+    expect(tree.exists('src/generated/client.py')).toBe(true);
+    expect(tree.exists('src/generated/async_client.py')).toBe(false);
     // The package must only export what it emitted, or importing it fails.
     const init = tree.read('src/generated/__init__.py', 'utf-8') ?? '';
-    expect(init).toContain('from .client_gen import TestApi');
-    expect(init).not.toContain('async_client_gen');
+    expect(init).toContain('from .client import TestApi');
+    expect(init).not.toContain('async_client');
   });
 
-  it('omits client_gen.py when clientType is "async"', async () => {
+  it('omits client.py when clientType is "async"', async () => {
     tree.write('openapi.json', JSON.stringify(trivialSpec));
     await openApiPyClientGenerator(tree, {
       openApiSpecPath: 'openapi.json',
       outputPath: 'src/generated',
       clientType: 'async',
     });
-    expect(tree.exists('src/generated/client_gen.py')).toBe(false);
-    expect(tree.exists('src/generated/async_client_gen.py')).toBe(true);
+    expect(tree.exists('src/generated/client.py')).toBe(false);
+    expect(tree.exists('src/generated/async_client.py')).toBe(true);
     const init = tree.read('src/generated/__init__.py', 'utf-8') ?? '';
-    expect(init).toContain('from .async_client_gen import AsyncTestApi');
-    expect(init).not.toMatch(/from \.client_gen import/);
+    expect(init).toContain('from .async_client import AsyncTestApi');
+    expect(init).not.toMatch(/from \.client import/);
   });
 
   // The errors module is shared by both clients, so it is emitted whichever

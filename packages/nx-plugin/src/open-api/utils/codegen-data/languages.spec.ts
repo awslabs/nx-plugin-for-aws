@@ -212,21 +212,17 @@ describe('languages', () => {
 
   describe('qualifyPythonType', () => {
     it('prefixes user-defined names', () => {
-      expect(qualifyPythonType('Pet', 'types_gen.')).toBe('types_gen.Pet');
-      expect(qualifyPythonType('list[Pet]', 'types_gen.')).toBe(
-        'list[types_gen.Pet]',
-      );
-      expect(qualifyPythonType('dict[str, Pet]', 'types_gen.')).toBe(
-        'dict[str, types_gen.Pet]',
+      expect(qualifyPythonType('Pet', 'types.')).toBe('types.Pet');
+      expect(qualifyPythonType('list[Pet]', 'types.')).toBe('list[types.Pet]');
+      expect(qualifyPythonType('dict[str, Pet]', 'types.')).toBe(
+        'dict[str, types.Pet]',
       );
     });
 
     it('leaves built-ins and Literals untouched', () => {
-      expect(qualifyPythonType('str', 'types_gen.')).toBe('str');
-      expect(qualifyPythonType('list[int]', 'types_gen.')).toBe('list[int]');
-      expect(qualifyPythonType('Literal["a"]', 'types_gen.')).toBe(
-        'Literal["a"]',
-      );
+      expect(qualifyPythonType('str', 'types.')).toBe('str');
+      expect(qualifyPythonType('list[int]', 'types.')).toBe('list[int]');
+      expect(qualifyPythonType('Literal["a"]', 'types.')).toBe('Literal["a"]');
     });
   });
 

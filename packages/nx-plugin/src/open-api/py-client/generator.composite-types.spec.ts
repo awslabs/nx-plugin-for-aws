@@ -2,9 +2,9 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { Tree } from '@nx/devkit';
-import { Spec } from '../utils/types';
+import type { Tree } from '@nx/devkit';
 import { PythonVerifier } from '../../utils/test/py.spec';
+import type { Spec } from '../utils/types';
 import {
   callGeneratedClient,
   createTree,
@@ -69,7 +69,7 @@ describe('openApiPyClientGenerator - composite types', () => {
       },
     };
     const { types } = await generateAndRead(verifier, tree, spec);
-    expect(types).toMatchSnapshot('types_gen.py');
+    expect(types).toMatchSnapshot('types.py');
     expect(types).toMatch(/Union\[.*str.*int.*\]|str \| int/);
 
     const res = await callGeneratedClient(
@@ -116,7 +116,7 @@ describe('openApiPyClientGenerator - composite types', () => {
       },
     };
     const { types } = await generateAndRead(verifier, tree, spec);
-    expect(types).toMatchSnapshot('types_gen.py');
+    expect(types).toMatchSnapshot('types.py');
   });
 
   it('should flatten allOf inheritance into a single pydantic class', async () => {
@@ -169,8 +169,8 @@ describe('openApiPyClientGenerator - composite types', () => {
       },
     };
     const { types, client } = await generateAndRead(verifier, tree, spec);
-    expect(types).toMatchSnapshot('types_gen.py');
-    expect(client).toMatchSnapshot('client_gen.py');
+    expect(types).toMatchSnapshot('types.py');
+    expect(client).toMatchSnapshot('client.py');
     // Fields from both composed models end up on the Dog class.
     expect(types).toMatch(/class Dog\(BaseModel\)/);
     expect(types).toMatch(/name:\s*str/);
@@ -232,7 +232,7 @@ describe('openApiPyClientGenerator - composite types', () => {
       },
     };
     const { types } = await generateAndRead(verifier, tree, spec);
-    expect(types).toMatchSnapshot('types_gen.py');
+    expect(types).toMatchSnapshot('types.py');
 
     const payload = {
       value: 1,
@@ -325,9 +325,9 @@ describe('openApiPyClientGenerator - composite types', () => {
 
     // Client uses TypeAdapter, not `.model_validate`.
     expect(client).toContain(
-      'TypeAdapter(types_gen.Animal).validate_python(response.json())',
+      'TypeAdapter(types.Animal).validate_python(response.json())',
     );
-    expect(client).not.toMatch(/types_gen\.Animal\.model_validate\(/);
+    expect(client).not.toMatch(/types\.Animal\.model_validate\(/);
 
     // Single-Union body ops take body positionally.
     const res = await callGeneratedClient(
@@ -371,9 +371,9 @@ describe('openApiPyClientGenerator - composite types', () => {
     };
     const { client } = await generateAndRead(verifier, tree, spec);
     expect(client).toContain(
-      'TypeAdapter(types_gen.Version).validate_python(response.json())',
+      'TypeAdapter(types.Version).validate_python(response.json())',
     );
-    expect(client).not.toMatch(/types_gen\.Version\.model_validate\(/);
+    expect(client).not.toMatch(/types\.Version\.model_validate\(/);
 
     const res = await callGeneratedClient(
       verifier,

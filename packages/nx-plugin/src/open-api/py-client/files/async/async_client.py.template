@@ -159,7 +159,7 @@ const renderTypedRaise = (op, resp) => {
     `raise ${cls}(\n` +
     `                response.status_code,\n` +
     `                self._error(\n` +
-    `                    types_gen.${entry.className}, ${statusExpr}, ${payload}\n` +
+    `                    types.${entry.className}, ${statusExpr}, ${payload}\n` +
     `                ),\n` +
     `            )`
   );
@@ -208,8 +208,8 @@ const hasMultipartBody = allOperations.some(op => {
 });
 // Render the `self._url(...)` expression for an operation, including matrix/
 // label path styles when declared.
-const urlExpr = (op, styledPathInputs) => {
-  let expr = `self._url("${op.path}", path_params`;
+const urlExpr = (op, pathInputs, styledPathInputs) => {
+  let expr = `self._url("${op.path}", ${pathInputs.length > 0 ? "path_params" : "{}"}`;
   if (styledPathInputs.length > 0) {
     expr += `, path_styles={${styledPathInputs.map(k => `"${k.source.wireName}": ("${k.model.pathStyle}", ${k.model.pathExplode ? 'True' : 'False'})`).join(', ')}}`;
   }
@@ -234,11 +234,13 @@ from urllib.parse import quote
 import httpx
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
-from . import types_gen
-from .errors import ApiError as ApiError
+from . import types
+from .errors import (
+    ApiError as ApiError,
 <%_ allOperations.forEach((op) => { _%>
-from .errors import <%- op.errorShape.exceptionClassName %> as <%- op.errorShape.exceptionClassName %>
+    <%- op.errorShape.exceptionClassName %> as <%- op.errorShape.exceptionClassName %>,
 <%_ }); _%>
+)
 
 _ErrorT = TypeVar("_ErrorT", bound=BaseModel)
 
@@ -370,9 +372,13 @@ class Async<%- className %>:
                 out[key] = self._scalar(value)
         return out
 
-    def _headers(self, header_params: dict[str, Any], collection_formats: Optional[dict[str, str]] = None) -> list[tuple[str, str]]:
+    def _headers(
+        self,
+        header_params: Optional[dict[str, Any]] = None,
+        collection_formats: Optional[dict[str, str]] = None,
+    ) -> list[tuple[str, str]]:
         out: list[tuple[str, str]] = []
-        for key, value in header_params.items():
+        for key, value in (header_params or {}).items():
             if value is None:
                 continue
             if isinstance(value, list):
@@ -512,6 +518,8 @@ class Async<%- className %>:
   const styledPathInputs = pathInputs.filter(k => k.model.pathStyle);
   const reservedInputs = queryInputs.filter(k => k.model.allowReserved);
   const partContentTypes = (op.parametersBody && op.parametersBody.partContentTypes) || undefined;
+  // Whether the operation writes a Content-Type into `header_params`.
+  const sendsContentType = !!bodyMediaType && !bodyIsMultipart;
   const hasTag = (op.tags && op.tags.length > 0);
   const methodPrefix = hasTag ? '_' : '';
 _%>
@@ -529,10 +537,18 @@ _%>
             stacklevel=2,
         )
 <%_ } _%>
+<%_ if (pathInputs.length > 0) { _%>
         path_params: dict[str, Any] = {<%_ pathInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %>"<%- k.source.wireName %>": <%- k.pythonName %><%_ }); _%>}
+<%_ } _%>
+<%_ if (queryInputs.length > 0) { _%>
         query_params: dict[str, Any] = {<%_ queryInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %>"<%- k.source.wireName %>": <%- k.pythonName %><%_ }); _%>}
+<%_ } _%>
+<%_ if (headerInputs.length > 0 || sendsContentType) { _%>
         header_params: dict[str, Any] = {<%_ headerInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %>"<%- k.source.wireName %>": <%- k.pythonName %><%_ }); _%>}
+<%_ } _%>
+<%_ if (cookieInputs.length > 0) { _%>
         cookie_params: dict[str, Any] = {<%_ cookieInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %>"<%- k.source.wireName %>": <%- k.pythonName %><%_ }); _%>}
+<%_ } _%>
 <%_ /* A content-based parameter (declared with `content` rather than
        `schema`) is serialised to its media type — JSON — as a single value. */ _%>
 <%_ contentJsonInputs.forEach((k) => {
@@ -546,13 +562,9 @@ _%>
        may share a name while declaring different collection formats. */ _%>
 <%_ if (queryCollectionInputs.length > 0) { _%>
         query_formats: Optional[dict[str, str]] = {<%_ queryCollectionInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %>"<%- k.source.wireName %>": "<%- k.source.collectionFormat %>"<%_ }); _%>}
-<%_ } else { _%>
-        query_formats: Optional[dict[str, str]] = None
 <%_ } _%>
 <%_ if (headerCollectionInputs.length > 0) { _%>
         header_formats: Optional[dict[str, str]] = {<%_ headerCollectionInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %>"<%- k.source.wireName %>": "<%- k.source.collectionFormat %>"<%_ }); _%>}
-<%_ } else { _%>
-        header_formats: Optional[dict[str, str]] = None
 <%_ } _%>
 <%_ if (shape.bodyFromFields) { _%>
         _body_fields: dict[str, Any] = {}
@@ -573,7 +585,7 @@ _%>
         # repeated keys); None fields were already omitted above.
         request_kwargs: dict[str, Any] = {"data": {k: self._dump(v) for k, v in _body_fields.items()}}
 <%_ } else { _%>
-        body = types_gen.<%- shape.bodyFromFields.model.pythonClassName %>.model_validate(
+        body = types.<%- shape.bodyFromFields.model.pythonClassName %>.model_validate(
             _body_fields
         ).model_dump(mode="json", by_alias=True, exclude_unset=True)
         request_kwargs: dict[str, Any] = {"json": body}
@@ -620,31 +632,32 @@ _%>
 <%_ } _%>
 <%_ } _%>
 <%_ } else { _%>
-        body = None
         request_kwargs: dict[str, Any] = {}
 <%_ } _%>
 <%_ if (reservedInputs.length > 0) { _%>
 <%_ /* allowReserved query parameters keep reserved characters literal, so the
        query string is built manually and appended to the URL — httpx would
        percent-encode values passed via `params=`. */ _%>
-        _qs = self._query_string(query_params, query_formats, {<%_ reservedInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %>"<%- k.source.wireName %>"<%_ }); _%>})
-        _request_url = <%- urlExpr(op, styledPathInputs) %> + ("?" + _qs if _qs else "")
+        _qs = self._query_string(<%- queryInputs.length > 0 ? "query_params" : "{}" %>, <%- queryCollectionInputs.length > 0 ? "query_formats" : "None" %>, {<%_ reservedInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %>"<%- k.source.wireName %>"<%_ }); _%>})
+        _request_url = <%- urlExpr(op, pathInputs, styledPathInputs) %> + ("?" + _qs if _qs else "")
 <%_ } else { _%>
-        _request_url = <%- urlExpr(op, styledPathInputs) %>
+        _request_url = <%- urlExpr(op, pathInputs, styledPathInputs) %>
 <%_ } _%>
 <%_ if (op.isStreaming) { _%>
 <%_ if (reservedInputs.length === 0) { _%>
         async with self._client.stream(
             "<%- op.method %>",
             _request_url,
-            params=self._query(query_params, query_formats),
+<%_ if (queryInputs.length > 0) { _%>
+            params=self._query(query_params<%- queryCollectionInputs.length > 0 ? ", query_formats" : "" %>),
+<%_ } _%>
 <%_ } else { _%>
         async with self._stream_with_url(
             _request_url,
             method="<%- op.method %>",
             url=_request_url,
 <%_ } _%>
-            headers=self._headers(header_params, header_formats),
+            headers=self._headers(<%- headerInputs.length > 0 || sendsContentType ? `header_params${headerCollectionInputs.length > 0 ? ", header_formats" : ""}` : "" %>),
 <%_ if (cookieInputs.length > 0) { _%>
             cookies=self._cookies(cookie_params),
 <%_ } _%>
@@ -687,14 +700,16 @@ _%>
         response = await self._client.request(
             "<%- op.method %>",
             _request_url,
-            params=self._query(query_params, query_formats),
+<%_ if (queryInputs.length > 0) { _%>
+            params=self._query(query_params<%- queryCollectionInputs.length > 0 ? ", query_formats" : "" %>),
+<%_ } _%>
 <%_ } else { _%>
         response = await self._send_with_url(
             _request_url,
             method="<%- op.method %>",
             url=_request_url,
 <%_ } _%>
-            headers=self._headers(header_params, header_formats),
+            headers=self._headers(<%- headerInputs.length > 0 || sendsContentType ? `header_params${headerCollectionInputs.length > 0 ? ", header_formats" : ""}` : "" %>),
 <%_ if (cookieInputs.length > 0) { _%>
             cookies=self._cookies(cookie_params),
 <%_ } _%>

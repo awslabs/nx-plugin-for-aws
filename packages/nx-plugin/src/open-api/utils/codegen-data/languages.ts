@@ -113,16 +113,16 @@ const PYTHON_BUILTIN_TYPES = new Set([
 ]);
 
 /**
- * Names that the generated `types_gen.py` and client modules import or define
+ * Names that the generated `types.py` and client modules import or define
  * at module scope. A user-defined schema named `Field`, `Optional`, etc.
  * would shadow these imports and either break forward-ref resolution
  * (`Optional["Field"]` resolves to `pydantic.Field` without escaping) or
  * silently produce invalid runtime types.
  *
  * Keep this aligned with the imports at the top of:
- *  - open-api/py-client/files/shared/types_gen.py.template
- *  - open-api/py-client/files/sync/client_gen.py.template
- *  - open-api/py-client/files/async/async_client_gen.py.template
+ *  - open-api/py-client/files/shared/types.py.template
+ *  - open-api/py-client/files/sync/client.py.template
+ *  - open-api/py-client/files/async/async_client.py.template
  */
 const PYTHON_RESERVED_MODEL_NAMES = new Set([
   // typing module
@@ -146,8 +146,8 @@ const PYTHON_RESERVED_MODEL_NAMES = new Set([
   'True',
   'False',
   'Type',
-  // namespace import in client_gen.py — never let a user model collide
-  'types_gen',
+  // namespace import in client.py — never let a user model collide
+  'types',
   // base exception we emit
   'ApiError',
 ]);
@@ -320,7 +320,7 @@ export const toPythonType = (property: Model): string => {
 
 /**
  * Prefix every user-defined (non-builtin) name in a python type string with
- * the given namespace (e.g. `"types_gen."`) so the caller can reference
+ * the given namespace (e.g. `"types."`) so the caller can reference
  * model references through a single import. Walks nested `list[...]` and
  * `dict[str, ...]` structures.
  */

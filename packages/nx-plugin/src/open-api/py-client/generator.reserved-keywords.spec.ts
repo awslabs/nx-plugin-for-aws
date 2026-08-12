@@ -67,8 +67,8 @@ describe('openApiPyClientGenerator - reserved keywords', () => {
       },
     };
     const { types, client } = await generateAndRead(verifier, tree, spec);
-    expect(types).toMatchSnapshot('types_gen.py');
-    expect(client).toMatchSnapshot('client_gen.py');
+    expect(types).toMatchSnapshot('types.py');
+    expect(client).toMatchSnapshot('client.py');
     expect(types).toContain('alias="class"');
 
     const res = await callGeneratedClient(
@@ -150,7 +150,7 @@ describe('openApiPyClientGenerator - reserved keywords', () => {
   it('should rename TypeScript-reserved schema names consistently in python references', async () => {
     // Regression: schema named `Error` is aliased to `_Error` (TS-reserved),
     // but references from error-wrapper classes and error-parse expressions
-    // used to resolve to `Error` / `types_gen.Error`, which doesn't exist.
+    // used to resolve to `Error` / `types.Error`, which doesn't exist.
     const spec: Spec = {
       openapi: '3.0.0',
       info: { title: 'TestApi', version: '1.0.0' },
@@ -200,8 +200,8 @@ describe('openApiPyClientGenerator - reserved keywords', () => {
     expect(types).not.toMatch(/\berror:\s+Error\b/);
     expect(types).toContain('error: _Error');
     // Neither client may name the un-renamed class, which doesn't exist.
-    expect(client).not.toMatch(/\btypes_gen\.Error\b/);
-    expect(asyncClient).not.toMatch(/\btypes_gen\.Error\b/);
+    expect(client).not.toMatch(/\btypes\.Error\b/);
+    expect(asyncClient).not.toMatch(/\btypes\.Error\b/);
 
     // The renamed class is what the raised error actually carries.
     const res = await callGeneratedClient(
@@ -330,14 +330,14 @@ describe('openApiPyClientGenerator - reserved keywords', () => {
     // module must import cleanly.  Smoke-check that nothing in client/async
     // referenced the bare unprefixed name (would only happen via
     // `pythonClientType` being out of sync).
-    expect(client).not.toContain('types_gen.Field');
-    expect(asyncClient).not.toContain('types_gen.Field');
+    expect(client).not.toContain('types.Field');
+    expect(asyncClient).not.toContain('types.Field');
   });
 
   it('should escape every python-reserved import name when used as a schema name', async () => {
     // Property + schema shapes that exercise a sample of the reserved
     // names.  Picking three representative ones: typing (`Optional`),
-    // pydantic (`BaseModel`), and the namespace import (`types_gen`).
+    // pydantic (`BaseModel`), and the namespace import (`types`).
     const spec: Spec = {
       openapi: '3.0.0',
       info: { title: 'TestApi', version: '1.0.0' },
@@ -370,9 +370,9 @@ describe('openApiPyClientGenerator - reserved keywords', () => {
             required: ['v'],
             properties: { v: { type: 'string' } },
           },
-          // `types_gen` would shadow the `from . import types_gen` import
+          // `types` would shadow the `from . import types` import
           // in the client modules if not escaped.
-          types_gen: {
+          types: {
             type: 'object',
             required: ['v'],
             properties: { v: { type: 'string' } },
@@ -385,10 +385,8 @@ describe('openApiPyClientGenerator - reserved keywords', () => {
     // remain reachable.
     expect(types).toContain('class _Optional(BaseModel)');
     expect(types).toContain('class _BaseModel(BaseModel)');
-    // `types_gen` is camelCased to `TypesGen` by `toClassName` and is not
-    // reserved, but the snake-cased property/identifier `types_gen` would
-    // be — verify both forms.  The escape is structural: `_TypesGen` is
-    // fine here since it doesn't collide with anything.
-    expect(types).toMatch(/class _?TypesGen\(BaseModel\)/);
+    // A schema named `types` class-cases to `Types`, which cannot shadow the
+    // lower-case `types` module the clients import, so it needs no escape.
+    expect(types).toContain('class Types(BaseModel)');
   });
 });

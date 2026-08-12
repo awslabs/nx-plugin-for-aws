@@ -6,6 +6,7 @@ import { generateFiles, type Tree } from '@nx/devkit';
 import * as path from 'path';
 import { declareDependencies } from '../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
+import { updateGitIgnore } from '../../utils/git';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { getGeneratorInfo, type NxGeneratorInfo } from '../../utils/nx';
 import { buildOpenApiCodeGenerationData } from '../ts-client/generator';
@@ -29,9 +30,9 @@ export const OPEN_API_PY_CLIENT_DEPENDENCIES = declareDependencies()({
  * Generate a Python httpx-based client from an OpenAPI spec.
  *
  * Emits:
- *  - types_gen.py        — pydantic v2 models + per-op error classes and TypedDicts
- *  - client_gen.py       — sync  client (httpx.Client)      when clientType includes 'sync'
- *  - async_client_gen.py — async client (httpx.AsyncClient) when clientType includes 'async'
+ *  - types.py        — pydantic v2 models + per-op error classes and TypedDicts
+ *  - client.py       — sync  client (httpx.Client)      when clientType includes 'sync'
+ *  - async_client.py — async client (httpx.AsyncClient) when clientType includes 'async'
  */
 export const openApiPyClientGenerator = async (
   tree: Tree,
@@ -44,6 +45,10 @@ export const openApiPyClientGenerator = async (
   const clientType = options.clientType ?? 'both';
 
   generateOpenApiPyClient(tree, data, options.outputPath, clientType);
+
+  // The client is regenerated from the spec, so it is ignored by default.
+  // Remove the entry to check it in instead.
+  updateGitIgnore(tree, '.', (patterns) => [...patterns, options.outputPath]);
 
   await addGeneratorMetricsIfApplicable(tree, [
     OPEN_API_PY_CLIENT_GENERATOR_INFO,

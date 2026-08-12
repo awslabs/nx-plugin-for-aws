@@ -70,9 +70,9 @@ export const generateAndRead = async (
   const read = (file: string) =>
     tree.read(`${outputPath}/${file}`, 'utf-8') ?? '';
   return {
-    types: read('types_gen.py'),
-    client: read('client_gen.py'),
-    asyncClient: read('async_client_gen.py'),
+    types: read('types.py'),
+    client: read('client.py'),
+    asyncClient: read('async_client.py'),
     errors: read('errors.py'),
     init: read('__init__.py'),
   };

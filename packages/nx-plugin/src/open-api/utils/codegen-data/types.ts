@@ -211,7 +211,7 @@ export interface Model {
    */
   pythonClassName?: string;
   /**
-   * The Python type qualified with the `types_gen.` namespace, for reference
+   * The Python type qualified with the `types.` namespace, for reference
    * from the generated client modules.
    */
   pythonClientType?: string;
@@ -274,7 +274,7 @@ export interface RequestInput {
   specName: string;
   /** The Python keyword-argument name (deduplicated snake_case). */
   pythonName?: string;
-  /** The Python annotation for the kwarg, qualified with `types_gen.`. */
+  /** The Python annotation for the kwarg, qualified with `types.`. */
   pythonAnnotation?: string;
 }
 
