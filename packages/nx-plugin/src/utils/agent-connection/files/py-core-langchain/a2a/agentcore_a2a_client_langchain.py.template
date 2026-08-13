@@ -3,6 +3,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
+import httpx
 from a2a.client import A2ACardResolver, ClientConfig, ClientFactory
 from a2a.types import Message, Part, Role, Task, TextPart
 
@@ -47,27 +48,32 @@ class _A2AClient:
 
     async def _invoke(self, prompt: str) -> str:
         # AgentCoreA2aClientConfig always sets the signed httpx client.
-        httpx_client = self._config.httpx_client
-        if httpx_client is None:
+        shared_client = self._config.httpx_client
+        if shared_client is None:
             raise RuntimeError("A2A client config is missing an httpx client")
-        card = await A2ACardResolver(
-            httpx_client=httpx_client, base_url=self._url
-        ).get_agent_card()
-        client = ClientFactory(self._config).create(card)
-        message = Message(
-            kind="message",
-            role=Role.user,
-            message_id=uuid4().hex,
-            parts=[Part(TextPart(kind="text", text=prompt))],
-        )
-        # The client config uses streaming=False, so the last event carries the
-        # complete response.
-        reply = ""
-        async for event in client.send_message(message):
-            text = _text(event)
-            if text:
-                reply = text
-        return reply
+        async with httpx.AsyncClient(
+            auth=shared_client.auth, timeout=shared_client.timeout
+        ) as httpx_client:
+            card = await A2ACardResolver(
+                httpx_client=httpx_client, base_url=self._url
+            ).get_agent_card()
+            client = ClientFactory(
+                ClientConfig(httpx_client=httpx_client, streaming=False)
+            ).create(card)
+            message = Message(
+                kind="message",
+                role=Role.user,
+                message_id=uuid4().hex,
+                parts=[Part(TextPart(kind="text", text=prompt))],
+            )
+            # The client config uses streaming=False, so the last event carries
+            # the complete response.
+            reply = ""
+            async for event in client.send_message(message):
+                text = _text(event)
+                if text:
+                    reply = text
+            return reply
 
 
 class AgentCoreA2aClientLangChain:
