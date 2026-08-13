@@ -42,21 +42,64 @@ class AgentCoreA2aClientConfig:
 `;
 
 exports[`py#agent#a2a-connection generator > should match snapshot for agent-connection core files > agentcore_a2a_client_strands.py 1`] = `
-"from collections.abc import Callable
+"import asyncio
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 
+import httpx
+from a2a.client import ClientConfig
 from strands.agent.a2a_agent import A2AAgent
+from strands.agent.agent_result import AgentResult
 
 from .agentcore_a2a_client_config import AgentCoreA2aClientConfig
 
 
-def _build(config: tuple, *, name: str | None, description: str | None) -> A2AAgent:
+def _run_sync(coro):
+    # The tool is invoked from sync agent code, which under uvicorn runs inside a
+    # live event loop where asyncio.run() would raise — fall back to a worker.
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
+
+
+class _A2AClient:
+    def __init__(
+        self,
+        url: str,
+        client_config: ClientConfig,
+        *,
+        name: str | None,
+        description: str | None,
+    ):
+        shared_client = client_config.httpx_client
+        if shared_client is None:
+            raise RuntimeError("A2A client config is missing an httpx client")
+        self._url = url
+        self._auth = shared_client.auth
+        self._timeout = shared_client.timeout
+        self._name = name
+        self._description = description
+
+    def __call__(self, prompt: str) -> AgentResult:
+        return _run_sync(self._invoke(prompt))
+
+    async def _invoke(self, prompt: str) -> AgentResult:
+        async with httpx.AsyncClient(auth=self._auth, timeout=self._timeout) as httpx_client:
+            agent = A2AAgent(
+                endpoint=self._url,
+                name=self._name,
+                description=self._description,
+                client_config=ClientConfig(httpx_client=httpx_client, streaming=False),
+            )
+            return await agent.invoke_async(prompt)
+
+
+def _build(config: tuple, *, name: str | None, description: str | None) -> _A2AClient:
     url, client_config = config
-    kwargs: dict = {"endpoint": url, "client_config": client_config}
-    if name:
-        kwargs["name"] = name
-    if description:
-        kwargs["description"] = description
-    return A2AAgent(**kwargs)
+    return _A2AClient(url, client_config, name=name, description=description)
 
 
 class AgentCoreA2aClientStrands:
@@ -68,7 +111,7 @@ class AgentCoreA2aClientStrands:
         *,
         name: str | None = None,
         description: str | None = None,
-    ) -> A2AAgent:
+    ) -> _A2AClient:
         """SigV4-authenticated client for a Bedrock AgentCore runtime."""
         return _build(
             AgentCoreA2aClientConfig.with_iam_auth(agent_runtime_arn),
@@ -83,7 +126,7 @@ class AgentCoreA2aClientStrands:
         *,
         name: str | None = None,
         description: str | None = None,
-    ) -> A2AAgent:
+    ) -> _A2AClient:
         """Bearer-authenticated client for a Bedrock AgentCore runtime."""
         return _build(
             AgentCoreA2aClientConfig.with_jwt_auth(agent_runtime_arn, access_token_provider),
@@ -97,7 +140,7 @@ class AgentCoreA2aClientStrands:
         *,
         name: str | None = None,
         description: str | None = None,
-    ) -> A2AAgent:
+    ) -> _A2AClient:
         """Plain-HTTP client — for local dev."""
         return _build(
             AgentCoreA2aClientConfig.without_auth(url),
@@ -109,8 +152,6 @@ class AgentCoreA2aClientStrands:
 
 exports[`py#agent#a2a-connection generator > should match snapshot for agent-connection core files > remote_client_strands.py 1`] = `
 "import os
-
-from strands.agent.a2a_agent import A2AAgent
 
 from test_agent_connection.core.agentcore_a2a_client_strands import (
     AgentCoreA2aClientStrands,
@@ -124,7 +165,7 @@ class RemoteClientStrands:
     """Strands client for the Remote A2A agent."""
 
     @staticmethod
-    def create() -> A2AAgent:
+    def create():
         if os.environ.get("LOCAL_DEV") == "true":
             return AgentCoreA2aClientStrands.without_auth("http://localhost:9001/")
         config = get_agentcore_runtime_config()
