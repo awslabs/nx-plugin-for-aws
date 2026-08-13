@@ -347,7 +347,7 @@ export const containerImage = (tool: keyof typeof CONTAINER_VERSIONS): string =>
  * Pinned exactly (no range operator) so generated infrastructure is reproducible.
  */
 export const TERRAFORM_VERSIONS = {
-  aws: '6.58.0',
+  aws: '6.60.0',
   random: '3.9.0',
   null: '3.3.0',
   archive: '2.8.0',

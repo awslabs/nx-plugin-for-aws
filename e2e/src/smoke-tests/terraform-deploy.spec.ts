@@ -309,7 +309,8 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
           // Python (`my-mcp-server`) MCP servers as targets. Prompt each agent
           // to call a gateway-prefixed tool (`<target>___<tool>`) for each
           // upstream server. A successful round-trip proves agent -> deployed
-          // Gateway (SigV4) -> MCP server works end-to-end for both languages.
+          // Gateway (Cedar ENFORCE + SigV4) -> MCP server works end-to-end for
+          // both languages.
           expect(
             await invokeTrpcAgentCoreAgent(
               outputs.ts_agent_arn,
@@ -342,8 +343,8 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
           // Chained gateways — the parent gateway fronts my_gateway via the
           // gateway -> gateway connection, re-exposing its tools under a
           // second prefix. Listing tools on the parent and calling one proves
-          // the parent -> my_gateway (SigV4 at both hops) -> MCP server chain
-          // works end-to-end.
+          // the parent -> my_gateway (SigV4 + Cedar at both hops) -> MCP
+          // server chain works end-to-end.
           await invokeAgentCoreGatewayTool(
             outputs.parent_gateway_url,
             'Parent Gateway -> Gateway -> TS MCP',
