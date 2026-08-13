@@ -246,16 +246,8 @@ module "ts_agui_agent" {
 }
 
 # ---------------------------------------------------------------------------
-# AgentCore Gateway (IAM-authenticated MCP endpoint)
+# AgentCore Gateway (Cedar policy engine + IAM-authenticated MCP endpoint)
 # ---------------------------------------------------------------------------
-
-# The gateways here are generated without a Cedar policy engine. AgentCore
-# injects a server-managed `metadata_configuration.allowed_request_headers` on
-# targets of a policy-engine gateway, which the AWS provider declares
-# `Optional` rather than `Computed`, so every apply fails its post-apply
-# consistency check; declaring the header explicitly is rejected as restricted.
-# cdk-deploy still covers Cedar. Restore it once the provider fixes the block —
-# tracked in #1065.
 
 # The gateway signs outbound calls to its MCP server targets with its own
 # role and fetches each target's tools at creation time, so it needs invoke
@@ -266,6 +258,11 @@ module "my_gateway" {
   additional_iam_policy_statements = [
     local.invoke_py_mcp_server_statement,
     local.invoke_ts_mcp_server_statement,
+  ]
+
+  policy_dependencies = [
+    aws_bedrockagentcore_gateway_target.ts_mcp_server.target_id,
+    aws_bedrockagentcore_gateway_target.py_mcp_server.target_id,
   ]
 
   # Aggregated by parent_gateway, so its gateway_url must not be consumed
@@ -280,9 +277,9 @@ module "my_gateway" {
 # Register both MCP servers as targets of the Gateway — the Terraform
 # analogue of `myGateway.addMcpServer(...)` in the CDK template. Target
 # names match the local-dev registrations (kebab-cased MCP project class
-# name) so tool prefixes are identical locally and deployed. The runtime ARNs
-# flow through each runtime's readiness probe, so targets are created only
-# once the runtimes serve MCP.
+# name) so Cedar action prefixes are identical locally and deployed. The
+# runtime ARNs flow through each runtime's readiness probe, so targets are
+# created only once the runtimes serve MCP.
 resource "aws_bedrockagentcore_gateway_target" "ts_mcp_server" {
   gateway_identifier = module.my_gateway.gateway_id
   name               = "hosted-mcp-server"
@@ -335,6 +332,10 @@ module "parent_gateway" {
       Action   = ["bedrock-agentcore:InvokeGateway"]
       Resource = [module.my_gateway.gateway_arn]
     }
+  ]
+
+  policy_dependencies = [
+    aws_bedrockagentcore_gateway_target.my_gateway.target_id,
   ]
 }
 
