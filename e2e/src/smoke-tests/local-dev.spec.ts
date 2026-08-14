@@ -32,6 +32,79 @@ const OPENAI_NPM_VERSION = '6.49.0';
 const OPENAI_PY_VERSION = '2.54.0';
 const LANGCHAIN_OPENAI_PY_VERSION = '1.4.3';
 
+// The AgentCore session header the generated servers read to bind a request to
+// a session. Reusing one value across calls is what makes a server reuse its
+// session-cached agent (and that agent's clients) rather than building a fresh
+// one per request.
+const AGENT_CORE_SESSION_ID_HEADER =
+  'x-amzn-bedrock-agentcore-runtime-session-id';
+
+// Prompt that asks an agent to delegate to its connected A2A agent, and the
+// marker the scoped mock rule (see `driveA2ADelegations`) echoes the remote's
+// reply back under.
+const A2A_DELEGATE_PROMPT = 'delegate this question to the remote agent';
+const A2A_DELEGATED_MARKER = 'delegated reply:';
+
+/**
+ * Scope the mock to drive one A2A delegation per `A2A_DELEGATE_PROMPT` turn,
+ * then echo the remote's reply back under `A2A_DELEGATED_MARKER`.
+ *
+ * Whether a turn still owes a tool call is decided by comparing delegate asks
+ * against the tool results already in the conversation, rather than by looking
+ * at the last message alone: a reused session carries earlier delegations, and
+ * a model that answers a later turn from that history never calls the tool
+ * again — so the A2A client would be exercised once however many times the
+ * agent is invoked, and reuse would go untested.
+ *
+ * Bounded with `.times()` + `.first()` so it neither hijacks the shared
+ * fallback for other tests nor lingers afterwards.
+ */
+function driveA2ADelegations(mock: MockServer, delegations: number): void {
+  type MockReq = {
+    messages: { role: string; content: string }[];
+    toolNames: readonly string[];
+  };
+  const counts = (req: MockReq) => ({
+    asks: req.messages.filter(
+      (m) => m.role === 'user' && m.content.includes(A2A_DELEGATE_PROMPT),
+    ).length,
+    results: req.messages.filter((m) => m.role === 'tool').length,
+  });
+  const owesToolCall = (req: MockReq) => {
+    const { asks, results } = counts(req);
+    return asks > 0 && results < asks;
+  };
+  const answersToolResult = (req: MockReq) => {
+    const { asks, results } = counts(req);
+    return asks > 0 && results >= asks;
+  };
+
+  const callTool = (req: MockReq) => ({
+    tools: [
+      {
+        name: req.toolNames.find((n) => n.startsWith('ask_')) ?? 'ask_agent',
+        args: { prompt: 'ping from e2e' },
+      },
+    ],
+  });
+  const echoToolResult = (req: MockReq) => {
+    const result = [...req.messages].reverse().find((m) => m.role === 'tool');
+    return { text: `${A2A_DELEGATED_MARKER} ${result?.content ?? 'none'}` };
+  };
+
+  mock
+    .when(owesToolCall as never)
+    .reply(callTool as never)
+    .first()
+    .times(delegations);
+
+  mock
+    .when(answersToolResult as never)
+    .reply(echoToolResult as never)
+    .first()
+    .times(delegations);
+}
+
 // The APIs the dev website is connected to, with the class names
 // matching their vended `use<ClassName>Client` hooks.
 const WEBSITE_APIS: ApiSpec[] = [
@@ -512,6 +585,12 @@ describe('smoke test - local-dev', { timeout: 30 * 60 * 1000 }, () => {
       );
       await runCLI(
         `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-py-agent --targetProject=py_project --targetComponent=my-py-mcp --no-interactive`,
+        opts,
+      );
+      // A2A delegation from a Strands agent, which wraps strands' A2AAgent —
+      // a different Layer-2 client to the langchain one connected below.
+      await runCLI(
+        `generate @aws/nx-plugin:connection --sourceProject=py_project --sourceComponent=my-py-agent --targetProject=py_project --targetComponent=my-py-a2a-agent --no-interactive`,
         opts,
       );
       // LangChain agent connections: MCP (langchain-mcp-adapters tool loader),
@@ -1460,6 +1539,38 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     expect(chunks.length).toBeGreaterThan(0);
     expect(chunks[0]).toHaveProperty('content');
 
+    // Delegate to the remote A2A agent twice on ONE session id. The A2A client
+    // is built once per session-cached agent, so the second delegation is the
+    // first to reuse it — the case where a client bound to a previous (closed)
+    // event loop surfaces as `RuntimeError: Event loop is closed`.
+    //
+    // The delegation tool returns its exception as the tool result, so a failed
+    // call still streams back a 200: assert on the body, not just the status.
+    driveA2ADelegations(llmMock!, 2);
+    const sessionId = `py-agent-a2a-reuse-${'0'.repeat(20)}`;
+    for (const attempt of [1, 2]) {
+      const delegateRes = await fetch(
+        `http://127.0.0.1:${ports.pyAgent}/invocations`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            [AGENT_CORE_SESSION_ID_HEADER]: sessionId,
+          },
+          body: JSON.stringify({ prompt: A2A_DELEGATE_PROMPT }),
+        },
+      );
+      const delegateBody = await delegateRes.text();
+      console.log(
+        `Python Agent A2A delegation ${attempt} (${delegateRes.status}):`,
+        delegateBody.slice(0, 300),
+      );
+      expect(delegateRes.status).toBe(200);
+      expect(delegateBody).toContain(A2A_DELEGATED_MARKER);
+      expect(delegateBody).not.toContain('Event loop is closed');
+      expect(delegateBody).not.toMatch(/Error: \w*Error/);
+    }
+
     // HTTP chat builds the generated client first, then connects.
     await chatStreamsReply(
       projectRoot,
@@ -1468,6 +1579,9 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
       STARTUP_TIMEOUT_MS,
     );
     await stopLast();
+    // This agent's dev chain also starts the A2A agent it delegates to, so wait
+    // for that port to be released before the next chain tries to bind it.
+    await waitForPortFree(ports.pyA2a, STARTUP_TIMEOUT_MS);
   });
 
   it('Python A2A Agent - card + streaming message', async () => {
@@ -1597,6 +1711,48 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     // The mock model must actually drive the run, not error out (the server
     // emits RUN_ERROR as a 'data:' event, so assert it is absent).
     expect(body).not.toContain('RUN_ERROR');
+
+    // Delegate twice on one session id, so the second delegation reuses the A2A
+    // client the first built — see the Strands equivalent in the Python HTTP
+    // Agent test above for why the second call is the one that matters.
+    driveA2ADelegations(llmMock!, 2);
+    const aguiSessionId = `py-langchain-a2a-reuse-${'0'.repeat(20)}`;
+    for (const attempt of [1, 2]) {
+      const delegateRes = await fetch(
+        `http://127.0.0.1:${ports.pyLangchainAgui}/invocations`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            [AGENT_CORE_SESSION_ID_HEADER]: aguiSessionId,
+          },
+          body: JSON.stringify({
+            threadId: 'delegate-thread',
+            runId: `delegate-run-${attempt}`,
+            messages: [
+              {
+                id: `msg-${attempt}`,
+                role: 'user',
+                content: A2A_DELEGATE_PROMPT,
+              },
+            ],
+            state: {},
+            tools: [],
+            context: [],
+            forwardedProps: {},
+          }),
+        },
+      );
+      const delegateBody = await delegateRes.text();
+      console.log(
+        `Python LangChain A2A delegation ${attempt} (${delegateRes.status}):`,
+        delegateBody.slice(0, 300),
+      );
+      expect(delegateRes.status).toBe(200);
+      expect(delegateBody).toContain(A2A_DELEGATED_MARKER);
+      expect(delegateBody).not.toContain('Event loop is closed');
+      expect(delegateBody).not.toContain('RUN_ERROR');
+    }
 
     await chatStreamsReply(
       projectRoot,
