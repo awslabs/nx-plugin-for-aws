@@ -75,7 +75,7 @@ export const AGENT_CORE_CONSTRUCTS_PY_DEPENDENCIES = [
 
 export type AgentCoreAuth = 'iam' | 'cognito';
 
-export type AgentCoreSession = 's3' | 'in-memory';
+export type AgentCoreSession = 's3' | 'dynamodb-s3' | 'in-memory';
 
 export interface AddAgentCoreInfraProps {
   nameClassName: string;

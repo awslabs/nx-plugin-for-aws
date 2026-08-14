@@ -223,6 +223,10 @@ const FRAMEWORKS: Record<AgentFramework, FrameworkTemplates> = {
           fromModule: '.core.model_errors_strands',
           importName: 'log_model_errors',
         },
+        {
+          fromModule: '.core.tool_errors_strands',
+          importName: 'log_tool_errors',
+        },
       ],
       protocols: {
         mcp: 'py-core-strands/mcp',
@@ -535,6 +539,19 @@ const emitPy = (tree: Tree, templateDir: string) =>
     {},
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
+
+/**
+ * Ensure the shared Python agent-connection project has
+ * `s3_checkpoint_saver_langchain.py` — a vendored `S3CheckpointSaver`
+ * (from `langgraph-checkpoint-s3`, MIT licensed) that LangChain agents with
+ * `session: 's3'` import from directly (`.core.s3_checkpoint_saver_langchain`),
+ * mirroring how they import `.core.runtime_config`. Vendored rather than
+ * installed as a dependency, and shared rather than per-agent, since it has
+ * no agent-specific templating.
+ */
+export function ensureLangchainS3CheckpointSaver(tree: Tree): void {
+  emitPy(tree, 'py-core-langchain/s3');
+}
 
 /**
  * Emit a framework's base Layer-2 helpers (model-error logging + per-session

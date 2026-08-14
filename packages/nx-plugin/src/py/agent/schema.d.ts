@@ -11,7 +11,7 @@ export type AgentProtocol = 'http' | 'a2a' | 'ag-ui';
 
 export type PyAgentAuth = 'iam' | 'cognito';
 
-export type PyAgentSession = 'in-memory';
+export type PyAgentSession = 's3' | 'dynamodb-s3' | 'in-memory';
 
 export interface PyAgentGeneratorSchema {
   project: string;

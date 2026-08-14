@@ -50,6 +50,7 @@ O gerador adicionará os seguintes arquivos ao seu projeto Python existente. Os 
         - \_\_init\_\_.py Python package initialization
         - init.py FastAPI application setup with CORS and error handling middleware
         - agent.py Main agent definition with sample tools
+        - session.py Resolves the framework-specific session persistence implementation
         - main.py FastAPI entry point for Bedrock AgentCore Runtime
         - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
     - pyproject.toml Updated with Strands dependencies
@@ -68,6 +69,7 @@ O ponto de entrada expõe seu agente através do protocolo A2A (Strands usa o [S
       - agent/ (or custom name if specified)
         - \_\_init\_\_.py Python package initialization
         - agent.py Main agent definition with sample tools
+        - session.py Resolves the framework-specific session persistence implementation
         - main.py A2A server entry point
         - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
     - pyproject.toml Updated with framework and A2A dependencies
@@ -86,6 +88,7 @@ O ponto de entrada expõe seu agente através do protocolo [AG-UI](https://docs.
       - agent/ (or custom name if specified)
         - \_\_init\_\_.py Python package initialization
         - agent.py Main agent definition with sample tools
+        - session.py Resolves the framework-specific session persistence implementation
         - main.py AG-UI server entry point
         - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
     - pyproject.toml Updated with framework and AG-UI dependencies
@@ -282,9 +285,9 @@ O protocolo do servidor do seu agente determina como ele se comunica. Todas as o
 - **A2A**: Um servidor [Agent-to-Agent](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-a2a.html) montado em uma aplicação FastAPI (Strands usa o [Strands A2A Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent); LangChain usa o [`a2a-sdk`](https://a2a-protocol.org/) agnóstico de framework). Melhor quando seu agente precisa ser descoberto e invocável por outros agentes compatíveis com A2A.
 - **AG-UI**: O [protocolo AG-UI](https://docs.ag-ui.com/) sobre SSE (Strands usa `ag-ui-strands`; LangChain usa `ag-ui-langgraph`). Melhor para integração direta com frontend usando [CopilotKit](https://docs.copilotkit.ai/) em um site React.
 
-O ponto de entrada do servidor difere por framework (Strands produz um `Agent` gerenciado por contexto, enquanto LangChain dirige um grafo `create_agent` compilado), mas o contrato externo para cada protocolo é o mesmo.
+O ponto de entrada do servidor difere por framework (Strands produz um `Agent` gerenciado por contexto, enquanto LangChain conduz um grafo `create_agent` compilado), mas o contrato externo para cada protocolo é o mesmo.
 
-Todos os protocolos expõem `/ping` para o contrato de verificação de integridade do runtime AgentCore. Agentes A2A escutam na porta `9000`; agentes HTTP e AG-UI escutam na porta `8080`. O Dockerfile e a infraestrutura gerados são configurados para você.
+Todos os protocolos expõem `/ping` para o contrato de verificação de saúde do runtime AgentCore. Agentes A2A escutam na porta `9000`; agentes HTTP e AG-UI escutam na porta `8080`. O Dockerfile e a infraestrutura gerados são configurados para você.
 
 <OptionFilter when={{ protocol: 'http' }} description="FastAPI HTTP server details">
 ## Servidor FastAPI (protocolo HTTP)
@@ -293,7 +296,7 @@ O servidor HTTP gerado inclui:
 - Configuração da aplicação FastAPI com middleware CORS
 - Middleware de tratamento de erros
 - Geração de esquema OpenAPI
-- Endpoint de verificação de integridade (`/ping`)
+- Endpoint de verificação de saúde (`/ping`)
 - Endpoint de invocação do agente (`/invocations`)
 
 ### Personalizando Entradas e Saídas de Invocação com Pydantic
@@ -381,7 +384,7 @@ A maioria dos usuários não precisará modificar este arquivo; edite `agent.py`
 <OptionFilter when={{ protocol: 'ag-ui' }} description="AG-UI / CopilotKit server details">
 ## Servidor AG-UI (protocolo AG-UI)
 
-O `main.py` gerado expõe um único endpoint POST que transmite eventos [AG-UI](https://docs.ag-ui.com/) sobre Server-Sent Events (SSE), bem como `/ping` para a verificação de integridade do runtime AgentCore. A conexão depende do framework:
+O `main.py` gerado expõe um único endpoint POST que transmite eventos [AG-UI](https://docs.ag-ui.com/) através de Server-Sent Events (SSE), bem como `/ping` para a verificação de saúde do runtime AgentCore. A conexão depende do framework:
 
 - **Strands**: envolve seu `Agent` em um `ag_ui_strands.StrandsAgent`, construído dentro de um manipulador `lifespan` do FastAPI (para que a construção aconteça na inicialização do contêiner/sessão em vez do tempo de importação), e servido de um loop `/invocations` FastAPI feito à mão.
 - **LangChain**: envolve o grafo compilado em um `ag_ui_langgraph.LangGraphAgent`, construído da mesma forma dentro de `lifespan`, e servido de um loop `/invocations` FastAPI feito à mão.
@@ -436,13 +439,13 @@ Para conversar com seu agente implantado no Bedrock AgentCore, defina a variáve
 
 <Tabs syncKey="auth">
 <TabItem label="IAM" _filter={{ auth: 'iam' }}>
-Para agentes autenticados com IAM, as solicitações são assinadas com [SigV4](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv.html) usando suas credenciais AWS padrão. Certifique-se de que o ambiente tenha credenciais AWS com permissão para invocar o runtime:
+Para agentes autenticados por IAM, as requisições são assinadas com [SigV4](https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_sigv.html) usando suas credenciais AWS padrão. Certifique-se de que o ambiente tenha credenciais AWS com permissão para invocar o runtime:
 
 <NxCommands commands={['run your-project:agent-chat']} env={{ RUNTIME_CONFIG_APP_ID: '<app-id>' }} />
 </TabItem>
 
 <TabItem label="Cognito" _filter={{ auth: 'cognito' }}>
-Para agentes autenticados com Cognito, forneça um token de acesso Cognito através da variável de ambiente `AGENT_ACCESS_TOKEN`, que é enviado como um token bearer:
+Para agentes autenticados por Cognito, forneça um token de acesso Cognito através da variável de ambiente `AGENT_ACCESS_TOKEN`, que é enviado como um token bearer:
 
 <NxCommands commands={['run your-project:agent-chat']} env={{ RUNTIME_CONFIG_APP_ID: '<app-id>', AGENT_ACCESS_TOKEN: '<access-token>' }} />
 
@@ -486,6 +489,47 @@ Seu agente é automaticamente configurado com observabilidade usando o [AWS Dist
 Você pode encontrar traces no Console AWS do CloudWatch, selecionando "GenAI Observability" no menu. Note que para que os traces sejam preenchidos, você precisará habilitar [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html).
 
 Para mais detalhes, consulte a [documentação do AgentCore sobre observabilidade](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html).
+
+### Gerenciamento de Sessão
+
+A opção `session` mapeia para um conceito de persistência subjacente diferente dependendo do framework escolhido: o conceito de [gerenciamento de sessão](https://strandsagents.com/docs/user-guide/concepts/agents/session-management/) do Strands para o framework `strands`, ou o conceito de [checkpointer](https://docs.langchain.com/oss/python/langgraph/persistence) do LangGraph para o framework `langchain`.
+
+<OptionFilter when={{ framework: 'strands' }} description="Strands session management (session.py)">
+A opção `session` controla como seu agente persiste o estado da conversa (histórico de mensagens, estado da ferramenta, etc.) entre invocações, usando o [SessionManager](https://strandsagents.com/docs/user-guide/concepts/agents/session-management/) do SDK Strands:
+
+- **`s3`** (padrão): A infraestrutura CDK/Terraform provisiona um bucket S3 dedicado para dados de sessão, criptografado com uma chave KMS dedicada e com todo acesso público bloqueado; logs de acesso ao servidor são entregues a um grupo de logs do CloudWatch Logs através da mesma chave. A função IAM do agente recebe acesso de leitura/escrita/listagem/exclusão ao bucket e acesso de descriptografia/geração-de-chave-de-dados à chave, e o nome do bucket é registrado junto com o ARN do agente na configuração do runtime do AppConfig.
+- **`in-memory`**: Nenhum bucket é provisionado. O estado da conversa é mantido apenas na memória durante o tempo de vida do processo em execução e não sobrevive a reinicializações ou scale-in.
+
+Isso é implementado no `session.py` gerado, que exporta uma função `get_session_manager()` resolvendo um `SessionManager` para a sessão atual.
+
+<OptionFilter when={{ protocol: 'ag-ui' }} description="AG-UI session wiring">
+Como o adaptador `ag-ui-strands` do AG-UI clona um `Agent` modelo por thread de conversa, `get_session_manager` é conectado como um `session_manager_provider` no `StrandsAgentConfig` passado para `StrandsAgent` em `main.py`, para que um `SessionManager` novo seja resolvido para cada thread em vez de ser incorporado ao agente modelo compartilhado.
+</OptionFilter>
+
+<OptionFilter when={{ protocol: ['http', 'a2a'] }} description="HTTP/A2A session wiring">
+Como `with_session_id` já armazena em cache uma instância de `Agent` por sessão, `get_session_manager` é chamado diretamente dentro da chamada `Agent(session_manager=get_session_manager())` de `get_agent` em `agent.py`.
+</OptionFilter>
+
+O próprio ID da sessão vem da sessão do AgentCore Runtime (propagada através do cabeçalho `x-amzn-bedrock-agentcore-runtime-session-id`) e é vinculado a um contexto baseado em [`contextvars.ContextVar`](https://docs.python.org/3/library/contextvars.html) para que `get_current_session_id()` possa resolvê-lo em qualquer lugar na requisição — incluindo em quaisquer clientes MCP ou A2A downstream conectados através do <Link path="/guides/connection">gerador `connection`</Link>, para que toda a cadeia de chamadas compartilhe uma sessão consistente.
+
+:::note[Desenvolvimento Local]
+Ao executar localmente (`LOCAL_DEV=true`, definido automaticamente pelo target `-dev`), os dados da sessão são sempre armazenados em disco em `tmp/agents/strands/<agent-name>` na raiz do workspace, independentemente da opção `session` configurada, por conveniência.
+:::
+</OptionFilter>
+
+<OptionFilter when={{ framework: 'langchain' }} description="LangChain session management (session.py)">
+A opção `session` controla como o checkpointer LangGraph do seu agente persiste o estado da conversa:
+
+- **`s3`**: O agente implantado usa um `S3CheckpointSaver` com o bucket de sessão provisionado, armazenando checkpoints e escritas pendentes sob o prefixo `checkpoints/`. Esta classe (adaptada de [`langgraph-checkpoint-s3`](https://github.com/Isa-rentacs/langgraph-checkpoint-s3), licença MIT) reside em `s3_checkpoint_saver_langchain.py` no projeto compartilhado de conexão de agente.
+- **`dynamodb-s3`**: A infraestrutura CDK/Terraform provisiona uma tabela DynamoDB para checkpoints, configurada conforme recomendado na [documentação AWS sobre o uso do DynamoDB como armazenamento de checkpoint para agentes LangGraph](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/ddb-langgraph-checkpoint.html) (esquema unificado `PK`/`SK`, cobrança `PAY_PER_REQUEST`, recuperação point-in-time e um atributo `ttl`), mais um bucket S3 para descarregar checkpoints acima de 350KB. Ambos são criptografados com uma chave KMS dedicada; os logs de acesso ao servidor do bucket são entregues a um grupo de logs do CloudWatch Logs através da mesma chave. A função IAM do agente recebe acesso de leitura/escrita à tabela e ao bucket, e os nomes da tabela/bucket são registrados junto com o ARN do agente na configuração do runtime do AppConfig.
+- **`in-memory`** (padrão): Nenhuma tabela ou bucket é provisionado. O estado da conversa é mantido apenas na memória durante o tempo de vida do processo em execução e não sobrevive a reinicializações ou scale-in.
+
+Isso é implementado no `session.py` gerado, que exporta uma função `get_checkpointer()` chamada de `create_agent(..., checkpointer=get_checkpointer())` em `agent.py`.
+
+:::note[Desenvolvimento Local]
+Ao executar localmente (`LOCAL_DEV=true`, definido automaticamente pelo target `-dev`), `get_checkpointer()` sempre retorna um [`AsyncSqliteSaver`](https://reference.langchain.com/python/langgraph.checkpoint.sqlite/aio/AsyncSqliteSaver) apoiado por um banco de dados SQLite local em `tmp/agents/langchain/<agent-name>` na raiz do workspace, independentemente da opção `session` configurada, por conveniência.
+:::
+</OptionFilter>
 </OptionFilter>
 
 ## Invocando seu Agente
@@ -493,7 +537,7 @@ Para mais detalhes, consulte a [documentação do AgentCore sobre observabilidad
 <OptionFilter when={{ protocol: 'http' }} description="FastAPI HTTP invocation details">
 ### Invocar o Servidor Local
 
-Para invocar um Agente em execução local através do target `<your-agent-name>-serve`, você pode enviar uma solicitação POST simples para `/invocations` na porta em que seu agente local está sendo executado. Por exemplo, com `curl`:
+Para invocar um Agente em execução local através do target `<your-agent-name>-serve`, você pode enviar uma simples requisição POST para `/invocations` na porta em que seu agente local está sendo executado. Por exemplo, com `curl`:
 
 ```bash
 curl -N -X POST http://localhost:8081/invocations \
@@ -513,7 +557,7 @@ O argumento `-N` dado ao `curl` desabilita o buffer do fluxo de saída, para que
 <TabItem label="IAM" _filter={{ auth: 'iam' }}>
 #### Autenticação IAM
 
-Para Autenticação IAM, a solicitação deve ser assinada usando AWS Signature Version 4 (SigV4).
+Para Autenticação IAM, a requisição deve ser assinada usando AWS Signature Version 4 (SigV4).
 
 ```bash
 acurl <region> bedrock-agentcore -N -X POST \
@@ -566,7 +610,7 @@ Consulte o <Link path="/guides/connection/react-py-agent">guia do gerador `conne
 <OptionFilter when={{ protocol: 'a2a' }} description="A2A delegation details">
 ### Invocando um Agente A2A como Ferramenta
 
-Para delegar trabalho deste agente para um agente A2A remoto (seja <Link path="/guides/ts-agent">TypeScript</Link> ou <Link path="/guides/py-agent">Python</Link>), use o <Link path="/guides/connection/py-agent-a2a">gerador `connection`</Link>. Ele fornece um cliente autenticado com SigV4 para o agente de destino e transforma por AST o `agent.py` deste agente para registrar o agente A2A remoto como um delegado decorado com `@tool`.
+Para delegar trabalho deste agente para um agente A2A remoto (seja <Link path="/guides/ts-agent">TypeScript</Link> ou <Link path="/guides/py-agent">Python</Link>), use o <Link path="/guides/connection/py-agent-a2a">gerador `connection`</Link>. Ele fornece um cliente autenticado por SigV4 para o agente de destino e transforma por AST o `agent.py` deste agente para registrar o agente A2A remoto como um delegado decorado com `@tool`.
 
 <RunGenerator generator="connection" />
 
@@ -605,7 +649,7 @@ model = BedrockModel(
 agent = Agent(model=model)
 ```
 
-Consulte o guia [Guardrails](https://strandsagents.com/docs/user-guide/safety-security/guardrails/) do Strands para mais detalhes.
+Consulte o guia de [Guardrails](https://strandsagents.com/docs/user-guide/safety-security/guardrails/) do Strands para mais detalhes.
 </TabItem>
 <TabItem label="LangChain" _filter={{ framework: 'langchain' }}>
 ```python

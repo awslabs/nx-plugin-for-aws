@@ -577,7 +577,8 @@ exports[`py#agent generator > langchain framework > should match snapshot for la
 from langchain.agents import create_agent
 from langchain_aws import ChatBedrockConverse
 from langchain_core.tools import tool
-from langgraph.checkpoint.memory import InMemorySaver
+
+from .session import get_checkpointer
 
 REGION = os.environ.get("AWS_REGION", "us-east-1")
 MODEL_ID = os.environ.get("MODEL_ID", "global.anthropic.claude-haiku-4-5-20251001-v1:0")
@@ -591,7 +592,6 @@ def subtract(a: int, b: int) -> int:
 
 def get_agent():
     model = ChatBedrockConverse(model=MODEL_ID, region_name=REGION)
-    # Swap InMemorySaver for a durable checkpointer in a multi-replica deployment.
     return create_agent(
         model=model,
         tools=[subtract],
@@ -600,7 +600,7 @@ You are a mathematical wizard.
 Use your tools for mathematical tasks.
 Refer to tools as your 'spellbook'.
 """,
-        checkpointer=InMemorySaver(),
+        checkpointer=get_checkpointer(),
     )
 "
 `;
@@ -721,6 +721,8 @@ dependencies = [
   "langchain==1.3.14",
   "langchain-aws==1.7.0",
   "langgraph==1.2.10",
+  "langgraph-checkpoint-sqlite==3.1.1",
+  "aiosqlite==0.22.1",
   "ag-ui-protocol==0.1.19",
   "ag-ui-langgraph==0.0.42",
   "uvicorn==0.52.1"
@@ -734,5 +736,47 @@ dev-dependencies = [ ]
 
 [tool.uv.sources.proj-agent-connection]
 workspace = true
+"
+`;
+
+exports[`py#agent generator > langchain framework > should match snapshot for langchain generated files > langchain-session.py 1`] = `
+"import os
+
+import aiosqlite
+import boto3
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from proj_agent_connection.core.runtime_config import get_agentcore_runtime_config
+from proj_agent_connection.core.s3_checkpoint_saver_langchain import S3CheckpointSaver
+
+
+def get_checkpointer() -> BaseCheckpointSaver:
+    """Returns a LangGraph checkpointer for persisting conversation state across
+    invocations. Local development always uses a local SQLite database for
+    convenience, regardless of the configured session option.
+    """
+    if os.environ.get("LOCAL_DEV") == "true":
+        os.makedirs("../../tmp/agents/langchain/snapshot-agent", exist_ok=True)
+        conn = aiosqlite.connect(
+            os.path.join(
+                "../../tmp/agents/langchain/snapshot-agent", "checkpoints.sqlite"
+            )
+        )
+        return AsyncSqliteSaver(conn)
+
+    config = get_agentcore_runtime_config()
+    session_config = (
+        (config.get("agentRuntimes") or {}).get("SnapshotAgent", {}).get("session", {})
+    )
+    bucket_name = session_config.get("bucketName")
+    if not bucket_name:
+        raise RuntimeError(
+            "No S3 checkpoint bucket configured for this agent in runtime configuration."
+        )
+    return S3CheckpointSaver(
+        bucket_name=bucket_name,
+        prefix="checkpoints/",
+        s3_client=boto3.client("s3"),
+    )
 "
 `;

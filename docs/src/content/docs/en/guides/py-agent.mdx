@@ -50,6 +50,7 @@ The generator will add the following files to your existing Python project. The 
         - \_\_init\_\_.py Python package initialization
         - init.py FastAPI application setup with CORS and error handling middleware
         - agent.py Main agent definition with sample tools
+        - session.py Resolves the framework-specific session persistence implementation
         - main.py FastAPI entry point for Bedrock AgentCore Runtime
         - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
     - pyproject.toml Updated with Strands dependencies
@@ -68,6 +69,7 @@ The entry point exposes your agent over the A2A protocol (Strands uses the [Stra
       - agent/ (or custom name if specified)
         - \_\_init\_\_.py Python package initialization
         - agent.py Main agent definition with sample tools
+        - session.py Resolves the framework-specific session persistence implementation
         - main.py A2A server entry point
         - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
     - pyproject.toml Updated with framework and A2A dependencies
@@ -86,6 +88,7 @@ The entry point exposes your agent via the [AG-UI](https://docs.ag-ui.com/) prot
       - agent/ (or custom name if specified)
         - \_\_init\_\_.py Python package initialization
         - agent.py Main agent definition with sample tools
+        - session.py Resolves the framework-specific session persistence implementation
         - main.py AG-UI server entry point
         - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
     - pyproject.toml Updated with framework and AG-UI dependencies
@@ -486,6 +489,47 @@ Your agent is automatically configured with observability using the [AWS Distro 
 You can find traces in the CloudWatch AWS Console, by selecting "GenAI Observability" in the menu. Note that for traces to be populated you will need to enable [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html).
 
 For more details, refer to the [AgentCore documentation on observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html).
+
+### Session Management
+
+The `session` option maps to a different underlying persistence concept depending on your chosen framework: Strands' [session management](https://strandsagents.com/docs/user-guide/concepts/agents/session-management/) concept for the `strands` framework, or LangGraph's [checkpointer](https://docs.langchain.com/oss/python/langgraph/persistence) concept for the `langchain` framework.
+
+<OptionFilter when={{ framework: 'strands' }} description="Strands session management (session.py)">
+The `session` option controls how your agent persists conversation state (message history, tool state, etc.) across invocations, using the Strands SDK's [SessionManager](https://strandsagents.com/docs/user-guide/concepts/agents/session-management/):
+
+- **`s3`** (default): The CDK/Terraform infrastructure provisions a dedicated S3 bucket for session data, encrypted with a dedicated KMS key and with all public access blocked; server access logs are delivered to a CloudWatch Logs log group via the same key. The agent's IAM role is granted read/write/list/delete access to the bucket and decrypt/generate-data-key access to the key, and the bucket name is registered alongside the agent's ARN in AppConfig runtime configuration.
+- **`in-memory`**: No bucket is provisioned. Conversation state is kept in memory only for the lifetime of the running process and does not survive restarts or scale-in.
+
+This is implemented in the generated `session.py`, which exports a `get_session_manager()` function resolving a `SessionManager` for the current session.
+
+<OptionFilter when={{ protocol: 'ag-ui' }} description="AG-UI session wiring">
+Since AG-UI's `ag-ui-strands` adapter clones a template `Agent` per conversation thread, `get_session_manager` is wired in as a `session_manager_provider` on the `StrandsAgentConfig` passed to `StrandsAgent` in `main.py`, so a fresh `SessionManager` is resolved for each thread rather than baked into the shared template agent.
+</OptionFilter>
+
+<OptionFilter when={{ protocol: ['http', 'a2a'] }} description="HTTP/A2A session wiring">
+Since `with_session_id` already caches one `Agent` instance per session, `get_session_manager` is called directly inside `get_agent`'s `Agent(session_manager=get_session_manager())` call in `agent.py`.
+</OptionFilter>
+
+The session ID itself comes from the AgentCore Runtime session (propagated via the `x-amzn-bedrock-agentcore-runtime-session-id` header) and is bound to a [`contextvars.ContextVar`](https://docs.python.org/3/library/contextvars.html)-based context so `get_current_session_id()` can resolve it anywhere in the request — including in any downstream MCP or A2A clients wired up via the <Link path="/guides/connection">`connection` generator</Link>, so the whole call chain shares a consistent session.
+
+:::note[Local Development]
+When running locally (`LOCAL_DEV=true`, set automatically by the `-dev` target), session data is always stored on disk under `tmp/agents/strands/<agent-name>` at the workspace root, regardless of the configured `session` option, for convenience.
+:::
+</OptionFilter>
+
+<OptionFilter when={{ framework: 'langchain' }} description="LangChain session management (session.py)">
+The `session` option controls how your agent's LangGraph checkpointer persists conversation state:
+
+- **`s3`** (default): The deployed agent uses an `S3CheckpointSaver` with the provisioned session bucket, storing checkpoints and pending writes under the `checkpoints/` prefix. This class (adapted from [`langgraph-checkpoint-s3`](https://github.com/Isa-rentacs/langgraph-checkpoint-s3), MIT licensed) lives in `s3_checkpoint_saver_langchain.py` in the shared agent-connection project.
+- **`dynamodb-s3`**: The CDK/Terraform infrastructure provisions a DynamoDB table for checkpoints, configured as recommended in the [AWS documentation on using DynamoDB as a checkpoint store for LangGraph agents](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/ddb-langgraph-checkpoint.html) (unified `PK`/`SK` schema, `PAY_PER_REQUEST` billing, point-in-time recovery, and a `ttl` attribute), plus an S3 bucket for offloading checkpoints over 350KB. Both are encrypted with a dedicated KMS key; the bucket's server access logs are delivered to a CloudWatch Logs log group via the same key. The agent's IAM role is granted read/write access to the table and bucket, and the table/bucket names are registered alongside the agent's ARN in AppConfig runtime configuration.
+- **`in-memory`**: No table or bucket is provisioned. Conversation state is kept in memory only for the lifetime of the running process and does not survive restarts or scale-in.
+
+This is implemented in the generated `session.py`, which exports a `get_checkpointer()` function called from `agent.py`'s `create_agent(..., checkpointer=get_checkpointer())`.
+
+:::note[Local Development]
+When running locally (`LOCAL_DEV=true`, set automatically by the `-dev` target), `get_checkpointer()` always returns an [`AsyncSqliteSaver`](https://reference.langchain.com/python/langgraph.checkpoint.sqlite/aio/AsyncSqliteSaver) backed by a local SQLite database under `tmp/agents/langchain/<agent-name>` at the workspace root, regardless of the configured `session` option, for convenience.
+:::
+</OptionFilter>
 </OptionFilter>
 
 ## Invoking your Agent

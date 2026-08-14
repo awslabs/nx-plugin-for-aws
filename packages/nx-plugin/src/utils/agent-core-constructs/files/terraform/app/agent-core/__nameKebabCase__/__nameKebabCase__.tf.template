@@ -1,4 +1,5 @@
-<%_ if (session === 's3') { _%>
+<%_ const hasSessionBucket = session === 's3' || session === 'dynamodb-s3'; _%>
+<%_ if (hasSessionBucket) { _%>
 terraform {
   required_providers {
     random = {
@@ -72,10 +73,10 @@ variable "user_pool_client_ids" {
 }
 
 <%_ } _%>
-<%_ if (auth === 'cognito' || session === 's3') { _%>
+<%_ if (auth === 'cognito' || hasSessionBucket) { _%>
 data "aws_region" "current" {}
 <%_ } _%>
-<%_ if (session === 's3') { _%>
+<%_ if (hasSessionBucket) { _%>
 data "aws_caller_identity" "current" {}
 <%_ } _%>
 <%_ if (auth === 'cognito') { _%>
@@ -84,7 +85,7 @@ locals {
   aws_region = data.aws_region.current.id
 }
 <%_ } _%>
-<%_ if (session === 's3') { _%>
+<%_ if (hasSessionBucket) { _%>
 
 locals {
   # Delivery source/destination names have a 60 character maximum. Truncate
@@ -223,6 +224,45 @@ resource "aws_cloudwatch_log_delivery" "session" {
 }
 
 <%_ } _%>
+<%_ if (session === 'dynamodb-s3') { _%>
+# Unified checkpoints/writes table, matching the schema
+# langgraph_checkpoint_aws.DynamoDBSaver expects (PK/SK, TTL on `ttl`).
+resource "aws_dynamodb_table" "session" {
+  name         = "<%= nameKebabCase %>-checkpoints-${random_id.session_unique_suffix.hex}"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "PK"
+  range_key    = "SK"
+
+  attribute {
+    name = "PK"
+    type = "S"
+  }
+
+  attribute {
+    name = "SK"
+    type = "S"
+  }
+
+  ttl {
+    attribute_name = "ttl"
+    enabled        = true
+  }
+
+  point_in_time_recovery {
+    enabled = true
+  }
+
+  server_side_encryption {
+    enabled     = true
+    kms_key_arn = aws_kms_key.session.arn
+  }
+
+  deletion_protection_enabled = true
+
+  tags = var.tags
+}
+
+<%_ } _%>
 module "agent_core_runtime" {
   source = "../../../core/agent-core"
   agent_runtime_name = "<%= nameClassName %>"
@@ -263,7 +303,7 @@ module "agent_core_runtime" {
         "arn:aws:bedrock:*:*:foundation-model/*",
         "arn:aws:bedrock:*:*:inference-profile/*"
       ]
-    }<% } %><% if (session === 's3') { %>,
+    }<% } %><% if (hasSessionBucket) { %>,
     # Grant access for the agent to read/write its session data
     {
       Effect = "Allow"
@@ -286,6 +326,18 @@ module "agent_core_runtime" {
         "kms:GenerateDataKey*"
       ]
       Resource = [aws_kms_key.session.arn]
+    }<% } %><% if (session === 'dynamodb-s3') { %>,
+    # Grant access for the agent to read/write its checkpoint table
+    {
+      Effect = "Allow"
+      Action = [
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:Query",
+        "dynamodb:BatchGetItem",
+        "dynamodb:BatchWriteItem"
+      ]
+      Resource = [aws_dynamodb_table.session.arn]
     }<% } %>
   ], var.additional_iam_policy_statements)
   tags = var.tags
@@ -297,7 +349,7 @@ module "add_agent_runtime_to_runtime_config" {
 
   namespace = "agentcore"
   key       = "agentRuntimes"
-  value     = { "<%= nameClassName %>" = { arn = module.agent_core_runtime.agent_core_runtime_arn<% if (session === 's3') { %>, session = { bucketName = aws_s3_bucket.session.bucket }<% } %> } }
+  value     = { "<%= nameClassName %>" = { arn = module.agent_core_runtime.agent_core_runtime_arn<% if (hasSessionBucket) { %>, session = { <% if (session === 'dynamodb-s3') { %>tableName = aws_dynamodb_table.session.name, <% } %>bucketName = aws_s3_bucket.session.bucket }<% } %> } }
 
   depends_on = [module.agent_core_runtime]
 }

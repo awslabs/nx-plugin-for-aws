@@ -158,6 +158,43 @@ dev-dependencies = []
     expect(agentTerraformContent).toMatchSnapshot('terraform-agent.tf');
   });
 
+  it('should not create session bucket infrastructure when session is in-memory (Terraform)', async () => {
+    await pyAgentGenerator(tree, {
+      project: 'test-project',
+      name: 'in-memory-terraform-agent',
+      infra: 'agentcore',
+      session: 'in-memory',
+      iac: 'terraform',
+    });
+
+    const agentTerraformContent = tree.read(
+      'packages/common/terraform/src/app/agents/in-memory-terraform-agent/in-memory-terraform-agent.tf',
+      'utf-8',
+    );
+    expect(agentTerraformContent).toMatchSnapshot(
+      'terraform-agent.tf (in-memory)',
+    );
+  });
+
+  it('should create DynamoDB checkpoint table and S3 offload bucket infrastructure when session is dynamodb-s3 (Terraform)', async () => {
+    await pyAgentGenerator(tree, {
+      project: 'test-project',
+      name: 'dynamodb-terraform-agent',
+      framework: 'langchain',
+      infra: 'agentcore',
+      session: 'dynamodb-s3',
+      iac: 'terraform',
+    });
+
+    const agentTerraformContent = tree.read(
+      'packages/common/terraform/src/app/agents/dynamodb-terraform-agent/dynamodb-terraform-agent.tf',
+      'utf-8',
+    );
+    expect(agentTerraformContent).toMatchSnapshot(
+      'terraform-agent.tf (dynamodb-s3)',
+    );
+  });
+
   it('should generate correct docker image tag for Terraform provider', async () => {
     // Update root package.json to have a scope
     const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
@@ -339,6 +376,7 @@ dev-dependencies = []
     expect(projectConfig.metadata.components[0].name).toBe('agent');
     expect(projectConfig.metadata.components[0].port).toBeDefined();
     expect(typeof projectConfig.metadata.components[0].port).toBe('number');
+    expect(projectConfig.metadata.components[0].session).toBe('s3');
   });
 
   it('should add component generator metadata with custom name', async () => {
