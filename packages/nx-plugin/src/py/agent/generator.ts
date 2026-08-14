@@ -81,7 +81,7 @@ export interface PyAgentMetadata extends IacMetadata {
    * Strands vs LangChain Layer-2 client + agent.py transform.
    */
   readonly framework: PyAgentFramework;
-  readonly session: string;
+  readonly session: PyAgentSession;
 }
 
 /** Whether the chat CLI signs its requests, which only IAM auth needs. */
@@ -266,9 +266,14 @@ export const pyAgentGenerator = async (
   }
   const session = options.session ?? 's3';
 
+  // With infra=none there's no CDK/Terraform construct to provision a bucket
+  // or table or set RUNTIME_CONFIG_APP_ID, so session.py's non-local-dev
+  // branch has nothing to read from AppConfig at runtime — the generated code
+  // still honors `session`, but only works outside local dev if the caller
+  // wires up matching infra/runtime config themselves.
   if (infra === 'none' && session !== 'in-memory') {
     console.warn(
-      'Warning: session is ignored when no infrastructure is configured (no infrastructure is generated)',
+      `Warning: session '${session}' requires infrastructure to configure it automatically (no infrastructure is generated for infra=none) — outside local dev this will fail unless you configure matching runtime config yourself`,
     );
   }
 

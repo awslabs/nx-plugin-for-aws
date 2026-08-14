@@ -110,6 +110,11 @@ class S3CheckpointSaver(BaseCheckpointSaver[str]):
         self.prefix = prefix.rstrip("/") + "/" if prefix else ""
         self.s3_client = s3_client or boto3.client("s3")
 
+    def _iter_objects(self, prefix: str) -> Iterator[dict[str, Any]]:
+        paginator = self.s3_client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self.bucket_name, Prefix=prefix):
+            yield from page.get("Contents", [])
+
     def get_tuple(self, config: RunnableConfig) -> CheckpointTuple | None:
         thread_id = str(config["configurable"]["thread_id"])
         checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
@@ -145,30 +150,8 @@ class S3CheckpointSaver(BaseCheckpointSaver[str]):
                     return None
                 raise RuntimeError(f"Failed to get checkpoint: {e}") from e
 
-        checkpoint_ns_safe = _normalize_checkpoint_ns(checkpoint_ns)
-        prefix = f"{self.prefix}checkpoints/{thread_id}/{checkpoint_ns_safe}/"
-        try:
-            paginator = self.s3_client.get_paginator("list_objects_v2")
-            objects = [
-                obj
-                for page in paginator.paginate(Bucket=self.bucket_name, Prefix=prefix)
-                for obj in page.get("Contents", [])
-            ]
-            if not objects:
-                return None
-            latest_key = sorted(objects, key=lambda x: x["Key"], reverse=True)[0]["Key"]
-            latest_checkpoint_id = latest_key.split("/")[-1].replace(".json", "")
-            return self.get_tuple(
-                RunnableConfig(
-                    configurable={
-                        "thread_id": thread_id,
-                        "checkpoint_ns": checkpoint_ns,
-                        "checkpoint_id": latest_checkpoint_id,
-                    }
-                )
-            )
-        except ClientError as e:
-            raise RuntimeError(f"Failed to list checkpoints: {e}") from e
+        # No checkpoint_id given - resolve the latest one the same way list() does.
+        return next(self.list(config, limit=1), None)
 
     # `builtins.list` is used here (rather than the bare `list` type) because this class
     # defines its own `list` method below, which shadows the builtin for annotations
@@ -178,21 +161,19 @@ class S3CheckpointSaver(BaseCheckpointSaver[str]):
     ) -> builtins.list[tuple[str, str, Any]]:
         writes_prefix = _get_writes_prefix(self.prefix, thread_id, checkpoint_ns, checkpoint_id)
         writes = []
-        paginator = self.s3_client.get_paginator("list_objects_v2")
-        for page in paginator.paginate(Bucket=self.bucket_name, Prefix=writes_prefix):
-            for obj in page.get("Contents", []):
-                key = obj["Key"]
-                filename = key.split("/")[-1].replace(".json", "")
-                if "_" not in filename:
-                    continue
-                task_id, idx_str = filename.rsplit("_", 1)
-                try:
-                    idx = int(idx_str)
-                except ValueError:
-                    continue
-                response = self.s3_client.get_object(Bucket=self.bucket_name, Key=key)
-                channel, value = _deserialize_write_data(response["Body"].read().decode("utf-8"), self.serde)
-                writes.append((task_id, channel, value, idx))
+        for obj in self._iter_objects(writes_prefix):
+            key = obj["Key"]
+            filename = key.split("/")[-1].replace(".json", "")
+            if "_" not in filename:
+                continue
+            task_id, idx_str = filename.rsplit("_", 1)
+            try:
+                idx = int(idx_str)
+            except ValueError:
+                continue
+            response = self.s3_client.get_object(Bucket=self.bucket_name, Key=key)
+            channel, value = _deserialize_write_data(response["Body"].read().decode("utf-8"), self.serde)
+            writes.append((task_id, channel, value, idx))
 
         writes.sort(key=lambda x: (x[0], x[3]))
         return [(task_id, channel, value) for task_id, channel, value, _ in writes]
@@ -215,20 +196,18 @@ class S3CheckpointSaver(BaseCheckpointSaver[str]):
         before_checkpoint_id = get_checkpoint_id(before) if before else None
 
         try:
-            paginator = self.s3_client.get_paginator("list_objects_v2")
             checkpoints = []
-            for page in paginator.paginate(Bucket=self.bucket_name, Prefix=prefix):
-                for obj in page.get("Contents", []):
-                    key = obj["Key"]
-                    if not key.endswith(".json"):
-                        continue
-                    parts = key[len(self.prefix) :].split("/")
-                    if len(parts) < 4 or parts[0] != "checkpoints":
-                        continue
-                    key_checkpoint_id = parts[3].replace(".json", "")
-                    if before_checkpoint_id and key_checkpoint_id >= before_checkpoint_id:
-                        continue
-                    checkpoints.append((parts[1], _denormalize_checkpoint_ns(parts[2]), key_checkpoint_id))
+            for obj in self._iter_objects(prefix):
+                key = obj["Key"]
+                if not key.endswith(".json"):
+                    continue
+                parts = key[len(self.prefix) :].split("/")
+                if len(parts) < 4 or parts[0] != "checkpoints":
+                    continue
+                key_checkpoint_id = parts[3].replace(".json", "")
+                if before_checkpoint_id and key_checkpoint_id >= before_checkpoint_id:
+                    continue
+                checkpoints.append((parts[1], _denormalize_checkpoint_ns(parts[2]), key_checkpoint_id))
 
             checkpoints.sort(key=lambda x: x[2], reverse=True)
             if limit:
@@ -317,17 +296,15 @@ class S3CheckpointSaver(BaseCheckpointSaver[str]):
         deleted_count = 0
         try:
             for prefix in prefixes:
-                paginator = self.s3_client.get_paginator("list_objects_v2")
                 objects_to_delete = []
-                for page in paginator.paginate(Bucket=self.bucket_name, Prefix=prefix):
-                    for obj in page.get("Contents", []):
-                        objects_to_delete.append({"Key": obj["Key"]})
-                        if len(objects_to_delete) >= 1000:
-                            self.s3_client.delete_objects(
-                                Bucket=self.bucket_name, Delete={"Objects": objects_to_delete}
-                            )
-                            deleted_count += len(objects_to_delete)
-                            objects_to_delete = []
+                for obj in self._iter_objects(prefix):
+                    objects_to_delete.append({"Key": obj["Key"]})
+                    if len(objects_to_delete) >= 1000:
+                        self.s3_client.delete_objects(
+                            Bucket=self.bucket_name, Delete={"Objects": objects_to_delete}
+                        )
+                        deleted_count += len(objects_to_delete)
+                        objects_to_delete = []
                 if objects_to_delete:
                     self.s3_client.delete_objects(Bucket=self.bucket_name, Delete={"Objects": objects_to_delete})
                     deleted_count += len(objects_to_delete)

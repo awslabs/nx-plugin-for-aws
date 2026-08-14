@@ -2,6 +2,8 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   getProjects,
   joinPathFragments,
@@ -81,33 +83,16 @@ const logToolErrorsImportPattern = (mod: string) =>
 const LOG_TOOL_ERRORS_WRITE_PATTERN =
   'language python\n`hooks=[log_model_errors]` => `hooks=[log_model_errors, log_tool_errors]`';
 
-// Existing agent-connection projects predate tool_errors_strands.py — mirrors
-// the py#agent generator's own py-core-strands/base/tool_errors_strands.py.template.
-const TOOL_ERRORS_STRANDS_PY_CONTENT = `import logging
-
-from strands.hooks import AfterToolCallEvent, HookRegistry
-
-logger = logging.getLogger(__name__)
-
-
-class _LogToolErrors:
-    def register_hooks(self, registry: HookRegistry, **_kwargs) -> None:
-        registry.add_callback(AfterToolCallEvent, self._on_after_tool_call)
-
-    @staticmethod
-    def _on_after_tool_call(event: AfterToolCallEvent) -> None:
-        tool_name = event.tool_use.get("name", "<unknown>")
-        if event.exception is not None:
-            logger.error("Tool '%s' failed: %s", tool_name, event.exception)
-            return
-        if event.result.get("status") != "error":
-            return
-        message = " ".join(block["text"] for block in event.result.get("content", []) if "text" in block)
-        logger.error("Tool '%s' failed%s", tool_name, f": {message}" if message else "")
-
-
-log_tool_errors = _LogToolErrors()
-`;
+// Existing agent-connection projects predate tool_errors_strands.py. This has
+// no EJS templating, so it's read verbatim from the generator's own template
+// rather than kept as a second, hand-copied source of truth.
+const TOOL_ERRORS_STRANDS_PY_CONTENT = readFileSync(
+  join(
+    import.meta.dirname,
+    '../../../utils/agent-connection/files/py-core-strands/base/tool_errors_strands.py.template',
+  ),
+  'utf-8',
+);
 
 /**
  * Ensures the shared Python agent-connection project has tool_errors_strands.py

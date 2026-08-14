@@ -425,7 +425,7 @@ dev-dependencies = []
     expect(projectConfig.targets['agent-docker']).toBeUndefined();
   });
 
-  it('should warn when session is not explicitly disabled with infra=none', async () => {
+  it('should warn but still generate real session content when session defaults to s3 with infra=none', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     await pyAgentGenerator(tree, {
@@ -436,8 +436,17 @@ dev-dependencies = []
     });
 
     expect(warnSpy).toHaveBeenCalledWith(
-      'Warning: session is ignored when no infrastructure is configured (no infrastructure is generated)',
+      expect.stringContaining("session 's3' requires infrastructure"),
     );
+
+    // infra=none doesn't force in-memory: the generated code still honors
+    // the chosen session backend, for callers who wire up matching
+    // infra/runtime config themselves outside this generator.
+    const sessionContent = tree.read(
+      'apps/test-project/proj_test_project/session_warn_agent/session.py',
+      'utf-8',
+    );
+    expect(sessionContent).toContain('S3SessionManager');
 
     warnSpy.mockRestore();
   });
