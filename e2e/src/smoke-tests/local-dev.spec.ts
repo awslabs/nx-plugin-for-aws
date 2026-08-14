@@ -59,7 +59,7 @@ const A2A_DELEGATED_MARKER = 'delegated reply:';
  * Bounded with `.times()` + `.first()` so it neither hijacks the shared
  * fallback for other tests nor lingers afterwards.
  */
-function driveA2ADelegations(delegations: number): void {
+function driveA2ADelegations(mock: MockServer, delegations: number): void {
   type MockReq = {
     messages: { role: string; content: string }[];
     toolNames: readonly string[];
@@ -92,13 +92,13 @@ function driveA2ADelegations(delegations: number): void {
     return { text: `${A2A_DELEGATED_MARKER} ${result?.content ?? 'none'}` };
   };
 
-  llmMock!
+  mock
     .when(owesToolCall as never)
     .reply(callTool as never)
     .first()
     .times(delegations);
 
-  llmMock!
+  mock
     .when(answersToolResult as never)
     .reply(echoToolResult as never)
     .first()
@@ -1546,7 +1546,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     //
     // The delegation tool returns its exception as the tool result, so a failed
     // call still streams back a 200: assert on the body, not just the status.
-    driveA2ADelegations(2);
+    driveA2ADelegations(llmMock!, 2);
     const sessionId = `py-agent-a2a-reuse-${'0'.repeat(20)}`;
     for (const attempt of [1, 2]) {
       const delegateRes = await fetch(
@@ -1579,6 +1579,9 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
       STARTUP_TIMEOUT_MS,
     );
     await stopLast();
+    // This agent's dev chain also starts the A2A agent it delegates to, so wait
+    // for that port to be released before the next chain tries to bind it.
+    await waitForPortFree(ports.pyA2a, STARTUP_TIMEOUT_MS);
   });
 
   it('Python A2A Agent - card + streaming message', async () => {
@@ -1712,7 +1715,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     // Delegate twice on one session id, so the second delegation reuses the A2A
     // client the first built — see the Strands equivalent in the Python HTTP
     // Agent test above for why the second call is the one that matters.
-    driveA2ADelegations(2);
+    driveA2ADelegations(llmMock!, 2);
     const aguiSessionId = `py-langchain-a2a-reuse-${'0'.repeat(20)}`;
     for (const attempt of [1, 2]) {
       const delegateRes = await fetch(
