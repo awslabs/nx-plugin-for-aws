@@ -50,7 +50,30 @@ export type DynamodbAgentProps = Omit<
   | 'protocolConfiguration'
   | 'agentRuntimeArtifact'
   | 'authorizerConfiguration'
->;
+> & {
+  /**
+   * Removal policy for the session bucket holding the agent's conversation
+   * history. Defaults to retaining it so a stack \`destroy\` doesn't silently
+   * delete session data — set to \`RemovalPolicy.DESTROY\` for sandbox/CI teardown.
+   *
+   * @default RemovalPolicy.RETAIN
+   */
+  readonly sessionBucketRemovalPolicy?: RemovalPolicy;
+  /**
+   * Whether to enable deletion protection on the session checkpoint table.
+   * Set to \`false\` to allow a stack \`destroy\` to remove it (e.g. for
+   * sandbox/CI teardown).
+   *
+   * @default true
+   */
+  readonly sessionTableDeletionProtection?: boolean;
+  /**
+   * Removal policy for the session checkpoint table.
+   *
+   * @default RemovalPolicy.RETAIN
+   */
+  readonly sessionTableRemovalPolicy?: RemovalPolicy;
+};
 
 export class DynamodbAgent
   extends Construct
@@ -77,6 +100,13 @@ export class DynamodbAgent
     this.dockerImage = AgentRuntimeArtifact.fromAsset(bundleDir, {
       platform: Platform.LINUX_ARM64,
     });
+
+    const {
+      sessionBucketRemovalPolicy = RemovalPolicy.RETAIN,
+      sessionTableDeletionProtection = true,
+      sessionTableRemovalPolicy = RemovalPolicy.RETAIN,
+      ...restProps
+    } = props ?? {};
 
     const sessionKey = new Key(this, 'SessionKey', {
       enableKeyRotation: true,
@@ -114,7 +144,7 @@ export class DynamodbAgent
 
     const sessionBucket = new Bucket(this, 'SessionBucket', {
       enforceSSL: true,
-      removalPolicy: RemovalPolicy.RETAIN,
+      removalPolicy: sessionBucketRemovalPolicy,
       encryption: BucketEncryption.KMS,
       encryptionKey: sessionKey,
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
@@ -193,8 +223,8 @@ export class DynamodbAgent
       timeToLiveAttribute: 'ttl',
       encryption: TableEncryption.CUSTOMER_MANAGED,
       encryptionKey: sessionKey,
-      deletionProtection: true,
-      removalPolicy: RemovalPolicy.RETAIN,
+      deletionProtection: sessionTableDeletionProtection,
+      removalPolicy: sessionTableRemovalPolicy,
     });
 
     this.agentCoreRuntime = new Runtime(this, 'DynamodbAgent', {
@@ -204,10 +234,10 @@ export class DynamodbAgent
       }),
       protocolConfiguration: ProtocolType.HTTP,
       agentRuntimeArtifact: this.dockerImage,
-      ...props,
+      ...restProps,
       environmentVariables: {
         RUNTIME_CONFIG_APP_ID: rc.appConfigApplicationId,
-        ...props?.environmentVariables,
+        ...restProps?.environmentVariables,
       },
     });
 
@@ -363,7 +393,16 @@ export type SnapshotBedrockAgentProps = Omit<
   | 'protocolConfiguration'
   | 'agentRuntimeArtifact'
   | 'authorizerConfiguration'
->;
+> & {
+  /**
+   * Removal policy for the session bucket holding the agent's conversation
+   * history. Defaults to retaining it so a stack \`destroy\` doesn't silently
+   * delete session data — set to \`RemovalPolicy.DESTROY\` for sandbox/CI teardown.
+   *
+   * @default RemovalPolicy.RETAIN
+   */
+  readonly sessionBucketRemovalPolicy?: RemovalPolicy;
+};
 
 export class SnapshotBedrockAgent
   extends Construct
@@ -390,6 +429,9 @@ export class SnapshotBedrockAgent
     this.dockerImage = AgentRuntimeArtifact.fromAsset(bundleDir, {
       platform: Platform.LINUX_ARM64,
     });
+
+    const { sessionBucketRemovalPolicy = RemovalPolicy.RETAIN, ...restProps } =
+      props ?? {};
 
     const sessionKey = new Key(this, 'SessionKey', {
       enableKeyRotation: true,
@@ -427,7 +469,7 @@ export class SnapshotBedrockAgent
 
     const sessionBucket = new Bucket(this, 'SessionBucket', {
       enforceSSL: true,
-      removalPolicy: RemovalPolicy.RETAIN,
+      removalPolicy: sessionBucketRemovalPolicy,
       encryption: BucketEncryption.KMS,
       encryptionKey: sessionKey,
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
@@ -503,10 +545,10 @@ export class SnapshotBedrockAgent
       }),
       protocolConfiguration: ProtocolType.HTTP,
       agentRuntimeArtifact: this.dockerImage,
-      ...props,
+      ...restProps,
       environmentVariables: {
         RUNTIME_CONFIG_APP_ID: rc.appConfigApplicationId,
-        ...props?.environmentVariables,
+        ...restProps?.environmentVariables,
       },
     });
 

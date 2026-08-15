@@ -596,7 +596,11 @@ Este é o ponto de entrada para o agente. Como selecionamos `--protocol=ag-ui`, 
 import { Fn, Lazy, Names, RemovalPolicy, Stack } from 'aws-cdk-lib';
 import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { Connections, IConnectable } from 'aws-cdk-lib/aws-ec2';
-import { BlockPublicAccess, Bucket, BucketEncryption } from 'aws-cdk-lib/aws-s3';
+import {
+  BlockPublicAccess,
+  Bucket,
+  BucketEncryption,
+} from 'aws-cdk-lib/aws-s3';
 import { Key } from 'aws-cdk-lib/aws-kms';
 import {
   CfnDelivery,
@@ -615,7 +619,13 @@ import {
   RuntimeProps,
   RuntimeAuthorizerConfiguration,
 } from 'aws-cdk-lib/aws-bedrockagentcore';
-import { PolicyStatement, Effect, ServicePrincipal, IGrantable, IPrincipal } from 'aws-cdk-lib/aws-iam';
+import {
+  PolicyStatement,
+  Effect,
+  ServicePrincipal,
+  IGrantable,
+  IPrincipal,
+} from 'aws-cdk-lib/aws-iam';
 import { IUserPool, IUserPoolClient } from 'aws-cdk-lib/aws-cognito';
 import { suppressRules } from '../../../core/checkov.js';
 import { RuntimeConfig } from '../../../core/runtime-config.js';
@@ -635,6 +645,14 @@ export type StoryAgentProps = Omit<
     userPool: IUserPool;
     userPoolClient: IUserPoolClient;
   };
+  /**
+   * Removal policy for the session bucket holding the agent's conversation
+   * history. Defaults to retaining it so a stack `destroy` doesn't silently
+   * delete session data — set to `RemovalPolicy.DESTROY` for sandbox/CI teardown.
+   *
+   * @default RemovalPolicy.RETAIN
+   */
+  readonly sessionBucketRemovalPolicy?: RemovalPolicy;
 };
 
 export class StoryAgent extends Construct implements IGrantable, IConnectable {
@@ -660,7 +678,11 @@ export class StoryAgent extends Construct implements IGrantable, IConnectable {
       platform: Platform.LINUX_ARM64,
     });
 
-    const { identity, ...restProps } = props;
+    const {
+      identity,
+      sessionBucketRemovalPolicy = RemovalPolicy.RETAIN,
+      ...restProps
+    } = props ?? {};
 
     const sessionKey = new Key(this, 'SessionKey', {
       enableKeyRotation: true,
@@ -671,7 +693,9 @@ export class StoryAgent extends Construct implements IGrantable, IConnectable {
     sessionKey.addToResourcePolicy(
       new PolicyStatement({
         effect: Effect.ALLOW,
-        principals: [new ServicePrincipal(`logs.${stack.region}.amazonaws.com`)],
+        principals: [
+          new ServicePrincipal(`logs.${stack.region}.amazonaws.com`),
+        ],
         actions: [
           'kms:Encrypt',
           'kms:Decrypt',
@@ -696,7 +720,7 @@ export class StoryAgent extends Construct implements IGrantable, IConnectable {
 
     const sessionBucket = new Bucket(this, 'SessionBucket', {
       enforceSSL: true,
-      removalPolicy: RemovalPolicy.RETAIN,
+      removalPolicy: sessionBucketRemovalPolicy,
       encryption: BucketEncryption.KMS,
       encryptionKey: sessionKey,
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
@@ -727,7 +751,6 @@ export class StoryAgent extends Construct implements IGrantable, IConnectable {
       'Server access logs are delivered to CloudWatch Logs',
     );
 
-    // Deliver the session bucket's server access logs to CloudWatch Logs.
     const sessionAccessLogsSource: CfnDeliverySource = new CfnDeliverySource(
       this,
       'SessionAccessLogsSource',
@@ -814,6 +837,11 @@ export class StoryAgent extends Construct implements IGrantable, IConnectable {
           bucketName: sessionBucket.bucketName,
         },
       },
+    });
+
+    rc.set('connection', 'agentRuntimes', {
+      ...rc.get('connection').agentRuntimes,
+      StoryAgent: this.agentCoreRuntime.agentRuntimeArn,
     });
   }
 

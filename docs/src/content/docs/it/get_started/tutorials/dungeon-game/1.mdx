@@ -451,6 +451,7 @@ Il `py#agent` genera questi file:
       - agent/
         - main.py punto di ingresso per il tuo agente in Bedrock AgentCore Runtime
         - agent.py definisce un agente di esempio e strumenti
+        - session.py risolve un SessionManager per persistere lo stato della conversazione
         - Dockerfile definisce l'immagine docker per il deployment su AgentCore Runtime
   - common/constructs/
     - src
@@ -489,7 +490,7 @@ Refer to tools as your 'spellbook'.
     )
 ```
 
-Questo crea un agente Strands di esempio e definisce uno strumento di sottrazione.
+Questo crea un agente Strands di esempio e definisce uno strumento di sottrazione. `log_model_errors` e `log_tool_errors` sono hook dal progetto condiviso `dungeon_adventure_agent_connection` che registrano i fallimenti di modello/strumento invece di lasciarli fallire silenziosamente.
 
 ```python
 # agent/main.py
@@ -588,14 +589,18 @@ async def ping():
     return {"status": "healthy"}
 ```
 
-Questo è il punto di ingresso per l'agente. Poiché abbiamo selezionato `--protocol=ag-ui`, il generatore avvolge il nostro `Agent` Strands con `StrandsAgent` da [`ag_ui_strands`](https://docs.copilotkit.ai/aws-strands/integration) e lo monta su un'app FastAPI che parla il [protocollo AG-UI](https://docs.copilotkit.ai/aws-strands/protocol) — questo è ciò con cui CopilotKit comunicherà dal sito web React. L'agente è costruito all'interno di un gestore `lifespan` — non al momento dell'import — quindi l'avvio del container, non l'import del modulo, possiede la costruzione, e ogni sessione AgentCore ottiene il proprio container. Il `_SessionIdMiddleware` lega l'ID di sessione AgentCore runtime in ingresso su un `ContextVar` in modo che qualsiasi client MCP/A2A downstream che colleghiamo in seguito (ad es. il server MCP Inventory nel <Link path="get_started/tutorials/dungeon-game/2">Modulo 2</Link>) lo inoltri automaticamente sulle sue chiamate in uscita. Nel <Link path="get_started/tutorials/dungeon-game/3">Modulo 3</Link> aggiungeremo anche un `session_manager_provider` in modo che ogni thread id ottenga il proprio `S3SessionManager` e la cronologia delle conversazioni persista tra i turni.
+Questo è il punto di ingresso per l'agente. Poiché abbiamo selezionato `--protocol=ag-ui`, il generatore avvolge il nostro `Agent` Strands con `StrandsAgent` da [`ag_ui_strands`](https://docs.copilotkit.ai/aws-strands/integration) e lo monta su un'app FastAPI che parla il [protocollo AG-UI](https://docs.copilotkit.ai/aws-strands/protocol) — questo è ciò con cui CopilotKit comunicherà dal sito web React. L'agente è costruito all'interno di un gestore `lifespan` — non al momento dell'import — quindi l'avvio del container, non l'import del modulo, possiede la costruzione, e ogni sessione AgentCore ottiene il proprio container. Il `_SessionIdMiddleware` lega l'ID di sessione AgentCore runtime in ingresso su un `ContextVar` in modo che qualsiasi client MCP/A2A downstream che colleghiamo in seguito (ad es. il server MCP Inventory nel <Link path="get_started/tutorials/dungeon-game/2">Modulo 2</Link>) lo inoltri automaticamente sulle sue chiamate in uscita. Poiché AG-UI memorizza nella cache un agente Strands per `thread_id`, colleghiamo un `session_manager_provider` invece del session manager dell'agente template — questo dà a ogni thread il proprio `SessionManager` in modo che la cronologia delle conversazioni persista tra i turni. Quella funzione `get_session_manager()` proviene da un `session.py` generato: quando deployato, restituisce un `strands.session.S3SessionManager` supportato da un bucket S3 che il generatore fornisce automaticamente; sotto `agent-dev` (`LOCAL_DEV=true`) restituisce sempre un `FileSessionManager` che scrive in una directory temporanea locale, indipendentemente dalla configurazione deployata.
 
 ```ts
 // common/constructs/src/app/agents/story-agent/story-agent.ts
 import { Fn, Lazy, Names, RemovalPolicy, Stack } from 'aws-cdk-lib';
 import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { Connections, IConnectable } from 'aws-cdk-lib/aws-ec2';
-import { BlockPublicAccess, Bucket, BucketEncryption } from 'aws-cdk-lib/aws-s3';
+import {
+  BlockPublicAccess,
+  Bucket,
+  BucketEncryption,
+} from 'aws-cdk-lib/aws-s3';
 import { Key } from 'aws-cdk-lib/aws-kms';
 import {
   CfnDelivery,
@@ -614,7 +619,13 @@ import {
   RuntimeProps,
   RuntimeAuthorizerConfiguration,
 } from 'aws-cdk-lib/aws-bedrockagentcore';
-import { PolicyStatement, Effect, ServicePrincipal, IGrantable, IPrincipal } from 'aws-cdk-lib/aws-iam';
+import {
+  PolicyStatement,
+  Effect,
+  ServicePrincipal,
+  IGrantable,
+  IPrincipal,
+} from 'aws-cdk-lib/aws-iam';
 import { IUserPool, IUserPoolClient } from 'aws-cdk-lib/aws-cognito';
 import { suppressRules } from '../../../core/checkov.js';
 import { RuntimeConfig } from '../../../core/runtime-config.js';
@@ -634,6 +645,14 @@ export type StoryAgentProps = Omit<
     userPool: IUserPool;
     userPoolClient: IUserPoolClient;
   };
+  /**
+   * Removal policy for the session bucket holding the agent's conversation
+   * history. Defaults to retaining it so a stack `destroy` doesn't silently
+   * delete session data — set to `RemovalPolicy.DESTROY` for sandbox/CI teardown.
+   *
+   * @default RemovalPolicy.RETAIN
+   */
+  readonly sessionBucketRemovalPolicy?: RemovalPolicy;
 };
 
 export class StoryAgent extends Construct implements IGrantable, IConnectable {
@@ -659,7 +678,11 @@ export class StoryAgent extends Construct implements IGrantable, IConnectable {
       platform: Platform.LINUX_ARM64,
     });
 
-    const { identity, ...restProps } = props;
+    const {
+      identity,
+      sessionBucketRemovalPolicy = RemovalPolicy.RETAIN,
+      ...restProps
+    } = props ?? {};
 
     const sessionKey = new Key(this, 'SessionKey', {
       enableKeyRotation: true,
@@ -670,7 +693,9 @@ export class StoryAgent extends Construct implements IGrantable, IConnectable {
     sessionKey.addToResourcePolicy(
       new PolicyStatement({
         effect: Effect.ALLOW,
-        principals: [new ServicePrincipal(`logs.${stack.region}.amazonaws.com`)],
+        principals: [
+          new ServicePrincipal(`logs.${stack.region}.amazonaws.com`),
+        ],
         actions: [
           'kms:Encrypt',
           'kms:Decrypt',
@@ -695,7 +720,7 @@ export class StoryAgent extends Construct implements IGrantable, IConnectable {
 
     const sessionBucket = new Bucket(this, 'SessionBucket', {
       enforceSSL: true,
-      removalPolicy: RemovalPolicy.RETAIN,
+      removalPolicy: sessionBucketRemovalPolicy,
       encryption: BucketEncryption.KMS,
       encryptionKey: sessionKey,
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
@@ -726,7 +751,6 @@ export class StoryAgent extends Construct implements IGrantable, IConnectable {
       'Server access logs are delivered to CloudWatch Logs',
     );
 
-    // Deliver the session bucket's server access logs to CloudWatch Logs.
     const sessionAccessLogsSource: CfnDeliverySource = new CfnDeliverySource(
       this,
       'SessionAccessLogsSource',
@@ -814,6 +838,11 @@ export class StoryAgent extends Construct implements IGrantable, IConnectable {
         },
       },
     });
+
+    rc.set('connection', 'agentRuntimes', {
+      ...rc.get('connection').agentRuntimes,
+      StoryAgent: this.agentCoreRuntime.agentRuntimeArn,
+    });
   }
 
   /**
@@ -848,7 +877,7 @@ export class StoryAgent extends Construct implements IGrantable, IConnectable {
 }
 ```
 
-Questo configura un `AgentRuntimeArtifact` CDK che carica l'immagine Docker del tuo agente su ECR e la ospita usando AgentCore Runtime.
+Questo configura un `AgentRuntimeArtifact` CDK che carica l'immagine Docker del tuo agente su ECR e la ospita usando AgentCore Runtime. Poiché abbiamo scelto `--auth=cognito`, il costrutto richiede l'identità user pool/client e autorizza le invocazioni AgentCore Runtime tramite Cognito, inoltrando l'header `Authorization` del chiamante. Fornisce anche il bucket di sessione che il `session.py` dello Story Agent legge a runtime — un bucket S3 crittografato con KMS con log di accesso al server consegnati a CloudWatch Logs — concede all'agente l'accesso in lettura/scrittura ad esso, gli concede l'accesso per invocare i modelli Bedrock e registra il suo ARN e il nome del bucket in `RuntimeConfig` in modo che sia l'agente (a runtime, tramite AppConfig) che la Game API (al momento di synth, tramite `invocationUrl`) possano trovarlo.
 
 Potresti notare un `Dockerfile` extra, che fa riferimento all'immagine Docker dal progetto `story`, permettendoci di co-localizzare il Dockerfile e il codice sorgente dell'agente.
 

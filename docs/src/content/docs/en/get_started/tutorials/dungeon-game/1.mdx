@@ -645,6 +645,14 @@ export type StoryAgentProps = Omit<
     userPool: IUserPool;
     userPoolClient: IUserPoolClient;
   };
+  /**
+   * Removal policy for the session bucket holding the agent's conversation
+   * history. Defaults to retaining it so a stack `destroy` doesn't silently
+   * delete session data — set to `RemovalPolicy.DESTROY` for sandbox/CI teardown.
+   *
+   * @default RemovalPolicy.RETAIN
+   */
+  readonly sessionBucketRemovalPolicy?: RemovalPolicy;
 };
 
 export class StoryAgent extends Construct implements IGrantable, IConnectable {
@@ -670,7 +678,11 @@ export class StoryAgent extends Construct implements IGrantable, IConnectable {
       platform: Platform.LINUX_ARM64,
     });
 
-    const { identity, ...restProps } = props;
+    const {
+      identity,
+      sessionBucketRemovalPolicy = RemovalPolicy.RETAIN,
+      ...restProps
+    } = props ?? {};
 
     const sessionKey = new Key(this, 'SessionKey', {
       enableKeyRotation: true,
@@ -708,7 +720,7 @@ export class StoryAgent extends Construct implements IGrantable, IConnectable {
 
     const sessionBucket = new Bucket(this, 'SessionBucket', {
       enforceSSL: true,
-      removalPolicy: RemovalPolicy.RETAIN,
+      removalPolicy: sessionBucketRemovalPolicy,
       encryption: BucketEncryption.KMS,
       encryptionKey: sessionKey,
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,

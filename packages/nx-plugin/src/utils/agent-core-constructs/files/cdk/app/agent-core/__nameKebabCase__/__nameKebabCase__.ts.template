@@ -50,7 +50,34 @@ export type <%- nameClassName %>Props = Omit<
   | 'protocolConfiguration'
   | 'agentRuntimeArtifact'
   | 'authorizerConfiguration'
->;
+><%_ if (hasSessionBucket) { _%> & {
+<%_ if (hasSessionBucket) { _%>
+  /**
+   * Removal policy for the session bucket holding the agent's conversation
+   * history. Defaults to retaining it so a stack `destroy` doesn't silently
+   * delete session data — set to `RemovalPolicy.DESTROY` for sandbox/CI teardown.
+   *
+   * @default RemovalPolicy.RETAIN
+   */
+  readonly sessionBucketRemovalPolicy?: RemovalPolicy;
+<%_ } _%>
+<%_ if (session === 'dynamodb-s3') { _%>
+  /**
+   * Whether to enable deletion protection on the session checkpoint table.
+   * Set to `false` to allow a stack `destroy` to remove it (e.g. for
+   * sandbox/CI teardown).
+   *
+   * @default true
+   */
+  readonly sessionTableDeletionProtection?: boolean;
+  /**
+   * Removal policy for the session checkpoint table.
+   *
+   * @default RemovalPolicy.RETAIN
+   */
+  readonly sessionTableRemovalPolicy?: RemovalPolicy;
+<%_ } _%>
+}<%_ } _%>;
 <%_ } else if (auth === 'cognito') { _%>
 export type <%- nameClassName %>Props = Omit<
   RuntimeProps,
@@ -66,6 +93,32 @@ export type <%- nameClassName %>Props = Omit<
     userPool: IUserPool;
     userPoolClient: IUserPoolClient;
   };
+<%_ if (hasSessionBucket) { _%>
+  /**
+   * Removal policy for the session bucket holding the agent's conversation
+   * history. Defaults to retaining it so a stack `destroy` doesn't silently
+   * delete session data — set to `RemovalPolicy.DESTROY` for sandbox/CI teardown.
+   *
+   * @default RemovalPolicy.RETAIN
+   */
+  readonly sessionBucketRemovalPolicy?: RemovalPolicy;
+<%_ } _%>
+<%_ if (session === 'dynamodb-s3') { _%>
+  /**
+   * Whether to enable deletion protection on the session checkpoint table.
+   * Set to `false` to allow a stack `destroy` to remove it (e.g. for
+   * sandbox/CI teardown).
+   *
+   * @default true
+   */
+  readonly sessionTableDeletionProtection?: boolean;
+  /**
+   * Removal policy for the session checkpoint table.
+   *
+   * @default RemovalPolicy.RETAIN
+   */
+  readonly sessionTableRemovalPolicy?: RemovalPolicy;
+<%_ } _%>
 };
 <%_ } _%>
 
@@ -97,8 +150,20 @@ export class <%- nameClassName %> extends Construct implements IGrantable, IConn
       platform: Platform.LINUX_ARM64,
     });
 
+<%_ if (auth === 'cognito' || hasSessionBucket) { _%>
+    const {
 <%_ if (auth === 'cognito') { _%>
-    const { identity, ...restProps } = props;
+      identity,
+<%_ } _%>
+<%_ if (hasSessionBucket) { _%>
+      sessionBucketRemovalPolicy = RemovalPolicy.RETAIN,
+<%_ } _%>
+<%_ if (session === 'dynamodb-s3') { _%>
+      sessionTableDeletionProtection = true,
+      sessionTableRemovalPolicy = RemovalPolicy.RETAIN,
+<%_ } _%>
+      ...restProps
+    } = props ?? {};
 
 <%_ } _%>
 <%_ if (hasSessionBucket) { _%>
@@ -136,7 +201,7 @@ export class <%- nameClassName %> extends Construct implements IGrantable, IConn
 
     const sessionBucket = new Bucket(this, 'SessionBucket', {
       enforceSSL: true,
-      removalPolicy: RemovalPolicy.RETAIN,
+      removalPolicy: sessionBucketRemovalPolicy,
       encryption: BucketEncryption.KMS,
       encryptionKey: sessionKey,
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
@@ -217,8 +282,8 @@ export class <%- nameClassName %> extends Construct implements IGrantable, IConn
       timeToLiveAttribute: 'ttl',
       encryption: TableEncryption.CUSTOMER_MANAGED,
       encryptionKey: sessionKey,
-      deletionProtection: true,
-      removalPolicy: RemovalPolicy.RETAIN,
+      deletionProtection: sessionTableDeletionProtection,
+      removalPolicy: sessionTableRemovalPolicy,
     });
 
 <%_ } _%>
@@ -238,13 +303,15 @@ export class <%- nameClassName %> extends Construct implements IGrantable, IConn
       requestHeaderConfiguration: {
         allowlistedHeaders: ['Authorization'],
       },
+<%_ } _%>
+<%_ if (auth === 'cognito' || hasSessionBucket) { _%>
       ...restProps,
 <%_ } else { _%>
       ...props,
 <%_ } _%>
       environmentVariables: {
         RUNTIME_CONFIG_APP_ID: rc.appConfigApplicationId,
-<%_ if (auth === 'cognito') { _%>
+<%_ if (auth === 'cognito' || hasSessionBucket) { _%>
         ...restProps?.environmentVariables,
 <%_ } else { _%>
         ...props?.environmentVariables,

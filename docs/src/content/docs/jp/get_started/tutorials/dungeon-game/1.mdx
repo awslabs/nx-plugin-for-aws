@@ -451,6 +451,7 @@ Pythonプロジェクトを作成するには：
       - agent/
         - main.py Bedrock AgentCore Runtimeでのエージェントのエントリーポイント
         - agent.py サンプルエージェントとツールを定義
+        - session.py 会話状態を永続化するためのSessionManagerを解決
         - Dockerfile AgentCore Runtimeへのデプロイ用のDockerイメージを定義
   - common/constructs/
     - src
@@ -489,7 +490,7 @@ Refer to tools as your 'spellbook'.
     )
 ```
 
-これはサンプルのStrandsエージェントを作成し、減算ツールを定義します。
+これはサンプルのStrandsエージェントを作成し、減算ツールを定義します。`log_model_errors`と`log_tool_errors`は、共有の`dungeon_adventure_agent_connection`プロジェクトのフックで、モデル/ツールの失敗を黙って失敗させるのではなく、ログに記録します。
 
 ```python
 # agent/main.py
@@ -588,14 +589,18 @@ async def ping():
     return {"status": "healthy"}
 ```
 
-これはエージェントのエントリーポイントです。`--protocol=ag-ui`を選択したため、ジェネレーターは[`ag_ui_strands`](https://docs.copilotkit.ai/aws-strands/integration)の`StrandsAgent`でStrandsの`Agent`をラップし、[AG-UIプロトコル](https://docs.copilotkit.ai/aws-strands/protocol)を話すFastAPIアプリにマウントします。これがReactウェブサイトからCopilotKitが通信する相手です。エージェントは`lifespan`ハンドラー内で構築されます（インポート時ではありません）。これにより、コンテナの起動（モジュールのインポートではなく）が構築を所有し、各AgentCoreセッションが独自のコンテナを取得します。`_SessionIdMiddleware`は、インバウンドのAgentCoreランタイムセッションIDを`ContextVar`にバインドするため、後で配線する下流のMCP/A2Aクライアント（<Link path="jp/get_started/tutorials/dungeon-game/2">モジュール2</Link>のInventory MCPサーバーなど）が、アウトバウンド呼び出しで自動的に転送します。<Link path="jp/get_started/tutorials/dungeon-game/3">モジュール3</Link>では、各スレッドIDが独自の`S3SessionManager`を取得し、会話履歴がターン間で永続化されるように、`session_manager_provider`も追加します。
+これはエージェントのエントリーポイントです。`--protocol=ag-ui`を選択したため、ジェネレーターは[`ag_ui_strands`](https://docs.copilotkit.ai/aws-strands/integration)の`StrandsAgent`でStrandsの`Agent`をラップし、[AG-UIプロトコル](https://docs.copilotkit.ai/aws-strands/protocol)を話すFastAPIアプリにマウントします。これがReactウェブサイトからCopilotKitが通信する相手です。エージェントは`lifespan`ハンドラー内で構築されます（インポート時ではありません）。これにより、コンテナの起動（モジュールのインポートではなく）が構築を所有し、各AgentCoreセッションが独自のコンテナを取得します。`_SessionIdMiddleware`は、インバウンドのAgentCoreランタイムセッションIDを`ContextVar`にバインドするため、後で配線する下流のMCP/A2Aクライアント（<Link path="jp/get_started/tutorials/dungeon-game/2">モジュール2</Link>のInventory MCPサーバーなど）が、アウトバウンド呼び出しで自動的に転送します。AG-UIは`thread_id`ごとに1つのStrandsエージェントをキャッシュするため、テンプレートエージェント自身のセッションマネージャーではなく、`session_manager_provider`をプラグインします。これにより、各スレッドが独自の`SessionManager`を取得し、会話履歴がターン間で永続化されます。その`get_session_manager()`関数は、生成された`session.py`の兄弟から来ています：デプロイされると、ジェネレーターが自動的にプロビジョニングするS3バケットに支えられた`strands.session.S3SessionManager`を返します。`agent-dev`（`LOCAL_DEV=true`）では、デプロイされた設定に関係なく、常にローカルの一時ディレクトリに書き込む`FileSessionManager`を返します。
 
 ```ts
 // common/constructs/src/app/agents/story-agent/story-agent.ts
 import { Fn, Lazy, Names, RemovalPolicy, Stack } from 'aws-cdk-lib';
 import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { Connections, IConnectable } from 'aws-cdk-lib/aws-ec2';
-import { BlockPublicAccess, Bucket, BucketEncryption } from 'aws-cdk-lib/aws-s3';
+import {
+  BlockPublicAccess,
+  Bucket,
+  BucketEncryption,
+} from 'aws-cdk-lib/aws-s3';
 import { Key } from 'aws-cdk-lib/aws-kms';
 import {
   CfnDelivery,
@@ -614,7 +619,13 @@ import {
   RuntimeProps,
   RuntimeAuthorizerConfiguration,
 } from 'aws-cdk-lib/aws-bedrockagentcore';
-import { PolicyStatement, Effect, ServicePrincipal, IGrantable, IPrincipal } from 'aws-cdk-lib/aws-iam';
+import {
+  PolicyStatement,
+  Effect,
+  ServicePrincipal,
+  IGrantable,
+  IPrincipal,
+} from 'aws-cdk-lib/aws-iam';
 import { IUserPool, IUserPoolClient } from 'aws-cdk-lib/aws-cognito';
 import { suppressRules } from '../../../core/checkov.js';
 import { RuntimeConfig } from '../../../core/runtime-config.js';
@@ -634,6 +645,14 @@ export type StoryAgentProps = Omit<
     userPool: IUserPool;
     userPoolClient: IUserPoolClient;
   };
+  /**
+   * Removal policy for the session bucket holding the agent's conversation
+   * history. Defaults to retaining it so a stack `destroy` doesn't silently
+   * delete session data — set to `RemovalPolicy.DESTROY` for sandbox/CI teardown.
+   *
+   * @default RemovalPolicy.RETAIN
+   */
+  readonly sessionBucketRemovalPolicy?: RemovalPolicy;
 };
 
 export class StoryAgent extends Construct implements IGrantable, IConnectable {
@@ -659,7 +678,11 @@ export class StoryAgent extends Construct implements IGrantable, IConnectable {
       platform: Platform.LINUX_ARM64,
     });
 
-    const { identity, ...restProps } = props;
+    const {
+      identity,
+      sessionBucketRemovalPolicy = RemovalPolicy.RETAIN,
+      ...restProps
+    } = props ?? {};
 
     const sessionKey = new Key(this, 'SessionKey', {
       enableKeyRotation: true,
@@ -670,7 +693,9 @@ export class StoryAgent extends Construct implements IGrantable, IConnectable {
     sessionKey.addToResourcePolicy(
       new PolicyStatement({
         effect: Effect.ALLOW,
-        principals: [new ServicePrincipal(`logs.${stack.region}.amazonaws.com`)],
+        principals: [
+          new ServicePrincipal(`logs.${stack.region}.amazonaws.com`),
+        ],
         actions: [
           'kms:Encrypt',
           'kms:Decrypt',
@@ -695,7 +720,7 @@ export class StoryAgent extends Construct implements IGrantable, IConnectable {
 
     const sessionBucket = new Bucket(this, 'SessionBucket', {
       enforceSSL: true,
-      removalPolicy: RemovalPolicy.RETAIN,
+      removalPolicy: sessionBucketRemovalPolicy,
       encryption: BucketEncryption.KMS,
       encryptionKey: sessionKey,
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
@@ -726,7 +751,6 @@ export class StoryAgent extends Construct implements IGrantable, IConnectable {
       'Server access logs are delivered to CloudWatch Logs',
     );
 
-    // Deliver the session bucket's server access logs to CloudWatch Logs.
     const sessionAccessLogsSource: CfnDeliverySource = new CfnDeliverySource(
       this,
       'SessionAccessLogsSource',
@@ -814,6 +838,11 @@ export class StoryAgent extends Construct implements IGrantable, IConnectable {
         },
       },
     });
+
+    rc.set('connection', 'agentRuntimes', {
+      ...rc.get('connection').agentRuntimes,
+      StoryAgent: this.agentCoreRuntime.agentRuntimeArn,
+    });
   }
 
   /**
@@ -848,7 +877,7 @@ export class StoryAgent extends Construct implements IGrantable, IConnectable {
 }
 ```
 
-これは、エージェントのDockerイメージをECRにアップロードし、AgentCore Runtimeを使用してホストするCDK `AgentRuntimeArtifact`を設定します。
+これは、エージェントのDockerイメージをECRにアップロードし、AgentCore Runtimeを使用してホストするCDK `AgentRuntimeArtifact`を設定します。`--auth=cognito`を選択したため、コンストラクトはユーザープール/クライアントIDを必要とし、Cognitoを介してAgentCore Runtime呼び出しを認可し、呼び出し元の`Authorization`ヘッダーを転送します。また、Story Agentの`session.py`が実行時に読み取るセッションバケット（CloudWatch Logsに配信されるサーバーアクセスログを持つKMS暗号化されたS3バケット）をプロビジョニングし、エージェントに読み取り/書き込みアクセスを許可し、Bedrockモデルを呼び出すアクセスを許可し、そのARNとバケット名を`RuntimeConfig`に登録して、エージェント（実行時、AppConfig経由）とGame API（synth時、`invocationUrl`経由）の両方が見つけられるようにします。
 
 追加の`Dockerfile`があることに気付くかもしれません。これは`story`プロジェクトのDockerイメージを参照しており、Dockerfileとエージェントのソースコードを同じ場所に配置できます。
 

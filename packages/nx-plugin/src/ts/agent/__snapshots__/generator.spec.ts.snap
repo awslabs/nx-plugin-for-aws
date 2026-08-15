@@ -714,7 +714,16 @@ export type SnapshotBedrockAgentProps = Omit<
   | 'protocolConfiguration'
   | 'agentRuntimeArtifact'
   | 'authorizerConfiguration'
->;
+> & {
+  /**
+   * Removal policy for the session bucket holding the agent's conversation
+   * history. Defaults to retaining it so a stack \`destroy\` doesn't silently
+   * delete session data — set to \`RemovalPolicy.DESTROY\` for sandbox/CI teardown.
+   *
+   * @default RemovalPolicy.RETAIN
+   */
+  readonly sessionBucketRemovalPolicy?: RemovalPolicy;
+};
 
 export class SnapshotBedrockAgent
   extends Construct
@@ -741,6 +750,9 @@ export class SnapshotBedrockAgent
     this.dockerImage = AgentRuntimeArtifact.fromAsset(bundleDir, {
       platform: Platform.LINUX_ARM64,
     });
+
+    const { sessionBucketRemovalPolicy = RemovalPolicy.RETAIN, ...restProps } =
+      props ?? {};
 
     const sessionKey = new Key(this, 'SessionKey', {
       enableKeyRotation: true,
@@ -778,7 +790,7 @@ export class SnapshotBedrockAgent
 
     const sessionBucket = new Bucket(this, 'SessionBucket', {
       enforceSSL: true,
-      removalPolicy: RemovalPolicy.RETAIN,
+      removalPolicy: sessionBucketRemovalPolicy,
       encryption: BucketEncryption.KMS,
       encryptionKey: sessionKey,
       blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
@@ -854,10 +866,10 @@ export class SnapshotBedrockAgent
       }),
       protocolConfiguration: ProtocolType.HTTP,
       agentRuntimeArtifact: this.dockerImage,
-      ...props,
+      ...restProps,
       environmentVariables: {
         RUNTIME_CONFIG_APP_ID: rc.appConfigApplicationId,
-        ...props?.environmentVariables,
+        ...restProps?.environmentVariables,
       },
     });
 
@@ -1016,6 +1028,12 @@ variable "appconfig_application_id" {
   type        = string
 }
 
+variable "session_force_destroy" {
+  description = "Whether to allow the session bucket to be destroyed even if it still contains objects."
+  type        = bool
+  default     = false
+}
+
 variable "appconfig_application_arn" {
   description = "ARN of the shared runtime-config AppConfig application (from \`core/runtime-config/appconfig.application_arn\`). Used to scope the IAM read permission granted to the agent runtime."
   type        = string
@@ -1092,7 +1110,7 @@ resource "aws_s3_bucket" "session" {
   #checkov:skip=CKV2_AWS_62:Event notifications not required for session data
   #checkov:skip=CKV_AWS_18:Server access logs are delivered to CloudWatch Logs (see aws_cloudwatch_log_delivery.session)
   #checkov:skip=CKV_AWS_21:Session data does not need versioning enabled
-  force_destroy = false
+  force_destroy = var.session_force_destroy
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "session" {

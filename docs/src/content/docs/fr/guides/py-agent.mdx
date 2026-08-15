@@ -502,14 +502,6 @@ L'option `session` contrôle comment votre agent persiste l'état de conversatio
 
 Ceci est implémenté dans le `session.py` généré, qui exporte une fonction `get_session_manager()` résolvant un `SessionManager` pour la session actuelle.
 
-<OptionFilter when={{ protocol: 'ag-ui' }} description="AG-UI session wiring">
-Étant donné que l'adaptateur `ag-ui-strands` d'AG-UI clone un `Agent` modèle par fil de conversation, `get_session_manager` est câblé en tant que `session_manager_provider` sur le `StrandsAgentConfig` passé à `StrandsAgent` dans `main.py`, de sorte qu'un nouveau `SessionManager` est résolu pour chaque fil plutôt que d'être intégré dans l'agent modèle partagé.
-</OptionFilter>
-
-<OptionFilter when={{ protocol: ['http', 'a2a'] }} description="HTTP/A2A session wiring">
-Étant donné que `with_session_id` met déjà en cache une instance `Agent` par session, `get_session_manager` est appelé directement à l'intérieur de l'appel `Agent(session_manager=get_session_manager())` de `get_agent` dans `agent.py`.
-</OptionFilter>
-
 L'identifiant de session lui-même provient de la session AgentCore Runtime (propagée via l'en-tête `x-amzn-bedrock-agentcore-runtime-session-id`) et est lié à un contexte basé sur [`contextvars.ContextVar`](https://docs.python.org/3/library/contextvars.html) afin que `get_current_session_id()` puisse le résoudre n'importe où dans la requête — y compris dans tous les clients MCP ou A2A en aval câblés via le <Link path="/guides/connection">générateur `connection`</Link>, de sorte que toute la chaîne d'appels partage une session cohérente.
 
 :::note[Développement local]
@@ -520,7 +512,7 @@ Lors de l'exécution locale (`LOCAL_DEV=true`, défini automatiquement par la ci
 <OptionFilter when={{ framework: 'langchain' }} description="LangChain session management (session.py)">
 L'option `session` contrôle comment le checkpointer LangGraph de votre agent persiste l'état de conversation :
 
-- **`s3`** (par défaut) : L'agent déployé utilise un `S3CheckpointSaver` avec le bucket de session provisionné, stockant les points de contrôle et les écritures en attente sous le préfixe `checkpoints/`. Cette classe (adaptée de [`langgraph-checkpoint-s3`](https://github.com/Isa-rentacs/langgraph-checkpoint-s3), sous licence MIT) se trouve dans `s3_checkpoint_saver_langchain.py` dans le projet de connexion d'agent partagé.
+- **`s3`** (par défaut) : L'agent déployé utilise un `S3CheckpointSaver` avec le bucket de session provisionné, stockant les points de contrôle et les écritures en attente sous le préfixe `checkpoints/`. Cette classe se trouve dans `s3_checkpoint_saver_langchain.py` dans le projet de connexion d'agent partagé.
 - **`dynamodb-s3`** : L'infrastructure CDK/Terraform provisionne une table DynamoDB pour les points de contrôle, configurée comme recommandé dans la [documentation AWS sur l'utilisation de DynamoDB comme magasin de points de contrôle pour les agents LangGraph](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/ddb-langgraph-checkpoint.html) (schéma `PK`/`SK` unifié, facturation `PAY_PER_REQUEST`, récupération point-in-time et un attribut `ttl`), plus un bucket S3 pour décharger les points de contrôle de plus de 350 Ko. Les deux sont chiffrés avec une clé KMS dédiée ; les journaux d'accès au serveur du bucket sont livrés à un groupe de journaux CloudWatch Logs via la même clé. Le rôle IAM de l'agent se voit accorder un accès en lecture/écriture à la table et au bucket, et les noms de table/bucket sont enregistrés aux côtés de l'ARN de l'agent dans la configuration du runtime AppConfig.
 - **`in-memory`** : Aucune table ou bucket n'est provisionné. L'état de conversation est conservé en mémoire uniquement pendant la durée de vie du processus en cours d'exécution et ne survit pas aux redémarrages ou à la réduction d'échelle.
 

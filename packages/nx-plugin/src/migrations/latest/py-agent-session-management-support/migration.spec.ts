@@ -9,7 +9,9 @@ import migration from './migration';
 
 // Registers a project with the ComponentMetadata the py#agent generator
 // itself writes, since the migration reads protocol/framework/name from it
-// rather than guessing from file contents.
+// rather than guessing from file contents. `targetPrefix` mirrors the
+// generator's own `name` component-metadata field (its target prefix) —
+// defaulting to the literal 'agent' fallback used when no `--name` was given.
 const registerAgentProject = (
   tree: Tree,
   name: string,
@@ -18,6 +20,7 @@ const registerAgentProject = (
   rc: string,
   framework: string = 'strands',
   agentDir = 'proj_test_project/agent/agent.py',
+  targetPrefix = 'agent',
 ) =>
   addProjectConfiguration(tree, name, {
     root,
@@ -26,6 +29,7 @@ const registerAgentProject = (
         {
           generator: PY_AGENT_GENERATOR_INFO.id,
           path: agentDir,
+          name: targetPrefix,
           rc,
           protocol,
           framework,
@@ -308,6 +312,32 @@ describe('py-agent-session-management-support migration', () => {
       '../../tmp/agents/strands/http-project-agent',
     );
     expect(sessionContent).toContain('return None');
+  });
+
+  it('derives the local session directory from the target-prefix name rather than a lossy kebab-case round trip of the class name', async () => {
+    // kebabCase("OldSHttp") would incorrectly yield "old-shttp", losing the
+    // hyphen around the single-letter "s" segment of the real name
+    // "old-s-http" — reading the target-prefix directly avoids that.
+    const agentFile =
+      'apps/old-s-http-project/proj_test_project/agent/agent.py';
+    registerAgentProject(
+      tree,
+      'old-s-http-project',
+      'apps/old-s-http-project',
+      'http',
+      'OldSHttp',
+      'strands',
+      undefined,
+      'old-s-http',
+    );
+    tree.write(agentFile, OLD_AGENT_PY_FILE);
+
+    await migration(tree);
+
+    const sessionPath =
+      'apps/old-s-http-project/proj_test_project/agent/session.py';
+    const sessionContent = tree.read(sessionPath, 'utf-8') ?? '';
+    expect(sessionContent).toContain('../../tmp/agents/strands/old-s-http');
   });
 
   it('adds an in-memory and local SQLite checkpointer to a langchain agent', async () => {

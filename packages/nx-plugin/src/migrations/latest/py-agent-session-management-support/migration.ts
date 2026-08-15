@@ -224,14 +224,31 @@ const findAgentComponentMetadata = (
         component.path === `${dirRelativeToProjectRoot}/agent.py`),
   );
 
-/** This agent's real kebab-case name, from ComponentMetadata's `rc` (class-name) field. */
+/**
+ * This agent's real kebab-case name — the generator's own target-prefix
+ * (ComponentMetadata's `name` field), used directly rather than
+ * reconstructing it by kebab-casing the class name (`rc`). That round trip
+ * loses word boundaries for names with single-letter segments, e.g.
+ * `kebabCase("OldSHttp")` => "old-shttp", not the real "old-s-http".
+ *
+ * When no `--name` was given at generation time, the generator falls back
+ * to `${project}-agent` for the real name, but records a literal 'agent' as
+ * the target-prefix — indistinguishable from an agent explicitly named
+ * "agent" — so re-derive the fallback from the project name in that case,
+ * exactly as the generator itself does.
+ */
 const agentTmpNameFor = (
   project: ProjectConfiguration,
   dir: string,
 ): string | undefined => {
   const dirRelativeToProjectRoot = toProjectRelativePath(project, dir);
-  const rc = findAgentComponentMetadata(project, dirRelativeToProjectRoot)?.rc;
-  return rc ? kebabCase(rc) : undefined;
+  const targetPrefix = findAgentComponentMetadata(
+    project,
+    dirRelativeToProjectRoot,
+  )?.name;
+  if (!targetPrefix) return undefined;
+  if (targetPrefix !== 'agent') return targetPrefix;
+  return kebabCase(`${project.name.split('.').pop() ?? project.name}-agent`);
 };
 
 /** This agent's protocol + framework, from its ComponentMetadata entry. */
