@@ -263,6 +263,46 @@ describe('py#rdb generator', () => {
     ).toHaveLength(1);
   });
 
+  // Re-running must not destroy the schema and edits the user owns — the whole
+  // point of re-running is usually to add infrastructure to an existing project.
+  it('should preserve user edits to user-owned files on a re-run', async () => {
+    await pyRdbGenerator(tree, { ...defaultOptions, infra: 'none' });
+
+    const userOwned = {
+      'packages/db/proj_db/models/example.py': `class MyModel(SQLModel, table=True):
+    critical_business_field: str
+`,
+      'packages/db/proj_db/connection.py': '# user edited connection\n',
+      'packages/db/proj_db/utils.py': '# user edited utils\n',
+      'packages/db/alembic.ini': '# user edited alembic config\n',
+      'packages/db/migrations/env.py': '# user edited migration env\n',
+    };
+    for (const [path, contents] of Object.entries(userOwned)) {
+      expect(tree.exists(path)).toBe(true);
+      tree.write(path, contents);
+    }
+
+    await pyRdbGenerator(tree, defaultOptions);
+
+    for (const [path, contents] of Object.entries(userOwned)) {
+      expect(tree.read(path, 'utf-8')).toBe(contents);
+    }
+  });
+
+  // config.json is framework-owned, so changed options must land on a re-run.
+  it('should converge framework-owned files on a re-run with changed options', async () => {
+    await pyRdbGenerator(tree, { ...defaultOptions, engine: 'postgres' });
+    await pyRdbGenerator(tree, { ...defaultOptions, engine: 'mysql' });
+
+    const config = JSON.parse(
+      tree.read('packages/db/config.json', 'utf-8') ?? '{}',
+    );
+    expect(config.localDev.dbEngine).toBe('mysql');
+    expect(tree.read('packages/db/proj_db/__init__.py', 'utf-8')).toContain(
+      'from .connection import',
+    );
+  });
+
   it('should add generator metrics', async () => {
     await sharedConstructsGenerator(tree, { iac: 'cdk' }, DEPENDENCIES);
     await pyRdbGenerator(tree, defaultOptions);

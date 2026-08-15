@@ -8,12 +8,15 @@ import {
   type GeneratorCallback,
   generateFiles,
   joinPathFragments,
+  OverwriteStrategy,
   readProjectConfiguration,
   type Tree,
   updateJson,
   updateProjectConfiguration,
+  writeJson,
 } from '@nx/devkit';
 import { addTsDependencies } from '../../utils/add-dependencies';
+import { addStarExport } from '../../utils/ast';
 import {
   addTypeScriptBundleTarget,
   BUNDLE_DEPENDENCIES,
@@ -176,12 +179,43 @@ export const tsRdbGenerator = async (
     ...esmVars(tree),
   };
 
+  // The Prisma schema and models, the handlers and the prisma client module are
+  // all user-editable, so a re-run (to add infrastructure, or after a failed
+  // run) must not clobber the user's schema and edits.
   generateFiles(
     tree,
     joinPathFragments(import.meta.dirname, 'files'),
     dir,
     templateOptions,
+    { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
+
+  // The barrel re-exports prisma.ts. `tsProjectGenerator` writes a stub index.ts
+  // when it creates the project, so the re-export is added to whatever is there
+  // rather than replacing it — which also leaves a user's own additions to the
+  // barrel alone on a re-run.
+  await addStarExport(
+    tree,
+    joinPathFragments(dir, 'src', 'index.ts'),
+    './prisma.js',
+  );
+
+  // config.json is framework-owned: it carries values derived from the
+  // generator's options, so it converges on a re-run with changed options.
+  writeJson(tree, joinPathFragments(dir, 'config.json'), {
+    runtimeConfigKey: nameClassName,
+    localDev: {
+      containerEngine,
+      containerName,
+      image: dockerImage,
+      port: localDbPort,
+      host: localDbHost,
+      dbName: databaseName,
+      dbUser: localDbUser,
+      dbPassword: localDbPassword,
+      dbEngine: options.engine,
+    },
+  });
   updateGitIgnore(tree, dir, (patterns) => [...patterns, 'generated/prisma']);
   await sharedRdbScriptsGenerator(tree, options.engine, DEPENDENCIES);
   const waitForDbScript =
