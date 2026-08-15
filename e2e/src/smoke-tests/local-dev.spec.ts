@@ -105,6 +105,60 @@ function driveA2ADelegations(mock: MockServer, delegations: number): void {
     .times(delegations);
 }
 
+// Prompts proving conversation history survives a full server restart: turn 1
+// states a fact under a stable session id, the dev server is stopped and
+// restarted (a fresh process — no in-memory carryover, only whatever the
+// session manager can reload from disk), then turn 2 asks the agent to recall
+// it. Local dev always uses FileSessionManager/AsyncSqliteSaver regardless of
+// the generator's `session` option, so this only proves the wiring works —
+// it can't distinguish the S3/DynamoDB backends, which only run when deployed.
+const SESSION_MEMORY_ESTABLISH_PROMPT =
+  'Remember this fact: my favorite color is teal.';
+const SESSION_MEMORY_RECALL_PROMPT = 'What is my favorite color?';
+const SESSION_MEMORY_MARKER = 'teal';
+
+/**
+ * Scripts the mock LLM for the session-persistence check above: acknowledges
+ * the establish turn once, then only answers the recall turn with
+ * `SESSION_MEMORY_MARKER` if the establish turn's content is present
+ * somewhere in the request's message history — i.e. the session was actually
+ * reloaded from disk after the restart, not carried over in memory.
+ *
+ * Bounded with `.times()` + `.first()` so it neither hijacks the shared
+ * fallback for other tests nor lingers afterwards.
+ */
+function driveSessionPersistenceCheck(mock: MockServer): void {
+  type MockReq = { messages: { role: string; content: string }[] };
+
+  const isEstablishTurn = (req: MockReq) =>
+    (req.messages.at(-1)?.content ?? '').includes(
+      SESSION_MEMORY_ESTABLISH_PROMPT,
+    );
+  const isRecallTurnWithHistory = (req: MockReq) => {
+    const last = req.messages.at(-1)?.content ?? '';
+    if (!last.includes(SESSION_MEMORY_RECALL_PROMPT)) return false;
+    return req.messages.some(
+      (m) =>
+        m.role === 'user' &&
+        m.content.includes(SESSION_MEMORY_ESTABLISH_PROMPT),
+    );
+  };
+
+  mock
+    .when(isEstablishTurn as never)
+    .reply({ text: 'Got it, I will remember that.' } as never)
+    .first()
+    .times(1);
+
+  mock
+    .when(isRecallTurnWithHistory as never)
+    .reply({
+      text: `Your favorite color is ${SESSION_MEMORY_MARKER}.`,
+    } as never)
+    .first()
+    .times(1);
+}
+
 // The APIs the dev website is connected to, with the class names
 // matching their vended `use<ClassName>Client` hooks.
 const WEBSITE_APIS: ApiSpec[] = [
@@ -1571,6 +1625,59 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
       expect(delegateBody).not.toMatch(/Error: \w*Error/);
     }
 
+    // Session persistence: establish a fact under a stable session id, fully
+    // restart the dev server (a fresh process — no in-memory carryover, only
+    // whatever the session manager can reload from disk), then ask the agent
+    // to recall it on the same session id. The recall reply only fires if the
+    // establish turn's content is still present in the request's message
+    // history, so this can only pass if the session was genuinely reloaded
+    // from disk rather than surviving in a live Python object.
+    driveSessionPersistenceCheck(llmMock!);
+    const memorySessionId = `py-agent-session-memory-${'0'.repeat(15)}`;
+    const establishRes = await fetch(
+      `http://127.0.0.1:${ports.pyAgent}/invocations`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          [AGENT_CORE_SESSION_ID_HEADER]: memorySessionId,
+        },
+        body: JSON.stringify({ prompt: SESSION_MEMORY_ESTABLISH_PROMPT }),
+      },
+    );
+    expect(establishRes.status).toBe(200);
+    await establishRes.text();
+
+    await stopLast();
+    // This agent's dev chain also starts the A2A agent it delegates to (see
+    // the comment at the end of this test), so both ports must be free before
+    // the restart tries to bind them again.
+    await waitForPortFree(ports.pyAgent, STARTUP_TIMEOUT_MS);
+    await waitForPortFree(ports.pyA2a, STARTUP_TIMEOUT_MS);
+    await startAndWait(
+      'local_dev_test.py_project:my-py-agent-dev',
+      ports.pyAgent,
+    );
+
+    const recallRes = await fetch(
+      `http://127.0.0.1:${ports.pyAgent}/invocations`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          [AGENT_CORE_SESSION_ID_HEADER]: memorySessionId,
+        },
+        body: JSON.stringify({ prompt: SESSION_MEMORY_RECALL_PROMPT }),
+      },
+    );
+    const recallBody = await recallRes.text();
+    console.log(
+      `Python Agent session-persistence recall (${recallRes.status}):`,
+      recallBody.slice(0, 300),
+    );
+    expect(recallRes.status).toBe(200);
+    expect(recallBody).toContain(SESSION_MEMORY_MARKER);
+
     // HTTP chat builds the generated client first, then connects.
     await chatStreamsReply(
       projectRoot,
@@ -1795,6 +1902,56 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
     expect(res.status).toBe(200);
     expect(chunks.length).toBeGreaterThan(0);
     expect(chunks[0]).toHaveProperty('content');
+
+    // Session persistence, same reasoning as the Strands HTTP agent above, but
+    // exercising the LangChain framework's own path: get_checkpointer()'s
+    // AsyncSqliteSaver rather than Strands' FileSessionManager. Establish a
+    // fact under a stable session id, fully restart the dev server, then ask
+    // the agent to recall it on the same session id — the recall reply only
+    // fires if the establish turn's content is still present in the request's
+    // message history, so this can only pass if the checkpointer genuinely
+    // reloaded state from disk rather than surviving in a live Python object.
+    driveSessionPersistenceCheck(llmMock!);
+    const langchainMemorySessionId = `py-langchain-session-memory-${'0'.repeat(10)}`;
+    const langchainEstablishRes = await fetch(
+      `http://127.0.0.1:${ports.pyLangchainHttp}/invocations`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          [AGENT_CORE_SESSION_ID_HEADER]: langchainMemorySessionId,
+        },
+        body: JSON.stringify({ prompt: SESSION_MEMORY_ESTABLISH_PROMPT }),
+      },
+    );
+    expect(langchainEstablishRes.status).toBe(200);
+    await langchainEstablishRes.text();
+
+    await stopLast();
+    await waitForPortFree(ports.pyLangchainHttp, STARTUP_TIMEOUT_MS);
+    await startAndWait(
+      'local_dev_test.py_project:my-py-langchain-http-agent-dev',
+      ports.pyLangchainHttp,
+    );
+
+    const langchainRecallRes = await fetch(
+      `http://127.0.0.1:${ports.pyLangchainHttp}/invocations`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          [AGENT_CORE_SESSION_ID_HEADER]: langchainMemorySessionId,
+        },
+        body: JSON.stringify({ prompt: SESSION_MEMORY_RECALL_PROMPT }),
+      },
+    );
+    const langchainRecallBody = await langchainRecallRes.text();
+    console.log(
+      `Python LangChain HTTP session-persistence recall (${langchainRecallRes.status}):`,
+      langchainRecallBody.slice(0, 300),
+    );
+    expect(langchainRecallRes.status).toBe(200);
+    expect(langchainRecallBody).toContain(SESSION_MEMORY_MARKER);
 
     await chatStreamsReply(
       projectRoot,
