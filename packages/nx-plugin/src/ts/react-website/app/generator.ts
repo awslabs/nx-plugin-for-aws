@@ -19,6 +19,7 @@ import { addTsDependencies } from '../../../utils/add-dependencies';
 import {
   addDestructuredImport,
   addSingleImport,
+  appendToArrayViaGritQL,
   applyGritQL,
 } from '../../../utils/ast';
 import {
@@ -524,10 +525,12 @@ export async function tsReactWebsiteGenerator(
     }
 
     if (tailwind) {
-      await applyGritQL(
+      await appendToArrayViaGritQL(
         tree,
         viteConfigPath,
-        '`plugins: [$items]` => `plugins: [$items, tailwindcss()]` where { $items <: within `defineConfig($_)`, $items <: not some `tailwindcss()` }',
+        'plugins:',
+        'tailwindcss()',
+        { scope: 'defineConfig($_)' },
       );
     }
 

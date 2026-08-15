@@ -412,3 +412,52 @@ export const insertViaGritQL = async (
   );
   return true;
 };
+
+/**
+ * Append `entry` to an array, skipping arrays that already contain it, e.g.
+ * `` appendToArrayViaGritQL(tree, file, 'tools:', 'myTool', { scope: 'new Agent($_)' }) ``
+ * turns `tools: [a, b]` into `tools: [a, b, myTool]`.
+ *
+ * `arrayPrefix` is whatever precedes the array literal, including its separator —
+ * `'tools:'` for an object property, `'tools='` for a keyword argument or
+ * assignment, `'"tools":'` for a quoted key. Which separator applies depends on
+ * the construct rather than the language, so the caller states it.
+ *
+ * Appends after the last *element*, not after the element list: GritQL binds a
+ * `[$items]` list to its trailing comma too, so rewriting the list yields the
+ * sparse array `[a, b, , entry]` — a hole that is `undefined` at runtime.
+ *
+ * `scope` limits the match to an enclosing pattern, so same-named arrays
+ * elsewhere in the file are left alone. `skipIfContains` overrides what the
+ * append dedupes on, for when the rendered entry is not the identifier to match.
+ *
+ * The caller formats afterwards. Returns true if the entry was appended.
+ */
+export const appendToArrayViaGritQL = async (
+  tree: Tree,
+  filePath: string,
+  arrayPrefix: string,
+  entry: string,
+  options: { scope?: string; skipIfContains?: string; language?: 'py' } = {},
+): Promise<boolean> => {
+  const { scope, skipIfContains, language } = options;
+  const within = (variable: string) =>
+    scope ? `${variable} <: within \`${scope}\`, ` : '';
+  const pattern =
+    `or {` +
+    // An empty array has no last element to append after.
+    ` \`${arrayPrefix}$arr\` where { $arr <: \`[]\`, ${within('$arr')}` +
+    ` $arr => \`[${GRIT_INSERT_PLACEHOLDER}]\` },` +
+    // Dedupe on the list, append after its last element.
+    ` \`${arrayPrefix}[$items]\` where {` +
+    ` $items <: not contains \`${skipIfContains ?? entry}\`, ${within('$items')}` +
+    ` $items <: [$..., $last], $last += \`, ${GRIT_INSERT_PLACEHOLDER}\` }` +
+    ` }`;
+
+  return insertViaGritQL(
+    tree,
+    filePath,
+    language === 'py' ? `language python\n${pattern}` : pattern,
+    entry,
+  );
+};

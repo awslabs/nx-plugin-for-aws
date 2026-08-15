@@ -408,6 +408,43 @@ export const getAgent = async (sessionId: string) =>
     expect(agent).toMatch(/tools: \[multiply, divide, remoteTool\]/);
   });
 
+  // Only a wrapped array (which carries a trailing comma) reproduces the hole, so
+  // the tools array here starts in that shape rather than on one line.
+  it('should not leave a hole when appending to a wrapped tools array', async () => {
+    setupProjects();
+    tree.write(
+      'apps/ts-host/src/host/agent.ts',
+      `import { Agent, tool } from '@strands-agents/sdk';
+import { z } from 'zod';
+
+const multiply = tool({ name: 'Multiply', inputSchema: z.object({}), callback: () => 0 });
+const divide = tool({ name: 'Divide', inputSchema: z.object({}), callback: () => 0 });
+
+export const getAgent = async (sessionId: string) =>
+  new Agent({
+    systemPrompt: '...',
+    tools: [
+      multiply,
+      divide,
+    ],
+  });
+`,
+    );
+
+    await tsAgentA2aConnectionGenerator(tree, {
+      sourceProject: '@test/ts-host',
+      targetProject: '@test/ts-remote',
+      sourceComponent: HOST,
+      targetComponent: REMOTE,
+    });
+
+    const agent = tree.read('apps/ts-host/src/host/agent.ts', 'utf-8')!;
+    expect(agent).not.toMatch(/,\s*,/);
+    for (const tool of ['multiply', 'divide', 'remoteTool']) {
+      expect(agent).toContain(tool);
+    }
+  });
+
   it('should match snapshot for agent-connection src files', async () => {
     setupProjects();
     await tsAgentA2aConnectionGenerator(tree, {
