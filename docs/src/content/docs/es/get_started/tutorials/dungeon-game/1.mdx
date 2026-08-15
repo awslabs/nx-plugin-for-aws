@@ -1,6 +1,6 @@
 ---
 title: Configurar un monorepo
-description: "Un tutorial sobre cómo construir un juego de aventuras de mazmorras impulsado por IA agéntica usando el @aws/nx-plugin."
+description: "Un tutorial paso a paso sobre cómo construir un juego de aventuras de mazmorras impulsado por IA agéntica usando @aws/nx-plugin."
 ---
 
 import { Aside, Code, FileTree, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
@@ -42,7 +42,7 @@ Esto configurará un monorepo NX dentro del directorio `dungeon-adventure`. Cuan
 - .gitignore
 - biome.json configura Biome para linting y formateo
 - nx.json configura el CLI de Nx y los valores predeterminados del monorepo
-- package.json todas las dependencias de node están definidas aquí
+- package.json todas las dependencias de node se definen aquí
 - pnpm-lock.yaml o bun.lock, yarn.lock, package-lock.json dependiendo del gestor de paquetes
 - pnpm-workspace.yaml si usas pnpm
 - README.md
@@ -51,22 +51,22 @@ Esto configurará un monorepo NX dentro del directorio `dungeon-adventure`. Cuan
 - aws-nx-plugin.config.mts configuración para el Nx Plugin for AWS
 </FileTree>
 
-<Aside type="tip" title="Hacer commits frecuentemente">Es una buena práctica asegurarse de que todos tus archivos sin preparar estén confirmados en Git antes de ejecutar cualquier generador. Esto te permite ver qué ha cambiado después de ejecutar tu generador mediante `git diff`.</Aside>
+<Aside type="tip" title="Haz commits frecuentes">Es una buena práctica asegurarse de que todos tus archivos sin preparar estén confirmados en Git antes de ejecutar cualquier generador. Esto te permite ver qué ha cambiado después de ejecutar tu generador mediante `git diff`.</Aside>
 
 ## Tarea 2: Estructurar el juego Dungeon Adventure
 
-Con el espacio de trabajo en su lugar, estructuramos los sub-proyectos del juego: la API del juego, el agente de historia, el servidor MCP de inventario, la base de datos del juego y el sitio web, junto con las conexiones que los conectan entre sí. Hay dos formas de hacer esto:
+Con el espacio de trabajo en su lugar, estructuramos los sub-proyectos del juego: la API del juego, el agente de historia, el servidor MCP de inventario, la base de datos del juego y el sitio web, junto con las conexiones que los conectan. Hay dos formas de hacer esto:
 
 - **Rápido** — copia los comandos directamente del diagrama a continuación y ejecútalos. La forma más rápida de llegar al mismo punto de partida.
 - **Paso a paso** — expande la sección a continuación para ejecutar cada generador tú mismo y examinar exactamente qué produce cada uno.
 
-El diagrama a continuación _es_ el espacio de trabajo Dungeon Adventure: cada proyecto, componente y conexión que construirás en este módulo. Presiona **Copy commands** para tomar toda la serie, luego ejecútalos desde dentro del directorio `dungeon-adventure` que creaste en la Tarea 1.
+El diagrama a continuación _es_ el espacio de trabajo Dungeon Adventure: cada proyecto, componente y conexión que construirás en este módulo. Presiona **Copy commands** para tomar toda la serie, luego ejecútalos desde el directorio `dungeon-adventure` que creaste en la Tarea 1.
 
 <EmbeddedGraph preset="dungeon-adventure" workspace="dungeon-adventure" iac="cdk" skipWorkspace />
 
 <Drawer title="Paso a paso" trigger="Paso a paso: ejecuta cada generador tú mismo y ve qué produce">
 
-En lugar de copiar todos los comandos a la vez, puedes ejecutar cada generador individualmente. Esta es la mejor manera de entender qué agrega cada generador a tu espacio de trabajo. Ejecuta cada generador por turno, desde dentro del directorio `dungeon-adventure` que creaste en la Tarea 1.
+En lugar de copiar todos los comandos a la vez, puedes ejecutar cada generador individualmente. Esta es la mejor manera de entender qué agrega cada generador a tu espacio de trabajo. Ejecuta cada generador por turno, desde el directorio `dungeon-adventure` que creaste en la Tarea 1.
 
 ##### Crear una API del juego
 
@@ -198,6 +198,7 @@ import {
   FunctionProps,
   Tracing,
 } from 'aws-cdk-lib/aws-lambda';
+import { RuntimeConfig } from '../../core/runtime-config.js';
 import {
   AuthorizationType,
   LambdaIntegration,
@@ -213,6 +214,7 @@ import {
   Grant,
 } from 'aws-cdk-lib/aws-iam';
 import {
+  ApiIntegrations,
   IntegrationBuilder,
   RestApiIntegration,
 } from '../../core/api/utils.js';
@@ -230,12 +232,18 @@ type Operations = Procedures<AppRouter>;
  * @template TIntegrations - Map of operation names to their integrations
  */
 export interface GameApiProps<
-  TIntegrations extends Record<Operations, RestApiIntegration>,
+  TIntegrations extends ApiIntegrations<Operations, RestApiIntegration>,
 > {
   /**
    * Map of operation names to their API Gateway integrations
    */
   integrations: TIntegrations;
+  /**
+   * Whether to enable AWS WAFv2 with the default managed ruleset on the API's default stage.
+   *
+   * @default true
+   */
+  enableWaf?: boolean;
 }
 
 /**
@@ -244,7 +252,7 @@ export interface GameApiProps<
  * @template TIntegrations - Map of operation names to their integrations
  */
 export class GameApi<
-  TIntegrations extends Record<Operations, RestApiIntegration>,
+  TIntegrations extends ApiIntegrations<Operations, RestApiIntegration>,
 > extends RestApi<Operations, TIntegrations> {
   private allowedOrigins: readonly string[] = ['*'];
 
@@ -256,7 +264,9 @@ export class GameApi<
    * @returns An IntegrationBuilder with default lambda integrations
    */
   public static defaultIntegrations = (scope: Construct) => {
+    const rc = RuntimeConfig.ensure(scope);
     return IntegrationBuilder.rest({
+      pattern: 'isolated',
       operations: routerToOperations(appRouter),
       defaultIntegrationOptions: {
         runtime: Runtime.NODEJS_LATEST,
@@ -274,6 +284,8 @@ export class GameApi<
       } as FunctionProps,
       buildDefaultIntegration: (op, props: FunctionProps) => {
         const handler = new Function(scope, `GameApi${op}Handler`, props);
+        handler.addEnvironment('RUNTIME_CONFIG_APP_ID', rc.appConfigApplicationId);
+        rc.grantReadAppConfig(handler);
         return {
           handler,
           integration: new LambdaIntegration(handler, {
@@ -454,6 +466,7 @@ from contextlib import contextmanager
 
 from strands import Agent, tool
 from strands_tools import current_time
+from dungeon_adventure_agent_connection import log_model_errors, log_tool_errors
 
 
 @tool
@@ -465,13 +478,14 @@ def subtract(a: int, b: int) -> int:
 def get_agent():
     yield Agent(
         name="StoryAgent",
-        description="StoryAgent Agent",
+        description="StoryAgent Strands Agent",
         system_prompt="""
 You are a mathematical wizard.
 Use your tools for mathematical tasks.
 Refer to tools as your 'spellbook'.
 """,
         tools=[subtract, current_time],
+        hooks=[log_model_errors, log_tool_errors],
     )
 ```
 
@@ -485,7 +499,7 @@ from contextlib import asynccontextmanager
 
 from ag_ui.core import EventType, RunAgentInput, RunErrorEvent
 from ag_ui.encoder import EventEncoder
-from ag_ui_strands import StrandsAgent
+from ag_ui_strands import StrandsAgent, StrandsAgentConfig
 from dungeon_adventure_agent_connection import get_current_session_id, session_id_context
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -493,6 +507,7 @@ from fastapi.responses import StreamingResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from .agent import get_agent
+from .session import get_session_manager
 
 logging.basicConfig(level=logging.INFO)
 
@@ -506,6 +521,9 @@ async def lifespan(app: FastAPI):
             agent=agent,
             name="StoryAgent",
             description="A Strands Agent exposed via the AG-UI protocol.",
+            # A per-thread session manager, not the template Agent's own, since
+            # AG-UI caches one Strands agent per thread_id.
+            config=StrandsAgentConfig(session_manager_provider=lambda _input_data: get_session_manager()),
         )
         yield
 
@@ -573,11 +591,20 @@ async def ping():
 Este es el punto de entrada para el agente. Debido a que seleccionamos `--protocol=ag-ui`, el generador envuelve nuestro `Agent` de Strands con `StrandsAgent` de [`ag_ui_strands`](https://docs.copilotkit.ai/aws-strands/integration) y lo monta en una aplicación FastAPI que habla el [protocolo AG-UI](https://docs.copilotkit.ai/aws-strands/protocol) — esto es con lo que CopilotKit hablará desde el sitio web React. El agente se construye dentro de un manejador `lifespan` — no en el momento de importación — para que el inicio del contenedor, no la importación del módulo, sea dueño de la construcción, y cada sesión de AgentCore obtenga su propio contenedor. El `_SessionIdMiddleware` vincula el ID de sesión de runtime de AgentCore entrante a un `ContextVar` para que cualquier cliente MCP/A2A descendente que conectemos más adelante (por ejemplo, el servidor MCP de Inventario en el <Link path="get_started/tutorials/dungeon-game/2">Módulo 2</Link>) lo reenvíe automáticamente en sus llamadas salientes. En el <Link path="get_started/tutorials/dungeon-game/3">Módulo 3</Link> también agregaremos un `session_manager_provider` para que cada thread id obtenga su propio `S3SessionManager` y el historial de conversación persista entre turnos.
 
 ```ts
-// common/constructs/src/app/agents/story-agent.ts
-import { Lazy, Names } from 'aws-cdk-lib';
+// common/constructs/src/app/agents/story-agent/story-agent.ts
+import { Fn, Lazy, Names, RemovalPolicy, Stack } from 'aws-cdk-lib';
 import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import { Connections, IConnectable } from 'aws-cdk-lib/aws-ec2';
+import { BlockPublicAccess, Bucket, BucketEncryption } from 'aws-cdk-lib/aws-s3';
+import { Key } from 'aws-cdk-lib/aws-kms';
+import {
+  CfnDelivery,
+  CfnDeliveryDestination,
+  CfnDeliverySource,
+  LogGroup,
+  RetentionDays,
+} from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
-import { execSync } from 'child_process';
 import * as path from 'path';
 import * as url from 'url';
 import {
@@ -585,31 +612,158 @@ import {
   ProtocolType,
   Runtime,
   RuntimeProps,
+  RuntimeAuthorizerConfiguration,
 } from 'aws-cdk-lib/aws-bedrockagentcore';
-import { IGrantable, IPrincipal } from 'aws-cdk-lib/aws-iam';
+import { PolicyStatement, Effect, ServicePrincipal, IGrantable, IPrincipal } from 'aws-cdk-lib/aws-iam';
+import { IUserPool, IUserPoolClient } from 'aws-cdk-lib/aws-cognito';
+import { suppressRules } from '../../../core/checkov.js';
+import { RuntimeConfig } from '../../../core/runtime-config.js';
+import { findWorkspaceRoot } from '../../../core/workspace.js';
 
 export type StoryAgentProps = Omit<
   RuntimeProps,
-  'runtimeName' | 'protocolConfiguration' | 'agentRuntimeArtifact'
->;
+  | 'runtimeName'
+  | 'protocolConfiguration'
+  | 'agentRuntimeArtifact'
+  | 'authorizerConfiguration'
+> & {
+  /**
+   * Identity details for Cognito Authentication
+   */
+  identity: {
+    userPool: IUserPool;
+    userPoolClient: IUserPoolClient;
+  };
+};
 
-export class StoryAgent extends Construct implements IGrantable {
+export class StoryAgent extends Construct implements IGrantable, IConnectable {
   public readonly dockerImage: AgentRuntimeArtifact;
   public readonly agentCoreRuntime: Runtime;
+  /** Default Gateway target name for this agent. */
+  public readonly agentName = 'story-agent';
+  /** Inbound auth — a fronting Gateway uses this to pick its outbound credential. */
+  public readonly auth = 'cognito';
 
-  constructor(scope: Construct, id: string, props?: StoryAgentProps) {
+  constructor(scope: Construct, id: string, props: StoryAgentProps) {
     super(scope, id);
 
-    this.dockerImage = AgentRuntimeArtifact.fromAsset(
-      path.dirname(url.fileURLToPath(new URL(import.meta.url))),
+    const rc = RuntimeConfig.ensure(this);
+
+    // Resolve the bundle output directory containing the Dockerfile and built artifacts
+    const bundleDir = path.join(
+      findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+      'dist/packages/story/docker/story-agent',
+    );
+
+    this.dockerImage = AgentRuntimeArtifact.fromAsset(bundleDir, {
+      platform: Platform.LINUX_ARM64,
+    });
+
+    const { identity, ...restProps } = props;
+
+    const sessionKey = new Key(this, 'SessionKey', {
+      enableKeyRotation: true,
+    });
+
+    // Allow CloudWatch Logs to use the session key for server access log delivery.
+    const stack = Stack.of(this);
+    sessionKey.addToResourcePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        principals: [new ServicePrincipal(`logs.${stack.region}.amazonaws.com`)],
+        actions: [
+          'kms:Encrypt',
+          'kms:Decrypt',
+          'kms:ReEncrypt*',
+          'kms:GenerateDataKey*',
+          'kms:DescribeKey',
+        ],
+        resources: ['*'],
+        conditions: {
+          ArnLike: {
+            'kms:EncryptionContext:aws:logs:arn': `arn:aws:logs:${stack.region}:${stack.account}:log-group:*`,
+          },
+        },
+      }),
+    );
+
+    const sessionAccessLogs = new LogGroup(this, 'SessionAccessLogs', {
+      retention: RetentionDays.ONE_YEAR,
+      encryptionKey: sessionKey,
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+
+    const sessionBucket = new Bucket(this, 'SessionBucket', {
+      enforceSSL: true,
+      removalPolicy: RemovalPolicy.RETAIN,
+      encryption: BucketEncryption.KMS,
+      encryptionKey: sessionKey,
+      blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+    });
+    suppressRules(
+      sessionBucket,
+      ['CKV_AWS_21'],
+      'Session data does not need versioning enabled',
+    );
+    suppressRules(
+      sessionBucket,
+      ['CKV2_AWS_61'],
+      'Lifecycle configuration not required for session data',
+    );
+    suppressRules(
+      sessionBucket,
+      ['CKV_AWS_144'],
+      'Cross-region replication not required for session data',
+    );
+    suppressRules(
+      sessionBucket,
+      ['CKV2_AWS_62'],
+      'Event notifications not required for session data',
+    );
+    suppressRules(
+      sessionBucket,
+      ['CKV_AWS_18'],
+      'Server access logs are delivered to CloudWatch Logs',
+    );
+
+    // Deliver the session bucket's server access logs to CloudWatch Logs.
+    const sessionAccessLogsSource: CfnDeliverySource = new CfnDeliverySource(
+      this,
+      'SessionAccessLogsSource',
       {
-        platform: Platform.LINUX_ARM64,
-        extraHash: execSync(
-          `docker inspect dungeon-adventure-story-agent:latest --format '{{.Id}}'`,
-          { encoding: 'utf-8' },
-        ).trim(),
+        name: Lazy.string({
+          produce: () =>
+            Names.uniqueResourceName(sessionAccessLogsSource, {
+              maxLength: 60,
+            }),
+        }),
+        logType: 'S3_SERVER_ACCESS_LOGS',
+        resourceArn: sessionBucket.bucketArn,
       },
     );
+    const sessionBucketPolicy = sessionBucket.policy;
+    if (sessionBucketPolicy) {
+      sessionAccessLogsSource.node.addDependency(sessionBucketPolicy);
+    }
+    const sessionAccessLogsDestination: CfnDeliveryDestination =
+      new CfnDeliveryDestination(this, 'SessionAccessLogsDestination', {
+        name: Lazy.string({
+          produce: () =>
+            Names.uniqueResourceName(sessionAccessLogsDestination, {
+              maxLength: 60,
+            }),
+        }),
+        destinationResourceArn: sessionAccessLogs.logGroupArn,
+      });
+    const sessionAccessLogsDelivery = new CfnDelivery(
+      this,
+      'SessionAccessLogsDelivery',
+      {
+        deliverySourceName: sessionAccessLogsSource.name,
+        deliveryDestinationArn: sessionAccessLogsDestination.attrArn,
+      },
+    );
+    sessionAccessLogsDelivery.addDependency(sessionAccessLogsSource);
 
     this.agentCoreRuntime = new Runtime(this, 'StoryAgent', {
       runtimeName: Lazy.string({
@@ -618,12 +772,78 @@ export class StoryAgent extends Construct implements IGrantable {
       }),
       protocolConfiguration: ProtocolType.HTTP,
       agentRuntimeArtifact: this.dockerImage,
-      ...props,
+      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingCognito(
+        identity.userPool,
+        [identity.userPoolClient],
+      ),
+      // Receive the caller's Authorization header (validated by the authorizer).
+      requestHeaderConfiguration: {
+        allowlistedHeaders: ['Authorization'],
+      },
+      ...restProps,
+      environmentVariables: {
+        RUNTIME_CONFIG_APP_ID: rc.appConfigApplicationId,
+        ...restProps?.environmentVariables,
+      },
+    });
+
+    // Grant access for the agent to invoke bedrock models
+    this.agentCoreRuntime.addToRolePolicy(
+      new PolicyStatement({
+        actions: [
+          'bedrock:InvokeModel',
+          'bedrock:InvokeModelWithResponseStream',
+        ],
+        resources: [
+          'arn:aws:bedrock:*:*:foundation-model/*',
+          'arn:aws:bedrock:*:*:inference-profile/*',
+        ],
+      }),
+    );
+
+    sessionBucket.grantReadWrite(this.agentCoreRuntime);
+
+    rc.grantReadAppConfig(this.agentCoreRuntime);
+
+    rc.set('agentcore', 'agentRuntimes', {
+      ...rc.get('agentcore').agentRuntimes,
+      StoryAgent: {
+        arn: this.agentCoreRuntime.agentRuntimeArn,
+        session: {
+          bucketName: sessionBucket.bucketName,
+        },
+      },
     });
   }
 
+  /**
+   * The principal to grant permissions to.
+   */
   public get grantPrincipal(): IPrincipal {
     return this.agentCoreRuntime.grantPrincipal;
+  }
+
+  /**
+   * Network connections for this agent runtime.
+   */
+  public get connections(): Connections {
+    return this.agentCoreRuntime.connections;
+  }
+
+  /**
+   * The HTTPS invocation URL of the runtime.
+   */
+  public get invocationUrl(): string {
+    // The URL must URL-encode the runtime ARN (':' -> '%3A', '/' -> '%2F').
+    // The ARN is a CDK token, so encode at deploy time via Fn.join/Fn.split.
+    const encodedArn = Fn.join(
+      '%2F',
+      Fn.split(
+        '/',
+        Fn.join('%3A', Fn.split(':', this.agentCoreRuntime.agentRuntimeArn)),
+      ),
+    );
+    return `https://bedrock-agentcore.${Stack.of(this).region}.amazonaws.com/runtimes/${encodedArn}/invocations?qualifier=DEFAULT`;
   }
 }
 ```

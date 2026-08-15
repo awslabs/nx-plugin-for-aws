@@ -1,9 +1,9 @@
 ---
 title: 实现和配置 Story 代理
-description: 使用 @aws/nx-plugin 构建由代理 AI 驱动的地牢冒险游戏的演练。
+description: 使用 @aws/nx-plugin 构建基于 AI 代理的地牢冒险游戏的演练。
 ---
 
-import { Aside, Code, FileTree, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import { Aside, Code, FileTree, Steps } from '@astrojs/starlight/components';
 import { Image } from 'astro:assets';
 import Drawer from '@components/drawer.astro';
 import Link from '@components/link.astro';
@@ -23,25 +23,15 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 ## 任务 1：实现 Story 代理
 
-Story 代理是一个在<Link path="get_started/tutorials/dungeon-game/1">模块 1</Link>中使用 `--protocol=ag-ui` 生成的 [Strands](https://strandsagents.com/) 代理，因此 UI 可以通过 CopilotKit 使用 [Agent-User Interaction 协议](https://docs.copilotkit.ai/aws-strands/protocol)从中进行流式传输。它使用 Inventory MCP Server 来管理玩家的物品，并使用 Strands 内置的 [`S3SessionManager`](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/agents/sessions/) 将对话历史持久化到我们在模块 2 中配置的会话存储桶中。
+Story 代理是一个在<Link path="get_started/tutorials/dungeon-game/1">模块 1</Link>中使用 `--protocol=ag-ui` 生成的 [Strands](https://strandsagents.com/) 代理，因此 UI 可以通过 CopilotKit 使用 [Agent-User Interaction 协议](https://docs.copilotkit.ai/aws-strands/protocol)从中流式传输数据。它使用 Inventory MCP Server 来管理玩家的物品，并且已经通过模块 1 中生成器提供的 `session.py` 持久化对话历史——部署后，这就是 Strands 内置的 [`S3SessionManager`](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/agents/sessions/) 写入到 Game API 的 `queryActions` 读取的同一个 S3 存储桶中，这样浏览器可以在重新访问时重建对话记录。
 
 ### 代理实现
 
-更新 `packages/story/dungeon_adventure_story/agent` 中的以下文件：
+更新 `packages/story/dungeon_adventure_story/agent` 中的 `agent.py`：
 
-<Tabs>
-  <TabItem label="main.py">
-<E2EDiff lang="python" before="dungeon-adventure/3/main.py.old.template" after="dungeon-adventure/3/main.py.template" />
-  </TabItem>
-  <TabItem label="agent.py">
 <E2EDiff lang="python" before="dungeon-adventure/3/agent.py.old.template" after="dungeon-adventure/3/agent.py.template" />
-  </TabItem>
-</Tabs>
 
-更改内容如下：
-
-- `main.py` 添加了一个 `session_manager_provider`，在部署时为每个 `thread_id` 创建一个 `S3SessionManager`，并在 `agent-dev` 下运行时（`LOCAL_DEV=true`）回退到 `/tmp/strands-sessions` 下的磁盘 `FileSessionManager`。部署后，S3 存储桶与 Game API 的 `queryActions` 读取的存储桶相同，因此浏览器可以在重新访问时重建记录；在本地，代理将会话持久化到磁盘并与本地 MCP 服务器通信，无需部署。
-- `agent.py` 删除了示例 `subtract` 工具，并将系统提示替换为地牢主持人提示，该提示邀请第一条用户消息说明玩家的名字和类型，并使用 Inventory MCP Server 的工具。
+`agent.py` 删除了示例 `subtract` 工具，并将系统提示替换为地牢主持人提示，该提示邀请第一条用户消息说明玩家的姓名和类型，并使用 Inventory MCP Server 的工具。`main.py` 在这里不需要更改——会话管理在生成代理时已经连接好了。
 
 ## 任务 2：在本地测试您的代理
 
@@ -59,7 +49,7 @@ Story 代理是一个在<Link path="get_started/tutorials/dungeon-game/1">模块
 
 ### 与您的代理聊天
 
-生成的 `agent-chat` 目标会针对您的代理打开一个交互式 REPL。它独立运行并连接到本地运行的代理，因此首先在一个终端中启动代理的本地服务器：
+生成的 `agent-chat` 目标会打开一个针对您的代理的交互式 REPL。它独立运行并连接到您本地运行的代理，因此首先在一个终端中启动代理的本地服务器：
 
 <NxCommands commands={["agent-dev story"]} />
 
@@ -70,7 +60,7 @@ Story 代理是一个在<Link path="get_started/tutorials/dungeon-game/1">模块
 您的第一条消息应该告诉代理您的英雄的名字和类型（例如：`My name is Alice. Start my zombie adventure.`），故事将流式返回。
 
 <Aside type="caution" title="需要 AWS 凭证">
-虽然代理在本地运行，但它会调用 [Amazon Bedrock](https://aws.amazon.com/bedrock/) 来使用 LLM。您需要在环境中配置 AWS 凭证，并有权访问 [Strands 默认模型](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/model-providers/amazon-bedrock/)。有关详细信息，请参阅 [Strands 模型提供程序文档](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/model-providers/amazon-bedrock/)。
+虽然代理在本地运行，但它会调用 [Amazon Bedrock](https://aws.amazon.com/bedrock/) 来使用 LLM。您需要在环境中配置 AWS 凭证，并具有访问 [Strands 默认模型](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/model-providers/amazon-bedrock/)的权限。有关详细信息，请参阅 [Strands 模型提供商文档](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/model-providers/amazon-bedrock/)。
 </Aside>
 
 恭喜。您已经在本地构建并测试了您的第一个 Strands 代理！🎉🎉🎉

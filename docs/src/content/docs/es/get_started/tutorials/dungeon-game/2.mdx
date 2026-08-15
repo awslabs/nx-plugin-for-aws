@@ -47,7 +47,7 @@ Para definir nuestras entradas y salidas de la API, creemos nuestro esquema usan
 Elimina el archivo `packages/game-api/src/schema/echo.ts` ya que no lo usaremos en este proyecto.
 
 <Aside type="tip" title="Inferencia automática de tipos">
-Para cada uno de los esquemas que definimos en Zod, también exportamos una interfaz usando la sintaxis `z.TypeOf`. Esto convierte nuestra definición de Zod en una interfaz de Typescript sin tener que duplicar esfuerzos.
+Para cada uno de los esquemas que definimos en Zod, también exportamos una interfaz usando la sintaxis `z.TypeOf`. Esto convierte nuestra definición de Zod en una interfaz de Typescript sin tener que duplicar el esfuerzo.
 </Aside>
 
 ### Modelado de entidades
@@ -81,7 +81,7 @@ El generador `ts#dynamodb` configuró [ElectroDB](https://electrodb.dev/en/core-
 <InstallCommand pkg={getDungeonAdventureElectroDbDependencies()} project="@dungeon-adventure/game-api" />
 
 <Aside title="Dependencias del proyecto">
-El cliente de S3 se agrega al `package.json` propio del proyecto `game-api`, ya que el código fuente de ese proyecto lo importa. Las versiones aún están alineadas en todo el espacio de trabajo a través del catálogo de dependencias del gestor de paquetes (donde sea compatible) ([política de versión única](https://nx.dev/concepts/decisions/dependency-management#single-version-policy)). Para más información, consulta la <Link path="guides/typescript-project#dependencies">guía de ts#project</Link>.
+El cliente de S3 se agrega al `package.json` propio del proyecto `game-api`, ya que el código fuente de ese proyecto lo importa. Las versiones aún están alineadas en todo el espacio de trabajo a través del catálogo de dependencias del administrador de paquetes (cuando es compatible) ([política de versión única](https://nx.dev/concepts/decisions/dependency-management#single-version-policy)). Para más información, consulta la <Link path="guides/typescript-project#dependencies">guía de ts#project</Link>.
 </Aside>
 
 Reemplaza la entidad de ejemplo generada en `packages/dungeon-db/src/entities/index.ts` con nuestras entidades `Game` e `Inventory`, y elimina `packages/dungeon-db/src/entities/example.ts`:
@@ -146,6 +146,14 @@ Elimina los directorios `tools` y `resources` en `packages/inventory/src/mcp-ser
 
 ## Tarea 3: Actualizar la infraestructura
 
+### Exponer el bucket de sesión
+
+El constructo del Story Agent ya aprovisiona y escribe en su propio bucket de sesión internamente, pero no lo expone — así que nada fuera del agente puede recibir acceso para leer de él todavía. Dado que `queryActions` necesita leer el historial de conversación de vuelta, para ilustración y simplicidad expondremos su bucket de sesión interno como una propiedad pública en `common/constructs/src/app/agents/story-agent/story-agent.ts`:
+
+<E2EDiff lang="typescript" before="dungeon-adventure/2/agents/story-agent.ts.old.template" after="dungeon-adventure/2/agents/story-agent.ts.template" />
+
+### Conectar el stack
+
 El constructo `DungeonDb` generado por `ts#dynamodb` ya aprovisiona nuestra tabla, así que solo necesitamos instanciarlo en nuestro stack y otorgar a la API del juego y al servidor MCP de inventario los permisos que necesitan. Actualiza `packages/infra/src/stacks/application-stack.ts` de la siguiente manera:
 
 <E2EDiff lang="typescript" before="dungeon-adventure/1/application-stack.ts.template" after="dungeon-adventure/2/stacks/application-stack.ts.template" />
@@ -154,13 +162,13 @@ El constructo `DungeonDb` generado por `ts#dynamodb` ya aprovisiona nuestra tabl
 Observa aquí que dado que cada procedimiento es servido por una función lambda individual, podemos seguir el principio de menor privilegio y asignar solo los permisos de lectura/escritura requeridos según la implementación del procedimiento.
 :::
 
-:::tip[Configuración de tiempo de ejecución]
-El constructo `DungeonDb` registra el nombre de la tabla desplegada en <Link path="guides/runtime-config">Configuración de tiempo de ejecución</Link> bajo el espacio de nombres `dynamodb`, almacenado en AWS AppConfig. La API del juego y el servidor MCP de inventario lo recuperan en tiempo de ejecución usando Lambda Powertools, en lugar de necesitar que se pase como una variable de entorno. Un beneficio de este enfoque es que a medida que crece el número de tablas u otros identificadores de infraestructura, solo necesitas una única variable de entorno `RUNTIME_CONFIG_APP_ID` cuando se ejecuta contra infraestructura desplegada.
+:::tip[Configuración en tiempo de ejecución]
+El constructo `DungeonDb` registra el nombre de la tabla desplegada en <Link path="guides/runtime-config">Configuración en tiempo de ejecución</Link> bajo el espacio de nombres `dynamodb`, almacenado en AWS AppConfig. La API del juego y el servidor MCP de inventario lo recuperan en tiempo de ejecución usando Lambda Powertools, en lugar de necesitar que se pase como una variable de entorno. Un beneficio de este enfoque es que a medida que crece el número de tablas u otros identificadores de infraestructura, solo necesitas una única variable de entorno `RUNTIME_CONFIG_APP_ID` cuando se ejecuta contra infraestructura desplegada.
 :::
 
 ## Tarea 4: Probar la API del juego localmente
 
-No hay necesidad de desplegar en AWS para probar nuestra API — el objetivo `dev` ejecuta la API del juego contra [DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html). Debido a que conectamos la API del juego al proyecto `DungeonDb` en el Módulo 1, este objetivo también inicia DynamoDB Local automáticamente.
+No es necesario desplegar en AWS para probar nuestra API — el objetivo `dev` ejecuta la API del juego contra [DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html). Debido a que conectamos la API del juego al proyecto `DungeonDb` en el Módulo 1, este objetivo también inicia DynamoDB Local automáticamente.
 
 Primero, corrige cualquier problema de lint:
 
