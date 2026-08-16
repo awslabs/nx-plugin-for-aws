@@ -776,5 +776,33 @@ const agent = new Agent({ tools: [b] });`,
       expect(written).not.toMatch(/,\s*,/);
       expect(written).toContain('ask_remote');
     });
+
+    // Pins down which GritQL form is unsafe, so the `=>` variant is not
+    // reintroduced on the assumption that any list append is fine: rewriting the
+    // list re-emits its trailing comma, while accumulating into it does not.
+    it('should not reintroduce the sparse hole that rewriting the list produces', async () => {
+      const wrapped = `const a = new Agent({
+  tools: [
+    x,
+    y,
+  ],
+});`;
+
+      tree.write('rewrite.ts', wrapped);
+      await applyGritQL(
+        tree,
+        'rewrite.ts',
+        '`tools: [$items]` => `tools: [$items, newTool]`',
+      );
+      expect(tree.read('rewrite.ts', 'utf-8')).toMatch(/,\s*,/);
+
+      tree.write('helper.ts', wrapped);
+      expect(
+        await appendToArrayViaGritQL(tree, 'helper.ts', 'tools:', 'newTool', {
+          scope: 'new Agent($_)',
+        }),
+      ).toBe(true);
+      expect(tree.read('helper.ts', 'utf-8')).not.toMatch(/,\s*,/);
+    });
   });
 });

@@ -423,9 +423,13 @@ export const insertViaGritQL = async (
  * assignment, `'"tools":'` for a quoted key. Which separator applies depends on
  * the construct rather than the language, so the caller states it.
  *
- * Appends after the last *element*, not after the element list: GritQL binds a
- * `[$items]` list to its trailing comma too, so rewriting the list yields the
- * sparse array `[a, b, , entry]` — a hole that is `undefined` at runtime.
+ * Appends after the last *element* rather than rewriting the element list with
+ * `=>`. GritQL binds a `[$items]` list to its trailing comma too, so
+ * `` `[$items]` => `[$items, entry]` `` emits the sparse array `[a, b, , entry]`
+ * once the formatter has wrapped the array — a hole that is `undefined` at
+ * runtime. (Accumulating with `$items += ", entry"` is safe by comparison, since
+ * it appends within the list rather than re-emitting it; both forms appear in
+ * this repo.)
  *
  * `scope` limits the match to an enclosing pattern, so same-named arrays
  * elsewhere in the file are left alone. `skipIfContains` overrides what the
