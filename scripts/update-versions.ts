@@ -20,6 +20,7 @@ import {
   parsePipRequirementsLine,
   VersionOperator,
 } from 'pip-requirements-js';
+import { parseDocument } from 'yaml';
 import { applyGritQL } from '../packages/nx-plugin/src/utils/ast';
 import { isNxPackage } from '../packages/nx-plugin/src/utils/version-upgrade-migration/nx-package-updates';
 import { registerNxPackageUpdates } from '../packages/nx-plugin/src/utils/version-upgrade-migration/register';
@@ -450,15 +451,16 @@ const updateWindowsSmithyCli = (tree: FsTree, newVersion: string): void => {
     console.warn(`Could not read ${actionPath}`);
     return;
   }
-  const updated = action.replace(
-    /(smithy-version:[\s\S]*?default: ')[^']+(')/,
-    `$1${newVersion}$2`,
-  );
-  if (updated === action) {
-    console.warn(`Could not update the Windows Smithy CLI in ${actionPath}`);
+  const document = parseDocument(action);
+  const pin = ['inputs', 'smithy-version', 'default'];
+  if (!document.hasIn(pin)) {
+    console.warn(`Could not find ${pin.join('.')} in ${actionPath}`);
     return;
   }
-  tree.write(actionPath, updated);
+  document.setIn(pin, newVersion);
+  // `lineWidth: 0` disables wrapping, so the long descriptions and shell scripts
+  // this document holds come back out on the lines they went in on.
+  tree.write(actionPath, document.toString({ lineWidth: 0 }));
   console.log(`Updated the Windows Smithy CLI to ${newVersion}`);
 };
 

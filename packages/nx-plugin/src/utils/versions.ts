@@ -61,9 +61,6 @@ export const TS_VERSIONS = {
   '@modelcontextprotocol/inspector': '0.22.0',
   '@ag-ui/a2ui-toolkit': '0.0.4',
   '@ag-ui/aws-strands': '0.2.3',
-  // Held at the version `@copilotkit/react-core` depends on exactly. Moving
-  // ahead of it resolves two copies of `@ag-ui/client`, whose structurally
-  // identical `AbstractAgent` types are then not assignable to each other.
   '@ag-ui/client': '0.0.57',
   '@ag-ui/core': '0.0.57',
   '@ag-ui/encoder': '0.0.57',
@@ -99,9 +96,6 @@ export const TS_VERSIONS = {
   '@vitest/ui': '4.1.10',
   '@astrojs/react': '6.0.2',
   '@astrojs/starlight': '0.41.7',
-  // Held below 7.2: it depends on `cookie` 2, which is ESM. Package managers
-  // installing a flat `node_modules` hoist a CommonJS `cookie` from elsewhere in
-  // the tree over it, and prerendering then fails on the missing named export.
   astro: '7.1.1',
   aws4fetch: '1.0.20',
   'aws-cdk': '2.1136.0',
