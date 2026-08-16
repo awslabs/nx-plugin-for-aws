@@ -11,7 +11,12 @@ const allow: AllowlistEntry[] = [
   {
     spdxId: 'Apache-2.0',
     fullName: 'Apache License 2.0',
-    aliases: ['Apache License 2.0', 'Apache Software License'],
+    aliases: [
+      'Apache License 2.0',
+      'Apache Software License',
+      // Mirrors the real pre-approved list, whose alias contains a comma
+      'Apache License, Version 2.0',
+    ],
   },
   {
     spdxId: 'BSD-3-Clause',
@@ -70,6 +75,30 @@ describe('SPDX evaluator', () => {
       'PRE_APPROVED',
     );
     expect(evaluator.evaluate('GPL-3.0; LGPL-3.0')).toBe('NOT_APPROVED');
+  });
+
+  it('handles , separated dual licenses as OR', () => {
+    // sqlite-vec declares both of its licenses in one free-text field
+    expect(evaluator.evaluate('MIT License, Apache License, Version 2.0')).toBe(
+      'PRE_APPROVED',
+    );
+    expect(evaluator.evaluate('MIT, Apache-2.0')).toBe('PRE_APPROVED');
+    // Only one operand needs to be allowed, since the operands are alternatives
+    expect(evaluator.evaluate('MIT License, GPL-3.0-or-later')).toBe(
+      'PRE_APPROVED',
+    );
+    expect(evaluator.evaluate('GPL-3.0-or-later, LGPL-2.1-or-later')).toBe(
+      'NOT_APPROVED',
+    );
+  });
+
+  it('does not split license names that themselves contain a comma', () => {
+    expect(evaluator.evaluate('Apache License, Version 2.0')).toBe(
+      'PRE_APPROVED',
+    );
+    expect(
+      evaluator.evaluate('The Apache License, Version 2.0, MIT License'),
+    ).toBe('PRE_APPROVED');
   });
 
   it('returns NOT_APPROVED for unknown SPDX ids', () => {
