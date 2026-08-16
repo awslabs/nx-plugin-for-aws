@@ -25,6 +25,7 @@ import {
 } from '../../../utils/agent-connection/agent-connection';
 import {
   addPythonDestructuredImport,
+  appendToArrayViaGritQL,
   applyGritQL,
   matchGritQL,
 } from '../../../utils/ast';
@@ -307,20 +308,10 @@ const addToolToAgent = async (
   toolName: string,
   framework: AgentFramework,
 ): Promise<void> => {
-  const scope = AGENT_CONSTRUCTOR[framework];
-  await applyGritQL(
-    tree,
-    filePath,
-    py(`\`tools=$old\` where {
-  $old <: within \`${scope}\`,
-  $old <: not contains \`${toolName}\`,
-  if ($old <: \`[]\`) {
-    $old => \`[${toolName}]\`
-  } else {
-    $old <: \`[$items]\` where { $items += \`, ${toolName}\` }
-  }
-}`),
-  );
+  await appendToArrayViaGritQL(tree, filePath, 'tools=', toolName, {
+    scope: AGENT_CONSTRUCTOR[framework],
+    language: 'py',
+  });
 };
 
 /**

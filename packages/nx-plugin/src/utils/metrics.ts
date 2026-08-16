@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { joinPathFragments, type Tree } from '@nx/devkit';
-import { applyGritQL, captureAllGritQL } from './ast';
+import { appendToArrayViaGritQL, applyGritQL, captureAllGritQL } from './ast';
 import { formatFilesInSubtree } from './format';
 import { getPackageVersion, type NxGeneratorInfo } from './nx';
 import {
@@ -156,12 +156,11 @@ const updateTerraformMetrics = async (tree: Tree, tags: string[]) => {
 
   // Add each tag, leaving existing tags in place to keep re-runs stable
   for (const tag of tags) {
-    await applyGritQL(
+    await appendToArrayViaGritQL(
       tree,
       TERRAFORM_METRICS_FILE_PATH,
-      `or { \`metric_tags = []\` => \`metric_tags = ["${tag}"]\`,` +
-        ` \`metric_tags = [$items]\` where { $items += \`, "${tag}"\` }` +
-        ` where { $items <: not contains \`"${tag}"\` } }`,
+      'metric_tags =',
+      `"${tag}"`,
     );
   }
 };
