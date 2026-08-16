@@ -99,7 +99,10 @@ export const TS_VERSIONS = {
   '@vitest/ui': '4.1.10',
   '@astrojs/react': '6.0.2',
   '@astrojs/starlight': '0.41.7',
-  astro: '7.2.2',
+  // Held below 7.2: it depends on `cookie` 2, which is ESM. Package managers
+  // installing a flat `node_modules` hoist a CommonJS `cookie` from elsewhere in
+  // the tree over it, and prerendering then fails on the missing named export.
+  astro: '7.1.1',
   aws4fetch: '1.0.20',
   'aws-cdk': '2.1136.0',
   'aws-cdk-lib': '2.265.0',
