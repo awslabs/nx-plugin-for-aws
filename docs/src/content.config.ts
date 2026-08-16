@@ -31,8 +31,13 @@ export const collections = {
   docs: defineCollection({
     loader: docsLoader(),
     schema: docsSchema({
+      // Composed with `extend` rather than `and`: Starlight deep-merges this
+      // schema with its own, and only a single object schema merges — an
+      // intersection is taken verbatim, dropping Starlight's own fields.
       extend: (context) =>
-        blogSchema(context).and(videosSchema).and(optionFilterSchema),
+        blogSchema(context)
+          .extend(videosSchema.shape)
+          .extend(optionFilterSchema.shape),
     }),
   }),
 };
