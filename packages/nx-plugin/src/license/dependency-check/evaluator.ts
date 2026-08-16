@@ -69,6 +69,57 @@ const buildAliasLookup = (allow: AllowlistEntry[]): Map<string, true> => {
   return m;
 };
 
+/**
+ * Split a free-text license list on a separator, treating the operands as
+ * alternatives (OR).
+ *
+ * Commas need care: several allowed license names contain one themselves (e.g.
+ * "Apache License, Version 2.0"), so the string is left intact when it already
+ * resolves as a single license, and fragments are otherwise rejoined
+ * longest-match-first. That keeps "MIT License, Apache License, Version 2.0"
+ * parsing as MIT + Apache rather than three unresolvable fragments.
+ *
+ * Returns `undefined` when the value shouldn't be treated as a list.
+ */
+const splitAlternatives = (
+  value: string,
+  separator: string,
+  isKnown: (token: string) => boolean,
+): string[] | undefined => {
+  if (!value.includes(separator)) return undefined;
+  if (isKnown(value)) return undefined;
+
+  const parts = value
+    .split(separator)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+  if (parts.length < 2) return undefined;
+
+  // Rejoin fragments that only make sense together, so a license name
+  // containing the separator survives the split. At each position take the
+  // longest run of fragments that forms a known license; failing that, emit the
+  // single fragment and let the caller report it.
+  const merged: string[] = [];
+  let i = 0;
+  while (i < parts.length) {
+    let matchedTo = -1;
+    let candidate = parts[i];
+    for (let j = i; j < parts.length; j++) {
+      if (j > i) candidate = `${candidate}${separator} ${parts[j]}`;
+      if (isKnown(candidate)) matchedTo = j;
+    }
+    if (matchedTo >= 0) {
+      merged.push(parts.slice(i, matchedTo + 1).join(`${separator} `));
+      i = matchedTo + 1;
+    } else {
+      merged.push(parts[i]);
+      i += 1;
+    }
+  }
+
+  return merged.length > 1 ? merged : undefined;
+};
+
 const evaluateToken = (
   token: string,
   spdxIds: string[],
@@ -101,21 +152,22 @@ export const createEvaluator = (options: EvaluatorOptions): Evaluator => {
       const normalised = normalise(rawLicense);
       if (isUnknownToken(normalised)) return 'UNKNOWN';
 
-      // Python tooling emits "Apache Software License; BSD License" — split and treat as OR
-      if (normalised.includes(';')) {
-        const parts = normalised
-          .split(';')
-          .map((p) => p.trim())
-          .filter((p) => p.length > 0);
-        if (parts.length > 1) {
-          for (const part of parts) {
-            const status = evaluateToken(part, spdxIds, aliasLookup);
-            if (status === 'PRE_APPROVED') return 'PRE_APPROVED';
-          }
-          if (parts.every((p) => isUnknownToken(normalise(p))))
-            return 'UNKNOWN';
-          return 'NOT_APPROVED';
+      // Python tooling emits free-text license lists rather than an SPDX
+      // expression: "Apache Software License; BSD License" (setuptools
+      // classifiers) or "MIT License, Apache License, Version 2.0" (a dual
+      // license declared in one `License:` field). Both mean "any of these
+      // applies", so treat the operands as OR.
+      const isKnown = (token: string) =>
+        evaluateToken(token, spdxIds, aliasLookup) === 'PRE_APPROVED';
+      for (const separator of [';', ',']) {
+        const parts = splitAlternatives(normalised, separator, isKnown);
+        if (!parts) continue;
+        for (const part of parts) {
+          if (evaluateToken(part, spdxIds, aliasLookup) === 'PRE_APPROVED')
+            return 'PRE_APPROVED';
         }
+        if (parts.every((p) => isUnknownToken(normalise(p)))) return 'UNKNOWN';
+        return 'NOT_APPROVED';
       }
 
       return evaluateToken(normalised, spdxIds, aliasLookup);
