@@ -61,9 +61,12 @@ export const TS_VERSIONS = {
   '@modelcontextprotocol/inspector': '0.22.0',
   '@ag-ui/a2ui-toolkit': '0.0.4',
   '@ag-ui/aws-strands': '0.2.3',
-  '@ag-ui/client': '0.0.58',
-  '@ag-ui/core': '0.0.58',
-  '@ag-ui/encoder': '0.0.58',
+  // Held at the version `@copilotkit/react-core` depends on exactly. Moving
+  // ahead of it resolves two copies of `@ag-ui/client`, whose structurally
+  // identical `AbstractAgent` types are then not assignable to each other.
+  '@ag-ui/client': '0.0.57',
+  '@ag-ui/core': '0.0.57',
+  '@ag-ui/encoder': '0.0.57',
   'agent-chat-cli': '0.3.0',
   '@copilotkit/react-core': '1.68.1',
   rxjs: '7.8.2',

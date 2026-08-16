@@ -435,6 +435,33 @@ const getUpdatedMiseVersions = (): Record<string, string> =>
     ]),
   );
 
+/**
+ * Moves the Smithy CLI version CI installs on Windows onto `newVersion`.
+ *
+ * Windows resolves the CLI from the PATH rather than through mise, so the version
+ * lives in the workflow action rather than in `versions.ts`. Left behind, it fails
+ * every Windows Smithy build: the CLI refuses a model built against a newer
+ * `smithy-model` than its own.
+ */
+const updateWindowsSmithyCli = (tree: FsTree, newVersion: string): void => {
+  const actionPath = '.github/actions/init-monorepo/action.yml';
+  const action = tree.read(actionPath, 'utf-8');
+  if (!action) {
+    console.warn(`Could not read ${actionPath}`);
+    return;
+  }
+  const updated = action.replace(
+    /(smithy-version:[\s\S]*?default: ')[^']+(')/,
+    `$1${newVersion}$2`,
+  );
+  if (updated === action) {
+    console.warn(`Could not update the Windows Smithy CLI in ${actionPath}`);
+    return;
+  }
+  tree.write(actionPath, updated);
+  console.log(`Updated the Windows Smithy CLI to ${newVersion}`);
+};
+
 const main = async () => {
   // Parse command line arguments
   const isDryRun = process.argv.includes('--dry-run');
@@ -510,6 +537,12 @@ const main = async () => {
       'packages/nx-plugin/src/utils/versions.ts',
       'MISE_VERSIONS',
     );
+
+    // Keep the Smithy CLI CI installs on Windows in step with the mise pin
+    const smithyChange = miseChanges.find((change) => change.name === 'smithy');
+    if (smithyChange) {
+      updateWindowsSmithyCli(tree, smithyChange.newVersion);
+    }
 
     // Update vendored git-secrets
     const gitSecretsChange = await updateGitSecrets(tree);
