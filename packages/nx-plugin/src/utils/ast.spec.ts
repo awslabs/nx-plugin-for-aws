@@ -11,6 +11,7 @@ import {
   addPythonDestructuredImport,
   addSingleImport,
   addStarExport,
+  appendToArrayViaGritQL,
   applyGritQL,
   hasExportDeclaration,
   matchGritQL,
@@ -616,6 +617,164 @@ def hello() -> str:
       expect(written).toContain('from contextlib import contextmanager');
       expect(written).toContain('def hello() -> str:');
       expect(written).toContain('from mymod import foo');
+    });
+  });
+
+  describe('appendToArrayViaGritQL', () => {
+    const append = (entry: string, skipIfContains?: string) =>
+      appendToArrayViaGritQL(tree, 'file.ts', 'tools:', entry, {
+        scope: 'new Agent($_)',
+        skipIfContains,
+      });
+
+    it('should append to a single-line array', async () => {
+      tree.write('file.ts', `const a = new Agent({ tools: [x, y] });`);
+
+      expect(await append('newTool')).toBe(true);
+
+      expect(tree.read('file.ts', 'utf-8')).toContain('tools: [x, y, newTool]');
+    });
+
+    // A wrapped array carries a trailing comma, which a naive append lands after.
+    it('should not leave a hole when the array has a trailing comma', async () => {
+      tree.write(
+        'file.ts',
+        `const a = new Agent({
+  tools: [
+    x,
+    y,
+  ],
+});`,
+      );
+
+      expect(await append('newTool')).toBe(true);
+
+      const written = tree.read('file.ts', 'utf-8')!;
+      expect(written).not.toMatch(/,\s*,/);
+      expect(written).toContain('newTool');
+    });
+
+    it('should not leave a hole appending repeatedly to a multi-line array', async () => {
+      tree.write(
+        'file.ts',
+        `const a = new Agent({
+  tools: [
+    x,
+  ],
+});`,
+      );
+
+      for (const entry of ['firstTool', 'secondTool', 'thirdTool']) {
+        expect(await append(entry)).toBe(true);
+      }
+
+      const written = tree.read('file.ts', 'utf-8')!;
+      expect(written).not.toMatch(/,\s*,/);
+      for (const entry of ['firstTool', 'secondTool', 'thirdTool']) {
+        expect(written).toContain(entry);
+      }
+    });
+
+    it('should append to an empty array', async () => {
+      tree.write('file.ts', `const a = new Agent({ tools: [] });`);
+
+      expect(await append('newTool')).toBe(true);
+
+      const written = tree.read('file.ts', 'utf-8')!;
+      expect(written).not.toMatch(/,\s*,/);
+      expect(written).toContain('newTool');
+    });
+
+    it('should be idempotent', async () => {
+      tree.write('file.ts', `const a = new Agent({ tools: [x] });`);
+
+      expect(await append('newTool')).toBe(true);
+      const afterFirst = tree.read('file.ts', 'utf-8')!;
+      expect(await append('newTool')).toBe(false);
+
+      expect(tree.read('file.ts', 'utf-8')).toBe(afterFirst);
+      expect(afterFirst.match(/newTool/g)).toHaveLength(1);
+    });
+
+    it('should dedupe on skipIfContains when given', async () => {
+      tree.write(
+        'file.ts',
+        `const a = new Agent({ tools: [myClient.asTool()] });`,
+      );
+
+      expect(await append('myClient.asTool()', 'myClient')).toBe(false);
+    });
+
+    it('should leave arrays outside the scope alone', async () => {
+      tree.write(
+        'file.ts',
+        `const other = { tools: [a] };
+const agent = new Agent({ tools: [b] });`,
+      );
+
+      expect(await append('newTool')).toBe(true);
+
+      const written = tree.read('file.ts', 'utf-8')!;
+      expect(written).toContain('const other = { tools: [a] };');
+      expect(written).toContain('tools: [b, newTool]');
+    });
+
+    it('should return false when the array is not present', async () => {
+      tree.write('file.ts', `const a = new Agent({});`);
+
+      expect(await append('newTool')).toBe(false);
+    });
+
+    it('should append to a python list without leaving a hole', async () => {
+      tree.write(
+        'file.py',
+        `agent = Agent(
+    tools=[
+        subtract,
+        current_time,
+    ],
+)
+`,
+      );
+
+      expect(
+        await appendToArrayViaGritQL(tree, 'file.py', 'tools=', 'ask_remote', {
+          scope: 'Agent($_)',
+          language: 'py',
+        }),
+      ).toBe(true);
+
+      const written = tree.read('file.py', 'utf-8')!;
+      expect(written).not.toMatch(/,\s*,/);
+      expect(written).toContain('ask_remote');
+    });
+
+    // The separator belongs to the construct, not the language: a python dict key
+    // takes `:` where a keyword argument takes `=`.
+    it('should append to a python dict entry', async () => {
+      tree.write(
+        'file.py',
+        `cfg = {
+    "tools": [subtract],
+}
+`,
+      );
+
+      expect(
+        await appendToArrayViaGritQL(
+          tree,
+          'file.py',
+          '"tools":',
+          'ask_remote',
+          {
+            language: 'py',
+          },
+        ),
+      ).toBe(true);
+
+      const written = tree.read('file.py', 'utf-8')!;
+      expect(written).not.toMatch(/,\s*,/);
+      expect(written).toContain('ask_remote');
     });
   });
 });

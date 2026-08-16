@@ -340,6 +340,30 @@ describe('py-agent-a2a-lifespan-construction migration', () => {
       expect(contents).toContain('Iterator[Any]');
     });
 
+    // The import swap drops `Iterator`, but the annotation rewrite only targets
+    // the one exact annotation — so a user's own `Iterator[...]` elsewhere in the
+    // file would be left referencing a name that is no longer imported, and the
+    // module raises NameError on import.
+    it('should leave the file untouched when the user has another Iterator annotation', async () => {
+      const withUserIterator = `${OLD_WITH_SESSION_ID}
+
+def user_helper() -> Iterator[str]:
+    yield "x"
+`;
+      tree.write(WITH_SESSION_ID_PATH, withUserIterator);
+
+      const result = await migration(tree);
+      const contents = tree.read(WITH_SESSION_ID_PATH, 'utf-8') ?? '';
+
+      expect(result.nextSteps).toHaveLength(1);
+      expect(result.nextSteps[0]).toContain(WITH_SESSION_ID_PATH);
+      // Either the import stays, or nothing references Iterator any more.
+      expect(contents).toContain('Iterator[str]');
+      expect(contents).toContain(
+        'from collections.abc import Callable, Iterator',
+      );
+    });
+
     it('should be idempotent', async () => {
       tree.write(WITH_SESSION_ID_PATH, OLD_WITH_SESSION_ID);
       tree.write(SESSION_CONTEXT_PATH, OLD_SESSION_CONTEXT);

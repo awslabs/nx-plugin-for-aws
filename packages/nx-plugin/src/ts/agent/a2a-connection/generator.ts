@@ -20,6 +20,7 @@ import {
 import {
   addDestructuredImport,
   addStarExport,
+  appendToArrayViaGritQL,
   applyGritQL,
 } from '../../../utils/ast';
 import {
@@ -187,11 +188,9 @@ export const tsAgentA2aConnectionGenerator = async (
     );
 
     // Append the tool to the tools array (after existing items)
-    await applyGritQL(
-      tree,
-      agentFilePath,
-      `\`tools: [$items]\` => \`tools: [$items, ${toolVarName}]\` where { $items <: within \`new Agent($_)\`, $items <: not contains \`${toolVarName}\` }`,
-    );
+    await appendToArrayViaGritQL(tree, agentFilePath, 'tools:', toolVarName, {
+      scope: 'new Agent($_)',
+    });
   }
 
   // 4. Set up dev target — depend on the target agent's dev

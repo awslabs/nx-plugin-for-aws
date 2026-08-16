@@ -280,6 +280,25 @@ const WITH_SESSION_ID_IMPORT_OLD =
 const WITH_SESSION_ID_IMPORT_NEW =
   'from collections.abc import Callable, Generator';
 
+/**
+ * Whether every `Iterator` reference in the file is one this migration is about
+ * to convert, so dropping the import cannot leave an undefined name behind. A
+ * user's own `Iterator[...]` annotation elsewhere in the file is not rewritten
+ * (the rewrite targets one exact annotation), so removing the import would leave
+ * the module raising `NameError` on import.
+ */
+const onlyIteratorUseIs = (contents: string, annotation: string): boolean => {
+  const withoutImport = contents.replace(
+    /^from collections\.abc import .*$/m,
+    '',
+  );
+  const uses = withoutImport.match(/\bIterator\b/g) ?? [];
+  const converted = withoutImport.match(
+    new RegExp(annotation.replace(/[[\]]/g, '\\$&'), 'g'),
+  );
+  return uses.length === (converted?.length ?? 0);
+};
+
 const migrateWithSessionId = async (
   tree: Tree,
   filePath: string,
@@ -288,10 +307,11 @@ const migrateWithSessionId = async (
   const contents = tree.read(filePath, 'utf-8') ?? '';
   if (!contents.includes('Iterator[Any]')) return;
 
-  const ready = await allMatch(tree, filePath, [
-    pyMatch(WITH_SESSION_ID_IMPORT_OLD),
-    pyMatch('Iterator[Any]'),
-  ]);
+  const ready =
+    (await allMatch(tree, filePath, [
+      pyMatch(WITH_SESSION_ID_IMPORT_OLD),
+      pyMatch('Iterator[Any]'),
+    ])) && onlyIteratorUseIs(contents, 'Iterator[Any]');
 
   if (!ready) {
     nextSteps.push(
@@ -323,10 +343,11 @@ const migrateSessionContext = async (
   const contents = tree.read(filePath, 'utf-8') ?? '';
   if (!contents.includes('Iterator[None]')) return;
 
-  const ready = await allMatch(tree, filePath, [
-    pyMatch(SESSION_CONTEXT_IMPORT_OLD),
-    pyMatch('Iterator[None]'),
-  ]);
+  const ready =
+    (await allMatch(tree, filePath, [
+      pyMatch(SESSION_CONTEXT_IMPORT_OLD),
+      pyMatch('Iterator[None]'),
+    ])) && onlyIteratorUseIs(contents, 'Iterator[None]');
 
   if (!ready) {
     nextSteps.push(

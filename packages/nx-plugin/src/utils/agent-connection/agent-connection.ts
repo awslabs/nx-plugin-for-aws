@@ -12,7 +12,12 @@ import pyProjectGenerator, {
   getPyProjectDetails,
 } from '../../py/project/generator';
 import tsProjectGenerator from '../../ts/lib/generator';
-import { addStarExport, applyGritQL, matchGritQL } from '../ast';
+import {
+  addStarExport,
+  appendToArrayViaGritQL,
+  applyGritQL,
+  matchGritQL,
+} from '../ast';
 import {
   type DependencyDeclaration,
   forDependencies,
@@ -713,17 +718,12 @@ const addPythonClientTools = async (
     return;
   }
 
-  await applyGritQL(
+  await appendToArrayViaGritQL(
     tree,
     filePath,
-    py(`\`tools=$old\` where {
-  $old <: not contains \`${clientVarName}\`,
-  if ($old <: \`[]\`) {
-    $old => \`[*${clientVarName}.list_tools_sync()]\`
-  } else {
-    $old <: \`[$items]\` where { $items += \`, *${clientVarName}.list_tools_sync()\` }
-  }
-}`),
+    'tools=',
+    `*${clientVarName}.list_tools_sync()`,
+    { skipIfContains: clientVarName, language: 'py' },
   );
 };
 

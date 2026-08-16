@@ -414,4 +414,44 @@ describe('ts#rdb generator', () => {
     const buildDeps = sharedConstructsConfig.targets.build.dependsOn as any[];
     expect(buildDeps.filter((d) => d === '@proj/db:build')).toHaveLength(1);
   });
+
+  // Re-running must not destroy the schema and edits the user owns — the whole
+  // point of re-running is usually to add infrastructure to an existing project.
+  it('should preserve user edits to user-owned files on a re-run', async () => {
+    await tsRdbGenerator(tree, { ...defaultOptions, infra: 'none' });
+
+    const userOwned = {
+      'packages/db/prisma/models/example.prisma': `model MyModel {
+  id String @id
+}
+`,
+      'packages/db/prisma/schema.prisma': '// user edited schema\n',
+      'packages/db/src/prisma.ts': '// user edited prisma client\n',
+      'packages/db/src/utils.ts': '// user edited utils\n',
+    };
+    for (const [path, contents] of Object.entries(userOwned)) {
+      expect(tree.exists(path)).toBe(true);
+      tree.write(path, contents);
+    }
+
+    await tsRdbGenerator(tree, defaultOptions);
+
+    for (const [path, contents] of Object.entries(userOwned)) {
+      expect(tree.read(path, 'utf-8')).toBe(contents);
+    }
+  });
+
+  // config.json is framework-owned, so changed options must land on a re-run.
+  it('should converge framework-owned files on a re-run with changed options', async () => {
+    await tsRdbGenerator(tree, { ...defaultOptions, engine: 'postgres' });
+    await tsRdbGenerator(tree, { ...defaultOptions, engine: 'mysql' });
+
+    const config = JSON.parse(
+      tree.read('packages/db/config.json', 'utf-8') ?? '{}',
+    );
+    expect(config.localDev.dbEngine).toBe('mysql');
+    expect(tree.read('packages/db/src/index.ts', 'utf-8')).toContain(
+      "export * from './prisma.js'",
+    );
+  });
 });

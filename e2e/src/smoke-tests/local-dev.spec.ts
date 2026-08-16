@@ -44,6 +44,9 @@ const AGENT_CORE_SESSION_ID_HEADER =
 // reply back under.
 const A2A_DELEGATE_PROMPT = 'delegate this question to the remote agent';
 const A2A_DELEGATED_MARKER = 'delegated reply:';
+// The remote agent answers from the mock's shared fallback, so its presence in
+// the delegating agent's response proves the A2A round trip actually completed.
+const A2A_REMOTE_REPLY = 'The answer is 42';
 
 /**
  * Scope the mock to drive one A2A delegation per `A2A_DELEGATE_PROMPT` turn,
@@ -157,6 +160,34 @@ function driveSessionPersistenceCheck(mock: MockServer): void {
     } as never)
     .first()
     .times(1);
+}
+
+/**
+ * Assert one delegation actually reached the remote agent and came back.
+ *
+ * The delegation tool returns its exception AS the tool result, which the mock
+ * then echoes under `A2A_DELEGATED_MARKER` — so a hop that failed outright still
+ * streams back a 200 carrying the marker. Bodies like
+ * `delegated reply: [ERROR] Error: fetch failed` or
+ * `delegated reply: Agent execution failed` pass a marker-only check, and
+ * `/Error: \w*Error/` only catches a *named* error class. The load-bearing
+ * assertion is therefore the remote's own reply (the mock's fallback text)
+ * appearing in the body: that can only happen if the A2A round trip succeeded.
+ */
+function expectDelegationSucceeded(body: string, label: string): void {
+  const detail = `${label}: ${body.slice(0, 500)}`;
+  expect(body, detail).toContain(A2A_DELEGATED_MARKER);
+  expect(body, detail).toContain(A2A_REMOTE_REPLY);
+  for (const signature of [
+    'Event loop is closed',
+    'Agent execution failed',
+    'fetch failed',
+    '[ERROR]',
+    'Traceback',
+    'RUN_ERROR',
+  ]) {
+    expect(body, detail).not.toContain(signature);
+  }
 }
 
 // The APIs the dev website is connected to, with the class names
@@ -1620,9 +1651,10 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
         delegateBody.slice(0, 300),
       );
       expect(delegateRes.status).toBe(200);
-      expect(delegateBody).toContain(A2A_DELEGATED_MARKER);
-      expect(delegateBody).not.toContain('Event loop is closed');
-      expect(delegateBody).not.toMatch(/Error: \w*Error/);
+      expectDelegationSucceeded(
+        delegateBody,
+        `Python Agent A2A delegation ${attempt}`,
+      );
     }
 
     // Session persistence: establish a fact under a stable session id, fully
@@ -1856,9 +1888,10 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
         delegateBody.slice(0, 300),
       );
       expect(delegateRes.status).toBe(200);
-      expect(delegateBody).toContain(A2A_DELEGATED_MARKER);
-      expect(delegateBody).not.toContain('Event loop is closed');
-      expect(delegateBody).not.toContain('RUN_ERROR');
+      expectDelegationSucceeded(
+        delegateBody,
+        `Python LangChain A2A delegation ${attempt}`,
+      );
     }
 
     await chatStreamsReply(

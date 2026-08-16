@@ -7,14 +7,17 @@ import {
   type GeneratorCallback,
   generateFiles,
   joinPathFragments,
+  OverwriteStrategy,
   readProjectConfiguration,
   type Tree,
   updateProjectConfiguration,
+  writeJson,
 } from '@nx/devkit';
 import {
   addPyDependencies,
   addTsDependencies,
 } from '../../utils/add-dependencies';
+import { addPythonReExport } from '../../utils/agent-connection/agent-connection';
 import { addPythonBundleTarget } from '../../utils/bundle/bundle';
 import { resolveContainers } from '../../utils/containers';
 import {
@@ -168,12 +171,46 @@ export const pyRdbGenerator = async (
     awsLambdaPowertoolsVersion: PY_VERSIONS['aws-lambda-powertools'],
   };
 
+  // Models, the connection module, the Alembic config and the migration env are
+  // user-editable, so a re-run (to add infrastructure, or after a failed run)
+  // must not clobber the user's schema and edits.
   generateFiles(
     tree,
     joinPathFragments(import.meta.dirname, 'files'),
     dir,
     templateOptions,
+    { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
+
+  // The package barrel re-exports connection.py. `pyProjectGenerator` writes a
+  // stub __init__.py when it creates the project, so the re-exports are added to
+  // whatever is there rather than replacing it — which also leaves a user's own
+  // additions to the barrel alone on a re-run.
+  const initFilePath = joinPathFragments(
+    dir,
+    normalizedModuleName,
+    '__init__.py',
+  );
+  for (const importName of ['get_engine', 'is_local_dev', 'session_context']) {
+    await addPythonReExport(tree, initFilePath, '.connection', importName);
+  }
+
+  // config.json is framework-owned: it carries values derived from the
+  // generator's options, so it converges on a re-run with changed options.
+  writeJson(tree, joinPathFragments(dir, 'config.json'), {
+    runtimeConfigKey: nameClassName,
+    localDev: {
+      containerEngine,
+      containerName,
+      image: dockerImage,
+      port: localDbPort,
+      host: localDbHost,
+      dbName: databaseName,
+      dbUser: localDbUser,
+      dbPassword: localDbPassword,
+      dbEngine: engine,
+    },
+  });
 
   await sharedRdbScriptsGenerator(tree, engine, DEPENDENCIES);
   const scriptsDir = relative(
