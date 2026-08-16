@@ -1,0 +1,61 @@
+import os
+
+<%_ if (session === 's3') { _%>
+import boto3
+<%_ } _%>
+import aiosqlite
+from langgraph.checkpoint.base import BaseCheckpointSaver
+<%_ if (session === 'in-memory') { _%>
+from langgraph.checkpoint.memory import InMemorySaver
+<%_ } _%>
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+<%_ if (session === 's3') { _%>
+from <%- agentConnectionModuleName %>.core.s3_checkpoint_saver_langchain import S3CheckpointSaver
+<%_ } else if (session === 'dynamodb-s3') { _%>
+from langgraph_checkpoint_aws import DynamoDBSaver
+<%_ } _%>
+<%_ if (session === 's3' || session === 'dynamodb-s3') { _%>
+from <%- agentConnectionModuleName %>.core.runtime_config import get_agentcore_runtime_config
+<%_ } _%>
+
+
+def get_checkpointer() -> BaseCheckpointSaver:
+    """Returns a LangGraph checkpointer for persisting conversation state across
+    invocations. Local development always uses a local SQLite database for
+    convenience, regardless of the configured session option.
+    """
+    if os.environ.get("LOCAL_DEV") == "true":
+        os.makedirs("<%- localSessionsDir %>", exist_ok=True)
+        conn = aiosqlite.connect(os.path.join("<%- localSessionsDir %>", "checkpoints.sqlite"))
+        return AsyncSqliteSaver(conn)
+
+<%_ if (session === 's3') { _%>
+    config = get_agentcore_runtime_config()
+    session_config = (config.get("agentRuntimes") or {}).get("<%- agentNameClassName %>", {}).get("session", {})
+    bucket_name = session_config.get("bucketName")
+    if not bucket_name:
+        raise RuntimeError(
+            "No S3 checkpoint bucket configured for this agent in runtime configuration."
+        )
+    return S3CheckpointSaver(
+        bucket_name=bucket_name,
+        prefix="checkpoints/",
+        s3_client=boto3.client("s3"),
+    )
+<%_ } else if (session === 'dynamodb-s3') { _%>
+    config = get_agentcore_runtime_config()
+    session_config = (config.get("agentRuntimes") or {}).get("<%- agentNameClassName %>", {}).get("session", {})
+    table_name = session_config.get("tableName")
+    bucket_name = session_config.get("bucketName")
+    if not table_name or not bucket_name:
+        raise RuntimeError(
+            "No DynamoDB checkpoint table or S3 offload bucket configured for this agent in runtime configuration."
+        )
+    return DynamoDBSaver(
+        table_name=table_name,
+        region_name=os.environ.get("AWS_REGION"),
+        s3_offload_config={"bucket_name": bucket_name},
+    )
+<%_ } else { _%>
+    return InMemorySaver()
+<%_ } _%>

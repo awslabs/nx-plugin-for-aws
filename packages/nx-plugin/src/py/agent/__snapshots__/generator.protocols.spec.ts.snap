@@ -1,7 +1,16 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`py#agent generator > should match snapshot for Terraform generated files > terraform-agent.tf 1`] = `
-"variable "env" {
+exports[`py#agent generator > should create DynamoDB checkpoint table and S3 offload bucket infrastructure when session is dynamodb-s3 (Terraform) > terraform-agent.tf (dynamodb-s3) 1`] = `
+"terraform {
+  required_providers {
+    random = {
+      source  = "hashicorp/random"
+      version = "3.9.0"
+    }
+  }
+}
+
+variable "env" {
   description = "Environment variables to pass to the agent core runtime"
   type        = map(string)
   default     = {}
@@ -47,9 +56,515 @@ variable "appconfig_application_id" {
   type        = string
 }
 
+variable "session_force_destroy" {
+  description = "Whether to allow the session bucket to be destroyed even if it still contains objects."
+  type        = bool
+  default     = false
+}
+
+variable "session_deletion_protection_enabled" {
+  description = "Whether to enable deletion protection on the session checkpoint table."
+  type        = bool
+  default     = true
+}
+
 variable "appconfig_application_arn" {
   description = "ARN of the shared runtime-config AppConfig application (from \`core/runtime-config/appconfig.application_arn\`). Used to scope the IAM read permission granted to the agent runtime."
   type        = string
+}
+
+data "aws_region" "current" {}
+data "aws_caller_identity" "current" {}
+
+locals {
+  # Delivery source/destination names have a 60 character maximum. Truncate
+  # the agent name so these stay within the limit.
+  session_access_logs_name_prefix = substr("dynamodb-terraform-agent", 0, 30)
+}
+
+# Uniquifies resource names below so this construct can be deployed more than
+# once (e.g. across stages) within the same account/region.
+resource "random_id" "session_unique_suffix" {
+  byte_length = 4
+}
+
+# KMS key encrypting the session bucket and its server access logs.
+resource "aws_kms_key" "session" {
+  description             = "KMS key for dynamodb-terraform-agent agent session data"
+  enable_key_rotation     = true
+  deletion_window_in_days = 7
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "EnableIAMUserPermissions"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::\${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        Sid       = "AllowCloudWatchLogs"
+        Effect    = "Allow"
+        Principal = { Service = "logs.\${data.aws_region.current.region}.amazonaws.com" }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+        Condition = {
+          ArnLike = {
+            "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:\${data.aws_region.current.region}:\${data.aws_caller_identity.current.account_id}:log-group:*"
+          }
+        }
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+# CloudWatch log group receiving the session bucket's server access logs.
+resource "aws_cloudwatch_log_group" "session_access_logs" {
+  name              = "/aws/s3/dynamodb-terraform-agent-session-access-logs-\${random_id.session_unique_suffix.hex}"
+  retention_in_days = 365
+  kms_key_id        = aws_kms_key.session.arn
+
+  tags = var.tags
+}
+
+# Bucket storing the agent's session data
+resource "aws_s3_bucket" "session" {
+  bucket = "dynamodb-terraform-agent-sessions-\${random_id.session_unique_suffix.hex}"
+  #checkov:skip=CKV2_AWS_61:Lifecycle configuration not required for session data
+  #checkov:skip=CKV_AWS_144:Cross-region replication not required for session data
+  #checkov:skip=CKV2_AWS_62:Event notifications not required for session data
+  #checkov:skip=CKV_AWS_18:Server access logs are delivered to CloudWatch Logs (see aws_cloudwatch_log_delivery.session)
+  #checkov:skip=CKV_AWS_21:Session data does not need versioning enabled
+  force_destroy = var.session_force_destroy
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "session" {
+  bucket = aws_s3_bucket.session.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      kms_master_key_id = aws_kms_key.session.arn
+      sse_algorithm     = "aws:kms"
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "session" {
+  bucket = aws_s3_bucket.session.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_policy" "session" {
+  bucket = aws_s3_bucket.session.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "DenyInsecureConnections"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = "s3:*"
+        Resource = [
+          aws_s3_bucket.session.arn,
+          "\${aws_s3_bucket.session.arn}/*"
+        ]
+        Condition = {
+          Bool = {
+            "aws:SecureTransport" = "false"
+          }
+        }
+      }
+    ]
+  })
+}
+
+# Deliver the session bucket's server access logs to CloudWatch Logs.
+resource "aws_cloudwatch_log_delivery_source" "session" {
+  name         = "\${local.session_access_logs_name_prefix}-access-logs-source-\${random_id.session_unique_suffix.hex}"
+  log_type     = "S3_SERVER_ACCESS_LOGS"
+  resource_arn = aws_s3_bucket.session.arn
+}
+
+resource "aws_cloudwatch_log_delivery_destination" "session" {
+  name = "\${local.session_access_logs_name_prefix}-access-logs-dest-\${random_id.session_unique_suffix.hex}"
+
+  delivery_destination_configuration {
+    destination_resource_arn = aws_cloudwatch_log_group.session_access_logs.arn
+  }
+}
+
+resource "aws_cloudwatch_log_delivery" "session" {
+  delivery_source_name     = aws_cloudwatch_log_delivery_source.session.name
+  delivery_destination_arn = aws_cloudwatch_log_delivery_destination.session.arn
+}
+
+# Unified checkpoints/writes table, matching the schema
+# langgraph_checkpoint_aws.DynamoDBSaver expects (PK/SK, TTL on \`ttl\`).
+resource "aws_dynamodb_table" "session" {
+  name         = "dynamodb-terraform-agent-checkpoints-\${random_id.session_unique_suffix.hex}"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "PK"
+  range_key    = "SK"
+
+  attribute {
+    name = "PK"
+    type = "S"
+  }
+
+  attribute {
+    name = "SK"
+    type = "S"
+  }
+
+  ttl {
+    attribute_name = "ttl"
+    enabled        = true
+  }
+
+  point_in_time_recovery {
+    enabled = true
+  }
+
+  server_side_encryption {
+    enabled     = true
+    kms_key_arn = aws_kms_key.session.arn
+  }
+
+  deletion_protection_enabled = var.session_deletion_protection_enabled
+
+  tags = var.tags
+}
+
+module "agent_core_runtime" {
+  source = "../../../core/agent-core"
+  agent_runtime_name = "DynamodbTerraformAgent"
+  docker_image_tag = "proj-dynamodb-terraform-agent:latest"
+  server_protocol = "HTTP"
+  enable_vpc = var.enable_vpc
+  vpc_id = var.vpc_id
+  subnet_ids = var.subnet_ids
+
+  env = merge({
+    RUNTIME_CONFIG_APP_ID = var.appconfig_application_id
+  }, var.env)
+  additional_iam_policy_statements = concat([
+    {
+      Effect   = "Allow"
+      Action   = [
+        "appconfig:StartConfigurationSession",
+        "appconfig:GetLatestConfiguration"
+      ]
+      Resource = ["\${var.appconfig_application_arn}/*"]
+    },
+    # Grant access for the agent to invoke bedrock models
+    {
+      Effect = "Allow"
+      Action = [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream"
+      ]
+      Resource = [
+        "arn:aws:bedrock:*:*:foundation-model/*",
+        "arn:aws:bedrock:*:*:inference-profile/*"
+      ]
+    },
+    # Grant access for the agent to read/write its session data
+    {
+      Effect = "Allow"
+      Action = [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:ListBucket"
+      ]
+      Resource = [
+        aws_s3_bucket.session.arn,
+        "\${aws_s3_bucket.session.arn}/*"
+      ]
+    },
+    # Grant access for the agent to use the session bucket's KMS key
+    {
+      Effect = "Allow"
+      Action = [
+        "kms:Decrypt",
+        "kms:GenerateDataKey*"
+      ]
+      Resource = [aws_kms_key.session.arn]
+    },
+    # Grant access for the agent to read/write its checkpoint table
+    {
+      Effect = "Allow"
+      Action = [
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:Query",
+        "dynamodb:BatchGetItem",
+        "dynamodb:BatchWriteItem"
+      ]
+      Resource = [aws_dynamodb_table.session.arn]
+    }
+  ], var.additional_iam_policy_statements)
+  tags = var.tags
+}
+
+# Add agent runtime ARN to runtime config
+module "add_agent_runtime_to_runtime_config" {
+  source = "../../../core/runtime-config/entry"
+
+  namespace = "agentcore"
+  key       = "agentRuntimes"
+  value     = { "DynamodbTerraformAgent" = { arn = module.agent_core_runtime.agent_core_runtime_arn, session = { tableName = aws_dynamodb_table.session.name, bucketName = aws_s3_bucket.session.bucket } } }
+
+  depends_on = [module.agent_core_runtime]
+}
+
+output "agent_core_runtime_role_arn" {
+  description = "ARN of the agent core runtime role"
+  value       = module.agent_core_runtime.agent_core_runtime_role_arn
+}
+
+output "agent_core_runtime_arn" {
+  description = "ARN of the Bedrock Agent Core runtime"
+  value       = module.agent_core_runtime.agent_core_runtime_arn
+}
+
+output "invocation_url" {
+  description = "HTTPS invocation URL of the runtime"
+  value       = module.agent_core_runtime.invocation_url
+}
+
+output "appconfig_application_id" {
+  description = "AppConfig Application ID for runtime config (passthrough of the shared \`appconfig_application_id\` input)."
+  value       = var.appconfig_application_id
+}
+
+output "security_group_id" {
+  description = "Security group ID of the agent core runtime, for use in ingress rules on resources it must reach (e.g. a database). Null unless enable_vpc is true."
+  value       = module.agent_core_runtime.security_group_id
+}
+"
+`;
+
+exports[`py#agent generator > should match snapshot for Terraform generated files > terraform-agent.tf 1`] = `
+"terraform {
+  required_providers {
+    random = {
+      source  = "hashicorp/random"
+      version = "3.9.0"
+    }
+  }
+}
+
+variable "env" {
+  description = "Environment variables to pass to the agent core runtime"
+  type        = map(string)
+  default     = {}
+}
+
+variable "additional_iam_policy_statements" {
+  description = "Additional IAM policy statements to attach to the agent core runtime role"
+  type = list(object({
+    Effect   = string
+    Action   = list(string)
+    Resource = list(string)
+  }))
+  default = []
+}
+
+variable "tags" {
+  description = "Tags to apply to resources"
+  type        = map(string)
+  default     = {}
+}
+
+# VPC Configuration (optional)
+variable "enable_vpc" {
+  description = "Run the agent core runtime inside a VPC. Set alongside vpc_id/subnet_ids."
+  type        = bool
+  default     = false
+}
+
+variable "vpc_id" {
+  description = "VPC ID to run the agent core runtime in. Required when enable_vpc is true."
+  type        = string
+  default     = null
+}
+
+variable "subnet_ids" {
+  description = "Subnet IDs to run the agent core runtime in. Required when enable_vpc is true."
+  type        = list(string)
+  default     = null
+}
+
+variable "appconfig_application_id" {
+  description = "ID of the shared runtime-config AppConfig application (from \`core/runtime-config/appconfig.application_id\`). The agent reads its runtime configuration from this application."
+  type        = string
+}
+
+variable "session_force_destroy" {
+  description = "Whether to allow the session bucket to be destroyed even if it still contains objects."
+  type        = bool
+  default     = false
+}
+
+variable "appconfig_application_arn" {
+  description = "ARN of the shared runtime-config AppConfig application (from \`core/runtime-config/appconfig.application_arn\`). Used to scope the IAM read permission granted to the agent runtime."
+  type        = string
+}
+
+data "aws_region" "current" {}
+data "aws_caller_identity" "current" {}
+
+locals {
+  # Delivery source/destination names have a 60 character maximum. Truncate
+  # the agent name so these stay within the limit.
+  session_access_logs_name_prefix = substr("terraform-snapshot-agent", 0, 30)
+}
+
+# Uniquifies resource names below so this construct can be deployed more than
+# once (e.g. across stages) within the same account/region.
+resource "random_id" "session_unique_suffix" {
+  byte_length = 4
+}
+
+# KMS key encrypting the session bucket and its server access logs.
+resource "aws_kms_key" "session" {
+  description             = "KMS key for terraform-snapshot-agent agent session data"
+  enable_key_rotation     = true
+  deletion_window_in_days = 7
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "EnableIAMUserPermissions"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::\${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        Sid       = "AllowCloudWatchLogs"
+        Effect    = "Allow"
+        Principal = { Service = "logs.\${data.aws_region.current.region}.amazonaws.com" }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+        Condition = {
+          ArnLike = {
+            "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:\${data.aws_region.current.region}:\${data.aws_caller_identity.current.account_id}:log-group:*"
+          }
+        }
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+# CloudWatch log group receiving the session bucket's server access logs.
+resource "aws_cloudwatch_log_group" "session_access_logs" {
+  name              = "/aws/s3/terraform-snapshot-agent-session-access-logs-\${random_id.session_unique_suffix.hex}"
+  retention_in_days = 365
+  kms_key_id        = aws_kms_key.session.arn
+
+  tags = var.tags
+}
+
+# Bucket storing the agent's session data
+resource "aws_s3_bucket" "session" {
+  bucket = "terraform-snapshot-agent-sessions-\${random_id.session_unique_suffix.hex}"
+  #checkov:skip=CKV2_AWS_61:Lifecycle configuration not required for session data
+  #checkov:skip=CKV_AWS_144:Cross-region replication not required for session data
+  #checkov:skip=CKV2_AWS_62:Event notifications not required for session data
+  #checkov:skip=CKV_AWS_18:Server access logs are delivered to CloudWatch Logs (see aws_cloudwatch_log_delivery.session)
+  #checkov:skip=CKV_AWS_21:Session data does not need versioning enabled
+  force_destroy = var.session_force_destroy
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "session" {
+  bucket = aws_s3_bucket.session.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      kms_master_key_id = aws_kms_key.session.arn
+      sse_algorithm     = "aws:kms"
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "session" {
+  bucket = aws_s3_bucket.session.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_policy" "session" {
+  bucket = aws_s3_bucket.session.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "DenyInsecureConnections"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = "s3:*"
+        Resource = [
+          aws_s3_bucket.session.arn,
+          "\${aws_s3_bucket.session.arn}/*"
+        ]
+        Condition = {
+          Bool = {
+            "aws:SecureTransport" = "false"
+          }
+        }
+      }
+    ]
+  })
+}
+
+# Deliver the session bucket's server access logs to CloudWatch Logs.
+resource "aws_cloudwatch_log_delivery_source" "session" {
+  name         = "\${local.session_access_logs_name_prefix}-access-logs-source-\${random_id.session_unique_suffix.hex}"
+  log_type     = "S3_SERVER_ACCESS_LOGS"
+  resource_arn = aws_s3_bucket.session.arn
+}
+
+resource "aws_cloudwatch_log_delivery_destination" "session" {
+  name = "\${local.session_access_logs_name_prefix}-access-logs-dest-\${random_id.session_unique_suffix.hex}"
+
+  delivery_destination_configuration {
+    destination_resource_arn = aws_cloudwatch_log_group.session_access_logs.arn
+  }
+}
+
+resource "aws_cloudwatch_log_delivery" "session" {
+  delivery_source_name     = aws_cloudwatch_log_delivery_source.session.name
+  delivery_destination_arn = aws_cloudwatch_log_delivery_destination.session.arn
 }
 
 module "agent_core_runtime" {
@@ -84,6 +599,29 @@ module "agent_core_runtime" {
         "arn:aws:bedrock:*:*:foundation-model/*",
         "arn:aws:bedrock:*:*:inference-profile/*"
       ]
+    },
+    # Grant access for the agent to read/write its session data
+    {
+      Effect = "Allow"
+      Action = [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:ListBucket"
+      ]
+      Resource = [
+        aws_s3_bucket.session.arn,
+        "\${aws_s3_bucket.session.arn}/*"
+      ]
+    },
+    # Grant access for the agent to use the session bucket's KMS key
+    {
+      Effect = "Allow"
+      Action = [
+        "kms:Decrypt",
+        "kms:GenerateDataKey*"
+      ]
+      Resource = [aws_kms_key.session.arn]
     }
   ], var.additional_iam_policy_statements)
   tags = var.tags
@@ -95,7 +633,7 @@ module "add_agent_runtime_to_runtime_config" {
 
   namespace = "agentcore"
   key       = "agentRuntimes"
-  value     = { "TerraformSnapshotAgent" = { arn = module.agent_core_runtime.agent_core_runtime_arn } }
+  value     = { "TerraformSnapshotAgent" = { arn = module.agent_core_runtime.agent_core_runtime_arn, session = { bucketName = aws_s3_bucket.session.bucket } } }
 
   depends_on = [module.agent_core_runtime]
 }
@@ -640,6 +1178,133 @@ output "agent_runtime_version" {
 output "security_group_id" {
   description = "Security group ID of the agent core runtime, for use in ingress rules on resources it must reach (e.g. a database). Null unless enable_vpc is true."
   value       = var.enable_vpc ? aws_security_group.agent_core_runtime[0].id : null
+}
+"
+`;
+
+exports[`py#agent generator > should not create session bucket infrastructure when session is in-memory (Terraform) > terraform-agent.tf (in-memory) 1`] = `
+"variable "env" {
+  description = "Environment variables to pass to the agent core runtime"
+  type        = map(string)
+  default     = {}
+}
+
+variable "additional_iam_policy_statements" {
+  description = "Additional IAM policy statements to attach to the agent core runtime role"
+  type = list(object({
+    Effect   = string
+    Action   = list(string)
+    Resource = list(string)
+  }))
+  default = []
+}
+
+variable "tags" {
+  description = "Tags to apply to resources"
+  type        = map(string)
+  default     = {}
+}
+
+# VPC Configuration (optional)
+variable "enable_vpc" {
+  description = "Run the agent core runtime inside a VPC. Set alongside vpc_id/subnet_ids."
+  type        = bool
+  default     = false
+}
+
+variable "vpc_id" {
+  description = "VPC ID to run the agent core runtime in. Required when enable_vpc is true."
+  type        = string
+  default     = null
+}
+
+variable "subnet_ids" {
+  description = "Subnet IDs to run the agent core runtime in. Required when enable_vpc is true."
+  type        = list(string)
+  default     = null
+}
+
+variable "appconfig_application_id" {
+  description = "ID of the shared runtime-config AppConfig application (from \`core/runtime-config/appconfig.application_id\`). The agent reads its runtime configuration from this application."
+  type        = string
+}
+
+variable "appconfig_application_arn" {
+  description = "ARN of the shared runtime-config AppConfig application (from \`core/runtime-config/appconfig.application_arn\`). Used to scope the IAM read permission granted to the agent runtime."
+  type        = string
+}
+
+module "agent_core_runtime" {
+  source = "../../../core/agent-core"
+  agent_runtime_name = "InMemoryTerraformAgent"
+  docker_image_tag = "proj-in-memory-terraform-agent:latest"
+  server_protocol = "HTTP"
+  enable_vpc = var.enable_vpc
+  vpc_id = var.vpc_id
+  subnet_ids = var.subnet_ids
+
+  env = merge({
+    RUNTIME_CONFIG_APP_ID = var.appconfig_application_id
+  }, var.env)
+  additional_iam_policy_statements = concat([
+    {
+      Effect   = "Allow"
+      Action   = [
+        "appconfig:StartConfigurationSession",
+        "appconfig:GetLatestConfiguration"
+      ]
+      Resource = ["\${var.appconfig_application_arn}/*"]
+    },
+    # Grant access for the agent to invoke bedrock models
+    {
+      Effect = "Allow"
+      Action = [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream"
+      ]
+      Resource = [
+        "arn:aws:bedrock:*:*:foundation-model/*",
+        "arn:aws:bedrock:*:*:inference-profile/*"
+      ]
+    }
+  ], var.additional_iam_policy_statements)
+  tags = var.tags
+}
+
+# Add agent runtime ARN to runtime config
+module "add_agent_runtime_to_runtime_config" {
+  source = "../../../core/runtime-config/entry"
+
+  namespace = "agentcore"
+  key       = "agentRuntimes"
+  value     = { "InMemoryTerraformAgent" = { arn = module.agent_core_runtime.agent_core_runtime_arn } }
+
+  depends_on = [module.agent_core_runtime]
+}
+
+output "agent_core_runtime_role_arn" {
+  description = "ARN of the agent core runtime role"
+  value       = module.agent_core_runtime.agent_core_runtime_role_arn
+}
+
+output "agent_core_runtime_arn" {
+  description = "ARN of the Bedrock Agent Core runtime"
+  value       = module.agent_core_runtime.agent_core_runtime_arn
+}
+
+output "invocation_url" {
+  description = "HTTPS invocation URL of the runtime"
+  value       = module.agent_core_runtime.invocation_url
+}
+
+output "appconfig_application_id" {
+  description = "AppConfig Application ID for runtime config (passthrough of the shared \`appconfig_application_id\` input)."
+  value       = var.appconfig_application_id
+}
+
+output "security_group_id" {
+  description = "Security group ID of the agent core runtime, for use in ingress rules on resources it must reach (e.g. a database). Null unless enable_vpc is true."
+  value       = module.agent_core_runtime.security_group_id
 }
 "
 `;

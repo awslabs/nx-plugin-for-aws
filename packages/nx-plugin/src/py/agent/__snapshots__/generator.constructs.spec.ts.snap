@@ -1,5 +1,328 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`py#agent generator > should create DynamoDB checkpoint table and S3 offload bucket infrastructure when session is dynamodb-s3 > agent-construct.ts (dynamodb-s3) 1`] = `
+"import { Fn, Lazy, Names, RemovalPolicy, Stack } from 'aws-cdk-lib';
+import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import { Connections, IConnectable } from 'aws-cdk-lib/aws-ec2';
+import {
+  BlockPublicAccess,
+  Bucket,
+  BucketEncryption,
+} from 'aws-cdk-lib/aws-s3';
+import { Key } from 'aws-cdk-lib/aws-kms';
+import {
+  CfnDelivery,
+  CfnDeliveryDestination,
+  CfnDeliverySource,
+  LogGroup,
+  RetentionDays,
+} from 'aws-cdk-lib/aws-logs';
+import {
+  AttributeType,
+  BillingMode,
+  Table,
+  TableEncryption,
+} from 'aws-cdk-lib/aws-dynamodb';
+import { Construct } from 'constructs';
+import * as path from 'path';
+import * as url from 'url';
+import {
+  AgentRuntimeArtifact,
+  ProtocolType,
+  Runtime,
+  RuntimeProps,
+} from 'aws-cdk-lib/aws-bedrockagentcore';
+import {
+  PolicyStatement,
+  Effect,
+  ServicePrincipal,
+  IGrantable,
+  IPrincipal,
+  Grant,
+} from 'aws-cdk-lib/aws-iam';
+import { suppressRules } from '../../../core/checkov.js';
+import { RuntimeConfig } from '../../../core/runtime-config.js';
+import { findWorkspaceRoot } from '../../../core/workspace.js';
+
+export type DynamodbAgentProps = Omit<
+  RuntimeProps,
+  | 'runtimeName'
+  | 'protocolConfiguration'
+  | 'agentRuntimeArtifact'
+  | 'authorizerConfiguration'
+> & {
+  /**
+   * Removal policy for the session bucket holding the agent's conversation
+   * history. Defaults to retaining it so a stack \`destroy\` doesn't silently
+   * delete session data — set to \`RemovalPolicy.DESTROY\` for sandbox/CI teardown.
+   *
+   * @default RemovalPolicy.RETAIN
+   */
+  readonly sessionBucketRemovalPolicy?: RemovalPolicy;
+  /**
+   * Whether to enable deletion protection on the session checkpoint table.
+   * Set to \`false\` to allow a stack \`destroy\` to remove it (e.g. for
+   * sandbox/CI teardown).
+   *
+   * @default true
+   */
+  readonly sessionTableDeletionProtection?: boolean;
+  /**
+   * Removal policy for the session checkpoint table.
+   *
+   * @default RemovalPolicy.RETAIN
+   */
+  readonly sessionTableRemovalPolicy?: RemovalPolicy;
+};
+
+export class DynamodbAgent
+  extends Construct
+  implements IGrantable, IConnectable
+{
+  public readonly dockerImage: AgentRuntimeArtifact;
+  public readonly agentCoreRuntime: Runtime;
+  /** Default Gateway target name for this agent. */
+  public readonly agentName = 'dynamodb-agent';
+  /** Inbound auth — a fronting Gateway uses this to pick its outbound credential. */
+  public readonly auth = 'iam';
+
+  constructor(scope: Construct, id: string, props?: DynamodbAgentProps) {
+    super(scope, id);
+
+    const rc = RuntimeConfig.ensure(this);
+
+    // Resolve the bundle output directory containing the Dockerfile and built artifacts
+    const bundleDir = path.join(
+      findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+      'dist/apps/test-project/docker/dynamodb-agent',
+    );
+
+    this.dockerImage = AgentRuntimeArtifact.fromAsset(bundleDir, {
+      platform: Platform.LINUX_ARM64,
+    });
+
+    const {
+      sessionBucketRemovalPolicy = RemovalPolicy.RETAIN,
+      sessionTableDeletionProtection = true,
+      sessionTableRemovalPolicy = RemovalPolicy.RETAIN,
+      ...restProps
+    } = props ?? {};
+
+    const sessionKey = new Key(this, 'SessionKey', {
+      enableKeyRotation: true,
+    });
+
+    // Allow CloudWatch Logs to use the session key for server access log delivery.
+    const stack = Stack.of(this);
+    sessionKey.addToResourcePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        principals: [
+          new ServicePrincipal(\`logs.\${stack.region}.amazonaws.com\`),
+        ],
+        actions: [
+          'kms:Encrypt',
+          'kms:Decrypt',
+          'kms:ReEncrypt*',
+          'kms:GenerateDataKey*',
+          'kms:DescribeKey',
+        ],
+        resources: ['*'],
+        conditions: {
+          ArnLike: {
+            'kms:EncryptionContext:aws:logs:arn': \`arn:aws:logs:\${stack.region}:\${stack.account}:log-group:*\`,
+          },
+        },
+      }),
+    );
+
+    const sessionAccessLogs = new LogGroup(this, 'SessionAccessLogs', {
+      retention: RetentionDays.ONE_YEAR,
+      encryptionKey: sessionKey,
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+
+    const sessionBucket = new Bucket(this, 'SessionBucket', {
+      enforceSSL: true,
+      removalPolicy: sessionBucketRemovalPolicy,
+      encryption: BucketEncryption.KMS,
+      encryptionKey: sessionKey,
+      blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+    });
+    suppressRules(
+      sessionBucket,
+      ['CKV_AWS_21'],
+      'Session data does not need versioning enabled',
+    );
+    suppressRules(
+      sessionBucket,
+      ['CKV2_AWS_61'],
+      'Lifecycle configuration not required for session data',
+    );
+    suppressRules(
+      sessionBucket,
+      ['CKV_AWS_144'],
+      'Cross-region replication not required for session data',
+    );
+    suppressRules(
+      sessionBucket,
+      ['CKV2_AWS_62'],
+      'Event notifications not required for session data',
+    );
+    suppressRules(
+      sessionBucket,
+      ['CKV_AWS_18'],
+      'Server access logs are delivered to CloudWatch Logs',
+    );
+
+    const sessionAccessLogsSource: CfnDeliverySource = new CfnDeliverySource(
+      this,
+      'SessionAccessLogsSource',
+      {
+        name: Lazy.string({
+          produce: () =>
+            Names.uniqueResourceName(sessionAccessLogsSource, {
+              maxLength: 60,
+            }),
+        }),
+        logType: 'S3_SERVER_ACCESS_LOGS',
+        resourceArn: sessionBucket.bucketArn,
+      },
+    );
+    const sessionBucketPolicy = sessionBucket.policy;
+    if (sessionBucketPolicy) {
+      sessionAccessLogsSource.node.addDependency(sessionBucketPolicy);
+    }
+    const sessionAccessLogsDestination: CfnDeliveryDestination =
+      new CfnDeliveryDestination(this, 'SessionAccessLogsDestination', {
+        name: Lazy.string({
+          produce: () =>
+            Names.uniqueResourceName(sessionAccessLogsDestination, {
+              maxLength: 60,
+            }),
+        }),
+        destinationResourceArn: sessionAccessLogs.logGroupArn,
+      });
+    const sessionAccessLogsDelivery = new CfnDelivery(
+      this,
+      'SessionAccessLogsDelivery',
+      {
+        deliverySourceName: sessionAccessLogsSource.name,
+        deliveryDestinationArn: sessionAccessLogsDestination.attrArn,
+      },
+    );
+    sessionAccessLogsDelivery.addDependency(sessionAccessLogsSource);
+
+    // Unified checkpoints/writes table, matching the schema
+    // langgraph_checkpoint_aws.DynamoDBSaver expects (PK/SK, TTL on \`ttl\`).
+    const sessionTable = new Table(this, 'SessionTable', {
+      partitionKey: { name: 'PK', type: AttributeType.STRING },
+      sortKey: { name: 'SK', type: AttributeType.STRING },
+      billingMode: BillingMode.PAY_PER_REQUEST,
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+      timeToLiveAttribute: 'ttl',
+      encryption: TableEncryption.CUSTOMER_MANAGED,
+      encryptionKey: sessionKey,
+      deletionProtection: sessionTableDeletionProtection,
+      removalPolicy: sessionTableRemovalPolicy,
+    });
+
+    this.agentCoreRuntime = new Runtime(this, 'DynamodbAgent', {
+      runtimeName: Lazy.string({
+        produce: () =>
+          Names.uniqueResourceName(this.agentCoreRuntime, { maxLength: 40 }),
+      }),
+      protocolConfiguration: ProtocolType.HTTP,
+      agentRuntimeArtifact: this.dockerImage,
+      ...restProps,
+      environmentVariables: {
+        RUNTIME_CONFIG_APP_ID: rc.appConfigApplicationId,
+        ...restProps?.environmentVariables,
+      },
+    });
+
+    // Grant access for the agent to invoke bedrock models
+    this.agentCoreRuntime.addToRolePolicy(
+      new PolicyStatement({
+        actions: [
+          'bedrock:InvokeModel',
+          'bedrock:InvokeModelWithResponseStream',
+        ],
+        resources: [
+          'arn:aws:bedrock:*:*:foundation-model/*',
+          'arn:aws:bedrock:*:*:inference-profile/*',
+        ],
+      }),
+    );
+
+    sessionTable.grantReadWriteData(this.agentCoreRuntime);
+    sessionBucket.grantReadWrite(this.agentCoreRuntime);
+
+    rc.grantReadAppConfig(this.agentCoreRuntime);
+
+    rc.set('agentcore', 'agentRuntimes', {
+      ...rc.get('agentcore').agentRuntimes,
+      DynamodbAgent: {
+        arn: this.agentCoreRuntime.agentRuntimeArn,
+        session: {
+          tableName: sessionTable.tableName,
+          bucketName: sessionBucket.bucketName,
+        },
+      },
+    });
+  }
+
+  /**
+   * The principal to grant permissions to.
+   */
+  public get grantPrincipal(): IPrincipal {
+    return this.agentCoreRuntime.grantPrincipal;
+  }
+
+  /**
+   * Network connections for this agent runtime.
+   */
+  public get connections(): Connections {
+    return this.agentCoreRuntime.connections;
+  }
+
+  /**
+   * The HTTPS invocation URL of the runtime.
+   */
+  public get invocationUrl(): string {
+    // The URL must URL-encode the runtime ARN (':' -> '%3A', '/' -> '%2F').
+    // The ARN is a CDK token, so encode at deploy time via Fn.join/Fn.split.
+    const encodedArn = Fn.join(
+      '%2F',
+      Fn.split(
+        '/',
+        Fn.join('%3A', Fn.split(':', this.agentCoreRuntime.agentRuntimeArn)),
+      ),
+    );
+    return \`https://bedrock-agentcore.\${Stack.of(this).region}.amazonaws.com/runtimes/\${encodedArn}/invocations?qualifier=DEFAULT\`;
+  }
+
+  /**
+   * Grants IAM permissions to invoke this agent runtime.
+   *
+   * @param grantee - The IAM principal to grant permissions to
+   */
+  public grantInvokeAccess(grantee: IGrantable) {
+    this.agentCoreRuntime.grantInvoke(grantee);
+
+    Grant.addToPrincipal({
+      grantee,
+      actions: ['bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream'],
+      resourceArns: [
+        this.agentCoreRuntime.agentRuntimeArn,
+        \`\${this.agentCoreRuntime.agentRuntimeArn}/*\`,
+      ],
+    });
+  }
+}
+"
+`;
+
 exports[`py#agent generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > agent-Dockerfile 1`] = `
 "FROM public.ecr.aws/docker/library/python:3.14-slim
 
@@ -27,9 +350,22 @@ CMD ["python", "bin/opentelemetry-instrument", "python", "-m", "proj_test_projec
 `;
 
 exports[`py#agent generator > should match snapshot for BedrockAgentCoreRuntime generated constructs files > agent-construct.ts 1`] = `
-"import { Fn, Lazy, Names, Stack } from 'aws-cdk-lib';
+"import { Fn, Lazy, Names, RemovalPolicy, Stack } from 'aws-cdk-lib';
 import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { Connections, IConnectable } from 'aws-cdk-lib/aws-ec2';
+import {
+  BlockPublicAccess,
+  Bucket,
+  BucketEncryption,
+} from 'aws-cdk-lib/aws-s3';
+import { Key } from 'aws-cdk-lib/aws-kms';
+import {
+  CfnDelivery,
+  CfnDeliveryDestination,
+  CfnDeliverySource,
+  LogGroup,
+  RetentionDays,
+} from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
 import * as path from 'path';
 import * as url from 'url';
@@ -41,10 +377,13 @@ import {
 } from 'aws-cdk-lib/aws-bedrockagentcore';
 import {
   PolicyStatement,
+  Effect,
+  ServicePrincipal,
   IGrantable,
   IPrincipal,
   Grant,
 } from 'aws-cdk-lib/aws-iam';
+import { suppressRules } from '../../../core/checkov.js';
 import { RuntimeConfig } from '../../../core/runtime-config.js';
 import { findWorkspaceRoot } from '../../../core/workspace.js';
 
@@ -54,7 +393,16 @@ export type SnapshotBedrockAgentProps = Omit<
   | 'protocolConfiguration'
   | 'agentRuntimeArtifact'
   | 'authorizerConfiguration'
->;
+> & {
+  /**
+   * Removal policy for the session bucket holding the agent's conversation
+   * history. Defaults to retaining it so a stack \`destroy\` doesn't silently
+   * delete session data — set to \`RemovalPolicy.DESTROY\` for sandbox/CI teardown.
+   *
+   * @default RemovalPolicy.RETAIN
+   */
+  readonly sessionBucketRemovalPolicy?: RemovalPolicy;
+};
 
 export class SnapshotBedrockAgent
   extends Construct
@@ -82,6 +430,114 @@ export class SnapshotBedrockAgent
       platform: Platform.LINUX_ARM64,
     });
 
+    const { sessionBucketRemovalPolicy = RemovalPolicy.RETAIN, ...restProps } =
+      props ?? {};
+
+    const sessionKey = new Key(this, 'SessionKey', {
+      enableKeyRotation: true,
+    });
+
+    // Allow CloudWatch Logs to use the session key for server access log delivery.
+    const stack = Stack.of(this);
+    sessionKey.addToResourcePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        principals: [
+          new ServicePrincipal(\`logs.\${stack.region}.amazonaws.com\`),
+        ],
+        actions: [
+          'kms:Encrypt',
+          'kms:Decrypt',
+          'kms:ReEncrypt*',
+          'kms:GenerateDataKey*',
+          'kms:DescribeKey',
+        ],
+        resources: ['*'],
+        conditions: {
+          ArnLike: {
+            'kms:EncryptionContext:aws:logs:arn': \`arn:aws:logs:\${stack.region}:\${stack.account}:log-group:*\`,
+          },
+        },
+      }),
+    );
+
+    const sessionAccessLogs = new LogGroup(this, 'SessionAccessLogs', {
+      retention: RetentionDays.ONE_YEAR,
+      encryptionKey: sessionKey,
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+
+    const sessionBucket = new Bucket(this, 'SessionBucket', {
+      enforceSSL: true,
+      removalPolicy: sessionBucketRemovalPolicy,
+      encryption: BucketEncryption.KMS,
+      encryptionKey: sessionKey,
+      blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+    });
+    suppressRules(
+      sessionBucket,
+      ['CKV_AWS_21'],
+      'Session data does not need versioning enabled',
+    );
+    suppressRules(
+      sessionBucket,
+      ['CKV2_AWS_61'],
+      'Lifecycle configuration not required for session data',
+    );
+    suppressRules(
+      sessionBucket,
+      ['CKV_AWS_144'],
+      'Cross-region replication not required for session data',
+    );
+    suppressRules(
+      sessionBucket,
+      ['CKV2_AWS_62'],
+      'Event notifications not required for session data',
+    );
+    suppressRules(
+      sessionBucket,
+      ['CKV_AWS_18'],
+      'Server access logs are delivered to CloudWatch Logs',
+    );
+
+    const sessionAccessLogsSource: CfnDeliverySource = new CfnDeliverySource(
+      this,
+      'SessionAccessLogsSource',
+      {
+        name: Lazy.string({
+          produce: () =>
+            Names.uniqueResourceName(sessionAccessLogsSource, {
+              maxLength: 60,
+            }),
+        }),
+        logType: 'S3_SERVER_ACCESS_LOGS',
+        resourceArn: sessionBucket.bucketArn,
+      },
+    );
+    const sessionBucketPolicy = sessionBucket.policy;
+    if (sessionBucketPolicy) {
+      sessionAccessLogsSource.node.addDependency(sessionBucketPolicy);
+    }
+    const sessionAccessLogsDestination: CfnDeliveryDestination =
+      new CfnDeliveryDestination(this, 'SessionAccessLogsDestination', {
+        name: Lazy.string({
+          produce: () =>
+            Names.uniqueResourceName(sessionAccessLogsDestination, {
+              maxLength: 60,
+            }),
+        }),
+        destinationResourceArn: sessionAccessLogs.logGroupArn,
+      });
+    const sessionAccessLogsDelivery = new CfnDelivery(
+      this,
+      'SessionAccessLogsDelivery',
+      {
+        deliverySourceName: sessionAccessLogsSource.name,
+        deliveryDestinationArn: sessionAccessLogsDestination.attrArn,
+      },
+    );
+    sessionAccessLogsDelivery.addDependency(sessionAccessLogsSource);
+
     this.agentCoreRuntime = new Runtime(this, 'SnapshotBedrockAgent', {
       runtimeName: Lazy.string({
         produce: () =>
@@ -89,10 +545,10 @@ export class SnapshotBedrockAgent
       }),
       protocolConfiguration: ProtocolType.HTTP,
       agentRuntimeArtifact: this.dockerImage,
-      ...props,
+      ...restProps,
       environmentVariables: {
         RUNTIME_CONFIG_APP_ID: rc.appConfigApplicationId,
-        ...props?.environmentVariables,
+        ...restProps?.environmentVariables,
       },
     });
 
@@ -110,12 +566,17 @@ export class SnapshotBedrockAgent
       }),
     );
 
+    sessionBucket.grantReadWrite(this.agentCoreRuntime);
+
     rc.grantReadAppConfig(this.agentCoreRuntime);
 
     rc.set('agentcore', 'agentRuntimes', {
       ...rc.get('agentcore').agentRuntimes,
       SnapshotBedrockAgent: {
         arn: this.agentCoreRuntime.agentRuntimeArn,
+        session: {
+          bucketName: sessionBucket.bucketName,
+        },
       },
     });
   }
@@ -195,9 +656,11 @@ exports[`py#agent generator > should match snapshot for generated files > agent-
 exports[`py#agent generator > should match snapshot for generated files > agent-agent.py 1`] = `
 "from contextlib import contextmanager
 
-from proj_agent_connection import log_model_errors
+from proj_agent_connection import log_model_errors, log_tool_errors
 from strands import Agent, tool
 from strands_tools import current_time
+
+from .session import get_session_manager
 
 
 @tool
@@ -216,7 +679,8 @@ Use your tools for mathematical tasks.
 Refer to tools as your 'spellbook'.
 """,
         tools=[subtract, current_time],
-        hooks=[log_model_errors],
+        hooks=[log_model_errors, log_tool_errors],
+        session_manager=get_session_manager(),
     )
 "
 `;
@@ -322,5 +786,150 @@ dev-dependencies = [ ]
 
 [tool.uv.sources.proj-agent-connection]
 workspace = true
+"
+`;
+
+exports[`py#agent generator > should not create session bucket infrastructure when session is in-memory > agent-construct.ts (in-memory) 1`] = `
+"import { Fn, Lazy, Names, Stack } from 'aws-cdk-lib';
+import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import { Connections, IConnectable } from 'aws-cdk-lib/aws-ec2';
+import { Construct } from 'constructs';
+import * as path from 'path';
+import * as url from 'url';
+import {
+  AgentRuntimeArtifact,
+  ProtocolType,
+  Runtime,
+  RuntimeProps,
+} from 'aws-cdk-lib/aws-bedrockagentcore';
+import {
+  PolicyStatement,
+  IGrantable,
+  IPrincipal,
+  Grant,
+} from 'aws-cdk-lib/aws-iam';
+import { RuntimeConfig } from '../../../core/runtime-config.js';
+import { findWorkspaceRoot } from '../../../core/workspace.js';
+
+export type InMemoryAgentProps = Omit<
+  RuntimeProps,
+  | 'runtimeName'
+  | 'protocolConfiguration'
+  | 'agentRuntimeArtifact'
+  | 'authorizerConfiguration'
+>;
+
+export class InMemoryAgent
+  extends Construct
+  implements IGrantable, IConnectable
+{
+  public readonly dockerImage: AgentRuntimeArtifact;
+  public readonly agentCoreRuntime: Runtime;
+  /** Default Gateway target name for this agent. */
+  public readonly agentName = 'in-memory-agent';
+  /** Inbound auth — a fronting Gateway uses this to pick its outbound credential. */
+  public readonly auth = 'iam';
+
+  constructor(scope: Construct, id: string, props?: InMemoryAgentProps) {
+    super(scope, id);
+
+    const rc = RuntimeConfig.ensure(this);
+
+    // Resolve the bundle output directory containing the Dockerfile and built artifacts
+    const bundleDir = path.join(
+      findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+      'dist/apps/test-project/docker/in-memory-agent',
+    );
+
+    this.dockerImage = AgentRuntimeArtifact.fromAsset(bundleDir, {
+      platform: Platform.LINUX_ARM64,
+    });
+
+    this.agentCoreRuntime = new Runtime(this, 'InMemoryAgent', {
+      runtimeName: Lazy.string({
+        produce: () =>
+          Names.uniqueResourceName(this.agentCoreRuntime, { maxLength: 40 }),
+      }),
+      protocolConfiguration: ProtocolType.HTTP,
+      agentRuntimeArtifact: this.dockerImage,
+      ...props,
+      environmentVariables: {
+        RUNTIME_CONFIG_APP_ID: rc.appConfigApplicationId,
+        ...props?.environmentVariables,
+      },
+    });
+
+    // Grant access for the agent to invoke bedrock models
+    this.agentCoreRuntime.addToRolePolicy(
+      new PolicyStatement({
+        actions: [
+          'bedrock:InvokeModel',
+          'bedrock:InvokeModelWithResponseStream',
+        ],
+        resources: [
+          'arn:aws:bedrock:*:*:foundation-model/*',
+          'arn:aws:bedrock:*:*:inference-profile/*',
+        ],
+      }),
+    );
+
+    rc.grantReadAppConfig(this.agentCoreRuntime);
+
+    rc.set('agentcore', 'agentRuntimes', {
+      ...rc.get('agentcore').agentRuntimes,
+      InMemoryAgent: {
+        arn: this.agentCoreRuntime.agentRuntimeArn,
+      },
+    });
+  }
+
+  /**
+   * The principal to grant permissions to.
+   */
+  public get grantPrincipal(): IPrincipal {
+    return this.agentCoreRuntime.grantPrincipal;
+  }
+
+  /**
+   * Network connections for this agent runtime.
+   */
+  public get connections(): Connections {
+    return this.agentCoreRuntime.connections;
+  }
+
+  /**
+   * The HTTPS invocation URL of the runtime.
+   */
+  public get invocationUrl(): string {
+    // The URL must URL-encode the runtime ARN (':' -> '%3A', '/' -> '%2F').
+    // The ARN is a CDK token, so encode at deploy time via Fn.join/Fn.split.
+    const encodedArn = Fn.join(
+      '%2F',
+      Fn.split(
+        '/',
+        Fn.join('%3A', Fn.split(':', this.agentCoreRuntime.agentRuntimeArn)),
+      ),
+    );
+    return \`https://bedrock-agentcore.\${Stack.of(this).region}.amazonaws.com/runtimes/\${encodedArn}/invocations?qualifier=DEFAULT\`;
+  }
+
+  /**
+   * Grants IAM permissions to invoke this agent runtime.
+   *
+   * @param grantee - The IAM principal to grant permissions to
+   */
+  public grantInvokeAccess(grantee: IGrantable) {
+    this.agentCoreRuntime.grantInvoke(grantee);
+
+    Grant.addToPrincipal({
+      grantee,
+      actions: ['bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream'],
+      resourceArns: [
+        this.agentCoreRuntime.agentRuntimeArn,
+        \`\${this.agentCoreRuntime.agentRuntimeArn}/*\`,
+      ],
+    });
+  }
+}
 "
 `;

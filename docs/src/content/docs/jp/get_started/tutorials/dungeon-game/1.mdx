@@ -1,6 +1,6 @@
 ---
 title: モノレポのセットアップ
-description: "@aws/nx-pluginを使用してエージェント型AI搭載のダンジョンアドベンチャーゲームを構築する方法のチュートリアル。"
+description: "@aws/nx-pluginを使用してエージェント型AI駆動のダンジョンアドベンチャーゲームを構築する方法のウォークスルー。"
 ---
 
 import { Aside, Code, FileTree, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
@@ -24,7 +24,7 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 ## タスク1: モノレポの作成
 
-新しいモノレポを作成するには、目的のディレクトリ内で次のコマンドを実行します:
+新しいモノレポを作成するには、目的のディレクトリ内から次のコマンドを実行します:
 
 <CreateNxWorkspaceCommand workspace="dungeon-adventure" iac="cdk" />
 
@@ -32,7 +32,7 @@ import gameConversationPng from '@assets/game-conversation.png'
 このチュートリアルではインフラストラクチャをコードとして管理するためにCDKを使用するため、`--iac=cdk`を使用します。Nx Plugin for AWSは`terraform`もサポートしています。
 :::
 
-これにより、`dungeon-adventure`ディレクトリ内にNXモノレポがセットアップされます。VSCodeでディレクトリを開くと、次のファイル構造が表示されます：
+これにより、`dungeon-adventure`ディレクトリ内にNXモノレポがセットアップされます。VSCodeでディレクトリを開くと、次のファイル構造が表示されます:
 
 <FileTree>
 - .nx/
@@ -51,7 +51,7 @@ import gameConversationPng from '@assets/game-conversation.png'
 - aws-nx-plugin.config.mts Nx Plugin for AWSの設定
 </FileTree>
 
-<Aside type="tip" title="こまめにコミット">ジェネレーターを実行する前に、すべてのステージングされていないファイルをGitにコミットすることがベストプラクティスです。これにより、ジェネレーター実行後に`git diff`で何が変更されたかを確認できます。</Aside>
+<Aside type="tip" title="頻繁にコミット">ジェネレーターを実行する前に、ステージングされていないすべてのファイルがGitにコミットされていることを確認するのがベストプラクティスです。これにより、`git diff`を使用してジェネレーター実行後の変更を確認できます。</Aside>
 
 ## タスク2: Dungeon Adventure Gameのスキャフォールディング
 
@@ -198,6 +198,7 @@ import {
   FunctionProps,
   Tracing,
 } from 'aws-cdk-lib/aws-lambda';
+import { RuntimeConfig } from '../../core/runtime-config.js';
 import {
   AuthorizationType,
   LambdaIntegration,
@@ -213,6 +214,7 @@ import {
   Grant,
 } from 'aws-cdk-lib/aws-iam';
 import {
+  ApiIntegrations,
   IntegrationBuilder,
   RestApiIntegration,
 } from '../../core/api/utils.js';
@@ -230,12 +232,18 @@ type Operations = Procedures<AppRouter>;
  * @template TIntegrations - Map of operation names to their integrations
  */
 export interface GameApiProps<
-  TIntegrations extends Record<Operations, RestApiIntegration>,
+  TIntegrations extends ApiIntegrations<Operations, RestApiIntegration>,
 > {
   /**
    * Map of operation names to their API Gateway integrations
    */
   integrations: TIntegrations;
+  /**
+   * Whether to enable AWS WAFv2 with the default managed ruleset on the API's default stage.
+   *
+   * @default true
+   */
+  enableWaf?: boolean;
 }
 
 /**
@@ -244,7 +252,7 @@ export interface GameApiProps<
  * @template TIntegrations - Map of operation names to their integrations
  */
 export class GameApi<
-  TIntegrations extends Record<Operations, RestApiIntegration>,
+  TIntegrations extends ApiIntegrations<Operations, RestApiIntegration>,
 > extends RestApi<Operations, TIntegrations> {
   private allowedOrigins: readonly string[] = ['*'];
 
@@ -256,7 +264,9 @@ export class GameApi<
    * @returns An IntegrationBuilder with default lambda integrations
    */
   public static defaultIntegrations = (scope: Construct) => {
+    const rc = RuntimeConfig.ensure(scope);
     return IntegrationBuilder.rest({
+      pattern: 'isolated',
       operations: routerToOperations(appRouter),
       defaultIntegrationOptions: {
         runtime: Runtime.NODEJS_LATEST,
@@ -274,6 +284,8 @@ export class GameApi<
       } as FunctionProps,
       buildDefaultIntegration: (op, props: FunctionProps) => {
         const handler = new Function(scope, `GameApi${op}Handler`, props);
+        handler.addEnvironment('RUNTIME_CONFIG_APP_ID', rc.appConfigApplicationId);
+        rc.grantReadAppConfig(handler);
         return {
           handler,
           integration: new LambdaIntegration(handler, {
@@ -439,6 +451,7 @@ Pythonプロジェクトを作成するには：
       - agent/
         - main.py Bedrock AgentCore Runtimeでのエージェントのエントリーポイント
         - agent.py サンプルエージェントとツールを定義
+        - session.py 会話状態を永続化するためのSessionManagerを解決
         - Dockerfile AgentCore Runtimeへのデプロイ用のDockerイメージを定義
   - common/constructs/
     - src
@@ -454,6 +467,7 @@ from contextlib import contextmanager
 
 from strands import Agent, tool
 from strands_tools import current_time
+from dungeon_adventure_agent_connection import log_model_errors, log_tool_errors
 
 
 @tool
@@ -465,17 +479,18 @@ def subtract(a: int, b: int) -> int:
 def get_agent():
     yield Agent(
         name="StoryAgent",
-        description="StoryAgent Agent",
+        description="StoryAgent Strands Agent",
         system_prompt="""
 You are a mathematical wizard.
 Use your tools for mathematical tasks.
 Refer to tools as your 'spellbook'.
 """,
         tools=[subtract, current_time],
+        hooks=[log_model_errors, log_tool_errors],
     )
 ```
 
-これはサンプルのStrandsエージェントを作成し、減算ツールを定義します。
+これはサンプルのStrandsエージェントを作成し、減算ツールを定義します。`log_model_errors`と`log_tool_errors`は、共有の`dungeon_adventure_agent_connection`プロジェクトのフックで、モデル/ツールの失敗を黙って失敗させるのではなく、ログに記録します。
 
 ```python
 # agent/main.py
@@ -485,7 +500,7 @@ from contextlib import asynccontextmanager
 
 from ag_ui.core import EventType, RunAgentInput, RunErrorEvent
 from ag_ui.encoder import EventEncoder
-from ag_ui_strands import StrandsAgent
+from ag_ui_strands import StrandsAgent, StrandsAgentConfig
 from dungeon_adventure_agent_connection import get_current_session_id, session_id_context
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -493,6 +508,7 @@ from fastapi.responses import StreamingResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from .agent import get_agent
+from .session import get_session_manager
 
 logging.basicConfig(level=logging.INFO)
 
@@ -506,6 +522,9 @@ async def lifespan(app: FastAPI):
             agent=agent,
             name="StoryAgent",
             description="A Strands Agent exposed via the AG-UI protocol.",
+            # A per-thread session manager, not the template Agent's own, since
+            # AG-UI caches one Strands agent per thread_id.
+            config=StrandsAgentConfig(session_manager_provider=lambda _input_data: get_session_manager()),
         )
         yield
 
@@ -570,14 +589,27 @@ async def ping():
     return {"status": "healthy"}
 ```
 
-これはエージェントのエントリーポイントです。`--protocol=ag-ui`を選択したため、ジェネレーターは[`ag_ui_strands`](https://docs.copilotkit.ai/aws-strands/integration)の`StrandsAgent`でStrandsの`Agent`をラップし、[AG-UIプロトコル](https://docs.copilotkit.ai/aws-strands/protocol)を話すFastAPIアプリにマウントします。これがReactウェブサイトからCopilotKitが通信する相手です。エージェントは`lifespan`ハンドラー内で構築されます（インポート時ではありません）。これにより、コンテナの起動（モジュールのインポートではなく）が構築を所有し、各AgentCoreセッションが独自のコンテナを取得します。`_SessionIdMiddleware`は、インバウンドのAgentCoreランタイムセッションIDを`ContextVar`にバインドするため、後で配線する下流のMCP/A2Aクライアント（<Link path="jp/get_started/tutorials/dungeon-game/2">モジュール2</Link>のInventory MCPサーバーなど）が、アウトバウンド呼び出しで自動的に転送します。<Link path="jp/get_started/tutorials/dungeon-game/3">モジュール3</Link>では、各スレッドIDが独自の`S3SessionManager`を取得し、会話履歴がターン間で永続化されるように、`session_manager_provider`も追加します。
+これはエージェントのエントリーポイントです。`--protocol=ag-ui`を選択したため、ジェネレーターは[`ag_ui_strands`](https://docs.copilotkit.ai/aws-strands/integration)の`StrandsAgent`でStrandsの`Agent`をラップし、[AG-UIプロトコル](https://docs.copilotkit.ai/aws-strands/protocol)を話すFastAPIアプリにマウントします。これがReactウェブサイトからCopilotKitが通信する相手です。エージェントは`lifespan`ハンドラー内で構築されます（インポート時ではありません）。これにより、コンテナの起動（モジュールのインポートではなく）が構築を所有し、各AgentCoreセッションが独自のコンテナを取得します。`_SessionIdMiddleware`は、インバウンドのAgentCoreランタイムセッションIDを`ContextVar`にバインドするため、後で配線する下流のMCP/A2Aクライアント（<Link path="jp/get_started/tutorials/dungeon-game/2">モジュール2</Link>のInventory MCPサーバーなど）が、アウトバウンド呼び出しで自動的に転送します。AG-UIは`thread_id`ごとに1つのStrandsエージェントをキャッシュするため、テンプレートエージェント自身のセッションマネージャーではなく、`session_manager_provider`をプラグインします。これにより、各スレッドが独自の`SessionManager`を取得し、会話履歴がターン間で永続化されます。その`get_session_manager()`関数は、生成された`session.py`の兄弟から来ています：デプロイされると、ジェネレーターが自動的にプロビジョニングするS3バケットに支えられた`strands.session.S3SessionManager`を返します。`agent-dev`（`LOCAL_DEV=true`）では、デプロイされた設定に関係なく、常にローカルの一時ディレクトリに書き込む`FileSessionManager`を返します。
 
 ```ts
-// common/constructs/src/app/agents/story-agent.ts
-import { Lazy, Names } from 'aws-cdk-lib';
+// common/constructs/src/app/agents/story-agent/story-agent.ts
+import { Fn, Lazy, Names, RemovalPolicy, Stack } from 'aws-cdk-lib';
 import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import { Connections, IConnectable } from 'aws-cdk-lib/aws-ec2';
+import {
+  BlockPublicAccess,
+  Bucket,
+  BucketEncryption,
+} from 'aws-cdk-lib/aws-s3';
+import { Key } from 'aws-cdk-lib/aws-kms';
+import {
+  CfnDelivery,
+  CfnDeliveryDestination,
+  CfnDeliverySource,
+  LogGroup,
+  RetentionDays,
+} from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
-import { execSync } from 'child_process';
 import * as path from 'path';
 import * as url from 'url';
 import {
@@ -585,31 +617,177 @@ import {
   ProtocolType,
   Runtime,
   RuntimeProps,
+  RuntimeAuthorizerConfiguration,
 } from 'aws-cdk-lib/aws-bedrockagentcore';
-import { IGrantable, IPrincipal } from 'aws-cdk-lib/aws-iam';
+import {
+  PolicyStatement,
+  Effect,
+  ServicePrincipal,
+  IGrantable,
+  IPrincipal,
+} from 'aws-cdk-lib/aws-iam';
+import { IUserPool, IUserPoolClient } from 'aws-cdk-lib/aws-cognito';
+import { suppressRules } from '../../../core/checkov.js';
+import { RuntimeConfig } from '../../../core/runtime-config.js';
+import { findWorkspaceRoot } from '../../../core/workspace.js';
 
 export type StoryAgentProps = Omit<
   RuntimeProps,
-  'runtimeName' | 'protocolConfiguration' | 'agentRuntimeArtifact'
->;
+  | 'runtimeName'
+  | 'protocolConfiguration'
+  | 'agentRuntimeArtifact'
+  | 'authorizerConfiguration'
+> & {
+  /**
+   * Identity details for Cognito Authentication
+   */
+  identity: {
+    userPool: IUserPool;
+    userPoolClient: IUserPoolClient;
+  };
+  /**
+   * Removal policy for the session bucket holding the agent's conversation
+   * history. Defaults to retaining it so a stack `destroy` doesn't silently
+   * delete session data — set to `RemovalPolicy.DESTROY` for sandbox/CI teardown.
+   *
+   * @default RemovalPolicy.RETAIN
+   */
+  readonly sessionBucketRemovalPolicy?: RemovalPolicy;
+};
 
-export class StoryAgent extends Construct implements IGrantable {
+export class StoryAgent extends Construct implements IGrantable, IConnectable {
   public readonly dockerImage: AgentRuntimeArtifact;
   public readonly agentCoreRuntime: Runtime;
+  /** Default Gateway target name for this agent. */
+  public readonly agentName = 'story-agent';
+  /** Inbound auth — a fronting Gateway uses this to pick its outbound credential. */
+  public readonly auth = 'cognito';
 
-  constructor(scope: Construct, id: string, props?: StoryAgentProps) {
+  constructor(scope: Construct, id: string, props: StoryAgentProps) {
     super(scope, id);
 
-    this.dockerImage = AgentRuntimeArtifact.fromAsset(
-      path.dirname(url.fileURLToPath(new URL(import.meta.url))),
+    const rc = RuntimeConfig.ensure(this);
+
+    // Resolve the bundle output directory containing the Dockerfile and built artifacts
+    const bundleDir = path.join(
+      findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+      'dist/packages/story/docker/story-agent',
+    );
+
+    this.dockerImage = AgentRuntimeArtifact.fromAsset(bundleDir, {
+      platform: Platform.LINUX_ARM64,
+    });
+
+    const {
+      identity,
+      sessionBucketRemovalPolicy = RemovalPolicy.RETAIN,
+      ...restProps
+    } = props ?? {};
+
+    const sessionKey = new Key(this, 'SessionKey', {
+      enableKeyRotation: true,
+    });
+
+    // Allow CloudWatch Logs to use the session key for server access log delivery.
+    const stack = Stack.of(this);
+    sessionKey.addToResourcePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        principals: [
+          new ServicePrincipal(`logs.${stack.region}.amazonaws.com`),
+        ],
+        actions: [
+          'kms:Encrypt',
+          'kms:Decrypt',
+          'kms:ReEncrypt*',
+          'kms:GenerateDataKey*',
+          'kms:DescribeKey',
+        ],
+        resources: ['*'],
+        conditions: {
+          ArnLike: {
+            'kms:EncryptionContext:aws:logs:arn': `arn:aws:logs:${stack.region}:${stack.account}:log-group:*`,
+          },
+        },
+      }),
+    );
+
+    const sessionAccessLogs = new LogGroup(this, 'SessionAccessLogs', {
+      retention: RetentionDays.ONE_YEAR,
+      encryptionKey: sessionKey,
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+
+    const sessionBucket = new Bucket(this, 'SessionBucket', {
+      enforceSSL: true,
+      removalPolicy: sessionBucketRemovalPolicy,
+      encryption: BucketEncryption.KMS,
+      encryptionKey: sessionKey,
+      blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+    });
+    suppressRules(
+      sessionBucket,
+      ['CKV_AWS_21'],
+      'Session data does not need versioning enabled',
+    );
+    suppressRules(
+      sessionBucket,
+      ['CKV2_AWS_61'],
+      'Lifecycle configuration not required for session data',
+    );
+    suppressRules(
+      sessionBucket,
+      ['CKV_AWS_144'],
+      'Cross-region replication not required for session data',
+    );
+    suppressRules(
+      sessionBucket,
+      ['CKV2_AWS_62'],
+      'Event notifications not required for session data',
+    );
+    suppressRules(
+      sessionBucket,
+      ['CKV_AWS_18'],
+      'Server access logs are delivered to CloudWatch Logs',
+    );
+
+    const sessionAccessLogsSource: CfnDeliverySource = new CfnDeliverySource(
+      this,
+      'SessionAccessLogsSource',
       {
-        platform: Platform.LINUX_ARM64,
-        extraHash: execSync(
-          `docker inspect dungeon-adventure-story-agent:latest --format '{{.Id}}'`,
-          { encoding: 'utf-8' },
-        ).trim(),
+        name: Lazy.string({
+          produce: () =>
+            Names.uniqueResourceName(sessionAccessLogsSource, {
+              maxLength: 60,
+            }),
+        }),
+        logType: 'S3_SERVER_ACCESS_LOGS',
+        resourceArn: sessionBucket.bucketArn,
       },
     );
+    const sessionBucketPolicy = sessionBucket.policy;
+    if (sessionBucketPolicy) {
+      sessionAccessLogsSource.node.addDependency(sessionBucketPolicy);
+    }
+    const sessionAccessLogsDestination: CfnDeliveryDestination =
+      new CfnDeliveryDestination(this, 'SessionAccessLogsDestination', {
+        name: Lazy.string({
+          produce: () =>
+            Names.uniqueResourceName(sessionAccessLogsDestination, {
+              maxLength: 60,
+            }),
+        }),
+        destinationResourceArn: sessionAccessLogs.logGroupArn,
+      });
+    const sessionAccessLogsDelivery = new CfnDelivery(
+      this,
+      'SessionAccessLogsDelivery',
+      {
+        deliverySourceName: sessionAccessLogsSource.name,
+        deliveryDestinationArn: sessionAccessLogsDestination.attrArn,
+      },
+    );
+    sessionAccessLogsDelivery.addDependency(sessionAccessLogsSource);
 
     this.agentCoreRuntime = new Runtime(this, 'StoryAgent', {
       runtimeName: Lazy.string({
@@ -618,17 +796,88 @@ export class StoryAgent extends Construct implements IGrantable {
       }),
       protocolConfiguration: ProtocolType.HTTP,
       agentRuntimeArtifact: this.dockerImage,
-      ...props,
+      authorizerConfiguration: RuntimeAuthorizerConfiguration.usingCognito(
+        identity.userPool,
+        [identity.userPoolClient],
+      ),
+      // Receive the caller's Authorization header (validated by the authorizer).
+      requestHeaderConfiguration: {
+        allowlistedHeaders: ['Authorization'],
+      },
+      ...restProps,
+      environmentVariables: {
+        RUNTIME_CONFIG_APP_ID: rc.appConfigApplicationId,
+        ...restProps?.environmentVariables,
+      },
+    });
+
+    // Grant access for the agent to invoke bedrock models
+    this.agentCoreRuntime.addToRolePolicy(
+      new PolicyStatement({
+        actions: [
+          'bedrock:InvokeModel',
+          'bedrock:InvokeModelWithResponseStream',
+        ],
+        resources: [
+          'arn:aws:bedrock:*:*:foundation-model/*',
+          'arn:aws:bedrock:*:*:inference-profile/*',
+        ],
+      }),
+    );
+
+    sessionBucket.grantReadWrite(this.agentCoreRuntime);
+
+    rc.grantReadAppConfig(this.agentCoreRuntime);
+
+    rc.set('agentcore', 'agentRuntimes', {
+      ...rc.get('agentcore').agentRuntimes,
+      StoryAgent: {
+        arn: this.agentCoreRuntime.agentRuntimeArn,
+        session: {
+          bucketName: sessionBucket.bucketName,
+        },
+      },
+    });
+
+    rc.set('connection', 'agentRuntimes', {
+      ...rc.get('connection').agentRuntimes,
+      StoryAgent: this.agentCoreRuntime.agentRuntimeArn,
     });
   }
 
+  /**
+   * The principal to grant permissions to.
+   */
   public get grantPrincipal(): IPrincipal {
     return this.agentCoreRuntime.grantPrincipal;
+  }
+
+  /**
+   * Network connections for this agent runtime.
+   */
+  public get connections(): Connections {
+    return this.agentCoreRuntime.connections;
+  }
+
+  /**
+   * The HTTPS invocation URL of the runtime.
+   */
+  public get invocationUrl(): string {
+    // The URL must URL-encode the runtime ARN (':' -> '%3A', '/' -> '%2F').
+    // The ARN is a CDK token, so encode at deploy time via Fn.join/Fn.split.
+    const encodedArn = Fn.join(
+      '%2F',
+      Fn.split(
+        '/',
+        Fn.join('%3A', Fn.split(':', this.agentCoreRuntime.agentRuntimeArn)),
+      ),
+    );
+    return `https://bedrock-agentcore.${Stack.of(this).region}.amazonaws.com/runtimes/${encodedArn}/invocations?qualifier=DEFAULT`;
   }
 }
 ```
 
-これは、エージェントのDockerイメージをECRにアップロードし、AgentCore Runtimeを使用してホストするCDK `AgentRuntimeArtifact`を設定します。
+これは、エージェントのDockerイメージをECRにアップロードし、AgentCore Runtimeを使用してホストするCDK `AgentRuntimeArtifact`を設定します。`--auth=cognito`を選択したため、コンストラクトはユーザープール/クライアントIDを必要とし、Cognitoを介してAgentCore Runtime呼び出しを認可し、呼び出し元の`Authorization`ヘッダーを転送します。また、Story Agentの`session.py`が実行時に読み取るセッションバケット（CloudWatch Logsに配信されるサーバーアクセスログを持つKMS暗号化されたS3バケット）をプロビジョニングし、エージェントに読み取り/書き込みアクセスを許可し、Bedrockモデルを呼び出すアクセスを許可し、そのARNとバケット名を`RuntimeConfig`に登録して、エージェント（実行時、AppConfig経由）とGame API（synth時、`invocationUrl`経由）の両方が見つけられるようにします。
 
 追加の`Dockerfile`があることに気付くかもしれません。これは`story`プロジェクトのDockerイメージを参照しており、Dockerfileとエージェントのソースコードを同じ場所に配置できます。
 

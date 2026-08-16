@@ -1,6 +1,6 @@
 ---
 title: Implémenter l'API Game et le serveur MCP Inventory
-description: Un guide détaillé pour créer un jeu d'aventure de donjon alimenté par une IA agentique en utilisant @aws/nx-plugin.
+description: Un guide détaillé pour construire un jeu d'aventure en donjon alimenté par une IA agentique en utilisant @aws/nx-plugin.
 ---
 
 import { Aside, Code, FileTree, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
@@ -35,7 +35,7 @@ Nous allons implémenter les API suivantes dans cette section :
 
 :::note[Où chaque élément d'état réside]
 - `games` et `inventory` sont dans **DynamoDB** (via ElectroDB) — les lambdas de l'API Game et le serveur MCP Inventory les lisent/écrivent.
-- `actions` (transcription du chat) est dans **S3** — le `S3SessionManager` du Story Agent écrit un blob JSON par tour, et `queryActions` dans l'API Game les relit pour que l'interface utilisateur puisse rejouer l'historique lors du rechargement de la page. Il n'y a pas de procédure `saveAction` ; l'agent est le seul écrivain.
+- `actions` (transcription du chat) est dans **S3** — le `S3SessionManager` du Story Agent écrit un blob JSON par tour, et `queryActions` dans l'API Game les relit pour que l'interface utilisateur puisse rejouer l'historique lors du rechargement de la page. Il n'y a pas de procédure `saveAction` ; l'agent est le seul rédacteur.
 :::
 
 ### Schéma de l'API
@@ -126,13 +126,13 @@ Après avoir défini nos procédures, pour les intégrer dans notre API, mettez 
 
 Créons un serveur MCP qui permettra à notre agent de gérer les objets dans l'inventaire d'un joueur.
 
-Nous définirons les outils suivants pour notre agent :
+Nous allons définir les outils suivants pour notre agent :
 
 - `list-inventory-items` pour récupérer les objets actuels de l'inventaire du joueur
 - `add-to-inventory` pour ajouter des objets à l'inventaire du joueur
 - `remove-from-inventory` pour retirer des objets de l'inventaire du joueur
 
-Pour gagner du temps, nous définirons tous les outils en ligne :
+Pour gagner du temps, nous allons définir tous les outils en ligne :
 
 <Tabs>
   <TabItem label="packages/inventory/src/mcp-server/server.ts">
@@ -140,22 +140,30 @@ Pour gagner du temps, nous définirons tous les outils en ligne :
 </TabItem>
 </Tabs>
 
-À mesure que le nombre d'outils augmente, vous pouvez les refactoriser dans des fichiers séparés si vous le souhaitez.
+Au fur et à mesure que le nombre d'outils augmente, vous pouvez les refactoriser dans des fichiers séparés si vous le souhaitez.
 
 Supprimez les répertoires `tools` et `resources` dans `packages/inventory/src/mcp-server` car ils ne seront pas utilisés.
 
 ## Tâche 3 : Mettre à jour l'infrastructure
+
+### Exposer le bucket de session
+
+Le construct Story Agent provisionne déjà et écrit dans son propre bucket de session en interne, mais ne l'expose pas — donc rien en dehors de l'agent ne peut se voir accorder l'accès pour le lire pour le moment. Puisque `queryActions` a besoin de relire l'historique de conversation, pour l'illustration et la simplicité, nous allons exposer son bucket de session interne en tant que propriété publique sur `common/constructs/src/app/agents/story-agent/story-agent.ts` :
+
+<E2EDiff lang="typescript" before="dungeon-adventure/2/agents/story-agent.ts.old.template" after="dungeon-adventure/2/agents/story-agent.ts.template" />
+
+### Câbler la stack
 
 Le construct `DungeonDb` généré par `ts#dynamodb` provisionne déjà notre table, nous devons donc simplement l'instancier dans notre stack et accorder à l'API Game et au serveur MCP Inventory les permissions dont ils ont besoin. Mettez à jour `packages/infra/src/stacks/application-stack.ts` comme suit :
 
 <E2EDiff lang="typescript" before="dungeon-adventure/1/application-stack.ts.template" after="dungeon-adventure/2/stacks/application-stack.ts.template" />
 
 :::note[Procédures isolées]
-Notez ici que puisque chaque procédure est servie par une fonction lambda individuelle, nous pouvons suivre le principe du moindre privilège et attribuer uniquement les permissions de lecture/écriture requises en fonction de l'implémentation de la procédure.
+Remarquez ici que puisque chaque procédure est servie par une fonction lambda individuelle, nous pouvons suivre le principe du moindre privilège et attribuer uniquement les permissions de lecture/écriture requises en fonction de l'implémentation de la procédure.
 :::
 
 :::tip[Configuration d'exécution]
-Le construct `DungeonDb` enregistre le nom de la table déployée dans la <Link path="guides/runtime-config">Configuration d'exécution</Link> sous l'espace de noms `dynamodb`, stockée dans AWS AppConfig. L'API Game et le serveur MCP Inventory la récupèrent au moment de l'exécution en utilisant Lambda Powertools, plutôt que d'avoir besoin qu'elle soit passée comme variable d'environnement. Un avantage de cette approche est qu'à mesure que le nombre de tables ou d'autres identifiants d'infrastructure augmente, vous n'avez besoin que d'une seule variable d'environnement `RUNTIME_CONFIG_APP_ID` lors de l'exécution contre une infrastructure déployée.
+Le construct `DungeonDb` enregistre le nom de la table déployée dans la <Link path="guides/runtime-config">Configuration d'exécution</Link> sous l'espace de noms `dynamodb`, stocké dans AWS AppConfig. L'API Game et le serveur MCP Inventory le récupèrent au moment de l'exécution en utilisant Lambda Powertools, plutôt que d'avoir besoin qu'il soit passé comme variable d'environnement. Un avantage de cette approche est qu'au fur et à mesure que le nombre de tables ou d'autres identifiants d'infrastructure augmente, vous n'avez besoin que d'une seule variable d'environnement `RUNTIME_CONFIG_APP_ID` lors de l'exécution contre l'infrastructure déployée.
 :::
 
 ## Tâche 4 : Tester l'API Game localement
@@ -166,7 +174,7 @@ Tout d'abord, corrigez les problèmes de lint :
 
 <PackageManagerShortCommand commands={["lint"]} />
 
-Ensuite, compilez la base de code :
+Ensuite, construisez la base de code :
 
 <PackageManagerShortCommand commands={["build"]} />
 

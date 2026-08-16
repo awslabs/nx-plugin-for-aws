@@ -1,6 +1,6 @@
 ---
 title: Implementar a API do Jogo e o servidor MCP de Inventário
-description: Um passo a passo de como construir um jogo de aventura em masmorra com IA agêntica usando o @aws/nx-plugin.
+description: Um passo a passo de como construir um jogo de aventura em masmorra alimentado por IA agêntica usando o @aws/nx-plugin.
 ---
 
 import { Aside, Code, FileTree, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
@@ -26,7 +26,7 @@ import { getDungeonAdventureElectroDbDependencies } from '../../../../../../../.
 
 ## Tarefa 1: Implementar a API do Jogo
 
-Vamos implementar as seguintes APIs nesta seção:
+Implementaremos as seguintes APIs nesta seção:
 
 1. `saveGame` - criar ou atualizar um jogo.
 2. `queryGames` - retornar uma lista paginada de jogos salvos anteriormente.
@@ -38,16 +38,16 @@ Vamos implementar as seguintes APIs nesta seção:
 - `actions` (transcrição do chat) está no **S3** — o `S3SessionManager` do Story Agent escreve um blob JSON por turno, e `queryActions` na API do Jogo os lê de volta para que a UI possa reproduzir o histórico ao recarregar a página. Não há procedimento `saveAction`; o agente é o único escritor.
 :::
 
-### Schema da API
+### Esquema da API
 
-Para definir nossas entradas e saídas da API, vamos criar nosso schema usando [Zod](https://zod.dev/) dentro do arquivo `packages/game-api/src/schema/index.ts` da seguinte forma:
+Para definir nossas entradas e saídas da API, vamos criar nosso esquema usando [Zod](https://zod.dev/) dentro do arquivo `packages/game-api/src/schema/index.ts` da seguinte forma:
 
 <E2EDiff lang="typescript" before="dungeon-adventure/2/schema/index.ts.old.template" after="dungeon-adventure/2/schema/index.ts.template" />
 
 Exclua o arquivo `packages/game-api/src/schema/echo.ts` pois não o usaremos neste projeto.
 
-<Aside type="tip" title="Inferência Automática de Tipos">
-Para cada um dos schemas que definimos no Zod, também exportamos uma interface usando a sintaxe `z.TypeOf`. Isso converte nossa definição Zod em uma interface Typescript sem ter que duplicar esforços.
+<Aside type="tip" title="Inferência Automática de Tipo">
+Para cada um dos esquemas que definimos no Zod, também exportamos uma interface usando a sintaxe `z.TypeOf`. Isso converte nossa definição Zod em uma interface Typescript sem ter que duplicar o esforço.
 </Aside>
 
 ### Modelagem de entidades
@@ -76,7 +76,7 @@ item: Item {
 game -> item: 1..*
 ```
 
-O gerador `ts#dynamodb` configurou o [ElectroDB](https://electrodb.dev/en/core-concepts/introduction/), que usaremos para modelar nossos dados. Vamos persistir o histórico de conversação no S3, então adicionamos uma dependência no cliente S3:
+O gerador `ts#dynamodb` configurou o [ElectroDB](https://electrodb.dev/en/core-concepts/introduction/), que usaremos para modelar nossos dados. Persistiremos o histórico de conversação no S3, então adicionamos uma dependência no cliente S3:
 
 <InstallCommand pkg={getDungeonAdventureElectroDbDependencies()} project="@dungeon-adventure/game-api" />
 
@@ -88,7 +88,7 @@ Substitua a entidade de exemplo gerada em `packages/dungeon-db/src/entities/inde
 
 <E2ECode lang="typescript" path="dungeon-adventure/2/dungeon-db/entities/index.ts.template" />
 
-O ElectroDB nos permite não apenas definir nossos tipos, mas também pode fornecer valores padrão para certos valores como timestamps. Além disso, o ElectroDB segue o [design de tabela única](https://electrodb.dev/en/core-concepts/single-table-relationships/) que é a melhor prática ao usar DynamoDB.
+O ElectroDB nos permite não apenas definir nossos tipos, mas também pode fornecer padrões para certos valores como timestamps. Além disso, o ElectroDB segue o [design de tabela única](https://electrodb.dev/en/core-concepts/single-table-relationships/) que é a melhor prática ao usar DynamoDB.
 
 <Aside title="Coleções do ElectroDB">
 Embora o ElectroDB suporte [coleções](https://electrodb.dev/en/modeling/collections/), optamos por não usá-las neste tutorial por simplicidade.
@@ -96,7 +96,7 @@ Embora o ElectroDB suporte [coleções](https://electrodb.dev/en/modeling/collec
 
 ### Definindo nossos procedimentos
 
-Para implementar os métodos da API, faça as seguintes alterações em `packages/game-api/src/procedures`:
+Para implementar os métodos da API, faça as seguintes alterações dentro de `packages/game-api/src/procedures`:
 
 <Tabs>
   <TabItem label="games.ts">
@@ -126,13 +126,13 @@ Depois de definirmos nossos procedimentos, para conectá-los à nossa API, atual
 
 Vamos criar um servidor MCP que permitirá ao nosso agente gerenciar itens no inventário de um jogador.
 
-Vamos definir as seguintes ferramentas para nosso agente:
+Definiremos as seguintes ferramentas para nosso agente:
 
 - `list-inventory-items` para recuperar os itens atuais do inventário do jogador
 - `add-to-inventory` para adicionar itens ao inventário do jogador
 - `remove-from-inventory` para remover itens do inventário do jogador
 
-Para economizar tempo, vamos definir todas as ferramentas inline:
+Para economizar tempo, definiremos todas as ferramentas inline:
 
 <Tabs>
   <TabItem label="packages/inventory/src/mcp-server/server.ts">
@@ -146,7 +146,15 @@ Exclua os diretórios `tools` e `resources` em `packages/inventory/src/mcp-serve
 
 ## Tarefa 3: Atualizar a infraestrutura
 
-O construto `DungeonDb` gerado por `ts#dynamodb` já provisiona nossa tabela, então só precisamos instanciá-lo em nossa stack e conceder à API do Jogo e ao servidor MCP de Inventário as permissões necessárias. Atualize `packages/infra/src/stacks/application-stack.ts` da seguinte forma:
+### Expor o bucket de sessão
+
+O construct do Story Agent já provisiona e escreve em seu próprio bucket de sessão internamente, mas não o expõe — então nada fora do agente pode receber acesso para ler dele ainda. Como `queryActions` precisa ler o histórico de conversação de volta, para ilustração e simplicidade, vamos expor seu bucket de sessão interno como uma propriedade pública em `common/constructs/src/app/agents/story-agent/story-agent.ts`:
+
+<E2EDiff lang="typescript" before="dungeon-adventure/2/agents/story-agent.ts.old.template" after="dungeon-adventure/2/agents/story-agent.ts.template" />
+
+### Conectar a stack
+
+O construct `DungeonDb` gerado por `ts#dynamodb` já provisiona nossa tabela, então só precisamos instanciá-lo em nossa stack e conceder à API do Jogo e ao servidor MCP de Inventário as permissões que eles precisam. Atualize `packages/infra/src/stacks/application-stack.ts` da seguinte forma:
 
 <E2EDiff lang="typescript" before="dungeon-adventure/1/application-stack.ts.template" after="dungeon-adventure/2/stacks/application-stack.ts.template" />
 
@@ -155,7 +163,7 @@ Observe aqui que, como cada procedimento é servido por uma função lambda indi
 :::
 
 :::tip[Configuração de Runtime]
-O construto `DungeonDb` registra o nome da tabela implantada na <Link path="guides/runtime-config">Configuração de Runtime</Link> sob o namespace `dynamodb`, armazenado no AWS AppConfig. A API do Jogo e o servidor MCP de Inventário o recuperam em tempo de execução usando Lambda Powertools, em vez de precisar que seja passado como uma variável de ambiente. Um benefício dessa abordagem é que, à medida que o número de tabelas ou outros identificadores de infraestrutura cresce, você só precisa de uma única variável de ambiente `RUNTIME_CONFIG_APP_ID` ao executar contra infraestrutura implantada.
+O construct `DungeonDb` registra o nome da tabela implantada na <Link path="guides/runtime-config">Configuração de Runtime</Link> sob o namespace `dynamodb`, armazenado no AWS AppConfig. A API do Jogo e o servidor MCP de Inventário o recuperam em tempo de execução usando Lambda Powertools, em vez de precisar que seja passado como uma variável de ambiente. Um benefício dessa abordagem é que, à medida que o número de tabelas ou outros identificadores de infraestrutura cresce, você só precisa de uma única variável de ambiente `RUNTIME_CONFIG_APP_ID` ao executar contra infraestrutura implantada.
 :::
 
 ## Tarefa 4: Testar a API do Jogo localmente
@@ -166,7 +174,7 @@ Primeiro, corrija quaisquer problemas de lint:
 
 <PackageManagerShortCommand commands={["lint"]} />
 
-Em seguida, compile a base de código:
+Em seguida, construa a base de código:
 
 <PackageManagerShortCommand commands={["build"]} />
 
@@ -206,7 +214,7 @@ curl -X POST 'http://localhost:2022/games.save' \
   -d '{"playerName":"Alice","genre":"zombie"}'
 ```
 
-O save retorna o jogo persistido (com o timestamp `lastUpdated` que a entidade define para você):
+O salvamento retorna o jogo persistido (com o timestamp `lastUpdated` que a entidade define para você):
 
 ```json
 {"result":{"data":{"playerName":"Alice","genre":"zombie","lastUpdated":"..."}}}

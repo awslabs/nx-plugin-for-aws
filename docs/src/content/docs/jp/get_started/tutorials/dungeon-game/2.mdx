@@ -35,7 +35,7 @@ import { getDungeonAdventureElectroDbDependencies } from '../../../../../../../.
 
 :::note[各状態の保存場所]
 - `games` と `inventory` は **DynamoDB**（ElectroDB 経由）にあります — Game API の Lambda と Inventory MCP サーバーがそれらを読み書きします。
-- `actions`（チャットトランスクリプト）は **S3** にあります — Story Agent の `S3SessionManager` がターンごとに 1 つの JSON ブロブを書き込み、Game API の `queryActions` がそれらを読み戻すことで、UI がページリロード時に履歴を再生できます。`saveAction` プロシージャはありません。エージェントが唯一の書き込み者です。
+- `actions`（チャットトランスクリプト）は **S3** にあります — Story Agent の `S3SessionManager` がターンごとに 1 つの JSON ブロブを書き込み、Game API の `queryActions` がそれらを読み戻して、UI がページリロード時に履歴を再生できるようにします。`saveAction` プロシージャはありません。エージェントが唯一の書き込み者です。
 :::
 
 ### API スキーマ
@@ -47,7 +47,7 @@ API の入力と出力を定義するために、`packages/game-api/src/schema/i
 このプロジェクトでは使用しないため、`packages/game-api/src/schema/echo.ts` ファイルを削除してください。
 
 <Aside type="tip" title="自動型推論">
-Zod で定義する各スキーマについて、`z.TypeOf` 構文を使用してインターフェースもエクスポートします。これにより、労力を重複させることなく、Zod の定義を TypeScript インターフェースに変換できます。
+Zod で定義する各スキーマについて、`z.TypeOf` 構文を使用してインターフェースもエクスポートします。これにより、作業を重複させることなく、Zod の定義を TypeScript インターフェースに変換できます。
 </Aside>
 
 ### エンティティモデリング
@@ -76,22 +76,22 @@ item: Item {
 game -> item: 1..*
 ```
 
-`ts#dynamodb` ジェネレーターは [ElectroDB](https://electrodb.dev/en/core-concepts/introduction/) をセットアップしており、これを使用してデータをモデル化します。会話履歴は S3 に保存するため、S3 クライアントへの依存関係を追加します：
+`ts#dynamodb` ジェネレーターは [ElectroDB](https://electrodb.dev/en/core-concepts/introduction/) をセットアップしており、これを使用してデータをモデル化します。会話履歴を S3 に永続化するため、S3 クライアントへの依存関係を追加します：
 
 <InstallCommand pkg={getDungeonAdventureElectroDbDependencies()} project="@dungeon-adventure/game-api" />
 
 <Aside title="プロジェクトの依存関係">
-S3 クライアントは `game-api` プロジェクト自身の `package.json` に追加されます。これは、そのプロジェクトのソースがそれをインポートするためです。バージョンは、パッケージマネージャーの依存関係カタログ（サポートされている場合）を介してワークスペース全体で整合性が保たれます（[単一バージョンポリシー](https://nx.dev/concepts/decisions/dependency-management#single-version-policy)）。詳細については、<Link path="guides/typescript-project#dependencies">ts#project ガイド</Link>を参照してください。
+S3 クライアントは `game-api` プロジェクト自身の `package.json` に追加されます。これは、そのプロジェクトのソースがそれをインポートするためです。バージョンは、パッケージマネージャーの依存関係カタログ（サポートされている場合）を介してワークスペース全体で引き続き調整されます（[単一バージョンポリシー](https://nx.dev/concepts/decisions/dependency-management#single-version-policy)）。詳細については、<Link path="guides/typescript-project#dependencies">ts#project ガイド</Link>を参照してください。
 </Aside>
 
-`packages/dungeon-db/src/entities/index.ts` で生成されたサンプルエンティティを `Game` と `Inventory` エンティティに置き換え、`packages/dungeon-db/src/entities/example.ts` を削除します：
+`packages/dungeon-db/src/entities/index.ts` 内の生成されたサンプルエンティティを `Game` と `Inventory` エンティティに置き換え、`packages/dungeon-db/src/entities/example.ts` を削除します：
 
 <E2ECode lang="typescript" path="dungeon-adventure/2/dungeon-db/entities/index.ts.template" />
 
-ElectroDB を使用すると、型を定義するだけでなく、タイムスタンプなどの特定の値にデフォルトを提供することもできます。さらに、ElectroDB は [シングルテーブル設計](https://electrodb.dev/en/core-concepts/single-table-relationships/)に従っており、これは DynamoDB を使用する際のベストプラクティスです。
+ElectroDB を使用すると、型を定義するだけでなく、タイムスタンプなどの特定の値のデフォルトを提供することもできます。さらに、ElectroDB は [シングルテーブル設計](https://electrodb.dev/en/core-concepts/single-table-relationships/)に従っており、これは DynamoDB を使用する際のベストプラクティスです。
 
 <Aside title="ElectroDB コレクション">
-ElectroDB は[コレクション](https://electrodb.dev/en/modeling/collections/)をサポートしていますが、このチュートリアルでは簡潔さのためにそれらを使用しないことにしました。
+ElectroDB は [コレクション](https://electrodb.dev/en/modeling/collections/)をサポートしていますが、このチュートリアルでは簡潔さのためにそれらを使用しないことを選択しました。
 </Aside>
 
 ### プロシージャの定義
@@ -140,18 +140,26 @@ API メソッドを実装するために、`packages/game-api/src/procedures` �
 </TabItem>
 </Tabs>
 
-ツールの数が増えるにつれて、必要に応じて別のファイルにリファクタリングできます。
+ツールの数が増えるにつれて、必要に応じて別々のファイルにリファクタリングできます。
 
-このプロジェクトでは使用しないため、`packages/inventory/src/mcp-server` の `tools` と `resources` ディレクトリを削除してください。
+これらは使用されないため、`packages/inventory/src/mcp-server` 内の `tools` と `resources` ディレクトリを削除してください。
 
 ## タスク 3: インフラストラクチャの更新
 
-`ts#dynamodb` によって生成された `DungeonDb` コンストラクトは既にテーブルをプロビジョニングしているため、スタック内でそれをインスタンス化し、Game API と Inventory MCP サーバーに必要な権限を付与するだけです。`packages/infra/src/stacks/application-stack.ts` を以下のように更新します：
+### セッションバケットの公開
+
+Story Agent のコンストラクトは、内部的に独自のセッションバケットをすでにプロビジョニングして書き込んでいますが、それを公開していません。そのため、エージェントの外部からそれへの読み取りアクセスを許可することはまだできません。`queryActions` が会話履歴を読み戻す必要があるため、説明と簡潔さのために、`common/constructs/src/app/agents/story-agent/story-agent.ts` の内部セッションバケットをパブリックプロパティとして公開します：
+
+<E2EDiff lang="typescript" before="dungeon-adventure/2/agents/story-agent.ts.old.template" after="dungeon-adventure/2/agents/story-agent.ts.template" />
+
+### スタックの接続
+
+`ts#dynamodb` によって生成された `DungeonDb` コンストラクトはすでにテーブルをプロビジョニングしているため、スタック内でそれをインスタンス化し、Game API と Inventory MCP サーバーに必要な権限を付与するだけです。`packages/infra/src/stacks/application-stack.ts` を以下のように更新します：
 
 <E2EDiff lang="typescript" before="dungeon-adventure/1/application-stack.ts.template" after="dungeon-adventure/2/stacks/application-stack.ts.template" />
 
 :::note[分離されたプロシージャ]
-ここで注目すべきは、各プロシージャが個別の Lambda 関数によって提供されるため、最小権限の原則に従い、プロシージャの実装に基づいて必要な読み取り/書き込み権限のみを割り当てることができる点です。
+ここで注目すべきは、各プロシージャが個別の Lambda 関数によって提供されるため、最小権限の原則に従い、プロシージャの実装に基づいて必要な読み取り/書き込み権限のみを割り当てることができることです。
 :::
 
 :::tip[ランタイム設定]
@@ -172,7 +180,7 @@ API を試すために AWS にデプロイする必要はありません — `de
 
 ### ローカルサーバーの起動
 
-`dev` ターゲットで Game API をローカルで起動します。これにより DynamoDB Local も起動されます：
+`dev` ターゲットを使用して Game API をローカルで起動します。これにより DynamoDB Local も起動されます：
 
 <NxCommands commands={["dev game-api"]} />
 
@@ -232,6 +240,6 @@ curl -X GET 'http://localhost:2022/games.query?input=%7B%7D'
 
 <NxCommands commands={["mcp-server-inspect inventory"]} />
 
-これにより、MCP サーバーがローカルで提供され（DynamoDB Local も起動されます）、`http://localhost:6274` で MCP Inspector が起動し、事前設定された状態で接続されます。**Connect** をクリックし、**Tools** タブに切り替え、**List Tools** をクリックして、`add-to-inventory`（例：`playerName: Alice`、`itemName: Rusty Sword`、`emoji: ⚔️`）を試し、続いて `list-inventory-items` を実行して DynamoDB Local に永続化されていることを確認します。完了したら、サーバーを停止します（`Ctrl+C`）。
+これにより、MCP サーバーがローカルで提供され（DynamoDB Local も起動されます）、`http://localhost:6274` で MCP Inspector が起動し、それに接続するように事前設定されます。**Connect** をクリックし、**Tools** タブに切り替え、**List Tools** をクリックして、`add-to-inventory`（例：`playerName: Alice`、`itemName: Rusty Sword`、`emoji: ⚔️`）を試し、その後 `list-inventory-items` を実行して DynamoDB Local に永続化されていることを確認します。完了したら、サーバーを停止します（`Ctrl+C`）。
 
-おめでとうございます！ローカル DynamoDB テーブルに対して最初の tRPC API と MCP サーバーを構築してテストしました！🎉🎉🎉
+おめでとうございます。ローカル DynamoDB テーブルに対して最初の tRPC API と MCP サーバーを構築してテストしました！ 🎉🎉🎉

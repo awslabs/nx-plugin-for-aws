@@ -1,9 +1,9 @@
 ---
 title: Implémenter et configurer l'agent Story
-description: Un guide détaillé pour créer un jeu d'aventure de donjon alimenté par une IA agentique en utilisant @aws/nx-plugin.
+description: Un guide pas à pas pour créer un jeu d'aventure de donjon alimenté par une IA agentique en utilisant @aws/nx-plugin.
 ---
 
-import { Aside, Code, FileTree, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import { Aside, Code, FileTree, Steps } from '@astrojs/starlight/components';
 import { Image } from 'astro:assets';
 import Drawer from '@components/drawer.astro';
 import Link from '@components/link.astro';
@@ -23,25 +23,15 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 ## Tâche 1 : Implémenter l'agent Story
 
-L'agent Story est un agent [Strands](https://strandsagents.com/) généré avec `--protocol=ag-ui` dans le <Link path="get_started/tutorials/dungeon-game/1">Module 1</Link>, afin que l'interface utilisateur puisse diffuser depuis celui-ci via le [protocole Agent-User Interaction](https://docs.copilotkit.ai/aws-strands/protocol) via CopilotKit. Il utilise le serveur MCP Inventory pour gérer les objets du joueur, et le [`S3SessionManager`](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/agents/sessions/) intégré de Strands pour persister l'historique des conversations dans le bucket de sessions que nous avons provisionné dans le Module 2.
+L'agent Story est un agent [Strands](https://strandsagents.com/) généré avec `--protocol=ag-ui` dans le <Link path="get_started/tutorials/dungeon-game/1">Module 1</Link>, afin que l'interface utilisateur puisse diffuser depuis celui-ci via le [protocole Agent-User Interaction](https://docs.copilotkit.ai/aws-strands/protocol) via CopilotKit. Il utilise le serveur MCP Inventory pour gérer les objets du joueur, et persiste déjà l'historique des conversations via le `session.py` que le générateur a provisionné dans le Module 1 — une fois déployé, c'est le [`S3SessionManager`](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/agents/sessions/) intégré de Strands qui écrit dans le même bucket S3 que celui depuis lequel le `queryActions` de l'API Game lit, afin que le navigateur puisse reconstruire les transcriptions lors d'une nouvelle visite.
 
 ### Implémentation de l'agent
 
-Mettez à jour les fichiers suivants dans `packages/story/dungeon_adventure_story/agent` :
+Mettez à jour `agent.py` dans `packages/story/dungeon_adventure_story/agent` :
 
-<Tabs>
-  <TabItem label="main.py">
-<E2EDiff lang="python" before="dungeon-adventure/3/main.py.old.template" after="dungeon-adventure/3/main.py.template" />
-  </TabItem>
-  <TabItem label="agent.py">
 <E2EDiff lang="python" before="dungeon-adventure/3/agent.py.old.template" after="dungeon-adventure/3/agent.py.template" />
-  </TabItem>
-</Tabs>
 
-Les modifications sont :
-
-- `main.py` ajoute un `session_manager_provider` qui crée un `S3SessionManager` par `thread_id` lors du déploiement, et revient à un `FileSessionManager` sur disque sous `/tmp/strands-sessions` lors de l'exécution sous `agent-dev` (`LOCAL_DEV=true`). Une fois déployé, le bucket S3 est le même que celui à partir duquel le `queryActions` de l'API Game lit, afin que le navigateur puisse reconstruire les transcriptions lors d'une nouvelle visite ; localement, l'agent persiste les sessions sur disque et communique avec le serveur MCP local, sans déploiement.
-- `agent.py` supprime l'outil d'exemple `subtract` et remplace le prompt système par un prompt de maître de donjon qui invite le premier message de l'utilisateur à indiquer le nom et le genre du joueur, et utilise les outils du serveur MCP Inventory.
+`agent.py` supprime l'outil d'exemple `subtract` et remplace le prompt système par un prompt de maître de donjon qui invite le premier message de l'utilisateur à indiquer le nom et le genre du joueur, et utilise les outils du serveur MCP Inventory. `main.py` n'a besoin d'aucune modification ici — la gestion des sessions était déjà configurée lors de la génération de l'agent.
 
 ## Tâche 2 : Tester votre agent localement
 
@@ -51,7 +41,7 @@ Pour compiler le code :
 
 <PackageManagerShortCommand commands={["build"]} />
 
-<Aside type="tip" title="Correction des erreurs de lint">
+<Aside type="tip" title="Correction des erreurs de Lint">
 Si vous rencontrez des erreurs de lint, exécutez la commande suivante pour les corriger automatiquement.
 
 <PackageManagerShortCommand commands={["lint"]} />
@@ -59,7 +49,7 @@ Si vous rencontrez des erreurs de lint, exécutez la commande suivante pour les 
 
 ### Discuter avec votre agent
 
-La cible générée `agent-chat` ouvre un REPL interactif avec votre agent. Il s'exécute de manière autonome et se connecte à votre agent s'exécutant localement, alors démarrez d'abord le serveur local de l'agent dans un terminal :
+La cible `agent-chat` générée ouvre un REPL interactif contre votre agent. Il s'exécute de manière autonome et se connecte à votre agent s'exécutant localement, donc démarrez d'abord le serveur local de l'agent dans un terminal :
 
 <NxCommands commands={["agent-dev story"]} />
 
@@ -67,10 +57,10 @@ Ensuite, dans un second terminal, démarrez le chat :
 
 <NxCommands commands={["agent-chat story"]} />
 
-Votre premier message doit indiquer à l'agent le nom de votre héros et le genre (par exemple : `My name is Alice. Start my zombie adventure.`) et l'histoire sera diffusée en retour.
+Votre premier message devrait indiquer à l'agent le nom de votre héros et le genre (par exemple : `My name is Alice. Start my zombie adventure.`) et l'histoire sera diffusée en retour.
 
 <Aside type="caution" title="Identifiants AWS requis">
 Bien que l'agent s'exécute localement, il invoque [Amazon Bedrock](https://aws.amazon.com/bedrock/) pour le LLM. Vous aurez besoin d'identifiants AWS dans votre environnement avec accès au [modèle par défaut de Strands](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/model-providers/amazon-bedrock/). Consultez la [documentation du fournisseur de modèles Strands](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/model-providers/amazon-bedrock/) pour plus de détails.
 </Aside>
 
-Félicitations. Vous avez créé et testé votre premier agent Strands localement !  🎉🎉🎉
+Félicitations. Vous avez construit et testé votre premier agent Strands localement !  🎉🎉🎉

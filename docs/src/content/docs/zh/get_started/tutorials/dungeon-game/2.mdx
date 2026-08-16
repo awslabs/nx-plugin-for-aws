@@ -1,6 +1,6 @@
 ---
 title: 实现游戏 API 和库存 MCP 服务器
-description: 使用 @aws/nx-plugin 构建由代理 AI 驱动的地牢冒险游戏的演练。
+description: 使用 @aws/nx-plugin 构建基于 AI 代理的地牢冒险游戏的演练。
 ---
 
 import { Aside, Code, FileTree, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
@@ -34,8 +34,8 @@ import { getDungeonAdventureElectroDbDependencies } from '../../../../../../../.
 4. `queryActions` - 返回给定游戏的对话历史记录。
 
 :::note[每个状态片段的存储位置]
-- `games` 和 `inventory` 存储在 **DynamoDB** 中（通过 ElectroDB）— 游戏 API lambda 和库存 MCP 服务器读写它们。
-- `actions`（聊天记录）存储在 **S3** 中 — Story Agent 的 `S3SessionManager` 每回合写入一个 JSON blob，游戏 API 中的 `queryActions` 读取它们，以便 UI 可以在页面重新加载时重放历史记录。没有 `saveAction` 过程；代理是唯一的写入者。
+- `games` 和 `inventory` 存储在 **DynamoDB**（通过 ElectroDB）— 游戏 API lambda 和库存 MCP 服务器读写它们。
+- `actions`（聊天记录）存储在 **S3** — Story Agent 的 `S3SessionManager` 每回合写入一个 JSON blob，游戏 API 中的 `queryActions` 读取它们，以便 UI 可以在页面重新加载时重放历史记录。没有 `saveAction` 过程；代理是唯一的写入者。
 :::
 
 ### API 模式
@@ -44,7 +44,7 @@ import { getDungeonAdventureElectroDbDependencies } from '../../../../../../../.
 
 <E2EDiff lang="typescript" before="dungeon-adventure/2/schema/index.ts.old.template" after="dungeon-adventure/2/schema/index.ts.template" />
 
-删除 `packages/game-api/src/schema/echo.ts` 文件，因为我们在这个项目中不会使用它。
+删除 `packages/game-api/src/schema/echo.ts` 文件，因为我们在此项目中不会使用它。
 
 <Aside type="tip" title="自动类型推断">
 对于我们在 Zod 中定义的每个模式，我们还使用 `z.TypeOf` 语法导出一个接口。这将我们的 Zod 定义转换为 Typescript 接口，而无需重复工作。
@@ -81,7 +81,7 @@ game -> item: 1..*
 <InstallCommand pkg={getDungeonAdventureElectroDbDependencies()} project="@dungeon-adventure/game-api" />
 
 <Aside title="项目依赖">
-S3 客户端被添加到 `game-api` 项目自己的 `package.json` 中，因为该项目的源代码导入了它。版本仍然通过包管理器的依赖目录（在支持的情况下）在整个工作空间中保持一致（[单一版本策略](https://nx.dev/concepts/decisions/dependency-management#single-version-policy)）。有关更多信息，请参阅 <Link path="guides/typescript-project#dependencies">ts#project 指南</Link>。
+S3 客户端被添加到 `game-api` 项目自己的 `package.json` 中，因为该项目的源代码导入了它。版本仍然通过包管理器的依赖目录（在支持的情况下）在整个工作区中保持一致（[单一版本策略](https://nx.dev/concepts/decisions/dependency-management#single-version-policy)）。有关更多信息，请参阅 <Link path="guides/typescript-project#dependencies">ts#project 指南</Link>。
 </Aside>
 
 用我们的 `Game` 和 `Inventory` 实体替换 `packages/dungeon-db/src/entities/index.ts` 中生成的示例实体，并删除 `packages/dungeon-db/src/entities/example.ts`：
@@ -110,7 +110,7 @@ ElectroDB 不仅允许我们定义类型，还可以为某些值（如时间戳�
   </TabItem>
 </Tabs>
 
-删除 `echo.ts` 文件（来自 `packages/game-api/src/procedures`），因为我们在这个项目中不会使用它。
+删除 `echo.ts` 文件（从 `packages/game-api/src/procedures`），因为我们在此项目中不会使用它。
 
 ### 路由器设置
 
@@ -146,7 +146,15 @@ ElectroDB 不仅允许我们定义类型，还可以为某些值（如时间戳�
 
 ## 任务 3：更新基础设施
 
-由 `ts#dynamodb` 生成的 `DungeonDb` 构造已经配置了我们的表，因此我们只需要在堆栈中实例化它，并授予游戏 API 和库存 MCP 服务器所需的权限。按如下方式更新 `packages/infra/src/stacks/application-stack.ts`：
+### 公开会话存储桶
+
+Story Agent 的构造已经在内部配置并写入其自己的会话存储桶，但没有公开它 — 因此存储桶外部的任何内容都无法被授予读取访问权限。由于 `queryActions` 需要读取对话历史记录，为了说明和简单起见，我们将在 `common/constructs/src/app/agents/story-agent/story-agent.ts` 上将其内部会话存储桶公开为公共属性：
+
+<E2EDiff lang="typescript" before="dungeon-adventure/2/agents/story-agent.ts.old.template" after="dungeon-adventure/2/agents/story-agent.ts.template" />
+
+### 连接堆栈
+
+`ts#dynamodb` 生成的 `DungeonDb` 构造已经配置了我们的表，因此我们只需要在堆栈中实例化它，并授予游戏 API 和库存 MCP 服务器所需的权限。按如下方式更新 `packages/infra/src/stacks/application-stack.ts`：
 
 <E2EDiff lang="typescript" before="dungeon-adventure/1/application-stack.ts.template" after="dungeon-adventure/2/stacks/application-stack.ts.template" />
 
@@ -172,7 +180,7 @@ ElectroDB 不仅允许我们定义类型，还可以为某些值（如时间戳�
 
 ### 启动本地服务器
 
-使用 `dev` 目标在本地启动游戏 API，它也会启动 DynamoDB Local：
+使用 `dev` 目标在本地启动游戏 API，这也会启动 DynamoDB Local：
 
 <NxCommands commands={["dev game-api"]} />
 
@@ -234,4 +242,4 @@ curl -X GET 'http://localhost:2022/games.query?input=%7B%7D'
 
 这会在本地提供 MCP 服务器（也会启动 DynamoDB Local）并在 `http://localhost:6274` 启动 MCP Inspector，预配置为连接到它。点击 **Connect**，切换到 **Tools** 选项卡，点击 **List Tools**，然后尝试 `add-to-inventory`（例如 `playerName: Alice`、`itemName: Rusty Sword`、`emoji: ⚔️`），然后使用 `list-inventory-items` 查看它已持久化到 DynamoDB Local。完成后停止服务器（`Ctrl+C`）。
 
-恭喜，您已经构建并测试了您的第一个针对本地 DynamoDB 表的 tRPC API 和 MCP 服务器！🎉🎉🎉
+恭喜，您已经构建并测试了针对本地 DynamoDB 表的第一个 tRPC API 和 MCP 服务器！🎉🎉🎉

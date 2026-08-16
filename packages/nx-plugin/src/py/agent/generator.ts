@@ -20,6 +20,7 @@ import { addAgentChatScripts } from '../../utils/agent-chat/agent-chat';
 import {
   AGENT_CONNECTION_PY_DEPENDENCIES,
   addPythonFrameworkBase,
+  ensureLangchainS3CheckpointSaver,
   ensurePythonAgentConnectionProject,
   getPythonAgentConnectionModuleName,
   getPythonAgentConnectionProject,
@@ -50,7 +51,10 @@ import {
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
 import { sortObjectKeys } from '../../utils/object';
-import { toProjectRelativePath } from '../../utils/paths';
+import {
+  getRelativePathToRootByDirectory,
+  toProjectRelativePath,
+} from '../../utils/paths';
 import { assignPort } from '../../utils/port';
 import { addWorkspaceDependencyToPyProject } from '../../utils/py';
 import {
@@ -63,6 +67,7 @@ import type {
   AgentProtocol,
   PyAgentFramework,
   PyAgentGeneratorSchema,
+  PyAgentSession,
 } from './schema';
 
 /** The metadata this generator records, which its predicates read. */
@@ -76,6 +81,7 @@ export interface PyAgentMetadata extends IacMetadata {
    * Strands vs LangChain Layer-2 client + agent.py transform.
    */
   readonly framework: PyAgentFramework;
+  readonly session: PyAgentSession;
 }
 
 /** Whether the chat CLI signs its requests, which only IAM auth needs. */
@@ -124,6 +130,19 @@ export const DEPENDENCIES = declareDependencies<PyAgentMetadata>()({
     { name: 'langchain', when: (m) => m.framework === 'langchain' },
     { name: 'langchain-aws', when: (m) => m.framework === 'langchain' },
     { name: 'langgraph', when: (m) => m.framework === 'langchain' },
+    // Local dev uses a SQLite-backed checkpointer for convenience (parity
+    // with the strands framework's local FileSessionManager).
+    {
+      name: 'langgraph-checkpoint-sqlite',
+      when: (m) => m.framework === 'langchain',
+    },
+    // AsyncSqliteSaver's driver, required alongside langgraph-checkpoint-sqlite.
+    { name: 'aiosqlite', when: (m) => m.framework === 'langchain' },
+    // Provides DynamoDBSaver (with S3 offloading for large checkpoints).
+    {
+      name: 'langgraph-checkpoint-aws',
+      when: (m) => m.framework === 'langchain' && m.session === 'dynamodb-s3',
+    },
     {
       name: 'ag-ui-protocol',
       when: (m) => m.framework === 'langchain' && m.protocol === 'ag-ui',
@@ -138,25 +157,25 @@ export const DEPENDENCIES = declareDependencies<PyAgentMetadata>()({
     },
     {
       name: 'strands-agents[a2a]',
-      when: (m) => m.framework !== 'langchain' && m.protocol === 'a2a',
+      when: (m) => m.framework === 'strands' && m.protocol === 'a2a',
     },
     {
       name: 'strands-agents',
-      when: (m) => m.framework !== 'langchain' && m.protocol !== 'a2a',
+      when: (m) => m.framework === 'strands' && m.protocol !== 'a2a',
     },
     {
       name: 'strands-agents-tools',
-      when: (m) => m.framework !== 'langchain',
+      when: (m) => m.framework === 'strands',
     },
     // Declared again here so a Strands AG-UI agent lists it in the same order
     // the generated pyproject.toml had before.
     {
       name: 'ag-ui-protocol',
-      when: (m) => m.framework !== 'langchain' && m.protocol === 'ag-ui',
+      when: (m) => m.framework === 'strands' && m.protocol === 'ag-ui',
     },
     {
       name: 'ag-ui-strands',
-      when: (m) => m.framework !== 'langchain' && m.protocol === 'ag-ui',
+      when: (m) => m.framework === 'strands' && m.protocol === 'ag-ui',
     },
     { name: 'uvicorn' },
     // `fastapi dev` runs the local server for every protocol.
@@ -226,9 +245,49 @@ export const pyAgentGenerator = async (
 
   const auth = options.auth ?? 'iam';
 
-  // Only 'in-memory' is currently supported for Python agents (session manager
-  // support for Python is not yet implemented).
-  const session = options.session ?? 'in-memory';
+  // Session backends are framework-specific: Strands' SessionManager only has
+  // an S3-backed implementation here (via strands.session.S3SessionManager),
+  // while LangChain uses dedicated S3 and DynamoDB checkpointer libraries.
+  // 'in-memory' is valid for both.
+  const SESSIONS_BY_FRAMEWORK: Record<
+    PyAgentFramework,
+    readonly PyAgentSession[]
+  > = {
+    strands: ['s3', 'in-memory'],
+    langchain: ['s3', 'dynamodb-s3', 'in-memory'],
+  };
+  if (
+    options.session &&
+    !SESSIONS_BY_FRAMEWORK[framework].includes(options.session)
+  ) {
+    throw new Error(
+      `Unsupported combination: session '${options.session}' is not implemented for the ${framework} framework (supported: ${SESSIONS_BY_FRAMEWORK[framework].join(', ')}).`,
+    );
+  }
+  const session = options.session ?? 's3';
+
+  // With infra=none there's no CDK/Terraform construct to provision a bucket
+  // or table or set RUNTIME_CONFIG_APP_ID, so session.py's non-local-dev
+  // branch has nothing to read from AppConfig at runtime — the generated code
+  // still honors `session`, but only works outside local dev if the caller
+  // wires up matching infra/runtime config themselves.
+  if (infra === 'none' && session !== 'in-memory') {
+    console.warn(
+      `Warning: session '${session}' requires infrastructure to configure it automatically (no infrastructure is generated for infra=none) — outside local dev this will fail unless you configure matching runtime config yourself`,
+    );
+  }
+
+  // Local-dev session storage lives at the workspace root
+  // (`tmp/agents/<framework>/<agent-name>`), not inside the project, so each
+  // agent gets its own storage directory — shared by both frameworks
+  // (Strands' FileSessionManager, LangChain's SqliteSaver). The
+  // `-dev`/`-serve` targets run with cwd={projectRoot}, so compute that
+  // directory relative to the project root here rather than resolving it at
+  // runtime.
+  const localSessionsDir = joinPathFragments(
+    getRelativePathToRootByDirectory(project.root),
+    `tmp/agents/${framework}/${name}`,
+  );
 
   // Ensure the shared agent-connection project exists so the server entry
   // point can import `session_id_context` and propagate the AgentCore
@@ -237,8 +296,8 @@ export const pyAgentGenerator = async (
   await ensurePythonAgentConnectionProject(tree, DEPENDENCIES);
   // The agent server imports the framework base helpers (session cache + model
   // error logging) regardless of whether a connection client is wired in. The
-  // langchain framework has no base layer (its AG-UI foundation reuses only the
-  // framework-agnostic session context), so this is a no-op for langchain.
+  // LangChain framework has no base layer (its AG-UI foundation reuses only the
+  // framework-agnostic session context), so this is a no-op for LangChain.
   await addPythonFrameworkBase(tree, DEPENDENCIES, framework);
   const agentConnectionModuleName = getPythonAgentConnectionModuleName(tree);
   addWorkspaceDependencyToPyProject(
@@ -254,12 +313,20 @@ export const pyAgentGenerator = async (
     moduleName,
     agentConnectionModuleName,
     framework,
+    protocol,
+    session,
+    localSessionsDir,
   };
 
-  // Generate common files shared by both protocols. The agent module (agent.py)
-  // is framework-specific (Strands yields a contextmanaged Agent; LangChain
-  // returns a compiled create_agent graph), so it comes from a per-framework
-  // dir. The package __init__.py is framework-agnostic (it stays in `common`).
+  // Files live under a per-framework dir (files/strands, files/langchain),
+  // mirrored one-for-one — including files that don't vary by framework
+  // (e.g. the empty package __init__.py) — so there's a single, uniform
+  // <framework>/<protocol> layout with no cross-framework fallbacks.
+  // `framework` is itself the directory name.
+
+  // Common files shared by both protocols: the agent module (Strands yields a
+  // contextmanaged Agent with a session.py sibling; LangChain returns a
+  // compiled create_agent graph) and the package __init__.py.
   generateFiles(
     tree,
     joinPathFragments(import.meta.dirname, 'files', framework, 'common'),
@@ -267,23 +334,14 @@ export const pyAgentGenerator = async (
     templateContext,
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
-  if (framework === 'langchain') {
-    // langchain/common only carries agent.py; the empty package __init__.py is
-    // framework-agnostic, so emit it from the strands `common` dir.
-    generateFiles(
-      tree,
-      joinPathFragments(import.meta.dirname, 'files', 'strands', 'common'),
-      targetSourceDir,
-      templateContext,
-      { overwriteStrategy: OverwriteStrategy.KeepExisting },
-    );
+
+  if (framework === 'langchain' && session === 's3') {
+    ensureLangchainS3CheckpointSaver(tree);
   }
 
-  // Generate protocol-specific files. Each protocol's server entry point (and,
-  // for HTTP, its init.py building the FastAPI app + lifespan) is
-  // framework-specific (Strands yields a contextmanaged Agent; LangChain drives
-  // a compiled create_agent graph), so it comes from a per-framework,
-  // per-protocol dir: `files/<framework>/<protocol>`.
+  // Protocol-specific files. Each protocol's server entry point is
+  // framework-specific (Strands yields a contextmanaged Agent; LangChain
+  // drives a compiled create_agent graph).
   const protocolLower = protocol.toLowerCase();
   generateFiles(
     tree,
@@ -400,6 +458,7 @@ export const pyAgentGenerator = async (
     auth,
     protocol,
     framework,
+    session,
     ...(iac ? { iac } : {}),
   };
 

@@ -3,7 +3,7 @@ title: Implementare e configurare l'agente Story
 description: Una guida dettagliata su come costruire un gioco di avventura in un dungeon basato su AI agentiche utilizzando @aws/nx-plugin.
 ---
 
-import { Aside, Code, FileTree, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import { Aside, Code, FileTree, Steps } from '@astrojs/starlight/components';
 import { Image } from 'astro:assets';
 import Drawer from '@components/drawer.astro';
 import Link from '@components/link.astro';
@@ -23,25 +23,15 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 ## Task 1: Implementare l'agente Story
 
-L'agente Story è un agente [Strands](https://strandsagents.com/) generato con `--protocol=ag-ui` nel <Link path="get_started/tutorials/dungeon-game/1">Modulo 1</Link>, in modo che l'interfaccia utente possa ricevere lo streaming da esso tramite il [protocollo Agent-User Interaction](https://docs.copilotkit.ai/aws-strands/protocol) via CopilotKit. Utilizza il server MCP Inventory per gestire gli oggetti del giocatore e [`S3SessionManager`](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/agents/sessions/) integrato in Strands per persistere la cronologia delle conversazioni nel bucket delle sessioni che abbiamo fornito nel Modulo 2.
+L'agente Story è un agente [Strands](https://strandsagents.com/) generato con `--protocol=ag-ui` nel <Link path="get_started/tutorials/dungeon-game/1">Modulo 1</Link>, in modo che l'interfaccia utente possa ricevere lo streaming da esso tramite il [protocollo Agent-User Interaction](https://docs.copilotkit.ai/aws-strands/protocol) via CopilotKit. Utilizza il server MCP Inventory per gestire gli oggetti del giocatore e persiste già la cronologia delle conversazioni tramite il `session.py` che il generatore ha fornito nel Modulo 1 — una volta distribuito, si tratta del [`S3SessionManager`](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/agents/sessions/) integrato di Strands che scrive nello stesso bucket S3 da cui legge il `queryActions` dell'API Game, in modo che il browser possa ricostruire le trascrizioni alla rivisitazione.
 
 ### Implementazione dell'agente
 
-Aggiorna i seguenti file in `packages/story/dungeon_adventure_story/agent`:
+Aggiorna `agent.py` in `packages/story/dungeon_adventure_story/agent`:
 
-<Tabs>
-  <TabItem label="main.py">
-<E2EDiff lang="python" before="dungeon-adventure/3/main.py.old.template" after="dungeon-adventure/3/main.py.template" />
-  </TabItem>
-  <TabItem label="agent.py">
 <E2EDiff lang="python" before="dungeon-adventure/3/agent.py.old.template" after="dungeon-adventure/3/agent.py.template" />
-  </TabItem>
-</Tabs>
 
-Le modifiche sono:
-
-- `main.py` aggiunge un `session_manager_provider` che crea un `S3SessionManager` per ogni `thread_id` quando viene distribuito, e ricade su un `FileSessionManager` su disco in `/tmp/strands-sessions` quando viene eseguito con `agent-dev` (`LOCAL_DEV=true`). Una volta distribuito, il bucket S3 è lo stesso da cui legge `queryActions` dell'API Game, in modo che il browser possa ricostruire le trascrizioni alla rivisitazione; localmente l'agente persiste le sessioni su disco e comunica con il server MCP locale, senza una distribuzione.
-- `agent.py` rimuove lo strumento di esempio `subtract` e sostituisce il prompt di sistema con uno da dungeon-master che invita il primo messaggio dell'utente a dichiarare il nome del giocatore e il genere, e utilizza gli strumenti del server MCP Inventory.
+`agent.py` rimuove lo strumento di esempio `subtract` e sostituisce il prompt di sistema con uno da dungeon-master che invita il primo messaggio dell'utente a dichiarare il nome del giocatore e il genere, e utilizza gli strumenti del server MCP Inventory. `main.py` non necessita di modifiche qui — la gestione delle sessioni era già configurata quando l'agente è stato generato.
 
 ## Task 2: Testare l'agente localmente
 
@@ -51,7 +41,7 @@ Per compilare il codice:
 
 <PackageManagerShortCommand commands={["build"]} />
 
-<Aside type="tip" title="Correggere gli errori di Lint">
+<Aside type="tip" title="Correzione degli errori di Lint">
 Se riscontri errori di lint, esegui il seguente comando per correggerli automaticamente.
 
 <PackageManagerShortCommand commands={["lint"]} />
@@ -59,7 +49,7 @@ Se riscontri errori di lint, esegui il seguente comando per correggerli automati
 
 ### Chattare con l'agente
 
-Il target generato `agent-chat` apre un REPL interattivo con il tuo agente. Viene eseguito in modo autonomo e si connette al tuo agente in esecuzione locale, quindi prima avvia il server locale dell'agente in un terminale:
+Il target generato `agent-chat` apre un REPL interattivo contro il tuo agente. Viene eseguito in modo autonomo e si connette al tuo agente in esecuzione locale, quindi prima avvia il server locale dell'agente in un terminale:
 
 <NxCommands commands={["agent-dev story"]} />
 

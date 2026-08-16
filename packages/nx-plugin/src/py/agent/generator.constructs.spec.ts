@@ -301,6 +301,43 @@ dev-dependencies = []
     expect(dockerfileContent).toMatchSnapshot('agent-Dockerfile');
   });
 
+  it('should not create session bucket infrastructure when session is in-memory', async () => {
+    await pyAgentGenerator(tree, {
+      project: 'test-project',
+      name: 'in-memory-agent',
+      infra: 'agentcore',
+      session: 'in-memory',
+      iac: 'cdk',
+    });
+
+    const agentConstructContent = tree.read(
+      'packages/common/constructs/src/app/agents/in-memory-agent/in-memory-agent.ts',
+      'utf-8',
+    );
+    expect(agentConstructContent).toMatchSnapshot(
+      'agent-construct.ts (in-memory)',
+    );
+  });
+
+  it('should create DynamoDB checkpoint table and S3 offload bucket infrastructure when session is dynamodb-s3', async () => {
+    await pyAgentGenerator(tree, {
+      project: 'test-project',
+      name: 'dynamodb-agent',
+      framework: 'langchain',
+      infra: 'agentcore',
+      session: 'dynamodb-s3',
+      iac: 'cdk',
+    });
+
+    const agentConstructContent = tree.read(
+      'packages/common/constructs/src/app/agents/dynamodb-agent/dynamodb-agent.ts',
+      'utf-8',
+    );
+    expect(agentConstructContent).toMatchSnapshot(
+      'agent-construct.ts (dynamodb-s3)',
+    );
+  });
+
   it('should add generator metric to app.ts', async () => {
     await sharedConstructsGenerator(
       tree,

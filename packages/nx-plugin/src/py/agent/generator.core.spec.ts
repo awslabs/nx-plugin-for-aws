@@ -76,9 +76,11 @@ dev-dependencies = []
       tree.exists(`${acBase}/core/with_session_id_strands.py`),
     ).toBeTruthy();
     expect(tree.exists(`${acBase}/core/model_errors_strands.py`)).toBeTruthy();
+    expect(tree.exists(`${acBase}/core/tool_errors_strands.py`)).toBeTruthy();
     const acInit = tree.read(`${acBase}/__init__.py`, 'utf-8')!;
     expect(acInit).toContain('with_session_id');
     expect(acInit).toContain('log_model_errors');
+    expect(acInit).toContain('log_tool_errors');
 
     // Check that pyproject.toml was updated with strands agent dependencies
     const pyprojectToml = parse(
@@ -421,5 +423,276 @@ dev-dependencies = []
     // Bundle and docker targets should not be added for None compute type
     expect(projectConfig.targets['bundle-arm']).toBeUndefined();
     expect(projectConfig.targets['agent-docker']).toBeUndefined();
+  });
+
+  it('should warn but still generate real session content when session defaults to s3 with infra=none', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await pyAgentGenerator(tree, {
+      project: 'test-project',
+      name: 'session-warn-agent',
+      infra: 'none',
+      iac: 'cdk',
+    });
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("session 's3' requires infrastructure"),
+    );
+
+    // infra=none doesn't force in-memory: the generated code still honors
+    // the chosen session backend, for callers who wire up matching
+    // infra/runtime config themselves outside this generator.
+    const sessionContent = tree.read(
+      'apps/test-project/proj_test_project/session_warn_agent/session.py',
+      'utf-8',
+    );
+    expect(sessionContent).toContain('S3SessionManager');
+
+    warnSpy.mockRestore();
+  });
+
+  it('should not warn when session is explicitly in-memory with infra=none', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    await pyAgentGenerator(tree, {
+      project: 'test-project',
+      name: 'session-none-agent',
+      infra: 'none',
+      session: 'in-memory',
+      iac: 'cdk',
+    });
+
+    expect(warnSpy).not.toHaveBeenCalled();
+
+    warnSpy.mockRestore();
+  });
+
+  it('should support session s3 for the langchain framework', async () => {
+    await pyAgentGenerator(tree, {
+      project: 'test-project',
+      name: 'langchain-session-agent',
+      framework: 'langchain',
+      session: 's3',
+      infra: 'none',
+      iac: 'cdk',
+    });
+  });
+
+  it('should throw when session dynamodb-s3 is requested for the strands framework', async () => {
+    await expect(
+      pyAgentGenerator(tree, {
+        project: 'test-project',
+        name: 'strands-dynamodb-agent',
+        session: 'dynamodb-s3',
+        infra: 'none',
+        iac: 'cdk',
+      }),
+    ).rejects.toThrow(
+      "Unsupported combination: session 'dynamodb-s3' is not implemented for the strands framework (supported: s3, in-memory).",
+    );
+  });
+
+  it('should not throw when session is explicitly in-memory for the langchain framework', async () => {
+    // Awaiting directly (rather than wrapping the resolved GeneratorCallback in
+    // `.resolves.not.toThrow()`, which would call it) is enough: an unhandled
+    // rejection here fails the test.
+    await pyAgentGenerator(tree, {
+      project: 'test-project',
+      name: 'langchain-explicit-session-agent',
+      framework: 'langchain',
+      session: 'in-memory',
+      infra: 'none',
+      iac: 'cdk',
+    });
+  });
+
+  it('should not throw when session is explicitly dynamodb-s3 for the langchain framework', async () => {
+    await pyAgentGenerator(tree, {
+      project: 'test-project',
+      name: 'langchain-dynamodb-agent',
+      framework: 'langchain',
+      session: 'dynamodb-s3',
+      infra: 'none',
+      iac: 'cdk',
+    });
+  });
+
+  it('should default to session s3 for the langchain framework', async () => {
+    await pyAgentGenerator(tree, {
+      project: 'test-project',
+      name: 'langchain-default-session-agent',
+      framework: 'langchain',
+      infra: 'none',
+      iac: 'cdk',
+    });
+
+    const sessionContent = tree.read(
+      'apps/test-project/proj_test_project/langchain_default_session_agent/session.py',
+      'utf-8',
+    );
+    expect(sessionContent).toContain('S3CheckpointSaver');
+  });
+
+  it('should generate session.py using S3 storage by default for the strands framework', async () => {
+    await pyAgentGenerator(tree, {
+      project: 'test-project',
+      infra: 'none',
+      iac: 'cdk',
+    });
+
+    const sessionContent = tree.read(
+      'apps/test-project/proj_test_project/agent/session.py',
+      'utf-8',
+    );
+    expect(sessionContent).toMatchSnapshot('session.py (s3)');
+  });
+
+  it('should generate session.py returning None when session is in-memory', async () => {
+    await pyAgentGenerator(tree, {
+      project: 'test-project',
+      infra: 'none',
+      session: 'in-memory',
+      iac: 'cdk',
+    });
+
+    const sessionContent = tree.read(
+      'apps/test-project/proj_test_project/agent/session.py',
+      'utf-8',
+    );
+    expect(sessionContent).toMatchSnapshot('session.py (in-memory)');
+  });
+
+  it('should wire session_manager directly into the Agent constructor for HTTP protocol', async () => {
+    await pyAgentGenerator(tree, {
+      project: 'test-project',
+      infra: 'none',
+      iac: 'cdk',
+    });
+
+    const agentContent = tree.read(
+      'apps/test-project/proj_test_project/agent/agent.py',
+      'utf-8',
+    );
+    expect(agentContent).toContain('from .session import get_session_manager');
+    expect(agentContent).toContain('session_manager=get_session_manager()');
+  });
+
+  it('should wire session_manager_provider via StrandsAgentConfig for AG-UI protocol', async () => {
+    await pyAgentGenerator(tree, {
+      project: 'test-project',
+      protocol: 'ag-ui',
+      infra: 'none',
+      iac: 'cdk',
+    });
+
+    const mainContent = tree.read(
+      'apps/test-project/proj_test_project/agent/main.py',
+      'utf-8',
+    );
+    expect(mainContent).toContain(
+      'from ag_ui_strands import StrandsAgent, StrandsAgentConfig',
+    );
+    expect(mainContent).toContain('from .session import get_session_manager');
+    expect(mainContent).toContain('config=StrandsAgentConfig(');
+    expect(mainContent).toContain(
+      'session_manager_provider=lambda _input_data: get_session_manager()',
+    );
+    // AG-UI wires the session manager on the adapter, not the template Agent itself.
+    const agentContent = tree.read(
+      'apps/test-project/proj_test_project/agent/agent.py',
+      'utf-8',
+    );
+    expect(agentContent).not.toContain('session_manager=get_session_manager()');
+  });
+
+  it('should generate session.py returning InMemorySaver for the langchain framework', async () => {
+    await pyAgentGenerator(tree, {
+      project: 'test-project',
+      framework: 'langchain',
+      session: 'in-memory',
+      infra: 'none',
+      iac: 'cdk',
+    });
+
+    const checkpointerContent = tree.read(
+      'apps/test-project/proj_test_project/agent/session.py',
+      'utf-8',
+    );
+    expect(checkpointerContent).toMatchSnapshot('session.py (in-memory)');
+  });
+
+  it('should generate session.py using DynamoDBSaver when session is dynamodb-s3', async () => {
+    await pyAgentGenerator(tree, {
+      project: 'test-project',
+      framework: 'langchain',
+      session: 'dynamodb-s3',
+      infra: 'none',
+      iac: 'cdk',
+    });
+
+    const checkpointerContent = tree.read(
+      'apps/test-project/proj_test_project/agent/session.py',
+      'utf-8',
+    );
+    expect(checkpointerContent).toMatchSnapshot('session.py (dynamodb-s3)');
+  });
+
+  it('should generate session.py using S3CheckpointSaver when session is s3', async () => {
+    await pyAgentGenerator(tree, {
+      project: 'test-project',
+      framework: 'langchain',
+      session: 's3',
+      infra: 'none',
+      iac: 'cdk',
+    });
+
+    const checkpointerContent = tree.read(
+      'apps/test-project/proj_test_project/agent/session.py',
+      'utf-8',
+    );
+    expect(checkpointerContent).toMatchSnapshot('session.py (s3)');
+    expect(checkpointerContent).toContain(
+      '.core.s3_checkpoint_saver_langchain',
+    );
+    expect(checkpointerContent).toContain('S3CheckpointSaver');
+
+    // Shared (not per-agent) — no agent-specific templating is needed.
+    const moduleDirs = tree.children('packages/common/agent_connection');
+    const moduleName = moduleDirs.find((c) => c.includes('agent_connection'))!;
+    expect(
+      tree.exists(
+        `packages/common/agent_connection/${moduleName}/core/s3_checkpoint_saver_langchain.py`,
+      ),
+    ).toBeTruthy();
+  });
+
+  it('should not generate s3_checkpoint_saver_langchain.py when session is not s3', async () => {
+    await pyAgentGenerator(tree, {
+      project: 'test-project',
+      framework: 'langchain',
+      session: 'dynamodb-s3',
+      infra: 'none',
+      iac: 'cdk',
+    });
+
+    const moduleDirs = tree.children('packages/common/agent_connection');
+    const moduleName = moduleDirs.find((c) => c.includes('agent_connection'))!;
+    expect(
+      tree.exists(
+        `packages/common/agent_connection/${moduleName}/core/s3_checkpoint_saver_langchain.py`,
+      ),
+    ).toBeFalsy();
+  });
+
+  it('should generate the Strands session.py instead of a LangChain checkpointer', async () => {
+    await pyAgentGenerator(tree, {
+      project: 'test-project',
+      infra: 'none',
+      iac: 'cdk',
+    });
+
+    expect(
+      tree.exists('apps/test-project/proj_test_project/agent/session.py'),
+    ).toBeTruthy();
   });
 });

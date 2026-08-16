@@ -391,6 +391,17 @@ describe('smoke test - dungeon-adventure', () => {
       force: true,
     });
 
+    // Check story-agent.ts matches story-agent.ts.old.template before modification
+    const storyAgentConstructPath = `${opts.cwd}/packages/common/constructs/src/app/agents/story-agent/story-agent.ts`;
+    expectFileMatchesOldTemplate(
+      storyAgentConstructPath,
+      dungeonFile('2/agents/story-agent.ts.old.template'),
+    );
+    writeFromTemplate(
+      storyAgentConstructPath,
+      '2/agents/story-agent.ts.template',
+    );
+
     writeFromTemplate(
       `${opts.cwd}/packages/infra/src/stacks/application-stack.ts`,
       '2/stacks/application-stack.ts.template',
@@ -410,14 +421,6 @@ describe('smoke test - dungeon-adventure', () => {
     }
 
     // Module 3: Story Agent
-
-    // Check main.py matches main.py.old.template before modification
-    const mainPyPath = `${opts.cwd}/packages/story/dungeon_adventure_story/agent/main.py`;
-    expectFileMatchesOldTemplate(
-      mainPyPath,
-      dungeonFile('3/main.py.old.template'),
-    );
-    writeFromTemplate(mainPyPath, '3/main.py.template');
 
     // Check agent.py matches agent.py.old.template before modification
     const agentPyPath = `${opts.cwd}/packages/story/dungeon_adventure_story/agent/agent.py`;
