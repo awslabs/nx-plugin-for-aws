@@ -20,6 +20,7 @@ import {
   parsePipRequirementsLine,
   VersionOperator,
 } from 'pip-requirements-js';
+import { parseDocument } from 'yaml';
 import { applyGritQL } from '../packages/nx-plugin/src/utils/ast';
 import { isNxPackage } from '../packages/nx-plugin/src/utils/version-upgrade-migration/nx-package-updates';
 import { registerNxPackageUpdates } from '../packages/nx-plugin/src/utils/version-upgrade-migration/register';
@@ -435,6 +436,34 @@ const getUpdatedMiseVersions = (): Record<string, string> =>
     ]),
   );
 
+/**
+ * Moves the Smithy CLI version CI installs on Windows onto `newVersion`.
+ *
+ * Windows resolves the CLI from the PATH rather than through mise, so the version
+ * lives in the workflow action rather than in `versions.ts`. Left behind, it fails
+ * every Windows Smithy build: the CLI refuses a model built against a newer
+ * `smithy-model` than its own.
+ */
+const updateWindowsSmithyCli = (tree: FsTree, newVersion: string): void => {
+  const actionPath = '.github/actions/init-monorepo/action.yml';
+  const action = tree.read(actionPath, 'utf-8');
+  if (!action) {
+    console.warn(`Could not read ${actionPath}`);
+    return;
+  }
+  const document = parseDocument(action);
+  const pin = ['inputs', 'smithy-version', 'default'];
+  if (!document.hasIn(pin)) {
+    console.warn(`Could not find ${pin.join('.')} in ${actionPath}`);
+    return;
+  }
+  document.setIn(pin, newVersion);
+  // `lineWidth: 0` disables wrapping, so the long descriptions and shell scripts
+  // this document holds come back out on the lines they went in on.
+  tree.write(actionPath, document.toString({ lineWidth: 0 }));
+  console.log(`Updated the Windows Smithy CLI to ${newVersion}`);
+};
+
 const main = async () => {
   // Parse command line arguments
   const isDryRun = process.argv.includes('--dry-run');
@@ -510,6 +539,12 @@ const main = async () => {
       'packages/nx-plugin/src/utils/versions.ts',
       'MISE_VERSIONS',
     );
+
+    // Keep the Smithy CLI CI installs on Windows in step with the mise pin
+    const smithyChange = miseChanges.find((change) => change.name === 'smithy');
+    if (smithyChange) {
+      updateWindowsSmithyCli(tree, smithyChange.newVersion);
+    }
 
     // Update vendored git-secrets
     const gitSecretsChange = await updateGitSecrets(tree);

@@ -32,7 +32,9 @@ export const collections = {
     loader: docsLoader(),
     schema: docsSchema({
       extend: (context) =>
-        blogSchema(context).and(videosSchema).and(optionFilterSchema),
+        blogSchema(context)
+          .extend(videosSchema.shape)
+          .extend(optionFilterSchema.shape),
     }),
   }),
 };
