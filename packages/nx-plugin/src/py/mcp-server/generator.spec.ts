@@ -10,6 +10,7 @@ import {
   type Tree,
   writeJson,
 } from '@nx/devkit';
+import yaml from 'js-yaml';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
@@ -70,6 +71,28 @@ dev = []
 [tool.uv]
 dev-dependencies = []
 `,
+    );
+  });
+
+  it('should register the MCP inspector as a rejected pnpm build', async () => {
+    tree.write('pnpm-workspace.yaml', 'packages:\n  - packages/*\n');
+
+    await pyMcpServerGenerator(tree, {
+      project: 'test-project',
+      infra: 'none',
+      iac: 'cdk',
+    });
+
+    const workspace = yaml.load(
+      tree.read('pnpm-workspace.yaml', 'utf-8')!,
+    ) as Record<string, any>;
+    // `false` (not `true`): the postinstall no-ops when the package is
+    // installed as a dependency, so pnpm should skip it rather than error.
+    expect(workspace.allowBuilds['@modelcontextprotocol/inspector']).toBe(
+      false,
+    );
+    expect(workspace.onlyBuiltDependencies ?? []).not.toContain(
+      '@modelcontextprotocol/inspector',
     );
   });
 

@@ -282,6 +282,28 @@ describe('ts#mcp-server generator', () => {
     expect(tree.exists('apps/test-project/package.json')).toBeTruthy();
   });
 
+  it('should register the MCP inspector as a rejected pnpm build', async () => {
+    tree.write('pnpm-workspace.yaml', 'packages:\n  - packages/*\n');
+
+    await tsMcpServerGenerator(tree, {
+      project: 'test-project',
+      infra: 'none',
+      iac: 'cdk',
+    });
+
+    const workspace = yaml.load(
+      tree.read('pnpm-workspace.yaml', 'utf-8')!,
+    ) as Record<string, any>;
+    // `false` (not `true`): the postinstall no-ops when the package is
+    // installed as a dependency, so pnpm should skip it rather than error.
+    expect(workspace.allowBuilds['@modelcontextprotocol/inspector']).toBe(
+      false,
+    );
+    expect(workspace.onlyBuiltDependencies ?? []).not.toContain(
+      '@modelcontextprotocol/inspector',
+    );
+  });
+
   it('should handle project without sourceRoot', async () => {
     // Create project without sourceRoot
     addProjectConfiguration(tree, 'no-source-root', {
