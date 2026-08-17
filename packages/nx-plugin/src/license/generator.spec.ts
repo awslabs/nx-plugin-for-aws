@@ -280,30 +280,13 @@ describe('license generator', () => {
       expect(config).toContain('pythonCollector');
     });
 
-    it('should add MCP exceptions when MCP server project exists (license after mcp)', async () => {
+    it('should not add MCP exceptions when MCP server project exists', async () => {
       addProjectConfiguration(tree, 'my-project', {
         root: 'packages/my-project',
         sourceRoot: 'packages/my-project/src',
         metadata: {
           components: [
             { generator: 'ts#mcp-server', path: 'src/mcp', name: 'my-mcp' },
-          ],
-        } as any,
-      });
-
-      await licenseGenerator(tree, options);
-
-      const config = tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8')!;
-      expect(config).toContain('@modelcontextprotocol/inspector');
-    });
-
-    it('should not add exceptions when no MCP projects exist', async () => {
-      addProjectConfiguration(tree, 'my-project', {
-        root: 'packages/my-project',
-        sourceRoot: 'packages/my-project/src',
-        metadata: {
-          components: [
-            { generator: 'ts#trpc-api', path: 'src/api', name: 'my-api' },
           ],
         } as any,
       });
@@ -385,26 +368,13 @@ describe('license generator', () => {
       ).toContain('{workspaceRoot}/**/uv.lock');
     });
 
-    it('should add MCP exceptions when mcp-server runs after license generator', async () => {
-      const { ensureLicenseExceptions } = await import('./config');
-      const { MCP_INSPECTOR_EXCEPTIONS } = await import('./known-exceptions');
-
-      await licenseGenerator(tree, options);
-      let config = tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8')!;
-      expect(config).not.toContain('@modelcontextprotocol/inspector');
-
-      await ensureLicenseExceptions(tree, MCP_INSPECTOR_EXCEPTIONS);
-      config = tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8')!;
-      expect(config).toContain('@modelcontextprotocol/inspector');
-    });
-
     it('should be no-op when ensure functions run before license generator', async () => {
       const { ensurePythonLicenseCollector, ensureLicenseExceptions } =
         await import('./config');
-      const { MCP_INSPECTOR_EXCEPTIONS } = await import('./known-exceptions');
+      const { AG_UI_LANGGRAPH_EXCEPTIONS } = await import('./known-exceptions');
 
       await ensurePythonLicenseCollector(tree);
-      await ensureLicenseExceptions(tree, MCP_INSPECTOR_EXCEPTIONS);
+      await ensureLicenseExceptions(tree, AG_UI_LANGGRAPH_EXCEPTIONS);
 
       expect(tree.exists(AWS_NX_PLUGIN_CONFIG_FILE_NAME)).toBeFalsy();
     });
@@ -435,11 +405,11 @@ describe('license generator', () => {
         } as any,
       });
 
-      // Second run: should now detect python + mcp
+      // Second run: should now detect python
       await licenseGenerator(tree, options);
       config = tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8')!;
       expect(config).toContain('pythonCollector');
-      expect(config).toContain('@modelcontextprotocol/inspector');
+      expect(config).not.toContain('@modelcontextprotocol/inspector');
     });
   });
 });

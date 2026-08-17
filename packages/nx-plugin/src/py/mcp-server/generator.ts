@@ -10,8 +10,6 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { ensureLicenseExceptions } from '../../license/config';
-import { MCP_INSPECTOR_EXCEPTIONS } from '../../license/known-exceptions';
 import {
   addPyDependencies,
   addTsDependencies,
@@ -40,6 +38,7 @@ import {
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
 import { toProjectRelativePath } from '../../utils/paths';
+import { registerPnpmBuiltDependencies } from '../../utils/pnpm-workspace';
 import { assignPort } from '../../utils/port';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
@@ -244,6 +243,14 @@ export const pyMcpServerGenerator = async (
     ...(iac ? { iac } : {}),
   };
 
+  // The MCP inspector has a postinstall script that cascades installs into its
+  // client packages, which no-ops when the package is installed as a dependency.
+  // Register it as an explicitly-rejected build so pnpm 11's default
+  // `strictDepBuilds=true` skips it instead of failing the install.
+  registerPnpmBuiltDependencies(tree, {
+    '@modelcontextprotocol/inspector': false,
+  });
+
   addPyDependencies(tree, DEPENDENCIES, {
     metadata,
     projectRoot: project.root,
@@ -332,8 +339,6 @@ export const pyMcpServerGenerator = async (
   );
 
   await addGeneratorMetricsIfApplicable(tree, [PY_MCP_SERVER_GENERATOR_INFO]);
-
-  await ensureLicenseExceptions(tree, MCP_INSPECTOR_EXCEPTIONS);
 
   await formatFilesInSubtree(tree);
   return () =>

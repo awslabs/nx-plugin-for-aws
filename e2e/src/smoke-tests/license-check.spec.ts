@@ -52,8 +52,6 @@ describe('smoke test - license-check', () => {
       if (name.startsWith('@types/')) continue;
       // mariadb is LGPL — used to verify failure detection in a later test
       if (name === 'mariadb') continue;
-      // MCP Inspector tarballs omit the LICENSE file — covered by known-exceptions
-      if (name.startsWith('@modelcontextprotocol/inspector')) continue;
       tsDependencies[name] = version as string;
     }
     rootPkg.devDependencies = {

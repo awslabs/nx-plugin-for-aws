@@ -4,8 +4,6 @@
  */
 import { getProjects, readNxJson, type Tree, updateNxJson } from '@nx/devkit';
 import { PY_AGENT_GENERATOR_INFO } from '../py/agent/generator';
-import { PY_MCP_SERVER_GENERATOR_INFO } from '../py/mcp-server/generator';
-import { TS_MCP_SERVER_GENERATOR_INFO } from '../ts/mcp-server/generator';
 import { ensureAwsNxPluginConfig } from '../utils/config/utils';
 import { formatFilesInSubtree } from '../utils/format';
 import { addGeneratorMetricsIfApplicable } from '../utils/metrics';
@@ -23,10 +21,7 @@ import {
   updateLicenseCheckTargetInputs,
   writeLicenseConfig,
 } from './config';
-import {
-  AG_UI_LANGGRAPH_EXCEPTIONS,
-  MCP_INSPECTOR_EXCEPTIONS,
-} from './known-exceptions';
+import { AG_UI_LANGGRAPH_EXCEPTIONS } from './known-exceptions';
 import type { LicenseGeneratorSchema } from './schema';
 import { SYNC_GENERATOR_NAME } from './sync/generator';
 
@@ -130,18 +125,12 @@ const writeLicenseCheckTarget = async (tree: Tree): Promise<void> => {
 
 const addExceptionsForExistingProjects = async (tree: Tree): Promise<void> => {
   const projects = getProjects(tree);
-  let needsMcp = false;
   // A LangChain AG-UI agent pulls jsonpatch/jsonpointer (BSD-3-Clause but with
   // only free-text metadata) via langchain-core. The py#agent generator adds
   // these exceptions itself, but if the license generator runs afterwards (or
   // the agent predates the dependency-check block) they may be missing, so
   // re-assert them here when such an agent exists.
   let needsLangchain = false;
-
-  const mcpIds = [
-    TS_MCP_SERVER_GENERATOR_INFO.id,
-    PY_MCP_SERVER_GENERATOR_INFO.id,
-  ];
 
   for (const [, config] of projects) {
     const components =
@@ -150,9 +139,6 @@ const addExceptionsForExistingProjects = async (tree: Tree): Promise<void> => {
       [];
     for (const comp of components) {
       const gen = comp.generator ?? comp;
-      if (typeof gen === 'string' && mcpIds.includes(gen)) {
-        needsMcp = true;
-      }
       if (
         gen === PY_AGENT_GENERATOR_INFO.id &&
         comp.framework === 'langchain'
@@ -162,13 +148,8 @@ const addExceptionsForExistingProjects = async (tree: Tree): Promise<void> => {
     }
   }
 
-  const exceptions = [
-    ...(needsMcp ? MCP_INSPECTOR_EXCEPTIONS : []),
-    ...(needsLangchain ? AG_UI_LANGGRAPH_EXCEPTIONS : []),
-  ];
-
-  if (exceptions.length > 0) {
-    await ensureLicenseExceptions(tree, exceptions);
+  if (needsLangchain) {
+    await ensureLicenseExceptions(tree, AG_UI_LANGGRAPH_EXCEPTIONS);
   }
 };
 
