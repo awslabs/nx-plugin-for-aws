@@ -86,6 +86,11 @@ runs:
       with:
         node-version: 22
         registry-url: 'https://registry.npmjs.org'
+    - name: Compute the failed-run uv cache key
+      if: ${{ inputs.setup-uv == 'true' && inputs.enable-uv-cache == 'true' }}
+      id: uv-failed-cache-key
+      shell: bash
+      run: echo "key=uv-failed-${{ runner.os }}-${{ hashFiles('packages/nx-plugin/src/utils/versions.ts') }}-${{ github.job }}${{ inputs.uv-cache-suffix && format('-{0}', inputs.uv-cache-suffix) || '' }}" >> "$GITHUB_OUTPUT"
     - name: Install the latest version of uv
       if: ${{ inputs.setup-uv == 'true' }}
       uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
@@ -110,6 +115,32 @@ runs:
         # finish had downloaded — leaving every other job to fetch the rest from
         # PyPI forever. Per-job entries each converge on that job's own set.
         cache-suffix: ${{ github.job }}${{ inputs.uv-cache-suffix && format('-{0}', inputs.uv-cache-suffix) || '' }}
+    # setup-uv saves its cache from a post step declared `post-if: success()`, so
+    # a job that fails never saves one — yet the jobs that fail on a PyPI outage
+    # are exactly the ones that most need a warm cache next time, and a leg can
+    # otherwise fail on a fresh package several runs in a row. This restores what
+    # a previous failed attempt managed to download, on top of whatever setup-uv
+    # restored; uv's cache is additive, so the two merge. `restore-keys` takes
+    # the newest entry for this job, as the run id/attempt suffix makes each key
+    # unique.
+    - name: Restore uv cache from a previous failed run
+      if: ${{ inputs.setup-uv == 'true' && inputs.enable-uv-cache == 'true' }}
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ${{ runner.os == 'Windows' && 'C:\uv-cache' || '/tmp/setup-uv-cache' }}
+        key: ${{ steps.uv-failed-cache-key.outputs.key }}-${{ github.run_id }}-${{ github.run_attempt }}
+        restore-keys: ${{ steps.uv-failed-cache-key.outputs.key }}-
+    # Exposed so a job can save the cache after a failing test step — see the
+    # `save-uv-cache-on-failure` action. A composite action's own steps all run
+    # before the job's test step, so it cannot observe that failure itself.
+    - name: Export the failed-run uv cache inputs
+      if: ${{ inputs.setup-uv == 'true' && inputs.enable-uv-cache == 'true' }}
+      shell: bash
+      run: |
+        {
+          echo "UV_FAILED_CACHE_KEY=${{ steps.uv-failed-cache-key.outputs.key }}-${{ github.run_id }}-${{ github.run_attempt }}"
+          echo "UV_CACHE_PATH=${{ runner.os == 'Windows' && 'C:\uv-cache' || '/tmp/setup-uv-cache' }}"
+        } >> "$GITHUB_ENV"
     - name: Configure uv retries
       if: ${{ inputs.setup-uv == 'true' }}
       shell: bash
