@@ -10,7 +10,7 @@ inputs:
     required: false
     default: 'true'
   enable-uv-cache:
-    description: 'Enable the uv download cache. Disable for jobs (e.g. local-dev smoke tests) that spawn many uv dev servers killed mid-run, which can leave the cache in a state where the post-job `uv cache prune` hangs.'
+    description: 'Enable the uv download cache, so wheels are restored from the Actions cache instead of refetched from PyPI on every job.'
     required: false
     default: 'true'
   setup-bun:
@@ -21,6 +21,18 @@ inputs:
     description: 'Install uv/Python. Disable for jobs that do not run Python tooling.'
     required: false
     default: 'true'
+  uv-http-retries:
+    description: 'Value for UV_HTTP_RETRIES, applied to every uv invocation in the job. Raised above uv''s default of 3 to ride out intermittent PyPI 5xx responses.'
+    required: false
+    default: '8'
+  uv-cache-suffix:
+    description: 'Extra suffix for the uv cache key, combined with the job name. Set to the matrix value in matrix jobs, whose job name alone is identical across legs.'
+    required: false
+    default: ''
+  prune-uv-cache:
+    description: 'Run `uv cache prune` before saving the cache. Off because smoke tests kill uv dev servers mid-run, which leaves the cache in a state where the prune hangs or exits non-zero and fails the job even when every test passed.'
+    required: false
+    default: 'false'
   setup-terraform:
     description: 'Install Terraform. Disable for jobs that do not run Terraform.'
     required: false
@@ -80,6 +92,30 @@ runs:
       with:
         version: 'latest'
         enable-cache: ${{ inputs.enable-uv-cache }}
+        prune-cache: ${{ inputs.prune-uv-cache }}
+        # Key the cache on the versions the generators vend, since the Python
+        # projects the smoke tests build are generated rather than checked in —
+        # the default glob finds no pyproject.toml/uv.lock to hash.
+        cache-dependency-glob: packages/nx-plugin/src/utils/versions.ts
+        # A fixed path rather than the default under `$RUNNER_TEMP`, whose
+        # CodeBuild value contains a per-job segment. GitHub derives a cache
+        # entry's version from the path it was saved from, so a varying path
+        # means a saved entry can never be restored by a later job.
+        cache-local-path: ${{ runner.os == 'Windows' && 'C:\uv-cache' || '/tmp/setup-uv-cache' }}
+        # Jobs that never invoke uv leave nothing to cache; without this the
+        # post-job save throws and fails a job whose tests all passed.
+        ignore-nothing-to-cache: 'true'
+        # Each job gets its own entry. On a hit the action skips saving, so a
+        # single shared key would freeze the cache at whatever the first job to
+        # finish had downloaded — leaving every other job to fetch the rest from
+        # PyPI forever. Per-job entries each converge on that job's own set.
+        cache-suffix: ${{ github.job }}${{ inputs.uv-cache-suffix && format('-{0}', inputs.uv-cache-suffix) || '' }}
+    - name: Configure uv retries
+      if: ${{ inputs.setup-uv == 'true' }}
+      shell: bash
+      # Set on the job environment so every `uv` invocation inherits it,
+      # including those spawned by Nx targets in generated workspaces.
+      run: echo "UV_HTTP_RETRIES=${{ inputs.uv-http-retries }}" >> "$GITHUB_ENV"
     - name: Set up QEMU
       if: ${{ runner.os != 'Windows' && inputs.container-tools == 'true' }}
       uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
