@@ -25,6 +25,10 @@ inputs:
     description: 'Value for UV_HTTP_RETRIES, applied to every uv invocation in the job. Raised above uv''s default of 3 to ride out intermittent PyPI 5xx responses.'
     required: false
     default: '8'
+  uv-cache-suffix:
+    description: 'Extra suffix for the uv cache key, combined with the job name. Set to the matrix value in matrix jobs, whose job name alone is identical across legs.'
+    required: false
+    default: ''
   prune-uv-cache:
     description: 'Run `uv cache prune` before saving the cache. Off because smoke tests kill uv dev servers mid-run, which leaves the cache in a state where the prune hangs or exits non-zero and fails the job even when every test passed.'
     required: false
@@ -101,6 +105,11 @@ runs:
         # Jobs that never invoke uv leave nothing to cache; without this the
         # post-job save throws and fails a job whose tests all passed.
         ignore-nothing-to-cache: 'true'
+        # Each job gets its own entry. On a hit the action skips saving, so a
+        # single shared key would freeze the cache at whatever the first job to
+        # finish had downloaded — leaving every other job to fetch the rest from
+        # PyPI forever. Per-job entries each converge on that job's own set.
+        cache-suffix: ${{ github.job }}${{ inputs.uv-cache-suffix && format('-{0}', inputs.uv-cache-suffix) || '' }}
     - name: Configure uv retries
       if: ${{ inputs.setup-uv == 'true' }}
       shell: bash
