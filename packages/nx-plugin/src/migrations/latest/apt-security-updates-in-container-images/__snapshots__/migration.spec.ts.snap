@@ -1,0 +1,90 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`apt-security-updates-in-container-images migration > adds the security updates to a py#agent Dockerfile 1`] = `
+"FROM public.ecr.aws/docker/library/python:3.14-slim
+
+# Apply the distribution's security updates: base image tags lag behind the
+# security suite, so its OS packages carry fixed HIGH/CRITICAL vulnerabilities
+# flagged by the image scan.
+RUN apt-get update && \\
+    apt-get upgrade -y --no-install-recommends && \\
+    rm -rf /var/lib/apt/lists/*
+
+# Remove the base image's pip: the agent runs from the bundled environment and
+# never needs it at runtime, and pip's vendored packages carry known
+# HIGH/CRITICAL vulnerabilities flagged by the image scan.
+RUN python -m pip uninstall -y pip && \\
+    rm -rf /usr/local/lib/python*/site-packages/pip \\
+           /usr/local/lib/python*/site-packages/pip-*.dist-info
+
+WORKDIR /app
+
+# Copy bundled package
+COPY . /app
+
+EXPOSE 8080
+
+ENV PYTHONPATH=/app
+ENV PATH="/app/bin:\${PATH}"
+
+CMD ["python", "bin/opentelemetry-instrument", "python", "-m", "proj_py_project.my_agent.main"]
+"
+`;
+
+exports[`apt-security-updates-in-container-images migration > adds the security updates to a py#mcp-server Dockerfile 1`] = `
+"FROM public.ecr.aws/docker/library/python:3.14-slim
+
+# Apply the distribution's security updates: base image tags lag behind the
+# security suite, so its OS packages carry fixed HIGH/CRITICAL vulnerabilities
+# flagged by the image scan.
+RUN apt-get update && \\
+    apt-get upgrade -y --no-install-recommends && \\
+    rm -rf /var/lib/apt/lists/*
+
+# Remove the base image's pip: the server runs from the bundled environment and
+# never needs it at runtime, and pip's vendored packages carry known
+# HIGH/CRITICAL vulnerabilities flagged by the image scan.
+RUN python -m pip uninstall -y pip && \\
+    rm -rf /usr/local/lib/python*/site-packages/pip \\
+           /usr/local/lib/python*/site-packages/pip-*.dist-info
+
+WORKDIR /app
+
+# Copy bundled package
+COPY . /app
+
+EXPOSE 8000
+
+ENV PYTHONPATH=/app
+
+CMD ["python", "bin/opentelemetry-instrument", "python", "-m", "uvicorn", "proj_py_project.my_mcp.http:app", "--host", "0.0.0.0", "--port", "8000"]
+"
+`;
+
+exports[`apt-security-updates-in-container-images migration > adds the security updates to a ts#agent Dockerfile 1`] = `
+"FROM public.ecr.aws/docker/library/node:lts-slim
+
+# Apply the distribution's security updates: base image tags lag behind the
+# security suite, so its OS packages carry fixed HIGH/CRITICAL vulnerabilities
+# flagged by the image scan.
+RUN apt-get update && \\
+    apt-get upgrade -y --no-install-recommends && \\
+    rm -rf /var/lib/apt/lists/*
+
+# Upgrade npm to a version free of known HIGH/CRITICAL vulnerabilities
+RUN npm install -g npm@11.0.0
+
+WORKDIR /app
+
+RUN npm init -y \\
+  && npm install @aws/aws-distro-opentelemetry-node-autoinstrumentation@0.12.0 \\
+  && npm uninstall -g npm
+
+# Copy bundled agent
+COPY index.js /app
+
+EXPOSE 8080
+
+CMD [ "node", "--require", "@aws/aws-distro-opentelemetry-node-autoinstrumentation/register", "index.js" ]
+"
+`;
