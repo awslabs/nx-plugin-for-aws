@@ -99,7 +99,7 @@ describe('smoke test - license-check', () => {
     delete rootPkg.dependencies?.mariadb;
     rootPkg.dependencies = {
       ...rootPkg.dependencies,
-      chalk: '5.6.2',
+      chalk: '6.0.0',
     };
     writeFileSync(rootPkgPath, JSON.stringify(rootPkg, null, 2));
 
