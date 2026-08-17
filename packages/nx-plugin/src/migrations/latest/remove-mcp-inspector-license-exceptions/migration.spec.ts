@@ -2,7 +2,8 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import type { Tree } from '@nx/devkit';
+import { type Tree, updateJson } from '@nx/devkit';
+import yaml from 'js-yaml';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { AWS_NX_PLUGIN_CONFIG_FILE_NAME } from '../../../utils/config/utils';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
@@ -14,6 +15,23 @@ describe('remove mcp inspector license exceptions migration', () => {
   beforeEach(() => {
     tree = createTreeUsingTsSolutionSetup();
   });
+
+  const withInspectorInstalled = () =>
+    updateJson(tree, 'package.json', (json) => {
+      json.devDependencies = {
+        ...json.devDependencies,
+        '@modelcontextprotocol/inspector': '2.2.0',
+      };
+      return json;
+    });
+
+  const readAllowBuilds = () =>
+    (
+      (yaml.load(tree.read('pnpm-workspace.yaml', 'utf-8')!) as Record<
+        string,
+        any
+      >) ?? {}
+    ).allowBuilds ?? {};
 
   const writeConfig = (body: string) =>
     tree.write(
@@ -93,5 +111,40 @@ describe('remove mcp inspector license exceptions migration', () => {
   it('should be a no-op when the workspace has no config file', async () => {
     await expect(migration(tree)).resolves.not.toThrow();
     expect(tree.exists(AWS_NX_PLUGIN_CONFIG_FILE_NAME)).toBeFalsy();
+  });
+
+  it('should reject the inspector build when the workspace has it installed', async () => {
+    tree.write('pnpm-workspace.yaml', 'packages:\n  - packages/*\n');
+    withInspectorInstalled();
+
+    await migration(tree);
+
+    // v2 added a postinstall script, so an upgrading workspace needs the entry
+    // or pnpm 11 fails the install the version sync runs.
+    expect(readAllowBuilds()['@modelcontextprotocol/inspector']).toBe(false);
+  });
+
+  it('should not register the inspector when the workspace does not have it', async () => {
+    tree.write('pnpm-workspace.yaml', 'packages:\n  - packages/*\n');
+
+    await migration(tree);
+
+    expect(readAllowBuilds()).not.toHaveProperty(
+      '@modelcontextprotocol/inspector',
+    );
+  });
+
+  it('should preserve an existing allowBuilds decision for other packages', async () => {
+    tree.write(
+      'pnpm-workspace.yaml',
+      'packages:\n  - packages/*\nallowBuilds:\n  esbuild: true\n',
+    );
+    withInspectorInstalled();
+
+    await migration(tree);
+
+    const allowBuilds = readAllowBuilds();
+    expect(allowBuilds.esbuild).toBe(true);
+    expect(allowBuilds['@modelcontextprotocol/inspector']).toBe(false);
   });
 });
