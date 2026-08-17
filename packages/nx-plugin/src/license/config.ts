@@ -416,6 +416,46 @@ export const ensureLicenseExceptions = async (
 };
 
 /**
+ * Remove the exceptions for the named packages from
+ * `license.dependencies.exceptions`, whatever reason or spdx each carries.
+ * Packages that aren't listed are left alone, as are all other exceptions.
+ *
+ * Scoped to `dependencies: { $scope }` like {@link ensureLicenseExceptions}, so
+ * an `exceptions` array elsewhere in the file isn't matched.
+ */
+export const removeLicenseExceptions = async (
+  tree: Tree,
+  packages: string[],
+): Promise<void> => {
+  if (!tree.exists(AWS_NX_PLUGIN_CONFIG_FILE_NAME)) return;
+
+  const { applyGritQL } = await import('../utils/ast');
+
+  let modified = false;
+  for (const pkg of packages) {
+    const removed = await applyGritQL(
+      tree,
+      AWS_NX_PLUGIN_CONFIG_FILE_NAME,
+      `\`dependencies: { $scope }\` where {
+        $scope <: contains bubble or {
+          \`[$items]\` where {
+            $items <: some bubble \`{ $props }\` as $entry where {
+              $props <: contains \`package: ${JSON.stringify(pkg)}\`,
+              $entry => .
+            }
+          }
+        }
+      }`,
+    );
+    modified ||= removed;
+  }
+
+  if (modified) {
+    await formatFilesInSubtree(tree, AWS_NX_PLUGIN_CONFIG_FILE_NAME);
+  }
+};
+
+/**
  * Add `pythonCollector()` to `license.dependencies.collectors`, unless one is
  * already configured.
  */

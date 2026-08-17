@@ -13,8 +13,6 @@ import {
   updateJson,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { ensureLicenseExceptions } from '../../license/config';
-import { MCP_INSPECTOR_EXCEPTIONS } from '../../license/known-exceptions';
 import { addTsDependencies } from '../../utils/add-dependencies';
 import {
   AGENT_CORE_CONSTRUCTS_PY_DEPENDENCIES,
@@ -361,8 +359,6 @@ export const tsMcpServerGenerator = async (
   );
 
   await addGeneratorMetricsIfApplicable(tree, [TS_MCP_SERVER_GENERATOR_INFO]);
-
-  await ensureLicenseExceptions(tree, MCP_INSPECTOR_EXCEPTIONS);
 
   await formatFilesInSubtree(tree);
   return () =>

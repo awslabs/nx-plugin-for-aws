@@ -15,6 +15,7 @@ import {
   ensureLicenseExceptions,
   ensurePythonLicenseCollector,
   readLicenseConfig,
+  removeLicenseExceptions,
   writeLicenseConfig,
 } from './config';
 import type { LicenseSourceConfig } from './config-types';
@@ -535,8 +536,8 @@ describe('license config', () => {
         expect(noHole(exceptions)).toBe(true);
       });
 
-      it('should add MCP exceptions into a single trailing-comma exception (user repro)', async () => {
-        const { MCP_INSPECTOR_EXCEPTIONS } = await import('./known-exceptions');
+      it('should add exceptions into a single trailing-comma exception (user repro)', async () => {
+        const added = [exception('bar'), exception('baz')];
         writeConfig(`{
   license: {
     dependencies: {
@@ -549,13 +550,13 @@ describe('license config', () => {
   },
 }`);
 
-        await ensureLicenseExceptions(tree, MCP_INSPECTOR_EXCEPTIONS);
+        await ensureLicenseExceptions(tree, added);
 
         const config = readAwsNxPluginConfig(tree);
         const exceptions = (config!.license as any).dependencies.exceptions;
         expect(noHole(exceptions)).toBe(true);
         expect(exceptions[0].package).toBe('foo');
-        expect(exceptions).toHaveLength(1 + MCP_INSPECTOR_EXCEPTIONS.length);
+        expect(exceptions).toHaveLength(1 + added.length);
       });
 
       it('should not create a hole appending across separate calls (forward generator order)', async () => {
@@ -612,6 +613,54 @@ describe('license config', () => {
           'c',
           'd',
         ]);
+      });
+
+      it('should remove named exceptions without disturbing the rest', async () => {
+        writeConfig(`{
+  license: {
+    dependencies: {
+      allow: [],
+      collectors: [],
+      exceptions: [
+        { package: 'a', reason: 'r', spdx: 'MIT' },
+        { package: 'b', reason: 'r', spdx: 'MIT' },
+        { package: 'c', reason: 'r', spdx: 'MIT' },
+      ],
+    },
+  },
+}`);
+
+        await removeLicenseExceptions(tree, ['b', 'missing']);
+
+        const config = readAwsNxPluginConfig(tree);
+        const exceptions = (config!.license as any).dependencies.exceptions;
+        expect(exceptions.map((e: any) => e.package)).toEqual(['a', 'c']);
+        expect(noHole(exceptions)).toBe(true);
+      });
+
+      it('should leave the config untouched when nothing matches', async () => {
+        writeConfig(`{
+  license: {
+    dependencies: {
+      allow: [],
+      collectors: [],
+      exceptions: [
+        { package: 'a', reason: 'r', spdx: 'MIT' },
+      ],
+    },
+  },
+}`);
+        const before = read();
+
+        await removeLicenseExceptions(tree, ['nope']);
+
+        expect(read()).toBe(before);
+      });
+
+      it('should not create a config file when none exists', async () => {
+        await removeLicenseExceptions(tree, ['a']);
+
+        expect(tree.exists(AWS_NX_PLUGIN_CONFIG_FILE_NAME)).toBeFalsy();
       });
 
       it('should not create a hole appending to a multi-line collectors array', async () => {

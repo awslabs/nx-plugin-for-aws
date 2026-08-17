@@ -10,8 +10,6 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { ensureLicenseExceptions } from '../../license/config';
-import { MCP_INSPECTOR_EXCEPTIONS } from '../../license/known-exceptions';
 import {
   addPyDependencies,
   addTsDependencies,
@@ -332,8 +330,6 @@ export const pyMcpServerGenerator = async (
   );
 
   await addGeneratorMetricsIfApplicable(tree, [PY_MCP_SERVER_GENERATOR_INFO]);
-
-  await ensureLicenseExceptions(tree, MCP_INSPECTOR_EXCEPTIONS);
 
   await formatFilesInSubtree(tree);
   return () =>
