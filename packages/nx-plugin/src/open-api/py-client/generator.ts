@@ -10,6 +10,7 @@ import { updateGitIgnore } from '../../utils/git';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { getGeneratorInfo, type NxGeneratorInfo } from '../../utils/nx';
 import { buildOpenApiCodeGenerationData } from '../ts-client/generator';
+import { assertNoClashingPythonNames } from '../utils/codegen-data';
 import { toPythonLiteral } from '../utils/codegen-data/languages';
 import type { CodeGenData } from '../utils/codegen-data/types';
 import type { OpenApiPyClientGeneratorSchema } from './schema';
@@ -33,6 +34,26 @@ export const OPEN_API_PY_CLIENT_DEPENDENCIES = declareDependencies()({
  *  - types.py        — pydantic v2 models + per-op error classes and TypedDicts
  *  - client.py       — sync  client (httpx.Client)      when clientType includes 'sync'
  *  - async_client.py — async client (httpx.AsyncClient) when clientType includes 'async'
+ *
+ * The shape mirrors `open-api#ts-client`, but the two decide a few things
+ * separately rather than through shared code: this generator reads the neutral
+ * `requestShape` from `codegen-data`, while the TypeScript templates still
+ * compute inlining themselves. Where they differ today, for the same spec:
+ *
+ *  - A discriminated object body: TypeScript inlines its fields, Python passes
+ *    the body whole so marshalling can dispatch on the discriminator.
+ *  - A body carrying `additionalProperties`, a union, or `patternProperties`, or
+ *    a body property literally named `body`: TypeScript wraps, Python flattens.
+ *  - An optional (`required: false`) object body: Python flattens its required
+ *    fields into required keyword arguments, so the body is always sent.
+ *  - A primitive `application/json` body: TypeScript sends the raw text, Python
+ *    sends it JSON-encoded.
+ *  - The media type chosen for a body offering several: TypeScript prefers any
+ *    `+json` type, Python only an exact `application/json`.
+ *
+ * Migrating the TypeScript templates onto `requestShape` would collapse these
+ * into one decision; until then they are differences of behaviour, not of
+ * correctness, and are covered by this generator's own tests.
  */
 export const openApiPyClientGenerator = async (
   tree: Tree,
@@ -43,6 +64,12 @@ export const openApiPyClientGenerator = async (
     options.openApiSpecPath,
   );
   const clientType = options.clientType ?? 'both';
+
+  // Checked here rather than in the shared pipeline, so a TypeScript consumer of
+  // the same spec is never failed by a Python-specific name clash.
+  for (const model of data.models) {
+    assertNoClashingPythonNames(model);
+  }
 
   generateOpenApiPyClient(tree, data, options.outputPath, clientType);
 
