@@ -30,6 +30,7 @@ export default defineConfig({
     environment: 'jsdom',
     include: ['src/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
     setupFiles: ['src/utils/mock-project-graph.ts'],
+    globalSetup: ['src/utils/test/warm-python-cache.ts'],
     reporters: ['default'],
     coverage: {
       reportsDirectory: '../../coverage/packages/nx-plugin',
