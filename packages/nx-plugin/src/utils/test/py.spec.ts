@@ -148,15 +148,22 @@ export class PythonVerifier {
         resolver({ ok: false, error: `Invalid JSON from worker: ${line}` });
       }
     });
+    // Kept so a worker that dies can report why, rather than failing whichever
+    // test happened to be waiting with no explanation.
+    let stderr = '';
     proc.stderr.on('data', (chunk) => {
+      stderr += String(chunk);
       // Forward to test output — helps diagnose worker crashes.
       process.stderr.write(chunk);
     });
     // Without this, a missing `uv` raises an uncaught exception rather than
     // failing the test that asked for the worker.
-    proc.on('error', (err) => this.fail(`Could not start worker: ${err}`));
+    proc.on('error', (err) => this.fail(`could not start worker: ${err}`));
     proc.on('exit', (code, signal) => {
-      this.fail(`Worker exited (code=${code} signal=${signal})`);
+      this.fail(
+        `worker exited (code=${code} signal=${signal})` +
+          (stderr.trim() ? `\n${stderr.trim()}` : ''),
+      );
       this.process = undefined;
       this.started = false;
     });
@@ -214,8 +221,17 @@ export class PythonVerifier {
       const details = res.details
         ? `\n  ${JSON.stringify(res.details, null, 2)}`
         : '';
+      const stage =
+        res.error === 'type_check_failed' ? 'type check' : 'compile';
+      // `res.error` is included rather than assumed to be one of the two
+      // sentinels: a worker that died reports its own reason there, and
+      // dropping it left the failure indistinguishable from a real one.
+      const reason =
+        res.error && res.error !== 'compile_failed' && !details
+          ? ` ${res.error}`
+          : '';
       throw new Error(
-        `Python ${res.error === 'type_check_failed' ? 'type check' : 'compile'} failed:${details}\n${res.traceback ?? ''}`,
+        `Python ${stage} failed:${reason}${details}\n${res.traceback ?? ''}`,
       );
     }
   }
