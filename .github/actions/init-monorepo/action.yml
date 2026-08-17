@@ -10,7 +10,7 @@ inputs:
     required: false
     default: 'true'
   enable-uv-cache:
-    description: 'Enable the uv download cache. Disable for jobs (e.g. local-dev smoke tests) that spawn many uv dev servers killed mid-run, which can leave the cache in a state where the post-job `uv cache prune` hangs.'
+    description: 'Enable the uv download cache, so wheels are restored from the Actions cache instead of refetched from PyPI on every job.'
     required: false
     default: 'true'
   setup-bun:
@@ -25,6 +25,10 @@ inputs:
     description: 'Value for UV_HTTP_RETRIES, applied to every uv invocation in the job. Raised above uv''s default of 3 to ride out intermittent PyPI 5xx responses.'
     required: false
     default: '8'
+  prune-uv-cache:
+    description: 'Run `uv cache prune` before saving the cache. Off because smoke tests kill uv dev servers mid-run, which leaves the cache in a state where the prune hangs or exits non-zero and fails the job even when every test passed.'
+    required: false
+    default: 'false'
   setup-terraform:
     description: 'Install Terraform. Disable for jobs that do not run Terraform.'
     required: false
@@ -84,6 +88,19 @@ runs:
       with:
         version: 'latest'
         enable-cache: ${{ inputs.enable-uv-cache }}
+        prune-cache: ${{ inputs.prune-uv-cache }}
+        # Key the cache on the versions the generators vend, since the Python
+        # projects the smoke tests build are generated rather than checked in —
+        # the default glob finds no pyproject.toml/uv.lock to hash.
+        cache-dependency-glob: packages/nx-plugin/src/utils/versions.ts
+        # A fixed path rather than the default under `$RUNNER_TEMP`, whose
+        # CodeBuild value contains a per-job segment. GitHub derives a cache
+        # entry's version from the path it was saved from, so a varying path
+        # means a saved entry can never be restored by a later job.
+        cache-local-path: ${{ runner.os == 'Windows' && 'C:\uv-cache' || '/tmp/setup-uv-cache' }}
+        # Jobs that never invoke uv leave nothing to cache; without this the
+        # post-job save throws and fails a job whose tests all passed.
+        ignore-nothing-to-cache: 'true'
     - name: Configure uv retries
       if: ${{ inputs.setup-uv == 'true' }}
       shell: bash
