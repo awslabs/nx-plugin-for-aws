@@ -9,6 +9,19 @@ const pyEnumValue = (member) => toPythonLiteral(member.value);
  */
 const isDiscriminatorTag = (prop) => !!prop.discriminatorValue;
 
+/**
+ * Render text from the spec as a Python docstring body. A description is
+ * arbitrary text: a backslash would start an escape sequence and a trailing one
+ * would escape the closing quotes, so it goes through the same escaping as any
+ * other literal, with the surrounding quotes stripped.
+ */
+const pyDocstring = (text) =>
+  toPythonLiteral(String(text ?? '').replace(/\r?\n/g, ' ')).slice(1, -1);
+
+/** A model's docstring text, noting deprecation where the spec declares it. */
+const modelDocstring = (model) =>
+  pyDocstring(model.description || '') + (model.deprecated ? ' (deprecated)' : '');
+
 const fieldAnnotation = (prop) => {
   let base;
   if (prop.isEnum && Array.isArray(prop.enum) && prop.enum.length > 0) {
@@ -31,14 +44,11 @@ const fieldCallFor = (property) => {
   const snake = property.pythonName || property.name;
   const aliasNeeded = snake !== property.name;
   const args = [];
-  const needsDefault =
-    !isDiscriminatorTag(property) &&
-    (!property.isRequired || property.isNullable);
+  const needsDefault = !isDiscriminatorTag(property) && !property.isRequired;
   if (needsDefault) args.push('default=None');
   if (aliasNeeded) args.push(`alias="${property.name}"`);
   if (property.description) {
-    const desc = property.description.replace(/"/g, "'").replace(/\n/g, ' ');
-    args.push(`description="${desc}"`);
+    args.push(`description=${toPythonLiteral(property.description.replace(/\r?\n/g, ' '))}`);
   }
   if (property.isReadOnly) args.push('frozen=True');
   if (property.deprecated) args.push('deprecated=True');
@@ -54,9 +64,7 @@ const renderProperty = (property) => {
   const snake = property.pythonName || property.name;
   const typeAnnotation = fieldAnnotation(property);
   const fieldCall = fieldCallFor(property);
-  const needsDefault =
-    !isDiscriminatorTag(property) &&
-    (!property.isRequired || property.isNullable);
+  const needsDefault = !isDiscriminatorTag(property) && !property.isRequired;
   if (fieldCall) {
     return `    ${snake}: ${typeAnnotation} = ${fieldCall}`;
   }
@@ -117,7 +125,7 @@ _%>
 
 class <%- model.pythonClassName %>(BaseModel):
 <%_ if (model.description || model.deprecated) { _%>
-    """<%- (model.description || '').replace(/"/g, "'") %><%- model.deprecated ? ' (deprecated)' : '' %>"""
+    """<%- modelDocstring(model) %>"""
 <%_ } _%>
     model_config = ConfigDict(populate_by_name=True, extra="allow")
 
@@ -131,7 +139,7 @@ class <%- model.pythonClassName %>(BaseModel):
 
 class <%- model.pythonClassName %>(BaseModel):
 <%_ if (model.description || model.deprecated) { _%>
-    """<%- (model.description || '').replace(/"/g, "'") %><%- model.deprecated ? ' (deprecated)' : '' %>"""
+    """<%- modelDocstring(model) %>"""
 <%_ } _%>
     model_config = ConfigDict(populate_by_name=True, extra="allow")
 
@@ -189,7 +197,7 @@ _%>
 <%_ if (model.export === 'enum') { _%>
 <%- model.pythonClassName %> = Literal[<%_ model.enum.forEach((m, i) => { _%><%- i > 0 ? ', ' : '' %><%- pyEnumValue(m) %><%_ }); _%>]
 <%_ if (model.description || model.deprecated) { _%>
-"""<%- (model.description || '').replace(/"/g, "'") %><%- model.deprecated ? ' (deprecated)' : '' %>"""
+"""<%- modelDocstring(model) %>"""
 <%_ } _%>
 <%_ } else if (model.export === 'one-of' || model.export === 'any-of') { _%>
 <%_ /* Classes are already defined above, so references can be unquoted.
@@ -215,12 +223,12 @@ _%>
 <%- model.pythonClassName %> = Union[<%_ model.properties.forEach((p, i) => { _%><%- i > 0 ? ', ' : '' %><%- p.pythonType || 'Any' %><%_ }); _%>]
 <%_ } _%>
 <%_ if (model.description || model.deprecated) { _%>
-"""<%- (model.description || '').replace(/"/g, "'") %><%- model.deprecated ? ' (deprecated)' : '' %>"""
+"""<%- modelDocstring(model) %>"""
 <%_ } _%>
 <%_ } else if (model.export === 'dictionary' || model.export === 'array' || model.export === 'tuple') { _%>
 <%- model.pythonClassName %> = <%- model.pythonType %>
 <%_ if (model.description || model.deprecated) { _%>
-"""<%- (model.description || '').replace(/"/g, "'") %><%- model.deprecated ? ' (deprecated)' : '' %>"""
+"""<%- modelDocstring(model) %>"""
 <%_ } _%>
 <%_ } _%>
 <%_ }); _%>
@@ -233,7 +241,7 @@ _%>
 
 class <%- op.requestTypeName %>(TypedDict):
 <%_ if (op.description || op.summary) { _%>
-    """<%- (op.description || op.summary).replace(/"/g, "'") %>"""
+    """<%- pyDocstring(op.description || op.summary) %>"""
 <%_ } _%>
 <%_ op.parameters.forEach((p) => { _%>
     <%- p.pythonName %>: <%- p.pythonAnnotation || p.pythonType || 'Any' %>
@@ -242,7 +250,7 @@ class <%- op.requestTypeName %>(TypedDict):
 
 class <%- op.requestTypeName %>(TypedDict, total=False):
 <%_ if (op.description || op.summary) { _%>
-    """<%- (op.description || op.summary).replace(/"/g, "'") %>"""
+    """<%- pyDocstring(op.description || op.summary) %>"""
 <%_ } _%>
 <%_ op.parameters.forEach((p) => { _%>
     <%- p.pythonName %>: <%- p.pythonAnnotation || p.pythonType || 'Any' %>
@@ -257,7 +265,7 @@ class <%- op.requestTypeName %>Required(TypedDict):
 
 class <%- op.requestTypeName %>(<%- op.requestTypeName %>Required, total=False):
 <%_ if (op.description || op.summary) { _%>
-    """<%- (op.description || op.summary).replace(/"/g, "'") %>"""
+    """<%- pyDocstring(op.description || op.summary) %>"""
 <%_ } _%>
 <%_ optional.forEach((p) => { _%>
     <%- p.pythonName %>: <%- p.pythonAnnotation || p.pythonType || 'Any' %>

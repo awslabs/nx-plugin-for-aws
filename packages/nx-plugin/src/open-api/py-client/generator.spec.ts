@@ -19,6 +19,23 @@ const sharedConstructsDeclaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
 });
 
+/** Every file in the tree and its contents, for comparing whole-tree state. */
+const snapshotTree = (tree: Tree): Record<string, string | null> => {
+  const files: Record<string, string | null> = {};
+  const walk = (dir: string) => {
+    for (const child of tree.children(dir)) {
+      const childPath = dir ? `${dir}/${child}` : child;
+      if (tree.isFile(childPath)) {
+        files[childPath] = tree.read(childPath, 'utf-8');
+      } else {
+        walk(childPath);
+      }
+    }
+  };
+  walk('');
+  return files;
+};
+
 const trivialSpec = {
   openapi: '3.0.0',
   info: { title: 'TestApi', version: '1.0.0' },
@@ -113,6 +130,39 @@ describe('openApiPyClientGenerator', () => {
       openApiSpecPath: 'openapi.json',
       outputPath: 'src/generated',
     });
+    expectHasMetricTags(tree, OPEN_API_PY_CLIENT_GENERATOR_INFO.metric);
+  });
+
+  // Running a generator twice must leave the workspace as the first run did:
+  // the client is regenerated on every build, so anything that accumulated
+  // (a duplicated `.gitignore` entry, a repeated metric) would grow unbounded.
+  it('should be idempotent when re-run with the same options', async () => {
+    await sharedConstructsGenerator(
+      tree,
+      { iac: 'cdk' },
+      sharedConstructsDeclaration,
+    );
+    tree.write('openapi.json', JSON.stringify(trivialSpec));
+    const options = {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    };
+
+    await openApiPyClientGenerator(tree, options);
+    const afterFirstRun = snapshotTree(tree);
+
+    await openApiPyClientGenerator(tree, options);
+    const afterSecondRun = snapshotTree(tree);
+
+    expect(afterSecondRun).toEqual(afterFirstRun);
+    // Spelled out separately: these are the entries a second run would append
+    // to rather than overwrite, so an equality check alone could mask a change
+    // in how they are assembled.
+    expect(
+      (tree.read('.gitignore', 'utf-8') ?? '')
+        .split('\n')
+        .filter((line) => line.trim() === 'src/generated'),
+    ).toHaveLength(1);
     expectHasMetricTags(tree, OPEN_API_PY_CLIENT_GENERATOR_INFO.metric);
   });
 });

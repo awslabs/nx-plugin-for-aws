@@ -126,6 +126,14 @@ const streamChunkParseExpr = (resp, lineVar) => {
   return `${py}.model_validate_json(${lineVar})`;
 };
 
+/**
+ * Render text from the spec as a Python docstring body. A description is
+ * arbitrary text, so it goes through the same escaping as any other literal
+ * (backslash first) with the surrounding quotes stripped.
+ */
+const pyDocstring = (text) =>
+  toPythonLiteral(String(text ?? '').replace(/\r?\n/g, ' ')).slice(1, -1);
+
 const responseStatusCondition = (code) => {
   if (typeof code === 'string' && /^\dXX$/.test(code)) {
     const base = Number(code.charAt(0)) * 100;
@@ -328,7 +336,10 @@ class <%- className %>:
             for key, value in self._client.params.multi_items()
         ]
         for key, value in self._query(query_params, collection_formats).items():
-            safe = "/:?#[]@!$&'()*+,;=" if key in reserved else ""
+            # RFC 3986 reserved characters kept literal for an allowReserved
+            # parameter. `#` is excluded: it would start the URL fragment and
+            # silently drop this value and every parameter after it.
+            safe = "/:?[]@!$&'()*+,;=" if key in reserved else ""
             values = value if isinstance(value, list) else [value]
             for v in values:
                 parts.append(quote(str(key), safe="") + "=" + quote(self._scalar(v), safe=safe))
@@ -370,9 +381,24 @@ class <%- className %>:
                     out[key] = [self._scalar(v) for v in value]
                 else:
                     out[key] = delimiter.join(self._scalar(v) for v in value)
+            elif self._is_object(value):
+                # OpenAPI's default query style is form/explode, under which an
+                # object expands to one parameter per property rather than
+                # being stringified.
+                for prop, prop_value in self._as_dict(value).items():
+                    if prop_value is not None:
+                        out[prop] = self._scalar(prop_value)
             else:
                 out[key] = self._scalar(value)
         return out
+
+    def _is_object(self, value: Any) -> bool:
+        return isinstance(value, (dict, BaseModel))
+
+    def _as_dict(self, value: Any) -> dict[str, Any]:
+        if isinstance(value, BaseModel):
+            return value.model_dump(mode="json", by_alias=True, exclude_unset=True)
+        return dict(value)
 
     def _headers(
         self,
@@ -528,7 +554,7 @@ _%>
         <%- signature(op) %>,
     ) -> <%- resultTypeSync(op) %>:
 <%_ if (op.description || op.summary) { _%>
-        """<%- (op.description || op.summary).split('\n')[0].replace(/"/g, "'") %>"""
+        """<%- pyDocstring((op.description || op.summary).split('\n')[0]) %>"""
 <%_ } _%>
 <%_ if (op.deprecated) { _%>
         warnings.warn(

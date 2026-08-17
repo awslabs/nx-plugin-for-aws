@@ -71,23 +71,35 @@ describe('openApiPyClientGenerator - content types', () => {
     );
   });
 
+  // Asserted with a custom media type: httpx sets `application/json` itself for
+  // a `json=` body, which would mask the flag for that media type. Any other
+  // declared type can only come from the generated code, so its absence proves
+  // the opt-out is wired.
   it('omits the Content-Type header when omit_content_type_header is true', async () => {
-    await generateAndRead(verifier, tree, bodySpec('application/json'));
-    const res = await verifier.invoke({
+    const spec = bodySpec('application/vnd.example+json');
+    await generateAndRead(verifier, tree, spec);
+
+    const sent = await callGeneratedClient(
+      verifier,
+      'send',
+      { data: 'hi' },
+      { status: 204 },
+    );
+    expect(sent.calls?.[0]?.headers['content-type'] ?? '').toBe(
+      'application/vnd.example+json',
+    );
+
+    const omitted = await verifier.invoke({
       module: 'sync',
       method: 'send',
       kwargs: { data: 'hi' },
       mock: [{ response: { status: 204 } }],
       clientKwargs: { omit_content_type_header: true },
     });
-    expect(res.ok).toBe(true);
-    // No explicit Content-Type was set by the generated code; httpx may still
-    // add one of its own (e.g. 'application/json' because json= is passed),
-    // but the generated override is absent.  We assert we didn't set a value
-    // coming from the spec's media type.  httpx's default for `json=` is
-    // 'application/json' — so we can't distinguish for that media type.
-    // Instead assert the opt-out flag is wired by sending a different media
-    // type: any custom media type is suppressed, and httpx won't step in.
+    expect(omitted.ok).toBe(true);
+    expect(omitted.calls?.[0]?.headers['content-type'] ?? '').not.toContain(
+      'vnd.example',
+    );
   });
 
   it('passes through custom media types from the spec', async () => {

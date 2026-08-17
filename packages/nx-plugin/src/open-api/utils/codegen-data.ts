@@ -112,9 +112,6 @@ export const buildOpenApiCodeGenData = (inSpec: Spec): CodeGenData => {
     groupOperationsByTag(allOperations);
 
   annotateAllOfFlattening(data.models);
-  for (const model of data.models) {
-    assertNoClashingPythonNames(model);
-  }
   for (const op of allOperations) {
     annotateRequestAndErrorShapes(op, modelsByName);
   }
@@ -584,7 +581,14 @@ const augmentOperation = (
   ];
 
   op.responses.forEach(addLanguageTypes);
-  op.responses = orderBy(op.responses, (r) => r.code);
+  // Concrete codes first, then wildcard ranges, then `default` — templates emit
+  // the checks in this order, and `default` renders as an unconditional branch
+  // that would shadow anything after it. Sorting on `code` alone would leave
+  // that to how the spec happened to enumerate its keys.
+  op.responses = orderBy(op.responses, [
+    (r) => (r.code === 'default' ? 2 : typeof r.code === 'number' ? 0 : 1),
+    (r) => r.code,
+  ]);
 
   // Result is the lowest successful response, otherwise the 2XX or default.
   op.result =
@@ -953,7 +957,9 @@ const assertNoClashingPropertyNames = (model: Model): void => {
 
 /**
  * The Python counterpart of {@link assertNoClashingPropertyNames}, run over the
- * flattened property list an `all-of` composite emits. Two members whose wire
+ * flattened property list an `all-of` composite emits. Called by the Python
+ * generator rather than the shared pipeline, so a TypeScript consumer is never
+ * failed by a Python-specific name clash. Two members whose wire
  * names snake_case alike (`fooBar` and `foo_bar`) would emit the same field
  * twice, silently keeping only the last, so fail fast instead.
  *
@@ -961,7 +967,7 @@ const assertNoClashingPropertyNames = (model: Model): void => {
  * already covered by the TypeScript assertion, which rejects any pair that also
  * collapses in Python.
  */
-const assertNoClashingPythonNames = (model: Model): void => {
+export const assertNoClashingPythonNames = (model: Model): void => {
   const seen = new Map<string, string>();
   for (const property of model.effectiveProperties ?? []) {
     if (!property.name) continue;

@@ -430,6 +430,30 @@ const rewriteCompositeSiblingProperties = (spec: Spec): Spec => {
  * list and marking the schema nullable instead. This lets the parser render a
  * proper union rather than collapsing to the first declared type.
  */
+/**
+ * Upper-cases wildcard response status codes (`2xx` to `2XX`).
+ *
+ * OpenAPI treats the range codes case-insensitively, but every consumer
+ * downstream matches the upper-case form — a lower-case key would otherwise be
+ * taken for a literal status code and emitted as one, which is not valid Python
+ * or TypeScript.
+ */
+const normaliseResponseCodeCase = (spec: Spec): void => {
+  for (const pathItem of Object.values(spec.paths ?? {})) {
+    for (const operation of Object.values(pathItem ?? {})) {
+      const responses = (operation as { responses?: Record<string, unknown> })
+        ?.responses;
+      if (!responses || typeof responses !== 'object') continue;
+      for (const code of Object.keys(responses)) {
+        if (/^\d[xX]{2}$/.test(code) && code !== code.toUpperCase()) {
+          responses[code.toUpperCase()] = responses[code];
+          delete responses[code];
+        }
+      }
+    }
+  }
+};
+
 const rewriteMultiTypeToAnyOf = (spec: Spec): Spec => {
   const rewrite = (v: any): any => {
     if (
@@ -499,6 +523,7 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
   let spec = cloneDeepWith(inSpec);
 
   inlinePathItemRefs(spec);
+  normaliseResponseCodeCase(spec);
   spec = rewriteConstToEnum(spec);
   spec = rewriteMultiTypeToAnyOf(spec);
   spec = rewriteCompositeSiblingProperties(spec);
