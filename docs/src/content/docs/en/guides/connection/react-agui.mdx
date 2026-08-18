@@ -92,6 +92,49 @@ The generated code handles authentication depending on your agent's configuratio
 - **IAM** (default): uses AWS SigV4-signed HTTP requests. Credentials are obtained from the Cognito Identity Pool configured with your website's auth.
 - **Cognito**: embeds the JWT access token in the `Authorization` header as a Bearer token.
 
+### Sessions and Threads
+
+AG-UI and AgentCore Runtime each have their own identifier for a conversation, and the generated hook ties them together:
+
+- **`threadId`** — the AG-UI conversation identifier, sent in the request body. CopilotKit generates a random UUID per chat unless you pass an explicit `threadId`.
+- **Session ID** — the AgentCore Runtime session, sent in the `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` header. It determines which [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html) serves the request, and on the agent side it is the key your <Link path="guides/ts-agent">`session.ts`</Link> / <Link path="guides/py-agent">`session.py`</Link> uses to persist conversation state.
+
+The generated hook derives the session ID from the thread ID, so one chat thread maps to one AgentCore session and one stored conversation:
+
+```ts
+// AgentCore session ids must be at least 33 characters.
+function agentCoreSessionId(input: RunAgentInput): string {
+  return (input.threadId ?? '').padEnd(33, '0');
+}
+```
+
+:::caution[Explicit thread IDs must be at least 33 characters]
+AgentCore rejects session IDs shorter than 33 characters, so the hook right-pads the thread ID with `0`. This padding is **not collision-free**: `abc` and `abc0` both pad to `abc000…0`, so two different threads share one AgentCore session — and therefore one microVM and one stored conversation. With the `s3` session option both threads resolve to the same `session/<paddedId>/` prefix, so each thread sees the other's history.
+
+If you pass an explicit `threadId`, make it at least 33 characters and unique, so the padding never applies:
+
+```tsx
+const threadId = `${playerName}-${genre}`.padEnd(33, '0');
+
+<CopilotChat agentId="agent" threadId={threadId} />
+```
+
+Leaving `threadId` unset is always safe — CopilotKit's generated UUID is 36 characters.
+:::
+
+:::danger[Thread IDs are supplied by the client]
+The thread ID comes from the browser, and the agent uses it to resolve stored conversation state. A signed-in user who supplies another user's thread ID — with their own valid credentials — will read that user's conversation. The generated code does **not** namespace sessions per user.
+
+AgentCore does not close this gap for you. Per the [AgentCore session isolation documentation](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-instances-security.html), invocations are authorized "against the agent runtime resource ARN, not against individual sessions", and AgentCore "validates the format of that session ID but does not verify that it belongs to the calling identity". AWS's guidance is to treat the session ID as "a server-side value derived from the authenticated end user — never accept it directly from untrusted client input".
+
+How to close this depends on your agent's `auth`:
+
+- **Cognito**: the infrastructure allowlists the `Authorization` header, so the AgentCore-validated JWT reaches your agent code. Derive the storage key from a claim on that token (`sub` is the [pattern AWS documents](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/memory-gateway-fgac.html) for per-user isolation) rather than trusting the thread ID alone. See <Link path="guides/ts-agent">Session Management</Link> for where to put this.
+- **IAM**: the calling principal is **not** available to your agent code — AgentCore does not forward the `x-amz-*` signing headers, and they cannot be added to the request header allowlist. Any caller-supplied identity header is forgeable. For IAM agents the trust boundary is the `bedrock-agentcore:InvokeAgentRuntime` permission itself, so grant it only to trusted backends rather than to end users. If you need per-user isolation for an end-user-facing app, use Cognito auth.
+
+Note that `X-Amzn-Bedrock-AgentCore-Runtime-User-Id` is **not** a trustworthy identity source — AgentCore ["treats the header value as an opaque identifier without verifying it"](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-oauth.html) against an authenticated identity.
+:::
+
 ## Infrastructure
 
 <Snippet name="connection/react-agent-infrastructure" parentHeading="Infrastructure" />

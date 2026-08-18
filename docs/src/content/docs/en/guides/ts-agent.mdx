@@ -362,6 +362,37 @@ This is implemented in the generated `session.ts`, which exports a `getSessionMa
 
 The session ID itself comes from the AgentCore Runtime session (propagated via the `x-amzn-bedrock-agentcore-runtime-session-id` header for A2A/AG-UI, or the WebSocket connection context for HTTP/tRPC) and is bound to an [`AsyncLocalStorage`](https://nodejs.org/api/async_context.html#class-asynclocalstorage)-based context so `getCurrentSessionId()` can resolve it anywhere in the request — including in any downstream MCP or A2A clients wired up via the <Link path="/guides/connection">`connection` generator</Link>, so the whole call chain shares a consistent session.
 
+:::note[AG-UI: sessions and threads]
+The AG-UI protocol has its own conversation identifier, `threadId`, in the request body. `@ag-ui/aws-strands` caches one Strands agent per `threadId` and calls `sessionManagerProvider` **once per thread** — the first time that thread is seen.
+
+The generated `index.ts` passes `getSessionManager`, which resolves the session ID from the header-derived context rather than from `threadId`. The two stay aligned because the <Link path="/guides/connection/react-agui">`connection` generator</Link>'s React hook derives the session header from the thread ID. If you invoke the agent from your own client, keep that relationship: send the same value as both, and note that because the provider is only called once per thread, changing the session header on a later request for the same thread will not switch the stored conversation.
+:::
+
+:::caution[Session isolation]
+Both the session ID and `threadId` are supplied by the caller, and the session ID is the key used to read and write stored conversation state. The generated code does not namespace sessions per user, so any caller able to invoke the agent can read another user's conversation by supplying their session ID.
+
+AgentCore does not prevent this: invocations are authorized ["against the agent runtime resource ARN, not against individual sessions"](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-instances-security.html), and AgentCore "validates the format of that session ID but does not verify that it belongs to the calling identity". The same page advises treating the session ID as "a server-side value derived from the authenticated end user".
+
+With `auth=cognito`, the generated infrastructure sets `requestHeaderConfiguration.allowlistedHeaders: ['Authorization']`, so the caller's JWT — already validated by the AgentCore authorizer — reaches your agent code as an ordinary request header. You can namespace the session on its `sub` claim:
+
+```ts
+// The AgentCore authorizer has already validated this token, so decoding
+// without signature verification is sufficient here.
+const sub = JSON.parse(
+  Buffer.from(token.split('.')[1], 'base64url').toString(),
+).sub;
+
+return new SessionManager({
+  sessionId: `${sub}/${sessionId}`,
+  storage: new S3Storage(bucketName),
+});
+```
+
+Skipping signature verification is [the approach AWS documents](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-oauth.html) for this case, since the runtime validated the token during inbound authorization. Fail closed if the claim is missing, and bind the token into the request context (as the session ID already is) so it is reachable from `getSessionManager()`.
+
+With `auth=iam`, the calling principal is **not** available to your agent code — AgentCore does not forward the `x-amz-*` signing headers and they cannot be allowlisted, and the instance metadata service exposes only the agent's own execution role. Treat the `bedrock-agentcore:InvokeAgentRuntime` permission as the trust boundary and grant it only to trusted backends, or use per-user IAM principals so IAM enforces the scoping.
+:::
+
 :::note[Local Development]
 When running locally (`LOCAL_DEV=true`, set automatically by the `-dev` target), session data is always stored on disk under `tmp/agents/strands/<agent-name>` at the workspace root, regardless of the configured `session` option, for convenience.
 :::
