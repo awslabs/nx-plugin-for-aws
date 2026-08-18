@@ -51,6 +51,9 @@ import OptionFilter from '@components/option-filter.astro';
         - init.py FastAPI application setup with CORS and error handling middleware
         - agent.py Main agent definition with sample tools
         - session.py Resolves the framework-specific session persistence implementation
+        - middleware/
+          - \_\_init\_\_.py Python package initialization
+          - session_id_middleware.py Binds the inbound AgentCore session ID for the request
         - main.py FastAPI entry point for Bedrock AgentCore Runtime
         - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
     - pyproject.toml Updated with Strands dependencies
@@ -70,6 +73,9 @@ import OptionFilter from '@components/option-filter.astro';
         - \_\_init\_\_.py Python package initialization
         - agent.py Main agent definition with sample tools
         - session.py Resolves the framework-specific session persistence implementation
+        - middleware/
+          - \_\_init\_\_.py Python package initialization
+          - session_id_middleware.py Binds the inbound AgentCore session ID for the request
         - main.py A2A server entry point
         - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
     - pyproject.toml Updated with framework and A2A dependencies
@@ -89,6 +95,9 @@ import OptionFilter from '@components/option-filter.astro';
         - \_\_init\_\_.py Python package initialization
         - agent.py Main agent definition with sample tools
         - session.py Resolves the framework-specific session persistence implementation
+        - middleware/
+          - \_\_init\_\_.py Python package initialization
+          - session_id_middleware.py Binds the inbound AgentCore session ID for the request
         - main.py AG-UI server entry point
         - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
     - pyproject.toml Updated with framework and AG-UI dependencies
@@ -502,14 +511,6 @@ aws cognito-idp admin-initiate-auth \
 
 这在生成的 `session.py` 中实现，它导出一个 `get_session_manager()` 函数，为当前会话解析 `SessionManager`。
 
-<OptionFilter when={{ protocol: 'ag-ui' }} description="AG-UI session wiring">
-由于 AG-UI 的 `ag-ui-strands` 适配器为每个对话线程克隆一个模板 `Agent`，因此 `get_session_manager` 作为 `session_manager_provider` 连接到传递给 `main.py` 中的 `StrandsAgent` 的 `StrandsAgentConfig` 上，因此为每个线程解析一个新的 `SessionManager`，而不是烘焙到共享模板代理中。
-</OptionFilter>
-
-<OptionFilter when={{ protocol: ['http', 'a2a'] }} description="HTTP/A2A session wiring">
-由于 `with_session_id` 已经为每个会话缓存一个 `Agent` 实例，因此 `get_session_manager` 直接在 `agent.py` 中的 `get_agent` 的 `Agent(session_manager=get_session_manager())` 调用内调用。
-</OptionFilter>
-
 会话 ID 本身来自 AgentCore Runtime 会话（通过 `x-amzn-bedrock-agentcore-runtime-session-id` 标头传播），并绑定到基于 [`contextvars.ContextVar`](https://docs.python.org/3/library/contextvars.html) 的上下文，因此 `get_current_session_id()` 可以在请求中的任何位置解析它 — 包括通过 <Link path="/guides/connection">`connection` 生成器</Link>连接的任何下游 MCP 或 A2A 客户端，因此整个调用链共享一致的会话。
 
 :::note[本地开发]
@@ -566,7 +567,7 @@ acurl <region> bedrock-agentcore -N -X POST \
 -H 'Content-Type: application/json'
 ```
 
-<Drawer title="Sigv4 enabled curl" trigger="单击此处了解有关配置上述 acurl 命令的更多详细信息">
+<Drawer title="Sigv4 enabled curl" trigger="Click here for more details on configuring the above acurl command">
 <Snippet name="tools/acurl" />
 </Drawer>
 </TabItem>
@@ -678,7 +679,7 @@ model = ChatBedrockConverse(
 <CardGrid>
   <ConnectionCard
     title="React to Python Agent"
-    description="从 React 网站调用 Python Agent"
+    description="Call a Python Agent from a React website"
     href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-py-agent`}
     source="react"
     target="strands"
@@ -686,14 +687,14 @@ model = ChatBedrockConverse(
   />
   <ConnectionCard
     title="React to AG-UI Agent"
-    description="通过 CopilotKit 从 React 网站调用公开 AG-UI 协议的 Agent"
+    description="Call an Agent exposing the AG-UI protocol from a React website via CopilotKit"
     href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-agui`}
     source="react"
     target="copilotkit"
   />
   <ConnectionCard
     title="Python Agent to MCP"
-    description="将 Python Agent 连接到 MCP 服务器"
+    description="Connect a Python Agent to an MCP server"
     href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-mcp`}
     source="strands"
     sourceBadge="python"
@@ -701,7 +702,7 @@ model = ChatBedrockConverse(
   />
   <ConnectionCard
     title="Python Agent to A2A Agent"
-    description="将 Python Agent 连接到远程 A2A 代理"
+    description="Connect a Python Agent to a remote A2A agent"
     href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-a2a`}
     source="strands"
     sourceBadge="python"
@@ -709,7 +710,7 @@ model = ChatBedrockConverse(
   />
   <ConnectionCard
     title="TypeScript Agent to A2A Agent"
-    description="将 TypeScript Agent 连接到远程 A2A 代理"
+    description="Connect a TypeScript Agent to a remote A2A agent"
     href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/ts-agent-a2a`}
     source="strands"
     sourceBadge="typescript"
@@ -717,7 +718,7 @@ model = ChatBedrockConverse(
   />
   <ConnectionCard
     title="Python Agent to Python DynamoDB"
-    description="将 Python Agent 连接到 DynamoDB 表"
+    description="Connect a Python Agent to a DynamoDB table"
     href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-dynamodb`}
     source="strands"
     sourceBadge="python"
@@ -726,7 +727,7 @@ model = ChatBedrockConverse(
   />
   <ConnectionCard
     title="Python Agent to AgentCore Gateway"
-    description="将 Python Agent 连接到 AgentCore Gateway"
+    description="Connect a Python Agent to an AgentCore Gateway"
     href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-gateway`}
     source="strands"
     sourceBadge="python"
@@ -734,7 +735,7 @@ model = ChatBedrockConverse(
   />
   <ConnectionCard
     title="AgentCore Gateway to Agent"
-    description="使用 AgentCore Gateway 作为运行时目标来前置代理"
+    description="Front an agent with an AgentCore Gateway as a runtime target"
     href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/agentcore-gateway-agent`}
     source="agentcore"
     target="strands"

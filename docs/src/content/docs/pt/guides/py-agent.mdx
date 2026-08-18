@@ -51,6 +51,9 @@ O gerador adicionará os seguintes arquivos ao seu projeto Python existente. Os 
         - init.py FastAPI application setup with CORS and error handling middleware
         - agent.py Main agent definition with sample tools
         - session.py Resolves the framework-specific session persistence implementation
+        - middleware/
+          - \_\_init\_\_.py Python package initialization
+          - session_id_middleware.py Binds the inbound AgentCore session ID for the request
         - main.py FastAPI entry point for Bedrock AgentCore Runtime
         - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
     - pyproject.toml Updated with Strands dependencies
@@ -70,6 +73,9 @@ O ponto de entrada expõe seu agente através do protocolo A2A (Strands usa o [S
         - \_\_init\_\_.py Python package initialization
         - agent.py Main agent definition with sample tools
         - session.py Resolves the framework-specific session persistence implementation
+        - middleware/
+          - \_\_init\_\_.py Python package initialization
+          - session_id_middleware.py Binds the inbound AgentCore session ID for the request
         - main.py A2A server entry point
         - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
     - pyproject.toml Updated with framework and A2A dependencies
@@ -89,6 +95,9 @@ O ponto de entrada expõe seu agente através do protocolo [AG-UI](https://docs.
         - \_\_init\_\_.py Python package initialization
         - agent.py Main agent definition with sample tools
         - session.py Resolves the framework-specific session persistence implementation
+        - middleware/
+          - \_\_init\_\_.py Python package initialization
+          - session_id_middleware.py Binds the inbound AgentCore session ID for the request
         - main.py AG-UI server entry point
         - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
     - pyproject.toml Updated with framework and AG-UI dependencies
@@ -422,7 +431,7 @@ Em seguida, em outro terminal, inicie o chat:
 
 <NxCommands commands={['run your-project:agent-chat']} />
 
-O gerador emite um `scripts/<your-agent-name>/chat.ts` para cada protocolo. Ele se conecta ao agente local por padrão, ou ao seu agente implantado quando `RUNTIME_CONFIG_APP_ID` está definido (veja [Conversar com seu agente implantado](#chat-with-your-deployed-agent) abaixo).
+O gerador emite um `scripts/<your-agent-name>/chat.ts` para cada protocolo. Ele se conecta ao agente local por padrão, ou ao seu agente implantado quando `RUNTIME_CONFIG_APP_ID` está definido (veja [Conversar com seu agente implantado](#conversar-com-seu-agente-implantado) abaixo).
 
 Para agentes **HTTP**, o script de chat usa um cliente TypeScript type-safe gerado a partir da especificação OpenAPI do agente. O gerador também emite:
 
@@ -502,14 +511,6 @@ A opção `session` controla como seu agente persiste o estado da conversa (hist
 
 Isso é implementado no `session.py` gerado, que exporta uma função `get_session_manager()` resolvendo um `SessionManager` para a sessão atual.
 
-<OptionFilter when={{ protocol: 'ag-ui' }} description="AG-UI session wiring">
-Como o adaptador `ag-ui-strands` do AG-UI clona um `Agent` modelo por thread de conversa, `get_session_manager` é conectado como um `session_manager_provider` no `StrandsAgentConfig` passado para `StrandsAgent` em `main.py`, para que um `SessionManager` novo seja resolvido para cada thread em vez de ser incorporado ao agente modelo compartilhado.
-</OptionFilter>
-
-<OptionFilter when={{ protocol: ['http', 'a2a'] }} description="HTTP/A2A session wiring">
-Como `with_session_id` já armazena em cache uma instância de `Agent` por sessão, `get_session_manager` é chamado diretamente dentro da chamada `Agent(session_manager=get_session_manager())` de `get_agent` em `agent.py`.
-</OptionFilter>
-
 O próprio ID da sessão vem da sessão do AgentCore Runtime (propagada através do cabeçalho `x-amzn-bedrock-agentcore-runtime-session-id`) e é vinculado a um contexto baseado em [`contextvars.ContextVar`](https://docs.python.org/3/library/contextvars.html) para que `get_current_session_id()` possa resolvê-lo em qualquer lugar na requisição — incluindo em quaisquer clientes MCP ou A2A downstream conectados através do <Link path="/guides/connection">gerador `connection`</Link>, para que toda a cadeia de chamadas compartilhe uma sessão consistente.
 
 :::note[Desenvolvimento Local]
@@ -566,7 +567,7 @@ acurl <region> bedrock-agentcore -N -X POST \
 -H 'Content-Type: application/json'
 ```
 
-<Drawer title="Sigv4 enabled curl" trigger="Clique aqui para mais detalhes sobre como configurar o comando acurl acima">
+<Drawer title="Sigv4 enabled curl" trigger="Click here for more details on configuring the above acurl command">
 <Snippet name="tools/acurl" />
 </Drawer>
 </TabItem>

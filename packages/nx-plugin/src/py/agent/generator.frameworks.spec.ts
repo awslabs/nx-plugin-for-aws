@@ -70,9 +70,17 @@ dev-dependencies = []
     // so downstream MCP / A2A connection clients forward it on outbound
     // calls. (AG-UI handles its own per-thread conversation isolation, so
     // we don't wrap the agent in `with_session_id` here — only the
-    // downstream forwarding path matters.)
+    // downstream forwarding path matters.) The binding middleware itself
+    // lives in a shared module rather than being defined inline.
     expect(mainContent).toContain('session_id_context');
     expect(mainContent).toContain(
+      'from .middleware.session_id_middleware import SESSION_ID_HEADER, SessionIdMiddleware',
+    );
+    const middlewareContent = tree.read(
+      'apps/test-project/proj_test_project/agent/middleware/session_id_middleware.py',
+      'utf-8',
+    );
+    expect(middlewareContent).toContain(
       'x-amzn-bedrock-agentcore-runtime-session-id',
     );
 
@@ -381,9 +389,17 @@ dev-dependencies = []
       expect(mainContent).not.toContain('create_strands_app');
       expect(mainContent).not.toContain('StrandsAgent');
 
-      // The session ID is still bound for downstream forwarding.
+      // The session ID is still bound for downstream forwarding, via the
+      // shared middleware module rather than an inline class.
       expect(mainContent).toContain('session_id_context');
       expect(mainContent).toContain(
+        'from .middleware.session_id_middleware import SESSION_ID_HEADER, SessionIdMiddleware',
+      );
+      const middlewareContent = tree.read(
+        'apps/test-project/proj_test_project/agent/middleware/session_id_middleware.py',
+        'utf-8',
+      );
+      expect(middlewareContent).toContain(
         'x-amzn-bedrock-agentcore-runtime-session-id',
       );
 
@@ -500,10 +516,12 @@ dev-dependencies = []
       );
       expect(mainContent).toContain('get_agent');
       expect(mainContent).toContain('/ping');
-      expect(mainContent).toContain('session_id_context');
+      // The session-binding middleware itself lives in a shared module (see
+      // below), imported rather than defined inline.
       expect(mainContent).toContain(
-        'x-amzn-bedrock-agentcore-runtime-session-id',
+        'from .middleware.session_id_middleware import SessionIdMiddleware',
       );
+      expect(mainContent).toContain('app.add_middleware(SessionIdMiddleware)');
       // The graph reply is published as a task artifact so streaming A2A clients
       // (e.g. the chat CLI) render it.
       expect(mainContent).toContain('add_artifact');
@@ -512,6 +530,20 @@ dev-dependencies = []
       expect(mainContent).not.toContain('strands.multiagent.a2a');
       expect(mainContent).not.toContain('A2AServer');
       expect(mainContent).not.toContain('from strands');
+
+      // The shared middleware module binds the inbound session (or a fresh
+      // UUID) to async context for every framework/protocol combination.
+      const middlewareContent = tree.read(
+        'apps/test-project/proj_test_project/agent/middleware/session_id_middleware.py',
+        'utf-8',
+      );
+      expect(middlewareContent).toContain('session_id_context');
+      expect(middlewareContent).toContain(
+        'x-amzn-bedrock-agentcore-runtime-session-id',
+      );
+      expect(middlewareContent).toContain(
+        'class SessionIdMiddleware(BaseHTTPMiddleware):',
+      );
     });
 
     it('should add per-protocol langchain dependencies', async () => {
