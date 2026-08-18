@@ -97,10 +97,14 @@ runs:
     # near copies of the same packages (~4.6GB against a 10GB repo limit) and no
     # job benefited from what the others had already fetched.
     #
-    # The key is per run, not per job: all of a run's jobs race to save one
-    # entry, and the losers' duplicate-key saves are logged and ignored. Every
-    # job restores before it runs, so whichever save lands is a superset of what
-    # it restored, and the entry grows monotonically run over run.
+    # The key is per run and per job id — not per matrix leg. One key for the
+    # whole run would let the first job to finish win the save, and that is
+    # usually a Python-light job like `package`, which clobbered the run's entry
+    # with a 22MB cache. Keying by job id keeps the heavy legs' caches separate
+    # from the light ones while collapsing each matrix's ~30 legs into a single
+    # entry, since siblings share a job id and their duplicate saves are logged
+    # and ignored. Every job restores before it runs, so each saved entry is a
+    # superset of what it restored and the cache compounds run over run.
     #
     # `restore-keys` is what makes that sharing work. An exact-match-only key
     # would let the first job to finish save and every later job take a hit and
@@ -117,8 +121,11 @@ runs:
       uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
         path: ${{ runner.os == 'Windows' && 'C:\uv-cache' || '/tmp/setup-uv-cache' }}
-        key: uv-${{ runner.os }}-${{ hashFiles('packages/nx-plugin/src/utils/versions.ts') }}-${{ github.run_id }}-${{ github.run_attempt }}
+        key: uv-${{ runner.os }}-${{ hashFiles('packages/nx-plugin/src/utils/versions.ts') }}-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
+        # Prefer this job's own lineage, then any job's — so a leg starts from
+        # its own superset if there is one, and otherwise from a sibling's.
         restore-keys: |
+          uv-${{ runner.os }}-${{ hashFiles('packages/nx-plugin/src/utils/versions.ts') }}-${{ github.job }}-
           uv-${{ runner.os }}-${{ hashFiles('packages/nx-plugin/src/utils/versions.ts') }}-
           uv-${{ runner.os }}-
     # `enable-cache: false` above also removes setup-uv's post-job save, so the
