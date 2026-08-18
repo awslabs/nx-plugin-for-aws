@@ -26,13 +26,9 @@ inputs:
     required: false
     default: '8'
   uv-cache-suffix:
-    description: 'Extra suffix for the uv cache key, combined with the job name. Set to the matrix value in matrix jobs, whose job name alone is identical across legs.'
+    description: 'Extra suffix distinguishing this job''s saved uv cache entry from its siblings''. Set to the matrix value in matrix jobs, whose job name alone is identical across legs. Every job restores from the same shared prefix regardless.'
     required: false
     default: ''
-  prune-uv-cache:
-    description: 'Run `uv cache prune` before saving the cache. Off because smoke tests kill uv dev servers mid-run, which leaves the cache in a state where the prune hangs or exits non-zero and fails the job even when every test passed.'
-    required: false
-    default: 'false'
   setup-terraform:
     description: 'Install Terraform. Disable for jobs that do not run Terraform.'
     required: false
@@ -91,25 +87,49 @@ runs:
       uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
       with:
         version: 'latest'
-        enable-cache: ${{ inputs.enable-uv-cache }}
-        prune-cache: ${{ inputs.prune-uv-cache }}
-        # Key the cache on the versions the generators vend, since the Python
-        # projects the smoke tests build are generated rather than checked in —
-        # the default glob finds no pyproject.toml/uv.lock to hash.
-        cache-dependency-glob: packages/nx-plugin/src/utils/versions.ts
+        # The cache is managed below rather than by setup-uv, which restores by
+        # exact key only. This step still exports UV_CACHE_DIR from
+        # `cache-local-path`, which is what the steps below cache.
+        enable-cache: 'false'
         # A fixed path rather than the default under `$RUNNER_TEMP`, whose
         # CodeBuild value contains a per-job segment. GitHub derives a cache
         # entry's version from the path it was saved from, so a varying path
         # means a saved entry can never be restored by a later job.
         cache-local-path: ${{ runner.os == 'Windows' && 'C:\uv-cache' || '/tmp/setup-uv-cache' }}
-        # Jobs that never invoke uv leave nothing to cache; without this the
-        # post-job save throws and fails a job whose tests all passed.
-        ignore-nothing-to-cache: 'true'
-        # Each job gets its own entry. On a hit the action skips saving, so a
-        # single shared key would freeze the cache at whatever the first job to
-        # finish had downloaded — leaving every other job to fetch the rest from
-        # PyPI forever. Per-job entries each converge on that job's own set.
-        cache-suffix: ${{ github.job }}${{ inputs.uv-cache-suffix && format('-{0}', inputs.uv-cache-suffix) || '' }}
+    # One cache shared by every job, rather than one per job. A wheel is
+    # identical whichever job downloaded it, so per-job entries stored ~46 near
+    # copies of the same packages (4.6GB against a 10GB repo limit) and no job
+    # benefited from what the others had already fetched.
+    #
+    # `restore-keys` is what makes sharing work: the exact key is unique per run
+    # so every run saves a fresh entry, and the prefix match then restores the
+    # most recent one. Keying by exact match alone would mean the first job to
+    # finish saves and every later job gets a hit and skips saving, freezing the
+    # cache at whatever that one job happened to download.
+    #
+    # Branches inherit the default branch's caches, so PR jobs restore what CI
+    # on main saved — the cache is shared across runs, workflows and PRs.
+    - name: Restore the uv cache
+      id: uv-cache
+      if: ${{ inputs.setup-uv == 'true' && inputs.enable-uv-cache == 'true' }}
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ${{ runner.os == 'Windows' && 'C:\uv-cache' || '/tmp/setup-uv-cache' }}
+        key: uv-${{ runner.os }}-${{ hashFiles('packages/nx-plugin/src/utils/versions.ts') }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}${{ inputs.uv-cache-suffix && format('-{0}', inputs.uv-cache-suffix) || '' }}
+        restore-keys: |
+          uv-${{ runner.os }}-${{ hashFiles('packages/nx-plugin/src/utils/versions.ts') }}-
+          uv-${{ runner.os }}-
+    # `enable-cache: false` above also removes setup-uv's post-job save, so the
+    # job saves the cache itself via the `save-uv-cache` action. Exported here so
+    # that action does not have to recompute the key.
+    - name: Export the uv cache key and path
+      if: ${{ inputs.setup-uv == 'true' && inputs.enable-uv-cache == 'true' }}
+      shell: bash
+      run: |
+        {
+          echo "UV_CACHE_KEY=${{ steps.uv-cache.outputs.cache-primary-key }}"
+          echo "UV_CACHE_PATH=${{ runner.os == 'Windows' && 'C:\uv-cache' || '/tmp/setup-uv-cache' }}"
+        } >> "$GITHUB_ENV"
     - name: Configure uv retries
       if: ${{ inputs.setup-uv == 'true' }}
       shell: bash
