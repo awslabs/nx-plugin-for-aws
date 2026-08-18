@@ -25,10 +25,6 @@ inputs:
     description: 'Value for UV_HTTP_RETRIES, applied to every uv invocation in the job. Raised above uv''s default of 3 to ride out intermittent PyPI 5xx responses.'
     required: false
     default: '8'
-  uv-cache-suffix:
-    description: 'Extra suffix distinguishing this job''s saved uv cache entry from its siblings''. Set to the matrix value in matrix jobs, whose job name alone is identical across legs. Every job restores from the same shared prefix regardless.'
-    required: false
-    default: ''
   setup-terraform:
     description: 'Install Terraform. Disable for jobs that do not run Terraform.'
     required: false
@@ -97,15 +93,21 @@ runs:
         # means a saved entry can never be restored by a later job.
         cache-local-path: ${{ runner.os == 'Windows' && 'C:\uv-cache' || '/tmp/setup-uv-cache' }}
     # One cache shared by every job, rather than one per job. A wheel is
-    # identical whichever job downloaded it, so per-job entries stored ~46 near
-    # copies of the same packages (4.6GB against a 10GB repo limit) and no job
-    # benefited from what the others had already fetched.
+    # identical whichever job downloaded it, so per-job entries stored dozens of
+    # near copies of the same packages (~4.6GB against a 10GB repo limit) and no
+    # job benefited from what the others had already fetched.
     #
-    # `restore-keys` is what makes sharing work: the exact key is unique per run
-    # so every run saves a fresh entry, and the prefix match then restores the
-    # most recent one. Keying by exact match alone would mean the first job to
-    # finish saves and every later job gets a hit and skips saving, freezing the
-    # cache at whatever that one job happened to download.
+    # The key is per run, not per job: all of a run's jobs race to save one
+    # entry, and the losers' duplicate-key saves are logged and ignored. Every
+    # job restores before it runs, so whichever save lands is a superset of what
+    # it restored, and the entry grows monotonically run over run.
+    #
+    # `restore-keys` is what makes that sharing work. An exact-match-only key
+    # would let the first job to finish save and every later job take a hit and
+    # skip saving, freezing the cache at whatever that one job had downloaded.
+    # The prefix match instead restores the newest entry, and falls back from the
+    # versions.ts hash to the OS alone so a dependency bump warms from the
+    # previous manifest rather than starting cold.
     #
     # Branches inherit the default branch's caches, so PR jobs restore what CI
     # on main saved — the cache is shared across runs, workflows and PRs.
@@ -115,7 +117,7 @@ runs:
       uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
         path: ${{ runner.os == 'Windows' && 'C:\uv-cache' || '/tmp/setup-uv-cache' }}
-        key: uv-${{ runner.os }}-${{ hashFiles('packages/nx-plugin/src/utils/versions.ts') }}-${{ github.run_id }}-${{ github.run_attempt }}-${{ github.job }}${{ inputs.uv-cache-suffix && format('-{0}', inputs.uv-cache-suffix) || '' }}
+        key: uv-${{ runner.os }}-${{ hashFiles('packages/nx-plugin/src/utils/versions.ts') }}-${{ github.run_id }}-${{ github.run_attempt }}
         restore-keys: |
           uv-${{ runner.os }}-${{ hashFiles('packages/nx-plugin/src/utils/versions.ts') }}-
           uv-${{ runner.os }}-
