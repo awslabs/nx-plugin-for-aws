@@ -26,7 +26,7 @@
 
 ---
 
-**@aws/nx-plugin** is a collection of code generators that scaffold full-stack, production-ready AWS applications inside an [Nx](https://nx.dev) monorepo. Every generator produces best-practice application code **and** the infrastructure to deploy it — type-safe, locally runnable, and ready to deploy.
+**@aws/nx-plugin** is a collection of code generators that scaffold full-stack AWS applications inside an [Nx](https://nx.dev) monorepo. Every generator produces best-practice application code **and** the infrastructure to deploy it — type-safe, locally runnable, and deployable from the start, getting you closer to production.
 
 ## Quick Start
 
