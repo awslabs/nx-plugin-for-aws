@@ -45,24 +45,28 @@ jobs:
           aws-region: ${{ secrets.AWS_TRANSLATE_AWS_REGION || 'us-west-2' }}
       - name: Run translation
         id: translate
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          FULL_TRANSLATION: ${{ github.event.inputs.full_translation }}
+          LANGUAGES: ${{ github.event.inputs.languages }}
         run: |
-          TRANSLATION_ARGS=""
+          TRANSLATION_ARGS=()
 
           # Check if this is a workflow dispatch with full translation
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ github.event.inputs.full_translation }}" == "true" ]]; then
-            TRANSLATION_ARGS="--all"
+          if [[ "$EVENT_NAME" == "workflow_dispatch" && "$FULL_TRANSLATION" == "true" ]]; then
+            TRANSLATION_ARGS+=(--all)
             echo "Running full translation"
           else
             echo "Running translation for changed files only"
           fi
 
           # Set target languages
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ github.event.inputs.languages }}" != "" ]]; then
-            TRANSLATION_ARGS="$TRANSLATION_ARGS --languages ${{ github.event.inputs.languages }}"
+          if [[ "$EVENT_NAME" == "workflow_dispatch" && -n "$LANGUAGES" ]]; then
+            TRANSLATION_ARGS+=(--languages "$LANGUAGES")
           fi
 
           # Run the translation script
-          pnpm tsx ./scripts/translate.ts $TRANSLATION_ARGS --verbose
+          pnpm tsx ./scripts/translate.ts "${TRANSLATION_ARGS[@]}" --verbose
 
           # Check if any files were changed
           if [[ -n "$(git status --porcelain)" ]]; then
@@ -74,6 +78,8 @@ jobs:
       - name: Commit translations
         id: commit_translations
         if: steps.translate.outputs.has_changes == 'true'
+        env:
+          HEAD_REF: ${{ github.head_ref }}
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
@@ -83,7 +89,7 @@ jobs:
           git commit -m "docs: update translations" --no-verify
 
           # Push directly to the PR branch
-          git push origin HEAD:${{ github.head_ref }}
+          git push origin "HEAD:$HEAD_REF"
       - name: Update PR
         if: github.event_name == 'pull_request' && steps.translate.outputs.has_changes == 'true'
         env:
