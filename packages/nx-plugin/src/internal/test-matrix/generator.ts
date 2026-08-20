@@ -4,6 +4,7 @@
  */
 import type { GeneratorCallback, Tree } from '@nx/devkit';
 import { agentcoreGatewayGenerator } from '../../sdk/agentcore-gateway';
+import { agentcoreHarnessGenerator } from '../../sdk/agentcore-harness';
 import {
   type ConnectionGeneratorSchema,
   connectionGenerator,
@@ -21,6 +22,7 @@ import {
   pyProjectGenerator,
   pyRdbGenerator,
 } from '../../sdk/py';
+import { smithyProjectGenerator } from '../../sdk/smithy';
 import { terraformProjectGenerator } from '../../sdk/terraform';
 import {
   type TsAgentGeneratorSchema,
@@ -157,6 +159,13 @@ export const internalTestMatrixGenerator = async (
   for (const api of tsApis) {
     await tsApiGenerator(tree, { ...api, ...projectDefaults });
   }
+
+  // A Smithy shape library; `my-smithy-api` covers consuming one.
+  await smithyProjectGenerator(tree, {
+    name: 'my-shapes',
+    type: 'shapes',
+    ...projectDefaults,
+  });
 
   // Python FastAPI — REST + HTTP, with Cognito and custom auth.
   const pyApis: PyApiGeneratorSchema[] = [
@@ -353,6 +362,14 @@ export const internalTestMatrixGenerator = async (
   await agentcoreGatewayGenerator(tree, {
     name: 'agent-gateway',
     protocol: 'http',
+    iac: 'inherit',
+    ...projectDefaults,
+  });
+
+  // AgentCore Harness — a standalone invocation project.
+  await agentcoreHarnessGenerator(tree, {
+    name: 'my-harness',
+    infra: 'agentcore',
     iac: 'inherit',
     ...projectDefaults,
   });
