@@ -1,5 +1,7 @@
 # Instructions for Claude
 
+@CLAUDE.private.md
+
 ## Required Reading
 
 Read the following before making changes:
@@ -54,3 +56,4 @@ Before raising a PR, validate changed generators in an example workspace using l
 - Use conventional commits, referencing the generator you are working on, eg "feat(ts#project): my commit message".
 - Raise PRs following the PR template.
 - After pushing to a PR, monitor the checks and iterate on any failures until all are green.
+
