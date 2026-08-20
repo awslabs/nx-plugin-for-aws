@@ -162,5 +162,33 @@ describe('python collector', () => {
       const names = await findWorkspacePyProjectNames(dir);
       expect(names).toEqual(['ok']);
     });
+
+    it('skips names with shell metacharacters', async () => {
+      // The name reaches a shell command, so a name carrying a command
+      // separator must never be passed through.
+      writePyproject(
+        'packages/evil',
+        '[project]\nname = "evil; touch /tmp/pwned #"\n',
+      );
+      writePyproject('packages/safe', '[project]\nname = "safe_pkg"\n');
+
+      const names = await findWorkspacePyProjectNames(dir);
+      expect(names).toEqual(['safe_pkg']);
+    });
+  });
+
+  it('does not interpolate an injected project name into the command', async () => {
+    writeVenv(dir);
+    mockExecSync.mockReturnValue('[]');
+
+    await collectPythonDependencies({
+      start: dir,
+      excludePackages: ['good_pkg', 'evil; touch /tmp/pwned #'],
+    });
+
+    const command = mockExecSync.mock.calls[0][0] as string;
+    expect(command).toContain('good_pkg');
+    expect(command).not.toContain('touch');
+    expect(command).not.toContain(';');
   });
 });
