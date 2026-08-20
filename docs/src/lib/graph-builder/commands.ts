@@ -76,7 +76,7 @@ const shouldEmit = (
 };
 
 const flag = (option: string, value: string | boolean) =>
-  typeof value === 'boolean' ? `--${option}=${value}` : `--${option}=${value}`;
+  `--${option}=${value}`;
 
 /**
  * The name a generator will give the project it creates, and by which later
