@@ -1,6 +1,5 @@
 import logging
 import os
-import uuid
 from contextlib import asynccontextmanager
 
 from a2a.server.agent_execution import AgentExecutor, RequestContext
@@ -10,18 +9,17 @@ from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
 from a2a.types import AgentCapabilities, AgentCard, Part, TextPart
 from a2a.utils import new_task
-from fastapi import FastAPI, Request
-from starlette.middleware.base import BaseHTTPMiddleware
+from fastapi import FastAPI
 
-from <%- agentConnectionModuleName %> import get_current_session_id, session_id_context
+from <%- agentConnectionModuleName %> import get_current_session_id
 
 from .agent import get_agent
+from .middleware.session_id_middleware import SessionIdMiddleware
 
 logging.basicConfig(level=logging.INFO)
 
 PORT = int(os.environ.get("PORT", "9000"))
 RUNTIME_URL = os.environ.get("AGENTCORE_RUNTIME_URL", f"http://localhost:{PORT}/")
-SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
 DEFAULT_MODES = ["text/plain"]
 
 
@@ -73,17 +71,8 @@ _agent_card = AgentCard(
 a2a_app = A2AStarletteApplication(agent_card=_agent_card, http_handler=_handler).build()
 
 
-class _SessionIdMiddleware(BaseHTTPMiddleware):
-    """Bind the inbound session (or a fresh UUID) to async context."""
-
-    async def dispatch(self, request: Request, call_next):
-        session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
-        with session_id_context(session_id):
-            return await call_next(request)
-
-
 app = FastAPI(title="<%= agentNameClassName %>", lifespan=lifespan)
-app.add_middleware(_SessionIdMiddleware)
+app.add_middleware(SessionIdMiddleware)
 
 
 @app.get("/ping")

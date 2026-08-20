@@ -452,6 +452,8 @@ The `py#agent` generates these files:
         - main.py entrypoint for your agent in Bedrock AgentCore Runtime
         - agent.py defines an example agent and tools
         - session.py resolves a SessionManager for persisting conversation state
+        - middleware/
+          - session_id_middleware.py binds the inbound AgentCore session ID for the request
         - Dockerfile defines the docker image for deployment to AgentCore Runtime
   - common/constructs/
     - src
@@ -493,6 +495,29 @@ Refer to tools as your 'spellbook'.
 This creates an example Strands agent and defines a subtraction tool. `log_model_errors` and `log_tool_errors` are hooks from the shared `dungeon_adventure_agent_connection` project that log model/tool failures instead of letting them fail silently.
 
 ```python
+# agent/middleware/session_id_middleware.py
+import uuid
+
+from fastapi import Request
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from dungeon_adventure_agent_connection import session_id_context
+
+SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
+
+
+class SessionIdMiddleware(BaseHTTPMiddleware):
+    """Bind the session ID for this request so downstream MCP / A2A clients forward it on outbound calls."""
+
+    async def dispatch(self, request: Request, call_next):
+        session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
+        with session_id_context(session_id):
+            return await call_next(request)
+```
+
+The `SessionIdMiddleware` binds the inbound AgentCore runtime session ID onto a `ContextVar` for the duration of the request.
+
+```python
 # agent/main.py
 import logging
 import uuid
@@ -505,14 +530,12 @@ from dungeon_adventure_agent_connection import get_current_session_id, session_i
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from starlette.middleware.base import BaseHTTPMiddleware
 
 from .agent import get_agent
+from .middleware.session_id_middleware import SESSION_ID_HEADER, SessionIdMiddleware
 from .session import get_session_manager
 
 logging.basicConfig(level=logging.INFO)
-
-SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
 
 
 @asynccontextmanager
@@ -529,15 +552,6 @@ async def lifespan(app: FastAPI):
         yield
 
 
-class _SessionIdMiddleware(BaseHTTPMiddleware):
-    """Bind the session ID for this request so downstream MCP / A2A clients forward it on outbound calls."""
-
-    async def dispatch(self, request: Request, call_next):
-        session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
-        with session_id_context(session_id):
-            return await call_next(request)
-
-
 app = FastAPI(title="AWS Strands - StoryAgent", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
@@ -546,7 +560,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.add_middleware(_SessionIdMiddleware)
+app.add_middleware(SessionIdMiddleware)
 
 
 @app.post("/invocations")
@@ -589,7 +603,7 @@ async def ping():
     return {"status": "healthy"}
 ```
 
-This is the entrypoint for the agent. Because we selected `--protocol=ag-ui`, the generator wraps our Strands `Agent` with `StrandsAgent` from [`ag_ui_strands`](https://docs.copilotkit.ai/aws-strands/integration) and mounts it on a FastAPI app that speaks the [AG-UI protocol](https://docs.copilotkit.ai/aws-strands/protocol) — this is what CopilotKit will talk to from the React website. The agent is built inside a `lifespan` handler — not at import time — so container startup, not module import, owns construction, and each AgentCore session gets its own container. The `_SessionIdMiddleware` binds the inbound AgentCore runtime session ID onto a `ContextVar` so any downstream MCP/A2A client we wire up later (e.g. the Inventory MCP server in <Link path="get_started/tutorials/dungeon-game/2">Module 2</Link>) automatically forwards it on its outbound calls. Since AG-UI caches one Strands agent per `thread_id`, we plug in a `session_manager_provider` rather than the template agent's own session manager — this gives each thread its own `SessionManager` so conversation history persists across turns. That `get_session_manager()` function comes from a generated `session.py` sibling: deployed, it returns a `strands.session.S3SessionManager` backed by an S3 bucket the generator provisions automatically; under `agent-dev` (`LOCAL_DEV=true`) it always returns a `FileSessionManager` writing to a local temp directory instead, regardless of deployed configuration.
+This is the entrypoint for the agent. Because we selected `--protocol=ag-ui`, the generator wraps our Strands `Agent` with `StrandsAgent` from [`ag_ui_strands`](https://docs.copilotkit.ai/aws-strands/integration) and mounts it on a FastAPI app that speaks the [AG-UI protocol](https://docs.copilotkit.ai/aws-strands/protocol) — this is what CopilotKit will talk to from the React website. The agent is built inside a `lifespan` handler — not at import time — so container startup, not module import, owns construction, and each AgentCore session gets its own container. The `SessionIdMiddleware` we saw above forwards the inbound AgentCore runtime session ID so any downstream MCP/A2A client we wire up later (e.g. the Inventory MCP server in <Link path="get_started/tutorials/dungeon-game/2">Module 2</Link>) automatically forwards it on its outbound calls. Since AG-UI caches one Strands agent per `thread_id`, we plug in a `session_manager_provider` rather than the template agent's own session manager — this gives each thread its own `SessionManager` so conversation history persists across turns. That `get_session_manager()` function comes from a generated `session.py` sibling: deployed, it returns a `strands.session.S3SessionManager` backed by an S3 bucket the generator provisions automatically; under `agent-dev` (`LOCAL_DEV=true`) it always returns a `FileSessionManager` writing to a local temp directory instead, regardless of deployed configuration.
 
 ```ts
 // common/constructs/src/app/agents/story-agent/story-agent.ts

@@ -618,13 +618,11 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
 from proj_agent_connection import get_current_session_id, session_id_context
-from starlette.middleware.base import BaseHTTPMiddleware
 
 from .agent import get_agent
+from .middleware.session_id_middleware import SESSION_ID_HEADER, SessionIdMiddleware
 
 logging.basicConfig(level=logging.INFO)
-
-SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
 
 
 @asynccontextmanager
@@ -638,15 +636,6 @@ async def lifespan(app: FastAPI):
     yield
 
 
-class _SessionIdMiddleware(BaseHTTPMiddleware):
-    """Bind the session ID for this request so downstream MCP / A2A clients forward it on outbound calls."""
-
-    async def dispatch(self, request: Request, call_next):
-        session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
-        with session_id_context(session_id):
-            return await call_next(request)
-
-
 app = FastAPI(title="SnapshotAgent", lifespan=lifespan)
 # Allow browser-based AG-UI clients (e.g. a connected React website) to call
 # this agent cross-origin, including the CORS preflight.
@@ -657,7 +646,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.add_middleware(_SessionIdMiddleware)
+app.add_middleware(SessionIdMiddleware)
 
 
 @app.post("/invocations")
