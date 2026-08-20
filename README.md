@@ -32,100 +32,18 @@
 
 ### Build with AI
 
-Add the MCP server to your AI assistant and let it build for you.
+**1. Create a workspace**
 
 ```bash
-claude mcp add nx-plugin-for-aws -- npx -y @aws/nx-plugin-mcp
+pnpm create @aws/nx-workspace my-project
+cd my-project
 ```
 
-<details>
-<summary><strong>Kiro</strong></summary>
+**2. Open your AI assistant in the created workspace and prompt it**
 
-Install the [Kiro Power](https://kiro.dev/docs/powers/) for the best experience — no manual MCP configuration needed:
+> _"Use the Nx Plugin for AWS to build a full-stack application consisting of a React website with shadcn and Cognito authentication, connected to a TypeScript Strands agent via the AG-UI protocol, and infrastructure to deploy it."_
 
-1. Open the Kiro Powers panel from the sidebar
-2. Click `+` to add a custom power
-3. Paste: `https://github.com/awslabs/nx-plugin-for-aws/tree/main/powers/nx-plugin-for-aws`
-4. Click install
-
-Or add the MCP server manually in `.kiro/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "nx-plugin-for-aws": {
-      "command": "npx",
-      "args": ["-y", "@aws/nx-plugin-mcp"]
-    }
-  }
-}
-```
-
-</details>
-
-<details>
-<summary><strong>Claude Code</strong></summary>
-
-```bash
-claude mcp add nx-plugin-for-aws -- npx -y @aws/nx-plugin-mcp
-```
-
-</details>
-
-<details>
-<summary><strong>Cursor</strong></summary>
-
-Add to `~/.cursor/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "nx-plugin-for-aws": {
-      "command": "npx",
-      "args": ["-y", "@aws/nx-plugin-mcp"]
-    }
-  }
-}
-```
-
-</details>
-
-<details>
-<summary><strong>Codex</strong></summary>
-
-Add to `~/.codex/config.toml`:
-
-```toml
-[mcp_servers.nx-plugin-for-aws]
-command = "npx"
-args = ["-y", "@aws/nx-plugin-mcp"]
-```
-
-</details>
-
-<details>
-<summary><strong>Other assistants</strong></summary>
-
-Most MCP-compatible assistants use a JSON configuration file. Add the following entry:
-
-```json
-{
-  "mcpServers": {
-    "nx-plugin-for-aws": {
-      "command": "npx",
-      "args": ["-y", "@aws/nx-plugin-mcp"]
-    }
-  }
-}
-```
-
-</details>
-
-Then just ask:
-
-> _"Use the Nx Plugin for AWS to build a full-stack app with a React website, a tRPC API, Cognito auth, and CDK infrastructure."_
-
-Your AI assistant will use the MCP tools to scaffold, connect, and configure everything. See the [Building with AI guide](https://awslabs.github.io/nx-plugin-for-aws/en/get_started/building-with-ai/) for more details.
+Your AI assistant will use the Nx Plugin for AWS MCP server, which is preconfigured in every workspace you create with the command above, to scaffold, connect, and configure everything. See the [Building with AI guide](https://awslabs.github.io/nx-plugin-for-aws/en/get_started/building-with-ai/) for more details.
 
 ### Build with the CLI
 
