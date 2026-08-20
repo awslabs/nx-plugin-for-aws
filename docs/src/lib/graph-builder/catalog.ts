@@ -50,8 +50,6 @@ export interface NodeType {
   /** Which end(s) of a supported connection this type can occupy. */
   readonly roles: readonly ('source' | 'target')[];
   readonly properties: readonly NodeProperty[];
-  /** The name option the user fills in — `name` for most, absent when fixed. */
-  readonly nameOption: string;
   /** The host project generator for component nodes. */
   readonly host?: {
     readonly generator: string;
@@ -249,7 +247,6 @@ export const NODE_TYPES: readonly NodeType[] = endpointTypes().map((id) => {
     kind: recipe.kind,
     roles: rolesOf(id),
     properties: toProperties(schema, variantOptions),
-    nameOption: recipe.kind === 'component' ? 'name' : 'name',
     ...(recipe.host
       ? {
           host: {
