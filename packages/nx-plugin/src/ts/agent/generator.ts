@@ -232,6 +232,19 @@ export const tsAgentGenerator = async (
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
+  // AG-UI and A2A both mount an Express app and share the same session-id
+  // middleware; HTTP relies on tRPC's createContext instead and has no
+  // Express dependency to support it.
+  if (protocol === 'ag-ui' || protocol === 'a2a') {
+    generateFiles(
+      tree,
+      joinPathFragments(import.meta.dirname, 'files', 'common-express'),
+      targetSourceDir,
+      templateContext,
+      { overwriteStrategy: OverwriteStrategy.KeepExisting },
+    );
+  }
+
   if (infra === 'agentcore') {
     const containers = await resolveContainers(tree, 'inherit');
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
