@@ -4,6 +4,7 @@
  */
 import { type Tree, updateJson } from '@nx/devkit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import trpcAgentCoreHarnessConnectionGenerator from '../agentcore-harness/trpc-connection/generator';
 import fastApiReactGenerator from '../py/fast-api/react/generator';
 import smithyReactConnectionGenerator from '../smithy/react-connection/generator';
 import trpcReactGenerator from '../trpc/react/generator';
@@ -42,6 +43,10 @@ vi.mock('../ts/rdb/trpc-connection/generator', () => ({
 }));
 
 vi.mock('../ts/rdb/agent-connection/generator', () => ({
+  default: vi.fn(),
+}));
+
+vi.mock('../agentcore-harness/trpc-connection/generator', () => ({
   default: vi.fn(),
 }));
 
@@ -128,6 +133,18 @@ describe('connection generator', () => {
         name,
         root: `packages/${name}`,
         metadata: { generator: 'agentcore-gateway' },
+      }),
+    );
+  };
+
+  // Helper to set up an agentcore-harness project
+  const setupHarnessProject = (name: string) => {
+    tree.write(
+      `packages/${name}/project.json`,
+      JSON.stringify({
+        name,
+        root: `packages/${name}`,
+        metadata: { generator: 'agentcore-harness' },
       }),
     );
   };
@@ -900,6 +917,13 @@ describe('connection generator', () => {
       );
     });
 
+    it('should identify agentcore-harness by metadata', async () => {
+      setupHarnessProject('harness');
+      expect(await determineProjectType(tree, 'harness')).toBe(
+        'agentcore-harness',
+      );
+    });
+
     it('should return undefined for unknown', async () => {
       setupUnknownProject();
       expect(await determineProjectType(tree, 'unknown')).toBeUndefined();
@@ -964,6 +988,25 @@ describe('connection generator', () => {
         frontendProjectName: 'frontend',
         smithyModelOrBackendProjectName: 'api-backend',
       });
+    });
+
+    it('should call trpcAgentCoreHarnessConnectionGenerator for ts#trpc-api -> agentcore-harness', async () => {
+      setupTrpcProject('api');
+      setupHarnessProject('harness');
+      await connectionGenerator(tree, {
+        sourceProject: 'api',
+        targetProject: 'harness',
+      });
+      expect(trpcAgentCoreHarnessConnectionGenerator).toHaveBeenCalledWith(
+        tree,
+        {
+          sourceProject: 'api',
+          targetProject: 'harness',
+          sourceComponent: undefined,
+          targetComponent: undefined,
+          preferInstallDependencies: undefined,
+        },
+      );
     });
 
     it('should throw for unsupported source', async () => {

@@ -1,0 +1,72 @@
+import type { RunAgentInput } from '@ag-ui/core';
+import { EventEncoder } from '@ag-ui/encoder';
+import {
+  BedrockAgentCoreClient,
+  InvokeHarnessCommand,
+} from '@aws-sdk/client-bedrock-agentcore';
+import type { APIGatewayProxyEvent } from 'aws-lambda';
+import type { Writable } from 'node:stream';
+import {
+  mapHarnessStreamToAgui,
+  toHarnessMessages,
+} from './converse-to-agui<% if (esm) { %>.js<% } %>';
+import { actorIdFromEvent, runtimeSessionIdFor } from './session<% if (esm) { %>.js<% } %>';
+
+const HARNESS_ARN = process.env.HARNESS_ARN!;
+const client = new BedrockAgentCoreClient({});
+
+function getAllowedOrigin(event: APIGatewayProxyEvent): string {
+  const origin = event.headers?.origin ?? event.headers?.Origin;
+  const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') ?? [];
+  return allowedOrigins.length > 0 && origin && allowedOrigins.includes(origin)
+    ? origin
+    : (allowedOrigins[0] ?? '*');
+}
+
+// POST /agui — body is an AG-UI RunAgentInput; response is AG-UI SSE. Only
+// `messages` and `threadId` are read from the client input. Every other
+// Harness-invocation field (systemPrompt, model, tools, allowedTools, skills,
+// actorId) is pinned server-side, per the AgentCore Harness security guidance:
+// https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-security.html
+export const handler = awslambda.streamifyResponse(
+  async (event: APIGatewayProxyEvent, responseStream: Writable) => {
+    const encoder = new EventEncoder();
+    const httpResponseStream = awslambda.HttpResponseStream.from(
+      responseStream,
+      {
+        statusCode: 200,
+        headers: {
+          'Content-Type': encoder.getContentType(),
+          'Access-Control-Allow-Origin': getAllowedOrigin(event),
+          'Cache-Control': 'no-cache',
+        },
+      },
+    );
+
+    try {
+      const input = JSON.parse(event.body ?? '{}') as RunAgentInput;
+      const actorId = actorIdFromEvent(event);
+      const runtimeSessionId = runtimeSessionIdFor(actorId, input.threadId);
+
+      const { stream } = await client.send(
+        new InvokeHarnessCommand({
+          harnessArn: HARNESS_ARN,
+          runtimeSessionId,
+          actorId,
+          messages: toHarnessMessages(input.messages),
+        }),
+      );
+
+      for await (const aguiEvent of mapHarnessStreamToAgui(stream!, {
+        threadId: input.threadId,
+        runId: input.runId,
+      })) {
+        httpResponseStream.write(encoder.encodeSSE(aguiEvent));
+      }
+    } catch (err) {
+      console.error('agui handler error', err);
+    } finally {
+      httpResponseStream.end();
+    }
+  },
+);

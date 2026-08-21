@@ -1,0 +1,373 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`agentcore-harness#trpc-connection generator > adds an addAguiRoute method to the api CDK construct > api-construct.ts 1`] = `
+"import { MyHarness } from '../harnesses/my-harness/my-harness.js';
+import { NodejsFunction, OutputFormat } from 'aws-cdk-lib/aws-lambda-nodejs';
+import * as url from 'url';
+import {
+  AuthorizationType,
+  LambdaIntegration,
+  ResponseTransferMode,
+} from 'aws-cdk-lib/aws-apigateway';
+import { Aspects, Duration } from 'aws-cdk-lib';
+import {
+  PolicyDocument,
+  PolicyStatement,
+  Effect,
+  AnyPrincipal,
+  IGrantable,
+  Grant,
+} from 'aws-cdk-lib/aws-iam';
+import {
+  Code,
+  Runtime,
+  Function,
+  FunctionProps,
+  Tracing,
+} from 'aws-cdk-lib/aws-lambda';
+import { RuntimeConfig } from '../../core/runtime-config.js';
+import { AddCorsPreflightAspect, RestApi } from '../../core/api/rest-api.js';
+
+export class TestApi extends RestApi {
+  private allowedOrigins = ['*'];
+
+  constructor(scope, id, props) {
+    super(scope, id, { ...props });
+    Aspects.of(this).add(new AddCorsPreflightAspect(() => this.allowedOrigins));
+  }
+
+  public restrictCorsTo(...origins) {
+    this.allowedOrigins = origins;
+  }
+
+  public grantInvokeAccess(grantee) {
+    Grant.addToPrincipal({
+      grantee,
+      actions: ['execute-api:Invoke'],
+      resourceArns: [this.api.arnForExecuteApi('*', '/*', '*')],
+    });
+  }
+
+  /**
+   * Adds a POST /agui route backed by MyHarness,
+   * translating its Converse-style stream into AG-UI server-sent events.
+   * Only 'messages' and 'threadId' are read from the request; every other
+   * Harness field (systemPrompt, model, tools, allowedTools, skills,
+   * actorId) is pinned server-side by the generated handler.
+   */
+  public addAguiRoute(harness: MyHarness): void {
+    const rc = RuntimeConfig.ensure(this);
+    const aguiHandler = new NodejsFunction(this, 'AguiHandler', {
+      entry: url.fileURLToPath(
+        new URL('../../../../../api/src/agui/handler.ts', import.meta.url),
+      ),
+      runtime: Runtime.NODEJS_LATEST,
+      timeout: Duration.seconds(180),
+      tracing: Tracing.ACTIVE,
+      bundling: {
+        format: OutputFormat.ESM,
+        mainFields: ['module', 'main'],
+        banner:
+          "import { createRequire as __aguiCreateRequire } from 'module'; const require = __aguiCreateRequire(import.meta.url);",
+      },
+      environment: {
+        HARNESS_ARN: harness.harnessArn,
+        MEMORY_ARN: harness.harness.attrMemoryManagedMemoryConfigurationArn,
+      },
+    });
+    aguiHandler.addEnvironment(
+      'RUNTIME_CONFIG_APP_ID',
+      rc.appConfigApplicationId,
+    );
+    rc.grantReadAppConfig(aguiHandler);
+    harness.grantInvokeAccess(aguiHandler);
+
+    const aguiResource = this.api.root.addResource('agui');
+    aguiResource.addMethod(
+      'POST',
+      new LambdaIntegration(aguiHandler, {
+        responseTransferMode: ResponseTransferMode.STREAM,
+      }),
+    );
+
+    // Grants every existing tRPC operation handler Memory-read access, so an
+    // optional 'history' procedure can reconstruct a conversation from
+    // AgentCore Memory, decoupled from the '/agui' connection's lifetime.
+    Object.values(this.integrations).forEach((integration) => {
+      if ('handler' in integration && integration.handler instanceof Function) {
+        integration.handler.addEnvironment('HARNESS_ARN', harness.harnessArn);
+        integration.handler.addEnvironment(
+          'MEMORY_ARN',
+          harness.harness.attrMemoryManagedMemoryConfigurationArn,
+        );
+        Grant.addToPrincipal({
+          grantee: integration.handler,
+          actions: [
+            'bedrock-agentcore:ListEvents',
+            'bedrock-agentcore:GetEvent',
+            'bedrock-agentcore:RetrieveMemoryRecords',
+          ],
+          resourceArns: [
+            harness.harness.attrMemoryManagedMemoryConfigurationArn,
+          ],
+        });
+      }
+    });
+  }
+}
+"
+`;
+
+exports[`agentcore-harness#trpc-connection generator > generates the agui route handler, mapper and session helper > converse-to-agui.ts 1`] = `
+"import type { BaseEvent, RunAgentInput } from '@ag-ui/core';
+import { EventType } from '@ag-ui/core';
+import type {
+  HarnessMessage,
+  InvokeHarnessStreamOutput,
+} from '@aws-sdk/client-bedrock-agentcore';
+
+/**
+ * Builds the single Harness message to forward for this turn. The Harness owns
+ * conversation continuity via \`runtimeSessionId\`, so only the newest user
+ * message is sent — the full \`RunAgentInput.messages\` history is the client's
+ * local thread state, not what should be replayed to the Harness.
+ */
+export function toHarnessMessages(
+  messages: RunAgentInput['messages'],
+): HarnessMessage[] {
+  const last = messages.at(-1);
+  if (!last || last.role !== 'user') {
+    throw new Error(
+      'Expected the last message in RunAgentInput to be a user message',
+    );
+  }
+  const text =
+    typeof last.content === 'string'
+      ? last.content
+      : (last.content ?? [])
+          .filter(
+            (block): block is { type: 'text'; text: string } =>
+              block.type === 'text',
+          )
+          .map((block) => block.text)
+          .join('\\n');
+  return [{ role: 'user', content: [{ text }] }];
+}
+
+let idCounter = 0;
+function nextId(prefix: string): string {
+  idCounter += 1;
+  return \`\${prefix}_\${Date.now()}_\${idCounter}\`;
+}
+
+/**
+ * Maps the Harness's \`InvokeHarness\` stream (Converse-shaped events) to AG-UI
+ * events. Assistant text becomes TEXT_MESSAGE_*; tool-use content blocks
+ * become TOOL_CALL_* (contentBlockStart.toolUse -> TOOL_CALL_START,
+ * contentBlockDelta.toolUse.input -> TOOL_CALL_ARGS, contentBlockStop ->
+ * TOOL_CALL_END). Unrecognised event members (metadata, exceptions) are
+ * skipped rather than surfaced as AG-UI events.
+ */
+export async function* mapHarnessStreamToAgui(
+  stream: AsyncIterable<InvokeHarnessStreamOutput>,
+  ctx: { threadId: string; runId: string },
+): AsyncGenerator<BaseEvent> {
+  yield {
+    type: EventType.RUN_STARTED,
+    threadId: ctx.threadId,
+    runId: ctx.runId,
+  } as BaseEvent;
+
+  let textMessageId: string | undefined;
+  // contentBlockIndex -> the AG-UI toolCallId minted for that block.
+  const toolCallIdByBlockIndex = new Map<number, string>();
+
+  try {
+    for await (const event of stream) {
+      if (
+        event.contentBlockStart?.start &&
+        'toolUse' in event.contentBlockStart.start &&
+        event.contentBlockStart.start.toolUse
+      ) {
+        const { toolUseId, name } = event.contentBlockStart.start.toolUse;
+        const toolCallId = toolUseId ?? nextId('tool');
+        toolCallIdByBlockIndex.set(
+          event.contentBlockStart.contentBlockIndex ?? 0,
+          toolCallId,
+        );
+        yield {
+          type: EventType.TOOL_CALL_START,
+          toolCallId,
+          toolCallName: name ?? 'unknown',
+        } as BaseEvent;
+        continue;
+      }
+
+      const delta = event.contentBlockDelta?.delta;
+      if (delta && 'text' in delta && delta.text !== undefined) {
+        if (!textMessageId) {
+          textMessageId = nextId('msg');
+          yield {
+            type: EventType.TEXT_MESSAGE_START,
+            messageId: textMessageId,
+            role: 'assistant',
+          } as BaseEvent;
+        }
+        yield {
+          type: EventType.TEXT_MESSAGE_CONTENT,
+          messageId: textMessageId,
+          delta: delta.text,
+        } as BaseEvent;
+        continue;
+      }
+
+      if (delta && 'toolUse' in delta && delta.toolUse) {
+        const toolCallId = toolCallIdByBlockIndex.get(
+          event.contentBlockDelta?.contentBlockIndex ?? 0,
+        );
+        if (toolCallId) {
+          yield {
+            type: EventType.TOOL_CALL_ARGS,
+            toolCallId,
+            delta: delta.toolUse.input ?? '',
+          } as BaseEvent;
+        }
+        continue;
+      }
+
+      if (event.contentBlockStop) {
+        const toolCallId = toolCallIdByBlockIndex.get(
+          event.contentBlockStop.contentBlockIndex ?? 0,
+        );
+        if (toolCallId) {
+          yield { type: EventType.TOOL_CALL_END, toolCallId } as BaseEvent;
+          toolCallIdByBlockIndex.delete(
+            event.contentBlockStop.contentBlockIndex ?? 0,
+          );
+        }
+        continue;
+      }
+      // messageStart / messageStop / metadata / exceptions: no AG-UI equivalent, skipped.
+    }
+  } finally {
+    if (textMessageId) {
+      yield {
+        type: EventType.TEXT_MESSAGE_END,
+        messageId: textMessageId,
+      } as BaseEvent;
+    }
+  }
+
+  yield {
+    type: EventType.RUN_FINISHED,
+    threadId: ctx.threadId,
+    runId: ctx.runId,
+  } as BaseEvent;
+}
+"
+`;
+
+exports[`agentcore-harness#trpc-connection generator > generates the agui route handler, mapper and session helper > handler.ts 1`] = `
+"import type { RunAgentInput } from '@ag-ui/core';
+import { EventEncoder } from '@ag-ui/encoder';
+import {
+  BedrockAgentCoreClient,
+  InvokeHarnessCommand,
+} from '@aws-sdk/client-bedrock-agentcore';
+import type { APIGatewayProxyEvent } from 'aws-lambda';
+import type { Writable } from 'node:stream';
+import {
+  mapHarnessStreamToAgui,
+  toHarnessMessages,
+} from './converse-to-agui.js';
+import { actorIdFromEvent, runtimeSessionIdFor } from './session.js';
+
+const HARNESS_ARN = process.env.HARNESS_ARN!;
+const client = new BedrockAgentCoreClient({});
+
+function getAllowedOrigin(event: APIGatewayProxyEvent): string {
+  const origin = event.headers?.origin ?? event.headers?.Origin;
+  const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') ?? [];
+  return allowedOrigins.length > 0 && origin && allowedOrigins.includes(origin)
+    ? origin
+    : (allowedOrigins[0] ?? '*');
+}
+
+// POST /agui — body is an AG-UI RunAgentInput; response is AG-UI SSE. Only
+// \`messages\` and \`threadId\` are read from the client input. Every other
+// Harness-invocation field (systemPrompt, model, tools, allowedTools, skills,
+// actorId) is pinned server-side, per the AgentCore Harness security guidance:
+// https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-security.html
+export const handler = awslambda.streamifyResponse(
+  async (event: APIGatewayProxyEvent, responseStream: Writable) => {
+    const encoder = new EventEncoder();
+    const httpResponseStream = awslambda.HttpResponseStream.from(
+      responseStream,
+      {
+        statusCode: 200,
+        headers: {
+          'Content-Type': encoder.getContentType(),
+          'Access-Control-Allow-Origin': getAllowedOrigin(event),
+          'Cache-Control': 'no-cache',
+        },
+      },
+    );
+
+    try {
+      const input = JSON.parse(event.body ?? '{}') as RunAgentInput;
+      const actorId = actorIdFromEvent(event);
+      const runtimeSessionId = runtimeSessionIdFor(actorId, input.threadId);
+
+      const { stream } = await client.send(
+        new InvokeHarnessCommand({
+          harnessArn: HARNESS_ARN,
+          runtimeSessionId,
+          actorId,
+          messages: toHarnessMessages(input.messages),
+        }),
+      );
+
+      for await (const aguiEvent of mapHarnessStreamToAgui(stream!, {
+        threadId: input.threadId,
+        runId: input.runId,
+      })) {
+        httpResponseStream.write(encoder.encodeSSE(aguiEvent));
+      }
+    } catch (err) {
+      console.error('agui handler error', err);
+    } finally {
+      httpResponseStream.end();
+    }
+  },
+);
+"
+`;
+
+exports[`agentcore-harness#trpc-connection generator > generates the agui route handler, mapper and session helper > session.ts 1`] = `
+"import { createHash } from 'node:crypto';
+import type { APIGatewayProxyEvent } from 'aws-lambda';
+
+// AgentCore Runtime Session IDs must be >= 33 characters and match
+// [a-zA-Z0-9][a-zA-Z0-9-_]*. actorId and threadId are hashed to a fixed width
+// independently before being joined — concatenating the two raw strings and
+// then truncating the result silently drops the threadId suffix for long
+// actorIds (e.g. a full IAM principal ARN), collapsing every thread from the
+// same caller into one Memory session.
+function fixedWidthToken(value: string): string {
+  return createHash('sha256').update(value).digest('hex').slice(0, 32);
+}
+
+export function runtimeSessionIdFor(actorId: string, threadId: string): string {
+  return \`\${fixedWidthToken(actorId)}_\${fixedWidthToken(threadId)}\`;
+}
+
+// IAM inbound has no JWT \`sub\`; the caller's IAM principal ARN is the closest
+// server-derived identity available, and is never taken from the request
+// body. Sanitized because ARNs contain ':' and '/', which InvokeHarness
+// rejects in the actorId field.
+export function actorIdFromEvent(event: APIGatewayProxyEvent): string {
+  const arn = event.requestContext.identity?.userArn ?? 'anonymous';
+  return arn.replace(/[^a-zA-Z0-9_-]/g, '-');
+}
+"
+`;

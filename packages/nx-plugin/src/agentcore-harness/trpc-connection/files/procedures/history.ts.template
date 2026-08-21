@@ -1,0 +1,66 @@
+import {
+  BedrockAgentCoreClient,
+  ListEventsCommand,
+} from '@aws-sdk/client-bedrock-agentcore';
+import { z } from 'zod';
+import { actorIdFromEvent, runtimeSessionIdFor } from '../agui/session<% if (esm) { %>.js<% } %>';
+import { publicProcedure } from '../init<% if (esm) { %>.js<% } %>';
+
+const client = new BedrockAgentCoreClient({});
+
+function textFromContent(content: unknown): string {
+  return content &&
+    typeof content === 'object' &&
+    'text' in content &&
+    typeof content.text === 'string'
+    ? content.text
+    : '';
+}
+
+const HistoryInputSchema = z.object({ threadId: z.string() });
+
+const HistoryMessageSchema = z.object({
+  role: z.enum(['user', 'assistant']),
+  content: z.string(),
+});
+
+const HistoryOutputSchema = z.object({
+  messages: z.array(HistoryMessageSchema),
+});
+
+/**
+ * Reconstructs a conversation from AgentCore Memory. The Harness commits each
+ * exchange to Memory as soon as it completes — independently of whether a
+ * client is still connected to `/agui` — so this survives a dropped
+ * connection, a page reload, or a check-in from another device. Scoped to the
+ * caller's own actor id (server-derived, same as `/agui`), never a
+ * client-supplied one.
+ */
+export const history = publicProcedure
+  .input(HistoryInputSchema)
+  .output(HistoryOutputSchema)
+  .query(async ({ input, ctx }) => {
+    const actorId = actorIdFromEvent(ctx.event);
+    const sessionId = runtimeSessionIdFor(actorId, input.threadId);
+
+    const { events } = await client.send(
+      new ListEventsCommand({
+        memoryId: process.env.MEMORY_ARN!,
+        actorId,
+        sessionId,
+        includePayloads: true,
+        maxResults: 100,
+      }),
+    );
+
+    const messages = (events ?? [])
+      .flatMap((event) => event.payload ?? [])
+      .flatMap((payload) => (payload.conversational ? [payload.conversational] : []))
+      .map((turn) => ({
+        role:
+          turn.role === 'ASSISTANT' ? ('assistant' as const) : ('user' as const),
+        content: textFromContent(turn.content),
+      }));
+
+    return { messages };
+  });

@@ -1,0 +1,25 @@
+import { createHash } from 'node:crypto';
+import type { APIGatewayProxyEvent } from 'aws-lambda';
+
+// AgentCore Runtime Session IDs must be >= 33 characters and match
+// [a-zA-Z0-9][a-zA-Z0-9-_]*. actorId and threadId are hashed to a fixed width
+// independently before being joined — concatenating the two raw strings and
+// then truncating the result silently drops the threadId suffix for long
+// actorIds (e.g. a full IAM principal ARN), collapsing every thread from the
+// same caller into one Memory session.
+function fixedWidthToken(value: string): string {
+  return createHash('sha256').update(value).digest('hex').slice(0, 32);
+}
+
+export function runtimeSessionIdFor(actorId: string, threadId: string): string {
+  return `${fixedWidthToken(actorId)}_${fixedWidthToken(threadId)}`;
+}
+
+// IAM inbound has no JWT `sub`; the caller's IAM principal ARN is the closest
+// server-derived identity available, and is never taken from the request
+// body. Sanitized because ARNs contain ':' and '/', which InvokeHarness
+// rejects in the actorId field.
+export function actorIdFromEvent(event: APIGatewayProxyEvent): string {
+  const arn = event.requestContext.identity?.userArn ?? 'anonymous';
+  return arn.replace(/[^a-zA-Z0-9_-]/g, '-');
+}
