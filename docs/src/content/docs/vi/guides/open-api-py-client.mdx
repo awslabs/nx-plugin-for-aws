@@ -1,0 +1,254 @@
+---
+title: OpenAPI Python Client
+description: Tài liệu tham khảo cho trình tạo client Python OpenAPI
+generator: open-api#py-client
+---
+import { FileTree } from '@astrojs/starlight/components';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Drawer from '@components/drawer.astro';
+
+Tạo một client Python type-safe cho bất kỳ đặc tả OpenAPI nào, được xây dựng trên [httpx](https://www.python-httpx.org/) và [pydantic](https://docs.pydantic.dev/).
+
+Client này là phiên bản Python tương ứng với trình tạo `open-api#ts-client`: một class cho mỗi API, các phương thức chỉ nhận keyword, các lỗi có kiểu bạn có thể thu hẹp, và một điểm mở rộng duy nhất — client `httpx` của riêng bạn — cho xác thực và bất cứ thứ gì khác bạn cần trên đường truyền.
+
+## Cách sử dụng
+
+<RunGenerator generator="open-api#py-client" />
+
+### Tùy chọn
+
+<GeneratorParameters generator="open-api#py-client" />
+
+## Đầu ra của Generator
+
+<FileTree>
+
+- \<outputPath>
+  - \_\_init\_\_.py Xuất các client, `ApiError` và module `types`
+  - types.py các model pydantic cho mọi schema trong đặc tả
+  - errors.py `ApiError` và một subclass cho mỗi operation
+  - client.py Client đồng bộ, sử dụng `httpx.Client`
+  - async_client.py Client bất đồng bộ, sử dụng `httpx.AsyncClient`
+
+</FileTree>
+
+Truyền `--clientType=sync` hoặc `--clientType=async` để chỉ tạo một trong hai client.
+
+:::tip[Client được tạo trong Git]
+Client được bỏ qua khỏi kiểm soát phiên bản theo mặc định, vì nó được tạo lại từ đặc tả. Xóa mục trong `.gitignore` của bạn để check in thay vào đó — nhưng lưu ý rằng bất kỳ chỉnh sửa thủ công nào sẽ bị ghi đè vào lần tiếp theo nó được tạo.
+:::
+
+### Các phụ thuộc
+
+Code được tạo import `httpx` và `pydantic`, vì vậy hãy thêm cả hai vào dự án bạn tạo:
+
+```toml
+# pyproject.toml
+dependencies = [
+  "httpx>=0.28.1",
+  "pydantic>=2.13.4",
+]
+```
+
+Không cần gì khác — không có runtime riêng, và không có framework nào để áp dụng.
+
+## Sử dụng Client được tạo
+
+Khởi tạo client với URL cơ sở của API:
+
+```python
+from my_api import MyApi, MyApiConfig
+
+api = MyApi(MyApiConfig(url="https://api.example.com"))
+
+pet = api.pet.add_pet(name="rex", status="available")
+print(pet.id, pet.name)
+```
+
+Các phương thức là **keyword-only**, vì vậy một lời gọi đọc như đặc tả, và các tham số bắt buộc đến trước:
+
+```python
+pets = api.pet.list_pets(status=["available"], limit=10)
+pet = api.pet.get_pet_by_id(pet_id=42)
+api.pet.delete_pet(pet_id=42)
+```
+
+Các operation được gắn tag trong đặc tả được nhóm thành các namespace — `api.pet.add_pet(...)` ở trên đến từ tag `pet`. Các operation không có tag nằm trực tiếp trên client, như `api.health()`.
+
+Một operation có body là một object sẽ có các trường của nó được làm phẳng vào lời gọi, vì vậy không có wrapper nào để xây dựng. Khi body là một list hoặc dictionary, nó được truyền theo vị trí thay vào đó:
+
+```python
+created = api.pet.batch_create([types.Pet(name="a"), types.Pet(name="b")])
+```
+
+### Các kiểu
+
+Mọi schema trở thành một model pydantic trong `types`, vì vậy kết quả được xác thực và editor của bạn biết hình dạng của chúng:
+
+```python
+from my_api import types
+
+pet = api.pet.add_pet(name="rex", owner=types.Owner(name="ann"))
+
+reveal_type(pet)         # types.Pet
+reveal_type(pet.owner)   # types.Owner | None
+```
+
+Các enum trở thành kiểu `Literal`, vì vậy một giá trị không hợp lệ là lỗi kiểu thay vì một request thất bại:
+
+```python
+api.pet.list_pets(status=["available"])   # ok
+api.pet.list_pets(status=["on-mars"])     # rejected before it is sent
+```
+
+Ngày và ngày-giờ là `datetime.date` / `datetime.datetime` khi vào và ra — client xử lý chuyển đổi ISO-8601:
+
+```python
+event = api.create_event(day=datetime.date(2026, 4, 18))
+reveal_type(event.day)   # datetime.date
+```
+
+### Lỗi
+
+Một response không thành công sẽ raise một exception. Catch `ApiError` để xử lý bất kỳ lỗi nào từ cả hai client:
+
+```python
+from my_api import ApiError
+
+try:
+    pet = api.pet.get_pet_by_id(pet_id=42)
+except ApiError as e:
+    print(e.status, e.error)
+```
+
+Mỗi operation cũng có subclass riêng của nó, có `.error` thu hẹp đến các response mà operation đó khai báo. `isinstance` chọn ra một status:
+
+```python {8,11}
+from my_api import types
+from my_api.errors import GetPetByIdApiError
+
+try:
+    pet = api.pet.get_pet_by_id(pet_id=42)
+except GetPetByIdApiError as e:
+    if isinstance(e.error, types.GetPetById404Error):
+        print("no such pet:", e.error.error.detail)
+    elif isinstance(e.error, types.GetPetById5XXError):
+        print("server error:", e.error.error.message)
+```
+
+Một body không khớp với schema mà đặc tả khai báo vẫn raise exception có kiểu, mang theo bất cứ thứ gì server thực sự gửi — vì vậy trang lỗi HTML của proxy xuất hiện dưới dạng lỗi thay vì lỗi xác thực bên trong error handler của bạn.
+
+### Streaming
+
+Một operation streaming trả về một iterator của các item đã được parse, vì vậy bạn có thể tiêu thụ response khi nó đến:
+
+```python
+for chunk in api.stream_chunks(count=4):
+    print(chunk.index, chunk.message)
+```
+
+### Async
+
+Client async phản chiếu client sync, từng phương thức một:
+
+```python
+from my_api import AsyncMyApi, AsyncMyApiConfig
+
+async with AsyncMyApi(AsyncMyApiConfig(url=url)) as api:
+    pet = await api.pet.add_pet(name="rex")
+
+    async for chunk in api.stream_chunks(count=4):
+        print(chunk.message)
+```
+
+Cả hai client đều raise từ cùng một hệ thống phân cấp, vì vậy `except ApiError` bắt được cả hai.
+
+## Xác thực
+
+Xác thực là một điều mà mọi API đều làm khác nhau, vì vậy client không phát minh ra một abstraction cho nó. Cung cấp client `httpx` của riêng bạn và bất cứ thứ gì bạn cấu hình trên đó đều áp dụng cho mọi request:
+
+```python {6}
+import httpx
+from my_api import MyApi, MyApiConfig
+
+with httpx.Client(auth=MyAuth()) as http:
+    api = MyApi(MyApiConfig(url=url, httpx_client=http))
+    pet = api.pet.add_pet(name="rex")
+```
+
+Đây là tương đương Python của việc truyền một `fetch` tùy chỉnh cho client TypeScript. Một [`httpx.Auth`](https://www.python-httpx.org/advanced/authentication/), event hooks, một transport tùy chỉnh, timeouts, retries, proxies, HTTP/2, và các header và query parameter riêng của client đều áp dụng — bao gồm cả trên multipart uploads và streaming responses.
+
+Một client bạn cung cấp không bao giờ bị đóng bởi client được tạo, vì vậy việc chia sẻ nó qua nhiều client là an toàn.
+
+<Drawer title="Ký các request với AWS SigV4" trigger="Nhấp vào đây để xem ví dụ ký các request với thông tin xác thực AWS IAM.">
+
+`httpx.Auth` là tất cả những gì một signer cần. Đối với một API đằng sau xác thực IAM:
+
+```python
+import hashlib
+from collections.abc import Generator
+
+import boto3
+import httpx
+from botocore.auth import SigV4Auth
+from botocore.awsrequest import AWSRequest
+
+from my_api import MyApi, MyApiConfig
+
+
+class SigV4HTTPXAuth(httpx.Auth):
+    requires_request_body = True
+
+    def __init__(self, credentials, service: str, region: str):
+        self.signer = SigV4Auth(credentials, service, region)
+
+    def auth_flow(
+        self, request: httpx.Request
+    ) -> Generator[httpx.Request, httpx.Response]:
+        headers = dict(request.headers)
+        headers.pop("connection", None)
+        headers["x-amz-content-sha256"] = hashlib.sha256(
+            request.content or b""
+        ).hexdigest()
+
+        aws_request = AWSRequest(
+            method=request.method,
+            url=str(request.url),
+            data=request.content,
+            headers=headers,
+        )
+        self.signer.add_auth(aws_request)
+
+        request.headers.clear()
+        request.headers.update(dict(aws_request.headers))
+        yield request
+
+
+session = boto3.Session()
+auth = SigV4HTTPXAuth(session.get_credentials(), "execute-api", session.region_name)
+
+with httpx.Client(auth=auth) as http:
+    api = MyApi(MyApiConfig(url=url, httpx_client=http))
+    pet = api.pet.add_pet(name="rex")
+```
+
+</Drawer>
+
+### Cấu hình khác
+
+`Config` mang một số lượng nhỏ các tùy chọn ngoài URL và client:
+
+```python
+api = MyApi(
+    MyApiConfig(
+        url=url,
+        # Sent with every request, where the operation sets no header of its own
+        headers={"x-tenant-id": "acme"},
+        # Omit the Content-Type the specification declares for each request
+        omit_content_type_header=False,
+    )
+)
+```
+
+Một header mà một operation đặt luôn thắng so với cùng header ở đây, vì vậy một giá trị per-call không bao giờ được merge vào giá trị đã cấu hình.

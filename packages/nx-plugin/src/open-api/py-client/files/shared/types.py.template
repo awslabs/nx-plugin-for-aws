@@ -1,0 +1,305 @@
+<%_
+const pyEnumValue = (member) => toPythonLiteral(member.value);
+/**
+ * A discriminated subtype's tag property. pydantic dispatches a tagged union
+ * on a bare `Literal` field that every member declares, so the tag is emitted
+ * as required whether or not the schema lists it in `required`: its value is
+ * fixed by union membership, and a missing tag is a request the server always
+ * rejects.
+ */
+const isDiscriminatorTag = (prop) => !!prop.discriminatorValue;
+
+/**
+ * Render text from the spec as a Python docstring body. A description is
+ * arbitrary text: a backslash would start an escape sequence and a trailing one
+ * would escape the closing quotes, so it goes through the same escaping as any
+ * other literal, with the surrounding quotes stripped.
+ */
+const pyDocstring = (text) =>
+  toPythonLiteral(String(text ?? '').replace(/\r?\n/g, ' ')).slice(1, -1);
+
+/** A model's docstring text, noting deprecation where the spec declares it. */
+const modelDocstring = (model) =>
+  pyDocstring(model.description || '') + (model.deprecated ? ' (deprecated)' : '');
+
+const fieldAnnotation = (prop) => {
+  let base;
+  if (prop.isEnum && Array.isArray(prop.enum) && prop.enum.length > 0) {
+    base = `Literal[${prop.enum.map(pyEnumValue).join(', ')}]`;
+  } else {
+    base = prop.pythonAnnotation || prop.pythonType || 'Any';
+  }
+  if (isDiscriminatorTag(prop)) return base;
+  if (!prop.isRequired || prop.isNullable) return `Optional[${base}]`;
+  return base;
+};
+const stripQuotes = (t) => (t || '').replace(/^"(.*)"$/, '$1');
+
+/**
+ * Render a pydantic `Field(...)` call for a model property — alias, default,
+ * description, deprecated, frozen.  Returns null when no Field(...) is needed
+ * so the template can emit a bare `name: T` or `name: T = None`.
+ */
+const fieldCallFor = (property) => {
+  const snake = property.pythonName || property.name;
+  const aliasNeeded = snake !== property.name;
+  const args = [];
+  const needsDefault = !isDiscriminatorTag(property) && !property.isRequired;
+  if (needsDefault) args.push('default=None');
+  if (aliasNeeded) args.push(`alias="${property.name}"`);
+  if (property.description) {
+    args.push(`description=${toPythonLiteral(property.description.replace(/\r?\n/g, ' '))}`);
+  }
+  if (property.isReadOnly) args.push('frozen=True');
+  if (property.deprecated) args.push('deprecated=True');
+  // Only emit Field(...) if something beyond a bare type annotation is needed.
+  if (args.length === 0) return null;
+  // If the only argument is default=None and there is no alias/desc/frozen/deprecated,
+  // prefer the shorter `= None` form.
+  if (args.length === 1 && args[0] === 'default=None') return null;
+  return `Field(${args.join(', ')})`;
+};
+
+const renderProperty = (property) => {
+  const snake = property.pythonName || property.name;
+  const typeAnnotation = fieldAnnotation(property);
+  const fieldCall = fieldCallFor(property);
+  const needsDefault = !isDiscriminatorTag(property) && !property.isRequired;
+  if (fieldCall) {
+    return `    ${snake}: ${typeAnnotation} = ${fieldCall}`;
+  }
+  if (needsDefault) {
+    return `    ${snake}: ${typeAnnotation} = None`;
+  }
+  return `    ${snake}: ${typeAnnotation}`;
+};
+_%>
+"""Types for <%- className %> — AUTO-GENERATED, do not edit."""
+
+from __future__ import annotations
+
+import datetime
+from typing import Annotated, Any, Literal, Never, Optional, TypedDict, Union
+
+from pydantic import BaseModel, ConfigDict, Field
+
+<%_
+/**
+ * Classify a model by how it's rendered in the module.
+ *
+ * `class` models emit as `class Foo(BaseModel)` and are self-contained — they
+ * reference other types only via forward-ref-quoted annotations that pydantic
+ * resolves lazily.
+ *
+ * `alias` models emit as `Foo = Union[...] / Literal[...] / list[...] / ...`.
+ * These are module-level expressions evaluated at import time, so every
+ * type they reference must already be defined.  Emit them *after* all class
+ * definitions so `TypeAdapter(Foo)` can resolve references without relying
+ * on forward-ref strings.
+ */
+const classifyModel = (model) => {
+  if (model.isInlinedByAllOf) return 'skip';
+  if (model.export === 'enum') return 'alias';
+  if (model.export === 'one-of' || model.export === 'any-of') return 'alias';
+  if (model.export === 'dictionary') return 'alias';
+  if (model.export === 'array') return 'alias';
+  if (model.export === 'tuple') return 'alias';
+  // `all-of` is rendered as a `BaseModel` subclass with flattened fields.
+  return 'class';
+};
+
+const renderClassModel = (model) => {
+  // Used inline below via the `classModels.forEach(...)` loop.
+};
+_%>
+
+<%_ /* ────── Pass 1: all class definitions ────── */ _%>
+<%_ models.forEach((model) => {
+  if (classifyModel(model) !== 'class') return;
+_%>
+<%_ if (model.export === 'all-of') {
+  // `effectiveProperties` is the shared flattening of the composition,
+  // recursing through members that are themselves allOf composites.
+  const flattened = model.effectiveProperties || [];
+_%>
+
+class <%- model.pythonClassName %>(BaseModel):
+<%_ if (model.description || model.deprecated) { _%>
+    """<%- modelDocstring(model) %>"""
+<%_ } _%>
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+<%_ if (flattened.length === 0) { _%>
+    pass
+<%_ } _%>
+<%_ flattened.forEach((property) => { _%>
+<%- renderProperty(property) %>
+<%_ }); _%>
+<%_ } else { _%>
+
+class <%- model.pythonClassName %>(BaseModel):
+<%_ if (model.description || model.deprecated) { _%>
+    """<%- modelDocstring(model) %>"""
+<%_ } _%>
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+<%_ if ((model.properties || []).length === 0 && !model.hasAdditionalProperties) { _%>
+    pass
+<%_ } _%>
+<%_ (model.properties || []).forEach((property) => { _%>
+<%- renderProperty(property) %>
+<%_ }); _%>
+<%_ } _%>
+<%_ }); _%>
+
+<%_
+/* ────── Pass 2: all non-class aliases ──────
+ * An alias is a module-level expression evaluated at import time, so unlike a
+ * class-body annotation (which `from __future__ import annotations` defers)
+ * every alias it references must already be bound. Emit them in dependency
+ * order via a topological sort: an alias that names another alias follows it.
+ * Classes are all defined above, so only alias-to-alias edges matter.
+ */
+const aliasModels = models.filter((m) => classifyModel(m) === 'alias');
+const aliasByClassName = new Map(aliasModels.map((m) => [m.pythonClassName, m]));
+/** The aliases the given alias's rendered type expression names. */
+const aliasDependencies = (model) => {
+  const rendered = model.export === 'enum'
+    ? ''
+    : [model.pythonType || '', ...(model.properties || []).map((p) => p.pythonType || '')].join(' ');
+  const found = new Set();
+  for (const identifier of rendered.match(/[A-Za-z_][A-Za-z0-9_]*/g) || []) {
+    const dependency = aliasByClassName.get(identifier);
+    if (dependency && dependency !== model) found.add(dependency);
+  }
+  return found;
+};
+const sortedAliasModels = [];
+const aliasState = new Map();
+const visitAlias = (model) => {
+  // 'visiting' marks a cycle: emit it where first reached and let the reference
+  // that closed the loop resolve against the earlier binding.
+  if (aliasState.get(model)) return;
+  aliasState.set(model, 'visiting');
+  for (const dependency of aliasDependencies(model)) {
+    visitAlias(dependency);
+  }
+  aliasState.set(model, 'done');
+  sortedAliasModels.push(model);
+};
+aliasModels
+  .slice()
+  .sort((a, b) => a.name.localeCompare(b.name))
+  .forEach(visitAlias);
+_%>
+<%_ sortedAliasModels.forEach((model) => { _%>
+
+<%_ if (model.export === 'enum') { _%>
+<%- model.pythonClassName %> = Literal[<%_ model.enum.forEach((m, i) => { _%><%- i > 0 ? ', ' : '' %><%- pyEnumValue(m) %><%_ }); _%>]
+<%_ if (model.description || model.deprecated) { _%>
+"""<%- modelDocstring(model) %>"""
+<%_ } _%>
+<%_ } else if (model.export === 'one-of' || model.export === 'any-of') { _%>
+<%_ /* Classes are already defined above, so references can be unquoted.
+       `pythonType` (no quotes) vs `pythonAnnotation` (forward-ref-quoted)
+       matters here: pydantic's `TypeAdapter(X)` can't resolve string
+       forward-refs at runtime, only typing does that statically. */ _%>
+<%_ /* A discriminated union renders as a pydantic tagged union so parsing
+       dispatches directly to the matching branch (never merging branches).
+       Requires every member to carry the discriminator as a Literal-typed
+       field; otherwise fall back to a plain Union. */ _%>
+<%_ /* pydantic requires the tag to be a bare Literal field on every member,
+       else TypeAdapter construction fails at import time. `renderProperty`
+       emits a tag that way whether or not the schema requires it. */
+    const memberModels = (model.composedModels || []);
+    const isTagged = model.discriminator && memberModels.length > 0
+      && memberModels.length === model.properties.filter(p => !p.isPrimitive).length
+      && (model.composedPrimitives || []).length === 0
+      && memberModels.every(m => (m.properties || []).some(p =>
+           p.name === model.discriminator.propertyName && p.discriminatorValue)); _%>
+<%_ if (isTagged) { _%>
+<%- model.pythonClassName %> = Annotated[Union[<%_ model.properties.forEach((p, i) => { _%><%- i > 0 ? ', ' : '' %><%- p.pythonType || 'Any' %><%_ }); _%>], Field(discriminator="<%- model.discriminator.pythonPropertyName %>")]
+<%_ } else { _%>
+<%- model.pythonClassName %> = Union[<%_ model.properties.forEach((p, i) => { _%><%- i > 0 ? ', ' : '' %><%- p.pythonType || 'Any' %><%_ }); _%>]
+<%_ } _%>
+<%_ if (model.description || model.deprecated) { _%>
+"""<%- modelDocstring(model) %>"""
+<%_ } _%>
+<%_ } else if (model.export === 'dictionary' || model.export === 'array' || model.export === 'tuple') { _%>
+<%- model.pythonClassName %> = <%- model.pythonType %>
+<%_ if (model.description || model.deprecated) { _%>
+"""<%- modelDocstring(model) %>"""
+<%_ } _%>
+<%_ } _%>
+<%_ }); _%>
+<%_ // ────── Per-operation request TypedDicts ────── _%>
+<%_ allOperations.forEach((op) => { _%>
+<%_ if (op.parameters && op.parameters.length > 0) { _%>
+<%_ const required = op.parameters.filter(p => p.isRequired); _%>
+<%_ const optional = op.parameters.filter(p => !p.isRequired); _%>
+<%_ if (required.length > 0 && optional.length === 0) { _%>
+
+class <%- op.requestTypeName %>(TypedDict):
+<%_ if (op.description || op.summary) { _%>
+    """<%- pyDocstring(op.description || op.summary) %>"""
+<%_ } _%>
+<%_ op.parameters.forEach((p) => { _%>
+    <%- p.pythonName %>: <%- p.pythonAnnotation || p.pythonType || 'Any' %>
+<%_ }); _%>
+<%_ } else if (required.length === 0) { _%>
+
+class <%- op.requestTypeName %>(TypedDict, total=False):
+<%_ if (op.description || op.summary) { _%>
+    """<%- pyDocstring(op.description || op.summary) %>"""
+<%_ } _%>
+<%_ op.parameters.forEach((p) => { _%>
+    <%- p.pythonName %>: <%- p.pythonAnnotation || p.pythonType || 'Any' %>
+<%_ }); _%>
+<%_ } else { _%>
+
+class <%- op.requestTypeName %>Required(TypedDict):
+<%_ required.forEach((p) => { _%>
+    <%- p.pythonName %>: <%- p.pythonAnnotation || p.pythonType || 'Any' %>
+<%_ }); _%>
+
+
+class <%- op.requestTypeName %>(<%- op.requestTypeName %>Required, total=False):
+<%_ if (op.description || op.summary) { _%>
+    """<%- pyDocstring(op.description || op.summary) %>"""
+<%_ } _%>
+<%_ optional.forEach((p) => { _%>
+    <%- p.pythonName %>: <%- p.pythonAnnotation || p.pythonType || 'Any' %>
+<%_ }); _%>
+<%_ } _%>
+<%_ } _%>
+<%_ }); _%>
+<%_ // ────── Per-operation error taxonomy ────── _%>
+<%_ allOperations.forEach((op) => {
+  const shape = op.errorShape;
+  if (!shape || shape.entries.length === 0) {
+_%>
+
+<%- op.operationIdPascalCase %>Error = Never
+<%_
+  } else {
+_%>
+<%_ shape.entries.forEach((entry) => {
+  // Inside types.py the error type is defined locally; strip the client
+  // module's `types.` prefix the response model's pythonClientType carries.
+  const payloadType = entry.responseModel.type === 'void'
+    ? 'None'
+    : (entry.responseModel.pythonClientType || 'Any').replace(/\btypes\./g, '');
+_%>
+
+class <%- entry.className %>(BaseModel):
+    """Error wrapper for <%- op.operationIdPascalCase %> status <%- entry.code %>."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    status: <%- entry.statusAnnotation %>
+    error: <%- payloadType %>
+<%_ }); _%>
+
+<%- op.operationIdPascalCase %>Error = <% if (shape.entries.length === 1) { %><%- shape.entries[0].className %><% } else { %>Union[<%_ shape.entries.forEach((e, i) => { _%><%- i > 0 ? ', ' : '' %><%- e.className %><%_ }); _%>]<% } %>
+<%_ } _%>
+<%_ }); _%>

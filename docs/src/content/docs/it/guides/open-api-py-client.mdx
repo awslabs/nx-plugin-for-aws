@@ -1,0 +1,254 @@
+---
+title: OpenAPI Python Client
+description: Documentazione di riferimento per il generatore di client Python OpenAPI
+generator: open-api#py-client
+---
+import { FileTree } from '@astrojs/starlight/components';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Drawer from '@components/drawer.astro';
+
+Genera un client Python type-safe per qualsiasi specifica OpenAPI, basato su [httpx](https://www.python-httpx.org/) e [pydantic](https://docs.pydantic.dev/).
+
+Il client è la controparte Python del generatore `open-api#ts-client`: una classe per API, metodi con solo argomenti nominali, errori tipizzati che puoi restringere e un singolo punto di estensione — il tuo client `httpx` — per l'autenticazione e qualsiasi altra cosa ti serva sulla rete.
+
+## Utilizzo
+
+<RunGenerator generator="open-api#py-client" />
+
+### Opzioni
+
+<GeneratorParameters generator="open-api#py-client" />
+
+## Output del Generatore
+
+<FileTree>
+
+- \<outputPath>
+  - \_\_init\_\_.py Esporta i client, `ApiError` e il modulo `types`
+  - types.py modelli pydantic per ogni schema nella specifica
+  - errors.py `ApiError` e una sottoclasse per operazione
+  - client.py Client sincrono, che usa `httpx.Client`
+  - async_client.py Client asincrono, che usa `httpx.AsyncClient`
+
+</FileTree>
+
+Passa `--clientType=sync` o `--clientType=async` per emettere solo uno dei due client.
+
+:::tip[Client Generato in Git]
+Il client è ignorato dal controllo di versione per impostazione predefinita, poiché viene rigenerato dalla specifica. Rimuovi la voce dal tuo `.gitignore` per includerlo invece — ma nota che qualsiasi modifica manuale verrà sovrascritta la prossima volta che viene generato.
+:::
+
+### Dipendenze
+
+Il codice generato importa `httpx` e `pydantic`, quindi aggiungi entrambi al progetto in cui generi:
+
+```toml
+# pyproject.toml
+dependencies = [
+  "httpx>=0.28.1",
+  "pydantic>=2.13.4",
+]
+```
+
+Non è richiesto nient'altro — nessun runtime proprio e nessun framework da adottare.
+
+## Utilizzo del Client Generato
+
+Istanzia il client con l'URL base dell'API:
+
+```python
+from my_api import MyApi, MyApiConfig
+
+api = MyApi(MyApiConfig(url="https://api.example.com"))
+
+pet = api.pet.add_pet(name="rex", status="available")
+print(pet.id, pet.name)
+```
+
+I metodi sono **solo con argomenti nominali**, quindi una chiamata si legge come la specifica, e i parametri richiesti vengono prima:
+
+```python
+pets = api.pet.list_pets(status=["available"], limit=10)
+pet = api.pet.get_pet_by_id(pet_id=42)
+api.pet.delete_pet(pet_id=42)
+```
+
+Le operazioni taggate nella specifica sono raggruppate in namespace — `api.pet.add_pet(...)` sopra proviene dal tag `pet`. Le operazioni non taggate si trovano direttamente sul client, come `api.health()`.
+
+Un'operazione il cui body è un oggetto ha i suoi campi appiattiti nella chiamata, quindi non c'è wrapper da costruire. Dove il body è una lista o un dizionario viene passato posizionalmente invece:
+
+```python
+created = api.pet.batch_create([types.Pet(name="a"), types.Pet(name="b")])
+```
+
+### Tipi
+
+Ogni schema diventa un modello pydantic in `types`, quindi i risultati sono validati e il tuo editor conosce la loro forma:
+
+```python
+from my_api import types
+
+pet = api.pet.add_pet(name="rex", owner=types.Owner(name="ann"))
+
+reveal_type(pet)         # types.Pet
+reveal_type(pet.owner)   # types.Owner | None
+```
+
+Gli enum diventano tipi `Literal`, quindi un valore non valido è un errore di tipo piuttosto che una richiesta fallita:
+
+```python
+api.pet.list_pets(status=["available"])   # ok
+api.pet.list_pets(status=["on-mars"])     # rejected before it is sent
+```
+
+Le date e i date-time sono `datetime.date` / `datetime.datetime` in entrata e in uscita — il client gestisce la conversione ISO-8601:
+
+```python
+event = api.create_event(day=datetime.date(2026, 4, 18))
+reveal_type(event.day)   # datetime.date
+```
+
+### Errori
+
+Una risposta non di successo solleva un'eccezione. Cattura `ApiError` per gestire qualsiasi fallimento da entrambi i client:
+
+```python
+from my_api import ApiError
+
+try:
+    pet = api.pet.get_pet_by_id(pet_id=42)
+except ApiError as e:
+    print(e.status, e.error)
+```
+
+Ogni operazione ha anche la propria sottoclasse, il cui `.error` si restringe alle risposte che quell'operazione dichiara. `isinstance` seleziona uno stato:
+
+```python {8,11}
+from my_api import types
+from my_api.errors import GetPetByIdApiError
+
+try:
+    pet = api.pet.get_pet_by_id(pet_id=42)
+except GetPetByIdApiError as e:
+    if isinstance(e.error, types.GetPetById404Error):
+        print("no such pet:", e.error.error.detail)
+    elif isinstance(e.error, types.GetPetById5XXError):
+        print("server error:", e.error.error.message)
+```
+
+Un body che non corrisponde allo schema dichiarato dalla specifica solleva comunque l'eccezione tipizzata, portando con sé qualunque cosa il server abbia effettivamente inviato — quindi una pagina di errore HTML di un proxy emerge come errore piuttosto che come fallimento di validazione all'interno del tuo gestore di errori.
+
+### Streaming
+
+Un'operazione che fa streaming restituisce un iteratore di elementi analizzati, quindi puoi consumare la risposta man mano che arriva:
+
+```python
+for chunk in api.stream_chunks(count=4):
+    print(chunk.index, chunk.message)
+```
+
+### Async
+
+Il client asincrono rispecchia quello sincrono, metodo per metodo:
+
+```python
+from my_api import AsyncMyApi, AsyncMyApiConfig
+
+async with AsyncMyApi(AsyncMyApiConfig(url=url)) as api:
+    pet = await api.pet.add_pet(name="rex")
+
+    async for chunk in api.stream_chunks(count=4):
+        print(chunk.message)
+```
+
+Entrambi i client sollevano dalla stessa gerarchia, quindi `except ApiError` cattura entrambi.
+
+## Autenticazione
+
+L'autenticazione è l'unica cosa che ogni API fa in modo diverso, quindi il client non inventa un'astrazione per essa. Fornisci il tuo client `httpx` e qualsiasi cosa configuri su di esso si applica a ogni richiesta:
+
+```python {6}
+import httpx
+from my_api import MyApi, MyApiConfig
+
+with httpx.Client(auth=MyAuth()) as http:
+    api = MyApi(MyApiConfig(url=url, httpx_client=http))
+    pet = api.pet.add_pet(name="rex")
+```
+
+Questo è l'equivalente Python di passare un `fetch` personalizzato al client TypeScript. Un [`httpx.Auth`](https://www.python-httpx.org/advanced/authentication/), hook di eventi, un transport personalizzato, timeout, retry, proxy, HTTP/2 e gli header e i parametri di query propri del client si applicano tutti — inclusi su upload multipart e risposte in streaming.
+
+Un client che fornisci non viene mai chiuso da quello generato, quindi è sicuro condividerlo tra più client.
+
+<Drawer title="Firmare richieste con AWS SigV4" trigger="Clicca qui per un esempio che firma le richieste con credenziali AWS IAM.">
+
+`httpx.Auth` è tutto ciò di cui un firmatario ha bisogno. Per un'API dietro autenticazione IAM:
+
+```python
+import hashlib
+from collections.abc import Generator
+
+import boto3
+import httpx
+from botocore.auth import SigV4Auth
+from botocore.awsrequest import AWSRequest
+
+from my_api import MyApi, MyApiConfig
+
+
+class SigV4HTTPXAuth(httpx.Auth):
+    requires_request_body = True
+
+    def __init__(self, credentials, service: str, region: str):
+        self.signer = SigV4Auth(credentials, service, region)
+
+    def auth_flow(
+        self, request: httpx.Request
+    ) -> Generator[httpx.Request, httpx.Response]:
+        headers = dict(request.headers)
+        headers.pop("connection", None)
+        headers["x-amz-content-sha256"] = hashlib.sha256(
+            request.content or b""
+        ).hexdigest()
+
+        aws_request = AWSRequest(
+            method=request.method,
+            url=str(request.url),
+            data=request.content,
+            headers=headers,
+        )
+        self.signer.add_auth(aws_request)
+
+        request.headers.clear()
+        request.headers.update(dict(aws_request.headers))
+        yield request
+
+
+session = boto3.Session()
+auth = SigV4HTTPXAuth(session.get_credentials(), "execute-api", session.region_name)
+
+with httpx.Client(auth=auth) as http:
+    api = MyApi(MyApiConfig(url=url, httpx_client=http))
+    pet = api.pet.add_pet(name="rex")
+```
+
+</Drawer>
+
+### Altra configurazione
+
+`Config` porta un piccolo numero di opzioni oltre all'URL e al client:
+
+```python
+api = MyApi(
+    MyApiConfig(
+        url=url,
+        # Sent with every request, where the operation sets no header of its own
+        headers={"x-tenant-id": "acme"},
+        # Omit the Content-Type the specification declares for each request
+        omit_content_type_header=False,
+    )
+)
+```
+
+Un header che un'operazione imposta vince sempre sullo stesso header qui, quindi un valore per chiamata non viene mai unito a quello configurato.

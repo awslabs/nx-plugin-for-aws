@@ -15,6 +15,9 @@ import {
   upperFirst,
 } from '../../utils/names';
 import {
+  qualifyPythonType,
+  toPythonAnnotation,
+  toPythonClassName,
   toPythonName,
   toPythonType,
   toTypeScriptModelName,
@@ -28,12 +31,15 @@ import {
   type CollectionFormat,
   createModel,
   DEFAULT_SERVICE_NAME,
+  type ErrorShape,
   indexModelsByName,
   type Model,
   type ModelsByName,
   type Operation,
   type PatternPropertyModel,
   PRIMITIVE_TYPES,
+  type RequestInput,
+  type RequestShape,
   type Service,
   STREAMING_CONTENT_TYPES,
   VENDOR_EXTENSIONS,
@@ -105,7 +111,12 @@ export const buildOpenApiCodeGenData = (inSpec: Spec): CodeGenData => {
   const { operationsByTag, untaggedOperations } =
     groupOperationsByTag(allOperations);
 
-  return {
+  annotateAllOfFlattening(data.models);
+  for (const op of allOperations) {
+    annotateRequestAndErrorShapes(op, modelsByName);
+  }
+
+  const result: CodeGenData = {
     ...data,
     operationsByTag,
     untaggedOperations,
@@ -114,6 +125,417 @@ export const buildOpenApiCodeGenData = (inSpec: Spec): CodeGenData => {
     vendorExtensions: vendorExtensionsOf(spec),
     className: toClassName(spec.info.title),
   };
+
+  // Final pass to derive python-specific fields now that all links and
+  // composite relationships are resolved. Produced once so every downstream
+  // language generator consumes a single prepared object.
+  annotatePythonData(result, modelsByName);
+
+  return result;
+};
+
+/**
+ * For each `all-of` composite: precompute the flat property list templates
+ * that flatten composition will emit (`effectiveProperties`), and mark
+ * hoisted (normaliser-synthesised) components the parent inlines
+ * (`isInlinedByAllOf`) so templates can skip emitting them separately.
+ */
+const annotateAllOfFlattening = (models: Model[]): void => {
+  /**
+   * Collect a composed model's own properties, recursing through a member that
+   * is itself an `all-of` so a nested composition contributes the leaf
+   * properties rather than the composite itself (which has no property name).
+   * `visiting` breaks a cycle in a self-referential composition.
+   */
+  const collect = (
+    model: Model,
+    into: Model[],
+    seen: Set<string>,
+    visiting: Set<Model>,
+  ): void => {
+    if (visiting.has(model)) return;
+    visiting.add(model);
+    for (const composed of model.composedModels ?? []) {
+      if (composed.vendorExtensions?.['x-aws-nx-hoisted']) {
+        composed.isInlinedByAllOf = model.name;
+      }
+      if (composed.export === 'all-of') {
+        collect(composed, into, seen, visiting);
+        continue;
+      }
+      for (const prop of composed.properties ?? []) {
+        if (!prop.name || seen.has(prop.name)) continue;
+        seen.add(prop.name);
+        into.push(prop);
+      }
+    }
+    visiting.delete(model);
+  };
+
+  for (const model of models) {
+    if (model.export !== 'all-of') continue;
+    const flattened: Model[] = [];
+    collect(model, flattened, new Set<string>(), new Set<Model>());
+    model.effectiveProperties = flattened;
+  }
+};
+
+/**
+ * The object-shaped properties a body model exposes for flattening, walking
+ * allOf composition via `effectiveProperties` when present.
+ */
+const flattenableBodyProperties = (bodyModel: Model | undefined): Model[] => {
+  if (!bodyModel) return [];
+  if (bodyModel.export === 'interface' && !bodyModel.hasAdditionalProperties) {
+    return bodyModel.properties ?? [];
+  }
+  if (bodyModel.export === 'all-of') {
+    return bodyModel.effectiveProperties ?? [];
+  }
+  return [];
+};
+
+/**
+ * Whether a body's fields can be flattened into the call signature without
+ * clashing with path/query/header/cookie parameters. Only object-shaped
+ * bodies (references to an interface or allOf) are eligible; discriminated
+ * bases stay whole so marshalling can dispatch on the discriminator.
+ */
+const canFlattenBodyIntoRequest = (
+  op: Operation,
+  bodyParam: Model | undefined,
+  bodyModel: Model | undefined,
+): boolean => {
+  if (!bodyParam || bodyParam.export !== 'reference') return false;
+  if (bodyModel?.discriminator) return false;
+  const props = flattenableBodyProperties(bodyModel);
+  if (props.length === 0) return false;
+  const otherNames = new Set(
+    (op.parameters ?? []).filter((p) => p.in !== 'body').map((p) => p.name),
+  );
+  return props.every((prop) => !otherNames.has(prop.name));
+};
+
+/**
+ * Expand a status-code range spec ("2XX", "5XX", etc.) to the concrete list
+ * of integer codes it covers. Returns `undefined` for `'default'` (any
+ * non-matched code) and `[code]` for a literal numeric code.
+ */
+const statusCodesFor = (code: number | string): number[] | undefined => {
+  if (typeof code === 'number') return [code];
+  if (/^\dXX$/.test(code)) {
+    const base = Number(code.charAt(0)) * 100;
+    return Array.from({ length: 100 }, (_, i) => base + i);
+  }
+  return undefined;
+};
+
+/**
+ * Build a language-agnostic description of an operation's inputs. Each input
+ * carries its source (where in the HTTP request it is placed) plus the
+ * underlying model — language templates decide how to translate that into
+ * their idiomatic call signature (kwargs, a wrapper interface, etc).
+ */
+const buildRequestShape = (
+  op: Operation,
+  modelsByName: ModelsByName,
+): RequestShape => {
+  const nonBody = (op.parameters ?? []).filter((p) => p.in !== 'body');
+  const inputs: RequestInput[] = nonBody.map((p) => ({
+    source: {
+      kind: p.in as 'path' | 'query' | 'header' | 'cookie',
+      wireName: p.prop ?? p.name,
+      ...(p.collectionFormat ? { collectionFormat: p.collectionFormat } : {}),
+    },
+    model: p,
+    fromFlattenedBody: false,
+    isRequired: !!p.isRequired,
+    isNullable: !!p.isNullable,
+    description: p.description,
+    specName: p.prop ?? p.name,
+  }));
+
+  const shape: RequestShape = { inputs, isSingleBodyInput: false };
+  const bodyParam = op.parametersBody ?? undefined;
+  if (bodyParam) {
+    const mediaType =
+      bodyParam.mediaType ??
+      (bodyParam.mediaTypes ? bodyParam.mediaTypes[0] : undefined) ??
+      undefined;
+    const bodyModel = modelsByName[bodyParam.type];
+    if (canFlattenBodyIntoRequest(op, bodyParam, bodyModel)) {
+      for (const prop of flattenableBodyProperties(bodyModel)) {
+        inputs.push({
+          source: { kind: 'body-field', fieldName: prop.name },
+          model: prop,
+          fromFlattenedBody: true,
+          isRequired: !!prop.isRequired,
+          isNullable: !!prop.isNullable,
+          description: prop.description,
+          specName: prop.name,
+        });
+      }
+      shape.bodyFromFields = { model: bodyModel, mediaType };
+    } else {
+      inputs.push({
+        source: { kind: 'body', wireName: 'body' },
+        model: bodyParam,
+        fromFlattenedBody: false,
+        isRequired: !!bodyParam.isRequired,
+        isNullable: !!bodyParam.isNullable,
+        description: bodyParam.description,
+        specName: 'body',
+      });
+      shape.bodyAsSingleInput = { model: bodyParam, mediaType };
+      if (nonBody.length === 0) shape.isSingleBodyInput = true;
+    }
+  }
+  return shape;
+};
+
+/**
+ * Build a language-agnostic error taxonomy for the operation: one entry per
+ * non-success response bucket. Language templates turn these into typed
+ * exception / error union shapes as appropriate.
+ */
+const buildErrorShape = (op: Operation): ErrorShape => ({
+  entries: (op.responses ?? [])
+    .filter((r) => r.code !== op.result?.code)
+    .map((resp) => ({
+      code: resp.code!,
+      statusCodes: statusCodesFor(resp.code!),
+      responseModel: resp,
+    })),
+});
+
+/**
+ * Annotate a typed entry (response, parameter, result) with whether the type
+ * it references resolves to a module-level alias — a collection
+ * (`list[...]` / `dict[str, ...]`), union or literal — rather than a class.
+ * Python templates read `referencedCollectionKind` to pick pydantic's
+ * `TypeAdapter(X)` over `X.model_validate(...)`.
+ */
+const annotateReferencedCollectionKind = (
+  entry: Model | undefined,
+  modelsByName: ModelsByName,
+): void => {
+  if (!entry?.type) return;
+  const referenced = modelsByName[entry.type];
+  if (!referenced) return;
+  if (referenced.export === 'dictionary') {
+    entry.referencedCollectionKind = 'dictionary';
+  } else if (referenced.export === 'array') {
+    entry.referencedCollectionKind = 'array';
+  } else if (
+    referenced.export === 'one-of' ||
+    referenced.export === 'any-of' ||
+    referenced.export === 'enum' ||
+    referenced.export === 'tuple'
+  ) {
+    entry.referencedCollectionKind = 'alias';
+  }
+};
+
+/**
+ * Attach the request shape, error shape and referenced-collection-kind
+ * annotations to an operation.
+ */
+const annotateRequestAndErrorShapes = (
+  op: Operation,
+  modelsByName: ModelsByName,
+): void => {
+  for (const parameter of op.parameters ?? []) {
+    annotateReferencedCollectionKind(parameter, modelsByName);
+  }
+  annotateReferencedCollectionKind(
+    op.parametersBody ?? undefined,
+    modelsByName,
+  );
+  for (const response of op.responses ?? []) {
+    annotateReferencedCollectionKind(response, modelsByName);
+  }
+  annotateReferencedCollectionKind(op.result, modelsByName);
+
+  op.requestShape = buildRequestShape(op, modelsByName);
+  op.errorShape = buildErrorShape(op);
+};
+
+const TYPES_GEN_PREFIX = 'types.';
+
+/**
+ * Attributes and methods the generated Python client defines on itself. An
+ * operation or tag whose name would land on one of these is suffixed, so a
+ * spec can't silently replace the client's own plumbing — an operation called
+ * `close` would otherwise shadow the method that releases the httpx client.
+ */
+const PYTHON_CLIENT_MEMBERS = new Set([
+  'aclose',
+  'close',
+  'config',
+  'url',
+  'query',
+  'query_string',
+  'headers',
+  'cookies',
+  'deep_object',
+  'dump',
+  'error',
+  'error_payload',
+  'client',
+  'base_url',
+  'owns_client',
+  'parent',
+]);
+
+/**
+ * A Python member name for an operation or tag that cannot collide with the
+ * client's own members, nor with another operation or tag on the same client.
+ */
+const uniquePythonMemberName = (name: string, taken: Set<string>): string => {
+  // A leading underscore is how the client marks its own internals, so an
+  // operation that snake-cases onto one is pushed out of that namespace too.
+  let candidate = PYTHON_CLIENT_MEMBERS.has(name.replace(/^_+/, ''))
+    ? `${name.replace(/^_+/, '')}_op`
+    : name;
+  while (taken.has(candidate)) {
+    candidate = `${candidate}_`;
+  }
+  taken.add(candidate);
+  return candidate;
+};
+
+/**
+ * Resolve the Python member name of every operation and tag, keeping them
+ * distinct from each other and from the client's own members.
+ */
+const annotatePythonMemberNames = (data: CodeGenData): void => {
+  const taken = new Set<string>();
+  data.pythonTagNames = Object.fromEntries(
+    Object.keys(data.operationsByTag).map((tag) => [
+      tag,
+      uniquePythonMemberName(toPythonName('property', tag), taken),
+    ]),
+  );
+  for (const op of data.allOperations) {
+    op.pythonMethodName = uniquePythonMemberName(
+      op.operationIdSnakeCase ?? toPythonName('operation', op.name),
+      taken,
+    );
+  }
+};
+
+/**
+ * Attach `pythonClientType` to a typed entry — the bare `pythonType`
+ * qualified with `types.` so client templates can reference model
+ * classes through a single import.
+ */
+const annotatePythonClientType = (entry: Model | undefined): void => {
+  if (!entry) return;
+  entry.pythonClientType = qualifyPythonType(
+    entry.pythonType || entry.type,
+    TYPES_GEN_PREFIX,
+  );
+};
+
+/**
+ * Final pass over all models + operation payloads to re-derive python type
+ * annotations after links/composites are resolved, and to add the
+ * python-specific annotations the py-client templates consume:
+ *  - `pythonType` / `pythonAnnotation` (refreshed — necessary for collection
+ *    aliases whose element type wasn't available first time through)
+ *  - `pythonClassName` / `pythonClientType`
+ *  - `requestShape.inputs[*].pythonName` / `.pythonAnnotation` (kwargs)
+ *  - `errorShape.exceptionClassName` / `.unionTypeName` / per-entry names
+ *  - `pythonMethodName` per operation and `pythonTagNames` per tag, escaped
+ *    clear of the members the generated client defines
+ *
+ * Runs for every spec — the resulting fields are only read by the py-client
+ * templates, so there's no cost to TypeScript consumers.
+ */
+const annotatePythonData = (
+  data: CodeGenData,
+  modelsByName: ModelsByName,
+): void => {
+  annotatePythonMemberNames(data);
+  for (const model of data.models) {
+    model.pythonClassName = toPythonClassName(model.name);
+    model.pythonType = toPythonType(model);
+    model.pythonAnnotation = toPythonAnnotation(model);
+    annotatePythonClientType(model);
+    for (const prop of model.properties ?? []) {
+      prop.pythonType = toPythonType(prop);
+      prop.pythonAnnotation = toPythonAnnotation(prop);
+      annotatePythonClientType(prop);
+    }
+    for (const prop of model.effectiveProperties ?? []) {
+      prop.pythonType = toPythonType(prop);
+      prop.pythonAnnotation = toPythonAnnotation(prop);
+      annotatePythonClientType(prop);
+    }
+    annotatePythonClientType(model.additionalPropertiesModel);
+  }
+
+  for (const op of data.allOperations) {
+    for (const parameter of op.parameters ?? []) {
+      parameter.pythonType = toPythonType(parameter);
+      parameter.pythonAnnotation = toPythonAnnotation(parameter);
+      annotatePythonClientType(parameter);
+    }
+    annotatePythonClientType(op.parametersBody ?? undefined);
+    annotatePythonClientType(op.result);
+    for (const response of op.responses ?? []) {
+      annotatePythonClientType(response);
+      annotatePythonClientType(response.itemSchemaModel);
+    }
+
+    const requestShape = op.requestShape;
+    if (requestShape) {
+      const seenNames = new Set<string>();
+      for (const input of requestShape.inputs) {
+        const rawName = input.model.pythonName || input.specName;
+        let pythonName = toPythonName('property', rawName);
+        if (seenNames.has(pythonName)) {
+          pythonName = `${pythonName}_${input.source.kind.replace('-', '_')}`;
+        }
+        seenNames.add(pythonName);
+        const baseType = qualifyPythonType(
+          input.model.pythonType || input.model.type,
+          TYPES_GEN_PREFIX,
+        );
+        input.pythonName = pythonName;
+        input.pythonAnnotation =
+          input.isRequired && !input.isNullable
+            ? baseType
+            : `Optional[${baseType}]`;
+      }
+      // Required-first so the generated keyword-only signature reads naturally.
+      requestShape.inputs.sort(
+        (a, b) => Number(b.isRequired) - Number(a.isRequired),
+      );
+    }
+
+    const errorShape = op.errorShape;
+    if (errorShape) {
+      const opPascal = op.operationIdPascalCase!;
+      errorShape.exceptionClassName = `${opPascal}ApiError`;
+      errorShape.unionTypeName =
+        errorShape.entries.length > 0 ? `${opPascal}Error` : 'Never';
+      for (const entry of errorShape.entries) {
+        const suffix =
+          entry.code === 'default'
+            ? 'Default'
+            : String(entry.code).toUpperCase();
+        entry.className = `${opPascal}${suffix}Error`;
+        entry.isExactCode = typeof entry.code === 'number';
+        // Only collapse to a Literal for exact numeric codes — ranges like
+        // 5XX expand to 100 codes, which produce a massive, unreadable
+        // Literal and don't narrow `response.status_code` usefully anyway.
+        entry.statusAnnotation = entry.isExactCode
+          ? `Literal[${entry.code}]`
+          : 'int';
+      }
+    }
+  }
 };
 
 /**
@@ -159,7 +581,14 @@ const augmentOperation = (
   ];
 
   op.responses.forEach(addLanguageTypes);
-  op.responses = orderBy(op.responses, (r) => r.code);
+  // Concrete codes first, then wildcard ranges, then `default` — templates emit
+  // the checks in this order, and `default` renders as an unconditional branch
+  // that would shadow anything after it. Sorting on `code` alone would leave
+  // that to how the spec happened to enumerate its keys.
+  op.responses = orderBy(op.responses, [
+    (r) => (r.code === 'default' ? 2 : typeof r.code === 'number' ? 0 : 1),
+    (r) => r.code,
+  ]);
 
   // Result is the lowest successful response, otherwise the 2XX or default.
   op.result =
@@ -492,9 +921,13 @@ const augmentModel = (
 
   model.properties.forEach(addLanguageTypes);
 
-  // Resolve the discriminator's TypeScript property name for marshalling.
+  // Resolve the discriminator's language property names for marshalling.
   if (model.discriminator) {
     model.discriminator.typescriptPropertyName = toTypeScriptName(
+      model.discriminator.propertyName,
+    );
+    model.discriminator.pythonPropertyName = toPythonName(
+      'property',
       model.discriminator.propertyName,
     );
   }
@@ -519,6 +952,33 @@ const assertNoClashingPropertyNames = (model: Model): void => {
       );
     }
     seen.set(property.typescriptName!, property.name);
+  }
+};
+
+/**
+ * The Python counterpart of {@link assertNoClashingPropertyNames}, run over the
+ * flattened property list an `all-of` composite emits. Called by the Python
+ * generator rather than the shared pipeline, so a TypeScript consumer is never
+ * failed by a Python-specific name clash. Two members whose wire
+ * names snake_case alike (`fooBar` and `foo_bar`) would emit the same field
+ * twice, silently keeping only the last, so fail fast instead.
+ *
+ * Only the flattened list needs checking: a single object's properties are
+ * already covered by the TypeScript assertion, which rejects any pair that also
+ * collapses in Python.
+ */
+export const assertNoClashingPythonNames = (model: Model): void => {
+  const seen = new Map<string, string>();
+  for (const property of model.effectiveProperties ?? []) {
+    if (!property.name) continue;
+    const pythonName = toPythonName('property', property.name);
+    const existing = seen.get(pythonName);
+    if (existing !== undefined && existing !== property.name) {
+      throw new Error(
+        `Property name conflict in "${model.name}": "${existing}" and "${property.name}" both map to the Python name "${pythonName}". Please rename one of these in your OpenAPI specification.`,
+      );
+    }
+    seen.set(pythonName, property.name);
   }
 };
 
