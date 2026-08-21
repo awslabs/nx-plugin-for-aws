@@ -4,7 +4,7 @@ description: Generate a TypeScript Agent for building AI agents with tools and d
 generator: ts#agent
 ---
 
-import { FileTree, Tabs, TabItem, CardGrid } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem, CardGrid, Steps } from '@astrojs/starlight/components';
 import Astro from '@astrojs/react';
 import ConnectionCard from '@components/connection-card.astro';
 import RunGenerator from '@components/run-generator.astro';
@@ -365,6 +365,23 @@ The session ID itself comes from the AgentCore Runtime session (propagated via t
 :::note[Local Development]
 When running locally (`LOCAL_DEV=true`, set automatically by the `-dev` target), session data is always stored on disk under `tmp/agents/strands/<agent-name>` at the workspace root, regardless of the configured `session` option, for convenience.
 :::
+
+#### Restricting sessions to their owner
+
+The session ID arrives from the caller, so on its own it identifies a conversation but not who the conversation belongs to. AgentCore Runtime authorizes an invocation against the agent runtime resource ARN rather than against an individual session, which leaves the agent free to decide what a session means to your application.
+
+:::caution[The session also selects the microVM]
+A session ID selects the [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html) that serves the request, so its filesystem, `/tmp` and in-process caches are shared by every request resolving to that session. Two callers who send the same session ID share those resources even when their stored conversations are separate.
+:::
+
+To restrict each user to their own conversations:
+
+<Steps>
+  1. Add an API to create a session, using <Link path="guides/trpc">tRPC</Link>, <Link path="guides/fastapi">FastAPI</Link> or <Link path="guides/ts-smithy-api">Smithy</Link>. Generate an opaque session ID (at least 33 characters) and store it alongside the calling user's ID — for example in a table created with the <Link path="guides/ts-dynamodb">`ts#dynamodb`</Link> generator. Each API guide shows how to retrieve the calling user's ID.
+  2. In your agent, look up the stored user ID for the session ID it was given, and reject the request when it does not match the caller. With `auth=cognito` the caller's JWT reaches your agent code, so its `sub` claim identifies them.
+</Steps>
+
+Generate the session ID rather than deriving it from user-supplied values such as a conversation name — anything a caller can predict, a caller can send.
 </OptionFilter>
 
 ## Invoking your Agent
