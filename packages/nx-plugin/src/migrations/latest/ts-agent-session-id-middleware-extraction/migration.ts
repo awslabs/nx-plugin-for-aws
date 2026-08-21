@@ -42,9 +42,20 @@ import type { ComponentMetadata } from '../../../utils/nx';
  * - Idempotent: re-running is a no-op once migrated.
  */
 
-const EXPRESS_IMPORT_OLD =
-  "import express, { type Request, type Response, type NextFunction } from 'express';";
-const EXPRESS_IMPORT_NEW = "import express from 'express';";
+// The consuming repo's formatter/linter (e.g. Biome, ESLint import/order) may
+// alphabetize these three named type imports, so match/rewrite any of their
+// orderings rather than only the literal order the generator emits. Fixed-
+// arity destructuring (`[$a, $b, $c]`) pins the specifier count to exactly
+// three - so a 4th merged-in specifier fails to match - while constraining
+// each slot independently makes the check order-independent.
+const EXPRESS_IMPORT_OLD_WHERE = `{
+  $clause <: import_clause(default=\`express\`, name=named_imports(imports=[$a, $b, $c])),
+  $a <: or { \`type Request\`, \`type Response\`, \`type NextFunction\` },
+  $b <: or { \`type Request\`, \`type Response\`, \`type NextFunction\` },
+  $c <: or { \`type Request\`, \`type Response\`, \`type NextFunction\` }
+}`;
+const EXPRESS_IMPORT_OLD_MATCH = `\`import $clause from 'express';\` where ${EXPRESS_IMPORT_OLD_WHERE}`;
+const EXPRESS_IMPORT_OLD_REWRITE = `\`import $clause from 'express';\` => \`import express from 'express';\` where ${EXPRESS_IMPORT_OLD_WHERE}`;
 
 const RANDOM_UUID_IMPORT = "import { randomUUID } from 'node:crypto';";
 
@@ -138,7 +149,7 @@ const migrateIndex = async (
   };
 
   const ready =
-    (await matchGritQL(tree, indexPath, `\`${EXPRESS_IMPORT_OLD}\``)) &&
+    (await matchGritQL(tree, indexPath, EXPRESS_IMPORT_OLD_MATCH)) &&
     (await matchGritQL(tree, indexPath, `\`${RANDOM_UUID_IMPORT}\``)) &&
     (await matchGritQL(tree, indexPath, `\`${SESSION_ID_HEADER_LINE}\``)) &&
     (await matchGritQL(tree, indexPath, `\`${MIDDLEWARE_LEADING_COMMENT}\``)) &&
@@ -172,11 +183,7 @@ const migrateIndex = async (
     tree.write(middlewarePath, sessionIdMiddlewareContent(mod));
   }
 
-  await applyGritQL(
-    tree,
-    indexPath,
-    `\`${EXPRESS_IMPORT_OLD}\` => \`${EXPRESS_IMPORT_NEW}\``,
-  );
+  await applyGritQL(tree, indexPath, EXPRESS_IMPORT_OLD_REWRITE);
   await applyGritQL(tree, indexPath, `\`${RANDOM_UUID_IMPORT}\` => .`);
   await applyGritQL(tree, indexPath, `\`${SESSION_ID_HEADER_LINE}\` => .`);
   await applyGritQL(tree, indexPath, REMOVE_RUNWITHSESSIONID_IMPORT_PATTERN);

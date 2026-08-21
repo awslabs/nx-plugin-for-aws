@@ -184,6 +184,29 @@ describe('ts#agent session-id middleware extraction migration', () => {
     expect(middlewareContent).toContain('export const sessionIdMiddleware');
   });
 
+  it('should extract A2A middleware when the express import specifiers were reordered (e.g. alphabetized by the consumer repo formatter)', async () => {
+    const tree = createTreeUsingTsSolutionSetup();
+    registerAgentProject(tree, 'agents', 'packages/agents', 'a2a', 'src/a2a');
+    const reordered = OLD_A2A_INDEX.replace(
+      "import express, {\n  type Request,\n  type Response,\n  type NextFunction,\n} from 'express';",
+      "import express, {\n  type NextFunction,\n  type Request,\n  type Response,\n} from 'express';",
+    );
+    tree.write('packages/agents/src/a2a/index.ts', reordered);
+
+    const result = await migration(tree);
+
+    expect(result.nextSteps).toEqual([]);
+
+    const indexContent = tree.read('packages/agents/src/a2a/index.ts', 'utf-8');
+    expect(indexContent).toContain("import express from 'express';");
+    expect(indexContent).toContain('app.use(sessionIdMiddleware);');
+    expect(
+      tree.exists(
+        'packages/agents/src/a2a/middleware/session-id-middleware.ts',
+      ),
+    ).toBe(true);
+  });
+
   it('should extract AG-UI middleware into a shared module', async () => {
     const tree = createTreeUsingTsSolutionSetup();
     registerAgentProject(
