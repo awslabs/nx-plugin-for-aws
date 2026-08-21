@@ -594,8 +594,10 @@ dev-dependencies = []
     );
     expect(mainContent).toContain('from .session import get_session_manager');
     expect(mainContent).toContain('config=StrandsAgentConfig(');
-    expect(mainContent).toContain(
-      'session_manager_provider=lambda _input_data: get_session_manager()',
+    // Keyed on the thread id, which is what AG-UI caches its agents on. The
+    // formatter may wrap the argument, so match without intervening whitespace.
+    expect(mainContent?.replace(/\s+/g, '')).toContain(
+      'session_manager_provider=lambdainput_data:get_session_manager(input_data.thread_id)',
     );
     // AG-UI wires the session manager on the adapter, not the template Agent itself.
     const agentContent = tree.read(
@@ -603,6 +605,119 @@ dev-dependencies = []
       'utf-8',
     );
     expect(agentContent).not.toContain('session_manager=get_session_manager()');
+  });
+
+  describe('session isolation', () => {
+    it('should namespace strands sessions on the JWT subject when auth is cognito', async () => {
+      await pyAgentGenerator(tree, {
+        project: 'test-project',
+        protocol: 'ag-ui',
+        infra: 'agentcore',
+        auth: 'cognito',
+        iac: 'cdk',
+      });
+
+      const main = tree.read(
+        'apps/test-project/proj_test_project/agent/main.py',
+        'utf-8',
+      );
+      const flat = main?.replace(/\s+/g, '');
+      // The provider runs inside the streaming body, outside middleware scope.
+      expect(main).toContain('user_id_context(user_id)');
+      // An empty user must not silently fall back to an unnamespaced key.
+      expect(main).not.toContain('user_id_context(user_id or "")');
+      // The adapter caches one agent (and session manager) per thread id, so
+      // the thread id itself must carry the namespace.
+      expect(flat).toContain(
+        'get_session_storage_key(input_data.thread_id,user_id)',
+      );
+
+      // The auth check lives in the shared middleware module.
+      const middleware = tree.read(
+        'apps/test-project/proj_test_project/agent/middleware/session_id_middleware.py',
+        'utf-8',
+      );
+      expect(middleware?.replace(/\s+/g, '')).toContain(
+        'get_jwt_subject(request.headers.get("authorization"))',
+      );
+      expect(middleware).toContain('user_id_context(user_id)');
+      // Fails closed rather than silently sharing an unscoped namespace.
+      expect(middleware).toContain('status_code=401');
+      // AgentCore recycles a runtime whose /ping returns non-200, and browser
+      // preflights carry no Authorization header.
+      expect(middleware).toContain('UNAUTHENTICATED_PATHS');
+      expect(middleware).toContain('request.method == "OPTIONS"');
+
+      const session = tree.read(
+        'apps/test-project/proj_test_project/agent/session.py',
+        'utf-8',
+      );
+      expect(session).toContain('get_session_storage_key(current_session_id)');
+    });
+
+    it('should namespace the langchain AG-UI thread id when auth is cognito', async () => {
+      await pyAgentGenerator(tree, {
+        project: 'test-project',
+        framework: 'langchain',
+        protocol: 'ag-ui',
+        infra: 'agentcore',
+        auth: 'cognito',
+        iac: 'cdk',
+      });
+
+      const main = tree.read(
+        'apps/test-project/proj_test_project/agent/main.py',
+        'utf-8',
+      );
+      // LangGraph keys checkpoints on the request body's thread id, so the
+      // namespace is applied to that id rather than via a session provider.
+      expect(main?.replace(/\s+/g, '')).toContain(
+        'get_session_storage_key(input_data.thread_id,user_id)',
+      );
+      expect(main).toContain('status_code=401');
+    });
+
+    it('should fall back to a local user in local dev, but not when deployed', async () => {
+      await pyAgentGenerator(tree, {
+        project: 'test-project',
+        protocol: 'ag-ui',
+        infra: 'agentcore',
+        auth: 'cognito',
+        iac: 'cdk',
+      });
+
+      const middleware = tree.read(
+        'apps/test-project/proj_test_project/agent/middleware/session_id_middleware.py',
+        'utf-8',
+      );
+      // `nx dev` has no authorizer in front of the server, so requests carry no
+      // Authorization header and would otherwise all be rejected.
+      expect(middleware).toContain(
+        'LOCAL_DEV = os.environ.get("LOCAL_DEV") == "true"',
+      );
+      expect(middleware).toContain('LOCAL_DEV_USER_ID if LOCAL_DEV else None');
+      // The fallback must be gated: deployed requests still fail closed.
+      expect(middleware).toContain('status_code=401');
+    });
+
+    it('should not read a caller identity when auth is iam', async () => {
+      await pyAgentGenerator(tree, {
+        project: 'test-project',
+        protocol: 'ag-ui',
+        infra: 'agentcore',
+        auth: 'iam',
+        iac: 'cdk',
+      });
+
+      const main = tree.read(
+        'apps/test-project/proj_test_project/agent/main.py',
+        'utf-8',
+      );
+      // The SigV4 caller principal is not available to the container, so an
+      // identity header would be caller-asserted and forgeable.
+      expect(main).not.toContain('get_jwt_subject');
+      expect(main).not.toContain('user_id_context');
+    });
   });
 
   it('should generate session.py returning InMemorySaver for the langchain framework', async () => {

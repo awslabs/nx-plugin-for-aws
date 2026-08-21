@@ -316,6 +316,7 @@ export const pyAgentGenerator = async (
     protocol,
     session,
     localSessionsDir,
+    auth,
   };
 
   // Files live under a per-framework dir (files/strands, files/langchain),

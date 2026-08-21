@@ -1,11 +1,31 @@
+<%_ if (auth === 'cognito') { _%>
+import os
+<%_ } _%>
 import uuid
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
+<%_ if (auth === 'cognito') { _%>
+from fastapi.responses import JSONResponse
+
+from <%- agentConnectionModuleName %> import (
+    get_jwt_subject,
+    session_id_context,
+    user_id_context,
+)
+<%_ } else { _%>
 
 from <%- agentConnectionModuleName %> import session_id_context
+<%_ } _%>
 
 SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
+<%_ if (auth === 'cognito') { _%>
+# Health checks and CORS preflights carry no Authorization header.
+UNAUTHENTICATED_PATHS = {"/ping", "/.well-known/agent-card.json"}
+# Only the `-dev` target sets this.
+LOCAL_DEV = os.environ.get("LOCAL_DEV") == "true"
+LOCAL_DEV_USER_ID = "local-dev-user"
+<%_ } _%>
 
 
 class SessionIdMiddleware(BaseHTTPMiddleware):
@@ -13,5 +33,22 @@ class SessionIdMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
+<%_ if (auth === 'cognito') { _%>
+        if request.method == "OPTIONS" or request.url.path in UNAUTHENTICATED_PATHS:
+            with session_id_context(session_id):
+                return await call_next(request)
+        # Local dev runs without an authorizer, so fall back to a fixed user.
+        user_id = get_jwt_subject(request.headers.get("authorization")) or (
+            LOCAL_DEV_USER_ID if LOCAL_DEV else None
+        )
+        if not user_id:
+            return JSONResponse(
+                {"error": "No authenticated user — cannot scope conversation storage."},
+                status_code=401,
+            )
+        with session_id_context(session_id), user_id_context(user_id):
+            return await call_next(request)
+<%_ } else { _%>
         with session_id_context(session_id):
             return await call_next(request)
+<%_ } _%>

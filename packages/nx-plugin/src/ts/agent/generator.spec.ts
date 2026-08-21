@@ -1289,6 +1289,100 @@ describe('ts#agent generator', () => {
     },
   );
 
+  describe('session isolation', () => {
+    it('should key the AG-UI session manager on the thread id', async () => {
+      await tsAgentGenerator(tree, {
+        project: 'test-project',
+        protocol: 'ag-ui',
+        infra: 'agentcore',
+        iac: 'cdk',
+      });
+
+      const index = tree.read('apps/test-project/src/agent/index.ts', 'utf-8');
+      // AG-UI caches one agent per thread id and calls the provider once per
+      // thread, so the provider must key on that same id.
+      expect(index).toContain(
+        'sessionManagerProvider: (input) => getSessionManager(input.threadId)',
+      );
+
+      const session = tree.read(
+        'apps/test-project/src/agent/session.ts',
+        'utf-8',
+      );
+      expect(session).toContain('getSessionStorageKey(currentSessionId!)');
+    });
+
+    it('should namespace sessions on the JWT subject when auth is cognito', async () => {
+      await tsAgentGenerator(tree, {
+        project: 'test-project',
+        protocol: 'ag-ui',
+        infra: 'agentcore',
+        auth: 'cognito',
+        iac: 'cdk',
+      });
+
+      // The auth wiring lives in the shared session-id middleware.
+      const middleware = tree.read(
+        'apps/test-project/src/agent/middleware/session-id-middleware.ts',
+        'utf-8',
+      );
+      expect(middleware).toContain('getJwtSubject(req.headers.authorization)');
+      expect(middleware).toContain('enterUserIdContext(userId)');
+      // Fails closed rather than silently sharing an unscoped namespace.
+      expect(middleware).toContain('if (!userId)');
+      // The adapter caches one agent (and SessionManager) per thread id, so the
+      // thread id itself must carry the namespace.
+      expect(middleware).toContain(
+        'body.threadId = getSessionStorageKey(body.threadId, userId)',
+      );
+      // The adapter maps `thread_id` onto `threadId` first-key-wins, so leaving
+      // the alias in place would let a client smuggle a thread id past the
+      // rewrite and read another user's conversation.
+      expect(middleware).toContain('delete body.thread_id');
+    });
+
+    it('should fall back to a local user in local dev, but not when deployed', async () => {
+      await tsAgentGenerator(tree, {
+        project: 'test-project',
+        protocol: 'ag-ui',
+        infra: 'agentcore',
+        auth: 'cognito',
+        iac: 'cdk',
+      });
+
+      const middleware = tree.read(
+        'apps/test-project/src/agent/middleware/session-id-middleware.ts',
+        'utf-8',
+      );
+      // `nx dev` has no authorizer in front of the server, so requests carry no
+      // Authorization header and would otherwise all be rejected.
+      expect(middleware).toContain("process.env.LOCAL_DEV === 'true'");
+      expect(middleware).toContain('LOCAL_DEV ? LOCAL_DEV_USER_ID : undefined');
+      // The fallback must be gated: deployed requests still fail closed.
+      expect(middleware).toContain('if (!userId)');
+      expect(middleware).toContain('res.status(401)');
+    });
+
+    it('should not read a caller identity when auth is iam', async () => {
+      await tsAgentGenerator(tree, {
+        project: 'test-project',
+        protocol: 'ag-ui',
+        infra: 'agentcore',
+        auth: 'iam',
+        iac: 'cdk',
+      });
+
+      const middleware = tree.read(
+        'apps/test-project/src/agent/middleware/session-id-middleware.ts',
+        'utf-8',
+      );
+      // The SigV4 caller principal is not available to the container, so an
+      // identity header would be caller-asserted and forgeable.
+      expect(middleware).not.toContain('getJwtSubject');
+      expect(middleware).not.toContain('enterUserIdContext');
+    });
+  });
+
   it('should warn when auth is explicitly set with infra=none', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 

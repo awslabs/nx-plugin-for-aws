@@ -7,8 +7,22 @@ from ag_ui.encoder import EventEncoder
 from ag_ui_strands import StrandsAgent, StrandsAgentConfig
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+<%_ if (auth === 'cognito') { _%>
+from fastapi.responses import JSONResponse, StreamingResponse
+<%_ } else { _%>
 from fastapi.responses import StreamingResponse
+<%_ } _%>
+<%_ if (auth === 'cognito') { _%>
+from <%- agentConnectionModuleName %> import (
+    get_current_session_id,
+    get_current_user_id,
+    get_session_storage_key,
+    session_id_context,
+    user_id_context,
+)
+<%_ } else { _%>
 from <%- agentConnectionModuleName %> import get_current_session_id, session_id_context
+<%_ } _%>
 
 from .agent import get_agent
 from .middleware.session_id_middleware import SESSION_ID_HEADER, SessionIdMiddleware
@@ -24,9 +38,10 @@ async def lifespan(app: FastAPI):
             agent=agent,
             name="<%= agentNameClassName %>",
             description="A Strands Agent exposed via the AG-UI protocol.",
-            # A per-thread session manager, not the template Agent's own, since
-            # AG-UI caches one Strands agent per thread_id.
-            config=StrandsAgentConfig(session_manager_provider=lambda _input_data: get_session_manager()),
+            # A per-thread session manager, since AG-UI caches one agent per thread_id.
+            config=StrandsAgentConfig(
+                session_manager_provider=lambda input_data: get_session_manager(input_data.thread_id)
+            ),
         )
         yield
 
@@ -58,10 +73,26 @@ async def invocations(request: Request):
         return StreamingResponse(_bad(), media_type=encoder.get_content_type())
 
     session_id = request.headers.get(SESSION_ID_HEADER) or get_current_session_id()
+<%_ if (auth === 'cognito') { _%>
+    user_id = get_current_user_id()
+    if not user_id:
+        return JSONResponse(
+            {"error": "No authenticated user — cannot scope conversation storage."},
+            status_code=401,
+        )
+    # Namespace the thread id: AG-UI caches one agent per thread_id.
+    input_data = input_data.model_copy(
+        update={"thread_id": get_session_storage_key(input_data.thread_id, user_id)}
+    )
+<%_ } _%>
 
     async def event_generator():
-        # Re-bind the session: the streaming body runs outside the middleware.
+        # Re-bind: the streaming body runs outside the middleware scope.
+<%_ if (auth === 'cognito') { _%>
+        with session_id_context(session_id or str(uuid.uuid4())), user_id_context(user_id):
+<%_ } else { _%>
         with session_id_context(session_id or str(uuid.uuid4())):
+<%_ } _%>
             async for event in request.app.state.agui_agent.run(input_data):
                 try:
                     yield encoder.encode(event)

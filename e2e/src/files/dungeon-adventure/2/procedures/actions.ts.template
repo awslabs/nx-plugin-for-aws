@@ -7,6 +7,7 @@ import {
   GetObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
+import { requireUserId } from '../identity.js';
 import { readFile, readdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
@@ -19,21 +20,31 @@ const resolveSessionsBucket = async (): Promise<string> => {
   const bucket = (agentcore as Record<string, any>).agentRuntimes?.StoryAgent
     ?.session?.bucketName;
   if (!bucket)
-    throw new Error(
-      'StoryAgent session bucket not found in runtime config',
-    );
+    throw new Error('StoryAgent session bucket not found in runtime config');
   return bucket;
 };
 
 const s3 = new S3Client();
 const LOCAL_SESSION_STORAGE_DIR = '../../tmp/agents/strands/story-agent';
 
-// Matches ``session_<sessionId>/agents/agent_<agentId>/messages/message_<idx>.json``
-// written by ``strands.session.S3SessionManager`` on the agent side. We only
-// ever care about the default agent id ``default`` that Strands uses when
-// none is set explicitly, so hard-code the path prefix the UI needs to list.
-const messagesPrefix = (sessionId: string) =>
-  `session_${sessionId}/agents/agent_default/messages/`;
+// Mirrors `get_session_storage_key` in the agent-connection module.
+const encodeKeySegment = (value: string): string =>
+  [...new TextEncoder().encode(value)]
+    .map((byte) => {
+      const char = String.fromCharCode(byte);
+      return (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9')
+        ? char
+        : `_${byte.toString(16).padStart(2, '0')}`;
+    })
+    .join('');
+
+const sessionStorageKey = (sessionId: string, userId: string) =>
+  `u-${encodeKeySegment(userId)}-${encodeKeySegment(sessionId)}`;
+
+// Matches the layout ``strands.session.S3SessionManager`` writes, for the
+// default agent id Strands uses when none is set.
+const messagesPrefix = (sessionId: string, userId: string) =>
+  `session_${sessionStorageKey(sessionId, userId)}/agents/agent_default/messages/`;
 
 const messageIndex = (pathOrKey: string): number => {
   const match = pathOrKey.match(/message_(\d+)\.json$/);
@@ -54,9 +65,12 @@ const toAction = (body: any): IAction | undefined => {
   return { role, content: text, messageId: body.message_id };
 };
 
-const readLocalActions = async (sessionId: string): Promise<IAction[]> => {
+const readLocalActions = async (
+  sessionId: string,
+  userId: string,
+): Promise<IAction[]> => {
   const baseDir = resolve(LOCAL_SESSION_STORAGE_DIR);
-  const messagesDir = resolve(baseDir, messagesPrefix(sessionId));
+  const messagesDir = resolve(baseDir, messagesPrefix(sessionId, userId));
   if (!messagesDir.startsWith(`${baseDir}/`)) {
     throw new Error('Invalid session id');
   }
@@ -80,12 +94,15 @@ const readLocalActions = async (sessionId: string): Promise<IAction[]> => {
   return actions;
 };
 
-const readS3Actions = async (sessionId: string): Promise<IAction[]> => {
+const readS3Actions = async (
+  sessionId: string,
+  userId: string,
+): Promise<IAction[]> => {
   const bucket = await resolveSessionsBucket();
   const list = await s3.send(
     new ListObjectsV2Command({
       Bucket: bucket,
-      Prefix: messagesPrefix(sessionId),
+      Prefix: messagesPrefix(sessionId, userId),
     }),
   );
   const keys = (list.Contents ?? [])
@@ -108,10 +125,11 @@ const readS3Actions = async (sessionId: string): Promise<IAction[]> => {
 export const queryActions = publicProcedure
   .input(z.object({ sessionId: z.string() }))
   .output(z.object({ items: z.array(ActionSchema) }))
-  .query(async ({ input }) => {
+  .query(async ({ input, ctx }) => {
+    const userId = requireUserId(ctx.event);
     const actions =
       process.env.LOCAL_DEV === 'true'
-        ? await readLocalActions(input.sessionId)
-        : await readS3Actions(input.sessionId);
+        ? await readLocalActions(input.sessionId, userId)
+        : await readS3Actions(input.sessionId, userId);
     return { items: actions };
   });

@@ -49,6 +49,7 @@ The generator will add the following files to your existing TypeScript project:
       - mcp-server/ (or custom name if specified)
         - index.ts Exports your server
         - server.ts Main server definition
+        - request-context.ts Per-request details (e.g. the calling agent's session id) for tools that scope stored data per caller
         - stdio.ts Entry point for STDIO transport, useful for simple local MCP servers
         - http.ts Entry point for Streamable HTTP transport, useful for hosting your MCP server
         - tools/
@@ -107,6 +108,39 @@ import { registerMyTool } from './tools/my-tool.js';
 
 registerMyTool(server);
 ```
+
+### Scoping Tool Data per Caller
+
+`createServer` receives an `McpRequestContext` describing the current request. Over Streamable HTTP this includes the caller's AgentCore Runtime session id, which an <Link path="guides/ts-agent">agent</Link> forwards automatically on every outbound MCP call.
+
+Pass it to a tool that stores data per caller:
+
+```typescript title="server.ts"
+export const createServer = async (context: McpRequestContext = {}) => {
+  // ...
+  registerMyTool(server, context);
+};
+```
+
+```typescript title="tools/my-tool.ts"
+export const registerMyTool = (
+  server: McpServer,
+  context: McpRequestContext,
+) => {
+  server.registerTool('my-tool', { /* ... */ }, async ({ itemName }) => {
+    if (!context.sessionId) {
+      throw new Error('No caller session — cannot resolve the owner.');
+    }
+    // Key stored data on the caller's session, not on a tool argument.
+    await save({ owner: context.sessionId, itemName });
+    // ...
+  });
+};
+```
+
+:::caution
+Scope stored data on the request context rather than on a tool argument. A model can be persuaded to pass any value it likes, so arguments such as a user or player name are not a trust boundary. The context is absent over STDIO, where there is no request.
+:::
 
 ### Adding Resources
 

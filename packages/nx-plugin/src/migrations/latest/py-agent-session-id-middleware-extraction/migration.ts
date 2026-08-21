@@ -85,8 +85,21 @@ const SESSION_ID_MIDDLEWARE_TEMPLATE = readFileSync(
   'utf-8',
 );
 
+// The template gates its per-user auth wiring on `auth === 'cognito'`. This
+// migration only relocates the class an existing project already has, which
+// predates that wiring, so render the non-cognito branch of each conditional.
+const IF_ELSE_BLOCK =
+  /<%_ if \(auth === 'cognito'\) \{ _%>\n(?:(?!<%_)[\s\S])*?<%_ \} else \{ _%>\n((?:(?!<%_)[\s\S])*?)<%_ \} _%>\n/g;
+const IF_ONLY_BLOCK =
+  /<%_ if \(auth === 'cognito'\) \{ _%>\n(?:(?!<%_)[\s\S])*?<%_ \} _%>\n/g;
+
+const renderWithoutCognitoAuth = (template: string): string =>
+  template
+    .replace(IF_ELSE_BLOCK, (_match, elseBranch: string) => elseBranch)
+    .replace(IF_ONLY_BLOCK, '');
+
 const sessionIdMiddlewareContent = (agentConnectionModule: string): string =>
-  SESSION_ID_MIDDLEWARE_TEMPLATE.replace(
+  renderWithoutCognitoAuth(SESSION_ID_MIDDLEWARE_TEMPLATE).replace(
     '<%- agentConnectionModuleName %>',
     agentConnectionModule,
   );

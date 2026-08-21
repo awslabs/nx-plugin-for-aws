@@ -3,7 +3,20 @@ import uuid
 import uvicorn
 from bedrock_agentcore.runtime.models import PingStatus
 from pydantic import BaseModel, Field
-from <%- agentConnectionModuleName %> import get_current_session_id, session_id_context
+<%_ if (auth === 'cognito') { _%>
+from <%- agentConnectionModuleName %> import (
+    get_current_session_id,
+    get_current_user_id,
+    get_session_storage_key,
+    session_id_context,
+)
+<%_ } else { _%>
+from <%- agentConnectionModuleName %> import (
+    get_current_session_id,
+    get_session_storage_key,
+    session_id_context,
+)
+<%_ } _%>
 
 from .init import JsonStreamingResponse, app
 from .middleware.session_id_middleware import SessionIdMiddleware
@@ -28,10 +41,11 @@ def _text(content) -> str:
     )
 
 
-async def handle_invoke(input: InvokeInput, session_id: str):
+async def handle_invoke(input: InvokeInput, session_id: str, user_id: str | None = None):
     """Streaming handler for agent invocation"""
-    # The session id is the LangGraph thread id, so the checkpointer keeps memory per session.
-    config = {"configurable": {"thread_id": session_id}}
+    # The session id is the LangGraph thread id. The user id is passed
+    # explicitly: this body streams outside the middleware's context.
+    config = {"configurable": {"thread_id": get_session_storage_key(session_id, user_id)}}
     # Re-bind the session: the streaming body runs outside the middleware scope.
     with session_id_context(session_id):
         stream = app.state.graph.astream(
@@ -53,7 +67,11 @@ async def handle_invoke(input: InvokeInput, session_id: str):
 async def invoke(input: InvokeInput) -> JsonStreamingResponse:
     """Entry point for agent invocation"""
     session_id = get_current_session_id() or str(uuid.uuid4())
+<%_ if (auth === 'cognito') { _%>
+    return JsonStreamingResponse(handle_invoke(input, session_id, get_current_user_id()))
+<%_ } else { _%>
     return JsonStreamingResponse(handle_invoke(input, session_id))
+<%_ } _%>
 
 
 app.add_middleware(SessionIdMiddleware)
