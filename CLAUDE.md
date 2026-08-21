@@ -49,6 +49,16 @@ Before raising a PR, validate changed generators in an example workspace using l
 - Confirm everything builds and runs locally, including the `dev` target.
 - If the change warrants it, deploy to AWS, test there, then tear down all provisioned resources.
 
+## Sandbox Deploy Environment Notes
+
+Gotchas specific to the remote agent sandbox, not the generator design — recorded so deploy/e2e validation doesn't rediscover them each time:
+
+- **`npm_config_virtual_store_dir`** may already be set globally to a path outside the current project, which breaks pnpm's virtual store layout and causes ESM upward `node_modules` resolution failures (e.g. `Cannot find package 'typescript'` from a nested dependency). Override it to a project-local path for every `pnpm`/`nx` invocation, e.g. `npm_config_virtual_store_dir=node_modules/.pnpm pnpm install`.
+- **Low `ulimit -n`** can cause `EMFILE` errors on file-heavy targets (e.g. the docs build). Raise it before running such targets.
+- **`node-pty`'s native build** (a root devDependency) needs `python3`, `make`, `g++` — run `apt-get install -y python3 make g++` before `pnpm install` if it fails on this step.
+- **The `aws-cdk` CLI's bundled `SdkProvider`** can fail with `Could not load credentials from any providers` even when the standard SDK default credential chain (`aws sts get-caller-identity`, `@aws-sdk/credential-provider-node`) resolves fine from the same sandbox. Work around it by resolving credentials once via `defaultProvider()` and exporting them as `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_SESSION_TOKEN` for the `cdk deploy` subprocess. Also export `CDK_DEFAULT_ACCOUNT`/`CDK_DEFAULT_REGION` explicitly — the generated CDK app's `main.ts` reads them directly and they aren't set by default in this sandbox.
+- **This sandbox's `fetch()`/undici stack reports inflated latencies** for streaming responses (e.g. 25–30s for requests that server-side traces show completing in ~150ms). For accurate client-side timing measurements, use Node's raw `https.request` instead.
+
 ## Best Practices
 
 - Always ensure the build passes before raising a PR.
