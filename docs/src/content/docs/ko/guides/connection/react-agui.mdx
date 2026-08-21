@@ -92,6 +92,25 @@ Nx Plugin for AWS는 [AG-UI 프로토콜](https://docs.ag-ui.com/)을 노출하�
 - **IAM** (기본값): AWS SigV4 서명된 HTTP 요청을 사용합니다. 자격 증명은 웹사이트의 인증과 함께 구성된 Cognito Identity Pool에서 가져옵니다.
 - **Cognito**: JWT 액세스 토큰을 Bearer 토큰으로 `Authorization` 헤더에 포함합니다.
 
+### 세션과 스레드
+
+AG-UI와 AgentCore Runtime은 각각 대화를 다르게 식별하며, 생성된 훅은 이들을 연결합니다:
+
+- **`threadId`** — AG-UI 대화 식별자로, 요청 본문에 전송됩니다. CopilotKit은 명시적인 `threadId`를 전달하지 않는 한 채팅당 무작위 UUID를 생성합니다.
+- **Session ID** — AgentCore Runtime 세션으로, `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` 헤더에 전송됩니다. 요청을 처리하는 [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html)을 선택하며, 에이전트의 `session.ts` / `session.py`가 대화 상태를 키로 사용하는 값입니다.
+
+훅은 스레드 ID에서 세션 ID를 파생하여 AgentCore Runtime이 요구하는 33자로 오른쪽 패딩합니다:
+
+```ts
+function agentCoreSessionId(input: RunAgentInput): string {
+  return (input.threadId ?? '').padEnd(33, '0');
+}
+```
+
+`threadId`를 설정하지 않는 것이 가장 간단합니다 — CopilotKit이 생성한 UUID는 이미 36자입니다. 명시적으로 전달하는 경우 최소 33자로 만드세요. 패딩은 후행 문자만 다른 스레드 ID를 동일한 세션에 매핑하기 때문입니다.
+
+두 값 모두 브라우저에서 오므로 누구의 것인지 말하지 않고 대화의 이름만 지정합니다. 각 사용자를 자신의 대화로 제한하려면 <Link path="guides/ts-agent">세션을 소유자로 제한하기</Link>를 참조하세요.
+
 ## 인프라
 
 <Snippet name="connection/react-agent-infrastructure" parentHeading="인프라" />

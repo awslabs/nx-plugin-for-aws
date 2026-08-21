@@ -513,6 +513,78 @@ aws cognito-idp admin-initiate-auth \
 
 会话 ID 本身来自 AgentCore Runtime 会话（通过 `x-amzn-bedrock-agentcore-runtime-session-id` 标头传播），并绑定到基于 [`contextvars.ContextVar`](https://docs.python.org/3/library/contextvars.html) 的上下文，因此 `get_current_session_id()` 可以在请求中的任何位置解析它 — 包括通过 <Link path="/guides/connection">`connection` 生成器</Link>连接的任何下游 MCP 或 A2A 客户端，因此整个调用链共享一致的会话。
 
+#### 将会话限制为其所有者
+
+会话 ID 来自调用者，因此它本身只能标识对话，而不能标识对话属于谁。AgentCore Runtime 针对代理运行时资源 ARN 而不是针对单个会话授权调用，这使代理可以自由决定会话对您的应用程序意味着什么。
+
+如果您希望每个用户只能访问自己的对话，请在您自己的应用程序中记录谁拥有每个会话，并在进入时检查该所有权。然后，会话 ID 是您的应用程序发出的内容，而不是调用者选择的内容。
+
+**1. 通过您的 API 创建会话**
+
+添加一个启动对话的过程。它自己生成会话 ID，从自己的请求上下文解析调用者，并存储该对 — 例如在使用 <Link path="guides/py-dynamodb">`py#dynamodb`</Link> 生成器创建的表中：
+
+| Attribute | Example | Notes |
+| --- | --- | --- |
+| `sessionId` | `a5f1…` | 分区键 — 代理从给定的会话 ID 查找所有者 |
+| `userId` | `<sub>` | 拥有会话的经过身份验证的调用者 |
+| `createdAt`, `title` | … | 您的 UI 列出对话所需的任何内容 |
+
+如果您还想列出用户自己的会话，请在 `userId` 上添加二级索引。
+
+```ts
+export const createSession = publicProcedure
+  .output(z.object({ sessionId: z.string() }))
+  .mutation(async ({ ctx }) => {
+    // AgentCore Runtime requires at least 33 characters.
+    const sessionId = randomUUID().replaceAll('-', '');
+    await sessionEntity
+      .put({ sessionId, userId: callerSub(ctx.event) })
+      .go();
+    return { sessionId };
+  });
+```
+
+API 可以使用任何语言；上面的示例使用 <Link path="guides/trpc">`ts#trpc-api`</Link> 生成器。
+
+从经过验证的请求上下文而不是从输入字段解析调用者，这样它就不能由浏览器提供。<Link path="guides/trpc">实现自定义中间件</Link>展示了如何为 IAM 和 Cognito 身份验证的 API 执行此操作。
+
+查询该索引的第二个过程让 UI 向用户提供他们自己的对话，而不会看到其他人的对话。
+
+**2. 在代理中验证所有权**
+
+您的代理已经接收会话 ID，并且使用 `auth=cognito` 时，它还接收调用者的 JWT — AgentCore Runtime 授权器验证它，生成的基础设施将 `Authorization` 标头列入白名单传递给您的代码。查找会话，将其所有者与调用者进行比较，如果它们不同则拒绝请求：
+
+```python
+class SessionOwnerMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        session_id = request.headers.get(SESSION_ID_HEADER)
+        claims = jwt.decode(
+            request.headers.get("authorization", "").removeprefix("Bearer "),
+            options={"verify_signature": False},
+        )
+        session = await get_session(session_id)
+
+        if not session or session["userId"] != claims.get("sub"):
+            return JSONResponse(
+                {"error": "Session does not belong to the caller"}, status_code=403
+            )
+
+        with session_id_context(session_id):
+            return await call_next(request)
+```
+
+在这里不验证签名而解码声明就足够了，因为 AgentCore Runtime 在入站授权期间验证了令牌。
+
+:::tip[为什么要在代理和 API 中都进行验证]
+API 决定谁拥有会话；代理强制执行它。在两个地方检查意味着泄露的会话 ID — 从浏览器复制或从旧对话中重用 — 在下次调用时仍然会被拒绝，并且代理的任何未来客户端都会继承相同的规则。
+:::
+
+:::caution[会话还选择 microVM]
+会话 ID 选择为请求提供服务的 [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html)，因此其文件系统、`/tmp` 和进程内缓存由解析到该会话的每个请求共享。如果您的代理或其工具写入本地磁盘，这值得注意：发送相同会话 ID 的两个调用者共享这些资源，即使他们存储的对话是分开的。
+
+在您的 API 中生成不透明的会话 ID 可以避免这种情况，因为调用者无法落在未给它的会话上。从用户提供的值派生一个 — 对话名称、电子邮件、游戏名称 — 是可预测的，并让两个调用者发生冲突。
+:::
+
 :::note[本地开发]
 在本地运行时（`LOCAL_DEV=true`，由 `-dev` 目标自动设置），无论配置的 `session` 选项如何，会话数据始终存储在工作区根目录的 `tmp/agents/strands/<agent-name>` 下的磁盘上，以方便使用。
 :::
@@ -680,7 +752,7 @@ model = ChatBedrockConverse(
   <ConnectionCard
     title="React to Python Agent"
     description="Call a Python Agent from a React website"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-py-agent`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'zh'}/guides/connection/react-py-agent`}
     source="react"
     target="strands"
     targetBadge="python"
@@ -688,14 +760,14 @@ model = ChatBedrockConverse(
   <ConnectionCard
     title="React to AG-UI Agent"
     description="Call an Agent exposing the AG-UI protocol from a React website via CopilotKit"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-agui`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'zh'}/guides/connection/react-agui`}
     source="react"
     target="copilotkit"
   />
   <ConnectionCard
     title="Python Agent to MCP"
     description="Connect a Python Agent to an MCP server"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-mcp`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'zh'}/guides/connection/py-agent-mcp`}
     source="strands"
     sourceBadge="python"
     target="mcp"
@@ -703,7 +775,7 @@ model = ChatBedrockConverse(
   <ConnectionCard
     title="Python Agent to A2A Agent"
     description="Connect a Python Agent to a remote A2A agent"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-a2a`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'zh'}/guides/connection/py-agent-a2a`}
     source="strands"
     sourceBadge="python"
     target="a2a"
@@ -711,7 +783,7 @@ model = ChatBedrockConverse(
   <ConnectionCard
     title="TypeScript Agent to A2A Agent"
     description="Connect a TypeScript Agent to a remote A2A agent"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/ts-agent-a2a`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'zh'}/guides/connection/ts-agent-a2a`}
     source="strands"
     sourceBadge="typescript"
     target="a2a"
@@ -719,7 +791,7 @@ model = ChatBedrockConverse(
   <ConnectionCard
     title="Python Agent to Python DynamoDB"
     description="Connect a Python Agent to a DynamoDB table"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-dynamodb`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'zh'}/guides/connection/py-agent-dynamodb`}
     source="strands"
     sourceBadge="python"
     target="dynamodb"
@@ -728,7 +800,7 @@ model = ChatBedrockConverse(
   <ConnectionCard
     title="Python Agent to AgentCore Gateway"
     description="Connect a Python Agent to an AgentCore Gateway"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-gateway`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'zh'}/guides/connection/py-agent-gateway`}
     source="strands"
     sourceBadge="python"
     target="agentcore"
@@ -736,7 +808,7 @@ model = ChatBedrockConverse(
   <ConnectionCard
     title="AgentCore Gateway to Agent"
     description="Front an agent with an AgentCore Gateway as a runtime target"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/agentcore-gateway-agent`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'zh'}/guides/connection/agentcore-gateway-agent`}
     source="agentcore"
     target="strands"
   />

@@ -362,6 +362,76 @@ CloudWatch AWS 콘솔에서 메뉴의 "GenAI Observability"를 선택하여 추�
 
 세션 ID 자체는 AgentCore Runtime 세션에서 가져오며(A2A/AG-UI의 경우 `x-amzn-bedrock-agentcore-runtime-session-id` 헤더를 통해, HTTP/tRPC의 경우 WebSocket 연결 컨텍스트를 통해 전파됨) [`AsyncLocalStorage`](https://nodejs.org/api/async_context.html#class-asynclocalstorage) 기반 컨텍스트에 바인딩되어 `getCurrentSessionId()`가 요청의 어디에서나 이를 확인할 수 있습니다. 여기에는 <Link path="/guides/connection">`connection` 생성기</Link>를 통해 연결된 다운스트림 MCP 또는 A2A 클라이언트도 포함되므로 전체 호출 체인이 일관된 세션을 공유합니다.
 
+#### 세션을 소유자로 제한
+
+세션 ID는 호출자로부터 도착하므로 그 자체로는 대화를 식별하지만 대화가 누구에게 속하는지는 식별하지 않습니다. AgentCore Runtime은 개별 세션이 아닌 에이전트 런타임 리소스 ARN에 대해 호출을 승인하므로 에이전트가 애플리케이션에서 세션이 무엇을 의미하는지 자유롭게 결정할 수 있습니다.
+
+각 사용자가 자신의 대화에만 접근하도록 하려면 자체 애플리케이션에서 각 세션을 누가 소유하는지 기록하고 들어오는 시점에 해당 소유권을 확인하세요. 그러면 세션 ID는 호출자가 선택하는 것이 아니라 애플리케이션이 발급하는 것이 됩니다.
+
+**1. API를 통해 세션 생성**
+
+대화를 시작하는 프로시저를 추가하세요. 세션 ID 자체를 생성하고, 자체 요청 컨텍스트에서 호출자를 확인하고, 쌍을 저장합니다. 예를 들어 <Link path="guides/ts-dynamodb">`ts#dynamodb`</Link> 생성기로 생성된 테이블에 저장할 수 있습니다:
+
+| Attribute | Example | Notes |
+| --- | --- | --- |
+| `sessionId` | `a5f1…` | Partition key — the agent looks up an owner from the session ID it is given |
+| `userId` | `<sub>` | The authenticated caller who owns the session |
+| `createdAt`, `title` | … | Anything your UI needs to list conversations |
+
+사용자 자신의 세션을 나열하려면 `userId`에 보조 인덱스를 추가하세요.
+
+```ts
+export const createSession = publicProcedure
+  .output(z.object({ sessionId: z.string() }))
+  .mutation(async ({ ctx }) => {
+    // AgentCore Runtime requires at least 33 characters.
+    const sessionId = randomUUID().replaceAll('-', '');
+    await sessionEntity
+      .put({ sessionId, userId: callerSub(ctx.event) })
+      .go();
+    return { sessionId };
+  });
+```
+
+브라우저에서 제공할 수 없도록 입력 필드가 아닌 검증된 요청 컨텍스트에서 호출자를 확인하세요. <Link path="guides/trpc">Implementing Custom Middleware</Link>는 IAM 및 Cognito 인증 API 모두에 대해 이를 수행하는 방법을 보여줍니다.
+
+해당 인덱스를 쿼리하는 두 번째 프로시저를 사용하면 UI가 다른 사람의 대화를 보지 않고 사용자에게 자신의 대화를 제공할 수 있습니다.
+
+**2. 에이전트에서 소유권 검증**
+
+에이전트는 이미 세션 ID를 받고 있으며, `auth=cognito`를 사용하면 호출자의 JWT도 받습니다. AgentCore Runtime 승인자가 이를 검증하고 생성된 인프라가 `Authorization` 헤더를 코드로 허용 목록에 추가합니다. 세션을 조회하고 소유자를 호출자와 비교한 후 다르면 요청을 거부하세요:
+
+```ts
+const sessionIdMiddleware = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  const sessionId = req.headers[SESSION_ID_HEADER] as string;
+  const userId = jwtSubject(req.headers.authorization);
+  const session = await getSession(sessionId);
+
+  if (!userId || session?.userId !== userId) {
+    res.status(403).json({ error: 'Session does not belong to the caller' });
+    return;
+  }
+
+  runWithSessionId(sessionId, () => next());
+};
+```
+
+AgentCore Runtime이 인바운드 승인 중에 토큰을 검증했으므로 서명을 검증하지 않고 클레임을 디코딩하는 것으로 충분합니다.
+
+:::tip[API와 에이전트 모두에서 검증하는 이유]
+API는 세션을 누가 소유하는지 결정하고, 에이전트는 이를 시행합니다. 두 곳 모두에서 확인한다는 것은 브라우저에서 복사되거나 이전 대화에서 재사용된 세션 ID가 다음 호출에서 여전히 거부되고, 에이전트의 향후 클라이언트가 동일한 규칙을 상속한다는 것을 의미합니다.
+:::
+
+:::caution[세션은 microVM도 선택합니다]
+세션 ID는 요청을 처리하는 [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html)을 선택하므로 해당 파일 시스템, `/tmp` 및 프로세스 내 캐시는 해당 세션으로 확인되는 모든 요청에서 공유됩니다. 에이전트나 도구가 로컬 디스크에 쓰는 경우 주의할 가치가 있습니다. 동일한 세션 ID를 보내는 두 호출자는 저장된 대화가 별도인 경우에도 해당 리소스를 공유합니다.
+
+API에서 불투명한 세션 ID를 생성하면 호출자가 제공받지 않은 세션에 도달할 수 없으므로 이를 방지할 수 있습니다. 사용자가 제공한 값(대화 이름, 이메일, 게임 이름)에서 파생하는 것은 예측 가능하며 두 호출자가 충돌할 수 있습니다.
+:::
+
 :::note[로컬 개발]
 로컬에서 실행할 때(`LOCAL_DEV=true`, `-dev` 타겟에 의해 자동으로 설정됨) 세션 데이터는 편의를 위해 구성된 `session` 옵션에 관계없이 항상 작업 공간 루트의 `tmp/agents/strands/<agent-name>` 아래 디스크에 저장됩니다.
 :::
