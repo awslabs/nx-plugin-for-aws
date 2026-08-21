@@ -362,6 +362,76 @@ Ceci est implémenté dans le fichier `session.ts` généré, qui exporte une fo
 
 L'ID de session lui-même provient de la session AgentCore Runtime (propagée via l'en-tête `x-amzn-bedrock-agentcore-runtime-session-id` pour A2A/AG-UI, ou le contexte de connexion WebSocket pour HTTP/tRPC) et est lié à un contexte basé sur [`AsyncLocalStorage`](https://nodejs.org/api/async_context.html#class-asynclocalstorage) afin que `getCurrentSessionId()` puisse le résoudre n'importe où dans la requête — y compris dans tous les clients MCP ou A2A en aval connectés via le <Link path="/guides/connection">générateur `connection`</Link>, de sorte que toute la chaîne d'appels partage une session cohérente.
 
+#### Restreindre les sessions à leur propriétaire
+
+L'ID de session provient de l'appelant, donc en soi il identifie une conversation mais pas à qui appartient la conversation. AgentCore Runtime autorise une invocation contre l'ARN de ressource du runtime de l'agent plutôt que contre une session individuelle, ce qui laisse l'agent libre de décider ce qu'une session signifie pour votre application.
+
+Si vous souhaitez que chaque utilisateur n'accède qu'à ses propres conversations, enregistrez qui possède chaque session dans votre propre application et vérifiez cette propriété à l'entrée. Un ID de session est alors quelque chose que votre application émet plutôt que quelque chose que l'appelant choisit.
+
+**1. Créer des sessions via votre API**
+
+Ajoutez une procédure qui démarre une conversation. Elle génère l'ID de session elle-même, résout l'appelant à partir de son propre contexte de requête, et stocke la paire — par exemple dans une table créée avec le générateur <Link path="guides/ts-dynamodb">`ts#dynamodb`</Link> :
+
+| Attribute | Example | Notes |
+| --- | --- | --- |
+| `sessionId` | `a5f1…` | Clé de partition — l'agent recherche un propriétaire à partir de l'ID de session qui lui est donné |
+| `userId` | `<sub>` | L'appelant authentifié qui possède la session |
+| `createdAt`, `title` | … | Tout ce dont votre interface utilisateur a besoin pour lister les conversations |
+
+Ajoutez un index secondaire sur `userId` si vous souhaitez également lister les propres sessions d'un utilisateur.
+
+```ts
+export const createSession = publicProcedure
+  .output(z.object({ sessionId: z.string() }))
+  .mutation(async ({ ctx }) => {
+    // AgentCore Runtime requires at least 33 characters.
+    const sessionId = randomUUID().replaceAll('-', '');
+    await sessionEntity
+      .put({ sessionId, userId: callerSub(ctx.event) })
+      .go();
+    return { sessionId };
+  });
+```
+
+Résolvez l'appelant à partir du contexte de requête vérifié plutôt qu'à partir d'un champ d'entrée, afin qu'il ne puisse pas être fourni par le navigateur. <Link path="guides/trpc">Implementing Custom Middleware</Link> montre comment faire cela pour les API authentifiées par IAM et Cognito.
+
+Une deuxième procédure interrogeant cet index permet à l'interface utilisateur d'offrir à un utilisateur ses propres conversations sans jamais voir celles de quelqu'un d'autre.
+
+**2. Valider la propriété dans l'agent**
+
+Votre agent reçoit déjà l'ID de session, et avec `auth=cognito` il reçoit également le JWT de l'appelant — l'autorisateur AgentCore Runtime le valide et l'infrastructure générée met en liste blanche l'en-tête `Authorization` jusqu'à votre code. Recherchez la session, comparez son propriétaire avec l'appelant, et refusez la requête s'ils diffèrent :
+
+```ts
+const sessionIdMiddleware = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  const sessionId = req.headers[SESSION_ID_HEADER] as string;
+  const userId = jwtSubject(req.headers.authorization);
+  const session = await getSession(sessionId);
+
+  if (!userId || session?.userId !== userId) {
+    res.status(403).json({ error: 'Session does not belong to the caller' });
+    return;
+  }
+
+  runWithSessionId(sessionId, () => next());
+};
+```
+
+Décoder la revendication sans vérifier sa signature est suffisant ici, puisque AgentCore Runtime a validé le jeton lors de l'autorisation entrante.
+
+:::tip[Pourquoi valider dans l'agent ainsi que dans l'API]
+L'API décide qui possède une session ; l'agent l'applique. Vérifier aux deux endroits signifie qu'un ID de session qui fuit — copié depuis un navigateur, ou réutilisé d'une ancienne conversation — est toujours refusé lors de la prochaine invocation, et tout futur client de l'agent hérite de la même règle.
+:::
+
+:::caution[La session sélectionne également la microVM]
+Un ID de session sélectionne la [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html) qui sert la requête, donc son système de fichiers, `/tmp` et les caches en processus sont partagés par chaque requête résolvant vers cette session. Cela mérite attention si votre agent ou ses outils écrivent sur le disque local : deux appelants qui envoient le même ID de session partagent ces ressources même lorsque leurs conversations stockées sont séparées.
+
+Générer des ID de session opaques dans votre API évite cela, car un appelant ne peut pas atterrir sur une session qui ne lui a pas été donnée. En dériver un à partir de valeurs fournies par l'utilisateur — un nom de conversation, un email, un nom de jeu — est prévisible et permet à deux appelants d'entrer en collision.
+:::
+
 :::note[Développement local]
 Lors de l'exécution locale (`LOCAL_DEV=true`, défini automatiquement par la cible `-dev`), les données de session sont toujours stockées sur disque sous `tmp/agents/strands/<agent-name>` à la racine de l'espace de travail, quelle que soit l'option `session` configurée, pour plus de commodité.
 :::

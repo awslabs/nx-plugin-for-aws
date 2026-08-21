@@ -362,6 +362,76 @@ bundle 目标使用 `index.ts` 作为 WebSocket 服务器的入口点，以托�
 
 会话 ID 本身来自 AgentCore Runtime 会话（对于 A2A/AG-UI 通过 `x-amzn-bedrock-agentcore-runtime-session-id` 标头传播，或对于 HTTP/tRPC 通过 WebSocket 连接上下文传播），并绑定到基于 [`AsyncLocalStorage`](https://nodejs.org/api/async_context.html#class-asynclocalstorage) 的上下文，因此 `getCurrentSessionId()` 可以在请求的任何地方解析它 — 包括通过 <Link path="/guides/connection">`connection` 生成器</Link>连接的任何下游 MCP 或 A2A 客户端，因此整个调用链共享一致的会话。
 
+#### 将会话限制为其所有者
+
+会话 ID 来自调用者，因此它本身只能识别对话，而不能识别对话属于谁。AgentCore Runtime 针对代理运行时资源 ARN 而不是针对单个会话授权调用，这使代理可以自由决定会话对您的应用程序意味着什么。
+
+如果您希望每个用户只能访问自己的对话，请在您自己的应用程序中记录谁拥有每个会话，并在进入时检查该所有权。然后，会话 ID 是您的应用程序发出的内容，而不是调用者选择的内容。
+
+**1. 通过您的 API 创建会话**
+
+添加一个启动对话的过程。它自己生成会话 ID，从自己的请求上下文解析调用者，并存储该对 — 例如在使用 <Link path="guides/ts-dynamodb">`ts#dynamodb`</Link> 生成器创建的表中：
+
+| Attribute | Example | Notes |
+| --- | --- | --- |
+| `sessionId` | `a5f1…` | 分区键 — 代理从给定的会话 ID 查找所有者 |
+| `userId` | `<sub>` | 拥有会话的经过身份验证的调用者 |
+| `createdAt`, `title` | … | UI 列出对话所需的任何内容 |
+
+如果您还想列出用户自己的会话，请在 `userId` 上添加二级索引。
+
+```ts
+export const createSession = publicProcedure
+  .output(z.object({ sessionId: z.string() }))
+  .mutation(async ({ ctx }) => {
+    // AgentCore Runtime requires at least 33 characters.
+    const sessionId = randomUUID().replaceAll('-', '');
+    await sessionEntity
+      .put({ sessionId, userId: callerSub(ctx.event) })
+      .go();
+    return { sessionId };
+  });
+```
+
+从已验证的请求上下文而不是从输入字段解析调用者，这样它就不能由浏览器提供。<Link path="guides/trpc">实现自定义中间件</Link>展示了如何为 IAM 和 Cognito 身份验证的 API 执行此操作。
+
+查询该索引的第二个过程让 UI 为用户提供他们自己的对话，而不会看到其他人的对话。
+
+**2. 在代理中验证所有权**
+
+您的代理已经接收会话 ID，并且使用 `auth=cognito` 时，它还接收调用者的 JWT — AgentCore Runtime 授权器验证它，生成的基础设施将 `Authorization` 标头列入白名单并传递给您的代码。查找会话，将其所有者与调用者进行比较，如果它们不同则拒绝请求：
+
+```ts
+const sessionIdMiddleware = async (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  const sessionId = req.headers[SESSION_ID_HEADER] as string;
+  const userId = jwtSubject(req.headers.authorization);
+  const session = await getSession(sessionId);
+
+  if (!userId || session?.userId !== userId) {
+    res.status(403).json({ error: 'Session does not belong to the caller' });
+    return;
+  }
+
+  runWithSessionId(sessionId, () => next());
+};
+```
+
+在这里，无需验证签名即可解码声明就足够了，因为 AgentCore Runtime 在入站授权期间验证了令牌。
+
+:::tip[为什么要在代理和 API 中都进行验证]
+API 决定谁拥有会话；代理强制执行它。在两个地方检查意味着泄漏的会话 ID — 从浏览器复制或从旧对话重用 — 在下次调用时仍会被拒绝，并且代理的任何未来客户端都会继承相同的规则。
+:::
+
+:::caution[会话还选择 microVM]
+会话 ID 选择为请求提供服务的 [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html)，因此其文件系统、`/tmp` 和进程内缓存由解析到该会话的每个请求共享。如果您的代理或其工具写入本地磁盘，这值得注意：发送相同会话 ID 的两个调用者共享这些资源，即使他们存储的对话是分开的。
+
+在您的 API 中生成不透明的会话 ID 可以避免这种情况，因为调用者无法访问未给予它的会话。从用户提供的值派生一个 — 对话名称、电子邮件、游戏名称 — 是可预测的，并且让两个调用者发生冲突。
+:::
+
 :::note[本地开发]
 在本地运行时（`LOCAL_DEV=true`，由 `-dev` 目标自动设置），无论配置的 `session` 选项如何，会话数据始终存储在工作区根目录的 `tmp/agents/strands/<agent-name>` 下的磁盘上，以方便使用。
 :::

@@ -513,6 +513,78 @@ Questo è implementato nel `session.py` generato, che esporta una funzione `get_
 
 L'ID di sessione stesso proviene dalla sessione AgentCore Runtime (propagata tramite l'header `x-amzn-bedrock-agentcore-runtime-session-id`) ed è legato a un contesto basato su [`contextvars.ContextVar`](https://docs.python.org/3/library/contextvars.html) in modo che `get_current_session_id()` possa risolverlo ovunque nella richiesta — incluso in qualsiasi client MCP o A2A downstream collegato tramite il <Link path="/guides/connection">generatore `connection`</Link>, in modo che l'intera catena di chiamate condivida una sessione coerente.
 
+#### Limitare le sessioni al loro proprietario
+
+L'ID di sessione arriva dal chiamante, quindi da solo identifica una conversazione ma non a chi appartiene la conversazione. AgentCore Runtime autorizza un'invocazione contro l'ARN della risorsa runtime dell'agente piuttosto che contro una singola sessione, il che lascia l'agente libero di decidere cosa significa una sessione per la tua applicazione.
+
+Se vuoi che ogni utente raggiunga solo le proprie conversazioni, registra chi possiede ogni sessione nella tua applicazione e verifica tale proprietà all'ingresso. Un ID di sessione è quindi qualcosa che la tua applicazione emette piuttosto che qualcosa che il chiamante sceglie.
+
+**1. Creare sessioni tramite la tua API**
+
+Aggiungi una procedura che avvia una conversazione. Genera l'ID di sessione stesso, risolve il chiamante dal proprio contesto di richiesta e memorizza la coppia — ad esempio in una tabella creata con il generatore <Link path="guides/py-dynamodb">`py#dynamodb`</Link>:
+
+| Attribute | Example | Notes |
+| --- | --- | --- |
+| `sessionId` | `a5f1…` | Chiave di partizione — l'agente cerca un proprietario dall'ID di sessione che gli viene fornito |
+| `userId` | `<sub>` | Il chiamante autenticato che possiede la sessione |
+| `createdAt`, `title` | … | Qualsiasi cosa la tua UI necessiti per elencare le conversazioni |
+
+Aggiungi un indice secondario su `userId` se vuoi anche elencare le sessioni proprie di un utente.
+
+```ts
+export const createSession = publicProcedure
+  .output(z.object({ sessionId: z.string() }))
+  .mutation(async ({ ctx }) => {
+    // AgentCore Runtime requires at least 33 characters.
+    const sessionId = randomUUID().replaceAll('-', '');
+    await sessionEntity
+      .put({ sessionId, userId: callerSub(ctx.event) })
+      .go();
+    return { sessionId };
+  });
+```
+
+L'API può essere in qualsiasi linguaggio; l'esempio sopra utilizza il generatore <Link path="guides/trpc">`ts#trpc-api`</Link>.
+
+Risolvi il chiamante dal contesto di richiesta verificato piuttosto che da un campo di input, in modo che non possa essere fornito dal browser. <Link path="guides/trpc">Implementing Custom Middleware</Link> mostra come farlo sia per le API autenticate con IAM che con Cognito.
+
+Una seconda procedura che interroga quell'indice consente all'UI di offrire a un utente le proprie conversazioni senza mai vedere quelle di nessun altro.
+
+**2. Validare la proprietà nell'agente**
+
+Il tuo agente riceve già l'ID di sessione e con `auth=cognito` riceve anche il JWT del chiamante — l'autorizzatore AgentCore Runtime lo valida e l'infrastruttura generata consente l'header `Authorization` fino al tuo codice. Cerca la sessione, confronta il suo proprietario con il chiamante e rifiuta la richiesta se differiscono:
+
+```python
+class SessionOwnerMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        session_id = request.headers.get(SESSION_ID_HEADER)
+        claims = jwt.decode(
+            request.headers.get("authorization", "").removeprefix("Bearer "),
+            options={"verify_signature": False},
+        )
+        session = await get_session(session_id)
+
+        if not session or session["userId"] != claims.get("sub"):
+            return JSONResponse(
+                {"error": "Session does not belong to the caller"}, status_code=403
+            )
+
+        with session_id_context(session_id):
+            return await call_next(request)
+```
+
+Decodificare il claim senza verificarne la firma è sufficiente qui, poiché AgentCore Runtime ha validato il token durante l'autorizzazione in ingresso.
+
+:::tip[Perché validare nell'agente oltre che nell'API]
+L'API decide chi possiede una sessione; l'agente la applica. Controllare in entrambi i posti significa che un ID di sessione che trapela — copiato da un browser o riutilizzato da una vecchia conversazione — viene comunque rifiutato alla prossima invocazione, e qualsiasi futuro client dell'agente eredita la stessa regola.
+:::
+
+:::caution[La sessione seleziona anche la microVM]
+Un ID di sessione seleziona la [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html) che serve la richiesta, quindi il suo filesystem, `/tmp` e le cache in-process sono condivise da ogni richiesta che si risolve in quella sessione. Questo merita attenzione se il tuo agente o i suoi strumenti scrivono sul disco locale: due chiamanti che inviano lo stesso ID di sessione condividono quelle risorse anche quando le loro conversazioni memorizzate sono separate.
+
+Generare ID di sessione opachi nella tua API evita questo, perché un chiamante non può atterrare su una sessione che non gli è stata data. Derivarne uno da valori forniti dall'utente — un nome di conversazione, un'email, un nome di gioco — è prevedibile e consente a due chiamanti di collidere.
+:::
+
 :::note[Sviluppo Locale]
 Quando si esegue localmente (`LOCAL_DEV=true`, impostato automaticamente dal target `-dev`), i dati di sessione vengono sempre memorizzati su disco sotto `tmp/agents/strands/<agent-name>` alla radice del workspace, indipendentemente dall'opzione `session` configurata, per comodità.
 :::
@@ -680,7 +752,7 @@ Utilizza il generatore <Link path="guides/connection">`connection`</Link> per in
   <ConnectionCard
     title="React to Python Agent"
     description="Call a Python Agent from a React website"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-py-agent`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'it'}/guides/connection/react-py-agent`}
     source="react"
     target="strands"
     targetBadge="python"
@@ -688,14 +760,14 @@ Utilizza il generatore <Link path="guides/connection">`connection`</Link> per in
   <ConnectionCard
     title="React to AG-UI Agent"
     description="Call an Agent exposing the AG-UI protocol from a React website via CopilotKit"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-agui`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'it'}/guides/connection/react-agui`}
     source="react"
     target="copilotkit"
   />
   <ConnectionCard
     title="Python Agent to MCP"
     description="Connect a Python Agent to an MCP server"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-mcp`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'it'}/guides/connection/py-agent-mcp`}
     source="strands"
     sourceBadge="python"
     target="mcp"
@@ -703,7 +775,7 @@ Utilizza il generatore <Link path="guides/connection">`connection`</Link> per in
   <ConnectionCard
     title="Python Agent to A2A Agent"
     description="Connect a Python Agent to a remote A2A agent"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-a2a`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'it'}/guides/connection/py-agent-a2a`}
     source="strands"
     sourceBadge="python"
     target="a2a"
@@ -711,7 +783,7 @@ Utilizza il generatore <Link path="guides/connection">`connection`</Link> per in
   <ConnectionCard
     title="TypeScript Agent to A2A Agent"
     description="Connect a TypeScript Agent to a remote A2A agent"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/ts-agent-a2a`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'it'}/guides/connection/ts-agent-a2a`}
     source="strands"
     sourceBadge="typescript"
     target="a2a"
@@ -719,7 +791,7 @@ Utilizza il generatore <Link path="guides/connection">`connection`</Link> per in
   <ConnectionCard
     title="Python Agent to Python DynamoDB"
     description="Connect a Python Agent to a DynamoDB table"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-dynamodb`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'it'}/guides/connection/py-agent-dynamodb`}
     source="strands"
     sourceBadge="python"
     target="dynamodb"
@@ -728,7 +800,7 @@ Utilizza il generatore <Link path="guides/connection">`connection`</Link> per in
   <ConnectionCard
     title="Python Agent to AgentCore Gateway"
     description="Connect a Python Agent to an AgentCore Gateway"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-gateway`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'it'}/guides/connection/py-agent-gateway`}
     source="strands"
     sourceBadge="python"
     target="agentcore"
@@ -736,7 +808,7 @@ Utilizza il generatore <Link path="guides/connection">`connection`</Link> per in
   <ConnectionCard
     title="AgentCore Gateway to Agent"
     description="Front an agent with an AgentCore Gateway as a runtime target"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/agentcore-gateway-agent`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'it'}/guides/connection/agentcore-gateway-agent`}
     source="agentcore"
     target="strands"
   />
