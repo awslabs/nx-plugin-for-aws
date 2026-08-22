@@ -90,6 +90,17 @@ export interface AgUiReactConnectionOptions {
     gatewayClassName: string;
     targetName: string;
   };
+  /**
+   * When set, the generated hook reads the connected tRPC API's URL from
+   * runtimeConfig.apis and routes to that API's `/agui` route (an
+   * AgentCore Harness behind it) instead of invoking an agent runtime
+   * directly. The API publishes its own URL to the website already (via
+   * the `ts#react-website -> ts#trpc-api` connection), so no runtime/gateway
+   * construct is patched for this route.
+   */
+  harnessRoute?: {
+    apiNameClassName: string;
+  };
 }
 
 /**
@@ -114,6 +125,7 @@ export const addAgUiReactConnection = async (
     agentNameClassName,
     auth,
     gatewayRoute,
+    harnessRoute,
   } = options;
 
   const theme = resolveAgUiTheme(frontendProjectConfig);
@@ -129,7 +141,7 @@ export const addAgUiReactConnection = async (
     tree,
     joinPathFragments(import.meta.dirname, 'files', 'common'),
     frontendProjectConfig.root,
-    { agentName, agentNameClassName, auth, gatewayRoute },
+    { agentName, agentNameClassName, auth, gatewayRoute, harnessRoute },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
@@ -201,9 +213,9 @@ export const addAgUiReactConnection = async (
   // Agents only publish their runtime ARN to the 'agentcore' namespace by
   // default, which isn't exposed to the website. Patch the agent's CDK/TF
   // construct to also publish under 'connection' so the browser can read it
-  // from runtime-config.json. When routing via a gateway, the gateway
-  // publishes its own URL instead.
-  if (!gatewayRoute) {
+  // from runtime-config.json. When routing via a gateway or a harness's API,
+  // that project already publishes its own URL instead.
+  if (!gatewayRoute && !harnessRoute) {
     await addAgentRuntimeToConnectionNamespace(tree, {
       agentNameKebabCase: kebabCase(agentNameClassName),
       agentNameClassName,

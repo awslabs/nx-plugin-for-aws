@@ -8,17 +8,29 @@ import {
   OverwriteStrategy,
   type Tree,
 } from '@nx/devkit';
+import { AGENTCORE_HARNESS_TRPC_CONNECTION_GENERATOR_INFO } from '../../agentcore-harness/trpc-connection/generator';
 import { addTargetToLocalDev } from '../../connection/local-dev';
+import {
+  type AgUiAuth,
+  addAgUiReactConnection,
+  DEPENDENCIES as AGUI_DEPENDENCIES,
+  resolveAgUiTheme,
+} from '../../ts/react-website/agui/generator';
 import { runtimeConfigGenerator } from '../../ts/react-website/runtime-config/generator';
 import { addTsDependencies } from '../../utils/add-dependencies';
 import { addSingleImport, applyGritQL } from '../../utils/ast';
-import { declareDependencies } from '../../utils/declared-dependencies';
+import {
+  declareDependencies,
+  onlyWhen,
+  ownedElsewhere,
+} from '../../utils/declared-dependencies';
 import { formatFilesInSubtree } from '../../utils/format';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { toClassName } from '../../utils/names';
+import { kebabCase, toClassName } from '../../utils/names';
 import {
   addComponentGeneratorMetadata,
+  type ComponentMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
@@ -31,7 +43,16 @@ export interface TrpcReactMetadata {
   readonly auth: string;
   /** Whether the backend is a REST API, which needs the SSE polyfill. */
   readonly isRestApi: boolean;
+  /**
+   * The AG-UI theme module, set only when this connection also wires an
+   * AgentCore Harness's `/agui` route into the website (the backend API has
+   * an `agentcore-harness#trpc-connection` component).
+   */
+  readonly theme?: string;
 }
+
+/** The harness-AG-UI path, whose packages `addAgUiReactConnection` adds. */
+const hasHarnessAgui = (m: TrpcReactMetadata) => m.theme !== undefined;
 
 // Each entry names the auth and API-type branch it belongs to, so the same
 // declaration drives both adding and the version sync.
@@ -58,6 +79,10 @@ export const DEPENDENCIES = declareDependencies<TrpcReactMetadata>()({
       when: (m) => m.isRestApi,
       dev: true,
     },
+    // `addAgUiReactConnection` adds these itself, so they are declared for
+    // ownership only, gated on whether this connection wired a Harness's
+    // `/agui` route.
+    ...ownedElsewhere(onlyWhen(AGUI_DEPENDENCIES.ts, hasHarnessAgui)),
   ],
 });
 
@@ -88,9 +113,23 @@ export async function reactGenerator(
   const apiNameClassName = toClassName(apiName);
   const backendProjectAlias = backendProjectConfig.name;
 
+  // The API's own components include an entry per connected AgentCore
+  // Harness (added by `agentcore-harness#trpc-connection`), each exposing a
+  // `/agui` route on this same API. Point a stock `HttpAgent` at it for each.
+  const harnessComponents: ComponentMetadata[] = (
+    (backendProjectConfig.metadata as any)?.components ?? []
+  ).filter(
+    (c: ComponentMetadata) =>
+      c.generator === AGENTCORE_HARNESS_TRPC_CONNECTION_GENERATOR_INFO.id,
+  );
+  const theme =
+    harnessComponents.length > 0
+      ? resolveAgUiTheme(frontendProjectConfig)
+      : undefined;
+
   // Recorded below and read by the declaration's predicates, so the packages
   // added here are exactly the ones the version sync will own.
-  const connectionMetadata: TrpcReactMetadata = { auth, isRestApi };
+  const connectionMetadata: TrpcReactMetadata = { auth, isRestApi, theme };
 
   generateFiles(
     tree,
@@ -208,6 +247,41 @@ export async function reactGenerator(
     apiNameClassName,
     connectionMetadata,
   );
+
+  // Reuses `addAgUiReactConnection`'s provider/theme/registration wiring
+  // unchanged — the only harness-specific difference is the URL: the API's
+  // own `/agui` route (this same connection's URL, plus `/agui`) instead of
+  // an agent runtime's `/invocations` endpoint.
+  for (const harnessComponent of harnessComponents) {
+    const agentNameClassName = harnessComponent.name!;
+    const agentName = kebabCase(agentNameClassName);
+
+    await addAgUiReactConnection(tree, {
+      frontendProjectConfig,
+      agentName,
+      agentNameClassName,
+      auth: auth as AgUiAuth,
+      harnessRoute: { apiNameClassName },
+    });
+
+    // Recorded so the version sync knows this connection's AG-UI dependencies
+    // are ours, once per connected Harness.
+    addComponentGeneratorMetadata(
+      tree,
+      frontendProjectConfig.name,
+      TRPC_REACT_GENERATOR_INFO,
+      toProjectRelativePath(
+        frontendProjectConfig,
+        joinPathFragments(
+          frontendProjectConfig.sourceRoot,
+          'hooks',
+          `useAgui${agentNameClassName}`,
+        ),
+      ),
+      agentNameClassName,
+      connectionMetadata,
+    );
+  }
 
   await addGeneratorMetricsIfApplicable(tree, [TRPC_REACT_GENERATOR_INFO]);
 

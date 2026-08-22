@@ -8,13 +8,34 @@ import { publicProcedure } from '../init<% if (esm) { %>.js<% } %>';
 
 const client = new BedrockAgentCoreClient({});
 
+// A Strands-backed Harness's Memory events store each turn as a
+// JSON-stringified turn record — `conversational.content.text` is that
+// string, not the message text itself. Unwrap `message.content[].text`;
+// fall back to the raw string for a payload shape that turns out not to be
+// this record (e.g. a future Harness runtime with a simpler content shape).
 function textFromContent(content: unknown): string {
-  return content &&
+  const raw =
+    content &&
     typeof content === 'object' &&
     'text' in content &&
     typeof content.text === 'string'
-    ? content.text
-    : '';
+      ? content.text
+      : '';
+  if (!raw) return '';
+  try {
+    const parts = JSON.parse(raw)?.message?.content;
+    if (Array.isArray(parts)) {
+      return parts
+        .filter(
+          (part): part is { text: string } => typeof part?.text === 'string',
+        )
+        .map((part) => part.text)
+        .join('');
+    }
+  } catch {
+    // Not the JSON turn-record shape — use the raw string as-is.
+  }
+  return raw;
 }
 
 const HistoryInputSchema = z.object({ threadId: z.string() });
@@ -53,7 +74,15 @@ export const history = publicProcedure
       }),
     );
 
+    // ListEvents returns events most-recent-first; the transcript needs the
+    // opposite order to render oldest-to-newest.
     const messages = (events ?? [])
+      .slice()
+      .sort(
+        (a, b) =>
+          (a.eventTimestamp?.getTime() ?? 0) -
+          (b.eventTimestamp?.getTime() ?? 0),
+      )
       .flatMap((event) => event.payload ?? [])
       .flatMap((payload) => (payload.conversational ? [payload.conversational] : []))
       .map((turn) => ({

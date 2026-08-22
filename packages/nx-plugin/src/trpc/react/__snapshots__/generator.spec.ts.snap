@@ -1,5 +1,191 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
+exports[`trpc react generator > AgentCore Harness AG-UI connection > wires a stock HttpAgent at the API /agui route for Cognito auth > useAguiMyHarness-Cognito.tsx 1`] = `
+"import { HttpAgent } from '@ag-ui/client';
+import type { AbstractAgent, Message, RunAgentInput } from '@ag-ui/client';
+import { useEffect, useMemo } from 'react';
+import { useRuntimeConfig } from './useRuntimeConfig';
+import { useAuth } from 'react-oidc-context';
+import { useTestApiClient } from './useTestApi';
+
+class CognitoHttpAgent extends HttpAgent {
+  getAccessToken: () => string | undefined;
+
+  constructor(
+    config: ConstructorParameters<typeof HttpAgent>[0],
+    getAccessToken: () => string | undefined,
+  ) {
+    super(config);
+    this.getAccessToken = getAccessToken;
+  }
+
+  protected override requestInit(input: RunAgentInput): RequestInit {
+    const init = super.requestInit(input);
+    const token = this.getAccessToken();
+    init.headers = {
+      ...(init.headers as Record<string, string>),
+      ...(token ? { Authorization: \`Bearer \${token}\` } : {}),
+    };
+    return init;
+  }
+
+  override clone(): CognitoHttpAgent {
+    const cloned = super.clone() as CognitoHttpAgent;
+    cloned.getAccessToken = this.getAccessToken;
+    return cloned;
+  }
+}
+
+/**
+ * Reconstructs the thread from the API's \`history\` procedure — the
+ * Memory-backed durable read path (the Harness commits each turn to Memory
+ * as it completes, independently of the SSE connection). Called on mount
+ * and after every run finalizes, whether it succeeded, errored, or the SSE
+ * connection dropped mid-turn, so the UI always converges on the server's
+ * canonical transcript instead of reconciling two id spaces client-side.
+ */
+async function hydrateFromHistory(
+  agent: AbstractAgent,
+  historyClient: ReturnType<typeof useTestApiClient>,
+): Promise<void> {
+  const { messages } = await historyClient.history.query({
+    threadId: agent.threadId,
+  });
+  agent.setMessages(
+    messages.map(
+      (m): Message => ({
+        id: crypto.randomUUID(),
+        role: m.role,
+        content: m.content,
+      }),
+    ),
+  );
+}
+
+export const useAguiMyHarness = (): Record<string, AbstractAgent> => {
+  const runtimeConfig = useRuntimeConfig();
+  const apiUrl = runtimeConfig.apis.TestApi;
+  const historyClient = useTestApiClient();
+  const auth = useAuth();
+
+  const url = useMemo(() => \`\${apiUrl.replace(/\\/$/, '')}/agui\`, [apiUrl]);
+
+  const agent = useMemo((): AbstractAgent => {
+    return new CognitoHttpAgent({ url }, () => auth.user?.access_token);
+  }, [url, auth]);
+
+  // Hydrate on mount/reconnect, and again whenever a run finalizes — a
+  // dropped SSE connection never loses the turn server-side, so re-reading
+  // \`history\` after the run ends heals any partial client-side state.
+  useEffect(() => {
+    let cancelled = false;
+    const rehydrate = () => {
+      hydrateFromHistory(agent, historyClient).catch((err) => {
+        console.error('Failed to hydrate my-harness thread from history', err);
+      });
+    };
+    rehydrate();
+    const { unsubscribe } = agent.subscribe({
+      onRunFinalized: () => {
+        if (!cancelled) rehydrate();
+      },
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [agent, historyClient]);
+
+  return useMemo(
+    (): Record<string, AbstractAgent> => ({ 'my-harness': agent }),
+    [agent],
+  );
+};
+"
+`;
+
+exports[`trpc react generator > AgentCore Harness AG-UI connection > wires a stock HttpAgent at the API /agui route for IAM auth > useAguiMyHarness-IAM.tsx 1`] = `
+"import { HttpAgent } from '@ag-ui/client';
+import type { AbstractAgent, Message, RunAgentInput } from '@ag-ui/client';
+import { useEffect, useMemo } from 'react';
+import { useRuntimeConfig } from './useRuntimeConfig';
+import { useSigV4 } from './useSigV4';
+import { useTestApiClient } from './useTestApi';
+
+/**
+ * Reconstructs the thread from the API's \`history\` procedure — the
+ * Memory-backed durable read path (the Harness commits each turn to Memory
+ * as it completes, independently of the SSE connection). Called on mount
+ * and after every run finalizes, whether it succeeded, errored, or the SSE
+ * connection dropped mid-turn, so the UI always converges on the server's
+ * canonical transcript instead of reconciling two id spaces client-side.
+ */
+async function hydrateFromHistory(
+  agent: AbstractAgent,
+  historyClient: ReturnType<typeof useTestApiClient>,
+): Promise<void> {
+  const { messages } = await historyClient.history.query({
+    threadId: agent.threadId,
+  });
+  agent.setMessages(
+    messages.map(
+      (m): Message => ({
+        id: crypto.randomUUID(),
+        role: m.role,
+        content: m.content,
+      }),
+    ),
+  );
+}
+
+export const useAguiMyHarness = (): Record<string, AbstractAgent> => {
+  const runtimeConfig = useRuntimeConfig();
+  const apiUrl = runtimeConfig.apis.TestApi;
+  const historyClient = useTestApiClient();
+  const sigv4 = useSigV4();
+
+  const url = useMemo(() => \`\${apiUrl.replace(/\\/$/, '')}/agui\`, [apiUrl]);
+
+  const agent = useMemo((): AbstractAgent => {
+    return new HttpAgent({
+      url,
+      fetch: sigv4.fetch as (
+        url: string,
+        init: RequestInit,
+      ) => Promise<Response>,
+    });
+  }, [url, sigv4]);
+
+  // Hydrate on mount/reconnect, and again whenever a run finalizes — a
+  // dropped SSE connection never loses the turn server-side, so re-reading
+  // \`history\` after the run ends heals any partial client-side state.
+  useEffect(() => {
+    let cancelled = false;
+    const rehydrate = () => {
+      hydrateFromHistory(agent, historyClient).catch((err) => {
+        console.error('Failed to hydrate my-harness thread from history', err);
+      });
+    };
+    rehydrate();
+    const { unsubscribe } = agent.subscribe({
+      onRunFinalized: () => {
+        if (!cancelled) rehydrate();
+      },
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [agent, historyClient]);
+
+  return useMemo(
+    (): Record<string, AbstractAgent> => ({ 'my-harness': agent }),
+    [agent],
+  );
+};
+"
+`;
+
 exports[`trpc react generator > REST API (rest-lambda) > should generate REST API client provider with splitLink for Cognito auth > TestApiClientProvider-REST-Cognito.tsx 1`] = `
 "import { AppRouter } from 'backend';
 import { useQueryClient } from '@tanstack/react-query';

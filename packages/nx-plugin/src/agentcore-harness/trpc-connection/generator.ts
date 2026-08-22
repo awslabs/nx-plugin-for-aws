@@ -71,7 +71,7 @@ export const trpcAgentCoreHarnessConnectionGenerator = async (
   );
   const harnessMetadata = readAgentCoreHarnessMetadata(harnessProject);
 
-  const apiMetadata = (apiProject.metadata as any) as TsTrpcApiMetadata;
+  const apiMetadata = apiProject.metadata as any as TsTrpcApiMetadata;
   if (apiMetadata?.infra !== 'rest-lambda') {
     throw new Error(
       `AgentCore Harness connections require a ts#trpc-api generated with infra: 'rest-lambda' (the AG-UI route needs a streaming response), but '${apiProject.name}' was generated with infra: '${apiMetadata?.infra}'.`,

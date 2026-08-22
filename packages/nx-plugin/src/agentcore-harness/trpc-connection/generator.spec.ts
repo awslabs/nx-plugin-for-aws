@@ -157,9 +157,7 @@ describe('agentcore-harness#trpc-connection generator', () => {
     });
 
     expect(tree.exists('packages/api/src/agui/handler.ts')).toBe(true);
-    expect(tree.exists('packages/api/src/agui/converse-to-agui.ts')).toBe(
-      true,
-    );
+    expect(tree.exists('packages/api/src/agui/converse-to-agui.ts')).toBe(true);
     expect(tree.exists('packages/api/src/agui/session.ts')).toBe(true);
     expect(
       tree.read('packages/api/src/agui/handler.ts', 'utf-8'),
@@ -185,7 +183,9 @@ describe('agentcore-harness#trpc-connection generator', () => {
 
     expect(tree.exists('packages/api/src/procedures/history.ts')).toBe(true);
     const router = tree.read('packages/api/src/router.ts', 'utf-8')!;
-    expect(router).toContain("import { history } from './procedures/history.js';");
+    expect(router).toContain(
+      "import { history } from './procedures/history.js';",
+    );
     expect(router.replace(/\s+/g, ' ')).toContain('router({ echo, history })');
   });
 
@@ -201,9 +201,9 @@ describe('agentcore-harness#trpc-connection generator', () => {
       targetProject: 'harness',
     });
 
-    expect(
-      tree.read('packages/api/src/agui/handler.ts', 'utf-8')?.trim(),
-    ).toBe('// custom content');
+    expect(tree.read('packages/api/src/agui/handler.ts', 'utf-8')?.trim()).toBe(
+      '// custom content',
+    );
   });
 
   it('adds an addAguiRoute method to the api CDK construct', async () => {
@@ -279,9 +279,9 @@ describe('agentcore-harness#trpc-connection generator', () => {
     });
 
     expect(tree.exists('packages/api/src/agui/handler.ts')).toBe(true);
-    expect(
-      tree.exists('packages/common/constructs/src/app/apis/api.ts'),
-    ).toBe(false);
+    expect(tree.exists('packages/common/constructs/src/app/apis/api.ts')).toBe(
+      false,
+    );
   });
 
   it('is idempotent when re-run with the same inputs', async () => {

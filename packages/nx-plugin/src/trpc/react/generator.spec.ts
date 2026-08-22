@@ -339,6 +339,158 @@ export function Main() {
       ).toBeUndefined();
     });
   });
+
+  describe('AgentCore Harness AG-UI connection', () => {
+    beforeEach(() => {
+      // Mirrors what `agentcore-harness#trpc-connection` records on the API
+      // project once it has wired a `/agui` route (see
+      // agentcore-harness/trpc-connection/generator.ts).
+      updateJson(tree, 'apps/backend/project.json', (config) => ({
+        ...config,
+        metadata: {
+          ...config.metadata,
+          infra: 'rest-lambda',
+          components: [
+            {
+              generator: 'agentcore-harness#trpc-connection',
+              name: 'MyHarness',
+              path: 'packages/common/constructs/src/app/harnesses/my-harness',
+            },
+          ],
+        },
+      }));
+    });
+
+    it('wires a stock HttpAgent at the API /agui route for IAM auth', async () => {
+      updateJson(tree, 'apps/backend/project.json', (config) => ({
+        ...config,
+        metadata: { ...config.metadata, auth: 'iam' },
+      }));
+
+      await reactGenerator(tree, {
+        frontendProjectName: 'frontend',
+        backendProjectName: 'backend',
+      });
+
+      expect(
+        tree.exists('apps/frontend/src/hooks/useAguiMyHarness.tsx'),
+      ).toBeTruthy();
+      expect(
+        tree.read('apps/frontend/src/hooks/useAguiMyHarness.tsx', 'utf-8'),
+      ).toMatchSnapshot('useAguiMyHarness-IAM.tsx');
+
+      // The AG-UI provider/theme/registration wiring is unchanged from the
+      // agent-runtime path.
+      expect(
+        tree.read('apps/frontend/src/components/AguiProvider.tsx', 'utf-8'),
+      ).toContain('myHarnessAgents');
+
+      const packageJson = JSON.parse(
+        tree.read('apps/frontend/package.json', 'utf-8'),
+      );
+      expect(packageJson.dependencies['@copilotkit/react-core']).toBe(
+        'catalog:',
+      );
+      expect(packageJson.dependencies['@ag-ui/client']).toBe('catalog:');
+    });
+
+    it('wires a stock HttpAgent at the API /agui route for Cognito auth', async () => {
+      updateJson(tree, 'apps/backend/project.json', (config) => ({
+        ...config,
+        metadata: { ...config.metadata, auth: 'cognito' },
+      }));
+
+      await reactGenerator(tree, {
+        frontendProjectName: 'frontend',
+        backendProjectName: 'backend',
+      });
+
+      expect(
+        tree.read('apps/frontend/src/hooks/useAguiMyHarness.tsx', 'utf-8'),
+      ).toMatchSnapshot('useAguiMyHarness-Cognito.tsx');
+    });
+
+    it('hydrates the thread from `history` on mount and re-hydrates when a run finalizes', async () => {
+      updateJson(tree, 'apps/backend/project.json', (config) => ({
+        ...config,
+        metadata: { ...config.metadata, auth: 'iam' },
+      }));
+
+      await reactGenerator(tree, {
+        frontendProjectName: 'frontend',
+        backendProjectName: 'backend',
+      });
+
+      const hook = tree.read(
+        'apps/frontend/src/hooks/useAguiMyHarness.tsx',
+        'utf-8',
+      );
+
+      // Hydrates on mount...
+      expect(hook).toContain('historyClient.history.query');
+      expect(hook).toContain('agent.setMessages');
+      expect(hook).toContain('rehydrate();');
+      // ...and again after every run finalizes (success, error, or a dropped
+      // SSE connection), rather than reconciling two id spaces client-side.
+      expect(hook).toContain('onRunFinalized');
+      expect(hook).not.toContain('onNewMessage');
+    });
+
+    it('does not wire an AG-UI connection when the API has no Harness component', async () => {
+      updateJson(tree, 'apps/backend/project.json', (config) => ({
+        ...config,
+        metadata: { ...config.metadata, components: [] },
+      }));
+
+      await reactGenerator(tree, {
+        frontendProjectName: 'frontend',
+        backendProjectName: 'backend',
+      });
+
+      expect(
+        tree.exists('apps/frontend/src/components/AguiProvider.tsx'),
+      ).toBeFalsy();
+      const packageJson = JSON.parse(
+        tree.read('apps/frontend/package.json', 'utf-8'),
+      );
+      expect(
+        packageJson.dependencies['@copilotkit/react-core'],
+      ).toBeUndefined();
+    });
+
+    it('is idempotent when re-run with the same inputs', async () => {
+      await reactGenerator(tree, {
+        frontendProjectName: 'frontend',
+        backendProjectName: 'backend',
+      });
+
+      const before = tree.read(
+        'apps/frontend/src/hooks/useAguiMyHarness.tsx',
+        'utf-8',
+      );
+      const providerBefore = tree.read(
+        'apps/frontend/src/components/AguiProvider.tsx',
+        'utf-8',
+      );
+
+      await reactGenerator(tree, {
+        frontendProjectName: 'frontend',
+        backendProjectName: 'backend',
+      });
+
+      expect(
+        tree.read('apps/frontend/src/hooks/useAguiMyHarness.tsx', 'utf-8'),
+      ).toEqual(before);
+      const providerAfter = tree.read(
+        'apps/frontend/src/components/AguiProvider.tsx',
+        'utf-8',
+      );
+      expect(providerAfter).toEqual(providerBefore);
+      // Registered exactly once, not once per re-run.
+      expect(providerAfter?.split('myHarnessAgents').length).toBeGreaterThan(1);
+      expect(providerAfter?.match(/useAguiMyHarness\(\)/g)?.length).toBe(1);
+    });
+  });
 });
 
 describe('trpc react generator with unqualified names', () => {

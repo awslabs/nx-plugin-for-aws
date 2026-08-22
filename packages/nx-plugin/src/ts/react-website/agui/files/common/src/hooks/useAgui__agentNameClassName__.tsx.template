@@ -1,3 +1,119 @@
+<%_ if (harnessRoute) { _%>
+import { HttpAgent } from '@ag-ui/client';
+import type { AbstractAgent, Message, RunAgentInput } from '@ag-ui/client';
+import { useEffect, useMemo } from 'react';
+import { useRuntimeConfig } from './useRuntimeConfig';
+<%_ if (auth === 'iam') { _%>
+import { useSigV4 } from './useSigV4';
+<%_ } else if (auth === 'cognito') { _%>
+import { useAuth } from 'react-oidc-context';
+<%_ } _%>
+import { use<%= harnessRoute.apiNameClassName %>Client } from './use<%= harnessRoute.apiNameClassName %>';
+
+<%_ if (auth === 'cognito') { _%>
+class CognitoHttpAgent extends HttpAgent {
+  getAccessToken: () => string | undefined;
+
+  constructor(
+    config: ConstructorParameters<typeof HttpAgent>[0],
+    getAccessToken: () => string | undefined,
+  ) {
+    super(config);
+    this.getAccessToken = getAccessToken;
+  }
+
+  protected override requestInit(input: RunAgentInput): RequestInit {
+    const init = super.requestInit(input);
+    const token = this.getAccessToken();
+    init.headers = {
+      ...(init.headers as Record<string, string>),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+    return init;
+  }
+
+  override clone(): CognitoHttpAgent {
+    const cloned = super.clone() as CognitoHttpAgent;
+    cloned.getAccessToken = this.getAccessToken;
+    return cloned;
+  }
+}
+<%_ } _%>
+
+/**
+ * Reconstructs the thread from the API's `history` procedure — the
+ * Memory-backed durable read path (the Harness commits each turn to Memory
+ * as it completes, independently of the SSE connection). Called on mount
+ * and after every run finalizes, whether it succeeded, errored, or the SSE
+ * connection dropped mid-turn, so the UI always converges on the server's
+ * canonical transcript instead of reconciling two id spaces client-side.
+ */
+async function hydrateFromHistory(
+  agent: AbstractAgent,
+  historyClient: ReturnType<typeof use<%= harnessRoute.apiNameClassName %>Client>,
+): Promise<void> {
+  const { messages } = await historyClient.history.query({
+    threadId: agent.threadId,
+  });
+  agent.setMessages(
+    messages.map(
+      (m): Message => ({ id: crypto.randomUUID(), role: m.role, content: m.content }),
+    ),
+  );
+}
+
+export const useAgui<%= agentNameClassName %> = (): Record<string, AbstractAgent> => {
+  const runtimeConfig = useRuntimeConfig();
+  const apiUrl = runtimeConfig.apis.<%= harnessRoute.apiNameClassName %>;
+  const historyClient = use<%= harnessRoute.apiNameClassName %>Client();
+  <%_ if (auth === 'iam') { _%>
+  const sigv4 = useSigV4();
+  <%_ } else if (auth === 'cognito') { _%>
+  const auth = useAuth();
+  <%_ } _%>
+
+  const url = useMemo(() => `${apiUrl.replace(/\/$/, '')}/agui`, [apiUrl]);
+
+  const agent = useMemo((): AbstractAgent => {
+    <%_ if (auth === 'iam') { _%>
+    return new HttpAgent({
+      url,
+      fetch: sigv4.fetch as (url: string, init: RequestInit) => Promise<Response>,
+    });
+    <%_ } else if (auth === 'cognito') { _%>
+    return new CognitoHttpAgent({ url }, () => auth.user?.access_token);
+    <%_ } else { _%>
+    return new HttpAgent({ url });
+    <%_ } _%>
+  }, [url<% if (auth === 'iam') { %>, sigv4<% } else if (auth === 'cognito') { %>, auth<% } %>]);
+
+  // Hydrate on mount/reconnect, and again whenever a run finalizes — a
+  // dropped SSE connection never loses the turn server-side, so re-reading
+  // `history` after the run ends heals any partial client-side state.
+  useEffect(() => {
+    let cancelled = false;
+    const rehydrate = () => {
+      hydrateFromHistory(agent, historyClient).catch((err) => {
+        console.error('Failed to hydrate <%= agentName %> thread from history', err);
+      });
+    };
+    rehydrate();
+    const { unsubscribe } = agent.subscribe({
+      onRunFinalized: () => {
+        if (!cancelled) rehydrate();
+      },
+    });
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [agent, historyClient]);
+
+  return useMemo((): Record<string, AbstractAgent> => ({ '<%= agentName %>': agent }), [
+    agent,
+  ]);
+};
+<%_ } else { _%>
 <%_ if (auth === 'iam') { _%>
 import { HttpAgent } from '@ag-ui/client';
 import type { AbstractAgent, RunAgentInput } from '@ag-ui/client';
@@ -141,3 +257,4 @@ export const useAgui<%= agentNameClassName %> = (): Record<string, AbstractAgent
     return { '<%= agentName %>': agent };
   }, [url<% if (auth === 'iam') { %>, sigv4<% } else if (auth === 'cognito') { %>, auth<% } %>]);
 };
+<%_ } _%>
