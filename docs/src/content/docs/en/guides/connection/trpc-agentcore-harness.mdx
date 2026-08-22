@@ -1,0 +1,146 @@
+---
+title: tRPC API to AgentCore Harness
+description: Connect a tRPC API to an Amazon Bedrock AgentCore Harness, exposing it as a standard AG-UI endpoint
+when:
+  sourceType: ts#trpc-api
+  targetType: agentcore-harness
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+The `connection` generator wires a <Link path="guides/trpc">tRPC API</Link> to an <Link path="guides/agentcore-harness">AgentCore Harness</Link>, adding a streaming `POST /agui` route to the API that authenticates the caller, invokes the Harness on the caller's behalf, and translates its response into a standard [AG-UI](https://docs.ag-ui.com/) server-sent-event stream. Because the translation happens server-side, the API becomes a drop-in AG-UI endpoint — the generated CopilotKit chat UI connects to it with a stock `@ag-ui/client` `HttpAgent`, and so can any AG-UI client you already have.
+
+A Harness is never exposed to the browser directly: `InvokeHarness` accepts per-invocation overrides for the system prompt, model, tools and actor id, so [AWS's guidance](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-security.html) is that an untrusted caller only ever reaches it through a trusted application layer. The generated `/agui` route is that layer: it reads only `messages` and `threadId` from the incoming request and pins everything else server-side.
+
+## Prerequisites
+
+Before using this generator, ensure you have:
+
+1. A tRPC API project generated with `ts#api --framework=trpc --infra=rest-lambda` (see the <Link path="guides/trpc">tRPC API guide</Link> — the AG-UI route needs the REST API's streaming Lambda integration, so `infra: http-lambda` is not supported)
+2. An <Link path="guides/agentcore-harness">AgentCore Harness</Link> project
+
+## Usage
+
+### Run the Generator
+
+<RunGenerator generator="connection" />
+
+Select your tRPC API project as the source and your AgentCore Harness project as the target.
+
+### Options
+
+<GeneratorParameters generator="connection" />
+
+## Generator Output
+
+The generator adds the AG-UI application code to your tRPC API project, plus an `addAguiRoute` method to its generated CDK construct:
+
+<FileTree>
+
+- packages/api/src
+  - agui
+    - handler.ts The `POST /agui` Lambda handler — calls `InvokeHarness` and streams the response as AG-UI SSE
+    - converse-to-agui.ts Pure mapper from the Harness's Converse-style stream to AG-UI events
+    - session.ts Derives the AgentCore Memory actor id and runtime session id for the caller
+  - procedures
+    - history.ts Optional tRPC query that reconstructs a conversation from AgentCore Memory
+  - router.ts Updated to register `history`
+- packages/common/constructs/src/app/apis/api.ts Gains an `addAguiRoute(harness)` method
+
+</FileTree>
+
+Wire the new route into your application stack — the generator does not call `addAguiRoute` for you, since every construct in a generated app is hand-assembled there:
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {2}
+const api = new Api(this, 'Api');
+api.addAguiRoute(harness);
+```
+
+## How It Works
+
+### The `/agui` Route
+
+`addAguiRoute` adds a dedicated streaming Lambda behind `POST /agui` on your API's existing REST API — not a tRPC procedure, since a stock AG-UI client expects a plain `text/event-stream` of AG-UI events, not tRPC's subscription wire format. The route is added under the API's existing root resource, so it automatically inherits the API's authorizer (IAM or Cognito) and CORS configuration; nothing extra is configured for auth.
+
+For every request, the handler:
+
+1. Parses the AG-UI `RunAgentInput` body, reading **only** `messages` and `threadId`.
+2. Derives the AgentCore Memory `actorId` from the identity the API's authorizer already validated (see [Authentication](#authentication) below) — never from the request body.
+3. Derives a `runtimeSessionId` from the actor id and `threadId` together, so sessions are namespaced per caller and a thread id alone can never be replayed against another user's session.
+4. Calls `InvokeHarness` with the caller's messages and the pinned `actorId`/`runtimeSessionId` — the system prompt, model, tools and skills are never read from the request, so the caller cannot override them.
+5. Maps the returned Converse-style stream to AG-UI events (`RUN_STARTED`, `TEXT_MESSAGE_*`, `TOOL_CALL_*`, `RUN_FINISHED`) and writes them to the response as they arrive.
+
+### Authentication
+
+The `/agui` route (and the `history` procedure) follow whichever auth mode your tRPC API was generated with:
+
+- **IAM** (default): the caller signs the request with SigV4. The API Gateway authorizer validates the signature; the handler derives the Memory actor id from the caller's IAM principal ARN (`event.requestContext.identity.userArn`).
+- **Cognito**: the caller presents a bearer JWT. The API Gateway Cognito authorizer validates it; the handler derives the Memory actor id from the validated JWT's `sub` claim (`event.requestContext.authorizer.claims.sub`) instead of an IAM principal, so each Cognito user gets their own Memory scope.
+
+In both cases, authentication terminates at this API — **the Harness itself is not reconfigured for JWT inbound, and the caller's bearer token is never forwarded to it.** The `/agui` Lambda invokes `InvokeHarness` using its own IAM execution role, exactly as it does under IAM auth; per-user scoping is enforced by this handler (the `actorId` derived above), not by the Harness. This keeps the Harness's deployment-time `auth: iam` setting unchanged — see the design doc's [Q3](https://github.com/waltmayf/nx-plugin-for-aws/blob/main/DESIGN-react-agentcore-harness-connection.md#12-open-questions--decisions-to-confirm) for the full rationale. If a future use case needs the Harness itself to see the caller's identity (e.g. per-user Token Vault or Gateway authorization), that is a separate, not-yet-implemented change to the Harness's own inbound auth.
+
+### `history`: reading Memory directly
+
+The Harness commits every exchange to AgentCore Memory as soon as it completes, independently of whether anything is still listening to the `/agui` stream — so a dropped connection, a page reload, or checking in from another device never loses a turn. The generated `history` tRPC query reads that Memory directly (`ListEvents`, scoped to the same server-derived actor id and session), returning the conversation as a plain `{ messages: { role, content }[] }` array. The generated CopilotKit UI calls it on mount and after every run finalizes to converge on the server's canonical transcript; a bring-your-own frontend can call it too, or ignore it entirely.
+
+### Connecting the generated CopilotKit UI
+
+This connection only wires up the API side. To get a working chat UI, also run the `connection` generator for `ts#react-website -> ts#trpc-api` (the website's existing tRPC connection) — it detects any Harness connected to the target API and generates the matching `useAgui<HarnessName>` hook automatically, pointed at this API's `/agui` route. Run this connection **first**, so the harness component is already recorded on the API when you connect the website:
+
+```bash frame="none"
+# 1. Wire the AG-UI route + Harness invoke grant onto the API
+nx g @aws/nx-plugin:connection --sourceProject=<api> --targetProject=<harness>
+
+# 2. Wire the website to the API — this also generates the CopilotKit hook
+#    for any Harness already connected in step 1
+nx g @aws/nx-plugin:connection --sourceProject=<website> --targetProject=<api>
+```
+
+If the website is already connected to the API, re-running step 2 after step 1 adds the new hook without disturbing your existing wiring (both steps are idempotent). See the <Link path="guides/connection/react-trpc">React to tRPC API guide</Link> for what the website-side connection generates.
+
+### Bring your own AG-UI frontend
+
+Because the `/agui` route speaks standard AG-UI over SSE, you don't need the generated React website or CopilotKit at all to use it. Any [AG-UI client](https://docs.ag-ui.com/) — a different frontend framework, a CLI, another service — can connect by pointing an `@ag-ui/client` `HttpAgent` (or an equivalent AG-UI client in another language) directly at the deployed API's URL plus `/agui`:
+
+```ts
+import { HttpAgent } from '@ag-ui/client';
+
+const agent = new HttpAgent({
+  url: 'https://<your-api-id>.execute-api.<region>.amazonaws.com/agui',
+  // IAM: sign the request with SigV4 (e.g. via aws4fetch), matching the API's authorizer.
+  // Cognito: attach `Authorization: Bearer <id or access token>` from your Cognito session.
+});
+```
+
+The API's base URL is published to <Link path="guides/runtime-config">Runtime Configuration</Link> under `apis.<ApiName>` when you connect it to a website, or is available directly from the deployed API Gateway stage's invoke URL (e.g. as a CDK/Terraform output) if you are not generating a website at all. Authenticate exactly as you would any other request to this API — SigV4 for `auth: iam`, a bearer JWT for `auth: cognito` — since the `/agui` route shares the API's authorizer. If you also want durable, cross-device hydration, call the `history` tRPC procedure the same way you'd call any other procedure on this API (it is plain tRPC, unaffected by AG-UI).
+
+## Infrastructure
+
+`addAguiRoute` provisions:
+
+- A dedicated Node.js Lambda (`AguiHandler`) behind `POST /agui`, with a 180 second timeout as a backstop for a long-running Harness invocation, and `HARNESS_ARN` / `MEMORY_ARN` environment variables.
+- An IAM grant letting that Lambda call `InvokeHarness` on the connected Harness.
+- IAM grants on every existing tRPC operation handler (`ListEvents`, `GetEvent`, `RetrieveMemoryRecords`) plus the same `HARNESS_ARN` / `MEMORY_ARN` env vars, so the `history` procedure can read Memory independently of the `/agui` Lambda.
+
+:::caution[REST API 29-second integration cap]
+API Gateway REST APIs cap a held integration response at 29 seconds, regardless of the Lambda's own timeout. The `/agui` route still delivers useful streaming deltas within that window, but a turn that runs longer keeps executing server-side (the Harness runs to completion independently of the caller) — the browser (or any client) falls back to `history` to read the rest of the conversation once it completes. This is why `history`/Memory, not the SSE connection, is the durable read path for a long-running turn.
+:::
+
+Only CDK is currently wired by this generator. If your API's `iac` is `terraform`, the AG-UI application code (`src/agui/`, `src/procedures/history.ts`) is still generated, but you'll need to wire the Lambda, the API Gateway route, and the Harness invoke grant into your Terraform configuration by hand.
+
+## Local Development
+
+Your tRPC API's existing `dev` target serves the whole router — including the `/agui` route — locally, so there is no separate dev proxy to run. The handler calls the real, deployed Harness using your own AWS credentials, so `InvokeHarness` behaves in local dev exactly as it does once deployed.
+
+<NxCommands commands={['dev <api-project-name>']} />
+
+## More Information
+
+- <Link path="guides/agentcore-harness">AgentCore Harness Guide</Link>
+- <Link path="guides/trpc">tRPC API Guide</Link>
+- <Link path="guides/connection/react-trpc">React to tRPC API Guide</Link>
+- [AG-UI Protocol Documentation](https://docs.ag-ui.com/)
+- [AgentCore Harness Security Guidance](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-security.html)

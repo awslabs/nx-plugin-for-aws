@@ -4,6 +4,7 @@
  */
 import type { GeneratorCallback, Tree } from '@nx/devkit';
 import { agentcoreGatewayGenerator } from '../../sdk/agentcore-gateway';
+import { agentcoreHarnessGenerator } from '../../sdk/agentcore-harness';
 import {
   type ConnectionGeneratorSchema,
   connectionGenerator,
@@ -134,6 +135,12 @@ export const internalTestMatrixGenerator = async (
   const tsApis: TsApiGeneratorSchema[] = [
     { name: 'my-api', infra: 'rest-lambda', auth: 'iam', iac: 'inherit' },
     { name: 'my-api-http', infra: 'http-lambda', auth: 'iam', iac: 'inherit' },
+    {
+      name: 'my-api-cognito',
+      infra: 'rest-lambda',
+      auth: 'cognito',
+      iac: 'inherit',
+    },
     {
       name: 'my-api-custom',
       infra: 'rest-lambda',
@@ -357,6 +364,15 @@ export const internalTestMatrixGenerator = async (
     ...projectDefaults,
   });
 
+  // AgentCore Harness, connected to both an iam-auth and a cognito-auth tRPC
+  // api, so the generated /agui route + history procedure are exercised
+  // under each auth mode the api supports.
+  await agentcoreHarnessGenerator(tree, {
+    name: 'my-harness',
+    iac: 'inherit',
+    ...projectDefaults,
+  });
+
   // Databases — DynamoDB, plus Aurora across both engines and ORMs.
   await tsDynamoDBGenerator(tree, {
     name: 'my-table',
@@ -507,6 +523,9 @@ export const internalTestMatrixGenerator = async (
       targetComponent: 'my-mcp-server',
     },
     { sourceProject: ts('parent-gateway'), targetProject: ts('my-gateway') },
+    // tRPC API -> AgentCore Harness (iam + cognito)
+    { sourceProject: ts('my-api'), targetProject: ts('my-harness') },
+    { sourceProject: ts('my-api-cognito'), targetProject: ts('my-harness') },
     // Gateway -> agent (http gateway fronting agent runtime targets: every
     // supported protocol permutation), then website -> gateway.
     {

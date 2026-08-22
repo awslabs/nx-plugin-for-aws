@@ -33,6 +33,11 @@ const eventWithUserArn = (userArn: string | undefined) =>
     requestContext: { identity: { userArn } },
   }) as any;
 
+const eventWithCognitoSub = (sub: string | undefined) =>
+  ({
+    requestContext: { authorizer: { claims: { sub } } },
+  }) as any;
+
 describe('actorIdFromEvent', () => {
   it('sanitizes an IAM principal ARN to the allowed charset', () => {
     // Bug #9: InvokeHarness rejects ':' and '/', which every ARN contains.
@@ -48,6 +53,30 @@ describe('actorIdFromEvent', () => {
 
   it('falls back to "anonymous" when no principal ARN is present', () => {
     expect(actorIdFromEvent(eventWithUserArn(undefined))).toBe('anonymous');
+  });
+
+  it('derives the actor id from the validated JWT `sub` claim under a Cognito authorizer', () => {
+    const actorId = actorIdFromEvent(
+      eventWithCognitoSub('12345678-abcd-4321-abcd-1234567890ab'),
+    );
+    expect(actorId).toBe('12345678-abcd-4321-abcd-1234567890ab');
+  });
+
+  it('prefers the Cognito `sub` claim over an IAM principal ARN when both are present', () => {
+    const event = {
+      requestContext: {
+        identity: { userArn: 'arn:aws:sts::123456789012:assumed-role/Foo/bar' },
+        authorizer: { claims: { sub: 'cognito-sub-123' } },
+      },
+    } as any;
+    expect(actorIdFromEvent(event)).toBe('cognito-sub-123');
+  });
+
+  it('falls back to "anonymous" when the authorizer context has no claims (e.g. a custom authorizer)', () => {
+    const event = {
+      requestContext: { authorizer: { principalId: 'some-custom-principal' } },
+    } as any;
+    expect(actorIdFromEvent(event)).toBe('anonymous');
   });
 });
 

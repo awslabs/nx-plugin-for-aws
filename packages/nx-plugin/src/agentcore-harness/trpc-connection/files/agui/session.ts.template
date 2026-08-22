@@ -15,11 +15,19 @@ export function runtimeSessionIdFor(actorId: string, threadId: string): string {
   return `${fixedWidthToken(actorId)}_${fixedWidthToken(threadId)}`;
 }
 
-// IAM inbound has no JWT `sub`; the caller's IAM principal ARN is the closest
-// server-derived identity available, and is never taken from the request
-// body. Sanitized because ARNs contain ':' and '/', which InvokeHarness
-// rejects in the actorId field.
+// Never taken from the request body — always derived from the identity the
+// API's own authorizer already validated, so the caller cannot spoof another
+// user's actor id. Works for whichever authorizer the API is configured
+// with, without needing to know the auth mode at generation time:
+// - Cognito (COGNITO_USER_POOLS authorizer): the JWT `sub` claim.
+// - IAM (SigV4): no JWT, so the caller's IAM principal ARN is the closest
+//   server-derived identity available.
+// Sanitized because both ARNs (':' and '/') and, in principle, claim values
+// can contain characters InvokeHarness rejects in the actorId field.
 export function actorIdFromEvent(event: APIGatewayProxyEvent): string {
-  const arn = event.requestContext.identity?.userArn ?? 'anonymous';
-  return arn.replace(/[^a-zA-Z0-9_-]/g, '-');
+  const claims = (
+    event.requestContext.authorizer as { claims?: { sub?: string } } | undefined
+  )?.claims;
+  const id = claims?.sub ?? event.requestContext.identity?.userArn ?? 'anonymous';
+  return id.replace(/[^a-zA-Z0-9_-]/g, '-');
 }

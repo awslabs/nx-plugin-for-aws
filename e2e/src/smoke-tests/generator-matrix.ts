@@ -336,6 +336,22 @@ export const runGeneratorMatrix = async (
     opts,
   );
 
+  // tRPC API -> AgentCore Harness connections — both auth modes the API
+  // supports (iam via my-api, cognito via a dedicated cognito-auth api), so
+  // the generated /agui route and history procedure are exercised under each.
+  await runCLI(
+    `generate @aws/nx-plugin:ts#api --name=my-api-cognito --infra=rest-lambda --auth=cognito --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=my-api --targetProject=@e2e-test/my-harness --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=my-api-cognito --targetProject=@e2e-test/my-harness --no-interactive${deferFlag}`,
+    opts,
+  );
+
   // An http-protocol gateway fronting agent runtime targets (every supported
   // protocol permutation: ts ag-ui + a2a, py ag-ui + http + a2a), plus the
   // website -> gateway connection so the browser reaches the fronted AG-UI

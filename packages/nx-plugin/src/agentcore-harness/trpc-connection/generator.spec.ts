@@ -170,6 +170,27 @@ describe('agentcore-harness#trpc-connection generator', () => {
     ).toMatchSnapshot('session.ts');
   });
 
+  it('generates the same actor-scoping session helper regardless of the api auth mode', async () => {
+    // actorIdFromEvent (session.ts) reads whichever identity the API's own
+    // authorizer already validated (Cognito claims or IAM principal ARN) at
+    // runtime, so the generated file is identical whether the api project is
+    // configured with auth: 'iam' or auth: 'cognito' — no template branch.
+    setupTrpcApi('api', { auth: 'cognito' });
+    setupHarness();
+    setupApiConstruct();
+    setupHarnessConstruct();
+
+    await trpcAgentCoreHarnessConnectionGenerator(tree, {
+      sourceProject: 'api',
+      targetProject: 'harness',
+    });
+
+    const sessionTs = tree.read('packages/api/src/agui/session.ts', 'utf-8')!;
+    expect(sessionTs).toContain('actorIdFromEvent');
+    expect(sessionTs).toContain('authorizer');
+    expect(sessionTs).toContain('claims');
+  });
+
   it('generates and registers the optional history procedure', async () => {
     setupTrpcApi();
     setupHarness();

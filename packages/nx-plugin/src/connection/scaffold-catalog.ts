@@ -573,6 +573,11 @@ export const CONNECTION_ORDERING = {
     reason:
       'The website connection publishes a route per agent attached to the gateway, so the gateway’s agents must be attached first.',
   },
+  'ts#react-website -> ts#trpc-api': {
+    after: ['ts#trpc-api -> agentcore-harness'],
+    reason:
+      'The website connection generates a CopilotKit hook per Harness already connected to the api, so the api must be connected to its Harness(es) first.',
+  },
 } as const satisfies Partial<
   Record<
     ConnectionKey,
