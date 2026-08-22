@@ -2,6 +2,7 @@ import { SessionManager } from '@strands-agents/sdk';
 import { LocalFileStorage<% if (session === 's3') { %>, S3Storage<% } else { %>, InMemoryStorage<% } %> } from '@strands-agents/sdk/storage';
 import {
   getCurrentSessionId,
+  getSessionStorageKey,
 <%_ if (session === 's3') { _%>
   getAgentCoreRuntimeConfig,
 <%_ } _%>
@@ -13,14 +14,19 @@ import {
  * convenience, regardless of the configured session option. Without a
  * configured session option, conversation state is kept in memory only and
  * does not survive process restarts.
+ *
+ * `storageKey` is used verbatim when given, so the caller scopes it.
  */
-export const getSessionManager = async (): Promise<SessionManager> => {
-  const sessionId = getCurrentSessionId();
-  if (!sessionId) {
+export const getSessionManager = async (
+  storageKey?: string,
+): Promise<SessionManager> => {
+  const currentSessionId = getCurrentSessionId();
+  if (!storageKey && !currentSessionId) {
     throw new Error(
       'No current session id — cannot resolve a SessionManager outside of a request scope.',
     );
   }
+  const sessionId = storageKey ?? getSessionStorageKey(currentSessionId!);
   if (process.env.LOCAL_DEV === 'true') {
     return new SessionManager({
       sessionId,

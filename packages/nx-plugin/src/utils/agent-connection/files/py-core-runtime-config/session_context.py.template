@@ -1,3 +1,7 @@
+import base64
+import binascii
+import json
+import re
 from collections.abc import Generator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -5,6 +9,7 @@ from contextvars import ContextVar
 _session_id_var: ContextVar[str | None] = ContextVar(
     "agentcore_session_id", default=None
 )
+_user_id_var: ContextVar[str | None] = ContextVar("agentcore_user_id", default=None)
 
 
 def get_current_session_id() -> str | None:
@@ -20,3 +25,71 @@ def session_id_context(session_id: str) -> Generator[None]:
         yield
     finally:
         _session_id_var.reset(token)
+
+
+def get_current_user_id() -> str | None:
+    """The authenticated user ID for the current async scope, or ``None``."""
+    return _user_id_var.get()
+
+
+@contextmanager
+def user_id_context(user_id: str) -> Generator[None]:
+    """Bind *user_id* as the current authenticated user for the block."""
+    token = _user_id_var.set(user_id)
+    try:
+        yield
+    finally:
+        _user_id_var.reset(token)
+
+
+def get_jwt_subject(authorization_header: str | None) -> str | None:
+    """The ``sub`` claim of a JWT, or ``None`` if absent or malformed.
+
+    AgentCore Runtime validates the token during inbound authorization, so the
+    signature is not re-verified here.
+    https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-oauth.html
+    """
+    if not authorization_header:
+        return None
+    token = re.sub(r"^Bearer ", "", authorization_header, flags=re.IGNORECASE)
+    parts = token.split(".")
+    if len(parts) < 2:
+        return None
+    payload = parts[1]
+    payload += "=" * (-len(payload) % 4)
+    try:
+        sub = json.loads(base64.urlsafe_b64decode(payload)).get("sub")
+    except (ValueError, binascii.Error):
+        return None
+    return sub if isinstance(sub, str) and sub else None
+
+
+def _encode_key_segment(value: str) -> str:
+    """Encode a value into the character set Strands accepts for session ids
+    (``^[a-z0-9_-]+$``), which excludes path separators and uppercase letters.
+
+    Every byte outside ``[a-z0-9]`` becomes a fixed-width ``_XX`` escape of its
+    UTF-8 value, so the encoding is injective and no ``-`` survives in a segment.
+    """
+    return "".join(
+        chr(byte)
+        if ("a" <= chr(byte) <= "z") or ("0" <= chr(byte) <= "9")
+        else f"_{byte:02x}"
+        for byte in value.encode("utf-8")
+    )
+
+
+def get_session_storage_key(session_id: str, user_id: str | None = None) -> str:
+    """The storage key identifying a conversation.
+
+    Namespaced by the authenticated user where one is available. The ``u-`` /
+    ``s-`` prefixes keep namespaced and unnamespaced keys disjoint.
+    """
+    user_id = user_id if user_id is not None else get_current_user_id()
+    if user_id == "":
+        raise ValueError(
+            "user_id is empty — refusing to resolve an unnamespaced storage key."
+        )
+    if user_id:
+        return f"u-{_encode_key_segment(user_id)}-{_encode_key_segment(session_id)}"
+    return f"s-{_encode_key_segment(session_id)}"

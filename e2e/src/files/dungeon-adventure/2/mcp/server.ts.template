@@ -1,11 +1,23 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import z from 'zod';
 import { createInventoryEntity } from '@dungeon-adventure/dungeon-db';
+import type { McpRequestContext } from './request-context.js';
+
+// The agent forwards its session id on every outbound call. Scoping on it keeps
+// inventory to the caller's own adventure; a model argument is not a trust boundary.
+const ownerOf = (context: McpRequestContext, playerName: string): string => {
+  if (!context.sessionId) {
+    throw new Error(
+      'No caller session — cannot resolve the owning player for this inventory.',
+    );
+  }
+  return `${context.sessionId}#${playerName}`;
+};
 
 /**
  * Create the MCP Server
  */
-export const createServer = async () => {
+export const createServer = async (context: McpRequestContext = {}) => {
   const server = new McpServer({
     name: 'inventory-mcp-server',
     version: '1.0.0',
@@ -14,7 +26,8 @@ export const createServer = async () => {
   server.registerTool(
     'list-inventory-items',
     {
-      description: "List items in the player's inventory. Leave cursor blank unless you are requesting subsequent pages",
+      description:
+        "List items in the player's inventory. Leave cursor blank unless you are requesting subsequent pages",
       inputSchema: {
         playerName: z.string(),
         cursor: z.string().optional(),
@@ -24,7 +37,7 @@ export const createServer = async () => {
       const inventory = await createInventoryEntity();
       const results = await inventory.query
         .primary({
-          playerName,
+          playerName: ownerOf(context, playerName),
         })
         .go();
 
@@ -37,7 +50,8 @@ export const createServer = async () => {
   server.registerTool(
     'add-to-inventory',
     {
-      description: "Add an item to the player's inventory. Quantity defaults to 1 if omitted.",
+      description:
+        "Add an item to the player's inventory. Quantity defaults to 1 if omitted.",
       inputSchema: {
         playerName: z.string(),
         itemName: z.string(),
@@ -49,7 +63,7 @@ export const createServer = async () => {
       const inventory = await createInventoryEntity();
       await inventory
         .put({
-          playerName,
+          playerName: ownerOf(context, playerName),
           itemName,
           quantity,
           emoji,
@@ -70,7 +84,8 @@ export const createServer = async () => {
   server.registerTool(
     'remove-from-inventory',
     {
-      description: "Remove an item from the player's inventory. If quantity is omitted, all items are removed.",
+      description:
+        "Remove an item from the player's inventory. If quantity is omitted, all items are removed.",
       inputSchema: {
         playerName: z.string(),
         itemName: z.string(),
@@ -83,28 +98,41 @@ export const createServer = async () => {
       // If quantity is omitted, remove the entire item
       if (quantity === undefined) {
         try {
-          await inventory.delete({ playerName, itemName }).go();
+          await inventory
+            .delete({ playerName: ownerOf(context, playerName), itemName })
+            .go();
           return {
             content: [
-              { type: 'text' as const, text: `${itemName} removed from inventory.` },
+              {
+                type: 'text' as const,
+                text: `${itemName} removed from inventory.`,
+              },
             ],
           };
         } catch {
           return {
             content: [
-              { type: 'text' as const, text: `${itemName} not found in inventory` },
+              {
+                type: 'text' as const,
+                text: `${itemName} not found in inventory`,
+              },
             ],
           };
         }
       }
 
       // If quantity is specified, fetch current quantity and update
-      const item = await inventory.get({ playerName, itemName }).go();
+      const item = await inventory
+        .get({ playerName: ownerOf(context, playerName), itemName })
+        .go();
 
       if (!item.data) {
         return {
           content: [
-            { type: 'text' as const, text: `${itemName} not found in inventory` },
+            {
+              type: 'text' as const,
+              text: `${itemName} not found in inventory`,
+            },
           ],
         };
       }
@@ -112,17 +140,22 @@ export const createServer = async () => {
       const newQuantity = item.data.quantity - quantity;
 
       if (newQuantity <= 0) {
-        await inventory.delete({ playerName, itemName }).go();
+        await inventory
+          .delete({ playerName: ownerOf(context, playerName), itemName })
+          .go();
         return {
           content: [
-            { type: 'text' as const, text: `${itemName} removed from inventory.` },
+            {
+              type: 'text' as const,
+              text: `${itemName} removed from inventory.`,
+            },
           ],
         };
       }
 
       await inventory
         .put({
-          playerName,
+          playerName: ownerOf(context, playerName),
           itemName,
           quantity: newQuantity,
           emoji: item.data.emoji,

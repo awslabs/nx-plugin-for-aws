@@ -1,21 +1,21 @@
 import { createGameEntity } from '@dungeon-adventure/dungeon-db';
+import { requireUserId } from '../identity.js';
+import { publicProcedure } from '../init.js';
 import {
   GameSchema,
   IGame,
   QueryInputSchema,
   createPaginatedQueryOutput,
 } from '../schema/index.js';
-import { publicProcedure } from '../init.js';
 
 export const queryGames = publicProcedure
   .input(QueryInputSchema)
   .output(createPaginatedQueryOutput(GameSchema))
-  .query(async ({ input }) => {
+  .query(async ({ input, ctx }) => {
     const gameEntity = await createGameEntity();
-    const result = await gameEntity.scan.go({
-      cursor: input.cursor,
-      count: input.limit,
-    });
+    const result = await gameEntity.query
+      .primary({ userId: requireUserId(ctx.event) })
+      .go({ cursor: input.cursor, count: input.limit });
 
     return {
       items: result.data as IGame[],
@@ -26,9 +26,11 @@ export const queryGames = publicProcedure
 export const saveGame = publicProcedure
   .input(GameSchema.omit({ lastUpdated: true }))
   .output(GameSchema)
-  .mutation(async ({ input }) => {
+  .mutation(async ({ input, ctx }) => {
     const gameEntity = await createGameEntity();
 
-    const result = await gameEntity.put(input).go();
+    const result = await gameEntity
+      .put({ ...input, userId: requireUserId(ctx.event) })
+      .go();
     return result.data as IGame;
   });

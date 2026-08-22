@@ -1,0 +1,35 @@
+import { TRPCError } from '@trpc/server';
+
+// The Identity Pool records the signed-in user in the IAM authorizer's `amr`
+// list as `<region>:<pool>:CognitoSignIn:<sub>`.
+const callerSub = (event: unknown): string | undefined => {
+  const cognitoIdentity = (
+    event as {
+      requestContext?: { authorizer?: { iam?: { cognitoIdentity?: unknown } } };
+    }
+  )?.requestContext?.authorizer?.iam?.cognitoIdentity as
+    | { amr?: string[] }
+    | undefined;
+  return (cognitoIdentity?.amr ?? [])
+    .filter((entry) => entry.includes(':CognitoSignIn:'))
+    .map((entry) => entry.split(':').pop())
+    .find((sub): sub is string => !!sub);
+};
+
+// Matches the agent's local-dev fallback.
+export const LOCAL_DEV_USER_ID = 'local-dev-user';
+
+/** The signed-in user, used to scope every read and write to its owner. */
+export const requireUserId = (event: unknown): string => {
+  if (process.env.LOCAL_DEV === 'true') {
+    return LOCAL_DEV_USER_ID;
+  }
+  const userId = callerSub(event);
+  if (!userId) {
+    throw new TRPCError({
+      code: 'FORBIDDEN',
+      message: 'Unable to determine the calling user',
+    });
+  }
+  return userId;
+};

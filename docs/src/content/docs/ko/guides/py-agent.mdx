@@ -513,6 +513,61 @@ CloudWatch AWS 콘솔에서 메뉴의 "GenAI Observability"를 선택하여 추�
 
 세션 ID 자체는 AgentCore Runtime 세션에서 가져오며 (`x-amzn-bedrock-agentcore-runtime-session-id` 헤더를 통해 전파), [`contextvars.ContextVar`](https://docs.python.org/3/library/contextvars.html) 기반 컨텍스트에 바인딩되어 `get_current_session_id()`가 요청의 어디서든 확인할 수 있습니다 — <Link path="/guides/connection">`connection` 생성기</Link>를 통해 연결된 다운스트림 MCP 또는 A2A 클라이언트 포함, 전체 호출 체인이 일관된 세션을 공유합니다.
 
+:::note[AG-UI: 세션과 스레드]
+AG-UI 프로토콜은 요청 본문에 자체 대화 식별자인 `thread_id`를 가지고 있습니다. `ag-ui-strands`는 `thread_id`당 하나의 Strands 에이전트를 캐시하고 **스레드당 한 번** `session_manager_provider`를 호출합니다 — 해당 스레드가 처음 보일 때.
+
+따라서 생성된 `main.py`는 `session_manager_provider=lambda input_data: get_session_manager(input_data.thread_id)`를 전달하여, 공급자와 어댑터의 캐시가 항상 일치하도록 동일한 스레드 ID로 대화 상태를 키잉합니다.
+
+`get_session_manager()`는 인수 없이 호출될 때 현재 AgentCore 세션 ID로 폴백하며, 이것이 HTTP 및 A2A 프로토콜이 사용하는 방식입니다.
+
+AG-UI 엔드포인트는 세션을 두 번 바인딩합니다 — 한 번은 미들웨어에서, 다시 한 번은 스트리밍 응답 본문 내부에서. 둘 다 필요합니다: Starlette의 `BaseHTTPMiddleware`는 `StreamingResponse` 본문이 소비되기 전에 컨텍스트를 종료하므로, 두 번째 바인딩이 스트리밍하는 동안 수행된 다운스트림 MCP 및 A2A 호출에 세션을 계속 표시하게 합니다.
+:::
+
+:::caution[세션 격리]
+세션 ID와 `thread_id`는 모두 호출자가 제공하므로, 어느 것도 그 자체로는 누구의 대화인지 식별할 수 없습니다. AgentCore Runtime은 개별 세션이 아닌 에이전트 런타임 리소스 ARN에 대해 호출을 승인하고, 호출 ID에 연결하지 않고 세션 ID의 형식을 검증합니다 — [세션을 사용자로 범위 지정하는 것은 에이전트의 책임입니다](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-instances-security.html).
+
+`auth=cognito`의 경우, 생성된 인프라는 `requestHeaderConfiguration.allowlistedHeaders: ['Authorization']`를 설정하므로, AgentCore 권한 부여자가 이미 검증한 호출자의 JWT가 일반 요청 헤더로 에이전트 코드에 도달합니다. 서버 엔트리 포인트는 `sub` 클레임을 읽고 요청에 바인딩하며, `session.py`는 `get_session_storage_key()`를 통해 이로부터 저장소 키를 구축하여 `u-<sub>-<conversation_id>`를 생성합니다.
+
+사용 가능한 클레임이 없는 요청은 범위가 지정되지 않은 네임스페이스로 폴백하는 대신 401로 거부됩니다. `nx dev` 하에서는 에이전트 앞에 권한 부여자가 없으므로, 인증되지 않은 요청은 대신 단일 로컬 사용자로 폴백합니다 — 이 폴백은 `-dev` 타겟만 설정하는 `LOCAL_DEV`에 게이트됩니다. AgentCore Runtime이 이미 [인바운드 권한 부여 중에 토큰을 검증했으므로](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-oauth.html) 클레임을 디코딩할 때 서명 검증은 건너뜁니다.
+
+`auth=iam`의 경우, SigV4는 에이전트 코드가 아닌 AgentCore Runtime에 호출 주체를 식별하므로, 대화 상태는 세션 ID만으로 키잉되고 `bedrock-agentcore:InvokeAgentRuntime`이 경계입니다 — 신뢰할 수 있는 백엔드에 부여하거나, 사용자별 IAM 주체를 사용하여 IAM이 범위 지정을 강제하도록 합니다.
+
+`get_session_storage_key()`는 또한 경로 구분자를 평탄화하므로, 대화 ID가 네임스페이스 밖으로 이동할 수 없습니다.
+:::
+
+#### 대안: 세션을 소유자로 제한하기
+
+네임스페이싱은 호출자별로 저장소를 키잉하므로, 한 사용자의 대화가 다른 사용자에게 반환되지 않습니다. 세션 ID 자체는 여전히 클라이언트가 보낸 것이며, 이는 두 가지 경우에 중요합니다:
+
+- 세션 ID는 요청을 제공하는 [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html)을 선택하므로, 파일 시스템, `/tmp` 및 프로세스 내 캐시는 해당 세션으로 확인되는 모든 요청에 의해 공유됩니다. 동일한 ID를 보내는 두 호출자는 별도의 저장소 키를 사용하더라도 이를 공유합니다.
+- 네임스페이싱은 대화를 분할합니다. 사용자가 재개할 수 있는 세션을 결정하지 않습니다.
+
+둘 중 하나가 중요하다면, 애플리케이션이 세션 ID를 소유하도록 하세요: API에서 발급하고, 누구에게 속하는지 기록하고, 에이전트에서 해당 소유권을 확인합니다.
+
+**1. API를 통해 세션 생성**
+
+대화를 시작하는 프로시저를 추가합니다. 세션 ID를 생성하고, 자체 요청 컨텍스트에서 호출자를 확인하고, 쌍을 저장합니다 — 예를 들어 <Link path="guides/py-dynamodb">`py#dynamodb`</Link> 생성기로 생성된 테이블에:
+
+| 속성 | 예시 | 참고 |
+| --- | --- | --- |
+| `sessionId` | `a5f1…` | 파티션 키 — 에이전트는 주어진 세션 ID에서 소유자를 조회합니다 |
+| `userId` | `<sub>` | 세션을 소유한 인증된 호출자 |
+| `createdAt`, `title` | … | UI가 대화를 나열하는 데 필요한 모든 것 |
+
+사용자 자신의 세션을 나열하려면 `userId`에 보조 인덱스를 추가하세요.
+
+브라우저에서 제공할 수 없도록 입력 필드가 아닌 검증된 요청 컨텍스트에서 호출자를 확인하세요. <Link path="guides/trpc">커스텀 미들웨어 구현</Link>은 IAM 및 Cognito 인증 API 모두에 대해 방법을 보여주며, API 자체는 모든 언어로 작성될 수 있습니다. 인덱스를 쿼리하는 두 번째 프로시저를 통해 UI는 다른 사람의 대화를 보지 않고 사용자에게 자신의 대화를 제공할 수 있습니다.
+
+**2. 에이전트에서 소유권 검증**
+
+에이전트는 세션 ID를 받고, `auth=cognito`의 경우 호출자의 JWT를 받습니다. `SessionIdMiddleware`에서 세션을 조회하고 `session["userId"]`를 `get_current_user_id()`와 비교하여, 다르면 핸들러로 계속하는 대신 `403`을 반환합니다.
+
+API는 세션을 누가 소유하는지 결정하고, 에이전트는 이를 강제합니다. 두 곳에서 확인하면 유출된 세션 ID가 다음 호출 시 여전히 거부되고, 에이전트의 향후 클라이언트는 동일한 규칙을 상속합니다.
+
+:::caution
+불투명하고 무작위인 세션 ID를 생성하고 매핑을 저장하세요. 사용자가 제공한 값(대화 이름, 이메일)에서 파생하는 것은 예측 가능하므로, 호출자가 주어지지 않은 세션에 도달할 수 있습니다.
+:::
+
 :::note[로컬 개발]
 로컬에서 실행할 때 (`LOCAL_DEV=true`, `-dev` 타겟에 의해 자동으로 설정), 구성된 `session` 옵션에 관계없이 세션 데이터는 편의를 위해 워크스페이스 루트의 `tmp/agents/strands/<agent-name>` 아래 디스크에 항상 저장됩니다.
 :::
@@ -526,6 +581,21 @@ CloudWatch AWS 콘솔에서 메뉴의 "GenAI Observability"를 선택하여 추�
 - **`in-memory`**: 테이블이나 버킷이 프로비저닝되지 않습니다. 대화 상태는 실행 중인 프로세스의 수명 동안만 메모리에 유지되며 재시작이나 스케일 인 시 유지되지 않습니다.
 
 이는 생성된 `session.py`에 구현되며, `agent.py`의 `create_agent(..., checkpointer=get_checkpointer())`에서 호출되는 `get_checkpointer()` 함수를 내보냅니다.
+
+Strands와 달리, 체크포인터는 세션별로 확인되지 않습니다. 한 번 생성되며, LangGraph는 호출 시 전달된 구성의 `thread_id`를 사용하여 읽고 쓸 대화를 선택합니다. 어떤 값이 해당 `thread_id`가 되는지는 프로토콜에 따라 다릅니다:
+
+- **HTTP**: `main.py`는 `{"configurable": {"thread_id": session_id}}`를 설정하므로, AgentCore 세션 ID가 *바로* LangGraph 스레드 ID입니다.
+- **AG-UI**: `ag-ui-langgraph`는 요청 본문의 `thread_id`에서 `thread_id`를 설정하므로, 대화 상태는 AG-UI 스레드로 키잉됩니다. 세션 ID는 다운스트림 MCP 및 A2A 호출을 위해 여전히 컨텍스트에 바인딩되지만, 대화를 선택하지는 **않습니다**.
+
+:::caution[세션 격리]
+저장된 대화를 선택하는 식별자는 호출자가 제공합니다 — HTTP의 경우 AgentCore 세션 ID, AG-UI의 경우 AG-UI `thread_id`. 어느 것도 그 자체로는 누구의 대화인지 식별할 수 없습니다. AgentCore Runtime은 개별 세션이 아닌 에이전트 런타임 리소스 ARN에 대해 호출을 승인하고, 호출 ID에 연결하지 않고 세션 ID의 형식을 검증합니다 — [세션을 사용자로 범위 지정하는 것은 에이전트의 책임입니다](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-instances-security.html).
+
+`auth=cognito`의 경우, 생성된 인프라는 `requestHeaderConfiguration.allowlistedHeaders: ['Authorization']`를 설정하므로, AgentCore 권한 부여자가 이미 검증한 호출자의 JWT가 일반 요청 헤더로 에이전트 코드에 도달합니다. LangGraph가 세션 공급자가 아닌 구성에서 대화를 선택하기 때문에, `main.py`는 `get_session_storage_key(session_id, user_id)`로 구성의 `thread_id`를 자체적으로 네임스페이싱합니다.
+
+사용 가능한 `sub` 클레임이 없는 요청은 범위가 지정되지 않은 네임스페이스로 폴백하는 대신 401로 거부됩니다. `nx dev` 하에서는 에이전트 앞에 권한 부여자가 없으므로, 인증되지 않은 요청은 대신 단일 로컬 사용자로 폴백합니다 — 이 폴백은 `-dev` 타겟만 설정하는 `LOCAL_DEV`에 게이트됩니다. AgentCore Runtime이 이미 [인바운드 권한 부여 중에 토큰을 검증했으므로](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-oauth.html) 클레임을 디코딩할 때 서명 검증은 건너뜁니다.
+
+`auth=iam`의 경우, SigV4는 에이전트 코드가 아닌 AgentCore Runtime에 호출 주체를 식별하므로, 대화는 호출자의 식별자만으로 키잉되고 `bedrock-agentcore:InvokeAgentRuntime`이 경계입니다 — 신뢰할 수 있는 백엔드에 부여하세요.
+:::
 
 :::note[로컬 개발]
 로컬에서 실행할 때 (`LOCAL_DEV=true`, `-dev` 타겟에 의해 자동으로 설정), `get_checkpointer()`는 구성된 `session` 옵션에 관계없이 편의를 위해 워크스페이스 루트의 `tmp/agents/langchain/<agent-name>` 아래 로컬 SQLite 데이터베이스로 지원되는 [`AsyncSqliteSaver`](https://reference.langchain.com/python/langgraph.checkpoint.sqlite/aio/AsyncSqliteSaver)를 항상 반환합니다.

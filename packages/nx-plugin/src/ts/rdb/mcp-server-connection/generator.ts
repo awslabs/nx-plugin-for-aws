@@ -84,7 +84,7 @@ export const tsRdbMcpServerConnectionGenerator = async (
     await applyGritQL(
       tree,
       serverPath,
-      `\`export const createServer = async () => { $body }\` => raw\`export const createServer = async () => {
+      `\`export const createServer = async ($params) => { $body }\` => raw\`export const createServer = async ($params) => {
   const ${rdbNameCamel} = await get${rdbNamePascal}();
   $body
 }\` where { $body <: not some \`const ${rdbNameCamel} = await get${rdbNamePascal}()\` }`,

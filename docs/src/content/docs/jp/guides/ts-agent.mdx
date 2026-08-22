@@ -362,6 +362,79 @@ CloudWatch AWS コンソールでメニューから「GenAI Observability」を�
 
 セッション ID 自体は AgentCore Runtime セッションから取得され（A2A/AG-UI の場合は `x-amzn-bedrock-agentcore-runtime-session-id` ヘッダーを介して、HTTP/tRPC の場合は WebSocket 接続コンテキストを介して伝播されます）、[`AsyncLocalStorage`](https://nodejs.org/api/async_context.html#class-asynclocalstorage) ベースのコンテキストにバインドされるため、`getCurrentSessionId()` はリクエスト内のどこでもそれを解決できます。これには、<Link path="/guides/connection">`connection` ジェネレーター</Link>を介して接続された下流の MCP または A2A クライアントも含まれるため、呼び出しチェーン全体が一貫したセッションを共有します。
 
+:::note[AG-UI: セッションとスレッド]
+AG-UI プロトコルには、リクエストボディに独自の会話識別子 `threadId` があります。`@ag-ui/aws-strands` は `threadId` ごとに1つの Strands エージェントをキャッシュし、**スレッドごとに1回**、そのスレッドが最初に見られたときに `sessionManagerProvider` を呼び出します。
+
+そのため、生成された `index.ts` は `sessionManagerProvider: (input) => getSessionManager(input.threadId)` を渡し、同じスレッド ID で会話状態をキーイングすることで、プロバイダーとアダプターのキャッシュが常に一致するようにします。
+
+`getSessionManager()` は、引数なしで呼び出された場合、現在の AgentCore セッション ID にフォールバックします。これが HTTP および A2A プロトコルでの使用方法です。
+:::
+
+:::caution[セッションの分離]
+セッション ID と `threadId` はどちらも呼び出し元によって提供されるため、どちらも単独では誰の会話であるかを識別できません。AgentCore Runtime は、個々のセッションに対してではなく、エージェントランタイムリソース ARN に対して呼び出しを承認し、セッション ID の形式を検証しますが、呼び出し元の ID に結び付けることはありません。[セッションをユーザーにスコープすることはエージェントの責任です](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-instances-security.html)。
+
+`auth=cognito` の場合、生成されたインフラストラクチャは `requestHeaderConfiguration.allowlistedHeaders: ['Authorization']` を設定するため、AgentCore オーソライザーによってすでに検証された呼び出し元の JWT が、通常のリクエストヘッダーとしてエージェントコードに到達します。サーバーエントリーポイントはその `sub` クレームを読み取り、リクエストにバインドし、`session.ts` は `getSessionStorageKey()` を介してそれからストレージキーを構築し、`u-<sub>-<conversationId>` を生成します。
+
+使用可能なクレームのないリクエストは、スコープされていない名前空間にフォールバックするのではなく、401 で拒否されます。`nx dev` の下では、エージェントの前にオーソライザーがないため、認証されていないリクエストは代わりに単一のローカルユーザーにフォールバックします。このフォールバックは `LOCAL_DEV` でゲートされており、`-dev` ターゲットのみが設定します。AgentCore Runtime がすでに[インバウンド承認中にトークンを検証した](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-oauth.html)ため、クレームをデコードする際に署名検証はスキップされます。
+
+AG-UI パスでは、ミドルウェアはプロトコルの `thread_id` エイリアスを `threadId` に折り畳んだ後に削除します。アダプターはボディを解析する際に `thread_id` を `threadId` に最初のキー優先でマッピングするため、エイリアスをそのままにしておくと、クライアントがスコープされていないスレッド ID を書き換えを回避して密輸できるようになります。これをカスタマイズする場合は、両方のステップを一緒に保持してください。
+
+`auth=iam` の場合、SigV4 はエージェントコードではなく AgentCore Runtime に対して呼び出し元プリンシパルを識別するため、会話状態はセッション ID のみでキーイングされ、`bedrock-agentcore:InvokeAgentRuntime` が境界となります。信頼できるバックエンドに付与するか、ユーザーごとの IAM プリンシパルを使用して IAM がスコーピングを強制するようにします。
+
+`getSessionStorageKey()` はパス区切り文字もフラット化するため、会話 ID はその名前空間から外に移動できません。
+:::
+
+#### 代替案: セッションを所有者に制限する
+
+名前空間化は呼び出し元ごとにストレージをキーイングするため、あるユーザーの会話が別のユーザーに返されることはありません。セッション ID 自体は依然としてクライアントが送信したものであり、これは2つのケースで重要です：
+
+- セッション ID はリクエストを処理する [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html) を選択するため、そのファイルシステム、`/tmp`、およびインプロセスキャッシュは、そのセッションに解決されるすべてのリクエストによって共有されます。2つの呼び出し元が同じ ID を送信すると、別々のストレージキーを持っていてもそれらを共有します。
+- 名前空間化は会話を分割します。ユーザーが再開できるセッションを決定するものではありません。
+
+どちらかが重要な場合は、アプリケーションにセッション ID を所有させてください。API から発行し、誰に属するかを記録し、エージェントでその所有権を確認します。
+
+**1. API を通じてセッションを作成する**
+
+会話を開始するプロシージャを追加します。これはセッション ID を生成し、独自のリクエストコンテキストから呼び出し元を解決し、ペアを保存します。たとえば、<Link path="guides/ts-dynamodb">`ts#dynamodb`</Link> ジェネレーターで作成されたテーブルに：
+
+| Attribute | Example | Notes |
+| --- | --- | --- |
+| `sessionId` | `a5f1…` | パーティションキー — エージェントは与えられたセッション ID から所有者を検索します |
+| `userId` | `<sub>` | セッションを所有する認証された呼び出し元 |
+| `createdAt`, `title` | … | UI が会話をリストするために必要なもの |
+
+ユーザー自身のセッションをリストしたい場合は、`userId` にセカンダリインデックスを追加します。
+
+```ts
+export const createSession = publicProcedure
+  .output(z.object({ sessionId: z.string() }))
+  .mutation(async ({ ctx }) => {
+    const sessionId = randomUUID().replaceAll('-', '');
+    await sessionEntity.put({ sessionId, userId: callerSub(ctx.event) }).go();
+    return { sessionId };
+  });
+```
+
+入力フィールドからではなく、検証されたリクエストコンテキストから呼び出し元を解決します。そうすることで、ブラウザから提供されることはありません。<Link path="guides/trpc">カスタムミドルウェアの実装</Link>は、IAM と Cognito 認証 API の両方でその方法を示しています。インデックスをクエリする2番目のプロシージャにより、UI は他の誰のものも見ることなく、ユーザーに自分の会話を提供できます。
+
+**2. エージェントで所有権を検証する**
+
+エージェントはセッション ID を受け取り、`auth=cognito` の場合は呼び出し元の JWT を受け取ります。セッションを検索し、その所有者を呼び出し元と比較し、異なる場合はリクエストを拒否します：
+
+```ts
+const session = await getSession(sessionId);
+if (session?.userId !== getCurrentUserId()) {
+  res.status(403).json({ error: 'Session does not belong to the caller' });
+  return;
+}
+```
+
+API はセッションの所有者を決定し、エージェントはそれを強制します。両方の場所でチェックすることは、漏洩したセッション ID が次の呼び出しで拒否され、エージェントの将来のクライアントが同じルールを継承することを意味します。
+
+:::caution
+不透明でランダムなセッション ID を生成し、マッピングを保存します。ユーザー提供の値（会話名、メールアドレス）から派生させることは予測可能であるため、呼び出し元は与えられていないセッションに到達できます。
+:::
+
 :::note[ローカル開発]
 ローカルで実行する場合（`LOCAL_DEV=true`、`-dev` ターゲットによって自動的に設定されます）、設定された `session` オプションに関係なく、セッションデータは常にワークスペースルートの `tmp/agents/strands/<agent-name>` の下のディスクに保存されます。これは便宜上のものです。
 :::

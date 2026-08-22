@@ -92,6 +92,47 @@ O código gerado lida com autenticação dependendo da configuração do seu age
 - **IAM** (padrão): usa requisições HTTP assinadas com AWS SigV4. As credenciais são obtidas do Cognito Identity Pool configurado com a autenticação do seu site.
 - **Cognito**: incorpora o token de acesso JWT no cabeçalho `Authorization` como um Bearer token.
 
+### Sessões e Threads
+
+AG-UI e AgentCore Runtime cada um tem seu próprio identificador para uma conversa, e o hook gerado os conecta:
+
+- **`threadId`** — o identificador de conversa AG-UI, enviado no corpo da requisição. CopilotKit gera um UUID aleatório por chat, a menos que você passe um `threadId` explícito. É nisto que o agente baseia o estado da conversa, porque os adaptadores AG-UI armazenam em cache um agente por thread.
+- **Session ID** — a sessão do AgentCore Runtime, enviada no cabeçalho `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`. Determina qual [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html) atende a requisição, e é propagado para quaisquer clientes MCP ou A2A downstream.
+
+O hook gerado deriva o session ID do thread ID, então um thread de chat mapeia para uma sessão AgentCore:
+
+```ts
+// AgentCore session ids must be at least 33 characters.
+function agentCoreSessionId(input: RunAgentInput): string {
+  return (input.threadId ?? '').padEnd(33, '0');
+}
+```
+
+:::note[Padding não é livre de colisões]
+AgentCore rejeita session IDs menores que 33 caracteres, então o hook preenche à direita o thread ID com `0`. Dois thread IDs diferindo apenas em caracteres finais abaixo de 33 — `abc` e `abc0` — portanto mapeiam para o mesmo session ID e compartilham uma microVM.
+
+O estado da conversa é baseado no thread ID em vez do session ID preenchido, então os dois threads ainda mantêm históricos separados. Se você quiser que eles fiquem em microVMs separadas também, passe thread IDs que já tenham pelo menos 33 caracteres:
+
+```tsx
+const threadId = `${conversationName}`.padEnd(33, '0');
+
+<CopilotChat agentId="agent" threadId={threadId} />
+```
+
+Deixar `threadId` não definido é sempre seguro — o UUID gerado pelo CopilotKit tem 36 caracteres.
+:::
+
+:::caution[Thread IDs são fornecidos pelo cliente]
+O thread ID vem do navegador, então ele não pode por si só identificar de quem é a conversa. AgentCore Runtime autoriza invocações contra o ARN do recurso de runtime do agente em vez de contra sessões individuais, e valida o formato de um session ID sem vinculá-lo à identidade chamadora — [delimitar uma sessão a um usuário é responsabilidade do agente](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-instances-security.html).
+
+Como o agente gerado lida com isso depende de seu `auth`:
+
+- **Cognito**: o estado da conversa é namespaciado pela claim `sub` do JWT do chamador, que o autorizador AgentCore já validou e que a infraestrutura permite passar para o código do seu agente. As chaves de armazenamento se tornam `u-<sub>-<threadId>` (cada parte escapada no conjunto de caracteres que Strands permite para session ids), então um chamador fornecendo o thread ID de outra pessoa só alcança seu próprio namespace. Requisições sem uma claim utilizável são rejeitadas com um 401, exceto sob `nx dev`, onde não há autorizador na frente do agente e requisições não autenticadas recorrem a um único usuário local.
+- **IAM**: SigV4 identifica o principal chamador para o AgentCore Runtime em vez de para o código do seu agente, então o estado da conversa é baseado apenas no thread ID e `bedrock-agentcore:InvokeAgentRuntime` é o limite — conceda-o a backends confiáveis. Use autenticação Cognito quando você quiser armazenamento de sessão por usuário em um aplicativo voltado para o usuário final.
+
+Para decidir quais conversas um usuário pode retomar, em vez de apenas particioná-las, veja <Link path="guides/ts-agent">Restringindo sessões ao seu proprietário</Link>.
+:::
+
 ## Infraestrutura
 
 <Snippet name="connection/react-agent-infrastructure" parentHeading="Infraestrutura" />

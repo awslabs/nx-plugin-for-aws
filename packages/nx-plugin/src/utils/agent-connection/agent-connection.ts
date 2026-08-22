@@ -519,6 +519,21 @@ export async function ensurePythonAgentConnectionProject<
     '.core.session_context',
     'session_id_context',
   );
+  // Per-user session namespacing: the agent server binds the caller's identity
+  // and `session.py` builds the storage key from it.
+  for (const importName of [
+    'get_current_user_id',
+    'user_id_context',
+    'get_jwt_subject',
+    'get_session_storage_key',
+  ]) {
+    await addPythonReExport(
+      tree,
+      moduleInitPath,
+      '.core.session_context',
+      importName,
+    );
+  }
 
   // The runtime-config loader reads AppConfig via aws-lambda-powertools.
   addDependenciesToPyProjectToml(

@@ -92,6 +92,47 @@ Code được tạo xử lý xác thực tùy thuộc vào cấu hình của age
 - **IAM** (mặc định): sử dụng các HTTP request được ký AWS SigV4. Thông tin xác thực được lấy từ Cognito Identity Pool được cấu hình với auth của trang web của bạn.
 - **Cognito**: nhúng JWT access token vào header `Authorization` dưới dạng Bearer token.
 
+### Sessions và Threads
+
+AG-UI và AgentCore Runtime mỗi cái có định danh riêng cho một cuộc hội thoại, và hook được tạo liên kết chúng với nhau:
+
+- **`threadId`** — định danh cuộc hội thoại AG-UI, được gửi trong request body. CopilotKit tạo một UUID ngẫu nhiên cho mỗi chat trừ khi bạn truyền một `threadId` rõ ràng. Đây là thứ mà agent dùng làm khóa cho trạng thái cuộc hội thoại, bởi vì các adapter AG-UI cache một agent cho mỗi thread.
+- **Session ID** — session của AgentCore Runtime, được gửi trong header `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`. Nó xác định [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html) nào phục vụ request, và được truyền đến bất kỳ MCP hoặc A2A client downstream nào.
+
+Hook được tạo suy ra session ID từ thread ID, vì vậy một chat thread ánh xạ đến một session AgentCore:
+
+```ts
+// AgentCore session ids must be at least 33 characters.
+function agentCoreSessionId(input: RunAgentInput): string {
+  return (input.threadId ?? '').padEnd(33, '0');
+}
+```
+
+:::note[Padding không tránh được xung đột]
+AgentCore từ chối các session ID ngắn hơn 33 ký tự, vì vậy hook đệm bên phải thread ID bằng `0`. Hai thread ID chỉ khác nhau ở các ký tự cuối dưới 33 — `abc` và `abc0` — do đó ánh xạ đến cùng một session ID và chia sẻ một microVM.
+
+Trạng thái cuộc hội thoại được khóa trên thread ID thay vì session ID đã đệm, vì vậy hai thread vẫn giữ các lịch sử riêng biệt. Nếu bạn muốn chúng trên các microVM riêng biệt, hãy truyền các thread ID đã có ít nhất 33 ký tự:
+
+```tsx
+const threadId = `${conversationName}`.padEnd(33, '0');
+
+<CopilotChat agentId="agent" threadId={threadId} />
+```
+
+Để `threadId` không được đặt luôn an toàn — UUID được tạo bởi CopilotKit có 36 ký tự.
+:::
+
+:::caution[Thread ID được cung cấp bởi client]
+Thread ID đến từ trình duyệt, vì vậy bản thân nó không thể xác định cuộc hội thoại là của ai. AgentCore Runtime ủy quyền các lời gọi dựa trên ARN tài nguyên runtime của agent thay vì dựa trên các session riêng lẻ, và xác thực định dạng của session ID mà không gắn nó với danh tính gọi — [việc giới hạn phạm vi session cho người dùng là trách nhiệm của agent](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-instances-security.html).
+
+Cách agent được tạo xử lý điều này phụ thuộc vào `auth` của nó:
+
+- **Cognito**: trạng thái cuộc hội thoại được phân vùng theo claim `sub` của JWT của người gọi, mà AgentCore authorizer đã xác thực và mà hạ tầng cho phép thông qua code agent của bạn. Các khóa lưu trữ trở thành `u-<sub>-<threadId>` (mỗi phần được escape vào bộ ký tự mà Strands cho phép cho session id), vì vậy người gọi cung cấp thread ID của người khác chỉ có thể truy cập vào namespace của chính họ. Các request không có claim khả dụng bị từ chối với mã 401, ngoại trừ dưới `nx dev`, nơi không có authorizer trước agent và các request không xác thực sẽ quay về một người dùng cục bộ duy nhất.
+- **IAM**: SigV4 xác định principal gọi với AgentCore Runtime thay vì với code agent của bạn, vì vậy trạng thái cuộc hội thoại được khóa chỉ trên thread ID và `bedrock-agentcore:InvokeAgentRuntime` là ranh giới — cấp nó cho các backend đáng tin cậy. Sử dụng xác thực Cognito khi bạn muốn lưu trữ session theo từng người dùng trong ứng dụng hướng đến người dùng cuối.
+
+Để quyết định người dùng có thể tiếp tục cuộc hội thoại nào, thay vì chỉ phân vùng chúng, xem <Link path="guides/ts-agent">Restricting sessions to their owner</Link>.
+:::
+
 ## Hạ tầng
 
 <Snippet name="connection/react-agent-infrastructure" parentHeading="Hạ tầng" />

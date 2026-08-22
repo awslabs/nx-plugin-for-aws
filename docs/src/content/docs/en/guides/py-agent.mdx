@@ -513,6 +513,61 @@ This is implemented in the generated `session.py`, which exports a `get_session_
 
 The session ID itself comes from the AgentCore Runtime session (propagated via the `x-amzn-bedrock-agentcore-runtime-session-id` header) and is bound to a [`contextvars.ContextVar`](https://docs.python.org/3/library/contextvars.html)-based context so `get_current_session_id()` can resolve it anywhere in the request — including in any downstream MCP or A2A clients wired up via the <Link path="/guides/connection">`connection` generator</Link>, so the whole call chain shares a consistent session.
 
+:::note[AG-UI: sessions and threads]
+The AG-UI protocol has its own conversation identifier, `thread_id`, in the request body. `ag-ui-strands` caches one Strands agent per `thread_id` and calls `session_manager_provider` **once per thread** — the first time that thread is seen.
+
+The generated `main.py` therefore passes `session_manager_provider=lambda input_data: get_session_manager(input_data.thread_id)`, keying conversation state on that same thread id so the provider and the adapter's cache always agree.
+
+`get_session_manager()` falls back to the current AgentCore session ID when called without an argument, which is how the HTTP and A2A protocols use it.
+
+The AG-UI endpoint binds the session twice — once in middleware, and again inside the streaming response body. Both are needed: Starlette's `BaseHTTPMiddleware` exits its context before the `StreamingResponse` body is consumed, so the second bind is what keeps the session visible to downstream MCP and A2A calls made while streaming.
+:::
+
+:::caution[Session isolation]
+The session ID and `thread_id` are both supplied by the caller, so neither can by itself identify whose conversation it is. AgentCore Runtime authorizes invocations against the agent runtime resource ARN rather than against individual sessions, and validates the format of a session ID without tying it to the calling identity — [scoping a session to a user is the agent's responsibility](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-instances-security.html).
+
+With `auth=cognito`, the generated infrastructure sets `requestHeaderConfiguration.allowlistedHeaders: ['Authorization']`, so the caller's JWT — already validated by the AgentCore authorizer — reaches your agent code as an ordinary request header. The server entry point reads its `sub` claim and binds it for the request, and `session.py` builds the storage key from it via `get_session_storage_key()`, producing `u-<sub>-<conversation_id>`.
+
+Requests without a usable claim are rejected with a 401 rather than falling back to an unscoped namespace. Under `nx dev` there is no authorizer in front of the agent, so unauthenticated requests fall back to a single local user instead — that fallback is gated on `LOCAL_DEV`, which only the `-dev` targets set. Signature verification is skipped when decoding the claim, since AgentCore Runtime already [validated the token during inbound authorization](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-oauth.html).
+
+With `auth=iam`, SigV4 identifies the calling principal to AgentCore Runtime rather than to your agent code, so conversation state is keyed on the session ID alone and `bedrock-agentcore:InvokeAgentRuntime` is the boundary — grant it to trusted backends, or use per-user IAM principals so IAM enforces the scoping.
+
+`get_session_storage_key()` also flattens path separators, so a conversation ID cannot traverse out of its namespace.
+:::
+
+#### Alternative: restricting sessions to their owner
+
+Namespacing keys the storage per caller, so one user's conversation is never returned to another. The session ID itself is still whatever the client sent, which matters in two cases:
+
+- A session ID selects the [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html) serving the request, so its filesystem, `/tmp` and in-process caches are shared by every request resolving to that session. Two callers sending the same ID share those even with separate storage keys.
+- Namespacing partitions conversations; it does not decide which sessions a user is allowed to resume.
+
+If either matters to you, have your application own the session ID instead: issue it from an API, record who it belongs to, and check that ownership in the agent.
+
+**1. Create sessions through your API**
+
+Add a procedure that starts a conversation. It generates the session ID, resolves the caller from its own request context, and stores the pair — for example in a table created with the <Link path="guides/py-dynamodb">`py#dynamodb`</Link> generator:
+
+| Attribute | Example | Notes |
+| --- | --- | --- |
+| `sessionId` | `a5f1…` | Partition key — the agent looks up an owner from the session ID it is given |
+| `userId` | `<sub>` | The authenticated caller who owns the session |
+| `createdAt`, `title` | … | Anything your UI needs to list conversations |
+
+Add a secondary index on `userId` if you also want to list a user's own sessions.
+
+Resolve the caller from the verified request context rather than from an input field, so it cannot be supplied by the browser. <Link path="guides/trpc">Implementing Custom Middleware</Link> shows how for both IAM and Cognito authenticated APIs, and the API itself can be in any language. A second procedure querying the index lets the UI offer a user their own conversations without seeing anyone else's.
+
+**2. Validate ownership in the agent**
+
+The agent receives the session ID, and with `auth=cognito` the caller's JWT. In `SessionIdMiddleware`, look the session up and compare `session["userId"]` against `get_current_user_id()`, returning a `403` when they differ rather than continuing to the handler.
+
+The API decides who owns a session; the agent enforces it. Checking in both places means a session ID that leaks is still refused on the next invocation, and any future client of the agent inherits the same rule.
+
+:::caution
+Generate an opaque, random session ID and store the mapping. Deriving one from user-supplied values — a conversation name, an email — is predictable, so a caller can land on a session it was not given.
+:::
+
 :::note[Local Development]
 When running locally (`LOCAL_DEV=true`, set automatically by the `-dev` target), session data is always stored on disk under `tmp/agents/strands/<agent-name>` at the workspace root, regardless of the configured `session` option, for convenience.
 :::
@@ -526,6 +581,21 @@ The `session` option controls how your agent's LangGraph checkpointer persists c
 - **`in-memory`**: No table or bucket is provisioned. Conversation state is kept in memory only for the lifetime of the running process and does not survive restarts or scale-in.
 
 This is implemented in the generated `session.py`, which exports a `get_checkpointer()` function called from `agent.py`'s `create_agent(..., checkpointer=get_checkpointer())`.
+
+Unlike Strands, the checkpointer is not resolved per session. It is created once, and LangGraph selects the conversation to read and write using the `thread_id` in the config passed at invocation time. Which value ends up as that `thread_id` depends on the protocol:
+
+- **HTTP**: `main.py` sets `{"configurable": {"thread_id": session_id}}`, so the AgentCore session ID *is* the LangGraph thread ID.
+- **AG-UI**: `ag-ui-langgraph` sets the `thread_id` from the `thread_id` in the request body, so conversation state is keyed on the AG-UI thread. The session ID is still bound to context for downstream MCP and A2A calls, but it does **not** select the conversation.
+
+:::caution[Session isolation]
+The identifier that selects the stored conversation is supplied by the caller — the AgentCore session ID for HTTP, or the AG-UI `thread_id` for AG-UI. Neither can by itself identify whose conversation it is. AgentCore Runtime authorizes invocations against the agent runtime resource ARN rather than against individual sessions, and validates the format of a session ID without tying it to the calling identity — [scoping a session to a user is the agent's responsibility](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-instances-security.html).
+
+With `auth=cognito`, the generated infrastructure sets `requestHeaderConfiguration.allowlistedHeaders: ['Authorization']`, so the caller's JWT — already validated by the AgentCore authorizer — reaches your agent code as an ordinary request header. Because LangGraph selects the conversation from the config rather than a session provider, `main.py` namespaces the config's `thread_id` itself with `get_session_storage_key(session_id, user_id)`.
+
+Requests without a usable `sub` claim are rejected with a 401 rather than falling back to an unscoped namespace. Under `nx dev` there is no authorizer in front of the agent, so unauthenticated requests fall back to a single local user instead — that fallback is gated on `LOCAL_DEV`, which only the `-dev` targets set. Signature verification is skipped when decoding the claim, since AgentCore Runtime already [validated the token during inbound authorization](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-oauth.html).
+
+With `auth=iam`, SigV4 identifies the calling principal to AgentCore Runtime rather than to your agent code, so conversations are keyed on the caller's identifier alone and `bedrock-agentcore:InvokeAgentRuntime` is the boundary — grant it to trusted backends.
+:::
 
 :::note[Local Development]
 When running locally (`LOCAL_DEV=true`, set automatically by the `-dev` target), `get_checkpointer()` always returns an [`AsyncSqliteSaver`](https://reference.langchain.com/python/langgraph.checkpoint.sqlite/aio/AsyncSqliteSaver) backed by a local SQLite database under `tmp/agents/langchain/<agent-name>` at the workspace root, regardless of the configured `session` option, for convenience.

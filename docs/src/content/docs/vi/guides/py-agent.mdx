@@ -513,6 +513,61 @@ Tùy chọn `session` kiểm soát cách agent của bạn lưu trữ trạng th
 
 Session ID đến từ session AgentCore Runtime (được truyền qua header `x-amzn-bedrock-agentcore-runtime-session-id`) và được gắn vào một context dựa trên [`contextvars.ContextVar`](https://docs.python.org/3/library/contextvars.html) để `get_current_session_id()` có thể giải quyết nó ở bất kỳ đâu trong yêu cầu — bao gồm trong bất kỳ MCP hoặc A2A client nào được kết nối qua <Link path="/guides/connection">generator `connection`</Link>, vì vậy toàn bộ chuỗi gọi chia sẻ một session nhất quán.
 
+:::note[AG-UI: sessions và threads]
+Giao thức AG-UI có định danh hội thoại riêng của nó, `thread_id`, trong request body. `ag-ui-strands` lưu cache một Strands agent cho mỗi `thread_id` và gọi `session_manager_provider` **một lần cho mỗi thread** — lần đầu tiên thread đó được nhìn thấy.
+
+Do đó, `main.py` được tạo ra truyền `session_manager_provider=lambda input_data: get_session_manager(input_data.thread_id)`, khóa trạng thái hội thoại trên cùng thread id đó để provider và cache của adapter luôn đồng ý.
+
+`get_session_manager()` quay lại session ID AgentCore hiện tại khi được gọi mà không có đối số, đó là cách các giao thức HTTP và A2A sử dụng nó.
+
+Endpoint AG-UI gắn session hai lần — một lần trong middleware, và một lần nữa bên trong streaming response body. Cả hai đều cần thiết: `BaseHTTPMiddleware` của Starlette thoát khỏi context của nó trước khi `StreamingResponse` body được tiêu thụ, vì vậy lần gắn thứ hai là thứ giữ cho session hiển thị với các cuộc gọi MCP và A2A downstream được thực hiện trong khi streaming.
+:::
+
+:::caution[Cách ly Session]
+Session ID và `thread_id` đều được cung cấp bởi người gọi, vì vậy không cái nào có thể tự nó xác định hội thoại là của ai. AgentCore Runtime ủy quyền các lần gọi đối với ARN tài nguyên agent runtime thay vì đối với các session riêng lẻ, và xác thực định dạng của session ID mà không gắn nó với danh tính người gọi — [phạm vi session cho người dùng là trách nhiệm của agent](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-instances-security.html).
+
+Với `auth=cognito`, hạ tầng được tạo ra đặt `requestHeaderConfiguration.allowlistedHeaders: ['Authorization']`, vì vậy JWT của người gọi — đã được xác thực bởi AgentCore authorizer — đến code agent của bạn như một request header thông thường. Điểm vào máy chủ đọc claim `sub` của nó và gắn nó cho yêu cầu, và `session.py` xây dựng storage key từ nó qua `get_session_storage_key()`, tạo ra `u-<sub>-<conversation_id>`.
+
+Các yêu cầu không có claim khả dụng bị từ chối với 401 thay vì quay lại một namespace không có phạm vi. Dưới `nx dev` không có authorizer trước agent, vì vậy các yêu cầu không xác thực quay lại một người dùng cục bộ duy nhất thay thế — fallback đó được kiểm soát bởi `LOCAL_DEV`, chỉ các target `-dev` đặt. Xác minh chữ ký bị bỏ qua khi giải mã claim, vì AgentCore Runtime đã [xác thực token trong quá trình ủy quyền đầu vào](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-oauth.html).
+
+Với `auth=iam`, SigV4 xác định principal gọi cho AgentCore Runtime thay vì cho code agent của bạn, vì vậy trạng thái hội thoại được khóa chỉ trên session ID và `bedrock-agentcore:InvokeAgentRuntime` là ranh giới — cấp nó cho các backend đáng tin cậy, hoặc sử dụng các IAM principal theo người dùng để IAM thực thi phạm vi.
+
+`get_session_storage_key()` cũng làm phẳng các dấu phân cách đường dẫn, vì vậy conversation ID không thể đi ra ngoài namespace của nó.
+:::
+
+#### Thay thế: hạn chế session cho chủ sở hữu của chúng
+
+Namespacing khóa lưu trữ theo người gọi, vì vậy hội thoại của một người dùng không bao giờ được trả về cho người khác. Bản thân session ID vẫn là bất cứ thứ gì client gửi, điều này quan trọng trong hai trường hợp:
+
+- Session ID chọn [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html) phục vụ yêu cầu, vì vậy filesystem, `/tmp` và cache trong tiến trình của nó được chia sẻ bởi mọi yêu cầu giải quyết cho session đó. Hai người gọi gửi cùng ID chia sẻ những thứ đó ngay cả với các storage key riêng biệt.
+- Namespacing phân vùng các hội thoại; nó không quyết định session nào người dùng được phép tiếp tục.
+
+Nếu một trong hai điều này quan trọng với bạn, hãy để ứng dụng của bạn sở hữu session ID thay thế: phát hành nó từ một API, ghi lại nó thuộc về ai, và kiểm tra quyền sở hữu đó trong agent.
+
+**1. Tạo session thông qua API của bạn**
+
+Thêm một procedure bắt đầu một hội thoại. Nó tạo session ID, giải quyết người gọi từ request context riêng của nó, và lưu trữ cặp — ví dụ trong một bảng được tạo bằng generator <Link path="guides/py-dynamodb">`py#dynamodb`</Link>:
+
+| Attribute | Example | Notes |
+| --- | --- | --- |
+| `sessionId` | `a5f1…` | Partition key — agent tra cứu chủ sở hữu từ session ID mà nó được cung cấp |
+| `userId` | `<sub>` | Người gọi đã xác thực sở hữu session |
+| `createdAt`, `title` | … | Bất cứ thứ gì UI của bạn cần để liệt kê các hội thoại |
+
+Thêm một secondary index trên `userId` nếu bạn cũng muốn liệt kê các session riêng của người dùng.
+
+Giải quyết người gọi từ request context đã xác minh thay vì từ một trường đầu vào, vì vậy nó không thể được cung cấp bởi trình duyệt. <Link path="guides/trpc">Implementing Custom Middleware</Link> cho thấy cách thực hiện cho cả API được xác thực bằng IAM và Cognito, và bản thân API có thể bằng bất kỳ ngôn ngữ nào. Một procedure thứ hai truy vấn index cho phép UI cung cấp cho người dùng các hội thoại riêng của họ mà không thấy của người khác.
+
+**2. Xác thực quyền sở hữu trong agent**
+
+Agent nhận session ID, và với `auth=cognito` là JWT của người gọi. Trong `SessionIdMiddleware`, tra cứu session và so sánh `session["userId"]` với `get_current_user_id()`, trả về `403` khi chúng khác nhau thay vì tiếp tục đến handler.
+
+API quyết định ai sở hữu session; agent thực thi nó. Kiểm tra ở cả hai nơi có nghĩa là session ID bị rò rỉ vẫn bị từ chối trong lần gọi tiếp theo, và bất kỳ client tương lai nào của agent đều kế thừa cùng quy tắc.
+
+:::caution
+Tạo một session ID ngẫu nhiên, không rõ ràng và lưu trữ ánh xạ. Lấy một từ các giá trị do người dùng cung cấp — tên hội thoại, email — có thể dự đoán được, vì vậy người gọi có thể đến một session mà nó không được cung cấp.
+:::
+
 :::note[Phát triển Cục bộ]
 Khi chạy cục bộ (`LOCAL_DEV=true`, được đặt tự động bởi target `-dev`), dữ liệu session luôn được lưu trữ trên đĩa dưới `tmp/agents/strands/<agent-name>` tại thư mục gốc workspace, bất kể tùy chọn `session` đã cấu hình, để thuận tiện.
 :::
@@ -526,6 +581,21 @@ Tùy chọn `session` kiểm soát cách checkpointer LangGraph của agent lưu
 - **`in-memory`**: Không có bảng hay bucket nào được cung cấp. Trạng thái hội thoại chỉ được giữ trong bộ nhớ trong suốt thời gian tồn tại của tiến trình đang chạy và không tồn tại qua các lần khởi động lại hoặc scale-in.
 
 Điều này được triển khai trong `session.py` được tạo ra, xuất một hàm `get_checkpointer()` được gọi từ `create_agent(..., checkpointer=get_checkpointer())` của `agent.py`.
+
+Không giống như Strands, checkpointer không được giải quyết theo session. Nó được tạo một lần, và LangGraph chọn hội thoại để đọc và ghi bằng cách sử dụng `thread_id` trong config được truyền tại thời điểm gọi. Giá trị nào trở thành `thread_id` đó phụ thuộc vào giao thức:
+
+- **HTTP**: `main.py` đặt `{"configurable": {"thread_id": session_id}}`, vì vậy session ID AgentCore *là* LangGraph thread ID.
+- **AG-UI**: `ag-ui-langgraph` đặt `thread_id` từ `thread_id` trong request body, vì vậy trạng thái hội thoại được khóa trên AG-UI thread. Session ID vẫn được gắn vào context cho các cuộc gọi MCP và A2A downstream, nhưng nó **không** chọn hội thoại.
+
+:::caution[Cách ly Session]
+Định danh chọn hội thoại được lưu trữ được cung cấp bởi người gọi — session ID AgentCore cho HTTP, hoặc `thread_id` AG-UI cho AG-UI. Không cái nào có thể tự nó xác định hội thoại là của ai. AgentCore Runtime ủy quyền các lần gọi đối với ARN tài nguyên agent runtime thay vì đối với các session riêng lẻ, và xác thực định dạng của session ID mà không gắn nó với danh tính người gọi — [phạm vi session cho người dùng là trách nhiệm của agent](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-instances-security.html).
+
+Với `auth=cognito`, hạ tầng được tạo ra đặt `requestHeaderConfiguration.allowlistedHeaders: ['Authorization']`, vì vậy JWT của người gọi — đã được xác thực bởi AgentCore authorizer — đến code agent của bạn như một request header thông thường. Bởi vì LangGraph chọn hội thoại từ config thay vì session provider, `main.py` tự namespace `thread_id` của config bằng `get_session_storage_key(session_id, user_id)`.
+
+Các yêu cầu không có claim `sub` khả dụng bị từ chối với 401 thay vì quay lại một namespace không có phạm vi. Dưới `nx dev` không có authorizer trước agent, vì vậy các yêu cầu không xác thực quay lại một người dùng cục bộ duy nhất thay thế — fallback đó được kiểm soát bởi `LOCAL_DEV`, chỉ các target `-dev` đặt. Xác minh chữ ký bị bỏ qua khi giải mã claim, vì AgentCore Runtime đã [xác thực token trong quá trình ủy quyền đầu vào](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-oauth.html).
+
+Với `auth=iam`, SigV4 xác định principal gọi cho AgentCore Runtime thay vì cho code agent của bạn, vì vậy các hội thoại được khóa chỉ trên định danh của người gọi và `bedrock-agentcore:InvokeAgentRuntime` là ranh giới — cấp nó cho các backend đáng tin cậy.
+:::
 
 :::note[Phát triển Cục bộ]
 Khi chạy cục bộ (`LOCAL_DEV=true`, được đặt tự động bởi target `-dev`), `get_checkpointer()` luôn trả về một [`AsyncSqliteSaver`](https://reference.langchain.com/python/langgraph.checkpoint.sqlite/aio/AsyncSqliteSaver) được hỗ trợ bởi cơ sở dữ liệu SQLite cục bộ dưới `tmp/agents/langchain/<agent-name>` tại thư mục gốc workspace, bất kể tùy chọn `session` đã cấu hình, để thuận tiện.

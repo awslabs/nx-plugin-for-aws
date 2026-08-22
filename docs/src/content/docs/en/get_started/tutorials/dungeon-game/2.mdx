@@ -29,13 +29,23 @@ import { getDungeonAdventureElectroDbDependencies } from '../../../../../../../.
 We will implement the following APIs in this section:
 
 1. `saveGame` - create or update a game.
-2. `queryGames` - return a paginated list of previously saved games.
+2. `queryGames` - return a paginated list of the signed-in player's saved games.
 3. `queryInventory` - return a paginated list of items in a player's inventory.
 4. `queryActions` - return the conversation history for a given game.
 
 :::note[Where each piece of state lives]
 - `games` and `inventory` are in **DynamoDB** (via ElectroDB) — the Game API lambdas and the Inventory MCP server read/write them.
 - `actions` (chat transcript) is in **S3** — the Story Agent's `S3SessionManager` writes one JSON blob per turn, and `queryActions` in the Game API reads them back so the UI can replay history on page reload. There's no `saveAction` procedure; the agent is the only writer.
+:::
+
+:::tip[Everything is scoped to the signed-in player]
+Both stores are keyed on the caller, so one player can never see another's adventures:
+
+- **Games** are partitioned in DynamoDB on the user's Cognito `sub`, so `queryGames` queries that partition instead of scanning the table. Two players can also pick the same hero name without colliding.
+- **Conversations** are namespaced by the agent, so keys look like `session_u-<sub>-<threadId>/…`.
+- **Inventory** is keyed on the calling agent's session plus the player name. The Inventory MCP server reads that session from the request context rather than trusting the `playerName` the model passes in — a model argument is not a trust boundary.
+
+Neither the `userId` nor the namespace is taken from the request body — the website could lie about it. `requireUserId` in `identity.ts` reads the caller from the IAM authorizer context that the Cognito Identity Pool populates (`requestContext.authorizer.iam.cognitoIdentity.amr`, which contains a `…:CognitoSignIn:<sub>` entry). That value is produced by the Identity Pool token exchange, so it is trustworthy rather than supplied by the browser, and requests without it are rejected. See <Link path="guides/trpc">Implementing Custom Middleware</Link> for the reusable version of this as a tRPC plugin.
 :::
 
 ### API schema
@@ -93,6 +103,12 @@ ElectroDB allows us to not only define our types, but can also provide defaults 
 <Aside title="ElectroDB Collections">
 Whilst ElectroDB does support [collections](https://electrodb.dev/en/modeling/collections/), we have chosen not to use them in this tutorial for simplicity.
 </Aside>
+
+### Resolving the calling user
+
+Every procedure scopes its data to the signed-in player, so they all need the caller's identity. Add `packages/game-api/src/identity.ts`:
+
+<E2ECode lang="typescript" path="dungeon-adventure/2/identity.ts.template" />
 
 ### Defining our procedures
 

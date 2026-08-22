@@ -29,13 +29,23 @@ import { getDungeonAdventureElectroDbDependencies } from '../../../../../../../.
 이 섹션에서는 다음 API를 구현합니다:
 
 1. `saveGame` - 게임을 생성하거나 업데이트합니다.
-2. `queryGames` - 이전에 저장된 게임의 페이지네이션된 목록을 반환합니다.
+2. `queryGames` - 로그인한 플레이어의 저장된 게임의 페이지네이션된 목록을 반환합니다.
 3. `queryInventory` - 플레이어 인벤토리의 아이템 페이지네이션된 목록을 반환합니다.
 4. `queryActions` - 주어진 게임의 대화 기록을 반환합니다.
 
 :::note[각 상태 조각이 저장되는 위치]
 - `games`와 `inventory`는 **DynamoDB**에 있습니다 (ElectroDB를 통해) — Game API 람다와 Inventory MCP 서버가 읽고 씁니다.
 - `actions` (채팅 기록)는 **S3**에 있습니다 — Story Agent의 `S3SessionManager`가 턴마다 하나의 JSON blob을 작성하고, Game API의 `queryActions`가 이를 읽어서 UI가 페이지 새로고침 시 기록을 재생할 수 있도록 합니다. `saveAction` 프로시저는 없으며, 에이전트만이 유일한 작성자입니다.
+:::
+
+:::tip[모든 것은 로그인한 플레이어로 범위가 지정됩니다]
+두 저장소 모두 호출자를 키로 사용하므로 한 플레이어가 다른 플레이어의 모험을 볼 수 없습니다:
+
+- **Games**는 DynamoDB에서 사용자의 Cognito `sub`로 파티션되므로 `queryGames`는 테이블을 스캔하는 대신 해당 파티션을 쿼리합니다. 두 플레이어가 동일한 영웅 이름을 선택해도 충돌하지 않습니다.
+- **Conversations**는 에이전트에 의해 네임스페이스가 지정되므로 키는 `session_u-<sub>-<threadId>/…`와 같이 보입니다.
+- **Inventory**는 호출하는 에이전트의 세션과 플레이어 이름을 키로 사용합니다. Inventory MCP 서버는 모델이 전달하는 `playerName`을 신뢰하는 대신 요청 컨텍스트에서 해당 세션을 읽습니다 — 모델 인수는 신뢰 경계가 아닙니다.
+
+`userId`나 네임스페이스 모두 요청 본문에서 가져오지 않습니다 — 웹사이트가 이에 대해 거짓말을 할 수 있기 때문입니다. `identity.ts`의 `requireUserId`는 Cognito Identity Pool이 채우는 IAM 권한 부여자 컨텍스트(`requestContext.authorizer.iam.cognitoIdentity.amr`, `…:CognitoSignIn:<sub>` 항목 포함)에서 호출자를 읽습니다. 이 값은 Identity Pool 토큰 교환에 의해 생성되므로 브라우저에서 제공되는 것이 아니라 신뢰할 수 있으며, 이것이 없는 요청은 거부됩니다. tRPC 플러그인으로서 이것의 재사용 가능한 버전은 <Link path="guides/trpc">사용자 정의 미들웨어 구현</Link>을 참조하세요.
 :::
 
 ### API 스키마
@@ -93,6 +103,12 @@ ElectroDB를 사용하면 타입을 정의할 수 있을 뿐만 아니라 타임
 <Aside title="ElectroDB 컬렉션">
 ElectroDB는 [컬렉션](https://electrodb.dev/en/modeling/collections/)을 지원하지만, 단순성을 위해 이 튜토리얼에서는 사용하지 않기로 했습니다.
 </Aside>
+
+### 호출 사용자 확인
+
+모든 프로시저는 로그인한 플레이어로 데이터 범위를 지정하므로 모두 호출자의 신원이 필요합니다. `packages/game-api/src/identity.ts`를 추가합니다:
+
+<E2ECode lang="typescript" path="dungeon-adventure/2/identity.ts.template" />
 
 ### 프로시저 정의
 

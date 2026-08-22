@@ -9,7 +9,16 @@ from ag_ui_langgraph import LangGraphAgent
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+<%_ if (auth === 'cognito') { _%>
+from <%- agentConnectionModuleName %> import (
+    get_current_session_id,
+    get_current_user_id,
+    get_session_storage_key,
+    session_id_context,
+)
+<%_ } else { _%>
 from <%- agentConnectionModuleName %> import get_current_session_id, session_id_context
+<%_ } _%>
 
 from .agent import get_agent
 from .middleware.session_id_middleware import SESSION_ID_HEADER, SessionIdMiddleware
@@ -58,6 +67,18 @@ async def invocations(request: Request):
         return StreamingResponse(_bad(), media_type=encoder.get_content_type())
 
     session_id = request.headers.get(SESSION_ID_HEADER) or get_current_session_id()
+<%_ if (auth === 'cognito') { _%>
+    # LangGraph keys checkpoints on the request body's thread id.
+    user_id = get_current_user_id()
+    if not user_id:
+        return JSONResponse(
+            {"error": "No authenticated user — cannot scope conversation storage."},
+            status_code=401,
+        )
+    input_data = input_data.model_copy(
+        update={"thread_id": get_session_storage_key(input_data.thread_id, user_id)}
+    )
+<%_ } _%>
 
     async def event_generator():
         # Re-bind the session: the streaming body runs outside the middleware.

@@ -352,6 +352,12 @@ describe('smoke test - dungeon-adventure', () => {
       '2/schema/index.ts.template',
     );
 
+    // Resolves the signed-in user from the caller's identity, shared by every
+    // procedure that scopes reads and writes to their owner.
+    writeFromTemplate(
+      `${opts.cwd}/packages/game-api/src/identity.ts`,
+      '2/identity.ts.template',
+    );
     writeFromTemplate(
       `${opts.cwd}/packages/game-api/src/procedures/actions.ts`,
       '2/procedures/actions.ts.template',

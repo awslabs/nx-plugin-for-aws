@@ -1,16 +1,63 @@
 import { randomUUID } from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
-import { runWithSessionId } from '<%- agentConnectionImport %>';
+import {
+  runWithSessionId,
+<%_ if (auth === 'cognito') { _%>
+  getJwtSubject,
+  enterUserIdContext,
+  getSessionStorageKey,
+<%_ } _%>
+} from '<%- agentConnectionImport %>';
 
 export const SESSION_ID_HEADER = 'x-amzn-bedrock-agentcore-runtime-session-id';
+<%_ if (auth === 'cognito') { _%>
+// Only the `-dev` target sets this.
+const LOCAL_DEV = process.env.LOCAL_DEV === 'true';
+const LOCAL_DEV_USER_ID = 'local-dev-user';
+<%_ } _%>
 
 // Bind the inbound session (or a fresh UUID) for downstream MCP / A2A calls.
 export const sessionIdMiddleware = (
   req: Request,
+<%_ if (auth === 'cognito') { _%>
+  res: Response,
+<%_ } else { _%>
   _res: Response,
+<%_ } _%>
   next: NextFunction,
 ) => {
   const header = req.headers[SESSION_ID_HEADER];
   const sessionId = (Array.isArray(header) ? header[0] : header) ?? randomUUID();
+<%_ if (auth === 'cognito') { _%>
+  // Local dev runs without an authorizer, so fall back to a fixed user.
+  const userId =
+    getJwtSubject(req.headers.authorization) ??
+    (LOCAL_DEV ? LOCAL_DEV_USER_ID : undefined);
+  if (!userId) {
+    res.status(401).json({
+      error: 'No authenticated user — cannot scope conversation storage.',
+    });
+    return;
+  }
+  // Namespace the thread id: the AG-UI adapter caches one agent per thread, and
+  // maps `thread_id` onto `threadId` first-key-wins, so fold the alias in first.
+  const body = req.body as Record<string, unknown> | undefined;
+  if (body && typeof body === 'object') {
+    if ('thread_id' in body) {
+      if (!('threadId' in body)) {
+        body.threadId = body.thread_id;
+      }
+      delete body.thread_id;
+    }
+    if (typeof body.threadId === 'string') {
+      body.threadId = getSessionStorageKey(body.threadId, userId);
+    }
+  }
+  runWithSessionId(sessionId, () => {
+    enterUserIdContext(userId);
+    next();
+  });
+<%_ } else { _%>
   runWithSessionId(sessionId, () => next());
+<%_ } _%>
 };

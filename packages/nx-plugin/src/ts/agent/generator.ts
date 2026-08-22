@@ -210,6 +210,7 @@ export const tsAgentGenerator = async (
     protocol,
     session,
     localSessionsDir,
+    auth,
     agentConnectionImport: `@${getNpmScope(tree)}/agent-connection`,
     ...esmVars(tree),
   };

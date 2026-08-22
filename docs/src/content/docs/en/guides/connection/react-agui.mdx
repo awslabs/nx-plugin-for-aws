@@ -92,6 +92,47 @@ The generated code handles authentication depending on your agent's configuratio
 - **IAM** (default): uses AWS SigV4-signed HTTP requests. Credentials are obtained from the Cognito Identity Pool configured with your website's auth.
 - **Cognito**: embeds the JWT access token in the `Authorization` header as a Bearer token.
 
+### Sessions and Threads
+
+AG-UI and AgentCore Runtime each have their own identifier for a conversation, and the generated hook ties them together:
+
+- **`threadId`** — the AG-UI conversation identifier, sent in the request body. CopilotKit generates a random UUID per chat unless you pass an explicit `threadId`. This is what the agent keys conversation state on, because the AG-UI adapters cache one agent per thread.
+- **Session ID** — the AgentCore Runtime session, sent in the `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` header. It determines which [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html) serves the request, and is propagated to any downstream MCP or A2A clients.
+
+The generated hook derives the session ID from the thread ID, so one chat thread maps to one AgentCore session:
+
+```ts
+// AgentCore session ids must be at least 33 characters.
+function agentCoreSessionId(input: RunAgentInput): string {
+  return (input.threadId ?? '').padEnd(33, '0');
+}
+```
+
+:::note[Padding is not collision-free]
+AgentCore rejects session IDs shorter than 33 characters, so the hook right-pads the thread ID with `0`. Two thread IDs differing only in trailing characters below 33 — `abc` and `abc0` — therefore map to the same session ID and share one microVM.
+
+Conversation state is keyed on the thread ID rather than the padded session ID, so the two threads still keep separate histories. If you want them on separate microVMs too, pass thread IDs that are already at least 33 characters:
+
+```tsx
+const threadId = `${conversationName}`.padEnd(33, '0');
+
+<CopilotChat agentId="agent" threadId={threadId} />
+```
+
+Leaving `threadId` unset is always safe — CopilotKit's generated UUID is 36 characters.
+:::
+
+:::caution[Thread IDs are supplied by the client]
+The thread ID comes from the browser, so it cannot by itself identify whose conversation it is. AgentCore Runtime authorizes invocations against the agent runtime resource ARN rather than against individual sessions, and validates the format of a session ID without tying it to the calling identity — [scoping a session to a user is the agent's responsibility](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-instances-security.html).
+
+How the generated agent handles this depends on its `auth`:
+
+- **Cognito**: conversation state is namespaced by the `sub` claim of the caller's JWT, which the AgentCore authorizer has already validated and which the infrastructure allowlists through to your agent code. Storage keys become `u-<sub>-<threadId>` (each part escaped into the character set Strands allows for session ids), so a caller supplying someone else's thread ID only ever reaches their own namespace. Requests without a usable claim are rejected with a 401, except under `nx dev`, where there is no authorizer in front of the agent and unauthenticated requests fall back to a single local user.
+- **IAM**: SigV4 identifies the calling principal to AgentCore Runtime rather than to your agent code, so conversation state is keyed on the thread ID alone and `bedrock-agentcore:InvokeAgentRuntime` is the boundary — grant it to trusted backends. Use Cognito auth when you want per-user session storage in an end-user-facing app.
+
+To decide which conversations a user may resume, rather than only partitioning them, see <Link path="guides/ts-agent">Restricting sessions to their owner</Link>.
+:::
+
 ## Infrastructure
 
 <Snippet name="connection/react-agent-infrastructure" parentHeading="Infrastructure" />

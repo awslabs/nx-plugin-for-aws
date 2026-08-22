@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 
 const sessionStorage = new AsyncLocalStorage<string>();
+const userIdStorage = new AsyncLocalStorage<string>();
 
 /** Run `callback` with `sessionId` as the current session. */
 export const runWithSessionId = <T>(sessionId: string, callback: () => T): T =>
@@ -19,3 +20,82 @@ export const enterSessionContext = (sessionId: string): void => {
 /** The session ID for the current async scope, or `undefined`. */
 export const getCurrentSessionId = (): string | undefined =>
   sessionStorage.getStore();
+
+/** Run `callback` with `userId` as the current authenticated user. */
+export const runWithUserId = <T>(userId: string, callback: () => T): T =>
+  userIdStorage.run(userId, callback);
+
+/** Bind `userId` onto the current async flow. */
+export const enterUserIdContext = (userId: string): void => {
+  userIdStorage.enterWith(userId);
+};
+
+/** The authenticated user ID for the current async scope, or `undefined`. */
+export const getCurrentUserId = (): string | undefined =>
+  userIdStorage.getStore();
+
+/**
+ * The `sub` claim of a JWT, or `undefined` if absent or malformed.
+ *
+ * AgentCore Runtime validates the token during inbound authorization, so the
+ * signature is not re-verified here.
+ * https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-oauth.html
+ */
+export const getJwtSubject = (
+  authorizationHeader: string | undefined,
+): string | undefined => {
+  if (!authorizationHeader) {
+    return undefined;
+  }
+  const token = authorizationHeader.replace(/^Bearer /i, '');
+  const payload = token.split('.')[1];
+  if (!payload) {
+    return undefined;
+  }
+  try {
+    const sub = JSON.parse(
+      Buffer.from(payload, 'base64url').toString('utf-8'),
+    )?.sub;
+    return typeof sub === 'string' && sub.length > 0 ? sub : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * The storage key identifying a conversation.
+ *
+ * Namespaced by the authenticated user where one is available, so scoping a
+ * conversation to its owner is handled here rather than by the runtime.
+ */
+export const getSessionStorageKey = (
+  sessionId: string,
+  userId = getCurrentUserId(),
+): string => {
+  if (userId === '') {
+    throw new Error(
+      'userId is empty — refusing to resolve an unnamespaced storage key.',
+    );
+  }
+  return userId
+    ? `u-${encodeKeySegment(userId)}-${encodeKeySegment(sessionId)}`
+    : `s-${encodeKeySegment(sessionId)}`;
+};
+
+/**
+ * Encode a value into the character set Strands accepts for session ids
+ * (`^[a-z0-9_-]+$`), which excludes path separators and uppercase letters.
+ *
+ * Every byte outside `[a-z0-9]` becomes a fixed-width `_XX` escape of its UTF-8
+ * value, so the encoding is injective and no `-` survives inside a segment.
+ * With the `u-` / `s-` prefixes, namespaced and unnamespaced keys stay disjoint.
+ */
+const encodeKeySegment = (value: string): string =>
+  [...new TextEncoder().encode(value)]
+    .map((byte) => {
+      const char = String.fromCharCode(byte);
+      return (char >= 'a' && char <= 'z') || (char >= '0' && char <= '9')
+        ? char
+        : `_${byte.toString(16).padStart(2, '0')}`;
+    })
+    .join('');

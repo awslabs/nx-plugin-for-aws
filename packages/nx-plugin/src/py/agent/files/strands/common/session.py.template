@@ -2,24 +2,30 @@ import os
 
 from strands.session import FileSessionManager, SessionManager<% if (session === 's3') { %>, S3SessionManager<% } %>
 
-from <%- agentConnectionModuleName %> import get_current_session_id
+from <%- agentConnectionModuleName %> import get_current_session_id, get_session_storage_key
 <%_ if (session === 's3') { _%>
 from <%- agentConnectionModuleName %>.core.runtime_config import get_agentcore_runtime_config
 <%_ } _%>
 
 
-def get_session_manager() -> SessionManager | None:
+def get_session_manager(storage_key: str | None = None) -> SessionManager | None:
     """Returns a SessionManager for persisting conversation state across
     invocations. Local development always uses local file storage for
     convenience, regardless of the configured session option. Without a
     configured session option, conversation state is kept in memory only and
     does not survive process restarts.
+
+    *storage_key* is used verbatim when given, so the caller scopes it.
     """
-    session_id = get_current_session_id()
-    if not session_id:
-        raise RuntimeError(
-            "No current session id — cannot resolve a SessionManager outside of a request scope."
-        )
+    if storage_key:
+        session_id = storage_key
+    else:
+        current_session_id = get_current_session_id()
+        if not current_session_id:
+            raise RuntimeError(
+                "No current session id — cannot resolve a SessionManager outside of a request scope."
+            )
+        session_id = get_session_storage_key(current_session_id)
     if os.environ.get("LOCAL_DEV") == "true":
         return FileSessionManager(session_id=session_id, storage_dir="<%- localSessionsDir %>")
 

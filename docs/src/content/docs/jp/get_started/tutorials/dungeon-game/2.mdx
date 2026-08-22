@@ -29,13 +29,23 @@ import { getDungeonAdventureElectroDbDependencies } from '../../../../../../../.
 このセクションでは、以下の API を実装します：
 
 1. `saveGame` - ゲームを作成または更新します。
-2. `queryGames` - 以前に保存されたゲームのページネーション付きリストを返します。
+2. `queryGames` - サインインしているプレイヤーの保存されたゲームのページネーション付きリストを返します。
 3. `queryInventory` - プレイヤーのインベントリ内のアイテムのページネーション付きリストを返します。
 4. `queryActions` - 指定されたゲームの会話履歴を返します。
 
 :::note[各状態の保存場所]
 - `games` と `inventory` は **DynamoDB**（ElectroDB 経由）にあります — Game API の Lambda と Inventory MCP サーバーがそれらを読み書きします。
 - `actions`（チャットトランスクリプト）は **S3** にあります — Story Agent の `S3SessionManager` がターンごとに 1 つの JSON ブロブを書き込み、Game API の `queryActions` がそれらを読み戻して、UI がページリロード時に履歴を再生できるようにします。`saveAction` プロシージャはありません。エージェントが唯一の書き込み者です。
+:::
+
+:::tip[すべてがサインインしているプレイヤーにスコープされています]
+両方のストアは呼び出し元をキーとしているため、あるプレイヤーが別のプレイヤーの冒険を見ることはできません：
+
+- **Games** は DynamoDB でユーザーの Cognito `sub` でパーティション化されているため、`queryGames` はテーブルをスキャンする代わりにそのパーティションをクエリします。2 人のプレイヤーが同じヒーロー名を選んでも衝突しません。
+- **Conversations** はエージェントによって名前空間化されているため、キーは `session_u-<sub>-<threadId>/…` のようになります。
+- **Inventory** は呼び出し元エージェントのセッションとプレイヤー名をキーとしています。Inventory MCP サーバーは、モデルが渡す `playerName` を信頼するのではなく、リクエストコンテキストからそのセッションを読み取ります — モデルの引数は信頼境界ではありません。
+
+`userId` も名前空間もリクエストボディから取得されません — ウェブサイトがそれについて嘘をつく可能性があります。`identity.ts` の `requireUserId` は、Cognito Identity Pool が設定する IAM オーソライザーコンテキスト（`requestContext.authorizer.iam.cognitoIdentity.amr`、これには `…:CognitoSignIn:<sub>` エントリが含まれます）から呼び出し元を読み取ります。その値は Identity Pool のトークン交換によって生成されるため、ブラウザによって提供されるのではなく信頼できるものであり、それがないリクエストは拒否されます。tRPC プラグインとしてのこの再利用可能なバージョンについては、<Link path="guides/trpc">カスタムミドルウェアの実装</Link>を参照してください。
 :::
 
 ### API スキーマ
@@ -93,6 +103,12 @@ ElectroDB を使用すると、型を定義するだけでなく、タイムス�
 <Aside title="ElectroDB コレクション">
 ElectroDB は [コレクション](https://electrodb.dev/en/modeling/collections/)をサポートしていますが、このチュートリアルでは簡潔さのためにそれらを使用しないことを選択しました。
 </Aside>
+
+### 呼び出し元ユーザーの解決
+
+すべてのプロシージャはそのデータをサインインしているプレイヤーにスコープするため、すべて呼び出し元の ID が必要です。`packages/game-api/src/identity.ts` を追加します：
+
+<E2ECode lang="typescript" path="dungeon-adventure/2/identity.ts.template" />
 
 ### プロシージャの定義
 

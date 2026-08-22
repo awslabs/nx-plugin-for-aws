@@ -12,8 +12,17 @@ import {
   applyWSSHandler,
 } from '@trpc/server/adapters/ws';
 import { Context } from './init<% if (esm) { %>.js<% } %>';
+<%_ if (auth === 'cognito') { _%>
+import { TRPCError } from '@trpc/server';
+import { getJwtSubject } from '<%- agentConnectionImport %>';
+<%_ } _%>
 
 const PORT = parseInt(process.env.PORT || '8080');
+<%_ if (auth === 'cognito') { _%>
+// Only the `-dev` target sets this.
+const LOCAL_DEV = process.env.LOCAL_DEV === 'true';
+const LOCAL_DEV_USER_ID = 'local-dev-user';
+<%_ } _%>
 
 const createContext = (
   opts: CreateHTTPContextOptions | CreateWSSContextFnOptions,
@@ -22,9 +31,24 @@ const createContext = (
     ('req' in opts
       ? opts.req.headers['x-amzn-bedrock-agentcore-runtime-session-id']
       : undefined) ?? randomUUID();
+<%_ if (auth === 'cognito') { _%>
+  const userId =
+    'req' in opts ? getJwtSubject(opts.req.headers.authorization) : undefined;
+  if (!userId && !LOCAL_DEV) {
+    throw new TRPCError({
+      code: 'UNAUTHORIZED',
+      message: 'No authenticated user — cannot scope conversation storage.',
+    });
+  }
+  return {
+    sessionId: Array.isArray(sessionId) ? sessionId[0] : sessionId,
+    userId: userId ?? LOCAL_DEV_USER_ID,
+  };
+<%_ } else { _%>
   return {
     sessionId: Array.isArray(sessionId) ? sessionId[0] : sessionId,
   };
+<%_ } _%>
 };
 
 const handler = createHTTPHandler({

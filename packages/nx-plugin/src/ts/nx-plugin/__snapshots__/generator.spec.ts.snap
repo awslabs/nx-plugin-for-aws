@@ -3,6 +3,7 @@
 exports[`ts#nx-plugin generator > should generate MCP server files > test-plugin/src/mcp-server/http.ts 1`] = `
 "#!/usr/bin/env node
 import { createServer } from './server.js';
+import { requestContext } from './request-context.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import express, { Request, Response } from 'express';
 
@@ -13,7 +14,7 @@ app.use(express.json());
 
 app.post('/mcp', async (req: Request, res: Response) => {
   try {
-    const server = await createServer();
+    const server = await createServer(requestContext(req));
     const transport: StreamableHTTPServerTransport =
       new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
@@ -94,6 +95,30 @@ exports[`ts#nx-plugin generator > should generate MCP server files > test-plugin
 "
 `;
 
+exports[`ts#nx-plugin generator > should generate MCP server files > test-plugin/src/mcp-server/request-context.ts 1`] = `
+"import type { Request } from 'express';
+
+const SESSION_ID_HEADER = 'x-amzn-bedrock-agentcore-runtime-session-id';
+
+/**
+ * Per-request context handed to tool registrations. Tools that store per-caller
+ * data should scope it on this rather than on a model-supplied argument.
+ */
+export interface McpRequestContext {
+  /** The caller's AgentCore session id, when invoked over HTTP. */
+  sessionId?: string;
+}
+
+/** Reads the request context an HTTP transport received. */
+export const requestContext = (req: Request): McpRequestContext => {
+  const header = req.headers[SESSION_ID_HEADER];
+  return {
+    sessionId: Array.isArray(header) ? header[0] : header,
+  };
+};
+"
+`;
+
 exports[`ts#nx-plugin generator > should generate MCP server files > test-plugin/src/mcp-server/resources/GENERAL_GUIDANCE.md 1`] = `
 "# General Guidance
 
@@ -161,11 +186,16 @@ import { registerGeneralGuidanceTool } from './tools/general-guidance.js';
 import { registerListGeneratorsTool } from './tools/list-generators.js';
 import { registerGeneratorGuideTool } from './tools/generator-guide.js';
 import { getPackageName } from './utils.js';
+import type { McpRequestContext } from './request-context.js';
 
 /**
- * Create the MCP Server
+ * Create the MCP Server.
+ *
+ * The context carries per-request details for tools that scope data per caller.
+ * Rename it to \`context\` and pass it to a registration when needed; it is
+ * absent over STDIO.
  */
-export const createServer = () => {
+export const createServer = (_context: McpRequestContext = {}) => {
   const packageName = getPackageName();
 
   const server = new McpServer(
