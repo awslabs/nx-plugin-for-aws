@@ -18,7 +18,7 @@ import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
 import OptionFilter from '@components/option-filter.astro';
 
-このジェネレーターは、デフォルトで[shadcn/ui](https://ui.shadcn.com/)が設定された新しい[React](https://react.dev/)ウェブサイトと、[S3](https://aws.amazon.com/s3/)でホストされ、[CloudFront](https://aws.amazon.com/cloudfront/)で配信され、[WAF](https://aws.amazon.com/waf/)で保護される静的ウェブサイトとしてクラウドにデプロイするためのAWS CDKまたはTerraformインフラストラクチャを作成します。
+このジェネレーターは、デフォルトで[shadcn/ui](https://ui.shadcn.com/)が設定された新しい[React](https://react.dev/)ウェブサイトと、[S3](https://aws.amazon.com/s3/)でホストされる静的ウェブサイトとしてクラウドにデプロイし、[CloudFront](https://aws.amazon.com/cloudfront/)で配信し、[WAF](https://aws.amazon.com/waf/)で保護するためのAWS CDKまたはTerraformインフラストラクチャを作成します。
 
 生成されたアプリケーションは、ビルドツールおよびバンドラーとして[Vite](https://vite.dev/)を使用します。型安全なルーティングには[TanStack Router](https://tanstack.com/router/v1)を使用します。
 
@@ -62,7 +62,7 @@ React Websiteは2つの方法で生成できます：
   - package.json Project manifest defining the project's package name and dependencies
 </FileTree>
 
-:::note[TanStack Routerなしの場合]
+:::note[TanStack Routerを使用しない場合]
 [TanStack Router](https://tanstack.com/router/v1)を使用しないことを選択した場合、`routes`ディレクトリの代わりに、アプリケーションのエントリーポイントとしてシンプルな`src/app.tsx`ファイルが提供されます。
 :::
 
@@ -129,58 +129,7 @@ waf -> cloudfront
 cloudfront -> s3
 ```
 
-#### セキュリティヘッダー
-
-CloudFrontディストリビューションは、すべてのレスポンスに`Strict-Transport-Security`、`X-Content-Type-Options`、`X-Frame-Options: DENY`、`Referrer-Policy`、および`Content-Security-Policy`を設定するレスポンスヘッダーポリシーを適用します。
-
-デフォルトの`Content-Security-Policy`が適用されます。これはXSSやクリックジャッキングを軽減するためにスクリプトとフレーミングを制限しますが、デプロイ時にのみURLが判明するAWSサービスエンドポイント（API Gateway、Cognito、Bedrock AgentCoreなど）をウェブサイトが呼び出せるようにHTTPSおよびWSS接続を許可します。ポリシーを調整する（例えば、`connect-src`を特定のオリジンに厳格化する）には、生成された`static-website.ts`（CDK）または`static-website.tf`（Terraform）の`content_security_policy`値を編集してください。
-
-`runtime-config.json`は`Cache-Control: no-cache`で配信されるため、ブラウザは再デプロイ後に古いキャッシュされたコピーを使用するのではなく、常に最新の設定を取得します。
-
-#### カスタムドメインとTLS
-
-デフォルトでは、ディストリビューションはデフォルトのCloudFrontドメイン名（`*.cloudfront.net`）とそのデフォルト証明書を使用しますが、これは最小TLSバージョン1.2の強制をサポートしていません。独自のドメインからウェブサイトを配信するには、[ACM証明書](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html)（CloudFrontで使用するには`us-east-1`に存在する必要があります）とドメイン名を指定してください。これにより、ビューアーに対して最小TLSバージョン1.2が強制されます：
-
-<Infrastructure>
-<Fragment slot="cdk">
-`packages/common/constructs/src/app/static-websites`にある生成されたウェブサイトコンストラクトで`certificate`と`domainNames`プロパティを渡します：
-
-```ts {6-8}
-export class MyWebsite extends StaticWebsite {
-  constructor(scope: Construct, id: string) {
-    super(scope, id, {
-      websiteName: 'MyWebsite',
-      websiteFilePath: ...,
-      domainNames: ['www.example.com'],
-      certificate: Certificate.fromCertificateArn(scope, 'Cert',
-        'arn:aws:acm:us-east-1:123456789012:certificate/...'),
-    });
-  }
-}
-```
-</Fragment>
-<Fragment slot="terraform">
-`packages/common/terraform/src/app/static-websites`にある生成されたウェブサイトモジュールで`custom_domain_names`と`acm_certificate_arn`変数を設定します：
-
-```hcl {5-6}
-module "static_website" {
-  source            = "../../../core/static-website"
-  website_name      = "my-website"
-  website_file_path = ...
-  custom_domain_names = ["www.example.com"]
-  acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/..."
-
-  providers = {
-    aws.us_east_1 = aws.us_east_1
-  }
-}
-```
-</Fragment>
-</Infrastructure>
-
-また、ドメインをCloudFrontディストリビューションに向けるDNSレコード（例：Route 53）を作成する必要があります。
-
-## React Websiteの実装
+## ウェブサイトの実装
 
 [Reactドキュメント](https://react.dev/learn)は、Reactでの構築の基本を学ぶための良い出発点です。
 
@@ -206,7 +155,7 @@ module "static_website" {
 
 #### ページ間のナビゲーション
 
-`Link`コンポーネントまたは`useNavigate`フックを使用してページ間を移動できます：
+ページ間を移動するには、`Link`コンポーネントまたは`useNavigate`フックを使用できます：
 
 ```tsx {1, 4, 8-9, 14}
 import { Link, useNavigate } from '@tanstack/react-router';
@@ -231,199 +180,15 @@ export const MyComponent = () => {
 
 詳細については、[TanStack Router](https://tanstack.com/router/latest/docs/framework/react/overview)ドキュメントを参照してください。
 
-## ランタイム設定
-
-インフラストラクチャからの設定は、<Link href="guides/runtime-config">ランタイム設定</Link>を介してウェブサイトに提供されます。これにより、ウェブサイトはアプリケーションがデプロイされるまで不明なAPI URLなどの詳細にアクセスできます。
-
-### インフラストラクチャ
-
-<Infrastructure>
-<Fragment slot="cdk">
-`RuntimeConfig` CDKコンストラクトを使用して、CDKインフラストラクチャで設定を追加および取得できます。`@aws/nx-plugin`ジェネレーター（<Link path="guides/trpc">`ts#api`</Link>や<Link path="guides/fastapi">`py#api`</Link>など）によって生成されたCDKコンストラクトは、自動的に適切な値を`RuntimeConfig`に追加します。
-
-ウェブサイトCDKコンストラクトは、ランタイム設定の`connection`名前空間を`runtime-config.json`ファイルとしてS3バケットのルートにデプロイします。
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { Stack } from 'aws-cdk-lib';
-import { Construct } from 'constructs';
-import { MyWebsite, MyApi } from '@my-scope/common-constructs';
-
-export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
-
-    // Website can be declared at any point — runtime config is resolved lazily
-    new MyWebsite(this, 'MyWebsite');
-
-    // Automatically adds values to the RuntimeConfig
-    new MyApi(this, 'MyApi', {
-      integrations: MyApi.defaultIntegrations(this).build(),
-    });
-  }
-}
-```
-
-:::note[CDK Websiteコンストラクト]
-CDKでは、ウェブサイトコンストラクトはスタック内の任意の時点で宣言できます。ランタイム設定はsynth時に遅延解決されるため、宣言順序に関係なくすべての値が含まれます。
-:::
-</Fragment>
-<Fragment slot="terraform">
-Terraformでは、ランタイム設定はruntime-configモジュールを通じて管理されます。`@aws/nx-plugin`ジェネレーター（<Link path="guides/trpc">`ts#api`</Link>や<Link path="guides/fastapi">`py#api`</Link>など）によって生成されたTerraformモジュールは、自動的に適切な値をランタイム設定に追加します。
-
-ウェブサイトTerraformモジュールは、ランタイム設定の`connection`名前空間を`runtime-config.json`ファイルとしてS3バケットのルートにデプロイします。
-
-```hcl title="packages/infra/src/main.tf" {20-21}
-module "asset_bucket" {
-  source = "../../common/terraform/src/core/asset-bucket"
-}
-
-# Automatically adds values to runtime config
-module "my_api" {
-  source = "../../common/terraform/src/app/apis/my-api"
-
-  asset_bucket_name = module.asset_bucket.bucket_name
-}
-
-# Automatically deploys the runtime config to runtime-config.json
-module "my_website" {
-  source = "../../common/terraform/src/app/static-websites/my-website"
-
-  providers = {
-    aws.us_east_1 = aws.us_east_1
-  }
-
-  # Ensure API is deployed first to add to runtime config
-  depends_on = [module.my_api]
-}
-```
-
-:::caution[モジュールの順序]
-ランタイム設定に追加するモジュールの_後_にウェブサイトモジュールを宣言し、順序を保証するために適切な`depends_on`を設定する必要があります。そうしないと、`runtime-config.json`ファイルに欠落が生じます。
-:::
-</Fragment>
-</Infrastructure>
-
-### ウェブサイトコード
-
-ウェブサイトでは、`useRuntimeConfig`フックを使用してランタイム設定から値を取得できます：
-
-```tsx {1,4}
-import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
-
-const MyComponent = () => {
-  const runtimeConfig = useRuntimeConfig();
-
-  // Access values in the runtime config here
-  const apiUrl = runtimeConfig.apis.MyApi;
-};
-```
-
-:::note[ランタイム設定]
-ランタイム設定がAWS AppConfigにどのように保存され、サーバーサイドのコンシューマー（Lambda関数、エージェント）がどのように取得できるかの詳細については、<Link path="guides/runtime-config">ランタイム設定</Link>ガイドを参照してください。
-:::
-
-### ローカルランタイム設定
-
-[ローカル開発サーバー](#local-development-server)を実行する際、ローカルウェブサイトがバックエンドURL、ID設定などを知るために、`public`ディレクトリに`runtime-config.json`ファイルが必要です。
-
-ウェブサイトプロジェクトには`load-runtime-config`ターゲットが設定されており、デプロイされたアプリケーションから`runtime-config.json`ファイルをダウンロードするために使用できます：
-
-<NxCommands commands={['load-runtime-config <my-website>']} />
-
-:::note[カスタムステージ名]
-<Infrastructure>
-<Fragment slot="cdk">
-インフラストラクチャプロジェクトの`src/main.ts`でステージ名のプレフィックスを変更した場合、ウェブサイトの`project.json`ファイルの`load-runtime-config`ターゲットを適宜更新する必要があります。
-
-また、`load-runtime-config`ターゲットは、AWS認証情報を持つ環境にアプリケーションの単一ステージがデプロイされていることを前提としていることに注意してください。同じアカウントとリージョンに複数のステージをデプロイする場合は、コマンドを調整する必要があります。
-</Fragment>
-<Fragment slot="terraform">
-Terraformプロジェクトの場合、`load-runtime-config`ターゲットは、最新のローカル`terraform apply`後に作成された`runtime-config.json`ファイルをコピーします。
-</Fragment>
-</Infrastructure>
-:::
-
-## ローカル開発サーバー
-
-ローカル開発の標準的なコマンドは`dev`で、1つのコマンドでウェブサイト（および接続したAPIのローカルサーバー）を起動します：
-
-<NxCommands commands={['dev <my-website>']} />
-
-`serve`ターゲットは、ローカルで実行するアプリケーションの範囲とデプロイされたAWSインフラストラクチャを指す範囲を制御する必要がある場合にも利用できます。複数のコンポーネントを持つプロジェクトで`dev`がどのように動作するかを含む、接続されたプロジェクト全体のローカル開発の広範な概要については、<Link path="guides/local-development">ローカル開発</Link>ガイドを参照してください。
-
-### Serveターゲット
-
-`serve`ターゲットは、ウェブサイトのローカル開発サーバーを起動します。このターゲットは、ウェブサイトが対話するサポートインフラストラクチャをデプロイし、[ローカルランタイム設定をロード](#local-runtime-config)している必要があります。
-
-このターゲットは以下のコマンドで実行できます：
-
-<NxCommands commands={['serve <my-website>']} />
-
-このターゲットは、「実際の」デプロイされたAPIやその他のインフラストラクチャを指しながらウェブサイトの変更を行う際に便利です。
-
-### Devターゲット
-
-`dev`ターゲットは、ウェブサイトのローカル開発サーバー（[Vite `MODE`](https://vite.dev/guide/env-and-mode)を`local-dev`に設定）を起動し、<Link path="/guides/connection">Connectionジェネレーター</Link>を介してウェブサイトに接続したAPIのローカルサーバーも起動します。
-
-このターゲットを介してローカルウェブサイトサーバーを実行すると、`runtime-config.json`は自動的にローカルで実行されているAPI URLを指すようにオーバーライドされます。
-
-このターゲットは以下のコマンドで実行できます：
-
-<NxCommands commands={['dev <my-website>']} />
-
-このターゲットは、ウェブサイトとAPIを横断して作業し、インフラストラクチャをデプロイせずに迅速に反復したい場合に便利です。
-
-:::note[ワークスペース`dev`スクリプト]
-ワークスペースのルート`package.json`には、`dev`ターゲットを持つすべてのプロジェクトに対して`dev`ターゲットを実行する`dev`スクリプトが含まれています：
-
-<PackageManagerShortCommand commands={["dev"]} />
-
-これにより、1つのコマンドでウェブサイト（および`dev`ターゲットを持つその他のプロジェクト）のローカル開発サーバーが起動します。このウェブサイトのみを実行するには、独自の`dev`ターゲット（例：`nx dev <my-website>`）を使用してください。
-:::
-
-:::warning[モック認証]
-このモードで実行され、`runtime-config.json`が存在しない場合、Cognito認証を設定している場合（<Link path="/guides/react-website-auth">`ts#website#auth`ジェネレーター</Link>経由）、ログインはスキップされ、ローカルサーバーへのリクエストには認証ヘッダーが含まれません。
-
-`dev`でログインと認証を有効にするには、インフラストラクチャをデプロイしてランタイム設定をロードしてください。
-:::
-
-:::tip[Dev動作]
-`dev`で実行する場合、APIが他のデプロイされたAWSリソースを指すために必要な環境変数を指定できます。例：
-
-<NxCommands env={{DYNAMODB_TABLE_NAME: 'xxxxx'}} commands={['dev <my-website>']} />
-
-ローカルAPIサーバーは、ローカルで設定したAWS認証情報で実行されることに注意してください。
-:::
-
-## ビルド
-
-`build`ターゲットを使用してウェブサイトをビルドできます。これは`bundle`、`compile`、`test`、`lint`ターゲットを実行し、ウェブサイトの型チェック、バンドル、テスト、リントを行います。
-
-<NxCommands commands={['build <my-website>']} />
-
-`bundle`ターゲットはViteを使用して、ルートの`dist/packages/<my-website>/bundle`ディレクトリにプロダクションバンドルを作成します。これは、ウェブサイトインフラストラクチャによって消費されるデプロイ可能なアーティファクトです。単独で実行できます：
-
-<NxCommands commands={['bundle <my-website>']} />
-
-## テスト
-
-ウェブサイトのテストは、標準的なTypeScriptプロジェクトでテストを書くのとよく似ているため、詳細については<Link path="guides/typescript-project#testing">TypeScriptプロジェクトガイド</Link>を参照してください。
-
-React固有のテストについては、React Testing Libraryがすでにインストールされており、テストを書くために使用できます。使用方法の詳細については、[React Testing Libraryドキュメント](https://testing-library.com/docs/react-testing-library/example-intro)を参照してください。
-
-`test`ターゲットを使用してテストを実行できます：
-
-<NxCommands commands={['test <my-website>']} />
-
 ## ウェブサイトのデプロイ
 
-React websiteジェネレーターは、選択した`iac`に基づいてCDKまたはTerraform Infrastructure as Codeを作成します。これを使用してウェブサイトをデプロイできます。
+React websiteジェネレーターは、選択した`iac`に基づいてCDKまたはTerraformのInfrastructure as Codeを作成します。これを使用してウェブサイトをデプロイできます。
 
 <Infrastructure>
 <Fragment slot="cdk">
 ウェブサイトをデプロイするには、<Link path="guides/typescript-infrastructure">`ts#infra`ジェネレーター</Link>を使用してCDKアプリケーションを作成することをお勧めします。
 
-`packages/common/constructs`で生成されたCDKコンストラクトを使用してウェブサイトをデプロイできます。
+`packages/common/constructs`に生成されたCDKコンストラクトを使用してウェブサイトをデプロイできます。
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {3, 9}
 import { Stack } from 'aws-cdk-lib';
@@ -450,7 +215,7 @@ export class ApplicationStack extends Stack {
 <Fragment slot="terraform">
 ウェブサイトをデプロイするには、<Link path="/guides/terraform-project">`terraform#project`ジェネレーター</Link>を使用してTerraformプロジェクトを作成することをお勧めします。
 
-`packages/common/terraform`で生成されたTerraformモジュールを使用してウェブサイトをデプロイできます。
+`packages/common/terraform`に生成されたTerraformモジュールを使用してウェブサイトをデプロイできます。
 
 ```hcl title="packages/infra/src/main.tf" {3}
 # Deploy website
@@ -484,9 +249,354 @@ provider "aws" {
 </Fragment>
 </Infrastructure>
 
+### セキュリティヘッダー
+
+CloudFrontディストリビューションは、すべてのレスポンスに`Strict-Transport-Security`、`X-Content-Type-Options`、`X-Frame-Options: DENY`、`Referrer-Policy`、および`Content-Security-Policy`を設定するレスポンスヘッダーポリシーを適用します。
+
+デフォルトの`Content-Security-Policy`が適用されます。これは、XSSやクリックジャッキングを軽減するためにスクリプトとフレーミングを制限しながら、HTTPS接続とWSS接続を許可するため、ウェブサイトはデプロイ時にのみURLが判明するAWSサービスエンドポイント（API Gateway、Cognito、Bedrock AgentCoreなど）を呼び出すことができます。ポリシーを調整する（例えば、`connect-src`を特定のオリジンに絞り込む）には、生成された`static-website.ts`（CDK）または`static-website.tf`（Terraform）の`content_security_policy`値を編集してください。
+
+`runtime-config.json`は`Cache-Control: no-cache`で配信されるため、ブラウザは再デプロイ後に古いキャッシュされたコピーを使用するのではなく、常に最新の設定を取得します。
+
+### WAF
+
+CloudFrontディストリビューションは、デフォルトで[AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACLによって保護されています。Web ACLは、AWSマネージドデフォルトルールセット（[`AWSManagedRulesCommonRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-crs)および[`AWSManagedRulesKnownBadInputsRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-known-bad-inputs)）を使用し、OWASP Top 10を含む一般的なWebエクスプロイトに対する保護を提供します。
+
+<Infrastructure>
+<Fragment slot="cdk">
+オプトアウトするには、ウェブサイトを作成する際に`enableWaf`を`false`に設定します：
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {10,15-18}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { MyWebsite, suppressRules } from '@my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    const website = new MyWebsite(this, 'MyWebsite', {
+      enableWaf: false,
+    });
+
+    // Disabling WAF fails the checkov CKV_AWS_68 check ("CloudFront
+    // Distribution should have WAF enabled"). Suppress it explicitly.
+    suppressRules(
+      website.cloudFrontDistribution,
+      ['CKV_AWS_68'],
+      'WAF is intentionally disabled for this distribution',
+    );
+  }
+}
+```
+
+:::caution[WAFを無効にする場合はCKV_AWS_68を抑制]
+WAFを無効にすると、合成されたCloudFrontディストリビューションにWeb ACLが関連付けられないため、上記のように抑制しない限り、`checkov`セキュリティスキャンが`CKV_AWS_68: "CloudFront Distribution should have WAF enabled"`で失敗します。
+:::
+</Fragment>
+<Fragment slot="terraform">
+オプトアウトするには、`enable_waf`を`false`に設定します：
+
+```hcl title="packages/infra/src/main.tf" {7}
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+  enable_waf = false
+}
+```
+</Fragment>
+</Infrastructure>
+
+### バケット暗号化
+
+ウェブサイトバケット、CloudFrontディストリビューションログバケット、およびそれらのサーバーアクセスログを受信するCloudWatch Logsグループは、デフォルトで顧客管理の[AWS KMS](https://aws.amazon.com/kms/)キーで暗号化されます。このキーは自動的に作成され、キーローテーションが有効になっています。
+
+<Infrastructure>
+<Fragment slot="cdk">
+異なる暗号化設定を使用する場合は、ウェブサイトを作成する際に`encryption`、`encryptionKey`、および`enableKeyRotation`プロパティを渡します：
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {11}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { BucketEncryption } from 'aws-cdk-lib/aws-s3';
+import { MyWebsite } from '@my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    new MyWebsite(this, 'MyWebsite', {
+      encryption: BucketEncryption.S3_MANAGED,
+    });
+  }
+}
+```
+
+自動的に作成されるキーの代わりに独自のKMSキーを使用するには、`encryptionKey`を渡します：
+
+```ts {2}
+new MyWebsite(this, 'MyWebsite', {
+  encryptionKey: myKey,
+});
+```
+
+`enableKeyRotation`（デフォルト`true`）は、自動的に作成されるキーにのみ適用されます。つまり、`encryption`が`BucketEncryption.KMS`（デフォルト）で、`encryptionKey`が提供されていない場合です。
+</Fragment>
+<Fragment slot="terraform">
+異なる暗号化設定を使用する場合は、`encryption`、`kms_key_arn`、および`enable_key_rotation`変数を設定します：
+
+```hcl title="packages/infra/src/main.tf" {7}
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+  encryption = "S3_MANAGED"
+}
+```
+
+自動的に作成されるキーの代わりに独自のKMSキーを使用するには、`kms_key_arn`を渡します。顧客提供のキーは、CloudWatch Logs、S3、およびCloudFrontサービスプリンシパルに必要な権限を独自のキーポリシーで既に付与している必要があります。
+
+`enable_key_rotation`（デフォルト`true`）は、自動的に作成されるキーにのみ適用されます。つまり、`encryption`が`"KMS"`（デフォルト）で、`kms_key_arn`が提供されていない場合です。
+</Fragment>
+</Infrastructure>
+
+### カスタムドメインとTLS
+
+デフォルトでは、ディストリビューションはデフォルトのCloudFrontドメイン名（`*.cloudfront.net`）とそのデフォルト証明書を使用します。これは、最小TLSバージョン1.2の強制をサポートしていません。独自のドメインからウェブサイトを提供するには、[ACM証明書](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html)（CloudFrontで使用するには`us-east-1`に存在する必要があります）とドメイン名を提供します。その後、ビューアーに対して最小TLSバージョン1.2が強制されます：
+
+<Infrastructure>
+<Fragment slot="cdk">
+ウェブサイトを作成する際に`certificate`および`domainNames`プロパティを渡します：
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {11-13}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { Certificate } from 'aws-cdk-lib/aws-certificatemanager';
+import { MyWebsite } from '@my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    new MyWebsite(this, 'MyWebsite', {
+      domainNames: ['www.example.com'],
+      certificate: Certificate.fromCertificateArn(this, 'Cert',
+        'arn:aws:acm:us-east-1:123456789012:certificate/...'),
+    });
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+`custom_domain_names`および`acm_certificate_arn`変数を設定します：
+
+```hcl title="packages/infra/src/main.tf" {7-8}
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+  custom_domain_names = ["www.example.com"]
+  acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/..."
+}
+```
+</Fragment>
+</Infrastructure>
+
+また、ドメインをCloudFrontディストリビューションに向けるDNSレコード（例：Route 53）を作成する必要があります。
+
+## ランタイム設定
+
+インフラストラクチャからの設定は、<Link href="guides/runtime-config">ランタイム設定</Link>を介してウェブサイトに提供されます。これにより、ウェブサイトはアプリケーションがデプロイされるまで不明なAPI URLなどの詳細にアクセスできます。
+
+### インフラストラクチャ
+
+<Infrastructure>
+<Fragment slot="cdk">
+`RuntimeConfig` CDKコンストラクトを使用して、CDKインフラストラクチャで設定を追加および取得できます。`@aws/nx-plugin`ジェネレーター（<Link path="guides/trpc">`ts#api`</Link>や<Link path="guides/fastapi">`py#api`</Link>など）によって生成されたCDKコンストラクトは、自動的に適切な値を`RuntimeConfig`に追加します。
+
+ウェブサイトのCDKコンストラクトは、ランタイム設定の`connection`名前空間を`runtime-config.json`ファイルとしてS3バケットのルートにデプロイします。
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { MyWebsite, MyApi } from '@my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    // Website can be declared at any point, since runtime config is resolved lazily
+    new MyWebsite(this, 'MyWebsite');
+
+    // Automatically adds values to the RuntimeConfig
+    new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this).build(),
+    });
+  }
+}
+```
+
+:::note[CDK Websiteコンストラクト]
+CDKでは、ウェブサイトコンストラクトはスタック内の任意の時点で宣言できます。ランタイム設定は合成時に遅延解決されるため、宣言順序に関係なくすべての値が含まれます。
+:::
+</Fragment>
+<Fragment slot="terraform">
+Terraformでは、ランタイム設定はruntime-configモジュールを通じて管理されます。`@aws/nx-plugin`ジェネレーター（<Link path="guides/trpc">`ts#api`</Link>や<Link path="guides/fastapi">`py#api`</Link>など）によって生成されたTerraformモジュールは、自動的に適切な値をランタイム設定に追加します。
+
+ウェブサイトのTerraformモジュールは、ランタイム設定の`connection`名前空間を`runtime-config.json`ファイルとしてS3バケットのルートにデプロイします。
+
+```hcl title="packages/infra/src/main.tf" {20-21}
+module "asset_bucket" {
+  source = "../../common/terraform/src/core/asset-bucket"
+}
+
+# Automatically adds values to runtime config
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  asset_bucket_name = module.asset_bucket.bucket_name
+}
+
+# Automatically deploys the runtime config to runtime-config.json
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+
+  # Ensure API is deployed first to add to runtime config
+  depends_on = [module.my_api]
+}
+```
+
+:::caution[モジュールの順序]
+ウェブサイトモジュールは、ランタイム設定に追加するモジュールの_後_に宣言し、順序を保証するために適切な`depends_on`を設定する必要があります。そうしないと、`runtime-config.json`ファイルに含まれません。
+:::
+</Fragment>
+</Infrastructure>
+
+### ウェブサイトコード
+
+ウェブサイトでは、`useRuntimeConfig`フックを使用してランタイム設定から値を取得できます：
+
+```tsx {1,4}
+import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
+
+const MyComponent = () => {
+  const runtimeConfig = useRuntimeConfig();
+
+  // Access values in the runtime config here
+  const apiUrl = runtimeConfig.apis.MyApi;
+};
+```
+
+:::note[ランタイム設定]
+ランタイム設定がAWS AppConfigにどのように保存されるか、およびサーバー側のコンシューマー（Lambda関数、エージェント）がそれを取得する方法の詳細については、<Link path="guides/runtime-config">ランタイム設定</Link>ガイドを参照してください。
+:::
+
+### ローカルランタイム設定
+
+[ローカル開発サーバー](#local-development-server)を実行する場合、ローカルウェブサイトがバックエンドURL、アイデンティティ設定などを知るために、`public`ディレクトリに`runtime-config.json`ファイルが必要です。
+
+ウェブサイトプロジェクトには、デプロイされたアプリケーションから`runtime-config.json`ファイルをダウンロードするために使用できる`load-runtime-config`ターゲットが設定されています：
+
+<NxCommands commands={['load-runtime-config <my-website>']} />
+
+:::note[カスタムステージ名]
+<Infrastructure>
+<Fragment slot="cdk">
+インフラストラクチャプロジェクトの`src/main.ts`でステージ名のプレフィックスを変更した場合、それに応じてウェブサイトの`project.json`ファイルの`load-runtime-config`ターゲットを更新する必要があります。
+
+また、`load-runtime-config`ターゲットは、AWS認証情報を持つ環境にアプリケーションの単一のステージがデプロイされていることを前提としていることに注意してください。同じアカウントとリージョンに複数のステージをデプロイする場合は、コマンドを調整する必要があります。
+</Fragment>
+<Fragment slot="terraform">
+Terraformプロジェクトの場合、`load-runtime-config`ターゲットは、最新のローカル`terraform apply`後に作成された`runtime-config.json`ファイルをコピーします。
+</Fragment>
+</Infrastructure>
+:::
+
+## ローカル開発サーバー
+
+ローカル開発の標準的なコマンドは`dev`で、これはウェブサイト（および接続したAPIのローカルサーバー）を1つのコマンドで起動します：
+
+<NxCommands commands={['dev <my-website>']} />
+
+`serve`ターゲットは、デプロイされたAWSインフラストラクチャを指すのではなく、アプリケーションのどの部分をローカルで実行するかを制御する必要がある場合にも利用できます。複数のコンポーネントを持つプロジェクトでの`dev`の動作を含む、接続されたプロジェクト全体でのローカル開発の広範な概要については、<Link path="guides/local-development">ローカル開発</Link>ガイドを参照してください。
+
+### Serveターゲット
+
+`serve`ターゲットは、ウェブサイトのローカル開発サーバーを起動します。このターゲットでは、ウェブサイトが対話するサポートインフラストラクチャをデプロイし、[ローカルランタイム設定をロード](#local-runtime-config)している必要があります。
+
+このターゲットは以下のコマンドで実行できます：
+
+<NxCommands commands={['serve <my-website>']} />
+
+このターゲットは、「実際の」デプロイされたAPIやその他のインフラストラクチャを指しながらウェブサイトの変更を行う場合に便利です。
+
+### Devターゲット
+
+`dev`ターゲットは、ウェブサイトのローカル開発サーバー（[Vite `MODE`](https://vite.dev/guide/env-and-mode)を`local-dev`に設定）を起動し、<Link path="/guides/connection">Connectionジェネレーター</Link>を介してウェブサイトに接続したAPIのローカルサーバーも起動します。
+
+このターゲットを介してローカルウェブサイトサーバーが実行されると、`runtime-config.json`は自動的にオーバーライドされ、ローカルで実行されているAPI URLを指すようになります。
+
+このターゲットは以下のコマンドで実行できます：
+
+<NxCommands commands={['dev <my-website>']} />
+
+このターゲットは、ウェブサイトとAPIを横断して作業し、インフラストラクチャをデプロイせずに迅速に反復したい場合に便利です。
+
+:::note[ワークスペース`dev`スクリプト]
+ワークスペースのルート`package.json`には、`dev`ターゲットを持つすべてのプロジェクトに対して`dev`ターゲットを実行する`dev`スクリプトが含まれています：
+
+<PackageManagerShortCommand commands={["dev"]} />
+
+これにより、1つのコマンドでウェブサイト（および`dev`ターゲットを持つその他のプロジェクト）のローカル開発サーバーが起動します。このウェブサイトだけを実行するには、独自の`dev`ターゲット（例：`nx dev <my-website>`）を使用してください。
+:::
+
+:::warning[モック認証]
+このモードで実行され、`runtime-config.json`が存在しない場合、Cognito認証を設定している場合（<Link path="/guides/react-website-auth">`ts#website#auth`ジェネレーター</Link>経由）、ログインはスキップされ、ローカルサーバーへのリクエストには認証ヘッダーが含まれません。
+
+`dev`でログインと認証を有効にするには、インフラストラクチャをデプロイしてランタイム設定をロードしてください。
+:::
+
+:::tip[Dev動作]
+`dev`で実行する場合、APIが他のデプロイされたAWSリソースを指すために必要な環境変数を指定できます。例：
+
+<NxCommands env={{DYNAMODB_TABLE_NAME: 'xxxxx'}} commands={['dev <my-website>']} />
+
+ローカルAPIサーバーは、ローカルで設定したAWS認証情報で実行されることに注意してください。
+:::
+
+## ビルド
+
+`build`ターゲットを使用してウェブサイトをビルドできます。これは`bundle`、`compile`、`test`、および`lint`ターゲットを実行し、ウェブサイトの型チェック、バンドル、テスト、およびリントを行います。
+
+<NxCommands commands={['build <my-website>']} />
+
+`bundle`ターゲットは、Viteを使用してルート`dist/packages/<my-website>/bundle`ディレクトリに本番バンドルを作成します。これは、ウェブサイトインフラストラクチャによって消費されるデプロイ可能なアーティファクトです。単独で実行できます：
+
+<NxCommands commands={['bundle <my-website>']} />
+
+## テスト
+
+ウェブサイトのテストは、標準的なTypeScriptプロジェクトでのテストの記述とよく似ているため、詳細については<Link path="guides/typescript-project#testing">TypeScriptプロジェクトガイド</Link>を参照してください。
+
+React固有のテストについては、React Testing Libraryが既にインストールされており、テストを記述するために使用できます。使用方法の詳細については、[React Testing Libraryドキュメント](https://testing-library.com/docs/react-testing-library/example-intro)を参照してください。
+
+`test`ターゲットを使用してテストを実行できます：
+
+<NxCommands commands={['test <my-website>']} />
+
 ## 接続
 
-<Link path="guides/connection">`connection`</Link>ジェネレーターを使用して、このプロジェクトをワークスペース内の他のプロジェクトと統合します。以下の接続がこのプロジェクトに関連します：
+<Link path="guides/connection">`connection`</Link>ジェネレーターを使用して、このプロジェクトをワークスペース内の他のプロジェクトと統合します。このプロジェクトに関連する接続は以下の通りです：
 
 <CardGrid>
   <ConnectionCard

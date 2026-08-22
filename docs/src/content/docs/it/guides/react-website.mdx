@@ -129,58 +129,7 @@ waf -> cloudfront
 cloudfront -> s3
 ```
 
-#### Header di sicurezza
-
-La distribuzione CloudFront applica una policy di header di risposta che imposta `Strict-Transport-Security`, `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy` e una `Content-Security-Policy` su tutte le risposte.
-
-Viene applicata una `Content-Security-Policy` predefinita. Essa limita gli script e il framing per mitigare XSS e clickjacking, consentendo al contempo connessioni HTTPS e WSS in modo che il sito web possa chiamare gli endpoint dei servizi AWS (come API Gateway, Cognito e Bedrock AgentCore) i cui URL sono noti solo al momento della distribuzione. Per regolare la policy (ad esempio per restringere `connect-src` alle tue origini specifiche), modifica il valore `content_security_policy` nel tuo `static-website.ts` (CDK) o `static-website.tf` (Terraform) generato.
-
-`runtime-config.json` viene servito con `Cache-Control: no-cache` in modo che i browser recuperino sempre la configurazione più recente dopo una ridistribuzione, anziché utilizzare una copia cache obsoleta.
-
-#### Dominio personalizzato e TLS
-
-Per impostazione predefinita, la distribuzione utilizza il nome di dominio CloudFront predefinito (`*.cloudfront.net`) e il suo certificato predefinito, che non supporta l'applicazione di una versione TLS minima di 1.2. Per servire il tuo sito web dal tuo dominio, fornisci un [certificato ACM](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html) (che deve risiedere in `us-east-1` per l'uso con CloudFront) e i tuoi nomi di dominio — viene quindi applicata una versione TLS minima di 1.2 per i visualizzatori:
-
-<Infrastructure>
-<Fragment slot="cdk">
-Passa le props `certificate` e `domainNames` nel tuo costrutto del sito web generato in `packages/common/constructs/src/app/static-websites`:
-
-```ts {6-8}
-export class MyWebsite extends StaticWebsite {
-  constructor(scope: Construct, id: string) {
-    super(scope, id, {
-      websiteName: 'MyWebsite',
-      websiteFilePath: ...,
-      domainNames: ['www.example.com'],
-      certificate: Certificate.fromCertificateArn(scope, 'Cert',
-        'arn:aws:acm:us-east-1:123456789012:certificate/...'),
-    });
-  }
-}
-```
-</Fragment>
-<Fragment slot="terraform">
-Imposta le variabili `custom_domain_names` e `acm_certificate_arn` nel tuo modulo del sito web generato in `packages/common/terraform/src/app/static-websites`:
-
-```hcl {5-6}
-module "static_website" {
-  source            = "../../../core/static-website"
-  website_name      = "my-website"
-  website_file_path = ...
-  custom_domain_names = ["www.example.com"]
-  acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/..."
-
-  providers = {
-    aws.us_east_1 = aws.us_east_1
-  }
-}
-```
-</Fragment>
-</Infrastructure>
-
-Dovrai anche creare record DNS (ad esempio in Route 53) che puntano il tuo dominio alla distribuzione CloudFront.
-
-## Implementare il tuo sito web React
+## Implementare il tuo sito web
 
 La [documentazione React](https://react.dev/learn) è un buon punto di partenza per imparare le basi della costruzione con React.
 
@@ -231,197 +180,13 @@ export const MyComponent = () => {
 
 Per maggiori dettagli, consulta la documentazione di [TanStack Router](https://tanstack.com/router/latest/docs/framework/react/overview).
 
-## Configurazione runtime
-
-La configurazione dalla tua infrastruttura viene fornita al tuo sito web tramite <Link href="guides/runtime-config">Configurazione runtime</Link>. Questo consente al tuo sito web di accedere a dettagli come gli URL delle API che non sono noti fino a quando la tua applicazione non viene distribuita.
-
-### Infrastruttura
-
-<Infrastructure>
-<Fragment slot="cdk">
-Il costrutto CDK `RuntimeConfig` può essere utilizzato per aggiungere e recuperare la configurazione nella tua infrastruttura CDK. I costrutti CDK generati dai generatori `@aws/nx-plugin` (come <Link path="guides/trpc">`ts#api`</Link> e <Link path="guides/fastapi">`py#api`</Link>) aggiungeranno automaticamente i valori appropriati al `RuntimeConfig`.
-
-Il tuo costrutto CDK del sito web distribuirà il namespace `connection` della configurazione runtime come file `runtime-config.json` nella radice del tuo bucket S3.
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { Stack } from 'aws-cdk-lib';
-import { Construct } from 'constructs';
-import { MyWebsite, MyApi } from '@my-scope/common-constructs';
-
-export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
-
-    // Website can be declared at any point — runtime config is resolved lazily
-    new MyWebsite(this, 'MyWebsite');
-
-    // Automatically adds values to the RuntimeConfig
-    new MyApi(this, 'MyApi', {
-      integrations: MyApi.defaultIntegrations(this).build(),
-    });
-  }
-}
-```
-
-:::note[Costrutto CDK del sito web]
-Con CDK, il costrutto del sito web può essere dichiarato in qualsiasi punto del tuo stack. La configurazione runtime viene risolta in modo lazy al momento della sintesi, quindi tutti i valori saranno inclusi indipendentemente dall'ordine di dichiarazione.
-:::
-</Fragment>
-<Fragment slot="terraform">
-Con Terraform, la configurazione runtime viene gestita tramite i moduli runtime-config. I moduli Terraform generati dai generatori `@aws/nx-plugin` (come <Link path="guides/trpc">`ts#api`</Link> e <Link path="guides/fastapi">`py#api`</Link>) aggiungeranno automaticamente i valori appropriati alla configurazione runtime.
-
-Il tuo modulo Terraform del sito web distribuirà il namespace `connection` della configurazione runtime come file `runtime-config.json` nella radice del tuo bucket S3.
-
-```hcl title="packages/infra/src/main.tf" {20-21}
-module "asset_bucket" {
-  source = "../../common/terraform/src/core/asset-bucket"
-}
-
-# Automatically adds values to runtime config
-module "my_api" {
-  source = "../../common/terraform/src/app/apis/my-api"
-
-  asset_bucket_name = module.asset_bucket.bucket_name
-}
-
-# Automatically deploys the runtime config to runtime-config.json
-module "my_website" {
-  source = "../../common/terraform/src/app/static-websites/my-website"
-
-  providers = {
-    aws.us_east_1 = aws.us_east_1
-  }
-
-  # Ensure API is deployed first to add to runtime config
-  depends_on = [module.my_api]
-}
-```
-
-:::caution[Ordinamento dei moduli]
-Devi assicurarti di dichiarare il tuo modulo del sito web _dopo_ qualsiasi modulo che aggiunge alla configurazione runtime e configurare l'appropriato `depends_on` per garantire l'ordinamento, altrimenti mancheranno nel tuo file `runtime-config.json`.
-:::
-</Fragment>
-</Infrastructure>
-
-### Codice del sito web
-
-Nel tuo sito web, puoi utilizzare l'hook `useRuntimeConfig` per recuperare i valori dalla configurazione runtime:
-
-```tsx {1,4}
-import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
-
-const MyComponent = () => {
-  const runtimeConfig = useRuntimeConfig();
-
-  // Access values in the runtime config here
-  const apiUrl = runtimeConfig.apis.MyApi;
-};
-```
-
-:::note[Configurazione runtime]
-Per dettagli su come la configurazione runtime viene memorizzata in AWS AppConfig e su come i consumatori lato server (funzioni Lambda, agenti) possono recuperarla, consulta la guida <Link path="guides/runtime-config">Configurazione runtime</Link>.
-:::
-
-### Configurazione runtime locale
-
-Quando esegui il [server di sviluppo locale](#server-di-sviluppo-locale), avrai bisogno di un file `runtime-config.json` nella tua directory `public` affinché il tuo sito web locale conosca gli URL del backend, la configurazione dell'identità, ecc.
-
-Il tuo progetto del sito web è configurato con un target `load-runtime-config` che puoi utilizzare per scaricare il file `runtime-config.json` da un'applicazione distribuita:
-
-<NxCommands commands={['load-runtime-config <my-website>']} />
-
-:::note[Nomi di stage personalizzati]
-<Infrastructure>
-<Fragment slot="cdk">
-Se modifichi il prefisso per i nomi degli stage nel file `src/main.ts` del tuo progetto di infrastruttura, dovrai aggiornare di conseguenza il target `load-runtime-config` nel file `project.json` del tuo sito web.
-
-Inoltre, vale la pena notare che il target `load-runtime-config` presuppone che un singolo stage della tua applicazione sia distribuito nell'ambiente per cui hai le credenziali AWS. Dovrai regolare il comando se distribuisci più stage nello stesso account e regione.
-</Fragment>
-<Fragment slot="terraform">
-Per i progetti Terraform, il target `load-runtime-config` copia il file `runtime-config.json` che è stato creato dopo il tuo più recente `terraform apply` locale.
-</Fragment>
-</Infrastructure>
-:::
-
-## Server di sviluppo locale
-
-Il comando canonico per lo sviluppo locale è `dev`, che avvia il tuo sito web (e qualsiasi server locale per le API a cui lo hai connesso) con un solo comando:
-
-<NxCommands commands={['dev <my-website>']} />
-
-Il target `serve` è anche disponibile per quando hai bisogno di controllare quanto della tua applicazione viene eseguito localmente rispetto al puntamento all'infrastruttura AWS distribuita. Per una panoramica più ampia dello sviluppo locale tra progetti connessi, incluso come si comporta `dev` per progetti con più componenti, consulta la guida <Link path="guides/local-development">Sviluppo locale</Link>.
-
-### Target Serve
-
-Il target `serve` avvia un server di sviluppo locale per il tuo sito web. Questo target richiede che tu abbia distribuito qualsiasi infrastruttura di supporto con cui il sito web interagisce e che tu abbia [caricato la configurazione runtime locale](#configurazione-runtime-locale).
-
-Puoi eseguire questo target con il seguente comando:
-
-<NxCommands commands={['serve <my-website>']} />
-
-Questo target è utile per lavorare sulle modifiche del sito web puntando a API "reali" distribuite e ad altra infrastruttura.
-
-### Target Dev
-
-Il target `dev` avvia un server di sviluppo locale per il tuo sito web (con [Vite `MODE`](https://vite.dev/guide/env-and-mode) impostato su `local-dev`), oltre ad avviare qualsiasi server locale per le API a cui hai connesso il tuo sito web tramite il <Link path="/guides/connection">generatore Connection</Link>.
-
-Quando il tuo server del sito web locale viene eseguito tramite questo target, `runtime-config.json` viene automaticamente sovrascritto per puntare agli URL delle tue API in esecuzione locale.
-
-Puoi eseguire questo target con il seguente comando:
-
-<NxCommands commands={['dev <my-website>']} />
-
-Questo target è utile quando stai lavorando sul tuo sito web e sulla tua API e desideri iterare rapidamente senza distribuire la tua infrastruttura.
-
-:::note[Script `dev` del workspace]
-Il `package.json` radice del tuo workspace include uno script `dev` che esegue il target `dev` per ogni progetto che ne ha uno:
-
-<PackageManagerShortCommand commands={["dev"]} />
-
-Questo avvia il server di sviluppo locale per il tuo sito web (e qualsiasi altro progetto con un target `dev`) con un solo comando. Per eseguire solo questo sito web, usa il suo proprio target `dev` (ad es. `nx dev <my-website>`).
-:::
-
-:::warning[Autenticazione simulata]
-Quando viene eseguito in questa modalità e non è presente alcun `runtime-config.json`, se hai configurato l'autenticazione Cognito (tramite il <Link path="/guides/react-website-auth">generatore `ts#website#auth`</Link>), il login verrà saltato e le richieste ai tuoi server locali non includeranno gli header di autenticazione.
-
-Per abilitare il login e l'autenticazione per `dev`, distribuisci la tua infrastruttura e carica la configurazione runtime.
-:::
-
-:::tip[Comportamento di Dev]
-Quando esegui con `dev`, puoi specificare qualsiasi variabile d'ambiente richiesta dalle tue API per puntare ad altre risorse AWS distribuite, ad esempio:
-
-<NxCommands env={{DYNAMODB_TABLE_NAME: 'xxxxx'}} commands={['dev <my-website>']} />
-
-Nota che i tuoi server API locali verranno eseguiti con le credenziali AWS che hai configurato localmente.
-:::
-
-## Build
-
-Puoi costruire il tuo sito web utilizzando il target `build`. Questo esegue i target `bundle`, `compile`, `test` e `lint`, effettuando il type-checking, il bundling, il testing e il linting del tuo sito web.
-
-<NxCommands commands={['build <my-website>']} />
-
-Il target `bundle` utilizza Vite per creare un bundle di produzione nella directory radice `dist/packages/<my-website>/bundle`. Questo è l'artefatto distribuibile consumato dalla tua infrastruttura del sito web. Puoi eseguirlo da solo:
-
-<NxCommands commands={['bundle <my-website>']} />
-
-## Testing
-
-Testare il tuo sito web è molto simile a scrivere test in un progetto TypeScript standard, quindi fai riferimento alla <Link path="guides/typescript-project#testing">guida al progetto TypeScript</Link> per maggiori dettagli.
-
-Per il testing specifico di React, React Testing Library è già installato e disponibile per scrivere test. Per maggiori dettagli sul suo utilizzo, fai riferimento alla [documentazione di React Testing Library](https://testing-library.com/docs/react-testing-library/example-intro).
-
-Puoi eseguire i tuoi test utilizzando il target `test`:
-
-<NxCommands commands={['test <my-website>']} />
-
 ## Distribuire il tuo sito web
 
-Il generatore del sito web React crea l'infrastruttura come codice CDK o Terraform in base al tuo `iac` selezionato. Puoi utilizzarlo per distribuire il tuo sito web.
+Il generatore di siti web React crea l'infrastruttura come codice CDK o Terraform in base al tuo `iac` selezionato. Puoi utilizzarla per distribuire il tuo sito web.
 
 <Infrastructure>
 <Fragment slot="cdk">
-Per distribuire il tuo sito web, ti consigliamo di utilizzare il <Link path="guides/typescript-infrastructure">generatore `ts#infra`</Link> per creare un'applicazione CDK.
+Per distribuire il tuo sito web, consigliamo di utilizzare il <Link path="guides/typescript-infrastructure">generatore `ts#infra`</Link> per creare un'applicazione CDK.
 
 Puoi utilizzare il costrutto CDK generato per te in `packages/common/constructs` per distribuire il tuo sito web.
 
@@ -448,7 +213,7 @@ Questo configura:
 5. Distribuzione automatica dei file del sito web e della configurazione runtime
 </Fragment>
 <Fragment slot="terraform">
-Per distribuire il tuo sito web, ti consigliamo di utilizzare il <Link path="/guides/terraform-project">generatore `terraform#project`</Link> per creare un progetto Terraform.
+Per distribuire il tuo sito web, consigliamo di utilizzare il <Link path="/guides/terraform-project">generatore `terraform#project`</Link> per creare un progetto Terraform.
 
 Puoi utilizzare il modulo Terraform generato per te in `packages/common/terraform` per distribuire il tuo sito web.
 
@@ -484,6 +249,351 @@ provider "aws" {
 </Fragment>
 </Infrastructure>
 
+### Header di sicurezza
+
+La distribuzione CloudFront applica una policy di header di risposta che imposta `Strict-Transport-Security`, `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy` e una `Content-Security-Policy` su tutte le risposte.
+
+Viene applicata una `Content-Security-Policy` predefinita. Limita gli script e il framing per mitigare XSS e clickjacking, consentendo al contempo connessioni HTTPS e WSS in modo che il sito web possa chiamare gli endpoint dei servizi AWS (come API Gateway, Cognito e Bedrock AgentCore) i cui URL sono noti solo al momento della distribuzione. Per regolare la policy (ad esempio per restringere `connect-src` alle tue origini specifiche), modifica il valore `content_security_policy` nel tuo `static-website.ts` (CDK) o `static-website.tf` (Terraform) generato.
+
+`runtime-config.json` viene servito con `Cache-Control: no-cache` in modo che i browser recuperino sempre la configurazione più recente dopo una ridistribuzione, anziché utilizzare una copia cache obsoleta.
+
+### WAF
+
+La distribuzione CloudFront è protetta da un Web ACL [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) di default. Il Web ACL utilizza il ruleset predefinito gestito da AWS ([`AWSManagedRulesCommonRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-crs) e [`AWSManagedRulesKnownBadInputsRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-known-bad-inputs)), fornendo protezione contro exploit web comuni inclusi OWASP Top 10.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Per disattivare, imposta `enableWaf` su `false` quando crei il tuo sito web:
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {10,15-18}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { MyWebsite, suppressRules } from '@my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    const website = new MyWebsite(this, 'MyWebsite', {
+      enableWaf: false,
+    });
+
+    // Disabling WAF fails the checkov CKV_AWS_68 check ("CloudFront
+    // Distribution should have WAF enabled"). Suppress it explicitly.
+    suppressRules(
+      website.cloudFrontDistribution,
+      ['CKV_AWS_68'],
+      'WAF is intentionally disabled for this distribution',
+    );
+  }
+}
+```
+
+:::caution[Sopprimere CKV_AWS_68 quando si disabilita WAF]
+La disabilitazione di WAF significa che la distribuzione CloudFront sintetizzata non ha un Web ACL associato, il che fa fallire la scansione di sicurezza `checkov` con `CKV_AWS_68: "CloudFront Distribution should have WAF enabled"` a meno che non venga soppresso come mostrato sopra.
+:::
+</Fragment>
+<Fragment slot="terraform">
+Per disattivare, imposta `enable_waf` su `false`:
+
+```hcl title="packages/infra/src/main.tf" {7}
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+  enable_waf = false
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Crittografia del bucket
+
+Il bucket del sito web, il bucket dei log della distribuzione CloudFront e il gruppo CloudWatch Logs che riceve i loro log di accesso al server sono crittografati con una chiave [AWS KMS](https://aws.amazon.com/kms/) gestita dal cliente di default. Questa chiave viene creata automaticamente per te, con la rotazione delle chiavi abilitata.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Se desideri utilizzare una configurazione di crittografia diversa, passa le props `encryption`, `encryptionKey` e `enableKeyRotation` quando crei il tuo sito web:
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {11}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { BucketEncryption } from 'aws-cdk-lib/aws-s3';
+import { MyWebsite } from '@my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    new MyWebsite(this, 'MyWebsite', {
+      encryption: BucketEncryption.S3_MANAGED,
+    });
+  }
+}
+```
+
+Per utilizzare la tua chiave KMS invece di una creata automaticamente, passa `encryptionKey`:
+
+```ts {2}
+new MyWebsite(this, 'MyWebsite', {
+  encryptionKey: myKey,
+});
+```
+
+`enableKeyRotation` (default `true`) si applica solo alla chiave creata automaticamente, cioè quando `encryption` è `BucketEncryption.KMS` (il default) e non viene fornita alcuna `encryptionKey`.
+</Fragment>
+<Fragment slot="terraform">
+Se desideri utilizzare una configurazione di crittografia diversa, imposta le variabili `encryption`, `kms_key_arn` e `enable_key_rotation`:
+
+```hcl title="packages/infra/src/main.tf" {7}
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+  encryption = "S3_MANAGED"
+}
+```
+
+Per utilizzare la tua chiave KMS invece di una creata automaticamente, passa `kms_key_arn`. Una chiave fornita dal cliente deve già concedere ai principal dei servizi CloudWatch Logs, S3 e CloudFront le autorizzazioni di cui hanno bisogno nella propria policy della chiave.
+
+`enable_key_rotation` (default `true`) si applica solo alla chiave creata automaticamente, cioè quando `encryption` è `"KMS"` (il default) e non viene fornito alcun `kms_key_arn`.
+</Fragment>
+</Infrastructure>
+
+### Dominio personalizzato e TLS
+
+Di default, la distribuzione utilizza il nome di dominio CloudFront predefinito (`*.cloudfront.net`) e il suo certificato predefinito, che non supporta l'applicazione di una versione TLS minima di 1.2. Per servire il tuo sito web dal tuo dominio, fornisci un [certificato ACM](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html) (che deve risiedere in `us-east-1` per l'uso con CloudFront) e i tuoi nomi di dominio. Viene quindi applicata una versione TLS minima di 1.2 per i visualizzatori:
+
+<Infrastructure>
+<Fragment slot="cdk">
+Passa le props `certificate` e `domainNames` quando crei il tuo sito web:
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {11-13}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { Certificate } from 'aws-cdk-lib/aws-certificatemanager';
+import { MyWebsite } from '@my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    new MyWebsite(this, 'MyWebsite', {
+      domainNames: ['www.example.com'],
+      certificate: Certificate.fromCertificateArn(this, 'Cert',
+        'arn:aws:acm:us-east-1:123456789012:certificate/...'),
+    });
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+Imposta le variabili `custom_domain_names` e `acm_certificate_arn`:
+
+```hcl title="packages/infra/src/main.tf" {7-8}
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+  custom_domain_names = ["www.example.com"]
+  acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/..."
+}
+```
+</Fragment>
+</Infrastructure>
+
+Dovrai anche creare record DNS (ad esempio in Route 53) che puntano il tuo dominio alla distribuzione CloudFront.
+
+## Configurazione runtime
+
+La configurazione dalla tua infrastruttura viene fornita al tuo sito web tramite <Link href="guides/runtime-config">Configurazione runtime</Link>. Questo consente al tuo sito web di accedere a dettagli come gli URL delle API che non sono noti fino a quando la tua applicazione non viene distribuita.
+
+### Infrastruttura
+
+<Infrastructure>
+<Fragment slot="cdk">
+Il costrutto CDK `RuntimeConfig` può essere utilizzato per aggiungere e recuperare la configurazione nella tua infrastruttura CDK. I costrutti CDK generati dai generatori `@aws/nx-plugin` (come <Link path="guides/trpc">`ts#api`</Link> e <Link path="guides/fastapi">`py#api`</Link>) aggiungeranno automaticamente valori appropriati al `RuntimeConfig`.
+
+Il tuo costrutto CDK del sito web distribuirà il namespace `connection` della configurazione runtime come file `runtime-config.json` nella radice del tuo bucket S3.
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { MyWebsite, MyApi } from '@my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    // Website can be declared at any point, since runtime config is resolved lazily
+    new MyWebsite(this, 'MyWebsite');
+
+    // Automatically adds values to the RuntimeConfig
+    new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this).build(),
+    });
+  }
+}
+```
+
+:::note[Costrutto CDK del sito web]
+Con CDK, il costrutto del sito web può essere dichiarato in qualsiasi punto dello stack. La configurazione runtime viene risolta in modo lazy al momento della sintesi, quindi tutti i valori saranno inclusi indipendentemente dall'ordine di dichiarazione.
+:::
+</Fragment>
+<Fragment slot="terraform">
+Con Terraform, la configurazione runtime viene gestita tramite i moduli runtime-config. I moduli Terraform generati dai generatori `@aws/nx-plugin` (come <Link path="guides/trpc">`ts#api`</Link> e <Link path="guides/fastapi">`py#api`</Link>) aggiungeranno automaticamente valori appropriati alla configurazione runtime.
+
+Il tuo modulo Terraform del sito web distribuirà il namespace `connection` della configurazione runtime come file `runtime-config.json` nella radice del tuo bucket S3.
+
+```hcl title="packages/infra/src/main.tf" {20-21}
+module "asset_bucket" {
+  source = "../../common/terraform/src/core/asset-bucket"
+}
+
+# Automatically adds values to runtime config
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  asset_bucket_name = module.asset_bucket.bucket_name
+}
+
+# Automatically deploys the runtime config to runtime-config.json
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+
+  # Ensure API is deployed first to add to runtime config
+  depends_on = [module.my_api]
+}
+```
+
+:::caution[Ordinamento dei moduli]
+Devi assicurarti di dichiarare il modulo del tuo sito web _dopo_ qualsiasi modulo che aggiunge alla configurazione runtime e configurare il `depends_on` appropriato per garantire l'ordinamento, altrimenti mancheranno nel tuo file `runtime-config.json`.
+:::
+</Fragment>
+</Infrastructure>
+
+### Codice del sito web
+
+Nel tuo sito web, puoi utilizzare l'hook `useRuntimeConfig` per recuperare i valori dalla configurazione runtime:
+
+```tsx {1,4}
+import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
+
+const MyComponent = () => {
+  const runtimeConfig = useRuntimeConfig();
+
+  // Access values in the runtime config here
+  const apiUrl = runtimeConfig.apis.MyApi;
+};
+```
+
+:::note[Configurazione runtime]
+Per dettagli su come la configurazione runtime viene memorizzata in AWS AppConfig e su come i consumatori lato server (funzioni Lambda, agenti) possono recuperarla, consulta la guida <Link path="guides/runtime-config">Configurazione runtime</Link>.
+:::
+
+### Configurazione runtime locale
+
+Quando esegui il [server di sviluppo locale](#server-di-sviluppo-locale), avrai bisogno di un file `runtime-config.json` nella tua directory `public` affinché il tuo sito web locale conosca gli URL del backend, la configurazione dell'identità, ecc.
+
+Il tuo progetto del sito web è configurato con un target `load-runtime-config` che puoi utilizzare per scaricare il file `runtime-config.json` da un'applicazione distribuita:
+
+<NxCommands commands={['load-runtime-config <my-website>']} />
+
+:::note[Nomi di stage personalizzati]
+<Infrastructure>
+<Fragment slot="cdk">
+Se modifichi il prefisso per i nomi degli stage nel `src/main.ts` del tuo progetto di infrastruttura, dovrai aggiornare di conseguenza il target `load-runtime-config` nel file `project.json` del tuo sito web.
+
+Inoltre, vale la pena notare che il target `load-runtime-config` presuppone che un singolo stage della tua applicazione sia distribuito nell'ambiente per cui hai le credenziali AWS. Dovrai regolare il comando se distribuisci più stage nello stesso account e regione.
+</Fragment>
+<Fragment slot="terraform">
+Per i progetti Terraform, il target `load-runtime-config` copia il file `runtime-config.json` che è stato creato dopo il tuo più recente `terraform apply` locale.
+</Fragment>
+</Infrastructure>
+:::
+
+## Server di sviluppo locale
+
+Il comando canonico per lo sviluppo locale è `dev`, che avvia il tuo sito web (e qualsiasi server locale per le API a cui lo hai connesso) con un solo comando:
+
+<NxCommands commands={['dev <my-website>']} />
+
+Il target `serve` è disponibile anche per quando hai bisogno di controllare quanto della tua applicazione viene eseguito localmente rispetto al puntamento all'infrastruttura AWS distribuita. Per una panoramica più ampia dello sviluppo locale tra progetti connessi, incluso come si comporta `dev` per progetti con più componenti, consulta la guida <Link path="guides/local-development">Sviluppo locale</Link>.
+
+### Target Serve
+
+Il target `serve` avvia un server di sviluppo locale per il tuo sito web. Questo target richiede che tu abbia distribuito qualsiasi infrastruttura di supporto con cui il sito web interagisce e che tu abbia [caricato la configurazione runtime locale](#configurazione-runtime-locale).
+
+Puoi eseguire questo target con il seguente comando:
+
+<NxCommands commands={['serve <my-website>']} />
+
+Questo target è utile per lavorare sulle modifiche del sito web puntando a API "reali" distribuite e ad altra infrastruttura.
+
+### Target Dev
+
+Il target `dev` avvia un server di sviluppo locale per il tuo sito web (con [Vite `MODE`](https://vite.dev/guide/env-and-mode) impostato su `local-dev`), oltre ad avviare qualsiasi server locale per le API a cui hai connesso il tuo sito web tramite il <Link path="/guides/connection">generatore Connection</Link>.
+
+Quando il server del tuo sito web locale viene eseguito tramite questo target, `runtime-config.json` viene automaticamente sovrascritto per puntare agli URL delle tue API in esecuzione localmente.
+
+Puoi eseguire questo target con il seguente comando:
+
+<NxCommands commands={['dev <my-website>']} />
+
+Questo target è utile quando lavori sul tuo sito web e sulla tua API e desideri iterare rapidamente senza distribuire la tua infrastruttura.
+
+:::note[Script `dev` del workspace]
+Il `package.json` radice del tuo workspace include uno script `dev` che esegue il target `dev` per ogni progetto che ne ha uno:
+
+<PackageManagerShortCommand commands={["dev"]} />
+
+Questo avvia il server di sviluppo locale per il tuo sito web (e qualsiasi altro progetto con un target `dev`) in un solo comando. Per eseguire solo questo sito web, usa il suo target `dev` (ad es. `nx dev <my-website>`).
+:::
+
+:::warning[Autenticazione simulata]
+Quando viene eseguito in questa modalità e non è presente alcun `runtime-config.json`, se hai configurato l'autenticazione Cognito (tramite il <Link path="/guides/react-website-auth">generatore `ts#website#auth`</Link>), il login verrà saltato e le richieste ai tuoi server locali non includeranno header di autenticazione.
+
+Per abilitare il login e l'autenticazione per `dev`, distribuisci la tua infrastruttura e carica la configurazione runtime.
+:::
+
+:::tip[Comportamento di Dev]
+Quando esegui con `dev`, puoi specificare qualsiasi variabile d'ambiente richiesta dalle tue API per puntare ad altre risorse AWS distribuite, ad esempio:
+
+<NxCommands env={{DYNAMODB_TABLE_NAME: 'xxxxx'}} commands={['dev <my-website>']} />
+
+Nota che i tuoi server API locali verranno eseguiti con le credenziali AWS che hai configurato localmente.
+:::
+
+## Build
+
+Puoi costruire il tuo sito web utilizzando il target `build`. Questo esegue i target `bundle`, `compile`, `test` e `lint`, effettuando il type-checking, il bundling, il testing e il linting del tuo sito web.
+
+<NxCommands commands={['build <my-website>']} />
+
+Il target `bundle` utilizza Vite per creare un bundle di produzione nella directory radice `dist/packages/<my-website>/bundle`. Questo è l'artefatto distribuibile consumato dalla tua infrastruttura del sito web. Puoi eseguirlo da solo:
+
+<NxCommands commands={['bundle <my-website>']} />
+
+## Testing
+
+Testare il tuo sito web è molto simile a scrivere test in un progetto TypeScript standard, quindi fai riferimento alla <Link path="guides/typescript-project#testing">guida al progetto TypeScript</Link> per maggiori dettagli.
+
+Per i test specifici di React, React Testing Library è già installato e disponibile per scrivere test. Per maggiori dettagli sul suo utilizzo, fai riferimento alla [documentazione di React Testing Library](https://testing-library.com/docs/react-testing-library/example-intro).
+
+Puoi eseguire i tuoi test utilizzando il target `test`:
+
+<NxCommands commands={['test <my-website>']} />
+
 ## Connessioni
 
 Utilizza il generatore <Link path="guides/connection">`connection`</Link> per integrare questo progetto con altri nel tuo workspace. Le seguenti connessioni coinvolgono questo progetto:
@@ -492,28 +602,28 @@ Utilizza il generatore <Link path="guides/connection">`connection`</Link> per in
   <ConnectionCard
     title="React to tRPC"
     description="Call a tRPC API from a React website"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'it'}/guides/connection/react-trpc`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-trpc`}
     source="react"
     target="trpc"
   />
   <ConnectionCard
     title="React to FastAPI"
     description="Call a Python FastAPI from a React website"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'it'}/guides/connection/react-fastapi`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-fastapi`}
     source="react"
     target="fastapi"
   />
   <ConnectionCard
     title="React to Smithy API"
     description="Call a Smithy API from a React website"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'it'}/guides/connection/react-smithy`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-smithy`}
     source="react"
     target="smithy"
   />
   <ConnectionCard
     title="React to Python Agent"
     description="Call a Python Agent from a React website"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'it'}/guides/connection/react-py-agent`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-py-agent`}
     source="react"
     target="strands"
     targetBadge="python"
@@ -521,7 +631,7 @@ Utilizza il generatore <Link path="guides/connection">`connection`</Link> per in
   <ConnectionCard
     title="React to TypeScript Agent"
     description="Call a TypeScript Agent from a React website"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'it'}/guides/connection/react-ts-agent`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-ts-agent`}
     source="react"
     target="strands"
     targetBadge="typescript"
@@ -529,14 +639,14 @@ Utilizza il generatore <Link path="guides/connection">`connection`</Link> per in
   <ConnectionCard
     title="React to AG-UI Agent"
     description="Call an Agent exposing the AG-UI protocol from a React website via CopilotKit"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'it'}/guides/connection/react-agui`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-agui`}
     source="react"
     target="copilotkit"
   />
   <ConnectionCard
     title="React Website to AgentCore Gateway"
     description="Connect a React website to agents through an AgentCore Gateway"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'it'}/guides/connection/react-agentcore-gateway`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-agentcore-gateway`}
     source="react"
     target="agentcore"
   />
