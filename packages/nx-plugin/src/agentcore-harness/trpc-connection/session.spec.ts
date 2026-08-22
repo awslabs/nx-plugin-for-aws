@@ -78,6 +78,10 @@ describe('actorIdFromEvent', () => {
     } as any;
     expect(actorIdFromEvent(event)).toBe('anonymous');
   });
+
+  it('falls back to "anonymous" when requestContext itself is absent, as in the local tRPC dev server\'s mock event', () => {
+    expect(actorIdFromEvent({} as any)).toBe('anonymous');
+  });
 });
 
 describe('runtimeSessionIdFor', () => {
