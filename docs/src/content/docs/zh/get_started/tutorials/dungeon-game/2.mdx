@@ -29,13 +29,23 @@ import { getDungeonAdventureElectroDbDependencies } from '../../../../../../../.
 我们将在本节中实现以下 API：
 
 1. `saveGame` - 创建或更新游戏。
-2. `queryGames` - 返回先前保存的游戏的分页列表。
+2. `queryGames` - 返回已登录玩家保存的游戏的分页列表。
 3. `queryInventory` - 返回玩家库存中物品的分页列表。
 4. `queryActions` - 返回给定游戏的对话历史记录。
 
 :::note[每个状态片段的存储位置]
 - `games` 和 `inventory` 存储在 **DynamoDB**（通过 ElectroDB）— 游戏 API lambda 和库存 MCP 服务器读写它们。
 - `actions`（聊天记录）存储在 **S3** — Story Agent 的 `S3SessionManager` 每回合写入一个 JSON blob，游戏 API 中的 `queryActions` 读取它们，以便 UI 可以在页面重新加载时重放历史记录。没有 `saveAction` 过程；代理是唯一的写入者。
+:::
+
+:::tip[所有内容都限定在已登录玩家的范围内]
+两个存储都以调用者为键，因此一个玩家永远无法看到另一个玩家的冒险：
+
+- **游戏**在 DynamoDB 中按用户的 Cognito `sub` 进行分区，因此 `queryGames` 查询该分区而不是扫描整个表。两个玩家也可以选择相同的英雄名称而不会冲突。
+- **对话**由代理进行命名空间划分，因此键看起来像 `session_u-<sub>-<threadId>/…`。
+- **库存**以调用代理的会话加上玩家名称为键。库存 MCP 服务器从请求上下文中读取该会话，而不是信任模型传入的 `playerName` — 模型参数不是信任边界。
+
+`userId` 和命名空间都不是从请求正文中获取的 — 网站可能会对此撒谎。`identity.ts` 中的 `requireUserId` 从 Cognito Identity Pool 填充的 IAM 授权器上下文中读取调用者（`requestContext.authorizer.iam.cognitoIdentity.amr`，其中包含 `…:CognitoSignIn:<sub>` 条目）。该值由 Identity Pool 令牌交换生成，因此它是可信的而不是由浏览器提供的，没有它的请求将被拒绝。有关作为 tRPC 插件的可重用版本，请参阅<Link path="guides/trpc">实现自定义中间件</Link>。
 :::
 
 ### API 模式
@@ -93,6 +103,12 @@ ElectroDB 不仅允许我们定义类型，还可以为某些值（如时间戳�
 <Aside title="ElectroDB 集合">
 虽然 ElectroDB 确实支持[集合](https://electrodb.dev/en/modeling/collections/)，但为了简单起见，我们在本教程中选择不使用它们。
 </Aside>
+
+### 解析调用用户
+
+每个过程都将其数据限定在已登录玩家的范围内，因此它们都需要调用者的身份。添加 `packages/game-api/src/identity.ts`：
+
+<E2ECode lang="typescript" path="dungeon-adventure/2/identity.ts.template" />
 
 ### 定义我们的过程
 

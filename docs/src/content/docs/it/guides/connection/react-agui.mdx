@@ -92,6 +92,47 @@ Il codice generato gestisce l'autenticazione in base alla configurazione del tuo
 - **IAM** (predefinito): utilizza richieste HTTP firmate con AWS SigV4. Le credenziali vengono ottenute dal Cognito Identity Pool configurato con l'autenticazione del tuo sito web.
 - **Cognito**: incorpora il token di accesso JWT nell'header `Authorization` come Bearer token.
 
+### Sessioni e Thread
+
+AG-UI e AgentCore Runtime hanno ciascuno il proprio identificatore per una conversazione, e l'hook generato li collega insieme:
+
+- **`threadId`** — l'identificatore di conversazione AG-UI, inviato nel corpo della richiesta. CopilotKit genera un UUID casuale per chat a meno che non passi un `threadId` esplicito. Questo è ciò su cui l'agent basa lo stato della conversazione, perché gli adapter AG-UI memorizzano nella cache un agent per thread.
+- **Session ID** — la sessione AgentCore Runtime, inviata nell'header `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`. Determina quale [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html) serve la richiesta, e viene propagato a eventuali client MCP o A2A downstream.
+
+L'hook generato deriva il session ID dal thread ID, quindi un thread di chat corrisponde a una sessione AgentCore:
+
+```ts
+// AgentCore session ids must be at least 33 characters.
+function agentCoreSessionId(input: RunAgentInput): string {
+  return (input.threadId ?? '').padEnd(33, '0');
+}
+```
+
+:::note[Il padding non è privo di collisioni]
+AgentCore rifiuta i session ID più corti di 33 caratteri, quindi l'hook aggiunge padding a destra al thread ID con `0`. Due thread ID che differiscono solo nei caratteri finali sotto 33 — `abc` e `abc0` — quindi corrispondono allo stesso session ID e condividono una microVM.
+
+Lo stato della conversazione è basato sul thread ID piuttosto che sul session ID con padding, quindi i due thread mantengono comunque cronologie separate. Se vuoi che siano su microVM separate, passa thread ID che sono già di almeno 33 caratteri:
+
+```tsx
+const threadId = `${conversationName}`.padEnd(33, '0');
+
+<CopilotChat agentId="agent" threadId={threadId} />
+```
+
+Lasciare `threadId` non impostato è sempre sicuro — l'UUID generato da CopilotKit è di 36 caratteri.
+:::
+
+:::caution[I thread ID sono forniti dal client]
+Il thread ID proviene dal browser, quindi non può da solo identificare di chi è la conversazione. AgentCore Runtime autorizza le invocazioni rispetto all'ARN della risorsa runtime dell'agent piuttosto che rispetto alle singole sessioni, e valida il formato di un session ID senza collegarlo all'identità chiamante — [limitare una sessione a un utente è responsabilità dell'agent](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-instances-security.html).
+
+Il modo in cui l'agent generato gestisce questo dipende dal suo `auth`:
+
+- **Cognito**: lo stato della conversazione è organizzato per namespace dal claim `sub` del JWT del chiamante, che l'authorizer AgentCore ha già validato e che l'infrastruttura inserisce nella allowlist verso il codice del tuo agent. Le chiavi di storage diventano `u-<sub>-<threadId>` (ogni parte escaped nel set di caratteri che Strands consente per i session id), quindi un chiamante che fornisce il thread ID di qualcun altro raggiunge solo il proprio namespace. Le richieste senza un claim utilizzabile vengono rifiutate con un 401, tranne sotto `nx dev`, dove non c'è un authorizer davanti all'agent e le richieste non autenticate ricadono su un singolo utente locale.
+- **IAM**: SigV4 identifica il principal chiamante ad AgentCore Runtime piuttosto che al codice del tuo agent, quindi lo stato della conversazione è basato solo sul thread ID e `bedrock-agentcore:InvokeAgentRuntime` è il confine — concedilo a backend fidati. Usa l'autenticazione Cognito quando vuoi lo storage delle sessioni per utente in un'app rivolta agli utenti finali.
+
+Per decidere quali conversazioni un utente può riprendere, piuttosto che solo partizionarle, vedi <Link path="guides/ts-agent">Limitare le sessioni al loro proprietario</Link>.
+:::
+
 ## Infrastruttura
 
 <Snippet name="connection/react-agent-infrastructure" parentHeading="Infrastruttura" />

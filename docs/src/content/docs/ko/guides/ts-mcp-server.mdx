@@ -49,6 +49,7 @@ import OptionFilter from '@components/option-filter.astro';
       - mcp-server/ (or custom name if specified)
         - index.ts Exports your server
         - server.ts Main server definition
+        - request-context.ts Per-request details (e.g. the calling agent's session id) for tools that scope stored data per caller
         - stdio.ts Entry point for STDIO transport, useful for simple local MCP servers
         - http.ts Entry point for Streamable HTTP transport, useful for hosting your MCP server
         - tools/
@@ -107,6 +108,39 @@ import { registerMyTool } from './tools/my-tool.js';
 
 registerMyTool(server);
 ```
+
+### 호출자별 도구 데이터 범위 지정
+
+`createServer`는 현재 요청을 설명하는 `McpRequestContext`를 받습니다. Streamable HTTP를 통해 이는 호출자의 AgentCore Runtime 세션 ID를 포함하며, <Link path="guides/ts-agent">에이전트</Link>는 모든 아웃바운드 MCP 호출에서 이를 자동으로 전달합니다.
+
+호출자별로 데이터를 저장하는 도구에 이를 전달합니다:
+
+```typescript title="server.ts"
+export const createServer = async (context: McpRequestContext = {}) => {
+  // ...
+  registerMyTool(server, context);
+};
+```
+
+```typescript title="tools/my-tool.ts"
+export const registerMyTool = (
+  server: McpServer,
+  context: McpRequestContext,
+) => {
+  server.registerTool('my-tool', { /* ... */ }, async ({ itemName }) => {
+    if (!context.sessionId) {
+      throw new Error('No caller session — cannot resolve the owner.');
+    }
+    // Key stored data on the caller's session, not on a tool argument.
+    await save({ owner: context.sessionId, itemName });
+    // ...
+  });
+};
+```
+
+:::caution
+도구 인수가 아닌 요청 컨텍스트에 저장된 데이터의 범위를 지정하세요. 모델은 원하는 값을 전달하도록 설득될 수 있으므로 사용자 또는 플레이어 이름과 같은 인수는 신뢰 경계가 아닙니다. 요청이 없는 STDIO에서는 컨텍스트가 없습니다.
+:::
 
 ### 리소스 추가
 

@@ -362,6 +362,79 @@ bundle 目标使用 `index.ts` 作为 WebSocket 服务器的入口点，以托�
 
 会话 ID 本身来自 AgentCore Runtime 会话（对于 A2A/AG-UI 通过 `x-amzn-bedrock-agentcore-runtime-session-id` 标头传播，或对于 HTTP/tRPC 通过 WebSocket 连接上下文传播），并绑定到基于 [`AsyncLocalStorage`](https://nodejs.org/api/async_context.html#class-asynclocalstorage) 的上下文，因此 `getCurrentSessionId()` 可以在请求的任何地方解析它 — 包括通过 <Link path="/guides/connection">`connection` 生成器</Link>连接的任何下游 MCP 或 A2A 客户端，因此整个调用链共享一致的会话。
 
+:::note[AG-UI：会话和线程]
+AG-UI 协议在请求体中有自己的对话标识符 `threadId`。`@ag-ui/aws-strands` 为每个 `threadId` 缓存一个 Strands 代理，并**每个线程调用一次** `sessionManagerProvider` — 即第一次看到该线程时。
+
+因此，生成的 `index.ts` 传递 `sessionManagerProvider: (input) => getSessionManager(input.threadId)`，将对话状态键控在同一个线程 ID 上，以便提供程序和适配器的缓存始终一致。
+
+当不带参数调用时，`getSessionManager()` 会回退到当前的 AgentCore 会话 ID，这是 HTTP 和 A2A 协议使用它的方式。
+:::
+
+:::caution[会话隔离]
+会话 ID 和 `threadId` 都由调用者提供，因此它们本身都无法识别对话属于谁。AgentCore Runtime 针对代理运行时资源 ARN 而不是针对单个会话授权调用，并验证会话 ID 的格式而不将其与调用身份绑定 — [将会话范围限定到用户是代理的责任](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-instances-security.html)。
+
+使用 `auth=cognito` 时，生成的基础设施设置 `requestHeaderConfiguration.allowlistedHeaders: ['Authorization']`，因此调用者的 JWT — 已由 AgentCore 授权器验证 — 作为普通请求标头到达您的代理代码。服务器入口点读取其 `sub` 声明并为请求绑定它，`session.ts` 通过 `getSessionStorageKey()` 从中构建存储键，生成 `u-<sub>-<conversationId>`。
+
+没有可用声明的请求会被拒绝并返回 401，而不是回退到无范围的命名空间。在 `nx dev` 下，代理前面没有授权器，因此未经身份验证的请求会回退到单个本地用户 — 该回退受 `LOCAL_DEV` 限制，只有 `-dev` 目标才会设置它。解码声明时会跳过签名验证，因为 AgentCore Runtime 已经[在入站授权期间验证了令牌](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-oauth.html)。
+
+在 AG-UI 路径上，中间件还会在将协议的 `thread_id` 别名折叠到 `threadId` 后删除它。适配器在解析正文时将 `thread_id` 映射到 `threadId`（首键优先），因此将别名保留在原位会让客户端绕过重写偷运无范围的线程 ID — 如果您自定义此功能，请将这两个步骤放在一起。
+
+使用 `auth=iam` 时，SigV4 向 AgentCore Runtime 而不是向您的代理代码标识调用主体，因此对话状态仅键控在会话 ID 上，`bedrock-agentcore:InvokeAgentRuntime` 是边界 — 将其授予受信任的后端，或使用每个用户的 IAM 主体，以便 IAM 强制执行范围限定。
+
+`getSessionStorageKey()` 还会展平路径分隔符，因此对话 ID 无法遍历出其命名空间。
+:::
+
+#### 替代方案：将会话限制为其所有者
+
+命名空间为每个调用者键控存储，因此一个用户的对话永远不会返回给另一个用户。会话 ID 本身仍然是客户端发送的任何内容，这在两种情况下很重要：
+
+- 会话 ID 选择服务请求的 [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html)，因此其文件系统、`/tmp` 和进程内缓存由解析到该会话的每个请求共享。两个调用者发送相同的 ID 会共享这些内容，即使使用单独的存储键。
+- 命名空间对对话进行分区；它不决定允许用户恢复哪些会话。
+
+如果其中任何一个对您很重要，请让您的应用程序拥有会话 ID：从 API 发出它，记录它属于谁，并在代理中检查该所有权。
+
+**1. 通过您的 API 创建会话**
+
+添加一个启动对话的过程。它生成会话 ID，从其自己的请求上下文解析调用者，并存储该对 — 例如在使用 <Link path="guides/ts-dynamodb">`ts#dynamodb`</Link> 生成器创建的表中：
+
+| Attribute | Example | Notes |
+| --- | --- | --- |
+| `sessionId` | `a5f1…` | 分区键 — 代理从给定的会话 ID 查找所有者 |
+| `userId` | `<sub>` | 拥有会话的经过身份验证的调用者 |
+| `createdAt`, `title` | … | UI 列出对话所需的任何内容 |
+
+如果您还想列出用户自己的会话，请在 `userId` 上添加二级索引。
+
+```ts
+export const createSession = publicProcedure
+  .output(z.object({ sessionId: z.string() }))
+  .mutation(async ({ ctx }) => {
+    const sessionId = randomUUID().replaceAll('-', '');
+    await sessionEntity.put({ sessionId, userId: callerSub(ctx.event) }).go();
+    return { sessionId };
+  });
+```
+
+从经过验证的请求上下文而不是从输入字段解析调用者，因此它不能由浏览器提供。<Link path="guides/trpc">实现自定义中间件</Link>展示了如何为 IAM 和 Cognito 身份验证的 API 执行此操作。查询索引的第二个过程让 UI 向用户提供他们自己的对话，而不会看到其他人的对话。
+
+**2. 在代理中验证所有权**
+
+代理接收会话 ID，并且使用 `auth=cognito` 时接收调用者的 JWT。查找会话，将其所有者与调用者进行比较，如果它们不同则拒绝请求：
+
+```ts
+const session = await getSession(sessionId);
+if (session?.userId !== getCurrentUserId()) {
+  res.status(403).json({ error: 'Session does not belong to the caller' });
+  return;
+}
+```
+
+API 决定谁拥有会话；代理强制执行它。在两个地方检查意味着泄露的会话 ID 在下次调用时仍会被拒绝，并且代理的任何未来客户端都会继承相同的规则。
+
+:::caution
+生成不透明的随机会话 ID 并存储映射。从用户提供的值（对话名称、电子邮件）派生一个是可预测的，因此调用者可以落在未给它的会话上。
+:::
+
 :::note[本地开发]
 在本地运行时（`LOCAL_DEV=true`，由 `-dev` 目标自动设置），无论配置的 `session` 选项如何，会话数据始终存储在工作区根目录的 `tmp/agents/strands/<agent-name>` 下的磁盘上，以方便使用。
 :::

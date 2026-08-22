@@ -513,6 +513,61 @@ Questo è implementato nel `session.py` generato, che esporta una funzione `get_
 
 L'ID di sessione stesso proviene dalla sessione AgentCore Runtime (propagata tramite l'header `x-amzn-bedrock-agentcore-runtime-session-id`) ed è legato a un contesto basato su [`contextvars.ContextVar`](https://docs.python.org/3/library/contextvars.html) in modo che `get_current_session_id()` possa risolverlo ovunque nella richiesta — incluso in qualsiasi client MCP o A2A downstream collegato tramite il <Link path="/guides/connection">generatore `connection`</Link>, in modo che l'intera catena di chiamate condivida una sessione coerente.
 
+:::note[AG-UI: sessioni e thread]
+Il protocollo AG-UI ha il proprio identificatore di conversazione, `thread_id`, nel corpo della richiesta. `ag-ui-strands` memorizza nella cache un agente Strands per `thread_id` e chiama `session_manager_provider` **una volta per thread** — la prima volta che quel thread viene visto.
+
+Il `main.py` generato quindi passa `session_manager_provider=lambda input_data: get_session_manager(input_data.thread_id)`, associando lo stato della conversazione a quello stesso thread id in modo che il provider e la cache dell'adapter siano sempre d'accordo.
+
+`get_session_manager()` ricade sull'ID di sessione AgentCore corrente quando chiamato senza argomento, che è il modo in cui i protocolli HTTP e A2A lo utilizzano.
+
+L'endpoint AG-UI lega la sessione due volte — una volta nel middleware e di nuovo all'interno del corpo della risposta in streaming. Entrambi sono necessari: il `BaseHTTPMiddleware` di Starlette esce dal suo contesto prima che il corpo di `StreamingResponse` venga consumato, quindi il secondo binding è ciò che mantiene la sessione visibile alle chiamate MCP e A2A downstream effettuate durante lo streaming.
+:::
+
+:::caution[Isolamento delle sessioni]
+L'ID di sessione e il `thread_id` sono entrambi forniti dal chiamante, quindi nessuno dei due può da solo identificare di chi è la conversazione. AgentCore Runtime autorizza le invocazioni contro l'ARN della risorsa runtime dell'agente piuttosto che contro le singole sessioni, e valida il formato di un ID di sessione senza legarlo all'identità chiamante — [l'ambito di una sessione a un utente è responsabilità dell'agente](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-instances-security.html).
+
+Con `auth=cognito`, l'infrastruttura generata imposta `requestHeaderConfiguration.allowlistedHeaders: ['Authorization']`, quindi il JWT del chiamante — già validato dall'autorizzatore AgentCore — raggiunge il codice del tuo agente come un normale header di richiesta. Il punto di ingresso del server legge il suo claim `sub` e lo lega per la richiesta, e `session.py` costruisce la chiave di archiviazione da esso tramite `get_session_storage_key()`, producendo `u-<sub>-<conversation_id>`.
+
+Le richieste senza un claim utilizzabile vengono rifiutate con un 401 piuttosto che ricadere su uno spazio dei nomi senza ambito. Con `nx dev` non c'è un autorizzatore davanti all'agente, quindi le richieste non autenticate ricadono su un singolo utente locale invece — quel fallback è controllato da `LOCAL_DEV`, che solo i target `-dev` impostano. La verifica della firma viene saltata quando si decodifica il claim, poiché AgentCore Runtime ha già [validato il token durante l'autorizzazione in entrata](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-oauth.html).
+
+Con `auth=iam`, SigV4 identifica il principale chiamante ad AgentCore Runtime piuttosto che al codice del tuo agente, quindi lo stato della conversazione è associato solo all'ID di sessione e `bedrock-agentcore:InvokeAgentRuntime` è il confine — concedilo a backend fidati, o usa principali IAM per utente in modo che IAM imponga l'ambito.
+
+`get_session_storage_key()` appiattisce anche i separatori di percorso, quindi un ID di conversazione non può attraversare fuori dal suo spazio dei nomi.
+:::
+
+#### Alternativa: limitare le sessioni al loro proprietario
+
+Lo spazio dei nomi associa l'archiviazione per chiamante, quindi la conversazione di un utente non viene mai restituita a un altro. L'ID di sessione stesso è ancora quello che il client ha inviato, il che conta in due casi:
+
+- Un ID di sessione seleziona la [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html) che serve la richiesta, quindi il suo filesystem, `/tmp` e le cache in-process sono condivisi da ogni richiesta che risolve a quella sessione. Due chiamanti che inviano lo stesso ID condividono quelli anche con chiavi di archiviazione separate.
+- Lo spazio dei nomi partiziona le conversazioni; non decide quali sessioni un utente è autorizzato a riprendere.
+
+Se uno dei due ti interessa, fai in modo che la tua applicazione possieda l'ID di sessione invece: emettilo da un'API, registra a chi appartiene e controlla quella proprietà nell'agente.
+
+**1. Crea sessioni tramite la tua API**
+
+Aggiungi una procedura che avvia una conversazione. Genera l'ID di sessione, risolve il chiamante dal proprio contesto di richiesta e memorizza la coppia — ad esempio in una tabella creata con il generatore <Link path="guides/py-dynamodb">`py#dynamodb`</Link>:
+
+| Attribute | Example | Notes |
+| --- | --- | --- |
+| `sessionId` | `a5f1…` | Chiave di partizione — l'agente cerca un proprietario dall'ID di sessione che gli viene dato |
+| `userId` | `<sub>` | Il chiamante autenticato che possiede la sessione |
+| `createdAt`, `title` | … | Qualsiasi cosa la tua UI necessiti per elencare le conversazioni |
+
+Aggiungi un indice secondario su `userId` se vuoi anche elencare le sessioni proprie di un utente.
+
+Risolvi il chiamante dal contesto di richiesta verificato piuttosto che da un campo di input, quindi non può essere fornito dal browser. <Link path="guides/trpc">Implementing Custom Middleware</Link> mostra come per entrambe le API autenticate IAM e Cognito, e l'API stessa può essere in qualsiasi linguaggio. Una seconda procedura che interroga l'indice consente all'UI di offrire a un utente le proprie conversazioni senza vedere quelle di altri.
+
+**2. Valida la proprietà nell'agente**
+
+L'agente riceve l'ID di sessione e, con `auth=cognito`, il JWT del chiamante. In `SessionIdMiddleware`, cerca la sessione e confronta `session["userId"]` con `get_current_user_id()`, restituendo un `403` quando differiscono piuttosto che continuare al gestore.
+
+L'API decide chi possiede una sessione; l'agente la applica. Controllare in entrambi i posti significa che un ID di sessione che trapela viene comunque rifiutato alla prossima invocazione, e qualsiasi futuro client dell'agente eredita la stessa regola.
+
+:::caution
+Genera un ID di sessione opaco e casuale e memorizza la mappatura. Derivarne uno da valori forniti dall'utente — un nome di conversazione, un'email — è prevedibile, quindi un chiamante può atterrare su una sessione che non gli è stata data.
+:::
+
 :::note[Sviluppo Locale]
 Quando si esegue localmente (`LOCAL_DEV=true`, impostato automaticamente dal target `-dev`), i dati di sessione vengono sempre memorizzati su disco sotto `tmp/agents/strands/<agent-name>` alla radice del workspace, indipendentemente dall'opzione `session` configurata, per comodità.
 :::
@@ -526,6 +581,21 @@ L'opzione `session` controlla come il checkpointer LangGraph del tuo agente pers
 - **`in-memory`**: Nessuna tabella o bucket viene fornito. Lo stato della conversazione viene mantenuto in memoria solo per la durata del processo in esecuzione e non sopravvive ai riavvii o allo scale-in.
 
 Questo è implementato nel `session.py` generato, che esporta una funzione `get_checkpointer()` chiamata dalla chiamata `create_agent(..., checkpointer=get_checkpointer())` di `agent.py`.
+
+A differenza di Strands, il checkpointer non viene risolto per sessione. Viene creato una volta e LangGraph seleziona la conversazione da leggere e scrivere utilizzando il `thread_id` nella configurazione passata al momento dell'invocazione. Quale valore finisce come quel `thread_id` dipende dal protocollo:
+
+- **HTTP**: `main.py` imposta `{"configurable": {"thread_id": session_id}}`, quindi l'ID di sessione AgentCore *è* l'ID del thread LangGraph.
+- **AG-UI**: `ag-ui-langgraph` imposta il `thread_id` dal `thread_id` nel corpo della richiesta, quindi lo stato della conversazione è associato al thread AG-UI. L'ID di sessione è ancora legato al contesto per le chiamate MCP e A2A downstream, ma **non** seleziona la conversazione.
+
+:::caution[Isolamento delle sessioni]
+L'identificatore che seleziona la conversazione memorizzata è fornito dal chiamante — l'ID di sessione AgentCore per HTTP, o il `thread_id` AG-UI per AG-UI. Nessuno dei due può da solo identificare di chi è la conversazione. AgentCore Runtime autorizza le invocazioni contro l'ARN della risorsa runtime dell'agente piuttosto che contro le singole sessioni, e valida il formato di un ID di sessione senza legarlo all'identità chiamante — [l'ambito di una sessione a un utente è responsabilità dell'agente](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-instances-security.html).
+
+Con `auth=cognito`, l'infrastruttura generata imposta `requestHeaderConfiguration.allowlistedHeaders: ['Authorization']`, quindi il JWT del chiamante — già validato dall'autorizzatore AgentCore — raggiunge il codice del tuo agente come un normale header di richiesta. Poiché LangGraph seleziona la conversazione dalla configurazione piuttosto che da un provider di sessione, `main.py` associa lo spazio dei nomi al `thread_id` della configurazione stesso con `get_session_storage_key(session_id, user_id)`.
+
+Le richieste senza un claim `sub` utilizzabile vengono rifiutate con un 401 piuttosto che ricadere su uno spazio dei nomi senza ambito. Con `nx dev` non c'è un autorizzatore davanti all'agente, quindi le richieste non autenticate ricadono su un singolo utente locale invece — quel fallback è controllato da `LOCAL_DEV`, che solo i target `-dev` impostano. La verifica della firma viene saltata quando si decodifica il claim, poiché AgentCore Runtime ha già [validato il token durante l'autorizzazione in entrata](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-oauth.html).
+
+Con `auth=iam`, SigV4 identifica il principale chiamante ad AgentCore Runtime piuttosto che al codice del tuo agente, quindi le conversazioni sono associate solo all'identificatore del chiamante e `bedrock-agentcore:InvokeAgentRuntime` è il confine — concedilo a backend fidati.
+:::
 
 :::note[Sviluppo Locale]
 Quando si esegue localmente (`LOCAL_DEV=true`, impostato automaticamente dal target `-dev`), `get_checkpointer()` restituisce sempre un [`AsyncSqliteSaver`](https://reference.langchain.com/python/langgraph.checkpoint.sqlite/aio/AsyncSqliteSaver) supportato da un database SQLite locale sotto `tmp/agents/langchain/<agent-name>` alla radice del workspace, indipendentemente dall'opzione `session` configurata, per comodità.
@@ -680,7 +750,7 @@ Utilizza il generatore <Link path="guides/connection">`connection`</Link> per in
   <ConnectionCard
     title="React to Python Agent"
     description="Call a Python Agent from a React website"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-py-agent`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'it'}/guides/connection/react-py-agent`}
     source="react"
     target="strands"
     targetBadge="python"
@@ -688,14 +758,14 @@ Utilizza il generatore <Link path="guides/connection">`connection`</Link> per in
   <ConnectionCard
     title="React to AG-UI Agent"
     description="Call an Agent exposing the AG-UI protocol from a React website via CopilotKit"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-agui`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'it'}/guides/connection/react-agui`}
     source="react"
     target="copilotkit"
   />
   <ConnectionCard
     title="Python Agent to MCP"
     description="Connect a Python Agent to an MCP server"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-mcp`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'it'}/guides/connection/py-agent-mcp`}
     source="strands"
     sourceBadge="python"
     target="mcp"
@@ -703,7 +773,7 @@ Utilizza il generatore <Link path="guides/connection">`connection`</Link> per in
   <ConnectionCard
     title="Python Agent to A2A Agent"
     description="Connect a Python Agent to a remote A2A agent"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-a2a`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'it'}/guides/connection/py-agent-a2a`}
     source="strands"
     sourceBadge="python"
     target="a2a"
@@ -711,7 +781,7 @@ Utilizza il generatore <Link path="guides/connection">`connection`</Link> per in
   <ConnectionCard
     title="TypeScript Agent to A2A Agent"
     description="Connect a TypeScript Agent to a remote A2A agent"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/ts-agent-a2a`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'it'}/guides/connection/ts-agent-a2a`}
     source="strands"
     sourceBadge="typescript"
     target="a2a"
@@ -719,7 +789,7 @@ Utilizza il generatore <Link path="guides/connection">`connection`</Link> per in
   <ConnectionCard
     title="Python Agent to Python DynamoDB"
     description="Connect a Python Agent to a DynamoDB table"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-dynamodb`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'it'}/guides/connection/py-agent-dynamodb`}
     source="strands"
     sourceBadge="python"
     target="dynamodb"
@@ -728,7 +798,7 @@ Utilizza il generatore <Link path="guides/connection">`connection`</Link> per in
   <ConnectionCard
     title="Python Agent to AgentCore Gateway"
     description="Connect a Python Agent to an AgentCore Gateway"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-gateway`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'it'}/guides/connection/py-agent-gateway`}
     source="strands"
     sourceBadge="python"
     target="agentcore"
@@ -736,7 +806,7 @@ Utilizza il generatore <Link path="guides/connection">`connection`</Link> per in
   <ConnectionCard
     title="AgentCore Gateway to Agent"
     description="Front an agent with an AgentCore Gateway as a runtime target"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/agentcore-gateway-agent`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'it'}/guides/connection/agentcore-gateway-agent`}
     source="agentcore"
     target="strands"
   />

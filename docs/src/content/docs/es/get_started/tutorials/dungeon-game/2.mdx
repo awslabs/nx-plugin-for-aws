@@ -29,13 +29,23 @@ import { getDungeonAdventureElectroDbDependencies } from '../../../../../../../.
 Implementaremos las siguientes APIs en esta sección:
 
 1. `saveGame` - crear o actualizar un juego.
-2. `queryGames` - devolver una lista paginada de juegos guardados previamente.
+2. `queryGames` - devolver una lista paginada de los juegos guardados del jugador que ha iniciado sesión.
 3. `queryInventory` - devolver una lista paginada de elementos en el inventario de un jugador.
 4. `queryActions` - devolver el historial de conversación para un juego dado.
 
 :::note[Dónde vive cada pieza de estado]
 - `games` e `inventory` están en **DynamoDB** (a través de ElectroDB) — las lambdas de la API del juego y el servidor MCP de inventario los leen/escriben.
 - `actions` (transcripción del chat) está en **S3** — el `S3SessionManager` del Story Agent escribe un blob JSON por turno, y `queryActions` en la API del juego los lee de vuelta para que la UI pueda reproducir el historial al recargar la página. No hay un procedimiento `saveAction`; el agente es el único escritor.
+:::
+
+:::tip[Todo está limitado al jugador que ha iniciado sesión]
+Ambos almacenes están indexados por el llamador, por lo que un jugador nunca puede ver las aventuras de otro:
+
+- **Games** están particionados en DynamoDB por el `sub` de Cognito del usuario, por lo que `queryGames` consulta esa partición en lugar de escanear la tabla. Dos jugadores también pueden elegir el mismo nombre de héroe sin colisionar.
+- **Conversations** están espaciadas por el agente, por lo que las claves se ven como `session_u-<sub>-<threadId>/…`.
+- **Inventory** está indexado por la sesión del agente llamador más el nombre del jugador. El servidor MCP de inventario lee esa sesión del contexto de la solicitud en lugar de confiar en el `playerName` que el modelo pasa — un argumento del modelo no es un límite de confianza.
+
+Ni el `userId` ni el espacio de nombres se toman del cuerpo de la solicitud — el sitio web podría mentir al respecto. `requireUserId` en `identity.ts` lee el llamador del contexto del autorizador IAM que el Cognito Identity Pool puebla (`requestContext.authorizer.iam.cognitoIdentity.amr`, que contiene una entrada `…:CognitoSignIn:<sub>`). Ese valor es producido por el intercambio de tokens del Identity Pool, por lo que es confiable en lugar de ser proporcionado por el navegador, y las solicitudes sin él son rechazadas. Consulta <Link path="guides/trpc">Implementing Custom Middleware</Link> para la versión reutilizable de esto como un plugin de tRPC.
 :::
 
 ### Esquema de la API
@@ -93,6 +103,12 @@ ElectroDB nos permite no solo definir nuestros tipos, sino que también puede pr
 <Aside title="Colecciones de ElectroDB">
 Aunque ElectroDB sí admite [colecciones](https://electrodb.dev/en/modeling/collections/), hemos elegido no usarlas en este tutorial por simplicidad.
 </Aside>
+
+### Resolviendo el usuario llamador
+
+Cada procedimiento limita sus datos al jugador que ha iniciado sesión, por lo que todos necesitan la identidad del llamador. Agrega `packages/game-api/src/identity.ts`:
+
+<E2ECode lang="typescript" path="dungeon-adventure/2/identity.ts.template" />
 
 ### Definiendo nuestros procedimientos
 

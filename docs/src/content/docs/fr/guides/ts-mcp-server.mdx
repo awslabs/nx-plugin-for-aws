@@ -49,6 +49,7 @@ Le générateur ajoutera les fichiers suivants à votre projet TypeScript exista
       - mcp-server/ (ou nom personnalisé si spécifié)
         - index.ts Exports your server
         - server.ts Main server definition
+        - request-context.ts Per-request details (e.g. the calling agent's session id) for tools that scope stored data per caller
         - stdio.ts Entry point for STDIO transport, useful for simple local MCP servers
         - http.ts Entry point for Streamable HTTP transport, useful for hosting your MCP server
         - tools/
@@ -107,6 +108,39 @@ import { registerMyTool } from './tools/my-tool.js';
 
 registerMyTool(server);
 ```
+
+### Portée des données d'outil par appelant
+
+`createServer` reçoit un `McpRequestContext` décrivant la requête actuelle. Via HTTP Streamable, cela inclut l'identifiant de session AgentCore Runtime de l'appelant, qu'un <Link path="guides/ts-agent">agent</Link> transmet automatiquement à chaque appel MCP sortant.
+
+Transmettez-le à un outil qui stocke des données par appelant :
+
+```typescript title="server.ts"
+export const createServer = async (context: McpRequestContext = {}) => {
+  // ...
+  registerMyTool(server, context);
+};
+```
+
+```typescript title="tools/my-tool.ts"
+export const registerMyTool = (
+  server: McpServer,
+  context: McpRequestContext,
+) => {
+  server.registerTool('my-tool', { /* ... */ }, async ({ itemName }) => {
+    if (!context.sessionId) {
+      throw new Error('No caller session — cannot resolve the owner.');
+    }
+    // Key stored data on the caller's session, not on a tool argument.
+    await save({ owner: context.sessionId, itemName });
+    // ...
+  });
+};
+```
+
+:::caution
+Délimitez les données stockées sur le contexte de requête plutôt que sur un argument d'outil. Un modèle peut être persuadé de passer n'importe quelle valeur, donc les arguments tels qu'un nom d'utilisateur ou de joueur ne constituent pas une limite de confiance. Le contexte est absent via STDIO, où il n'y a pas de requête.
+:::
 
 ### Ajouter des ressources
 

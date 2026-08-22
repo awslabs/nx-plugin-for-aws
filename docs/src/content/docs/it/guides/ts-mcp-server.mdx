@@ -49,6 +49,7 @@ Il generatore aggiungerà i seguenti file al tuo progetto TypeScript esistente:
       - mcp-server/ (o nome personalizzato se specificato)
         - index.ts Esporta il tuo server
         - server.ts Definizione principale del server
+        - request-context.ts Dettagli per richiesta (ad es. l'id di sessione dell'agente chiamante) per strumenti che delimitano i dati memorizzati per chiamante
         - stdio.ts Punto di ingresso per il trasporto STDIO, utile per semplici MCP server locali
         - http.ts Punto di ingresso per il trasporto HTTP Streamable, utile per ospitare il tuo MCP server
         - tools/
@@ -107,6 +108,39 @@ import { registerMyTool } from './tools/my-tool.js';
 
 registerMyTool(server);
 ```
+
+### Delimitare i Dati degli Strumenti per Chiamante
+
+`createServer` riceve un `McpRequestContext` che descrive la richiesta corrente. Su HTTP Streamable questo include l'id di sessione AgentCore Runtime del chiamante, che un <Link path="guides/ts-agent">agent</Link> inoltra automaticamente su ogni chiamata MCP in uscita.
+
+Passalo a uno strumento che memorizza dati per chiamante:
+
+```typescript title="server.ts"
+export const createServer = async (context: McpRequestContext = {}) => {
+  // ...
+  registerMyTool(server, context);
+};
+```
+
+```typescript title="tools/my-tool.ts"
+export const registerMyTool = (
+  server: McpServer,
+  context: McpRequestContext,
+) => {
+  server.registerTool('my-tool', { /* ... */ }, async ({ itemName }) => {
+    if (!context.sessionId) {
+      throw new Error('No caller session — cannot resolve the owner.');
+    }
+    // Key stored data on the caller's session, not on a tool argument.
+    await save({ owner: context.sessionId, itemName });
+    // ...
+  });
+};
+```
+
+:::caution
+Delimita i dati memorizzati sul contesto della richiesta piuttosto che su un argomento dello strumento. Un modello può essere persuaso a passare qualsiasi valore desideri, quindi argomenti come un nome utente o giocatore non sono un confine di fiducia. Il contesto è assente su STDIO, dove non c'è richiesta.
+:::
 
 ### Aggiungere Risorse
 

@@ -362,6 +362,79 @@ Tùy chọn `session` kiểm soát cách agent của bạn duy trì trạng thá
 
 Session ID chính nó đến từ AgentCore Runtime session (được truyền qua header `x-amzn-bedrock-agentcore-runtime-session-id` cho A2A/AG-UI, hoặc WebSocket connection context cho HTTP/tRPC) và được gắn với một context dựa trên [`AsyncLocalStorage`](https://nodejs.org/api/async_context.html#class-asynclocalstorage) để `getCurrentSessionId()` có thể resolve nó ở bất kỳ đâu trong request — bao gồm trong bất kỳ MCP hoặc A2A client downstream nào được kết nối thông qua <Link path="/guides/connection">`connection` generator</Link>, để toàn bộ chuỗi gọi chia sẻ một session nhất quán.
 
+:::note[AG-UI: session và thread]
+Giao thức AG-UI có định danh hội thoại riêng của nó, `threadId`, trong request body. `@ag-ui/aws-strands` cache một Strands agent cho mỗi `threadId` và gọi `sessionManagerProvider` **một lần cho mỗi thread** — lần đầu tiên thread đó được nhìn thấy.
+
+`index.ts` được tạo do đó truyền `sessionManagerProvider: (input) => getSessionManager(input.threadId)`, gắn trạng thái hội thoại với cùng thread id đó để provider và cache của adapter luôn đồng nhất.
+
+`getSessionManager()` fallback về AgentCore session ID hiện tại khi được gọi mà không có tham số, đó là cách các giao thức HTTP và A2A sử dụng nó.
+:::
+
+:::caution[Cô lập session]
+Session ID và `threadId` đều được cung cấp bởi caller, vì vậy không cái nào có thể tự xác định hội thoại thuộc về ai. AgentCore Runtime ủy quyền các lời gọi đối với agent runtime resource ARN thay vì đối với các session riêng lẻ, và xác thực định dạng của session ID mà không gắn nó với danh tính gọi — [việc phạm vi session cho một người dùng là trách nhiệm của agent](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-instances-security.html).
+
+Với `auth=cognito`, hạ tầng được tạo thiết lập `requestHeaderConfiguration.allowlistedHeaders: ['Authorization']`, vì vậy JWT của caller — đã được xác thực bởi AgentCore authorizer — đến mã agent của bạn như một request header thông thường. Server entry point đọc claim `sub` của nó và gắn nó cho request, và `session.ts` xây dựng storage key từ nó thông qua `getSessionStorageKey()`, tạo ra `u-<sub>-<conversationId>`.
+
+Các request không có claim có thể sử dụng bị từ chối với 401 thay vì fallback về một namespace không có phạm vi. Dưới `nx dev` không có authorizer trước agent, vì vậy các request không được xác thực fallback về một local user duy nhất thay thế — fallback đó được kiểm soát bởi `LOCAL_DEV`, chỉ các target `-dev` thiết lập. Xác minh chữ ký bị bỏ qua khi giải mã claim, vì AgentCore Runtime đã [xác thực token trong quá trình ủy quyền đầu vào](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-oauth.html).
+
+Trên đường dẫn AG-UI, middleware cũng xóa alias `thread_id` của giao thức sau khi gộp nó vào `threadId`. Adapter ánh xạ `thread_id` lên `threadId` first-key-wins khi nó phân tích body, vì vậy để alias tại chỗ sẽ cho phép client lén lút một thread id không có phạm vi qua việc viết lại — giữ cả hai bước cùng nhau nếu bạn tùy chỉnh điều này.
+
+Với `auth=iam`, SigV4 xác định principal gọi cho AgentCore Runtime thay vì cho mã agent của bạn, vì vậy trạng thái hội thoại được gắn chỉ với session ID và `bedrock-agentcore:InvokeAgentRuntime` là ranh giới — cấp nó cho các backend đáng tin cậy, hoặc sử dụng IAM principal cho mỗi người dùng để IAM thực thi phạm vi.
+
+`getSessionStorageKey()` cũng làm phẳng các dấu phân cách đường dẫn, vì vậy conversation ID không thể đi ra ngoài namespace của nó.
+:::
+
+#### Thay thế: hạn chế session cho chủ sở hữu của chúng
+
+Namespacing gắn storage cho mỗi caller, vì vậy hội thoại của một người dùng không bao giờ được trả về cho người khác. Session ID chính nó vẫn là bất cứ thứ gì client gửi, điều này quan trọng trong hai trường hợp:
+
+- Session ID chọn [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html) phục vụ request, vì vậy filesystem, `/tmp` và cache trong process của nó được chia sẻ bởi mọi request resolve về session đó. Hai caller gửi cùng ID chia sẻ những thứ đó ngay cả với các storage key riêng biệt.
+- Namespacing phân vùng các hội thoại; nó không quyết định session nào một người dùng được phép tiếp tục.
+
+Nếu một trong hai điều này quan trọng với bạn, hãy để ứng dụng của bạn sở hữu session ID thay thế: phát hành nó từ một API, ghi lại nó thuộc về ai, và kiểm tra quyền sở hữu đó trong agent.
+
+**1. Tạo session thông qua API của bạn**
+
+Thêm một procedure bắt đầu một hội thoại. Nó tạo session ID, resolve caller từ request context riêng của nó, và lưu trữ cặp đó — ví dụ trong một bảng được tạo bằng generator <Link path="guides/ts-dynamodb">`ts#dynamodb`</Link>:
+
+| Attribute | Example | Notes |
+| --- | --- | --- |
+| `sessionId` | `a5f1…` | Partition key — agent tra cứu chủ sở hữu từ session ID nó được cung cấp |
+| `userId` | `<sub>` | Caller được xác thực sở hữu session |
+| `createdAt`, `title` | … | Bất cứ thứ gì UI của bạn cần để liệt kê các hội thoại |
+
+Thêm một secondary index trên `userId` nếu bạn cũng muốn liệt kê các session riêng của người dùng.
+
+```ts
+export const createSession = publicProcedure
+  .output(z.object({ sessionId: z.string() }))
+  .mutation(async ({ ctx }) => {
+    const sessionId = randomUUID().replaceAll('-', '');
+    await sessionEntity.put({ sessionId, userId: callerSub(ctx.event) }).go();
+    return { sessionId };
+  });
+```
+
+Resolve caller từ request context đã được xác minh thay vì từ một input field, vì vậy nó không thể được cung cấp bởi trình duyệt. <Link path="guides/trpc">Implementing Custom Middleware</Link> cho thấy cách thực hiện cho cả API được xác thực IAM và Cognito. Một procedure thứ hai truy vấn index cho phép UI cung cấp cho người dùng các hội thoại riêng của họ mà không nhìn thấy của người khác.
+
+**2. Xác thực quyền sở hữu trong agent**
+
+Agent nhận session ID, và với `auth=cognito` là JWT của caller. Tra cứu session, so sánh chủ sở hữu của nó với caller, và từ chối request nếu chúng khác nhau:
+
+```ts
+const session = await getSession(sessionId);
+if (session?.userId !== getCurrentUserId()) {
+  res.status(403).json({ error: 'Session does not belong to the caller' });
+  return;
+}
+```
+
+API quyết định ai sở hữu session; agent thực thi nó. Kiểm tra ở cả hai nơi có nghĩa là session ID bị rò rỉ vẫn bị từ chối trong lần gọi tiếp theo, và bất kỳ client tương lai nào của agent đều kế thừa cùng quy tắc.
+
+:::caution
+Tạo một session ID mờ đục, ngẫu nhiên và lưu trữ ánh xạ. Suy ra một từ các giá trị do người dùng cung cấp — tên hội thoại, email — có thể dự đoán được, vì vậy caller có thể đến một session mà nó không được cung cấp.
+:::
+
 :::note[Phát triển cục bộ]
 Khi chạy cục bộ (`LOCAL_DEV=true`, được thiết lập tự động bởi target `-dev`), dữ liệu session luôn được lưu trữ trên đĩa dưới `tmp/agents/strands/<agent-name>` tại workspace root, bất kể tùy chọn `session` được cấu hình, để thuận tiện.
 :::

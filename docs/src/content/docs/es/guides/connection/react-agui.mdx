@@ -92,6 +92,47 @@ El código generado maneja la autenticación dependiendo de la configuración de
 - **IAM** (predeterminado): usa solicitudes HTTP firmadas con AWS SigV4. Las credenciales se obtienen del Identity Pool de Cognito configurado con la autenticación de tu sitio web.
 - **Cognito**: incrusta el token de acceso JWT en el encabezado `Authorization` como un token Bearer.
 
+### Sesiones e hilos
+
+AG-UI y AgentCore Runtime tienen cada uno su propio identificador para una conversación, y el hook generado los vincula:
+
+- **`threadId`** — el identificador de conversación de AG-UI, enviado en el cuerpo de la solicitud. CopilotKit genera un UUID aleatorio por chat a menos que pases un `threadId` explícito. Esto es en lo que el agente basa el estado de la conversación, porque los adaptadores AG-UI almacenan en caché un agente por hilo.
+- **Session ID** — la sesión de AgentCore Runtime, enviada en el encabezado `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`. Determina qué [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html) atiende la solicitud, y se propaga a cualquier cliente MCP o A2A descendente.
+
+El hook generado deriva el ID de sesión del ID de hilo, por lo que un hilo de chat se mapea a una sesión de AgentCore:
+
+```ts
+// AgentCore session ids must be at least 33 characters.
+function agentCoreSessionId(input: RunAgentInput): string {
+  return (input.threadId ?? '').padEnd(33, '0');
+}
+```
+
+:::note[El relleno no está libre de colisiones]
+AgentCore rechaza IDs de sesión más cortos de 33 caracteres, por lo que el hook rellena a la derecha el ID de hilo con `0`. Dos IDs de hilo que difieren solo en caracteres finales por debajo de 33 — `abc` y `abc0` — por lo tanto se mapean al mismo ID de sesión y comparten una microVM.
+
+El estado de la conversación se basa en el ID de hilo en lugar del ID de sesión rellenado, por lo que los dos hilos aún mantienen historiales separados. Si deseas que estén en microVMs separadas también, pasa IDs de hilo que ya tengan al menos 33 caracteres:
+
+```tsx
+const threadId = `${conversationName}`.padEnd(33, '0');
+
+<CopilotChat agentId="agent" threadId={threadId} />
+```
+
+Dejar `threadId` sin establecer siempre es seguro — el UUID generado por CopilotKit tiene 36 caracteres.
+:::
+
+:::caution[Los IDs de hilo son proporcionados por el cliente]
+El ID de hilo proviene del navegador, por lo que no puede por sí mismo identificar de quién es la conversación. AgentCore Runtime autoriza invocaciones contra el ARN del recurso de runtime del agente en lugar de contra sesiones individuales, y valida el formato de un ID de sesión sin vincularlo a la identidad que llama — [delimitar una sesión a un usuario es responsabilidad del agente](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-instances-security.html).
+
+Cómo el agente generado maneja esto depende de su `auth`:
+
+- **Cognito**: el estado de la conversación se organiza por el claim `sub` del JWT del llamador, que el autorizador de AgentCore ya ha validado y que la infraestructura permite pasar a tu código de agente. Las claves de almacenamiento se convierten en `u-<sub>-<threadId>` (cada parte escapada al conjunto de caracteres que Strands permite para IDs de sesión), por lo que un llamador que proporcione el ID de hilo de otra persona solo alcanza su propio espacio de nombres. Las solicitudes sin un claim utilizable se rechazan con un 401, excepto bajo `nx dev`, donde no hay autorizador frente al agente y las solicitudes no autenticadas recurren a un único usuario local.
+- **IAM**: SigV4 identifica el principal que llama a AgentCore Runtime en lugar de a tu código de agente, por lo que el estado de la conversación se basa solo en el ID de hilo y `bedrock-agentcore:InvokeAgentRuntime` es el límite — concédelo a backends confiables. Usa autenticación Cognito cuando desees almacenamiento de sesión por usuario en una aplicación orientada al usuario final.
+
+Para decidir qué conversaciones puede reanudar un usuario, en lugar de solo particionarlas, consulta <Link path="guides/ts-agent">Restricción de sesiones a su propietario</Link>.
+:::
+
 ## Infraestructura
 
 <Snippet name="connection/react-agent-infrastructure" parentHeading="Infraestructura" />

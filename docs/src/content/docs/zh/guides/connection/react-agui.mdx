@@ -92,6 +92,47 @@ Nx Plugin for AWS 提供了一个生成器，用于将 React 网站连接到公�
 - **IAM**（默认）：使用 AWS SigV4 签名的 HTTP 请求。凭证从配置了您网站身份验证的 Cognito Identity Pool 获取。
 - **Cognito**：将 JWT 访问令牌作为 Bearer 令牌嵌入到 `Authorization` 标头中。
 
+### 会话和线程
+
+AG-UI 和 AgentCore Runtime 各自拥有自己的对话标识符，生成的 hook 将它们联系在一起：
+
+- **`threadId`** — AG-UI 对话标识符，在请求正文中发送。除非您传递显式的 `threadId`，否则 CopilotKit 会为每个聊天生成一个随机 UUID。这是 agent 用于键入对话状态的标识符，因为 AG-UI 适配器为每个线程缓存一个 agent。
+- **Session ID** — AgentCore Runtime 会话，在 `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` 标头中发送。它决定哪个 [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html) 处理请求，并传播到任何下游 MCP 或 A2A 客户端。
+
+生成的 hook 从线程 ID 派生会话 ID，因此一个聊天线程映射到一个 AgentCore 会话：
+
+```ts
+// AgentCore session ids must be at least 33 characters.
+function agentCoreSessionId(input: RunAgentInput): string {
+  return (input.threadId ?? '').padEnd(33, '0');
+}
+```
+
+:::note[填充不是无冲突的]
+AgentCore 拒绝短于 33 个字符的会话 ID，因此 hook 使用 `0` 右填充线程 ID。两个仅在 33 以下的尾随字符中不同的线程 ID——`abc` 和 `abc0`——因此映射到相同的会话 ID 并共享一个 microVM。
+
+对话状态基于线程 ID 而不是填充后的会话 ID 进行键入，因此两个线程仍然保持独立的历史记录。如果您也希望它们在单独的 microVM 上，请传递至少 33 个字符的线程 ID：
+
+```tsx
+const threadId = `${conversationName}`.padEnd(33, '0');
+
+<CopilotChat agentId="agent" threadId={threadId} />
+```
+
+不设置 `threadId` 始终是安全的——CopilotKit 生成的 UUID 是 36 个字符。
+:::
+
+:::caution[线程 ID 由客户端提供]
+线程 ID 来自浏览器，因此它本身无法识别对话属于谁。AgentCore Runtime 针对 agent 运行时资源 ARN 而不是针对单个会话授权调用，并验证会话 ID 的格式而不将其与调用身份绑定——[将会话范围限定为用户是 agent 的责任](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-instances-security.html)。
+
+生成的 agent 如何处理这一点取决于其 `auth`：
+
+- **Cognito**：对话状态按调用者的 JWT 的 `sub` 声明进行命名空间，AgentCore 授权器已经验证了该声明，并且基础设施将其列入白名单传递给您的 agent 代码。存储键变为 `u-<sub>-<threadId>`（每个部分都转义为 Strands 允许用于会话 ID 的字符集），因此提供他人线程 ID 的调用者只能访问自己的命名空间。没有可用声明的请求将被拒绝并返回 401，除非在 `nx dev` 下，此时 agent 前面没有授权器，未经身份验证的请求会回退到单个本地用户。
+- **IAM**：SigV4 向 AgentCore Runtime 而不是向您的 agent 代码标识调用主体，因此对话状态仅基于线程 ID 进行键入，`bedrock-agentcore:InvokeAgentRuntime` 是边界——将其授予受信任的后端。当您希望在面向最终用户的应用程序中使用每用户会话存储时，请使用 Cognito 身份验证。
+
+要决定用户可以恢复哪些对话，而不仅仅是对它们进行分区，请参阅<Link path="guides/ts-agent">将会话限制为其所有者</Link>。
+:::
+
 ## 基础设施
 
 <Snippet name="connection/react-agent-infrastructure" parentHeading="基础设施" />

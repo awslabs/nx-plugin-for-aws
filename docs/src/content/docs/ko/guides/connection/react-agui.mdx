@@ -92,6 +92,47 @@ Nx Plugin for AWS는 [AG-UI 프로토콜](https://docs.ag-ui.com/)을 노출하�
 - **IAM** (기본값): AWS SigV4 서명된 HTTP 요청을 사용합니다. 자격 증명은 웹사이트의 인증과 함께 구성된 Cognito Identity Pool에서 가져옵니다.
 - **Cognito**: JWT 액세스 토큰을 Bearer 토큰으로 `Authorization` 헤더에 포함합니다.
 
+### 세션과 스레드
+
+AG-UI와 AgentCore Runtime은 각각 대화를 위한 고유한 식별자를 가지며, 생성된 훅은 이들을 함께 연결합니다:
+
+- **`threadId`** — AG-UI 대화 식별자로, 요청 본문에 전송됩니다. CopilotKit은 명시적인 `threadId`를 전달하지 않는 한 채팅당 무작위 UUID를 생성합니다. AG-UI 어댑터가 스레드당 하나의 에이전트를 캐시하기 때문에 에이전트는 이것을 대화 상태의 키로 사용합니다.
+- **Session ID** — AgentCore Runtime 세션으로, `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` 헤더에 전송됩니다. 이는 어떤 [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html)이 요청을 처리할지 결정하며, 다운스트림 MCP 또는 A2A 클라이언트로 전파됩니다.
+
+생성된 훅은 스레드 ID에서 세션 ID를 파생하므로 하나의 채팅 스레드가 하나의 AgentCore 세션에 매핑됩니다:
+
+```ts
+// AgentCore session ids must be at least 33 characters.
+function agentCoreSessionId(input: RunAgentInput): string {
+  return (input.threadId ?? '').padEnd(33, '0');
+}
+```
+
+:::note[패딩은 충돌 방지가 아닙니다]
+AgentCore는 33자보다 짧은 세션 ID를 거부하므로 훅은 스레드 ID를 `0`으로 오른쪽 패딩합니다. 33자 미만의 후행 문자만 다른 두 스레드 ID — `abc`와 `abc0` — 는 따라서 동일한 세션 ID에 매핑되고 하나의 microVM을 공유합니다.
+
+대화 상태는 패딩된 세션 ID가 아닌 스레드 ID를 키로 사용하므로 두 스레드는 여전히 별도의 히스토리를 유지합니다. 별도의 microVM에도 배치하려면 이미 최소 33자인 스레드 ID를 전달하세요:
+
+```tsx
+const threadId = `${conversationName}`.padEnd(33, '0');
+
+<CopilotChat agentId="agent" threadId={threadId} />
+```
+
+`threadId`를 설정하지 않는 것은 항상 안전합니다 — CopilotKit이 생성하는 UUID는 36자입니다.
+:::
+
+:::caution[스레드 ID는 클라이언트에서 제공됩니다]
+스레드 ID는 브라우저에서 오므로 그 자체로는 누구의 대화인지 식별할 수 없습니다. AgentCore Runtime은 개별 세션이 아닌 에이전트 런타임 리소스 ARN에 대해 호출을 승인하고, 호출 ID에 연결하지 않고 세션 ID의 형식을 검증합니다 — [세션을 사용자에게 범위 지정하는 것은 에이전트의 책임입니다](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-instances-security.html).
+
+생성된 에이전트가 이를 처리하는 방식은 `auth`에 따라 다릅니다:
+
+- **Cognito**: 대화 상태는 호출자의 JWT의 `sub` 클레임으로 네임스페이스가 지정되며, AgentCore 권한 부여자가 이미 검증했고 인프라가 에이전트 코드로 허용 목록에 추가합니다. 스토리지 키는 `u-<sub>-<threadId>`가 됩니다(각 부분은 Strands가 세션 ID에 허용하는 문자 집합으로 이스케이프됨). 따라서 다른 사람의 스레드 ID를 제공하는 호출자는 자신의 네임스페이스에만 도달합니다. 사용 가능한 클레임이 없는 요청은 401로 거부되지만, `nx dev`에서는 에이전트 앞에 권한 부여자가 없고 인증되지 않은 요청은 단일 로컬 사용자로 폴백됩니다.
+- **IAM**: SigV4는 에이전트 코드가 아닌 AgentCore Runtime에 호출 주체를 식별하므로 대화 상태는 스레드 ID만을 키로 사용하고 `bedrock-agentcore:InvokeAgentRuntime`이 경계입니다 — 신뢰할 수 있는 백엔드에 권한을 부여하세요. 최종 사용자 대면 앱에서 사용자별 세션 스토리지를 원할 때는 Cognito 인증을 사용하세요.
+
+사용자가 재개할 수 있는 대화를 분할하는 것이 아니라 결정하려면 <Link path="guides/ts-agent">세션을 소유자로 제한</Link>을 참조하세요.
+:::
+
 ## 인프라
 
 <Snippet name="connection/react-agent-infrastructure" parentHeading="인프라" />

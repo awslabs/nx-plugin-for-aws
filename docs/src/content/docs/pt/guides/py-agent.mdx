@@ -513,6 +513,61 @@ Isso é implementado no `session.py` gerado, que exporta uma função `get_sessi
 
 O próprio ID da sessão vem da sessão do AgentCore Runtime (propagada através do cabeçalho `x-amzn-bedrock-agentcore-runtime-session-id`) e é vinculado a um contexto baseado em [`contextvars.ContextVar`](https://docs.python.org/3/library/contextvars.html) para que `get_current_session_id()` possa resolvê-lo em qualquer lugar na requisição — incluindo em quaisquer clientes MCP ou A2A downstream conectados através do <Link path="/guides/connection">gerador `connection`</Link>, para que toda a cadeia de chamadas compartilhe uma sessão consistente.
 
+:::note[AG-UI: sessões e threads]
+O protocolo AG-UI tem seu próprio identificador de conversa, `thread_id`, no corpo da requisição. `ag-ui-strands` armazena em cache um agente Strands por `thread_id` e chama `session_manager_provider` **uma vez por thread** — na primeira vez que essa thread é vista.
+
+O `main.py` gerado, portanto, passa `session_manager_provider=lambda input_data: get_session_manager(input_data.thread_id)`, chaveando o estado da conversa nesse mesmo id de thread para que o provedor e o cache do adaptador sempre concordem.
+
+`get_session_manager()` retorna ao ID da sessão AgentCore atual quando chamado sem um argumento, que é como os protocolos HTTP e A2A o usam.
+
+O endpoint AG-UI vincula a sessão duas vezes — uma vez no middleware e novamente dentro do corpo da resposta de streaming. Ambos são necessários: o `BaseHTTPMiddleware` do Starlette sai de seu contexto antes que o corpo do `StreamingResponse` seja consumido, então a segunda vinculação é o que mantém a sessão visível para chamadas MCP e A2A downstream feitas durante o streaming.
+:::
+
+:::caution[Isolamento de sessão]
+O ID da sessão e o `thread_id` são ambos fornecidos pelo chamador, então nenhum deles pode por si só identificar de quem é a conversa. O AgentCore Runtime autoriza invocações contra o ARN do recurso de runtime do agente em vez de contra sessões individuais, e valida o formato de um ID de sessão sem vinculá-lo à identidade do chamador — [definir o escopo de uma sessão para um usuário é responsabilidade do agente](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-instances-security.html).
+
+Com `auth=cognito`, a infraestrutura gerada define `requestHeaderConfiguration.allowlistedHeaders: ['Authorization']`, então o JWT do chamador — já validado pelo autorizador AgentCore — chega ao código do seu agente como um cabeçalho de requisição comum. O ponto de entrada do servidor lê sua claim `sub` e a vincula para a requisição, e `session.py` constrói a chave de armazenamento a partir dela via `get_session_storage_key()`, produzindo `u-<sub>-<conversation_id>`.
+
+Requisições sem uma claim utilizável são rejeitadas com um 401 em vez de retornar a um namespace sem escopo. Sob `nx dev` não há autorizador na frente do agente, então requisições não autenticadas retornam a um único usuário local em vez disso — esse fallback é controlado por `LOCAL_DEV`, que apenas os targets `-dev` definem. A verificação de assinatura é ignorada ao decodificar a claim, já que o AgentCore Runtime já [validou o token durante a autorização de entrada](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-oauth.html).
+
+Com `auth=iam`, SigV4 identifica o principal chamador para o AgentCore Runtime em vez de para o código do seu agente, então o estado da conversa é chaveado apenas no ID da sessão e `bedrock-agentcore:InvokeAgentRuntime` é o limite — conceda-o a backends confiáveis, ou use principais IAM por usuário para que o IAM imponha o escopo.
+
+`get_session_storage_key()` também nivela separadores de caminho, então um ID de conversa não pode atravessar para fora de seu namespace.
+:::
+
+#### Alternativa: restringir sessões ao seu proprietário
+
+O namespace chaveia o armazenamento por chamador, então a conversa de um usuário nunca é retornada a outro. O próprio ID da sessão ainda é o que o cliente enviou, o que importa em dois casos:
+
+- Um ID de sessão seleciona a [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html) que atende a requisição, então seu sistema de arquivos, `/tmp` e caches em processo são compartilhados por cada requisição que resolve para essa sessão. Dois chamadores enviando o mesmo ID compartilham esses mesmo com chaves de armazenamento separadas.
+- O namespace particiona conversas; ele não decide quais sessões um usuário tem permissão para retomar.
+
+Se qualquer um deles importa para você, faça sua aplicação possuir o ID da sessão em vez disso: emita-o de uma API, registre a quem ele pertence e verifique essa propriedade no agente.
+
+**1. Criar sessões através da sua API**
+
+Adicione um procedimento que inicia uma conversa. Ele gera o ID da sessão, resolve o chamador de seu próprio contexto de requisição e armazena o par — por exemplo, em uma tabela criada com o gerador <Link path="guides/py-dynamodb">`py#dynamodb`</Link>:
+
+| Attribute | Example | Notes |
+| --- | --- | --- |
+| `sessionId` | `a5f1…` | Chave de partição — o agente procura um proprietário a partir do ID da sessão que recebe |
+| `userId` | `<sub>` | O chamador autenticado que possui a sessão |
+| `createdAt`, `title` | … | Qualquer coisa que sua UI precise para listar conversas |
+
+Adicione um índice secundário em `userId` se você também quiser listar as próprias sessões de um usuário.
+
+Resolva o chamador do contexto de requisição verificado em vez de um campo de entrada, para que não possa ser fornecido pelo navegador. <Link path="guides/trpc">Implementing Custom Middleware</Link> mostra como para APIs autenticadas por IAM e Cognito, e a própria API pode estar em qualquer linguagem. Um segundo procedimento consultando o índice permite que a UI ofereça a um usuário suas próprias conversas sem ver as de ninguém mais.
+
+**2. Validar propriedade no agente**
+
+O agente recebe o ID da sessão e, com `auth=cognito`, o JWT do chamador. No `SessionIdMiddleware`, procure a sessão e compare `session["userId"]` contra `get_current_user_id()`, retornando um `403` quando eles diferirem em vez de continuar para o manipulador.
+
+A API decide quem possui uma sessão; o agente a impõe. Verificar em ambos os lugares significa que um ID de sessão que vaza ainda é recusado na próxima invocação, e qualquer cliente futuro do agente herda a mesma regra.
+
+:::caution
+Gere um ID de sessão opaco e aleatório e armazene o mapeamento. Derivar um de valores fornecidos pelo usuário — um nome de conversa, um email — é previsível, então um chamador pode chegar a uma sessão que não lhe foi dada.
+:::
+
 :::note[Desenvolvimento Local]
 Ao executar localmente (`LOCAL_DEV=true`, definido automaticamente pelo target `-dev`), os dados da sessão são sempre armazenados em disco em `tmp/agents/strands/<agent-name>` na raiz do workspace, independentemente da opção `session` configurada, por conveniência.
 :::
@@ -526,6 +581,21 @@ A opção `session` controla como o checkpointer LangGraph do seu agente persist
 - **`in-memory`**: Nenhuma tabela ou bucket é provisionado. O estado da conversa é mantido apenas na memória durante o tempo de vida do processo em execução e não sobrevive a reinicializações ou scale-in.
 
 Isso é implementado no `session.py` gerado, que exporta uma função `get_checkpointer()` chamada de `create_agent(..., checkpointer=get_checkpointer())` em `agent.py`.
+
+Ao contrário do Strands, o checkpointer não é resolvido por sessão. Ele é criado uma vez, e o LangGraph seleciona a conversa para ler e escrever usando o `thread_id` na configuração passada no momento da invocação. Qual valor acaba sendo esse `thread_id` depende do protocolo:
+
+- **HTTP**: `main.py` define `{"configurable": {"thread_id": session_id}}`, então o ID da sessão AgentCore *é* o ID da thread LangGraph.
+- **AG-UI**: `ag-ui-langgraph` define o `thread_id` a partir do `thread_id` no corpo da requisição, então o estado da conversa é chaveado na thread AG-UI. O ID da sessão ainda é vinculado ao contexto para chamadas MCP e A2A downstream, mas ele **não** seleciona a conversa.
+
+:::caution[Isolamento de sessão]
+O identificador que seleciona a conversa armazenada é fornecido pelo chamador — o ID da sessão AgentCore para HTTP, ou o `thread_id` AG-UI para AG-UI. Nenhum deles pode por si só identificar de quem é a conversa. O AgentCore Runtime autoriza invocações contra o ARN do recurso de runtime do agente em vez de contra sessões individuais, e valida o formato de um ID de sessão sem vinculá-lo à identidade do chamador — [definir o escopo de uma sessão para um usuário é responsabilidade do agente](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-instances-security.html).
+
+Com `auth=cognito`, a infraestrutura gerada define `requestHeaderConfiguration.allowlistedHeaders: ['Authorization']`, então o JWT do chamador — já validado pelo autorizador AgentCore — chega ao código do seu agente como um cabeçalho de requisição comum. Como o LangGraph seleciona a conversa da configuração em vez de um provedor de sessão, `main.py` define o namespace do `thread_id` da configuração com `get_session_storage_key(session_id, user_id)`.
+
+Requisições sem uma claim `sub` utilizável são rejeitadas com um 401 em vez de retornar a um namespace sem escopo. Sob `nx dev` não há autorizador na frente do agente, então requisições não autenticadas retornam a um único usuário local em vez disso — esse fallback é controlado por `LOCAL_DEV`, que apenas os targets `-dev` definem. A verificação de assinatura é ignorada ao decodificar a claim, já que o AgentCore Runtime já [validou o token durante a autorização de entrada](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-oauth.html).
+
+Com `auth=iam`, SigV4 identifica o principal chamador para o AgentCore Runtime em vez de para o código do seu agente, então as conversas são chaveadas apenas no identificador do chamador e `bedrock-agentcore:InvokeAgentRuntime` é o limite — conceda-o a backends confiáveis.
+:::
 
 :::note[Desenvolvimento Local]
 Ao executar localmente (`LOCAL_DEV=true`, definido automaticamente pelo target `-dev`), `get_checkpointer()` sempre retorna um [`AsyncSqliteSaver`](https://reference.langchain.com/python/langgraph.checkpoint.sqlite/aio/AsyncSqliteSaver) apoiado por um banco de dados SQLite local em `tmp/agents/langchain/<agent-name>` na raiz do workspace, independentemente da opção `session` configurada, por conveniência.

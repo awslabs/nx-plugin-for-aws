@@ -49,6 +49,7 @@ import OptionFilter from '@components/option-filter.astro';
       - mcp-server/ (or custom name if specified)
         - index.ts Exports your server
         - server.ts Main server definition
+        - request-context.ts Per-request details (e.g. the calling agent's session id) for tools that scope stored data per caller
         - stdio.ts Entry point for STDIO transport, useful for simple local MCP servers
         - http.ts Entry point for Streamable HTTP transport, useful for hosting your MCP server
         - tools/
@@ -107,6 +108,39 @@ import { registerMyTool } from './tools/my-tool.js';
 
 registerMyTool(server);
 ```
+
+### 按调用者限定工具数据范围
+
+`createServer` 接收一个描述当前请求的 `McpRequestContext`。通过 Streamable HTTP，这包括调用者的 AgentCore Runtime 会话 ID，<Link path="guides/ts-agent">代理</Link>会在每次出站 MCP 调用时自动转发该 ID。
+
+将其传递给按调用者存储数据的工具：
+
+```typescript title="server.ts"
+export const createServer = async (context: McpRequestContext = {}) => {
+  // ...
+  registerMyTool(server, context);
+};
+```
+
+```typescript title="tools/my-tool.ts"
+export const registerMyTool = (
+  server: McpServer,
+  context: McpRequestContext,
+) => {
+  server.registerTool('my-tool', { /* ... */ }, async ({ itemName }) => {
+    if (!context.sessionId) {
+      throw new Error('No caller session — cannot resolve the owner.');
+    }
+    // Key stored data on the caller's session, not on a tool argument.
+    await save({ owner: context.sessionId, itemName });
+    // ...
+  });
+};
+```
+
+:::caution
+将存储的数据范围限定在请求上下文上，而不是工具参数上。模型可以被说服传递任何它喜欢的值，因此诸如用户或玩家名称之类的参数不是信任边界。在 STDIO 上下文中不存在上下文，因为没有请求。
+:::
 
 ### 添加资源
 

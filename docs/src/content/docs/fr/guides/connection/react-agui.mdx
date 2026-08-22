@@ -92,6 +92,47 @@ Le code généré gère l'authentification en fonction de la configuration de vo
 - **IAM** (par défaut) : utilise des requêtes HTTP signées AWS SigV4. Les identifiants sont obtenus à partir du pool d'identités Cognito configuré avec l'authentification de votre site web.
 - **Cognito** : intègre le jeton d'accès JWT dans l'en-tête `Authorization` en tant que jeton Bearer.
 
+### Sessions et Threads
+
+AG-UI et AgentCore Runtime ont chacun leur propre identifiant pour une conversation, et le hook généré les lie ensemble :
+
+- **`threadId`** — l'identifiant de conversation AG-UI, envoyé dans le corps de la requête. CopilotKit génère un UUID aléatoire par chat sauf si vous passez un `threadId` explicite. C'est sur cela que l'agent indexe l'état de la conversation, car les adaptateurs AG-UI mettent en cache un agent par thread.
+- **Session ID** — la session AgentCore Runtime, envoyée dans l'en-tête `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`. Elle détermine quelle [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html) traite la requête, et est propagée à tous les clients MCP ou A2A en aval.
+
+Le hook généré dérive l'ID de session à partir de l'ID de thread, de sorte qu'un thread de chat correspond à une session AgentCore :
+
+```ts
+// AgentCore session ids must be at least 33 characters.
+function agentCoreSessionId(input: RunAgentInput): string {
+  return (input.threadId ?? '').padEnd(33, '0');
+}
+```
+
+:::note[Le padding n'est pas sans collision]
+AgentCore rejette les ID de session de moins de 33 caractères, donc le hook complète à droite l'ID de thread avec `0`. Deux ID de thread ne différant que par des caractères de fin en dessous de 33 — `abc` et `abc0` — correspondent donc au même ID de session et partagent une microVM.
+
+L'état de la conversation est indexé sur l'ID de thread plutôt que sur l'ID de session complété, donc les deux threads conservent des historiques séparés. Si vous voulez qu'ils soient sur des microVM séparées également, passez des ID de thread qui font déjà au moins 33 caractères :
+
+```tsx
+const threadId = `${conversationName}`.padEnd(33, '0');
+
+<CopilotChat agentId="agent" threadId={threadId} />
+```
+
+Laisser `threadId` non défini est toujours sûr — l'UUID généré par CopilotKit fait 36 caractères.
+:::
+
+:::caution[Les ID de thread sont fournis par le client]
+L'ID de thread provient du navigateur, il ne peut donc pas à lui seul identifier à qui appartient la conversation. AgentCore Runtime autorise les invocations contre l'ARN de ressource du runtime de l'agent plutôt que contre des sessions individuelles, et valide le format d'un ID de session sans le lier à l'identité appelante — [limiter une session à un utilisateur est la responsabilité de l'agent](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-instances-security.html).
+
+La façon dont l'agent généré gère cela dépend de son `auth` :
+
+- **Cognito** : l'état de la conversation est organisé par namespace selon la revendication `sub` du JWT de l'appelant, que l'autorisateur AgentCore a déjà validée et que l'infrastructure autorise à passer à votre code d'agent. Les clés de stockage deviennent `u-<sub>-<threadId>` (chaque partie échappée dans le jeu de caractères que Strands autorise pour les ID de session), donc un appelant fournissant l'ID de thread de quelqu'un d'autre n'atteint jamais que son propre namespace. Les requêtes sans revendication utilisable sont rejetées avec un 401, sauf sous `nx dev`, où il n'y a pas d'autorisateur devant l'agent et les requêtes non authentifiées reviennent à un seul utilisateur local.
+- **IAM** : SigV4 identifie le principal appelant à AgentCore Runtime plutôt qu'à votre code d'agent, donc l'état de la conversation est indexé uniquement sur l'ID de thread et `bedrock-agentcore:InvokeAgentRuntime` est la limite — accordez-le à des backends de confiance. Utilisez l'authentification Cognito lorsque vous voulez un stockage de session par utilisateur dans une application destinée aux utilisateurs finaux.
+
+Pour décider quelles conversations un utilisateur peut reprendre, plutôt que de simplement les partitionner, voir <Link path="guides/ts-agent">Restreindre les sessions à leur propriétaire</Link>.
+:::
+
 ## Infrastructure
 
 <Snippet name="connection/react-agent-infrastructure" parentHeading="Infrastructure" />

@@ -92,6 +92,47 @@ React ウェブサイトをソースプロジェクトとして、AG-UI Agent �
 - **IAM**（デフォルト）：AWS SigV4 署名付き HTTP リクエストを使用します。認証情報は、ウェブサイトの認証で設定された Cognito Identity Pool から取得されます。
 - **Cognito**：JWT アクセストークンを Bearer トークンとして `Authorization` ヘッダーに埋め込みます。
 
+### セッションとスレッド
+
+AG-UI と AgentCore Runtime はそれぞれ会話用の独自の識別子を持ち、生成されたフックはそれらを結び付けます：
+
+- **`threadId`** — AG-UI の会話識別子で、リクエストボディで送信されます。CopilotKit は、明示的な `threadId` を渡さない限り、チャットごとにランダムな UUID を生成します。これは Agent が会話状態をキーとするもので、AG-UI アダプターがスレッドごとに 1 つの Agent をキャッシュするためです。
+- **Session ID** — AgentCore Runtime セッションで、`X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` ヘッダーで送信されます。これは、どの [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html) がリクエストを処理するかを決定し、下流の MCP または A2A クライアントに伝播されます。
+
+生成されたフックはスレッド ID からセッション ID を導出するため、1 つのチャットスレッドが 1 つの AgentCore セッションにマッピングされます：
+
+```ts
+// AgentCore session ids must be at least 33 characters.
+function agentCoreSessionId(input: RunAgentInput): string {
+  return (input.threadId ?? '').padEnd(33, '0');
+}
+```
+
+:::note[パディングは衝突フリーではありません]
+AgentCore は 33 文字未満のセッション ID を拒否するため、フックはスレッド ID を `0` で右パディングします。33 文字未満の末尾文字のみが異なる 2 つのスレッド ID — `abc` と `abc0` — は、同じセッション ID にマッピングされ、1 つの microVM を共有します。
+
+会話状態はパディングされたセッション ID ではなくスレッド ID でキーとされるため、2 つのスレッドは依然として別々の履歴を保持します。それらを別々の microVM 上に配置したい場合は、すでに少なくとも 33 文字のスレッド ID を渡します：
+
+```tsx
+const threadId = `${conversationName}`.padEnd(33, '0');
+
+<CopilotChat agentId="agent" threadId={threadId} />
+```
+
+`threadId` を未設定のままにすることは常に安全です — CopilotKit が生成する UUID は 36 文字です。
+:::
+
+:::caution[スレッド ID はクライアントから提供されます]
+スレッド ID はブラウザから送信されるため、それ自体では誰の会話であるかを識別できません。AgentCore Runtime は、個々のセッションに対してではなく、Agent ランタイムリソース ARN に対して呼び出しを承認し、セッション ID の形式を検証しますが、呼び出し元のアイデンティティに結び付けることはありません — [セッションをユーザーにスコープすることは Agent の責任です](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-instances-security.html)。
+
+生成された Agent がこれをどのように処理するかは、その `auth` に依存します：
+
+- **Cognito**：会話状態は、呼び出し元の JWT の `sub` クレームによって名前空間化されます。これは AgentCore オーソライザーがすでに検証しており、インフラストラクチャが Agent コードに許可リストとして渡します。ストレージキーは `u-<sub>-<threadId>` になります（各部分は Strands がセッション ID に許可する文字セットにエスケープされます）。そのため、呼び出し元が他の誰かのスレッド ID を提供しても、自分の名前空間にのみ到達します。使用可能なクレームのないリクエストは 401 で拒否されますが、`nx dev` の下では Agent の前にオーソライザーがなく、認証されていないリクエストは単一のローカルユーザーにフォールバックします。
+- **IAM**：SigV4 は、Agent コードではなく AgentCore Runtime に対して呼び出し元プリンシパルを識別するため、会話状態はスレッド ID のみでキーとされ、`bedrock-agentcore:InvokeAgentRuntime` が境界となります — 信頼できるバックエンドに付与してください。エンドユーザー向けアプリでユーザーごとのセッションストレージが必要な場合は、Cognito 認証を使用してください。
+
+ユーザーが再開できる会話を決定するには、単にパーティション化するだけでなく、<Link path="guides/ts-agent">セッションを所有者に制限する</Link>を参照してください。
+:::
+
 ## インフラストラクチャ
 
 <Snippet name="connection/react-agent-infrastructure" parentHeading="インフラストラクチャ" />

@@ -513,6 +513,61 @@ CloudWatch AWSコンソールでトレースを確認できます。メニュー
 
 セッションID自体はAgentCore Runtimeセッション（`x-amzn-bedrock-agentcore-runtime-session-id` ヘッダーを介して伝播）から取得され、[`contextvars.ContextVar`](https://docs.python.org/3/library/contextvars.html) ベースのコンテキストにバインドされるため、`get_current_session_id()` はリクエスト内のどこからでも解決できます — <Link path="/guides/connection">`connection` ジェネレーター</Link> を介して接続されたダウンストリームのMCPまたはA2Aクライアントを含め、コール全体で一貫したセッションが共有されます。
 
+:::note[AG-UI: セッションとスレッド]
+AG-UIプロトコルには、リクエストボディに独自の会話識別子 `thread_id` があります。`ag-ui-strands` は `thread_id` ごとに1つのStrandsエージェントをキャッシュし、`session_manager_provider` を**スレッドごとに1回**呼び出します — そのスレッドが最初に見られたときです。
+
+したがって、生成された `main.py` は `session_manager_provider=lambda input_data: get_session_manager(input_data.thread_id)` を渡し、同じスレッドIDで会話状態をキーイングするため、プロバイダーとアダプターのキャッシュは常に一致します。
+
+`get_session_manager()` は引数なしで呼び出された場合、現在のAgentCoreセッションIDにフォールバックします。これがHTTPおよびA2Aプロトコルでの使用方法です。
+
+AG-UIエンドポイントはセッションを2回バインドします — 1回はミドルウェアで、もう1回はストリーミングレスポンスボディ内です。両方が必要です: Starletteの `BaseHTTPMiddleware` は `StreamingResponse` ボディが消費される前にコンテキストを終了するため、2回目のバインドがストリーミング中に行われるダウンストリームのMCPおよびA2A呼び出しに対してセッションを可視化し続けます。
+:::
+
+:::caution[セッションの分離]
+セッションIDと `thread_id` は両方とも呼び出し元によって提供されるため、どちらも単独では誰の会話であるかを識別できません。AgentCore Runtimeは個々のセッションに対してではなく、エージェントランタイムリソースARNに対して呼び出しを認可し、セッションIDの形式を検証しますが、呼び出し元のIDに紐付けません — [セッションをユーザーにスコープすることはエージェントの責任です](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-instances-security.html)。
+
+`auth=cognito` の場合、生成されたインフラストラクチャは `requestHeaderConfiguration.allowlistedHeaders: ['Authorization']` を設定するため、AgentCore認可者によって既に検証された呼び出し元のJWTが通常のリクエストヘッダーとしてエージェントコードに到達します。サーバーエントリーポイントはその `sub` クレームを読み取り、リクエストにバインドし、`session.py` は `get_session_storage_key()` を介してそれからストレージキーを構築し、`u-<sub>-<conversation_id>` を生成します。
+
+使用可能なクレームのないリクエストは、スコープなしの名前空間にフォールバックするのではなく、401で拒否されます。`nx dev` ではエージェントの前に認可者がないため、認証されていないリクエストは代わりに単一のローカルユーザーにフォールバックします — そのフォールバックは `LOCAL_DEV` でゲートされており、`-dev` ターゲットのみが設定します。AgentCore Runtimeは既に [インバウンド認可中にトークンを検証した](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-oauth.html) ため、クレームをデコードする際に署名検証はスキップされます。
+
+`auth=iam` の場合、SigV4はエージェントコードではなくAgentCore Runtimeに対して呼び出し元プリンシパルを識別するため、会話状態はセッションIDのみでキーイングされ、`bedrock-agentcore:InvokeAgentRuntime` が境界となります — 信頼できるバックエンドに付与するか、ユーザーごとのIAMプリンシパルを使用してIAMがスコーピングを強制するようにします。
+
+`get_session_storage_key()` はパス区切り文字もフラット化するため、会話IDはその名前空間から抜け出すことができません。
+:::
+
+#### 代替案: セッションを所有者に制限する
+
+名前空間化は呼び出し元ごとにストレージをキーイングするため、あるユーザーの会話が別のユーザーに返されることはありません。セッションID自体はクライアントが送信したものであり、これが2つのケースで重要になります:
+
+- セッションIDはリクエストを処理する [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html) を選択するため、そのファイルシステム、`/tmp`、およびインプロセスキャッシュは、そのセッションに解決されるすべてのリクエストによって共有されます。2人の呼び出し元が同じIDを送信すると、別々のストレージキーがあってもそれらを共有します。
+- 名前空間化は会話をパーティション化します。ユーザーが再開できるセッションを決定するものではありません。
+
+どちらかが重要な場合は、アプリケーションにセッションIDを所有させてください: APIから発行し、誰に属するかを記録し、エージェントでその所有権をチェックします。
+
+**1. API経由でセッションを作成する**
+
+会話を開始するプロシージャを追加します。セッションIDを生成し、独自のリクエストコンテキストから呼び出し元を解決し、ペアを保存します — 例えば、<Link path="guides/py-dynamodb">`py#dynamodb`</Link> ジェネレーターで作成されたテーブルに:
+
+| 属性 | 例 | 備考 |
+| --- | --- | --- |
+| `sessionId` | `a5f1…` | パーティションキー — エージェントは与えられたセッションIDから所有者を検索します |
+| `userId` | `<sub>` | セッションを所有する認証された呼び出し元 |
+| `createdAt`, `title` | … | UIが会話をリストするために必要なもの |
+
+ユーザー自身のセッションをリストしたい場合は、`userId` にセカンダリインデックスを追加します。
+
+入力フィールドからではなく、検証されたリクエストコンテキストから呼び出し元を解決するため、ブラウザから提供することはできません。<Link path="guides/trpc">カスタムミドルウェアの実装</Link> は、IAMとCognito認証APIの両方でその方法を示しており、API自体は任意の言語で記述できます。インデックスをクエリする2番目のプロシージャにより、UIはユーザーに他のユーザーの会話を見せることなく、自分の会話を提供できます。
+
+**2. エージェントで所有権を検証する**
+
+エージェントはセッションIDを受け取り、`auth=cognito` の場合は呼び出し元のJWTも受け取ります。`SessionIdMiddleware` で、セッションを検索し、`session["userId"]` を `get_current_user_id()` と比較し、異なる場合はハンドラーに続けるのではなく `403` を返します。
+
+APIはセッションの所有者を決定し、エージェントはそれを強制します。両方の場所でチェックすることで、漏洩したセッションIDは次の呼び出し時に拒否され、エージェントの将来のクライアントは同じルールを継承します。
+
+:::caution
+不透明でランダムなセッションIDを生成し、マッピングを保存します。ユーザー提供の値（会話名、メールアドレス）から導出することは予測可能であるため、呼び出し元は与えられていないセッションに到達できます。
+:::
+
 :::note[ローカル開発]
 ローカルで実行する場合（`-dev` ターゲットによって自動的に設定される `LOCAL_DEV=true`）、設定された `session` オプションに関わらず、セッションデータは常にワークスペースルートの `tmp/agents/strands/<agent-name>` 以下のディスクに保存されます（利便性のため）。
 :::
@@ -526,6 +581,21 @@ CloudWatch AWSコンソールでトレースを確認できます。メニュー
 - **`in-memory`**: テーブルもバケットもプロビジョニングされません。会話状態は実行中のプロセスの存続期間中のみメモリに保持され、再起動やスケールインでは保持されません。
 
 これは生成された `session.py` に実装されており、`agent.py` の `create_agent(..., checkpointer=get_checkpointer())` から呼び出される `get_checkpointer()` 関数をエクスポートします。
+
+Strandsとは異なり、チェックポインターはセッションごとに解決されません。一度作成され、LangGraphは呼び出し時に渡される設定の `thread_id` を使用して読み書きする会話を選択します。その `thread_id` として最終的にどの値になるかはプロトコルによって異なります:
+
+- **HTTP**: `main.py` は `{"configurable": {"thread_id": session_id}}` を設定するため、AgentCoreセッションIDがLangGraphスレッドID*になります*。
+- **AG-UI**: `ag-ui-langgraph` はリクエストボディの `thread_id` から `thread_id` を設定するため、会話状態はAG-UIスレッドでキーイングされます。セッションIDはダウンストリームのMCPおよびA2A呼び出しのためにコンテキストにバインドされたままですが、会話を選択**しません**。
+
+:::caution[セッションの分離]
+保存された会話を選択する識別子は呼び出し元によって提供されます — HTTPの場合はAgentCoreセッションID、AG-UIの場合はAG-UI `thread_id`。どちらも単独では誰の会話であるかを識別できません。AgentCore Runtimeは個々のセッションに対してではなく、エージェントランタイムリソースARNに対して呼び出しを認可し、セッションIDの形式を検証しますが、呼び出し元のIDに紐付けません — [セッションをユーザーにスコープすることはエージェントの責任です](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-instances-security.html)。
+
+`auth=cognito` の場合、生成されたインフラストラクチャは `requestHeaderConfiguration.allowlistedHeaders: ['Authorization']` を設定するため、AgentCore認可者によって既に検証された呼び出し元のJWTが通常のリクエストヘッダーとしてエージェントコードに到達します。LangGraphはセッションプロバイダーではなく設定から会話を選択するため、`main.py` は `get_session_storage_key(session_id, user_id)` で設定の `thread_id` 自体を名前空間化します。
+
+使用可能な `sub` クレームのないリクエストは、スコープなしの名前空間にフォールバックするのではなく、401で拒否されます。`nx dev` ではエージェントの前に認可者がないため、認証されていないリクエストは代わりに単一のローカルユーザーにフォールバックします — そのフォールバックは `LOCAL_DEV` でゲートされており、`-dev` ターゲットのみが設定します。AgentCore Runtimeは既に [インバウンド認可中にトークンを検証した](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-oauth.html) ため、クレームをデコードする際に署名検証はスキップされます。
+
+`auth=iam` の場合、SigV4はエージェントコードではなくAgentCore Runtimeに対して呼び出し元プリンシパルを識別するため、会話は呼び出し元の識別子のみでキーイングされ、`bedrock-agentcore:InvokeAgentRuntime` が境界となります — 信頼できるバックエンドに付与します。
+:::
 
 :::note[ローカル開発]
 ローカルで実行する場合（`-dev` ターゲットによって自動的に設定される `LOCAL_DEV=true`）、設定された `session` オプションに関わらず、`get_checkpointer()` は常にワークスペースルートの `tmp/agents/langchain/<agent-name>` 以下のローカルSQLiteデータベースに基づく [`AsyncSqliteSaver`](https://reference.langchain.com/python/langgraph.checkpoint.sqlite/aio/AsyncSqliteSaver) を返します（利便性のため）。
@@ -680,7 +750,7 @@ model = ChatBedrockConverse(
   <ConnectionCard
     title="React to Python Agent"
     description="Call a Python Agent from a React website"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-py-agent`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'jp'}/guides/connection/react-py-agent`}
     source="react"
     target="strands"
     targetBadge="python"
@@ -688,14 +758,14 @@ model = ChatBedrockConverse(
   <ConnectionCard
     title="React to AG-UI Agent"
     description="Call an Agent exposing the AG-UI protocol from a React website via CopilotKit"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-agui`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'jp'}/guides/connection/react-agui`}
     source="react"
     target="copilotkit"
   />
   <ConnectionCard
     title="Python Agent to MCP"
     description="Connect a Python Agent to an MCP server"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-mcp`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'jp'}/guides/connection/py-agent-mcp`}
     source="strands"
     sourceBadge="python"
     target="mcp"
@@ -703,7 +773,7 @@ model = ChatBedrockConverse(
   <ConnectionCard
     title="Python Agent to A2A Agent"
     description="Connect a Python Agent to a remote A2A agent"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-a2a`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'jp'}/guides/connection/py-agent-a2a`}
     source="strands"
     sourceBadge="python"
     target="a2a"
@@ -711,7 +781,7 @@ model = ChatBedrockConverse(
   <ConnectionCard
     title="TypeScript Agent to A2A Agent"
     description="Connect a TypeScript Agent to a remote A2A agent"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/ts-agent-a2a`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'jp'}/guides/connection/ts-agent-a2a`}
     source="strands"
     sourceBadge="typescript"
     target="a2a"
@@ -719,7 +789,7 @@ model = ChatBedrockConverse(
   <ConnectionCard
     title="Python Agent to Python DynamoDB"
     description="Connect a Python Agent to a DynamoDB table"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-dynamodb`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'jp'}/guides/connection/py-agent-dynamodb`}
     source="strands"
     sourceBadge="python"
     target="dynamodb"
@@ -728,7 +798,7 @@ model = ChatBedrockConverse(
   <ConnectionCard
     title="Python Agent to AgentCore Gateway"
     description="Connect a Python Agent to an AgentCore Gateway"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-gateway`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'jp'}/guides/connection/py-agent-gateway`}
     source="strands"
     sourceBadge="python"
     target="agentcore"
@@ -736,7 +806,7 @@ model = ChatBedrockConverse(
   <ConnectionCard
     title="AgentCore Gateway to Agent"
     description="Front an agent with an AgentCore Gateway as a runtime target"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/agentcore-gateway-agent`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'jp'}/guides/connection/agentcore-gateway-agent`}
     source="agentcore"
     target="strands"
   />
