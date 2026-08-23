@@ -34,14 +34,19 @@ import {
  *   `props` parameter through to `DynamoDBTable`, so no change is needed
  *   there.
  * - The vended Terraform dynamodb core module gains the equivalent
- *   `encryption` and `kms_key_arn` variables (`encryption` also accepts
- *   `DEFAULT`, the AWS owned key, which CDK already supports for free via
- *   `TableEncryption.DEFAULT`), with the KMS key made conditional via
- *   `count` and `server_side_encryption.enabled` tied to `encryption`.
+ *   `encryption`, `kms_key_arn` and `create_kms_key` variables (`encryption`
+ *   also accepts `DEFAULT`, the AWS owned key, which CDK already supports for
+ *   free via `TableEncryption.DEFAULT`), with the KMS key made conditional on
+ *   `create_kms_key` (not on `kms_key_arn`'s nullness, which `count` can't
+ *   depend on when the ARN comes from another resource) and
+ *   `server_side_encryption.enabled` tied to `encryption`. `AWS_MANAGED`
+ *   resolves to the explicit `alias/aws/dynamodb` ARN rather than `null`,
+ *   since the provider's `kms_key_arn` is Optional+Computed and a `null`
+ *   there means "leave whatever is there", not "clear it".
  * - The vended Terraform per-table app module (`app/dynamodb/<name>/<name>.tf`)
- *   gains pass-through `encryption` and `kms_key_arn` variables forwarded to
- *   the core module call, matching its existing `enable_key_rotation`
- *   pass-through.
+ *   gains pass-through `encryption`, `kms_key_arn` and `create_kms_key`
+ *   variables forwarded to the core module call, matching its existing
+ *   `enable_key_rotation` pass-through.
  *
  * These files are generated with `KeepExisting`, so without this an upgraded
  * workspace has generators that support this configuration but vended files
@@ -204,13 +209,19 @@ const NEW_TERRAFORM_VARIABLES_TEXT = [
   '}',
   '',
   'variable "kms_key_arn" {',
-  '  description = "ARN of an existing KMS key used to encrypt the table when encryption is CUSTOMER_MANAGED. When not provided, a new key is created. Note that a customer-supplied key must already grant the DynamoDB service the necessary permissions in its own key policy."',
+  '  description = "ARN of an existing KMS key used to encrypt the table when encryption is CUSTOMER_MANAGED. When not provided and create_kms_key is true, a new key is created. Note that a customer-supplied key must already grant the DynamoDB service the necessary permissions in its own key policy."',
   '  type        = string',
   '  default     = null',
   '}',
   '',
+  'variable "create_kms_key" {',
+  '  description = "Whether to create a KMS key for the table. Only applies when encryption is CUSTOMER_MANAGED. Set to false when supplying kms_key_arn."',
+  '  type        = bool',
+  '  default     = true',
+  '}',
+  '',
   'variable "enable_key_rotation" {',
-  '  description = "Whether to enable automatic key rotation on the KMS key used to encrypt the table. Only applies when encryption is CUSTOMER_MANAGED and kms_key_arn is not provided."',
+  '  description = "Whether to enable automatic key rotation on the KMS key used to encrypt the table. Only applies when encryption is CUSTOMER_MANAGED and create_kms_key is true."',
   '  type        = bool',
   '  default     = true',
   '}',
@@ -248,18 +259,24 @@ const migrateTerraformModule = async (
     ].join('\n'),
   );
   const LOCALS_BLOCK = hcl('`locals { $_ }`');
+  const DATA_PARTITION_LINE = hcl('`data "aws_partition" "current" {}`');
   const KMS_KEY_BLOCK = hcl('`resource "aws_kms_key" "table" { $_ }`');
   const SSE_ENABLED_LINE = hcl('`enabled = true`');
   const SSE_KMS_KEY_LINE = hcl('`kms_key_arn = aws_kms_key.table.arn`');
   const OUTPUT_VALUE_LINE = hcl('`value = aws_kms_key.table.arn`');
+  const OUTPUT_DESCRIPTION_LINE = hcl(
+    '`description = "ARN of the KMS key used to encrypt the DynamoDB table."`',
+  );
 
   const anchors = [
     OLD_ENABLE_KEY_ROTATION_VAR,
     LOCALS_BLOCK,
+    DATA_PARTITION_LINE,
     KMS_KEY_BLOCK,
     SSE_ENABLED_LINE,
     SSE_KMS_KEY_LINE,
     OUTPUT_VALUE_LINE,
+    OUTPUT_DESCRIPTION_LINE,
   ];
 
   const allPresent = (
@@ -291,13 +308,21 @@ const migrateTerraformModule = async (
       `\`locals { $body }\` => \`locals {\n  $body\n\n  ${GRIT_INSERT_PLACEHOLDER}\n}\``,
     ),
     [
-      'create_table_key = var.encryption == "CUSTOMER_MANAGED" && var.kms_key_arn == null',
+      'create_table_key = var.encryption == "CUSTOMER_MANAGED" && var.create_kms_key',
       'table_kms_key_arn = (',
-      '  var.encryption != "CUSTOMER_MANAGED" ? null :',
-      '  local.create_table_key ? aws_kms_key.table[0].arn :',
-      '  var.kms_key_arn',
+      '  var.encryption == "CUSTOMER_MANAGED" ? (local.create_table_key ? aws_kms_key.table[0].arn : var.kms_key_arn) :',
+      '  var.encryption == "AWS_MANAGED" ? "arn:${data.aws_partition.current.partition}:kms:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:alias/aws/dynamodb" :',
+      '  null',
       ')',
     ].join('\n  '),
+  );
+
+  // 2b. Region is needed to resolve the AWS_MANAGED key's alias ARN above.
+  await insertViaGritQL(
+    tree,
+    TERRAFORM_DYNAMODB_FILE,
+    `${DATA_PARTITION_LINE} => \`data "aws_partition" "current" {}\n${GRIT_INSERT_PLACEHOLDER}\``,
+    'data "aws_region" "current" {}',
   );
 
   // 3. Make the KMS key conditional on encryption/kms_key_arn.
@@ -342,6 +367,11 @@ const migrateTerraformModule = async (
     TERRAFORM_DYNAMODB_FILE,
     `${OUTPUT_VALUE_LINE} => \`value = local.table_kms_key_arn\``,
   );
+  await applyGritQL(
+    tree,
+    TERRAFORM_DYNAMODB_FILE,
+    `${OUTPUT_DESCRIPTION_LINE} => \`description = "ARN of the KMS key used to encrypt the DynamoDB table, or null when using the AWS owned key (encryption = DEFAULT)."\``,
+  );
 };
 
 const NEW_APP_MODULE_VARIABLES_TEXT = [
@@ -357,13 +387,19 @@ const NEW_APP_MODULE_VARIABLES_TEXT = [
   '}',
   '',
   'variable "kms_key_arn" {',
-  '  description = "ARN of an existing KMS key used to encrypt the table when encryption is CUSTOMER_MANAGED. When not provided, a new key is created. Note that a customer-supplied key must already grant the DynamoDB service the necessary permissions in its own key policy."',
+  '  description = "ARN of an existing KMS key used to encrypt the table when encryption is CUSTOMER_MANAGED. When not provided and create_kms_key is true, a new key is created. Note that a customer-supplied key must already grant the DynamoDB service the necessary permissions in its own key policy."',
   '  type        = string',
   '  default     = null',
   '}',
   '',
+  'variable "create_kms_key" {',
+  '  description = "Whether to create a KMS key for the table. Only applies when encryption is CUSTOMER_MANAGED. Set to false when supplying kms_key_arn."',
+  '  type        = bool',
+  '  default     = true',
+  '}',
+  '',
   'variable "enable_key_rotation" {',
-  '  description = "Whether to enable automatic key rotation on the KMS key used to encrypt the table. Only applies when encryption is CUSTOMER_MANAGED and kms_key_arn is not provided."',
+  '  description = "Whether to enable automatic key rotation on the KMS key used to encrypt the table. Only applies when encryption is CUSTOMER_MANAGED and create_kms_key is true."',
   '  type        = bool',
   '  default     = true',
   '}',
@@ -439,9 +475,11 @@ const migrateTerraformAppModules = async (
       hcl(
         `\`deletion_protection_enabled = var.deletion_protection_enabled\` => \`deletion_protection_enabled = var.deletion_protection_enabled\n  ${GRIT_INSERT_PLACEHOLDER}\``,
       ),
-      ['encryption   = var.encryption', 'kms_key_arn  = var.kms_key_arn'].join(
-        '\n  ',
-      ),
+      [
+        'encryption      = var.encryption',
+        'kms_key_arn     = var.kms_key_arn',
+        'create_kms_key  = var.create_kms_key',
+      ].join('\n  '),
     );
   }
 };

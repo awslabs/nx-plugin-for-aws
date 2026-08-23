@@ -406,13 +406,18 @@ describe('dynamodb-configurable-encryption migration', () => {
 
     expect(contents).toContain('variable "encryption"');
     expect(contents).toContain('variable "kms_key_arn"');
+    expect(contents).toContain('variable "create_kms_key"');
     expect(contents).toContain(
       'contains(["CUSTOMER_MANAGED", "AWS_MANAGED", "DEFAULT"], var.encryption)',
     );
     expect(contents).toContain(
-      'create_table_key = var.encryption == "CUSTOMER_MANAGED" && var.kms_key_arn == null',
+      'create_table_key = var.encryption == "CUSTOMER_MANAGED" && var.create_kms_key',
     );
     expect(contents).toContain('table_kms_key_arn = (');
+    expect(contents).toContain(
+      'var.encryption == "AWS_MANAGED" ? "arn:${data.aws_partition.current.partition}:kms:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:alias/aws/dynamodb" :',
+    );
+    expect(contents).toContain('data "aws_region" "current" {}');
     expect(contents).toContain('count = local.create_table_key ? 1 : 0');
     expect(contents).toContain('enabled = var.encryption != "DEFAULT"');
     expect(contents).toContain(
@@ -422,6 +427,9 @@ describe('dynamodb-configurable-encryption migration', () => {
     expect(contents).not.toContain('kms_key_arn = aws_kms_key.table.arn');
     expect(contents).not.toContain('enabled     = true');
     expect(contents).toContain('value = local.table_kms_key_arn');
+    expect(contents).toContain(
+      'description = "ARN of the KMS key used to encrypt the DynamoDB table, or null when using the AWS owned key (encryption = DEFAULT)."',
+    );
     expect(result.nextSteps).toEqual([]);
     expect(contents).toMatchSnapshot();
   });
@@ -433,6 +441,7 @@ describe('dynamodb-configurable-encryption migration', () => {
 
     expect(contents).toContain('variable "encryption"');
     expect(contents).toContain('variable "kms_key_arn"');
+    expect(contents).toContain('variable "create_kms_key"');
     expect(contents).toContain(
       'contains(["CUSTOMER_MANAGED", "AWS_MANAGED", "DEFAULT"], var.encryption)',
     );
@@ -440,6 +449,7 @@ describe('dynamodb-configurable-encryption migration', () => {
     expect(contents).toContain('= var.encryption');
     expect(contents).toContain('kms_key_arn');
     expect(contents).toContain('= var.kms_key_arn');
+    expect(contents).toContain('= var.create_kms_key');
     expect(result.nextSteps).toEqual([]);
     expect(contents).toMatchSnapshot();
   });
