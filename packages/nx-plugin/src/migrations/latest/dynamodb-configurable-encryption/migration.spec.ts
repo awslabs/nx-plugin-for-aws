@@ -395,6 +395,9 @@ describe('dynamodb-configurable-encryption migration', () => {
     expect(contents).not.toContain(
       'encryption: TableEncryption.CUSTOMER_MANAGED,',
     );
+    expect(contents).toContain(
+      'Only applies when `encryption` is `TableEncryption.CUSTOMER_MANAGED` and no',
+    );
     expect(result.nextSteps).toEqual([]);
     expect(contents).toMatchSnapshot();
   });

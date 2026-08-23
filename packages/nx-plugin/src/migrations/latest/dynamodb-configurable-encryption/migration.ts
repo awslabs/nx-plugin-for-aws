@@ -161,6 +161,24 @@ const migrateCdkConstruct = async (
   `,
   );
 
+  // Update the enableKeyRotation field's own comment to note it now only
+  // applies to the auto-created key, matching the vended template exactly.
+  // Routed through the insert placeholder (rather than embedding the text
+  // directly in the GritQL rewrite) since the comment's own backticks would
+  // otherwise be parsed as GritQL code-block delimiters.
+  await insertViaGritQL(
+    tree,
+    CDK_DYNAMODB_FILE,
+    `${ENABLE_KEY_ROTATION_COMMENT} => \`${GRIT_INSERT_PLACEHOLDER}\``,
+    `/**
+   * Whether to enable automatic key rotation on the KMS key used to encrypt the table.
+   * Only applies when \`encryption\` is \`TableEncryption.CUSTOMER_MANAGED\` and no
+   * \`encryptionKey\` is supplied.
+   *
+   * @default true
+   */`,
+  );
+
   await applyGritQL(
     tree,
     CDK_DYNAMODB_FILE,
@@ -198,7 +216,7 @@ const hcl = (pattern: string) => `language hcl\n${pattern}`;
 
 const NEW_TERRAFORM_VARIABLES_TEXT = [
   'variable "encryption" {',
-  '  description = "Server-side encryption for the table. One of CUSTOMER_MANAGED, AWS_MANAGED or DEFAULT (the AWS owned key, at no cost and with no key to manage)."',
+  '  description = "Server-side encryption for the table. One of CUSTOMER_MANAGED, AWS_MANAGED or DEFAULT (the AWS owned key, at no cost and with no key to manage). Changing this on an already-deployed table away from CUSTOMER_MANAGED requires a manual step first - see the ts#dynamodb generator docs."',
   '  type        = string',
   '  default     = "CUSTOMER_MANAGED"',
   '',
@@ -376,7 +394,7 @@ const migrateTerraformModule = async (
 
 const NEW_APP_MODULE_VARIABLES_TEXT = [
   'variable "encryption" {',
-  '  description = "Server-side encryption for the table. One of CUSTOMER_MANAGED, AWS_MANAGED or DEFAULT (the AWS owned key, at no cost and with no key to manage)."',
+  '  description = "Server-side encryption for the table. One of CUSTOMER_MANAGED, AWS_MANAGED or DEFAULT (the AWS owned key, at no cost and with no key to manage). Changing this on an already-deployed table away from CUSTOMER_MANAGED requires a manual step first - see the ts#dynamodb generator docs."',
   '  type        = string',
   '  default     = "CUSTOMER_MANAGED"',
   '',

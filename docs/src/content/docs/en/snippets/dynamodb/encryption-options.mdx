@@ -2,6 +2,7 @@
 title: Encryption Options
 ---
 import Infrastructure from '@components/infrastructure.astro';
+import OptionFilter from '@components/option-filter.astro';
 
 #### Use an AWS Managed Key
 
@@ -18,6 +19,16 @@ const table = new MyTable(this, 'Table', {
   encryption: TableEncryption.AWS_MANAGED,
 });
 ```
+
+:::tip[Checkov]
+Choosing `AWS_MANAGED` means the table is no longer encrypted with a customer-managed key, which fails Checkov's `CKV_AWS_119`. Suppress it on the table:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { suppressRules } from '@my-scope/common-constructs';
+
+suppressRules(table.table, ['CKV_AWS_119'], 'Using an AWS managed key rather than a customer-managed CMK');
+```
+:::
 </Fragment>
 <Fragment slot="terraform">
 
@@ -45,6 +56,16 @@ const table = new MyTable(this, 'Table', {
   encryption: TableEncryption.DEFAULT,
 });
 ```
+
+:::tip[Checkov]
+Choosing `DEFAULT` means the table is no longer encrypted with a customer-managed key, which fails Checkov's `CKV_AWS_119`. Suppress it on the table:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { suppressRules } from '@my-scope/common-constructs';
+
+suppressRules(table.table, ['CKV_AWS_119'], 'Using the AWS owned key rather than a customer-managed CMK');
+```
+:::
 </Fragment>
 <Fragment slot="terraform">
 
@@ -56,6 +77,28 @@ module "my_table" {
 ```
 </Fragment>
 </Infrastructure>
+
+<OptionFilter when={{ iac: 'terraform' }} description="Switching an already-deployed table away from CUSTOMER_MANAGED">
+#### Switching away from CUSTOMER_MANAGED
+
+On an **already-deployed** table, changing `encryption` away from `CUSTOMER_MANAGED` (to either `AWS_MANAGED` or `DEFAULT`) in a single `terraform apply` fails: Terraform destroys the customer-managed key before updating the table, and DynamoDB then rejects the update because the key is already pending deletion.
+
+Work around it by updating the table's encryption directly via the AWS CLI first, then letting Terraform catch up and clean up the orphaned key:
+
+```bash
+# For AWS_MANAGED:
+aws dynamodb update-table --table-name <table-name> \
+  --sse-specification Enabled=true,SSEType=KMS,KMSMasterKeyId=alias/aws/dynamodb
+
+# For DEFAULT:
+aws dynamodb update-table --table-name <table-name> --sse-specification Enabled=false
+
+# Then wait for this to report ENABLED (or for SSEDescription to disappear, for DEFAULT):
+aws dynamodb describe-table --table-name <table-name> --query Table.SSEDescription.Status
+```
+
+Then update `encryption` in your Terraform config and run `terraform apply` as normal — Terraform now only needs to destroy the already-unused key, with nothing left depending on it.
+</OptionFilter>
 
 #### Use Your Own KMS Key
 
@@ -102,6 +145,16 @@ const table = new MyTable(this, 'Table', {
   enableKeyRotation: false,
 });
 ```
+
+:::tip[Checkov]
+Disabling key rotation, or bringing your own key that doesn't rotate, fails Checkov's `CKV_AWS_7`. Suppress it on the key:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { suppressRules } from '@my-scope/common-constructs';
+
+suppressRules(table.table.encryptionKey!, ['CKV_AWS_7'], 'Key rotation is managed externally');
+```
+:::
 </Fragment>
 <Fragment slot="terraform">
 
