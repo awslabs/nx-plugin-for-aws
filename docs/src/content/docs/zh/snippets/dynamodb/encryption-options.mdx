@@ -2,6 +2,7 @@
 title: 加密选项
 ---
 import Infrastructure from '@components/infrastructure.astro';
+import OptionFilter from '@components/option-filter.astro';
 
 #### 使用 AWS 托管密钥
 
@@ -18,6 +19,16 @@ const table = new MyTable(this, 'Table', {
   encryption: TableEncryption.AWS_MANAGED,
 });
 ```
+
+:::tip[Checkov]
+选择 `AWS_MANAGED` 意味着表不再使用客户托管密钥加密，这会导致 Checkov 的 `CKV_AWS_119` 检查失败。在表上抑制该规则：
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { suppressRules } from '@my-scope/common-constructs';
+
+suppressRules(table.table, ['CKV_AWS_119'], 'Using an AWS managed key rather than a customer-managed CMK');
+```
+:::
 </Fragment>
 <Fragment slot="terraform">
 
@@ -45,6 +56,16 @@ const table = new MyTable(this, 'Table', {
   encryption: TableEncryption.DEFAULT,
 });
 ```
+
+:::tip[Checkov]
+选择 `DEFAULT` 意味着表不再使用客户托管密钥加密，这会导致 Checkov 的 `CKV_AWS_119` 检查失败。在表上抑制该规则：
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { suppressRules } from '@my-scope/common-constructs';
+
+suppressRules(table.table, ['CKV_AWS_119'], 'Using the AWS owned key rather than a customer-managed CMK');
+```
+:::
 </Fragment>
 <Fragment slot="terraform">
 
@@ -56,6 +77,28 @@ module "my_table" {
 ```
 </Fragment>
 </Infrastructure>
+
+<OptionFilter when={{ iac: 'terraform' }} description="Switching an already-deployed table away from CUSTOMER_MANAGED">
+#### 从 CUSTOMER_MANAGED 切换
+
+在**已部署**的表上，在单次 `terraform apply` 中将 `encryption` 从 `CUSTOMER_MANAGED` 更改为 `AWS_MANAGED` 或 `DEFAULT` 会失败：Terraform 在更新表之前销毁客户托管密钥，然后 DynamoDB 会拒绝更新，因为密钥已处于待删除状态。
+
+解决方法是先通过 AWS CLI 直接更新表的加密，然后让 Terraform 跟进并清理孤立的密钥：
+
+```bash
+# For AWS_MANAGED:
+aws dynamodb update-table --table-name <table-name> \
+  --sse-specification Enabled=true,SSEType=KMS,KMSMasterKeyId=alias/aws/dynamodb
+
+# For DEFAULT:
+aws dynamodb update-table --table-name <table-name> --sse-specification Enabled=false
+
+# Then wait for this to report ENABLED (or for SSEDescription to disappear, for DEFAULT):
+aws dynamodb describe-table --table-name <table-name> --query Table.SSEDescription.Status
+```
+
+然后在 Terraform 配置中更新 `encryption` 并正常运行 `terraform apply`——Terraform 现在只需要销毁已经未使用的密钥，没有任何东西依赖它。
+</OptionFilter>
 
 #### 使用您自己的 KMS 密钥
 
@@ -102,6 +145,16 @@ const table = new MyTable(this, 'Table', {
   enableKeyRotation: false,
 });
 ```
+
+:::tip[Checkov]
+禁用密钥轮换，或使用不轮换的自己的密钥，会导致 Checkov 的 `CKV_AWS_7` 检查失败。在密钥上抑制该规则：
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { suppressRules } from '@my-scope/common-constructs';
+
+suppressRules(table.table.encryptionKey!, ['CKV_AWS_7'], 'Key rotation is managed externally');
+```
+:::
 </Fragment>
 <Fragment slot="terraform">
 

@@ -2,6 +2,7 @@
 title: 암호화 옵션
 ---
 import Infrastructure from '@components/infrastructure.astro';
+import OptionFilter from '@components/option-filter.astro';
 
 #### AWS 관리형 키 사용
 
@@ -18,6 +19,16 @@ const table = new MyTable(this, 'Table', {
   encryption: TableEncryption.AWS_MANAGED,
 });
 ```
+
+:::tip[Checkov]
+`AWS_MANAGED`를 선택하면 테이블이 더 이상 고객 관리형 키로 암호화되지 않으므로 Checkov의 `CKV_AWS_119`가 실패합니다. 테이블에서 이를 억제하세요:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { suppressRules } from '@my-scope/common-constructs';
+
+suppressRules(table.table, ['CKV_AWS_119'], 'Using an AWS managed key rather than a customer-managed CMK');
+```
+:::
 </Fragment>
 <Fragment slot="terraform">
 
@@ -45,6 +56,16 @@ const table = new MyTable(this, 'Table', {
   encryption: TableEncryption.DEFAULT,
 });
 ```
+
+:::tip[Checkov]
+`DEFAULT`를 선택하면 테이블이 더 이상 고객 관리형 키로 암호화되지 않으므로 Checkov의 `CKV_AWS_119`가 실패합니다. 테이블에서 이를 억제하세요:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { suppressRules } from '@my-scope/common-constructs';
+
+suppressRules(table.table, ['CKV_AWS_119'], 'Using the AWS owned key rather than a customer-managed CMK');
+```
+:::
 </Fragment>
 <Fragment slot="terraform">
 
@@ -56,6 +77,28 @@ module "my_table" {
 ```
 </Fragment>
 </Infrastructure>
+
+<OptionFilter when={{ iac: 'terraform' }} description="이미 배포된 테이블을 CUSTOMER_MANAGED에서 전환">
+#### CUSTOMER_MANAGED에서 전환
+
+**이미 배포된** 테이블에서 단일 `terraform apply`로 `encryption`을 `CUSTOMER_MANAGED`에서 (`AWS_MANAGED` 또는 `DEFAULT`로) 변경하면 실패합니다: Terraform이 테이블을 업데이트하기 전에 고객 관리형 키를 삭제하고, DynamoDB는 키가 이미 삭제 대기 중이기 때문에 업데이트를 거부합니다.
+
+먼저 AWS CLI를 통해 테이블의 암호화를 직접 업데이트한 다음 Terraform이 따라잡고 고아가 된 키를 정리하도록 하여 이 문제를 해결하세요:
+
+```bash
+# For AWS_MANAGED:
+aws dynamodb update-table --table-name <table-name> \
+  --sse-specification Enabled=true,SSEType=KMS,KMSMasterKeyId=alias/aws/dynamodb
+
+# For DEFAULT:
+aws dynamodb update-table --table-name <table-name> --sse-specification Enabled=false
+
+# Then wait for this to report ENABLED (or for SSEDescription to disappear, for DEFAULT):
+aws dynamodb describe-table --table-name <table-name> --query Table.SSEDescription.Status
+```
+
+그런 다음 Terraform 구성에서 `encryption`을 업데이트하고 평소처럼 `terraform apply`를 실행하세요 — 이제 Terraform은 이미 사용되지 않는 키만 삭제하면 되며, 더 이상 의존하는 것이 없습니다.
+</OptionFilter>
 
 #### 자체 KMS 키 사용
 
@@ -102,6 +145,16 @@ const table = new MyTable(this, 'Table', {
   enableKeyRotation: false,
 });
 ```
+
+:::tip[Checkov]
+키 로테이션을 비활성화하거나 로테이션되지 않는 자체 키를 가져오면 Checkov의 `CKV_AWS_7`이 실패합니다. 키에서 이를 억제하세요:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { suppressRules } from '@my-scope/common-constructs';
+
+suppressRules(table.table.encryptionKey!, ['CKV_AWS_7'], 'Key rotation is managed externally');
+```
+:::
 </Fragment>
 <Fragment slot="terraform">
 
