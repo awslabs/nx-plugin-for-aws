@@ -10,7 +10,7 @@ import {
   toPythonType,
   toTypeScriptType,
 } from './languages.js';
-import type { Model } from './types.js';
+import type { Model, PythonType } from './types.js';
 
 const createModel = (partial: Partial<Model>): Model => ({
   $refs: [],
@@ -211,18 +211,54 @@ describe('languages', () => {
   });
 
   describe('qualifyPythonType', () => {
-    it('prefixes user-defined names', () => {
-      expect(qualifyPythonType('Pet', 'types.')).toBe('types.Pet');
-      expect(qualifyPythonType('list[Pet]', 'types.')).toBe('list[types.Pet]');
-      expect(qualifyPythonType('dict[str, Pet]', 'types.')).toBe(
+    const pet: PythonType = { kind: 'reference', name: 'Pet' };
+    const str: PythonType = { kind: 'builtin', name: 'str' };
+
+    it('prefixes class references, at any depth', () => {
+      expect(qualifyPythonType(pet, 'types.')).toBe('types.Pet');
+      expect(qualifyPythonType({ kind: 'list', element: pet }, 'types.')).toBe(
+        'list[types.Pet]',
+      );
+      expect(qualifyPythonType({ kind: 'dict', value: pet }, 'types.')).toBe(
         'dict[str, types.Pet]',
       );
+      expect(
+        qualifyPythonType(
+          { kind: 'optional', inner: { kind: 'list', element: pet } },
+          'types.',
+        ),
+      ).toBe('Optional[list[types.Pet]]');
+      expect(
+        qualifyPythonType({ kind: 'tuple', members: [str, pet] }, 'types.'),
+      ).toBe('tuple[str, types.Pet]');
     });
 
-    it('leaves built-ins and Literals untouched', () => {
-      expect(qualifyPythonType('str', 'types.')).toBe('str');
-      expect(qualifyPythonType('list[int]', 'types.')).toBe('list[int]');
-      expect(qualifyPythonType('Literal["a"]', 'types.')).toBe('Literal["a"]');
+    it('leaves built-ins and literals untouched', () => {
+      expect(qualifyPythonType(str, 'types.')).toBe('str');
+      expect(
+        qualifyPythonType(
+          { kind: 'list', element: { kind: 'builtin', name: 'int' } },
+          'types.',
+        ),
+      ).toBe('list[int]');
+      expect(
+        qualifyPythonType({ kind: 'literal', values: ['"a"'] }, 'types.'),
+      ).toBe('Literal["a"]');
+    });
+
+    // A literal's text is data, not something to parse: a value containing a
+    // bracket or a class name must survive untouched.
+    it('never rewrites the inside of a literal', () => {
+      expect(
+        qualifyPythonType(
+          { kind: 'literal', values: ['"list[Pet]"', '"Pet"'] },
+          'types.',
+        ),
+      ).toBe('Literal["list[Pet]", "Pet"]');
+    });
+
+    it('renders Any for a missing type', () => {
+      expect(qualifyPythonType(undefined, 'types.')).toBe('Any');
     });
   });
 

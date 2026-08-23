@@ -20,6 +20,7 @@ import {
   toPythonClassName,
   toPythonName,
   toPythonType,
+  toPythonTypeTree,
   toTypeScriptModelName,
   toTypeScriptName,
   toTypeScriptType,
@@ -38,6 +39,7 @@ import {
   type Operation,
   type PatternPropertyModel,
   PRIMITIVE_TYPES,
+  type PythonType,
   type RequestInput,
   type RequestShape,
   type Service,
@@ -431,8 +433,9 @@ const annotatePythonMemberNames = (data: CodeGenData): void => {
  */
 const annotatePythonClientType = (entry: Model | undefined): void => {
   if (!entry) return;
+  entry.pythonTypeTree ??= toPythonTypeTree(entry);
   entry.pythonClientType = qualifyPythonType(
-    entry.pythonType || entry.type,
+    entry.pythonTypeTree,
     TYPES_GEN_PREFIX,
   );
 };
@@ -459,15 +462,18 @@ const annotatePythonData = (
   annotatePythonMemberNames(data);
   for (const model of data.models) {
     model.pythonClassName = toPythonClassName(model.name);
+    model.pythonTypeTree = toPythonTypeTree(model);
     model.pythonType = toPythonType(model);
     model.pythonAnnotation = toPythonAnnotation(model);
     annotatePythonClientType(model);
     for (const prop of model.properties ?? []) {
+      prop.pythonTypeTree = toPythonTypeTree(prop);
       prop.pythonType = toPythonType(prop);
       prop.pythonAnnotation = toPythonAnnotation(prop);
       annotatePythonClientType(prop);
     }
     for (const prop of model.effectiveProperties ?? []) {
+      prop.pythonTypeTree = toPythonTypeTree(prop);
       prop.pythonType = toPythonType(prop);
       prop.pythonAnnotation = toPythonAnnotation(prop);
       annotatePythonClientType(prop);
@@ -477,6 +483,7 @@ const annotatePythonData = (
 
   for (const op of data.allOperations) {
     for (const parameter of op.parameters ?? []) {
+      parameter.pythonTypeTree = toPythonTypeTree(parameter);
       parameter.pythonType = toPythonType(parameter);
       parameter.pythonAnnotation = toPythonAnnotation(parameter);
       annotatePythonClientType(parameter);
@@ -498,15 +505,20 @@ const annotatePythonData = (
           pythonName = `${pythonName}_${input.source.kind.replace('-', '_')}`;
         }
         seenNames.add(pythonName);
-        const baseType = qualifyPythonType(
-          input.model.pythonType || input.model.type,
-          TYPES_GEN_PREFIX,
-        );
-        input.pythonName = pythonName;
-        input.pythonAnnotation =
+        const baseType =
+          input.model.pythonTypeTree ?? toPythonTypeTree(input.model);
+        // An optional or nullable input may be left unset, so its annotation
+        // admits None. Built as a tree so nothing has to unwrap it by name.
+        const annotationType: PythonType =
           input.isRequired && !input.isNullable
             ? baseType
-            : `Optional[${baseType}]`;
+            : { kind: 'optional', inner: baseType };
+        input.pythonName = pythonName;
+        input.pythonTypeTree = annotationType;
+        input.pythonAnnotation = qualifyPythonType(
+          annotationType,
+          TYPES_GEN_PREFIX,
+        );
       }
       // Required-first so the generated keyword-only signature reads naturally.
       requestShape.inputs.sort(

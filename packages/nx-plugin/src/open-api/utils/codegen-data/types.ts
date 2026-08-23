@@ -207,6 +207,11 @@ export interface Model {
   /** The rendered Python type. */
   pythonType?: string;
   /**
+   * The Python type as a tree. Templates inspect this to decide how a value is
+   * validated, rather than matching on how `pythonType` is spelled.
+   */
+  pythonTypeTree?: PythonType;
+  /**
    * The rendered Python type with user-defined names forward-ref quoted, for
    * use inside class bodies before the referenced class is defined.
    */
@@ -253,6 +258,40 @@ export interface Model {
 export type VendorExtensions = { [key: string]: unknown };
 
 /**
+ * A Python type as a tree rather than the rendered string, so a consumer can
+ * ask what a type *is* instead of matching on how it happens to be spelled.
+ *
+ * `builtin` — a type needing no import or qualification (`str`, `int`, `Any`,
+ *   `datetime.date`). `reference` — a name defined in the generated `types`
+ *   module, which may need qualifying or forward-ref quoting. `literal` — a
+ *   `Literal[...]` from an enum or discriminator tag. The rest describe
+ *   structure, whose members are themselves `PythonType`s.
+ */
+export type PythonType =
+  | { kind: 'builtin'; name: string }
+  | { kind: 'reference'; name: string }
+  | { kind: 'literal'; values: string[] }
+  | { kind: 'list'; element: PythonType }
+  | { kind: 'dict'; value: PythonType }
+  | { kind: 'tuple'; members: PythonType[] }
+  | { kind: 'optional'; inner: PythonType };
+
+/**
+ * Whether the type describes a container whose contents pydantic must validate
+ * element-wise — the distinction that decides `TypeAdapter(X)` over
+ * `X.model_validate(...)`, since only a class carries that method.
+ */
+export const isPythonCollection = (type: PythonType): boolean =>
+  type.kind === 'list' || type.kind === 'dict' || type.kind === 'tuple';
+
+/**
+ * Whether the type is validated through a `TypeAdapter` rather than by calling
+ * a method on it: everything except a reference to a generated class.
+ */
+export const needsPythonTypeAdapter = (type: PythonType): boolean =>
+  type.kind !== 'reference';
+
+/**
  * Where a single operation input is placed in the HTTP request. `body-field`
  * is a field of an object request body flattened into the call signature.
  */
@@ -282,6 +321,8 @@ export interface RequestInput {
   pythonName?: string;
   /** The Python annotation for the kwarg, qualified with `types.`. */
   pythonAnnotation?: string;
+  /** The annotation as a tree, so templates can inspect it structurally. */
+  pythonTypeTree?: PythonType;
 }
 
 /**

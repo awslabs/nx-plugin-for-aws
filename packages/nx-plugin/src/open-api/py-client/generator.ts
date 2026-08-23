@@ -12,7 +12,11 @@ import { getGeneratorInfo, type NxGeneratorInfo } from '../../utils/nx';
 import { buildOpenApiCodeGenerationData } from '../ts-client/generator';
 import { assertNoClashingPythonNames } from '../utils/codegen-data';
 import { toPythonLiteral } from '../utils/codegen-data/languages';
-import type { CodeGenData } from '../utils/codegen-data/types';
+import {
+  type CodeGenData,
+  isPythonCollection,
+  needsPythonTypeAdapter,
+} from '../utils/codegen-data/types';
 import type { OpenApiPyClientGeneratorSchema } from './schema';
 
 export const OPEN_API_PY_CLIENT_GENERATOR_INFO: NxGeneratorInfo =
@@ -94,8 +98,15 @@ export const generateOpenApiPyClient = (
   clientType: 'sync' | 'async' | 'both' = 'both',
 ) => {
   // `toPythonLiteral` is shared with the type renderer so a value is escaped
-  // the same way wherever a template spells it out.
-  const base = { ...data, clientType, toPythonLiteral };
+  // the same way wherever a template spells it out. The type predicates let a
+  // template ask what a Python type is, rather than matching its spelling.
+  const base = {
+    ...data,
+    clientType,
+    toPythonLiteral,
+    isPythonCollection,
+    needsPythonTypeAdapter,
+  };
 
   generateFiles(
     tree,

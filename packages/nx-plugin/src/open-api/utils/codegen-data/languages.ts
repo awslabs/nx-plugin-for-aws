@@ -4,7 +4,7 @@
  */
 
 import { camelCase, snakeCase, toClassName } from '../../../utils/names.js';
-import { type Model, PRIMITIVE_TYPES } from './types.js';
+import { type Model, PRIMITIVE_TYPES, type PythonType } from './types.js';
 
 const toTypescriptPrimitive = (property: Model): string => {
   if (
@@ -164,23 +164,12 @@ export const toPythonClassName = (name: string): string => {
 };
 
 /**
- * Returns true if the given python type name is a built-in (not a user-defined
- * model).
+ * Whether the rendered name is a Python built-in rather than a reference to a
+ * generated class. Only bare names reach here — a structured type is described
+ * by {@link PythonType} instead of being matched on its spelling.
  */
-export const isPythonBuiltin = (type: string): boolean => {
-  if (!type) return true;
-  if (PYTHON_BUILTIN_TYPES.has(type)) return true;
-  if (
-    type.startsWith('list[') ||
-    type.startsWith('dict[') ||
-    type.startsWith('tuple[')
-  ) {
-    return true;
-  }
-  if (type.startsWith('Optional[') || type.startsWith('Union[')) return true;
-  if (type.startsWith('Literal[')) return true;
-  return false;
-};
+const isPythonBuiltinName = (name: string): boolean =>
+  !name || PYTHON_BUILTIN_TYPES.has(name);
 
 const toPythonPrimitive = (property: Model): string => {
   if (property.type === 'string' && property.format === 'date') {
@@ -240,39 +229,146 @@ export const toPythonLiteral = (value: unknown): string => {
   return String(value);
 };
 
-/** Render an enum's values as a Python `Literal[...]` expression. */
-const toPythonEnumLiteral = (property: Model): string => {
-  const members = property.enum;
-  if (!members || members.length === 0) return toPythonPrimitive(property);
-  return `Literal[${members.map((m) => toPythonLiteral(m.value)).join(', ')}]`;
+/**
+ * A discriminated subtype's tag values. `discriminatorValue` is stored as
+ * rendered TypeScript literals (e.g. `"cat" | "kitten"`), which are already in
+ * Python's literal spelling.
+ */
+const pythonDiscriminatorValues = (discriminatorValue: string): string[] =>
+  discriminatorValue.split(' | ');
+
+/** An enum's members as Python literal expressions. */
+const pythonEnumValues = (property: Model): string[] =>
+  (property.enum ?? []).map((member) => toPythonLiteral(member.value));
+
+/**
+ * The Python type of a collection's element. An enum element (anonymous or
+ * referenced) becomes a `Literal[...]` so callers can't pass a value outside
+ * the set.
+ */
+const pythonCollectionElementType = (
+  property: Model,
+  link: Model | undefined,
+): PythonType => {
+  if (link?.export === 'enum') {
+    return { kind: 'literal', values: pythonEnumValues(link) };
+  }
+  if (link) {
+    return toPythonTypeTree(link);
+  }
+  // No link, but the collection itself carries the enum members (an inline
+  // enum array or dictionary).
+  if (property.isEnum && property.enum.length > 0) {
+    return { kind: 'literal', values: pythonEnumValues(property) };
+  }
+  return pythonPrimitiveType(property);
+};
+
+/** A primitive or model reference as a structured type. */
+const pythonPrimitiveType = (property: Model): PythonType => {
+  const name = toPythonPrimitive(property);
+  return isPythonBuiltinName(name)
+    ? { kind: 'builtin', name }
+    : { kind: 'reference', name };
 };
 
 /**
- * A discriminated subtype's discriminator property renders as its literal
- * tag(s). `discriminatorValue` is stored as rendered TypeScript literals
- * (e.g. `"cat" | "kitten"`); translate to `Literal["cat", "kitten"]`.
+ * The Python type of a property, as a tree.
+ *
+ * This is the single place a model's Python type is derived. Consumers that
+ * need to know what a type is — a collection, a class reference, a literal —
+ * inspect the tree rather than the rendered string, and render it with
+ * {@link renderPythonType} when they need source text.
  */
-const toPythonDiscriminatorLiteral = (discriminatorValue: string): string =>
-  `Literal[${discriminatorValue.split(' | ').join(', ')}]`;
+export const toPythonTypeTree = (property: Model): PythonType => {
+  if (property.discriminatorValue) {
+    return {
+      kind: 'literal',
+      values: pythonDiscriminatorValues(property.discriminatorValue),
+    };
+  }
+  const link = property.link ?? undefined;
+  switch (property.export) {
+    case 'enum':
+      return property.enum?.length
+        ? { kind: 'literal', values: pythonEnumValues(property) }
+        : pythonPrimitiveType(property);
+    case 'generic':
+    case 'reference':
+      return pythonPrimitiveType(property);
+    case 'array':
+      return {
+        kind: 'list',
+        element: pythonCollectionElementType(property, link),
+      };
+    case 'tuple':
+      return {
+        kind: 'tuple',
+        members: property.properties.map((member) => toPythonTypeTree(member)),
+      };
+    case 'dictionary':
+      return {
+        kind: 'dict',
+        value: pythonCollectionElementType(property, link),
+      };
+    case 'one-of':
+    case 'any-of':
+    case 'all-of':
+      return { kind: 'reference', name: toPythonClassName(property.name) };
+    default: {
+      // "any"/"unknown" has export = interface — route to the primitive path so
+      // they become `Any` rather than being treated as a model reference.
+      if (PRIMITIVE_TYPES.has(property.type) || property.type === 'unknown') {
+        return pythonPrimitiveType(property);
+      }
+      const name = toPythonClassName(property.type);
+      return isPythonBuiltinName(name)
+        ? { kind: 'builtin', name }
+        : { kind: 'reference', name };
+    }
+  }
+};
 
-/**
- * Resolve the element type of a collection model. When the element is an
- * enum (anonymous or referenced) the type is rendered as a `Literal[...]`
- * so callers can't pass arbitrary values.
- */
-const collectionElementType = (property: Model, link: Model | undefined) => {
-  if (link && link.export === 'enum') {
-    return toPythonEnumLiteral(link);
-  }
-  if (link) {
-    return toPythonType(link);
-  }
-  // When no link is available but the collection itself carries enum members
-  // (inline enum array/dict), render them as Literal too.
-  if (property.isEnum && property.enum.length > 0) {
-    return toPythonEnumLiteral(property);
-  }
-  return toPythonPrimitive(property);
+/** How a reference to a generated class is spelled where it is rendered. */
+export interface RenderPythonTypeOptions {
+  /**
+   * Namespace prefix for a class reference, e.g. `"types."` from a client
+   * module that imports the types module wholesale.
+   */
+  readonly prefix?: string;
+  /**
+   * Wrap a class reference in quotes, for use inside a class body before the
+   * referenced class is defined. pydantic resolves these lazily.
+   */
+  readonly forwardRef?: boolean;
+}
+
+/** Render a structured Python type as source text. */
+export const renderPythonType = (
+  type: PythonType,
+  options: RenderPythonTypeOptions = {},
+): string => {
+  const render = (t: PythonType): string => {
+    switch (t.kind) {
+      case 'builtin':
+        return t.name;
+      case 'reference': {
+        const qualified = `${options.prefix ?? ''}${t.name}`;
+        return options.forwardRef ? `"${qualified}"` : qualified;
+      }
+      case 'literal':
+        return `Literal[${t.values.join(', ')}]`;
+      case 'list':
+        return `list[${render(t.element)}]`;
+      case 'dict':
+        return `dict[str, ${render(t.value)}]`;
+      case 'tuple':
+        return `tuple[${t.members.map(render).join(', ')}]`;
+      case 'optional':
+        return `Optional[${render(t.inner)}]`;
+    }
+  };
+  return render(type);
 };
 
 /**
@@ -285,132 +381,24 @@ const collectionElementType = (property: Model, link: Model | undefined) => {
  * body (where the class isn't yet defined) should use `toPythonAnnotation`
  * instead to get forward-ref quoting.
  */
-export const toPythonType = (property: Model): string => {
-  if (property.discriminatorValue) {
-    return toPythonDiscriminatorLiteral(property.discriminatorValue);
-  }
-  const link = property.link ?? undefined;
-  switch (property.export) {
-    case 'enum':
-      return toPythonEnumLiteral(property);
-    case 'generic':
-    case 'reference':
-      return toPythonPrimitive(property);
-    case 'array':
-      return `list[${collectionElementType(property, link)}]`;
-    case 'tuple':
-      return `tuple[${property.properties
-        .map((member) => toPythonType(member))
-        .join(', ')}]`;
-    case 'dictionary':
-      return `dict[str, ${collectionElementType(property, link)}]`;
-    case 'one-of':
-    case 'any-of':
-    case 'all-of':
-      return toPythonClassName(property.name);
-    default:
-      // "any"/"unknown" has export = interface — route to the primitive path
-      // so they become `Any` rather than being treated as a model reference.
-      if (PRIMITIVE_TYPES.has(property.type) || property.type === 'unknown') {
-        return toPythonPrimitive(property);
-      }
-      return toPythonClassName(property.type);
-  }
-};
+export const toPythonType = (property: Model): string =>
+  renderPythonType(toPythonTypeTree(property));
 
 /**
- * Prefix every user-defined (non-builtin) name in a python type string with
- * the given namespace (e.g. `"types."`) so the caller can reference
- * model references through a single import. Walks nested `list[...]` and
- * `dict[str, ...]` structures.
+ * Render a type with every class reference prefixed with the given namespace,
+ * so a client module can reach the types module through a single import.
  */
 export const qualifyPythonType = (
-  type: string | undefined,
+  type: PythonType | undefined,
   prefix: string,
-): string => {
-  if (!type) return 'Any';
-  if (PYTHON_BUILTIN_TYPES.has(type)) return type;
-  const list = /^list\[(.*)\]$/s.exec(type);
-  if (list) return `list[${qualifyPythonType(list[1], prefix)}]`;
-  const dict = /^dict\[str, (.*)\]$/s.exec(type);
-  if (dict) return `dict[str, ${qualifyPythonType(dict[1], prefix)}]`;
-  const tuple = /^tuple\[(.*)\]$/s.exec(type);
-  if (tuple) {
-    // Split on top-level commas only — members may themselves be generics.
-    const members: string[] = [];
-    let depth = 0;
-    let current = '';
-    for (const ch of tuple[1]) {
-      if (ch === '[') depth++;
-      if (ch === ']') depth--;
-      if (ch === ',' && depth === 0) {
-        members.push(current.trim());
-        current = '';
-      } else {
-        current += ch;
-      }
-    }
-    if (current.trim()) members.push(current.trim());
-    return `tuple[${members.map((m) => qualifyPythonType(m, prefix)).join(', ')}]`;
-  }
-  if (
-    type.startsWith('Optional[') ||
-    type.startsWith('Union[') ||
-    type.startsWith('Literal[')
-  ) {
-    return type;
-  }
-  return `${prefix}${type}`;
-};
+): string => (type ? renderPythonType(type, { prefix }) : 'Any');
 
 /**
- * Same as `toPythonType`, but wraps user-defined (non-builtin) types in
- * forward-ref string quotes so they can be used inside class bodies before
- * the referenced class is defined. Collections recursively forward-quote.
+ * Same as `toPythonType`, but wraps class references in forward-ref quotes so
+ * they can be used inside a class body before the class is defined.
  */
-export const toPythonAnnotation = (property: Model): string => {
-  const render = (p: Model): string => {
-    if (p.discriminatorValue) {
-      return toPythonDiscriminatorLiteral(p.discriminatorValue);
-    }
-    const link = p.link ?? undefined;
-    const collectionElement = () =>
-      link && link.export === 'enum'
-        ? toPythonEnumLiteral(link)
-        : link
-          ? render(link)
-          : p.isEnum && p.enum.length > 0
-            ? toPythonEnumLiteral(p)
-            : toPythonPrimitive(p);
-    switch (p.export) {
-      case 'enum':
-        return toPythonEnumLiteral(p);
-      case 'generic':
-      case 'reference': {
-        const rendered = toPythonPrimitive(p);
-        return isPythonBuiltin(rendered) ? rendered : `"${rendered}"`;
-      }
-      case 'array':
-        return `list[${collectionElement()}]`;
-      case 'tuple':
-        return `tuple[${p.properties.map((member) => render(member)).join(', ')}]`;
-      case 'dictionary':
-        return `dict[str, ${collectionElement()}]`;
-      case 'one-of':
-      case 'any-of':
-      case 'all-of':
-        return `"${toPythonClassName(p.name)}"`;
-      default: {
-        if (PRIMITIVE_TYPES.has(p.type) || p.type === 'unknown') {
-          return toPythonPrimitive(p);
-        }
-        const escaped = toPythonClassName(p.type);
-        return isPythonBuiltin(escaped) ? escaped : `"${escaped}"`;
-      }
-    }
-  };
-  return render(property);
-};
+export const toPythonAnnotation = (property: Model): string =>
+  renderPythonType(toPythonTypeTree(property), { forwardRef: true });
 
 // @see https://github.com/OpenAPITools/openapi-generator/blob/e2a62ace74de361bef6338b7fa37da8577242aef/modules/openapi-generator/src/main/java/org/openapitools/codegen/languages/AbstractPythonCodegen.java#L106
 const PYTHON_KEYWORDS = new Set([

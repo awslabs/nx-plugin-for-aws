@@ -26,6 +26,20 @@ const isPythonAlias = (resp) =>
   ['one-of', 'any-of', 'enum', 'tuple'].includes(resp.export) ||
   !!resp.isEnum;
 
+/**
+ * The structured Python type of a model, so these templates can ask what a type
+ * is rather than matching on how it is spelled.
+ */
+const pythonTypeOf = (model) => model.pythonTypeTree ?? { kind: 'builtin', name: 'Any' };
+
+/**
+ * Whether the value is validated by calling `model_validate` on a generated
+ * pydantic class. Anything else — a primitive, collection, literal or a name
+ * bound to a module-level alias — goes through a `TypeAdapter`.
+ */
+const isModelClass = (model) =>
+  !needsPythonTypeAdapter(pythonTypeOf(model)) && !isPythonAlias(model);
+
 /** Whether a response arrives as JSON on the wire. */
 const isJsonWire = (resp) =>
   (resp.mediaTypes || []).some((m) => {
@@ -50,13 +64,11 @@ const responseParseExpr = (resp) => {
   const py = resp.pythonClientType || 'Any';
   const isJsonMedia = isJsonWire(resp);
   // An enum or union alias is a single value on the wire, so it reads like a
-  // scalar even though it renders as a module-level alias.
+  // scalar even though it renders as a module-level alias. A referenced
+  // collection alias resolves to a container, so it is validated as one.
   const isCollection =
-    ['array', 'dictionary', 'tuple'].includes(resp.export) ||
-    ['array', 'dictionary'].includes(resp.referencedCollectionKind) ||
-    py.startsWith('list[') ||
-    py.startsWith('dict[') ||
-    py.startsWith('tuple[');
+    isPythonCollection(pythonTypeOf(resp)) ||
+    ['array', 'dictionary'].includes(resp.referencedCollectionKind);
   const isScalar = !isCollection;
   const nullable = resp.isNullable ? (t) => `Optional[${t}]` : (t) => t;
   if (isScalar) {
@@ -71,7 +83,7 @@ const responseParseExpr = (resp) => {
     if ((py === 'str' || py === 'Any') && !resp.isNullable) {
       return 'response.json()';
     }
-    if (!PYTHON_BUILTIN.has(py) && !resp.isNullable && !isPythonAlias(resp)) {
+    if (isModelClass(resp) && !resp.isNullable) {
       return `${py}.model_validate(response.json())`;
     }
     return `TypeAdapter(${nullable(py)}).validate_python(response.json())`;
@@ -87,16 +99,7 @@ const responseParseExpr = (resp) => {
 const streamItemParseExpr = (itemModel, lineVar) => {
   const py = itemModel.pythonClientType || 'Any';
   if (py === 'Any') return `json.loads(${lineVar})`;
-  if (
-    itemModel.referencedCollectionKind ||
-    PYTHON_BUILTIN.has(py) ||
-    py.startsWith('list[') ||
-    py.startsWith('dict[') ||
-    py.startsWith('tuple[') ||
-    py.startsWith('Literal[') ||
-    py.startsWith('Union[') ||
-    py.startsWith('Optional[')
-  ) {
+  if (!isModelClass(itemModel)) {
     return `TypeAdapter(${py}).validate_json(${lineVar})`;
   }
   return `${py}.model_validate_json(${lineVar})`;
@@ -111,16 +114,7 @@ const streamItemParseExpr = (itemModel, lineVar) => {
 const streamChunkParseExpr = (resp, lineVar) => {
   const py = resp.pythonClientType || 'Any';
   if (py === 'str' || py === 'Any') return lineVar;
-  if (
-    resp.referencedCollectionKind ||
-    PYTHON_BUILTIN.has(py) ||
-    py.startsWith('list[') ||
-    py.startsWith('dict[') ||
-    py.startsWith('tuple[') ||
-    py.startsWith('Literal[') ||
-    py.startsWith('Union[') ||
-    py.startsWith('Optional[')
-  ) {
+  if (!isModelClass(resp)) {
     return `TypeAdapter(${py}).validate_json(${lineVar})`;
   }
   return `${py}.model_validate_json(${lineVar})`;
