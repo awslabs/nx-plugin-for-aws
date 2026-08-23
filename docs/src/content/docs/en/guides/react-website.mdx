@@ -334,6 +334,22 @@ export class ApplicationStack extends Stack {
 }
 ```
 
+:::caution[Suppress CKV_AWS_158 when using S3_MANAGED]
+Choosing `BucketEncryption.S3_MANAGED` means the access log group is no longer KMS encrypted, which fails the `checkov` security scan with `CKV_AWS_158`. Suppress it:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { LogGroup } from 'aws-cdk-lib/aws-logs';
+import { suppressRules } from '@my-scope/common-constructs';
+
+suppressRules(
+  website,
+  ['CKV_AWS_158'],
+  'Access log group is not KMS encrypted when encryption is S3_MANAGED',
+  (c) => c instanceof LogGroup,
+);
+```
+:::
+
 To use your own KMS key instead of one created automatically, pass `encryptionKey`:
 
 ```ts {2}
@@ -342,10 +358,36 @@ new MyWebsite(this, 'MyWebsite', {
 });
 ```
 
-`enableKeyRotation` (default `true`) only applies to the automatically created key, i.e. when `encryption` is `BucketEncryption.KMS` (the default) and no `encryptionKey` is supplied.
+:::caution[Imported keys need their own permissions]
+A key imported via `Key.fromKeyArn` must already grant the CloudWatch Logs, S3 and CloudFront service principals the permissions they need in its own key policy. `addToResourcePolicy` is a no-op on an imported key, so this construct can't grant them for you, and `cdk synth` won't warn you - the failure only shows up at deploy time. A key created in the same app (`new Key(this, 'WebsiteKey')`) doesn't have this problem, since CDK can update its policy directly.
+:::
+
+`enableKeyRotation` (default `true`) only applies to the automatically created key, i.e. when `encryption` is `BucketEncryption.KMS` (the default) and no `encryptionKey` is supplied:
+
+```ts {2}
+new MyWebsite(this, 'MyWebsite', {
+  enableKeyRotation: false,
+});
+```
+
+:::caution[Suppress CKV_AWS_7 when disabling key rotation]
+Disabling key rotation on the automatically created key fails the `checkov` security scan with `CKV_AWS_7`. Suppress it:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { Key } from 'aws-cdk-lib/aws-kms';
+import { suppressRules } from '@my-scope/common-constructs';
+
+suppressRules(
+  website,
+  ['CKV_AWS_7'],
+  'Key rotation is managed externally',
+  (c) => c instanceof Key,
+);
+```
+:::
 </Fragment>
 <Fragment slot="terraform">
-If you want to use a different encryption configuration, set the `encryption`, `kms_key_arn` and `enable_key_rotation` variables:
+If you want to use a different encryption configuration, set the `encryption`, `kms_key_arn`, `create_kms_key` and `enable_key_rotation` variables:
 
 ```hcl title="packages/infra/src/main.tf" {7}
 module "my_website" {
@@ -358,9 +400,52 @@ module "my_website" {
 }
 ```
 
-To use your own KMS key instead of one created automatically, pass `kms_key_arn`. A customer-supplied key must already grant the CloudWatch Logs, S3 and CloudFront service principals the permissions they need in its own key policy.
+:::caution[Checkov: S3_MANAGED]
+Choosing `S3_MANAGED` fails the `checkov` security scan with `CKV_AWS_145` on the website and distribution log buckets. The vended `test` target doesn't accept a `--config-file`, but `checkov` auto-discovers a `.checkov.yaml` in its working directory, so drop one in `packages/infra/src`:
 
-`enable_key_rotation` (default `true`) only applies to the automatically created key, i.e. when `encryption` is `"KMS"` (the default) and no `kms_key_arn` is supplied.
+```yaml title="packages/infra/src/.checkov.yaml"
+skip-check:
+  - CKV_AWS_145
+```
+:::
+
+To use your own KMS key instead of one created automatically, pass `kms_key_arn` and set `create_kms_key` to `false`:
+
+```hcl title="packages/infra/src/main.tf" {7-8}
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+  kms_key_arn    = aws_kms_key.website.arn
+  create_kms_key = false
+}
+```
+
+A customer-supplied key must already grant the CloudWatch Logs, S3 and CloudFront service principals the permissions they need in its own key policy.
+
+`enable_key_rotation` (default `true`) only applies to the automatically created key, i.e. when `encryption` is `"KMS"` (the default) and `create_kms_key` is `true`:
+
+```hcl title="packages/infra/src/main.tf" {7}
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+  enable_key_rotation = false
+}
+```
+
+:::caution[Checkov: key rotation disabled]
+Disabling key rotation on the automatically created key fails the `checkov` security scan with `CKV_AWS_7`. Add it to the same `.checkov.yaml`:
+
+```yaml title="packages/infra/src/.checkov.yaml"
+skip-check:
+  - CKV_AWS_7
+```
+:::
 </Fragment>
 </Infrastructure>
 
