@@ -4,7 +4,7 @@ description: 生成用于构建带工具的 AI 代理的 TypeScript Agent，并�
 generator: ts#agent
 ---
 
-import { FileTree, Tabs, TabItem, CardGrid } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem, CardGrid, Steps } from '@astrojs/starlight/components';
 import Astro from '@astrojs/react';
 import ConnectionCard from '@components/connection-card.astro';
 import RunGenerator from '@components/run-generator.astro';
@@ -365,6 +365,23 @@ bundle 目标使用 `index.ts` 作为 WebSocket 服务器的入口点，以托�
 :::note[本地开发]
 在本地运行时（`LOCAL_DEV=true`，由 `-dev` 目标自动设置），无论配置的 `session` 选项如何，会话数据始终存储在工作区根目录的 `tmp/agents/strands/<agent-name>` 下的磁盘上，以方便使用。
 :::
+
+#### 将会话限制为其所有者
+
+会话 ID 来自调用者，因此它本身只能识别对话，但不能识别对话属于谁。AgentCore Runtime 针对代理运行时资源 ARN 而不是针对单个会话授权调用，这使代理可以自由决定会话对您的应用程序意味着什么。
+
+:::caution[会话还会选择 microVM]
+会话 ID 选择为请求提供服务的 [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html)，因此其文件系统、`/tmp` 和进程内缓存由解析到该会话的每个请求共享。发送相同会话 ID 的两个调用者共享这些资源，即使他们存储的对话是分开的。
+:::
+
+要将每个用户限制为他们自己的对话：
+
+<Steps>
+  1. 添加一个 API 来创建会话，使用 <Link path="guides/trpc">tRPC</Link>、<Link path="guides/fastapi">FastAPI</Link> 或 <Link path="guides/ts-smithy-api">Smithy</Link>。生成一个不透明的会话 ID（至少 33 个字符）并将其与调用用户的 ID 一起存储 — 例如在使用 <Link path="guides/ts-dynamodb">`ts#dynamodb`</Link> 生成器创建的表中。每个 API 指南都展示了如何检索调用用户的 ID。
+  2. 在您的代理中，查找给定会话 ID 的存储用户 ID，并在它与调用者不匹配时拒绝请求。使用 `auth=cognito` 时，调用者的 JWT 会到达您的代理代码，因此其 `sub` 声明可以识别他们。
+</Steps>
+
+生成会话 ID，而不是从用户提供的值（如对话名称）派生它 — 调用者可以预测的任何内容，调用者都可以发送。
 </OptionFilter>
 
 ## 调用您的 Agent

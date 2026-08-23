@@ -92,6 +92,25 @@ Code được tạo xử lý xác thực tùy thuộc vào cấu hình của age
 - **IAM** (mặc định): sử dụng các HTTP request được ký AWS SigV4. Thông tin xác thực được lấy từ Cognito Identity Pool được cấu hình với auth của trang web của bạn.
 - **Cognito**: nhúng JWT access token vào header `Authorization` dưới dạng Bearer token.
 
+### Sessions và Threads
+
+AG-UI và AgentCore Runtime mỗi cái xác định một cuộc hội thoại theo cách khác nhau, và hook được tạo liên kết chúng lại với nhau:
+
+- **`threadId`** — định danh cuộc hội thoại AG-UI, được gửi trong request body. CopilotKit tạo một UUID ngẫu nhiên cho mỗi cuộc trò chuyện trừ khi bạn truyền một `threadId` rõ ràng.
+- **Session ID** — session AgentCore Runtime, được gửi trong header `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`. Nó chọn [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html) phục vụ request, và là thứ mà `session.ts` / `session.py` của agent của bạn dùng làm khóa cho trạng thái cuộc hội thoại.
+
+Hook suy ra session ID từ thread ID, đệm phải nó đến 33 ký tự mà AgentCore Runtime yêu cầu:
+
+```ts
+function agentCoreSessionId(input: RunAgentInput): string {
+  return (input.threadId ?? '').padEnd(33, '0');
+}
+```
+
+Để `threadId` không được đặt là đơn giản nhất — UUID được tạo bởi CopilotKit đã có 36 ký tự. Nếu bạn truyền một cách rõ ràng, hãy đảm bảo nó có ít nhất 33 ký tự, vì việc đệm ánh xạ các thread ID chỉ khác nhau ở các ký tự cuối vào cùng một session.
+
+Cả Session ID và Thread ID đều được cung cấp bởi trình duyệt. Để hạn chế mỗi người dùng chỉ truy cập các cuộc hội thoại của riêng họ, hãy tham khảo hướng dẫn <Link path="guides/py-agent">`py#agent`</Link> hoặc <Link path="guides/ts-agent">`ts#agent`</Link>.
+
 ## Hạ tầng
 
 <Snippet name="connection/react-agent-infrastructure" parentHeading="Hạ tầng" />

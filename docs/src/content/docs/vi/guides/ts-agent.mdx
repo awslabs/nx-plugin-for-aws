@@ -4,7 +4,7 @@ description: Tạo TypeScript Agent để xây dựng AI agent với các công 
 generator: ts#agent
 ---
 
-import { FileTree, Tabs, TabItem, CardGrid } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem, CardGrid, Steps } from '@astrojs/starlight/components';
 import Astro from '@astrojs/react';
 import ConnectionCard from '@components/connection-card.astro';
 import RunGenerator from '@components/run-generator.astro';
@@ -365,6 +365,23 @@ Session ID chính nó đến từ AgentCore Runtime session (được truyền q
 :::note[Phát triển cục bộ]
 Khi chạy cục bộ (`LOCAL_DEV=true`, được thiết lập tự động bởi target `-dev`), dữ liệu session luôn được lưu trữ trên đĩa dưới `tmp/agents/strands/<agent-name>` tại workspace root, bất kể tùy chọn `session` được cấu hình, để thuận tiện.
 :::
+
+#### Hạn chế session cho chủ sở hữu của chúng
+
+Session ID đến từ người gọi, vì vậy bản thân nó chỉ xác định một cuộc hội thoại chứ không phải cuộc hội thoại thuộc về ai. AgentCore Runtime ủy quyền một lần gọi dựa trên ARN tài nguyên agent runtime thay vì dựa trên một session riêng lẻ, điều này để agent tự do quyết định session có ý nghĩa gì đối với ứng dụng của bạn.
+
+:::caution[Session cũng chọn microVM]
+Một session ID chọn [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html) phục vụ request, vì vậy filesystem, `/tmp` và cache trong process của nó được chia sẻ bởi mọi request resolve đến session đó. Hai người gọi gửi cùng một session ID chia sẻ các tài nguyên đó ngay cả khi các cuộc hội thoại được lưu trữ của họ là riêng biệt.
+:::
+
+Để hạn chế mỗi người dùng chỉ có thể truy cập các cuộc hội thoại của riêng họ:
+
+<Steps>
+  1. Thêm một API để tạo session, sử dụng <Link path="guides/trpc">tRPC</Link>, <Link path="guides/fastapi">FastAPI</Link> hoặc <Link path="guides/ts-smithy-api">Smithy</Link>. Tạo một session ID không rõ ràng (ít nhất 33 ký tự) và lưu trữ nó cùng với ID của người dùng đang gọi — ví dụ trong một bảng được tạo bằng generator <Link path="guides/ts-dynamodb">`ts#dynamodb`</Link>. Mỗi hướng dẫn API cho biết cách lấy ID của người dùng đang gọi.
+  2. Trong agent của bạn, tra cứu ID người dùng được lưu trữ cho session ID mà nó được cung cấp, và từ chối request khi nó không khớp với người gọi. Với `auth=cognito`, JWT của người gọi đến mã agent của bạn, vì vậy claim `sub` của nó xác định họ.
+</Steps>
+
+Tạo session ID thay vì suy ra nó từ các giá trị do người dùng cung cấp như tên cuộc hội thoại — bất cứ thứ gì người gọi có thể dự đoán, người gọi có thể gửi.
 </OptionFilter>
 
 ## Gọi Agent của bạn

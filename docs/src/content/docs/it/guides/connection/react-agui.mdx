@@ -92,6 +92,25 @@ Il codice generato gestisce l'autenticazione in base alla configurazione del tuo
 - **IAM** (predefinito): utilizza richieste HTTP firmate con AWS SigV4. Le credenziali vengono ottenute dal Cognito Identity Pool configurato con l'autenticazione del tuo sito web.
 - **Cognito**: incorpora il token di accesso JWT nell'header `Authorization` come Bearer token.
 
+### Sessioni e Thread
+
+AG-UI e AgentCore Runtime identificano ciascuno una conversazione in modo diverso, e l'hook generato li collega insieme:
+
+- **`threadId`** — l'identificatore di conversazione AG-UI, inviato nel corpo della richiesta. CopilotKit genera un UUID casuale per chat a meno che non passi un `threadId` esplicito.
+- **Session ID** — la sessione AgentCore Runtime, inviata nell'header `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`. Seleziona la [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html) che serve la richiesta, ed è ciò su cui il `session.ts` / `session.py` del tuo agent chiave lo stato della conversazione.
+
+L'hook deriva il session ID dal thread ID, riempiendolo a destra fino ai 33 caratteri richiesti da AgentCore Runtime:
+
+```ts
+function agentCoreSessionId(input: RunAgentInput): string {
+  return (input.threadId ?? '').padEnd(33, '0');
+}
+```
+
+Lasciare `threadId` non impostato è il modo più semplice — l'UUID generato da CopilotKit è già di 36 caratteri. Se ne passi uno esplicitamente, rendilo di almeno 33 caratteri, poiché il riempimento mappa thread ID che differiscono solo nei caratteri finali sulla stessa sessione.
+
+Sia il Session ID che il Thread ID sono forniti dal browser. Per limitare ogni utente alle proprie conversazioni, fai riferimento alla guida <Link path="guides/py-agent">`py#agent`</Link> o <Link path="guides/ts-agent">`ts#agent`</Link>.
+
 ## Infrastruttura
 
 <Snippet name="connection/react-agent-infrastructure" parentHeading="Infrastruttura" />

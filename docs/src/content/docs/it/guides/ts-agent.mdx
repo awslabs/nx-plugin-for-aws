@@ -4,7 +4,7 @@ description: Genera un TypeScript Agent per costruire agenti AI con strumenti e 
 generator: ts#agent
 ---
 
-import { FileTree, Tabs, TabItem, CardGrid } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem, CardGrid, Steps } from '@astrojs/starlight/components';
 import Astro from '@astrojs/react';
 import ConnectionCard from '@components/connection-card.astro';
 import RunGenerator from '@components/run-generator.astro';
@@ -365,6 +365,23 @@ L'ID di sessione stesso proviene dalla sessione AgentCore Runtime (propagato tra
 :::note[Sviluppo Locale]
 Quando si esegue localmente (`LOCAL_DEV=true`, impostato automaticamente dal target `-dev`), i dati di sessione vengono sempre memorizzati su disco sotto `tmp/agents/strands/<agent-name>` alla radice del workspace, indipendentemente dall'opzione `session` configurata, per comodità.
 :::
+
+#### Limitare le sessioni al loro proprietario
+
+L'ID di sessione arriva dal chiamante, quindi da solo identifica una conversazione ma non a chi appartiene la conversazione. AgentCore Runtime autorizza un'invocazione contro l'ARN della risorsa del runtime dell'agente piuttosto che contro una singola sessione, il che lascia l'agente libero di decidere cosa significa una sessione per la tua applicazione.
+
+:::caution[La sessione seleziona anche la microVM]
+Un ID di sessione seleziona la [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html) che serve la richiesta, quindi il suo filesystem, `/tmp` e le cache in-process sono condivise da ogni richiesta che si risolve in quella sessione. Due chiamanti che inviano lo stesso ID di sessione condividono quelle risorse anche quando le loro conversazioni memorizzate sono separate.
+:::
+
+Per limitare ogni utente alle proprie conversazioni:
+
+<Steps>
+  1. Aggiungi un'API per creare una sessione, utilizzando <Link path="guides/trpc">tRPC</Link>, <Link path="guides/fastapi">FastAPI</Link> o <Link path="guides/ts-smithy-api">Smithy</Link>. Genera un ID di sessione opaco (almeno 33 caratteri) e memorizzalo insieme all'ID dell'utente chiamante — ad esempio in una tabella creata con il generatore <Link path="guides/ts-dynamodb">`ts#dynamodb`</Link>. Ogni guida API mostra come recuperare l'ID dell'utente chiamante.
+  2. Nel tuo agente, cerca l'ID utente memorizzato per l'ID di sessione che gli è stato fornito e rifiuta la richiesta quando non corrisponde al chiamante. Con `auth=cognito` il JWT del chiamante raggiunge il codice del tuo agente, quindi il suo claim `sub` lo identifica.
+</Steps>
+
+Genera l'ID di sessione piuttosto che derivarlo da valori forniti dall'utente come un nome di conversazione — qualsiasi cosa un chiamante possa prevedere, un chiamante può inviare.
 </OptionFilter>
 
 ## Invocare il Tuo Agent

@@ -4,7 +4,7 @@ description: ツールを使用してAIエージェントを構築し、Amazon B
 generator: ts#agent
 ---
 
-import { FileTree, Tabs, TabItem, CardGrid } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem, CardGrid, Steps } from '@astrojs/starlight/components';
 import Astro from '@astrojs/react';
 import ConnectionCard from '@components/connection-card.astro';
 import RunGenerator from '@components/run-generator.astro';
@@ -365,6 +365,23 @@ CloudWatch AWS コンソールでメニューから「GenAI Observability」を�
 :::note[ローカル開発]
 ローカルで実行する場合（`LOCAL_DEV=true`、`-dev` ターゲットによって自動的に設定されます）、設定された `session` オプションに関係なく、セッションデータは常にワークスペースルートの `tmp/agents/strands/<agent-name>` の下のディスクに保存されます。これは便宜上のものです。
 :::
+
+#### セッションを所有者に制限する
+
+セッション ID は呼び出し元から送信されるため、それ自体では会話を識別しますが、会話が誰に属しているかは識別しません。AgentCore Runtime は、個々のセッションに対してではなく、エージェントランタイムリソース ARN に対して呼び出しを承認するため、エージェントはアプリケーションにとってセッションが何を意味するかを自由に決定できます。
+
+:::caution[セッションは microVM も選択します]
+セッション ID は、リクエストを処理する [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html) を選択するため、そのファイルシステム、`/tmp`、およびプロセス内キャッシュは、そのセッションに解決されるすべてのリクエストによって共有されます。同じセッション ID を送信する2人の呼び出し元は、保存された会話が別々であっても、これらのリソースを共有します。
+:::
+
+各ユーザーを自分の会話に制限するには：
+
+<Steps>
+  1. <Link path="guides/trpc">tRPC</Link>、<Link path="guides/fastapi">FastAPI</Link>、または <Link path="guides/ts-smithy-api">Smithy</Link> を使用して、セッションを作成する API を追加します。不透明なセッション ID（少なくとも33文字）を生成し、呼び出し元のユーザー ID と一緒に保存します。たとえば、<Link path="guides/ts-dynamodb">`ts#dynamodb`</Link> ジェネレーターで作成されたテーブルに保存します。各 API ガイドには、呼び出し元のユーザー ID を取得する方法が示されています。
+  2. エージェントで、与えられたセッション ID に対して保存されたユーザー ID を検索し、呼び出し元と一致しない場合はリクエストを拒否します。`auth=cognito` の場合、呼び出し元の JWT がエージェントコードに到達するため、その `sub` クレームが呼び出し元を識別します。
+</Steps>
+
+会話名などのユーザー提供値からセッション ID を導出するのではなく、セッション ID を生成してください。呼び出し元が予測できるものは、呼び出し元が送信できます。
 </OptionFilter>
 
 ## エージェントの呼び出し

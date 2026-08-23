@@ -4,7 +4,7 @@ description: Genera un Python Agent para construir agentes de IA con herramienta
 generator: py#agent
 ---
 
-import { FileTree, Tabs, TabItem, CardGrid } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem, CardGrid, Steps } from '@astrojs/starlight/components';
 import Astro from '@astrojs/react';
 import ConnectionCard from '@components/connection-card.astro';
 import RunGenerator from '@components/run-generator.astro';
@@ -516,6 +516,23 @@ El ID de sesión en sí proviene de la sesión de AgentCore Runtime (propagada a
 :::note[Desarrollo Local]
 Al ejecutarse localmente (`LOCAL_DEV=true`, establecido automáticamente por el target `-dev`), los datos de sesión siempre se almacenan en disco bajo `tmp/agents/strands/<agent-name>` en la raíz del workspace, independientemente de la opción `session` configurada, por conveniencia.
 :::
+
+#### Restringir sesiones a su propietario
+
+El ID de sesión llega desde el llamador, por lo que por sí solo identifica una conversación pero no a quién pertenece la conversación. AgentCore Runtime autoriza una invocación contra el ARN del recurso del runtime del agente en lugar de contra una sesión individual, lo que deja al agente libre para decidir qué significa una sesión para tu aplicación.
+
+:::caution[La sesión también selecciona la microVM]
+Un ID de sesión selecciona la [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html) que sirve la solicitud, por lo que su sistema de archivos, `/tmp` y cachés en proceso son compartidos por cada solicitud que se resuelve a esa sesión. Dos llamadores que envían el mismo ID de sesión comparten esos recursos incluso cuando sus conversaciones almacenadas están separadas.
+:::
+
+Para restringir a cada usuario a sus propias conversaciones:
+
+<Steps>
+  1. Agrega una API para crear una sesión, usando <Link path="guides/trpc">tRPC</Link>, <Link path="guides/fastapi">FastAPI</Link> o <Link path="guides/ts-smithy-api">Smithy</Link>. Genera un ID de sesión opaco (al menos 33 caracteres) y almacénalo junto con el ID del usuario que llama — por ejemplo en una tabla creada con el generador <Link path="guides/py-dynamodb">`py#dynamodb`</Link>. Cada guía de API muestra cómo recuperar el ID del usuario que llama.
+  2. En tu agente, busca el ID de usuario almacenado para el ID de sesión que se le dio, y rechaza la solicitud cuando no coincida con el llamador. Con `auth=cognito` el JWT del llamador llega a tu código del agente, por lo que su claim `sub` los identifica.
+</Steps>
+
+Genera el ID de sesión en lugar de derivarlo de valores proporcionados por el usuario como un nombre de conversación — cualquier cosa que un llamador pueda predecir, un llamador puede enviar.
 </OptionFilter>
 
 <OptionFilter when={{ framework: 'langchain' }} description="LangChain session management (session.py)">
