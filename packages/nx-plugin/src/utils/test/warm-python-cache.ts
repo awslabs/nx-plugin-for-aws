@@ -3,9 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { execFileSync } from 'child_process';
-import { OPEN_API_PY_CLIENT_DEPENDENCIES } from '../../open-api/py-client/generator';
-import { declaredNames } from '../declared-dependencies';
-import { PY_VERSIONS, withPyVersions } from '../versions';
+import {
+  PY_CLIENT_VERIFIER_DEPENDENCIES,
+  PY_VERIFIER_TYPE_CHECKER,
+} from './python-dependencies';
 
 /**
  * Vitest globalSetup that warms uv's cache once before any worker spawns.
@@ -22,12 +23,11 @@ import { PY_VERSIONS, withPyVersions } from '../versions';
  * a message naming the tool.
  */
 export default function setup() {
-  const deps = withPyVersions(
-    OPEN_API_PY_CLIENT_DEPENDENCIES,
-    declaredNames(OPEN_API_PY_CLIENT_DEPENDENCIES.py),
-  )
-    .concat(`ty${PY_VERSIONS.ty}`)
-    .flatMap((spec) => ['--with', spec]);
+  // The same set the verifier installs, so the warm cache is the one it hits.
+  const deps = [
+    ...PY_CLIENT_VERIFIER_DEPENDENCIES,
+    PY_VERIFIER_TYPE_CHECKER,
+  ].flatMap((spec) => ['--with', spec]);
   try {
     execFileSync('uv', ['run', ...deps, 'python', '-c', ''], {
       stdio: 'ignore',

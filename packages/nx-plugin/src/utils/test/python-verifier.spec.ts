@@ -5,6 +5,7 @@
 import type { Tree } from '@nx/devkit';
 import { createTreeUsingTsSolutionSetup } from '../test';
 import { PythonVerifier } from './py.spec';
+import { PY_CLIENT_VERIFIER_DEPENDENCIES } from './python-dependencies';
 
 // A few tests for the test utility as a sanity check, mirroring ts.spec.ts.
 describe('PythonVerifier', () => {
@@ -86,6 +87,32 @@ describe('PythonVerifier', () => {
       ].join('\n'),
     );
     await verifier.expectPythonToCompile(tree, paths, 'pkg', { pkg: 'pkg' });
+  });
+
+  // Dependencies are the caller's to choose, mirroring TypeScriptVerifier: a
+  // worker only resolves what it was asked to install.
+  describe('dependencies', () => {
+    it('should resolve a dependency it was given', async () => {
+      const scoped = new PythonVerifier(PY_CLIENT_VERIFIER_DEPENDENCIES);
+      try {
+        const paths = writePackage('import httpx\n\nCLIENT = httpx.Client\n');
+        await scoped.expectPythonToCompile(tree, paths, 'pkg', { pkg: 'pkg' });
+      } finally {
+        await scoped.shutdown();
+      }
+    });
+
+    it('should not resolve a dependency it was not given', async () => {
+      const bare = new PythonVerifier([]);
+      try {
+        const paths = writePackage('import httpx\n\nCLIENT = httpx.Client\n');
+        await expect(
+          bare.expectPythonToCompile(tree, paths, 'pkg', { pkg: 'pkg' }),
+        ).rejects.toThrow(/httpx/);
+      } finally {
+        await bare.shutdown();
+      }
+    });
   });
 
   describe('typeCheckUsage', () => {

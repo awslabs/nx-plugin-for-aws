@@ -6,10 +6,13 @@ import type { Tree } from '@nx/devkit';
 import { type ChildProcessWithoutNullStreams, spawn } from 'child_process';
 import path from 'path';
 import { createInterface, type Interface } from 'readline';
-import { OPEN_API_PY_CLIENT_DEPENDENCIES } from '../../open-api/py-client/generator';
-import { declaredNames } from '../declared-dependencies';
 import { createTreeUsingTsSolutionSetup } from '../test';
-import { PY_VERSIONS, withPyVersions } from '../versions';
+import {
+  PY_CLIENT_VERIFIER_DEPENDENCIES,
+  PY_VERIFIER_TYPE_CHECKER,
+} from './python-dependencies';
+
+export { PY_CLIENT_VERIFIER_DEPENDENCIES };
 
 const WORKER_PATH = path.join(
   import.meta.dirname,
@@ -121,19 +124,25 @@ export class PythonVerifier {
   private stdout?: Interface;
   private queue: Array<(r: InvokeResult) => void> = [];
   private started = false;
+  private readonly dependencies: string[];
+
+  /**
+   * @param dependencies packages the worker installs, as fully-qualified
+   * specifiers (e.g. `httpx==0.28.1`). `ty` is always added, since the worker
+   * type checks with it. Use {@link PY_CLIENT_VERIFIER_DEPENDENCIES} for the
+   * versions a generated client is vended against.
+   */
+  constructor(dependencies: string[] = PY_CLIENT_VERIFIER_DEPENDENCIES) {
+    this.dependencies = dependencies;
+  }
 
   private ensureStarted(): ChildProcessWithoutNullStreams {
     if (this.started && this.process) return this.process;
-    // Use the same pinned versions the generator declares so the test
-    // environment matches what consumers get at runtime. `ty` joins them so it
-    // resolves the client's imports against that same environment — it is the
-    // checker the plugin's Python projects run.
-    const deps = withPyVersions(
-      OPEN_API_PY_CLIENT_DEPENDENCIES,
-      declaredNames(OPEN_API_PY_CLIENT_DEPENDENCIES.py),
-    )
-      .concat(`ty${PY_VERSIONS.ty}`)
-      .flatMap((spec) => ['--with', spec]);
+    // `ty` resolves the code under test against this same environment, so it
+    // sees the very versions the code will run with.
+    const deps = [...this.dependencies, PY_VERIFIER_TYPE_CHECKER].flatMap(
+      (spec) => ['--with', spec],
+    );
     const proc = spawn('uv', ['run', ...deps, 'python', '-u', WORKER_PATH], {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
