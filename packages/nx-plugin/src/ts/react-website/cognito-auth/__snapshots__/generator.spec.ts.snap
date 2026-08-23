@@ -105,6 +105,7 @@ import {
   FeaturePlan,
   ManagedLoginVersion,
   Mfa,
+  type MfaSecondFactor,
   OAuthScope,
   StandardThreatProtectionMode,
   UserPool,
@@ -137,6 +138,20 @@ export interface UserIdentityProps {
    * @default true
    */
   readonly enableWaf?: boolean;
+
+  /**
+   * Whether users must configure MFA, may optionally configure MFA, or cannot use MFA at all.
+   *
+   * @default Mfa.REQUIRED
+   */
+  readonly mfa?: Mfa;
+
+  /**
+   * The MFA methods available to users when MFA is not off.
+   *
+   * @default { sms: true, otp: true }
+   */
+  readonly mfaSecondFactor?: MfaSecondFactor;
 }
 
 /**
@@ -155,12 +170,16 @@ export class UserIdentity extends Construct {
   constructor(
     scope: Construct,
     id: string,
-    { enableWaf = true }: UserIdentityProps = {},
+    {
+      enableWaf = true,
+      mfa = Mfa.REQUIRED,
+      mfaSecondFactor = { sms: true, otp: true },
+    }: UserIdentityProps = {},
   ) {
     super(scope, id);
 
     this.region = Stack.of(this).region;
-    this.userPool = this.createUserPool();
+    this.userPool = this.createUserPool(mfa, mfaSecondFactor);
 
     if (enableWaf) {
       this.webAcl = this.createWebAcl(
@@ -208,7 +227,7 @@ export class UserIdentity extends Construct {
     });
   }
 
-  private createUserPool = () => {
+  private createUserPool = (mfa: Mfa, mfaSecondFactor: MfaSecondFactor) => {
     const userPool = new UserPool(this, 'UserPool', {
       deletionProtection: true,
       passwordPolicy: {
@@ -219,11 +238,11 @@ export class UserIdentity extends Construct {
         requireSymbols: true,
         tempPasswordValidity: Duration.days(3),
       },
-      mfa: Mfa.REQUIRED,
+      mfa,
       featurePlan: FeaturePlan.PLUS,
       // Audit-only logs threat assessments without blocking sign-in. Switch to FULL_FUNCTION to enforce automatic responses.
       standardThreatProtectionMode: StandardThreatProtectionMode.AUDIT_ONLY,
-      mfaSecondFactor: { sms: true, otp: true },
+      mfaSecondFactor,
       signInCaseSensitive: false,
       signInAliases: { username: true, email: true },
       accountRecovery: AccountRecovery.EMAIL_ONLY,
