@@ -70,7 +70,7 @@ Si vous avez choisi de ne pas utiliser [TanStack Router](https://tanstack.com/ro
 
 <Snippet name="shared-constructs" />
 
-Le générateur crée l'infrastructure en tant que code pour déployer votre site Web en fonction de votre `iac` sélectionné :
+Le générateur crée l'infrastructure as code pour déployer votre site Web en fonction de votre `iac` sélectionné :
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -182,7 +182,7 @@ Pour plus de détails, consultez la documentation [TanStack Router](https://tans
 
 ## Déployer votre site Web
 
-Le générateur de site Web React crée l'infrastructure en tant que code CDK ou Terraform en fonction de votre `iac` sélectionné. Vous pouvez l'utiliser pour déployer votre site Web.
+Le générateur de site Web React crée l'infrastructure as code CDK ou Terraform en fonction de votre `iac` sélectionné. Vous pouvez l'utiliser pour déployer votre site Web.
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -207,9 +207,9 @@ export class ApplicationStack extends Stack {
 Cela configure :
 
 1. Un bucket S3 pour héberger vos fichiers de site Web statique
-2. Une distribution CloudFront pour la diffusion de contenu mondiale
+2. Une distribution CloudFront pour la diffusion de contenu globale
 3. Une Web ACL WAF pour la protection de sécurité
-4. Un contrôle d'accès à l'origine pour un accès S3 sécurisé
+4. Un contrôle d'accès d'origine pour un accès S3 sécurisé
 5. Le déploiement automatique des fichiers du site Web et de la configuration d'exécution
 </Fragment>
 <Fragment slot="terraform">
@@ -231,9 +231,9 @@ module "my_website" {
 Cela configure :
 
 1. Un bucket S3 pour héberger vos fichiers de site Web statique
-2. Une distribution CloudFront pour la diffusion de contenu mondiale
+2. Une distribution CloudFront pour la diffusion de contenu globale
 3. Une Web ACL WAF pour la protection de sécurité (déployée dans us-east-1)
-4. Un contrôle d'accès à l'origine pour un accès S3 sécurisé
+4. Un contrôle d'accès d'origine pour un accès S3 sécurisé
 5. Le déploiement automatique des fichiers du site Web et de la configuration d'exécution
 
 :::note[Région du fournisseur WAF]
@@ -290,7 +290,7 @@ export class ApplicationStack extends Stack {
 ```
 
 :::caution[Supprimer CKV_AWS_68 lors de la désactivation de WAF]
-La désactivation de WAF signifie que la distribution CloudFront synthétisée n'a pas de Web ACL associée, ce qui fait échouer l'analyse de sécurité `checkov` avec `CKV_AWS_68: "CloudFront Distribution should have WAF enabled"` sauf si elle est supprimée comme indiqué ci-dessus.
+La désactivation de WAF signifie que la distribution CloudFront synthétisée n'a pas de Web ACL associée, ce qui échoue l'analyse de sécurité `checkov` avec `CKV_AWS_68: "CloudFront Distribution should have WAF enabled"` sauf si elle est supprimée comme indiqué ci-dessus.
 :::
 </Fragment>
 <Fragment slot="terraform">
@@ -311,7 +311,7 @@ module "my_website" {
 
 ### Chiffrement du bucket
 
-Le bucket du site Web, le bucket de journaux de la distribution CloudFront et le groupe CloudWatch Logs recevant leurs journaux d'accès au serveur sont chiffrés avec une clé [AWS KMS](https://aws.amazon.com/kms/) gérée par le client par défaut. Cette clé est créée automatiquement pour vous, avec la rotation de clé activée.
+Le bucket du site Web, le bucket de logs de la distribution CloudFront et le groupe CloudWatch Logs recevant leurs logs d'accès au serveur sont chiffrés avec une clé [AWS KMS](https://aws.amazon.com/kms/) gérée par le client par défaut. Cette clé est créée automatiquement pour vous, avec la rotation de clé activée.
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -334,6 +334,22 @@ export class ApplicationStack extends Stack {
 }
 ```
 
+:::caution[Supprimer CKV_AWS_158 lors de l'utilisation de S3_MANAGED]
+Choisir `BucketEncryption.S3_MANAGED` signifie que le groupe de logs d'accès n'est plus chiffré par KMS, ce qui échoue l'analyse de sécurité `checkov` avec `CKV_AWS_158`. Supprimez-le :
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { LogGroup } from 'aws-cdk-lib/aws-logs';
+import { suppressRules } from '@my-scope/common-constructs';
+
+suppressRules(
+  website,
+  ['CKV_AWS_158'],
+  'Access log group is not KMS encrypted when encryption is S3_MANAGED',
+  (c) => c instanceof LogGroup,
+);
+```
+:::
+
 Pour utiliser votre propre clé KMS au lieu d'une créée automatiquement, passez `encryptionKey` :
 
 ```ts {2}
@@ -342,10 +358,36 @@ new MyWebsite(this, 'MyWebsite', {
 });
 ```
 
-`enableKeyRotation` (par défaut `true`) s'applique uniquement à la clé créée automatiquement, c'est-à-dire lorsque `encryption` est `BucketEncryption.KMS` (par défaut) et qu'aucune `encryptionKey` n'est fournie.
+:::caution[Les clés importées ont besoin de leurs propres permissions]
+Une clé importée via `Key.fromKeyArn` doit déjà accorder aux principaux de service CloudWatch Logs, S3 et CloudFront les permissions dont ils ont besoin dans sa propre politique de clé. `addToResourcePolicy` est un no-op sur une clé importée, donc ce construct ne peut pas les accorder pour vous, et `cdk synth` ne vous avertira pas - l'échec n'apparaît qu'au moment du déploiement. Une clé créée dans la même application (`new Key(this, 'WebsiteKey')`) n'a pas ce problème, car CDK peut mettre à jour sa politique directement.
+:::
+
+`enableKeyRotation` (par défaut `true`) ne s'applique qu'à la clé créée automatiquement, c'est-à-dire lorsque `encryption` est `BucketEncryption.KMS` (par défaut) et qu'aucune `encryptionKey` n'est fournie :
+
+```ts {2}
+new MyWebsite(this, 'MyWebsite', {
+  enableKeyRotation: false,
+});
+```
+
+:::caution[Supprimer CKV_AWS_7 lors de la désactivation de la rotation de clé]
+La désactivation de la rotation de clé sur la clé créée automatiquement échoue l'analyse de sécurité `checkov` avec `CKV_AWS_7`. Supprimez-le :
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { Key } from 'aws-cdk-lib/aws-kms';
+import { suppressRules } from '@my-scope/common-constructs';
+
+suppressRules(
+  website,
+  ['CKV_AWS_7'],
+  'Key rotation is managed externally',
+  (c) => c instanceof Key,
+);
+```
+:::
 </Fragment>
 <Fragment slot="terraform">
-Si vous souhaitez utiliser une configuration de chiffrement différente, définissez les variables `encryption`, `kms_key_arn` et `enable_key_rotation` :
+Si vous souhaitez utiliser une configuration de chiffrement différente, définissez les variables `encryption`, `kms_key_arn`, `create_kms_key` et `enable_key_rotation` :
 
 ```hcl title="packages/infra/src/main.tf" {7}
 module "my_website" {
@@ -358,9 +400,52 @@ module "my_website" {
 }
 ```
 
-Pour utiliser votre propre clé KMS au lieu d'une créée automatiquement, passez `kms_key_arn`. Une clé fournie par le client doit déjà accorder aux principaux de service CloudWatch Logs, S3 et CloudFront les permissions dont ils ont besoin dans sa propre politique de clé.
+:::caution[Checkov: S3_MANAGED]
+Choisir `S3_MANAGED` échoue l'analyse de sécurité `checkov` avec `CKV_AWS_145` sur les buckets du site Web et des logs de distribution. La cible `test` fournie n'accepte pas de `--config-file`, mais `checkov` découvre automatiquement un `.checkov.yaml` dans son répertoire de travail, donc déposez-en un dans `packages/infra/src` :
 
-`enable_key_rotation` (par défaut `true`) s'applique uniquement à la clé créée automatiquement, c'est-à-dire lorsque `encryption` est `"KMS"` (par défaut) et qu'aucun `kms_key_arn` n'est fourni.
+```yaml title="packages/infra/src/.checkov.yaml"
+skip-check:
+  - CKV_AWS_145
+```
+:::
+
+Pour utiliser votre propre clé KMS au lieu d'une créée automatiquement, passez `kms_key_arn` et définissez `create_kms_key` sur `false` :
+
+```hcl title="packages/infra/src/main.tf" {7-8}
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+  kms_key_arn    = aws_kms_key.website.arn
+  create_kms_key = false
+}
+```
+
+Une clé fournie par le client doit déjà accorder aux principaux de service CloudWatch Logs, S3 et CloudFront les permissions dont ils ont besoin dans sa propre politique de clé.
+
+`enable_key_rotation` (par défaut `true`) ne s'applique qu'à la clé créée automatiquement, c'est-à-dire lorsque `encryption` est `"KMS"` (par défaut) et que `create_kms_key` est `true` :
+
+```hcl title="packages/infra/src/main.tf" {7}
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+  enable_key_rotation = false
+}
+```
+
+:::caution[Checkov: rotation de clé désactivée]
+La désactivation de la rotation de clé sur la clé créée automatiquement échoue l'analyse de sécurité `checkov` avec `CKV_AWS_7`. Ajoutez-le au même `.checkov.yaml` :
+
+```yaml title="packages/infra/src/.checkov.yaml"
+skip-check:
+  - CKV_AWS_7
+```
+:::
 </Fragment>
 </Infrastructure>
 
@@ -477,7 +562,7 @@ module "my_website" {
 ```
 
 :::caution[Ordre des modules]
-Vous devez vous assurer de déclarer votre module de site Web _après_ tous les modules qui ajoutent à la configuration d'exécution et de configurer le `depends_on` approprié pour garantir l'ordre, sinon ils seront manquants dans votre fichier `runtime-config.json`.
+Vous devez vous assurer de déclarer votre module de site Web _après_ tous les modules qui ajoutent à la configuration d'exécution et configurer le `depends_on` approprié pour garantir l'ordre, sinon ils seront manquants dans votre fichier `runtime-config.json`.
 :::
 </Fragment>
 </Infrastructure>
@@ -503,7 +588,7 @@ Pour plus de détails sur la façon dont la configuration d'exécution est stock
 
 ### Configuration d'exécution locale
 
-Lors de l'exécution du [serveur de développement local](#serveur-de-développement-local), vous aurez besoin d'un fichier `runtime-config.json` dans votre répertoire `public` pour que votre site Web local connaisse les URL backend, la configuration d'identité, etc.
+Lors de l'exécution du [serveur de développement local](#serveur-de-développement-local), vous aurez besoin d'un fichier `runtime-config.json` dans votre répertoire `public` afin que votre site Web local connaisse les URL backend, la configuration d'identité, etc.
 
 Votre projet de site Web est configuré avec une cible `load-runtime-config` que vous pouvez utiliser pour télécharger le fichier `runtime-config.json` depuis une application déployée :
 
@@ -542,9 +627,9 @@ Cette cible est utile pour travailler sur les modifications du site Web tout en 
 
 ### Cible Dev
 
-La cible `dev` démarre un serveur de développement local pour votre site Web (avec [Vite `MODE`](https://vite.dev/guide/env-and-mode) défini sur `local-dev`), ainsi que le démarrage de tous les serveurs locaux pour les API auxquelles vous avez connecté votre site Web via le <Link path="/guides/connection">générateur de connexion</Link>.
+La cible `dev` démarre un serveur de développement local pour votre site Web (avec [Vite `MODE`](https://vite.dev/guide/env-and-mode) défini sur `local-dev`), ainsi que le démarrage de tous les serveurs locaux pour les API auxquelles vous avez connecté votre site Web via le <Link path="/guides/connection">générateur Connection</Link>.
 
-Lorsque votre serveur de site Web local est exécuté via cette cible, `runtime-config.json` est automatiquement remplacé pour pointer vers vos URL d'API s'exécutant localement.
+Lorsque votre serveur de site Web local est exécuté via cette cible, `runtime-config.json` est automatiquement remplacé pour pointer vers vos URL d'API en cours d'exécution localement.
 
 Vous pouvez exécuter cette cible avec la commande suivante :
 
@@ -574,7 +659,7 @@ Lors de l'exécution avec `dev`, vous pouvez spécifier toutes les variables d'e
 Notez que vos serveurs d'API locaux s'exécuteront avec les informations d'identification AWS que vous avez configurées localement.
 :::
 
-## Construction
+## Building
 
 Vous pouvez construire votre site Web en utilisant la cible `build`. Cela exécute les cibles `bundle`, `compile`, `test` et `lint`, vérifiant les types, regroupant, testant et lintant votre site Web.
 
@@ -584,7 +669,7 @@ La cible `bundle` utilise Vite pour créer un bundle de production dans le répe
 
 <NxCommands commands={['bundle <my-website>']} />
 
-## Tests
+## Testing
 
 Tester votre site Web ressemble beaucoup à l'écriture de tests dans un projet TypeScript standard, veuillez donc vous référer au <Link path="guides/typescript-project#testing">guide du projet TypeScript</Link> pour plus de détails.
 

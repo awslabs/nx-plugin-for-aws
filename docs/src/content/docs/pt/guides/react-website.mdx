@@ -259,7 +259,7 @@ Uma `Content-Security-Policy` padrão é aplicada. Ela restringe scripts e frami
 
 ### WAF
 
-A distribuição CloudFront é protegida por um Web ACL [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) por padrão. O Web ACL usa o conjunto de regras padrão gerenciado pela AWS ([`AWSManagedRulesCommonRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-crs) e [`AWSManagedRulesKnownBadInputsRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-known-bad-inputs)), fornecendo proteção contra explorações web comuns, incluindo o OWASP Top 10.
+A distribuição CloudFront é protegida por um [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACL por padrão. O Web ACL usa o conjunto de regras padrão gerenciado pela AWS ([`AWSManagedRulesCommonRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-crs) e [`AWSManagedRulesKnownBadInputsRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-known-bad-inputs)), fornecendo proteção contra explorações web comuns, incluindo o OWASP Top 10.
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -334,6 +334,22 @@ export class ApplicationStack extends Stack {
 }
 ```
 
+:::caution[Suprimir CKV_AWS_158 ao usar S3_MANAGED]
+Escolher `BucketEncryption.S3_MANAGED` significa que o grupo de log de acesso não está mais criptografado com KMS, o que falha na verificação de segurança `checkov` com `CKV_AWS_158`. Suprima-o:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { LogGroup } from 'aws-cdk-lib/aws-logs';
+import { suppressRules } from '@my-scope/common-constructs';
+
+suppressRules(
+  website,
+  ['CKV_AWS_158'],
+  'Access log group is not KMS encrypted when encryption is S3_MANAGED',
+  (c) => c instanceof LogGroup,
+);
+```
+:::
+
 Para usar sua própria chave KMS em vez de uma criada automaticamente, passe `encryptionKey`:
 
 ```ts {2}
@@ -342,10 +358,36 @@ new MyWebsite(this, 'MyWebsite', {
 });
 ```
 
-`enableKeyRotation` (padrão `true`) aplica-se apenas à chave criada automaticamente, ou seja, quando `encryption` é `BucketEncryption.KMS` (o padrão) e nenhum `encryptionKey` é fornecido.
+:::caution[Chaves importadas precisam de suas próprias permissões]
+Uma chave importada via `Key.fromKeyArn` já deve conceder aos principais de serviço CloudWatch Logs, S3 e CloudFront as permissões necessárias em sua própria política de chave. `addToResourcePolicy` é um no-op em uma chave importada, então este construct não pode concedê-las para você, e `cdk synth` não irá avisá-lo - a falha só aparece no momento da implantação. Uma chave criada no mesmo app (`new Key(this, 'WebsiteKey')`) não tem esse problema, já que o CDK pode atualizar sua política diretamente.
+:::
+
+`enableKeyRotation` (padrão `true`) só se aplica à chave criada automaticamente, ou seja, quando `encryption` é `BucketEncryption.KMS` (o padrão) e nenhum `encryptionKey` é fornecido:
+
+```ts {2}
+new MyWebsite(this, 'MyWebsite', {
+  enableKeyRotation: false,
+});
+```
+
+:::caution[Suprimir CKV_AWS_7 ao desativar rotação de chave]
+Desativar a rotação de chave na chave criada automaticamente falha na verificação de segurança `checkov` com `CKV_AWS_7`. Suprima-o:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { Key } from 'aws-cdk-lib/aws-kms';
+import { suppressRules } from '@my-scope/common-constructs';
+
+suppressRules(
+  website,
+  ['CKV_AWS_7'],
+  'Key rotation is managed externally',
+  (c) => c instanceof Key,
+);
+```
+:::
 </Fragment>
 <Fragment slot="terraform">
-Se você quiser usar uma configuração de criptografia diferente, defina as variáveis `encryption`, `kms_key_arn` e `enable_key_rotation`:
+Se você quiser usar uma configuração de criptografia diferente, defina as variáveis `encryption`, `kms_key_arn`, `create_kms_key` e `enable_key_rotation`:
 
 ```hcl title="packages/infra/src/main.tf" {7}
 module "my_website" {
@@ -358,15 +400,58 @@ module "my_website" {
 }
 ```
 
-Para usar sua própria chave KMS em vez de uma criada automaticamente, passe `kms_key_arn`. Uma chave fornecida pelo cliente já deve conceder aos principais de serviço CloudWatch Logs, S3 e CloudFront as permissões necessárias em sua própria política de chave.
+:::caution[Checkov: S3_MANAGED]
+Escolher `S3_MANAGED` falha na verificação de segurança `checkov` com `CKV_AWS_145` nos buckets de site e log de distribuição. O target `test` fornecido não aceita um `--config-file`, mas `checkov` descobre automaticamente um `.checkov.yaml` em seu diretório de trabalho, então coloque um em `packages/infra/src`:
 
-`enable_key_rotation` (padrão `true`) aplica-se apenas à chave criada automaticamente, ou seja, quando `encryption` é `"KMS"` (o padrão) e nenhum `kms_key_arn` é fornecido.
+```yaml title="packages/infra/src/.checkov.yaml"
+skip-check:
+  - CKV_AWS_145
+```
+:::
+
+Para usar sua própria chave KMS em vez de uma criada automaticamente, passe `kms_key_arn` e defina `create_kms_key` como `false`:
+
+```hcl title="packages/infra/src/main.tf" {7-8}
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+  kms_key_arn    = aws_kms_key.website.arn
+  create_kms_key = false
+}
+```
+
+Uma chave fornecida pelo cliente já deve conceder aos principais de serviço CloudWatch Logs, S3 e CloudFront as permissões necessárias em sua própria política de chave.
+
+`enable_key_rotation` (padrão `true`) só se aplica à chave criada automaticamente, ou seja, quando `encryption` é `"KMS"` (o padrão) e `create_kms_key` é `true`:
+
+```hcl title="packages/infra/src/main.tf" {7}
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+  enable_key_rotation = false
+}
+```
+
+:::caution[Checkov: rotação de chave desativada]
+Desativar a rotação de chave na chave criada automaticamente falha na verificação de segurança `checkov` com `CKV_AWS_7`. Adicione-o ao mesmo `.checkov.yaml`:
+
+```yaml title="packages/infra/src/.checkov.yaml"
+skip-check:
+  - CKV_AWS_7
+```
+:::
 </Fragment>
 </Infrastructure>
 
 ### Domínio Personalizado e TLS
 
-Por padrão, a distribuição usa o nome de domínio CloudFront padrão (`*.cloudfront.net`) e seu certificado padrão, que não suporta a aplicação de uma versão TLS mínima de 1.2. Para servir seu site a partir do seu próprio domínio, forneça um [certificado ACM](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html) (que deve residir em `us-east-1` para uso com CloudFront) e seus nomes de domínio. Uma versão TLS mínima de 1.2 é então aplicada para os visualizadores:
+Por padrão, a distribuição usa o nome de domínio padrão do CloudFront (`*.cloudfront.net`) e seu certificado padrão, que não suporta a aplicação de uma versão TLS mínima de 1.2. Para servir seu site a partir do seu próprio domínio, forneça um [certificado ACM](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html) (que deve residir em `us-east-1` para uso com CloudFront) e seus nomes de domínio. Uma versão TLS mínima de 1.2 é então aplicada para os visualizadores:
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -418,7 +503,7 @@ A configuração da sua infraestrutura é fornecida ao seu site via <Link href="
 
 <Infrastructure>
 <Fragment slot="cdk">
-O construct CDK `RuntimeConfig` pode ser usado para adicionar e recuperar configuração na sua infraestrutura CDK. Os constructs CDK gerados pelos geradores `@aws/nx-plugin` (como <Link path="guides/trpc">`ts#api`</Link> e <Link path="guides/fastapi">`py#api`</Link>) adicionarão automaticamente valores apropriados ao `RuntimeConfig`.
+O construct CDK `RuntimeConfig` pode ser usado para adicionar e recuperar configuração em sua infraestrutura CDK. Os constructs CDK gerados pelos geradores `@aws/nx-plugin` (como <Link path="guides/trpc">`ts#api`</Link> e <Link path="guides/fastapi">`py#api`</Link>) adicionarão automaticamente valores apropriados ao `RuntimeConfig`.
 
 Seu construct CDK de site implantará o namespace `connection` da configuração de runtime como um arquivo `runtime-config.json` na raiz do seu bucket S3.
 
@@ -477,7 +562,7 @@ module "my_website" {
 ```
 
 :::caution[Ordenação de Módulos]
-Você deve garantir que declare seu módulo de site _após_ quaisquer módulos que adicionem à configuração de runtime e configure o `depends_on` apropriado para garantir a ordenação, caso contrário eles estarão faltando no seu arquivo `runtime-config.json`.
+Você deve garantir que declare seu módulo de site _depois_ de quaisquer módulos que adicionem à configuração de runtime e configure o `depends_on` apropriado para garantir a ordenação, caso contrário eles estarão faltando no seu arquivo `runtime-config.json`.
 :::
 </Fragment>
 </Infrastructure>
@@ -503,7 +588,7 @@ Para detalhes sobre como a configuração de runtime é armazenada no AWS AppCon
 
 ### Configuração de Runtime Local
 
-Ao executar o [servidor de desenvolvimento local](#servidor-de-desenvolvimento-local), você precisará de um arquivo `runtime-config.json` no seu diretório `public` para que seu site local conheça as URLs do backend, configuração de identidade, etc.
+Ao executar o [servidor de desenvolvimento local](#servidor-de-desenvolvimento-local), você precisará de um arquivo `runtime-config.json` no seu diretório `public` para que seu site local conheça as URLs de backend, configuração de identidade, etc.
 
 Seu projeto de site está configurado com um target `load-runtime-config` que você pode usar para baixar o arquivo `runtime-config.json` de uma aplicação implantada:
 
@@ -514,7 +599,7 @@ Seu projeto de site está configurado com um target `load-runtime-config` que vo
 <Fragment slot="cdk">
 Se você alterar o prefixo para seus nomes de stage no `src/main.ts` do seu projeto de infraestrutura, você precisará atualizar o target `load-runtime-config` no arquivo `project.json` do seu site de acordo.
 
-Além disso, vale notar que o target `load-runtime-config` assume que um único stage da sua aplicação está implantado no ambiente para o qual você tem credenciais AWS. Você precisará ajustar o comando se implantar vários stages na mesma conta e região.
+Além disso, vale notar que o target `load-runtime-config` assume que um único stage da sua aplicação está implantado no ambiente para o qual você tem credenciais AWS. Você precisará ajustar o comando se implantar múltiplos stages na mesma conta e região.
 </Fragment>
 <Fragment slot="terraform">
 Para projetos Terraform, o target `load-runtime-config` copia o arquivo `runtime-config.json` que foi criado após seu `terraform apply` local mais recente.
@@ -524,11 +609,11 @@ Para projetos Terraform, o target `load-runtime-config` copia o arquivo `runtime
 
 ## Servidor de Desenvolvimento Local
 
-O comando canônico para desenvolvimento local é `dev`, que inicia seu site (e quaisquer servidores locais para APIs às quais você o conectou) com um comando:
+O comando canônico para desenvolvimento local é `dev`, que inicia seu site (e quaisquer servidores locais para APIs que você conectou a ele) com um único comando:
 
 <NxCommands commands={['dev <my-website>']} />
 
-O target `serve` também está disponível para quando você precisar controlar quanto da sua aplicação é executado localmente versus apontando para a infraestrutura AWS implantada. Para uma visão geral mais ampla do desenvolvimento local em projetos conectados, incluindo como `dev` se comporta para projetos com vários componentes, consulte o guia <Link path="guides/local-development">Desenvolvimento Local</Link>.
+O target `serve` também está disponível para quando você precisa controlar quanto da sua aplicação é executado localmente versus apontando para infraestrutura AWS implantada. Para uma visão geral mais ampla do desenvolvimento local em projetos conectados, incluindo como `dev` se comporta para projetos com múltiplos componentes, consulte o guia <Link path="guides/local-development">Desenvolvimento Local</Link>.
 
 ### Target Serve
 
@@ -542,7 +627,7 @@ Este target é útil para trabalhar em alterações do site enquanto aponta para
 
 ### Target Dev
 
-O target `dev` inicia um servidor de desenvolvimento local para seu site (com [Vite `MODE`](https://vite.dev/guide/env-and-mode) definido como `local-dev`), bem como inicia quaisquer servidores locais para APIs às quais você conectou seu site via o <Link path="/guides/connection">gerador Connection</Link>.
+O target `dev` inicia um servidor de desenvolvimento local para seu site (com [Vite `MODE`](https://vite.dev/guide/env-and-mode) definido como `local-dev`), bem como inicia quaisquer servidores locais para APIs que você conectou ao seu site via o <Link path="/guides/connection">gerador Connection</Link>.
 
 Quando seu servidor de site local é executado via este target, `runtime-config.json` é automaticamente substituído para apontar para suas URLs de API em execução local.
 
@@ -557,7 +642,7 @@ O `package.json` raiz do seu workspace inclui um script `dev` que executa o targ
 
 <PackageManagerShortCommand commands={["dev"]} />
 
-Isso inicia o servidor de desenvolvimento local para seu site (e quaisquer outros projetos com um target `dev`) em um comando. Para executar apenas este site, use seu próprio target `dev` (por exemplo, `nx dev <my-website>`).
+Isso inicia o servidor de desenvolvimento local para seu site (e quaisquer outros projetos com um target `dev`) em um único comando. Para executar apenas este site, use seu próprio target `dev` (por exemplo, `nx dev <my-website>`).
 :::
 
 :::warning[Autenticação Simulada]
@@ -574,9 +659,9 @@ Ao executar com `dev`, você pode especificar quaisquer variáveis de ambiente n
 Observe que seus servidores de API locais serão executados com as credenciais AWS que você configurou localmente.
 :::
 
-## Building
+## Build
 
-Você pode fazer o build do seu site usando o target `build`. Isso executa os targets `bundle`, `compile`, `test` e `lint`, verificando tipos, empacotando, testando e fazendo lint do seu site.
+Você pode fazer o build do seu site usando o target `build`. Isso executa os targets `bundle`, `compile`, `test` e `lint`, fazendo verificação de tipos, bundling, testes e linting do seu site.
 
 <NxCommands commands={['build <my-website>']} />
 
@@ -651,3 +736,4 @@ Use o gerador <Link path="guides/connection">`connection`</Link> para integrar e
     target="agentcore"
   />
 </CardGrid>
+
