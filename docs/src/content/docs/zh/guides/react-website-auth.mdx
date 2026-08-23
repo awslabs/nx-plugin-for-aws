@@ -15,7 +15,7 @@ React 网站身份验证生成器使用 [Amazon Cognito](https://aws.amazon.com/
 
 此生成器配置 CDK 或 Terraform 基础设施以创建 Cognito 用户池和关联的身份池，以及用于处理用户登录流程的托管 UI，并将其与您的 React 网站集成。
 
-## 用法
+## 使用方法
 
 ### 为您的 React 网站添加身份验证
 
@@ -106,7 +106,7 @@ browser -> backend: IAM/Cognito
 
 #### 威胁防护
 
-用户池在 Cognito [Plus 功能计划](https://docs.aws.amazon.com/cognito/latest/developerguide/feature-plans-features-plus.html)上创建，并将[威胁防护](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pool-settings-threat-protection.html)设置为标准身份验证的 `AUDIT` 模式。在审计模式下，Cognito 为每次登录分配风险级别，并将评估记录到 CloudWatch，而不会阻止用户。
+用户池在 Cognito [Plus 功能计划](https://docs.aws.amazon.com/cognito/latest/developerguide/feature-plans-features-plus.html)上创建，标准身份验证的[威胁防护](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pool-settings-threat-protection.html)设置为 `AUDIT` 模式。在审计模式下，Cognito 为每次登录分配风险级别并将评估记录到 CloudWatch，而不会阻止用户。
 
 一旦您观察了用户的风险评估，您可以切换到全功能强制执行，以自动响应风险活动（例如要求 MFA 或阻止登录）：
 
@@ -119,9 +119,45 @@ browser -> backend: IAM/Cognito
 </Fragment>
 </Infrastructure>
 
+#### 多因素身份验证 (MFA)
+
+默认情况下，用户必须在登录之前配置 MFA（短信验证码或基于时间的一次性密码）。您可以将 MFA 设置为可选、完全关闭，或限制可用的第二因素方法：
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts
+import { Mfa } from 'aws-cdk-lib/aws-cognito';
+
+new UserIdentity(this, 'Identity', {
+  mfa: Mfa.OPTIONAL,
+  mfaSecondFactor: { sms: false, otp: true },
+});
+```
+
+`mfa` 接受 `Mfa.OFF` / `Mfa.OPTIONAL` / `Mfa.REQUIRED`。`mfaSecondFactor.sms` 和 `mfaSecondFactor.otp` 独立启用或禁用每种第二因素方法；当 `mfa` 为 `Mfa.OFF` 时它们无效。将 `mfa: Mfa.REQUIRED` 设置为同时禁用两种方法会在合成时被拒绝，因为这样就没有人能够完成登录。
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+
+  mfa = "OPTIONAL"
+  mfa_second_factor_sms = false
+  mfa_second_factor_otp = true
+}
+```
+
+`mfa` 接受 `"OFF"` / `"OPTIONAL"` / `"ON"`。`mfa_second_factor_sms` 和 `mfa_second_factor_otp` 独立启用或禁用每种第二因素方法；当 `mfa` 为 `"OFF"` 时它们无效。
+</Fragment>
+</Infrastructure>
+
+:::caution[SMS MFA 与电话号码验证绑定]
+除非 SMS 也是启用的 MFA 方法（当 MFA 未关闭时），否则 Cognito 会拒绝基于短信的电话号码验证，这在 CDK 和 Terraform 中都是如此。因此，当 `mfa` 开启时禁用 `mfaSecondFactor.sms` / `mfa_second_factor_sms` 也会禁用用户池的基于短信的电话号码验证。
+:::
+
 #### Web 应用程序防火墙 (WAF)
 
-默认情况下，用户池与使用 `AWSManagedRulesCommonRuleSet` 和 `AWSManagedRulesKnownBadInputsRuleSet` 托管规则组的 [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACL 关联。如果您希望管理自己的 Web ACL 或不需要，可以禁用此功能：
+默认情况下，用户池与 [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACL 关联，使用 `AWSManagedRulesCommonRuleSet` 和 `AWSManagedRulesKnownBadInputsRuleSet` 托管规则组。如果您希望管理自己的 Web ACL 或不需要，可以禁用此功能：
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -141,14 +177,14 @@ module "user_identity" {
 </Infrastructure>
 
 :::caution[`EC2MetaDataSSRF_QUERYARGUMENTS` 设置为 Count]
-此规则将查询参数中的环回地址标记为 [SSRF](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-list.html) 尝试，这将阻止本地登录，因为托管 UI 接收 `localhost` `redirect_uri`。因此，在配置本地回调 URL 时，它被设置为 [Count](https://docs.aws.amazon.com/waf/latest/developerguide/web-acl-rule-action.html#web-acl-rule-action-count) —— 匹配项仍会被记录，其他所有规则都会阻止。删除本地回调 URL 以将其恢复为 Block。
+此规则将查询参数中的环回地址标记为 [SSRF](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-list.html) 尝试，这会阻止本地登录，因为托管 UI 接收 `localhost` `redirect_uri`。因此，在配置本地回调 URL 时，它被设置为 [Count](https://docs.aws.amazon.com/waf/latest/developerguide/web-acl-rule-action.html#web-acl-rule-action-count) — 匹配项仍会被记录，其他每条规则都会阻止。删除本地回调 URL 以将其恢复为 Block。
 :::
 
-## 基础设施用法
+## 基础设施使用
 
 <Infrastructure>
 <Fragment slot="cdk">
-您需要将用户身份基础设施添加到您的堆栈中，在网站_之前_声明它：
+您需要将用户身份基础设施添加到堆栈中，在网站_之前_声明它：
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {3,9}
 import { Stack } from 'aws-cdk-lib';
@@ -168,8 +204,8 @@ export class ApplicationStack extends Stack {
 
 `UserIdentity` 构造会自动添加必要的<Link path="guides/react-website#runtime-configuration">运行时配置</Link>，以确保您的网站可以指向正确的 Cognito 用户池进行身份验证。
 
-:::note[SMS 角色保留]
-用户池由 Cognito 假定用于发送 SMS 消息的 IAM 角色支持。该角色的删除策略与用户池的删除策略相同 —— 默认情况下，CDK 的 `UserPool` 使用 `RemovalPolicy.RETAIN`，因此在 `cdk destroy` 时，用户池及其 SMS 角色都会被保留，如果不再需要，需要手动清理。
+:::note[短信角色保留]
+用户池由 Cognito 代入以发送短信的 IAM 角色支持。角色的删除策略与用户池的删除策略相同 — 默认情况下，CDK 的 `UserPool` 使用 `RemovalPolicy.RETAIN`，因此在 `cdk destroy` 时，用户池及其短信角色都会被保留，如果不再需要，需要手动清理。
 :::
 </Fragment>
 <Fragment slot="terraform">
@@ -198,10 +234,10 @@ module "my_website" {
 </Fragment>
 </Infrastructure>
 
-:::caution[删除生产环境的 localhost 回调 URL]
-生成的用户池客户端允许您的 CloudFront 分发 URL（以及在其上配置的任何自定义域名）作为 OAuth 回调/注销 URL，以及用于针对已部署池进行本地开发的 `http://localhost:4200` 和 `http://localhost:4300`。
+:::caution[为生产环境删除 localhost 回调 URL]
+生成的用户池客户端允许您的 CloudFront 分发 URL（以及在其上配置的任何自定义域名）作为 OAuth 回调/注销 URL，加上用于针对已部署池进行本地开发的 `http://localhost:4200` 和 `http://localhost:4300`。
 
-建议**删除生产阶段的 `http://localhost` 回调/注销 URL**，将允许列表限制为您的真实应用程序源。
+建议**为生产阶段删除 `http://localhost` 回调/注销 URL**，将允许列表限制为您的真实应用程序源。
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -275,4 +311,3 @@ resource "aws_iam_role_policy" "authenticated_fast_api_invoke" {
 ```
 </Fragment>
 </Infrastructure>
-

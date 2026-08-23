@@ -13,7 +13,7 @@ import Snippet from '@components/snippet.astro';
 
 React 웹사이트 인증 생성기는 [Amazon Cognito](https://aws.amazon.com/cognito/)를 사용하여 React 웹사이트에 인증을 추가합니다.
 
-이 생성기는 Cognito 사용자 풀과 관련 자격 증명 풀을 생성하고, 사용자 로그인 흐름을 처리하는 호스팅 UI 및 React 웹사이트와의 통합을 위한 CDK 또는 Terraform 인프라를 구성합니다.
+이 생성기는 CDK 또는 Terraform 인프라를 구성하여 Cognito User Pool 및 관련 Identity Pool을 생성하고, 사용자 로그인 플로우를 처리하는 호스팅 UI와 React 웹사이트와의 통합을 설정합니다.
 
 ## 사용법
 
@@ -43,7 +43,7 @@ React 웹사이트에서 다음과 같은 변경 사항을 확인할 수 있습�
 
 <Snippet name="shared-constructs" />
 
-선택한 `iac`에 따라 생성된 다음 인프라 코드도 확인할 수 있습니다:
+선택한 `iac`에 따라 다음과 같은 인프라 코드가 생성됩니다:
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -106,7 +106,7 @@ browser -> backend: IAM/Cognito
 
 #### 위협 보호
 
-사용자 풀은 표준 인증을 위해 위협 보호가 `AUDIT` 모드로 설정된 Cognito [Plus 기능 플랜](https://docs.aws.amazon.com/cognito/latest/developerguide/feature-plans-features-plus.html)에서 생성됩니다. 감사 모드에서 Cognito는 각 로그인에 위험 수준을 할당하고 사용자를 차단하지 않고 평가를 CloudWatch에 기록합니다.
+User Pool은 표준 인증을 위해 [위협 보호](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pool-settings-threat-protection.html)가 `AUDIT` 모드로 설정된 Cognito [Plus 기능 플랜](https://docs.aws.amazon.com/cognito/latest/developerguide/feature-plans-features-plus.html)에서 생성됩니다. 감사 모드에서 Cognito는 각 로그인에 위험 수준을 할당하고 사용자를 차단하지 않고 평가를 CloudWatch에 기록합니다.
 
 사용자에 대한 위험 평가를 관찰한 후, 위험한 활동에 자동으로 대응하도록(예: MFA 요구 또는 로그인 차단) 전체 기능 적용으로 전환할 수 있습니다:
 
@@ -119,9 +119,47 @@ browser -> backend: IAM/Cognito
 </Fragment>
 </Infrastructure>
 
-#### 웹 애플리케이션 방화벽 (WAF)
+#### 다중 인증(MFA)
 
-기본적으로 사용자 풀은 `AWSManagedRulesCommonRuleSet` 및 `AWSManagedRulesKnownBadInputsRuleSet` 관리형 규칙 그룹을 사용하는 [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACL과 연결됩니다. 자체 Web ACL을 관리하거나 필요하지 않은 경우 이를 비활성화할 수 있습니다:
+기본적으로 사용자는 로그인하기 전에 MFA(SMS 코드 또는 시간 기반 일회용 비밀번호)를 구성해야 합니다. MFA를 선택 사항으로 만들거나, 완전히 끄거나, 사용 가능한 2단계 인증 방법을 제한할 수 있습니다:
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts
+import { Mfa } from 'aws-cdk-lib/aws-cognito';
+
+new UserIdentity(this, 'Identity', {
+  mfa: Mfa.OPTIONAL,
+  mfaSecondFactor: { sms: false, otp: true },
+});
+```
+
+`mfa` accepts `Mfa.OFF` / `Mfa.OPTIONAL` / `Mfa.REQUIRED`. `mfaSecondFactor.sms` and `mfaSecondFactor.otp` enable or disable each second-factor method independently; they have no effect when `mfa` is `Mfa.OFF`. Setting `mfa: Mfa.REQUIRED` with both methods disabled is rejected at synth time, since nobody could then complete sign-in.
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+
+  mfa = "OPTIONAL"
+  mfa_second_factor_sms = false
+  mfa_second_factor_otp = true
+}
+```
+
+`mfa` accepts `"OFF"` / `"OPTIONAL"` / `"ON"`. `mfa_second_factor_sms` and `mfa_second_factor_otp` enable or disable each second-factor method independently; they have no effect when `mfa` is `"OFF"`.
+</Fragment>
+</Infrastructure>
+
+`mfa`는 CDK에서 `Mfa.OFF` / `Mfa.OPTIONAL` / `Mfa.REQUIRED`를, Terraform에서 `"OFF"` / `"OPTIONAL"` / `"ON"`을 허용합니다. `mfaSecondFactor.sms` / `mfa_second_factor_sms`와 `otp` 동등 항목은 각 2단계 인증 방법을 독립적으로 활성화하거나 비활성화합니다. `mfa`가 꺼져 있을 때는 효과가 없습니다.
+
+:::caution[Terraform은 SMS MFA를 전화번호 확인과 연결합니다]
+CDK 구성과 달리 Terraform AWS 공급자는 전화번호 확인에 사용하는 것과 독립적으로 SMS를 MFA 방법으로 제공할 방법이 없습니다. 따라서 `mfa_second_factor_sms = false`로 설정하면 SMS 기반 전화번호 확인도 비활성화됩니다(`auto_verified_attributes`에서 `phone_number`가 제거됨).
+:::
+
+#### 웹 애플리케이션 방화벽(WAF)
+
+기본적으로 User Pool은 `AWSManagedRulesCommonRuleSet` 및 `AWSManagedRulesKnownBadInputsRuleSet` 관리형 규칙 그룹을 사용하는 [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACL과 연결됩니다. 자체 Web ACL을 관리하거나 필요하지 않은 경우 이를 비활성화할 수 있습니다:
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -140,15 +178,15 @@ module "user_identity" {
 </Fragment>
 </Infrastructure>
 
-:::caution[`EC2MetaDataSSRF_QUERYARGUMENTS`가 Count로 설정됨]
-이 규칙은 쿼리 인수의 루프백 주소를 [SSRF](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-list.html) 시도로 플래그 지정하여 로컬 로그인을 차단합니다. 호스팅 UI가 `localhost` `redirect_uri`를 수신하기 때문입니다. 따라서 로컬 콜백 URL이 구성되어 있는 동안에는 [Count](https://docs.aws.amazon.com/waf/latest/developerguide/web-acl-rule-action.html#web-acl-rule-action-count)로 설정됩니다. 일치 항목은 여전히 기록되며 다른 모든 규칙은 차단됩니다. 로컬 콜백 URL을 제거하여 Block으로 복원하세요.
+:::caution[`EC2MetaDataSSRF_QUERYARGUMENTS`는 Count로 설정됩니다]
+이 규칙은 쿼리 인수의 루프백 주소를 [SSRF](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-list.html) 시도로 플래그 지정하여 호스팅 UI가 `localhost` `redirect_uri`를 수신하므로 로컬 로그인을 차단합니다. 따라서 로컬 콜백 URL이 구성되어 있는 동안 [Count](https://docs.aws.amazon.com/waf/latest/developerguide/web-acl-rule-action.html#web-acl-rule-action-count)로 설정됩니다. 일치 항목은 여전히 기록되며 다른 모든 규칙은 차단됩니다. 로컬 콜백 URL을 제거하여 Block으로 복원하세요.
 :::
 
 ## 인프라 사용법
 
 <Infrastructure>
 <Fragment slot="cdk">
-웹사이트 _이전에_ 선언하여 스택에 사용자 자격 증명 인프라를 추가해야 합니다:
+스택에 사용자 자격 증명 인프라를 추가해야 하며, 웹사이트 _이전에_ 선언해야 합니다:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {3,9}
 import { Stack } from 'aws-cdk-lib';
@@ -166,10 +204,10 @@ export class ApplicationStack extends Stack {
 }
 ```
 
-`UserIdentity` 구성은 웹사이트가 인증을 위해 올바른 Cognito 사용자 풀을 가리킬 수 있도록 필요한 <Link path="guides/react-website#runtime-configuration">런타임 구성</Link>을 자동으로 추가합니다.
+`UserIdentity` 구성은 웹사이트가 인증을 위해 올바른 Cognito User Pool을 가리킬 수 있도록 필요한 <Link path="guides/react-website#runtime-configuration">런타임 구성</Link>을 자동으로 추가합니다.
 
 :::note[SMS 역할 보존]
-사용자 풀은 Cognito가 SMS 메시지를 보내기 위해 수임하는 IAM 역할로 지원됩니다. 역할의 제거 정책은 사용자 풀의 정책을 반영합니다. 기본적으로 CDK의 `UserPool`은 `RemovalPolicy.RETAIN`을 사용하므로 `cdk destroy` 시 사용자 풀과 SMS 역할이 모두 보존되며 더 이상 필요하지 않은 경우 수동으로 정리해야 합니다.
+User Pool은 Cognito가 SMS 메시지를 보내기 위해 가정하는 IAM 역할로 지원됩니다. 역할의 제거 정책은 User Pool의 정책을 반영합니다. 기본적으로 CDK의 `UserPool`은 `RemovalPolicy.RETAIN`을 사용하므로 `cdk destroy` 시 User Pool과 SMS 역할이 모두 보존되며 더 이상 필요하지 않은 경우 수동으로 정리해야 합니다.
 :::
 </Fragment>
 <Fragment slot="terraform">
@@ -194,12 +232,12 @@ module "my_website" {
 }
 ```
 
-사용자 자격 증명 모듈은 웹사이트가 인증을 위해 올바른 Cognito 사용자 풀을 가리킬 수 있도록 필요한 <Link path="guides/react-website#runtime-configuration">런타임 구성</Link>을 자동으로 추가합니다.
+사용자 자격 증명 모듈은 웹사이트가 인증을 위해 올바른 Cognito User Pool을 가리킬 수 있도록 필요한 <Link path="guides/react-website#runtime-configuration">런타임 구성</Link>을 자동으로 추가합니다.
 </Fragment>
 </Infrastructure>
 
 :::caution[프로덕션용 localhost 콜백 URL 제거]
-생성된 사용자 풀 클라이언트는 CloudFront 배포 URL(및 구성된 모든 사용자 지정 도메인 이름)을 OAuth 콜백/로그아웃 URL로 허용하며, 배포된 풀에 대한 로컬 개발을 위해 `http://localhost:4200` 및 `http://localhost:4300`을 추가로 허용합니다.
+생성된 User Pool 클라이언트는 CloudFront 배포 URL(및 구성된 모든 사용자 지정 도메인 이름)을 OAuth 콜백/로그아웃 URL로 허용하며, 배포된 풀에 대한 로컬 개발을 위해 `http://localhost:4200` 및 `http://localhost:4300`을 추가로 허용합니다.
 
 **프로덕션 단계에서는 `http://localhost` 콜백/로그아웃 URL을 제거**하여 허용 목록을 실제 애플리케이션 원본으로만 제한하는 것이 좋습니다.
 

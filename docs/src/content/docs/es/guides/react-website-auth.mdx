@@ -1,6 +1,6 @@
 ---
 title: Autenticación de Sitio Web React
-description: Documentación de referencia para Autenticación de Sitio Web React
+description: Documentación de referencia para la Autenticación de Sitio Web React
 generator: ts#website#auth
 ---
 import { FileTree } from '@astrojs/starlight/components';
@@ -11,15 +11,15 @@ import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
 
-El generador de Autenticación de Sitio Web React agrega autenticación a tu sitio web React usando [Amazon Cognito](https://aws.amazon.com/cognito/).
+El generador de Autenticación de Sitio Web React añade autenticación a tu sitio web React usando [Amazon Cognito](https://aws.amazon.com/cognito/).
 
-Este generador configura la infraestructura CDK o Terraform para crear un Cognito User Pool y un Identity Pool asociado, así como una interfaz de usuario alojada para manejar los flujos de inicio de sesión de usuarios y su integración con tu sitio web React.
+Este generador configura la infraestructura CDK o Terraform para crear un Cognito User Pool y un Identity Pool asociado, así como una interfaz de usuario alojada para manejar los flujos de inicio de sesión de usuarios, y su integración con tu sitio web React.
 
 ## Uso
 
-### Agregar Autenticación a tu Sitio Web React
+### Añadir Autenticación a tu Sitio Web React
 
-Puedes agregar autenticación a tu sitio web React de dos maneras:
+Puedes añadir autenticación a tu sitio web React de dos maneras:
 
 <RunGenerator generator="ts#website#auth" />
 
@@ -69,7 +69,7 @@ También encontrarás el siguiente código de infraestructura generado según tu
 
 #### Arquitectura
 
-Este generador agrega un Amazon Cognito user pool (para inicio de sesión) y un identity pool (para federar usuarios autenticados a credenciales IAM con alcance) a la arquitectura de sitio web estático existente:
+Este generador añade un user pool de Amazon Cognito (para inicio de sesión) y un identity pool (para federar usuarios autenticados a credenciales IAM con alcance) a la arquitectura de sitio web estático existente:
 
 ```d2 inline=true
 direction: right
@@ -119,9 +119,45 @@ Establece `advanced_security_mode` a `ENFORCED` en el bloque `user_pool_add_ons`
 </Fragment>
 </Infrastructure>
 
+#### Autenticación multifactor (MFA)
+
+Por defecto, los usuarios deben configurar MFA (un código SMS o una contraseña de un solo uso basada en tiempo) antes de poder iniciar sesión. Puedes hacer que MFA sea opcional, desactivarlo por completo o restringir qué métodos de segundo factor están disponibles:
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts
+import { Mfa } from 'aws-cdk-lib/aws-cognito';
+
+new UserIdentity(this, 'Identity', {
+  mfa: Mfa.OPTIONAL,
+  mfaSecondFactor: { sms: false, otp: true },
+});
+```
+
+`mfa` acepta `Mfa.OFF` / `Mfa.OPTIONAL` / `Mfa.REQUIRED`. `mfaSecondFactor.sms` y `mfaSecondFactor.otp` habilitan o deshabilitan cada método de segundo factor de forma independiente; no tienen efecto cuando `mfa` es `Mfa.OFF`. Establecer `mfa: Mfa.REQUIRED` con ambos métodos deshabilitados se rechaza en tiempo de síntesis, ya que nadie podría entonces completar el inicio de sesión.
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+
+  mfa = "OPTIONAL"
+  mfa_second_factor_sms = false
+  mfa_second_factor_otp = true
+}
+```
+
+`mfa` acepta `"OFF"` / `"OPTIONAL"` / `"ON"`. `mfa_second_factor_sms` y `mfa_second_factor_otp` habilitan o deshabilitan cada método de segundo factor de forma independiente; no tienen efecto cuando `mfa` es `"OFF"`.
+</Fragment>
+</Infrastructure>
+
+:::caution[SMS MFA está vinculado a la verificación de número de teléfono]
+Cognito rechaza la verificación de número de teléfono basada en SMS a menos que SMS también sea un método MFA habilitado cuando MFA no está desactivado, tanto en CDK como en Terraform. Deshabilitar `mfaSecondFactor.sms` / `mfa_second_factor_sms` mientras `mfa` está activado por lo tanto también deshabilita la verificación de número de teléfono basada en SMS para el user pool.
+:::
+
 #### Web Application Firewall (WAF)
 
-Por defecto, el User Pool está asociado con un [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACL usando los grupos de reglas administradas `AWSManagedRulesCommonRuleSet` y `AWSManagedRulesKnownBadInputsRuleSet`. Puedes deshabilitar esto si deseas administrar tu propio Web ACL o no requieres uno:
+Por defecto, el User Pool está asociado con una Web ACL de [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) usando los grupos de reglas administradas `AWSManagedRulesCommonRuleSet` y `AWSManagedRulesKnownBadInputsRuleSet`. Puedes deshabilitar esto si deseas administrar tu propia Web ACL o no requieres una:
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -141,14 +177,14 @@ module "user_identity" {
 </Infrastructure>
 
 :::caution[`EC2MetaDataSSRF_QUERYARGUMENTS` está configurado en Count]
-Esta regla marca las direcciones de loopback en los argumentos de consulta como intentos de [SSRF](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-list.html), lo que bloquearía el inicio de sesión local ya que la Hosted UI recibe un `redirect_uri` de `localhost`. Por lo tanto, está configurada en [Count](https://docs.aws.amazon.com/waf/latest/developerguide/web-acl-rule-action.html#web-acl-rule-action-count) mientras las URLs de callback locales estén configuradas — las coincidencias aún se registran y todas las demás reglas bloquean. Elimina las URLs de callback locales para restaurarla a Block.
+Esta regla marca las direcciones de loopback en argumentos de consulta como intentos de [SSRF](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-list.html), lo que bloquearía el inicio de sesión local ya que la Hosted UI recibe un `redirect_uri` de `localhost`. Por lo tanto, está configurada en [Count](https://docs.aws.amazon.com/waf/latest/developerguide/web-acl-rule-action.html#web-acl-rule-action-count) mientras las URLs de callback locales están configuradas — las coincidencias aún se registran, y todas las demás reglas bloquean. Elimina las URLs de callback locales para restaurarla a Block.
 :::
 
 ## Uso de Infraestructura
 
 <Infrastructure>
 <Fragment slot="cdk">
-Necesitarás agregar la infraestructura de identidad de usuario a tu stack, declarándola _antes_ del sitio web:
+Necesitarás añadir la infraestructura de identidad de usuario a tu stack, declarándola _antes_ del sitio web:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {3,9}
 import { Stack } from 'aws-cdk-lib';
@@ -166,14 +202,14 @@ export class ApplicationStack extends Stack {
 }
 ```
 
-El construct `UserIdentity` agrega automáticamente la <Link path="guides/react-website#runtime-configuration">Configuración de Tiempo de Ejecución</Link> necesaria para asegurar que tu sitio web pueda apuntar al Cognito User Pool correcto para la autenticación.
+El construct `UserIdentity` añade automáticamente la <Link path="guides/react-website#runtime-configuration">Configuración de Tiempo de Ejecución</Link> necesaria para asegurar que tu sitio web pueda apuntar al Cognito User Pool correcto para la autenticación.
 
 :::note[Retención del rol SMS]
-El User Pool está respaldado por un rol IAM que Cognito asume para enviar mensajes SMS. La política de eliminación del rol refleja la del User Pool — por defecto, el `UserPool` de CDK usa `RemovalPolicy.RETAIN`, por lo que en `cdk destroy` tanto el User Pool como su rol SMS se retienen y deberán limpiarse manualmente si ya no son necesarios.
+El User Pool está respaldado por un rol IAM que Cognito asume para enviar mensajes SMS. La política de eliminación del rol refleja la del User Pool — por defecto, el `UserPool` de CDK usa `RemovalPolicy.RETAIN`, por lo que en `cdk destroy` tanto el User Pool como su rol SMS se retienen y necesitarán ser limpiados manualmente si ya no se necesitan.
 :::
 </Fragment>
 <Fragment slot="terraform">
-Necesitarás agregar el módulo de identidad de usuario y asegurar que tu sitio web dependa de él:
+Necesitarás añadir el módulo de identidad de usuario, y asegurar que tu sitio web dependa de él:
 
 ```hcl title="packages/infra/src/main.tf" {2-4,14-15}
 # Deploy user identity first to add to runtime config
@@ -194,7 +230,7 @@ module "my_website" {
 }
 ```
 
-El módulo de identidad de usuario agrega automáticamente la <Link path="guides/react-website#runtime-configuration">Configuración de Tiempo de Ejecución</Link> necesaria para asegurar que tu sitio web pueda apuntar al Cognito User Pool correcto para la autenticación.
+El módulo de identidad de usuario añade automáticamente la <Link path="guides/react-website#runtime-configuration">Configuración de Tiempo de Ejecución</Link> necesaria para asegurar que tu sitio web pueda apuntar al Cognito User Pool correcto para la autenticación.
 </Fragment>
 </Infrastructure>
 
@@ -215,7 +251,7 @@ Edita las `callback_urls`/`logout_urls` en `packages/common/terraform/src/core/u
 
 ### Otorgar Acceso a Usuarios Autenticados
 
-Para otorgar a los usuarios autenticados acceso para realizar ciertas acciones, como otorgar permisos para invocar una API, puedes agregar declaraciones de política IAM al rol autenticado del identity pool:
+Para otorgar a los usuarios autenticados acceso para realizar ciertas acciones, como otorgar permisos para invocar una API, puedes añadir declaraciones de política IAM al rol autenticado del identity pool:
 
 <Infrastructure>
 <Fragment slot="cdk">
