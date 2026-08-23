@@ -53,13 +53,19 @@ variable "encryption" {
 }
 
 variable "kms_key_arn" {
-  description = "ARN of an existing KMS key used to encrypt the website and distribution log buckets when encryption is KMS. When not provided, a new key is created. Note that a customer-supplied key must already grant the CloudWatch Logs, S3 and CloudFront service principals the necessary permissions in its own key policy."
+  description = "ARN of an existing KMS key used to encrypt the website and distribution log buckets when encryption is KMS. When not provided and create_kms_key is true, a new key is created. Note that a customer-supplied key must already grant the CloudWatch Logs, S3 and CloudFront service principals the necessary permissions in its own key policy."
   type        = string
   default     = null
 }
 
+variable "create_kms_key" {
+  description = "Whether to create a KMS key for the website. Only applies when encryption is KMS. Set to false when supplying kms_key_arn."
+  type        = bool
+  default     = true
+}
+
 variable "enable_key_rotation" {
-  description = "Whether the automatically created KMS key has rotation enabled. Only applies when encryption is KMS and kms_key_arn is not provided."
+  description = "Whether the automatically created KMS key has rotation enabled. Only applies when encryption is KMS and create_kms_key is true."
   type        = bool
   default     = true
 }
@@ -76,7 +82,7 @@ locals {
   # website name so the longest delivery name stays within the limit.
   access_logs_name_prefix = substr(lower(var.website_name), 0, 16)
 
-  create_website_key = var.encryption == "KMS" && var.kms_key_arn == null
+  create_website_key = var.encryption == "KMS" && var.create_kms_key
   website_kms_key_arn = (
     var.encryption != "KMS" ? null :
     local.create_website_key ? aws_kms_key.website_key[0].arn :
@@ -535,12 +541,6 @@ resource "aws_cloudfront_distribution" "website" {
 
   tags = {
     Name = "${lower(var.website_name)}-distribution-${random_id.unique_suffix.hex}"
-  }
-
-  lifecycle {
-    replace_triggered_by = [
-      aws_wafv2_web_acl.cloudfront_waf
-    ]
   }
 
   # CloudFront validates access to the distribution logs bucket when it

@@ -745,8 +745,11 @@ describe('static-website-configurable-waf-encryption migration', () => {
       expect(migrated).toContain('variable "enable_waf"');
       expect(migrated).toContain('variable "encryption"');
       expect(migrated).toContain('variable "kms_key_arn"');
+      expect(migrated).toContain('variable "create_kms_key"');
       expect(migrated).toContain('variable "enable_key_rotation"');
-      expect(migrated).toContain('create_website_key');
+      expect(migrated).toContain(
+        'create_website_key = var.encryption == "KMS" && var.create_kms_key',
+      );
       expect(migrated).toContain('website_kms_key_arn');
       expect(migrated).toContain('count = local.create_website_key ? 1 : 0');
       expect(migrated).toContain(
@@ -772,6 +775,7 @@ describe('static-website-configurable-waf-encryption migration', () => {
       expect(migrated).not.toContain('aws_kms_key.website_key.arn');
       expect(migrated).not.toContain('aws_kms_key.website_key.key_id');
       expect(migrated).not.toContain('aws_wafv2_web_acl.cloudfront_waf.arn');
+      expect(migrated).not.toContain('replace_triggered_by');
       expect(result.nextSteps).toEqual([]);
     });
 
@@ -823,6 +827,7 @@ describe('static-website-configurable-waf-encryption migration', () => {
       expect(migrated).toContain('variable "enable_waf"');
       expect(migrated).toContain('variable "encryption"');
       expect(migrated).toContain('variable "kms_key_arn"');
+      expect(migrated).toContain('variable "create_kms_key"');
       expect(migrated).toContain('variable "enable_key_rotation"');
       expect(migrated).toContain(
         'custom_domain_names = var.custom_domain_names',
@@ -833,6 +838,7 @@ describe('static-website-configurable-waf-encryption migration', () => {
       expect(migrated).toContain('enable_waf          = var.enable_waf');
       expect(migrated).toContain('encryption          = var.encryption');
       expect(migrated).toContain('kms_key_arn         = var.kms_key_arn');
+      expect(migrated).toContain('create_kms_key      = var.create_kms_key');
       expect(migrated).toContain(
         'enable_key_rotation = var.enable_key_rotation',
       );

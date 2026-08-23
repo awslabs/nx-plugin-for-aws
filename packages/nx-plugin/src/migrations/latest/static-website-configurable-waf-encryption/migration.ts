@@ -35,14 +35,19 @@ import {
  *   an optional `props` constructor parameter so these can be configured per
  *   app, rather than only by hand-editing the vended construct.
  * - The vended Terraform static-website core module gains the equivalent
- *   `enable_waf`, `encryption`, `kms_key_arn` and `enable_key_rotation`
- *   variables.
+ *   `enable_waf`, `encryption`, `kms_key_arn`, `create_kms_key` and
+ *   `enable_key_rotation` variables. The CloudFront distribution's
+ *   `lifecycle.replace_triggered_by` on the WAF ACL is also dropped - it
+ *   can't resolve once the ACL has a count of 0 and no prior state to
+ *   reference, which broke `terraform plan` on any greenfield deployment
+ *   with `enable_waf = false`.
  * - Each vended per-website Terraform app module (`app/static-websites/<name>/<name>.tf`)
  *   gains pass-through `custom_domain_names`, `acm_certificate_arn`,
- *   `enable_waf`, `encryption`, `kms_key_arn` and `enable_key_rotation`
- *   variables forwarded to the core module call, matching the pass-through
- *   convention every other app-wraps-core Terraform module in this plugin
- *   already follows (`rdb`, `agent-core`, `dcr-proxies`, the REST/HTTP API).
+ *   `enable_waf`, `encryption`, `kms_key_arn`, `create_kms_key` and
+ *   `enable_key_rotation` variables forwarded to the core module call,
+ *   matching the pass-through convention every other app-wraps-core
+ *   Terraform module in this plugin already follows (`rdb`, `agent-core`,
+ *   `dcr-proxies`, the REST/HTTP API).
  *
  * These files are generated with `KeepExisting`, so without this an upgraded
  * workspace has generators that support this configuration but vended files
@@ -56,10 +61,10 @@ const TERRAFORM_STATIC_WEBSITES_APP_DIR = `${PACKAGES_DIR}/${SHARED_TERRAFORM_DI
 
 const CDK_DIVERGED_MESSAGE = `${CDK_STATIC_WEBSITE_FILE}: has diverged from the generated shape - left untouched. To pick up the enableWaf, encryption, encryptionKey and enableKeyRotation props, manually port them from the vended core/static-website.ts template (see the ts#react-website generator's static-website construct).`;
 
-const TERRAFORM_DIVERGED_MESSAGE = `${TERRAFORM_STATIC_WEBSITE_FILE}: has diverged from the generated shape - left untouched. To pick up the enable_waf, encryption, kms_key_arn and enable_key_rotation variables, manually port them from the vended static-website.tf template (see the ts#react-website generator's static-website module).`;
+const TERRAFORM_DIVERGED_MESSAGE = `${TERRAFORM_STATIC_WEBSITE_FILE}: has diverged from the generated shape - left untouched. To pick up the enable_waf, encryption, kms_key_arn, create_kms_key and enable_key_rotation variables, manually port them from the vended static-website.tf template (see the ts#react-website generator's static-website module).`;
 
 const terraformAppDivergedMessage = (filePath: string) =>
-  `${filePath}: has diverged from the generated shape - left untouched. To make custom_domain_names, acm_certificate_arn, enable_waf, encryption, kms_key_arn and enable_key_rotation configurable from your root Terraform configuration, add pass-through variables here and forward them to the static_website module call (see the ts#react-website generator's static-websites app template).`;
+  `${filePath}: has diverged from the generated shape - left untouched. To make custom_domain_names, acm_certificate_arn, enable_waf, encryption, kms_key_arn, create_kms_key and enable_key_rotation configurable from your root Terraform configuration, add pass-through variables here and forward them to the static_website module call (see the ts#react-website generator's static-websites app template).`;
 
 // The doc comments below carry backticked markdown, which must stay out of
 // the GritQL pattern that inserts this text (see insertViaGritQL). It's routed
@@ -78,7 +83,10 @@ const STATIC_WEBSITE_PROPS_TEXT = `/**
   readonly encryption?: BucketEncryption;
   /**
    * KMS key used to encrypt the website and distribution log buckets. Only used when \`encryption\` is
-   * \`BucketEncryption.KMS\`. When not provided, a new key is created.
+   * \`BucketEncryption.KMS\`. When not provided, a new key is created. Note that a key imported via
+   * \`Key.fromKeyArn\` must already grant the CloudWatch Logs, S3 and CloudFront service principals the
+   * necessary permissions in its own key policy - \`addToResourcePolicy\` is a no-op on an imported key,
+   * so this construct cannot grant them on your behalf.
    */
   readonly encryptionKey?: IKey;
   /**
@@ -347,13 +355,19 @@ const NEW_VARIABLES_TEXT = [
   '}',
   '',
   'variable "kms_key_arn" {',
-  '  description = "ARN of an existing KMS key used to encrypt the website and distribution log buckets when encryption is KMS. When not provided, a new key is created. Note that a customer-supplied key must already grant the CloudWatch Logs, S3 and CloudFront service principals the necessary permissions in its own key policy."',
+  '  description = "ARN of an existing KMS key used to encrypt the website and distribution log buckets when encryption is KMS. When not provided and create_kms_key is true, a new key is created. Note that a customer-supplied key must already grant the CloudWatch Logs, S3 and CloudFront service principals the necessary permissions in its own key policy."',
   '  type        = string',
   '  default     = null',
   '}',
   '',
+  'variable "create_kms_key" {',
+  '  description = "Whether to create a KMS key for the website. Only applies when encryption is KMS. Set to false when supplying kms_key_arn."',
+  '  type        = bool',
+  '  default     = true',
+  '}',
+  '',
   'variable "enable_key_rotation" {',
-  '  description = "Whether the automatically created KMS key has rotation enabled. Only applies when encryption is KMS and kms_key_arn is not provided."',
+  '  description = "Whether the automatically created KMS key has rotation enabled. Only applies when encryption is KMS and create_kms_key is true."',
   '  type        = bool',
   '  default     = true',
   '}',
@@ -361,7 +375,7 @@ const NEW_VARIABLES_TEXT = [
 
 const NEW_LOCALS_TEXT = [
   '',
-  '  create_website_key = var.encryption == "KMS" && var.kms_key_arn == null',
+  '  create_website_key = var.encryption == "KMS" && var.create_kms_key',
   '  website_kms_key_arn = (',
   '    var.encryption != "KMS" ? null :',
   '    local.create_website_key ? aws_kms_key.website_key[0].arn :',
@@ -439,6 +453,15 @@ const migrateTerraformModule = async (
       '  $line <: within `output "waf_web_acl_arn" { $_ }`\n' +
       '}',
   );
+  // Forces distribution replacement whenever the WAF ACL changes. Once the
+  // ACL gains `count`, this can't be resolved on a greenfield apply where
+  // count is 0 and there's no prior state to reference - see
+  // https://github.com/awslabs/nx-plugin-for-aws/pull/1107. It's also
+  // redundant: web_acl_id already references the ACL ARN directly, so a
+  // replaced ACL still drives a plain distribution update.
+  const LIFECYCLE_REPLACE_TRIGGERED_BY_BLOCK = hcl(
+    '`lifecycle {\n    replace_triggered_by = [\n      aws_wafv2_web_acl.cloudfront_waf\n    ]\n  }`',
+  );
 
   const anchors = [
     ACM_CERT_VARIABLE,
@@ -455,6 +478,7 @@ const migrateTerraformModule = async (
     WAF_BLOCK,
     WEB_ACL_ID_LINE,
     WAF_OUTPUT_VALUE_LINE,
+    LIFECYCLE_REPLACE_TRIGGERED_BY_BLOCK,
   ];
 
   const allPresent = (
@@ -584,6 +608,14 @@ const migrateTerraformModule = async (
     WAF_OUTPUT_VALUE_LINE +
       ' => `value = var.enable_waf ? aws_wafv2_web_acl.cloudfront_waf[0].arn : null`',
   );
+
+  // 6. Drop the lifecycle block that can no longer resolve once the WAF ACL
+  //    has a count of 0 and no prior state to reference.
+  await applyGritQL(
+    tree,
+    TERRAFORM_STATIC_WEBSITE_FILE,
+    LIFECYCLE_REPLACE_TRIGGERED_BY_BLOCK + ' => ``',
+  );
 };
 
 const NEW_APP_MODULE_VARIABLES_TEXT = [
@@ -617,13 +649,19 @@ const NEW_APP_MODULE_VARIABLES_TEXT = [
   '}',
   '',
   'variable "kms_key_arn" {',
-  '  description = "ARN of an existing KMS key used to encrypt the website and distribution log buckets when encryption is KMS. When not provided, a new key is created. Note that a customer-supplied key must already grant the CloudWatch Logs, S3 and CloudFront service principals the necessary permissions in its own key policy."',
+  '  description = "ARN of an existing KMS key used to encrypt the website and distribution log buckets when encryption is KMS. When not provided and create_kms_key is true, a new key is created. Note that a customer-supplied key must already grant the CloudWatch Logs, S3 and CloudFront service principals the necessary permissions in its own key policy."',
   '  type        = string',
   '  default     = null',
   '}',
   '',
+  'variable "create_kms_key" {',
+  '  description = "Whether to create a KMS key for the website. Only applies when encryption is KMS. Set to false when supplying kms_key_arn."',
+  '  type        = bool',
+  '  default     = true',
+  '}',
+  '',
   'variable "enable_key_rotation" {',
-  '  description = "Whether the automatically created KMS key has rotation enabled. Only applies when encryption is KMS and kms_key_arn is not provided."',
+  '  description = "Whether the automatically created KMS key has rotation enabled. Only applies when encryption is KMS and create_kms_key is true."',
   '  type        = bool',
   '  default     = true',
   '}',
@@ -635,6 +673,7 @@ const NEW_APP_MODULE_FORWARD_TEXT = [
   'enable_waf          = var.enable_waf',
   'encryption          = var.encryption',
   'kms_key_arn         = var.kms_key_arn',
+  'create_kms_key      = var.create_kms_key',
   'enable_key_rotation = var.enable_key_rotation',
 ].join('\n  ');
 
