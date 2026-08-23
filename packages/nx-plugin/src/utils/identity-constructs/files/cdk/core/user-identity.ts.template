@@ -89,6 +89,12 @@ export class UserIdentity extends Construct {
   ) {
     super(scope, id);
 
+    if (mfa === Mfa.REQUIRED && !mfaSecondFactor.sms && !mfaSecondFactor.otp) {
+      throw new Error(
+        'UserIdentity: mfa is REQUIRED but mfaSecondFactor has no methods enabled (sms and otp are both false)',
+      );
+    }
+
     this.region = Stack.of(this).region;
     this.userPool = this.createUserPool(mfa, mfaSecondFactor);
 
@@ -139,6 +145,11 @@ export class UserIdentity extends Construct {
   }
 
   private createUserPool = (mfa: Mfa, mfaSecondFactor: MfaSecondFactor) => {
+    // Cognito rejects SmsConfiguration (emitted whenever phone is auto-verified) unless SMS is
+    // also an enabled MFA method, for any non-OFF MfaConfiguration. So phone verification via SMS
+    // can only be offered when SMS is actually usable as a second factor.
+    const phoneVerificationEnabled = mfa === Mfa.OFF || mfaSecondFactor.sms;
+
     const userPool = new UserPool(this, 'UserPool', {
       deletionProtection: true,
       passwordPolicy: {
@@ -166,11 +177,11 @@ export class UserIdentity extends Construct {
       },
       autoVerify: {
         email: true,
-        phone: true,
+        phone: phoneVerificationEnabled,
       },
       keepOriginal: {
         email: true,
-        phone: true,
+        phone: phoneVerificationEnabled,
       },
     });
     // Retain the SMS role alongside the pool so the pool can still be updated and deleted manually

@@ -292,6 +292,14 @@ describe('user-identity-configurable-mfa migration', () => {
     expect(migrated).not.toContain(
       'mfaSecondFactor: { sms: true, otp: true },',
     );
+    expect(migrated).toContain(
+      'if (mfa === Mfa.REQUIRED && !mfaSecondFactor.sms && !mfaSecondFactor.otp) {',
+    );
+    expect(migrated).toContain(
+      'const phoneVerificationEnabled = mfa === Mfa.OFF || mfaSecondFactor.sms;',
+    );
+    expect(migrated).toContain('phone: phoneVerificationEnabled,');
+    expect(migrated).not.toContain('phone: true,');
     expect(result.nextSteps).toEqual([]);
   });
 

@@ -28,6 +28,13 @@ import {
  * `sms_configuration` (and, with it, SMS phone verification) rather than only
  * MFA, unlike the CDK prop.
  *
+ * CDK has the same underlying coupling for any non-OFF `mfa`: Cognito rejects
+ * `SmsConfiguration` (which CDK emits whenever phone is auto-verified) unless
+ * SMS is also an enabled MFA method. So `phoneVerificationEnabled` gates
+ * `autoVerify`/`keepOriginal`'s `phone` flag on whether SMS is actually usable
+ * as a second factor, and a `mfa: REQUIRED` with neither `sms` nor `otp`
+ * enabled - a pool nobody could ever sign into - is rejected at synth time.
+ *
  * How to write a migration:
  * - https://nx.dev/docs/kb/migration-generators
  * - What `nextSteps` means: https://nx.dev/docs/reference/devkit/MigrationReturnObject
@@ -69,7 +76,7 @@ variable "mfa_second_factor_sms" {
 }`;
 
 // Guards each file: present only once it has been migrated.
-const CDK_MIGRATED_PATTERN = '`this.createUserPool(mfa, mfaSecondFactor)`';
+const CDK_MIGRATED_PATTERN = '`mfa === Mfa.OFF || mfaSecondFactor.sms`';
 const TERRAFORM_IDENTITY_MIGRATED_PATTERN =
   'language hcl\n`mfa_configuration = var.mfa`';
 const TERRAFORM_MAIN_MIGRATED_PATTERN = 'language hcl\n`mfa = var.mfa`';
@@ -90,6 +97,13 @@ const CDK_CREATE_SIGNATURE_PATTERN = '`private createUserPool = () => $body`';
 const CDK_MFA_FIELD_PATTERN = '`mfa: Mfa.REQUIRED`';
 const CDK_MFA_SECOND_FACTOR_FIELD_PATTERN =
   '`mfaSecondFactor: { sms: true, otp: true }`';
+const CDK_SUPER_CALL_PATTERN = '`super(scope, id);`';
+// $props preserves the whole (large) UserPool props object untouched while
+// inserting the new const declaration immediately before it.
+const CDK_NEW_USER_POOL_PATTERN =
+  "`const userPool = new UserPool(this, 'UserPool', { $props })`";
+// Matches both the autoVerify.phone and keepOriginal.phone occurrences in one pass.
+const CDK_PHONE_TRUE_PATTERN = '`phone: true`';
 
 const CDK_EDITS: Array<[string, string]> = [
   [
@@ -136,6 +150,26 @@ const CDK_EDITS: Array<[string, string]> = [
   [
     CDK_MFA_SECOND_FACTOR_FIELD_PATTERN,
     `${CDK_MFA_SECOND_FACTOR_FIELD_PATTERN} => \`mfaSecondFactor\``,
+  ],
+  [
+    CDK_SUPER_CALL_PATTERN,
+    `${CDK_SUPER_CALL_PATTERN} => \`super(scope, id);
+
+    if (mfa === Mfa.REQUIRED && !mfaSecondFactor.sms && !mfaSecondFactor.otp) {
+      throw new Error(
+        'UserIdentity: mfa is REQUIRED but mfaSecondFactor has no methods enabled (sms and otp are both false)',
+      );
+    }\``,
+  ],
+  [
+    CDK_NEW_USER_POOL_PATTERN,
+    `${CDK_NEW_USER_POOL_PATTERN} => \`const phoneVerificationEnabled = mfa === Mfa.OFF || mfaSecondFactor.sms;
+
+    const userPool = new UserPool(this, 'UserPool', { $props })\``,
+  ],
+  [
+    CDK_PHONE_TRUE_PATTERN,
+    `${CDK_PHONE_TRUE_PATTERN} => \`phone: phoneVerificationEnabled\``,
   ],
 ];
 
