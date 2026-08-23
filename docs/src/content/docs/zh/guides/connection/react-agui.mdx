@@ -92,6 +92,25 @@ Nx Plugin for AWS 提供了一个生成器，用于将 React 网站连接到公�
 - **IAM**（默认）：使用 AWS SigV4 签名的 HTTP 请求。凭证从配置了您网站身份验证的 Cognito Identity Pool 获取。
 - **Cognito**：将 JWT 访问令牌作为 Bearer 令牌嵌入到 `Authorization` 标头中。
 
+### 会话和线程
+
+AG-UI 和 AgentCore Runtime 各自以不同的方式识别对话，生成的 hook 将它们联系在一起：
+
+- **`threadId`** — AG-UI 对话标识符，在请求正文中发送。除非您传递显式的 `threadId`，否则 CopilotKit 会为每个聊天生成一个随机 UUID。
+- **Session ID** — AgentCore Runtime 会话，在 `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` 标头中发送。它选择为请求提供服务的 [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html)，并且是您的 agent 的 `session.ts` / `session.py` 用于键入对话状态的内容。
+
+hook 从线程 ID 派生会话 ID，将其右填充到 AgentCore Runtime 所需的 33 个字符：
+
+```ts
+function agentCoreSessionId(input: RunAgentInput): string {
+  return (input.threadId ?? '').padEnd(33, '0');
+}
+```
+
+不设置 `threadId` 是最简单的——CopilotKit 生成的 UUID 已经是 36 个字符。如果您显式传递一个，请确保它至少有 33 个字符，因为填充会将仅在尾随字符上不同的线程 ID 映射到同一个会话。
+
+Session ID 和 Thread ID 都由浏览器提供。要将每个用户限制为他们自己的对话，请参阅 <Link path="guides/py-agent">`py#agent`</Link> 或 <Link path="guides/ts-agent">`ts#agent`</Link> 指南。
+
 ## 基础设施
 
 <Snippet name="connection/react-agent-infrastructure" parentHeading="基础设施" />

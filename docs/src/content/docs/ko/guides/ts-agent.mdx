@@ -4,7 +4,7 @@ description: 도구를 사용하여 AI 에이전트를 구축하고 Amazon Bedro
 generator: ts#agent
 ---
 
-import { FileTree, Tabs, TabItem, CardGrid } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem, CardGrid, Steps } from '@astrojs/starlight/components';
 import Astro from '@astrojs/react';
 import ConnectionCard from '@components/connection-card.astro';
 import RunGenerator from '@components/run-generator.astro';
@@ -365,6 +365,23 @@ CloudWatch AWS 콘솔에서 메뉴의 "GenAI Observability"를 선택하여 추�
 :::note[로컬 개발]
 로컬에서 실행할 때(`LOCAL_DEV=true`, `-dev` 타겟에 의해 자동으로 설정됨) 세션 데이터는 편의를 위해 구성된 `session` 옵션에 관계없이 항상 작업 공간 루트의 `tmp/agents/strands/<agent-name>` 아래 디스크에 저장됩니다.
 :::
+
+#### 세션을 소유자로 제한
+
+세션 ID는 호출자로부터 도착하므로 그 자체로는 대화를 식별하지만 대화가 누구에게 속하는지는 식별하지 않습니다. AgentCore Runtime은 개별 세션이 아닌 에이전트 런타임 리소스 ARN에 대해 호출을 승인하므로 에이전트가 애플리케이션에서 세션이 무엇을 의미하는지 자유롭게 결정할 수 있습니다.
+
+:::caution[세션은 microVM도 선택합니다]
+세션 ID는 요청을 처리하는 [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html)을 선택하므로 해당 파일 시스템, `/tmp` 및 프로세스 내 캐시는 해당 세션으로 확인되는 모든 요청에서 공유됩니다. 동일한 세션 ID를 보내는 두 호출자는 저장된 대화가 분리되어 있더라도 해당 리소스를 공유합니다.
+:::
+
+각 사용자를 자신의 대화로 제한하려면:
+
+<Steps>
+  1. <Link path="guides/trpc">tRPC</Link>, <Link path="guides/fastapi">FastAPI</Link> 또는 <Link path="guides/ts-smithy-api">Smithy</Link>를 사용하여 세션을 생성하는 API를 추가합니다. 불투명한 세션 ID(최소 33자)를 생성하고 호출 사용자의 ID와 함께 저장합니다. 예를 들어 <Link path="guides/ts-dynamodb">`ts#dynamodb`</Link> 생성기로 생성된 테이블에 저장할 수 있습니다. 각 API 가이드는 호출 사용자의 ID를 검색하는 방법을 보여줍니다.
+  2. 에이전트에서 주어진 세션 ID에 대해 저장된 사용자 ID를 조회하고 호출자와 일치하지 않으면 요청을 거부합니다. `auth=cognito`를 사용하면 호출자의 JWT가 에이전트 코드에 도달하므로 `sub` 클레임이 호출자를 식별합니다.
+</Steps>
+
+대화 이름과 같은 사용자 제공 값에서 세션 ID를 파생하는 대신 생성하세요. 호출자가 예측할 수 있는 것은 호출자가 보낼 수 있습니다.
 </OptionFilter>
 
 ## Agent 호출

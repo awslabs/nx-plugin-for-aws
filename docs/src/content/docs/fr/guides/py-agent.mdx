@@ -4,7 +4,7 @@ description: Générer un Python Agent pour construire des agents IA avec des ou
 generator: py#agent
 ---
 
-import { FileTree, Tabs, TabItem, CardGrid } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem, CardGrid, Steps } from '@astrojs/starlight/components';
 import Astro from '@astrojs/react';
 import ConnectionCard from '@components/connection-card.astro';
 import RunGenerator from '@components/run-generator.astro';
@@ -516,6 +516,23 @@ L'identifiant de session lui-même provient de la session AgentCore Runtime (pro
 :::note[Développement local]
 Lors de l'exécution locale (`LOCAL_DEV=true`, défini automatiquement par la cible `-dev`), les données de session sont toujours stockées sur disque sous `tmp/agents/strands/<agent-name>` à la racine de l'espace de travail, quelle que soit l'option `session` configurée, pour plus de commodité.
 :::
+
+#### Restreindre les sessions à leur propriétaire
+
+L'identifiant de session provient de l'appelant, donc en soi il identifie une conversation mais pas à qui appartient la conversation. AgentCore Runtime autorise une invocation contre l'ARN de ressource du runtime de l'agent plutôt que contre une session individuelle, ce qui laisse l'agent libre de décider ce qu'une session signifie pour votre application.
+
+:::caution[La session sélectionne également la microVM]
+Un identifiant de session sélectionne la [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html) qui sert la requête, donc son système de fichiers, `/tmp` et les caches en processus sont partagés par chaque requête résolvant vers cette session. Deux appelants qui envoient le même identifiant de session partagent ces ressources même lorsque leurs conversations stockées sont séparées.
+:::
+
+Pour restreindre chaque utilisateur à ses propres conversations :
+
+<Steps>
+  1. Ajoutez une API pour créer une session, en utilisant <Link path="guides/trpc">tRPC</Link>, <Link path="guides/fastapi">FastAPI</Link> ou <Link path="guides/ts-smithy-api">Smithy</Link>. Générez un identifiant de session opaque (au moins 33 caractères) et stockez-le aux côtés de l'identifiant de l'utilisateur appelant — par exemple dans une table créée avec le générateur <Link path="guides/py-dynamodb">`py#dynamodb`</Link>. Chaque guide d'API montre comment récupérer l'identifiant de l'utilisateur appelant.
+  2. Dans votre agent, recherchez l'identifiant utilisateur stocké pour l'identifiant de session qui lui a été donné, et rejetez la requête lorsqu'il ne correspond pas à l'appelant. Avec `auth=cognito`, le JWT de l'appelant atteint votre code d'agent, donc sa revendication `sub` les identifie.
+</Steps>
+
+Générez l'identifiant de session plutôt que de le dériver de valeurs fournies par l'utilisateur telles qu'un nom de conversation — tout ce qu'un appelant peut prédire, un appelant peut envoyer.
 </OptionFilter>
 
 <OptionFilter when={{ framework: 'langchain' }} description="LangChain session management (session.py)">

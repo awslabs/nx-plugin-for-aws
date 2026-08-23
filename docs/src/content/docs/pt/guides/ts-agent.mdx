@@ -4,7 +4,7 @@ description: Gere um TypeScript Agent para construir agentes de IA com ferrament
 generator: ts#agent
 ---
 
-import { FileTree, Tabs, TabItem, CardGrid } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem, CardGrid, Steps } from '@astrojs/starlight/components';
 import Astro from '@astrojs/react';
 import ConnectionCard from '@components/connection-card.astro';
 import RunGenerator from '@components/run-generator.astro';
@@ -365,6 +365,23 @@ O ID da sessão em si vem da sessão do AgentCore Runtime (propagado via cabeça
 :::note[Desenvolvimento Local]
 Ao executar localmente (`LOCAL_DEV=true`, definido automaticamente pelo target `-dev`), os dados da sessão são sempre armazenados em disco em `tmp/agents/strands/<agent-name>` na raiz do workspace, independentemente da opção `session` configurada, por conveniência.
 :::
+
+#### Restringindo sessões ao seu proprietário
+
+O ID da sessão chega do chamador, então por si só ele identifica uma conversa, mas não a quem a conversa pertence. O AgentCore Runtime autoriza uma invocação contra o ARN do recurso de runtime do agente em vez de contra uma sessão individual, o que deixa o agente livre para decidir o que uma sessão significa para sua aplicação.
+
+:::caution[A sessão também seleciona a microVM]
+Um ID de sessão seleciona a [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html) que atende a solicitação, então seu sistema de arquivos, `/tmp` e caches em processo são compartilhados por todas as solicitações que resolvem para essa sessão. Dois chamadores que enviam o mesmo ID de sessão compartilham esses recursos mesmo quando suas conversas armazenadas são separadas.
+:::
+
+Para restringir cada usuário às suas próprias conversas:
+
+<Steps>
+  1. Adicione uma API para criar uma sessão, usando <Link path="guides/trpc">tRPC</Link>, <Link path="guides/fastapi">FastAPI</Link> ou <Link path="guides/ts-smithy-api">Smithy</Link>. Gere um ID de sessão opaco (pelo menos 33 caracteres) e armazene-o junto com o ID do usuário chamador — por exemplo, em uma tabela criada com o gerador <Link path="guides/ts-dynamodb">`ts#dynamodb`</Link>. Cada guia de API mostra como recuperar o ID do usuário chamador.
+  2. Em seu agente, procure o ID de usuário armazenado para o ID de sessão que foi fornecido e rejeite a solicitação quando ele não corresponder ao chamador. Com `auth=cognito`, o JWT do chamador chega ao código do seu agente, então sua claim `sub` os identifica.
+</Steps>
+
+Gere o ID da sessão em vez de derivá-lo de valores fornecidos pelo usuário, como um nome de conversa — qualquer coisa que um chamador possa prever, um chamador pode enviar.
 </OptionFilter>
 
 ## Invocando seu Agent
