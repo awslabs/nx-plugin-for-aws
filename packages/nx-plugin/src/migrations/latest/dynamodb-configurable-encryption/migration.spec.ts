@@ -415,6 +415,9 @@ describe('dynamodb-configurable-encryption migration', () => {
     expect(contents).toContain('table_kms_key_arn = (');
     expect(contents).toContain('count = local.create_table_key ? 1 : 0');
     expect(contents).toContain('enabled = var.encryption != "DEFAULT"');
+    expect(contents).toContain(
+      '#checkov:skip=CKV_AWS_119:Encryption is configurable via var.encryption; checkov cannot resolve the conditional server_side_encryption.enabled expression',
+    );
     expect(contents).toContain('kms_key_arn = local.table_kms_key_arn');
     expect(contents).not.toContain('kms_key_arn = aws_kms_key.table.arn');
     expect(contents).not.toContain('enabled     = true');

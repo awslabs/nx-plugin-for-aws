@@ -318,6 +318,19 @@ const migrateTerraformModule = async (
     `${SSE_ENABLED_LINE} => \`enabled = var.encryption != "DEFAULT"\``,
   );
 
+  // 4b. Checkov's CKV_AWS_119 only passes when server_side_encryption.enabled
+  // is the literal `true` — it can't resolve the conditional above, even
+  // though CUSTOMER_MANAGED (the default) always uses a real CMK. Same
+  // false-positive shape as CKV_AWS_139 on the vended RDS module.
+  await insertViaGritQL(
+    tree,
+    TERRAFORM_DYNAMODB_FILE,
+    hcl(
+      `\`resource "aws_dynamodb_table" "table" { $body }\` => \`resource "aws_dynamodb_table" "table" {\n  ${GRIT_INSERT_PLACEHOLDER}\n  $body\n}\``,
+    ),
+    '#checkov:skip=CKV_AWS_119:Encryption is configurable via var.encryption; checkov cannot resolve the conditional server_side_encryption.enabled expression',
+  );
+
   // 5. Resolve the key ARN through the new local everywhere it's consumed.
   await applyGritQL(
     tree,
