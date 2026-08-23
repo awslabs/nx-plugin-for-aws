@@ -1,0 +1,115 @@
+---
+title: Options de Chiffrement
+---
+import Infrastructure from '@components/infrastructure.astro';
+
+#### Utiliser une clé gérée par AWS
+
+Utilise la clé KMS partagée `aws/dynamodb` qu'AWS gère en votre nom. Elle est visible dans la console KMS de votre compte et facturée par requête, mais il n'y a pas de clé à créer, faire pivoter ou supprimer.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { TableEncryption } from 'aws-cdk-lib/aws-dynamodb';
+import { MyTable } from '@my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  encryption: TableEncryption.AWS_MANAGED,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source     = "../../common/terraform/src/app/dynamodb/my-table"
+  encryption = "AWS_MANAGED"
+}
+```
+</Fragment>
+</Infrastructure>
+
+#### Utiliser la clé détenue par AWS
+
+Utilise une clé entièrement détenue et gérée par AWS — gratuite, sans clé visible dans votre compte. L'option la plus simple lorsque vous n'avez pas besoin d'une clé visible par le client ou le compte pour des raisons de conformité.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { TableEncryption } from 'aws-cdk-lib/aws-dynamodb';
+import { MyTable } from '@my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  encryption: TableEncryption.DEFAULT,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source     = "../../common/terraform/src/app/dynamodb/my-table"
+  encryption = "DEFAULT"
+}
+```
+</Fragment>
+</Infrastructure>
+
+#### Utiliser votre propre clé KMS
+
+Fournissez une clé gérée par le client existante au lieu d'en faire créer une pour vous. La clé doit déjà accorder au service DynamoDB les permissions dont il a besoin dans sa propre politique de clé.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { Key } from 'aws-cdk-lib/aws-kms';
+import { MyTable } from '@my-scope/common-constructs';
+
+const key = Key.fromKeyArn(this, 'Key', 'arn:aws:kms:us-east-1:111111111111:key/my-key-id');
+
+const table = new MyTable(this, 'Table', {
+  encryptionKey: key,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source      = "../../common/terraform/src/app/dynamodb/my-table"
+  kms_key_arn = "arn:aws:kms:us-east-1:111111111111:key/my-key-id"
+}
+```
+</Fragment>
+</Infrastructure>
+
+#### Rotation de la clé de chiffrement
+
+Lorsque la table crée sa propre clé KMS gérée par le client (par défaut, et uniquement lorsque vous n'avez pas fourni votre propre clé), cette clé a la rotation automatique activée par défaut. Désactivez-la si votre politique de sécurité gère la rotation en externe.
+
+##### Désactiver la rotation de la clé de chiffrement
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from '@my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  enableKeyRotation: false,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source              = "../../common/terraform/src/app/dynamodb/my-table"
+  enable_key_rotation = false
+}
+```
+</Fragment>
+</Infrastructure>

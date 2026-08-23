@@ -1,0 +1,115 @@
+---
+title: 加密选项
+---
+import Infrastructure from '@components/infrastructure.astro';
+
+#### 使用 AWS 托管密钥
+
+使用 AWS 代表您管理的共享 `aws/dynamodb` KMS 密钥。它在您账户的 KMS 控制台中可见并按请求计费，但您无需创建、轮换或删除密钥。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { TableEncryption } from 'aws-cdk-lib/aws-dynamodb';
+import { MyTable } from '@my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  encryption: TableEncryption.AWS_MANAGED,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source     = "../../common/terraform/src/app/dynamodb/my-table"
+  encryption = "AWS_MANAGED"
+}
+```
+</Fragment>
+</Infrastructure>
+
+#### 使用 AWS 拥有的密钥
+
+使用完全由 AWS 拥有和管理的密钥——免费，且您的账户中完全看不到密钥。当您出于合规原因不需要客户或账户可见的密钥时，这是最简单的选项。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { TableEncryption } from 'aws-cdk-lib/aws-dynamodb';
+import { MyTable } from '@my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  encryption: TableEncryption.DEFAULT,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source     = "../../common/terraform/src/app/dynamodb/my-table"
+  encryption = "DEFAULT"
+}
+```
+</Fragment>
+</Infrastructure>
+
+#### 使用您自己的 KMS 密钥
+
+提供现有的客户托管密钥，而不是为您创建一个。该密钥必须在其自己的密钥策略中已经授予 DynamoDB 服务所需的权限。
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { Key } from 'aws-cdk-lib/aws-kms';
+import { MyTable } from '@my-scope/common-constructs';
+
+const key = Key.fromKeyArn(this, 'Key', 'arn:aws:kms:us-east-1:111111111111:key/my-key-id');
+
+const table = new MyTable(this, 'Table', {
+  encryptionKey: key,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source      = "../../common/terraform/src/app/dynamodb/my-table"
+  kms_key_arn = "arn:aws:kms:us-east-1:111111111111:key/my-key-id"
+}
+```
+</Fragment>
+</Infrastructure>
+
+#### 加密密钥轮换
+
+当表创建自己的客户托管 KMS 密钥时（默认情况，且仅当您未提供自己的密钥时），该密钥默认启用自动密钥轮换。如果您的安全策略在外部管理轮换，可以禁用它。
+
+##### 禁用加密密钥轮换
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from '@my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  enableKeyRotation: false,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source              = "../../common/terraform/src/app/dynamodb/my-table"
+  enable_key_rotation = false
+}
+```
+</Fragment>
+</Infrastructure>

@@ -63,8 +63,25 @@ variable "deletion_protection_enabled" {
   default     = true
 }
 
+variable "encryption" {
+  description = "Server-side encryption for the table. One of CUSTOMER_MANAGED, AWS_MANAGED or DEFAULT (the AWS owned key, at no cost and with no key to manage)."
+  type        = string
+  default     = "CUSTOMER_MANAGED"
+
+  validation {
+    condition     = contains(["CUSTOMER_MANAGED", "AWS_MANAGED", "DEFAULT"], var.encryption)
+    error_message = "encryption must be one of CUSTOMER_MANAGED, AWS_MANAGED or DEFAULT."
+  }
+}
+
+variable "kms_key_arn" {
+  description = "ARN of an existing KMS key used to encrypt the table when encryption is CUSTOMER_MANAGED. When not provided, a new key is created. Note that a customer-supplied key must already grant the DynamoDB service the necessary permissions in its own key policy."
+  type        = string
+  default     = null
+}
+
 variable "enable_key_rotation" {
-  description = "Whether to enable automatic key rotation on the KMS key used to encrypt the table."
+  description = "Whether to enable automatic key rotation on the KMS key used to encrypt the table. Only applies when encryption is CUSTOMER_MANAGED and kms_key_arn is not provided."
   type        = bool
   default     = true
 }
@@ -84,12 +101,21 @@ locals {
   gsi_attribute_names = distinct(flatten([
     for gsi in var.global_secondary_indexes : [gsi.hash_key, gsi.range_key]
   ]))
+
+  create_table_key = var.encryption == "CUSTOMER_MANAGED" && var.kms_key_arn == null
+  table_kms_key_arn = (
+    var.encryption != "CUSTOMER_MANAGED" ? null :
+    local.create_table_key ? aws_kms_key.table[0].arn :
+    var.kms_key_arn
+  )
 }
 
 data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
 
 resource "aws_kms_key" "table" {
+  count = local.create_table_key ? 1 : 0
+
   description         = "KMS key for DynamoDB table \${var.name}"
   enable_key_rotation = var.enable_key_rotation
 
@@ -165,8 +191,8 @@ resource "aws_dynamodb_table" "table" {
   }
 
   server_side_encryption {
-    enabled     = true
-    kms_key_arn = aws_kms_key.table.arn
+    enabled     = var.encryption != "DEFAULT"
+    kms_key_arn = local.table_kms_key_arn
   }
 }
 
@@ -181,8 +207,8 @@ output "table_arn" {
 }
 
 output "kms_key_arn" {
-  description = "ARN of the KMS key used to encrypt the DynamoDB table."
-  value       = aws_kms_key.table.arn
+  description = "ARN of the KMS key used to encrypt the DynamoDB table, if using customer-managed encryption."
+  value       = local.table_kms_key_arn
 }
 "
 `;
@@ -219,8 +245,25 @@ variable "deletion_protection_enabled" {
   default     = true
 }
 
+variable "encryption" {
+  description = "Server-side encryption for the table. One of CUSTOMER_MANAGED, AWS_MANAGED or DEFAULT (the AWS owned key, at no cost and with no key to manage)."
+  type        = string
+  default     = "CUSTOMER_MANAGED"
+
+  validation {
+    condition     = contains(["CUSTOMER_MANAGED", "AWS_MANAGED", "DEFAULT"], var.encryption)
+    error_message = "encryption must be one of CUSTOMER_MANAGED, AWS_MANAGED or DEFAULT."
+  }
+}
+
+variable "kms_key_arn" {
+  description = "ARN of an existing KMS key used to encrypt the table when encryption is CUSTOMER_MANAGED. When not provided, a new key is created. Note that a customer-supplied key must already grant the DynamoDB service the necessary permissions in its own key policy."
+  type        = string
+  default     = null
+}
+
 variable "enable_key_rotation" {
-  description = "Whether to enable automatic key rotation on the KMS key used to encrypt the table."
+  description = "Whether to enable automatic key rotation on the KMS key used to encrypt the table. Only applies when encryption is CUSTOMER_MANAGED and kms_key_arn is not provided."
   type        = bool
   default     = true
 }
@@ -247,6 +290,8 @@ module "dynamodb_table" {
   billing_mode                   = var.billing_mode
   point_in_time_recovery_enabled = var.point_in_time_recovery_enabled
   deletion_protection_enabled    = var.deletion_protection_enabled
+  encryption                     = var.encryption
+  kms_key_arn                    = var.kms_key_arn
   enable_key_rotation            = var.enable_key_rotation
   global_secondary_indexes       = local.global_secondary_indexes
 }
@@ -747,7 +792,7 @@ import {
 } from 'aws-cdk-lib/aws-dynamodb';
 import { RemovalPolicy } from 'aws-cdk-lib';
 import { Grant, IGrantable } from 'aws-cdk-lib/aws-iam';
-import { Key } from 'aws-cdk-lib/aws-kms';
+import { IKey, Key } from 'aws-cdk-lib/aws-kms';
 import { RuntimeConfig } from './runtime-config.js';
 
 type _DynamoDBTableProps = Omit<
@@ -768,7 +813,22 @@ export interface DynamoDBTableProps extends _DynamoDBTableProps {
   readonly runtimeConfigKey: string;
 
   /**
+   * Server-side encryption for the table.
+   *
+   * @default TableEncryption.CUSTOMER_MANAGED
+   */
+  readonly encryption?: TableEncryption;
+
+  /**
+   * KMS key used to encrypt the table. Only used when \`encryption\` is
+   * \`TableEncryption.CUSTOMER_MANAGED\`. When not provided, a new key is created.
+   */
+  readonly encryptionKey?: IKey;
+
+  /**
    * Whether to enable automatic key rotation on the KMS key used to encrypt the table.
+   * Only applies when \`encryption\` is \`TableEncryption.CUSTOMER_MANAGED\` and no
+   * \`encryptionKey\` is supplied.
    *
    * @default true
    */
@@ -788,13 +848,19 @@ export abstract class DynamoDBTable extends Construct {
       pointInTimeRecoverySpecification = { pointInTimeRecoveryEnabled: true },
       deletionProtection = true,
       removalPolicy = RemovalPolicy.RETAIN,
+      encryption = TableEncryption.CUSTOMER_MANAGED,
+      encryptionKey,
       enableKeyRotation = true,
       ...rest
     }: DynamoDBTableProps,
   ) {
     super(scope, id);
 
-    const key = new Key(this, 'EncryptionKey', { enableKeyRotation });
+    const key: IKey | undefined =
+      encryption === TableEncryption.CUSTOMER_MANAGED
+        ? (encryptionKey ??
+          new Key(this, 'EncryptionKey', { enableKeyRotation }))
+        : undefined;
 
     this.table = new Table(this, runtimeConfigKey, {
       ...rest,
@@ -805,7 +871,7 @@ export abstract class DynamoDBTable extends Construct {
       pointInTimeRecoverySpecification,
       deletionProtection,
       encryptionKey: key,
-      encryption: TableEncryption.CUSTOMER_MANAGED,
+      encryption,
       removalPolicy,
     });
 

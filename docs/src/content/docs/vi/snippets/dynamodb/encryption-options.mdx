@@ -1,0 +1,115 @@
+---
+title: Tùy chọn Mã hóa
+---
+import Infrastructure from '@components/infrastructure.astro';
+
+#### Sử dụng Khóa do AWS Quản lý
+
+Sử dụng khóa KMS `aws/dynamodb` được chia sẻ mà AWS quản lý thay mặt bạn. Nó hiển thị trong bảng điều khiển KMS của tài khoản bạn và được tính phí theo yêu cầu, nhưng không có khóa nào để bạn tạo, xoay vòng hoặc xóa.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { TableEncryption } from 'aws-cdk-lib/aws-dynamodb';
+import { MyTable } from '@my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  encryption: TableEncryption.AWS_MANAGED,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source     = "../../common/terraform/src/app/dynamodb/my-table"
+  encryption = "AWS_MANAGED"
+}
+```
+</Fragment>
+</Infrastructure>
+
+#### Sử dụng Khóa Thuộc sở hữu của AWS
+
+Sử dụng một khóa hoàn toàn thuộc sở hữu và được quản lý bởi AWS — miễn phí, không có khóa nào hiển thị trong tài khoản của bạn. Tùy chọn đơn giản nhất khi bạn không cần khóa hiển thị cho khách hàng hoặc tài khoản vì lý do tuân thủ.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { TableEncryption } from 'aws-cdk-lib/aws-dynamodb';
+import { MyTable } from '@my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  encryption: TableEncryption.DEFAULT,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source     = "../../common/terraform/src/app/dynamodb/my-table"
+  encryption = "DEFAULT"
+}
+```
+</Fragment>
+</Infrastructure>
+
+#### Sử dụng Khóa KMS của Riêng Bạn
+
+Cung cấp một khóa do khách hàng quản lý hiện có thay vì để một khóa được tạo cho bạn. Khóa phải đã cấp cho dịch vụ DynamoDB các quyền cần thiết trong chính sách khóa của nó.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { Key } from 'aws-cdk-lib/aws-kms';
+import { MyTable } from '@my-scope/common-constructs';
+
+const key = Key.fromKeyArn(this, 'Key', 'arn:aws:kms:us-east-1:111111111111:key/my-key-id');
+
+const table = new MyTable(this, 'Table', {
+  encryptionKey: key,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source      = "../../common/terraform/src/app/dynamodb/my-table"
+  kms_key_arn = "arn:aws:kms:us-east-1:111111111111:key/my-key-id"
+}
+```
+</Fragment>
+</Infrastructure>
+
+#### Xoay vòng Khóa Mã hóa
+
+Khi bảng tạo khóa KMS do khách hàng quản lý của riêng nó (mặc định, và chỉ khi bạn chưa cung cấp khóa của riêng mình), khóa đó có tính năng xoay vòng khóa tự động được bật theo mặc định. Vô hiệu hóa nó nếu chính sách bảo mật của bạn quản lý xoay vòng từ bên ngoài.
+
+##### Vô hiệu hóa Xoay vòng Khóa Mã hóa
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from '@my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  enableKeyRotation: false,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source              = "../../common/terraform/src/app/dynamodb/my-table"
+  enable_key_rotation = false
+}
+```
+</Fragment>
+</Infrastructure>

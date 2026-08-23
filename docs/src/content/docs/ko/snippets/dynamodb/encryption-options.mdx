@@ -1,0 +1,115 @@
+---
+title: 암호화 옵션
+---
+import Infrastructure from '@components/infrastructure.astro';
+
+#### AWS 관리형 키 사용
+
+AWS가 대신 관리하는 공유 `aws/dynamodb` KMS 키를 사용합니다. 계정의 KMS 콘솔에서 볼 수 있고 요청당 과금되지만, 생성, 로테이션 또는 삭제할 키가 없습니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { TableEncryption } from 'aws-cdk-lib/aws-dynamodb';
+import { MyTable } from '@my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  encryption: TableEncryption.AWS_MANAGED,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source     = "../../common/terraform/src/app/dynamodb/my-table"
+  encryption = "AWS_MANAGED"
+}
+```
+</Fragment>
+</Infrastructure>
+
+#### AWS 소유 키 사용
+
+AWS가 완전히 소유하고 관리하는 키를 사용합니다 — 무료이며, 계정에 키가 전혀 표시되지 않습니다. 규정 준수 이유로 고객 또는 계정에 표시되는 키가 필요하지 않은 경우 가장 간단한 옵션입니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { TableEncryption } from 'aws-cdk-lib/aws-dynamodb';
+import { MyTable } from '@my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  encryption: TableEncryption.DEFAULT,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source     = "../../common/terraform/src/app/dynamodb/my-table"
+  encryption = "DEFAULT"
+}
+```
+</Fragment>
+</Infrastructure>
+
+#### 자체 KMS 키 사용
+
+자동으로 생성되는 대신 기존 고객 관리형 키를 제공합니다. 키는 자체 키 정책에서 DynamoDB 서비스에 필요한 권한을 이미 부여해야 합니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { Key } from 'aws-cdk-lib/aws-kms';
+import { MyTable } from '@my-scope/common-constructs';
+
+const key = Key.fromKeyArn(this, 'Key', 'arn:aws:kms:us-east-1:111111111111:key/my-key-id');
+
+const table = new MyTable(this, 'Table', {
+  encryptionKey: key,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source      = "../../common/terraform/src/app/dynamodb/my-table"
+  kms_key_arn = "arn:aws:kms:us-east-1:111111111111:key/my-key-id"
+}
+```
+</Fragment>
+</Infrastructure>
+
+#### 암호화 키 로테이션
+
+테이블이 자체 고객 관리형 KMS 키를 생성하는 경우(기본값이며, 자체 키를 제공하지 않은 경우에만 해당), 해당 키는 기본적으로 자동 키 로테이션이 활성화됩니다. 보안 정책이 외부에서 로테이션을 관리하는 경우 비활성화하세요.
+
+##### 암호화 키 로테이션 비활성화
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from '@my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  enableKeyRotation: false,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source              = "../../common/terraform/src/app/dynamodb/my-table"
+  enable_key_rotation = false
+}
+```
+</Fragment>
+</Infrastructure>
