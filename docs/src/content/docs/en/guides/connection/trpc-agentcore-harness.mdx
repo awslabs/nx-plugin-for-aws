@@ -10,6 +10,7 @@ import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
 
 The `connection` generator wires a <Link path="guides/trpc">tRPC API</Link> to an <Link path="guides/agentcore-harness">AgentCore Harness</Link>, adding a streaming `POST /agui` route to the API that authenticates the caller, invokes the Harness on the caller's behalf, and translates its response into a standard [AG-UI](https://docs.ag-ui.com/) server-sent-event stream. Because the translation happens server-side, the API becomes a drop-in AG-UI endpoint — the generated CopilotKit chat UI connects to it with a stock `@ag-ui/client` `HttpAgent`, and so can any AG-UI client you already have.
 
@@ -52,12 +53,17 @@ The generator adds the AG-UI application code to your tRPC API project, plus an 
 
 </FileTree>
 
-Wire the new route into your application stack — the generator does not call `addAguiRoute` for you, since every construct in a generated app is hand-assembled there:
+Wire the new route into your application stack — the generator does not call `addAguiRoute` for you, since every construct in a generated app is hand-assembled there. Instantiate the Harness construct (see the <Link path="guides/agentcore-harness">AgentCore Harness guide</Link>) and your `Api`, then pass the harness to `addAguiRoute`:
 
-```ts title="packages/infra/src/stacks/application-stack.ts" {2}
-const api = new Api(this, 'Api');
+```ts title="packages/infra/src/stacks/application-stack.ts" {5}
+import { MyApi, MyHarness } from '@my-scope/common-constructs';
+
+const harness = new MyHarness(this, 'MyHarness');
+const api = new MyApi(this, 'Api');
 api.addAguiRoute(harness);
 ```
+
+See <Link path="guides/connection/trpc-agentcore-harness#deploying-the-full-application">Deploying the full application</Link> below for the complete website → API → Harness setup, from workspace creation to deploy.
 
 ## How It Works
 
@@ -130,6 +136,83 @@ API Gateway REST APIs cap a held integration response at 29 seconds, regardless 
 :::
 
 Only CDK is currently wired by this generator. If your API's `iac` is `terraform`, the AG-UI application code (`src/agui/`, `src/procedures/history.ts`) is still generated, but you'll need to wire the Lambda, the API Gateway route, and the Harness invoke grant into your Terraform configuration by hand.
+
+## Deploying the full application
+
+This is the complete path from an empty machine to a deployed website talking to a Harness, using each generator's defaults. Every generator above and its related guides are consolidated here so you don't have to navigate away.
+
+### 1. Create a workspace
+
+<CreateNxWorkspaceCommand workspace="my-project" iac="cdk" />
+
+### 2. Generate the projects
+
+Run these from the workspace root. Defaults give a tRPC API with `infra: rest-lambda` (required for the `/agui` route) and `auth: iam`, a React website with Cognito auth, and a CDK infrastructure project. The `--no-interactive` flag accepts every default so the block runs unattended:
+
+```bash frame="none"
+# tRPC API (framework=trpc, infra=rest-lambda, auth=iam by default)
+nx g @aws/nx-plugin:ts#api trpc-api --no-interactive
+
+# AgentCore Harness
+nx g @aws/nx-plugin:agentcore-harness agentcore-harness --no-interactive
+
+# React website (framework=react, ux=shadcn by default)
+nx g @aws/nx-plugin:ts#website react-website --no-interactive
+
+# Cognito authentication for the website
+nx g @aws/nx-plugin:ts#website#auth --project=react-website --no-interactive
+
+# Connect the API to the Harness FIRST — adds the /agui route to the API
+nx g @aws/nx-plugin:connection --sourceProject=trpc-api --targetProject=agentcore-harness --no-interactive
+
+# Connect the website to the API — also generates the CopilotKit hook for the Harness connected above
+nx g @aws/nx-plugin:connection --sourceProject=react-website --targetProject=trpc-api --no-interactive
+
+# CDK infrastructure project
+nx g @aws/nx-plugin:ts#infra infra --no-interactive
+```
+
+### 3. Wire the constructs into your stack
+
+The generators scaffold each project's CDK construct, but — as with every generated app — you assemble the constructs into your infrastructure stack by hand. Instantiate each one, call `addAguiRoute` to attach the `/agui` route to the API, and grant the website's authenticated users access to the API (replace `@my-scope` with your workspace's npm scope):
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {12,13,16}
+import {
+  MyWebsite,
+  MyApi,
+  MyHarness,
+  UserIdentity,
+} from '@my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    const identity = new UserIdentity(this, 'Identity');
+    const harness = new MyHarness(this, 'MyHarness');
+    const api = new MyApi(this, 'Api');
+
+    api.addAguiRoute(harness);
+    api.grantInvokeAccess(identity.identityPool.authenticatedRole);
+
+    new MyWebsite(this, 'Website');
+  }
+}
+```
+
+The `grantInvokeAccess` line lets your website's Cognito-authenticated users call the API — and therefore the `/agui` route, which shares the API's authorizer. Omit it only if you regenerated the API with `auth: cognito` (the Cognito authorizer validates the JWT directly) rather than the default `auth: iam`.
+
+### 4. Bootstrap and deploy
+
+Bootstrap CDK once per account, then deploy. Because the website is fronted by CloudFront with an AWS WAF WebACL, bootstrap **both** your target Region and `us-east-1`:
+
+<NxCommands commands={['bootstrap infra']} />
+
+<NxCommands commands={['deploy infra']} />
+
+The Harness also requires Amazon Bedrock model access to be enabled in the target Region. See the <Link path="guides/typescript-infrastructure">TypeScript Infrastructure guide</Link> for the `deploy-sandbox` and `deploy-ci` targets and how AWS credentials are resolved.
+
+Once deployed, open the website's CloudFront URL (a CDK output), sign up through Cognito, and the CopilotKit chat will stream from your Harness through the API's `/agui` route.
 
 ## Local Development
 
