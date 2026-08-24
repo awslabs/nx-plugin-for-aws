@@ -2,6 +2,10 @@
 title: OpenAPI Python Client
 description: Tài liệu tham khảo cho trình tạo client Python OpenAPI
 generator: open-api#py-client
+sidebar:
+  # Hidden until a connection generator vends this client, matching the
+  # generator's own `hidden: true`.
+  hidden: true
 ---
 import { FileTree } from '@astrojs/starlight/components';
 import GeneratorParameters from '@components/generator-parameters.astro';
@@ -124,7 +128,7 @@ except ApiError as e:
 
 Mỗi operation cũng có subclass riêng của nó, có `.error` thu hẹp đến các response mà operation đó khai báo. `isinstance` chọn ra một status:
 
-```python {8,11}
+```python {8,10}
 from my_api import types
 from my_api.errors import GetPetByIdApiError
 
@@ -133,9 +137,11 @@ try:
 except GetPetByIdApiError as e:
     if isinstance(e.error, types.GetPetById404Error):
         print("no such pet:", e.error.error.detail)
-    elif isinstance(e.error, types.GetPetById5XXError):
-        print("server error:", e.error.error.message)
+    else:
+        print("failed with", e.status)
 ```
+
+Có một class cho mỗi response mà operation khai báo, được đặt tên theo mã trạng thái của nó — một phạm vi `4XX` được khai báo trở thành `GetPetById4XXError`.
 
 Một body không khớp với schema mà đặc tả khai báo vẫn raise exception có kiểu, mang theo bất cứ thứ gì server thực sự gửi — vì vậy trang lỗi HTML của proxy xuất hiện dưới dạng lỗi thay vì lỗi xác thực bên trong error handler của bạn.
 
@@ -155,7 +161,7 @@ Client async phản chiếu client sync, từng phương thức một:
 ```python
 from my_api import AsyncMyApi, AsyncMyApiConfig
 
-async with AsyncMyApi(AsyncMyApiConfig(url=url)) as api:
+async with AsyncMyApi(AsyncMyApiConfig(url="https://api.example.com")) as api:
     pet = await api.pet.add_pet(name="rex")
 
     async for chunk in api.stream_chunks(count=4):
@@ -168,12 +174,22 @@ Cả hai client đều raise từ cùng một hệ thống phân cấp, vì vậ
 
 Xác thực là một điều mà mọi API đều làm khác nhau, vì vậy client không phát minh ra một abstraction cho nó. Cung cấp client `httpx` của riêng bạn và bất cứ thứ gì bạn cấu hình trên đó đều áp dụng cho mọi request:
 
-```python {6}
+```python {6,13}
 import httpx
 from my_api import MyApi, MyApiConfig
 
-with httpx.Client(auth=MyAuth()) as http:
-    api = MyApi(MyApiConfig(url=url, httpx_client=http))
+
+class BearerAuth(httpx.Auth):
+    def __init__(self, token: str) -> None:
+        self.token = token
+
+    def auth_flow(self, request):
+        request.headers["Authorization"] = f"Bearer {self.token}"
+        yield request
+
+
+with httpx.Client(auth=BearerAuth("my-token")) as http:
+    api = MyApi(MyApiConfig(url="https://api.example.com", httpx_client=http))
     pet = api.pet.add_pet(name="rex")
 ```
 
@@ -229,7 +245,7 @@ session = boto3.Session()
 auth = SigV4HTTPXAuth(session.get_credentials(), "execute-api", session.region_name)
 
 with httpx.Client(auth=auth) as http:
-    api = MyApi(MyApiConfig(url=url, httpx_client=http))
+    api = MyApi(MyApiConfig(url="https://api.example.com", httpx_client=http))
     pet = api.pet.add_pet(name="rex")
 ```
 
@@ -242,7 +258,7 @@ with httpx.Client(auth=auth) as http:
 ```python
 api = MyApi(
     MyApiConfig(
-        url=url,
+        url="https://api.example.com",
         # Sent with every request, where the operation sets no header of its own
         headers={"x-tenant-id": "acme"},
         # Omit the Content-Type the specification declares for each request

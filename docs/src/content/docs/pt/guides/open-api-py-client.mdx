@@ -2,6 +2,10 @@
 title: OpenAPI Python Client
 description: Documentação de referência para o gerador de cliente Python OpenAPI
 generator: open-api#py-client
+sidebar:
+  # Hidden until a connection generator vends this client, matching the
+  # generator's own `hidden: true`.
+  hidden: true
 ---
 import { FileTree } from '@astrojs/starlight/components';
 import GeneratorParameters from '@components/generator-parameters.astro';
@@ -124,7 +128,7 @@ except ApiError as e:
 
 Cada operação também tem sua própria subclasse, cujo `.error` restringe às respostas que aquela operação declara. `isinstance` seleciona um status:
 
-```python {8,11}
+```python {8,10}
 from my_api import types
 from my_api.errors import GetPetByIdApiError
 
@@ -133,9 +137,11 @@ try:
 except GetPetByIdApiError as e:
     if isinstance(e.error, types.GetPetById404Error):
         print("no such pet:", e.error.error.detail)
-    elif isinstance(e.error, types.GetPetById5XXError):
-        print("server error:", e.error.error.message)
+    else:
+        print("failed with", e.status)
 ```
+
+Há uma classe por resposta que a operação declara, nomeada após seu código de status — um intervalo `4XX` declarado se torna `GetPetById4XXError`.
 
 Um corpo que não corresponde ao schema que a especificação declara ainda lança a exceção tipada, carregando o que o servidor realmente enviou — então uma página de erro HTML de um proxy aparece como um erro em vez de uma falha de validação dentro do seu manipulador de erros.
 
@@ -155,7 +161,7 @@ O cliente assíncrono espelha o síncrono, método por método:
 ```python
 from my_api import AsyncMyApi, AsyncMyApiConfig
 
-async with AsyncMyApi(AsyncMyApiConfig(url=url)) as api:
+async with AsyncMyApi(AsyncMyApiConfig(url="https://api.example.com")) as api:
     pet = await api.pet.add_pet(name="rex")
 
     async for chunk in api.stream_chunks(count=4):
@@ -168,12 +174,22 @@ Ambos os clientes lançam da mesma hierarquia, então `except ApiError` captura 
 
 Autenticação é a única coisa que cada API faz de forma diferente, então o cliente não inventa uma abstração para isso. Forneça seu próprio cliente `httpx` e o que você configurar nele se aplica a cada requisição:
 
-```python {6}
+```python {6,13}
 import httpx
 from my_api import MyApi, MyApiConfig
 
-with httpx.Client(auth=MyAuth()) as http:
-    api = MyApi(MyApiConfig(url=url, httpx_client=http))
+
+class BearerAuth(httpx.Auth):
+    def __init__(self, token: str) -> None:
+        self.token = token
+
+    def auth_flow(self, request):
+        request.headers["Authorization"] = f"Bearer {self.token}"
+        yield request
+
+
+with httpx.Client(auth=BearerAuth("my-token")) as http:
+    api = MyApi(MyApiConfig(url="https://api.example.com", httpx_client=http))
     pet = api.pet.add_pet(name="rex")
 ```
 
@@ -229,7 +245,7 @@ session = boto3.Session()
 auth = SigV4HTTPXAuth(session.get_credentials(), "execute-api", session.region_name)
 
 with httpx.Client(auth=auth) as http:
-    api = MyApi(MyApiConfig(url=url, httpx_client=http))
+    api = MyApi(MyApiConfig(url="https://api.example.com", httpx_client=http))
     pet = api.pet.add_pet(name="rex")
 ```
 
@@ -242,7 +258,7 @@ with httpx.Client(auth=auth) as http:
 ```python
 api = MyApi(
     MyApiConfig(
-        url=url,
+        url="https://api.example.com",
         # Sent with every request, where the operation sets no header of its own
         headers={"x-tenant-id": "acme"},
         # Omit the Content-Type the specification declares for each request

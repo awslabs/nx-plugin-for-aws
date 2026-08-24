@@ -2,6 +2,10 @@
 title: OpenAPI Python Client
 description: OpenAPI Pythonクライアントジェネレーターのリファレンスドキュメント
 generator: open-api#py-client
+sidebar:
+  # Hidden until a connection generator vends this client, matching the
+  # generator's own `hidden: true`.
+  hidden: true
 ---
 import { FileTree } from '@astrojs/starlight/components';
 import GeneratorParameters from '@components/generator-parameters.astro';
@@ -124,7 +128,7 @@ except ApiError as e:
 
 各操作には独自のサブクラスもあり、その`.error`はその操作が宣言するレスポンスに絞り込まれます。`isinstance`で1つのステータスを選び出します：
 
-```python {8,11}
+```python {8,10}
 from my_api import types
 from my_api.errors import GetPetByIdApiError
 
@@ -133,9 +137,11 @@ try:
 except GetPetByIdApiError as e:
     if isinstance(e.error, types.GetPetById404Error):
         print("no such pet:", e.error.error.detail)
-    elif isinstance(e.error, types.GetPetById5XXError):
-        print("server error:", e.error.error.message)
+    else:
+        print("failed with", e.status)
 ```
+
+操作が宣言するレスポンス毎に1つのクラスがあり、ステータスコードにちなんで名付けられます。宣言された`4XX`範囲は`GetPetById4XXError`になります。
 
 仕様が宣言するスキーマと一致しないボディでも、型付き例外が発生し、サーバーが実際に送信したものを運びます。そのため、プロキシのHTMLエラーページは、エラーハンドラー内の検証失敗ではなく、エラーとして表面化します。
 
@@ -155,7 +161,7 @@ for chunk in api.stream_chunks(count=4):
 ```python
 from my_api import AsyncMyApi, AsyncMyApiConfig
 
-async with AsyncMyApi(AsyncMyApiConfig(url=url)) as api:
+async with AsyncMyApi(AsyncMyApiConfig(url="https://api.example.com")) as api:
     pet = await api.pet.add_pet(name="rex")
 
     async for chunk in api.stream_chunks(count=4):
@@ -168,12 +174,22 @@ async with AsyncMyApi(AsyncMyApiConfig(url=url)) as api:
 
 認証はすべてのAPIが異なる方法で行うものなので、クライアントはそのための抽象化を発明しません。独自の`httpx`クライアントを提供すると、そこで設定したものがすべてのリクエストに適用されます：
 
-```python {6}
+```python {6,13}
 import httpx
 from my_api import MyApi, MyApiConfig
 
-with httpx.Client(auth=MyAuth()) as http:
-    api = MyApi(MyApiConfig(url=url, httpx_client=http))
+
+class BearerAuth(httpx.Auth):
+    def __init__(self, token: str) -> None:
+        self.token = token
+
+    def auth_flow(self, request):
+        request.headers["Authorization"] = f"Bearer {self.token}"
+        yield request
+
+
+with httpx.Client(auth=BearerAuth("my-token")) as http:
+    api = MyApi(MyApiConfig(url="https://api.example.com", httpx_client=http))
     pet = api.pet.add_pet(name="rex")
 ```
 
@@ -229,7 +245,7 @@ session = boto3.Session()
 auth = SigV4HTTPXAuth(session.get_credentials(), "execute-api", session.region_name)
 
 with httpx.Client(auth=auth) as http:
-    api = MyApi(MyApiConfig(url=url, httpx_client=http))
+    api = MyApi(MyApiConfig(url="https://api.example.com", httpx_client=http))
     pet = api.pet.add_pet(name="rex")
 ```
 
@@ -242,7 +258,7 @@ with httpx.Client(auth=auth) as http:
 ```python
 api = MyApi(
     MyApiConfig(
-        url=url,
+        url="https://api.example.com",
         # Sent with every request, where the operation sets no header of its own
         headers={"x-tenant-id": "acme"},
         # Omit the Content-Type the specification declares for each request
