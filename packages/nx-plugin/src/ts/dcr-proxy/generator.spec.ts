@@ -10,7 +10,10 @@ import {
 import { expectHasMetricTags } from '../../utils/metrics-assertions.js';
 import { getNpmScopePrefix } from '../../utils/npm-scope.js';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
-import { TS_DCR_PROXY_GENERATOR_INFO, tsDcrProxyGenerator } from './generator.js';
+import {
+  TS_DCR_PROXY_GENERATOR_INFO,
+  tsDcrProxyGenerator,
+} from './generator.js';
 
 describe('ts#dcr-proxy generator', () => {
   let tree: Tree;
