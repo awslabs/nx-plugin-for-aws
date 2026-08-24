@@ -97,6 +97,20 @@ class _MockMatch:
         return True
 
 
+class _ChunkedStream(httpx.SyncByteStream, httpx.AsyncByteStream):
+    """Serves a body as a fixed list of chunks, sync or async."""
+
+    def __init__(self, chunks: list[bytes]) -> None:
+        self.chunks = chunks
+
+    def __iter__(self):
+        yield from self.chunks
+
+    async def __aiter__(self):
+        for chunk in self.chunks:
+            yield chunk
+
+
 class _MockTransport(httpx.BaseTransport, httpx.AsyncBaseTransport):
     """Deterministic transport for both sync and async httpx clients."""
 
@@ -131,8 +145,20 @@ class _MockTransport(httpx.BaseTransport, httpx.AsyncBaseTransport):
         # the caller's spec and leak into a later replay of the same entry.
         headers = dict(spec.get("headers", {}))
         if "jsonl_lines" in spec:
-            body = ("\n".join(spec["jsonl_lines"]) + "\n").encode("utf-8")
+            newline = spec.get("newline", "\n")
+            body = (newline.join(spec["jsonl_lines"]) + newline).encode("utf-8")
             headers.setdefault("content-type", "application/jsonl")
+            if "chunk_size" in spec:
+                # Served in fixed-size pieces so a line spanning two chunks
+                # exercises the client's buffering. A single chunk would let a
+                # client that discards the buffer between reads still pass.
+                size = spec["chunk_size"]
+                chunks = [body[i : i + size] for i in range(0, len(body), size)]
+                return httpx.Response(
+                    status_code=status,
+                    headers=headers,
+                    stream=_ChunkedStream(chunks),
+                )
         elif "json" in spec:
             body = json.dumps(spec["json"]).encode("utf-8")
             headers.setdefault("content-type", "application/json")

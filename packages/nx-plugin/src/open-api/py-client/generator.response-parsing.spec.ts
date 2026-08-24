@@ -320,4 +320,118 @@ describe('openApiPyClientGenerator - response parsing', () => {
     );
     expect(texted.pyType).toBe('int');
   });
+
+  // A response body the spec marks nullable may arrive as JSON `null`. Parsing
+  // it as the declared class would raise a pydantic ValidationError.
+  describe('nullable response bodies', () => {
+    const nullableSpec: Spec = {
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/maybe': {
+          get: {
+            operationId: 'getMaybe',
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      nullable: true,
+                      required: ['a'],
+                      properties: { a: { type: 'string' } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    it('returns None for a null object body', async () => {
+      await generateAndRead(verifier, tree, nullableSpec);
+      const res = await callGeneratedClient(
+        verifier,
+        'get_maybe',
+        {},
+        {
+          json: null,
+        },
+      );
+      expect(res.ok).toBe(true);
+      expect(res.value).toBeNull();
+    });
+
+    it('still parses a present object body', async () => {
+      await generateAndRead(verifier, tree, nullableSpec);
+      const res = await callGeneratedClient(
+        verifier,
+        'get_maybe',
+        {},
+        {
+          json: { a: 'hi' },
+        },
+      );
+      expect(res.ok).toBe(true);
+      expect(res.value).toEqual({ a: 'hi' });
+    });
+  });
+
+  // A response declaring JSON alongside another media type can arrive as either,
+  // and a declared-JSON body can arrive empty. Both raised a bare
+  // `json.JSONDecodeError` out of the client.
+  describe('bodies that are not the JSON the spec declares', () => {
+    const multiMediaSpec: Spec = {
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/either': {
+          get: {
+            operationId: 'getEither',
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': { schema: { type: 'string' } },
+                  'text/plain': { schema: { type: 'string' } },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    it('reads a text body on a response also declaring JSON', async () => {
+      await generateAndRead(verifier, tree, multiMediaSpec);
+      const res = await callGeneratedClient(
+        verifier,
+        'get_either',
+        {},
+        {
+          text: 'not json at all',
+          headers: { 'content-type': 'text/plain' },
+        },
+      );
+      expect(res.ok).toBe(true);
+      expect(res.value).toBe('not json at all');
+    });
+
+    it('returns None for an empty body', async () => {
+      await generateAndRead(verifier, tree, multiMediaSpec);
+      const res = await callGeneratedClient(
+        verifier,
+        'get_either',
+        {},
+        {
+          status: 200,
+        },
+      );
+      expect(res.ok).toBe(true);
+      expect(res.value).toBeNull();
+    });
+  });
 });

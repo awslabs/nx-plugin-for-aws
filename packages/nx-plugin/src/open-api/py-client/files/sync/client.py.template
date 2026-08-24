@@ -86,6 +86,11 @@ const responseParseExpr = (resp) => {
   if (resp.type === 'binary') return 'response.content';
   const py = resp.pythonClientType || 'Any';
   const isJsonMedia = isJsonWire(resp);
+  // A response declaring JSON alongside another media type can arrive as either,
+  // and a declared-JSON body can arrive empty, so the body is read through a
+  // helper that tolerates both rather than assuming `response.json()` succeeds.
+  const jsonBody =
+    (resp.mediaTypes || []).length > 1 ? 'self._json_body(response)' : 'response.json()';
   // An enum or union alias is a single value on the wire, so it reads like a
   // scalar even though it renders as a module-level alias. A referenced
   // collection alias resolves to a container, so it is validated as one.
@@ -95,7 +100,7 @@ const responseParseExpr = (resp) => {
   const isScalar = !isCollection;
   const nullable = resp.isNullable ? (t) => `${t} | None` : (t) => t;
   if (isScalar) {
-    if (py === 'Any') return isJsonMedia ? 'response.json()' : 'response.text';
+    if (py === 'Any') return isJsonMedia ? jsonBody : 'response.text';
     // A non-JSON wire hands over text, which pydantic coerces to the declared
     // type (`"7"` to 7, `"true"` to True, an ISO string to a date).
     if (!isJsonMedia) {
@@ -104,15 +109,15 @@ const responseParseExpr = (resp) => {
     // `str` and `Any` need no coercion from a JSON body; every other declared
     // type does (a JSON number to `float`, an ISO string to a `date`).
     if ((py === 'str' || py === 'Any') && !resp.isNullable) {
-      return 'response.json()';
+      return jsonBody;
     }
     if (isModelClass(resp) && !resp.isNullable) {
-      return `${py}.model_validate(response.json())`;
+      return `${py}.model_validate(${jsonBody})`;
     }
-    return `TypeAdapter(${nullable(py)}).validate_python(response.json())`;
+    return `TypeAdapter(${nullable(py)}).validate_python(${jsonBody})`;
   }
   if (!isJsonMedia && py === 'Any') return 'response.text';
-  return `TypeAdapter(${nullable(py)}).validate_python(response.json())`;
+  return `TypeAdapter(${nullable(py)}).validate_python(${jsonBody})`;
 };
 
 /**
@@ -135,8 +140,10 @@ const streamItemParseExpr = (itemModel, lineVar) => {
  * the return annotation the caller sees.
  */
 const streamChunkParseExpr = (resp, lineVar) => {
-  const py = resp.pythonClientType || 'Any';
-  if (py === 'str' || py === 'Any') return lineVar;
+  const py = resp.type === 'void' ? 'None' : resp.pythonClientType || 'Any';
+  // A void response has no item type, so the line is yielded as text rather
+  // than validated against `None`, which nothing satisfies.
+  if (py === 'None' || py === 'str' || py === 'Any') return lineVar;
   if (!isModelClass(resp)) {
     return `TypeAdapter(${py}).validate_json(${lineVar})`;
   }
@@ -281,6 +288,8 @@ const tagGroups = operationsByTag;
 const hasContentJsonParams = allOperations.some(op => (op.parameters || []).some(p => p.in !== 'body' && p.mediaType === 'application/json'));
 const hasPartContentTypes = allOperations.some(op => op.parametersBody && op.parametersBody.partContentTypes);
 const hasAllowReservedParams = allOperations.some(op => (op.parameters || []).some(p => p.in === 'query' && p.allowReserved));
+// A response declaring several media types is read through `_json_body`.
+const hasMultiMediaResponse = allOperations.some(op => (op.responses || []).some(r => (r.mediaTypes || []).length > 1));
 // An untyped streamed item is decoded with `json.loads`, which needs the import.
 const hasUntypedStreamItems = allOperations.some(op => (op.responses || []).some(r =>
   r.isJsonlStreaming && r.itemSchemaModel && (r.itemSchemaModel.pythonClientType || 'Any') === 'Any'));
@@ -593,7 +602,12 @@ class <%- className %>:
 
 <%_ if (hasMultipartBody) { _%>
     def _is_file_part(self, value: Any) -> bool:
-        return hasattr(value, "read") or isinstance(value, (bytes, bytearray, tuple))
+        # httpx reads a file part as (filename, content[, content_type]), so a
+        # tuple only qualifies in that shape — a `prefixItems` field is a tuple
+        # too, and passing one to httpx as a file raises a TypeError.
+        if isinstance(value, tuple):
+            return 2 <= len(value) <= 3 and isinstance(value[0], (str, type(None)))
+        return hasattr(value, "read") or isinstance(value, (bytes, bytearray))
 
     def _multipart(
         self,
@@ -631,6 +645,20 @@ class <%- className %>:
         if value is None or isinstance(value, (int, float)):
             return "" if value is None else str(value)
         return json.dumps(value, separators=(",", ":"))
+
+<%_ } _%>
+<%_ if (hasMultiMediaResponse) { _%>
+    def _json_body(self, response: httpx.Response) -> Any:
+        # A response declaring JSON alongside another media type can arrive as
+        # either, and a declared-JSON body can arrive empty (a 200 with no
+        # content). Both would raise a bare JSONDecodeError out of the client, so
+        # the text is handed over instead.
+        if not response.content:
+            return None
+        try:
+            return response.json()
+        except ValueError:
+            return response.text
 
 <%_ } _%>
     def _error_payload(self, response: httpx.Response) -> Any:
@@ -842,6 +870,9 @@ _%>
                     buffer += chunk
                     while "\n" in buffer:
                         line, buffer = buffer.split("\n", 1)
+                        # `iter_text` doesn't translate newlines, so a CRLF
+                        # stream leaves a trailing carriage return on each line.
+                        line = line.rstrip("\r")
                         if line.strip():
                             yield <%- streamItemParseExpr(resp.itemSchemaModel, "line") %>
                 if buffer.strip():

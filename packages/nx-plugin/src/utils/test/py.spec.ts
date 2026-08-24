@@ -21,6 +21,13 @@ export interface MockResponseSpec {
   json?: unknown;
   text?: string;
   jsonl_lines?: string[];
+  /** Line separator for `jsonl_lines`, so a CRLF stream can be served. */
+  newline?: string;
+  /**
+   * Serve the body in fixed-size chunks rather than one. A line spanning two
+   * chunks is what exercises the client's buffering.
+   */
+  chunk_size?: number;
   bytes_b64?: string;
 }
 

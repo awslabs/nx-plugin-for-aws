@@ -751,6 +751,14 @@ const augmentResponses = (
       const responseSchema = resolveIfRef(spec, responseContent.schema);
       if (responseSchema) {
         augmentModelFromSchema(spec, response, responseSchema, modelsByName);
+        // A response body the spec marks nullable may arrive as JSON `null`, so
+        // the flag is carried onto the response for the templates that parse it.
+        // Set here rather than in `augmentModelFromSchema`, which every property
+        // also goes through: doing it there would change how a property
+        // referencing a nullable schema is typed.
+        if ((responseSchema as { nullable?: boolean }).nullable) {
+          response.isNullable = true;
+        }
       }
       if (
         STREAMING_CONTENT_TYPES.has(mediaType) &&

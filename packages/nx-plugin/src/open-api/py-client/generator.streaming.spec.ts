@@ -332,4 +332,57 @@ describe('openApiPyClientGenerator - streaming', () => {
       },
     );
   });
+
+  // The buffering across chunk boundaries only matters when a line is split, so
+  // the body is served in small pieces. Served whole, a client that replaced its
+  // buffer instead of appending to it would still pass.
+  describe('chunk boundaries', () => {
+    const lines = Array.from({ length: 8 }, (_, i) =>
+      JSON.stringify({
+        content: `chunk-${i}-with-enough-text-to-span-a-boundary`,
+      }),
+    );
+    const expected = lines.map((line) => JSON.parse(line));
+
+    it.each([1, 7, 13, 64])(
+      'reassembles JSONL lines served in %i-byte chunks',
+      async (chunkSize) => {
+        await generateAndRead(verifier, tree, jsonlSpec);
+        const res = await callGeneratedClientStreaming(
+          verifier,
+          'stream_data',
+          { prompt: 'hi' },
+          { status: 200, jsonl_lines: lines, chunk_size: chunkSize },
+        );
+        expect(res.ok).toBe(true);
+        expect(res.value).toEqual(expected);
+      },
+    );
+
+    // `iter_text` doesn't translate newlines, so a CRLF stream would otherwise
+    // leave a trailing carriage return inside each parsed line.
+    it('parses a CRLF-delimited stream', async () => {
+      await generateAndRead(verifier, tree, jsonlSpec);
+      const res = await callGeneratedClientStreaming(
+        verifier,
+        'stream_data',
+        { prompt: 'hi' },
+        { status: 200, jsonl_lines: lines, newline: '\r\n', chunk_size: 11 },
+      );
+      expect(res.ok).toBe(true);
+      expect(res.value).toEqual(expected);
+    });
+
+    it('reassembles chunked lines on the async client', async () => {
+      await generateAndRead(verifier, tree, jsonlSpec);
+      const res = await callGeneratedClientStreamingAsync(
+        verifier,
+        'stream_data',
+        { prompt: 'hi' },
+        { status: 200, jsonl_lines: lines, chunk_size: 9 },
+      );
+      expect(res.ok).toBe(true);
+      expect(res.value).toEqual(expected);
+    });
+  });
 });
