@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from '../test';
-import { PythonVerifier } from './py.spec';
-import { PY_CLIENT_VERIFIER_DEPENDENCIES } from './python-dependencies';
+import { createTreeUsingTsSolutionSetup } from '../test.js';
+import { PythonVerifier } from './py.spec.js';
+import { PY_CLIENT_VERIFIER_DEPENDENCIES } from './python-dependencies.js';
 
 // A few tests for the test utility as a sanity check, mirroring ts.spec.ts.
 describe('PythonVerifier', () => {

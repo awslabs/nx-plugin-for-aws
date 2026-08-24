@@ -3,14 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import type { Spec } from '../utils/types';
+import type { Spec } from '../utils/types.js';
 import {
   callGeneratedClient,
   createPythonClientVerifier,
   createTree,
   generateAndRead,
   requestBody,
-} from './generator.utils.spec';
+} from './generator.utils.spec.js';
 
 describe('openApiPyClientGenerator - arrays', () => {
   let tree: Tree;

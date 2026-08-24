@@ -6,7 +6,7 @@ import { execFileSync } from 'child_process';
 import {
   PY_CLIENT_VERIFIER_DEPENDENCIES,
   PY_VERIFIER_TYPE_CHECKER,
-} from './python-dependencies';
+} from './python-dependencies.js';
 
 /**
  * Vitest globalSetup that warms uv's cache once before any worker spawns.

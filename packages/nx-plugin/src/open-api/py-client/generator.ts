@@ -4,23 +4,23 @@
  */
 import { generateFiles, type Tree } from '@nx/devkit';
 import * as path from 'path';
-import { declareDependencies } from '../../utils/declared-dependencies';
-import { formatFilesInSubtree } from '../../utils/format';
-import { updateGitIgnore } from '../../utils/git';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { getGeneratorInfo, type NxGeneratorInfo } from '../../utils/nx';
-import { buildOpenApiCodeGenerationData } from '../ts-client/generator';
-import {
-  annotatePythonData,
-  assertNoClashingPythonNames,
-} from '../utils/codegen-data';
-import { toPythonLiteral } from '../utils/codegen-data/languages';
+import { declareDependencies } from '../../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../../utils/format.js';
+import { updateGitIgnore } from '../../utils/git.js';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
+import { getGeneratorInfo, type NxGeneratorInfo } from '../../utils/nx.js';
+import { buildOpenApiCodeGenerationData } from '../ts-client/generator.js';
+import { toPythonLiteral } from '../utils/codegen-data/languages.js';
 import {
   type CodeGenData,
   isPythonCollection,
   needsPythonTypeAdapter,
-} from '../utils/codegen-data/types';
-import type { OpenApiPyClientGeneratorSchema } from './schema';
+} from '../utils/codegen-data/types.js';
+import {
+  annotatePythonData,
+  assertNoClashingPythonNames,
+} from '../utils/codegen-data.js';
+import type { OpenApiPyClientGeneratorSchema } from './schema.js';
 
 export const OPEN_API_PY_CLIENT_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(import.meta.filename);

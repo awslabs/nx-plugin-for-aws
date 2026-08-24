@@ -3,14 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import type { Spec } from '../utils/types';
+import type { Spec } from '../utils/types.js';
 import {
   callGeneratedClient,
   createPythonClientVerifier,
   createTree,
   expectSingleRequest,
   generateAndRead,
-} from './generator.utils.spec';
+} from './generator.utils.spec.js';
 
 /**
  * The client's extension point is the caller's own `httpx` client: auth,

@@ -3,14 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import { PET_STORE_SPEC } from '../ts-client/petstore-spec';
+import { PET_STORE_SPEC } from '../ts-client/petstore-spec.js';
 import {
   callGeneratedClient,
   callGeneratedClientAsync,
   createPythonClientVerifier,
   createTree,
   generateAndRead,
-} from './generator.utils.spec';
+} from './generator.utils.spec.js';
 
 describe('openApiPyClientGenerator - petstore', () => {
   let tree: Tree;

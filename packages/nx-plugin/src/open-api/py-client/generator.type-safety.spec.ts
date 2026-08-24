@@ -2,12 +2,12 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import type { Spec } from '../utils/types';
+import type { Spec } from '../utils/types.js';
 import {
   createPythonClientVerifier,
   createTree,
   generateAndRead,
-} from './generator.utils.spec';
+} from './generator.utils.spec.js';
 
 /**
  * A spec exercising every feature whose type-safety we care about.  The spec

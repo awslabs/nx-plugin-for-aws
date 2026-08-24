@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import type { Spec } from '../utils/types';
+import type { Spec } from '../utils/types.js';
 import {
   callGeneratedClient,
   callGeneratedClientAsync,
@@ -13,7 +13,7 @@ import {
   requestBody,
   requestHeader,
   requestUrl,
-} from './generator.utils.spec';
+} from './generator.utils.spec.js';
 
 describe('openApiPyClientGenerator - requests', () => {
   let tree: Tree;

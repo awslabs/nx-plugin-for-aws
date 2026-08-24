@@ -3,18 +3,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
 import {
   type InvokeResult,
   type MockEntry,
   type MockResponseSpec,
   PythonVerifier,
   type RouteSpec,
-} from '../../utils/test/py.spec';
-import { PY_CLIENT_VERIFIER_DEPENDENCIES } from '../../utils/test/python-dependencies';
-import type { Spec } from '../utils/types';
-import { openApiPyClientGenerator } from './generator';
-import type { OpenApiPyClientGeneratorSchema } from './schema';
+} from '../../utils/test/py.spec.js';
+import { PY_CLIENT_VERIFIER_DEPENDENCIES } from '../../utils/test/python-dependencies.js';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import type { Spec } from '../utils/types.js';
+import { openApiPyClientGenerator } from './generator.js';
+import type { OpenApiPyClientGeneratorSchema } from './schema.js';
 
 /**
  * A verifier carrying the dependencies a generated client imports, started

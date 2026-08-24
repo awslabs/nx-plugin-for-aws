@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { Spec } from '../utils/types';
+import type { Spec } from '../utils/types.js';
 
 export const PET_STORE_SPEC: Spec = {
   openapi: '3.0.4',

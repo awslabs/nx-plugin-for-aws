@@ -6,8 +6,8 @@ import type { Tree } from '@nx/devkit';
 import { type ChildProcessWithoutNullStreams, spawn } from 'child_process';
 import path from 'path';
 import { createInterface, type Interface } from 'readline';
-import { createTreeUsingTsSolutionSetup } from '../test';
-import { PY_VERIFIER_TYPE_CHECKER } from './python-dependencies';
+import { createTreeUsingTsSolutionSetup } from '../test.js';
+import { PY_VERIFIER_TYPE_CHECKER } from './python-dependencies.js';
 
 const WORKER_PATH = path.join(
   import.meta.dirname,

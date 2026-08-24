@@ -8,7 +8,7 @@ import {
   METRIC_ID,
   METRICS_ASPECT_FILE_PATH,
   TERRAFORM_METRICS_FILE_PATH,
-} from './metrics';
+} from './metrics.js';
 
 /**
  * Asserts that the MetricsAspect tags array in the CDK app.ts file

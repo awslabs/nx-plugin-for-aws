@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import type { Spec } from '../utils/types';
+import type { Spec } from '../utils/types.js';
 import {
   callGeneratedClientStreaming,
   callGeneratedClientStreamingAsync,
@@ -11,7 +11,7 @@ import {
   createTree,
   generateAndRead,
   mockJsonlResponse,
-} from './generator.utils.spec';
+} from './generator.utils.spec.js';
 
 describe('openApiPyClientGenerator - streaming', () => {
   let tree: Tree;
@@ -384,5 +384,37 @@ describe('openApiPyClientGenerator - streaming', () => {
       expect(res.ok).toBe(true);
       expect(res.value).toEqual(expected);
     });
+  });
+
+  // A streaming operation whose response declares no content yields the raw text
+  // lines, so the annotation has to say `str` — `Iterator[None]` type-checks
+  // against nothing that is actually yielded.
+  it('yields text lines for a stream with a void response', async () => {
+    const spec: Spec = {
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/events': {
+          get: {
+            operationId: 'events',
+            'x-streaming': true,
+            responses: { '200': { description: 'stream' } },
+          },
+        },
+      },
+    };
+    const { client, asyncClient } = await generateAndRead(verifier, tree, spec);
+    expect(client).toContain('Iterator[str]');
+    expect(asyncClient).toContain('AsyncGenerator[str]');
+    expect(client).not.toContain('Iterator[None]');
+
+    const res = await callGeneratedClientStreaming(
+      verifier,
+      'events',
+      {},
+      { status: 200, text: 'first\nsecond\n' },
+    );
+    expect(res.ok).toBe(true);
+    expect(res.value).toEqual(['first', 'second']);
   });
 });

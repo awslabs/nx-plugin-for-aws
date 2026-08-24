@@ -4,14 +4,14 @@
  */
 import { PositionEncoding, Workspace } from '@astral-sh/ruff-wasm-nodejs';
 import type { Tree } from '@nx/devkit';
-import { PET_STORE_SPEC } from '../ts-client/petstore-spec';
-import type { Spec } from '../utils/types';
+import { PET_STORE_SPEC } from '../ts-client/petstore-spec.js';
+import type { Spec } from '../utils/types.js';
 import {
   createPythonClientVerifier,
   createTree,
   generateAndRead,
   outputPath,
-} from './generator.utils.spec';
+} from './generator.utils.spec.js';
 
 /**
  * The lint settings a generated Python project vends, so a client emitted into

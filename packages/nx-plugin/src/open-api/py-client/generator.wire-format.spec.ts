@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import type { Spec } from '../utils/types';
+import type { Spec } from '../utils/types.js';
 import {
   callGeneratedClient,
   createPythonClientVerifier,
@@ -12,7 +12,7 @@ import {
   expectSingleRequest,
   generateAndRead,
   requestQuery,
-} from './generator.utils.spec';
+} from './generator.utils.spec.js';
 
 /**
  * What the client puts on the wire, asserted against the recorded request

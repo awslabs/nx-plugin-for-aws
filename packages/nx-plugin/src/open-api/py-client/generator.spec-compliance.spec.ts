@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import type { Spec } from '../utils/types';
+import type { Spec } from '../utils/types.js';
 import {
   callGeneratedClient,
   createPythonClientVerifier,
@@ -12,7 +12,7 @@ import {
   requestBody,
   requestHeader,
   requestUrl,
-} from './generator.utils.spec';
+} from './generator.utils.spec.js';
 
 /**
  * Parity coverage for OpenAPI spec-compliance features mirrored from the
