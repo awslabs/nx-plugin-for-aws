@@ -125,36 +125,7 @@ new MyApi(this, 'MyApi', {
 
 </Fragment>
 <Fragment slot="terraform">
-Para personalizar opções como configuração de VPC, você precisa editar o módulo Terraform gerado. Por exemplo, para adicionar suporte a VPC a todas as funções Lambda:
-
-```hcl
-# packages/common/terraform/src/app/apis/my-api/my-api.tf
-# Add VPC variables
-variable "vpc_subnet_ids" {
-  description = "List of VPC subnet IDs for Lambda function"
-  type        = list(string)
-  default     = []
-}
-
-variable "vpc_security_group_ids" {
-  description = "List of VPC security group IDs for Lambda function"
-  type        = list(string)
-  default     = []
-}
-
-# Update the Lambda function resource
-resource "aws_lambda_function" "api_lambda" {
-  # ... existing configuration ...
-
-  # Add VPC configuration
-  vpc_config {
-    subnet_ids         = var.vpc_subnet_ids
-    security_group_ids = var.vpc_security_group_ids
-  }
-}
-```
-
-Então use o módulo com a configuração de VPC:
+A configuração de VPC já é suportada pelo módulo gerado — defina `enable_vpc` junto com `vpc_id` e `subnet_ids`, e o módulo implanta a função Lambda em sua VPC atrás de um grupo de segurança que ele cria para você:
 
 ```hcl
 module "my_api" {
@@ -163,12 +134,15 @@ module "my_api" {
   asset_bucket_name = module.asset_bucket.bucket_name
 
   # VPC configuration
-  vpc_subnet_ids         = [aws_subnet.private_a.id, aws_subnet.private_b.id]
-  vpc_security_group_ids = [aws_security_group.lambda_sg.id]
+  enable_vpc = true
+  vpc_id     = aws_vpc.main.id
+  subnet_ids = [aws_subnet.private_a.id, aws_subnet.private_b.id]
 
   tags = local.common_tags
 }
 ```
+
+Para opções que o módulo não expõe, edite o recurso `aws_lambda_function` no módulo Terraform gerado diretamente.
 </Fragment>
 </Infrastructure>
 
@@ -344,7 +318,9 @@ Edite `packages/common/terraform/src/app/apis/my-api/my-api.tf`:
 
 # Remove the default single Lambda function
 - resource "aws_lambda_function" "api_lambda" {
--   filename         = data.archive_file.lambda_zip.output_path
+-   s3_bucket         = aws_s3_object.lambda_zip.bucket
+-   s3_key            = aws_s3_object.lambda_zip.key
+-   s3_object_version = aws_s3_object.lambda_zip.version_id
 -   function_name    = "MyApiHandler"
 -   role            = aws_iam_role.lambda_execution_role.arn
 -   handler         = "index.handler"
@@ -372,7 +348,9 @@ Edite `packages/common/terraform/src/app/apis/my-api/my-api.tf`:
 
 # Add individual Lambda functions for each operation using the same bundle
 + resource "aws_lambda_function" "say_hello_handler" {
-+   filename         = data.archive_file.lambda_zip.output_path
++   s3_bucket         = aws_s3_object.lambda_zip.bucket
++   s3_key            = aws_s3_object.lambda_zip.key
++   s3_object_version = aws_s3_object.lambda_zip.version_id
 +   function_name    = "MyApi-SayHello"
 +   role            = aws_iam_role.lambda_execution_role.arn
 +   handler         = "sayHello.handler"  # Specific handler for this operation
@@ -392,7 +370,9 @@ Edite `packages/common/terraform/src/app/apis/my-api/my-api.tf`:
 + }
 
 + resource "aws_lambda_function" "get_documentation_handler" {
-+   filename         = data.archive_file.lambda_zip.output_path
++   s3_bucket         = aws_s3_object.lambda_zip.bucket
++   s3_key            = aws_s3_object.lambda_zip.key
++   s3_object_version = aws_s3_object.lambda_zip.version_id
 +   function_name    = "MyApi-GetDocumentation"
 +   role            = aws_iam_role.lambda_execution_role.arn
 +   handler         = "getDocumentation.handler"  # Specific handler for this operation
@@ -467,8 +447,10 @@ Edite `packages/common/terraform/src/app/apis/my-api/my-api.tf`:
 
 # Remove the default single Lambda function
 - resource "aws_lambda_function" "api_lambda" {
--   filename         = data.archive_file.lambda_zip.output_path
--   function_name    = "MyApiHandler"
+-   s3_bucket         = aws_s3_object.lambda_zip.bucket
+-   s3_key            = aws_s3_object.lambda_zip.key
+-   s3_object_version = aws_s3_object.lambda_zip.version_id
+-   function_name    = "MyApiHandler-${random_string.suffix.result}"
 -   role            = aws_iam_role.lambda_execution_role.arn
 -   handler         = "index.handler"
 -   runtime         = "nodejs22.x"
@@ -477,25 +459,29 @@ Edite `packages/common/terraform/src/app/apis/my-api/my-api.tf`:
 - }
 
 # Remove the default proxy integration
-- resource "aws_apigatewayv2_integration" "lambda_integration" {
--   api_id           = module.http_api.api_id
--   integration_type = "AWS_PROXY"
--   integration_uri  = aws_lambda_function.api_lambda.invoke_arn
+- resource "aws_api_gateway_integration" "lambda_integration" {
+-   rest_api_id = module.rest_api.api_id
+-   resource_id = aws_api_gateway_resource.proxy_resource.id
+-   http_method = aws_api_gateway_method.proxy_method.http_method
+-   integration_http_method = "POST"
+-   type                    = "AWS_PROXY"
+-   uri                     = aws_lambda_function.api_lambda.invoke_arn
 -   # ... rest of configuration
 - }
 
-# Remove the default proxy routes
-- resource "aws_apigatewayv2_route" "proxy_routes" {
--   for_each = toset(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"])
--   api_id    = module.http_api.api_id
--   route_key = "${each.key} /{proxy+}"
--   target    = "integrations/${aws_apigatewayv2_integration.lambda_integration.id}"
+# Remove the default catch-all proxy method
+- resource "aws_api_gateway_method" "proxy_method" {
+-   rest_api_id   = module.rest_api.api_id
+-   resource_id   = aws_api_gateway_resource.proxy_resource.id
+-   http_method   = "ANY"
 -   # ... rest of configuration
 - }
 
 # Add individual Lambda functions for each operation using the same bundle
 + resource "aws_lambda_function" "say_hello_handler" {
-+   filename         = data.archive_file.lambda_zip.output_path
++   s3_bucket         = aws_s3_object.lambda_zip.bucket
++   s3_key            = aws_s3_object.lambda_zip.key
++   s3_object_version = aws_s3_object.lambda_zip.version_id
 +   function_name    = "MyApi-SayHello"
 +   role            = aws_iam_role.lambda_execution_role.arn
 +   handler         = "sayHello.handler"  # Specific handler for this operation
@@ -515,7 +501,9 @@ Edite `packages/common/terraform/src/app/apis/my-api/my-api.tf`:
 + }
 
 + resource "aws_lambda_function" "get_documentation_handler" {
-+   filename         = data.archive_file.lambda_zip.output_path
++   s3_bucket         = aws_s3_object.lambda_zip.bucket
++   s3_key            = aws_s3_object.lambda_zip.key
++   s3_object_version = aws_s3_object.lambda_zip.version_id
 +   function_name    = "MyApi-GetDocumentation"
 +   role            = aws_iam_role.lambda_execution_role.arn
 +   handler         = "getDocumentation.handler"  # Specific handler for this operation

@@ -118,8 +118,8 @@ Agent를 배포하기 위해 다음 파일이 생성됩니다:
   - packages/common/constructs/src
     - app
       - agents
-        - \<project-name>
-          - \<project-name>.ts CDK construct for deploying your agent
+        - \<agent-name>
+          - \<agent-name>.ts CDK construct for deploying your agent
 </FileTree>
 </Fragment>
 <Fragment slot="terraform">
@@ -127,8 +127,8 @@ Agent를 배포하기 위해 다음 파일이 생성됩니다:
   - packages/common/terraform/src
     - app
       - agents
-        - \<project-name>
-          - \<project-name>.tf Module for deploying your agent
+        - \<agent-name>
+          - \<agent-name>.tf Module for deploying your agent
     - core
       - agent-core
         - runtime.tf Generic module for deploying to Bedrock AgentCore Runtime
@@ -203,7 +203,7 @@ Strands 프레임워크는 다음을 자동으로 처리합니다:
 
 ### 모델 구성
 
-기본적으로 Strands 에이전트는 Claude 4 Sonnet을 사용하지만, 모델 제공자 간에 쉽게 전환할 수 있습니다:
+기본적으로 Strands 에이전트는 Amazon Bedrock의 Claude Sonnet 4.6을 사용하지만, 모델 제공자 간에 쉽게 전환할 수 있습니다:
 
 ```typescript
 import { Agent } from '@strands-agents/sdk';
@@ -247,7 +247,7 @@ Strands 에이전트 작성에 대한 더 심층적인 가이드는 [Strands 문
 <OptionFilter when={{ protocol: 'a2a' }} description="A2A Express server details">
 ## A2A 서버 (A2A 프로토콜)
 
-생성된 `index.ts`는 [Strands A2A Express Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent)를 Express 앱에 마운트하여 생성된 에이전트가 `/ping` 헬스 체크와 함께 A2A 프로토콜 엔드포인트를 노출하도록 합니다. AgentCore에 배포될 때 진입점은 AppConfig에서 런타임의 공개 ARN을 확인하고 에이전트 카드에 광고합니다.
+생성된 `index.ts`는 [Strands A2A Express Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent)를 Express 앱에 마운트하여 생성된 에이전트가 `/ping` 헬스 체크와 함께 A2A 프로토콜 엔드포인트를 노출하도록 합니다. 에이전트 카드에 광고되는 URL은 `AGENTCORE_RUNTIME_URL` 환경 변수에서 가져오며, 로컬 개발의 경우 `http://localhost:<port>/`로 폴백됩니다. 배포된 에이전트의 공개 URL을 광고하려면 런타임에서 이를 설정하세요.
 
 대부분의 사용자는 이 파일을 수정할 필요가 없습니다. 도구나 시스템 프롬프트를 변경하려면 `agent.ts`를 편집하세요. A2A 에이전트는 포트 `9000`에서 수신 대기하며(HTTP의 경우 `8080`), 생성된 Dockerfile 및 인프라가 이미 이에 맞게 구성되어 있습니다.
 </OptionFilter>
@@ -255,7 +255,7 @@ Strands 에이전트 작성에 대한 더 심층적인 가이드는 [Strands 문
 <OptionFilter when={{ protocol: 'ag-ui' }} description="AG-UI server details">
 ## AG-UI 서버 (AG-UI 프로토콜)
 
-생성된 `index.ts`는 Strands `Agent`를 [`@ag-ui/aws-strands`](https://www.npmjs.com/package/@ag-ui/aws-strands) `StrandsAgent`로 래핑하고 `createStrandsApp()`을 통해 Express 앱을 생성합니다. 결과 앱은 Server-Sent Events (SSE)를 통해 [AG-UI](https://docs.ag-ui.com/) 이벤트를 스트리밍하는 단일 POST 엔드포인트와 AgentCore 런타임 헬스 체크를 위한 `/ping`을 노출합니다.
+생성된 `index.ts`는 Strands `Agent`를 [`@ag-ui/aws-strands`](https://www.npmjs.com/package/@ag-ui/aws-strands) `StrandsAgent`로 래핑하고 `addPing`, `addCapabilities` 및 `addStrandsExpressEndpoint`를 사용하여 Express 앱을 빌드하며, `createStrandsApp()`의 기본값을 미러링합니다. 결과 앱은 Server-Sent Events (SSE)를 통해 [AG-UI](https://docs.ag-ui.com/) 이벤트를 스트리밍하는 단일 POST 엔드포인트와 AgentCore 런타임 헬스 체크를 위한 `/ping`을 노출합니다.
 
 AG-UI 에이전트는 프론트엔드에서 직접 사용되도록 설계되었습니다. <Link path="/guides/connection/react-agui">`connection` 생성기</Link>를 사용하여 [CopilotKit](https://docs.copilotkit.ai/aws-strands) 제공자 및 [AG-UI HttpAgent](https://docs.ag-ui.com/) 클라이언트로 React 웹사이트를 에이전트에 연결하세요.
 
@@ -395,11 +395,13 @@ CloudWatch AWS 콘솔에서 메뉴의 "GenAI Observability"를 선택하여 추�
 
 예를 들어 작업 공간에 클라이언트를 가져오는 `scripts/test.ts`라는 파일을 생성할 수 있습니다:
 
+클라이언트 클래스는 에이전트의 이름을 따르므로 `my-agent`라는 이름의 에이전트는 `MyAgentClient`를 내보냅니다.
+
 ```typescript
 // scripts/test.ts
-import { AgentClient } from '../packages/<project>/src/agent/client.js';
+import { MyAgentClient } from '../packages/<project>/src/agent/client.js';
 
-const client = AgentClient.local({ url: 'http://localhost:8081/ws' });
+const client = MyAgentClient.local({ url: 'http://localhost:8081/ws' });
 
 client.invoke.subscribe({ prompt: 'what is 1 plus 1?' }, { onData: console.log });
 ```
@@ -429,9 +431,9 @@ client.invoke.subscribe({ prompt: 'what is 1 plus 1?' }, { onData: console.log }
 `withIamAuth` 팩토리 메서드에 ARN을 전달하여 배포된 에이전트를 호출할 수 있습니다:
 
 ```typescript
-import { AgentClient } from './agent/client.js';
+import { MyAgentClient } from './agent/client.js';
 
-const client = AgentClient.withIamAuth({
+const client = MyAgentClient.withIamAuth({
   agentRuntimeArn: 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent',
 });
 
@@ -453,7 +455,7 @@ client.invoke.subscribe({ prompt: 'what is 1 plus 1?' }, {
 JWT / Cognito 액세스 토큰으로 인증하려면 `withJwtAuth` 팩토리 메서드를 사용하세요.
 
 ```typescript
-const client = AgentClient.withJwtAuth({
+const client = MyAgentClient.withJwtAuth({
   agentRuntimeArn: 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent',
   accessTokenProvider: async () => `<access-token>`,
 });
@@ -470,7 +472,7 @@ import { CognitoIdentityProvider } from "@aws-sdk/client-cognito-identity-provid
 
 const cognito = new CognitoIdentityProvider();
 
-const jwtClient = AgentClient.withJwtAuth({
+const jwtClient = MyAgentClient.withJwtAuth({
   agentRuntimeArn: 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent',
   accessTokenProvider: async () => {
     const response = await cognito.adminInitiateAuth({
