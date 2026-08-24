@@ -12,190 +12,62 @@ import {
 } from './generator.utils.spec.js';
 
 /**
- * The sync and async clients are rendered by two templates that differ only in
- * how they await. Normalising that difference away should leave the same text,
- * so anything else that diverges is drift — and drift is how a fix applied to
- * one client but not the other survives (a tagged async stream once failed to
- * forward `aclose()` while its sync counterpart was correct).
+ * Both clients render from one template, so the text they share cannot drift.
+ * What can still diverge is the handful of places the template branches on
+ * `isAsync`, so those are asserted directly, per flavour, rather than by
+ * comparing the two generated clients to each other.
  */
-const normalise = (source: string): string =>
-  source
-    // The async client's own names and the keywords that make it async.
-    .replace(/\b_Async([A-Z])/g, '_$1')
-    .replace(/\bAsync([A-Z])/g, '$1')
-    .replace(/\b__aenter__\b/g, '__enter__')
-    .replace(/\b__aexit__\b/g, '__exit__')
-    .replace(/\basync def\b/g, 'def')
-    .replace(/\basync with\b/g, 'with')
-    .replace(/\basync for\b/g, 'for')
-    .replace(/\bawait /g, '')
-    .replace(/\basynchronous\b/gi, (m) =>
-      m[0] === 'A' ? 'Synchronous' : 'synchronous',
-    )
-    .replace(/\basynccontextmanager\b/g, 'contextmanager')
-    // httpx and typing spell their async counterparts differently.
-    .replace(/\baclose\b/g, 'close')
-    .replace(/\baiter_lines\b/g, 'iter_lines')
-    .replace(/\baiter_text\b/g, 'iter_text')
-    .replace(/\baiter_bytes\b/g, 'iter_bytes')
-    .replace(/\baread\b/g, 'read')
-    .replace(/\bAsyncIterator\b/g, 'Iterator')
-    .replace(/\bAsyncGenerator\b/g, 'Generator')
-    .replace(/\bAsyncClient\b/g, 'Client')
-    .replace(/\bAsyncBaseTransport\b/g, 'BaseTransport')
-    // A sync stream is an `Iterator`; its async counterpart is a `Generator`,
-    // which additionally declares the `aclose()` an early-stopping caller needs.
-    .replace(/\bGenerator\b/g, 'Iterator')
-    // Whichever of the two the module imports, the import line collapses to one
-    // form once the names above do.
-    .replace(
-      /from collections\.abc import [A-Za-z, ]+/g,
-      'from collections.abc import Iterator',
-    )
-    // A tag namespace delegates a stream differently by necessity: `yield from`
-    // propagates `close()` into the inner generator, while its async equivalent
-    // returns that generator so `aclose()` reaches it (re-yielding would not).
-    .replace(/\byield from (self\._parent\._)/g, 'return $1')
-    // Import lists and blank runs reflow once the above collapses names.
-    .replace(/\s+/g, ' ')
-    .trim();
 
-/**
- * Shapes the petstore doesn't reach, each exercising a branch that exists once
- * per template — so a branch edited on one side only is caught here.
- */
-const BRANCH_SPECS: Record<string, Spec> = {
-  'whole-body multipart': {
-    openapi: '3.0.0',
-    info: { title: 'TestApi', version: '1.0.0' },
-    paths: {
-      '/upload': {
-        post: {
-          operationId: 'upload',
-          requestBody: {
-            required: true,
+/** A tagged streaming operation, whose delegate form differs by necessity. */
+const TAGGED_STREAM_SPEC: Spec = {
+  openapi: '3.1.0',
+  info: { title: 'TestApi', version: '1.0.0' },
+  paths: {
+    '/stream': {
+      get: {
+        operationId: 'streamIt',
+        tags: ['feed'],
+        responses: {
+          '200': {
+            description: 'stream',
             content: {
-              'multipart/form-data': {
-                schema: { type: 'object', additionalProperties: true },
+              'application/jsonl': {
+                schema: { $ref: '#/components/schemas/Chunk' },
+                itemSchema: { $ref: '#/components/schemas/Chunk' },
               },
             },
           },
-          responses: { '204': { description: 'No content' } },
         },
       },
     },
   },
-  'urlencoded and binary bodies': {
-    openapi: '3.0.0',
-    info: { title: 'TestApi', version: '1.0.0' },
-    paths: {
-      '/form': {
-        post: {
-          operationId: 'postForm',
-          requestBody: {
-            required: true,
-            content: {
-              'application/x-www-form-urlencoded': {
-                schema: {
-                  type: 'object',
-                  required: ['a'],
-                  properties: { a: { type: 'string' } },
-                },
-              },
-            },
-          },
-          responses: { '204': { description: 'No content' } },
-        },
-      },
-      '/raw': {
-        post: {
-          operationId: 'postRaw',
-          requestBody: {
-            required: true,
-            content: {
-              'application/octet-stream': {
-                schema: { type: 'string', format: 'binary' },
-              },
-            },
-          },
-          responses: { '204': { description: 'No content' } },
-        },
-      },
-      '/text': {
-        post: {
-          operationId: 'postText',
-          requestBody: {
-            required: true,
-            content: { 'text/plain': { schema: { type: 'string' } } },
-          },
-          responses: { '204': { description: 'No content' } },
-        },
-      },
-    },
-  },
-  'tagged streaming and allowReserved': {
-    openapi: '3.1.0',
-    info: { title: 'TestApi', version: '1.0.0' },
-    paths: {
-      '/stream': {
-        get: {
-          operationId: 'streamIt',
-          tags: ['feed'],
-          parameters: [
-            {
-              name: 'q',
-              in: 'query',
-              allowReserved: true,
-              schema: { type: 'string' },
-            },
-          ],
-          responses: {
-            '200': {
-              description: 'stream',
-              content: {
-                'application/jsonl': {
-                  schema: { $ref: '#/components/schemas/Chunk' },
-                  itemSchema: { $ref: '#/components/schemas/Chunk' },
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-    components: {
-      schemas: {
-        Chunk: {
-          type: 'object',
-          required: ['content'],
-          properties: { content: { type: 'string' } },
-        },
-      },
-    },
-  },
-  'void stream, cookies and wildcard errors': {
-    openapi: '3.0.0',
-    info: { title: 'TestApi', version: '1.0.0' },
-    paths: {
-      '/events': {
-        get: {
-          operationId: 'events',
-          'x-streaming': true,
-          parameters: [
-            { name: 'session', in: 'cookie', schema: { type: 'string' } },
-          ],
-          responses: {
-            '200': { description: 'stream' },
-            '5XX': { description: 'Boom' },
-            default: { description: 'Other' },
-          },
-        },
+  components: {
+    schemas: {
+      Chunk: {
+        type: 'object',
+        required: ['content'],
+        properties: { content: { type: 'string' } },
       },
     },
   },
 };
 
-describe('openApiPyClientGenerator - sync/async parity', () => {
+/** A tagged non-streaming operation, whose delegate awaits on the async side. */
+const TAGGED_CALL_SPEC: Spec = {
+  openapi: '3.0.0',
+  info: { title: 'TestApi', version: '1.0.0' },
+  paths: {
+    '/pets': {
+      post: {
+        operationId: 'addPet',
+        tags: ['pet'],
+        responses: { '204': { description: 'No content' } },
+      },
+    },
+  },
+};
+
+describe('openApiPyClientGenerator - sync/async flavours', () => {
   let tree: Tree;
   const verifier = createPythonClientVerifier();
 
@@ -203,26 +75,109 @@ describe('openApiPyClientGenerator - sync/async parity', () => {
     tree = createTree();
   });
 
-  it('renders the same client for sync and async, modulo async keywords', async () => {
+  // Only these forms propagate closing to the generator that opened the
+  // response. `yield from` does so in sync; in async, returning the inner
+  // generator does, whereas an `async def` re-yielding from it wraps the
+  // generator in a second one `aclose()` never reaches — and the connection
+  // then leaks until garbage collection.
+  it('delegates a tagged stream so closing it reaches the response', async () => {
+    const { client, asyncClient } = await generateAndRead(
+      verifier,
+      tree,
+      TAGGED_STREAM_SPEC,
+    );
+    expect(client).toContain('    def stream_it(');
+    expect(client).toContain('        yield from self._parent._stream_it(');
+
+    expect(asyncClient).toContain('    def stream_it(');
+    expect(asyncClient).toContain('        return self._parent._stream_it(');
+    expect(asyncClient).not.toContain('    async def stream_it(');
+    expect(asyncClient).not.toContain('async for item in self._parent._');
+  });
+
+  it('delegates a tagged call by awaiting it on the async client', async () => {
+    const { client, asyncClient } = await generateAndRead(
+      verifier,
+      tree,
+      TAGGED_CALL_SPEC,
+    );
+    expect(client).toContain('    def add_pet(');
+    expect(client).toContain('        return self._parent._add_pet(');
+
+    expect(asyncClient).toContain('    async def add_pet(');
+    expect(asyncClient).toContain(
+      '        return await self._parent._add_pet(',
+    );
+  });
+
+  // The streamed return type is a different ABC per flavour, not an `Async`
+  // spelling of one: only `AsyncGenerator` declares the `aclose()` above.
+  it("annotates a stream with the flavour's own iterator type", async () => {
+    const { client, asyncClient } = await generateAndRead(
+      verifier,
+      tree,
+      TAGGED_STREAM_SPEC,
+    );
+    expect(client).toContain('from collections.abc import Iterator');
+    expect(client).toContain(') -> Iterator[types.Chunk]:');
+
+    expect(asyncClient).toContain('from collections.abc import AsyncGenerator');
+    expect(asyncClient).toContain(') -> AsyncGenerator[types.Chunk]:');
+    expect(asyncClient).not.toContain('Iterator[types.Chunk]');
+  });
+
+  // Every async keyword and httpx name the template's flavour table maps. A
+  // missed entry would emit sync code into the async client, which still parses.
+  it('emits the async spelling of every awaited operation', async () => {
     const { client, asyncClient } = await generateAndRead(
       verifier,
       tree,
       PET_STORE_SPEC,
     );
-    expect(normalise(asyncClient)).toBe(normalise(client));
+
+    for (const [sync, async] of [
+      ['httpx.Client()', 'httpx.AsyncClient()'],
+      ['def __enter__', 'async def __aenter__'],
+      ['def __exit__', 'async def __aexit__'],
+      ['def close(self)', 'async def aclose(self)'],
+      ['self._client.close()', 'await self._client.aclose()'],
+    ] as const) {
+      expect(client).toContain(sync);
+      expect(asyncClient).toContain(async);
+    }
+
+    // Neither flavour may carry the other's keywords at all.
+    expect(client).not.toContain('await ');
+    expect(client).not.toContain('async ');
   });
 
-  // The petstore leaves several per-flavour branches unrendered, and a branch no
-  // spec renders is a branch this test cannot compare.
-  it.each(Object.keys(BRANCH_SPECS))(
-    'renders the same client for sync and async given %s',
-    async (name) => {
-      const { client, asyncClient } = await generateAndRead(
-        verifier,
-        tree,
-        BRANCH_SPECS[name],
-      );
-      expect(normalise(asyncClient)).toBe(normalise(client));
-    },
-  );
+  // The streaming send block is the one region the flavours iterate differently.
+  it("iterates a streamed response with the flavour's own loop", async () => {
+    const { client, asyncClient } = await generateAndRead(
+      verifier,
+      tree,
+      TAGGED_STREAM_SPEC,
+    );
+    expect(client).toContain('with self._client.stream(');
+    expect(client).toContain('for chunk in response.iter_text():');
+
+    expect(asyncClient).toContain('async with self._client.stream(');
+    expect(asyncClient).toContain('async for chunk in response.aiter_text():');
+    expect(asyncClient).not.toContain('for chunk in response.iter_text():');
+  });
+
+  it('names the async client and its config after the async flavour', async () => {
+    const { client, asyncClient } = await generateAndRead(
+      verifier,
+      tree,
+      TAGGED_CALL_SPEC,
+    );
+    expect(client).toContain('class TestApi:');
+    expect(client).toContain('class TestApiConfig:');
+    expect(client).toContain('class _PetNamespace:');
+
+    expect(asyncClient).toContain('class AsyncTestApi:');
+    expect(asyncClient).toContain('class AsyncTestApiConfig:');
+    expect(asyncClient).toContain('class _AsyncPetNamespace:');
+  });
 });

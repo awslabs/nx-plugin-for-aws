@@ -121,8 +121,7 @@ const PYTHON_BUILTIN_TYPES = new Set([
  *
  * Keep this aligned with the imports at the top of:
  *  - open-api/py-client/files/shared/types.py.template
- *  - open-api/py-client/files/sync/client.py.template
- *  - open-api/py-client/files/async/async_client.py.template
+ *  - open-api/py-client/files/client/__clientModuleName__.py.template
  */
 const PYTHON_RESERVED_MODEL_NAMES = new Set([
   // typing module

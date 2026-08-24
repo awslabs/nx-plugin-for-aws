@@ -120,21 +120,24 @@ export const generateOpenApiPyClient = (
     base,
   );
 
+  // Both clients render from one template: they differ only in how they await,
+  // and keeping two copies is how a fix lands in one and not the other.
+  // `clientModuleName` names the emitted file, `isAsync` selects the keywords.
+  const clientDir = path.join(import.meta.dirname, 'files', 'client');
+
   if (clientType === 'sync' || clientType === 'both') {
-    generateFiles(
-      tree,
-      path.join(import.meta.dirname, 'files', 'sync'),
-      outputPath,
-      base,
-    );
+    generateFiles(tree, clientDir, outputPath, {
+      ...base,
+      isAsync: false,
+      clientModuleName: 'client',
+    });
   }
   if (clientType === 'async' || clientType === 'both') {
-    generateFiles(
-      tree,
-      path.join(import.meta.dirname, 'files', 'async'),
-      outputPath,
-      base,
-    );
+    generateFiles(tree, clientDir, outputPath, {
+      ...base,
+      isAsync: true,
+      clientModuleName: 'async_client',
+    });
   }
 };
 

@@ -22,19 +22,44 @@ const resultType = (op) => {
 };
 
 /**
- * The streamed item type. `AsyncGenerator` rather than `AsyncIterator` so a
- * caller who stops early can `aclose()` the stream in a type-safe way. Its send
- * type defaults to `None`, so it is left off (ruff `UP043`).
+ * The keywords, httpx methods and typing names that differ between the sync and
+ * async flavours. Everything else below is spelled once.
  */
-const asyncStreamType = (item) => `AsyncGenerator[${item}]`;
+const kw = isAsync
+  ? { def: 'async def', for: 'async for', with: 'async with', await: 'await ' }
+  : { def: 'def', for: 'for', with: 'with', await: '' };
+const hx = isAsync
+  ? { close: 'aclose', read: 'aread', iterText: 'aiter_text', iterLines: 'aiter_lines' }
+  : { close: 'close', read: 'read', iterText: 'iter_text', iterLines: 'iter_lines' };
+const enterName = isAsync ? '__aenter__' : '__enter__';
+const exitName = isAsync ? '__aexit__' : '__exit__';
+const contextManager = isAsync ? 'asynccontextmanager' : 'contextmanager';
+const asyncPrefix = isAsync ? 'Async' : '';
+const clientClassName = `${asyncPrefix}${className}`;
 
-const resultTypeAsync = (op) => {
+/**
+ * The declared type of a streamed operation. Async uses `AsyncGenerator` rather
+ * than `AsyncIterator` so a caller who stops early can `aclose()` the stream in
+ * a type-safe way; its send type defaults to `None`, so it is left off (ruff
+ * `UP043`).
+ */
+const streamType = (item) => `${isAsync ? 'AsyncGenerator' : 'Iterator'}[${item}]`;
+
+/**
+ * The `collections.abc` names the module imports. Async needs two — a
+ * `AsyncGenerator` for an operation's stream and a separate `AsyncIterator` for
+ * the `_stream_with_url` yield type — where sync spells both `Iterator`.
+ */
+const streamAbc = isAsync ? 'AsyncGenerator' : 'Iterator';
+const contextAbc = isAsync ? 'AsyncIterator' : 'Iterator';
+
+const resultTypeFor = (op) => {
   if (op.isStreaming) {
     // A void response has no item type, so the raw text lines are yielded.
-    if (!op.result || op.result.type === 'void') return asyncStreamType('str');
+    if (!op.result || op.result.type === 'void') return streamType('str');
     const jsonl = (op.responses || []).find(r => r.isJsonlStreaming);
-    if (jsonl && jsonl.itemSchemaModel) return asyncStreamType(jsonl.itemSchemaModel.pythonClientType);
-    return asyncStreamType(op.result.pythonClientType);
+    if (jsonl && jsonl.itemSchemaModel) return streamType(jsonl.itemSchemaModel.pythonClientType);
+    return streamType(op.result.pythonClientType);
   }
   return resultType(op);
 };
@@ -253,8 +278,10 @@ const renderTypedRaise = (op, resp) => {
   );
 };
 
+/** Is this operation a single-body call eligible for positional-arg style? */
 const isPositionalBody = (op) => !!op.requestShape?.isSingleBodyInput;
 
+/** Build the `def method(self, *, …)` signature from the generic request shape. */
 const signature = (op) => {
   const inputs = op.requestShape?.inputs ?? [];
   if (inputs.length === 0) return 'self';
@@ -278,7 +305,7 @@ const inputsByKind = (op, kind) =>
 // already made a valid identifier — the raw tag may be any string at all.
 const pythonClassNameForTag = (tag) => {
   const name = pythonTagNames[tag];
-  return `_Async${name.charAt(0).toUpperCase()}${name.slice(1)}Namespace`;
+  return `_${asyncPrefix}${name.charAt(0).toUpperCase()}${name.slice(1)}Namespace`;
 };
 
 // `operationsByTag` keys are already normalised to identifiers by the shared
@@ -289,6 +316,7 @@ const tagGroups = operationsByTag;
 const hasContentJsonParams = allOperations.some(op => (op.parameters || []).some(p => p.in !== 'body' && p.mediaType === 'application/json'));
 const hasPartContentTypes = allOperations.some(op => op.parametersBody && op.parametersBody.partContentTypes);
 const hasAllowReservedParams = allOperations.some(op => (op.parameters || []).some(p => p.in === 'query' && p.allowReserved));
+const abcImports = [...new Set([streamAbc, ...(hasAllowReservedParams ? [contextAbc] : [])])].join(', ');
 // A response declaring several media types is read through `_json_body`.
 const hasMultiMediaResponse = allOperations.some(op => (op.responses || []).some(r => (r.mediaTypes || []).length > 1));
 // An untyped streamed item is decoded with `json.loads`, which needs the import.
@@ -310,7 +338,7 @@ const urlExpr = (op, pathInputs, styledPathInputs) => {
   return expr + ')';
 };
 _%>
-"""Async<%- className %> — AUTO-GENERATED asynchronous client."""
+"""<%- clientClassName %> — AUTO-GENERATED <%- isAsync ? 'asynchronous' : 'synchronous' %> client."""
 
 from __future__ import annotations
 
@@ -319,9 +347,9 @@ import datetime
 import json
 <%_ } _%>
 import warnings
-from collections.abc import AsyncGenerator<%- hasAllowReservedParams ? ', AsyncIterator' : '' %>
+from collections.abc import <%- abcImports %>
 <%_ if (hasAllowReservedParams) { _%>
-from contextlib import asynccontextmanager
+from contextlib import <%- contextManager %>
 <%_ } _%>
 from dataclasses import dataclass, field
 from typing import Any, Literal, TypeVar
@@ -342,8 +370,8 @@ _ErrorT = TypeVar("_ErrorT", bound=BaseModel)
 
 
 @dataclass
-class Async<%- className %>Config:
-    """Client configuration for Async<%- className %>."""
+class <%- clientClassName %>Config:
+    """Client configuration for <%- clientClassName %>."""
 
     #: Base URL for the API.
     url: str
@@ -352,7 +380,7 @@ class Async<%- className %>Config:
     #: hook, a custom transport, timeouts, retries or a proxy all apply, and the
     #: client's own headers and query params are sent alongside each operation's.
     #: A supplied client is never closed by this one, so it can be shared.
-    httpx_client: httpx.AsyncClient | None = None
+    httpx_client: httpx.<%- asyncPrefix %>Client | None = None
     #: Headers added to every request, where the operation sets none itself.
     headers: dict[str, str] = field(default_factory=dict)
     #: By default the client sends a Content-Type header set to the media type
@@ -360,27 +388,27 @@ class Async<%- className %>Config:
     omit_content_type_header: bool = False
 
 
-class Async<%- className %>:
-    """Asynchronous API client for <%- className %>."""
+class <%- clientClassName %>:
+    """<%- isAsync ? 'Asynchronous' : 'Synchronous' %> API client for <%- className %>."""
 
-    def __init__(self, config: Async<%- className %>Config) -> None:
+    def __init__(self, config: <%- clientClassName %>Config) -> None:
         self._config = config
-        self._client = config.httpx_client or httpx.AsyncClient()
+        self._client = config.httpx_client or httpx.<%- asyncPrefix %>Client()
         self._owns_client = config.httpx_client is None
         self._base_url = config.url.rstrip("/")
 <%_ Object.keys(tagGroups).forEach((tag) => { _%>
         self.<%- pythonTagNames[tag] %>: <%- pythonClassNameForTag(tag) %> = <%- pythonClassNameForTag(tag) %>(self)
 <%_ }); _%>
 
-    async def __aenter__(self) -> Async<%- className %>:
+    <%- kw.def %> <%- enterName %>(self) -> <%- clientClassName %>:
         return self
 
-    async def __aexit__(self, *exc: Any) -> None:
-        await self.aclose()
+    <%- kw.def %> <%- exitName %>(self, *exc: Any) -> None:
+        <%- kw.await %>self.<%- hx.close %>()
 
-    async def aclose(self) -> None:
+    <%- kw.def %> <%- hx.close %>(self) -> None:
         if self._owns_client:
-            await self._client.aclose()
+            <%- kw.await %>self._client.<%- hx.close %>()
 
     def _url(
         self,
@@ -584,27 +612,27 @@ class Async<%- className %>:
         return value
 
 <%_ if (hasAllowReservedParams) { _%>
-    async def _send_with_url(self, final_url: str, **kwargs: Any) -> httpx.Response:
+    <%- kw.def %> _send_with_url(self, final_url: str, **kwargs: Any) -> httpx.Response:
         # `request()` lets httpx rebuild the query from the client's params,
         # discarding a hand-built one. Building the request first and overriding
         # the URL keeps it, while auth and event hooks still run on send.
         request = self._client.build_request(**kwargs)
         request.url = httpx.URL(final_url)
-        return await self._client.send(request)
+        return <%- kw.await %>self._client.send(request)
 
-    @asynccontextmanager
-    async def _stream_with_url(
+    @<%- contextManager %>
+    <%- kw.def %> _stream_with_url(
         self, final_url: str, **kwargs: Any
-    ) -> AsyncIterator[httpx.Response]:
+    ) -> <%- contextAbc %>[httpx.Response]:
         # The streaming counterpart of `_send_with_url`: `stream()` would rebuild
         # the query from the client's params and percent-encode a hand-built one.
         request = self._client.build_request(**kwargs)
         request.url = httpx.URL(final_url)
-        response = await self._client.send(request, stream=True)
+        response = <%- kw.await %>self._client.send(request, stream=True)
         try:
             yield response
         finally:
-            await response.aclose()
+            <%- kw.await %>response.<%- hx.close %>()
 
 <%_ } _%>
 <%_ if (hasMultipartBody) { _%>
@@ -716,9 +744,9 @@ class Async<%- className %>:
   const methodPrefix = hasTag ? '_' : '';
 _%>
 
-    async def <%- methodPrefix %><%- op.pythonMethodName %>(
+    <%- kw.def %> <%- methodPrefix %><%- op.pythonMethodName %>(
         <%- signature(op) %>,
-    ) -> <%- resultTypeAsync(op) %>:
+    ) -> <%- resultTypeFor(op) %>:
 <%- methodDocstring(op, '        ') %><%_ if (op.deprecated) { _%>
         warnings.warn(
             "`<%- op.pythonMethodName %>` is deprecated.",
@@ -843,14 +871,14 @@ _%>
 <%_ } _%>
 <%_ if (op.isStreaming) { _%>
 <%_ if (reservedInputs.length === 0) { _%>
-        async with self._client.stream(
+        <%- kw.with %> self._client.stream(
             "<%- op.method %>",
             _request_url,
 <%_ if (queryInputs.length > 0) { _%>
             params=self._query(query_params<%- queryCollectionInputs.length > 0 ? ", query_formats" : "" %>),
 <%_ } _%>
 <%_ } else { _%>
-        async with self._stream_with_url(
+        <%- kw.with %> self._stream_with_url(
             _request_url,
             method="<%- op.method %>",
             url=_request_url,
@@ -873,7 +901,7 @@ _%>
 <%_ } _%>
 <%_ if (isResult && resp.isJsonlStreaming) { _%>
                 buffer = ""
-                async for chunk in response.aiter_text():
+                <%- kw.for %> chunk in response.<%- hx.iterText %>():
                     buffer += chunk
                     while "\n" in buffer:
                         line, buffer = buffer.split("\n", 1)
@@ -886,29 +914,29 @@ _%>
                     yield <%- streamItemParseExpr(resp.itemSchemaModel, "buffer") %>
                 return
 <%_ } else if (isResult) { _%>
-                async for line in response.aiter_lines():
+                <%- kw.for %> line in response.<%- hx.iterLines %>():
                     if line:
                         yield <%- streamChunkParseExpr(resp, "line") %>
                 return
 <%_ } else { _%>
-<%- ind %>await response.aread()
+<%- ind %><%- kw.await %>response.<%- hx.read %>()
 <%- ind %><%- renderTypedRaise(op, resp) %>
 <%_ } _%>
 <%_ }); _%>
 <%_ if (!hasUnconditionalBranch(op)) { _%>
-            await response.aread()
+            <%- kw.await %>response.<%- hx.read %>()
             raise <%- op.errorShape.exceptionClassName %>(response.status_code, None)
 <%_ } _%>
 <%_ } else { _%>
 <%_ if (reservedInputs.length === 0) { _%>
-        response = await self._client.request(
+        response = <%- kw.await %>self._client.request(
             "<%- op.method %>",
             _request_url,
 <%_ if (queryInputs.length > 0) { _%>
             params=self._query(query_params<%- queryCollectionInputs.length > 0 ? ", query_formats" : "" %>),
 <%_ } _%>
 <%_ } else { _%>
-        response = await self._send_with_url(
+        response = <%- kw.await %>self._send_with_url(
             _request_url,
             method="<%- op.method %>",
             url=_request_url,
@@ -941,21 +969,25 @@ _%>
 class <%- pythonClassNameForTag(tag) %>:
     """`<%- tag %>` operations."""
 
-    def __init__(self, parent: Async<%- className %>) -> None:
+    def __init__(self, parent: <%- clientClassName %>) -> None:
         self._parent = parent
 <%_ ops.forEach((op) => {
   const inputs = op.requestShape?.inputs ?? [];
+  // A streaming delegate is a plain `def` handing back the inner generator, so
+  // closing it reaches that generator: `yield from` forwards `close()`, and
+  // returning the async generator forwards `aclose()`. An `async def` that
+  // re-yielded would wrap it in a second generator `aclose()` never reaches,
+  // holding the connection open until garbage collection.
+  const delegateDef = isAsync && !op.isStreaming ? 'async def' : 'def';
+  const delegate = op.isStreaming
+    ? (isAsync ? 'return ' : 'yield from ')
+    : `return ${kw.await}`;
 _%>
 
-<%_ /* A streaming delegate is a plain `def` returning the inner generator, not
-       an `async def` re-yielding from it: `async for ... yield` would create a
-       second generator whose `aclose()` never reaches the first, holding the
-       connection open until garbage collection. */ _%>
-    <%- signature(op).replace(/^self/, `${op.isStreaming ? 'def' : 'async def'} ${op.pythonMethodName}(\n        self`) %>,
-    ) -> <%- resultTypeAsync(op) %>:
+    <%- signature(op).replace(/^self/, `${delegateDef} ${op.pythonMethodName}(\n        self`) %>,
+    ) -> <%- resultTypeFor(op) %>:
 <%- methodDocstring(op, '        ') _%>
-<%_ if (op.isStreaming) { _%>
-        return self._parent._<%- op.pythonMethodName %>(
+        <%- delegate %>self._parent._<%- op.pythonMethodName %>(
 <%_ if (isPositionalBody(op)) { _%>
             <%- inputs[0].pythonName %>,
 <%_ } else { _%>
@@ -964,16 +996,5 @@ _%>
 <%_ }); _%>
 <%_ } _%>
         )
-<%_ } else { _%>
-        return await self._parent._<%- op.pythonMethodName %>(
-<%_ if (isPositionalBody(op)) { _%>
-            <%- inputs[0].pythonName %>,
-<%_ } else { _%>
-<%_ inputs.forEach((k) => { _%>
-            <%- k.pythonName %>=<%- k.pythonName %>,
-<%_ }); _%>
-<%_ } _%>
-        )
-<%_ } _%>
 <%_ }); _%>
 <%_ }); _%>
