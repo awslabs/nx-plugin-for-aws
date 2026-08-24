@@ -55,6 +55,18 @@ export const LAMBDA_FUNCTION_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
 );
 
+const PARSER_MODELS_MODULE = 'aws_lambda_powertools.utilities.parser.models';
+
+/**
+ * The module an event model is importable from. Most are re-exported by the
+ * `models` package, but the IoT Core registry events are only available from
+ * the submodule that defines them.
+ */
+export const eventModuleFor = (event: string): string =>
+  event.startsWith('IoTCore')
+    ? `${PARSER_MODELS_MODULE}.iot_registry_events`
+    : PARSER_MODELS_MODULE;
+
 export interface LambdaFunctionDetails {
   /**
    * The normalized name of the lambda handler project
@@ -181,6 +193,7 @@ export const pyLambdaFunctionGenerator = async (
     dir,
     lambdaFunctionClassName,
     lambdaFunctionSnakeCase: normalizedFunctionName,
+    eventModule: eventModuleFor(schema.event ?? 'Any'),
   };
 
   projectConfig.targets = sortObjectKeys(projectConfig.targets);
