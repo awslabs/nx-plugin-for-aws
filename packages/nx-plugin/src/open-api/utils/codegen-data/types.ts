@@ -310,8 +310,6 @@ export interface RequestInput {
   source: RequestInputSource;
   /** The model describing the input's type. */
   model: Model;
-  /** True when this input is a flattened request-body field. */
-  fromFlattenedBody: boolean;
   isRequired: boolean;
   isNullable: boolean;
   description: string | null;

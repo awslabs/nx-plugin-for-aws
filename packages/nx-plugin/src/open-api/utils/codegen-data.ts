@@ -274,7 +274,6 @@ const buildRequestShape = (
       ...(p.collectionFormat ? { collectionFormat: p.collectionFormat } : {}),
     },
     model: p,
-    fromFlattenedBody: false,
     isRequired: !!p.isRequired,
     isNullable: !!p.isNullable,
     description: p.description,
@@ -294,7 +293,6 @@ const buildRequestShape = (
         inputs.push({
           source: { kind: 'body-field', fieldName: prop.name },
           model: prop,
-          fromFlattenedBody: true,
           isRequired: !!prop.isRequired,
           isNullable: !!prop.isNullable,
           description: prop.description,
@@ -306,7 +304,6 @@ const buildRequestShape = (
       inputs.push({
         source: { kind: 'body', wireName: 'body' },
         model: bodyParam,
-        fromFlattenedBody: false,
         isRequired: !!bodyParam.isRequired,
         isNullable: !!bodyParam.isNullable,
         description: bodyParam.description,
