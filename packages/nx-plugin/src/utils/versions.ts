@@ -69,7 +69,12 @@ export const TS_VERSIONS = {
   '@ag-ui/client': '0.0.57',
   '@ag-ui/core': '0.0.57',
   '@ag-ui/encoder': '0.0.57',
-  'agent-chat-cli': '0.4.0',
+  // Held at 0.3.x to stay on the same A2A protocol major as @a2a-js/sdk above,
+  // which the generated A2A server uses. agent-chat-cli 0.4.0 depends on
+  // @a2a-js/sdk 1.x, whose client calls SendStreamingMessage — a method the
+  // 0.3.x server does not implement, so chatting fails with JSON-RPC -32601.
+  // Bump both together, updating the generated server for the 1.x API.
+  'agent-chat-cli': '0.3.0',
   '@copilotkit/react-core': '1.69.0',
   rxjs: '7.8.2',
   '@strands-agents/sdk': '1.14.0',
