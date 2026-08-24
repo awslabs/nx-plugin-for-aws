@@ -61,9 +61,14 @@ export const TS_VERSIONS = {
   '@modelcontextprotocol/inspector': '2.3.0',
   '@ag-ui/a2ui-toolkit': '0.0.4',
   '@ag-ui/aws-strands': '0.2.3',
-  '@ag-ui/client': '0.0.58',
-  '@ag-ui/core': '0.0.58',
-  '@ag-ui/encoder': '0.0.58',
+  // Must match the version @copilotkit/react-core depends on exactly. It pins
+  // @ag-ui/client and @ag-ui/core to a single version, so any other version
+  // here installs a second copy and generated websites fail to compile: the
+  // AbstractAgent passed to CopilotKitProvider comes from a different module
+  // instance than the one the prop is typed against.
+  '@ag-ui/client': '0.0.57',
+  '@ag-ui/core': '0.0.57',
+  '@ag-ui/encoder': '0.0.57',
   'agent-chat-cli': '0.4.0',
   '@copilotkit/react-core': '1.69.0',
   rxjs: '7.8.2',
