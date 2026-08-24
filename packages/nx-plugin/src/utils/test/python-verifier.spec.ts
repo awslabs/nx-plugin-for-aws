@@ -13,7 +13,7 @@ describe('PythonVerifier', () => {
   let verifier: PythonVerifier;
 
   beforeAll(() => {
-    verifier = new PythonVerifier();
+    verifier = new PythonVerifier(PY_CLIENT_VERIFIER_DEPENDENCIES);
   });
 
   afterAll(async () => {

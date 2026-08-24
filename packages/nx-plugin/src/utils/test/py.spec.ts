@@ -7,12 +7,7 @@ import { type ChildProcessWithoutNullStreams, spawn } from 'child_process';
 import path from 'path';
 import { createInterface, type Interface } from 'readline';
 import { createTreeUsingTsSolutionSetup } from '../test';
-import {
-  PY_CLIENT_VERIFIER_DEPENDENCIES,
-  PY_VERIFIER_TYPE_CHECKER,
-} from './python-dependencies';
-
-export { PY_CLIENT_VERIFIER_DEPENDENCIES };
+import { PY_VERIFIER_TYPE_CHECKER } from './python-dependencies';
 
 const WORKER_PATH = path.join(
   import.meta.dirname,
@@ -129,10 +124,10 @@ export class PythonVerifier {
   /**
    * @param dependencies packages the worker installs, as fully-qualified
    * specifiers (e.g. `httpx==0.28.1`). `ty` is always added, since the worker
-   * type checks with it. Use {@link PY_CLIENT_VERIFIER_DEPENDENCIES} for the
-   * versions a generated client is vended against.
+   * type checks with it rather than it being a dependency of the code under
+   * test.
    */
-  constructor(dependencies: string[] = PY_CLIENT_VERIFIER_DEPENDENCIES) {
+  constructor(dependencies: string[] = []) {
     this.dependencies = dependencies;
   }
 

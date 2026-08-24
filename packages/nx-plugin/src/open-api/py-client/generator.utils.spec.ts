@@ -4,15 +4,32 @@
  */
 import type { Tree } from '@nx/devkit';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import type {
-  InvokeResult,
-  MockEntry,
-  MockResponseSpec,
+import {
+  type InvokeResult,
+  type MockEntry,
+  type MockResponseSpec,
   PythonVerifier,
 } from '../../utils/test/py.spec';
+import { PY_CLIENT_VERIFIER_DEPENDENCIES } from '../../utils/test/python-dependencies';
 import type { Spec } from '../utils/types';
 import { openApiPyClientGenerator } from './generator';
 import type { OpenApiPyClientGeneratorSchema } from './schema';
+
+/**
+ * A verifier carrying the dependencies a generated client imports, started
+ * before the suite and shut down after it.
+ *
+ * Every py-client spec needs the same one, so the lifecycle lives here rather
+ * than being repeated. The worker is long-lived: it is reused across the
+ * suite's tests and torn down once.
+ */
+export const createPythonClientVerifier = (): PythonVerifier => {
+  const verifier = new PythonVerifier(PY_CLIENT_VERIFIER_DEPENDENCIES);
+  afterAll(async () => {
+    await verifier.shutdown();
+  });
+  return verifier;
+};
 
 /**
  * Base URL the generated client points at inside tests — the mock transport

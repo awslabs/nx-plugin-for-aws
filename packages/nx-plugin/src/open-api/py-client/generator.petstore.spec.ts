@@ -3,26 +3,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import { PythonVerifier } from '../../utils/test/py.spec';
 import { PET_STORE_SPEC } from '../ts-client/generator.petstore.spec';
 import {
   callGeneratedClient,
   callGeneratedClientAsync,
+  createPythonClientVerifier,
   createTree,
   generateAndRead,
 } from './generator.utils.spec';
 
 describe('openApiPyClientGenerator - petstore', () => {
   let tree: Tree;
-  let verifier: PythonVerifier;
-
-  beforeAll(() => {
-    verifier = new PythonVerifier();
-  });
-
-  afterAll(async () => {
-    await verifier.shutdown();
-  });
+  const verifier = createPythonClientVerifier();
 
   beforeEach(() => {
     tree = createTree();

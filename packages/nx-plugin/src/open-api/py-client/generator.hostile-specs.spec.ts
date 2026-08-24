@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import { PythonVerifier } from '../../utils/test/py.spec';
 import type { Spec } from '../utils/types';
 import {
   callGeneratedClient,
+  createPythonClientVerifier,
   createTree,
   expectSingleRequest,
   generateAndRead,
@@ -21,15 +21,7 @@ import {
  */
 describe('openApiPyClientGenerator - hostile specs', () => {
   let tree: Tree;
-  let verifier: PythonVerifier;
-
-  beforeAll(() => {
-    verifier = new PythonVerifier();
-  });
-
-  afterAll(async () => {
-    await verifier.shutdown();
-  });
+  const verifier = createPythonClientVerifier();
 
   beforeEach(() => {
     tree = createTree();

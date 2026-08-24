@@ -2,9 +2,12 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { PythonVerifier } from '../../utils/test/py.spec';
 import type { Spec } from '../utils/types';
-import { createTree, generateAndRead } from './generator.utils.spec';
+import {
+  createPythonClientVerifier,
+  createTree,
+  generateAndRead,
+} from './generator.utils.spec';
 
 /**
  * A spec exercising every feature whose type-safety we care about.  The spec
@@ -466,17 +469,12 @@ const usageModule = (body: string) =>
   ].join('\n');
 
 describe('openApiPyClientGenerator - type safety', () => {
-  let verifier: PythonVerifier;
+  const verifier = createPythonClientVerifier();
 
   beforeAll(async () => {
-    verifier = new PythonVerifier();
     // Compiling also type checks the client itself; these tests then check what
     // it lets a caller do.
     await generateAndRead(verifier, createTree(), parityMatrixSpec);
-  });
-
-  afterAll(async () => {
-    await verifier.shutdown();
   });
 
   it('accepts valid usage with no diagnostics', async () => {
