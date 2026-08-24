@@ -18,11 +18,11 @@ import {
   smithyCompileOutputs,
   smithyGenerateSsdkTarget,
   writeSsdkBundleConfig,
-} from '../../../smithy/project/generator';
-import { addTsDependencies } from '../../../utils/add-dependencies';
-import { formatFilesInSubtree } from '../../../utils/format';
-import { FsCommands } from '../../../utils/fs';
-import { warnIfSmithyMissing } from '../../../utils/smithy';
+} from '../../../smithy/project/generator.js';
+import { addTsDependencies } from '../../../utils/add-dependencies.js';
+import { formatFilesInSubtree } from '../../../utils/format.js';
+import { FsCommands } from '../../../utils/fs.js';
+import { warnIfSmithyMissing } from '../../../utils/smithy.js';
 
 /**
  * Move Smithy projects off the container build onto the Smithy CLI.

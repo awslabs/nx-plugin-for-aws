@@ -9,8 +9,8 @@ import { FsTree } from 'nx/src/generators/tree';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { formatFilesInSubtree, requiresPythonToRuffTarget } from './format';
-import { createTreeUsingTsSolutionSetup } from './test';
+import { formatFilesInSubtree, requiresPythonToRuffTarget } from './format.js';
+import { createTreeUsingTsSolutionSetup } from './test.js';
 
 describe('requiresPythonToRuffTarget', () => {
   it('maps a lower-bound specifier to a ruff target', () => {

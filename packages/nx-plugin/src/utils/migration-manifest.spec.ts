@@ -8,7 +8,7 @@ import {
   type DiscoveredMigration,
   MIGRATIONS_JSON_SCHEMA,
   SYNC_VENDED_MIGRATION_KEY,
-} from './migration-manifest';
+} from './migration-manifest.js';
 
 const migration = (
   overrides: Partial<DiscoveredMigration> = {},

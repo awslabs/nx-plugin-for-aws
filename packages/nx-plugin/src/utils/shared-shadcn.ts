@@ -9,25 +9,25 @@ import {
   type Tree,
   updateJson,
 } from '@nx/devkit';
-import tsProjectGenerator from '../ts/lib/generator';
-import { configureTsProject } from '../ts/lib/ts-project-utils';
-import { VITEST_DEPENDENCIES } from '../ts/lib/vitest';
+import tsProjectGenerator from '../ts/lib/generator.js';
+import { configureTsProject } from '../ts/lib/ts-project-utils.js';
+import { VITEST_DEPENDENCIES } from '../ts/lib/vitest.js';
 import {
   type DependencyDeclaration,
   declaredNames,
   forDependencies,
   type MustDeclare,
-} from './declared-dependencies';
-import { addDependenciesToPackageJson } from './dependencies';
-import { formatFilesInSubtree } from './format';
-import { esmVars } from './module-format';
-import { getNpmScopePrefix } from './npm-scope';
+} from './declared-dependencies.js';
+import { addDependenciesToPackageJson } from './dependencies.js';
+import { formatFilesInSubtree } from './format.js';
+import { esmVars } from './module-format.js';
+import { getNpmScopePrefix } from './npm-scope.js';
 import {
   PACKAGES_DIR,
   SHARED_SHADCN_DIR,
   SHARED_SHADCN_NAME,
-} from './shared-constructs-constants';
-import { type ITsDepVersion, withVersions } from './versions';
+} from './shared-constructs-constants.js';
+import { type ITsDepVersion, withVersions } from './versions.js';
 
 /** Dependencies a caller must declare to use the shared shadcn project. */
 export const SHADCN_DEPENDENCIES = [

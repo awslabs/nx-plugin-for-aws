@@ -4,8 +4,16 @@
  */
 import { describe, expect, it } from 'vitest';
 import PluginPackageJson from '../../package.json' with { type: 'json' };
-import { type DeclaredTs, declareDependencies } from './declared-dependencies';
-import { NX_PACKAGES, NX_VERSION, TS_VERSIONS, withVersions } from './versions';
+import {
+  type DeclaredTs,
+  declareDependencies,
+} from './declared-dependencies.js';
+import {
+  NX_PACKAGES,
+  NX_VERSION,
+  TS_VERSIONS,
+  withVersions,
+} from './versions.js';
 
 const declaration = declareDependencies()({
   ts: [

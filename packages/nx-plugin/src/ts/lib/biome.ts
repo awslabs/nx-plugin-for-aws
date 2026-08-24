@@ -8,9 +8,9 @@ import {
   updateNxJson,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { readProjectConfigurationUnqualified } from '../../utils/nx';
-import { sortObjectKeys } from '../../utils/object';
-import type { ConfigureProjectOptions } from './types';
+import { readProjectConfigurationUnqualified } from '../../utils/nx.js';
+import { sortObjectKeys } from '../../utils/object.js';
+import type { ConfigureProjectOptions } from './types.js';
 
 export const configureBiomeLint = async (
   tree: Tree,

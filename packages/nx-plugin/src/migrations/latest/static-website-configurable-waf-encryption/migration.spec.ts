@@ -4,8 +4,8 @@
  */
 import type { Tree } from '@nx/devkit';
 import { joinPathFragments } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import migration from './migration';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
+import migration from './migration.js';
 
 const CDK_FILE = 'packages/common/constructs/src/core/static-website.ts';
 const APP_DIR = 'packages/common/constructs/src/app/static-websites';

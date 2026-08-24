@@ -9,43 +9,43 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import tsProjectGenerator from '../../ts/lib/generator';
-import { addTsDependencies } from '../../utils/add-dependencies';
+import tsProjectGenerator from '../../ts/lib/generator.js';
+import { addTsDependencies } from '../../utils/add-dependencies.js';
 import {
   API_CONSTRUCTS_DEPENDENCIES,
   API_CONSTRUCTS_PY_DEPENDENCIES,
   addApiGatewayInfra,
-} from '../../utils/api-constructs/api-constructs';
+} from '../../utils/api-constructs/api-constructs.js';
 import {
   addTypeScriptBundleTarget,
   BUNDLE_DEPENDENCIES,
-} from '../../utils/bundle/bundle';
+} from '../../utils/bundle/bundle.js';
 import {
   declareDependencies,
   ownedElsewhere,
-} from '../../utils/declared-dependencies';
-import { formatFilesInSubtree } from '../../utils/format';
-import { resolveIac } from '../../utils/iac';
-import { installDependencies } from '../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { esmVars } from '../../utils/module-format';
-import { kebabCase, toClassName } from '../../utils/names';
-import { getNpmScopePrefix } from '../../utils/npm-scope';
+} from '../../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../../utils/format.js';
+import { resolveIac } from '../../utils/iac.js';
+import { installDependencies } from '../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
+import { esmVars } from '../../utils/module-format.js';
+import { kebabCase, toClassName } from '../../utils/names.js';
+import { getNpmScopePrefix } from '../../utils/npm-scope.js';
 import {
   addDependencyToTargetIfNotPresent,
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
-} from '../../utils/nx';
-import { sortObjectKeys } from '../../utils/object';
-import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
-import { assignPort } from '../../utils/port';
+} from '../../utils/nx.js';
+import { sortObjectKeys } from '../../utils/object.js';
+import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager.js';
+import { assignPort } from '../../utils/port.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../utils/shared-constructs';
-import type { IacMetadata } from '../../utils/shared-constructs-constants';
+} from '../../utils/shared-constructs.js';
+import type { IacMetadata } from '../../utils/shared-constructs-constants.js';
 import type { TsTrpcApiGeneratorSchema } from './schema';
 
 /** The metadata this generator records, which its predicates read. */

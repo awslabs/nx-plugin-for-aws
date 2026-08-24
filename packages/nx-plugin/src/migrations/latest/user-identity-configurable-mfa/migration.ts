@@ -7,13 +7,13 @@ import {
   addDestructuredImport,
   applyGritQL,
   matchGritQL,
-} from '../../../utils/ast';
-import { formatFilesInSubtree } from '../../../utils/format';
+} from '../../../utils/ast.js';
+import { formatFilesInSubtree } from '../../../utils/format.js';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
-} from '../../../utils/shared-constructs-constants';
+} from '../../../utils/shared-constructs-constants.js';
 
 /**
  * Surface mfa and mfaSecondFactor on the vended UserIdentity construct/module

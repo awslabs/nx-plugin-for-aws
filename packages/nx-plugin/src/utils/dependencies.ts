@@ -14,7 +14,7 @@ import {
 } from '@nx/devkit';
 import yaml from 'js-yaml';
 import { coerce, gt, gte } from 'semver';
-import { readAwsNxPluginConfig } from './config/utils';
+import { readAwsNxPluginConfig } from './config/utils.js';
 
 // Minimum version that introduced catalog support per package manager (npm has none).
 const CATALOG_SUPPORT: Partial<Record<PackageManager, string>> = {

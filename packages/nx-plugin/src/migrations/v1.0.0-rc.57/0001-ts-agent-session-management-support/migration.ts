@@ -10,21 +10,21 @@ import {
   type Tree,
   visitNotIgnoredFiles,
 } from '@nx/devkit';
-import { TS_AGENT_GENERATOR_INFO } from '../../../ts/agent/generator';
-import { AGENT_CONNECTION_PROJECT_DIR } from '../../../utils/agent-connection/agent-connection';
+import { TS_AGENT_GENERATOR_INFO } from '../../../ts/agent/generator.js';
+import { AGENT_CONNECTION_PROJECT_DIR } from '../../../utils/agent-connection/agent-connection.js';
 import {
   applyGritQL,
   captureGritQLVariable,
   matchGritQL,
-} from '../../../utils/ast';
-import { formatFilesInSubtree } from '../../../utils/format';
-import { isEsmWorkspace } from '../../../utils/module-format';
-import { kebabCase } from '../../../utils/names';
-import type { ComponentMetadata } from '../../../utils/nx';
+} from '../../../utils/ast.js';
+import { formatFilesInSubtree } from '../../../utils/format.js';
+import { isEsmWorkspace } from '../../../utils/module-format.js';
+import { kebabCase } from '../../../utils/names.js';
+import type { ComponentMetadata } from '../../../utils/nx.js';
 import {
   getRelativePathToRootByDirectory,
   toProjectRelativePath,
-} from '../../../utils/paths';
+} from '../../../utils/paths.js';
 
 /**
  * Add session management support to ts#agent.

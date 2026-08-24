@@ -3,18 +3,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import { declareDependencies } from './declared-dependencies';
+import { declareDependencies } from './declared-dependencies.js';
 import {
   addGeneratorMetricsIfApplicable,
   METRIC_ID,
   METRICS_ASPECT_FILE_PATH,
   TERRAFORM_METRICS_FILE_PATH,
-} from './metrics';
+} from './metrics.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from './shared-constructs';
-import { createTreeUsingTsSolutionSetup } from './test';
+} from './shared-constructs.js';
+import { createTreeUsingTsSolutionSetup } from './test.js';
 
 const declaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],

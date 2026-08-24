@@ -8,14 +8,14 @@ import {
   type MigrationReturnObject,
   type Tree,
 } from '@nx/devkit';
-import { TERRAFORM_PROJECT_GENERATOR_INFO } from '../../../terraform/project/generator';
+import { TERRAFORM_PROJECT_GENERATOR_INFO } from '../../../terraform/project/generator.js';
 import {
   applyGritQL,
   GRIT_INSERT_PLACEHOLDER,
   insertViaGritQL,
   matchGritQL,
-} from '../../../utils/ast';
-import { formatFilesInSubtree } from '../../../utils/format';
+} from '../../../utils/ast.js';
+import { formatFilesInSubtree } from '../../../utils/format.js';
 
 /**
  * Adopt an existing Terraform state bucket in the vended bootstrap script when its state object is missing

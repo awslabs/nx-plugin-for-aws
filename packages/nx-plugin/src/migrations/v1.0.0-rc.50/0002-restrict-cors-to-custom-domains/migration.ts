@@ -11,13 +11,13 @@ import {
   addDestructuredImport,
   addStarExport,
   applyGritQL,
-} from '../../../utils/ast';
-import { formatFilesInSubtree } from '../../../utils/format';
-import { isEsmWorkspace } from '../../../utils/module-format';
+} from '../../../utils/ast.js';
+import { formatFilesInSubtree } from '../../../utils/format.js';
+import { isEsmWorkspace } from '../../../utils/module-format.js';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
-} from '../../../utils/shared-constructs-constants';
+} from '../../../utils/shared-constructs-constants.js';
 
 /**
  * Include CloudFront custom domain aliases in restrictCorsTo and UserIdentity callback URLs

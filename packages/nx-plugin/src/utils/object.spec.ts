@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { describe, expect, it } from 'vitest';
-import { sortObjectKeys } from './object';
+import { sortObjectKeys } from './object.js';
 
 describe('sortObjectKeys', () => {
   it('sorts keys alphabetically', () => {

@@ -7,55 +7,55 @@ import {
   type ProjectConfiguration,
   type Tree,
 } from '@nx/devkit';
-import agentcoreGatewayAgentConnectionGenerator from '../agentcore-gateway/agent-connection/generator';
-import agentcoreGatewayGatewayConnectionGenerator from '../agentcore-gateway/gateway-connection/generator';
-import { AGENTCORE_GATEWAY_GENERATOR_INFO } from '../agentcore-gateway/generator';
-import agentcoreGatewayMcpConnectionGenerator from '../agentcore-gateway/mcp-connection/generator';
-import agentcoreGatewayReactConnectionGenerator from '../agentcore-gateway/react-connection/generator';
-import pyAgentA2aConnectionGenerator from '../py/agent/a2a-connection/generator';
-import pyAgentGatewayConnectionGenerator from '../py/agent/gateway-connection/generator';
-import pyAgentMcpConnectionGenerator from '../py/agent/mcp-connection/generator';
-import pyAgentReactConnectionGenerator from '../py/agent/react-connection/generator';
-import pyDynamoDBAgentConnectionGenerator from '../py/dynamodb/agent-connection/generator';
-import pyDynamoDBFastApiConnectionGenerator from '../py/dynamodb/fast-api-connection/generator';
-import { PY_DYNAMODB_GENERATOR_INFO } from '../py/dynamodb/generator';
-import pyDynamoDBMcpServerConnectionGenerator from '../py/dynamodb/mcp-server-connection/generator';
-import fastApiReactGenerator from '../py/fast-api/react/generator';
-import pyRdbAgentConnectionGenerator from '../py/rdb/agent-connection/generator';
-import pyRdbFastApiConnectionGenerator from '../py/rdb/fast-api-connection/generator';
-import { PY_RDB_GENERATOR_INFO } from '../py/rdb/generator';
-import pyRdbMcpServerConnectionGenerator from '../py/rdb/mcp-server-connection/generator';
-import { SMITHY_PROJECT_GENERATOR_INFO } from '../smithy/project/generator';
-import smithyReactConnectionGenerator from '../smithy/react-connection/generator';
-import { TS_SMITHY_API_GENERATOR_INFO } from '../smithy/ts/api/generator';
-import trpcReactGenerator from '../trpc/react/generator';
-import tsAgentA2aConnectionGenerator from '../ts/agent/a2a-connection/generator';
-import tsAgentGatewayConnectionGenerator from '../ts/agent/gateway-connection/generator';
-import tsAgentMcpConnectionGenerator from '../ts/agent/mcp-connection/generator';
-import tsAgentReactConnectionGenerator from '../ts/agent/react-connection/generator';
-import tsDynamoDBAgentConnectionGenerator from '../ts/dynamodb/agent-connection/generator';
-import { TS_DYNAMODB_GENERATOR_INFO } from '../ts/dynamodb/generator';
-import tsDynamoDBMcpServerConnectionGenerator from '../ts/dynamodb/mcp-server-connection/generator';
-import tsDynamoDBSmithyConnectionGenerator from '../ts/dynamodb/smithy-connection/generator';
-import tsDynamoDBTrpcConnectionGenerator from '../ts/dynamodb/trpc-connection/generator';
-import tsRdbAgentConnectionGenerator from '../ts/rdb/agent-connection/generator';
-import { TS_RDB_GENERATOR_INFO } from '../ts/rdb/generator';
-import tsRdbMcpServerConnectionGenerator from '../ts/rdb/mcp-server-connection/generator';
-import tsRdbSmithyConnectionGenerator from '../ts/rdb/smithy-connection/generator';
-import tsRdbTrpcConnectionGenerator from '../ts/rdb/trpc-connection/generator';
-import { hasExportDeclaration } from '../utils/ast';
+import agentcoreGatewayAgentConnectionGenerator from '../agentcore-gateway/agent-connection/generator.js';
+import agentcoreGatewayGatewayConnectionGenerator from '../agentcore-gateway/gateway-connection/generator.js';
+import { AGENTCORE_GATEWAY_GENERATOR_INFO } from '../agentcore-gateway/generator.js';
+import agentcoreGatewayMcpConnectionGenerator from '../agentcore-gateway/mcp-connection/generator.js';
+import agentcoreGatewayReactConnectionGenerator from '../agentcore-gateway/react-connection/generator.js';
+import pyAgentA2aConnectionGenerator from '../py/agent/a2a-connection/generator.js';
+import pyAgentGatewayConnectionGenerator from '../py/agent/gateway-connection/generator.js';
+import pyAgentMcpConnectionGenerator from '../py/agent/mcp-connection/generator.js';
+import pyAgentReactConnectionGenerator from '../py/agent/react-connection/generator.js';
+import pyDynamoDBAgentConnectionGenerator from '../py/dynamodb/agent-connection/generator.js';
+import pyDynamoDBFastApiConnectionGenerator from '../py/dynamodb/fast-api-connection/generator.js';
+import { PY_DYNAMODB_GENERATOR_INFO } from '../py/dynamodb/generator.js';
+import pyDynamoDBMcpServerConnectionGenerator from '../py/dynamodb/mcp-server-connection/generator.js';
+import fastApiReactGenerator from '../py/fast-api/react/generator.js';
+import pyRdbAgentConnectionGenerator from '../py/rdb/agent-connection/generator.js';
+import pyRdbFastApiConnectionGenerator from '../py/rdb/fast-api-connection/generator.js';
+import { PY_RDB_GENERATOR_INFO } from '../py/rdb/generator.js';
+import pyRdbMcpServerConnectionGenerator from '../py/rdb/mcp-server-connection/generator.js';
+import { SMITHY_PROJECT_GENERATOR_INFO } from '../smithy/project/generator.js';
+import smithyReactConnectionGenerator from '../smithy/react-connection/generator.js';
+import { TS_SMITHY_API_GENERATOR_INFO } from '../smithy/ts/api/generator.js';
+import trpcReactGenerator from '../trpc/react/generator.js';
+import tsAgentA2aConnectionGenerator from '../ts/agent/a2a-connection/generator.js';
+import tsAgentGatewayConnectionGenerator from '../ts/agent/gateway-connection/generator.js';
+import tsAgentMcpConnectionGenerator from '../ts/agent/mcp-connection/generator.js';
+import tsAgentReactConnectionGenerator from '../ts/agent/react-connection/generator.js';
+import tsDynamoDBAgentConnectionGenerator from '../ts/dynamodb/agent-connection/generator.js';
+import { TS_DYNAMODB_GENERATOR_INFO } from '../ts/dynamodb/generator.js';
+import tsDynamoDBMcpServerConnectionGenerator from '../ts/dynamodb/mcp-server-connection/generator.js';
+import tsDynamoDBSmithyConnectionGenerator from '../ts/dynamodb/smithy-connection/generator.js';
+import tsDynamoDBTrpcConnectionGenerator from '../ts/dynamodb/trpc-connection/generator.js';
+import tsRdbAgentConnectionGenerator from '../ts/rdb/agent-connection/generator.js';
+import { TS_RDB_GENERATOR_INFO } from '../ts/rdb/generator.js';
+import tsRdbMcpServerConnectionGenerator from '../ts/rdb/mcp-server-connection/generator.js';
+import tsRdbSmithyConnectionGenerator from '../ts/rdb/smithy-connection/generator.js';
+import tsRdbTrpcConnectionGenerator from '../ts/rdb/trpc-connection/generator.js';
+import { hasExportDeclaration } from '../utils/ast.js';
 import {
   type ComponentMetadata,
   readProjectConfigurationUnqualified,
-} from '../utils/nx';
-import { readToml } from '../utils/toml';
+} from '../utils/nx.js';
+import { readToml } from '../utils/toml.js';
 import type { ConnectionGeneratorSchema } from './schema';
 import {
   type Connection,
   type ConnectionKey,
   SUPPORTED_CONNECTIONS,
   type SUPPORTED_PROJECT_TYPES,
-} from './supported-connections';
+} from './supported-connections.js';
 
 export type { Connection };
 

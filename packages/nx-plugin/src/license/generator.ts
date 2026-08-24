@@ -3,15 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { getProjects, readNxJson, type Tree, updateNxJson } from '@nx/devkit';
-import { PY_AGENT_GENERATOR_INFO } from '../py/agent/generator';
-import { ensureAwsNxPluginConfig } from '../utils/config/utils';
-import { formatFilesInSubtree } from '../utils/format';
-import { addGeneratorMetricsIfApplicable } from '../utils/metrics';
+import { PY_AGENT_GENERATOR_INFO } from '../py/agent/generator.js';
+import { ensureAwsNxPluginConfig } from '../utils/config/utils.js';
+import { formatFilesInSubtree } from '../utils/format.js';
+import { addGeneratorMetricsIfApplicable } from '../utils/metrics.js';
 import {
   getGeneratorInfo,
   mergeTargetDefault,
   type NxGeneratorInfo,
-} from '../utils/nx';
+} from '../utils/nx.js';
 import {
   addLicenseCheckToAllLintTargets,
   defaultLicenseConfig,
@@ -20,10 +20,10 @@ import {
   ensurePythonLicenseCollector,
   updateLicenseCheckTargetInputs,
   writeLicenseConfig,
-} from './config';
-import { AG_UI_LANGGRAPH_EXCEPTIONS } from './known-exceptions';
+} from './config.js';
+import { AG_UI_LANGGRAPH_EXCEPTIONS } from './known-exceptions.js';
 import type { LicenseGeneratorSchema } from './schema';
-import { SYNC_GENERATOR_NAME } from './sync/generator';
+import { SYNC_GENERATOR_NAME } from './sync/generator.js';
 
 export const LICENSE_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,

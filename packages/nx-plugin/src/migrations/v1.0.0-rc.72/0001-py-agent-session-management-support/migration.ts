@@ -12,26 +12,26 @@ import {
   type Tree,
   visitNotIgnoredFiles,
 } from '@nx/devkit';
-import { PY_AGENT_GENERATOR_INFO } from '../../../py/agent/generator';
-import { addPyDependencies } from '../../../utils/add-dependencies';
+import { PY_AGENT_GENERATOR_INFO } from '../../../py/agent/generator.js';
+import { addPyDependencies } from '../../../utils/add-dependencies.js';
 import {
   addPythonReExport,
   getPythonAgentConnectionModuleName,
   getPythonAgentConnectionProjectDir,
-} from '../../../utils/agent-connection/agent-connection';
+} from '../../../utils/agent-connection/agent-connection.js';
 import {
   applyGritQL,
   captureGritQLVariable,
   matchGritQL,
-} from '../../../utils/ast';
-import { declareDependencies } from '../../../utils/declared-dependencies';
-import { formatFilesInSubtree } from '../../../utils/format';
-import { kebabCase } from '../../../utils/names';
-import type { ComponentMetadata } from '../../../utils/nx';
+} from '../../../utils/ast.js';
+import { declareDependencies } from '../../../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../../../utils/format.js';
+import { kebabCase } from '../../../utils/names.js';
+import type { ComponentMetadata } from '../../../utils/nx.js';
 import {
   getRelativePathToRootByDirectory,
   toProjectRelativePath,
-} from '../../../utils/paths';
+} from '../../../utils/paths.js';
 
 /**
  * Add session management support to py#agent.

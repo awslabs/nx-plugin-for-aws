@@ -3,11 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import { declareDependencies } from '../../utils/declared-dependencies';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { expectTypeScriptToCompile } from '../../utils/test/ts.spec';
-import tsProjectGenerator from './generator';
-import { configureVitest, VITEST_DEPENDENCIES } from './vitest';
+import { declareDependencies } from '../../utils/declared-dependencies.js';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import { expectTypeScriptToCompile } from '../../utils/test/ts.spec.js';
+import tsProjectGenerator from './generator.js';
+import { configureVitest, VITEST_DEPENDENCIES } from './vitest.js';
 
 const declaration = declareDependencies()({ ts: [...VITEST_DEPENDENCIES] });
 

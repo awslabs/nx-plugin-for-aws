@@ -11,23 +11,26 @@ import {
   updateJson,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { declareDependencies } from '../../utils/declared-dependencies';
-import { formatFilesInSubtree } from '../../utils/format';
-import { installDependencies } from '../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { esmVars } from '../../utils/module-format';
+import { declareDependencies } from '../../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../../utils/format.js';
+import { installDependencies } from '../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
+import { esmVars } from '../../utils/module-format.js';
 import {
   addDependencyToTargetIfNotPresent,
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
-} from '../../utils/nx';
-import { sortObjectKeys } from '../../utils/object';
-import tsProjectGenerator, { getTsLibDetails } from '../lib/generator';
-import tsMcpServerGenerator from '../mcp-server/generator';
+} from '../../utils/nx.js';
+import { sortObjectKeys } from '../../utils/object.js';
+import tsProjectGenerator, { getTsLibDetails } from '../lib/generator.js';
+import tsMcpServerGenerator from '../mcp-server/generator.js';
 import type { TsNxPluginGeneratorSchema } from './schema';
-import { configureTsProjectAsNxPlugin, NX_PLUGIN_DEPENDENCIES } from './utils';
+import {
+  configureTsProjectAsNxPlugin,
+  NX_PLUGIN_DEPENDENCIES,
+} from './utils.js';
 
 export const DEPENDENCIES = declareDependencies()({
   ts: [...NX_PLUGIN_DEPENDENCIES],

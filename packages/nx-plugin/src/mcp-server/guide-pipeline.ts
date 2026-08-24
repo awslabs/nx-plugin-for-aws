@@ -24,13 +24,13 @@ import {
   buildNxInitCommand,
   buildPackageManagerExecCommand,
   buildPackageManagerShortCommand,
-} from '../utils/commands';
-import type { NxGeneratorInfo } from '../utils/generators';
+} from '../utils/commands.js';
+import type { NxGeneratorInfo } from '../utils/generators.js';
 import {
   buildNxCommand,
   renderGeneratorCommand,
   renderSchema,
-} from './guide-render';
+} from './guide-render.js';
 import {
   hasBareAttr,
   isJsxElement,
@@ -39,14 +39,14 @@ import {
   readEstreeAttr,
   readExpressionAttr,
   readStringAttr,
-} from './mdx-ast';
+} from './mdx-ast.js';
 import {
   describePredicate,
   evaluatePredicate,
   extractStringArrayExpression,
   type Predicate,
   parseWhenExpression,
-} from './option-filter';
+} from './option-filter.js';
 
 export interface PipelineOptions {
   generators: NxGeneratorInfo[];

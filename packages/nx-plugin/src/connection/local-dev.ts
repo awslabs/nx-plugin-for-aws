@@ -7,12 +7,12 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { applyGritQL } from '../utils/ast';
-import { toClassName } from '../utils/names';
+import { applyGritQL } from '../utils/ast.js';
+import { toClassName } from '../utils/names.js';
 import {
   addDependencyToTargetIfNotPresent,
   readProjectConfigurationUnqualified,
-} from '../utils/nx';
+} from '../utils/nx.js';
 
 export interface LocalDevOptions {
   apiName: string;

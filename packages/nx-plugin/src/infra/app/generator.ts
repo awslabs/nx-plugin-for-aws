@@ -13,44 +13,44 @@ import {
   updateJson,
 } from '@nx/devkit';
 import path from 'path';
-import tsProjectGenerator, { getTsLibDetails } from '../../ts/lib/generator';
-import { mergeTsReferences } from '../../ts/lib/ts-project-utils';
-import { addTsDependencies } from '../../utils/add-dependencies';
-import { resolveContainers } from '../../utils/containers';
+import tsProjectGenerator, { getTsLibDetails } from '../../ts/lib/generator.js';
+import { mergeTsReferences } from '../../ts/lib/ts-project-utils.js';
+import { addTsDependencies } from '../../utils/add-dependencies.js';
+import { resolveContainers } from '../../utils/containers.js';
 import {
   declareDependencies,
   ownedElsewhere,
-} from '../../utils/declared-dependencies';
-import { formatFilesInSubtree } from '../../utils/format';
-import { installDependencies } from '../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { esmVars } from '../../utils/module-format';
-import { kebabCase } from '../../utils/names';
-import { getNpmScopePrefix } from '../../utils/npm-scope';
+} from '../../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../../utils/format.js';
+import { installDependencies } from '../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
+import { esmVars } from '../../utils/module-format.js';
+import { kebabCase } from '../../utils/names.js';
+import { getNpmScopePrefix } from '../../utils/npm-scope.js';
 import {
   addDependencyToTargetIfNotPresent,
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   projectExists,
-} from '../../utils/nx';
-import { sortObjectKeys } from '../../utils/object';
-import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
-import { uvxCommand } from '../../utils/py';
+} from '../../utils/nx.js';
+import { sortObjectKeys } from '../../utils/object.js';
+import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager.js';
+import { uvxCommand } from '../../utils/py.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../utils/shared-constructs';
+} from '../../utils/shared-constructs.js';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   SHARED_INFRA_CONFIG_DIR,
-} from '../../utils/shared-constructs-constants';
-import { sharedInfraConfigGenerator } from '../../utils/shared-infra-config';
+} from '../../utils/shared-constructs-constants.js';
+import { sharedInfraConfigGenerator } from '../../utils/shared-infra-config.js';
 import {
   SHARED_INFRA_SCRIPTS_DEPENDENCIES,
   sharedInfraScriptsGenerator,
-} from '../../utils/shared-infra-scripts';
+} from '../../utils/shared-infra-scripts.js';
 import type { TsInfraGeneratorSchema } from './schema';
 
 // This generator records no metadata, so nothing a predicate could read: the

@@ -8,7 +8,7 @@ import { execSync } from 'child_process';
 import fastGlob from 'fast-glob';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { uvxCommand } from '../../../utils/py';
+import { uvxCommand } from '../../../utils/py.js';
 
 export interface PythonDependency {
   name: string;

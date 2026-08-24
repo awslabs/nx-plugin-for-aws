@@ -6,7 +6,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { describe, expect, it } from 'vitest';
-import { importTypeScriptModule } from './js';
+import { importTypeScriptModule } from './js.js';
 
 // Load the actual template files and strip EJS tags for import
 const loadTemplate = (relativePath: string): string => {

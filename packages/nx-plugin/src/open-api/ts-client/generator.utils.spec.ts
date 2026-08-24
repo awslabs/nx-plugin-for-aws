@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Mock } from 'vitest';
-import { importTypeScriptModule } from '../../utils/js';
+import { importTypeScriptModule } from '../../utils/js.js';
 
 export const baseUrl = 'https://example.com';
 

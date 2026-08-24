@@ -4,8 +4,8 @@
  */
 import { readProjectConfiguration, type Tree } from '@nx/devkit';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import { tsDynamoDBAgentConnectionGenerator } from './generator';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
+import { tsDynamoDBAgentConnectionGenerator } from './generator.js';
 
 describe('ts#dynamodb agent-connection generator', () => {
   let tree: Tree;

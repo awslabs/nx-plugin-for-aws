@@ -7,17 +7,17 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { formatFilesInSubtree } from '../../../utils/format';
-import { installDependencies } from '../../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
+import { formatFilesInSubtree } from '../../../utils/format.js';
+import { installDependencies } from '../../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics.js';
 import {
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
-} from '../../../utils/nx';
-import { addWorkspaceDependencyToPyProject } from '../../../utils/py';
+} from '../../../utils/nx.js';
+import { addWorkspaceDependencyToPyProject } from '../../../utils/py.js';
 import type { PyDynamoDBMcpServerConnectionGeneratorSchema } from './schema';
 
 export const PY_DYNAMODB_MCP_SERVER_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =

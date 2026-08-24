@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { startMcpServer } from '.';
+import { startMcpServer } from './index.js';
 
 /**
  * Entry point for the `mcp-inspect` target, which runs the server from source

@@ -15,19 +15,19 @@ import yaml from 'js-yaml';
 import { getCatalogManager } from 'nx/src/utils/catalog';
 import { parsePipRequirementsLine } from 'pip-requirements-js';
 import { coerce, parse, satisfies, validRange } from 'semver';
-import { applyGritQL, captureAllGritQL } from '../ast';
-import { buildInstallCommand } from '../commands';
-import { formatFilesInSubtree } from '../format';
-import { updateToml } from '../toml';
-import { PY_VERSIONS, TERRAFORM_VERSIONS, TS_VERSIONS } from '../versions';
-import { isNxPackage } from './nx-package-updates';
+import { applyGritQL, captureAllGritQL } from '../ast.js';
+import { buildInstallCommand } from '../commands.js';
+import { formatFilesInSubtree } from '../format.js';
+import { updateToml } from '../toml.js';
+import { PY_VERSIONS, TERRAFORM_VERSIONS, TS_VERSIONS } from '../versions.js';
+import { isNxPackage } from './nx-package-updates.js';
 import {
   type OwnedDependencies,
   ownedDependencies,
-} from './owned-dependencies';
-import { syncEmbeddedVersions } from './sync-embedded-versions';
-import { syncMetricsVersion } from './sync-metrics-version';
-import { isVendedUpgrade } from './vended-upgrade';
+} from './owned-dependencies.js';
+import { syncEmbeddedVersions } from './sync-embedded-versions.js';
+import { syncMetricsVersion } from './sync-metrics-version.js';
+import { isVendedUpgrade } from './vended-upgrade.js';
 
 /**
  * Syncs the versions a generated workspace pins to those this release vends:

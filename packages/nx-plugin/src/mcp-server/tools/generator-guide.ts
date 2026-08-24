@@ -4,12 +4,12 @@
  */
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import type { NxGeneratorInfo } from '../../utils/generators';
+import type { NxGeneratorInfo } from '../../utils/generators.js';
 import {
   fetchGuidePagesForGenerator,
   renderGeneratorInfo,
-} from '../generator-info';
-import { PackageManagerSchema } from '../schema';
+} from '../generator-info.js';
+import { PackageManagerSchema } from '../schema.js';
 
 /**
  * Add a tool which provides a detailed guide for an individual generator.

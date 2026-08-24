@@ -6,11 +6,14 @@ import type { Tree } from '@nx/devkit';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
-} from '../../utils/config/utils';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
-import { getNpmScopePrefix } from '../../utils/npm-scope';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { TS_DCR_PROXY_GENERATOR_INFO, tsDcrProxyGenerator } from './generator';
+} from '../../utils/config/utils.js';
+import { expectHasMetricTags } from '../../utils/metrics.spec.js';
+import { getNpmScopePrefix } from '../../utils/npm-scope.js';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import {
+  TS_DCR_PROXY_GENERATOR_INFO,
+  tsDcrProxyGenerator,
+} from './generator.js';
 
 describe('ts#dcr-proxy generator', () => {
   let tree: Tree;

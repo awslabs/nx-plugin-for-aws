@@ -4,18 +4,18 @@
  */
 import * as path from 'node:path';
 import { getProjects, type Tree } from '@nx/devkit';
-import { AWS_NX_PLUGIN_CONFIG_FILE_NAME } from '../config/utils';
+import { AWS_NX_PLUGIN_CONFIG_FILE_NAME } from '../config/utils.js';
 import {
   type DependencyDeclaration,
   type DependencyMetadata,
   ownedDependencyEntries,
-} from '../declared-dependencies';
-import { buildGeneratorInfoList } from '../generators';
+} from '../declared-dependencies.js';
+import { buildGeneratorInfoList } from '../generators.js';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
-} from '../shared-constructs-constants';
+} from '../shared-constructs-constants.js';
 
 /** Directory holding `generators.json`, which maps ids to their modules. */
 export const PLUGIN_ROOT = path.resolve(import.meta.dirname, '..', '..', '..');

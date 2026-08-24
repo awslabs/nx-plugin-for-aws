@@ -10,8 +10,8 @@ import {
   type Tree,
   updateJson,
 } from '@nx/devkit';
-import { applyGritQL, matchGritQL } from '../../../utils/ast';
-import { formatFilesInSubtree } from '../../../utils/format';
+import { applyGritQL, matchGritQL } from '../../../utils/ast.js';
+import { formatFilesInSubtree } from '../../../utils/format.js';
 
 /**
  * Move a Smithy API onto the renamed `@smithy/server-*` packages.

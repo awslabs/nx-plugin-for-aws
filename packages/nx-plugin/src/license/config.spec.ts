@@ -7,8 +7,8 @@ import { afterEach, beforeEach, vi } from 'vitest';
 import {
   AWS_NX_PLUGIN_CONFIG_FILE_NAME,
   readAwsNxPluginConfig,
-} from '../utils/config/utils';
-import { createTreeUsingTsSolutionSetup } from '../utils/test';
+} from '../utils/config/utils.js';
+import { createTreeUsingTsSolutionSetup } from '../utils/test.js';
 import {
   defaultLicenseConfig,
   ensureDependencyCheckBlock,
@@ -17,9 +17,9 @@ import {
   readLicenseConfig,
   removeLicenseExceptions,
   writeLicenseConfig,
-} from './config';
-import type { LicenseSourceConfig } from './config-types';
-import type { DependencyCheckException } from './dependency-check/types';
+} from './config.js';
+import type { LicenseSourceConfig } from './config-types.js';
+import type { DependencyCheckException } from './dependency-check/types.js';
 import type { SPDXLicenseIdentifier } from './schema';
 
 const LICENSES: SPDXLicenseIdentifier[] = ['Apache-2.0', 'MIT', 'ASL'];

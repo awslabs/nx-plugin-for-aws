@@ -5,18 +5,18 @@
 
 import { joinPathFragments, type Tree } from '@nx/devkit';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { declareDependencies } from './declared-dependencies';
+import { declareDependencies } from './declared-dependencies.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from './shared-constructs';
+} from './shared-constructs.js';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   SHARED_CONSTRUCTS_NAME,
   SHARED_TERRAFORM_DIR,
-} from './shared-constructs-constants';
-import { createTreeUsingTsSolutionSetup, snapshotTreeDir } from './test';
+} from './shared-constructs-constants.js';
+import { createTreeUsingTsSolutionSetup, snapshotTreeDir } from './test.js';
 
 const declaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],

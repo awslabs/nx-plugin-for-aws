@@ -8,13 +8,13 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   LATEST_MIGRATIONS_DIR,
   stampMigrationVersions,
-} from '../migration-versions';
-import { NX_PACKAGES, NX_VERSION } from '../versions';
+} from '../migration-versions.js';
+import { NX_PACKAGES, NX_VERSION } from '../versions.js';
 import {
   nxPackageUpdatesKey,
   type PackageJsonUpdates,
-} from './nx-package-updates';
-import { registerNxPackageUpdates } from './register';
+} from './nx-package-updates.js';
+import { registerNxPackageUpdates } from './register.js';
 
 const PACKAGE_JSON_UPDATES_PATH = 'packages/nx-plugin/packageJsonUpdates.json';
 const NX_KEY = nxPackageUpdatesKey(NX_VERSION);

@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { NxGeneratorInfo } from '../../utils/generators';
-import { IAC_PROVIDERS } from '../../utils/iac-providers';
-import { buildNxCommand, fetchGuidePages } from '../generator-info';
-import { PACKAGE_MANAGERS } from '../schema';
+import type { NxGeneratorInfo } from '../../utils/generators.js';
+import { IAC_PROVIDERS } from '../../utils/iac-providers.js';
+import { buildNxCommand, fetchGuidePages } from '../generator-info.js';
+import { PACKAGE_MANAGERS } from '../schema.js';
 
 export const TOOL_SELECTION_GUIDE = `## Tool Selection Guide
 

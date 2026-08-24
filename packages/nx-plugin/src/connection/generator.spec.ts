@@ -4,13 +4,13 @@
  */
 import { type Tree, updateJson } from '@nx/devkit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import fastApiReactGenerator from '../py/fast-api/react/generator';
-import smithyReactConnectionGenerator from '../smithy/react-connection/generator';
-import trpcReactGenerator from '../trpc/react/generator';
-import tsRdbAgentConnectionGenerator from '../ts/rdb/agent-connection/generator';
-import tsRdbSmithyConnectionGenerator from '../ts/rdb/smithy-connection/generator';
-import tsRdbTrpcConnectionGenerator from '../ts/rdb/trpc-connection/generator';
-import { createTreeUsingTsSolutionSetup } from '../utils/test';
+import fastApiReactGenerator from '../py/fast-api/react/generator.js';
+import smithyReactConnectionGenerator from '../smithy/react-connection/generator.js';
+import trpcReactGenerator from '../trpc/react/generator.js';
+import tsRdbAgentConnectionGenerator from '../ts/rdb/agent-connection/generator.js';
+import tsRdbSmithyConnectionGenerator from '../ts/rdb/smithy-connection/generator.js';
+import tsRdbTrpcConnectionGenerator from '../ts/rdb/trpc-connection/generator.js';
+import { createTreeUsingTsSolutionSetup } from '../utils/test.js';
 import {
   type Connection,
   connectionGenerator,
@@ -18,7 +18,7 @@ import {
   findComponentInMetadata,
   PROJECT_COMPONENT_SENTINEL,
   resolveConnection,
-} from './generator';
+} from './generator.js';
 
 // Mock the generators
 vi.mock('../trpc/react/generator', () => ({

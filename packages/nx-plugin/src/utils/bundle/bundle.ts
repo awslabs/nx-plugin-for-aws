@@ -11,19 +11,19 @@ import {
   type TargetConfiguration,
   type Tree,
 } from '@nx/devkit';
-import { applyGritQL } from '../ast';
+import { applyGritQL } from '../ast.js';
 import {
   type DependencyDeclaration,
   forDependencies,
   type MustDeclare,
-} from '../declared-dependencies';
-import { addDependenciesToPackageJson } from '../dependencies';
+} from '../declared-dependencies.js';
+import { addDependenciesToPackageJson } from '../dependencies.js';
 import {
   addDependencyToTargetIfNotPresent,
   normalizeTargetKeyOrder,
-} from '../nx';
-import { getRelativePathToRoot } from '../paths';
-import { type ITsDepVersion, withVersions } from '../versions';
+} from '../nx.js';
+import { getRelativePathToRoot } from '../paths.js';
+import { type ITsDepVersion, withVersions } from '../versions.js';
 
 /** Dependencies a caller must declare to add a TypeScript bundle target. */
 export const BUNDLE_DEPENDENCIES = [

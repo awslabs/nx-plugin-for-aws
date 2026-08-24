@@ -13,22 +13,25 @@ import {
 import {
   addPyDependencies,
   addTsDependencies,
-} from '../../utils/add-dependencies';
-import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
-import { addPythonBundleTarget } from '../../utils/bundle/bundle';
-import { resolveContainers } from '../../utils/containers';
+} from '../../utils/add-dependencies.js';
+import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-constructs.js';
+import { addPythonBundleTarget } from '../../utils/bundle/bundle.js';
+import { resolveContainers } from '../../utils/containers.js';
 import {
   declareDependencies,
   ownedElsewhere,
-} from '../../utils/declared-dependencies';
-import { addDockerScanTarget, DOCKER_DEPENDENCIES } from '../../utils/docker';
-import { formatFilesInSubtree } from '../../utils/format';
-import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs';
-import { resolveIac } from '../../utils/iac';
-import { installDependencies } from '../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { kebabCase, toClassName, toSnakeCase } from '../../utils/names';
-import { getNpmScope } from '../../utils/npm-scope';
+} from '../../utils/declared-dependencies.js';
+import {
+  addDockerScanTarget,
+  DOCKER_DEPENDENCIES,
+} from '../../utils/docker.js';
+import { formatFilesInSubtree } from '../../utils/format.js';
+import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs.js';
+import { resolveIac } from '../../utils/iac.js';
+import { installDependencies } from '../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
+import { kebabCase, toClassName, toSnakeCase } from '../../utils/names.js';
+import { getNpmScope } from '../../utils/npm-scope.js';
 import {
   addComponentDevTarget,
   addComponentGeneratorMetadata,
@@ -36,16 +39,16 @@ import {
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
-} from '../../utils/nx';
-import { toProjectRelativePath } from '../../utils/paths';
-import { registerPnpmBuiltDependencies } from '../../utils/pnpm-workspace';
-import { assignPort } from '../../utils/port';
+} from '../../utils/nx.js';
+import { toProjectRelativePath } from '../../utils/paths.js';
+import { registerPnpmBuiltDependencies } from '../../utils/pnpm-workspace.js';
+import { assignPort } from '../../utils/port.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../utils/shared-constructs';
-import type { IacMetadata } from '../../utils/shared-constructs-constants';
-import { BASE_IMAGES } from '../../utils/versions';
+} from '../../utils/shared-constructs.js';
+import type { IacMetadata } from '../../utils/shared-constructs-constants.js';
+import { BASE_IMAGES } from '../../utils/versions.js';
 import type { PyMcpServerGeneratorSchema } from './schema';
 
 /** The metadata this generator records, which its predicates read. */

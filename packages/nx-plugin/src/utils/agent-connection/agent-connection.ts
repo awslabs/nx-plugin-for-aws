@@ -10,28 +10,28 @@ import {
 } from '@nx/devkit';
 import pyProjectGenerator, {
   getPyProjectDetails,
-} from '../../py/project/generator';
-import tsProjectGenerator from '../../ts/lib/generator';
+} from '../../py/project/generator.js';
+import tsProjectGenerator from '../../ts/lib/generator.js';
 import {
   addStarExport,
   appendToArrayViaGritQL,
   applyGritQL,
   matchGritQL,
-} from '../ast';
+} from '../ast.js';
 import {
   type DependencyDeclaration,
   forDependencies,
   type MustDeclare,
   type MustDeclarePy,
-} from '../declared-dependencies';
-import { addDependenciesToPackageJson } from '../dependencies';
-import { esmVars } from '../module-format';
-import { addDependenciesToPyProjectToml } from '../py';
+} from '../declared-dependencies.js';
+import { addDependenciesToPackageJson } from '../dependencies.js';
+import { esmVars } from '../module-format.js';
+import { addDependenciesToPyProjectToml } from '../py.js';
 import {
   type IPyDepVersion,
   type ITsDepVersion,
   withVersions,
-} from '../versions';
+} from '../versions.js';
 
 /** TypeScript dependencies a caller must declare to emit agent-connection clients. */
 export const AGENT_CONNECTION_DEPENDENCIES = [

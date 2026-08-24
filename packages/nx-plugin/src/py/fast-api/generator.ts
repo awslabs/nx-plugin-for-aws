@@ -12,38 +12,40 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { addPyDependencies } from '../../utils/add-dependencies';
+import { addPyDependencies } from '../../utils/add-dependencies.js';
 import {
   API_CONSTRUCTS_DEPENDENCIES,
   API_CONSTRUCTS_PY_DEPENDENCIES,
   addApiGatewayInfra,
-} from '../../utils/api-constructs/api-constructs';
-import { addSharedConstructsOpenApiMetadataGenerateTarget } from '../../utils/api-constructs/open-api-metadata';
-import { addPythonBundleTarget } from '../../utils/bundle/bundle';
+} from '../../utils/api-constructs/api-constructs.js';
+import { addSharedConstructsOpenApiMetadataGenerateTarget } from '../../utils/api-constructs/open-api-metadata.js';
+import { addPythonBundleTarget } from '../../utils/bundle/bundle.js';
 import {
   declareDependencies,
   ownedElsewhere,
-} from '../../utils/declared-dependencies';
-import { formatFilesInSubtree } from '../../utils/format';
-import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs';
-import { resolveIac } from '../../utils/iac';
-import { installDependencies } from '../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { toClassName, toKebabCase } from '../../utils/names';
+} from '../../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../../utils/format.js';
+import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs.js';
+import { resolveIac } from '../../utils/iac.js';
+import { installDependencies } from '../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
+import { toClassName, toKebabCase } from '../../utils/names.js';
 import {
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
-} from '../../utils/nx';
-import { sortObjectKeys } from '../../utils/object';
-import { assignPort } from '../../utils/port';
+} from '../../utils/nx.js';
+import { sortObjectKeys } from '../../utils/object.js';
+import { assignPort } from '../../utils/port.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../utils/shared-constructs';
-import type { IacMetadata } from '../../utils/shared-constructs-constants';
-import pyProjectGenerator, { getPyProjectDetails } from '../project/generator';
-import { addOpenApiGeneration } from './react/open-api';
+} from '../../utils/shared-constructs.js';
+import type { IacMetadata } from '../../utils/shared-constructs-constants.js';
+import pyProjectGenerator, {
+  getPyProjectDetails,
+} from '../project/generator.js';
+import { addOpenApiGeneration } from './react/open-api.js';
 import type { PyFastApiProjectGeneratorSchema } from './schema';
 
 /** The metadata this generator records, which its predicates read. */

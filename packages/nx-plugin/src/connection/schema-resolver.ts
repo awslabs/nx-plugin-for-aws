@@ -10,7 +10,7 @@ import {
   type ScaffoldRecipe,
   type SchemaResolver,
   schemaPathOf,
-} from './scaffold-catalog';
+} from './scaffold-catalog.js';
 
 /** Reads schemas from disk, for the plugin and its tests. */
 export const nodeSchemaResolver: SchemaResolver = (() => {

@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { buildCreateNxWorkspaceCommand } from '../../utils/commands';
-import { IAC_PROVIDERS } from '../../utils/iac-providers';
-import { PackageManagerSchema } from '../schema';
+import { buildCreateNxWorkspaceCommand } from '../../utils/commands.js';
+import { IAC_PROVIDERS } from '../../utils/iac-providers.js';
+import { PackageManagerSchema } from '../schema.js';
 
 /**
  * Add a tool which tells a model how to create an Nx workspace

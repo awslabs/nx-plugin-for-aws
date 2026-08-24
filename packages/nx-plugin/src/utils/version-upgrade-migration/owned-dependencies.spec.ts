@@ -10,17 +10,17 @@ import {
   type Tree,
 } from '@nx/devkit';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { captureAllGritQL, matchGritQL } from '../ast';
-import { AWS_NX_PLUGIN_CONFIG_FILE_NAME } from '../config/utils';
-import { declaredNames } from '../declared-dependencies';
-import { buildGeneratorInfoList } from '../generators';
-import { createTreeUsingTsSolutionSetup } from '../test';
-import { PY_VERSIONS, TS_VERSIONS } from '../versions';
+import { captureAllGritQL, matchGritQL } from '../ast.js';
+import { AWS_NX_PLUGIN_CONFIG_FILE_NAME } from '../config/utils.js';
+import { declaredNames } from '../declared-dependencies.js';
+import { buildGeneratorInfoList } from '../generators.js';
+import { createTreeUsingTsSolutionSetup } from '../test.js';
+import { PY_VERSIONS, TS_VERSIONS } from '../versions.js';
 import {
   generatorsRun,
   ownedDependencies,
   PLUGIN_ROOT,
-} from './owned-dependencies';
+} from './owned-dependencies.js';
 
 const addProject = (
   tree: Tree,

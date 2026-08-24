@@ -4,9 +4,9 @@
  */
 import { readJson, type Tree, writeJson } from '@nx/devkit';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { addPyDependencies, addTsDependencies } from './add-dependencies';
-import { declareDependencies } from './declared-dependencies';
-import { createTreeUsingTsSolutionSetup } from './test';
+import { addPyDependencies, addTsDependencies } from './add-dependencies.js';
+import { declareDependencies } from './declared-dependencies.js';
+import { createTreeUsingTsSolutionSetup } from './test.js';
 
 describe('add-dependencies', () => {
   let tree: Tree;

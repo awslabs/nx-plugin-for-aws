@@ -3,20 +3,20 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { type Tree, updateJson } from '@nx/devkit';
-import { declareDependencies } from '../../../utils/declared-dependencies';
-import { expectHasMetricTags } from '../../../utils/metrics.spec';
+import { declareDependencies } from '../../../utils/declared-dependencies.js';
+import { expectHasMetricTags } from '../../../utils/metrics.spec.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../../utils/shared-constructs';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import { tsProjectGenerator } from '../../lib/generator';
-import { tsReactWebsiteGenerator } from '../../react-website/app/generator';
-import { tsAgentGenerator } from '../generator';
+} from '../../../utils/shared-constructs.js';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
+import { tsProjectGenerator } from '../../lib/generator.js';
+import { tsReactWebsiteGenerator } from '../../react-website/app/generator.js';
+import { tsAgentGenerator } from '../generator.js';
 import {
   TS_AGENT_REACT_CONNECTION_GENERATOR_INFO,
   tsAgentReactConnectionGenerator,
-} from './generator';
+} from './generator.js';
 
 const sharedConstructsDeclaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],

@@ -9,7 +9,7 @@ import {
   joinPathFragments,
   OverwriteStrategy,
 } from '@nx/devkit';
-import { esmVars } from '../module-format';
+import { esmVars } from '../module-format.js';
 
 export type AgentChatProtocol = 'http' | 'a2a' | 'ag-ui';
 export type AgentChatAuth = 'iam' | 'cognito';

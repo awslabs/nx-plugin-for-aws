@@ -3,11 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
 import {
   PY_AGENT_GATEWAY_CONNECTION_GENERATOR_INFO,
   pyAgentGatewayConnectionGenerator,
-} from './generator';
+} from './generator.js';
 
 describe('py#agent#gateway-connection generator', () => {
   let tree: Tree;

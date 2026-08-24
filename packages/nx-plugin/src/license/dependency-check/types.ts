@@ -19,7 +19,7 @@ export interface DependencyCheckException {
 export interface DependencyCheckConfig {
   allow: AllowlistEntry[];
   exceptions?: DependencyCheckException[];
-  collectors?: import('./collectors/collector').LicenseCollector[];
+  collectors?: import('./collectors/collector.js').LicenseCollector[];
   /**
    * Called once for every discovered dependency, with its package name and the
    * SPDX license expression resolved for it (an exception's `spdx` takes

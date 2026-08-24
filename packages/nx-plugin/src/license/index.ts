@@ -6,14 +6,14 @@
 export type {
   CollectedDependency,
   LicenseCollector,
-} from './dependency-check/collectors/collector';
+} from './dependency-check/collectors/collector.js';
 export {
   npmCollector,
   pythonCollector,
-} from './dependency-check/collectors/collector';
-export { PRE_APPROVED_LICENSES as DEFAULT_LICENSE_ALLOWLIST } from './dependency-check/pre-approved';
+} from './dependency-check/collectors/collector.js';
+export { PRE_APPROVED_LICENSES as DEFAULT_LICENSE_ALLOWLIST } from './dependency-check/pre-approved.js';
 export type {
   AllowlistEntry,
   DependencyCheckConfig,
   DependencyCheckException,
-} from './dependency-check/types';
+} from './dependency-check/types.js';

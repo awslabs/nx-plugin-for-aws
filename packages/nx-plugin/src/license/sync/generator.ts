@@ -13,20 +13,20 @@ import { minimatch } from 'minimatch';
 import type { SyncGeneratorResult } from 'nx/src/utils/sync-generators';
 import { basename } from 'path';
 import PackageJson from '../../../package.json' with { type: 'json' };
-import { AWS_NX_PLUGIN_CONFIG_FILE_NAME } from '../../utils/config/utils';
-import { getGitIncludedFiles, isWithinGitRepo } from '../../utils/git';
-import { getGeneratorInfo } from '../../utils/nx';
-import { LANGUAGE_COMMENT_SYNTAX, readLicenseConfig } from '../config';
+import { AWS_NX_PLUGIN_CONFIG_FILE_NAME } from '../../utils/config/utils.js';
+import { getGitIncludedFiles, isWithinGitRepo } from '../../utils/git.js';
+import { getGeneratorInfo } from '../../utils/nx.js';
+import { LANGUAGE_COMMENT_SYNTAX, readLicenseConfig } from '../config.js';
 import type {
   CommentSyntax,
   LicenseHeaderConfig,
   LicenseHeaderFormat,
-} from '../config-types';
+} from '../config-types.js';
 import {
   PROJECT_FILES_TO_SYNC,
   type ProjectFileToSync,
   syncProjectFile,
-} from './project-file-sync';
+} from './project-file-sync.js';
 
 export const SYNC_GENERATOR_NAME = `${PackageJson.name}:${getGeneratorInfo(import.meta.filename).id}`;
 

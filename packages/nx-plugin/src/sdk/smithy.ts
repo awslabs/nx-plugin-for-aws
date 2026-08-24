@@ -4,5 +4,5 @@
  */
 
 // Smithy Project Generator
-export { smithyProjectGenerator } from '../smithy/project/generator';
+export { smithyProjectGenerator } from '../smithy/project/generator.js';
 export type { SmithyProjectGeneratorSchema } from '../smithy/project/schema';

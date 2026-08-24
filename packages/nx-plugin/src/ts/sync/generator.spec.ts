@@ -11,8 +11,8 @@ import {
   type Tree,
 } from '@nx/devkit';
 import { afterEach, vi } from 'vitest';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { tsSyncGeneratorGenerator } from './generator';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import { tsSyncGeneratorGenerator } from './generator.js';
 
 vi.mock('@nx/devkit', async (importOriginal) => {
   const original = await importOriginal<typeof devkit>();

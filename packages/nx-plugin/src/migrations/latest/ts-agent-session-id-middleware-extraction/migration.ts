@@ -10,15 +10,15 @@ import {
   type MigrationReturnObject,
   type Tree,
 } from '@nx/devkit';
-import { TS_AGENT_GENERATOR_INFO } from '../../../ts/agent/generator';
+import { TS_AGENT_GENERATOR_INFO } from '../../../ts/agent/generator.js';
 import {
   addDestructuredImport,
   applyGritQL,
   captureGritQLVariable,
   matchGritQL,
-} from '../../../utils/ast';
-import { formatFilesInSubtree } from '../../../utils/format';
-import type { ComponentMetadata } from '../../../utils/nx';
+} from '../../../utils/ast.js';
+import { formatFilesInSubtree } from '../../../utils/format.js';
+import type { ComponentMetadata } from '../../../utils/nx.js';
 
 /**
  * Extract the inline session-id Express middleware - previously duplicated

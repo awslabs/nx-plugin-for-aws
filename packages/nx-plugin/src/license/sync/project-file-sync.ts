@@ -8,8 +8,8 @@ import {
   type Tree,
   updateJson,
 } from '@nx/devkit';
-import { updateToml } from '../../utils/toml';
-import type { LicenseSourceConfig } from '../config-types';
+import { updateToml } from '../../utils/toml.js';
+import type { LicenseSourceConfig } from '../config-types.js';
 
 /**
  * Different project files with licensing information to be synchronised

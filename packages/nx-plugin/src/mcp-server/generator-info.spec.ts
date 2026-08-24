@@ -4,12 +4,12 @@
  */
 
 import fs from 'fs';
-import type { NxGeneratorInfo } from '../utils/generators';
+import type { NxGeneratorInfo } from '../utils/generators.js';
 import {
   fetchGuidePagesForGenerator,
   postProcessGuide,
   renderFilterableOptionsAsync,
-} from './generator-info';
+} from './generator-info.js';
 
 describe('postProcessGuide', () => {
   const generators: NxGeneratorInfo[] = [

@@ -15,8 +15,8 @@ import {
 import type { SyncGeneratorResult } from 'nx/src/utils/sync-generators';
 import { relative } from 'path';
 import PackageJson from '../../../package.json' with { type: 'json' };
-import { getLocalDependencySpecifier } from '../../utils/dependencies';
-import { getGeneratorInfo, type NxGeneratorInfo } from '../../utils/nx';
+import { getLocalDependencySpecifier } from '../../utils/dependencies.js';
+import { getGeneratorInfo, type NxGeneratorInfo } from '../../utils/nx.js';
 
 export const TS_SYNC_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,

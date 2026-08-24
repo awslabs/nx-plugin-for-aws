@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import { addAgentTargetToLocalDev } from '../../../connection/agent-local-dev';
-import type { ComponentMetadata } from '../../../utils/nx';
+import { addAgentTargetToLocalDev } from '../../../connection/agent-local-dev.js';
+import type { ComponentMetadata } from '../../../utils/nx.js';
 
 export interface TsAgentLocalDevOptions {
   agentName: string;

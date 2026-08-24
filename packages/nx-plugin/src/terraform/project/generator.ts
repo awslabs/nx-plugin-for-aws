@@ -16,31 +16,34 @@ import {
   updateNxJson,
 } from '@nx/devkit';
 import { join, relative } from 'path';
-import { getTsLibDetails } from '../../ts/lib/generator';
-import { addTsDependencies } from '../../utils/add-dependencies';
+import { getTsLibDetails } from '../../ts/lib/generator.js';
+import { addTsDependencies } from '../../utils/add-dependencies.js';
 import {
   declareDependencies,
   ownedElsewhere,
-} from '../../utils/declared-dependencies';
-import { updateGitIgnore } from '../../utils/git';
-import { installDependencies } from '../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { kebabCase } from '../../utils/names';
+} from '../../utils/declared-dependencies.js';
+import { updateGitIgnore } from '../../utils/git.js';
+import { installDependencies } from '../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
+import { kebabCase } from '../../utils/names.js';
 import {
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   projectExists,
-} from '../../utils/nx';
-import { sortObjectKeys } from '../../utils/object';
-import { uvxCommand } from '../../utils/py';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+} from '../../utils/nx.js';
+import { sortObjectKeys } from '../../utils/object.js';
+import { uvxCommand } from '../../utils/py.js';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   SHARED_TERRAFORM_DIR,
   SHARED_TERRAFORM_NAME,
-} from '../../utils/shared-constructs-constants';
-import { terraformProviderVersions, withVersions } from '../../utils/versions';
+} from '../../utils/shared-constructs-constants.js';
+import {
+  terraformProviderVersions,
+  withVersions,
+} from '../../utils/versions.js';
 import type { TerraformProjectGeneratorSchema } from './schema';
 
 // Terraform projects carry no package.json, so their build tooling and the AWS

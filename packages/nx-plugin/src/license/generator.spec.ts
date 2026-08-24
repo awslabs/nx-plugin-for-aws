@@ -8,17 +8,17 @@ import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
 import {
   AWS_NX_PLUGIN_CONFIG_FILE_NAME,
   readAwsNxPluginConfig,
-} from '../utils/config/utils';
-import { declareDependencies } from '../utils/declared-dependencies';
-import { expectHasMetricTags } from '../utils/metrics.spec';
+} from '../utils/config/utils.js';
+import { declareDependencies } from '../utils/declared-dependencies.js';
+import { expectHasMetricTags } from '../utils/metrics.spec.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../utils/shared-constructs';
-import { createTreeUsingTsSolutionSetup } from '../utils/test';
-import { LICENSE_GENERATOR_INFO, licenseGenerator } from './generator';
+} from '../utils/shared-constructs.js';
+import { createTreeUsingTsSolutionSetup } from '../utils/test.js';
+import { LICENSE_GENERATOR_INFO, licenseGenerator } from './generator.js';
 import type { LicenseGeneratorSchema } from './schema';
-import { SYNC_GENERATOR_NAME } from './sync/generator';
+import { SYNC_GENERATOR_NAME } from './sync/generator.js';
 
 const sharedConstructsDeclaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
@@ -345,7 +345,7 @@ describe('license generator', () => {
     });
 
     it('should add pythonCollector when py#project runs after license generator', async () => {
-      const { ensurePythonLicenseCollector } = await import('./config');
+      const { ensurePythonLicenseCollector } = await import('./config.js');
 
       tree.write('pnpm-lock.yaml', '');
       await licenseGenerator(tree, options);
@@ -370,8 +370,10 @@ describe('license generator', () => {
 
     it('should be no-op when ensure functions run before license generator', async () => {
       const { ensurePythonLicenseCollector, ensureLicenseExceptions } =
-        await import('./config');
-      const { AG_UI_LANGGRAPH_EXCEPTIONS } = await import('./known-exceptions');
+        await import('./config.js');
+      const { AG_UI_LANGGRAPH_EXCEPTIONS } = await import(
+        './known-exceptions.js'
+      );
 
       await ensurePythonLicenseCollector(tree);
       await ensureLicenseExceptions(tree, AG_UI_LANGGRAPH_EXCEPTIONS);

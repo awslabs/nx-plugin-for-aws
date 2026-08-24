@@ -13,35 +13,35 @@ import {
   updateJson,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { addTsDependencies } from '../../utils/add-dependencies';
+import { addTsDependencies } from '../../utils/add-dependencies.js';
 import {
   AGENT_CORE_CONSTRUCTS_PY_DEPENDENCIES,
   addMcpServerInfra,
-} from '../../utils/agent-core-constructs/agent-core-constructs';
+} from '../../utils/agent-core-constructs/agent-core-constructs.js';
 import {
   addTypeScriptBundleTarget,
   BUNDLE_DEPENDENCIES,
-} from '../../utils/bundle/bundle';
-import { resolveContainers } from '../../utils/containers';
+} from '../../utils/bundle/bundle.js';
+import { resolveContainers } from '../../utils/containers.js';
 import {
   declareDependencies,
   ownedElsewhere,
-} from '../../utils/declared-dependencies';
+} from '../../utils/declared-dependencies.js';
 import {
   ADOT_IMAGE_DEPENDENCIES,
   addDockerScanTarget,
   DOCKER_DEPENDENCIES,
   NODE_IMAGE_DEPENDENCIES,
   nodeImageVersions,
-} from '../../utils/docker';
-import { formatFilesInSubtree } from '../../utils/format';
-import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs';
-import { resolveIac } from '../../utils/iac';
-import { installDependencies } from '../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { isEsmWorkspace } from '../../utils/module-format';
-import { kebabCase, toClassName } from '../../utils/names';
-import { getNpmScope } from '../../utils/npm-scope';
+} from '../../utils/docker.js';
+import { formatFilesInSubtree } from '../../utils/format.js';
+import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs.js';
+import { resolveIac } from '../../utils/iac.js';
+import { installDependencies } from '../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
+import { isEsmWorkspace } from '../../utils/module-format.js';
+import { kebabCase, toClassName } from '../../utils/names.js';
+import { getNpmScope } from '../../utils/npm-scope.js';
 import {
   addComponentDevTarget,
   addComponentGeneratorMetadata,
@@ -49,16 +49,16 @@ import {
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
-} from '../../utils/nx';
-import { sortObjectKeys } from '../../utils/object';
-import { registerPnpmBuiltDependencies } from '../../utils/pnpm-workspace';
-import { assignPort } from '../../utils/port';
+} from '../../utils/nx.js';
+import { sortObjectKeys } from '../../utils/object.js';
+import { registerPnpmBuiltDependencies } from '../../utils/pnpm-workspace.js';
+import { assignPort } from '../../utils/port.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../utils/shared-constructs';
-import type { IacMetadata } from '../../utils/shared-constructs-constants';
-import { BASE_IMAGES, TS_VERSIONS } from '../../utils/versions';
+} from '../../utils/shared-constructs.js';
+import type { IacMetadata } from '../../utils/shared-constructs-constants.js';
+import { BASE_IMAGES, TS_VERSIONS } from '../../utils/versions.js';
 import type { TsMcpServerGeneratorSchema } from './schema';
 
 /** The metadata this generator records, which its predicates read. */

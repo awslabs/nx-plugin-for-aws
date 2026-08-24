@@ -7,7 +7,7 @@ import {
   type ConnectionKey,
   SUPPORTED_CONNECTIONS,
   type SUPPORTED_PROJECT_TYPES,
-} from './supported-connections';
+} from './supported-connections.js';
 
 /**
  * How to scaffold each end of a connection, derived from the plugin's own

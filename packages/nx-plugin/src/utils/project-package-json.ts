@@ -11,8 +11,8 @@ import {
 } from '@nx/devkit';
 import yaml from 'js-yaml';
 import { minimatch } from 'minimatch';
-import { detectWorkspacePackageManager } from './dependencies';
-import { isEsmWorkspace } from './module-format';
+import { detectWorkspacePackageManager } from './dependencies.js';
+import { isEsmWorkspace } from './module-format.js';
 
 export interface EnsureProjectPackageJsonOptions {
   /** Directory of the project relative to the workspace root */

@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import type { IacOption } from '../../utils/iac';
+import type { IacOption } from '../../utils/iac.js';
 
 export interface TsDcrProxyGeneratorSchema {
   name?: string;

@@ -8,13 +8,13 @@ import {
   readProjectConfiguration,
   type Tree,
 } from '@nx/devkit';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
-import { toKebabCase } from '../../utils/names';
+import { expectHasMetricTags } from '../../utils/metrics.spec.js';
+import { toKebabCase } from '../../utils/names.js';
 import {
   createTreeUsingTsSolutionSetup,
   snapshotTreeDir,
-} from '../../utils/test';
-import { INFRA_APP_GENERATOR_INFO, tsInfraGenerator } from './generator';
+} from '../../utils/test.js';
+import { INFRA_APP_GENERATOR_INFO, tsInfraGenerator } from './generator.js';
 import type { TsInfraGeneratorSchema } from './schema';
 
 describe('infra generator', () => {

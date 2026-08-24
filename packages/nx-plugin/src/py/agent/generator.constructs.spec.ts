@@ -8,18 +8,18 @@ import {
   joinPathFragments,
   type Tree,
 } from '@nx/devkit';
-import { declareDependencies } from '../../utils/declared-dependencies';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
+import { declareDependencies } from '../../utils/declared-dependencies.js';
+import { expectHasMetricTags } from '../../utils/metrics.spec.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../utils/shared-constructs';
+} from '../../utils/shared-constructs.js';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
-} from '../../utils/shared-constructs-constants';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { PY_AGENT_GENERATOR_INFO, pyAgentGenerator } from './generator';
+} from '../../utils/shared-constructs-constants.js';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import { PY_AGENT_GENERATOR_INFO, pyAgentGenerator } from './generator.js';
 
 const sharedConstructsDeclaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],

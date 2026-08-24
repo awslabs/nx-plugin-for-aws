@@ -6,9 +6,9 @@
 import { execFileSync } from 'child_process';
 import { createRequire } from 'module';
 import { describe, expect, it } from 'vitest';
-import { declareDependencies } from './declared-dependencies';
-import { FIXABLE_RULES, RUFF_WASM_VERSION, ruffFixAndFormat } from './ruff';
-import { PY_VERSIONS, withPyVersions } from './versions';
+import { declareDependencies } from './declared-dependencies.js';
+import { FIXABLE_RULES, RUFF_WASM_VERSION, ruffFixAndFormat } from './ruff.js';
+import { PY_VERSIONS, withPyVersions } from './versions.js';
 
 const declaration = declareDependencies()({ py: [{ name: 'ruff' }] });
 
