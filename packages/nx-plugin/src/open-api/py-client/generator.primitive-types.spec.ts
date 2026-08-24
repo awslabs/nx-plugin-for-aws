@@ -277,7 +277,7 @@ describe('openApiPyClientGenerator - primitive types', () => {
       },
     };
     const { types } = await generateAndRead(verifier, tree, spec);
-    expect(types).toContain('Optional[str]');
+    expect(types).toContain('str | None');
 
     const res = await callGeneratedClient(
       verifier,

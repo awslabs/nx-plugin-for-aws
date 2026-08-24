@@ -241,11 +241,11 @@ describe('openApiPyClientGenerator - composite types', () => {
   });
 
   it('parses a Union-aliased response body via TypeAdapter at runtime', async () => {
-    // Regression: `Foo = Union["Dog", "Cat"]` rendered as a module-level
+    // Regression: `Foo = "Dog" | "Cat"` rendered as a module-level
     // alias failed when the generated client did
     // `Foo.model_validate(...)` — Union aliases don't have `model_validate`.
     // It also failed when aliases were emitted *before* the classes they
-    // reference — TypeAdapter(Union["Dog", "Cat"]) can't resolve string
+    // reference — TypeAdapter("Dog" | "Cat") can't resolve string
     // forward-refs at runtime (unlike pydantic class-body annotations).
     const spec: Spec = {
       openapi: '3.0.0',
@@ -305,11 +305,11 @@ describe('openApiPyClientGenerator - composite types', () => {
     const { types, client } = await generateAndRead(verifier, tree, spec);
 
     // Union alias references real class names (not "Dog" / "Cat" strings).
-    expect(types).toMatch(/^Animal\s*=\s*Union\[Dog,\s*Cat\]/m);
+    expect(types).toMatch(/^Animal\s*=\s*Dog \| Cat$/m);
     // Classes must appear before the alias that references them.
     const dogIdx = types.indexOf('class Dog(');
     const catIdx = types.indexOf('class Cat(');
-    const aliasIdx = types.indexOf('Animal = Union[');
+    const aliasIdx = types.indexOf('Animal = Dog | Cat');
     expect(dogIdx).toBeGreaterThan(-1);
     expect(catIdx).toBeGreaterThan(-1);
     expect(aliasIdx).toBeGreaterThan(dogIdx);
@@ -442,7 +442,7 @@ describe('openApiPyClientGenerator - composite types', () => {
 
     // The alias is a pydantic tagged union on the discriminator field.
     expect(types).toMatch(
-      /^Pet\s*=\s*Annotated\[Union\[Dog,\s*Cat\],\s*Field\(discriminator="pet_type"\)\]/m,
+      /^Pet\s*=\s*Annotated\[Dog \| Cat,\s*Field\(discriminator="pet_type"\)\]/m,
     );
     // Each member's discriminator property is a Literal tag.
     expect(types).toMatch(/pet_type:\s*Literal\["dog"\]/);

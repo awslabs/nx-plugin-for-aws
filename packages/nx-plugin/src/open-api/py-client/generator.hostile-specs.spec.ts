@@ -329,8 +329,8 @@ describe('openApiPyClientGenerator - hostile specs', () => {
     };
     const { types } = await generateAndRead(verifier, tree, spec);
     // Optional in type but with no default, so omitting it is an error.
-    expect(types).toContain('note: Optional[str]');
-    expect(types).not.toMatch(/note: Optional\[str\] = /);
+    expect(types).toContain('note: str | None');
+    expect(types).not.toMatch(/note: str \| None = /);
 
     const res = await callGeneratedClient(
       verifier,

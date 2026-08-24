@@ -39,7 +39,7 @@ const normalise = (source: string): string =>
     .replace(/\baiter_bytes\b/g, 'iter_bytes')
     .replace(/\baread\b/g, 'read')
     .replace(/\bAsyncIterator\b/g, 'Iterator')
-    .replace(/\bAsyncGenerator\[([^\]]*), None\]/g, 'Iterator[$1]')
+    .replace(/\bAsyncGenerator\[/g, 'Iterator[')
     .replace(/\bAsyncClient\b/g, 'Client')
     .replace(/\bAsyncBaseTransport\b/g, 'BaseTransport')
     .replace(/\bcollections\.abc import Generator, Iterator\b/g, 'x')

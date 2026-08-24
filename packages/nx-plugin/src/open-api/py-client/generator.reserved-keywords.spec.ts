@@ -256,9 +256,9 @@ describe('openApiPyClientGenerator - reserved keywords', () => {
   it('should escape schema names that shadow generated python imports (e.g. `Field`)', async () => {
     // Regression: a schema named `Field` (e.g. an inline `anyOf` whose
     // `title` is `Field`, as FastAPI emits when a property is named `field`)
-    // would be rendered as a top-level `Field = Union[...]` alias that
+    // would be rendered as a top-level `Field = ...` alias that
     // shadows the imported `pydantic.Field` symbol.  This corrupted forward
-    // ref evaluation: `Optional["Field"]` in a class body would resolve to
+    // ref evaluation: `"Field" | None` in a class body would resolve to
     // `pydantic.Field` (a function) rather than the alias, raising
     // `TypeError: unsupported operand type(s) for |: 'function' and 'type'`
     // when pydantic later attempted `field | None`.  Escape the class name
@@ -312,12 +312,12 @@ describe('openApiPyClientGenerator - reserved keywords', () => {
     // The emitted alias must be `_Field`, not `Field`, so it doesn't
     // shadow the `from pydantic import ..., Field` import.
     expect(types).not.toMatch(/^Field = /m);
-    expect(types).toContain('_Field = Union[str, None]');
+    expect(types).toContain('_Field = str | None');
     // The `pydantic.Field` import must remain intact and usable in the
     // module — unrelated properties still rendered with `Field(...)`.
     expect(types).toMatch(/from pydantic import .*\bField\b/);
     // References inside class bodies must use the escaped name.
-    expect(types).toContain('field: Optional["_Field"]');
+    expect(types).toContain('field: _Field | None');
     // Client modules don't reference the alias type directly, but the
     // module must import cleanly.  Smoke-check that nothing in client/async
     // referenced the bare unprefixed name (would only happen via

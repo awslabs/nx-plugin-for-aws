@@ -364,8 +364,12 @@ export const renderPythonType = (
         return `dict[str, ${render(t.value)}]`;
       case 'tuple':
         return `tuple[${t.members.map(render).join(', ')}]`;
-      case 'optional':
-        return `Optional[${render(t.inner)}]`;
+      case 'optional': {
+        // PEP 604, which is what the ruff rules generated Python projects vend
+        // (`UP045`) require, and what every other Python template here emits.
+        const inner = render(t.inner);
+        return inner === 'None' ? inner : `${inner} | None`;
+      }
     }
   };
   return render(type);

@@ -1,4 +1,6 @@
 <%_
+// An operation with no error responses has `Never` as its error type.
+const hasNeverErrorType = allOperations.some(op => !op.errorShape || op.errorShape.entries.length === 0);
 const pyEnumValue = (member) => toPythonLiteral(member.value);
 /**
  * A discriminated subtype's tag property. pydantic dispatches a tagged union
@@ -22,15 +24,46 @@ const pyDocstring = (text) =>
 const modelDocstring = (model) =>
   pyDocstring(model.description || '') + (model.deprecated ? ' (deprecated)' : '');
 
+/**
+ * A docstring, indented and wrapped to the vended line length so a long
+ * description doesn't trip the `E501` the generated project lints with. Returns
+ * the empty string when there is nothing to say.
+ */
+const docstring = (text, indent) => {
+  const body = String(text ?? '');
+  if (!body) return '';
+  const oneLine = `${indent}"""${body}"""`;
+  if (oneLine.length <= 120) return `${oneLine}\n`;
+  const width = 120 - indent.length;
+  const lines = [];
+  let current = '';
+  for (const word of body.split(' ')) {
+    if (current && `${current} ${word}`.length > width) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = current ? `${current} ${word}` : word;
+    }
+  }
+  if (current) lines.push(current);
+  return `${indent}"""\n${lines.map((l) => `${indent}${l}`).join('\n')}\n${indent}"""\n`;
+};
+
+/** A model's docstring, wrapped as above. */
+const docstringBlock = (model, indent) =>
+  model.description || model.deprecated
+    ? docstring(modelDocstring(model), indent)
+    : '';
+
 const fieldAnnotation = (prop) => {
   let base;
   if (prop.isEnum && Array.isArray(prop.enum) && prop.enum.length > 0) {
     base = `Literal[${prop.enum.map(pyEnumValue).join(', ')}]`;
   } else {
-    base = prop.pythonAnnotation || prop.pythonType || 'Any';
+    base = prop.pythonType || 'Any';
   }
   if (isDiscriminatorTag(prop)) return base;
-  if (!prop.isRequired || prop.isNullable) return `Optional[${base}]`;
+  if (!prop.isRequired || prop.isNullable) return `${base} | None`;
   return base;
 };
 const stripQuotes = (t) => (t || '').replace(/^"(.*)"$/, '$1');
@@ -79,7 +112,7 @@ _%>
 from __future__ import annotations
 
 import datetime
-from typing import Annotated, Any, Literal, Never, Optional, TypedDict, Union
+from typing import Annotated, Any, Literal<%- hasNeverErrorType ? ', Never' : '' %>, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -91,7 +124,7 @@ from pydantic import BaseModel, ConfigDict, Field
  * reference other types only via forward-ref-quoted annotations that pydantic
  * resolves lazily.
  *
- * `alias` models emit as `Foo = Union[...] / Literal[...] / list[...] / ...`.
+ * `alias` models emit as `Foo = A | B / Literal[...] / list[...] / ...`.
  * These are module-level expressions evaluated at import time, so every
  * type they reference must already be defined.  Emit them *after* all class
  * definitions so `TypeAdapter(Foo)` can resolve references without relying
@@ -124,10 +157,7 @@ _%>
 _%>
 
 class <%- model.pythonClassName %>(BaseModel):
-<%_ if (model.description || model.deprecated) { _%>
-    """<%- modelDocstring(model) %>"""
-<%_ } _%>
-    model_config = ConfigDict(populate_by_name=True, extra="allow")
+<%- docstringBlock(model, '    ') %>    model_config = ConfigDict(populate_by_name=True, extra="allow")
 
 <%_ if (flattened.length === 0) { _%>
     pass
@@ -138,10 +168,7 @@ class <%- model.pythonClassName %>(BaseModel):
 <%_ } else { _%>
 
 class <%- model.pythonClassName %>(BaseModel):
-<%_ if (model.description || model.deprecated) { _%>
-    """<%- modelDocstring(model) %>"""
-<%_ } _%>
-    model_config = ConfigDict(populate_by_name=True, extra="allow")
+<%- docstringBlock(model, '    ') %>    model_config = ConfigDict(populate_by_name=True, extra="allow")
 
 <%_ if ((model.properties || []).length === 0 && !model.hasAdditionalProperties) { _%>
     pass
@@ -196,18 +223,14 @@ _%>
 
 <%_ if (model.export === 'enum') { _%>
 <%- model.pythonClassName %> = Literal[<%_ model.enum.forEach((m, i) => { _%><%- i > 0 ? ', ' : '' %><%- pyEnumValue(m) %><%_ }); _%>]
-<%_ if (model.description || model.deprecated) { _%>
-"""<%- modelDocstring(model) %>"""
-<%_ } _%>
-<%_ } else if (model.export === 'one-of' || model.export === 'any-of') { _%>
-<%_ /* Classes are already defined above, so references can be unquoted.
-       `pythonType` (no quotes) vs `pythonAnnotation` (forward-ref-quoted)
-       matters here: pydantic's `TypeAdapter(X)` can't resolve string
-       forward-refs at runtime, only typing does that statically. */ _%>
+<%- docstringBlock(model, '') %><%_ } else if (model.export === 'one-of' || model.export === 'any-of') { _%>
+<%_ /* Classes are already defined above, so references can be unquoted —
+       which matters here, since pydantic's `TypeAdapter(X)` resolves an alias
+       at runtime and cannot see through a string forward-ref. */ _%>
 <%_ /* A discriminated union renders as a pydantic tagged union so parsing
        dispatches directly to the matching branch (never merging branches).
        Requires every member to carry the discriminator as a Literal-typed
-       field; otherwise fall back to a plain Union. */ _%>
+       field; otherwise fall back to a plain union. */ _%>
 <%_ /* pydantic requires the tag to be a bare Literal field on every member,
        else TypeAdapter construction fails at import time. `renderProperty`
        emits a tag that way whether or not the schema requires it. */
@@ -218,19 +241,13 @@ _%>
       && memberModels.every(m => (m.properties || []).some(p =>
            p.name === model.discriminator.propertyName && p.discriminatorValue)); _%>
 <%_ if (isTagged) { _%>
-<%- model.pythonClassName %> = Annotated[Union[<%_ model.properties.forEach((p, i) => { _%><%- i > 0 ? ', ' : '' %><%- p.pythonType || 'Any' %><%_ }); _%>], Field(discriminator="<%- model.discriminator.pythonPropertyName %>")]
+<%- model.pythonClassName %> = Annotated[<%_ model.properties.forEach((p, i) => { _%><%- i > 0 ? ' | ' : '' %><%- p.pythonType || 'Any' %><%_ }); _%>, Field(discriminator="<%- model.discriminator.pythonPropertyName %>")]
 <%_ } else { _%>
-<%- model.pythonClassName %> = Union[<%_ model.properties.forEach((p, i) => { _%><%- i > 0 ? ', ' : '' %><%- p.pythonType || 'Any' %><%_ }); _%>]
+<%- model.pythonClassName %> = <%_ model.properties.forEach((p, i) => { _%><%- i > 0 ? ' | ' : '' %><%- p.pythonType || 'Any' %><%_ }); _%>
 <%_ } _%>
-<%_ if (model.description || model.deprecated) { _%>
-"""<%- modelDocstring(model) %>"""
-<%_ } _%>
-<%_ } else if (model.export === 'dictionary' || model.export === 'array' || model.export === 'tuple') { _%>
+<%- docstringBlock(model, '') %><%_ } else if (model.export === 'dictionary' || model.export === 'array' || model.export === 'tuple') { _%>
 <%- model.pythonClassName %> = <%- model.pythonType %>
-<%_ if (model.description || model.deprecated) { _%>
-"""<%- modelDocstring(model) %>"""
-<%_ } _%>
-<%_ } _%>
+<%- docstringBlock(model, '') %><%_ } _%>
 <%_ }); _%>
 <%_ // ────── Per-operation request TypedDicts ────── _%>
 <%_ allOperations.forEach((op) => { _%>
@@ -240,35 +257,26 @@ _%>
 <%_ if (required.length > 0 && optional.length === 0) { _%>
 
 class <%- op.requestTypeName %>(TypedDict):
-<%_ if (op.description || op.summary) { _%>
-    """<%- pyDocstring(op.description || op.summary) %>"""
-<%_ } _%>
-<%_ op.parameters.forEach((p) => { _%>
-    <%- p.pythonName %>: <%- p.pythonAnnotation || p.pythonType || 'Any' %>
+<%- docstring(pyDocstring(op.description || op.summary), '    ') %><%_ op.parameters.forEach((p) => { _%>
+    <%- p.pythonName %>: <%- p.pythonType || 'Any' %>
 <%_ }); _%>
 <%_ } else if (required.length === 0) { _%>
 
 class <%- op.requestTypeName %>(TypedDict, total=False):
-<%_ if (op.description || op.summary) { _%>
-    """<%- pyDocstring(op.description || op.summary) %>"""
-<%_ } _%>
-<%_ op.parameters.forEach((p) => { _%>
-    <%- p.pythonName %>: <%- p.pythonAnnotation || p.pythonType || 'Any' %>
+<%- docstring(pyDocstring(op.description || op.summary), '    ') %><%_ op.parameters.forEach((p) => { _%>
+    <%- p.pythonName %>: <%- p.pythonType || 'Any' %>
 <%_ }); _%>
 <%_ } else { _%>
 
 class <%- op.requestTypeName %>Required(TypedDict):
 <%_ required.forEach((p) => { _%>
-    <%- p.pythonName %>: <%- p.pythonAnnotation || p.pythonType || 'Any' %>
+    <%- p.pythonName %>: <%- p.pythonType || 'Any' %>
 <%_ }); _%>
 
 
 class <%- op.requestTypeName %>(<%- op.requestTypeName %>Required, total=False):
-<%_ if (op.description || op.summary) { _%>
-    """<%- pyDocstring(op.description || op.summary) %>"""
-<%_ } _%>
-<%_ optional.forEach((p) => { _%>
-    <%- p.pythonName %>: <%- p.pythonAnnotation || p.pythonType || 'Any' %>
+<%- docstring(pyDocstring(op.description || op.summary), '    ') %><%_ optional.forEach((p) => { _%>
+    <%- p.pythonName %>: <%- p.pythonType || 'Any' %>
 <%_ }); _%>
 <%_ } _%>
 <%_ } _%>
@@ -300,6 +308,6 @@ class <%- entry.className %>(BaseModel):
     error: <%- payloadType %>
 <%_ }); _%>
 
-<%- op.operationIdPascalCase %>Error = <% if (shape.entries.length === 1) { %><%- shape.entries[0].className %><% } else { %>Union[<%_ shape.entries.forEach((e, i) => { _%><%- i > 0 ? ', ' : '' %><%- e.className %><%_ }); _%>]<% } %>
+<%- op.operationIdPascalCase %>Error = <%_ shape.entries.forEach((e, i) => { _%><%- i > 0 ? ' | ' : '' %><%- e.className %><%_ }); _%>
 <%_ } _%>
 <%_ }); _%>

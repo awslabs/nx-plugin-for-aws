@@ -179,4 +179,30 @@ describe('openApiPyClientGenerator - tags', () => {
     );
     expect(resTagged.ok).toBe(true);
   });
+
+  // The tag method is the form the guide teaches and what autocomplete shows,
+  // so it carries the operation's description rather than only the private
+  // method it delegates to.
+  it('emits the operation docstring on the tag method callers use', async () => {
+    const { client, asyncClient } = await generateAndRead(verifier, tree, {
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/pets': {
+          post: {
+            operationId: 'addPet',
+            tags: ['pet'],
+            description: 'Add a new pet to the store.',
+            responses: { '204': { description: 'No content' } },
+          },
+        },
+      },
+    });
+    for (const module of [client, asyncClient]) {
+      // Once on the private method, once on the tag namespace member.
+      expect(
+        module.match(/"""Add a new pet to the store\."""/g) ?? [],
+      ).toHaveLength(2);
+    }
+  });
 });

@@ -10,7 +10,7 @@ const PYTHON_BUILTIN = new Set([
 const successType = (resp) => {
   const py = resp.type === 'void' ? 'None' : resp.pythonClientType || 'None';
   // A nullable response body may arrive as JSON null.
-  return resp.isNullable && py !== 'None' ? `Optional[${py}]` : py;
+  return resp.isNullable && py !== 'None' ? `${py} | None` : py;
 };
 
 /**
@@ -23,7 +23,7 @@ const resultType = (op) => {
   const types = [...new Set((op.successResponses || []).map(successType))];
   if (types.length === 0) return 'None';
   if (types.length === 1) return types[0];
-  return `Union[${types.join(', ')}]`;
+  return types.join(' | ');
 };
 
 const resultTypeSync = (op) => {
@@ -93,7 +93,7 @@ const responseParseExpr = (resp) => {
     isPythonCollection(pythonTypeOf(resp)) ||
     ['array', 'dictionary'].includes(resp.referencedCollectionKind);
   const isScalar = !isCollection;
-  const nullable = resp.isNullable ? (t) => `Optional[${t}]` : (t) => t;
+  const nullable = resp.isNullable ? (t) => `${t} | None` : (t) => t;
   if (isScalar) {
     if (py === 'Any') return isJsonMedia ? 'response.json()' : 'response.text';
     // A non-JSON wire hands over text, which pydantic coerces to the declared
@@ -150,6 +150,33 @@ const streamChunkParseExpr = (resp, lineVar) => {
  */
 const pyDocstring = (text) =>
   toPythonLiteral(String(text ?? '').replace(/\r?\n/g, ' ')).slice(1, -1);
+
+/**
+ * An operation's docstring, indented and wrapped to the vended line length so
+ * a long description doesn't trip the `E501` the generated project lints with.
+ * Returns the empty string when the operation has nothing to say.
+ */
+const methodDocstring = (op, indent) => {
+  const text = (op.description || op.summary || '').split('\n')[0];
+  if (!text) return '';
+  const body = pyDocstring(text);
+  const oneLine = `${indent}"""${body}"""`;
+  if (oneLine.length <= 120) return `${oneLine}\n`;
+  // Greedily fill lines, leaving room for the indent.
+  const width = 120 - indent.length;
+  const lines = [];
+  let current = '';
+  for (const word of body.split(' ')) {
+    if (current && `${current} ${word}`.length > width) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = current ? `${current} ${word}` : word;
+    }
+  }
+  if (current) lines.push(current);
+  return `${indent}"""\n${lines.map((l) => `${indent}${l}`).join('\n')}\n${indent}"""\n`;
+};
 
 const responseStatusCondition = (code) => {
   if (typeof code === 'string' && /^\dXX$/.test(code)) {
@@ -285,7 +312,7 @@ import warnings
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from typing import Any, Literal, Never, Optional, TypeVar, Union
+from typing import Any, Literal, TypeVar
 from urllib.parse import quote
 
 import httpx
@@ -313,7 +340,7 @@ class <%- className %>Config:
     #: hook, a custom transport, timeouts, retries or a proxy all apply, and the
     #: client's own headers and query params are sent alongside each operation's.
     #: A supplied client is never closed by this one, so it can be shared.
-    httpx_client: Optional[httpx.Client] = None
+    httpx_client: httpx.Client | None = None
     #: Headers added to every request, where the operation sets none itself.
     headers: dict[str, str] = field(default_factory=dict)
     #: By default the client sends a Content-Type header set to the media type
@@ -333,7 +360,7 @@ class <%- className %>:
         self.<%- pythonTagNames[tag] %>: <%- pythonClassNameForTag(tag) %> = <%- pythonClassNameForTag(tag) %>(self)
 <%_ }); _%>
 
-    def __enter__(self) -> "<%- className %>":
+    def __enter__(self) -> <%- className %>:
         return self
 
     def __exit__(self, *exc: Any) -> None:
@@ -347,7 +374,7 @@ class <%- className %>:
         self,
         path: str,
         path_params: dict[str, Any],
-        path_styles: Optional[dict[str, tuple[str, bool]]] = None,
+        path_styles: dict[str, tuple[str, bool]] | None = None,
     ) -> str:
         for key, value in path_params.items():
             style, explode = (path_styles or {}).get(key, ("simple", False))
@@ -385,7 +412,7 @@ class <%- className %>:
     def _query_string(
         self,
         query_params: dict[str, Any],
-        collection_formats: Optional[dict[str, str]],
+        collection_formats: dict[str, str] | None,
         reserved: set[str],
     ) -> str:
         # Build the query string manually: httpx percent-encodes reserved
@@ -441,7 +468,7 @@ class <%- className %>:
             return ""
         return str(dumped)
 
-    def _query(self, query_params: dict[str, Any], collection_formats: Optional[dict[str, str]] = None) -> dict[str, Any]:
+    def _query(self, query_params: dict[str, Any], collection_formats: dict[str, str] | None = None) -> dict[str, Any]:
         out: dict[str, Any] = {}
         for key, value in query_params.items():
             if value is None:
@@ -476,8 +503,8 @@ class <%- className %>:
 
     def _headers(
         self,
-        header_params: Optional[dict[str, Any]] = None,
-        collection_formats: Optional[dict[str, str]] = None,
+        header_params: dict[str, Any] | None = None,
+        collection_formats: dict[str, str] | None = None,
     ) -> list[tuple[str, str]]:
         out: list[tuple[str, str]] = []
         for key, value in (header_params or {}).items():
@@ -571,7 +598,7 @@ class <%- className %>:
     def _multipart(
         self,
         fields: dict[str, Any],
-        part_content_types: Optional[dict[str, str]] = None,
+        part_content_types: dict[str, str] | None = None,
     ) -> list[tuple[str, Any]]:
         # Every field becomes an httpx `files=` part: binary values stream as
         # file parts (one per element for a list) and everything else is sent as
@@ -657,10 +684,7 @@ _%>
     def <%- methodPrefix %><%- op.pythonMethodName %>(
         <%- signature(op) %>,
     ) -> <%- resultTypeSync(op) %>:
-<%_ if (op.description || op.summary) { _%>
-        """<%- pyDocstring((op.description || op.summary).split('\n')[0]) %>"""
-<%_ } _%>
-<%_ if (op.deprecated) { _%>
+<%- methodDocstring(op, '        ') %><%_ if (op.deprecated) { _%>
         warnings.warn(
             "`<%- op.pythonMethodName %>` is deprecated.",
             DeprecationWarning,
@@ -691,10 +715,10 @@ _%>
 <%_ /* Query and header formats are kept apart: a query and a header parameter
        may share a name while declaring different collection formats. */ _%>
 <%_ if (queryCollectionInputs.length > 0) { _%>
-        query_formats: Optional[dict[str, str]] = {<%_ queryCollectionInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %>"<%- k.source.wireName %>": "<%- k.source.collectionFormat %>"<%_ }); _%>}
+        query_formats: dict[str, str] | None = {<%_ queryCollectionInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %>"<%- k.source.wireName %>": "<%- k.source.collectionFormat %>"<%_ }); _%>}
 <%_ } _%>
 <%_ if (headerCollectionInputs.length > 0) { _%>
-        header_formats: Optional[dict[str, str]] = {<%_ headerCollectionInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %>"<%- k.source.wireName %>": "<%- k.source.collectionFormat %>"<%_ }); _%>}
+        header_formats: dict[str, str] | None = {<%_ headerCollectionInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %>"<%- k.source.wireName %>": "<%- k.source.collectionFormat %>"<%_ }); _%>}
 <%_ } _%>
 <%_ if (shape.bodyFromFields) { _%>
         _body_fields: dict[str, Any] = {}
@@ -879,7 +903,7 @@ _%>
 class <%- pythonClassNameForTag(tag) %>:
     """`<%- tag %>` operations."""
 
-    def __init__(self, parent: "<%- className %>") -> None:
+    def __init__(self, parent: <%- className %>) -> None:
         self._parent = parent
 <%_ ops.forEach((op) => {
   const inputs = op.requestShape?.inputs ?? [];
@@ -887,6 +911,7 @@ _%>
 
     <%- signature(op).replace(/^self/, `def ${op.pythonMethodName}(\n        self`) %>,
     ) -> <%- resultTypeSync(op) %>:
+<%- methodDocstring(op, '        ') _%>
 <%_ if (op.isStreaming) { _%>
         yield from self._parent._<%- op.pythonMethodName %>(
 <%_ if (isPositionalBody(op)) { _%>

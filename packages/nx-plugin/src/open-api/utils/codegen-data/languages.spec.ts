@@ -227,7 +227,7 @@ describe('languages', () => {
           { kind: 'optional', inner: { kind: 'list', element: pet } },
           'types.',
         ),
-      ).toBe('Optional[list[types.Pet]]');
+      ).toBe('list[types.Pet] | None');
       expect(
         qualifyPythonType({ kind: 'tuple', members: [str, pet] }, 'types.'),
       ).toBe('tuple[str, types.Pet]');

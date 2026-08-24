@@ -113,7 +113,7 @@ describe('openApiPyClientGenerator - errors', () => {
     expect(types).toContain('class GetPet404Error(BaseModel)');
     expect(types).toContain('class GetPet5XXError(BaseModel)');
     expect(types).toContain('class GetPetDefaultError(BaseModel)');
-    expect(types).toMatch(/GetPetError = Union\[/);
+    expect(types).toMatch(/GetPetError = GetPet\d+Error \| /);
   });
 
   // Both clients raise from one hierarchy, so a caller catching `ApiError`
