@@ -111,7 +111,7 @@ describe('ts#astro-docs generator', () => {
     expect(deps).toHaveProperty('astro');
     expect(deps).toHaveProperty('@astrojs/starlight');
     // Astro's prerender output imports `cookie` directly, so a compatible copy
-    // has to be reachable from this project — see the note in versions.ts.
+    // has to be reachable from this project.
     expect(deps).toHaveProperty('cookie');
     // Blog on by default.
     expect(deps).toHaveProperty('starlight-blog');

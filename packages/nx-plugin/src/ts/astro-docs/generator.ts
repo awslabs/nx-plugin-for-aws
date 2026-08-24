@@ -41,8 +41,10 @@ export interface TsAstroDocsMetadata {
 export const DEPENDENCIES = declareDependencies<TsAstroDocsMetadata>()({
   ts: [
     { name: 'astro' },
-    // Keeps a cookie version compatible with astro's prerender output reachable
-    // from this project — see the note on `cookie` in versions.ts.
+    // Astro leaves `cookie` external in the prerender bundle, so the emitted
+    // `dist` entry imports it directly. Node resolves that from `dist`, which
+    // cannot reach astro's own nested copy, so the docs project declares it to
+    // keep a compatible one in reach.
     { name: 'cookie' },
     { name: '@astrojs/starlight' },
     { name: 'starlight-blog', when: (m) => m.includeBlog },

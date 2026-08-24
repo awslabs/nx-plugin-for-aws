@@ -61,19 +61,9 @@ export const TS_VERSIONS = {
   '@modelcontextprotocol/inspector': '2.3.0',
   '@ag-ui/a2ui-toolkit': '0.0.4',
   '@ag-ui/aws-strands': '0.2.3',
-  // Must match the version @copilotkit/react-core depends on exactly. It pins
-  // @ag-ui/client and @ag-ui/core to a single version, so any other version
-  // here installs a second copy and generated websites fail to compile: the
-  // AbstractAgent passed to CopilotKitProvider comes from a different module
-  // instance than the one the prop is typed against.
   '@ag-ui/client': '0.0.57',
   '@ag-ui/core': '0.0.57',
   '@ag-ui/encoder': '0.0.57',
-  // Held at 0.3.x to stay on the same A2A protocol major as @a2a-js/sdk above,
-  // which the generated A2A server uses. agent-chat-cli 0.4.0 depends on
-  // @a2a-js/sdk 1.x, whose client calls SendStreamingMessage — a method the
-  // 0.3.x server does not implement, so chatting fails with JSON-RPC -32601.
-  // Bump both together, updating the generated server for the 1.x API.
   'agent-chat-cli': '0.3.0',
   '@copilotkit/react-core': '1.69.0',
   rxjs: '7.8.2',
@@ -107,13 +97,6 @@ export const TS_VERSIONS = {
   '@astrojs/react': '6.0.4',
   '@astrojs/starlight': '0.41.7',
   astro: '7.2.4',
-  // Not imported by generated code. Astro leaves `cookie` external in the
-  // prerender bundle, so the emitted `dist` entry imports parseCookie and
-  // stringifySetCookie — names that only exist in cookie 1+. Node resolves
-  // that specifier by walking up from `dist`, where astro's own copy is not an
-  // ancestor and therefore unreachable. Under a hoisted node_modules the only
-  // reachable copy can be express's cookie 0.7, which has neither name, and
-  // the docs build fails. Declaring it here keeps a compatible copy in reach.
   cookie: '2.0.1',
   aws4fetch: '1.0.20',
   'aws-cdk': '2.1138.0',
