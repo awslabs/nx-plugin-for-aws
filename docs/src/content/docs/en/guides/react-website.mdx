@@ -129,58 +129,7 @@ waf -> cloudfront
 cloudfront -> s3
 ```
 
-#### Security Headers
-
-The CloudFront distribution applies a response headers policy that sets `Strict-Transport-Security`, `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy` and a `Content-Security-Policy` on all responses.
-
-A default `Content-Security-Policy` is enforced. It restricts scripts and framing to mitigate XSS and clickjacking, while permitting HTTPS and WSS connections so the website can call AWS service endpoints (such as API Gateway, Cognito and Bedrock AgentCore) whose URLs are only known at deploy time. To adjust the policy (for example to tighten `connect-src` to your specific origins), edit the `content_security_policy` value in your generated `static-website.ts` (CDK) or `static-website.tf` (Terraform).
-
-`runtime-config.json` is served with `Cache-Control: no-cache` so that browsers always fetch the latest configuration after a redeploy, rather than using a stale cached copy.
-
-#### Custom Domain & TLS
-
-By default the distribution uses the default CloudFront domain name (`*.cloudfront.net`) and its default certificate, which does not support enforcing a minimum TLS version of 1.2. To serve your website from your own domain, supply an [ACM certificate](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html) (which must reside in `us-east-1` for use with CloudFront) and your domain names — a minimum TLS version of 1.2 is then enforced for viewers:
-
-<Infrastructure>
-<Fragment slot="cdk">
-Pass the `certificate` and `domainNames` props through in your generated website construct in `packages/common/constructs/src/app/static-websites`:
-
-```ts {6-8}
-export class MyWebsite extends StaticWebsite {
-  constructor(scope: Construct, id: string) {
-    super(scope, id, {
-      websiteName: 'MyWebsite',
-      websiteFilePath: ...,
-      domainNames: ['www.example.com'],
-      certificate: Certificate.fromCertificateArn(scope, 'Cert',
-        'arn:aws:acm:us-east-1:123456789012:certificate/...'),
-    });
-  }
-}
-```
-</Fragment>
-<Fragment slot="terraform">
-Set the `custom_domain_names` and `acm_certificate_arn` variables in your generated website module in `packages/common/terraform/src/app/static-websites`:
-
-```hcl {5-6}
-module "static_website" {
-  source            = "../../../core/static-website"
-  website_name      = "my-website"
-  website_file_path = ...
-  custom_domain_names = ["www.example.com"]
-  acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/..."
-
-  providers = {
-    aws.us_east_1 = aws.us_east_1
-  }
-}
-```
-</Fragment>
-</Infrastructure>
-
-You will also need to create DNS records (for example in Route 53) pointing your domain at the CloudFront distribution.
-
-## Implementing your React Website
+## Implementing your Website
 
 The [React documentation](https://react.dev/learn) is a good place to start to learn the basics of building with React.
 
@@ -231,6 +180,321 @@ export const MyComponent = () => {
 
 For more details, check out the [TanStack Router](https://tanstack.com/router/latest/docs/framework/react/overview) documentation.
 
+## Deploying your Website
+
+The React website generator creates CDK or Terraform infrastructure as code based on your selected `iac`. You can use this to deploy your website.
+
+<Infrastructure>
+<Fragment slot="cdk">
+To deploy your website, we recommend using the <Link path="guides/typescript-infrastructure">`ts#infra` generator</Link> to create a CDK application.
+
+You can use the CDK construct generated for you in `packages/common/constructs` to deploy your website.
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {3, 9}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { MyWebsite } from '@my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    new MyWebsite(this, 'MyWebsite');
+  }
+}
+```
+
+This sets up:
+
+1. An S3 bucket for hosting your static website files
+2. CloudFront distribution for global content delivery
+3. WAF Web ACL for security protection
+4. Origin Access Control for secure S3 access
+5. Automatic deployment of website files and runtime configuration
+</Fragment>
+<Fragment slot="terraform">
+To deploy your website, we recommend using the <Link path="/guides/terraform-project">`terraform#project` generator</Link> to create a Terraform project.
+
+You can use the Terraform module generated for you in `packages/common/terraform` to deploy your website.
+
+```hcl title="packages/infra/src/main.tf" {3}
+# Deploy website
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+}
+```
+
+This sets up:
+
+1. An S3 bucket for hosting your static website files
+2. CloudFront distribution for global content delivery
+3. WAF Web ACL for security protection (deployed in us-east-1)
+4. Origin Access Control for secure S3 access
+5. Automatic deployment of website files and runtime configuration
+
+:::note[WAF Provider Region]
+The `aws.us_east_1` provider is required for CloudFront and WAF resources, which must be deployed in the us-east-1 region. Make sure your Terraform configuration includes this provider:
+
+```hcl title="packages/infra/src/providers.tf"
+provider "aws" {
+  alias  = "us_east_1"
+  region = "us-east-1"
+}
+```
+:::
+</Fragment>
+</Infrastructure>
+
+### Security Headers
+
+The CloudFront distribution applies a response headers policy that sets `Strict-Transport-Security`, `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy` and a `Content-Security-Policy` on all responses.
+
+A default `Content-Security-Policy` is enforced. It restricts scripts and framing to mitigate XSS and clickjacking, while permitting HTTPS and WSS connections so the website can call AWS service endpoints (such as API Gateway, Cognito and Bedrock AgentCore) whose URLs are only known at deploy time. To adjust the policy (for example to tighten `connect-src` to your specific origins), edit the `content_security_policy` value in your generated `static-website.ts` (CDK) or `static-website.tf` (Terraform).
+
+`runtime-config.json` is served with `Cache-Control: no-cache` so that browsers always fetch the latest configuration after a redeploy, rather than using a stale cached copy.
+
+### WAF
+
+The CloudFront distribution is protected by an [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACL by default. The Web ACL uses the AWS managed default ruleset ([`AWSManagedRulesCommonRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-crs) and [`AWSManagedRulesKnownBadInputsRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-known-bad-inputs)), providing protection against common web exploits including the OWASP Top 10.
+
+<Infrastructure>
+<Fragment slot="cdk">
+To opt out, set `enableWaf` to `false` when you create your website:
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {10,15-18}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { MyWebsite, suppressRules } from '@my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    const website = new MyWebsite(this, 'MyWebsite', {
+      enableWaf: false,
+    });
+
+    // Disabling WAF fails the checkov CKV_AWS_68 check ("CloudFront
+    // Distribution should have WAF enabled"). Suppress it explicitly.
+    suppressRules(
+      website.cloudFrontDistribution,
+      ['CKV_AWS_68'],
+      'WAF is intentionally disabled for this distribution',
+    );
+  }
+}
+```
+
+:::caution[Suppress CKV_AWS_68 when disabling WAF]
+Disabling WAF means the synthesized CloudFront distribution has no Web ACL associated, which fails the `checkov` security scan with `CKV_AWS_68: "CloudFront Distribution should have WAF enabled"` unless suppressed as shown above.
+:::
+</Fragment>
+<Fragment slot="terraform">
+To opt out, set `enable_waf` to `false`:
+
+```hcl title="packages/infra/src/main.tf" {7}
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+  enable_waf = false
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Bucket Encryption
+
+The website bucket, the CloudFront distribution log bucket, and the CloudWatch Logs group receiving their server access logs are encrypted with a customer-managed [AWS KMS](https://aws.amazon.com/kms/) key by default. This key is created for you automatically, with key rotation enabled.
+
+<Infrastructure>
+<Fragment slot="cdk">
+If you want to use a different encryption configuration, pass the `encryption`, `encryptionKey` and `enableKeyRotation` props when you create your website:
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {11}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { BucketEncryption } from 'aws-cdk-lib/aws-s3';
+import { MyWebsite } from '@my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    new MyWebsite(this, 'MyWebsite', {
+      encryption: BucketEncryption.S3_MANAGED,
+    });
+  }
+}
+```
+
+:::caution[Suppress CKV_AWS_158 when using S3_MANAGED]
+Choosing `BucketEncryption.S3_MANAGED` means the access log group is no longer KMS encrypted, which fails the `checkov` security scan with `CKV_AWS_158`. Suppress it:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { LogGroup } from 'aws-cdk-lib/aws-logs';
+import { suppressRules } from '@my-scope/common-constructs';
+
+suppressRules(
+  website,
+  ['CKV_AWS_158'],
+  'Access log group is not KMS encrypted when encryption is S3_MANAGED',
+  (c) => c instanceof LogGroup,
+);
+```
+:::
+
+To use your own KMS key instead of one created automatically, pass `encryptionKey`:
+
+```ts {2}
+new MyWebsite(this, 'MyWebsite', {
+  encryptionKey: myKey,
+});
+```
+
+:::caution[Imported keys need their own permissions]
+A key imported via `Key.fromKeyArn` must already grant the CloudWatch Logs, S3 and CloudFront service principals the permissions they need in its own key policy. `addToResourcePolicy` is a no-op on an imported key, so this construct can't grant them for you, and `cdk synth` won't warn you - the failure only shows up at deploy time. A key created in the same app (`new Key(this, 'WebsiteKey')`) doesn't have this problem, since CDK can update its policy directly.
+:::
+
+`enableKeyRotation` (default `true`) only applies to the automatically created key, i.e. when `encryption` is `BucketEncryption.KMS` (the default) and no `encryptionKey` is supplied:
+
+```ts {2}
+new MyWebsite(this, 'MyWebsite', {
+  enableKeyRotation: false,
+});
+```
+
+:::caution[Suppress CKV_AWS_7 when disabling key rotation]
+Disabling key rotation on the automatically created key fails the `checkov` security scan with `CKV_AWS_7`. Suppress it:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { Key } from 'aws-cdk-lib/aws-kms';
+import { suppressRules } from '@my-scope/common-constructs';
+
+suppressRules(
+  website,
+  ['CKV_AWS_7'],
+  'Key rotation is managed externally',
+  (c) => c instanceof Key,
+);
+```
+:::
+</Fragment>
+<Fragment slot="terraform">
+If you want to use a different encryption configuration, set the `encryption`, `kms_key_arn`, `create_kms_key` and `enable_key_rotation` variables:
+
+```hcl title="packages/infra/src/main.tf" {7}
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+  encryption = "S3_MANAGED"
+}
+```
+
+:::caution[Checkov: S3_MANAGED]
+Choosing `S3_MANAGED` fails the `checkov` security scan with `CKV_AWS_145` on the website and distribution log buckets. The vended `test` target doesn't accept a `--config-file`, but `checkov` auto-discovers a `.checkov.yaml` in its working directory, so drop one in `packages/infra/src`:
+
+```yaml title="packages/infra/src/.checkov.yaml"
+skip-check:
+  - CKV_AWS_145
+```
+:::
+
+To use your own KMS key instead of one created automatically, pass `kms_key_arn` and set `create_kms_key` to `false`:
+
+```hcl title="packages/infra/src/main.tf" {7-8}
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+  kms_key_arn    = aws_kms_key.website.arn
+  create_kms_key = false
+}
+```
+
+A customer-supplied key must already grant the CloudWatch Logs, S3 and CloudFront service principals the permissions they need in its own key policy.
+
+`enable_key_rotation` (default `true`) only applies to the automatically created key, i.e. when `encryption` is `"KMS"` (the default) and `create_kms_key` is `true`:
+
+```hcl title="packages/infra/src/main.tf" {7}
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+  enable_key_rotation = false
+}
+```
+
+:::caution[Checkov: key rotation disabled]
+Disabling key rotation on the automatically created key fails the `checkov` security scan with `CKV_AWS_7`. Add it to the same `.checkov.yaml`:
+
+```yaml title="packages/infra/src/.checkov.yaml"
+skip-check:
+  - CKV_AWS_7
+```
+:::
+</Fragment>
+</Infrastructure>
+
+### Custom Domain & TLS
+
+By default the distribution uses the default CloudFront domain name (`*.cloudfront.net`) and its default certificate, which does not support enforcing a minimum TLS version of 1.2. To serve your website from your own domain, supply an [ACM certificate](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html) (which must reside in `us-east-1` for use with CloudFront) and your domain names. A minimum TLS version of 1.2 is then enforced for viewers:
+
+<Infrastructure>
+<Fragment slot="cdk">
+Pass the `certificate` and `domainNames` props when you create your website:
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {11-13}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { Certificate } from 'aws-cdk-lib/aws-certificatemanager';
+import { MyWebsite } from '@my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    new MyWebsite(this, 'MyWebsite', {
+      domainNames: ['www.example.com'],
+      certificate: Certificate.fromCertificateArn(this, 'Cert',
+        'arn:aws:acm:us-east-1:123456789012:certificate/...'),
+    });
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+Set the `custom_domain_names` and `acm_certificate_arn` variables:
+
+```hcl title="packages/infra/src/main.tf" {7-8}
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+  custom_domain_names = ["www.example.com"]
+  acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/..."
+}
+```
+</Fragment>
+</Infrastructure>
+
+You will also need to create DNS records (for example in Route 53) pointing your domain at the CloudFront distribution.
+
 ## Runtime Configuration
 
 Configuration from your infrastructure is provided to your website via <Link href="guides/runtime-config">Runtime Configuration</Link>. This allows your website to access details such as API URLs which are not known until your application is deployed.
@@ -252,7 +516,7 @@ export class ApplicationStack extends Stack {
   constructor(scope: Construct, id: string) {
     super(scope, id);
 
-    // Website can be declared at any point — runtime config is resolved lazily
+    // Website can be declared at any point, since runtime config is resolved lazily
     new MyWebsite(this, 'MyWebsite');
 
     // Automatically adds values to the RuntimeConfig
@@ -414,75 +678,6 @@ For React specific testing, React Testing Library is already installed and avail
 You can run your tests using the `test` target:
 
 <NxCommands commands={['test <my-website>']} />
-
-## Deploying Your Website
-
-The React website generator creates CDK or Terraform infrastructure as code based on your selected `iac`. You can use this to deploy your website.
-
-<Infrastructure>
-<Fragment slot="cdk">
-To deploy your website, we recommend using the <Link path="guides/typescript-infrastructure">`ts#infra` generator</Link> to create a CDK application.
-
-You can use the CDK construct generated for you in `packages/common/constructs` to deploy your website.
-
-```ts title="packages/infra/src/stacks/application-stack.ts" {3, 9}
-import { Stack } from 'aws-cdk-lib';
-import { Construct } from 'constructs';
-import { MyWebsite } from '@my-scope/common-constructs';
-
-export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
-
-    new MyWebsite(this, 'MyWebsite');
-  }
-}
-```
-
-This sets up:
-
-1. An S3 bucket for hosting your static website files
-2. CloudFront distribution for global content delivery
-3. WAF Web ACL for security protection
-4. Origin Access Control for secure S3 access
-5. Automatic deployment of website files and runtime configuration
-</Fragment>
-<Fragment slot="terraform">
-To deploy your website, we recommend using the <Link path="/guides/terraform-project">`terraform#project` generator</Link> to create a Terraform project.
-
-You can use the Terraform module generated for you in `packages/common/terraform` to deploy your website.
-
-```hcl title="packages/infra/src/main.tf" {3}
-# Deploy website
-module "my_website" {
-  source = "../../common/terraform/src/app/static-websites/my-website"
-
-  providers = {
-    aws.us_east_1 = aws.us_east_1
-  }
-}
-```
-
-This sets up:
-
-1. An S3 bucket for hosting your static website files
-2. CloudFront distribution for global content delivery
-3. WAF Web ACL for security protection (deployed in us-east-1)
-4. Origin Access Control for secure S3 access
-5. Automatic deployment of website files and runtime configuration
-
-:::note[WAF Provider Region]
-The `aws.us_east_1` provider is required for CloudFront and WAF resources, which must be deployed in the us-east-1 region. Make sure your Terraform configuration includes this provider:
-
-```hcl title="packages/infra/src/providers.tf"
-provider "aws" {
-  alias  = "us_east_1"
-  region = "us-east-1"
-}
-```
-:::
-</Fragment>
-</Infrastructure>
 
 ## Connections
 
