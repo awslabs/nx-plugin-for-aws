@@ -339,6 +339,13 @@ const AGENT_TO_GATEWAY: readonly ConnectionConstraint[] = [
     equals: 'iam',
     reason: 'Agent connections require the gateway to authenticate with IAM.',
   },
+  {
+    side: 'target',
+    option: 'protocol',
+    equals: 'mcp',
+    reason:
+      'An agent reaches a gateway as an MCP client, so the gateway must serve the mcp protocol. Note a single gateway cannot both front an agent and be called by one, since fronting requires the http protocol.',
+  },
 ];
 
 const GATEWAY_TO_MCP: readonly ConnectionConstraint[] = [
@@ -364,12 +371,6 @@ const GATEWAY_TO_AGENT: readonly ConnectionConstraint[] = [
     equals: 'http',
     reason:
       'Agent runtime targets can only be attached to an http-protocol gateway.',
-  },
-  {
-    side: 'target',
-    option: 'auth',
-    equals: 'iam',
-    reason: 'The gateway signs requests to its agent targets with IAM.',
   },
 ];
 
