@@ -10,6 +10,7 @@ import {
   createPythonClientVerifier,
   createTree,
   generateAndRead,
+  requestJsonBody,
 } from './generator.utils.spec';
 
 /**
@@ -432,6 +433,96 @@ describe('openApiPyClientGenerator - response parsing', () => {
       );
       expect(res.ok).toBe(true);
       expect(res.value).toBeNull();
+    });
+  });
+
+  // A binary response is handed over as bytes, and a unicode body must survive
+  // the round trip rather than being mangled by an encoding assumption.
+  describe('binary and unicode bodies', () => {
+    it('returns a binary response as bytes', async () => {
+      await generateAndRead(verifier, tree, {
+        openapi: '3.0.0',
+        info: { title: 'TestApi', version: '1.0.0' },
+        paths: {
+          '/blob': {
+            get: {
+              operationId: 'getBlob',
+              responses: {
+                '200': {
+                  description: 'OK',
+                  content: {
+                    'application/octet-stream': {
+                      schema: { type: 'string', format: 'binary' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+      const res = await callGeneratedClient(
+        verifier,
+        'get_blob',
+        {},
+        {
+          // "hello" as raw bytes, so nothing can decode it into a str by accident.
+          bytes_b64: Buffer.from('hello').toString('base64'),
+          headers: { 'content-type': 'application/octet-stream' },
+        },
+      );
+      expect(res.ok).toBe(true);
+      expect(res.pyType).toBe('bytes');
+    });
+
+    it('round-trips a unicode body', async () => {
+      await generateAndRead(verifier, tree, {
+        openapi: '3.0.0',
+        info: { title: 'TestApi', version: '1.0.0' },
+        paths: {
+          '/echo': {
+            post: {
+              operationId: 'echo',
+              requestBody: {
+                required: true,
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      required: ['text'],
+                      properties: { text: { type: 'string' } },
+                    },
+                  },
+                },
+              },
+              responses: {
+                '200': {
+                  description: 'OK',
+                  content: {
+                    'application/json': {
+                      schema: {
+                        type: 'object',
+                        required: ['text'],
+                        properties: { text: { type: 'string' } },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+      const text = 'ペット — 🐈 café';
+      const res = await callGeneratedClient(
+        verifier,
+        'echo',
+        { text },
+        { json: { text } },
+      );
+      expect(res.ok).toBe(true);
+      expect(res.value).toEqual({ text });
+      expect(requestJsonBody(res)).toEqual({ text });
     });
   });
 });

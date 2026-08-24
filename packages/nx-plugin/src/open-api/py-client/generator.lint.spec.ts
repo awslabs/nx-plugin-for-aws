@@ -4,7 +4,7 @@
  */
 import { PositionEncoding, Workspace } from '@astral-sh/ruff-wasm-nodejs';
 import type { Tree } from '@nx/devkit';
-import { PET_STORE_SPEC } from '../ts-client/generator.petstore.spec';
+import { PET_STORE_SPEC } from '../ts-client/petstore-spec';
 import type { Spec } from '../utils/types';
 import {
   createPythonClientVerifier,

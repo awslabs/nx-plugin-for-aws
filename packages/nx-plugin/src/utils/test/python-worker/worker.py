@@ -6,6 +6,8 @@
 from __future__ import annotations
 
 import asyncio
+import atexit
+import glob
 import importlib
 import io
 import itertools
@@ -140,6 +142,12 @@ class _MockTransport(httpx.BaseTransport, httpx.AsyncBaseTransport):
         )
 
     def _build_response(self, spec: dict) -> httpx.Response:
+        # A transport-level failure a real network produces, so a test can check
+        # it reaches the caller rather than being turned into an API error.
+        if spec.get("raise_timeout"):
+            raise httpx.TimeoutException("mock timeout")
+        if spec.get("raise_connect_error"):
+            raise httpx.ConnectError("mock connect error")
         status = spec.get("status", 200)
         # Copied because the defaults applied below would otherwise persist onto
         # the caller's spec and leak into a later replay of the same entry.
@@ -230,13 +238,54 @@ class _MockTransport(httpx.BaseTransport, httpx.AsyncBaseTransport):
 _PACKAGE_DIR: str | None = None
 
 
+def _cleanup_package_dir() -> None:
+    """Remove this worker's package directory on exit.
+
+    Each compile replaces the previous directory, but the final one would
+    otherwise outlive the worker.
+    """
+    if _PACKAGE_DIR and os.path.isdir(_PACKAGE_DIR):
+        shutil.rmtree(_PACKAGE_DIR, ignore_errors=True)
+
+
+atexit.register(_cleanup_package_dir)
+
+
+def _reap_orphaned_dirs() -> None:
+    """Delete package directories left by workers that are no longer running.
+
+    `atexit` doesn't run when a worker is killed rather than asked to stop, so a
+    crashed run leaves its directories behind. Each is named after the process
+    that owns it, which lets a later worker tell an orphan from a live one.
+    """
+    for entry in glob.glob(os.path.join(tempfile.gettempdir(), "pyclient-*")):
+        # `pyclient-<pid>-<random>`; anything else predates this naming.
+        parts = os.path.basename(entry).split("-")
+        if len(parts) < 3 or not parts[1].isdigit():
+            continue
+        pid_part = parts[1]
+        if int(pid_part) == os.getpid():
+            continue
+        try:
+            os.kill(int(pid_part), 0)
+        except ProcessLookupError:
+            shutil.rmtree(entry, ignore_errors=True)
+        except OSError:
+            # Owned by another user, or otherwise not ours to remove.
+            continue
+
+
+_reap_orphaned_dirs()
+
+
 def _write_files(files: dict[str, str], pkg_name: str = "generated") -> str:
     """Lay files out as `<tmpdir>/<pkg_name>/...` so the parent dir is on
     sys.path and the package imports as `pkg_name`."""
     global _PACKAGE_DIR
     if _PACKAGE_DIR and os.path.isdir(_PACKAGE_DIR):
         shutil.rmtree(_PACKAGE_DIR)
-    _PACKAGE_DIR = tempfile.mkdtemp(prefix="pyclient-")
+    # Named after this process, so a later worker can reap it if we are killed.
+    _PACKAGE_DIR = tempfile.mkdtemp(prefix=f"pyclient-{os.getpid()}-")
     pkg_dir = os.path.join(_PACKAGE_DIR, pkg_name)
     os.makedirs(pkg_dir, exist_ok=True)
     for rel, content in files.items():
@@ -451,11 +500,16 @@ def _build_mock_client(
     if auth == "body-digest":
         kwargs["auth"] = _BodyDigestAuth()
     if event_hook_header:
-
+        # An AsyncClient only awaits its hooks, so each flavour needs its own.
         def _hook(request: httpx.Request) -> None:
             request.headers[event_hook_header] = "yes"
 
-        kwargs["event_hooks"] = {"request": [_hook]}
+        async def _async_hook(request: httpx.Request) -> None:
+            request.headers[event_hook_header] = "yes"
+
+        kwargs["event_hooks"] = {
+            "request": [_hook if kind == "sync" else _async_hook]
+        }
     if kind == "sync":
         return httpx.Client(**kwargs), transport
     return httpx.AsyncClient(**kwargs), transport

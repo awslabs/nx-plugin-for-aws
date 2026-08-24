@@ -259,4 +259,34 @@ describe('openApiPyClientGenerator - pluggability', () => {
       expect(res.ok).toBe(true);
     },
   );
+
+  // A transport failure is httpx's to raise, not something the client should
+  // reinterpret: a caller retrying on `httpx.TimeoutException` has to see it.
+  it.each([
+    ['a timeout', { raise_timeout: true }, 'TimeoutException'],
+    ['a connection error', { raise_connect_error: true }, 'ConnectError'],
+  ] as const)(
+    'propagates %s from the underlying httpx client',
+    async (_label, failure, exceptionType) => {
+      const res = await verifier.invoke({
+        module: 'sync',
+        method: 'get_thing',
+        kwargs: { id: 'a' },
+        mock: [{ response: failure }],
+      });
+      expect(res.ok).toBe(false);
+      expect(res.exception?.type).toBe(exceptionType);
+    },
+  );
+
+  it('propagates a timeout from the async client', async () => {
+    const res = await verifier.invoke({
+      module: 'async',
+      method: 'get_thing',
+      kwargs: { id: 'a' },
+      mock: [{ response: { raise_timeout: true } }],
+    });
+    expect(res.ok).toBe(false);
+    expect(res.exception?.type).toBe('TimeoutException');
+  });
 });

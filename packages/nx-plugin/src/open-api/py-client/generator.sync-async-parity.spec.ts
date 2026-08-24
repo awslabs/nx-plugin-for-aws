@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import { PET_STORE_SPEC } from '../ts-client/generator.petstore.spec';
+import { PET_STORE_SPEC } from '../ts-client/petstore-spec';
 import {
   createPythonClientVerifier,
   createTree,

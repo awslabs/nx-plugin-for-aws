@@ -7,7 +7,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readProjectConfiguration, type Tree } from '@nx/devkit';
-import { expectHasMetricTags } from '../utils/metrics.spec.js';
+import { expectHasMetricTags } from '../utils/metrics-assertions.js';
 import { createTreeUsingTsSolutionSetup } from '../utils/test.js';
 import {
   AGENTCORE_GATEWAY_GENERATOR_INFO,

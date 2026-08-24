@@ -4,7 +4,7 @@
  */
 import type { Tree } from '@nx/devkit';
 import { declareDependencies } from '../../utils/declared-dependencies';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
+import { expectHasMetricTags } from '../../utils/metrics-assertions';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,

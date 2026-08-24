@@ -19,8 +19,11 @@ import {
  * locks.
  *
  * Mirrors the pre-warm this suite used for `ruff` before it moved in-process.
- * Failures are ignored: a missing `uv` is reported by the verifier itself, with
- * a message naming the tool.
+ *
+ * A failure here is not fatal — a missing `uv` is reported by the verifier
+ * itself, with a message naming the tool — but it is warned about rather than
+ * swallowed: a broken cache otherwise degrades silently to every worker racing a
+ * cold one, which is the startup failure this exists to prevent.
  */
 export default function setup() {
   // The same set the verifier installs, so the warm cache is the one it hits.
@@ -32,7 +35,10 @@ export default function setup() {
     execFileSync('uv', ['run', ...deps, 'python', '-c', ''], {
       stdio: 'ignore',
     });
-  } catch {
-    // Ignored — the verifier reports an unavailable uv when a test needs it.
+  } catch (error) {
+    console.warn(
+      `Could not warm uv's cache, so each Python worker will install its own ` +
+        `dependencies and may time out starting up: ${error}`,
+    );
   }
 }

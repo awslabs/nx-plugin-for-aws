@@ -4,7 +4,7 @@
  */
 import type { Tree } from '@nx/devkit';
 import { resolveContainers } from '../../utils/containers.js';
-import { expectHasMetricTags } from '../../utils/metrics.spec.js';
+import { expectHasMetricTags } from '../../utils/metrics-assertions.js';
 import { readProjectConfigurationUnqualified } from '../../utils/nx.js';
 import { sharedConstructsGenerator } from '../../utils/shared-constructs.js';
 import {

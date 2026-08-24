@@ -29,6 +29,9 @@ export interface MockResponseSpec {
    */
   chunk_size?: number;
   bytes_b64?: string;
+  /** Fail the request the way a real network would, rather than responding. */
+  raise_timeout?: boolean;
+  raise_connect_error?: boolean;
 }
 
 export interface MockEntry {
