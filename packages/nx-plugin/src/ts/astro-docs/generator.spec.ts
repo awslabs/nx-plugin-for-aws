@@ -9,8 +9,8 @@ import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
 } from '../../utils/shared-constructs.js';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
 import { TypeScriptVerifier } from '../../utils/test/ts.spec.js';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
 import {
   TS_ASTRO_DOCS_GENERATOR_INFO,
   tsAstroDocsGenerator,
@@ -110,6 +110,9 @@ describe('ts#astro-docs generator', () => {
     };
     expect(deps).toHaveProperty('astro');
     expect(deps).toHaveProperty('@astrojs/starlight');
+    // Astro's prerender output imports `cookie` directly, so a compatible copy
+    // has to be reachable from this project — see the note in versions.ts.
+    expect(deps).toHaveProperty('cookie');
     // Blog on by default.
     expect(deps).toHaveProperty('starlight-blog');
     // Translation on by default — its scripts import these at runtime.

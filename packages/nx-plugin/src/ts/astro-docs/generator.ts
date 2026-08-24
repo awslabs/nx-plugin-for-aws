@@ -41,6 +41,9 @@ export interface TsAstroDocsMetadata {
 export const DEPENDENCIES = declareDependencies<TsAstroDocsMetadata>()({
   ts: [
     { name: 'astro' },
+    // Keeps a cookie version compatible with astro's prerender output reachable
+    // from this project — see the note on `cookie` in versions.ts.
+    { name: 'cookie' },
     { name: '@astrojs/starlight' },
     { name: 'starlight-blog', when: (m) => m.includeBlog },
     { name: '@strands-agents/sdk', when: (m) => m.includeTranslation },

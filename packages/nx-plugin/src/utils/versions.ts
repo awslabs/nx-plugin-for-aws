@@ -107,6 +107,14 @@ export const TS_VERSIONS = {
   '@astrojs/react': '6.0.4',
   '@astrojs/starlight': '0.41.7',
   astro: '7.2.4',
+  // Not imported by generated code. Astro leaves `cookie` external in the
+  // prerender bundle, so the emitted `dist` entry imports parseCookie and
+  // stringifySetCookie — names that only exist in cookie 1+. Node resolves
+  // that specifier by walking up from `dist`, where astro's own copy is not an
+  // ancestor and therefore unreachable. Under a hoisted node_modules the only
+  // reachable copy can be express's cookie 0.7, which has neither name, and
+  // the docs build fails. Declaring it here keeps a compatible copy in reach.
+  cookie: '2.0.1',
   aws4fetch: '1.0.20',
   'aws-cdk': '2.1138.0',
   'aws-cdk-lib': '2.266.0',
