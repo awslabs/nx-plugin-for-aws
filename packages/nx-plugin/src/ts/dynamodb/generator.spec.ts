@@ -251,6 +251,21 @@ describe('ts#dynamodb generator', () => {
     );
   });
 
+  it('should place the project in a subDirectory when provided', async () => {
+    await tsDynamoDBGenerator(tree, {
+      ...defaultOptions,
+      subDirectory: 'nested',
+    });
+
+    const projectConfig = readProjectConfigurationUnqualified(
+      tree,
+      '@proj/my-table',
+    );
+    expect(projectConfig.root).toBe('packages/nested');
+    expect(tree.exists('packages/nested/package.json')).toBe(true);
+    expect(tree.exists('packages/my-table/package.json')).toBe(false);
+  });
+
   it('should use custom tableName when provided', async () => {
     await tsDynamoDBGenerator(tree, {
       ...defaultOptions,
