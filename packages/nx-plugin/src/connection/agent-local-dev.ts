@@ -7,12 +7,12 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { applyGritQL } from '../utils/ast';
+import { applyGritQL } from '../utils/ast.js';
 import {
   addDependencyToTargetIfNotPresent,
   type ComponentMetadata,
   readProjectConfigurationUnqualified,
-} from '../utils/nx';
+} from '../utils/nx.js';
 
 export interface AgentLocalDevOptions {
   agentNameClassName: string;

@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { addProjectConfiguration, type Tree, writeJson } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from '../test';
-import { BASE_IMAGES, TS_VERSIONS } from '../versions';
-import { syncVendedVersions } from './sync-vended-versions';
+import { createTreeUsingTsSolutionSetup } from '../test.js';
+import { BASE_IMAGES, TS_VERSIONS } from '../versions.js';
+import { syncVendedVersions } from './sync-vended-versions.js';
 
 // A thrown migration aborts the whole `nx migrate`, stranding the user mid
 // upgrade. These files are the user's to hand-edit, so the sync's contract —

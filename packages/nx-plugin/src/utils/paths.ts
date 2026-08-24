@@ -4,7 +4,7 @@
  */
 import type { ProjectConfiguration, Tree } from '@nx/devkit';
 import * as path from 'path';
-import { readProjectConfigurationUnqualified } from './nx';
+import { readProjectConfigurationUnqualified } from './nx.js';
 
 export const getRelativePathToRoot = (
   tree: Tree,

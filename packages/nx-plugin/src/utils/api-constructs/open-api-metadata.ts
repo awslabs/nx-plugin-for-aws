@@ -8,13 +8,13 @@ import {
   type Tree,
   updateJson,
 } from '@nx/devkit';
-import { updateGitIgnore } from '../git';
-import type { Iac } from '../iac';
-import { addDependencyToTargetIfNotPresent } from '../nx';
+import { updateGitIgnore } from '../git.js';
+import type { Iac } from '../iac.js';
+import { addDependencyToTargetIfNotPresent } from '../nx.js';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
-} from '../shared-constructs-constants';
+} from '../shared-constructs-constants.js';
 
 export interface AddOpenApiMetadataGenerateTargetOptions {
   iac: Iac;

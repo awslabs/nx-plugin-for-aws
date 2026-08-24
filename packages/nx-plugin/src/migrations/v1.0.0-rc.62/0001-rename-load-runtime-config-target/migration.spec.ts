@@ -7,8 +7,8 @@ import {
   readProjectConfiguration,
   type Tree,
 } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import migration from './migration';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
+import migration from './migration.js';
 
 const OLD_TARGET = 'load:runtime-config';
 const NEW_TARGET = 'load-runtime-config';

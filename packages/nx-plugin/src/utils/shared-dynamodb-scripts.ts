@@ -11,14 +11,14 @@ import {
 import type {
   DependencyDeclaration,
   MustDeclare,
-} from './declared-dependencies';
-import { addDependenciesToPackageJson } from './dependencies';
+} from './declared-dependencies.js';
+import { addDependenciesToPackageJson } from './dependencies.js';
 import {
   PACKAGES_DIR,
   SHARED_SCRIPTS_DIR,
-} from './shared-constructs-constants';
-import { ensureSharedScriptsProject } from './shared-scripts';
-import { type ITsDepVersion, withVersions } from './versions';
+} from './shared-constructs-constants.js';
+import { ensureSharedScriptsProject } from './shared-scripts.js';
+import { type ITsDepVersion, withVersions } from './versions.js';
 
 /** Dependencies a caller must declare to use the shared DynamoDB scripts. */
 export const SHARED_DYNAMODB_SCRIPTS_DEPENDENCIES = [

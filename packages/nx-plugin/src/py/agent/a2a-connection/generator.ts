@@ -10,7 +10,7 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { addPyDependencies } from '../../../utils/add-dependencies';
+import { addPyDependencies } from '../../../utils/add-dependencies.js';
 import {
   AGENT_CONNECTION_PY_DEPENDENCIES,
   type AgentFramework,
@@ -22,30 +22,30 @@ import {
   getPythonAgentConnectionProjectDir,
   PY_CLIENT_NAMING,
   resolveAgentFramework,
-} from '../../../utils/agent-connection/agent-connection';
+} from '../../../utils/agent-connection/agent-connection.js';
 import {
   addPythonDestructuredImport,
   appendToArrayViaGritQL,
   applyGritQL,
   matchGritQL,
-} from '../../../utils/ast';
+} from '../../../utils/ast.js';
 import {
   declareDependencies,
   ownedElsewhere,
-} from '../../../utils/declared-dependencies';
-import { formatFilesInSubtree } from '../../../utils/format';
-import { installDependencies } from '../../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
-import { snakeCase } from '../../../utils/names';
+} from '../../../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../../../utils/format.js';
+import { installDependencies } from '../../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics.js';
+import { snakeCase } from '../../../utils/names.js';
 import {
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
-} from '../../../utils/nx';
-import { toProjectRelativePath } from '../../../utils/paths';
-import { addWorkspaceDependencyToPyProject } from '../../../utils/py';
+} from '../../../utils/nx.js';
+import { toProjectRelativePath } from '../../../utils/paths.js';
+import { addWorkspaceDependencyToPyProject } from '../../../utils/py.js';
 import type { PyAgentA2aConnectionGeneratorSchema } from './schema';
 
 /** Prefix a GritQL pattern with `language python` */

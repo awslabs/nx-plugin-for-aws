@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { pyApiGenerator } from './generator';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import { pyApiGenerator } from './generator.js';
 import { PyApiGeneratorSchema } from './schema';
 
 describe('py#api generator', () => {

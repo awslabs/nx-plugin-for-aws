@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { type ExecutorContext, workspaceRoot } from '@nx/devkit';
-import { readAwsNxPluginConfigFromDisk } from '../../utils/config/utils';
-import { formatReport, runCheck } from './check';
-import { type LicenseCollector, npmCollector } from './collectors/collector';
-import type { DependencyCheckConfig } from './types';
+import { readAwsNxPluginConfigFromDisk } from '../../utils/config/utils.js';
+import { formatReport, runCheck } from './check.js';
+import { type LicenseCollector, npmCollector } from './collectors/collector.js';
+import type { DependencyCheckConfig } from './types.js';
 
 export type LicenseCheckExecutorSchema = Record<string, never>;
 

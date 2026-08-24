@@ -10,13 +10,13 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import * as tsLibGenerator from '../../ts/lib/generator';
-import * as gitUtils from '../../utils/git';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import * as tsLibGenerator from '../../ts/lib/generator.js';
+import * as gitUtils from '../../utils/git.js';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
 import {
   TERRAFORM_PROJECT_GENERATOR_INFO,
   terraformProjectGenerator,
-} from './generator';
+} from './generator.js';
 import type { TerraformProjectGeneratorSchema } from './schema';
 
 describe('terraformProjectGenerator', () => {

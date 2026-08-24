@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { MigrationReturnObject, Tree } from '@nx/devkit';
-import { syncVendedVersions } from './sync-vended-versions';
+import { syncVendedVersions } from './sync-vended-versions.js';
 
 /**
  * Syncs the workspace's vended versions to those the installed plugin vends.

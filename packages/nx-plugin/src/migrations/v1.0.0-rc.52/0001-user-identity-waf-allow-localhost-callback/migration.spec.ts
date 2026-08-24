@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import { tsReactWebsiteGenerator } from '../../../ts/react-website/app/generator';
-import { tsWebsiteAuthGenerator } from '../../../ts/website/auth/generator';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import migration from './migration';
+import { tsReactWebsiteGenerator } from '../../../ts/react-website/app/generator.js';
+import { tsWebsiteAuthGenerator } from '../../../ts/website/auth/generator.js';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
+import migration from './migration.js';
 
 const CDK_FILE = 'packages/common/constructs/src/core/user-identity.ts';
 const TERRAFORM_FILE =

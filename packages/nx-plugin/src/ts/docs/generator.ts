@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { GeneratorCallback, Tree } from '@nx/devkit';
-import { getGeneratorInfo, type NxGeneratorInfo } from '../../utils/nx';
-import { tsAstroDocsGenerator } from '../astro-docs/generator';
+import { getGeneratorInfo, type NxGeneratorInfo } from '../../utils/nx.js';
+import { tsAstroDocsGenerator } from '../astro-docs/generator.js';
 import type { TsDocsGeneratorSchema } from './schema';
 
 export const TS_DOCS_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(

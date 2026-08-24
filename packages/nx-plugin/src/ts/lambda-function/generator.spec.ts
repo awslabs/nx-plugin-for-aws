@@ -6,15 +6,15 @@ import { addProjectConfiguration, type Tree } from '@nx/devkit';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
-} from '../../utils/config/utils';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { TypeScriptVerifier } from '../../utils/test/ts.spec';
+} from '../../utils/config/utils.js';
+import { expectHasMetricTags } from '../../utils/metrics.spec.js';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import { TypeScriptVerifier } from '../../utils/test/ts.spec.js';
 import {
   TS_LAMBDA_FUNCTION_GENERATOR_INFO,
   tsLambdaFunctionGenerator,
-} from './generator';
-import { TS_HANDLER_RETURN_TYPES } from './io';
+} from './generator.js';
+import { TS_HANDLER_RETURN_TYPES } from './io.js';
 import type { EventSource, TsLambdaFunctionGeneratorSchema } from './schema';
 
 describe('ts-lambda-function generator', () => {

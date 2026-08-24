@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { readJson, type Tree } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import { tsWebsiteGenerator } from './generator';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
+import { tsWebsiteGenerator } from './generator.js';
 
 describe('ts#website generator', () => {
   let tree: Tree;

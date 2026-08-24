@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { NxGeneratorInfo } from '../../utils/generators';
-import { fetchGuidePages } from '../generator-info';
-import { PackageManagerSchema } from '../schema';
+import type { NxGeneratorInfo } from '../../utils/generators.js';
+import { fetchGuidePages } from '../generator-info.js';
+import { PackageManagerSchema } from '../schema.js';
 
 /** The guide page backing this tool, so it never drifts from the docs. */
 const UPGRADING_GUIDE = 'upgrading';

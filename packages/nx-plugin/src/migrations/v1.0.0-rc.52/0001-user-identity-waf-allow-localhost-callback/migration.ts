@@ -3,13 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { MigrationReturnObject, Tree } from '@nx/devkit';
-import { applyGritQL, matchGritQL } from '../../../utils/ast';
-import { formatFilesInSubtree } from '../../../utils/format';
+import { applyGritQL, matchGritQL } from '../../../utils/ast.js';
+import { formatFilesInSubtree } from '../../../utils/format.js';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
-} from '../../../utils/shared-constructs-constants';
+} from '../../../utils/shared-constructs-constants.js';
 
 /**
  * Count the EC2MetaDataSSRF_QUERYARGUMENTS WAF rule on the UserIdentity Web ACL

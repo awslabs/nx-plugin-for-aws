@@ -8,8 +8,8 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { applyGritQL } from '../utils/ast';
-import { addDependencyToTargetIfNotPresent } from '../utils/nx';
+import { applyGritQL } from '../utils/ast.js';
+import { addDependencyToTargetIfNotPresent } from '../utils/nx.js';
 
 export interface LocalGatewayUpstream {
   /**

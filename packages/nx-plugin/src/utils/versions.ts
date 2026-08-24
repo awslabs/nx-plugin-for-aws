@@ -7,7 +7,7 @@ import {
   type DeclaredTs,
   type DependencyDeclaration,
   declaredNames,
-} from './declared-dependencies';
+} from './declared-dependencies.js';
 
 /**
  * Versons for TypeScript dependencies added by generators

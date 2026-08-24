@@ -15,25 +15,25 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { libraryGenerator } from '@nx/js';
-import { declareDependencies } from '../../utils/declared-dependencies';
-import { formatFilesInSubtree } from '../../utils/format';
-import { installDependencies } from '../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { isEsmWorkspace } from '../../utils/module-format';
-import { toKebabCase } from '../../utils/names';
-import { getNpmScopePrefix } from '../../utils/npm-scope';
+import { declareDependencies } from '../../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../../utils/format.js';
+import { installDependencies } from '../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
+import { isEsmWorkspace } from '../../utils/module-format.js';
+import { toKebabCase } from '../../utils/names.js';
+import { getNpmScopePrefix } from '../../utils/npm-scope.js';
 import {
   addGeneratorMetadata,
   getGeneratorInfo,
   mergeTargetDefault,
   type NxGeneratorInfo,
   projectExists,
-} from '../../utils/nx';
-import { sortObjectKeys } from '../../utils/object';
-import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
+} from '../../utils/nx.js';
+import { sortObjectKeys } from '../../utils/object.js';
+import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager.js';
 import type { TsProjectGeneratorSchema } from './schema';
-import { configureTsProject } from './ts-project-utils';
-import { VITEST_DEPENDENCIES } from './vitest';
+import { configureTsProject } from './ts-project-utils.js';
+import { VITEST_DEPENDENCIES } from './vitest.js';
 
 export const DEPENDENCIES = declareDependencies()({
   ts: [...VITEST_DEPENDENCIES],

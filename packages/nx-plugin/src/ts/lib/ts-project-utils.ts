@@ -4,18 +4,18 @@
  */
 import { joinPathFragments, logger, type Tree, updateJson } from '@nx/devkit';
 import { join, relative } from 'path';
-import { addLicenseCheckToLintTarget } from '../../license/config';
-import { AWS_NX_PLUGIN_CONFIG_FILE_NAME } from '../../utils/config/utils';
+import { addLicenseCheckToLintTarget } from '../../license/config.js';
+import { AWS_NX_PLUGIN_CONFIG_FILE_NAME } from '../../utils/config/utils.js';
 import {
   type DependencyDeclaration,
   forDependencies,
   type MustDeclare,
-} from '../../utils/declared-dependencies';
-import { isEsmWorkspace } from '../../utils/module-format';
-import { ensureProjectPackageJson } from '../../utils/project-package-json';
-import { configureBiomeLint } from './biome';
-import type { ConfigureProjectOptions } from './types';
-import { configureVitest, type VITEST_DEPENDENCIES } from './vitest';
+} from '../../utils/declared-dependencies.js';
+import { isEsmWorkspace } from '../../utils/module-format.js';
+import { ensureProjectPackageJson } from '../../utils/project-package-json.js';
+import { configureBiomeLint } from './biome.js';
+import type { ConfigureProjectOptions } from './types.js';
+import { configureVitest, type VITEST_DEPENDENCIES } from './vitest.js';
 
 interface TsConfigReference {
   path: string;

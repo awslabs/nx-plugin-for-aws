@@ -1,6 +1,6 @@
 ---
 title: Configurer un monorepo
-description: "Une présentation de la création d'un jeu d'aventure dans un donjon propulsé par une IA agentique, en utilisant le @aws/nx-plugin."
+description: "Un guide pas à pas pour construire un jeu d'aventure de donjon alimenté par une IA agentique en utilisant le @aws/nx-plugin."
 ---
 
 import { Aside, Code, FileTree, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
@@ -24,7 +24,7 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 ## Tâche 1 : Créer un monorepo
 
-Pour créer un nouveau monorepo, depuis le répertoire souhaité, exécutez la commande suivante :
+Pour créer un nouveau monorepo, depuis le répertoire de votre choix, exécutez la commande suivante :
 
 <CreateNxWorkspaceCommand workspace="dungeon-adventure" iac="cdk" />
 
@@ -468,6 +468,7 @@ Examinons certains fichiers en détail :
 from contextlib import contextmanager
 
 from strands import Agent, tool
+from strands.hooks import HookCallback, HookProvider
 from strands_tools import current_time
 from dungeon_adventure_agent_connection import log_model_errors, log_tool_errors
 
@@ -475,6 +476,9 @@ from dungeon_adventure_agent_connection import log_model_errors, log_tool_errors
 @tool
 def subtract(a: int, b: int) -> int:
     return a - b
+
+
+AGENT_HOOKS: list[HookProvider | HookCallback] = [log_model_errors, log_tool_errors]
 
 
 @contextmanager
@@ -488,7 +492,7 @@ Use your tools for mathematical tasks.
 Refer to tools as your 'spellbook'.
 """,
         tools=[subtract, current_time],
-        hooks=[log_model_errors, log_tool_errors],
+        hooks=AGENT_HOOKS,
     )
 ```
 
@@ -531,7 +535,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from .agent import get_agent
+from .agent import AGENT_HOOKS, get_agent
 from .middleware.session_id_middleware import SESSION_ID_HEADER, SessionIdMiddleware
 from .session import get_session_manager
 
@@ -548,6 +552,10 @@ async def lifespan(app: FastAPI):
             # A per-thread session manager, not the template Agent's own, since
             # AG-UI caches one Strands agent per thread_id.
             config=StrandsAgentConfig(session_manager_provider=lambda _input_data: get_session_manager()),
+            # Required as well as on the template Agent: AG-UI keeps only the
+            # built HookRegistry, so hooks it can't read back are never
+            # registered and model/tool failures go unreported.
+            hooks=AGENT_HOOKS,
         )
         yield
 
@@ -1072,11 +1080,17 @@ Le `ts#website` génère ces fichiers. Examinons certains des fichiers clés mis
 // packages/common/constructs/src/app/static-websites/game-ui.ts
 import * as url from 'url';
 import { Construct } from 'constructs';
-import { StaticWebsite } from '../../core/index.js';
+import { StaticWebsite, StaticWebsiteProps } from '../../core/index.js';
+
+export type GameUIProps = Omit<
+  StaticWebsiteProps,
+  'websiteName' | 'websiteFilePath'
+>;
 
 export class GameUI extends StaticWebsite {
-  constructor(scope: Construct, id: string) {
+  constructor(scope: Construct, id: string, props?: GameUIProps) {
     super(scope, id, {
+      ...props,
       websiteName: 'GameUI',
       websiteFilePath: url.fileURLToPath(
         new URL(

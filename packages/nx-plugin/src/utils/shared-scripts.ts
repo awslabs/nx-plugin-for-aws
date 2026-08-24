@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { joinPathFragments, type Tree } from '@nx/devkit';
-import tsProjectGenerator from '../ts/lib/generator';
+import tsProjectGenerator from '../ts/lib/generator.js';
 import {
   PACKAGES_DIR,
   SHARED_SCRIPTS_DIR,
   SHARED_SCRIPTS_NAME,
-} from './shared-constructs-constants';
+} from './shared-constructs-constants.js';
 
 /**
  * Lazily creates the shared scripts package at packages/common/scripts/.

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { describe, expect, it } from 'vitest';
-import { mergeTsReferences } from './ts-project-utils';
+import { mergeTsReferences } from './ts-project-utils.js';
 
 describe('mergeTsReferences', () => {
   it('appends new references to the end', () => {

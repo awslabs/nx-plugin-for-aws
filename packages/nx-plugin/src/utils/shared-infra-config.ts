@@ -8,16 +8,16 @@ import {
   OverwriteStrategy,
   type Tree,
 } from '@nx/devkit';
-import tsProjectGenerator from '../ts/lib/generator';
-import { formatFilesInSubtree } from './format';
-import { esmVars } from './module-format';
-import { getNpmScopePrefix } from './npm-scope';
-import { getPackageManagerDisplayCommands } from './pkg-manager';
+import tsProjectGenerator from '../ts/lib/generator.js';
+import { formatFilesInSubtree } from './format.js';
+import { esmVars } from './module-format.js';
+import { getNpmScopePrefix } from './npm-scope.js';
+import { getPackageManagerDisplayCommands } from './pkg-manager.js';
 import {
   PACKAGES_DIR,
   SHARED_INFRA_CONFIG_DIR,
   SHARED_INFRA_CONFIG_NAME,
-} from './shared-constructs-constants';
+} from './shared-constructs-constants.js';
 
 /**
  * Lazily creates the shared infra-config package at packages/common/infra-config/.

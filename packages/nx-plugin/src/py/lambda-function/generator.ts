@@ -10,36 +10,36 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { addPyDependencies } from '../../utils/add-dependencies';
-import { addPythonBundleTarget } from '../../utils/bundle/bundle';
+import { addPyDependencies } from '../../utils/add-dependencies.js';
+import { addPythonBundleTarget } from '../../utils/bundle/bundle.js';
 import {
   declareDependencies,
   ownedElsewhere,
-} from '../../utils/declared-dependencies';
-import { formatFilesInSubtree } from '../../utils/format';
-import { addLambdaFunctionInfra } from '../../utils/function-constructs/function-constructs';
-import { resolveIac } from '../../utils/iac';
-import { installDependencies } from '../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+} from '../../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../../utils/format.js';
+import { addLambdaFunctionInfra } from '../../utils/function-constructs/function-constructs.js';
+import { resolveIac } from '../../utils/iac.js';
+import { installDependencies } from '../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
 import {
   toClassName,
   toDotNotation,
   toKebabCase,
   toSnakeCase,
-} from '../../utils/names';
-import { getNpmScope } from '../../utils/npm-scope';
+} from '../../utils/names.js';
+import { getNpmScope } from '../../utils/npm-scope.js';
 import {
   addComponentGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
-} from '../../utils/nx';
-import { sortObjectKeys } from '../../utils/object';
-import { toProjectRelativePath } from '../../utils/paths';
+} from '../../utils/nx.js';
+import { sortObjectKeys } from '../../utils/object.js';
+import { toProjectRelativePath } from '../../utils/paths.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../utils/shared-constructs';
+} from '../../utils/shared-constructs.js';
 import type { PyLambdaFunctionGeneratorSchema } from './schema';
 
 export const DEPENDENCIES = declareDependencies()({
@@ -54,6 +54,18 @@ export const DEPENDENCIES = declareDependencies()({
 export const LAMBDA_FUNCTION_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
 );
+
+const PARSER_MODELS_MODULE = 'aws_lambda_powertools.utilities.parser.models';
+
+/**
+ * The module an event model is importable from. Most are re-exported by the
+ * `models` package, but the IoT Core registry events are only available from
+ * the submodule that defines them.
+ */
+export const eventModuleFor = (event: string): string =>
+  event.startsWith('IoTCore')
+    ? `${PARSER_MODELS_MODULE}.iot_registry_events`
+    : PARSER_MODELS_MODULE;
 
 export interface LambdaFunctionDetails {
   /**
@@ -181,6 +193,7 @@ export const pyLambdaFunctionGenerator = async (
     dir,
     lambdaFunctionClassName,
     lambdaFunctionSnakeCase: normalizedFunctionName,
+    eventModule: eventModuleFor(schema.event ?? 'Any'),
   };
 
   projectConfig.targets = sortObjectKeys(projectConfig.targets);

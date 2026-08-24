@@ -6,7 +6,7 @@ import { detectPackageManager } from '@nx/devkit';
 import {
   PACKAGE_MANAGER_COMMANDS,
   type PackageManagerDisplayCommands,
-} from './commands';
+} from './commands.js';
 
 export type { PackageManagerDisplayCommands };
 

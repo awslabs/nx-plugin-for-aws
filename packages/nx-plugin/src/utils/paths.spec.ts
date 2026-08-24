@@ -8,8 +8,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   getRelativePathToRoot,
   getRelativePathToRootByDirectory,
-} from './paths';
-import { createTreeUsingTsSolutionSetup } from './test';
+} from './paths.js';
+import { createTreeUsingTsSolutionSetup } from './test.js';
 
 vi.mock('@nx/devkit', async () => {
   const actual = await vi.importActual('@nx/devkit');

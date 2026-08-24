@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { GeneratorCallback, Tree } from '@nx/devkit';
-import { declareDependencies } from '../utils/declared-dependencies';
-import { formatFilesInSubtree } from '../utils/format';
-import { applyWorkspaceInit, INIT_DEPENDENCIES } from '../utils/init';
-import { installDependencies } from '../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../utils/metrics';
-import { getGeneratorInfo, type NxGeneratorInfo } from '../utils/nx';
+import { declareDependencies } from '../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../utils/format.js';
+import { applyWorkspaceInit, INIT_DEPENDENCIES } from '../utils/init.js';
+import { installDependencies } from '../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../utils/metrics.js';
+import { getGeneratorInfo, type NxGeneratorInfo } from '../utils/nx.js';
 import type { InitGeneratorSchema } from './schema';
 
 // `husky` comes from the preset, which is discovered as init: both mark the

@@ -4,7 +4,7 @@
  */
 
 import { TsProjectGeneratorSchema } from '../../ts/lib/schema';
-import { IacOption } from '../../utils/iac';
+import { IacOption } from '../../utils/iac.js';
 
 export interface TsTrpcApiGeneratorSchema {
   name: string;

@@ -6,13 +6,16 @@ import { readJson, readProjectConfiguration, type Tree } from '@nx/devkit';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
-} from '../../utils/config/utils';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
+} from '../../utils/config/utils.js';
+import { expectHasMetricTags } from '../../utils/metrics.spec.js';
 import {
   createTreeUsingTsSolutionSetup,
   snapshotTreeDir,
-} from '../../utils/test';
-import { TRPC_BACKEND_GENERATOR_INFO, tsTrpcApiGenerator } from './generator';
+} from '../../utils/test.js';
+import {
+  TRPC_BACKEND_GENERATOR_INFO,
+  tsTrpcApiGenerator,
+} from './generator.js';
 import type { TsTrpcApiGeneratorSchema } from './schema';
 
 describe('trpc backend generator', () => {

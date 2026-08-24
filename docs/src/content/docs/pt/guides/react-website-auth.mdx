@@ -13,7 +13,7 @@ import Snippet from '@components/snippet.astro';
 
 O gerador de Autenticação de Website React adiciona autenticação ao seu website React usando [Amazon Cognito](https://aws.amazon.com/cognito/).
 
-Este gerador configura a infraestrutura CDK ou Terraform para criar um Cognito User Pool e Identity Pool associado, bem como uma UI hospedada para lidar com fluxos de login de usuário e sua integração com seu website React.
+Este gerador configura a infraestrutura CDK ou Terraform para criar um Cognito User Pool e o Identity Pool associado, bem como uma UI hospedada para lidar com fluxos de login de usuário e sua integração com seu website React.
 
 ## Uso
 
@@ -69,7 +69,7 @@ Você também encontrará o seguinte código de infraestrutura gerado com base n
 
 #### Arquitetura
 
-Este gerador adiciona um Amazon Cognito user pool (para sign-in) e um identity pool (para federar usuários autenticados a credenciais IAM com escopo) à arquitetura de static-website existente:
+Este gerador adiciona um Amazon Cognito user pool (para login) e um identity pool (para federar usuários autenticados a credenciais IAM com escopo) à arquitetura de website estático existente:
 
 ```d2 inline=true
 direction: right
@@ -106,9 +106,9 @@ browser -> backend: IAM/Cognito
 
 #### Proteção contra ameaças
 
-O User Pool é criado no [plano de recursos Plus](https://docs.aws.amazon.com/cognito/latest/developerguide/feature-plans-features-plus.html) do Cognito com [proteção contra ameaças](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pool-settings-threat-protection.html) definida para o modo `AUDIT` para autenticação padrão. No modo de auditoria, o Cognito atribui um nível de risco a cada sign-in e registra a avaliação no CloudWatch sem bloquear usuários.
+O User Pool é criado no [plano de recursos Plus](https://docs.aws.amazon.com/cognito/latest/developerguide/feature-plans-features-plus.html) do Cognito com [proteção contra ameaças](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pool-settings-threat-protection.html) definida para o modo `AUDIT` para autenticação padrão. No modo de auditoria, o Cognito atribui um nível de risco a cada login e registra a avaliação no CloudWatch sem bloquear usuários.
 
-Depois de observar as avaliações de risco para seus usuários, você pode mudar para a aplicação de função completa para responder automaticamente a atividades arriscadas (por exemplo, exigindo MFA ou bloqueando sign-in):
+Depois de observar as avaliações de risco para seus usuários, você pode mudar para a aplicação de função completa para responder automaticamente a atividades arriscadas (por exemplo, exigindo MFA ou bloqueando o login):
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -118,6 +118,42 @@ Defina `standardThreatProtectionMode` como `StandardThreatProtectionMode.FULL_FU
 Defina `advanced_security_mode` como `ENFORCED` no bloco `user_pool_add_ons` em `packages/common/terraform/src/core/user-identity/identity/identity.tf`.
 </Fragment>
 </Infrastructure>
+
+#### Autenticação multifator (MFA)
+
+Por padrão, os usuários devem configurar MFA (um código SMS ou uma senha de uso único baseada em tempo) antes de poderem fazer login. Você pode tornar o MFA opcional, desativá-lo completamente ou restringir quais métodos de segundo fator estão disponíveis:
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts
+import { Mfa } from 'aws-cdk-lib/aws-cognito';
+
+new UserIdentity(this, 'Identity', {
+  mfa: Mfa.OPTIONAL,
+  mfaSecondFactor: { sms: false, otp: true },
+});
+```
+
+`mfa` aceita `Mfa.OFF` / `Mfa.OPTIONAL` / `Mfa.REQUIRED`. `mfaSecondFactor.sms` e `mfaSecondFactor.otp` habilitam ou desabilitam cada método de segundo fator independentemente; eles não têm efeito quando `mfa` é `Mfa.OFF`. Definir `mfa: Mfa.REQUIRED` com ambos os métodos desabilitados é rejeitado no momento da síntese, pois ninguém poderia então completar o login.
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+
+  mfa = "OPTIONAL"
+  mfa_second_factor_sms = false
+  mfa_second_factor_otp = true
+}
+```
+
+`mfa` aceita `"OFF"` / `"OPTIONAL"` / `"ON"`. `mfa_second_factor_sms` e `mfa_second_factor_otp` habilitam ou desabilitam cada método de segundo fator independentemente; eles não têm efeito quando `mfa` é `"OFF"`.
+</Fragment>
+</Infrastructure>
+
+:::caution[SMS MFA está vinculado à verificação de número de telefone]
+O Cognito rejeita a verificação de número de telefone baseada em SMS a menos que SMS também seja um método MFA habilitado sempre que MFA não estiver desativado, tanto no CDK quanto no Terraform. Desabilitar `mfaSecondFactor.sms` / `mfa_second_factor_sms` enquanto `mfa` está ativado, portanto, também desabilita a verificação de número de telefone baseada em SMS para o user pool.
+:::
 
 #### Web Application Firewall (WAF)
 
@@ -141,7 +177,7 @@ module "user_identity" {
 </Infrastructure>
 
 :::caution[`EC2MetaDataSSRF_QUERYARGUMENTS` está definido como Count]
-Esta regra sinaliza endereços de loopback em argumentos de consulta como tentativas de [SSRF](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-list.html), o que bloquearia o sign-in local, já que a Hosted UI recebe um `redirect_uri` `localhost`. Portanto, está definida como [Count](https://docs.aws.amazon.com/waf/latest/developerguide/web-acl-rule-action.html#web-acl-rule-action-count) enquanto URLs de callback locais estão configuradas — as correspondências ainda são registradas e todas as outras regras bloqueiam. Remova as URLs de callback locais para restaurá-la para Block.
+Esta regra sinaliza endereços de loopback em argumentos de consulta como tentativas de [SSRF](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-list.html), o que bloquearia o login local, pois a Hosted UI recebe um `redirect_uri` `localhost`. Portanto, está definida como [Count](https://docs.aws.amazon.com/waf/latest/developerguide/web-acl-rule-action.html#web-acl-rule-action-count) enquanto as URLs de callback locais estão configuradas — as correspondências ainda são registradas e todas as outras regras bloqueiam. Remova as URLs de callback locais para restaurá-la para Block.
 :::
 
 ## Uso da Infraestrutura
@@ -208,7 +244,7 @@ O cliente User Pool gerado permite a URL de distribuição do CloudFront (e quai
 Edite as URLs de callback/logout em `packages/common/constructs/src/core/user-identity.ts`.
 </Fragment>
 <Fragment slot="terraform">
-Edite os `callback_urls`/`logout_urls` em `packages/common/terraform/src/core/user-identity/identity/identity.tf`.
+Edite as `callback_urls`/`logout_urls` em `packages/common/terraform/src/core/user-identity/identity/identity.tf`.
 </Fragment>
 </Infrastructure>
 :::
@@ -229,7 +265,9 @@ export class ApplicationStack extends Stack {
     super(scope, id);
 
     const identity = new UserIdentity(this, 'Identity');
-    const api = new MyApi(this, 'MyApi');
+    const api = new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this).build(),
+    });
 
     api.grantInvokeAccess(identity.identityPool.authenticatedRole);
 

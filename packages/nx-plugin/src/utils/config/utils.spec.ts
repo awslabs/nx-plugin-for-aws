@@ -5,13 +5,13 @@
 
 import type { Tree } from '@nx/devkit';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
-import type { LicenseLinesContent } from '../../license/config-types';
+import type { LicenseLinesContent } from '../../license/config-types.js';
 import {
   AWS_NX_PLUGIN_CONFIG_FILE_NAME,
   ensureAwsNxPluginConfig,
   readAwsNxPluginConfig,
   updateAwsNxPluginConfig,
-} from './utils';
+} from './utils.js';
 
 describe('config utils', () => {
   let tree: Tree;

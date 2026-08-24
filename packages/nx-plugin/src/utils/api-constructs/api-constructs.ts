@@ -10,18 +10,18 @@ import {
   type Tree,
   updateJson,
 } from '@nx/devkit';
-import { addStarExport } from '../ast';
+import { addStarExport } from '../ast.js';
 import {
   type DeclaredPyDependency,
   type DeclaredTsDependency,
   type DependencyDeclaration,
   forDependencies,
   type MustDeclare,
-} from '../declared-dependencies';
-import { addDependenciesToPackageJson } from '../dependencies';
-import type { Iac } from '../iac';
-import { esmVars } from '../module-format';
-import { addDependencyToTargetIfNotPresent } from '../nx';
+} from '../declared-dependencies.js';
+import { addDependenciesToPackageJson } from '../dependencies.js';
+import type { Iac } from '../iac.js';
+import { esmVars } from '../module-format.js';
+import { addDependencyToTargetIfNotPresent } from '../nx.js';
 import {
   generatedInfrastructure,
   generatedTerraform,
@@ -29,14 +29,14 @@ import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
-} from '../shared-constructs-constants';
+} from '../shared-constructs-constants.js';
 import {
   type IPyDepVersion,
   type ITsDepVersion,
   PY_VERSIONS,
   terraformProviderVersions,
   withVersions,
-} from '../versions';
+} from '../versions.js';
 
 /**
  * Dependencies a caller must declare to add API Gateway infrastructure.

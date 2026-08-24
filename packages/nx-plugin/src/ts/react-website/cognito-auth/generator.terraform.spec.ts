@@ -6,13 +6,13 @@ import type { Tree } from '@nx/devkit';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
-} from '../../../utils/config/utils';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import { RUNTIME_CONFIG_GENERATOR_INFO } from '../runtime-config/generator';
+} from '../../../utils/config/utils.js';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
+import { RUNTIME_CONFIG_GENERATOR_INFO } from '../runtime-config/generator.js';
 import {
   COGNITO_AUTH_GENERATOR_INFO,
   tsReactWebsiteAuthGenerator,
-} from './generator';
+} from './generator.js';
 import type { TsReactWebsiteAuthGeneratorSchema } from './schema';
 
 describe('cognito-auth generator terraform iac', () => {

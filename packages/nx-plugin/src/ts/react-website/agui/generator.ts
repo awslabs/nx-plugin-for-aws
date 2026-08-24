@@ -9,25 +9,25 @@ import {
   type ProjectConfiguration,
   type Tree,
 } from '@nx/devkit';
-import { addAgentRuntimeToConnectionNamespace } from '../../../connection/agent-runtime-config';
-import { addTsDependencies } from '../../../utils/add-dependencies';
+import { addAgentRuntimeToConnectionNamespace } from '../../../connection/agent-runtime-config.js';
+import { addTsDependencies } from '../../../utils/add-dependencies.js';
 import {
   addDestructuredImport,
   addSingleImport,
   applyGritQL,
-} from '../../../utils/ast';
+} from '../../../utils/ast.js';
 import {
   declareDependencies,
   ownedElsewhere,
-} from '../../../utils/declared-dependencies';
-import { kebabCase } from '../../../utils/names';
-import { getNpmScopePrefix } from '../../../utils/npm-scope';
-import { registerPnpmBuiltDependencies } from '../../../utils/pnpm-workspace';
+} from '../../../utils/declared-dependencies.js';
+import { kebabCase } from '../../../utils/names.js';
+import { getNpmScopePrefix } from '../../../utils/npm-scope.js';
+import { registerPnpmBuiltDependencies } from '../../../utils/pnpm-workspace.js';
 import {
   SHADCN_DEPENDENCIES,
   sharedShadcnGenerator,
-} from '../../../utils/shared-shadcn';
-import { runtimeConfigGenerator } from '../runtime-config/generator';
+} from '../../../utils/shared-shadcn.js';
+import { runtimeConfigGenerator } from '../runtime-config/generator.js';
 
 /**
  * The values this helper's predicates read. Its callers record them, so the

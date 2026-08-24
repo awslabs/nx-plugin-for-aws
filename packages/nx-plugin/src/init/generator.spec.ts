@@ -6,9 +6,9 @@ import { readJson, readNxJson, type Tree } from '@nx/devkit';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
 import yaml from 'js-yaml';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { SYNC_GENERATOR_NAME as TS_SYNC_GENERATOR_NAME } from '../ts/sync/generator';
-import { readAwsNxPluginConfig } from '../utils/config/utils';
-import { initGenerator } from './generator';
+import { SYNC_GENERATOR_NAME as TS_SYNC_GENERATOR_NAME } from '../ts/sync/generator.js';
+import { readAwsNxPluginConfig } from '../utils/config/utils.js';
+import { initGenerator } from './generator.js';
 
 const NX_TYPESCRIPT_SYNC_GENERATOR = '@nx/js:typescript-sync';
 

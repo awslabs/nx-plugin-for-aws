@@ -4,8 +4,8 @@
  */
 import { readProjectConfiguration, type Tree } from '@nx/devkit';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import { tsDynamoDBSmithyConnectionGenerator } from './generator';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
+import { tsDynamoDBSmithyConnectionGenerator } from './generator.js';
 
 describe('ts#dynamodb smithy-connection generator', () => {
   let tree: Tree;

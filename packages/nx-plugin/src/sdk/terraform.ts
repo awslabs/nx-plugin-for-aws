@@ -4,5 +4,5 @@
  */
 
 // Terraform Project Generator
-export { terraformProjectGenerator } from '../terraform/project/generator';
+export { terraformProjectGenerator } from '../terraform/project/generator.js';
 export type { TerraformProjectGeneratorSchema } from '../terraform/project/schema';

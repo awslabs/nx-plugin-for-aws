@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import type { IPyDepVersion, ITsDepVersion } from './versions';
+import type { IPyDepVersion, ITsDepVersion } from './versions.js';
 
 /**
  * Which vended dependencies each generator is responsible for, and when each

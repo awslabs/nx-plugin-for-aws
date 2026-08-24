@@ -3,15 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { addProjectConfiguration, type Tree, writeJson } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from '../test';
+import { createTreeUsingTsSolutionSetup } from '../test.js';
 import {
   BASE_IMAGES,
   CONTAINER_REPOSITORIES,
   CONTAINER_VERSIONS,
   PY_VERSIONS,
   TS_VERSIONS,
-} from '../versions';
-import { syncVendedVersions } from './sync-vended-versions';
+} from '../versions.js';
+import { syncVendedVersions } from './sync-vended-versions.js';
 
 // Versions the plugin vends, read from the manifest so the tests track it.
 const VENDED_NPM = TS_VERSIONS.npm;

@@ -118,8 +118,8 @@ Entry point sử dụng [`@ag-ui/aws-strands`](https://www.npmjs.com/package/@ag
   - packages/common/constructs/src
     - app
       - agents
-        - \<project-name>
-          - \<project-name>.ts CDK construct for deploying your agent
+        - \<agent-name>
+          - \<agent-name>.ts CDK construct for deploying your agent
 </FileTree>
 </Fragment>
 <Fragment slot="terraform">
@@ -127,8 +127,8 @@ Entry point sử dụng [`@ag-ui/aws-strands`](https://www.npmjs.com/package/@ag
   - packages/common/terraform/src
     - app
       - agents
-        - \<project-name>
-          - \<project-name>.tf Module for deploying your agent
+        - \<agent-name>
+          - \<agent-name>.tf Module for deploying your agent
     - core
       - agent-core
         - runtime.tf Generic module for deploying to Bedrock AgentCore Runtime
@@ -203,7 +203,7 @@ Framework Strands tự động xử lý:
 
 ### Cấu hình Model
 
-Theo mặc định, các Strands agent sử dụng Claude 4 Sonnet, nhưng bạn có thể dễ dàng chuyển đổi giữa các model provider:
+Theo mặc định, các Strands agent sử dụng Claude Sonnet 4.6 trên Amazon Bedrock, nhưng bạn có thể dễ dàng chuyển đổi giữa các model provider:
 
 ```typescript
 import { Agent } from '@strands-agents/sdk';
@@ -247,7 +247,7 @@ Tham khảo <Link path="/guides/connection/ts-agent-mcp">hướng dẫn `connect
 <OptionFilter when={{ protocol: 'a2a' }} description="A2A Express server details">
 ## A2A Server (giao thức A2A)
 
-File `index.ts` được tạo mount [Strands A2A Express Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) lên một Express app để agent được tạo expose các endpoint giao thức A2A cùng với health check `/ping`. Khi triển khai lên AgentCore, entry point resolve ARN công khai của runtime từ AppConfig và quảng cáo nó trong agent card.
+File `index.ts` được tạo mount [Strands A2A Express Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) lên một Express app để agent được tạo expose các endpoint giao thức A2A cùng với health check `/ping`. URL được quảng cáo trong agent card đến từ biến môi trường `AGENTCORE_RUNTIME_URL`, quay lại `http://localhost:<port>/` cho phát triển cục bộ.
 
 Hầu hết người dùng sẽ không cần sửa đổi file này — chỉnh sửa `agent.ts` để thay đổi công cụ hoặc system prompt. Các A2A agent lắng nghe trên cổng `9000` (so với `8080` cho HTTP), mà Dockerfile và hạ tầng được tạo đã được cấu hình sẵn.
 </OptionFilter>
@@ -255,7 +255,7 @@ Hầu hết người dùng sẽ không cần sửa đổi file này — chỉnh 
 <OptionFilter when={{ protocol: 'ag-ui' }} description="AG-UI server details">
 ## AG-UI Server (giao thức AG-UI)
 
-File `index.ts` được tạo bọc Strands `Agent` của bạn trong một [`@ag-ui/aws-strands`](https://www.npmjs.com/package/@ag-ui/aws-strands) `StrandsAgent` và tạo một Express app thông qua `createStrandsApp()`. App kết quả expose một POST endpoint duy nhất stream các sự kiện [AG-UI](https://docs.ag-ui.com/) qua Server-Sent Events (SSE), cũng như `/ping` cho health check của AgentCore runtime.
+File `index.ts` được tạo bọc Strands `Agent` của bạn trong một [`@ag-ui/aws-strands`](https://www.npmjs.com/package/@ag-ui/aws-strands) `StrandsAgent` và tạo một Express app. App kết quả expose một POST endpoint duy nhất stream các sự kiện [AG-UI](https://docs.ag-ui.com/) qua Server-Sent Events (SSE), cũng như `/ping` cho health check của AgentCore runtime.
 
 Các AG-UI agent được thiết kế để được sử dụng trực tiếp bởi frontend. Sử dụng <Link path="/guides/connection/react-agui">`connection` generator</Link> để kết nối React website của bạn với agent thông qua [CopilotKit](https://docs.copilotkit.ai/aws-strands) provider và [AG-UI HttpAgent](https://docs.ag-ui.com/) client.
 
@@ -395,11 +395,13 @@ Bạn có thể gọi một agent đang chạy cục bộ bằng phương thức
 
 Ví dụ, bạn có thể tạo một file có tên `scripts/test.ts` trong workspace của bạn import client:
 
+Class client được đặt tên theo agent của bạn, vì vậy một agent có tên `my-agent` export `MyAgentClient`.
+
 ```typescript
 // scripts/test.ts
-import { AgentClient } from '../packages/<project>/src/agent/client.js';
+import { MyAgentClient } from '../packages/<project>/src/agent/client.js';
 
-const client = AgentClient.local({ url: 'http://localhost:8081/ws' });
+const client = MyAgentClient.local({ url: 'http://localhost:8081/ws' });
 
 client.invoke.subscribe({ prompt: 'what is 1 plus 1?' }, { onData: console.log });
 ```
@@ -429,9 +431,9 @@ Client factory sử dụng HTTP header trong WebSocket handshake để xác th�
 Bạn có thể gọi agent đã triển khai của bạn bằng cách truyền ARN của nó cho phương thức factory `withIamAuth`:
 
 ```typescript
-import { AgentClient } from './agent/client.js';
+import { MyAgentClient } from './agent/client.js';
 
-const client = AgentClient.withIamAuth({
+const client = MyAgentClient.withIamAuth({
   agentRuntimeArn: 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent',
 });
 
@@ -453,7 +455,7 @@ client.invoke.subscribe({ prompt: 'what is 1 plus 1?' }, {
 Sử dụng phương thức factory `withJwtAuth` để xác thực bằng JWT / Cognito access token.
 
 ```typescript
-const client = AgentClient.withJwtAuth({
+const client = MyAgentClient.withJwtAuth({
   agentRuntimeArn: 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent',
   accessTokenProvider: async () => `<access-token>`,
 });
@@ -470,7 +472,7 @@ import { CognitoIdentityProvider } from "@aws-sdk/client-cognito-identity-provid
 
 const cognito = new CognitoIdentityProvider();
 
-const jwtClient = AgentClient.withJwtAuth({
+const jwtClient = MyAgentClient.withJwtAuth({
   agentRuntimeArn: 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent',
   accessTokenProvider: async () => {
     const response = await cognito.adminInitiateAuth({

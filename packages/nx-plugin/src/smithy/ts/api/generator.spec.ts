@@ -6,18 +6,18 @@ import { readJson, type Tree } from '@nx/devkit';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
-} from '../../../utils/config/utils';
-import { declareDependencies } from '../../../utils/declared-dependencies';
-import { expectHasMetricTags } from '../../../utils/metrics.spec';
+} from '../../../utils/config/utils.js';
+import { declareDependencies } from '../../../utils/declared-dependencies.js';
+import { expectHasMetricTags } from '../../../utils/metrics.spec.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../../utils/shared-constructs';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
+} from '../../../utils/shared-constructs.js';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
 import {
   TS_SMITHY_API_GENERATOR_INFO,
   tsSmithyApiGenerator,
-} from './generator';
+} from './generator.js';
 
 const sharedConstructsDeclaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],

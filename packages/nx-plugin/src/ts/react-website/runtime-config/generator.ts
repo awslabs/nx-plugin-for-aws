@@ -8,18 +8,22 @@ import {
   OverwriteStrategy,
   type Tree,
 } from '@nx/devkit';
-import { addSingleImport, applyGritQL, matchGritQL } from '../../../utils/ast';
-import { addHookResultToRouterProviderContext } from '../../../utils/ast/website';
-import { formatFilesInSubtree } from '../../../utils/format';
-import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
-import { getNpmScopePrefix } from '../../../utils/npm-scope';
+import {
+  addSingleImport,
+  applyGritQL,
+  matchGritQL,
+} from '../../../utils/ast.js';
+import { addHookResultToRouterProviderContext } from '../../../utils/ast/website.js';
+import { formatFilesInSubtree } from '../../../utils/format.js';
+import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics.js';
+import { getNpmScopePrefix } from '../../../utils/npm-scope.js';
 import {
   addComponentGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
-} from '../../../utils/nx';
-import { toProjectRelativePath } from '../../../utils/paths';
+} from '../../../utils/nx.js';
+import { toProjectRelativePath } from '../../../utils/paths.js';
 import type { RuntimeConfigGeneratorSchema } from './schema';
 
 export const RUNTIME_CONFIG_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(

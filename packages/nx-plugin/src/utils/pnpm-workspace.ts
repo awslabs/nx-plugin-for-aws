@@ -4,7 +4,7 @@
  */
 import type { Tree } from '@nx/devkit';
 import yaml from 'js-yaml';
-import { detectWorkspacePackageManager } from './dependencies';
+import { detectWorkspacePackageManager } from './dependencies.js';
 
 const WORKSPACE_FILE = 'pnpm-workspace.yaml';
 

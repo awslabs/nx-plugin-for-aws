@@ -3,13 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { GeneratorCallback, Tree } from '@nx/devkit';
-import { agentcoreGatewayGenerator } from '../../sdk/agentcore-gateway';
-import { agentcoreHarnessGenerator } from '../../sdk/agentcore-harness';
+import { agentcoreGatewayGenerator } from '../../sdk/agentcore-gateway.js';
+import { agentcoreHarnessGenerator } from '../../sdk/agentcore-harness.js';
 import {
   type ConnectionGeneratorSchema,
   connectionGenerator,
-} from '../../sdk/connection';
-import { licenseGenerator } from '../../sdk/license';
+} from '../../sdk/connection.js';
+import { licenseGenerator } from '../../sdk/license.js';
 import {
   type PyAgentGeneratorSchema,
   type PyApiGeneratorSchema,
@@ -21,9 +21,9 @@ import {
   pyMcpServerGenerator,
   pyProjectGenerator,
   pyRdbGenerator,
-} from '../../sdk/py';
-import { smithyProjectGenerator } from '../../sdk/smithy';
-import { terraformProjectGenerator } from '../../sdk/terraform';
+} from '../../sdk/py.js';
+import { smithyProjectGenerator } from '../../sdk/smithy.js';
+import { terraformProjectGenerator } from '../../sdk/terraform.js';
 import {
   type TsAgentGeneratorSchema,
   type TsApiGeneratorSchema,
@@ -44,10 +44,10 @@ import {
   tsRdbGenerator,
   tsWebsiteAuthGenerator,
   tsWebsiteGenerator,
-} from '../../sdk/ts';
-import { installDependencies } from '../../utils/install';
-import { toSnakeCase } from '../../utils/names';
-import { getNpmScope, getNpmScopePrefix } from '../../utils/npm-scope';
+} from '../../sdk/ts.js';
+import { installDependencies } from '../../utils/install.js';
+import { toSnakeCase } from '../../utils/names.js';
+import { getNpmScope, getNpmScopePrefix } from '../../utils/npm-scope.js';
 import type { InternalTestMatrixGeneratorSchema } from './schema';
 
 /**

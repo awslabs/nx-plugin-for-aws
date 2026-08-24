@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { NxGeneratorInfo } from '../../utils/generators';
-import { IAC_PROVIDERS } from '../../utils/iac-providers';
-import { buildNxCommand, fetchGuidePages } from '../generator-info';
-import { PACKAGE_MANAGERS } from '../schema';
+import type { NxGeneratorInfo } from '../../utils/generators.js';
+import { IAC_PROVIDERS } from '../../utils/iac-providers.js';
+import { buildNxCommand, fetchGuidePages } from '../generator-info.js';
+import { PACKAGE_MANAGERS } from '../schema.js';
 
 export const TOOL_SELECTION_GUIDE = `## Tool Selection Guide
 
@@ -88,7 +88,7 @@ When scaffolding several projects in one go, chain generators to avoid a slow de
 
 ${PACKAGE_MANAGERS.map(
   (pm) => `  \`\`\`bash
-  ${buildNxCommand('g @aws/nx-plugin:ts#trpc-api --no-interactive --name=my-app-api --auth=IAM --prefer-install-dependencies=false', pm)} && \\
+  ${buildNxCommand('g @aws/nx-plugin:ts#trpc-api --no-interactive --name=my-app-api --auth=iam --prefer-install-dependencies=false', pm)} && \\
     ${buildNxCommand('g @aws/nx-plugin:ts#react-website --no-interactive --name=my-app-website --prefer-install-dependencies=false', pm)} && \\
     ${buildNxCommand('g @aws/nx-plugin:connection --no-interactive --sourceProject=@my-app/my-app-website --targetProject=@my-app/my-app-api --prefer-install-dependencies=false', pm)} && \\
     ${buildNxCommand('g @aws/nx-plugin:ts#infra --no-interactive --name=infra', pm)} && \\

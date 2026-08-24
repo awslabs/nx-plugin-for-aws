@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { addProjectConfiguration, type Tree } from '@nx/devkit';
-import { TS_AGENT_GENERATOR_INFO } from '../../../ts/agent/generator';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import migration from './migration';
+import { TS_AGENT_GENERATOR_INFO } from '../../../ts/agent/generator.js';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
+import migration from './migration.js';
 
 const registerAgentProject = (
   tree: Tree,

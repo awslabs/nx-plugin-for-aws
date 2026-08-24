@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { buildGeneratorInfoList } from './generators';
+import { buildGeneratorInfoList } from './generators.js';
 
 describe('generators', () => {
   it('should not have duplicate metrics across generators', () => {

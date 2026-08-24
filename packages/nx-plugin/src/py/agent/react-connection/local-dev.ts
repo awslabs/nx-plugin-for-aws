@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import { addAgentTargetToLocalDev } from '../../../connection/agent-local-dev';
-import { kebabCase } from '../../../utils/names';
-import type { ComponentMetadata } from '../../../utils/nx';
+import { addAgentTargetToLocalDev } from '../../../connection/agent-local-dev.js';
+import { kebabCase } from '../../../utils/names.js';
+import type { ComponentMetadata } from '../../../utils/nx.js';
 
 export interface PyAgentLocalDevOptions {
   agentName: string;

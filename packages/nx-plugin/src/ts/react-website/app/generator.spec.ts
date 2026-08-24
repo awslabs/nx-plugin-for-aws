@@ -6,17 +6,17 @@ import { readJson, type Tree } from '@nx/devkit';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
-} from '../../../utils/config/utils';
-import { expectHasMetricTags } from '../../../utils/metrics.spec';
+} from '../../../utils/config/utils.js';
+import { expectHasMetricTags } from '../../../utils/metrics.spec.js';
 import {
   createTreeUsingTsSolutionSetup,
   snapshotTreeDir,
-} from '../../../utils/test';
+} from '../../../utils/test.js';
 import {
   REACT_WEBSITE_APP_GENERATOR_INFO,
   SUPPORTED_UX_PROVIDERS,
   tsReactWebsiteGenerator,
-} from './generator';
+} from './generator.js';
 import type { TsReactWebsiteGeneratorSchema } from './schema';
 
 describe('react-website generator', () => {

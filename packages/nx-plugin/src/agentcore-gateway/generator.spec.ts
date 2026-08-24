@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { readProjectConfiguration, type Tree } from '@nx/devkit';
-import { expectHasMetricTags } from '../utils/metrics.spec';
-import { createTreeUsingTsSolutionSetup } from '../utils/test';
+import { expectHasMetricTags } from '../utils/metrics.spec.js';
+import { createTreeUsingTsSolutionSetup } from '../utils/test.js';
 import {
   AGENTCORE_GATEWAY_GENERATOR_INFO,
   agentcoreGatewayGenerator,
-} from './generator';
+} from './generator.js';
 
 describe('agentcore-gateway generator', () => {
   let tree: Tree;

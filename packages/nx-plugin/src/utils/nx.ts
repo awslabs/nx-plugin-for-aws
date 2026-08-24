@@ -14,14 +14,14 @@ import {
 } from '@nx/devkit';
 import * as path from 'path';
 import PackageJson from '../../package.json' with { type: 'json' };
-import { NX_PLUGIN_MCP_PACKAGE_NAME } from './mcp';
-import { toSnakeCase } from './names';
-import { getNpmScope, getNpmScopePrefix } from './npm-scope';
+import { NX_PLUGIN_MCP_PACKAGE_NAME } from './mcp.js';
+import { toSnakeCase } from './names.js';
+import { getNpmScope, getNpmScopePrefix } from './npm-scope.js';
 
-export type { GeneratorInfo, NxGeneratorInfo } from './generators';
-export { buildGeneratorInfoList } from './generators';
+export type { GeneratorInfo, NxGeneratorInfo } from './generators.js';
+export { buildGeneratorInfoList } from './generators.js';
 
-import { buildGeneratorInfoList, type GeneratorInfo } from './generators';
+import { buildGeneratorInfoList, type GeneratorInfo } from './generators.js';
 
 const GENERATORS = buildGeneratorInfoList(
   path.resolve(import.meta.dirname, '..', '..'),

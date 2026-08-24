@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { describe, expect, it } from 'vitest';
-import { createEvaluator } from './evaluator';
-import type { AllowlistEntry } from './types';
+import { createEvaluator } from './evaluator.js';
+import type { AllowlistEntry } from './types.js';
 
 const allow: AllowlistEntry[] = [
   { spdxId: 'MIT', fullName: 'MIT License', aliases: ['MIT License'] },

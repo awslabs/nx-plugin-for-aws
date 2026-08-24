@@ -5,8 +5,8 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { installPackagesTask, type Tree } from '@nx/devkit';
-import { Logger, UVProvider } from './nxlv-python';
-import type { ITsDepVersion } from './versions';
+import { Logger, UVProvider } from './nxlv-python.js';
+import type { ITsDepVersion } from './versions.js';
 
 /**
  * Languages whose dependencies a generator may install.

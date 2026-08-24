@@ -10,19 +10,19 @@ import {
   type Tree,
   updateJson,
 } from '@nx/devkit';
-import terraformProjectGenerator from '../terraform/project/generator';
-import tsProjectGenerator from '../ts/lib/generator';
-import { readAwsNxPluginConfig } from './config/utils';
+import terraformProjectGenerator from '../terraform/project/generator.js';
+import tsProjectGenerator from '../ts/lib/generator.js';
+import { readAwsNxPluginConfig } from './config/utils.js';
 import type {
   DependencyDeclaration,
   MustDeclare,
-} from './declared-dependencies';
-import { addDependenciesToPackageJson } from './dependencies';
-import { formatFilesInSubtree } from './format';
-import type { Iac } from './iac';
-import { esmVars } from './module-format';
-import { getNpmScopePrefix } from './npm-scope';
-import { getPackageManagerDisplayCommands } from './pkg-manager';
+} from './declared-dependencies.js';
+import { addDependenciesToPackageJson } from './dependencies.js';
+import { formatFilesInSubtree } from './format.js';
+import type { Iac } from './iac.js';
+import { esmVars } from './module-format.js';
+import { getNpmScopePrefix } from './npm-scope.js';
+import { getPackageManagerDisplayCommands } from './pkg-manager.js';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DEPENDENCIES,
@@ -30,11 +30,11 @@ import {
   SHARED_CONSTRUCTS_NAME,
   SHARED_TERRAFORM_DIR,
   SHARED_TERRAFORM_NAME,
-} from './shared-constructs-constants';
+} from './shared-constructs-constants.js';
 
 export { SHARED_CONSTRUCTS_DEPENDENCIES };
 
-import { terraformProviderVersions, withVersions } from './versions';
+import { terraformProviderVersions, withVersions } from './versions.js';
 
 export interface SharedConstructsGeneratorOptions {
   iac: Iac;

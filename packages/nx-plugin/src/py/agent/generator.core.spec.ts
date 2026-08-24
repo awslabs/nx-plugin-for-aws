@@ -5,10 +5,10 @@
 
 import { parse } from '@iarna/toml';
 import { addProjectConfiguration, type Tree } from '@nx/devkit';
-import type { UVPyprojectToml } from '../../utils/nxlv-python';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { CONTAINER_VERSIONS } from '../../utils/versions';
-import { pyAgentGenerator } from './generator';
+import type { UVPyprojectToml } from '../../utils/nxlv-python.js';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import { CONTAINER_VERSIONS } from '../../utils/versions.js';
+import { pyAgentGenerator } from './generator.js';
 
 describe('py#agent generator', () => {
   let tree: Tree;

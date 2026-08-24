@@ -10,10 +10,10 @@ import {
   pascalCase,
   toClassName,
   upperFirst,
-} from '../../utils/names';
-import { STREAMING_CONTENT_TYPES } from './codegen-data/types';
-import { isRef, resolveIfRef, resolveRef, splitRef } from './refs';
-import type { Spec } from './types';
+} from '../../utils/names.js';
+import { STREAMING_CONTENT_TYPES } from './codegen-data/types.js';
+import { isRef, resolveIfRef, resolveRef, splitRef } from './refs.js';
+import type { Spec } from './types.js';
 
 interface SubSchema {
   readonly nameParts: string[];

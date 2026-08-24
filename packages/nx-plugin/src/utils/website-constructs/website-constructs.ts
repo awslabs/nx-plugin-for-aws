@@ -10,23 +10,23 @@ import {
   type Tree,
   updateJson,
 } from '@nx/devkit';
-import { addStarExport } from '../ast';
-import type { DeclaredPyDependency } from '../declared-dependencies';
-import type { Iac } from '../iac';
-import { esmVars } from '../module-format';
-import { addDependencyToTargetIfNotPresent } from '../nx';
+import { addStarExport } from '../ast.js';
+import type { DeclaredPyDependency } from '../declared-dependencies.js';
+import type { Iac } from '../iac.js';
+import { esmVars } from '../module-format.js';
+import { addDependencyToTargetIfNotPresent } from '../nx.js';
 import {
   generatedTerraform,
   type IacMetadata,
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
-} from '../shared-constructs-constants';
+} from '../shared-constructs-constants.js';
 import {
   type IPyDepVersion,
   PY_VERSIONS,
   terraformProviderVersions,
-} from '../versions';
+} from '../versions.js';
 
 /**
  * Python version the generated Terraform pins in the static website module's

@@ -11,10 +11,10 @@ import {
   type DependencyDeclaration,
   forDependencies,
   type MustDeclare,
-} from './declared-dependencies';
-import { FS_DEPENDENCIES, FsCommands } from './fs';
-import { addDependencyToTargetIfNotPresent } from './nx';
-import { containerImage, type ITsDepVersion, TS_VERSIONS } from './versions';
+} from './declared-dependencies.js';
+import { FS_DEPENDENCIES, FsCommands } from './fs.js';
+import { addDependencyToTargetIfNotPresent } from './nx.js';
+import { containerImage, type ITsDepVersion, TS_VERSIONS } from './versions.js';
 
 /** Dependencies a caller must declare to add a Docker scan target. */
 export const DOCKER_DEPENDENCIES = [...FS_DEPENDENCIES] as const;

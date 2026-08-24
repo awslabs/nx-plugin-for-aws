@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as devkit from '@nx/devkit';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { installDependencies } from './install';
+import { installDependencies } from './install.js';
 
 const install = vi.fn();
 

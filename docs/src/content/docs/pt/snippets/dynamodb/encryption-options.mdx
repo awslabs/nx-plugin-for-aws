@@ -1,0 +1,168 @@
+---
+title: Opções de Criptografia
+---
+import Infrastructure from '@components/infrastructure.astro';
+import OptionFilter from '@components/option-filter.astro';
+
+#### Usar uma Chave Gerenciada pela AWS
+
+Usa a chave KMS compartilhada `aws/dynamodb` que a AWS gerencia em seu nome. Ela é visível no console KMS da sua conta e cobrada por requisição, mas não há chave para você criar, rotacionar ou excluir.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { TableEncryption } from 'aws-cdk-lib/aws-dynamodb';
+import { MyTable } from '@my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  encryption: TableEncryption.AWS_MANAGED,
+});
+```
+
+:::tip[Checkov]
+Escolher `AWS_MANAGED` significa que a tabela não está mais criptografada com uma chave gerenciada pelo cliente, o que falha no `CKV_AWS_119` do Checkov. Suprima-o na tabela:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { suppressRules } from '@my-scope/common-constructs';
+
+suppressRules(table.table, ['CKV_AWS_119'], 'Using an AWS managed key rather than a customer-managed CMK');
+```
+:::
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source     = "../../common/terraform/src/app/dynamodb/my-table"
+  encryption = "AWS_MANAGED"
+}
+```
+</Fragment>
+</Infrastructure>
+
+#### Usar a Chave de Propriedade da AWS
+
+Usa uma chave totalmente de propriedade e gerenciada pela AWS — gratuita, sem chave visível em sua conta. A opção mais simples quando você não precisa de uma chave visível ao cliente ou à conta por motivos de conformidade.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { TableEncryption } from 'aws-cdk-lib/aws-dynamodb';
+import { MyTable } from '@my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  encryption: TableEncryption.DEFAULT,
+});
+```
+
+:::tip[Checkov]
+Escolher `DEFAULT` significa que a tabela não está mais criptografada com uma chave gerenciada pelo cliente, o que falha no `CKV_AWS_119` do Checkov. Suprima-o na tabela:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { suppressRules } from '@my-scope/common-constructs';
+
+suppressRules(table.table, ['CKV_AWS_119'], 'Using the AWS owned key rather than a customer-managed CMK');
+```
+:::
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source     = "../../common/terraform/src/app/dynamodb/my-table"
+  encryption = "DEFAULT"
+}
+```
+</Fragment>
+</Infrastructure>
+
+<OptionFilter when={{ iac: 'terraform' }} description="Switching an already-deployed table away from CUSTOMER_MANAGED">
+#### Mudando de CUSTOMER_MANAGED
+
+Em uma tabela **já implantada**, alterar `encryption` de `CUSTOMER_MANAGED` (para `AWS_MANAGED` ou `DEFAULT`) em um único `terraform apply` falha: o Terraform destrói a chave gerenciada pelo cliente antes de atualizar a tabela, e o DynamoDB então rejeita a atualização porque a chave já está pendente de exclusão.
+
+Contorne isso atualizando a criptografia da tabela diretamente via AWS CLI primeiro, e depois deixando o Terraform alcançar e limpar a chave órfã:
+
+```bash
+# For AWS_MANAGED:
+aws dynamodb update-table --table-name <table-name> \
+  --sse-specification Enabled=true,SSEType=KMS,KMSMasterKeyId=alias/aws/dynamodb
+
+# For DEFAULT:
+aws dynamodb update-table --table-name <table-name> --sse-specification Enabled=false
+
+# Then wait for this to report ENABLED (or for SSEDescription to disappear, for DEFAULT):
+aws dynamodb describe-table --table-name <table-name> --query Table.SSEDescription.Status
+```
+
+Então atualize `encryption` em sua configuração Terraform e execute `terraform apply` normalmente — o Terraform agora só precisa destruir a chave já não utilizada, sem nada mais dependendo dela.
+</OptionFilter>
+
+#### Usar Sua Própria Chave KMS
+
+Forneça uma chave gerenciada pelo cliente existente em vez de ter uma criada para você. A chave já deve conceder ao serviço DynamoDB as permissões necessárias em sua própria política de chave.
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { Key } from 'aws-cdk-lib/aws-kms';
+import { MyTable } from '@my-scope/common-constructs';
+
+const key = Key.fromKeyArn(this, 'Key', 'arn:aws:kms:us-east-1:111111111111:key/my-key-id');
+
+const table = new MyTable(this, 'Table', {
+  encryptionKey: key,
+});
+```
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source      = "../../common/terraform/src/app/dynamodb/my-table"
+  kms_key_arn = "arn:aws:kms:us-east-1:111111111111:key/my-key-id"
+}
+```
+</Fragment>
+</Infrastructure>
+
+#### Rotação de Chave de Criptografia
+
+Quando a tabela cria sua própria chave KMS gerenciada pelo cliente (o padrão, e apenas quando você não forneceu sua própria chave), essa chave tem rotação automática de chave habilitada por padrão. Desabilite-a se sua política de segurança gerencia a rotação externamente.
+
+##### Desabilitar Rotação de Chave de Criptografia
+
+<Infrastructure>
+<Fragment slot="cdk">
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyTable } from '@my-scope/common-constructs';
+
+const table = new MyTable(this, 'Table', {
+  enableKeyRotation: false,
+});
+```
+
+:::tip[Checkov]
+Desabilitar a rotação de chave, ou trazer sua própria chave que não rotaciona, falha no `CKV_AWS_7` do Checkov. Suprima-o na chave:
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { suppressRules } from '@my-scope/common-constructs';
+
+suppressRules(table.table.encryptionKey!, ['CKV_AWS_7'], 'Key rotation is managed externally');
+```
+:::
+</Fragment>
+<Fragment slot="terraform">
+
+```hcl title="packages/infra/src/main.tf"
+module "my_table" {
+  source              = "../../common/terraform/src/app/dynamodb/my-table"
+  enable_key_rotation = false
+}
+```
+</Fragment>
+</Infrastructure>

@@ -5,15 +5,15 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { addProjectConfiguration, type Tree } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from '../test';
+import { createTreeUsingTsSolutionSetup } from '../test.js';
 import {
   BASE_IMAGES,
   CONTAINER_VERSIONS,
   PY_VERSIONS,
   TS_VERSIONS,
-} from '../versions';
-import { isDockerfile } from './sync-embedded-versions';
-import { syncVendedVersions } from './sync-vended-versions';
+} from '../versions.js';
+import { isDockerfile } from './sync-embedded-versions.js';
+import { syncVendedVersions } from './sync-vended-versions.js';
 
 const PLUGIN_SRC = path.resolve(import.meta.dirname, '..', '..');
 

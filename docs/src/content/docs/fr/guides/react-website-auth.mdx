@@ -13,7 +13,7 @@ import Snippet from '@components/snippet.astro';
 
 Le générateur d'authentification de site Web React ajoute l'authentification à votre site Web React en utilisant [Amazon Cognito](https://aws.amazon.com/cognito/).
 
-Ce générateur configure l'infrastructure CDK ou Terraform pour créer un Cognito User Pool et un Identity Pool associé, ainsi qu'une interface utilisateur hébergée pour gérer les flux de connexion utilisateur, et son intégration avec votre site Web React.
+Ce générateur configure l'infrastructure CDK ou Terraform pour créer un Cognito User Pool et un Identity Pool associé, ainsi qu'une interface utilisateur hébergée pour gérer les flux de connexion utilisateur et son intégration avec votre site Web React.
 
 ## Utilisation
 
@@ -35,8 +35,8 @@ Vous trouverez les modifications suivantes dans votre site Web React :
   - src
     - components
       - CognitoAuth
-        - index.tsx Composant d'authentification principal
-    - main.tsx Mis à jour pour instrumenter le composant CognitoAuth
+        - index.tsx Main authentication component
+    - main.tsx Updated to instrument the CognitoAuth component
 </FileTree>
 
 ### Infrastructure
@@ -50,7 +50,7 @@ Vous trouverez également le code d'infrastructure suivant généré en fonction
 <FileTree>
   - packages/common/constructs/src
     - core
-      - user-identity.ts Construct qui définit le user pool et l'identity pool
+      - user-identity.ts Construct which defines the user pool and identity pool
 </FileTree>
 </Fragment>
 <Fragment slot="terraform">
@@ -58,18 +58,18 @@ Vous trouverez également le code d'infrastructure suivant généré en fonction
   - packages/common/terraform/src
     - core
       - user-identity
-        - main.tf Wrapper de module pour la configuration d'identité
+        - main.tf Module wrapper for the identity configuration
         - identity
-          - identity.tf Infrastructure d'identité de base incluant Cognito User Pool et Identity Pool
+          - identity.tf Core identity infrastructure including Cognito User Pool and Identity Pool
         - add-callback-url
-          - add-callback-url.tf Module pour ajouter des URL de rappel aux clients de user pool existants
+          - add-callback-url.tf Module for adding callback URLs to existing user pool clients
 </FileTree>
 </Fragment>
 </Infrastructure>
 
 #### Architecture
 
-Ce générateur ajoute un user pool Amazon Cognito (pour la connexion) et un identity pool (pour fédérer les utilisateurs connectés aux informations d'identification IAM délimitées) à l'architecture de site Web statique existante :
+Ce générateur ajoute un pool d'utilisateurs Amazon Cognito (pour la connexion) et un pool d'identités (pour fédérer les utilisateurs connectés aux informations d'identification IAM délimitées) à l'architecture de site Web statique existante :
 
 ```d2 inline=true
 direction: right
@@ -108,7 +108,7 @@ browser -> backend: IAM/Cognito
 
 Le User Pool est créé sur le [plan de fonctionnalités Plus](https://docs.aws.amazon.com/cognito/latest/developerguide/feature-plans-features-plus.html) de Cognito avec la [protection contre les menaces](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pool-settings-threat-protection.html) définie en mode `AUDIT` pour l'authentification standard. En mode audit, Cognito attribue un niveau de risque à chaque connexion et enregistre l'évaluation dans CloudWatch sans bloquer les utilisateurs.
 
-Une fois que vous avez observé les évaluations de risque pour vos utilisateurs, vous pouvez passer à l'application complète pour répondre automatiquement aux activités à risque (par exemple, exiger MFA ou bloquer la connexion) :
+Une fois que vous avez observé les évaluations de risque pour vos utilisateurs, vous pouvez passer à l'application complète pour répondre automatiquement aux activités à risque (par exemple, exiger l'authentification multifacteur ou bloquer la connexion) :
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -119,9 +119,45 @@ Définissez `advanced_security_mode` sur `ENFORCED` dans le bloc `user_pool_add_
 </Fragment>
 </Infrastructure>
 
+#### Authentification multifacteur (MFA)
+
+Par défaut, les utilisateurs doivent configurer l'authentification multifacteur (un code SMS ou un mot de passe à usage unique basé sur le temps) avant de pouvoir se connecter. Vous pouvez rendre l'authentification multifacteur facultative, la désactiver entièrement ou restreindre les méthodes de second facteur disponibles :
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts
+import { Mfa } from 'aws-cdk-lib/aws-cognito';
+
+new UserIdentity(this, 'Identity', {
+  mfa: Mfa.OPTIONAL,
+  mfaSecondFactor: { sms: false, otp: true },
+});
+```
+
+`mfa` accepte `Mfa.OFF` / `Mfa.OPTIONAL` / `Mfa.REQUIRED`. `mfaSecondFactor.sms` et `mfaSecondFactor.otp` activent ou désactivent chaque méthode de second facteur indépendamment ; ils n'ont aucun effet lorsque `mfa` est `Mfa.OFF`. Définir `mfa: Mfa.REQUIRED` avec les deux méthodes désactivées est rejeté au moment de la synthèse, car personne ne pourrait alors terminer la connexion.
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+
+  mfa = "OPTIONAL"
+  mfa_second_factor_sms = false
+  mfa_second_factor_otp = true
+}
+```
+
+`mfa` accepte `"OFF"` / `"OPTIONAL"` / `"ON"`. `mfa_second_factor_sms` et `mfa_second_factor_otp` activent ou désactivent chaque méthode de second facteur indépendamment ; ils n'ont aucun effet lorsque `mfa` est `"OFF"`.
+</Fragment>
+</Infrastructure>
+
+:::caution[L'authentification multifacteur par SMS est liée à la vérification du numéro de téléphone]
+Cognito rejette la vérification du numéro de téléphone par SMS sauf si le SMS est également une méthode d'authentification multifacteur activée lorsque l'authentification multifacteur n'est pas désactivée, à la fois dans CDK et Terraform. Désactiver `mfaSecondFactor.sms` / `mfa_second_factor_sms` lorsque `mfa` est activé désactive donc également la vérification du numéro de téléphone par SMS pour le pool d'utilisateurs.
+:::
+
 #### Pare-feu d'application Web (WAF)
 
-Par défaut, le User Pool est associé à une Web ACL [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) utilisant les groupes de règles gérées `AWSManagedRulesCommonRuleSet` et `AWSManagedRulesKnownBadInputsRuleSet`. Vous pouvez désactiver cela si vous souhaitez gérer votre propre Web ACL ou si vous n'en avez pas besoin :
+Par défaut, le User Pool est associé à un Web ACL [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) utilisant les groupes de règles gérées `AWSManagedRulesCommonRuleSet` et `AWSManagedRulesKnownBadInputsRuleSet`. Vous pouvez désactiver cela si vous souhaitez gérer votre propre Web ACL ou si vous n'en avez pas besoin :
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -141,7 +177,7 @@ module "user_identity" {
 </Infrastructure>
 
 :::caution[`EC2MetaDataSSRF_QUERYARGUMENTS` est défini sur Count]
-Cette règle signale les adresses de bouclage dans les arguments de requête comme des tentatives [SSRF](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-list.html), ce qui bloquerait la connexion locale puisque l'interface utilisateur hébergée reçoit un `redirect_uri` `localhost`. Elle est donc définie sur [Count](https://docs.aws.amazon.com/waf/latest/developerguide/web-acl-rule-action.html#web-acl-rule-action-count) tant que les URL de rappel locales sont configurées — les correspondances sont toujours enregistrées, et toutes les autres règles bloquent. Supprimez les URL de rappel locales pour la restaurer en mode Block.
+Cette règle signale les adresses de bouclage dans les arguments de requête comme des tentatives [SSRF](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-list.html), ce qui bloquerait la connexion locale puisque l'interface utilisateur hébergée reçoit un `redirect_uri` `localhost`. Elle est donc définie sur [Count](https://docs.aws.amazon.com/waf/latest/developerguide/web-acl-rule-action.html#web-acl-rule-action-count) tant que les URL de rappel locales sont configurées — les correspondances sont toujours enregistrées et toutes les autres règles bloquent. Supprimez les URL de rappel locales pour la restaurer en Block.
 :::
 
 ## Utilisation de l'infrastructure
@@ -198,7 +234,7 @@ Le module d'identité utilisateur ajoute automatiquement la <Link path="guides/r
 </Fragment>
 </Infrastructure>
 
-:::caution[Supprimer les URL de rappel localhost pour la production]
+:::caution[Supprimez les URL de rappel localhost pour la production]
 Le client User Pool généré autorise l'URL de votre distribution CloudFront (et tous les noms de domaine personnalisés configurés dessus) comme URL de rappel/déconnexion OAuth, plus `http://localhost:4200` et `http://localhost:4300` pour le développement local contre le pool déployé.
 
 Il est recommandé de **supprimer les URL de rappel/déconnexion `http://localhost` pour les environnements de production**, en gardant la liste d'autorisation limitée aux origines réelles de votre application.
@@ -215,7 +251,7 @@ Modifiez les `callback_urls`/`logout_urls` dans `packages/common/terraform/src/c
 
 ### Accorder l'accès aux utilisateurs authentifiés
 
-Afin d'accorder aux utilisateurs authentifiés l'accès pour effectuer certaines actions, comme accorder des autorisations pour invoquer une API, vous pouvez ajouter des instructions de politique IAM au rôle authentifié de l'identity pool :
+Afin d'accorder aux utilisateurs authentifiés l'accès pour effectuer certaines actions, comme accorder des autorisations pour invoquer une API, vous pouvez ajouter des instructions de politique IAM au rôle authentifié du pool d'identités :
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -229,7 +265,9 @@ export class ApplicationStack extends Stack {
     super(scope, id);
 
     const identity = new UserIdentity(this, 'Identity');
-    const api = new MyApi(this, 'MyApi');
+    const api = new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this).build(),
+    });
 
     api.grantInvokeAccess(identity.identityPool.authenticatedRole);
 

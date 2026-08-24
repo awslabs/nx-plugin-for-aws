@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { ProjectConfiguration, Tree } from '@nx/devkit';
-import { declareDependencies } from './declared-dependencies';
-import { addDockerScanTarget, DOCKER_DEPENDENCIES } from './docker';
-import { createTreeUsingTsSolutionSetup } from './test';
-import { CONTAINER_VERSIONS } from './versions';
+import { declareDependencies } from './declared-dependencies.js';
+import { addDockerScanTarget, DOCKER_DEPENDENCIES } from './docker.js';
+import { createTreeUsingTsSolutionSetup } from './test.js';
+import { CONTAINER_VERSIONS } from './versions.js';
 
 const declaration = declareDependencies()({ ts: [...DOCKER_DEPENDENCIES] });
 

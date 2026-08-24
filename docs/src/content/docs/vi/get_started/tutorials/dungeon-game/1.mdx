@@ -1,6 +1,6 @@
 ---
 title: Thiết lập monorepo
-description: "Hướng dẫn từng bước xây dựng trò chơi phiêu lưu ngục tối được hỗ trợ bởi AI tác nhân sử dụng @aws/nx-plugin."
+description: "Hướng dẫn chi tiết cách xây dựng trò chơi phiêu lưu hầm ngục được hỗ trợ bởi AI agentic sử dụng @aws/nx-plugin."
 ---
 
 import { Aside, Code, FileTree, Steps, Tabs, TabItem } from '@astrojs/starlight/components';
@@ -24,34 +24,34 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 ## Nhiệm vụ 1: Tạo monorepo
 
-Để tạo một monorepo mới, từ thư mục bạn muốn, chạy lệnh sau:
+Để tạo monorepo mới, từ thư mục mong muốn của bạn, chạy lệnh sau:
 
 <CreateNxWorkspaceCommand workspace="dungeon-adventure" iac="cdk" />
 
-:::note[CDK là IaC Provider]
-Chúng ta sử dụng `--iac=cdk` vì sẽ dùng CDK cho cơ sở hạ tầng dưới dạng mã trong hướng dẫn này. Nx Plugin for AWS cũng hỗ trợ `terraform`.
+:::note[CDK làm IaC Provider]
+Chúng ta sử dụng `--iac=cdk` vì chúng ta sẽ sử dụng CDK cho infrastructure as code trong hướng dẫn này. Nx Plugin for AWS cũng hỗ trợ `terraform`.
 :::
 
-Lệnh này sẽ thiết lập một monorepo NX trong thư mục `dungeon-adventure`. Khi bạn mở thư mục trong VSCode, bạn sẽ thấy cấu trúc tệp như sau:
+Lệnh này sẽ thiết lập một NX monorepo trong thư mục `dungeon-adventure`. Khi bạn mở thư mục trong VSCode, bạn sẽ thấy cấu trúc tệp này:
 
 <FileTree>
 - .nx/
 - .vscode/
 - node_modules/
-- packages/ đây là nơi các dự án con của bạn sẽ nằm
+- packages/ this is where your sub-projects will reside
 - .gitignore
-- biome.json cấu hình Biome cho linting và định dạng
-- nx.json cấu hình Nx CLI và các mặc định monorepo
-- package.json tất cả các phụ thuộc node được định nghĩa ở đây
-- pnpm-lock.yaml hoặc bun.lock, yarn.lock, package-lock.json tùy thuộc vào trình quản lý gói
-- pnpm-workspace.yaml nếu sử dụng pnpm
+- biome.json configures Biome for linting and formatting
+- nx.json configures the Nx CLI and monorepo defaults
+- package.json all node dependencies are defined here
+- pnpm-lock.yaml or bun.lock, yarn.lock, package-lock.json depending on package manager
+- pnpm-workspace.yaml if using pnpm
 - README.md
-- tsconfig.base.json tất cả các dự án con dựa trên node đều kế thừa từ đây
+- tsconfig.base.json all node based sub-projects extend this
 - tsconfig.json
-- aws-nx-plugin.config.mts cấu hình cho Nx Plugin for AWS
+- aws-nx-plugin.config.mts configuraton for the Nx Plugin for AWS
 </FileTree>
 
-<Aside type="tip" title="Commit thường xuyên">Thực hành tốt nhất là đảm bảo tất cả các tệp chưa được stage đều được commit trong Git trước khi chạy bất kỳ generator nào. Điều này cho phép bạn xem những gì đã thay đổi sau khi chạy generator thông qua `git diff`.</Aside>
+<Aside type="tip" title="Commit Often">Thực hành tốt nhất là đảm bảo tất cả các tệp chưa được staged của bạn được commit trong Git trước khi chạy bất kỳ generator nào. Điều này cho phép bạn xem những gì đã thay đổi sau khi chạy generator của bạn thông qua `git diff`.</Aside>
 
 ## Nhiệm vụ 2: Khởi tạo Dungeon Adventure Game
 
@@ -468,6 +468,7 @@ Hãy xem xét một số tệp chi tiết:
 from contextlib import contextmanager
 
 from strands import Agent, tool
+from strands.hooks import HookCallback, HookProvider
 from strands_tools import current_time
 from dungeon_adventure_agent_connection import log_model_errors, log_tool_errors
 
@@ -475,6 +476,9 @@ from dungeon_adventure_agent_connection import log_model_errors, log_tool_errors
 @tool
 def subtract(a: int, b: int) -> int:
     return a - b
+
+
+AGENT_HOOKS: list[HookProvider | HookCallback] = [log_model_errors, log_tool_errors]
 
 
 @contextmanager
@@ -488,7 +492,7 @@ Use your tools for mathematical tasks.
 Refer to tools as your 'spellbook'.
 """,
         tools=[subtract, current_time],
-        hooks=[log_model_errors, log_tool_errors],
+        hooks=AGENT_HOOKS,
     )
 ```
 
@@ -531,7 +535,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from .agent import get_agent
+from .agent import AGENT_HOOKS, get_agent
 from .middleware.session_id_middleware import SESSION_ID_HEADER, SessionIdMiddleware
 from .session import get_session_manager
 
@@ -548,6 +552,10 @@ async def lifespan(app: FastAPI):
             # A per-thread session manager, not the template Agent's own, since
             # AG-UI caches one Strands agent per thread_id.
             config=StrandsAgentConfig(session_manager_provider=lambda _input_data: get_session_manager()),
+            # Required as well as on the template Agent: AG-UI keeps only the
+            # built HookRegistry, so hooks it can't read back are never
+            # registered and model/tool failures go unreported.
+            hooks=AGENT_HOOKS,
         )
         yield
 
@@ -1072,11 +1080,17 @@ Bạn sẽ thấy một số tệp mới xuất hiện trong cây tệp của m�
 // packages/common/constructs/src/app/static-websites/game-ui.ts
 import * as url from 'url';
 import { Construct } from 'constructs';
-import { StaticWebsite } from '../../core/index.js';
+import { StaticWebsite, StaticWebsiteProps } from '../../core/index.js';
+
+export type GameUIProps = Omit<
+  StaticWebsiteProps,
+  'websiteName' | 'websiteFilePath'
+>;
 
 export class GameUI extends StaticWebsite {
-  constructor(scope: Construct, id: string) {
+  constructor(scope: Construct, id: string, props?: GameUIProps) {
     super(scope, id, {
+      ...props,
       websiteName: 'GameUI',
       websiteFilePath: url.fileURLToPath(
         new URL(

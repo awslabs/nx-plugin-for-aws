@@ -7,14 +7,14 @@ import {
   backfillMigrationVersions,
   LATEST_MIGRATIONS_DIR,
   stampMigrationVersions,
-} from '../migration-versions';
-import { NX_PACKAGES, NX_VERSION } from '../versions';
+} from '../migration-versions.js';
+import { NX_PACKAGES, NX_VERSION } from '../versions.js';
 import {
   isNxPackage,
   nxPackageJsonUpdates,
   nxPackageUpdatesKey,
   type PackageJsonUpdates,
-} from './nx-package-updates';
+} from './nx-package-updates.js';
 
 describe('nx package updates', () => {
   describe('isNxPackage', () => {

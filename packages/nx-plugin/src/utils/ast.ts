@@ -6,8 +6,8 @@
 import { QueryBuilder } from '@getgrit/gritql';
 import type { Tree } from '@nx/devkit';
 import * as path from 'path';
-import { updateGitIgnore } from './git';
-import { isEsmWorkspace } from './module-format';
+import { updateGitIgnore } from './git.js';
+import { isEsmWorkspace } from './module-format.js';
 
 const GRIT_DIR = '.grit';
 
@@ -169,6 +169,19 @@ export const addSingleImport = async (
   );
   if (alreadyImported) {
     return;
+  }
+
+  // The same identifier bound to a different module would be a duplicate
+  // declaration, so refuse rather than emit a file that cannot compile.
+  const identifierTaken = await matchGritQL(
+    tree,
+    filePath,
+    `\`import ${variableName} from $module\``,
+  );
+  if (identifierTaken) {
+    throw new Error(
+      `Cannot import ${variableName} from '${from}' in ${filePath}: ${variableName} is already imported from a different module. Rename the project so its generated identifier does not collide.`,
+    );
   }
 
   // Prepend new import to file

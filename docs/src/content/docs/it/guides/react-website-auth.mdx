@@ -1,6 +1,6 @@
 ---
-title: Autenticazione per Sito Web React
-description: Documentazione di riferimento per l'autenticazione per sito web React
+title: Autenticazione per siti web React
+description: Documentazione di riferimento per l'autenticazione per siti web React
 generator: ts#website#auth
 ---
 import { FileTree } from '@astrojs/starlight/components';
@@ -11,13 +11,13 @@ import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
 
-Il generatore di autenticazione per sito web React aggiunge l'autenticazione al tuo sito web React utilizzando [Amazon Cognito](https://aws.amazon.com/cognito/).
+Il generatore di autenticazione per siti web React aggiunge l'autenticazione al tuo sito web React utilizzando [Amazon Cognito](https://aws.amazon.com/cognito/).
 
-Questo generatore configura l'infrastruttura CDK o Terraform per creare un Cognito User Pool e il relativo Identity Pool associato, oltre a un'interfaccia utente ospitata per gestire i flussi di accesso degli utenti e la sua integrazione con il tuo sito web React.
+Questo generatore configura l'infrastruttura CDK o Terraform per creare un Cognito User Pool e un Identity Pool associato, oltre a un'interfaccia utente ospitata per gestire i flussi di accesso degli utenti e la sua integrazione con il tuo sito web React.
 
 ## Utilizzo
 
-### Aggiungi l'autenticazione al tuo sito web React
+### Aggiungere l'autenticazione al tuo sito web React
 
 Puoi aggiungere l'autenticazione al tuo sito web React in due modi:
 
@@ -35,8 +35,8 @@ Troverai le seguenti modifiche nel tuo sito web React:
   - src
     - components
       - CognitoAuth
-        - index.tsx Componente di autenticazione principale
-    - main.tsx Aggiornato per instrumentare il componente CognitoAuth
+        - index.tsx Main authentication component
+    - main.tsx Updated to instrument the CognitoAuth component
 </FileTree>
 
 ### Infrastruttura
@@ -50,7 +50,7 @@ Troverai anche il seguente codice di infrastruttura generato in base al tuo `iac
 <FileTree>
   - packages/common/constructs/src
     - core
-      - user-identity.ts Construct che definisce il user pool e l'identity pool
+      - user-identity.ts Construct which defines the user pool and identity pool
 </FileTree>
 </Fragment>
 <Fragment slot="terraform">
@@ -58,18 +58,18 @@ Troverai anche il seguente codice di infrastruttura generato in base al tuo `iac
   - packages/common/terraform/src
     - core
       - user-identity
-        - main.tf Wrapper del modulo per la configurazione dell'identità
+        - main.tf Module wrapper for the identity configuration
         - identity
-          - identity.tf Infrastruttura di identità principale che include Cognito User Pool e Identity Pool
+          - identity.tf Core identity infrastructure including Cognito User Pool and Identity Pool
         - add-callback-url
-          - add-callback-url.tf Modulo per aggiungere URL di callback ai client del user pool esistenti
+          - add-callback-url.tf Module for adding callback URLs to existing user pool clients
 </FileTree>
 </Fragment>
 </Infrastructure>
 
 #### Architettura
 
-Questo generatore aggiunge un Amazon Cognito user pool (per l'accesso) e un identity pool (per federare gli utenti autenticati a credenziali IAM con ambito) all'architettura esistente del sito web statico:
+Questo generatore aggiunge un user pool Amazon Cognito (per l'accesso) e un identity pool (per federare gli utenti autenticati con credenziali IAM con ambito) all'architettura del sito web statico esistente:
 
 ```d2 inline=true
 direction: right
@@ -119,6 +119,42 @@ Imposta `advanced_security_mode` su `ENFORCED` nel blocco `user_pool_add_ons` in
 </Fragment>
 </Infrastructure>
 
+#### Autenticazione a più fattori (MFA)
+
+Per impostazione predefinita, gli utenti devono configurare l'MFA (un codice SMS o una password monouso basata sul tempo) prima di poter accedere. Puoi rendere l'MFA opzionale, disattivarla completamente o limitare i metodi di secondo fattore disponibili:
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts
+import { Mfa } from 'aws-cdk-lib/aws-cognito';
+
+new UserIdentity(this, 'Identity', {
+  mfa: Mfa.OPTIONAL,
+  mfaSecondFactor: { sms: false, otp: true },
+});
+```
+
+`mfa` accetta `Mfa.OFF` / `Mfa.OPTIONAL` / `Mfa.REQUIRED`. `mfaSecondFactor.sms` e `mfaSecondFactor.otp` abilitano o disabilitano ciascun metodo di secondo fattore in modo indipendente; non hanno effetto quando `mfa` è `Mfa.OFF`. Impostare `mfa: Mfa.REQUIRED` con entrambi i metodi disabilitati viene rifiutato al momento della sintesi, poiché nessuno potrebbe quindi completare l'accesso.
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+
+  mfa = "OPTIONAL"
+  mfa_second_factor_sms = false
+  mfa_second_factor_otp = true
+}
+```
+
+`mfa` accetta `"OFF"` / `"OPTIONAL"` / `"ON"`. `mfa_second_factor_sms` e `mfa_second_factor_otp` abilitano o disabilitano ciascun metodo di secondo fattore in modo indipendente; non hanno effetto quando `mfa` è `"OFF"`.
+</Fragment>
+</Infrastructure>
+
+:::caution[L'MFA SMS è legato alla verifica del numero di telefono]
+Cognito rifiuta la verifica del numero di telefono basata su SMS a meno che SMS non sia anche un metodo MFA abilitato ogni volta che l'MFA non è disattivato, sia in CDK che in Terraform. Disabilitare `mfaSecondFactor.sms` / `mfa_second_factor_sms` mentre `mfa` è attivo disabilita quindi anche la verifica del numero di telefono basata su SMS per il user pool.
+:::
+
 #### Web Application Firewall (WAF)
 
 Per impostazione predefinita, il User Pool è associato a un Web ACL [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) utilizzando i gruppi di regole gestite `AWSManagedRulesCommonRuleSet` e `AWSManagedRulesKnownBadInputsRuleSet`. Puoi disabilitare questa opzione se desideri gestire il tuo Web ACL o se non ne hai bisogno:
@@ -141,7 +177,7 @@ module "user_identity" {
 </Infrastructure>
 
 :::caution[`EC2MetaDataSSRF_QUERYARGUMENTS` è impostato su Count]
-Questa regola contrassegna gli indirizzi di loopback negli argomenti di query come tentativi di [SSRF](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-list.html), il che bloccherebbe l'accesso locale poiché l'interfaccia utente ospitata riceve un `redirect_uri` `localhost`. Pertanto è impostata su [Count](https://docs.aws.amazon.com/waf/latest/developerguide/web-acl-rule-action.html#web-acl-rule-action-count) mentre sono configurati gli URL di callback locali — le corrispondenze vengono comunque registrate e tutte le altre regole bloccano. Rimuovi gli URL di callback locali per ripristinarla su Block.
+Questa regola contrassegna gli indirizzi di loopback negli argomenti delle query come tentativi di [SSRF](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-list.html), il che bloccherebbe l'accesso locale poiché l'interfaccia utente ospitata riceve un `redirect_uri` `localhost`. È quindi impostata su [Count](https://docs.aws.amazon.com/waf/latest/developerguide/web-acl-rule-action.html#web-acl-rule-action-count) mentre sono configurati gli URL di callback locali — le corrispondenze vengono comunque registrate e tutte le altre regole bloccano. Rimuovi gli URL di callback locali per ripristinarla su Block.
 :::
 
 ## Utilizzo dell'infrastruttura
@@ -166,10 +202,10 @@ export class ApplicationStack extends Stack {
 }
 ```
 
-Il construct `UserIdentity` aggiunge automaticamente la <Link path="guides/react-website#runtime-configuration">Configurazione di Runtime</Link> necessaria per garantire che il tuo sito web possa puntare al Cognito User Pool corretto per l'autenticazione.
+Il costrutto `UserIdentity` aggiunge automaticamente la <Link path="guides/react-website#runtime-configuration">configurazione di runtime</Link> necessaria per garantire che il tuo sito web possa puntare al Cognito User Pool corretto per l'autenticazione.
 
 :::note[Conservazione del ruolo SMS]
-Il User Pool è supportato da un ruolo IAM che Cognito assume per inviare messaggi SMS. La politica di rimozione del ruolo rispecchia quella del User Pool — per impostazione predefinita il `UserPool` di CDK utilizza `RemovalPolicy.RETAIN`, quindi su `cdk destroy` sia il User Pool che il suo ruolo SMS vengono conservati e dovranno essere puliti manualmente se non più necessari.
+Il User Pool è supportato da un ruolo IAM che Cognito assume per inviare messaggi SMS. La politica di rimozione del ruolo rispecchia quella del User Pool — per impostazione predefinita il `UserPool` di CDK utilizza `RemovalPolicy.RETAIN`, quindi con `cdk destroy` sia il User Pool che il suo ruolo SMS vengono conservati e dovranno essere puliti manualmente se non più necessari.
 :::
 </Fragment>
 <Fragment slot="terraform">
@@ -194,12 +230,12 @@ module "my_website" {
 }
 ```
 
-Il modulo di identità utente aggiunge automaticamente la <Link path="guides/react-website#runtime-configuration">Configurazione di Runtime</Link> necessaria per garantire che il tuo sito web possa puntare al Cognito User Pool corretto per l'autenticazione.
+Il modulo di identità utente aggiunge automaticamente la <Link path="guides/react-website#runtime-configuration">configurazione di runtime</Link> necessaria per garantire che il tuo sito web possa puntare al Cognito User Pool corretto per l'autenticazione.
 </Fragment>
 </Infrastructure>
 
 :::caution[Rimuovi gli URL di callback localhost per la produzione]
-Il client User Pool generato consente l'URL della distribuzione CloudFront (e qualsiasi nome di dominio personalizzato configurato su di esso) come URL di callback/logout OAuth, più `http://localhost:4200` e `http://localhost:4300` per lo sviluppo locale contro il pool distribuito.
+Il client User Pool generato consente l'URL di distribuzione CloudFront (e qualsiasi nome di dominio personalizzato configurato su di esso) come URL di callback/logout OAuth, più `http://localhost:4200` e `http://localhost:4300` per lo sviluppo locale contro il pool distribuito.
 
 Si raccomanda di **rimuovere gli URL di callback/logout `http://localhost` per gli stage di produzione**, mantenendo la lista consentita limitata alle origini reali della tua applicazione.
 
@@ -213,9 +249,9 @@ Modifica i `callback_urls`/`logout_urls` in `packages/common/terraform/src/core/
 </Infrastructure>
 :::
 
-### Concessione dell'accesso agli utenti autenticati
+### Concedere l'accesso agli utenti autenticati
 
-Per concedere agli utenti autenticati l'accesso per eseguire determinate azioni, come concedere le autorizzazioni per invocare un'API, puoi aggiungere istruzioni di policy IAM al ruolo autenticato dell'identity pool:
+Per concedere agli utenti autenticati l'accesso per eseguire determinate azioni, come concedere le autorizzazioni per invocare un'API, puoi aggiungere dichiarazioni di policy IAM al ruolo autenticato dell'identity pool:
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -229,7 +265,9 @@ export class ApplicationStack extends Stack {
     super(scope, id);
 
     const identity = new UserIdentity(this, 'Identity');
-    const api = new MyApi(this, 'MyApi');
+    const api = new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this).build(),
+    });
 
     api.grantInvokeAccess(identity.identityPool.authenticatedRole);
 

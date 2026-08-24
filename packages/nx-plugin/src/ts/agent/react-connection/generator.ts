@@ -9,35 +9,35 @@ import {
   type Tree,
   updateJson,
 } from '@nx/devkit';
-import { addAgentRuntimeToConnectionNamespace } from '../../../connection/agent-runtime-config';
-import type { ResolvedConnectionOptions } from '../../../connection/generator';
-import { addTsDependencies } from '../../../utils/add-dependencies';
-import { addSingleImport, applyGritQL } from '../../../utils/ast';
+import { addAgentRuntimeToConnectionNamespace } from '../../../connection/agent-runtime-config.js';
+import type { ResolvedConnectionOptions } from '../../../connection/generator.js';
+import { addTsDependencies } from '../../../utils/add-dependencies.js';
+import { addSingleImport, applyGritQL } from '../../../utils/ast.js';
 import {
   declareDependencies,
   onlyWhen,
   ownedElsewhere,
-} from '../../../utils/declared-dependencies';
-import { formatFilesInSubtree } from '../../../utils/format';
-import { installDependencies } from '../../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
-import { kebabCase, toClassName } from '../../../utils/names';
+} from '../../../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../../../utils/format.js';
+import { installDependencies } from '../../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics.js';
+import { kebabCase, toClassName } from '../../../utils/names.js';
 import {
   addComponentGeneratorMetadata,
   type ComponentMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
-} from '../../../utils/nx';
-import { toProjectRelativePath } from '../../../utils/paths';
+} from '../../../utils/nx.js';
+import { toProjectRelativePath } from '../../../utils/paths.js';
 import {
   DEPENDENCIES as AGUI_DEPENDENCIES,
   type AgUiAuth,
   addAgUiReactConnection,
   resolveAgUiTheme,
-} from '../../react-website/agui/generator';
-import { runtimeConfigGenerator } from '../../react-website/runtime-config/generator';
-import { addTsAgentTargetToLocalDev } from './local-dev';
+} from '../../react-website/agui/generator.js';
+import { runtimeConfigGenerator } from '../../react-website/runtime-config/generator.js';
+import { addTsAgentTargetToLocalDev } from './local-dev.js';
 
 /** The metadata this generator records, which its predicates read. */
 export interface TsAgentReactConnectionMetadata {

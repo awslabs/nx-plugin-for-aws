@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { createServer } from './server';
+import { createServer } from './server.js';
 
 export const startMcpServer = async () => {
   const transport = new StdioServerTransport();

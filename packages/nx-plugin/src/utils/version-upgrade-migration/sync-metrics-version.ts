@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import { applyGritQL } from '../ast';
+import { applyGritQL } from '../ast.js';
 import {
   METRICS_ASPECT_FILE_PATH,
   TERRAFORM_METRICS_FILE_PATH,
-} from '../metrics';
-import { getPackageVersion } from '../nx';
+} from '../metrics.js';
+import { getPackageVersion } from '../nx.js';
 
 /**
  * Sync the plugin version the metrics files report, so usage is attributed to

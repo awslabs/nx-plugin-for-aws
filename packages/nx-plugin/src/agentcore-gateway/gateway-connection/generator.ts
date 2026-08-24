@@ -3,21 +3,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { GeneratorCallback, Tree } from '@nx/devkit';
-import { formatFilesInSubtree } from '../../utils/format';
-import { installDependencies } from '../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { kebabCase } from '../../utils/names';
+import { formatFilesInSubtree } from '../../utils/format.js';
+import { installDependencies } from '../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
+import { kebabCase } from '../../utils/names.js';
 import {
   addComponentGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
-} from '../../utils/nx';
-import { attachUpstreamToLocalGateway } from '../attach-upstream';
+} from '../../utils/nx.js';
+import { attachUpstreamToLocalGateway } from '../attach-upstream.js';
 import {
   AGENTCORE_GATEWAY_GENERATOR_INFO,
   readAgentCoreGatewayMetadata,
-} from '../generator';
+} from '../generator.js';
 import type { AgentcoreGatewayGatewayConnectionGeneratorSchema } from './schema';
 
 export const AGENTCORE_GATEWAY_GATEWAY_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =

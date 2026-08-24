@@ -5,15 +5,15 @@
 import { readNxJson, type Tree, updateNxJson } from '@nx/devkit';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { applyGritQL } from '../../utils/ast';
+import { applyGritQL } from '../../utils/ast.js';
 import {
   type DependencyDeclaration,
   forDependencies,
   type MustDeclare,
-} from '../../utils/declared-dependencies';
-import { addDependenciesToPackageJson } from '../../utils/dependencies';
-import { type ITsDepVersion, withVersions } from '../../utils/versions';
-import type { ConfigureProjectOptions } from './types';
+} from '../../utils/declared-dependencies.js';
+import { addDependenciesToPackageJson } from '../../utils/dependencies.js';
+import { type ITsDepVersion, withVersions } from '../../utils/versions.js';
+import type { ConfigureProjectOptions } from './types.js';
 
 const readGritPattern = (name: string): string =>
   readFileSync(

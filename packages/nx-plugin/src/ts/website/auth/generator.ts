@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import { getGeneratorInfo, type NxGeneratorInfo } from '../../../utils/nx';
-import { tsReactWebsiteAuthGenerator } from '../../react-website/cognito-auth/generator';
+import { getGeneratorInfo, type NxGeneratorInfo } from '../../../utils/nx.js';
+import { tsReactWebsiteAuthGenerator } from '../../react-website/cognito-auth/generator.js';
 import type { TsWebsiteAuthGeneratorSchema } from './schema';
 
 export const TS_WEBSITE_AUTH_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(

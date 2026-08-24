@@ -15,7 +15,7 @@ vi.mock('child_process', () => ({
 
 // Import after mock is set up
 const { collectPythonDependencies, findWorkspacePyProjectNames } = await import(
-  './python-collector'
+  './python-collector.js'
 );
 
 describe('python collector', () => {

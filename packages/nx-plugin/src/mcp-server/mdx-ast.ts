@@ -11,7 +11,7 @@ import type {
   MdxJsxFlowElement,
   MdxJsxTextElement,
 } from 'mdast-util-mdx-jsx';
-import { parseWhenExpression } from './option-filter';
+import { parseWhenExpression } from './option-filter.js';
 
 export type JsxParent = Root | MdxJsxFlowElement | MdxJsxTextElement;
 export type JsxElement = MdxJsxFlowElement | MdxJsxTextElement;

@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { addProjectConfiguration, type Tree } from '@nx/devkit';
-import { PY_AGENT_GENERATOR_INFO } from '../../../py/agent/generator';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import migration from './migration';
+import { PY_AGENT_GENERATOR_INFO } from '../../../py/agent/generator.js';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
+import migration from './migration.js';
 
 const AGENT_DIR = 'apps/test-project/proj_test_project/agent';
 const AGENT_CONNECTION_MODULE = 'proj_agent_connection';

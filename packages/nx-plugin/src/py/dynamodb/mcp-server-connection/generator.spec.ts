@@ -4,8 +4,8 @@
  */
 import { readProjectConfiguration, type Tree } from '@nx/devkit';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import { pyDynamoDBMcpServerConnectionGenerator } from './generator';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
+import { pyDynamoDBMcpServerConnectionGenerator } from './generator.js';
 
 describe('py#dynamodb mcp-server-connection generator', () => {
   let tree: Tree;

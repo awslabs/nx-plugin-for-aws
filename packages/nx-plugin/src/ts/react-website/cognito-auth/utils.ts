@@ -5,8 +5,8 @@
 import type { Tree } from '@nx/devkit';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { addDestructuredImport, applyGritQL } from '../../../utils/ast';
-import { kebabCase } from '../../../utils/names';
+import { addDestructuredImport, applyGritQL } from '../../../utils/ast.js';
+import { kebabCase } from '../../../utils/names.js';
 
 const readGritPattern = (name: string): string =>
   readFileSync(

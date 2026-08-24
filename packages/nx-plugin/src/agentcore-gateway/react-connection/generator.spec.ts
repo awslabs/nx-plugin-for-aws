@@ -7,8 +7,8 @@ import {
   readProjectConfiguration,
   type Tree,
 } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { agentcoreGatewayReactConnectionGenerator } from './generator';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import { agentcoreGatewayReactConnectionGenerator } from './generator.js';
 
 describe('agentcore-gateway#react-connection generator', () => {
   let tree: Tree;

@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { readJson, type Tree } from '@nx/devkit';
-import { removeLicenseExceptions } from '../../../license/config';
-import { registerPnpmBuiltDependencies } from '../../../utils/pnpm-workspace';
+import { removeLicenseExceptions } from '../../../license/config.js';
+import { registerPnpmBuiltDependencies } from '../../../utils/pnpm-workspace.js';
 
 const INSPECTOR = '@modelcontextprotocol/inspector';
 

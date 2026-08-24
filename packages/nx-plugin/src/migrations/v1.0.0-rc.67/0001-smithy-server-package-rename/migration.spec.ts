@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { addProjectConfiguration, readJson, type Tree } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import migration from './migration';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
+import migration from './migration.js';
 
 const PROJECT_ROOT = 'packages/test-api/backend';
 const HANDLER = `${PROJECT_ROOT}/src/handler.ts`;

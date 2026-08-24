@@ -7,9 +7,9 @@ import {
   type DependencyDeclaration,
   forDependencies,
   type MustDeclare,
-} from './declared-dependencies';
-import { addDependenciesToPackageJson } from './dependencies';
-import { type ITsDepVersion, withVersions } from './versions';
+} from './declared-dependencies.js';
+import { addDependenciesToPackageJson } from './dependencies.js';
+import { type ITsDepVersion, withVersions } from './versions.js';
 
 /** Dependencies a caller must declare to use `FsCommands`. */
 export const FS_DEPENDENCIES = [

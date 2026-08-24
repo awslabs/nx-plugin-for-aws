@@ -118,8 +118,8 @@ Para desplegar tu Agent, se generan los siguientes archivos:
   - packages/common/constructs/src
     - app
       - agents
-        - \<project-name>
-          - \<project-name>.ts CDK construct for deploying your agent
+        - \<agent-name>
+          - \<agent-name>.ts CDK construct for deploying your agent
 </FileTree>
 </Fragment>
 <Fragment slot="terraform">
@@ -127,8 +127,8 @@ Para desplegar tu Agent, se generan los siguientes archivos:
   - packages/common/terraform/src
     - app
       - agents
-        - \<project-name>
-          - \<project-name>.tf Module for deploying your agent
+        - \<agent-name>
+          - \<agent-name>.tf Module for deploying your agent
     - core
       - agent-core
         - runtime.tf Generic module for deploying to Bedrock AgentCore Runtime
@@ -203,7 +203,7 @@ El framework Strands maneja automáticamente:
 
 ### Configuración del modelo
 
-Por defecto, los agentes Strands usan Claude 4 Sonnet, pero puedes cambiar fácilmente entre proveedores de modelos:
+Por defecto, los agentes Strands usan Claude Sonnet 4.6 en Amazon Bedrock, pero puedes cambiar fácilmente entre proveedores de modelos:
 
 ```typescript
 import { Agent } from '@strands-agents/sdk';
@@ -247,7 +247,7 @@ Para una guía más detallada sobre cómo escribir agentes Strands, consulta la 
 <OptionFilter when={{ protocol: 'a2a' }} description="A2A Express server details">
 ## Servidor A2A (protocolo A2A)
 
-El `index.ts` generado monta el [Strands A2A Express Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) en una aplicación Express para que el agente generado exponga los endpoints del protocolo A2A junto con un health check `/ping`. Cuando se despliega en AgentCore, el punto de entrada resuelve el ARN público del runtime desde AppConfig y lo anuncia en la tarjeta del agente.
+El `index.ts` generado monta el [Strands A2A Express Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) en una aplicación Express para que el agente generado exponga los endpoints del protocolo A2A junto con un health check `/ping`. La URL anunciada en la tarjeta del agente proviene de la variable de entorno `AGENTCORE_RUNTIME_URL`, recurriendo a `http://localhost:<port>/` para desarrollo local.
 
 La mayoría de los usuarios no necesitarán modificar este archivo — edita `agent.ts` para cambiar herramientas o el prompt del sistema. Los agentes A2A escuchan en el puerto `9000` (vs `8080` para HTTP), para lo cual el Dockerfile y la infraestructura generados ya están configurados.
 </OptionFilter>
@@ -255,7 +255,7 @@ La mayoría de los usuarios no necesitarán modificar este archivo — edita `ag
 <OptionFilter when={{ protocol: 'ag-ui' }} description="AG-UI server details">
 ## Servidor AG-UI (protocolo AG-UI)
 
-El `index.ts` generado envuelve tu `Agent` de Strands en un `StrandsAgent` de [`@ag-ui/aws-strands`](https://www.npmjs.com/package/@ag-ui/aws-strands) y crea una aplicación Express a través de `createStrandsApp()`. La aplicación resultante expone un único endpoint POST que transmite eventos [AG-UI](https://docs.ag-ui.com/) sobre Server-Sent Events (SSE), así como `/ping` para el health check del runtime AgentCore.
+El `index.ts` generado envuelve tu `Agent` de Strands en un `StrandsAgent` de [`@ag-ui/aws-strands`](https://www.npmjs.com/package/@ag-ui/aws-strands) y crea una aplicación Express. La aplicación resultante expone un único endpoint POST que transmite eventos [AG-UI](https://docs.ag-ui.com/) sobre Server-Sent Events (SSE), así como `/ping` para el health check del runtime AgentCore.
 
 Los agentes AG-UI están diseñados para ser consumidos directamente por un frontend. Usa el <Link path="/guides/connection/react-agui">generador `connection`</Link> para conectar tu sitio web React al agente con un proveedor [CopilotKit](https://docs.copilotkit.ai/aws-strands) y un cliente [AG-UI HttpAgent](https://docs.ag-ui.com/).
 
@@ -395,11 +395,13 @@ Puedes invocar un agente ejecutándose localmente usando el método de fábrica 
 
 Puedes, por ejemplo, crear un archivo llamado `scripts/test.ts` en tu workspace que importe el cliente:
 
+La clase del cliente se nombra según tu agente, por lo que un agente llamado `my-agent` exporta `MyAgentClient`.
+
 ```typescript
 // scripts/test.ts
-import { AgentClient } from '../packages/<project>/src/agent/client.js';
+import { MyAgentClient } from '../packages/<project>/src/agent/client.js';
 
-const client = AgentClient.local({ url: 'http://localhost:8081/ws' });
+const client = MyAgentClient.local({ url: 'http://localhost:8081/ws' });
 
 client.invoke.subscribe({ prompt: 'what is 1 plus 1?' }, { onData: console.log });
 ```
@@ -429,9 +431,9 @@ La fábrica de cliente usa encabezados HTTP en el handshake WebSocket para auten
 Puedes invocar tu agente desplegado pasando su ARN al método de fábrica `withIamAuth`:
 
 ```typescript
-import { AgentClient } from './agent/client.js';
+import { MyAgentClient } from './agent/client.js';
 
-const client = AgentClient.withIamAuth({
+const client = MyAgentClient.withIamAuth({
   agentRuntimeArn: 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent',
 });
 
@@ -453,7 +455,7 @@ Esto usará la cadena de proveedores de credenciales AWS predeterminada para aut
 Usa el método de fábrica `withJwtAuth` para autenticar con el token de acceso JWT / Cognito.
 
 ```typescript
-const client = AgentClient.withJwtAuth({
+const client = MyAgentClient.withJwtAuth({
   agentRuntimeArn: 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent',
   accessTokenProvider: async () => `<access-token>`,
 });
@@ -470,7 +472,7 @@ import { CognitoIdentityProvider } from "@aws-sdk/client-cognito-identity-provid
 
 const cognito = new CognitoIdentityProvider();
 
-const jwtClient = AgentClient.withJwtAuth({
+const jwtClient = MyAgentClient.withJwtAuth({
   agentRuntimeArn: 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent',
   accessTokenProvider: async () => {
     const response = await cognito.adminInitiateAuth({

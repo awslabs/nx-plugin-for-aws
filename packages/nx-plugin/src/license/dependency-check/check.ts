@@ -3,18 +3,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { AWS_NX_PLUGIN_CONFIG_FILE_NAME } from '../../utils/config/utils';
+import { AWS_NX_PLUGIN_CONFIG_FILE_NAME } from '../../utils/config/utils.js';
 import {
   DEFAULT_COLLECTORS,
   type LicenseCollector,
-} from './collectors/collector';
-import { createEvaluator } from './evaluator';
+} from './collectors/collector.js';
+import { createEvaluator } from './evaluator.js';
 import type {
   CheckedDependency,
   CheckResult,
   DependencyCheckConfig,
   DependencyCheckException,
-} from './types';
+} from './types.js';
 
 export interface RunCheckOptions {
   projectRoot: string;

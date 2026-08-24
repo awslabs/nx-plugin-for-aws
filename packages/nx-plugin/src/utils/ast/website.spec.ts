@@ -6,7 +6,7 @@
 import type { Tree } from '@nx/devkit';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { addHookResultToRouterProviderContext } from './website';
+import { addHookResultToRouterProviderContext } from './website.js';
 
 describe('website ast utils', () => {
   let tree: Tree;
