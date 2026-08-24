@@ -889,10 +889,14 @@ class <%- pythonClassNameForTag(tag) %>:
   const inputs = op.requestShape?.inputs ?? [];
 _%>
 
-    <%- signature(op).replace(/^self/, `async def ${op.pythonMethodName}(\n        self`) %>,
+<%_ /* A streaming delegate is a plain `def` returning the inner generator, not
+       an `async def` re-yielding from it: `async for ... yield` would create a
+       second generator whose `aclose()` never reaches the first, holding the
+       connection open until garbage collection. */ _%>
+    <%- signature(op).replace(/^self/, `${op.isStreaming ? 'def' : 'async def'} ${op.pythonMethodName}(\n        self`) %>,
     ) -> <%- resultTypeAsync(op) %>:
 <%_ if (op.isStreaming) { _%>
-        async for item in self._parent._<%- op.pythonMethodName %>(
+        return self._parent._<%- op.pythonMethodName %>(
 <%_ if (isPositionalBody(op)) { _%>
             <%- inputs[0].pythonName %>,
 <%_ } else { _%>
@@ -900,8 +904,7 @@ _%>
             <%- k.pythonName %>=<%- k.pythonName %>,
 <%_ }); _%>
 <%_ } _%>
-        ):
-            yield item
+        )
 <%_ } else { _%>
         return await self._parent._<%- op.pythonMethodName %>(
 <%_ if (isPositionalBody(op)) { _%>

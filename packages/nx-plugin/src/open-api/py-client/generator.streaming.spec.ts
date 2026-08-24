@@ -283,4 +283,53 @@ describe('openApiPyClientGenerator - streaming', () => {
     expect(res.exception?.type).toBe('StreamDataApiError');
     expect(res.exception?.status).toBe(500);
   });
+
+  // A tagged streaming operation delegates to the client's own method. Closing
+  // the stream a caller holds must reach the generator actually producing the
+  // items, or the response — and its pooled connection — stays open until
+  // garbage collection.
+  describe('abandoning a stream', () => {
+    const taggedSpec: Spec = {
+      ...jsonlSpec,
+      paths: {
+        '/stream': {
+          post: {
+            ...(jsonlSpec.paths!['/stream'] as Record<string, any>).post,
+            tags: ['chat'],
+          },
+        },
+      },
+    };
+
+    it.each(['sync', 'async'] as const)(
+      'closes the underlying response on the %s client',
+      async (module) => {
+        await generateAndRead(verifier, tree, taggedSpec);
+        const res = await verifier.invoke({
+          module,
+          method: `chat.stream_data`,
+          kwargs: { prompt: 'hi' },
+          stream: true,
+          streamTake: 1,
+          routes: [{ method: 'POST', path: '/stream' }],
+          mock: [
+            {
+              response: {
+                status: 200,
+                jsonl_lines: [
+                  JSON.stringify({ content: 'a' }),
+                  JSON.stringify({ content: 'b' }),
+                  JSON.stringify({ content: 'c' }),
+                ],
+              },
+            },
+          ],
+        });
+        expect(res.ok).toBe(true);
+        const value = res.value as { items: unknown[]; closed: boolean };
+        expect(value.items).toEqual([{ content: 'a' }]);
+        expect(value.closed).toBe(true);
+      },
+    );
+  });
 });

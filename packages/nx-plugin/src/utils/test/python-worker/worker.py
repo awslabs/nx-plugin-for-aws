@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import io
+import itertools
 import json
 import os
 import py_compile
@@ -103,6 +104,10 @@ class _MockTransport(httpx.BaseTransport, httpx.AsyncBaseTransport):
         self.entries = [_MockMatch(e) for e in entries]
         self.routes = [_RouteSpec(r["method"], r["path"]) for r in routes or []]
         self.calls: list[dict] = []
+        # Streamed responses handed out, and the ones whose body was released.
+        # A test asks whether closing a stream reached the response.
+        self.responses: list[httpx.Response] = []
+        self.released: list[httpx.Response] = []
 
     def _record(self, request: httpx.Request) -> None:
         try:
@@ -141,6 +146,28 @@ class _MockTransport(httpx.BaseTransport, httpx.AsyncBaseTransport):
             body = b""
         return httpx.Response(status_code=status, headers=headers, content=body)
 
+    def _track_release(self, response: httpx.Response) -> None:
+        """Record the response once it is closed.
+
+        A streamed response is closed by the `with client.stream(...)` block
+        inside the generated method exiting, so this reports whether a caller's
+        `close()`/`aclose()` on the stream reached that far.
+        """
+        original_close = response.close
+        original_aclose = response.aclose
+        released = self.released
+
+        def close() -> None:
+            released.append(response)
+            original_close()
+
+        async def aclose() -> None:
+            released.append(response)
+            await original_aclose()
+
+        response.close = close  # type: ignore[method-assign]
+        response.aclose = aclose  # type: ignore[method-assign]
+
     def _match(self, request: httpx.Request) -> httpx.Response:
         self._record(request)
         # Checked before the mocks: a client requesting a route the spec never
@@ -153,7 +180,10 @@ class _MockTransport(httpx.BaseTransport, httpx.AsyncBaseTransport):
         for entry in self.entries:
             if entry.matches(request):
                 entry.used = True
-                return self._build_response(entry.response)
+                response = self._build_response(entry.response)
+                self.responses.append(response)
+                self._track_release(response)
+                return response
         # A request no mock describes is a mistake in the test, not a response
         # the client should interpret: raise so it can't be mistaken for one.
         raise NoMockMatched(f"No mock matched {request.method} {request.url}")
@@ -424,6 +454,8 @@ def handle_invoke(req: dict) -> dict:
     method_name = req["method"]
     module_kind = req["module"]  # "sync" | "async"
     is_stream = bool(req.get("stream"))
+    # When set, the stream is abandoned after this many items and then closed.
+    stream_take = req.get("stream_take")
 
     client_cls, cls_name = _resolve_invoke(module_kind, pkg)
     config_cls = getattr(pkg, f"{cls_name}Config")
@@ -453,6 +485,13 @@ def handle_invoke(req: dict) -> dict:
         if callable(closer):
             closer()
 
+    def _stream_released() -> bool:
+        # Whether closing the stream reached the response body. The release runs
+        # when the `with client.stream(...)` block inside the generated method
+        # exits, so a delegate that re-yields rather than forwarding close()
+        # never gets there and holds the connection until GC.
+        return len(transport.released) == len(transport.responses) > 0
+
     def _resolve_method(obj: Any, dotted: str) -> Callable[..., Any]:
         for part in dotted.split("."):
             obj = getattr(obj, part)
@@ -462,6 +501,14 @@ def handle_invoke(req: dict) -> dict:
         fn = _resolve_method(client, method_name)
         try:
             if is_stream:
+                if stream_take is not None:
+                    # Stop early and close, so a delegate that doesn't forward
+                    # close() to the generator actually producing the items
+                    # leaves the response open and is caught below.
+                    stream = fn(*args, **kwargs)
+                    taken = list(itertools.islice(stream, stream_take))
+                    stream.close()
+                    return {"items": taken, "closed": _stream_released()}
                 return list(fn(*args, **kwargs))
             return fn(*args, **kwargs)
         finally:
@@ -474,6 +521,15 @@ def handle_invoke(req: dict) -> dict:
         fn = _resolve_method(client, method_name)
         try:
             if is_stream:
+                if stream_take is not None:
+                    stream = fn(*args, **kwargs)
+                    taken: list[Any] = []
+                    async for item in stream:
+                        taken.append(item)
+                        if len(taken) >= stream_take:
+                            break
+                    await stream.aclose()
+                    return {"items": taken, "closed": _stream_released()}
                 collected: list[Any] = []
                 async for item in fn(*args, **kwargs):
                     collected.append(item)

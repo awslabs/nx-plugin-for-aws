@@ -82,6 +82,12 @@ export interface InvokeOptions {
   closeThenReuse?: boolean;
   /** Turn Python warnings into errors, so a deprecation fails the call. */
   errorOnWarning?: boolean;
+  /**
+   * Abandon a stream after this many items and close it, so a delegate that
+   * doesn't forward `close()`/`aclose()` to the generator producing the items
+   * leaves the response open. Makes `value` `{ items, closed }`.
+   */
+  streamTake?: number;
 }
 
 export interface CompileOptions {
@@ -294,6 +300,7 @@ export class PythonVerifier {
       event_hook_header: options.eventHookHeader ?? null,
       close_then_reuse: !!options.closeThenReuse,
       error_on_warning: !!options.errorOnWarning,
+      stream_take: options.streamTake ?? null,
     });
     // The worker speaks snake_case; expose the type fields camelCased alongside.
     const raw = res as InvokeResult & {
