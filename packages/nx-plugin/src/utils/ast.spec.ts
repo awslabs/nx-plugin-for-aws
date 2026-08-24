@@ -138,6 +138,17 @@ describe('ast utils', () => {
       const writtenContent = tree.read('file.ts', 'utf-8');
       expect(writtenContent).toBe(initialContent);
     });
+
+    it('should refuse to bind the same identifier to a second module', async () => {
+      const initialContent = `import DefaultImport from '@scope/package';`;
+      tree.write('file.ts', initialContent);
+
+      await expect(
+        addSingleImport(tree, 'file.ts', 'DefaultImport', '@scope/other'),
+      ).rejects.toThrow(/already imported from a different module/);
+
+      expect(tree.read('file.ts', 'utf-8')).toBe(initialContent);
+    });
   });
 
   describe('addStarExport', () => {

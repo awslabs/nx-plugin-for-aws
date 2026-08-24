@@ -171,6 +171,19 @@ export const addSingleImport = async (
     return;
   }
 
+  // The same identifier bound to a different module would be a duplicate
+  // declaration, so refuse rather than emit a file that cannot compile.
+  const identifierTaken = await matchGritQL(
+    tree,
+    filePath,
+    `\`import ${variableName} from $module\``,
+  );
+  if (identifierTaken) {
+    throw new Error(
+      `Cannot import ${variableName} from '${from}' in ${filePath}: ${variableName} is already imported from a different module. Rename the project so its generated identifier does not collide.`,
+    );
+  }
+
   // Prepend new import to file
   const contents = tree.read(filePath)!.toString();
   tree.write(filePath, `import ${variableName} from '${from}';\n${contents}`);
