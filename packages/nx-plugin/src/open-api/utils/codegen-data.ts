@@ -219,17 +219,29 @@ const canFlattenBodyIntoRequest = (
 };
 
 /**
- * Expand a status-code range spec ("2XX", "5XX", etc.) to the concrete list
- * of integer codes it covers. Returns `undefined` for `'default'` (any
- * non-matched code) and `[code]` for a literal numeric code.
+ * Whether a response code always describes a successful response: a concrete
+ * 2xx code, or the `2XX` range.
+ *
+ * `default` is excluded — it covers whatever the spec did not enumerate, which
+ * spans both success and failure, so whether it is a success depends on the
+ * operation's other responses. See {@link successResponsesOf}.
  */
-const statusCodesFor = (code: number | string): number[] | undefined => {
-  if (typeof code === 'number') return [code];
-  if (/^\dXX$/.test(code)) {
-    const base = Number(code.charAt(0)) * 100;
-    return Array.from({ length: 100 }, (_, i) => base + i);
-  }
-  return undefined;
+const isSuccessCode = (code: number | string): boolean =>
+  typeof code === 'number' ? code >= 200 && code < 300 : code === '2XX';
+
+/**
+ * Every response the operation returns rather than raises for, in the order a
+ * client checks them: concrete codes, then `2XX`, then `default`.
+ *
+ * An operation declaring `200` and `2XX` has two, since a 201 is described by
+ * the range and is still a success. A `default` is only a success when the
+ * operation declares no other — as the sole response it must describe the
+ * success case, whereas alongside one it is the fallback for everything else.
+ */
+const successResponsesOf = (responses: Model[]): Model[] => {
+  const declared = responses.filter((r) => isSuccessCode(r.code!));
+  if (declared.length > 0) return declared;
+  return responses.filter((r) => r.code === 'default');
 };
 
 /**
@@ -301,11 +313,13 @@ const buildRequestShape = (
  * exception / error union shapes as appropriate.
  */
 const buildErrorShape = (op: Operation): ErrorShape => ({
+  // A response that can describe a success is not an error, even when it isn't
+  // the one whose type the operation returns: raising on a declared `2XX` or
+  // `default` would turn a 201 into an exception.
   entries: (op.responses ?? [])
-    .filter((r) => r.code !== op.result?.code)
+    .filter((r) => !(op.successResponses ?? []).includes(r))
     .map((resp) => ({
       code: resp.code!,
-      statusCodes: statusCodesFor(resp.code!),
       responseModel: resp,
     })),
 });
@@ -393,12 +407,24 @@ const PYTHON_CLIENT_MEMBERS = new Set([
  * A Python member name for an operation or tag that cannot collide with the
  * client's own members, nor with another operation or tag on the same client.
  */
-const uniquePythonMemberName = (name: string, taken: Set<string>): string => {
+const uniquePythonMemberName = (
+  name: string,
+  taken: Set<string>,
+  fallback: string,
+): string => {
   // A leading underscore is how the client marks its own internals, so an
   // operation that snake-cases onto one is pushed out of that namespace too.
   let candidate = PYTHON_CLIENT_MEMBERS.has(name.replace(/^_+/, ''))
     ? `${name.replace(/^_+/, '')}_op`
     : name;
+  // snake_case strips everything that isn't alphanumeric, so a name written
+  // entirely in another script yields the empty string, and one starting with a
+  // digit isn't a valid identifier. Either would emit code that doesn't parse.
+  if (!candidate) {
+    candidate = fallback;
+  } else if (/^\d/.test(candidate)) {
+    candidate = `${fallback}_${candidate}`;
+  }
   while (taken.has(candidate)) {
     candidate = `${candidate}_`;
   }
@@ -413,17 +439,22 @@ const uniquePythonMemberName = (name: string, taken: Set<string>): string => {
 const annotatePythonMemberNames = (data: CodeGenData): void => {
   const taken = new Set<string>();
   data.pythonTagNames = Object.fromEntries(
-    Object.keys(data.operationsByTag).map((tag) => [
+    Object.keys(data.operationsByTag).map((tag, index) => [
       tag,
-      uniquePythonMemberName(toPythonName('property', tag), taken),
+      uniquePythonMemberName(
+        toPythonName('property', tag),
+        taken,
+        `tag_${index + 1}`,
+      ),
     ]),
   );
-  for (const op of data.allOperations) {
+  data.allOperations.forEach((op, index) => {
     op.pythonMethodName = uniquePythonMemberName(
       op.operationIdSnakeCase ?? toPythonName('operation', op.name),
       taken,
+      `operation_${index + 1}`,
     );
-  }
+  });
 };
 
 /**
@@ -607,6 +638,9 @@ const augmentOperation = (
     op.responses.find(
       (r) => typeof r.code === 'number' && r.code >= 200 && r.code < 300,
     ) ?? op.responses.find((r) => r.code === '2XX' || r.code === 'default');
+  // Already ordered concrete → wildcard → `default` by the sort above, which is
+  // the order a client must check them in.
+  op.successResponses = successResponsesOf(op.responses);
 
   op.operationIdPascalCase = pascalCase(op.uniqueName);
   op.operationIdSnakeCase = toPythonName('operation', op.uniqueName);

@@ -129,7 +129,21 @@ class AsyncSwaggerPetstoreOpenAPI30:
     ) -> str:
         for key, value in path_params.items():
             style, explode = (path_styles or {}).get(key, ("simple", False))
-            values = value if isinstance(value, list) else [value]
+            # An object expands to its key,value members; a list to its items.
+            # Each is encoded on its own so the separators between them stay
+            # literal, as RFC 6570 requires.
+            dumped = self._dump(value)
+            if isinstance(dumped, dict):
+                values = [
+                    part
+                    for k, v in dumped.items()
+                    if v is not None
+                    for part in (k, self._scalar(v))
+                ]
+            elif isinstance(dumped, list):
+                values = list(dumped)
+            else:
+                values = [value]
             if style == "matrix":
                 # RFC 6570 path-style expansion: ;key=a,b (explode: ;key=a;key=b)
                 if explode:
@@ -174,7 +188,20 @@ class AsyncSwaggerPetstoreOpenAPI30:
         if isinstance(value, (datetime.date, datetime.datetime)):
             return value.isoformat()
         dumped = self._dump(value)
-        return dumped if isinstance(dumped, str) else str(dumped)
+        if isinstance(dumped, str):
+            return dumped
+        # RFC 6570 renders a list as its comma-joined members and an object as
+        # comma-joined key,value pairs. Python's own \`str\` would emit a repr —
+        # \`['a', 'b']\`, quotes and spaces included.
+        if isinstance(dumped, list):
+            return ",".join(self._scalar(v) for v in dumped)
+        if isinstance(dumped, dict):
+            return ",".join(
+                f"{k},{self._scalar(v)}" for k, v in dumped.items() if v is not None
+            )
+        if dumped is None:
+            return ""
+        return str(dumped)
 
     def _query(
         self,
@@ -243,7 +270,32 @@ class AsyncSwaggerPetstoreOpenAPI30:
         return out
 
     def _cookies(self, cookie_params: dict[str, Any]) -> dict[str, str]:
-        return {k: self._scalar(v) for k, v in cookie_params.items() if v is not None}
+        out: dict[str, str] = {}
+        for key, value in cookie_params.items():
+            if value is None:
+                continue
+            dumped = self._dump(value)
+            # A cookie uses form-style expansion, so a list joins on \`,\` and an
+            # object on \`,\` between each key and value. Members are encoded so a
+            # \`;\` or \`,\` inside one can't be read as a delimiter, while the
+            # joining commas stay literal.
+            if isinstance(dumped, list):
+                rendered = ",".join(self._cookie_value(v) for v in dumped)
+            elif isinstance(dumped, dict):
+                rendered = ",".join(
+                    self._cookie_value(k) + "," + self._cookie_value(v)
+                    for k, v in dumped.items()
+                    if v is not None
+                )
+            else:
+                rendered = self._cookie_value(value)
+            out[key] = rendered
+        return out
+
+    def _cookie_value(self, value: Any) -> str:
+        # Only the characters a cookie parser treats as structure are escaped,
+        # so a timestamp keeps its colons rather than arriving as %3A.
+        return quote(self._scalar(value), safe="/:?@!$&'()*+[]~")
 
     def _dump(self, value: Any) -> Any:
         if value is None:
@@ -344,12 +396,10 @@ class AsyncSwaggerPetstoreOpenAPI30:
                 response.status_code,
                 self._error(types.AddPet422Error, 422, None),
             )
-        if True:
-            raise AddPetApiError(
-                response.status_code,
-                self._error(types.AddPetDefaultError, response.status_code, None),
-            )
-        raise AddPetApiError(response.status_code, None)
+        raise AddPetApiError(
+            response.status_code,
+            self._error(types.AddPetDefaultError, response.status_code, None),
+        )
 
     async def _create_user(
         self,
@@ -397,12 +447,10 @@ class AsyncSwaggerPetstoreOpenAPI30:
         )
         if response.status_code == 200:
             return types.User.model_validate(response.json())
-        if True:
-            raise CreateUserApiError(
-                response.status_code,
-                self._error(types.CreateUserDefaultError, response.status_code, None),
-            )
-        raise CreateUserApiError(response.status_code, None)
+        raise CreateUserApiError(
+            response.status_code,
+            self._error(types.CreateUserDefaultError, response.status_code, None),
+        )
 
     async def _create_users_with_list_input(
         self,
@@ -423,16 +471,12 @@ class AsyncSwaggerPetstoreOpenAPI30:
         )
         if response.status_code == 200:
             return types.User.model_validate(response.json())
-        if True:
-            raise CreateUsersWithListInputApiError(
-                response.status_code,
-                self._error(
-                    types.CreateUsersWithListInputDefaultError,
-                    response.status_code,
-                    None,
-                ),
-            )
-        raise CreateUsersWithListInputApiError(response.status_code, None)
+        raise CreateUsersWithListInputApiError(
+            response.status_code,
+            self._error(
+                types.CreateUsersWithListInputDefaultError, response.status_code, None
+            ),
+        )
 
     async def _delete_order(
         self,
@@ -461,12 +505,10 @@ class AsyncSwaggerPetstoreOpenAPI30:
                 response.status_code,
                 self._error(types.DeleteOrder404Error, 404, None),
             )
-        if True:
-            raise DeleteOrderApiError(
-                response.status_code,
-                self._error(types.DeleteOrderDefaultError, response.status_code, None),
-            )
-        raise DeleteOrderApiError(response.status_code, None)
+        raise DeleteOrderApiError(
+            response.status_code,
+            self._error(types.DeleteOrderDefaultError, response.status_code, None),
+        )
 
     async def _delete_pet(
         self,
@@ -493,12 +535,10 @@ class AsyncSwaggerPetstoreOpenAPI30:
                 response.status_code,
                 self._error(types.DeletePet400Error, 400, None),
             )
-        if True:
-            raise DeletePetApiError(
-                response.status_code,
-                self._error(types.DeletePetDefaultError, response.status_code, None),
-            )
-        raise DeletePetApiError(response.status_code, None)
+        raise DeletePetApiError(
+            response.status_code,
+            self._error(types.DeletePetDefaultError, response.status_code, None),
+        )
 
     async def _delete_user(
         self,
@@ -527,12 +567,10 @@ class AsyncSwaggerPetstoreOpenAPI30:
                 response.status_code,
                 self._error(types.DeleteUser404Error, 404, None),
             )
-        if True:
-            raise DeleteUserApiError(
-                response.status_code,
-                self._error(types.DeleteUserDefaultError, response.status_code, None),
-            )
-        raise DeleteUserApiError(response.status_code, None)
+        raise DeleteUserApiError(
+            response.status_code,
+            self._error(types.DeleteUserDefaultError, response.status_code, None),
+        )
 
     async def _find_pets_by_status(
         self,
@@ -558,14 +596,10 @@ class AsyncSwaggerPetstoreOpenAPI30:
                 response.status_code,
                 self._error(types.FindPetsByStatus400Error, 400, None),
             )
-        if True:
-            raise FindPetsByStatusApiError(
-                response.status_code,
-                self._error(
-                    types.FindPetsByStatusDefaultError, response.status_code, None
-                ),
-            )
-        raise FindPetsByStatusApiError(response.status_code, None)
+        raise FindPetsByStatusApiError(
+            response.status_code,
+            self._error(types.FindPetsByStatusDefaultError, response.status_code, None),
+        )
 
     async def _find_pets_by_tags(
         self,
@@ -591,14 +625,10 @@ class AsyncSwaggerPetstoreOpenAPI30:
                 response.status_code,
                 self._error(types.FindPetsByTags400Error, 400, None),
             )
-        if True:
-            raise FindPetsByTagsApiError(
-                response.status_code,
-                self._error(
-                    types.FindPetsByTagsDefaultError, response.status_code, None
-                ),
-            )
-        raise FindPetsByTagsApiError(response.status_code, None)
+        raise FindPetsByTagsApiError(
+            response.status_code,
+            self._error(types.FindPetsByTagsDefaultError, response.status_code, None),
+        )
 
     async def _get_inventory(
         self,
@@ -616,12 +646,10 @@ class AsyncSwaggerPetstoreOpenAPI30:
             return TypeAdapter(types.GetInventory200Response).validate_python(
                 response.json()
             )
-        if True:
-            raise GetInventoryApiError(
-                response.status_code,
-                self._error(types.GetInventoryDefaultError, response.status_code, None),
-            )
-        raise GetInventoryApiError(response.status_code, None)
+        raise GetInventoryApiError(
+            response.status_code,
+            self._error(types.GetInventoryDefaultError, response.status_code, None),
+        )
 
     async def _get_order_by_id(
         self,
@@ -650,12 +678,10 @@ class AsyncSwaggerPetstoreOpenAPI30:
                 response.status_code,
                 self._error(types.GetOrderById404Error, 404, None),
             )
-        if True:
-            raise GetOrderByIdApiError(
-                response.status_code,
-                self._error(types.GetOrderByIdDefaultError, response.status_code, None),
-            )
-        raise GetOrderByIdApiError(response.status_code, None)
+        raise GetOrderByIdApiError(
+            response.status_code,
+            self._error(types.GetOrderByIdDefaultError, response.status_code, None),
+        )
 
     async def _get_pet_by_id(
         self,
@@ -684,12 +710,10 @@ class AsyncSwaggerPetstoreOpenAPI30:
                 response.status_code,
                 self._error(types.GetPetById404Error, 404, None),
             )
-        if True:
-            raise GetPetByIdApiError(
-                response.status_code,
-                self._error(types.GetPetByIdDefaultError, response.status_code, None),
-            )
-        raise GetPetByIdApiError(response.status_code, None)
+        raise GetPetByIdApiError(
+            response.status_code,
+            self._error(types.GetPetByIdDefaultError, response.status_code, None),
+        )
 
     async def _get_user_by_name(
         self,
@@ -718,14 +742,10 @@ class AsyncSwaggerPetstoreOpenAPI30:
                 response.status_code,
                 self._error(types.GetUserByName404Error, 404, None),
             )
-        if True:
-            raise GetUserByNameApiError(
-                response.status_code,
-                self._error(
-                    types.GetUserByNameDefaultError, response.status_code, None
-                ),
-            )
-        raise GetUserByNameApiError(response.status_code, None)
+        raise GetUserByNameApiError(
+            response.status_code,
+            self._error(types.GetUserByNameDefaultError, response.status_code, None),
+        )
 
     async def _login_user(
         self,
@@ -755,12 +775,10 @@ class AsyncSwaggerPetstoreOpenAPI30:
                 response.status_code,
                 self._error(types.LoginUser400Error, 400, None),
             )
-        if True:
-            raise LoginUserApiError(
-                response.status_code,
-                self._error(types.LoginUserDefaultError, response.status_code, None),
-            )
-        raise LoginUserApiError(response.status_code, None)
+        raise LoginUserApiError(
+            response.status_code,
+            self._error(types.LoginUserDefaultError, response.status_code, None),
+        )
 
     async def _logout_user(
         self,
@@ -776,12 +794,10 @@ class AsyncSwaggerPetstoreOpenAPI30:
         )
         if response.status_code == 200:
             return None
-        if True:
-            raise LogoutUserApiError(
-                response.status_code,
-                self._error(types.LogoutUserDefaultError, response.status_code, None),
-            )
-        raise LogoutUserApiError(response.status_code, None)
+        raise LogoutUserApiError(
+            response.status_code,
+            self._error(types.LogoutUserDefaultError, response.status_code, None),
+        )
 
     async def _place_order(
         self,
@@ -833,12 +849,10 @@ class AsyncSwaggerPetstoreOpenAPI30:
                 response.status_code,
                 self._error(types.PlaceOrder422Error, 422, None),
             )
-        if True:
-            raise PlaceOrderApiError(
-                response.status_code,
-                self._error(types.PlaceOrderDefaultError, response.status_code, None),
-            )
-        raise PlaceOrderApiError(response.status_code, None)
+        raise PlaceOrderApiError(
+            response.status_code,
+            self._error(types.PlaceOrderDefaultError, response.status_code, None),
+        )
 
     async def _update_pet(
         self,
@@ -893,12 +907,10 @@ class AsyncSwaggerPetstoreOpenAPI30:
                 response.status_code,
                 self._error(types.UpdatePet422Error, 422, None),
             )
-        if True:
-            raise UpdatePetApiError(
-                response.status_code,
-                self._error(types.UpdatePetDefaultError, response.status_code, None),
-            )
-        raise UpdatePetApiError(response.status_code, None)
+        raise UpdatePetApiError(
+            response.status_code,
+            self._error(types.UpdatePetDefaultError, response.status_code, None),
+        )
 
     async def _update_pet_with_form(
         self,
@@ -927,14 +939,12 @@ class AsyncSwaggerPetstoreOpenAPI30:
                 response.status_code,
                 self._error(types.UpdatePetWithForm400Error, 400, None),
             )
-        if True:
-            raise UpdatePetWithFormApiError(
-                response.status_code,
-                self._error(
-                    types.UpdatePetWithFormDefaultError, response.status_code, None
-                ),
-            )
-        raise UpdatePetWithFormApiError(response.status_code, None)
+        raise UpdatePetWithFormApiError(
+            response.status_code,
+            self._error(
+                types.UpdatePetWithFormDefaultError, response.status_code, None
+            ),
+        )
 
     async def _update_user(
         self,
@@ -968,12 +978,10 @@ class AsyncSwaggerPetstoreOpenAPI30:
                 response.status_code,
                 self._error(types.UpdateUser404Error, 404, None),
             )
-        if True:
-            raise UpdateUserApiError(
-                response.status_code,
-                self._error(types.UpdateUserDefaultError, response.status_code, None),
-            )
-        raise UpdateUserApiError(response.status_code, None)
+        raise UpdateUserApiError(
+            response.status_code,
+            self._error(types.UpdateUserDefaultError, response.status_code, None),
+        )
 
     async def _upload_file(
         self,
@@ -1011,12 +1019,10 @@ class AsyncSwaggerPetstoreOpenAPI30:
                 response.status_code,
                 self._error(types.UploadFile404Error, 404, None),
             )
-        if True:
-            raise UploadFileApiError(
-                response.status_code,
-                self._error(types.UploadFileDefaultError, response.status_code, None),
-            )
-        raise UploadFileApiError(response.status_code, None)
+        raise UploadFileApiError(
+            response.status_code,
+            self._error(types.UploadFileDefaultError, response.status_code, None),
+        )
 
 
 class _AsyncPetNamespace:
@@ -1390,7 +1396,21 @@ class SwaggerPetstoreOpenAPI30:
     ) -> str:
         for key, value in path_params.items():
             style, explode = (path_styles or {}).get(key, ("simple", False))
-            values = value if isinstance(value, list) else [value]
+            # An object expands to its key,value members; a list to its items.
+            # Each is encoded on its own so the separators between them stay
+            # literal, as RFC 6570 requires.
+            dumped = self._dump(value)
+            if isinstance(dumped, dict):
+                values = [
+                    part
+                    for k, v in dumped.items()
+                    if v is not None
+                    for part in (k, self._scalar(v))
+                ]
+            elif isinstance(dumped, list):
+                values = list(dumped)
+            else:
+                values = [value]
             if style == "matrix":
                 # RFC 6570 path-style expansion: ;key=a,b (explode: ;key=a;key=b)
                 if explode:
@@ -1435,7 +1455,20 @@ class SwaggerPetstoreOpenAPI30:
         if isinstance(value, (datetime.date, datetime.datetime)):
             return value.isoformat()
         dumped = self._dump(value)
-        return dumped if isinstance(dumped, str) else str(dumped)
+        if isinstance(dumped, str):
+            return dumped
+        # RFC 6570 renders a list as its comma-joined members and an object as
+        # comma-joined key,value pairs. Python's own \`str\` would emit a repr —
+        # \`['a', 'b']\`, quotes and spaces included.
+        if isinstance(dumped, list):
+            return ",".join(self._scalar(v) for v in dumped)
+        if isinstance(dumped, dict):
+            return ",".join(
+                f"{k},{self._scalar(v)}" for k, v in dumped.items() if v is not None
+            )
+        if dumped is None:
+            return ""
+        return str(dumped)
 
     def _query(
         self,
@@ -1504,7 +1537,32 @@ class SwaggerPetstoreOpenAPI30:
         return out
 
     def _cookies(self, cookie_params: dict[str, Any]) -> dict[str, str]:
-        return {k: self._scalar(v) for k, v in cookie_params.items() if v is not None}
+        out: dict[str, str] = {}
+        for key, value in cookie_params.items():
+            if value is None:
+                continue
+            dumped = self._dump(value)
+            # A cookie uses form-style expansion, so a list joins on \`,\` and an
+            # object on \`,\` between each key and value. Members are encoded so a
+            # \`;\` or \`,\` inside one can't be read as a delimiter, while the
+            # joining commas stay literal.
+            if isinstance(dumped, list):
+                rendered = ",".join(self._cookie_value(v) for v in dumped)
+            elif isinstance(dumped, dict):
+                rendered = ",".join(
+                    self._cookie_value(k) + "," + self._cookie_value(v)
+                    for k, v in dumped.items()
+                    if v is not None
+                )
+            else:
+                rendered = self._cookie_value(value)
+            out[key] = rendered
+        return out
+
+    def _cookie_value(self, value: Any) -> str:
+        # Only the characters a cookie parser treats as structure are escaped,
+        # so a timestamp keeps its colons rather than arriving as %3A.
+        return quote(self._scalar(value), safe="/:?@!$&'()*+[]~")
 
     def _dump(self, value: Any) -> Any:
         if value is None:
@@ -1605,12 +1663,10 @@ class SwaggerPetstoreOpenAPI30:
                 response.status_code,
                 self._error(types.AddPet422Error, 422, None),
             )
-        if True:
-            raise AddPetApiError(
-                response.status_code,
-                self._error(types.AddPetDefaultError, response.status_code, None),
-            )
-        raise AddPetApiError(response.status_code, None)
+        raise AddPetApiError(
+            response.status_code,
+            self._error(types.AddPetDefaultError, response.status_code, None),
+        )
 
     def _create_user(
         self,
@@ -1658,12 +1714,10 @@ class SwaggerPetstoreOpenAPI30:
         )
         if response.status_code == 200:
             return types.User.model_validate(response.json())
-        if True:
-            raise CreateUserApiError(
-                response.status_code,
-                self._error(types.CreateUserDefaultError, response.status_code, None),
-            )
-        raise CreateUserApiError(response.status_code, None)
+        raise CreateUserApiError(
+            response.status_code,
+            self._error(types.CreateUserDefaultError, response.status_code, None),
+        )
 
     def _create_users_with_list_input(
         self,
@@ -1684,16 +1738,12 @@ class SwaggerPetstoreOpenAPI30:
         )
         if response.status_code == 200:
             return types.User.model_validate(response.json())
-        if True:
-            raise CreateUsersWithListInputApiError(
-                response.status_code,
-                self._error(
-                    types.CreateUsersWithListInputDefaultError,
-                    response.status_code,
-                    None,
-                ),
-            )
-        raise CreateUsersWithListInputApiError(response.status_code, None)
+        raise CreateUsersWithListInputApiError(
+            response.status_code,
+            self._error(
+                types.CreateUsersWithListInputDefaultError, response.status_code, None
+            ),
+        )
 
     def _delete_order(
         self,
@@ -1722,12 +1772,10 @@ class SwaggerPetstoreOpenAPI30:
                 response.status_code,
                 self._error(types.DeleteOrder404Error, 404, None),
             )
-        if True:
-            raise DeleteOrderApiError(
-                response.status_code,
-                self._error(types.DeleteOrderDefaultError, response.status_code, None),
-            )
-        raise DeleteOrderApiError(response.status_code, None)
+        raise DeleteOrderApiError(
+            response.status_code,
+            self._error(types.DeleteOrderDefaultError, response.status_code, None),
+        )
 
     def _delete_pet(
         self,
@@ -1754,12 +1802,10 @@ class SwaggerPetstoreOpenAPI30:
                 response.status_code,
                 self._error(types.DeletePet400Error, 400, None),
             )
-        if True:
-            raise DeletePetApiError(
-                response.status_code,
-                self._error(types.DeletePetDefaultError, response.status_code, None),
-            )
-        raise DeletePetApiError(response.status_code, None)
+        raise DeletePetApiError(
+            response.status_code,
+            self._error(types.DeletePetDefaultError, response.status_code, None),
+        )
 
     def _delete_user(
         self,
@@ -1788,12 +1834,10 @@ class SwaggerPetstoreOpenAPI30:
                 response.status_code,
                 self._error(types.DeleteUser404Error, 404, None),
             )
-        if True:
-            raise DeleteUserApiError(
-                response.status_code,
-                self._error(types.DeleteUserDefaultError, response.status_code, None),
-            )
-        raise DeleteUserApiError(response.status_code, None)
+        raise DeleteUserApiError(
+            response.status_code,
+            self._error(types.DeleteUserDefaultError, response.status_code, None),
+        )
 
     def _find_pets_by_status(
         self,
@@ -1819,14 +1863,10 @@ class SwaggerPetstoreOpenAPI30:
                 response.status_code,
                 self._error(types.FindPetsByStatus400Error, 400, None),
             )
-        if True:
-            raise FindPetsByStatusApiError(
-                response.status_code,
-                self._error(
-                    types.FindPetsByStatusDefaultError, response.status_code, None
-                ),
-            )
-        raise FindPetsByStatusApiError(response.status_code, None)
+        raise FindPetsByStatusApiError(
+            response.status_code,
+            self._error(types.FindPetsByStatusDefaultError, response.status_code, None),
+        )
 
     def _find_pets_by_tags(
         self,
@@ -1852,14 +1892,10 @@ class SwaggerPetstoreOpenAPI30:
                 response.status_code,
                 self._error(types.FindPetsByTags400Error, 400, None),
             )
-        if True:
-            raise FindPetsByTagsApiError(
-                response.status_code,
-                self._error(
-                    types.FindPetsByTagsDefaultError, response.status_code, None
-                ),
-            )
-        raise FindPetsByTagsApiError(response.status_code, None)
+        raise FindPetsByTagsApiError(
+            response.status_code,
+            self._error(types.FindPetsByTagsDefaultError, response.status_code, None),
+        )
 
     def _get_inventory(
         self,
@@ -1877,12 +1913,10 @@ class SwaggerPetstoreOpenAPI30:
             return TypeAdapter(types.GetInventory200Response).validate_python(
                 response.json()
             )
-        if True:
-            raise GetInventoryApiError(
-                response.status_code,
-                self._error(types.GetInventoryDefaultError, response.status_code, None),
-            )
-        raise GetInventoryApiError(response.status_code, None)
+        raise GetInventoryApiError(
+            response.status_code,
+            self._error(types.GetInventoryDefaultError, response.status_code, None),
+        )
 
     def _get_order_by_id(
         self,
@@ -1911,12 +1945,10 @@ class SwaggerPetstoreOpenAPI30:
                 response.status_code,
                 self._error(types.GetOrderById404Error, 404, None),
             )
-        if True:
-            raise GetOrderByIdApiError(
-                response.status_code,
-                self._error(types.GetOrderByIdDefaultError, response.status_code, None),
-            )
-        raise GetOrderByIdApiError(response.status_code, None)
+        raise GetOrderByIdApiError(
+            response.status_code,
+            self._error(types.GetOrderByIdDefaultError, response.status_code, None),
+        )
 
     def _get_pet_by_id(
         self,
@@ -1945,12 +1977,10 @@ class SwaggerPetstoreOpenAPI30:
                 response.status_code,
                 self._error(types.GetPetById404Error, 404, None),
             )
-        if True:
-            raise GetPetByIdApiError(
-                response.status_code,
-                self._error(types.GetPetByIdDefaultError, response.status_code, None),
-            )
-        raise GetPetByIdApiError(response.status_code, None)
+        raise GetPetByIdApiError(
+            response.status_code,
+            self._error(types.GetPetByIdDefaultError, response.status_code, None),
+        )
 
     def _get_user_by_name(
         self,
@@ -1979,14 +2009,10 @@ class SwaggerPetstoreOpenAPI30:
                 response.status_code,
                 self._error(types.GetUserByName404Error, 404, None),
             )
-        if True:
-            raise GetUserByNameApiError(
-                response.status_code,
-                self._error(
-                    types.GetUserByNameDefaultError, response.status_code, None
-                ),
-            )
-        raise GetUserByNameApiError(response.status_code, None)
+        raise GetUserByNameApiError(
+            response.status_code,
+            self._error(types.GetUserByNameDefaultError, response.status_code, None),
+        )
 
     def _login_user(
         self,
@@ -2016,12 +2042,10 @@ class SwaggerPetstoreOpenAPI30:
                 response.status_code,
                 self._error(types.LoginUser400Error, 400, None),
             )
-        if True:
-            raise LoginUserApiError(
-                response.status_code,
-                self._error(types.LoginUserDefaultError, response.status_code, None),
-            )
-        raise LoginUserApiError(response.status_code, None)
+        raise LoginUserApiError(
+            response.status_code,
+            self._error(types.LoginUserDefaultError, response.status_code, None),
+        )
 
     def _logout_user(
         self,
@@ -2037,12 +2061,10 @@ class SwaggerPetstoreOpenAPI30:
         )
         if response.status_code == 200:
             return None
-        if True:
-            raise LogoutUserApiError(
-                response.status_code,
-                self._error(types.LogoutUserDefaultError, response.status_code, None),
-            )
-        raise LogoutUserApiError(response.status_code, None)
+        raise LogoutUserApiError(
+            response.status_code,
+            self._error(types.LogoutUserDefaultError, response.status_code, None),
+        )
 
     def _place_order(
         self,
@@ -2094,12 +2116,10 @@ class SwaggerPetstoreOpenAPI30:
                 response.status_code,
                 self._error(types.PlaceOrder422Error, 422, None),
             )
-        if True:
-            raise PlaceOrderApiError(
-                response.status_code,
-                self._error(types.PlaceOrderDefaultError, response.status_code, None),
-            )
-        raise PlaceOrderApiError(response.status_code, None)
+        raise PlaceOrderApiError(
+            response.status_code,
+            self._error(types.PlaceOrderDefaultError, response.status_code, None),
+        )
 
     def _update_pet(
         self,
@@ -2154,12 +2174,10 @@ class SwaggerPetstoreOpenAPI30:
                 response.status_code,
                 self._error(types.UpdatePet422Error, 422, None),
             )
-        if True:
-            raise UpdatePetApiError(
-                response.status_code,
-                self._error(types.UpdatePetDefaultError, response.status_code, None),
-            )
-        raise UpdatePetApiError(response.status_code, None)
+        raise UpdatePetApiError(
+            response.status_code,
+            self._error(types.UpdatePetDefaultError, response.status_code, None),
+        )
 
     def _update_pet_with_form(
         self,
@@ -2188,14 +2206,12 @@ class SwaggerPetstoreOpenAPI30:
                 response.status_code,
                 self._error(types.UpdatePetWithForm400Error, 400, None),
             )
-        if True:
-            raise UpdatePetWithFormApiError(
-                response.status_code,
-                self._error(
-                    types.UpdatePetWithFormDefaultError, response.status_code, None
-                ),
-            )
-        raise UpdatePetWithFormApiError(response.status_code, None)
+        raise UpdatePetWithFormApiError(
+            response.status_code,
+            self._error(
+                types.UpdatePetWithFormDefaultError, response.status_code, None
+            ),
+        )
 
     def _update_user(
         self,
@@ -2229,12 +2245,10 @@ class SwaggerPetstoreOpenAPI30:
                 response.status_code,
                 self._error(types.UpdateUser404Error, 404, None),
             )
-        if True:
-            raise UpdateUserApiError(
-                response.status_code,
-                self._error(types.UpdateUserDefaultError, response.status_code, None),
-            )
-        raise UpdateUserApiError(response.status_code, None)
+        raise UpdateUserApiError(
+            response.status_code,
+            self._error(types.UpdateUserDefaultError, response.status_code, None),
+        )
 
     def _upload_file(
         self,
@@ -2272,12 +2286,10 @@ class SwaggerPetstoreOpenAPI30:
                 response.status_code,
                 self._error(types.UploadFile404Error, 404, None),
             )
-        if True:
-            raise UploadFileApiError(
-                response.status_code,
-                self._error(types.UploadFileDefaultError, response.status_code, None),
-            )
-        raise UploadFileApiError(response.status_code, None)
+        raise UploadFileApiError(
+            response.status_code,
+            self._error(types.UploadFileDefaultError, response.status_code, None),
+        )
 
 
 class _PetNamespace:

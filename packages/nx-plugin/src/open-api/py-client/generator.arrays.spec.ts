@@ -9,6 +9,7 @@ import {
   createPythonClientVerifier,
   createTree,
   generateAndRead,
+  requestBody,
 } from './generator.utils.spec';
 
 describe('openApiPyClientGenerator - arrays', () => {
@@ -66,9 +67,7 @@ describe('openApiPyClientGenerator - arrays', () => {
     );
     expect(res.ok).toBe(true);
     expect(res.value).toEqual({ processed: 3 });
-    expect(res.calls?.[0]?.body).toEqual(
-      JSON.stringify(['tag1', 'tag2', 'tag3']),
-    );
+    expect(requestBody(res)).toEqual(JSON.stringify(['tag1', 'tag2', 'tag3']));
   });
 
   it('should handle operation which accepts an array of objects', async () => {

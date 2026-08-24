@@ -9,6 +9,9 @@ import {
   createPythonClientVerifier,
   createTree,
   generateAndRead,
+  requestBody,
+  requestHeader,
+  requestUrl,
 } from './generator.utils.spec';
 
 /**
@@ -83,9 +86,9 @@ describe('openApiPyClientGenerator - spec compliance', () => {
       { json: { username: 'alice' } },
     );
     expect(res.ok).toBe(true);
-    const contentType = res.calls?.[0]?.headers['content-type'] ?? '';
+    const contentType = requestHeader(res, 'content-type') ?? '';
     expect(contentType).toMatch(/^application\/x-www-form-urlencoded/);
-    const body = res.calls?.[0]?.body ?? '';
+    const body = requestBody(res) ?? '';
     // URL-encoded pairs, arrays as repeated keys, not JSON.
     expect(body).not.toMatch(/^\s*\{/);
     expect(body).toContain('username=alice');
@@ -130,7 +133,7 @@ describe('openApiPyClientGenerator - spec compliance', () => {
       { status: 204 },
     );
     expect(res.ok).toBe(true);
-    expect(res.calls?.[0]?.body).toBe('username=alice');
+    expect(requestBody(res)).toBe('username=alice');
   });
 
   it('sends a primitive urlencoded body verbatim', async () => {
@@ -165,8 +168,8 @@ describe('openApiPyClientGenerator - spec compliance', () => {
       ['a=1&b=two%20words'],
     );
     expect(res.ok).toBe(true);
-    expect(res.calls?.[0]?.body).toBe('a=1&b=two%20words');
-    expect(res.calls?.[0]?.headers['content-type']).toBe(
+    expect(requestBody(res)).toBe('a=1&b=two%20words');
+    expect(requestHeader(res, 'content-type')).toBe(
       'application/x-www-form-urlencoded',
     );
   });
@@ -312,7 +315,7 @@ describe('openApiPyClientGenerator - spec compliance', () => {
       { json: 'ok' },
     );
     expect(res.ok).toBe(true);
-    const url = decodeURIComponent(res.calls?.[0]?.url ?? '');
+    const url = decodeURIComponent(requestUrl(res));
     // RFC 6570: ;matrixParam=a,b (non-explode) and .x (label)
     expect(url).toContain('/resource/;matrixParam=a,b/.x');
   });
@@ -353,7 +356,7 @@ describe('openApiPyClientGenerator - spec compliance', () => {
       { json: 'ok' },
     );
     expect(res.ok).toBe(true);
-    const url = decodeURIComponent(res.calls?.[0]?.url ?? '');
+    const url = decodeURIComponent(requestUrl(res));
     expect(url).toContain('/resource/;ids=a;ids=b');
   });
 
@@ -397,7 +400,7 @@ describe('openApiPyClientGenerator - spec compliance', () => {
       { json: 'ok' },
     );
     expect(res.ok).toBe(true);
-    const url = res.calls?.[0]?.url ?? '';
+    const url = requestUrl(res);
     // Reserved characters stay literal for `path`; `q` is percent-encoded.
     expect(url).toContain('path=a/b:c,d');
     expect(url).toMatch(/q=x(%20|\+)y/);
@@ -447,7 +450,7 @@ describe('openApiPyClientGenerator - spec compliance', () => {
       { json: 'ok' },
     );
     expect(res.ok).toBe(true);
-    const url = decodeURIComponent(res.calls?.[0]?.url ?? '');
+    const url = decodeURIComponent(requestUrl(res));
     // The whole object is a single JSON-serialised query value.
     expect(url).toContain('filter={"colour":"red"}');
   });
@@ -496,7 +499,7 @@ describe('openApiPyClientGenerator - spec compliance', () => {
       { status: 204 },
     );
     expect(res.ok).toBe(true);
-    const body = res.calls?.[0]?.body ?? '';
+    const body = requestBody(res) ?? '';
     // The metadata part declares its JSON content type inside the multipart body.
     expect(body).toContain('application/json');
     expect(body).toContain('{"name":"x"}');

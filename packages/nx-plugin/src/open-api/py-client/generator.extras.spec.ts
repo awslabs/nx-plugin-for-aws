@@ -9,6 +9,7 @@ import {
   createPythonClientVerifier,
   createTree,
   generateAndRead,
+  requestHeader,
 } from './generator.utils.spec';
 
 describe('openApiPyClientGenerator - deprecated / readOnly / cookies / multi-header', () => {
@@ -116,9 +117,7 @@ describe('openApiPyClientGenerator - deprecated / readOnly / cookies / multi-hea
     );
     expect(res.ok).toBe(true);
     const cookieHeader =
-      res.calls?.[0]?.headers['cookie'] ??
-      res.calls?.[0]?.headers['Cookie'] ??
-      '';
+      requestHeader(res, 'cookie') ?? requestHeader(res, 'Cookie') ?? '';
     expect(cookieHeader).toContain('session=abc123');
   });
 
@@ -159,7 +158,7 @@ describe('openApiPyClientGenerator - deprecated / readOnly / cookies / multi-hea
     expect(res.ok).toBe(true);
     // httpx flattens duplicate headers into a comma-separated string in
     // its dict view — we just verify both values made it onto the wire.
-    const traceHeader = res.calls?.[0]?.headers['x-trace'] ?? '';
+    const traceHeader = requestHeader(res, 'x-trace') ?? '';
     expect(traceHeader).toMatch(/a/);
     expect(traceHeader).toMatch(/b/);
   });

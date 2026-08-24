@@ -343,11 +343,6 @@ export interface RequestShape {
 /** One non-success response bucket in an operation's error taxonomy. */
 export interface ErrorShapeEntry {
   code: number | string;
-  /**
-   * The concrete status codes the bucket covers: `[code]` for a literal code,
-   * the full range for `NXX`, or undefined for `default`.
-   */
-  statusCodes?: number[];
   responseModel: Model;
   /** The generated per-code error class name (e.g. `GetPet404Error`). */
   className?: string;
@@ -403,6 +398,16 @@ export interface Operation {
 
   /** The response model used as the operation's result. */
   result?: Model;
+  /**
+   * Every response that can describe a success, ordered as the templates emit
+   * their checks: concrete codes, then the `2XX` range, then `default`.
+   *
+   * An operation declaring `200` and `2XX` has two: returning only for the
+   * first would make a 201 an error. `default` appears here because it covers
+   * whatever the spec did not enumerate, which includes success codes — but it
+   * describes non-2xx codes too, so it is a success only for a 2xx status.
+   */
+  successResponses?: Model[];
 
   /** The explicit body parameter when the body is not inlined. */
   explicitRequestBodyParameter?: Model;

@@ -4,16 +4,36 @@ const PYTHON_BUILTIN = new Set([
   'datetime.date', 'datetime.datetime',
 ]);
 
+/**
+ * The declared type of a single success response, `None` for an empty body.
+ */
+const successType = (resp) => {
+  const py = resp.type === 'void' ? 'None' : resp.pythonClientType || 'None';
+  // A nullable response body may arrive as JSON null.
+  return resp.isNullable && py !== 'None' ? `Optional[${py}]` : py;
+};
+
+/**
+ * The union of every type the operation can return.
+ *
+ * An operation declaring both `200` and `2XX` returns either body, so the
+ * signature admits both rather than only the first.
+ */
+const resultType = (op) => {
+  const types = [...new Set((op.successResponses || []).map(successType))];
+  if (types.length === 0) return 'None';
+  if (types.length === 1) return types[0];
+  return `Union[${types.join(', ')}]`;
+};
+
 const resultTypeSync = (op) => {
-  if (!op.result || op.result.type === 'void') return op.isStreaming ? 'Iterator[None]' : 'None';
   if (op.isStreaming) {
+    if (!op.result || op.result.type === 'void') return 'Iterator[None]';
     const jsonl = (op.responses || []).find(r => r.isJsonlStreaming);
     if (jsonl && jsonl.itemSchemaModel) return `Iterator[${jsonl.itemSchemaModel.pythonClientType}]`;
     return `Iterator[${op.result.pythonClientType}]`;
   }
-  const py = op.result.pythonClientType || 'None';
-  // A nullable response body may arrive as JSON null.
-  return op.result.isNullable && py !== 'None' ? `Optional[${py}]` : py;
+  return resultType(op);
 };
 
 /**
@@ -40,12 +60,15 @@ const pythonTypeOf = (model) => model.pythonTypeTree ?? { kind: 'builtin', name:
 const isModelClass = (model) =>
   !needsPythonTypeAdapter(pythonTypeOf(model)) && !isPythonAlias(model);
 
+/** Whether a media type carries a JSON payload. */
+const isJsonMediaType = (mediaType) => {
+  const base = (mediaType || '').split(';')[0].trim();
+  return base === 'application/json' || base.endsWith('+json');
+};
+
 /** Whether a response arrives as JSON on the wire. */
 const isJsonWire = (resp) =>
-  (resp.mediaTypes || []).some((m) => {
-    const base = m.split(';')[0].trim();
-    return base === 'application/json' || base.endsWith('+json');
-  });
+  (resp.mediaTypes || []).some(isJsonMediaType);
 
 /**
  * Render the expression that turns an httpx response into the operation's
@@ -136,6 +159,32 @@ const responseStatusCondition = (code) => {
   return `response.status_code == ${code}`;
 };
 
+/** Whether a response is one the operation returns rather than raises for. */
+const isSuccessResponse = (op, resp) =>
+  (op.successResponses || []).some((r) => r.code === resp.code);
+
+/**
+ * Whether one branch always runs, making the trailing raise unreachable.
+ *
+ * Only an error `default` is unconditional: as the success branch it carries a
+ * 2xx check, so a non-2xx status still falls through to the raise below.
+ */
+const hasUnconditionalBranch = (op) =>
+  (op.responses || []).some(
+    (r) => r.code === 'default' && !isSuccessResponse(op, r),
+  );
+
+/**
+ * The status check guarding a response branch, or null when none is needed.
+ *
+ * `default` matches any status the spec did not enumerate, so it needs no check
+ * — except where it is the success branch, which only a 2xx status may take.
+ */
+const branchCondition = (op, resp) => {
+  if (resp.code !== 'default') return responseStatusCondition(resp.code);
+  return isSuccessResponse(op, resp) ? '200 <= response.status_code < 300' : null;
+};
+
 /**
  * Render the error raise expression for a non-success response.
  *
@@ -190,8 +239,12 @@ const signature = (op) => {
 const inputsByKind = (op, kind) =>
   (op.requestShape?.inputs ?? []).filter((k) => k.source.kind === kind);
 
-const pythonClassNameForTag = (tag) =>
-  `_${tag.charAt(0).toUpperCase()}${tag.slice(1)}Namespace`;
+// Derived from the resolved attribute name, which the shared codegen has
+// already made a valid identifier — the raw tag may be any string at all.
+const pythonClassNameForTag = (tag) => {
+  const name = pythonTagNames[tag];
+  return `_${name.charAt(0).toUpperCase()}${name.slice(1)}Namespace`;
+};
 
 // `operationsByTag` keys are already normalised to identifiers by the shared
 // codegen, and `pythonTagNames` maps each to its snake_case attribute name.
@@ -298,7 +351,21 @@ class <%- className %>:
     ) -> str:
         for key, value in path_params.items():
             style, explode = (path_styles or {}).get(key, ("simple", False))
-            values = value if isinstance(value, list) else [value]
+            # An object expands to its key,value members; a list to its items.
+            # Each is encoded on its own so the separators between them stay
+            # literal, as RFC 6570 requires.
+            dumped = self._dump(value)
+            if isinstance(dumped, dict):
+                values = [
+                    part
+                    for k, v in dumped.items()
+                    if v is not None
+                    for part in (k, self._scalar(v))
+                ]
+            elif isinstance(dumped, list):
+                values = list(dumped)
+            else:
+                values = [value]
             if style == "matrix":
                 # RFC 6570 path-style expansion: ;key=a,b (explode: ;key=a;key=b)
                 if explode:
@@ -359,7 +426,20 @@ class <%- className %>:
         if isinstance(value, (datetime.date, datetime.datetime)):
             return value.isoformat()
         dumped = self._dump(value)
-        return dumped if isinstance(dumped, str) else str(dumped)
+        if isinstance(dumped, str):
+            return dumped
+        # RFC 6570 renders a list as its comma-joined members and an object as
+        # comma-joined key,value pairs. Python's own `str` would emit a repr —
+        # `['a', 'b']`, quotes and spaces included.
+        if isinstance(dumped, list):
+            return ",".join(self._scalar(v) for v in dumped)
+        if isinstance(dumped, dict):
+            return ",".join(
+                f"{k},{self._scalar(v)}" for k, v in dumped.items() if v is not None
+            )
+        if dumped is None:
+            return ""
+        return str(dumped)
 
     def _query(self, query_params: dict[str, Any], collection_formats: Optional[dict[str, str]] = None) -> dict[str, Any]:
         out: dict[str, Any] = {}
@@ -424,9 +504,32 @@ class <%- className %>:
         return out
 
     def _cookies(self, cookie_params: dict[str, Any]) -> dict[str, str]:
-        return {
-            k: self._scalar(v) for k, v in cookie_params.items() if v is not None
-        }
+        out: dict[str, str] = {}
+        for key, value in cookie_params.items():
+            if value is None:
+                continue
+            dumped = self._dump(value)
+            # A cookie uses form-style expansion, so a list joins on `,` and an
+            # object on `,` between each key and value. Members are encoded so a
+            # `;` or `,` inside one can't be read as a delimiter, while the
+            # joining commas stay literal.
+            if isinstance(dumped, list):
+                rendered = ",".join(self._cookie_value(v) for v in dumped)
+            elif isinstance(dumped, dict):
+                rendered = ",".join(
+                    self._cookie_value(k) + "," + self._cookie_value(v)
+                    for k, v in dumped.items()
+                    if v is not None
+                )
+            else:
+                rendered = self._cookie_value(value)
+            out[key] = rendered
+        return out
+
+    def _cookie_value(self, value: Any) -> str:
+        # Only the characters a cookie parser treats as structure are escaped,
+        # so a timestamp keeps its colons rather than arriving as %3A.
+        return quote(self._scalar(value), safe="/:?@!$&'()*+[]~")
 
     def _dump(self, value: Any) -> Any:
         if value is None:
@@ -534,6 +637,13 @@ class <%- className %>:
   const bodyIsBinary = wholeBodyInputs.length === 1 && wholeBodyInputs[0].model.type === 'binary';
   const bodyIsMultipart = bodyMediaType === 'multipart/form-data';
   const bodyIsUrlEncoded = bodyMediaType === 'application/x-www-form-urlencoded';
+  // A body is JSON-encoded only when its media type says so. Anything else
+  // (text/plain, application/xml, ...) carries its own encoding, so a primitive
+  // is sent verbatim rather than wrapped in JSON quotes.
+  const bodyIsJsonWire = !bodyMediaType || isJsonMediaType(bodyMediaType);
+  const bodyIsPrimitiveNonJson = !bodyIsJsonWire
+    && wholeBodyInputs.length === 1
+    && wholeBodyInputs[0].model.isPrimitive;
   const contentJsonInputs = [...queryInputs, ...headerInputs, ...cookieInputs].filter(k => k.model.mediaType === 'application/json');
   const styledPathInputs = pathInputs.filter(k => k.model.pathStyle);
   const reservedInputs = queryInputs.filter(k => k.model.allowReserved);
@@ -645,6 +755,13 @@ _%>
         request_kwargs: dict[str, Any] = {"content": None if body is None else str(body)}
         if body is not None and not self._config.omit_content_type_header:
             header_params.setdefault("Content-Type", "<%- bodyMediaType %>")
+<%_ } else if (bodyIsPrimitiveNonJson) { _%>
+        # A primitive under a non-JSON media type is its own encoding, so it is
+        # sent as-is rather than JSON-encoded.
+        body = <%- wholeBodyInputs[0].pythonName %>
+        request_kwargs: dict[str, Any] = {"content": None if body is None else str(body)}
+        if body is not None and not self._config.omit_content_type_header:
+            header_params.setdefault("Content-Type", "<%- bodyMediaType %>")
 <%_ } else { _%>
         body = self._dump(<%- wholeBodyInputs[0].pythonName %>)
         request_kwargs: dict[str, Any] = {"json": body}
@@ -686,13 +803,14 @@ _%>
             **request_kwargs,
         ) as response:
 <%_ op.responses.forEach((resp) => {
-  const isResult = op.result && op.result.code === resp.code;
-  const cond = resp.code === 'default' ? null : responseStatusCondition(resp.code);
+  const isResult = isSuccessResponse(op, resp);
+  const cond = branchCondition(op, resp);
 _%>
+<%_ /* A branch body is indented one level under its status check; an
+       unconditional branch sits at the enclosing level instead. */ _%>
+<%_ const ind = cond ? '                ' : '            '; _%>
 <%_ if (cond) { _%>
             if <%- cond %>:
-<%_ } else { _%>
-            if True:
 <%_ } _%>
 <%_ if (isResult && resp.isJsonlStreaming) { _%>
                 buffer = ""
@@ -711,12 +829,14 @@ _%>
                         yield <%- streamChunkParseExpr(resp, "line") %>
                 return
 <%_ } else { _%>
-                response.read()
-                <%- renderTypedRaise(op, resp) %>
+<%- ind %>response.read()
+<%- ind %><%- renderTypedRaise(op, resp) %>
 <%_ } _%>
 <%_ }); _%>
+<%_ if (!hasUnconditionalBranch(op)) { _%>
             response.read()
             raise <%- op.errorShape.exceptionClassName %>(response.status_code, None)
+<%_ } _%>
 <%_ } else { _%>
 <%_ if (reservedInputs.length === 0) { _%>
         response = self._client.request(
@@ -738,21 +858,18 @@ _%>
             **request_kwargs,
         )
 <%_ op.responses.forEach((resp) => {
-  const isResult = op.result && op.result.code === resp.code;
-  const cond = resp.code === 'default' ? null : responseStatusCondition(resp.code);
+  const isSuccess = isSuccessResponse(op, resp);
+  const cond = branchCondition(op, resp);
 _%>
+<%_ const ind = cond ? '            ' : '        '; _%>
 <%_ if (cond) { _%>
         if <%- cond %>:
-<%_ } else { _%>
-        if True:
 <%_ } _%>
-<%_ if (isResult) { _%>
-            return <%- responseParseExpr(resp) %>
-<%_ } else { _%>
-            <%- renderTypedRaise(op, resp) %>
-<%_ } _%>
+<%- ind %><%- isSuccess ? `return ${responseParseExpr(resp)}` : renderTypedRaise(op, resp) %>
 <%_ }); _%>
+<%_ if (!hasUnconditionalBranch(op)) { _%>
         raise <%- op.errorShape.exceptionClassName %>(response.status_code, None)
+<%_ } _%>
 <%_ } _%>
 <%_ }); _%>
 <%_ // ────── Tag namespaces ────── _%>

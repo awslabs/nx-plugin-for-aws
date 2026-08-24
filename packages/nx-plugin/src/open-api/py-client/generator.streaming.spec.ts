@@ -155,9 +155,11 @@ describe('openApiPyClientGenerator - streaming', () => {
     expect(res.value).toEqual([{ content: 'hello' }, { content: 'world' }]);
   });
 
-  it('should emit AsyncIterator on the async client', async () => {
+  // `AsyncGenerator` rather than `AsyncIterator`: only the former declares
+  // `aclose()`, so a caller who stops early can close the stream type-safely.
+  it('should emit AsyncGenerator on the async client', async () => {
     const { asyncClient } = await generateAndRead(verifier, tree, jsonlSpec);
-    expect(asyncClient).toContain('AsyncIterator[types.Chunk]');
+    expect(asyncClient).toContain('AsyncGenerator[types.Chunk, None]');
   });
 
   // A primitive item schema has no `model_validate_json`, so it goes through a

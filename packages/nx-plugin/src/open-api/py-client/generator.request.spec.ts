@@ -10,6 +10,9 @@ import {
   createPythonClientVerifier,
   createTree,
   generateAndRead,
+  requestBody,
+  requestHeader,
+  requestUrl,
 } from './generator.utils.spec';
 
 describe('openApiPyClientGenerator - requests', () => {
@@ -88,11 +91,11 @@ describe('openApiPyClientGenerator - requests', () => {
     );
     expect(res.ok).toBe(true);
     expect(res.value).toEqual({ result: 'success' });
-    expect(res.calls?.[0]?.url).toContain('/test/test123');
-    expect(res.calls?.[0]?.url).toMatch(/filter=active/);
-    expect(res.calls?.[0]?.url).toMatch(/tags=tag1/);
-    expect(res.calls?.[0]?.url).toMatch(/tags=tag2/);
-    expect(res.calls?.[0]?.headers['x-api-key']).toBe('api-key-123');
+    expect(requestUrl(res)).toContain('/test/test123');
+    expect(requestUrl(res)).toMatch(/filter=active/);
+    expect(requestUrl(res)).toMatch(/tags=tag1/);
+    expect(requestUrl(res)).toMatch(/tags=tag2/);
+    expect(requestHeader(res, 'x-api-key')).toBe('api-key-123');
   });
 
   it('should encode path parameters containing URL-unsafe characters', async () => {
@@ -129,7 +132,7 @@ describe('openApiPyClientGenerator - requests', () => {
       { json: 'ok' },
     );
     expect(res.ok).toBe(true);
-    expect(res.calls?.[0]?.url).toContain('/widget/a%20b%2Fc');
+    expect(requestUrl(res)).toContain('/widget/a%20b%2Fc');
   });
 
   it('should handle operations with simple request bodies and query parameters', async () => {
@@ -187,8 +190,8 @@ describe('openApiPyClientGenerator - requests', () => {
       { json: 'ok' },
     );
     expect(res.ok).toBe(true);
-    expect(res.calls?.[0]?.url).toMatch(/filter=active/);
-    expect(JSON.parse(res.calls?.[0]?.body ?? '{}')).toEqual({ data: 'hello' });
+    expect(requestUrl(res)).toMatch(/filter=active/);
+    expect(JSON.parse(requestBody(res) ?? '{}')).toEqual({ data: 'hello' });
   });
 
   it('async client round-trips the same parameters', async () => {
@@ -261,7 +264,7 @@ describe('openApiPyClientGenerator - requests', () => {
       { json: 'ok' },
     );
     expect(res.ok).toBe(true);
-    const url = decodeURIComponent(res.calls?.[0]?.url ?? '');
+    const url = decodeURIComponent(requestUrl(res));
     expect(url).toMatch(/filter\[colour\]=red/);
     expect(url).toMatch(/filter\[size\]=5/);
   });

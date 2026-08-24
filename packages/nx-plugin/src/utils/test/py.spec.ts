@@ -32,6 +32,12 @@ export interface MockEntry {
   response: MockResponseSpec;
 }
 
+/** One `method` + path template an OpenAPI spec declares. */
+export interface RouteSpec {
+  method: string;
+  path: string;
+}
+
 export interface InvokeOptions {
   module: 'sync' | 'async';
   method: string;
@@ -39,6 +45,12 @@ export interface InvokeOptions {
   kwargs?: Record<string, unknown>;
   stream?: boolean;
   mock?: MockEntry[];
+  /**
+   * The routes the spec declares. Any request not matching one of them fails
+   * the call, so a client that sends the wrong method or URL cannot be masked
+   * by a mock that answers everything.
+   */
+  routes?: RouteSpec[];
   baseUrl?: string;
   clientKwargs?: Record<string, unknown>;
   /** Name of the package directory (default "generated"). */
@@ -272,6 +284,7 @@ export class PythonVerifier {
       kwargs: options.kwargs ?? {},
       stream: !!options.stream,
       mock: options.mock ?? [],
+      routes: options.routes ?? [],
       base_url: options.baseUrl ?? 'http://mock',
       client_kwargs: options.clientKwargs ?? {},
       package: options.packageName ?? 'generated',

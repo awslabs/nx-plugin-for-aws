@@ -72,7 +72,21 @@ class ErrApi:
     ) -> str:
         for key, value in path_params.items():
             style, explode = (path_styles or {}).get(key, ("simple", False))
-            values = value if isinstance(value, list) else [value]
+            # An object expands to its key,value members; a list to its items.
+            # Each is encoded on its own so the separators between them stay
+            # literal, as RFC 6570 requires.
+            dumped = self._dump(value)
+            if isinstance(dumped, dict):
+                values = [
+                    part
+                    for k, v in dumped.items()
+                    if v is not None
+                    for part in (k, self._scalar(v))
+                ]
+            elif isinstance(dumped, list):
+                values = list(dumped)
+            else:
+                values = [value]
             if style == "matrix":
                 # RFC 6570 path-style expansion: ;key=a,b (explode: ;key=a;key=b)
                 if explode:
@@ -117,7 +131,20 @@ class ErrApi:
         if isinstance(value, (datetime.date, datetime.datetime)):
             return value.isoformat()
         dumped = self._dump(value)
-        return dumped if isinstance(dumped, str) else str(dumped)
+        if isinstance(dumped, str):
+            return dumped
+        # RFC 6570 renders a list as its comma-joined members and an object as
+        # comma-joined key,value pairs. Python's own \`str\` would emit a repr —
+        # \`['a', 'b']\`, quotes and spaces included.
+        if isinstance(dumped, list):
+            return ",".join(self._scalar(v) for v in dumped)
+        if isinstance(dumped, dict):
+            return ",".join(
+                f"{k},{self._scalar(v)}" for k, v in dumped.items() if v is not None
+            )
+        if dumped is None:
+            return ""
+        return str(dumped)
 
     def _query(
         self,
@@ -186,7 +213,32 @@ class ErrApi:
         return out
 
     def _cookies(self, cookie_params: dict[str, Any]) -> dict[str, str]:
-        return {k: self._scalar(v) for k, v in cookie_params.items() if v is not None}
+        out: dict[str, str] = {}
+        for key, value in cookie_params.items():
+            if value is None:
+                continue
+            dumped = self._dump(value)
+            # A cookie uses form-style expansion, so a list joins on \`,\` and an
+            # object on \`,\` between each key and value. Members are encoded so a
+            # \`;\` or \`,\` inside one can't be read as a delimiter, while the
+            # joining commas stay literal.
+            if isinstance(dumped, list):
+                rendered = ",".join(self._cookie_value(v) for v in dumped)
+            elif isinstance(dumped, dict):
+                rendered = ",".join(
+                    self._cookie_value(k) + "," + self._cookie_value(v)
+                    for k, v in dumped.items()
+                    if v is not None
+                )
+            else:
+                rendered = self._cookie_value(value)
+            out[key] = rendered
+        return out
+
+    def _cookie_value(self, value: Any) -> str:
+        # Only the characters a cookie parser treats as structure are escaped,
+        # so a timestamp keeps its colons rather than arriving as %3A.
+        return quote(self._scalar(value), safe="/:?@!$&'()*+[]~")
 
     def _dump(self, value: Any) -> Any:
         if value is None:
@@ -269,16 +321,14 @@ class ErrApi:
                     self._error_payload(response),
                 ),
             )
-        if True:
-            raise GetPetApiError(
+        raise GetPetApiError(
+            response.status_code,
+            self._error(
+                types.GetPetDefaultError,
                 response.status_code,
-                self._error(
-                    types.GetPetDefaultError,
-                    response.status_code,
-                    self._error_payload(response),
-                ),
-            )
-        raise GetPetApiError(response.status_code, None)
+                self._error_payload(response),
+            ),
+        )
 "
 `;
 

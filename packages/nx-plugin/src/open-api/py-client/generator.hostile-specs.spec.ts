@@ -343,4 +343,64 @@ describe('openApiPyClientGenerator - hostile specs', () => {
       note: null,
     });
   });
+
+  // snake_case strips everything non-alphanumeric, so a tag or operationId in
+  // another script yields the empty string and a leading digit isn't a valid
+  // identifier. Either would emit a module that doesn't parse.
+  it('emits valid identifiers for names that do not snake_case', async () => {
+    const { client, asyncClient } = await generateAndRead(verifier, tree, {
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/cjk': {
+          get: {
+            operationId: '取得',
+            tags: ['ペット'],
+            responses: { '204': { description: 'No content' } },
+          },
+        },
+        '/num': {
+          get: {
+            operationId: 'numTagOp',
+            tags: ['123-numeric-start'],
+            responses: { '204': { description: 'No content' } },
+          },
+        },
+      },
+    });
+    // Generation would otherwise emit `self.:` / `self.123_numeric_start`.
+    for (const module of [client, asyncClient]) {
+      expect(module).not.toMatch(/self\.\s*:/);
+      expect(module).not.toMatch(/self\.\d/);
+      expect(module).not.toMatch(/def\s*\(/);
+    }
+  });
+
+  it('calls an operation whose name does not snake_case', async () => {
+    await generateAndRead(verifier, tree, {
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/cjk': {
+          get: {
+            operationId: '取得',
+            responses: {
+              '200': {
+                description: 'OK',
+                content: { 'application/json': { schema: { type: 'string' } } },
+              },
+            },
+          },
+        },
+      },
+    });
+    const res = await callGeneratedClient(
+      verifier,
+      'operation_1',
+      {},
+      { json: 'ok' },
+    );
+    expect(res.ok).toBe(true);
+    expect(res.value).toBe('ok');
+  });
 });

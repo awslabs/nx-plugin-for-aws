@@ -229,4 +229,214 @@ describe('openApiPyClientGenerator - responses', () => {
     expect(res.ok).toBe(true);
     expect(res.value).toBeNull();
   });
+
+  // A `2XX` range alongside a concrete code still describes a success, so a 201
+  // must return the range's body rather than raise.
+  describe('success-eligible responses', () => {
+    const rangeSpec: Spec = {
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/x': {
+          get: {
+            operationId: 'get_x',
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      required: ['a'],
+                      properties: { a: { type: 'string' } },
+                    },
+                  },
+                },
+              },
+              '2XX': {
+                description: 'Other success',
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      required: ['b'],
+                      properties: { b: { type: 'string' } },
+                    },
+                  },
+                },
+              },
+              '500': { description: 'Boom' },
+            },
+          },
+        },
+      },
+    };
+
+    it('returns the concrete response for its own code', async () => {
+      await generateAndRead(verifier, tree, rangeSpec);
+      const res = await callGeneratedClient(
+        verifier,
+        'get_x',
+        {},
+        {
+          status: 200,
+          json: { a: 'hello' },
+        },
+      );
+      expect(res.ok).toBe(true);
+      expect(res.value).toEqual({ a: 'hello' });
+    });
+
+    it('returns the 2XX response for a code the range covers', async () => {
+      await generateAndRead(verifier, tree, rangeSpec);
+      const res = await callGeneratedClient(
+        verifier,
+        'get_x',
+        {},
+        {
+          status: 201,
+          json: { b: 'created' },
+        },
+      );
+      expect(res.ok).toBe(true);
+      expect(res.value).toEqual({ b: 'created' });
+    });
+
+    it('still raises for a declared error code', async () => {
+      await generateAndRead(verifier, tree, rangeSpec);
+      const res = await callGeneratedClient(
+        verifier,
+        'get_x',
+        {},
+        {
+          status: 500,
+        },
+      );
+      expect(res.ok).toBe(false);
+      expect(res.exception?.status).toBe(500);
+    });
+
+    // A declared 204 alongside a 200 is a success with an empty body, not an
+    // error.
+    it('returns None for a second concrete success code', async () => {
+      await generateAndRead(verifier, tree, {
+        openapi: '3.0.0',
+        info: { title: 'TestApi', version: '1.0.0' },
+        paths: {
+          '/y': {
+            get: {
+              operationId: 'get_y',
+              responses: {
+                '200': {
+                  description: 'OK',
+                  content: {
+                    'application/json': {
+                      schema: {
+                        type: 'object',
+                        required: ['a'],
+                        properties: { a: { type: 'string' } },
+                      },
+                    },
+                  },
+                },
+                '204': { description: 'No content' },
+              },
+            },
+          },
+        },
+      });
+      const res = await callGeneratedClient(
+        verifier,
+        'get_y',
+        {},
+        {
+          status: 204,
+        },
+      );
+      expect(res.ok).toBe(true);
+      expect(res.value).toBeNull();
+    });
+  });
+
+  // A `default`-only operation must not treat every status as a success: a 500
+  // has to raise rather than be parsed as the declared body.
+  describe('default-only responses', () => {
+    const defaultOnlySpec: Spec = {
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/z': {
+          get: {
+            operationId: 'get_z',
+            responses: {
+              default: {
+                description: 'Whatever',
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      required: ['c'],
+                      properties: { c: { type: 'string' } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    it('returns the body for a 2xx status', async () => {
+      await generateAndRead(verifier, tree, defaultOnlySpec);
+      const res = await callGeneratedClient(
+        verifier,
+        'get_z',
+        {},
+        {
+          status: 200,
+          json: { c: 'ok' },
+        },
+      );
+      expect(res.ok).toBe(true);
+      expect(res.value).toEqual({ c: 'ok' });
+    });
+
+    it('raises for a non-2xx status', async () => {
+      await generateAndRead(verifier, tree, defaultOnlySpec);
+      const res = await callGeneratedClient(
+        verifier,
+        'get_z',
+        {},
+        {
+          status: 500,
+          json: { c: 'boom' },
+        },
+      );
+      expect(res.ok).toBe(false);
+      expect(res.exception?.status).toBe(500);
+    });
+  });
+
+  // `if True:` is never a status check: a generated branch either carries a real
+  // condition or is the sole unconditional error fallback.
+  it('never guards a response branch with `if True:`', async () => {
+    const { client, asyncClient } = await generateAndRead(verifier, tree, {
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/a': {
+          get: {
+            operationId: 'getA',
+            responses: {
+              '200': { description: 'OK' },
+              default: { description: 'Err' },
+            },
+          },
+        },
+      },
+    });
+    expect(client).not.toContain('if True:');
+    expect(asyncClient).not.toContain('if True:');
+  });
 });

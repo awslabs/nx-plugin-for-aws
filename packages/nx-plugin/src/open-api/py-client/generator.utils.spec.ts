@@ -9,6 +9,7 @@ import {
   type MockEntry,
   type MockResponseSpec,
   PythonVerifier,
+  type RouteSpec,
 } from '../../utils/test/py.spec';
 import { PY_CLIENT_VERIFIER_DEPENDENCIES } from '../../utils/test/python-dependencies';
 import type { Spec } from '../utils/types';
@@ -36,6 +37,37 @@ export const createPythonClientVerifier = (): PythonVerifier => {
  * doesn't actually dial anywhere so this is decorative.
  */
 export const baseUrl = 'https://example.com';
+
+/**
+ * The routes of the spec most recently generated, so every invocation can be
+ * checked against what the spec declares.
+ *
+ * A mock that answered any request would make an assertion about the response
+ * pass even for a client that requested the wrong method or URL, so the routes
+ * are enforced by the worker independently of mock matching. Recorded here
+ * rather than passed per call: the check should apply to every test by default,
+ * including ones written later.
+ */
+let currentRoutes: RouteSpec[] = [];
+
+/** The `method` + path template of every operation the spec declares. */
+const routesOf = (spec: Spec): RouteSpec[] =>
+  Object.entries(spec.paths ?? {}).flatMap(([path, pathItem]) =>
+    Object.keys(pathItem ?? {})
+      .filter((key) => HTTP_METHODS.has(key.toLowerCase()))
+      .map((method) => ({ method: method.toUpperCase(), path })),
+  );
+
+const HTTP_METHODS = new Set([
+  'get',
+  'put',
+  'post',
+  'delete',
+  'options',
+  'head',
+  'patch',
+  'trace',
+]);
 
 /**
  * Default output directory used by every test.  Matches the ts-client layout
@@ -74,6 +106,7 @@ export const generateAndRead = async (
   init: string;
 }> => {
   tree.write('openapi.json', JSON.stringify(spec));
+  currentRoutes = routesOf(spec);
   await openApiPyClientGenerator(tree, {
     openApiSpecPath: 'openapi.json',
     outputPath,
@@ -115,6 +148,7 @@ export const callGeneratedClient = async (
     args,
     kwargs,
     mock: normaliseMock(mock),
+    routes: currentRoutes,
     clientKwargs: configKwargs,
   });
 
@@ -132,6 +166,7 @@ export const callGeneratedClientAsync = async (
     args,
     kwargs,
     mock: normaliseMock(mock),
+    routes: currentRoutes,
   });
 
 /** Call a streaming generator method and collect all yielded items. */
@@ -147,6 +182,7 @@ export const callGeneratedClientStreaming = async (
     stream: true,
     kwargs,
     mock: normaliseMock(mock),
+    routes: currentRoutes,
   });
 
 export const callGeneratedClientStreamingAsync = async (
@@ -161,6 +197,7 @@ export const callGeneratedClientStreamingAsync = async (
     stream: true,
     kwargs,
     mock: normaliseMock(mock),
+    routes: currentRoutes,
   });
 
 /** Accept either a single response spec (catch-all) or an array of mocks. */
@@ -206,6 +243,25 @@ export const expectRequestTarget = (
   expect(call.method).toBe(method);
   expect(new URL(call.url).pathname).toBe(path);
 };
+
+/** The full URL of the single request the client made. */
+export const requestUrl = (result: InvokeResult): string =>
+  expectSingleRequest(result).url;
+
+/** The raw request body of the single request the client made. */
+export const requestBody = (result: InvokeResult): string | null =>
+  expectSingleRequest(result).body;
+
+/**
+ * A header of the single request the client made, or `undefined` when it was
+ * not sent. Goes through {@link expectSingleRequest} so a negative assertion
+ * distinguishes "header omitted" from "no request made at all".
+ */
+export const requestHeader = (
+  result: InvokeResult,
+  name: string,
+): string | undefined =>
+  expectSingleRequest(result).headers[name.toLowerCase()];
 
 /** The parsed JSON request body of the single request the client made. */
 export const requestJsonBody = (result: InvokeResult): unknown => {

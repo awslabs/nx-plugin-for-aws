@@ -256,4 +256,81 @@ describe('openApiPyClientGenerator - request wire format', () => {
     expect(cookie).toContain('flag=true');
     expect(cookie).toContain('at=2026-04-18T10:00:00');
   });
+
+  // A container in a cookie, header or path segment must expand per RFC 6570.
+  // Python's own `str` would emit a repr — `['a', 'b']`, quotes and spaces
+  // included — which no server parses.
+  describe('containers outside the query string', () => {
+    const containerSpec: Spec = {
+      openapi: '3.0.3',
+      info: { title: 'WireApi', version: '1.0.0' },
+      paths: {
+        '/ctr/{obj}': {
+          get: {
+            operationId: 'containers',
+            parameters: [
+              {
+                name: 'tags',
+                in: 'cookie',
+                schema: { type: 'array', items: { type: 'string' } },
+              },
+              {
+                name: 'x-ctx',
+                in: 'header',
+                schema: {
+                  type: 'object',
+                  properties: { a: { type: 'string' }, b: { type: 'string' } },
+                },
+              },
+              {
+                name: 'obj',
+                in: 'path',
+                required: true,
+                schema: {
+                  type: 'object',
+                  properties: {
+                    x: { type: 'integer' },
+                    y: { type: 'integer' },
+                  },
+                },
+              },
+            ],
+            responses: { '204': { description: 'No content' } },
+          },
+        },
+      },
+    };
+
+    it('expands a list cookie, object header and object path parameter', async () => {
+      await generateAndRead(verifier, tree, containerSpec);
+      const res = await callGeneratedClient(
+        verifier,
+        'containers',
+        { tags: ['a', 'b'], x_ctx: { a: '1', b: '2' }, obj: { x: 1, y: 2 } },
+        { status: 204 },
+      );
+      expect(res.ok).toBe(true);
+      const call = expectSingleRequest(res);
+      // No Python repr anywhere on the wire.
+      expect(JSON.stringify(call)).not.toMatch(/\['|'\]|\{'/);
+      expect(call.headers['cookie']).toBe('tags=a,b');
+      expect(call.headers['x-ctx']).toBe('a,1,b,2');
+      expect(new URL(call.url).pathname).toBe('/ctr/x,1,y,2');
+    });
+
+    it('percent-encodes a cookie value containing a delimiter', async () => {
+      await generateAndRead(verifier, tree, containerSpec);
+      const res = await callGeneratedClient(
+        verifier,
+        'containers',
+        { tags: ['a;b', 'c,d'], obj: { x: 1 } },
+        { status: 204 },
+      );
+      expect(res.ok).toBe(true);
+      // A raw `;` or `,` would be read as a cookie delimiter by the server.
+      expect(expectSingleRequest(res).headers['cookie']).toBe(
+        'tags=a%3Bb,c%2Cd',
+      );
+    });
+  });
 });

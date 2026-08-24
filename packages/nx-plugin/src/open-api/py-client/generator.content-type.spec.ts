@@ -9,6 +9,8 @@ import {
   createPythonClientVerifier,
   createTree,
   generateAndRead,
+  requestBody,
+  requestHeader,
 } from './generator.utils.spec';
 
 describe('openApiPyClientGenerator - content types', () => {
@@ -58,7 +60,7 @@ describe('openApiPyClientGenerator - content types', () => {
       { status: 204 },
     );
     expect(res.ok).toBe(true);
-    expect(res.calls?.[0]?.headers['content-type'] ?? '').toMatch(
+    expect(requestHeader(res, 'content-type') ?? '').toMatch(
       /application\/json/,
     );
   });
@@ -77,7 +79,7 @@ describe('openApiPyClientGenerator - content types', () => {
       { data: 'hi' },
       { status: 204 },
     );
-    expect(sent.calls?.[0]?.headers['content-type'] ?? '').toBe(
+    expect(requestHeader(sent, 'content-type') ?? '').toBe(
       'application/vnd.example+json',
     );
 
@@ -89,7 +91,7 @@ describe('openApiPyClientGenerator - content types', () => {
       clientKwargs: { omit_content_type_header: true },
     });
     expect(omitted.ok).toBe(true);
-    expect(omitted.calls?.[0]?.headers['content-type'] ?? '').not.toContain(
+    expect(requestHeader(omitted, 'content-type') ?? '').not.toContain(
       'vnd.example',
     );
   });
@@ -107,10 +109,78 @@ describe('openApiPyClientGenerator - content types', () => {
       { status: 204 },
     );
     expect(res.ok).toBe(true);
-    expect(res.calls?.[0]?.headers['content-type']).toBe(
+    expect(requestHeader(res, 'content-type')).toBe(
       'application/vnd.example+json',
     );
   });
+
+  // A primitive under a non-JSON media type carries its own encoding, so
+  // JSON-encoding it would put `"hello world"` — quotes included — on the wire
+  // under a `text/plain` header.
+  it.each([
+    ['text/plain', 'hello world'],
+    ['text/csv', 'a,b,c'],
+    ['application/x-yaml', 'key: value'],
+  ])('sends a primitive %s body verbatim', async (mediaType, value) => {
+    await generateAndRead(verifier, tree, {
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/send': {
+          post: {
+            operationId: 'send',
+            requestBody: {
+              required: true,
+              content: { [mediaType]: { schema: { type: 'string' } } },
+            },
+            responses: { '204': { description: 'No content' } },
+          },
+        },
+      },
+    });
+    const res = await callGeneratedClient(
+      verifier,
+      'send',
+      {},
+      { status: 204 },
+      [value],
+    );
+    expect(res.ok).toBe(true);
+    expect(requestBody(res)).toBe(value);
+    expect(requestHeader(res, 'content-type')).toBe(mediaType);
+  });
+
+  // The JSON media types keep JSON encoding, so a string body stays quoted.
+  it.each(['application/json', 'application/vnd.example+json'])(
+    'JSON-encodes a primitive %s body',
+    async (mediaType) => {
+      await generateAndRead(verifier, tree, {
+        openapi: '3.0.0',
+        info: { title: 'TestApi', version: '1.0.0' },
+        paths: {
+          '/send': {
+            post: {
+              operationId: 'send',
+              requestBody: {
+                required: true,
+                content: { [mediaType]: { schema: { type: 'string' } } },
+              },
+              responses: { '204': { description: 'No content' } },
+            },
+          },
+        },
+      });
+      const res = await callGeneratedClient(
+        verifier,
+        'send',
+        {},
+        { status: 204 },
+        ['hello'],
+      );
+      expect(res.ok).toBe(true);
+      expect(requestBody(res)).toBe('"hello"');
+    },
+  );
 
   it('routes multipart/form-data bodies through httpx `files=`/`data=`', async () => {
     // Regression: multipart bodies used to emit `body: types.unknown`
@@ -164,11 +234,11 @@ describe('openApiPyClientGenerator - content types', () => {
       { status: 204 },
     );
     expect(res.ok).toBe(true);
-    const contentType = res.calls?.[0]?.headers['content-type'] ?? '';
+    const contentType = requestHeader(res, 'content-type') ?? '';
     expect(contentType).toMatch(
       /^(multipart\/form-data; boundary=|application\/x-www-form-urlencoded)/,
     );
-    const body = res.calls?.[0]?.body ?? '';
+    const body = requestBody(res) ?? '';
     expect(body).not.toMatch(/^\s*\{/); // not JSON
   });
 });

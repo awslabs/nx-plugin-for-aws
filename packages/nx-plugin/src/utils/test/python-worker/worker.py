@@ -11,6 +11,7 @@ import io
 import json
 import os
 import py_compile
+import re
 import shutil
 import subprocess
 import sys
@@ -27,6 +28,48 @@ import pydantic
 # ─── Mock httpx transport ────────────────────────────────────────────────
 class NoMockMatched(Exception):
     """Raised when a request matches no mock entry, so the test fails loudly."""
+
+
+class OffSpecRequest(Exception):
+    """Raised when a request targets no route the OpenAPI spec declares.
+
+    A mock that matched any request would let a client send the wrong method or
+    URL and still satisfy every assertion about what came back, so the routes
+    the spec declares are checked independently of mock matching.
+    """
+
+
+def _wire_path(request: httpx.Request) -> str:
+    """The request path as sent, keeping percent-encoding intact.
+
+    `request.url.path` decodes, which would turn an encoded `%2F` inside a path
+    parameter back into a separator and split one segment into two.
+    """
+    return request.url.raw_path.decode("ascii").split("?", 1)[0]
+
+
+class _RouteSpec:
+    """One `method` + path template the spec declares, as a regex."""
+
+    def __init__(self, method: str, path_template: str) -> None:
+        self.method = method.upper()
+        self.path_template = path_template
+        # A path parameter matches any single segment, whatever style it uses:
+        # `simple` renders a bare value, `matrix` a `;name=` prefix and `label` a
+        # `.` prefix, all within the one segment the template declares.
+        pattern = "".join(
+            "[^/]*" if part.startswith("{") and part.endswith("}") else re.escape(part)
+            for part in re.split(r"(\{[^}]*\})", path_template)
+        )
+        self.pattern = re.compile(f"^{pattern}$")
+
+    def matches(self, request: httpx.Request) -> bool:
+        return request.method.upper() == self.method and bool(
+            self.pattern.match(_wire_path(request))
+        )
+
+    def __str__(self) -> str:
+        return f"{self.method} {self.path_template}"
 
 
 class _MockMatch:
@@ -56,8 +99,9 @@ class _MockMatch:
 class _MockTransport(httpx.BaseTransport, httpx.AsyncBaseTransport):
     """Deterministic transport for both sync and async httpx clients."""
 
-    def __init__(self, entries: list[dict]) -> None:
+    def __init__(self, entries: list[dict], routes: list[dict] | None = None) -> None:
         self.entries = [_MockMatch(e) for e in entries]
+        self.routes = [_RouteSpec(r["method"], r["path"]) for r in routes or []]
         self.calls: list[dict] = []
 
     def _record(self, request: httpx.Request) -> None:
@@ -99,6 +143,13 @@ class _MockTransport(httpx.BaseTransport, httpx.AsyncBaseTransport):
 
     def _match(self, request: httpx.Request) -> httpx.Response:
         self._record(request)
+        # Checked before the mocks: a client requesting a route the spec never
+        # declared is wrong regardless of which mock would have answered it.
+        if self.routes and not any(route.matches(request) for route in self.routes):
+            raise OffSpecRequest(
+                f"{request.method} {_wire_path(request)} matches no route the spec "
+                f"declares: {', '.join(str(r) for r in self.routes)}"
+            )
         for entry in self.entries:
             if entry.matches(request):
                 entry.used = True
@@ -333,8 +384,9 @@ def _build_mock_client(
     client_kwargs: dict | None = None,
     auth: str | None = None,
     event_hook_header: str | None = None,
+    routes: list[dict] | None = None,
 ) -> tuple[Any, _MockTransport]:
-    transport = _MockTransport(entries)
+    transport = _MockTransport(entries, routes)
     kwargs: dict[str, Any] = {
         "transport": transport,
         "base_url": "http://mock",
@@ -382,6 +434,7 @@ def handle_invoke(req: dict) -> dict:
         req.get("httpx_client_kwargs") or {},
         req.get("auth"),
         req.get("event_hook_header"),
+        req.get("routes") or [],
     )
     client = client_cls(
         config_cls(
