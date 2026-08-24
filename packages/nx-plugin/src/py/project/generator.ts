@@ -15,32 +15,32 @@ import {
 import {
   addLicenseCheckToLintTarget,
   ensurePythonLicenseCollector,
-} from '../../license/config';
+} from '../../license/config.js';
 import {
   addPyDependencies,
   addTsDependencies,
-} from '../../utils/add-dependencies';
-import { declareDependencies } from '../../utils/declared-dependencies';
-import { updateGitIgnore } from '../../utils/git';
-import { installDependencies } from '../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { normalizeDistributionName, toSnakeCase } from '../../utils/names';
-import { getNpmScope } from '../../utils/npm-scope';
+} from '../../utils/add-dependencies.js';
+import { declareDependencies } from '../../utils/declared-dependencies.js';
+import { updateGitIgnore } from '../../utils/git.js';
+import { installDependencies } from '../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
+import { normalizeDistributionName, toSnakeCase } from '../../utils/names.js';
+import { getNpmScope } from '../../utils/npm-scope.js';
 import {
   addDependencyToTargetIfNotPresent,
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   projectExists,
-} from '../../utils/nx';
-import type { UVPyprojectToml } from '../../utils/nxlv-python';
+} from '../../utils/nx.js';
+import type { UVPyprojectToml } from '../../utils/nxlv-python.js';
 import {
   migrateToSharedVenvGenerator,
   uvProjectGenerator,
-} from '../../utils/nxlv-python';
-import { sortObjectKeys } from '../../utils/object';
-import { updateToml } from '../../utils/toml';
-import { withVersions } from '../../utils/versions';
+} from '../../utils/nxlv-python.js';
+import { sortObjectKeys } from '../../utils/object.js';
+import { updateToml } from '../../utils/toml.js';
+import { withVersions } from '../../utils/versions.js';
 import type { PyProjectGeneratorSchema } from './schema';
 
 export const DEPENDENCIES = declareDependencies()({

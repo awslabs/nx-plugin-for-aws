@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from '../utils/test';
-import { addTargetToLocalDev, type LocalDevOptions } from './local-dev';
+import { createTreeUsingTsSolutionSetup } from '../utils/test.js';
+import { addTargetToLocalDev, type LocalDevOptions } from './local-dev.js';
 
 describe('dev', () => {
   let tree: Tree;

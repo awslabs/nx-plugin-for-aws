@@ -6,9 +6,9 @@ import { generateFiles, joinPathFragments, type Tree } from '@nx/devkit';
 import { existsSync, readFileSync } from 'fs';
 import { createJiti } from 'jiti';
 import { join } from 'path';
-import { applyGritQL, matchGritQL } from '../ast';
-import { formatFilesInSubtree } from '../format';
-import type { AwsNxPluginConfig } from '.';
+import { applyGritQL, matchGritQL } from '../ast.js';
+import { formatFilesInSubtree } from '../format.js';
+import type { AwsNxPluginConfig } from './index.js';
 
 export const AWS_NX_PLUGIN_CONFIG_FILE_NAME = 'aws-nx-plugin.config.mts';
 

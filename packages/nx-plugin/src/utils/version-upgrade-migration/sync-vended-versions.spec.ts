@@ -13,16 +13,16 @@ import yaml from 'js-yaml';
 import {
   METRICS_ASPECT_FILE_PATH,
   TERRAFORM_METRICS_FILE_PATH,
-} from '../metrics';
-import { getPackageVersion } from '../nx';
-import { createTreeUsingTsSolutionSetup } from '../test';
+} from '../metrics.js';
+import { getPackageVersion } from '../nx.js';
+import { createTreeUsingTsSolutionSetup } from '../test.js';
 import {
   NX_PACKAGES,
   PY_VERSIONS,
   TERRAFORM_VERSIONS,
   TS_VERSIONS,
-} from '../versions';
-import { syncVendedVersions } from './sync-vended-versions';
+} from '../versions.js';
+import { syncVendedVersions } from './sync-vended-versions.js';
 
 // Versions the plugin vends, read from the manifest so the tests track it.
 const VENDED_ZOD = TS_VERSIONS.zod;

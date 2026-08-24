@@ -4,8 +4,8 @@
  */
 import type { Tree } from '@nx/devkit';
 import type { OpenAPIV3 } from 'openapi-types';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { parseOpenApiSpec } from './parse';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import { parseOpenApiSpec } from './parse.js';
 
 describe('openapi parse utils', () => {
   describe('parseOpenApiSpec', () => {

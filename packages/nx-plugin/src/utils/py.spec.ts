@@ -6,12 +6,15 @@
 import { parse, stringify } from '@iarna/toml';
 import type { Tree } from '@nx/devkit';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
-import { type DeclaredPy, declareDependencies } from './declared-dependencies';
-import type { UVPyprojectToml } from './nxlv-python';
+import {
+  type DeclaredPy,
+  declareDependencies,
+} from './declared-dependencies.js';
+import type { UVPyprojectToml } from './nxlv-python.js';
 import {
   addDependenciesToPyProjectToml,
   addWorkspaceDependencyToPyProject,
-} from './py';
+} from './py.js';
 
 const declaration = declareDependencies()({
   py: [

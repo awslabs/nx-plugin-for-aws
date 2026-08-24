@@ -4,16 +4,16 @@
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import PackageJson from '../../package.json' with { type: 'json' };
-import { listGenerators } from '../utils/nx';
-import { addToExistingProjectTool } from './tools/add-to-existing-project';
-import { addCreateWorkspaceCommandTool } from './tools/create-workspace-command';
+import { listGenerators } from '../utils/nx.js';
+import { addToExistingProjectTool } from './tools/add-to-existing-project.js';
+import { addCreateWorkspaceCommandTool } from './tools/create-workspace-command.js';
 import {
   addGeneralGuidanceTool,
   TOOL_SELECTION_GUIDE,
-} from './tools/general-guidance';
-import { addGeneratorGuideTool } from './tools/generator-guide';
-import { addListGeneratorsTool } from './tools/list-generators';
-import { addUpgradeWorkspaceTool } from './tools/upgrade-workspace';
+} from './tools/general-guidance.js';
+import { addGeneratorGuideTool } from './tools/generator-guide.js';
+import { addListGeneratorsTool } from './tools/list-generators.js';
+import { addUpgradeWorkspaceTool } from './tools/upgrade-workspace.js';
 
 /**
  * Create the MCP Server

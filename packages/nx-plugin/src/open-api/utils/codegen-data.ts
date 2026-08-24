@@ -13,14 +13,14 @@ import {
   snakeCase,
   toClassName,
   upperFirst,
-} from '../../utils/names';
+} from '../../utils/names.js';
 import {
   toPythonName,
   toPythonType,
   toTypeScriptModelName,
   toTypeScriptName,
   toTypeScriptType,
-} from './codegen-data/languages';
+} from './codegen-data/languages.js';
 import {
   COLLECTION_TYPES,
   COMPOSED_SCHEMA_TYPES,
@@ -38,8 +38,8 @@ import {
   STREAMING_CONTENT_TYPES,
   VENDOR_EXTENSIONS,
   type VendorExtensions,
-} from './codegen-data/types';
-import { normaliseOpenApiSpecForCodeGen } from './normalise';
+} from './codegen-data/types.js';
+import { normaliseOpenApiSpecForCodeGen } from './normalise.js';
 import {
   buildClientData,
   buildInlineModel,
@@ -49,9 +49,9 @@ import {
   getSpecPathParameters,
   linkModel,
   specParameterKey,
-} from './parser';
-import { isRef, resolveIfRef, splitRef } from './refs';
-import type { OpenApiSchema, OpenApiSchemaOrRef, Spec } from './types';
+} from './parser.js';
+import { isRef, resolveIfRef, splitRef } from './refs.js';
+import type { OpenApiSchema, OpenApiSchemaOrRef, Spec } from './types.js';
 
 /**
  * Build the data structure used to generate code from an OpenAPI spec.

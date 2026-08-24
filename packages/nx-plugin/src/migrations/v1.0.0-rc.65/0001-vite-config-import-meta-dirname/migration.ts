@@ -8,8 +8,8 @@ import {
   type MigrationReturnObject,
   type Tree,
 } from '@nx/devkit';
-import { applyGritQL } from '../../../utils/ast';
-import { formatFilesInSubtree } from '../../../utils/format';
+import { applyGritQL } from '../../../utils/ast.js';
+import { formatFilesInSubtree } from '../../../utils/format.js';
 
 /**
  * Resolve the vended vite and vitest config paths from `import.meta.dirname`

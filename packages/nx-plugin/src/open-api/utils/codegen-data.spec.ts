@@ -2,8 +2,8 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { buildOpenApiCodeGenData } from './codegen-data';
-import type { Spec } from './types';
+import { buildOpenApiCodeGenData } from './codegen-data.js';
+import type { Spec } from './types.js';
 
 describe('openapi codegen data utils', () => {
   describe('buildOpenApiCodeGenData', () => {

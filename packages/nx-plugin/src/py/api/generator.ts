@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import { getGeneratorInfo, type NxGeneratorInfo } from '../../utils/nx';
-import { pyFastApiProjectGenerator } from '../fast-api/generator';
+import { getGeneratorInfo, type NxGeneratorInfo } from '../../utils/nx.js';
+import { pyFastApiProjectGenerator } from '../fast-api/generator.js';
 import type { PyApiGeneratorSchema } from './schema';
 
 export const PY_API_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(

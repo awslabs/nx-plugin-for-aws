@@ -8,7 +8,7 @@ import {
   type MigrationReturnObject,
   type Tree,
 } from '@nx/devkit';
-import { PY_AGENT_GENERATOR_INFO } from '../../../py/agent/generator';
+import { PY_AGENT_GENERATOR_INFO } from '../../../py/agent/generator.js';
 import {
   addPythonDestructuredImport,
   applyGritQL,
@@ -16,9 +16,9 @@ import {
   GRIT_INSERT_PLACEHOLDER,
   insertViaGritQL,
   matchGritQL,
-} from '../../../utils/ast';
-import { formatFilesInSubtree } from '../../../utils/format';
-import type { ComponentMetadata } from '../../../utils/nx';
+} from '../../../utils/ast.js';
+import { formatFilesInSubtree } from '../../../utils/format.js';
+import type { ComponentMetadata } from '../../../utils/nx.js';
 
 /**
  * Forward a Strands py#agent's hooks to the AG-UI adapter.

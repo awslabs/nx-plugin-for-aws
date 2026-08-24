@@ -4,13 +4,13 @@
  */
 import { generateFiles, type Tree } from '@nx/devkit';
 import path from 'path';
-import { formatFilesInSubtree } from '../../utils/format';
-import { esmVars } from '../../utils/module-format';
+import { formatFilesInSubtree } from '../../utils/format.js';
+import { esmVars } from '../../utils/module-format.js';
 import {
   buildOpenApiCodeGenerationData,
   generateOpenApiTsClient,
-} from '../ts-client/generator';
-import type { CodeGenData } from '../utils/codegen-data/types';
+} from '../ts-client/generator.js';
+import type { CodeGenData } from '../utils/codegen-data/types.js';
 import type { OpenApiTsHooksGeneratorSchema } from './schema';
 
 /**

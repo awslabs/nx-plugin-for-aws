@@ -11,13 +11,13 @@ import {
   applicableDependencies,
   type DependencyDeclaration,
   type DependencyMetadata,
-} from './declared-dependencies';
-import { addDependenciesToPackageJson } from './dependencies';
+} from './declared-dependencies.js';
+import { addDependenciesToPackageJson } from './dependencies.js';
 import {
   addDependenciesToDependencyGroupInPyProjectToml,
   addDependenciesToPyProjectToml,
-} from './py';
-import { TS_VERSIONS } from './versions';
+} from './py.js';
+import { TS_VERSIONS } from './versions.js';
 
 /**
  * Add the dependencies a declaration says apply, so the declaration is the only

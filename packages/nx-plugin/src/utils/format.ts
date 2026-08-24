@@ -6,9 +6,9 @@
 import { Biome } from '@biomejs/js-api/nodejs';
 import { getProjects, type Tree } from '@nx/devkit';
 import path from 'path';
-import { type RuffOptions, ruffFixAndFormat } from './ruff';
-import { tryReadToml } from './toml';
-import { TS_VERSIONS } from './versions';
+import { type RuffOptions, ruffFixAndFormat } from './ruff.js';
+import { tryReadToml } from './toml.js';
+import { TS_VERSIONS } from './versions.js';
 
 /**
  * The biome.json vended into a new workspace. The pnpm catalog resolver is only

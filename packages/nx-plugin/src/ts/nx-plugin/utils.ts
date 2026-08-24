@@ -14,14 +14,14 @@ import {
   type DependencyDeclaration,
   forDependencies,
   type MustDeclare,
-} from '../../utils/declared-dependencies';
-import { addDependenciesToPackageJson } from '../../utils/dependencies';
-import { isEsmWorkspace } from '../../utils/module-format';
+} from '../../utils/declared-dependencies.js';
+import { addDependenciesToPackageJson } from '../../utils/dependencies.js';
+import { isEsmWorkspace } from '../../utils/module-format.js';
 import {
   nxPluginSelfDependency,
   readProjectConfigurationUnqualified,
-} from '../../utils/nx';
-import { type ITsDepVersion, withVersions } from '../../utils/versions';
+} from '../../utils/nx.js';
+import { type ITsDepVersion, withVersions } from '../../utils/versions.js';
 
 /** Dependencies a caller must declare to configure an Nx Plugin project. */
 export const NX_PLUGIN_DEPENDENCIES = [

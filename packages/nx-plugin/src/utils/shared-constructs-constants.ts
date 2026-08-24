@@ -2,8 +2,8 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import type { DeclaredTsDependency } from './declared-dependencies';
-import type { ITsDepVersion } from './versions';
+import type { DeclaredTsDependency } from './declared-dependencies.js';
+import type { ITsDepVersion } from './versions.js';
 
 export const PACKAGES_DIR = 'packages';
 export const SHARED_CONSTRUCTS_NAME = 'common-constructs';

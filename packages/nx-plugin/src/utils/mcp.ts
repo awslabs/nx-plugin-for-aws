@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { readJson, type Tree, writeJson } from '@nx/devkit';
-import { updateToml } from './toml';
+import { updateToml } from './toml.js';
 
 /**
  * Name of the Nx Plugin for AWS MCP server, used as the key in each agent's config.

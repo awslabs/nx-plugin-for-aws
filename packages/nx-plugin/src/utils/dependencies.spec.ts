@@ -9,8 +9,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   addDependenciesToPackageJson,
   resetCatalogSupportCache,
-} from './dependencies';
-import { createTreeUsingTsSolutionSetup } from './test';
+} from './dependencies.js';
+import { createTreeUsingTsSolutionSetup } from './test.js';
 
 vi.mock('@nx/devkit', async (importOriginal) => {
   const original = await importOriginal<typeof devkit>();

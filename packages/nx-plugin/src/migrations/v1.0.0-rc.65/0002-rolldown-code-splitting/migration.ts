@@ -8,8 +8,8 @@ import {
   type MigrationReturnObject,
   type Tree,
 } from '@nx/devkit';
-import { applyGritQL } from '../../../utils/ast';
-import { formatFilesInSubtree } from '../../../utils/format';
+import { applyGritQL } from '../../../utils/ast.js';
+import { formatFilesInSubtree } from '../../../utils/format.js';
 
 /**
  * Move generated rolldown configs onto `codeSplitting: false`.

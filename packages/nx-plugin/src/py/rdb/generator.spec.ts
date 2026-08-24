@@ -3,20 +3,20 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import { resolveContainers } from '../../utils/containers';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
-import { readProjectConfigurationUnqualified } from '../../utils/nx';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import { resolveContainers } from '../../utils/containers.js';
+import { expectHasMetricTags } from '../../utils/metrics.spec.js';
+import { readProjectConfigurationUnqualified } from '../../utils/nx.js';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs.js';
 import {
   createTreeUsingTsSolutionSetup,
   snapshotTreeDir,
-} from '../../utils/test';
-import { CONTAINER_VERSIONS, withPyVersions } from '../../utils/versions';
+} from '../../utils/test.js';
+import { CONTAINER_VERSIONS, withPyVersions } from '../../utils/versions.js';
 import {
   DEPENDENCIES,
   PY_RDB_GENERATOR_INFO,
   pyRdbGenerator,
-} from './generator';
+} from './generator.js';
 
 vi.mock('../../utils/containers', () => ({
   resolveContainers: vi.fn(),

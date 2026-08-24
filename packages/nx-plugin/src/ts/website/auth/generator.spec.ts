@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import { tsReactWebsiteGenerator } from '../../react-website/app/generator';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
+import { tsReactWebsiteGenerator } from '../../react-website/app/generator.js';
 import {
   TS_WEBSITE_AUTH_GENERATOR_INFO,
   tsWebsiteAuthGenerator,
-} from './generator';
+} from './generator.js';
 import type { TsWebsiteAuthGeneratorSchema } from './schema';
 
 describe('ts#website#auth generator', () => {

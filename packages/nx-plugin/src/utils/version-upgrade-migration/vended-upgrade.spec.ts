@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { describe, expect, it } from 'vitest';
-import { isVendedUpgrade } from './vended-upgrade';
+import { isVendedUpgrade } from './vended-upgrade.js';
 
 describe('isVendedUpgrade', () => {
   it('should upgrade an exact version below the vended one', () => {

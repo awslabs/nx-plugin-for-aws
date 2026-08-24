@@ -9,7 +9,7 @@
  * `renderGeneratorInfo` for list-generators) and the pipeline both render
  * identical command strings without either re-implementing the other.
  */
-import { buildPackageManagerExecCommand } from '../utils/commands';
+import { buildPackageManagerExecCommand } from '../utils/commands.js';
 
 /**
  * Build an nx command, optionally prefixed by the package manager's exec

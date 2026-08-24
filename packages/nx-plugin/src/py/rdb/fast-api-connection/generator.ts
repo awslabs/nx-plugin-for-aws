@@ -10,19 +10,19 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { formatFilesInSubtree } from '../../../utils/format';
-import { installDependencies } from '../../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
-import { toClassName, toSnakeCase } from '../../../utils/names';
-import { getNpmScope } from '../../../utils/npm-scope';
+import { formatFilesInSubtree } from '../../../utils/format.js';
+import { installDependencies } from '../../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics.js';
+import { toClassName, toSnakeCase } from '../../../utils/names.js';
+import { getNpmScope } from '../../../utils/npm-scope.js';
 import {
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
-} from '../../../utils/nx';
-import { addWorkspaceDependencyToPyProject } from '../../../utils/py';
+} from '../../../utils/nx.js';
+import { addWorkspaceDependencyToPyProject } from '../../../utils/py.js';
 import type { PyRdbFastApiConnectionGeneratorSchema } from './schema';
 
 export const PY_RDB_FAST_API_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =

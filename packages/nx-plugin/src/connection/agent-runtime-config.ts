@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { joinPathFragments, type Tree } from '@nx/devkit';
-import { applyGritQL, matchGritQL } from '../utils/ast';
+import { applyGritQL, matchGritQL } from '../utils/ast.js';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
-} from '../utils/shared-constructs-constants';
+} from '../utils/shared-constructs-constants.js';
 
 const CONNECTION_TF_MODULE_NAME =
   'add_agent_runtime_to_connection_runtime_config';

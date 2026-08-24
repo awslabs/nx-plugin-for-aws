@@ -7,9 +7,9 @@ import {
   AWS_NX_PLUGIN_CONFIG_FILE_NAME,
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
-} from './config/utils';
-import { resolveContainers } from './containers';
-import { createTreeUsingTsSolutionSetup } from './test';
+} from './config/utils.js';
+import { resolveContainers } from './containers.js';
+import { createTreeUsingTsSolutionSetup } from './test.js';
 
 describe('containers utils', () => {
   let tree: Tree;

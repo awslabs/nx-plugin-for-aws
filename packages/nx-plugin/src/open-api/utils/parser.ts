@@ -23,13 +23,13 @@ import {
   type Operation,
   PRIMITIVE_TYPES,
   type Service,
-} from './codegen-data/types';
-import { isRef, resolveIfRef, splitRef } from './refs';
+} from './codegen-data/types.js';
+import { isRef, resolveIfRef, splitRef } from './refs.js';
 import type {
   OpenApiSchemaOrRef,
   OpenApiSchema as Schema,
   Spec,
-} from './types';
+} from './types.js';
 
 /**
  * OpenAPI primitive `type` values mapped to the internal model `type`.

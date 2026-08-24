@@ -10,45 +10,45 @@ import {
 } from '@nx/devkit';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { addTsDependencies } from '../../../utils/add-dependencies';
+import { addTsDependencies } from '../../../utils/add-dependencies.js';
 import {
   addDestructuredImport,
   addSingleImport,
   applyGritQL,
-} from '../../../utils/ast';
-import { addHookResultToRouterProviderContext } from '../../../utils/ast/website';
+} from '../../../utils/ast.js';
+import { addHookResultToRouterProviderContext } from '../../../utils/ast/website.js';
 import {
   declareDependencies,
   ownedElsewhere,
-} from '../../../utils/declared-dependencies';
-import { formatFilesInSubtree } from '../../../utils/format';
-import { resolveIac } from '../../../utils/iac';
+} from '../../../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../../../utils/format.js';
+import { resolveIac } from '../../../utils/iac.js';
 import {
   addIdentityInfra,
   IDENTITY_CONSTRUCTS_PY_DEPENDENCIES,
-} from '../../../utils/identity-constructs/identity-constructs';
-import { installDependencies } from '../../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
-import { getNpmScope } from '../../../utils/npm-scope';
+} from '../../../utils/identity-constructs/identity-constructs.js';
+import { installDependencies } from '../../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics.js';
+import { getNpmScope } from '../../../utils/npm-scope.js';
 import {
   addComponentGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
-} from '../../../utils/nx';
-import { toProjectRelativePath } from '../../../utils/paths';
+} from '../../../utils/nx.js';
+import { toProjectRelativePath } from '../../../utils/paths.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../../utils/shared-constructs';
-import { runtimeConfigGenerator } from '../runtime-config/generator';
+} from '../../../utils/shared-constructs.js';
+import { runtimeConfigGenerator } from '../runtime-config/generator.js';
 import type { TsReactWebsiteAuthGeneratorSchema } from './schema';
 import {
   addCloudscapeAuthMenu,
   addNoneAuthMenu,
   addShadcnAuthMenu,
   deriveCognitoDomainPrefix,
-} from './utils';
+} from './utils.js';
 
 const readGritPattern = (name: string): string =>
   readFileSync(

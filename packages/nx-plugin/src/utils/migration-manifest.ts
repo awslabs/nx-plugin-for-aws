@@ -2,13 +2,13 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import type { MigrationsJson } from './migration-versions';
+import type { MigrationsJson } from './migration-versions.js';
 import {
   isValidVersion,
   LATEST_MIGRATIONS_DIR,
   migrationKey,
-} from './migration-versions';
-import { sortObjectKeys } from './object';
+} from './migration-versions.js';
+import { sortObjectKeys } from './object.js';
 
 /**
  * `migrations.json` is assembled from the plugin's source rather than committed,

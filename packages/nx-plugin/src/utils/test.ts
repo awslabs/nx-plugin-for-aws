@@ -12,7 +12,7 @@ import {
 } from '@nx/devkit';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
 import { expect } from 'vitest';
-import { getDefaultBiomeConfig } from './format';
+import { getDefaultBiomeConfig } from './format.js';
 
 /**
  * Create a workspace tree configured so that nx's `isUsingTsSolutionSetup`

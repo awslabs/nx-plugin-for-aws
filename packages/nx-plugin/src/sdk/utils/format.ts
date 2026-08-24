@@ -6,4 +6,4 @@
 export {
   type FormatFilesInSubtreeOptions,
   formatFilesInSubtree,
-} from '../../utils/format';
+} from '../../utils/format.js';

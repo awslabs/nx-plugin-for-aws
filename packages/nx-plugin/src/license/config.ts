@@ -13,15 +13,15 @@ import {
   AWS_NX_PLUGIN_CONFIG_FILE_NAME,
   readAwsNxPluginConfig,
   updateAwsNxPluginConfig,
-} from '../utils/config/utils';
-import { formatFilesInSubtree } from '../utils/format';
-import { addDependencyToTargetIfNotPresent } from '../utils/nx';
+} from '../utils/config/utils.js';
+import { formatFilesInSubtree } from '../utils/format.js';
+import { addDependencyToTargetIfNotPresent } from '../utils/nx.js';
 import type {
   CommentSyntax,
   LicenseConfig,
   LicenseSourceConfig,
-} from './config-types';
-import type { DependencyCheckException } from './dependency-check/types';
+} from './config-types.js';
+import type { DependencyCheckException } from './dependency-check/types.js';
 import type { SPDXLicenseIdentifier } from './schema';
 
 /**
@@ -175,7 +175,7 @@ const prependLicenseProperty = async (
   property: string,
 ): Promise<boolean> => {
   const { insertViaGritQL, GRIT_INSERT_PLACEHOLDER } = await import(
-    '../utils/ast'
+    '../utils/ast.js'
   );
 
   // Non-empty license object: insert before the first existing property.
@@ -203,7 +203,7 @@ const prependLicenseProperty = async (
  */
 const hasDependenciesBlock = async (tree: Tree): Promise<boolean> => {
   if (!tree.exists(AWS_NX_PLUGIN_CONFIG_FILE_NAME)) return false;
-  const { matchGritQL } = await import('../utils/ast');
+  const { matchGritQL } = await import('../utils/ast.js');
   return matchGritQL(
     tree,
     AWS_NX_PLUGIN_CONFIG_FILE_NAME,
@@ -264,7 +264,7 @@ export const updateLicenseCheckTargetInputs = async (
  */
 const hasPythonCollector = async (tree: Tree): Promise<boolean> => {
   if (!tree.exists(AWS_NX_PLUGIN_CONFIG_FILE_NAME)) return false;
-  const { matchGritQL } = await import('../utils/ast');
+  const { matchGritQL } = await import('../utils/ast.js');
   return matchGritQL(tree, AWS_NX_PLUGIN_CONFIG_FILE_NAME, '`pythonCollector`');
 };
 
@@ -338,7 +338,7 @@ export const ensureDependencyCheckBlock = async (
 ): Promise<void> => {
   if (!tree.exists(AWS_NX_PLUGIN_CONFIG_FILE_NAME)) return;
 
-  const { addDestructuredImport } = await import('../utils/ast');
+  const { addDestructuredImport } = await import('../utils/ast.js');
 
   if (await hasDependenciesBlock(tree)) {
     return;
@@ -388,7 +388,7 @@ export const ensureLicenseExceptions = async (
   if (!tree.exists(AWS_NX_PLUGIN_CONFIG_FILE_NAME)) return;
 
   const { insertViaGritQL, GRIT_INSERT_PLACEHOLDER } = await import(
-    '../utils/ast'
+    '../utils/ast.js'
   );
 
   if (!(await hasDependenciesBlock(tree))) {
@@ -429,7 +429,7 @@ export const removeLicenseExceptions = async (
 ): Promise<void> => {
   if (!tree.exists(AWS_NX_PLUGIN_CONFIG_FILE_NAME)) return;
 
-  const { applyGritQL } = await import('../utils/ast');
+  const { applyGritQL } = await import('../utils/ast.js');
 
   let modified = false;
   for (const pkg of packages) {
@@ -465,7 +465,7 @@ export const ensurePythonLicenseCollector = async (
   if (!tree.exists(AWS_NX_PLUGIN_CONFIG_FILE_NAME)) return;
 
   const { addDestructuredImport, insertViaGritQL, GRIT_INSERT_PLACEHOLDER } =
-    await import('../utils/ast');
+    await import('../utils/ast.js');
 
   if (!(await hasDependenciesBlock(tree))) {
     return;
@@ -593,7 +593,7 @@ export const writeLicenseConfig = async (
   tree: Tree,
   source: LicenseSourceConfig,
 ) => {
-  const { captureGritQL } = await import('../utils/ast');
+  const { captureGritQL } = await import('../utils/ast.js');
 
   // Capture the existing `dependencies: { ... }` block before overwriting the
   // license value, so we can re-attach it afterwards. It's managed by the

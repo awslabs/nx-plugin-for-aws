@@ -11,7 +11,7 @@ import {
   toDotNotation,
   toKebabCase,
   toSnakeCase,
-} from './names';
+} from './names.js';
 
 describe('names utils', () => {
   describe('toClassName', () => {

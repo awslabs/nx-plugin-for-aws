@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { IacOption } from '../../utils/iac';
+import { IacOption } from '../../utils/iac.js';
 import { TsProjectGeneratorSchema } from '../lib/schema';
 
 export interface TsApiGeneratorSchema {

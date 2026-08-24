@@ -7,11 +7,11 @@ import {
   type Tree,
   visitNotIgnoredFiles,
 } from '@nx/devkit';
-import { formatFilesInSubtree } from '../../../utils/format';
+import { formatFilesInSubtree } from '../../../utils/format.js';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
-} from '../../../utils/shared-constructs-constants';
+} from '../../../utils/shared-constructs-constants.js';
 
 /**
  * Replace the legacy angle-bracket FunctionProps type assertion with the modern as syntax in generated API constructs

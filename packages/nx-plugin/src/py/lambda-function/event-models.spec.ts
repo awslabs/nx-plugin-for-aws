@@ -5,7 +5,7 @@
 
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { eventModuleFor } from './generator';
+import { eventModuleFor } from './generator.js';
 
 /**
  * The handler template interpolates the chosen event model straight into an

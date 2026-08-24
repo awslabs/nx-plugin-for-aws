@@ -7,8 +7,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Tree } from '@nx/devkit';
 import GeneratorsJson from '../../generators.json' with { type: 'json' };
-import { agentcoreGatewayGenerator } from '../sdk/agentcore-gateway';
-import { connectionGenerator } from '../sdk/connection';
+import { agentcoreGatewayGenerator } from '../sdk/agentcore-gateway.js';
+import { connectionGenerator } from '../sdk/connection.js';
 import {
   pyAgentGenerator,
   pyApiGenerator,
@@ -16,7 +16,7 @@ import {
   pyMcpServerGenerator,
   pyProjectGenerator,
   pyRdbGenerator,
-} from '../sdk/py';
+} from '../sdk/py.js';
 import {
   tsAgentGenerator,
   tsApiGenerator,
@@ -25,20 +25,20 @@ import {
   tsProjectGenerator,
   tsRdbGenerator,
   tsWebsiteGenerator,
-} from '../sdk/ts';
+} from '../sdk/ts.js';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
-} from '../utils/config/utils';
-import { toSnakeCase } from '../utils/names';
-import { getNpmScope } from '../utils/npm-scope';
-import { createTreeUsingTsSolutionSetup } from '../utils/test';
+} from '../utils/config/utils.js';
+import { toSnakeCase } from '../utils/names.js';
+import { getNpmScope } from '../utils/npm-scope.js';
+import { createTreeUsingTsSolutionSetup } from '../utils/test.js';
 import {
   CONNECTION_CONSTRAINTS,
   type ConnectionConstraint,
-} from './scaffold-catalog';
-import { nodeSchemaResolver, SCAFFOLD_RECIPES } from './schema-resolver';
-import { SUPPORTED_CONNECTIONS } from './supported-connections';
+} from './scaffold-catalog.js';
+import { nodeSchemaResolver, SCAFFOLD_RECIPES } from './schema-resolver.js';
+import { SUPPORTED_CONNECTIONS } from './supported-connections.js';
 
 /**
  * The docs graph builder promises that a graph it accepts is a graph that

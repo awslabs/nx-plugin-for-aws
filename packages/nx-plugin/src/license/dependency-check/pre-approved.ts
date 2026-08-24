@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import type { AllowlistEntry } from './types';
+import type { AllowlistEntry } from './types.js';
 
 export const PRE_APPROVED_LICENSES: AllowlistEntry[] = [
   {

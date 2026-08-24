@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { logger } from '@nx/devkit';
-import { smithyCliCommand, warnIfSmithyMissing } from './smithy';
-import { MISE_VERSIONS, TS_VERSIONS } from './versions';
+import { smithyCliCommand, warnIfSmithyMissing } from './smithy.js';
+import { MISE_VERSIONS, TS_VERSIONS } from './versions.js';
 
 /**
  * The Windows behaviour, which CI cannot exercise from a Linux runner: `mise`

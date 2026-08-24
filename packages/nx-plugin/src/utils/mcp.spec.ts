@@ -7,7 +7,7 @@ import TOML from '@iarna/toml';
 import { readJson, type Tree, writeJson } from '@nx/devkit';
 import { createTree } from '@nx/devkit/testing';
 import { describe, expect, it } from 'vitest';
-import { configureMcpServers, NX_PLUGIN_MCP_SERVER_NAME } from './mcp';
+import { configureMcpServers, NX_PLUGIN_MCP_SERVER_NAME } from './mcp.js';
 
 describe('mcp utils', () => {
   describe('configureMcpServers', () => {

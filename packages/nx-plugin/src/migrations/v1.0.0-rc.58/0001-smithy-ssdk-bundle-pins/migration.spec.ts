@@ -5,9 +5,9 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { addProjectConfiguration, type Tree } from '@nx/devkit';
-import { smithyProjectGenerator } from '../../../smithy/project/generator';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import migration from './migration';
+import { smithyProjectGenerator } from '../../../smithy/project/generator.js';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
+import migration from './migration.js';
 
 const BUILD_DOCKERFILE = 'test-api/build.Dockerfile';
 

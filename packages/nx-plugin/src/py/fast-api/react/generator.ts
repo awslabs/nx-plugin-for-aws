@@ -6,20 +6,20 @@ import { joinPathFragments, type Tree } from '@nx/devkit';
 import {
   addOpenApiReactClient,
   OPEN_API_REACT_DEPENDENCIES,
-} from '../../../utils/connection/open-api/react';
-import { declareDependencies } from '../../../utils/declared-dependencies';
-import { formatFilesInSubtree } from '../../../utils/format';
-import { installDependencies } from '../../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
-import { toClassName } from '../../../utils/names';
+} from '../../../utils/connection/open-api/react.js';
+import { declareDependencies } from '../../../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../../../utils/format.js';
+import { installDependencies } from '../../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics.js';
+import { toClassName } from '../../../utils/names.js';
 import {
   addComponentGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
-} from '../../../utils/nx';
-import { toProjectRelativePath } from '../../../utils/paths';
-import { addOpenApiGeneration } from './open-api';
+} from '../../../utils/nx.js';
+import { toProjectRelativePath } from '../../../utils/paths.js';
+import { addOpenApiGeneration } from './open-api.js';
 import type { FastApiReactGeneratorSchema } from './schema';
 
 export const DEPENDENCIES = declareDependencies()({

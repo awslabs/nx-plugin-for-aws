@@ -4,5 +4,5 @@
  */
 
 // AgentCore Gateway Generator
-export { agentcoreGatewayGenerator } from '../agentcore-gateway/generator';
+export { agentcoreGatewayGenerator } from '../agentcore-gateway/generator.js';
 export type { AgentcoreGatewayGeneratorSchema } from '../agentcore-gateway/schema';

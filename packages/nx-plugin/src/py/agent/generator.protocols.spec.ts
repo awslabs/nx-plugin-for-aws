@@ -7,9 +7,9 @@ import { addProjectConfiguration, type Tree } from '@nx/devkit';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
-} from '../../utils/config/utils';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { PY_AGENT_GENERATOR_INFO, pyAgentGenerator } from './generator';
+} from '../../utils/config/utils.js';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import { PY_AGENT_GENERATOR_INFO, pyAgentGenerator } from './generator.js';
 
 describe('py#agent generator', () => {
   let tree: Tree;

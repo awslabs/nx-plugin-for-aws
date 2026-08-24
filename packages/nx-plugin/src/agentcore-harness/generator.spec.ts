@@ -7,15 +7,18 @@ import yaml from 'js-yaml';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
-} from '../utils/config/utils';
-import { expectHasMetricTags } from '../utils/metrics.spec';
-import { createTreeUsingTsSolutionSetup, snapshotTreeDir } from '../utils/test';
-import { TS_VERSIONS } from '../utils/versions';
+} from '../utils/config/utils.js';
+import { expectHasMetricTags } from '../utils/metrics.spec.js';
+import {
+  createTreeUsingTsSolutionSetup,
+  snapshotTreeDir,
+} from '../utils/test.js';
+import { TS_VERSIONS } from '../utils/versions.js';
 import {
   AGENTCORE_HARNESS_GENERATOR_INFO,
   agentcoreHarnessGenerator,
   readAgentCoreHarnessMetadata,
-} from './generator';
+} from './generator.js';
 import type { AgentcoreHarnessGeneratorSchema } from './schema';
 import harnessSchema from './schema.json' with { type: 'json' };
 

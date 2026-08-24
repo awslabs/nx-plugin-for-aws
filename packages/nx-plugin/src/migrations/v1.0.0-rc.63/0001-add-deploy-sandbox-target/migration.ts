@@ -9,11 +9,11 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { INFRA_APP_GENERATOR_INFO } from '../../../infra/app/generator';
-import { captureGritQLVariable } from '../../../utils/ast';
-import { formatFilesInSubtree } from '../../../utils/format';
-import { normalizeTargetKeyOrder } from '../../../utils/nx';
-import { sortObjectKeys } from '../../../utils/object';
+import { INFRA_APP_GENERATOR_INFO } from '../../../infra/app/generator.js';
+import { captureGritQLVariable } from '../../../utils/ast.js';
+import { formatFilesInSubtree } from '../../../utils/format.js';
+import { normalizeTargetKeyOrder } from '../../../utils/nx.js';
+import { sortObjectKeys } from '../../../utils/object.js';
 
 /**
  * CDK infrastructure projects gained a `deploy-sandbox` target, which deploys the

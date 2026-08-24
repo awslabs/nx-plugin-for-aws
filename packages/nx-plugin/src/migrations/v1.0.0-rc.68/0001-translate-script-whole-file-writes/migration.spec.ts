@@ -5,9 +5,9 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { addProjectConfiguration, type Tree, updateJson } from '@nx/devkit';
-import { TS_ASTRO_DOCS_GENERATOR_INFO } from '../../../ts/astro-docs/generator';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import migration from './migration';
+import { TS_ASTRO_DOCS_GENERATOR_INFO } from '../../../ts/astro-docs/generator.js';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
+import migration from './migration.js';
 
 const SCRIPT = 'docs/scripts/translate.ts';
 

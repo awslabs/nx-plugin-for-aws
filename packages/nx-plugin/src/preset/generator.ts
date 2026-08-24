@@ -15,14 +15,14 @@ import { readFileSync } from 'fs';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
-} from '../utils/config/utils';
-import { declareDependencies } from '../utils/declared-dependencies';
-import { addDependenciesToPackageJson } from '../utils/dependencies';
-import { formatFilesInSubtree } from '../utils/format';
-import { applyWorkspaceInit, INIT_DEPENDENCIES } from '../utils/init';
-import { installDependencies } from '../utils/install';
-import { getGeneratorInfo, type NxGeneratorInfo } from '../utils/nx';
-import { withVersions } from '../utils/versions';
+} from '../utils/config/utils.js';
+import { declareDependencies } from '../utils/declared-dependencies.js';
+import { addDependenciesToPackageJson } from '../utils/dependencies.js';
+import { formatFilesInSubtree } from '../utils/format.js';
+import { applyWorkspaceInit, INIT_DEPENDENCIES } from '../utils/init.js';
+import { installDependencies } from '../utils/install.js';
+import { getGeneratorInfo, type NxGeneratorInfo } from '../utils/nx.js';
+import { withVersions } from '../utils/versions.js';
 import type { PresetGeneratorSchema } from './schema';
 
 export const DEPENDENCIES = declareDependencies()({

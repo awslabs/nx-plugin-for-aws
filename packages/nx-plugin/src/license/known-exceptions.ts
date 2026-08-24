@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import type { DependencyCheckException } from './dependency-check/types';
+import type { DependencyCheckException } from './dependency-check/types.js';
 
 export const AG_UI_LANGGRAPH_EXCEPTIONS: DependencyCheckException[] = [
   {

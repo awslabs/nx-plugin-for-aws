@@ -5,9 +5,12 @@
 import { readJson, readNxJson, type Tree } from '@nx/devkit';
 import yaml from 'js-yaml';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { SYNC_GENERATOR_NAME as TS_SYNC_GENERATOR_NAME } from '../ts/sync/generator';
-import { createTreeUsingTsSolutionSetup, snapshotTreeDir } from '../utils/test';
-import { isAmazonian, presetGenerator } from './generator';
+import { SYNC_GENERATOR_NAME as TS_SYNC_GENERATOR_NAME } from '../ts/sync/generator.js';
+import {
+  createTreeUsingTsSolutionSetup,
+  snapshotTreeDir,
+} from '../utils/test.js';
+import { isAmazonian, presetGenerator } from './generator.js';
 
 const NX_TYPESCRIPT_SYNC_GENERATOR = '@nx/js:typescript-sync';
 
@@ -26,7 +29,7 @@ vi.mock('child_process', async (importOriginal) => {
 });
 
 import { execSync } from 'child_process';
-import { readAwsNxPluginConfig } from '../utils/config/utils';
+import { readAwsNxPluginConfig } from '../utils/config/utils.js';
 
 const mockExecSync = execSync as ReturnType<typeof vi.fn>;
 

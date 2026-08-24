@@ -10,7 +10,7 @@ import {
   onlyWhen,
   ownedDependencyEntries,
   ownedElsewhere,
-} from './declared-dependencies';
+} from './declared-dependencies.js';
 
 interface AgentMetadata {
   readonly protocol: string;

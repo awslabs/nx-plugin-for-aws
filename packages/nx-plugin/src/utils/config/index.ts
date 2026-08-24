@@ -2,13 +2,13 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import type { LicenseConfig } from '../../license/config-types';
-import type { ContainersConfig } from '../containers';
-import type { IacConfig } from '../iac';
+import type { LicenseConfig } from '../../license/config-types.js';
+import type { ContainersConfig } from '../containers.js';
+import type { IacConfig } from '../iac.js';
 
-export * from '../../license/config-types';
-export type { Containers, ContainersConfig } from '../containers';
-export type { Iac, IacConfig } from '../iac';
+export * from '../../license/config-types.js';
+export type { Containers, ContainersConfig } from '../containers.js';
+export type { Iac, IacConfig } from '../iac.js';
 
 /**
  * Configuration for how generators manage dependencies via the package manager

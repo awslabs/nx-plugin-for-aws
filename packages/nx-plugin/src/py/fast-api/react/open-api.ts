@@ -10,8 +10,8 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { snakeCase } from '../../../utils/names';
-import { sortObjectKeys } from '../../../utils/object';
+import { snakeCase } from '../../../utils/names.js';
+import { sortObjectKeys } from '../../../utils/object.js';
 
 export interface AddOpenApiGenerationOptions {
   project: ProjectConfiguration;

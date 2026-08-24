@@ -5,19 +5,19 @@
 
 import type { Tree } from '@nx/devkit';
 import * as devkit from '@nx/devkit';
-import { declareDependencies } from '../../utils/declared-dependencies';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
-import { readProjectConfigurationUnqualified } from '../../utils/nx';
+import { declareDependencies } from '../../utils/declared-dependencies.js';
+import { expectHasMetricTags } from '../../utils/metrics.spec.js';
+import { readProjectConfigurationUnqualified } from '../../utils/nx.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../utils/shared-constructs';
+} from '../../utils/shared-constructs.js';
 import {
   createTreeUsingTsSolutionSetup,
   snapshotTreeDir,
-} from '../../utils/test';
-import { TS_VERSIONS } from '../../utils/versions';
-import { TS_RDB_GENERATOR_INFO, tsRdbGenerator } from './generator';
+} from '../../utils/test.js';
+import { TS_VERSIONS } from '../../utils/versions.js';
+import { TS_RDB_GENERATOR_INFO, tsRdbGenerator } from './generator.js';
 
 const sharedConstructsDeclaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],

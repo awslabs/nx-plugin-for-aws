@@ -12,18 +12,18 @@ import {
   addDestructuredImport,
   applyGritQL,
   matchGritQL,
-} from '../../../utils/ast';
-import { formatFilesInSubtree } from '../../../utils/format';
-import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
-import { pascalCase } from '../../../utils/names';
+} from '../../../utils/ast.js';
+import { formatFilesInSubtree } from '../../../utils/format.js';
+import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics.js';
+import { pascalCase } from '../../../utils/names.js';
 import {
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
-} from '../../../utils/nx';
-import { toProjectRelativePath } from '../../../utils/paths';
+} from '../../../utils/nx.js';
+import { toProjectRelativePath } from '../../../utils/paths.js';
 import type { TsRdbSmithyConnectionGeneratorSchema } from './schema';
 
 export const TS_RDB_SMITHY_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =

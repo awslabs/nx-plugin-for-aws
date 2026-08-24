@@ -3,20 +3,20 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { type Tree, updateJson } from '@nx/devkit';
-import { tsReactWebsiteGenerator } from '../../../ts/react-website/app/generator';
-import { matchGritQL } from '../../../utils/ast';
-import { declareDependencies } from '../../../utils/declared-dependencies';
-import { expectHasMetricTags } from '../../../utils/metrics.spec';
+import { tsReactWebsiteGenerator } from '../../../ts/react-website/app/generator.js';
+import { matchGritQL } from '../../../utils/ast.js';
+import { declareDependencies } from '../../../utils/declared-dependencies.js';
+import { expectHasMetricTags } from '../../../utils/metrics.spec.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../../utils/shared-constructs';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import { pyFastApiProjectGenerator } from '../generator';
+} from '../../../utils/shared-constructs.js';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
+import { pyFastApiProjectGenerator } from '../generator.js';
 import {
   FAST_API_REACT_GENERATOR_INFO,
   fastApiReactGenerator,
-} from './generator';
+} from './generator.js';
 
 const sharedConstructsDeclaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],

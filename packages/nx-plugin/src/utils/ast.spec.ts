@@ -15,7 +15,7 @@ import {
   applyGritQL,
   hasExportDeclaration,
   matchGritQL,
-} from './ast';
+} from './ast.js';
 
 describe('ast utils', () => {
   let tree: Tree;

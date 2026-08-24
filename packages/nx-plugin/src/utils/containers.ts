@@ -7,7 +7,7 @@ import { execSync } from 'child_process';
 import {
   AWS_NX_PLUGIN_CONFIG_FILE_NAME,
   readAwsNxPluginConfig,
-} from './config/utils';
+} from './config/utils.js';
 
 export const CONTAINER_ENGINES = ['docker', 'finch'] as const;
 

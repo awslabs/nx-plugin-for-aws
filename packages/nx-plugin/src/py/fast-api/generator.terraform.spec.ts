@@ -4,8 +4,8 @@
  */
 
 import type { Tree } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { pyFastApiProjectGenerator } from './generator';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import { pyFastApiProjectGenerator } from './generator.js';
 
 describe('fastapi project generator', () => {
   let tree: Tree;

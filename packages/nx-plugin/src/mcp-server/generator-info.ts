@@ -5,23 +5,23 @@
 
 import fs from 'fs';
 import path from 'path';
-import type { NxGeneratorInfo } from '../utils/generators';
-import { kebabCase } from '../utils/names';
-import { parseMdx, postProcessGuideWithRemark } from './guide-pipeline';
+import type { NxGeneratorInfo } from '../utils/generators.js';
+import { kebabCase } from '../utils/names.js';
+import { parseMdx, postProcessGuideWithRemark } from './guide-pipeline.js';
 import {
   buildNxCommand,
   renderGeneratorCommand,
   renderSchema,
-} from './guide-render';
-import { collectFilterableKeysFromJsx, extractFrontmatter } from './mdx-ast';
-import { evaluatePredicate } from './option-filter';
+} from './guide-render.js';
+import { collectFilterableKeysFromJsx, extractFrontmatter } from './mdx-ast.js';
+import { evaluatePredicate } from './option-filter.js';
 import {
   filterableOptionsFromSchema,
   type GeneratorSchema,
-} from './schema-registry';
+} from './schema-registry.js';
 
 // Re-export so existing callers of `generator-info` continue working.
-export { buildNxCommand } from './guide-render';
+export { buildNxCommand } from './guide-render.js';
 
 /**
  * Render summary information about a generator
@@ -44,7 +44,7 @@ ${renderGeneratorCommand(info.id, schema, packageManager)}
 `;
 };
 
-export type FilterableOption = import('./schema-registry').FilterableOption;
+export type FilterableOption = import('./schema-registry.js').FilterableOption;
 
 /**
  * Enum properties from the generator's JSON schema — the options a user

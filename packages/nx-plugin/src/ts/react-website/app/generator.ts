@@ -15,50 +15,50 @@ import {
 } from '@nx/devkit';
 import { applicationGenerator } from '@nx/react';
 import { relative, sep } from 'path';
-import { addTsDependencies } from '../../../utils/add-dependencies';
+import { addTsDependencies } from '../../../utils/add-dependencies.js';
 import {
   addDestructuredImport,
   addSingleImport,
   appendToArrayViaGritQL,
   applyGritQL,
-} from '../../../utils/ast';
+} from '../../../utils/ast.js';
 import {
   declareDependencies,
   ownedElsewhere,
-} from '../../../utils/declared-dependencies';
-import { formatFilesInSubtree } from '../../../utils/format';
-import { resolveIac } from '../../../utils/iac';
-import { installDependencies } from '../../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
-import { kebabCase, toClassName, toKebabCase } from '../../../utils/names';
-import { getNpmScopePrefix } from '../../../utils/npm-scope';
+} from '../../../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../../../utils/format.js';
+import { resolveIac } from '../../../utils/iac.js';
+import { installDependencies } from '../../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics.js';
+import { kebabCase, toClassName, toKebabCase } from '../../../utils/names.js';
+import { getNpmScopePrefix } from '../../../utils/npm-scope.js';
 import {
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
-} from '../../../utils/nx';
-import { sortObjectKeys } from '../../../utils/object';
-import { getRelativePathToRoot } from '../../../utils/paths';
-import { getPackageManagerDisplayCommands } from '../../../utils/pkg-manager';
+} from '../../../utils/nx.js';
+import { sortObjectKeys } from '../../../utils/object.js';
+import { getRelativePathToRoot } from '../../../utils/paths.js';
+import { getPackageManagerDisplayCommands } from '../../../utils/pkg-manager.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../../utils/shared-constructs';
+} from '../../../utils/shared-constructs.js';
 import {
   type IacMetadata,
   PACKAGES_DIR,
   SHARED_SHADCN_DIR,
-} from '../../../utils/shared-constructs-constants';
+} from '../../../utils/shared-constructs-constants.js';
 import {
   SHADCN_DEPENDENCIES,
   sharedShadcnGenerator,
-} from '../../../utils/shared-shadcn';
+} from '../../../utils/shared-shadcn.js';
 import {
   addWebsiteInfra,
   WEBSITE_CONSTRUCTS_PY_DEPENDENCIES,
-} from '../../../utils/website-constructs/website-constructs';
-import { configureTsProject } from '../../lib/ts-project-utils';
-import { VITEST_DEPENDENCIES } from '../../lib/vitest';
+} from '../../../utils/website-constructs/website-constructs.js';
+import { configureTsProject } from '../../lib/ts-project-utils.js';
+import { VITEST_DEPENDENCIES } from '../../lib/vitest.js';
 // typescript factory imports removed — now using GritQL for vite config transforms
 import type {
   TsReactWebsiteGeneratorSchema,

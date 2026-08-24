@@ -14,24 +14,24 @@ import yaml from 'js-yaml';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
-} from '../../utils/config/utils';
-import { declareDependencies } from '../../utils/declared-dependencies';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
-import type { UVPyprojectToml } from '../../utils/nxlv-python';
+} from '../../utils/config/utils.js';
+import { declareDependencies } from '../../utils/declared-dependencies.js';
+import { expectHasMetricTags } from '../../utils/metrics.spec.js';
+import type { UVPyprojectToml } from '../../utils/nxlv-python.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../utils/shared-constructs';
+} from '../../utils/shared-constructs.js';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
-} from '../../utils/shared-constructs-constants';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { CONTAINER_VERSIONS } from '../../utils/versions';
+} from '../../utils/shared-constructs-constants.js';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import { CONTAINER_VERSIONS } from '../../utils/versions.js';
 import {
   PY_MCP_SERVER_GENERATOR_INFO,
   pyMcpServerGenerator,
-} from './generator';
+} from './generator.js';
 
 const sharedConstructsDeclaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],

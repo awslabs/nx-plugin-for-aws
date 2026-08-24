@@ -6,8 +6,8 @@
 import { QueryBuilder } from '@getgrit/gritql';
 import type { Tree } from '@nx/devkit';
 import * as path from 'path';
-import { updateGitIgnore } from './git';
-import { isEsmWorkspace } from './module-format';
+import { updateGitIgnore } from './git.js';
+import { isEsmWorkspace } from './module-format.js';
 
 const GRIT_DIR = '.grit';
 

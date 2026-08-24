@@ -13,8 +13,8 @@ import {
   type NxGeneratorInfo,
   normalizeTargetKeyOrder,
   readProjectConfigurationUnqualified,
-} from './nx';
-import { createTreeUsingTsSolutionSetup } from './test';
+} from './nx.js';
+import { createTreeUsingTsSolutionSetup } from './test.js';
 
 describe('readProjectConfigurationUnqualified', () => {
   let tree: Tree;

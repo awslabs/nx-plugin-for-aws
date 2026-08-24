@@ -11,9 +11,9 @@ import {
 } from '@nx/devkit';
 import { beforeEach, describe, expect, it } from 'vitest';
 import generatorsJson from '../../../../generators.json';
-import { DCR_PROXY_HANDLERS } from '../../../utils/dcr-proxy-constructs/dcr-proxy-constructs';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import migration, { CONNECTION_KINDS } from './migration';
+import { DCR_PROXY_HANDLERS } from '../../../utils/dcr-proxy-constructs/dcr-proxy-constructs.js';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
+import migration, { CONNECTION_KINDS } from './migration.js';
 
 /**
  * A workspace whose shared infrastructure project was generated with the given

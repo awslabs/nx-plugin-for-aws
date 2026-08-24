@@ -8,8 +8,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   ensureProjectPackageJson,
   ensureWorkspaceGlobCovers,
-} from './project-package-json';
-import { createTreeUsingTsSolutionSetup } from './test';
+} from './project-package-json.js';
+import { createTreeUsingTsSolutionSetup } from './test.js';
 
 describe('ensureProjectPackageJson', () => {
   let tree: Tree;

@@ -7,9 +7,9 @@ import {
   AWS_NX_PLUGIN_CONFIG_FILE_NAME,
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
-} from './config/utils';
-import { resolveIac } from './iac';
-import { createTreeUsingTsSolutionSetup } from './test';
+} from './config/utils.js';
+import { resolveIac } from './iac.js';
+import { createTreeUsingTsSolutionSetup } from './test.js';
 
 describe('iac utils', () => {
   let tree: Tree;

@@ -8,22 +8,22 @@ import {
   OverwriteStrategy,
   type Tree,
 } from '@nx/devkit';
-import { addTargetToLocalDev } from '../../connection/local-dev';
-import { runtimeConfigGenerator } from '../../ts/react-website/runtime-config/generator';
-import { addTsDependencies } from '../../utils/add-dependencies';
-import { addSingleImport, applyGritQL } from '../../utils/ast';
-import { declareDependencies } from '../../utils/declared-dependencies';
-import { formatFilesInSubtree } from '../../utils/format';
-import { installDependencies } from '../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { toClassName } from '../../utils/names';
+import { addTargetToLocalDev } from '../../connection/local-dev.js';
+import { runtimeConfigGenerator } from '../../ts/react-website/runtime-config/generator.js';
+import { addTsDependencies } from '../../utils/add-dependencies.js';
+import { addSingleImport, applyGritQL } from '../../utils/ast.js';
+import { declareDependencies } from '../../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../../utils/format.js';
+import { installDependencies } from '../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
+import { toClassName } from '../../utils/names.js';
 import {
   addComponentGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
-} from '../../utils/nx';
-import { toProjectRelativePath } from '../../utils/paths';
+} from '../../utils/nx.js';
+import { toProjectRelativePath } from '../../utils/paths.js';
 import type { ReactGeneratorSchema } from './schema';
 
 /** The metadata this generator records, which its predicates read. */

@@ -6,8 +6,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { formatReport, runCheck } from './check';
-import type { AllowlistEntry } from './types';
+import { formatReport, runCheck } from './check.js';
+import type { AllowlistEntry } from './types.js';
 
 const allow: AllowlistEntry[] = [
   { spdxId: 'MIT', fullName: 'MIT License', aliases: [] },

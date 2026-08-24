@@ -5,8 +5,8 @@
 
 import type { OpenAPIV3 } from 'openapi-types';
 import { describe, expect, it } from 'vitest';
-import { isRef, resolveIfRef, resolveRef, splitRef } from './refs';
-import type { Spec } from './types';
+import { isRef, resolveIfRef, resolveRef, splitRef } from './refs.js';
+import type { Spec } from './types.js';
 
 const testSpec: Spec = {
   openapi: '3.0.3',

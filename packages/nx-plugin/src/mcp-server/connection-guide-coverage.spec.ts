@@ -5,12 +5,12 @@
 
 import { readdirSync } from 'fs';
 import { join } from 'path';
-import { SUPPORTED_CONNECTIONS } from '../connection/supported-connections';
-import { buildGeneratorInfoList } from '../utils/generators';
+import { SUPPORTED_CONNECTIONS } from '../connection/supported-connections.js';
+import { buildGeneratorInfoList } from '../utils/generators.js';
 import {
   fetchGuidePagesForGenerator,
   renderFilterableOptionsAsync,
-} from './generator-info';
+} from './generator-info.js';
 
 /**
  * `generator-guide` promises that a combination it accepts is one the

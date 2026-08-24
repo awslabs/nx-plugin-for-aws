@@ -10,16 +10,16 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import camelCase from 'lodash.camelcase';
-import { formatFilesInSubtree } from '../../../utils/format';
-import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
-import { kebabCase, pascalCase } from '../../../utils/names';
+import { formatFilesInSubtree } from '../../../utils/format.js';
+import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics.js';
+import { kebabCase, pascalCase } from '../../../utils/names.js';
 import {
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
-} from '../../../utils/nx';
+} from '../../../utils/nx.js';
 import type { TsRdbTrpcConnectionGeneratorSchema } from './schema';
 
 export const TS_RDB_TRPC_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =

@@ -4,5 +4,5 @@
  */
 
 // AgentCore Harness Generator
-export { agentcoreHarnessGenerator } from '../agentcore-harness/generator';
+export { agentcoreHarnessGenerator } from '../agentcore-harness/generator.js';
 export type { AgentcoreHarnessGeneratorSchema } from '../agentcore-harness/schema';

@@ -12,30 +12,30 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { addTsDependencies } from '../utils/add-dependencies';
-import { addAgentCoreHarnessInfra } from '../utils/agent-core-constructs/agent-core-constructs';
+import { addTsDependencies } from '../utils/add-dependencies.js';
+import { addAgentCoreHarnessInfra } from '../utils/agent-core-constructs/agent-core-constructs.js';
 import {
   declareDependencies,
   ownedElsewhere,
-} from '../utils/declared-dependencies';
-import { formatFilesInSubtree } from '../utils/format';
-import { resolveIac } from '../utils/iac';
-import { installDependencies } from '../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../utils/metrics';
-import { kebabCase, toClassName } from '../utils/names';
-import { getNpmScopePrefix } from '../utils/npm-scope';
+} from '../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../utils/format.js';
+import { resolveIac } from '../utils/iac.js';
+import { installDependencies } from '../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../utils/metrics.js';
+import { kebabCase, toClassName } from '../utils/names.js';
+import { getNpmScopePrefix } from '../utils/npm-scope.js';
 import {
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   projectExists,
   readProjectConfigurationUnqualified,
-} from '../utils/nx';
+} from '../utils/nx.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../utils/shared-constructs';
-import type { IacMetadata } from '../utils/shared-constructs-constants';
+} from '../utils/shared-constructs.js';
+import type { IacMetadata } from '../utils/shared-constructs-constants.js';
 import type { AgentcoreHarnessGeneratorSchema } from './schema';
 
 // scripts/chat.ts needs all of these whatever the infrastructure choice, so no

@@ -8,7 +8,7 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { formatFilesInSubtree } from '../../../utils/format';
+import { formatFilesInSubtree } from '../../../utils/format.js';
 
 /**
  * React website projects gained a `load-runtime-config` target so the config

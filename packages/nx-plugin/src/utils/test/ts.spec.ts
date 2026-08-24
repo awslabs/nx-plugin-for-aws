@@ -7,7 +7,7 @@ import { createProjectSync, type Project, ts } from '@ts-morph/bootstrap';
 import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { createTreeUsingTsSolutionSetup } from '../test';
+import { createTreeUsingTsSolutionSetup } from '../test.js';
 
 /**
  * Utility for verifying typescript files compile

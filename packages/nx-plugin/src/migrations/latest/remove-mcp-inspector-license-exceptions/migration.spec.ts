@@ -5,9 +5,9 @@
 import { type Tree, updateJson } from '@nx/devkit';
 import yaml from 'js-yaml';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { AWS_NX_PLUGIN_CONFIG_FILE_NAME } from '../../../utils/config/utils';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import migration from './migration';
+import { AWS_NX_PLUGIN_CONFIG_FILE_NAME } from '../../../utils/config/utils.js';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
+import migration from './migration.js';
 
 describe('remove mcp inspector license exceptions migration', () => {
   let tree: Tree;

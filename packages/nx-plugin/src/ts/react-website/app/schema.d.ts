@@ -2,8 +2,8 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { IacOption } from '../../../utils/iac';
-import { UxOption } from './generator';
+import { IacOption } from '../../../utils/iac.js';
+import { UxOption } from './generator.js';
 
 export type WebsiteInfraOption = 'cloudfront-s3' | 'none';
 

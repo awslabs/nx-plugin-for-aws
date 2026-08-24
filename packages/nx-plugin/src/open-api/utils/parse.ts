@@ -5,7 +5,7 @@
 
 import SwaggerParser from '@apidevtools/swagger-parser';
 import type { Tree } from '@nx/devkit';
-import type { Spec } from './types';
+import type { Spec } from './types.js';
 
 const TREE_PROTOCOL_PREFIX = 'workspace://';
 

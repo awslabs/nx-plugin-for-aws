@@ -8,8 +8,8 @@ import {
   joinPathFragments,
   visitNotIgnoredFiles,
 } from '@nx/devkit';
-import { SMITHY_PROJECT_GENERATOR_INFO } from '../../smithy/project/generator';
-import { applyGritQL } from '../ast';
+import { SMITHY_PROJECT_GENERATOR_INFO } from '../../smithy/project/generator.js';
+import { applyGritQL } from '../ast.js';
 import {
   BASE_IMAGES,
   CONTAINER_REPOSITORIES,
@@ -19,9 +19,9 @@ import {
   MISE_VERSIONS,
   PY_VERSIONS,
   TS_VERSIONS,
-} from '../versions';
-import { type OwnedDependencies, ownedForFile } from './owned-dependencies';
-import { isVendedUpgrade } from './vended-upgrade';
+} from '../versions.js';
+import { type OwnedDependencies, ownedForFile } from './owned-dependencies.js';
+import { isVendedUpgrade } from './vended-upgrade.js';
 
 /**
  * Sync the vended versions generators bake into the body of a file rather than

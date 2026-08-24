@@ -8,19 +8,19 @@ import { joinPathFragments, type Tree } from '@nx/devkit';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
-} from '../../utils/config/utils';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
-import type { UVPyprojectToml } from '../../utils/nxlv-python';
-import { sortObjectKeys } from '../../utils/object';
+} from '../../utils/config/utils.js';
+import { expectHasMetricTags } from '../../utils/metrics.spec.js';
+import type { UVPyprojectToml } from '../../utils/nxlv-python.js';
+import { sortObjectKeys } from '../../utils/object.js';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
-} from '../../utils/shared-constructs-constants';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+} from '../../utils/shared-constructs-constants.js';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
 import {
   FAST_API_GENERATOR_INFO,
   pyFastApiProjectGenerator,
-} from './generator';
+} from './generator.js';
 
 describe('fastapi project generator', () => {
   let tree: Tree;

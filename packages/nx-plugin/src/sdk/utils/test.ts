@@ -3,4 +3,4 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export { createTreeUsingTsSolutionSetup } from '../../utils/test';
+export { createTreeUsingTsSolutionSetup } from '../../utils/test.js';

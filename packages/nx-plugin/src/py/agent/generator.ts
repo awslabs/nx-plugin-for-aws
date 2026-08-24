@@ -10,13 +10,13 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { ensureLicenseExceptions } from '../../license/config';
-import { AG_UI_LANGGRAPH_EXCEPTIONS } from '../../license/known-exceptions';
+import { ensureLicenseExceptions } from '../../license/config.js';
+import { AG_UI_LANGGRAPH_EXCEPTIONS } from '../../license/known-exceptions.js';
 import {
   addPyDependencies,
   addTsDependencies,
-} from '../../utils/add-dependencies';
-import { addAgentChatScripts } from '../../utils/agent-chat/agent-chat';
+} from '../../utils/add-dependencies.js';
+import { addAgentChatScripts } from '../../utils/agent-chat/agent-chat.js';
 import {
   AGENT_CONNECTION_PY_DEPENDENCIES,
   addPythonFrameworkBase,
@@ -24,23 +24,26 @@ import {
   ensurePythonAgentConnectionProject,
   getPythonAgentConnectionModuleName,
   getPythonAgentConnectionProject,
-} from '../../utils/agent-connection/agent-connection';
-import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
-import { addPythonBundleTarget } from '../../utils/bundle/bundle';
-import { resolveContainers } from '../../utils/containers';
+} from '../../utils/agent-connection/agent-connection.js';
+import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-constructs.js';
+import { addPythonBundleTarget } from '../../utils/bundle/bundle.js';
+import { resolveContainers } from '../../utils/containers.js';
 import {
   declareDependencies,
   ownedElsewhere,
-} from '../../utils/declared-dependencies';
-import { addDockerScanTarget, DOCKER_DEPENDENCIES } from '../../utils/docker';
-import { formatFilesInSubtree } from '../../utils/format';
-import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs';
-import { updateGitIgnore } from '../../utils/git';
-import { resolveIac } from '../../utils/iac';
-import { installDependencies } from '../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { kebabCase, toClassName, toSnakeCase } from '../../utils/names';
-import { getNpmScope } from '../../utils/npm-scope';
+} from '../../utils/declared-dependencies.js';
+import {
+  addDockerScanTarget,
+  DOCKER_DEPENDENCIES,
+} from '../../utils/docker.js';
+import { formatFilesInSubtree } from '../../utils/format.js';
+import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs.js';
+import { updateGitIgnore } from '../../utils/git.js';
+import { resolveIac } from '../../utils/iac.js';
+import { installDependencies } from '../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
+import { kebabCase, toClassName, toSnakeCase } from '../../utils/names.js';
+import { getNpmScope } from '../../utils/npm-scope.js';
 import {
   addComponentDevTarget,
   addComponentGeneratorMetadata,
@@ -49,20 +52,20 @@ import {
   type NxGeneratorInfo,
   normalizeTargetKeyOrder,
   readProjectConfigurationUnqualified,
-} from '../../utils/nx';
-import { sortObjectKeys } from '../../utils/object';
+} from '../../utils/nx.js';
+import { sortObjectKeys } from '../../utils/object.js';
 import {
   getRelativePathToRootByDirectory,
   toProjectRelativePath,
-} from '../../utils/paths';
-import { assignPort } from '../../utils/port';
-import { addWorkspaceDependencyToPyProject } from '../../utils/py';
+} from '../../utils/paths.js';
+import { assignPort } from '../../utils/port.js';
+import { addWorkspaceDependencyToPyProject } from '../../utils/py.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../utils/shared-constructs';
-import type { IacMetadata } from '../../utils/shared-constructs-constants';
-import { BASE_IMAGES } from '../../utils/versions';
+} from '../../utils/shared-constructs.js';
+import type { IacMetadata } from '../../utils/shared-constructs-constants.js';
+import { BASE_IMAGES } from '../../utils/versions.js';
 import type {
   AgentProtocol,
   PyAgentFramework,

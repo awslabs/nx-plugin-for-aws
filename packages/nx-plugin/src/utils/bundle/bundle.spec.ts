@@ -9,13 +9,13 @@ import {
   readJson,
   type Tree,
 } from '@nx/devkit';
-import { declareDependencies } from '../declared-dependencies';
-import { createTreeUsingTsSolutionSetup } from '../test';
+import { declareDependencies } from '../declared-dependencies.js';
+import { createTreeUsingTsSolutionSetup } from '../test.js';
 import {
   addPythonBundleTarget,
   addTypeScriptBundleTarget,
   BUNDLE_DEPENDENCIES,
-} from './bundle';
+} from './bundle.js';
 
 const declaration = declareDependencies()({ ts: [...BUNDLE_DEPENDENCIES] });
 
