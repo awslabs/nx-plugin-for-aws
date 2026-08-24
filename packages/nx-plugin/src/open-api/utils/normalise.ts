@@ -466,10 +466,18 @@ const normaliseResponseCodeCase = (spec: Spec): void => {
         ?.responses;
       if (!responses || typeof responses !== 'object') continue;
       for (const code of Object.keys(responses)) {
-        if (/^\d[xX]{2}$/.test(code) && code !== code.toUpperCase()) {
-          responses[code.toUpperCase()] = responses[code];
-          delete responses[code];
+        if (!/^\d[xX]{2}$/.test(code) || code === code.toUpperCase()) continue;
+        const upper = code.toUpperCase();
+        // Both spellings name the same range, so one would silently overwrite
+        // the other — and which survived would depend on key order. The repo
+        // throws on a schema-name collision for the same reason.
+        if (upper in responses) {
+          throw new Error(
+            `Response code conflict: "${code}" and "${upper}" describe the same status range. Please declare only one of them in your OpenAPI specification.`,
+          );
         }
+        responses[upper] = responses[code];
+        delete responses[code];
       }
     }
   }

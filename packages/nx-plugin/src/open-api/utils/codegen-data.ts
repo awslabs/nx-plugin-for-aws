@@ -128,11 +128,6 @@ export const buildOpenApiCodeGenData = (inSpec: Spec): CodeGenData => {
     className: toClassName(spec.info.title),
   };
 
-  // Final pass to derive python-specific fields now that all links and
-  // composite relationships are resolved. Produced once so every downstream
-  // language generator consumes a single prepared object.
-  annotatePythonData(result, modelsByName);
-
   return result;
 };
 
@@ -152,13 +147,19 @@ const annotateAllOfFlattening = (models: Model[]): void => {
   const collect = (
     model: Model,
     into: Model[],
-    seen: Set<string>,
+    seen: Map<string, Model>,
     visiting: Set<Model>,
   ): void => {
     if (visiting.has(model)) return;
     visiting.add(model);
     for (const composed of model.composedModels ?? []) {
-      if (composed.vendorExtensions?.['x-aws-nx-hoisted']) {
+      // Only a member whose properties this flattening actually absorbs may be
+      // marked inlined. A hoisted `oneOf` member has no named properties, so
+      // marking it would have templates skip it while nothing carried its
+      // constraint — the union would silently disappear.
+      const isFlattenable =
+        composed.export === 'interface' || composed.export === 'all-of';
+      if (composed.vendorExtensions?.['x-aws-nx-hoisted'] && isFlattenable) {
         composed.isInlinedByAllOf = model.name;
       }
       if (composed.export === 'all-of') {
@@ -166,9 +167,20 @@ const annotateAllOfFlattening = (models: Model[]): void => {
         continue;
       }
       for (const prop of composed.properties ?? []) {
-        if (!prop.name || seen.has(prop.name)) continue;
-        seen.add(prop.name);
-        into.push(prop);
+        if (!prop.name) continue;
+        const existing = seen.get(prop.name);
+        if (existing) {
+          // `allOf` is a conjunction, so a property any branch requires is
+          // required — taking only the first branch's flag would make it
+          // optional because of the order the branches happen to appear in.
+          existing.isRequired = existing.isRequired || prop.isRequired;
+          continue;
+        }
+        // Copied, so raising `isRequired` above describes this composition
+        // rather than mutating the composed schema every user of it shares.
+        const flattenedProp = { ...prop };
+        seen.set(prop.name, flattenedProp);
+        into.push(flattenedProp);
       }
     }
     visiting.delete(model);
@@ -177,7 +189,7 @@ const annotateAllOfFlattening = (models: Model[]): void => {
   for (const model of models) {
     if (model.export !== 'all-of') continue;
     const flattened: Model[] = [];
-    collect(model, flattened, new Set<string>(), new Set<Model>());
+    collect(model, flattened, new Map<string, Model>(), new Set<Model>());
     model.effectiveProperties = flattened;
   }
 };
@@ -483,13 +495,12 @@ const annotatePythonClientType = (entry: Model | undefined): void => {
  *  - `pythonMethodName` per operation and `pythonTagNames` per tag, escaped
  *    clear of the members the generated client defines
  *
- * Runs for every spec — the resulting fields are only read by the py-client
- * templates, so there's no cost to TypeScript consumers.
+ * Called by the py-client generator rather than from the shared pipeline, so a
+ * TypeScript consumer of the same spec never pays for fields only the Python
+ * templates read — the same split as {@link assertNoClashingPythonNames}.
  */
-const annotatePythonData = (
-  data: CodeGenData,
-  modelsByName: ModelsByName,
-): void => {
+export const annotatePythonData = (data: CodeGenData): void => {
+  const modelsByName = indexModelsByName(data.models);
   annotatePythonMemberNames(data);
   for (const model of data.models) {
     model.pythonClassName = toPythonClassName(model.name);
@@ -531,9 +542,17 @@ const annotatePythonData = (
       const seenNames = new Set<string>();
       for (const input of requestShape.inputs) {
         const rawName = input.model.pythonName || input.specName;
-        let pythonName = toPythonName('property', rawName);
+        const base = toPythonName('property', rawName);
+        let pythonName = base;
         if (seenNames.has(pythonName)) {
-          pythonName = `${pythonName}_${input.source.kind.replace('-', '_')}`;
+          // Qualify by where the input goes, then keep suffixing until the name
+          // is free: the qualified form can itself collide (a header
+          // `fooBarHeader` next to a query `fooBar` and a header `foo_bar` all
+          // reach `foo_bar_header`), which would emit a duplicate argument.
+          pythonName = `${base}_${input.source.kind.replace('-', '_')}`;
+          while (seenNames.has(pythonName)) {
+            pythonName = `${pythonName}_`;
+          }
         }
         seenNames.add(pythonName);
         const baseType =

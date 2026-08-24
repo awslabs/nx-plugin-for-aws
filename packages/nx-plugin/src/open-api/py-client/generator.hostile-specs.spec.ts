@@ -403,4 +403,45 @@ describe('openApiPyClientGenerator - hostile specs', () => {
     expect(res.ok).toBe(true);
     expect(res.value).toBe('ok');
   });
+
+  // Three parameters snake_casing towards one name: the query `fooBar` takes
+  // `foo_bar`, so the header `fooBarHeader` is qualified to `foo_bar_header` —
+  // which is what the header `foo_bar` would also be qualified to. Without a
+  // loop that emits `def m(foo_bar_header, ..., foo_bar_header)`, a hard
+  // `SyntaxError: duplicate argument`.
+  it('keeps deduplicated argument names distinct when the qualified form collides', async () => {
+    await generateAndRead(verifier, tree, {
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/x': {
+          get: {
+            operationId: 'getX',
+            parameters: [
+              { name: 'fooBar', in: 'query', schema: { type: 'string' } },
+              {
+                name: 'fooBarHeader',
+                in: 'header',
+                schema: { type: 'string' },
+              },
+              { name: 'foo_bar', in: 'header', schema: { type: 'string' } },
+            ],
+            responses: { '204': { description: 'No content' } },
+          },
+        },
+      },
+    });
+    const res = await callGeneratedClient(
+      verifier,
+      'get_x',
+      { foo_bar: 'q', foo_bar_header: 'h1', foo_bar_header_: 'h2' },
+      { status: 204 },
+    );
+    expect(res.ok).toBe(true);
+    const call = expectSingleRequest(res);
+    // Each parameter must reach its own wire name, not overwrite a sibling.
+    expect(new URL(call.url).searchParams.get('fooBar')).toBe('q');
+    expect(call.headers['foobarheader']).toBe('h1');
+    expect(call.headers['foo_bar']).toBe('h2');
+  });
 });

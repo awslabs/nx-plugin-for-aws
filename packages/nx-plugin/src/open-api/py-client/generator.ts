@@ -10,7 +10,10 @@ import { updateGitIgnore } from '../../utils/git';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
 import { getGeneratorInfo, type NxGeneratorInfo } from '../../utils/nx';
 import { buildOpenApiCodeGenerationData } from '../ts-client/generator';
-import { assertNoClashingPythonNames } from '../utils/codegen-data';
+import {
+  annotatePythonData,
+  assertNoClashingPythonNames,
+} from '../utils/codegen-data';
 import { toPythonLiteral } from '../utils/codegen-data/languages';
 import {
   type CodeGenData,
@@ -69,8 +72,10 @@ export const openApiPyClientGenerator = async (
   );
   const clientType = options.clientType ?? 'both';
 
-  // Checked here rather than in the shared pipeline, so a TypeScript consumer of
-  // the same spec is never failed by a Python-specific name clash.
+  // Derived here rather than in the shared pipeline, so a TypeScript consumer of
+  // the same spec pays for neither these fields nor a Python-specific name clash.
+  annotatePythonData(data);
+
   for (const model of data.models) {
     assertNoClashingPythonNames(model);
   }
