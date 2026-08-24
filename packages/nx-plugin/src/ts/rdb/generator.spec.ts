@@ -389,6 +389,15 @@ describe('ts#rdb generator', () => {
     expect(updatedProjectJson.targets['bundle']).toBeDefined();
   });
 
+  it('should place the project in a subDirectory when provided', async () => {
+    await tsRdbGenerator(tree, { ...defaultOptions, subDirectory: 'nested' });
+
+    const projectConfig = readProjectConfigurationUnqualified(tree, '@proj/db');
+    expect(projectConfig.root).toBe('packages/nested');
+    expect(tree.exists('packages/nested/package.json')).toBe(true);
+    expect(tree.exists('packages/db/package.json')).toBe(false);
+  });
+
   it('should be idempotent when re-run with same options', async () => {
     await tsRdbGenerator(tree, defaultOptions);
     await tsRdbGenerator(tree, defaultOptions);
