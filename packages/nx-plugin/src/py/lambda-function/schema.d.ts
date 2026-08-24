@@ -20,7 +20,7 @@ type EventSource =
   | 'CloudFormationCustomResourceCreateModel'
   | 'CloudFormationCustomResourceUpdateModel'
   | 'CloudFormationCustomResourceDeleteModel'
-  | 'CloudwatchLogsModel'
+  | 'CloudWatchLogsModel'
   | 'DynamoDBStreamModel'
   | 'EventBridgeModel'
   | 'IoTCoreThingEvent'
