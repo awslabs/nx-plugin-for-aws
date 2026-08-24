@@ -468,6 +468,7 @@ Python プロジェクトを作成するには:
 from contextlib import contextmanager
 
 from strands import Agent, tool
+from strands.hooks import HookCallback, HookProvider
 from strands_tools import current_time
 from dungeon_adventure_agent_connection import log_model_errors, log_tool_errors
 
@@ -475,6 +476,9 @@ from dungeon_adventure_agent_connection import log_model_errors, log_tool_errors
 @tool
 def subtract(a: int, b: int) -> int:
     return a - b
+
+
+AGENT_HOOKS: list[HookProvider | HookCallback] = [log_model_errors, log_tool_errors]
 
 
 @contextmanager
@@ -488,7 +492,7 @@ Use your tools for mathematical tasks.
 Refer to tools as your 'spellbook'.
 """,
         tools=[subtract, current_time],
-        hooks=[log_model_errors, log_tool_errors],
+        hooks=AGENT_HOOKS,
     )
 ```
 
@@ -531,7 +535,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from .agent import get_agent
+from .agent import AGENT_HOOKS, get_agent
 from .middleware.session_id_middleware import SESSION_ID_HEADER, SessionIdMiddleware
 from .session import get_session_manager
 
@@ -548,6 +552,10 @@ async def lifespan(app: FastAPI):
             # A per-thread session manager, not the template Agent's own, since
             # AG-UI caches one Strands agent per thread_id.
             config=StrandsAgentConfig(session_manager_provider=lambda _input_data: get_session_manager()),
+            # Required as well as on the template Agent: AG-UI keeps only the
+            # built HookRegistry, so hooks it can't read back are never
+            # registered and model/tool failures go unreported.
+            hooks=AGENT_HOOKS,
         )
         yield
 
