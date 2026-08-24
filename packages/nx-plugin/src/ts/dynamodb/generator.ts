@@ -93,6 +93,7 @@ export const tsDynamoDBGenerator = async (
     await tsProjectGenerator(tree, {
       name: options.name,
       directory: options.directory,
+      subDirectory: options.subDirectory,
       preferInstallDependencies: false,
     });
   }
