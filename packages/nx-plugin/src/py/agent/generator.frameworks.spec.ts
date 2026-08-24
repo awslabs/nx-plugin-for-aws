@@ -66,6 +66,21 @@ dev-dependencies = []
     expect(mainContent).toContain('async def lifespan(app: FastAPI)');
     expect(mainContent).toContain('app.state.agui_agent');
 
+    // AG-UI builds a fresh Agent per thread_id and copies the template Agent's
+    // kwargs, but skips `hooks` (Strands only keeps the built HookRegistry), so
+    // the hooks must be handed to the adapter as well or model/tool failures go
+    // unreported for every served request.
+    const aguiAgentContent = tree.read(
+      'apps/test-project/proj_test_project/agent/agent.py',
+      'utf-8',
+    );
+    expect(aguiAgentContent).toContain(
+      'AGENT_HOOKS: list[HookProvider | HookCallback] = [log_model_errors, log_tool_errors]',
+    );
+    expect(aguiAgentContent).toContain('hooks=AGENT_HOOKS,');
+    expect(mainContent).toContain('from .agent import AGENT_HOOKS, get_agent');
+    expect(mainContent).toContain('hooks=AGENT_HOOKS,');
+
     // AG-UI must bind the inbound AgentCore session ID into the ContextVar
     // so downstream MCP / A2A connection clients forward it on outbound
     // calls. (AG-UI handles its own per-thread conversation isolation, so
