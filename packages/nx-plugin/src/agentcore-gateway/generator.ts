@@ -45,17 +45,13 @@ import {
 import type { IacMetadata } from '../utils/shared-constructs-constants.js';
 import type { AgentcoreGatewayGeneratorSchema } from './schema';
 
-// The gateway's local-dev server and Cedar policy rendering need these
-// whatever the auth; only the MCP SDK is protocol-specific (the http local
-// gateway is a plain proxy).
+// The gateway's local-dev server needs these whatever the auth; only the MCP
+// SDK is protocol-specific (the http local gateway is a plain proxy).
 export const DEPENDENCIES = declareDependencies<AgentCoreGatewayMetadata>()({
   ts: [
     { name: '@modelcontextprotocol/sdk', when: (m) => m.protocol === 'mcp' },
     { name: 'express' },
     { name: '@types/express', dev: true },
-    // ejs renders the Cedar policy in the shared gateway construct.
-    { name: 'ejs', dev: true },
-    { name: '@types/ejs', dev: true },
     // local-dev.ts runs via tsx, which is shared tooling.
     { name: 'tsx', dev: true, root: true },
     ...ownedElsewhere(AGENT_CORE_CONSTRUCTS_DEPENDENCIES),

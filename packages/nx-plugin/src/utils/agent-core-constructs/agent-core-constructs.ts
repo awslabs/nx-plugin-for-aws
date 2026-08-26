@@ -24,7 +24,7 @@ import type { Iac } from '../iac.js';
 import { esmVars } from '../module-format.js';
 import { addDependencyToTargetIfNotPresent } from '../nx.js';
 import {
-  generatedInfrastructure,
+  generatedCdk,
   generatedTerraform,
   type IacMetadata,
   PACKAGES_DIR,
@@ -44,13 +44,16 @@ type IACProvider = { iac: Iac };
 /**
  * Dependencies a caller must declare to add an AgentCore Gateway construct.
  *
- * Gated on infrastructure having been generated, since the construct helpers only
- * run on that branch.
+ * Both providers render Cedar policies with `ejs`, each from a different
+ * manifest: the CDK construct imports it from the shared constructs project,
+ * while Terraform's `render-cedar.cjs` resolves it from the workspace root,
+ * since the shared terraform project it runs in has no `package.json`.
  */
 export const AGENT_CORE_CONSTRUCTS_DEPENDENCIES = [
-  { name: 'ejs', when: generatedInfrastructure },
-  { name: '@aws-sdk/client-bedrock-agentcore', when: generatedInfrastructure },
-  { name: '@types/ejs', when: generatedInfrastructure },
+  { name: 'ejs', when: generatedCdk },
+  { name: '@aws-sdk/client-bedrock-agentcore', when: generatedCdk },
+  { name: '@types/ejs', when: generatedCdk },
+  { name: 'ejs', when: generatedTerraform, dev: true, root: true },
 ] as const satisfies readonly DeclaredTsDependency<
   ITsDepVersion,
   IacMetadata
@@ -318,7 +321,7 @@ export const addAgentCoreGatewayInfra = async <
       await addAgentCoreGatewayCDKInfra(tree, options, declaration);
       break;
     case 'terraform':
-      addAgentCoreGatewayTerraformInfra(tree, options);
+      addAgentCoreGatewayTerraformInfra(tree, options, declaration);
       break;
   }
 
@@ -453,6 +456,7 @@ const addAgentCoreGatewayCDKInfra = async (
 const addAgentCoreGatewayTerraformInfra = (
   tree: Tree,
   options: AddAgentCoreGatewayInfraProps,
+  declaration: DependencyDeclaration,
 ) => {
   generateFiles(
     tree,
@@ -523,7 +527,19 @@ const addAgentCoreGatewayTerraformInfra = (
     if (tree.exists(renderScript)) {
       tree.delete(renderScript);
     }
+    return;
   }
+
+  // render-cedar.cjs resolves ejs from the workspace root, since the shared
+  // terraform project it runs in has no package.json.
+  addDependenciesToPackageJson(
+    tree,
+    {},
+    withVersions(
+      forDependencies<typeof AGENT_CORE_CONSTRUCTS_DEPENDENCIES>(declaration),
+      ['ejs'],
+    ),
+  );
 };
 
 export interface AddAgentCoreHarnessInfraProps {
