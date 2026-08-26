@@ -25,6 +25,12 @@ const cdkTarget = () => ({
   },
 });
 
+/**
+ * The target as workspaces of this era carried it. `SRC_FILE` names a path
+ * nothing writes — the `terraform-load-runtime-config-src-path` migration
+ * corrects that separately. This migration clones the target verbatim, so the
+ * fixture stays as-generated-then.
+ */
 const terraformTarget = () => ({
   executor: 'nx:run-commands',
   metadata: {
