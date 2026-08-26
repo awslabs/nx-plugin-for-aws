@@ -66,6 +66,15 @@ export const API_CONSTRUCTS_PY_DEPENDENCIES = [
   IacMetadata
 >[];
 
+/**
+ * Path segments a REST API operation may have in the generated Terraform.
+ *
+ * API Gateway REST APIs need a resource per path segment, and Terraform cannot
+ * express recursion, so the module declares one resource per level up to this
+ * depth. Deeper paths fail the plan with a message pointing at the fix.
+ */
+const MAX_REST_PATH_DEPTH = 8;
+
 interface BackendOptions {
   type: 'trpc' | 'fastapi' | 'smithy';
   integrationPattern: 'isolated' | 'shared';
@@ -280,7 +289,11 @@ const addApiGatewayTerraformModules = (
       options.constructType,
     ),
     joinPathFragments(PACKAGES_DIR, SHARED_TERRAFORM_DIR, 'src', 'app', 'apis'),
-    { ...options, ...terraformProviderVersions() },
+    {
+      ...options,
+      maxRestPathDepth: MAX_REST_PATH_DEPTH,
+      ...terraformProviderVersions(),
+    },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },

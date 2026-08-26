@@ -1028,6 +1028,90 @@ describe('trpc backend generator', () => {
       );
       expect(terraformFiles.length).toBeGreaterThan(0);
     });
+
+    it.each(['http-lambda', 'rest-lambda'] as const)(
+      'should generate one lambda function per operation for %s with the isolated pattern',
+      async (infra) => {
+        await tsTrpcApiGenerator(tree, {
+          name: 'TestApi',
+          directory: 'apps',
+          infra,
+          auth: 'iam',
+          integrationPattern: 'isolated',
+          iac: 'terraform',
+        });
+
+        const appApiContent = tree.read(
+          'packages/common/terraform/src/app/apis/test-api/test-api.tf',
+          'utf-8',
+        );
+
+        // Operations drive the per-operation resources
+        expect(appApiContent).toContain(
+          'operations_file = "${path.module}/../../../generated/test-api/operations.json"',
+        );
+        expect(appApiContent).toMatch(
+          /resource "aws_lambda_function" "api_lambda" \{\s*for_each = local\.operations/,
+        );
+        expect(appApiContent).toMatch(
+          /resource "aws_iam_role" "lambda_execution_role" \{\s*for_each = local\.operations/,
+        );
+        // The proxy catch-all belongs to the shared pattern only
+        expect(appApiContent).not.toContain('{proxy+}');
+        expect(appApiContent).not.toContain('/{proxy+}');
+
+        // Outputs are keyed per operation
+        expect(appApiContent).toContain('output "lambda_function_names"');
+        expect(appApiContent).not.toContain('output "lambda_function_name"');
+
+        // A script/target generates the operations metadata the module reads
+        const projectConfig = JSON.parse(
+          tree.read('apps/test-api/project.json', 'utf-8'),
+        );
+        expect(projectConfig.targets.operations).toBeDefined();
+        expect(projectConfig.targets.build.dependsOn).toContain('operations');
+        expect(
+          tree.exists('apps/test-api/scripts/generate-operations.ts'),
+        ).toBeTruthy();
+
+        // The shared terraform project must have the file before it is planned
+        const terraformConfig = JSON.parse(
+          tree.read('packages/common/terraform/project.json', 'utf-8'),
+        );
+        expect(terraformConfig.targets.build.dependsOn).toContain(
+          '@proj/test-api:operations',
+        );
+      },
+    );
+
+    it('should generate a single router lambda with the shared pattern', async () => {
+      await tsTrpcApiGenerator(tree, {
+        name: 'TestApi',
+        directory: 'apps',
+        infra: 'http-lambda',
+        auth: 'iam',
+        integrationPattern: 'shared',
+        iac: 'terraform',
+      });
+
+      const appApiContent = tree.read(
+        'packages/common/terraform/src/app/apis/test-api/test-api.tf',
+        'utf-8',
+      );
+
+      expect(appApiContent).not.toContain('local.operations');
+      expect(appApiContent).toContain('/{proxy+}');
+      expect(appApiContent).toContain('output "lambda_function_name"');
+
+      // No operations metadata is needed for the shared pattern
+      const projectConfig = JSON.parse(
+        tree.read('apps/test-api/project.json', 'utf-8'),
+      );
+      expect(projectConfig.targets.operations).toBeUndefined();
+      expect(
+        tree.exists('apps/test-api/scripts/generate-operations.ts'),
+      ).toBeFalsy();
+    });
   });
 
   it('should place project in subDirectory when provided', async () => {

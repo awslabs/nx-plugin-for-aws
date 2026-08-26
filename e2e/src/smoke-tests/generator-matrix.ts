@@ -67,6 +67,17 @@ export const runGeneratorMatrix = async (
     opts,
   );
 
+  // tRPC APIs using the shared integration pattern — the APIs above take the
+  // default `isolated` pattern, so both are covered.
+  await runCLI(
+    `generate @aws/nx-plugin:ts#api --name=my-api-shared --infra=rest-lambda --integrationPattern=shared --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:ts#api --name=my-api-shared-http --infra=http-lambda --integrationPattern=shared --no-interactive${deferFlag}`,
+    opts,
+  );
+
   // tRPC APIs with Custom auth — REST + HTTP variants.
   await runCLI(
     `generate @aws/nx-plugin:ts#api --name=my-api-custom --infra=rest-lambda --auth=custom --no-interactive${deferFlag}`,
