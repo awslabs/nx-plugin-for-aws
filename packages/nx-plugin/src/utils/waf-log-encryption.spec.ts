@@ -199,7 +199,10 @@ describe('waf log group encryption', () => {
       const contents = fs.readFileSync(path.join(PLUGIN_SRC, file), 'utf-8');
 
       expect(contents).toMatch(
-        new RegExp(`const ${keyVar}(?::[^=]+)? = .*new Key\\(`, 's'),
+        new RegExp(
+          `const ${keyVar}(?::[^=]+)? = .*new (?:\\w+\\.)?Key\\(`,
+          's',
+        ),
       );
       expect(contents).toMatch(
         new RegExp(

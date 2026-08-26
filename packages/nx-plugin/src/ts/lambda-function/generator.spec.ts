@@ -8,8 +8,8 @@ import {
   updateAwsNxPluginConfig,
 } from '../../utils/config/utils.js';
 import { expectHasMetricTags } from '../../utils/metrics.spec.js';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
 import { TypeScriptVerifier } from '../../utils/test/ts.spec.js';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
 import {
   TS_LAMBDA_FUNCTION_GENERATOR_INFO,
   tsLambdaFunctionGenerator,
