@@ -41,7 +41,7 @@ const CONSTRUCTS_SRC = `${PACKAGES_DIR}/${SHARED_CONSTRUCTS_DIR}/src`;
 const TERRAFORM_SRC = `${PACKAGES_DIR}/${SHARED_TERRAFORM_DIR}/src`;
 
 const CDK_USER_IDENTITY_FILE = `${CONSTRUCTS_SRC}/core/user-identity.ts`;
-const TERRAFORM_REST_API_FILE = `${TERRAFORM_SRC}/core/api/rest/rest-api/rest-api.tf`;
+const TERRAFORM_REST_API_FILE = `${TERRAFORM_SRC}/core/api/rest-api/rest-api.tf`;
 const TERRAFORM_USER_IDENTITY_FILE = `${TERRAFORM_SRC}/core/user-identity/identity/identity.tf`;
 const TERRAFORM_GATEWAYS_DIR = `${TERRAFORM_SRC}/app/gateways`;
 

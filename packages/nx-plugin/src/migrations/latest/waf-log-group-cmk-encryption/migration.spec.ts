@@ -7,7 +7,7 @@ import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
 import migration from './migration.js';
 
 const TERRAFORM_REST_API_FILE =
-  'packages/common/terraform/src/core/api/rest/rest-api/rest-api.tf';
+  'packages/common/terraform/src/core/api/rest-api/rest-api.tf';
 const TERRAFORM_USER_IDENTITY_FILE =
   'packages/common/terraform/src/core/user-identity/identity/identity.tf';
 const TERRAFORM_GATEWAY_FILE =
