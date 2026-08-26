@@ -133,8 +133,10 @@ export async function terraformProjectGenerator(
       executor: 'nx:run-commands',
       options: {
         forwardAllArgs: true,
-        command: `terraform destroy -state=${tfDistDir}/bootstrap.tfstate`,
-        cwd: '{projectRoot}/bootstrap',
+        commands: [
+          'tsx {projectRoot}/scripts/bootstrap-destroy.ts {projectRoot}',
+        ],
+        cwd: '{workspaceRoot}',
       },
     },
     build: {
@@ -231,18 +233,23 @@ export async function terraformProjectGenerator(
         cwd: '{projectRoot}/src',
       },
     },
-    test: {
+    checkov: {
       executor: 'nx:run-commands',
       cache: true,
       outputs: ['{workspaceRoot}/dist/{projectRoot}/checkov'],
       options: {
         command: uvxCommand(
           'checkov',
-          `--directory . -o cli -o json --output-file-path console,${checkovReportJsonPath}`,
+          `--config-file ../checkov.yml --directory . -o cli -o json --output-file-path console,${checkovReportJsonPath}`,
         ),
         forwardAllArgs: true,
         cwd: '{projectRoot}/src',
       },
+    },
+    // Alias of `checkov`, so the security scan runs under the name Nx users
+    // expect for a project's tests, and under the same name as the CDK app's.
+    test: {
+      dependsOn: ['checkov'],
     },
     validate: {
       executor: 'nx:run-commands',
@@ -291,6 +298,17 @@ export async function terraformProjectGenerator(
     },
     {
       overwriteStrategy: OverwriteStrategy.Overwrite,
+    },
+  );
+
+  // Checkov skips are the user's to curate, so preserve any they have added.
+  generateFiles(
+    tree,
+    joinPathFragments(import.meta.dirname, './files/checkov'),
+    lib.dir,
+    {},
+    {
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
   );
 

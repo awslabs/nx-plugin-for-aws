@@ -48,10 +48,12 @@ For application projects (`--type=application`), the generator creates a complet
     - main.tf S3 bucket and policies for state storage
     - providers.tf AWS provider configuration
     - variables.tf Bootstrap variable definitions
-  - scripts Node helpers run by the nx `bootstrap` and `init` targets
+  - scripts Node helpers run by the nx `bootstrap`, `bootstrap-destroy` and `init` targets
     - aws-config.ts Resolves account + region via the AWS SDK credential chain
     - bootstrap.ts Pulls/pushes the bootstrap tfstate and runs `terraform apply`
+    - bootstrap-destroy.ts Empties the state bucket and runs `terraform destroy`
     - init.ts Runs `terraform init` with the S3 backend config
+  - checkov.yml Checkov configuration, including the checks to skip
   - project.json Project configuration and build targets
 
 </FileTree>
@@ -71,6 +73,7 @@ For library projects (`--type=library`), the generator creates a simpler structu
 
   - src
     - main.tf Main Terraform module file
+  - checkov.yml Checkov configuration, including the checks to skip
   - project.json Project configuration and build targets
 
 </FileTree>
@@ -250,11 +253,30 @@ Format your Terraform code using the `fmt` target:
 
 #### Security Testing
 
-Run security checks on your infrastructure using Checkov with the `test` target:
+Run security checks on your infrastructure using Checkov with the `checkov` target:
 
-<NxCommands commands={['test tf-infra']} />
+<NxCommands commands={['checkov tf-infra']} />
+
+The `test` target is an alias for `checkov`, so <NxCommands commands={['test tf-infra']} /> runs the same scan.
 
 You will find your security test results in the root `dist` folder, under `dist/packages/<my-terraform-project>/checkov`.
+
+Checks are configured in the project's `checkov.yml`. Add a check id to `skip-check` to suppress it across the whole project:
+
+```yaml title="checkov.yml"
+skip-check:
+  - CKV_AWS_115 # Concurrent execution limit
+  - CKV_AWS_116 # Dead Letter Queue
+```
+
+To suppress a check for a single resource instead, add a `#checkov:skip=<id>:<reason>` comment inside the resource block:
+
+```hcl
+resource "aws_s3_bucket" "example" {
+  #checkov:skip=CKV_AWS_18:Access logging not required for this bucket
+  bucket = "example"
+}
+```
 
 <OptionFilter when={{ type: 'application' }} description="Application-only targets: plan / apply / destroy / etc.">
 ### Application-Only Targets
@@ -310,6 +332,12 @@ This will permanently delete all resources managed by this Terraform configurati
 To clean up the bootstrap resources (S3 bucket for state storage):
 
 <NxCommands commands={['bootstrap-destroy tf-infra']} />
+
+This empties the state bucket before destroying it, and resolves the region from the AWS SDK credential chain, so it runs unattended in CI.
+
+:::caution[Destroy your infrastructure first]
+The state bucket holds the state for every environment, so run `destroy` for each environment before this. Once the bucket is gone, Terraform no longer knows about the resources it created.
+:::
 </OptionFilter>
 
 ## More Information

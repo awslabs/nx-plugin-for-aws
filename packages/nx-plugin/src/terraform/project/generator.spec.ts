@@ -65,6 +65,99 @@ describe('terraformProjectGenerator', () => {
       expect(projectConfig.targets).toHaveProperty('output');
     });
 
+    it('should keep every established target name and add checkov', async () => {
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      const projectConfig = readProjectConfiguration(
+        tree,
+        '@proj/my-terraform-project',
+      );
+
+      // Renaming or dropping any of these breaks existing invocations, so the
+      // full set is pinned. `checkov` matches the CDK app's scan target, which
+      // is what lets `run-many --target checkov` reach Terraform projects too.
+      expect(Object.keys(projectConfig.targets).sort()).toEqual([
+        'apply',
+        'bootstrap',
+        'bootstrap-destroy',
+        'build',
+        'checkov',
+        'deploy',
+        'destroy',
+        'fmt',
+        'init',
+        'output',
+        'plan',
+        'test',
+        'validate',
+      ]);
+    });
+
+    it('should pass the region to bootstrap-destroy so it never prompts', async () => {
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      const projectConfig = readProjectConfiguration(
+        tree,
+        '@proj/my-terraform-project',
+      );
+      const bootstrapDestroyTarget = projectConfig.targets['bootstrap-destroy'];
+
+      expect(bootstrapDestroyTarget.options.commands).toEqual([
+        'tsx {projectRoot}/scripts/bootstrap-destroy.ts {projectRoot}',
+      ]);
+      expect(bootstrapDestroyTarget.options.cwd).toBe('{workspaceRoot}');
+
+      // `aws_region` has no default, so a bare `terraform destroy` blocks
+      // forever on its input prompt in any non-TTY context.
+      const script = tree.read(
+        'packages/my-terraform-project/scripts/bootstrap-destroy.ts',
+        'utf-8',
+      );
+      expect(script).toContain('`-var=aws_region=${region}`');
+      expect(script).toContain("'-auto-approve'");
+      expect(script).toContain('resolveAwsConfig');
+    });
+
+    it('should vend a checkov config and wire it into the scan', async () => {
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      const projectConfig = readProjectConfiguration(
+        tree,
+        '@proj/my-terraform-project',
+      );
+
+      expect(
+        tree.exists('packages/my-terraform-project/checkov.yml'),
+      ).toBeTruthy();
+      expect(projectConfig.targets['checkov'].options.command).toContain(
+        '--config-file ../checkov.yml',
+      );
+    });
+
+    it('should preserve user-curated checkov skips on re-run', async () => {
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      const checkovConfigPath = 'packages/my-terraform-project/checkov.yml';
+      tree.write(checkovConfigPath, 'skip-check:\n  - CKV_AWS_999\n');
+
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      expect(tree.read(checkovConfigPath, 'utf-8')).toContain('CKV_AWS_999');
+    });
+
+    it('should declare a required_version in both providers.tf', async () => {
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      for (const providersPath of [
+        'packages/my-terraform-project/src/providers.tf',
+        'packages/my-terraform-project/bootstrap/providers.tf',
+      ]) {
+        expect(tree.read(providersPath, 'utf-8')).toContain(
+          'required_version = ">= 1.0"',
+        );
+      }
+    });
+
     it('should declare all dependencies at the root and vend no project package.json', async () => {
       await terraformProjectGenerator(tree, applicationSchema);
 
@@ -239,6 +332,7 @@ describe('terraformProjectGenerator', () => {
       );
 
       // Verify only library targets are present (no application targets)
+      expect(projectConfig.targets).toHaveProperty('checkov');
       expect(projectConfig.targets).toHaveProperty('fmt');
       expect(projectConfig.targets).toHaveProperty('init');
       expect(projectConfig.targets).toHaveProperty('test');
@@ -277,11 +371,14 @@ describe('terraformProjectGenerator', () => {
       expect(validateTarget.options.cwd).toBe('{projectRoot}/src');
       expect(validateTarget.dependsOn).toEqual(['init']);
 
-      // Test test target
-      const testTarget = projectConfig.targets['test'];
-      expect(testTarget.executor).toBe('nx:run-commands');
-      expect(testTarget.cache).toBe(true);
-      expect(testTarget.options.command).toContain('uvx --from checkov==');
+      // Test checkov target, which carries the scan
+      const checkovTarget = projectConfig.targets['checkov'];
+      expect(checkovTarget.executor).toBe('nx:run-commands');
+      expect(checkovTarget.cache).toBe(true);
+      expect(checkovTarget.options.command).toContain('uvx --from checkov==');
+
+      // `test` is an alias of it
+      expect(projectConfig.targets['test'].dependsOn).toEqual(['checkov']);
     });
   });
 
@@ -478,9 +575,9 @@ describe('terraformProjectGenerator', () => {
         projectConfig.targets['apply'].configurations.dev.command;
       expect(applyCommand).toContain('dist/{projectRoot}/terraform/dev.tfplan');
 
-      // Check that test target uses correct checkov output path
-      const testCommand = projectConfig.targets['test'].options.command;
-      expect(testCommand).toContain('dist/{projectRoot}/checkov');
+      // Check that checkov target uses correct checkov output path
+      const checkovCommand = projectConfig.targets['checkov'].options.command;
+      expect(checkovCommand).toContain('dist/{projectRoot}/checkov');
     });
   });
 
