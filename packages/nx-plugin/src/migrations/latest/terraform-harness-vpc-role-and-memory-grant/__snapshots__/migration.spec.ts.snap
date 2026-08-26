@@ -1,0 +1,487 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`terraform-harness-vpc-role-and-memory-grant migration > snapshots the migrated module 1`] = `
+"terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "6.61.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "3.6.3"
+    }
+  }
+}
+
+variable "model_id" {
+  description = "Amazon Bedrock model or inference profile used by default."
+  type        = string
+  default     = "global.anthropic.claude-sonnet-4-6"
+}
+
+variable "allowed_tools" {
+  description = "Tools the Harness may use, e.g. [\\"@builtin\\"] or narrower patterns such as [\\"@builtin/file_operations\\"]. Deploys with no tools when null."
+  type        = list(string)
+  default     = null
+}
+
+variable "memory" {
+  description = "Memory configuration for the Harness. Null leaves the service to provision managed memory with default strategies. Set exactly one field: managed_memory_configuration to tune that managed memory, agentcore_memory_configuration to use a memory resource you own, or disabled to turn memory off."
+  type = object({
+    managed_memory_configuration = optional(object({
+      strategies            = optional(set(string))
+      event_expiry_duration = optional(number)
+      encryption_key_arn    = optional(string)
+    }))
+    agentcore_memory_configuration = optional(object({
+      arn            = string
+      actor_id       = optional(string)
+      messages_count = optional(number)
+    }))
+    disabled = optional(bool, false)
+  })
+  default = null
+
+  validation {
+    condition = var.memory == null || length([
+      for configured in [
+        var.memory.managed_memory_configuration != null,
+        var.memory.agentcore_memory_configuration != null,
+        var.memory.disabled,
+      ] : configured if configured
+    ]) == 1
+    error_message = "Set exactly one of memory.managed_memory_configuration, memory.agentcore_memory_configuration or memory.disabled."
+  }
+}
+
+variable "environment_variables" {
+  description = "Environment variables available to the Harness."
+  type        = map(string)
+  default     = null
+  sensitive   = true
+}
+
+variable "max_iterations" {
+  description = "Maximum agent loop iterations per invocation. Uses the service default when null."
+  type        = number
+  default     = null
+}
+
+variable "timeout_seconds" {
+  description = "Maximum seconds an invocation may run. Uses the service default when null."
+  type        = number
+  default     = null
+}
+
+variable "execution_role_arn" {
+  description = "ARN of an existing IAM role for the Harness to assume. Used as-is: no role is created and none of the baseline permissions below are granted. Creates the baseline role when null."
+  type        = string
+  default     = null
+
+  validation {
+    condition = var.execution_role_arn == null || (
+      var.model_resource_arns == null && length(var.additional_execution_role_policy_statements) == 0
+    )
+    error_message = "model_resource_arns and additional_execution_role_policy_statements configure the generated execution role, which is not created when execution_role_arn is supplied. Grant those permissions on the supplied role instead."
+  }
+}
+
+variable "model_resource_arns" {
+  description = "Bedrock model and inference-profile ARNs the execution role may invoke. Defaults to every foundation model plus this account's Bedrock resources in the deployment region; replace with narrower ARNs to restrict baseline model access."
+  type        = set(string)
+  default     = null
+}
+
+variable "additional_execution_role_policy_statements" {
+  description = "Additional least-privilege IAM policy statements required by configured optional capabilities (e.g. customer-owned Gateways, memory, custom browsers or code interpreters, skills, secrets). Sid and Condition are optional; null fields are omitted from the rendered policy."
+  type = list(object({
+    Sid       = optional(string)
+    Effect    = string
+    Action    = list(string)
+    Resource  = list(string)
+    Condition = optional(any)
+  }))
+  default = []
+}
+
+# VPC Configuration (optional)
+variable "enable_vpc" {
+  description = "Run the Harness inside a VPC so it can reach private resources. Set alongside vpc_id/subnet_ids."
+  type        = bool
+  default     = false
+}
+
+variable "vpc_id" {
+  description = "VPC ID to run the Harness in. Required when enable_vpc is true."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = !var.enable_vpc || (var.vpc_id != null && var.subnet_ids != null)
+    error_message = "vpc_id and subnet_ids must be set when enable_vpc is true."
+  }
+}
+
+variable "subnet_ids" {
+  description = "Subnet IDs to run the Harness in. Required when enable_vpc is true."
+  type        = list(string)
+  default     = null
+}
+
+variable "tags" {
+  description = "Tags to apply to resources"
+  type        = map(string)
+  default     = {}
+}
+
+data "aws_caller_identity" "current" {}
+data "aws_partition" "current" {}
+data "aws_region" "current" {}
+
+resource "random_id" "unique_suffix" {
+  byte_length = 4
+}
+
+locals {
+  account_id = data.aws_caller_identity.current.account_id
+  partition  = data.aws_partition.current.partition
+  region     = data.aws_region.current.region
+
+  # Capped at 31 characters so the suffix keeps the deployed Harness name
+  # within its 40-character limit.
+  harness_name_prefix = "MyHarness"
+  harness_name        = "\${local.harness_name_prefix}_\${random_id.unique_suffix.hex}"
+
+  # Set var.model_resource_arns to narrow the default model access.
+  model_resource_arns = var.model_resource_arns != null ? var.model_resource_arns : [
+    "arn:\${local.partition}:bedrock:*::foundation-model/*",
+    "arn:\${local.partition}:bedrock:\${local.region}:\${local.account_id}:*",
+  ]
+
+  create_execution_role = var.execution_role_arn == null
+  execution_role_arn    = local.create_execution_role ? aws_iam_role.execution_role[0].arn : var.execution_role_arn
+
+  # The service provisions managed memory unless var.memory redirects it
+  # elsewhere or turns it off.
+  has_managed_memory = var.memory == null || var.memory.managed_memory_configuration != null
+}
+
+resource "aws_iam_role" "execution_role" {
+  count = local.create_execution_role ? 1 : 0
+
+  name = "\${local.harness_name_prefix}-HarnessRole-\${random_id.unique_suffix.hex}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Principal = {
+        Service = "bedrock-agentcore.amazonaws.com"
+      }
+      Action = "sts:AssumeRole"
+      Condition = {
+        StringEquals = {
+          "aws:SourceAccount" = local.account_id
+        }
+        ArnLike = {
+          "aws:SourceArn" = "arn:\${local.partition}:bedrock-agentcore:\${local.region}:\${local.account_id}:*"
+        }
+      }
+    }]
+  })
+
+  tags = var.tags
+}
+
+# Baseline permissions per the AgentCore Harness security guidance; extend for
+# customer-owned resources via var.additional_execution_role_policy_statements.
+# https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-security.html
+resource "aws_iam_role_policy" "execution_role" {
+  count = local.create_execution_role ? 1 : 0
+
+  name = "\${local.harness_name_prefix}-HarnessPolicy"
+  role = aws_iam_role.execution_role[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = concat([
+      {
+        Sid    = "BedrockModelInvocation"
+        Effect = "Allow"
+        Action = [
+          "bedrock:InvokeModel",
+          "bedrock:InvokeModelWithResponseStream",
+        ]
+        Resource = local.model_resource_arns
+      },
+      {
+        #checkov:skip=CKV_AWS_355:EcrPublicTokenAccess requires a wildcard resource; ecr-public:GetAuthorizationToken has no resource-level permission
+        Sid      = "EcrPublicTokenAccess"
+        Effect   = "Allow"
+        Action   = ["ecr-public:GetAuthorizationToken"]
+        Resource = ["*"]
+      },
+      {
+        #checkov:skip=CKV_AWS_355:StsForEcrPublicPull requires a wildcard resource; sts:GetServiceBearerToken has no resource-level permission
+        Sid      = "StsForEcrPublicPull"
+        Effect   = "Allow"
+        Action   = ["sts:GetServiceBearerToken"]
+        Resource = ["*"]
+      },
+      {
+        #checkov:skip=CKV_AWS_355:XRayTracingAccess requires a wildcard resource; the X-Ray segment and sampling APIs have no resource-level permission
+        #checkov:skip=CKV_AWS_290:XRayTracingAccess requires a wildcard resource; the X-Ray segment and sampling APIs have no resource-level permission
+        Sid    = "XRayTracingAccess"
+        Effect = "Allow"
+        Action = [
+          "xray:PutTraceSegments",
+          "xray:PutTelemetryRecords",
+          "xray:GetSamplingRules",
+          "xray:GetSamplingTargets",
+        ]
+        Resource = ["*"]
+      },
+      {
+        Sid    = "CloudWatchLogsGroup"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:DescribeLogStreams",
+        ]
+        Resource = [
+          "arn:\${local.partition}:logs:\${local.region}:\${local.account_id}:log-group:/aws/bedrock-agentcore/runtimes/*",
+        ]
+      },
+      {
+        Sid      = "CloudWatchLogsDescribeGroups"
+        Effect   = "Allow"
+        Action   = ["logs:DescribeLogGroups"]
+        Resource = ["arn:\${local.partition}:logs:\${local.region}:\${local.account_id}:log-group:*"]
+      },
+      {
+        Sid    = "CloudWatchLogsStream"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+        ]
+        Resource = [
+          "arn:\${local.partition}:logs:\${local.region}:\${local.account_id}:log-group:/aws/bedrock-agentcore/runtimes/*:log-stream:*",
+        ]
+      },
+      {
+        #checkov:skip=CKV_AWS_355:CloudWatchMetricsPublish requires a wildcard resource; cloudwatch:PutMetricData is scoped by the namespace condition instead
+        #checkov:skip=CKV_AWS_290:CloudWatchMetricsPublish requires a wildcard resource; cloudwatch:PutMetricData is scoped by the namespace condition instead
+        Sid      = "CloudWatchMetricsPublish"
+        Effect   = "Allow"
+        Action   = ["cloudwatch:PutMetricData"]
+        Resource = ["*"]
+        Condition = {
+          StringEquals = {
+            "cloudwatch:namespace" = "bedrock-agentcore"
+          }
+        }
+      },
+      {
+        Sid    = "AgentCoreWorkloadIdentity"
+        Effect = "Allow"
+        Action = [
+          "bedrock-agentcore:GetWorkloadAccessToken",
+          "bedrock-agentcore:GetWorkloadAccessTokenForJWT",
+        ]
+        Resource = [
+          "arn:\${local.partition}:bedrock-agentcore:\${local.region}:\${local.account_id}:workload-identity-directory/default",
+          "arn:\${local.partition}:bedrock-agentcore:\${local.region}:\${local.account_id}:workload-identity-directory/default/workload-identity/harness_\${local.harness_name}-*",
+        ]
+      },
+      {
+        Sid    = "AgentCoreBrowserDefault"
+        Effect = "Allow"
+        Action = [
+          "bedrock-agentcore:StartBrowserSession",
+          "bedrock-agentcore:StopBrowserSession",
+          "bedrock-agentcore:GetBrowserSession",
+          "bedrock-agentcore:ListBrowserSessions",
+          "bedrock-agentcore:UpdateBrowserStream",
+          "bedrock-agentcore:ConnectBrowserAutomationStream",
+          "bedrock-agentcore:ConnectBrowserLiveViewStream",
+        ]
+        Resource = [
+          "arn:\${local.partition}:bedrock-agentcore:\${local.region}:aws:browser/*",
+        ]
+      },
+      {
+        Sid    = "AgentCoreCodeInterpreterDefault"
+        Effect = "Allow"
+        Action = [
+          "bedrock-agentcore:StartCodeInterpreterSession",
+          "bedrock-agentcore:StopCodeInterpreterSession",
+          "bedrock-agentcore:GetCodeInterpreterSession",
+          "bedrock-agentcore:ListCodeInterpreterSessions",
+          "bedrock-agentcore:InvokeCodeInterpreter",
+        ]
+        Resource = [
+          "arn:\${local.partition}:bedrock-agentcore:\${local.region}:aws:code-interpreter/*",
+        ]
+      },
+      ], [
+      # Null Sid/Condition fields are dropped from the rendered policy.
+      for statement in var.additional_execution_role_policy_statements :
+      { for key, value in statement : key => value if value != null }
+    ])
+  })
+}
+
+# Security group for the Harness, used when running inside a VPC
+resource "aws_security_group" "harness" {
+  count = var.enable_vpc ? 1 : 0
+
+  #checkov:skip=CKV2_AWS_5:Attached to the Harness via its network configuration; Checkov cannot resolve this reference
+  name_prefix = "\${local.harness_name_prefix}-harness-"
+  description = "Security group for the \${local.harness_name_prefix} Harness"
+  vpc_id      = var.vpc_id
+  tags        = var.tags
+}
+
+resource "aws_vpc_security_group_egress_rule" "harness_https" {
+  count = var.enable_vpc ? 1 : 0
+
+  security_group_id = aws_security_group.harness[0].id
+  cidr_ipv4         = "0.0.0.0/0"
+  from_port         = 443
+  to_port           = 443
+  ip_protocol       = "tcp"
+  description       = "Allow outbound HTTPS to AWS service endpoints"
+}
+
+# Omitting authorizer_configuration uses IAM inbound authorization; add a
+# custom_jwt_authorizer block to change that.
+resource "aws_bedrockagentcore_harness" "this" {
+  harness_name       = local.harness_name
+  execution_role_arn = local.execution_role_arn
+
+  allowed_tools         = var.allowed_tools
+  environment_variables = var.environment_variables
+  max_iterations        = var.max_iterations
+  timeout_seconds       = var.timeout_seconds
+
+  model {
+    bedrock_model_config {
+      model_id = var.model_id
+    }
+  }
+
+  # Read at plan time; the walk up from path.module reaches the workspace root.
+  system_prompt {
+    text = file("\${path.module}/../../../../../../../packages/my-harness/src/PROMPT.md")
+  }
+
+  dynamic "memory" {
+    for_each = var.memory != null ? [var.memory] : []
+    content {
+      dynamic "managed_memory_configuration" {
+        for_each = memory.value.managed_memory_configuration != null ? [memory.value.managed_memory_configuration] : []
+        content {
+          strategies            = managed_memory_configuration.value.strategies
+          event_expiry_duration = managed_memory_configuration.value.event_expiry_duration
+          encryption_key_arn    = managed_memory_configuration.value.encryption_key_arn
+        }
+      }
+
+      dynamic "agentcore_memory_configuration" {
+        for_each = memory.value.agentcore_memory_configuration != null ? [memory.value.agentcore_memory_configuration] : []
+        content {
+          arn            = agentcore_memory_configuration.value.arn
+          actor_id       = agentcore_memory_configuration.value.actor_id
+          messages_count = agentcore_memory_configuration.value.messages_count
+        }
+      }
+
+      dynamic "disabled" {
+        for_each = memory.value.disabled ? [1] : []
+        content {}
+      }
+    }
+  }
+
+  dynamic "environment" {
+    for_each = var.enable_vpc ? [1] : []
+    content {
+      agentcore_runtime_environment {
+        network_configuration {
+          network_mode = "VPC"
+          network_mode_config {
+            security_groups = [aws_security_group.harness[0].id]
+            subnets         = var.subnet_ids
+          }
+        }
+      }
+    }
+  }
+
+  tags = var.tags
+
+  depends_on = [aws_iam_role_policy.execution_role]
+}
+
+# Scoped to the memory ARN the service assigns, which is only readable after the
+# Harness exists, so this is a policy of its own rather than a baseline
+# statement. Skipped when the Harness uses a role or memory the module did not
+# create.
+resource "aws_iam_role_policy" "managed_memory" {
+  count = local.create_execution_role && local.has_managed_memory ? 1 : 0
+
+  name = "\${local.harness_name_prefix}-HarnessManagedMemoryPolicy"
+  role = aws_iam_role.execution_role[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid    = "AgentCoreManagedMemory"
+      Effect = "Allow"
+      Action = [
+        "bedrock-agentcore:CreateEvent",
+        "bedrock-agentcore:DeleteEvent",
+        "bedrock-agentcore:GetEvent",
+        "bedrock-agentcore:ListEvents",
+        "bedrock-agentcore:RetrieveMemoryRecords",
+      ]
+      Resource = [
+        aws_bedrockagentcore_harness.this.memory_actual[0].managed_memory_configuration[0].arn,
+      ]
+    }]
+  })
+}
+
+module "add_harness_arn_to_runtime_config" {
+  source = "../../../core/runtime-config/entry"
+
+  namespace = "agentcore"
+  key       = "harnesses"
+  value     = { "MyHarness" = aws_bedrockagentcore_harness.this.arn }
+}
+
+output "harness_id" {
+  description = "ID of the Amazon Bedrock AgentCore Harness"
+  value       = aws_bedrockagentcore_harness.this.harness_id
+}
+
+output "harness_arn" {
+  description = "ARN of the Amazon Bedrock AgentCore Harness"
+  value       = aws_bedrockagentcore_harness.this.arn
+}
+
+output "execution_role_arn" {
+  description = "ARN of the IAM role assumed by the Harness, whether generated or supplied via var.execution_role_arn"
+  value       = local.execution_role_arn
+}
+
+output "security_group_id" {
+  description = "Security group ID of the Harness, for use in ingress rules on resources it must reach (e.g. a database). Null unless enable_vpc is true."
+  value       = var.enable_vpc ? aws_security_group.harness[0].id : null
+}
+"
+`;
