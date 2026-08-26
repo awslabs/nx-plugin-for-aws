@@ -8,12 +8,12 @@ import {
   OverwriteStrategy,
   type Tree,
 } from '@nx/devkit';
-import { addHookResultToRouterProviderContext } from '../../../utils/ast/website.js';
 import {
   addSingleImport,
   applyGritQL,
   matchGritQL,
 } from '../../../utils/ast.js';
+import { addHookResultToRouterProviderContext } from '../../../utils/ast/website.js';
 import { formatFilesInSubtree } from '../../../utils/format.js';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics.js';
 import { getNpmScopePrefix } from '../../../utils/npm-scope.js';

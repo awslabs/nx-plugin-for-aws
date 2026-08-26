@@ -5,8 +5,8 @@
 
 import type { Tree } from '@nx/devkit';
 import { importTypeScriptModule } from '../../utils/js.js';
-import { expectTypeScriptToCompile } from '../../utils/test/ts.spec.js';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import { expectTypeScriptToCompile } from '../../utils/test/ts.spec.js';
 import type { Spec } from '../utils/types.js';
 import { openApiTsClientGenerator } from './generator.js';
 import { baseUrl, callGeneratedClient } from './generator.utils.spec.js';

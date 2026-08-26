@@ -4,8 +4,8 @@
  */
 import type { Tree } from '@nx/devkit';
 import { importTypeScriptModule } from '../../utils/js.js';
-import { TypeScriptVerifier } from '../../utils/test/ts.spec.js';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import { TypeScriptVerifier } from '../../utils/test/ts.spec.js';
 import type { Spec } from '../utils/types.js';
 import { openApiTsMetadataGenerator } from './generator.js';
 
