@@ -12,17 +12,19 @@ A configuração de runtime é o mecanismo usado pelo Nx Plugin for AWS para pas
 
 A configuração de runtime é organizada em **namespaces**. Cada namespace é um agrupamento lógico de valores de configuração relacionados. No momento da implantação, todos os namespaces são armazenados no **AWS AppConfig** como Configuration Profiles.
 
-Dois namespaces integrados são usados por constructs gerados:
+Quatro namespaces integrados são usados por constructs gerados:
 
 - **`connection`** — configuração que permite que projetos gerados se conectem uns aos outros:
   - **URLs de API** — registradas automaticamente por constructs de API
   - **Configurações do Cognito** — registradas automaticamente pelo construct UserIdentity
   - **ARNs de runtime de Agent** — adicionados pelo gerador de conexão quando você conecta um site React a um Agent
 - **`agentcore`** — ARNs de runtime do AgentCore para agents e servidores MCP. Registrados automaticamente pelos constructs de agent/MCP e usados para descoberta do lado do servidor (agent → agent via A2A, agent → servidor MCP).
+- **`dynamodb`** — nomes de tabelas, registrados automaticamente por constructs de tabela DynamoDB e lidos pelo cliente de tabela gerado.
+- **`database`** — detalhes de conexão do Aurora, registrados automaticamente por constructs de banco de dados relacional e lidos pelo cliente de banco de dados gerado.
 
-O namespace `connection` também é implantado como um arquivo `runtime-config.json` no bucket S3 do seu site, permitindo a descoberta de recursos de backend do lado do cliente. O namespace `agentcore` é apenas do lado do servidor (via AppConfig), portanto os ARNs de runtime de agent não são expostos ao frontend, a menos que você conecte explicitamente um site a um agent.
+O namespace `connection` também é implantado como um arquivo `runtime-config.json` no bucket S3 do seu site, permitindo a descoberta de recursos de backend do lado do cliente. Os outros namespaces são apenas do lado do servidor (via AppConfig), portanto valores como ARNs de runtime de agent e nomes de tabelas não são expostos ao frontend, a menos que você conecte explicitamente um site a eles.
 
-Você pode definir quantos namespaces adicionais desejar, fornecendo uma alternativa conveniente às variáveis de ambiente para passar valores de tempo de implantação, como nomes de tabelas DynamoDB, para suas funções Lambda ou outros recursos de computação.
+Você pode definir quantos namespaces adicionais desejar, fornecendo uma alternativa conveniente às variáveis de ambiente para passar valores de tempo de implantação para suas funções Lambda ou outros recursos de computação.
 
 ```d2
 direction: down
@@ -104,6 +106,17 @@ O Terraform conecta a configuração de runtime através de três módulos `core
      source = "../../common/terraform/src/core/runtime-config/appconfig"
 
      application_name = "my-app-runtime-config"
+   }
+   ```
+
+   A variável `namespaces` tem como padrão todos os namespaces integrados, então os módulos gerados funcionam sem configurá-la. Para adicionar seus próprios namespaces, liste-os junto com os integrados:
+
+   ```hcl title="packages/infra/src/main.tf"
+   module "runtime_config_appconfig" {
+     source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+     application_name = "my-app-runtime-config"
+     namespaces       = ["connection", "agentcore", "database", "dynamodb", "tables"]
    }
    ```
 

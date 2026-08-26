@@ -12,17 +12,19 @@ Cấu hình runtime là cơ chế được Nx Plugin for AWS sử dụng để t
 
 Cấu hình runtime được tổ chức thành các **namespace**. Mỗi namespace là một nhóm logic của các giá trị cấu hình liên quan. Tại thời điểm triển khai, tất cả các namespace được lưu trữ trong **AWS AppConfig** dưới dạng Configuration Profiles.
 
-Hai namespace tích hợp sẵn được sử dụng bởi các construct được tạo:
+Bốn namespace tích hợp sẵn được sử dụng bởi các construct được tạo:
 
 - **`connection`** — cấu hình cho phép các dự án được tạo kết nối với nhau:
   - **API URLs** — được đăng ký tự động bởi các construct API
   - **Cognito settings** — được đăng ký tự động bởi construct UserIdentity
   - **Agent runtime ARNs** — được thêm bởi trình tạo kết nối khi bạn kết nối một website React với một Agent
 - **`agentcore`** — AgentCore runtime ARNs cho các agent và MCP server. Được đăng ký tự động bởi các construct agent/MCP và được sử dụng để khám phá phía server (agent → agent qua A2A, agent → MCP server).
+- **`dynamodb`** — tên bảng, được đăng ký tự động bởi các construct bảng DynamoDB và được đọc bởi table client được tạo.
+- **`database`** — chi tiết kết nối Aurora, được đăng ký tự động bởi các construct cơ sở dữ liệu quan hệ và được đọc bởi database client được tạo.
 
-Namespace `connection` cũng được triển khai dưới dạng file `runtime-config.json` vào S3 bucket của website của bạn, cho phép khám phá các tài nguyên backend từ phía client. Namespace `agentcore` chỉ dành cho phía server (qua AppConfig) nên các agent runtime ARN không được tiết lộ cho frontend trừ khi bạn kết nối rõ ràng một website với một agent.
+Namespace `connection` cũng được triển khai dưới dạng file `runtime-config.json` vào S3 bucket của website của bạn, cho phép khám phá các tài nguyên backend từ phía client. Các namespace khác chỉ dành cho phía server (qua AppConfig), vì vậy các giá trị như agent runtime ARN và tên bảng không được tiết lộ cho frontend trừ khi bạn kết nối rõ ràng một website với chúng.
 
-Bạn có thể định nghĩa bao nhiêu namespace bổ sung tùy thích, cung cấp một giải pháp thay thế thuận tiện cho các biến môi trường để truyền các giá trị tại thời điểm triển khai như tên bảng DynamoDB cho các hàm Lambda hoặc tài nguyên tính toán khác của bạn.
+Bạn có thể định nghĩa bao nhiêu namespace bổ sung tùy thích, cung cấp một giải pháp thay thế thuận tiện cho các biến môi trường để truyền các giá trị tại thời điểm triển khai cho các hàm Lambda hoặc tài nguyên tính toán khác của bạn.
 
 ```d2
 direction: down
@@ -104,6 +106,17 @@ Terraform kết nối cấu hình runtime qua ba module `core/runtime-config/*`.
      source = "../../common/terraform/src/core/runtime-config/appconfig"
 
      application_name = "my-app-runtime-config"
+   }
+   ```
+
+   Biến `namespaces` mặc định là mọi namespace tích hợp sẵn, vì vậy các module được tạo hoạt động mà không cần cấu hình nó. Để thêm các namespace của riêng bạn, liệt kê chúng cùng với các namespace tích hợp sẵn:
+
+   ```hcl title="packages/infra/src/main.tf"
+   module "runtime_config_appconfig" {
+     source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+     application_name = "my-app-runtime-config"
+     namespaces       = ["connection", "agentcore", "database", "dynamodb", "tables"]
    }
    ```
 

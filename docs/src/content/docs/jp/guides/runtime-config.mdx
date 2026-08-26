@@ -12,17 +12,19 @@ import Link from '@components/link.astro';
 
 ランタイム設定は**名前空間**に整理されています。各名前空間は、関連する設定値の論理的なグループです。デプロイ時に、すべての名前空間は**AWS AppConfig**に設定プロファイルとして保存されます。
 
-生成されたコンストラクトによって使用される2つの組み込み名前空間があります：
+生成されたコンストラクトによって使用される4つの組み込み名前空間があります：
 
 - **`connection`** — 生成されたプロジェクトが相互に接続できるようにする設定：
   - **API URL** — APIコンストラクトによって自動的に登録されます
   - **Cognito設定** — UserIdentityコンストラクトによって自動的に登録されます
   - **エージェントランタイムARN** — Reactウェブサイトをエージェントに接続する際に、接続ジェネレーターによって追加されます
 - **`agentcore`** — エージェントとMCPサーバー用のAgentCoreランタイムARN。エージェント/MCPコンストラクトによって自動的に登録され、サーバーサイドの検出（A2A経由のエージェント→エージェント、エージェント→MCPサーバー）に使用されます。
+- **`dynamodb`** — テーブル名。DynamoDBテーブルコンストラクトによって自動的に登録され、生成されたテーブルクライアントによって読み取られます。
+- **`database`** — Auroraの接続詳細。リレーショナルデータベースコンストラクトによって自動的に登録され、生成されたデータベースクライアントによって読み取られます。
 
-`connection`名前空間は、ウェブサイトのS3バケットに`runtime-config.json`ファイルとしてもデプロイされ、バックエンドリソースのクライアントサイド検出を可能にします。`agentcore`名前空間はサーバーサイドのみ（AppConfig経由）であるため、ウェブサイトをエージェントに明示的に接続しない限り、エージェントランタイムARNはフロントエンドに公開されません。
+`connection`名前空間は、ウェブサイトのS3バケットに`runtime-config.json`ファイルとしてもデプロイされ、バックエンドリソースのクライアントサイド検出を可能にします。他の名前空間はサーバーサイドのみ（AppConfig経由）であるため、ウェブサイトを明示的に接続しない限り、エージェントランタイムARNやテーブル名などの値はフロントエンドに公開されません。
 
-必要に応じて追加の名前空間をいくつでも定義でき、DynamoDBテーブル名などのデプロイ時の値をLambda関数や他のコンピュートリソースに渡すための環境変数の便利な代替手段を提供します。
+必要に応じて追加の名前空間をいくつでも定義でき、デプロイ時の値をLambda関数や他のコンピュートリソースに渡すための環境変数の便利な代替手段を提供します。
 
 ```d2
 direction: down
@@ -104,6 +106,17 @@ Terraformは、3つの`core/runtime-config/*`モジュールを通じてラン�
      source = "../../common/terraform/src/core/runtime-config/appconfig"
 
      application_name = "my-app-runtime-config"
+   }
+   ```
+
+   `namespaces`変数はデフォルトですべての組み込み名前空間に設定されているため、生成されたモジュールは設定なしで動作します。独自の名前空間を追加するには、組み込みの名前空間と一緒にリストします：
+
+   ```hcl title="packages/infra/src/main.tf"
+   module "runtime_config_appconfig" {
+     source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+     application_name = "my-app-runtime-config"
+     namespaces       = ["connection", "agentcore", "database", "dynamodb", "tables"]
    }
    ```
 
