@@ -294,12 +294,6 @@ variable "enable_rds_proxy" {
   default     = true
 }
 
-variable "enable_credential_rotation" {
-  description = "Whether to enable automatic credential rotation for the admin secret."
-  type        = bool
-  default     = true
-}
-
 variable "enable_cloudwatch_logs" {
   description = "Whether to export Aurora engine logs to CloudWatch. PostgreSQL logs DDL statements only (log_statement=ddl); MySQL enables Advanced Auditing scoped to connections and DDL (server_audit_events=CONNECT,QUERY_DDL). Neither logs statement parameter values, to avoid leaking PII into log data."
   type        = bool
@@ -372,7 +366,6 @@ module "aurora" {
   name                                  = "db"
   vpc_id                                = var.vpc_id
   subnet_ids                            = var.database_subnet_ids
-  lambda_subnet_ids                     = var.lambda_subnet_ids
   engine                                = "aurora-postgresql"
   engine_version                        = var.engine_version
   database_name                         = "database_name"
@@ -384,7 +377,6 @@ module "aurora" {
   deletion_protection                   = var.deletion_protection
   skip_final_snapshot                   = var.skip_final_snapshot
   enable_rds_proxy                      = var.enable_rds_proxy
-  enable_credential_rotation            = var.enable_credential_rotation
   enable_cloudwatch_logs                = var.enable_cloudwatch_logs
   enable_performance_insights           = var.enable_performance_insights
   performance_insights_retention_period = var.performance_insights_retention_period
@@ -754,6 +746,9 @@ resource "aws_lambda_function" "create_db_user" {
   environment {
     variables = {
       DATABASE_SECRET_ARN = module.aurora.secret_arn
+      DATABASE_HOST       = module.aurora.writer_endpoint
+      DATABASE_PORT       = module.aurora.cluster_port
+      DATABASE_NAME       = module.aurora.database_name
     }
   }
 
@@ -830,6 +825,9 @@ resource "aws_lambda_function" "migration_handler" {
   environment {
     variables = {
       DATABASE_SECRET_ARN = module.aurora.secret_arn
+      DATABASE_HOST       = module.aurora.writer_endpoint
+      DATABASE_PORT       = module.aurora.cluster_port
+      DATABASE_NAME       = module.aurora.database_name
     }
   }
 
@@ -1309,12 +1307,26 @@ def get_local_dev_config() -> dict:
 
 
 def get_database_secret() -> DatabaseSecret:
+    """Read the admin credentials secret.
+
+    RDS-managed secrets hold only \`username\` and \`password\`, so the host, port
+    and database name are taken from the environment when the secret omits them.
+    """
     secret_arn = os.environ.get("DATABASE_SECRET_ARN")
     if not secret_arn:
         raise ValueError("Missing required environment variable DATABASE_SECRET_ARN.")
     client = boto3.client("secretsmanager")
     response = client.get_secret_value(SecretId=secret_arn)
-    return json.loads(response["SecretString"])
+    secret = json.loads(response["SecretString"])
+
+    for key, env_var in (("host", "DATABASE_HOST"), ("port", "DATABASE_PORT"), ("dbname", "DATABASE_NAME")):
+        value = os.environ.get(env_var)
+        if value:
+            secret[key] = value
+        if secret.get(key) is None:
+            raise ValueError(f"Database secret is missing {key} and no override was provided in {env_var}.")
+
+    return secret
 
 
 _database_config: dict[str, DatabaseConfig] = {}

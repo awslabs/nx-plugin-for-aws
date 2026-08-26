@@ -39,12 +39,28 @@ def get_local_dev_config() -> dict:
 
 
 def get_database_secret() -> DatabaseSecret:
+    """Read the admin credentials secret.
+
+    RDS-managed secrets hold only `username` and `password`, so the host, port
+    and database name are taken from the environment when the secret omits them.
+    """
     secret_arn = os.environ.get('DATABASE_SECRET_ARN')
     if not secret_arn:
         raise ValueError('Missing required environment variable DATABASE_SECRET_ARN.')
     client = boto3.client('secretsmanager')
     response = client.get_secret_value(SecretId=secret_arn)
-    return json.loads(response['SecretString'])
+    secret = json.loads(response['SecretString'])
+
+    for key, env_var in (('host', 'DATABASE_HOST'), ('port', 'DATABASE_PORT'), ('dbname', 'DATABASE_NAME')):
+        value = os.environ.get(env_var)
+        if value:
+            secret[key] = value
+        if secret.get(key) is None:
+            raise ValueError(
+                f'Database secret is missing {key} and no override was provided in {env_var}.'
+            )
+
+    return secret
 
 
 _database_config: dict[str, DatabaseConfig] = {}
