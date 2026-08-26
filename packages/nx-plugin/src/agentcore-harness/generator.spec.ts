@@ -91,6 +91,7 @@ const SCHEMA_INTERFACE_OPTIONS: Record<
  */
 const TF_CHECKOV_SKIPS = [
   'CKV2_AWS_5:Attached to the Harness via its network configuration; Checkov cannot resolve this reference',
+  'CKV_AWS_355:EcrManagedImageToken requires a wildcard resource; ecr:GetAuthorizationToken has no resource-level permission',
   'CKV_AWS_355:EcrPublicTokenAccess requires a wildcard resource; ecr-public:GetAuthorizationToken has no resource-level permission',
   'CKV_AWS_355:StsForEcrPublicPull requires a wildcard resource; sts:GetServiceBearerToken has no resource-level permission',
   'CKV_AWS_355:XRayTracingAccess requires a wildcard resource; the X-Ray segment and sampling APIs have no resource-level permission',
@@ -587,6 +588,21 @@ describe('agentcore-harness generator', () => {
         'value       = var.enable_vpc ? aws_security_group.harness[0].id : null',
       );
 >>>>>>> 92fe76cf (docs(agentcore-harness): document the Terraform module's variables, VPC support and memory grant)
+    });
+
+    it('grants the private ECR pull VPC mode needs, and only then', () => {
+      // In VPC mode the harness pulls its managed container from a private ECR
+      // repository rather than ECR Public, so the role needs pull permissions
+      // on it or sessions fail to start.
+      expect(tf).toContain('var.enable_vpc ? [');
+      expect(tf).toContain('Sid    = "EcrManagedImagePull"');
+      expect(tf).toContain(
+        'Resource = ["arn:${local.partition}:ecr:${local.region}:*:repository/harness-*"]',
+      );
+      expect(tf).toContain('Sid      = "EcrManagedImageToken"');
+
+      // ECR Public remains the non-VPC path, so both stay.
+      expect(tf).toContain('Sid      = "EcrPublicTokenAccess"');
     });
 
     it('justifies every wildcard IAM statement inline', () => {

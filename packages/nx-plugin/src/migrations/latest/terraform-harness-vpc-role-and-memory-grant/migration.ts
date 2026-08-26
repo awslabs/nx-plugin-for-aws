@@ -405,10 +405,34 @@ const BASELINE_POLICY_TEXT = `resource "aws_iam_role_policy" "execution_role" {
           "arn:\${local.partition}:bedrock-agentcore:\${local.region}:aws:code-interpreter/*",
         ]
       },
-      ], [
-      # Null Sid/Condition fields are dropped from the rendered policy.
-      for statement in var.additional_execution_role_policy_statements :
-      { for key, value in statement : key => value if value != null }
+      ],
+      # In VPC mode the Harness pulls its managed container from a private ECR
+      # repository in the region rather than ECR Public, so it needs pull
+      # permissions on it. The repository is service-owned, hence the wildcard
+      # account.
+      var.enable_vpc ? [
+        {
+          Sid    = "EcrManagedImagePull"
+          Effect = "Allow"
+          Action = [
+            "ecr:BatchGetImage",
+            "ecr:GetDownloadUrlForLayer",
+            "ecr:BatchCheckLayerAvailability",
+          ]
+          Resource = ["arn:\${local.partition}:ecr:\${local.region}:*:repository/harness-*"]
+        },
+        {
+          #checkov:skip=CKV_AWS_355:EcrManagedImageToken requires a wildcard resource; ecr:GetAuthorizationToken has no resource-level permission
+          Sid      = "EcrManagedImageToken"
+          Effect   = "Allow"
+          Action   = ["ecr:GetAuthorizationToken"]
+          Resource = ["*"]
+        },
+      ] : [],
+      [
+        # Null Sid/Condition fields are dropped from the rendered policy.
+        for statement in var.additional_execution_role_policy_statements :
+        { for key, value in statement : key => value if value != null }
     ])
   })
 }`;
