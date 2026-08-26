@@ -46,7 +46,7 @@ const OUTPUTS_TEXT = [
   '}',
   '',
   'output "table_arn" {',
-  '  description = "ARN of the DynamoDB table, for use in IAM policies granting access to the table and (suffixed with /index/*) its global secondary indexes"',
+  '  description = "ARN of the DynamoDB table, for use in IAM policies granting access to the table. Suffix with /index/* to cover its global secondary indexes."',
   '  value       = module.dynamodb_table.table_arn',
   '}',
   '',
