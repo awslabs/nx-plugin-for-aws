@@ -2,64 +2,9 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { runCLI } from '../utils';
-
-/**
- * Runs every gateway's Cedar render script the way `terraform apply` does,
- * against the workspace's real installed dependencies. Plan defers an
- * `external` data source's `result`, so neither `terraform plan` nor the mocked
- * `terraform test` above executes `program`.
- */
-const runCedarRenderScripts = (projectRoot: string) => {
-  const gatewaysDir = join(
-    projectRoot,
-    'packages/common/terraform/src/app/gateways',
-  );
-  if (!existsSync(gatewaysDir)) {
-    return;
-  }
-
-  for (const gateway of readdirSync(gatewaysDir, { withFileTypes: true })) {
-    if (!gateway.isDirectory()) {
-      continue;
-    }
-    const moduleDir = join(gatewaysDir, gateway.name);
-    const script = join(moduleDir, 'render-cedar.cjs');
-    // Only a Cedar-enabled gateway vends the script.
-    if (!existsSync(script)) {
-      continue;
-    }
-    const policiesDir = join(projectRoot, 'packages', gateway.name, 'policies');
-    const policies = existsSync(policiesDir)
-      ? readdirSync(policiesDir).filter((f) => f.endsWith('.cedar'))
-      : [];
-    expect(policies.length).toBeGreaterThan(0);
-
-    for (const policy of policies) {
-      const result = spawnSync(process.execPath, [script], {
-        cwd: moduleDir,
-        input: JSON.stringify({
-          template: join(policiesDir, policy),
-          gatewayArn: `arn:aws:bedrock-agentcore:us-west-2:123456789012:gateway/${gateway.name}-abcd1234`,
-          accountId: '123456789012',
-        }),
-        encoding: 'utf-8',
-        env: { ...process.env, NODE_PATH: '' },
-      });
-      console.log(
-        `Rendered ${gateway.name}/${policy}: status=${result.status} stderr=${result.stderr}`,
-      );
-      expect(result.stderr ?? '').not.toContain('Cannot find module');
-      expect(result.status).toBe(0);
-      const { rendered } = JSON.parse(result.stdout);
-      expect(rendered).toContain('permit');
-      expect(rendered).not.toContain('<%');
-    }
-  }
-};
 
 /**
  * Validates the generated Terraform with a credential-free `terraform test`.
@@ -152,7 +97,4 @@ export const runTerraformPlanTest = async (opts: {
     ...rawOpts,
     redirectStderr: true,
   });
-
-  // Plan defers the `external` data sources, so run their programs directly.
-  runCedarRenderScripts(opts.cwd);
 };

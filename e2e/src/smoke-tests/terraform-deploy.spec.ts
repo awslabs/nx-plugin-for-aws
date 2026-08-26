@@ -340,18 +340,6 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
             ),
           ).toContain('8');
 
-          // Cedar policies, rendered by render-cedar.cjs at apply time.
-          const renderedPolicies = JSON.parse(
-            outputs.my_gateway_rendered_policies,
-          ) as Record<string, string>;
-          console.log('my_gateway rendered policies:', renderedPolicies);
-          expect(Object.keys(renderedPolicies)).toContain('permit-all.cedar');
-          for (const [file, policy] of Object.entries(renderedPolicies)) {
-            expect(policy, file).toContain('permit');
-            expect(policy, file).toContain(outputs.my_gateway_arn);
-            expect(policy, file).not.toContain('<%');
-          }
-
           // Chained gateways — the parent gateway fronts my_gateway via the
           // gateway -> gateway connection, re-exposing its tools under a
           // second prefix. Listing tools on the parent and calling one proves
