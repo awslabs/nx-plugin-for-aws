@@ -606,20 +606,73 @@ resource "aws_wafv2_web_acl" "api_waf" {
   }
 }
 
-# CloudWatch Log Group for WAF request logs. Name must start with \`aws-waf-logs-\`.
-resource "aws_cloudwatch_log_group" "api_waf_logs" {
-  #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
-  #checkov:skip=CKV_AWS_338:Log retention set to one month which is sufficient for WAF logs
-  count = var.enable_waf ? 1 : 0
-
-  name              = "aws-waf-logs-\${var.api_name}-\${random_id.waf_log_suffix[0].hex}"
-  retention_in_days = 30
-  tags              = var.tags
-}
-
 resource "random_id" "waf_log_suffix" {
   count       = var.enable_waf ? 1 : 0
   byte_length = 4
+}
+
+locals {
+  waf_log_group_name = var.enable_waf ? "aws-waf-logs-\${var.api_name}-\${random_id.waf_log_suffix[0].hex}" : null
+}
+
+# KMS key for encrypting WAF request logs at rest
+resource "aws_kms_key" "waf_logs" {
+  count = var.enable_waf ? 1 : 0
+
+  description             = "\${var.api_name} API WAF log encryption"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "Enable IAM User Permissions"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::\${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        Sid       = "Allow CloudWatch Logs"
+        Effect    = "Allow"
+        Principal = { Service = "logs.\${data.aws_region.current.region}.amazonaws.com" }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+        Condition = {
+          ArnEquals = {
+            "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:\${data.aws_region.current.region}:\${data.aws_caller_identity.current.account_id}:log-group:\${local.waf_log_group_name}"
+          }
+        }
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_kms_alias" "waf_logs" {
+  count = var.enable_waf ? 1 : 0
+
+  name          = "alias/\${var.api_name}-\${random_id.waf_log_suffix[0].hex}-waf-logs"
+  target_key_id = aws_kms_key.waf_logs[0].key_id
+}
+
+# CloudWatch Log Group for WAF request logs. Name must start with \`aws-waf-logs-\`.
+resource "aws_cloudwatch_log_group" "api_waf_logs" {
+  #checkov:skip=CKV_AWS_338:Log retention set to one month which is sufficient for WAF logs
+  count = var.enable_waf ? 1 : 0
+
+  name              = local.waf_log_group_name
+  retention_in_days = 30
+  kms_key_id        = aws_kms_key.waf_logs[0].arn
+  tags              = var.tags
 }
 
 resource "aws_wafv2_web_acl_logging_configuration" "api_waf_logging" {
@@ -2105,20 +2158,73 @@ resource "aws_wafv2_web_acl" "api_waf" {
   }
 }
 
-# CloudWatch Log Group for WAF request logs. Name must start with \`aws-waf-logs-\`.
-resource "aws_cloudwatch_log_group" "api_waf_logs" {
-  #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
-  #checkov:skip=CKV_AWS_338:Log retention set to one month which is sufficient for WAF logs
-  count = var.enable_waf ? 1 : 0
-
-  name              = "aws-waf-logs-\${var.api_name}-\${random_id.waf_log_suffix[0].hex}"
-  retention_in_days = 30
-  tags              = var.tags
-}
-
 resource "random_id" "waf_log_suffix" {
   count       = var.enable_waf ? 1 : 0
   byte_length = 4
+}
+
+locals {
+  waf_log_group_name = var.enable_waf ? "aws-waf-logs-\${var.api_name}-\${random_id.waf_log_suffix[0].hex}" : null
+}
+
+# KMS key for encrypting WAF request logs at rest
+resource "aws_kms_key" "waf_logs" {
+  count = var.enable_waf ? 1 : 0
+
+  description             = "\${var.api_name} API WAF log encryption"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "Enable IAM User Permissions"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::\${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        Sid       = "Allow CloudWatch Logs"
+        Effect    = "Allow"
+        Principal = { Service = "logs.\${data.aws_region.current.region}.amazonaws.com" }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+        Condition = {
+          ArnEquals = {
+            "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:\${data.aws_region.current.region}:\${data.aws_caller_identity.current.account_id}:log-group:\${local.waf_log_group_name}"
+          }
+        }
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_kms_alias" "waf_logs" {
+  count = var.enable_waf ? 1 : 0
+
+  name          = "alias/\${var.api_name}-\${random_id.waf_log_suffix[0].hex}-waf-logs"
+  target_key_id = aws_kms_key.waf_logs[0].key_id
+}
+
+# CloudWatch Log Group for WAF request logs. Name must start with \`aws-waf-logs-\`.
+resource "aws_cloudwatch_log_group" "api_waf_logs" {
+  #checkov:skip=CKV_AWS_338:Log retention set to one month which is sufficient for WAF logs
+  count = var.enable_waf ? 1 : 0
+
+  name              = local.waf_log_group_name
+  retention_in_days = 30
+  kms_key_id        = aws_kms_key.waf_logs[0].arn
+  tags              = var.tags
 }
 
 resource "aws_wafv2_web_acl_logging_configuration" "api_waf_logging" {
@@ -3088,20 +3194,73 @@ resource "aws_wafv2_web_acl" "api_waf" {
   }
 }
 
-# CloudWatch Log Group for WAF request logs. Name must start with \`aws-waf-logs-\`.
-resource "aws_cloudwatch_log_group" "api_waf_logs" {
-  #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
-  #checkov:skip=CKV_AWS_338:Log retention set to one month which is sufficient for WAF logs
-  count = var.enable_waf ? 1 : 0
-
-  name              = "aws-waf-logs-\${var.api_name}-\${random_id.waf_log_suffix[0].hex}"
-  retention_in_days = 30
-  tags              = var.tags
-}
-
 resource "random_id" "waf_log_suffix" {
   count       = var.enable_waf ? 1 : 0
   byte_length = 4
+}
+
+locals {
+  waf_log_group_name = var.enable_waf ? "aws-waf-logs-\${var.api_name}-\${random_id.waf_log_suffix[0].hex}" : null
+}
+
+# KMS key for encrypting WAF request logs at rest
+resource "aws_kms_key" "waf_logs" {
+  count = var.enable_waf ? 1 : 0
+
+  description             = "\${var.api_name} API WAF log encryption"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "Enable IAM User Permissions"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::\${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        Sid       = "Allow CloudWatch Logs"
+        Effect    = "Allow"
+        Principal = { Service = "logs.\${data.aws_region.current.region}.amazonaws.com" }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+        Condition = {
+          ArnEquals = {
+            "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:\${data.aws_region.current.region}:\${data.aws_caller_identity.current.account_id}:log-group:\${local.waf_log_group_name}"
+          }
+        }
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_kms_alias" "waf_logs" {
+  count = var.enable_waf ? 1 : 0
+
+  name          = "alias/\${var.api_name}-\${random_id.waf_log_suffix[0].hex}-waf-logs"
+  target_key_id = aws_kms_key.waf_logs[0].key_id
+}
+
+# CloudWatch Log Group for WAF request logs. Name must start with \`aws-waf-logs-\`.
+resource "aws_cloudwatch_log_group" "api_waf_logs" {
+  #checkov:skip=CKV_AWS_338:Log retention set to one month which is sufficient for WAF logs
+  count = var.enable_waf ? 1 : 0
+
+  name              = local.waf_log_group_name
+  retention_in_days = 30
+  kms_key_id        = aws_kms_key.waf_logs[0].arn
+  tags              = var.tags
 }
 
 resource "aws_wafv2_web_acl_logging_configuration" "api_waf_logging" {

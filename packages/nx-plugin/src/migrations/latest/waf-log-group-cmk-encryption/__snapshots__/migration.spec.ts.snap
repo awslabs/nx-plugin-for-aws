@@ -1,0 +1,286 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`waf-log-group-cmk-encryption migration > should encrypt the cdk user identity WAF log group 1`] = `
+"import { Effect, PolicyStatement, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
+import { Key } from 'aws-cdk-lib/aws-kms';
+import { RemovalPolicy, Stack } from 'aws-cdk-lib';
+import { CfnLoggingConfiguration, CfnWebACL } from 'aws-cdk-lib/aws-wafv2';
+import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
+import { Construct } from 'constructs';
+import { suppressRules } from './checkov.js';
+
+export class UserIdentity extends Construct {
+  private createWebAcl = (id: string) => {
+    const webAcl = new CfnWebACL(this, 'WebAcl', {});
+
+    // Send WAF request logs to CloudWatch. The log group name must start with
+    // \`aws-waf-logs-\` to satisfy the WAFv2 logging destination requirement.
+    const stack = Stack.of(this);
+    const wafLogGroupName = \`aws-waf-logs-\${id}-\${this.node.addr.slice(-8)}\`;
+
+    // KMS key for encrypting WAF logs at rest, usable by CloudWatch Logs
+    const logsKey = new Key(this, 'WebAclLogsKey', {
+      enableKeyRotation: true,
+    });
+    logsKey.addToResourcePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        principals: [
+          new ServicePrincipal(\`logs.\${stack.region}.amazonaws.com\`),
+        ],
+        actions: [
+          'kms:Encrypt',
+          'kms:Decrypt',
+          'kms:ReEncrypt*',
+          'kms:GenerateDataKey*',
+          'kms:DescribeKey',
+        ],
+        resources: ['*'],
+        conditions: {
+          ArnEquals: {
+            'kms:EncryptionContext:aws:logs:arn': \`arn:aws:logs:\${stack.region}:\${stack.account}:log-group:\${wafLogGroupName}\`,
+          },
+        },
+      }),
+    );
+
+    const wafLogGroup = new LogGroup(this, 'WebAclLogs', {
+      logGroupName: wafLogGroupName,
+      encryptionKey: logsKey,
+      retention: RetentionDays.ONE_MONTH,
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+
+    new CfnLoggingConfiguration(this, 'WebAclLoggingConfig', {
+      resourceArn: webAcl.attrArn,
+      logDestinationConfigs: [wafLogGroup.logGroupArn],
+    });
+
+    return webAcl;
+  };
+}
+"
+`;
+
+exports[`waf-log-group-cmk-encryption migration > should encrypt the terraform gateway WAF log group via the module locals 1`] = `
+"data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+locals {
+  aws_account_id = data.aws_caller_identity.current.account_id
+  aws_region     = data.aws_region.current.id
+  gateway_waf_log_group_name = var.enable_waf ? "aws-waf-logs-my-gateway-\${random_id.unique_suffix.hex}" : null
+}
+
+resource "random_id" "unique_suffix" {
+  byte_length = 4
+}
+
+# WAF request logs. WAFv2 requires the \`aws-waf-logs-\` name prefix.
+resource "aws_cloudwatch_log_group" "gateway_waf_logs" {
+  #checkov:skip=CKV_AWS_338:Log retention set to one year which is sufficient for WAF logs
+  count = var.enable_waf ? 1 : 0
+
+  name              = local.gateway_waf_log_group_name
+  kms_key_id        = aws_kms_key.gateway_waf_logs[0].arn
+  retention_in_days = 365
+}
+
+# KMS key for encrypting WAF request logs at rest
+resource "aws_kms_key" "gateway_waf_logs" {
+  count = var.enable_waf ? 1 : 0
+
+  description             = "my-gateway gateway WAF log encryption"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "Enable IAM User Permissions"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::\${local.aws_account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        Sid       = "Allow CloudWatch Logs"
+        Effect    = "Allow"
+        Principal = { Service = "logs.\${local.aws_region}.amazonaws.com" }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+        Condition = {
+          ArnEquals = {
+            "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:\${local.aws_region}:\${local.aws_account_id}:log-group:\${local.gateway_waf_log_group_name}"
+          }
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_kms_alias" "gateway_waf_logs" {
+  count = var.enable_waf ? 1 : 0
+
+  name          = "alias/my-gateway-\${random_id.unique_suffix.hex}-waf-logs"
+  target_key_id = aws_kms_key.gateway_waf_logs[0].key_id
+}
+"
+`;
+
+exports[`waf-log-group-cmk-encryption migration > should encrypt the terraform rest api WAF log group 1`] = `
+"data "aws_region" "current" {}
+data "aws_caller_identity" "current" {}
+
+locals {
+  existing = "untouched"
+  waf_log_group_name = var.enable_waf ? "aws-waf-logs-\${var.api_name}-\${random_id.waf_log_suffix[0].hex}" : null
+}
+
+# CloudWatch Log Group for WAF request logs. Name must start with \`aws-waf-logs-\`.
+resource "aws_cloudwatch_log_group" "api_waf_logs" {
+  #checkov:skip=CKV_AWS_338:Log retention set to one month which is sufficient for WAF logs
+  count = var.enable_waf ? 1 : 0
+
+  name              = local.waf_log_group_name
+  kms_key_id        = aws_kms_key.waf_logs[0].arn
+  retention_in_days = 30
+  tags              = var.tags
+}
+
+# KMS key for encrypting WAF request logs at rest
+resource "aws_kms_key" "waf_logs" {
+  count = var.enable_waf ? 1 : 0
+
+  description             = "\${var.api_name} API WAF log encryption"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "Enable IAM User Permissions"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::\${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        Sid       = "Allow CloudWatch Logs"
+        Effect    = "Allow"
+        Principal = { Service = "logs.\${data.aws_region.current.region}.amazonaws.com" }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+        Condition = {
+          ArnEquals = {
+            "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:\${data.aws_region.current.region}:\${data.aws_caller_identity.current.account_id}:log-group:\${local.waf_log_group_name}"
+          }
+        }
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_kms_alias" "waf_logs" {
+  count = var.enable_waf ? 1 : 0
+
+  name          = "alias/\${var.api_name}-\${random_id.waf_log_suffix[0].hex}-waf-logs"
+  target_key_id = aws_kms_key.waf_logs[0].key_id
+}
+
+resource "random_id" "waf_log_suffix" {
+  count       = var.enable_waf ? 1 : 0
+  byte_length = 4
+}
+"
+`;
+
+exports[`waf-log-group-cmk-encryption migration > should encrypt the terraform user identity WAF log group 1`] = `
+"data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+locals {
+  local_callback_urls = [
+    "http://localhost:4200"
+  ]
+  user_pool_waf_log_group_name = var.enable_waf ? "aws-waf-logs-UserPool-\${random_id.unique_suffix.hex}" : null
+}
+
+resource "random_id" "unique_suffix" {
+  byte_length = 4
+}
+
+# CloudWatch Log Group for WAF request logs. Name must start with \`aws-waf-logs-\`.
+resource "aws_cloudwatch_log_group" "user_pool_waf_logs" {
+  #checkov:skip=CKV_AWS_338:Log retention set to one month which is sufficient for WAF logs
+  count = var.enable_waf ? 1 : 0
+
+  name              = local.user_pool_waf_log_group_name
+  kms_key_id        = aws_kms_key.user_pool_waf_logs[0].arn
+  retention_in_days = 30
+}
+
+# KMS key for encrypting WAF request logs at rest
+resource "aws_kms_key" "user_pool_waf_logs" {
+  count = var.enable_waf ? 1 : 0
+
+  description             = "User pool WAF log encryption"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "Enable IAM User Permissions"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::\${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        Sid       = "Allow CloudWatch Logs"
+        Effect    = "Allow"
+        Principal = { Service = "logs.\${data.aws_region.current.region}.amazonaws.com" }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+        Condition = {
+          ArnEquals = {
+            "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:\${data.aws_region.current.region}:\${data.aws_caller_identity.current.account_id}:log-group:\${local.user_pool_waf_log_group_name}"
+          }
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_kms_alias" "user_pool_waf_logs" {
+  count = var.enable_waf ? 1 : 0
+
+  name          = "alias/user-pool-\${random_id.unique_suffix.hex}-waf-logs"
+  target_key_id = aws_kms_key.user_pool_waf_logs[0].key_id
+}
+"
+`;
