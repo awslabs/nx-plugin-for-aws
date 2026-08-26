@@ -25,7 +25,6 @@ import { esmVars } from '../module-format.js';
 import { addDependencyToTargetIfNotPresent } from '../nx.js';
 import {
   generatedCdk,
-  generatedInfrastructure,
   generatedTerraform,
   type IacMetadata,
   PACKAGES_DIR,
@@ -45,17 +44,23 @@ type IACProvider = { iac: Iac };
 /**
  * Dependencies a caller must declare to add an AgentCore Gateway construct.
  *
- * `ejs` and its types are gated on CDK: only the CDK construct renders Cedar
- * policies with it, and only that branch installs them (into the shared
- * constructs project). The Terraform branch renders policies with a script that
- * uses Node's standard library alone, because it runs from the shared terraform
- * project — which has no `package.json` for a bare `require` to resolve
- * against.
+ * Both providers render Cedar policies with `ejs`, but each needs it in a
+ * different manifest, so each branch installs it where it resolves from:
+ *
+ * - CDK imports it from the shared constructs project, so it goes in that
+ *   project's manifest, along with the SDK client its readiness probe uses and
+ *   the types the TypeScript construct needs.
+ * - Terraform's `render-cedar.cjs` runs from the shared terraform project,
+ *   which has no `package.json`, so it goes in the workspace root manifest —
+ *   the only one above the script that a bare `require` can resolve against
+ *   under pnpm's isolated node_modules.
  */
 export const AGENT_CORE_CONSTRUCTS_DEPENDENCIES = [
   { name: 'ejs', when: generatedCdk },
-  { name: '@aws-sdk/client-bedrock-agentcore', when: generatedInfrastructure },
+  { name: '@aws-sdk/client-bedrock-agentcore', when: generatedCdk },
   { name: '@types/ejs', when: generatedCdk },
+  // The Cedar render script resolves this from the workspace root.
+  { name: 'ejs', when: generatedTerraform, dev: true, root: true },
 ] as const satisfies readonly DeclaredTsDependency<
   ITsDepVersion,
   IacMetadata
@@ -323,7 +328,7 @@ export const addAgentCoreGatewayInfra = async <
       await addAgentCoreGatewayCDKInfra(tree, options, declaration);
       break;
     case 'terraform':
-      addAgentCoreGatewayTerraformInfra(tree, options);
+      addAgentCoreGatewayTerraformInfra(tree, options, declaration);
       break;
   }
 
@@ -458,6 +463,7 @@ const addAgentCoreGatewayCDKInfra = async (
 const addAgentCoreGatewayTerraformInfra = (
   tree: Tree,
   options: AddAgentCoreGatewayInfraProps,
+  declaration: DependencyDeclaration,
 ) => {
   generateFiles(
     tree,
@@ -528,7 +534,20 @@ const addAgentCoreGatewayTerraformInfra = (
     if (tree.exists(renderScript)) {
       tree.delete(renderScript);
     }
+    return;
   }
+
+  // render-cedar.cjs requires ejs and runs from the shared terraform project,
+  // which has no package.json — so it goes in the workspace root manifest, the
+  // only one above the script pnpm's isolated node_modules lets it resolve.
+  addDependenciesToPackageJson(
+    tree,
+    {},
+    withVersions(
+      forDependencies<typeof AGENT_CORE_CONSTRUCTS_DEPENDENCIES>(declaration),
+      ['ejs'],
+    ),
+  );
 };
 
 export interface AddAgentCoreHarnessInfraProps {

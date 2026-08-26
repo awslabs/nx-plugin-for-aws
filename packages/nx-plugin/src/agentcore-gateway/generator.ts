@@ -46,10 +46,7 @@ import type { IacMetadata } from '../utils/shared-constructs-constants.js';
 import type { AgentcoreGatewayGeneratorSchema } from './schema';
 
 // The gateway's local-dev server needs these whatever the auth; only the MCP
-// SDK is protocol-specific (the http local gateway is a plain proxy). Cedar
-// policy rendering adds nothing here: the CDK construct's `ejs` belongs to the
-// shared constructs project, and the Terraform script uses only Node's
-// standard library.
+// SDK is protocol-specific (the http local gateway is a plain proxy).
 export const DEPENDENCIES = declareDependencies<AgentCoreGatewayMetadata>()({
   ts: [
     { name: '@modelcontextprotocol/sdk', when: (m) => m.protocol === 'mcp' },

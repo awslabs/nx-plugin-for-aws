@@ -8,20 +8,20 @@ import { join } from 'node:path';
 import { runCLI } from '../utils';
 
 /**
- * Runs every gateway's Cedar render script the way `terraform apply` does.
+ * Runs every gateway's Cedar render script the way `terraform apply` does,
+ * against the workspace's real installed dependencies.
  *
  * An `external` data source's `result` is only known after apply — under plan it
  * sits in `after_unknown` — so neither `terraform plan` nor the mocked
- * `terraform test` above ever executes `program`. That leaves the script's own
- * dependency resolution unproven by the whole Terraform lane, which is how a
- * bare `require` of a package the shared terraform project cannot resolve
- * survived: the project carries no `package.json`, so under pnpm's isolated
- * layout nothing above the module directory provides one.
+ * `terraform test` above ever executes `program`. That left the script's `ejs`
+ * resolution unproven by the whole Terraform lane: it runs from the shared
+ * terraform project, which has no `package.json`, so under pnpm's isolated
+ * layout the dependency has to come from the workspace root.
  *
  * `NODE_PATH` is cleared deliberately. Nx's own bin shim exports one covering
  * pnpm's hoisted virtual store, and Nx happens to depend on `ejs` itself, so a
- * script spawned beneath `nx apply` could resolve a package it never declared —
- * masking the failure a user hits running `terraform apply` directly.
+ * script spawned beneath `nx apply` could resolve a copy the workspace never
+ * declared — masking a missing declaration.
  */
 const runCedarRenderScripts = (projectRoot: string) => {
   const gatewaysDir = join(

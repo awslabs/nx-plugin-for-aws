@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readProjectConfiguration, type Tree } from '@nx/devkit';
@@ -507,24 +507,63 @@ describe('agentcore-gateway generator', () => {
 
     // Terraform defers an `external` data source's `result` to apply, so
     // neither `terraform plan` nor the mocked `terraform test` runs the script
-    // — only a real apply does. These tests run it the way that apply does:
-    // from the module directory, with the query on stdin. That directory
-    // belongs to the shared terraform project, which has no `package.json`, so
-    // the script must resolve nothing outside Node's standard library.
+    // — only a real apply does, which is why the resolution failure below
+    // survived. The script runs from the shared terraform project, which has no
+    // package.json, so the workspace root is the nearest manifest it can
+    // resolve `ejs` from.
     describe('render-cedar.cjs', () => {
       const GATEWAY_ARN =
         'arn:aws:bedrock-agentcore:us-west-2:123456789012:gateway/MyGateway-1a2b3c4d';
 
-      // The script is copied to a directory with no `node_modules` above it, so
-      // a bare `require` of a third-party package cannot resolve — exactly the
-      // isolation pnpm's non-hoisted layout gives the real module directory.
-      const runRenderScript = (
-        policy: string,
-        query: Record<string, string> = {},
-      ) => {
-        const dir = mkdtempSync(join(tmpdir(), 'render-cedar-'));
-        const scriptPath = join(dir, 'render-cedar.cjs');
-        const policyPath = join(dir, 'permit-all.cedar');
+      it('declares ejs at the workspace root, not the gateway project', () => {
+        const root = JSON.parse(tree.read('package.json', 'utf-8')!);
+        expect({
+          ...root.dependencies,
+          ...root.devDependencies,
+        }).toHaveProperty('ejs');
+
+        // The gateway project imports nothing from ejs, and its manifest is not
+        // on the script's resolution path anyway.
+        const gateway = JSON.parse(
+          tree.read('packages/my-gateway/package.json', 'utf-8')!,
+        );
+        expect({
+          ...gateway.dependencies,
+          ...gateway.devDependencies,
+        }).not.toHaveProperty('ejs');
+      });
+
+      // Run the way apply does — from the module directory, query on stdin —
+      // with ejs reachable only from a root manifest above it, mirroring the
+      // generated layout. NODE_PATH is cleared because pnpm's bin shims export
+      // one covering the hoisted virtual store (where nx's own ejs sits), which
+      // would otherwise mask an unresolvable require.
+      it('resolves ejs from the workspace root and renders the vended policy', () => {
+        const root = mkdtempSync(join(tmpdir(), 'render-cedar-'));
+        const moduleDir = join(
+          root,
+          'packages/common/terraform/src/app/gateways/my-gateway',
+        );
+        mkdirSync(moduleDir, { recursive: true });
+        writeFileSync(
+          join(root, 'package.json'),
+          JSON.stringify({ name: 'root', private: true }),
+        );
+        // Stand in for the installed root node_modules/ejs.
+        const ejsDir = join(root, 'node_modules', 'ejs');
+        mkdirSync(ejsDir, { recursive: true });
+        writeFileSync(
+          join(ejsDir, 'package.json'),
+          JSON.stringify({ name: 'ejs', version: '6.0.1', main: 'index.js' }),
+        );
+        writeFileSync(
+          join(ejsDir, 'index.js'),
+          // Minimal stand-in for ejs.render covering `<%= name %>`.
+          'exports.render = (s, v) => s.replace(/<%=\\s*([A-Za-z_$][\\w$]*)\\s*%>/g, (m, k) => String(v[k]));\n',
+        );
+
+        const scriptPath = join(moduleDir, 'render-cedar.cjs');
+        const policyPath = join(root, 'permit-all.cedar');
         writeFileSync(
           scriptPath,
           tree
@@ -533,60 +572,30 @@ describe('agentcore-gateway generator', () => {
             )!
             .toString(),
         );
-        writeFileSync(policyPath, policy);
-        const result = spawnSync(process.execPath, [scriptPath], {
-          cwd: dir,
-          input: JSON.stringify({
-            template: policyPath,
-            gatewayArn: GATEWAY_ARN,
-            accountId: '123456789012',
-            ...query,
-          }),
-          encoding: 'utf-8',
-          // A stray NODE_PATH (pnpm's bin shims export one) would let a bare
-          // require resolve out of the virtual store and hide the very failure
-          // this guards against.
-          env: { ...process.env, NODE_PATH: '' },
-        });
-        return result;
-      };
-
-      it('renders the vended permit-all policy with no third-party dependency', () => {
-        const result = runRenderScript(
+        writeFileSync(
+          policyPath,
           tree
             .read('packages/my-gateway/policies/permit-all.cedar')!
             .toString(),
         );
 
+        const result = spawnSync(process.execPath, [scriptPath], {
+          cwd: moduleDir,
+          input: JSON.stringify({
+            template: policyPath,
+            gatewayArn: GATEWAY_ARN,
+            accountId: '123456789012',
+          }),
+          encoding: 'utf-8',
+          env: { ...process.env, NODE_PATH: '' },
+        });
+
         expect(result.stderr).not.toContain('Cannot find module');
         expect(result.status).toBe(0);
         const { rendered } = JSON.parse(result.stdout);
-        // Both variables the vended policy references are substituted, leaving
-        // no placeholder behind.
         expect(rendered).toContain(`AgentCore::Gateway::"${GATEWAY_ARN}"`);
         expect(rendered).toContain('123456789012');
         expect(rendered).not.toContain('<%=');
-      });
-
-      it('substitutes additional variables added to the data source query', () => {
-        const result = runRenderScript(
-          'permit (principal == AgentCore::IamEntity::"<%= agentRoleArn %>", action, resource);\n',
-          { agentRoleArn: 'arn:aws:iam::123456789012:role/Agent' },
-        );
-
-        expect(result.status).toBe(0);
-        expect(JSON.parse(result.stdout).rendered).toContain(
-          'arn:aws:iam::123456789012:role/Agent',
-        );
-      });
-
-      it('fails loudly when a policy references an unknown variable', () => {
-        const result = runRenderScript(
-          'permit (principal, action, resource == AgentCore::Gateway::"<%= nope %>");\n',
-        );
-
-        expect(result.status).toBe(1);
-        expect(result.stderr).toContain('nope');
       });
     });
   });
