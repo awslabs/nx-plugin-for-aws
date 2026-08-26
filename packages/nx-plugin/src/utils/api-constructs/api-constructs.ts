@@ -31,9 +31,11 @@ import {
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants.js';
 import {
+  cdkLambdaRuntimeVars,
   type IPyDepVersion,
   type ITsDepVersion,
   PY_VERSIONS,
+  terraformLambdaRuntimeVars,
   terraformProviderVersions,
   withVersions,
 } from '../versions.js';
@@ -168,7 +170,7 @@ const addApiGatewayCdkConstructs = async (
         'core',
         'api',
       ),
-      { ...esmVars(tree) },
+      { ...esmVars(tree), ...cdkLambdaRuntimeVars() },
       {
         overwriteStrategy: OverwriteStrategy.KeepExisting,
       },
@@ -223,7 +225,7 @@ const addApiGatewayCdkConstructs = async (
       'app',
       'apis',
     ),
-    { ...options, ...esmVars(tree) },
+    { ...options, ...esmVars(tree), ...cdkLambdaRuntimeVars() },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
@@ -296,6 +298,7 @@ const addApiGatewayTerraformModules = (
       ...options,
       maxRestPathDepth: MAX_REST_PATH_DEPTH,
       ...terraformProviderVersions(),
+      ...terraformLambdaRuntimeVars(),
     },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,

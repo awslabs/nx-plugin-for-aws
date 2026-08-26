@@ -347,6 +347,63 @@ export const containerImage = (tool: keyof typeof CONTAINER_VERSIONS): string =>
   `${CONTAINER_REPOSITORIES[tool]}:${CONTAINER_VERSIONS[tool]}`;
 
 /**
+ * The managed Lambda runtimes generated infrastructure targets, as the single
+ * source both IaC providers derive from.
+ *
+ * CDK and Terraform name the same runtime differently — `Runtime.NODEJS_24_X`
+ * against `nodejs24.x` — so each provider held its own copy and the two drifted:
+ * the same generator with the same options vended a different Node major
+ * depending on `--iac`. Deriving both from the version here makes a bump one
+ * edit that moves them together.
+ *
+ * Pinned to an exact major rather than tracking CDK's `NODEJS_LATEST` alias,
+ * whose value moves with `aws-cdk-lib` and would silently reopen the drift on
+ * the next dependency bump. The cost is that this has to be bumped by hand,
+ * which is the point: the runtime a user's functions execute on is a deliberate,
+ * reviewable choice.
+ */
+export const LAMBDA_RUNTIME_VERSIONS = {
+  node: '24',
+  python: '3.14',
+} as const;
+export type ILambdaRuntime = keyof typeof LAMBDA_RUNTIME_VERSIONS;
+
+/** The runtime as Terraform's `runtime` attribute names it, e.g. `nodejs24.x`. */
+export const terraformLambdaRuntime = (runtime: ILambdaRuntime): string =>
+  runtime === 'node'
+    ? `nodejs${LAMBDA_RUNTIME_VERSIONS.node}.x`
+    : `python${LAMBDA_RUNTIME_VERSIONS.python}`;
+
+/**
+ * The runtime as an `aws-cdk-lib` `Runtime` member, e.g. `Runtime.NODEJS_24_X`.
+ * Always an explicitly versioned member, never a `_LATEST` alias.
+ */
+export const cdkLambdaRuntime = (runtime: ILambdaRuntime): string =>
+  runtime === 'node'
+    ? `Runtime.NODEJS_${LAMBDA_RUNTIME_VERSIONS.node}_X`
+    : `Runtime.PYTHON_${LAMBDA_RUNTIME_VERSIONS.python.replace('.', '_')}`;
+
+/**
+ * Substitution variables exposing the pinned runtimes to generated CDK
+ * templates (e.g. `runtime: <%- nodeRuntime %>`). Paired with
+ * {@link terraformLambdaRuntimeVars}, which names the same variables so a
+ * template reads alike under either provider.
+ */
+export const cdkLambdaRuntimeVars = () => ({
+  nodeRuntime: cdkLambdaRuntime('node'),
+  pythonRuntime: cdkLambdaRuntime('python'),
+});
+
+/**
+ * Substitution variables exposing the pinned runtimes to generated `.tf`
+ * templates (e.g. `runtime = "<%- nodeRuntime %>"`).
+ */
+export const terraformLambdaRuntimeVars = () => ({
+  nodeRuntime: terraformLambdaRuntime('node'),
+  pythonRuntime: terraformLambdaRuntime('python'),
+});
+
+/**
  * Exact versions for Terraform providers used by generated `.tf` modules.
  * Pinned exactly (no range operator) so generated infrastructure is reproducible.
  */
