@@ -12,17 +12,19 @@ La configuración en tiempo de ejecución es el mecanismo utilizado por Nx Plugi
 
 La configuración en tiempo de ejecución está organizada en **espacios de nombres**. Cada espacio de nombres es una agrupación lógica de valores de configuración relacionados. En tiempo de despliegue, todos los espacios de nombres se almacenan en **AWS AppConfig** como Perfiles de Configuración.
 
-Dos espacios de nombres integrados son utilizados por los constructos generados:
+Cuatro espacios de nombres integrados son utilizados por los constructos generados:
 
 - **`connection`** — configuración que permite a los proyectos generados conectarse entre sí:
   - **URLs de API** — registradas automáticamente por los constructos de API
   - **Configuración de Cognito** — registrada automáticamente por el constructo UserIdentity
   - **ARNs de tiempo de ejecución de agentes** — agregados por el generador de conexión cuando conectas un sitio web React a un agente
 - **`agentcore`** — ARNs de tiempo de ejecución de AgentCore para agentes y servidores MCP. Registrados automáticamente por los constructos de agente/MCP y utilizados para descubrimiento del lado del servidor (agente → agente vía A2A, agente → servidor MCP).
+- **`dynamodb`** — nombres de tablas, registrados automáticamente por los constructos de tabla DynamoDB y leídos por el cliente de tabla generado.
+- **`database`** — detalles de conexión de Aurora, registrados automáticamente por los constructos de base de datos relacional y leídos por el cliente de base de datos generado.
 
-El espacio de nombres `connection` también se despliega como un archivo `runtime-config.json` en el bucket S3 de tu sitio web, permitiendo el descubrimiento del lado del cliente de recursos backend. El espacio de nombres `agentcore` es solo del lado del servidor (vía AppConfig) por lo que los ARNs de tiempo de ejecución de agentes no se exponen al frontend a menos que conectes explícitamente un sitio web a un agente.
+El espacio de nombres `connection` también se despliega como un archivo `runtime-config.json` en el bucket S3 de tu sitio web, permitiendo el descubrimiento del lado del cliente de recursos backend. Los otros espacios de nombres son solo del lado del servidor (vía AppConfig), por lo que valores como ARNs de tiempo de ejecución de agentes y nombres de tablas no se exponen al frontend a menos que conectes explícitamente un sitio web a ellos.
 
-Puedes definir tantos espacios de nombres adicionales como desees, proporcionando una alternativa conveniente a las variables de entorno para pasar valores en tiempo de despliegue como nombres de tablas DynamoDB a tus funciones Lambda u otros recursos de cómputo.
+Puedes definir tantos espacios de nombres adicionales como desees, proporcionando una alternativa conveniente a las variables de entorno para pasar valores en tiempo de despliegue a tus funciones Lambda u otros recursos de cómputo.
 
 ```d2
 direction: down
@@ -104,6 +106,17 @@ Terraform conecta la configuración en tiempo de ejecución a través de tres m�
      source = "../../common/terraform/src/core/runtime-config/appconfig"
 
      application_name = "my-app-runtime-config"
+   }
+   ```
+
+   La variable `namespaces` tiene como valor predeterminado todos los espacios de nombres integrados, por lo que los módulos generados funcionan sin configurarla. Para agregar espacios de nombres propios, enuméralos junto con los integrados:
+
+   ```hcl title="packages/infra/src/main.tf"
+   module "runtime_config_appconfig" {
+     source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+     application_name = "my-app-runtime-config"
+     namespaces       = ["connection", "agentcore", "database", "dynamodb", "tables"]
    }
    ```
 
