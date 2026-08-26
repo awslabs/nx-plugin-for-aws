@@ -52,6 +52,13 @@ export const generatedTerraform = (m: IacMetadata): boolean =>
   m.iac === 'terraform';
 
 /**
+ * Whether CDK infrastructure was generated, for the packages only a construct
+ * imports — the Terraform branch vends `.tf` modules and scripts instead, so it
+ * never receives them.
+ */
+export const generatedCdk = (m: IacMetadata): boolean => m.iac === 'cdk';
+
+/**
  * Dependencies a caller must declare to use the shared constructs project.
  * Lives here so generators can spread it without importing the generator.
  *

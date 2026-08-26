@@ -28,8 +28,8 @@ allowed.
 
 ## Template variables
 
-Policies are [EJS](https://ejs.co/) templates rendered at synth/plan time
-with the following variables in scope:
+Policies are templates rendered at synth/apply time with the following
+variables in scope:
 
 - `<%%= gatewayArn %>` — this gateway's ARN
 - `<%%= accountId %>` — the AWS account this gateway is deployed into

@@ -340,6 +340,24 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
             ),
           ).toContain('8');
 
+          // Cedar policies — the gateway's policies are rendered by
+          // `render-cedar.cjs` through an `external` data source, whose result
+          // Terraform defers to apply. Asserting the output proves the script
+          // ran and produced a complete policy: every placeholder substituted,
+          // scoped to this gateway's real ARN. A failure to render would
+          // otherwise only surface as an opaque apply error.
+          const renderedPolicies = JSON.parse(
+            outputs.my_gateway_rendered_policies,
+          ) as Record<string, string>;
+          console.log('my_gateway rendered policies:', renderedPolicies);
+          expect(Object.keys(renderedPolicies)).toContain('permit-all.cedar');
+          for (const [file, policy] of Object.entries(renderedPolicies)) {
+            expect(policy, file).toContain('permit');
+            expect(policy, file).toContain(outputs.my_gateway_arn);
+            // An unsubstituted placeholder would reach the Cedar validator.
+            expect(policy, file).not.toContain('<%');
+          }
+
           // Chained gateways — the parent gateway fronts my_gateway via the
           // gateway -> gateway connection, re-exposing its tools under a
           // second prefix. Listing tools on the parent and calling one proves

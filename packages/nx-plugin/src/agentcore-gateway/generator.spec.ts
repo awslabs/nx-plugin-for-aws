@@ -2,6 +2,10 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { readProjectConfiguration, type Tree } from '@nx/devkit';
 import { expectHasMetricTags } from '../utils/metrics.spec.js';
 import { createTreeUsingTsSolutionSetup } from '../utils/test.js';
@@ -421,7 +425,7 @@ describe('agentcore-gateway generator', () => {
       ).toBe(false);
     });
 
-    it('renders Cedar policies via the ejs render script', () => {
+    it('renders Cedar policies via the render script', () => {
       expect(
         tree.exists(
           'packages/common/terraform/src/app/gateways/my-gateway/render-cedar.cjs',
@@ -499,6 +503,91 @@ describe('agentcore-gateway generator', () => {
       expect(module).toContain(
         'null_resource.gateway_ready[0].triggers.gateway_url',
       );
+    });
+
+    // Terraform defers an `external` data source's `result` to apply, so
+    // neither `terraform plan` nor the mocked `terraform test` runs the script
+    // — only a real apply does. These tests run it the way that apply does:
+    // from the module directory, with the query on stdin. That directory
+    // belongs to the shared terraform project, which has no `package.json`, so
+    // the script must resolve nothing outside Node's standard library.
+    describe('render-cedar.cjs', () => {
+      const GATEWAY_ARN =
+        'arn:aws:bedrock-agentcore:us-west-2:123456789012:gateway/MyGateway-1a2b3c4d';
+
+      // The script is copied to a directory with no `node_modules` above it, so
+      // a bare `require` of a third-party package cannot resolve — exactly the
+      // isolation pnpm's non-hoisted layout gives the real module directory.
+      const runRenderScript = (
+        policy: string,
+        query: Record<string, string> = {},
+      ) => {
+        const dir = mkdtempSync(join(tmpdir(), 'render-cedar-'));
+        const scriptPath = join(dir, 'render-cedar.cjs');
+        const policyPath = join(dir, 'permit-all.cedar');
+        writeFileSync(
+          scriptPath,
+          tree
+            .read(
+              'packages/common/terraform/src/app/gateways/my-gateway/render-cedar.cjs',
+            )!
+            .toString(),
+        );
+        writeFileSync(policyPath, policy);
+        const result = spawnSync(process.execPath, [scriptPath], {
+          cwd: dir,
+          input: JSON.stringify({
+            template: policyPath,
+            gatewayArn: GATEWAY_ARN,
+            accountId: '123456789012',
+            ...query,
+          }),
+          encoding: 'utf-8',
+          // A stray NODE_PATH (pnpm's bin shims export one) would let a bare
+          // require resolve out of the virtual store and hide the very failure
+          // this guards against.
+          env: { ...process.env, NODE_PATH: '' },
+        });
+        return result;
+      };
+
+      it('renders the vended permit-all policy with no third-party dependency', () => {
+        const result = runRenderScript(
+          tree
+            .read('packages/my-gateway/policies/permit-all.cedar')!
+            .toString(),
+        );
+
+        expect(result.stderr).not.toContain('Cannot find module');
+        expect(result.status).toBe(0);
+        const { rendered } = JSON.parse(result.stdout);
+        // Both variables the vended policy references are substituted, leaving
+        // no placeholder behind.
+        expect(rendered).toContain(`AgentCore::Gateway::"${GATEWAY_ARN}"`);
+        expect(rendered).toContain('123456789012');
+        expect(rendered).not.toContain('<%=');
+      });
+
+      it('substitutes additional variables added to the data source query', () => {
+        const result = runRenderScript(
+          'permit (principal == AgentCore::IamEntity::"<%= agentRoleArn %>", action, resource);\n',
+          { agentRoleArn: 'arn:aws:iam::123456789012:role/Agent' },
+        );
+
+        expect(result.status).toBe(0);
+        expect(JSON.parse(result.stdout).rendered).toContain(
+          'arn:aws:iam::123456789012:role/Agent',
+        );
+      });
+
+      it('fails loudly when a policy references an unknown variable', () => {
+        const result = runRenderScript(
+          'permit (principal, action, resource == AgentCore::Gateway::"<%= nope %>");\n',
+        );
+
+        expect(result.status).toBe(1);
+        expect(result.stderr).toContain('nope');
+      });
     });
   });
 

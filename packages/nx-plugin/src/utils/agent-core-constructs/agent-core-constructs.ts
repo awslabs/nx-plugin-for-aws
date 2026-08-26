@@ -24,6 +24,7 @@ import type { Iac } from '../iac.js';
 import { esmVars } from '../module-format.js';
 import { addDependencyToTargetIfNotPresent } from '../nx.js';
 import {
+  generatedCdk,
   generatedInfrastructure,
   generatedTerraform,
   type IacMetadata,
@@ -44,13 +45,17 @@ type IACProvider = { iac: Iac };
 /**
  * Dependencies a caller must declare to add an AgentCore Gateway construct.
  *
- * Gated on infrastructure having been generated, since the construct helpers only
- * run on that branch.
+ * `ejs` and its types are gated on CDK: only the CDK construct renders Cedar
+ * policies with it, and only that branch installs them (into the shared
+ * constructs project). The Terraform branch renders policies with a script that
+ * uses Node's standard library alone, because it runs from the shared terraform
+ * project — which has no `package.json` for a bare `require` to resolve
+ * against.
  */
 export const AGENT_CORE_CONSTRUCTS_DEPENDENCIES = [
-  { name: 'ejs', when: generatedInfrastructure },
+  { name: 'ejs', when: generatedCdk },
   { name: '@aws-sdk/client-bedrock-agentcore', when: generatedInfrastructure },
-  { name: '@types/ejs', when: generatedInfrastructure },
+  { name: '@types/ejs', when: generatedCdk },
 ] as const satisfies readonly DeclaredTsDependency<
   ITsDepVersion,
   IacMetadata

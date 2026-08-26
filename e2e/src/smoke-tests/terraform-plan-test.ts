@@ -2,9 +2,76 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { runCLI } from '../utils';
+
+/**
+ * Runs every gateway's Cedar render script the way `terraform apply` does.
+ *
+ * An `external` data source's `result` is only known after apply — under plan it
+ * sits in `after_unknown` — so neither `terraform plan` nor the mocked
+ * `terraform test` above ever executes `program`. That leaves the script's own
+ * dependency resolution unproven by the whole Terraform lane, which is how a
+ * bare `require` of a package the shared terraform project cannot resolve
+ * survived: the project carries no `package.json`, so under pnpm's isolated
+ * layout nothing above the module directory provides one.
+ *
+ * `NODE_PATH` is cleared deliberately. Nx's own bin shim exports one covering
+ * pnpm's hoisted virtual store, and Nx happens to depend on `ejs` itself, so a
+ * script spawned beneath `nx apply` could resolve a package it never declared —
+ * masking the failure a user hits running `terraform apply` directly.
+ */
+const runCedarRenderScripts = (projectRoot: string) => {
+  const gatewaysDir = join(
+    projectRoot,
+    'packages/common/terraform/src/app/gateways',
+  );
+  if (!existsSync(gatewaysDir)) {
+    return;
+  }
+
+  for (const gateway of readdirSync(gatewaysDir, { withFileTypes: true })) {
+    if (!gateway.isDirectory()) {
+      continue;
+    }
+    const moduleDir = join(gatewaysDir, gateway.name);
+    const script = join(moduleDir, 'render-cedar.cjs');
+    // Only a Cedar-enabled gateway vends the script.
+    if (!existsSync(script)) {
+      continue;
+    }
+    const policiesDir = join(projectRoot, 'packages', gateway.name, 'policies');
+    const policies = existsSync(policiesDir)
+      ? readdirSync(policiesDir).filter((f) => f.endsWith('.cedar'))
+      : [];
+    expect(policies.length).toBeGreaterThan(0);
+
+    for (const policy of policies) {
+      const result = spawnSync(process.execPath, [script], {
+        cwd: moduleDir,
+        input: JSON.stringify({
+          template: join(policiesDir, policy),
+          gatewayArn: `arn:aws:bedrock-agentcore:us-west-2:123456789012:gateway/${gateway.name}-abcd1234`,
+          accountId: '123456789012',
+        }),
+        encoding: 'utf-8',
+        env: { ...process.env, NODE_PATH: '' },
+      });
+      console.log(
+        `Rendered ${gateway.name}/${policy}: status=${result.status} stderr=${result.stderr}`,
+      );
+      expect(result.stderr ?? '').not.toContain('Cannot find module');
+      expect(result.status).toBe(0);
+      const { rendered } = JSON.parse(result.stdout);
+      // Every placeholder the policy carries is substituted, so what reaches
+      // the Cedar validator is a complete policy.
+      expect(rendered).toContain('permit');
+      expect(rendered).not.toContain('<%');
+    }
+  }
+};
 
 /**
  * Validates the generated Terraform with a credential-free `terraform test`.
@@ -97,4 +164,7 @@ export const runTerraformPlanTest = async (opts: {
     ...rawOpts,
     redirectStderr: true,
   });
+
+  // Plan defers the `external` data sources, so run their programs directly.
+  runCedarRenderScripts(opts.cwd);
 };
