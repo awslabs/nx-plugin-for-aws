@@ -2,12 +2,20 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+import { execSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, posix } from 'node:path';
 import { readJson, type Tree } from '@nx/devkit';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
 } from '../../../utils/config/utils.js';
 import { expectHasMetricTags } from '../../../utils/metrics.spec.js';
+import {
+  PACKAGES_DIR,
+  SHARED_TERRAFORM_DIR,
+} from '../../../utils/shared-constructs-constants.js';
 import {
   createTreeUsingTsSolutionSetup,
   snapshotTreeDir,
@@ -644,7 +652,8 @@ describe('react-website generator', () => {
         'fs.copyFileSync',
       );
       expect(loadRuntimeConfigTarget.options.env).toEqual({
-        SRC_FILE: 'dist/packages/common/terraform/runtime-config.json',
+        SRC_FILE:
+          'dist/packages/common/terraform/runtime-config/connection.json',
         DEST_DIR: '{projectRoot}/public',
         DEST_FILE: '{projectRoot}/public/runtime-config.json',
       });
@@ -672,7 +681,7 @@ describe('react-website generator', () => {
 
       expect(loadRuntimeConfigTarget).toBeDefined();
       expect(loadRuntimeConfigTarget.options.env.SRC_FILE).toBe(
-        'dist/packages/common/terraform/runtime-config.json',
+        'dist/packages/common/terraform/runtime-config/connection.json',
       );
       expect(loadRuntimeConfigTarget.options.env.DEST_DIR).toBe(
         '{projectRoot}/public',
@@ -705,6 +714,94 @@ describe('react-website generator', () => {
       expect(loadRuntimeConfigTarget.options.command).toContain(
         'TestAppWebsiteBucketName',
       );
+    });
+
+    /**
+     * The Terraform target copies a file the vended `.tf` modules write at apply
+     * time, so `SRC_FILE` is derived from those modules rather than restated
+     * here — a change to either the aggregation's output directory or the
+     * namespace the website reads fails this rather than silently breaking the
+     * target.
+     */
+    const deriveAggregatedConfigFile = (tree: Tree): string => {
+      const readModuleDir = `${PACKAGES_DIR}/${SHARED_TERRAFORM_DIR}/src/core/runtime-config/read`;
+
+      // The `read` module resolves its aggregation directory relative to itself.
+      const readTf = tree.read(`${readModuleDir}/read.tf`, 'utf-8')!;
+      const configDir = /config_dir\s*=\s*"\$\{path\.module\}\/(.+?)"/.exec(
+        readTf,
+      )![1];
+
+      // It aggregates the namespace's entries into `<config_dir>/<namespace>.json`.
+      expect(readTf).toContain(
+        'namespace_path  = "${local.config_dir}/${var.namespace}.json"',
+      );
+
+      // The website reads one namespace from that directory.
+      const staticWebsiteTf = tree.read(
+        `${PACKAGES_DIR}/${SHARED_TERRAFORM_DIR}/src/core/static-website/static-website.tf`,
+        'utf-8',
+      )!;
+      const namespace =
+        /module "runtime_config_reader" \{[^}]*?namespace\s*=\s*"(.+?)"/s.exec(
+          staticWebsiteTf,
+        )![1];
+
+      return `${posix.join(readModuleDir, configDir)}/${namespace}.json`;
+    };
+
+    it('should point SRC_FILE at the file the terraform aggregation writes', async () => {
+      await tsReactWebsiteGenerator(tree, {
+        ...options,
+        iac: 'terraform',
+      });
+
+      const projectConfig = readJson(tree, 'test-app/project.json');
+      expect(
+        projectConfig.targets['load-runtime-config'].options.env.SRC_FILE,
+      ).toBe(deriveAggregatedConfigFile(tree));
+    });
+
+    it("should copy the aggregated config into the website's public directory", async () => {
+      await tsReactWebsiteGenerator(tree, {
+        ...options,
+        iac: 'terraform',
+      });
+
+      const { command, env } = readJson(tree, 'test-app/project.json').targets[
+        'load-runtime-config'
+      ].options;
+
+      // Stand the aggregation's output up on disk exactly where the vended
+      // Terraform writes it, then run the target's real command against it.
+      const workspaceRoot = mkdtempSync(join(tmpdir(), 'load-runtime-config-'));
+      const runtimeConfig = { apis: { MyApi: 'https://example.com' } };
+      const srcFile = join(workspaceRoot, env.SRC_FILE);
+      mkdirSync(dirname(srcFile), { recursive: true });
+      writeFileSync(srcFile, JSON.stringify(runtimeConfig));
+
+      // `{projectRoot}` is substituted by nx before the executor runs.
+      const resolveTokens = (value: string) =>
+        value.replace(/\{projectRoot\}/g, 'test-app');
+
+      execSync(command, {
+        cwd: workspaceRoot,
+        env: {
+          ...process.env,
+          DEST_DIR: resolveTokens(env.DEST_DIR),
+          DEST_FILE: resolveTokens(env.DEST_FILE),
+          SRC_FILE: env.SRC_FILE,
+        },
+      });
+
+      expect(
+        JSON.parse(
+          readFileSync(
+            join(workspaceRoot, 'test-app/public/runtime-config.json'),
+            'utf-8',
+          ),
+        ),
+      ).toEqual(runtimeConfig);
     });
   });
 

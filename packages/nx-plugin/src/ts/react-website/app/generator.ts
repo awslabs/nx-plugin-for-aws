@@ -48,6 +48,7 @@ import {
   type IacMetadata,
   PACKAGES_DIR,
   SHARED_SHADCN_DIR,
+  TERRAFORM_WEBSITE_RUNTIME_CONFIG_FILE,
 } from '../../../utils/shared-constructs-constants.js';
 import {
   SHADCN_DEPENDENCIES,
@@ -262,7 +263,7 @@ export async function tsReactWebsiteGenerator(
         command:
           'node -e "const fs=require(\'fs\');fs.mkdirSync(process.env.DEST_DIR,{recursive:true});fs.copyFileSync(process.env.SRC_FILE,process.env.DEST_FILE);"',
         env: {
-          SRC_FILE: 'dist/packages/common/terraform/runtime-config.json',
+          SRC_FILE: TERRAFORM_WEBSITE_RUNTIME_CONFIG_FILE,
           DEST_DIR: `{projectRoot}/public`,
           DEST_FILE: `{projectRoot}/public/runtime-config.json`,
         },
