@@ -159,6 +159,29 @@ describe('ts#dynamodb generator', () => {
     );
   });
 
+  it('should protect the table and its key from destruction in terraform', async () => {
+    await tsDynamoDBGenerator(tree, {
+      ...defaultOptions,
+      iac: 'terraform',
+    });
+
+    const dynamodb = tree.read(
+      'packages/common/terraform/src/core/dynamodb/dynamodb.tf',
+      'utf-8',
+    );
+
+    // Terraform-side guard, independent of the DynamoDB-side
+    // deletion_protection_enabled flag, so clearing that variable alone cannot
+    // destroy the table. It must be a literal — prevent_destroy cannot
+    // reference a variable.
+    expect(dynamodb).toContain('prevent_destroy = true');
+
+    // The maximum KMS pending window, matching the CDK default, so a
+    // point-in-time restore of the table stays possible for as long as
+    // possible.
+    expect(dynamodb).toContain('deletion_window_in_days = 30');
+  });
+
   it('should keep an existing dynamodb app construct', async () => {
     await sharedConstructsGenerator(
       tree,

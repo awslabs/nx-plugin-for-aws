@@ -46,7 +46,7 @@ Cela provisionne une table DynamoDB avec :
 - Une facturation à la demande (`PAY_PER_REQUEST`)
 - Un chiffrement KMS géré par le client avec rotation automatique des clés
 - La récupération à un instant dans le passé activée
-- La protection contre la suppression activée
+- La protection contre la suppression activée, plus une garde de cycle de vie `prevent_destroy`
 - Le nom de la table enregistré dans Runtime Config sous l'espace de noms `dynamodb` dans AWS AppConfig
 
 Le module `core/runtime-config/appconfig` expose l'espace de noms `dynamodb` par défaut, de sorte que le nom de la table est déployé sans configuration supplémentaire. Si vous passez explicitement `namespaces` à ce module, conservez `dynamodb` dans la liste — sinon aucun profil de configuration n'est créé pour celui-ci et le client de table généré ne peut pas résoudre le nom de la table.
@@ -55,20 +55,33 @@ Le module `core/runtime-config/appconfig` expose l'espace de noms `dynamodb` par
 
 ### Protection contre la suppression
 
-La protection contre la suppression est activée par défaut pour éviter la suppression accidentelle de la table.
+La table est protégée par deux gardes indépendantes, de sorte que la désactivation de l'une seule ne peut pas supprimer vos données :
 
-#### Désactiver la protection contre la suppression
+<Infrastructure>
+<Fragment slot="cdk">
+- `deletionProtection`, appliquée par DynamoDB.
+- `RemovalPolicy.RETAIN`, appliquée par CloudFormation, qui laisse la table en place lorsqu'elle est retirée de la stack.
+</Fragment>
+<Fragment slot="terraform">
+- `deletion_protection_enabled`, appliquée par DynamoDB.
+- `lifecycle { prevent_destroy = true }` sur la table dans `common/terraform/src/core/dynamodb/dynamodb.tf`, appliquée par Terraform, qui fait échouer tout plan qui détruirait la table.
+</Fragment>
+</Infrastructure>
 
-Désactivez-la pour les environnements où la suppression de table est attendue, comme les stacks de développement ou de prévisualisation éphémères.
+#### Supprimer la table
+
+Désactivez la protection pour les environnements où la suppression de table est attendue, comme les stacks de développement ou de prévisualisation éphémères.
 
 <Infrastructure>
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
 import { MyTable } from '@my-scope/common-constructs';
 
 const table = new MyTable(this, 'Table', {
   deletionProtection: false,
+  removalPolicy: RemovalPolicy.DESTROY,
 });
 ```
 </Fragment>
@@ -80,6 +93,22 @@ module "my_table" {
   deletion_protection_enabled = false
 }
 ```
+
+`prevent_destroy` doit être un littéral — Terraform ne permet pas de référencer une variable — il ne peut donc pas être désactivé depuis `main.tf`. Supprimez également le bloc `lifecycle` de la table dans `common/terraform/src/core/dynamodb/dynamodb.tf` :
+
+```hcl title="packages/common/terraform/src/core/dynamodb/dynamodb.tf" del={4-6}
+resource "aws_dynamodb_table" "table" {
+  # ...
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+```
+
+:::caution
+Ce module est partagé par toutes les tables de votre workspace, donc supprimer le bloc supprime cette garde pour toutes.
+:::
 </Fragment>
 </Infrastructure>
 
@@ -145,4 +174,3 @@ module "my_table" {
 La table est chiffrée avec une clé KMS gérée par le client par défaut, créée automatiquement pour vous. Passez à une clé gérée par AWS, à la clé détenue par AWS, ou apportez votre propre clé KMS, si vous gérez le chiffrement différemment.
 
 <Snippet name="dynamodb/encryption-options" parentHeading="Chiffrement" />
-

@@ -1,0 +1,75 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`terraform-data-resource-destroy-protection migration > should protect the aurora cluster and pin its key window 1`] = `
+"resource "aws_kms_key" "database" {
+  description         = "KMS key for Aurora cluster \${var.name}"
+  enable_key_rotation = var.enable_key_rotation
+
+  deletion_window_in_days = 30
+
+  tags = merge(var.tags, {
+    Name = "\${var.name}-aurora"
+  })
+}
+
+resource "aws_rds_cluster" "database" {
+  cluster_identifier  = local.cluster_name
+  engine              = var.engine
+  storage_encrypted   = true
+  kms_key_id          = aws_kms_key.database.arn
+  deletion_protection = var.deletion_protection
+  skip_final_snapshot = var.skip_final_snapshot
+
+  serverlessv2_scaling_configuration {
+    min_capacity = var.serverless_min_capacity
+    max_capacity = var.serverless_max_capacity
+  }
+
+  tags = merge(var.tags, {
+    Name = "\${var.name}-aurora"
+  })
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+"
+`;
+
+exports[`terraform-data-resource-destroy-protection migration > should protect the dynamodb table and pin its key window 1`] = `
+"resource "aws_kms_key" "table" {
+  count = local.create_table_key ? 1 : 0
+
+  description         = "KMS key for DynamoDB table \${var.name}"
+  enable_key_rotation = var.enable_key_rotation
+
+  deletion_window_in_days = 30
+}
+
+resource "aws_dynamodb_table" "table" {
+  name                        = var.name
+  billing_mode                = var.billing_mode
+  hash_key                    = "pk"
+  range_key                   = "sk"
+  deletion_protection_enabled = var.deletion_protection_enabled
+
+  attribute {
+    name = "pk"
+    type = "S"
+  }
+
+  point_in_time_recovery {
+    enabled = var.point_in_time_recovery_enabled
+  }
+
+  server_side_encryption {
+    enabled     = var.encryption != "DEFAULT"
+    kms_key_arn = local.table_kms_key_arn
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+"
+`;

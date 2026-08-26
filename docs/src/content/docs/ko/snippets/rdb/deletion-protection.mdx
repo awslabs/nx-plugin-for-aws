@@ -3,21 +3,34 @@ title: 삭제 보호
 ---
 import Infrastructure from '@components/infrastructure.astro';
 
-삭제 보호는 기본적으로 활성화되어 있으며(CDK에서 `deletionProtection: true`, Terraform에서 `deletion_protection = true`) Aurora 클러스터를 실수로 삭제하는 것을 방지합니다.
+Aurora 클러스터는 두 개의 독립적인 보호 장치로 보호되므로, 둘 중 하나만 끄는 것으로는 데이터를 삭제할 수 없습니다:
 
-#### 삭제 보호 비활성화
+<Infrastructure>
+<Fragment slot="cdk">
+- `deletionProtection`, RDS에 의해 적용됩니다.
+- `RemovalPolicy.RETAIN`, CloudFormation에 의해 적용되며, 스택에서 제거될 때 클러스터를 그대로 유지합니다.
+</Fragment>
+<Fragment slot="terraform">
+- `deletion_protection`, RDS에 의해 적용됩니다.
+- `common/terraform/src/core/rdb/aurora/aurora.tf`의 클러스터에 있는 `lifecycle { prevent_destroy = true }`, Terraform에 의해 적용되며, 클러스터를 삭제하려는 모든 계획을 실패시킵니다.
+</Fragment>
+</Infrastructure>
 
-단기 개발 또는 프리뷰 스택과 같이 데이터베이스 삭제가 예상되는 환경에서는 삭제 보호를 비활성화할 수 있습니다.
+#### 데이터베이스 삭제
+
+단기 개발 또는 프리뷰 스택과 같이 데이터베이스 삭제가 예상되는 환경에서는 보호를 비활성화할 수 있습니다.
 
 <Infrastructure>
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
 import { MyDatabase } from '@my-scope/common-constructs';
 
 const db = new MyDatabase(this, 'Db', {
   ...
   deletionProtection: false,
+  removalPolicy: RemovalPolicy.DESTROY,
 });
 ```
 </Fragment>
@@ -28,7 +41,24 @@ module "my_database" {
   source = "../../common/terraform/src/app/dbs/my-database"
   ...
   deletion_protection = false
+  skip_final_snapshot = true
 }
 ```
+
+`prevent_destroy`는 리터럴이어야 합니다 — Terraform은 변수를 참조하는 것을 허용하지 않습니다 — 따라서 `main.tf`에서 끌 수 없습니다. 또한 `common/terraform/src/core/rdb/aurora/aurora.tf`의 클러스터에서 `lifecycle` 블록을 제거하세요:
+
+```hcl title="packages/common/terraform/src/core/rdb/aurora/aurora.tf" del={4-6}
+resource "aws_rds_cluster" "database" {
+  # ...
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+```
+
+:::caution
+이 모듈은 워크스페이스의 모든 데이터베이스에서 공유되므로, 블록을 제거하면 모든 데이터베이스에 대한 보호 장치가 제거됩니다.
+:::
 </Fragment>
 </Infrastructure>
