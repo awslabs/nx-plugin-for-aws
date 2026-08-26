@@ -26,8 +26,8 @@ import {
  *
  * - `enable_vpc` / `vpc_id` / `subnet_ids` with a security group and a 443-only
  *   egress rule, so the Harness can reach private resources.
- * - `execution_role_arn`, so an existing role can be supplied. The generated
- *   role and its baseline policy are then not created.
+ * - `create_execution_role` / `execution_role_arn`, so an existing role can be
+ *   supplied. The generated role and its baseline policy are then not created.
  * - `allowed_tools`, `memory`, `environment_variables`, `max_iterations` and
  *   `timeout_seconds` as variables rather than HCL edits.
  * - The managed-memory grant moved to its own policy, made conditional and
@@ -100,17 +100,28 @@ variable "timeout_seconds" {
   default     = null
 }
 
-variable "execution_role_arn" {
-  description = "ARN of an existing IAM role for the Harness to assume. Used as-is: no role is created and none of the baseline permissions below are granted. Creates the baseline role when null."
-  type        = string
-  default     = null
+variable "create_execution_role" {
+  description = "Create the execution role with the baseline permissions below. Set false alongside execution_role_arn to use a role you already have, which is then used as-is."
+  type        = bool
+  default     = true
 
   validation {
-    condition = var.execution_role_arn == null || (
+    condition     = var.create_execution_role || var.execution_role_arn != null
+    error_message = "execution_role_arn must be set when create_execution_role is false."
+  }
+
+  validation {
+    condition = var.create_execution_role || (
       var.model_resource_arns == null && length(var.additional_execution_role_policy_statements) == 0
     )
-    error_message = "model_resource_arns and additional_execution_role_policy_statements configure the generated execution role, which is not created when execution_role_arn is supplied. Grant those permissions on the supplied role instead."
+    error_message = "model_resource_arns and additional_execution_role_policy_statements configure the generated execution role, which is not created when create_execution_role is false. Grant those permissions on the supplied role instead."
   }
+}
+
+variable "execution_role_arn" {
+  description = "ARN of an existing IAM role for the Harness to assume. Requires create_execution_role = false."
+  type        = string
+  default     = null
 }`;
 
 /** VPC and tag variables added after `additional_execution_role_policy_statements`. */
@@ -145,8 +156,7 @@ variable "tags" {
 }`;
 
 /** Locals added to the module's existing `locals` block. */
-const NEW_LOCALS_TEXT = `  create_execution_role = var.execution_role_arn == null
-  execution_role_arn    = local.create_execution_role ? aws_iam_role.execution_role[0].arn : var.execution_role_arn
+const NEW_LOCALS_TEXT = `  execution_role_arn = var.create_execution_role ? aws_iam_role.execution_role[0].arn : var.execution_role_arn
 
   # The service provisions managed memory unless var.memory redirects it
   # elsewhere or turns it off.
@@ -232,7 +242,7 @@ const MANAGED_MEMORY_POLICY_TEXT = `# Scoped to the memory ARN the service assig
 # statement. Skipped when the Harness uses a role or memory the module did not
 # create.
 resource "aws_iam_role_policy" "managed_memory" {
-  count = local.create_execution_role && local.has_managed_memory ? 1 : 0
+  count = var.create_execution_role && local.has_managed_memory ? 1 : 0
 
   name = "\${local.harness_name_prefix}-HarnessManagedMemoryPolicy"
   role = aws_iam_role.execution_role[0].id
@@ -268,7 +278,7 @@ const SECURITY_GROUP_OUTPUT_TEXT = `output "security_group_id" {
  * statement being removed.
  */
 const BASELINE_POLICY_TEXT = `resource "aws_iam_role_policy" "execution_role" {
-  count = local.create_execution_role ? 1 : 0
+  count = var.create_execution_role ? 1 : 0
 
   name = "\${local.harness_name_prefix}-HarnessPolicy"
   role = aws_iam_role.execution_role[0].id
@@ -528,7 +538,7 @@ export default async function migration(
       tree,
       filePath,
       hcl(
-        '`resource "aws_iam_role" "execution_role" { $body }` => `resource "aws_iam_role" "execution_role" {\n  count = local.create_execution_role ? 1 : 0\n\n  $body\n\n  tags = var.tags\n}`',
+        '`resource "aws_iam_role" "execution_role" { $body }` => `resource "aws_iam_role" "execution_role" {\n  count = var.create_execution_role ? 1 : 0\n\n  $body\n\n  tags = var.tags\n}`',
       ),
     );
 

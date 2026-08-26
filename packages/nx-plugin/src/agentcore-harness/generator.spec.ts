@@ -502,6 +502,7 @@ describe('agentcore-harness generator', () => {
         'environment_variables',
         'max_iterations',
         'timeout_seconds',
+        'create_execution_role',
         'execution_role_arn',
         'model_resource_arns',
         'additional_execution_role_policy_statements',
@@ -529,7 +530,10 @@ describe('agentcore-harness generator', () => {
         'error_message = "vpc_id and subnet_ids must be set when enable_vpc is true."',
       );
       expect(tf).toContain(
-        'error_message = "model_resource_arns and additional_execution_role_policy_statements configure the generated execution role, which is not created when execution_role_arn is supplied. Grant those permissions on the supplied role instead."',
+        'error_message = "execution_role_arn must be set when create_execution_role is false."',
+      );
+      expect(tf).toContain(
+        'error_message = "model_resource_arns and additional_execution_role_policy_statements configure the generated execution role, which is not created when create_execution_role is false. Grant those permissions on the supplied role instead."',
       );
       expect(tf).toContain(
         'error_message = "Set exactly one of memory.managed_memory_configuration, memory.agentcore_memory_configuration or memory.disabled."',
@@ -537,20 +541,20 @@ describe('agentcore-harness generator', () => {
     });
 
     it('creates the role and its baseline policy only when none is supplied', () => {
+      // Counted off a plain input, not a computed value: a count derived from a
+      // supplied ARN is unknown at plan time whenever that ARN is itself a
+      // resource attribute, which fails the plan outright.
       for (const resource of [
         'resource "aws_iam_role" "execution_role"',
         'resource "aws_iam_role_policy" "execution_role"',
       ]) {
         expect(tf, resource).toContain(
-          `${resource} {\n  count = local.create_execution_role ? 1 : 0`,
+          `${resource} {\n  count = var.create_execution_role ? 1 : 0`,
         );
       }
-      expect(tf).toContain(
-        'create_execution_role = var.execution_role_arn == null',
-      );
       // The harness and the output both follow whichever role is in use.
       expect(tf).toContain(
-        'execution_role_arn    = local.create_execution_role ? aws_iam_role.execution_role[0].arn : var.execution_role_arn',
+        'execution_role_arn = var.create_execution_role ? aws_iam_role.execution_role[0].arn : var.execution_role_arn',
       );
       expect(tf).toContain('execution_role_arn = local.execution_role_arn');
     });
@@ -648,7 +652,7 @@ describe('agentcore-harness generator', () => {
       // policy, which the harness itself depends on.
       expect(tf).toContain('resource "aws_iam_role_policy" "managed_memory"');
       expect(tf).toContain(
-        'count = local.create_execution_role && local.has_managed_memory ? 1 : 0',
+        'count = var.create_execution_role && local.has_managed_memory ? 1 : 0',
       );
     });
 

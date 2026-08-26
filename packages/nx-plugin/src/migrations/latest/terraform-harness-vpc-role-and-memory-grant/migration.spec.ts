@@ -352,17 +352,18 @@ describe('terraform-harness-vpc-role-and-memory-grant migration', () => {
     await migration(tree);
     const contents = tree.read(APP_MODULE_FILE, 'utf-8')!;
 
+    expect(contents).toContain('variable "create_execution_role"');
     expect(contents).toContain('variable "execution_role_arn"');
     expect(contents).toContain(
-      'create_execution_role = var.execution_role_arn == null',
+      'execution_role_arn = var.create_execution_role ? aws_iam_role.execution_role[0].arn : var.execution_role_arn',
     );
 
     // Both the role and its baseline policy are skipped for a supplied role
     expect(contents).toMatch(
-      /resource "aws_iam_role" "execution_role" \{\s*\n\s*count = local\.create_execution_role \? 1 : 0/,
+      /resource "aws_iam_role" "execution_role" \{\s*\n\s*count = var\.create_execution_role \? 1 : 0/,
     );
     expect(contents).toMatch(
-      /resource "aws_iam_role_policy" "execution_role" \{\s*\n\s*count = local\.create_execution_role \? 1 : 0/,
+      /resource "aws_iam_role_policy" "execution_role" \{\s*\n\s*count = var\.create_execution_role \? 1 : 0/,
     );
     expect(contents).toContain('role = aws_iam_role.execution_role[0].id');
 
@@ -421,7 +422,7 @@ describe('terraform-harness-vpc-role-and-memory-grant migration', () => {
       'resource "aws_iam_role_policy" "managed_memory"',
     );
     expect(contents).toContain(
-      'count = local.create_execution_role && local.has_managed_memory ? 1 : 0',
+      'count = var.create_execution_role && local.has_managed_memory ? 1 : 0',
     );
     expect(contents).toContain(
       'has_managed_memory = var.memory == null || var.memory.managed_memory_configuration != null',
