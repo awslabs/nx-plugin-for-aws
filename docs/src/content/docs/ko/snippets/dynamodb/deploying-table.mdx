@@ -46,7 +46,7 @@ module "my_table" {
 - 온디맨드 (`PAY_PER_REQUEST`) 과금
 - 자동 키 로테이션이 활성화된 고객 관리형 KMS 암호화
 - 특정 시점 복구 활성화
-- 삭제 보호 활성화
+- 삭제 보호 활성화 및 `prevent_destroy` 라이프사이클 가드
 - AWS AppConfig의 `dynamodb` 네임스페이스 아래 Runtime Config에 등록된 테이블 이름
 
 `core/runtime-config/appconfig` 모듈은 기본적으로 `dynamodb` 네임스페이스를 노출하므로, 추가 구성 없이 테이블 이름이 배포됩니다. 해당 모듈에 `namespaces`를 명시적으로 전달하는 경우, 목록에 `dynamodb`를 유지하세요. 그렇지 않으면 구성 프로필이 생성되지 않아 생성된 테이블 클라이언트가 테이블 이름을 확인할 수 없습니다.
@@ -55,20 +55,33 @@ module "my_table" {
 
 ### 삭제 보호
 
-실수로 테이블이 삭제되는 것을 방지하기 위해 삭제 보호가 기본적으로 활성화되어 있습니다.
+테이블은 두 개의 독립적인 가드로 보호되므로, 둘 중 하나만 끄는 것으로는 데이터를 삭제할 수 없습니다:
 
-#### 삭제 보호 비활성화
+<Infrastructure>
+<Fragment slot="cdk">
+- `deletionProtection`, DynamoDB에 의해 적용됩니다.
+- `RemovalPolicy.RETAIN`, CloudFormation에 의해 적용되며, 스택에서 제거될 때 테이블을 그대로 유지합니다.
+</Fragment>
+<Fragment slot="terraform">
+- `deletion_protection_enabled`, DynamoDB에 의해 적용됩니다.
+- `common/terraform/src/core/dynamodb/dynamodb.tf`의 테이블에 있는 `lifecycle { prevent_destroy = true }`, Terraform에 의해 적용되며, 테이블을 삭제하려는 모든 플랜을 실패시킵니다.
+</Fragment>
+</Infrastructure>
 
-단기 개발 또는 프리뷰 스택과 같이 테이블 삭제가 예상되는 환경에서는 비활성화하세요.
+#### 테이블 삭제하기
+
+단기 개발 또는 프리뷰 스택과 같이 테이블 삭제가 예상되는 환경에서는 보호를 비활성화하세요.
 
 <Infrastructure>
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
 import { MyTable } from '@my-scope/common-constructs';
 
 const table = new MyTable(this, 'Table', {
   deletionProtection: false,
+  removalPolicy: RemovalPolicy.DESTROY,
 });
 ```
 </Fragment>
@@ -80,6 +93,22 @@ module "my_table" {
   deletion_protection_enabled = false
 }
 ```
+
+`prevent_destroy`는 리터럴이어야 합니다 — Terraform은 변수를 참조하는 것을 허용하지 않습니다 — 따라서 `main.tf`에서 끌 수 없습니다. 또한 `common/terraform/src/core/dynamodb/dynamodb.tf`의 테이블에서 `lifecycle` 블록을 제거하세요:
+
+```hcl title="packages/common/terraform/src/core/dynamodb/dynamodb.tf" del={4-6}
+resource "aws_dynamodb_table" "table" {
+  # ...
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+```
+
+:::caution
+이 모듈은 워크스페이스의 모든 테이블에서 공유되므로, 블록을 제거하면 모든 테이블에 대한 가드가 제거됩니다.
+:::
 </Fragment>
 </Infrastructure>
 
@@ -145,4 +174,3 @@ module "my_table" {
 테이블은 기본적으로 고객 관리형 KMS 키로 암호화되며, 자동으로 생성됩니다. 암호화를 다르게 관리하는 경우 AWS 관리형 키, AWS 소유 키로 전환하거나 자체 KMS 키를 가져올 수 있습니다.
 
 <Snippet name="dynamodb/encryption-options" parentHeading="암호화" />
-

@@ -3,21 +3,34 @@ title: Protection contre la suppression
 ---
 import Infrastructure from '@components/infrastructure.astro';
 
-La protection contre la suppression est activée par défaut (`deletionProtection: true` dans CDK, `deletion_protection = true` dans Terraform) pour protéger le cluster Aurora contre toute suppression accidentelle.
+Le cluster Aurora est protégé par deux garde-fous indépendants, de sorte que la désactivation de l'un seul ne peut pas supprimer vos données :
 
-#### Désactiver la protection contre la suppression
+<Infrastructure>
+<Fragment slot="cdk">
+- `deletionProtection`, appliqué par RDS.
+- `RemovalPolicy.RETAIN`, appliqué par CloudFormation, qui laisse le cluster en place lorsqu'il est retiré de la stack.
+</Fragment>
+<Fragment slot="terraform">
+- `deletion_protection`, appliqué par RDS.
+- `lifecycle { prevent_destroy = true }` sur le cluster dans `common/terraform/src/core/rdb/aurora/aurora.tf`, appliqué par Terraform, qui fait échouer tout plan qui détruirait le cluster.
+</Fragment>
+</Infrastructure>
 
-Vous pouvez désactiver la protection contre la suppression pour les environnements où la suppression de la base de données est attendue, comme les stacks de développement ou de prévisualisation éphémères.
+#### Suppression de la base de données
+
+Vous pouvez désactiver la protection pour les environnements où la suppression de la base de données est attendue, comme les stacks de développement ou de prévisualisation éphémères.
 
 <Infrastructure>
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
 import { MyDatabase } from '@my-scope/common-constructs';
 
 const db = new MyDatabase(this, 'Db', {
   ...
   deletionProtection: false,
+  removalPolicy: RemovalPolicy.DESTROY,
 });
 ```
 </Fragment>
@@ -28,7 +41,24 @@ module "my_database" {
   source = "../../common/terraform/src/app/dbs/my-database"
   ...
   deletion_protection = false
+  skip_final_snapshot = true
 }
 ```
+
+`prevent_destroy` doit être un littéral — Terraform ne permet pas de référencer une variable — il ne peut donc pas être désactivé depuis `main.tf`. Supprimez également le bloc `lifecycle` du cluster dans `common/terraform/src/core/rdb/aurora/aurora.tf` :
+
+```hcl title="packages/common/terraform/src/core/rdb/aurora/aurora.tf" del={4-6}
+resource "aws_rds_cluster" "database" {
+  # ...
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+```
+
+:::caution
+Ce module est partagé par toutes les bases de données de votre workspace, donc supprimer le bloc supprime ce garde-fou pour toutes.
+:::
 </Fragment>
 </Infrastructure>

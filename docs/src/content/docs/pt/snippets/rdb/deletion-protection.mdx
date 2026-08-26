@@ -3,21 +3,34 @@ title: Proteção contra Exclusão
 ---
 import Infrastructure from '@components/infrastructure.astro';
 
-A proteção contra exclusão está habilitada por padrão (`deletionProtection: true` no CDK, `deletion_protection = true` no Terraform) para proteger o cluster Aurora contra exclusão acidental.
+O cluster Aurora é protegido por duas proteções independentes, de modo que desativar apenas uma delas não pode excluir seus dados:
 
-#### Desabilitar Proteção contra Exclusão
+<Infrastructure>
+<Fragment slot="cdk">
+- `deletionProtection`, aplicado pelo RDS.
+- `RemovalPolicy.RETAIN`, aplicado pelo CloudFormation, que deixa o cluster no lugar quando ele é removido da stack.
+</Fragment>
+<Fragment slot="terraform">
+- `deletion_protection`, aplicado pelo RDS.
+- `lifecycle { prevent_destroy = true }` no cluster em `common/terraform/src/core/rdb/aurora/aurora.tf`, aplicado pelo Terraform, que falha qualquer plano que destruiria o cluster.
+</Fragment>
+</Infrastructure>
 
-Você pode desabilitar a proteção contra exclusão para ambientes onde a exclusão do banco de dados é esperada, como stacks de desenvolvimento ou preview de curta duração.
+#### Excluir o Banco de Dados
+
+Você pode desabilitar a proteção para ambientes onde a exclusão do banco de dados é esperada, como stacks de desenvolvimento ou preview de curta duração.
 
 <Infrastructure>
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
 import { MyDatabase } from '@my-scope/common-constructs';
 
 const db = new MyDatabase(this, 'Db', {
   ...
   deletionProtection: false,
+  removalPolicy: RemovalPolicy.DESTROY,
 });
 ```
 </Fragment>
@@ -28,7 +41,24 @@ module "my_database" {
   source = "../../common/terraform/src/app/dbs/my-database"
   ...
   deletion_protection = false
+  skip_final_snapshot = true
 }
 ```
+
+`prevent_destroy` deve ser um literal — o Terraform não permite que ele referencie uma variável — então não pode ser desativado a partir de `main.tf`. Remova também o bloco `lifecycle` do cluster em `common/terraform/src/core/rdb/aurora/aurora.tf`:
+
+```hcl title="packages/common/terraform/src/core/rdb/aurora/aurora.tf" del={4-6}
+resource "aws_rds_cluster" "database" {
+  # ...
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+```
+
+:::caution
+Este módulo é compartilhado por todos os bancos de dados no seu workspace, então remover o bloco remove essa proteção para todos eles.
+:::
 </Fragment>
 </Infrastructure>

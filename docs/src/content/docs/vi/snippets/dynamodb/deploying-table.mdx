@@ -46,7 +46,7 @@ module "my_table" {
 - Thanh toán theo yêu cầu (`PAY_PER_REQUEST`)
 - Mã hóa KMS do khách hàng quản lý với tự động xoay vòng khóa
 - Khôi phục theo thời điểm được bật
-- Bảo vệ xóa được bật
+- Bảo vệ xóa được bật, cùng với bảo vệ vòng đời `prevent_destroy`
 - Tên bảng được đăng ký trong Runtime Config dưới namespace `dynamodb` trong AWS AppConfig
 
 Module `core/runtime-config/appconfig` hiển thị namespace `dynamodb` theo mặc định, vì vậy tên bảng được triển khai mà không cần cấu hình thêm. Nếu bạn truyền `namespaces` vào module đó một cách rõ ràng, hãy giữ `dynamodb` trong danh sách — nếu không, không có configuration profile nào được tạo cho nó và table client được tạo ra không thể phân giải tên bảng.
@@ -55,20 +55,33 @@ Module `core/runtime-config/appconfig` hiển thị namespace `dynamodb` theo m�
 
 ### Bảo vệ Xóa
 
-Bảo vệ xóa được bật mặc định để ngăn chặn việc xóa bảng một cách vô tình.
+Bảng được bảo vệ bởi hai biện pháp bảo vệ độc lập, do đó việc tắt một trong hai không thể xóa dữ liệu của bạn:
 
-#### Vô hiệu hóa Bảo vệ Xóa
+<Infrastructure>
+<Fragment slot="cdk">
+- `deletionProtection`, được thực thi bởi DynamoDB.
+- `RemovalPolicy.RETAIN`, được thực thi bởi CloudFormation, giữ bảng tại chỗ khi nó bị xóa khỏi stack.
+</Fragment>
+<Fragment slot="terraform">
+- `deletion_protection_enabled`, được thực thi bởi DynamoDB.
+- `lifecycle { prevent_destroy = true }` trên bảng trong `common/terraform/src/core/dynamodb/dynamodb.tf`, được thực thi bởi Terraform, làm thất bại bất kỳ kế hoạch nào sẽ phá hủy bảng.
+</Fragment>
+</Infrastructure>
 
-Vô hiệu hóa nó cho các môi trường mà việc xóa bảng được mong đợi, chẳng hạn như các stack phát triển hoặc xem trước có thời gian tồn tại ngắn.
+#### Xóa Bảng
+
+Vô hiệu hóa bảo vệ cho các môi trường mà việc xóa bảng được mong đợi, chẳng hạn như các stack phát triển hoặc xem trước có thời gian tồn tại ngắn.
 
 <Infrastructure>
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
 import { MyTable } from '@my-scope/common-constructs';
 
 const table = new MyTable(this, 'Table', {
   deletionProtection: false,
+  removalPolicy: RemovalPolicy.DESTROY,
 });
 ```
 </Fragment>
@@ -80,6 +93,22 @@ module "my_table" {
   deletion_protection_enabled = false
 }
 ```
+
+`prevent_destroy` phải là một giá trị cố định — Terraform không cho phép nó tham chiếu đến một biến — vì vậy nó không thể được tắt từ `main.tf`. Cũng xóa khối `lifecycle` khỏi bảng trong `common/terraform/src/core/dynamodb/dynamodb.tf`:
+
+```hcl title="packages/common/terraform/src/core/dynamodb/dynamodb.tf" del={4-6}
+resource "aws_dynamodb_table" "table" {
+  # ...
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+```
+
+:::caution
+Module này được chia sẻ bởi mọi bảng trong workspace của bạn, vì vậy việc xóa khối này sẽ xóa biện pháp bảo vệ đó cho tất cả chúng.
+:::
 </Fragment>
 </Infrastructure>
 

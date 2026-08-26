@@ -46,7 +46,7 @@ Isso provisiona uma tabela DynamoDB com:
 - Cobrança sob demanda (`PAY_PER_REQUEST`)
 - Criptografia KMS gerenciada pelo cliente com rotação automática de chave
 - Recuperação point-in-time habilitada
-- Proteção contra exclusão habilitada
+- Proteção contra exclusão habilitada, além de uma proteção de ciclo de vida `prevent_destroy`
 - Nome da tabela registrado no Runtime Config sob o namespace `dynamodb` no AWS AppConfig
 
 O módulo `core/runtime-config/appconfig` expõe o namespace `dynamodb` por padrão, então o nome da tabela é implantado sem configuração adicional. Se você passar `namespaces` para esse módulo explicitamente, mantenha `dynamodb` na lista — caso contrário, nenhum perfil de configuração é criado para ele e o cliente de tabela gerado não consegue resolver o nome da tabela.
@@ -55,20 +55,33 @@ O módulo `core/runtime-config/appconfig` expõe o namespace `dynamodb` por padr
 
 ### Proteção contra Exclusão
 
-A proteção contra exclusão está habilitada por padrão para prevenir a exclusão acidental da tabela.
+A tabela é protegida por duas proteções independentes, de modo que desativar apenas uma delas não pode excluir seus dados:
 
-#### Desabilitar Proteção contra Exclusão
+<Infrastructure>
+<Fragment slot="cdk">
+- `deletionProtection`, aplicada pelo DynamoDB.
+- `RemovalPolicy.RETAIN`, aplicada pelo CloudFormation, que deixa a tabela no lugar quando ela é removida da stack.
+</Fragment>
+<Fragment slot="terraform">
+- `deletion_protection_enabled`, aplicada pelo DynamoDB.
+- `lifecycle { prevent_destroy = true }` na tabela em `common/terraform/src/core/dynamodb/dynamodb.tf`, aplicada pelo Terraform, que falha qualquer plano que destruiria a tabela.
+</Fragment>
+</Infrastructure>
 
-Desabilite-a para ambientes onde a exclusão da tabela é esperada, como stacks de desenvolvimento ou preview de curta duração.
+#### Excluindo a Tabela
+
+Desabilite a proteção para ambientes onde a exclusão da tabela é esperada, como stacks de desenvolvimento ou preview de curta duração.
 
 <Infrastructure>
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
 import { MyTable } from '@my-scope/common-constructs';
 
 const table = new MyTable(this, 'Table', {
   deletionProtection: false,
+  removalPolicy: RemovalPolicy.DESTROY,
 });
 ```
 </Fragment>
@@ -80,6 +93,22 @@ module "my_table" {
   deletion_protection_enabled = false
 }
 ```
+
+`prevent_destroy` deve ser um literal — o Terraform não permite que ele referencie uma variável — então não pode ser desativado a partir de `main.tf`. Remova também o bloco `lifecycle` da tabela em `common/terraform/src/core/dynamodb/dynamodb.tf`:
+
+```hcl title="packages/common/terraform/src/core/dynamodb/dynamodb.tf" del={4-6}
+resource "aws_dynamodb_table" "table" {
+  # ...
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+```
+
+:::caution
+Este módulo é compartilhado por todas as tabelas no seu workspace, então remover o bloco remove essa proteção para todas elas.
+:::
 </Fragment>
 </Infrastructure>
 
@@ -145,4 +174,3 @@ module "my_table" {
 A tabela é criptografada com uma chave KMS gerenciada pelo cliente por padrão, criada automaticamente para você. Mude para uma chave gerenciada pela AWS, a chave de propriedade da AWS, ou traga sua própria chave KMS, se você gerencia a criptografia de forma diferente.
 
 <Snippet name="dynamodb/encryption-options" parentHeading="Criptografia" />
-

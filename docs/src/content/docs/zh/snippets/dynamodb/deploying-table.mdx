@@ -46,7 +46,7 @@ module "my_table" {
 - 按需（`PAY_PER_REQUEST`）计费
 - 具有自动密钥轮换的客户托管 KMS 加密
 - 启用时间点恢复
-- 启用删除保护
+- 启用删除保护，以及 `prevent_destroy` 生命周期保护
 - 表名在 AWS AppConfig 的 `dynamodb` 命名空间下注册到 Runtime Config
 
 `core/runtime-config/appconfig` 模块默认公开 `dynamodb` 命名空间，因此表名无需进一步配置即可部署。如果您显式地向该模块传递 `namespaces`，请在列表中保留 `dynamodb` —— 否则不会为其创建配置文件，生成的表客户端将无法解析表名。
@@ -55,20 +55,33 @@ module "my_table" {
 
 ### 删除保护
 
-默认启用删除保护以防止意外删除表。
+表由两个独立的保护机制保护，因此单独关闭其中任何一个都无法删除您的数据：
 
-#### 禁用删除保护
+<Infrastructure>
+<Fragment slot="cdk">
+- `deletionProtection`，由 DynamoDB 强制执行。
+- `RemovalPolicy.RETAIN`，由 CloudFormation 强制执行，当表从堆栈中移除时会将其保留在原处。
+</Fragment>
+<Fragment slot="terraform">
+- `deletion_protection_enabled`，由 DynamoDB 强制执行。
+- `lifecycle { prevent_destroy = true }` 在 `common/terraform/src/core/dynamodb/dynamodb.tf` 中的表上，由 Terraform 强制执行，会使任何试图销毁表的计划失败。
+</Fragment>
+</Infrastructure>
 
-对于预期会删除表的环境（例如短期开发或预览堆栈），可以禁用它。
+#### 删除表
+
+对于预期会删除表的环境（例如短期开发或预览堆栈），可以禁用保护。
 
 <Infrastructure>
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
 import { MyTable } from '@my-scope/common-constructs';
 
 const table = new MyTable(this, 'Table', {
   deletionProtection: false,
+  removalPolicy: RemovalPolicy.DESTROY,
 });
 ```
 </Fragment>
@@ -80,6 +93,22 @@ module "my_table" {
   deletion_protection_enabled = false
 }
 ```
+
+`prevent_destroy` 必须是字面量 —— Terraform 不允许它引用变量 —— 因此无法从 `main.tf` 中关闭它。还需要从 `common/terraform/src/core/dynamodb/dynamodb.tf` 中的表中删除 `lifecycle` 块：
+
+```hcl title="packages/common/terraform/src/core/dynamodb/dynamodb.tf" del={4-6}
+resource "aws_dynamodb_table" "table" {
+  # ...
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+```
+
+:::caution
+此模块由工作区中的每个表共享，因此删除该块会移除所有表的保护。
+:::
 </Fragment>
 </Infrastructure>
 

@@ -46,7 +46,7 @@ module "my_table" {
 - オンデマンド（`PAY_PER_REQUEST`）課金
 - 自動キーローテーション付きのカスタマー管理 KMS 暗号化
 - ポイントインタイムリカバリが有効
-- 削除保護が有効
+- 削除保護が有効、さらに `prevent_destroy` ライフサイクルガード
 - AWS AppConfig の `dynamodb` 名前空間下の Runtime Config にテーブル名が登録される
 
 `core/runtime-config/appconfig` モジュールはデフォルトで `dynamodb` 名前空間を公開するため、テーブル名は追加の設定なしでデプロイされます。そのモジュールに明示的に `namespaces` を渡す場合は、リストに `dynamodb` を含めてください。そうしないと、設定プロファイルが作成されず、生成されたテーブルクライアントがテーブル名を解決できなくなります。
@@ -55,20 +55,33 @@ module "my_table" {
 
 ### 削除保護
 
-削除保護はデフォルトで有効になっており、誤ってテーブルを削除することを防ぎます。
+テーブルは 2 つの独立したガードによって保護されているため、どちらか一方だけをオフにしてもデータを削除することはできません：
 
-#### 削除保護を無効にする
+<Infrastructure>
+<Fragment slot="cdk">
+- `deletionProtection`、DynamoDB によって強制されます。
+- `RemovalPolicy.RETAIN`、CloudFormation によって強制され、スタックから削除されてもテーブルをそのまま残します。
+</Fragment>
+<Fragment slot="terraform">
+- `deletion_protection_enabled`、DynamoDB によって強制されます。
+- `common/terraform/src/core/dynamodb/dynamodb.tf` のテーブルに対する `lifecycle { prevent_destroy = true }`、Terraform によって強制され、テーブルを破棄するプランは失敗します。
+</Fragment>
+</Infrastructure>
 
-短期間の開発環境やプレビュースタックなど、テーブルの削除が想定される環境では無効にします。
+#### テーブルの削除
+
+短期間の開発環境やプレビュースタックなど、テーブルの削除が想定される環境では保護を無効にします。
 
 <Infrastructure>
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
 import { MyTable } from '@my-scope/common-constructs';
 
 const table = new MyTable(this, 'Table', {
   deletionProtection: false,
+  removalPolicy: RemovalPolicy.DESTROY,
 });
 ```
 </Fragment>
@@ -80,6 +93,22 @@ module "my_table" {
   deletion_protection_enabled = false
 }
 ```
+
+`prevent_destroy` はリテラルでなければなりません — Terraform は変数を参照することを許可していません — そのため、`main.tf` からオフにすることはできません。また、`common/terraform/src/core/dynamodb/dynamodb.tf` のテーブルから `lifecycle` ブロックを削除してください：
+
+```hcl title="packages/common/terraform/src/core/dynamodb/dynamodb.tf" del={4-6}
+resource "aws_dynamodb_table" "table" {
+  # ...
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+```
+
+:::caution
+このモジュールはワークスペース内のすべてのテーブルで共有されているため、ブロックを削除するとすべてのテーブルのガードが削除されます。
+:::
 </Fragment>
 </Infrastructure>
 

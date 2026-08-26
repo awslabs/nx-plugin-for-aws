@@ -3,21 +3,34 @@ title: 删除保护
 ---
 import Infrastructure from '@components/infrastructure.astro';
 
-默认情况下启用删除保护（CDK 中为 `deletionProtection: true`，Terraform 中为 `deletion_protection = true`），以保护 Aurora 集群免遭意外删除。
+Aurora 集群受到两个独立保护措施的保护，因此单独关闭其中任何一个都无法删除您的数据：
 
-#### 禁用删除保护
+<Infrastructure>
+<Fragment slot="cdk">
+- `deletionProtection`，由 RDS 强制执行。
+- `RemovalPolicy.RETAIN`，由 CloudFormation 强制执行，当集群从堆栈中移除时，它会将集群保留在原位。
+</Fragment>
+<Fragment slot="terraform">
+- `deletion_protection`，由 RDS 强制执行。
+- `lifecycle { prevent_destroy = true }` 在 `common/terraform/src/core/rdb/aurora/aurora.tf` 中的集群上，由 Terraform 强制执行，它会使任何试图销毁集群的计划失败。
+</Fragment>
+</Infrastructure>
 
-您可以为预期会删除数据库的环境禁用删除保护，例如短期开发或预览堆栈。
+#### 删除数据库
+
+您可以为预期会删除数据库的环境禁用保护，例如短期开发或预览堆栈。
 
 <Infrastructure>
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
 import { MyDatabase } from '@my-scope/common-constructs';
 
 const db = new MyDatabase(this, 'Db', {
   ...
   deletionProtection: false,
+  removalPolicy: RemovalPolicy.DESTROY,
 });
 ```
 </Fragment>
@@ -28,7 +41,24 @@ module "my_database" {
   source = "../../common/terraform/src/app/dbs/my-database"
   ...
   deletion_protection = false
+  skip_final_snapshot = true
 }
 ```
+
+`prevent_destroy` 必须是字面量 — Terraform 不允许它引用变量 — 因此无法从 `main.tf` 中关闭它。还需要从 `common/terraform/src/core/rdb/aurora/aurora.tf` 中的集群中移除 `lifecycle` 块：
+
+```hcl title="packages/common/terraform/src/core/rdb/aurora/aurora.tf" del={4-6}
+resource "aws_rds_cluster" "database" {
+  # ...
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+```
+
+:::caution
+此模块由工作区中的每个数据库共享，因此移除该块会移除所有数据库的保护措施。
+:::
 </Fragment>
 </Infrastructure>
