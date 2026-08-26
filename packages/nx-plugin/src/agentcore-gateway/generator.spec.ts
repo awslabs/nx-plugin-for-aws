@@ -505,12 +505,8 @@ describe('agentcore-gateway generator', () => {
       );
     });
 
-    // Terraform defers an `external` data source's `result` to apply, so
-    // neither `terraform plan` nor the mocked `terraform test` runs the script
-    // — only a real apply does, which is why the resolution failure below
-    // survived. The script runs from the shared terraform project, which has no
-    // package.json, so the workspace root is the nearest manifest it can
-    // resolve `ejs` from.
+    // The script runs in the shared terraform project, which has no
+    // package.json, so it resolves ejs from the workspace root.
     describe('render-cedar.cjs', () => {
       const GATEWAY_ARN =
         'arn:aws:bedrock-agentcore:us-west-2:123456789012:gateway/MyGateway-1a2b3c4d';
@@ -522,8 +518,6 @@ describe('agentcore-gateway generator', () => {
           ...root.devDependencies,
         }).toHaveProperty('ejs');
 
-        // The gateway project imports nothing from ejs, and its manifest is not
-        // on the script's resolution path anyway.
         const gateway = JSON.parse(
           tree.read('packages/my-gateway/package.json', 'utf-8')!,
         );
@@ -533,11 +527,9 @@ describe('agentcore-gateway generator', () => {
         }).not.toHaveProperty('ejs');
       });
 
-      // Run the way apply does — from the module directory, query on stdin —
-      // with ejs reachable only from a root manifest above it, mirroring the
-      // generated layout. NODE_PATH is cleared because pnpm's bin shims export
-      // one covering the hoisted virtual store (where nx's own ejs sits), which
-      // would otherwise mask an unresolvable require.
+      // Run as apply does: from the module directory, query on stdin, with ejs
+      // reachable only from the root manifest. NODE_PATH is cleared so pnpm's
+      // bin shims can't supply a copy from the hoisted virtual store.
       it('resolves ejs from the workspace root and renders the vended policy', () => {
         const root = mkdtempSync(join(tmpdir(), 'render-cedar-'));
         const moduleDir = join(

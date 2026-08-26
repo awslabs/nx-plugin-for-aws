@@ -20,9 +20,7 @@ const rootEjs = (tree: Tree) => {
 describe('terraform-gateway-cedar-render-root-ejs migration', () => {
   let tree: Tree;
 
-  const addGateway = (
-    options: { script?: boolean; manifest?: Record<string, unknown> } = {},
-  ) => {
+  const addGateway = (options: { script?: boolean } = {}) => {
     addProjectConfiguration(tree, '@proj/my-gateway', {
       root: 'packages/my-gateway',
       metadata: {
@@ -35,7 +33,7 @@ describe('terraform-gateway-cedar-render-root-ejs migration', () => {
     tree.write(
       MANIFEST_PATH,
       JSON.stringify(
-        options.manifest ?? {
+        {
           name: '@proj/my-gateway',
           dependencies: { express: 'catalog:' },
           devDependencies: { ejs: 'catalog:', '@types/ejs': 'catalog:' },
@@ -58,36 +56,27 @@ describe('terraform-gateway-cedar-render-root-ejs migration', () => {
 
     await migration(tree);
 
-    // The root manifest is the nearest one above the script, which sits in the
-    // package.json-less shared terraform project.
     expect(rootEjs(tree)).toBeDefined();
   });
 
-  it('drops the redundant ejs from the gateway manifest', async () => {
+  it('declares the vended ejs version', async () => {
     addGateway({ script: true });
 
     await migration(tree);
 
-    const manifest = JSON.parse(tree.read(MANIFEST_PATH, 'utf-8')!);
-    expect(manifest.devDependencies).not.toHaveProperty('ejs');
-    expect(manifest.devDependencies).not.toHaveProperty('@types/ejs');
-    expect(manifest.dependencies).toEqual({ express: 'catalog:' });
+    const declared = rootEjs(tree);
+    expect(declared === 'catalog:' || declared === TS_VERSIONS.ejs).toBe(true);
   });
 
-  it('keeps an ejs version the user pinned themselves', async () => {
-    addGateway({
-      script: true,
-      manifest: {
-        name: '@proj/my-gateway',
-        devDependencies: { ejs: '^3.1.0' },
-      },
-    });
+  // Purely additive: the migration cannot tell whether a user has started
+  // importing ejs in the gateway project, so it never removes it.
+  it('leaves the gateway project dependencies untouched', async () => {
+    addGateway({ script: true });
+    const before = JSON.parse(tree.read(MANIFEST_PATH, 'utf-8')!);
 
     await migration(tree);
 
-    expect(
-      JSON.parse(tree.read(MANIFEST_PATH, 'utf-8')!).devDependencies.ejs,
-    ).toBe('^3.1.0');
+    expect(JSON.parse(tree.read(MANIFEST_PATH, 'utf-8')!)).toEqual(before);
   });
 
   it('leaves a CDK gateway alone, which resolves ejs from shared constructs', async () => {
@@ -96,10 +85,6 @@ describe('terraform-gateway-cedar-render-root-ejs migration', () => {
     await migration(tree);
 
     expect(rootEjs(tree)).toBeUndefined();
-    // The CDK gateway's own manifest is not touched either.
-    expect(
-      JSON.parse(tree.read(MANIFEST_PATH, 'utf-8')!).devDependencies.ejs,
-    ).toBe('catalog:');
   });
 
   it('is idempotent', async () => {
@@ -114,15 +99,5 @@ describe('terraform-gateway-cedar-render-root-ejs migration', () => {
 
     expect(tree.read('package.json', 'utf-8')).toBe(afterFirst.root);
     expect(tree.read(MANIFEST_PATH, 'utf-8')).toBe(afterFirst.manifest);
-  });
-
-  it('declares the vended ejs version', async () => {
-    addGateway({ script: true });
-
-    await migration(tree);
-
-    // Either the pinned range or a catalog reference resolving to it.
-    const declared = rootEjs(tree);
-    expect(declared === 'catalog:' || declared === TS_VERSIONS.ejs).toBe(true);
   });
 });

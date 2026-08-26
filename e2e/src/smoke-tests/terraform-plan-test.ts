@@ -9,19 +9,9 @@ import { runCLI } from '../utils';
 
 /**
  * Runs every gateway's Cedar render script the way `terraform apply` does,
- * against the workspace's real installed dependencies.
- *
- * An `external` data source's `result` is only known after apply — under plan it
- * sits in `after_unknown` — so neither `terraform plan` nor the mocked
- * `terraform test` above ever executes `program`. That left the script's `ejs`
- * resolution unproven by the whole Terraform lane: it runs from the shared
- * terraform project, which has no `package.json`, so under pnpm's isolated
- * layout the dependency has to come from the workspace root.
- *
- * `NODE_PATH` is cleared deliberately. Nx's own bin shim exports one covering
- * pnpm's hoisted virtual store, and Nx happens to depend on `ejs` itself, so a
- * script spawned beneath `nx apply` could resolve a copy the workspace never
- * declared — masking a missing declaration.
+ * against the workspace's real installed dependencies. Plan defers an
+ * `external` data source's `result`, so neither `terraform plan` nor the mocked
+ * `terraform test` above executes `program`.
  */
 const runCedarRenderScripts = (projectRoot: string) => {
   const gatewaysDir = join(
@@ -65,8 +55,6 @@ const runCedarRenderScripts = (projectRoot: string) => {
       expect(result.stderr ?? '').not.toContain('Cannot find module');
       expect(result.status).toBe(0);
       const { rendered } = JSON.parse(result.stdout);
-      // Every placeholder the policy carries is substituted, so what reaches
-      // the Cedar validator is a complete policy.
       expect(rendered).toContain('permit');
       expect(rendered).not.toContain('<%');
     }

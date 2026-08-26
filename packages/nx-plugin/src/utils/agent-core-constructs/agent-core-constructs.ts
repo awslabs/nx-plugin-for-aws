@@ -44,22 +44,15 @@ type IACProvider = { iac: Iac };
 /**
  * Dependencies a caller must declare to add an AgentCore Gateway construct.
  *
- * Both providers render Cedar policies with `ejs`, but each needs it in a
- * different manifest, so each branch installs it where it resolves from:
- *
- * - CDK imports it from the shared constructs project, so it goes in that
- *   project's manifest, along with the SDK client its readiness probe uses and
- *   the types the TypeScript construct needs.
- * - Terraform's `render-cedar.cjs` runs from the shared terraform project,
- *   which has no `package.json`, so it goes in the workspace root manifest —
- *   the only one above the script that a bare `require` can resolve against
- *   under pnpm's isolated node_modules.
+ * Both providers render Cedar policies with `ejs`, each from a different
+ * manifest: the CDK construct imports it from the shared constructs project,
+ * while Terraform's `render-cedar.cjs` resolves it from the workspace root,
+ * since the shared terraform project it runs in has no `package.json`.
  */
 export const AGENT_CORE_CONSTRUCTS_DEPENDENCIES = [
   { name: 'ejs', when: generatedCdk },
   { name: '@aws-sdk/client-bedrock-agentcore', when: generatedCdk },
   { name: '@types/ejs', when: generatedCdk },
-  // The Cedar render script resolves this from the workspace root.
   { name: 'ejs', when: generatedTerraform, dev: true, root: true },
 ] as const satisfies readonly DeclaredTsDependency<
   ITsDepVersion,
@@ -537,9 +530,8 @@ const addAgentCoreGatewayTerraformInfra = (
     return;
   }
 
-  // render-cedar.cjs requires ejs and runs from the shared terraform project,
-  // which has no package.json — so it goes in the workspace root manifest, the
-  // only one above the script pnpm's isolated node_modules lets it resolve.
+  // render-cedar.cjs resolves ejs from the workspace root, since the shared
+  // terraform project it runs in has no package.json.
   addDependenciesToPackageJson(
     tree,
     {},

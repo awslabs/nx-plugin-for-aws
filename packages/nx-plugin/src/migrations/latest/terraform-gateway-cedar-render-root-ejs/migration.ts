@@ -7,7 +7,6 @@ import {
   joinPathFragments,
   type MigrationReturnObject,
   type Tree,
-  updateJson,
 } from '@nx/devkit';
 import { AGENTCORE_GATEWAY_GENERATOR_INFO } from '../../../agentcore-gateway/generator.js';
 import { addDependenciesToPackageJson } from '../../../utils/dependencies.js';
@@ -20,38 +19,11 @@ import { TS_VERSIONS } from '../../../utils/versions.js';
 
 /**
  * Declare `ejs` at the workspace root for Terraform gateways with Cedar
- * policies.
- *
- * `render-cedar.cjs` requires `ejs` and is run by an `external` data source
- * from `packages/common/terraform/src/app/gateways/<name>/`. That directory
- * belongs to the shared terraform project, which has no `package.json`, so
- * under pnpm's isolated node_modules nothing above the script provided `ejs`
- * and `terraform apply` failed reading the data source. The workspace root is
- * the nearest manifest the script can resolve against.
- *
- * The redundant copy in each gateway project's manifest is dropped, since
- * nothing in a gateway project imports `ejs`. A version the user pinned
- * themselves (a non-`catalog:` specifier) is left alone.
+ * policies, which is where `render-cedar.cjs` resolves it from: the script runs
+ * in the shared terraform project, which has no `package.json` of its own.
  */
 
 const RENDER_SCRIPT = 'render-cedar.cjs';
-
-/** Drop `ejs` / `@types/ejs` from a gateway project's manifest. */
-const removeUnusedEjs = (tree: Tree, manifestPath: string): void => {
-  if (!tree.exists(manifestPath)) {
-    return;
-  }
-  updateJson(tree, manifestPath, (json) => {
-    for (const field of ['dependencies', 'devDependencies'] as const) {
-      for (const name of ['ejs', '@types/ejs']) {
-        if (json[field]?.[name] === 'catalog:') {
-          delete json[field][name];
-        }
-      }
-    }
-    return json;
-  });
-};
 
 export default async function migration(
   tree: Tree,
@@ -76,15 +48,12 @@ export default async function migration(
     // Only a Terraform gateway with Cedar policies vends the render script; a
     // CDK one resolves ejs from the shared constructs project instead.
     if (
-      !tree.exists(
+      tree.exists(
         joinPathFragments(gatewaysDir, metadata.name ?? '', RENDER_SCRIPT),
       )
     ) {
-      continue;
+      needsRootEjs = true;
     }
-
-    needsRootEjs = true;
-    removeUnusedEjs(tree, joinPathFragments(project.root, 'package.json'));
   }
 
   if (needsRootEjs) {

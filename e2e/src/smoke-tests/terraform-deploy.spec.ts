@@ -340,12 +340,7 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
             ),
           ).toContain('8');
 
-          // Cedar policies — the gateway's policies are rendered by
-          // `render-cedar.cjs` through an `external` data source, whose result
-          // Terraform defers to apply. Asserting the output proves the script
-          // ran and produced a complete policy: every placeholder substituted,
-          // scoped to this gateway's real ARN. A failure to render would
-          // otherwise only surface as an opaque apply error.
+          // Cedar policies, rendered by render-cedar.cjs at apply time.
           const renderedPolicies = JSON.parse(
             outputs.my_gateway_rendered_policies,
           ) as Record<string, string>;
@@ -354,7 +349,6 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
           for (const [file, policy] of Object.entries(renderedPolicies)) {
             expect(policy, file).toContain('permit');
             expect(policy, file).toContain(outputs.my_gateway_arn);
-            // An unsubstituted placeholder would reach the Cedar validator.
             expect(policy, file).not.toContain('<%');
           }
 
