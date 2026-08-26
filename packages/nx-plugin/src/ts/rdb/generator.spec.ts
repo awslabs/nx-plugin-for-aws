@@ -23,6 +23,35 @@ const sharedConstructsDeclaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
 });
 
+const TERRAFORM_AURORA_CORE =
+  'packages/common/terraform/src/core/rdb/aurora/aurora.tf';
+const TERRAFORM_AURORA_APP = 'packages/common/terraform/src/app/dbs/db/db.tf';
+
+/** Declared name to default value for every optional variable in a module. */
+const readTerraformVariableDefaults = (
+  tree: Tree,
+  filePath: string,
+): Record<string, string> =>
+  Object.fromEntries(
+    [
+      // Nested blocks are indented, so an unindented `}` closes the variable.
+      ...tree
+        .read(filePath, 'utf-8')
+        .matchAll(/variable "(?<name>\w+)" \{\n(?<body>.*?)\n\}/gs),
+    ]
+      .map(({ groups }) => [
+        groups.name,
+        /^\s*default\s*=\s*(?<value>.+)$/m.exec(groups.body)?.groups.value,
+      ])
+      .filter(([, value]) => value !== undefined),
+  );
+
+/** The app module's call into the core module, with alignment padding collapsed. */
+const readTerraformAuroraModuleCall = (tree: Tree): string =>
+  /module "aurora" \{\n.*?\n\}/s
+    .exec(tree.read(TERRAFORM_AURORA_APP, 'utf-8'))[0]
+    .replace(/ +/g, ' ');
+
 describe('ts#rdb generator', () => {
   let tree: Tree;
   beforeEach(() => {
@@ -340,6 +369,60 @@ describe('ts#rdb generator', () => {
     // of an encrypted cluster stays restorable for as long as possible.
     expect(aurora).toContain('deletion_window_in_days = 30');
   });
+
+  it('should agree on every aurora variable default between the terraform app and core modules', async () => {
+    await tsRdbGenerator(tree, { ...defaultOptions, iac: 'terraform' });
+
+    const core = readTerraformVariableDefaults(tree, TERRAFORM_AURORA_CORE);
+    const app = readTerraformVariableDefaults(tree, TERRAFORM_AURORA_APP);
+
+    // A root configuration instantiates the app module, which forwards its own
+    // value down, so a differing default there silently overrides the core one.
+    const shared = Object.keys(core).filter((name) => name in app);
+    expect(Object.fromEntries(shared.map((n) => [n, app[n]]))).toEqual(
+      Object.fromEntries(shared.map((n) => [n, core[n]])),
+    );
+
+    // Every re-declared variable must forward its own value down, so the app
+    // module's default is the one that takes effect.
+    const moduleCall = readTerraformAuroraModuleCall(tree);
+    for (const name of shared) {
+      expect(moduleCall).toContain(`${name} = var.${name}`);
+    }
+
+    // Any optional core variable the app module does not re-declare is
+    // unreachable from a root configuration. `engine` is the one exception —
+    // the generator fixes it from the chosen engine.
+    expect(Object.keys(core).filter((name) => !(name in app))).toEqual([
+      'engine',
+    ]);
+  });
+
+  it.each([
+    ['postgres', '["postgresql"]', 'log_statement'],
+    ['mysql', '["audit", "error"]', 'server_audit_events'],
+  ] as const)(
+    'should export %s engine logs and create the cluster parameter group by default in terraform',
+    async (engine, exports, parameter) => {
+      await tsRdbGenerator(tree, {
+        ...defaultOptions,
+        iac: 'terraform',
+        engine,
+      });
+
+      expect(
+        readTerraformVariableDefaults(tree, TERRAFORM_AURORA_APP)
+          .enable_cloudwatch_logs,
+      ).toBe('true');
+
+      // The same variable count-gates the cluster parameter group, which is what
+      // configures the engine to emit the logs it exports.
+      const core = tree.read(TERRAFORM_AURORA_CORE, 'utf-8');
+      expect(core).toContain('count = var.enable_cloudwatch_logs ? 1 : 0');
+      expect(core).toContain(exports);
+      expect(core).toContain(parameter);
+    },
+  );
 
   it('should keep an existing aurora shared construct', async () => {
     await sharedConstructsGenerator(
