@@ -170,6 +170,27 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
         );
       }
 
+      // The data-bearing modules guard themselves with
+      // `lifecycle { prevent_destroy = true }`, which cannot be driven by a
+      // variable. Flip the literal to false so `terraform destroy` can tear the
+      // test stack down; the server-side deletion_protection flags are already
+      // disabled by the main.tf wiring templates.
+      for (const relativeTfPath of [
+        'core/dynamodb/dynamodb.tf',
+        'core/rdb/aurora/aurora.tf',
+      ]) {
+        const tfPath = `${opts.cwd}/packages/common/terraform/src/${relativeTfPath}`;
+        if (existsSync(tfPath)) {
+          writeFileSync(
+            tfPath,
+            readFileSync(tfPath, 'utf-8').replace(
+              /prevent_destroy\s*=\s*true/g,
+              'prevent_destroy = false',
+            ),
+          );
+        }
+      }
+
       if (config.requiresRdsServiceLinkedRole) {
         ensureRdsServiceLinkedRole();
       }

@@ -320,6 +320,27 @@ describe('ts#rdb generator', () => {
     );
   });
 
+  it('should protect the aurora cluster and its key from destruction in terraform', async () => {
+    await tsRdbGenerator(tree, {
+      ...defaultOptions,
+      iac: 'terraform',
+    });
+
+    const aurora = tree.read(
+      'packages/common/terraform/src/core/rdb/aurora/aurora.tf',
+      'utf-8',
+    );
+
+    // Terraform-side guard, independent of the RDS-side deletion_protection
+    // flag, so clearing that variable alone cannot destroy the cluster. It must
+    // be a literal — prevent_destroy cannot reference a variable.
+    expect(aurora).toContain('prevent_destroy = true');
+
+    // The maximum KMS pending window, matching the CDK default, so a snapshot
+    // of an encrypted cluster stays restorable for as long as possible.
+    expect(aurora).toContain('deletion_window_in_days = 30');
+  });
+
   it('should keep an existing aurora shared construct', async () => {
     await sharedConstructsGenerator(
       tree,
