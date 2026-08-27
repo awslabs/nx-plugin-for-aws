@@ -20,7 +20,10 @@ import {
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants.js';
-import { terraformProviderVersions } from '../versions.js';
+import {
+  auroraServerlessV2Capacity,
+  terraformProviderVersions,
+} from '../versions.js';
 
 export interface AddRdbConstructOptions {
   projectName: string;
@@ -91,7 +94,7 @@ export const addRdbCdkConstructs = async (
       'core',
       'rdb',
     ),
-    { ...options, ...esmVars(tree) },
+    { ...options, ...esmVars(tree), ...auroraServerlessV2Capacity() },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
@@ -151,7 +154,7 @@ export const addRdbTerraformModules = (
     tree,
     joinPathFragments(import.meta.dirname, 'files', 'terraform', 'core', 'rdb'),
     joinPathFragments(PACKAGES_DIR, SHARED_TERRAFORM_DIR, 'src', 'core', 'rdb'),
-    { ...terraformProviderVersions() },
+    { ...terraformProviderVersions(), ...auroraServerlessV2Capacity() },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
@@ -161,7 +164,11 @@ export const addRdbTerraformModules = (
     tree,
     joinPathFragments(import.meta.dirname, 'files', 'terraform', 'app', 'dbs'),
     joinPathFragments(PACKAGES_DIR, SHARED_TERRAFORM_DIR, 'src', 'app', 'dbs'),
-    { ...options, ...terraformProviderVersions() },
+    {
+      ...options,
+      ...terraformProviderVersions(),
+      ...auroraServerlessV2Capacity(),
+    },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
