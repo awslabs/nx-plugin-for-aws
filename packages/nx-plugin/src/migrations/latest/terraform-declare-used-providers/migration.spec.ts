@@ -118,9 +118,42 @@ resource "random_string" "suffix" {
     expect(nextSteps).toEqual([]);
   });
 
-  it('should not treat an embedded script as a provider reference', async () => {
-    // A `local-exec` heredoc's Python identifiers look like HCL references.
-    const withScript = `terraform {
+  // Providers are read from the syntax tree, so a type merely *named* somewhere
+  // is not a use. Each of these would fool a textual scan.
+  it.each([
+    [
+      'an embedded script in a local-exec heredoc',
+      `resource "aws_s3_object" "upload" {
+  bucket = "b"
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      python -c "
+local_path_obj = Path(local_path)
+print(random_password.nope.result)
+for f in local_path_obj.rglob('*'):
+    print(f)
+"
+    EOT
+  }
+}`,
+    ],
+    [
+      'a type named in string prose',
+      `resource "aws_s3_object" "upload" {
+  bucket      = "b"
+  description = "paired with random_string.suffix.result elsewhere"
+}`,
+    ],
+    [
+      'a type named in a comment',
+      `# resource "random_string" "suffix" { length = 8 }
+resource "aws_s3_object" "upload" {
+  bucket = "b"
+}`,
+    ],
+  ])('should not treat %s as a use', async (_, body) => {
+    const contents = `terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -129,26 +162,14 @@ resource "random_string" "suffix" {
   }
 }
 
-resource "aws_s3_object" "upload" {
-  bucket = "b"
-  key    = "k"
-
-  provisioner "local-exec" {
-    command = <<-EOT
-      python -c "
-local_path_obj = Path(local_path)
-for f in local_path_obj.rglob('*'):
-    print(f)
-"
-    EOT
-  }
-}
+${body}
 `;
-    tree.write(REST_API, withScript);
+    tree.write(REST_API, contents);
 
-    await migration(tree);
+    const { nextSteps } = await migration(tree);
 
-    expect(tree.read(REST_API, 'utf-8')).toEqual(withScript);
+    expect(tree.read(REST_API, 'utf-8')).toEqual(contents);
+    expect(nextSteps).toEqual([]);
   });
 
   it('should skip and report a module with no required_providers block', async () => {

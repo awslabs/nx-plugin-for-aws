@@ -9,6 +9,7 @@ import {
   visitNotIgnoredFiles,
 } from '@nx/devkit';
 import {
+  captureAllGritQL,
   GRIT_INSERT_PLACEHOLDER,
   insertViaGritQL,
   matchGritQL,
@@ -66,54 +67,36 @@ const providerOf = (type: string): string | undefined => {
 };
 
 /**
- * Drop heredoc bodies before scanning for references. Vended modules embed
- * Python and shell in `local-exec` provisioners, whose identifiers would
- * otherwise read as HCL references.
+ * The providers a module requires, read from its `resource` and `data` blocks.
+ *
+ * Only declarations are read, because Terraform resolves a resource reference
+ * within the module that declares it — so a provider a module references is one
+ * it also declares a block for, and the blocks alone are complete. Matching the
+ * syntax tree also means a type named in a comment, in string prose or inside a
+ * `local-exec` heredoc's embedded Python is not a use, since none of those parse
+ * as a block.
  */
-const withoutHeredocs = (contents: string): string => {
-  const kept: string[] = [];
-  let terminator: string | undefined;
-  for (const line of contents.split('\n')) {
-    if (terminator) {
-      if (line.trim() === terminator) {
-        terminator = undefined;
-      }
-      continue;
-    }
-    terminator = /<<[-~]?([A-Z][A-Z0-9_]*)\s*$/.exec(line)?.[1];
-    kept.push(line);
-  }
-  return kept.join('\n');
-};
-
-/** The providers a module's resources, data sources and references require. */
-const usedProviders = (contents: string): Set<string> => {
+const usedProviders = async (
+  tree: Tree,
+  filePath: string,
+): Promise<Set<string>> => {
   const used = new Set<string>();
-  const add = (type: string) => {
-    if (BUILTIN_TYPES.has(type)) {
-      return;
+  for (const kind of ['resource', 'data']) {
+    for (const block of await captureAllGritQL(
+      tree,
+      filePath,
+      hcl(`\`${kind} $type $name { $_ }\``),
+    )) {
+      // The block's own type, e.g. `resource "random_string" "suffix" {`.
+      const type = /"([A-Za-z0-9_]+)"/.exec(block)?.[1];
+      if (!type || BUILTIN_TYPES.has(type)) {
+        continue;
+      }
+      const provider = providerOf(type);
+      if (provider) {
+        used.add(provider);
+      }
     }
-    const provider = providerOf(type);
-    if (provider) {
-      used.add(provider);
-    }
-  };
-
-  const source = withoutHeredocs(contents);
-  for (const [, type] of source.matchAll(
-    /^[ \t]*(?:resource|data)\s+"([A-Za-z0-9_]+)"/gm,
-  )) {
-    add(type);
-  }
-  for (const [, type] of source.matchAll(
-    /\bdata\.([A-Za-z0-9_]+)\.[A-Za-z0-9_]+/g,
-  )) {
-    add(type);
-  }
-  for (const [, type] of source.matchAll(
-    /(?:^|[^A-Za-z0-9_."])((?:null|random|archive|external|local|time|tls)_[A-Za-z0-9_]+)\.[a-z][A-Za-z0-9_]*\./g,
-  )) {
-    add(type);
   }
   return used;
 };
@@ -172,10 +155,10 @@ export default async function migration(
     const declared = new Set<string>();
 
     for (const filePath of filePaths) {
-      const contents = tree.read(filePath, 'utf-8') ?? '';
-      for (const provider of usedProviders(contents)) {
+      for (const provider of await usedProviders(tree, filePath)) {
         used.add(provider);
       }
+      const contents = tree.read(filePath, 'utf-8') ?? '';
       if (!contents.includes('required_providers')) {
         continue;
       }
