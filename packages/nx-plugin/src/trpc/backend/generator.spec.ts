@@ -1050,11 +1050,12 @@ describe('trpc backend generator', () => {
         expect(appApiContent).toContain(
           'operations_file = "${path.module}/../../../generated/test-api/operations.json"',
         );
+        // One lambda function and execution role per operation
         expect(appApiContent).toMatch(
-          /resource "aws_lambda_function" "api_lambda" \{\s*for_each = local\.operations/,
+          /resource "aws_lambda_function" "api_lambda" \{[^}]*for_each = local\.operations/,
         );
         expect(appApiContent).toMatch(
-          /resource "aws_iam_role" "lambda_execution_role" \{\s*for_each = local\.operations/,
+          /resource "aws_iam_role" "lambda_execution_role" \{[^}]*for_each = local\.operations/,
         );
         // The proxy catch-all belongs to the shared pattern only
         expect(appApiContent).not.toContain('{proxy+}');

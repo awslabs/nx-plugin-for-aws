@@ -137,19 +137,13 @@ resource "random_string" "suffix" {
 
 <%_ if (backend.integrationPattern === 'isolated') { _%>
 locals {
-  # Operations are generated from the API definition as part of its build.
-  # Guarded with fileexists so `terraform validate` succeeds before the first
-  # build; the precondition below fails the plan if it is genuinely missing.
+  # Generated at build time from the API definition
   operations_file = "${path.module}/../../../generated/<%- apiNameKebabCase %>/operations.json"
   operations      = fileexists(local.operations_file) ? jsondecode(file(local.operations_file)) : {}
 
-  # Operation names may contain characters AWS resource names disallow (tRPC
-  # uses dot notation for nested routers), and may exceed the 64 character name
-  # limit. Slugify, then append a digest so truncated names stay unique.
   operation_slug = { for op in keys(local.operations) : op => replace(op, "/[^a-zA-Z0-9-_]/", "-") }
   operation_hash = { for op in keys(local.operations) : op => substr(sha256(op), 0, 8) }
 
-  # Reserve room for the "-<hash>-<suffix>" tail within the 64 character limit
   function_name = { for op in keys(local.operations) : op =>
     "${substr("<%- apiNameClassName %>-${local.operation_slug[op]}", 0, 64 - length(local.operation_hash[op]) - length(random_string.suffix.result) - 2)}-${local.operation_hash[op]}-${random_string.suffix.result}"
   }
@@ -157,7 +151,6 @@ locals {
     "${substr("<%- apiNameClassName %>-${local.operation_slug[op]}-role", 0, 64 - length(local.operation_hash[op]) - length(random_string.suffix.result) - 2)}-${local.operation_hash[op]}-${random_string.suffix.result}"
   }
 
-  # API Gateway route keys, eg "GET /items/{itemId}"
   operation_path = { for op, details in local.operations : op =>
     startswith(details.path, "/") ? details.path : "/${details.path}"
   }
@@ -165,15 +158,13 @@ locals {
     "${upper(details.method)} ${local.operation_path[op]}"
   }
 
-  # Source ARN suffix scoping each function's invoke permission to its own route.
-  # Path parameters become wildcards, since the ARN matches concrete request paths.
   permission_source_suffix = { for op, details in local.operations : op =>
     "${upper(details.method)}${replace(local.operation_path[op], "/{[^}]*}/", "*")}"
   }
 }
 
-# Fail the plan with an actionable message when the operations metadata is absent
 resource "terraform_data" "operations_metadata" {
+  # Fails the plan when the operations metadata has not been generated
   input = local.operations_file
 
   lifecycle {
@@ -249,15 +240,14 @@ resource "aws_vpc_security_group_egress_rule" "api_lambda_https" {
   description       = "Allow outbound HTTPS to AWS service endpoints"
 }
 
-# Lambda function
-<%_ if (backend.integrationPattern === 'isolated') { _%>
-# One lambda function per operation, each serving just that operation
 resource "aws_lambda_function" "api_lambda" {
+  <%_ if (backend.integrationPattern === 'isolated') { _%>
+  # One lambda function per operation, each serving just that operation
   for_each = local.operations
-<%_ } else { _%>
-# This configures a single "router" lambda to serve all requests
-resource "aws_lambda_function" "api_lambda" {
-<%_ } _%>
+
+  <%_ } else { _%>
+  # A single "router" lambda serving all requests
+  <%_ } _%>
   #checkov:skip=CKV_AWS_117:Lambda function is optionally deployed into a VPC via vpc_id/subnet_ids; not required for this use case
   #checkov:skip=CKV_AWS_116:Dead Letter Queue not required for this simple API use case
   #checkov:skip=CKV_AWS_272:Code signing not required for this use case
@@ -395,8 +385,6 @@ resource "aws_iam_role_policy_attachment" "lambda_vpc_access" {
 # Additional IAM policies for Lambda (if provided)
 resource "aws_iam_role_policy" "lambda_additional_policies" {
   <%_ if (backend.integrationPattern === 'isolated') { _%>
-  # Keyed on the operations, which are known at plan time; the statements are
-  # not, so an empty policy is written when there is nothing to grant.
   for_each = local.operations
 
   name = "${substr(local.function_name[each.key], 0, 55)}-policies"
@@ -686,7 +674,6 @@ resource "aws_lambda_permission" "api_gateway_invoke" {
   qualifier     = aws_lambda_alias.live[each.key].name
   <%_ } _%>
   principal     = "apigateway.amazonaws.com"
-  # Scoped to the operation's own route so each function is only invokable for it
   source_arn    = "${module.http_api.api_execution_arn}/*/${local.permission_source_suffix[each.key]}"
   <%_ } else { _%>
   statement_id  = "AllowExecutionFromAPIGateway"

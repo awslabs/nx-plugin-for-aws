@@ -10,6 +10,7 @@ import {
   type Tree,
   updateJson,
 } from '@nx/devkit';
+import { OPERATIONS_METADATA_FILE_NAME } from '../../open-api/operations-metadata/generator.js';
 import { updateGitIgnore } from '../git.js';
 import { addDependencyToTargetIfNotPresent } from '../nx.js';
 import {
@@ -17,7 +18,6 @@ import {
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants.js';
 import { terraformOperationsMetadataDir } from './open-api-metadata.js';
-import { OPERATIONS_METADATA_FILE_NAME } from './operations.js';
 
 export interface AddTrpcOperationsMetadataTargetOptions {
   apiNameKebabCase: string;

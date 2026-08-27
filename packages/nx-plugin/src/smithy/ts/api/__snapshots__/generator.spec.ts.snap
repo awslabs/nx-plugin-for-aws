@@ -788,19 +788,13 @@ resource "random_string" "suffix" {
 }
 
 locals {
-  # Operations are generated from the API definition as part of its build.
-  # Guarded with fileexists so \`terraform validate\` succeeds before the first
-  # build; the precondition below fails the plan if it is genuinely missing.
+  # Generated at build time from the API definition
   operations_file = "\${path.module}/../../../generated/test-api/operations.json"
   operations      = fileexists(local.operations_file) ? jsondecode(file(local.operations_file)) : {}
 
-  # Operation names may contain characters AWS resource names disallow (tRPC
-  # uses dot notation for nested routers), and may exceed the 64 character name
-  # limit. Slugify, then append a digest so truncated names stay unique.
   operation_slug = { for op in keys(local.operations) : op => replace(op, "/[^a-zA-Z0-9-_]/", "-") }
   operation_hash = { for op in keys(local.operations) : op => substr(sha256(op), 0, 8) }
 
-  # Reserve room for the "-<hash>-<suffix>" tail within the 64 character limit
   function_name = { for op in keys(local.operations) : op =>
     "\${substr("TestApi-\${local.operation_slug[op]}", 0, 64 - length(local.operation_hash[op]) - length(random_string.suffix.result) - 2)}-\${local.operation_hash[op]}-\${random_string.suffix.result}"
   }
@@ -808,9 +802,8 @@ locals {
     "\${substr("TestApi-\${local.operation_slug[op]}-role", 0, 64 - length(local.operation_hash[op]) - length(random_string.suffix.result) - 2)}-\${local.operation_hash[op]}-\${random_string.suffix.result}"
   }
 
-  # REST APIs need a resource per path segment. Split each operation's path into
-  # segments, then derive every distinct path prefix with its parent, so the
-  # resource tree can be built one level at a time below.
+  # A REST API needs a resource per path segment, so each operation's path is
+  # split into the distinct path prefixes the resource tree is built from below
   operation_segments = { for op, details in local.operations : op => compact(split("/", details.path)) }
 
   path_nodes = merge([
@@ -823,15 +816,14 @@ locals {
     }
   ]...)
 
-  # Terraform cannot express recursion, so each depth is a separate resource.
-  # Paths deeper than this are reported by the precondition below.
-  max_path_depth = 8
+  # Instances of a resource cannot reference one another, so each depth is a
+  # separate resource. Deeper paths are reported by the precondition below.
+  max_path_depth = 16
   path_nodes_by_depth = { for depth in range(local.max_path_depth) : depth => {
     for path, node in local.path_nodes : path => node if node.depth == depth
   } }
   paths_too_deep = [for path, node in local.path_nodes : path if node.depth >= local.max_path_depth]
 
-  # Resource ids for every path prefix, gathered from the per-depth resources
   resource_ids = merge(
     { for path, resource in aws_api_gateway_resource.path_depth_0 : path => resource.id },
     { for path, resource in aws_api_gateway_resource.path_depth_1 : path => resource.id },
@@ -841,22 +833,27 @@ locals {
     { for path, resource in aws_api_gateway_resource.path_depth_5 : path => resource.id },
     { for path, resource in aws_api_gateway_resource.path_depth_6 : path => resource.id },
     { for path, resource in aws_api_gateway_resource.path_depth_7 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_8 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_9 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_10 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_11 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_12 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_13 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_14 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_15 : path => resource.id },
   )
 
-  # The resource each operation's method is attached to
   operation_resource_id = { for op, segments in local.operation_segments : op =>
     local.resource_ids[join("/", segments)]
   }
 
-  # Source ARN suffix scoping each function's invoke permission to its own method.
-  # Path parameters become wildcards, since the ARN matches concrete request paths.
   permission_source_suffix = { for op, details in local.operations : op =>
     "\${upper(details.method)}/\${replace(join("/", local.operation_segments[op]), "/{[^}]*}/", "*")}"
   }
 }
 
-# Fail the plan with an actionable message when the operations metadata is absent
 resource "terraform_data" "operations_metadata" {
+  # Fails the plan when the operations metadata has not been generated
   input = local.operations_file
 
   lifecycle {
@@ -947,6 +944,78 @@ resource "aws_api_gateway_resource" "path_depth_7" {
   path_part   = each.value.part
 }
 
+# API Gateway resources at path depth 8
+resource "aws_api_gateway_resource" "path_depth_8" {
+  for_each = local.path_nodes_by_depth[8]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_7[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 9
+resource "aws_api_gateway_resource" "path_depth_9" {
+  for_each = local.path_nodes_by_depth[9]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_8[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 10
+resource "aws_api_gateway_resource" "path_depth_10" {
+  for_each = local.path_nodes_by_depth[10]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_9[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 11
+resource "aws_api_gateway_resource" "path_depth_11" {
+  for_each = local.path_nodes_by_depth[11]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_10[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 12
+resource "aws_api_gateway_resource" "path_depth_12" {
+  for_each = local.path_nodes_by_depth[12]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_11[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 13
+resource "aws_api_gateway_resource" "path_depth_13" {
+  for_each = local.path_nodes_by_depth[13]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_12[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 14
+resource "aws_api_gateway_resource" "path_depth_14" {
+  for_each = local.path_nodes_by_depth[14]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_13[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 15
+resource "aws_api_gateway_resource" "path_depth_15" {
+  for_each = local.path_nodes_by_depth[15]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_14[each.value.parent].id
+  path_part   = each.value.part
+}
+
 # Resources
 
 # Create Lambda ZIP file from the bundle directory
@@ -1021,10 +1090,10 @@ resource "aws_vpc_security_group_egress_rule" "api_lambda_https" {
   description       = "Allow outbound HTTPS to AWS service endpoints"
 }
 
-# Lambda function
-# One lambda function per operation, each serving just that operation
 resource "aws_lambda_function" "api_lambda" {
+  # One lambda function per operation, each serving just that operation
   for_each = local.operations
+
   #checkov:skip=CKV_AWS_117:Lambda function is optionally deployed into a VPC via vpc_id/subnet_ids; not required for this use case
   #checkov:skip=CKV_AWS_116:Dead Letter Queue not required for this simple API use case
   #checkov:skip=CKV_AWS_272:Code signing not required for this use case
@@ -1116,8 +1185,6 @@ resource "aws_iam_role_policy_attachment" "lambda_vpc_access" {
 
 # Additional IAM policies for Lambda (if provided)
 resource "aws_iam_role_policy" "lambda_additional_policies" {
-  # Keyed on the operations, which are known at plan time; the statements are
-  # not, so an empty policy is written when there is nothing to grant.
   for_each = local.operations
 
   name = "\${substr(local.function_name[each.key], 0, 55)}-policies"
@@ -1359,6 +1426,14 @@ resource "aws_api_gateway_deployment" "api_deployment" {
       [for r in aws_api_gateway_resource.path_depth_5 : r.id],
       [for r in aws_api_gateway_resource.path_depth_6 : r.id],
       [for r in aws_api_gateway_resource.path_depth_7 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_8 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_9 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_10 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_11 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_12 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_13 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_14 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_15 : r.id],
       [for m in aws_api_gateway_method.operation_methods : m.id],
       [for i in aws_api_gateway_integration.lambda_integration : i.id],
       [for m in aws_api_gateway_method.options_method : m.id],
@@ -1506,7 +1581,6 @@ resource "aws_lambda_permission" "api_gateway_invoke" {
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.api_lambda[each.key].function_name
   principal     = "apigateway.amazonaws.com"
-  # Scoped to the operation's own method so each function is only invokable for it
   source_arn    = "\${module.rest_api.api_execution_arn}/*/\${local.permission_source_suffix[each.key]}"
 
   depends_on = [module.rest_api, aws_lambda_function.api_lambda]
@@ -2488,19 +2562,13 @@ resource "random_string" "suffix" {
 }
 
 locals {
-  # Operations are generated from the API definition as part of its build.
-  # Guarded with fileexists so \`terraform validate\` succeeds before the first
-  # build; the precondition below fails the plan if it is genuinely missing.
+  # Generated at build time from the API definition
   operations_file = "\${path.module}/../../../generated/test-api/operations.json"
   operations      = fileexists(local.operations_file) ? jsondecode(file(local.operations_file)) : {}
 
-  # Operation names may contain characters AWS resource names disallow (tRPC
-  # uses dot notation for nested routers), and may exceed the 64 character name
-  # limit. Slugify, then append a digest so truncated names stay unique.
   operation_slug = { for op in keys(local.operations) : op => replace(op, "/[^a-zA-Z0-9-_]/", "-") }
   operation_hash = { for op in keys(local.operations) : op => substr(sha256(op), 0, 8) }
 
-  # Reserve room for the "-<hash>-<suffix>" tail within the 64 character limit
   function_name = { for op in keys(local.operations) : op =>
     "\${substr("TestApi-\${local.operation_slug[op]}", 0, 64 - length(local.operation_hash[op]) - length(random_string.suffix.result) - 2)}-\${local.operation_hash[op]}-\${random_string.suffix.result}"
   }
@@ -2508,9 +2576,8 @@ locals {
     "\${substr("TestApi-\${local.operation_slug[op]}-role", 0, 64 - length(local.operation_hash[op]) - length(random_string.suffix.result) - 2)}-\${local.operation_hash[op]}-\${random_string.suffix.result}"
   }
 
-  # REST APIs need a resource per path segment. Split each operation's path into
-  # segments, then derive every distinct path prefix with its parent, so the
-  # resource tree can be built one level at a time below.
+  # A REST API needs a resource per path segment, so each operation's path is
+  # split into the distinct path prefixes the resource tree is built from below
   operation_segments = { for op, details in local.operations : op => compact(split("/", details.path)) }
 
   path_nodes = merge([
@@ -2523,15 +2590,14 @@ locals {
     }
   ]...)
 
-  # Terraform cannot express recursion, so each depth is a separate resource.
-  # Paths deeper than this are reported by the precondition below.
-  max_path_depth = 8
+  # Instances of a resource cannot reference one another, so each depth is a
+  # separate resource. Deeper paths are reported by the precondition below.
+  max_path_depth = 16
   path_nodes_by_depth = { for depth in range(local.max_path_depth) : depth => {
     for path, node in local.path_nodes : path => node if node.depth == depth
   } }
   paths_too_deep = [for path, node in local.path_nodes : path if node.depth >= local.max_path_depth]
 
-  # Resource ids for every path prefix, gathered from the per-depth resources
   resource_ids = merge(
     { for path, resource in aws_api_gateway_resource.path_depth_0 : path => resource.id },
     { for path, resource in aws_api_gateway_resource.path_depth_1 : path => resource.id },
@@ -2541,22 +2607,27 @@ locals {
     { for path, resource in aws_api_gateway_resource.path_depth_5 : path => resource.id },
     { for path, resource in aws_api_gateway_resource.path_depth_6 : path => resource.id },
     { for path, resource in aws_api_gateway_resource.path_depth_7 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_8 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_9 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_10 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_11 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_12 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_13 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_14 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_15 : path => resource.id },
   )
 
-  # The resource each operation's method is attached to
   operation_resource_id = { for op, segments in local.operation_segments : op =>
     local.resource_ids[join("/", segments)]
   }
 
-  # Source ARN suffix scoping each function's invoke permission to its own method.
-  # Path parameters become wildcards, since the ARN matches concrete request paths.
   permission_source_suffix = { for op, details in local.operations : op =>
     "\${upper(details.method)}/\${replace(join("/", local.operation_segments[op]), "/{[^}]*}/", "*")}"
   }
 }
 
-# Fail the plan with an actionable message when the operations metadata is absent
 resource "terraform_data" "operations_metadata" {
+  # Fails the plan when the operations metadata has not been generated
   input = local.operations_file
 
   lifecycle {
@@ -2647,6 +2718,78 @@ resource "aws_api_gateway_resource" "path_depth_7" {
   path_part   = each.value.part
 }
 
+# API Gateway resources at path depth 8
+resource "aws_api_gateway_resource" "path_depth_8" {
+  for_each = local.path_nodes_by_depth[8]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_7[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 9
+resource "aws_api_gateway_resource" "path_depth_9" {
+  for_each = local.path_nodes_by_depth[9]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_8[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 10
+resource "aws_api_gateway_resource" "path_depth_10" {
+  for_each = local.path_nodes_by_depth[10]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_9[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 11
+resource "aws_api_gateway_resource" "path_depth_11" {
+  for_each = local.path_nodes_by_depth[11]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_10[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 12
+resource "aws_api_gateway_resource" "path_depth_12" {
+  for_each = local.path_nodes_by_depth[12]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_11[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 13
+resource "aws_api_gateway_resource" "path_depth_13" {
+  for_each = local.path_nodes_by_depth[13]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_12[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 14
+resource "aws_api_gateway_resource" "path_depth_14" {
+  for_each = local.path_nodes_by_depth[14]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_13[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 15
+resource "aws_api_gateway_resource" "path_depth_15" {
+  for_each = local.path_nodes_by_depth[15]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_14[each.value.parent].id
+  path_part   = each.value.part
+}
+
 # Resources
 
 # Create Lambda ZIP file from the bundle directory
@@ -2721,10 +2864,10 @@ resource "aws_vpc_security_group_egress_rule" "api_lambda_https" {
   description       = "Allow outbound HTTPS to AWS service endpoints"
 }
 
-# Lambda function
-# One lambda function per operation, each serving just that operation
 resource "aws_lambda_function" "api_lambda" {
+  # One lambda function per operation, each serving just that operation
   for_each = local.operations
+
   #checkov:skip=CKV_AWS_117:Lambda function is optionally deployed into a VPC via vpc_id/subnet_ids; not required for this use case
   #checkov:skip=CKV_AWS_116:Dead Letter Queue not required for this simple API use case
   #checkov:skip=CKV_AWS_272:Code signing not required for this use case
@@ -2816,8 +2959,6 @@ resource "aws_iam_role_policy_attachment" "lambda_vpc_access" {
 
 # Additional IAM policies for Lambda (if provided)
 resource "aws_iam_role_policy" "lambda_additional_policies" {
-  # Keyed on the operations, which are known at plan time; the statements are
-  # not, so an empty policy is written when there is nothing to grant.
   for_each = local.operations
 
   name = "\${substr(local.function_name[each.key], 0, 55)}-policies"
@@ -2978,6 +3119,14 @@ resource "aws_api_gateway_deployment" "api_deployment" {
       [for r in aws_api_gateway_resource.path_depth_5 : r.id],
       [for r in aws_api_gateway_resource.path_depth_6 : r.id],
       [for r in aws_api_gateway_resource.path_depth_7 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_8 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_9 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_10 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_11 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_12 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_13 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_14 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_15 : r.id],
       [for m in aws_api_gateway_method.operation_methods : m.id],
       [for i in aws_api_gateway_integration.lambda_integration : i.id],
       [for m in aws_api_gateway_method.options_method : m.id],
@@ -3124,7 +3273,6 @@ resource "aws_lambda_permission" "api_gateway_invoke" {
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.api_lambda[each.key].function_name
   principal     = "apigateway.amazonaws.com"
-  # Scoped to the operation's own method so each function is only invokable for it
   source_arn    = "\${module.rest_api.api_execution_arn}/*/\${local.permission_source_suffix[each.key]}"
 
   depends_on = [module.rest_api, aws_lambda_function.api_lambda]
@@ -3655,19 +3803,13 @@ resource "random_string" "suffix" {
 }
 
 locals {
-  # Operations are generated from the API definition as part of its build.
-  # Guarded with fileexists so \`terraform validate\` succeeds before the first
-  # build; the precondition below fails the plan if it is genuinely missing.
+  # Generated at build time from the API definition
   operations_file = "\${path.module}/../../../generated/test-api/operations.json"
   operations      = fileexists(local.operations_file) ? jsondecode(file(local.operations_file)) : {}
 
-  # Operation names may contain characters AWS resource names disallow (tRPC
-  # uses dot notation for nested routers), and may exceed the 64 character name
-  # limit. Slugify, then append a digest so truncated names stay unique.
   operation_slug = { for op in keys(local.operations) : op => replace(op, "/[^a-zA-Z0-9-_]/", "-") }
   operation_hash = { for op in keys(local.operations) : op => substr(sha256(op), 0, 8) }
 
-  # Reserve room for the "-<hash>-<suffix>" tail within the 64 character limit
   function_name = { for op in keys(local.operations) : op =>
     "\${substr("TestApi-\${local.operation_slug[op]}", 0, 64 - length(local.operation_hash[op]) - length(random_string.suffix.result) - 2)}-\${local.operation_hash[op]}-\${random_string.suffix.result}"
   }
@@ -3675,9 +3817,8 @@ locals {
     "\${substr("TestApi-\${local.operation_slug[op]}-role", 0, 64 - length(local.operation_hash[op]) - length(random_string.suffix.result) - 2)}-\${local.operation_hash[op]}-\${random_string.suffix.result}"
   }
 
-  # REST APIs need a resource per path segment. Split each operation's path into
-  # segments, then derive every distinct path prefix with its parent, so the
-  # resource tree can be built one level at a time below.
+  # A REST API needs a resource per path segment, so each operation's path is
+  # split into the distinct path prefixes the resource tree is built from below
   operation_segments = { for op, details in local.operations : op => compact(split("/", details.path)) }
 
   path_nodes = merge([
@@ -3690,15 +3831,14 @@ locals {
     }
   ]...)
 
-  # Terraform cannot express recursion, so each depth is a separate resource.
-  # Paths deeper than this are reported by the precondition below.
-  max_path_depth = 8
+  # Instances of a resource cannot reference one another, so each depth is a
+  # separate resource. Deeper paths are reported by the precondition below.
+  max_path_depth = 16
   path_nodes_by_depth = { for depth in range(local.max_path_depth) : depth => {
     for path, node in local.path_nodes : path => node if node.depth == depth
   } }
   paths_too_deep = [for path, node in local.path_nodes : path if node.depth >= local.max_path_depth]
 
-  # Resource ids for every path prefix, gathered from the per-depth resources
   resource_ids = merge(
     { for path, resource in aws_api_gateway_resource.path_depth_0 : path => resource.id },
     { for path, resource in aws_api_gateway_resource.path_depth_1 : path => resource.id },
@@ -3708,22 +3848,27 @@ locals {
     { for path, resource in aws_api_gateway_resource.path_depth_5 : path => resource.id },
     { for path, resource in aws_api_gateway_resource.path_depth_6 : path => resource.id },
     { for path, resource in aws_api_gateway_resource.path_depth_7 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_8 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_9 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_10 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_11 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_12 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_13 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_14 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_15 : path => resource.id },
   )
 
-  # The resource each operation's method is attached to
   operation_resource_id = { for op, segments in local.operation_segments : op =>
     local.resource_ids[join("/", segments)]
   }
 
-  # Source ARN suffix scoping each function's invoke permission to its own method.
-  # Path parameters become wildcards, since the ARN matches concrete request paths.
   permission_source_suffix = { for op, details in local.operations : op =>
     "\${upper(details.method)}/\${replace(join("/", local.operation_segments[op]), "/{[^}]*}/", "*")}"
   }
 }
 
-# Fail the plan with an actionable message when the operations metadata is absent
 resource "terraform_data" "operations_metadata" {
+  # Fails the plan when the operations metadata has not been generated
   input = local.operations_file
 
   lifecycle {
@@ -3814,6 +3959,78 @@ resource "aws_api_gateway_resource" "path_depth_7" {
   path_part   = each.value.part
 }
 
+# API Gateway resources at path depth 8
+resource "aws_api_gateway_resource" "path_depth_8" {
+  for_each = local.path_nodes_by_depth[8]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_7[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 9
+resource "aws_api_gateway_resource" "path_depth_9" {
+  for_each = local.path_nodes_by_depth[9]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_8[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 10
+resource "aws_api_gateway_resource" "path_depth_10" {
+  for_each = local.path_nodes_by_depth[10]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_9[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 11
+resource "aws_api_gateway_resource" "path_depth_11" {
+  for_each = local.path_nodes_by_depth[11]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_10[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 12
+resource "aws_api_gateway_resource" "path_depth_12" {
+  for_each = local.path_nodes_by_depth[12]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_11[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 13
+resource "aws_api_gateway_resource" "path_depth_13" {
+  for_each = local.path_nodes_by_depth[13]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_12[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 14
+resource "aws_api_gateway_resource" "path_depth_14" {
+  for_each = local.path_nodes_by_depth[14]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_13[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 15
+resource "aws_api_gateway_resource" "path_depth_15" {
+  for_each = local.path_nodes_by_depth[15]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_14[each.value.parent].id
+  path_part   = each.value.part
+}
+
 # Resources
 
 # Create Lambda ZIP file from the bundle directory
@@ -3888,10 +4105,10 @@ resource "aws_vpc_security_group_egress_rule" "api_lambda_https" {
   description       = "Allow outbound HTTPS to AWS service endpoints"
 }
 
-# Lambda function
-# One lambda function per operation, each serving just that operation
 resource "aws_lambda_function" "api_lambda" {
+  # One lambda function per operation, each serving just that operation
   for_each = local.operations
+
   #checkov:skip=CKV_AWS_117:Lambda function is optionally deployed into a VPC via vpc_id/subnet_ids; not required for this use case
   #checkov:skip=CKV_AWS_116:Dead Letter Queue not required for this simple API use case
   #checkov:skip=CKV_AWS_272:Code signing not required for this use case
@@ -3983,8 +4200,6 @@ resource "aws_iam_role_policy_attachment" "lambda_vpc_access" {
 
 # Additional IAM policies for Lambda (if provided)
 resource "aws_iam_role_policy" "lambda_additional_policies" {
-  # Keyed on the operations, which are known at plan time; the statements are
-  # not, so an empty policy is written when there is nothing to grant.
   for_each = local.operations
 
   name = "\${substr(local.function_name[each.key], 0, 55)}-policies"
@@ -4133,6 +4348,14 @@ resource "aws_api_gateway_deployment" "api_deployment" {
       [for r in aws_api_gateway_resource.path_depth_5 : r.id],
       [for r in aws_api_gateway_resource.path_depth_6 : r.id],
       [for r in aws_api_gateway_resource.path_depth_7 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_8 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_9 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_10 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_11 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_12 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_13 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_14 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_15 : r.id],
       [for m in aws_api_gateway_method.operation_methods : m.id],
       [for i in aws_api_gateway_integration.lambda_integration : i.id],
       [for m in aws_api_gateway_method.options_method : m.id],
@@ -4290,7 +4513,6 @@ resource "aws_lambda_permission" "api_gateway_invoke" {
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.api_lambda[each.key].function_name
   principal     = "apigateway.amazonaws.com"
-  # Scoped to the operation's own method so each function is only invokable for it
   source_arn    = "\${module.rest_api.api_execution_arn}/*/\${local.permission_source_suffix[each.key]}"
 
   depends_on = [module.rest_api, aws_lambda_function.api_lambda]
@@ -4561,19 +4783,13 @@ resource "random_string" "suffix" {
 }
 
 locals {
-  # Operations are generated from the API definition as part of its build.
-  # Guarded with fileexists so \`terraform validate\` succeeds before the first
-  # build; the precondition below fails the plan if it is genuinely missing.
+  # Generated at build time from the API definition
   operations_file = "\${path.module}/../../../generated/custom-api/operations.json"
   operations      = fileexists(local.operations_file) ? jsondecode(file(local.operations_file)) : {}
 
-  # Operation names may contain characters AWS resource names disallow (tRPC
-  # uses dot notation for nested routers), and may exceed the 64 character name
-  # limit. Slugify, then append a digest so truncated names stay unique.
   operation_slug = { for op in keys(local.operations) : op => replace(op, "/[^a-zA-Z0-9-_]/", "-") }
   operation_hash = { for op in keys(local.operations) : op => substr(sha256(op), 0, 8) }
 
-  # Reserve room for the "-<hash>-<suffix>" tail within the 64 character limit
   function_name = { for op in keys(local.operations) : op =>
     "\${substr("CustomApi-\${local.operation_slug[op]}", 0, 64 - length(local.operation_hash[op]) - length(random_string.suffix.result) - 2)}-\${local.operation_hash[op]}-\${random_string.suffix.result}"
   }
@@ -4581,9 +4797,8 @@ locals {
     "\${substr("CustomApi-\${local.operation_slug[op]}-role", 0, 64 - length(local.operation_hash[op]) - length(random_string.suffix.result) - 2)}-\${local.operation_hash[op]}-\${random_string.suffix.result}"
   }
 
-  # REST APIs need a resource per path segment. Split each operation's path into
-  # segments, then derive every distinct path prefix with its parent, so the
-  # resource tree can be built one level at a time below.
+  # A REST API needs a resource per path segment, so each operation's path is
+  # split into the distinct path prefixes the resource tree is built from below
   operation_segments = { for op, details in local.operations : op => compact(split("/", details.path)) }
 
   path_nodes = merge([
@@ -4596,15 +4811,14 @@ locals {
     }
   ]...)
 
-  # Terraform cannot express recursion, so each depth is a separate resource.
-  # Paths deeper than this are reported by the precondition below.
-  max_path_depth = 8
+  # Instances of a resource cannot reference one another, so each depth is a
+  # separate resource. Deeper paths are reported by the precondition below.
+  max_path_depth = 16
   path_nodes_by_depth = { for depth in range(local.max_path_depth) : depth => {
     for path, node in local.path_nodes : path => node if node.depth == depth
   } }
   paths_too_deep = [for path, node in local.path_nodes : path if node.depth >= local.max_path_depth]
 
-  # Resource ids for every path prefix, gathered from the per-depth resources
   resource_ids = merge(
     { for path, resource in aws_api_gateway_resource.path_depth_0 : path => resource.id },
     { for path, resource in aws_api_gateway_resource.path_depth_1 : path => resource.id },
@@ -4614,22 +4828,27 @@ locals {
     { for path, resource in aws_api_gateway_resource.path_depth_5 : path => resource.id },
     { for path, resource in aws_api_gateway_resource.path_depth_6 : path => resource.id },
     { for path, resource in aws_api_gateway_resource.path_depth_7 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_8 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_9 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_10 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_11 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_12 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_13 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_14 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_15 : path => resource.id },
   )
 
-  # The resource each operation's method is attached to
   operation_resource_id = { for op, segments in local.operation_segments : op =>
     local.resource_ids[join("/", segments)]
   }
 
-  # Source ARN suffix scoping each function's invoke permission to its own method.
-  # Path parameters become wildcards, since the ARN matches concrete request paths.
   permission_source_suffix = { for op, details in local.operations : op =>
     "\${upper(details.method)}/\${replace(join("/", local.operation_segments[op]), "/{[^}]*}/", "*")}"
   }
 }
 
-# Fail the plan with an actionable message when the operations metadata is absent
 resource "terraform_data" "operations_metadata" {
+  # Fails the plan when the operations metadata has not been generated
   input = local.operations_file
 
   lifecycle {
@@ -4720,6 +4939,78 @@ resource "aws_api_gateway_resource" "path_depth_7" {
   path_part   = each.value.part
 }
 
+# API Gateway resources at path depth 8
+resource "aws_api_gateway_resource" "path_depth_8" {
+  for_each = local.path_nodes_by_depth[8]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_7[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 9
+resource "aws_api_gateway_resource" "path_depth_9" {
+  for_each = local.path_nodes_by_depth[9]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_8[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 10
+resource "aws_api_gateway_resource" "path_depth_10" {
+  for_each = local.path_nodes_by_depth[10]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_9[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 11
+resource "aws_api_gateway_resource" "path_depth_11" {
+  for_each = local.path_nodes_by_depth[11]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_10[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 12
+resource "aws_api_gateway_resource" "path_depth_12" {
+  for_each = local.path_nodes_by_depth[12]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_11[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 13
+resource "aws_api_gateway_resource" "path_depth_13" {
+  for_each = local.path_nodes_by_depth[13]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_12[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 14
+resource "aws_api_gateway_resource" "path_depth_14" {
+  for_each = local.path_nodes_by_depth[14]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_13[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 15
+resource "aws_api_gateway_resource" "path_depth_15" {
+  for_each = local.path_nodes_by_depth[15]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_14[each.value.parent].id
+  path_part   = each.value.part
+}
+
 # Resources
 
 # Create Lambda ZIP file from the bundle directory
@@ -4794,10 +5085,10 @@ resource "aws_vpc_security_group_egress_rule" "api_lambda_https" {
   description       = "Allow outbound HTTPS to AWS service endpoints"
 }
 
-# Lambda function
-# One lambda function per operation, each serving just that operation
 resource "aws_lambda_function" "api_lambda" {
+  # One lambda function per operation, each serving just that operation
   for_each = local.operations
+
   #checkov:skip=CKV_AWS_117:Lambda function is optionally deployed into a VPC via vpc_id/subnet_ids; not required for this use case
   #checkov:skip=CKV_AWS_116:Dead Letter Queue not required for this simple API use case
   #checkov:skip=CKV_AWS_272:Code signing not required for this use case
@@ -4889,8 +5180,6 @@ resource "aws_iam_role_policy_attachment" "lambda_vpc_access" {
 
 # Additional IAM policies for Lambda (if provided)
 resource "aws_iam_role_policy" "lambda_additional_policies" {
-  # Keyed on the operations, which are known at plan time; the statements are
-  # not, so an empty policy is written when there is nothing to grant.
   for_each = local.operations
 
   name = "\${substr(local.function_name[each.key], 0, 55)}-policies"
@@ -5132,6 +5421,14 @@ resource "aws_api_gateway_deployment" "api_deployment" {
       [for r in aws_api_gateway_resource.path_depth_5 : r.id],
       [for r in aws_api_gateway_resource.path_depth_6 : r.id],
       [for r in aws_api_gateway_resource.path_depth_7 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_8 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_9 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_10 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_11 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_12 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_13 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_14 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_15 : r.id],
       [for m in aws_api_gateway_method.operation_methods : m.id],
       [for i in aws_api_gateway_integration.lambda_integration : i.id],
       [for m in aws_api_gateway_method.options_method : m.id],
@@ -5279,7 +5576,6 @@ resource "aws_lambda_permission" "api_gateway_invoke" {
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.api_lambda[each.key].function_name
   principal     = "apigateway.amazonaws.com"
-  # Scoped to the operation's own method so each function is only invokable for it
   source_arn    = "\${module.rest_api.api_execution_arn}/*/\${local.permission_source_suffix[each.key]}"
 
   depends_on = [module.rest_api, aws_lambda_function.api_lambda]
