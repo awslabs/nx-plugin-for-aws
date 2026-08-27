@@ -48,10 +48,12 @@ Terraform 基础设施生成器创建一个 Terraform 基础设施项目。生�
     - main.tf 用于状态存储的 S3 存储桶和策略
     - providers.tf AWS 提供程序配置
     - variables.tf 引导变量定义
-  - scripts 由 nx `bootstrap` 和 `init` 目标运行的 Node 辅助程序
+  - scripts 由 nx `bootstrap`、`bootstrap-destroy` 和 `init` 目标运行的 Node 辅助程序
     - aws-config.ts 通过 AWS SDK 凭证链解析账户 + 区域
     - bootstrap.ts 拉取/推送引导 tfstate 并运行 `terraform apply`
+    - bootstrap-destroy.ts 清空状态存储桶并运行 `terraform destroy`
     - init.ts 使用 S3 后端配置运行 `terraform init`
+  - checkov.yml Checkov 配置，包括要跳过的检查
   - project.json 项目配置和构建目标
 
 </FileTree>
@@ -71,6 +73,7 @@ Terraform 基础设施生成器创建一个 Terraform 基础设施项目。生�
 
   - src
     - main.tf 主 Terraform 模块文件
+  - checkov.yml Checkov 配置，包括要跳过的检查
   - project.json 项目配置和构建目标
 
 </FileTree>
@@ -250,11 +253,65 @@ region      = "us-west-2"
 
 #### 安全测试
 
-使用 Checkov 通过 `test` 目标对您的基础设施运行安全检查：
+使用 Checkov 通过 `checkov` 目标对您的基础设施运行安全检查：
+
+<NxCommands commands={['checkov tf-infra']} />
+
+您将在根 `dist` 文件夹下的 `dist/packages/<my-terraform-project>/checkov` 中找到您的安全测试结果。
+
+检查在项目的 `checkov.yml` 中配置。将检查 ID 添加到 `skip-check` 以在整个项目中抑制它：
+
+```yaml title="checkov.yml"
+skip-check:
+  - CKV_AWS_115 # Concurrent execution limit
+  - CKV_AWS_116 # Dead Letter Queue
+```
+
+要仅对单个资源抑制检查，请在资源块内添加 `#checkov:skip=<id>:<reason>` 注释：
+
+```hcl
+resource "aws_s3_bucket" "example" {
+  #checkov:skip=CKV_AWS_18:Access logging not required for this bucket
+  bucket = "example"
+}
+```
+
+#### 运行 Terraform 测试
+
+`test` 目标在项目中的任何 `.tftest.hcl` 文件上运行 [Terraform 的原生测试框架](https://developer.hashicorp.com/terraform/language/tests)：
 
 <NxCommands commands={['test tf-infra']} />
 
-您将在根 `dist` 文件夹下的 `dist/packages/<my-terraform-project>/checkov` 中找到您的安全测试结果。
+没有测试文件的项目是无操作成功，因此您可以在需要时添加测试。
+
+每个 `run` 块评估您的配置。使用 `command = plan` 检查 Terraform _将会_执行的操作（这会展开整个模块图，因此它可以捕获 `validate` 无法捕获的计划时错误），或使用 `command = apply` 创建真实资源并断言其输出。声明 `mock_provider` 意味着不会进行 API 调用，也不需要 AWS 凭证，这使得 `plan` 测试快速且可以安全地在 CI 中运行：
+
+```hcl title="src/main.tftest.hcl"
+mock_provider "aws" {
+  mock_data "aws_caller_identity" {
+    defaults = { account_id = "123456789012" }
+  }
+  mock_data "aws_region" {
+    defaults = { region = "us-east-1" }
+  }
+}
+
+variables {
+  aws_region  = "us-east-1"
+  environment = "dev"
+}
+
+run "plan_is_valid" {
+  command = plan
+
+  assert {
+    condition     = data.aws_caller_identity.current.account_id == "123456789012"
+    error_message = "Unexpected account id"
+  }
+}
+```
+
+在 `variables` 块中设置配置所需的每个变量，否则运行将失败并显示"has a required variable ... with no set value"。
 
 <OptionFilter when={{ type: 'application' }} description="Application-only targets: plan / apply / destroy / etc.">
 ### 仅限应用程序的目标
@@ -310,6 +367,12 @@ region      = "us-west-2"
 要清理引导资源（用于状态存储的 S3 存储桶）：
 
 <NxCommands commands={['bootstrap-destroy tf-infra']} />
+
+这会在销毁状态存储桶之前清空它，并从 AWS SDK 凭证链解析区域，因此它可以在 CI 中无人值守运行。
+
+:::caution[首先销毁您的基础设施]
+状态存储桶保存每个环境的状态，因此在此之前为每个环境运行 `destroy`。一旦存储桶消失，Terraform 将不再知道它创建的资源。
+:::
 </OptionFilter>
 
 ## 更多信息

@@ -48,10 +48,12 @@ Terraform 인프라 생성기는 Terraform 인프라 프로젝트를 생성합�
     - main.tf 상태 저장을 위한 S3 버킷 및 정책
     - providers.tf AWS 프로바이더 구성
     - variables.tf 부트스트랩 변수 정의
-  - scripts nx `bootstrap` 및 `init` 타겟에서 실행되는 Node 헬퍼
+  - scripts nx `bootstrap`, `bootstrap-destroy` 및 `init` 타겟에서 실행되는 Node 헬퍼
     - aws-config.ts AWS SDK 자격 증명 체인을 통해 계정 + 리전 확인
     - bootstrap.ts 부트스트랩 tfstate를 가져오기/푸시하고 `terraform apply` 실행
+    - bootstrap-destroy.ts 상태 버킷을 비우고 `terraform destroy` 실행
     - init.ts S3 백엔드 구성으로 `terraform init` 실행
+  - checkov.yml 건너뛸 검사를 포함한 Checkov 구성
   - project.json 프로젝트 구성 및 빌드 타겟
 
 </FileTree>
@@ -71,6 +73,7 @@ Terraform 인프라 생성기는 Terraform 인프라 프로젝트를 생성합�
 
   - src
     - main.tf 메인 Terraform 모듈 파일
+  - checkov.yml 건너뛸 검사를 포함한 Checkov 구성
   - project.json 프로젝트 구성 및 빌드 타겟
 
 </FileTree>
@@ -250,11 +253,65 @@ region      = "us-west-2"
 
 #### 보안 테스트
 
-`test` 타겟을 사용하여 Checkov로 인프라에 대한 보안 검사를 실행합니다:
+`checkov` 타겟을 사용하여 Checkov로 인프라에 대한 보안 검사를 실행합니다:
+
+<NxCommands commands={['checkov tf-infra']} />
+
+보안 테스트 결과는 루트 `dist` 폴더의 `dist/packages/<my-terraform-project>/checkov` 아래에서 찾을 수 있습니다.
+
+검사는 프로젝트의 `checkov.yml`에서 구성됩니다. 전체 프로젝트에서 검사를 억제하려면 `skip-check`에 검사 ID를 추가하세요:
+
+```yaml title="checkov.yml"
+skip-check:
+  - CKV_AWS_115 # Concurrent execution limit
+  - CKV_AWS_116 # Dead Letter Queue
+```
+
+단일 리소스에 대한 검사만 억제하려면 리소스 블록 내부에 `#checkov:skip=<id>:<reason>` 주석을 추가하세요:
+
+```hcl
+resource "aws_s3_bucket" "example" {
+  #checkov:skip=CKV_AWS_18:Access logging not required for this bucket
+  bucket = "example"
+}
+```
+
+#### Terraform 테스트 실행
+
+`test` 타겟은 프로젝트의 모든 `.tftest.hcl` 파일에 대해 [Terraform의 네이티브 테스트 프레임워크](https://developer.hashicorp.com/terraform/language/tests)를 실행합니다:
 
 <NxCommands commands={['test tf-infra']} />
 
-보안 테스트 결과는 루트 `dist` 폴더의 `dist/packages/<my-terraform-project>/checkov` 아래에서 찾을 수 있습니다.
+테스트 파일이 없는 프로젝트는 성공으로 처리되므로 필요할 때 테스트를 추가할 수 있습니다.
+
+각 `run` 블록은 구성을 평가합니다. `command = plan`을 사용하여 Terraform이 _수행할_ 작업을 확인하거나(전체 모듈 그래프를 확장하므로 `validate`가 감지할 수 없는 계획 시간 오류를 포착합니다), `command = apply`를 사용하여 실제 리소스를 생성하고 출력을 검증할 수 있습니다. `mock_provider`를 선언하면 API 호출이 이루어지지 않고 AWS 자격 증명이 필요하지 않으므로 `plan` 테스트를 빠르고 안전하게 CI에서 실행할 수 있습니다:
+
+```hcl title="src/main.tftest.hcl"
+mock_provider "aws" {
+  mock_data "aws_caller_identity" {
+    defaults = { account_id = "123456789012" }
+  }
+  mock_data "aws_region" {
+    defaults = { region = "us-east-1" }
+  }
+}
+
+variables {
+  aws_region  = "us-east-1"
+  environment = "dev"
+}
+
+run "plan_is_valid" {
+  command = plan
+
+  assert {
+    condition     = data.aws_caller_identity.current.account_id == "123456789012"
+    error_message = "Unexpected account id"
+  }
+}
+```
+
+`variables` 블록에 구성에 필요한 모든 변수를 설정하세요. 그렇지 않으면 "has a required variable ... with no set value" 오류와 함께 실행이 실패합니다.
 
 <OptionFilter when={{ type: 'application' }} description="Application-only targets: plan / apply / destroy / etc.">
 ### 애플리케이션 전용 타겟
@@ -310,6 +367,12 @@ Terraform 구성에서 출력 값을 검색합니다:
 부트스트랩 리소스(상태 저장을 위한 S3 버킷)를 정리하려면:
 
 <NxCommands commands={['bootstrap-destroy tf-infra']} />
+
+이렇게 하면 상태 버킷을 파괴하기 전에 비우고, AWS SDK 자격 증명 체인에서 리전을 확인하므로 CI에서 무인으로 실행됩니다.
+
+:::caution[먼저 인프라를 삭제하세요]
+상태 버킷은 모든 환경의 상태를 보유하므로 이 작업을 수행하기 전에 각 환경에 대해 `destroy`를 실행하세요. 버킷이 사라지면 Terraform은 더 이상 생성한 리소스에 대해 알지 못합니다.
+:::
 </OptionFilter>
 
 ## 추가 정보
