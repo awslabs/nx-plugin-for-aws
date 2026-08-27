@@ -403,11 +403,19 @@ describe('agentcore-harness generator', () => {
     });
 
     it('configures no tools on the resource but exposes allowedTools as props', () => {
-      // From the resource literal onwards, so an allowedTools assignment
-      // anywhere in the resource or after it fails.
+      // The service treats an absent allowedTools as every tool, so the
+      // construct defaults it to none and always passes it explicitly.
+      expect(construct).toContain('allowedTools = [],');
+
+      // Assigned after the harnessProps spread, so an undefined value from a
+      // caller cannot reinstate the service's every-tool default.
       const resourceStart = construct.indexOf('new agentcore.CfnHarness(');
       expect(resourceStart).toBeGreaterThan(0);
-      expect(construct.slice(resourceStart)).not.toContain('allowedTools');
+      const resource = construct.slice(resourceStart);
+      expect(resource).toContain('allowedTools,');
+      expect(resource.indexOf('...harnessProps,')).toBeLessThan(
+        resource.indexOf('allowedTools,'),
+      );
 
       // Omitted from the inherited native props, so the optional field below
       // is the only route by which a caller can supply tools.
@@ -479,21 +487,30 @@ describe('agentcore-harness generator', () => {
       expect(tree.exists(CDK_HARNESSES_INDEX_PATH)).toBe(false);
     });
 
-    it('declares only the three retained input variables', () => {
-      // Set equality, so a reintroduced system_prompt, allowed_tools,
-      // max_iterations, max_tokens or timeout_seconds variable fails.
+    it('declares only the four retained input variables', () => {
+      // Set equality, so a reintroduced system_prompt, max_iterations,
+      // max_tokens or timeout_seconds variable fails.
       expect(
         [...tf.matchAll(/^variable "([a-z_]+)"/gm)].map(([, name]) => name),
       ).toEqual([
         'model_id',
+        'allowed_tools',
         'model_resource_arns',
         'additional_execution_role_policy_statements',
       ]);
       // No validation block survives, and nothing references the removed
-      // variables or assigns tools to the resource.
+      // variables.
       expect(tf).not.toContain('validation {');
       expect(tf).not.toContain('var.system_prompt');
-      expect(tf).not.toContain('allowed_tools');
+    });
+
+    it('defaults allowed_tools to none and always sends it', () => {
+      // The service treats an absent allowed_tools as every tool, so the
+      // module defaults to none and assigns the variable unconditionally.
+      expect(tf).toMatch(
+        /variable "allowed_tools" \{[^}]*type {8}= list\(string\)\n {2}default {5}= \[\]/,
+      );
+      expect(tf).toContain('allowed_tools      = var.allowed_tools');
     });
 
     it('justifies every wildcard IAM statement inline', () => {

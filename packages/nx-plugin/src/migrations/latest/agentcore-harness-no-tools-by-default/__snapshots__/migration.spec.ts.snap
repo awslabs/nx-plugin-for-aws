@@ -1,0 +1,79 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`agentcore-harness-no-tools-by-default migration > cdk > defaults allowedTools to none and passes it explicitly 1`] = `
+"import * as agentcore from 'aws-cdk-lib/aws-bedrockagentcore';
+import { Construct } from 'constructs';
+
+export class MyHarness extends Construct {
+  public readonly harness: agentcore.CfnHarness;
+
+  constructor(scope: Construct, id: string, props?: MyHarnessProps) {
+    super(scope, id);
+
+    const stack = Stack.of(this);
+    const {
+      // The service treats an absent allowedTools as every tool, so this
+      // defaults to none and is always passed explicitly.
+      allowedTools = [],
+      executionRole,
+      modelResourceArns = [
+        \`arn:\${stack.partition}:bedrock:*::foundation-model/*\`,
+      ],
+      vpc,
+      vpcSubnets,
+      securityGroups,
+      ...harnessProps
+    } = props ?? {};
+
+    this.harness = new agentcore.CfnHarness(this, 'Harness', {
+      model: {
+        bedrockModelConfig: {
+          modelId: 'global.anthropic.claude-sonnet-4-6',
+        },
+      },
+      systemPrompt: [{ text: systemPrompt }],
+      ...harnessProps,
+      allowedTools,
+      // Set after harnessProps so the deployed name always matches the
+      // execution role's workload-identity resource pattern.
+      harnessName,
+      executionRoleArn: this.executionRole.roleArn,
+      environment,
+    });
+  }
+}
+"
+`;
+
+exports[`agentcore-harness-no-tools-by-default migration > terraform > declares allowed_tools defaulting to none and assigns it 1`] = `
+"variable "model_id" {
+  description = "Amazon Bedrock model or inference profile used by default."
+  type        = string
+  default     = "global.anthropic.claude-sonnet-4-6"
+}
+
+variable "allowed_tools" {
+  description = "Tools the Harness may use. Defaults to none; set [\\"@builtin\\"] for every built-in tool, or name individual tools. Always sent explicitly, since the service treats an absent value as every tool."
+  type        = list(string)
+  default     = []
+}
+
+variable "model_resource_arns" {
+  description = "Bedrock model and inference-profile ARNs the execution role may invoke."
+  type        = set(string)
+  default     = null
+}
+
+resource "aws_bedrockagentcore_harness" "this" {
+  harness_name       = local.harness_name
+  execution_role_arn = aws_iam_role.execution_role.arn
+  allowed_tools      = var.allowed_tools
+
+  model {
+    bedrock_model_config {
+      model_id = var.model_id
+    }
+  }
+}
+"
+`;
