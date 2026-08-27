@@ -383,7 +383,23 @@ describe('agentcore-harness generator', () => {
       expect(construct).toContain('systemPrompt: [{ text: systemPrompt }],');
     });
 
-    it('suppresses the three unscopeable IAM statements on the role policy', () => {
+    it('grants the private ECR pull a VPC Harness needs, and only then', () => {
+      // In a VPC the Harness pulls its managed container from a private ECR
+      // repository rather than ECR Public, so the role needs pull permissions
+      // on it or sessions fail to start.
+      expect(construct).toContain("sid: 'EcrManagedImagePull',");
+      expect(construct).toContain(
+        '`arn:${stack.partition}:ecr:${stack.region}:*:repository/harness-*`',
+      );
+      expect(construct).toContain("sid: 'EcrManagedImageToken',");
+      // Conditional on the VPC prop, spread into the baseline statements.
+      expect(construct).toContain('...(vpc\n');
+
+      // ECR Public remains the non-VPC path, so both stay.
+      expect(construct).toContain("sid: 'EcrPublicTokenAccess',");
+    });
+
+    it('suppresses the four unscopeable IAM statements on the role policy', () => {
       // App-level specifier: the construct sits three directories below core/.
       expect(construct).toContain(
         "import { suppressRules } from '../../../core/checkov.js';",
@@ -396,7 +412,7 @@ describe('agentcore-harness generator', () => {
       expect(construct).toContain(
         'const isPolicy = (c: IConstruct) => c instanceof iam.Policy;',
       );
-      expect(construct.match(/suppressRules\(\n/g)).toHaveLength(3);
+      expect(construct.match(/suppressRules\(\n/g)).toHaveLength(4);
       for (const reason of [
         'EcrPublicTokenAccess: ecr-public:GetAuthorizationToken has no resource-level permission.',
         'StsForEcrPublicPull: sts:GetServiceBearerToken has no resource-level permission.',
@@ -404,6 +420,11 @@ describe('agentcore-harness generator', () => {
       ]) {
         expect(construct, reason).toContain(`        '${reason}',`);
       }
+      // The VPC-only grant is suppressed inside the matching conditional, so it
+      // is indented one level further.
+      expect(construct).toContain(
+        "          'EcrManagedImageToken: ecr:GetAuthorizationToken has no resource-level permission.',",
+      );
     });
 
     it('configures no tools on the resource but exposes allowedTools as props', () => {
