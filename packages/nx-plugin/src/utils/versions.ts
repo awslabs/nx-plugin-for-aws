@@ -347,28 +347,6 @@ export const containerImage = (tool: keyof typeof CONTAINER_VERSIONS): string =>
   `${CONTAINER_REPOSITORIES[tool]}:${CONTAINER_VERSIONS[tool]}`;
 
 /**
- * Aurora Serverless v2 scaling bounds, in ACUs, that both IaC providers derive
- * from so the same generator options vend the same ceiling regardless of `--iac`.
- *
- * Set explicitly on CDK rather than inheriting `DatabaseClusterProps`, whose
- * default moves with `aws-cdk-lib`. Serverless v2 bills on ACUs consumed, not on
- * the ceiling, so the maximum is headroom rather than a cost commitment.
- */
-export const AURORA_SERVERLESS_V2_CAPACITY = {
-  min: 0.5,
-  max: 4,
-} as const;
-
-/**
- * Substitution variables exposing the Aurora Serverless v2 scaling bounds to
- * generated CDK and Terraform templates.
- */
-export const auroraServerlessV2Capacity = () => ({
-  serverlessMinCapacity: AURORA_SERVERLESS_V2_CAPACITY.min,
-  serverlessMaxCapacity: AURORA_SERVERLESS_V2_CAPACITY.max,
-});
-
-/**
  * Exact versions for Terraform providers used by generated `.tf` modules.
  * Pinned exactly (no range operator) so generated infrastructure is reproducible.
  */
