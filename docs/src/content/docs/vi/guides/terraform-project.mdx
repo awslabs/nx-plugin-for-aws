@@ -48,10 +48,12 @@ Trình tạo tạo ra các cấu trúc tệp khác nhau tùy thuộc vào loại
     - main.tf S3 bucket và policies cho lưu trữ state
     - providers.tf Cấu hình AWS provider
     - variables.tf Định nghĩa biến Bootstrap
-  - scripts Node helpers chạy bởi các target nx `bootstrap` và `init`
+  - scripts Node helpers chạy bởi các target nx `bootstrap`, `bootstrap-destroy` và `init`
     - aws-config.ts Phân giải account + region thông qua chuỗi thông tin xác thực AWS SDK
     - bootstrap.ts Pull/push bootstrap tfstate và chạy `terraform apply`
+    - bootstrap-destroy.ts Làm trống state bucket và chạy `terraform destroy`
     - init.ts Chạy `terraform init` với cấu hình S3 backend
+  - checkov.yml Cấu hình Checkov, bao gồm các kiểm tra cần bỏ qua
   - project.json Cấu hình dự án và build targets
 
 </FileTree>
@@ -71,6 +73,7 @@ Trình tạo cũng tạo ra một thư viện `packages/common/terraform` ban đ
 
   - src
     - main.tf Tệp module Terraform chính
+  - checkov.yml Cấu hình Checkov, bao gồm các kiểm tra cần bỏ qua
   - project.json Cấu hình dự án và build targets
 
 </FileTree>
@@ -250,11 +253,65 @@ Bạn có thể xác thực cấu hình Terraform của mình bằng cách sử 
 
 #### Kiểm tra Bảo mật
 
-Chạy kiểm tra bảo mật trên hạ tầng của bạn bằng cách sử dụng Checkov với target `test`:
+Chạy kiểm tra bảo mật trên hạ tầng của bạn bằng cách sử dụng Checkov với target `checkov`:
+
+<NxCommands commands={['checkov tf-infra']} />
+
+Bạn sẽ tìm thấy kết quả kiểm tra bảo mật của mình trong thư mục `dist` gốc, dưới `dist/packages/<my-terraform-project>/checkov`.
+
+Các kiểm tra được cấu hình trong `checkov.yml` của dự án. Thêm một check id vào `skip-check` để bỏ qua nó trên toàn bộ dự án:
+
+```yaml title="checkov.yml"
+skip-check:
+  - CKV_AWS_115 # Concurrent execution limit
+  - CKV_AWS_116 # Dead Letter Queue
+```
+
+Để bỏ qua một kiểm tra cho một tài nguyên duy nhất, thêm một comment `#checkov:skip=<id>:<reason>` bên trong khối tài nguyên:
+
+```hcl
+resource "aws_s3_bucket" "example" {
+  #checkov:skip=CKV_AWS_18:Access logging not required for this bucket
+  bucket = "example"
+}
+```
+
+#### Chạy Terraform Tests
+
+Target `test` chạy [framework test gốc của Terraform](https://developer.hashicorp.com/terraform/language/tests) trên bất kỳ tệp `.tftest.hcl` nào trong dự án của bạn:
 
 <NxCommands commands={['test tf-infra']} />
 
-Bạn sẽ tìm thấy kết quả kiểm tra bảo mật của mình trong thư mục `dist` gốc, dưới `dist/packages/<my-terraform-project>/checkov`.
+Một dự án không có tệp test sẽ thành công mà không làm gì, vì vậy bạn có thể thêm test khi cần. `build` chạy target này, vì vậy các test của bạn chạy như một phần của build bình thường.
+
+Mỗi khối `run` đánh giá cấu hình của bạn. Sử dụng `command = plan` để kiểm tra những gì Terraform _sẽ_ làm (điều này mở rộng toàn bộ đồ thị module, vì vậy nó bắt được các lỗi plan-time mà `validate` không thể), hoặc `command = apply` để tạo tài nguyên thực và khẳng định trên các output của chúng. Khai báo `mock_provider` có nghĩa là không có cuộc gọi API nào được thực hiện và không cần thông tin xác thực AWS, điều này giữ cho các test `plan` nhanh và an toàn để chạy trong CI:
+
+```hcl title="src/main.tftest.hcl"
+mock_provider "aws" {
+  mock_data "aws_caller_identity" {
+    defaults = { account_id = "123456789012" }
+  }
+  mock_data "aws_region" {
+    defaults = { region = "us-east-1" }
+  }
+}
+
+variables {
+  aws_region  = "us-east-1"
+  environment = "dev"
+}
+
+run "plan_is_valid" {
+  command = plan
+
+  assert {
+    condition     = data.aws_caller_identity.current.account_id == "123456789012"
+    error_message = "Unexpected account id"
+  }
+}
+```
+
+Đặt mọi biến mà cấu hình của bạn yêu cầu trong khối `variables`, nếu không run sẽ thất bại với "has a required variable ... with no set value".
 
 <OptionFilter when={{ type: 'application' }} description="Application-only targets: plan / apply / destroy / etc.">
 ### Các Target Chỉ dành cho Application
@@ -310,6 +367,12 @@ Khi bạn cần phá bỏ hạ tầng của mình, sử dụng target `destroy`:
 Để dọn dẹp các tài nguyên bootstrap (S3 bucket cho lưu trữ state):
 
 <NxCommands commands={['bootstrap-destroy tf-infra']} />
+
+Điều này làm trống state bucket trước khi hủy nó, và phân giải region từ chuỗi thông tin xác thực AWS SDK, vì vậy nó chạy tự động trong CI.
+
+:::caution[Destroy your infrastructure first]
+State bucket giữ state cho mọi môi trường, vì vậy hãy chạy `destroy` cho từng môi trường trước khi thực hiện điều này. Khi bucket đã bị xóa, Terraform không còn biết về các tài nguyên mà nó đã tạo.
+:::
 </OptionFilter>
 
 ## Thông tin Thêm

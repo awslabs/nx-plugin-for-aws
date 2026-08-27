@@ -48,10 +48,12 @@ Terraform インフラストラクチャジェネレーターは、Terraform イ
     - main.tf S3 bucket and policies for state storage
     - providers.tf AWS provider configuration
     - variables.tf Bootstrap variable definitions
-  - scripts Node helpers run by the nx `bootstrap` and `init` targets
+  - scripts Node helpers run by the nx `bootstrap`, `bootstrap-destroy` and `init` targets
     - aws-config.ts Resolves account + region via the AWS SDK credential chain
     - bootstrap.ts Pulls/pushes the bootstrap tfstate and runs `terraform apply`
+    - bootstrap-destroy.ts Empties the state bucket and runs `terraform destroy`
     - init.ts Runs `terraform init` with the S3 backend config
+  - checkov.yml Checkov configuration, including the checks to skip
   - project.json Project configuration and build targets
 
 </FileTree>
@@ -71,6 +73,7 @@ Terraform インフラストラクチャジェネレーターは、Terraform イ
 
   - src
     - main.tf Main Terraform module file
+  - checkov.yml Checkov configuration, including the checks to skip
   - project.json Project configuration and build targets
 
 </FileTree>
@@ -250,11 +253,65 @@ bootstrap ターゲットはアプリケーションタイプのプロジェク�
 
 #### セキュリティテスト
 
-`test` ターゲットで Checkov を使用してインフラストラクチャのセキュリティチェックを実行します：
+`checkov` ターゲットで Checkov を使用してインフラストラクチャのセキュリティチェックを実行します：
+
+<NxCommands commands={['checkov tf-infra']} />
+
+セキュリティテストの結果は、ルートの `dist` フォルダー内の `dist/packages/<my-terraform-project>/checkov` にあります。
+
+チェックはプロジェクトの `checkov.yml` で設定されます。プロジェクト全体でチェックを抑制するには、`skip-check` にチェック ID を追加します：
+
+```yaml title="checkov.yml"
+skip-check:
+  - CKV_AWS_115 # Concurrent execution limit
+  - CKV_AWS_116 # Dead Letter Queue
+```
+
+単一のリソースに対してのみチェックを抑制するには、リソースブロック内に `#checkov:skip=<id>:<reason>` コメントを追加します：
+
+```hcl
+resource "aws_s3_bucket" "example" {
+  #checkov:skip=CKV_AWS_18:Access logging not required for this bucket
+  bucket = "example"
+}
+```
+
+#### Terraform テストの実行
+
+`test` ターゲットは、プロジェクト内の `.tftest.hcl` ファイルに対して [Terraform のネイティブテストフレームワーク](https://developer.hashicorp.com/terraform/language/tests)を実行します：
 
 <NxCommands commands={['test tf-infra']} />
 
-セキュリティテストの結果は、ルートの `dist` フォルダー内の `dist/packages/<my-terraform-project>/checkov` にあります。
+テストファイルがないプロジェクトは成功として扱われるため、必要なときにテストを追加できます。`build` はこのターゲットを実行するため、通常のビルドの一部としてテストが実行されます。
+
+各 `run` ブロックは設定を評価します。`command = plan` を使用すると、Terraform が何を_行うか_を確認できます（これはモジュールグラフ全体を展開するため、`validate` では検出できない計画時のエラーをキャッチします）。また、`command = apply` を使用すると、実際のリソースを作成してその出力をアサートできます。`mock_provider` を宣言すると、API 呼び出しが行われず、AWS 認証情報も不要になるため、`plan` テストを高速かつ安全に CI で実行できます：
+
+```hcl title="src/main.tftest.hcl"
+mock_provider "aws" {
+  mock_data "aws_caller_identity" {
+    defaults = { account_id = "123456789012" }
+  }
+  mock_data "aws_region" {
+    defaults = { region = "us-east-1" }
+  }
+}
+
+variables {
+  aws_region  = "us-east-1"
+  environment = "dev"
+}
+
+run "plan_is_valid" {
+  command = plan
+
+  assert {
+    condition     = data.aws_caller_identity.current.account_id == "123456789012"
+    error_message = "Unexpected account id"
+  }
+}
+```
+
+設定に必要なすべての変数を `variables` ブロックに設定してください。そうしないと、「has a required variable ... with no set value」というエラーで実行が失敗します。
 
 <OptionFilter when={{ type: 'application' }} description="Application-only targets: plan / apply / destroy / etc.">
 ### アプリケーション専用ターゲット
@@ -310,6 +367,12 @@ Terraform 設定から出力値を取得します：
 ブートストラップリソース（状態保存用の S3 バケット）をクリーンアップするには：
 
 <NxCommands commands={['bootstrap-destroy tf-infra']} />
+
+これは、バケットを破棄する前に状態バケットを空にし、AWS SDK 認証情報チェーンからリージョンを解決するため、CI で無人実行できます。
+
+:::caution[最初にインフラストラクチャを破棄してください]
+状態バケットはすべての環境の状態を保持しているため、これを実行する前に各環境で `destroy` を実行してください。バケットがなくなると、Terraform は作成したリソースについて認識できなくなります。
+:::
 </OptionFilter>
 
 ## 詳細情報

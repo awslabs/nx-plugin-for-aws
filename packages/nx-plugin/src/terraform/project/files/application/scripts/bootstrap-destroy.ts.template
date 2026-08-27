@@ -1,0 +1,111 @@
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import {
+  S3Client,
+  DeleteObjectsCommand,
+  GetObjectCommand,
+  ListObjectVersionsCommand,
+} from '@aws-sdk/client-s3';
+import { fromNodeProviderChain } from '@aws-sdk/credential-providers';
+import { resolveAwsConfig } from './aws-config';
+
+const projectRootRel = process.argv[2];
+if (!projectRootRel) {
+  throw new Error(
+    'Expected the project root as argv[2] — this script is wired up by the generated `bootstrap-destroy` nx target and should be invoked through it.',
+  );
+}
+const workspaceRoot = process.cwd();
+const projectRoot = resolve(workspaceRoot, projectRootRel);
+const bootstrapDir = join(projectRoot, 'bootstrap');
+const tfStatePath = join(
+  workspaceRoot,
+  'dist',
+  projectRootRel,
+  'terraform',
+  'bootstrap.tfstate',
+);
+
+/** Removes every object version and delete marker so the bucket can be destroyed. */
+const emptyBucket = async (s3: S3Client, bucket: string) => {
+  for (;;) {
+    const listed = await s3.send(
+      new ListObjectVersionsCommand({ Bucket: bucket }),
+    );
+    const objects = [
+      ...(listed.Versions ?? []),
+      ...(listed.DeleteMarkers ?? []),
+    ].map(({ Key, VersionId }) => ({ Key, VersionId }));
+
+    if (objects.length === 0) return;
+
+    await s3.send(
+      new DeleteObjectsCommand({
+        Bucket: bucket,
+        Delete: { Objects: objects, Quiet: true },
+      }),
+    );
+
+    if (!listed.IsTruncated) return;
+  }
+};
+
+/**
+ * Destroys the remote Terraform state bucket created by `bootstrap`.
+ *
+ * The bucket holds its own state object, so the state is pulled from S3 first
+ * (this works from a fresh checkout) and the bucket emptied before the destroy
+ * — it is not `force_destroy`, so a non-empty bucket fails to delete.
+ */
+const main = async () => {
+  const { accountId, region } = await resolveAwsConfig();
+  const bucket = `${accountId}-tf-state-${region}`;
+
+  const s3 = new S3Client({ region, credentials: fromNodeProviderChain() });
+
+  mkdirSync(dirname(tfStatePath), { recursive: true });
+
+  // Prefer the remote state, so this works from a fresh checkout.
+  try {
+    const out = await s3.send(
+      new GetObjectCommand({ Bucket: bucket, Key: 'bootstrap.tfstate' }),
+    );
+    if (out.Body) {
+      writeFileSync(tfStatePath, await out.Body.transformToByteArray());
+    }
+  } catch (err: any) {
+    const status = err?.$metadata?.httpStatusCode;
+    const name = err?.name ?? '';
+    const missing =
+      name === 'NoSuchBucket' || name === 'NoSuchKey' || status === 404;
+    if (!missing) throw err;
+  }
+
+  if (!existsSync(tfStatePath)) {
+    console.log(
+      `No bootstrap state found for ${bucket} — nothing to destroy. It may already have been destroyed.`,
+    );
+    return;
+  }
+
+  execFileSync('terraform', ['init'], { cwd: bootstrapDir, stdio: 'inherit' });
+
+  await emptyBucket(s3, bucket);
+
+  execFileSync(
+    'terraform',
+    [
+      'destroy',
+      '-auto-approve',
+      `-state=${tfStatePath}`,
+      `-var=aws_region=${region}`,
+    ],
+    { cwd: bootstrapDir, stdio: 'inherit' },
+  );
+};
+
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

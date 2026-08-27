@@ -48,10 +48,12 @@ Per i progetti application (`--type=application`), il generatore crea un'applica
     - main.tf Bucket S3 e policy per l'archiviazione dello stato
     - providers.tf Configurazione del provider AWS
     - variables.tf Definizioni delle variabili di bootstrap
-  - scripts Helper Node eseguiti dai target nx `bootstrap` e `init`
+  - scripts Helper Node eseguiti dai target nx `bootstrap`, `bootstrap-destroy` e `init`
     - aws-config.ts Risolve account + regione tramite la catena di credenziali AWS SDK
     - bootstrap.ts Esegue pull/push del tfstate di bootstrap ed esegue `terraform apply`
+    - bootstrap-destroy.ts Svuota il bucket di stato ed esegue `terraform destroy`
     - init.ts Esegue `terraform init` con la configurazione del backend S3
+  - checkov.yml Configurazione di Checkov, inclusi i controlli da saltare
   - project.json Configurazione del progetto e target di build
 
 </FileTree>
@@ -71,6 +73,7 @@ Per i progetti library (`--type=library`), il generatore crea una struttura più
 
   - src
     - main.tf File del modulo Terraform principale
+  - checkov.yml Configurazione di Checkov, inclusi i controlli da saltare
   - project.json Configurazione del progetto e target di build
 
 </FileTree>
@@ -250,11 +253,65 @@ Formatta il tuo codice Terraform utilizzando il target `fmt`:
 
 #### Test di sicurezza
 
-Esegui controlli di sicurezza sulla tua infrastruttura utilizzando Checkov con il target `test`:
+Esegui controlli di sicurezza sulla tua infrastruttura utilizzando Checkov con il target `checkov`:
+
+<NxCommands commands={['checkov tf-infra']} />
+
+Troverai i risultati dei test di sicurezza nella cartella `dist` principale, sotto `dist/packages/<my-terraform-project>/checkov`.
+
+I controlli sono configurati nel file `checkov.yml` del progetto. Aggiungi un id di controllo a `skip-check` per sopprimerlo nell'intero progetto:
+
+```yaml title="checkov.yml"
+skip-check:
+  - CKV_AWS_115 # Concurrent execution limit
+  - CKV_AWS_116 # Dead Letter Queue
+```
+
+Per sopprimere un controllo per una singola risorsa invece, aggiungi un commento `#checkov:skip=<id>:<reason>` all'interno del blocco della risorsa:
+
+```hcl
+resource "aws_s3_bucket" "example" {
+  #checkov:skip=CKV_AWS_18:Access logging not required for this bucket
+  bucket = "example"
+}
+```
+
+#### Eseguire i test Terraform
+
+Il target `test` esegue il [framework di test nativo di Terraform](https://developer.hashicorp.com/terraform/language/tests) su qualsiasi file `.tftest.hcl` nel tuo progetto:
 
 <NxCommands commands={['test tf-infra']} />
 
-Troverai i risultati dei test di sicurezza nella cartella `dist` principale, sotto `dist/packages/<my-terraform-project>/checkov`.
+Un progetto senza file di test è un successo senza operazioni, quindi puoi aggiungere test quando ne hai bisogno. `build` esegue questo target, quindi i tuoi test vengono eseguiti come parte di una build normale.
+
+Ogni blocco `run` valuta la tua configurazione. Usa `command = plan` per verificare cosa _farebbe_ Terraform (questo espande l'intero grafo dei moduli, quindi cattura errori in fase di pianificazione che `validate` non può rilevare), oppure `command = apply` per creare risorse reali e fare asserzioni sui loro output. Dichiarare `mock_provider` significa che non vengono effettuate chiamate API e non sono necessarie credenziali AWS, il che mantiene i test `plan` veloci e sicuri da eseguire in CI:
+
+```hcl title="src/main.tftest.hcl"
+mock_provider "aws" {
+  mock_data "aws_caller_identity" {
+    defaults = { account_id = "123456789012" }
+  }
+  mock_data "aws_region" {
+    defaults = { region = "us-east-1" }
+  }
+}
+
+variables {
+  aws_region  = "us-east-1"
+  environment = "dev"
+}
+
+run "plan_is_valid" {
+  command = plan
+
+  assert {
+    condition     = data.aws_caller_identity.current.account_id == "123456789012"
+    error_message = "Unexpected account id"
+  }
+}
+```
+
+Imposta ogni variabile richiesta dalla tua configurazione nel blocco `variables`, altrimenti l'esecuzione fallisce con "has a required variable ... with no set value".
 
 <OptionFilter when={{ type: 'application' }} description="Application-only targets: plan / apply / destroy / etc.">
 ### Target solo per Application
@@ -310,6 +367,12 @@ Questo eliminerà permanentemente tutte le risorse gestite da questa configurazi
 Per pulire le risorse di bootstrap (bucket S3 per l'archiviazione dello stato):
 
 <NxCommands commands={['bootstrap-destroy tf-infra']} />
+
+Questo svuota il bucket di stato prima di distruggerlo e risolve la regione dalla catena di credenziali AWS SDK, quindi viene eseguito in modo automatico in CI.
+
+:::caution[Distruggi prima la tua infrastruttura]
+Il bucket di stato contiene lo stato per ogni ambiente, quindi esegui `destroy` per ogni ambiente prima di questo. Una volta che il bucket è stato eliminato, Terraform non conosce più le risorse che ha creato.
+:::
 </OptionFilter>
 
 ## Ulteriori informazioni

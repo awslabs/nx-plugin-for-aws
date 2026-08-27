@@ -94,6 +94,9 @@ export async function terraformProjectGenerator(
     'checkov',
     'checkov_report.json',
   );
+  // `test` keeps its `.terraform` here rather than in `src`, so initialising it
+  // never races the backend-configured targets over the shared one.
+  const testDataDir = joinPathFragments(distDir, 'terraform-test');
 
   // Calculate relative path from current project to common/terraform/metrics
   // Use forward slashes for terraform module source paths (even on Windows)
@@ -133,12 +136,14 @@ export async function terraformProjectGenerator(
       executor: 'nx:run-commands',
       options: {
         forwardAllArgs: true,
-        command: `terraform destroy -state=${tfDistDir}/bootstrap.tfstate`,
-        cwd: '{projectRoot}/bootstrap',
+        commands: [
+          'tsx {projectRoot}/scripts/bootstrap-destroy.ts {projectRoot}',
+        ],
+        cwd: '{workspaceRoot}',
       },
     },
     build: {
-      dependsOn: ['fmt', 'test', `${sharedTfProjectName}:build`],
+      dependsOn: ['fmt', 'checkov', 'test', `${sharedTfProjectName}:build`],
     },
     deploy: {
       dependsOn: ['apply'],
@@ -206,7 +211,7 @@ export async function terraformProjectGenerator(
     [targetName: string]: TargetConfiguration;
   } = {
     build: {
-      dependsOn: ['fmt', 'test'],
+      dependsOn: ['fmt', 'checkov', 'test'],
     },
     fmt: {
       executor: 'nx:run-commands',
@@ -231,17 +236,39 @@ export async function terraformProjectGenerator(
         cwd: '{projectRoot}/src',
       },
     },
-    test: {
+    checkov: {
       executor: 'nx:run-commands',
       cache: true,
       outputs: ['{workspaceRoot}/dist/{projectRoot}/checkov'],
       options: {
         command: uvxCommand(
           'checkov',
-          `--directory . -o cli -o json --output-file-path console,${checkovReportJsonPath}`,
+          `--config-file ../checkov.yml --directory . -o cli -o json --output-file-path console,${checkovReportJsonPath}`,
         ),
         forwardAllArgs: true,
         cwd: '{projectRoot}/src',
+      },
+    },
+    // Terraform's native test framework, which runs any `.tftest.hcl` files.
+    // A project with none is a no-op success.
+    //
+    // `-backend=false` installs the modules and providers the tests need
+    // without configuring the S3 backend, so this runs before `bootstrap` and
+    // needs no credentials. `TF_DATA_DIR` keeps that `.terraform` out of `src`,
+    // so it never races the backend-configured targets over the shared one.
+    // `^production` is what invalidates the cache when a consumed module
+    // changes; `{projectRoot}/**/*` alone would serve a stale pass.
+    test: {
+      executor: 'nx:run-commands',
+      cache: true,
+      inputs: ['default', '^production'],
+      outputs: [`{workspaceRoot}/dist/{projectRoot}/terraform-test`],
+      options: {
+        commands: ['terraform init -backend=false', 'terraform test'],
+        forwardAllArgs: true,
+        cwd: '{projectRoot}/src',
+        parallel: false,
+        env: { TF_DATA_DIR: testDataDir },
       },
     },
     validate: {
@@ -291,6 +318,17 @@ export async function terraformProjectGenerator(
     },
     {
       overwriteStrategy: OverwriteStrategy.Overwrite,
+    },
+  );
+
+  // Checkov skips are the user's to curate, so preserve any they have added.
+  generateFiles(
+    tree,
+    joinPathFragments(import.meta.dirname, './files/checkov'),
+    lib.dir,
+    {},
+    {
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
   );
 
