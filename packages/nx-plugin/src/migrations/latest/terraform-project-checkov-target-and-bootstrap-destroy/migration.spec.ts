@@ -66,9 +66,9 @@ const generatePreFixProject = async (tree: Tree, type = 'application') => {
 
   const config = readProjectConfiguration(tree, PROJECT);
   delete config.targets.checkov;
-  // Pre-fix, `build` depended on the scan through `test`.
-  config.targets.build.dependsOn = config.targets.build.dependsOn.filter(
-    (d: string) => d !== 'checkov',
+  // Pre-fix, `build` reached the scan through `test`.
+  config.targets.build.dependsOn = config.targets.build.dependsOn.map(
+    (d: string) => (d === 'checkov' ? 'test' : d),
   );
   config.targets.test = {
     executor: 'nx:run-commands',

@@ -140,7 +140,7 @@ export async function terraformProjectGenerator(
       },
     },
     build: {
-      dependsOn: ['fmt', 'checkov', 'test', `${sharedTfProjectName}:build`],
+      dependsOn: ['fmt', 'checkov', `${sharedTfProjectName}:build`],
     },
     deploy: {
       dependsOn: ['apply'],
@@ -207,10 +207,11 @@ export async function terraformProjectGenerator(
   const libTargets: {
     [targetName: string]: TargetConfiguration;
   } = {
-    // `checkov` and `test` are separate concerns — the security scan and the
-    // Terraform tests — so a build runs both.
+    // `test` is deliberately absent: it runs `terraform test`, which needs the
+    // providers downloaded, so a build would depend on network access. Run it
+    // explicitly with `nx test <project>`.
     build: {
-      dependsOn: ['fmt', 'checkov', 'test'],
+      dependsOn: ['fmt', 'checkov'],
     },
     fmt: {
       executor: 'nx:run-commands',
@@ -250,16 +251,19 @@ export async function terraformProjectGenerator(
     },
     // Terraform's native test framework, which runs any `.tftest.hcl` files.
     // A project with none is a no-op success.
+    //
+    // Providers are installed with `-backend=false` so this needs no
+    // bootstrapped state bucket; mocked tests reach no backend anyway.
     test: {
       executor: 'nx:run-commands',
       cache: true,
       inputs: ['default'],
       options: {
-        command: 'terraform test',
+        commands: ['terraform init -backend=false', 'terraform test'],
         forwardAllArgs: true,
         cwd: '{projectRoot}/src',
+        parallel: false,
       },
-      dependsOn: ['init'],
     },
     validate: {
       executor: 'nx:run-commands',

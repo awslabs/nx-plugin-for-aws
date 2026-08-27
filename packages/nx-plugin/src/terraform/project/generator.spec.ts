@@ -92,10 +92,30 @@ describe('terraformProjectGenerator', () => {
         'validate',
       ]);
 
-      // The security scan and the Terraform tests are separate concerns, so a
-      // build must run both — neither may be dropped.
+      // The security scan must not be dropped from `build`.
       expect(projectConfig.targets['build'].dependsOn).toContain('checkov');
-      expect(projectConfig.targets['build'].dependsOn).toContain('test');
+    });
+
+    it('should not couple build to the terraform CLI or remote state', async () => {
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      const projectConfig = readProjectConfiguration(
+        tree,
+        '@proj/my-terraform-project',
+      );
+
+      const collectDeps = (target: string): string[] =>
+        (projectConfig.targets[target]?.dependsOn ?? []).flatMap(
+          (dep: string) => [dep, ...collectDeps(dep)],
+        );
+      const buildDeps = collectDeps('build');
+
+      // `test` runs `terraform test`, which downloads providers, so a build
+      // would need the terraform CLI and network access. Users run it directly.
+      expect(buildDeps).not.toContain('test');
+      // `init` configures the S3 backend, which fails until `bootstrap` has
+      // created the bucket, so nothing a build needs may depend on it.
+      expect(buildDeps).not.toContain('init');
     });
 
     it('should pass the region to bootstrap-destroy so it never prompts', async () => {
@@ -386,10 +406,14 @@ describe('terraformProjectGenerator', () => {
       const testTarget = projectConfig.targets['test'];
       expect(testTarget.executor).toBe('nx:run-commands');
       expect(testTarget.cache).toBe(true);
-      expect(testTarget.options.command).toBe('terraform test');
       expect(testTarget.options.cwd).toBe('{projectRoot}/src');
-      // `terraform test` needs the providers installed, as `validate` does.
-      expect(testTarget.dependsOn).toEqual(['init']);
+      // Providers are installed without configuring the S3 backend, which
+      // would need a bootstrapped bucket — so `build` works before bootstrap.
+      expect(testTarget.options.commands).toEqual([
+        'terraform init -backend=false',
+        'terraform test',
+      ]);
+      expect(testTarget.dependsOn).toBeUndefined();
     });
   });
 
