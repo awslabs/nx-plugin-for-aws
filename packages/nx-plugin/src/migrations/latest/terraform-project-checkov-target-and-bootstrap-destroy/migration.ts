@@ -21,9 +21,10 @@ import { sortObjectKeys } from '../../../utils/object.js';
 /**
  * Terraform projects gained three fixes:
  *
- * - The security scan moves to a `checkov` target, with `test` kept as an alias
- *   of it. CDK infrastructure projects already call theirs `checkov`, so
- *   `nx run-many --target checkov` skipped Terraform projects entirely.
+ * - A `checkov` target carries the security scan, matching the name CDK
+ *   infrastructure projects already use, so `nx run-many --target checkov` no
+ *   longer skips Terraform projects. An existing `test` target is the user's,
+ *   so it is left exactly as it is.
  * - A `checkov.yml` gives Terraform users the same central place to configure
  *   skips that the CDK app has, wired in via `--config-file`.
  * - `bootstrap-destroy` runs a script that resolves the region from the AWS SDK
@@ -42,11 +43,11 @@ import { sortObjectKeys } from '../../../utils/object.js';
 
 const hcl = (pattern: string) => `language hcl\n${pattern}`;
 
-/** The scan command, whichever target currently carries it. */
+/** The scan command, as the pre-fix generator vended it on `test`. */
 const CHECKOV_COMMAND_PATTERN = /uvx --from checkov==/;
 
 const divergedTargetsStep = (projectName: string) =>
-  `${projectName}: its 'test' target no longer matches the shape the generator produced - left untouched. Rename it to 'checkov' and add a 'test' target with "dependsOn": ["checkov"] so 'nx run-many --target checkov' includes this project.`;
+  `${projectName}: no 'test' target carrying the checkov scan was found, so no 'checkov' target was added - add one running checkov over the project so 'nx run-many --target checkov' includes this project.`;
 
 const divergedProvidersStep = (filePath: string) =>
   `${filePath}: has diverged from the generated shape - left untouched. Add \`required_version = ">= 1.0"\` to its \`terraform\` block to pin the minimum Terraform version.`;
@@ -120,11 +121,11 @@ export default async function migration(
     const targets = project.targets ?? {};
     let changed = false;
 
-    // Move the scan onto `checkov`, leaving `test` as an alias of it. Guarded
-    // on `checkov` being absent so a re-run is a no-op.
+    // Add `checkov`, copying the scan from the `test` target the pre-fix
+    // generator put it on. `test` itself belongs to the user and is left as it
+    // is. Guarded on `checkov` being absent so a re-run is a no-op.
     if (!targets.checkov) {
-      const test = targets.test;
-      const command = test?.options?.command;
+      const command = targets.test?.options?.command;
 
       if (
         typeof command !== 'string' ||
@@ -141,10 +142,9 @@ export default async function migration(
             );
 
         targets.checkov = normalizeTargetKeyOrder({
-          ...test,
-          options: { ...test.options, command: withConfigFile },
+          ...targets.test,
+          options: { ...targets.test.options, command: withConfigFile },
         });
-        targets.test = { dependsOn: ['checkov'] };
         changed = true;
       }
     }

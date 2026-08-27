@@ -257,8 +257,6 @@ Run security checks on your infrastructure using Checkov with the `checkov` targ
 
 <NxCommands commands={['checkov tf-infra']} />
 
-The `test` target is an alias for `checkov`, so <NxCommands commands={['test tf-infra']} /> runs the same scan.
-
 You will find your security test results in the root `dist` folder, under `dist/packages/<my-terraform-project>/checkov`.
 
 Checks are configured in the project's `checkov.yml`. Add a check id to `skip-check` to suppress it across the whole project:
@@ -277,6 +275,43 @@ resource "aws_s3_bucket" "example" {
   bucket = "example"
 }
 ```
+
+#### Running Terraform Tests
+
+The `test` target runs [Terraform's native test framework](https://developer.hashicorp.com/terraform/language/tests) over any `.tftest.hcl` files in your project:
+
+<NxCommands commands={['test tf-infra']} />
+
+A project with no test files is a no-op success, so you can add tests when you need them.
+
+Each `run` block evaluates your configuration. Use `command = plan` to check what Terraform _would_ do (this expands the whole module graph, so it catches plan-time errors that `validate` cannot), or `command = apply` to create real resources and assert on their outputs. Declaring `mock_provider` means no API calls are made and no AWS credentials are needed, which keeps `plan` tests fast and safe to run in CI:
+
+```hcl title="src/main.tftest.hcl"
+mock_provider "aws" {
+  mock_data "aws_caller_identity" {
+    defaults = { account_id = "123456789012" }
+  }
+  mock_data "aws_region" {
+    defaults = { region = "us-east-1" }
+  }
+}
+
+variables {
+  aws_region  = "us-east-1"
+  environment = "dev"
+}
+
+run "plan_is_valid" {
+  command = plan
+
+  assert {
+    condition     = data.aws_caller_identity.current.account_id == "123456789012"
+    error_message = "Unexpected account id"
+  }
+}
+```
+
+Set every variable your configuration requires in the `variables` block, otherwise the run fails with "has a required variable ... with no set value".
 
 <OptionFilter when={{ type: 'application' }} description="Application-only targets: plan / apply / destroy / etc.">
 ### Application-Only Targets

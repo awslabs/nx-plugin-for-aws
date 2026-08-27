@@ -91,6 +91,11 @@ describe('terraformProjectGenerator', () => {
         'test',
         'validate',
       ]);
+
+      // The security scan and the Terraform tests are separate concerns, so a
+      // build must run both — neither may be dropped.
+      expect(projectConfig.targets['build'].dependsOn).toContain('checkov');
+      expect(projectConfig.targets['build'].dependsOn).toContain('test');
     });
 
     it('should pass the region to bootstrap-destroy so it never prompts', async () => {
@@ -371,14 +376,20 @@ describe('terraformProjectGenerator', () => {
       expect(validateTarget.options.cwd).toBe('{projectRoot}/src');
       expect(validateTarget.dependsOn).toEqual(['init']);
 
-      // Test checkov target, which carries the scan
+      // Test checkov target, which carries the security scan
       const checkovTarget = projectConfig.targets['checkov'];
       expect(checkovTarget.executor).toBe('nx:run-commands');
       expect(checkovTarget.cache).toBe(true);
       expect(checkovTarget.options.command).toContain('uvx --from checkov==');
 
-      // `test` is an alias of it
-      expect(projectConfig.targets['test'].dependsOn).toEqual(['checkov']);
+      // Test test target, which runs Terraform's native test framework
+      const testTarget = projectConfig.targets['test'];
+      expect(testTarget.executor).toBe('nx:run-commands');
+      expect(testTarget.cache).toBe(true);
+      expect(testTarget.options.command).toBe('terraform test');
+      expect(testTarget.options.cwd).toBe('{projectRoot}/src');
+      // `terraform test` needs the providers installed, as `validate` does.
+      expect(testTarget.dependsOn).toEqual(['init']);
     });
   });
 

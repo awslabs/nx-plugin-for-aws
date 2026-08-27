@@ -66,6 +66,10 @@ const generatePreFixProject = async (tree: Tree, type = 'application') => {
 
   const config = readProjectConfiguration(tree, PROJECT);
   delete config.targets.checkov;
+  // Pre-fix, `build` depended on the scan through `test`.
+  config.targets.build.dependsOn = config.targets.build.dependsOn.filter(
+    (d: string) => d !== 'checkov',
+  );
   config.targets.test = {
     executor: 'nx:run-commands',
     cache: true,
@@ -117,8 +121,9 @@ describe('terraform-project-checkov-target-and-bootstrap-destroy migration', () 
     expect(result.nextSteps).toEqual([]);
   });
 
-  it('should move the scan to checkov and keep test as an alias', async () => {
+  it('should add checkov, leaving the existing test target untouched', async () => {
     await generatePreFixProject(tree);
+    const testBefore = readProjectConfiguration(tree, PROJECT).targets.test;
 
     const result = await migration(tree);
 
@@ -128,8 +133,9 @@ describe('terraform-project-checkov-target-and-bootstrap-destroy migration', () 
       '--config-file ../checkov.yml',
     );
     expect(targets.checkov.cache).toBe(true);
-    // `test` must keep working, now by delegating to `checkov`.
-    expect(targets.test.dependsOn).toEqual(['checkov']);
+    // An existing workspace's `test` target is the user's, so the migration
+    // adds `checkov` alongside it rather than rewriting it.
+    expect(targets.test).toEqual(testBefore);
     expect(result.nextSteps).toEqual([]);
   });
 
@@ -199,7 +205,6 @@ describe('terraform-project-checkov-target-and-bootstrap-destroy migration', () 
 
     const targets = readProjectConfiguration(tree, PROJECT).targets;
     expect(targets.checkov.options.command).toContain('uvx --from checkov==');
-    expect(targets.test.dependsOn).toEqual(['checkov']);
     expect(tree.exists(BOOTSTRAP_DESTROY_SCRIPT)).toBeFalsy();
     expect(result.nextSteps).toEqual([]);
   });

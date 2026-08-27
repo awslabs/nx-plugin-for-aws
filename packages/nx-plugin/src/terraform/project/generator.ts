@@ -140,7 +140,7 @@ export async function terraformProjectGenerator(
       },
     },
     build: {
-      dependsOn: ['fmt', 'test', `${sharedTfProjectName}:build`],
+      dependsOn: ['fmt', 'checkov', 'test', `${sharedTfProjectName}:build`],
     },
     deploy: {
       dependsOn: ['apply'],
@@ -207,8 +207,10 @@ export async function terraformProjectGenerator(
   const libTargets: {
     [targetName: string]: TargetConfiguration;
   } = {
+    // `checkov` and `test` are separate concerns — the security scan and the
+    // Terraform tests — so a build runs both.
     build: {
-      dependsOn: ['fmt', 'test'],
+      dependsOn: ['fmt', 'checkov', 'test'],
     },
     fmt: {
       executor: 'nx:run-commands',
@@ -246,10 +248,18 @@ export async function terraformProjectGenerator(
         cwd: '{projectRoot}/src',
       },
     },
-    // Alias of `checkov`, so the security scan runs under the name Nx users
-    // expect for a project's tests, and under the same name as the CDK app's.
+    // Terraform's native test framework, which runs any `.tftest.hcl` files.
+    // A project with none is a no-op success.
     test: {
-      dependsOn: ['checkov'],
+      executor: 'nx:run-commands',
+      cache: true,
+      inputs: ['default'],
+      options: {
+        command: 'terraform test',
+        forwardAllArgs: true,
+        cwd: '{projectRoot}/src',
+      },
+      dependsOn: ['init'],
     },
     validate: {
       executor: 'nx:run-commands',
