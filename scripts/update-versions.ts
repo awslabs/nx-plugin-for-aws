@@ -482,7 +482,9 @@ const getUpdatedLambdaRuntimeVersions =
  * from uv itself rather than being held by hand. Returns the current pin when uv
  * can't be queried, keeping the failure isolated like the runtimes above.
  */
-const getUpdatedPythonRuntimePatch = (minor: string): string => {
+const getUpdatedPythonRuntimePatch = (
+  minor: string,
+): { patch: string; unresolved?: string } => {
   try {
     const output = execSync(
       'uv python list --all-versions --output-format json',
@@ -493,15 +495,16 @@ const getUpdatedPythonRuntimePatch = (minor: string): string => {
       minor,
     );
     if (latest) {
-      return latest;
+      return { patch: latest };
     }
-    console.warn(
-      `uv lists no CPython ${minor} release, so the patch stays at ${PYTHON_RUNTIME_PATCH}`,
-    );
+    const unresolved = `uv lists no CPython ${minor} release, so the project Python version stays at ${minor}.${PYTHON_RUNTIME_PATCH}`;
+    console.warn(unresolved);
+    return { patch: PYTHON_RUNTIME_PATCH, unresolved };
   } catch (error) {
-    console.warn('Could not list Python versions with uv:', error);
+    const unresolved = `Could not list Python versions with uv, so the project Python version stays at ${minor}.${PYTHON_RUNTIME_PATCH}`;
+    console.warn(unresolved, error);
+    return { patch: PYTHON_RUNTIME_PATCH, unresolved };
   }
-  return PYTHON_RUNTIME_PATCH;
 };
 
 /** The latest version mise can install of every tool in {@link MISE_VERSIONS}. */
@@ -625,9 +628,8 @@ const main = async () => {
 
     // The Python runtime's patch, which only uv knows. Resolved for the minor this
     // run lands on, so a minor bump and its patch move together.
-    const updatedPythonPatch = getUpdatedPythonRuntimePatch(
-      updatedLambdaRuntimeVersions.python,
-    );
+    const { patch: updatedPythonPatch, unresolved: unresolvedPythonPatch } =
+      getUpdatedPythonRuntimePatch(updatedLambdaRuntimeVersions.python);
 
     // Apply updated Lambda runtimes to the versions file. Both IaC providers and
     // the uv project Python version derive from these, so one rewrite moves them.
@@ -639,25 +641,30 @@ const main = async () => {
       'LAMBDA_RUNTIME_VERSIONS',
     );
 
-    // `PYTHON_RUNTIME_PATCH` is a bare constant rather than a table entry, so it
-    // takes its own rewrite.
+    // Reported in the PR body, so a resolution failure is visible without reading
+    // the CI logs and can't be mistaken for "already up to date".
+    for (const entry of unresolvedRuntimes) {
+      lambdaRuntimeChanges.push({ note: unresolvedRuntimeWarning(entry) });
+    }
+
+    // The interpreter a uv project pins, reported as the full `major.minor.patch`
+    // it writes rather than the bare patch, which means nothing on its own.
+    const projectPythonChanges: ReportChange[] = [];
     if (updatedPythonPatch !== PYTHON_RUNTIME_PATCH) {
+      // A bare constant rather than a table entry, so it takes its own rewrite.
       await applyGritQL(
         tree,
         'packages/nx-plugin/src/utils/versions.ts',
         `\`export const PYTHON_RUNTIME_PATCH = '${PYTHON_RUNTIME_PATCH}'\` => \`export const PYTHON_RUNTIME_PATCH = '${updatedPythonPatch}'\``,
       );
-      lambdaRuntimeChanges.push({
-        name: 'python runtime patch',
-        oldVersion: PYTHON_RUNTIME_PATCH,
-        newVersion: updatedPythonPatch,
+      projectPythonChanges.push({
+        name: 'python',
+        oldVersion: `${LAMBDA_RUNTIME_VERSIONS.python}.${PYTHON_RUNTIME_PATCH}`,
+        newVersion: `${updatedLambdaRuntimeVersions.python}.${updatedPythonPatch}`,
       });
     }
-
-    // Reported in the PR body, so a resolution failure is visible without reading
-    // the CI logs and can't be mistaken for "already up to date".
-    for (const entry of unresolvedRuntimes) {
-      lambdaRuntimeChanges.push({ note: unresolvedRuntimeWarning(entry) });
+    if (unresolvedPythonPatch) {
+      projectPythonChanges.push({ note: unresolvedPythonPatch });
     }
 
     // Keep the Smithy CLI CI installs on Windows in step with the mise pin
@@ -699,6 +706,7 @@ const main = async () => {
       { title: 'Java Dependencies', changes: javaChanges },
       { title: 'mise Tools', changes: miseChanges },
       { title: 'Lambda Runtimes', changes: lambdaRuntimeChanges },
+      { title: 'Project Python Version', changes: projectPythonChanges },
       ...(vendoredChanges.length > 0
         ? [{ title: 'Vendored Tools', changes: vendoredChanges }]
         : []),

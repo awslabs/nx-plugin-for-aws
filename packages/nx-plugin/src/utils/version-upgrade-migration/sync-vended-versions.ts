@@ -15,7 +15,7 @@ import yaml from 'js-yaml';
 import { getCatalogManager } from 'nx/src/utils/catalog';
 import { parsePipRequirementsLine } from 'pip-requirements-js';
 import { coerce, parse, satisfies, validRange } from 'semver';
-import { applyGritQL, captureAllGritQL } from '../ast.js';
+import { applyGritQL, captureAllGritQLVariable } from '../ast.js';
 import { buildInstallCommand } from '../commands.js';
 import { formatFilesInSubtree } from '../format.js';
 import {
@@ -26,11 +26,7 @@ import {
 import { updateToml } from '../toml.js';
 import {
   cdkLambdaRuntime,
-  type ILambdaRuntime,
-  LAMBDA_RUNTIME_VERSIONS,
   PY_VERSIONS,
-  pyenvPythonVersion,
-  pyprojectPythonDependency,
   TERRAFORM_VERSIONS,
   TS_VERSIONS,
   terraformLambdaRuntime,
@@ -41,7 +37,12 @@ import {
   ownedDependencies,
 } from './owned-dependencies.js';
 import { syncEmbeddedVersions } from './sync-embedded-versions.js';
+import { syncLambdaRuntimes, type VendedIac } from './sync-lambda-runtimes.js';
 import { syncMetricsVersion } from './sync-metrics-version.js';
+import {
+  syncProjectPythonVersion,
+  syncPythonBundleVersion,
+} from './sync-python-language-version.js';
 import { isVendedUpgrade } from './vended-upgrade.js';
 
 /**
@@ -614,13 +615,15 @@ const declaredProviderVersion = async (
   path: string,
   provider: string,
 ): Promise<string | undefined> => {
-  const [captured] = await captureAllGritQL(
-    tree,
-    path,
-    providerVersionPattern(provider),
-  );
-  // The match is the whole attribute, e.g. `version = "6.40.0"`.
-  return /"([^"]+)"/.exec(captured ?? '')?.[1];
+  const [bound] =
+    (await captureAllGritQLVariable(
+      tree,
+      path,
+      providerVersionPattern(provider),
+      'version',
+    )) ?? [];
+  // The binding is the quoted version, e.g. `"6.40.0"`.
+  return bound?.replace(/^"|"$/g, '');
 };
 
 /** Sync vended provider versions in every `.tf` file. */
@@ -657,349 +660,15 @@ const syncTerraformProviders = async (tree: Tree): Promise<string[]> => {
 };
 
 /**
- * The two projects this plugin generates infrastructure into, and the only place
- * a Lambda runtime is rewritten.
+ * The projects this plugin generates infrastructure into, per provider.
  *
- * A runtime is not a dependency, so there is no per-package ownership to consult
- * — the scope has to be the directories the plugin owns outright. A function the
- * user defined in their own project keeps whatever runtime they chose, even
- * though it is the same shape.
+ * A runtime is not a dependency, so there is no per-package ownership to consult —
+ * these directories are the scope. A Lambda a user defined in their own project
+ * keeps whatever runtime they chose, even though it is the same shape.
  */
-const OWNED_INFRA_DIRS = [
-  `${PACKAGES_DIR}/${SHARED_CONSTRUCTS_DIR}/`,
-  `${PACKAGES_DIR}/${SHARED_TERRAFORM_DIR}/`,
-] as const;
-
-const isOwnedInfraFile = (path: string): boolean =>
-  OWNED_INFRA_DIRS.some((dir) => path.startsWith(dir));
-
-/**
- * A Lambda runtime a vended file declares, and where it sits.
- *
- * Found by matching the `runtime` assignment with GritQL, so only a real property
- * or attribute matches — a `Runtime` reference used for anything else, or one
- * inside a comment, is not a runtime this owns.
- */
-interface DeclaredRuntime {
-  /** Exact text to rewrite, e.g. `runtime: lambda.Runtime.NODEJS_22_X`. */
-  readonly match: string;
-  readonly language: ILambdaRuntime;
-  /**
-   * Version the runtime names, or undefined for an alias like `NODEJS_LATEST`
-   * whose value `aws-cdk-lib` decides rather than this repo.
-   */
-  readonly version?: string;
-}
-
-/**
- * GritQL matching a `runtime` assignment and binding its value.
- *
- * The whole assignment is returned, which is also the text the rewrite replaces.
- */
-const RUNTIME_ASSIGNMENT = '`runtime: $value`';
-const TF_RUNTIME_ASSIGNMENT = 'language hcl\n`runtime = $value`';
-
-/** `NODEJS_22_X` -> `22`, `PYTHON_3_14` -> `3.14`; undefined for an alias. */
-const cdkMemberVersion = (member: string): string | undefined =>
-  /^NODEJS_(\d+)_X$/.exec(member)?.[1] ??
-  /^PYTHON_(\d+)_(\d+)$/.exec(member)?.slice(1).join('.');
-
-/**
- * Read a matched CDK assignment, or undefined when its value is not a versioned
- * managed runtime.
- *
- * GritQL has already established this is a `runtime` property; the regex only
- * parses the value it bound.
- */
-const readCdkRuntime = (assignment: string): DeclaredRuntime | undefined => {
-  const parsed =
-    /^runtime:\s*(?:lambda\.)?Runtime\.((?:NODEJS|PYTHON)_[A-Z0-9_]+)$/.exec(
-      assignment.trim(),
-    );
-  if (!parsed) {
-    return undefined;
-  }
-  const member = parsed[1];
-  return {
-    match: assignment.trim(),
-    language: member.startsWith('NODEJS') ? 'node' : 'python',
-    version: cdkMemberVersion(member),
-  };
-};
-
-/** Read a matched Terraform assignment, or undefined for a non-runtime value. */
-const readTerraformRuntime = (
-  assignment: string,
-): DeclaredRuntime | undefined => {
-  const parsed = /^runtime\s*=\s*"((?:nodejs|python)[0-9][^"]*)"$/.exec(
-    assignment.trim(),
-  );
-  if (!parsed) {
-    return undefined;
-  }
-  const identifier = parsed[1];
-  return {
-    match: assignment.trim(),
-    language: identifier.startsWith('nodejs') ? 'node' : 'python',
-    version:
-      /^nodejs([\d.]+?)\.x$/.exec(identifier)?.[1] ??
-      /^python([\d.]+)$/.exec(identifier)?.[1],
-  };
-};
-
-/**
- * Every runtime a vended file assigns, or undefined when the file could not be
- * matched at all.
- *
- * `captureAllGritQL` returns `[]` both for a file with no runtimes and for a
- * pattern that failed to apply, so a file the parser rejected is told apart by
- * checking whether it mentions a runtime assignment at all. Without that a parse
- * failure would look like "nothing to do" and silently skip the file.
- */
-const declaredRuntimes = async (
-  tree: Tree,
-  path: string,
-  hcl: boolean,
-): Promise<DeclaredRuntime[] | undefined> => {
-  const captured = await captureAllGritQL(
-    tree,
-    path,
-    hcl ? TF_RUNTIME_ASSIGNMENT : RUNTIME_ASSIGNMENT,
-  );
-
-  if (captured.length === 0) {
-    const contents = tree.read(path, 'utf-8') ?? '';
-    const assigns = hcl
-      ? /\bruntime\s*=/.test(contents)
-      : /\bruntime:/.test(contents);
-    // Mentions a runtime assignment but matched none: the pattern did not apply.
-    return assigns ? undefined : [];
-  }
-
-  const read = hcl ? readTerraformRuntime : readCdkRuntime;
-  return captured.flatMap((assignment) => {
-    const runtime = read(assignment);
-    return runtime ? [runtime] : [];
-  });
-};
-
-/**
- * Sync the Lambda runtimes vended into `common/constructs` and
- * `common/terraform`.
- *
- * The runtimes present are read from the file rather than compared against a list
- * of what past releases vended, which would need maintaining by hand for the same
- * reason the pin itself does.
- *
- * A runtime below the pin is ours to move, as is a `_LATEST` alias — its value is
- * decided by `aws-cdk-lib`, which is the drift this replaces. A runtime at or
- * ahead of the pin is the user's and is left. One in a shape the rewrite cannot
- * reach is reported instead.
- *
- * @returns the files changed, and the owned files still holding an older runtime
- */
-const syncLambdaRuntimes = async (
-  tree: Tree,
-): Promise<{ updated: string[]; diverged: string[] }> => {
-  const files: { path: string; hcl: boolean }[] = [];
-
-  visitNotIgnoredFiles(tree, '.', (path) => {
-    if (!isOwnedInfraFile(path)) {
-      return;
-    }
-    if (path.endsWith('.ts')) {
-      files.push({ path, hcl: false });
-    } else if (path.endsWith('.tf')) {
-      files.push({ path, hcl: true });
-    }
-  });
-
-  const updated: string[] = [];
-  const diverged: string[] = [];
-
-  for (const { path, hcl } of files) {
-    const declared = await declaredRuntimes(tree, path, hcl);
-
-    // A file whose runtimes could not be matched is reported rather than skipped
-    // silently, which would leave it behind with nothing to say so.
-    if (declared === undefined) {
-      diverged.push(path);
-      continue;
-    }
-
-    let changed = false;
-    let stale = false;
-
-    // Deduped: one rewrite covers every occurrence of the same assignment.
-    const seen = new Set<string>();
-    for (const runtime of declared) {
-      if (seen.has(runtime.match)) {
-        continue;
-      }
-      seen.add(runtime.match);
-
-      const vended = hcl
-        ? terraformLambdaRuntime(runtime.language)
-        : cdkLambdaRuntime(runtime.language);
-      const replacement = hcl
-        ? `runtime = "${vended}"`
-        : runtime.match.replace(
-            /Runtime\.(?:NODEJS|PYTHON)_[A-Z0-9_]+$/,
-            vended,
-          );
-
-      if (runtime.match === replacement) {
-        continue;
-      }
-      // An alias carries no version to compare, and is always ours to pin.
-      if (
-        runtime.version !== undefined &&
-        !isVendedUpgrade(
-          LAMBDA_RUNTIME_VERSIONS[runtime.language],
-          runtime.version,
-        )
-      ) {
-        continue;
-      }
-
-      const prefix = hcl ? 'language hcl\n' : '';
-      if (
-        await applyGritQL(
-          tree,
-          path,
-          `${prefix}\`${runtime.match}\` => \`${replacement}\``,
-        )
-      ) {
-        changed = true;
-      } else {
-        stale = true;
-      }
-    }
-
-    if (changed) {
-      updated.push(path);
-    }
-    if (stale) {
-      diverged.push(path);
-    }
-  }
-
-  return { updated, diverged };
-};
-
-/**
- * Sync the interpreter a uv project pins to the Lambda Python runtime.
- *
- * `.python-version` holds the exact interpreter and `[project].requires-python`
- * its lower bound; Ruff's `target-version` is derived from the latter, so leaving
- * these behind lints against a different version than the function runs on. Only
- * moved forward, and only from a value this plugin vended.
- */
-const syncProjectPythonVersion = (tree: Tree): string[] => {
-  const updated: string[] = [];
-  const vendedInterpreter = pyenvPythonVersion();
-  const vendedRequires = pyprojectPythonDependency();
-
-  // Every `.python-version`, not just the root: uv writes one per project too,
-  // and a project left behind resolves a different interpreter than it deploys on.
-  visitNotIgnoredFiles(tree, '.', (path) => {
-    if (path !== '.python-version' && !path.endsWith('/.python-version')) {
-      return;
-    }
-    const declared = (tree.read(path, 'utf-8') ?? '').trim();
-    if (declared && isVendedUpgrade(vendedInterpreter, declared)) {
-      tree.write(path, `${vendedInterpreter}\n`);
-      updated.push(path);
-    }
-  });
-
-  visitNotIgnoredFiles(tree, '.', (path) => {
-    if (!path.endsWith('pyproject.toml')) {
-      return;
-    }
-    let changed = false;
-    updateToml(tree, path, (toml) => {
-      const project = toml.project as Record<string, unknown> | undefined;
-      const declared = project?.['requires-python'];
-      if (typeof declared !== 'string') {
-        return toml;
-      }
-      // Only the `>=<major>.<minor>` shape the generators write, so a specifier
-      // the user tightened or widened is theirs to keep.
-      const lower = /^>=\s*(\d+\.\d+)$/.exec(declared.trim());
-      if (lower && isVendedUpgrade(LAMBDA_RUNTIME_VERSIONS.python, lower[1])) {
-        project!['requires-python'] = vendedRequires;
-        changed = true;
-      }
-      return toml;
-    });
-    if (changed) {
-      updated.push(path);
-    }
-  });
-
-  return updated;
-};
-
-/**
- * Sync the Python version a `bundle` target resolves wheels against.
- *
- * The target pins `--python-platform` but earlier releases pinned no
- * `--python-version`, so wheels resolved against whichever interpreter the build
- * machine had rather than the Lambda runtime. Both the missing flag and a stale
- * one are corrected, keyed on the `uv pip install` the generators write.
- */
-const syncPythonBundleVersion = (tree: Tree): string[] => {
-  const updated: string[] = [];
-  const vended = LAMBDA_RUNTIME_VERSIONS.python;
-
-  visitNotIgnoredFiles(tree, '.', (path) => {
-    if (!path.endsWith('project.json')) {
-      return;
-    }
-    let changed = false;
-    updateJson(tree, path, (json) => {
-      for (const target of Object.values(
-        (json.targets ?? {}) as Record<string, { options?: unknown }>,
-      )) {
-        const options = target.options as { commands?: unknown[] } | undefined;
-        if (!Array.isArray(options?.commands)) {
-          continue;
-        }
-        options.commands = options.commands.map((command) => {
-          if (
-            typeof command !== 'string' ||
-            !command.includes('uv pip install') ||
-            !command.includes('--python-platform')
-          ) {
-            return command;
-          }
-          const declared = /--python-version (\S+)/.exec(command);
-          if (!declared) {
-            changed = true;
-            return command.replace(
-              /(--python-platform \S+)/,
-              `$1 --python-version ${vended}`,
-            );
-          }
-          if (isVendedUpgrade(vended, declared[1])) {
-            changed = true;
-            return command.replace(
-              /--python-version \S+/,
-              `--python-version ${vended}`,
-            );
-          }
-          return command;
-        });
-      }
-      return json;
-    });
-    if (changed) {
-      updated.push(path);
-    }
-  });
-
-  return updated;
+const OWNED_INFRA_DIRS: Readonly<Record<VendedIac, string>> = {
+  cdk: `${PACKAGES_DIR}/${SHARED_CONSTRUCTS_DIR}`,
+  terraform: `${PACKAGES_DIR}/${SHARED_TERRAFORM_DIR}`,
 };
 
 /**
@@ -1017,7 +686,7 @@ export const syncVendedVersions = async (
   const overrides = syncOverrides(tree, owned);
   const pyProjects = syncPyProjects(tree, owned);
   const terraformFiles = await syncTerraformProviders(tree);
-  const lambdaRuntimes = await syncLambdaRuntimes(tree);
+  const lambdaRuntimes = await syncLambdaRuntimes(tree, OWNED_INFRA_DIRS);
   const projectPython = syncProjectPythonVersion(tree);
   const pythonBundles = syncPythonBundleVersion(tree);
   const skippedEmbedded = await syncEmbeddedVersions(tree, owned);
