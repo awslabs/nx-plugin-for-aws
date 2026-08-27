@@ -22,6 +22,13 @@ import {
 } from 'pip-requirements-js';
 import { parseDocument } from 'yaml';
 import { applyGritQL } from '../packages/nx-plugin/src/utils/ast';
+import {
+  LAMBDA_RUNTIMES_DOC_URL,
+  parseManagedRuntimes,
+  type RuntimeResolution,
+  resolveLambdaRuntimes,
+  unresolvedRuntimeWarning,
+} from '../packages/nx-plugin/src/utils/lambda-runtime-resolution';
 import { isNxPackage } from '../packages/nx-plugin/src/utils/version-upgrade-migration/nx-package-updates';
 import { registerNxPackageUpdates } from '../packages/nx-plugin/src/utils/version-upgrade-migration/register';
 import {
@@ -50,7 +57,12 @@ interface TemplateChange {
   path: string;
 }
 
-type ReportChange = VersionChange | TemplateChange;
+/** Something the run could not do, reported so it reaches the PR body. */
+interface ReportNote {
+  note: string;
+}
+
+type ReportChange = VersionChange | TemplateChange | ReportNote;
 
 interface ChangeGroup {
   title: string;
@@ -296,6 +308,10 @@ const writeReport = (changeGroups: ChangeGroup[]): void => {
           reportContent += `- ${change.name} ${change.oldVersion} -> ${change.newVersion}\n`;
           return;
         }
+        if ('note' in change) {
+          reportContent += `- ${change.note}\n`;
+          return;
+        }
         reportContent += `- ${change.path}\n`;
       });
     }
@@ -429,152 +445,39 @@ const getUpdatedJavaVersions = async (): Promise<Record<string, string>> =>
     ),
   );
 
-/** The AWS documentation page listing every managed Lambda runtime. */
-const LAMBDA_RUNTIMES_DOC_URL =
-  'https://docs.aws.amazon.com/lambda/latest/dg/lambda-runtimes.html';
-
-/** A managed runtime as the supported-runtimes table describes it. */
-interface ManagedRuntime {
-  /** Runtime identifier, e.g. `nodejs24.x`. */
-  readonly identifier: string;
-  /** Version as it appears in the identifier, e.g. `24` or `3.14`. */
-  readonly version: string;
-  /** Forecast deprecation date, or undefined when the table says "Not scheduled". */
-  readonly deprecation?: Date;
-}
-
 /**
- * Every `nodejs`/`python` runtime in the supported-runtimes table, with its
- * forecast deprecation date.
+ * The latest generally-available managed Lambda runtimes, and the languages this
+ * could not resolve.
  *
- * This table is the only source that distinguishes a generally-available runtime
- * from a preview one. The Lambda API accepts a preview runtime (verified against
- * `CreateFunction`: `nodejs26.x` and `python3.15` are both accepted today) and the
- * botocore `Runtime` enum lists them with no preview or deprecation metadata at
- * all — so neither can tell GA from preview, and a resolver keyed on "highest
- * version wins" would pin a runtime that carries no SLA and is explicitly
- * documented as unfit for production.
- *
- * A dated deprecation is what marks a runtime GA: AWS publishes a lifecycle only
- * once it commits to supporting the runtime. Preview runtimes read
- * "Not scheduled". That is also why the date is parsed rather than merely
- * detected — it lets an already-deprecated runtime be skipped too.
+ * The fetch lives here; the parsing and selection live in
+ * `utils/lambda-runtime-resolution.ts` so they are covered by the plugin's tests.
+ * A failure is isolated to this bump: the current pins are kept, a warning names
+ * which failure mode it was, and the caller reports it in the PR body. Taking the
+ * whole run down would drop that week's TypeScript, Python, Terraform, Java and
+ * mise bumps over an unrelated documentation change.
  */
-const getManagedRuntimes = async (): Promise<ManagedRuntime[]> => {
-  const response = await fetch(LAMBDA_RUNTIMES_DOC_URL);
-  if (!response.ok) {
-    throw new Error(
-      `Failed to fetch the Lambda runtimes documentation (${response.status} ${response.statusText})`,
-    );
-  }
-  const html = await response.text();
-
-  const cellsOf = (row: string): string[] =>
-    [...row.matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/g)].map((cell) =>
-      cell[1]
-        .replace(/<[^>]+>/g, '')
-        .replace(/&nbsp;/g, ' ')
-        .replace(/&amp;/g, '&')
-        .trim(),
-    );
-
-  const runtimes: ManagedRuntime[] = [];
-  for (const row of html.matchAll(/<tr>([\s\S]*?)<\/tr>/g)) {
-    // Name | Identifier | Operating system | Deprecation date | ...
-    const cells = cellsOf(row[1]);
-    if (cells.length < 4) {
-      continue;
-    }
-    const [, identifier, , deprecation] = cells;
-    const parsed = /^(nodejs|python)([0-9][0-9.]*?)(?:\.x)?$/.exec(identifier);
-    if (!parsed) {
-      continue;
-    }
-    const at = new Date(deprecation);
-    runtimes.push({
-      identifier,
-      version: parsed[2],
-      deprecation: Number.isNaN(at.getTime()) ? undefined : at,
-    });
-  }
-
-  // The table's shape is what every judgement below rests on, so a change to it
-  // has to fail rather than quietly resolve nothing: silently keeping the current
-  // value is precisely the rot this resolver exists to prevent.
-  if (runtimes.length === 0) {
-    throw new Error(
-      `Found no nodejs/python runtimes in the supported runtimes table at ${LAMBDA_RUNTIMES_DOC_URL} - the page shape has likely changed`,
-    );
-  }
-  return runtimes;
-};
-
-/** Compare two dotted numeric versions (`24`, `3.14`) ascending. */
-const compareRuntimeVersions = (a: string, b: string): number => {
-  const left = a.split('.').map(Number);
-  const right = b.split('.').map(Number);
-  for (let i = 0; i < Math.max(left.length, right.length); i++) {
-    const diff = (left[i] ?? 0) - (right[i] ?? 0);
-    if (diff !== 0) {
-      return diff;
-    }
-  }
-  return 0;
-};
-
-/**
- * The latest generally-available managed runtime for each language in
- * {@link LAMBDA_RUNTIME_VERSIONS}.
- *
- * Only runtimes carrying a deprecation date are eligible (see
- * {@link getManagedRuntimes}), and one already past — or within six months of —
- * its date is skipped, matching the rule Lambda itself applies to new regions.
- * Never moves a runtime backwards: a pin ahead of what the table offers is left
- * where it is.
- */
-const getUpdatedLambdaRuntimeVersions = async (): Promise<
-  Record<string, string>
-> => {
-  const runtimes = await getManagedRuntimes();
-  const horizon = new Date();
-  horizon.setMonth(horizon.getMonth() + 6);
-
-  return Object.fromEntries(
-    (Object.keys(LAMBDA_RUNTIME_VERSIONS) as ILambdaRuntime[]).map(
-      (language) => {
-        const current = LAMBDA_RUNTIME_VERSIONS[language];
-        const prefix = language === 'node' ? 'nodejs' : 'python';
-        const generallyAvailable = runtimes.filter(
-          (runtime) =>
-            runtime.identifier.startsWith(prefix) &&
-            runtime.deprecation !== undefined &&
-            runtime.deprecation > horizon,
+const getUpdatedLambdaRuntimeVersions =
+  async (): Promise<RuntimeResolution> => {
+    let html = '';
+    try {
+      const response = await fetch(LAMBDA_RUNTIMES_DOC_URL);
+      if (response.ok) {
+        html = await response.text();
+      } else {
+        console.warn(
+          `Could not fetch ${LAMBDA_RUNTIMES_DOC_URL} (${response.status} ${response.statusText})`,
         );
+      }
+    } catch (error) {
+      console.warn(`Could not fetch ${LAMBDA_RUNTIMES_DOC_URL}:`, error);
+    }
 
-        // Every language here has GA runtimes today, so an empty set means the
-        // table stopped saying what this reads - fail rather than pin nothing.
-        if (generallyAvailable.length === 0) {
-          throw new Error(
-            `Found no generally-available ${prefix} runtime with a deprecation date beyond ${horizon.toDateString()} at ${LAMBDA_RUNTIMES_DOC_URL}`,
-          );
-        }
-
-        const latest = generallyAvailable.reduce((best, runtime) =>
-          compareRuntimeVersions(runtime.version, best.version) > 0
-            ? runtime
-            : best,
-        );
-
-        return [
-          language,
-          compareRuntimeVersions(latest.version, current) > 0
-            ? latest.version
-            : current,
-        ];
-      },
-    ),
-  );
-};
+    const resolution = resolveLambdaRuntimes(parseManagedRuntimes(html));
+    for (const entry of resolution.unresolved) {
+      console.warn(unresolvedRuntimeWarning(entry));
+    }
+    return resolution;
+  };
 
 /** The latest version mise can install of every tool in {@link MISE_VERSIONS}. */
 const getUpdatedMiseVersions = (): Record<string, string> =>
@@ -690,18 +593,26 @@ const main = async () => {
     );
 
     // Get the latest generally-available managed Lambda runtimes
-    const updatedLambdaRuntimeVersions =
-      await getUpdatedLambdaRuntimeVersions();
+    const {
+      versions: updatedLambdaRuntimeVersions,
+      unresolved: unresolvedRuntimes,
+    } = await getUpdatedLambdaRuntimeVersions();
 
     // Apply updated Lambda runtimes to the versions file. Both IaC providers and
     // the uv project Python version derive from these, so one rewrite moves them.
-    const lambdaRuntimeChanges = await applyUpdatedVersions(
+    const lambdaRuntimeChanges: ReportChange[] = await applyUpdatedVersions(
       tree,
       LAMBDA_RUNTIME_VERSIONS,
       updatedLambdaRuntimeVersions,
       'packages/nx-plugin/src/utils/versions.ts',
       'LAMBDA_RUNTIME_VERSIONS',
     );
+
+    // Reported in the PR body, so a page reshuffle is visible without reading the
+    // CI logs and can't be mistaken for "already up to date".
+    for (const entry of unresolvedRuntimes) {
+      lambdaRuntimeChanges.push({ note: unresolvedRuntimeWarning(entry) });
+    }
 
     // Keep the Smithy CLI CI installs on Windows in step with the mise pin
     const smithyChange = miseChanges.find((change) => change.name === 'smithy');
