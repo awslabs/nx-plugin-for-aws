@@ -5,7 +5,7 @@
 import { joinPathFragments, type Tree } from '@nx/devkit';
 import { buildOpenApiCodeGenerationData } from '../ts-client/generator.js';
 import type { CodeGenData } from '../utils/codegen-data/types.js';
-import type { OpenApiOperationsMetadataGeneratorSchema } from './schema';
+import type { OpenApiJsonMetadataGeneratorSchema } from './schema';
 
 /**
  * File name the operations metadata is written to. The Terraform modules read
@@ -17,16 +17,16 @@ export const OPERATIONS_METADATA_FILE_NAME = 'operations.json';
  * Generates an operations metadata JSON file from an OpenAPI specification,
  * read by the vended Terraform modules to define one integration per operation.
  */
-export const openApiOperationsMetadataGenerator = async (
+export const openApiJsonMetadataGenerator = async (
   tree: Tree,
-  options: OpenApiOperationsMetadataGeneratorSchema,
+  options: OpenApiJsonMetadataGeneratorSchema,
 ) => {
   const data = await buildOpenApiCodeGenerationData(
     tree,
     options.openApiSpecPath,
   );
 
-  generateOpenApiOperationsMetadata(tree, data, options.outputPath);
+  generateOpenApiJsonMetadata(tree, data, options.outputPath);
 };
 
 /**
@@ -34,7 +34,7 @@ export const openApiOperationsMetadataGenerator = async (
  * sorted by operation name so the file is stable across runs and does not churn
  * the Terraform plan.
  */
-export const generateOpenApiOperationsMetadata = (
+export const generateOpenApiJsonMetadata = (
   tree: Tree,
   data: CodeGenData,
   outputPath: string,
@@ -56,4 +56,4 @@ export const generateOpenApiOperationsMetadata = (
   );
 };
 
-export default openApiOperationsMetadataGenerator;
+export default openApiJsonMetadataGenerator;

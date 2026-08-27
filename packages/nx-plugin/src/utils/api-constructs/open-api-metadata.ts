@@ -162,7 +162,7 @@ const addTerraformOpenApiOperationsGenerateTarget = (
           outputs: [joinPathFragments('{workspaceRoot}', generatedDirFromRoot)],
           options: {
             commands: [
-              `nx g @aws/nx-plugin:open-api#operations-metadata --openApiSpecPath="${specPath}" --outputPath="${generatedDirFromRoot}" --no-interactive`,
+              `nx g @aws/nx-plugin:open-api#json-metadata --openApiSpecPath="${specPath}" --outputPath="${generatedDirFromRoot}" --no-interactive`,
             ],
           },
           dependsOn: [specBuildTargetName],

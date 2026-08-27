@@ -136,6 +136,22 @@ export const internalTestMatrixGenerator = async (
   const tsApis: TsApiGeneratorSchema[] = [
     { name: 'my-api', infra: 'rest-lambda', auth: 'iam', iac: 'inherit' },
     { name: 'my-api-http', infra: 'http-lambda', auth: 'iam', iac: 'inherit' },
+    // The APIs above take the default `isolated` integration pattern; these
+    // cover `shared`.
+    {
+      name: 'my-api-shared',
+      infra: 'rest-lambda',
+      auth: 'iam',
+      integrationPattern: 'shared',
+      iac: 'inherit',
+    },
+    {
+      name: 'my-api-shared-http',
+      infra: 'http-lambda',
+      auth: 'iam',
+      integrationPattern: 'shared',
+      iac: 'inherit',
+    },
     {
       name: 'my-api-custom',
       infra: 'rest-lambda',

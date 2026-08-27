@@ -5,9 +5,9 @@
 import type { Tree } from '@nx/devkit';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
 import type { Spec } from '../utils/types.js';
-import { openApiOperationsMetadataGenerator } from './generator.js';
+import { openApiJsonMetadataGenerator } from './generator.js';
 
-describe('openApiOperationsMetadataGenerator', () => {
+describe('openApiJsonMetadataGenerator', () => {
   let tree: Tree;
 
   beforeEach(() => {
@@ -16,7 +16,7 @@ describe('openApiOperationsMetadataGenerator', () => {
 
   const operationsFor = async (spec: Spec) => {
     tree.write('openapi.json', JSON.stringify(spec));
-    await openApiOperationsMetadataGenerator(tree, {
+    await openApiJsonMetadataGenerator(tree, {
       openApiSpecPath: 'openapi.json',
       outputPath: 'generated',
     });
