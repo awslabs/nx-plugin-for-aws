@@ -235,14 +235,26 @@ export async function tsInfraGenerator(
             })
           : withCdkEnv({
               cwd: '{projectRoot}',
-              command: 'cdk destroy --require-approval=never',
+              command: 'cdk destroy --force',
+            }),
+      };
+      config.targets['destroy-sandbox'] = {
+        executor: 'nx:run-commands',
+        dependsOn: ['^build', 'compile'],
+        options: stageConfig
+          ? withCdkEnv({
+              command: `tsx packages/common/scripts/src/infra/infra-destroy.ts ${libraryRoot} ${sandboxStagePattern}`,
+            })
+          : withCdkEnv({
+              cwd: '{projectRoot}',
+              command: `cdk destroy --force ${sandboxStagePattern}`,
             }),
       };
       config.targets['destroy-ci'] = {
         executor: 'nx:run-commands',
         options: withCdkEnv({
           cwd: '{projectRoot}',
-          command: `cdk destroy --require-approval=never --app ${distDirFromProjectRoot}`,
+          command: `cdk destroy --force --app ${distDirFromProjectRoot}`,
         }),
       };
       config.targets.cdk = {

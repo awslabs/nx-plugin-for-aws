@@ -93,13 +93,32 @@ describe('CDK command construction', () => {
     ]);
   });
 
-  it('should build destroy command with default --require-approval', () => {
+  // `cdk destroy` has no --require-approval; without --force it blocks on a
+  // confirmation prompt, which fails outright when nx runs it without a TTY.
+  it('should build destroy command with default --force', () => {
+    expect(buildCdkCommand('destroy', ['my-app-dev/*'])).toEqual([
+      'cdk',
+      'destroy',
+      '--force',
+      'my-app-dev/*',
+    ]);
+  });
+
+  it('should not repeat --force the user passed for destroy', () => {
     expect(buildCdkCommand('destroy', ['my-app-dev/*', '--force'])).toEqual([
       'cdk',
       'destroy',
-      '--require-approval=never',
       'my-app-dev/*',
       '--force',
+    ]);
+  });
+
+  it('should recognise the -f alias for destroy', () => {
+    expect(buildCdkCommand('destroy', ['my-app-dev/*', '-f'])).toEqual([
+      'cdk',
+      'destroy',
+      'my-app-dev/*',
+      '-f',
     ]);
   });
 
