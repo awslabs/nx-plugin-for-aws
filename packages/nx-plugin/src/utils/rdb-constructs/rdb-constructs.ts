@@ -22,6 +22,28 @@ import {
 } from '../shared-constructs-constants.js';
 import { terraformProviderVersions } from '../versions.js';
 
+/**
+ * Aurora Serverless v2 scaling bounds, in ACUs, that both IaC providers derive
+ * from so the same generator options vend the same ceiling regardless of `--iac`.
+ *
+ * Set explicitly on CDK rather than inheriting `DatabaseClusterProps`, whose
+ * default moves with `aws-cdk-lib`. Serverless v2 bills on ACUs consumed, not on
+ * the ceiling, so the maximum is headroom rather than a cost commitment.
+ */
+export const AURORA_SERVERLESS_V2_CAPACITY = {
+  min: 0.5,
+  max: 4,
+} as const;
+
+/**
+ * Substitution variables exposing the Aurora Serverless v2 scaling bounds to
+ * generated CDK and Terraform templates.
+ */
+const auroraServerlessV2Capacity = () => ({
+  serverlessMinCapacity: AURORA_SERVERLESS_V2_CAPACITY.min,
+  serverlessMaxCapacity: AURORA_SERVERLESS_V2_CAPACITY.max,
+});
+
 export interface AddRdbConstructOptions {
   projectName: string;
   projectRoot: string;
@@ -91,7 +113,7 @@ export const addRdbCdkConstructs = async (
       'core',
       'rdb',
     ),
-    { ...options, ...esmVars(tree) },
+    { ...options, ...esmVars(tree), ...auroraServerlessV2Capacity() },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
@@ -151,7 +173,7 @@ export const addRdbTerraformModules = (
     tree,
     joinPathFragments(import.meta.dirname, 'files', 'terraform', 'core', 'rdb'),
     joinPathFragments(PACKAGES_DIR, SHARED_TERRAFORM_DIR, 'src', 'core', 'rdb'),
-    { ...terraformProviderVersions() },
+    { ...terraformProviderVersions(), ...auroraServerlessV2Capacity() },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
@@ -161,7 +183,11 @@ export const addRdbTerraformModules = (
     tree,
     joinPathFragments(import.meta.dirname, 'files', 'terraform', 'app', 'dbs'),
     joinPathFragments(PACKAGES_DIR, SHARED_TERRAFORM_DIR, 'src', 'app', 'dbs'),
-    { ...options, ...terraformProviderVersions() },
+    {
+      ...options,
+      ...terraformProviderVersions(),
+      ...auroraServerlessV2Capacity(),
+    },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
