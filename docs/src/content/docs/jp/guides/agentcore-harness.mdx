@@ -112,16 +112,21 @@ module "my_harness" {
 }
 ```
 
-モジュールは4つの変数を公開します。
+モジュールは以下の変数を公開します。
 
 - `model_id` — Harnessがデフォルトで使用するBedrockモデルまたは推論プロファイル。
 - `allowed_tools` — Harnessが使用できるツール。デフォルトではなし。<a href="#configuring-tools">ツールの構成</a>を参照してください。
-- `model_resource_arns` — 実行ロールが呼び出せるBedrockモデルおよび推論プロファイルARN。デフォルトリストを置き換えます。
-- `additional_execution_role_policy_statements` — 実行ロールポリシーに追加されるIAMステートメントオブジェクト（`Effect`、`Action`、`Resource`、オプションの`Sid`と`Condition`）のリスト。
+- `memory` — Harnessメモリ構成。<a href="#configuring-memory">メモリの構成</a>を参照してください。
+- `environment_variables`、`max_iterations`、`timeout_seconds` — 対応するネイティブHarnessフィールド。
+- `execution_role_arn` — 生成されたロールの代わりに使用する既存のIAMロール。指定されたロールはそのまま使用されます。ロールもそのベースラインポリシーも作成されないため、`model_resource_arns`と`additional_execution_role_policy_statements`を組み合わせることはできません。
+- `model_resource_arns` — 生成された実行ロールが呼び出せるBedrockモデルおよび推論プロファイルARN。デフォルトリストを置き換えます。
+- `additional_execution_role_policy_statements` — 生成された実行ロールポリシーに追加されるIAMステートメントオブジェクト（`Effect`、`Action`、`Resource`、オプションの`Sid`と`Condition`）のリスト。
+- `enable_vpc`、`vpc_id`、`subnet_ids` — HarnessをVPC内で実行し、プライベートリソースに到達できるようにします。<a href="#running-in-a-vpc">VPCでの実行</a>を参照してください。
+- `tags` — モジュールが作成するリソースに適用されるタグ。
 
-その他すべては、モジュール自体の生成された`aws_bedrockagentcore_harness`リソースで構成されます。
+その他のプロバイダーネイティブフィールドは、モジュール自体の生成された`aws_bedrockagentcore_harness`リソースを編集することで構成されます。<a href="#customizing-your-harness">Harnessのカスタマイズ</a>を参照してください。
 
-モジュールは`harness_id`、`harness_arn`、`execution_role_arn`を出力します。
+モジュールは`harness_id`、`harness_arn`、`execution_role_arn`、`security_group_id`を出力します。
 
 通常どおりTerraformプロジェクトのplan/applyワークフローでデプロイします。<Link path="guides/terraform-project">Terraformプロジェクトガイド</Link>を参照してください。
   </Fragment>
@@ -197,7 +202,7 @@ Harness ARNは次の順序で解決されます。
 固定された`aws-cdk-lib/aws-bedrockagentcore`モジュールのすべてのネイティブHarnessプロパティは、コンストラクトのpropsを通じて利用可能です。代替モデルプロバイダー、ツール定義、メモリ、スキル、環境構成、トランケーション、カスタムJWT認証、実行制限などがあり、明示的なpropsは生成されたデフォルトよりも優先されます。または、`packages/common/constructs/src/app/harnesses/<name>/<name>.ts`で生成されたコンストラクトを編集します。
   </Fragment>
   <Fragment slot="terraform">
-生成されたモジュールは、ネイティブ`aws_bedrockagentcore_harness`リソースを直接編集可能に保つため、プロバイダーネイティブフィールド（代替モデルプロバイダー（`gemini_model_config`、`openai_model_config`）、`tool`ブロック、`memory`、`skill`ブロック、環境（`environment`、`environment_variables`、`environment_artifact`）、`truncation`、`custom_jwt_authorizer`を持つ`authorizer_configuration`）は、`packages/common/terraform/src/app/harnesses/<name>/<name>.tf`を編集することで構成されます。
+モジュールの変数は、ほとんどのデプロイメントが構成するフィールド（`model_id`、`allowed_tools`、`memory`、`environment_variables`、`max_iterations`、`timeout_seconds`）と、実行ロールおよびVPC配置をカバーしています。TerraformにはCDKコンストラクトのpropスプレッドに相当するものがないため、残りのプロバイダーネイティブフィールドは、`packages/common/terraform/src/app/harnesses/<name>/<name>.tf`の`aws_bedrockagentcore_harness`リソースを編集することで構成されます。代替モデルプロバイダー（`gemini_model_config`、`openai_model_config`）、`tool`ブロック、`skill`ブロック、`environment_artifact`、`environment`下のファイルシステムとライフサイクル構成、`truncation`、`custom_jwt_authorizer`を持つ`authorizer_configuration`などです。
   </Fragment>
 </Infrastructure>
 
@@ -216,8 +221,7 @@ new MyHarness(this, 'Harness', { allowedTools: ['@builtin'] });
   <Fragment slot="terraform">
 ```hcl title="packages/infra/src/main.tf"
 module "my_harness" {
-  source = "../../common/terraform/src/app/harnesses/my-harness"
-
+  source        = "../../common/terraform/src/app/harnesses/my-harness"
   allowed_tools = ["@builtin"]
 }
 ```
@@ -225,6 +229,36 @@ module "my_harness" {
 </Infrastructure>
 
 `@builtin`を`@builtin/file_operations`などの特定のパターンに絞り込んで、エージェントループができることを制限します。追加できる組み込みツールについては、[Harnessツール](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-tools.html)を参照してください。
+
+### メモリの構成
+
+サービスはデフォルトでHarness用のマネージドメモリをプロビジョニングし、生成された実行ロールにはそれへのアクセスが許可されます。サービスが割り当てるメモリARNにスコープされ、インフラストラクチャが作成したマネージドメモリをHarnessが使用している間のみ許可されます。メモリを明示的に構成して、そのマネージドメモリを調整したり、所有するメモリリソースにHarnessを向けたり、メモリをオフにしたりできます。
+
+<Infrastructure>
+  <Fragment slot="cdk">
+```ts
+new MyHarness(this, 'MyHarness', {
+  memory: { managedMemoryConfiguration: { strategies: ['SUMMARIZATION'] } },
+});
+```
+
+`memory`を指定すると、デフォルトのマネージドメモリが置き換えられるため、コンストラクトは実行ロールからメモリ許可を除外します。構成に必要なものを`addToRolePolicy`で追加してください。
+  </Fragment>
+  <Fragment slot="terraform">
+```hcl
+module "my_harness" {
+  source = "../../common/terraform/src/app/harnesses/my-harness"
+  memory = {
+    managed_memory_configuration = {
+      strategies = ["SUMMARIZATION"]
+    }
+  }
+}
+```
+
+`managed_memory_configuration`（サービスのマネージドメモリを調整）、`agentcore_memory_configuration`（所有するメモリリソースをARNで使用）、`disabled`（メモリなし）のいずれか1つを正確に設定します。`agentcore_memory_configuration`または`disabled`を選択すると、実行ロールからマネージドメモリ許可が削除されます。独自のメモリリソースの場合は、`additional_execution_role_policy_statements`を通じてアクセスを許可します。
+  </Fragment>
+</Infrastructure>
 
 ### VPCでの実行
 
@@ -241,28 +275,31 @@ database.connections.allowDefaultPortFrom(harness, 'Harness to database');
 Harnessは、VPCのプライベートサブネット（エグレス付き）に配置され、専用のセキュリティグループに入れられます。`vpcSubnets`と`securityGroups`でいずれかをオーバーライドできます。両方とも`vpc`が必要で、`connections`はHarnessがVPC内で実行されている場合にのみ利用可能です。
   </Fragment>
   <Fragment slot="terraform">
-生成された`aws_bedrockagentcore_harness`リソースの`environment.agent_core_runtime_environment`に`network_configuration`ブロックを追加し、配置したセキュリティグループを他のリソースのルールから参照します。
+`enable_vpc`を`vpc_id`および`subnet_ids`と一緒に設定して、HarnessをVPC内で実行し、データベースなどのプライベートリソースに到達できるようにします。
 
-```hcl title="packages/common/terraform/src/app/harnesses/my-harness/my-harness.tf"
-resource "aws_security_group" "harness" {
-  vpc_id = var.vpc_id
-}
-
-resource "aws_bedrockagentcore_harness" "this" {
-  # ...
-  environment {
-    agent_core_runtime_environment {
-      network_configuration {
-        network_mode = "VPC"
-        network_mode_config {
-          security_groups = [aws_security_group.harness.id]
-          subnets         = var.subnet_ids
-        }
-      }
-    }
-  }
+```hcl
+module "my_harness" {
+  source     = "../../common/terraform/src/app/harnesses/my-harness"
+  enable_vpc = true
+  vpc_id     = var.vpc_id
+  subnet_ids = var.private_subnet_ids
 }
 ```
+
+モジュールはHarness用のセキュリティグループを作成し、アウトバウンドHTTPSのみを許可します。その`security_group_id`出力は、Harnessが到達する必要があるリソースが独自のイングレスルールで参照するものです。
+
+```hcl
+resource "aws_vpc_security_group_ingress_rule" "harness_to_database" {
+  security_group_id            = aws_security_group.database.id
+  referenced_security_group_id = module.my_harness.security_group_id
+  from_port                    = 5432
+  to_port                      = 5432
+  ip_protocol                  = "tcp"
+  description                  = "Harness to database"
+}
+```
+
+`security_group_id`は、`enable_vpc`がtrueでない限りnullであり、`vpc_id`と`subnet_ids`はtrueの場合に両方とも必要です。
   </Fragment>
 </Infrastructure>
 
