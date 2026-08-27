@@ -6,6 +6,31 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { TERRAFORM_VERSIONS, terraformProviderVersions } from './versions.js';
 
+/**
+ * This scan reads the templates as text rather than through the GritQL helpers
+ * in `utils/ast.ts`, which is the repo's convention for HCL everywhere else.
+ * That is deliberate, and the reason is specific: GritQL parses a `.tf.template`
+ * containing EJS *control flow* (`<%_ if ... _%>`) as HCL that yields no
+ * resource declarations at all — and it fails open, returning zero matches
+ * rather than an error.
+ *
+ * Measured against the templates this test guards: a GritQL implementation of
+ * the same check finds 29 of the 29 resources in `static-website.tf.template`
+ * (no control flow) and 0 of the 38 in the REST API app module (48 control-flow
+ * tags). Run over the tree before these declarations were added, it reports 10
+ * of the 14 real defects, silently skipping all 5 control-flow templates —
+ * which includes both API app modules, the very modules this test exists to
+ * cover. A structurally-correct matcher that cannot see the files where the bug
+ * lives is worse than a textual one that can, so the invariant is asserted on
+ * the text.
+ *
+ * The two shapes that motivate an AST matcher are handled directly instead:
+ * heredoc bodies are stripped before scanning (so embedded Python and shell
+ * aren't read as HCL references), and `required_providers` is located by
+ * brace-matching rather than a line pattern (so an entry spread across lines is
+ * still found).
+ */
+
 const PLUGIN_SRC = path.resolve(import.meta.dirname, '..');
 
 /**
@@ -111,6 +136,17 @@ const withoutHeredocs = (contents: string): string => {
   return kept.join('\n');
 };
 
+/**
+ * Reduce every quoted string to just its `${...}` interpolations, which are the
+ * only part of a string HCL evaluates as a reference. Prose mentioning a
+ * resource (`description = "uses random_string.suffix"`) is not a use of it,
+ * while `"x-${random_string.suffix.result}"` is.
+ */
+const withoutStringProse = (contents: string): string =>
+  contents.replace(/"(?:[^"\\]|\\.)*"/g, (literal) =>
+    [...literal.matchAll(/\$\{([^}]*)\}/g)].map(([, expr]) => expr).join(' '),
+  );
+
 /** The providers a module's resources, data sources and references require. */
 const usedProviders = (contents: string): Map<string, Set<string>> => {
   const used = new Map<string, Set<string>>();
@@ -126,22 +162,27 @@ const usedProviders = (contents: string): Map<string, Set<string>> => {
   };
 
   const hcl = withoutHeredocs(contents);
-  // A declaration, e.g. `resource "random_string" "suffix" {`.
+  // A declaration, e.g. `resource "random_string" "suffix" {`. Read before
+  // strings are reduced, since the type itself is quoted.
   for (const [, type] of hcl.matchAll(
     /^[ \t]*(?:resource|data)\s+"([A-Za-z0-9_]+)"/gm,
   )) {
     add(type);
   }
+
+  // References are read with string prose removed, so only evaluated
+  // expressions count.
+  const expressions = withoutStringProse(hcl);
   // A data source reference, e.g. `data.external.docker_digest.result`. A module
   // may read one a sibling file declares.
-  for (const [, type] of hcl.matchAll(
+  for (const [, type] of expressions.matchAll(
     /\bdata\.([A-Za-z0-9_]+)\.[A-Za-z0-9_]+/g,
   )) {
     add(type);
   }
   // A managed resource reference, e.g. `random_string.suffix.result`.
-  for (const [, type] of hcl.matchAll(
-    /(?:^|[^A-Za-z0-9_."])((?:null|random|archive|external|local|time|tls)_[A-Za-z0-9_]+)\.[a-z][A-Za-z0-9_]*\./g,
+  for (const [, type] of expressions.matchAll(
+    /(?:^|[^A-Za-z0-9_.])((?:null|random|archive|external|local|time|tls)_[A-Za-z0-9_]+)\.[a-z][A-Za-z0-9_]*\./g,
   )) {
     add(type);
   }
@@ -209,5 +250,103 @@ describe('terraform required_providers', () => {
     }
 
     expect(unpinned).toEqual([]);
+  });
+
+  // The scan is textual (see the note at the top of this file), so the shapes an
+  // AST matcher would handle for free are pinned here instead. Each of these is
+  // a way a text scan could plausibly be fooled.
+  describe('scanning', () => {
+    it.each([
+      [
+        'an entry spread across lines',
+        `terraform {
+  required_providers {
+    random
+      =
+      {
+        source = "hashicorp/random"
+      }
+  }
+}`,
+        ['random'],
+      ],
+      [
+        'an entry holding a nested attribute',
+        `terraform {
+  required_providers {
+    aws = {
+      source                = "hashicorp/aws"
+      configuration_aliases = [aws.us_east_1]
+    }
+    random = {
+      source = "hashicorp/random"
+    }
+  }
+}`,
+        ['aws', 'random'],
+      ],
+    ])('should find %s', (_, contents, expected) => {
+      expect([...declaredProviders(contents)].sort()).toEqual(expected);
+    });
+
+    it.each([
+      [
+        'a type named only in a comment',
+        `# resource "random_string" "not_real" {}
+resource "aws_s3_bucket" "b" {
+  bucket = "x"
+}`,
+        ['aws'],
+      ],
+      [
+        'a type named only in string prose',
+        `resource "aws_s3_bucket" "b" {
+  description = "uses random_string.suffix.result elsewhere"
+}`,
+        ['aws'],
+      ],
+      [
+        'a type used only inside a heredoc script',
+        `resource "aws_s3_object" "o" {
+  provisioner "local-exec" {
+    command = <<-EOT
+      local_path_obj = Path(p)
+      print(local_path_obj.name)
+    EOT
+  }
+}`,
+        ['aws'],
+      ],
+    ])('should not count %s as a use', (_, contents, expected) => {
+      expect([...usedProviders(contents).keys()].sort()).toEqual(expected);
+    });
+
+    it.each([
+      [
+        'an interpolated reference',
+        'resource "aws_s3_bucket" "b" {\n  bucket = "a-${random_string.suffix.result}"\n}',
+        ['aws', 'random'],
+      ],
+      [
+        'a data source a sibling file declares',
+        'locals {\n  tag = data.external.digest.result.sha\n}',
+        ['external'],
+      ],
+      [
+        'a bare resource reference',
+        'locals {\n  id = null_resource.ready.id\n}',
+        ['null'],
+      ],
+    ])('should count %s as a use', (_, contents, expected) => {
+      expect([...usedProviders(contents).keys()].sort()).toEqual(expected);
+    });
+
+    it('should not count a terraform built-in, which has no provider', () => {
+      expect([
+        ...usedProviders(
+          'resource "terraform_data" "v" {\n  input = 1\n}',
+        ).keys(),
+      ]).toEqual([]);
+    });
   });
 });
