@@ -29,6 +29,8 @@ import {
   CfnWebACLAssociation,
 } from 'aws-cdk-lib/aws-wafv2';
 import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
+import { Key } from 'aws-cdk-lib/aws-kms';
+import { Effect, PolicyStatement, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
 import { RuntimeConfig } from './runtime-config<% if (esm) { %>.js<% } %>';
 import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
@@ -265,18 +267,41 @@ export class UserIdentity extends Construct {
       webAclArn: webAcl.attrArn,
     });
 
-    // Send WAF request logs to CloudWatch. The log group name must start with
-    // `aws-waf-logs-` to satisfy the WAFv2 logging destination requirement.
+    // The log group name must start with `aws-waf-logs-` to satisfy the WAFv2
+    // logging destination requirement.
+    const stack = Stack.of(this);
+    const wafLogGroupName = `aws-waf-logs-${id}-${this.node.addr.slice(-8)}`;
+
+    // KMS key for encrypting WAF logs at rest, usable by CloudWatch Logs
+    const logsKey = new Key(this, 'WebAclLogsKey', {
+      enableKeyRotation: true,
+    });
+    logsKey.addToResourcePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        principals: [new ServicePrincipal(`logs.${stack.region}.amazonaws.com`)],
+        actions: [
+          'kms:Encrypt',
+          'kms:Decrypt',
+          'kms:ReEncrypt*',
+          'kms:GenerateDataKey*',
+          'kms:DescribeKey',
+        ],
+        resources: ['*'],
+        conditions: {
+          ArnEquals: {
+            'kms:EncryptionContext:aws:logs:arn': `arn:aws:logs:${stack.region}:${stack.account}:log-group:${wafLogGroupName}`,
+          },
+        },
+      }),
+    );
+
     const wafLogGroup = new LogGroup(this, 'WebAclLogs', {
-      logGroupName: `aws-waf-logs-${id}-${this.node.addr.slice(-8)}`,
+      logGroupName: wafLogGroupName,
       retention: RetentionDays.ONE_MONTH,
+      encryptionKey: logsKey,
       removalPolicy: RemovalPolicy.DESTROY,
     });
-    suppressRules(
-      wafLogGroup,
-      ['CKV_AWS_158'],
-      'Using default CloudWatch log encryption for WAF logs',
-    );
 
     new CfnLoggingConfiguration(this, 'WebAclLoggingConfig', {
       resourceArn: webAcl.attrArn,
