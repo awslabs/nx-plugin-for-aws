@@ -313,6 +313,14 @@ export const handler = awslambda.streamifyResponse(
       },
     );
 
+    // The edge-optimized REST API closes the connection after 30s of silence.
+    // A long, event-free stretch (e.g. a slow tool call) can exceed that, so
+    // send an SSE keepalive comment periodically to hold the stream open until
+    // the Harness resumes emitting events or the Lambda times out.
+    const heartbeat = setInterval(() => {
+      httpResponseStream.write(': keepalive\\n\\n');
+    }, 15000);
+
     try {
       const input = JSON.parse(event.body ?? '{}') as RunAgentInput;
       const actorId = actorIdFromEvent(event);
@@ -336,6 +344,7 @@ export const handler = awslambda.streamifyResponse(
     } catch (err) {
       console.error('agui handler error', err);
     } finally {
+      clearInterval(heartbeat);
       httpResponseStream.end();
     }
   },
