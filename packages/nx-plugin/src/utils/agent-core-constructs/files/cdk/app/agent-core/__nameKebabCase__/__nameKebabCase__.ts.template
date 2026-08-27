@@ -33,7 +33,7 @@ import {
   RuntimeAuthorizerConfiguration,
 <%_ } _%>
 } from 'aws-cdk-lib/aws-bedrockagentcore';
-import { <%_ if (serverProtocol !== 'mcp') { _%>PolicyStatement, <%_ } _%><%_ if (hasSessionBucket) { _%>Effect, ServicePrincipal, <%_ } _%>IGrantable, IPrincipal<%_ if (auth === 'iam') { _%>, Grant<%_ } _%> } from 'aws-cdk-lib/aws-iam';
+import { <%_ if (serverProtocol !== 'mcp' || hasSessionBucket) { _%>PolicyStatement, <%_ } _%><%_ if (hasSessionBucket) { _%>Effect, ServicePrincipal, <%_ } _%>IGrantable, IPrincipal<%_ if (auth === 'iam') { _%>, Grant<%_ } _%> } from 'aws-cdk-lib/aws-iam';
 <%_ if (auth === 'cognito') { _%>
 import { IUserPool, IUserPoolClient } from 'aws-cdk-lib/aws-cognito';
 <%_ } _%>
@@ -336,10 +336,40 @@ export class <%- nameClassName %> extends Construct implements IGrantable, IConn
 
 <%_ } _%>
 <%_ if (session === 'dynamodb-s3') { _%>
-    sessionTable.grantReadWriteData(this.agentCoreRuntime);
+    // Actions the checkpointer issues against the table.
+    this.agentCoreRuntime.addToRolePolicy(
+      new PolicyStatement({
+        actions: [
+          'dynamodb:GetItem',
+          'dynamodb:PutItem',
+          'dynamodb:Query',
+          'dynamodb:BatchGetItem',
+          'dynamodb:BatchWriteItem',
+        ],
+        resources: [sessionTable.tableArn],
+      }),
+    );
 <%_ } _%>
 <%_ if (hasSessionBucket) { _%>
-    sessionBucket.grantReadWrite(this.agentCoreRuntime);
+    // Actions the session manager issues against the bucket.
+    this.agentCoreRuntime.addToRolePolicy(
+      new PolicyStatement({
+        actions: ['s3:GetObject', 's3:PutObject', 's3:DeleteObject'],
+        resources: [sessionBucket.arnForObjects('*')],
+      }),
+    );
+    this.agentCoreRuntime.addToRolePolicy(
+      new PolicyStatement({
+        actions: ['s3:ListBucket'],
+        resources: [sessionBucket.bucketArn],
+      }),
+    );
+    this.agentCoreRuntime.addToRolePolicy(
+      new PolicyStatement({
+        actions: ['kms:Decrypt', 'kms:GenerateDataKey*'],
+        resources: [sessionKey.keyArn],
+      }),
+    );
 <%_ } _%>
 
     rc.grantReadAppConfig(this.agentCoreRuntime);
