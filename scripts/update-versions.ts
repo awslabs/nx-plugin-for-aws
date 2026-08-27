@@ -23,10 +23,10 @@ import {
 import { parseDocument } from 'yaml';
 import { applyGritQL } from '../packages/nx-plugin/src/utils/ast';
 import {
-  LAMBDA_RUNTIMES_DOC_URL,
-  parseManagedRuntimes,
   type RuntimeResolution,
   resolveLambdaRuntimes,
+  resolveLatestPythonPatch,
+  type UvPythonEntry,
   unresolvedRuntimeWarning,
 } from '../packages/nx-plugin/src/utils/lambda-runtime-resolution';
 import { isNxPackage } from '../packages/nx-plugin/src/utils/version-upgrade-migration/nx-package-updates';
@@ -41,6 +41,7 @@ import {
   MISE_TOOLS,
   MISE_VERSIONS,
   PY_VERSIONS,
+  PYTHON_RUNTIME_PATCH,
   TERRAFORM_VERSIONS,
   TS_VERSIONS,
   VENDORED_VERSIONS,
@@ -446,38 +447,62 @@ const getUpdatedJavaVersions = async (): Promise<Record<string, string>> =>
   );
 
 /**
- * The latest generally-available managed Lambda runtimes, and the languages this
- * could not resolve.
+ * The latest managed Lambda runtimes, and the languages this could not resolve.
  *
- * The fetch lives here; the parsing and selection live in
- * `utils/lambda-runtime-resolution.ts` so they are covered by the plugin's tests.
- * A failure is isolated to this bump: the current pins are kept, a warning names
- * which failure mode it was, and the caller reports it in the PR body. Taking the
- * whole run down would drop that week's TypeScript, Python, Terraform, Java and
- * mise bumps over an unrelated documentation change.
+ * Read from `Runtime.ALL` in `aws-cdk-lib`, a curated list that omits runtimes
+ * still in public preview. `aws-cdk-lib` is a dev dependency of this repo for the
+ * scripts only — never a dependency of the published plugin.
+ *
+ * A failure is isolated to this bump: the current pins are kept, a warning is
+ * logged, and the caller reports it in the PR body. Taking the whole run down
+ * would drop that week's TypeScript, Python, Terraform, Java and mise bumps too.
  */
 const getUpdatedLambdaRuntimeVersions =
   async (): Promise<RuntimeResolution> => {
-    let html = '';
+    let identifiers: string[] = [];
     try {
-      const response = await fetch(LAMBDA_RUNTIMES_DOC_URL);
-      if (response.ok) {
-        html = await response.text();
-      } else {
-        console.warn(
-          `Could not fetch ${LAMBDA_RUNTIMES_DOC_URL} (${response.status} ${response.statusText})`,
-        );
-      }
+      const { Runtime } = await import('aws-cdk-lib/aws-lambda');
+      // Deduped: an alias such as `NODEJS_LATEST` repeats a runtime's name.
+      identifiers = [...new Set(Runtime.ALL.map((runtime) => runtime.name))];
     } catch (error) {
-      console.warn(`Could not fetch ${LAMBDA_RUNTIMES_DOC_URL}:`, error);
+      console.warn('Could not read the aws-cdk-lib runtime list:', error);
     }
 
-    const resolution = resolveLambdaRuntimes(parseManagedRuntimes(html));
+    const resolution = resolveLambdaRuntimes(identifiers);
     for (const entry of resolution.unresolved) {
       console.warn(unresolvedRuntimeWarning(entry));
     }
     return resolution;
   };
+
+/**
+ * The latest CPython patch uv can install for the pinned Python runtime.
+ *
+ * Lambda names only `major.minor`, so the patch a generated project pins comes
+ * from uv itself rather than being held by hand. Returns the current pin when uv
+ * can't be queried, keeping the failure isolated like the runtimes above.
+ */
+const getUpdatedPythonRuntimePatch = (minor: string): string => {
+  try {
+    const output = execSync(
+      'uv python list --all-versions --output-format json',
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    const latest = resolveLatestPythonPatch(
+      JSON.parse(output) as UvPythonEntry[],
+      minor,
+    );
+    if (latest) {
+      return latest;
+    }
+    console.warn(
+      `uv lists no CPython ${minor} release, so the patch stays at ${PYTHON_RUNTIME_PATCH}`,
+    );
+  } catch (error) {
+    console.warn('Could not list Python versions with uv:', error);
+  }
+  return PYTHON_RUNTIME_PATCH;
+};
 
 /** The latest version mise can install of every tool in {@link MISE_VERSIONS}. */
 const getUpdatedMiseVersions = (): Record<string, string> =>
@@ -592,11 +617,17 @@ const main = async () => {
       'MISE_VERSIONS',
     );
 
-    // Get the latest generally-available managed Lambda runtimes
+    // Get the latest managed Lambda runtimes
     const {
       versions: updatedLambdaRuntimeVersions,
       unresolved: unresolvedRuntimes,
     } = await getUpdatedLambdaRuntimeVersions();
+
+    // The Python runtime's patch, which only uv knows. Resolved for the minor this
+    // run lands on, so a minor bump and its patch move together.
+    const updatedPythonPatch = getUpdatedPythonRuntimePatch(
+      updatedLambdaRuntimeVersions.python,
+    );
 
     // Apply updated Lambda runtimes to the versions file. Both IaC providers and
     // the uv project Python version derive from these, so one rewrite moves them.
@@ -608,8 +639,23 @@ const main = async () => {
       'LAMBDA_RUNTIME_VERSIONS',
     );
 
-    // Reported in the PR body, so a page reshuffle is visible without reading the
-    // CI logs and can't be mistaken for "already up to date".
+    // `PYTHON_RUNTIME_PATCH` is a bare constant rather than a table entry, so it
+    // takes its own rewrite.
+    if (updatedPythonPatch !== PYTHON_RUNTIME_PATCH) {
+      await applyGritQL(
+        tree,
+        'packages/nx-plugin/src/utils/versions.ts',
+        `\`export const PYTHON_RUNTIME_PATCH = '${PYTHON_RUNTIME_PATCH}'\` => \`export const PYTHON_RUNTIME_PATCH = '${updatedPythonPatch}'\``,
+      );
+      lambdaRuntimeChanges.push({
+        name: 'python runtime patch',
+        oldVersion: PYTHON_RUNTIME_PATCH,
+        newVersion: updatedPythonPatch,
+      });
+    }
+
+    // Reported in the PR body, so a resolution failure is visible without reading
+    // the CI logs and can't be mistaken for "already up to date".
     for (const entry of unresolvedRuntimes) {
       lambdaRuntimeChanges.push({ note: unresolvedRuntimeWarning(entry) });
     }

@@ -351,16 +351,8 @@ export const containerImage = (tool: keyof typeof CONTAINER_VERSIONS): string =>
  * source both IaC providers derive from.
  *
  * CDK and Terraform name the same runtime differently — `Runtime.NODEJS_24_X`
- * against `nodejs24.x` — so each provider held its own copy and the two drifted:
- * the same generator with the same options vended a different Node major
- * depending on `--iac`. Deriving both from the version here makes a bump one
- * edit that moves them together.
- *
- * Pinned to an exact major rather than tracking CDK's `NODEJS_LATEST` alias,
- * whose value moves with `aws-cdk-lib` and would silently reopen the drift on
- * the next dependency bump. The cost is that this has to be bumped by hand,
- * which is the point: the runtime a user's functions execute on is a deliberate,
- * reviewable choice.
+ * against `nodejs24.x` — so deriving both from the version here keeps a bump one
+ * edit that moves them together. Resolved by the version update workflow.
  */
 export const LAMBDA_RUNTIME_VERSIONS = {
   node: '24',
@@ -371,11 +363,10 @@ export type ILambdaRuntime = keyof typeof LAMBDA_RUNTIME_VERSIONS;
 /**
  * Patch of the CPython release uv pins as the project interpreter.
  *
- * A Lambda runtime names only `major.minor` (`python3.14`) because Lambda patches
- * the interpreter for you, but uv pins an exact `major.minor.patch`. Only the
- * patch lives here — the `major.minor` comes from
- * {@link LAMBDA_RUNTIME_VERSIONS}, so the interpreter a project builds against
- * cannot drift from the runtime it deploys onto.
+ * A Lambda runtime names only `major.minor`, but uv pins an exact
+ * `major.minor.patch`, so only the patch lives here — the `major.minor` comes from
+ * {@link LAMBDA_RUNTIME_VERSIONS}. Resolved from uv by the version update
+ * workflow.
  */
 export const PYTHON_RUNTIME_PATCH = '0';
 

@@ -15,7 +15,7 @@ import yaml from 'js-yaml';
 import { getCatalogManager } from 'nx/src/utils/catalog';
 import { parsePipRequirementsLine } from 'pip-requirements-js';
 import { coerce, parse, satisfies, validRange } from 'semver';
-import { applyGritQL, captureAllGritQL, matchGritQL } from '../ast.js';
+import { applyGritQL, captureAllGritQL } from '../ast.js';
 import { buildInstallCommand } from '../commands.js';
 import { formatFilesInSubtree } from '../format.js';
 import {
@@ -26,6 +26,7 @@ import {
 import { updateToml } from '../toml.js';
 import {
   cdkLambdaRuntime,
+  type ILambdaRuntime,
   LAMBDA_RUNTIME_VERSIONS,
   PY_VERSIONS,
   pyenvPythonVersion,
@@ -673,148 +674,149 @@ const isOwnedInfraFile = (path: string): boolean =>
   OWNED_INFRA_DIRS.some((dir) => path.startsWith(dir));
 
 /**
- * The Node runtimes this plugin has vended, which are the only values rewritten.
+ * A Lambda runtime a vended file declares, and where it sits.
  *
- * Enumerated rather than "anything below the pin" so a runtime the user chose
- * inside an owned file is recognised as theirs and reported instead of
- * overwritten. `NODEJS_LATEST` is included because its value is decided by
- * `aws-cdk-lib` rather than by this repo.
+ * Anchored on the `runtime` assignment so only a Lambda runtime matches — a
+ * `Runtime` reference anywhere else in the file is left alone.
  */
-const VENDED_CDK_NODE_RUNTIMES = [
-  'Runtime.NODEJS_LATEST',
-  'Runtime.NODEJS_22_X',
-  'Runtime.NODEJS_24_X',
-] as const;
+interface DeclaredRuntime {
+  /** Exact text to rewrite, e.g. `runtime: lambda.Runtime.NODEJS_22_X`. */
+  readonly match: string;
+  readonly language: ILambdaRuntime;
+  /**
+   * Version the runtime names, or undefined for an alias like `NODEJS_LATEST`
+   * whose value `aws-cdk-lib` decides rather than this repo.
+   */
+  readonly version?: string;
+}
 
-const VENDED_TF_NODE_RUNTIMES = ['nodejs22.x', 'nodejs24.x'] as const;
+/** `NODEJS_22_X` -> `22`, `PYTHON_3_14` -> `3.14`; undefined for an alias. */
+const cdkMemberVersion = (member: string): string | undefined =>
+  /^NODEJS_(\d+)_X$/.exec(member)?.[1] ??
+  /^PYTHON_(\d+)_(\d+)$/.exec(member)?.slice(1).join('.');
 
-/** Python runtimes this plugin has vended, in each provider's spelling. */
-const VENDED_CDK_PYTHON_RUNTIMES = [
-  'Runtime.PYTHON_3_13',
-  'Runtime.PYTHON_3_14',
-] as const;
+/** Every runtime a vended CDK construct assigns. */
+const declaredCdkRuntimes = (contents: string): DeclaredRuntime[] =>
+  [
+    ...contents.matchAll(
+      /\bruntime:\s*((?:lambda\.)?Runtime\.((?:NODEJS|PYTHON)_[A-Z0-9_]+))/g,
+    ),
+  ].map(([, reference, member]) => ({
+    match: `runtime: ${reference}`,
+    language: member.startsWith('NODEJS')
+      ? ('node' as const)
+      : ('python' as const),
+    version: cdkMemberVersion(member),
+  }));
 
-const VENDED_TF_PYTHON_RUNTIMES = ['python3.13', 'python3.14'] as const;
+/** Every runtime a vended Terraform module assigns. */
+const declaredTerraformRuntimes = (contents: string): DeclaredRuntime[] =>
+  [
+    ...contents.matchAll(/\bruntime\s*=\s*"((?:nodejs|python)[0-9][^"]*)"/g),
+  ].map(([, identifier]) => ({
+    match: `runtime = "${identifier}"`,
+    language: identifier.startsWith('nodejs')
+      ? ('node' as const)
+      : ('python' as const),
+    version:
+      /^nodejs([\d.]+?)\.x$/.exec(identifier)?.[1] ??
+      /^python([\d.]+)$/.exec(identifier)?.[1],
+  }));
 
 /**
  * Sync the Lambda runtimes vended into `common/constructs` and
  * `common/terraform`.
  *
- * Matched on the `runtime` assignment itself rather than the construct around it,
- * so a construct the user has otherwise reworked still has its runtime moved —
- * while a runtime value we never vended is left alone and reported, since that is
- * the user's choice however the file got there.
+ * The runtimes present are read from the file rather than compared against a list
+ * of what past releases vended, which would need maintaining by hand for the same
+ * reason the pin itself does.
  *
- * @returns the files changed, and the owned files still holding a stale runtime
+ * A runtime below the pin is ours to move, as is a `_LATEST` alias — its value is
+ * decided by `aws-cdk-lib`, which is the drift this replaces. A runtime at or
+ * ahead of the pin is the user's and is left. One in a shape the rewrite cannot
+ * reach is reported instead.
+ *
+ * @returns the files changed, and the owned files still holding an older runtime
  */
 const syncLambdaRuntimes = async (
   tree: Tree,
 ): Promise<{ updated: string[]; diverged: string[] }> => {
-  const cdkFiles: string[] = [];
-  const terraformFiles: string[] = [];
+  const files: { path: string; hcl: boolean }[] = [];
 
   visitNotIgnoredFiles(tree, '.', (path) => {
     if (!isOwnedInfraFile(path)) {
       return;
     }
     if (path.endsWith('.ts')) {
-      cdkFiles.push(path);
+      files.push({ path, hcl: false });
     } else if (path.endsWith('.tf')) {
-      terraformFiles.push(path);
+      files.push({ path, hcl: true });
     }
   });
 
   const updated: string[] = [];
   const diverged: string[] = [];
 
-  const vendedCdk = {
-    node: cdkLambdaRuntime('node'),
-    python: cdkLambdaRuntime('python'),
-  };
+  for (const { path, hcl } of files) {
+    const contents = tree.read(path, 'utf-8') ?? '';
+    const declared = hcl
+      ? declaredTerraformRuntimes(contents)
+      : declaredCdkRuntimes(contents);
 
-  for (const path of cdkFiles) {
     let changed = false;
-    for (const [language, stale] of [
-      ...VENDED_CDK_NODE_RUNTIMES.map((r) => ['node', r] as const),
-      ...VENDED_CDK_PYTHON_RUNTIMES.map((r) => ['python', r] as const),
-    ]) {
-      const vended = vendedCdk[language];
-      if (stale === vended) {
+    let stale = false;
+
+    // Deduped: one rewrite covers every occurrence of the same assignment.
+    const seen = new Set<string>();
+    for (const runtime of declared) {
+      if (seen.has(runtime.match)) {
         continue;
       }
-      // Both the bare `Runtime.X` and the `lambda.Runtime.X` a
-      // namespace-imported construct writes, whose prefix is preserved.
-      for (const [from, to] of [
-        [stale, vended],
-        [`lambda.${stale}`, `lambda.${vended}`],
-      ]) {
-        if (
-          await applyGritQL(
-            tree,
-            path,
-            `\`runtime: ${from}\` => \`runtime: ${to}\``,
-          )
-        ) {
-          changed = true;
-        }
-      }
-    }
-    if (changed) {
-      updated.push(path);
-    }
-    // Anything still naming a runtime we vended is written in a shape the
-    // property pattern cannot reach - reported rather than rewritten.
-    const stillStale = [
-      ...VENDED_CDK_NODE_RUNTIMES,
-      ...VENDED_CDK_PYTHON_RUNTIMES,
-    ].filter((r) => r !== vendedCdk.node && r !== vendedCdk.python);
-    for (const stale of stillStale) {
-      if (await matchGritQL(tree, path, `\`${stale}\``)) {
-        diverged.push(path);
-        break;
-      }
-    }
-  }
+      seen.add(runtime.match);
 
-  const vendedTf = {
-    node: terraformLambdaRuntime('node'),
-    python: terraformLambdaRuntime('python'),
-  };
+      const vended = hcl
+        ? terraformLambdaRuntime(runtime.language)
+        : cdkLambdaRuntime(runtime.language);
+      const replacement = hcl
+        ? `runtime = "${vended}"`
+        : runtime.match.replace(
+            /Runtime\.(?:NODEJS|PYTHON)_[A-Z0-9_]+$/,
+            vended,
+          );
 
-  for (const path of terraformFiles) {
-    let changed = false;
-    for (const [language, stale] of [
-      ...VENDED_TF_NODE_RUNTIMES.map((r) => ['node', r] as const),
-      ...VENDED_TF_PYTHON_RUNTIMES.map((r) => ['python', r] as const),
-    ]) {
-      const vended = vendedTf[language];
-      if (stale === vended) {
+      if (runtime.match === replacement) {
         continue;
       }
+      // An alias carries no version to compare, and is always ours to pin.
+      if (
+        runtime.version !== undefined &&
+        !isVendedUpgrade(
+          LAMBDA_RUNTIME_VERSIONS[runtime.language],
+          runtime.version,
+        )
+      ) {
+        continue;
+      }
+
+      const prefix = hcl ? 'language hcl\n' : '';
       if (
         await applyGritQL(
           tree,
           path,
-          `language hcl\n\`runtime = "${stale}"\` => \`runtime = "${vended}"\``,
+          `${prefix}\`${runtime.match}\` => \`${replacement}\``,
         )
       ) {
         changed = true;
+      } else {
+        stale = true;
       }
     }
+
     if (changed) {
       updated.push(path);
     }
-    const stillStale = [
-      ...VENDED_TF_NODE_RUNTIMES,
-      ...VENDED_TF_PYTHON_RUNTIMES,
-    ].filter((r) => r !== vendedTf.node && r !== vendedTf.python);
-    for (const stale of stillStale) {
-      if (
-        await matchGritQL(tree, path, `language hcl\n\`runtime = "${stale}"\``)
-      ) {
-        diverged.push(path);
-        break;
-      }
+    if (stale) {
+      diverged.push(path);
     }
   }
 

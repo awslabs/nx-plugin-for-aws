@@ -148,39 +148,52 @@ describe('lambda runtime sync', () => {
     });
   });
 
-  describe('divergence', () => {
-    // A runtime we never vended is the user's choice even inside an owned file.
-    it('should leave a runtime the user chose alone', async () => {
-      const before = cdkConstruct('Runtime.NODEJS_18_X');
-      tree.write(CDK_FILE, before);
+  describe('runtimes the sync leaves alone', () => {
+    // Ahead of the pin, so it is the user's deliberate choice.
+    it('should not move a runtime ahead of the pin backwards', async () => {
+      const ahead = `Runtime.NODEJS_${Number(LAMBDA_RUNTIME_VERSIONS.node) + 2}_X`;
+      tree.write(CDK_FILE, cdkConstruct(ahead));
 
       const { nextSteps } = await syncVendedVersions(tree);
 
-      expect(tree.read(CDK_FILE, 'utf-8')).toContain('Runtime.NODEJS_18_X');
+      expect(tree.read(CDK_FILE, 'utf-8')).toContain(ahead);
       expect(nextSteps).toEqual([]);
     });
 
-    it('should report a stale runtime it could not rewrite', async () => {
-      // Reached through an alias, so the `runtime:` property pattern misses it.
-      tree.write(
-        CDK_FILE,
-        `import { Runtime } from 'aws-cdk-lib/aws-lambda';
+    it('should not move a Terraform runtime ahead of the pin backwards', async () => {
+      const ahead = `nodejs${Number(LAMBDA_RUNTIME_VERSIONS.node) + 2}.x`;
+      tree.write(TF_FILE, terraformModule(ahead));
 
-const NODE = Runtime.NODEJS_22_X;
+      await syncVendedVersions(tree);
 
-export const props = { runtime: NODE } as const;
-`,
-      );
-
-      const { nextSteps } = await syncVendedVersions(tree);
-
-      const contents = tree.read(CDK_FILE, 'utf-8')!;
-      if (contents.includes('NODEJS_22_X')) {
-        expect(nextSteps?.join('\n')).toContain(CDK_FILE);
-      } else {
-        expect(contents).toContain(VENDED_CDK_NODE);
-      }
+      expect(tree.read(TF_FILE, 'utf-8')).toContain(ahead);
     });
+
+    // Only a `runtime` assignment is matched, so a `Runtime` reference used for
+    // anything else keeps whatever the user wrote.
+    it('should leave a Runtime reference that is not a runtime assignment', async () => {
+      const before = `import { Runtime } from 'aws-cdk-lib/aws-lambda';
+
+export const supported = [Runtime.NODEJS_18_X, Runtime.NODEJS_20_X];
+`;
+      tree.write(CDK_FILE, before);
+
+      await syncVendedVersions(tree);
+
+      expect(tree.read(CDK_FILE, 'utf-8')).toEqual(before);
+    });
+  });
+
+  // A `_LATEST` alias resolves against whichever aws-cdk-lib is installed rather
+  // than this repo's pin, which is the drift the sync exists to close.
+  it('should pin a _LATEST alias', async () => {
+    tree.write(CDK_FILE, cdkConstruct('Runtime.NODEJS_LATEST'));
+
+    await syncVendedVersions(tree);
+
+    const contents = tree.read(CDK_FILE, 'utf-8')!;
+    expect(contents).toContain(`runtime: ${VENDED_CDK_NODE}`);
+    expect(contents).not.toContain('NODEJS_LATEST');
   });
 
   describe('uv project python version', () => {

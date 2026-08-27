@@ -5,75 +5,12 @@
 import { type ILambdaRuntime, LAMBDA_RUNTIME_VERSIONS } from './versions.js';
 
 /**
- * Resolution of the latest generally-available managed Lambda runtimes, used by
- * the weekly version update.
+ * Resolution of the Lambda runtimes and the CPython patch the version update
+ * pins.
  *
  * Lives here rather than beside the script so it is covered by the plugin's test
- * suite; the script keeps the `fetch` and the reporting around it.
+ * suite; the script supplies the runtime list and the uv output.
  */
-
-/** The AWS documentation page listing every managed Lambda runtime. */
-export const LAMBDA_RUNTIMES_DOC_URL =
-  'https://docs.aws.amazon.com/lambda/latest/dg/lambda-runtimes.html';
-
-/** A managed runtime as the supported-runtimes table describes it. */
-export interface ManagedRuntime {
-  /** Runtime identifier, e.g. `nodejs24.x`. */
-  readonly identifier: string;
-  /** Version as it appears in the identifier, e.g. `24` or `3.14`. */
-  readonly version: string;
-  /** Forecast deprecation date, or undefined when the table says "Not scheduled". */
-  readonly deprecation?: Date;
-}
-
-/**
- * Every `nodejs`/`python` runtime in the supported-runtimes table, with its
- * forecast deprecation date.
- *
- * This table is the only source that distinguishes a generally-available runtime
- * from a preview one: the Lambda API accepts preview runtimes, and the botocore
- * `Runtime` enum carries no preview or deprecation metadata, so a resolver keyed
- * on "highest version wins" would pin a runtime with no SLA that AWS documents as
- * unfit for production.
- *
- * A dated deprecation marks a runtime GA — AWS publishes a lifecycle only once it
- * commits to supporting it, and previews read "Not scheduled". The date is parsed
- * rather than merely detected so an imminent deprecation can be skipped too.
- *
- * Returns an empty list for a page holding no runtime rows, which the caller
- * treats as unresolved.
- */
-export const parseManagedRuntimes = (html: string): ManagedRuntime[] => {
-  const cellsOf = (row: string): string[] =>
-    [...row.matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/g)].map((cell) =>
-      cell[1]
-        .replace(/<[^>]+>/g, '')
-        .replace(/&nbsp;/g, ' ')
-        .replace(/&amp;/g, '&')
-        .trim(),
-    );
-
-  const runtimes: ManagedRuntime[] = [];
-  for (const row of html.matchAll(/<tr>([\s\S]*?)<\/tr>/g)) {
-    // Name | Identifier | Operating system | Deprecation date | ...
-    const cells = cellsOf(row[1]);
-    if (cells.length < 4) {
-      continue;
-    }
-    const [, identifier, , deprecation] = cells;
-    const parsed = /^(nodejs|python)([0-9][0-9.]*?)(?:\.x)?$/.exec(identifier);
-    if (!parsed) {
-      continue;
-    }
-    const at = new Date(deprecation);
-    runtimes.push({
-      identifier,
-      version: parsed[2],
-      deprecation: Number.isNaN(at.getTime()) ? undefined : at,
-    });
-  }
-  return runtimes;
-};
 
 /** Compare two dotted numeric versions (`24`, `3.14`) ascending. */
 export const compareRuntimeVersions = (a: string, b: string): number => {
@@ -88,8 +25,26 @@ export const compareRuntimeVersions = (a: string, b: string): number => {
   return 0;
 };
 
+/**
+ * The version a managed runtime identifier names, or undefined for one that isn't
+ * a versioned `nodejs`/`python` runtime.
+ *
+ * `nodejs24.x` -> `24`, `python3.14` -> `3.14`. The bare `nodejs` and
+ * `nodejs4.3-edge` style identifiers carry no comparable version and are skipped.
+ */
+export const runtimeIdentifierVersion = (
+  identifier: string,
+): { language: ILambdaRuntime; version: string } | undefined => {
+  const node = /^nodejs(\d+)\.x$/.exec(identifier);
+  if (node) {
+    return { language: 'node', version: node[1] };
+  }
+  const python = /^python(\d+\.\d+)$/.exec(identifier);
+  return python ? { language: 'python', version: python[1] } : undefined;
+};
+
 /** Why a language's runtime could not be resolved. */
-export type UnresolvedReason = 'unreadable-page' | 'no-ga-runtime';
+export type UnresolvedReason = 'no-runtimes-listed';
 
 export interface RuntimeResolution {
   /** Runtime version per language, holding the current pin where unresolved. */
@@ -103,61 +58,48 @@ export interface RuntimeResolution {
 }
 
 /**
- * The latest generally-available managed runtime for each language in
- * {@link LAMBDA_RUNTIME_VERSIONS}, alongside the languages it could not resolve.
+ * The latest managed runtime for each language in {@link LAMBDA_RUNTIME_VERSIONS},
+ * from the runtime identifiers `aws-cdk-lib` publishes.
  *
- * Only runtimes carrying a deprecation date are eligible, and one already past —
- * or within six months of — its date is skipped, matching the rule Lambda applies
- * to new regions. Never moves a runtime backwards: a pin ahead of what the table
- * offers stays.
+ * `Runtime.ALL` is a curated list of the runtimes CDK supports, so a runtime still
+ * in public preview does not appear — which is what makes it a usable source for a
+ * generally-available runtime. Never moves a runtime backwards: a pin ahead of
+ * what CDK offers stays.
  *
- * A language the table says nothing readable about keeps its current pin and is
- * reported through `unresolved`, so a page reshuffle costs this bump alone rather
- * than the whole version update. The two failure modes stay distinct: an
- * unreadable page against a page carrying no GA runtime.
+ * A language the list says nothing about keeps its current pin and is reported
+ * through `unresolved`, so a failure costs this bump alone rather than the whole
+ * version update.
  */
 export const resolveLambdaRuntimes = (
-  runtimes: readonly ManagedRuntime[],
-  now: Date = new Date(),
+  identifiers: readonly string[],
 ): RuntimeResolution => {
-  const horizon = new Date(now);
-  horizon.setMonth(horizon.getMonth() + 6);
   const unresolved: RuntimeResolution['unresolved'][number][] = [];
 
   const versions = Object.fromEntries(
     (Object.keys(LAMBDA_RUNTIME_VERSIONS) as ILambdaRuntime[]).map(
       (language) => {
         const current = LAMBDA_RUNTIME_VERSIONS[language];
-        const prefix = language === 'node' ? 'nodejs' : 'python';
-        const generallyAvailable = runtimes.filter(
-          (runtime) =>
-            runtime.identifier.startsWith(prefix) &&
-            runtime.deprecation !== undefined &&
-            runtime.deprecation > horizon,
-        );
+        const available = identifiers
+          .map(runtimeIdentifierVersion)
+          .filter((parsed) => parsed?.language === language)
+          .map((parsed) => parsed!.version);
 
-        // Every language here has GA runtimes today, so an empty set means the
-        // page no longer says what this reads.
-        if (generallyAvailable.length === 0) {
+        if (available.length === 0) {
           unresolved.push({
             language,
             kept: current,
-            reason: runtimes.length === 0 ? 'unreadable-page' : 'no-ga-runtime',
+            reason: 'no-runtimes-listed',
           });
           return [language, current];
         }
 
-        const latest = generallyAvailable.reduce((best, runtime) =>
-          compareRuntimeVersions(runtime.version, best.version) > 0
-            ? runtime
-            : best,
+        const latest = available.reduce((best, version) =>
+          compareRuntimeVersions(version, best) > 0 ? version : best,
         );
 
         return [
           language,
-          compareRuntimeVersions(latest.version, current) > 0
-            ? latest.version
-            : current,
+          compareRuntimeVersions(latest, current) > 0 ? latest : current,
         ];
       },
     ),
@@ -170,6 +112,45 @@ export const resolveLambdaRuntimes = (
 export const unresolvedRuntimeWarning = (
   entry: RuntimeResolution['unresolved'][number],
 ): string =>
-  entry.reason === 'unreadable-page'
-    ? `Could not read the Lambda runtimes table at ${LAMBDA_RUNTIMES_DOC_URL}, so ${entry.language} keeps its pinned runtime (${entry.kept})`
-    : `Found no generally-available ${entry.language} runtime with a current deprecation date at ${LAMBDA_RUNTIMES_DOC_URL}, so it keeps its pinned runtime (${entry.kept})`;
+  `Found no ${entry.language} runtime in the aws-cdk-lib runtime list, so it keeps its pinned runtime (${entry.kept})`;
+
+/** A CPython build as `uv python list --output-format json` reports it. */
+export interface UvPythonEntry {
+  readonly version: string;
+  readonly version_parts: {
+    readonly major: number;
+    readonly minor: number;
+    readonly patch: number;
+  };
+  readonly implementation: string;
+  readonly variant?: string;
+}
+
+/**
+ * The latest CPython patch uv can install for a `major.minor`, or undefined when
+ * it lists none.
+ *
+ * Lambda names only `major.minor` and patches the interpreter itself, but uv pins
+ * an exact `major.minor.patch`, so the patch is resolved from what uv can actually
+ * install for the runtime's minor. Pre-releases and the free-threaded variant are
+ * excluded: a generated project needs the default build of a final release.
+ */
+export const resolveLatestPythonPatch = (
+  entries: readonly UvPythonEntry[],
+  minor: string = LAMBDA_RUNTIME_VERSIONS.python,
+): string | undefined => {
+  const [major, wanted] = minor.split('.').map(Number);
+  const patches = entries
+    .filter(
+      (entry) =>
+        entry.implementation === 'cpython' &&
+        entry.variant !== 'freethreaded' &&
+        entry.version_parts.major === major &&
+        entry.version_parts.minor === wanted &&
+        // A final release only; `3.15.0rc1` carries a suffix.
+        /^\d+\.\d+\.\d+$/.test(entry.version),
+    )
+    .map((entry) => entry.version_parts.patch);
+
+  return patches.length > 0 ? String(Math.max(...patches)) : undefined;
+};
