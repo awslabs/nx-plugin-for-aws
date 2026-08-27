@@ -834,13 +834,18 @@ const syncProjectPythonVersion = (tree: Tree): string[] => {
   const vendedInterpreter = pyenvPythonVersion();
   const vendedRequires = pyprojectPythonDependency();
 
-  if (tree.exists('.python-version')) {
-    const declared = (tree.read('.python-version', 'utf-8') ?? '').trim();
-    if (declared && isVendedUpgrade(vendedInterpreter, declared)) {
-      tree.write('.python-version', `${vendedInterpreter}\n`);
-      updated.push('.python-version');
+  // Every `.python-version`, not just the root: uv writes one per project too,
+  // and a project left behind resolves a different interpreter than it deploys on.
+  visitNotIgnoredFiles(tree, '.', (path) => {
+    if (path !== '.python-version' && !path.endsWith('/.python-version')) {
+      return;
     }
-  }
+    const declared = (tree.read(path, 'utf-8') ?? '').trim();
+    if (declared && isVendedUpgrade(vendedInterpreter, declared)) {
+      tree.write(path, `${vendedInterpreter}\n`);
+      updated.push(path);
+    }
+  });
 
   visitNotIgnoredFiles(tree, '.', (path) => {
     if (!path.endsWith('pyproject.toml')) {
@@ -871,6 +876,67 @@ const syncProjectPythonVersion = (tree: Tree): string[] => {
 };
 
 /**
+ * Sync the Python version a `bundle` target resolves wheels against.
+ *
+ * The target pins `--python-platform` but earlier releases pinned no
+ * `--python-version`, so wheels resolved against whichever interpreter the build
+ * machine had rather than the Lambda runtime. Both the missing flag and a stale
+ * one are corrected, keyed on the `uv pip install` the generators write.
+ */
+const syncPythonBundleVersion = (tree: Tree): string[] => {
+  const updated: string[] = [];
+  const vended = LAMBDA_RUNTIME_VERSIONS.python;
+
+  visitNotIgnoredFiles(tree, '.', (path) => {
+    if (!path.endsWith('project.json')) {
+      return;
+    }
+    let changed = false;
+    updateJson(tree, path, (json) => {
+      for (const target of Object.values(
+        (json.targets ?? {}) as Record<string, { options?: unknown }>,
+      )) {
+        const options = target.options as { commands?: unknown[] } | undefined;
+        if (!Array.isArray(options?.commands)) {
+          continue;
+        }
+        options.commands = options.commands.map((command) => {
+          if (
+            typeof command !== 'string' ||
+            !command.includes('uv pip install') ||
+            !command.includes('--python-platform')
+          ) {
+            return command;
+          }
+          const declared = /--python-version (\S+)/.exec(command);
+          if (!declared) {
+            changed = true;
+            return command.replace(
+              /(--python-platform \S+)/,
+              `$1 --python-version ${vended}`,
+            );
+          }
+          if (isVendedUpgrade(vended, declared[1])) {
+            changed = true;
+            return command.replace(
+              /--python-version \S+/,
+              `--python-version ${vended}`,
+            );
+          }
+          return command;
+        });
+      }
+      return json;
+    });
+    if (changed) {
+      updated.push(path);
+    }
+  });
+
+  return updated;
+};
+
+/**
  * Sync the versions this release vends, for the dependencies the workspace's
  * generators own.
  */
@@ -887,6 +953,7 @@ export const syncVendedVersions = async (
   const terraformFiles = await syncTerraformProviders(tree);
   const lambdaRuntimes = await syncLambdaRuntimes(tree);
   const projectPython = syncProjectPythonVersion(tree);
+  const pythonBundles = syncPythonBundleVersion(tree);
   const skippedEmbedded = await syncEmbeddedVersions(tree, owned);
   await syncMetricsVersion(tree);
 
@@ -899,9 +966,13 @@ export const syncVendedVersions = async (
       )}\` to update the lock file.`,
     );
   }
-  if (pyProjects.length > 0 || projectPython.length > 0) {
+  if (
+    pyProjects.length > 0 ||
+    projectPython.length > 0 ||
+    pythonBundles.length > 0
+  ) {
     nextSteps.push(
-      `Python dependency versions were updated in ${[...new Set([...pyProjects, ...projectPython])].join(', ')}. Run \`uv sync\` to update uv.lock.`,
+      `Python dependency versions were updated in ${[...new Set([...pyProjects, ...projectPython, ...pythonBundles])].join(', ')}. Run \`uv sync\` to update uv.lock.`,
     );
   }
   // A runtime the sync recognised is simply moved; one it doesn't recognise is

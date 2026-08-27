@@ -219,6 +219,19 @@ dependencies = []
       );
     });
 
+    // uv writes a `.python-version` per project as well as at the root; one left
+    // behind resolves a different interpreter than the function deploys on.
+    it('should move a per-project .python-version too', async () => {
+      tree.write('.python-version', '3.13.0\n');
+      tree.write('packages/api/.python-version', '3.13.0\n');
+
+      await syncVendedVersions(tree);
+
+      expect(
+        tree.read('packages/api/.python-version', 'utf-8')?.trim(),
+      ).toEqual(pyenvPythonVersion());
+    });
+
     it('should leave a requires-python the user tightened alone', async () => {
       const before = `[project]
 name = "api"
@@ -231,6 +244,72 @@ dependencies = []
 
       expect(tree.read('packages/api/pyproject.toml', 'utf-8')).toContain(
         '>=3.13,<3.14',
+      );
+    });
+  });
+
+  describe('python bundle target', () => {
+    const bundleProject = (command: string) => ({
+      name: 'api',
+      root: 'packages/api',
+      targets: {
+        'bundle-x86': {
+          executor: 'nx:run-commands',
+          options: { commands: [command], parallel: false },
+        },
+      },
+    });
+
+    const UV_INSTALL =
+      'uv pip install -n --no-deps --python-platform x86_64-manylinux_2_28 --target dist/packages/api/bundle-x86 -r dist/packages/api/bundle-x86/requirements.txt';
+
+    // Earlier releases pinned no `--python-version`, so wheels resolved against
+    // the build machine's interpreter rather than the Lambda runtime.
+    it('should add a missing --python-version', async () => {
+      tree.write(
+        'packages/api/project.json',
+        JSON.stringify(bundleProject(UV_INSTALL), null, 2),
+      );
+
+      await syncVendedVersions(tree);
+
+      expect(tree.read('packages/api/project.json', 'utf-8')).toContain(
+        `--python-version ${LAMBDA_RUNTIME_VERSIONS.python}`,
+      );
+    });
+
+    it('should move a stale --python-version forward', async () => {
+      tree.write(
+        'packages/api/project.json',
+        JSON.stringify(
+          bundleProject(
+            UV_INSTALL.replace(
+              '--python-platform x86_64-manylinux_2_28',
+              '--python-platform x86_64-manylinux_2_28 --python-version 3.12',
+            ),
+          ),
+          null,
+          2,
+        ),
+      );
+
+      await syncVendedVersions(tree);
+
+      const contents = tree.read('packages/api/project.json', 'utf-8')!;
+      expect(contents).toContain(
+        `--python-version ${LAMBDA_RUNTIME_VERSIONS.python}`,
+      );
+      expect(contents).not.toContain('--python-version 3.12');
+    });
+
+    it('should leave an unrelated command alone', async () => {
+      const project = bundleProject('echo not a uv install');
+      tree.write('packages/api/project.json', JSON.stringify(project, null, 2));
+
+      await syncVendedVersions(tree);
+
+      expect(tree.read('packages/api/project.json', 'utf-8')).not.toContain(
+        '--python-version',
       );
     });
   });
