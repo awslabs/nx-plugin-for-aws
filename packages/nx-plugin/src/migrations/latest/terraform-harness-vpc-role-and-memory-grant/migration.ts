@@ -45,14 +45,12 @@ const hcl = (pattern: string) => `language hcl\n${pattern}`;
 const divergedMessage = (filePath: string) =>
   `${filePath}: has diverged from the generated shape - left untouched. To pick up VPC support, a supplied execution role, the allowed_tools/memory/environment_variables/max_iterations/timeout_seconds variables and the corrected managed-memory grant, compare it against the agentcore-harness generator's Terraform template and apply the parts you want.`;
 
-/** Variables added ahead of the existing `model_resource_arns` variable. */
-const NEW_VARIABLES_TEXT = `variable "allowed_tools" {
-  description = "Tools the Harness may use, e.g. [\\"@builtin\\"] or narrower patterns such as [\\"@builtin/file_operations\\"]. Deploys with no tools when null."
-  type        = list(string)
-  default     = null
-}
-
-variable "memory" {
+/**
+ * Variables added ahead of the existing `model_resource_arns` variable.
+ * `allowed_tools` is not among them: the earlier `agentcore-harness-no-tools-by-default`
+ * migration already declares it, and runs first.
+ */
+const NEW_VARIABLES_TEXT = `variable "memory" {
   description = "Memory configuration for the Harness. Null leaves the service to provision managed memory with default strategies. Set exactly one field: managed_memory_configuration to tune that managed memory, agentcore_memory_configuration to use a memory resource you own, or disabled to turn memory off."
   type = object({
     managed_memory_configuration = optional(object({
@@ -185,7 +183,11 @@ resource "aws_vpc_security_group_egress_rule" "harness_https" {
   description       = "Allow outbound HTTPS to AWS service endpoints"
 }`;
 
-/** Native fields and the VPC network configuration, added to the Harness resource. */
+/**
+ * Native fields added to the Harness resource. `allowed_tools` is re-emitted
+ * here, aligned with the rest, replacing the line the earlier
+ * no-tools-by-default migration added.
+ */
 const HARNESS_FIELDS_TEXT = `  allowed_tools         = var.allowed_tools
   environment_variables = var.environment_variables
   max_iterations        = var.max_iterations
@@ -449,6 +451,9 @@ const REQUIRED_SHAPES = [
   '`resource "aws_iam_role_policy" "execution_role" { $_ }`',
   '`resource "aws_bedrockagentcore_harness" "this" { $_ }`',
   '`output "execution_role_arn" { $_ }`',
+  // The no-tools-by-default migration runs first, so its assignment is present
+  // and is what the native fields below are anchored on.
+  '`allowed_tools = var.allowed_tools`',
 ];
 
 /**
@@ -577,7 +582,14 @@ export default async function migration(
       BASELINE_POLICY_TEXT,
     );
 
-    // Native fields and the VPC network configuration on the Harness resource.
+    // The role ARN follows whichever role is in use, and the `allowed_tools`
+    // line the no-tools-by-default migration added is re-aligned with the
+    // native fields that now sit beside it.
+    await applyGritQL(
+      tree,
+      filePath,
+      hcl('`allowed_tools      = var.allowed_tools` => ``'),
+    );
     await insertViaGritQL(
       tree,
       filePath,

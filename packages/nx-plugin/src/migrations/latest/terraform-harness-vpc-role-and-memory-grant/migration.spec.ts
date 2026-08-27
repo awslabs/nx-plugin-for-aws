@@ -16,8 +16,10 @@ const divergedMessage = (filePath: string) =>
   `${filePath}: has diverged from the generated shape - left untouched. To pick up VPC support, a supplied execution role, the allowed_tools/memory/environment_variables/max_iterations/timeout_seconds variables and the corrected managed-memory grant, compare it against the agentcore-harness generator's Terraform template and apply the parts you want.`;
 
 /**
- * The vended Terraform harness app module as it was before VPC support, a
- * supplied execution role and the native field variables.
+ * The vended Terraform harness app module as an upgrading workspace has it: the
+ * earlier no-tools-by-default migration has run, so `allowed_tools` is already
+ * declared and assigned, but VPC support, a supplied execution role and the
+ * remaining native fields are not there yet.
  */
 const oldAppModule = `terraform {
   required_version = ">= 1.0"
@@ -38,6 +40,12 @@ variable "model_id" {
   description = "Amazon Bedrock model or inference profile used by default."
   type        = string
   default     = "global.anthropic.claude-sonnet-4-6"
+}
+
+variable "allowed_tools" {
+  description = "Tools the Harness may use. Defaults to none; set [\\"@builtin\\"] for every built-in tool, or name individual tools. Always sent explicitly, since the service treats an absent value as every tool."
+  type        = list(string)
+  default     = []
 }
 
 variable "model_resource_arns" {
@@ -264,6 +272,7 @@ resource "aws_iam_role_policy" "execution_role" {
 resource "aws_bedrockagentcore_harness" "this" {
   harness_name       = local.harness_name
   execution_role_arn = aws_iam_role.execution_role.arn
+  allowed_tools      = var.allowed_tools
 
   model {
     bedrock_model_config {

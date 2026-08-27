@@ -608,7 +608,6 @@ describe('agentcore-harness generator', () => {
       expect(tf).toContain(
         'value       = var.enable_vpc ? aws_security_group.harness[0].id : null',
       );
->>>>>>> 92fe76cf (docs(agentcore-harness): document the Terraform module's variables, VPC support and memory grant)
     });
 
     it('grants the private ECR pull VPC mode needs, and only then', () => {
