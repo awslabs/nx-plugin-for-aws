@@ -15,11 +15,25 @@ import yaml from 'js-yaml';
 import { getCatalogManager } from 'nx/src/utils/catalog';
 import { parsePipRequirementsLine } from 'pip-requirements-js';
 import { coerce, parse, satisfies, validRange } from 'semver';
-import { applyGritQL, captureAllGritQL } from '../ast.js';
+import { applyGritQL, captureAllGritQL, matchGritQL } from '../ast.js';
 import { buildInstallCommand } from '../commands.js';
 import { formatFilesInSubtree } from '../format.js';
+import {
+  PACKAGES_DIR,
+  SHARED_CONSTRUCTS_DIR,
+  SHARED_TERRAFORM_DIR,
+} from '../shared-constructs-constants.js';
 import { updateToml } from '../toml.js';
-import { PY_VERSIONS, TERRAFORM_VERSIONS, TS_VERSIONS } from '../versions.js';
+import {
+  cdkLambdaRuntime,
+  LAMBDA_RUNTIME_VERSIONS,
+  PY_VERSIONS,
+  pyenvPythonVersion,
+  pyprojectPythonDependency,
+  TERRAFORM_VERSIONS,
+  TS_VERSIONS,
+  terraformLambdaRuntime,
+} from '../versions.js';
 import { isNxPackage } from './nx-package-updates.js';
 import {
   type OwnedDependencies,
@@ -642,6 +656,221 @@ const syncTerraformProviders = async (tree: Tree): Promise<string[]> => {
 };
 
 /**
+ * The two projects this plugin generates infrastructure into, and the only place
+ * a Lambda runtime is rewritten.
+ *
+ * A runtime is not a dependency, so there is no per-package ownership to consult
+ * — the scope has to be the directories the plugin owns outright. A function the
+ * user defined in their own project keeps whatever runtime they chose, even
+ * though it is the same shape.
+ */
+const OWNED_INFRA_DIRS = [
+  `${PACKAGES_DIR}/${SHARED_CONSTRUCTS_DIR}/`,
+  `${PACKAGES_DIR}/${SHARED_TERRAFORM_DIR}/`,
+] as const;
+
+const isOwnedInfraFile = (path: string): boolean =>
+  OWNED_INFRA_DIRS.some((dir) => path.startsWith(dir));
+
+/**
+ * The Node runtimes this plugin has vended, which are the only values rewritten.
+ *
+ * Enumerated rather than "anything below the pin" so a runtime the user chose
+ * inside an owned file is recognised as theirs and reported instead of
+ * overwritten. `NODEJS_LATEST` is included because its value is decided by
+ * `aws-cdk-lib` rather than by this repo.
+ */
+const VENDED_CDK_NODE_RUNTIMES = [
+  'Runtime.NODEJS_LATEST',
+  'Runtime.NODEJS_22_X',
+  'Runtime.NODEJS_24_X',
+] as const;
+
+const VENDED_TF_NODE_RUNTIMES = ['nodejs22.x', 'nodejs24.x'] as const;
+
+/** Python runtimes this plugin has vended, in each provider's spelling. */
+const VENDED_CDK_PYTHON_RUNTIMES = [
+  'Runtime.PYTHON_3_13',
+  'Runtime.PYTHON_3_14',
+] as const;
+
+const VENDED_TF_PYTHON_RUNTIMES = ['python3.13', 'python3.14'] as const;
+
+/**
+ * Sync the Lambda runtimes vended into `common/constructs` and
+ * `common/terraform`.
+ *
+ * Matched on the `runtime` assignment itself rather than the construct around it,
+ * so a construct the user has otherwise reworked still has its runtime moved —
+ * while a runtime value we never vended is left alone and reported, since that is
+ * the user's choice however the file got there.
+ *
+ * @returns the files changed, and the owned files still holding a stale runtime
+ */
+const syncLambdaRuntimes = async (
+  tree: Tree,
+): Promise<{ updated: string[]; diverged: string[] }> => {
+  const cdkFiles: string[] = [];
+  const terraformFiles: string[] = [];
+
+  visitNotIgnoredFiles(tree, '.', (path) => {
+    if (!isOwnedInfraFile(path)) {
+      return;
+    }
+    if (path.endsWith('.ts')) {
+      cdkFiles.push(path);
+    } else if (path.endsWith('.tf')) {
+      terraformFiles.push(path);
+    }
+  });
+
+  const updated: string[] = [];
+  const diverged: string[] = [];
+
+  const vendedCdk = {
+    node: cdkLambdaRuntime('node'),
+    python: cdkLambdaRuntime('python'),
+  };
+
+  for (const path of cdkFiles) {
+    let changed = false;
+    for (const [language, stale] of [
+      ...VENDED_CDK_NODE_RUNTIMES.map((r) => ['node', r] as const),
+      ...VENDED_CDK_PYTHON_RUNTIMES.map((r) => ['python', r] as const),
+    ]) {
+      const vended = vendedCdk[language];
+      if (stale === vended) {
+        continue;
+      }
+      // Both the bare `Runtime.X` and the `lambda.Runtime.X` a
+      // namespace-imported construct writes, whose prefix is preserved.
+      for (const [from, to] of [
+        [stale, vended],
+        [`lambda.${stale}`, `lambda.${vended}`],
+      ]) {
+        if (
+          await applyGritQL(
+            tree,
+            path,
+            `\`runtime: ${from}\` => \`runtime: ${to}\``,
+          )
+        ) {
+          changed = true;
+        }
+      }
+    }
+    if (changed) {
+      updated.push(path);
+    }
+    // Anything still naming a runtime we vended is written in a shape the
+    // property pattern cannot reach - reported rather than rewritten.
+    const stillStale = [
+      ...VENDED_CDK_NODE_RUNTIMES,
+      ...VENDED_CDK_PYTHON_RUNTIMES,
+    ].filter((r) => r !== vendedCdk.node && r !== vendedCdk.python);
+    for (const stale of stillStale) {
+      if (await matchGritQL(tree, path, `\`${stale}\``)) {
+        diverged.push(path);
+        break;
+      }
+    }
+  }
+
+  const vendedTf = {
+    node: terraformLambdaRuntime('node'),
+    python: terraformLambdaRuntime('python'),
+  };
+
+  for (const path of terraformFiles) {
+    let changed = false;
+    for (const [language, stale] of [
+      ...VENDED_TF_NODE_RUNTIMES.map((r) => ['node', r] as const),
+      ...VENDED_TF_PYTHON_RUNTIMES.map((r) => ['python', r] as const),
+    ]) {
+      const vended = vendedTf[language];
+      if (stale === vended) {
+        continue;
+      }
+      if (
+        await applyGritQL(
+          tree,
+          path,
+          `language hcl\n\`runtime = "${stale}"\` => \`runtime = "${vended}"\``,
+        )
+      ) {
+        changed = true;
+      }
+    }
+    if (changed) {
+      updated.push(path);
+    }
+    const stillStale = [
+      ...VENDED_TF_NODE_RUNTIMES,
+      ...VENDED_TF_PYTHON_RUNTIMES,
+    ].filter((r) => r !== vendedTf.node && r !== vendedTf.python);
+    for (const stale of stillStale) {
+      if (
+        await matchGritQL(tree, path, `language hcl\n\`runtime = "${stale}"\``)
+      ) {
+        diverged.push(path);
+        break;
+      }
+    }
+  }
+
+  return { updated, diverged };
+};
+
+/**
+ * Sync the interpreter a uv project pins to the Lambda Python runtime.
+ *
+ * `.python-version` holds the exact interpreter and `[project].requires-python`
+ * its lower bound; Ruff's `target-version` is derived from the latter, so leaving
+ * these behind lints against a different version than the function runs on. Only
+ * moved forward, and only from a value this plugin vended.
+ */
+const syncProjectPythonVersion = (tree: Tree): string[] => {
+  const updated: string[] = [];
+  const vendedInterpreter = pyenvPythonVersion();
+  const vendedRequires = pyprojectPythonDependency();
+
+  if (tree.exists('.python-version')) {
+    const declared = (tree.read('.python-version', 'utf-8') ?? '').trim();
+    if (declared && isVendedUpgrade(vendedInterpreter, declared)) {
+      tree.write('.python-version', `${vendedInterpreter}\n`);
+      updated.push('.python-version');
+    }
+  }
+
+  visitNotIgnoredFiles(tree, '.', (path) => {
+    if (!path.endsWith('pyproject.toml')) {
+      return;
+    }
+    let changed = false;
+    updateToml(tree, path, (toml) => {
+      const project = toml.project as Record<string, unknown> | undefined;
+      const declared = project?.['requires-python'];
+      if (typeof declared !== 'string') {
+        return toml;
+      }
+      // Only the `>=<major>.<minor>` shape the generators write, so a specifier
+      // the user tightened or widened is theirs to keep.
+      const lower = /^>=\s*(\d+\.\d+)$/.exec(declared.trim());
+      if (lower && isVendedUpgrade(LAMBDA_RUNTIME_VERSIONS.python, lower[1])) {
+        project!['requires-python'] = vendedRequires;
+        changed = true;
+      }
+      return toml;
+    });
+    if (changed) {
+      updated.push(path);
+    }
+  });
+
+  return updated;
+};
+
+/**
  * Sync the versions this release vends, for the dependencies the workspace's
  * generators own.
  */
@@ -656,6 +885,8 @@ export const syncVendedVersions = async (
   const overrides = syncOverrides(tree, owned);
   const pyProjects = syncPyProjects(tree, owned);
   const terraformFiles = await syncTerraformProviders(tree);
+  const lambdaRuntimes = await syncLambdaRuntimes(tree);
+  const projectPython = syncProjectPythonVersion(tree);
   const skippedEmbedded = await syncEmbeddedVersions(tree, owned);
   await syncMetricsVersion(tree);
 
@@ -668,9 +899,16 @@ export const syncVendedVersions = async (
       )}\` to update the lock file.`,
     );
   }
-  if (pyProjects.length > 0) {
+  if (pyProjects.length > 0 || projectPython.length > 0) {
     nextSteps.push(
-      `Python dependency versions were updated in ${pyProjects.join(', ')}. Run \`uv sync\` to update uv.lock.`,
+      `Python dependency versions were updated in ${[...new Set([...pyProjects, ...projectPython])].join(', ')}. Run \`uv sync\` to update uv.lock.`,
+    );
+  }
+  // A runtime the sync recognised is simply moved; one it doesn't recognise is
+  // the user's choice, so it is reported rather than rewritten.
+  if (lambdaRuntimes.diverged.length > 0) {
+    nextSteps.push(
+      `Lambda runtimes in ${[...new Set(lambdaRuntimes.diverged)].join(', ')} have diverged from the generated shape and were left untouched. Set them to \`${cdkLambdaRuntime('node')}\` (CDK) or \`"${terraformLambdaRuntime('node')}"\` (Terraform) if you want them on the runtime this release vends.`,
     );
   }
   if (terraformFiles.length > 0) {

@@ -4,10 +4,15 @@
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import type { ProjectConfiguration } from '@nx/devkit';
 import { describe, expect, it } from 'vitest';
+import { addPythonBundleTarget } from './bundle/bundle.js';
+import { requiresPythonToRuffTarget } from './format.js';
 import {
   cdkLambdaRuntime,
   LAMBDA_RUNTIME_VERSIONS,
+  pyenvPythonVersion,
+  pyprojectPythonDependency,
   terraformLambdaRuntime,
 } from './versions.js';
 
@@ -65,6 +70,41 @@ describe('vended lambda runtimes', () => {
       `python${LAMBDA_RUNTIME_VERSIONS.python}`,
     );
     expect(cdkLambdaRuntime('python')).toBe('Runtime.PYTHON_3_14');
+  });
+
+  // A generated Python project resolves its wheels against the uv interpreter, so
+  // an interpreter on a different minor than the Lambda runtime builds a bundle
+  // the deployed function cannot run.
+  it('should pin the uv interpreter to the lambda python runtime', () => {
+    expect(pyenvPythonVersion()).toMatch(
+      new RegExp(
+        `^${LAMBDA_RUNTIME_VERSIONS.python.replace('.', '\\.')}\\.\\d+$`,
+      ),
+    );
+    expect(pyprojectPythonDependency()).toBe(
+      `>=${LAMBDA_RUNTIME_VERSIONS.python}`,
+    );
+  });
+
+  // Ruff derives `target-version` from `requires-python`, so lint targets the
+  // version the function runs on.
+  it('should derive the ruff target from the lambda python runtime', () => {
+    expect(requiresPythonToRuffTarget(pyprojectPythonDependency())).toBe(
+      `py${LAMBDA_RUNTIME_VERSIONS.python.replace('.', '')}`,
+    );
+  });
+
+  // The bundle target must pin `--python-version`, or wheels resolve against
+  // whichever interpreter the build machine happens to have.
+  it('should pin the python bundle to the lambda python runtime', () => {
+    const project: ProjectConfiguration = { root: 'packages/api', name: 'api' };
+    addPythonBundleTarget(project);
+    const commands = project.targets?.['bundle-x86']?.options
+      ?.commands as string[];
+
+    expect(commands.join('\n')).toContain(
+      `--python-version ${LAMBDA_RUNTIME_VERSIONS.python}`,
+    );
   });
 
   // A `_LATEST` alias resolves against whatever `aws-cdk-lib` is pinned, so its

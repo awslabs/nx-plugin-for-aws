@@ -368,6 +368,34 @@ export const LAMBDA_RUNTIME_VERSIONS = {
 } as const;
 export type ILambdaRuntime = keyof typeof LAMBDA_RUNTIME_VERSIONS;
 
+/**
+ * Patch of the CPython release uv pins as the project interpreter.
+ *
+ * A Lambda runtime names only `major.minor` (`python3.14`) because Lambda patches
+ * the interpreter for you, but uv pins an exact `major.minor.patch`. Only the
+ * patch lives here — the `major.minor` comes from
+ * {@link LAMBDA_RUNTIME_VERSIONS}, so the interpreter a project builds against
+ * cannot drift from the runtime it deploys onto.
+ */
+export const PYTHON_RUNTIME_PATCH = '0';
+
+/**
+ * The interpreter uv pins for a generated Python project, as `major.minor.patch`.
+ * Matches the Lambda Python runtime by construction.
+ */
+export const pyenvPythonVersion = (): string =>
+  `${LAMBDA_RUNTIME_VERSIONS.python}.${PYTHON_RUNTIME_PATCH}`;
+
+/**
+ * The `[project].requires-python` specifier for a generated Python project.
+ *
+ * A lower bound on the Lambda runtime's `major.minor`: the deployed interpreter
+ * is that version, and Ruff derives its `target-version` from this (`py314`), so
+ * lint targets the same version the function runs on.
+ */
+export const pyprojectPythonDependency = (): string =>
+  `>=${LAMBDA_RUNTIME_VERSIONS.python}`;
+
 /** The runtime as Terraform's `runtime` attribute names it, e.g. `nodejs24.x`. */
 export const terraformLambdaRuntime = (runtime: ILambdaRuntime): string =>
   runtime === 'node'
