@@ -92,11 +92,13 @@ describe('terraformProjectGenerator', () => {
         'validate',
       ]);
 
-      // The security scan must not be dropped from `build`.
+      // A build runs the security scan and the Terraform tests; neither may be
+      // dropped, or they rot unnoticed.
       expect(projectConfig.targets['build'].dependsOn).toContain('checkov');
+      expect(projectConfig.targets['build'].dependsOn).toContain('test');
     });
 
-    it('should not couple build to the terraform CLI or remote state', async () => {
+    it('should not couple build to remote state', async () => {
       await terraformProjectGenerator(tree, applicationSchema);
 
       const projectConfig = readProjectConfiguration(
@@ -108,14 +110,36 @@ describe('terraformProjectGenerator', () => {
         (projectConfig.targets[target]?.dependsOn ?? []).flatMap(
           (dep: string) => [dep, ...collectDeps(dep)],
         );
-      const buildDeps = collectDeps('build');
 
-      // `test` runs `terraform test`, which downloads providers, so a build
-      // would need the terraform CLI and network access. Users run it directly.
-      expect(buildDeps).not.toContain('test');
       // `init` configures the S3 backend, which fails until `bootstrap` has
-      // created the bucket, so nothing a build needs may depend on it.
-      expect(buildDeps).not.toContain('init');
+      // created the bucket, so nothing a build needs may depend on it — `test`
+      // installs what it needs itself with `-backend=false`.
+      expect(collectDeps('build')).not.toContain('init');
+    });
+
+    it('should keep the test target out of the shared terraform directory', async () => {
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      const projectConfig = readProjectConfiguration(
+        tree,
+        '@proj/my-terraform-project',
+      );
+      const testTarget = projectConfig.targets['test'];
+
+      // `init`, `validate`, `plan` and `destroy` share `src/.terraform`.
+      // Initialising the tests into that same directory races them, so the test
+      // data dir is relocated out of the source tree.
+      expect(testTarget.options.env.TF_DATA_DIR).toContain(
+        'dist/{projectRoot}/terraform-test',
+      );
+      expect(testTarget.options.cwd).toBe('{projectRoot}/src');
+
+      // A cache hit must restore what the run installed, and a change to a
+      // consumed module must invalidate it — otherwise a hit is a false pass.
+      expect(testTarget.outputs).toEqual([
+        '{workspaceRoot}/dist/{projectRoot}/terraform-test',
+      ]);
+      expect(testTarget.inputs).toEqual(['default', '^production']);
     });
 
     it('should pass the region to bootstrap-destroy so it never prompts', async () => {

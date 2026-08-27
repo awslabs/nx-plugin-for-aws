@@ -94,6 +94,9 @@ export async function terraformProjectGenerator(
     'checkov',
     'checkov_report.json',
   );
+  // `test` keeps its `.terraform` here rather than in `src`, so initialising it
+  // never races the backend-configured targets over the shared one.
+  const testDataDir = joinPathFragments(distDir, 'terraform-test');
 
   // Calculate relative path from current project to common/terraform/metrics
   // Use forward slashes for terraform module source paths (even on Windows)
@@ -140,7 +143,7 @@ export async function terraformProjectGenerator(
       },
     },
     build: {
-      dependsOn: ['fmt', 'checkov', `${sharedTfProjectName}:build`],
+      dependsOn: ['fmt', 'checkov', 'test', `${sharedTfProjectName}:build`],
     },
     deploy: {
       dependsOn: ['apply'],
@@ -207,11 +210,8 @@ export async function terraformProjectGenerator(
   const libTargets: {
     [targetName: string]: TargetConfiguration;
   } = {
-    // `test` is deliberately absent: it runs `terraform test`, which needs the
-    // providers downloaded, so a build would depend on network access. Run it
-    // explicitly with `nx test <project>`.
     build: {
-      dependsOn: ['fmt', 'checkov'],
+      dependsOn: ['fmt', 'checkov', 'test'],
     },
     fmt: {
       executor: 'nx:run-commands',
@@ -252,17 +252,23 @@ export async function terraformProjectGenerator(
     // Terraform's native test framework, which runs any `.tftest.hcl` files.
     // A project with none is a no-op success.
     //
-    // Providers are installed with `-backend=false` so this needs no
-    // bootstrapped state bucket; mocked tests reach no backend anyway.
+    // `-backend=false` installs the modules and providers the tests need
+    // without configuring the S3 backend, so this runs before `bootstrap` and
+    // needs no credentials. `TF_DATA_DIR` keeps that `.terraform` out of `src`,
+    // so it never races the backend-configured targets over the shared one.
+    // `^production` is what invalidates the cache when a consumed module
+    // changes; `{projectRoot}/**/*` alone would serve a stale pass.
     test: {
       executor: 'nx:run-commands',
       cache: true,
-      inputs: ['default'],
+      inputs: ['default', '^production'],
+      outputs: [`{workspaceRoot}/dist/{projectRoot}/terraform-test`],
       options: {
         commands: ['terraform init -backend=false', 'terraform test'],
         forwardAllArgs: true,
         cwd: '{projectRoot}/src',
         parallel: false,
+        env: { TF_DATA_DIR: testDataDir },
       },
     },
     validate: {
