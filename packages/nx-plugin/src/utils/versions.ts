@@ -368,7 +368,7 @@ export type ILambdaRuntime = keyof typeof LAMBDA_RUNTIME_VERSIONS;
  * {@link LAMBDA_RUNTIME_VERSIONS}. Resolved from uv by the version update
  * workflow.
  */
-export const PYTHON_RUNTIME_PATCH = '0';
+export const PYTHON_RUNTIME_PATCH = '7';
 
 /**
  * The interpreter uv pins for a generated Python project, as `major.minor.patch`.

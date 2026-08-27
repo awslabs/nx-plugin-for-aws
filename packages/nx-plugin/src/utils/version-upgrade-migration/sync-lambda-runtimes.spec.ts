@@ -182,6 +182,44 @@ export const supported = [Runtime.NODEJS_18_X, Runtime.NODEJS_20_X];
 
       expect(tree.read(CDK_FILE, 'utf-8')).toEqual(before);
     });
+
+    // Matched structurally, so a commented-out assignment is not a declaration.
+    it('should leave a commented-out CDK runtime alone', async () => {
+      const before = `import { Runtime } from 'aws-cdk-lib/aws-lambda';
+
+// runtime: Runtime.NODEJS_18_X
+export const nothing = true;
+`;
+      tree.write(CDK_FILE, before);
+
+      await syncVendedVersions(tree);
+
+      expect(tree.read(CDK_FILE, 'utf-8')).toEqual(before);
+    });
+
+    it('should leave a commented-out Terraform runtime alone', async () => {
+      const before = `resource "aws_lambda_function" "a" {
+  handler = "index.handler"
+  # runtime = "nodejs18.x"
+}
+`;
+      tree.write(TF_FILE, before);
+
+      await syncVendedVersions(tree);
+
+      expect(tree.read(TF_FILE, 'utf-8')).toEqual(before);
+    });
+
+    // A `runtime` property that isn't a Lambda runtime at all.
+    it('should leave an unrelated runtime property alone', async () => {
+      const before = `export const config = { runtime: 'edge' } as const;
+`;
+      tree.write(CDK_FILE, before);
+
+      await syncVendedVersions(tree);
+
+      expect(tree.read(CDK_FILE, 'utf-8')).toEqual(before);
+    });
   });
 
   // A `_LATEST` alias resolves against whichever aws-cdk-lib is installed rather

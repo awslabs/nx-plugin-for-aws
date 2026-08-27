@@ -676,8 +676,9 @@ const isOwnedInfraFile = (path: string): boolean =>
 /**
  * A Lambda runtime a vended file declares, and where it sits.
  *
- * Anchored on the `runtime` assignment so only a Lambda runtime matches — a
- * `Runtime` reference anywhere else in the file is left alone.
+ * Found by matching the `runtime` assignment with GritQL, so only a real property
+ * or attribute matches — a `Runtime` reference used for anything else, or one
+ * inside a comment, is not a runtime this owns.
  */
 interface DeclaredRuntime {
   /** Exact text to rewrite, e.g. `runtime: lambda.Runtime.NODEJS_22_X`. */
@@ -690,38 +691,97 @@ interface DeclaredRuntime {
   readonly version?: string;
 }
 
+/**
+ * GritQL matching a `runtime` assignment and binding its value.
+ *
+ * The whole assignment is returned, which is also the text the rewrite replaces.
+ */
+const RUNTIME_ASSIGNMENT = '`runtime: $value`';
+const TF_RUNTIME_ASSIGNMENT = 'language hcl\n`runtime = $value`';
+
 /** `NODEJS_22_X` -> `22`, `PYTHON_3_14` -> `3.14`; undefined for an alias. */
 const cdkMemberVersion = (member: string): string | undefined =>
   /^NODEJS_(\d+)_X$/.exec(member)?.[1] ??
   /^PYTHON_(\d+)_(\d+)$/.exec(member)?.slice(1).join('.');
 
-/** Every runtime a vended CDK construct assigns. */
-const declaredCdkRuntimes = (contents: string): DeclaredRuntime[] =>
-  [
-    ...contents.matchAll(
-      /\bruntime:\s*((?:lambda\.)?Runtime\.((?:NODEJS|PYTHON)_[A-Z0-9_]+))/g,
-    ),
-  ].map(([, reference, member]) => ({
-    match: `runtime: ${reference}`,
-    language: member.startsWith('NODEJS')
-      ? ('node' as const)
-      : ('python' as const),
+/**
+ * Read a matched CDK assignment, or undefined when its value is not a versioned
+ * managed runtime.
+ *
+ * GritQL has already established this is a `runtime` property; the regex only
+ * parses the value it bound.
+ */
+const readCdkRuntime = (assignment: string): DeclaredRuntime | undefined => {
+  const parsed =
+    /^runtime:\s*(?:lambda\.)?Runtime\.((?:NODEJS|PYTHON)_[A-Z0-9_]+)$/.exec(
+      assignment.trim(),
+    );
+  if (!parsed) {
+    return undefined;
+  }
+  const member = parsed[1];
+  return {
+    match: assignment.trim(),
+    language: member.startsWith('NODEJS') ? 'node' : 'python',
     version: cdkMemberVersion(member),
-  }));
+  };
+};
 
-/** Every runtime a vended Terraform module assigns. */
-const declaredTerraformRuntimes = (contents: string): DeclaredRuntime[] =>
-  [
-    ...contents.matchAll(/\bruntime\s*=\s*"((?:nodejs|python)[0-9][^"]*)"/g),
-  ].map(([, identifier]) => ({
-    match: `runtime = "${identifier}"`,
-    language: identifier.startsWith('nodejs')
-      ? ('node' as const)
-      : ('python' as const),
+/** Read a matched Terraform assignment, or undefined for a non-runtime value. */
+const readTerraformRuntime = (
+  assignment: string,
+): DeclaredRuntime | undefined => {
+  const parsed = /^runtime\s*=\s*"((?:nodejs|python)[0-9][^"]*)"$/.exec(
+    assignment.trim(),
+  );
+  if (!parsed) {
+    return undefined;
+  }
+  const identifier = parsed[1];
+  return {
+    match: assignment.trim(),
+    language: identifier.startsWith('nodejs') ? 'node' : 'python',
     version:
       /^nodejs([\d.]+?)\.x$/.exec(identifier)?.[1] ??
       /^python([\d.]+)$/.exec(identifier)?.[1],
-  }));
+  };
+};
+
+/**
+ * Every runtime a vended file assigns, or undefined when the file could not be
+ * matched at all.
+ *
+ * `captureAllGritQL` returns `[]` both for a file with no runtimes and for a
+ * pattern that failed to apply, so a file the parser rejected is told apart by
+ * checking whether it mentions a runtime assignment at all. Without that a parse
+ * failure would look like "nothing to do" and silently skip the file.
+ */
+const declaredRuntimes = async (
+  tree: Tree,
+  path: string,
+  hcl: boolean,
+): Promise<DeclaredRuntime[] | undefined> => {
+  const captured = await captureAllGritQL(
+    tree,
+    path,
+    hcl ? TF_RUNTIME_ASSIGNMENT : RUNTIME_ASSIGNMENT,
+  );
+
+  if (captured.length === 0) {
+    const contents = tree.read(path, 'utf-8') ?? '';
+    const assigns = hcl
+      ? /\bruntime\s*=/.test(contents)
+      : /\bruntime:/.test(contents);
+    // Mentions a runtime assignment but matched none: the pattern did not apply.
+    return assigns ? undefined : [];
+  }
+
+  const read = hcl ? readTerraformRuntime : readCdkRuntime;
+  return captured.flatMap((assignment) => {
+    const runtime = read(assignment);
+    return runtime ? [runtime] : [];
+  });
+};
 
 /**
  * Sync the Lambda runtimes vended into `common/constructs` and
@@ -758,10 +818,14 @@ const syncLambdaRuntimes = async (
   const diverged: string[] = [];
 
   for (const { path, hcl } of files) {
-    const contents = tree.read(path, 'utf-8') ?? '';
-    const declared = hcl
-      ? declaredTerraformRuntimes(contents)
-      : declaredCdkRuntimes(contents);
+    const declared = await declaredRuntimes(tree, path, hcl);
+
+    // A file whose runtimes could not be matched is reported rather than skipped
+    // silently, which would leave it behind with nothing to say so.
+    if (declared === undefined) {
+      diverged.push(path);
+      continue;
+    }
 
     let changed = false;
     let stale = false;
