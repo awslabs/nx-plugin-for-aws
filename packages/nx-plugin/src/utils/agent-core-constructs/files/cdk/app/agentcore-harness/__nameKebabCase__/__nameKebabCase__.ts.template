@@ -143,6 +143,29 @@ export class <%- nameClassName %>
           actions: ['sts:GetServiceBearerToken'],
           resources: ['*'],
         }),
+        // In a VPC the Harness pulls its managed container from a private ECR
+        // repository in the region rather than ECR Public. The repository is
+        // service-owned, hence the wildcard account.
+        ...(vpc
+          ? [
+              new iam.PolicyStatement({
+                sid: 'EcrManagedImagePull',
+                actions: [
+                  'ecr:BatchGetImage',
+                  'ecr:GetDownloadUrlForLayer',
+                  'ecr:BatchCheckLayerAvailability',
+                ],
+                resources: [
+                  `arn:${stack.partition}:ecr:${stack.region}:*:repository/harness-*`,
+                ],
+              }),
+              new iam.PolicyStatement({
+                sid: 'EcrManagedImageToken',
+                actions: ['ecr:GetAuthorizationToken'],
+                resources: ['*'],
+              }),
+            ]
+          : []),
         new iam.PolicyStatement({
           sid: 'XRayTracingAccess',
           actions: [
@@ -245,6 +268,14 @@ export class <%- nameClassName %>
         'XRayTracingAccess: X-Ray segment and sampling APIs have no resource-level permission.',
         isPolicy,
       );
+      if (vpc) {
+        suppressRules(
+          this.executionRole,
+          WILDCARD_IAM_RULES,
+          'EcrManagedImageToken: ecr:GetAuthorizationToken has no resource-level permission.',
+          isPolicy,
+        );
+      }
     }
 
     // Rendered lazily so security groups added through `connections` after
