@@ -66,6 +66,18 @@ export const API_CONSTRUCTS_PY_DEPENDENCIES = [
   IacMetadata
 >[];
 
+/**
+ * Path segments a REST API operation may have in the generated Terraform.
+ *
+ * API Gateway REST APIs need a resource per path segment, and instances of a
+ * Terraform resource cannot reference one another
+ * (https://github.com/hashicorp/terraform/issues/26697), so the module declares
+ * one resource per level up to this depth. Deeper paths fail the plan with a
+ * message pointing at the fix. Empty levels create no resources, so the only
+ * cost of the headroom is the generated configuration itself.
+ */
+const MAX_REST_PATH_DEPTH = 16;
+
 interface BackendOptions {
   type: 'trpc' | 'fastapi' | 'smithy';
   integrationPattern: 'isolated' | 'shared';
@@ -280,7 +292,11 @@ const addApiGatewayTerraformModules = (
       options.constructType,
     ),
     joinPathFragments(PACKAGES_DIR, SHARED_TERRAFORM_DIR, 'src', 'app', 'apis'),
-    { ...options, ...terraformProviderVersions() },
+    {
+      ...options,
+      maxRestPathDepth: MAX_REST_PATH_DEPTH,
+      ...terraformProviderVersions(),
+    },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },

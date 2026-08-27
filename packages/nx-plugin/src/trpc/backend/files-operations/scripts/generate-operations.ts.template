@@ -1,0 +1,40 @@
+import { mkdirSync, writeFileSync } from 'fs';
+import { dirname } from 'path';
+import { appRouter } from '../src/router<% if (esm) { %>.js<% } %>';
+
+/**
+ * Flattens the router into operation names (dot notation for nested routers)
+ * with the path and method each procedure is served on.
+ */
+const toOperations = (
+  router: any,
+  prefix = '',
+): Record<string, { path: string; method: string }> =>
+  Object.fromEntries(
+    Object.entries(router._def.procedures).flatMap(
+      ([name, procedureOrRouter]: [string, any]) => {
+        const fullPath = prefix ? `${prefix}.${name}` : name;
+        return procedureOrRouter._def?.router
+          ? Object.entries(toOperations(procedureOrRouter, fullPath))
+          : [
+              [
+                fullPath,
+                {
+                  path: fullPath,
+                  method:
+                    procedureOrRouter._def.type === 'mutation' ? 'POST' : 'GET',
+                },
+              ],
+            ];
+      },
+    ),
+  );
+
+// Sorted by operation name so the file is stable and does not churn the Terraform plan
+const operations = Object.fromEntries(
+  Object.entries(toOperations(appRouter)).sort(([a], [b]) => a.localeCompare(b)),
+);
+
+const outputFile = process.argv[2];
+mkdirSync(dirname(outputFile), { recursive: true });
+writeFileSync(outputFile, `${JSON.stringify(operations, null, 2)}\n`);

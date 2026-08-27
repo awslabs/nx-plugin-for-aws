@@ -264,6 +264,7 @@ export const pyFastApiProjectGenerator = async (
       apiNameKebabCase,
       specPath,
       specBuildTargetName: `${projectConfig.name}:openapi`,
+      integrationPattern,
     });
   }
 

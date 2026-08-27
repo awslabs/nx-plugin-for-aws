@@ -204,9 +204,19 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
           const outputs = readTerraformOutputs(opts.cwd);
           console.log('Terraform outputs:', outputs);
 
-          // tRPC
+          // tRPC — the isolated integration pattern (one Lambda per procedure)
           await invokeTrpcApi(outputs.my_api_endpoint, 'tRPC REST API');
           await invokeTrpcApi(outputs.my_api_http_endpoint, 'tRPC HTTP API');
+
+          // tRPC — the shared integration pattern (a single router Lambda)
+          await invokeTrpcApi(
+            outputs.my_api_shared_endpoint,
+            'tRPC REST API (shared)',
+          );
+          await invokeTrpcApi(
+            outputs.my_api_shared_http_endpoint,
+            'tRPC HTTP API (shared)',
+          );
 
           // FastAPI
           await invokeRestApi(outputs.py_api_endpoint, 'FastAPI REST');

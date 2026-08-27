@@ -425,5 +425,52 @@ describe('fastapi project generator', () => {
         'authorization = "COGNITO_USER_POOLS"',
       );
     });
+
+    it('should generate the operations metadata the isolated module reads', async () => {
+      await pyFastApiProjectGenerator(tree, {
+        name: 'test-api',
+        directory: 'apps',
+        infra: 'http-lambda',
+        auth: 'iam',
+        integrationPattern: 'isolated',
+        iac: 'terraform',
+      });
+
+      const terraformConfig = JSON.parse(
+        tree.read('packages/common/terraform/project.json', 'utf-8'),
+      );
+      const target = terraformConfig.targets['generate:test-api-operations'];
+
+      // The module reads the metadata with `file()`, so it must be generated
+      // before the shared terraform project is planned
+      expect(target).toBeDefined();
+      expect(target.options.commands[0]).toContain(
+        '@aws/nx-plugin:open-api#json-metadata',
+      );
+      expect(target.options.commands[0]).toContain(
+        'packages/common/terraform/src/generated/test-api',
+      );
+      expect(terraformConfig.targets.build.dependsOn).toContain(
+        'generate:test-api-operations',
+      );
+    });
+
+    it('should not generate operations metadata for the shared pattern', async () => {
+      await pyFastApiProjectGenerator(tree, {
+        name: 'test-api',
+        directory: 'apps',
+        infra: 'http-lambda',
+        auth: 'iam',
+        integrationPattern: 'shared',
+        iac: 'terraform',
+      });
+
+      const terraformConfig = JSON.parse(
+        tree.read('packages/common/terraform/project.json', 'utf-8'),
+      );
+      expect(
+        terraformConfig.targets['generate:test-api-operations'],
+      ).toBeUndefined();
+    });
   });
 });

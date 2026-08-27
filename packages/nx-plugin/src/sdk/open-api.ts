@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+export { openApiJsonMetadataGenerator } from '../open-api/json-metadata/generator.js';
+export type { OpenApiJsonMetadataGeneratorSchema } from '../open-api/json-metadata/schema';
 export {
   buildOpenApiCodeGenerationData,
   openApiTsClientGenerator,

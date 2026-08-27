@@ -3551,6 +3551,49 @@ resource "random_string" "suffix" {
   upper   = false
 }
 
+locals {
+  # Generated at build time from the API definition
+  operations_file = "\${path.module}/../../../generated/test-api/operations.json"
+  operations      = fileexists(local.operations_file) ? jsondecode(file(local.operations_file)) : {}
+
+  operation_slug = { for op in keys(local.operations) : op => replace(op, "/[^a-zA-Z0-9-_]/", "-") }
+  operation_hash = { for op in keys(local.operations) : op => substr(sha256(op), 0, 8) }
+
+  function_name = { for op in keys(local.operations) : op =>
+    "\${substr("TestApi-\${local.operation_slug[op]}", 0, 64 - length(local.operation_hash[op]) - length(random_string.suffix.result) - 2)}-\${local.operation_hash[op]}-\${random_string.suffix.result}"
+  }
+  role_name = { for op in keys(local.operations) : op =>
+    "\${substr("TestApi-\${local.operation_slug[op]}-role", 0, 64 - length(local.operation_hash[op]) - length(random_string.suffix.result) - 2)}-\${local.operation_hash[op]}-\${random_string.suffix.result}"
+  }
+
+  operation_path = { for op, details in local.operations : op =>
+    startswith(details.path, "/") ? details.path : "/\${details.path}"
+  }
+  route_key = { for op, details in local.operations : op =>
+    "\${upper(details.method)} \${local.operation_path[op]}"
+  }
+
+  permission_source_suffix = { for op, details in local.operations : op =>
+    "\${upper(details.method)}\${replace(local.operation_path[op], "/{[^}]*}/", "*")}"
+  }
+}
+
+resource "terraform_data" "operations_metadata" {
+  # Fails the plan when the operations metadata has not been generated
+  input = local.operations_file
+
+  lifecycle {
+    precondition {
+      condition     = fileexists(local.operations_file)
+      error_message = "Operations metadata not found at \${local.operations_file}. Build the TestApi project to generate it."
+    }
+    precondition {
+      condition     = length(local.operations) > 0
+      error_message = "No operations found in \${local.operations_file}. The TestApi API must define at least one operation."
+    }
+  }
+}
+
 # Resources
 
 # Create Lambda ZIP file from the bundle directory
@@ -3611,9 +3654,10 @@ resource "aws_vpc_security_group_egress_rule" "api_lambda_https" {
   description       = "Allow outbound HTTPS to AWS service endpoints"
 }
 
-# Lambda function
-# This configures a single "router" lambda to serve all requests
 resource "aws_lambda_function" "api_lambda" {
+  # One lambda function per operation, each serving just that operation
+  for_each = local.operations
+
   #checkov:skip=CKV_AWS_117:Lambda function is optionally deployed into a VPC via vpc_id/subnet_ids; not required for this use case
   #checkov:skip=CKV_AWS_116:Dead Letter Queue not required for this simple API use case
   #checkov:skip=CKV_AWS_272:Code signing not required for this use case
@@ -3622,8 +3666,8 @@ resource "aws_lambda_function" "api_lambda" {
   s3_bucket         = aws_s3_object.lambda_zip.bucket
   s3_key            = aws_s3_object.lambda_zip.key
   s3_object_version = aws_s3_object.lambda_zip.version_id
-  function_name    = "TestApiHandler-\${random_string.suffix.result}"
-  role            = aws_iam_role.lambda_execution_role.arn
+  function_name    = local.function_name[each.key]
+  role            = aws_iam_role.lambda_execution_role[each.key].arn
   handler         = "index.handler"
   runtime         = "nodejs22.x"
   timeout         = 30
@@ -3659,7 +3703,9 @@ resource "aws_lambda_function" "api_lambda" {
 
 # IAM role for Lambda execution
 resource "aws_iam_role" "lambda_execution_role" {
-  name = "TestApiHandler-execution-role-\${random_string.suffix.result}"
+  for_each = local.operations
+
+  name = local.role_name[each.key]
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -3679,28 +3725,34 @@ resource "aws_iam_role" "lambda_execution_role" {
 
 # Attach basic execution policy to Lambda role
 resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
+  for_each = local.operations
+
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-  role       = aws_iam_role.lambda_execution_role.name
+  role       = aws_iam_role.lambda_execution_role[each.key].name
 }
 
 # Attach X-Ray tracing policy to Lambda role
 resource "aws_iam_role_policy_attachment" "lambda_xray_execution" {
+  for_each = local.operations
+
   policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
-  role       = aws_iam_role.lambda_execution_role.name
+  role       = aws_iam_role.lambda_execution_role[each.key].name
 }
 
 # Attach VPC access policy to Lambda role when deployed into a VPC
 resource "aws_iam_role_policy_attachment" "lambda_vpc_access" {
-  count      = var.enable_vpc ? 1 : 0
+  for_each = var.enable_vpc ? local.operations : {}
+
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
-  role       = aws_iam_role.lambda_execution_role.name
+  role       = aws_iam_role.lambda_execution_role[each.key].name
 }
 
 # Additional IAM policies for Lambda (if provided)
 resource "aws_iam_role_policy" "lambda_additional_policies" {
-  count = length(local.lambda_policy_statements) > 0 ? 1 : 0
-  name  = "TestApiHandler-additional-policies-\${random_string.suffix.result}"
-  role  = aws_iam_role.lambda_execution_role.id
+  for_each = local.operations
+
+  name = "\${substr(local.function_name[each.key], 0, 55)}-policies"
+  role = aws_iam_role.lambda_execution_role[each.key].id
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -3727,8 +3779,10 @@ resource "aws_cloudwatch_log_group" "lambda_logs" {
   #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
   #checkov:skip=CKV_AWS_338:Log retention set to forever
   #checkov:skip=CKV_AWS_66:Log retention set to forever
-  name              = "/aws/lambda/TestApiHandler-\${random_string.suffix.result}"
-  tags              = var.tags
+  for_each = local.operations
+
+  name = "/aws/lambda/\${local.function_name[each.key]}"
+  tags = var.tags
 }
 
 
@@ -3747,9 +3801,11 @@ resource "aws_apigatewayv2_authorizer" "cognito_authorizer" {
 
 # Lambda integration for HTTP API
 resource "aws_apigatewayv2_integration" "lambda_integration" {
+  for_each = local.operations
+
   api_id           = module.http_api.api_id
   integration_type = "AWS_PROXY"
-  integration_uri  = aws_lambda_function.api_lambda.invoke_arn
+  integration_uri  = aws_lambda_function.api_lambda[each.key].invoke_arn
 
   payload_format_version = "2.0"
   timeout_milliseconds   = 30000
@@ -3757,15 +3813,13 @@ resource "aws_apigatewayv2_integration" "lambda_integration" {
   depends_on = [aws_lambda_function.api_lambda]
 }
 
-# Route for proxy integration (catches all requests)
-resource "aws_apigatewayv2_route" "proxy_routes" {
-  # NB: OPTIONS is omitted here since API Gateway manages responding to preflight requests
-  # when cors settings are configured
-  for_each = toset(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"])
+# One route per operation, each targeting that operation's integration
+resource "aws_apigatewayv2_route" "operation_routes" {
+  for_each = local.operations
 
   api_id    = module.http_api.api_id
-  route_key = "\${each.key} /{proxy+}"
-  target    = "integrations/\${aws_apigatewayv2_integration.lambda_integration.id}"
+  route_key = local.route_key[each.key]
+  target    = "integrations/\${aws_apigatewayv2_integration.lambda_integration[each.key].id}"
 
   authorization_type = "JWT"
   authorizer_id      = aws_apigatewayv2_authorizer.cognito_authorizer.id
@@ -3786,11 +3840,13 @@ module "add_url_to_runtime_config" {
 
 # Lambda permission for API Gateway to invoke the function
 resource "aws_lambda_permission" "api_gateway_invoke" {
+  for_each = local.operations
+
   statement_id  = "AllowExecutionFromAPIGateway"
   action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.api_lambda.function_name
+  function_name = aws_lambda_function.api_lambda[each.key].function_name
   principal     = "apigateway.amazonaws.com"
-  source_arn    = "\${module.http_api.api_execution_arn}/*/*"
+  source_arn    = "\${module.http_api.api_execution_arn}/*/\${local.permission_source_suffix[each.key]}"
 
   depends_on = [module.http_api, aws_lambda_function.api_lambda]
 }
@@ -3833,73 +3889,73 @@ output "stage_execution_arn" {
   value       = module.http_api.stage_execution_arn
 }
 
-# Lambda Function Outputs
-output "lambda_function_name" {
-  description = "Name of the Lambda function"
-  value       = aws_lambda_function.api_lambda.function_name
+# Lambda Function Outputs, keyed by operation name
+output "operations" {
+  description = "Names of the API operations, each with its own Lambda function"
+  value       = keys(local.operations)
 }
 
-output "lambda_function_arn" {
-  description = "ARN of the Lambda function"
-  value       = aws_lambda_function.api_lambda.arn
+output "lambda_function_names" {
+  description = "Name of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.function_name }
 }
 
-output "lambda_invoke_arn" {
-  description = "Invoke ARN of the Lambda function"
-  value       = aws_lambda_function.api_lambda.invoke_arn
+output "lambda_function_arns" {
+  description = "ARN of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.arn }
 }
 
-output "lambda_qualified_arn" {
-  description = "Qualified ARN of the Lambda function"
-  value       = aws_lambda_function.api_lambda.qualified_arn
+output "lambda_invoke_arns" {
+  description = "Invoke ARN of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.invoke_arn }
 }
 
-output "lambda_version" {
-  description = "Version of the Lambda function"
-  value       = aws_lambda_function.api_lambda.version
+output "lambda_qualified_arns" {
+  description = "Qualified ARN of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.qualified_arn }
+}
+
+output "lambda_versions" {
+  description = "Version of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.version }
 }
 
 output "lambda_source_code_hash" {
-  description = "Base64-encoded SHA256 hash of the Lambda deployment package"
-  value       = aws_lambda_function.api_lambda.source_code_hash
+  description = "Base64-encoded SHA256 hash of the Lambda deployment package, shared by every operation"
+  value       = data.archive_file.lambda_zip.output_base64sha256
 }
 
-output "lambda_source_code_size" {
-  description = "Size of the Lambda deployment package in bytes"
-  value       = aws_lambda_function.api_lambda.source_code_size
+# IAM Role Outputs, keyed by operation name
+output "lambda_execution_role_arns" {
+  description = "ARN of each operation's Lambda execution role, keyed by operation name"
+  value       = { for op, role in aws_iam_role.lambda_execution_role : op => role.arn }
 }
 
-# IAM Role Outputs
-output "lambda_execution_role_arn" {
-  description = "ARN of the Lambda execution role"
-  value       = aws_iam_role.lambda_execution_role.arn
-}
-
-output "lambda_execution_role_name" {
-  description = "Name of the Lambda execution role"
-  value       = aws_iam_role.lambda_execution_role.name
+output "lambda_execution_role_names" {
+  description = "Name of each operation's Lambda execution role, keyed by operation name. Attach additional policies to a specific operation's role by name."
+  value       = { for op, role in aws_iam_role.lambda_execution_role : op => role.name }
 }
 
 output "security_group_id" {
-  description = "Security group ID of the API Lambda function, for use in ingress rules on resources it must reach (e.g. a database). Null unless enable_vpc is true."
+  description = "Security group ID shared by the API Lambda functions, for use in ingress rules on resources they must reach (e.g. a database). Null unless enable_vpc is true."
   value       = var.enable_vpc ? aws_security_group.api_lambda[0].id : null
 }
 
-# Integration Outputs
-output "integration_id" {
-  description = "ID of the Lambda integration"
-  value       = aws_apigatewayv2_integration.lambda_integration.id
+# Integration Outputs, keyed by operation name
+output "integration_ids" {
+  description = "ID of each operation's Lambda integration, keyed by operation name"
+  value       = { for op, i in aws_apigatewayv2_integration.lambda_integration : op => i.id }
 }
 
-# CloudWatch Log Groups
-output "lambda_log_group_name" {
-  description = "Name of the Lambda CloudWatch log group"
-  value       = aws_cloudwatch_log_group.lambda_logs.name
+# CloudWatch Log Groups, keyed by operation name
+output "lambda_log_group_names" {
+  description = "Name of each operation's Lambda CloudWatch log group, keyed by operation name"
+  value       = { for op, lg in aws_cloudwatch_log_group.lambda_logs : op => lg.name }
 }
 
-output "lambda_log_group_arn" {
-  description = "ARN of the Lambda CloudWatch log group"
-  value       = aws_cloudwatch_log_group.lambda_logs.arn
+output "lambda_log_group_arns" {
+  description = "ARN of each operation's Lambda CloudWatch log group, keyed by operation name"
+  value       = { for op, lg in aws_cloudwatch_log_group.lambda_logs : op => lg.arn }
 }
 
 output "api_log_group_name" {
@@ -4291,6 +4347,49 @@ resource "random_string" "suffix" {
   upper   = false
 }
 
+locals {
+  # Generated at build time from the API definition
+  operations_file = "\${path.module}/../../../generated/test-api/operations.json"
+  operations      = fileexists(local.operations_file) ? jsondecode(file(local.operations_file)) : {}
+
+  operation_slug = { for op in keys(local.operations) : op => replace(op, "/[^a-zA-Z0-9-_]/", "-") }
+  operation_hash = { for op in keys(local.operations) : op => substr(sha256(op), 0, 8) }
+
+  function_name = { for op in keys(local.operations) : op =>
+    "\${substr("TestApi-\${local.operation_slug[op]}", 0, 64 - length(local.operation_hash[op]) - length(random_string.suffix.result) - 2)}-\${local.operation_hash[op]}-\${random_string.suffix.result}"
+  }
+  role_name = { for op in keys(local.operations) : op =>
+    "\${substr("TestApi-\${local.operation_slug[op]}-role", 0, 64 - length(local.operation_hash[op]) - length(random_string.suffix.result) - 2)}-\${local.operation_hash[op]}-\${random_string.suffix.result}"
+  }
+
+  operation_path = { for op, details in local.operations : op =>
+    startswith(details.path, "/") ? details.path : "/\${details.path}"
+  }
+  route_key = { for op, details in local.operations : op =>
+    "\${upper(details.method)} \${local.operation_path[op]}"
+  }
+
+  permission_source_suffix = { for op, details in local.operations : op =>
+    "\${upper(details.method)}\${replace(local.operation_path[op], "/{[^}]*}/", "*")}"
+  }
+}
+
+resource "terraform_data" "operations_metadata" {
+  # Fails the plan when the operations metadata has not been generated
+  input = local.operations_file
+
+  lifecycle {
+    precondition {
+      condition     = fileexists(local.operations_file)
+      error_message = "Operations metadata not found at \${local.operations_file}. Build the TestApi project to generate it."
+    }
+    precondition {
+      condition     = length(local.operations) > 0
+      error_message = "No operations found in \${local.operations_file}. The TestApi API must define at least one operation."
+    }
+  }
+}
+
 # Resources
 
 # Create Lambda ZIP file from the bundle directory
@@ -4351,9 +4450,10 @@ resource "aws_vpc_security_group_egress_rule" "api_lambda_https" {
   description       = "Allow outbound HTTPS to AWS service endpoints"
 }
 
-# Lambda function
-# This configures a single "router" lambda to serve all requests
 resource "aws_lambda_function" "api_lambda" {
+  # One lambda function per operation, each serving just that operation
+  for_each = local.operations
+
   #checkov:skip=CKV_AWS_117:Lambda function is optionally deployed into a VPC via vpc_id/subnet_ids; not required for this use case
   #checkov:skip=CKV_AWS_116:Dead Letter Queue not required for this simple API use case
   #checkov:skip=CKV_AWS_272:Code signing not required for this use case
@@ -4362,8 +4462,8 @@ resource "aws_lambda_function" "api_lambda" {
   s3_bucket         = aws_s3_object.lambda_zip.bucket
   s3_key            = aws_s3_object.lambda_zip.key
   s3_object_version = aws_s3_object.lambda_zip.version_id
-  function_name    = "TestApiHandler-\${random_string.suffix.result}"
-  role            = aws_iam_role.lambda_execution_role.arn
+  function_name    = local.function_name[each.key]
+  role            = aws_iam_role.lambda_execution_role[each.key].arn
   handler         = "index.handler"
   runtime         = "nodejs22.x"
   timeout         = 30
@@ -4399,7 +4499,9 @@ resource "aws_lambda_function" "api_lambda" {
 
 # IAM role for Lambda execution
 resource "aws_iam_role" "lambda_execution_role" {
-  name = "TestApiHandler-execution-role-\${random_string.suffix.result}"
+  for_each = local.operations
+
+  name = local.role_name[each.key]
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -4419,28 +4521,34 @@ resource "aws_iam_role" "lambda_execution_role" {
 
 # Attach basic execution policy to Lambda role
 resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
+  for_each = local.operations
+
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-  role       = aws_iam_role.lambda_execution_role.name
+  role       = aws_iam_role.lambda_execution_role[each.key].name
 }
 
 # Attach X-Ray tracing policy to Lambda role
 resource "aws_iam_role_policy_attachment" "lambda_xray_execution" {
+  for_each = local.operations
+
   policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
-  role       = aws_iam_role.lambda_execution_role.name
+  role       = aws_iam_role.lambda_execution_role[each.key].name
 }
 
 # Attach VPC access policy to Lambda role when deployed into a VPC
 resource "aws_iam_role_policy_attachment" "lambda_vpc_access" {
-  count      = var.enable_vpc ? 1 : 0
+  for_each = var.enable_vpc ? local.operations : {}
+
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
-  role       = aws_iam_role.lambda_execution_role.name
+  role       = aws_iam_role.lambda_execution_role[each.key].name
 }
 
 # Additional IAM policies for Lambda (if provided)
 resource "aws_iam_role_policy" "lambda_additional_policies" {
-  count = length(local.lambda_policy_statements) > 0 ? 1 : 0
-  name  = "TestApiHandler-additional-policies-\${random_string.suffix.result}"
-  role  = aws_iam_role.lambda_execution_role.id
+  for_each = local.operations
+
+  name = "\${substr(local.function_name[each.key], 0, 55)}-policies"
+  role = aws_iam_role.lambda_execution_role[each.key].id
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -4467,8 +4575,10 @@ resource "aws_cloudwatch_log_group" "lambda_logs" {
   #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
   #checkov:skip=CKV_AWS_338:Log retention set to forever
   #checkov:skip=CKV_AWS_66:Log retention set to forever
-  name              = "/aws/lambda/TestApiHandler-\${random_string.suffix.result}"
-  tags              = var.tags
+  for_each = local.operations
+
+  name = "/aws/lambda/\${local.function_name[each.key]}"
+  tags = var.tags
 }
 
 
@@ -4569,9 +4679,11 @@ resource "aws_lambda_permission" "authorizer_invoke" {
 
 # Lambda integration for HTTP API
 resource "aws_apigatewayv2_integration" "lambda_integration" {
+  for_each = local.operations
+
   api_id           = module.http_api.api_id
   integration_type = "AWS_PROXY"
-  integration_uri  = aws_lambda_function.api_lambda.invoke_arn
+  integration_uri  = aws_lambda_function.api_lambda[each.key].invoke_arn
 
   payload_format_version = "2.0"
   timeout_milliseconds   = 30000
@@ -4579,15 +4691,13 @@ resource "aws_apigatewayv2_integration" "lambda_integration" {
   depends_on = [aws_lambda_function.api_lambda]
 }
 
-# Route for proxy integration (catches all requests)
-resource "aws_apigatewayv2_route" "proxy_routes" {
-  # NB: OPTIONS is omitted here since API Gateway manages responding to preflight requests
-  # when cors settings are configured
-  for_each = toset(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"])
+# One route per operation, each targeting that operation's integration
+resource "aws_apigatewayv2_route" "operation_routes" {
+  for_each = local.operations
 
   api_id    = module.http_api.api_id
-  route_key = "\${each.key} /{proxy+}"
-  target    = "integrations/\${aws_apigatewayv2_integration.lambda_integration.id}"
+  route_key = local.route_key[each.key]
+  target    = "integrations/\${aws_apigatewayv2_integration.lambda_integration[each.key].id}"
 
   authorization_type = "CUSTOM"
   authorizer_id      = aws_apigatewayv2_authorizer.custom_authorizer.id
@@ -4608,11 +4718,13 @@ module "add_url_to_runtime_config" {
 
 # Lambda permission for API Gateway to invoke the function
 resource "aws_lambda_permission" "api_gateway_invoke" {
+  for_each = local.operations
+
   statement_id  = "AllowExecutionFromAPIGateway"
   action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.api_lambda.function_name
+  function_name = aws_lambda_function.api_lambda[each.key].function_name
   principal     = "apigateway.amazonaws.com"
-  source_arn    = "\${module.http_api.api_execution_arn}/*/*"
+  source_arn    = "\${module.http_api.api_execution_arn}/*/\${local.permission_source_suffix[each.key]}"
 
   depends_on = [module.http_api, aws_lambda_function.api_lambda]
 }
@@ -4655,73 +4767,73 @@ output "stage_execution_arn" {
   value       = module.http_api.stage_execution_arn
 }
 
-# Lambda Function Outputs
-output "lambda_function_name" {
-  description = "Name of the Lambda function"
-  value       = aws_lambda_function.api_lambda.function_name
+# Lambda Function Outputs, keyed by operation name
+output "operations" {
+  description = "Names of the API operations, each with its own Lambda function"
+  value       = keys(local.operations)
 }
 
-output "lambda_function_arn" {
-  description = "ARN of the Lambda function"
-  value       = aws_lambda_function.api_lambda.arn
+output "lambda_function_names" {
+  description = "Name of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.function_name }
 }
 
-output "lambda_invoke_arn" {
-  description = "Invoke ARN of the Lambda function"
-  value       = aws_lambda_function.api_lambda.invoke_arn
+output "lambda_function_arns" {
+  description = "ARN of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.arn }
 }
 
-output "lambda_qualified_arn" {
-  description = "Qualified ARN of the Lambda function"
-  value       = aws_lambda_function.api_lambda.qualified_arn
+output "lambda_invoke_arns" {
+  description = "Invoke ARN of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.invoke_arn }
 }
 
-output "lambda_version" {
-  description = "Version of the Lambda function"
-  value       = aws_lambda_function.api_lambda.version
+output "lambda_qualified_arns" {
+  description = "Qualified ARN of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.qualified_arn }
+}
+
+output "lambda_versions" {
+  description = "Version of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.version }
 }
 
 output "lambda_source_code_hash" {
-  description = "Base64-encoded SHA256 hash of the Lambda deployment package"
-  value       = aws_lambda_function.api_lambda.source_code_hash
+  description = "Base64-encoded SHA256 hash of the Lambda deployment package, shared by every operation"
+  value       = data.archive_file.lambda_zip.output_base64sha256
 }
 
-output "lambda_source_code_size" {
-  description = "Size of the Lambda deployment package in bytes"
-  value       = aws_lambda_function.api_lambda.source_code_size
+# IAM Role Outputs, keyed by operation name
+output "lambda_execution_role_arns" {
+  description = "ARN of each operation's Lambda execution role, keyed by operation name"
+  value       = { for op, role in aws_iam_role.lambda_execution_role : op => role.arn }
 }
 
-# IAM Role Outputs
-output "lambda_execution_role_arn" {
-  description = "ARN of the Lambda execution role"
-  value       = aws_iam_role.lambda_execution_role.arn
-}
-
-output "lambda_execution_role_name" {
-  description = "Name of the Lambda execution role"
-  value       = aws_iam_role.lambda_execution_role.name
+output "lambda_execution_role_names" {
+  description = "Name of each operation's Lambda execution role, keyed by operation name. Attach additional policies to a specific operation's role by name."
+  value       = { for op, role in aws_iam_role.lambda_execution_role : op => role.name }
 }
 
 output "security_group_id" {
-  description = "Security group ID of the API Lambda function, for use in ingress rules on resources it must reach (e.g. a database). Null unless enable_vpc is true."
+  description = "Security group ID shared by the API Lambda functions, for use in ingress rules on resources they must reach (e.g. a database). Null unless enable_vpc is true."
   value       = var.enable_vpc ? aws_security_group.api_lambda[0].id : null
 }
 
-# Integration Outputs
-output "integration_id" {
-  description = "ID of the Lambda integration"
-  value       = aws_apigatewayv2_integration.lambda_integration.id
+# Integration Outputs, keyed by operation name
+output "integration_ids" {
+  description = "ID of each operation's Lambda integration, keyed by operation name"
+  value       = { for op, i in aws_apigatewayv2_integration.lambda_integration : op => i.id }
 }
 
-# CloudWatch Log Groups
-output "lambda_log_group_name" {
-  description = "Name of the Lambda CloudWatch log group"
-  value       = aws_cloudwatch_log_group.lambda_logs.name
+# CloudWatch Log Groups, keyed by operation name
+output "lambda_log_group_names" {
+  description = "Name of each operation's Lambda CloudWatch log group, keyed by operation name"
+  value       = { for op, lg in aws_cloudwatch_log_group.lambda_logs : op => lg.name }
 }
 
-output "lambda_log_group_arn" {
-  description = "ARN of the Lambda CloudWatch log group"
-  value       = aws_cloudwatch_log_group.lambda_logs.arn
+output "lambda_log_group_arns" {
+  description = "ARN of each operation's Lambda CloudWatch log group, keyed by operation name"
+  value       = { for op, lg in aws_cloudwatch_log_group.lambda_logs : op => lg.arn }
 }
 
 output "api_log_group_name" {
@@ -5113,6 +5225,49 @@ resource "random_string" "suffix" {
   upper   = false
 }
 
+locals {
+  # Generated at build time from the API definition
+  operations_file = "\${path.module}/../../../generated/test-api/operations.json"
+  operations      = fileexists(local.operations_file) ? jsondecode(file(local.operations_file)) : {}
+
+  operation_slug = { for op in keys(local.operations) : op => replace(op, "/[^a-zA-Z0-9-_]/", "-") }
+  operation_hash = { for op in keys(local.operations) : op => substr(sha256(op), 0, 8) }
+
+  function_name = { for op in keys(local.operations) : op =>
+    "\${substr("TestApi-\${local.operation_slug[op]}", 0, 64 - length(local.operation_hash[op]) - length(random_string.suffix.result) - 2)}-\${local.operation_hash[op]}-\${random_string.suffix.result}"
+  }
+  role_name = { for op in keys(local.operations) : op =>
+    "\${substr("TestApi-\${local.operation_slug[op]}-role", 0, 64 - length(local.operation_hash[op]) - length(random_string.suffix.result) - 2)}-\${local.operation_hash[op]}-\${random_string.suffix.result}"
+  }
+
+  operation_path = { for op, details in local.operations : op =>
+    startswith(details.path, "/") ? details.path : "/\${details.path}"
+  }
+  route_key = { for op, details in local.operations : op =>
+    "\${upper(details.method)} \${local.operation_path[op]}"
+  }
+
+  permission_source_suffix = { for op, details in local.operations : op =>
+    "\${upper(details.method)}\${replace(local.operation_path[op], "/{[^}]*}/", "*")}"
+  }
+}
+
+resource "terraform_data" "operations_metadata" {
+  # Fails the plan when the operations metadata has not been generated
+  input = local.operations_file
+
+  lifecycle {
+    precondition {
+      condition     = fileexists(local.operations_file)
+      error_message = "Operations metadata not found at \${local.operations_file}. Build the TestApi project to generate it."
+    }
+    precondition {
+      condition     = length(local.operations) > 0
+      error_message = "No operations found in \${local.operations_file}. The TestApi API must define at least one operation."
+    }
+  }
+}
+
 # Resources
 
 # Create Lambda ZIP file from the bundle directory
@@ -5173,9 +5328,10 @@ resource "aws_vpc_security_group_egress_rule" "api_lambda_https" {
   description       = "Allow outbound HTTPS to AWS service endpoints"
 }
 
-# Lambda function
-# This configures a single "router" lambda to serve all requests
 resource "aws_lambda_function" "api_lambda" {
+  # One lambda function per operation, each serving just that operation
+  for_each = local.operations
+
   #checkov:skip=CKV_AWS_117:Lambda function is optionally deployed into a VPC via vpc_id/subnet_ids; not required for this use case
   #checkov:skip=CKV_AWS_116:Dead Letter Queue not required for this simple API use case
   #checkov:skip=CKV_AWS_272:Code signing not required for this use case
@@ -5184,8 +5340,8 @@ resource "aws_lambda_function" "api_lambda" {
   s3_bucket         = aws_s3_object.lambda_zip.bucket
   s3_key            = aws_s3_object.lambda_zip.key
   s3_object_version = aws_s3_object.lambda_zip.version_id
-  function_name    = "TestApiHandler-\${random_string.suffix.result}"
-  role            = aws_iam_role.lambda_execution_role.arn
+  function_name    = local.function_name[each.key]
+  role            = aws_iam_role.lambda_execution_role[each.key].arn
   handler         = "index.handler"
   runtime         = "nodejs22.x"
   timeout         = 30
@@ -5221,7 +5377,9 @@ resource "aws_lambda_function" "api_lambda" {
 
 # IAM role for Lambda execution
 resource "aws_iam_role" "lambda_execution_role" {
-  name = "TestApiHandler-execution-role-\${random_string.suffix.result}"
+  for_each = local.operations
+
+  name = local.role_name[each.key]
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -5241,28 +5399,34 @@ resource "aws_iam_role" "lambda_execution_role" {
 
 # Attach basic execution policy to Lambda role
 resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
+  for_each = local.operations
+
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-  role       = aws_iam_role.lambda_execution_role.name
+  role       = aws_iam_role.lambda_execution_role[each.key].name
 }
 
 # Attach X-Ray tracing policy to Lambda role
 resource "aws_iam_role_policy_attachment" "lambda_xray_execution" {
+  for_each = local.operations
+
   policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
-  role       = aws_iam_role.lambda_execution_role.name
+  role       = aws_iam_role.lambda_execution_role[each.key].name
 }
 
 # Attach VPC access policy to Lambda role when deployed into a VPC
 resource "aws_iam_role_policy_attachment" "lambda_vpc_access" {
-  count      = var.enable_vpc ? 1 : 0
+  for_each = var.enable_vpc ? local.operations : {}
+
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
-  role       = aws_iam_role.lambda_execution_role.name
+  role       = aws_iam_role.lambda_execution_role[each.key].name
 }
 
 # Additional IAM policies for Lambda (if provided)
 resource "aws_iam_role_policy" "lambda_additional_policies" {
-  count = length(local.lambda_policy_statements) > 0 ? 1 : 0
-  name  = "TestApiHandler-additional-policies-\${random_string.suffix.result}"
-  role  = aws_iam_role.lambda_execution_role.id
+  for_each = local.operations
+
+  name = "\${substr(local.function_name[each.key], 0, 55)}-policies"
+  role = aws_iam_role.lambda_execution_role[each.key].id
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -5289,17 +5453,21 @@ resource "aws_cloudwatch_log_group" "lambda_logs" {
   #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
   #checkov:skip=CKV_AWS_338:Log retention set to forever
   #checkov:skip=CKV_AWS_66:Log retention set to forever
-  name              = "/aws/lambda/TestApiHandler-\${random_string.suffix.result}"
-  tags              = var.tags
+  for_each = local.operations
+
+  name = "/aws/lambda/\${local.function_name[each.key]}"
+  tags = var.tags
 }
 
 
 
 # Lambda integration for HTTP API
 resource "aws_apigatewayv2_integration" "lambda_integration" {
+  for_each = local.operations
+
   api_id           = module.http_api.api_id
   integration_type = "AWS_PROXY"
-  integration_uri  = aws_lambda_function.api_lambda.invoke_arn
+  integration_uri  = aws_lambda_function.api_lambda[each.key].invoke_arn
 
   payload_format_version = "2.0"
   timeout_milliseconds   = 30000
@@ -5307,15 +5475,13 @@ resource "aws_apigatewayv2_integration" "lambda_integration" {
   depends_on = [aws_lambda_function.api_lambda]
 }
 
-# Route for proxy integration (catches all requests)
-resource "aws_apigatewayv2_route" "proxy_routes" {
-  # NB: OPTIONS is omitted here since API Gateway manages responding to preflight requests
-  # when cors settings are configured
-  for_each = toset(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"])
+# One route per operation, each targeting that operation's integration
+resource "aws_apigatewayv2_route" "operation_routes" {
+  for_each = local.operations
 
   api_id    = module.http_api.api_id
-  route_key = "\${each.key} /{proxy+}"
-  target    = "integrations/\${aws_apigatewayv2_integration.lambda_integration.id}"
+  route_key = local.route_key[each.key]
+  target    = "integrations/\${aws_apigatewayv2_integration.lambda_integration[each.key].id}"
 
   authorization_type = "AWS_IAM"
 
@@ -5335,11 +5501,13 @@ module "add_url_to_runtime_config" {
 
 # Lambda permission for API Gateway to invoke the function
 resource "aws_lambda_permission" "api_gateway_invoke" {
+  for_each = local.operations
+
   statement_id  = "AllowExecutionFromAPIGateway"
   action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.api_lambda.function_name
+  function_name = aws_lambda_function.api_lambda[each.key].function_name
   principal     = "apigateway.amazonaws.com"
-  source_arn    = "\${module.http_api.api_execution_arn}/*/*"
+  source_arn    = "\${module.http_api.api_execution_arn}/*/\${local.permission_source_suffix[each.key]}"
 
   depends_on = [module.http_api, aws_lambda_function.api_lambda]
 }
@@ -5382,73 +5550,73 @@ output "stage_execution_arn" {
   value       = module.http_api.stage_execution_arn
 }
 
-# Lambda Function Outputs
-output "lambda_function_name" {
-  description = "Name of the Lambda function"
-  value       = aws_lambda_function.api_lambda.function_name
+# Lambda Function Outputs, keyed by operation name
+output "operations" {
+  description = "Names of the API operations, each with its own Lambda function"
+  value       = keys(local.operations)
 }
 
-output "lambda_function_arn" {
-  description = "ARN of the Lambda function"
-  value       = aws_lambda_function.api_lambda.arn
+output "lambda_function_names" {
+  description = "Name of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.function_name }
 }
 
-output "lambda_invoke_arn" {
-  description = "Invoke ARN of the Lambda function"
-  value       = aws_lambda_function.api_lambda.invoke_arn
+output "lambda_function_arns" {
+  description = "ARN of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.arn }
 }
 
-output "lambda_qualified_arn" {
-  description = "Qualified ARN of the Lambda function"
-  value       = aws_lambda_function.api_lambda.qualified_arn
+output "lambda_invoke_arns" {
+  description = "Invoke ARN of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.invoke_arn }
 }
 
-output "lambda_version" {
-  description = "Version of the Lambda function"
-  value       = aws_lambda_function.api_lambda.version
+output "lambda_qualified_arns" {
+  description = "Qualified ARN of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.qualified_arn }
+}
+
+output "lambda_versions" {
+  description = "Version of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.version }
 }
 
 output "lambda_source_code_hash" {
-  description = "Base64-encoded SHA256 hash of the Lambda deployment package"
-  value       = aws_lambda_function.api_lambda.source_code_hash
+  description = "Base64-encoded SHA256 hash of the Lambda deployment package, shared by every operation"
+  value       = data.archive_file.lambda_zip.output_base64sha256
 }
 
-output "lambda_source_code_size" {
-  description = "Size of the Lambda deployment package in bytes"
-  value       = aws_lambda_function.api_lambda.source_code_size
+# IAM Role Outputs, keyed by operation name
+output "lambda_execution_role_arns" {
+  description = "ARN of each operation's Lambda execution role, keyed by operation name"
+  value       = { for op, role in aws_iam_role.lambda_execution_role : op => role.arn }
 }
 
-# IAM Role Outputs
-output "lambda_execution_role_arn" {
-  description = "ARN of the Lambda execution role"
-  value       = aws_iam_role.lambda_execution_role.arn
-}
-
-output "lambda_execution_role_name" {
-  description = "Name of the Lambda execution role"
-  value       = aws_iam_role.lambda_execution_role.name
+output "lambda_execution_role_names" {
+  description = "Name of each operation's Lambda execution role, keyed by operation name. Attach additional policies to a specific operation's role by name."
+  value       = { for op, role in aws_iam_role.lambda_execution_role : op => role.name }
 }
 
 output "security_group_id" {
-  description = "Security group ID of the API Lambda function, for use in ingress rules on resources it must reach (e.g. a database). Null unless enable_vpc is true."
+  description = "Security group ID shared by the API Lambda functions, for use in ingress rules on resources they must reach (e.g. a database). Null unless enable_vpc is true."
   value       = var.enable_vpc ? aws_security_group.api_lambda[0].id : null
 }
 
-# Integration Outputs
-output "integration_id" {
-  description = "ID of the Lambda integration"
-  value       = aws_apigatewayv2_integration.lambda_integration.id
+# Integration Outputs, keyed by operation name
+output "integration_ids" {
+  description = "ID of each operation's Lambda integration, keyed by operation name"
+  value       = { for op, i in aws_apigatewayv2_integration.lambda_integration : op => i.id }
 }
 
-# CloudWatch Log Groups
-output "lambda_log_group_name" {
-  description = "Name of the Lambda CloudWatch log group"
-  value       = aws_cloudwatch_log_group.lambda_logs.name
+# CloudWatch Log Groups, keyed by operation name
+output "lambda_log_group_names" {
+  description = "Name of each operation's Lambda CloudWatch log group, keyed by operation name"
+  value       = { for op, lg in aws_cloudwatch_log_group.lambda_logs : op => lg.name }
 }
 
-output "lambda_log_group_arn" {
-  description = "ARN of the Lambda CloudWatch log group"
-  value       = aws_cloudwatch_log_group.lambda_logs.arn
+output "lambda_log_group_arns" {
+  description = "ARN of each operation's Lambda CloudWatch log group, keyed by operation name"
+  value       = { for op, lg in aws_cloudwatch_log_group.lambda_logs : op => lg.arn }
 }
 
 output "api_log_group_name" {
@@ -5908,6 +6076,235 @@ resource "random_string" "suffix" {
   upper   = false
 }
 
+locals {
+  # Generated at build time from the API definition
+  operations_file = "\${path.module}/../../../generated/test-api/operations.json"
+  operations      = fileexists(local.operations_file) ? jsondecode(file(local.operations_file)) : {}
+
+  operation_slug = { for op in keys(local.operations) : op => replace(op, "/[^a-zA-Z0-9-_]/", "-") }
+  operation_hash = { for op in keys(local.operations) : op => substr(sha256(op), 0, 8) }
+
+  function_name = { for op in keys(local.operations) : op =>
+    "\${substr("TestApi-\${local.operation_slug[op]}", 0, 64 - length(local.operation_hash[op]) - length(random_string.suffix.result) - 2)}-\${local.operation_hash[op]}-\${random_string.suffix.result}"
+  }
+  role_name = { for op in keys(local.operations) : op =>
+    "\${substr("TestApi-\${local.operation_slug[op]}-role", 0, 64 - length(local.operation_hash[op]) - length(random_string.suffix.result) - 2)}-\${local.operation_hash[op]}-\${random_string.suffix.result}"
+  }
+
+  # A REST API needs a resource per path segment, so each operation's path is
+  # split into the distinct path prefixes the resource tree is built from below
+  operation_segments = { for op, details in local.operations : op => compact(split("/", details.path)) }
+
+  path_nodes = merge([
+    for op, segments in local.operation_segments : {
+      for i, segment in segments : join("/", slice(segments, 0, i + 1)) => {
+        depth  = i
+        parent = i == 0 ? "" : join("/", slice(segments, 0, i))
+        part   = segment
+      }
+    }
+  ]...)
+
+  # Instances of a resource cannot reference one another, so each depth is a
+  # separate resource. Deeper paths are reported by the precondition below.
+  max_path_depth = 16
+  path_nodes_by_depth = { for depth in range(local.max_path_depth) : depth => {
+    for path, node in local.path_nodes : path => node if node.depth == depth
+  } }
+  paths_too_deep = [for path, node in local.path_nodes : path if node.depth >= local.max_path_depth]
+
+  resource_ids = merge(
+    { for path, resource in aws_api_gateway_resource.path_depth_0 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_1 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_2 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_3 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_4 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_5 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_6 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_7 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_8 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_9 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_10 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_11 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_12 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_13 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_14 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_15 : path => resource.id },
+  )
+
+  operation_resource_id = { for op, segments in local.operation_segments : op =>
+    local.resource_ids[join("/", segments)]
+  }
+
+  permission_source_suffix = { for op, details in local.operations : op =>
+    "\${upper(details.method)}/\${replace(join("/", local.operation_segments[op]), "/{[^}]*}/", "*")}"
+  }
+}
+
+resource "terraform_data" "operations_metadata" {
+  # Fails the plan when the operations metadata has not been generated
+  input = local.operations_file
+
+  lifecycle {
+    precondition {
+      condition     = fileexists(local.operations_file)
+      error_message = "Operations metadata not found at \${local.operations_file}. Build the TestApi project to generate it."
+    }
+    precondition {
+      condition     = length(local.operations) > 0
+      error_message = "No operations found in \${local.operations_file}. The TestApi API must define at least one operation."
+    }
+    precondition {
+      condition     = length(local.paths_too_deep) == 0
+      error_message = "Operation paths exceed the supported depth of \${local.max_path_depth} segments: \${join(", ", local.paths_too_deep)}. Add further aws_api_gateway_resource levels to this module to support them."
+    }
+  }
+}
+
+# API Gateway resources at path depth 0
+resource "aws_api_gateway_resource" "path_depth_0" {
+  for_each = local.path_nodes_by_depth[0]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = module.rest_api.api_root_resource_id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 1
+resource "aws_api_gateway_resource" "path_depth_1" {
+  for_each = local.path_nodes_by_depth[1]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_0[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 2
+resource "aws_api_gateway_resource" "path_depth_2" {
+  for_each = local.path_nodes_by_depth[2]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_1[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 3
+resource "aws_api_gateway_resource" "path_depth_3" {
+  for_each = local.path_nodes_by_depth[3]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_2[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 4
+resource "aws_api_gateway_resource" "path_depth_4" {
+  for_each = local.path_nodes_by_depth[4]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_3[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 5
+resource "aws_api_gateway_resource" "path_depth_5" {
+  for_each = local.path_nodes_by_depth[5]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_4[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 6
+resource "aws_api_gateway_resource" "path_depth_6" {
+  for_each = local.path_nodes_by_depth[6]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_5[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 7
+resource "aws_api_gateway_resource" "path_depth_7" {
+  for_each = local.path_nodes_by_depth[7]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_6[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 8
+resource "aws_api_gateway_resource" "path_depth_8" {
+  for_each = local.path_nodes_by_depth[8]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_7[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 9
+resource "aws_api_gateway_resource" "path_depth_9" {
+  for_each = local.path_nodes_by_depth[9]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_8[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 10
+resource "aws_api_gateway_resource" "path_depth_10" {
+  for_each = local.path_nodes_by_depth[10]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_9[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 11
+resource "aws_api_gateway_resource" "path_depth_11" {
+  for_each = local.path_nodes_by_depth[11]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_10[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 12
+resource "aws_api_gateway_resource" "path_depth_12" {
+  for_each = local.path_nodes_by_depth[12]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_11[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 13
+resource "aws_api_gateway_resource" "path_depth_13" {
+  for_each = local.path_nodes_by_depth[13]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_12[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 14
+resource "aws_api_gateway_resource" "path_depth_14" {
+  for_each = local.path_nodes_by_depth[14]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_13[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 15
+resource "aws_api_gateway_resource" "path_depth_15" {
+  for_each = local.path_nodes_by_depth[15]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_14[each.value.parent].id
+  path_part   = each.value.part
+}
+
 # Resources
 
 # Create Lambda ZIP file from the bundle directory
@@ -5982,8 +6379,10 @@ resource "aws_vpc_security_group_egress_rule" "api_lambda_https" {
   description       = "Allow outbound HTTPS to AWS service endpoints"
 }
 
-# Lambda function
 resource "aws_lambda_function" "api_lambda" {
+  # One lambda function per operation, each serving just that operation
+  for_each = local.operations
+
   #checkov:skip=CKV_AWS_117:Lambda function is optionally deployed into a VPC via vpc_id/subnet_ids; not required for this use case
   #checkov:skip=CKV_AWS_116:Dead Letter Queue not required for this simple API use case
   #checkov:skip=CKV_AWS_272:Code signing not required for this use case
@@ -5992,8 +6391,8 @@ resource "aws_lambda_function" "api_lambda" {
   s3_bucket         = aws_s3_object.lambda_zip.bucket
   s3_key            = aws_s3_object.lambda_zip.key
   s3_object_version = aws_s3_object.lambda_zip.version_id
-  function_name    = "TestApiHandler-\${random_string.suffix.result}"
-  role            = aws_iam_role.lambda_execution_role.arn
+  function_name    = local.function_name[each.key]
+  role            = aws_iam_role.lambda_execution_role[each.key].arn
   handler         = "index.handler"
   runtime         = "nodejs22.x"
   timeout         = 30
@@ -6029,7 +6428,9 @@ resource "aws_lambda_function" "api_lambda" {
 
 # IAM role for Lambda execution
 resource "aws_iam_role" "lambda_execution_role" {
-  name = "TestApiHandler-execution-role-\${random_string.suffix.result}"
+  for_each = local.operations
+
+  name = local.role_name[each.key]
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -6049,28 +6450,34 @@ resource "aws_iam_role" "lambda_execution_role" {
 
 # Attach basic execution policy to Lambda role
 resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
+  for_each = local.operations
+
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-  role       = aws_iam_role.lambda_execution_role.name
+  role       = aws_iam_role.lambda_execution_role[each.key].name
 }
 
 # Attach X-Ray tracing policy to Lambda role
 resource "aws_iam_role_policy_attachment" "lambda_xray_execution" {
+  for_each = local.operations
+
   policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
-  role       = aws_iam_role.lambda_execution_role.name
+  role       = aws_iam_role.lambda_execution_role[each.key].name
 }
 
 # Attach VPC access policy to Lambda role when deployed into a VPC
 resource "aws_iam_role_policy_attachment" "lambda_vpc_access" {
-  count      = var.enable_vpc ? 1 : 0
+  for_each = var.enable_vpc ? local.operations : {}
+
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
-  role       = aws_iam_role.lambda_execution_role.name
+  role       = aws_iam_role.lambda_execution_role[each.key].name
 }
 
 # Additional IAM policies for Lambda (if provided)
 resource "aws_iam_role_policy" "lambda_additional_policies" {
-  count = length(local.lambda_policy_statements) > 0 ? 1 : 0
-  name  = "TestApiHandler-additional-policies-\${random_string.suffix.result}"
-  role  = aws_iam_role.lambda_execution_role.id
+  for_each = local.operations
+
+  name = "\${substr(local.function_name[each.key], 0, 55)}-policies"
+  role = aws_iam_role.lambda_execution_role[each.key].id
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -6097,8 +6504,10 @@ resource "aws_cloudwatch_log_group" "lambda_logs" {
   #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
   #checkov:skip=CKV_AWS_338:Log retention set to forever
   #checkov:skip=CKV_AWS_66:Log retention set to forever
-  name              = "/aws/lambda/TestApiHandler-\${random_string.suffix.result}"
-  tags              = var.tags
+  for_each = local.operations
+
+  name = "/aws/lambda/\${local.function_name[each.key]}"
+  tags = var.tags
 }
 
 
@@ -6111,33 +6520,14 @@ resource "aws_api_gateway_authorizer" "cognito_authorizer" {
   identity_source       = "method.request.header.Authorization"
 }
 
-# Create proxy resource (captures all paths)
-resource "aws_api_gateway_resource" "proxy_resource" {
-  rest_api_id = module.rest_api.api_id
-  parent_id   = module.rest_api.api_root_resource_id
-  path_part   = "{proxy+}"
-}
-
-# Lambda integration for REST API
-resource "aws_api_gateway_integration" "lambda_integration" {
-  rest_api_id = module.rest_api.api_id
-  resource_id = aws_api_gateway_resource.proxy_resource.id
-  http_method = aws_api_gateway_method.proxy_method.http_method
-
-  integration_http_method = "POST"
-  type                    = "AWS_PROXY"
-  uri                     = aws_lambda_function.api_lambda.response_streaming_invoke_arn
-  response_transfer_mode  = "STREAM"
-
-  depends_on = [aws_lambda_function.api_lambda]
-}
-
-# Method for proxy integration
-resource "aws_api_gateway_method" "proxy_method" {
+# Method per operation
+resource "aws_api_gateway_method" "operation_methods" {
   #checkov:skip=CKV2_AWS_53:Request validation not required for proxy integration as Lambda handles validation
+  for_each = local.operations
+
   rest_api_id   = module.rest_api.api_id
-  resource_id   = aws_api_gateway_resource.proxy_resource.id
-  http_method   = "ANY"
+  resource_id   = local.operation_resource_id[each.key]
+  http_method   = upper(each.value.method)
 
   authorization = "COGNITO_USER_POOLS"
   authorizer_id = aws_api_gateway_authorizer.cognito_authorizer.id
@@ -6145,28 +6535,51 @@ resource "aws_api_gateway_method" "proxy_method" {
   # and 'aws.cognito.signin.user.admin' (Cognito admin/SRP auth APIs).
   authorization_scopes = ["openid", "aws.cognito.signin.user.admin"]
 
+  # Path parameters must be declared on the method
   request_parameters = {
-    "method.request.path.proxy" = true
+    for segment in local.operation_segments[each.key] :
+    "method.request.path.\${trimsuffix(trimprefix(segment, "{"), "}")}" => true
+    if startswith(segment, "{")
   }
 
   depends_on = [aws_api_gateway_authorizer.cognito_authorizer]
 }
 
-# OPTIONS method for CORS preflight
+# Lambda integration per operation
+resource "aws_api_gateway_integration" "lambda_integration" {
+  for_each = local.operations
+
+  rest_api_id = module.rest_api.api_id
+  resource_id = local.operation_resource_id[each.key]
+  http_method = aws_api_gateway_method.operation_methods[each.key].http_method
+
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = aws_lambda_function.api_lambda[each.key].response_streaming_invoke_arn
+  response_transfer_mode  = "STREAM"
+
+  depends_on = [aws_lambda_function.api_lambda]
+}
+
+# OPTIONS method for CORS preflight, on every resource an operation is served from
 resource "aws_api_gateway_method" "options_method" {
   #checkov:skip=CKV2_AWS_70:OPTIONS method must be unauthenticated for CORS preflight requests
   #checkov:skip=CKV2_AWS_53:Request validation not required for OPTIONS CORS preflight method
+  for_each = local.resource_ids
+
   rest_api_id   = module.rest_api.api_id
-  resource_id   = aws_api_gateway_resource.proxy_resource.id
+  resource_id   = each.value
   http_method   = "OPTIONS"
   authorization = "NONE"
 }
 
-# CORS integration for OPTIONS method
+# CORS integration for OPTIONS methods
 resource "aws_api_gateway_integration" "options_integration" {
+  for_each = local.resource_ids
+
   rest_api_id = module.rest_api.api_id
-  resource_id = aws_api_gateway_resource.proxy_resource.id
-  http_method = aws_api_gateway_method.options_method.http_method
+  resource_id = each.value
+  http_method = aws_api_gateway_method.options_method[each.key].http_method
 
   type = "MOCK"
   request_templates = {
@@ -6174,11 +6587,13 @@ resource "aws_api_gateway_integration" "options_integration" {
   }
 }
 
-# OPTIONS method response
+# OPTIONS method responses
 resource "aws_api_gateway_method_response" "options_response" {
+  for_each = local.resource_ids
+
   rest_api_id = module.rest_api.api_id
-  resource_id = aws_api_gateway_resource.proxy_resource.id
-  http_method = aws_api_gateway_method.options_method.http_method
+  resource_id = each.value
+  http_method = aws_api_gateway_method.options_method[each.key].http_method
   status_code = "204"
 
   response_parameters = {
@@ -6188,18 +6603,22 @@ resource "aws_api_gateway_method_response" "options_response" {
   }
 }
 
-# OPTIONS integration response
+# OPTIONS integration responses
 resource "aws_api_gateway_integration_response" "options_integration_response" {
+  for_each = local.resource_ids
+
   rest_api_id = module.rest_api.api_id
-  resource_id = aws_api_gateway_resource.proxy_resource.id
-  http_method = aws_api_gateway_method.options_method.http_method
-  status_code = aws_api_gateway_method_response.options_response.status_code
+  resource_id = each.value
+  http_method = aws_api_gateway_method.options_method[each.key].http_method
+  status_code = aws_api_gateway_method_response.options_response[each.key].status_code
 
   response_parameters = {
     "method.response.header.Access-Control-Allow-Headers" = "'\${join(",", var.cors_allow_headers)}'"
     "method.response.header.Access-Control-Allow-Methods" = "'\${join(",", var.cors_allow_methods)}'"
     "method.response.header.Access-Control-Allow-Origin"  = "'\${join(",", var.cors_allow_origins)}'"
   }
+
+  depends_on = [aws_api_gateway_integration.options_integration]
 }
 
 # API Gateway deployment
@@ -6207,13 +6626,28 @@ resource "aws_api_gateway_deployment" "api_deployment" {
   rest_api_id = module.rest_api.api_id
 
   triggers = {
-    redeployment = sha1(jsonencode([
-      aws_api_gateway_resource.proxy_resource.id,
-      aws_api_gateway_method.proxy_method.id,
-      aws_api_gateway_integration.lambda_integration.id,
-      aws_api_gateway_method.options_method.id,
-      aws_api_gateway_integration.options_integration.id,
-    ]))
+    redeployment = sha1(jsonencode(concat(
+      [for r in aws_api_gateway_resource.path_depth_0 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_1 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_2 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_3 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_4 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_5 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_6 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_7 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_8 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_9 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_10 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_11 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_12 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_13 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_14 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_15 : r.id],
+      [for m in aws_api_gateway_method.operation_methods : m.id],
+      [for i in aws_api_gateway_integration.lambda_integration : i.id],
+      [for m in aws_api_gateway_method.options_method : m.id],
+      [for i in aws_api_gateway_integration.options_integration : i.id],
+    )))
   }
 
   lifecycle {
@@ -6221,7 +6655,7 @@ resource "aws_api_gateway_deployment" "api_deployment" {
   }
 
   depends_on = [
-    aws_api_gateway_method.proxy_method,
+    aws_api_gateway_method.operation_methods,
     aws_api_gateway_integration.lambda_integration,
     aws_api_gateway_method.options_method,
     aws_api_gateway_integration.options_integration,
@@ -6349,11 +6783,13 @@ resource "aws_api_gateway_rest_api_policy" "api_policy" {
 
 # Lambda permission for API Gateway to invoke the function
 resource "aws_lambda_permission" "api_gateway_invoke" {
+  for_each = local.operations
+
   statement_id  = "AllowExecutionFromAPIGateway"
   action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.api_lambda.function_name
+  function_name = aws_lambda_function.api_lambda[each.key].function_name
   principal     = "apigateway.amazonaws.com"
-  source_arn    = "\${module.rest_api.api_execution_arn}/*/*"
+  source_arn    = "\${module.rest_api.api_execution_arn}/*/\${local.permission_source_suffix[each.key]}"
 
   depends_on = [module.rest_api, aws_lambda_function.api_lambda]
 }
@@ -6418,83 +6854,83 @@ output "stage_id" {
   value       = aws_api_gateway_stage.api_stage.id
 }
 
-# Lambda Function Outputs
-output "lambda_function_name" {
-  description = "Name of the Lambda function"
-  value       = aws_lambda_function.api_lambda.function_name
+# Lambda Function Outputs, keyed by operation name
+output "operations" {
+  description = "Names of the API operations, each with its own Lambda function"
+  value       = keys(local.operations)
 }
 
-output "lambda_function_arn" {
-  description = "ARN of the Lambda function"
-  value       = aws_lambda_function.api_lambda.arn
+output "lambda_function_names" {
+  description = "Name of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.function_name }
 }
 
-output "lambda_invoke_arn" {
-  description = "Invoke ARN of the Lambda function"
-  value       = aws_lambda_function.api_lambda.invoke_arn
+output "lambda_function_arns" {
+  description = "ARN of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.arn }
 }
 
-output "lambda_qualified_arn" {
-  description = "Qualified ARN of the Lambda function"
-  value       = aws_lambda_function.api_lambda.qualified_arn
+output "lambda_invoke_arns" {
+  description = "Invoke ARN of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.invoke_arn }
 }
 
-output "lambda_version" {
-  description = "Version of the Lambda function"
-  value       = aws_lambda_function.api_lambda.version
+output "lambda_qualified_arns" {
+  description = "Qualified ARN of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.qualified_arn }
+}
+
+output "lambda_versions" {
+  description = "Version of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.version }
 }
 
 output "lambda_source_code_hash" {
-  description = "Base64-encoded SHA256 hash of the Lambda deployment package"
-  value       = aws_lambda_function.api_lambda.source_code_hash
+  description = "Base64-encoded SHA256 hash of the Lambda deployment package, shared by every operation"
+  value       = data.archive_file.lambda_zip.output_base64sha256
 }
 
-output "lambda_source_code_size" {
-  description = "Size of the Lambda deployment package in bytes"
-  value       = aws_lambda_function.api_lambda.source_code_size
+# IAM Role Outputs, keyed by operation name
+output "lambda_execution_role_arns" {
+  description = "ARN of each operation's Lambda execution role, keyed by operation name"
+  value       = { for op, role in aws_iam_role.lambda_execution_role : op => role.arn }
 }
 
-# IAM Role Outputs
-output "lambda_execution_role_arn" {
-  description = "ARN of the Lambda execution role"
-  value       = aws_iam_role.lambda_execution_role.arn
-}
-
-output "lambda_execution_role_name" {
-  description = "Name of the Lambda execution role"
-  value       = aws_iam_role.lambda_execution_role.name
+output "lambda_execution_role_names" {
+  description = "Name of each operation's Lambda execution role, keyed by operation name. Attach additional policies to a specific operation's role by name."
+  value       = { for op, role in aws_iam_role.lambda_execution_role : op => role.name }
 }
 
 output "security_group_id" {
-  description = "Security group ID of the API Lambda function, for use in ingress rules on resources it must reach (e.g. a database). Null unless enable_vpc is true."
+  description = "Security group ID shared by the API Lambda functions, for use in ingress rules on resources they must reach (e.g. a database). Null unless enable_vpc is true."
   value       = var.enable_vpc ? aws_security_group.api_lambda[0].id : null
 }
 
-# Integration Outputs
-output "integration_id" {
-  description = "ID of the Lambda integration"
-  value       = aws_api_gateway_integration.lambda_integration.id
+# Integration Outputs, keyed by operation name
+output "integration_ids" {
+  description = "ID of each operation's Lambda integration, keyed by operation name"
+  value       = { for op, i in aws_api_gateway_integration.lambda_integration : op => i.id }
 }
 
-output "proxy_resource_id" {
-  description = "ID of the proxy resource"
-  value       = aws_api_gateway_resource.proxy_resource.id
+output "method_ids" {
+  description = "ID of each operation's API Gateway method, keyed by operation name"
+  value       = { for op, m in aws_api_gateway_method.operation_methods : op => m.id }
 }
 
-output "proxy_method_id" {
-  description = "ID of the proxy method"
-  value       = aws_api_gateway_method.proxy_method.id
+output "resource_ids" {
+  description = "ID of each API Gateway resource, keyed by its path"
+  value       = local.resource_ids
 }
 
-# CloudWatch Log Groups
-output "lambda_log_group_name" {
-  description = "Name of the Lambda CloudWatch log group"
-  value       = aws_cloudwatch_log_group.lambda_logs.name
+# CloudWatch Log Groups, keyed by operation name
+output "lambda_log_group_names" {
+  description = "Name of each operation's Lambda CloudWatch log group, keyed by operation name"
+  value       = { for op, lg in aws_cloudwatch_log_group.lambda_logs : op => lg.name }
 }
 
-output "lambda_log_group_arn" {
-  description = "ARN of the Lambda CloudWatch log group"
-  value       = aws_cloudwatch_log_group.lambda_logs.arn
+output "lambda_log_group_arns" {
+  description = "ARN of each operation's Lambda CloudWatch log group, keyed by operation name"
+  value       = { for op, lg in aws_cloudwatch_log_group.lambda_logs : op => lg.arn }
 }
 ",
 }
@@ -6935,6 +7371,235 @@ resource "random_string" "suffix" {
   upper   = false
 }
 
+locals {
+  # Generated at build time from the API definition
+  operations_file = "\${path.module}/../../../generated/test-api/operations.json"
+  operations      = fileexists(local.operations_file) ? jsondecode(file(local.operations_file)) : {}
+
+  operation_slug = { for op in keys(local.operations) : op => replace(op, "/[^a-zA-Z0-9-_]/", "-") }
+  operation_hash = { for op in keys(local.operations) : op => substr(sha256(op), 0, 8) }
+
+  function_name = { for op in keys(local.operations) : op =>
+    "\${substr("TestApi-\${local.operation_slug[op]}", 0, 64 - length(local.operation_hash[op]) - length(random_string.suffix.result) - 2)}-\${local.operation_hash[op]}-\${random_string.suffix.result}"
+  }
+  role_name = { for op in keys(local.operations) : op =>
+    "\${substr("TestApi-\${local.operation_slug[op]}-role", 0, 64 - length(local.operation_hash[op]) - length(random_string.suffix.result) - 2)}-\${local.operation_hash[op]}-\${random_string.suffix.result}"
+  }
+
+  # A REST API needs a resource per path segment, so each operation's path is
+  # split into the distinct path prefixes the resource tree is built from below
+  operation_segments = { for op, details in local.operations : op => compact(split("/", details.path)) }
+
+  path_nodes = merge([
+    for op, segments in local.operation_segments : {
+      for i, segment in segments : join("/", slice(segments, 0, i + 1)) => {
+        depth  = i
+        parent = i == 0 ? "" : join("/", slice(segments, 0, i))
+        part   = segment
+      }
+    }
+  ]...)
+
+  # Instances of a resource cannot reference one another, so each depth is a
+  # separate resource. Deeper paths are reported by the precondition below.
+  max_path_depth = 16
+  path_nodes_by_depth = { for depth in range(local.max_path_depth) : depth => {
+    for path, node in local.path_nodes : path => node if node.depth == depth
+  } }
+  paths_too_deep = [for path, node in local.path_nodes : path if node.depth >= local.max_path_depth]
+
+  resource_ids = merge(
+    { for path, resource in aws_api_gateway_resource.path_depth_0 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_1 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_2 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_3 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_4 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_5 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_6 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_7 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_8 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_9 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_10 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_11 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_12 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_13 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_14 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_15 : path => resource.id },
+  )
+
+  operation_resource_id = { for op, segments in local.operation_segments : op =>
+    local.resource_ids[join("/", segments)]
+  }
+
+  permission_source_suffix = { for op, details in local.operations : op =>
+    "\${upper(details.method)}/\${replace(join("/", local.operation_segments[op]), "/{[^}]*}/", "*")}"
+  }
+}
+
+resource "terraform_data" "operations_metadata" {
+  # Fails the plan when the operations metadata has not been generated
+  input = local.operations_file
+
+  lifecycle {
+    precondition {
+      condition     = fileexists(local.operations_file)
+      error_message = "Operations metadata not found at \${local.operations_file}. Build the TestApi project to generate it."
+    }
+    precondition {
+      condition     = length(local.operations) > 0
+      error_message = "No operations found in \${local.operations_file}. The TestApi API must define at least one operation."
+    }
+    precondition {
+      condition     = length(local.paths_too_deep) == 0
+      error_message = "Operation paths exceed the supported depth of \${local.max_path_depth} segments: \${join(", ", local.paths_too_deep)}. Add further aws_api_gateway_resource levels to this module to support them."
+    }
+  }
+}
+
+# API Gateway resources at path depth 0
+resource "aws_api_gateway_resource" "path_depth_0" {
+  for_each = local.path_nodes_by_depth[0]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = module.rest_api.api_root_resource_id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 1
+resource "aws_api_gateway_resource" "path_depth_1" {
+  for_each = local.path_nodes_by_depth[1]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_0[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 2
+resource "aws_api_gateway_resource" "path_depth_2" {
+  for_each = local.path_nodes_by_depth[2]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_1[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 3
+resource "aws_api_gateway_resource" "path_depth_3" {
+  for_each = local.path_nodes_by_depth[3]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_2[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 4
+resource "aws_api_gateway_resource" "path_depth_4" {
+  for_each = local.path_nodes_by_depth[4]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_3[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 5
+resource "aws_api_gateway_resource" "path_depth_5" {
+  for_each = local.path_nodes_by_depth[5]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_4[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 6
+resource "aws_api_gateway_resource" "path_depth_6" {
+  for_each = local.path_nodes_by_depth[6]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_5[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 7
+resource "aws_api_gateway_resource" "path_depth_7" {
+  for_each = local.path_nodes_by_depth[7]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_6[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 8
+resource "aws_api_gateway_resource" "path_depth_8" {
+  for_each = local.path_nodes_by_depth[8]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_7[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 9
+resource "aws_api_gateway_resource" "path_depth_9" {
+  for_each = local.path_nodes_by_depth[9]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_8[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 10
+resource "aws_api_gateway_resource" "path_depth_10" {
+  for_each = local.path_nodes_by_depth[10]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_9[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 11
+resource "aws_api_gateway_resource" "path_depth_11" {
+  for_each = local.path_nodes_by_depth[11]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_10[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 12
+resource "aws_api_gateway_resource" "path_depth_12" {
+  for_each = local.path_nodes_by_depth[12]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_11[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 13
+resource "aws_api_gateway_resource" "path_depth_13" {
+  for_each = local.path_nodes_by_depth[13]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_12[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 14
+resource "aws_api_gateway_resource" "path_depth_14" {
+  for_each = local.path_nodes_by_depth[14]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_13[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 15
+resource "aws_api_gateway_resource" "path_depth_15" {
+  for_each = local.path_nodes_by_depth[15]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_14[each.value.parent].id
+  path_part   = each.value.part
+}
+
 # Resources
 
 # Create Lambda ZIP file from the bundle directory
@@ -7009,8 +7674,10 @@ resource "aws_vpc_security_group_egress_rule" "api_lambda_https" {
   description       = "Allow outbound HTTPS to AWS service endpoints"
 }
 
-# Lambda function
 resource "aws_lambda_function" "api_lambda" {
+  # One lambda function per operation, each serving just that operation
+  for_each = local.operations
+
   #checkov:skip=CKV_AWS_117:Lambda function is optionally deployed into a VPC via vpc_id/subnet_ids; not required for this use case
   #checkov:skip=CKV_AWS_116:Dead Letter Queue not required for this simple API use case
   #checkov:skip=CKV_AWS_272:Code signing not required for this use case
@@ -7019,8 +7686,8 @@ resource "aws_lambda_function" "api_lambda" {
   s3_bucket         = aws_s3_object.lambda_zip.bucket
   s3_key            = aws_s3_object.lambda_zip.key
   s3_object_version = aws_s3_object.lambda_zip.version_id
-  function_name    = "TestApiHandler-\${random_string.suffix.result}"
-  role            = aws_iam_role.lambda_execution_role.arn
+  function_name    = local.function_name[each.key]
+  role            = aws_iam_role.lambda_execution_role[each.key].arn
   handler         = "index.handler"
   runtime         = "nodejs22.x"
   timeout         = 30
@@ -7056,7 +7723,9 @@ resource "aws_lambda_function" "api_lambda" {
 
 # IAM role for Lambda execution
 resource "aws_iam_role" "lambda_execution_role" {
-  name = "TestApiHandler-execution-role-\${random_string.suffix.result}"
+  for_each = local.operations
+
+  name = local.role_name[each.key]
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -7076,28 +7745,34 @@ resource "aws_iam_role" "lambda_execution_role" {
 
 # Attach basic execution policy to Lambda role
 resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
+  for_each = local.operations
+
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-  role       = aws_iam_role.lambda_execution_role.name
+  role       = aws_iam_role.lambda_execution_role[each.key].name
 }
 
 # Attach X-Ray tracing policy to Lambda role
 resource "aws_iam_role_policy_attachment" "lambda_xray_execution" {
+  for_each = local.operations
+
   policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
-  role       = aws_iam_role.lambda_execution_role.name
+  role       = aws_iam_role.lambda_execution_role[each.key].name
 }
 
 # Attach VPC access policy to Lambda role when deployed into a VPC
 resource "aws_iam_role_policy_attachment" "lambda_vpc_access" {
-  count      = var.enable_vpc ? 1 : 0
+  for_each = var.enable_vpc ? local.operations : {}
+
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
-  role       = aws_iam_role.lambda_execution_role.name
+  role       = aws_iam_role.lambda_execution_role[each.key].name
 }
 
 # Additional IAM policies for Lambda (if provided)
 resource "aws_iam_role_policy" "lambda_additional_policies" {
-  count = length(local.lambda_policy_statements) > 0 ? 1 : 0
-  name  = "TestApiHandler-additional-policies-\${random_string.suffix.result}"
-  role  = aws_iam_role.lambda_execution_role.id
+  for_each = local.operations
+
+  name = "\${substr(local.function_name[each.key], 0, 55)}-policies"
+  role = aws_iam_role.lambda_execution_role[each.key].id
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -7124,64 +7799,70 @@ resource "aws_cloudwatch_log_group" "lambda_logs" {
   #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
   #checkov:skip=CKV_AWS_338:Log retention set to forever
   #checkov:skip=CKV_AWS_66:Log retention set to forever
-  name              = "/aws/lambda/TestApiHandler-\${random_string.suffix.result}"
-  tags              = var.tags
+  for_each = local.operations
+
+  name = "/aws/lambda/\${local.function_name[each.key]}"
+  tags = var.tags
 }
 
 
 
-# Create proxy resource (captures all paths)
-resource "aws_api_gateway_resource" "proxy_resource" {
-  rest_api_id = module.rest_api.api_id
-  parent_id   = module.rest_api.api_root_resource_id
-  path_part   = "{proxy+}"
-}
-
-# Lambda integration for REST API
-resource "aws_api_gateway_integration" "lambda_integration" {
-  rest_api_id = module.rest_api.api_id
-  resource_id = aws_api_gateway_resource.proxy_resource.id
-  http_method = aws_api_gateway_method.proxy_method.http_method
-
-  integration_http_method = "POST"
-  type                    = "AWS_PROXY"
-  uri                     = aws_lambda_function.api_lambda.response_streaming_invoke_arn
-  response_transfer_mode  = "STREAM"
-
-  depends_on = [aws_lambda_function.api_lambda]
-}
-
-# Method for proxy integration
-resource "aws_api_gateway_method" "proxy_method" {
+# Method per operation
+resource "aws_api_gateway_method" "operation_methods" {
   #checkov:skip=CKV2_AWS_53:Request validation not required for proxy integration as Lambda handles validation
+  for_each = local.operations
+
   rest_api_id   = module.rest_api.api_id
-  resource_id   = aws_api_gateway_resource.proxy_resource.id
-  http_method   = "ANY"
+  resource_id   = local.operation_resource_id[each.key]
+  http_method   = upper(each.value.method)
 
   authorization = "AWS_IAM"
 
+  # Path parameters must be declared on the method
   request_parameters = {
-    "method.request.path.proxy" = true
+    for segment in local.operation_segments[each.key] :
+    "method.request.path.\${trimsuffix(trimprefix(segment, "{"), "}")}" => true
+    if startswith(segment, "{")
   }
 
   depends_on = []
 }
 
-# OPTIONS method for CORS preflight
+# Lambda integration per operation
+resource "aws_api_gateway_integration" "lambda_integration" {
+  for_each = local.operations
+
+  rest_api_id = module.rest_api.api_id
+  resource_id = local.operation_resource_id[each.key]
+  http_method = aws_api_gateway_method.operation_methods[each.key].http_method
+
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = aws_lambda_function.api_lambda[each.key].response_streaming_invoke_arn
+  response_transfer_mode  = "STREAM"
+
+  depends_on = [aws_lambda_function.api_lambda]
+}
+
+# OPTIONS method for CORS preflight, on every resource an operation is served from
 resource "aws_api_gateway_method" "options_method" {
   #checkov:skip=CKV2_AWS_70:OPTIONS method must be unauthenticated for CORS preflight requests
   #checkov:skip=CKV2_AWS_53:Request validation not required for OPTIONS CORS preflight method
+  for_each = local.resource_ids
+
   rest_api_id   = module.rest_api.api_id
-  resource_id   = aws_api_gateway_resource.proxy_resource.id
+  resource_id   = each.value
   http_method   = "OPTIONS"
   authorization = "NONE"
 }
 
-# CORS integration for OPTIONS method
+# CORS integration for OPTIONS methods
 resource "aws_api_gateway_integration" "options_integration" {
+  for_each = local.resource_ids
+
   rest_api_id = module.rest_api.api_id
-  resource_id = aws_api_gateway_resource.proxy_resource.id
-  http_method = aws_api_gateway_method.options_method.http_method
+  resource_id = each.value
+  http_method = aws_api_gateway_method.options_method[each.key].http_method
 
   type = "MOCK"
   request_templates = {
@@ -7189,11 +7870,13 @@ resource "aws_api_gateway_integration" "options_integration" {
   }
 }
 
-# OPTIONS method response
+# OPTIONS method responses
 resource "aws_api_gateway_method_response" "options_response" {
+  for_each = local.resource_ids
+
   rest_api_id = module.rest_api.api_id
-  resource_id = aws_api_gateway_resource.proxy_resource.id
-  http_method = aws_api_gateway_method.options_method.http_method
+  resource_id = each.value
+  http_method = aws_api_gateway_method.options_method[each.key].http_method
   status_code = "204"
 
   response_parameters = {
@@ -7203,18 +7886,22 @@ resource "aws_api_gateway_method_response" "options_response" {
   }
 }
 
-# OPTIONS integration response
+# OPTIONS integration responses
 resource "aws_api_gateway_integration_response" "options_integration_response" {
+  for_each = local.resource_ids
+
   rest_api_id = module.rest_api.api_id
-  resource_id = aws_api_gateway_resource.proxy_resource.id
-  http_method = aws_api_gateway_method.options_method.http_method
-  status_code = aws_api_gateway_method_response.options_response.status_code
+  resource_id = each.value
+  http_method = aws_api_gateway_method.options_method[each.key].http_method
+  status_code = aws_api_gateway_method_response.options_response[each.key].status_code
 
   response_parameters = {
     "method.response.header.Access-Control-Allow-Headers" = "'\${join(",", var.cors_allow_headers)}'"
     "method.response.header.Access-Control-Allow-Methods" = "'\${join(",", var.cors_allow_methods)}'"
     "method.response.header.Access-Control-Allow-Origin"  = "'\${join(",", var.cors_allow_origins)}'"
   }
+
+  depends_on = [aws_api_gateway_integration.options_integration]
 }
 
 # API Gateway deployment
@@ -7222,13 +7909,28 @@ resource "aws_api_gateway_deployment" "api_deployment" {
   rest_api_id = module.rest_api.api_id
 
   triggers = {
-    redeployment = sha1(jsonencode([
-      aws_api_gateway_resource.proxy_resource.id,
-      aws_api_gateway_method.proxy_method.id,
-      aws_api_gateway_integration.lambda_integration.id,
-      aws_api_gateway_method.options_method.id,
-      aws_api_gateway_integration.options_integration.id,
-    ]))
+    redeployment = sha1(jsonencode(concat(
+      [for r in aws_api_gateway_resource.path_depth_0 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_1 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_2 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_3 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_4 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_5 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_6 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_7 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_8 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_9 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_10 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_11 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_12 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_13 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_14 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_15 : r.id],
+      [for m in aws_api_gateway_method.operation_methods : m.id],
+      [for i in aws_api_gateway_integration.lambda_integration : i.id],
+      [for m in aws_api_gateway_method.options_method : m.id],
+      [for i in aws_api_gateway_integration.options_integration : i.id],
+    )))
   }
 
   lifecycle {
@@ -7236,7 +7938,7 @@ resource "aws_api_gateway_deployment" "api_deployment" {
   }
 
   depends_on = [
-    aws_api_gateway_method.proxy_method,
+    aws_api_gateway_method.operation_methods,
     aws_api_gateway_integration.lambda_integration,
     aws_api_gateway_method.options_method,
     aws_api_gateway_integration.options_integration,
@@ -7375,11 +8077,13 @@ resource "aws_api_gateway_rest_api_policy" "api_policy" {
 
 # Lambda permission for API Gateway to invoke the function
 resource "aws_lambda_permission" "api_gateway_invoke" {
+  for_each = local.operations
+
   statement_id  = "AllowExecutionFromAPIGateway"
   action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.api_lambda.function_name
+  function_name = aws_lambda_function.api_lambda[each.key].function_name
   principal     = "apigateway.amazonaws.com"
-  source_arn    = "\${module.rest_api.api_execution_arn}/*/*"
+  source_arn    = "\${module.rest_api.api_execution_arn}/*/\${local.permission_source_suffix[each.key]}"
 
   depends_on = [module.rest_api, aws_lambda_function.api_lambda]
 }
@@ -7444,83 +8148,83 @@ output "stage_id" {
   value       = aws_api_gateway_stage.api_stage.id
 }
 
-# Lambda Function Outputs
-output "lambda_function_name" {
-  description = "Name of the Lambda function"
-  value       = aws_lambda_function.api_lambda.function_name
+# Lambda Function Outputs, keyed by operation name
+output "operations" {
+  description = "Names of the API operations, each with its own Lambda function"
+  value       = keys(local.operations)
 }
 
-output "lambda_function_arn" {
-  description = "ARN of the Lambda function"
-  value       = aws_lambda_function.api_lambda.arn
+output "lambda_function_names" {
+  description = "Name of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.function_name }
 }
 
-output "lambda_invoke_arn" {
-  description = "Invoke ARN of the Lambda function"
-  value       = aws_lambda_function.api_lambda.invoke_arn
+output "lambda_function_arns" {
+  description = "ARN of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.arn }
 }
 
-output "lambda_qualified_arn" {
-  description = "Qualified ARN of the Lambda function"
-  value       = aws_lambda_function.api_lambda.qualified_arn
+output "lambda_invoke_arns" {
+  description = "Invoke ARN of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.invoke_arn }
 }
 
-output "lambda_version" {
-  description = "Version of the Lambda function"
-  value       = aws_lambda_function.api_lambda.version
+output "lambda_qualified_arns" {
+  description = "Qualified ARN of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.qualified_arn }
+}
+
+output "lambda_versions" {
+  description = "Version of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.version }
 }
 
 output "lambda_source_code_hash" {
-  description = "Base64-encoded SHA256 hash of the Lambda deployment package"
-  value       = aws_lambda_function.api_lambda.source_code_hash
+  description = "Base64-encoded SHA256 hash of the Lambda deployment package, shared by every operation"
+  value       = data.archive_file.lambda_zip.output_base64sha256
 }
 
-output "lambda_source_code_size" {
-  description = "Size of the Lambda deployment package in bytes"
-  value       = aws_lambda_function.api_lambda.source_code_size
+# IAM Role Outputs, keyed by operation name
+output "lambda_execution_role_arns" {
+  description = "ARN of each operation's Lambda execution role, keyed by operation name"
+  value       = { for op, role in aws_iam_role.lambda_execution_role : op => role.arn }
 }
 
-# IAM Role Outputs
-output "lambda_execution_role_arn" {
-  description = "ARN of the Lambda execution role"
-  value       = aws_iam_role.lambda_execution_role.arn
-}
-
-output "lambda_execution_role_name" {
-  description = "Name of the Lambda execution role"
-  value       = aws_iam_role.lambda_execution_role.name
+output "lambda_execution_role_names" {
+  description = "Name of each operation's Lambda execution role, keyed by operation name. Attach additional policies to a specific operation's role by name."
+  value       = { for op, role in aws_iam_role.lambda_execution_role : op => role.name }
 }
 
 output "security_group_id" {
-  description = "Security group ID of the API Lambda function, for use in ingress rules on resources it must reach (e.g. a database). Null unless enable_vpc is true."
+  description = "Security group ID shared by the API Lambda functions, for use in ingress rules on resources they must reach (e.g. a database). Null unless enable_vpc is true."
   value       = var.enable_vpc ? aws_security_group.api_lambda[0].id : null
 }
 
-# Integration Outputs
-output "integration_id" {
-  description = "ID of the Lambda integration"
-  value       = aws_api_gateway_integration.lambda_integration.id
+# Integration Outputs, keyed by operation name
+output "integration_ids" {
+  description = "ID of each operation's Lambda integration, keyed by operation name"
+  value       = { for op, i in aws_api_gateway_integration.lambda_integration : op => i.id }
 }
 
-output "proxy_resource_id" {
-  description = "ID of the proxy resource"
-  value       = aws_api_gateway_resource.proxy_resource.id
+output "method_ids" {
+  description = "ID of each operation's API Gateway method, keyed by operation name"
+  value       = { for op, m in aws_api_gateway_method.operation_methods : op => m.id }
 }
 
-output "proxy_method_id" {
-  description = "ID of the proxy method"
-  value       = aws_api_gateway_method.proxy_method.id
+output "resource_ids" {
+  description = "ID of each API Gateway resource, keyed by its path"
+  value       = local.resource_ids
 }
 
-# CloudWatch Log Groups
-output "lambda_log_group_name" {
-  description = "Name of the Lambda CloudWatch log group"
-  value       = aws_cloudwatch_log_group.lambda_logs.name
+# CloudWatch Log Groups, keyed by operation name
+output "lambda_log_group_names" {
+  description = "Name of each operation's Lambda CloudWatch log group, keyed by operation name"
+  value       = { for op, lg in aws_cloudwatch_log_group.lambda_logs : op => lg.name }
 }
 
-output "lambda_log_group_arn" {
-  description = "ARN of the Lambda CloudWatch log group"
-  value       = aws_cloudwatch_log_group.lambda_logs.arn
+output "lambda_log_group_arns" {
+  description = "ARN of each operation's Lambda CloudWatch log group, keyed by operation name"
+  value       = { for op, lg in aws_cloudwatch_log_group.lambda_logs : op => lg.arn }
 }
 ",
 }
@@ -7961,6 +8665,235 @@ resource "random_string" "suffix" {
   upper   = false
 }
 
+locals {
+  # Generated at build time from the API definition
+  operations_file = "\${path.module}/../../../generated/test-api/operations.json"
+  operations      = fileexists(local.operations_file) ? jsondecode(file(local.operations_file)) : {}
+
+  operation_slug = { for op in keys(local.operations) : op => replace(op, "/[^a-zA-Z0-9-_]/", "-") }
+  operation_hash = { for op in keys(local.operations) : op => substr(sha256(op), 0, 8) }
+
+  function_name = { for op in keys(local.operations) : op =>
+    "\${substr("TestApi-\${local.operation_slug[op]}", 0, 64 - length(local.operation_hash[op]) - length(random_string.suffix.result) - 2)}-\${local.operation_hash[op]}-\${random_string.suffix.result}"
+  }
+  role_name = { for op in keys(local.operations) : op =>
+    "\${substr("TestApi-\${local.operation_slug[op]}-role", 0, 64 - length(local.operation_hash[op]) - length(random_string.suffix.result) - 2)}-\${local.operation_hash[op]}-\${random_string.suffix.result}"
+  }
+
+  # A REST API needs a resource per path segment, so each operation's path is
+  # split into the distinct path prefixes the resource tree is built from below
+  operation_segments = { for op, details in local.operations : op => compact(split("/", details.path)) }
+
+  path_nodes = merge([
+    for op, segments in local.operation_segments : {
+      for i, segment in segments : join("/", slice(segments, 0, i + 1)) => {
+        depth  = i
+        parent = i == 0 ? "" : join("/", slice(segments, 0, i))
+        part   = segment
+      }
+    }
+  ]...)
+
+  # Instances of a resource cannot reference one another, so each depth is a
+  # separate resource. Deeper paths are reported by the precondition below.
+  max_path_depth = 16
+  path_nodes_by_depth = { for depth in range(local.max_path_depth) : depth => {
+    for path, node in local.path_nodes : path => node if node.depth == depth
+  } }
+  paths_too_deep = [for path, node in local.path_nodes : path if node.depth >= local.max_path_depth]
+
+  resource_ids = merge(
+    { for path, resource in aws_api_gateway_resource.path_depth_0 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_1 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_2 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_3 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_4 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_5 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_6 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_7 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_8 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_9 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_10 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_11 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_12 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_13 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_14 : path => resource.id },
+    { for path, resource in aws_api_gateway_resource.path_depth_15 : path => resource.id },
+  )
+
+  operation_resource_id = { for op, segments in local.operation_segments : op =>
+    local.resource_ids[join("/", segments)]
+  }
+
+  permission_source_suffix = { for op, details in local.operations : op =>
+    "\${upper(details.method)}/\${replace(join("/", local.operation_segments[op]), "/{[^}]*}/", "*")}"
+  }
+}
+
+resource "terraform_data" "operations_metadata" {
+  # Fails the plan when the operations metadata has not been generated
+  input = local.operations_file
+
+  lifecycle {
+    precondition {
+      condition     = fileexists(local.operations_file)
+      error_message = "Operations metadata not found at \${local.operations_file}. Build the TestApi project to generate it."
+    }
+    precondition {
+      condition     = length(local.operations) > 0
+      error_message = "No operations found in \${local.operations_file}. The TestApi API must define at least one operation."
+    }
+    precondition {
+      condition     = length(local.paths_too_deep) == 0
+      error_message = "Operation paths exceed the supported depth of \${local.max_path_depth} segments: \${join(", ", local.paths_too_deep)}. Add further aws_api_gateway_resource levels to this module to support them."
+    }
+  }
+}
+
+# API Gateway resources at path depth 0
+resource "aws_api_gateway_resource" "path_depth_0" {
+  for_each = local.path_nodes_by_depth[0]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = module.rest_api.api_root_resource_id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 1
+resource "aws_api_gateway_resource" "path_depth_1" {
+  for_each = local.path_nodes_by_depth[1]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_0[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 2
+resource "aws_api_gateway_resource" "path_depth_2" {
+  for_each = local.path_nodes_by_depth[2]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_1[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 3
+resource "aws_api_gateway_resource" "path_depth_3" {
+  for_each = local.path_nodes_by_depth[3]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_2[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 4
+resource "aws_api_gateway_resource" "path_depth_4" {
+  for_each = local.path_nodes_by_depth[4]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_3[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 5
+resource "aws_api_gateway_resource" "path_depth_5" {
+  for_each = local.path_nodes_by_depth[5]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_4[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 6
+resource "aws_api_gateway_resource" "path_depth_6" {
+  for_each = local.path_nodes_by_depth[6]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_5[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 7
+resource "aws_api_gateway_resource" "path_depth_7" {
+  for_each = local.path_nodes_by_depth[7]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_6[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 8
+resource "aws_api_gateway_resource" "path_depth_8" {
+  for_each = local.path_nodes_by_depth[8]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_7[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 9
+resource "aws_api_gateway_resource" "path_depth_9" {
+  for_each = local.path_nodes_by_depth[9]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_8[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 10
+resource "aws_api_gateway_resource" "path_depth_10" {
+  for_each = local.path_nodes_by_depth[10]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_9[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 11
+resource "aws_api_gateway_resource" "path_depth_11" {
+  for_each = local.path_nodes_by_depth[11]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_10[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 12
+resource "aws_api_gateway_resource" "path_depth_12" {
+  for_each = local.path_nodes_by_depth[12]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_11[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 13
+resource "aws_api_gateway_resource" "path_depth_13" {
+  for_each = local.path_nodes_by_depth[13]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_12[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 14
+resource "aws_api_gateway_resource" "path_depth_14" {
+  for_each = local.path_nodes_by_depth[14]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_13[each.value.parent].id
+  path_part   = each.value.part
+}
+
+# API Gateway resources at path depth 15
+resource "aws_api_gateway_resource" "path_depth_15" {
+  for_each = local.path_nodes_by_depth[15]
+
+  rest_api_id = module.rest_api.api_id
+  parent_id   = aws_api_gateway_resource.path_depth_14[each.value.parent].id
+  path_part   = each.value.part
+}
+
 # Resources
 
 # Create Lambda ZIP file from the bundle directory
@@ -8035,8 +8968,10 @@ resource "aws_vpc_security_group_egress_rule" "api_lambda_https" {
   description       = "Allow outbound HTTPS to AWS service endpoints"
 }
 
-# Lambda function
 resource "aws_lambda_function" "api_lambda" {
+  # One lambda function per operation, each serving just that operation
+  for_each = local.operations
+
   #checkov:skip=CKV_AWS_117:Lambda function is optionally deployed into a VPC via vpc_id/subnet_ids; not required for this use case
   #checkov:skip=CKV_AWS_116:Dead Letter Queue not required for this simple API use case
   #checkov:skip=CKV_AWS_272:Code signing not required for this use case
@@ -8045,8 +8980,8 @@ resource "aws_lambda_function" "api_lambda" {
   s3_bucket         = aws_s3_object.lambda_zip.bucket
   s3_key            = aws_s3_object.lambda_zip.key
   s3_object_version = aws_s3_object.lambda_zip.version_id
-  function_name    = "TestApiHandler-\${random_string.suffix.result}"
-  role            = aws_iam_role.lambda_execution_role.arn
+  function_name    = local.function_name[each.key]
+  role            = aws_iam_role.lambda_execution_role[each.key].arn
   handler         = "index.handler"
   runtime         = "nodejs22.x"
   timeout         = 30
@@ -8082,7 +9017,9 @@ resource "aws_lambda_function" "api_lambda" {
 
 # IAM role for Lambda execution
 resource "aws_iam_role" "lambda_execution_role" {
-  name = "TestApiHandler-execution-role-\${random_string.suffix.result}"
+  for_each = local.operations
+
+  name = local.role_name[each.key]
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -8102,28 +9039,34 @@ resource "aws_iam_role" "lambda_execution_role" {
 
 # Attach basic execution policy to Lambda role
 resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
+  for_each = local.operations
+
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-  role       = aws_iam_role.lambda_execution_role.name
+  role       = aws_iam_role.lambda_execution_role[each.key].name
 }
 
 # Attach X-Ray tracing policy to Lambda role
 resource "aws_iam_role_policy_attachment" "lambda_xray_execution" {
+  for_each = local.operations
+
   policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
-  role       = aws_iam_role.lambda_execution_role.name
+  role       = aws_iam_role.lambda_execution_role[each.key].name
 }
 
 # Attach VPC access policy to Lambda role when deployed into a VPC
 resource "aws_iam_role_policy_attachment" "lambda_vpc_access" {
-  count      = var.enable_vpc ? 1 : 0
+  for_each = var.enable_vpc ? local.operations : {}
+
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
-  role       = aws_iam_role.lambda_execution_role.name
+  role       = aws_iam_role.lambda_execution_role[each.key].name
 }
 
 # Additional IAM policies for Lambda (if provided)
 resource "aws_iam_role_policy" "lambda_additional_policies" {
-  count = length(local.lambda_policy_statements) > 0 ? 1 : 0
-  name  = "TestApiHandler-additional-policies-\${random_string.suffix.result}"
-  role  = aws_iam_role.lambda_execution_role.id
+  for_each = local.operations
+
+  name = "\${substr(local.function_name[each.key], 0, 55)}-policies"
+  role = aws_iam_role.lambda_execution_role[each.key].id
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -8150,8 +9093,10 @@ resource "aws_cloudwatch_log_group" "lambda_logs" {
   #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
   #checkov:skip=CKV_AWS_338:Log retention set to forever
   #checkov:skip=CKV_AWS_66:Log retention set to forever
-  name              = "/aws/lambda/TestApiHandler-\${random_string.suffix.result}"
-  tags              = var.tags
+  for_each = local.operations
+
+  name = "/aws/lambda/\${local.function_name[each.key]}"
+  tags = var.tags
 }
 
 
@@ -8248,59 +9193,63 @@ resource "aws_lambda_permission" "authorizer_invoke" {
   source_arn    = "\${module.rest_api.api_execution_arn}/authorizers/\${aws_api_gateway_authorizer.custom_authorizer.id}"
 }
 
-# Create proxy resource (captures all paths)
-resource "aws_api_gateway_resource" "proxy_resource" {
-  rest_api_id = module.rest_api.api_id
-  parent_id   = module.rest_api.api_root_resource_id
-  path_part   = "{proxy+}"
-}
-
-# Lambda integration for REST API
-resource "aws_api_gateway_integration" "lambda_integration" {
-  rest_api_id = module.rest_api.api_id
-  resource_id = aws_api_gateway_resource.proxy_resource.id
-  http_method = aws_api_gateway_method.proxy_method.http_method
-
-  integration_http_method = "POST"
-  type                    = "AWS_PROXY"
-  uri                     = aws_lambda_function.api_lambda.response_streaming_invoke_arn
-  response_transfer_mode  = "STREAM"
-
-  depends_on = [aws_lambda_function.api_lambda]
-}
-
-# Method for proxy integration
-resource "aws_api_gateway_method" "proxy_method" {
+# Method per operation
+resource "aws_api_gateway_method" "operation_methods" {
   #checkov:skip=CKV2_AWS_53:Request validation not required for proxy integration as Lambda handles validation
+  for_each = local.operations
+
   rest_api_id   = module.rest_api.api_id
-  resource_id   = aws_api_gateway_resource.proxy_resource.id
-  http_method   = "ANY"
+  resource_id   = local.operation_resource_id[each.key]
+  http_method   = upper(each.value.method)
 
   authorization = "CUSTOM"
   authorizer_id = aws_api_gateway_authorizer.custom_authorizer.id
 
+  # Path parameters must be declared on the method
   request_parameters = {
-    "method.request.path.proxy" = true
+    for segment in local.operation_segments[each.key] :
+    "method.request.path.\${trimsuffix(trimprefix(segment, "{"), "}")}" => true
+    if startswith(segment, "{")
   }
 
   depends_on = [aws_api_gateway_authorizer.custom_authorizer]
 }
 
-# OPTIONS method for CORS preflight
+# Lambda integration per operation
+resource "aws_api_gateway_integration" "lambda_integration" {
+  for_each = local.operations
+
+  rest_api_id = module.rest_api.api_id
+  resource_id = local.operation_resource_id[each.key]
+  http_method = aws_api_gateway_method.operation_methods[each.key].http_method
+
+  integration_http_method = "POST"
+  type                    = "AWS_PROXY"
+  uri                     = aws_lambda_function.api_lambda[each.key].response_streaming_invoke_arn
+  response_transfer_mode  = "STREAM"
+
+  depends_on = [aws_lambda_function.api_lambda]
+}
+
+# OPTIONS method for CORS preflight, on every resource an operation is served from
 resource "aws_api_gateway_method" "options_method" {
   #checkov:skip=CKV2_AWS_70:OPTIONS method must be unauthenticated for CORS preflight requests
   #checkov:skip=CKV2_AWS_53:Request validation not required for OPTIONS CORS preflight method
+  for_each = local.resource_ids
+
   rest_api_id   = module.rest_api.api_id
-  resource_id   = aws_api_gateway_resource.proxy_resource.id
+  resource_id   = each.value
   http_method   = "OPTIONS"
   authorization = "NONE"
 }
 
-# CORS integration for OPTIONS method
+# CORS integration for OPTIONS methods
 resource "aws_api_gateway_integration" "options_integration" {
+  for_each = local.resource_ids
+
   rest_api_id = module.rest_api.api_id
-  resource_id = aws_api_gateway_resource.proxy_resource.id
-  http_method = aws_api_gateway_method.options_method.http_method
+  resource_id = each.value
+  http_method = aws_api_gateway_method.options_method[each.key].http_method
 
   type = "MOCK"
   request_templates = {
@@ -8308,11 +9257,13 @@ resource "aws_api_gateway_integration" "options_integration" {
   }
 }
 
-# OPTIONS method response
+# OPTIONS method responses
 resource "aws_api_gateway_method_response" "options_response" {
+  for_each = local.resource_ids
+
   rest_api_id = module.rest_api.api_id
-  resource_id = aws_api_gateway_resource.proxy_resource.id
-  http_method = aws_api_gateway_method.options_method.http_method
+  resource_id = each.value
+  http_method = aws_api_gateway_method.options_method[each.key].http_method
   status_code = "204"
 
   response_parameters = {
@@ -8322,18 +9273,22 @@ resource "aws_api_gateway_method_response" "options_response" {
   }
 }
 
-# OPTIONS integration response
+# OPTIONS integration responses
 resource "aws_api_gateway_integration_response" "options_integration_response" {
+  for_each = local.resource_ids
+
   rest_api_id = module.rest_api.api_id
-  resource_id = aws_api_gateway_resource.proxy_resource.id
-  http_method = aws_api_gateway_method.options_method.http_method
-  status_code = aws_api_gateway_method_response.options_response.status_code
+  resource_id = each.value
+  http_method = aws_api_gateway_method.options_method[each.key].http_method
+  status_code = aws_api_gateway_method_response.options_response[each.key].status_code
 
   response_parameters = {
     "method.response.header.Access-Control-Allow-Headers" = "'\${join(",", var.cors_allow_headers)}'"
     "method.response.header.Access-Control-Allow-Methods" = "'\${join(",", var.cors_allow_methods)}'"
     "method.response.header.Access-Control-Allow-Origin"  = "'\${join(",", var.cors_allow_origins)}'"
   }
+
+  depends_on = [aws_api_gateway_integration.options_integration]
 }
 
 # API Gateway deployment
@@ -8341,13 +9296,28 @@ resource "aws_api_gateway_deployment" "api_deployment" {
   rest_api_id = module.rest_api.api_id
 
   triggers = {
-    redeployment = sha1(jsonencode([
-      aws_api_gateway_resource.proxy_resource.id,
-      aws_api_gateway_method.proxy_method.id,
-      aws_api_gateway_integration.lambda_integration.id,
-      aws_api_gateway_method.options_method.id,
-      aws_api_gateway_integration.options_integration.id,
-    ]))
+    redeployment = sha1(jsonencode(concat(
+      [for r in aws_api_gateway_resource.path_depth_0 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_1 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_2 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_3 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_4 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_5 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_6 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_7 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_8 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_9 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_10 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_11 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_12 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_13 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_14 : r.id],
+      [for r in aws_api_gateway_resource.path_depth_15 : r.id],
+      [for m in aws_api_gateway_method.operation_methods : m.id],
+      [for i in aws_api_gateway_integration.lambda_integration : i.id],
+      [for m in aws_api_gateway_method.options_method : m.id],
+      [for i in aws_api_gateway_integration.options_integration : i.id],
+    )))
   }
 
   lifecycle {
@@ -8355,7 +9325,7 @@ resource "aws_api_gateway_deployment" "api_deployment" {
   }
 
   depends_on = [
-    aws_api_gateway_method.proxy_method,
+    aws_api_gateway_method.operation_methods,
     aws_api_gateway_integration.lambda_integration,
     aws_api_gateway_method.options_method,
     aws_api_gateway_integration.options_integration,
@@ -8484,11 +9454,13 @@ resource "aws_api_gateway_rest_api_policy" "api_policy" {
 
 # Lambda permission for API Gateway to invoke the function
 resource "aws_lambda_permission" "api_gateway_invoke" {
+  for_each = local.operations
+
   statement_id  = "AllowExecutionFromAPIGateway"
   action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.api_lambda.function_name
+  function_name = aws_lambda_function.api_lambda[each.key].function_name
   principal     = "apigateway.amazonaws.com"
-  source_arn    = "\${module.rest_api.api_execution_arn}/*/*"
+  source_arn    = "\${module.rest_api.api_execution_arn}/*/\${local.permission_source_suffix[each.key]}"
 
   depends_on = [module.rest_api, aws_lambda_function.api_lambda]
 }
@@ -8553,83 +9525,83 @@ output "stage_id" {
   value       = aws_api_gateway_stage.api_stage.id
 }
 
-# Lambda Function Outputs
-output "lambda_function_name" {
-  description = "Name of the Lambda function"
-  value       = aws_lambda_function.api_lambda.function_name
+# Lambda Function Outputs, keyed by operation name
+output "operations" {
+  description = "Names of the API operations, each with its own Lambda function"
+  value       = keys(local.operations)
 }
 
-output "lambda_function_arn" {
-  description = "ARN of the Lambda function"
-  value       = aws_lambda_function.api_lambda.arn
+output "lambda_function_names" {
+  description = "Name of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.function_name }
 }
 
-output "lambda_invoke_arn" {
-  description = "Invoke ARN of the Lambda function"
-  value       = aws_lambda_function.api_lambda.invoke_arn
+output "lambda_function_arns" {
+  description = "ARN of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.arn }
 }
 
-output "lambda_qualified_arn" {
-  description = "Qualified ARN of the Lambda function"
-  value       = aws_lambda_function.api_lambda.qualified_arn
+output "lambda_invoke_arns" {
+  description = "Invoke ARN of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.invoke_arn }
 }
 
-output "lambda_version" {
-  description = "Version of the Lambda function"
-  value       = aws_lambda_function.api_lambda.version
+output "lambda_qualified_arns" {
+  description = "Qualified ARN of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.qualified_arn }
+}
+
+output "lambda_versions" {
+  description = "Version of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.version }
 }
 
 output "lambda_source_code_hash" {
-  description = "Base64-encoded SHA256 hash of the Lambda deployment package"
-  value       = aws_lambda_function.api_lambda.source_code_hash
+  description = "Base64-encoded SHA256 hash of the Lambda deployment package, shared by every operation"
+  value       = data.archive_file.lambda_zip.output_base64sha256
 }
 
-output "lambda_source_code_size" {
-  description = "Size of the Lambda deployment package in bytes"
-  value       = aws_lambda_function.api_lambda.source_code_size
+# IAM Role Outputs, keyed by operation name
+output "lambda_execution_role_arns" {
+  description = "ARN of each operation's Lambda execution role, keyed by operation name"
+  value       = { for op, role in aws_iam_role.lambda_execution_role : op => role.arn }
 }
 
-# IAM Role Outputs
-output "lambda_execution_role_arn" {
-  description = "ARN of the Lambda execution role"
-  value       = aws_iam_role.lambda_execution_role.arn
-}
-
-output "lambda_execution_role_name" {
-  description = "Name of the Lambda execution role"
-  value       = aws_iam_role.lambda_execution_role.name
+output "lambda_execution_role_names" {
+  description = "Name of each operation's Lambda execution role, keyed by operation name. Attach additional policies to a specific operation's role by name."
+  value       = { for op, role in aws_iam_role.lambda_execution_role : op => role.name }
 }
 
 output "security_group_id" {
-  description = "Security group ID of the API Lambda function, for use in ingress rules on resources it must reach (e.g. a database). Null unless enable_vpc is true."
+  description = "Security group ID shared by the API Lambda functions, for use in ingress rules on resources they must reach (e.g. a database). Null unless enable_vpc is true."
   value       = var.enable_vpc ? aws_security_group.api_lambda[0].id : null
 }
 
-# Integration Outputs
-output "integration_id" {
-  description = "ID of the Lambda integration"
-  value       = aws_api_gateway_integration.lambda_integration.id
+# Integration Outputs, keyed by operation name
+output "integration_ids" {
+  description = "ID of each operation's Lambda integration, keyed by operation name"
+  value       = { for op, i in aws_api_gateway_integration.lambda_integration : op => i.id }
 }
 
-output "proxy_resource_id" {
-  description = "ID of the proxy resource"
-  value       = aws_api_gateway_resource.proxy_resource.id
+output "method_ids" {
+  description = "ID of each operation's API Gateway method, keyed by operation name"
+  value       = { for op, m in aws_api_gateway_method.operation_methods : op => m.id }
 }
 
-output "proxy_method_id" {
-  description = "ID of the proxy method"
-  value       = aws_api_gateway_method.proxy_method.id
+output "resource_ids" {
+  description = "ID of each API Gateway resource, keyed by its path"
+  value       = local.resource_ids
 }
 
-# CloudWatch Log Groups
-output "lambda_log_group_name" {
-  description = "Name of the Lambda CloudWatch log group"
-  value       = aws_cloudwatch_log_group.lambda_logs.name
+# CloudWatch Log Groups, keyed by operation name
+output "lambda_log_group_names" {
+  description = "Name of each operation's Lambda CloudWatch log group, keyed by operation name"
+  value       = { for op, lg in aws_cloudwatch_log_group.lambda_logs : op => lg.name }
 }
 
-output "lambda_log_group_arn" {
-  description = "ARN of the Lambda CloudWatch log group"
-  value       = aws_cloudwatch_log_group.lambda_logs.arn
+output "lambda_log_group_arns" {
+  description = "ARN of each operation's Lambda CloudWatch log group, keyed by operation name"
+  value       = { for op, lg in aws_cloudwatch_log_group.lambda_logs : op => lg.arn }
 }
 ",
 }

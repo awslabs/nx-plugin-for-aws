@@ -265,6 +265,7 @@ export const tsSmithyApiGenerator = async (
         'openapi.json',
       ),
       specBuildTargetName: `${modelProjectConfig.name}:build`,
+      integrationPattern,
     });
 
     // Add bundle target using rolldown

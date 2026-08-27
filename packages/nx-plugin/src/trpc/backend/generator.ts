@@ -16,6 +16,7 @@ import {
   API_CONSTRUCTS_PY_DEPENDENCIES,
   addApiGatewayInfra,
 } from '../../utils/api-constructs/api-constructs.js';
+import { addTrpcOperationsMetadataTarget } from '../../utils/api-constructs/trpc-operations-metadata.js';
 import {
   addTypeScriptBundleTarget,
   BUNDLE_DEPENDENCIES,
@@ -257,6 +258,16 @@ export async function tsTrpcApiGenerator(
     }
 
     addDependencyToTargetIfNotPresent(projectConfig, 'build', 'bundle');
+
+    // Terraform defines one Lambda function per operation from a generated
+    // metadata file; CDK derives the same information from the router's types.
+    if (iac === 'terraform' && getIntegrationPattern(options) === 'isolated') {
+      addTrpcOperationsMetadataTarget(tree, {
+        apiNameKebabCase,
+        project: projectConfig,
+        templateOptions: esmVars(tree),
+      });
+    }
   }
 
   projectConfig.targets = sortObjectKeys(projectConfig.targets);

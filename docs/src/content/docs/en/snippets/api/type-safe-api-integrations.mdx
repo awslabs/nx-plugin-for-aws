@@ -1,23 +1,13 @@
 ---
 title: Type-Safe API Integrations
 ---
-import { Tabs, TabItem } from '@astrojs/starlight/components';
+import { Steps } from '@astrojs/starlight/components';
 import Infrastructure from '@components/infrastructure.astro';
+import Drawer from '@components/drawer.astro';
+import OptionFilter from '@components/option-filter.astro';
+import RunGenerator from '@components/run-generator.astro';
 
 The REST/HTTP API CDK constructs are configured to provide a type-safe interface for defining integrations for each of your operations.
-
-<Infrastructure>
-<Fragment slot="cdk">
-The CDK constructs provide full type-safe integration support as described below.
-</Fragment>
-<Fragment slot="terraform">
-:::note[Router Pattern]
-Terraform modules use the "router pattern" with a single Lambda function serving all operations. Type-safe integrations are not supported - the module creates one Lambda function that handles all API requests.
-
-For explicit per-operation integrations with Terraform, you would need to manually create individual Lambda functions and API Gateway routes. See the [Explicit Integrations](#explicit-integrations) section for examples.
-:::
-</Fragment>
-</Infrastructure>
 
 #### Default Integrations
 
@@ -32,7 +22,7 @@ new MyApi(this, 'MyApi', {
 ```
 </Fragment>
 <Fragment slot="terraform">
-Terraform modules automatically use the router pattern with a single Lambda function. No additional configuration is needed:
+The generated module already defines the default integrations for the pattern the API was generated with, so no additional configuration is needed:
 
 ```hcl
 module "my_api" {
@@ -40,11 +30,11 @@ module "my_api" {
 
   asset_bucket_name = module.asset_bucket.bucket_name
 
-  # The module automatically creates a single Lambda function
-  # that handles all API operations
   tags = local.common_tags
 }
 ```
+
+With the default `isolated` pattern, this creates one Lambda function per operation.
 </Fragment>
 </Infrastructure>
 
@@ -78,13 +68,13 @@ api.integrations.$router.handler.addEnvironment('LOG_LEVEL', 'DEBUG');
 ```
 </Fragment>
 <Fragment slot="terraform">
-With Terraform's router pattern, there's only one Lambda function. You can access it via the module outputs:
+With the `isolated` pattern, the module's outputs are maps keyed by operation name, so you can reach a single operation's resources. For example, to grant one operation's Lambda function extra permissions:
 
 ```hcl
-# Grant additional permissions to the single Lambda function
-resource "aws_iam_role_policy" "additional_permissions" {
-  name = "additional-api-permissions"
-  role = module.my_api.lambda_execution_role_name
+# Grant additional permissions to just the sayHello operation's function
+resource "aws_iam_role_policy" "say_hello_permissions" {
+  name = "say-hello-additional-permissions"
+  role = module.my_api.lambda_execution_role_names["sayHello"]
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -99,6 +89,48 @@ resource "aws_iam_role_policy" "additional_permissions" {
       }
     ]
   })
+}
+```
+
+To grant the same permissions to every operation, iterate the `operations` output:
+
+```hcl
+resource "aws_iam_role_policy" "additional_permissions" {
+  for_each = toset(module.my_api.operations)
+
+  name = "additional-api-permissions"
+  role = module.my_api.lambda_execution_role_names[each.key]
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = "arn:aws:s3:::my-bucket/*"
+      }
+    ]
+  })
+}
+```
+
+The module also exposes `lambda_function_names`, `lambda_function_arns`, `lambda_invoke_arns`, `integration_ids` and `lambda_log_group_names` as maps keyed by operation name. With the `shared` pattern the equivalent singular outputs (`lambda_execution_role_name`, `lambda_function_name`, …) are exposed instead, since there is only one function.
+
+Permissions every operation needs are better passed to the module, which applies them to each function's role:
+
+```hcl
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  asset_bucket_name = module.asset_bucket.bucket_name
+
+  additional_iam_policy_statements = [
+    {
+      Effect   = "Allow"
+      Action   = ["s3:GetObject"]
+      Resource = ["arn:aws:s3:::my-bucket/*"]
+    }
+  ]
 }
 ```
 </Fragment>
@@ -125,7 +157,7 @@ new MyApi(this, 'MyApi', {
 
 </Fragment>
 <Fragment slot="terraform">
-VPC configuration is already supported by the generated module — set `enable_vpc` along with `vpc_id` and `subnet_ids`, and the module deploys the Lambda function into your VPC behind a security group it creates for you:
+VPC configuration is already supported by the generated module — set `enable_vpc` along with `vpc_id` and `subnet_ids`, and the module deploys every Lambda function into your VPC behind a shared security group it creates for you:
 
 ```hcl
 module "my_api" {
@@ -142,7 +174,7 @@ module "my_api" {
 }
 ```
 
-For options the module does not expose, edit the `aws_lambda_function` resource in the generated Terraform module directly.
+For options the module does not expose, edit the `aws_lambda_function` resource in the generated Terraform module directly. With the `isolated` pattern that single resource is declared `for_each = local.operations`, so an edit there applies to every operation.
 </Fragment>
 </Infrastructure>
 
@@ -173,7 +205,21 @@ You will encounter a type error if the same operation is targeted by both `withO
 
 </Fragment>
 <Fragment slot="terraform">
-To customise options for specific operations with Terraform, you need to edit the generated Terraform module to configure individual Lambda functions per operation (see the [Explicit Integrations](#explicit-integrations) section below).
+With the `isolated` pattern the Lambda function resource is already per-operation, so options can be varied by operation name. For example, to give one operation a longer timeout, edit the `aws_lambda_function` resource in the generated module:
+
+```hcl
+# packages/common/terraform/src/app/apis/my-api/my-api.tf
+resource "aws_lambda_function" "api_lambda" {
+  for_each = local.operations
+
+  # Default to 30 seconds, but allow longer for specific operations
+  timeout = lookup({
+    sayHello = 60
+  }, each.key, 30)
+
+  # ... rest of configuration
+}
+```
 </Fragment>
 </Infrastructure>
 
@@ -244,11 +290,36 @@ api.integrations.getFile.bucket.grantRead(...);
 ```
 </Fragment>
 <Fragment slot="terraform">
-:::note[Integration Overrides]
-Overriding specific integrations is not supported with Terraform modules since they use the router pattern. All operations are handled by the single Lambda function.
+To point a specific operation at a different integration type, exclude it from the default `for_each` and declare its integration separately. For example, to serve `getDocumentation` from an external website:
 
-For different integration types per operation, you would need to implement explicit integrations manually (see the [Explicit Integrations](#explicit-integrations) section below).
-:::
+```hcl
+# packages/common/terraform/src/app/apis/my-api/my-api.tf
+
+# Exclude the overridden operation from the default per-operation resources
+locals {
+  overridden_operations = ["getDocumentation"]
+  default_operations = {
+    for op, details in local.operations : op => details
+    if !contains(local.overridden_operations, op)
+  }
+}
+
+# Then use local.default_operations in place of local.operations for the
+# aws_lambda_function, aws_iam_role, aws_apigatewayv2_integration and
+# aws_lambda_permission resources, and add the override:
+resource "aws_apigatewayv2_integration" "get_documentation" {
+  api_id             = module.http_api.api_id
+  integration_type   = "HTTP_PROXY"
+  integration_uri    = "https://example.com/documentation"
+  integration_method = "GET"
+}
+
+resource "aws_apigatewayv2_route" "get_documentation" {
+  api_id    = module.http_api.api_id
+  route_key = local.route_key["getDocumentation"]
+  target    = "integrations/${aws_apigatewayv2_integration.get_documentation.id}"
+}
+```
 </Fragment>
 </Infrastructure>
 
@@ -274,11 +345,20 @@ new MyApi(this, 'MyApi', {
 ```
 </Fragment>
 <Fragment slot="terraform">
-:::note[Authorizer Overrides]
-Per-operation authorizer overrides are not supported with Terraform modules. The entire API uses the authentication method specified when generating the API (IAM, Cognito, or Custom).
+Authorization is set on the route (HTTP API) or method (REST API) for each operation, so it can be varied by operation name. For example, to leave one operation unauthenticated on an HTTP API:
 
-For per-operation authorization, you would need to implement explicit integrations manually as below.
-:::
+```hcl
+# packages/common/terraform/src/app/apis/my-api/my-api.tf
+resource "aws_apigatewayv2_route" "operation_routes" {
+  for_each = local.operations
+
+  # ... rest of configuration
+
+  authorization_type = each.key == "getDocumentation" ? "NONE" : "AWS_IAM"
+}
+```
+
+For an IAM-authenticated REST API, also add a resource policy statement allowing unauthenticated access to that operation's path.
 </Fragment>
 </Infrastructure>
 
@@ -302,331 +382,26 @@ new MyApi(this, 'MyApi', {
 ```
 </Fragment>
 <Fragment slot="terraform">
-For explicit per-operation integrations with Terraform, you should modify the generated app-specific module to replace the default proxy integration with specific integrations for each operation.
+Replace the `for_each` used by the `isolated` pattern with explicit instantiations of the Lambda functions, integrations and permissions for each operation.
 
-Edit `packages/common/terraform/src/app/apis/my-api/my-api.tf`:
-
-1. **Remove the default proxy routes** (e.g., `resource "aws_apigatewayv2_route" "proxy_routes"`)
-2. **Replace the single Lambda function** with individual functions for each operation
-3. **Create specific integrations and routes** for each operation, reusing the same ZIP bundle:
-
-<Tabs syncKey="http-rest">
-<TabItem label="HTTP API" _filter={{ infra: 'http-lambda' }}>
-
-```diff
-# packages/common/terraform/src/app/apis/my-api/my-api.tf
-
-# Remove the default single Lambda function
-- resource "aws_lambda_function" "api_lambda" {
--   s3_bucket         = aws_s3_object.lambda_zip.bucket
--   s3_key            = aws_s3_object.lambda_zip.key
--   s3_object_version = aws_s3_object.lambda_zip.version_id
--   function_name    = "MyApiHandler"
--   role            = aws_iam_role.lambda_execution_role.arn
--   handler         = "index.handler"
--   runtime         = "nodejs22.x"
--   timeout         = 30
--   # ... rest of configuration
-- }
-
-# Remove the default proxy integration
-- resource "aws_apigatewayv2_integration" "lambda_integration" {
--   api_id           = module.http_api.api_id
--   integration_type = "AWS_PROXY"
--   integration_uri  = aws_lambda_function.api_lambda.invoke_arn
--   # ... rest of configuration
-- }
-
-# Remove the default proxy routes
-- resource "aws_apigatewayv2_route" "proxy_routes" {
--   for_each = toset(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"])
--   api_id    = module.http_api.api_id
--   route_key = "${each.key} /{proxy+}"
--   target    = "integrations/${aws_apigatewayv2_integration.lambda_integration.id}"
--   # ... rest of configuration
-- }
-
-# Add individual Lambda functions for each operation using the same bundle
-+ resource "aws_lambda_function" "say_hello_handler" {
-+   s3_bucket         = aws_s3_object.lambda_zip.bucket
-+   s3_key            = aws_s3_object.lambda_zip.key
-+   s3_object_version = aws_s3_object.lambda_zip.version_id
-+   function_name    = "MyApi-SayHello"
-+   role            = aws_iam_role.lambda_execution_role.arn
-+   handler         = "sayHello.handler"  # Specific handler for this operation
-+   runtime         = "nodejs22.x"
-+   timeout         = 30
-+   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
-+
-+   tracing_config {
-+     mode = "Active"
-+   }
-+
-+   environment {
-+     variables = var.env
-+   }
-+
-+   tags = var.tags
-+ }
-
-+ resource "aws_lambda_function" "get_documentation_handler" {
-+   s3_bucket         = aws_s3_object.lambda_zip.bucket
-+   s3_key            = aws_s3_object.lambda_zip.key
-+   s3_object_version = aws_s3_object.lambda_zip.version_id
-+   function_name    = "MyApi-GetDocumentation"
-+   role            = aws_iam_role.lambda_execution_role.arn
-+   handler         = "getDocumentation.handler"  # Specific handler for this operation
-+   runtime         = "nodejs22.x"
-+   timeout         = 30
-+   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
-+
-+   tracing_config {
-+     mode = "Active"
-+   }
-+
-+   environment {
-+     variables = var.env
-+   }
-+
-+   tags = var.tags
-+ }
-
-# Add specific integrations for each operation
-+ resource "aws_apigatewayv2_integration" "say_hello_integration" {
-+   api_id           = module.http_api.api_id
-+   integration_type = "AWS_PROXY"
-+   integration_uri  = aws_lambda_function.say_hello_handler.invoke_arn
-+   payload_format_version = "2.0"
-+   timeout_milliseconds   = 30000
-+ }
-
-+ resource "aws_apigatewayv2_integration" "get_documentation_integration" {
-+   api_id           = module.http_api.api_id
-+   integration_type = "HTTP_PROXY"
-+   integration_uri  = "https://example.com/documentation"
-+   integration_method = "GET"
-+ }
-
-# Add specific routes for each operation
-+ resource "aws_apigatewayv2_route" "say_hello_route" {
-+   api_id    = module.http_api.api_id
-+   route_key = "POST /sayHello"
-+   target    = "integrations/${aws_apigatewayv2_integration.say_hello_integration.id}"
-+   authorization_type = "AWS_IAM"
-+ }
-
-+ resource "aws_apigatewayv2_route" "get_documentation_route" {
-+   api_id    = module.http_api.api_id
-+   route_key = "GET /documentation"
-+   target    = "integrations/${aws_apigatewayv2_integration.get_documentation_integration.id}"
-+   authorization_type = "NONE"
-+ }
-
-# Add Lambda permissions for each function
-+ resource "aws_lambda_permission" "say_hello_permission" {
-+   statement_id  = "AllowExecutionFromAPIGateway-SayHello"
-+   action        = "lambda:InvokeFunction"
-+   function_name = aws_lambda_function.say_hello_handler.function_name
-+   principal     = "apigateway.amazonaws.com"
-+   source_arn    = "${module.http_api.api_execution_arn}/*/*"
-+ }
-
-+ resource "aws_lambda_permission" "get_documentation_permission" {
-+   statement_id  = "AllowExecutionFromAPIGateway-GetDocumentation"
-+   action        = "lambda:InvokeFunction"
-+   function_name = aws_lambda_function.get_documentation_handler.function_name
-+   principal     = "apigateway.amazonaws.com"
-+   source_arn    = "${module.http_api.api_execution_arn}/*/*"
-+ }
-```
-</TabItem>
-<TabItem label="REST API" _filter={{ infra: 'rest-lambda' }}>
-
-```diff
-# packages/common/terraform/src/app/apis/my-api/my-api.tf
-
-# Remove the default single Lambda function
-- resource "aws_lambda_function" "api_lambda" {
--   s3_bucket         = aws_s3_object.lambda_zip.bucket
--   s3_key            = aws_s3_object.lambda_zip.key
--   s3_object_version = aws_s3_object.lambda_zip.version_id
--   function_name    = "MyApiHandler-${random_string.suffix.result}"
--   role            = aws_iam_role.lambda_execution_role.arn
--   handler         = "index.handler"
--   runtime         = "nodejs22.x"
--   timeout         = 30
--   # ... rest of configuration
-- }
-
-# Remove the default proxy integration
-- resource "aws_api_gateway_integration" "lambda_integration" {
--   rest_api_id = module.rest_api.api_id
--   resource_id = aws_api_gateway_resource.proxy_resource.id
--   http_method = aws_api_gateway_method.proxy_method.http_method
--   integration_http_method = "POST"
--   type                    = "AWS_PROXY"
--   uri                     = aws_lambda_function.api_lambda.invoke_arn
--   # ... rest of configuration
-- }
-
-# Remove the default catch-all proxy method
-- resource "aws_api_gateway_method" "proxy_method" {
--   rest_api_id   = module.rest_api.api_id
--   resource_id   = aws_api_gateway_resource.proxy_resource.id
--   http_method   = "ANY"
--   # ... rest of configuration
-- }
-
-# Add individual Lambda functions for each operation using the same bundle
-+ resource "aws_lambda_function" "say_hello_handler" {
-+   s3_bucket         = aws_s3_object.lambda_zip.bucket
-+   s3_key            = aws_s3_object.lambda_zip.key
-+   s3_object_version = aws_s3_object.lambda_zip.version_id
-+   function_name    = "MyApi-SayHello"
-+   role            = aws_iam_role.lambda_execution_role.arn
-+   handler         = "sayHello.handler"  # Specific handler for this operation
-+   runtime         = "nodejs22.x"
-+   timeout         = 30
-+   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
-+
-+   tracing_config {
-+     mode = "Active"
-+   }
-+
-+   environment {
-+     variables = var.env
-+   }
-+
-+   tags = var.tags
-+ }
-
-+ resource "aws_lambda_function" "get_documentation_handler" {
-+   s3_bucket         = aws_s3_object.lambda_zip.bucket
-+   s3_key            = aws_s3_object.lambda_zip.key
-+   s3_object_version = aws_s3_object.lambda_zip.version_id
-+   function_name    = "MyApi-GetDocumentation"
-+   role            = aws_iam_role.lambda_execution_role.arn
-+   handler         = "getDocumentation.handler"  # Specific handler for this operation
-+   runtime         = "nodejs22.x"
-+   timeout         = 30
-+   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
-+
-+   tracing_config {
-+     mode = "Active"
-+   }
-+
-+   environment {
-+     variables = var.env
-+   }
-+
-+   tags = var.tags
-+ }
-
-# Add specific resources and methods for each operation
-+ resource "aws_api_gateway_resource" "say_hello_resource" {
-+   rest_api_id = module.rest_api.api_id
-+   parent_id   = module.rest_api.api_root_resource_id
-+   path_part   = "sayHello"
-+ }
-
-+ resource "aws_api_gateway_method" "say_hello_method" {
-+   rest_api_id   = module.rest_api.api_id
-+   resource_id   = aws_api_gateway_resource.say_hello_resource.id
-+   http_method   = "POST"
-+   authorization = "AWS_IAM"
-+ }
-
-+ resource "aws_api_gateway_integration" "say_hello_integration" {
-+   rest_api_id = module.rest_api.api_id
-+   resource_id = aws_api_gateway_resource.say_hello_resource.id
-+   http_method = aws_api_gateway_method.say_hello_method.http_method
-+
-+   integration_http_method = "POST"
-+   type                   = "AWS_PROXY"
-+   uri                    = aws_lambda_function.say_hello_handler.invoke_arn
-+ }
-
-+ resource "aws_api_gateway_resource" "get_documentation_resource" {
-+   rest_api_id = module.rest_api.api_id
-+   parent_id   = module.rest_api.api_root_resource_id
-+   path_part   = "documentation"
-+ }
-
-+ resource "aws_api_gateway_method" "get_documentation_method" {
-+   rest_api_id   = module.rest_api.api_id
-+   resource_id   = aws_api_gateway_resource.get_documentation_resource.id
-+   http_method   = "GET"
-+   authorization = "NONE"
-+ }
-
-+ resource "aws_api_gateway_integration" "get_documentation_integration" {
-+   rest_api_id = module.rest_api.api_id
-+   resource_id = aws_api_gateway_resource.get_documentation_resource.id
-+   http_method = aws_api_gateway_method.get_documentation_method.http_method
-+
-+   integration_http_method = "GET"
-+   type                   = "HTTP"
-+   uri                    = "https://example.com/documentation"
-+ }
-
-# Update deployment to depend on new integrations
-~ resource "aws_api_gateway_deployment" "api_deployment" {
-    rest_api_id = module.rest_api.api_id
-
-    depends_on = [
--     aws_api_gateway_integration.lambda_integration,
-+     aws_api_gateway_integration.say_hello_integration,
-+     aws_api_gateway_integration.get_documentation_integration,
-    ]
-
-    lifecycle {
-      create_before_destroy = true
-    }
-
-+   triggers = {
-+     redeployment = sha1(jsonencode([
-+       aws_api_gateway_integration.say_hello_integration,
-+       aws_api_gateway_integration.get_documentation_integration,
-+     ]))
-+   }
-  }
-
-# Add Lambda permissions for each function
-+ resource "aws_lambda_permission" "say_hello_permission" {
-+   statement_id  = "AllowExecutionFromAPIGateway-SayHello"
-+   action        = "lambda:InvokeFunction"
-+   function_name = aws_lambda_function.say_hello_handler.function_name
-+   principal     = "apigateway.amazonaws.com"
-+   source_arn    = "${module.rest_api.api_execution_arn}/*/*"
-+ }
-
-+ resource "aws_lambda_permission" "get_documentation_permission" {
-+   statement_id  = "AllowExecutionFromAPIGateway-GetDocumentation"
-+   action        = "lambda:InvokeFunction"
-+   function_name = aws_lambda_function.get_documentation_handler.function_name
-+   principal     = "apigateway.amazonaws.com"
-+   source_arn    = "${module.rest_api.api_execution_arn}/*/*"
-+ }
-```
-</TabItem>
-</Tabs>
-
+:::caution
+Unlike CDK, there is no type-safety in Terraform which will give you a type error if you add a new operation in your application code but forget to declare it in your infrastructure.
+:::
 </Fragment>
 </Infrastructure>
 
 #### Integration Pattern
 
-<Infrastructure>
-<Fragment slot="cdk">
+Generated APIs support two integration patterns:
 
-Generated CDK API constructs support two integration patterns:
-
-- `isolated` creates one Lambda function per operation. This is the default for generated APIs.
+- `isolated` creates one Lambda function per operation. This is the default and recommended option for APIs.
 - `shared` creates a single default router Lambda and reuses it for every operation unless you override specific integrations.
 
-`isolated` gives you finer-grained permissions and configuration per operation. `shared` reduces Lambda and API Gateway integration sprawl while still allowing selective overrides.
+`isolated` gives you finer-grained permissions and configuration per operation, as well as better separation for logs and traces. `shared` reduces the likelihood of encountering cold-starts for low-usage APIs.
 
-For example, setting `pattern` to `'shared'` creates a single function instead of one per integration:
+<Infrastructure>
+<Fragment slot="cdk">
+The integration pattern can be changed at any time in CDK by updating your API construct. For example, setting `pattern` to `'shared'` creates a single function instead of one per integration:
 
 ```ts {6}
 // packages/common/constructs/src/app/apis/my-api.ts
@@ -643,20 +418,71 @@ export class MyApi<...> extends ... {
 ```
 </Fragment>
 <Fragment slot="terraform">
-Terraform modules automatically use the router pattern - this is the default and only supported approach. The generated module creates a single Lambda function that handles all API operations.
+Unlike CDK, the integration pattern is baked into the generated module. To change the integration pattern:
 
-You can simply instantiate the default module to get the router pattern:
+<Steps>
+  1. Delete the previously generated API module in `packages/common/terraform/src/app/apis`
+  2. Re-run the API generator with the other integration pattern:
+      <RunGenerator generator="ts#api" requiredParameters={{ integrationPattern: 'shared' }} />
+</Steps>
+
+With the `isolated` pattern, the module reads the operations from a generated file:
 
 ```hcl
-# Default router pattern - single Lambda function for all operations
-module "my_api" {
-  source = "../../common/terraform/src/app/apis/my-api"
-
-  asset_bucket_name = module.asset_bucket.bucket_name
-
-  # Single Lambda function handles all operations automatically
-  tags = local.common_tags
+# packages/common/terraform/src/app/apis/my-api/my-api.tf
+locals {
+  operations_file = "${path.module}/../../../generated/my-api/operations.json"
+  operations      = fileexists(local.operations_file) ? jsondecode(file(local.operations_file)) : {}
 }
 ```
+
+This file is generated from your API, so you do not need to edit this by hand. Adding an operation to your API application code adds the route and lambda function on the next deploy. It is `.gitignore`d by default; remove the entry if you prefer to check it in.
 </Fragment>
 </Infrastructure>
+
+<OptionFilter when={{ iac: 'terraform', infra: 'rest-lambda' }} description="Raising the REST API path depth limit in Terraform">
+##### Terraform REST API Path Depth Limit
+
+:::caution
+Due to a limitation with Terraform where instances of resources can't reference one another (see [hashicorp/terraform#26697](https://github.com/hashicorp/terraform/issues/26697)), the API Gateway resource tree is built one level at a time rather than recursively, supporting operation paths of up to 16 segments. If an operation's path exceeds this, the plan fails with a message naming the paths that are too deep.
+
+<Drawer title="Supporting deeper paths" trigger="Click here for instructions to support deeper paths should your API require it">
+
+Edit `packages/common/terraform/src/app/apis/<my-api>/<my-api>.tf`:
+
+<Steps>
+  1. Increment `max_path_depth` in `locals`:
+
+      ```hcl
+      locals {
+        max_path_depth = 17
+      }
+      ```
+
+  2. Copy the last `aws_api_gateway_resource` block, incrementing both the resource name and its parent:
+
+      ```hcl
+      resource "aws_api_gateway_resource" "path_depth_16" {
+        for_each = local.path_nodes_by_depth[16]
+
+        rest_api_id = module.rest_api.api_id
+        parent_id   = aws_api_gateway_resource.path_depth_15[each.value.parent].id
+        path_part   = each.value.part
+      }
+      ```
+
+  3. Add the new level to the `resource_ids` local:
+
+      ```hcl
+      locals {
+        resource_ids = merge(
+          ...
+          { for path, resource in aws_api_gateway_resource.path_depth_16 : path => resource.id },
+        )
+      }
+      ```
+</Steps>
+
+</Drawer>
+:::
+</OptionFilter>

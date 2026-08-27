@@ -14,6 +14,7 @@ import { addDependencyToTargetIfNotPresent } from '../nx.js';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
+  SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants.js';
 
 export interface AddOpenApiMetadataGenerateTargetOptions {
@@ -21,27 +22,42 @@ export interface AddOpenApiMetadataGenerateTargetOptions {
   apiNameKebabCase: string;
   specPath: string;
   specBuildTargetName: string;
+  /**
+   * How integrations are mapped to operations. Terraform only needs the
+   * operations metadata for the `isolated` pattern, since the `shared` pattern
+   * routes every operation to one proxy Lambda.
+   */
+  integrationPattern?: 'isolated' | 'shared';
 }
 
 /**
- * Adds a generate:<api-name>-metadata target to shared constructs (CDK only)
- * This allows for API CDK constructs to have type-safety for integrations based on an OpenAPI Specification
+ * Adds a target which generates metadata about the API's operations from its
+ * OpenAPI specification, so that infrastructure can define an integration per
+ * operation.
+ *
+ * For CDK this generates TypeScript, giving the construct type-safe integrations.
+ * For Terraform this generates JSON, which the vended module reads to build one
+ * Lambda function and route per operation.
  */
 export const addSharedConstructsOpenApiMetadataGenerateTarget = (
   tree: Tree,
+  options: AddOpenApiMetadataGenerateTargetOptions,
+) => {
+  if (options.iac === 'cdk') {
+    addCdkOpenApiMetadataGenerateTarget(tree, options);
+  } else if (options.iac === 'terraform') {
+    addTerraformOpenApiOperationsGenerateTarget(tree, options);
+  }
+};
+
+const addCdkOpenApiMetadataGenerateTarget = (
+  tree: Tree,
   {
-    iac,
     apiNameKebabCase,
     specPath,
     specBuildTargetName,
   }: AddOpenApiMetadataGenerateTargetOptions,
 ) => {
-  if (iac !== 'cdk') {
-    // For Terraform, we do not support type-safe integration builders, rather only the single lambda
-    // router pattern, and therefore do not need to add depenencies on metadata generation.
-    return;
-  }
-
   const generatedMetadataDir = joinPathFragments('generated', apiNameKebabCase);
   const generatedMetadataDirFromRoot = joinPathFragments(
     joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR),
@@ -93,5 +109,81 @@ export const addSharedConstructsOpenApiMetadataGenerateTarget = (
     tree,
     joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR),
     (patterns) => [...patterns, joinPathFragments('src', generatedMetadataDir)],
+  );
+};
+
+/**
+ * Directory the operations metadata for an API is generated into, relative to
+ * the shared Terraform project's `src`. The vended module reads the file from
+ * here, so the module template and this target must agree on the location.
+ */
+export const terraformOperationsMetadataDir = (apiNameKebabCase: string) =>
+  joinPathFragments('generated', apiNameKebabCase);
+
+const addTerraformOpenApiOperationsGenerateTarget = (
+  tree: Tree,
+  {
+    apiNameKebabCase,
+    specPath,
+    specBuildTargetName,
+    integrationPattern,
+  }: AddOpenApiMetadataGenerateTargetOptions,
+) => {
+  // The `shared` pattern routes every operation to a single proxy Lambda, so the
+  // module has no need for the operations metadata.
+  if (integrationPattern !== 'isolated') {
+    return;
+  }
+
+  const generatedDirFromRoot = joinPathFragments(
+    PACKAGES_DIR,
+    SHARED_TERRAFORM_DIR,
+    'src',
+    terraformOperationsMetadataDir(apiNameKebabCase),
+  );
+
+  updateJson(
+    tree,
+    joinPathFragments(PACKAGES_DIR, SHARED_TERRAFORM_DIR, 'project.json'),
+    (config: ProjectConfiguration) => {
+      config.targets ??= {};
+      // Terraform reads the operations metadata with `file()`, so it must exist
+      // before plan; the target is wired into `build` below.
+      const operationsTargetName = `generate:${apiNameKebabCase}-operations`;
+      if (!config.targets[operationsTargetName]) {
+        config.targets[operationsTargetName] = {
+          cache: true,
+          executor: 'nx:run-commands',
+          inputs: [
+            {
+              dependentTasksOutputFiles: '**/*.json',
+            },
+          ],
+          outputs: [joinPathFragments('{workspaceRoot}', generatedDirFromRoot)],
+          options: {
+            commands: [
+              `nx g @aws/nx-plugin:open-api#json-metadata --openApiSpecPath="${specPath}" --outputPath="${generatedDirFromRoot}" --no-interactive`,
+            ],
+          },
+          dependsOn: [specBuildTargetName],
+        };
+      }
+      addDependencyToTargetIfNotPresent(config, 'build', operationsTargetName);
+      return config;
+    },
+  );
+
+  // Ignore the generated metadata by default
+  // Users can safely remove the entry from the .gitignore if they prefer to check it in
+  updateGitIgnore(
+    tree,
+    joinPathFragments(PACKAGES_DIR, SHARED_TERRAFORM_DIR),
+    (patterns) => [
+      ...patterns,
+      joinPathFragments(
+        'src',
+        terraformOperationsMetadataDir(apiNameKebabCase),
+      ),
+    ],
   );
 };
