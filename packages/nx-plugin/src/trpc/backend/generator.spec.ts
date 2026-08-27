@@ -493,6 +493,80 @@ describe('trpc backend generator', () => {
     expect(tree.exists('apps/test-api/src/authorizer.ts')).toBe(true);
   });
 
+  // The authorizer result cache TTL must stay aligned across CDK and Terraform,
+  // and across HTTP and REST, so the same workspace behaves the same whichever
+  // it is generated with. Caching is keyed on the identity source, so the TTL is
+  // only meaningful alongside one.
+  describe('custom authorizer result cache TTL', () => {
+    it.each(['http-lambda', 'rest-lambda'] as const)(
+      'should leave the 300s aws-cdk-lib default in place for %s on CDK',
+      async (infra) => {
+        await tsTrpcApiGenerator(tree, {
+          name: 'TestApi',
+          directory: 'apps',
+          infra,
+          auth: 'custom',
+          integrationPattern: 'isolated',
+          iac: 'cdk',
+        });
+
+        const construct = tree.read(
+          'packages/common/constructs/src/app/apis/test-api.ts',
+          'utf-8',
+        );
+
+        // Both HttpLambdaAuthorizer and TokenAuthorizer default resultsCacheTtl
+        // to Duration.minutes(5), which is the value we want, so the construct
+        // must not override it.
+        expect(construct).not.toContain('resultsCacheTtl');
+      },
+    );
+
+    it('should pin 300s alongside an identity source for HTTP on Terraform', async () => {
+      await tsTrpcApiGenerator(tree, {
+        name: 'TestApi',
+        directory: 'apps',
+        infra: 'http-lambda',
+        auth: 'custom',
+        iac: 'terraform',
+      });
+
+      const module = tree.read(
+        'packages/common/terraform/src/app/apis/test-api/test-api.tf',
+        'utf-8',
+      );
+
+      expect(module).toMatch(/authorizer_result_ttl_in_seconds\s+=\s+300/);
+      // API Gateway keys the cache on the identity sources, and requires at
+      // least one for caching to be enabled at all.
+      expect(module).toMatch(
+        /identity_sources\s+=\s+\["\$request\.header\.Authorization"\]/,
+      );
+    });
+
+    it('should leave the 300s provider default in place for REST on Terraform', async () => {
+      await tsTrpcApiGenerator(tree, {
+        name: 'TestApi',
+        directory: 'apps',
+        infra: 'rest-lambda',
+        auth: 'custom',
+        iac: 'terraform',
+      });
+
+      const module = tree.read(
+        'packages/common/terraform/src/app/apis/test-api/test-api.tf',
+        'utf-8',
+      );
+
+      // aws_api_gateway_authorizer defaults authorizer_result_ttl_in_seconds to
+      // 300, so the module must not override it.
+      expect(module).not.toContain('authorizer_result_ttl_in_seconds');
+      expect(module).toMatch(
+        /identity_source\s+=\s+"method\.request\.header\.Authorization"/,
+      );
+    });
+  });
+
   it('should generate a single router lambda for REST APIs when using the shared integration pattern', async () => {
     await tsTrpcApiGenerator(tree, {
       name: 'TestApi',
