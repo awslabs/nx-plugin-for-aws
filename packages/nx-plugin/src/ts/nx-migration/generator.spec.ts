@@ -257,6 +257,36 @@ describe('nx-migration generator', () => {
       expect(tree.exists('packages/nx-plugin/migrations.json')).toBeFalsy();
     });
 
+    it('should scaffold an empty notes snippet for the reference page', async () => {
+      await tsNxMigrationGenerator(tree, {
+        project: PROJECT,
+        name: 'rename-foo-target',
+        description: 'Rename the foo target to bar',
+      });
+
+      const notes = tree.read(
+        'docs/src/content/docs/en/snippets/migrations/rename-foo-target.mdx',
+        'utf-8',
+      );
+      expect(notes).toContain('title: rename-foo-target');
+      // Comment-only, so the page renders nothing until a maintainer writes notes
+      expect(notes).toContain('Optional maintainer notes');
+    });
+
+    it('should not overwrite existing migration notes', async () => {
+      const notesPath =
+        'docs/src/content/docs/en/snippets/migrations/rename-foo-target.mdx';
+      tree.write(notesPath, 'Existing notes');
+
+      await tsNxMigrationGenerator(tree, {
+        project: PROJECT,
+        name: 'rename-foo-target',
+        description: 'Rename the foo target to bar',
+      });
+
+      expect(tree.read(notesPath, 'utf-8')).toBe('Existing notes');
+    });
+
     it('should not overwrite an existing metadata description', async () => {
       tree.write(
         dir('metadata.json'),

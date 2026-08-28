@@ -197,6 +197,20 @@ export default defineConfig({
               },
             },
             {
+              label: 'Migrations reference',
+              link: '/get_started/migrations',
+              translations: {
+                jp: 'マイグレーションリファレンス',
+                ko: '마이그레이션 참조',
+                fr: 'Référence des migrations',
+                it: 'Riferimento delle migrazioni',
+                es: 'Referencia de migraciones',
+                pt: 'Referência de migrações',
+                zh: '迁移参考',
+                vi: 'Tham chiếu migration',
+              },
+            },
+            {
               label: 'Add to an existing project',
               link: '/get_started/existing-project',
               translations: {

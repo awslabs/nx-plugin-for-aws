@@ -45,6 +45,12 @@ export const NX_MIGRATION_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
 );
 
 /**
+ * Where the migrations reference page reads each migration's optional notes from.
+ * A snippet so the notes are translated with the rest of the docs.
+ */
+const MIGRATION_NOTES_DIR = 'docs/src/content/docs/en/snippets/migrations';
+
+/**
  * Scaffolds a migration in an Nx Plugin project and registers it in the
  * plugin's `migrations.json` (creating the manifest and wiring the
  * `nx-migrations` field into the plugin's `package.json` if absent), so
@@ -143,6 +149,17 @@ export const tsNxMigrationGenerator = async (
     if (!tree.exists(metadataPath)) {
       writeJson(tree, metadataPath, { description });
     }
+
+    // The migrations reference page lists the migration from its folder, and
+    // picks up optional notes from this snippet. Scaffolded empty so it renders
+    // nothing until a maintainer writes something.
+    generateFiles(
+      tree,
+      joinPathFragments(import.meta.dirname, 'notes-files'),
+      MIGRATION_NOTES_DIR,
+      { name },
+      { overwriteStrategy: OverwriteStrategy.KeepExisting },
+    );
   } else {
     // Elsewhere, register the migration under its folder-prefixed key. The fields
     // present discriminate the kind for nx, and paths are relative to

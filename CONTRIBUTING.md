@@ -139,6 +139,8 @@ Each kind scaffolds the appropriate files under `packages/nx-plugin/src/migratio
 
 Entries are keyed by folder and name (`latest-<name>`, becoming `v<x.y.z>-<name>` once a release claims them), so reusing a name for a later change can't silently overwrite a migration that has already shipped.
 
+Each migration also gets a notes snippet at `docs/src/content/docs/en/snippets/migrations/<name>.mdx`, rendered on the [migrations reference](./docs/src/content/docs/en/get_started/migrations.mdx) page beneath the migration's description. It is scaffolded empty and renders nothing until you write something, so leave it alone unless there is something users need to know before running the migration — a prerequisite, a caveat, or the reason a related infrastructure change ships without a migration.
+
 `ts#nx-migration` is a public generator, so it works on any Nx Plugin project (it creates `migrations.json` and wires the `nx-migrations` field into the plugin's `package.json` if absent). See its [guide](./docs/src/content/docs/en/guides/nx-migration.mdx) for the full reference. Within this repo, always pass `--project=@aws/nx-plugin`.
 
 #### What should be a migration
