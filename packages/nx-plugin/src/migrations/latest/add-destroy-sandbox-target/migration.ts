@@ -32,11 +32,10 @@ import {
  * name, so a project whose sandbox stage has been renamed gets a target that
  * destroys the stage it actually declares.
  *
- * The destroy targets also move from `--require-approval=never` to `--force`.
- * `cdk destroy` has no `--require-approval` option — it ignores the flag and
- * then blocks on a confirmation prompt, which fails outright under nx, where no
- * TTY is attached. The same fix lands in the vended `buildCdkCommand`, which
- * builds the command for `stageConfig` workspaces.
+ * The destroy targets also drop `--require-approval=never`. `cdk destroy` has no
+ * such option, so it only warns that the flag is being ignored. The same fix
+ * lands in the vended `buildCdkCommand`, which builds the command for
+ * `stageConfig` workspaces.
  *
  * How to write a migration:
  * - https://nx.dev/docs/kb/migration-generators
@@ -45,10 +44,10 @@ import {
 
 const TARGET = 'destroy-sandbox';
 
-/** The destroy targets whose non-interactive flag is corrected. */
+/** The destroy targets the ignored flag is stripped from. */
 const DESTROY_TARGETS = ['destroy', 'destroy-ci'] as const;
 
-/** `cdk destroy` silently ignores this, then prompts for confirmation. */
+/** `cdk destroy` has no such option, so it only warns and carries on. */
 const IGNORED_APPROVAL_FLAG = /\s*--require-approval(=\S*)?/;
 
 /**
@@ -79,27 +78,24 @@ const sandboxStageId = async (
 };
 
 /**
- * Swap `--require-approval` for `--force` in a `cdk destroy` command. Returns
- * undefined when the command isn't the shape the generator produced, or already
- * runs non-interactively.
+ * Strip the ignored `--require-approval` from a `cdk destroy` command. Returns
+ * undefined when the command isn't the shape the generator produced, or the flag
+ * is already gone.
  */
-const withForceFlag = (command: unknown): string | undefined => {
+const withoutApprovalFlag = (command: unknown): string | undefined => {
   if (typeof command !== 'string' || !command.includes('cdk destroy')) {
     return undefined;
   }
   if (!IGNORED_APPROVAL_FLAG.test(command)) return undefined;
-  const stripped = command.replace(IGNORED_APPROVAL_FLAG, '');
-  return /(^|\s)(--force|-f)(\s|$)/.test(stripped)
-    ? stripped
-    : stripped.replace('cdk destroy', 'cdk destroy --force');
+  return command.replace(IGNORED_APPROVAL_FLAG, '');
 };
 
-/** Corrects the non-interactive flag on the project's destroy targets. */
+/** Drops the ignored approval flag from the project's destroy targets. */
 const migrateDestroyFlags = (project: ProjectConfiguration): boolean => {
   let changed = false;
   for (const name of DESTROY_TARGETS) {
     const target = project.targets?.[name];
-    const command = withForceFlag(target?.options?.command);
+    const command = withoutApprovalFlag(target?.options?.command);
     if (command) {
       target.options = { ...target.options, command };
       changed = true;
@@ -125,10 +121,9 @@ const CDK_COMMAND_TEMPLATE = readFileSync(
 );
 
 /**
- * Re-vends the CDK command builder, which picks the non-interactive flag per
- * action rather than always passing `--require-approval`. Only the shape the
- * generator produced is replaced: a customised copy is the user's, so it is
- * reported instead.
+ * Re-vends the CDK command builder, which no longer adds `--require-approval`
+ * for the `destroy` action. Only the shape the generator produced is replaced: a
+ * customised copy is the user's, so it is reported instead.
  */
 const migrateCdkCommandBuilder = (tree: Tree, nextSteps: string[]): void => {
   if (!tree.exists(CDK_COMMAND_PATH)) return;
@@ -139,7 +134,7 @@ const migrateCdkCommandBuilder = (tree: Tree, nextSteps: string[]): void => {
 
   if (!current.includes('hasRequireApproval')) {
     nextSteps.push(
-      `${CDK_COMMAND_PATH}: has diverged from the generated shape — left untouched. Have it pass \`--force\` rather than \`--require-approval\` for the \`destroy\` action, otherwise 'destroy' blocks on a confirmation prompt when run without a TTY.`,
+      `${CDK_COMMAND_PATH}: has diverged from the generated shape — left untouched. Have it skip \`--require-approval\` for the \`destroy\` action, which has no such option.`,
     );
     return;
   }

@@ -98,7 +98,7 @@ exports[`infra generator > should configure project.json with correct targets > 
   ],
   "executor": "nx:run-commands",
   "options": {
-    "command": "cdk destroy --force",
+    "command": "cdk destroy",
     "cwd": "{projectRoot}",
   },
 }
@@ -202,14 +202,14 @@ exports[`infra generator > should configure project.json with correct targets > 
       ],
       "executor": "nx:run-commands",
       "options": {
-        "command": "cdk destroy --force",
+        "command": "cdk destroy",
         "cwd": "{projectRoot}",
       },
     },
     "destroy-ci": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "cdk destroy --force --app ../../dist/{projectRoot}/cdk.out",
+        "command": "cdk destroy --app ../../dist/{projectRoot}/cdk.out",
         "cwd": "{projectRoot}",
       },
     },
@@ -220,7 +220,7 @@ exports[`infra generator > should configure project.json with correct targets > 
       ],
       "executor": "nx:run-commands",
       "options": {
-        "command": "cdk destroy --force "proj-test-sandbox/*"",
+        "command": "cdk destroy "proj-test-sandbox/*"",
         "cwd": "{projectRoot}",
       },
     },
@@ -808,14 +808,14 @@ exports[`infra generator > should handle custom project names correctly > custom
       ],
       "executor": "nx:run-commands",
       "options": {
-        "command": "cdk destroy --force",
+        "command": "cdk destroy",
         "cwd": "{projectRoot}",
       },
     },
     "destroy-ci": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "cdk destroy --force --app ../../dist/{projectRoot}/cdk.out",
+        "command": "cdk destroy --app ../../dist/{projectRoot}/cdk.out",
         "cwd": "{projectRoot}",
       },
     },
@@ -826,7 +826,7 @@ exports[`infra generator > should handle custom project names correctly > custom
       ],
       "executor": "nx:run-commands",
       "options": {
-        "command": "cdk destroy --force "proj-custom-infra-sandbox/*"",
+        "command": "cdk destroy "proj-custom-infra-sandbox/*"",
         "cwd": "{projectRoot}",
       },
     },
@@ -1068,10 +1068,10 @@ exports[`infra generator > with stageConfig > should snapshot generated scripts 
 "/**
  * Builds the CDK command as an array of arguments for spawnSync.
  *
- * Runs non-interactively by default, since these commands run under nx with no
- * TTY attached: \`--require-approval=never\` for deploys, \`--force\` for destroys
- * (\`cdk destroy\` has no \`--require-approval\`). If the user passes the relevant
- * flag themselves, their choice is respected and no default is added.
+ * Deploys default to --require-approval=never (standard for local dev deploys).
+ * If the user explicitly passes --require-approval with any value, we
+ * respect their choice and don't add the default. \`cdk destroy\` has no
+ * --require-approval option, so nothing is added for it.
  *
  * Pass --express to opt into CloudFormation express mode for faster
  * iteration; it is not enabled by default so deploys wait for full
@@ -1081,17 +1081,14 @@ export function buildCdkCommand(
   action: string,
   remainingArgs: string[],
 ): string[] {
-  const has = (flag: string) =>
-    remainingArgs.some((a) => a === flag || a.startsWith(\`\${flag}=\`));
-  const nonInteractive =
-    action === 'destroy'
-      ? has('--force') || has('-f')
-        ? []
-        : ['--force']
-      : has('--require-approval')
-        ? []
-        : ['--require-approval=never'];
-  return ['cdk', action, ...nonInteractive, ...remainingArgs];
+  const hasRequireApproval = remainingArgs.some(
+    (a) => a === '--require-approval' || a.startsWith('--require-approval='),
+  );
+  const defaults =
+    action === 'destroy' || hasRequireApproval
+      ? []
+      : ['--require-approval=never'];
+  return ['cdk', action, ...defaults, ...remainingArgs];
 }
 "
 `;

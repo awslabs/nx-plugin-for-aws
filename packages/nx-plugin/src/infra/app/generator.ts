@@ -235,7 +235,7 @@ export async function tsInfraGenerator(
             })
           : withCdkEnv({
               cwd: '{projectRoot}',
-              command: 'cdk destroy --force',
+              command: 'cdk destroy',
             }),
       };
       config.targets['destroy-sandbox'] = {
@@ -247,14 +247,14 @@ export async function tsInfraGenerator(
             })
           : withCdkEnv({
               cwd: '{projectRoot}',
-              command: `cdk destroy --force ${sandboxStagePattern}`,
+              command: `cdk destroy ${sandboxStagePattern}`,
             }),
       };
       config.targets['destroy-ci'] = {
         executor: 'nx:run-commands',
         options: withCdkEnv({
           cwd: '{projectRoot}',
-          command: `cdk destroy --force --app ${distDirFromProjectRoot}`,
+          command: `cdk destroy --app ${distDirFromProjectRoot}`,
         }),
       };
       config.targets.cdk = {

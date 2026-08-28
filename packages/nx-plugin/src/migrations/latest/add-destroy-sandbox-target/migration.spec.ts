@@ -122,7 +122,7 @@ describe('add-destroy-sandbox-target migration', () => {
       dependsOn: ['^build', 'compile'],
       options: {
         cwd: '{projectRoot}',
-        command: 'cdk destroy --force "proj-infra-sandbox/*"',
+        command: 'cdk destroy "proj-infra-sandbox/*"',
       },
     });
     expect(result.nextSteps).toEqual([]);
@@ -147,7 +147,7 @@ describe('add-destroy-sandbox-target migration', () => {
     await migration(tree);
 
     expect(sandboxTargetOf(tree).options.command).toBe(
-      'cdk destroy --force "proj-infra-sandbox/*"',
+      'cdk destroy "proj-infra-sandbox/*"',
     );
   });
 
@@ -157,7 +157,7 @@ describe('add-destroy-sandbox-target migration', () => {
     await migration(tree);
 
     expect(sandboxTargetOf(tree).options.command).toBe(
-      'cdk destroy --force "my-own-sandbox/*"',
+      'cdk destroy "my-own-sandbox/*"',
     );
   });
 
@@ -172,7 +172,7 @@ app.synth();
     await migration(tree);
 
     expect(sandboxTargetOf(tree).options.command).toBe(
-      'cdk destroy --force "proj-infra-sandbox/*"',
+      'cdk destroy "proj-infra-sandbox/*"',
     );
   });
 
@@ -238,17 +238,17 @@ app.synth();
     await migration(tree);
 
     expect(sandboxTargetOf(tree).options.command).toBe(
-      'cdk destroy --force "proj-infra-sandbox/*"',
+      'cdk destroy "proj-infra-sandbox/*"',
     );
     expect(sandboxTargetOf(tree, '@proj/other-infra').options.command).toBe(
-      'cdk destroy --force "proj-other-infra-sandbox/*"',
+      'cdk destroy "proj-other-infra-sandbox/*"',
     );
   });
 
-  describe('non-interactive destroy flag', () => {
-    // `cdk destroy` has no --require-approval, so it ignores the flag and then
-    // blocks on a confirmation prompt, which nx cannot answer.
-    it('should swap --require-approval for --force on the destroy targets', async () => {
+  describe('ignored approval flag', () => {
+    // `cdk destroy` has no --require-approval option, so it only warns that the
+    // flag is being ignored.
+    it('should drop --require-approval from the destroy targets', async () => {
       seedInfraProject(tree);
       const project = readProjectConfiguration(tree, '@proj/infra');
       project.targets['destroy-ci'] = {
@@ -264,30 +264,14 @@ app.synth();
       const result = await migration(tree);
       const targets = readProjectConfiguration(tree, '@proj/infra').targets;
 
-      expect(targets.destroy.options.command).toBe('cdk destroy --force');
+      expect(targets.destroy.options.command).toBe('cdk destroy');
       expect(targets['destroy-ci'].options.command).toBe(
-        'cdk destroy --force --app ../../dist/{projectRoot}/cdk.out',
+        'cdk destroy --app ../../dist/{projectRoot}/cdk.out',
       );
       expect(result.nextSteps).toEqual([]);
     });
 
-    it('should leave a destroy target that already passes --force alone', async () => {
-      seedInfraProject(tree, {
-        destroy: {
-          executor: 'nx:run-commands',
-          options: { cwd: '{projectRoot}', command: 'cdk destroy --force' },
-        },
-      });
-
-      await migration(tree);
-
-      expect(
-        readProjectConfiguration(tree, '@proj/infra').targets.destroy.options
-          .command,
-      ).toBe('cdk destroy --force');
-    });
-
-    it('should not add a second --force when the user already passes one', async () => {
+    it('should keep flags the user passes themselves', async () => {
       seedInfraProject(tree, {
         destroy: {
           executor: 'nx:run-commands',
@@ -306,7 +290,7 @@ app.synth();
       ).toBe('cdk destroy --force');
     });
 
-    it('should re-vend the command builder so destroy passes --force', async () => {
+    it('should re-vend the command builder so destroy skips the flag', async () => {
       seedInfraProject(tree);
       tree.write(CDK_COMMAND_PATH, CDK_COMMAND_BEFORE);
 
@@ -314,7 +298,6 @@ app.synth();
       const after = tree.read(CDK_COMMAND_PATH).toString();
 
       expect(after).toContain("action === 'destroy'");
-      expect(after).toContain("['--force']");
       expect(result.nextSteps).toEqual([]);
     });
 
@@ -328,7 +311,9 @@ app.synth();
       const result = await migration(tree);
 
       expect(tree.read(CDK_COMMAND_PATH).toString()).toContain('myOwnThing()');
-      expect(tree.read(CDK_COMMAND_PATH).toString()).not.toContain('--force');
+      expect(tree.read(CDK_COMMAND_PATH).toString()).not.toContain(
+        'buildCdkCommand(\n',
+      );
       expect(result.nextSteps).toEqual([
         expect.stringContaining('has diverged from the generated shape'),
       ]);

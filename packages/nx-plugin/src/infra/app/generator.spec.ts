@@ -110,7 +110,7 @@ describe('infra generator', () => {
       executor: 'nx:run-commands',
       options: {
         cwd: '{projectRoot}',
-        command: 'cdk destroy --force',
+        command: 'cdk destroy',
       },
       dependsOn: ['^build', 'compile'],
     });
@@ -118,7 +118,7 @@ describe('infra generator', () => {
       executor: 'nx:run-commands',
       options: {
         cwd: '{projectRoot}',
-        command: 'cdk destroy --force "proj-test-sandbox/*"',
+        command: 'cdk destroy "proj-test-sandbox/*"',
       },
       dependsOn: ['^build', 'compile'],
     });
@@ -126,7 +126,7 @@ describe('infra generator', () => {
       executor: 'nx:run-commands',
       options: {
         cwd: '{projectRoot}',
-        command: 'cdk destroy --force --app ../../dist/{projectRoot}/cdk.out',
+        command: 'cdk destroy --app ../../dist/{projectRoot}/cdk.out',
       },
     });
     expect(config.targets.cdk).toMatchObject({
@@ -312,7 +312,7 @@ describe('infra generator', () => {
       'cdk deploy --require-approval=never',
     );
     expect(config.targets.deploy.options.cwd).toBe('{projectRoot}');
-    expect(config.targets.destroy.options.command).toBe('cdk destroy --force');
+    expect(config.targets.destroy.options.command).toBe('cdk destroy');
     expect(config.targets.destroy.options.cwd).toBe('{projectRoot}');
   });
 
@@ -342,12 +342,11 @@ describe('infra generator', () => {
     );
   });
 
-  // `cdk destroy` has no --require-approval; --force is what makes it
-  // non-interactive.
+  // `cdk destroy` has no --require-approval option, so only deploys carry it.
   describe.each([
-    { action: 'deploy', flag: '--require-approval=never' },
-    { action: 'destroy', flag: '--force' },
-  ])('$action-sandbox target', ({ action, flag }) => {
+    { action: 'deploy', cdkCommand: 'cdk deploy --require-approval=never' },
+    { action: 'destroy', cdkCommand: 'cdk destroy' },
+  ])('$action-sandbox target', ({ action, cdkCommand }) => {
     const target = `${action}-sandbox`;
 
     // The stage pattern must match the stage main.ts instantiates, otherwise
@@ -374,7 +373,7 @@ describe('infra generator', () => {
 
         expect(mainTs).toContain(`new ApplicationStage(app, '${stage}'`);
         expect(config.targets[target].options.command).toBe(
-          `cdk ${action} ${flag} "${stage}/*"`,
+          `${cdkCommand} "${stage}/*"`,
         );
       },
     );
