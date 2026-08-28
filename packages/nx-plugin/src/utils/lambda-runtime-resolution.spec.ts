@@ -6,9 +6,7 @@ import { describe, expect, it } from 'vitest';
 import {
   compareRuntimeVersions,
   resolveLambdaRuntimes,
-  resolveLatestPythonPatch,
   runtimeIdentifierVersion,
-  type UvPythonEntry,
   unresolvedRuntimeWarning,
 } from './lambda-runtime-resolution.js';
 import { LAMBDA_RUNTIME_VERSIONS } from './versions.js';
@@ -28,17 +26,6 @@ const CDK_RUNTIMES = [
   'java21',
   'provided.al2023',
 ];
-
-const uvEntry = (version: string, extra: Partial<UvPythonEntry> = {}) => {
-  const [major, minor, patch] = version.split('.').map((p) => parseInt(p, 10));
-  return {
-    version,
-    version_parts: { major, minor, patch },
-    implementation: 'cpython',
-    variant: 'default',
-    ...extra,
-  } as UvPythonEntry;
-};
 
 describe('lambda runtime resolution', () => {
   describe('reading a runtime identifier', () => {
@@ -130,50 +117,6 @@ describe('lambda runtime resolution', () => {
           reason: 'no-runtimes-listed',
         },
       ]);
-    });
-  });
-
-  describe('resolving the CPython patch from uv', () => {
-    it('should pick the highest patch for the pinned minor', () => {
-      const patch = resolveLatestPythonPatch(
-        [
-          uvEntry('3.14.0'),
-          uvEntry('3.14.7'),
-          uvEntry('3.14.4'),
-          uvEntry('3.13.9'),
-        ],
-        '3.14',
-      );
-
-      expect(patch).toBe('7');
-    });
-
-    // A generated project needs the default build of a final release.
-    it('should exclude pre-releases and free-threaded builds', () => {
-      const patch = resolveLatestPythonPatch(
-        [
-          uvEntry('3.14.2'),
-          { ...uvEntry('3.14.9'), variant: 'freethreaded' },
-          { ...uvEntry('3.14.0'), version: '3.14.8rc1' },
-          { ...uvEntry('3.14.9'), implementation: 'pypy' },
-        ],
-        '3.14',
-      );
-
-      expect(patch).toBe('2');
-    });
-
-    it('should return undefined when uv lists no matching release', () => {
-      expect(
-        resolveLatestPythonPatch([uvEntry('3.13.9')], '3.14'),
-      ).toBeUndefined();
-      expect(resolveLatestPythonPatch([], '3.14')).toBeUndefined();
-    });
-
-    it('should follow the minor it is given, so a bump moves both together', () => {
-      const entries = [uvEntry('3.14.7'), uvEntry('3.15.2')];
-
-      expect(resolveLatestPythonPatch(entries, '3.15')).toBe('2');
     });
   });
 

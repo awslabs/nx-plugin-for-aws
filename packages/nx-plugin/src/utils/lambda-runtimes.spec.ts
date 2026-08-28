@@ -75,12 +75,10 @@ describe('vended lambda runtimes', () => {
   // A generated Python project resolves its wheels against the uv interpreter, so
   // an interpreter on a different minor than the Lambda runtime builds a bundle
   // the deployed function cannot run.
+  // Named without a patch, so uv resolves whichever patch of that minor the
+  // platform has a build for rather than one that may not exist there.
   it('should pin the uv interpreter to the lambda python runtime', () => {
-    expect(pyenvPythonVersion()).toMatch(
-      new RegExp(
-        `^${LAMBDA_RUNTIME_VERSIONS.python.replace('.', '\\.')}\\.\\d+$`,
-      ),
-    );
+    expect(pyenvPythonVersion()).toBe(LAMBDA_RUNTIME_VERSIONS.python);
     expect(pyprojectPythonDependency()).toBe(
       `>=${LAMBDA_RUNTIME_VERSIONS.python}`,
     );
