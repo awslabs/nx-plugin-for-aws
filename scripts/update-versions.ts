@@ -464,6 +464,56 @@ const updateWindowsSmithyCli = (tree: FsTree, newVersion: string): void => {
   console.log(`Updated the Windows Smithy CLI to ${newVersion}`);
 };
 
+/** The npm package whose ruff build formats generated Python. */
+const RUFF_WASM_PACKAGE = '@astral-sh/ruff-wasm-nodejs';
+
+/**
+ * The exact version `@astral-sh/ruff-wasm-nodejs` is pinned to, which
+ * npm-check-updates has already bumped by the time this runs.
+ */
+const readRuffWasmVersion = (tree: FsTree): string | undefined => {
+  const packageJsonPath = 'packages/nx-plugin/package.json';
+  const contents = tree.read(packageJsonPath, 'utf-8');
+  if (!contents) {
+    console.warn(`Could not read ${packageJsonPath}`);
+    return undefined;
+  }
+  const version = (
+    JSON.parse(contents) as { dependencies?: Record<string, string> }
+  ).dependencies?.[RUFF_WASM_PACKAGE];
+  if (!version) {
+    console.warn(`Could not find ${RUFF_WASM_PACKAGE} in ${packageJsonPath}`);
+  }
+  return version;
+};
+
+/**
+ * Holds the ruff the vended `format` and `lint` targets run on the release
+ * `@astral-sh/ruff-wasm-nodejs` is built from.
+ *
+ * Generated files are formatted by the wasm bindings but checked by the vended
+ * `format` target, so a drift between the two pins makes generated files fail
+ * `ruff format --check` on any formatting change. The npm pin leads because
+ * npm-check-updates applies a cooldown that pip-check-updates has no equivalent
+ * for, so a same-day ruff release reaches the PyPI pin and not the npm one.
+ */
+const alignRuffWithWasmBindings = (
+  tree: FsTree,
+  updatedPyVersions: Record<string, string>,
+): void => {
+  const wasmVersion = readRuffWasmVersion(tree);
+  if (!wasmVersion) {
+    return;
+  }
+  const aligned = `==${wasmVersion}`;
+  if (updatedPyVersions.ruff !== aligned) {
+    console.log(
+      `Holding ruff at ${aligned} to match ${RUFF_WASM_PACKAGE}@${wasmVersion}`,
+    );
+    updatedPyVersions.ruff = aligned;
+  }
+};
+
 const main = async () => {
   // Parse command line arguments
   const isDryRun = process.argv.includes('--dry-run');
@@ -494,6 +544,10 @@ const main = async () => {
 
     // Get updated Python versions
     const updatedPyVersions = getUpdatedPythonVersions(tmpDir);
+
+    // Keep the ruff the vended targets run on the release the wasm bindings
+    // that format generated files are built from
+    alignRuffWithWasmBindings(tree, updatedPyVersions);
 
     // Apply updated Python versions to the versions file
     const pyChanges = await applyUpdatedVersions(
