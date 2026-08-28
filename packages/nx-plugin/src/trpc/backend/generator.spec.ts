@@ -12,6 +12,7 @@ import {
   createTreeUsingTsSolutionSetup,
   snapshotTreeDir,
 } from '../../utils/test.js';
+import { terraformLambdaRuntime } from '../../utils/versions.js';
 import {
   TRPC_BACKEND_GENERATOR_INFO,
   tsTrpcApiGenerator,
@@ -733,7 +734,9 @@ describe('trpc backend generator', () => {
 
       // Verify tRPC-specific handler configuration
       expect(appApiContent).toMatch(/handler\s+=\s+"index\.handler"/);
-      expect(appApiContent).toMatch(/runtime\s+=\s+"nodejs22\.x"/);
+      expect(appApiContent).toMatch(
+        new RegExp(`runtime\\s+=\\s+"${terraformLambdaRuntime('node')}"`),
+      );
 
       // Snapshot terraform files
       const terraformFileContents = {
@@ -780,7 +783,9 @@ describe('trpc backend generator', () => {
 
       // Verify tRPC-specific handler configuration
       expect(appApiContent).toMatch(/handler\s+=\s+"index\.handler"/);
-      expect(appApiContent).toMatch(/runtime\s+=\s+"nodejs22\.x"/);
+      expect(appApiContent).toMatch(
+        new RegExp(`runtime\\s+=\\s+"${terraformLambdaRuntime('node')}"`),
+      );
 
       // Snapshot terraform files
       const terraformFileContents = {
@@ -828,7 +833,9 @@ describe('trpc backend generator', () => {
 
       // Verify tRPC-specific handler configuration
       expect(appApiContent).toMatch(/handler\s+=\s+"index\.handler"/);
-      expect(appApiContent).toMatch(/runtime\s+=\s+"nodejs22\.x"/);
+      expect(appApiContent).toMatch(
+        new RegExp(`runtime\\s+=\\s+"${terraformLambdaRuntime('node')}"`),
+      );
 
       // Snapshot terraform files
       const terraformFileContents = {
@@ -876,7 +883,9 @@ describe('trpc backend generator', () => {
 
       // Verify tRPC-specific handler configuration
       expect(appApiContent).toMatch(/handler\s+=\s+"index\.handler"/);
-      expect(appApiContent).toMatch(/runtime\s+=\s+"nodejs22\.x"/);
+      expect(appApiContent).toMatch(
+        new RegExp(`runtime\\s+=\\s+"${terraformLambdaRuntime('node')}"`),
+      );
 
       // Snapshot terraform files
       const terraformFileContents = {
@@ -923,7 +932,9 @@ describe('trpc backend generator', () => {
 
       // Verify tRPC-specific handler configuration
       expect(appApiContent).toMatch(/handler\s+=\s+"index\.handler"/);
-      expect(appApiContent).toMatch(/runtime\s+=\s+"nodejs22\.x"/);
+      expect(appApiContent).toMatch(
+        new RegExp(`runtime\\s+=\\s+"${terraformLambdaRuntime('node')}"`),
+      );
 
       // Snapshot terraform files
       const terraformFileContents = {
@@ -971,7 +982,9 @@ describe('trpc backend generator', () => {
 
       // Verify tRPC-specific handler configuration
       expect(appApiContent).toMatch(/handler\s+=\s+"index\.handler"/);
-      expect(appApiContent).toMatch(/runtime\s+=\s+"nodejs22\.x"/);
+      expect(appApiContent).toMatch(
+        new RegExp(`runtime\\s+=\\s+"${terraformLambdaRuntime('node')}"`),
+      );
 
       // Snapshot terraform files
       const terraformFileContents = {

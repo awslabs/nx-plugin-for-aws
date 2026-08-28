@@ -9,6 +9,7 @@ import {
   updateAwsNxPluginConfig,
 } from '../../utils/config/utils.js';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import { LAMBDA_RUNTIME_VERSIONS } from '../../utils/versions.js';
 import { PY_AGENT_GENERATOR_INFO, pyAgentGenerator } from './generator.js';
 
 describe('py#agent generator', () => {
@@ -265,7 +266,7 @@ dev-dependencies = []
     const commands = projectConfig.targets['bundle-arm'].options.commands;
     expect(commands).toEqual([
       'uv export --frozen --no-dev --no-editable --project {projectRoot} --package test-project -o dist/{projectRoot}/bundle-arm/requirements.txt',
-      'uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform aarch64-manylinux_2_28 --target dist/{projectRoot}/bundle-arm -r dist/{projectRoot}/bundle-arm/requirements.txt',
+      `uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform aarch64-manylinux_2_28 --python-version ${LAMBDA_RUNTIME_VERSIONS.python} --target dist/{projectRoot}/bundle-arm -r dist/{projectRoot}/bundle-arm/requirements.txt`,
     ]);
 
     // Check that docker target was added

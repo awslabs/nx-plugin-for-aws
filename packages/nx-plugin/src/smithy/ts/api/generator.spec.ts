@@ -14,6 +14,7 @@ import {
   sharedConstructsGenerator,
 } from '../../../utils/shared-constructs.js';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
+import { terraformLambdaRuntime } from '../../../utils/versions.js';
 import {
   TS_SMITHY_API_GENERATOR_INFO,
   tsSmithyApiGenerator,
@@ -637,7 +638,9 @@ describe('tsSmithyApiGenerator', () => {
 
       // Verify Smithy-specific handler configuration
       expect(appApiContent).toMatch(/handler\s+=\s+"index\.handler"/);
-      expect(appApiContent).toMatch(/runtime\s+=\s+"nodejs22\.x"/);
+      expect(appApiContent).toMatch(
+        new RegExp(`runtime\\s+=\\s+"${terraformLambdaRuntime('node')}"`),
+      );
 
       // Snapshot terraform files
       const terraformFileContents = {
@@ -683,7 +686,9 @@ describe('tsSmithyApiGenerator', () => {
 
       // Verify Smithy-specific handler configuration
       expect(appApiContent).toMatch(/handler\s+=\s+"index\.handler"/);
-      expect(appApiContent).toMatch(/runtime\s+=\s+"nodejs22\.x"/);
+      expect(appApiContent).toMatch(
+        new RegExp(`runtime\\s+=\\s+"${terraformLambdaRuntime('node')}"`),
+      );
 
       // Snapshot terraform files
       const terraformFileContents = {

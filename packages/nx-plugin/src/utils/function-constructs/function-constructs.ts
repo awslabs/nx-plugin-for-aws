@@ -19,7 +19,11 @@ import {
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants.js';
-import { terraformProviderVersions } from '../versions.js';
+import {
+  cdkLambdaRuntime,
+  terraformLambdaRuntime,
+  terraformProviderVersions,
+} from '../versions.js';
 
 export interface AddLambdaFunctionConstructOptions {
   functionProjectName: string;
@@ -88,7 +92,7 @@ const addLambdaFunctionCdkConstructs = async (
     ),
     {
       ...options,
-      runtime: `Runtime.${options.runtime === 'python' ? 'PYTHON_3_14' : 'NODEJS_LATEST'}`,
+      runtime: cdkLambdaRuntime(options.runtime),
       ...esmVars(tree),
     },
     {
@@ -145,7 +149,7 @@ const addLambdaFunctionTerraformModules = (
     ),
     {
       ...options,
-      runtime: options.runtime === 'python' ? 'python3.14' : 'nodejs22.x',
+      runtime: terraformLambdaRuntime(options.runtime),
       ...terraformProviderVersions(),
     },
     {
