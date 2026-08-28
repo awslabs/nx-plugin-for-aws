@@ -9,6 +9,7 @@ import {
   callGeneratedClientStreaming,
   createPythonClientVerifier,
   createTree,
+  expectSingleRequest,
   generateAndRead,
   mockJsonlResponse,
 } from './generator.utils.spec.js';
@@ -171,5 +172,106 @@ describe('openApiPyClientGenerator - fast-api-shaped specs', () => {
     expect(res.exception?.type).toBe('EchoApiError');
     expect(res.exception?.error_type).toBe('Echo500Error');
     expect(res.exception?.status).toBe(500);
+  });
+
+  /**
+   * FastAPI writes `Optional[T] = Query(description=...)` as an OpenAPI 3.1
+   * `anyOf: [T, null]` carrying a `description`, which the generator hoists to a
+   * documented module-level alias. That is its own emission path — nothing else
+   * produces a standalone alias with a docstring — and it once emitted the
+   * docstring on the alias's own line, so the module did not parse.
+   */
+  describe('documented optional query parameters', () => {
+    const documentedOptionalSpec: Spec = {
+      openapi: '3.1.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/vessels': {
+          get: {
+            operationId: 'listVessels',
+            parameters: [
+              {
+                name: 'as_of',
+                in: 'query',
+                required: false,
+                description: 'Read the registry as it stood at this instant',
+                schema: {
+                  anyOf: [
+                    { type: 'string', format: 'date-time' },
+                    { type: 'null' },
+                  ],
+                  description: 'Read the registry as it stood at this instant',
+                  title: 'As Of',
+                },
+              },
+              {
+                name: 'hull_class',
+                in: 'query',
+                required: false,
+                description: 'Repeatable hull class filter',
+                schema: {
+                  anyOf: [
+                    {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/HullClass' },
+                    },
+                    { type: 'null' },
+                  ],
+                  description: 'Repeatable hull class filter',
+                  title: 'Hull Class',
+                },
+              },
+            ],
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': {
+                    schema: { type: 'array', items: { type: 'string' } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: { HullClass: { type: 'string', enum: ['skiff', 'hauler'] } },
+      },
+    } as unknown as Spec;
+
+    // `generateAndRead` compiles and imports the module, so a docstring running
+    // onto its alias fails here — this is the assertion that was missing.
+    it('emits a documented alias on its own line', async () => {
+      const { types } = await generateAndRead(
+        verifier,
+        tree,
+        documentedOptionalSpec,
+      );
+      expect(types).toMatch(
+        /^ListVesselsRequestQueryAsOf = datetime\.datetime \| None$/m,
+      );
+      expect(types).toMatch(
+        /^"""Read the registry as it stood at this instant"""$/m,
+      );
+      // The defect: the alias's own line lost the space after `=` and ran into
+      // the docstring, because a slurping EJS tag ate the trailing newline.
+      expect(types).not.toMatch(/^[A-Za-z_]\w* =\S/m);
+      expect(types).not.toMatch(/None"""/);
+    });
+
+    it('sends both parameters on the wire', async () => {
+      await generateAndRead(verifier, tree, documentedOptionalSpec);
+      const res = await callGeneratedClient(
+        verifier,
+        'list_vessels',
+        { as_of: '2026-09-01T00:00:00', hull_class: ['skiff', 'hauler'] },
+        { json: ['ves_1'] },
+      );
+      expect(res.ok).toBe(true);
+      const query = new URL(expectSingleRequest(res).url).searchParams;
+      expect(query.get('as_of')).toBe('2026-09-01T00:00:00');
+      expect(query.getAll('hull_class')).toEqual(['skiff', 'hauler']);
+    });
   });
 });
