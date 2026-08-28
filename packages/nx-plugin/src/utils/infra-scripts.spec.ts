@@ -93,11 +93,19 @@ describe('CDK command construction', () => {
     ]);
   });
 
-  it('should build destroy command with default --require-approval', () => {
+  // `cdk destroy` has no --require-approval option, so it is not added.
+  it('should build destroy command without --require-approval', () => {
+    expect(buildCdkCommand('destroy', ['my-app-dev/*'])).toEqual([
+      'cdk',
+      'destroy',
+      'my-app-dev/*',
+    ]);
+  });
+
+  it('should pass through flags the user gives destroy', () => {
     expect(buildCdkCommand('destroy', ['my-app-dev/*', '--force'])).toEqual([
       'cdk',
       'destroy',
-      '--require-approval=never',
       'my-app-dev/*',
       '--force',
     ]);
