@@ -82,36 +82,35 @@ const categorizeGenerators = () => {
 
 const { standalone, components } = categorizeGenerators();
 
-// The CodeBuild Windows runner lacks Docker (agents, MCP servers and rdb build a
-// Docker image) and can't run checkov (ts#infra and terraform#project). These stay
-// covered on the Linux standalone leg and the windows-latest dungeon-adventure
-// test.
+// Generators whose build packages a Docker image, so a runner without a daemon
+// cannot exercise them. They stay covered on the Linux standalone leg.
 //
 // Smithy is not among them: it builds with the Smithy CLI rather than a container,
 // which the runner installs (see .github/actions/init-monorepo).
-const CODEBUILD_WINDOWS = process.env.NX_E2E_CODEBUILD_WINDOWS === 'true';
-
-const CODEBUILD_WINDOWS_UNSUPPORTED = new Set([
+const DOCKER_DEPENDENT = [
   'ts#agent',
   'py#agent',
   'ts#mcp-server',
   'py#mcp-server',
   'ts#rdb',
   'py#rdb',
-  'ts#infra',
-  'terraform#project',
-]);
+];
+
+// The CodeBuild Windows runner lacks Docker and additionally can't run checkov
+// (ts#infra and terraform#project). The GitHub macOS runner lacks only Docker.
+const CODEBUILD_WINDOWS = process.env.NX_E2E_CODEBUILD_WINDOWS === 'true';
+const NO_DOCKER = process.env.NX_E2E_NO_DOCKER === 'true';
+
+const UNSUPPORTED_GENERATORS = new Set(
+  CODEBUILD_WINDOWS
+    ? [...DOCKER_DEPENDENT, 'ts#infra', 'terraform#project']
+    : DOCKER_DEPENDENT,
+);
 
 // A connection is unsupported when either endpoint's project is. Matched exactly
-// against each side of the key.
-const CONNECTION_UNSUPPORTED_ENDPOINTS = new Set([
-  'ts#agent',
-  'py#agent',
-  'ts#mcp-server',
-  'py#mcp-server',
-  'ts#rdb',
-  'py#rdb',
-]);
+// against each side of the key. Only the Docker-dependent endpoints matter here —
+// checkov runs on an infrastructure project, which is not a connection endpoint.
+const CONNECTION_UNSUPPORTED_ENDPOINTS = new Set(DOCKER_DEPENDENT);
 
 // Connections whose factories build an unsupported project the key doesn't
 // name (the website -> gateway case attaches a ts#agent to the gateway).
@@ -129,11 +128,11 @@ const connectionUnsupported = (key: string): boolean =>
 const keepForRunner = <T extends { generator?: string; unsupported?: boolean }>(
   cases: T[],
 ): T[] =>
-  CODEBUILD_WINDOWS
+  CODEBUILD_WINDOWS || NO_DOCKER
     ? cases.filter(
         (c) =>
           !c.unsupported &&
-          !(c.generator && CODEBUILD_WINDOWS_UNSUPPORTED.has(c.generator)),
+          !(c.generator && UNSUPPORTED_GENERATORS.has(c.generator)),
       )
     : cases;
 

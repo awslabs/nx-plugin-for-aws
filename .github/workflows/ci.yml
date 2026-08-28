@@ -214,6 +214,40 @@ jobs:
         env:
           NX_E2E_SHARD: ${{ matrix.shard }}/6
         run: pnpm nx run @aws/nx-plugin-e2e:smoke-test --name=standalone
+  # Runs on GitHub's hosted macOS runners. NX_E2E_NO_DOCKER skips the cases whose
+  # build packages a container image, since those images ship no Docker daemon;
+  # they stay covered on the Linux standalone leg.
+  smoke_tests_macos_standalone:
+    name: macOS Smoke Tests - standalone (${{matrix.shard}}/6)
+    runs-on: macos-latest
+    needs: package
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - name: Download build artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: build-artifact
+          path: dist
+      - uses: ./.github/actions/init-monorepo
+        with:
+          container-tools: 'false'
+          setup-bun: 'false'
+          uv-cache-suffix: ${{ matrix.shard }}
+      - name: macOS Smoke Test - standalone (shard ${{ matrix.shard }}/6)
+        env:
+          NX_E2E_SHARD: ${{ matrix.shard }}/6
+          NX_E2E_NO_DOCKER: 'true'
+          # The image ships a Homebrew CPython, which uv would use to satisfy an
+          # interpreter it cannot download. That masks a version a developer on a
+          # clean machine cannot install, so only uv-managed interpreters count.
+          UV_MANAGED_PYTHON: '1'
+        run: pnpm nx run @aws/nx-plugin-e2e:smoke-test --name=standalone
   smoke_tests_windows:
     name: Windows Smoke Tests - ${{matrix.smoke_test}}
     runs-on: windows-latest
@@ -299,6 +333,7 @@ jobs:
         smoke_tests,
         smoke_tests_migrate,
         smoke_tests_standalone,
+        smoke_tests_macos_standalone,
         smoke_tests_windows,
         smoke_tests_windows_standalone,
       ]
