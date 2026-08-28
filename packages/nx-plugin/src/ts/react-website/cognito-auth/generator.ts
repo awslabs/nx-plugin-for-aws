@@ -37,15 +37,11 @@ import {
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx.js';
 import { toProjectRelativePath } from '../../../utils/paths.js';
-import {
-  getExistingComponentPort,
-  getExistingProjectPort,
-} from '../../../utils/port.js';
+import { getExistingProjectPort } from '../../../utils/port.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
 } from '../../../utils/shared-constructs.js';
-import { REACT_WEBSITE_APP_GENERATOR_INFO } from '../app/generator.js';
 import { runtimeConfigGenerator } from '../runtime-config/generator.js';
 import type { TsReactWebsiteAuthGeneratorSchema } from './schema';
 import {
@@ -107,11 +103,7 @@ export async function tsReactWebsiteAuthGenerator(
   // Falls back to Vite's own defaults when the website predates per-project
   // port assignment, matching the shared construct's own defaults.
   const localDevServerPort = getExistingProjectPort(projectConfig) ?? 4200;
-  const localPreviewPort =
-    getExistingComponentPort(projectConfig, {
-      info: REACT_WEBSITE_APP_GENERATOR_INFO,
-      name: 'preview',
-    }) ?? 4300;
+  const localPreviewPort = localDevServerPort + 100;
 
   await addIdentityInfra(tree, {
     iac,

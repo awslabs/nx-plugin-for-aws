@@ -10,7 +10,6 @@ import {
   sharedConstructsGenerator,
 } from '../../../utils/shared-constructs.js';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
-import { REACT_WEBSITE_APP_GENERATOR_INFO } from '../app/generator.js';
 import {
   COGNITO_AUTH_GENERATOR_INFO,
   tsReactWebsiteAuthGenerator,
@@ -657,13 +656,6 @@ describe('cognito-auth generator', () => {
         metadata: {
           ux,
           ports: [4201],
-          components: [
-            {
-              generator: REACT_WEBSITE_APP_GENERATOR_INFO.id,
-              name: 'preview',
-              port: 4301,
-            },
-          ],
         },
       }),
     );
@@ -717,13 +709,6 @@ describe('cognito-auth generator', () => {
         metadata: {
           ux,
           ports: [4201],
-          components: [
-            {
-              generator: REACT_WEBSITE_APP_GENERATOR_INFO.id,
-              name: 'preview',
-              port: 4301,
-            },
-          ],
         },
       }),
     );

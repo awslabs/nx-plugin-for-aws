@@ -34,7 +34,6 @@ import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics.js';
 import { kebabCase, toClassName, toKebabCase } from '../../../utils/names.js';
 import { getNpmScopePrefix } from '../../../utils/npm-scope.js';
 import {
-  addComponentGeneratorMetadata,
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
@@ -250,12 +249,8 @@ export async function tsReactWebsiteGenerator(
   // the Cognito callback URL allow-list (added when auth is configured) be
   // computed deterministically instead.
   const port = assignPort(tree, projectConfiguration, 4200);
-  // A second, independently-tracked port on the same project — keyed by the
-  // 'preview' component name so a re-run's assignPort call finds it again
-  // rather than reusing the dev-server port above.
-  const previewPort = assignPort(tree, projectConfiguration, 4300, {
-    component: { info: REACT_WEBSITE_APP_GENERATOR_INFO, name: 'preview' },
-  });
+  // Mirrors Vite's own default relationship between the two.
+  const previewPort = port + 100;
 
   const infra = schema.infra ?? 'cloudfront-s3';
 
@@ -328,17 +323,6 @@ export async function tsReactWebsiteGenerator(
   projectConfiguration.targets = sortObjectKeys(targets);
 
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfiguration);
-
-  // Persisted so a re-run's assignPort call above can find this port again via
-  // the 'preview' component entry, rather than mistaking it for unassigned.
-  addComponentGeneratorMetadata(
-    tree,
-    fullyQualifiedName,
-    REACT_WEBSITE_APP_GENERATOR_INFO,
-    'vite.config.mts',
-    'preview',
-    { port: previewPort },
-  );
 
   // Recorded here and read by the declaration's predicates, so the packages
   // added below are exactly the ones the version sync will own.

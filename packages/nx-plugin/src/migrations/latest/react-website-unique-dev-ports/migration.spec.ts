@@ -145,13 +145,7 @@ describe('react-website-unique-dev-ports migration', () => {
     const result = await migration(tree);
 
     const project = readProjectConfiguration(tree, 'website-one');
-    expect((project.metadata as any).ports).toEqual([4200, 4300]);
-    expect((project.metadata as any).components).toContainEqual({
-      generator: REACT_WEBSITE_APP_GENERATOR_INFO.id,
-      path: 'vite.config.mts',
-      name: 'preview',
-      port: 4300,
-    });
+    expect((project.metadata as any).ports).toEqual([4200]);
     const viteConfig = tree.read(
       'packages/website-one/vite.config.mts',
       'utf-8',
@@ -170,10 +164,10 @@ describe('react-website-unique-dev-ports migration', () => {
 
     expect(
       (readProjectConfiguration(tree, 'website-a').metadata as any).ports,
-    ).toEqual([4200, 4300]);
+    ).toEqual([4200]);
     expect(
       (readProjectConfiguration(tree, 'website-b').metadata as any).ports,
-    ).toEqual([4201, 4301]);
+    ).toEqual([4201]);
 
     const viteConfigA = tree.read(
       'packages/website-a/vite.config.mts',
@@ -232,7 +226,7 @@ describe('react-website-unique-dev-ports migration', () => {
     // Ports are still reserved in metadata so a second website doesn't collide.
     expect(
       (readProjectConfiguration(tree, 'website-one').metadata as any).ports,
-    ).toEqual([4200, 4300]);
+    ).toEqual([4200]);
     expect(
       result.nextSteps.some(
         (s) => s.includes('vite.config.mts') && s.includes('server'),
