@@ -8,7 +8,7 @@ import {
   OverwriteStrategy,
   type Tree,
 } from '@nx/devkit';
-import { addStarExport } from '../ast.js';
+import { addStarExport, appendToArrayViaGritQL, applyGritQL } from '../ast.js';
 import type { DeclaredPyDependency } from '../declared-dependencies.js';
 import type { Iac } from '../iac.js';
 import { esmVars } from '../module-format.js';
@@ -40,7 +40,89 @@ export const IDENTITY_CONSTRUCTS_PY_DEPENDENCIES = [
 export interface AddIdentityInfraOptions {
   cognitoDomain: string;
   allowSignup: boolean;
+  /**
+   * Local ports (dev server, preview, ...) of the website adding auth,
+   * allow-listed as Cognito callback/logout URLs so its sign-in redirects succeed.
+   */
+  localCallbackPorts: number[];
 }
+
+/**
+ * Idempotently allow-list a local port as a Cognito callback/logout URL, on
+ * whichever shared identity construct/module the given `iac` provider vends.
+ * Shared between the auth generator (adding a new website's ports) and the
+ * migration that backfills ports for websites that predate per-project port
+ * assignment.
+ *
+ * Returns whether the port ended up allow-listed (already was, or now is) —
+ * `false` means the file doesn't exist or has diverged from the shape this
+ * can recognise, which the migration reports via `nextSteps` rather than
+ * clobbering.
+ */
+export const addLocalCallbackUrl = async (
+  tree: Tree,
+  iac: Iac,
+  port: number,
+): Promise<boolean> => {
+  if (iac === 'cdk') {
+    return addLocalCallbackUrlToCdk(tree, port);
+  } else if (iac === 'terraform') {
+    return addLocalCallbackUrlToTerraform(tree, port);
+  } else {
+    throw new Error(`Unsupported iac ${iac}`);
+  }
+};
+
+const addLocalCallbackUrlToCdk = async (
+  tree: Tree,
+  port: number,
+): Promise<boolean> => {
+  const filePath = joinPathFragments(
+    PACKAGES_DIR,
+    SHARED_CONSTRUCTS_DIR,
+    'src',
+    'core',
+    'user-identity.ts',
+  );
+  const url = `'http://localhost:${port}'`;
+  if (!tree.exists(filePath)) {
+    return false;
+  }
+  if (tree.read(filePath, 'utf-8').includes(url)) {
+    return true;
+  }
+  return appendToArrayViaGritQL(tree, filePath, 'LOCAL_CALLBACK_URLS = ', url);
+};
+
+// Rewrites the last array element directly (rather than inserting after a
+// placeholder) so the indentation is exact — nothing reformats generated
+// `.tf` files afterward.
+const addLocalCallbackUrlToTerraform = async (
+  tree: Tree,
+  port: number,
+): Promise<boolean> => {
+  const filePath = joinPathFragments(
+    PACKAGES_DIR,
+    SHARED_TERRAFORM_DIR,
+    'src',
+    'core',
+    'user-identity',
+    'identity',
+    'identity.tf',
+  );
+  const url = `"http://localhost:${port}"`;
+  if (!tree.exists(filePath)) {
+    return false;
+  }
+  if (tree.read(filePath, 'utf-8').includes(url)) {
+    return true;
+  }
+  return applyGritQL(
+    tree,
+    filePath,
+    `language hcl\n\`local_callback_urls = [$items]\` where { $items <: not contains \`${url}\`, $items <: [$..., $last], $last => \`$last,\n    ${url}\` }`,
+  );
+};
 
 /**
  * Add infrastructure for a static website
@@ -52,7 +134,7 @@ export const addIdentityInfra = async (
   if (options.iac === 'cdk') {
     await addIdentityCdkConstructs(tree, options);
   } else if (options.iac === 'terraform') {
-    addIdentityTerraformModules(tree, options);
+    await addIdentityTerraformModules(tree, options);
   } else {
     throw new Error(`Unsupported iac ${options.iac}`);
   }
@@ -83,9 +165,15 @@ const addIdentityCdkConstructs = async (
     ),
     './user-identity.js',
   );
+
+  // The construct is shared by every website in the workspace, so each one adding
+  // auth allow-lists its own local ports rather than overwriting the others'.
+  for (const port of options.localCallbackPorts) {
+    await addLocalCallbackUrlToCdk(tree, port);
+  }
 };
 
-const addIdentityTerraformModules = (
+const addIdentityTerraformModules = async (
   tree: Tree,
   options: AddIdentityInfraOptions,
 ) => {
@@ -102,6 +190,12 @@ const addIdentityTerraformModules = (
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
   );
+
+  // The module is shared by every website in the workspace, so each one adding
+  // auth allow-lists its own local ports rather than overwriting the others'.
+  for (const port of options.localCallbackPorts) {
+    await addLocalCallbackUrlToTerraform(tree, port);
+  }
 
   // Update the static website module to add the callback url
   const staticWebsiteModule = tree.read(

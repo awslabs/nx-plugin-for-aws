@@ -34,6 +34,7 @@ import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics.js';
 import { kebabCase, toClassName, toKebabCase } from '../../../utils/names.js';
 import { getNpmScopePrefix } from '../../../utils/npm-scope.js';
 import {
+  addComponentGeneratorMetadata,
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
@@ -41,6 +42,7 @@ import {
 import { sortObjectKeys } from '../../../utils/object.js';
 import { getRelativePathToRoot } from '../../../utils/paths.js';
 import { getPackageManagerDisplayCommands } from '../../../utils/pkg-manager.js';
+import { assignPort } from '../../../utils/port.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
@@ -241,6 +243,20 @@ export async function tsReactWebsiteGenerator(
 
   const targets = projectConfiguration.targets;
 
+  // Each website gets its own explicit dev-server port. Vite itself already
+  // auto-increments past a port already in use, so two websites don't actually
+  // collide — but which port each one lands on then depends on start order and
+  // can't be known ahead of time. An explicit, per-project port is what lets
+  // the Cognito callback URL allow-list (added when auth is configured) be
+  // computed deterministically instead.
+  const port = assignPort(tree, projectConfiguration, 4200);
+  // A second, independently-tracked port on the same project — keyed by the
+  // 'preview' component name so a re-run's assignPort call finds it again
+  // rather than reusing the dev-server port above.
+  const previewPort = assignPort(tree, projectConfiguration, 4300, {
+    component: { info: REACT_WEBSITE_APP_GENERATOR_INFO, name: 'preview' },
+  });
+
   const infra = schema.infra ?? 'cloudfront-s3';
 
   // Configure load-runtime-config target based on IaC provider (only when infra is not none)
@@ -312,6 +328,17 @@ export async function tsReactWebsiteGenerator(
   projectConfiguration.targets = sortObjectKeys(targets);
 
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfiguration);
+
+  // Persisted so a re-run's assignPort call above can find this port again via
+  // the 'preview' component entry, rather than mistaking it for unassigned.
+  addComponentGeneratorMetadata(
+    tree,
+    fullyQualifiedName,
+    REACT_WEBSITE_APP_GENERATOR_INFO,
+    'vite.config.mts',
+    'preview',
+    { port: previewPort },
+  );
 
   // Recorded here and read by the declaration's predicates, so the packages
   // added below are exactly the ones the version sync will own.
@@ -522,6 +549,21 @@ export async function tsReactWebsiteGenerator(
       tree,
       viteConfigPath,
       `\`build: { $bprops }\` where { $bprops <: contains \`outDir: $_\` => \`outDir: '${outDir}'\` }`,
+    );
+
+    // Replace @nx/react's default dev-server port (4200) with the one assigned above.
+    await applyGritQL(
+      tree,
+      viteConfigPath,
+      `\`server: { $sprops }\` where { $sprops <: contains \`port: $_\` => \`port: ${port}\` }`,
+    );
+
+    // Likewise for the preview port (@nx/react's default is 4300), so `vite preview`
+    // doesn't collide across websites either.
+    await applyGritQL(
+      tree,
+      viteConfigPath,
+      `\`preview: { $pprops }\` where { $pprops <: contains \`port: $_\` => \`port: ${previewPort}\` }`,
     );
 
     // Add plugins to the plugins array
