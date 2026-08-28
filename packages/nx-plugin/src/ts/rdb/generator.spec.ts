@@ -424,6 +424,31 @@ describe('ts#rdb generator', () => {
     },
   );
 
+  it.each(['postgres', 'mysql'] as const)(
+    'should grant the terraform rds proxy role only rds-db:connect for %s',
+    async (engine) => {
+      await tsRdbGenerator(tree, {
+        ...defaultOptions,
+        iac: 'terraform',
+        engine,
+      });
+
+      const db = tree.read(TERRAFORM_AURORA_APP, 'utf-8');
+
+      // The proxy is created with default_auth_scheme = IAM_AUTH and no secrets
+      // registered, so rds-db:connect for the application user is the only
+      // permission it needs to reach the cluster — on either engine.
+      expect(db).toContain('Action = ["rds-db:connect"]');
+
+      const proxyPolicy = db?.slice(
+        db.indexOf('resource "aws_iam_role_policy" "proxy_db_user_connect"'),
+        db.indexOf('module "add_rdb_to_runtime_config"'),
+      );
+      expect(proxyPolicy).not.toContain('secretsmanager:GetSecretValue');
+      expect(proxyPolicy).not.toContain('kms:Decrypt');
+    },
+  );
+
   it('should keep an existing aurora shared construct', async () => {
     await sharedConstructsGenerator(
       tree,

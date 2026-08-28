@@ -21,6 +21,22 @@ export type DatabaseSecret = {
   port: number;
 };
 
+/**
+ * Connection details for the admin credentials secret. RDS-managed secrets hold
+ * only `username` and `password`, so the host, port and database name are taken
+ * from the environment when the secret omits them.
+ */
+type SecretConnectionOverrides = Partial<Omit<DatabaseSecret, 'username' | 'password'>>;
+
+const connectionOverridesFromEnv = (): SecretConnectionOverrides => {
+  const { DATABASE_HOST, DATABASE_PORT, DATABASE_NAME } = process.env;
+  return {
+    ...(DATABASE_HOST ? { host: DATABASE_HOST } : {}),
+    ...(DATABASE_PORT ? { port: Number(DATABASE_PORT) } : {}),
+    ...(DATABASE_NAME ? { dbname: DATABASE_NAME } : {}),
+  };
+};
+
 const databaseConfigPromises: Record<string, Promise<DatabaseConfig>> = {};
 
 const getSecretValue = async (secretArn: string): Promise<string> => {
@@ -47,7 +63,18 @@ export const getDatabaseSecret = async (): Promise<DatabaseSecret> => {
     );
   }
 
-  return JSON.parse(await getSecretValue(secretArn)) as DatabaseSecret;
+  const secret = JSON.parse(await getSecretValue(secretArn)) as DatabaseSecret;
+  const secretWithConnection = { ...secret, ...connectionOverridesFromEnv() };
+
+  for (const key of ['host', 'port', 'dbname'] as const) {
+    if (secretWithConnection[key] == null) {
+      throw new Error(
+        `Database secret is missing ${key} and no override was provided in the environment.`,
+      );
+    }
+  }
+
+  return secretWithConnection;
 };
 
 const loadDatabaseConfig = async (

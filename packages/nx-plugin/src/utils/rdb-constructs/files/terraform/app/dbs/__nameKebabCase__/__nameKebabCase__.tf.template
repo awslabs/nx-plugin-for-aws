@@ -88,12 +88,6 @@ variable "enable_rds_proxy" {
   default     = true
 }
 
-variable "enable_credential_rotation" {
-  description = "Whether to enable automatic credential rotation for the admin secret."
-  type        = bool
-  default     = true
-}
-
 variable "enable_cloudwatch_logs" {
   description = "Whether to export Aurora engine logs to CloudWatch. PostgreSQL logs DDL statements only (log_statement=ddl); MySQL enables Advanced Auditing scoped to connections and DDL (server_audit_events=CONNECT,QUERY_DDL). Neither logs statement parameter values, to avoid leaking PII into log data."
   type        = bool
@@ -144,7 +138,7 @@ variable "create_db_user_docker_image_tag" {
 }
 <%_ } _%>
 
-<%_ if (framework !== 'sqlmodel') { _%>
+<%_ if (framework === 'prisma') { _%>
 variable "asset_bucket_name" {
   description = "Name of the shared asset S3 bucket used to stage the Lambda deployment zip. Instantiate the `core/asset-bucket` module once per deployment and pass its `bucket_name` output here."
   type        = string
@@ -163,7 +157,7 @@ resource "random_string" "suffix" {
 locals {
   config                       = jsondecode(file("${path.module}/../../../../../../../<%= projectRoot %>/config.json"))
   runtime_config_key           = local.config.runtimeConfigKey
-<%_ if (framework !== 'sqlmodel') { _%>
+<%_ if (framework === 'prisma') { _%>
   create_db_user_bundle_path   = "${path.module}/../../../../../../../<%- createDbUserBundleDir %>"
 <%_ } _%>
   migration_function_name      = "<%= nameKebabCase %>-migration-${random_string.suffix.result}"
@@ -177,7 +171,6 @@ module "aurora" {
   name                                  = "<%= nameKebabCase %>"
   vpc_id                                = var.vpc_id
   subnet_ids                            = var.database_subnet_ids
-  lambda_subnet_ids                     = var.lambda_subnet_ids
   engine                                = "<%= engine === 'mysql' ? 'aurora-mysql' : 'aurora-postgresql' %>"
   engine_version                        = var.engine_version
   database_name                         = "<%= databaseName %>"
@@ -189,7 +182,6 @@ module "aurora" {
   deletion_protection                   = var.deletion_protection
   skip_final_snapshot                   = var.skip_final_snapshot
   enable_rds_proxy                      = var.enable_rds_proxy
-  enable_credential_rotation            = var.enable_credential_rotation
   enable_cloudwatch_logs                = var.enable_cloudwatch_logs
   enable_performance_insights           = var.enable_performance_insights
   performance_insights_retention_period = var.performance_insights_retention_period
@@ -206,22 +198,6 @@ resource "aws_iam_role_policy" "proxy_db_user_connect" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
-<%_ if (engine === 'mysql' && framework !== 'sqlmodel') { _%>
-      {
-        Effect = "Allow"
-        Action = [
-          "secretsmanager:GetSecretValue"
-        ]
-        Resource = [module.aurora.secret_arn]
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "kms:Decrypt"
-        ]
-        Resource = [module.aurora.kms_key_arn]
-      }
-<%_ } else { _%>
       {
         Effect = "Allow"
         Action = ["rds-db:connect"]
@@ -229,12 +205,11 @@ resource "aws_iam_role_policy" "proxy_db_user_connect" {
           "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.aurora.cluster_resource_id}/${local.database_runtime_user}"
         ]
       }
-<%_ } _%>
     ]
   })
 }
 
-<%_ if (framework !== 'sqlmodel') { _%>
+<%_ if (framework === 'prisma') { _%>
 data "archive_file" "create_db_user_zip" {
   type        = "zip"
   source_dir  = local.create_db_user_bundle_path
@@ -595,7 +570,7 @@ resource "aws_lambda_function" "create_db_user" {
   role              = aws_iam_role.create_db_user.arn
   handler           = "index.handler"
   source_code_hash  = data.archive_file.create_db_user_zip.output_base64sha256
-  runtime           = "nodejs24.x"
+  runtime           = "<%- nodeRuntime %>"
   timeout          = 300
   architectures    = ["arm64"]
 <%_ } _%>
@@ -612,6 +587,9 @@ resource "aws_lambda_function" "create_db_user" {
   environment {
     variables = {
       DATABASE_SECRET_ARN = module.aurora.secret_arn
+      DATABASE_HOST       = module.aurora.writer_endpoint
+      DATABASE_PORT       = module.aurora.cluster_port
+      DATABASE_NAME       = module.aurora.database_name
 <%_ if (framework === 'prisma') { _%>
       NODE_EXTRA_CA_CERTS = "/var/runtime/ca-cert.pem"
 <%_ } _%>
@@ -699,6 +677,9 @@ resource "aws_lambda_function" "migration_handler" {
   environment {
     variables = {
       DATABASE_SECRET_ARN = module.aurora.secret_arn
+      DATABASE_HOST       = module.aurora.writer_endpoint
+      DATABASE_PORT       = module.aurora.cluster_port
+      DATABASE_NAME       = module.aurora.database_name
     }
   }
 

@@ -151,6 +151,17 @@ The narrow exceptions:
 - Changes that only affect the *choices offered* at generation time (a new option whose default leaves existing output unchanged)
 - Removing a file the generator no longer vends, where the leftover copy is harmless
 
+#### Migrations that change infrastructure
+
+A migration that touches IaC changes the resources a workspace deploys, so the diff isn't the whole story — the **transition** from the deployed stack to the migrated one has to be exercised with a real deployment. Deploy on the published version, apply the migration, deploy again, and confirm the update succeeds against live resources.
+
+Some transitions can't be made safely, and those are the ones not to ship:
+
+- **The update would break a user's deployment.** If the change can't be applied to an already-deployed stack — a replacement the platform refuses, a resource that can't be updated in place — don't provide a migration.
+- **The change would cause data loss.** A resource replacement that discards a bucket, table or database takes the user's data with it. Don't provide a migration, whatever the deployed stack's contents happen to be in your test.
+
+In either case leave existing workspaces on the shape they already deploy: new workspaces get the new resources from today's generators, and existing ones keep working. **Justify the missing migration in the PR description** so the omission is a recorded decision rather than an oversight.
+
 #### Choosing the kind: prefer deterministic
 
 **Start deterministic.** A codemod runs unattended and identically for everyone — no agent required, no consent prompt, no variation between runs, and it is covered by tests you can rely on. Most migrations touch a shape we vend and can be pattern-matched, so most migrations should be a plain `implementation`. Reporting what it skipped via `nextSteps` is often enough on its own: the user gets a precise manual follow-up rather than a migration that needs an agent to finish.

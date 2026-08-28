@@ -23,7 +23,11 @@ import {
   normalizeTargetKeyOrder,
 } from '../nx.js';
 import { getRelativePathToRoot } from '../paths.js';
-import { type ITsDepVersion, withVersions } from '../versions.js';
+import {
+  type ITsDepVersion,
+  LAMBDA_RUNTIME_VERSIONS,
+  withVersions,
+} from '../versions.js';
 
 /** Dependencies a caller must declare to add a TypeScript bundle target. */
 export const BUNDLE_DEPENDENCIES = [
@@ -67,7 +71,10 @@ const createPythonBundleTarget = ({
     options: {
       commands: [
         `uv export --frozen --no-dev --no-editable --project {projectRoot} --package ${packageName} -o dist/{projectRoot}/${bundleTargetName}/requirements.txt`,
-        `uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform ${pythonPlatform} --target dist/{projectRoot}/${bundleTargetName} -r dist/{projectRoot}/${bundleTargetName}/requirements.txt`,
+        // `--python-version` pins wheel resolution to the Lambda Python runtime,
+        // so the bundle cannot be built against whichever interpreter happens to
+        // be on the build machine.
+        `uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform ${pythonPlatform} --python-version ${LAMBDA_RUNTIME_VERSIONS.python} --target dist/{projectRoot}/${bundleTargetName} -r dist/{projectRoot}/${bundleTargetName}/requirements.txt`,
       ],
       parallel: false,
     },

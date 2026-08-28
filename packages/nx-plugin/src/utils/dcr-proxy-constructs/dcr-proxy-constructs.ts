@@ -19,7 +19,11 @@ import {
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants.js';
-import { terraformProviderVersions } from '../versions.js';
+import {
+  cdkLambdaRuntimeVars,
+  terraformLambdaRuntimeVars,
+  terraformProviderVersions,
+} from '../versions.js';
 
 /**
  * The DCR proxy Lambda handlers. Each is bundled independently and wired to a
@@ -154,6 +158,7 @@ const addDcrProxyCdkConstructs = async (
       nameKebabCase: options.dcrProxyNameKebabCase,
       bundlePathsFromRoot: options.bundlePathsFromRoot,
       ...esmVars(tree),
+      ...cdkLambdaRuntimeVars(),
     },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
@@ -236,6 +241,7 @@ const addDcrProxyTerraformModules = (
       nameKebabCase: options.dcrProxyNameKebabCase,
       bundlePathsFromRoot: options.bundlePathsFromRoot,
       ...terraformProviderVersions(),
+      ...terraformLambdaRuntimeVars(),
     },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,

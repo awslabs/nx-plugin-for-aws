@@ -4,8 +4,8 @@
  */
 import type { Tree } from '@nx/devkit';
 import { declareDependencies } from '../../utils/declared-dependencies.js';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
 import { expectTypeScriptToCompile } from '../../utils/test/ts.spec.js';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
 import tsProjectGenerator from './generator.js';
 import { configureVitest, VITEST_DEPENDENCIES } from './vitest.js';
 

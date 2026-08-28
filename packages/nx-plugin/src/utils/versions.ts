@@ -347,6 +347,82 @@ export const containerImage = (tool: keyof typeof CONTAINER_VERSIONS): string =>
   `${CONTAINER_REPOSITORIES[tool]}:${CONTAINER_VERSIONS[tool]}`;
 
 /**
+ * The managed Lambda runtimes generated infrastructure targets, as the single
+ * source both IaC providers derive from.
+ *
+ * CDK and Terraform name the same runtime differently — `Runtime.NODEJS_24_X`
+ * against `nodejs24.x` — so deriving both from the version here keeps a bump one
+ * edit that moves them together. Resolved by the version update workflow.
+ */
+export const LAMBDA_RUNTIME_VERSIONS = {
+  node: '24',
+  python: '3.14',
+} as const;
+export type ILambdaRuntime = keyof typeof LAMBDA_RUNTIME_VERSIONS;
+
+/**
+ * Patch of the CPython release uv pins as the project interpreter.
+ *
+ * A Lambda runtime names only `major.minor`, but uv pins an exact
+ * `major.minor.patch`, so only the patch lives here — the `major.minor` comes from
+ * {@link LAMBDA_RUNTIME_VERSIONS}. Resolved from uv by the version update
+ * workflow.
+ */
+export const PYTHON_RUNTIME_PATCH = '7';
+
+/**
+ * The interpreter uv pins for a generated Python project, as `major.minor.patch`.
+ * Matches the Lambda Python runtime by construction.
+ */
+export const pyenvPythonVersion = (): string =>
+  `${LAMBDA_RUNTIME_VERSIONS.python}.${PYTHON_RUNTIME_PATCH}`;
+
+/**
+ * The `[project].requires-python` specifier for a generated Python project.
+ *
+ * A lower bound on the Lambda runtime's `major.minor`: the deployed interpreter
+ * is that version, and Ruff derives its `target-version` from this (`py314`), so
+ * lint targets the same version the function runs on.
+ */
+export const pyprojectPythonDependency = (): string =>
+  `>=${LAMBDA_RUNTIME_VERSIONS.python}`;
+
+/** The runtime as Terraform's `runtime` attribute names it, e.g. `nodejs24.x`. */
+export const terraformLambdaRuntime = (runtime: ILambdaRuntime): string =>
+  runtime === 'node'
+    ? `nodejs${LAMBDA_RUNTIME_VERSIONS.node}.x`
+    : `python${LAMBDA_RUNTIME_VERSIONS.python}`;
+
+/**
+ * The runtime as an `aws-cdk-lib` `Runtime` member, e.g. `Runtime.NODEJS_24_X`.
+ * Always an explicitly versioned member, never a `_LATEST` alias.
+ */
+export const cdkLambdaRuntime = (runtime: ILambdaRuntime): string =>
+  runtime === 'node'
+    ? `Runtime.NODEJS_${LAMBDA_RUNTIME_VERSIONS.node}_X`
+    : `Runtime.PYTHON_${LAMBDA_RUNTIME_VERSIONS.python.replace('.', '_')}`;
+
+/**
+ * Substitution variables exposing the pinned runtimes to generated CDK
+ * templates (e.g. `runtime: <%- nodeRuntime %>`). Paired with
+ * {@link terraformLambdaRuntimeVars}, which names the same variables so a
+ * template reads alike under either provider.
+ */
+export const cdkLambdaRuntimeVars = () => ({
+  nodeRuntime: cdkLambdaRuntime('node'),
+  pythonRuntime: cdkLambdaRuntime('python'),
+});
+
+/**
+ * Substitution variables exposing the pinned runtimes to generated `.tf`
+ * templates (e.g. `runtime = "<%- nodeRuntime %>"`).
+ */
+export const terraformLambdaRuntimeVars = () => ({
+  nodeRuntime: terraformLambdaRuntime('node'),
+  pythonRuntime: terraformLambdaRuntime('python'),
+});
+
+/**
  * Exact versions for Terraform providers used by generated `.tf` modules.
  * Pinned exactly (no range operator) so generated infrastructure is reproducible.
  */

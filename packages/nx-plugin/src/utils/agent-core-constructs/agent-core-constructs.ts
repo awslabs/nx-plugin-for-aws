@@ -32,6 +32,7 @@ import {
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants.js';
 import {
+  cdkLambdaRuntimeVars,
   type IPyDepVersion,
   type ITsDepVersion,
   PY_VERSIONS,
@@ -366,7 +367,7 @@ const addAgentCoreGatewayCDKInfra = async (
       'core',
       'agentcore-gateway',
     ),
-    { ...esmVars(tree) },
+    { ...esmVars(tree), ...cdkLambdaRuntimeVars() },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },

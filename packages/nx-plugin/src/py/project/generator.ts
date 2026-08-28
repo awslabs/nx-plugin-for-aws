@@ -40,7 +40,11 @@ import {
 } from '../../utils/nxlv-python.js';
 import { sortObjectKeys } from '../../utils/object.js';
 import { updateToml } from '../../utils/toml.js';
-import { withVersions } from '../../utils/versions.js';
+import {
+  pyenvPythonVersion,
+  pyprojectPythonDependency,
+  withVersions,
+} from '../../utils/versions.js';
 import type { PyProjectGeneratorSchema } from './schema';
 
 export const DEPENDENCIES = declareDependencies()({
@@ -179,8 +183,8 @@ export const pyProjectGenerator = async (
         autoActivate: true,
         packageManager: 'uv',
         moveDevDependencies: false,
-        pyenvPythonVersion: '3.14.0',
-        pyprojectPythonDependency: '>=3.14',
+        pyenvPythonVersion: pyenvPythonVersion(),
+        pyprojectPythonDependency: pyprojectPythonDependency(),
       });
     }
 
@@ -198,8 +202,8 @@ export const pyProjectGenerator = async (
       buildBundleLocalDependencies: true,
       linter: 'ruff',
       rootPyprojectDependencyGroup: 'main',
-      pyenvPythonVersion: '3.14.0',
-      pyprojectPythonDependency: '>=3.14',
+      pyenvPythonVersion: pyenvPythonVersion(),
+      pyprojectPythonDependency: pyprojectPythonDependency(),
       projectType: schema.type,
       projectNameAndRootFormat: 'as-provided',
       moduleName: normalizedModuleName,

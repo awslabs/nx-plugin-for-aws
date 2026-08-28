@@ -11,7 +11,11 @@ import {
   createTreeUsingTsSolutionSetup,
   snapshotTreeDir,
 } from '../../utils/test.js';
-import { CONTAINER_VERSIONS, withPyVersions } from '../../utils/versions.js';
+import {
+  CONTAINER_VERSIONS,
+  LAMBDA_RUNTIME_VERSIONS,
+  withPyVersions,
+} from '../../utils/versions.js';
 import {
   DEPENDENCIES,
   PY_RDB_GENERATOR_INFO,
@@ -78,7 +82,7 @@ describe('py#rdb generator', () => {
       options: {
         commands: [
           'uv export --frozen --no-dev --no-editable --project {projectRoot} --package proj.db -o dist/{projectRoot}/bundle-arm/requirements.txt',
-          'uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform aarch64-manylinux_2_28 --target dist/{projectRoot}/bundle-arm -r dist/{projectRoot}/bundle-arm/requirements.txt',
+          `uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform aarch64-manylinux_2_28 --python-version ${LAMBDA_RUNTIME_VERSIONS.python} --target dist/{projectRoot}/bundle-arm -r dist/{projectRoot}/bundle-arm/requirements.txt`,
         ],
         parallel: false,
       },

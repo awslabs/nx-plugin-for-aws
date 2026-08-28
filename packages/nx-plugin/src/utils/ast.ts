@@ -362,6 +362,46 @@ export const captureGritQLVariable = async (
 };
 
 /**
+ * Like {@link captureAllGritQL}, but returns one metavariable's binding for every
+ * match rather than the whole matched node.
+ *
+ * This is what lets a caller work on the value a pattern isolated — matching
+ * `` `runtime: $value` `` and reading `$value` gives `Runtime.NODEJS_24_X` alone,
+ * so nothing downstream has to re-derive the assignment around it.
+ *
+ * A match whose metavariable is unbound contributes nothing, so the result holds
+ * only real bindings. Returns undefined if the pattern could not be applied,
+ * which an empty array cannot express.
+ */
+export const captureAllGritQLVariable = async (
+  tree: Tree,
+  filePath: string,
+  pattern: string,
+  variableName: string,
+): Promise<string[] | undefined> => {
+  if (!tree.exists(filePath)) return undefined;
+  ensureGritDir(tree);
+  const source = tree.read(filePath)!.toString();
+  // The underlying binding lookup requires the `$` sigil.
+  const name = variableName.startsWith('$') ? variableName : `$${variableName}`;
+  const captured: string[] = [];
+  try {
+    const query = new QueryBuilder(pattern);
+    query.filter((node) => {
+      const bound = node.var(name);
+      if (bound !== null && bound !== undefined) {
+        captured.push(bound);
+      }
+      return true;
+    });
+    await query.applyToFile({ path: filePath, content: source });
+  } catch {
+    return undefined;
+  }
+  return captured;
+};
+
+/**
  * Return the text of every node matching the GritQL pattern, in document order.
  */
 export const captureAllGritQL = async (

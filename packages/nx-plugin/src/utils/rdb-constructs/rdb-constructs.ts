@@ -20,7 +20,11 @@ import {
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants.js';
-import { terraformProviderVersions } from '../versions.js';
+import {
+  cdkLambdaRuntimeVars,
+  terraformLambdaRuntimeVars,
+  terraformProviderVersions,
+} from '../versions.js';
 
 /**
  * Aurora Serverless v2 scaling bounds, in ACUs, that both IaC providers derive
@@ -123,7 +127,7 @@ export const addRdbCdkConstructs = async (
     tree,
     joinPathFragments(import.meta.dirname, 'files', 'cdk', 'app', 'dbs'),
     joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'src', 'app', 'dbs'),
-    { ...options, ...esmVars(tree) },
+    { ...options, ...esmVars(tree), ...cdkLambdaRuntimeVars() },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
@@ -187,6 +191,7 @@ export const addRdbTerraformModules = (
       ...options,
       ...terraformProviderVersions(),
       ...auroraServerlessV2Capacity(),
+      ...terraformLambdaRuntimeVars(),
     },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
