@@ -6,7 +6,8 @@ import { execSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, posix } from 'node:path';
-import { readJson, type Tree } from '@nx/devkit';
+import * as devkit from '@nx/devkit';
+import { readJson, type Tree, updateJson } from '@nx/devkit';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
@@ -20,6 +21,8 @@ import {
   createTreeUsingTsSolutionSetup,
   snapshotTreeDir,
 } from '../../../utils/test.js';
+import { syncVendedVersions } from '../../../utils/version-upgrade-migration/sync-vended-versions.js';
+import { TS_VERSIONS } from '../../../utils/versions.js';
 import {
   REACT_WEBSITE_APP_GENERATOR_INFO,
   SUPPORTED_UX_PROVIDERS,
@@ -103,6 +106,47 @@ describe('react-website generator', () => {
     // become a second React instance at build time.
     const viteConfig = tree.read('test-app/vite.config.mts')?.toString();
     expect(viteConfig).toContain("dedupe: ['react', 'react-dom']");
+  });
+
+  it("should pin the express @nx/react resolves to via npm's overrides", async () => {
+    vi.spyOn(devkit, 'detectPackageManager').mockReturnValue('npm');
+
+    await tsReactWebsiteGenerator(tree, options);
+
+    // @nx/react's optional express peer sits a major behind the vended express,
+    // and npm fails the whole install on a peer it cannot satisfy.
+    expect(readJson(tree, 'package.json').overrides?.['@nx/react']).toEqual({
+      express: TS_VERSIONS.express,
+    });
+  });
+
+  it.each(['pnpm', 'yarn', 'bun'] as const)(
+    'should not add the @nx/react express override for %s, which only warns',
+    async (pkgMgr) => {
+      vi.spyOn(devkit, 'detectPackageManager').mockReturnValue(pkgMgr);
+
+      await tsReactWebsiteGenerator(tree, options);
+
+      expect(readJson(tree, 'package.json').overrides).toBeUndefined();
+    },
+  );
+
+  // `express` is declared `versionOnly` so the version sync owns it: the pin is
+  // only reachable through the override, and a stale one leaves npm unable to
+  // resolve once the vended express moves on.
+  it('should let the version sync carry the express override forward', async () => {
+    vi.spyOn(devkit, 'detectPackageManager').mockReturnValue('npm');
+    await tsReactWebsiteGenerator(tree, options);
+    updateJson(tree, 'package.json', (json) => ({
+      ...json,
+      overrides: { '@nx/react': { express: '5.0.0' } },
+    }));
+
+    await syncVendedVersions(tree);
+
+    expect(readJson(tree, 'package.json').overrides['@nx/react'].express).toBe(
+      TS_VERSIONS.express,
+    );
   });
 
   it('should generate shared constructs', async () => {

@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
+  detectPackageManager,
   generateFiles,
   joinPathFragments,
   names,
@@ -54,6 +55,7 @@ import {
   SHADCN_DEPENDENCIES,
   sharedShadcnGenerator,
 } from '../../../utils/shared-shadcn.js';
+import { withVersions } from '../../../utils/versions.js';
 import {
   addWebsiteInfra,
   WEBSITE_CONSTRUCTS_PY_DEPENDENCIES,
@@ -135,6 +137,8 @@ export const DEPENDENCIES = declareDependencies<TsReactWebsiteMetadata>()({
       dev: true,
       root: true,
     },
+    // Declared for its pinned version, which goes into npm's `overrides` below.
+    { name: 'express', versionOnly: true },
     ...ownedElsewhere(SHADCN_DEPENDENCIES),
     ...ownedElsewhere(VITEST_DEPENDENCIES),
     ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
@@ -602,6 +606,23 @@ export async function tsReactWebsiteGenerator(
   );
 
   addTsDependencies(tree, DEPENDENCIES, { metadata, projectRoot: libraryRoot });
+
+  // @nx/react declares an optional `express` peer on the major behind the one
+  // vended here, for a module-federation dev-server this never runs. npm alone
+  // fails the whole install on an optional peer it cannot satisfy, so it gets a
+  // scoped override; the other package managers only warn.
+  if (detectPackageManager() === 'npm') {
+    updateJson(tree, 'package.json', (packageJson) => {
+      packageJson.overrides = {
+        ...packageJson.overrides,
+        '@nx/react': {
+          ...packageJson.overrides?.['@nx/react'],
+          ...withVersions(DEPENDENCIES, ['express']),
+        },
+      };
+      return packageJson;
+    });
+  }
 
   // @nx/react's applicationGenerator seeds react/react-dom into the root
   // manifest. The website now declares its own pinned versions, so drop the
