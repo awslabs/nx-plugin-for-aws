@@ -138,7 +138,7 @@ variable "create_db_user_docker_image_tag" {
 }
 <%_ } _%>
 
-<%_ if (framework !== 'sqlmodel') { _%>
+<%_ if (framework === 'prisma') { _%>
 variable "asset_bucket_name" {
   description = "Name of the shared asset S3 bucket used to stage the Lambda deployment zip. Instantiate the `core/asset-bucket` module once per deployment and pass its `bucket_name` output here."
   type        = string
@@ -157,7 +157,7 @@ resource "random_string" "suffix" {
 locals {
   config                       = jsondecode(file("${path.module}/../../../../../../../<%= projectRoot %>/config.json"))
   runtime_config_key           = local.config.runtimeConfigKey
-<%_ if (framework !== 'sqlmodel') { _%>
+<%_ if (framework === 'prisma') { _%>
   create_db_user_bundle_path   = "${path.module}/../../../../../../../<%- createDbUserBundleDir %>"
 <%_ } _%>
   migration_function_name      = "<%= nameKebabCase %>-migration-${random_string.suffix.result}"
@@ -198,22 +198,6 @@ resource "aws_iam_role_policy" "proxy_db_user_connect" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
-<%_ if (engine === 'mysql' && framework !== 'sqlmodel') { _%>
-      {
-        Effect = "Allow"
-        Action = [
-          "secretsmanager:GetSecretValue"
-        ]
-        Resource = [module.aurora.secret_arn]
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "kms:Decrypt"
-        ]
-        Resource = [module.aurora.kms_key_arn]
-      }
-<%_ } else { _%>
       {
         Effect = "Allow"
         Action = ["rds-db:connect"]
@@ -221,12 +205,11 @@ resource "aws_iam_role_policy" "proxy_db_user_connect" {
           "arn:aws:rds-db:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:dbuser:${module.aurora.cluster_resource_id}/${local.database_runtime_user}"
         ]
       }
-<%_ } _%>
     ]
   })
 }
 
-<%_ if (framework !== 'sqlmodel') { _%>
+<%_ if (framework === 'prisma') { _%>
 data "archive_file" "create_db_user_zip" {
   type        = "zip"
   source_dir  = local.create_db_user_bundle_path
