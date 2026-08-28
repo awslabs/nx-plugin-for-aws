@@ -12,6 +12,7 @@ import GeneratorsJson from '../packages/nx-plugin/generators.json';
 interface GeneratorInfo {
   description: string;
   hidden?: boolean;
+  experimental?: boolean;
 }
 
 interface GeneratorsJsonSchema {
@@ -47,7 +48,9 @@ const getCreateNxWorkspaceCommand = (): string => {
 };
 
 /**
- * Build the generators table from generators.json, filtering out hidden generators
+ * Build the generators table from generators.json, filtering out hidden
+ * generators. Experimental generators are flagged in their description, since
+ * their output can change without a migration to update an existing workspace.
  */
 const getGeneratorsTable = (): string => {
   const generators = Object.entries(
@@ -56,7 +59,9 @@ const getGeneratorsTable = (): string => {
     .filter(([, info]) => !info.hidden)
     .map(([id, info]) => ({
       id,
-      description: info.description,
+      description: info.experimental
+        ? `${info.description} (experimental)`
+        : info.description,
     }));
 
   const maxIdLen = Math.max(...generators.map((g) => g.id.length + 2));

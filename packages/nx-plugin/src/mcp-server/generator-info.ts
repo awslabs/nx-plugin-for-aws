@@ -24,6 +24,13 @@ import {
 export { buildNxCommand } from './guide-render.js';
 
 /**
+ * Warn agents that an experimental generator's output may change in a future
+ * release without a migration to carry an existing workspace across.
+ */
+export const renderExperimentalWarning = (generatorId: string): string =>
+  `> [!WARNING] Experimental: the \`${generatorId}\` generator's behaviour and generated output may change in a future release without a migration being published to apply the change to an existing workspace.`;
+
+/**
  * Render summary information about a generator
  */
 export const renderGeneratorInfo = (
@@ -35,7 +42,7 @@ export const renderGeneratorInfo = (
   return `${info.id}
 
 Description: ${info.description}
-
+${info.experimental ? `\n${renderExperimentalWarning(info.id)}\n` : ''}
 Available Parameters:
 ${renderSchema(schema)}
 
