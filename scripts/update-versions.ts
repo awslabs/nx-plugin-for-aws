@@ -29,6 +29,7 @@ import {
   type UvPythonEntry,
   unresolvedRuntimeWarning,
 } from '../packages/nx-plugin/src/utils/lambda-runtime-resolution';
+import { RUFF_WASM_VERSION } from '../packages/nx-plugin/src/utils/ruff';
 import { isNxPackage } from '../packages/nx-plugin/src/utils/version-upgrade-migration/nx-package-updates';
 import { registerNxPackageUpdates } from '../packages/nx-plugin/src/utils/version-upgrade-migration/register';
 import {
@@ -178,6 +179,35 @@ const getUpdatedPythonVersions = (tmpDir: string): Record<string, string> => {
 
   console.log('Updated Python versions:', updatedVersions);
   return updatedVersions;
+};
+
+/**
+ * Holds the vended `ruff` on the release `@astral-sh/ruff-wasm-nodejs` is built
+ * from, which is what actually formats generated Python.
+ *
+ * The two move on different clocks: the wasm package is an npm dependency, so
+ * `npm-check-updates` only takes it once its `cooldown` has elapsed, while
+ * `pip-check-updates` has no such delay and takes the ruff released hours
+ * earlier. Left alone the pins land a release apart and generated files fail the
+ * vended `format --check`, which `ruff.spec.ts` asserts against.
+ *
+ * The wasm build leads because it is the one already installed and running here;
+ * the held-back ruff is taken next run, once the bindings catch up.
+ */
+const holdRuffToWasmBuild = (
+  updatedVersions: Record<string, string>,
+): ReportNote[] => {
+  const proposed = updatedVersions.ruff;
+  const wasmPin = `==${RUFF_WASM_VERSION}`;
+  if (!proposed || proposed === wasmPin) {
+    return [];
+  }
+  updatedVersions.ruff = wasmPin;
+  return [
+    {
+      note: `ruff held at ${wasmPin} (${proposed} available): @astral-sh/ruff-wasm-nodejs is still on ${RUFF_WASM_VERSION}, and the two must match`,
+    },
+  ];
 };
 
 /**
@@ -575,14 +605,18 @@ const main = async () => {
     // Get updated Python versions
     const updatedPyVersions = getUpdatedPythonVersions(tmpDir);
 
+    // Applied before the rewrite so the held version is never written
+    const ruffHold = holdRuffToWasmBuild(updatedPyVersions);
+
     // Apply updated Python versions to the versions file
-    const pyChanges = await applyUpdatedVersions(
+    const pyChanges: ReportChange[] = await applyUpdatedVersions(
       tree,
       PY_VERSIONS,
       updatedPyVersions,
       'packages/nx-plugin/src/utils/versions.ts',
       'PY_VERSIONS',
     );
+    pyChanges.push(...ruffHold);
 
     // Get updated Terraform provider versions
     const updatedTerraformVersions = await getUpdatedTerraformVersions();
