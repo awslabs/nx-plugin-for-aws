@@ -361,21 +361,15 @@ export const LAMBDA_RUNTIME_VERSIONS = {
 export type ILambdaRuntime = keyof typeof LAMBDA_RUNTIME_VERSIONS;
 
 /**
- * Patch of the CPython release uv pins as the project interpreter.
+ * The interpreter uv pins for a generated Python project, as the Lambda runtime's
+ * `major.minor`.
  *
- * A Lambda runtime names only `major.minor`, but uv pins an exact
- * `major.minor.patch`, so only the patch lives here — the `major.minor` comes from
- * {@link LAMBDA_RUNTIME_VERSIONS}. Resolved from uv by the version update
- * workflow.
+ * No patch: uv reads this as a request for any patch of that minor, so it resolves
+ * whichever one the platform has a build for. Naming an exact patch pins one that
+ * may not exist everywhere, and Lambda patches the interpreter itself, so the minor
+ * is the whole of what a project needs to agree on.
  */
-export const PYTHON_RUNTIME_PATCH = '7';
-
-/**
- * The interpreter uv pins for a generated Python project, as `major.minor.patch`.
- * Matches the Lambda Python runtime by construction.
- */
-export const pyenvPythonVersion = (): string =>
-  `${LAMBDA_RUNTIME_VERSIONS.python}.${PYTHON_RUNTIME_PATCH}`;
+export const pyenvPythonVersion = (): string => LAMBDA_RUNTIME_VERSIONS.python;
 
 /**
  * The `[project].requires-python` specifier for a generated Python project.

@@ -25,8 +25,6 @@ import { applyGritQL } from '../packages/nx-plugin/src/utils/ast';
 import {
   type RuntimeResolution,
   resolveLambdaRuntimes,
-  resolveLatestPythonPatch,
-  type UvPythonEntry,
   unresolvedRuntimeWarning,
 } from '../packages/nx-plugin/src/utils/lambda-runtime-resolution';
 import { RUFF_WASM_VERSION } from '../packages/nx-plugin/src/utils/ruff';
@@ -34,7 +32,6 @@ import { isNxPackage } from '../packages/nx-plugin/src/utils/version-upgrade-mig
 import { registerNxPackageUpdates } from '../packages/nx-plugin/src/utils/version-upgrade-migration/register';
 import {
   type IJavaVersion,
-  type ILambdaRuntime,
   type IMiseVersion,
   JAVA_ARTIFACTS,
   JAVA_VERSIONS,
@@ -42,7 +39,6 @@ import {
   MISE_TOOLS,
   MISE_VERSIONS,
   PY_VERSIONS,
-  PYTHON_RUNTIME_PATCH,
   TERRAFORM_VERSIONS,
   TS_VERSIONS,
   VENDORED_VERSIONS,
@@ -505,38 +501,6 @@ const getUpdatedLambdaRuntimeVersions =
     return resolution;
   };
 
-/**
- * The latest CPython patch uv can install for the pinned Python runtime.
- *
- * Lambda names only `major.minor`, so the patch a generated project pins comes
- * from uv itself rather than being held by hand. Returns the current pin when uv
- * can't be queried, keeping the failure isolated like the runtimes above.
- */
-const getUpdatedPythonRuntimePatch = (
-  minor: string,
-): { patch: string; unresolved?: string } => {
-  try {
-    const output = execSync(
-      'uv python list --all-versions --output-format json',
-      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] },
-    );
-    const latest = resolveLatestPythonPatch(
-      JSON.parse(output) as UvPythonEntry[],
-      minor,
-    );
-    if (latest) {
-      return { patch: latest };
-    }
-    const unresolved = `uv lists no CPython ${minor} release, so the project Python version stays at ${minor}.${PYTHON_RUNTIME_PATCH}`;
-    console.warn(unresolved);
-    return { patch: PYTHON_RUNTIME_PATCH, unresolved };
-  } catch (error) {
-    const unresolved = `Could not list Python versions with uv, so the project Python version stays at ${minor}.${PYTHON_RUNTIME_PATCH}`;
-    console.warn(unresolved, error);
-    return { patch: PYTHON_RUNTIME_PATCH, unresolved };
-  }
-};
-
 /** The latest version mise can install of every tool in {@link MISE_VERSIONS}. */
 const getUpdatedMiseVersions = (): Record<string, string> =>
   Object.fromEntries(
@@ -660,11 +624,6 @@ const main = async () => {
       unresolved: unresolvedRuntimes,
     } = await getUpdatedLambdaRuntimeVersions();
 
-    // The Python runtime's patch, which only uv knows. Resolved for the minor this
-    // run lands on, so a minor bump and its patch move together.
-    const { patch: updatedPythonPatch, unresolved: unresolvedPythonPatch } =
-      getUpdatedPythonRuntimePatch(updatedLambdaRuntimeVersions.python);
-
     // Apply updated Lambda runtimes to the versions file. Both IaC providers and
     // the uv project Python version derive from these, so one rewrite moves them.
     const lambdaRuntimeChanges: ReportChange[] = await applyUpdatedVersions(
@@ -679,26 +638,6 @@ const main = async () => {
     // the CI logs and can't be mistaken for "already up to date".
     for (const entry of unresolvedRuntimes) {
       lambdaRuntimeChanges.push({ note: unresolvedRuntimeWarning(entry) });
-    }
-
-    // The interpreter a uv project pins, reported as the full `major.minor.patch`
-    // it writes rather than the bare patch, which means nothing on its own.
-    const projectPythonChanges: ReportChange[] = [];
-    if (updatedPythonPatch !== PYTHON_RUNTIME_PATCH) {
-      // A bare constant rather than a table entry, so it takes its own rewrite.
-      await applyGritQL(
-        tree,
-        'packages/nx-plugin/src/utils/versions.ts',
-        `\`export const PYTHON_RUNTIME_PATCH = '${PYTHON_RUNTIME_PATCH}'\` => \`export const PYTHON_RUNTIME_PATCH = '${updatedPythonPatch}'\``,
-      );
-      projectPythonChanges.push({
-        name: 'python',
-        oldVersion: `${LAMBDA_RUNTIME_VERSIONS.python}.${PYTHON_RUNTIME_PATCH}`,
-        newVersion: `${updatedLambdaRuntimeVersions.python}.${updatedPythonPatch}`,
-      });
-    }
-    if (unresolvedPythonPatch) {
-      projectPythonChanges.push({ note: unresolvedPythonPatch });
     }
 
     // Keep the Smithy CLI CI installs on Windows in step with the mise pin
@@ -740,7 +679,6 @@ const main = async () => {
       { title: 'Java Dependencies', changes: javaChanges },
       { title: 'mise Tools', changes: miseChanges },
       { title: 'Lambda Runtimes', changes: lambdaRuntimeChanges },
-      { title: 'Project Python Version', changes: projectPythonChanges },
       ...(vendoredChanges.length > 0
         ? [{ title: 'Vendored Tools', changes: vendoredChanges }]
         : []),

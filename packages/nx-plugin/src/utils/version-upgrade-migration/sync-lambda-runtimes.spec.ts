@@ -259,9 +259,7 @@ dependencies = []
     // The Lambda Python runtime and the interpreter uv pins must agree, since
     // wheels are resolved against the latter.
     it('should keep the interpreter in step with the lambda python runtime', () => {
-      expect(pyenvPythonVersion()).toMatch(
-        new RegExp(`^${LAMBDA_RUNTIME_VERSIONS.python.replace('.', '\\.')}\\.`),
-      );
+      expect(pyenvPythonVersion()).toEqual(LAMBDA_RUNTIME_VERSIONS.python);
       expect(pyprojectPythonDependency()).toEqual(
         `>=${LAMBDA_RUNTIME_VERSIONS.python}`,
       );

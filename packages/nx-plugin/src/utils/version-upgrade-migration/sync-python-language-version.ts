@@ -23,8 +23,8 @@ import { isVendedUpgrade } from './vended-upgrade.js';
 /**
  * Sync the interpreter a uv project pins to the Lambda Python runtime.
  *
- * `.python-version` holds the exact interpreter and `[project].requires-python`
- * its lower bound; Ruff's `target-version` is derived from the latter, so leaving
+ * `.python-version` holds the interpreter and `[project].requires-python` its
+ * lower bound; Ruff's `target-version` is derived from the latter, so leaving
  * these behind lints against a different version than the function runs on. Only
  * moved forward, and only from a value this plugin vended.
  */
