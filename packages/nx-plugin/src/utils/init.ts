@@ -47,6 +47,13 @@ import { type ITsDepVersion, withVersions } from './versions.js';
 const WORKSPACES = ['packages/*'];
 const NX_TYPESCRIPT_SYNC_GENERATOR = '@nx/js:typescript-sync';
 
+/**
+ * Concurrent tasks Nx runs by default. Chosen over the machine's core count
+ * because a full build saturates at this point — the task graph's critical path
+ * becomes the limit, and higher values add memory pressure for no gain.
+ */
+const DEFAULT_PARALLEL = 8;
+
 /** Dependencies a caller must declare to apply the workspace init. */
 export const INIT_DEPENDENCIES = [
   { name: 'nx' },
@@ -294,6 +301,11 @@ export const applyWorkspaceInit = async <const D extends DependencyDeclaration>(
     ...nxJson,
     // Preserve an explicit analytics choice in an existing workspace.
     analytics: (nxJson as { analytics?: boolean }).analytics ?? false,
+    // Nx defaults to 3 concurrent tasks. Workspaces built from these generators
+    // have a wide, shallow task graph (each project contributes lint, compile,
+    // test, bundle and often docker targets), so 3 leaves cores idle on a full
+    // build. Preserve an explicit choice in an existing workspace.
+    parallel: nxJson.parallel ?? DEFAULT_PARALLEL,
     targetDefaults: {
       ...nxJson.targetDefaults,
       compile: mergeTargetDefault(nxJson.targetDefaults?.compile, (base) => ({

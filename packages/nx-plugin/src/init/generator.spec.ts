@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { readJson, readNxJson, type Tree } from '@nx/devkit';
+import { readJson, readNxJson, type Tree, updateNxJson } from '@nx/devkit';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
 import yaml from 'js-yaml';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -29,6 +29,17 @@ describe('init generator', () => {
   it('should record the container engine in the plugin config', async () => {
     await initGenerator(tree, { iac: 'cdk', containers: 'finch' });
     expect(readAwsNxPluginConfig(tree).containers.engine).toBe('finch');
+  });
+
+  it('should set the default task parallelism', async () => {
+    await initGenerator(tree, { iac: 'cdk', containers: 'docker' });
+    expect(readNxJson(tree)?.parallel).toBe(8);
+  });
+
+  it('should preserve an existing parallelism choice', async () => {
+    updateNxJson(tree, { ...readNxJson(tree), parallel: 2 });
+    await initGenerator(tree, { iac: 'cdk', containers: 'docker' });
+    expect(readNxJson(tree)?.parallel).toBe(2);
   });
 
   it('should register the sync generators on the compile target', async () => {
