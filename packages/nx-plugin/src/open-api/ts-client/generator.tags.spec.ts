@@ -513,7 +513,7 @@ describe('openApiTsClientGenerator - tags', () => {
         outputPath: 'src/generated',
       }),
     ).rejects.toThrow(
-      'Untagged operations cannot have the same operationId (myOp)',
+      'Untagged operations cannot have the same operationId ("myOp", at GET /users)',
     );
   });
 
@@ -578,7 +578,7 @@ describe('openApiTsClientGenerator - tags', () => {
         outputPath: 'src/generated',
       }),
     ).rejects.toThrow(
-      'Operations with the same tag ("users") cannot have the same operationId ("list")',
+      'Operations with the same tag ("users") cannot have the same operationId ("list", at GET /users)',
     );
   });
 });

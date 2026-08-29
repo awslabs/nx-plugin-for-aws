@@ -470,6 +470,17 @@ describe('openApiPyClientGenerator - hostile specs', () => {
             responses: { '200': { description: 'OK' } },
           },
         },
+        // Nothing alphanumeric at all, so the escaped name is empty. An empty
+        // prefix named this operation's error class `ApiError` — redefining the
+        // base class it derives from, so the classes emitted after it inherited
+        // from the redefinition and `except ApiError` caught the wrong type.
+        '/c': {
+          get: {
+            operationId: '___',
+            tags: ['t'],
+            responses: { '200': { description: 'OK' } },
+          },
+        },
       },
     });
     for (const module of [types, errors]) {
@@ -478,6 +489,13 @@ describe('openApiPyClientGenerator - hostile specs', () => {
       expect(module).not.toMatch(/^\d\w* = /m);
       expect(module).not.toMatch(/class \d\w*ApiError/);
     }
+    // Every emitted class name is distinct, and none redefines the base.
+    const classNames = [...errors.matchAll(/^class (\w+)/gm)].map((m) => m[1]);
+    expect(classNames).toContain('ApiError');
+    expect(new Set(classNames).size).toBe(classNames.length);
+    // The base is the only class deriving from `Exception`; the rest extend it.
+    expect(errors).toMatch(/^class ApiError\(Exception\)/m);
+    expect(errors).not.toMatch(/^class ApiError\(ApiError\)/m);
   });
 
   // An object schema with no properties and no `additionalProperties` parsed as

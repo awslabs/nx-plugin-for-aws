@@ -618,14 +618,19 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
   const seenOperationIds = new Set<string>();
   const duplicatedOperationIds = new Set<string>();
 
+  // camelCasing is lossy — ids differing only in punctuation converge, and one
+  // written entirely in punctuation converges on the empty string. Keep what the
+  // document said so a rejection can name the operations the author has to change.
+  const writtenOperationIds = new Map<object, string>();
+
   // Make sure all operationIds are camelCase, and find which ones are duplicated
   Object.entries(spec.paths ?? {}).forEach(([path, pathOps]) =>
     Object.entries(pathOps ?? {}).forEach(([method, op]) => {
       const operation = resolveIfRef(spec, op);
       if (operation && typeof operation === 'object') {
-        const operationId = camelCase(
-          (operation as any).operationId ?? `${method}-${path}`,
-        );
+        const written = (operation as any).operationId ?? `${method}-${path}`;
+        const operationId = camelCase(written);
+        writtenOperationIds.set(operation, String(written));
         (operation as any).operationId = operationId;
         if (seenOperationIds.has(operationId)) {
           duplicatedOperationIds.add(operationId);
@@ -683,16 +688,16 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
             seenOperationIdsByTag[tag] &&
             seenOperationIdsByTag[tag].has(operationId)
           ) {
-            // Report the tags as written: a tag of only non-alphanumerics
-            // normalises to the empty string, which names nothing to the reader.
-            const asWritten =
-              tags.length > 0
-                ? tags.map((t) => `"${t}"`).join(', ')
-                : String(tag);
+            // Report tag and id as written: either normalises to the empty
+            // string when spelt with no alphanumerics, which names nothing to
+            // the reader. `path` and `method` pin down which operation to edit.
+            const tagsAsWritten = tags.map((t) => `"${t}"`).join(', ');
+            const idAsWritten = `"${writtenOperationIds.get(operation) ?? operationId}"`;
+            const at = `${method.toUpperCase()} ${path}`;
             throw new Error(
               tag === untagged
-                ? `Untagged operations cannot have the same operationId (${operationId})`
-                : `Operations with the same tag (${asWritten}) cannot have the same operationId ("${operationId}")`,
+                ? `Untagged operations cannot have the same operationId (${idAsWritten}, at ${at})`
+                : `Operations with the same tag (${tagsAsWritten}) cannot have the same operationId (${idAsWritten}, at ${at})`,
             );
           }
 

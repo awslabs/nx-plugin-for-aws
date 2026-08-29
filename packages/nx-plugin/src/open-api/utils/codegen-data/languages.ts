@@ -159,10 +159,18 @@ const PYTHON_RESERVED_MODEL_NAMES = new Set([
  */
 export const toPythonClassName = (name: string): string => {
   const tsName = toTypeScriptModelName(name);
-  // A class name is an identifier too: an operationId like `42` or `1stOperation`
-  // renders a name beginning with a digit, which does not parse. Prefixing keeps
-  // it distinct rather than renaming it to something positional.
-  const identifier = /^\d/.test(tsName) ? `N${tsName}` : tsName;
+  // A class name is an identifier too. An operationId like `42` or `1stOperation`
+  // renders a name beginning with a digit, and one written entirely in
+  // punctuation (`___`) or another script renders nothing at all — an empty
+  // prefix would name an operation's error class after the base class it derives
+  // from, silently reparenting every class emitted after it. Encoding the raw
+  // name's code points keeps it distinct rather than positional, matching how
+  // {@link toPythonName} escapes the same names.
+  const identifier = tsName
+    ? /^\d/.test(tsName)
+      ? `N${tsName}`
+      : tsName
+    : `U${encodeCodePoints(name)}`;
   return PYTHON_RESERVED_MODEL_NAMES.has(identifier)
     ? `_${identifier}`
     : identifier;
@@ -533,18 +541,20 @@ const isPydanticReservedName = (name: string): boolean =>
  * are encoded instead — a distinct, stable name rather than a positional one, so
  * two such names never collide and the same spec always renders the same way.
  */
-const toPythonIdentifier = (name: string): string => {
-  const snake = snakeCase(name);
-  if (snake && !/^\d/.test(snake)) {
-    return snake;
-  }
-  const encoded = Array.from(name)
+const encodeCodePoints = (name: string): string =>
+  Array.from(name)
     .map((ch) =>
       /[a-zA-Z0-9]/.test(ch) ? ch : ch.codePointAt(0)!.toString(16),
     )
     .join('')
     .toLowerCase();
-  return snake ? `n_${snake}` : `u_${encoded}`;
+
+const toPythonIdentifier = (name: string): string => {
+  const snake = snakeCase(name);
+  if (snake && !/^\d/.test(snake)) {
+    return snake;
+  }
+  return snake ? `n_${snake}` : `u_${encodeCodePoints(name)}`;
 };
 
 export const toPythonName = (
