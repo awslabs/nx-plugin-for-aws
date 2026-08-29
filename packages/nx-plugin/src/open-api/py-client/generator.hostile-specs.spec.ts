@@ -4,12 +4,14 @@
  */
 import type { Tree } from '@nx/devkit';
 import type { Spec } from '../utils/types.js';
+import { openApiPyClientGenerator } from './generator.js';
 import {
   callGeneratedClient,
   createPythonClientVerifier,
   createTree,
   expectSingleRequest,
   generateAndRead,
+  outputPath,
   requestQuery,
 } from './generator.utils.spec.js';
 
@@ -509,5 +511,117 @@ describe('openApiPyClientGenerator - hostile specs', () => {
     });
     expect(types).toContain('class Empty(BaseModel):');
     expect(types).not.toContain('Empty = dict[str, Empty]');
+  });
+
+  // A keyword argument shares a scope with the locals the method assigns and the
+  // builtins its annotations subscript. Independent FastAPI testing found a body
+  // field named `header_params` sent as `{}` and a param named `list` breaking
+  // `TypeAdapter(list[...])` with a TypeError.
+  it('escapes arguments that would shadow a method local or a builtin', async () => {
+    const { client } = await generateAndRead(verifier, tree, {
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/s': {
+          post: {
+            operationId: 'shadow',
+            parameters: [
+              { name: 'list', in: 'query', schema: { type: 'string' } },
+              { name: 'query_params', in: 'query', schema: { type: 'string' } },
+            ],
+            requestBody: {
+              required: true,
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    required: ['header_params'],
+                    properties: { header_params: { type: 'string' } },
+                  },
+                },
+              },
+            },
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': {
+                    schema: { type: 'array', items: { type: 'string' } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    for (const escaped of [
+      'var_list',
+      'var_query_params',
+      'var_header_params',
+    ]) {
+      expect(client).toContain(escaped);
+    }
+    // The locals must still be the client's own, assigned after the kwargs.
+    expect(client).toMatch(/^ {8}query_params: dict\[str, Any\] = /m);
+    expect(client).toContain('TypeAdapter(list[str])');
+  });
+
+  // The client emits more private helpers than were reserved, so an operation
+  // named after one replaced it — breaking every *other* operation that calls it.
+  it('keeps an operation from replacing a private client helper', async () => {
+    const { client } = await generateAndRead(verifier, tree, {
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/x': {
+          get: {
+            operationId: 'scalar',
+            tags: ['t'],
+            parameters: [
+              { name: 'q', in: 'query', schema: { type: 'string' } },
+            ],
+            responses: { '204': { description: 'No content' } },
+          },
+        },
+      },
+    });
+    // The helper survives, and the operation is pushed out of its name.
+    expect(client).toMatch(/^ {4}def _scalar\(self, value: Any\) -> str:$/m);
+    expect(client).toContain('def _scalar_op(');
+  });
+
+  // Two tags differing only in punctuation become one namespace, and where the
+  // operation ids also collapse an operation was dropped with no error at all.
+  it('rejects two tags that normalise to the same namespace', async () => {
+    tree.write(
+      'openapi.json',
+      JSON.stringify({
+        openapi: '3.0.0',
+        info: { title: 'TestApi', version: '1.0.0' },
+        paths: {
+          '/a': {
+            get: {
+              operationId: 'get',
+              tags: ['my-tag'],
+              responses: { '204': { description: 'No' } },
+            },
+          },
+          '/b': {
+            get: {
+              operationId: 'get',
+              tags: ['my.tag'],
+              responses: { '204': { description: 'No' } },
+            },
+          },
+        },
+      }),
+    );
+    await expect(
+      openApiPyClientGenerator(tree, {
+        openApiSpecPath: 'openapi.json',
+        outputPath,
+      }),
+    ).rejects.toThrow(/cannot have the same operationId/);
   });
 });

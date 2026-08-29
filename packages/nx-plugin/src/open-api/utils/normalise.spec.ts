@@ -590,4 +590,57 @@ describe('normaliseOpenApiSpecForCodeGen', () => {
       $ref: '#/components/schemas/CustomTitle',
     });
   });
+
+  // A `discriminator.mapping` value is a bare reference string rather than a
+  // `$ref` object. Left un-rewritten it no longer resolves after a schema is
+  // renamed, and a tagged union silently degrades to an untagged one — which can
+  // parse a payload into the wrong branch instead of failing. FastAPI hits this
+  // for any model appearing in both request and response position, since it then
+  // names the schemas `Foo-Input`/`Foo-Output`.
+  it('rewrites discriminator mapping refs when a schema is renamed', () => {
+    const spec: Spec = {
+      openapi: '3.1.0',
+      info: { title: 'T', version: '1' },
+      paths: {},
+      components: {
+        schemas: {
+          'Cat-Input': {
+            type: 'object',
+            required: ['kind'],
+            properties: { kind: { type: 'string', enum: ['cat'] } },
+          },
+          Dog: {
+            type: 'object',
+            required: ['kind'],
+            properties: { kind: { type: 'string', enum: ['dog'] } },
+          },
+          Pet: {
+            oneOf: [
+              { $ref: '#/components/schemas/Cat-Input' },
+              { $ref: '#/components/schemas/Dog' },
+            ],
+            discriminator: {
+              propertyName: 'kind',
+              mapping: {
+                cat: '#/components/schemas/Cat-Input',
+                dog: '#/components/schemas/Dog',
+              },
+            },
+          },
+        },
+      },
+    } as any;
+
+    const result = normaliseOpenApiSpecForCodeGen(spec);
+
+    // The schema was renamed, so the mapping must point at the new name.
+    expect(result.components?.schemas?.CatInput).toBeDefined();
+    expect((result.components!.schemas!.Pet as any).discriminator).toEqual({
+      propertyName: 'kind',
+      mapping: {
+        cat: '#/components/schemas/CatInput',
+        dog: '#/components/schemas/Dog',
+      },
+    });
+  });
 });

@@ -72,21 +72,53 @@ const normaliseSchemaNames = (spec: Spec): Spec => {
     return spec;
   }
 
+  /** The renamed form of a schema reference, or undefined if it is unaffected. */
+  const renamedRef = (ref: string): string | undefined => {
+    const parts = splitRef(ref);
+    if (
+      parts.length !== 3 ||
+      parts[0] !== 'components' ||
+      parts[1] !== 'schemas'
+    ) {
+      return undefined;
+    }
+    const newName = schemaNameMapping[parts[2]];
+    return newName ? `#/components/schemas/${newName}` : undefined;
+  };
+
   // Update all $ref references throughout the spec
   spec = cloneDeepWith(spec, (v) => {
     if (isRef(v)) {
-      const parts = splitRef(v.$ref);
-      if (
-        parts.length === 3 &&
-        parts[0] === 'components' &&
-        parts[1] === 'schemas'
-      ) {
-        const oldName = parts[2];
-        const newName = schemaNameMapping[oldName];
-        if (newName) {
-          return { $ref: `#/components/schemas/${newName}` };
-        }
+      const renamed = renamedRef(v.$ref);
+      if (renamed) {
+        return { $ref: renamed };
       }
+    }
+    // A `discriminator.mapping` value is a bare reference string, not a `$ref`
+    // object, so it is rewritten here. Left stale it no longer resolves, and a
+    // tagged union silently degrades to an untagged one — which can parse a
+    // response into the wrong branch rather than failing.
+    if (
+      v &&
+      typeof v === 'object' &&
+      !Array.isArray(v) &&
+      typeof (v as { propertyName?: unknown }).propertyName === 'string' &&
+      (v as { mapping?: unknown }).mapping &&
+      typeof (v as { mapping?: unknown }).mapping === 'object'
+    ) {
+      const discriminator = v as {
+        propertyName: string;
+        mapping: Record<string, string>;
+      };
+      return {
+        ...discriminator,
+        mapping: Object.fromEntries(
+          Object.entries(discriminator.mapping).map(([value, ref]) => [
+            value,
+            typeof ref === 'string' ? (renamedRef(ref) ?? ref) : ref,
+          ]),
+        ),
+      };
     }
   });
 
@@ -621,16 +653,30 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
 
         seenOperationIds.add(deduplicatedOpId);
 
-        // Throw an error for any duplicated operation ids with the same tag, or untagged
-        [...(tags.length === 0 ? [untagged] : tags)].forEach((tag) => {
+        // Throw an error for any duplicated operation ids with the same tag, or
+        // untagged. Keyed on the *normalised* tag: two tags that differ only in
+        // punctuation (`my-tag` and `my.tag`) become one namespace downstream, so
+        // ids that clash there clash for the client — and deduplicating by tag
+        // cannot separate them, which silently dropped an operation.
+        const normalisedTags: (string | symbol)[] =
+          tags.length === 0
+            ? [untagged]
+            : [...new Set(tags.map((t) => camelCase(t)))];
+        normalisedTags.forEach((tag) => {
           if (
             seenOperationIdsByTag[tag] &&
             seenOperationIdsByTag[tag].has(operationId)
           ) {
+            // Report the tags as written: a tag of only non-alphanumerics
+            // normalises to the empty string, which names nothing to the reader.
+            const asWritten =
+              tags.length > 0
+                ? tags.map((t) => `"${t}"`).join(', ')
+                : String(tag);
             throw new Error(
               tag === untagged
                 ? `Untagged operations cannot have the same operationId (${operationId})`
-                : `Operations with the same tag (${String(tag)}) cannot have the same operationId (${operationId})`,
+                : `Operations with the same tag (${asWritten}) cannot have the same operationId ("${operationId}")`,
             );
           }
 

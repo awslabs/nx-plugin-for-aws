@@ -259,7 +259,7 @@ const pythonCollectionElementType = (
     return { kind: 'literal', values: pythonEnumValues(link) };
   }
   if (link) {
-    return toPythonTypeTree(link);
+    return nullableMemberType(link, toPythonTypeTree(link));
   }
   // No link, but the collection itself carries the enum members (an inline
   // enum array or dictionary).
@@ -285,6 +285,19 @@ const pythonPrimitiveType = (property: Model): PythonType => {
  * inspect the tree rather than the rendered string, and render it with
  * {@link renderPythonType} when they need source text.
  */
+/**
+ * A collection member's type, admitting `None` when the member is nullable.
+ *
+ * The member's own nullability is not the collection's: `list[str | None]` is a
+ * list that is always present whose items may be null. Dropping it made a valid
+ * response containing `null` fail to parse. TypeScript applies the same rule via
+ * its own member renderer.
+ */
+const nullableMemberType = (member: Model, rendered: PythonType): PythonType =>
+  member.isNullable && member.type !== 'null'
+    ? { kind: 'optional', inner: rendered }
+    : rendered;
+
 export const toPythonTypeTree = (property: Model): PythonType => {
   if (property.discriminatorValue) {
     return {
@@ -309,7 +322,9 @@ export const toPythonTypeTree = (property: Model): PythonType => {
     case 'tuple':
       return {
         kind: 'tuple',
-        members: property.properties.map((member) => toPythonTypeTree(member)),
+        members: property.properties.map((member) =>
+          nullableMemberType(member, toPythonTypeTree(member)),
+        ),
       };
     case 'dictionary':
       return {
@@ -461,6 +476,44 @@ const PYTHON_KEYWORDS = new Set([
 ]);
 
 /**
+ * Names the generated client's method bodies bind, or reference in a type
+ * expression, in the same scope as an operation's keyword arguments.
+ *
+ * A kwarg sharing one of these is not merely shadowed — the method assigns its
+ * own local over the caller's value, so internal state is serialised onto the
+ * wire (a body field named `header_params` was sent as `{}`), or the local wins
+ * before a `TypeAdapter(list[...])` annotation is evaluated and the call fails
+ * with a `TypeError`. Escaped like a keyword, since the wire name is preserved
+ * by the field alias either way.
+ */
+const PYTHON_METHOD_SCOPE_NAMES = new Set([
+  // Locals an operation method itself assigns, in the same scope as its kwargs.
+  // Locals of the private helpers are excluded — those take their own
+  // parameters and never share a scope with an operation's arguments — as are
+  // `body` and `response`, which are the generator's own names for the whole
+  // body and the response and are assigned after the request is built.
+  'cookie_params',
+  'header_formats',
+  'header_params',
+  'path_params',
+  'path_styles',
+  'query_formats',
+  'query_params',
+  'request_kwargs',
+  // Builtins the emitted annotations subscript. A kwarg named `list` makes
+  // `list[types.X]` subscript the caller's value.
+  'bool',
+  'bytes',
+  'dict',
+  'int',
+  'list',
+  'set',
+  'str',
+  'tuple',
+  'type',
+]);
+
+/**
  * Names pydantic reserves on a `BaseModel`. A field called `model_dump` or
  * `model_config` would either shadow the method callers rely on or replace the
  * `ConfigDict` the generated class sets, so they are escaped like a keyword.
@@ -495,7 +548,7 @@ const toPythonIdentifier = (name: string): string => {
 };
 
 export const toPythonName = (
-  namedEntity: 'model' | 'property' | 'operation',
+  namedEntity: 'model' | 'property' | 'operation' | 'argument',
   name: string,
 ) => {
   const nameSnakeCase = toPythonIdentifier(name);
@@ -512,7 +565,11 @@ export const toPythonName = (
   if (
     isPydanticReserved ||
     PYTHON_KEYWORDS.has(rawStripped) ||
-    PYTHON_KEYWORDS.has(nameSnakeCase)
+    PYTHON_KEYWORDS.has(nameSnakeCase) ||
+    // Only a method argument shares a scope with the client's own locals and
+    // with the builtins its annotations subscript; a model field is a class
+    // attribute and shadows neither.
+    (namedEntity === 'argument' && PYTHON_METHOD_SCOPE_NAMES.has(nameSnakeCase))
   ) {
     const nameSuffix = `_${nameSnakeCase}`;
     switch (namedEntity) {
@@ -520,6 +577,7 @@ export const toPythonName = (
         return `model${nameSuffix}`;
       case 'operation':
         return `call${nameSuffix}`;
+      case 'argument':
       case 'property':
         return `var${nameSuffix}`;
       default:

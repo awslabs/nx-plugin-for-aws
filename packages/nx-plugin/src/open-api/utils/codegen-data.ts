@@ -404,8 +404,21 @@ const PYTHON_CLIENT_MEMBERS = new Set([
   'cookies',
   'deep_object',
   'dump',
+  // Every remaining private helper the client template emits. A name missing
+  // here is not merely shadowed: the operation replaces the helper, so every
+  // *other* operation that calls it fails.
+  'as_dict',
+  'cookie_value',
   'error',
   'error_payload',
+  'is_file_part',
+  'is_object',
+  'json_body',
+  'multipart',
+  'part_text',
+  'scalar',
+  'send_with_url',
+  'stream_with_url',
   'client',
   'base_url',
   'owns_client',
@@ -539,7 +552,9 @@ export const annotatePythonData = (data: CodeGenData): void => {
       const seenNames = new Set<string>();
       for (const input of requestShape.inputs) {
         const rawName = input.model.pythonName || input.specName;
-        const base = toPythonName('property', rawName);
+        // An operation input becomes a keyword argument, so it is escaped clear
+        // of the locals and builtins the method body uses as well.
+        const base = toPythonName('argument', rawName);
         let pythonName = base;
         if (seenNames.has(pythonName)) {
           // Qualify by where the input goes, then keep suffixing until the name
@@ -1086,13 +1101,18 @@ const assertNoClashingPropertyNames = (model: Model): void => {
  * names snake_case alike (`fooBar` and `foo_bar`) would emit the same field
  * twice, silently keeping only the last, so fail fast instead.
  *
- * Only the flattened list needs checking: a single object's properties are
- * already covered by the TypeScript assertion, which rejects any pair that also
- * collapses in Python.
+ * A model's own properties are checked as well as the flattened list. The
+ * TypeScript assertion does not cover them: escaping a keyword makes `from` and
+ * `var_from` distinct in TypeScript (`from`/`varFrom`) but identical in Python,
+ * so the class emitted the same field twice and pydantic kept only the last —
+ * binding the wire value to the wrong type.
  */
 export const assertNoClashingPythonNames = (model: Model): void => {
   const seen = new Map<string, string>();
-  for (const property of model.effectiveProperties ?? []) {
+  for (const property of [
+    ...(model.effectiveProperties ?? []),
+    ...(model.properties ?? []),
+  ]) {
     if (!property.name) continue;
     const pythonName = toPythonName('property', property.name);
     const existing = seen.get(pythonName);
@@ -1237,6 +1257,24 @@ const groupOperationsByTag = (
   untaggedOperations: Operation[];
 } => {
   const isTagged = (op: Operation): boolean => !!op.tags && op.tags.length > 0;
+
+  // Two tags that normalise to one identifier merge into a single namespace.
+  // Distinct tags are indistinguishable to a caller once merged, and where their
+  // operation ids also collapse an operation is dropped from the client with no
+  // error at all, so the collision is rejected instead.
+  const tagOwners = new Map<string, string>();
+  for (const op of allOperations.filter(isTagged)) {
+    for (const tag of op.tags!) {
+      const normalised = camelCase(tag);
+      const owner = tagOwners.get(normalised);
+      if (owner !== undefined && owner !== tag) {
+        throw new Error(
+          `Tag name conflict: "${owner}" and "${tag}" both normalise to "${normalised}", so their operations would share one namespace. Please rename one of these tags in your OpenAPI specification.`,
+        );
+      }
+      tagOwners.set(normalised, tag);
+    }
+  }
 
   const operationsByTag = allOperations
     .filter(isTagged)

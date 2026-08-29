@@ -578,7 +578,7 @@ describe('openApiTsClientGenerator - tags', () => {
         outputPath: 'src/generated',
       }),
     ).rejects.toThrow(
-      'Operations with the same tag (users) cannot have the same operationId (list)',
+      'Operations with the same tag ("users") cannot have the same operationId ("list")',
     );
   });
 });
