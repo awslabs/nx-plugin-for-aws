@@ -185,6 +185,10 @@ const markBinaryStringSchema = (schema: unknown): void => {
   const s = schema as OpenAPIV3.SchemaObject & {
     contentMediaType?: string;
     contentEncoding?: string;
+    // `items` is declared only on the array branch of `SchemaObject`, and
+    // `prefixItems` not at all; both are read here without narrowing `type`
+    // first, since a form body may omit it.
+    items?: unknown;
     prefixItems?: unknown[];
   };
   if (
