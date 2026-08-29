@@ -85,6 +85,16 @@ const pythonTypeOf = (model) => model.pythonTypeTree ?? { kind: 'builtin', name:
  * pydantic class. Anything else — a primitive, collection, literal or a name
  * bound to a module-level alias — goes through a `TypeAdapter`.
  */
+/**
+ * Whether the model's Python type is a single value rather than a container or a
+ * generated class — a `str`, an `int`, or a `Literal` from an enum. Such a body
+ * has a text form of its own, so a non-JSON media type sends it verbatim.
+ */
+const isPythonScalarType = (model) => {
+  const type = pythonTypeOf(model);
+  return type.kind === 'literal' || type.kind === 'builtin';
+};
+
 const isModelClass = (model) =>
   !needsPythonTypeAdapter(pythonTypeOf(model)) && !isPythonAlias(model);
 
@@ -731,9 +741,15 @@ class <%- clientClassName %>:
   // (text/plain, application/xml, ...) carries its own encoding, so a primitive
   // is sent verbatim rather than wrapped in JSON quotes.
   const bodyIsJsonWire = !bodyMediaType || isJsonMediaType(bodyMediaType);
-  const bodyIsPrimitiveNonJson = !bodyIsJsonWire
+  // A scalar body under a non-JSON media type is sent verbatim. An enum is a
+  // scalar on the wire but is not `isPrimitive` (its `export` is `enum`), so it
+  // was JSON-encoded and arrived quoted under, say, a `text/plain` header.
+  const bodyIsScalarNonJson = !bodyIsJsonWire
     && wholeBodyInputs.length === 1
-    && wholeBodyInputs[0].model.isPrimitive;
+    && (wholeBodyInputs[0].model.isPrimitive
+      || wholeBodyInputs[0].model.isEnum
+      || wholeBodyInputs[0].model.export === 'enum'
+      || isPythonScalarType(wholeBodyInputs[0].model));
   const contentJsonInputs = [...queryInputs, ...headerInputs, ...cookieInputs].filter(k => k.model.mediaType === 'application/json');
   const styledPathInputs = pathInputs.filter(k => k.model.pathStyle);
   const reservedInputs = queryInputs.filter(k => k.model.allowReserved);
@@ -842,13 +858,23 @@ _%>
         request_kwargs: dict[str, Any] = {"content": None if body is None else str(body)}
         if body is not None and not self._config.omit_content_type_header:
             header_params.setdefault("Content-Type", "<%- bodyMediaType %>")
-<%_ } else if (bodyIsPrimitiveNonJson) { _%>
+<%_ } else if (bodyIsScalarNonJson) { _%>
         # A primitive under a non-JSON media type is its own encoding, so it is
         # sent as-is rather than JSON-encoded.
         body = <%- wholeBodyInputs[0].pythonName %>
         request_kwargs: dict[str, Any] = {"content": None if body is None else str(body)}
         if body is not None and not self._config.omit_content_type_header:
             header_params.setdefault("Content-Type", "<%- bodyMediaType %>")
+<%_ } else if (wholeBodyInputs[0].isRequired && wholeBodyInputs[0].isNullable) { _%>
+        # The body is required and may be null, so `None` is the JSON value
+        # `null` rather than an absent body — httpx omits `json=None` entirely,
+        # which a server cannot tell from no body at all.
+        body = self._dump(<%- wholeBodyInputs[0].pythonName %>)
+        request_kwargs: dict[str, Any] = (
+            {"content": b"null"} if body is None else {"json": body}
+        )
+        if not self._config.omit_content_type_header:
+            header_params.setdefault("Content-Type", "<%- bodyMediaType || 'application/json' %>")
 <%_ } else { _%>
         body = self._dump(<%- wholeBodyInputs[0].pythonName %>)
         request_kwargs: dict[str, Any] = {"json": body}

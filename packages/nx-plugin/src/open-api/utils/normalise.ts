@@ -180,23 +180,39 @@ const isBinaryContentMediaType = (contentMediaType: string): boolean =>
  * textual/JSON `contentMediaType` keeps the field a string. `format: binary` is
  * left untouched (already binary anywhere).
  */
+const markBinaryStringSchema = (schema: unknown): void => {
+  if (!schema || typeof schema !== 'object' || isRef(schema)) return;
+  const s = schema as OpenAPIV3.SchemaObject & {
+    contentMediaType?: string;
+    contentEncoding?: string;
+    prefixItems?: unknown[];
+  };
+  if (
+    s.type === 'string' &&
+    s.format !== 'binary' &&
+    s.contentMediaType &&
+    !s.contentEncoding &&
+    isBinaryContentMediaType(s.contentMediaType)
+  ) {
+    s.format = 'binary';
+    return;
+  }
+  // A file field is not always a bare property: `list[UploadFile]` puts it under
+  // `items`, and `UploadFile | None` under `anyOf`. Left unmarked the element
+  // stayed a `str`, so it was sent as a text part and the server rejected it.
+  markBinaryStringSchema(s.items);
+  for (const member of [
+    ...(s.anyOf ?? []),
+    ...(s.oneOf ?? []),
+    ...(s.allOf ?? []),
+    ...(s.prefixItems ?? []),
+  ]) {
+    markBinaryStringSchema(member);
+  }
+};
+
 const markFormBinaryFields = (schema: OpenAPIV3.SchemaObject): void => {
-  Object.values(schema.properties ?? {}).forEach((prop) => {
-    if (isRef(prop)) return;
-    const s = prop as OpenAPIV3.SchemaObject & {
-      contentMediaType?: string;
-      contentEncoding?: string;
-    };
-    if (
-      s.type === 'string' &&
-      s.format !== 'binary' &&
-      s.contentMediaType &&
-      !s.contentEncoding &&
-      isBinaryContentMediaType(s.contentMediaType)
-    ) {
-      s.format = 'binary';
-    }
-  });
+  Object.values(schema.properties ?? {}).forEach(markBinaryStringSchema);
 };
 
 const hasSubSchemasToVisit = (
@@ -752,6 +768,25 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
               | OpenAPIV3.SchemaObject
               | undefined;
             if (resolved) markFormBinaryFields(resolved);
+          }
+          // A whole body under a binary media type is itself the file. FastAPI
+          // writes `bytes` as `{type: string, contentMediaType: ...}`, which
+          // without this stayed a `str` and was sent as `repr(bytes)`.
+          for (const mediaType of contentMediaTypes) {
+            if (
+              isFormMediaType(mediaType) ||
+              !isBinaryContentMediaType(mediaType)
+            ) {
+              continue;
+            }
+            const schema = requestBody!.content![mediaType]?.schema;
+            if (
+              schema &&
+              !isRef(schema) &&
+              (schema as OpenAPIV3.SchemaObject).type === 'string'
+            ) {
+              (schema as OpenAPIV3.SchemaObject).format = 'binary';
+            }
           }
           if (
             bodyContentSchema &&

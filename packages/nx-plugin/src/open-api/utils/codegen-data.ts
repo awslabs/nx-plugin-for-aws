@@ -926,12 +926,31 @@ const augmentBodyParameter = (
   if (!specBody) return;
 
   if (parameter.mediaType) {
+    const declaredSchema = specBody.content?.[parameter.mediaType]?.schema as
+      | { nullable?: boolean }
+      | undefined;
     const bodySchema = resolveIfRef(
       spec,
       specBody.content?.[parameter.mediaType]?.schema,
     );
     if (bodySchema) {
       augmentModelFromSchema(spec, parameter, bodySchema, modelsByName);
+      // A body the spec marks nullable may legitimately be sent as JSON `null`.
+      // Read from the declared schema too: `nullable` may sit beside a `$ref`,
+      // which resolution replaces wholesale.
+      // A composite whose members include `null` is the 3.1 spelling of an
+      // optional, and reaches here as a reference to a hoisted schema.
+      const referenced = modelsByName[parameter.type];
+      const hasNullMember = (referenced?.composedPrimitives ?? []).some(
+        (member) => member.type === 'null',
+      );
+      if (
+        declaredSchema?.nullable ||
+        hasNullMember ||
+        (bodySchema as { nullable?: boolean }).nullable
+      ) {
+        parameter.isNullable = true;
+      }
     }
   }
   // Track all the media types that can be accepted in the request body
@@ -1237,7 +1256,10 @@ const assertEncodableUrlEncodedBody = (op: Operation): void => {
     mediaTypes.find(
       (mt) => mt === 'application/json' || mt.endsWith('+json'),
     ) ?? mediaTypes[0];
-  if (chosenMediaType !== 'application/x-www-form-urlencoded') return;
+  if (chosenMediaType !== 'application/x-www-form-urlencoded') {
+    assertEncodableNonJsonBody(op, chosenMediaType, body);
+    return;
+  }
   if (body.isPrimitive) return;
   if (body.export === 'array' || body.export === 'tuple') {
     throw new Error(
@@ -1245,6 +1267,36 @@ const assertEncodableUrlEncodedBody = (op: Operation): void => {
     );
   }
 };
+
+/**
+ * A structured body under a media type that is neither JSON nor a form has no
+ * defined encoding. Both generators JSON-encoded it while asserting the declared
+ * Content-Type, so an object went out as JSON bytes labelled `text/plain` — which
+ * a conforming server rejects or mis-parses. Fail fast instead of shipping a wire
+ * form that cannot be right.
+ *
+ * A scalar body is fine: it has a text form of its own and is sent verbatim.
+ */
+const assertEncodableNonJsonBody = (
+  op: Operation,
+  mediaType: string,
+  body: Model,
+): void => {
+  const base = mediaType.split(';')[0];
+  if (base === 'application/json' || base.endsWith('+json')) return;
+  if (FORM_BODY_MEDIA_TYPES.has(base)) return;
+  // Binary bodies are sent as raw content, and a scalar as its text form.
+  if (body.type === 'binary' || body.isPrimitive || body.isEnum) return;
+  if (body.export === 'enum' || body.export === 'generic') return;
+  throw new Error(
+    `Operation ${op.method} ${op.path} declares a "${mediaType}" request body whose schema is an object or array, which has no defined encoding for that media type — it would be sent as JSON under a "${mediaType}" header. Declare the body as "application/json", or use a scalar schema which is sent verbatim.`,
+  );
+};
+
+const FORM_BODY_MEDIA_TYPES = new Set([
+  'multipart/form-data',
+  'application/x-www-form-urlencoded',
+]);
 
 /**
  * Group operations by their (camelCased) tags, collecting any untagged
@@ -1257,24 +1309,6 @@ const groupOperationsByTag = (
   untaggedOperations: Operation[];
 } => {
   const isTagged = (op: Operation): boolean => !!op.tags && op.tags.length > 0;
-
-  // Two tags that normalise to one identifier merge into a single namespace.
-  // Distinct tags are indistinguishable to a caller once merged, and where their
-  // operation ids also collapse an operation is dropped from the client with no
-  // error at all, so the collision is rejected instead.
-  const tagOwners = new Map<string, string>();
-  for (const op of allOperations.filter(isTagged)) {
-    for (const tag of op.tags!) {
-      const normalised = camelCase(tag);
-      const owner = tagOwners.get(normalised);
-      if (owner !== undefined && owner !== tag) {
-        throw new Error(
-          `Tag name conflict: "${owner}" and "${tag}" both normalise to "${normalised}", so their operations would share one namespace. Please rename one of these tags in your OpenAPI specification.`,
-        );
-      }
-      tagOwners.set(normalised, tag);
-    }
-  }
 
   const operationsByTag = allOperations
     .filter(isTagged)

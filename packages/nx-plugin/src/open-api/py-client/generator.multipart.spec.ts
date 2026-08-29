@@ -4,6 +4,7 @@
  */
 import type { Tree } from '@nx/devkit';
 import type { Spec } from '../utils/types.js';
+import { openApiPyClientGenerator } from './generator.js';
 import {
   callGeneratedClient,
   callGeneratedClientAsync,
@@ -11,6 +12,7 @@ import {
   createTree,
   expectSingleRequest,
   generateAndRead,
+  outputPath,
 } from './generator.utils.spec.js';
 
 /**
@@ -234,5 +236,208 @@ describe('openApiPyClientGenerator - multipart bodies', () => {
     );
     expect(res.ok).toBe(true);
     expect(partsOf(expectSingleRequest(res).body).meta).toBe('{"name":"x"}');
+  });
+
+  /**
+   * FastAPI writes a `bytes` body as `{type: 'string', contentMediaType: ...}`
+   * rather than `format: binary`. The promotion to binary was scoped to form
+   * media types and walked only one level of `properties`, so a whole binary body
+   * stayed a `str` and was sent as `repr(bytes)`, and a `list[UploadFile]` was
+   * typed `list[str]` and sent as text parts the server refused.
+   */
+  describe('OpenAPI 3.1 binary bodies', () => {
+    const binarySpec = (schema: unknown, mediaType: string): Spec =>
+      ({
+        openapi: '3.1.0',
+        info: { title: 'TestApi', version: '1.0.0' },
+        paths: {
+          '/upload': {
+            post: {
+              operationId: 'upload',
+              requestBody: {
+                required: true,
+                content: { [mediaType]: { schema } },
+              },
+              responses: { '204': { description: 'No content' } },
+            },
+          },
+        },
+      }) as unknown as Spec;
+
+    it('types a whole binary body as bytes', async () => {
+      const { client } = await generateAndRead(
+        verifier,
+        tree,
+        binarySpec(
+          { type: 'string', contentMediaType: 'application/octet-stream' },
+          'application/octet-stream',
+        ),
+      );
+      expect(client).toContain('body: bytes');
+      // `str(body)` would put `b'\x00'` on the wire.
+      expect(client).not.toMatch(
+        /\{"content": None if body is None else str\(body\)\}/,
+      );
+    });
+
+    it('types a list of file fields as bytes', async () => {
+      const { client } = await generateAndRead(
+        verifier,
+        tree,
+        binarySpec(
+          {
+            type: 'object',
+            required: ['files'],
+            properties: {
+              files: {
+                type: 'array',
+                items: {
+                  type: 'string',
+                  contentMediaType: 'application/octet-stream',
+                },
+              },
+            },
+          },
+          'multipart/form-data',
+        ),
+      );
+      expect(client).toContain('files: list[bytes]');
+    });
+
+    it('types an optional file field as bytes', async () => {
+      const { types } = await generateAndRead(
+        verifier,
+        tree,
+        binarySpec(
+          {
+            type: 'object',
+            properties: {
+              file: {
+                anyOf: [
+                  {
+                    type: 'string',
+                    contentMediaType: 'application/octet-stream',
+                  },
+                  { type: 'null' },
+                ],
+              },
+            },
+          },
+          'multipart/form-data',
+        ),
+      );
+      expect(types).toContain('bytes | None');
+    });
+  });
+
+  // An enum is a single value on the wire but is not `isPrimitive`, so it was
+  // JSON-encoded and arrived quoted under its declared non-JSON Content-Type.
+  it('sends an enum body verbatim under a non-JSON media type', async () => {
+    const { client } = await generateAndRead(verifier, tree, {
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/c': {
+          post: {
+            operationId: 'setColour',
+            requestBody: {
+              required: true,
+              content: {
+                'text/plain': {
+                  schema: { $ref: '#/components/schemas/Colour' },
+                },
+              },
+            },
+            responses: { '204': { description: 'No content' } },
+          },
+        },
+      },
+      components: {
+        schemas: { Colour: { type: 'string', enum: ['red', 'blue'] } },
+      },
+    });
+    // Formatting may wrap the dict, so assert the expression, not the line.
+    expect(client).toContain('"content": None if body is None else str(body)');
+    expect(client).not.toContain('{"json": body}');
+  });
+
+  // A structured body under a media type that is neither JSON nor a form has no
+  // defined encoding; it was sent as JSON bytes under the declared header.
+  it('rejects a structured body under a non-JSON media type', async () => {
+    tree.write(
+      'openapi.json',
+      JSON.stringify({
+        openapi: '3.0.0',
+        info: { title: 'TestApi', version: '1.0.0' },
+        paths: {
+          '/p': {
+            post: {
+              operationId: 'send',
+              requestBody: {
+                required: true,
+                content: {
+                  'text/plain': {
+                    schema: {
+                      type: 'object',
+                      required: ['a'],
+                      properties: { a: { type: 'string' } },
+                    },
+                  },
+                },
+              },
+              responses: { '204': { description: 'No content' } },
+            },
+          },
+        },
+      }),
+    );
+    await expect(
+      openApiPyClientGenerator(tree, {
+        openApiSpecPath: 'openapi.json',
+        outputPath,
+      }),
+    ).rejects.toThrow(/no defined encoding for that media type/);
+  });
+
+  // `json=None` makes httpx omit the body entirely, which a server cannot tell
+  // from no body at all — but a required nullable body means the JSON `null`.
+  it('sends null for a required nullable body', async () => {
+    const { client } = await generateAndRead(verifier, tree, {
+      openapi: '3.1.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/n': {
+          post: {
+            operationId: 'setPayload',
+            requestBody: {
+              required: true,
+              content: {
+                'application/json': {
+                  schema: {
+                    anyOf: [
+                      { $ref: '#/components/schemas/Payload' },
+                      { type: 'null' },
+                    ],
+                  },
+                },
+              },
+            },
+            responses: { '204': { description: 'No content' } },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          Payload: {
+            type: 'object',
+            required: ['a'],
+            properties: { a: { type: 'string' } },
+          },
+        },
+      },
+    } as unknown as Spec);
+    expect(client).toContain(
+      '{"content": b"null"} if body is None else {"json": body}',
+    );
   });
 });

@@ -591,9 +591,11 @@ describe('openApiPyClientGenerator - hostile specs', () => {
     expect(client).toContain('def _scalar_op(');
   });
 
-  // Two tags differing only in punctuation become one namespace, and where the
-  // operation ids also collapse an operation was dropped with no error at all.
-  it('rejects two tags that normalise to the same namespace', async () => {
+  // Two tags differing only in punctuation become one namespace. That is
+  // harmless while their operation ids differ, but where the ids also collapse an
+  // operation was dropped from the client with no error at all — the duplicate-id
+  // check keyed on the raw tag and so never saw them as sharing a namespace.
+  it('rejects colliding operation ids across tags that share a namespace', async () => {
     tree.write(
       'openapi.json',
       JSON.stringify({
@@ -623,5 +625,32 @@ describe('openApiPyClientGenerator - hostile specs', () => {
         outputPath,
       }),
     ).rejects.toThrow(/cannot have the same operationId/);
+  });
+
+  it('merges tags that share a namespace when their operation ids differ', async () => {
+    const { client } = await generateAndRead(verifier, tree, {
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/a': {
+          get: {
+            operationId: 'getA',
+            tags: ['my-tag'],
+            responses: { '204': { description: 'No' } },
+          },
+        },
+        '/b': {
+          get: {
+            operationId: 'getB',
+            tags: ['my.tag'],
+            responses: { '204': { description: 'No' } },
+          },
+        },
+      },
+    });
+    // Both operations must remain reachable — neither is dropped.
+    expect(client).toContain('def get_a(');
+    expect(client).toContain('def get_b(');
+    expect(client).toContain('self.my_tag');
   });
 });
