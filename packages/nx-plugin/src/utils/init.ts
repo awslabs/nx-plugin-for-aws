@@ -47,6 +47,8 @@ import { type ITsDepVersion, withVersions } from './versions.js';
 const WORKSPACES = ['packages/*'];
 const NX_TYPESCRIPT_SYNC_GENERATOR = '@nx/js:typescript-sync';
 
+export const DEFAULT_PARALLEL = 8;
+
 /** Dependencies a caller must declare to apply the workspace init. */
 export const INIT_DEPENDENCIES = [
   { name: 'nx' },
@@ -294,6 +296,7 @@ export const applyWorkspaceInit = async <const D extends DependencyDeclaration>(
     ...nxJson,
     // Preserve an explicit analytics choice in an existing workspace.
     analytics: (nxJson as { analytics?: boolean }).analytics ?? false,
+    parallel: nxJson.parallel ?? DEFAULT_PARALLEL,
     targetDefaults: {
       ...nxJson.targetDefaults,
       compile: mergeTargetDefault(nxJson.targetDefaults?.compile, (base) => ({

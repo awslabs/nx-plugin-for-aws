@@ -201,6 +201,15 @@ describe('preset generator', () => {
     expect(readNxJson(tree).analytics).toBe(false);
   });
 
+  it('should raise the default task parallelism in nx.json', async () => {
+    await presetGenerator(tree, {
+      iac: 'cdk',
+      containers: 'docker',
+    });
+
+    expect(readNxJson(tree).parallel).toBe(8);
+  });
+
   it('should register the TypeScript sync generators for compile targets', async () => {
     await presetGenerator(tree, {
       iac: 'cdk',
