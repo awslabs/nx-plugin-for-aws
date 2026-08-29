@@ -575,10 +575,14 @@ export const annotatePythonData = (data: CodeGenData): void => {
 
     const errorShape = op.errorShape;
     if (errorShape) {
-      const opPascal = op.operationIdPascalCase!;
+      // The pascal-cased operation id is shared with TypeScript, where a leading
+      // digit is legal; a Python class name beginning with one does not parse.
+      const opPascal = toPythonClassName(op.operationIdPascalCase!);
       errorShape.exceptionClassName = `${opPascal}ApiError`;
-      errorShape.unionTypeName =
-        errorShape.entries.length > 0 ? `${opPascal}Error` : 'Never';
+      // Always a valid class name: templates emit `<name> = Never` for an
+      // operation with no error responses, so the name is needed either way.
+      errorShape.unionTypeName = `${opPascal}Error`;
+      errorShape.hasErrorEntries = errorShape.entries.length > 0;
       for (const entry of errorShape.entries) {
         const suffix =
           entry.code === 'default'
@@ -721,7 +725,15 @@ const augmentResponses = (
     ) {
       const composedPrimitives = (
         modelsByName[response.type].composedPrimitives ?? []
-      ).filter((p) => !COLLECTION_TYPES.has(p.export));
+      ).filter(
+        (p) =>
+          !COLLECTION_TYPES.has(p.export) &&
+          // `null` is the one primitive a runtime CAN tell from the others, and
+          // it is how OpenAPI 3.1 spells an optional: FastAPI emits
+          // `anyOf: [X, {type: 'null'}]` for `Optional[X]`. Counting it here
+          // failed generation outright for an idiomatic optional response.
+          p.type !== 'null',
+      );
       if (composedPrimitives.length > 0) {
         throw new Error(
           `Operation "${op.method} ${op.path}" returns a composite schema of primitives with ${camelCase(modelsByName[response.type].export)}, which cannot be distinguished at runtime`,
@@ -743,8 +755,42 @@ const augmentResponses = (
     const mediaTypes = Object.keys(specResponse.content);
     response.mediaTypes = mediaTypes;
 
+    // One status can only be parsed one way: the response's type comes from the
+    // first media type, and nothing inspects the response's Content-Type to pick
+    // between them. Where the schemas agree that is harmless (a `string` served
+    // as either JSON or text), but where they differ the client would coerce one
+    // wire form into the other's type and raise deep inside pydantic. Rejected
+    // here for the same reason a composite of primitives is: it cannot be told
+    // apart at runtime.
+    // A streaming media type describes each item of the stream rather than the
+    // whole body, so it is compared through `itemSchema` elsewhere and excluded
+    // here — a JSONL response legitimately pairs with an `application/json`
+    // declaration of the same item type.
+    const bodySchemas = new Set(
+      mediaTypes
+        .filter((mediaType) => !STREAMING_CONTENT_TYPES.has(mediaType))
+        .map((mediaType) =>
+          JSON.stringify(specResponse.content![mediaType]?.schema ?? null),
+        ),
+    );
+    if (bodySchemas.size > 1) {
+      throw new Error(
+        `Operation "${op.method} ${op.path}" declares response ${response.code} with different schemas per media type (${mediaTypes.join(', ')}), which cannot be distinguished at runtime. Declare one schema for the status, or split the media types across separate operations.`,
+      );
+    }
+
     for (const mediaType of mediaTypes) {
       const responseContent = specResponse.content[mediaType];
+      const declaredSchema = responseContent.schema as
+        | { nullable?: boolean }
+        | undefined;
+      // A composite whose members include `null` — how OpenAPI 3.1 spells an
+      // optional — is nullable, even though the `null` member itself is dropped
+      // from the composite so it stays distinguishable at runtime.
+      const composedModel = modelsByName[response.type];
+      const hasNullMember = (composedModel?.composedPrimitives ?? []).some(
+        (member) => member.type === 'null',
+      );
       const responseSchema = resolveIfRef(spec, responseContent.schema);
       if (responseSchema) {
         augmentModelFromSchema(spec, response, responseSchema, modelsByName);
@@ -753,7 +799,14 @@ const augmentResponses = (
         // Set here rather than in `augmentModelFromSchema`, which every property
         // also goes through: doing it there would change how a property
         // referencing a nullable schema is typed.
-        if ((responseSchema as { nullable?: boolean }).nullable) {
+        //
+        // Read from the declared schema as well as the resolved one: `nullable`
+        // may sit beside a `$ref`, which resolution replaces wholesale.
+        if (
+          declaredSchema?.nullable ||
+          hasNullMember ||
+          (responseSchema as { nullable?: boolean }).nullable
+        ) {
           response.isNullable = true;
         }
       }

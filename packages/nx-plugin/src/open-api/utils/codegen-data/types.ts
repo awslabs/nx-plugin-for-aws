@@ -360,6 +360,8 @@ export interface ErrorShape {
   exceptionClassName?: string;
   /** The generated error union type name (e.g. `GetPetError`). */
   unionTypeName?: string;
+  /** False when the operation declares no error responses, so the union is `Never`. */
+  hasErrorEntries?: boolean;
 }
 
 /**

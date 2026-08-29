@@ -159,7 +159,13 @@ const PYTHON_RESERVED_MODEL_NAMES = new Set([
  */
 export const toPythonClassName = (name: string): string => {
   const tsName = toTypeScriptModelName(name);
-  return PYTHON_RESERVED_MODEL_NAMES.has(tsName) ? `_${tsName}` : tsName;
+  // A class name is an identifier too: an operationId like `42` or `1stOperation`
+  // renders a name beginning with a digit, which does not parse. Prefixing keeps
+  // it distinct rather than renaming it to something positional.
+  const identifier = /^\d/.test(tsName) ? `N${tsName}` : tsName;
+  return PYTHON_RESERVED_MODEL_NAMES.has(identifier)
+    ? `_${identifier}`
+    : identifier;
 };
 
 /**
@@ -465,11 +471,34 @@ const PYTHON_KEYWORDS = new Set([
 const isPydanticReservedName = (name: string): boolean =>
   name.startsWith('model_') || name === 'model_fields' || name === 'schema';
 
+/**
+ * A snake_case name that is a usable Python identifier.
+ *
+ * `snakeCase` keeps only alphanumerics, so a name written in another script
+ * yields the empty string and one beginning with a digit is not an identifier at
+ * all. Either would emit code that does not parse, so the raw name's code points
+ * are encoded instead — a distinct, stable name rather than a positional one, so
+ * two such names never collide and the same spec always renders the same way.
+ */
+const toPythonIdentifier = (name: string): string => {
+  const snake = snakeCase(name);
+  if (snake && !/^\d/.test(snake)) {
+    return snake;
+  }
+  const encoded = Array.from(name)
+    .map((ch) =>
+      /[a-zA-Z0-9]/.test(ch) ? ch : ch.codePointAt(0)!.toString(16),
+    )
+    .join('')
+    .toLowerCase();
+  return snake ? `n_${snake}` : `u_${encoded}`;
+};
+
 export const toPythonName = (
   namedEntity: 'model' | 'property' | 'operation',
   name: string,
 ) => {
-  const nameSnakeCase = snakeCase(name);
+  const nameSnakeCase = toPythonIdentifier(name);
 
   // Names overlapping a TypeScript reserved word carry a leading `_`; strip it
   // before testing against the Python keyword set. Also test the snake-cased

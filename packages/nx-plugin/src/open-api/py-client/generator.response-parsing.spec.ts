@@ -4,12 +4,14 @@
  */
 import type { Tree } from '@nx/devkit';
 import type { Spec } from '../utils/types.js';
+import { openApiPyClientGenerator } from './generator.js';
 import {
   callGeneratedClient,
   callGeneratedClientAsync,
   createPythonClientVerifier,
   createTree,
   generateAndRead,
+  outputPath,
   requestJsonBody,
 } from './generator.utils.spec.js';
 
@@ -524,5 +526,197 @@ describe('openApiPyClientGenerator - response parsing', () => {
       expect(res.value).toEqual({ text });
       expect(requestJsonBody(res)).toEqual({ text });
     });
+  });
+
+  /**
+   * The 3.1 spelling of an optional response. FastAPI emits
+   * `anyOf: [X, {type: 'null'}]` for `Optional[X]`, and `null` was counted as an
+   * indistinguishable composed primitive — so generation failed outright on an
+   * idiomatic optional response. `null` is precisely the one primitive a runtime
+   * CAN tell apart.
+   */
+  describe('OpenAPI 3.1 optional responses', () => {
+    const optionalSpec = (schema: unknown): Spec =>
+      ({
+        openapi: '3.1.0',
+        info: { title: 'TestApi', version: '1.0.0' },
+        paths: {
+          '/maybe': {
+            get: {
+              operationId: 'getMaybe',
+              responses: {
+                '200': {
+                  description: 'OK',
+                  content: { 'application/json': { schema } },
+                },
+              },
+            },
+          },
+        },
+        components: {
+          schemas: {
+            Order: {
+              type: 'object',
+              required: ['id'],
+              properties: { id: { type: 'string' } },
+            },
+          },
+        },
+      }) as unknown as Spec;
+
+    const NULLABLE_SHAPES: Array<[string, unknown]> = [
+      [
+        'anyOf with a $ref',
+        { anyOf: [{ $ref: '#/components/schemas/Order' }, { type: 'null' }] },
+      ],
+      [
+        'oneOf with a $ref',
+        { oneOf: [{ $ref: '#/components/schemas/Order' }, { type: 'null' }] },
+      ],
+      [
+        'a $ref with a nullable sibling',
+        { $ref: '#/components/schemas/Order', nullable: true },
+      ],
+    ];
+
+    it.each(NULLABLE_SHAPES)('returns None for %s', async (_label, schema) => {
+      await generateAndRead(verifier, tree, optionalSpec(schema));
+      const res = await callGeneratedClient(
+        verifier,
+        'get_maybe',
+        {},
+        {
+          json: null,
+        },
+      );
+      expect(res.ok).toBe(true);
+      expect(res.value).toBeNull();
+    });
+
+    it.each(NULLABLE_SHAPES)(
+      'still parses a present body for %s',
+      async (_label, schema) => {
+        await generateAndRead(verifier, tree, optionalSpec(schema));
+        const res = await callGeneratedClient(
+          verifier,
+          'get_maybe',
+          {},
+          {
+            json: { id: 'o1' },
+          },
+        );
+        expect(res.ok).toBe(true);
+        expect(res.value).toEqual({ id: 'o1' });
+      },
+    );
+  });
+
+  // Two members of an untagged union declaring an identically-shaped optional
+  // property are safe to compose either way, but the normaliser hoists each
+  // inline schema to its own name — so keying the check on the name rejected a
+  // union whose members convert identically.
+  it('accepts an untagged union whose members share an identical property', async () => {
+    const { types } = await generateAndRead(verifier, tree, {
+      openapi: '3.1.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/c': {
+          post: {
+            operationId: 'putContact',
+            requestBody: {
+              required: true,
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/Contact' },
+                },
+              },
+            },
+            responses: { '204': { description: 'No content' } },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          Contact: {
+            anyOf: [
+              { $ref: '#/components/schemas/Email' },
+              { $ref: '#/components/schemas/Phone' },
+            ],
+          },
+          Email: {
+            type: 'object',
+            required: ['email'],
+            properties: {
+              email: { type: 'string' },
+              verified_at: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+            },
+          },
+          Phone: {
+            type: 'object',
+            required: ['phone'],
+            properties: {
+              phone: { type: 'string' },
+              verified_at: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+            },
+          },
+        },
+      },
+    } as unknown as Spec);
+    expect(types).toContain('class Email(BaseModel):');
+    expect(types).toContain('class Phone(BaseModel):');
+  });
+
+  // A genuine conflict must still be refused: one member converts the property
+  // as a date-time, the other leaves it a plain string.
+  it('still rejects an untagged union whose members convert a property differently', async () => {
+    tree.write(
+      'openapi.json',
+      JSON.stringify({
+        openapi: '3.0.0',
+        info: { title: 'TestApi', version: '1.0.0' },
+        paths: {
+          '/v': {
+            post: {
+              operationId: 'putV',
+              requestBody: {
+                required: true,
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/V' },
+                  },
+                },
+              },
+              responses: { '204': { description: 'No content' } },
+            },
+          },
+        },
+        components: {
+          schemas: {
+            V: {
+              anyOf: [
+                { $ref: '#/components/schemas/A' },
+                { $ref: '#/components/schemas/B' },
+              ],
+            },
+            A: {
+              type: 'object',
+              required: ['when'],
+              properties: { when: { type: 'string', format: 'date-time' } },
+            },
+            B: {
+              type: 'object',
+              required: ['when'],
+              properties: { when: { type: 'string' } },
+            },
+          },
+        },
+      }),
+    );
+    await expect(
+      openApiPyClientGenerator(tree, {
+        openApiSpecPath: 'openapi.json',
+        outputPath,
+      }),
+    ).rejects.toThrow(/different types/);
   });
 });

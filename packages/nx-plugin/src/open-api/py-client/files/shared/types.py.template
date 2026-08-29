@@ -133,7 +133,18 @@ const classifyModel = (model) => {
   if (model.isInlinedByAllOf) return 'skip';
   if (model.export === 'enum') return 'alias';
   if (model.export === 'one-of' || model.export === 'any-of') return 'alias';
-  if (model.export === 'dictionary') return 'alias';
+  // An object with no properties and no `additionalProperties` parses as a
+  // dictionary whose value type is the model itself, which would render as the
+  // self-referential `X = dict[str, X]`. It carries no value type at all, so it
+  // is emitted as an empty class — which is what the schema describes.
+  if (model.export === 'dictionary') {
+    const isEmptyObject =
+      !model.link &&
+      !model.hasAdditionalProperties &&
+      !model.hasPatternProperties &&
+      model.type === model.name;
+    return isEmptyObject ? 'class' : 'alias';
+  }
   if (model.export === 'array') return 'alias';
   if (model.export === 'tuple') return 'alias';
   // `all-of` is rendered as a `BaseModel` subclass with flattened fields.
@@ -282,7 +293,7 @@ class <%- op.requestTypeName %>(<%- op.requestTypeName %>Required, total=False):
   if (!shape || shape.entries.length === 0) {
 _%>
 
-<%- op.operationIdPascalCase %>Error = Never
+<%- shape.unionTypeName %> = Never
 <%_
   } else {
 _%>
@@ -303,6 +314,6 @@ class <%- entry.className %>(BaseModel):
     error: <%- payloadType %>
 <%_ }); _%>
 
-<%- op.operationIdPascalCase %>Error = <% shape.entries.forEach((e, i) => { %><%- i > 0 ? ' | ' : '' %><%- e.className %><% }); %>
+<%- shape.unionTypeName %> = <% shape.entries.forEach((e, i) => { %><%- i > 0 ? ' | ' : '' %><%- e.className %><% }); %>
 <%_ } _%>
 <%_ }); _%>

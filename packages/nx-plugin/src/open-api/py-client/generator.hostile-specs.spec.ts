@@ -394,12 +394,9 @@ describe('openApiPyClientGenerator - hostile specs', () => {
         },
       },
     });
-    const res = await callGeneratedClient(
-      verifier,
-      'operation_1',
-      {},
-      { json: 'ok' },
-    );
+    // The operation id has no alphanumerics to snake_case, so it falls back to a
+    // generated identifier rather than emitting an empty one.
+    const res = await callGeneratedClient(verifier, 'u_', {}, { json: 'ok' });
     expect(res.ok).toBe(true);
     expect(res.value).toBe('ok');
   });
@@ -443,5 +440,74 @@ describe('openApiPyClientGenerator - hostile specs', () => {
     expect(new URL(call.url).searchParams.get('fooBar')).toBe('q');
     expect(call.headers['foobarheader']).toBe('h1');
     expect(call.headers['foo_bar']).toBe('h2');
+  });
+
+  // An `operationId` with no alphanumerics, or one starting with a digit, also
+  // names the generated error classes — where an invalid identifier does not
+  // parse. Independent FastAPI testing found `42Error = Never` and
+  // `class 42ApiError`.
+  it('emits valid class names for operation ids that are not identifiers', async () => {
+    const { types, errors } = await generateAndRead(verifier, tree, {
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/a': {
+          get: {
+            operationId: '42',
+            tags: ['t'],
+            responses: {
+              '200': { description: 'OK' },
+              '404': { description: 'No' },
+            },
+          },
+        },
+        '/b': {
+          get: {
+            operationId: '1stOperation',
+            tags: ['t'],
+            responses: { '200': { description: 'OK' } },
+          },
+        },
+      },
+    });
+    for (const module of [types, errors]) {
+      // No class or alias may begin with a digit.
+      expect(module).not.toMatch(/^class \d/m);
+      expect(module).not.toMatch(/^\d\w* = /m);
+      expect(module).not.toMatch(/class \d\w*ApiError/);
+    }
+  });
+
+  // An object schema with no properties and no `additionalProperties` parsed as
+  // a dictionary whose value type was the model itself, emitting the
+  // self-referential `Empty = dict[str, Empty]` — a `NameError` on import, which
+  // a parse-only check does not catch.
+  it('emits an empty object schema as a class, not a self-referential alias', async () => {
+    const { types } = await generateAndRead(verifier, tree, {
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/e': {
+          post: {
+            operationId: 'postEmpty',
+            tags: ['e'],
+            requestBody: {
+              required: true,
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/Empty' },
+                },
+              },
+            },
+            responses: { '204': { description: 'No content' } },
+          },
+        },
+      },
+      components: {
+        schemas: { Empty: { type: 'object', properties: {} } },
+      },
+    });
+    expect(types).toContain('class Empty(BaseModel):');
+    expect(types).not.toContain('Empty = dict[str, Empty]');
   });
 });
