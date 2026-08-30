@@ -507,13 +507,14 @@ describe('ts#mcp-server generator', () => {
     expect(projectConfig.targets['mcp-server-docker'].dependsOn).toEqual([
       'bundle',
     ]);
-    expect(projectConfig.targets['mcp-server-docker'].outputs).toEqual([
-      '{workspaceRoot}/dist/apps/test-project/bundle/mcp/test-project-mcp-server/Dockerfile',
-    ]);
+    // The built image lives in the container engine rather than under any
+    // outputs path, so there is nothing for a cache hit to restore.
+    expect(projectConfig.targets['mcp-server-docker'].cache).toBe(false);
+    expect(projectConfig.targets['mcp-server-docker'].outputs).toBeUndefined();
 
-    // Check that a cacheable trivy scan target was added
+    // Check that a non-cacheable trivy scan target was added
     expect(projectConfig.targets['mcp-server-trivy']).toEqual({
-      cache: true,
+      cache: false,
       inputs: ['default', '^production'],
       outputs: [
         '{workspaceRoot}/dist/apps/test-project/trivy/proj-test-project-mcp-server-latest',

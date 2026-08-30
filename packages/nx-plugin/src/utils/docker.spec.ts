@@ -67,7 +67,7 @@ describe('docker utils', () => {
       );
     });
 
-    it('should add a cacheable scan target depending on the docker target', () => {
+    it('should add a non-cacheable scan target depending on the docker target', () => {
       const project = makeProject();
       addDockerScanTarget(
         tree,
@@ -82,7 +82,9 @@ describe('docker utils', () => {
       );
 
       const target = project.targets['my-agent-trivy'];
-      expect(target.cache).toBe(true);
+      // The scanned image lives in the container engine, so a restored cache
+      // entry could report a pass for an image that is no longer there.
+      expect(target.cache).toBe(false);
       expect(target.inputs).toEqual(['default', '^production']);
       expect(target.dependsOn).toEqual(['my-agent-docker']);
       expect(target.outputs).toEqual([

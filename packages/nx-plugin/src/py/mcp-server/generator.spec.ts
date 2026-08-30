@@ -435,6 +435,10 @@ dev-dependencies = []
       false,
     );
 
+    // The built image lives in the container engine rather than under any
+    // outputs path, so there is nothing for a cache hit to restore.
+    expect(projectConfig.targets['mcp-server-docker'].cache).toBe(false);
+
     // Check that docker target depends on bundle-arm
     expect(projectConfig.targets['mcp-server-docker'].dependsOn).toContain(
       'bundle-arm',
@@ -443,9 +447,9 @@ dev-dependencies = []
     // Check that build target depends on docker
     expect(projectConfig.targets.build.dependsOn).toContain('docker');
 
-    // Check that a cacheable trivy scan target was added
+    // Check that a non-cacheable trivy scan target was added
     expect(projectConfig.targets['mcp-server-trivy']).toEqual({
-      cache: true,
+      cache: false,
       inputs: ['default', '^production'],
       outputs: [
         '{workspaceRoot}/dist/apps/test-project/trivy/proj-test-project-mcp-server-latest',

@@ -296,6 +296,10 @@ dev-dependencies = []
     ]);
     expect(projectConfig.targets['agent-docker'].options.parallel).toBe(false);
 
+    // The built image lives in the container engine rather than under any
+    // outputs path, so there is nothing for a cache hit to restore.
+    expect(projectConfig.targets['agent-docker'].cache).toBe(false);
+
     // Check that docker target depends on bundle-arm
     expect(projectConfig.targets['agent-docker'].dependsOn).toContain(
       'bundle-arm',
@@ -304,9 +308,9 @@ dev-dependencies = []
     // Check that build target depends on docker
     expect(projectConfig.targets.build.dependsOn).toContain('docker');
 
-    // Check that a cacheable trivy scan target was added
+    // Check that a non-cacheable trivy scan target was added
     expect(projectConfig.targets['agent-trivy']).toEqual({
-      cache: true,
+      cache: false,
       inputs: ['default', '^production'],
       outputs: [
         '{workspaceRoot}/dist/apps/test-project/trivy/proj-test-project-agent-latest',

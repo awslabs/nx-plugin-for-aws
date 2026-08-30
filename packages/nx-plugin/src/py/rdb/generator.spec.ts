@@ -198,7 +198,7 @@ describe('py#rdb generator', () => {
     ).toMatchSnapshot();
     const projectConfig = readProjectConfigurationUnqualified(tree, 'proj.db');
     expect(projectConfig.targets.docker).toEqual({
-      cache: true,
+      cache: false,
       executor: 'nx:run-commands',
       options: {
         commands: [
@@ -211,9 +211,9 @@ describe('py#rdb generator', () => {
     });
     expect(projectConfig.targets.build.dependsOn).toContain('docker');
 
-    // Check that a cacheable trivy scan target was added covering both images
+    // Check that a non-cacheable trivy scan target was added covering both images
     expect(projectConfig.targets.trivy).toEqual({
-      cache: true,
+      cache: false,
       inputs: ['default', '^production'],
       outputs: [
         '{workspaceRoot}/dist/packages/db/trivy/proj-db-migration-latest',

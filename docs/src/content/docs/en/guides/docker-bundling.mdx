@@ -14,7 +14,7 @@ import { CONTAINER_VERSIONS } from '../../../../../../packages/nx-plugin/src/uti
 export const trivyTarget = `{
   "targets": {
     "trivy": {
-      "cache": true,
+      "cache": false,
       "inputs": ["default", "^production"],
       "outputs": ["{workspaceRoot}/dist/{projectRoot}/trivy"],
       "executor": "nx:run-commands",
@@ -68,7 +68,7 @@ The Docker build context is written to your project's `dist` folder. Your infras
 :::tip[Why bundle outside the Dockerfile?]
 Keeping the bundle step in Nx (rather than inside the `Dockerfile`) means:
 
-- Nx can **cache** the bundle target, so repeated builds are fast.
+- Nx can **cache** the bundle target — its output is a directory on disk, so a cache hit genuinely restores it.
 - The `Dockerfile` does not need access to your monorepo, private registries, or build-time secrets.
 - The image layer is tiny — a single `COPY` of already-built artifacts, with no transitive `node_modules` or build toolchain.
 :::
@@ -167,7 +167,7 @@ Add a `docker` target which:
 {
   "targets": {
     "docker": {
-      "cache": true,
+      "cache": false,
       "executor": "nx:run-commands",
       "options": {
         "commands": [
@@ -181,6 +181,12 @@ Add a `docker` target which:
   }
 }
 ```
+
+:::caution[Do not let Nx cache an image build]
+A built image lives in the container engine's store, not under any `outputs` path, so Nx has nothing to restore on a cache hit — it would report the build complete while the image is missing (say after a `docker rmi` or a `docker system prune`), and a `trivy` target depending on it would report a cached pass against an image that isn't there.
+
+Setting `"cache": false` keeps this sound at almost no cost: the container engine's own layer cache is keyed on the build context and lives alongside the image, so an unchanged context rebuilds in well under a second and always leaves the image present.
+:::
 
 :::tip[Cross-platform file copy]
 The `ncp` package provides a cross-platform file/directory copy command, avoiding `cp` (unavailable on Windows). Install it at the root of your workspace with `pnpm add -D -w ncp`.
@@ -256,7 +262,7 @@ Add a `docker` target which copies the `Dockerfile` into the bundle output direc
 {
   "targets": {
     "docker": {
-      "cache": true,
+      "cache": false,
       "executor": "nx:run-commands",
       "options": {
         "commands": [
@@ -296,8 +302,8 @@ The scan is intentionally not wired into `build` since this can introduce unnece
 Instead we recommend running the above command as a dedicated step in your CI pipeline prior to deployment to production stages.
 :::
 
-:::tip[Caching skips unchanged images]
-Because the image is fully determined by your project source, declaring `inputs` (here `default` and `^production`, matching the `bundle` target) lets Nx cache the scan and skip re-scanning an image that hasn't changed. Pin the Trivy image version (e.g. <code>trivy:<TrivyVersion /></code>) so scans are reproducible.
+:::caution[The scan is not cacheable either]
+The image the scan reads is only reachable through the container engine, so a restored cache entry would report a pass for an image that may no longer be there. With `"cache": false` the scan always runs against the real image, and fails loudly if it is missing. Pin the Trivy image version (e.g. <code>trivy:<TrivyVersion /></code>) so scans are reproducible.
 :::
 
 :::note[Suppressing findings]
