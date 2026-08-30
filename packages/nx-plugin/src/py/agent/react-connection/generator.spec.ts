@@ -150,7 +150,7 @@ export function Main() {
     // Verify client generation target was added
     expect(projectConfig.targets['generate:test-agent-client']).toBeDefined();
     expect(projectConfig.targets['generate:test-agent-client'].executor).toBe(
-      'nx:run-commands',
+      '@aws/nx-plugin:open-api-codegen',
     );
     expect(
       projectConfig.targets['generate:test-agent-client'].dependsOn,
