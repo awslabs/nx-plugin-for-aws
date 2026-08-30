@@ -506,20 +506,37 @@ const rewriteCompositeSiblingProperties = (spec: Spec): Spec => {
 };
 
 /**
- * Upper-cases wildcard response status codes (`2xx` to `2XX`).
+ * Upper-cases wildcard response status codes (`2xx` to `2XX`), drops spec
+ * extensions, and rejects a key that is neither.
  *
  * OpenAPI treats the range codes case-insensitively, but every consumer
  * downstream matches the upper-case form — a lower-case key would otherwise be
  * taken for a literal status code and emitted as one, which is not valid Python
- * or TypeScript.
+ * or TypeScript. A key that is no kind of status code was emitted as a bare name
+ * either way: `x-vendor-note` did not parse, and an alphabetic one like `unknown`
+ * parsed and imported, then raised `NameError` from `response.status_code ==
+ * unknown` only once that status arrived.
  */
+const RESPONSE_CODE_PATTERN = /^(?:\d{3}|\d[xX]{2}|default)$/;
+
 const normaliseResponseCodeCase = (spec: Spec): void => {
-  for (const pathItem of Object.values(spec.paths ?? {})) {
-    for (const operation of Object.values(pathItem ?? {})) {
+  for (const [path, pathItem] of Object.entries(spec.paths ?? {})) {
+    for (const [method, operation] of Object.entries(pathItem ?? {})) {
       const responses = (operation as { responses?: Record<string, unknown> })
         ?.responses;
       if (!responses || typeof responses !== 'object') continue;
       for (const code of Object.keys(responses)) {
+        // A `x-` extension is legal on the Responses Object and describes nothing
+        // to generate, so it is dropped rather than rejected.
+        if (code.startsWith('x-')) {
+          delete responses[code];
+          continue;
+        }
+        if (!RESPONSE_CODE_PATTERN.test(code)) {
+          throw new Error(
+            `Operation "${method.toUpperCase()} ${path}" declares a response keyed "${code}", which is not a status code, a wildcard range (such as "5XX") or "default". Please correct it in your OpenAPI specification.`,
+          );
+        }
         if (!/^\d[xX]{2}$/.test(code) || code === code.toUpperCase()) continue;
         const upper = code.toUpperCase();
         // Both spellings name the same range, so one would silently overwrite

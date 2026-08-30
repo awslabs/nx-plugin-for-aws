@@ -643,4 +643,55 @@ describe('normaliseOpenApiSpecForCodeGen', () => {
       },
     });
   });
+
+  /**
+   * A Responses Object key becomes a status branch and names the classes for that
+   * status. Anything that is not a status code was emitted as a bare name: a key
+   * containing punctuation did not parse, and an alphabetic one parsed and
+   * imported, then raised `NameError` from the emitted comparison once that
+   * status arrived.
+   */
+  describe('response keys', () => {
+    const specWithResponseKey = (
+      key: string,
+      value: unknown = { description: 'd' },
+    ) =>
+      ({
+        openapi: '3.1.0',
+        info: { title: 'TestApi', version: '1.0.0' },
+        paths: {
+          '/x': {
+            get: {
+              operationId: 'getX',
+              responses: { '200': { description: 'OK' }, [key]: value },
+            },
+          },
+        },
+      }) as unknown as Spec;
+
+    it.each(['unknown', '200 OK', '20X', 'default '])(
+      'rejects a response keyed %s',
+      (key) => {
+        expect(() =>
+          normaliseOpenApiSpecForCodeGen(specWithResponseKey(key)),
+        ).toThrow(/declares a response keyed "/);
+      },
+    );
+
+    it.each(['200', '404', '5XX', 'default'])('accepts %s', (key) => {
+      const result = normaliseOpenApiSpecForCodeGen(specWithResponseKey(key));
+      const responses = (result.paths['/x'] as any).get.responses;
+      expect(Object.keys(responses)).toContain(key);
+    });
+
+    // A `x-` extension is legal on the Responses Object and describes nothing to
+    // generate, so it is dropped rather than rejected.
+    it('drops a spec extension', () => {
+      const result = normaliseOpenApiSpecForCodeGen(
+        specWithResponseKey('x-vendor-note', 'a spec extension'),
+      );
+      const responses = (result.paths['/x'] as any).get.responses;
+      expect(Object.keys(responses)).toEqual(['200']);
+    });
+  });
 });
