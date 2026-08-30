@@ -12,7 +12,7 @@ import {
 import { TS_DYNAMODB_GENERATOR_INFO } from '../../../ts/dynamodb/generator.js';
 import { TS_RDB_GENERATOR_INFO } from '../../../ts/rdb/generator.js';
 import { formatFilesInSubtree } from '../../../utils/format.js';
-import { normalizeTargetKeyOrder } from '../../../utils/nx.js';
+import { addDependencyToTargetIfNotPresent } from '../../../utils/nx.js';
 
 /**
  * Make the dev target of ts#dynamodb and ts#rdb projects depend on pull-image
@@ -52,8 +52,22 @@ export default async function migration(
       continue;
     }
 
-    const dependsOn = dev.dependsOn ?? [];
-    if (dependsOn.includes(PULL_IMAGE_TARGET)) {
+    // Nx requires an array here. Anything else is hand-written and is reported
+    // rather than rewritten, so a malformed value is never spread or clobbered.
+    if (dev.dependsOn !== undefined && !Array.isArray(dev.dependsOn)) {
+      nextSteps.push(divergedNextStep(name));
+      continue;
+    }
+
+    const alreadyDependsOnPullImage = (dev.dependsOn ?? []).some(
+      (dependency) =>
+        dependency === PULL_IMAGE_TARGET ||
+        (typeof dependency === 'object' &&
+          dependency !== null &&
+          dependency.target === PULL_IMAGE_TARGET &&
+          dependency.projects === undefined),
+    );
+    if (alreadyDependsOnPullImage) {
       continue;
     }
 
@@ -62,10 +76,7 @@ export default async function migration(
       continue;
     }
 
-    project.targets.dev = normalizeTargetKeyOrder({
-      ...dev,
-      dependsOn: [PULL_IMAGE_TARGET, ...dependsOn],
-    });
+    addDependencyToTargetIfNotPresent(project, 'dev', PULL_IMAGE_TARGET);
     updateProjectConfiguration(tree, name, project);
     migrated = true;
   }
