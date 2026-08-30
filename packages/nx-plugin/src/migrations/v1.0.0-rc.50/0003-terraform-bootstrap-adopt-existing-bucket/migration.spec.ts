@@ -7,7 +7,6 @@ import { join } from 'node:path';
 import type { Tree } from '@nx/devkit';
 import { terraformProjectGenerator } from '../../../terraform/project/generator.js';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
-import pluginCacheMigration from '../../latest/terraform-provider-plugin-cache/migration.js';
 import migration from './migration.js';
 
 const BOOTSTRAP_FILE = 'packages/infra/scripts/bootstrap.ts';
@@ -152,9 +151,6 @@ describe('terraform-bootstrap-adopt-existing-bucket migration', () => {
     await generateWithPreFixBootstrap(tree);
 
     const result = await migration(tree);
-    // The script has moved on since this migration, so the later migrations
-    // that touched it run too — as `nx migrate` runs them, in order.
-    await pluginCacheMigration(tree);
 
     // The point of a migration: the workspace ends up byte-identical to one
     // generated from today's generators.
