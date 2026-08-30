@@ -150,6 +150,26 @@ The narrow exceptions:
 - Formatting or stylistic changes to vended templates
 - Changes that only affect the *choices offered* at generation time (a new option whose default leaves existing output unchanged)
 - Removing a file the generator no longer vends, where the leftover copy is harmless
+- Changes to a generator marked `experimental` (see [Experimental generators](#experimental-generators))
+
+#### Experimental generators
+
+A generator whose shape is still settling can be marked experimental by adding `"experimental": true` to its `generators.json` entry:
+
+```json
+"agentcore-harness": {
+  "factory": "./src/agentcore-harness/generator",
+  "schema": "./src/agentcore-harness/schema.json",
+  "description": "Generate an AgentCore Harness project",
+  "metric": "g71",
+  "guidePages": ["agentcore-harness"],
+  "experimental": true
+}
+```
+
+An experimental generator is **permitted to change without a migration** being published to carry an existing workspace across, so its output can be reshaped freely while it stabilises. Users upgrading reconcile those changes themselves.
+
+The flag needs nothing else authored: its guide page (any page carrying `generator: <id>` in its frontmatter) automatically shows a banner saying so, and the MCP `list-generators` / `generator-guide` tools include the same warning for agents. Remove the flag once the generator is stable — from then on it follows the normal migration rules above.
 
 #### Migrations that change infrastructure
 
@@ -387,7 +407,7 @@ All authoring happens in `docs/src/content/docs/en/`. Translations under other l
 
 #### Linking a guide to its generator
 
-Add `generator: <id>` to the page's frontmatter. This wires the page into the option-filter bar and enables the build-time validator that checks every `<OptionFilter>` predicate against the generator's JSON schema.
+Add `generator: <id>` to the page's frontmatter. This wires the page into the option-filter bar, adds the experimental banner when the generator is marked as such, and enables the build-time validator that checks every `<OptionFilter>` predicate against the generator's JSON schema.
 
 ```mdx
 ---

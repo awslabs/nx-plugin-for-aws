@@ -25,4 +25,15 @@ describe('generators', () => {
       `Each generator must have a unique metric. Assign a new metric id to the most recently introduced generator.\nDuplicates found:\n${duplicates.join('\n')}`,
     ).toEqual([]);
   });
+
+  it('should surface the experimental flag', () => {
+    const generators = buildGeneratorInfoList(process.cwd());
+
+    expect(
+      generators.find((g) => g.id === 'agentcore-harness')?.experimental,
+    ).toBe(true);
+    expect(generators.find((g) => g.id === 'ts#project')?.experimental).toBe(
+      undefined,
+    );
+  });
 });

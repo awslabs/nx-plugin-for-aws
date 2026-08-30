@@ -12,6 +12,12 @@ export interface GeneratorInfo {
   readonly resolvedFactoryPath: string;
   readonly resolvedSchemaPath: string;
   readonly hidden?: boolean;
+  /**
+   * Experimental generators may change without a migration being published to
+   * apply the change to an existing workspace. Surfaced as a banner on the
+   * generator's guide page and in the MCP server's generator listings.
+   */
+  readonly experimental?: boolean;
   readonly description: string;
   readonly guidePages?: readonly string[];
 }
@@ -33,6 +39,9 @@ export const buildGeneratorInfoList = (baseDir: string): GeneratorInfo[] =>
       resolvedSchemaPath: path.resolve(baseDir, info.schema),
       description: info.description,
       ...('hidden' in info && info.hidden ? { hidden: info.hidden } : {}),
+      ...('experimental' in info && info.experimental
+        ? { experimental: info.experimental }
+        : {}),
       ...('guidePages' in info && info.guidePages
         ? { guidePages: info.guidePages }
         : {}),

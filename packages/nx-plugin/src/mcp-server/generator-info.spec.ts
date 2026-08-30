@@ -9,6 +9,7 @@ import {
   fetchGuidePagesForGenerator,
   postProcessGuide,
   renderFilterableOptionsAsync,
+  renderGeneratorInfo,
 } from './generator-info.js';
 
 describe('postProcessGuide', () => {
@@ -890,5 +891,41 @@ SMITHY_BODY`,
       expect(result.kind).toBe('ok');
       expect(result.content).toBe('');
     });
+  });
+});
+
+describe('renderGeneratorInfo', () => {
+  const info: NxGeneratorInfo = {
+    id: 'test-generator',
+    description: 'A test generator',
+    resolvedSchemaPath: '/path/to/schema.json',
+    resolvedFactoryPath: '/path/to/factory',
+    metric: 'g1',
+  };
+
+  beforeEach(() => {
+    vi.spyOn(fs, 'readFileSync').mockReturnValue(
+      JSON.stringify({ properties: { name: { type: 'string' } } }),
+    );
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('warns that an experimental generator may change without a migration', () => {
+    const rendered = renderGeneratorInfo('pnpm', {
+      ...info,
+      experimental: true,
+    });
+
+    expect(rendered).toContain('[!WARNING] Experimental');
+    expect(rendered).toContain(
+      'without a migration being published to apply the change to an existing workspace',
+    );
+  });
+
+  it('omits the warning for a non-experimental generator', () => {
+    expect(renderGeneratorInfo('pnpm', info)).not.toContain('Experimental');
   });
 });
