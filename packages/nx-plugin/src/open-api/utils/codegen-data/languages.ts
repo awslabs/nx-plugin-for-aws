@@ -286,14 +286,6 @@ const pythonPrimitiveType = (property: Model): PythonType => {
 };
 
 /**
- * The Python type of a property, as a tree.
- *
- * This is the single place a model's Python type is derived. Consumers that
- * need to know what a type is — a collection, a class reference, a literal —
- * inspect the tree rather than the rendered string, and render it with
- * {@link renderPythonType} when they need source text.
- */
-/**
  * A collection member's type, admitting `None` when the member is nullable.
  *
  * The member's own nullability is not the collection's: `list[str | None]` is a
@@ -306,6 +298,14 @@ const nullableMemberType = (member: Model, rendered: PythonType): PythonType =>
     ? { kind: 'optional', inner: rendered }
     : rendered;
 
+/**
+ * The Python type of a property, as a tree.
+ *
+ * This is the single place a model's Python type is derived. Consumers that
+ * need to know what a type is — a collection, a class reference, a literal —
+ * inspect the tree rather than the rendered string, and render it with
+ * {@link renderPythonType} when they need source text.
+ */
 export const toPythonTypeTree = (property: Model): PythonType => {
   if (property.discriminatorValue) {
     return {
@@ -533,13 +533,9 @@ const isPydanticReservedName = (name: string): boolean =>
   name.startsWith('model_') || name === 'model_fields' || name === 'schema';
 
 /**
- * A snake_case name that is a usable Python identifier.
- *
- * `snakeCase` keeps only alphanumerics, so a name written in another script
- * yields the empty string and one beginning with a digit is not an identifier at
- * all. Either would emit code that does not parse, so the raw name's code points
- * are encoded instead — a distinct, stable name rather than a positional one, so
- * two such names never collide and the same spec always renders the same way.
+ * A name's non-alphanumeric characters replaced by their code points, so a name
+ * that would otherwise escape to nothing keeps a distinct, stable spelling: two
+ * such names never collide and the same spec always renders the same way.
  */
 const encodeCodePoints = (name: string): string =>
   Array.from(name)
@@ -549,6 +545,14 @@ const encodeCodePoints = (name: string): string =>
     .join('')
     .toLowerCase();
 
+/**
+ * A snake_case name that is a usable Python identifier.
+ *
+ * `snakeCase` keeps only alphanumerics, so a name written in another script
+ * yields the empty string and one beginning with a digit is not an identifier at
+ * all. Either would emit code that does not parse, so the name falls back to
+ * {@link encodeCodePoints} rather than to a positional name.
+ */
 const toPythonIdentifier = (name: string): string => {
   const snake = snakeCase(name);
   if (snake && !/^\d/.test(snake)) {

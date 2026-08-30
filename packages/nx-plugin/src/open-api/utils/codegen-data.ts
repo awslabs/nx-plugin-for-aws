@@ -393,7 +393,7 @@ const TYPES_GEN_PREFIX = 'types.';
  * spec can't silently replace the client's own plumbing — an operation called
  * `close` would otherwise shadow the method that releases the httpx client.
  */
-const PYTHON_CLIENT_MEMBERS = new Set([
+export const PYTHON_CLIENT_MEMBERS = new Set([
   'aclose',
   'close',
   'config',

@@ -4,6 +4,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
+import { PYTHON_CLIENT_MEMBERS } from '../utils/codegen-data.js';
 
 /**
  * One template renders both clients, so a flavour difference is expressed once —
@@ -93,5 +94,26 @@ describe('openApiPyClientGenerator - client template invariants', () => {
     // argument-forwarding body instead of repeating it.
     expect(occurrences(body, "'yield from '")).toBe(1);
     expect(occurrences(body, 'self._parent._')).toBe(1);
+  });
+
+  /**
+   * `PYTHON_CLIENT_MEMBERS` is what pushes an operation named after one of the
+   * client's own members out of the way. A helper added to the template but not
+   * to that set is worse than shadowed: the operation *replaces* the helper, so
+   * every other operation calling it breaks. Deriving the expected set from the
+   * template is what keeps the two from drifting.
+   */
+  it('escapes every member the client template defines', () => {
+    const defined = new Set([
+      ...[...body.matchAll(/self\._([a-z_]+)/g)].map((m) => m[1]),
+      ...[...body.matchAll(/^\s+(?:async )?def _([a-z_]+)/gm)]
+        .map((m) => m[1])
+        // `__init__` is dunder, not a member a spec name can collide with.
+        .filter((name) => name !== '_init__'),
+    ]);
+    const missing = [...defined].filter(
+      (name) => !PYTHON_CLIENT_MEMBERS.has(name),
+    );
+    expect(missing).toEqual([]);
   });
 });

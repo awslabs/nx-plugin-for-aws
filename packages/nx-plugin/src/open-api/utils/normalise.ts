@@ -172,13 +172,19 @@ const isBinaryContentMediaType = (contentMediaType: string): boolean =>
   );
 
 /**
- * Rewrite file string fields of a form body to `format: binary` so the
- * generator types them as `Blob`. FastAPI emits an identical schema
+ * Rewrite a binary string schema, and any nested within it, to `format: binary`
+ * so the generator types it as a file rather than text.
+ *
+ * A base64 `contentEncoding` or a textual/JSON `contentMediaType` keeps the
+ * schema a string, and `format: binary` is left untouched (already binary
+ * anywhere). Nesting is walked because a file is not always a bare property:
+ * `list[UploadFile]` puts it under `items` and `UploadFile | None` under
+ * `anyOf`, and an element left unmarked stayed a `str`, so it was sent as a text
+ * part the server rejected.
+ *
+ * Callers decide *where* this applies, since FastAPI emits the same schema
  * (`{type: string, contentMediaType: ...}`) for a multipart file field and for
- * `bytes` in a JSON body; only the enclosing media type distinguishes them, so
- * this promotion is scoped to form bodies. A base64 `contentEncoding` or a
- * textual/JSON `contentMediaType` keeps the field a string. `format: binary` is
- * left untouched (already binary anywhere).
+ * `bytes` in a JSON body — only the enclosing media type tells them apart.
  */
 const markBinaryStringSchema = (schema: unknown): void => {
   if (!schema || typeof schema !== 'object' || isRef(schema)) return;
@@ -201,9 +207,6 @@ const markBinaryStringSchema = (schema: unknown): void => {
     s.format = 'binary';
     return;
   }
-  // A file field is not always a bare property: `list[UploadFile]` puts it under
-  // `items`, and `UploadFile | None` under `anyOf`. Left unmarked the element
-  // stayed a `str`, so it was sent as a text part and the server rejected it.
   markBinaryStringSchema(s.items);
   for (const member of [
     ...(s.anyOf ?? []),
@@ -215,6 +218,7 @@ const markBinaryStringSchema = (schema: unknown): void => {
   }
 };
 
+/** A form body's binary string fields are file uploads. */
 const markFormBinaryFields = (schema: OpenAPIV3.SchemaObject): void => {
   Object.values(schema.properties ?? {}).forEach(markBinaryStringSchema);
 };
@@ -498,12 +502,6 @@ const rewriteCompositeSiblingProperties = (spec: Spec): Spec => {
 };
 
 /**
- * Rewrites an OpenAPI 3.1 multi-type schema (`type: ['integer', 'string']`)
- * into the equivalent `anyOf` of single-type schemas, dropping `null` from the
- * list and marking the schema nullable instead. This lets the parser render a
- * proper union rather than collapsing to the first declared type.
- */
-/**
  * Upper-cases wildcard response status codes (`2xx` to `2XX`).
  *
  * OpenAPI treats the range codes case-insensitively, but every consumer
@@ -535,6 +533,12 @@ const normaliseResponseCodeCase = (spec: Spec): void => {
   }
 };
 
+/**
+ * Rewrites an OpenAPI 3.1 multi-type schema (`type: ['integer', 'string']`)
+ * into the equivalent `anyOf` of single-type schemas, dropping `null` from the
+ * list and marking the schema nullable instead. This lets the parser render a
+ * proper union rather than collapsing to the first declared type.
+ */
 const rewriteMultiTypeToAnyOf = (spec: Spec): Spec => {
   const rewrite = (v: any): any => {
     if (
