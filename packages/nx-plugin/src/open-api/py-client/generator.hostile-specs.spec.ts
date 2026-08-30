@@ -671,4 +671,174 @@ describe('openApiPyClientGenerator - hostile specs', () => {
     expect(client).toContain('def get_b(');
     expect(client).toContain('self.my_tag');
   });
+
+  /**
+   * The names derived per operation share `types.py` with the classes declared for
+   * schemas, so a spec may already have taken one. Emitting it twice is invisible
+   * to both `ast.parse` and the import — Python simply keeps the last definition,
+   * which silently retypes every reference to the schema it replaced.
+   */
+  describe('a schema named like a generated class', () => {
+    const collidingSpec = (schemaName: string): Spec => ({
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/a': {
+          get: {
+            operationId: 'getThing',
+            tags: ['t'],
+            parameters: [
+              { name: 'q', in: 'query', schema: { type: 'string' } },
+            ],
+            responses: {
+              '200': {
+                description: 'OK',
+                content: { 'application/json': { schema: { type: 'string' } } },
+              },
+              '404': {
+                description: 'Not found',
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      properties: { msg: { type: 'string' } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        // Referenced so the schema is reachable and must keep its own shape.
+        '/b': {
+          get: {
+            operationId: 'useIt',
+            tags: ['t'],
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': {
+                    schema: { $ref: `#/components/schemas/${schemaName}` },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          [schemaName]: {
+            type: 'object',
+            required: ['mine'],
+            properties: { mine: { type: 'string' } },
+          },
+        },
+      },
+    });
+
+    it.each([
+      // The per-status error wrapper, the union alias over them, and the model
+      // built for a parameter position.
+      'GetThing404Error',
+      'GetThingError',
+      'GetThingRequestQueryParameters',
+    ])('keeps the schema %s and renames the generated class', async (name) => {
+      const { types } = await generateAndRead(
+        verifier,
+        tree,
+        collidingSpec(name),
+      );
+      // Only module-level declarations: a `class X(...)` or an `X = ...` alias.
+      const declared = [
+        ...types.matchAll(/^class (\w+)\(/gm),
+        ...types.matchAll(/^(\w+) = /gm),
+      ].map((match) => match[1]);
+      expect(new Set(declared).size).toBe(declared.length);
+      // The schema keeps the name it was given, with its own property.
+      expect(types).toMatch(
+        new RegExp(`^class ${name}\\(BaseModel\\):[\\s\\S]*?mine: str`, 'm'),
+      );
+    });
+  });
+
+  // A hoisted inline schema disambiguates against the declared names, but the
+  // suffixed result was not itself checked — so a spec declaring `OuterInner1`
+  // had it replaced by the schema hoisted out of `Outer.inner`.
+  it('does not take a declared name when disambiguating a hoisted schema', async () => {
+    const { types } = await generateAndRead(verifier, tree, {
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/a': {
+          get: {
+            operationId: 'getA',
+            tags: ['t'],
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/Outer' },
+                  },
+                },
+              },
+            },
+          },
+        },
+        '/b': {
+          get: {
+            operationId: 'getB',
+            tags: ['t'],
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/OuterInner1' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          Outer: {
+            type: 'object',
+            properties: {
+              inner: {
+                type: 'object',
+                properties: { hoisted: { type: 'string' } },
+              },
+            },
+          },
+          OuterInner: {
+            type: 'object',
+            required: ['declared0'],
+            properties: { declared0: { type: 'string' } },
+          },
+          OuterInner1: {
+            type: 'object',
+            required: ['declared1'],
+            properties: { declared1: { type: 'boolean' } },
+          },
+        },
+      },
+    });
+    // Each declared schema keeps its own property.
+    expect(types).toMatch(
+      /^class OuterInner\(BaseModel\):[\s\S]*?declared0: str/m,
+    );
+    expect(types).toMatch(
+      /^class OuterInner1\(BaseModel\):[\s\S]*?declared1: bool/m,
+    );
+    // The hoisted schema took the next free name, and is what `inner` refers to.
+    expect(types).toMatch(
+      /^class OuterInner2\(BaseModel\):[\s\S]*?hoisted: str/m,
+    );
+    expect(types).toContain('inner: OuterInner2 | None');
+  });
 });

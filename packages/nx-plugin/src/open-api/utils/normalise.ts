@@ -279,17 +279,21 @@ const createUniqueModelName = (
   // schema whose reference (`StorePhotos`) no longer resolves.
   const candidateName = nameParts.map(toClassName).join('');
 
-  const seenModelNameCount = seenModelNameCounts[candidateName];
-
   // We have not seen this name so we're free to use it
-  if (seenModelNameCount === undefined) {
+  if (seenModelNameCounts[candidateName] === undefined) {
     seenModelNameCounts[candidateName] = 1;
     return candidateName;
   }
 
-  // We have seen the name before, so we must disambiguate
-  seenModelNameCounts[candidateName]++;
-  return `${candidateName}${seenModelNameCount}`;
+  // We have seen the name before, so we must disambiguate. The suffixed name
+  // needs checking too: a declared schema may already be called `FooBar1`, and
+  // taking it silently replaced the user's schema with the hoisted one.
+  let suffixed = `${candidateName}${seenModelNameCounts[candidateName]++}`;
+  while (seenModelNameCounts[suffixed] !== undefined) {
+    suffixed = `${candidateName}${seenModelNameCounts[candidateName]++}`;
+  }
+  seenModelNameCounts[suffixed] = 1;
+  return suffixed;
 };
 
 const hoistInlineObjectSubSchemas = (

@@ -80,10 +80,14 @@ export const buildOpenApiCodeGenData = (inSpec: Spec): CodeGenData => {
   );
 
   // A model per operation request parameter position (query/path/body/...).
+  // Named against the schemas already declared, since a spec may declare one
+  // called `FooRequestQueryParameters` itself — emitting that name twice made the
+  // second definition win and silently retyped every reference to the first.
+  const takenModelNames = new Set(data.models.map((model) => model.name));
   data.models = [
     ...data.models,
     ...allOperations.flatMap((op) =>
-      buildRequestParameterModels(op, modelsByName),
+      buildRequestParameterModels(op, modelsByName, takenModelNames),
     ),
   ];
 
@@ -495,6 +499,22 @@ const annotatePythonClientType = (entry: Model | undefined): void => {
 };
 
 /**
+ * A name for a generated class that no schema and no other generated class has
+ * taken, recording it so later ones see it. The suffix keeps the name
+ * recognisable rather than renaming it to something positional, and is a digit
+ * rather than an underscore because class-name normalisation strips a trailing
+ * one — so `FooError_` collapsed back onto `FooError`.
+ */
+const uniqueGeneratedName = (candidate: string, taken: Set<string>): string => {
+  let name = candidate;
+  for (let suffix = 2; taken.has(name); suffix++) {
+    name = `${candidate}${suffix}`;
+  }
+  taken.add(name);
+  return name;
+};
+
+/**
  * Final pass over all models + operation payloads to re-derive python type
  * annotations after links/composites are resolved, and to add the
  * python-specific annotations the py-client templates consume:
@@ -513,6 +533,13 @@ const annotatePythonClientType = (entry: Model | undefined): void => {
 export const annotatePythonData = (data: CodeGenData): void => {
   const modelsByName = indexModelsByName(data.models);
   annotatePythonMemberNames(data);
+  // Every class `types.py` declares for a schema. The names derived per operation
+  // below share that module, so they are checked against it rather than assumed
+  // free — taking one emitted the same class twice and Python kept the last,
+  // silently retyping every reference to the schema it replaced.
+  const takenClassNames = new Set(
+    data.models.map((model) => toPythonClassName(model.name)),
+  );
   for (const model of data.models) {
     model.pythonClassName = toPythonClassName(model.name);
     model.pythonTypeTree = toPythonTypeTree(model);
@@ -597,14 +624,20 @@ export const annotatePythonData = (data: CodeGenData): void => {
       errorShape.exceptionClassName = `${opPascal}ApiError`;
       // Always a valid class name: templates emit `<name> = Never` for an
       // operation with no error responses, so the name is needed either way.
-      errorShape.unionTypeName = `${opPascal}Error`;
+      errorShape.unionTypeName = uniqueGeneratedName(
+        `${opPascal}Error`,
+        takenClassNames,
+      );
       errorShape.hasErrorEntries = errorShape.entries.length > 0;
       for (const entry of errorShape.entries) {
         const suffix =
           entry.code === 'default'
             ? 'Default'
             : String(entry.code).toUpperCase();
-        entry.className = `${opPascal}${suffix}Error`;
+        entry.className = uniqueGeneratedName(
+          `${opPascal}${suffix}Error`,
+          takenClassNames,
+        );
         entry.isExactCode = typeof entry.code === 'number';
         // Only collapse to a Literal for exact numeric codes — ranges like
         // 5XX expand to 100 codes, which produce a massive, unreadable
@@ -1001,6 +1034,7 @@ const getCollectionFormat = (
 const buildRequestParameterModels = (
   op: Operation,
   modelsByName: ModelsByName,
+  takenModelNames: Set<string>,
 ): Model[] => {
   if (!op.parameters || op.parameters.length === 0) {
     return [];
@@ -1039,7 +1073,10 @@ const buildRequestParameterModels = (
   op.explicitRequestBodyParameter = parametersByPosition['body']?.[0];
 
   return Object.entries(parametersByPosition).map(([position, parameters]) => {
-    const name = `${op.operationIdPascalCase}Request${upperFirst(position)}Parameters`;
+    const name = uniqueGeneratedName(
+      `${op.operationIdPascalCase}Request${upperFirst(position)}Parameters`,
+      takenModelNames,
+    );
     return createModel({
       description: op.description,
       export: 'interface',
