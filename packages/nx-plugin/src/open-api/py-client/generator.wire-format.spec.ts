@@ -137,6 +137,21 @@ const spec: Spec = {
         },
       },
     },
+    '/opaque': {
+      get: {
+        operationId: 'opaque',
+        parameters: [
+          { name: 'token', in: 'cookie', schema: { type: 'string' } },
+          { name: 'shape', in: 'cookie', schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': {
+            description: 'OK',
+            content: { 'application/json': { schema: { type: 'string' } } },
+          },
+        },
+      },
+    },
   },
 };
 
@@ -255,6 +270,53 @@ describe('openApiPyClientGenerator - request wire format', () => {
     const cookie = expectSingleRequest(res).headers.cookie ?? '';
     expect(cookie).toContain('flag=true');
     expect(cookie).toContain('at=2026-04-18T10:00:00');
+  });
+
+  // Servers do not URL-decode cookies, so anything escaped here arrives escaped.
+  // `=` is the padding of every base64 token — a JWT, a Fernet session, a CSRF
+  // token — and escaping it corrupted all of them.
+  it('leaves a cookie value that needs no escaping literal', async () => {
+    const res = await callGeneratedClient(
+      verifier,
+      'opaque',
+      { token: 'gAAAAABn1Q==', shape: '{a:1}|x^y`z/%41' },
+      { json: 'ok' },
+    );
+    const cookie = expectSingleRequest(res).headers.cookie ?? '';
+    expect(cookie).toContain('token=gAAAAABn1Q==');
+    // Every other RFC 6265 cookie-octet survives too, `%` included — escaping it
+    // double-encoded a value that already carried a percent sequence.
+    expect(cookie).toContain('shape={a:1}|x^y`z/%41');
+  });
+
+  // A `;` or `,` would otherwise be read as a delimiter, so those still escape.
+  it('escapes only the characters a cookie parser reads as structure', async () => {
+    const res = await callGeneratedClient(
+      verifier,
+      'opaque',
+      { token: 'a;b,c d', shape: 'q"r\\s' },
+      { json: 'ok' },
+    );
+    const cookie = expectSingleRequest(res).headers.cookie ?? '';
+    expect(cookie).toContain('token=a%3Bb%2Cc%20d');
+    expect(cookie).toContain('shape=q%22r%5Cs');
+  });
+
+  // httpx's `cookies=` goes through `http.cookiejar`, which skips a request that
+  // already carries a `Cookie` header — so a caller with their own cookie auth
+  // silently lost every operation cookie, including required ones.
+  it('sends operation cookies alongside a caller-supplied Cookie header', async () => {
+    const res = await callGeneratedClient(
+      verifier,
+      'cookied',
+      { flag: true },
+      { json: 'ok' },
+      [],
+      { headers: { Cookie: 'sso=abc' } },
+    );
+    const cookie = expectSingleRequest(res).headers.cookie ?? '';
+    expect(cookie).toContain('sso=abc');
+    expect(cookie).toContain('flag=true');
   });
 
   // A container in a cookie, header or path segment must expand per RFC 6570.

@@ -484,22 +484,46 @@ const PYTHON_KEYWORDS = new Set([
 ]);
 
 /**
- * Names the generated client's method bodies bind, or reference in a type
- * expression, in the same scope as an operation's keyword arguments.
+ * Names the emitted annotations refer to, so binding one shadows the type it
+ * names within the scope the annotation is evaluated in.
+ *
+ * For a keyword argument the local wins before a `TypeAdapter(list[...])`
+ * annotation is evaluated, and the call fails with a `TypeError`. For a pydantic
+ * field it is worse: the class body binds the name to the field default, and
+ * because `types.py` carries `from __future__ import annotations` every
+ * annotation on the class is evaluated in that namespace — so one field named
+ * `str` makes a sibling's `str | None` unresolvable and the module cannot be
+ * imported at all. `datetime` is the module the date annotations qualify.
+ */
+const PYTHON_TYPE_SCOPE_NAMES = new Set([
+  'bool',
+  'bytes',
+  'datetime',
+  'dict',
+  'float',
+  'int',
+  'list',
+  'set',
+  'str',
+  'tuple',
+  'type',
+]);
+
+/**
+ * Names the generated client's method bodies bind, in the same scope as an
+ * operation's keyword arguments.
  *
  * A kwarg sharing one of these is not merely shadowed — the method assigns its
  * own local over the caller's value, so internal state is serialised onto the
- * wire (a body field named `header_params` was sent as `{}`), or the local wins
- * before a `TypeAdapter(list[...])` annotation is evaluated and the call fails
- * with a `TypeError`. Escaped like a keyword, since the wire name is preserved
- * by the field alias either way.
+ * wire (a body field named `header_params` was sent as `{}`). Escaped like a
+ * keyword, since the wire name is preserved by the field alias either way.
+ *
+ * Locals of the private helpers are excluded — those take their own parameters
+ * and never share a scope with an operation's arguments — as are `body` and
+ * `response`, the generator's own names for the whole body and the response,
+ * which are assigned after the request is built.
  */
 const PYTHON_METHOD_SCOPE_NAMES = new Set([
-  // Locals an operation method itself assigns, in the same scope as its kwargs.
-  // Locals of the private helpers are excluded — those take their own
-  // parameters and never share a scope with an operation's arguments — as are
-  // `body` and `response`, which are the generator's own names for the whole
-  // body and the response and are assigned after the request is built.
   'cookie_params',
   'header_formats',
   'header_params',
@@ -508,17 +532,6 @@ const PYTHON_METHOD_SCOPE_NAMES = new Set([
   'query_formats',
   'query_params',
   'request_kwargs',
-  // Builtins the emitted annotations subscript. A kwarg named `list` makes
-  // `list[types.X]` subscript the caller's value.
-  'bool',
-  'bytes',
-  'dict',
-  'int',
-  'list',
-  'set',
-  'str',
-  'tuple',
-  'type',
 ]);
 
 /**
@@ -580,9 +593,11 @@ export const toPythonName = (
     isPydanticReserved ||
     PYTHON_KEYWORDS.has(rawStripped) ||
     PYTHON_KEYWORDS.has(nameSnakeCase) ||
-    // Only a method argument shares a scope with the client's own locals and
-    // with the builtins its annotations subscript; a model field is a class
-    // attribute and shadows neither.
+    // A method argument and a model field both share a scope with the names the
+    // emitted annotations refer to; only an argument also shares one with the
+    // client's own locals.
+    ((namedEntity === 'argument' || namedEntity === 'property') &&
+      PYTHON_TYPE_SCOPE_NAMES.has(nameSnakeCase)) ||
     (namedEntity === 'argument' && PYTHON_METHOD_SCOPE_NAMES.has(nameSnakeCase))
   ) {
     const nameSuffix = `_${nameSnakeCase}`;

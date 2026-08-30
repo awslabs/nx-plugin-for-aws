@@ -9,6 +9,7 @@ import {
   createPythonClientVerifier,
   createTree,
   generateAndRead,
+  requestJsonBody,
 } from './generator.utils.spec.js';
 
 describe('openApiPyClientGenerator - reserved keywords', () => {
@@ -380,5 +381,175 @@ describe('openApiPyClientGenerator - reserved keywords', () => {
     // A schema named `types` class-cases to `Types`, which cannot shadow the
     // lower-case `types` module the clients import, so it needs no escape.
     expect(types).toContain('class Types(BaseModel)');
+  });
+
+  /**
+   * `types.py` carries `from __future__ import annotations`, so pydantic
+   * evaluates every annotation on a class in that class's own namespace. A field
+   * named after a type the annotations refer to is bound there to its default,
+   * which makes the *sibling* annotations unresolvable — the module cannot be
+   * imported at all, and neither `ast.parse` nor ruff can see it.
+   */
+  it('escapes a property named after a type its own annotations refer to', async () => {
+    const shadowing = [
+      'str',
+      'int',
+      'bool',
+      'bytes',
+      'list',
+      'dict',
+      'datetime',
+    ];
+    const spec: Spec = {
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/m': {
+          post: {
+            operationId: 'postM',
+            tags: ['m'],
+            requestBody: {
+              required: true,
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/Shadow' },
+                },
+              },
+            },
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/Shadow' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          Shadow: {
+            type: 'object',
+            properties: {
+              ...Object.fromEntries(
+                shadowing.map((name) => [name, { type: 'string' }]),
+              ),
+              // Siblings whose annotations name each shadowed type, which is
+              // what turns the shadowing into an import failure.
+              a_text: { type: 'string' },
+              a_count: { type: 'integer' },
+              a_flag: { type: 'boolean' },
+              a_blob: { type: 'string', format: 'binary' },
+              a_when: { type: 'string', format: 'date-time' },
+              a_items: { type: 'array', items: { type: 'string' } },
+              a_map: {
+                type: 'object',
+                additionalProperties: { type: 'string' },
+              },
+            },
+          },
+        },
+      },
+    };
+    // `generateAndRead` imports and type checks the package, so a module that
+    // cannot be imported fails here rather than needing an assertion.
+    const { types } = await generateAndRead(verifier, tree, spec);
+    for (const name of shadowing) {
+      expect(types).toContain(`var_${name}: str | None = `);
+      // The wire name survives on the alias, so nothing changes on the wire.
+      expect(types).toContain(`alias="${name}"`);
+    }
+  });
+
+  // The escape has to keep the wire name, in both directions.
+  it('round-trips a shadowing property under its wire name', async () => {
+    const spec: Spec = {
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/echo': {
+          post: {
+            operationId: 'echo',
+            tags: ['e'],
+            requestBody: {
+              required: true,
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    required: ['str'],
+                    properties: {
+                      str: { type: 'string' },
+                      list: { type: 'array', items: { type: 'string' } },
+                    },
+                  },
+                },
+              },
+            },
+            responses: { '204': { description: 'No content' } },
+          },
+        },
+      },
+    };
+    await generateAndRead(verifier, tree, spec);
+    const res = await callGeneratedClient(
+      verifier,
+      'e.echo',
+      { var_str: 'hello', var_list: ['a'] },
+      { status: 204 },
+    );
+    expect(res.ok).toBe(true);
+    expect(requestJsonBody(res)).toEqual({ str: 'hello', list: ['a'] });
+  });
+
+  /**
+   * A wire name is data, and it reaches the emitted source as a Python string
+   * literal. A `"` or a newline in one closed the literal early and the module
+   * did not parse, so every such interpolation goes through `toPythonLiteral`.
+   */
+  it('escapes a quote or newline in a wire name', async () => {
+    const hostile = 'quo"te\nnext';
+    const spec: Spec = {
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/q': {
+          post: {
+            operationId: 'postQ',
+            tags: ['q'],
+            parameters: [
+              { name: hostile, in: 'query', schema: { type: 'string' } },
+            ],
+            requestBody: {
+              required: true,
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      [hostile]: { type: 'string' },
+                      ok: { type: 'string' },
+                    },
+                  },
+                },
+              },
+            },
+            responses: { '204': { description: 'No content' } },
+          },
+        },
+      },
+    };
+    // Importing and type checking the package is what proves it parses.
+    const { types, client } = await generateAndRead(verifier, tree, spec);
+    for (const module of [types, client]) {
+      // The raw name never appears unescaped inside a literal.
+      expect(module).not.toContain('"quo"te');
+    }
+    // The escaped form carries the real wire name, newline included.
+    expect(types).toContain('alias=');
+    expect(client).toContain('\\n');
   });
 });

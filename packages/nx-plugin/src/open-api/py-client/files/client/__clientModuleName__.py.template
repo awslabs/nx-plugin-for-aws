@@ -193,6 +193,9 @@ const streamChunkParseExpr = (resp, lineVar) => {
  * arbitrary text, so it goes through the same escaping as any other literal
  * (backslash first) with the surrounding quotes stripped.
  */
+/** A wire name as a Python string literal, so a quote in it cannot end the string. */
+const pyStr = (value) => toPythonLiteral(String(value));
+
 const pyDocstring = (text) =>
   toPythonLiteral(String(text ?? '').replace(/\r?\n/g, ' ')).slice(1, -1);
 
@@ -495,6 +498,11 @@ class <%- clientClassName %>:
 
     _COLLECTION_DELIMITERS = {"csv": ",", "ssv": " ", "pipes": "|"}
 
+    #: Characters left literal in a cookie value: every RFC 6265 cookie-octet
+    #: except the `,` and `;` this client joins members on. A `=` stays literal
+    #: too — only the first one separates a cookie's name from its value.
+    _COOKIE_SAFE = "!#$%&'()*+-./:<>?@[]^_`{|}~="
+
     def _scalar(self, value: Any) -> str:
         # The wire form of a single parameter value: JSON spellings for bools,
         # ISO-8601 for dates, and the model's own wire shape for anything else.
@@ -555,6 +563,7 @@ class <%- clientClassName %>:
         self,
         header_params: dict[str, Any] | None = None,
         collection_formats: dict[str, str] | None = None,
+        cookie_params: dict[str, Any] | None = None,
     ) -> list[tuple[str, str]]:
         out: list[tuple[str, str]] = []
         for key, value in (header_params or {}).items():
@@ -578,7 +587,45 @@ class <%- clientClassName %>:
             for key, value in self._config.headers.items()
             if key.lower() not in operation_headers
         )
+        # The operation's cookies are merged into one `Cookie` header alongside
+        # every other source. Passing them to httpx's `cookies=` instead would
+        # drop them outright whenever a `Cookie` header is present, since
+        # http.cookiejar skips a request that already carries one — and setting
+        # the header here would in turn shadow the caller's own jar and header,
+        # which httpx resolves in favour of the more specific value.
+        cookies = self._cookies(cookie_params or {})
+        if cookies:
+            pairs = [
+                *(
+                    value
+                    for source in (self._client.headers, dict(out))
+                    for key, value in source.items()
+                    if key.lower() == "cookie"
+                ),
+                *(f"{key}={value}" for key, value in self._client.cookies.items()),
+                *(f"{key}={value}" for key, value in cookies.items()),
+            ]
+            out = [(key, value) for key, value in out if key.lower() != "cookie"]
+            out.append(("Cookie", "; ".join(pairs)))
         return out
+
+    def _default_content_type(
+        self, header_params: dict[str, Any], media_type: str
+    ) -> None:
+        # The media type the specification declares, applied unless the operation
+        # takes a Content-Type of its own and the caller supplied one. Header
+        # names are case-insensitive, and a declared header the caller omitted is
+        # present holding `None` — neither counts as the caller setting it.
+        if any(
+            key.lower() == "content-type" and value is not None
+            for key, value in header_params.items()
+        ):
+            return
+        for key in list(header_params):
+            if key.lower() == "content-type":
+                header_params[key] = media_type
+                return
+        header_params["Content-Type"] = media_type
 
     def _cookies(self, cookie_params: dict[str, Any]) -> dict[str, str]:
         out: dict[str, str] = {}
@@ -604,9 +651,10 @@ class <%- clientClassName %>:
         return out
 
     def _cookie_value(self, value: Any) -> str:
-        # Only the characters a cookie parser treats as structure are escaped,
-        # so a timestamp keeps its colons rather than arriving as %3A.
-        return quote(self._scalar(value), safe="/:?@!$&'()*+[]~")
+        # Only the characters a cookie parser treats as structure are escaped, so
+        # a timestamp keeps its colons and a base64 token its `=` padding. Servers
+        # do not URL-decode cookies, so anything escaped here arrives escaped.
+        return quote(self._scalar(value), safe=self._COOKIE_SAFE)
 
     def _dump(self, value: Any) -> Any:
         if value is None:
@@ -752,8 +800,18 @@ class <%- clientClassName %>:
   const styledPathInputs = pathInputs.filter(k => k.model.pathStyle);
   const reservedInputs = queryInputs.filter(k => k.model.allowReserved);
   const partContentTypes = (op.parametersBody && op.parametersBody.partContentTypes) || undefined;
-  // Whether the operation writes a Content-Type into `header_params`.
-  const sendsContentType = !!bodyMediaType && !bodyIsMultipart;
+  // Whether the operation writes a Content-Type into `header_params`, which is
+  // also what declares it. A whole binary body is sent as raw content even under
+  // a form media type, so it sets the header httpx would otherwise derive from
+  // the multipart body it is not building.
+  const sendsContentType = !!bodyMediaType && (bodyIsBinary || !bodyIsMultipart);
+  // `_headers` also takes the cookies, since it merges them into `Cookie`.
+  // Keyword form, so each argument is independent of the others being present.
+  const headerArgs = [
+    headerInputs.length > 0 || sendsContentType ? 'header_params' : '',
+    headerCollectionInputs.length > 0 ? 'collection_formats=header_formats' : '',
+    cookieInputs.length > 0 ? 'cookie_params=cookie_params' : '',
+  ].filter(Boolean).join(', ');
   const hasTag = (op.tags && op.tags.length > 0);
   const methodPrefix = hasTag ? '_' : '';
 _%>
@@ -769,47 +827,47 @@ _%>
         )
 <%_ } _%>
 <%_ if (pathInputs.length > 0) { _%>
-        path_params: dict[str, Any] = {<%_ pathInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %>"<%- k.source.wireName %>": <%- k.pythonName %><%_ }); _%>}
+        path_params: dict[str, Any] = {<%_ pathInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %><%- pyStr(k.source.wireName) %>: <%- k.pythonName %><%_ }); _%>}
 <%_ } _%>
 <%_ if (queryInputs.length > 0) { _%>
-        query_params: dict[str, Any] = {<%_ queryInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %>"<%- k.source.wireName %>": <%- k.pythonName %><%_ }); _%>}
+        query_params: dict[str, Any] = {<%_ queryInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %><%- pyStr(k.source.wireName) %>: <%- k.pythonName %><%_ }); _%>}
 <%_ } _%>
 <%_ if (headerInputs.length > 0 || sendsContentType) { _%>
-        header_params: dict[str, Any] = {<%_ headerInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %>"<%- k.source.wireName %>": <%- k.pythonName %><%_ }); _%>}
+        header_params: dict[str, Any] = {<%_ headerInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %><%- pyStr(k.source.wireName) %>: <%- k.pythonName %><%_ }); _%>}
 <%_ } _%>
 <%_ if (cookieInputs.length > 0) { _%>
-        cookie_params: dict[str, Any] = {<%_ cookieInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %>"<%- k.source.wireName %>": <%- k.pythonName %><%_ }); _%>}
+        cookie_params: dict[str, Any] = {<%_ cookieInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %><%- pyStr(k.source.wireName) %>: <%- k.pythonName %><%_ }); _%>}
 <%_ } _%>
 <%_ /* A content-based parameter (declared with `content` rather than
        `schema`) is serialised to its media type — JSON — as a single value. */ _%>
 <%_ contentJsonInputs.forEach((k) => {
   const params = k.source.kind === 'query' ? 'query_params' : k.source.kind === 'header' ? 'header_params' : 'cookie_params'; _%>
-        if <%- params %>["<%- k.source.wireName %>"] is not None:
-            <%- params %>["<%- k.source.wireName %>"] = json.dumps(
-                self._dump(<%- params %>["<%- k.source.wireName %>"]), separators=(",", ":")
+        if <%- params %>[<%- pyStr(k.source.wireName) %>] is not None:
+            <%- params %>[<%- pyStr(k.source.wireName) %>] = json.dumps(
+                self._dump(<%- params %>[<%- pyStr(k.source.wireName) %>]), separators=(",", ":")
             )
 <%_ }); _%>
 <%_ /* Query and header formats are kept apart: a query and a header parameter
        may share a name while declaring different collection formats. */ _%>
 <%_ if (queryCollectionInputs.length > 0) { _%>
-        query_formats: dict[str, str] | None = {<%_ queryCollectionInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %>"<%- k.source.wireName %>": "<%- k.source.collectionFormat %>"<%_ }); _%>}
+        query_formats: dict[str, str] | None = {<%_ queryCollectionInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %><%- pyStr(k.source.wireName) %>: <%- pyStr(k.source.collectionFormat) %><%_ }); _%>}
 <%_ } _%>
 <%_ if (headerCollectionInputs.length > 0) { _%>
-        header_formats: dict[str, str] | None = {<%_ headerCollectionInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %>"<%- k.source.wireName %>": "<%- k.source.collectionFormat %>"<%_ }); _%>}
+        header_formats: dict[str, str] | None = {<%_ headerCollectionInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %><%- pyStr(k.source.wireName) %>: <%- pyStr(k.source.collectionFormat) %><%_ }); _%>}
 <%_ } _%>
 <%_ if (shape.bodyFromFields) { _%>
         _body_fields: dict[str, Any] = {}
 <%_ bodyFieldInputs.forEach((k) => {
   if (k.isRequired) { _%>
-        _body_fields["<%- k.source.fieldName %>"] = <%- k.pythonName %>
+        _body_fields[<%- pyStr(k.source.fieldName) %>] = <%- k.pythonName %>
 <%_ } else { _%>
         if <%- k.pythonName %> is not None:
-            _body_fields["<%- k.source.fieldName %>"] = <%- k.pythonName %>
+            _body_fields[<%- pyStr(k.source.fieldName) %>] = <%- k.pythonName %>
 <%_ } }); _%>
 <%_ if (shape.bodyFromFields.mediaType === 'multipart/form-data') { _%>
         # httpx populates the Content-Type (and boundary) automatically when
         # `files=` or `data=` is supplied; binary values stream as file parts.
-        _files = self._multipart(_body_fields<%_ if (partContentTypes) { _%>, {<%_ Object.entries(partContentTypes).forEach(([prop, ct], i) => { _%><%- i > 0 ? ', ' : '' %>"<%- prop %>": "<%- ct %>"<%_ }); _%>}<%_ } _%>)
+        _files = self._multipart(_body_fields<%_ if (partContentTypes) { _%>, {<%_ Object.entries(partContentTypes).forEach(([prop, ct], i) => { _%><%- i > 0 ? ', ' : '' %><%- pyStr(prop) %>: <%- pyStr(ct) %><%_ }); _%>}<%_ } _%>)
         request_kwargs: dict[str, Any] = {"files": _files}
 <%_ } else if (shape.bodyFromFields.mediaType === 'application/x-www-form-urlencoded') { _%>
         # httpx URL-encodes `data=` as form key=value pairs (arrays as
@@ -822,7 +880,7 @@ _%>
         request_kwargs: dict[str, Any] = {"json": body}
 <%_ if (shape.bodyFromFields.mediaType) { _%>
         if not self._config.omit_content_type_header:
-            header_params.setdefault("Content-Type", "<%- shape.bodyFromFields.mediaType %>")
+            self._default_content_type(header_params, "<%- shape.bodyFromFields.mediaType %>")
 <%_ } _%>
 <%_ } _%>
 <%_ } else if (wholeBodyInputs.length > 0) { _%>
@@ -831,7 +889,7 @@ _%>
         request_kwargs: dict[str, Any] = {"content": body}
 <%_ if (bodyMediaType) { _%>
         if body is not None and not self._config.omit_content_type_header:
-            header_params.setdefault("Content-Type", "<%- bodyMediaType %>")
+            self._default_content_type(header_params, "<%- bodyMediaType %>")
 <%_ } _%>
 <%_ } else if (bodyIsMultipart) { _%>
         body = <%- wholeBodyInputs[0].pythonName %>
@@ -855,14 +913,14 @@ _%>
         body = <%- wholeBodyInputs[0].pythonName %>
         request_kwargs: dict[str, Any] = {"content": None if body is None else str(body)}
         if body is not None and not self._config.omit_content_type_header:
-            header_params.setdefault("Content-Type", "<%- bodyMediaType %>")
+            self._default_content_type(header_params, "<%- bodyMediaType %>")
 <%_ } else if (bodyIsScalarNonJson) { _%>
         # A scalar under a non-JSON media type is its own encoding, so it is
         # sent as-is rather than JSON-encoded.
         body = <%- wholeBodyInputs[0].pythonName %>
         request_kwargs: dict[str, Any] = {"content": None if body is None else str(body)}
         if body is not None and not self._config.omit_content_type_header:
-            header_params.setdefault("Content-Type", "<%- bodyMediaType %>")
+            self._default_content_type(header_params, "<%- bodyMediaType %>")
 <%_ } else if (wholeBodyInputs[0].isRequired && wholeBodyInputs[0].isNullable) { _%>
         # The body is required and may be null, so `None` is the JSON value
         # `null` rather than an absent body — httpx omits `json=None` entirely,
@@ -872,13 +930,13 @@ _%>
             {"content": b"null"} if body is None else {"json": body}
         )
         if not self._config.omit_content_type_header:
-            header_params.setdefault("Content-Type", "<%- bodyMediaType || 'application/json' %>")
+            self._default_content_type(header_params, "<%- bodyMediaType || 'application/json' %>")
 <%_ } else { _%>
         body = self._dump(<%- wholeBodyInputs[0].pythonName %>)
         request_kwargs: dict[str, Any] = {"json": body}
 <%_ if (bodyMediaType) { _%>
         if body is not None and not self._config.omit_content_type_header:
-            header_params.setdefault("Content-Type", "<%- bodyMediaType %>")
+            self._default_content_type(header_params, "<%- bodyMediaType %>")
 <%_ } _%>
 <%_ } _%>
 <%_ } else { _%>
@@ -888,7 +946,7 @@ _%>
 <%_ /* allowReserved query parameters keep reserved characters literal, so the
        query string is built manually and appended to the URL — httpx would
        percent-encode values passed via `params=`. */ _%>
-        _qs = self._query_string(<%- queryInputs.length > 0 ? "query_params" : "{}" %>, <%- queryCollectionInputs.length > 0 ? "query_formats" : "None" %>, {<%_ reservedInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %>"<%- k.source.wireName %>"<%_ }); _%>})
+        _qs = self._query_string(<%- queryInputs.length > 0 ? "query_params" : "{}" %>, <%- queryCollectionInputs.length > 0 ? "query_formats" : "None" %>, {<%_ reservedInputs.forEach((k, i) => { _%><%- i > 0 ? ', ' : '' %><%- pyStr(k.source.wireName) %><%_ }); _%>})
         _request_url = <%- urlExpr(op, pathInputs, styledPathInputs) %> + ("?" + _qs if _qs else "")
 <%_ } else { _%>
         _request_url = <%- urlExpr(op, pathInputs, styledPathInputs) %>
@@ -907,10 +965,7 @@ _%>
             method="<%- op.method %>",
             url=_request_url,
 <%_ } _%>
-            headers=self._headers(<%- headerInputs.length > 0 || sendsContentType ? `header_params${headerCollectionInputs.length > 0 ? ", header_formats" : ""}` : "" %>),
-<%_ if (cookieInputs.length > 0) { _%>
-            cookies=self._cookies(cookie_params),
-<%_ } _%>
+            headers=self._headers(<%- headerArgs %>),
             **request_kwargs,
         ) as response:
 <%_ op.responses.forEach((resp) => {
@@ -965,10 +1020,7 @@ _%>
             method="<%- op.method %>",
             url=_request_url,
 <%_ } _%>
-            headers=self._headers(<%- headerInputs.length > 0 || sendsContentType ? `header_params${headerCollectionInputs.length > 0 ? ", header_formats" : ""}` : "" %>),
-<%_ if (cookieInputs.length > 0) { _%>
-            cookies=self._cookies(cookie_params),
-<%_ } _%>
+            headers=self._headers(<%- headerArgs %>),
             **request_kwargs,
         )
 <%_ op.responses.forEach((resp) => {

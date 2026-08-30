@@ -409,6 +409,7 @@ export const PYTHON_CLIENT_MEMBERS = new Set([
   // *other* operation that calls it fails.
   'as_dict',
   'cookie_value',
+  'default_content_type',
   'error',
   'error_payload',
   'is_file_part',

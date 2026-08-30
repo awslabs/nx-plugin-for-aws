@@ -241,4 +241,100 @@ describe('openApiPyClientGenerator - content types', () => {
     const body = requestBody(res) ?? '';
     expect(body).not.toMatch(/^\s*\{/); // not JSON
   });
+
+  /**
+   * An operation may declare `Content-Type` as a parameter of its own, letting a
+   * caller override the media type per call. The declared default has to survive
+   * the caller omitting it, and the caller's value has to win when supplied —
+   * without the two ever going out together.
+   */
+  describe('an operation declaring its own Content-Type header', () => {
+    const ctParamSpec = (headerName: string): Spec => ({
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/send': {
+          post: {
+            operationId: 'send',
+            parameters: [
+              {
+                name: headerName,
+                in: 'header',
+                required: false,
+                schema: { type: 'string' },
+              },
+            ],
+            requestBody: {
+              required: true,
+              content: {
+                'application/xml': { schema: { type: 'string' } },
+              },
+            },
+            responses: { '204': { description: 'No content' } },
+          },
+        },
+      },
+    });
+
+    // The parameter is in `header_params` holding `None`, so a plain
+    // `setdefault` treated it as already set and the request went out with no
+    // Content-Type at all — losing the media type the specification declares.
+    it('falls back to the declared media type when the caller omits it', async () => {
+      await generateAndRead(verifier, tree, ctParamSpec('Content-Type'));
+      const res = await callGeneratedClient(
+        verifier,
+        'send',
+        { body: '<a/>' },
+        {
+          status: 204,
+        },
+      );
+      expect(res.ok).toBe(true);
+      expect(requestHeader(res, 'content-type')).toBe('application/xml');
+    });
+
+    it('uses the caller value when supplied', async () => {
+      await generateAndRead(verifier, tree, ctParamSpec('Content-Type'));
+      const res = await callGeneratedClient(
+        verifier,
+        'send',
+        { body: '<a/>', content_type: 'text/xml' },
+        { status: 204 },
+      );
+      expect(res.ok).toBe(true);
+      expect(requestHeader(res, 'content-type')).toBe('text/xml');
+    });
+
+    // Header names are case-insensitive, so a differently-cased parameter is the
+    // same header. Matching it exactly sent both, which RFC 9110 disallows and
+    // which leaves the media type up to whichever value a server reads first.
+    // The recording mock keys headers case-insensitively and so cannot see two,
+    // making the caller's value winning the observable half of the assertion.
+    it('uses the caller value from a differently-cased parameter', async () => {
+      await generateAndRead(verifier, tree, ctParamSpec('content-type'));
+      const res = await callGeneratedClient(
+        verifier,
+        'send',
+        { body: '<a/>', content_type: 'application/vnd.x+xml' },
+        { status: 204 },
+      );
+      expect(res.ok).toBe(true);
+      expect(requestHeader(res, 'content-type')).toBe('application/vnd.x+xml');
+    });
+
+    // The duplicate itself is invisible to the recording mock, so it is pinned on
+    // the emitted source: the default has to go through the case-insensitive
+    // helper rather than a `setdefault` keyed on one exact spelling.
+    it('resolves the default through a case-insensitive helper', async () => {
+      const { client } = await generateAndRead(
+        verifier,
+        tree,
+        ctParamSpec('content-type'),
+      );
+      expect(client).toContain(
+        '_default_content_type(header_params, "application/xml")',
+      );
+      expect(client).not.toContain('header_params.setdefault("Content-Type"');
+    });
+  });
 });

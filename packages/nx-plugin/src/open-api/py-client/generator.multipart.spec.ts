@@ -440,4 +440,40 @@ describe('openApiPyClientGenerator - multipart bodies', () => {
       '{"content": b"null"} if body is None else {"json": body}',
     );
   });
+
+  // A whole binary body is sent as raw content even under a form media type, so
+  // it sets the Content-Type httpx would otherwise derive from the multipart body
+  // it is not building. The flag that writes that header is also what declares
+  // `header_params`, and excluding every multipart body left the assignment out
+  // while the write stayed — a `NameError` on every call, which `ast.parse`
+  // cannot see and only the type check caught.
+  it('declares header_params for a binary body under a form media type', async () => {
+    const { client } = await generateAndRead(verifier, tree, {
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/upload': {
+          post: {
+            operationId: 'upload',
+            tags: ['files'],
+            requestBody: {
+              required: true,
+              content: {
+                'multipart/form-data': {
+                  schema: { type: 'string', format: 'binary' },
+                },
+              },
+            },
+            responses: { '204': { description: 'No content' } },
+          },
+        },
+      },
+    });
+    // The declaration precedes the write, and the dict reaches `_headers`.
+    expect(client).toContain('header_params: dict[str, Any] = {}');
+    expect(client).toContain(
+      '_default_content_type(header_params, "multipart/form-data")',
+    );
+    expect(client).toContain('headers=self._headers(header_params)');
+  });
 });

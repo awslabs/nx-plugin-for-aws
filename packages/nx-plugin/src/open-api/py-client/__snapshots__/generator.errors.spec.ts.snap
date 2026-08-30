@@ -121,6 +121,11 @@ class ErrApi:
 
     _COLLECTION_DELIMITERS = {"csv": ",", "ssv": " ", "pipes": "|"}
 
+    #: Characters left literal in a cookie value: every RFC 6265 cookie-octet
+    #: except the \`,\` and \`;\` this client joins members on. A \`=\` stays literal
+    #: too — only the first one separates a cookie's name from its value.
+    _COOKIE_SAFE = "!#$%&'()*+-./:<>?@[]^_\`{|}~="
+
     def _scalar(self, value: Any) -> str:
         # The wire form of a single parameter value: JSON spellings for bools,
         # ISO-8601 for dates, and the model's own wire shape for anything else.
@@ -185,6 +190,7 @@ class ErrApi:
         self,
         header_params: dict[str, Any] | None = None,
         collection_formats: dict[str, str] | None = None,
+        cookie_params: dict[str, Any] | None = None,
     ) -> list[tuple[str, str]]:
         out: list[tuple[str, str]] = []
         for key, value in (header_params or {}).items():
@@ -208,7 +214,45 @@ class ErrApi:
             for key, value in self._config.headers.items()
             if key.lower() not in operation_headers
         )
+        # The operation's cookies are merged into one \`Cookie\` header alongside
+        # every other source. Passing them to httpx's \`cookies=\` instead would
+        # drop them outright whenever a \`Cookie\` header is present, since
+        # http.cookiejar skips a request that already carries one — and setting
+        # the header here would in turn shadow the caller's own jar and header,
+        # which httpx resolves in favour of the more specific value.
+        cookies = self._cookies(cookie_params or {})
+        if cookies:
+            pairs = [
+                *(
+                    value
+                    for source in (self._client.headers, dict(out))
+                    for key, value in source.items()
+                    if key.lower() == "cookie"
+                ),
+                *(f"{key}={value}" for key, value in self._client.cookies.items()),
+                *(f"{key}={value}" for key, value in cookies.items()),
+            ]
+            out = [(key, value) for key, value in out if key.lower() != "cookie"]
+            out.append(("Cookie", "; ".join(pairs)))
         return out
+
+    def _default_content_type(
+        self, header_params: dict[str, Any], media_type: str
+    ) -> None:
+        # The media type the specification declares, applied unless the operation
+        # takes a Content-Type of its own and the caller supplied one. Header
+        # names are case-insensitive, and a declared header the caller omitted is
+        # present holding \`None\` — neither counts as the caller setting it.
+        if any(
+            key.lower() == "content-type" and value is not None
+            for key, value in header_params.items()
+        ):
+            return
+        for key in list(header_params):
+            if key.lower() == "content-type":
+                header_params[key] = media_type
+                return
+        header_params["Content-Type"] = media_type
 
     def _cookies(self, cookie_params: dict[str, Any]) -> dict[str, str]:
         out: dict[str, str] = {}
@@ -234,9 +278,10 @@ class ErrApi:
         return out
 
     def _cookie_value(self, value: Any) -> str:
-        # Only the characters a cookie parser treats as structure are escaped,
-        # so a timestamp keeps its colons rather than arriving as %3A.
-        return quote(self._scalar(value), safe="/:?@!$&'()*+[]~")
+        # Only the characters a cookie parser treats as structure are escaped, so
+        # a timestamp keeps its colons and a base64 token its \`=\` padding. Servers
+        # do not URL-decode cookies, so anything escaped here arrives escaped.
+        return quote(self._scalar(value), safe=self._COOKIE_SAFE)
 
     def _dump(self, value: Any) -> Any:
         if value is None:

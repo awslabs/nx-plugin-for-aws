@@ -178,6 +178,11 @@ class AsyncSwaggerPetstoreOpenAPI30:
 
     _COLLECTION_DELIMITERS = {"csv": ",", "ssv": " ", "pipes": "|"}
 
+    #: Characters left literal in a cookie value: every RFC 6265 cookie-octet
+    #: except the \`,\` and \`;\` this client joins members on. A \`=\` stays literal
+    #: too — only the first one separates a cookie's name from its value.
+    _COOKIE_SAFE = "!#$%&'()*+-./:<>?@[]^_\`{|}~="
+
     def _scalar(self, value: Any) -> str:
         # The wire form of a single parameter value: JSON spellings for bools,
         # ISO-8601 for dates, and the model's own wire shape for anything else.
@@ -242,6 +247,7 @@ class AsyncSwaggerPetstoreOpenAPI30:
         self,
         header_params: dict[str, Any] | None = None,
         collection_formats: dict[str, str] | None = None,
+        cookie_params: dict[str, Any] | None = None,
     ) -> list[tuple[str, str]]:
         out: list[tuple[str, str]] = []
         for key, value in (header_params or {}).items():
@@ -265,7 +271,45 @@ class AsyncSwaggerPetstoreOpenAPI30:
             for key, value in self._config.headers.items()
             if key.lower() not in operation_headers
         )
+        # The operation's cookies are merged into one \`Cookie\` header alongside
+        # every other source. Passing them to httpx's \`cookies=\` instead would
+        # drop them outright whenever a \`Cookie\` header is present, since
+        # http.cookiejar skips a request that already carries one — and setting
+        # the header here would in turn shadow the caller's own jar and header,
+        # which httpx resolves in favour of the more specific value.
+        cookies = self._cookies(cookie_params or {})
+        if cookies:
+            pairs = [
+                *(
+                    value
+                    for source in (self._client.headers, dict(out))
+                    for key, value in source.items()
+                    if key.lower() == "cookie"
+                ),
+                *(f"{key}={value}" for key, value in self._client.cookies.items()),
+                *(f"{key}={value}" for key, value in cookies.items()),
+            ]
+            out = [(key, value) for key, value in out if key.lower() != "cookie"]
+            out.append(("Cookie", "; ".join(pairs)))
         return out
+
+    def _default_content_type(
+        self, header_params: dict[str, Any], media_type: str
+    ) -> None:
+        # The media type the specification declares, applied unless the operation
+        # takes a Content-Type of its own and the caller supplied one. Header
+        # names are case-insensitive, and a declared header the caller omitted is
+        # present holding \`None\` — neither counts as the caller setting it.
+        if any(
+            key.lower() == "content-type" and value is not None
+            for key, value in header_params.items()
+        ):
+            return
+        for key in list(header_params):
+            if key.lower() == "content-type":
+                header_params[key] = media_type
+                return
+        header_params["Content-Type"] = media_type
 
     def _cookies(self, cookie_params: dict[str, Any]) -> dict[str, str]:
         out: dict[str, str] = {}
@@ -291,9 +335,10 @@ class AsyncSwaggerPetstoreOpenAPI30:
         return out
 
     def _cookie_value(self, value: Any) -> str:
-        # Only the characters a cookie parser treats as structure are escaped,
-        # so a timestamp keeps its colons rather than arriving as %3A.
-        return quote(self._scalar(value), safe="/:?@!$&'()*+[]~")
+        # Only the characters a cookie parser treats as structure are escaped, so
+        # a timestamp keeps its colons and a base64 token its \`=\` padding. Servers
+        # do not URL-decode cookies, so anything escaped here arrives escaped.
+        return quote(self._scalar(value), safe=self._COOKIE_SAFE)
 
     def _dump(self, value: Any) -> Any:
         if value is None:
@@ -364,7 +409,7 @@ class AsyncSwaggerPetstoreOpenAPI30:
         )
         request_kwargs: dict[str, Any] = {"json": body}
         if not self._config.omit_content_type_header:
-            header_params.setdefault("Content-Type", "application/json")
+            self._default_content_type(header_params, "application/json")
         _request_url = self._url("/pet", {})
         response = await self._client.request(
             "POST",
@@ -425,7 +470,7 @@ class AsyncSwaggerPetstoreOpenAPI30:
         )
         request_kwargs: dict[str, Any] = {"json": body}
         if not self._config.omit_content_type_header:
-            header_params.setdefault("Content-Type", "application/json")
+            self._default_content_type(header_params, "application/json")
         _request_url = self._url("/user", {})
         response = await self._client.request(
             "POST",
@@ -449,7 +494,7 @@ class AsyncSwaggerPetstoreOpenAPI30:
         body = self._dump(body)
         request_kwargs: dict[str, Any] = {"json": body}
         if body is not None and not self._config.omit_content_type_header:
-            header_params.setdefault("Content-Type", "application/json")
+            self._default_content_type(header_params, "application/json")
         _request_url = self._url("/user/createWithList", {})
         response = await self._client.request(
             "POST",
@@ -516,7 +561,7 @@ class AsyncSwaggerPetstoreOpenAPI30:
         response = await self._client.request(
             "DELETE",
             _request_url,
-            headers=self._headers(header_params, header_formats),
+            headers=self._headers(header_params, collection_formats=header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -824,7 +869,7 @@ class AsyncSwaggerPetstoreOpenAPI30:
         )
         request_kwargs: dict[str, Any] = {"json": body}
         if not self._config.omit_content_type_header:
-            header_params.setdefault("Content-Type", "application/json")
+            self._default_content_type(header_params, "application/json")
         _request_url = self._url("/store/order", {})
         response = await self._client.request(
             "POST",
@@ -877,7 +922,7 @@ class AsyncSwaggerPetstoreOpenAPI30:
         )
         request_kwargs: dict[str, Any] = {"json": body}
         if not self._config.omit_content_type_header:
-            header_params.setdefault("Content-Type", "application/json")
+            self._default_content_type(header_params, "application/json")
         _request_url = self._url("/pet", {})
         response = await self._client.request(
             "PUT",
@@ -953,7 +998,7 @@ class AsyncSwaggerPetstoreOpenAPI30:
         body = self._dump(body)
         request_kwargs: dict[str, Any] = {"json": body}
         if body is not None and not self._config.omit_content_type_header:
-            header_params.setdefault("Content-Type", "application/json")
+            self._default_content_type(header_params, "application/json")
         _request_url = self._url("/user/{username}", path_params)
         response = await self._client.request(
             "PUT",
@@ -993,7 +1038,7 @@ class AsyncSwaggerPetstoreOpenAPI30:
         body = body
         request_kwargs: dict[str, Any] = {"content": body}
         if body is not None and not self._config.omit_content_type_header:
-            header_params.setdefault("Content-Type", "application/octet-stream")
+            self._default_content_type(header_params, "application/octet-stream")
         _request_url = self._url("/pet/{petId}/uploadImage", path_params)
         response = await self._client.request(
             "POST",
@@ -1462,6 +1507,11 @@ class SwaggerPetstoreOpenAPI30:
 
     _COLLECTION_DELIMITERS = {"csv": ",", "ssv": " ", "pipes": "|"}
 
+    #: Characters left literal in a cookie value: every RFC 6265 cookie-octet
+    #: except the \`,\` and \`;\` this client joins members on. A \`=\` stays literal
+    #: too — only the first one separates a cookie's name from its value.
+    _COOKIE_SAFE = "!#$%&'()*+-./:<>?@[]^_\`{|}~="
+
     def _scalar(self, value: Any) -> str:
         # The wire form of a single parameter value: JSON spellings for bools,
         # ISO-8601 for dates, and the model's own wire shape for anything else.
@@ -1526,6 +1576,7 @@ class SwaggerPetstoreOpenAPI30:
         self,
         header_params: dict[str, Any] | None = None,
         collection_formats: dict[str, str] | None = None,
+        cookie_params: dict[str, Any] | None = None,
     ) -> list[tuple[str, str]]:
         out: list[tuple[str, str]] = []
         for key, value in (header_params or {}).items():
@@ -1549,7 +1600,45 @@ class SwaggerPetstoreOpenAPI30:
             for key, value in self._config.headers.items()
             if key.lower() not in operation_headers
         )
+        # The operation's cookies are merged into one \`Cookie\` header alongside
+        # every other source. Passing them to httpx's \`cookies=\` instead would
+        # drop them outright whenever a \`Cookie\` header is present, since
+        # http.cookiejar skips a request that already carries one — and setting
+        # the header here would in turn shadow the caller's own jar and header,
+        # which httpx resolves in favour of the more specific value.
+        cookies = self._cookies(cookie_params or {})
+        if cookies:
+            pairs = [
+                *(
+                    value
+                    for source in (self._client.headers, dict(out))
+                    for key, value in source.items()
+                    if key.lower() == "cookie"
+                ),
+                *(f"{key}={value}" for key, value in self._client.cookies.items()),
+                *(f"{key}={value}" for key, value in cookies.items()),
+            ]
+            out = [(key, value) for key, value in out if key.lower() != "cookie"]
+            out.append(("Cookie", "; ".join(pairs)))
         return out
+
+    def _default_content_type(
+        self, header_params: dict[str, Any], media_type: str
+    ) -> None:
+        # The media type the specification declares, applied unless the operation
+        # takes a Content-Type of its own and the caller supplied one. Header
+        # names are case-insensitive, and a declared header the caller omitted is
+        # present holding \`None\` — neither counts as the caller setting it.
+        if any(
+            key.lower() == "content-type" and value is not None
+            for key, value in header_params.items()
+        ):
+            return
+        for key in list(header_params):
+            if key.lower() == "content-type":
+                header_params[key] = media_type
+                return
+        header_params["Content-Type"] = media_type
 
     def _cookies(self, cookie_params: dict[str, Any]) -> dict[str, str]:
         out: dict[str, str] = {}
@@ -1575,9 +1664,10 @@ class SwaggerPetstoreOpenAPI30:
         return out
 
     def _cookie_value(self, value: Any) -> str:
-        # Only the characters a cookie parser treats as structure are escaped,
-        # so a timestamp keeps its colons rather than arriving as %3A.
-        return quote(self._scalar(value), safe="/:?@!$&'()*+[]~")
+        # Only the characters a cookie parser treats as structure are escaped, so
+        # a timestamp keeps its colons and a base64 token its \`=\` padding. Servers
+        # do not URL-decode cookies, so anything escaped here arrives escaped.
+        return quote(self._scalar(value), safe=self._COOKIE_SAFE)
 
     def _dump(self, value: Any) -> Any:
         if value is None:
@@ -1648,7 +1738,7 @@ class SwaggerPetstoreOpenAPI30:
         )
         request_kwargs: dict[str, Any] = {"json": body}
         if not self._config.omit_content_type_header:
-            header_params.setdefault("Content-Type", "application/json")
+            self._default_content_type(header_params, "application/json")
         _request_url = self._url("/pet", {})
         response = self._client.request(
             "POST",
@@ -1709,7 +1799,7 @@ class SwaggerPetstoreOpenAPI30:
         )
         request_kwargs: dict[str, Any] = {"json": body}
         if not self._config.omit_content_type_header:
-            header_params.setdefault("Content-Type", "application/json")
+            self._default_content_type(header_params, "application/json")
         _request_url = self._url("/user", {})
         response = self._client.request(
             "POST",
@@ -1733,7 +1823,7 @@ class SwaggerPetstoreOpenAPI30:
         body = self._dump(body)
         request_kwargs: dict[str, Any] = {"json": body}
         if body is not None and not self._config.omit_content_type_header:
-            header_params.setdefault("Content-Type", "application/json")
+            self._default_content_type(header_params, "application/json")
         _request_url = self._url("/user/createWithList", {})
         response = self._client.request(
             "POST",
@@ -1800,7 +1890,7 @@ class SwaggerPetstoreOpenAPI30:
         response = self._client.request(
             "DELETE",
             _request_url,
-            headers=self._headers(header_params, header_formats),
+            headers=self._headers(header_params, collection_formats=header_formats),
             **request_kwargs,
         )
         if response.status_code == 200:
@@ -2108,7 +2198,7 @@ class SwaggerPetstoreOpenAPI30:
         )
         request_kwargs: dict[str, Any] = {"json": body}
         if not self._config.omit_content_type_header:
-            header_params.setdefault("Content-Type", "application/json")
+            self._default_content_type(header_params, "application/json")
         _request_url = self._url("/store/order", {})
         response = self._client.request(
             "POST",
@@ -2161,7 +2251,7 @@ class SwaggerPetstoreOpenAPI30:
         )
         request_kwargs: dict[str, Any] = {"json": body}
         if not self._config.omit_content_type_header:
-            header_params.setdefault("Content-Type", "application/json")
+            self._default_content_type(header_params, "application/json")
         _request_url = self._url("/pet", {})
         response = self._client.request(
             "PUT",
@@ -2237,7 +2327,7 @@ class SwaggerPetstoreOpenAPI30:
         body = self._dump(body)
         request_kwargs: dict[str, Any] = {"json": body}
         if body is not None and not self._config.omit_content_type_header:
-            header_params.setdefault("Content-Type", "application/json")
+            self._default_content_type(header_params, "application/json")
         _request_url = self._url("/user/{username}", path_params)
         response = self._client.request(
             "PUT",
@@ -2277,7 +2367,7 @@ class SwaggerPetstoreOpenAPI30:
         body = body
         request_kwargs: dict[str, Any] = {"content": body}
         if body is not None and not self._config.omit_content_type_header:
-            header_params.setdefault("Content-Type", "application/octet-stream")
+            self._default_content_type(header_params, "application/octet-stream")
         _request_url = self._url("/pet/{petId}/uploadImage", path_params)
         response = self._client.request(
             "POST",
@@ -2583,7 +2673,7 @@ class ApiResponse(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="allow")
 
     code: int | None = None
-    type: str | None = None
+    var_type: str | None = Field(default=None, alias="type")
     message: str | None = None
 
 
