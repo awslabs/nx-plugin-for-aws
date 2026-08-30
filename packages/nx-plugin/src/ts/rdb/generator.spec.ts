@@ -139,6 +139,7 @@ describe('ts#rdb generator', () => {
     });
     expect(projectConfig.targets['dev']).toEqual({
       executor: 'nx:run-commands',
+      dependsOn: ['pull-image'],
       options: {
         command: 'tsx ../common/scripts/src/rdb/start-container.ts',
         cwd: '{projectRoot}',
@@ -251,6 +252,7 @@ describe('ts#rdb generator', () => {
     });
     expect(mysqlProjectConfig.targets['dev']).toEqual({
       executor: 'nx:run-commands',
+      dependsOn: ['pull-image'],
       options: {
         command: 'tsx ../common/scripts/src/rdb/start-container.ts',
         cwd: '{projectRoot}',
