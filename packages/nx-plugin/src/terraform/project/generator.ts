@@ -16,6 +16,7 @@ import {
   updateNxJson,
 } from '@nx/devkit';
 import { join, relative } from 'path';
+import { addLicenseCheckToLintTarget } from '../../license/config.js';
 import { getTsLibDetails } from '../../ts/lib/generator.js';
 import { addTsDependencies } from '../../utils/add-dependencies.js';
 import {
@@ -373,6 +374,11 @@ export async function terraformProjectGenerator(
   if (!projectExists(tree, lib.fullyQualifiedName)) {
     addProjectConfiguration(tree, lib.fullyQualifiedName, projectConfiguration);
   }
+
+  // The `lint` target checks licenses alongside formatting, as it does for
+  // TypeScript and Python projects.
+  addLicenseCheckToLintTarget(tree, lib.fullyQualifiedName);
+
   // This generator IS the Terraform project, so the provider is fixed.
   addGeneratorMetadata(
     tree,

@@ -10,6 +10,7 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
+import { addLicenseCheckToLintTarget } from '../../../license/config.js';
 import {
   TERRAFORM_FMT_TARGET,
   TERRAFORM_PROJECT_GENERATOR_INFO,
@@ -123,6 +124,9 @@ export default async function migration(
         ...project,
         targets: sortObjectKeys(project.targets),
       });
+      // The new `lint` target checks licenses alongside formatting, as every
+      // other linting project's does in a workspace that has run `license`.
+      addLicenseCheckToLintTarget(tree, projectName);
     }
 
     await realignProviders(tree, project.root);

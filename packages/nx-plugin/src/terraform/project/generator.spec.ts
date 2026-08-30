@@ -10,6 +10,7 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { licenseGenerator } from '../../license/generator.js';
 import * as tsLibGenerator from '../../ts/lib/generator.js';
 import * as gitUtils from '../../utils/git.js';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
@@ -830,6 +831,29 @@ describe('terraformProjectGenerator', () => {
       expect(
         tree.read('packages/my-terraform-project/src/main.tf', 'utf-8'),
       ).toEqual(mainTfAfterFirstRun);
+    });
+
+    it('should keep the license-check lint dependency across a re-run', async () => {
+      // The license generator wires every project's `lint` to the root
+      // license-check, so a project generated after it must claim that wiring
+      // itself — otherwise the generator re-vends a bare `lint` and the license
+      // generator re-adds the dependency on the next pass, which is a diff.
+      await licenseGenerator(tree, { license: 'Apache-2.0' } as never);
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      const lintDependsOn = () =>
+        readProjectConfiguration(tree, '@proj/my-terraform-project').targets
+          ?.lint?.dependsOn;
+      const afterFirstRun = lintDependsOn();
+      expect(afterFirstRun).toContainEqual({
+        projects: ['@proj/source'],
+        target: 'license-check',
+      });
+
+      await licenseGenerator(tree, { license: 'Apache-2.0' } as never);
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      expect(lintDependsOn()).toEqual(afterFirstRun);
     });
 
     it('should preserve project.json customisations when re-run', async () => {

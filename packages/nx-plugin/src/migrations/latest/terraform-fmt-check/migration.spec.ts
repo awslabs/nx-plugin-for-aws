@@ -140,6 +140,23 @@ describe('terraform-fmt-check migration', () => {
     expect(providers).toContain('required_version = ">= 1.0"');
   });
 
+  it('should wire the new lint target to license-check when the workspace licenses', async () => {
+    tree.write('package.json', JSON.stringify({ name: '@proj/source' }));
+    addProjectConfiguration(tree, '@proj/source', {
+      root: '.',
+      targets: { 'license-check': { executor: 'nx:noop' } },
+    });
+    addTerraformProject(tree);
+
+    await migration(tree);
+
+    // Every other linting project depends on the root license-check, so the
+    // new target must too — else the next `license` run adds it and diffs.
+    expect(
+      readProjectConfiguration(tree, PROJECT).targets.lint.dependsOn,
+    ).toContainEqual({ projects: ['@proj/source'], target: 'license-check' });
+  });
+
   it('should be idempotent', async () => {
     addTerraformProject(tree);
     tree.write('packages/tf-lib/src/providers.tf', MISALIGNED_PROVIDERS);
