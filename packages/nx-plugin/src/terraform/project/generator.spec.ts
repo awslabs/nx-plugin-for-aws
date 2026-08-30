@@ -142,6 +142,69 @@ describe('terraformProjectGenerator', () => {
       expect(testTarget.inputs).toEqual(['default', '^production']);
     });
 
+    it('should share provider downloads across every terraform init', async () => {
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      const projectConfig = readProjectConfiguration(
+        tree,
+        '@proj/my-terraform-project',
+      );
+      // Nx does not interpolate `{workspaceRoot}` inside `env`, so the path is
+      // relative to the target's `cwd` of `{projectRoot}/src`. It resolves to
+      // the workspace root's `.terraform`, which is already gitignored and
+      // survives `nx reset`.
+      const pluginCacheDir = '../../../.terraform/plugin-cache';
+      const makeDir = {
+        command: `make-dir ${pluginCacheDir}`,
+        forwardAllArgs: false,
+      };
+
+      // `test` cleans its `TF_DATA_DIR` out of `dist` on every miss, so without
+      // a shared cache it re-downloads every provider each time it runs.
+      const testTarget = projectConfig.targets['test'];
+      expect(testTarget.options.env.TF_PLUGIN_CACHE_DIR).toBe(pluginCacheDir);
+      // Terraform errors and falls back to downloading when the directory does
+      // not exist, so it is created before `terraform init` reads it.
+      expect(testTarget.options.commands[0]).toEqual(makeDir);
+      expect(testTarget.options.parallel).toBe(false);
+      // `make-dir` takes no terraform flags, so args are not forwarded to it.
+      expect(testTarget.options.forwardAllArgs).toBe(true);
+
+      // An application's `init` delegates to the vended script, which resolves
+      // the cache itself rather than reading it from the target.
+      const initTarget = projectConfig.targets['init'];
+      expect(initTarget.options.commands).toEqual([
+        'tsx {projectRoot}/scripts/init.ts {projectRoot}',
+      ]);
+    });
+
+    it('should share provider downloads from the vended scripts', async () => {
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      const helper = tree.read(
+        'packages/my-terraform-project/scripts/plugin-cache.ts',
+        'utf-8',
+      );
+      expect(helper).toContain('TF_PLUGIN_CACHE_DIR');
+      expect(helper).toContain(
+        "join(process.cwd(), '.terraform', 'plugin-cache')",
+      );
+      // Terraform falls back to downloading when the directory is missing.
+      expect(helper).toContain('mkdirSync(dir, { recursive: true })');
+
+      // Every script that runs `terraform init` reads the shared cache.
+      for (const script of ['init', 'bootstrap', 'bootstrap-destroy']) {
+        const contents = tree.read(
+          `packages/my-terraform-project/scripts/${script}.ts`,
+          'utf-8',
+        );
+        expect(contents).toContain(
+          "import { pluginCacheEnv } from './plugin-cache'",
+        );
+        expect(contents).toContain('env: pluginCacheEnv()');
+      }
+    });
+
     it('should pass the region to bootstrap-destroy so it never prompts', async () => {
       await terraformProjectGenerator(tree, applicationSchema);
 
@@ -434,10 +497,34 @@ describe('terraformProjectGenerator', () => {
       // Providers are installed without configuring the S3 backend, which
       // would need a bootstrapped bucket — so `build` works before bootstrap.
       expect(testTarget.options.commands).toEqual([
+        {
+          command: 'make-dir ../../../.terraform/plugin-cache',
+          forwardAllArgs: false,
+        },
         'terraform init -backend=false',
         'terraform test',
       ]);
       expect(testTarget.dependsOn).toBeUndefined();
+    });
+
+    it("should share provider downloads from a library's init", async () => {
+      await terraformProjectGenerator(tree, librarySchema);
+
+      const projectConfig = readProjectConfiguration(
+        tree,
+        '@proj/my-terraform-project',
+      );
+      const pluginCacheDir = '../../../.terraform/plugin-cache';
+
+      // A library has no backend to configure, so its `init` runs terraform
+      // directly and reads the shared cache from the target.
+      const initTarget = projectConfig.targets['init'];
+      expect(initTarget.options.env.TF_PLUGIN_CACHE_DIR).toBe(pluginCacheDir);
+      expect(initTarget.configurations.dev.commands).toEqual([
+        { command: `make-dir ${pluginCacheDir}`, forwardAllArgs: false },
+        'terraform init',
+      ]);
+      expect(initTarget.options.parallel).toBe(false);
     });
   });
 

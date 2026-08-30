@@ -98,6 +98,19 @@ export async function terraformProjectGenerator(
   // never races the backend-configured targets over the shared one.
   const testDataDir = joinPathFragments(distDir, 'terraform-test');
 
+  // Provider downloads are shared across every `terraform init` in the
+  // workspace, so a target whose `.terraform` was cleaned links the providers it
+  // already has rather than re-downloading them. Nx does not interpolate
+  // `{workspaceRoot}` inside `env`, so this is relative to the target's `cwd`.
+  // It sits under the already-gitignored `.terraform`, which keeps hundreds of
+  // megabytes of providers out of both git and Nx's file walk, and unlike
+  // `.nx/cache` it survives `nx reset`.
+  const pluginCacheDir = joinPathFragments(
+    outDirToRootRelativePath,
+    '.terraform',
+    'plugin-cache',
+  );
+
   // Calculate relative path from current project to common/terraform/metrics
   // Use forward slashes for terraform module source paths (even on Windows)
   const metricsModulePath = relative(
@@ -228,12 +241,17 @@ export async function terraformProjectGenerator(
       defaultConfiguration: 'dev',
       configurations: {
         dev: {
-          command: 'terraform init',
+          commands: [
+            { command: `make-dir ${pluginCacheDir}`, forwardAllArgs: false },
+            'terraform init',
+          ],
         },
       },
       options: {
         forwardAllArgs: true,
         cwd: '{projectRoot}/src',
+        parallel: false,
+        env: { TF_PLUGIN_CACHE_DIR: pluginCacheDir },
       },
     },
     checkov: {
@@ -264,11 +282,15 @@ export async function terraformProjectGenerator(
       inputs: ['default', '^production'],
       outputs: [`{workspaceRoot}/dist/{projectRoot}/terraform-test`],
       options: {
-        commands: ['terraform init -backend=false', 'terraform test'],
+        commands: [
+          { command: `make-dir ${pluginCacheDir}`, forwardAllArgs: false },
+          'terraform init -backend=false',
+          'terraform test',
+        ],
         forwardAllArgs: true,
         cwd: '{projectRoot}/src',
         parallel: false,
-        env: { TF_DATA_DIR: testDataDir },
+        env: { TF_DATA_DIR: testDataDir, TF_PLUGIN_CACHE_DIR: pluginCacheDir },
       },
     },
     validate: {
