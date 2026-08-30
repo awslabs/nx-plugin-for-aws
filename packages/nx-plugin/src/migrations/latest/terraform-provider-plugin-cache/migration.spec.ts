@@ -16,7 +16,8 @@ import migration from './migration.js';
 
 const PROJECT = '@proj/infra';
 const PROJECT_ROOT = 'packages/infra';
-const PLUGIN_CACHE_SCRIPT = `${PROJECT_ROOT}/scripts/plugin-cache.ts`;
+const ENV_SCRIPT = `${PROJECT_ROOT}/scripts/env.ts`;
+const INIT_SCRIPT = `${PROJECT_ROOT}/scripts/init.ts`;
 /** `packages/infra/src` is three levels below the root that holds `.terraform`. */
 const EXPECTED_CACHE_DIR = '../../../.terraform/plugin-cache';
 
@@ -34,34 +35,12 @@ const currentTemplate = (script: string) =>
   ).replace('<%- stateKeyPrefix %>', 'proj-infra');
 
 /**
- * The `terraform init` call in each vended script, before and after the fix, so
- * the fixture is the shape users are upgrading from rather than something
- * derived.
+ * The `terraform init` call in the vended `init` script before the fix, so the
+ * fixture is the shape users are upgrading from rather than something derived.
  */
-const PRE_FIX_INIT_CALLS = {
-  init: {
-    before: "{ cwd: srcDir, stdio: 'inherit' }",
-    after: "{ cwd: srcDir, stdio: 'inherit', env: pluginCacheEnv() }",
-  },
-  bootstrap: {
-    before:
-      "execFileSync('terraform', ['init'], { cwd: bootstrapDir, stdio: 'inherit' });",
-    after: `execFileSync('terraform', ['init'], {
-    cwd: bootstrapDir,
-    stdio: 'inherit',
-    env: pluginCacheEnv(),
-  });`,
-  },
-  'bootstrap-destroy': {
-    before:
-      "execFileSync('terraform', ['init'], { cwd: bootstrapDir, stdio: 'inherit' });",
-    after: `execFileSync('terraform', ['init'], {
-    cwd: bootstrapDir,
-    stdio: 'inherit',
-    env: pluginCacheEnv(),
-  });`,
-  },
-} as const;
+const PRE_FIX_INIT_CALL = "{ cwd: srcDir, stdio: 'inherit' }";
+const FIXED_INIT_CALL =
+  "{ cwd: srcDir, stdio: 'inherit', env: pluginCacheEnv() }";
 
 /**
  * Generates a terraform project, then reverts what this migration adds back to
@@ -100,19 +79,16 @@ const generatePreFixProject = async (
   updateProjectConfiguration(tree, PROJECT, config);
 
   if (type === 'application') {
-    tree.delete(PLUGIN_CACHE_SCRIPT);
-    // The scripts as vended before the fix: the same `terraform init` calls,
-    // without the shared cache.
-    for (const [script, call] of Object.entries(PRE_FIX_INIT_CALLS)) {
-      const path = `${PROJECT_ROOT}/scripts/${script}.ts`;
-      tree.write(
-        path,
-        tree
-          .read(path, 'utf-8')!
-          .replace(call.after, call.before)
-          .replace("import { pluginCacheEnv } from './plugin-cache';\n", ''),
-      );
-    }
+    tree.delete(ENV_SCRIPT);
+    // The `init` script as vended before the fix: the same `terraform init`
+    // call, without the shared cache.
+    tree.write(
+      INIT_SCRIPT,
+      tree
+        .read(INIT_SCRIPT, 'utf-8')!
+        .replace(FIXED_INIT_CALL, PRE_FIX_INIT_CALL)
+        .replace("import { pluginCacheEnv } from './env';\n", ''),
+    );
   }
 };
 
@@ -195,12 +171,12 @@ describe('terraform-provider-plugin-cache migration', () => {
     expect(result.nextSteps).toEqual([]);
   });
 
-  it('should vend the plugin-cache helper the scripts import', async () => {
+  it('should vend the env helper the init script imports', async () => {
     await generatePreFixProject(tree);
 
     await migration(tree);
 
-    const script = tree.read(PLUGIN_CACHE_SCRIPT, 'utf-8');
+    const script = tree.read(ENV_SCRIPT, 'utf-8');
     expect(script).toContain('TF_PLUGIN_CACHE_DIR');
     expect(script).toContain(
       "join(process.cwd(), '.terraform', 'plugin-cache')",
@@ -216,63 +192,59 @@ describe('terraform-provider-plugin-cache migration', () => {
 
     // The point of a migration: the scripts end up byte-identical to a
     // workspace generated from today's generators.
-    for (const script of Object.keys(PRE_FIX_INIT_CALLS)) {
-      expect(tree.read(`${PROJECT_ROOT}/scripts/${script}.ts`, 'utf-8')).toBe(
-        currentTemplate(script),
-      );
-    }
+    expect(tree.read(INIT_SCRIPT, 'utf-8')).toBe(currentTemplate('init'));
+    expect(tree.read(ENV_SCRIPT, 'utf-8')).toBe(currentTemplate('env'));
     expect(result.nextSteps).toEqual([]);
   });
 
-  it('should skip and report a script whose init call has diverged', async () => {
+  it('should skip and report an init script whose call has diverged', async () => {
     await generatePreFixProject(tree);
-    const path = `${PROJECT_ROOT}/scripts/bootstrap.ts`;
     tree.write(
-      path,
+      INIT_SCRIPT,
       tree
-        .read(path, 'utf-8')!
-        .replace(
-          "execFileSync('terraform', ['init'], { cwd: bootstrapDir, stdio: 'inherit' });",
-          'await myOwnInit({ cwd: bootstrapDir });',
-        ),
+        .read(INIT_SCRIPT, 'utf-8')!
+        .replace("execFileSync(\n    'terraform',", 'await myOwnInit('),
     );
 
     const result = await migration(tree);
 
-    expect(tree.read(path, 'utf-8')).toContain('await myOwnInit(');
-    expect(tree.read(path, 'utf-8')).not.toContain('pluginCacheEnv');
-    expect(result.nextSteps).toContainEqual(expect.stringContaining(path));
+    expect(tree.read(INIT_SCRIPT, 'utf-8')).toContain('await myOwnInit(');
+    expect(tree.read(INIT_SCRIPT, 'utf-8')).not.toContain('pluginCacheEnv');
+    expect(result.nextSteps).toContainEqual(
+      expect.stringContaining(INIT_SCRIPT),
+    );
   });
 
-  it('should migrate a customised script without disturbing the customisation', async () => {
+  it('should migrate a customised init script without disturbing the customisation', async () => {
     await generatePreFixProject(tree);
-    const path = `${PROJECT_ROOT}/scripts/bootstrap.ts`;
     tree.write(
-      path,
+      INIT_SCRIPT,
       tree
-        .read(path, 'utf-8')!
+        .read(INIT_SCRIPT, 'utf-8')!
         .replace(
-          "execFileSync('terraform', ['init'], { cwd: bootstrapDir, stdio: 'inherit' });",
-          "execFileSync('terraform', ['init'], { cwd: bootstrapDir, stdio: 'inherit' });\n\n  // our team pins a workspace before applying\n  execFileSync('terraform', ['workspace', 'select', 'ops'], { cwd: bootstrapDir, stdio: 'inherit' });",
+          'const main = async () => {',
+          "const main = async () => {\n  // our team pins a workspace before initialising\n  console.log('ops');",
         ),
     );
 
     const result = await migration(tree);
-    const migrated = tree.read(path, 'utf-8') ?? '';
+    const migrated = tree.read(INIT_SCRIPT, 'utf-8') ?? '';
 
     expect(migrated).toContain('env: pluginCacheEnv()');
-    expect(migrated).toContain("'workspace', 'select', 'ops'");
-    expect(migrated).toContain('// our team pins a workspace before applying');
+    expect(migrated).toContain("console.log('ops')");
+    expect(migrated).toContain(
+      '// our team pins a workspace before initialising',
+    );
     expect(result.nextSteps).toEqual([]);
   });
 
-  it('should preserve a customised plugin-cache helper', async () => {
+  it('should preserve a customised env helper', async () => {
     await generatePreFixProject(tree);
-    tree.write(PLUGIN_CACHE_SCRIPT, '// mine\n');
+    tree.write(ENV_SCRIPT, '// mine\n');
 
     await migration(tree);
 
-    expect(tree.read(PLUGIN_CACHE_SCRIPT, 'utf-8')).toBe('// mine\n');
+    expect(tree.read(ENV_SCRIPT, 'utf-8')).toBe('// mine\n');
   });
 
   it('should skip and report a test target that no longer runs terraform init', async () => {
@@ -313,12 +285,12 @@ describe('terraform-provider-plugin-cache migration', () => {
 
     await migration(tree);
     const afterFirst = readProjectConfiguration(tree, PROJECT);
-    const scriptAfterFirst = tree.read(PLUGIN_CACHE_SCRIPT, 'utf-8');
+    const scriptAfterFirst = tree.read(ENV_SCRIPT, 'utf-8');
 
     const result = await migration(tree);
 
     expect(readProjectConfiguration(tree, PROJECT)).toEqual(afterFirst);
-    expect(tree.read(PLUGIN_CACHE_SCRIPT, 'utf-8')).toBe(scriptAfterFirst);
+    expect(tree.read(ENV_SCRIPT, 'utf-8')).toBe(scriptAfterFirst);
     expect(result.nextSteps).toEqual([]);
   });
 

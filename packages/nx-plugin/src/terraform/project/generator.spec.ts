@@ -178,11 +178,11 @@ describe('terraformProjectGenerator', () => {
       ]);
     });
 
-    it('should share provider downloads from the vended scripts', async () => {
+    it('should share provider downloads from the vended init script', async () => {
       await terraformProjectGenerator(tree, applicationSchema);
 
       const helper = tree.read(
-        'packages/my-terraform-project/scripts/plugin-cache.ts',
+        'packages/my-terraform-project/scripts/env.ts',
         'utf-8',
       );
       expect(helper).toContain('TF_PLUGIN_CACHE_DIR');
@@ -192,17 +192,14 @@ describe('terraformProjectGenerator', () => {
       // Terraform falls back to downloading when the directory is missing.
       expect(helper).toContain('mkdirSync(dir, { recursive: true })');
 
-      // Every script that runs `terraform init` reads the shared cache.
-      for (const script of ['init', 'bootstrap', 'bootstrap-destroy']) {
-        const contents = tree.read(
-          `packages/my-terraform-project/scripts/${script}.ts`,
-          'utf-8',
-        );
-        expect(contents).toContain(
-          "import { pluginCacheEnv } from './plugin-cache'",
-        );
-        expect(contents).toContain('env: pluginCacheEnv()');
-      }
+      // The `init` target runs terraform from this script rather than the
+      // target, so the cache reaches it here.
+      const initScript = tree.read(
+        'packages/my-terraform-project/scripts/init.ts',
+        'utf-8',
+      );
+      expect(initScript).toContain("import { pluginCacheEnv } from './env'");
+      expect(initScript).toContain('env: pluginCacheEnv()');
     });
 
     it('should pass the region to bootstrap-destroy so it never prompts', async () => {

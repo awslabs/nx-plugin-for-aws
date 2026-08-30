@@ -32,7 +32,7 @@ import { kebabCase } from '../../../utils/names.js';
  * The cache lives under the already-gitignored `.terraform` at the workspace
  * root. Terraform reports an error and silently falls back to downloading when
  * the directory does not exist, so each target creates it first, and the vended
- * scripts get a `plugin-cache` helper that does the same.
+ * `init` script gets an `env` helper that does the same.
  *
  * Nx does not interpolate `{workspaceRoot}` inside `env`, so the value is
  * relative to the target's own `cwd` of `{projectRoot}/src`.
@@ -72,76 +72,49 @@ const withMakeDir = (commands: unknown[], pluginCacheDir: string) => [
 ];
 
 /**
- * The vended scripts that run `terraform init`, and the call each one makes.
- * Matched structurally, so formatting and argument layout don't affect whether
- * a script is recognised.
+ * The `terraform init` call in the vended `init` script, matched structurally so
+ * formatting and argument layout don't affect whether it is recognised.
  */
-const SCRIPTS = [
-  {
-    name: 'init',
-    initCall:
-      "`execFileSync('terraform', [$args], { cwd: srcDir, stdio: 'inherit' })`",
-    withEnv:
-      "`execFileSync('terraform', [$args], { cwd: srcDir, stdio: 'inherit', env: pluginCacheEnv() })`",
-  },
-  {
-    name: 'bootstrap',
-    initCall:
-      "`execFileSync('terraform', ['init'], { cwd: bootstrapDir, stdio: 'inherit' })`",
-    withEnv:
-      "`execFileSync('terraform', ['init'], { cwd: bootstrapDir, stdio: 'inherit', env: pluginCacheEnv() })`",
-  },
-  {
-    name: 'bootstrap-destroy',
-    initCall:
-      "`execFileSync('terraform', ['init'], { cwd: bootstrapDir, stdio: 'inherit' })`",
-    withEnv:
-      "`execFileSync('terraform', ['init'], { cwd: bootstrapDir, stdio: 'inherit', env: pluginCacheEnv() })`",
-  },
-] as const;
+const INIT_CALL =
+  "`execFileSync('terraform', [$args], { cwd: srcDir, stdio: 'inherit' })`";
+const INIT_CALL_WITH_ENV =
+  "`execFileSync('terraform', [$args], { cwd: srcDir, stdio: 'inherit', env: pluginCacheEnv() })`";
 
 const divergedScriptStep = (filePath: string) =>
-  `${filePath}: its \`terraform init\` call no longer matches the shape the generator produced - left untouched. Pass \`env: pluginCacheEnv()\` to that \`execFileSync\` so it shares the provider cache in \`scripts/plugin-cache.ts\`.`;
+  `${filePath}: its \`terraform init\` call no longer matches the shape the generator produced - left untouched. Pass \`env: pluginCacheEnv()\` to that \`execFileSync\` so it shares the provider cache in \`scripts/env.ts\`.`;
 
 /**
- * Route a vended script's `terraform init` through the shared provider cache.
+ * Route the vended `init` script's `terraform init` through the shared cache.
  *
  * Guarded on the helper not already being imported, so a re-run — and a project
  * generated with the cache — is a no-op.
  */
-const migrateScript = async (
+const migrateInitScript = async (
   tree: Tree,
   filePath: string,
-  script: (typeof SCRIPTS)[number],
   nextSteps: string[],
 ): Promise<void> => {
   if (!tree.exists(filePath)) return;
   if (await matchGritQL(tree, filePath, '`pluginCacheEnv()`')) return;
 
-  if (!(await matchGritQL(tree, filePath, script.initCall))) {
+  if (!(await matchGritQL(tree, filePath, INIT_CALL))) {
     nextSteps.push(divergedScriptStep(filePath));
     return;
   }
 
-  await applyGritQL(tree, filePath, `${script.initCall} => ${script.withEnv}`);
+  await applyGritQL(tree, filePath, `${INIT_CALL} => ${INIT_CALL_WITH_ENV}`);
 
   // Placed in the generator's import position rather than prepended, so a
-  // migrated workspace matches a freshly generated one. Every one of these
-  // scripts imports `./aws-config` directly above it.
+  // migrated workspace matches a freshly generated one.
   const awsConfigImport = "`import { resolveAwsConfig } from './aws-config'`";
   if (await matchGritQL(tree, filePath, awsConfigImport)) {
     await applyGritQL(
       tree,
       filePath,
-      `${awsConfigImport} => \`import { resolveAwsConfig } from './aws-config';\nimport { pluginCacheEnv } from './plugin-cache'\``,
+      `${awsConfigImport} => \`import { resolveAwsConfig } from './aws-config';\nimport { pluginCacheEnv } from './env'\``,
     );
   } else {
-    await addDestructuredImport(
-      tree,
-      filePath,
-      ['pluginCacheEnv'],
-      './plugin-cache',
-    );
+    await addDestructuredImport(tree, filePath, ['pluginCacheEnv'], './env');
   }
 };
 
@@ -227,9 +200,11 @@ export default async function migration(
       updateProjectConfiguration(tree, projectName, { ...project, targets });
     }
 
-    // Applications run `terraform init` from the vended scripts too. The helper
-    // is new, so KeepExisting adds it while leaving a user's own copy alone;
-    // the scripts that call it already exist, so each is rewritten below.
+    // An application's `init` target runs `terraform init` from the vended
+    // script rather than the target, so the cache reaches it via the `env`
+    // helper. The helper is new, so KeepExisting adds it while leaving a user's
+    // own copy alone; the script that calls it already exists, so it is
+    // rewritten below.
     if (tree.exists(joinPathFragments(project.root, 'bootstrap'))) {
       generateFiles(
         tree,
@@ -242,14 +217,11 @@ export default async function migration(
         { overwriteStrategy: OverwriteStrategy.KeepExisting },
       );
 
-      for (const script of SCRIPTS) {
-        await migrateScript(
-          tree,
-          joinPathFragments(project.root, 'scripts', `${script.name}.ts`),
-          script,
-          nextSteps,
-        );
-      }
+      await migrateInitScript(
+        tree,
+        joinPathFragments(project.root, 'scripts', 'init.ts'),
+        nextSteps,
+      );
     }
   }
 
