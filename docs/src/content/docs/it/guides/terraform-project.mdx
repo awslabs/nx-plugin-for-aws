@@ -53,6 +53,7 @@ Per i progetti application (`--type=application`), il generatore crea un'applica
     - bootstrap.ts Esegue pull/push del tfstate di bootstrap ed esegue `terraform apply`
     - bootstrap-destroy.ts Svuota il bucket di stato ed esegue `terraform destroy`
     - init.ts Esegue `terraform init` con la configurazione del backend S3
+    - plugin-cache.ts Punta `terraform init` alla cache condivisa dei provider
   - checkov.yml Configurazione di Checkov, inclusi i controlli da saltare
   - project.json Configurazione del progetto e target di build
 
@@ -312,6 +313,18 @@ run "plan_is_valid" {
 ```
 
 Imposta ogni variabile richiesta dalla tua configurazione nel blocco `variables`, altrimenti l'esecuzione fallisce con "has a required variable ... with no set value".
+
+#### Cache condivisa dei provider
+
+Ogni target che esegue `terraform init` condivide una cache dei provider in `.terraform/plugin-cache` nella radice del tuo workspace, tramite [`TF_PLUGIN_CACHE_DIR`](https://developer.hashicorp.com/terraform/cli/config/config-file#provider-plugin-cache) di Terraform. I provider vengono scaricati una volta e collegati da lì in seguito, il che è particolarmente importante per il target `test`: mantiene la sua directory di lavoro sotto `dist`, quindi una pulizia di `dist` o un cache miss altrimenti riscaricherebbero il provider AWS — diverse centinaia di megabyte — ad ogni esecuzione.
+
+La directory viene creata automaticamente prima di ogni `terraform init`, e `.terraform` è gitignored. A differenza di `.nx/cache`, non viene rimossa da `nx reset`, quindi un reset non elimina i provider. In CI, metti in cache `.terraform/plugin-cache` tra i job per ottenere lo stesso risparmio.
+
+L'`env` di Nx ha la precedenza sulla tua shell, quindi impostare `TF_PLUGIN_CACHE_DIR` nel tuo ambiente non cambia dove questi target cercano. Per puntarli altrove — una posizione condivisa tra diversi workspace, ad esempio — modifica `TF_PLUGIN_CACHE_DIR` nel `project.json` del tuo progetto, e il percorso in `scripts/plugin-cache.ts` per i target `bootstrap`, `bootstrap-destroy` e `init`. I percorsi in `project.json` sono relativi al `cwd` del target, poiché Nx non espande `{workspaceRoot}` all'interno di `env`.
+
+:::note[File di lock]
+La cache non cambia quali versioni dei provider ottieni: `.terraform.lock.hcl` le fissa ancora, e Terraform registra gli stessi hash indipendentemente dal fatto che un provider provenga dalla cache o dal registry. Committa il file di lock come al solito.
+:::
 
 <OptionFilter when={{ type: 'application' }} description="Application-only targets: plan / apply / destroy / etc.">
 ### Target solo per Application
