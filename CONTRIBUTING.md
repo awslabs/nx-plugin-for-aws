@@ -169,7 +169,7 @@ A generator whose shape is still settling can be marked experimental by adding `
 
 An experimental generator is **permitted to change without a migration** being published to carry an existing workspace across, so its output can be reshaped freely while it stabilises. Users upgrading reconcile those changes themselves.
 
-The flag needs nothing else authored: its guide page (any page carrying `generator: <id>` in its frontmatter) automatically shows a banner saying so, rendered from the `experimental-generator` snippet so the wording is translated by the usual workflow, and the MCP `list-generators` / `generator-guide` tools include the same warning for agents. Remove the flag once the generator is stable — from then on it follows the normal migration rules above.
+The flag needs nothing else authored: its guide page (any page carrying `generator: <id>` in its frontmatter) automatically shows a banner saying so, and the MCP `list-generators` / `generator-guide` tools include the same warning for agents. Remove the flag once the generator is stable — from then on it follows the normal migration rules above.
 
 #### Migrations that change infrastructure
 
