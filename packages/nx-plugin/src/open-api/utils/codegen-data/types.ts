@@ -395,6 +395,11 @@ export interface Operation {
   pythonMethodName?: string;
   /** The generated request type name (e.g. `FooRequest`). */
   requestTypeName?: string;
+  /**
+   * {@link requestTypeName} as a Python class name. TypeScript allows a name a
+   * digit-leading operationId produces (`42Request`) where Python does not.
+   */
+  pythonRequestTypeName?: string;
 
   /** The response model used as the operation's result. */
   result?: Model;

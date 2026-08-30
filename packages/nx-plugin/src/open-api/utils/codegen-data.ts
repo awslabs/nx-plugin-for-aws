@@ -616,6 +616,13 @@ export const annotatePythonData = (data: CodeGenData): void => {
       );
     }
 
+    if (op.requestTypeName) {
+      op.pythonRequestTypeName = uniqueGeneratedName(
+        toPythonClassName(op.requestTypeName),
+        takenClassNames,
+      );
+    }
+
     const errorShape = op.errorShape;
     if (errorShape) {
       // The pascal-cased operation id is shared with TypeScript, where a leading

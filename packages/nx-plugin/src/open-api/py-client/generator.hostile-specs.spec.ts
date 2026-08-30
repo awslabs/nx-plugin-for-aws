@@ -841,4 +841,78 @@ describe('openApiPyClientGenerator - hostile specs', () => {
     );
     expect(types).toContain('inner: OuterInner2 | None');
   });
+
+  /**
+   * The spec title names the client class. It reaches the templates already
+   * class-cased for TypeScript, where every result is a legal name — Python is
+   * stricter, and these modules also export an `ApiError` of their own that the
+   * title must not shadow.
+   */
+  it.each([
+    // No alphanumerics at all, so the shared name is empty: `class :`.
+    ['___', 'U'],
+    ['日本語', 'U'],
+    // A keyword, and the base exception these modules export.
+    ['None', '_None'],
+    ['ApiError', '_ApiError'],
+  ])('names the client class for a title of %s', async (title, expected) => {
+    const { client, init } = await generateAndRead(verifier, tree, {
+      openapi: '3.0.0',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/a': {
+          get: {
+            operationId: 'getA',
+            tags: ['t'],
+            responses: {
+              '200': {
+                description: 'OK',
+                content: { 'application/json': { schema: { type: 'string' } } },
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(client).toContain(`class ${expected}:`);
+    expect(client).toContain(`class ${expected}Config:`);
+    // The re-export names the same class, so the package root stays usable.
+    expect(init).toContain(`import ${expected} as ${expected}`);
+  });
+
+  // A digit-leading operationId names the request TypedDict too, and TypeScript
+  // accepts `42Request` where Python does not.
+  it('emits a valid request type name for a digit-leading operation id', async () => {
+    const { types } = await generateAndRead(verifier, tree, {
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/a': {
+          get: {
+            operationId: '42',
+            tags: ['t'],
+            parameters: [
+              {
+                name: 'q',
+                in: 'query',
+                required: true,
+                schema: { type: 'string' },
+              },
+            ],
+            responses: {
+              '200': {
+                description: 'OK',
+                content: { 'application/json': { schema: { type: 'string' } } },
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(types).not.toMatch(/^class \d/m);
+    // Escaped the same way as the sibling model built for the query position, so
+    // the two names stay consistent.
+    expect(types).toMatch(/^class _42Request\(TypedDict\)/m);
+    expect(types).toMatch(/^class _42RequestQueryParameters/m);
+  });
 });

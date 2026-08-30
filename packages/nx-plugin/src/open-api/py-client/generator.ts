@@ -10,7 +10,10 @@ import { updateGitIgnore } from '../../utils/git.js';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
 import { getGeneratorInfo, type NxGeneratorInfo } from '../../utils/nx.js';
 import { buildOpenApiCodeGenerationData } from '../ts-client/generator.js';
-import { toPythonLiteral } from '../utils/codegen-data/languages.js';
+import {
+  toPythonClassName,
+  toPythonLiteral,
+} from '../utils/codegen-data/languages.js';
 import {
   type CodeGenData,
   isPythonCollection,
@@ -107,6 +110,12 @@ export const generateOpenApiPyClient = (
   // template ask what a Python type is, rather than matching its spelling.
   const base = {
     ...data,
+    // The shared `className` comes from the spec title via `toClassName`, which
+    // is a valid TypeScript name but not always a Python one: a title with no
+    // alphanumerics renders nothing (`class :`) and one spelt `None` renders a
+    // keyword. It also has to clear the names these modules export themselves,
+    // so a title of `ApiError` cannot shadow the base exception.
+    className: toPythonClassName(data.className),
     clientType,
     toPythonLiteral,
     isPythonCollection,
