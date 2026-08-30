@@ -57,9 +57,10 @@ export const expectHasTerraformMetricTags = (
   const content = tree.read(TERRAFORM_METRICS_FILE_PATH, 'utf-8');
   expect(content).toBeTruthy();
 
-  // Check metric_id and metric_version. Padded to the width `terraform fmt`
-  // aligns the block to, which the vended `fmt` target checks for.
-  expect(content).toContain(`metric_id      = "${METRIC_ID}"`);
+  // Check metric_id
+  expect(content).toContain(`metric_id = "${METRIC_ID}"`);
+
+  // Check metric_version
   expect(content).toContain('metric_version = "0.0.0"');
 
   // Check metric_tags

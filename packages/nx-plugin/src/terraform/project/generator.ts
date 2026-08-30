@@ -75,22 +75,22 @@ export const TERRAFORM_PROJECT_GENERATOR_INFO: NxGeneratorInfo =
  * it. Writing from the base target would rewrite the `default` input the hash is
  * computed over, so the target could never cache-hit.
  *
- * `-recursive` covers nested modules; `terraform fmt` alone reads only the
- * directory it is given. Provider caches under `.terraform` are skipped, since
- * `fmt` ignores dot-prefixed directories.
+ * The scanned scope stays as it was — the project's own `src`, not `-recursive`
+ * — so the target checks exactly the files it used to rewrite. `-diff` names
+ * what to fix when it fails.
  */
 export const TERRAFORM_FMT_TARGET: TargetConfiguration = {
   executor: 'nx:run-commands',
   cache: true,
   inputs: ['default'],
   options: {
-    command: 'terraform fmt -check -recursive -diff',
+    command: 'terraform fmt -check -diff',
     forwardAllArgs: true,
     cwd: '{projectRoot}/src',
   },
   configurations: {
     fix: {
-      command: 'terraform fmt -recursive',
+      command: 'terraform fmt',
     },
     'skip-lint': {
       // Cross-platform no-op (`true` is not available on Windows cmd).

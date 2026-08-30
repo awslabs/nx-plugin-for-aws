@@ -16,12 +16,7 @@ import {
 } from '../../../terraform/project/generator.js';
 import { applyGritQL } from '../../../utils/ast.js';
 import { formatFilesInSubtree } from '../../../utils/format.js';
-import { METRIC_ID } from '../../../utils/metrics.js';
 import { sortObjectKeys } from '../../../utils/object.js';
-import {
-  PACKAGES_DIR,
-  SHARED_TERRAFORM_DIR,
-} from '../../../utils/shared-constructs-constants.js';
 
 /**
  * The `fmt` target ran `terraform fmt`, which rewrites the files it reads. Those
@@ -34,78 +29,38 @@ import {
  * so `run-many --target lint` reaches Terraform projects and its `fix` and
  * `skip-lint` configurations propagate.
  *
- * The two vended Terraform files that `terraform fmt` would have rewritten are
- * realigned as well, so the newly-checking target passes on an untouched
- * workspace.
+ * The vended `providers.tf` backend block is realigned too, since the write the
+ * old target performed on every run is what kept it formatted.
  */
 
 /** The command the base target ran before it checked rather than wrote. */
 const WRITING_COMMAND = 'terraform fmt';
 
-const SHARED_TERRAFORM_SRC = joinPathFragments(
-  PACKAGES_DIR,
-  SHARED_TERRAFORM_DIR,
-  'src',
-);
+/**
+ * Backend arguments `terraform fmt` aligns to a common width but the generator
+ * wrote unpadded. Matched on the name alone, so a user's own value survives.
+ */
+const BACKEND_ARGUMENTS = ['encrypt', 'use_lockfile'];
 
 /**
- * Assignments `terraform fmt` aligns to a common width but the generators wrote
- * unpadded, keyed by the file they live in and matched on the name alone so a
- * user's own value is preserved.
+ * Realigns the `backend "s3"` arguments in an application's `providers.tf`, which
+ * the newly-checking target would otherwise reject on an untouched workspace.
  */
-const MISALIGNED_ASSIGNMENTS: Record<string, { name: string; pad: number }[]> =
-  {
-    [joinPathFragments(SHARED_TERRAFORM_SRC, 'metrics', 'metrics.tf')]: [
-      { name: 'metric_id', pad: 'metric_version'.length },
-      { name: 'Description', pad: 'AWSTemplateFormatVersion'.length },
-    ],
-    [joinPathFragments(
-      SHARED_TERRAFORM_SRC,
-      'core',
-      'runtime-config',
-      'read',
-      'read.tf',
-    )]: [
-      { name: 'config_dir', pad: 'namespace_path'.length },
-      { name: 'entries_dir', pad: 'namespace_path'.length },
-      { name: 'namespace_path', pad: 'namespace_path'.length },
-    ],
-  };
-
-/**
- * Realign an assignment to the width `terraform fmt` pads it to, leaving its
- * value as the user has it. Reports nothing: the check target names any file it
- * still rejects, and `fmt --configuration=fix` fixes it.
- */
-const realign = async (
+const realignProviders = async (
   tree: Tree,
-  filePath: string,
-  { name, pad }: { name: string; pad: number },
+  projectRoot: string,
 ): Promise<void> => {
-  await applyGritQL(
-    tree,
-    filePath,
-    `language hcl\n\`${name} = $value\` => \`${name.padEnd(pad)} = $value\``,
-  );
-};
+  const filePath = joinPathFragments(projectRoot, 'src', 'providers.tf');
+  if (!tree.exists(filePath)) return;
 
-/** Realigns the vended Terraform files `terraform fmt` would rewrite. */
-const realignVendedFiles = async (tree: Tree): Promise<void> => {
-  for (const [filePath, assignments] of Object.entries(
-    MISALIGNED_ASSIGNMENTS,
-  )) {
-    if (!tree.exists(filePath)) continue;
-    // Only the file the generator produced is realigned, identified by the
-    // metric id it carries; a user's own metrics block is left alone.
-    if (
-      filePath.endsWith('metrics.tf') &&
-      !tree.read(filePath, 'utf-8')?.includes(METRIC_ID)
-    ) {
-      continue;
-    }
-    for (const assignment of assignments) {
-      await realign(tree, filePath, assignment);
-    }
+  const width = Math.max(...BACKEND_ARGUMENTS.map((name) => name.length));
+  for (const name of BACKEND_ARGUMENTS) {
+    await applyGritQL(
+      tree,
+      filePath,
+      `language hcl\n\`${name} = $value\` => \`${name.padEnd(width)} = $value\`` +
+        ` where { $value <: within \`backend "s3" { $_ }\` }`,
+    );
   }
 };
 
@@ -169,9 +124,9 @@ export default async function migration(
         targets: sortObjectKeys(project.targets),
       });
     }
-  }
 
-  await realignVendedFiles(tree);
+    await realignProviders(tree, project.root);
+  }
 
   await formatFilesInSubtree(tree);
 

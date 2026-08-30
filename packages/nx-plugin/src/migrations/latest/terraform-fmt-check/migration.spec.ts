@@ -4,38 +4,14 @@
  */
 import {
   addProjectConfiguration,
-  joinPathFragments,
   readProjectConfiguration,
   type Tree,
 } from '@nx/devkit';
 import { TERRAFORM_PROJECT_GENERATOR_INFO } from '../../../terraform/project/generator';
-import { METRIC_ID } from '../../../utils/metrics';
-import {
-  PACKAGES_DIR,
-  SHARED_TERRAFORM_DIR,
-} from '../../../utils/shared-constructs-constants';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
 import migration from './migration';
 
 const PROJECT = '@proj/tf-lib';
-
-const SHARED_TERRAFORM_SRC = joinPathFragments(
-  PACKAGES_DIR,
-  SHARED_TERRAFORM_DIR,
-  'src',
-);
-const METRICS_PATH = joinPathFragments(
-  SHARED_TERRAFORM_SRC,
-  'metrics',
-  'metrics.tf',
-);
-const READ_PATH = joinPathFragments(
-  SHARED_TERRAFORM_SRC,
-  'core',
-  'runtime-config',
-  'read',
-  'read.tf',
-);
 
 /** The `fmt` target as it was vended before this migration. */
 const writingFmtTarget = () => ({
@@ -60,26 +36,14 @@ const addTerraformProject = (
     targets: targets as never,
   });
 
-/** The misaligned `metrics.tf` the generators wrote. */
-const MISALIGNED_METRICS = `locals {
-  metric_id = "${METRIC_ID}"
-  metric_version = "1.2.3"
-  metric_tags    = ["g1"]
-}
+/** The misaligned `backend "s3"` block the generator wrote. */
+const MISALIGNED_PROVIDERS = `terraform {
+  required_version = ">= 1.0"
 
-resource "aws_cloudformation_stack" "metrics" {
-  template_body = jsonencode({
-    AWSTemplateFormatVersion = "2010-09-09"
-    Description = "(\${local.metric_id})"
-  })
-}
-`;
-
-/** The misaligned `read.tf` the generators wrote. */
-const MISALIGNED_READ = `locals {
-  config_dir      = "\${path.module}/../runtime-config"
-  entries_dir     = "\${local.config_dir}/entries"
-  namespace_path  = "\${local.config_dir}/x.json"
+  backend "s3" {
+    encrypt        = true
+    use_lockfile   = true
+  }
 }
 `;
 
@@ -98,9 +62,9 @@ describe('terraform-fmt-check migration', () => {
     const fmt = readProjectConfiguration(tree, PROJECT).targets.fmt;
     // Writing from the base target rewrote the `default` input its own hash was
     // computed from, so it could never cache-hit.
-    expect(fmt.options.command).toBe('terraform fmt -check -recursive -diff');
+    expect(fmt.options.command).toBe('terraform fmt -check -diff');
     expect(fmt.inputs).toEqual(['default']);
-    expect(fmt.configurations.fix.command).toBe('terraform fmt -recursive');
+    expect(fmt.configurations.fix.command).toBe('terraform fmt');
     expect(fmt.configurations['skip-lint'].command).toBe('node -e ""');
     // Options the user may have set are preserved.
     expect(fmt.options.cwd).toBe('{projectRoot}/src');
@@ -160,55 +124,37 @@ describe('terraform-fmt-check migration', () => {
     expect(targets.lint).toBeUndefined();
   });
 
-  it('should realign the vended terraform files fmt would rewrite', async () => {
-    tree.write(METRICS_PATH, MISALIGNED_METRICS);
-    tree.write(READ_PATH, MISALIGNED_READ);
+  it('should realign the vended providers.tf backend block', async () => {
+    addTerraformProject(tree);
+    tree.write('packages/tf-lib/src/providers.tf', MISALIGNED_PROVIDERS);
 
     await migration(tree);
 
-    // `terraform fmt` aligns each block's assignments to a common width, so the
-    // newly-checking target rejects these files until they match.
-    expect(tree.read(METRICS_PATH, 'utf-8')).toContain(
-      `metric_id      = "${METRIC_ID}"`,
-    );
-    expect(tree.read(METRICS_PATH, 'utf-8')).toContain(
-      'Description              =',
-    );
-    const read = tree.read(READ_PATH, 'utf-8')!;
-    expect(read).toContain('config_dir     =');
-    expect(read).toContain('entries_dir    =');
-    expect(read).toContain('namespace_path =');
-    // The values themselves are untouched.
-    expect(read).toContain('"${local.config_dir}/entries"');
-  });
-
-  it('should leave a metrics file it does not recognise alone', async () => {
-    const own = 'locals {\n  metric_id = "mine"\n  metric_version = "1"\n}\n';
-    tree.write(METRICS_PATH, own);
-
-    await migration(tree);
-
-    expect(tree.read(METRICS_PATH, 'utf-8')).toBe(own);
+    // `terraform fmt` aligns a block's arguments to a common width, so the
+    // newly-checking target rejects this file until it matches. The write the
+    // old target performed on every run is what had kept it formatted.
+    const providers = tree.read('packages/tf-lib/src/providers.tf', 'utf-8')!;
+    expect(providers).toContain('encrypt      = true');
+    expect(providers).toContain('use_lockfile = true');
+    // Everything outside the backend block is untouched.
+    expect(providers).toContain('required_version = ">= 1.0"');
   });
 
   it('should be idempotent', async () => {
     addTerraformProject(tree);
-    tree.write(METRICS_PATH, MISALIGNED_METRICS);
-    tree.write(READ_PATH, MISALIGNED_READ);
+    tree.write('packages/tf-lib/src/providers.tf', MISALIGNED_PROVIDERS);
 
     await migration(tree);
     const after = [
       tree.read('packages/tf-lib/project.json', 'utf-8'),
-      tree.read(METRICS_PATH, 'utf-8'),
-      tree.read(READ_PATH, 'utf-8'),
+      tree.read('packages/tf-lib/src/providers.tf', 'utf-8'),
     ];
 
     const { nextSteps } = await migration(tree);
 
     expect([
       tree.read('packages/tf-lib/project.json', 'utf-8'),
-      tree.read(METRICS_PATH, 'utf-8'),
-      tree.read(READ_PATH, 'utf-8'),
+      tree.read('packages/tf-lib/src/providers.tf', 'utf-8'),
     ]).toEqual(after);
     expect(nextSteps).toEqual([]);
   });

@@ -141,15 +141,6 @@ const updateCdkMetrics = async (tree: Tree, tags: string[]) => {
 };
 
 /**
- * Assignments in the `locals` block, padded to the width `terraform fmt` aligns
- * them to. GritQL emits a rewrite verbatim, so the padding is written here — the
- * vended `fmt` target checks formatting and fails on a misaligned block.
- */
-const METRICS_LOCALS = ['metric_id', 'metric_version', 'metric_tags'];
-const alignedAssignment = (name: string, value: string): string =>
-  `${name.padEnd(Math.max(...METRICS_LOCALS.map((local) => local.length)))} = ${value}`;
-
-/**
  * Updates the Terraform metrics CloudFormation stack with the metric id, version and tags
  */
 const updateTerraformMetrics = async (tree: Tree, tags: string[]) => {
@@ -157,14 +148,14 @@ const updateTerraformMetrics = async (tree: Tree, tags: string[]) => {
   await applyGritQL(
     tree,
     TERRAFORM_METRICS_FILE_PATH,
-    `\`metric_id = $old\` => \`${alignedAssignment('metric_id', `"${METRIC_ID}"`)}\``,
+    `\`metric_id = $old\` => \`metric_id = "${METRIC_ID}"\``,
   );
 
   // Update metric_version
   await applyGritQL(
     tree,
     TERRAFORM_METRICS_FILE_PATH,
-    `\`metric_version = $old\` => \`${alignedAssignment('metric_version', `"${getPackageVersion()}"`)}\``,
+    `\`metric_version = $old\` => \`metric_version = "${getPackageVersion()}"\``,
   );
 
   // Add each tag, leaving existing tags in place to keep re-runs stable
