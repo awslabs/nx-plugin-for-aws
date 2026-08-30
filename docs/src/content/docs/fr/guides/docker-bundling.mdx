@@ -14,7 +14,7 @@ import { CONTAINER_VERSIONS } from '../../../../../../packages/nx-plugin/src/uti
 export const trivyTarget = `{
   "targets": {
     "trivy": {
-      "cache": true,
+      "cache": false,
       "inputs": ["default", "^production"],
       "outputs": ["{workspaceRoot}/dist/{projectRoot}/trivy"],
       "executor": "nx:run-commands",
@@ -68,7 +68,7 @@ Le contexte de construction Docker est écrit dans le dossier `dist` de votre pr
 :::tip[Pourquoi bundler en dehors du Dockerfile ?]
 Garder l'étape de bundling dans Nx (plutôt qu'à l'intérieur du `Dockerfile`) signifie :
 
-- Nx peut **mettre en cache** la cible bundle, donc les constructions répétées sont rapides.
+- Nx peut **mettre en cache** la cible bundle — sa sortie est un répertoire sur le disque, donc un succès de cache la restaure véritablement.
 - Le `Dockerfile` n'a pas besoin d'accéder à votre monorepo, aux registres privés ou aux secrets de construction.
 - La couche d'image est minuscule — un simple `COPY` d'artefacts déjà construits, sans `node_modules` transitifs ni chaîne d'outils de construction.
 :::
@@ -167,7 +167,7 @@ Ajoutez une cible `docker` qui :
 {
   "targets": {
     "docker": {
-      "cache": true,
+      "cache": false,
       "executor": "nx:run-commands",
       "options": {
         "commands": [
@@ -181,6 +181,12 @@ Ajoutez une cible `docker` qui :
   }
 }
 ```
+
+:::caution[Ne laissez pas Nx mettre en cache une construction d'image]
+Une image construite réside dans le magasin du moteur de conteneurs, pas sous un chemin `outputs`, donc Nx n'a rien à restaurer lors d'un succès de cache — il signalerait la construction terminée alors que l'image est manquante (par exemple après un `docker rmi` ou un `docker system prune`), et une cible `trivy` en dépendant signalerait un succès mis en cache contre une image qui n'est pas là.
+
+Définir `"cache": false` maintient cela cohérent à un coût presque nul : le cache de couches propre au moteur de conteneurs est indexé sur le contexte de construction et réside aux côtés de l'image, donc un contexte inchangé se reconstruit en bien moins d'une seconde et laisse toujours l'image présente.
+:::
 
 :::tip[Copie de fichiers multiplateforme]
 Le package `ncp` fournit une commande de copie de fichier/répertoire multiplateforme, évitant `cp` (indisponible sur Windows). Installez-le à la racine de votre espace de travail avec `pnpm add -D -w ncp`.
@@ -256,7 +262,7 @@ Ajoutez une cible `docker` qui copie le `Dockerfile` dans le répertoire de sort
 {
   "targets": {
     "docker": {
-      "cache": true,
+      "cache": false,
       "executor": "nx:run-commands",
       "options": {
         "commands": [
@@ -296,8 +302,8 @@ L'analyse n'est intentionnellement pas connectée à `build` car cela peut intro
 Nous recommandons plutôt d'exécuter la commande ci-dessus comme une étape dédiée dans votre pipeline CI avant le déploiement vers les environnements de production.
 :::
 
-:::tip[La mise en cache ignore les images inchangées]
-Comme l'image est entièrement déterminée par le code source de votre projet, déclarer des `inputs` (ici `default` et `^production`, correspondant à la cible `bundle`) permet à Nx de mettre en cache l'analyse et d'ignorer la réanalyse d'une image qui n'a pas changé. Épinglez la version de l'image Trivy (par exemple <code>trivy:<TrivyVersion /></code>) pour que les analyses soient reproductibles.
+:::caution[L'analyse n'est pas non plus cacheable]
+L'image que l'analyse lit n'est accessible que via le moteur de conteneurs, donc une entrée de cache restaurée signalerait un succès pour une image qui pourrait ne plus être là. Avec `"cache": false`, l'analyse s'exécute toujours contre l'image réelle et échoue bruyamment si elle est manquante. Épinglez la version de l'image Trivy (par exemple <code>trivy:<TrivyVersion /></code>) pour que les analyses soient reproductibles.
 :::
 
 :::note[Suppression des découvertes]

@@ -14,7 +14,7 @@ import { CONTAINER_VERSIONS } from '../../../../../../packages/nx-plugin/src/uti
 export const trivyTarget = `{
   "targets": {
     "trivy": {
-      "cache": true,
+      "cache": false,
       "inputs": ["default", "^production"],
       "outputs": ["{workspaceRoot}/dist/{projectRoot}/trivy"],
       "executor": "nx:run-commands",
@@ -68,7 +68,7 @@ Docker 빌드 컨텍스트는 프로젝트의 `dist` 폴더에 작성됩니다. 
 :::tip[Dockerfile 외부에서 번들링하는 이유는?]
 번들 단계를 Nx에 유지하면(`Dockerfile` 내부가 아닌) 다음과 같은 이점이 있습니다:
 
-- Nx가 번들 타겟을 **캐시**할 수 있어 반복 빌드가 빠릅니다.
+- Nx가 번들 타겟을 **캐시**할 수 있습니다 — 출력이 디스크의 디렉토리이므로 캐시 히트 시 실제로 복원됩니다.
 - `Dockerfile`은 모노레포, 프라이빗 레지스트리 또는 빌드 시간 시크릿에 액세스할 필요가 없습니다.
 - 이미지 레이어가 작습니다 — 이미 빌드된 아티팩트의 단일 `COPY`이며, 전이적인 `node_modules` 또는 빌드 툴체인이 없습니다.
 :::
@@ -167,7 +167,7 @@ CMD ["node", "index.js"]
 {
   "targets": {
     "docker": {
-      "cache": true,
+      "cache": false,
       "executor": "nx:run-commands",
       "options": {
         "commands": [
@@ -181,6 +181,12 @@ CMD ["node", "index.js"]
   }
 }
 ```
+
+:::caution[Nx가 이미지 빌드를 캐시하지 않도록 하세요]
+빌드된 이미지는 컨테이너 엔진의 저장소에 있으며 `outputs` 경로 아래에 있지 않으므로 Nx는 캐시 히트 시 복원할 것이 없습니다 — 이미지가 누락된 상태에서(예: `docker rmi` 또는 `docker system prune` 후) 빌드가 완료되었다고 보고하며, 이에 의존하는 `trivy` 타겟은 존재하지 않는 이미지에 대해 캐시된 통과를 보고합니다.
+
+`"cache": false`로 설정하면 거의 비용 없이 이를 건전하게 유지할 수 있습니다: 컨테이너 엔진 자체의 레이어 캐시는 빌드 컨텍스트를 키로 하고 이미지와 함께 있으므로 변경되지 않은 컨텍스트는 1초 이내에 재빌드되며 항상 이미지가 존재하도록 합니다.
+:::
 
 :::tip[크로스 플랫폼 파일 복사]
 `ncp` 패키지는 크로스 플랫폼 파일/디렉토리 복사 명령을 제공하여 `cp`(Windows에서 사용 불가)를 피합니다. 워크스페이스 루트에 `pnpm add -D -w ncp`로 설치하세요.
@@ -256,7 +262,7 @@ CMD ["python", "-m", "my_project.main"]
 {
   "targets": {
     "docker": {
-      "cache": true,
+      "cache": false,
       "executor": "nx:run-commands",
       "options": {
         "commands": [
@@ -296,8 +302,8 @@ Trivy의 취약점 데이터베이스가 새로운 CVE로 지속적으로 업데
 대신 프로덕션 단계에 배포하기 전에 CI 파이프라인에서 전용 단계로 위 명령을 실행하는 것을 권장합니다.
 :::
 
-:::tip[캐싱은 변경되지 않은 이미지를 건너뜀]
-이미지는 프로젝트 소스에 의해 완전히 결정되므로 `inputs`를 선언하면(여기서는 `bundle` 타겟과 일치하는 `default` 및 `^production`) Nx가 스캔을 캐시하고 변경되지 않은 이미지의 재스캔을 건너뛸 수 있습니다. Trivy 이미지 버전을 고정하여(예: <code>trivy:<TrivyVersion /></code>) 스캔을 재현 가능하게 만드세요.
+:::caution[스캔도 캐시할 수 없습니다]
+스캔이 읽는 이미지는 컨테이너 엔진을 통해서만 접근할 수 있으므로 복원된 캐시 항목은 더 이상 존재하지 않을 수 있는 이미지에 대해 통과를 보고합니다. `"cache": false`를 사용하면 스캔이 항상 실제 이미지에 대해 실행되며 누락된 경우 크게 실패합니다. Trivy 이미지 버전을 고정하여(예: <code>trivy:<TrivyVersion /></code>) 스캔을 재현 가능하게 만드세요.
 :::
 
 :::note[발견 사항 억제]

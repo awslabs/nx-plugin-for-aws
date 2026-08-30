@@ -14,7 +14,7 @@ import { CONTAINER_VERSIONS } from '../../../../../../packages/nx-plugin/src/uti
 export const trivyTarget = `{
   "targets": {
     "trivy": {
-      "cache": true,
+      "cache": false,
       "inputs": ["default", "^production"],
       "outputs": ["{workspaceRoot}/dist/{projectRoot}/trivy"],
       "executor": "nx:run-commands",
@@ -68,7 +68,7 @@ Il contesto di build Docker viene scritto nella cartella `dist` del tuo progetto
 :::tip[Perché fare il bundle fuori dal Dockerfile?]
 Mantenere lo step di bundle in Nx (piuttosto che all'interno del `Dockerfile`) significa:
 
-- Nx può **cachare** il target bundle, quindi le build ripetute sono veloci.
+- Nx può **cachare** il target bundle — il suo output è una directory su disco, quindi un cache hit lo ripristina genuinamente.
 - Il `Dockerfile` non ha bisogno di accedere al tuo monorepo, ai registry privati o ai segreti di build-time.
 - Il layer dell'immagine è minuscolo — un singolo `COPY` di artefatti già costruiti, senza `node_modules` transitivi o toolchain di build.
 :::
@@ -167,7 +167,7 @@ Aggiungi un target `docker` che:
 {
   "targets": {
     "docker": {
-      "cache": true,
+      "cache": false,
       "executor": "nx:run-commands",
       "options": {
         "commands": [
@@ -181,6 +181,12 @@ Aggiungi un target `docker` che:
   }
 }
 ```
+
+:::caution[Non lasciare che Nx cachi una build di immagine]
+Un'immagine costruita vive nello store del motore di container, non sotto alcun percorso `outputs`, quindi Nx non ha nulla da ripristinare su un cache hit — riporterebbe la build completa mentre l'immagine è mancante (ad esempio dopo un `docker rmi` o un `docker system prune`), e un target `trivy` che dipende da essa riporterebbe un pass cachato contro un'immagine che non c'è.
+
+Impostare `"cache": false` mantiene questo corretto a quasi nessun costo: la cache dei layer del motore di container stesso è basata sul contesto di build e vive accanto all'immagine, quindi un contesto non modificato si ricostruisce in ben meno di un secondo e lascia sempre l'immagine presente.
+:::
 
 :::tip[Copia file cross-platform]
 Il pacchetto `ncp` fornisce un comando di copia file/directory cross-platform, evitando `cp` (non disponibile su Windows). Installalo alla radice del tuo workspace con `pnpm add -D -w ncp`.
@@ -256,7 +262,7 @@ Aggiungi un target `docker` che copia il `Dockerfile` nella directory di output 
 {
   "targets": {
     "docker": {
-      "cache": true,
+      "cache": false,
       "executor": "nx:run-commands",
       "options": {
         "commands": [
@@ -296,8 +302,8 @@ La scansione non è intenzionalmente collegata a `build` poiché questo può int
 Invece raccomandiamo di eseguire il comando sopra come step dedicato nella tua pipeline CI prima della distribuzione agli stage di produzione.
 :::
 
-:::tip[La cache salta le immagini non modificate]
-Poiché l'immagine è completamente determinata dal sorgente del tuo progetto, dichiarare `inputs` (qui `default` e `^production`, corrispondenti al target `bundle`) permette a Nx di cachare la scansione e saltare la ri-scansione di un'immagine che non è cambiata. Fissa la versione dell'immagine Trivy (es. <code>trivy:<TrivyVersion /></code>) in modo che le scansioni siano riproducibili.
+:::caution[La scansione non è cachabile neanche]
+L'immagine che la scansione legge è raggiungibile solo attraverso il motore di container, quindi una voce di cache ripristinata riporterebbe un pass per un'immagine che potrebbe non essere più lì. Con `"cache": false` la scansione viene sempre eseguita contro l'immagine reale, e fallisce rumorosamente se è mancante. Fissa la versione dell'immagine Trivy (es. <code>trivy:<TrivyVersion /></code>) in modo che le scansioni siano riproducibili.
 :::
 
 :::note[Soppressione dei risultati]
