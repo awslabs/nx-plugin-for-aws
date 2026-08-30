@@ -251,6 +251,7 @@ export const pyRdbGenerator = async (
 
     projectConfig.targets['bundle-migration'] = {
       cache: true,
+      inputs: ['default'],
       outputs: ['{workspaceRoot}/dist/{projectRoot}/docker/migration'],
       executor: 'nx:run-commands',
       options: {
@@ -277,6 +278,7 @@ export const pyRdbGenerator = async (
     };
     projectConfig.targets['bundle-create-db-user'] = {
       cache: true,
+      inputs: ['default'],
       outputs: ['{workspaceRoot}/dist/{projectRoot}/docker/create-db-user'],
       executor: 'nx:run-commands',
       options: {
