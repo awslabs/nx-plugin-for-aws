@@ -53,7 +53,7 @@ Terraform 인프라 생성기는 Terraform 인프라 프로젝트를 생성합�
     - bootstrap.ts 부트스트랩 tfstate를 가져오기/푸시하고 `terraform apply` 실행
     - bootstrap-destroy.ts 상태 버킷을 비우고 `terraform destroy` 실행
     - init.ts S3 백엔드 구성으로 `terraform init` 실행
-    - plugin-cache.ts 공유 프로바이더 캐시에서 `terraform init`을 가리킴
+    - env.ts 공유 프로바이더 캐시에서 `terraform init`을 가리킴
   - checkov.yml 건너뛸 검사를 포함한 Checkov 구성
   - project.json 프로젝트 구성 및 빌드 타겟
 
@@ -314,17 +314,7 @@ run "plan_is_valid" {
 
 `variables` 블록에 구성에 필요한 모든 변수를 설정하세요. 그렇지 않으면 "has a required variable ... with no set value" 오류와 함께 실행이 실패합니다.
 
-#### 공유 프로바이더 캐시
-
-`terraform init`을 실행하는 모든 타겟은 Terraform의 [`TF_PLUGIN_CACHE_DIR`](https://developer.hashicorp.com/terraform/cli/config/config-file#provider-plugin-cache)을 통해 워크스페이스 루트의 `.terraform/plugin-cache`에 있는 하나의 프로바이더 캐시를 공유합니다. 프로바이더는 한 번 다운로드되고 이후에는 거기에서 링크되는데, 이는 `test` 타겟에 가장 중요합니다: 작업 디렉터리를 `dist` 아래에 유지하므로 `dist`를 정리하거나 캐시 미스가 발생하면 매번 실행할 때마다 AWS 프로바이더(수백 메가바이트)를 다시 다운로드하게 됩니다.
-
-디렉터리는 각 `terraform init` 전에 자동으로 생성되며 `.terraform`은 gitignore됩니다. `.nx/cache`와 달리 `nx reset`으로 제거되지 않으므로 리셋해도 프로바이더가 삭제되지 않습니다. CI에서는 작업 간에 `.terraform/plugin-cache`를 캐시하여 동일한 절약 효과를 얻을 수 있습니다.
-
-Nx의 `env`는 셸보다 우선하므로 환경에서 `TF_PLUGIN_CACHE_DIR`을 설정해도 이러한 타겟이 찾는 위치가 변경되지 않습니다. 다른 곳(예: 여러 워크스페이스 간에 공유되는 위치)을 가리키려면 프로젝트의 `project.json`에서 `TF_PLUGIN_CACHE_DIR`을 변경하고 `bootstrap`, `bootstrap-destroy` 및 `init` 타겟에 대한 `scripts/plugin-cache.ts`의 경로를 변경하세요. `project.json`의 경로는 Nx가 `env` 내부에서 `{workspaceRoot}`를 확장하지 않으므로 타겟의 `cwd`에 상대적입니다.
-
-:::note[잠금 파일]
-캐시는 가져오는 프로바이더 버전을 변경하지 않습니다: `.terraform.lock.hcl`은 여전히 버전을 고정하며, Terraform은 프로바이더가 캐시에서 왔든 레지스트리에서 왔든 동일한 해시를 기록합니다. 평소처럼 잠금 파일을 커밋하세요.
-:::
+`terraform init`을 실행하는 모든 타겟은 워크스페이스 루트의 `.terraform/plugin-cache`에 있는 프로바이더 캐시를 공유합니다. 자세한 내용은 [Terraform 문서](https://developer.hashicorp.com/terraform/cli/config/config-file#provider-plugin-cache)를 참조하세요.
 
 <OptionFilter when={{ type: 'application' }} description="Application-only targets: plan / apply / destroy / etc.">
 ### 애플리케이션 전용 타겟

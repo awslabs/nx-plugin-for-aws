@@ -53,7 +53,7 @@ Terraform 基础设施生成器创建一个 Terraform 基础设施项目。生�
     - bootstrap.ts 拉取/推送引导 tfstate 并运行 `terraform apply`
     - bootstrap-destroy.ts 清空状态存储桶并运行 `terraform destroy`
     - init.ts 使用 S3 后端配置运行 `terraform init`
-    - plugin-cache.ts 将 `terraform init` 指向共享提供程序缓存
+    - env.ts 将 `terraform init` 指向共享提供程序缓存
   - checkov.yml Checkov 配置，包括要跳过的检查
   - project.json 项目配置和构建目标
 
@@ -314,17 +314,7 @@ run "plan_is_valid" {
 
 在 `variables` 块中设置配置所需的每个变量，否则运行将失败并显示"has a required variable ... with no set value"。
 
-#### 共享提供程序缓存
-
-每个运行 `terraform init` 的目标都通过 Terraform 的 [`TF_PLUGIN_CACHE_DIR`](https://developer.hashicorp.com/terraform/cli/config/config-file#provider-plugin-cache) 在工作区根目录的 `.terraform/plugin-cache` 共享一个提供程序缓存。提供程序只下载一次，之后从那里链接，这对 `test` 目标最重要：它将其工作目录保存在 `dist` 下，因此清理 `dist` 或缓存未命中会在每次运行时重新下载 AWS 提供程序——数百兆字节。
-
-该目录在每次 `terraform init` 之前自动创建，并且 `.terraform` 已被 gitignore。与 `.nx/cache` 不同，它不会被 `nx reset` 删除，因此重置不会丢弃提供程序。在 CI 中，在作业之间缓存 `.terraform/plugin-cache` 以获得相同的节省。
-
-Nx 的 `env` 优先于您的 shell，因此在环境中设置 `TF_PLUGIN_CACHE_DIR` 不会改变这些目标查找的位置。要将它们指向其他位置——例如在多个工作区之间共享的位置——请在项目的 `project.json` 中更改 `TF_PLUGIN_CACHE_DIR`，并在 `scripts/plugin-cache.ts` 中为 `bootstrap`、`bootstrap-destroy` 和 `init` 目标更改路径。`project.json` 中的路径相对于目标的 `cwd`，因为 Nx 不会在 `env` 内展开 `{workspaceRoot}`。
-
-:::note[锁定文件]
-缓存不会改变您获得的提供程序版本：`.terraform.lock.hcl` 仍然固定它们，无论提供程序来自缓存还是注册表，Terraform 都会记录相同的哈希值。像往常一样提交锁定文件。
-:::
+每个运行 `terraform init` 的目标都在工作区根目录的 `.terraform/plugin-cache` 共享一个提供程序缓存。有关更多信息，请参阅 [Terraform 文档](https://developer.hashicorp.com/terraform/cli/config/config-file#provider-plugin-cache)。
 
 <OptionFilter when={{ type: 'application' }} description="Application-only targets: plan / apply / destroy / etc.">
 ### 仅限应用程序的目标

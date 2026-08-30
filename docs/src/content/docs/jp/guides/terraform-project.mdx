@@ -53,7 +53,7 @@ Terraform インフラストラクチャジェネレーターは、Terraform イ
     - bootstrap.ts Pulls/pushes the bootstrap tfstate and runs `terraform apply`
     - bootstrap-destroy.ts Empties the state bucket and runs `terraform destroy`
     - init.ts Runs `terraform init` with the S3 backend config
-    - plugin-cache.ts Points `terraform init` at the shared provider cache
+    - env.ts Points `terraform init` at the shared provider cache
   - checkov.yml Checkov configuration, including the checks to skip
   - project.json Project configuration and build targets
 
@@ -314,17 +314,7 @@ run "plan_is_valid" {
 
 設定に必要なすべての変数を `variables` ブロックに設定してください。そうしないと、「has a required variable ... with no set value」というエラーで実行が失敗します。
 
-#### 共有プロバイダーキャッシュ
-
-`terraform init` を実行するすべてのターゲットは、Terraform の [`TF_PLUGIN_CACHE_DIR`](https://developer.hashicorp.com/terraform/cli/config/config-file#provider-plugin-cache) を介して、ワークスペースルートの `.terraform/plugin-cache` にある 1 つのプロバイダーキャッシュを共有します。プロバイダーは一度ダウンロードされ、その後はそこからリンクされます。これは `test` ターゲットにとって最も重要です：作業ディレクトリを `dist` 配下に保持するため、`dist` がクリーンアップされたり、キャッシュミスが発生したりすると、実行のたびに AWS プロバイダー（数百メガバイト）を再ダウンロードすることになります。
-
-ディレクトリは各 `terraform init` の前に自動的に作成され、`.terraform` は gitignore されています。`.nx/cache` とは異なり、`nx reset` では削除されないため、リセットしてもプロバイダーが破棄されることはありません。CI では、ジョブ間で `.terraform/plugin-cache` をキャッシュすることで、同じ節約効果が得られます。
-
-Nx の `env` はシェルよりも優先されるため、環境で `TF_PLUGIN_CACHE_DIR` を設定しても、これらのターゲットが参照する場所は変わりません。別の場所（複数のワークスペース間で共有される場所など）を指定するには、プロジェクトの `project.json` で `TF_PLUGIN_CACHE_DIR` を変更し、`bootstrap`、`bootstrap-destroy`、`init` ターゲット用に `scripts/plugin-cache.ts` のパスを変更します。`project.json` のパスは、Nx がターゲットの `cwd` 内で `{workspaceRoot}` を展開しないため、ターゲットの `cwd` からの相対パスです。
-
-:::note[ロックファイル]
-キャッシュは取得するプロバイダーのバージョンを変更しません：`.terraform.lock.hcl` は引き続きそれらを固定し、Terraform はプロバイダーがキャッシュから来たかレジストリから来たかに関わらず、同じハッシュを記録します。通常どおりロックファイルをコミットしてください。
-:::
+`terraform init` を実行するすべてのターゲットは、ワークスペースルートの `.terraform/plugin-cache` にあるプロバイダーキャッシュを共有します。詳細については、[Terraform ドキュメント](https://developer.hashicorp.com/terraform/cli/config/config-file#provider-plugin-cache)を参照してください。
 
 <OptionFilter when={{ type: 'application' }} description="Application-only targets: plan / apply / destroy / etc.">
 ### アプリケーション専用ターゲット
