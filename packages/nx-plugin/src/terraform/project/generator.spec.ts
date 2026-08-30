@@ -856,6 +856,23 @@ describe('terraformProjectGenerator', () => {
       expect(lintDependsOn()).toEqual(afterFirstRun);
     });
 
+    it('should leave project.json byte-identical when re-run', async () => {
+      // `updateProjectConfiguration` re-serialises project.json with every
+      // inline array expanded, so without a formatting pass the re-run rewrites
+      // the whole file — a diff, and one the vended `format` target rejects.
+      await licenseGenerator(tree, { license: 'Apache-2.0' } as never);
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      const path = 'packages/my-terraform-project/project.json';
+      const afterFirstRun = tree.read(path, 'utf-8');
+      expect(afterFirstRun).toContain('"dependsOn": ["plan"]');
+
+      await licenseGenerator(tree, { license: 'Apache-2.0' } as never);
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      expect(tree.read(path, 'utf-8')).toBe(afterFirstRun);
+    });
+
     it('should preserve project.json customisations when re-run', async () => {
       await terraformProjectGenerator(tree, applicationSchema);
 

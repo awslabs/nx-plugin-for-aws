@@ -23,6 +23,7 @@ import {
   declareDependencies,
   ownedElsewhere,
 } from '../../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../../utils/format.js';
 import { updateGitIgnore } from '../../utils/git.js';
 import { installDependencies } from '../../utils/install.js';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
@@ -447,6 +448,10 @@ export async function terraformProjectGenerator(
       return packageJson;
     });
   }
+
+  // `updateProjectConfiguration` re-serialises project.json with every inline
+  // array expanded, which the vended `format` target rejects.
+  await formatFilesInSubtree(tree);
 
   // `@nx-extend/terraform` is registered as an Nx plugin in nx.json, so Nx
   // loads it when computing the project graph — it must resolve even if the
