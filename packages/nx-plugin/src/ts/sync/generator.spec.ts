@@ -28,19 +28,35 @@ vi.mock('@nx/devkit', async (importOriginal) => {
     // the per-test patch of the underlying nx module — delegate at call time.
     createProjectGraphAsync: (...args: unknown[]) =>
       nxProjectGraph.createProjectGraphAsync(...args),
+    readCachedProjectGraph: (...args: unknown[]) =>
+      nxProjectGraph.readCachedProjectGraph(...args),
   };
 });
 
-// The generator derives local dependencies from the Nx project graph (via
-// createProjectGraphAsync). Building a real graph reads from disk, so patch the
-// underlying nx module (the same technique as utils/mock-project-graph.ts) and
-// set the graph per test.
+// The generator derives local dependencies from the Nx project graph, preferring
+// the cache Nx populates before running sync generators. Both accessors read
+// from disk, so patch the underlying nx module (the same technique as
+// utils/mock-project-graph.ts) and set the graph per test.
 const _require = createRequire(import.meta.url);
 const projectGraphModule = _require('nx/src/project-graph/project-graph');
 const originalCreateProjectGraphAsync =
   projectGraphModule.createProjectGraphAsync;
+const originalReadCachedProjectGraph =
+  projectGraphModule.readCachedProjectGraph;
 
+// Mirrors Nx: the cache is populated and `createProjectGraphAsync` is redundant.
 const setProjectGraph = (graph: ProjectGraph) => {
+  projectGraphModule.readCachedProjectGraph = () => graph;
+  projectGraphModule.createProjectGraphAsync = async () => graph;
+};
+
+// Mirrors a cold workspace: no cache on disk, so only building the graph works.
+const setUncachedProjectGraph = (graph: ProjectGraph) => {
+  projectGraphModule.readCachedProjectGraph = () => {
+    throw new Error(
+      '[readCachedProjectGraph] ERROR: No cached ProjectGraph is available.',
+    );
+  };
   projectGraphModule.createProjectGraphAsync = async () => graph;
 };
 
@@ -62,6 +78,7 @@ describe('ts-sync generator', () => {
   afterEach(() => {
     projectGraphModule.createProjectGraphAsync =
       originalCreateProjectGraphAsync;
+    projectGraphModule.readCachedProjectGraph = originalReadCachedProjectGraph;
   });
 
   const writeJson = (path: string, value: unknown) =>
@@ -454,6 +471,40 @@ describe('ts-sync generator', () => {
       expect(
         readJson(tree, 'packages/lib-b/package.json').dependencies ?? {},
       ).not.toHaveProperty('@proj/lib-a');
+    });
+
+    it('reads the cached graph without rebuilding it', async () => {
+      addProject('lib-a', '@proj/lib-a');
+      addProject('lib-b', '@proj/lib-b');
+      addDependency('lib-b', 'lib-a');
+      projectGraphModule.readCachedProjectGraph = () => graph;
+      const createProjectGraph = vi.fn();
+      projectGraphModule.createProjectGraphAsync = createProjectGraph;
+
+      await tsSyncGeneratorGenerator(tree);
+
+      expect(createProjectGraph).not.toHaveBeenCalled();
+      expect(
+        readJson(tree, 'packages/lib-b/package.json').dependencies[
+          '@proj/lib-a'
+        ],
+      ).toBe('workspace:*');
+    });
+
+    it('builds the graph when no cache is available', async () => {
+      addProject('lib-a', '@proj/lib-a');
+      addProject('lib-b', '@proj/lib-b');
+      addDependency('lib-b', 'lib-a');
+      setUncachedProjectGraph(graph);
+
+      const result = await tsSyncGeneratorGenerator(tree);
+
+      expect(result.outOfSyncMessage).toContain('@proj/lib-a: workspace:*');
+      expect(
+        readJson(tree, 'packages/lib-b/package.json').dependencies[
+          '@proj/lib-a'
+        ],
+      ).toBe('workspace:*');
     });
   });
 });
