@@ -134,7 +134,7 @@ describe('ts lib generator', () => {
     expect(namedInputs?.default).toBeDefined();
 
     expect(namedInputs.default).toContainEqual({
-      dependentTasksOutputFiles: '**/*',
+      dependentTasksOutputFiles: 'dist/**',
       transitive: true,
     });
 
