@@ -69,6 +69,36 @@ const NX_EXTEND_PLUGIN = '@nx-extend/terraform';
 export const TERRAFORM_PROJECT_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(import.meta.filename);
 
+/**
+ * Checks formatting, mirroring the TypeScript and Python `format` targets: the
+ * base target fails on an unformatted file and the `fix` configuration rewrites
+ * it. Writing from the base target would rewrite the `default` input the hash is
+ * computed over, so the target could never cache-hit.
+ *
+ * `-recursive` covers nested modules; `terraform fmt` alone reads only the
+ * directory it is given. Provider caches under `.terraform` are skipped, since
+ * `fmt` ignores dot-prefixed directories.
+ */
+export const TERRAFORM_FMT_TARGET: TargetConfiguration = {
+  executor: 'nx:run-commands',
+  cache: true,
+  inputs: ['default'],
+  options: {
+    command: 'terraform fmt -check -recursive -diff',
+    forwardAllArgs: true,
+    cwd: '{projectRoot}/src',
+  },
+  configurations: {
+    fix: {
+      command: 'terraform fmt -recursive',
+    },
+    'skip-lint': {
+      // Cross-platform no-op (`true` is not available on Windows cmd).
+      command: 'node -e ""',
+    },
+  },
+};
+
 export async function terraformProjectGenerator(
   tree: Tree,
   schema: TerraformProjectGeneratorSchema,
@@ -241,15 +271,13 @@ export async function terraformProjectGenerator(
     assemble: {
       executor: 'nx:noop',
     },
-    fmt: {
-      executor: 'nx:run-commands',
-      cache: true,
-      inputs: ['default'],
-      options: {
-        command: 'terraform fmt',
-        forwardAllArgs: true,
-        cwd: '{projectRoot}/src',
-      },
+    fmt: TERRAFORM_FMT_TARGET,
+    // Terraform has no linter of its own, so `lint` orchestrates the format
+    // check. It exists so `nx run-many --target lint` reaches terraform
+    // projects, and so `--configuration=fix` and `--configuration=skip-lint`
+    // propagate to `fmt` the way they do for TypeScript and Python projects.
+    lint: {
+      dependsOn: ['fmt'],
     },
     init: {
       executor: 'nx:run-commands',
@@ -269,9 +297,12 @@ export async function terraformProjectGenerator(
         env: { TF_PLUGIN_CACHE_DIR: pluginCacheDir },
       },
     },
+    // `^production` mirrors `test`: checkov resolves the relative modules a
+    // project consumes, so a change in one must invalidate the scan.
     checkov: {
       executor: 'nx:run-commands',
       cache: true,
+      inputs: ['default', '^production'],
       outputs: ['{workspaceRoot}/dist/{projectRoot}/checkov'],
       options: {
         command: uvxCommand(

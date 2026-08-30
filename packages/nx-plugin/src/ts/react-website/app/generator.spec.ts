@@ -778,7 +778,7 @@ describe('react-website generator', () => {
 
       // It aggregates the namespace's entries into `<config_dir>/<namespace>.json`.
       expect(readTf).toContain(
-        'namespace_path  = "${local.config_dir}/${var.namespace}.json"',
+        'namespace_path = "${local.config_dir}/${var.namespace}.json"',
       );
 
       // The website reads one namespace from that directory.
