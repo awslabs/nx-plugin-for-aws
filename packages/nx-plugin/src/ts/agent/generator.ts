@@ -46,6 +46,7 @@ import { esmVars } from '../../utils/module-format.js';
 import { kebabCase, toClassName } from '../../utils/names.js';
 import { getNpmScope } from '../../utils/npm-scope.js';
 import {
+  addArtifactDependencyToTargets,
   addComponentDevTarget,
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
@@ -307,7 +308,7 @@ export const tsAgentGenerator = async (
     };
 
     addDependencyToTargetIfNotPresent(project, 'docker', dockerTargetName);
-    addDependencyToTargetIfNotPresent(project, 'build', 'docker');
+    addArtifactDependencyToTargets(project, 'docker');
 
     addDockerScanTarget(
       tree,

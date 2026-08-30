@@ -43,19 +43,23 @@ export const addOpenApiGeneration = (
   // Instrument the script as part of the fastapi project build
   const fastApiOpenApiDist = joinPathFragments('dist', project.root, 'openapi');
   const specPath = joinPathFragments(fastApiOpenApiDist, 'openapi.json');
+  const withOpenApi = (target: string) => ({
+    ...project.targets?.[target],
+    dependsOn: [
+      ...(project.targets?.[target]?.dependsOn ?? []).filter(
+        (t) => t !== 'openapi',
+      ),
+      'openapi',
+    ],
+  });
   updateProjectConfiguration(tree, project.name, {
     ...project,
     targets: sortObjectKeys({
       ...project.targets,
-      build: {
-        ...project.targets?.build,
-        dependsOn: [
-          ...(project.targets?.build?.dependsOn ?? []).filter(
-            (t) => t !== 'openapi',
-          ),
-          'openapi',
-        ],
-      },
+      build: withOpenApi('build'),
+      // The spec is a deployable artifact: the infrastructure derives the API's
+      // routes from it, so a deploy needs it as much as a build does.
+      package: withOpenApi('package'),
       openapi: {
         cache: true,
         executor: 'nx:run-commands',

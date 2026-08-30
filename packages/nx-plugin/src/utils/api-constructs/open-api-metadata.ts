@@ -10,7 +10,10 @@ import {
 } from '@nx/devkit';
 import { updateGitIgnore } from '../git.js';
 import type { Iac } from '../iac.js';
-import { addDependencyToTargetIfNotPresent } from '../nx.js';
+import {
+  addArtifactDependencyToTargets,
+  addDependencyToTargetIfNotPresent,
+} from '../nx.js';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
@@ -168,7 +171,7 @@ const addTerraformOpenApiOperationsGenerateTarget = (
           dependsOn: [specBuildTargetName],
         };
       }
-      addDependencyToTargetIfNotPresent(config, 'build', operationsTargetName);
+      addArtifactDependencyToTargets(config, operationsTargetName);
       return config;
     },
   );

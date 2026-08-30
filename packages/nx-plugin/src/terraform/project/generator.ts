@@ -148,6 +148,12 @@ export async function terraformProjectGenerator(
     deploy: {
       dependsOn: ['apply'],
     },
+    // The artifact-only sibling of build, which `plan` depends on. `checkov`
+    // stays in it: policy scanning is a security control rather than a code
+    // quality gate, and it caches on the module sources so a warm run is free.
+    package: {
+      dependsOn: ['checkov', `${sharedTfProjectName}:package`],
+    },
     destroy: {
       executor: 'nx:run-commands',
       defaultConfiguration: 'dev',
@@ -203,7 +209,7 @@ export async function terraformProjectGenerator(
         cwd: '{projectRoot}/src',
         parallel: false,
       },
-      dependsOn: ['init', 'validate', '^validate', 'build'],
+      dependsOn: ['init', 'validate', '^validate', 'package'],
     },
   };
 
@@ -212,6 +218,12 @@ export async function terraformProjectGenerator(
   } = {
     build: {
       dependsOn: ['fmt', 'checkov', 'test'],
+    },
+    // A Terraform library vends modules rather than a deployable artifact, so
+    // its `package` scans them and carries whatever the consuming projects
+    // register on it.
+    package: {
+      dependsOn: ['checkov'],
     },
     fmt: {
       executor: 'nx:run-commands',

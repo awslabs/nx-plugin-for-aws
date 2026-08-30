@@ -74,7 +74,7 @@ describe('infra generator', () => {
       cache: true,
       executor: 'nx:run-commands',
       outputs: ['{workspaceRoot}/dist/{projectRoot}/cdk.out'],
-      dependsOn: ['^build', 'compile'],
+      dependsOn: ['^package', 'compile'],
       options: {
         cwd: '{projectRoot}',
         command: 'cdk synth',
@@ -87,7 +87,7 @@ describe('infra generator', () => {
         cwd: '{projectRoot}',
         command: 'cdk deploy --require-approval=never',
       },
-      dependsOn: ['^build', 'compile'],
+      dependsOn: ['^package', 'compile'],
     });
     expect(config.targets['deploy-sandbox']).toMatchObject({
       executor: 'nx:run-commands',
@@ -95,7 +95,7 @@ describe('infra generator', () => {
         cwd: '{projectRoot}',
         command: 'cdk deploy --require-approval=never "proj-test-sandbox/*"',
       },
-      dependsOn: ['^build', 'compile'],
+      dependsOn: ['^package', 'compile'],
     });
     expect(config.targets['deploy-ci']).toMatchObject({
       executor: 'nx:run-commands',
@@ -112,7 +112,7 @@ describe('infra generator', () => {
         cwd: '{projectRoot}',
         command: 'cdk destroy',
       },
-      dependsOn: ['^build', 'compile'],
+      dependsOn: ['^package', 'compile'],
     });
     expect(config.targets['destroy-sandbox']).toMatchObject({
       executor: 'nx:run-commands',
@@ -120,7 +120,7 @@ describe('infra generator', () => {
         cwd: '{projectRoot}',
         command: 'cdk destroy "proj-test-sandbox/*"',
       },
-      dependsOn: ['^build', 'compile'],
+      dependsOn: ['^package', 'compile'],
     });
     expect(config.targets['destroy-ci']).toMatchObject({
       executor: 'nx:run-commands',
@@ -386,10 +386,10 @@ describe('infra generator', () => {
       );
     });
 
-    it(`should build first, like the ${action} target`, async () => {
+    it(`should package first, like the ${action} target`, async () => {
       await tsInfraGenerator(tree, options);
       const config = readProjectConfiguration(tree, '@proj/test');
-      expect(config.targets[target].dependsOn).toEqual(['^build', 'compile']);
+      expect(config.targets[target].dependsOn).toEqual(['^package', 'compile']);
     });
   });
 
@@ -430,7 +430,7 @@ describe('infra generator', () => {
           `tsx packages/common/scripts/src/infra/infra-${action}.ts packages/test "proj-test-sandbox/*"`,
         );
         expect(config.targets[`${action}-sandbox`].dependsOn).toEqual([
-          '^build',
+          '^package',
           'compile',
         ]);
       },
@@ -536,7 +536,7 @@ describe('infra generator', () => {
       const config = readProjectConfiguration(tree, '@proj/test');
       expect(config.targets.deploy).toMatchObject({
         executor: 'nx:run-commands',
-        dependsOn: ['^build', 'compile'],
+        dependsOn: ['^package', 'compile'],
         options: {
           command:
             'tsx packages/common/scripts/src/infra/infra-deploy.ts packages/test',
@@ -544,7 +544,7 @@ describe('infra generator', () => {
       });
       expect(config.targets.destroy).toMatchObject({
         executor: 'nx:run-commands',
-        dependsOn: ['^build', 'compile'],
+        dependsOn: ['^package', 'compile'],
         options: {
           command:
             'tsx packages/common/scripts/src/infra/infra-destroy.ts packages/test',
@@ -595,5 +595,43 @@ describe('infra generator', () => {
     expect(readProjectConfiguration(tree, '@proj/test')).toBeDefined();
     expect(readProjectConfiguration(tree, '@proj/other')).toBeDefined();
     expect(tree.exists('packages/other/cdk.json')).toBeTruthy();
+  });
+
+  describe('package target', () => {
+    it('should produce the cloud assembly without the build quality gates', async () => {
+      await tsInfraGenerator(tree, options);
+      const config = readProjectConfiguration(tree, '@proj/test');
+
+      // `synth` is the deployable artifact, so it belongs on package; lint,
+      // test and checkov are quality gates, which stay on build alone.
+      expect(config.targets.package.dependsOn).toContain('synth');
+      expect(config.targets.package.dependsOn).not.toContain('lint');
+      expect(config.targets.package.dependsOn).not.toContain('test');
+      expect(config.targets.package.dependsOn).not.toContain('checkov');
+    });
+
+    it('should keep build running every quality gate', async () => {
+      await tsInfraGenerator(tree, options);
+      const config = readProjectConfiguration(tree, '@proj/test');
+
+      // Narrowing the deploy path must not narrow `build`, which is still the
+      // target that runs everything.
+      for (const gate of ['lint', 'test', 'synth', 'checkov']) {
+        expect(config.targets.build.dependsOn).toContain(gate);
+      }
+    });
+
+    it('should not grow either target on a re-run', async () => {
+      await tsInfraGenerator(tree, options);
+      const first = readProjectConfiguration(tree, '@proj/test');
+      const build = [...first.targets.build.dependsOn];
+      const pkg = [...first.targets.package.dependsOn];
+
+      await tsInfraGenerator(tree, options);
+      const second = readProjectConfiguration(tree, '@proj/test');
+
+      expect(second.targets.build.dependsOn).toEqual(build);
+      expect(second.targets.package.dependsOn).toEqual(pkg);
+    });
   });
 });

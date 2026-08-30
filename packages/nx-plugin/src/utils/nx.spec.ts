@@ -5,6 +5,8 @@
 import type { ProjectConfiguration, Tree } from '@nx/devkit';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  addArtifactDependencyToTargets,
+  addArtifactProjectToTargets,
   addComponentDevTarget,
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
@@ -553,6 +555,80 @@ describe('addDependencyToTargetIfNotPresent', () => {
       '@e2e/website-no-router:build',
       '^build',
     ]);
+  });
+});
+
+describe('addArtifactDependencyToTargets', () => {
+  const makeProject = (): ProjectConfiguration => ({
+    name: 'test-project',
+    root: 'apps/test-project',
+  });
+
+  it('should register the dependency on both build and package', () => {
+    const project = makeProject();
+    addArtifactDependencyToTargets(project, 'bundle');
+    expect(project.targets?.build?.dependsOn).toEqual(['bundle']);
+    expect(project.targets?.package?.dependsOn).toEqual(['bundle']);
+  });
+
+  it('should append to the existing dependencies of both targets', () => {
+    const project = makeProject();
+    project.targets = {
+      build: { dependsOn: ['lint', 'compile', 'test'] },
+      package: { dependsOn: ['compile'] },
+    };
+    addArtifactDependencyToTargets(project, 'docker');
+    expect(project.targets.build.dependsOn).toEqual([
+      'lint',
+      'compile',
+      'test',
+      'docker',
+    ]);
+    expect(project.targets.package.dependsOn).toEqual(['compile', 'docker']);
+  });
+
+  it('should be idempotent so a re-run does not grow either target', () => {
+    const project = makeProject();
+    addArtifactDependencyToTargets(project, 'bundle');
+    addArtifactDependencyToTargets(project, 'bundle');
+    expect(project.targets?.build?.dependsOn).toEqual(['bundle']);
+    expect(project.targets?.package?.dependsOn).toEqual(['bundle']);
+  });
+});
+
+describe('addArtifactProjectToTargets', () => {
+  const makeProject = (): ProjectConfiguration => ({
+    name: 'common-constructs',
+    root: 'packages/common/constructs',
+  });
+
+  it('should register build against build and package against package', () => {
+    const project = makeProject();
+    addArtifactProjectToTargets(project, '@proj/api');
+    expect(project.targets?.build?.dependsOn).toEqual(['@proj/api:build']);
+    expect(project.targets?.package?.dependsOn).toEqual(['@proj/api:package']);
+  });
+
+  it('should accumulate each consumed project in registration order', () => {
+    const project = makeProject();
+    addArtifactProjectToTargets(project, '@proj/api');
+    addArtifactProjectToTargets(project, '@proj/website');
+    expect(project.targets?.build?.dependsOn).toEqual([
+      '@proj/api:build',
+      '@proj/website:build',
+    ]);
+    expect(project.targets?.package?.dependsOn).toEqual([
+      '@proj/api:package',
+      '@proj/website:package',
+    ]);
+  });
+
+  it('should be idempotent so a re-run does not grow either target', () => {
+    const project = makeProject();
+    addArtifactProjectToTargets(project, '@proj/api');
+    addArtifactProjectToTargets(project, '@proj/api');
+    expect(project.targets?.build?.dependsOn).toEqual(['@proj/api:build']);
+    expect(project.targets?.package?.dependsOn).toEqual(['@proj/api:package']);
   });
 });
 

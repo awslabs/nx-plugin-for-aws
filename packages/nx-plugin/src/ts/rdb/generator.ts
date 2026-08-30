@@ -42,6 +42,7 @@ import { esmVars } from '../../utils/module-format.js';
 import { kebabCase, snakeCase, toClassName } from '../../utils/names.js';
 import { getNpmScope } from '../../utils/npm-scope.js';
 import {
+  addArtifactDependencyToTargets,
   addDependencyToTargetIfNotPresent,
   addGeneratorMetadata,
   getGeneratorInfo,
@@ -347,7 +348,7 @@ export const tsRdbGenerator = async (
         },
         dependsOn: ['bundle'],
       };
-      addDependencyToTargetIfNotPresent(projectConfig, 'build', 'docker');
+      addArtifactDependencyToTargets(projectConfig, 'docker');
 
       addDockerScanTarget(
         tree,
@@ -361,7 +362,7 @@ export const tsRdbGenerator = async (
         DEPENDENCIES,
       );
     }
-    addDependencyToTargetIfNotPresent(projectConfig, 'build', 'bundle');
+    addArtifactDependencyToTargets(projectConfig, 'bundle');
   }
   addDependencyToTargetIfNotPresent(projectConfig, 'compile', 'generate');
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfig);

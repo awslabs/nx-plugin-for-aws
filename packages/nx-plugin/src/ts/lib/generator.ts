@@ -143,6 +143,10 @@ export const tsProjectGenerator = async (
   targets['build'] = {
     dependsOn: ['lint', 'compile', 'test'],
   };
+  // The artifact-only sibling of build, which the deploy targets depend on.
+  targets['package'] = {
+    dependsOn: ['compile'],
+  };
   projectConfiguration.targets = sortObjectKeys(targets);
 
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfiguration);

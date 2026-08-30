@@ -33,6 +33,7 @@ import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
 import { kebabCase, toClassName, toSnakeCase } from '../../utils/names.js';
 import { getNpmScope } from '../../utils/npm-scope.js';
 import {
+  addArtifactDependencyToTargets,
   addComponentDevTarget,
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
@@ -203,7 +204,7 @@ export const pyMcpServerGenerator = async (
     };
 
     addDependencyToTargetIfNotPresent(project, 'docker', dockerTargetName);
-    addDependencyToTargetIfNotPresent(project, 'build', 'docker');
+    addArtifactDependencyToTargets(project, 'docker');
 
     addDockerScanTarget(
       tree,

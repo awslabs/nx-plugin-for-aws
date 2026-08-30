@@ -277,7 +277,9 @@ export async function tsReactWebsiteGenerator(
 
   if (!projectAlreadyExists) {
     targets['compile'] = {
-      dependsOn: ['^build'],
+      // `tsc` needs its dependencies' declarations, which `compile` emits — not
+      // their lint or test results.
+      dependsOn: ['^compile'],
       executor: 'nx:run-commands',
       outputs: ['{workspaceRoot}/dist/{projectRoot}/tsc'],
       options: {
@@ -290,6 +292,9 @@ export async function tsReactWebsiteGenerator(
     // artifact. build aggregates lint/compile/test/bundle.
     targets['build'] = {
       dependsOn: ['lint', 'compile', 'test', 'bundle'],
+    };
+    targets['package'] = {
+      dependsOn: ['compile', 'bundle'],
     };
 
     // Run the website and its connected dependencies locally. Mirrors the

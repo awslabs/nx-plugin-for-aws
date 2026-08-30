@@ -13,7 +13,7 @@ import {
 import { addStarExport } from '../ast.js';
 import type { Iac } from '../iac.js';
 import { esmVars } from '../module-format.js';
-import { addDependencyToTargetIfNotPresent } from '../nx.js';
+import { addArtifactProjectToTargets } from '../nx.js';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
@@ -49,11 +49,7 @@ export const addDynamoDBInfra = async (
       'project.json',
     ),
     (config: ProjectConfiguration) => {
-      addDependencyToTargetIfNotPresent(
-        config,
-        'build',
-        `${options.projectName}:build`,
-      );
+      addArtifactProjectToTargets(config, options.projectName);
       return config;
     },
   );

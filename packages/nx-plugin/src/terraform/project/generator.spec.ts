@@ -87,6 +87,7 @@ describe('terraformProjectGenerator', () => {
         'fmt',
         'init',
         'output',
+        'package',
         'plan',
         'test',
         'validate',
@@ -317,7 +318,7 @@ describe('terraformProjectGenerator', () => {
         'init',
         'validate',
         '^validate',
-        'build',
+        'package',
       ]);
     });
 
@@ -712,6 +713,53 @@ describe('terraformProjectGenerator', () => {
       expect(
         readProjectConfiguration(tree, '@proj/other-terraform-project'),
       ).toBeDefined();
+    });
+  });
+
+  describe('package target', () => {
+    const applicationSchema: TerraformProjectGeneratorSchema = {
+      name: 'my-terraform-project',
+      type: 'application',
+      directory: 'packages',
+    };
+
+    it('should keep checkov on the plan path but drop the terraform tests', async () => {
+      await terraformProjectGenerator(tree, applicationSchema);
+      const config = readProjectConfiguration(
+        tree,
+        '@proj/my-terraform-project',
+      );
+
+      // Policy scanning is a security control rather than a code quality gate,
+      // so it stays where an interactive `plan` still reaches it.
+      expect(config.targets.package.dependsOn).toContain('checkov');
+      expect(config.targets.package.dependsOn).not.toContain('test');
+      expect(config.targets.package.dependsOn).not.toContain('fmt');
+    });
+
+    it('should keep build running every quality gate', async () => {
+      await terraformProjectGenerator(tree, applicationSchema);
+      const config = readProjectConfiguration(
+        tree,
+        '@proj/my-terraform-project',
+      );
+
+      for (const gate of ['fmt', 'checkov', 'test']) {
+        expect(config.targets.build.dependsOn).toContain(gate);
+      }
+    });
+
+    it('should scan a library, which vends modules the applications plan', async () => {
+      await terraformProjectGenerator(tree, {
+        name: 'my-terraform-lib',
+        type: 'library',
+      });
+      const config = readProjectConfiguration(tree, '@proj/my-terraform-lib');
+
+      // A library produces no artifact of its own, but its modules reach a plan
+      // through the consuming application, so they must still be scanned.
+      expect(config.targets.package.dependsOn).toEqual(['checkov']);
+      expect(config.targets.package.dependsOn).not.toContain('test');
     });
   });
 

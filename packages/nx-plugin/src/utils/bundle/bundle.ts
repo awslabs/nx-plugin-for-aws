@@ -19,6 +19,7 @@ import {
 } from '../declared-dependencies.js';
 import { addDependenciesToPackageJson } from '../dependencies.js';
 import {
+  addArtifactDependencyToTargets,
   addDependencyToTargetIfNotPresent,
   normalizeTargetKeyOrder,
 } from '../nx.js';
@@ -109,7 +110,7 @@ export const addPythonBundleTarget = (
 
   // Add a "bundle" target which depends on either bundle-arm or bundle-x86 (or both)
   addDependencyToTargetIfNotPresent(project, 'bundle', bundleTargetName);
-  addDependencyToTargetIfNotPresent(project, 'build', 'bundle');
+  addArtifactDependencyToTargets(project, 'bundle');
 
   return {
     bundleTargetName,
@@ -178,7 +179,7 @@ export const addTypeScriptBundleTarget = async <
   }
 
   // Add bundle to the build target
-  addDependencyToTargetIfNotPresent(project, 'build', 'bundle');
+  addArtifactDependencyToTargets(project, 'bundle');
 
   const rolldownConfigPath = joinPathFragments(
     project.root,
