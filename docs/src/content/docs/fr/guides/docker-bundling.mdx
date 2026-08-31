@@ -15,7 +15,6 @@ export const trivyTarget = `{
   "targets": {
     "trivy": {
       "cache": false,
-      "inputs": ["default", "^production"],
       "outputs": ["{workspaceRoot}/dist/{projectRoot}/trivy"],
       "executor": "nx:run-commands",
       "options": {
@@ -302,8 +301,10 @@ L'analyse n'est intentionnellement pas connectée à `build` car cela peut intro
 Nous recommandons plutôt d'exécuter la commande ci-dessus comme une étape dédiée dans votre pipeline CI avant le déploiement vers les environnements de production.
 :::
 
-:::caution[L'analyse n'est pas non plus cacheable]
+:::tip[Pourquoi l'analyse n'est délibérément pas mise en cache]
 L'image que l'analyse lit n'est accessible que via le moteur de conteneurs, donc une entrée de cache restaurée signalerait un succès pour une image qui pourrait ne plus être là. Avec `"cache": false`, l'analyse s'exécute toujours contre l'image réelle et échoue bruyamment si elle est manquante. Épinglez la version de l'image Trivy (par exemple <code>trivy:<TrivyVersion /></code>) pour que les analyses soient reproductibles.
+
+Cela signifie que chaque exécution de `trivy` effectue un `docker save` complet plus une analyse par image — attendez-vous à des dizaines de secondes par image plutôt qu'à un succès de cache gratuit, c'est pourquoi l'analyse appartient à son propre job CI plutôt qu'à `build`. Elle rafraîchit également la base de données de vulnérabilités de Trivy à chaque exécution, elle a donc besoin d'un accès réseau ; ce rafraîchissement est le but, puisqu'une analyse n'est aussi bonne que les données CVE qui la sous-tendent. Sur un runner isolé du réseau, montez un répertoire de cache persistant à `/root/.cache/trivy` et ajoutez `--skip-db-update`, après avoir alimenté la base de données dans une étape antérieure.
 :::
 
 :::note[Suppression des découvertes]

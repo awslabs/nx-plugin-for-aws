@@ -15,7 +15,6 @@ export const trivyTarget = `{
   "targets": {
     "trivy": {
       "cache": false,
-      "inputs": ["default", "^production"],
       "outputs": ["{workspaceRoot}/dist/{projectRoot}/trivy"],
       "executor": "nx:run-commands",
       "options": {
@@ -302,8 +301,10 @@ CMD ["python", "-m", "my_project.main"]
 相反，我们建议在 CI 管道中作为专门步骤运行上述命令，在部署到生产阶段之前。
 :::
 
-:::caution[扫描也不可缓存]
+:::tip[为什么扫描故意不被缓存]
 扫描读取的镜像只能通过容器引擎访问，因此恢复的缓存条目会报告可能不再存在的镜像的通过。使用 `"cache": false`，扫描始终针对真实镜像运行，如果镜像缺失则会大声失败。固定 Trivy 镜像版本（例如 <code>trivy:<TrivyVersion /></code>），以便扫描可重现。
+
+这意味着每次 `trivy` 运行都会对每个镜像执行完整的 `docker save` 加扫描——预计每个镜像需要数十秒而不是免费的缓存命中，这就是为什么扫描应该在自己的 CI 作业中而不是在 `build` 中。它还会在每次运行时刷新 Trivy 的漏洞数据库，因此需要网络访问；这种刷新是重点，因为扫描的好坏取决于其背后的 CVE 数据。在网络隔离的运行器上，在 `/root/.cache/trivy` 挂载一个持久缓存目录并添加 `--skip-db-update`，在早期步骤中播种数据库。
 :::
 
 :::note[抑制发现]

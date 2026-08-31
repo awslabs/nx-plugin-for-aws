@@ -15,7 +15,6 @@ export const trivyTarget = `{
   "targets": {
     "trivy": {
       "cache": false,
-      "inputs": ["default", "^production"],
       "outputs": ["{workspaceRoot}/dist/{projectRoot}/trivy"],
       "executor": "nx:run-commands",
       "options": {
@@ -302,8 +301,10 @@ Trivy의 취약점 데이터베이스가 새로운 CVE로 지속적으로 업데
 대신 프로덕션 단계에 배포하기 전에 CI 파이프라인에서 전용 단계로 위 명령을 실행하는 것을 권장합니다.
 :::
 
-:::caution[스캔도 캐시할 수 없습니다]
+:::tip[스캔이 의도적으로 캐시되지 않는 이유]
 스캔이 읽는 이미지는 컨테이너 엔진을 통해서만 접근할 수 있으므로 복원된 캐시 항목은 더 이상 존재하지 않을 수 있는 이미지에 대해 통과를 보고합니다. `"cache": false`를 사용하면 스캔이 항상 실제 이미지에 대해 실행되며 누락된 경우 크게 실패합니다. Trivy 이미지 버전을 고정하여(예: <code>trivy:<TrivyVersion /></code>) 스캔을 재현 가능하게 만드세요.
+
+이는 모든 `trivy` 실행이 이미지당 전체 `docker save`와 스캔을 수행한다는 것을 의미합니다 — 무료 캐시 히트가 아닌 이미지당 수십 초를 예상하세요. 이것이 스캔이 `build`가 아닌 자체 CI 작업에 속하는 이유입니다. 또한 각 실행마다 Trivy의 취약점 데이터베이스를 새로 고치므로 네트워크 액세스가 필요합니다. 이 새로 고침이 핵심입니다. 스캔은 그 뒤에 있는 CVE 데이터만큼만 좋기 때문입니다. 네트워크가 격리된 러너에서는 `/root/.cache/trivy`에 영구 캐시 디렉토리를 마운트하고 `--skip-db-update`를 추가하되, 이전 단계에서 데이터베이스를 시드해야 합니다.
 :::
 
 :::note[발견 사항 억제]

@@ -15,7 +15,6 @@ export const trivyTarget = `{
   "targets": {
     "trivy": {
       "cache": false,
-      "inputs": ["default", "^production"],
       "outputs": ["{workspaceRoot}/dist/{projectRoot}/trivy"],
       "executor": "nx:run-commands",
       "options": {
@@ -302,8 +301,10 @@ O escaneamento intencionalmente não está conectado ao `build`, pois isso pode 
 Em vez disso, recomendamos executar o comando acima como uma etapa dedicada em seu pipeline de CI antes da implantação em estágios de produção.
 :::
 
-:::caution[O escaneamento também não é cacheável]
+:::tip[Por que o escaneamento deliberadamente não é cacheado]
 A imagem que o escaneamento lê só é acessível através do mecanismo de contêiner, então uma entrada de cache restaurada reportaria um passe para uma imagem que pode não estar mais lá. Com `"cache": false` o escaneamento sempre executa contra a imagem real, e falha ruidosamente se ela estiver faltando. Fixe a versão da imagem Trivy (por exemplo, <code>trivy:<TrivyVersion /></code>) para que os escaneamentos sejam reproduzíveis.
+
+Isso significa que cada execução de `trivy` faz um `docker save` completo mais escaneamento por imagem — espere dezenas de segundos por imagem em vez de um cache hit gratuito, e é por isso que o escaneamento pertence ao seu próprio job de CI em vez de no `build`. Ele também atualiza o banco de dados de vulnerabilidades do Trivy em cada execução, então precisa de acesso à rede; essa atualização é o ponto, já que um escaneamento é tão bom quanto os dados de CVE por trás dele. Em um runner isolado de rede, monte um diretório de cache persistente em `/root/.cache/trivy` e adicione `--skip-db-update`, tendo semeado o banco de dados em uma etapa anterior.
 :::
 
 :::note[Suprimindo descobertas]
