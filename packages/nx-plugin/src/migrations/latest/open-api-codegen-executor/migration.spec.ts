@@ -137,6 +137,61 @@ describe('open-api-codegen-executor migration', () => {
     ).toEqual(watchTarget);
   });
 
+  // `nx watch` runs until interrupted, which a single executor invocation cannot
+  // express, so a continuous target is never reported — even where it invokes the
+  // generator directly and so would otherwise look diverged.
+  it.each([
+    ['watch-generate:my-api-client', '--includeDependencies -- '],
+    ['regen-loop', '-- '],
+  ])(
+    'should silently skip the continuous target %s that invokes the generator',
+    async (targetName, watchArgs) => {
+      const target = {
+        executor: 'nx:run-commands',
+        continuous: true,
+        options: {
+          commands: [
+            `nx watch --projects=my-api ${watchArgs}nx g @aws/nx-plugin:open-api#ts-hooks --openApiSpecPath="dist/a.json" --outputPath="out" --no-interactive`,
+          ],
+        },
+      };
+      addProjectConfiguration(tree, 'web', {
+        root: 'packages/web',
+        targets: { [targetName]: target },
+      });
+
+      const { nextSteps } = await migration(tree);
+
+      expect(nextSteps).toEqual([]);
+      expect(readProjectConfiguration(tree, 'web').targets[targetName]).toEqual(
+        target,
+      );
+    },
+  );
+
+  // `continuous` is the property that makes a target un-convertible, not its name.
+  it('should report a diverged target named watch- that is not continuous', async () => {
+    addProjectConfiguration(tree, 'web', {
+      root: 'packages/web',
+      targets: {
+        'watch-but-not-continuous': {
+          executor: 'nx:run-commands',
+          options: {
+            commands: [
+              'nx g @aws/nx-plugin:open-api#ts-hooks --openApiSpecPath="dist/a.json" --outputPath="out" --no-interactive --verbose',
+            ],
+          },
+        },
+      },
+    });
+
+    const { nextSteps } = await migration(tree);
+
+    expect(nextSteps).toEqual([
+      expect.stringContaining('web:watch-but-not-continuous'),
+    ]);
+  });
+
   it.each([
     [
       'an extra flag',

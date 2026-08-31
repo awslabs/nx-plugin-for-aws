@@ -81,12 +81,21 @@ const parseCodegenCommand = (command: string): CodegenOptions | undefined => {
 
 /**
  * Whether a target invokes an OpenAPI generator without being the shape the
- * generators produced, so it must be reported rather than rewritten. The `watch`
- * targets that wrap `nx run <project>:<codegen target>` are excluded: they
- * invoke the codegen target rather than the generator, so they stay as they are.
+ * generators produced, so it must be reported rather than rewritten.
+ *
+ * Continuous targets are excluded. The vended `watch-generate:<api>-client`
+ * wraps `nx watch -- nx run <project>:<codegen target>`, which references the
+ * codegen target rather than the generator, so it never matches here anyway. But
+ * a watch target rewritten to invoke the generator directly would, and telling
+ * its owner to switch to the executor would be wrong advice: `nx watch` runs
+ * until interrupted, which a single executor invocation cannot express.
+ *
+ * `continuous` is the property that makes that true, so it is what is checked —
+ * rather than the `watch-` name prefix, which is only a convention.
  */
 const hasCustomisedCodegenCommand = (target: TargetConfiguration): boolean =>
   target.executor === 'nx:run-commands' &&
+  !target.continuous &&
   JSON.stringify(target.options ?? {}).includes('@aws/nx-plugin:open-api#');
 
 export default async function migration(
