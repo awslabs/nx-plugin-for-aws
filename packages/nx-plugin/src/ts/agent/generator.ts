@@ -34,6 +34,7 @@ import {
   ADOT_IMAGE_DEPENDENCIES,
   addDockerScanTarget,
   DOCKER_DEPENDENCIES,
+  IMAGE_BUILD_CACHE,
   NODE_IMAGE_DEPENDENCIES,
   nodeImageVersions,
 } from '../../utils/docker.js';
@@ -46,6 +47,7 @@ import { esmVars } from '../../utils/module-format.js';
 import { kebabCase, toClassName } from '../../utils/names.js';
 import { getNpmScope } from '../../utils/npm-scope.js';
 import {
+  addArtifactDependencyToTargets,
   addComponentDevTarget,
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
@@ -290,8 +292,7 @@ export const tsAgentGenerator = async (
 
     const fs = new FsCommands(tree, DEPENDENCIES);
     project.targets[dockerTargetName] = {
-      cache: true,
-      outputs: [`{workspaceRoot}/${dockerOutputDir}/Dockerfile`],
+      cache: IMAGE_BUILD_CACHE,
       executor: 'nx:run-commands',
       options: {
         commands: [
@@ -307,7 +308,7 @@ export const tsAgentGenerator = async (
     };
 
     addDependencyToTargetIfNotPresent(project, 'docker', dockerTargetName);
-    addDependencyToTargetIfNotPresent(project, 'build', 'docker');
+    addArtifactDependencyToTargets(project, 'docker');
 
     addDockerScanTarget(
       tree,

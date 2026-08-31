@@ -77,6 +77,45 @@ const PYTHON_TRANSIENT_ARTIFACTS = [
   '.ruff_cache',
 ];
 
+// Python test files, excluded from the `production` named input so that editing
+// a test does not invalidate targets whose output cannot contain it.
+//
+// Anchored to the `tests` directory, which is where the generated project puts
+// them and the only path the build excludes (`ignorePaths` is matched against
+// the project root's top-level entries). An unanchored `**/test_*.py` would also
+// match a production module inside the packaged source directory — a
+// `test_data_loader.py` helper ships in the wheel, so excluding it would leave
+// the wheel stale after a fix to it.
+export const PYTHON_TEST_FILE_EXCLUSIONS = ['!{projectRoot}/tests/**/*'];
+
+/**
+ * Excludes Python test files from the `production` named input, preserving any
+ * entries already present (including user additions).
+ *
+ * The input is created when absent: the Python targets reference `production`,
+ * and Nx fails hard on a named input that is not defined.
+ */
+export const addPythonTestExclusionsToProductionInput = (tree: Tree) => {
+  const nxJson = readNxJson(tree);
+  if (!nxJson) {
+    return;
+  }
+  const production = nxJson.namedInputs?.production ?? ['default'];
+  const missing = PYTHON_TEST_FILE_EXCLUSIONS.filter(
+    (exclusion) => !production.includes(exclusion),
+  );
+  if (missing.length === 0 && nxJson.namedInputs?.production) {
+    return;
+  }
+  updateNxJson(tree, {
+    ...nxJson,
+    namedInputs: {
+      ...nxJson.namedInputs,
+      production: [...production, ...missing],
+    },
+  });
+};
+
 export interface PyProjectDetails {
   /**
    * Fully qualified Nx project id including scope, in dot notation (eg foo.bar).
@@ -145,6 +184,8 @@ export const pyProjectGenerator = async (
     getPyProjectDetails(tree, schema);
 
   addTsDependencies(tree, DEPENDENCIES);
+
+  addPythonTestExclusionsToProductionInput(tree);
 
   const pythonPlugin = withVersions(DEPENDENCIES, ['@nxlv/python']);
   Object.entries(pythonPlugin).forEach(([name, version]) =>
@@ -246,7 +287,9 @@ export const pyProjectGenerator = async (
     const buildTarget = projectConfiguration.targets.build;
     projectConfiguration.targets.compile = {
       ...buildTarget,
-      inputs: ['default', '^production'],
+      // `tests` is in `ignorePaths` below, so test files cannot reach the built
+      // distribution and must not invalidate it.
+      inputs: ['production', '^production'],
       outputs: [buildOutputPath],
       options: {
         ...buildTarget.options,
@@ -269,6 +312,10 @@ export const pyProjectGenerator = async (
       options: {
         outputPath,
       },
+    };
+    // The artifact-only sibling of build, which the deploy targets depend on.
+    projectConfiguration.targets.assemble = {
+      dependsOn: ['compile'],
     };
   }
   projectConfiguration.targets.typecheck = {

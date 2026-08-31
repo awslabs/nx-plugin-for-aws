@@ -24,6 +24,7 @@ import {
 import {
   addDockerScanTarget,
   DOCKER_DEPENDENCIES,
+  IMAGE_BUILD_CACHE,
 } from '../../utils/docker.js';
 import { formatFilesInSubtree } from '../../utils/format.js';
 import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs.js';
@@ -33,6 +34,7 @@ import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
 import { kebabCase, toClassName, toSnakeCase } from '../../utils/names.js';
 import { getNpmScope } from '../../utils/npm-scope.js';
 import {
+  addArtifactDependencyToTargets,
   addComponentDevTarget,
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
@@ -184,7 +186,7 @@ export const pyMcpServerGenerator = async (
     // Add a docker target that prepares the docker context and builds the image
     const fs = new FsCommands(tree, DEPENDENCIES);
     project.targets[dockerTargetName] = {
-      cache: true,
+      cache: IMAGE_BUILD_CACHE,
       executor: 'nx:run-commands',
       options: {
         commands: [
@@ -203,7 +205,7 @@ export const pyMcpServerGenerator = async (
     };
 
     addDependencyToTargetIfNotPresent(project, 'docker', dockerTargetName);
-    addDependencyToTargetIfNotPresent(project, 'build', 'docker');
+    addArtifactDependencyToTargets(project, 'docker');
 
     addDockerScanTarget(
       tree,

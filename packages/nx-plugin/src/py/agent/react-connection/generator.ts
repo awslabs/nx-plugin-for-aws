@@ -164,6 +164,12 @@ export const pyAgentReactConnectionGenerator = async (
         ...agentProjectConfig.targets,
         [openApiTargetName]: {
           cache: true,
+          // The spec serialises models a dependency may own, and this target
+          // has no `dependsOn` for `default`'s transitive
+          // `dependentTasksOutputFiles` to resolve against — so `^production` is
+          // the only edge to the dependency, and without it a model change there
+          // serves a stale spec.
+          inputs: ['production', '^production'],
           executor: 'nx:run-commands',
           outputs: [
             `{workspaceRoot}/dist/{projectRoot}/openapi/${agentNameSnakeCase}`,

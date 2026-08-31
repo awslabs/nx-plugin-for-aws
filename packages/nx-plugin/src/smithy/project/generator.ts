@@ -216,6 +216,12 @@ export const smithyProjectGenerator = async (
           dependsOn:
             type === 'shapes' ? ['compile'] : ['compile', 'generate-ssdk'],
         },
+        // Everything this project's build does is artifact production, so
+        // `assemble` carries the same dependencies.
+        assemble: {
+          dependsOn:
+            type === 'shapes' ? ['compile'] : ['compile', 'generate-ssdk'],
+        },
         compile: {
           cache: true,
           outputs: smithyCompileOutputs(type),

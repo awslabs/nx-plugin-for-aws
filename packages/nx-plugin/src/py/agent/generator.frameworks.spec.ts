@@ -190,11 +190,22 @@ dev-dependencies = []
     expect(
       projectConfig.targets['agent-openapi'].options.commands[0],
     ).toContain('scripts/agent_openapi.py');
+    // The spec serialises models a dependency may own, and this target has no
+    // `dependsOn` for `default`'s transitive `dependentTasksOutputFiles` to
+    // resolve against — so `^production` is the only edge to the dependency, and
+    // without it a dependency's model change serves a stale spec.
+    expect(projectConfig.targets['agent-openapi'].inputs).toEqual([
+      'production',
+      '^production',
+    ]);
 
     expect(projectConfig.targets['agent-generate-client']).toBeDefined();
+    expect(projectConfig.targets['agent-generate-client'].executor).toBe(
+      '@aws/nx-plugin:open-api-codegen',
+    );
     expect(
-      projectConfig.targets['agent-generate-client'].options.commands[0],
-    ).toContain('@aws/nx-plugin:open-api#ts-client');
+      projectConfig.targets['agent-generate-client'].options.generator,
+    ).toBe('ts-client');
     expect(projectConfig.targets['agent-generate-client'].dependsOn).toEqual([
       'agent-openapi',
     ]);

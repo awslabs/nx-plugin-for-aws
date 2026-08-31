@@ -27,6 +27,7 @@ import {
 import {
   addDockerScanTarget,
   DOCKER_DEPENDENCIES,
+  IMAGE_BUILD_CACHE,
 } from '../../utils/docker.js';
 import { formatFilesInSubtree } from '../../utils/format.js';
 import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs.js';
@@ -36,6 +37,7 @@ import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
 import { kebabCase, snakeCase, toClassName } from '../../utils/names.js';
 import { getNpmScope } from '../../utils/npm-scope.js';
 import {
+  addArtifactDependencyToTargets,
   addDependencyToTargetIfNotPresent,
   addGeneratorMetadata,
   getGeneratorInfo,
@@ -249,6 +251,7 @@ export const pyRdbGenerator = async (
 
     projectConfig.targets['bundle-migration'] = {
       cache: true,
+      inputs: ['default'],
       outputs: ['{workspaceRoot}/dist/{projectRoot}/docker/migration'],
       executor: 'nx:run-commands',
       options: {
@@ -275,6 +278,7 @@ export const pyRdbGenerator = async (
     };
     projectConfig.targets['bundle-create-db-user'] = {
       cache: true,
+      inputs: ['default'],
       outputs: ['{workspaceRoot}/dist/{projectRoot}/docker/create-db-user'],
       executor: 'nx:run-commands',
       options: {
@@ -353,7 +357,7 @@ export const pyRdbGenerator = async (
   if (options.infra !== 'none') {
     if (iac === 'terraform') {
       projectConfig.targets.docker = {
-        cache: true,
+        cache: IMAGE_BUILD_CACHE,
         executor: 'nx:run-commands',
         options: {
           commands: [
@@ -364,7 +368,7 @@ export const pyRdbGenerator = async (
         },
         dependsOn: ['bundle-migration', 'bundle-create-db-user'],
       };
-      addDependencyToTargetIfNotPresent(projectConfig, 'build', 'docker');
+      addArtifactDependencyToTargets(projectConfig, 'docker');
 
       addDockerScanTarget(
         tree,

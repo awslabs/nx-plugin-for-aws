@@ -8,14 +8,12 @@ import NxCommands from '@components/nx-commands.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 import Link from '@components/link.astro';
 import Infrastructure from '@components/infrastructure.astro';
-import TrivyVersion from '@components/trivy-version.astro';
 import { CONTAINER_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/versions';
 
 export const trivyTarget = `{
   "targets": {
     "trivy": {
-      "cache": true,
-      "inputs": ["default", "^production"],
+      "cache": false,
       "outputs": ["{workspaceRoot}/dist/{projectRoot}/trivy"],
       "executor": "nx:run-commands",
       "options": {
@@ -68,7 +66,7 @@ Docker ビルドコンテキストは、プロジェクトの `dist` フォル�
 :::tip[なぜ Dockerfile の外でバンドルするのか？]
 バンドルステップを Nx 内に保持する（`Dockerfile` 内ではなく）ことは、次のことを意味します：
 
-- Nx はバンドルターゲットを**キャッシュ**できるため、繰り返しのビルドが高速になります。
+- Nx はバンドルターゲットを**キャッシュ**できます — その出力はディスク上のディレクトリであるため、キャッシュヒットは本当にそれを復元します。
 - `Dockerfile` は、モノレポ、プライベートレジストリ、またはビルド時のシークレットにアクセスする必要がありません。
 - イメージレイヤーは小さくなります — すでにビルドされたアーティファクトの単一の `COPY` で、推移的な `node_modules` やビルドツールチェーンはありません。
 :::
@@ -84,6 +82,7 @@ Rolldown を呼び出す `bundle` ターゲットを設定します。<Link path
   "targets": {
     "bundle": {
       "cache": true,
+      "inputs": ["default"],
       "executor": "nx:run-commands",
       "outputs": ["{workspaceRoot}/dist/{projectRoot}/bundle"],
       "options": {
@@ -167,7 +166,7 @@ CMD ["node", "index.js"]
 {
   "targets": {
     "docker": {
-      "cache": true,
+      "cache": false,
       "executor": "nx:run-commands",
       "options": {
         "commands": [
@@ -181,6 +180,10 @@ CMD ["node", "index.js"]
   }
 }
 ```
+
+:::caution[Do not cache image builds]
+イメージビルドターゲットには `"cache": false` を設定します。ビルドされたイメージはファイルシステムの `outputs` パスに書き込まれないため、Nx はキャッシュヒット時に復元するものがありません。コンテナエンジンはイメージレイヤーをキャッシュするため、パフォーマンスペナルティはありません。
+:::
 
 :::tip[クロスプラットフォームファイルコピー]
 `ncp` パッケージは、クロスプラットフォームのファイル/ディレクトリコピーコマンドを提供し、`cp`（Windows では利用できません）を回避します。ワークスペースのルートで `pnpm add -D -w ncp` を使用してインストールします。
@@ -256,7 +259,7 @@ CMD ["python", "-m", "my_project.main"]
 {
   "targets": {
     "docker": {
-      "cache": true,
+      "cache": false,
       "executor": "nx:run-commands",
       "options": {
         "commands": [
@@ -294,10 +297,6 @@ CMD ["python", "-m", "my_project.main"]
 Trivy の脆弱性データベースは新しい CVE で継続的に更新されるため、開発中の反復時に不要な摩擦が生じる可能性があるため、スキャンは意図的に `build` に組み込まれていません。
 
 代わりに、本番ステージへのデプロイ前に、CI パイプラインで専用のステップとして上記のコマンドを実行することをお勧めします。
-:::
-
-:::tip[キャッシュは変更されていないイメージをスキップします]
-イメージはプロジェクトソースによって完全に決定されるため、`inputs`（ここでは `default` と `^production`、`bundle` ターゲットと一致）を宣言することで、Nx はスキャンをキャッシュし、変更されていないイメージの再スキャンをスキップできます。Trivy イメージバージョンをピン留めして（例：<code>trivy:<TrivyVersion /></code>）、スキャンを再現可能にします。
 :::
 
 :::note[検出結果の抑制]

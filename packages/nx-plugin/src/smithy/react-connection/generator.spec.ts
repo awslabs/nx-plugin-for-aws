@@ -127,13 +127,15 @@ export function Main() {
       // Verify client generation target was added
       expect(projectConfig.targets['generate:test-api-client']).toBeDefined();
       expect(projectConfig.targets['generate:test-api-client'].executor).toBe(
-        'nx:run-commands',
+        '@aws/nx-plugin:open-api-codegen',
       );
-      expect(
-        projectConfig.targets['generate:test-api-client'].options.commands,
-      ).toEqual([
-        'nx g @aws/nx-plugin:open-api#ts-hooks --openApiSpecPath="dist/apps/api-model/build/openapi/openapi.json" --outputPath="apps/frontend/src/generated/test-api" --no-interactive',
-      ]);
+      expect(projectConfig.targets['generate:test-api-client'].options).toEqual(
+        {
+          generator: 'ts-hooks',
+          openApiSpecPath: 'dist/apps/api-model/build/openapi/openapi.json',
+          outputPath: 'apps/frontend/src/generated/test-api',
+        },
+      );
       expect(
         projectConfig.targets['generate:test-api-client'].dependsOn,
       ).toContain('api-model:build');
@@ -553,11 +555,13 @@ export function Main() {
       ).toContain('api-model:build');
 
       // Verify the correct spec path is used (from model project)
-      expect(
-        projectConfig.targets['generate:test-api-client'].options.commands,
-      ).toEqual([
-        'nx g @aws/nx-plugin:open-api#ts-hooks --openApiSpecPath="dist/apps/api-model/build/openapi/openapi.json" --outputPath="apps/frontend/src/generated/test-api" --no-interactive',
-      ]);
+      expect(projectConfig.targets['generate:test-api-client'].options).toEqual(
+        {
+          generator: 'ts-hooks',
+          openApiSpecPath: 'dist/apps/api-model/build/openapi/openapi.json',
+          outputPath: 'apps/frontend/src/generated/test-api',
+        },
+      );
 
       // Verify Cognito auth is used
       expect(tree.exists('apps/frontend/src/hooks/useSigV4.tsx')).toBeFalsy();

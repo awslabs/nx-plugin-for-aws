@@ -35,6 +35,7 @@ import {
 import {
   addDockerScanTarget,
   DOCKER_DEPENDENCIES,
+  IMAGE_BUILD_CACHE,
 } from '../../utils/docker.js';
 import { formatFilesInSubtree } from '../../utils/format.js';
 import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs.js';
@@ -45,6 +46,7 @@ import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
 import { kebabCase, toClassName, toSnakeCase } from '../../utils/names.js';
 import { getNpmScope } from '../../utils/npm-scope.js';
 import {
+  addArtifactDependencyToTargets,
   addComponentDevTarget,
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
@@ -54,6 +56,7 @@ import {
   readProjectConfigurationUnqualified,
 } from '../../utils/nx.js';
 import { sortObjectKeys } from '../../utils/object.js';
+import { openApiCodegenTarget } from '../../utils/open-api-codegen-target.js';
 import {
   getRelativePathToRootByDirectory,
   toProjectRelativePath,
@@ -392,7 +395,7 @@ export const pyAgentGenerator = async (
     // Add a docker target that prepares the docker context and builds the image
     const fs = new FsCommands(tree, DEPENDENCIES);
     project.targets[dockerTargetName] = {
-      cache: true,
+      cache: IMAGE_BUILD_CACHE,
       executor: 'nx:run-commands',
       options: {
         commands: [
@@ -411,7 +414,7 @@ export const pyAgentGenerator = async (
     };
 
     addDependencyToTargetIfNotPresent(project, 'docker', dockerTargetName);
-    addDependencyToTargetIfNotPresent(project, 'build', 'docker');
+    addArtifactDependencyToTargets(project, 'docker');
 
     addDockerScanTarget(
       tree,
@@ -537,6 +540,12 @@ export const pyAgentGenerator = async (
       ? {
           [openApiTargetName]: {
             cache: true,
+            // The spec serialises models a dependency may own, and this target
+            // has no `dependsOn` for `default`'s transitive
+            // `dependentTasksOutputFiles` to resolve against — so `^production`
+            // is the only edge to the dependency, and without it a model change
+            // there serves a stale spec.
+            inputs: ['production', '^production'],
             executor: 'nx:run-commands',
             outputs: [
               `{workspaceRoot}/dist/{projectRoot}/openapi/${agentNameSnakeCase}`,
@@ -547,22 +556,13 @@ export const pyAgentGenerator = async (
               ],
             },
           },
-          [clientGenTargetName]: {
-            cache: true,
-            executor: 'nx:run-commands',
-            dependsOn: [openApiTargetName],
-            inputs: [
-              {
-                dependentTasksOutputFiles: '**/*.json',
-              },
-            ],
+          [clientGenTargetName]: openApiCodegenTarget({
+            generator: 'ts-client',
+            openApiSpecPath: `dist/${project.root}/openapi/${agentNameSnakeCase}/openapi.json`,
+            outputPath: `${project.root}/scripts/${agentTargetPrefix}/generated`,
+            specBuildTargetName: openApiTargetName,
             outputs: [`{projectRoot}/scripts/${agentTargetPrefix}/generated`],
-            options: {
-              commands: [
-                `nx g @aws/nx-plugin:open-api#ts-client --openApiSpecPath="dist/${project.root}/openapi/${agentNameSnakeCase}/openapi.json" --outputPath="${project.root}/scripts/${agentTargetPrefix}/generated" --no-interactive`,
-              ],
-            },
-          },
+          }),
         }
       : {};
 

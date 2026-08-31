@@ -12,7 +12,7 @@ import {
 } from '@nx/devkit';
 import { OPERATIONS_METADATA_FILE_NAME } from '../../open-api/json-metadata/generator.js';
 import { updateGitIgnore } from '../git.js';
-import { addDependencyToTargetIfNotPresent } from '../nx.js';
+import { addArtifactDependencyToTargets } from '../nx.js';
 import {
   PACKAGES_DIR,
   SHARED_TERRAFORM_DIR,
@@ -74,6 +74,10 @@ export const addTrpcOperationsMetadataTarget = (
   project.targets ??= {};
   project.targets.operations ??= {
     cache: true,
+    // The metadata is derived from this project's own router, so a dependency's
+    // project directory (which Nx's implicit inputs would read in full)
+    // contributes nothing beyond its build artifacts.
+    inputs: ['default'],
     executor: 'nx:run-commands',
     outputs: [joinPathFragments('{workspaceRoot}', generatedDirFromRoot)],
     options: {
@@ -84,7 +88,7 @@ export const addTrpcOperationsMetadataTarget = (
     },
     dependsOn: ['compile'],
   };
-  addDependencyToTargetIfNotPresent(project, 'build', 'operations');
+  addArtifactDependencyToTargets(project, 'operations');
 
   // The shared Terraform project reads the generated file with `file()`, so it
   // must be written before that project is planned.
@@ -92,11 +96,7 @@ export const addTrpcOperationsMetadataTarget = (
     tree,
     joinPathFragments(PACKAGES_DIR, SHARED_TERRAFORM_DIR, 'project.json'),
     (config: ProjectConfiguration) => {
-      addDependencyToTargetIfNotPresent(
-        config,
-        'build',
-        `${project.name}:operations`,
-      );
+      addArtifactDependencyToTargets(config, `${project.name}:operations`);
       return config;
     },
   );

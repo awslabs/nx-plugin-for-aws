@@ -106,6 +106,7 @@ describe('ts#rdb generator', () => {
     ).toMatchSnapshot();
     expect(projectConfig.targets.bundle).toEqual({
       cache: true,
+      inputs: ['default'],
       outputs: ['{workspaceRoot}/dist/{projectRoot}/bundle'],
       executor: 'nx:run-commands',
       options: {
@@ -139,6 +140,7 @@ describe('ts#rdb generator', () => {
     });
     expect(projectConfig.targets['dev']).toEqual({
       executor: 'nx:run-commands',
+      dependsOn: ['pull-image'],
       options: {
         command: 'tsx ../common/scripts/src/rdb/start-container.ts',
         cwd: '{projectRoot}',
@@ -251,6 +253,7 @@ describe('ts#rdb generator', () => {
     });
     expect(mysqlProjectConfig.targets['dev']).toEqual({
       executor: 'nx:run-commands',
+      dependsOn: ['pull-image'],
       options: {
         command: 'tsx ../common/scripts/src/rdb/start-container.ts',
         cwd: '{projectRoot}',

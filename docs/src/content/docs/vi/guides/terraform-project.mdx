@@ -9,6 +9,7 @@ import Link from '@components/link.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import OptionFilter from '@components/option-filter.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 
 [Terraform](https://www.terraform.io/) là một công cụ phần mềm mã nguồn mở cho infrastructure as code, cho phép bạn tạo, thay đổi và cải thiện hạ tầng một cách an toàn và dự đoán được.
 
@@ -53,6 +54,7 @@ Trình tạo tạo ra các cấu trúc tệp khác nhau tùy thuộc vào loại
     - bootstrap.ts Pull/push bootstrap tfstate và chạy `terraform apply`
     - bootstrap-destroy.ts Làm trống state bucket và chạy `terraform destroy`
     - init.ts Chạy `terraform init` với cấu hình S3 backend
+    - env.ts Trỏ `terraform init` đến shared provider cache
   - checkov.yml Cấu hình Checkov, bao gồm các kiểm tra cần bỏ qua
   - project.json Cấu hình dự án và build targets
 
@@ -245,11 +247,45 @@ Bạn có thể xác thực cấu hình Terraform của mình bằng cách sử 
 
 <NxCommands commands={['validate tf-infra']} />
 
-#### Định dạng Code của bạn
+#### Linting
 
-Định dạng code Terraform của bạn bằng cách sử dụng target `fmt`:
+Các dự án Terraform sử dụng [`terraform fmt`](https://developer.hashicorp.com/terraform/cli/commands/fmt) để kiểm tra định dạng.
 
-<NxCommands commands={['fmt tf-infra']} />
+##### Chạy Linter
+
+Để gọi linter kiểm tra dự án của bạn, bạn có thể chạy target `lint`.
+
+<NxCommands commands={["lint tf-infra"]} />
+
+##### Sửa các Vấn đề Lint
+
+Phần lớn các vấn đề linting hoặc định dạng có thể được sửa tự động bằng cách chạy với tham số `--configuration=fix`.
+
+<NxCommands commands={["lint tf-infra --configuration=fix"]} />
+
+Tương tự, nếu bạn muốn sửa tất cả các vấn đề lint trong tất cả các package trong workspace của mình, bạn có thể chạy:
+
+<NxCommands commands={["run-many --target lint --all --configuration=fix"]} />
+
+:::tip[Shorthand Command]
+Điều này có một lệnh viết tắt từ thư mục gốc của workspace của bạn:
+
+<PackageManagerShortCommand commands={["lint"]} />
+:::
+
+##### Bỏ qua các Vấn đề Lint
+
+Để tránh các vấn đề linting làm chậm bạn trong quá trình phát triển (đặc biệt nếu bạn có các vấn đề không thể tự động sửa trong dự án của mình), bạn có thể chạy build với cấu hình `skip-lint`:
+
+<NxCommands commands={["run-many --target build --configuration=skip-lint"]} />
+
+Điều này bỏ qua hoàn toàn kiểm tra định dạng trong quá trình build.
+
+:::tip[Shorthand Command]
+Điều này có một lệnh viết tắt từ thư mục gốc của workspace của bạn:
+
+<PackageManagerShortCommand commands={["build:skip-lint"]} />
+:::
 
 #### Kiểm tra Bảo mật
 
@@ -258,6 +294,8 @@ Chạy kiểm tra bảo mật trên hạ tầng của bạn bằng cách sử d�
 <NxCommands commands={['checkov tf-infra']} />
 
 Bạn sẽ tìm thấy kết quả kiểm tra bảo mật của mình trong thư mục `dist` gốc, dưới `dist/packages/<my-terraform-project>/checkov`.
+
+Checkov chạy như một phần của `build`.
 
 Các kiểm tra được cấu hình trong `checkov.yml` của dự án. Thêm một check id vào `skip-check` để bỏ qua nó trên toàn bộ dự án:
 
@@ -313,6 +351,10 @@ run "plan_is_valid" {
 
 Đặt mọi biến mà cấu hình của bạn yêu cầu trong khối `variables`, nếu không run sẽ thất bại với "has a required variable ... with no set value".
 
+Mọi target chạy `terraform init` đều tái sử dụng một provider cache dưới `.terraform/plugin-cache` trong workspace root của bạn, vì vậy các provider được tải xuống một lần thay vì mỗi lần chạy. Mỗi dự án có thư mục riêng ở đó: hai lần chạy `terraform init` cùng điền vào một cache có thể mỗi cái tính toán một hash khác nhau cho cùng một provider, sau đó terraform sẽ từ chối so với `.terraform.lock.hcl` của bạn. Xem [tài liệu Terraform](https://developer.hashicorp.com/terraform/cli/config/config-file#provider-plugin-cache) để biết thêm thông tin.
+
+Đặt `TF_PLUGIN_CACHE_DIR` trong môi trường của bạn để trỏ script `init` được cung cấp đến một cache mà bạn tự quản lý — ví dụ như một volume được chia sẻ giữa các workspace. Lưu ý rằng target `test` đọc đường dẫn của nó từ `project.json`, vì vậy hãy thay đổi nó ở đó nữa.
+
 <OptionFilter when={{ type: 'application' }} description="Application-only targets: plan / apply / destroy / etc.">
 ### Các Target Chỉ dành cho Application
 
@@ -325,6 +367,12 @@ Trước khi áp dụng các thay đổi, bạn có thể xem Terraform sẽ là
 <NxCommands commands={['plan tf-infra']} />
 
 Điều này sẽ tạo một tệp plan trong `dist/packages/<my-terraform-project>/terraform/dev.tfplan`.
+
+`plan` phụ thuộc vào `assemble`, vì vậy nó tạo ra các artifact mà các module của bạn tham chiếu, chẳng hạn như các bundle Lambda và metadata operations được tạo, mà không chạy các cổng lint, test và type-check.
+
+:::caution[Use `build` in your pipeline]
+`assemble` được sử dụng để lặp nhanh hơn trong quá trình phát triển. Chạy `build` trong pipeline CI của bạn để đảm bảo dự án của bạn vượt qua các cổng chất lượng trước khi triển khai production.
+:::
 
 #### Khởi tạo Terraform
 

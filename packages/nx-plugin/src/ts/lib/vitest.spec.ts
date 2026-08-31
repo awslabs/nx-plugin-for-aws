@@ -62,6 +62,76 @@ describe('vitest utils', () => {
     expect(content).not.toContain('root: __dirname');
   });
 
+  it('should write coverage under the project dist directory', async () => {
+    await configureVitest(
+      tree,
+      {
+        dir: 'test',
+        fullyQualifiedName: 'test',
+      },
+      declaration,
+    );
+    const content = tree.read('test/vitest.config.mts', 'utf8');
+    // Coverage inside the project would be formatted by the `format` target and
+    // counted as an input to every task in the project.
+    expect(content).toContain(
+      `reportsDirectory: '../dist/test/test-output/vitest/coverage'`,
+    );
+    expect(content).not.toContain(`'./test-output`);
+  });
+
+  it('should resolve the coverage depth of a nested project', async () => {
+    tree.write(
+      'packages/nested/lib/vitest.config.mts',
+      wrapConfig(`test: {
+    coverage: {
+      reportsDirectory: './test-output/vitest/coverage',
+      provider: 'v8' as const,
+    },
+  },`),
+    );
+
+    await configureVitest(
+      tree,
+      {
+        dir: 'packages/nested/lib',
+        fullyQualifiedName: '@proj/lib',
+      },
+      declaration,
+    );
+
+    expect(
+      tree.read('packages/nested/lib/vitest.config.mts', 'utf8'),
+    ).toContain(
+      `reportsDirectory: '../../../dist/packages/nested/lib/test-output/vitest/coverage'`,
+    );
+  });
+
+  it('should leave a coverage directory the user repointed alone', async () => {
+    tree.write(
+      'test/vitest.config.mts',
+      wrapConfig(`test: {
+    coverage: {
+      reportsDirectory: './my-coverage',
+      provider: 'v8' as const,
+    },
+  },`),
+    );
+
+    await configureVitest(
+      tree,
+      {
+        dir: 'test',
+        fullyQualifiedName: 'test',
+      },
+      declaration,
+    );
+
+    expect(tree.read('test/vitest.config.mts', 'utf8')).toContain(
+      `reportsDirectory: './my-coverage'`,
+    );
+  });
+
   it('should generate a valid vitest.config.mts without a double comma', () => {
     const content = tree.read('test/vitest.config.mts', 'utf8');
     // Guards against the grit transform emitting `},,` when the matched

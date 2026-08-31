@@ -19,6 +19,7 @@ import {
 } from '../declared-dependencies.js';
 import { addDependenciesToPackageJson } from '../dependencies.js';
 import {
+  addArtifactDependencyToTargets,
   addDependencyToTargetIfNotPresent,
   normalizeTargetKeyOrder,
 } from '../nx.js';
@@ -65,7 +66,9 @@ const createPythonBundleTarget = ({
 }: CreatePythonBundleTargetOptions): TargetConfiguration => {
   return {
     cache: true,
-    inputs: ['default', '^production'],
+    // The bundle holds exported dependencies and the entrypoint script, never
+    // test files, so tests are excluded via `production`.
+    inputs: ['production', '^production'],
     executor: 'nx:run-commands',
     outputs: [`{workspaceRoot}/dist/{projectRoot}/${bundleTargetName}`],
     options: {
@@ -109,7 +112,7 @@ export const addPythonBundleTarget = (
 
   // Add a "bundle" target which depends on either bundle-arm or bundle-x86 (or both)
   addDependencyToTargetIfNotPresent(project, 'bundle', bundleTargetName);
-  addDependencyToTargetIfNotPresent(project, 'build', 'bundle');
+  addArtifactDependencyToTargets(project, 'bundle');
 
   return {
     bundleTargetName,
@@ -167,6 +170,11 @@ export const addTypeScriptBundleTarget = async <
   if (!project.targets.bundle) {
     project.targets.bundle = normalizeTargetKeyOrder({
       cache: true,
+      // Declared rather than left to Nx's implicit `["default", "^default"]`,
+      // which reads a dependency's whole project directory: rolldown resolves
+      // dependencies through the build artifacts `default` already tracks, so
+      // `^default` only adds files no bundle can contain.
+      inputs: ['default'],
       outputs: [`{workspaceRoot}/dist/{projectRoot}/bundle`],
       executor: 'nx:run-commands',
       options: {
@@ -178,7 +186,7 @@ export const addTypeScriptBundleTarget = async <
   }
 
   // Add bundle to the build target
-  addDependencyToTargetIfNotPresent(project, 'build', 'bundle');
+  addArtifactDependencyToTargets(project, 'bundle');
 
   const rolldownConfigPath = joinPathFragments(
     project.root,

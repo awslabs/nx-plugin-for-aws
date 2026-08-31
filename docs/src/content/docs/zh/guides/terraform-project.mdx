@@ -9,6 +9,7 @@ import Link from '@components/link.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import OptionFilter from '@components/option-filter.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 
 [Terraform](https://www.terraform.io/) 是一个开源的基础设施即代码软件工具，使您能够安全且可预测地创建、更改和改进基础设施。
 
@@ -53,6 +54,7 @@ Terraform 基础设施生成器创建一个 Terraform 基础设施项目。生�
     - bootstrap.ts 拉取/推送引导 tfstate 并运行 `terraform apply`
     - bootstrap-destroy.ts 清空状态存储桶并运行 `terraform destroy`
     - init.ts 使用 S3 后端配置运行 `terraform init`
+    - env.ts 将 `terraform init` 指向共享提供程序缓存
   - checkov.yml Checkov 配置，包括要跳过的检查
   - project.json 项目配置和构建目标
 
@@ -245,11 +247,45 @@ region      = "us-west-2"
 
 <NxCommands commands={['validate tf-infra']} />
 
-#### 格式化您的代码
+#### Linting
 
-使用 `fmt` 目标格式化您的 Terraform 代码：
+Terraform 项目使用 [`terraform fmt`](https://developer.hashicorp.com/terraform/cli/commands/fmt) 来检查格式。
 
-<NxCommands commands={['fmt tf-infra']} />
+##### 运行 Linter
+
+要调用 linter 检查您的项目，您可以运行 `lint` 目标。
+
+<NxCommands commands={["lint tf-infra"]} />
+
+##### 修复 Lint 问题
+
+大多数 linting 或格式化问题可以通过使用 `--configuration=fix` 参数运行来自动修复。
+
+<NxCommands commands={["lint tf-infra --configuration=fix"]} />
+
+同样，如果您想修复工作区中所有包的所有 lint 问题，可以运行：
+
+<NxCommands commands={["run-many --target lint --all --configuration=fix"]} />
+
+:::tip[简写命令]
+这在您的工作区根目录有一个简写命令：
+
+<PackageManagerShortCommand commands={["lint"]} />
+:::
+
+##### 跳过 Lint 问题
+
+为了避免在开发过程中 linting 问题拖慢您的速度（特别是如果您的项目中有无法自动修复的问题），您可以使用 `skip-lint` 配置运行构建：
+
+<NxCommands commands={["run-many --target build --configuration=skip-lint"]} />
+
+这会在构建期间完全跳过格式检查。
+
+:::tip[简写命令]
+这在您的工作区根目录有一个简写命令：
+
+<PackageManagerShortCommand commands={["build:skip-lint"]} />
+:::
 
 #### 安全测试
 
@@ -258,6 +294,8 @@ region      = "us-west-2"
 <NxCommands commands={['checkov tf-infra']} />
 
 您将在根 `dist` 文件夹下的 `dist/packages/<my-terraform-project>/checkov` 中找到您的安全测试结果。
+
+Checkov 作为 `build` 的一部分运行。
 
 检查在项目的 `checkov.yml` 中配置。将检查 ID 添加到 `skip-check` 以在整个项目中抑制它：
 
@@ -313,6 +351,10 @@ run "plan_is_valid" {
 
 在 `variables` 块中设置配置所需的每个变量，否则运行将失败并显示"has a required variable ... with no set value"。
 
+每个运行 `terraform init` 的目标都在工作区根目录的 `.terraform/plugin-cache` 下重用提供程序缓存，因此提供程序只下载一次而不是每次运行时都下载。每个项目在那里都有自己的目录：两个 `terraform init` 运行同时填充一个缓存时，每个都可能为同一个提供程序计算不同的哈希值，然后 terraform 会根据您的 `.terraform.lock.hcl` 拒绝它。有关更多信息，请参阅 [Terraform 文档](https://developer.hashicorp.com/terraform/cli/config/config-file#provider-plugin-cache)。
+
+在您的环境中设置 `TF_PLUGIN_CACHE_DIR` 以将提供的 `init` 脚本指向您自己管理的缓存——例如在工作区之间共享的卷。请注意，`test` 目标从 `project.json` 读取其路径，因此也要在那里更改它。
+
 <OptionFilter when={{ type: 'application' }} description="Application-only targets: plan / apply / destroy / etc.">
 ### 仅限应用程序的目标
 
@@ -325,6 +367,12 @@ run "plan_is_valid" {
 <NxCommands commands={['plan tf-infra']} />
 
 这将在 `dist/packages/<my-terraform-project>/terraform/dev.tfplan` 中创建一个计划文件。
+
+`plan` 依赖于 `assemble`，因此它会生成您的模块引用的工件，例如 Lambda 包和生成的操作元数据，而不运行 lint、test 和 type-check 门控。
+
+:::caution[在您的管道中使用 `build`]
+`assemble` 用于开发期间的快速迭代。在您的 CI 管道中运行 `build`，以确保您的项目在生产部署之前通过质量门控。
+:::
 
 #### 初始化 Terraform
 

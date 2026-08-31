@@ -29,6 +29,7 @@ import {
 import {
   addDockerScanTarget,
   DOCKER_DEPENDENCIES,
+  IMAGE_BUILD_CACHE,
   NODE_IMAGE_DEPENDENCIES,
   nodeImageVersions,
 } from '../../utils/docker.js';
@@ -42,6 +43,7 @@ import { esmVars } from '../../utils/module-format.js';
 import { kebabCase, snakeCase, toClassName } from '../../utils/names.js';
 import { getNpmScope } from '../../utils/npm-scope.js';
 import {
+  addArtifactDependencyToTargets,
   addDependencyToTargetIfNotPresent,
   addGeneratorMetadata,
   getGeneratorInfo,
@@ -306,6 +308,7 @@ export const tsRdbGenerator = async (
   };
   projectConfig.targets['dev'] = {
     executor: 'nx:run-commands',
+    dependsOn: ['pull-image'],
     options: {
       command: `tsx ${scriptsDir}/start-container.ts`,
       cwd: '{projectRoot}',
@@ -340,14 +343,14 @@ export const tsRdbGenerator = async (
   if (options.infra !== 'none') {
     if (iac === 'terraform') {
       projectConfig.targets['docker'] = {
-        cache: true,
+        cache: IMAGE_BUILD_CACHE,
         executor: 'nx:run-commands',
         options: {
           command: `${containerEngine} build --platform linux/arm64 --provenance=false -t ${migrationDockerImageTag} ${migrationBundleDir}`,
         },
         dependsOn: ['bundle'],
       };
-      addDependencyToTargetIfNotPresent(projectConfig, 'build', 'docker');
+      addArtifactDependencyToTargets(projectConfig, 'docker');
 
       addDockerScanTarget(
         tree,
@@ -361,7 +364,7 @@ export const tsRdbGenerator = async (
         DEPENDENCIES,
       );
     }
-    addDependencyToTargetIfNotPresent(projectConfig, 'build', 'bundle');
+    addArtifactDependencyToTargets(projectConfig, 'bundle');
   }
   addDependencyToTargetIfNotPresent(projectConfig, 'compile', 'generate');
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfig);

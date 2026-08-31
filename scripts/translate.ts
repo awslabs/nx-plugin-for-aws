@@ -322,6 +322,24 @@ function assertFrontmatterIsParseable(text: string): void {
 }
 
 /**
+ * An MDX file's imports must still parse after translation. The agent
+ * occasionally emits a component's import line twice, which acorn rejects with
+ * `Identifier '<name>' has already been declared` and fails the docs build, so
+ * reject it here and let the retry write the file cleanly.
+ */
+function assertImportsAreUnique(text: string): void {
+  const seen = new Set<string>();
+  for (const [, name] of text.matchAll(/^import\s+(\w+)\s+from\s+/gm)) {
+    if (seen.has(name)) {
+      throw new Error(
+        `duplicate import of "${name}" — acorn rejects a redeclared identifier and the docs build fails`,
+      );
+    }
+    seen.add(name);
+  }
+}
+
+/**
  * Copy the source's code blocks over the translated file's. The prompt tells the
  * agent to reproduce them verbatim, but it occasionally translates a comment
  * anyway, which would ship stale or broken code.
@@ -400,7 +418,9 @@ async function translateFileForLanguage(
     // already-correct translation may rightly decide there is nothing to do.
     if (fs.existsSync(targetAbsPath)) {
       try {
-        assertFrontmatterIsParseable(await fs.readFile(targetAbsPath, 'utf-8'));
+        const translated = await fs.readFile(targetAbsPath, 'utf-8');
+        assertFrontmatterIsParseable(translated);
+        assertImportsAreUnique(translated);
         await restoreCodeBlocks(file.sourceAbsPath, targetAbsPath);
         return;
       } catch (err) {

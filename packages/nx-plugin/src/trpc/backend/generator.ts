@@ -33,7 +33,7 @@ import { esmVars } from '../../utils/module-format.js';
 import { kebabCase, toClassName } from '../../utils/names.js';
 import { getNpmScopePrefix } from '../../utils/npm-scope.js';
 import {
-  addDependencyToTargetIfNotPresent,
+  addArtifactDependencyToTargets,
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
@@ -257,7 +257,7 @@ export async function tsTrpcApiGenerator(
       );
     }
 
-    addDependencyToTargetIfNotPresent(projectConfig, 'build', 'bundle');
+    addArtifactDependencyToTargets(projectConfig, 'bundle');
 
     // Terraform defines one Lambda function per operation from a generated
     // metadata file; CDK derives the same information from the router's types.

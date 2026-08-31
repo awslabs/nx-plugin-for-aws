@@ -9,6 +9,7 @@ import Link from '@components/link.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import OptionFilter from '@components/option-filter.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 
 [Terraform](https://www.terraform.io/) は、インフラストラクチャを安全かつ予測可能に作成、変更、改善できるオープンソースの Infrastructure as Code ソフトウェアツールです。
 
@@ -53,6 +54,7 @@ Terraform インフラストラクチャジェネレーターは、Terraform イ
     - bootstrap.ts Pulls/pushes the bootstrap tfstate and runs `terraform apply`
     - bootstrap-destroy.ts Empties the state bucket and runs `terraform destroy`
     - init.ts Runs `terraform init` with the S3 backend config
+    - env.ts Points `terraform init` at the shared provider cache
   - checkov.yml Checkov configuration, including the checks to skip
   - project.json Project configuration and build targets
 
@@ -245,11 +247,45 @@ bootstrap ターゲットはアプリケーションタイプのプロジェク�
 
 <NxCommands commands={['validate tf-infra']} />
 
-#### コードのフォーマット
+#### リンティング
 
-`fmt` ターゲットを使用して Terraform コードをフォーマットします：
+Terraform プロジェクトは [`terraform fmt`](https://developer.hashicorp.com/terraform/cli/commands/fmt) を使用してフォーマットをチェックします。
 
-<NxCommands commands={['fmt tf-infra']} />
+##### リンターの実行
+
+プロジェクトをチェックするためにリンターを呼び出すには、`lint` ターゲットを実行します。
+
+<NxCommands commands={["lint tf-infra"]} />
+
+##### リント問題の修正
+
+リンティングやフォーマットの問題の大部分は、`--configuration=fix` 引数を付けて実行することで自動的に修正できます。
+
+<NxCommands commands={["lint tf-infra --configuration=fix"]} />
+
+同様に、ワークスペース内のすべてのパッケージのすべてのリント問題を修正したい場合は、次を実行できます：
+
+<NxCommands commands={["run-many --target lint --all --configuration=fix"]} />
+
+:::tip[ショートハンドコマンド]
+ワークスペースのルートから実行できるショートハンドコマンドがあります：
+
+<PackageManagerShortCommand commands={["lint"]} />
+:::
+
+##### リント問題のスキップ
+
+開発中にリンティング問題によって遅延するのを避けるため（特にプロジェクトに自動修正できない問題がある場合）、`skip-lint` 設定でビルドを実行できます：
+
+<NxCommands commands={["run-many --target build --configuration=skip-lint"]} />
+
+これにより、ビルド中のフォーマットチェックが完全にスキップされます。
+
+:::tip[ショートハンドコマンド]
+ワークスペースのルートから実行できるショートハンドコマンドがあります：
+
+<PackageManagerShortCommand commands={["build:skip-lint"]} />
+:::
 
 #### セキュリティテスト
 
@@ -258,6 +294,8 @@ bootstrap ターゲットはアプリケーションタイプのプロジェク�
 <NxCommands commands={['checkov tf-infra']} />
 
 セキュリティテストの結果は、ルートの `dist` フォルダー内の `dist/packages/<my-terraform-project>/checkov` にあります。
+
+Checkov は `build` の一部として実行されます。
 
 チェックはプロジェクトの `checkov.yml` で設定されます。プロジェクト全体でチェックを抑制するには、`skip-check` にチェック ID を追加します：
 
@@ -313,6 +351,10 @@ run "plan_is_valid" {
 
 設定に必要なすべての変数を `variables` ブロックに設定してください。そうしないと、「has a required variable ... with no set value」というエラーで実行が失敗します。
 
+`terraform init` を実行するすべてのターゲットは、ワークスペースルートの `.terraform/plugin-cache` にあるプロバイダーキャッシュを再利用するため、プロバイダーは毎回ではなく一度だけダウンロードされます。各プロジェクトはそこに独自のディレクトリを持ちます：2つの `terraform init` 実行が同時に1つのキャッシュを埋める場合、それぞれが同じプロバイダーに対して異なるハッシュを計算する可能性があり、terraform はそれを `.terraform.lock.hcl` に対して拒否します。詳細については、[Terraform ドキュメント](https://developer.hashicorp.com/terraform/cli/config/config-file#provider-plugin-cache)を参照してください。
+
+環境で `TF_PLUGIN_CACHE_DIR` を設定して、提供される `init` スクリプトを自分で管理するキャッシュ（たとえば、ワークスペース間で共有されるボリューム）に向けることができます。`test` ターゲットは `project.json` からパスを読み取るため、そこでも変更してください。
+
 <OptionFilter when={{ type: 'application' }} description="Application-only targets: plan / apply / destroy / etc.">
 ### アプリケーション専用ターゲット
 
@@ -325,6 +367,12 @@ run "plan_is_valid" {
 <NxCommands commands={['plan tf-infra']} />
 
 これにより、`dist/packages/<my-terraform-project>/terraform/dev.tfplan` にプランファイルが作成されます。
+
+`plan` は `assemble` に依存しているため、lint、test、type-check ゲートを実行せずに、Lambda バンドルや生成された操作メタデータなど、モジュールが参照するアーティファクトを生成します。
+
+:::caution[パイプラインでは `build` を使用してください]
+`assemble` は開発中の高速な反復のために使用されます。本番環境へのデプロイの前にプロジェクトが品質ゲートを通過することを確認するために、CI パイプラインでは `build` を実行してください。
+:::
 
 #### Terraform の初期化
 

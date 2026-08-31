@@ -571,9 +571,12 @@ describe('tsSmithyApiGenerator', () => {
     const openApiTarget =
       sharedConstructsConfig.targets['generate:test-api-metadata'];
     expect(openApiTarget.dependsOn).toContain('@proj/test-api-model:build');
-    expect(openApiTarget.options.commands).toContain(
-      'nx g @aws/nx-plugin:open-api#ts-metadata --openApiSpecPath="dist/test-api/model/build/openapi/openapi.json" --outputPath="packages/common/constructs/src/generated/test-api" --no-interactive',
-    );
+    expect(openApiTarget.executor).toBe('@aws/nx-plugin:open-api-codegen');
+    expect(openApiTarget.options).toEqual({
+      generator: 'ts-metadata',
+      openApiSpecPath: 'dist/test-api/model/build/openapi/openapi.json',
+      outputPath: 'packages/common/constructs/src/generated/test-api',
+    });
   });
 
   it('should handle kebab-case API names correctly', async () => {

@@ -9,6 +9,7 @@ import {
   fetchGuidePagesForGenerator,
   postProcessGuide,
   renderFilterableOptionsAsync,
+  renderGeneratorInfo,
 } from './generator-info.js';
 
 describe('postProcessGuide', () => {
@@ -616,6 +617,34 @@ REACT_PY_STRANDS_BODY`,
       expect(result.content).toMatch(/react.*ts#trpc-api/);
     });
 
+    it('warns that an experimental generator may change on the unsupported path', async () => {
+      const unsupportedOptions = {
+        sourceType: 'ts#trpc-api',
+        targetType: 'smithy',
+        protocol: 'http',
+      };
+
+      const experimental = await fetchGuidePagesForGenerator(
+        { ...connectionInfo, experimental: true },
+        [connectionInfo],
+        undefined,
+        undefined,
+        unsupportedOptions,
+      );
+      expect(experimental.kind).toBe('unsupported');
+      expect(experimental.content).toContain('[!WARNING] Experimental');
+
+      const stable = await fetchGuidePagesForGenerator(
+        connectionInfo,
+        [connectionInfo],
+        undefined,
+        undefined,
+        unsupportedOptions,
+      );
+      expect(stable.kind).toBe('unsupported');
+      expect(stable.content).not.toContain('Experimental');
+    });
+
     it('still shows partial matches when not every predicate key is supplied', async () => {
       // No protocol supplied — both protocol-tagged pages are kept.
       const result = await fetchGuidePagesForGenerator(
@@ -890,5 +919,41 @@ SMITHY_BODY`,
       expect(result.kind).toBe('ok');
       expect(result.content).toBe('');
     });
+  });
+});
+
+describe('renderGeneratorInfo', () => {
+  const info: NxGeneratorInfo = {
+    id: 'test-generator',
+    description: 'A test generator',
+    resolvedSchemaPath: '/path/to/schema.json',
+    resolvedFactoryPath: '/path/to/factory',
+    metric: 'g1',
+  };
+
+  beforeEach(() => {
+    vi.spyOn(fs, 'readFileSync').mockReturnValue(
+      JSON.stringify({ properties: { name: { type: 'string' } } }),
+    );
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('warns that an experimental generator may change without a migration', () => {
+    const rendered = renderGeneratorInfo('pnpm', {
+      ...info,
+      experimental: true,
+    });
+
+    expect(rendered).toContain('[!WARNING] Experimental');
+    expect(rendered).toContain(
+      'without a migration being published to apply the change to an existing workspace',
+    );
+  });
+
+  it('omits the warning for a non-experimental generator', () => {
+    expect(renderGeneratorInfo('pnpm', info)).not.toContain('Experimental');
   });
 });

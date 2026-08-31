@@ -127,6 +127,14 @@ export function Main() {
     expect(projectConfig.targets['agent-openapi'].outputs).toEqual([
       '{workspaceRoot}/dist/{projectRoot}/openapi/agent',
     ]);
+    // The spec serialises models a dependency may own, and this target has no
+    // `dependsOn` for `default`'s transitive `dependentTasksOutputFiles` to
+    // resolve against — so `^production` is the only edge to the dependency, and
+    // without it a dependency's model change serves a stale spec.
+    expect(projectConfig.targets['agent-openapi'].inputs).toEqual([
+      'production',
+      '^production',
+    ]);
   });
 
   it('should update frontend project configuration with client generation target', async () => {
@@ -150,7 +158,7 @@ export function Main() {
     // Verify client generation target was added
     expect(projectConfig.targets['generate:test-agent-client']).toBeDefined();
     expect(projectConfig.targets['generate:test-agent-client'].executor).toBe(
-      'nx:run-commands',
+      '@aws/nx-plugin:open-api-codegen',
     );
     expect(
       projectConfig.targets['generate:test-agent-client'].dependsOn,
