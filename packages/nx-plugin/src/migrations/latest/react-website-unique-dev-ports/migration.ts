@@ -92,8 +92,7 @@ export default async function migration(
 ): Promise<MigrationReturnObject> {
   const nextSteps: string[] = [];
 
-  // Deterministic order so re-runs (and different machines migrating the same
-  // workspace) assign the same ports.
+  // Codepoint order, so re-runs and different machines assign the same ports.
   const websiteNames: string[] = [...getProjects(tree).entries()]
     .filter(
       ([, project]) =>
@@ -101,7 +100,7 @@ export default async function migration(
         REACT_WEBSITE_APP_GENERATOR_INFO.id,
     )
     .map(([name]) => name)
-    .sort((a, b) => a.localeCompare(b));
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 
   for (const name of websiteNames) {
     const project: ProjectConfiguration = readProjectConfiguration(tree, name);
