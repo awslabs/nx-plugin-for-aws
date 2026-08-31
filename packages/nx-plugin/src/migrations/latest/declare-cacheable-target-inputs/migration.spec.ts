@@ -41,8 +41,6 @@ describe('declare-cacheable-target-inputs migration', () => {
     'bundle-migration',
     'bundle-create-db-user',
     'operations',
-    'openapi',
-    'my-agent-openapi',
   ])('should narrow %s to the default input', async (name) => {
     addProject(tree, { [name]: target(name) });
 
@@ -53,6 +51,21 @@ describe('declare-cacheable-target-inputs migration', () => {
     // directory rather than the build artifacts these targets consume.
     expect(inputsOf(tree, name)).toEqual(['default']);
   });
+
+  it.each(['openapi', 'my-agent-openapi'])(
+    'should keep a dependency edge on %s, which has no dependsOn',
+    async (name) => {
+      addProject(tree, { [name]: target(name) });
+
+      await migration(tree);
+
+      // With no upstream task, `default`'s transitive
+      // `dependentTasksOutputFiles` resolves against nothing, so `default` alone
+      // would collapse to this project's files and serve a stale spec when a
+      // dependency's models change.
+      expect(inputsOf(tree, name)).toEqual(['default', '^production']);
+    },
+  );
 
   it('should keep the dependency edge on checkov, which resolves consumed modules', async () => {
     addProject(tree, { checkov: target('checkov') });
@@ -88,9 +101,9 @@ describe('declare-cacheable-target-inputs migration', () => {
     expect(inputsOf(tree, 'compile')).toBeUndefined();
   });
 
-  it('should skip a target pointed away from the vended output shape', async () => {
+  it('should skip a target that declares no outputs of its own', async () => {
     addProject(tree, {
-      bundle: { ...target('bundle'), outputs: ['{projectRoot}/out'] },
+      bundle: { ...target('bundle'), outputs: [] },
       openapi: { ...target('openapi'), executor: '@my/plugin:build' },
     });
 
@@ -98,6 +111,27 @@ describe('declare-cacheable-target-inputs migration', () => {
 
     expect(inputsOf(tree, 'bundle')).toBeUndefined();
     expect(inputsOf(tree, 'openapi')).toBeUndefined();
+  });
+
+  it('should narrow an operations target writing outside dist', async () => {
+    // The real `operations` target writes generated Terraform sources under
+    // `packages/common/terraform/src/generated/`, so keying the vended shape on
+    // a `dist` path would mean never matching one.
+    addProject(tree, {
+      operations: {
+        cache: true,
+        executor: 'nx:run-commands',
+        outputs: [
+          '{workspaceRoot}/packages/common/terraform/src/generated/my-api',
+        ],
+        options: { commands: ['tsx x'], cwd: '{workspaceRoot}' },
+        dependsOn: ['compile'],
+      },
+    });
+
+    await migration(tree);
+
+    expect(inputsOf(tree, 'operations')).toEqual(['default']);
   });
 
   it('should preserve the rest of the target configuration', async () => {
