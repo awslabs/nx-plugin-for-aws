@@ -1,6 +1,8 @@
 <%_ const hasSessionBucket = session === 's3' || session === 'dynamodb-s3'; _%>
 import { Fn, Lazy, Names<%_ if (hasSessionBucket) { _%>, RemovalPolicy<%_ } _%>, Stack } from 'aws-cdk-lib';
+<%_ if (container) { _%>
 import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
+<%_ } _%>
 import { Connections, IConnectable } from 'aws-cdk-lib/aws-ec2';
 <%_ if (hasSessionBucket) { _%>
 import { BlockPublicAccess, Bucket, BucketEncryption } from 'aws-cdk-lib/aws-s3';
@@ -25,6 +27,9 @@ import { Construct } from 'constructs';
 import * as path from 'path';
 import * as url from 'url';
 import {
+<%_ if (!container) { _%>
+  AgentCoreRuntime,
+<%_ } _%>
   AgentRuntimeArtifact,
   ProtocolType,
   Runtime,
@@ -123,7 +128,7 @@ export type <%- nameClassName %>Props = Omit<
 <%_ } _%>
 
 export class <%- nameClassName %> extends Construct implements IGrantable, IConnectable {
-  public readonly dockerImage: AgentRuntimeArtifact;
+  public readonly <%- container ? 'dockerImage' : 'code' %>: AgentRuntimeArtifact;
   public readonly agentCoreRuntime: Runtime;
 <%_ if (serverProtocol === 'mcp') { _%>
   /** Default Gateway target name for this MCP server. */
@@ -140,15 +145,26 @@ export class <%- nameClassName %> extends Construct implements IGrantable, IConn
 
     const rc = RuntimeConfig.ensure(this);
 
-    // Resolve the bundle output directory containing the Dockerfile and built artifacts
+    // Resolve the <%- container ? 'bundle output directory containing the Dockerfile and built artifacts' : 'packaged code directory, uploaded as a zip asset' %>
     const bundleDir = path.join(
       findWorkspaceRoot(url.fileURLToPath(new URL(<% if (esm) { %>import.meta.url<% } else { %>require('url').pathToFileURL(__filename).href<% } %>))),
-      '<%- dockerOutputDir %>',
+      '<%- artifactOutputDir %>',
     );
 
+<%_ if (container) { _%>
     this.dockerImage = AgentRuntimeArtifact.fromAsset(bundleDir, {
       platform: Platform.LINUX_ARM64,
     });
+<%_ } else { _%>
+    // The `opentelemetry-instrument` prefix auto-instruments with the AWS Distro
+    // for OpenTelemetry packaged alongside the code.
+    // https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html
+    this.code = AgentRuntimeArtifact.fromCodeAsset({
+      path: bundleDir,
+      runtime: AgentCoreRuntime.<%- codeRuntime %>,
+      entrypoint: ['opentelemetry-instrument', '<%- codeEntryPoint %>'],
+    });
+<%_ } _%>
 
 <%_ if (auth === 'cognito' || hasSessionBucket) { _%>
     const {
@@ -293,7 +309,7 @@ export class <%- nameClassName %> extends Construct implements IGrantable, IConn
           Names.uniqueResourceName(this.agentCoreRuntime, { maxLength: 40 }),
       }),
       protocolConfiguration: ProtocolType.<%- serverProtocol.toUpperCase() %>,
-      agentRuntimeArtifact: this.dockerImage,
+      agentRuntimeArtifact: this.<%- container ? 'dockerImage' : 'code' %>,
 <%_ if (auth === 'cognito') { _%>
       authorizerConfiguration: RuntimeAuthorizerConfiguration.usingCognito(
         identity.userPool,

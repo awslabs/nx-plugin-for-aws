@@ -81,12 +81,36 @@ export type AgentCoreAuth = 'iam' | 'cognito';
 
 export type AgentCoreSession = 's3' | 'dynamodb-s3' | 'in-memory';
 
+/**
+ * How the runtime's artifact is packaged, and the details each packaging needs.
+ *
+ * `container` builds an arm64 image from a Dockerfile and hosts it from ECR.
+ * `code` uploads a zip of the built code to S3 and runs it on an AgentCore
+ * managed language runtime.
+ */
+export type AgentCoreArtifact =
+  | {
+      readonly type: 'container';
+      /** Local image tag the build produces, published to ECR by Terraform. */
+      readonly dockerImageTag: string;
+      /** Build context directory, holding the Dockerfile and built artifacts. */
+      readonly outputDir: string;
+    }
+  | {
+      readonly type: 'code';
+      /** Packaged code directory, archived and uploaded as the artifact. */
+      readonly outputDir: string;
+      /** Managed language runtime, e.g. `NODE_22` or `PYTHON_3_14`. */
+      readonly runtime: string;
+      /** Entry point file within the package, run by the managed runtime. */
+      readonly entryPoint: string;
+    };
+
 export interface AddAgentCoreInfraProps {
   nameClassName: string;
   nameKebabCase: string;
   projectName: string;
-  dockerImageTag: string;
-  dockerOutputDir: string;
+  artifact: AgentCoreArtifact;
   appDirectory: string;
   serverProtocol: 'mcp' | 'http' | 'a2a';
   auth: AgentCoreAuth;
@@ -94,6 +118,28 @@ export interface AddAgentCoreInfraProps {
   session: AgentCoreSession;
   containers: Containers;
 }
+
+/**
+ * Template substitution variables describing the runtime artifact, shared by
+ * the CDK and Terraform branches so both read the same fields.
+ */
+/**
+ * The shared Terraform module directory a given packaging uses, under
+ * `core/`. Container packaging keeps the original `agent-core` name so
+ * existing workspaces are untouched.
+ */
+const terraformAgentCoreModule = (artifact: AgentCoreArtifact): string =>
+  artifact.type === 'container' ? 'agent-core' : 'agent-core-code';
+
+const artifactTemplateVars = (artifact: AgentCoreArtifact) => ({
+  container: artifact.type === 'container',
+  artifactOutputDir: artifact.outputDir,
+  terraformAgentCoreModule: terraformAgentCoreModule(artifact),
+  dockerImageTag:
+    artifact.type === 'container' ? artifact.dockerImageTag : undefined,
+  codeRuntime: artifact.type === 'code' ? artifact.runtime : undefined,
+  codeEntryPoint: artifact.type === 'code' ? artifact.entryPoint : undefined,
+});
 
 const addAgentCoreInfra = async (
   tree: Tree,
@@ -138,7 +184,11 @@ const addAgentCoreCDKInfra = async (
       'app',
       options.appDirectory,
     ),
-    { ...options, ...esmVars(tree) },
+    {
+      ...options,
+      ...artifactTemplateVars(options.artifact),
+      ...esmVars(tree),
+    },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
@@ -174,7 +224,10 @@ const addAgentCoreTerraformInfra = (
   tree: Tree,
   options: AddAgentCoreInfraProps,
 ) => {
-  // Add the AgentCore shared module
+  // Add the AgentCore shared module. Each packaging gets its own module
+  // directory: the shared modules are written `KeepExisting` (so they stay
+  // user-owned), and a workspace may host both packagings at once, which a
+  // single directory could only serve for whichever was generated first.
   generateFiles(
     tree,
     joinPathFragments(
@@ -189,11 +242,12 @@ const addAgentCoreTerraformInfra = (
       SHARED_TERRAFORM_DIR,
       'src',
       'core',
-      'agent-core',
+      terraformAgentCoreModule(options.artifact),
     ),
     {
       containers: options.containers,
       boto3Version: PY_VERSIONS.boto3,
+      ...artifactTemplateVars(options.artifact),
       ...terraformProviderVersions(),
     },
     {
@@ -218,7 +272,11 @@ const addAgentCoreTerraformInfra = (
       'app',
       options.appDirectory,
     ),
-    { ...options, ...terraformProviderVersions() },
+    {
+      ...options,
+      ...artifactTemplateVars(options.artifact),
+      ...terraformProviderVersions(),
+    },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
@@ -229,8 +287,7 @@ export interface AddMcpServerInfraProps {
   mcpServerNameClassName: string;
   mcpServerNameKebabCase: string;
   projectName: string;
-  dockerImageTag: string;
-  dockerOutputDir: string;
+  artifact: AgentCoreArtifact;
   auth: AgentCoreAuth;
   containers: Containers;
 }
@@ -245,8 +302,7 @@ export const addMcpServerInfra = async (
   await addAgentCoreInfra(tree, {
     nameClassName: options.mcpServerNameClassName,
     nameKebabCase: options.mcpServerNameKebabCase,
-    dockerImageTag: options.dockerImageTag,
-    dockerOutputDir: options.dockerOutputDir,
+    artifact: options.artifact,
     projectName: options.projectName,
     appDirectory: 'mcp-servers',
     serverProtocol: 'mcp',
@@ -262,8 +318,7 @@ export interface AddAgentInfraProps {
   agentNameClassName: string;
   agentNameKebabCase: string;
   projectName: string;
-  dockerImageTag: string;
-  dockerOutputDir: string;
+  artifact: AgentCoreArtifact;
   auth: AgentCoreAuth;
   session: AgentCoreSession;
   serverProtocol?: 'http' | 'a2a';
@@ -281,8 +336,7 @@ export const addAgentInfra = async (
     nameClassName: options.agentNameClassName,
     nameKebabCase: options.agentNameKebabCase,
     projectName: options.projectName,
-    dockerImageTag: options.dockerImageTag,
-    dockerOutputDir: options.dockerOutputDir,
+    artifact: options.artifact,
     appDirectory: 'agents',
     session: options.session,
     serverProtocol: options.serverProtocol ?? 'http',

@@ -63,9 +63,10 @@ dev-dependencies = []
     expect(
       tree.exists('apps/test-project/proj_test_project/agent/main.py'),
     ).toBeTruthy();
+    // Code packaging is the default, so there is no Dockerfile
     expect(
       tree.exists('apps/test-project/proj_test_project/agent/Dockerfile'),
-    ).toBeTruthy();
+    ).toBeFalsy();
 
     // The agent server imports the framework base helpers, so they must be
     // emitted + re-exported even without any connection client.
@@ -135,11 +136,12 @@ dev-dependencies = []
     expect(
       tree.exists('apps/test-project/proj_test_project/custom_agent/main.py'),
     ).toBeTruthy();
+    // Code packaging is the default, so there is no Dockerfile
     expect(
       tree.exists(
         'apps/test-project/proj_test_project/custom_agent/Dockerfile',
       ),
-    ).toBeTruthy();
+    ).toBeFalsy();
 
     // Check that project configuration was updated with custom serve target
     const projectConfig = JSON.parse(
@@ -253,7 +255,7 @@ dev-dependencies = []
   it('should generate strands agent with BedrockAgentCoreRuntime (default)', async () => {
     await pyAgentGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'cdk',
     });
 
@@ -336,7 +338,7 @@ dev-dependencies = []
     await pyAgentGenerator(tree, {
       project: 'test-project',
       name: 'custom-bedrock-agent',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'cdk',
     });
 

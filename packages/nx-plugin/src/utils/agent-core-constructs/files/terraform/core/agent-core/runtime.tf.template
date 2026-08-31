@@ -6,10 +6,17 @@ terraform {
       source  = "hashicorp/aws"
       version = "<%- awsProviderVersion %>"
     }
+<%_ if (container) { _%>
     external = {
       source  = "hashicorp/external"
       version = "<%- externalProviderVersion %>"
     }
+<%_ } else { _%>
+    archive = {
+      source  = "hashicorp/archive"
+      version = "<%- archiveProviderVersion %>"
+    }
+<%_ } _%>
     null = {
       source  = "hashicorp/null"
       version = "<%- nullProviderVersion %>"
@@ -53,10 +60,27 @@ variable "authorizer_configuration" {
   default = null
 }
 
+<%_ if (container) { _%>
 variable "docker_image_tag" {
   description = "Name of the docker image tag to use as the agent core runtime"
   type        = string
 }
+<%_ } else { _%>
+variable "code_dir" {
+  description = "Directory holding the packaged agent code, archived and uploaded as the agent core runtime artifact"
+  type        = string
+}
+
+variable "code_runtime" {
+  description = "Managed language runtime executing the packaged code (e.g. NODE_22, PYTHON_3_14)"
+  type        = string
+}
+
+variable "code_entry_point" {
+  description = "Entry point file within the packaged code, run by the managed runtime"
+  type        = string
+}
+<%_ } _%>
 
 variable "env" {
   description = "Environment variables to pass to the agent core runtime"
@@ -118,6 +142,7 @@ resource "random_id" "unique_suffix" {
   byte_length = 4
 }
 
+<%_ if (container) { _%>
 # ECR Repository
 resource "aws_ecr_repository" "agent_core_repository" {
   #checkov:skip=CKV_AWS_136:AES256 encryption is sufficient for ECR repositories
@@ -159,6 +184,91 @@ resource "aws_ecr_repository_policy" "agent_core_ecr_policy" {
     ]
   })
 }
+<%_ } else { _%>
+# Bucket holding the packaged code uploaded as the runtime artifact
+resource "aws_s3_bucket" "agent_core_code" {
+  #checkov:skip=CKV2_AWS_61:Lifecycle configuration not required for code packages
+  #checkov:skip=CKV2_AWS_62:Event notifications not required for code packages
+  #checkov:skip=CKV_AWS_144:Cross-region replication not required for code packages
+  #checkov:skip=CKV_AWS_18:Access logging not required for code packages
+  #checkov:skip=CKV_AWS_145:AES256 (S3-managed) encryption is sufficient for build artefacts
+  bucket        = "${lower(replace(var.agent_runtime_name, "_", "-"))}-code-${random_id.unique_suffix.hex}"
+  force_destroy = true
+
+  tags = var.tags
+}
+
+resource "aws_s3_bucket_versioning" "agent_core_code" {
+  bucket = aws_s3_bucket.agent_core_code.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "agent_core_code" {
+  bucket = aws_s3_bucket.agent_core_code.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "agent_core_code" {
+  bucket = aws_s3_bucket.agent_core_code.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_policy" "agent_core_code" {
+  bucket = aws_s3_bucket.agent_core_code.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "DenyInsecureConnections"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = "s3:*"
+        Resource = [
+          aws_s3_bucket.agent_core_code.arn,
+          "${aws_s3_bucket.agent_core_code.arn}/*"
+        ]
+        Condition = {
+          Bool = {
+            "aws:SecureTransport" = "false"
+          }
+        }
+      }
+    ]
+  })
+}
+
+# Archive the packaged code. The output hash keys the object below, so a code
+# change uploads a new object and triggers a runtime update.
+data "archive_file" "agent_core_code" {
+  type        = "zip"
+  source_dir  = var.code_dir
+  output_path = "${var.code_dir}.zip"
+}
+
+resource "aws_s3_object" "agent_core_code" {
+  bucket = aws_s3_bucket.agent_core_code.id
+  # Keyed on the hex digest rather than `output_base64sha256`, whose `/` and `=`
+  # characters would read as a key prefix and leave the object unresolvable.
+  key    = "${data.archive_file.agent_core_code.output_sha256}.zip"
+  source = data.archive_file.agent_core_code.output_path
+  etag   = data.archive_file.agent_core_code.output_md5
+
+  tags = var.tags
+}
+<%_ } _%>
 
 # IAM Role for Agent Core Runtime
 resource "aws_iam_role" "agent_core_runtime_role" {
@@ -197,6 +307,7 @@ resource "aws_iam_policy" "agent_core_runtime_policy" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = concat([
+<%_ if (container) { _%>
       {
         Sid    = "ECRImageAccess"
         Effect = "Allow"
@@ -218,6 +329,19 @@ resource "aws_iam_policy" "agent_core_runtime_policy" {
           "*"
         ]
       },
+<%_ } else { _%>
+      {
+        Sid    = "CodePackageAccess"
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:GetObjectVersion"
+        ]
+        Resource = [
+          "${aws_s3_bucket.agent_core_code.arn}/*"
+        ]
+      },
+<%_ } _%>
       {
         "Effect" : "Allow",
         "Action" : [
@@ -292,6 +416,7 @@ resource "aws_iam_role_policy_attachment" "agent_core_policy" {
   policy_arn = aws_iam_policy.agent_core_runtime_policy.arn
 }
 
+<%_ if (container) { _%>
 # Data source to get container image digest
 data "external" "docker_digest" {
   program = ["sh", "-c", "echo '{\"digest\":\"'$(<%= containers %> inspect ${var.docker_image_tag} --format '{{.Id}}')'\"}' "]
@@ -332,6 +457,7 @@ resource "null_resource" "docker_publish" {
 
   depends_on = [aws_ecr_repository_policy.agent_core_ecr_policy]
 }
+<%_ } _%>
 
 # Security group for the agent core runtime, used when running inside a VPC
 resource "aws_security_group" "agent_core_runtime" {
@@ -362,9 +488,26 @@ resource "aws_bedrockagentcore_agent_runtime" "agent_runtime" {
   role_arn           = aws_iam_role.agent_core_runtime_role.arn
 
   agent_runtime_artifact {
+<%_ if (container) { _%>
     container_configuration {
       container_uri = "${aws_ecr_repository.agent_core_repository.repository_url}:${local.image_tag}"
     }
+<%_ } else { _%>
+    code_configuration {
+      # The `opentelemetry-instrument` prefix auto-instruments with the AWS Distro
+      # for OpenTelemetry packaged alongside the code.
+      # https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html
+      entry_point = ["opentelemetry-instrument", var.code_entry_point]
+      runtime     = var.code_runtime
+
+      code {
+        s3 {
+          bucket = aws_s3_bucket.agent_core_code.id
+          prefix = aws_s3_object.agent_core_code.key
+        }
+      }
+    }
+<%_ } _%>
   }
 
   environment_variables = length(var.env) > 0 ? var.env : null
@@ -407,7 +550,11 @@ resource "aws_bedrockagentcore_agent_runtime" "agent_runtime" {
   tags = var.tags
 
   depends_on = [
+<%_ if (container) { _%>
     null_resource.docker_publish,
+<%_ } else { _%>
+    aws_s3_object.agent_core_code,
+<%_ } _%>
     aws_iam_role_policy_attachment.agent_core_policy
   ]
 }

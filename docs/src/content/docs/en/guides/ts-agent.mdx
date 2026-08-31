@@ -63,7 +63,7 @@ The generator will add the following files to your existing TypeScript project. 
         - session.ts Resolves the SessionManager used to persist conversation state
         - client.ts Vended client for invoking your agent
         - agent-core-trpc-client.ts Client factory for connecting to agents on AgentCore Runtime
-        - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - package.json Updated with Strands dependencies
     - project.json Updated with agent serve targets
 </FileTree>
@@ -81,7 +81,7 @@ The entry point uses the [Strands A2A Express Server](https://strandsagents.com/
         - index.ts A2A Express server entry point
         - agent.ts Main agent definition with sample tools
         - session.ts Resolves the SessionManager used to persist conversation state
-        - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - package.json Updated with Strands and Express dependencies
     - project.json Updated with agent serve targets
 </FileTree>
@@ -99,7 +99,7 @@ The entry point uses [`@ag-ui/aws-strands`](https://www.npmjs.com/package/@ag-ui
         - index.ts AG-UI server entry point (Express + SSE)
         - agent.ts Main agent definition with sample tools
         - session.ts Resolves the SessionManager used to persist conversation state
-        - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - package.json Updated with Strands and AG-UI dependencies
     - project.json Updated with agent serve targets
 </FileTree>
@@ -107,7 +107,9 @@ The entry point uses [`@ag-ui/aws-strands`](https://www.npmjs.com/package/@ag-ui
 
 ### Infrastructure
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment">
+<Snippet name="agentcore-hosting" />
+
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Bedrock AgentCore Runtime deployment">
 <Snippet name="shared-constructs" />
 
 For deploying your Agent, the following files are generated:
@@ -130,7 +132,7 @@ For deploying your Agent, the following files are generated:
         - \<agent-name>
           - \<agent-name>.tf Module for deploying your agent
     - core
-      - agent-core
+      - agent-core-code (or agent-core when `infra` is `agentcore-ecr`)
         - runtime.tf Generic module for deploying to Bedrock AgentCore Runtime
 </FileTree>
 </Fragment>
@@ -249,7 +251,7 @@ For a more in-depth guide to writing Strands agents, refer to the [Strands docum
 
 The generated `index.ts` mounts the [Strands A2A Express Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) onto an Express app so the generated agent exposes the A2A protocol endpoints alongside a `/ping` health check. The URL advertised in the agent card comes from the `AGENTCORE_RUNTIME_URL` environment variable, falling back to `http://localhost:<port>/` for local development.
 
-Most users will not need to modify this file — edit `agent.ts` to change tools or the system prompt. A2A agents listen on port `9000` (vs `8080` for HTTP), which the generated Dockerfile and infrastructure are already configured for.
+Most users will not need to modify this file — edit `agent.ts` to change tools or the system prompt. A2A agents listen on port `9000` (vs `8080` for HTTP), which the generated infrastructure is already configured for.
 </OptionFilter>
 
 <OptionFilter when={{ protocol: 'ag-ui' }} description="AG-UI server details">
@@ -259,7 +261,7 @@ The generated `index.ts` wraps your Strands `Agent` in an [`@ag-ui/aws-strands`]
 
 AG-UI agents are designed to be consumed directly by a frontend. Use the <Link path="/guides/connection/react-agui">`connection` generator</Link> to wire your React website up to the agent with a [CopilotKit](https://docs.copilotkit.ai/aws-strands) provider and [AG-UI HttpAgent](https://docs.ag-ui.com/) client.
 
-Most users will not need to modify `index.ts` — edit `agent.ts` to change tools or the system prompt. AG-UI agents listen on port `8080` (same as HTTP), which the generated Dockerfile and infrastructure are already configured for.
+Most users will not need to modify `index.ts` — edit `agent.ts` to change tools or the system prompt. AG-UI agents listen on port `8080` (same as HTTP), which the generated infrastructure is already configured for.
 </OptionFilter>
 
 ## Running Your Agent
@@ -290,7 +292,7 @@ Then, in another terminal, start the chat:
 
 The generator emits a `scripts/<your-agent-name>/chat.ts` for every protocol. You can customize it as you evolve the agent's input shape. It connects to the local agent by default, or to your deployed agent when `RUNTIME_CONFIG_APP_ID` is set (see [Chat with your deployed agent](#chat-with-your-deployed-agent) below).
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Deployed agent chat details">
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Deployed agent chat details">
 #### Chat with your deployed agent
 
 To chat with your agent deployed to Bedrock AgentCore, set the `RUNTIME_CONFIG_APP_ID` environment variable to the AppConfig application id of the deployment (output as `RuntimeConfigApplicationId` by the deployed stack). The chat script resolves your agent's runtime ARN from runtime configuration and connects to the deployed endpoint:
@@ -322,7 +324,7 @@ aws cognito-idp admin-initiate-auth \
 </Tabs>
 </OptionFilter>
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment details">
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Bedrock AgentCore Runtime deployment details">
 ## Deploying Your Agent to Bedrock AgentCore Runtime
 
 <Snippet name="agent/bedrock-deployment" parentHeading="Deploying Your Agent to Bedrock AgentCore Runtime" />
@@ -333,6 +335,13 @@ aws cognito-idp admin-initiate-auth \
 
 The bundle target uses `index.ts` as the entrypoint for the WebSocket server to host on Bedrock AgentCore Runtime.
 
+<OptionFilter when={{ infra: 'agentcore' }} description="Code package target">
+### Package Target
+
+The generator configures a `<your-agent-name>-package` target which assembles the deployable code package: the bundled `index.js` plus a vendored install of the AWS Distro for OpenTelemetry, which AgentCore requires to be present in the package. The infrastructure uploads this directory as a `.zip` using `AgentRuntimeArtifact.fromCodeAsset`.
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'agentcore-ecr' }} description="Container image build and scan">
 ### Docker Target
 
 The generator configures a `<your-agent-name>-docker` target which copies the `Dockerfile` from your agent source directory into the bundle output directory. This co-locates the `Dockerfile` with the bundled artifacts, allowing CDK to build the Docker image directly using `AgentRuntimeArtifact.fromAsset`.
@@ -342,10 +351,11 @@ A `docker` target is also generated which prepares the docker context for all ag
 ### Image Scanning
 
 <Snippet name="trivy-image-scan" parentHeading="Image Scanning" />
+</OptionFilter>
 
 ### Observability
 
-Your agent is automatically configured with observability using the [AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT), by configuring auto-instrumentation in your `Dockerfile`.
+Your agent is automatically configured with observability using the [AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT). Under `agentcore` the ADOT distribution is packaged alongside your code and loaded via the `opentelemetry-instrument` entry point; under `agentcore-ecr` it is installed in the image and loaded by the `Dockerfile`'s command.
 
 You can find traces in the CloudWatch AWS Console, by selecting "GenAI Observability" in the menu. Note that for traces to be populated you will need to enable [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html).
 
