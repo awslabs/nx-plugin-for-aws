@@ -181,10 +181,8 @@ Aggiungi un target `docker` che:
 }
 ```
 
-:::caution[Non lasciare che Nx cachi una build di immagine]
-Un'immagine costruita vive nello store del motore di container, non sotto alcun percorso `outputs`, quindi Nx non ha nulla da ripristinare su un cache hit — riporterebbe la build completa mentre l'immagine è mancante (ad esempio dopo un `docker rmi` o un `docker system prune`), e un target `trivy` che dipende da essa riporterebbe un pass cachato contro un'immagine che non c'è.
-
-Impostare `"cache": false` mantiene questo corretto a quasi nessun costo: la cache dei layer del motore di container stesso è basata sul contesto di build e vive accanto all'immagine, quindi un contesto non modificato si ricostruisce in ben meno di un secondo e lascia sempre l'immagine presente.
+:::caution[Non cachare le build delle immagini]
+Imposta `"cache": false` sui target di build delle immagini. Un'immagine costruita non viene scritta in un percorso `outputs` nel filesystem, quindi Nx non ha nulla da ripristinare su un cache hit. I motori di container cachano i layer delle immagini indipendentemente, quindi non c'è penalità di prestazioni.
 :::
 
 :::tip[Copia file cross-platform]
@@ -304,7 +302,7 @@ Invece raccomandiamo di eseguire il comando sopra come step dedicato nella tua p
 :::tip[Perché la scansione non è deliberatamente cachata]
 L'immagine che la scansione legge è raggiungibile solo attraverso il motore di container, quindi una voce di cache ripristinata riporterebbe un pass per un'immagine che potrebbe non essere più lì. Con `"cache": false` la scansione viene sempre eseguita contro l'immagine reale, e fallisce rumorosamente se è mancante. Fissa la versione dell'immagine Trivy (es. <code>trivy:<TrivyVersion /></code>) in modo che le scansioni siano riproducibili.
 
-Questo significa che ogni esecuzione di `trivy` esegue un `docker save` completo più la scansione per immagine — aspettati decine di secondi per immagine piuttosto che un cache hit gratuito, motivo per cui la scansione appartiene al proprio job CI piuttosto che in `build`. Inoltre aggiorna il database delle vulnerabilità di Trivy ad ogni esecuzione, quindi ha bisogno di accesso alla rete; quell'aggiornamento è il punto, dato che una scansione è valida solo quanto i dati CVE dietro di essa. Su un runner isolato dalla rete, monta una directory di cache persistente in `/root/.cache/trivy` e aggiungi `--skip-db-update`, avendo seminato il database in uno step precedente.
+A differenza della build dell'immagine sopra — dove la cache dei layer del motore assorbe il costo — questa non è gratuita: ogni esecuzione di `trivy` esegue un `docker save` completo più la scansione per immagine, quindi aspettati decine di secondi per immagine piuttosto che un cache hit. Questo è il motivo per cui la scansione appartiene al proprio job CI piuttosto che in `build`. Inoltre aggiorna il database delle vulnerabilità di Trivy ad ogni esecuzione, quindi ha bisogno di accesso alla rete; quell'aggiornamento è il punto, dato che una scansione è valida solo quanto i dati CVE dietro di essa. Su un runner isolato dalla rete, monta una directory di cache persistente in `/root/.cache/trivy` e aggiungi `--skip-db-update`, avendo seminato il database in uno step precedente.
 :::
 
 :::note[Soppressione dei risultati]

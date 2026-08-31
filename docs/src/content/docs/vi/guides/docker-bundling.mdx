@@ -181,10 +181,8 @@ Thêm target `docker` để:
 }
 ```
 
-:::caution[Không để Nx cache một image build]
-Một built image tồn tại trong store của container engine, không nằm dưới bất kỳ đường dẫn `outputs` nào, do đó Nx không có gì để khôi phục khi cache hit — nó sẽ báo cáo build hoàn thành trong khi image bị thiếu (ví dụ sau một `docker rmi` hoặc một `docker system prune`), và một `trivy` target phụ thuộc vào nó sẽ báo cáo một cached pass đối với một image không có ở đó.
-
-Đặt `"cache": false` giữ điều này đúng đắn với chi phí gần như bằng không: layer cache riêng của container engine được khóa trên build context và tồn tại cùng với image, do đó một context không thay đổi rebuild trong dưới một giây và luôn để lại image hiện diện.
+:::caution[Không cache image builds]
+Đặt `"cache": false` trên các image build targets. Một built image không được ghi vào đường dẫn `outputs` trong filesystem, do đó Nx không có gì để khôi phục khi cache hit. Container engines cache image layers bất kể điều gì, do đó không có hình phạt về hiệu suất.
 :::
 
 :::tip[Sao chép file đa nền tảng]
@@ -304,7 +302,7 @@ Thay vào đó, chúng tôi khuyến nghị chạy lệnh trên như một bư�
 :::tip[Tại sao scan cố ý không được cache]
 Image mà scan đọc chỉ có thể truy cập được thông qua container engine, do đó một cache entry được khôi phục sẽ báo cáo một pass cho một image có thể không còn ở đó nữa. Với `"cache": false`, scan luôn chạy đối với image thực, và thất bại rõ ràng nếu nó bị thiếu. Ghim phiên bản Trivy image (ví dụ: <code>trivy:<TrivyVersion /></code>) để các lần quét có thể tái tạo.
 
-Điều này có nghĩa là mỗi lần chạy `trivy` thực hiện một `docker save` đầy đủ cộng với scan cho mỗi image — mong đợi hàng chục giây cho mỗi image thay vì một cache hit miễn phí, đó là lý do tại sao scan thuộc về CI job riêng của nó thay vì trong `build`. Nó cũng làm mới cơ sở dữ liệu lỗ hổng của Trivy trong mỗi lần chạy, do đó nó cần truy cập mạng; việc làm mới đó là điểm quan trọng, vì một scan chỉ tốt bằng dữ liệu CVE đằng sau nó. Trên một runner bị cô lập mạng, mount một thư mục cache bền vững tại `/root/.cache/trivy` và thêm `--skip-db-update`, sau khi đã seed cơ sở dữ liệu trong một bước trước đó.
+Không giống như image build ở trên — nơi layer cache của engine hấp thụ chi phí — cái này không miễn phí: mỗi lần chạy `trivy` thực hiện một `docker save` đầy đủ cộng với scan cho mỗi image, do đó mong đợi hàng chục giây cho mỗi image thay vì một cache hit. Đó là lý do tại sao scan thuộc về CI job riêng của nó thay vì trong `build`. Nó cũng làm mới cơ sở dữ liệu lỗ hổng của Trivy trong mỗi lần chạy, do đó nó cần truy cập mạng; việc làm mới đó là điểm quan trọng, vì một scan chỉ tốt bằng dữ liệu CVE đằng sau nó. Trên một runner bị cô lập mạng, mount một thư mục cache bền vững tại `/root/.cache/trivy` và thêm `--skip-db-update`, sau khi đã seed cơ sở dữ liệu trong một bước trước đó.
 :::
 
 :::note[Ngăn chặn các phát hiện]
