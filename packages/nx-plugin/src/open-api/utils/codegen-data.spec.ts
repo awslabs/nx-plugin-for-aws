@@ -1268,4 +1268,58 @@ describe('openapi codegen data utils', () => {
       );
     });
   });
+
+  // The per-media-type conflict check follows references so two spellings of one
+  // shape compare equal. Expanding every occurrence, and carrying each level's
+  // text upwards, exhausted the heap and then overran the maximum string length
+  // on the largest published specs — so a shared schema is keyed once and each
+  // level reduced to a digest. A wide, deeply shared document stands in for
+  // those here.
+  it('compares media types on a document that shares one schema widely', () => {
+    const depth = 40;
+    const width = 60;
+    const schemas: Record<string, unknown> = {
+      Leaf: { type: 'object', properties: { v: { type: 'string' } } },
+    };
+    for (let level = 0; level < depth; level++) {
+      schemas[`Level${level}`] = {
+        type: 'object',
+        properties: Object.fromEntries(
+          Array.from({ length: width }, (_, i) => [
+            `p${i}`,
+            {
+              $ref: `#/components/schemas/${level === 0 ? 'Leaf' : `Level${level - 1}`}`,
+            },
+          ]),
+        ),
+      };
+    }
+    const spec = {
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/x': {
+          get: {
+            operationId: 'getX',
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': {
+                    schema: { $ref: `#/components/schemas/Level${depth - 1}` },
+                  },
+                  'application/xml': {
+                    schema: { $ref: `#/components/schemas/Level${depth - 1}` },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: { schemas },
+    } as unknown as Spec;
+
+    expect(() => buildOpenApiCodeGenData(spec)).not.toThrow();
+  });
 });

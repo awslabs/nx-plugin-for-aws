@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { createHash } from 'node:crypto';
 import orderBy from 'lodash.orderby';
 import trim from 'lodash.trim';
 import uniqBy from 'lodash.uniqby';
@@ -763,38 +764,78 @@ const assignOperationNames = (
  * to import.
  */
 /**
- * A schema with every `$ref` in it replaced by its target, so two schemas can be
- * compared by shape rather than by how they happen to be written.
+ * A short, stable digest of a string. Each level of {@link schemaShapeKey} is
+ * reduced to one of these rather than carrying its children's text upwards: a
+ * deeply nested schema in a large document otherwise built a key past the
+ * maximum string length, and the biggest published specs failed outright.
+ */
+const digest = (value: string): string =>
+  createHash('sha1').update(value).digest('base64');
+
+/**
+ * A key identifying a schema by its shape rather than by how it is written, so
+ * two schemas can be compared for equivalence.
  *
  * Normalisation hoists only the preferred media type's inline schema into
  * `components`, and does so at any depth, so the same shape reaches here as a
- * `$ref` under one media type and inline under another. `seen` breaks a cycle in
- * a self-referential schema, leaving the reference in place.
+ * `$ref` under one media type and inline under another — following references is
+ * what lets those compare equal.
+ *
+ * Each reference is expanded once and its key reused: a large document shares a
+ * handful of schemas across thousands of sites, and expanding every occurrence
+ * exhausted the heap on the biggest published specs. `seen` breaks a cycle in a
+ * self-referential schema by keying the reference itself, and such a schema is
+ * left out of the cache since its key depends on where it was reached from.
  */
-const fullyResolvedSchema = (
+const schemaShapeKey = (
   spec: Spec,
   schema: unknown,
+  cache: Map<string, string>,
   seen: ReadonlySet<string> = new Set(),
-): unknown => {
-  if (!schema || typeof schema !== 'object') return schema;
+): string => {
+  if (!schema || typeof schema !== 'object') return JSON.stringify(schema);
   if (Array.isArray(schema)) {
-    return schema.map((member) => fullyResolvedSchema(spec, member, seen));
+    return digest(
+      `[${schema.map((member) => schemaShapeKey(spec, member, cache, seen)).join(',')}]`,
+    );
   }
   if (isRef(schema)) {
     const ref = (schema as OpenAPIV3.ReferenceObject).$ref;
-    if (seen.has(ref)) return schema;
-    return fullyResolvedSchema(
-      spec,
-      resolveIfRef(spec, schema),
-      new Set(seen).add(ref),
-    );
+    if (seen.has(ref)) return `cycle:${ref}`;
+    const cached = cache.get(ref);
+    if (cached !== undefined) return cached;
+    const nested = new Set(seen).add(ref);
+    const key = schemaShapeKey(spec, resolveIfRef(spec, schema), cache, nested);
+    if (!key.startsWith('cycle:')) {
+      cache.set(ref, key);
+    }
+    return key;
   }
-  return Object.fromEntries(
-    Object.entries(schema)
+  return digest(
+    `{${Object.entries(schema)
       // Bookkeeping the normaliser adds to what it hoists, not part of the shape.
       .filter(([key]) => !key.startsWith('x-aws-nx-'))
-      .map(([key, value]) => [key, fullyResolvedSchema(spec, value, seen)]),
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(
+        ([key, value]) => `${key}:${schemaShapeKey(spec, value, cache, seen)}`,
+      )
+      .join(',')}}`,
   );
+};
+
+/**
+ * Keyed by the document, since its schemas recur across every operation and a
+ * cache shared between documents would answer for the wrong one. Held weakly so
+ * a spec's entries go when the spec does.
+ */
+const schemaShapeCaches = new WeakMap<Spec, Map<string, string>>();
+const schemaShapeCacheFor = (spec: Spec): Map<string, string> => {
+  let cache = schemaShapeCaches.get(spec);
+  if (!cache) {
+    cache = new Map<string, string>();
+    schemaShapeCaches.set(spec, cache);
+  }
+  return cache;
 };
 
 const augmentResponses = (
@@ -868,7 +909,9 @@ const augmentResponses = (
         .filter((mediaType) => !STREAMING_CONTENT_TYPES.has(mediaType))
         .map((mediaType) => specResponse.content![mediaType]?.schema)
         .filter((schema) => schema !== undefined)
-        .map((schema) => JSON.stringify(fullyResolvedSchema(spec, schema))),
+        .map((schema) =>
+          schemaShapeKey(spec, schema, schemaShapeCacheFor(spec)),
+        ),
     );
     if (bodySchemas.size > 1) {
       throw new Error(
