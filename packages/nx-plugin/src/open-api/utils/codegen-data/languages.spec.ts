@@ -2,10 +2,14 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+
+import { execFileSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import {
+  PYTHON_CLASS_CASED_BUILTINS,
   qualifyPythonType,
   toPythonAnnotation,
+  toPythonClassName,
   toPythonName,
   toPythonType,
   toTypeScriptType,
@@ -287,6 +291,43 @@ describe('languages', () => {
     it('should handle already escaped names', () => {
       expect(toPythonName('model', '_class')).toBe('model_class');
       expect(toPythonName('property', '_import')).toBe('var_import');
+    });
+  });
+
+  /**
+   * A schema named after a class-cased builtin is emitted as a class that shadows
+   * it only from its own definition onwards. `types.py` carries `from __future__
+   * import annotations`, so an annotation rendered above that class resolves to
+   * the builtin and pydantic rejects the module — and whether it happens at all
+   * depends on where the schema sorts. A published spec with a schema named
+   * `Exception` produced a `types.py` that could not be imported.
+   */
+  describe('toPythonClassName', () => {
+    it.each(['Exception', 'ValueError', 'Warning', 'KeyError', 'None'])(
+      'escapes a schema named %s',
+      (name) => {
+        expect(toPythonClassName(name)).toBe(`_${name}`);
+      },
+    );
+
+    // Checked against the interpreter rather than maintained by hand, so a
+    // builtin this list misses fails here instead of in generated output. A
+    // superset assertion: the list is built from the newest Python the generated
+    // projects target, and the interpreter running the tests may be older —
+    // escaping a name that is not yet a builtin is harmless, missing one is not.
+    it('covers every class-cased builtin the interpreter has', () => {
+      const actual = execFileSync(
+        'python3',
+        [
+          '-c',
+          "import builtins;print('\\n'.join(sorted(n for n in dir(builtins) if not n.startswith('_') and n[0].isupper())))",
+        ],
+        { encoding: 'utf-8' },
+      )
+        .trim()
+        .split('\n');
+      const listed = new Set(PYTHON_CLASS_CASED_BUILTINS);
+      expect(actual.filter((name) => !listed.has(name))).toEqual([]);
     });
   });
 });

@@ -113,6 +113,92 @@ const PYTHON_BUILTIN_TYPES = new Set([
 ]);
 
 /**
+ * Every class-cased Python builtin, checked against `dir(builtins)` by a test.
+ *
+ * A schema of the same name is emitted as a class that shadows the builtin only
+ * from its own definition onwards, so an annotation rendered above it resolves to
+ * the builtin — a `types.py` that does not import, and whether it happens depends
+ * on where the schema sorts.
+ */
+export const PYTHON_CLASS_CASED_BUILTINS = [
+  'ArithmeticError',
+  'AssertionError',
+  'AttributeError',
+  'BaseException',
+  'BaseExceptionGroup',
+  'BlockingIOError',
+  'BrokenPipeError',
+  'BufferError',
+  'BytesWarning',
+  'ChildProcessError',
+  'ConnectionAbortedError',
+  'ConnectionError',
+  'ConnectionRefusedError',
+  'ConnectionResetError',
+  'DeprecationWarning',
+  'EOFError',
+  'Ellipsis',
+  'EncodingWarning',
+  'EnvironmentError',
+  'Exception',
+  'ExceptionGroup',
+  'False',
+  'FileExistsError',
+  'FileNotFoundError',
+  'FloatingPointError',
+  'FutureWarning',
+  'GeneratorExit',
+  'IOError',
+  'ImportError',
+  'ImportWarning',
+  'IndentationError',
+  'IndexError',
+  'InterruptedError',
+  'IsADirectoryError',
+  'KeyError',
+  'KeyboardInterrupt',
+  'LookupError',
+  'MemoryError',
+  'ModuleNotFoundError',
+  'NameError',
+  'None',
+  'NotADirectoryError',
+  'NotImplemented',
+  'NotImplementedError',
+  'OSError',
+  'OverflowError',
+  'PendingDeprecationWarning',
+  'PermissionError',
+  'ProcessLookupError',
+  'PythonFinalizationError',
+  'RecursionError',
+  'ReferenceError',
+  'ResourceWarning',
+  'RuntimeError',
+  'RuntimeWarning',
+  'StopAsyncIteration',
+  'StopIteration',
+  'SyntaxError',
+  'SyntaxWarning',
+  'SystemError',
+  'SystemExit',
+  'TabError',
+  'TimeoutError',
+  'True',
+  'TypeError',
+  'UnboundLocalError',
+  'UnicodeDecodeError',
+  'UnicodeEncodeError',
+  'UnicodeError',
+  'UnicodeTranslateError',
+  'UnicodeWarning',
+  'UserWarning',
+  'ValueError',
+  'Warning',
+  'ZeroDivisionError',
+];
+
+/**
  * Names that the generated `types.py` and client modules import or define
  * at module scope. A user-defined schema named `Field`, `Optional`, etc.
  * would shadow these imports and either break forward-ref resolution
@@ -149,6 +235,16 @@ const PYTHON_RESERVED_MODEL_NAMES = new Set([
   'types',
   // base exception we emit
   'ApiError',
+  // Every class-cased Python builtin, because a class of the same name shadows
+  // one only *after* its own definition. `from __future__ import annotations`
+  // defers every annotation to module scope, so a reference emitted above the
+  // class resolves to the builtin instead — and which of the two wins depends on
+  // the order the schemas happen to sort in. A published spec with a schema named
+  // `Exception` produced a `types.py` that could not be imported at all.
+  //
+  // Listed in full rather than by the names seen to break: the set is fixed and
+  // small, and a test asserts it against `dir(builtins)` so a new one is caught.
+  ...PYTHON_CLASS_CASED_BUILTINS,
 ]);
 
 /**
