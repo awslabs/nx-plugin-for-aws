@@ -51,6 +51,7 @@ const setProjectGraph = (graph: ProjectGraph) => {
 };
 
 // Mirrors a cold workspace: no cache on disk, so only building the graph works.
+// Nx throws a plain Error here, which the generator handles type-agnostically.
 const setUncachedProjectGraph = (graph: ProjectGraph) => {
   projectGraphModule.readCachedProjectGraph = () => {
     throw new Error(
@@ -79,6 +80,7 @@ describe('ts-sync generator', () => {
     projectGraphModule.createProjectGraphAsync =
       originalCreateProjectGraphAsync;
     projectGraphModule.readCachedProjectGraph = originalReadCachedProjectGraph;
+    vi.unstubAllEnvs();
   });
 
   const writeJson = (path: string, value: unknown) =>
@@ -505,6 +507,41 @@ describe('ts-sync generator', () => {
           '@proj/lib-a'
         ],
       ).toBe('workspace:*');
+    });
+
+    // NX_CACHE_PROJECT_GRAPH=false suppresses cache writes but not reads, so a
+    // cache that is present but stale must not be trusted.
+    it('builds the graph when graph caching is disabled', async () => {
+      vi.stubEnv('NX_CACHE_PROJECT_GRAPH', 'false');
+      addProject('lib-a', '@proj/lib-a');
+      addProject('lib-b', '@proj/lib-b');
+      addDependency('lib-b', 'lib-a');
+      // The cache predates the import and would miss the dependency.
+      projectGraphModule.readCachedProjectGraph = () => emptyGraph();
+      projectGraphModule.createProjectGraphAsync = async () => graph;
+
+      const result = await tsSyncGeneratorGenerator(tree);
+
+      expect(result.outOfSyncMessage).toContain('@proj/lib-a: workspace:*');
+      expect(
+        readJson(tree, 'packages/lib-b/package.json').dependencies[
+          '@proj/lib-a'
+        ],
+      ).toBe('workspace:*');
+    });
+
+    it('does not read the cache when graph caching is disabled', async () => {
+      vi.stubEnv('NX_CACHE_PROJECT_GRAPH', 'false');
+      addProject('lib-a', '@proj/lib-a');
+      addProject('lib-b', '@proj/lib-b');
+      addDependency('lib-b', 'lib-a');
+      const readCached = vi.fn();
+      projectGraphModule.readCachedProjectGraph = readCached;
+      projectGraphModule.createProjectGraphAsync = async () => graph;
+
+      await tsSyncGeneratorGenerator(tree);
+
+      expect(readCached).not.toHaveBeenCalled();
     });
   });
 });
