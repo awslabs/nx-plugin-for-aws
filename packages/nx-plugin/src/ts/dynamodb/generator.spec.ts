@@ -82,6 +82,7 @@ describe('ts#dynamodb generator', () => {
     });
     expect(projectConfig.targets['dev']).toEqual({
       executor: 'nx:run-commands',
+      dependsOn: ['pull-image'],
       continuous: true,
       options: {
         commands: [

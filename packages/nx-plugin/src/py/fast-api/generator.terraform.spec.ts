@@ -444,10 +444,9 @@ describe('fastapi project generator', () => {
       // The module reads the metadata with `file()`, so it must be generated
       // before the shared terraform project is planned
       expect(target).toBeDefined();
-      expect(target.options.commands[0]).toContain(
-        '@aws/nx-plugin:open-api#json-metadata',
-      );
-      expect(target.options.commands[0]).toContain(
+      expect(target.executor).toBe('@aws/nx-plugin:open-api-codegen');
+      expect(target.options.generator).toBe('json-metadata');
+      expect(target.options.outputPath).toBe(
         'packages/common/terraform/src/generated/test-api',
       );
       expect(terraformConfig.targets.build.dependsOn).toContain(

@@ -98,6 +98,25 @@ export async function terraformProjectGenerator(
   // never races the backend-configured targets over the shared one.
   const testDataDir = joinPathFragments(distDir, 'terraform-test');
 
+  // Provider downloads persist here, so a target whose `.terraform` was cleaned
+  // links the providers it already has rather than re-downloading them. Nx does
+  // not interpolate `{workspaceRoot}` inside `env`, so this is relative to the
+  // target's `cwd`. It sits under `.terraform`, which this generator gitignores
+  // — that is also what keeps the providers out of Nx's file walk — and unlike
+  // `.nx/cache` it survives `nx reset`.
+  //
+  // One cache per project rather than one for the workspace: two `terraform
+  // init` runs filling a shared cache concurrently each compute a different hash
+  // for the same provider, because the hash covers a directory the other is
+  // still writing, and terraform then rejects the mismatch against the lock
+  // file. Per project, no two writers ever meet, so the targets stay parallel.
+  const pluginCacheDir = joinPathFragments(
+    outDirToRootRelativePath,
+    '.terraform',
+    'plugin-cache',
+    '{projectRoot}',
+  );
+
   // Calculate relative path from current project to common/terraform/metrics
   // Use forward slashes for terraform module source paths (even on Windows)
   const metricsModulePath = relative(
@@ -237,12 +256,17 @@ export async function terraformProjectGenerator(
       defaultConfiguration: 'dev',
       configurations: {
         dev: {
-          command: 'terraform init',
+          commands: [
+            { command: `make-dir ${pluginCacheDir}`, forwardAllArgs: false },
+            'terraform init',
+          ],
         },
       },
       options: {
         forwardAllArgs: true,
         cwd: '{projectRoot}/src',
+        parallel: false,
+        env: { TF_PLUGIN_CACHE_DIR: pluginCacheDir },
       },
     },
     checkov: {
@@ -267,17 +291,27 @@ export async function terraformProjectGenerator(
     // so it never races the backend-configured targets over the shared one.
     // `^production` is what invalidates the cache when a consumed module
     // changes; `{projectRoot}/**/*` alone would serve a stale pass.
+    //
+    // `TF_DATA_DIR` is terraform's working directory, not an artifact: its
+    // provider entries are symlinks into the shared plugin cache, so restoring
+    // it on another machine would yield dangling links while the commands that
+    // repopulate them are skipped. Declaring no outputs keeps a cache hit to
+    // what it actually asserts — that the tests passed for these inputs.
     test: {
       executor: 'nx:run-commands',
       cache: true,
       inputs: ['default', '^production'],
-      outputs: [`{workspaceRoot}/dist/{projectRoot}/terraform-test`],
+      outputs: [],
       options: {
-        commands: ['terraform init -backend=false', 'terraform test'],
+        commands: [
+          { command: `make-dir ${pluginCacheDir}`, forwardAllArgs: false },
+          'terraform init -backend=false',
+          'terraform test',
+        ],
         forwardAllArgs: true,
         cwd: '{projectRoot}/src',
         parallel: false,
-        env: { TF_DATA_DIR: testDataDir },
+        env: { TF_DATA_DIR: testDataDir, TF_PLUGIN_CACHE_DIR: pluginCacheDir },
       },
     },
     validate: {

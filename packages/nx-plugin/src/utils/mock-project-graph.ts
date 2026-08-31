@@ -4,7 +4,8 @@
  */
 
 /**
- * Mock createProjectGraphAsync to avoid expensive project graph building in tests.
+ * Mock the project graph accessors to avoid expensive project graph building in
+ * tests, and to keep tests from reading this repository's own on-disk graph.
  *
  * This is the vitest equivalent of Nx's own internal testing utility:
  * https://github.com/nrwl/nx/blob/master/packages/nx/src/internal-testing-utils/mock-project-graph.ts
@@ -19,7 +20,6 @@ import { createRequire } from 'module';
 
 const _require = createRequire(import.meta.url);
 const projectGraph = _require('nx/src/project-graph/project-graph');
-projectGraph.createProjectGraphAsync = async () => ({
-  nodes: {},
-  dependencies: {},
-});
+const emptyGraph = () => ({ nodes: {}, dependencies: {} });
+projectGraph.createProjectGraphAsync = async () => emptyGraph();
+projectGraph.readCachedProjectGraph = () => emptyGraph();

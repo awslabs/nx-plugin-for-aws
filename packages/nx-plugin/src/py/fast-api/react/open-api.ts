@@ -62,6 +62,8 @@ export const addOpenApiGeneration = (
       assemble: withOpenApi('assemble'),
       openapi: {
         cache: true,
+        // The spec is derived from the FastAPI app, so tests are excluded.
+        inputs: ['production', '^production'],
         executor: 'nx:run-commands',
         outputs: ['{workspaceRoot}/dist/{projectRoot}/openapi'],
         options: {

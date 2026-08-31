@@ -7,16 +7,10 @@ import { join } from 'path';
 import { generateFiles, joinPathFragments } from '@nx/devkit';
 import { flushChanges, FsTree } from 'nx/src/generators/tree';
 import { buildCreateNxWorkspaceCommand } from '../packages/nx-plugin/src/utils/commands';
-import GeneratorsJson from '../packages/nx-plugin/generators.json';
-
-interface GeneratorInfo {
-  description: string;
-  hidden?: boolean;
-}
-
-interface GeneratorsJsonSchema {
-  generators: Record<string, GeneratorInfo>;
-}
+import {
+  describeGeneratorForCatalogue,
+  generatorsJsonEntries,
+} from '../packages/nx-plugin/src/utils/generators';
 
 const ROOT = join(__dirname, '..');
 
@@ -47,16 +41,15 @@ const getCreateNxWorkspaceCommand = (): string => {
 };
 
 /**
- * Build the generators table from generators.json, filtering out hidden generators
+ * Build the generators table from generators.json, filtering out hidden
+ * generators.
  */
 const getGeneratorsTable = (): string => {
-  const generators = Object.entries(
-    (GeneratorsJson as GeneratorsJsonSchema).generators,
-  )
+  const generators = Object.entries(generatorsJsonEntries)
     .filter(([, info]) => !info.hidden)
     .map(([id, info]) => ({
       id,
-      description: info.description,
+      description: describeGeneratorForCatalogue(info),
     }));
 
   const maxIdLen = Math.max(...generators.map((g) => g.id.length + 2));

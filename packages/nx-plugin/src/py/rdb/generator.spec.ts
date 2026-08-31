@@ -76,7 +76,7 @@ describe('py#rdb generator', () => {
 
     expect(projectConfig.targets['bundle-arm']).toEqual({
       cache: true,
-      inputs: ['default', '^production'],
+      inputs: ['production', '^production'],
       executor: 'nx:run-commands',
       outputs: ['{workspaceRoot}/dist/{projectRoot}/bundle-arm'],
       options: {

@@ -8,6 +8,7 @@ import {
   getProjects,
   joinPathFragments,
   type ProjectGraph,
+  readCachedProjectGraph,
   readJson,
   type Tree,
   updateJson,
@@ -94,7 +95,7 @@ const syncLocalProjectDependencies = async (
   tree: Tree,
   localSpecifier: string,
 ): Promise<Record<string, string[]>> => {
-  const projectGraph = await createProjectGraphAsync();
+  const projectGraph = await readProjectGraph();
 
   const projectInfoByName = collectProjectInfo(tree, projectGraph);
 
@@ -137,6 +138,25 @@ const syncLocalProjectDependencies = async (
   }
 
   return addedByManifest;
+};
+
+/**
+ * Nx builds the project graph immediately before invoking sync generators, so
+ * the cache is fresh. Reading it avoids a rebuild, which is not memoized in
+ * process. Falls back to building when no cache is available.
+ *
+ * `NX_CACHE_PROJECT_GRAPH=false` suppresses cache writes but not reads, so the
+ * graph must be built to avoid consuming a stale cache.
+ */
+const readProjectGraph = async (): Promise<ProjectGraph> => {
+  if (process.env.NX_CACHE_PROJECT_GRAPH !== 'false') {
+    try {
+      return readCachedProjectGraph();
+    } catch {
+      // No cached graph available, build it below.
+    }
+  }
+  return await createProjectGraphAsync();
 };
 
 interface ProjectInfo {

@@ -66,7 +66,9 @@ const createPythonBundleTarget = ({
 }: CreatePythonBundleTargetOptions): TargetConfiguration => {
   return {
     cache: true,
-    inputs: ['default', '^production'],
+    // The bundle holds exported dependencies and the entrypoint script, never
+    // test files, so tests are excluded via `production`.
+    inputs: ['production', '^production'],
     executor: 'nx:run-commands',
     outputs: [`{workspaceRoot}/dist/{projectRoot}/${bundleTargetName}`],
     options: {

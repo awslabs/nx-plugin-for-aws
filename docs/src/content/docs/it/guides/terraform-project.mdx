@@ -53,6 +53,7 @@ Per i progetti application (`--type=application`), il generatore crea un'applica
     - bootstrap.ts Esegue pull/push del tfstate di bootstrap ed esegue `terraform apply`
     - bootstrap-destroy.ts Svuota il bucket di stato ed esegue `terraform destroy`
     - init.ts Esegue `terraform init` con la configurazione del backend S3
+    - env.ts Punta `terraform init` alla cache condivisa dei provider
   - checkov.yml Configurazione di Checkov, inclusi i controlli da saltare
   - project.json Configurazione del progetto e target di build
 
@@ -314,6 +315,10 @@ run "plan_is_valid" {
 ```
 
 Imposta ogni variabile richiesta dalla tua configurazione nel blocco `variables`, altrimenti l'esecuzione fallisce con "has a required variable ... with no set value".
+
+Ogni target che esegue `terraform init` riutilizza una cache dei provider in `.terraform/plugin-cache` nella radice del tuo workspace, quindi i provider vengono scaricati una sola volta anziché ad ogni esecuzione. Ogni progetto ottiene la propria directory lì: due esecuzioni di `terraform init` che riempiono una cache contemporaneamente possono ciascuna calcolare un hash diverso per lo stesso provider, che terraform poi rifiuta confrontandolo con il tuo `.terraform.lock.hcl`. Consulta la [documentazione Terraform](https://developer.hashicorp.com/terraform/cli/config/config-file#provider-plugin-cache) per ulteriori informazioni.
+
+Imposta `TF_PLUGIN_CACHE_DIR` nel tuo ambiente per puntare lo script `init` fornito a una cache che gestisci tu stesso — ad esempio un volume condiviso tra workspace. Nota che il target `test` legge il suo percorso da `project.json`, quindi modificalo anche lì.
 
 <OptionFilter when={{ type: 'application' }} description="Application-only targets: plan / apply / destroy / etc.">
 ### Target solo per Application

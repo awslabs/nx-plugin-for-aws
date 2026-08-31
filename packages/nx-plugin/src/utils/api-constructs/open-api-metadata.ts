@@ -14,6 +14,7 @@ import {
   addArtifactDependencyToTargets,
   addDependencyToTargetIfNotPresent,
 } from '../nx.js';
+import { openApiCodegenTarget } from '../open-api-codegen-target.js';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
@@ -82,24 +83,15 @@ const addCdkOpenApiMetadataGenerateTarget = (
       // for providing a type-safe CDK construct
       const metadataTargetName = `generate:${apiNameKebabCase}-metadata`;
       if (!config.targets[metadataTargetName]) {
-        config.targets[metadataTargetName] = {
-          cache: true,
-          executor: 'nx:run-commands',
-          inputs: [
-            {
-              dependentTasksOutputFiles: '**/*.json',
-            },
-          ],
+        config.targets[metadataTargetName] = openApiCodegenTarget({
+          generator: 'ts-metadata',
+          openApiSpecPath: specPath,
+          outputPath: generatedMetadataDirFromRoot,
+          specBuildTargetName,
           outputs: [
             joinPathFragments('{workspaceRoot}', generatedMetadataDirFromRoot),
           ],
-          options: {
-            commands: [
-              `nx g @aws/nx-plugin:open-api#ts-metadata --openApiSpecPath="${specPath}" --outputPath="${generatedMetadataDirFromRoot}" --no-interactive`,
-            ],
-          },
-          dependsOn: [specBuildTargetName],
-        };
+        });
       }
       addDependencyToTargetIfNotPresent(config, 'compile', metadataTargetName);
       return config;
@@ -154,22 +146,13 @@ const addTerraformOpenApiOperationsGenerateTarget = (
       // before plan; the target is wired into `build` below.
       const operationsTargetName = `generate:${apiNameKebabCase}-operations`;
       if (!config.targets[operationsTargetName]) {
-        config.targets[operationsTargetName] = {
-          cache: true,
-          executor: 'nx:run-commands',
-          inputs: [
-            {
-              dependentTasksOutputFiles: '**/*.json',
-            },
-          ],
+        config.targets[operationsTargetName] = openApiCodegenTarget({
+          generator: 'json-metadata',
+          openApiSpecPath: specPath,
+          outputPath: generatedDirFromRoot,
+          specBuildTargetName,
           outputs: [joinPathFragments('{workspaceRoot}', generatedDirFromRoot)],
-          options: {
-            commands: [
-              `nx g @aws/nx-plugin:open-api#json-metadata --openApiSpecPath="${specPath}" --outputPath="${generatedDirFromRoot}" --no-interactive`,
-            ],
-          },
-          dependsOn: [specBuildTargetName],
-        };
+        });
       }
       addArtifactDependencyToTargets(config, operationsTargetName);
       return config;

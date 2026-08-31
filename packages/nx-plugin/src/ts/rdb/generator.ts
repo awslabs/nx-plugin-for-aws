@@ -307,6 +307,7 @@ export const tsRdbGenerator = async (
   };
   projectConfig.targets['dev'] = {
     executor: 'nx:run-commands',
+    dependsOn: ['pull-image'],
     options: {
       command: `tsx ${scriptsDir}/start-container.ts`,
       cwd: '{projectRoot}',
