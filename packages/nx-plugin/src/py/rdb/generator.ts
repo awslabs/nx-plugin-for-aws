@@ -27,6 +27,7 @@ import {
 import {
   addDockerScanTarget,
   DOCKER_DEPENDENCIES,
+  IMAGE_BUILD_CACHE,
 } from '../../utils/docker.js';
 import { formatFilesInSubtree } from '../../utils/format.js';
 import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs.js';
@@ -354,7 +355,7 @@ export const pyRdbGenerator = async (
   if (options.infra !== 'none') {
     if (iac === 'terraform') {
       projectConfig.targets.docker = {
-        cache: true,
+        cache: IMAGE_BUILD_CACHE,
         executor: 'nx:run-commands',
         options: {
           commands: [

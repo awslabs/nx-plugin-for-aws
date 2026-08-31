@@ -8,14 +8,12 @@ import NxCommands from '@components/nx-commands.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 import Link from '@components/link.astro';
 import Infrastructure from '@components/infrastructure.astro';
-import TrivyVersion from '@components/trivy-version.astro';
 import { CONTAINER_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/versions';
 
 export const trivyTarget = `{
   "targets": {
     "trivy": {
-      "cache": true,
-      "inputs": ["default", "^production"],
+      "cache": false,
       "outputs": ["{workspaceRoot}/dist/{projectRoot}/trivy"],
       "executor": "nx:run-commands",
       "options": {
@@ -68,7 +66,7 @@ Le contexte de construction Docker est écrit dans le dossier `dist` de votre pr
 :::tip[Pourquoi bundler en dehors du Dockerfile ?]
 Garder l'étape de bundling dans Nx (plutôt qu'à l'intérieur du `Dockerfile`) signifie :
 
-- Nx peut **mettre en cache** la cible bundle, donc les constructions répétées sont rapides.
+- Nx peut **mettre en cache** la cible bundle — sa sortie est un répertoire sur le disque, donc un succès de cache la restaure véritablement.
 - Le `Dockerfile` n'a pas besoin d'accéder à votre monorepo, aux registres privés ou aux secrets de construction.
 - La couche d'image est minuscule — un simple `COPY` d'artefacts déjà construits, sans `node_modules` transitifs ni chaîne d'outils de construction.
 :::
@@ -167,7 +165,7 @@ Ajoutez une cible `docker` qui :
 {
   "targets": {
     "docker": {
-      "cache": true,
+      "cache": false,
       "executor": "nx:run-commands",
       "options": {
         "commands": [
@@ -181,6 +179,10 @@ Ajoutez une cible `docker` qui :
   }
 }
 ```
+
+:::caution[Ne mettez pas en cache les constructions d'images]
+Définissez `"cache": false` sur les cibles de construction d'images. Une image construite n'est pas écrite dans un chemin `outputs` dans le système de fichiers, donc Nx n'a rien à restaurer lors d'un succès de cache. Les moteurs de conteneurs mettent en cache les couches d'images de toute façon, il n'y a donc aucune pénalité de performance.
+:::
 
 :::tip[Copie de fichiers multiplateforme]
 Le package `ncp` fournit une commande de copie de fichier/répertoire multiplateforme, évitant `cp` (indisponible sur Windows). Installez-le à la racine de votre espace de travail avec `pnpm add -D -w ncp`.
@@ -256,7 +258,7 @@ Ajoutez une cible `docker` qui copie le `Dockerfile` dans le répertoire de sort
 {
   "targets": {
     "docker": {
-      "cache": true,
+      "cache": false,
       "executor": "nx:run-commands",
       "options": {
         "commands": [
@@ -294,10 +296,6 @@ Les cibles d'analyse par image de chaque projet sont agrégées sous une cible `
 L'analyse n'est intentionnellement pas connectée à `build` car cela peut introduire des frictions inutiles lors de l'itération pendant le développement, car la base de données de vulnérabilités de Trivy est continuellement mise à jour avec de nouveaux CVE.
 
 Nous recommandons plutôt d'exécuter la commande ci-dessus comme une étape dédiée dans votre pipeline CI avant le déploiement vers les environnements de production.
-:::
-
-:::tip[La mise en cache ignore les images inchangées]
-Comme l'image est entièrement déterminée par le code source de votre projet, déclarer des `inputs` (ici `default` et `^production`, correspondant à la cible `bundle`) permet à Nx de mettre en cache l'analyse et d'ignorer la réanalyse d'une image qui n'a pas changé. Épinglez la version de l'image Trivy (par exemple <code>trivy:<TrivyVersion /></code>) pour que les analyses soient reproductibles.
 :::
 
 :::note[Suppression des découvertes]

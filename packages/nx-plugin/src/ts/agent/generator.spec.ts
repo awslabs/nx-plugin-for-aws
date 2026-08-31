@@ -372,14 +372,14 @@ describe('ts#agent generator', () => {
     ]);
     expect(projectConfig.targets['agent-docker'].options.parallel).toBe(false);
     expect(projectConfig.targets['agent-docker'].dependsOn).toEqual(['bundle']);
-    expect(projectConfig.targets['agent-docker'].outputs).toEqual([
-      '{workspaceRoot}/dist/apps/test-project/bundle/agent/test-project-agent/Dockerfile',
-    ]);
+    // The built image lives in the container engine rather than under any
+    // outputs path, so there is nothing for a cache hit to restore.
+    expect(projectConfig.targets['agent-docker'].cache).toBe(false);
+    expect(projectConfig.targets['agent-docker'].outputs).toBeUndefined();
 
-    // Check that a cacheable trivy scan target was added
+    // Check that a non-cacheable trivy scan target was added
     expect(projectConfig.targets['agent-trivy']).toEqual({
-      cache: true,
-      inputs: ['default', '^production'],
+      cache: false,
       outputs: [
         '{workspaceRoot}/dist/apps/test-project/trivy/proj-test-project-agent-latest',
       ],

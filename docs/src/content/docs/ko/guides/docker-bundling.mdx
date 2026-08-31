@@ -8,14 +8,12 @@ import NxCommands from '@components/nx-commands.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 import Link from '@components/link.astro';
 import Infrastructure from '@components/infrastructure.astro';
-import TrivyVersion from '@components/trivy-version.astro';
 import { CONTAINER_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/versions';
 
 export const trivyTarget = `{
   "targets": {
     "trivy": {
-      "cache": true,
-      "inputs": ["default", "^production"],
+      "cache": false,
       "outputs": ["{workspaceRoot}/dist/{projectRoot}/trivy"],
       "executor": "nx:run-commands",
       "options": {
@@ -68,7 +66,7 @@ Docker 빌드 컨텍스트는 프로젝트의 `dist` 폴더에 작성됩니다. 
 :::tip[Dockerfile 외부에서 번들링하는 이유는?]
 번들 단계를 Nx에 유지하면(`Dockerfile` 내부가 아닌) 다음과 같은 이점이 있습니다:
 
-- Nx가 번들 타겟을 **캐시**할 수 있어 반복 빌드가 빠릅니다.
+- Nx가 번들 타겟을 **캐시**할 수 있습니다 — 출력이 디스크의 디렉토리이므로 캐시 히트 시 실제로 복원됩니다.
 - `Dockerfile`은 모노레포, 프라이빗 레지스트리 또는 빌드 시간 시크릿에 액세스할 필요가 없습니다.
 - 이미지 레이어가 작습니다 — 이미 빌드된 아티팩트의 단일 `COPY`이며, 전이적인 `node_modules` 또는 빌드 툴체인이 없습니다.
 :::
@@ -167,7 +165,7 @@ CMD ["node", "index.js"]
 {
   "targets": {
     "docker": {
-      "cache": true,
+      "cache": false,
       "executor": "nx:run-commands",
       "options": {
         "commands": [
@@ -181,6 +179,10 @@ CMD ["node", "index.js"]
   }
 }
 ```
+
+:::caution[이미지 빌드를 캐시하지 마세요]
+이미지 빌드 타겟에 `"cache": false`를 설정하세요. 빌드된 이미지는 파일 시스템의 `outputs` 경로에 작성되지 않으므로 Nx는 캐시 히트 시 복원할 것이 없습니다. 컨테이너 엔진은 어쨌든 이미지 레이어를 캐시하므로 성능 저하가 없습니다.
+:::
 
 :::tip[크로스 플랫폼 파일 복사]
 `ncp` 패키지는 크로스 플랫폼 파일/디렉토리 복사 명령을 제공하여 `cp`(Windows에서 사용 불가)를 피합니다. 워크스페이스 루트에 `pnpm add -D -w ncp`로 설치하세요.
@@ -256,7 +258,7 @@ CMD ["python", "-m", "my_project.main"]
 {
   "targets": {
     "docker": {
-      "cache": true,
+      "cache": false,
       "executor": "nx:run-commands",
       "options": {
         "commands": [
@@ -294,10 +296,6 @@ CMD ["python", "-m", "my_project.main"]
 Trivy의 취약점 데이터베이스가 새로운 CVE로 지속적으로 업데이트되므로 개발 중 반복 작업 시 불필요한 마찰을 초래할 수 있어 스캔은 의도적으로 `build`에 연결되지 않습니다.
 
 대신 프로덕션 단계에 배포하기 전에 CI 파이프라인에서 전용 단계로 위 명령을 실행하는 것을 권장합니다.
-:::
-
-:::tip[캐싱은 변경되지 않은 이미지를 건너뜀]
-이미지는 프로젝트 소스에 의해 완전히 결정되므로 `inputs`를 선언하면(여기서는 `bundle` 타겟과 일치하는 `default` 및 `^production`) Nx가 스캔을 캐시하고 변경되지 않은 이미지의 재스캔을 건너뛸 수 있습니다. Trivy 이미지 버전을 고정하여(예: <code>trivy:<TrivyVersion /></code>) 스캔을 재현 가능하게 만드세요.
 :::
 
 :::note[발견 사항 억제]

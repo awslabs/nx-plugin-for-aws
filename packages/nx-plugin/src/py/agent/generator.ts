@@ -35,6 +35,7 @@ import {
 import {
   addDockerScanTarget,
   DOCKER_DEPENDENCIES,
+  IMAGE_BUILD_CACHE,
 } from '../../utils/docker.js';
 import { formatFilesInSubtree } from '../../utils/format.js';
 import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs.js';
@@ -394,7 +395,7 @@ export const pyAgentGenerator = async (
     // Add a docker target that prepares the docker context and builds the image
     const fs = new FsCommands(tree, DEPENDENCIES);
     project.targets[dockerTargetName] = {
-      cache: true,
+      cache: IMAGE_BUILD_CACHE,
       executor: 'nx:run-commands',
       options: {
         commands: [

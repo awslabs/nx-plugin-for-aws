@@ -31,6 +31,7 @@ import {
   ADOT_IMAGE_DEPENDENCIES,
   addDockerScanTarget,
   DOCKER_DEPENDENCIES,
+  IMAGE_BUILD_CACHE,
   NODE_IMAGE_DEPENDENCIES,
   nodeImageVersions,
 } from '../../utils/docker.js';
@@ -193,8 +194,7 @@ export const tsMcpServerGenerator = async (
 
     const fs = new FsCommands(tree, DEPENDENCIES);
     project.targets[dockerTargetName] = {
-      cache: true,
-      outputs: [`{workspaceRoot}/${dockerOutputDir}/Dockerfile`],
+      cache: IMAGE_BUILD_CACHE,
       executor: 'nx:run-commands',
       options: {
         commands: [

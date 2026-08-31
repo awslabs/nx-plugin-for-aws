@@ -29,6 +29,7 @@ import {
 import {
   addDockerScanTarget,
   DOCKER_DEPENDENCIES,
+  IMAGE_BUILD_CACHE,
   NODE_IMAGE_DEPENDENCIES,
   nodeImageVersions,
 } from '../../utils/docker.js';
@@ -342,7 +343,7 @@ export const tsRdbGenerator = async (
   if (options.infra !== 'none') {
     if (iac === 'terraform') {
       projectConfig.targets['docker'] = {
-        cache: true,
+        cache: IMAGE_BUILD_CACHE,
         executor: 'nx:run-commands',
         options: {
           command: `${containerEngine} build --platform linux/arm64 --provenance=false -t ${migrationDockerImageTag} ${migrationBundleDir}`,

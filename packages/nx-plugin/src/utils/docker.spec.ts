@@ -67,7 +67,7 @@ describe('docker utils', () => {
       );
     });
 
-    it('should add a cacheable scan target depending on the docker target', () => {
+    it('should add a non-cacheable scan target depending on the docker target', () => {
       const project = makeProject();
       addDockerScanTarget(
         tree,
@@ -82,8 +82,11 @@ describe('docker utils', () => {
       );
 
       const target = project.targets['my-agent-trivy'];
-      expect(target.cache).toBe(true);
-      expect(target.inputs).toEqual(['default', '^production']);
+      // The scanned image lives in the container engine, so a restored cache
+      // entry could report a pass for an image that is no longer there.
+      expect(target.cache).toBe(false);
+      // Nx only hashes a cacheable task, so `inputs` would be dead config.
+      expect(target.inputs).toBeUndefined();
       expect(target.dependsOn).toEqual(['my-agent-docker']);
       expect(target.outputs).toEqual([
         '{workspaceRoot}/dist/packages/my-project/trivy/scope-my-agent-latest',

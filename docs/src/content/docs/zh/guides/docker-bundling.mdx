@@ -8,14 +8,12 @@ import NxCommands from '@components/nx-commands.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 import Link from '@components/link.astro';
 import Infrastructure from '@components/infrastructure.astro';
-import TrivyVersion from '@components/trivy-version.astro';
 import { CONTAINER_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/versions';
 
 export const trivyTarget = `{
   "targets": {
     "trivy": {
-      "cache": true,
-      "inputs": ["default", "^production"],
+      "cache": false,
       "outputs": ["{workspaceRoot}/dist/{projectRoot}/trivy"],
       "executor": "nx:run-commands",
       "options": {
@@ -68,7 +66,7 @@ Docker 构建上下文被写入项目的 `dist` 文件夹。然后，您的基�
 :::tip[为什么在 Dockerfile 外部打包？]
 将打包步骤保留在 Nx 中（而不是在 `Dockerfile` 内部）意味着：
 
-- Nx 可以**缓存**打包目标，因此重复构建速度很快。
+- Nx 可以**缓存**打包目标——其输出是磁盘上的目录，因此缓存命中会真正恢复它。
 - `Dockerfile` 不需要访问您的 monorepo、私有注册表或构建时密钥。
 - 镜像层很小——只是已构建工件的单个 `COPY`，没有传递的 `node_modules` 或构建工具链。
 :::
@@ -167,7 +165,7 @@ CMD ["node", "index.js"]
 {
   "targets": {
     "docker": {
-      "cache": true,
+      "cache": false,
       "executor": "nx:run-commands",
       "options": {
         "commands": [
@@ -181,6 +179,10 @@ CMD ["node", "index.js"]
   }
 }
 ```
+
+:::caution[不要缓存镜像构建]
+在镜像构建目标上设置 `"cache": false`。构建的镜像不会写入文件系统中的 `outputs` 路径，因此 Nx 在缓存命中时没有任何内容可恢复。容器引擎无论如何都会缓存镜像层，因此没有性能损失。
+:::
 
 :::tip[跨平台文件复制]
 `ncp` 包提供跨平台文件/目录复制命令，避免使用 `cp`（在 Windows 上不可用）。使用 `pnpm add -D -w ncp` 在工作空间根目录安装它。
@@ -256,7 +258,7 @@ CMD ["python", "-m", "my_project.main"]
 {
   "targets": {
     "docker": {
-      "cache": true,
+      "cache": false,
       "executor": "nx:run-commands",
       "options": {
         "commands": [
@@ -294,10 +296,6 @@ CMD ["python", "-m", "my_project.main"]
 扫描故意不连接到 `build`，因为这可能会在开发期间迭代时引入不必要的摩擦，因为 Trivy 的漏洞数据库会不断更新新的 CVE。
 
 相反，我们建议在 CI 管道中作为专门步骤运行上述命令，在部署到生产阶段之前。
-:::
-
-:::tip[缓存跳过未更改的镜像]
-因为镜像完全由您的项目源代码决定，声明 `inputs`（这里是 `default` 和 `^production`，匹配 `bundle` 目标）让 Nx 缓存扫描并跳过重新扫描未更改的镜像。固定 Trivy 镜像版本（例如 <code>trivy:<TrivyVersion /></code>），以便扫描可重现。
 :::
 
 :::note[抑制发现]
