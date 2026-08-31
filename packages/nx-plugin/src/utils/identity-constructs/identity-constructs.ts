@@ -138,10 +138,15 @@ const addLocalCallbackUrlToTerraform = async (
   ) {
     return true;
   }
+  // `[$items]` doesn't match `[]`, so an empty list needs its own branch.
   return applyGritQL(
     tree,
     filePath,
-    `language hcl\n\`local_callback_urls = [$items]\` where { $items <: not contains \`${url}\`, $items <: [$..., $last], $last => \`$last,\n    ${url}\` }`,
+    `language hcl\n` +
+      `or {` +
+      ` \`local_callback_urls = []\` => \`local_callback_urls = [\n    ${url}\n  ]\`,` +
+      ` \`local_callback_urls = [$items]\` where { $items <: not contains \`${url}\`, $items <: [$..., $last], $last => \`$last,\n    ${url}\` }` +
+      ` }`,
   );
 };
 
