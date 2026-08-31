@@ -77,28 +77,28 @@ pnpm nx g @aws/nx-plugin:ts#infra
 
 ## Available Generators
 
-| Generator               | Description                                                                                                       |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `ts#project`            | TypeScript library                                                                                                |
-| `ts#api`                | TypeScript API (tRPC or Smithy) with API Gateway + Lambda + [Powertools](https://github.com/aws-powertools/powertools-lambda-typescript) |
-| `ts#rdb`                | Relational databases with Aurora RDS                                                                              |
-| `ts#website`            | React app (Vite)                                                                                                  |
-| `ts#website#auth`       | Add Cognito auth to a website                                                                                     |
-| `ts#infra`              | AWS CDK infrastructure project                                                                                    |
-| `ts#lambda-function`    | TypeScript Lambda with type-safe event sources                                                                    |
-| `ts#mcp-server`         | MCP server (TypeScript)                                                                                           |
-| `ts#agent`              | [Strands Agent](https://strandsagents.com/) (TypeScript)                                                          |
-| `ts#nx-generator`       | Nx generator scaffold                                                                                             |
-| `smithy#project`        | Smithy model project — a service model, or a shape library shared between Smithy projects                          |
-| `py#project`            | Python project (uv)                                                                                               |
-| `py#api`                | Python API (FastAPI) with API Gateway + Lambda + [Powertools](https://github.com/aws-powertools/powertools-lambda-python)      |
-| `py#lambda-function`    | Python Lambda with type-safe event sources                                                                        |
-| `py#mcp-server`         | MCP server (Python)                                                                                               |
-| `py#agent`              | [Strands Agent](https://strandsagents.com/) (Python)                                                              |
-| `agentcore-harness`     | [AgentCore Harness](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness.html) agent loop (experimental) |
-| `connection`            | Connect projects together (e.g. frontend to API)                                                                  |
-| `terraform#project`     | Terraform project                                                                                                 |
-| `license`               | Manage LICENSE files and source headers                                                                           |
+| Generator            | Description                                                                                                                              |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `ts#project`         | TypeScript library                                                                                                                       |
+| `ts#api`             | TypeScript API (tRPC or Smithy) with API Gateway + Lambda + [Powertools](https://github.com/aws-powertools/powertools-lambda-typescript) |
+| `ts#rdb`             | Relational databases with Aurora RDS                                                                                                     |
+| `ts#website`         | React app (Vite)                                                                                                                         |
+| `ts#website#auth`    | Add Cognito auth to a website                                                                                                            |
+| `ts#infra`           | AWS CDK infrastructure project                                                                                                           |
+| `ts#lambda-function` | TypeScript Lambda with type-safe event sources                                                                                           |
+| `ts#mcp-server`      | MCP server (TypeScript)                                                                                                                  |
+| `ts#agent`           | [Strands Agent](https://strandsagents.com/) (TypeScript)                                                                                 |
+| `ts#nx-generator`    | Nx generator scaffold                                                                                                                    |
+| `smithy#project`     | Smithy model project — a service model, or a shape library shared between Smithy projects                                                |
+| `py#project`         | Python project (uv)                                                                                                                      |
+| `py#api`             | Python API (FastAPI) with API Gateway + Lambda + [Powertools](https://github.com/aws-powertools/powertools-lambda-python)                |
+| `py#lambda-function` | Python Lambda with type-safe event sources                                                                                               |
+| `py#mcp-server`      | MCP server (Python)                                                                                                                      |
+| `py#agent`           | [Strands Agent](https://strandsagents.com/) (Python)                                                                                     |
+| `agentcore-harness`  | [AgentCore Harness](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness.html) agent loop (experimental)                |
+| `connection`         | Connect projects together (e.g. frontend to API)                                                                                         |
+| `terraform#project`  | Terraform project                                                                                                                        |
+| `license`            | Manage LICENSE files and source headers                                                                                                  |
 
 ## Community
 
