@@ -167,7 +167,7 @@ export async function tsInfraGenerator(
     `${libraryRoot}/project.json`,
     (config: ProjectConfiguration) => {
       config.projectType = 'application';
-      // `synth` is the CDK artifact, so it belongs on `package` too; `checkov`
+      // `synth` is the CDK artifact, so it belongs on `assemble` too; `checkov`
       // is a quality gate, so it stays on `build` alone.
       addArtifactDependencyToTargets(config, 'synth');
       addDependencyToTargetIfNotPresent(config, 'build', 'checkov');
@@ -179,7 +179,7 @@ export async function tsInfraGenerator(
         executor: 'nx:run-commands',
         inputs: ['default'],
         outputs: ['{workspaceRoot}/dist/{projectRoot}/cdk.out'],
-        dependsOn: ['^package', 'compile'], // compile clobbers dist directory, so ensure synth runs afterwards
+        dependsOn: ['^assemble', 'compile'], // compile clobbers dist directory, so ensure synth runs afterwards
         options: withCdkEnv({
           cwd: '{projectRoot}',
           command: 'cdk synth',
@@ -200,7 +200,7 @@ export async function tsInfraGenerator(
       };
       config.targets.deploy = {
         executor: 'nx:run-commands',
-        dependsOn: ['^package', 'compile'],
+        dependsOn: ['^assemble', 'compile'],
         options: stageConfig
           ? withCdkEnv({
               command: `tsx packages/common/scripts/src/infra/infra-deploy.ts ${libraryRoot}`,
@@ -212,7 +212,7 @@ export async function tsInfraGenerator(
       };
       config.targets['deploy-sandbox'] = {
         executor: 'nx:run-commands',
-        dependsOn: ['^package', 'compile'],
+        dependsOn: ['^assemble', 'compile'],
         options: stageConfig
           ? withCdkEnv({
               command: `tsx packages/common/scripts/src/infra/infra-deploy.ts ${libraryRoot} ${sandboxStagePattern}`,
@@ -231,7 +231,7 @@ export async function tsInfraGenerator(
       };
       config.targets.destroy = {
         executor: 'nx:run-commands',
-        dependsOn: ['^package', 'compile'],
+        dependsOn: ['^assemble', 'compile'],
         options: stageConfig
           ? withCdkEnv({
               command: `tsx packages/common/scripts/src/infra/infra-destroy.ts ${libraryRoot}`,
@@ -243,7 +243,7 @@ export async function tsInfraGenerator(
       };
       config.targets['destroy-sandbox'] = {
         executor: 'nx:run-commands',
-        dependsOn: ['^package', 'compile'],
+        dependsOn: ['^assemble', 'compile'],
         options: stageConfig
           ? withCdkEnv({
               command: `tsx packages/common/scripts/src/infra/infra-destroy.ts ${libraryRoot} ${sandboxStagePattern}`,

@@ -271,7 +271,7 @@ export const pyProjectGenerator = async (
       },
     };
     // The artifact-only sibling of build, which the deploy targets depend on.
-    projectConfiguration.targets.package = {
+    projectConfiguration.targets.assemble = {
       dependsOn: ['compile'],
     };
   }

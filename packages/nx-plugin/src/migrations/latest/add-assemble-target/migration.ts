@@ -11,8 +11,12 @@ import {
 } from '@nx/devkit';
 import { INFRA_APP_GENERATOR_INFO } from '../../../infra/app/generator.js';
 import { TERRAFORM_PROJECT_GENERATOR_INFO } from '../../../terraform/project/generator.js';
+import { REACT_WEBSITE_APP_GENERATOR_INFO } from '../../../ts/react-website/app/generator.js';
 import { formatFilesInSubtree } from '../../../utils/format.js';
-import { normalizeTargetKeyOrder } from '../../../utils/nx.js';
+import {
+  normalizeTargetKeyOrder,
+  type TargetDependency,
+} from '../../../utils/nx.js';
 import { sortObjectKeys } from '../../../utils/object.js';
 
 /**
@@ -21,24 +25,34 @@ import { sortObjectKeys } from '../../../utils/object.js';
  * `^build`, so deploying pulled in every upstream project's gates too — work a
  * deploy does not need.
  *
- * `package` is the artifact-only sibling of `build`, which the deploy targets
+ * `assemble` is the artifact-only sibling of `build`, which the deploy targets
  * depend on instead. `build` is untouched, so it remains the target that runs
  * everything.
  *
- * Each project's `package` is derived from what its own `build` declares rather
+ * Each project's `assemble` is derived from what its own `build` declares rather
  * than from the generator that created it, so a project whose build has been
  * extended with an extra artifact target keeps producing it. Anything this
  * migration cannot classify is reported via `nextSteps` and left alone.
+ *
+ * A `compile` target depending on `^build` is also narrowed to `^compile`, which
+ * is what keeps `^assemble` from pulling the upstream quality gates back in.
  *
  * How to write a migration:
  * - https://nx.dev/docs/kb/migration-generators
  * - What `nextSteps` means: https://nx.dev/docs/reference/devkit/MigrationReturnObject
  */
 
-/** Targets that produce a deployable artifact, so they belong on `package`. */
+/**
+ * Targets that produce a deployable artifact, so they belong on `assemble`.
+ *
+ * `bundle-migration` and `bundle-create-db-user` are the RDB bundles, which the
+ * generator registers on `build` directly as well as on `bundle`.
+ */
 const ARTIFACT_TARGETS = [
   'compile',
   'bundle',
+  'bundle-migration',
+  'bundle-create-db-user',
   'docker',
   'openapi',
   'operations',
@@ -62,7 +76,7 @@ const QUALITY_GATES = ['lint', 'format', 'fmt', 'test', 'typecheck', 'checkov'];
  */
 const TERRAFORM_ARTIFACT_TARGETS = ['checkov'];
 
-/** The CDK targets whose `^build` becomes `^package`. */
+/** The CDK targets whose `^build` becomes `^assemble`. */
 const CDK_DEPLOY_TARGETS = [
   'synth',
   'deploy',
@@ -83,25 +97,47 @@ const isGenerateTarget = (target: string): boolean =>
   target.startsWith('generate:') || target === 'generate';
 
 /**
- * The `package` dependencies derived from a project's `build`. Returns undefined
- * when `build` declares something this migration cannot classify, so the caller
- * reports it rather than guessing.
+ * The `assemble` dependencies derived from a project's `build`.
+ *
+ * Returns `'unclassifiable'` when `build` declares something this migration
+ * cannot classify, so the caller reports it rather than guessing. A `build` that
+ * declares nothing at all is not unclassifiable — it yields an empty list, and
+ * the project gets a no-op `assemble`.
  */
-const packageDependenciesFor = (
+const assembleDependenciesFor = (
   build: ProjectConfiguration['targets'][string] | undefined,
   artifactTargets: string[],
-): string[] | undefined => {
+): TargetDependency[] | 'unclassifiable' => {
   const dependsOn = build?.dependsOn;
-  if (!Array.isArray(dependsOn)) return undefined;
+  if (dependsOn === undefined) return [];
+  if (!Array.isArray(dependsOn)) return 'unclassifiable';
 
-  const dependencies: string[] = [];
+  const dependencies: TargetDependency[] = [];
   for (const dependency of dependsOn) {
-    if (typeof dependency !== 'string') return undefined;
+    // The object form is valid Nx, and this plugin emits it. It names another
+    // project's target explicitly, so it is classified on that target.
+    if (typeof dependency !== 'string') {
+      const objectTarget = (dependency as { target?: unknown })?.target;
+      if (typeof objectTarget !== 'string') return 'unclassifiable';
+      if (objectTarget === 'build') {
+        dependencies.push({ ...dependency, target: 'assemble' });
+        continue;
+      }
+      if (
+        artifactTargets.includes(objectTarget) ||
+        isGenerateTarget(objectTarget)
+      ) {
+        dependencies.push(dependency);
+        continue;
+      }
+      if (QUALITY_GATES.includes(objectTarget)) continue;
+      return 'unclassifiable';
+    }
     const [, crossProjectTarget] = dependency.match(/^.+:([^:]+)$/) ?? [];
     if (crossProjectTarget === 'build') {
       // Mirror the cross-project edge against the consumed project's own
-      // `package`, which keeps the artifact-only chain closed.
-      dependencies.push(dependency.replace(/:build$/, ':package'));
+      // `assemble`, which keeps the artifact-only chain closed.
+      dependencies.push(dependency.replace(/:build$/, ':assemble'));
       continue;
     }
     if (artifactTargets.includes(crossProjectTarget)) {
@@ -118,41 +154,48 @@ const packageDependenciesFor = (
       continue;
     }
     if (QUALITY_GATES.includes(dependency)) continue;
-    return undefined;
+    return 'unclassifiable';
   }
   return dependencies;
 };
 
 /**
- * Adds the project's `package`, derived from its `build`. Returns whether the
+ * Adds the project's `assemble`, derived from its `build`. Returns whether the
  * project was changed.
  */
-const addPackageTarget = (
+const addAssembleTarget = (
   projectName: string,
   project: ProjectConfiguration,
   nextSteps: string[],
 ): boolean => {
-  // Already migrated, or the project authors its own `package` (an Nx plugin
-  // project publishes one), so it is the user's to keep.
-  if (project.targets.package) return false;
+  // Already migrated. A project's own `package` target is deliberately left
+  // alone: that name is for publishing to a package manager, a different job.
+  if (project.targets.assemble) return false;
+
+  // Nothing to derive an `assemble` from, so there is nothing to do. Consumers
+  // reference `<project>:build`, which is untouched.
+  if (!project.targets.build) return false;
 
   const isTerraform = generatedBy(project, TERRAFORM_PROJECT_GENERATOR_INFO.id);
 
-  const dependencies = packageDependenciesFor(
+  const dependencies = assembleDependenciesFor(
     project.targets.build,
     isTerraform
       ? [...ARTIFACT_TARGETS, ...TERRAFORM_ARTIFACT_TARGETS]
       : ARTIFACT_TARGETS,
   );
 
-  if (!dependencies) {
+  if (dependencies === 'unclassifiable') {
+    // Consumers have already been repointed at this project's `assemble`, and Nx
+    // silently skips a dependency whose target does not exist, so say so: an
+    // unmigrated project here means its artifacts stop being built for a deploy.
     nextSteps.push(
-      `Add a 'package' target to ${projectName} by hand — its 'build' target declares dependencies this migration does not recognise. It should depend on whichever of build's dependencies produce deployable artifacts, and on none of its lint/test/typecheck gates.`,
+      `Add an 'assemble' target to ${projectName} by hand — its 'build' target declares dependencies this migration does not recognise. It should depend on whichever of build's dependencies produce deployable artifacts, and on none of its lint/test/typecheck gates. Projects that consume ${projectName} now depend on '${projectName}:assemble', and Nx silently skips a dependency on a target that does not exist, so until you add it a deploy will not rebuild this project's artifacts.`,
     );
     return false;
   }
 
-  project.targets.package = normalizeTargetKeyOrder(
+  project.targets.assemble = normalizeTargetKeyOrder(
     dependencies.length > 0
       ? { dependsOn: dependencies }
       : { executor: 'nx:noop' },
@@ -175,7 +218,7 @@ const repoint = (
   return 'repointed';
 };
 
-/** Points a CDK infrastructure project's deploy targets at `^package`. */
+/** Points a CDK infrastructure project's deploy targets at `^assemble`. */
 const migrateCdkDeployTargets = (
   projectName: string,
   project: ProjectConfiguration,
@@ -186,23 +229,23 @@ const migrateCdkDeployTargets = (
 
   for (const name of CDK_DEPLOY_TARGETS) {
     if (!project.targets[name]) continue;
-    const result = repoint(project.targets[name], '^build', '^package');
+    const result = repoint(project.targets[name], '^build', '^assemble');
     if (result === 'repointed') changed = true;
     if (result === 'diverged') diverged.push(name);
   }
 
   if (diverged.length > 0) {
     const targets = diverged.map((t) => `'${t}'`).join(', ');
-    const plural = diverged.length === 1;
+    const singular = diverged.length === 1;
     nextSteps.push(
-      `Point ${targets} on ${projectName} at '^package' by hand — ${plural ? 'it does' : 'they do'} not depend on '^build' as the generator left ${plural ? 'it' : 'them'}.`,
+      `Point ${targets} on ${projectName} at '^assemble' by hand — ${singular ? 'it does' : 'they do'} not depend on '^build' as the generator left ${singular ? 'it' : 'them'}.`,
     );
   }
   return changed;
 };
 
 /**
- * Points a Terraform application's `plan` at `package`, so planning no longer
+ * Points a Terraform application's `plan` at `assemble`, so planning no longer
  * runs the module tests.
  */
 const migrateTerraformPlanTarget = (
@@ -210,10 +253,10 @@ const migrateTerraformPlanTarget = (
   project: ProjectConfiguration,
   nextSteps: string[],
 ): boolean => {
-  const result = repoint(project.targets.plan, 'build', 'package');
+  const result = repoint(project.targets.plan, 'build', 'assemble');
   if (result === 'diverged') {
     nextSteps.push(
-      `Point 'plan' on ${projectName} at 'package' by hand — it does not depend on 'build' as the generator left it.`,
+      `Point 'plan' on ${projectName} at 'assemble' by hand — it does not depend on 'build' as the generator left it.`,
     );
   }
   return result === 'repointed';
@@ -221,14 +264,29 @@ const migrateTerraformPlanTarget = (
 
 /**
  * A website's `compile` needs its dependencies' declarations, which `compile`
- * emits — not their lint or test results. Narrowing it is what keeps `^package`
+ * emits — not their lint or test results. Narrowing it is what keeps `^assemble`
  * from pulling the upstream quality gates back in.
  *
  * Keyed off the target's shape rather than the generator, so a project that
- * adopted the same `^build` compile is narrowed too.
+ * adopted the same `^build` compile is narrowed too. A project the plugin did
+ * not generate is reported, since its `compile` may depend on `^build` for a
+ * reason this migration cannot see.
  */
-const narrowCompileTarget = (project: ProjectConfiguration): boolean =>
-  repoint(project.targets.compile, '^build', '^compile') === 'repointed';
+const narrowCompileTarget = (
+  projectName: string,
+  project: ProjectConfiguration,
+  nextSteps: string[],
+): boolean => {
+  if (repoint(project.targets.compile, '^build', '^compile') !== 'repointed') {
+    return false;
+  }
+  if (!generatedBy(project, REACT_WEBSITE_APP_GENERATOR_INFO.id)) {
+    nextSteps.push(
+      `Narrowed 'compile' on ${projectName} from '^build' to '^compile', so it no longer waits for its dependencies' lint and test targets. Revert it if that project's compile relied on an upstream step that only 'build' runs.`,
+    );
+  }
+  return true;
+};
 
 export default async function migration(
   tree: Tree,
@@ -238,14 +296,14 @@ export default async function migration(
   for (const [projectName, project] of getProjects(tree)) {
     project.targets ??= {};
 
-    let changed = addPackageTarget(projectName, project, nextSteps);
+    let changed = addAssembleTarget(projectName, project, nextSteps);
 
     if (generatedBy(project, INFRA_APP_GENERATOR_INFO.id)) {
-      // `synth` is the cloud assembly, so it belongs on `package`; `checkov`
+      // `synth` is the cloud assembly, so it belongs on `assemble`; `checkov`
       // scans that assembly and stays a `build`-only gate.
-      const pkg = project.targets.package;
-      if (pkg?.dependsOn && !pkg.dependsOn.includes('synth')) {
-        pkg.dependsOn.push('synth');
+      const assemble = project.targets.assemble;
+      if (assemble?.dependsOn && !assemble.dependsOn.includes('synth')) {
+        assemble.dependsOn.push('synth');
         changed = true;
       }
       changed =
@@ -260,7 +318,7 @@ export default async function migration(
         migrateTerraformPlanTarget(projectName, project, nextSteps) || changed;
     }
 
-    changed = narrowCompileTarget(project) || changed;
+    changed = narrowCompileTarget(projectName, project, nextSteps) || changed;
 
     if (changed) {
       updateProjectConfiguration(tree, projectName, {

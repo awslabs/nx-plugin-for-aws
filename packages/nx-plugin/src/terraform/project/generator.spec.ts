@@ -78,6 +78,7 @@ describe('terraformProjectGenerator', () => {
       // is what lets `run-many --target checkov` reach Terraform projects too.
       expect(Object.keys(projectConfig.targets).sort()).toEqual([
         'apply',
+        'assemble',
         'bootstrap',
         'bootstrap-destroy',
         'build',
@@ -87,7 +88,6 @@ describe('terraformProjectGenerator', () => {
         'fmt',
         'init',
         'output',
-        'package',
         'plan',
         'test',
         'validate',
@@ -318,7 +318,7 @@ describe('terraformProjectGenerator', () => {
         'init',
         'validate',
         '^validate',
-        'package',
+        'assemble',
       ]);
     });
 
@@ -716,7 +716,7 @@ describe('terraformProjectGenerator', () => {
     });
   });
 
-  describe('package target', () => {
+  describe('assemble target', () => {
     const applicationSchema: TerraformProjectGeneratorSchema = {
       name: 'my-terraform-project',
       type: 'application',
@@ -732,9 +732,9 @@ describe('terraformProjectGenerator', () => {
 
       // Policy scanning is a security control rather than a code quality gate,
       // so it stays where an interactive `plan` still reaches it.
-      expect(config.targets.package.dependsOn).toContain('checkov');
-      expect(config.targets.package.dependsOn).not.toContain('test');
-      expect(config.targets.package.dependsOn).not.toContain('fmt');
+      expect(config.targets.assemble.dependsOn).toContain('checkov');
+      expect(config.targets.assemble.dependsOn).not.toContain('test');
+      expect(config.targets.assemble.dependsOn).not.toContain('fmt');
     });
 
     it('should keep build running every quality gate', async () => {
@@ -758,8 +758,8 @@ describe('terraformProjectGenerator', () => {
 
       // A library produces no artifact of its own, but its modules reach a plan
       // through the consuming application, so they must still be scanned.
-      expect(config.targets.package.dependsOn).toEqual(['checkov']);
-      expect(config.targets.package.dependsOn).not.toContain('test');
+      expect(config.targets.assemble.dependsOn).toEqual(['checkov']);
+      expect(config.targets.assemble.dependsOn).not.toContain('test');
     });
   });
 

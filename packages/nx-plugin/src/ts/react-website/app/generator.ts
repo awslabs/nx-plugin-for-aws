@@ -293,7 +293,7 @@ export async function tsReactWebsiteGenerator(
     targets['build'] = {
       dependsOn: ['lint', 'compile', 'test', 'bundle'],
     };
-    targets['package'] = {
+    targets['assemble'] = {
       dependsOn: ['compile', 'bundle'],
     };
 

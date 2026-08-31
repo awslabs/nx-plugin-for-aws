@@ -345,10 +345,10 @@ export const addDependencyToTargetIfNotPresent = (
 
 /**
  * Register a dependency that produces a deployable artifact on both `build` and
- * `package`.
+ * `assemble`.
  *
  * `build` is the everything target: artifacts plus the quality gates (lint,
- * test, typecheck). `package` is its artifact-only sibling, which the deploy
+ * test, typecheck). `assemble` is its artifact-only sibling, which the deploy
  * targets depend on so a deploy builds what it deploys and nothing else.
  */
 export const addArtifactDependencyToTargets = (
@@ -356,17 +356,17 @@ export const addArtifactDependencyToTargets = (
   dependency: TargetDependency,
 ) => {
   addDependencyToTargetIfNotPresent(project, 'build', dependency);
-  addDependencyToTargetIfNotPresent(project, 'package', dependency);
+  addDependencyToTargetIfNotPresent(project, 'assemble', dependency);
 };
 
 /**
  * Register another project whose artifacts this one consumes, on both `build`
- * and `package`.
+ * and `assemble`.
  *
  * The shared infrastructure project reads the artifacts of every project it
  * deploys, and those cross-project edges are explicit because Nx's `^` operator
- * only follows package dependencies. `package` mirrors the list against the
- * consumed projects' own `package`, keeping the artifact-only chain closed.
+ * only follows package dependencies. `assemble` mirrors the list against the
+ * consumed projects' own `assemble`, keeping the artifact-only chain closed.
  */
 export const addArtifactProjectToTargets = (
   project: ProjectConfiguration,
@@ -379,8 +379,8 @@ export const addArtifactProjectToTargets = (
   );
   addDependencyToTargetIfNotPresent(
     project,
-    'package',
-    `${consumedProjectName}:package`,
+    'assemble',
+    `${consumedProjectName}:assemble`,
   );
 };
 

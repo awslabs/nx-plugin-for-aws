@@ -10,6 +10,7 @@ import {
 } from '@nx/devkit';
 import { INFRA_APP_GENERATOR_INFO } from '../../../infra/app/generator.js';
 import { TERRAFORM_PROJECT_GENERATOR_INFO } from '../../../terraform/project/generator.js';
+import { REACT_WEBSITE_APP_GENERATOR_INFO } from '../../../ts/react-website/app/generator.js';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
 import migration from './migration.js';
 
@@ -69,14 +70,14 @@ const seedTerraformProject = (
 const targetsOf = (tree: Tree, project: string) =>
   readProjectConfiguration(tree, project).targets;
 
-describe('add-package-target migration', () => {
+describe('add-assemble-target migration', () => {
   let tree: Tree;
 
   beforeEach(() => {
     tree = createTreeUsingTsSolutionSetup();
   });
 
-  describe('package target', () => {
+  describe('assemble target', () => {
     it('should carry the artifact dependencies of build and none of its gates', async () => {
       addProjectConfiguration(tree, '@proj/api', {
         root: 'packages/api',
@@ -87,12 +88,12 @@ describe('add-package-target migration', () => {
 
       await migration(tree);
 
-      expect(targetsOf(tree, '@proj/api').package).toEqual({
+      expect(targetsOf(tree, '@proj/api').assemble).toEqual({
         dependsOn: ['compile', 'bundle'],
       });
     });
 
-    it('should mirror cross-project build edges against their package', async () => {
+    it('should mirror cross-project build edges against their assemble', async () => {
       addProjectConfiguration(tree, '@proj/common-constructs', {
         root: 'packages/common/constructs',
         targets: {
@@ -110,8 +111,8 @@ describe('add-package-target migration', () => {
 
       await migration(tree);
 
-      expect(targetsOf(tree, '@proj/common-constructs').package).toEqual({
-        dependsOn: ['compile', '@proj/api:package', '@proj/website:package'],
+      expect(targetsOf(tree, '@proj/common-constructs').assemble).toEqual({
+        dependsOn: ['compile', '@proj/api:assemble', '@proj/website:assemble'],
       });
     });
 
@@ -123,7 +124,7 @@ describe('add-package-target migration', () => {
 
       await migration(tree);
 
-      expect(targetsOf(tree, '@proj/gates-only').package).toEqual({
+      expect(targetsOf(tree, '@proj/gates-only').assemble).toEqual({
         executor: 'nx:noop',
       });
     });
@@ -142,7 +143,7 @@ describe('add-package-target migration', () => {
   });
 
   describe('CDK infrastructure projects', () => {
-    it('should point the deploy family at ^package', async () => {
+    it('should point the deploy family at ^assemble', async () => {
       seedInfraProject(tree);
 
       await migration(tree);
@@ -155,20 +156,20 @@ describe('add-package-target migration', () => {
         'destroy',
         'destroy-sandbox',
       ]) {
-        expect(targets[name].dependsOn).toEqual(['^package', 'compile']);
+        expect(targets[name].dependsOn).toEqual(['^assemble', 'compile']);
       }
     });
 
-    it('should produce the cloud assembly from package but not scan it', async () => {
+    it('should produce the cloud assembly from assemble but not scan it', async () => {
       seedInfraProject(tree);
 
       await migration(tree);
 
       // `synth` is the artifact; `checkov` scans it and stays a build-only gate.
-      expect(targetsOf(tree, '@proj/infra').package.dependsOn).toContain(
+      expect(targetsOf(tree, '@proj/infra').assemble.dependsOn).toContain(
         'synth',
       );
-      expect(targetsOf(tree, '@proj/infra').package.dependsOn).not.toContain(
+      expect(targetsOf(tree, '@proj/infra').assemble.dependsOn).not.toContain(
         'checkov',
       );
     });
@@ -185,7 +186,7 @@ describe('add-package-target migration', () => {
   });
 
   describe('Terraform projects', () => {
-    it('should point plan at package rather than build', async () => {
+    it('should point plan at assemble rather than build', async () => {
       seedTerraformProject(tree);
 
       await migration(tree);
@@ -194,7 +195,7 @@ describe('add-package-target migration', () => {
         'init',
         'validate',
         '^validate',
-        'package',
+        'assemble',
       ]);
     });
 
@@ -203,11 +204,11 @@ describe('add-package-target migration', () => {
 
       await migration(tree);
 
-      const pkg = targetsOf(tree, '@proj/tf-app').package;
-      expect(pkg.dependsOn).toContain('checkov');
-      expect(pkg.dependsOn).toContain('@proj/terraform:package');
-      expect(pkg.dependsOn).not.toContain('test');
-      expect(pkg.dependsOn).not.toContain('fmt');
+      const assemble = targetsOf(tree, '@proj/tf-app').assemble;
+      expect(assemble.dependsOn).toContain('checkov');
+      expect(assemble.dependsOn).toContain('@proj/terraform:assemble');
+      expect(assemble.dependsOn).not.toContain('test');
+      expect(assemble.dependsOn).not.toContain('fmt');
     });
 
     it('should scan a library, which vends modules the applications plan', async () => {
@@ -219,7 +220,7 @@ describe('add-package-target migration', () => {
 
       await migration(tree);
 
-      expect(targetsOf(tree, '@proj/tf-lib').package.dependsOn).toEqual([
+      expect(targetsOf(tree, '@proj/tf-lib').assemble.dependsOn).toEqual([
         'checkov',
       ]);
     });
@@ -242,13 +243,13 @@ describe('add-package-target migration', () => {
       await migration(tree);
 
       // The shared Terraform project reads the artifacts of everything it
-      // deploys, so a library's package cannot be a blanket no-op.
-      expect(targetsOf(tree, '@proj/terraform').package.dependsOn).toEqual([
+      // deploys, so a library's assemble cannot be a blanket no-op.
+      expect(targetsOf(tree, '@proj/terraform').assemble.dependsOn).toEqual([
         'checkov',
-        '@proj/ts-api:package',
+        '@proj/ts-api:assemble',
         '@proj/ts-api:operations',
         'generate:py-api-operations',
-        '@proj/web:package',
+        '@proj/web:assemble',
       ]);
     });
   });
@@ -257,6 +258,7 @@ describe('add-package-target migration', () => {
     it('should narrow ^build to ^compile so upstream gates stay out', async () => {
       addProjectConfiguration(tree, '@proj/website', {
         root: 'packages/website',
+        metadata: { generator: REACT_WEBSITE_APP_GENERATOR_INFO.id } as never,
         targets: {
           build: { dependsOn: ['lint', 'compile', 'test', 'bundle'] },
           compile: {
@@ -275,6 +277,168 @@ describe('add-package-target migration', () => {
     });
   });
 
+  describe('artifact target classification', () => {
+    it('should carry the RDB bundles, which build registers directly', async () => {
+      // `py#rdb` registers bundle-migration and bundle-create-db-user on build
+      // itself, not only on bundle.
+      addProjectConfiguration(tree, 'proj.db', {
+        root: 'packages/db',
+        targets: {
+          build: {
+            dependsOn: [
+              'lint',
+              'compile',
+              'test',
+              'typecheck',
+              'bundle',
+              'bundle-migration',
+              'bundle-create-db-user',
+            ],
+          },
+        },
+      });
+
+      const result = await migration(tree);
+
+      expect(targetsOf(tree, 'proj.db').assemble).toEqual({
+        dependsOn: [
+          'compile',
+          'bundle',
+          'bundle-migration',
+          'bundle-create-db-user',
+        ],
+      });
+      expect(result.nextSteps).toEqual([]);
+    });
+
+    it('should leave a consumed project no dangling assemble edge', async () => {
+      // Nx silently skips a dependency on a target that does not exist, so a
+      // consumed project must always end up with the `assemble` its consumers
+      // were repointed at.
+      addProjectConfiguration(tree, 'proj.db', {
+        root: 'packages/db',
+        targets: {
+          build: {
+            dependsOn: ['lint', 'compile', 'test', 'bundle-migration'],
+          },
+        },
+      });
+      addProjectConfiguration(tree, '@proj/common-constructs', {
+        root: 'packages/common/constructs',
+        targets: {
+          build: { dependsOn: ['lint', 'compile', 'test', 'proj.db:build'] },
+        },
+      });
+
+      await migration(tree);
+
+      const consumer = targetsOf(tree, '@proj/common-constructs').assemble;
+      expect(consumer.dependsOn).toContain('proj.db:assemble');
+      expect(targetsOf(tree, 'proj.db').assemble).toBeDefined();
+    });
+
+    it('should accept the object form of dependsOn', async () => {
+      addProjectConfiguration(tree, '@proj/api', {
+        root: 'packages/api',
+        targets: {
+          build: {
+            dependsOn: [
+              'lint',
+              'compile',
+              'bundle',
+              { projects: ['@proj/shared'], target: 'build' },
+              { projects: ['@proj/other'], target: 'compile' },
+              { projects: ['@proj/lint-only'], target: 'lint' },
+            ],
+          },
+        },
+      });
+
+      const result = await migration(tree);
+
+      expect(targetsOf(tree, '@proj/api').assemble.dependsOn).toEqual([
+        'compile',
+        'bundle',
+        { projects: ['@proj/shared'], target: 'assemble' },
+        { projects: ['@proj/other'], target: 'compile' },
+      ]);
+      expect(result.nextSteps).toEqual([]);
+    });
+  });
+
+  describe('projects with nothing to derive', () => {
+    it('should be a no-op for a build declaring no dependencies', async () => {
+      // `ts#astro-docs` runs `astro build` directly, with no dependsOn.
+      addProjectConfiguration(tree, '@proj/docs', {
+        root: 'packages/docs',
+        targets: {
+          build: {
+            executor: 'nx:run-commands',
+            options: { command: 'astro build' },
+          },
+        },
+      });
+
+      const result = await migration(tree);
+
+      expect(targetsOf(tree, '@proj/docs').assemble).toEqual({
+        executor: 'nx:noop',
+      });
+      expect(result.nextSteps).toEqual([]);
+    });
+
+    it('should be a no-op for a project with no build target', async () => {
+      addProjectConfiguration(tree, '@proj/lint-only', {
+        root: 'packages/lint-only',
+        targets: { lint: { executor: 'nx:run-commands' } },
+      });
+
+      const result = await migration(tree);
+
+      expect(targetsOf(tree, '@proj/lint-only').assemble).toBeUndefined();
+      expect(result.nextSteps).toEqual([]);
+    });
+  });
+
+  describe('compile narrowing', () => {
+    it('should not report narrowing a generated website', async () => {
+      addProjectConfiguration(tree, '@proj/website', {
+        root: 'packages/website',
+        metadata: { generator: REACT_WEBSITE_APP_GENERATOR_INFO.id } as never,
+        targets: {
+          build: { dependsOn: ['lint', 'compile', 'test', 'bundle'] },
+          compile: { dependsOn: ['^build'], executor: 'nx:run-commands' },
+        },
+      });
+
+      const result = await migration(tree);
+
+      expect(targetsOf(tree, '@proj/website').compile.dependsOn).toEqual([
+        '^compile',
+      ]);
+      expect(result.nextSteps).toEqual([]);
+    });
+
+    it('should report narrowing a project the plugin did not generate', async () => {
+      addProjectConfiguration(tree, '@proj/hand-written', {
+        root: 'packages/hand-written',
+        targets: {
+          build: { dependsOn: ['lint', 'compile', 'test'] },
+          compile: { dependsOn: ['^build'], executor: 'nx:run-commands' },
+        },
+      });
+
+      const result = await migration(tree);
+
+      expect(targetsOf(tree, '@proj/hand-written').compile.dependsOn).toEqual([
+        '^compile',
+      ]);
+      expect(result.nextSteps).toEqual([
+        expect.stringContaining('@proj/hand-written'),
+      ]);
+    });
+  });
+
   describe('divergence', () => {
     it('should report a build declaring an unrecognised dependency', async () => {
       addProjectConfiguration(tree, '@proj/custom', {
@@ -286,15 +450,21 @@ describe('add-package-target migration', () => {
 
       const result = await migration(tree);
 
-      expect(targetsOf(tree, '@proj/custom').package).toBeUndefined();
+      expect(targetsOf(tree, '@proj/custom').assemble).toBeUndefined();
+      // The report must say consumers were already repointed, since Nx skips a
+      // dependency on a missing target silently.
       expect(result.nextSteps).toEqual([
-        expect.stringContaining('@proj/custom'),
+        expect.stringContaining("'@proj/custom:assemble'"),
       ]);
+      expect(result.nextSteps[0]).toContain('silently skips');
     });
 
-    it('should not clobber a package target the user already authors', async () => {
+    it('should leave a publishable package target untouched', async () => {
+      // `package` publishes to a package manager, which is a different job from
+      // assembling deployable artifacts. An Nx plugin project vends one.
       const authored = {
         executor: '@nx/js:tsc',
+        outputs: ['{options.outputPath}'],
         options: { outputPath: 'dist/packages/plugin/package' },
       };
       addProjectConfiguration(tree, '@proj/plugin', {
@@ -305,9 +475,32 @@ describe('add-package-target migration', () => {
         },
       });
 
-      await migration(tree);
+      const result = await migration(tree);
 
       expect(targetsOf(tree, '@proj/plugin').package).toEqual(authored);
+      // `package` is not an artifact target, so it is not carried onto
+      // `assemble`, and it is not a quality gate either — hence it is reported.
+      expect(targetsOf(tree, '@proj/plugin').assemble).toBeUndefined();
+      expect(result.nextSteps).toEqual([
+        expect.stringContaining('@proj/plugin'),
+      ]);
+    });
+
+    it('should not clobber an assemble target the user already authors', async () => {
+      const authored = { executor: 'nx:noop' };
+      addProjectConfiguration(tree, '@proj/custom-assemble', {
+        root: 'packages/custom-assemble',
+        targets: {
+          build: { dependsOn: ['lint', 'compile', 'test', 'bundle'] },
+          assemble: authored,
+        },
+      });
+
+      await migration(tree);
+
+      expect(targetsOf(tree, '@proj/custom-assemble').assemble).toEqual(
+        authored,
+      );
     });
 
     it('should report a deploy target that no longer depends on ^build', async () => {
@@ -372,6 +565,11 @@ describe('add-package-target migration', () => {
         JSON.stringify(targetsOf(tree, p)),
       ),
     ).toEqual(after);
-    expect(second.nextSteps).toEqual(first.nextSteps);
+    // The first run narrowed `@proj/api`'s compile and reported doing so; the
+    // second changes nothing, so it has nothing to report.
+    expect(first.nextSteps).toEqual([
+      expect.stringContaining("Narrowed 'compile' on @proj/api"),
+    ]);
+    expect(second.nextSteps).toEqual([]);
   });
 });

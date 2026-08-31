@@ -564,18 +564,18 @@ describe('addArtifactDependencyToTargets', () => {
     root: 'apps/test-project',
   });
 
-  it('should register the dependency on both build and package', () => {
+  it('should register the dependency on both build and assemble', () => {
     const project = makeProject();
     addArtifactDependencyToTargets(project, 'bundle');
     expect(project.targets?.build?.dependsOn).toEqual(['bundle']);
-    expect(project.targets?.package?.dependsOn).toEqual(['bundle']);
+    expect(project.targets?.assemble?.dependsOn).toEqual(['bundle']);
   });
 
   it('should append to the existing dependencies of both targets', () => {
     const project = makeProject();
     project.targets = {
       build: { dependsOn: ['lint', 'compile', 'test'] },
-      package: { dependsOn: ['compile'] },
+      assemble: { dependsOn: ['compile'] },
     };
     addArtifactDependencyToTargets(project, 'docker');
     expect(project.targets.build.dependsOn).toEqual([
@@ -584,7 +584,7 @@ describe('addArtifactDependencyToTargets', () => {
       'test',
       'docker',
     ]);
-    expect(project.targets.package.dependsOn).toEqual(['compile', 'docker']);
+    expect(project.targets.assemble.dependsOn).toEqual(['compile', 'docker']);
   });
 
   it('should be idempotent so a re-run does not grow either target', () => {
@@ -592,7 +592,7 @@ describe('addArtifactDependencyToTargets', () => {
     addArtifactDependencyToTargets(project, 'bundle');
     addArtifactDependencyToTargets(project, 'bundle');
     expect(project.targets?.build?.dependsOn).toEqual(['bundle']);
-    expect(project.targets?.package?.dependsOn).toEqual(['bundle']);
+    expect(project.targets?.assemble?.dependsOn).toEqual(['bundle']);
   });
 });
 
@@ -602,11 +602,13 @@ describe('addArtifactProjectToTargets', () => {
     root: 'packages/common/constructs',
   });
 
-  it('should register build against build and package against package', () => {
+  it('should register build against build and assemble against assemble', () => {
     const project = makeProject();
     addArtifactProjectToTargets(project, '@proj/api');
     expect(project.targets?.build?.dependsOn).toEqual(['@proj/api:build']);
-    expect(project.targets?.package?.dependsOn).toEqual(['@proj/api:package']);
+    expect(project.targets?.assemble?.dependsOn).toEqual([
+      '@proj/api:assemble',
+    ]);
   });
 
   it('should accumulate each consumed project in registration order', () => {
@@ -617,9 +619,9 @@ describe('addArtifactProjectToTargets', () => {
       '@proj/api:build',
       '@proj/website:build',
     ]);
-    expect(project.targets?.package?.dependsOn).toEqual([
-      '@proj/api:package',
-      '@proj/website:package',
+    expect(project.targets?.assemble?.dependsOn).toEqual([
+      '@proj/api:assemble',
+      '@proj/website:assemble',
     ]);
   });
 
@@ -628,7 +630,9 @@ describe('addArtifactProjectToTargets', () => {
     addArtifactProjectToTargets(project, '@proj/api');
     addArtifactProjectToTargets(project, '@proj/api');
     expect(project.targets?.build?.dependsOn).toEqual(['@proj/api:build']);
-    expect(project.targets?.package?.dependsOn).toEqual(['@proj/api:package']);
+    expect(project.targets?.assemble?.dependsOn).toEqual([
+      '@proj/api:assemble',
+    ]);
   });
 });
 

@@ -59,7 +59,7 @@ export const addOpenApiGeneration = (
       build: withOpenApi('build'),
       // The spec is a deployable artifact: the infrastructure derives the API's
       // routes from it, so a deploy needs it as much as a build does.
-      package: withOpenApi('package'),
+      assemble: withOpenApi('assemble'),
       openapi: {
         cache: true,
         executor: 'nx:run-commands',
