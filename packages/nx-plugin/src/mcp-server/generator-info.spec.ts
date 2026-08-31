@@ -617,6 +617,34 @@ REACT_PY_STRANDS_BODY`,
       expect(result.content).toMatch(/react.*ts#trpc-api/);
     });
 
+    it('warns that an experimental generator may change on the unsupported path', async () => {
+      const unsupportedOptions = {
+        sourceType: 'ts#trpc-api',
+        targetType: 'smithy',
+        protocol: 'http',
+      };
+
+      const experimental = await fetchGuidePagesForGenerator(
+        { ...connectionInfo, experimental: true },
+        [connectionInfo],
+        undefined,
+        undefined,
+        unsupportedOptions,
+      );
+      expect(experimental.kind).toBe('unsupported');
+      expect(experimental.content).toContain('[!WARNING] Experimental');
+
+      const stable = await fetchGuidePagesForGenerator(
+        connectionInfo,
+        [connectionInfo],
+        undefined,
+        undefined,
+        unsupportedOptions,
+      );
+      expect(stable.kind).toBe('unsupported');
+      expect(stable.content).not.toContain('Experimental');
+    });
+
     it('still shows partial matches when not every predicate key is supplied', async () => {
       // No protocol supplied — both protocol-tagged pages are kept.
       const result = await fetchGuidePagesForGenerator(

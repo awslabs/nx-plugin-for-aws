@@ -14,7 +14,6 @@ import {
 import { initGenerator } from '@nx/js';
 import { readFileSync } from 'fs';
 import yaml from 'js-yaml';
-import GeneratorsJson from '../../generators.json' with { type: 'json' };
 import { SYNC_GENERATOR_NAME as TS_SYNC_GENERATOR_NAME } from '../ts/sync/generator.js';
 import { BASE_TSCONFIG_COMPILER_OPTIONS } from './base-tsconfig.js';
 import {
@@ -32,6 +31,10 @@ import {
   detectWorkspacePackageManager,
 } from './dependencies.js';
 import { getDefaultBiomeConfig } from './format.js';
+import {
+  describeGeneratorForCatalogue,
+  generatorsJsonEntries,
+} from './generators.js';
 import type { Iac } from './iac.js';
 import { configureMcpServers } from './mcp.js';
 import { getNpmScope } from './npm-scope.js';
@@ -382,9 +385,12 @@ export const applyWorkspaceInit = async <const D extends DependencyDeclaration>(
     '.',
     {
       projectName: getNpmScope(tree),
-      generators: Object.entries(GeneratorsJson.generators)
-        .filter(([_, v]) => !v['hidden'])
-        .map(([k, v]) => ({ name: k, description: v.description })),
+      generators: Object.entries(generatorsJsonEntries)
+        .filter(([, info]) => !info.hidden)
+        .map(([id, info]) => ({
+          name: id,
+          description: describeGeneratorForCatalogue(info),
+        })),
       ...(() => {
         const cmds = getPackageManagerDisplayCommands();
         return {
