@@ -222,13 +222,6 @@ export interface Model {
    */
   pythonClassName?: string;
   /**
-   * The `required` list this schema declared, kept even when it declares none of
-   * the properties it names — an `allOf` member may raise a sibling branch's
-   * property to mandatory, which is not the same as constraining nothing.
-   */
-  declaredRequired?: string[];
-
-  /**
    * The Python type qualified with the `types.` namespace, for reference
    * from the generated client modules.
    */

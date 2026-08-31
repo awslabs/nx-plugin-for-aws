@@ -326,4 +326,49 @@ describe('openApiPyClientGenerator - complex types', () => {
       }),
     ).rejects.toThrow(/both map to the Python name "var_from"/);
   });
+
+  // Hoisting replaces a nullable inline object property with a `$ref`, and
+  // `nullable` describes that use of the schema rather than the schema itself. It
+  // was moved onto the hoisted definition and then dropped, so a required
+  // nullable object rejected the null its own spec permits — the shape a real API
+  // returns for an absent sub-resource.
+  it('keeps a required nullable object property nullable', async () => {
+    const { types } = await generateAndRead(verifier, tree, {
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/t': {
+          get: {
+            operationId: 'getT',
+            tags: ['t'],
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      required: ['iso', 'scalar'],
+                      properties: {
+                        iso: {
+                          type: 'object',
+                          nullable: true,
+                          required: ['id'],
+                          properties: { id: { type: 'integer' } },
+                        },
+                        scalar: { type: 'string', nullable: true },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(types).toMatch(/iso: GetT200ResponseIso \| None/);
+    // The scalar case already worked and must stay that way.
+    expect(types).toMatch(/scalar: str \| None/);
+  });
 });

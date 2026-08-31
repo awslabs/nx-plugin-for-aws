@@ -592,6 +592,11 @@ const PYTHON_KEYWORDS = new Set([
  * imported at all. `datetime` is the module the date annotations qualify.
  */
 const PYTHON_TYPE_SCOPE_NAMES = new Set([
+  // The module every generated annotation qualifies a model through. A kwarg of
+  // this name shadowed it in the method's own return annotation, so the call
+  // raised `AttributeError` on the caller's value — after the module imported and
+  // with the request itself going out correctly.
+  'types',
   'bool',
   'bytes',
   'datetime',

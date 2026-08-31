@@ -1266,10 +1266,16 @@ const marshallingKey = (
         .sort();
       return `union<${[...new Set(members)].join('|')}>`;
     }
-    if (referenced.export === 'interface') {
+    if (referenced.export === 'interface' || referenced.export === 'all-of') {
       // Keyed on the shape too, for the same reason: two members declaring an
-      // identical inline object property are hoisted to different names.
-      const fields = (referenced.properties ?? [])
+      // identical inline object property are hoisted to different names, and
+      // keying on the name alone rejected a union whose members convert the same
+      // way. `all-of` composes first, so its flattened properties are used.
+      const properties =
+        referenced.export === 'all-of'
+          ? (referenced.effectiveProperties ?? [])
+          : (referenced.properties ?? []);
+      const fields = properties
         .filter((property) => property.name)
         .map(
           (property) =>
@@ -1278,9 +1284,6 @@ const marshallingKey = (
         .sort();
       return `object<${fields.join(',')}>`;
     }
-    // An `all-of` composes members that are resolved later, so it keeps its name
-    // as its key rather than a shape this pass cannot see yet.
-    if (referenced.export === 'all-of') return `ref:${m.type}`;
     return marshallingKey(referenced, modelsByName, nested);
   }
   return 'plain';

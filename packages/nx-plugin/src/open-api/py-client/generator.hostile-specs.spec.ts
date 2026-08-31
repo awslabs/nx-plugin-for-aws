@@ -1031,4 +1031,57 @@ describe('openApiPyClientGenerator - hostile specs', () => {
     expect(danglingTypeReferences(types, client, asyncClient)).toEqual([]);
     expect(types).toContain('GetX200Response = ');
   });
+
+  // `types` is the module every annotation qualifies a model through, so a kwarg
+  // of that name shadowed it in the method's own return annotation: the request
+  // went out correctly, then the call raised `AttributeError` on the caller's
+  // value. Invisible to parsing and to importing the package.
+  it('escapes a parameter named after the types module', async () => {
+    const { client } = await generateAndRead(verifier, tree, {
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/place': {
+          get: {
+            operationId: 'placeByType',
+            tags: ['t'],
+            parameters: [
+              {
+                in: 'query',
+                name: 'types',
+                required: true,
+                schema: { type: 'array', items: { type: 'string' } },
+              },
+            ],
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/Place' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          Place: {
+            type: 'object',
+            required: ['id'],
+            properties: { id: { type: 'string' } },
+          },
+        },
+      },
+    });
+    expect(client).toContain('var_types: list[str]');
+    expect(client).not.toMatch(/^\s+types: list\[str\]/m);
+    // The wire name is unchanged.
+    expect(client).toContain('{"types": var_types}');
+  });
 });

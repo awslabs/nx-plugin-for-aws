@@ -857,15 +857,32 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
             const paramSchema = param?.schema as
               | OpenAPIV3.SchemaObject
               | undefined;
-            if (
-              paramSchema &&
-              !isRef(paramSchema) &&
-              (isCompositeSchema(paramSchema) ||
-                (paramSchema.type === 'object' && !!paramSchema.properties))
-            ) {
-              const schemaName = `${upperFirst(deduplicatedOpId)}Request${upperFirst(param.in)}${upperFirst(camelCase(param.name))}`;
+            if (!paramSchema || isRef(paramSchema)) return;
+            const schemaName = `${upperFirst(deduplicatedOpId)}Request${upperFirst(param.in)}${upperFirst(camelCase(param.name))}`;
+            const needsName = (schema: OpenAPIV3.SchemaObject): boolean =>
+              isCompositeSchema(schema) ||
+              (schema.type === 'object' && !!schema.properties);
+            if (needsName(paramSchema)) {
               spec.components!.schemas![schemaName] = paramSchema;
               param.schema = { $ref: `#/components/schemas/${schemaName}` };
+              return;
+            }
+            // An array's items need a name of their own: left inline, a composite
+            // there rendered as a member type nothing declared — `list[U]`, since
+            // the anonymous schema's name escapes to nothing.
+            // `items` is declared only on the array branch of `SchemaObject`.
+            const items = (paramSchema as { items?: unknown }).items as
+              | OpenAPIV3.SchemaObject
+              | undefined;
+            if (
+              paramSchema.type === 'array' &&
+              items &&
+              !isRef(items) &&
+              needsName(items)
+            ) {
+              const itemName = `${schemaName}Item`;
+              spec.components!.schemas![itemName] = items;
+              paramSchema.items = { $ref: `#/components/schemas/${itemName}` };
             }
           });
         }
