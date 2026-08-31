@@ -446,6 +446,41 @@ describe('openapi codegen data utils', () => {
       );
     });
 
+    // `type` is optional in OpenAPI and `properties` implies an object, which is
+    // how the parser already classifies one. Hoisting insisted on the explicit
+    // `type`, so a member written without it stayed inline, was taken for a
+    // non-object, and the assertion above rejected the whole document — a shape
+    // real published specs use for the "base plus one more field" idiom.
+    it('composes an allOf member that omits type but declares properties', () => {
+      const spec: Spec = {
+        ...sampleSpec,
+        components: {
+          schemas: {
+            ...sampleSpec.components.schemas,
+            Cursor: {
+              type: 'object',
+              required: ['cursor'],
+              properties: { cursor: { type: 'string' } },
+            },
+            CursorCollection: {
+              allOf: [
+                { $ref: '#/components/schemas/Cursor' },
+                { properties: { has_more: { type: 'boolean' } } },
+              ],
+            },
+          },
+        },
+      } as unknown as Spec;
+
+      const data = buildOpenApiCodeGenData(spec);
+      const model = data.models.find((m) => m.name === 'CursorCollection');
+      // Both branches contribute: the referenced schema and the untyped member.
+      expect(model?.effectiveProperties?.map((p) => p.name).sort()).toEqual([
+        'cursor',
+        'has_more',
+      ]);
+    });
+
     it('should classify operations as query or mutation by method', () => {
       const data = buildOpenApiCodeGenData(sampleSpec);
 
