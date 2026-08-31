@@ -170,6 +170,11 @@ export const addTypeScriptBundleTarget = async <
   if (!project.targets.bundle) {
     project.targets.bundle = normalizeTargetKeyOrder({
       cache: true,
+      // Declared rather than left to Nx's implicit `["default", "^default"]`,
+      // which reads a dependency's whole project directory: rolldown resolves
+      // dependencies through the build artifacts `default` already tracks, so
+      // `^default` only adds files no bundle can contain.
+      inputs: ['default'],
       outputs: [`{workspaceRoot}/dist/{projectRoot}/bundle`],
       executor: 'nx:run-commands',
       options: {

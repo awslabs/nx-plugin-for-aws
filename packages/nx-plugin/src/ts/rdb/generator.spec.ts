@@ -106,6 +106,7 @@ describe('ts#rdb generator', () => {
     ).toMatchSnapshot();
     expect(projectConfig.targets.bundle).toEqual({
       cache: true,
+      inputs: ['default'],
       outputs: ['{workspaceRoot}/dist/{projectRoot}/bundle'],
       executor: 'nx:run-commands',
       options: {

@@ -16,12 +16,14 @@ import {
   updateNxJson,
 } from '@nx/devkit';
 import { join, relative } from 'path';
+import { addLicenseCheckToLintTarget } from '../../license/config.js';
 import { getTsLibDetails } from '../../ts/lib/generator.js';
 import { addTsDependencies } from '../../utils/add-dependencies.js';
 import {
   declareDependencies,
   ownedElsewhere,
 } from '../../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../../utils/format.js';
 import { updateGitIgnore } from '../../utils/git.js';
 import { installDependencies } from '../../utils/install.js';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
@@ -68,6 +70,35 @@ export const DEPENDENCIES = declareDependencies()({
 const NX_EXTEND_PLUGIN = '@nx-extend/terraform';
 export const TERRAFORM_PROJECT_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(import.meta.filename);
+
+/**
+ * Checks formatting, mirroring the TypeScript and Python `format` targets: the
+ * base target fails on an unformatted file and the `fix` configuration rewrites
+ * it. Writing from the base target would rewrite the `default` input the hash is
+ * computed over, so the target could never cache-hit.
+ *
+ * Scoped to the project's own `src` rather than `-recursive`, so it checks the
+ * files the vended templates cover. `-diff` names what to fix when it fails.
+ */
+export const TERRAFORM_FORMAT_TARGET: TargetConfiguration = {
+  executor: 'nx:run-commands',
+  cache: true,
+  inputs: ['default'],
+  options: {
+    command: 'terraform fmt -check -diff',
+    forwardAllArgs: true,
+    cwd: '{projectRoot}/src',
+  },
+  configurations: {
+    fix: {
+      command: 'terraform fmt',
+    },
+    'skip-lint': {
+      // Cross-platform no-op (`true` is not available on Windows cmd).
+      command: 'node -e ""',
+    },
+  },
+};
 
 export async function terraformProjectGenerator(
   tree: Tree,
@@ -162,7 +193,7 @@ export async function terraformProjectGenerator(
       },
     },
     build: {
-      dependsOn: ['fmt', 'checkov', 'test', `${sharedTfProjectName}:build`],
+      dependsOn: ['format', 'checkov', 'test', `${sharedTfProjectName}:build`],
     },
     deploy: {
       dependsOn: ['apply'],
@@ -234,22 +265,20 @@ export async function terraformProjectGenerator(
     [targetName: string]: TargetConfiguration;
   } = {
     build: {
-      dependsOn: ['fmt', 'checkov', 'test'],
+      dependsOn: ['format', 'checkov', 'test'],
     },
     // A Terraform library vends modules rather than a deployable artifact, so
     // its `assemble` carries only whatever the consuming projects register on it.
     assemble: {
       executor: 'nx:noop',
     },
-    fmt: {
-      executor: 'nx:run-commands',
-      cache: true,
-      inputs: ['default'],
-      options: {
-        command: 'terraform fmt',
-        forwardAllArgs: true,
-        cwd: '{projectRoot}/src',
-      },
+    format: TERRAFORM_FORMAT_TARGET,
+    // Terraform has no linter of its own, so `lint` orchestrates the format
+    // check. It exists so `nx run-many --target lint` reaches terraform
+    // projects, and so `--configuration=fix` and `--configuration=skip-lint`
+    // propagate to `format` the way they do for TypeScript and Python projects.
+    lint: {
+      dependsOn: ['format'],
     },
     init: {
       executor: 'nx:run-commands',
@@ -269,9 +298,12 @@ export async function terraformProjectGenerator(
         env: { TF_PLUGIN_CACHE_DIR: pluginCacheDir },
       },
     },
+    // `^production` mirrors `test`: checkov resolves the relative modules a
+    // project consumes, so a change in one must invalidate the scan.
     checkov: {
       executor: 'nx:run-commands',
       cache: true,
+      inputs: ['default', '^production'],
       outputs: ['{workspaceRoot}/dist/{projectRoot}/checkov'],
       options: {
         command: uvxCommand(
@@ -342,6 +374,11 @@ export async function terraformProjectGenerator(
   if (!projectExists(tree, lib.fullyQualifiedName)) {
     addProjectConfiguration(tree, lib.fullyQualifiedName, projectConfiguration);
   }
+
+  // The `lint` target checks licenses alongside formatting, as it does for
+  // TypeScript and Python projects.
+  addLicenseCheckToLintTarget(tree, lib.fullyQualifiedName);
+
   // This generator IS the Terraform project, so the provider is fixed.
   addGeneratorMetadata(
     tree,
@@ -410,6 +447,10 @@ export async function terraformProjectGenerator(
       return packageJson;
     });
   }
+
+  // `updateProjectConfiguration` re-serialises project.json with every inline
+  // array expanded, which the vended `format` target rejects.
+  await formatFilesInSubtree(tree);
 
   // `@nx-extend/terraform` is registered as an Nx plugin in nx.json, so Nx
   // loads it when computing the project graph — it must resolve even if the

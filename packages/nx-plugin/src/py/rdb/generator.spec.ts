@@ -90,6 +90,7 @@ describe('py#rdb generator', () => {
     });
     expect(projectConfig.targets['bundle-migration']).toEqual({
       cache: true,
+      inputs: ['default'],
       outputs: ['{workspaceRoot}/dist/{projectRoot}/docker/migration'],
       executor: 'nx:run-commands',
       options: {
@@ -107,6 +108,7 @@ describe('py#rdb generator', () => {
     });
     expect(projectConfig.targets['bundle-create-db-user']).toEqual({
       cache: true,
+      inputs: ['default'],
       outputs: ['{workspaceRoot}/dist/{projectRoot}/docker/create-db-user'],
       executor: 'nx:run-commands',
       options: {

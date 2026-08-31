@@ -81,6 +81,11 @@ export const tsAstroDocsGenerator = async (
   const alreadyExists = projectExists(tree, fullyQualifiedName);
 
   const targets: ProjectConfiguration['targets'] = {
+    // Inputs are left to Nx's implicit `["default", "^default"]`. Astro resolves
+    // imports from a dependency's source rather than its build output, and this
+    // target declares no `dependsOn` for `default`'s transitive
+    // `dependentTasksOutputFiles` to resolve against — so `^default` is the only
+    // thing keeping a dependency's content in the hash.
     build: {
       executor: 'nx:run-commands',
       options: {

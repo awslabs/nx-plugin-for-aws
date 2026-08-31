@@ -10,6 +10,7 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { licenseGenerator } from '../../license/generator.js';
 import * as tsLibGenerator from '../../ts/lib/generator.js';
 import * as gitUtils from '../../utils/git.js';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
@@ -59,7 +60,7 @@ describe('terraformProjectGenerator', () => {
       expect(projectConfig.targets).toHaveProperty('plan');
 
       // Verify library targets are also present
-      expect(projectConfig.targets).toHaveProperty('fmt');
+      expect(projectConfig.targets).toHaveProperty('format');
       expect(projectConfig.targets).toHaveProperty('test');
       expect(projectConfig.targets).toHaveProperty('validate');
       expect(projectConfig.targets).toHaveProperty('output');
@@ -85,8 +86,9 @@ describe('terraformProjectGenerator', () => {
         'checkov',
         'deploy',
         'destroy',
-        'fmt',
+        'format',
         'init',
+        'lint',
         'output',
         'plan',
         'test',
@@ -195,7 +197,8 @@ describe('terraformProjectGenerator', () => {
       expect(targets.test.options.env.TF_PLUGIN_CACHE_DIR).toContain(
         '{projectRoot}',
       );
-      for (const targetName of ['init', 'test', 'validate', 'plan', 'fmt']) {
+      for (const targetName of ['init', 'test', 'validate', 'plan', 'format']) {
+        expect(targets[targetName]).toBeDefined();
         expect(targets[targetName].parallelism).toBeUndefined();
       }
     });
@@ -467,7 +470,7 @@ describe('terraformProjectGenerator', () => {
 
       // Verify only library targets are present (no application targets)
       expect(projectConfig.targets).toHaveProperty('checkov');
-      expect(projectConfig.targets).toHaveProperty('fmt');
+      expect(projectConfig.targets).toHaveProperty('format');
       expect(projectConfig.targets).toHaveProperty('init');
       expect(projectConfig.targets).toHaveProperty('test');
       expect(projectConfig.targets).toHaveProperty('validate');
@@ -490,12 +493,12 @@ describe('terraformProjectGenerator', () => {
         '@proj/my-terraform-project',
       );
 
-      // Test fmt target
-      const fmtTarget = projectConfig.targets['fmt'];
-      expect(fmtTarget.executor).toBe('nx:run-commands');
-      expect(fmtTarget.cache).toBe(true);
-      expect(fmtTarget.options.command).toBe('terraform fmt');
-      expect(fmtTarget.options.cwd).toBe('{projectRoot}/src');
+      // Test format target
+      const formatTarget = projectConfig.targets['format'];
+      expect(formatTarget.executor).toBe('nx:run-commands');
+      expect(formatTarget.cache).toBe(true);
+      expect(formatTarget.options.command).toBe('terraform fmt -check -diff');
+      expect(formatTarget.options.cwd).toBe('{projectRoot}/src');
 
       // Test validate target
       const validateTarget = projectConfig.targets['validate'];
@@ -547,6 +550,52 @@ describe('terraformProjectGenerator', () => {
         'terraform init',
       ]);
       expect(initTarget.options.parallel).toBe(false);
+    });
+
+    it('should check formatting from format and write only from its fix configuration', async () => {
+      await terraformProjectGenerator(tree, librarySchema);
+
+      const fmt = readProjectConfiguration(tree, '@proj/my-terraform-project')
+        .targets['format'];
+
+      // Writing from the base target would rewrite the `default` input its own
+      // hash is computed over, so it could never cache-hit.
+      expect(fmt.inputs).toEqual(['default']);
+      expect(fmt.options.command).toContain('-check');
+      expect(fmt.configurations.fix.command).toBe('terraform fmt');
+      expect(fmt.configurations.fix.command).not.toContain('-check');
+      // Cross-platform no-op (`true` is not available on Windows cmd).
+      expect(fmt.configurations['skip-lint'].command).toBe('node -e ""');
+    });
+
+    it('should orchestrate the format check from a lint target', async () => {
+      await terraformProjectGenerator(tree, librarySchema);
+
+      // `run-many --target lint` must reach Terraform projects, and its `fix`
+      // and `skip-lint` configurations propagate to `format` through this edge.
+      expect(
+        readProjectConfiguration(tree, '@proj/my-terraform-project').targets[
+          'lint'
+        ].dependsOn,
+      ).toEqual(['format']);
+    });
+
+    it('should declare inputs on every cacheable target', async () => {
+      await terraformProjectGenerator(tree, librarySchema);
+
+      const { targets } = readProjectConfiguration(
+        tree,
+        '@proj/my-terraform-project',
+      );
+
+      // Nx's implicit inputs for a target with none declared are
+      // `["default", "^default"]`, which reads a dependency's whole project
+      // directory rather than the build artifacts this project consumes.
+      for (const [name, target] of Object.entries(targets)) {
+        if (target.cache) {
+          expect(target.inputs, `${name} declares no inputs`).toBeDefined();
+        }
+      }
     });
   });
 
@@ -787,6 +836,46 @@ describe('terraformProjectGenerator', () => {
       ).toEqual(mainTfAfterFirstRun);
     });
 
+    it('should keep the license-check lint dependency across a re-run', async () => {
+      // The license generator wires every project's `lint` to the root
+      // license-check, so a project generated after it must claim that wiring
+      // itself — otherwise the generator re-vends a bare `lint` and the license
+      // generator re-adds the dependency on the next pass, which is a diff.
+      await licenseGenerator(tree, { license: 'Apache-2.0' } as never);
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      const lintDependsOn = () =>
+        readProjectConfiguration(tree, '@proj/my-terraform-project').targets
+          ?.lint?.dependsOn;
+      const afterFirstRun = lintDependsOn();
+      expect(afterFirstRun).toContainEqual({
+        projects: ['@proj/source'],
+        target: 'license-check',
+      });
+
+      await licenseGenerator(tree, { license: 'Apache-2.0' } as never);
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      expect(lintDependsOn()).toEqual(afterFirstRun);
+    });
+
+    it('should leave project.json byte-identical when re-run', async () => {
+      // `updateProjectConfiguration` re-serialises project.json with every
+      // inline array expanded, so without a formatting pass the re-run rewrites
+      // the whole file — a diff, and one the vended `format` target rejects.
+      await licenseGenerator(tree, { license: 'Apache-2.0' } as never);
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      const path = 'packages/my-terraform-project/project.json';
+      const afterFirstRun = tree.read(path, 'utf-8');
+      expect(afterFirstRun).toContain('"dependsOn": ["plan"]');
+
+      await licenseGenerator(tree, { license: 'Apache-2.0' } as never);
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      expect(tree.read(path, 'utf-8')).toBe(afterFirstRun);
+    });
+
     it('should preserve project.json customisations when re-run', async () => {
       await terraformProjectGenerator(tree, applicationSchema);
 
@@ -841,7 +930,7 @@ describe('terraformProjectGenerator', () => {
       expect(config.targets.assemble.dependsOn).toEqual([
         '@proj/terraform:assemble',
       ]);
-      for (const gate of ['fmt', 'checkov', 'test']) {
+      for (const gate of ['format', 'checkov', 'test']) {
         expect(config.targets.assemble.dependsOn).not.toContain(gate);
       }
     });
@@ -853,7 +942,7 @@ describe('terraformProjectGenerator', () => {
         '@proj/my-terraform-project',
       );
 
-      for (const gate of ['fmt', 'checkov', 'test']) {
+      for (const gate of ['format', 'checkov', 'test']) {
         expect(config.targets.build.dependsOn).toContain(gate);
       }
     });

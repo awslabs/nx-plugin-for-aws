@@ -74,6 +74,10 @@ export const addTrpcOperationsMetadataTarget = (
   project.targets ??= {};
   project.targets.operations ??= {
     cache: true,
+    // The metadata is derived from this project's own router, so a dependency's
+    // project directory (which Nx's implicit inputs would read in full)
+    // contributes nothing beyond its build artifacts.
+    inputs: ['default'],
     executor: 'nx:run-commands',
     outputs: [joinPathFragments('{workspaceRoot}', generatedDirFromRoot)],
     options: {

@@ -92,6 +92,14 @@ describe('fastapi project generator', () => {
     expect(projectConfig.targets.openapi.options.commands).toContain(
       'uv run python {projectRoot}/scripts/generate_open_api.py "dist/{projectRoot}/openapi/openapi.json"',
     );
+    // The spec serialises models a dependency may own, and this target has no
+    // `dependsOn` for `default`'s transitive `dependentTasksOutputFiles` to
+    // resolve against — so `^production` is the only edge to the dependency, and
+    // without it a dependency's model change serves a stale spec.
+    expect(projectConfig.targets.openapi.inputs).toEqual([
+      'production',
+      '^production',
+    ]);
 
     // Verify start target for development
     expect(projectConfig.targets.serve).toBeDefined();
