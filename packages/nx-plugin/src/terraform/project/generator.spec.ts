@@ -723,18 +723,19 @@ describe('terraformProjectGenerator', () => {
       directory: 'packages',
     };
 
-    it('should keep checkov on the plan path but drop the terraform tests', async () => {
+    it('should carry only the shared modules, not the quality gates', async () => {
       await terraformProjectGenerator(tree, applicationSchema);
       const config = readProjectConfiguration(
         tree,
         '@proj/my-terraform-project',
       );
 
-      // Policy scanning is a security control rather than a code quality gate,
-      // so it stays where an interactive `plan` still reaches it.
-      expect(config.targets.assemble.dependsOn).toContain('checkov');
-      expect(config.targets.assemble.dependsOn).not.toContain('test');
-      expect(config.targets.assemble.dependsOn).not.toContain('fmt');
+      expect(config.targets.assemble.dependsOn).toEqual([
+        '@proj/terraform:assemble',
+      ]);
+      for (const gate of ['fmt', 'checkov', 'test']) {
+        expect(config.targets.assemble.dependsOn).not.toContain(gate);
+      }
     });
 
     it('should keep build running every quality gate', async () => {
@@ -749,17 +750,14 @@ describe('terraformProjectGenerator', () => {
       }
     });
 
-    it('should scan a library, which vends modules the applications plan', async () => {
+    it('should be a no-op for a library, which vends no artifact', async () => {
       await terraformProjectGenerator(tree, {
         name: 'my-terraform-lib',
         type: 'library',
       });
       const config = readProjectConfiguration(tree, '@proj/my-terraform-lib');
 
-      // A library produces no artifact of its own, but its modules reach a plan
-      // through the consuming application, so they must still be scanned.
-      expect(config.targets.assemble.dependsOn).toEqual(['checkov']);
-      expect(config.targets.assemble.dependsOn).not.toContain('test');
+      expect(config.targets.assemble).toEqual({ executor: 'nx:noop' });
     });
   });
 

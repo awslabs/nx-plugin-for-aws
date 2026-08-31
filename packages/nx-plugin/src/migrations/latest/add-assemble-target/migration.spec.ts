@@ -199,19 +199,30 @@ describe('add-assemble-target migration', () => {
       ]);
     });
 
-    it('should keep checkov on the plan path but drop the module tests', async () => {
+    it('should carry the shared modules but none of the quality gates', async () => {
       seedTerraformProject(tree);
 
       await migration(tree);
 
       const assemble = targetsOf(tree, '@proj/tf-app').assemble;
-      expect(assemble.dependsOn).toContain('checkov');
-      expect(assemble.dependsOn).toContain('@proj/terraform:assemble');
-      expect(assemble.dependsOn).not.toContain('test');
-      expect(assemble.dependsOn).not.toContain('fmt');
+      expect(assemble.dependsOn).toEqual(['@proj/terraform:assemble']);
+      for (const gate of ['fmt', 'checkov', 'test']) {
+        expect(assemble.dependsOn).not.toContain(gate);
+      }
     });
 
-    it('should scan a library, which vends modules the applications plan', async () => {
+    it('should keep build running every quality gate', async () => {
+      seedTerraformProject(tree);
+
+      await migration(tree);
+
+      const build = targetsOf(tree, '@proj/tf-app').build;
+      for (const gate of ['fmt', 'checkov', 'test']) {
+        expect(build.dependsOn).toContain(gate);
+      }
+    });
+
+    it('should be a no-op for a library, which vends no artifact', async () => {
       seedTerraformProject(tree, {
         name: '@proj/tf-lib',
         projectType: 'library',
@@ -220,9 +231,9 @@ describe('add-assemble-target migration', () => {
 
       await migration(tree);
 
-      expect(targetsOf(tree, '@proj/tf-lib').assemble.dependsOn).toEqual([
-        'checkov',
-      ]);
+      expect(targetsOf(tree, '@proj/tf-lib').assemble).toEqual({
+        executor: 'nx:noop',
+      });
     });
 
     it('should keep the shared project cross-project artifact edges', async () => {
@@ -245,7 +256,6 @@ describe('add-assemble-target migration', () => {
       // The shared Terraform project reads the artifacts of everything it
       // deploys, so a library's assemble cannot be a blanket no-op.
       expect(targetsOf(tree, '@proj/terraform').assemble.dependsOn).toEqual([
-        'checkov',
         '@proj/ts-api:assemble',
         '@proj/ts-api:operations',
         'generate:py-api-operations',

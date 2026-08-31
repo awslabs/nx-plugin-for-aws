@@ -64,17 +64,10 @@ const ARTIFACT_TARGETS = [
  * Targets that check the code rather than produce an artifact. Listed so an
  * unrecognised entry is reported rather than silently classified either way.
  *
- * `fmt` is the Terraform formatter, and `checkov` scans the CDK cloud assembly
- * once `synth` has written it, so neither produces an artifact of its own.
+ * `fmt` is the Terraform formatter, and `checkov` scans what the build has
+ * already produced, so neither produces an artifact of its own.
  */
 const QUALITY_GATES = ['lint', 'format', 'fmt', 'test', 'typecheck', 'checkov'];
-
-/**
- * On Terraform, `checkov` is a security control an interactive `plan` should
- * still run, so it stays on the artifact path. On CDK it runs after `synth` and
- * outside the deploy path, which this preserves.
- */
-const TERRAFORM_ARTIFACT_TARGETS = ['checkov'];
 
 /** The CDK targets whose `^build` becomes `^assemble`. */
 const CDK_DEPLOY_TARGETS = [
@@ -106,7 +99,6 @@ const isGenerateTarget = (target: string): boolean =>
  */
 const assembleDependenciesFor = (
   build: ProjectConfiguration['targets'][string] | undefined,
-  artifactTargets: string[],
 ): TargetDependency[] | 'unclassifiable' => {
   const dependsOn = build?.dependsOn;
   if (dependsOn === undefined) return [];
@@ -124,7 +116,7 @@ const assembleDependenciesFor = (
         continue;
       }
       if (
-        artifactTargets.includes(objectTarget) ||
+        ARTIFACT_TARGETS.includes(objectTarget) ||
         isGenerateTarget(objectTarget)
       ) {
         dependencies.push(dependency);
@@ -140,7 +132,7 @@ const assembleDependenciesFor = (
       dependencies.push(dependency.replace(/:build$/, ':assemble'));
       continue;
     }
-    if (artifactTargets.includes(crossProjectTarget)) {
+    if (ARTIFACT_TARGETS.includes(crossProjectTarget)) {
       // Already names an artifact target on the other project, so it carries
       // over unchanged.
       dependencies.push(dependency);
@@ -149,7 +141,7 @@ const assembleDependenciesFor = (
     if (crossProjectTarget && QUALITY_GATES.includes(crossProjectTarget)) {
       continue;
     }
-    if (artifactTargets.includes(dependency) || isGenerateTarget(dependency)) {
+    if (ARTIFACT_TARGETS.includes(dependency) || isGenerateTarget(dependency)) {
       dependencies.push(dependency);
       continue;
     }
@@ -176,14 +168,7 @@ const addAssembleTarget = (
   // reference `<project>:build`, which is untouched.
   if (!project.targets.build) return false;
 
-  const isTerraform = generatedBy(project, TERRAFORM_PROJECT_GENERATOR_INFO.id);
-
-  const dependencies = assembleDependenciesFor(
-    project.targets.build,
-    isTerraform
-      ? [...ARTIFACT_TARGETS, ...TERRAFORM_ARTIFACT_TARGETS]
-      : ARTIFACT_TARGETS,
-  );
+  const dependencies = assembleDependenciesFor(project.targets.build);
 
   if (dependencies === 'unclassifiable') {
     // Consumers have already been repointed at this project's `assemble`, and Nx
