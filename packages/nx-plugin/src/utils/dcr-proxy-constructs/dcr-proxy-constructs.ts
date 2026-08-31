@@ -13,7 +13,7 @@ import {
 import { addStarExport } from '../ast.js';
 import type { Iac } from '../iac.js';
 import { esmVars } from '../module-format.js';
-import { addDependencyToTargetIfNotPresent } from '../nx.js';
+import { addArtifactProjectToTargets } from '../nx.js';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
@@ -90,11 +90,7 @@ export const addDcrProxyInfra = async (
       'project.json',
     ),
     (config: ProjectConfiguration) => {
-      addDependencyToTargetIfNotPresent(
-        config,
-        'build',
-        `${options.proxyProjectName}:build`,
-      );
+      addArtifactProjectToTargets(config, options.proxyProjectName);
       return config;
     },
   );

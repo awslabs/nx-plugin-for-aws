@@ -14,7 +14,7 @@ import { addStarExport } from '../ast.js';
 import type { DeclaredPyDependency } from '../declared-dependencies.js';
 import type { Iac } from '../iac.js';
 import { esmVars } from '../module-format.js';
-import { addDependencyToTargetIfNotPresent } from '../nx.js';
+import { addArtifactProjectToTargets } from '../nx.js';
 import {
   generatedTerraform,
   type IacMetadata,
@@ -72,11 +72,7 @@ export const addWebsiteInfra = async (
       'project.json',
     ),
     (config: ProjectConfiguration) => {
-      addDependencyToTargetIfNotPresent(
-        config,
-        'build',
-        `${options.websiteProjectName}:build`,
-      );
+      addArtifactProjectToTargets(config, options.websiteProjectName);
       return config;
     },
   );

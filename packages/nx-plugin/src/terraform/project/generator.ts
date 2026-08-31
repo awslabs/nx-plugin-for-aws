@@ -167,6 +167,10 @@ export async function terraformProjectGenerator(
     deploy: {
       dependsOn: ['apply'],
     },
+    // The artifact-only sibling of build, which `plan` depends on.
+    assemble: {
+      dependsOn: [`${sharedTfProjectName}:assemble`],
+    },
     destroy: {
       executor: 'nx:run-commands',
       defaultConfiguration: 'dev',
@@ -222,7 +226,7 @@ export async function terraformProjectGenerator(
         cwd: '{projectRoot}/src',
         parallel: false,
       },
-      dependsOn: ['init', 'validate', '^validate', 'build'],
+      dependsOn: ['init', 'validate', '^validate', 'assemble'],
     },
   };
 
@@ -231,6 +235,11 @@ export async function terraformProjectGenerator(
   } = {
     build: {
       dependsOn: ['fmt', 'checkov', 'test'],
+    },
+    // A Terraform library vends modules rather than a deployable artifact, so
+    // its `assemble` carries only whatever the consuming projects register on it.
+    assemble: {
+      executor: 'nx:noop',
     },
     fmt: {
       executor: 'nx:run-commands',

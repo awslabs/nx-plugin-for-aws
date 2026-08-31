@@ -22,7 +22,7 @@ import {
 import { addDependenciesToPackageJson } from '../dependencies.js';
 import type { Iac } from '../iac.js';
 import { esmVars } from '../module-format.js';
-import { addDependencyToTargetIfNotPresent } from '../nx.js';
+import { addArtifactProjectToTargets } from '../nx.js';
 import {
   generatedCdk,
   generatedTerraform,
@@ -117,11 +117,7 @@ const addAgentCoreInfra = async (
       'project.json',
     ),
     (config: ProjectConfiguration) => {
-      addDependencyToTargetIfNotPresent(
-        config,
-        'build',
-        `${options.projectName}:build`,
-      );
+      addArtifactProjectToTargets(config, options.projectName);
       return config;
     },
   );
@@ -334,11 +330,7 @@ export const addAgentCoreGatewayInfra = async <
       'project.json',
     ),
     (config: ProjectConfiguration) => {
-      addDependencyToTargetIfNotPresent(
-        config,
-        'build',
-        `${options.projectName}:build`,
-      );
+      addArtifactProjectToTargets(config, options.projectName);
       return config;
     },
   );

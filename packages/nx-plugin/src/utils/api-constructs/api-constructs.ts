@@ -21,7 +21,7 @@ import {
 import { addDependenciesToPackageJson } from '../dependencies.js';
 import type { Iac } from '../iac.js';
 import { esmVars } from '../module-format.js';
-import { addDependencyToTargetIfNotPresent } from '../nx.js';
+import { addArtifactProjectToTargets } from '../nx.js';
 import {
   generatedInfrastructure,
   generatedTerraform,
@@ -134,11 +134,7 @@ export const addApiGatewayInfra = async <const D extends DependencyDeclaration>(
       'project.json',
     ),
     (config: ProjectConfiguration) => {
-      addDependencyToTargetIfNotPresent(
-        config,
-        'build',
-        `${options.apiProjectName}:build`,
-      );
+      addArtifactProjectToTargets(config, options.apiProjectName);
       return config;
     },
   );

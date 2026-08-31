@@ -10,7 +10,10 @@ import {
 } from '@nx/devkit';
 import { updateGitIgnore } from '../git.js';
 import type { Iac } from '../iac.js';
-import { addDependencyToTargetIfNotPresent } from '../nx.js';
+import {
+  addArtifactDependencyToTargets,
+  addDependencyToTargetIfNotPresent,
+} from '../nx.js';
 import { openApiCodegenTarget } from '../open-api-codegen-target.js';
 import {
   PACKAGES_DIR,
@@ -151,7 +154,7 @@ const addTerraformOpenApiOperationsGenerateTarget = (
           outputs: [joinPathFragments('{workspaceRoot}', generatedDirFromRoot)],
         });
       }
-      addDependencyToTargetIfNotPresent(config, 'build', operationsTargetName);
+      addArtifactDependencyToTargets(config, operationsTargetName);
       return config;
     },
   );

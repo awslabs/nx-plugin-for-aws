@@ -78,6 +78,7 @@ describe('terraformProjectGenerator', () => {
       // is what lets `run-many --target checkov` reach Terraform projects too.
       expect(Object.keys(projectConfig.targets).sort()).toEqual([
         'apply',
+        'assemble',
         'bootstrap',
         'bootstrap-destroy',
         'build',
@@ -401,7 +402,7 @@ describe('terraformProjectGenerator', () => {
         'init',
         'validate',
         '^validate',
-        'build',
+        'assemble',
       ]);
     });
 
@@ -820,6 +821,51 @@ describe('terraformProjectGenerator', () => {
       expect(
         readProjectConfiguration(tree, '@proj/other-terraform-project'),
       ).toBeDefined();
+    });
+  });
+
+  describe('assemble target', () => {
+    const applicationSchema: TerraformProjectGeneratorSchema = {
+      name: 'my-terraform-project',
+      type: 'application',
+      directory: 'packages',
+    };
+
+    it('should carry only the shared modules, not the quality gates', async () => {
+      await terraformProjectGenerator(tree, applicationSchema);
+      const config = readProjectConfiguration(
+        tree,
+        '@proj/my-terraform-project',
+      );
+
+      expect(config.targets.assemble.dependsOn).toEqual([
+        '@proj/terraform:assemble',
+      ]);
+      for (const gate of ['fmt', 'checkov', 'test']) {
+        expect(config.targets.assemble.dependsOn).not.toContain(gate);
+      }
+    });
+
+    it('should keep build running every quality gate', async () => {
+      await terraformProjectGenerator(tree, applicationSchema);
+      const config = readProjectConfiguration(
+        tree,
+        '@proj/my-terraform-project',
+      );
+
+      for (const gate of ['fmt', 'checkov', 'test']) {
+        expect(config.targets.build.dependsOn).toContain(gate);
+      }
+    });
+
+    it('should be a no-op for a library, which vends no artifact', async () => {
+      await terraformProjectGenerator(tree, {
+        name: 'my-terraform-lib',
+        type: 'library',
+      });
+      const config = readProjectConfiguration(tree, '@proj/my-terraform-lib');
+
+      expect(config.targets.assemble).toEqual({ executor: 'nx:noop' });
     });
   });
 

@@ -36,6 +36,7 @@ import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
 import { kebabCase, snakeCase, toClassName } from '../../utils/names.js';
 import { getNpmScope } from '../../utils/npm-scope.js';
 import {
+  addArtifactDependencyToTargets,
   addDependencyToTargetIfNotPresent,
   addGeneratorMetadata,
   getGeneratorInfo,
@@ -364,7 +365,7 @@ export const pyRdbGenerator = async (
         },
         dependsOn: ['bundle-migration', 'bundle-create-db-user'],
       };
-      addDependencyToTargetIfNotPresent(projectConfig, 'build', 'docker');
+      addArtifactDependencyToTargets(projectConfig, 'docker');
 
       addDockerScanTarget(
         tree,

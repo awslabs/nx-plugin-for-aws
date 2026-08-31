@@ -344,6 +344,47 @@ export const addDependencyToTargetIfNotPresent = (
 };
 
 /**
+ * Register a dependency that produces a deployable artifact on both `build` and
+ * `assemble`.
+ *
+ * `build` is the everything target: artifacts plus the quality gates (lint,
+ * test, typecheck). `assemble` is its artifact-only sibling, which the deploy
+ * targets depend on so a deploy builds what it deploys and nothing else.
+ */
+export const addArtifactDependencyToTargets = (
+  project: ProjectConfiguration,
+  dependency: TargetDependency,
+) => {
+  addDependencyToTargetIfNotPresent(project, 'build', dependency);
+  addDependencyToTargetIfNotPresent(project, 'assemble', dependency);
+};
+
+/**
+ * Register another project whose artifacts this one consumes, on both `build`
+ * and `assemble`.
+ *
+ * The shared infrastructure project reads the artifacts of every project it
+ * deploys, and those cross-project edges are explicit because Nx's `^` operator
+ * only follows package dependencies. `assemble` mirrors the list against the
+ * consumed projects' own `assemble`, keeping the artifact-only chain closed.
+ */
+export const addArtifactProjectToTargets = (
+  project: ProjectConfiguration,
+  consumedProjectName: string,
+) => {
+  addDependencyToTargetIfNotPresent(
+    project,
+    'build',
+    `${consumedProjectName}:build`,
+  );
+  addDependencyToTargetIfNotPresent(
+    project,
+    'assemble',
+    `${consumedProjectName}:assemble`,
+  );
+};
+
+/**
  * Register a component's `<name>-dev` target under the project-level `dev`
  * target, so `nx run <project>:dev` starts every component in the project.
  *
