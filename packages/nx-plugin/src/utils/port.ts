@@ -26,7 +26,7 @@ export const getExistingProjectPort = (
  * project, if any. Projects which host multiple components (e.g. one agent or
  * MCP server per component) record a port per component in metadata.components.
  */
-export const getExistingComponentPort = (
+const getExistingComponentPort = (
   project: ProjectConfiguration,
   component: { info: { id: string }; name?: string },
 ): number | undefined => {
