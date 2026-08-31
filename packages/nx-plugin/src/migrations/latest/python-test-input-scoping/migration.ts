@@ -7,6 +7,7 @@ import {
   type MigrationReturnObject,
   type ProjectConfiguration,
   readNxJson,
+  type TargetConfiguration,
   type Tree,
   updateNxJson,
   updateProjectConfiguration,
@@ -40,14 +41,35 @@ const PRODUCTION_INPUTS = ['production', '^production'];
 /** The inputs those targets previously read. */
 const PREVIOUS_INPUTS = ['default', '^production'];
 
+/**
+ * Dependent-task-output globs this plugin has vended. Any of them is rewritten
+ * to the current one; anything else is the user's own scoping decision.
+ */
+const PREVIOUSLY_VENDED_GLOBS = ['**/*', 'dist/**'];
+
 const isPythonProject = (project: ProjectConfiguration): boolean =>
   Object.values(project.targets ?? {}).some((target) =>
     String(target?.executor ?? '').startsWith('@nxlv/python'),
   );
 
-/** An OpenAPI spec generation target, named `openapi` or `<agent>-openapi`. */
-const isOpenApiTarget = (name: string): boolean =>
-  name === 'openapi' || name.endsWith('-openapi');
+/**
+ * An OpenAPI spec generation target as the generators vend it: named `openapi`
+ * or `<agent>-openapi`, running a command, and writing its spec under
+ * `dist/.../openapi`. The extra checks keep a user-authored target that merely
+ * shares the suffix from being rescoped, since these targets are identified by
+ * declaring no `inputs` at all.
+ */
+const isOpenApiTarget = (
+  name: string,
+  target?: TargetConfiguration,
+): boolean => {
+  if (name !== 'openapi' && !name.endsWith('-openapi')) return false;
+  if (!target) return true;
+  return (
+    target.executor === 'nx:run-commands' &&
+    (target.outputs ?? []).some((output) => output.includes('/openapi'))
+  );
+};
 
 const arraysEqual = (a: readonly unknown[], b: readonly unknown[]): boolean =>
   a.length === b.length && a.every((entry, index) => entry === b[index]);
@@ -60,33 +82,30 @@ const migrateNamedInputs = (tree: Tree, nextSteps: string[]): void => {
   const nxJson = readNxJson(tree);
   if (!nxJson) return;
 
-  const production = nxJson.namedInputs?.production;
-  const nextProduction = production
-    ? [
-        ...production,
-        ...PYTHON_TEST_FILE_EXCLUSIONS.filter(
-          (exclusion) => !production.includes(exclusion),
-        ),
-      ]
-    : undefined;
-
-  if (!production) {
-    nextSteps.push(
-      "nx.json declares no 'production' named input — left untouched. Add one excluding your Python test files so build tasks are not invalidated by test edits.",
-    );
-  }
+  // Seeded as `['default']` when absent, exactly as the generator does. The
+  // targets below are rewritten to read `production`, and Nx fails hard on a
+  // named input that is not defined, so the two must not diverge.
+  const production = nxJson.namedInputs?.production ?? ['default'];
+  const nextProduction = [
+    ...production,
+    ...PYTHON_TEST_FILE_EXCLUSIONS.filter(
+      (exclusion) => !production.includes(exclusion),
+    ),
+  ];
 
   const defaultInput = nxJson.namedInputs?.default;
   let nextDefault = defaultInput;
   if (defaultInput) {
     const glob = DEPENDENT_TASKS_OUTPUT_FILES_INPUT.dependentTasksOutputFiles;
-    // Only the entry this plugin vended is rewritten; a different glob is the
+    // Only an entry this plugin vended is rewritten; a different glob is the
     // user's own scoping decision.
     nextDefault = defaultInput.map((input) =>
       typeof input === 'object' &&
       input !== null &&
       'dependentTasksOutputFiles' in input &&
-      input.dependentTasksOutputFiles === '**/*'
+      PREVIOUSLY_VENDED_GLOBS.includes(
+        input.dependentTasksOutputFiles as string,
+      )
         ? { ...input, dependentTasksOutputFiles: glob }
         : input,
     );
@@ -102,7 +121,9 @@ const migrateNamedInputs = (tree: Tree, nextSteps: string[]): void => {
         typeof input === 'object' &&
         input !== null &&
         'dependentTasksOutputFiles' in input &&
-        input.dependentTasksOutputFiles !== '**/*' &&
+        !PREVIOUSLY_VENDED_GLOBS.includes(
+          input.dependentTasksOutputFiles as string,
+        ) &&
         input.dependentTasksOutputFiles !== glob,
     );
     if (!hadVendedEntry && hasCustomEntry) {
@@ -116,7 +137,7 @@ const migrateNamedInputs = (tree: Tree, nextSteps: string[]): void => {
     ...nxJson,
     namedInputs: {
       ...nxJson.namedInputs,
-      ...(nextProduction ? { production: nextProduction } : {}),
+      production: nextProduction,
       ...(nextDefault ? { default: nextDefault } : {}),
     },
   });
@@ -138,7 +159,7 @@ const migrateProjectTargets = (
   for (const [targetName, target] of Object.entries(project.targets ?? {})) {
     if (
       !PRODUCTION_SCOPED_TARGETS.includes(targetName) &&
-      !isOpenApiTarget(targetName)
+      !isOpenApiTarget(targetName, target)
     ) {
       continue;
     }
@@ -154,7 +175,7 @@ const migrateProjectTargets = (
     // `default`. Everything else carried the vended pair.
     const isVendedShape = inputs
       ? arraysEqual(inputs as unknown[], PREVIOUS_INPUTS)
-      : isOpenApiTarget(targetName);
+      : isOpenApiTarget(targetName, target);
 
     if (!isVendedShape) {
       nextSteps.push(

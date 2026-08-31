@@ -78,16 +78,15 @@ const PYTHON_TRANSIENT_ARTIFACTS = [
 ];
 
 // Python test files, excluded from the `production` named input so that editing
-// a test does not invalidate targets whose output cannot contain it. The
-// workspace ships TypeScript equivalents already; these are their Python
-// counterparts, covering both pytest layouts (a `tests` directory, and
-// `test_*.py`/`*_test.py` files colocated with the module they cover).
-export const PYTHON_TEST_FILE_EXCLUSIONS = [
-  '!{projectRoot}/tests/**/*',
-  '!{projectRoot}/**/test_*.py',
-  '!{projectRoot}/**/*_test.py',
-  '!{projectRoot}/**/conftest.py',
-];
+// a test does not invalidate targets whose output cannot contain it.
+//
+// Anchored to the `tests` directory, which is where the generated project puts
+// them and the only path the build excludes (`ignorePaths` is matched against
+// the project root's top-level entries). An unanchored `**/test_*.py` would also
+// match a production module inside the packaged source directory — a
+// `test_data_loader.py` helper ships in the wheel, so excluding it would leave
+// the wheel stale after a fix to it.
+export const PYTHON_TEST_FILE_EXCLUSIONS = ['!{projectRoot}/tests/**/*'];
 
 /**
  * Excludes Python test files from the `production` named input, preserving any

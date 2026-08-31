@@ -47,22 +47,25 @@ export const TS_LIB_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
  * Consumes build artifacts produced by a project's dependencies, so a task
  * re-runs when the output it actually reads changes.
  *
- * Scoped to `dist` because that is where every target that feeds another
- * project writes. Test reports (`reports/`, `coverage/`) are nothing a
- * downstream task reads, and pytest stamps wall-clock time into them, so
- * including them would mint a fresh hash on each test run and cascade it
- * through the whole graph.
+ * Test reports are excluded rather than build artifacts included: several
+ * generators emit generated sources outside `dist` (an OpenAPI client under a
+ * website's `src/generated`, a Smithy SSDK, the Prisma client) and add them to
+ * `.gitignore`, which keeps them out of the project's own fileset — so this
+ * input is the only thing that hashes them. `reports/` and `coverage/` hold
+ * pytest's JUnit and coverage XML, which carry a wall-clock timestamp and so
+ * mint a fresh hash on every test run that would cascade through the graph.
  */
 export const DEPENDENT_TASKS_OUTPUT_FILES_INPUT = {
-  dependentTasksOutputFiles: 'dist/**',
+  dependentTasksOutputFiles: '!{reports,coverage}/**',
   transitive: true,
 };
 
 // Globs this generator has vended for the dependent-task-output input. Any of
 // them is replaced in place, so the entry is neither duplicated nor left at a
-// wider scope when a generator re-runs.
+// different scope when a generator re-runs.
 const VENDED_DEPENDENT_TASKS_OUTPUT_GLOBS = [
   '**/*',
+  'dist/**',
   DEPENDENT_TASKS_OUTPUT_FILES_INPUT.dependentTasksOutputFiles,
 ];
 
