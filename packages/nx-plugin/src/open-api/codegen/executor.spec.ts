@@ -116,19 +116,24 @@ describe('open-api-codegen executor', () => {
     expect(generatedFiles()).toEqual([]);
   });
 
-  it('should fail for an unknown generator', async () => {
-    const result = await executor(
-      {
-        generator: 'not-a-generator' as OpenApiCodegenTarget,
-        openApiSpecPath: SPEC_PATH,
-        outputPath: OUTPUT_PATH,
-      },
-      {} as ExecutorContext,
-    );
+  // `constructor` and friends are inherited keys, so a lookup on the generator
+  // map finds them even though they are not generators.
+  it.each(['not-a-generator', 'constructor', 'toString', '__proto__'])(
+    'should fail for the unknown generator %s',
+    async (generator) => {
+      const result = await executor(
+        {
+          generator: generator as OpenApiCodegenTarget,
+          openApiSpecPath: SPEC_PATH,
+          outputPath: OUTPUT_PATH,
+        },
+        {} as ExecutorContext,
+      );
 
-    expect(result).toEqual({ success: false });
-    expect(generatedFiles()).toEqual([]);
-  });
+      expect(result).toEqual({ success: false });
+      expect(generatedFiles()).toEqual([]);
+    },
+  );
 
   it('should be idempotent', async () => {
     await run('ts-hooks');

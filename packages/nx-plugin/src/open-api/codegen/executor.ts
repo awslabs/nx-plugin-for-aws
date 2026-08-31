@@ -3,6 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { type ExecutorContext, logger, workspaceRoot } from '@nx/devkit';
+// `@nx/devkit` re-exports FsTree only from its `internal` entry and does not
+// export flushChanges at all, so the tree is taken from nx directly, as the
+// `nx g` command itself does.
 import { FsTree, flushChanges, printChanges } from 'nx/src/generators/tree.js';
 import type { OpenApiCodegenExecutorSchema } from './executor-schema';
 
@@ -30,17 +33,21 @@ export default async function openApiCodegenExecutor(
   options: OpenApiCodegenExecutorSchema,
   _context: ExecutorContext,
 ): Promise<{ success: boolean }> {
-  const loadGenerator = GENERATORS[options.generator];
-  if (!loadGenerator) {
+  // `Object.hasOwn` so an inherited key (eg `constructor`) is not mistaken for a
+  // generator, which would fail with a TypeError rather than the message below.
+  if (!Object.hasOwn(GENERATORS, options.generator)) {
     logger.error(
       `Unknown generator "${options.generator}". Expected one of ${Object.keys(GENERATORS).join(', ')}.`,
     );
     return { success: false };
   }
 
-  const generator = (await loadGenerator()).default;
+  const generator = (await GENERATORS[options.generator]()).default;
 
-  const tree = new FsTree(workspaceRoot, false);
+  const tree = new FsTree(
+    workspaceRoot,
+    process.env.NX_VERBOSE_LOGGING === 'true',
+  );
   await generator(tree, {
     openApiSpecPath: options.openApiSpecPath,
     outputPath: options.outputPath,
