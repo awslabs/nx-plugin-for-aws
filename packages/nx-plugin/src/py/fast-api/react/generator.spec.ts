@@ -120,14 +120,14 @@ export function Main() {
     // Verify client generation target was added
     expect(projectConfig.targets['generate:test-api-client']).toBeDefined();
     expect(projectConfig.targets['generate:test-api-client'].executor).toBe(
-      'nx:run-commands',
+      '@aws/nx-plugin:open-api-codegen',
     );
 
-    expect(
-      projectConfig.targets['generate:test-api-client'].options.commands,
-    ).toEqual([
-      'nx g @aws/nx-plugin:open-api#ts-hooks --openApiSpecPath="dist/apps/backend/openapi/openapi.json" --outputPath="apps/frontend/src/generated/test-api" --no-interactive',
-    ]);
+    expect(projectConfig.targets['generate:test-api-client'].options).toEqual({
+      generator: 'ts-hooks',
+      openApiSpecPath: 'dist/apps/backend/openapi/openapi.json',
+      outputPath: 'apps/frontend/src/generated/test-api',
+    });
 
     expect(
       projectConfig.targets['generate:test-api-client'].dependsOn,

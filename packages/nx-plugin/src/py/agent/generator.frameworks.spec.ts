@@ -192,9 +192,12 @@ dev-dependencies = []
     ).toContain('scripts/agent_openapi.py');
 
     expect(projectConfig.targets['agent-generate-client']).toBeDefined();
+    expect(projectConfig.targets['agent-generate-client'].executor).toBe(
+      '@aws/nx-plugin:open-api-codegen',
+    );
     expect(
-      projectConfig.targets['agent-generate-client'].options.commands[0],
-    ).toContain('@aws/nx-plugin:open-api#ts-client');
+      projectConfig.targets['agent-generate-client'].options.generator,
+    ).toBe('ts-client');
     expect(projectConfig.targets['agent-generate-client'].dependsOn).toEqual([
       'agent-openapi',
     ]);

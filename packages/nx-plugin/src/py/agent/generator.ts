@@ -54,6 +54,7 @@ import {
   readProjectConfigurationUnqualified,
 } from '../../utils/nx.js';
 import { sortObjectKeys } from '../../utils/object.js';
+import { openApiCodegenTarget } from '../../utils/open-api-codegen-target.js';
 import {
   getRelativePathToRootByDirectory,
   toProjectRelativePath,
@@ -547,22 +548,13 @@ export const pyAgentGenerator = async (
               ],
             },
           },
-          [clientGenTargetName]: {
-            cache: true,
-            executor: 'nx:run-commands',
-            dependsOn: [openApiTargetName],
-            inputs: [
-              {
-                dependentTasksOutputFiles: '**/*.json',
-              },
-            ],
+          [clientGenTargetName]: openApiCodegenTarget({
+            generator: 'ts-client',
+            openApiSpecPath: `dist/${project.root}/openapi/${agentNameSnakeCase}/openapi.json`,
+            outputPath: `${project.root}/scripts/${agentTargetPrefix}/generated`,
+            specBuildTargetName: openApiTargetName,
             outputs: [`{projectRoot}/scripts/${agentTargetPrefix}/generated`],
-            options: {
-              commands: [
-                `nx g @aws/nx-plugin:open-api#ts-client --openApiSpecPath="dist/${project.root}/openapi/${agentNameSnakeCase}/openapi.json" --outputPath="${project.root}/scripts/${agentTargetPrefix}/generated" --no-interactive`,
-              ],
-            },
-          },
+          }),
         }
       : {};
 

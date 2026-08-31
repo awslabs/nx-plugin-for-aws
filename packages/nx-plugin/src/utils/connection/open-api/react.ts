@@ -22,6 +22,7 @@ import { addDependenciesToPackageJson } from '../../dependencies.js';
 import { updateGitIgnore } from '../../git.js';
 import { kebabCase, toClassName } from '../../names.js';
 import { sortObjectKeys } from '../../object.js';
+import { openApiCodegenTarget } from '../../open-api-codegen-target.js';
 import { type ITsDepVersion, withVersions } from '../../versions.js';
 
 /** Dependencies a caller must declare to add an OpenAPI React client. */
@@ -142,24 +143,15 @@ export const addOpenApiReactClient = async <
           },
         ]),
       ),
-      [clientGenTarget]: {
-        cache: true,
-        executor: 'nx:run-commands',
-        inputs: [
-          {
-            dependentTasksOutputFiles: '**/*.json',
-          },
-        ],
+      [clientGenTarget]: openApiCodegenTarget({
+        generator: 'ts-hooks',
+        openApiSpecPath: specPath,
+        outputPath: generatedClientDirFromRoot,
+        specBuildTargetName,
         outputs: [
           joinPathFragments('{workspaceRoot}', generatedClientDirFromRoot),
         ],
-        options: {
-          commands: [
-            `nx g @aws/nx-plugin:open-api#ts-hooks --openApiSpecPath="${specPath}" --outputPath="${generatedClientDirFromRoot}" --no-interactive`,
-          ],
-        },
-        dependsOn: [specBuildTargetName],
-      },
+      }),
       // Watch target for regenerating the client
       [clientGenWatchTarget]: {
         executor: 'nx:run-commands',
