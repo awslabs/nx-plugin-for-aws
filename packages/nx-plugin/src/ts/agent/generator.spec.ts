@@ -340,7 +340,7 @@ describe('ts#agent generator', () => {
   it('should generate strands agent with BedrockAgentCoreRuntime and default name', async () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'cdk',
     });
 
@@ -407,7 +407,7 @@ describe('ts#agent generator', () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
       name: 'custom-bedrock-agent',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'cdk',
     });
 
@@ -503,7 +503,7 @@ describe('ts#agent generator', () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
       name: 'snapshot-bedrock-agent',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'cdk',
     });
 
@@ -783,7 +783,7 @@ describe('ts#agent generator', () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
       name: 'path-test-agent',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'cdk',
     });
 
@@ -809,7 +809,7 @@ describe('ts#agent generator', () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
       name: 'first-agent',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'cdk',
     });
 
@@ -817,7 +817,7 @@ describe('ts#agent generator', () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
       name: 'second-agent',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'cdk',
     });
 
@@ -1534,7 +1534,7 @@ describe('ts#agent generator', () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
       name: 'in-memory-agent',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       session: 'in-memory',
       iac: 'cdk',
     });
@@ -1589,9 +1589,15 @@ describe('ts#agent generator', () => {
       iac: 'cdk',
     });
 
+    // Code packaging needs no Dockerfile, so the upgrade adds the package
+    // target and the infrastructure that deploys it.
     expect(
       tree.exists('apps/test-project/src/upgrade-agent/Dockerfile'),
-    ).toBeTruthy();
+    ).toBeFalsy();
     expect(tree.exists('packages/common/constructs')).toBeTruthy();
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+    expect(projectConfig.targets['upgrade-agent-package']).toBeDefined();
   });
 });
