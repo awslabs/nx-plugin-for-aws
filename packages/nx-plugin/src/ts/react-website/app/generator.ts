@@ -249,7 +249,8 @@ export async function tsReactWebsiteGenerator(
   // the Cognito callback URL allow-list (added when auth is configured) be
   // computed deterministically instead.
   const port = assignPort(tree, projectConfiguration, 4200);
-  // Mirrors Vite's own default relationship between the two.
+  // @nx/react's vite config defaults to 4200 for the dev server and 4300 for
+  // preview; keep that +100 relationship so the pair stays predictable.
   const previewPort = port + 100;
 
   const infra = schema.infra ?? 'cloudfront-s3';
