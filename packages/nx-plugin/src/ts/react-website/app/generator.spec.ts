@@ -18,6 +18,7 @@ import {
   updateAwsNxPluginConfig,
 } from '../../../utils/config/utils.js';
 import { expectHasMetricTags } from '../../../utils/metrics.spec.js';
+import { getNpmScopePrefix } from '../../../utils/npm-scope.js';
 import {
   PACKAGES_DIR,
   SHARED_TERRAFORM_DIR,
@@ -94,12 +95,15 @@ describe('react-website generator', () => {
     await tsReactWebsiteGenerator(tree, { ...options, name: 'first-app' });
     await tsReactWebsiteGenerator(tree, { ...options, name: 'second-app' });
 
-    expect(readProjectConfiguration(tree, 'first-app').metadata).toMatchObject({
-      ports: [4200],
-    });
-    expect(readProjectConfiguration(tree, 'second-app').metadata).toMatchObject(
-      { ports: [4201] },
-    );
+    // Projects register under the scoped name (e.g. `@proj/first-app`);
+    // file paths on the tree stay unscoped.
+    const scopePrefix = getNpmScopePrefix(tree);
+    expect(
+      readProjectConfiguration(tree, `${scopePrefix}first-app`).metadata,
+    ).toMatchObject({ ports: [4200] });
+    expect(
+      readProjectConfiguration(tree, `${scopePrefix}second-app`).metadata,
+    ).toMatchObject({ ports: [4201] });
 
     const first = tree.read('first-app/vite.config.mts', 'utf-8');
     expect(first).toContain('port: 4200');
