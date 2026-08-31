@@ -141,6 +141,7 @@ export const tsDynamoDBGenerator = async (
   };
   projectConfig.targets['dev'] = {
     executor: 'nx:run-commands',
+    dependsOn: ['pull-image'],
     continuous: true,
     options: {
       commands: [
