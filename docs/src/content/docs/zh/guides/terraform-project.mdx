@@ -53,6 +53,7 @@ Terraform 基础设施生成器创建一个 Terraform 基础设施项目。生�
     - bootstrap.ts 拉取/推送引导 tfstate 并运行 `terraform apply`
     - bootstrap-destroy.ts 清空状态存储桶并运行 `terraform destroy`
     - init.ts 使用 S3 后端配置运行 `terraform init`
+    - env.ts 将 `terraform init` 指向共享提供程序缓存
   - checkov.yml Checkov 配置，包括要跳过的检查
   - project.json 项目配置和构建目标
 
@@ -312,6 +313,10 @@ run "plan_is_valid" {
 ```
 
 在 `variables` 块中设置配置所需的每个变量，否则运行将失败并显示"has a required variable ... with no set value"。
+
+每个运行 `terraform init` 的目标都在工作区根目录的 `.terraform/plugin-cache` 下重用提供程序缓存，因此提供程序只下载一次而不是每次运行时都下载。每个项目在那里都有自己的目录：两个 `terraform init` 运行同时填充一个缓存时，每个都可能为同一个提供程序计算不同的哈希值，然后 terraform 会根据您的 `.terraform.lock.hcl` 拒绝它。有关更多信息，请参阅 [Terraform 文档](https://developer.hashicorp.com/terraform/cli/config/config-file#provider-plugin-cache)。
+
+在您的环境中设置 `TF_PLUGIN_CACHE_DIR` 以将提供的 `init` 脚本指向您自己管理的缓存——例如在工作区之间共享的卷。请注意，`test` 目标从 `project.json` 读取其路径，因此也要在那里更改它。
 
 <OptionFilter when={{ type: 'application' }} description="Application-only targets: plan / apply / destroy / etc.">
 ### 仅限应用程序的目标
