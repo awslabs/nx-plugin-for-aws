@@ -19,7 +19,7 @@ const PROJECT_ROOT = 'packages/infra';
 const ENV_SCRIPT = `${PROJECT_ROOT}/scripts/env.ts`;
 const INIT_SCRIPT = `${PROJECT_ROOT}/scripts/init.ts`;
 /** `packages/infra/src` is three levels below the root that holds `.terraform`. */
-const EXPECTED_CACHE_DIR = '../../../.terraform/plugin-cache';
+const EXPECTED_CACHE_DIR = '../../../.terraform/plugin-cache/{projectRoot}';
 
 /**
  * A script as today's generator vends it, read from the template — so this suite
@@ -40,7 +40,7 @@ const currentTemplate = (script: string) =>
  */
 const PRE_FIX_INIT_CALL = "{ cwd: srcDir, stdio: 'inherit' }";
 const FIXED_INIT_CALL =
-  "{ cwd: srcDir, stdio: 'inherit', env: pluginCacheEnv() }";
+  "{ cwd: srcDir, stdio: 'inherit', env: pluginCacheEnv(projectRootRel) }";
 
 /**
  * Generates a terraform project, then reverts what this migration adds back to
@@ -65,6 +65,10 @@ const generatePreFixProject = async (
   config.targets.test.options.env = {
     TF_DATA_DIR: '../../../dist/{projectRoot}/terraform-test',
   };
+  // Pre-fix, the data dir was a self-contained tree worth caching.
+  config.targets.test.outputs = [
+    '{workspaceRoot}/dist/{projectRoot}/terraform-test',
+  ];
 
   if (type === 'library') {
     // A library's `init` ran `terraform init` inline as a single `command`.
@@ -171,6 +175,54 @@ describe('terraform-provider-plugin-cache migration', () => {
     expect(result.nextSteps).toEqual([]);
   });
 
+  it('should give each project its own cache so the targets stay parallel', async () => {
+    await generatePreFixProject(tree);
+
+    const result = await migration(tree);
+
+    const { targets } = readProjectConfiguration(tree, PROJECT);
+    // Two writers filling one cache concurrently fail the run, so each project
+    // gets its own rather than anything having to serialise.
+    expect(targets.test.options.env.TF_PLUGIN_CACHE_DIR).toContain(
+      '{projectRoot}',
+    );
+    for (const targetName of ['test', 'init', 'validate']) {
+      expect(targets[targetName].parallelism).toBeUndefined();
+    }
+    expect(result.nextSteps).toEqual([]);
+  });
+
+  it('should stop caching the test data dir as an artifact', async () => {
+    await generatePreFixProject(tree);
+
+    await migration(tree);
+
+    // Its provider entries are symlinks into the shared cache, so restoring it
+    // on another machine yields dangling links.
+    expect(
+      readProjectConfiguration(tree, PROJECT).targets.test.outputs,
+    ).toEqual([]);
+  });
+
+  it('should preserve outputs a user has customised', async () => {
+    await generatePreFixProject(tree);
+    const config = readProjectConfiguration(tree, PROJECT);
+    config.targets.test.outputs = [
+      '{workspaceRoot}/dist/{projectRoot}/terraform-test',
+      '{workspaceRoot}/dist/{projectRoot}/my-report',
+    ];
+    updateProjectConfiguration(tree, PROJECT, config);
+
+    await migration(tree);
+
+    expect(
+      readProjectConfiguration(tree, PROJECT).targets.test.outputs,
+    ).toEqual([
+      '{workspaceRoot}/dist/{projectRoot}/terraform-test',
+      '{workspaceRoot}/dist/{projectRoot}/my-report',
+    ]);
+  });
+
   it('should vend the env helper the init script imports', async () => {
     await generatePreFixProject(tree);
 
@@ -179,7 +231,7 @@ describe('terraform-provider-plugin-cache migration', () => {
     const script = tree.read(ENV_SCRIPT, 'utf-8');
     expect(script).toContain('TF_PLUGIN_CACHE_DIR');
     expect(script).toContain(
-      "join(process.cwd(), '.terraform', 'plugin-cache')",
+      "join(process.cwd(), '.terraform', 'plugin-cache', projectRootRel)",
     );
     // Created because terraform errors and re-downloads when it is missing.
     expect(script).toContain('mkdirSync');
@@ -230,7 +282,7 @@ describe('terraform-provider-plugin-cache migration', () => {
     const result = await migration(tree);
     const migrated = tree.read(INIT_SCRIPT, 'utf-8') ?? '';
 
-    expect(migrated).toContain('env: pluginCacheEnv()');
+    expect(migrated).toContain('env: pluginCacheEnv(projectRootRel)');
     expect(migrated).toContain("console.log('ops')");
     expect(migrated).toContain(
       '// our team pins a workspace before initialising',

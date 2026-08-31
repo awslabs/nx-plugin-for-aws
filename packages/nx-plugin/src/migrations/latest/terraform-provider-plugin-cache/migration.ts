@@ -30,9 +30,13 @@ import { kebabCase } from '../../../utils/names.js';
  * target's runtime on every cache miss.
  *
  * The cache lives under the already-gitignored `.terraform` at the workspace
- * root. Terraform reports an error and silently falls back to downloading when
- * the directory does not exist, so each target creates it first, and the vended
- * `init` script gets an `env` helper that does the same.
+ * root, one directory per project. Terraform reports an error and silently falls
+ * back to downloading when the directory does not exist, so each target creates
+ * it first, and the vended `init` script gets an `env` helper that does the same.
+ *
+ * A directory per project rather than one shared: two `terraform init` runs
+ * filling one cache concurrently each compute a different hash for the same
+ * provider, and terraform then rejects the mismatch against the lock file.
  *
  * Nx does not interpolate `{workspaceRoot}` inside `env`, so the value is
  * relative to the target's own `cwd` of `{projectRoot}/src`.
@@ -41,14 +45,15 @@ import { kebabCase } from '../../../utils/names.js';
 const TF_PLUGIN_CACHE_DIR = 'TF_PLUGIN_CACHE_DIR';
 
 const divergedStep = (projectName: string, targetName: string) =>
-  `${projectName}: its '${targetName}' target no longer matches the shape the generator produced - left untouched. To share provider downloads, set the \`TF_PLUGIN_CACHE_DIR\` env var to the workspace root's \`.terraform/plugin-cache\` (relative to the target's \`cwd\`), creating that directory before \`terraform init\` runs.`;
+  `${projectName}: its '${targetName}' target no longer matches the shape the generator produced - left untouched. To reuse provider downloads, set the \`TF_PLUGIN_CACHE_DIR\` env var to \`.terraform/plugin-cache/<projectRoot>\` under the workspace root (relative to the target's \`cwd\`), creating that directory before \`terraform init\` runs.`;
 
-/** Path to the shared cache from a target running in `{projectRoot}/src`. */
+/** Path to this project's cache from a target running in `{projectRoot}/src`. */
 const pluginCacheDirFor = (projectRoot: string) =>
   joinPathFragments(
     relative(joinPathFragments(projectRoot, 'src'), '.') || '.',
     '.terraform',
     'plugin-cache',
+    '{projectRoot}',
   ).replace(/\\/g, '/');
 
 /** Whether a target already runs the command, however it is expressed. */
@@ -78,10 +83,10 @@ const withMakeDir = (commands: unknown[], pluginCacheDir: string) => [
 const INIT_CALL =
   "`execFileSync('terraform', [$args], { cwd: srcDir, stdio: 'inherit' })`";
 const INIT_CALL_WITH_ENV =
-  "`execFileSync('terraform', [$args], { cwd: srcDir, stdio: 'inherit', env: pluginCacheEnv() })`";
+  "`execFileSync('terraform', [$args], { cwd: srcDir, stdio: 'inherit', env: pluginCacheEnv(projectRootRel) })`";
 
 const divergedScriptStep = (filePath: string) =>
-  `${filePath}: its \`terraform init\` call no longer matches the shape the generator produced - left untouched. Pass \`env: pluginCacheEnv()\` to that \`execFileSync\` so it shares the provider cache in \`scripts/env.ts\`.`;
+  `${filePath}: its \`terraform init\` call no longer matches the shape the generator produced - left untouched. Pass \`env: pluginCacheEnv(projectRootRel)\` to that \`execFileSync\` so it shares the provider cache in \`scripts/env.ts\`.`;
 
 /**
  * Route the vended `init` script's `terraform init` through the shared cache.
@@ -95,7 +100,7 @@ const migrateInitScript = async (
   nextSteps: string[],
 ): Promise<void> => {
   if (!tree.exists(filePath)) return;
-  if (await matchGritQL(tree, filePath, '`pluginCacheEnv()`')) return;
+  if (await matchGritQL(tree, filePath, '`pluginCacheEnv($_)`')) return;
 
   if (!(await matchGritQL(tree, filePath, INIT_CALL))) {
     nextSteps.push(divergedScriptStep(filePath));
@@ -172,7 +177,20 @@ export default async function migration(
     // `test` carries its `terraform init -backend=false` on the target itself.
     const test = targets.test;
     if (test?.options) {
+      const wasMigrated = test.options.env?.[TF_PLUGIN_CACHE_DIR] !== undefined;
       migrateTarget('test', test, test.options, test.options.env);
+
+      // The data dir becomes symlinks into the shared cache, so it is no longer
+      // a self-contained artifact worth restoring on another machine. Only the
+      // exact output the generator declared is dropped.
+      if (
+        !wasMigrated &&
+        test.outputs?.length === 1 &&
+        test.outputs[0] === '{workspaceRoot}/dist/{projectRoot}/terraform-test'
+      ) {
+        test.outputs = [];
+        changed = true;
+      }
     }
 
     // `init` carries its command under the `dev` configuration. A library's
