@@ -140,6 +140,74 @@ describe('terraform-fmt-check migration', () => {
     expect(providers).toContain('required_version = ">= 1.0"');
   });
 
+  it('should leave a customised backend block alone and report it', async () => {
+    // `terraform fmt` aligns `=` to the widest key in the whole block, so a
+    // block carrying the user's own arguments has a width this cannot know.
+    // Rewriting the two vended keys to their own width would push them out of
+    // alignment with the user's and fail the check this migration installs.
+    const customised = `terraform {
+  backend "s3" {
+    encrypt        = true
+    use_lockfile   = true
+    bucket         = "my-state-bucket"
+    dynamodb_table = "tf-locks"
+  }
+}
+`;
+    addTerraformProject(tree);
+    tree.write('packages/tf-lib/src/providers.tf', customised);
+
+    const { nextSteps } = await migration(tree);
+
+    expect(tree.read('packages/tf-lib/src/providers.tf', 'utf-8')).toBe(
+      customised,
+    );
+    expect(nextSteps).toEqual([
+      expect.stringContaining('packages/tf-lib/src/providers.tf'),
+    ]);
+    expect(nextSteps[0]).toContain('--configuration=fix');
+  });
+
+  it('should leave an already-aligned vended backend block untouched', async () => {
+    const aligned = `terraform {
+  backend "s3" {
+    encrypt      = true
+    use_lockfile = true
+  }
+}
+`;
+    addTerraformProject(tree);
+    tree.write('packages/tf-lib/src/providers.tf', aligned);
+
+    const { nextSteps } = await migration(tree);
+
+    expect(tree.read('packages/tf-lib/src/providers.tf', 'utf-8')).toBe(
+      aligned,
+    );
+    expect(nextSteps).toEqual([]);
+  });
+
+  it('should preserve a users own fmt configurations', async () => {
+    addTerraformProject(tree, {
+      fmt: {
+        ...writingFmtTarget(),
+        configurations: {
+          fix: { command: 'terraform fmt -recursive' },
+          'skip-lint': { command: 'echo MINE' },
+        },
+      },
+    });
+
+    await migration(tree);
+
+    // Their configurations win, as their `options` do — someone who set `fix`
+    // to cover nested modules keeps it.
+    const { configurations } = readProjectConfiguration(tree, PROJECT).targets
+      .fmt;
+    expect(configurations.fix.command).toBe('terraform fmt -recursive');
+    expect(configurations['skip-lint'].command).toBe('echo MINE');
+  });
+
   it('should wire the new lint target to license-check when the workspace licenses', async () => {
     tree.write('package.json', JSON.stringify({ name: '@proj/source' }));
     addProjectConfiguration(tree, '@proj/source', {
