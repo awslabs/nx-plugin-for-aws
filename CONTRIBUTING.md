@@ -169,7 +169,11 @@ A generator whose shape is still settling can be marked experimental by adding `
 
 An experimental generator is **permitted to change without a migration** being published to carry an existing workspace across, so its output can be reshaped freely while it stabilises. Users upgrading reconcile those changes themselves.
 
-The flag needs nothing else authored: its guide page (any page carrying `generator: <id>` in its frontmatter) automatically shows a banner saying so, and the MCP `list-generators` / `generator-guide` tools include the same warning for agents. Remove the flag once the generator is stable — from then on it follows the normal migration rules above.
+Most surfaces pick the flag up on their own: its guide page (any page carrying `generator: <id>` in its frontmatter) automatically shows a banner saying so, the MCP `list-generators` / `generator-guide` tools include the same warning for agents, and the generated `SKILL.md` / `POWER.md` tables and the README vended into new workspaces mark the generator experimental.
+
+The one surface to update by hand is the generator table in `packages/nx-plugin/README.md` — a curated subset with its own descriptions, so it isn't generated from `generators.json`. Add `(experimental)` to the generator's description there and copy the file to the root `README.md` (the pre-commit hook does this for you). A unit test fails if you forget.
+
+Remove the flag once the generator is stable — from then on it follows the normal migration rules above.
 
 #### Migrations that change infrastructure
 

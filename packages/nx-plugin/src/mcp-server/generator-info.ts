@@ -171,7 +171,7 @@ const renderUnsupportedMessage = (
   return `## ${info.id}
 
 > [!WARNING] Unsupported combination: ${requestedDesc}. The \`${info.id}\` generator has no guide variant matching this combination — running it will likely fail.
-
+${info.experimental ? `\n${renderExperimentalWarning(info.id)}\n` : ''}
 Supported combinations:
 ${supportedList}
 
