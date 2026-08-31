@@ -8,7 +8,12 @@ import {
   OverwriteStrategy,
   type Tree,
 } from '@nx/devkit';
-import { addStarExport, appendToArrayViaGritQL, applyGritQL } from '../ast.js';
+import {
+  addStarExport,
+  appendToArrayViaGritQL,
+  applyGritQL,
+  matchGritQL,
+} from '../ast.js';
 import type { DeclaredPyDependency } from '../declared-dependencies.js';
 import type { Iac } from '../iac.js';
 import { esmVars } from '../module-format.js';
@@ -88,7 +93,15 @@ const addLocalCallbackUrlToCdk = async (
   if (!tree.exists(filePath)) {
     return false;
   }
-  if (tree.read(filePath, 'utf-8').includes(url)) {
+  // Scoped to the array, so a URL mentioned elsewhere in the file (e.g. a
+  // comment, or a different array) doesn't read as allow-listed.
+  if (
+    await matchGritQL(
+      tree,
+      filePath,
+      `\`LOCAL_CALLBACK_URLS = [$items]\` where { $items <: contains \`${url}\` }`,
+    )
+  ) {
     return true;
   }
   return appendToArrayViaGritQL(tree, filePath, 'LOCAL_CALLBACK_URLS = ', url);
@@ -114,7 +127,15 @@ const addLocalCallbackUrlToTerraform = async (
   if (!tree.exists(filePath)) {
     return false;
   }
-  if (tree.read(filePath, 'utf-8').includes(url)) {
+  // Scoped to the array, so a URL mentioned elsewhere in the file doesn't
+  // read as allow-listed.
+  if (
+    await matchGritQL(
+      tree,
+      filePath,
+      `language hcl\n\`local_callback_urls = [$items]\` where { $items <: contains \`${url}\` }`,
+    )
+  ) {
     return true;
   }
   return applyGritQL(
