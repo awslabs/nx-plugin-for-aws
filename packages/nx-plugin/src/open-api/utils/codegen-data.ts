@@ -762,6 +762,41 @@ const assignOperationNames = (
  * void responses and streaming item schemas. Returns the response model names
  * to import.
  */
+/**
+ * A schema with every `$ref` in it replaced by its target, so two schemas can be
+ * compared by shape rather than by how they happen to be written.
+ *
+ * Normalisation hoists only the preferred media type's inline schema into
+ * `components`, and does so at any depth, so the same shape reaches here as a
+ * `$ref` under one media type and inline under another. `seen` breaks a cycle in
+ * a self-referential schema, leaving the reference in place.
+ */
+const fullyResolvedSchema = (
+  spec: Spec,
+  schema: unknown,
+  seen: ReadonlySet<string> = new Set(),
+): unknown => {
+  if (!schema || typeof schema !== 'object') return schema;
+  if (Array.isArray(schema)) {
+    return schema.map((member) => fullyResolvedSchema(spec, member, seen));
+  }
+  if (isRef(schema)) {
+    const ref = (schema as OpenAPIV3.ReferenceObject).$ref;
+    if (seen.has(ref)) return schema;
+    return fullyResolvedSchema(
+      spec,
+      resolveIfRef(spec, schema),
+      new Set(seen).add(ref),
+    );
+  }
+  return Object.fromEntries(
+    Object.entries(schema)
+      // Bookkeeping the normaliser adds to what it hoists, not part of the shape.
+      .filter(([key]) => !key.startsWith('x-aws-nx-'))
+      .map(([key, value]) => [key, fullyResolvedSchema(spec, value, seen)]),
+  );
+};
+
 const augmentResponses = (
   spec: Spec,
   op: Operation,
@@ -822,12 +857,18 @@ const augmentResponses = (
     // whole body, so it is compared through `itemSchema` elsewhere and excluded
     // here — a JSONL response legitimately pairs with an `application/json`
     // declaration of the same item type.
+    // Compared through their resolved form, and only where both declare one:
+    // normalisation hoists just the preferred media type's inline schema into
+    // `components` and leaves the others inline, so comparing as written pitted a
+    // `$ref` against the very schema it was hoisted from and never matched. An
+    // absent `schema` means unconstrained rather than different (a Media Type
+    // Object may omit it), so it does not count as a distinct shape.
     const bodySchemas = new Set(
       mediaTypes
         .filter((mediaType) => !STREAMING_CONTENT_TYPES.has(mediaType))
-        .map((mediaType) =>
-          JSON.stringify(specResponse.content![mediaType]?.schema ?? null),
-        ),
+        .map((mediaType) => specResponse.content![mediaType]?.schema)
+        .filter((schema) => schema !== undefined)
+        .map((schema) => JSON.stringify(fullyResolvedSchema(spec, schema))),
     );
     if (bodySchemas.size > 1) {
       throw new Error(

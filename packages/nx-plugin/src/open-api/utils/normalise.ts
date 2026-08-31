@@ -146,10 +146,21 @@ const isCompositeSchema = (schema: OpenAPIV3.SchemaObject) =>
  * The media type whose schema is hoisted for a request/response: prefer
  * `application/json`, falling back to any `+json` vendored type (e.g.
  * `application/problem+json`).
+ *
+ * Parameters are stripped before matching, as they are for the `+json` fallback:
+ * a media type's parameters do not identify it (RFC 9110 §8.3), and matching
+ * `application/json` exactly meant `application/json; charset=utf-8` — a common
+ * spelling — hoisted nothing, so the response type resolved to a name that was
+ * never declared.
  */
+const baseMediaType = (mediaType: string): string =>
+  mediaType.split(';')[0].trim();
+
 const preferredJsonMediaType = (mediaTypes: string[]): string | undefined =>
-  mediaTypes.find((mediaType) => mediaType === 'application/json') ??
-  mediaTypes.find((mediaType) => mediaType.split(';')[0].endsWith('+json'));
+  mediaTypes.find(
+    (mediaType) => baseMediaType(mediaType) === 'application/json',
+  ) ??
+  mediaTypes.find((mediaType) => baseMediaType(mediaType).endsWith('+json'));
 
 const FORM_MEDIA_TYPES = [
   'multipart/form-data',
@@ -891,8 +902,9 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
   // The substituted body is itself walked for refs, so a chain — an array whose
   // items are a named scalar — collapses in one pass. Substituting the array
   // without following through left `items` pointing at a schema this same pass
-  // deletes, so the client referred to a type nothing declared and the emitted
-  // TypeScript did not compile.
+  // deletes, so the client referred to a type nothing declared — the emitted
+  // TypeScript did not compile, and the Python raised `AttributeError` on every
+  // call, which neither parsing nor importing the package reveals.
   const inlinedRefs: Set<string> = new Set();
   const inlineNonObjectRefs = (value: unknown): unknown =>
     cloneDeepWith(value, (v) => {

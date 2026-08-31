@@ -719,4 +719,71 @@ describe('openApiPyClientGenerator - response parsing', () => {
       }),
     ).rejects.toThrow(/different types/);
   });
+
+  /**
+   * Normalisation hoists only the preferred media type's inline schema into
+   * `components`, at any depth, so the same shape reaches the conflict check as a
+   * `$ref` under one media type and inline under another. Comparing them as
+   * written pitted a `$ref` against the schema it was hoisted from and never
+   * matched, refusing valid documents — a real spec serving one array of objects
+   * as both JSON and XML.
+   */
+  describe('several media types declaring one schema', () => {
+    const twoMediaTypes = (jsonSchema: unknown, xmlSchema: unknown): Spec =>
+      ({
+        openapi: '3.0.0',
+        info: { title: 'TestApi', version: '1.0.0' },
+        paths: {
+          '/x': {
+            get: {
+              operationId: 'getX',
+              tags: ['t'],
+              responses: {
+                '200': {
+                  description: 'OK',
+                  content: {
+                    'application/json': { schema: jsonSchema },
+                    'application/xml': { schema: xmlSchema },
+                  },
+                },
+              },
+            },
+          },
+        },
+      }) as unknown as Spec;
+
+    const itemSchema = {
+      type: 'array',
+      items: { type: 'object', properties: { a: { type: 'string' } } },
+    };
+
+    it('accepts identical schemas hoisted to different depths', async () => {
+      const { types } = await generateAndRead(
+        verifier,
+        tree,
+        twoMediaTypes(itemSchema, structuredClone(itemSchema)),
+      );
+      expect(types).toContain('class GetX200ResponseItem(BaseModel)');
+    });
+
+    // A Media Type Object may omit `schema`, which means unconstrained rather
+    // than a second, different shape.
+    it('accepts a media type that declares no schema', async () => {
+      await generateAndRead(
+        verifier,
+        tree,
+        twoMediaTypes(itemSchema, undefined),
+      );
+    });
+
+    it('still rejects schemas that genuinely differ', async () => {
+      await expect(
+        generateAndRead(
+          verifier,
+          tree,
+          twoMediaTypes({ type: 'string' }, itemSchema),
+        ),
+      ).rejects.toThrow(/different schemas per media type/);
+    });
+  });
 });

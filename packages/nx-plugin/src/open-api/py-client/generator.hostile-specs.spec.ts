@@ -915,4 +915,120 @@ describe('openApiPyClientGenerator - hostile specs', () => {
     expect(types).toMatch(/^class _42Request\(TypedDict\)/m);
     expect(types).toMatch(/^class _42RequestQueryParameters/m);
   });
+
+  /**
+   * A client annotation naming a type `types.py` never declares raises
+   * `AttributeError` when the operation is called — after the module has parsed
+   * and imported cleanly, so neither check sees it.
+   */
+  const danglingTypeReferences = (
+    types: string,
+    ...clients: string[]
+  ): string[] => {
+    const declared = new Set([
+      ...[...types.matchAll(/^class (\w+)[( :]/gm)].map((m) => m[1]),
+      ...[...types.matchAll(/^(\w+) = /gm)].map((m) => m[1]),
+    ]);
+    const used = new Set(
+      clients.flatMap((client) =>
+        [...client.matchAll(/types\.(\w+)/g)].map((m) => m[1]),
+      ),
+    );
+    return [...used].filter((name) => !declared.has(name)).sort();
+  };
+
+  // A named scalar reached through `items` is inlined, and the array wrapping it
+  // was substituted without following through — leaving `items` pointing at a
+  // schema the same pass deleted, so the client was annotated
+  // `list[types.IndexName]` with nothing of that name declared.
+  it('declares every type its client refers to for an array of a named scalar', async () => {
+    const { types, client, asyncClient } = await generateAndRead(
+      verifier,
+      tree,
+      {
+        openapi: '3.0.0',
+        info: { title: 'TestApi', version: '1.0.0' },
+        paths: {
+          '/x': {
+            get: {
+              operationId: 'getX',
+              tags: ['t'],
+              responses: {
+                '200': {
+                  description: 'OK',
+                  content: {
+                    'application/json': {
+                      schema: {
+                        type: 'array',
+                        items: { $ref: '#/components/schemas/IndexName' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        components: {
+          schemas: { IndexName: { type: 'string', maxLength: 45 } },
+        },
+      },
+    );
+    expect(danglingTypeReferences(types, client, asyncClient)).toEqual([]);
+    // The chain collapses to the scalar rather than keeping a named alias.
+    expect(client).toContain('-> list[str]');
+  });
+
+  // A media type's parameters do not identify it (RFC 9110 §8.3), and matching
+  // `application/json` exactly meant `application/json; charset=utf-8` hoisted
+  // nothing — so the response resolved to a name that was never declared.
+  it('hoists a JSON schema declared with a charset parameter', async () => {
+    const { types, client, asyncClient } = await generateAndRead(
+      verifier,
+      tree,
+      {
+        openapi: '3.0.0',
+        info: { title: 'TestApi', version: '1.0.0' },
+        paths: {
+          '/x': {
+            get: {
+              operationId: 'getX',
+              tags: ['t'],
+              responses: {
+                '200': {
+                  description: 'OK',
+                  content: {
+                    'application/json; charset=utf-8': {
+                      schema: {
+                        oneOf: [
+                          { $ref: '#/components/schemas/Users' },
+                          { $ref: '#/components/schemas/UsersList' },
+                        ],
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        components: {
+          schemas: {
+            Users: {
+              type: 'object',
+              required: ['a'],
+              properties: { a: { type: 'string' } },
+            },
+            UsersList: {
+              type: 'object',
+              required: ['b'],
+              properties: { b: { type: 'string' } },
+            },
+          },
+        },
+      },
+    );
+    expect(danglingTypeReferences(types, client, asyncClient)).toEqual([]);
+    expect(types).toContain('GetX200Response = ');
+  });
 });
