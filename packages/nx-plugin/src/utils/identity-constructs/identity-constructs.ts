@@ -125,16 +125,18 @@ const addLocalCallbackUrlToTerraform = async (
 };
 
 /**
- * Add infrastructure for a static website
+ * Add infrastructure for a static website. Returns the local ports that could
+ * not be allow-listed as Cognito callback/logout URLs, because the shared
+ * construct/module no longer matches the generated shape.
  */
 export const addIdentityInfra = async (
   tree: Tree,
   options: AddIdentityInfraOptions & { iac: Iac },
-) => {
+): Promise<number[]> => {
   if (options.iac === 'cdk') {
-    await addIdentityCdkConstructs(tree, options);
+    return addIdentityCdkConstructs(tree, options);
   } else if (options.iac === 'terraform') {
-    await addIdentityTerraformModules(tree, options);
+    return addIdentityTerraformModules(tree, options);
   } else {
     throw new Error(`Unsupported iac ${options.iac}`);
   }
@@ -143,7 +145,7 @@ export const addIdentityInfra = async (
 const addIdentityCdkConstructs = async (
   tree: Tree,
   options: AddIdentityInfraOptions,
-) => {
+): Promise<number[]> => {
   generateFiles(
     tree,
     joinPathFragments(import.meta.dirname, 'files', 'cdk', 'core'),
@@ -168,15 +170,19 @@ const addIdentityCdkConstructs = async (
 
   // The construct is shared by every website in the workspace, so each one adding
   // auth allow-lists its own local ports rather than overwriting the others'.
+  const portsNotAllowListed: number[] = [];
   for (const port of options.localCallbackPorts) {
-    await addLocalCallbackUrlToCdk(tree, port);
+    if (!(await addLocalCallbackUrlToCdk(tree, port))) {
+      portsNotAllowListed.push(port);
+    }
   }
+  return portsNotAllowListed;
 };
 
 const addIdentityTerraformModules = async (
   tree: Tree,
   options: AddIdentityInfraOptions,
-) => {
+): Promise<number[]> => {
   generateFiles(
     tree,
     joinPathFragments(import.meta.dirname, 'files', 'terraform', 'core'),
@@ -193,8 +199,11 @@ const addIdentityTerraformModules = async (
 
   // The module is shared by every website in the workspace, so each one adding
   // auth allow-lists its own local ports rather than overwriting the others'.
+  const portsNotAllowListed: number[] = [];
   for (const port of options.localCallbackPorts) {
-    await addLocalCallbackUrlToTerraform(tree, port);
+    if (!(await addLocalCallbackUrlToTerraform(tree, port))) {
+      portsNotAllowListed.push(port);
+    }
   }
 
   // Update the static website module to add the callback url
@@ -289,4 +298,6 @@ module "add_callback_url" {
       }
     }
   }
+
+  return portsNotAllowListed;
 };
