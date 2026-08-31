@@ -164,6 +164,8 @@ export const pyAgentReactConnectionGenerator = async (
         ...agentProjectConfig.targets,
         [openApiTargetName]: {
           cache: true,
+          // The spec is derived from the agent, so tests are excluded.
+          inputs: ['production', '^production'],
           executor: 'nx:run-commands',
           outputs: [
             `{workspaceRoot}/dist/{projectRoot}/openapi/${agentNameSnakeCase}`,
