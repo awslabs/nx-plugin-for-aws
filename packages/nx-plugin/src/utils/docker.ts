@@ -159,8 +159,9 @@ export const addDockerScanTarget = <const D extends DependencyDeclaration>(
     // The image being scanned is only reachable through the container engine,
     // so a restored cache entry would report a pass for an image that may no
     // longer exist. The scan re-runs and either scans the real image or fails.
+    // Nx only hashes a cacheable task, so declaring `inputs` here would have no
+    // effect.
     cache: false,
-    inputs: ['default', '^production'],
     outputs: [`{workspaceRoot}/${scanDir}`],
     executor: 'nx:run-commands',
     options: {

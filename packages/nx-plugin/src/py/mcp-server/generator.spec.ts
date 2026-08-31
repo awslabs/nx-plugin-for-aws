@@ -450,7 +450,6 @@ dev-dependencies = []
     // Check that a non-cacheable trivy scan target was added
     expect(projectConfig.targets['mcp-server-trivy']).toEqual({
       cache: false,
-      inputs: ['default', '^production'],
       outputs: [
         '{workspaceRoot}/dist/apps/test-project/trivy/proj-test-project-mcp-server-latest',
       ],

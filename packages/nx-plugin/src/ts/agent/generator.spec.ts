@@ -380,7 +380,6 @@ describe('ts#agent generator', () => {
     // Check that a non-cacheable trivy scan target was added
     expect(projectConfig.targets['agent-trivy']).toEqual({
       cache: false,
-      inputs: ['default', '^production'],
       outputs: [
         '{workspaceRoot}/dist/apps/test-project/trivy/proj-test-project-agent-latest',
       ],

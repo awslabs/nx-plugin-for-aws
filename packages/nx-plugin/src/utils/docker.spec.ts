@@ -85,7 +85,8 @@ describe('docker utils', () => {
       // The scanned image lives in the container engine, so a restored cache
       // entry could report a pass for an image that is no longer there.
       expect(target.cache).toBe(false);
-      expect(target.inputs).toEqual(['default', '^production']);
+      // Nx only hashes a cacheable task, so `inputs` would be dead config.
+      expect(target.inputs).toBeUndefined();
       expect(target.dependsOn).toEqual(['my-agent-docker']);
       expect(target.outputs).toEqual([
         '{workspaceRoot}/dist/packages/my-project/trivy/scope-my-agent-latest',

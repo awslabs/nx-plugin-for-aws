@@ -214,7 +214,6 @@ describe('py#rdb generator', () => {
     // Check that a non-cacheable trivy scan target was added covering both images
     expect(projectConfig.targets.trivy).toEqual({
       cache: false,
-      inputs: ['default', '^production'],
       outputs: [
         '{workspaceRoot}/dist/packages/db/trivy/proj-db-migration-latest',
       ],

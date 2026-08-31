@@ -15,7 +15,6 @@ export const trivyTarget = `{
   "targets": {
     "trivy": {
       "cache": false,
-      "inputs": ["default", "^production"],
       "outputs": ["{workspaceRoot}/dist/{projectRoot}/trivy"],
       "executor": "nx:run-commands",
       "options": {
@@ -302,8 +301,10 @@ The scan is intentionally not wired into `build` since this can introduce unnece
 Instead we recommend running the above command as a dedicated step in your CI pipeline prior to deployment to production stages.
 :::
 
-:::caution[The scan is not cacheable either]
+:::tip[Why the scan is deliberately not cached]
 The image the scan reads is only reachable through the container engine, so a restored cache entry would report a pass for an image that may no longer be there. With `"cache": false` the scan always runs against the real image, and fails loudly if it is missing. Pin the Trivy image version (e.g. <code>trivy:<TrivyVersion /></code>) so scans are reproducible.
+
+This means every `trivy` run does a full `docker save` plus scan per image — expect tens of seconds per image rather than a free cache hit, which is why the scan belongs in its own CI job rather than in `build`. It also refreshes Trivy's vulnerability database on each run, so it needs network access; that refresh is the point, since a scan is only as good as the CVE data behind it. On a network-isolated runner, mount a persistent cache directory at `/root/.cache/trivy` and add `--skip-db-update`, having seeded the database in an earlier step.
 :::
 
 :::note[Suppressing findings]

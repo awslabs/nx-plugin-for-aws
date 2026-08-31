@@ -36,12 +36,23 @@ const IMAGE_TARGET_NAME = /(^|-)(docker|trivy)$/;
 const CONTAINER_ENGINE_COMMAND = /\b(docker|finch)\s+(build|save)\b/;
 
 /**
- * The `Dockerfile` output the TypeScript image targets declared. It is a copy
- * made on the way to the build, never consumed as a build artifact, so it is
- * dropped along with the caching it existed to support. Any other output is the
- * user's and is kept.
+ * The `Dockerfile` the TypeScript image targets declared as their output. It is
+ * a copy made on the way into the build context, never a product of the build,
+ * so it is dropped along with the caching it existed to support.
  */
-const DOCKERFILE_OUTPUT = /\/Dockerfile$/;
+const VENDED_DOCKERFILE_OUTPUT = /\/bundle\/(agent|mcp)\/[^/]+\/Dockerfile$/;
+
+/** The directory the scan target stages its tarball and ignore file in. */
+const VENDED_SCAN_OUTPUT = /\/trivy\/[^/]+$/;
+
+/**
+ * Outputs the generators declare on these targets. Neither is the artifact the
+ * target's success stands for, so dropping their caching loses nothing. An
+ * output beyond these belongs to a target the user has repurposed, whose product
+ * may genuinely be on disk and soundly cacheable.
+ */
+const isVendedOutput = (output: string): boolean =>
+  VENDED_DOCKERFILE_OUTPUT.test(output) || VENDED_SCAN_OUTPUT.test(output);
 
 /** Every command a target runs, however its options spell them. */
 const targetCommands = (target: TargetConfiguration): string[] => {
@@ -58,7 +69,10 @@ const targetCommands = (target: TargetConfiguration): string[] => {
 const divergedMessage = (projectName: string, targetName: string) =>
   `${projectName}:${targetName}: has diverged from the generated shape - left untouched. Set \`"cache": false\` on it by hand if it builds or scans a container image: the image lives in the container engine rather than under the target's \`outputs\`, so a cache hit can report success for an image that is no longer there.`;
 
-/** Applies the fix to one target, reporting a diverged one via `nextSteps`. */
+const ownOutputsMessage = (projectName: string, targetName: string) =>
+  `${projectName}:${targetName}: declares outputs of its own, so it was left cacheable. If its result depends on a container image rather than only on those outputs, set \`"cache": false\` on it by hand: the image lives in the container engine, so a cache hit can report success for an image that is no longer there.`;
+
+/** Applies the fix to one target, reporting one it declines to touch. */
 const migrateTarget = (
   projectName: string,
   targetName: string,
@@ -75,9 +89,23 @@ const migrateTarget = (
     return false;
   }
 
+  // Running the engine does not by itself make a target's result uncacheable:
+  // one that also declares outputs of its own may well produce the artifact its
+  // success stands for on disk (a `docker save` tarball, a test report), and
+  // that is soundly cacheable. Only the shapes the generators vend are rewritten.
+  const ownOutputs = target.outputs?.filter((o) => !isVendedOutput(o)) ?? [];
+  if (ownOutputs.length > 0) {
+    nextSteps.push(ownOutputsMessage(projectName, targetName));
+    return false;
+  }
+
   target.cache = IMAGE_BUILD_CACHE;
 
-  const outputs = target.outputs?.filter((o) => !DOCKERFILE_OUTPUT.test(o));
+  // The scan keeps its staging directory: it is a real directory on disk, and
+  // dropping it would leave the tarball behind on a later run.
+  const outputs = target.outputs?.filter(
+    (o) => !VENDED_DOCKERFILE_OUTPUT.test(o),
+  );
   if (outputs && outputs.length === 0) {
     delete target.outputs;
   } else if (outputs) {
