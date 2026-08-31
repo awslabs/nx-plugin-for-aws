@@ -13,7 +13,7 @@ import migration from './migration';
 
 const PROJECT = '@proj/tf-lib';
 
-/** The `fmt` target as it was vended before this migration. */
+/** The target as the generator vended it, under its former name. */
 const writingFmtTarget = () => ({
   executor: 'nx:run-commands',
   cache: true,
@@ -59,7 +59,7 @@ describe('terraform-fmt-check migration', () => {
 
     await migration(tree);
 
-    const fmt = readProjectConfiguration(tree, PROJECT).targets.fmt;
+    const fmt = readProjectConfiguration(tree, PROJECT).targets.format;
     // Writing from the base target rewrote the `default` input its own hash was
     // computed from, so it could never cache-hit.
     expect(fmt.options.command).toBe('terraform fmt -check -diff');
@@ -71,13 +71,56 @@ describe('terraform-fmt-check migration', () => {
     expect(fmt.options.forwardAllArgs).toBe(true);
   });
 
+  it('should rename the target to format and repoint dependsOn', async () => {
+    addTerraformProject(tree, {
+      build: { dependsOn: ['fmt', 'checkov', 'test'] },
+      fmt: writingFmtTarget(),
+    });
+
+    await migration(tree);
+
+    const { targets } = readProjectConfiguration(tree, PROJECT);
+    expect(targets.format).toBeDefined();
+    expect(targets.fmt).toBeUndefined();
+    // A dependsOn naming a target that does not exist is not an error in Nx — it
+    // silently drops the edge — so build would stop checking formatting.
+    expect(targets.build.dependsOn).toEqual(['format', 'checkov', 'test']);
+  });
+
+  it('should converge a workspace that already ran the pre-rename migration', async () => {
+    // Its target is already checking, under the old name.
+    addTerraformProject(tree, {
+      build: { dependsOn: ['fmt', 'checkov', 'test'] },
+      fmt: {
+        ...writingFmtTarget(),
+        options: {
+          ...writingFmtTarget().options,
+          command: 'terraform fmt -check -diff',
+        },
+        configurations: {
+          fix: { command: 'terraform fmt' },
+          'skip-lint': { command: 'node -e ""' },
+        },
+      },
+      lint: { dependsOn: ['fmt'] },
+    });
+
+    await migration(tree);
+
+    const { targets } = readProjectConfiguration(tree, PROJECT);
+    expect(targets.fmt).toBeUndefined();
+    expect(targets.format.options.command).toBe('terraform fmt -check -diff');
+    expect(targets.build.dependsOn).toEqual(['format', 'checkov', 'test']);
+    expect(targets.lint.dependsOn).toEqual(['format']);
+  });
+
   it('should add a lint target which orchestrates the format check', async () => {
     addTerraformProject(tree);
 
     await migration(tree);
 
     expect(readProjectConfiguration(tree, PROJECT).targets.lint.dependsOn) //
-      .toEqual(['fmt']);
+      .toEqual(['format']);
   });
 
   it('should preserve an existing lint target', async () => {
@@ -89,7 +132,7 @@ describe('terraform-fmt-check migration', () => {
     await migration(tree);
 
     expect(readProjectConfiguration(tree, PROJECT).targets.lint.dependsOn) //
-      .toEqual(['fmt', 'my-check']);
+      .toEqual(['format', 'my-check']);
   });
 
   it('should skip and report a customised fmt target', async () => {
@@ -187,7 +230,7 @@ describe('terraform-fmt-check migration', () => {
     expect(nextSteps).toEqual([]);
   });
 
-  it('should preserve a users own fmt configurations', async () => {
+  it('should preserve a users own format configurations', async () => {
     addTerraformProject(tree, {
       fmt: {
         ...writingFmtTarget(),
@@ -203,7 +246,7 @@ describe('terraform-fmt-check migration', () => {
     // Their configurations win, as their `options` do — someone who set `fix`
     // to cover nested modules keeps it.
     const { configurations } = readProjectConfiguration(tree, PROJECT).targets
-      .fmt;
+      .format;
     expect(configurations.fix.command).toBe('terraform fmt -recursive');
     expect(configurations['skip-lint'].command).toBe('echo MINE');
   });

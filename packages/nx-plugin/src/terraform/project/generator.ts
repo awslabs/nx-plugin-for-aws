@@ -77,11 +77,10 @@ export const TERRAFORM_PROJECT_GENERATOR_INFO: NxGeneratorInfo =
  * it. Writing from the base target would rewrite the `default` input the hash is
  * computed over, so the target could never cache-hit.
  *
- * The scanned scope stays as it was — the project's own `src`, not `-recursive`
- * — so the target checks exactly the files it used to rewrite. `-diff` names
- * what to fix when it fails.
+ * Scoped to the project's own `src` rather than `-recursive`, so it checks the
+ * files the vended templates cover. `-diff` names what to fix when it fails.
  */
-export const TERRAFORM_FMT_TARGET: TargetConfiguration = {
+export const TERRAFORM_FORMAT_TARGET: TargetConfiguration = {
   executor: 'nx:run-commands',
   cache: true,
   inputs: ['default'],
@@ -194,7 +193,7 @@ export async function terraformProjectGenerator(
       },
     },
     build: {
-      dependsOn: ['fmt', 'checkov', 'test', `${sharedTfProjectName}:build`],
+      dependsOn: ['format', 'checkov', 'test', `${sharedTfProjectName}:build`],
     },
     deploy: {
       dependsOn: ['apply'],
@@ -266,20 +265,20 @@ export async function terraformProjectGenerator(
     [targetName: string]: TargetConfiguration;
   } = {
     build: {
-      dependsOn: ['fmt', 'checkov', 'test'],
+      dependsOn: ['format', 'checkov', 'test'],
     },
     // A Terraform library vends modules rather than a deployable artifact, so
     // its `assemble` carries only whatever the consuming projects register on it.
     assemble: {
       executor: 'nx:noop',
     },
-    fmt: TERRAFORM_FMT_TARGET,
+    format: TERRAFORM_FORMAT_TARGET,
     // Terraform has no linter of its own, so `lint` orchestrates the format
     // check. It exists so `nx run-many --target lint` reaches terraform
     // projects, and so `--configuration=fix` and `--configuration=skip-lint`
-    // propagate to `fmt` the way they do for TypeScript and Python projects.
+    // propagate to `format` the way they do for TypeScript and Python projects.
     lint: {
-      dependsOn: ['fmt'],
+      dependsOn: ['format'],
     },
     init: {
       executor: 'nx:run-commands',

@@ -12,7 +12,7 @@ import {
 } from '@nx/devkit';
 import { addLicenseCheckToLintTarget } from '../../../license/config.js';
 import {
-  TERRAFORM_FMT_TARGET,
+  TERRAFORM_FORMAT_TARGET,
   TERRAFORM_PROJECT_GENERATOR_INFO,
 } from '../../../terraform/project/generator.js';
 import { applyGritQL } from '../../../utils/ast.js';
@@ -20,26 +20,24 @@ import { formatFilesInSubtree } from '../../../utils/format.js';
 import { sortObjectKeys } from '../../../utils/object.js';
 
 /**
- * The `fmt` target ran `terraform fmt`, which rewrites the files it reads. Those
- * files are its own declared `inputs`, so every run changed the hash it had just
- * been computed from and the target could never cache-hit — Nx reported it flaky
- * on every build.
+ * Converges a Terraform project's format target on the shape ts and py projects
+ * carry: a `format` target that checks, a `fix` configuration that writes, and a
+ * `lint` target orchestrating it so `run-many --target lint` reaches Terraform
+ * projects with its `fix` and `skip-lint` configurations propagating.
  *
- * It now checks formatting, matching the TypeScript and Python `format` targets,
- * with the write moved to a `fix` configuration. A `lint` target orchestrates it
- * so `run-many --target lint` reaches Terraform projects and its `fix` and
- * `skip-lint` configurations propagate.
- *
- * The vended `providers.tf` backend block is realigned too, since the write the
- * old target performed on every run is what kept it formatted.
+ * The target was named `fmt` and ran `terraform fmt`, which rewrites the files it
+ * reads. Those files are its own declared `inputs`, so every run changed the hash
+ * it had just been computed from and it could never cache-hit — Nx reported it
+ * flaky on every build. That per-run write is also what kept the vended
+ * `providers.tf` backend block aligned, so this realigns it.
  */
 
 /** The command the base target ran before it checked rather than wrote. */
 const WRITING_COMMAND = 'terraform fmt';
 
 /**
- * The `backend "s3"` arguments the generator vends, which it wrote unpadded.
- * Realignment only applies to a block holding exactly these.
+ * The `backend "s3"` arguments the generator vends. Realignment only applies to a
+ * block holding exactly these.
  */
 const BACKEND_ARGUMENTS = ['encrypt', 'use_lockfile'];
 
@@ -63,9 +61,8 @@ const readBackendArguments = (
 };
 
 /**
- * Realigns the `backend "s3"` arguments in an application's `providers.tf`. The
- * write the old target performed on every run is what had kept them aligned, so
- * the newly-checking target would otherwise reject an untouched workspace.
+ * Realigns the `backend "s3"` arguments in an application's `providers.tf`, which
+ * the checking target requires and the per-run write had been supplying.
  *
  * `terraform fmt` aligns `=` to the widest key in the whole block, so a block
  * carrying arguments beyond the two vended ones has a width this cannot know.
@@ -90,7 +87,7 @@ const realignProviders = async (
     declared.every(({ name }) => BACKEND_ARGUMENTS.includes(name));
   if (!isVendedBlock) {
     nextSteps.push(
-      `${filePath}: its \`backend "s3"\` block declares arguments beyond the generated ones, so its alignment was left as it is. Run \`nx run ${projectName}:fmt --configuration=fix\` if the new format check reports it.`,
+      `${filePath}: its \`backend "s3"\` block declares arguments beyond the generated ones, so its alignment was left as it is. Run \`nx run ${projectName}:format --configuration=fix\` if the new format check reports it.`,
     );
     return;
   }
@@ -98,7 +95,7 @@ const realignProviders = async (
   const width = Math.max(...BACKEND_ARGUMENTS.map((name) => name.length));
 
   // Already at the width `terraform fmt` aligns this block to, so a re-run — and
-  // a workspace whose file is already formatted — is a no-op.
+  // a workspace whose file is formatted — is a no-op.
   if (declared.every(({ column }) => column === width)) return;
 
   // Each argument is realigned around whatever value it holds, so a value the
@@ -115,47 +112,89 @@ const realignProviders = async (
   }
 };
 
+/** The target name this migration converges on, matching ts and py projects. */
+const FORMAT_TARGET = 'format';
+/** The name the generator vended this target under before the rename. */
+const LEGACY_TARGET = 'fmt';
+
 /**
- * Moves a project's `fmt` target onto the checking form and adds the `lint`
- * target that orchestrates it. A `fmt` whose command is no longer the one the
- * generator produced is the user's, so it is reported instead.
+ * Repoints `dependsOn` entries naming the old target at the new one. A stale
+ * entry is not an error in Nx — it silently drops the edge — so `build` would
+ * stop checking formatting altogether.
+ */
+const repointDependsOn = (project: ProjectConfiguration): boolean => {
+  let changed = false;
+  for (const target of Object.values(project.targets ?? {})) {
+    const dependsOn = target.dependsOn;
+    if (!Array.isArray(dependsOn) || !dependsOn.includes(LEGACY_TARGET)) {
+      continue;
+    }
+    target.dependsOn = dependsOn.map((entry) =>
+      entry === LEGACY_TARGET ? FORMAT_TARGET : entry,
+    );
+    changed = true;
+  }
+  return changed;
+};
+
+/**
+ * Renames the `fmt` target to `format`, moves it onto the checking form, and
+ * adds the `lint` target that orchestrates it.
+ *
+ * A target whose command is not the one the generator produced is the user's, so
+ * it is reported instead. Both the vended name and the new one are accepted as
+ * the starting point, so a workspace part-way through converges either way.
  */
 const migrateProject = (
   projectName: string,
   project: ProjectConfiguration,
   nextSteps: string[],
 ): boolean => {
-  const fmt = project.targets?.fmt;
-  if (!fmt) return false;
+  const targets = project.targets ?? {};
+  const existingName = targets[FORMAT_TARGET]
+    ? FORMAT_TARGET
+    : targets[LEGACY_TARGET]
+      ? LEGACY_TARGET
+      : undefined;
+  if (!existingName) return false;
 
+  const format = targets[existingName];
   let changed = false;
 
-  if (fmt.options?.command === WRITING_COMMAND) {
-    project.targets.fmt = {
-      ...fmt,
-      inputs: TERRAFORM_FMT_TARGET.inputs,
+  if (format.options?.command === WRITING_COMMAND) {
+    targets[existingName] = {
+      ...format,
+      inputs: TERRAFORM_FORMAT_TARGET.inputs,
       options: {
-        ...fmt.options,
-        command: TERRAFORM_FMT_TARGET.options.command,
+        ...format.options,
+        command: TERRAFORM_FORMAT_TARGET.options.command,
       },
       // The user's own configurations win, as their `options` do above: someone
       // who set `fix` to `terraform fmt -recursive` to cover nested modules
       // keeps it.
       configurations: {
-        ...TERRAFORM_FMT_TARGET.configurations,
-        ...fmt.configurations,
+        ...TERRAFORM_FORMAT_TARGET.configurations,
+        ...format.configurations,
       },
     };
     changed = true;
-  } else if (!fmt.configurations?.fix) {
+  } else if (!format.configurations?.fix) {
     nextSteps.push(
-      `${projectName}: its 'fmt' target has been customised, so it was left as it is. Have it run \`${TERRAFORM_FMT_TARGET.options.command}\` and move the writing form to a 'fix' configuration — writing from the base target rewrites the inputs its cache key is computed from, so it can never cache-hit.`,
+      `${projectName}: its '${existingName}' target has been customised, so it was left as it is. Have it run \`${TERRAFORM_FORMAT_TARGET.options.command}\` and move the writing form to a 'fix' configuration — writing from the base target rewrites the inputs its cache key is computed from, so it can never cache-hit.`,
     );
     return false;
   }
 
-  if (!project.targets.lint) {
-    project.targets.lint = { dependsOn: ['fmt'] };
+  if (existingName === LEGACY_TARGET) {
+    targets[FORMAT_TARGET] = targets[LEGACY_TARGET];
+    delete targets[LEGACY_TARGET];
+    changed = true;
+  }
+
+  changed = repointDependsOn(project) || changed;
+
+  if (!targets.lint) {
+    targets.lint = { dependsOn: [FORMAT_TARGET] };
     changed = true;
   }
 

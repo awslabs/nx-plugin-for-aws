@@ -60,7 +60,7 @@ describe('terraformProjectGenerator', () => {
       expect(projectConfig.targets).toHaveProperty('plan');
 
       // Verify library targets are also present
-      expect(projectConfig.targets).toHaveProperty('fmt');
+      expect(projectConfig.targets).toHaveProperty('format');
       expect(projectConfig.targets).toHaveProperty('test');
       expect(projectConfig.targets).toHaveProperty('validate');
       expect(projectConfig.targets).toHaveProperty('output');
@@ -86,7 +86,7 @@ describe('terraformProjectGenerator', () => {
         'checkov',
         'deploy',
         'destroy',
-        'fmt',
+        'format',
         'init',
         'lint',
         'output',
@@ -197,7 +197,8 @@ describe('terraformProjectGenerator', () => {
       expect(targets.test.options.env.TF_PLUGIN_CACHE_DIR).toContain(
         '{projectRoot}',
       );
-      for (const targetName of ['init', 'test', 'validate', 'plan', 'fmt']) {
+      for (const targetName of ['init', 'test', 'validate', 'plan', 'format']) {
+        expect(targets[targetName]).toBeDefined();
         expect(targets[targetName].parallelism).toBeUndefined();
       }
     });
@@ -469,7 +470,7 @@ describe('terraformProjectGenerator', () => {
 
       // Verify only library targets are present (no application targets)
       expect(projectConfig.targets).toHaveProperty('checkov');
-      expect(projectConfig.targets).toHaveProperty('fmt');
+      expect(projectConfig.targets).toHaveProperty('format');
       expect(projectConfig.targets).toHaveProperty('init');
       expect(projectConfig.targets).toHaveProperty('test');
       expect(projectConfig.targets).toHaveProperty('validate');
@@ -492,12 +493,12 @@ describe('terraformProjectGenerator', () => {
         '@proj/my-terraform-project',
       );
 
-      // Test fmt target
-      const fmtTarget = projectConfig.targets['fmt'];
-      expect(fmtTarget.executor).toBe('nx:run-commands');
-      expect(fmtTarget.cache).toBe(true);
-      expect(fmtTarget.options.command).toBe('terraform fmt -check -diff');
-      expect(fmtTarget.options.cwd).toBe('{projectRoot}/src');
+      // Test format target
+      const formatTarget = projectConfig.targets['format'];
+      expect(formatTarget.executor).toBe('nx:run-commands');
+      expect(formatTarget.cache).toBe(true);
+      expect(formatTarget.options.command).toBe('terraform fmt -check -diff');
+      expect(formatTarget.options.cwd).toBe('{projectRoot}/src');
 
       // Test validate target
       const validateTarget = projectConfig.targets['validate'];
@@ -549,11 +550,13 @@ describe('terraformProjectGenerator', () => {
         'terraform init',
       ]);
       expect(initTarget.options.parallel).toBe(false);
-    it('should check formatting from fmt and write only from its fix configuration', async () => {
+    });
+
+    it('should check formatting from format and write only from its fix configuration', async () => {
       await terraformProjectGenerator(tree, librarySchema);
 
       const fmt = readProjectConfiguration(tree, '@proj/my-terraform-project')
-        .targets['fmt'];
+        .targets['format'];
 
       // Writing from the base target would rewrite the `default` input its own
       // hash is computed over, so it could never cache-hit.
@@ -569,12 +572,12 @@ describe('terraformProjectGenerator', () => {
       await terraformProjectGenerator(tree, librarySchema);
 
       // `run-many --target lint` must reach Terraform projects, and its `fix`
-      // and `skip-lint` configurations propagate to `fmt` through this edge.
+      // and `skip-lint` configurations propagate to `format` through this edge.
       expect(
         readProjectConfiguration(tree, '@proj/my-terraform-project').targets[
           'lint'
         ].dependsOn,
-      ).toEqual(['fmt']);
+      ).toEqual(['format']);
     });
 
     it('should declare inputs on every cacheable target', async () => {
@@ -927,7 +930,7 @@ describe('terraformProjectGenerator', () => {
       expect(config.targets.assemble.dependsOn).toEqual([
         '@proj/terraform:assemble',
       ]);
-      for (const gate of ['fmt', 'checkov', 'test']) {
+      for (const gate of ['format', 'checkov', 'test']) {
         expect(config.targets.assemble.dependsOn).not.toContain(gate);
       }
     });
@@ -939,7 +942,7 @@ describe('terraformProjectGenerator', () => {
         '@proj/my-terraform-project',
       );
 
-      for (const gate of ['fmt', 'checkov', 'test']) {
+      for (const gate of ['format', 'checkov', 'test']) {
         expect(config.targets.build.dependsOn).toContain(gate);
       }
     });
