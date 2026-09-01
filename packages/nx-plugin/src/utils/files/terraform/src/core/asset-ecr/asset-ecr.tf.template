@@ -1,0 +1,137 @@
+terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "<%- awsProviderVersion %>"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "<%- randomProviderVersion %>"
+    }
+  }
+}
+
+variable "repository_name_prefix" {
+  description = "Optional prefix to apply to the generated repository name. Useful when you want a stable, human-recognisable identifier in addition to the random suffix."
+  type        = string
+  default     = "assets"
+}
+
+variable "enable_key_rotation" {
+  description = "Whether to enable automatic key rotation on the KMS key used to encrypt the images in the repository."
+  type        = bool
+  default     = true
+}
+
+variable "tags" {
+  description = "Tags to apply to all resources"
+  type        = map(string)
+  default     = {}
+}
+
+data "aws_caller_identity" "current" {}
+
+resource "random_string" "suffix" {
+  length  = 8
+  special = false
+  upper   = false
+}
+
+# KMS key encrypting the images in the shared asset repository.
+resource "aws_kms_key" "assets" {
+  description             = "KMS key for ${var.repository_name_prefix} asset repository images"
+  enable_key_rotation     = var.enable_key_rotation
+  deletion_window_in_days = 30
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "EnableIAMUserPermissions"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
+# Shared asset container registry. Every container image the workspace deploys is
+# pushed here under a tag namespaced by the image's owner.
+resource "aws_ecr_repository" "assets" {
+  name = "${var.repository_name_prefix}-${random_string.suffix.result}"
+
+  image_tag_mutability = "IMMUTABLE"
+  force_delete         = true
+
+  encryption_configuration {
+    encryption_type = "KMS"
+    kms_key         = aws_kms_key.assets.arn
+  }
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  tags = var.tags
+}
+
+resource "aws_ecr_repository_policy" "assets" {
+  repository = aws_ecr_repository.assets.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowPushPull"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:BatchGetImage",
+          "ecr:CompleteLayerUpload",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:InitiateLayerUpload",
+          "ecr:PutImage",
+          "ecr:UploadLayerPart"
+        ]
+      },
+      {
+        Sid    = "AllowLambdaPull"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:BatchGetImage",
+          "ecr:GetDownloadUrlForLayer"
+        ]
+      }
+    ]
+  })
+}
+
+output "repository_name" {
+  description = "Name of the shared asset repository"
+  value       = aws_ecr_repository.assets.name
+}
+
+output "repository_url" {
+  description = "URL of the shared asset repository — pass to app modules' `asset_ecr_repository_url` input."
+  value       = aws_ecr_repository.assets.repository_url
+
+  depends_on = [aws_ecr_repository_policy.assets]
+}
+
+output "repository_arn" {
+  description = "ARN of the shared asset repository — pass to app modules' `asset_ecr_repository_arn` input, which scopes their image pull grants to it."
+  value       = aws_ecr_repository.assets.arn
+}

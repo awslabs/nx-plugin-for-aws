@@ -644,11 +644,17 @@ describe('ts#agent generator', () => {
       'packages/common/terraform/src/core/agent-core-container/runtime.tf',
       'utf-8',
     );
-    // The packaging modules own only their own plumbing...
+    // The packaging modules own only their own plumbing — a code archive
+    // staged in the shared asset bucket, or an image pushed to the shared
+    // asset registry. Neither provisions the shared resource it targets.
     expect(codeModule).toContain('archive_file');
-    expect(codeModule).not.toContain('aws_ecr_repository');
-    expect(containerModule).toContain('aws_ecr_repository');
+    expect(codeModule).toContain('var.asset_bucket_name');
+    expect(codeModule).not.toContain('docker_publish');
+    expect(containerModule).toContain('docker_publish');
+    expect(containerModule).toContain('var.asset_ecr_repository_url');
     expect(containerModule).not.toContain('archive_file');
+    expect(codeModule).not.toContain('aws_ecr_repository');
+    expect(containerModule).not.toContain('aws_ecr_repository');
     // ...and both delegate the runtime to one shared generic module.
     expect(codeModule).toContain('source = "../agent-core"');
     expect(containerModule).toContain('source = "../agent-core"');
@@ -673,6 +679,48 @@ describe('ts#agent generator', () => {
         'utf-8',
       ),
     ).toContain('source = "../../../core/agent-core-container"');
+  });
+
+  it('should host container-packaged agents in the shared asset registry', async () => {
+    await tsAgentGenerator(tree, {
+      project: 'test-project',
+      name: 'first-container-agent',
+      infra: 'agentcore-ecr',
+      iac: 'terraform',
+    });
+    await tsAgentGenerator(tree, {
+      project: 'test-project',
+      name: 'second-container-agent',
+      infra: 'agentcore-ecr',
+      iac: 'terraform',
+    });
+
+    // Both agents thread the one shared registry through, rather than each
+    // provisioning a repository of its own.
+    for (const name of ['first-container-agent', 'second-container-agent']) {
+      const appModule = tree.read(
+        `packages/common/terraform/src/app/agents/${name}/${name}.tf`,
+        'utf-8',
+      );
+      expect(appModule).toContain('variable "asset_ecr_repository_url"');
+      expect(appModule).toContain(
+        'asset_ecr_repository_url = var.asset_ecr_repository_url',
+      );
+      expect(appModule).toContain(
+        'asset_ecr_repository_arn = var.asset_ecr_repository_arn',
+      );
+      expect(appModule).not.toContain('aws_ecr_repository');
+    }
+
+    // Sharing one repository means the image tags must not collide, so each
+    // runtime namespaces its content-addressed tag with its own name.
+    const containerModule = tree.read(
+      'packages/common/terraform/src/core/agent-core-container/runtime.tf',
+      'utf-8',
+    );
+    expect(containerModule).toContain(
+      'image_tag = "agent-core-${lower(var.agent_runtime_name)}-${replace(data.external.docker_digest.result.digest, "sha256:", "")}"',
+    );
   });
 
   it('should match snapshot for Terraform generated files', async () => {

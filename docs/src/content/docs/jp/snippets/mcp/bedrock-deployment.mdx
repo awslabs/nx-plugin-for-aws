@@ -32,7 +32,7 @@ export class ExampleStack extends Stack {
 <Fragment slot="terraform">
 Terraform モジュールが生成されます。名前はジェネレーター実行時に選択した `name` に基づいて付けられるか、デフォルトでは `<ProjectName>-mcp-server` となります。
 
-共有の <Link path="/guides/runtime-config#writing-configuration">`runtime_config_appconfig`</Link> モジュールの出力を MCP サーバーモジュールに渡します。デフォルトの `agentcore` パッケージングでは、サーバーのコードが共有アセットバケットにステージングされるため、それも渡します — Lambda および API モジュールがすでに行っているように、デプロイメントごとに `core/asset-bucket` モジュールを一度インスタンス化します:
+共有の <Link path="/guides/runtime-config#writing-configuration">`runtime_config_appconfig`</Link> モジュールの出力を、そのパッケージングが使用する共有アーティファクトストアと共に MCP サーバーモジュールに渡します。デフォルトの `agentcore` パッケージングでは、サーバーのコードが共有アセットバケットにステージングされるため、Lambda および API モジュールがすでに行っているように、デプロイメントごとに `core/asset-bucket` モジュールを一度インスタンス化します:
 
 ```terraform
 module "asset_bucket" {
@@ -45,9 +45,26 @@ module "my_project_mcp_server" {
   appconfig_application_id  = module.runtime_config_appconfig.application_id
   appconfig_application_arn = module.runtime_config_appconfig.application_arn
 
-  # Only for `agentcore` packaging; `agentcore-ecr` publishes to ECR instead.
   asset_bucket_name = module.asset_bucket.bucket_name
   asset_bucket_arn  = module.asset_bucket.bucket_arn
+}
+```
+
+`agentcore-ecr` では、サーバーのイメージが代わりに共有アセットレジストリに公開されるため、バケットの代わりに `core/asset-ecr` の出力を渡します。1つのレジストリがワークスペース内のすべてのコンテナにサービスを提供するため、MCP サーバーは独自のリポジトリを必要としません:
+
+```terraform
+module "asset_ecr" {
+  source = "../../common/terraform/src/core/asset-ecr"
+}
+
+module "my_project_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
+  asset_ecr_repository_url = module.asset_ecr.repository_url
+  asset_ecr_repository_arn = module.asset_ecr.repository_arn
 }
 ```
 </Fragment>

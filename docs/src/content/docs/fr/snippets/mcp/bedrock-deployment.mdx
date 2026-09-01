@@ -32,7 +32,7 @@ Ce construct utilise le [module `aws-cdk-lib/aws-bedrockagentcore`](https://docs
 <Fragment slot="terraform">
 Un module Terraform est généré pour vous, nommé en fonction du `name` que vous avez choisi lors de l'exécution du générateur, ou `<ProjectName>-mcp-server` par défaut.
 
-Passez les sorties du module partagé <Link path="/guides/runtime-config#writing-configuration">`runtime_config_appconfig`</Link> dans le module du serveur MCP. Avec le packaging `agentcore` par défaut, le code du serveur est placé dans le bucket d'assets partagé, donc passez-le également — instanciez le module `core/asset-bucket` une fois par déploiement, comme le font déjà les modules Lambda et API :
+Passez les sorties du module partagé <Link path="/guides/runtime-config#writing-configuration">`runtime_config_appconfig`</Link> dans le module du serveur MCP, ainsi que le magasin d'artefacts partagé utilisé par son packaging. Avec le packaging `agentcore` par défaut, le code du serveur est placé dans le bucket d'assets partagé, donc instanciez le module `core/asset-bucket` une fois par déploiement, comme le font déjà les modules Lambda et API :
 
 ```terraform
 module "asset_bucket" {
@@ -45,9 +45,26 @@ module "my_project_mcp_server" {
   appconfig_application_id  = module.runtime_config_appconfig.application_id
   appconfig_application_arn = module.runtime_config_appconfig.application_arn
 
-  # Only for `agentcore` packaging; `agentcore-ecr` publishes to ECR instead.
   asset_bucket_name = module.asset_bucket.bucket_name
   asset_bucket_arn  = module.asset_bucket.bucket_arn
+}
+```
+
+Avec `agentcore-ecr`, l'image du serveur est publiée dans le registre d'assets partagé à la place, donc passez les sorties de `core/asset-ecr` plutôt que celles du bucket. Un seul registre sert tous les conteneurs de l'espace de travail, donc aucun serveur MCP n'a besoin de son propre dépôt :
+
+```terraform
+module "asset_ecr" {
+  source = "../../common/terraform/src/core/asset-ecr"
+}
+
+module "my_project_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
+  asset_ecr_repository_url = module.asset_ecr.repository_url
+  asset_ecr_repository_arn = module.asset_ecr.repository_arn
 }
 ```
 </Fragment>

@@ -14,17 +14,13 @@ terraform {
       source  = "hashicorp/null"
       version = "<%- nullProviderVersion %>"
     }
-    random = {
-      source  = "hashicorp/random"
-      version = "<%- randomProviderVersion %>"
-    }
   }
 }
 
-# Container packaging for an AgentCore Runtime: owns the ECR repository and the
-# image publish, and delegates the runtime itself to the generic `agent-core`
-# module. Swap this module for `agent-core-code` to deploy a code package
-# instead — the inputs below are the only difference.
+# Container packaging for an AgentCore Runtime: publishes the built image to the
+# shared asset registry, and delegates the runtime itself to the generic
+# `agent-core` module. Swap this module for `agent-core-code` to deploy a code
+# package instead — the inputs below are the only difference.
 
 variable "agent_runtime_name" {
   description = "Name of the agent runtime"
@@ -33,6 +29,16 @@ variable "agent_runtime_name" {
 
 variable "docker_image_tag" {
   description = "Name of the docker image tag to use as the agent core runtime"
+  type        = string
+}
+
+variable "asset_ecr_repository_url" {
+  description = "URL of the shared asset ECR repository the runtime's image is published to. Instantiate the `core/asset-ecr` module once per deployment and pass its `repository_url` output here."
+  type        = string
+}
+
+variable "asset_ecr_repository_arn" {
+  description = "ARN of the shared asset ECR repository (from `core/asset-ecr.repository_arn`), used to scope the runtime's image pull grant to it."
   type        = string
 }
 
@@ -94,62 +100,10 @@ variable "tags" {
   default     = {}
 }
 
-data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
 locals {
-  aws_account_id = data.aws_caller_identity.current.account_id
-  aws_region     = data.aws_region.current.id
-}
-
-# Uniquifies the repository name so this module can be deployed more than once
-# (e.g. across stages) within the same account/region. Owned here rather than
-# read from the shared module, which consumes this repository's URL — reading it
-# back would be a dependency cycle.
-resource "random_id" "repository_suffix" {
-  byte_length = 4
-}
-
-# ECR Repository
-resource "aws_ecr_repository" "agent_core_repository" {
-  #checkov:skip=CKV_AWS_136:AES256 encryption is sufficient for ECR repositories
-  name = "${lower(var.agent_runtime_name)}_repository_${random_id.repository_suffix.hex}"
-
-  image_tag_mutability = "IMMUTABLE"
-  force_delete         = true
-
-  image_scanning_configuration {
-    scan_on_push = true
-  }
-
-  tags = var.tags
-}
-
-# ECR Repository Policy
-resource "aws_ecr_repository_policy" "agent_core_ecr_policy" {
-  repository = aws_ecr_repository.agent_core_repository.name
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid    = "AllowPushPull"
-        Effect = "Allow"
-        Principal = {
-          AWS = "arn:aws:iam::${local.aws_account_id}:root"
-        }
-        Action = [
-          "ecr:GetDownloadUrlForLayer",
-          "ecr:BatchGetImage",
-          "ecr:BatchCheckLayerAvailability",
-          "ecr:PutImage",
-          "ecr:InitiateLayerUpload",
-          "ecr:UploadLayerPart",
-          "ecr:CompleteLayerUpload"
-        ]
-      }
-    ]
-  })
+  aws_region = data.aws_region.current.id
 }
 
 # Data source to get container image digest
@@ -159,14 +113,14 @@ data "external" "docker_digest" {
 
 locals {
   # Content-based, immutable image tag derived from the local image digest
-  image_tag = replace(data.external.docker_digest.result.digest, "sha256:", "")
+  image_tag = "agent-core-${lower(var.agent_runtime_name)}-${replace(data.external.docker_digest.result.digest, "sha256:", "")}"
 }
 
 # Null resource for container image publish
 resource "null_resource" "docker_publish" {
   triggers = {
     docker_digest    = data.external.docker_digest.result.digest
-    repository_url   = aws_ecr_repository.agent_core_repository.repository_url
+    repository_url   = var.asset_ecr_repository_url
     docker_image_tag = var.docker_image_tag
     image_tag        = local.image_tag
   }
@@ -189,8 +143,6 @@ resource "null_resource" "docker_publish" {
       IMAGE_TAG        = self.triggers.image_tag
     }
   }
-
-  depends_on = [aws_ecr_repository_policy.agent_core_ecr_policy]
 }
 
 module "runtime" {
@@ -206,7 +158,7 @@ module "runtime" {
   tags                     = var.tags
 
   container_configuration = {
-    container_uri = "${aws_ecr_repository.agent_core_repository.repository_url}:${local.image_tag}"
+    container_uri = "${var.asset_ecr_repository_url}:${local.image_tag}"
   }
 
   # The runtime pulls the image, so grant it read access to the repository.
@@ -219,7 +171,7 @@ module "runtime" {
         "ecr:GetDownloadUrlForLayer"
       ]
       Resource = [
-        aws_ecr_repository.agent_core_repository.arn
+        var.asset_ecr_repository_arn
       ]
     },
     {
@@ -277,7 +229,7 @@ output "security_group_id" {
   value       = module.runtime.security_group_id
 }
 
-output "ecr_repository_url" {
-  description = "URL of the ECR repository holding the runtime's image"
-  value       = aws_ecr_repository.agent_core_repository.repository_url
+output "container_uri" {
+  description = "URI of the published image the runtime runs, within the shared asset registry"
+  value       = "${var.asset_ecr_repository_url}:${local.image_tag}"
 }

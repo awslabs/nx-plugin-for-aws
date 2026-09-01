@@ -352,6 +352,37 @@ describe('ts#rdb generator', () => {
     );
   });
 
+  it('should host database container images in the shared asset registry', async () => {
+    await tsRdbGenerator(tree, { ...defaultOptions, iac: 'terraform' });
+    await tsRdbGenerator(tree, {
+      ...defaultOptions,
+      name: 'other-db',
+      iac: 'terraform',
+    });
+
+    // Both databases publish their migration image to the one shared registry
+    // rather than each provisioning a repository of its own.
+    for (const [name, prefix] of [
+      ['db', 'db'],
+      ['other-db', 'other-db'],
+    ]) {
+      const dbModule = tree.read(
+        `packages/common/terraform/src/app/dbs/${name}/${name}.tf`,
+        'utf-8',
+      );
+      expect(dbModule).toContain('variable "asset_ecr_repository_url"');
+      expect(dbModule).not.toContain('aws_ecr_repository');
+      expect(dbModule).toContain(
+        'image_uri     = "${var.asset_ecr_repository_url}:${local.image_tag}"',
+      );
+      // Sharing one repository means the tags must not collide, so each
+      // database namespaces its content-addressed tag with its own name.
+      expect(dbModule).toContain(
+        `image_tag = "${prefix}-migration-\${replace(data.external.docker_digest.result.digest, "sha256:", "")}"`,
+      );
+    }
+  });
+
   it('should protect the aurora cluster and its key from destruction in terraform', async () => {
     await tsRdbGenerator(tree, {
       ...defaultOptions,

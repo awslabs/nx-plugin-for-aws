@@ -379,9 +379,11 @@ Use o `DockerImageAsset` com qualquer construct AWS que aceite uma imagem de con
 O provider AWS do Terraform não tem um recurso de primeira classe "construir e enviar uma imagem Docker". O padrão usado pelos geradores é:
 
 1. O target `build` do projeto executa `docker build`, produzindo uma imagem local com tag `my-scope-my-project:latest`.
-2. Um `aws_ecr_repository` para armazenar a imagem.
+2. Um repositório ECR compartilhado usando o módulo `core/asset-ecr`
 3. Um `null_resource` com um provisioner `local-exec` que autentica no ECR, re-tageia a imagem construída localmente com seu digest de conteúdo, e a envia.
 4. O recurso downstream (por exemplo, `aws_ecs_task_definition`) referencia a imagem por sua tag imutável baseada em digest.
+
+Como um repositório armazena todas as imagens, cada tag é namespacada pelo proprietário da imagem, bem como seu digest, então imagens compartilhando o registro nunca colidem.
 
 ```d2
 direction: down
@@ -407,7 +409,7 @@ app: Application {
 infra: Infrastructure {
   direction: right
   publish: "null_resource\nlocal-exec: docker push"
-  repo: aws_ecr_repository
+  repo: "core/asset-ecr\n(shared)"
   publish -> repo: tag + push
 }
 
@@ -421,10 +423,8 @@ infra.repo -> ecr
 
 
 ```hcl
-resource "aws_ecr_repository" "repo" {
-  name                 = "my-project-repository"
-  image_tag_mutability = "IMMUTABLE"
-  force_delete         = true
+module "asset_ecr" {
+  source = "../../common/terraform/src/core/asset-ecr"
 }
 
 # Invalidate the push whenever the locally-built image digest changes
@@ -433,14 +433,15 @@ data "external" "docker_digest" {
 }
 
 locals {
-  # Content-based, immutable image tag derived from the local image digest
-  image_tag = replace(data.external.docker_digest.result.digest, "sha256:", "")
+  # Content-based, immutable image tag derived from the local image digest, and
+  # namespaced by owner so images sharing the registry never collide
+  image_tag = "my-project-${replace(data.external.docker_digest.result.digest, "sha256:", "")}"
 }
 
 resource "null_resource" "docker_publish" {
   triggers = {
     docker_digest  = data.external.docker_digest.result.digest
-    repository_url = aws_ecr_repository.repo.repository_url
+    repository_url = module.asset_ecr.repository_url
     image_tag      = local.image_tag
   }
 
@@ -455,7 +456,7 @@ resource "null_resource" "docker_publish" {
 }
 ```
 
-O bloco `data.external.docker_digest` garante que o `null_resource` seja executado novamente sempre que o hash da imagem local mudar, acionando um novo push em cada mudança significativa de código. A imagem é enviada sob uma tag imutável baseada em conteúdo derivada de seu digest, então o repositório ECR pode usar mutabilidade de tag `IMMUTABLE` e rejeitar qualquer tentativa de sobrescrever uma tag existente.
+O bloco `data.external.docker_digest` garante que o `null_resource` seja executado novamente sempre que o hash da imagem local mudar, acionando um novo push em cada mudança significativa de código. A imagem é enviada sob uma tag imutável baseada em conteúdo derivada de seu digest, então o repositório compartilhado usa mutabilidade de tag `IMMUTABLE` e rejeita qualquer tentativa de sobrescrever uma tag existente.
 
 :::note[Executando bundle antes do apply]
 `nx apply <project>` requer que a tag de imagem `my-scope-my-project:latest` já exista localmente. Execute `nx build my-project` (ou `nx docker my-project`) antes de `nx apply <project>`.

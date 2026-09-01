@@ -343,6 +343,11 @@ variable "create_db_user_docker_image_tag" {
 }
 
 
+variable "asset_ecr_repository_url" {
+  description = "URL of the shared asset ECR repository the Lambda container images are published to. Instantiate the \`core/asset-ecr\` module once per deployment and pass its \`repository_url\` output here."
+  type        = string
+}
+
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
 
@@ -420,76 +425,26 @@ module "add_rdb_to_runtime_config" {
   }
 }
 
-resource "aws_ecr_repository" "migration_handler" {
-  #checkov:skip=CKV_AWS_136:AES256 encryption is sufficient for ECR repositories
-  name                 = "db-migration-\${random_string.suffix.result}"
-  image_tag_mutability = "IMMUTABLE"
-  force_delete         = true
-
-  image_scanning_configuration {
-    scan_on_push = true
-  }
-
-  tags = var.tags
-}
-
-resource "aws_ecr_repository_policy" "migration_handler" {
-  repository = aws_ecr_repository.migration_handler.name
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid    = "AllowPushPull"
-        Effect = "Allow"
-        Principal = {
-          AWS = "arn:aws:iam::\${data.aws_caller_identity.current.account_id}:root"
-        }
-        Action = [
-          "ecr:BatchCheckLayerAvailability",
-          "ecr:CompleteLayerUpload",
-          "ecr:GetDownloadUrlForLayer",
-          "ecr:InitiateLayerUpload",
-          "ecr:PutImage",
-          "ecr:UploadLayerPart"
-        ]
-      },
-      {
-        Sid    = "AllowLambdaPull"
-        Effect = "Allow"
-        Principal = {
-          Service = "lambda.amazonaws.com"
-        }
-        Action = [
-          "ecr:BatchCheckLayerAvailability",
-          "ecr:BatchGetImage",
-          "ecr:GetDownloadUrlForLayer"
-        ]
-      }
-    ]
-  })
-}
-
 data "external" "docker_digest" {
   program = ["sh", "-c", "echo '{\\"digest\\":\\"'$(docker inspect \${var.migration_docker_image_tag} --format '{{.Id}}')'\\"}' "]
 }
 
 locals {
   # Content-based, immutable image tag derived from the local image digest
-  image_tag = replace(data.external.docker_digest.result.digest, "sha256:", "")
+  image_tag = "db-migration-\${replace(data.external.docker_digest.result.digest, "sha256:", "")}"
 }
 data "external" "create_db_user_docker_digest" {
   program = ["sh", "-c", "echo '{\\"digest\\":\\"'$(docker inspect \${var.create_db_user_docker_image_tag} --format '{{.Id}}')'\\"}' "]
 }
 
 locals {
-  create_db_user_image_tag = replace(data.external.create_db_user_docker_digest.result.digest, "sha256:", "")
+  create_db_user_image_tag = "db-create-db-user-\${replace(data.external.create_db_user_docker_digest.result.digest, "sha256:", "")}"
 }
 
 resource "null_resource" "docker_publish" {
   triggers = {
     docker_digest    = data.external.docker_digest.result.digest
-    repository_url   = aws_ecr_repository.migration_handler.repository_url
+    repository_url   = var.asset_ecr_repository_url
     migration_docker_image_tag = var.migration_docker_image_tag
     image_tag        = local.image_tag
     create_db_user_docker_digest    = data.external.create_db_user_docker_digest.result.digest
@@ -502,8 +457,8 @@ resource "null_resource" "docker_publish" {
       aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$REPOSITORY_URL"
       docker tag "$MIGRATION_DOCKER_IMAGE_TAG" "$REPOSITORY_URL:$IMAGE_TAG"
       docker push "$REPOSITORY_URL:$IMAGE_TAG"
-      docker tag "$CREATE_DB_USER_DOCKER_IMAGE_TAG" "$REPOSITORY_URL:create-db-user-$CREATE_DB_USER_IMAGE_TAG"
-      docker push "$REPOSITORY_URL:create-db-user-$CREATE_DB_USER_IMAGE_TAG"
+      docker tag "$CREATE_DB_USER_DOCKER_IMAGE_TAG" "$REPOSITORY_URL:$CREATE_DB_USER_IMAGE_TAG"
+      docker push "$REPOSITORY_URL:$CREATE_DB_USER_IMAGE_TAG"
     EOT
     environment = {
       AWS_REGION       = data.aws_region.current.region
@@ -514,8 +469,6 @@ resource "null_resource" "docker_publish" {
       CREATE_DB_USER_IMAGE_TAG        = self.triggers.create_db_user_image_tag
     }
   }
-
-  depends_on = [aws_ecr_repository_policy.migration_handler]
 }
 
 resource "aws_iam_role" "migration_handler" {
@@ -724,7 +677,7 @@ resource "aws_lambda_function" "create_db_user" {
   #checkov:skip=CKV_AWS_173:Lambda environment variables encrypted by managed key
   #checkov:skip=CKV_AWS_272:Code signing not configured as deployment packages are built and deployed within the same pipeline
   package_type  = "Image"
-  image_uri     = "\${aws_ecr_repository.migration_handler.repository_url}:create-db-user-\${local.create_db_user_image_tag}"
+  image_uri     = "\${var.asset_ecr_repository_url}:\${local.create_db_user_image_tag}"
   function_name = local.create_db_user_function_name
   role          = aws_iam_role.create_db_user.arn
   timeout       = 300
@@ -808,7 +761,7 @@ resource "aws_lambda_function" "migration_handler" {
   package_type  = "Image"
   function_name = local.migration_function_name
   role          = aws_iam_role.migration_handler.arn
-  image_uri     = "\${aws_ecr_repository.migration_handler.repository_url}:\${local.image_tag}"
+  image_uri     = "\${var.asset_ecr_repository_url}:\${local.image_tag}"
   memory_size   = 1024
   timeout       = 300
   architectures = ["arm64"]

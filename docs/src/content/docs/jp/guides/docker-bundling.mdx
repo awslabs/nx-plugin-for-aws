@@ -379,9 +379,11 @@ CDK は `bundle`/`docker` ターゲットを自動的に実行しません — `
 Terraform の AWS プロバイダーには、「Docker イメージをビルドしてプッシュする」ファーストクラスのリソースがありません。ジェネレーターが使用するパターンは次のとおりです：
 
 1. プロジェクトの `build` ターゲットが `docker build` を実行し、`my-scope-my-project:latest` とタグ付けされたローカルイメージを生成します。
-2. イメージを保持する `aws_ecr_repository`。
+2. `core/asset-ecr` モジュールを使用した共有 ECR リポジトリ
 3. ECR に認証し、ローカルにビルドされたイメージをそのコンテンツダイジェストで再タグ付けし、プッシュする `local-exec` プロビジョナーを持つ `null_resource`。
 4. ダウンストリームリソース（例：`aws_ecs_task_definition`）は、不変のダイジェストベースのタグでイメージを参照します。
+
+1 つのリポジトリがすべてのイメージを保持するため、各タグはイメージの所有者とそのダイジェストによって名前空間が付けられ、レジストリを共有するイメージが衝突することはありません。
 
 ```d2
 direction: down
@@ -407,7 +409,7 @@ app: Application {
 infra: Infrastructure {
   direction: right
   publish: "null_resource\nlocal-exec: docker push"
-  repo: aws_ecr_repository
+  repo: "core/asset-ecr\n(shared)"
   publish -> repo: tag + push
 }
 
@@ -421,10 +423,8 @@ infra.repo -> ecr
 
 
 ```hcl
-resource "aws_ecr_repository" "repo" {
-  name                 = "my-project-repository"
-  image_tag_mutability = "IMMUTABLE"
-  force_delete         = true
+module "asset_ecr" {
+  source = "../../common/terraform/src/core/asset-ecr"
 }
 
 # Invalidate the push whenever the locally-built image digest changes
@@ -433,14 +433,15 @@ data "external" "docker_digest" {
 }
 
 locals {
-  # Content-based, immutable image tag derived from the local image digest
-  image_tag = replace(data.external.docker_digest.result.digest, "sha256:", "")
+  # Content-based, immutable image tag derived from the local image digest, and
+  # namespaced by owner so images sharing the registry never collide
+  image_tag = "my-project-${replace(data.external.docker_digest.result.digest, "sha256:", "")}"
 }
 
 resource "null_resource" "docker_publish" {
   triggers = {
     docker_digest  = data.external.docker_digest.result.digest
-    repository_url = aws_ecr_repository.repo.repository_url
+    repository_url = module.asset_ecr.repository_url
     image_tag      = local.image_tag
   }
 
@@ -455,7 +456,7 @@ resource "null_resource" "docker_publish" {
 }
 ```
 
-`data.external.docker_digest` ブロックは、ローカルイメージハッシュが変更されるたびに `null_resource` が再実行されることを保証し、意味のあるコード変更ごとに新しいプッシュをトリガーします。イメージは、そのダイジェストから派生した不変のコンテンツベースのタグでプッシュされるため、ECR リポジトリは `IMMUTABLE` タグの可変性を使用でき、既存のタグを上書きしようとする試みを拒否できます。
+`data.external.docker_digest` ブロックは、ローカルイメージハッシュが変更されるたびに `null_resource` が再実行されることを保証し、意味のあるコード変更ごとに新しいプッシュをトリガーします。イメージは、そのダイジェストから派生した不変のコンテンツベースのタグでプッシュされるため、共有リポジトリは `IMMUTABLE` タグの可変性を使用し、既存のタグを上書きしようとする試みを拒否します。
 
 :::note[apply 前にバンドルを実行する]
 `nx apply <project>` には、イメージタグ `my-scope-my-project:latest` がローカルに既に存在している必要があります。`nx apply <project>` の前に `nx build my-project`（または `nx docker my-project`）を実行します。

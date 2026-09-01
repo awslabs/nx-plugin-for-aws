@@ -31,7 +31,7 @@ export class ExampleStack extends Stack {
 <Fragment slot="terraform">
 将为您生成一个 Terraform 模块，根据您运行生成器时选择的 `name` 命名，或默认为 `<ProjectName>-agent`。
 
-将共享的 <Link path="/zh/guides/runtime-config#writing-configuration">`runtime_config_appconfig`</Link> 模块的输出传递给 agent 模块。在默认的 `agentcore` 打包方式下，agent 的代码会暂存在共享资产存储桶中，因此也需要传递该存储桶 — 像 Lambda 和 API 模块已经做的那样，为每个部署实例化一次 `core/asset-bucket` 模块：
+将共享的 <Link path="/zh/guides/runtime-config#writing-configuration">`runtime_config_appconfig`</Link> 模块的输出传递给 agent 模块，以及其打包所使用的共享工件存储。在默认的 `agentcore` 打包方式下，agent 的代码会暂存在共享资产存储桶中，因此像 Lambda 和 API 模块已经做的那样，为每个部署实例化一次 `core/asset-bucket` 模块：
 
 ```terraform
 module "asset_bucket" {
@@ -44,9 +44,26 @@ module "my_project_agent" {
   appconfig_application_id  = module.runtime_config_appconfig.application_id
   appconfig_application_arn = module.runtime_config_appconfig.application_arn
 
-  # Only for `agentcore` packaging; `agentcore-ecr` publishes to ECR instead.
   asset_bucket_name = module.asset_bucket.bucket_name
   asset_bucket_arn  = module.asset_bucket.bucket_arn
+}
+```
+
+在 `agentcore-ecr` 下，agent 的镜像会发布到共享资产注册表，因此传递 `core/asset-ecr` 的输出而不是存储桶的输出。一个注册表为工作区中的每个容器提供服务，因此任何 agent 都不需要自己的仓库：
+
+```terraform
+module "asset_ecr" {
+  source = "../../common/terraform/src/core/asset-ecr"
+}
+
+module "my_project_agent" {
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
+  asset_ecr_repository_url = module.asset_ecr.repository_url
+  asset_ecr_repository_arn = module.asset_ecr.repository_arn
 }
 ```
 </Fragment>
@@ -107,7 +124,7 @@ module "my_project_agent" {
   appconfig_application_id  = module.runtime_config_appconfig.application_id
   appconfig_application_arn = module.runtime_config_appconfig.application_arn
 
-  # Only for `agentcore` packaging; `agentcore-ecr` publishes to ECR instead.
+  # Under `agentcore-ecr`, pass `core/asset-ecr`'s outputs instead.
   asset_bucket_name = module.asset_bucket.bucket_name
   asset_bucket_arn  = module.asset_bucket.bucket_arn
 }

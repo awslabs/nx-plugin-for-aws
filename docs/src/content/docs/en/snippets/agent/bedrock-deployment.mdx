@@ -31,7 +31,7 @@ This construct uses the [`aws-cdk-lib/aws-bedrockagentcore` module](https://docs
 <Fragment slot="terraform">
 A Terraform module is generated for you, named based on the `name` you chose when running the generator, or `<ProjectName>-agent` by default.
 
-Pass the shared <Link path="/guides/runtime-config#writing-configuration">`runtime_config_appconfig`</Link> module's outputs into the agent module. Under the default `agentcore` packaging the agent's code is staged in the shared asset bucket, so pass that too — instantiate the `core/asset-bucket` module once per deployment, as the Lambda and API modules already do:
+Pass the shared <Link path="/guides/runtime-config#writing-configuration">`runtime_config_appconfig`</Link> module's outputs into the agent module, along with the shared artefact store its packaging uses. Under the default `agentcore` packaging the agent's code is staged in the shared asset bucket, so instantiate the `core/asset-bucket` module once per deployment, as the Lambda and API modules already do:
 
 ```terraform
 module "asset_bucket" {
@@ -44,9 +44,26 @@ module "my_project_agent" {
   appconfig_application_id  = module.runtime_config_appconfig.application_id
   appconfig_application_arn = module.runtime_config_appconfig.application_arn
 
-  # Only for `agentcore` packaging; `agentcore-ecr` publishes to ECR instead.
   asset_bucket_name = module.asset_bucket.bucket_name
   asset_bucket_arn  = module.asset_bucket.bucket_arn
+}
+```
+
+Under `agentcore-ecr` the agent's image is published to the shared asset registry instead, so pass `core/asset-ecr`'s outputs rather than the bucket's. One registry serves every container in the workspace, so no agent needs a repository of its own:
+
+```terraform
+module "asset_ecr" {
+  source = "../../common/terraform/src/core/asset-ecr"
+}
+
+module "my_project_agent" {
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
+  asset_ecr_repository_url = module.asset_ecr.repository_url
+  asset_ecr_repository_arn = module.asset_ecr.repository_arn
 }
 ```
 </Fragment>
@@ -107,7 +124,7 @@ module "my_project_agent" {
   appconfig_application_id  = module.runtime_config_appconfig.application_id
   appconfig_application_arn = module.runtime_config_appconfig.application_arn
 
-  # Only for `agentcore` packaging; `agentcore-ecr` publishes to ECR instead.
+  # Under `agentcore-ecr`, pass `core/asset-ecr`'s outputs instead.
   asset_bucket_name = module.asset_bucket.bucket_name
   asset_bucket_arn  = module.asset_bucket.bucket_arn
 }
