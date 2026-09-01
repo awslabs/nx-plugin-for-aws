@@ -212,57 +212,6 @@ const holdRuffToWasmBuild = (
 };
 
 /**
- * `@copilotkit/react-core` depends on an exact `@ag-ui/client` and `@ag-ui/core`,
- * and the website passes an `@ag-ui/client` agent straight into CopilotKit's
- * provider. Bumping the `@ag-ui/*` pins past what CopilotKit asks for installs a
- * second copy, and the two `AbstractAgent` declarations are structurally
- * incompatible (private `_debug`), so every generated website fails to compile
- * with TS2322 — which takes out the whole smoke test matrix at once.
- *
- * So hold the shared `@ag-ui/*` packages at whatever CopilotKit pins. They move
- * again once a CopilotKit release asks for a newer one.
- */
-const holdAgUiToCopilotKit = (
-  updatedVersions: Record<string, string>,
-): ReportNote[] => {
-  const copilotKitVersion =
-    updatedVersions['@copilotkit/react-core'] ??
-    TS_VERSIONS['@copilotkit/react-core'];
-
-  let deps: Record<string, string>;
-  try {
-    deps = JSON.parse(
-      execSync(
-        `npm view @copilotkit/react-core@${copilotKitVersion} dependencies --json`,
-        { encoding: 'utf-8' },
-      ),
-    );
-  } catch {
-    return [
-      {
-        note: `could not read @copilotkit/react-core@${copilotKitVersion} dependencies to pin @ag-ui/* against — left as proposed`,
-      },
-    ];
-  }
-
-  // Only the packages CopilotKit itself depends on can duplicate against it.
-  // `@ag-ui/aws-strands` and `@ag-ui/a2ui-toolkit` are agent-side only.
-  const notes: ReportNote[] = [];
-  for (const name of ['@ag-ui/client', '@ag-ui/core', '@ag-ui/encoder']) {
-    // `@ag-ui/encoder` is not a CopilotKit dependency, but ships from the same
-    // release train as client/core and must match them.
-    const required = deps[name] ?? deps['@ag-ui/client'];
-    const proposed = updatedVersions[name];
-    if (!required || !proposed || proposed === required) continue;
-    updatedVersions[name] = required;
-    notes.push({
-      note: `${name} held at ${required} (${proposed} available): @copilotkit/react-core@${copilotKitVersion} pins ${required}, and a second copy breaks the generated website's build`,
-    });
-  }
-  return notes;
-};
-
-/**
  * Compares two `major.minor.patch` version strings.
  * @returns positive if a > b, negative if a < b, zero if equal
  */
@@ -652,18 +601,14 @@ const main = async () => {
     // Get updated TypeScript versions
     const updatedTsVersions = getUpdatedTypeScriptVersions(tmpDir);
 
-    // Applied before the rewrite so the held versions are never written
-    const agUiHold = holdAgUiToCopilotKit(updatedTsVersions);
-
     // Apply updated TypeScript versions to the versions file
-    const tsChanges: ReportChange[] = await applyUpdatedVersions(
+    const tsChanges = await applyUpdatedVersions(
       tree,
       TS_VERSIONS,
       updatedTsVersions,
       'packages/nx-plugin/src/utils/versions.ts',
       'TS_VERSIONS',
     );
-    tsChanges.push(...agUiHold);
 
     // Get updated Python versions
     const updatedPyVersions = getUpdatedPythonVersions(tmpDir);

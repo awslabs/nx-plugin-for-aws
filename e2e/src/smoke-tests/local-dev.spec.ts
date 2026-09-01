@@ -10,6 +10,7 @@ import { ensureDirSync } from 'fs-extra';
 import type { MockServer } from 'llm-mock-server';
 import { createConnection } from 'net';
 import * as pty from 'node-pty';
+import { join } from 'path';
 import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
 import { startLlmMock } from '../utils/llm-mock';
 import {
@@ -306,32 +307,117 @@ function startServer(
 }
 
 /**
- * One attempt at driving `agent-chat` through a PTY: send the message once the
- * prompt is up, and resolve when the agent streams `expected` back.
- *
- * Resolves `false` (rather than rejecting) when the prompt never consumed the
- * message, so the caller can relaunch — see `chatStreamsReply`.
+ * Resolve a `<agent>-chat` target to what it actually runs, from the generated
+ * `project.json`. Read rather than hardcoded so this follows whatever the
+ * generators emit.
  */
-function chatAttempt(
-  cwd: string,
+function readChatTarget(
+  projectRoot: string,
+  target: string,
+): {
+  command: string;
+  cwd: string;
+  env: Record<string, string>;
+  dependsOn: string[];
+} {
+  const [projectName, targetName] = target.split(':');
+  const project = JSON.parse(
+    execSync(`pnpm exec nx show project ${projectName} --json`, {
+      cwd: projectRoot,
+      encoding: 'utf-8',
+      windowsHide: true,
+    }),
+  );
+  const chat = project.targets?.[targetName];
+  if (!chat) {
+    throw new Error(
+      `Target "${targetName}" not found on project ${projectName}`,
+    );
+  }
+  const command: string =
+    chat.options?.command ?? chat.options?.commands?.[0] ?? '';
+  if (!command) {
+    throw new Error(`Target "${target}" declares no command`);
+  }
+  // Nx templates `cwd`/`env` with {projectRoot} / {workspaceRoot}.
+  const expand = (value: string) =>
+    value
+      .replaceAll('{projectRoot}', project.root)
+      .replaceAll('{workspaceRoot}', '.');
+  return {
+    command: expand(command),
+    cwd: expand(chat.options?.cwd ?? '{workspaceRoot}'),
+    env: Object.fromEntries(
+      Object.entries(chat.options?.env ?? {}).map(([k, v]) => [
+        k,
+        expand(String(v)),
+      ]),
+    ),
+    // Only same-project string deps are used here (the generated chat targets
+    // declare at most the client-codegen target).
+    dependsOn: (chat.dependsOn ?? []).filter(
+      (d: unknown): d is string => typeof d === 'string',
+    ),
+  };
+}
+
+/**
+ * Drive a generated `<agent>-chat` script through a PTY (the Clack prompt needs
+ * a TTY), send one message once the prompt is up, and resolve when the agent
+ * streams `expected` back. Proves the chat CLI boots, connects, submits input
+ * and renders the reply end-to-end.
+ *
+ * The chat script is spawned directly rather than via `nx run <target>`. Going
+ * through Nx puts the CLI two processes down (`pnpm → nx → tsx`), and when those
+ * intermediates have not wired the PTY through by the time we type, the input is
+ * silently dropped and the prompt never reads it — the flake this avoids. Any
+ * `dependsOn` codegen is run first, without a PTY, so the PTY has exactly one
+ * process in it.
+ */
+async function chatStreamsReply(
+  projectRoot: string,
   target: string,
   expected: string,
   timeoutMs: number,
-  message: string,
-): Promise<{ ok: boolean; consumed: boolean; out: string }> {
+  message = 'What is 3 times 5?',
+): Promise<void> {
+  const [projectName] = target.split(':');
+  const { command, cwd, env, dependsOn } = readChatTarget(projectRoot, target);
+
+  // HTTP chat imports a generated client, so run the target's `dependsOn` first.
+  // Ordinary (non-PTY) execution — only the chat script itself needs a TTY.
+  for (const dep of dependsOn) {
+    await runCLI(`run ${projectName}:${dep}`, { cwd: projectRoot });
+  }
+
+  // Spawn the binary directly so the PTY holds exactly one process — no shell
+  // or package-manager wrapper between us and the prompt. The dependency may be
+  // linked into either the project's or the workspace root's `.bin`.
+  const [bin, ...args] = command.split(' ');
+  const binPath = [
+    join(projectRoot, cwd, 'node_modules', '.bin', bin),
+    join(projectRoot, 'node_modules', '.bin', bin),
+  ].find((candidate) => existsSync(candidate));
+  if (!binPath) {
+    throw new Error(
+      `Could not resolve "${bin}" for ${target} in ${cwd} or the workspace root`,
+    );
+  }
   return new Promise((resolve, reject) => {
-    const term = pty.spawn('pnpm', ['exec', 'nx', 'run', target], {
-      cwd,
-      env: { ...process.env, NX_DAEMON: 'true', RUNTIME_CONFIG_APP_ID: '' },
+    const term = pty.spawn(binPath, args, {
+      cwd: join(projectRoot, cwd),
+      env: {
+        ...process.env,
+        ...env,
+        NX_DAEMON: 'true',
+        RUNTIME_CONFIG_APP_ID: '',
+      },
     });
     let out = '';
     let sent = false;
     let settled = false;
     const clean = () => stripVTControlCharacters(out);
-    // Clack reads in raw mode with echo off and repaints the line itself, so the
-    // message appearing back is proof the prompt actually consumed stdin.
-    const consumed = () => clean().includes(message);
-    const finish = (result?: { ok: boolean }, err?: Error) => {
+    const finish = (err?: Error) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -340,11 +426,17 @@ function chatAttempt(
       } catch {
         // already dead
       }
-      err
-        ? reject(err)
-        : resolve({ ok: result!.ok, consumed: consumed(), out: clean() });
+      err ? reject(err) : resolve();
     };
-    const timer = setTimeout(() => finish({ ok: false }), timeoutMs);
+    const timer = setTimeout(
+      () =>
+        finish(
+          new Error(
+            `Chat target ${target} did not stream "${expected}" within ${timeoutMs}ms. Output:\n${clean()}`,
+          ),
+        ),
+      timeoutMs,
+    );
     term.onData((d) => {
       out += d;
       process.stdout.write(`[${target}] ${d}`);
@@ -357,62 +449,13 @@ function chatAttempt(
       }
       if (
         sent &&
-        consumed() &&
         text.slice(text.indexOf(message) + message.length).includes(expected)
       ) {
-        finish({ ok: true });
+        finish();
       }
     });
-    term.onExit(() =>
-      finish(undefined, new Error(`Chat target ${target} exited early`)),
-    );
+    term.onExit(() => finish(new Error(`Chat target ${target} exited early`)));
   });
-}
-
-/**
- * Drive `agent-chat` through a PTY (the Clack prompt needs a TTY), send one
- * message once connected, and resolve when the agent streams `expected` back.
- * Proves the standalone chat boots, connects, submits input and renders the
- * reply end-to-end. Rejects if not seen before the timeout.
- *
- * Occasionally the prompt never receives what we type: `agent-chat` runs as a
- * grandchild (pnpm → nx → tsx), and if the intermediate processes have not wired
- * the PTY through to it by the time we write, the input goes nowhere. Clack
- * renders its own input, so an attempt whose output never shows the message
- * never consumed it — relaunch rather than spend the whole budget waiting on a
- * process that will never answer.
- */
-async function chatStreamsReply(
-  cwd: string,
-  target: string,
-  expected: string,
-  timeoutMs: number,
-  message = 'What is 3 times 5?',
-): Promise<void> {
-  const attempts = 3;
-  let last = '';
-  for (let attempt = 1; attempt <= attempts; attempt++) {
-    const { ok, consumed, out } = await chatAttempt(
-      cwd,
-      target,
-      expected,
-      timeoutMs,
-      message,
-    );
-    if (ok) return;
-    last = out;
-    // The prompt did receive the message and still did not answer — a real
-    // failure, so report it rather than masking it behind a retry.
-    if (consumed) break;
-    if (attempt < attempts) {
-      console.warn(
-        `Chat target ${target} never consumed the typed message (attempt ${attempt}/${attempts}); relaunching`,
-      );
-    }
-  }
-  throw new Error(
-    `Chat target ${target} did not stream "${expected}" within ${timeoutMs}ms. Output:\n${last}`,
-  );
 }
 
 function killProcess(child: ChildProcess): Promise<void> {
