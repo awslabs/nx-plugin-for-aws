@@ -76,7 +76,9 @@ For every request, the handler:
 
 Authentication follows whichever mode your tRPC API was generated with. Under **IAM** (default) the caller signs with SigV4 and the actor id comes from the IAM principal ARN (`event.requestContext.identity.userArn`); under **Cognito** the caller presents a bearer JWT and the actor id comes from the validated `sub` claim (`event.requestContext.authorizer.claims.sub`). In both cases authentication terminates at the API — the Harness itself is invoked with the Lambda's own IAM execution role, and the caller's token is never forwarded to it. Per-user scoping is enforced by this handler (the derived `actorId`), not by the Harness, so its deployment-time `auth: iam` setting is unchanged.
 
-The generated `history` tRPC query reads AgentCore Memory directly (`ListEvents`, scoped to the same server-derived actor id and session), returning the conversation as `{ messages: { role, content }[] }`. Because the Harness commits every exchange to Memory as it completes, `history` is the durable read path — a dropped connection, reload, or another device never loses a turn. The generated CopilotKit UI calls it on mount and after every run; a bring-your-own frontend can call it too, or ignore it.
+The generated `history` tRPC query reads AgentCore Memory directly (`ListEvents`, scoped to the same server-derived actor id and session) and reconstructs the **full** transcript, not just text: assistant tool calls become `toolCalls` on an assistant message, and their results (stored under role `USER` in Memory) become separate `tool` messages carrying a `toolCallId` that links back to the call. Because the Harness commits every exchange to Memory as it completes, `history` is the durable read path — a dropped connection, reload, or another device never loses a turn, tool-call chips included, so a reloaded conversation renders identically to the live stream. The generated CopilotKit UI calls it on mount and after every run; a bring-your-own frontend can call it too, or ignore it.
+
+Reloading only converges on that server transcript if the AG-UI agent instance handed to `CopilotKitProvider` is **stable** across renders — the generated `useAgui<HarnessName>` hook memoizes the agent, and (under `auth: iam`) `useSigV4`'s returned signing client is itself memoized so it doesn't change identity every render. An unstable agent gets torn down and rebuilt before `setMessages` from `history` ever reaches a render, producing an empty transcript on reload even though `/agui` and Memory are both working correctly. Keep this in mind if you swap in your own signing/auth hook in place of `useSigV4` — it must return a referentially stable object too.
 
 ## Infrastructure
 
@@ -182,14 +184,16 @@ The Harness also requires Amazon Bedrock model access to be enabled in the targe
 
 ## Building the chat UI
 
-The website-side connection (step 2) wired the AG-UI plumbing into your website — the shared `<AguiProvider>` (already wrapping `<App />` in `main.tsx`), the `useAgui<HarnessName>` hook pointed at this API's `/agui` route, and a themed `src/components/copilot` module — but it does **not** add a chat component to any route. You render one, importing it from the generated `./components/copilot` module so your website's `ux` theme is applied.
+The website-side connection (step 2) wired the AG-UI plumbing into your website — the shared `<AguiProvider>` (already wrapping `<App />` in `main.tsx`) and the `useAgui<HarnessName>` hook pointed at this API's `/agui` route — but it does **not** add a chat component to any route. You render one yourself, importing the stock `<CopilotChat>` from `@copilotkit/react-core/v2`; the standard AG-UI frontend works against this project as-is, with no generated theming layer required.
 
 Two props drive it:
 
 - **`agentId`** — the Harness's name in kebab-case, the key returned by the generated `useAgui<HarnessName>` hook (`agentcore-harness` for the project above).
 - **`threadId`** — identifies the conversation. The hook hydrates the active thread from `history` on mount and after every run, so a reload or another device always restores the transcript from AgentCore Memory. Pass a **stable** id to make a conversation resumable; omit it to start a fresh thread. Wrapping the component in `key={threadId}` remounts it when the id changes, re-running the mount-time hydration so switching threads reloads that thread's history. Threads are scoped to the caller's server-derived actor id, so a user only ever sees their own conversations. (The <Link path="get_started/tutorials/dungeon-game/4">Dungeon Adventure tutorial</Link> uses this deterministic-`threadId` pattern to make each game route sharable and resumable.)
 
-`<CopilotChat>`, `<CopilotSidebar>` and `<CopilotPopup>` all take these same props for an inline chat, a docked panel, or a floating popup. See <Link path="guides/connection/react-agui#customising-the-look-and-feel">Customising the look and feel</Link> for the slot-based theming. This is the same generated frontend the <Link path="guides/connection/react-agui">React → AG-UI guide</Link> documents in full; the only difference is that the hook talks to your API's `/agui` route rather than an agent runtime directly.
+`<CopilotChat>`, `<CopilotSidebar>` and `<CopilotPopup>` all take these same props for an inline chat, a docked panel, or a floating popup. This is the same stock CopilotKit frontend the <Link path="guides/connection/react-agui">React → AG-UI guide</Link> documents in full; the only difference is that the hook talks to your API's `/agui` route rather than an agent runtime directly.
+
+`<CopilotChat>` fills its parent, so give it a container with an explicit height and width (e.g. `flex: 1` inside a sized flex layout); dropping it into an unsized box collapses the message input and footer to their minimum width. The example below wraps it accordingly.
 
 Rather than hard-code a single `threadId`, the walkthrough below renders a **session picker** that lists a user's past conversations and opens each one — the shape most apps need.
 
@@ -382,21 +386,72 @@ export class ApplicationStack extends Stack {
 
 `grantReadWriteData` grants both the DynamoDB and KMS permissions the handlers need. The `ChatSessions` construct also registers the deployed table name in <Link path="guides/runtime-config">Runtime Configuration</Link>, which `resolveTableName()` reads at runtime.
 
-#### 5. Render the chat page with a session picker
+#### 5. Render the chat page and a sidebar session picker
 
-Add the chat page. The website's generated `use<ApiName>` tRPC hook (here `useTrpcApi`, from the <Link path="guides/connection/react-trpc">React → tRPC connection</Link>) exposes the new procedures. Render a list that opens each thread, a control that starts a fresh one, and the `<CopilotChat>` for the active thread — `key={threadId}` remounts it on selection so the durable `history` path reloads that thread:
+Add the chat page. It reads the active `threadId` from the route's search params and renders the `<CopilotChat>` for that thread — `key={threadId}` remounts it when the id changes, so the durable `history` path reloads the selected thread. The session picker itself lives in the sidebar (next), which navigates here with `?threadId=<id>`, keeping the chat route itself minimal:
 
 ```tsx title="packages/react-website/src/routes/chat.tsx"
 import '@copilotkit/react-core/v2/styles.css';
+import { CopilotChat } from '@copilotkit/react-core/v2';
+import { createFileRoute } from '@tanstack/react-router';
+
+export const Route = createFileRoute('/chat')({
+  component: ChatPage,
+  validateSearch: (search: Record<string, unknown>): { threadId?: string } => ({
+    threadId: typeof search.threadId === 'string' ? search.threadId : undefined,
+  }),
+});
+
+function ChatPage() {
+  const { threadId } = Route.useSearch();
+
+  // Stock CopilotChat fills its parent, so give it a sized container: an
+  // explicit height plus `minWidth`/`minHeight: 0` so it fills and shrinks
+  // rather than collapsing to its content's minimum width.
+  return (
+    <div style={{ height: 'calc(100svh - 9rem)', minWidth: 0, minHeight: 0 }}>
+      {threadId ? (
+        <CopilotChat
+          key={threadId}
+          agentId="agentcore-harness"
+          threadId={threadId}
+        />
+      ) : (
+        <div>Select a chat or start a new one from the sidebar.</div>
+      )}
+    </div>
+  );
+}
+
+```
+
+The route lives inside the `<AguiProvider>` wrapper that already wraps your app, and `validateSearch` is what lets the sidebar link to it with `?threadId=<id>`.
+
+Now put the session picker in the website's generated sidebar. The generated file already renders a nav group (Home, Chat); add a second **Chats** `SidebarGroup` that lists the user's saved threads — each a `<Link>` to `/chat?threadId=…` — plus a **New chat** action that creates a thread and navigates to it. This keeps thread navigation in the sidebar and the chat route itself minimal:
+
+```tsx title="packages/react-website/src/components/app-sidebar.tsx"
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupAction,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+} from '@my-project/common-shadcn/components/ui/sidebar';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
-import { CopilotChat } from '../components/copilot';
+import { Link, useNavigate } from '@tanstack/react-router';
+import { Home, MessageSquare, Plus } from 'lucide-react';
+
+import Config from '../config';
 import { useTrpcApi } from '../hooks/useTrpcApi';
 
-export function ChatPage() {
+export function AppSidebar() {
   const trpc = useTrpcApi();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [threadId, setThreadId] = useState<string>();
 
   const sessions = useQuery(trpc.chatSessions.list.queryOptions());
   const saveSession = useMutation(
@@ -409,56 +464,13 @@ export function ChatPage() {
   const newChat = () => {
     // randomUUID is 36 chars, satisfying AgentCore's >= 33 char session id rule.
     const id = crypto.randomUUID();
-    saveSession.mutate({ threadId: id, title: 'New chat' });
-    setThreadId(id);
+    saveSession.mutate({
+      threadId: id,
+      title: `New chat ${new Date().toLocaleString()}`,
+    });
+    void navigate({ to: '/chat', search: { threadId: id } });
   };
 
-  return (
-    <div style={{ display: 'flex', gap: '1rem' }}>
-      <aside>
-        <button onClick={newChat}>New chat</button>
-        <ul>
-          {sessions.data?.sessions.map((s) => (
-            <li key={s.threadId}>
-              <button onClick={() => setThreadId(s.threadId)}>{s.title}</button>
-            </li>
-          ))}
-        </ul>
-      </aside>
-      {threadId && (
-        <CopilotChat
-          key={threadId}
-          agentId="agentcore-harness"
-          threadId={threadId}
-        />
-      )}
-    </div>
-  );
-}
-
-```
-
-Render this page anywhere inside the `<AguiProvider>` wrapper (i.e. anywhere in your app). Call `saveChatSession` again to rename a session (e.g. derive a title from the first user message once a run finishes). The <Link path="get_started/tutorials/dungeon-game/4">Dungeon Adventure tutorial</Link>'s "Continue" list is another worked example of this app-owned-index shape.
-
-Finally, add a link to the chat page in the website's generated sidebar so it's reachable from the nav:
-
-```tsx title="packages/react-website/src/components/app-sidebar.tsx" ins={11,23-27}
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-} from '@my-project/common-shadcn/components/ui/sidebar';
-import { Link } from '@tanstack/react-router';
-import { Home, MessageSquare } from 'lucide-react';
-
-import Config from '../config';
-
-export function AppSidebar() {
   // Menu items.
   const navItems = [
     {
@@ -472,6 +484,7 @@ export function AppSidebar() {
       icon: MessageSquare,
     },
   ];
+
   return (
     <Sidebar>
       <SidebarContent>
@@ -492,17 +505,54 @@ export function AppSidebar() {
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel>Chats</SidebarGroupLabel>
+          <SidebarGroupAction title="New chat" onClick={newChat}>
+            <Plus />
+            <span className="sr-only">New chat</span>
+          </SidebarGroupAction>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {sessions.data?.sessions.map((s) => (
+                <SidebarMenuItem key={s.threadId}>
+                  <SidebarMenuButton asChild>
+                    <Link
+                      to="/chat"
+                      search={{ threadId: s.threadId }}
+                      preload="intent"
+                    >
+                      <MessageSquare />
+                      <span className="truncate">{s.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
       </SidebarContent>
     </Sidebar>
   );
 }
 ```
 
+Call `saveChatSession` again to rename a session (e.g. derive a title from the first user message once a run finishes). The <Link path="get_started/tutorials/dungeon-game/4">Dungeon Adventure tutorial</Link>'s "Continue" list is another worked example of this app-owned-index shape.
+
 With steps 1–5 complete, run one `deploy-sandbox` to ship everything — the DynamoDB table and IAM grants from step 4, and the website changes from step 5 (the website's built assets are deployed by its construct, so any frontend edit needs a deploy to appear on the CloudFront URL):
 
 <NxCommands commands={['deploy-sandbox infra']} />
 
-Once deployed, open the website's CloudFront URL (a CDK output), sign up through Cognito, and the CopilotKit chat will stream from your Harness through the API's `/agui` route.
+Once deployed, open the website's CloudFront URL (a CDK output). The generated User Pool defaults to `AllowAdminCreateUserOnly: true` (no self-signup), so create your first user with the AWS CLI rather than a signup form — the username can't be email-shaped, since the pool uses email as an alias:
+
+```bash
+aws cognito-idp admin-create-user --user-pool-id <POOL_ID> --region <REGION> \
+  --username <name> --user-attributes Name=email,Value=<you@example.com> Name=email_verified,Value=true --message-action SUPPRESS
+aws cognito-idp admin-set-user-password --user-pool-id <POOL_ID> --region <REGION> \
+  --username <name> --password '<TempPass!123>' --permanent
+```
+
+Sign in with that username and password, and the CopilotKit chat will stream from your Harness through the API's `/agui` route.
 
 :::note[Local dev shares one partition]
 Under the `dev` target there's no authorizer, so `actorIdFromEvent` resolves to `anonymous` (the same fallback `history` uses locally) — every session is stored under that single partition. Per-user isolation takes effect against a deployed stack, where the API's authorizer supplies a real IAM principal or Cognito `sub`.
@@ -524,6 +574,8 @@ const agent = new HttpAgent({
 ```
 
 Authenticate exactly as you would any other request to this API — SigV4 for `auth: iam`, a bearer JWT for `auth: cognito`. For durable, cross-device hydration, call the `history` tRPC procedure the same way you'd call any other procedure on this API.
+
+`history`'s messages include tool calls and their results, not just text — map them into your AG-UI client's message model as an assistant message carrying `toolCalls` (`[{ id, type: 'function', function: { name, arguments } }]`) followed by a `tool` message whose `toolCallId` matches that call's `id`, the same linkage `@ag-ui/client`'s own `Message` type expects. And whatever object you feed your client's `fetch`/signing dependency on, make sure it's referentially stable across renders (memoize it) — an agent instance that's recreated every render discards a `setMessages`-based hydration before it ever paints, which looks identical to `history` returning nothing even though it isn't.
 
 ## Local Development
 

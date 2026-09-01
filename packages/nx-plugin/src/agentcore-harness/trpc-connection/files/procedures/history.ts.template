@@ -8,12 +8,46 @@ import { publicProcedure } from '../init<% if (esm) { %>.js<% } %>';
 
 const client = new BedrockAgentCoreClient({});
 
+interface ParsedToolCall {
+  id: string;
+  type: 'function';
+  function: { name: string; arguments: string };
+}
+
+interface ParsedToolResult {
+  toolCallId: string;
+  content: string;
+}
+
+interface ParsedTurnContent {
+  text: string;
+  toolCalls: ParsedToolCall[];
+  toolResults: ParsedToolResult[];
+}
+
+const EMPTY_TURN_CONTENT: ParsedTurnContent = {
+  text: '',
+  toolCalls: [],
+  toolResults: [],
+};
+
+function textFromToolResultContent(content: unknown): string {
+  if (!Array.isArray(content)) return '';
+  return content
+    .filter(
+      (part): part is { text: string } => typeof part?.text === 'string',
+    )
+    .map((part) => part.text)
+    .join('');
+}
+
 // A Strands-backed Harness's Memory events store each turn as a
 // JSON-stringified turn record — `conversational.content.text` is that
-// string, not the message text itself. Unwrap `message.content[].text`;
-// fall back to the raw string for a payload shape that turns out not to be
-// this record (e.g. a future Harness runtime with a simpler content shape).
-function textFromContent(content: unknown): string {
+// string, not the message text itself. Unwrap `message.content[]` into text,
+// toolUse and toolResult blocks; fall back to the raw string as plain text
+// for a payload shape that turns out not to be this record (e.g. a future
+// Harness runtime with a simpler content shape).
+function parseTurnContent(content: unknown): ParsedTurnContent {
   const raw =
     content &&
     typeof content === 'object' &&
@@ -21,28 +55,60 @@ function textFromContent(content: unknown): string {
     typeof content.text === 'string'
       ? content.text
       : '';
-  if (!raw) return '';
+  if (!raw) return EMPTY_TURN_CONTENT;
+
+  let parts: unknown;
   try {
-    const parts = JSON.parse(raw)?.message?.content;
-    if (Array.isArray(parts)) {
-      return parts
-        .filter(
-          (part): part is { text: string } => typeof part?.text === 'string',
-        )
-        .map((part) => part.text)
-        .join('');
-    }
+    parts = JSON.parse(raw)?.message?.content;
   } catch {
     // Not the JSON turn-record shape — use the raw string as-is.
+    return { ...EMPTY_TURN_CONTENT, text: raw };
   }
-  return raw;
+  if (!Array.isArray(parts)) return { ...EMPTY_TURN_CONTENT, text: raw };
+
+  const textParts: string[] = [];
+  const toolCalls: ParsedToolCall[] = [];
+  const toolResults: ParsedToolResult[] = [];
+  for (const part of parts) {
+    if (typeof part?.text === 'string') {
+      textParts.push(part.text);
+    } else if (typeof part?.toolUse?.toolUseId === 'string') {
+      toolCalls.push({
+        id: part.toolUse.toolUseId,
+        type: 'function',
+        function: {
+          name:
+            typeof part.toolUse.name === 'string'
+              ? part.toolUse.name
+              : 'unknown',
+          arguments: JSON.stringify(part.toolUse.input ?? {}),
+        },
+      });
+    } else if (typeof part?.toolResult?.toolUseId === 'string') {
+      toolResults.push({
+        toolCallId: part.toolResult.toolUseId,
+        content: textFromToolResultContent(part.toolResult.content),
+      });
+    }
+  }
+  return { text: textParts.join(''), toolCalls, toolResults };
 }
 
 const HistoryInputSchema = z.object({ threadId: z.string() });
 
 const HistoryMessageSchema = z.object({
-  role: z.enum(['user', 'assistant']),
+  role: z.enum(['user', 'assistant', 'tool']),
   content: z.string(),
+  toolCalls: z
+    .array(
+      z.object({
+        id: z.string(),
+        type: z.literal('function'),
+        function: z.object({ name: z.string(), arguments: z.string() }),
+      }),
+    )
+    .optional(),
+  toolCallId: z.string().optional(),
 });
 
 const HistoryOutputSchema = z.object({
@@ -56,6 +122,12 @@ const HistoryOutputSchema = z.object({
  * connection, a page reload, or a check-in from another device. Scoped to the
  * caller's own actor id (server-derived, same as `/agui`), never a
  * client-supplied one.
+ *
+ * Reconstructs the full transcript, not just text: tool calls made by the
+ * assistant become `toolCalls` on an assistant message, and their results
+ * (stored under role USER in Memory) become separate `tool` messages keyed
+ * by `toolCallId`, so a reloaded thread renders identically to the live
+ * stream, tool-call chips included.
  */
 export const history = publicProcedure
   .input(HistoryInputSchema)
@@ -84,12 +156,43 @@ export const history = publicProcedure
           (b.eventTimestamp?.getTime() ?? 0),
       )
       .flatMap((event) => event.payload ?? [])
-      .flatMap((payload) => (payload.conversational ? [payload.conversational] : []))
-      .map((turn) => ({
-        role:
-          turn.role === 'ASSISTANT' ? ('assistant' as const) : ('user' as const),
-        content: textFromContent(turn.content),
-      }));
+      .flatMap((payload) =>
+        payload.conversational ? [payload.conversational] : [],
+      )
+      .flatMap(
+        (
+          turn,
+        ): Array<
+          | { role: 'assistant'; content: string; toolCalls?: ParsedToolCall[] }
+          | { role: 'user'; content: string }
+          | { role: 'tool'; content: string; toolCallId: string }
+        > => {
+          const { text, toolCalls, toolResults } = parseTurnContent(
+            turn.content,
+          );
+
+          if (turn.role === 'ASSISTANT') {
+            return text || toolCalls.length
+              ? [
+                  {
+                    role: 'assistant' as const,
+                    content: text,
+                    ...(toolCalls.length ? { toolCalls } : {}),
+                  },
+                ]
+              : [];
+          }
+
+          return [
+            ...(text ? [{ role: 'user' as const, content: text }] : []),
+            ...toolResults.map((result) => ({
+              role: 'tool' as const,
+              content: result.content,
+              toolCallId: result.toolCallId,
+            })),
+          ];
+        },
+      );
 
     return { messages };
   });
