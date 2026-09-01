@@ -31,7 +31,7 @@ export class ExampleStack extends Stack {
 <Fragment slot="terraform">
 제너레이터를 실행할 때 선택한 `name`을 기반으로 하거나 기본적으로 `<ProjectName>-agent`로 명명된 Terraform 모듈이 생성됩니다.
 
-공유된 <Link path="/ko/guides/runtime-config#writing-configuration">`runtime_config_appconfig`</Link> 모듈의 출력을 에이전트 모듈에 전달하세요. 기본 `agentcore` 패키징에서는 에이전트의 코드가 공유 자산 버킷에 스테이징되므로 이것도 전달하세요 — Lambda 및 API 모듈이 이미 수행하는 것처럼 배포당 한 번 `core/asset-bucket` 모듈을 인스턴스화하세요:
+공유된 <Link path="/ko/guides/runtime-config#writing-configuration">`runtime_config_appconfig`</Link> 모듈의 출력을 에이전트 모듈에 전달하고, 패키징에 사용되는 공유 아티팩트 저장소도 함께 전달하세요. 기본 `agentcore` 패키징에서는 에이전트의 코드가 공유 자산 버킷에 스테이징되므로 Lambda 및 API 모듈이 이미 수행하는 것처럼 배포당 한 번 `core/asset-bucket` 모듈을 인스턴스화하세요:
 
 ```terraform
 module "asset_bucket" {
@@ -44,9 +44,26 @@ module "my_project_agent" {
   appconfig_application_id  = module.runtime_config_appconfig.application_id
   appconfig_application_arn = module.runtime_config_appconfig.application_arn
 
-  # Only for `agentcore` packaging; `agentcore-ecr` publishes to ECR instead.
   asset_bucket_name = module.asset_bucket.bucket_name
   asset_bucket_arn  = module.asset_bucket.bucket_arn
+}
+```
+
+`agentcore-ecr`에서는 에이전트의 이미지가 대신 공유 자산 레지스트리에 게시되므로 버킷 대신 `core/asset-ecr`의 출력을 전달하세요. 하나의 레지스트리가 워크스페이스의 모든 컨테이너를 제공하므로 에이전트는 자체 리포지토리가 필요하지 않습니다:
+
+```terraform
+module "asset_ecr" {
+  source = "../../common/terraform/src/core/asset-ecr"
+}
+
+module "my_project_agent" {
+  source = "../../common/terraform/src/app/agents/my-project-agent"
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
+  asset_ecr_repository_url = module.asset_ecr.repository_url
+  asset_ecr_repository_arn = module.asset_ecr.repository_arn
 }
 ```
 </Fragment>
@@ -107,7 +124,7 @@ module "my_project_agent" {
   appconfig_application_id  = module.runtime_config_appconfig.application_id
   appconfig_application_arn = module.runtime_config_appconfig.application_arn
 
-  # Only for `agentcore` packaging; `agentcore-ecr` publishes to ECR instead.
+  # Under `agentcore-ecr`, pass `core/asset-ecr`'s outputs instead.
   asset_bucket_name = module.asset_bucket.bucket_name
   asset_bucket_arn  = module.asset_bucket.bucket_arn
 }

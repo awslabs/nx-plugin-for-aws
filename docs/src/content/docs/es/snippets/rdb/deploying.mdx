@@ -37,7 +37,13 @@ La infraestructura generada crea dos usuarios de base de datos:
 <Fragment slot="terraform">
 El módulo Terraform se crea en `common/terraform`. Ejemplo de uso:
 
+La Lambda de migración se despliega como una imagen de contenedor, publicada en el registro de activos compartido. Instancia el módulo `core/asset-ecr` una vez por despliegue y pasa su `repository_url` a cada módulo de base de datos:
+
 ```hcl title="packages/infra/src/main.tf"
+module "asset_ecr" {
+  source = "../../common/terraform/src/core/asset-ecr"
+}
+
 module "my_database" {
   source = "../../common/terraform/src/app/dbs/my-database"
 
@@ -46,11 +52,13 @@ module "my_database" {
   database_subnet_ids = aws_subnet.database[*].id
   lambda_subnet_ids   = aws_subnet.private[*].id
 
+  asset_ecr_repository_url = module.asset_ecr.repository_url
+
   tags = local.common_tags
 }
 ```
 
-Esto aprovisiona un clúster Aurora con RDS Proxy, credenciales de administrador, Lambda create-db-user, registro de configuración en tiempo de ejecución, Lambda de migración y recursos de registro de contenedores.
+Esto aprovisiona un clúster Aurora con RDS Proxy, credenciales de administrador, Lambda create-db-user, registro de configuración en tiempo de ejecución y Lambda de migración.
 
 El módulo de base de datos registra sus detalles de conexión bajo el espacio de nombres de <Link path="guides/runtime-config">configuración en tiempo de ejecución</Link> `database`, que la aplicación AppConfig de configuración en tiempo de ejecución compartida expone por defecto.
 
