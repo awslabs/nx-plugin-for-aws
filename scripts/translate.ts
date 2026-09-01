@@ -326,16 +326,24 @@ function assertFrontmatterIsParseable(text: string): void {
  * occasionally emits a component's import line twice, which acorn rejects with
  * `Identifier '<name>' has already been declared` and fails the docs build, so
  * reject it here and let the retry write the file cleanly.
+ *
+ * Only the prose carries MDX imports, so fenced code is excluded — a document
+ * quoting two Python snippets that each `import os` is valid. The name and the
+ * `from` are matched on the import's own line for the same reason.
  */
 function assertImportsAreUnique(text: string): void {
   const seen = new Set<string>();
-  for (const [, name] of text.matchAll(/^import\s+(\w+)\s+from\s+/gm)) {
-    if (seen.has(name)) {
-      throw new Error(
-        `duplicate import of "${name}" — acorn rejects a redeclared identifier and the docs build fails`,
-      );
+  for (const chunk of splitOnFences(text).prose) {
+    for (const [, name] of chunk.matchAll(
+      /^import[^\S\n]+(\w+)[^\S\n]+from[^\S\n]/gm,
+    )) {
+      if (seen.has(name)) {
+        throw new Error(
+          `duplicate import of "${name}" — acorn rejects a redeclared identifier and the docs build fails`,
+        );
+      }
+      seen.add(name);
     }
-    seen.add(name);
   }
 }
 
