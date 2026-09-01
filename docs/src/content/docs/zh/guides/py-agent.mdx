@@ -55,7 +55,7 @@ import OptionFilter from '@components/option-filter.astro';
           - \_\_init\_\_.py Python package initialization
           - session_id_middleware.py Binds the inbound AgentCore session ID for the request
         - main.py FastAPI entry point for Bedrock AgentCore Runtime
-        - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - pyproject.toml Updated with Strands dependencies
     - project.json Updated with agent serve targets
 </FileTree>
@@ -77,7 +77,7 @@ import OptionFilter from '@components/option-filter.astro';
           - \_\_init\_\_.py Python package initialization
           - session_id_middleware.py Binds the inbound AgentCore session ID for the request
         - main.py A2A server entry point
-        - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - pyproject.toml Updated with framework and A2A dependencies
     - project.json Updated with agent serve targets
 </FileTree>
@@ -99,7 +99,7 @@ import OptionFilter from '@components/option-filter.astro';
           - \_\_init\_\_.py Python package initialization
           - session_id_middleware.py Binds the inbound AgentCore session ID for the request
         - main.py AG-UI server entry point
-        - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - pyproject.toml Updated with framework and AG-UI dependencies
     - project.json Updated with agent serve targets
 </FileTree>
@@ -111,7 +111,9 @@ AG-UI 代理可以使用 <Link path="/guides/connection/react-agui">`connection`
 
 ### 基础设施
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment">
+<Snippet name="agentcore-hosting" />
+
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Bedrock AgentCore Runtime deployment">
 <Snippet name="shared-constructs" />
 
 为了部署您的 Agent，会生成以下文件：
@@ -136,6 +138,10 @@ AG-UI 代理可以使用 <Link path="/guides/connection/react-agui">`connection`
     - core
       - agent-core
         - runtime.tf Generic module for deploying to Bedrock AgentCore Runtime
+      - agent-core-code (when `infra` is `agentcore`)
+        - runtime.tf Packages your agent's code and delegates to `agent-core`
+      - agent-core-container (when `infra` is `agentcore-ecr`)
+        - runtime.tf Builds and publishes your agent's image and delegates to `agent-core`
 </FileTree>
 </Fragment>
 </Infrastructure>
@@ -296,7 +302,7 @@ model = ChatBedrockConverse(
 
 服务器入口点因框架而异（Strands 产生一个上下文管理的 `Agent`，而 LangChain 驱动一个编译的 `create_agent` 图），但每个协议的外部契约是相同的。
 
-所有协议都公开 `/ping` 用于 AgentCore 运行时健康检查契约。A2A 代理监听端口 `9000`；HTTP 和 AG-UI 代理监听端口 `8080`。生成的 Dockerfile 和基础设施已为您配置。
+所有协议都公开 `/ping` 用于 AgentCore 运行时健康检查契约。A2A 代理监听端口 `9000`；HTTP 和 AG-UI 代理监听端口 `8080`。生成的基础设施已为您配置。
 
 <OptionFilter when={{ protocol: 'http' }} description="FastAPI HTTP server details">
 ## FastAPI 服务器（HTTP 协议）
@@ -441,7 +447,7 @@ AG-UI 代理旨在由前端直接使用。使用 <Link path="/guides/connection/
 
 当您自定义代理的输入形状（例如向 `InvokeInput` 添加新字段）时，更新 `chat.ts` 以在调用代理时传递新字段，其余部分将自动工作。
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Deployed agent chat details">
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Deployed agent chat details">
 #### 与您部署的代理聊天
 
 要与部署到 Bedrock AgentCore 的代理聊天，请将 `RUNTIME_CONFIG_APP_ID` 环境变量设置为部署的 AppConfig 应用程序 ID（由部署的堆栈输出为 `RuntimeConfigApplicationId`）。聊天脚本从运行时配置解析您的代理的运行时 ARN 并连接到部署的端点：
@@ -473,7 +479,7 @@ aws cognito-idp admin-initiate-auth \
 </Tabs>
 </OptionFilter>
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment details">
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Bedrock AgentCore Runtime deployment details">
 ## 将您的代理部署到 Bedrock AgentCore Runtime
 
 <Snippet name="agent/bedrock-deployment" parentHeading="将您的代理部署到 Bedrock AgentCore Runtime" />
@@ -485,15 +491,21 @@ aws cognito-idp admin-initiate-auth \
 - 使用 `uv export` 将您的 Python 依赖项导出到 `requirements.txt` 文件
 - 使用 `uv pip install` 为目标平台（`aarch64-manylinux_2_28`）安装依赖项
 
+<OptionFilter when={{ infra: 'agentcore' }} description="Code package target">
+还会添加一个 `<your-agent-name>-package` 目标，它组装可部署的代码包：`aarch64` 依赖项包、您的 Python 模块树和根 `main.py` 入口点。生成的基础设施将此目录作为 `.zip` 上传 — 在 CDK 下通过 `AgentRuntimeArtifact.fromCodeAsset`，或在 Terraform 下归档到共享资产存储桶中。
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'agentcore-ecr' }} description="Container image build and scan">
 还会添加一个特定于您的 Agent 的 `docker` 目标，它将 `Dockerfile` 和打包的工件复制到 docker 上下文目录中。这将 `Dockerfile` 与构建输出放在一起，允许 CDK 使用 `AgentRuntimeArtifact.fromAsset` 直接构建 Docker 镜像。
 
 ### 镜像扫描
 
 <Snippet name="trivy-image-scan" parentHeading="镜像扫描" />
+</OptionFilter>
 
 ### 可观测性
 
-您的代理通过在 `Dockerfile` 中配置自动检测，使用 [AWS Distro for Open Telemetry](https://aws.amazon.com/otel/)（ADOT）自动配置可观测性。
+您的代理使用 [AWS Distro for Open Telemetry](https://aws.amazon.com/otel/)（ADOT）自动配置可观测性。
 
 您可以在 CloudWatch AWS 控制台中找到跟踪，方法是在菜单中选择"GenAI Observability"。请注意，要填充跟踪，您需要启用[事务搜索](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html)。
 

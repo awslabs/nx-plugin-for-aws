@@ -6,7 +6,7 @@ import Infrastructure from '@components/infrastructure.astro';
 
 ### Infrastructure as Code
 
-Nếu bạn chọn `agentcore` cho `infra`, cơ sở hạ tầng CDK hoặc Terraform liên quan sẽ được tạo ra mà bạn có thể sử dụng để triển khai MCP server của mình lên [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html).
+Nếu bạn chọn `agentcore` hoặc `agentcore-ecr` cho `infra`, cơ sở hạ tầng CDK hoặc Terraform liên quan sẽ được tạo ra mà bạn có thể sử dụng để triển khai MCP server của mình lên [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html).
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -32,26 +32,26 @@ Construct này sử dụng [module `aws-cdk-lib/aws-bedrockagentcore`](https://d
 <Fragment slot="terraform">
 Một Terraform module được tạo ra cho bạn, được đặt tên dựa trên `name` bạn đã chọn khi chạy generator, hoặc `<ProjectName>-mcp-server` theo mặc định.
 
-Truyền các outputs của module <Link path="/vi/guides/runtime-config#writing-configuration">`runtime_config_appconfig`</Link> được chia sẻ vào module MCP server:
+Truyền các outputs của module <Link path="/vi/guides/runtime-config#writing-configuration">`runtime_config_appconfig`</Link> được chia sẻ vào module MCP server. Với cách đóng gói `agentcore` mặc định, code của server được lưu trữ trong shared asset bucket, vì vậy hãy truyền nó vào nữa — khởi tạo module `core/asset-bucket` một lần cho mỗi deployment, như các module Lambda và API đã làm:
 
 ```terraform
+module "asset_bucket" {
+  source = "../../common/terraform/src/core/asset-bucket"
+}
+
 module "my_project_mcp_server" {
   source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
 
   appconfig_application_id  = module.runtime_config_appconfig.application_id
   appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
+  # Only for `agentcore` packaging; `agentcore-ecr` publishes to ECR instead.
+  asset_bucket_name = module.asset_bucket.bucket_name
+  asset_bucket_arn  = module.asset_bucket.bucket_arn
 }
 ```
 </Fragment>
 </Infrastructure>
-
-:::caution[Yêu cầu Docker]
-[Docker](https://www.docker.com/) là bắt buộc để build và triển khai MCP server của bạn. Đảm bảo bạn đã cài đặt và khởi chạy Docker để tránh các lỗi như:
-
-```
-ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
-```
-:::
 
 ### Xác thực
 

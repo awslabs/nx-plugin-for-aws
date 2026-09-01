@@ -449,10 +449,43 @@ describe('ts#mcp-server generator', () => {
     expect(httpContent).toMatchSnapshot('mcp-server-http.ts');
   });
 
+  it('should default to code packaging on AgentCore Runtime', async () => {
+    await tsMcpServerGenerator(tree, {
+      project: 'test-project',
+      // No infra specified, should default to code packaging on agentcore
+      iac: 'cdk',
+    });
+
+    // Code packaging needs no Dockerfile or image build
+    expect(
+      tree.exists('apps/test-project/src/mcp-server/Dockerfile'),
+    ).toBeFalsy();
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+    expect(projectConfig.targets['bundle']).toBeDefined();
+    expect(projectConfig.targets['mcp-server-package']).toBeDefined();
+    expect(projectConfig.targets['mcp-server-docker']).toBeUndefined();
+    expect(projectConfig.targets['mcp-server-trivy']).toBeUndefined();
+    expect(projectConfig.targets['docker']).toBeUndefined();
+    expect(projectConfig.targets['trivy']).toBeUndefined();
+
+    const construct = tree.read(
+      'packages/common/constructs/src/app/mcp-servers/test-project-mcp-server/test-project-mcp-server.ts',
+      'utf-8',
+    );
+    expect(construct).toContain('AgentRuntimeArtifact.fromCodeAsset');
+    expect(construct).toContain('AgentCoreRuntime.NODE_22');
+    expect(construct).toContain(
+      "entrypoint: ['opentelemetry-instrument', 'index.js']",
+    );
+  });
+
   it('should generate MCP server with BedrockAgentCoreRuntime and default name', async () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'cdk',
     });
 
@@ -544,7 +577,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'custom-bedrock-server',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'cdk',
     });
 
@@ -695,7 +728,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'snapshot-bedrock-server',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'cdk',
     });
 
@@ -747,7 +780,7 @@ describe('ts#mcp-server generator', () => {
   it('should generate MCP server with Terraform provider and default name', async () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'terraform',
     });
 
@@ -793,7 +826,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'custom-terraform-server',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'terraform',
     });
 
@@ -831,7 +864,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'terraform-snapshot-server',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'terraform',
     });
 
@@ -863,7 +896,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'terraform-server',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'terraform',
     });
 
@@ -916,7 +949,7 @@ describe('ts#mcp-server generator', () => {
 
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'inherit',
     });
 
@@ -953,7 +986,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'path-test-server',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'cdk',
     });
 
@@ -979,7 +1012,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'first-server',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'cdk',
     });
 
@@ -987,7 +1020,7 @@ describe('ts#mcp-server generator', () => {
     await tsMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'second-server',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'cdk',
     });
 

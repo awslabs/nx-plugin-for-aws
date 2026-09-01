@@ -25,7 +25,16 @@ import {
   getPythonAgentConnectionModuleName,
   getPythonAgentConnectionProject,
 } from '../../utils/agent-connection/agent-connection.js';
-import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-constructs.js';
+import {
+  type AgentCoreArtifact,
+  addAgentInfra,
+} from '../../utils/agent-core-constructs/agent-core-constructs.js';
+import {
+  addPythonCodePackageTarget,
+  agentCorePythonRuntime,
+  isAgentCoreHosted,
+  isContainerHosted,
+} from '../../utils/agent-core-packaging.js';
 import { addPythonBundleTarget } from '../../utils/bundle/bundle.js';
 import { resolveContainers } from '../../utils/containers.js';
 import {
@@ -73,6 +82,7 @@ import type {
   AgentProtocol,
   PyAgentFramework,
   PyAgentGeneratorSchema,
+  PyAgentInfra,
   PyAgentSession,
 } from './schema';
 
@@ -88,6 +98,11 @@ export interface PyAgentMetadata extends IacMetadata {
    */
   readonly framework: PyAgentFramework;
   readonly session: PyAgentSession;
+  /**
+   * How this component is packaged and hosted, so a consumer can tell a
+   * code-packaged runtime from a container-packaged one without re-deriving it.
+   */
+  readonly infra: PyAgentInfra;
 }
 
 /** Whether the chat CLI signs its requests, which only IAM auth needs. */
@@ -357,7 +372,8 @@ export const pyAgentGenerator = async (
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
-  if (infra === 'agentcore') {
+  if (isAgentCoreHosted(infra)) {
+    const container = isContainerHosted(infra);
     const containers = await resolveContainers(tree, 'inherit');
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
 
@@ -369,64 +385,121 @@ export const pyAgentGenerator = async (
       },
     );
 
-    // Add the Dockerfile
-    generateFiles(
-      tree,
-      joinPathFragments(import.meta.dirname, 'files', 'deploy'),
-      targetSourceDir,
-      {
-        agentNameSnakeCase,
-        moduleName,
-        bundleOutputDir,
-        protocol,
-        pythonBaseImage: BASE_IMAGES.python,
-      },
-      { overwriteStrategy: OverwriteStrategy.KeepExisting },
-    );
+    let artifact: AgentCoreArtifact;
 
-    const dockerOutputDir = joinPathFragments(
-      'dist',
-      project.root,
-      'docker',
-      name,
-    );
-    const dockerTargetName = `${agentTargetPrefix}-docker`;
+    if (container) {
+      // Add the Dockerfile
+      generateFiles(
+        tree,
+        joinPathFragments(import.meta.dirname, 'files', 'deploy'),
+        targetSourceDir,
+        {
+          agentNameSnakeCase,
+          moduleName,
+          bundleOutputDir,
+          protocol,
+          pythonBaseImage: BASE_IMAGES.python,
+        },
+        { overwriteStrategy: OverwriteStrategy.KeepExisting },
+      );
 
-    // Add a docker target that prepares the docker context and builds the image
-    const fs = new FsCommands(tree, DEPENDENCIES);
-    project.targets[dockerTargetName] = {
-      cache: IMAGE_BUILD_CACHE,
-      executor: 'nx:run-commands',
-      options: {
-        commands: [
-          fs.rm(dockerOutputDir),
-          fs.mkdir(dockerOutputDir),
-          fs.cp(bundleOutputDir, dockerOutputDir),
-          fs.cp(
-            `${targetSourceDir}/Dockerfile`,
-            `${dockerOutputDir}/Dockerfile`,
+      const dockerOutputDir = joinPathFragments(
+        'dist',
+        project.root,
+        'docker',
+        name,
+      );
+      const dockerTargetName = `${agentTargetPrefix}-docker`;
+
+      // Add a docker target that prepares the docker context and builds the image
+      const fs = new FsCommands(tree, DEPENDENCIES);
+      project.targets[dockerTargetName] = {
+        cache: IMAGE_BUILD_CACHE,
+        executor: 'nx:run-commands',
+        options: {
+          commands: [
+            fs.rm(dockerOutputDir),
+            fs.mkdir(dockerOutputDir),
+            fs.cp(bundleOutputDir, dockerOutputDir),
+            fs.cp(
+              `${targetSourceDir}/Dockerfile`,
+              `${dockerOutputDir}/Dockerfile`,
+            ),
+            `${containers} build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
+          ],
+          parallel: false,
+        },
+        dependsOn: [bundleTargetName],
+      };
+
+      addDependencyToTargetIfNotPresent(project, 'docker', dockerTargetName);
+      addArtifactDependencyToTargets(project, 'docker');
+
+      addDockerScanTarget(
+        tree,
+        {
+          project,
+          containerEngine: containers,
+          trivyTargetName: `${agentTargetPrefix}-trivy`,
+          dockerTargetName,
+          imageTags: [dockerImageTag],
+        },
+        DEPENDENCIES,
+      );
+
+      artifact = {
+        type: 'container',
+        dockerImageTag,
+        outputDir: dockerOutputDir,
+      };
+    } else {
+      // The entry point the managed runtime runs, at the package root.
+      generateFiles(
+        tree,
+        joinPathFragments(import.meta.dirname, 'files', 'package'),
+        joinPathFragments(project.root, 'package', agentNameSnakeCase),
+        {
+          agentNameSnakeCase,
+          moduleName,
+          port: protocol === 'a2a' ? 9000 : 8080,
+        },
+        { overwriteStrategy: OverwriteStrategy.KeepExisting },
+      );
+
+      const packageOutputDir = joinPathFragments(
+        'dist',
+        project.root,
+        'package',
+        name,
+      );
+      addPythonCodePackageTarget(
+        tree,
+        {
+          project,
+          targetName: `${agentTargetPrefix}-package`,
+          bundleTargetName,
+          bundleOutputDir,
+          packageOutputDir,
+          sourceRoot: project.sourceRoot,
+          moduleName,
+          entryPointPath: joinPathFragments(
+            project.root,
+            'package',
+            agentNameSnakeCase,
+            'main.py',
           ),
-          `${containers} build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
-        ],
-        parallel: false,
-      },
-      dependsOn: [bundleTargetName],
-    };
+          entryPointFileName: 'main.py',
+        },
+        DEPENDENCIES,
+      );
 
-    addDependencyToTargetIfNotPresent(project, 'docker', dockerTargetName);
-    addArtifactDependencyToTargets(project, 'docker');
-
-    addDockerScanTarget(
-      tree,
-      {
-        project,
-        containerEngine: containers,
-        trivyTargetName: `${agentTargetPrefix}-trivy`,
-        dockerTargetName,
-        imageTags: [dockerImageTag],
-      },
-      DEPENDENCIES,
-    );
+      artifact = {
+        type: 'code',
+        outputDir: packageOutputDir,
+        runtime: agentCorePythonRuntime(),
+        entryPoint: 'main.py',
+      };
+    }
 
     // Add shared constructs
     await sharedConstructsGenerator(tree, { iac }, DEPENDENCIES);
@@ -438,8 +511,7 @@ export const pyAgentGenerator = async (
     await addAgentInfra(tree, {
       agentNameKebabCase: name,
       agentNameClassName,
-      dockerImageTag,
-      dockerOutputDir,
+      artifact,
       iac,
       projectName: project.name,
       auth,
@@ -459,6 +531,7 @@ export const pyAgentGenerator = async (
   // Recorded below and read by the declaration's predicates, so the packages
   // added here are exactly the ones the version sync will own.
   const metadata: PyAgentMetadata = {
+    infra,
     port: localDevPort,
     rc: agentNameClassName,
     auth,

@@ -19,8 +19,16 @@ import {
 } from '../../utils/agent-connection/agent-connection.js';
 import {
   AGENT_CORE_CONSTRUCTS_PY_DEPENDENCIES,
+  type AgentCoreArtifact,
   addAgentInfra,
 } from '../../utils/agent-core-constructs/agent-core-constructs.js';
+import {
+  addTypeScriptCodePackageTarget,
+  agentCoreNodeRuntime,
+  CODE_PACKAGE_DEPENDENCIES,
+  isAgentCoreHosted,
+  isContainerHosted,
+} from '../../utils/agent-core-packaging.js';
 import {
   addTypeScriptBundleTarget,
   BUNDLE_DEPENDENCIES,
@@ -64,7 +72,7 @@ import {
 } from '../../utils/shared-constructs.js';
 import type { IacMetadata } from '../../utils/shared-constructs-constants.js';
 import { BASE_IMAGES, TS_VERSIONS } from '../../utils/versions.js';
-import type { TsAgentGeneratorSchema } from './schema';
+import type { TsAgentGeneratorSchema, TsAgentInfra } from './schema';
 
 /** The metadata this generator records, which its predicates read. */
 export interface TsAgentMetadata extends IacMetadata {
@@ -73,6 +81,11 @@ export interface TsAgentMetadata extends IacMetadata {
   readonly auth: string;
   readonly protocol: string;
   readonly session: string;
+  /**
+   * How this component is packaged and hosted, so a consumer can tell a
+   * code-packaged runtime from a container-packaged one without re-deriving it.
+   */
+  readonly infra: TsAgentInfra;
 }
 
 // Each entry names the branch it belongs to, so the same declaration drives both
@@ -125,6 +138,7 @@ export const DEPENDENCIES = declareDependencies<TsAgentMetadata>()({
     ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
     ...ownedElsewhere(NODE_IMAGE_DEPENDENCIES),
     ...ownedElsewhere(ADOT_IMAGE_DEPENDENCIES),
+    ...ownedElsewhere(CODE_PACKAGE_DEPENDENCIES),
   ],
   py: ownedElsewhere(AGENT_CORE_CONSTRUCTS_PY_DEPENDENCIES),
 });
@@ -247,7 +261,8 @@ export const tsAgentGenerator = async (
     );
   }
 
-  if (infra === 'agentcore') {
+  if (isAgentCoreHosted(infra)) {
+    const container = isContainerHosted(infra);
     const containers = await resolveContainers(tree, 'inherit');
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
 
@@ -262,65 +277,104 @@ export const tsAgentGenerator = async (
       DEPENDENCIES,
     );
 
-    // Add the Dockerfile
-    generateFiles(
-      tree,
-      joinPathFragments(import.meta.dirname, 'files', 'deploy'),
-      targetSourceDir,
-      {
-        distDir,
-        name,
-        protocol,
-        adotVersion:
-          TS_VERSIONS['@aws/aws-distro-opentelemetry-node-autoinstrumentation'],
-        jaegerVersion: TS_VERSIONS['@opentelemetry/propagator-jaeger'],
-        nodeBaseImage: BASE_IMAGES.node,
-        ...nodeImageVersions(),
-        ...esmVars(tree),
-      },
-      { overwriteStrategy: OverwriteStrategy.KeepExisting },
-    );
-
-    const dockerOutputDir = joinPathFragments(
+    const bundleOutputDir = joinPathFragments(
       'dist',
       project.root,
       'bundle',
       'agent',
       name,
     );
-    const dockerTargetName = `${agentTargetPrefix}-docker`;
 
-    const fs = new FsCommands(tree, DEPENDENCIES);
-    project.targets[dockerTargetName] = {
-      cache: IMAGE_BUILD_CACHE,
-      executor: 'nx:run-commands',
-      options: {
-        commands: [
-          fs.cp(
-            `${targetSourceDir}/Dockerfile`,
-            `${dockerOutputDir}/Dockerfile`,
-          ),
-          `${containers} build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
-        ],
-        parallel: false,
-      },
-      dependsOn: ['bundle'],
-    };
+    let artifact: AgentCoreArtifact;
 
-    addDependencyToTargetIfNotPresent(project, 'docker', dockerTargetName);
-    addArtifactDependencyToTargets(project, 'docker');
+    if (container) {
+      // Add the Dockerfile
+      generateFiles(
+        tree,
+        joinPathFragments(import.meta.dirname, 'files', 'deploy'),
+        targetSourceDir,
+        {
+          distDir,
+          name,
+          protocol,
+          adotVersion:
+            TS_VERSIONS[
+              '@aws/aws-distro-opentelemetry-node-autoinstrumentation'
+            ],
+          jaegerVersion: TS_VERSIONS['@opentelemetry/propagator-jaeger'],
+          nodeBaseImage: BASE_IMAGES.node,
+          ...nodeImageVersions(),
+          ...esmVars(tree),
+        },
+        { overwriteStrategy: OverwriteStrategy.KeepExisting },
+      );
 
-    addDockerScanTarget(
-      tree,
-      {
-        project,
-        containerEngine: containers,
-        trivyTargetName: `${agentTargetPrefix}-trivy`,
-        dockerTargetName,
-        imageTags: [dockerImageTag],
-      },
-      DEPENDENCIES,
-    );
+      const dockerTargetName = `${agentTargetPrefix}-docker`;
+
+      const fs = new FsCommands(tree, DEPENDENCIES);
+      project.targets[dockerTargetName] = {
+        cache: IMAGE_BUILD_CACHE,
+        executor: 'nx:run-commands',
+        options: {
+          commands: [
+            fs.cp(
+              `${targetSourceDir}/Dockerfile`,
+              `${bundleOutputDir}/Dockerfile`,
+            ),
+            `${containers} build --platform linux/arm64 -t ${dockerImageTag} ${bundleOutputDir}`,
+          ],
+          parallel: false,
+        },
+        dependsOn: ['bundle'],
+      };
+
+      addDependencyToTargetIfNotPresent(project, 'docker', dockerTargetName);
+      addArtifactDependencyToTargets(project, 'docker');
+
+      addDockerScanTarget(
+        tree,
+        {
+          project,
+          containerEngine: containers,
+          trivyTargetName: `${agentTargetPrefix}-trivy`,
+          dockerTargetName,
+          imageTags: [dockerImageTag],
+        },
+        DEPENDENCIES,
+      );
+
+      artifact = {
+        type: 'container',
+        dockerImageTag,
+        outputDir: bundleOutputDir,
+      };
+    } else {
+      const packageOutputDir = joinPathFragments(
+        'dist',
+        project.root,
+        'package',
+        'agent',
+        name,
+      );
+      addTypeScriptCodePackageTarget(
+        tree,
+        {
+          project,
+          targetName: `${agentTargetPrefix}-package`,
+          bundleTargetName: 'bundle',
+          bundleOutputDir,
+          packageOutputDir,
+        },
+        DEPENDENCIES,
+      );
+
+      artifact = {
+        type: 'code',
+        outputDir: packageOutputDir,
+        runtime: agentCoreNodeRuntime(),
+        entryPoint: 'index.js',
+      };
+    }
 
     // Add shared constructs
     await sharedConstructsGenerator(tree, { iac }, DEPENDENCIES);
@@ -333,8 +387,7 @@ export const tsAgentGenerator = async (
       agentNameKebabCase: name,
       agentNameClassName,
       projectName: project.name,
-      dockerImageTag,
-      dockerOutputDir,
+      artifact,
       iac,
       auth,
       session,
@@ -353,6 +406,7 @@ export const tsAgentGenerator = async (
   // Recorded below and read by the declaration's predicates, so the packages
   // added here are exactly the ones the version sync will own.
   const metadata: TsAgentMetadata = {
+    infra,
     port: localDevPort,
     rc: agentNameClassName,
     auth,

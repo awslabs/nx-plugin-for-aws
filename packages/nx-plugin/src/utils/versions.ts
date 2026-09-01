@@ -361,6 +361,31 @@ export const LAMBDA_RUNTIME_VERSIONS = {
 export type ILambdaRuntime = keyof typeof LAMBDA_RUNTIME_VERSIONS;
 
 /**
+ * The managed AgentCore Runtime runtimes generated infrastructure targets, for
+ * agents and MCP servers packaged as code rather than as a container image.
+ *
+ * Tracked separately from {@link LAMBDA_RUNTIME_VERSIONS}: AgentCore publishes
+ * its own, smaller set, so a Lambda bump would otherwise move these to a runtime
+ * AgentCore rejects at create time. Resolved by the version update workflow from
+ * the `AgentCoreRuntime` members `aws-cdk-lib` publishes, the same source the
+ * Lambda runtimes come from.
+ */
+export const AGENT_CORE_RUNTIME_VERSIONS = {
+  node: '22',
+  python: '3.14',
+} as const;
+export type IAgentCoreRuntime = keyof typeof AGENT_CORE_RUNTIME_VERSIONS;
+
+/**
+ * The runtime as AgentCore's `runtime` field names it, e.g. `NODE_22` or
+ * `PYTHON_3_14`.
+ */
+export const agentCoreRuntime = (runtime: IAgentCoreRuntime): string =>
+  runtime === 'node'
+    ? `NODE_${AGENT_CORE_RUNTIME_VERSIONS.node}`
+    : `PYTHON_${AGENT_CORE_RUNTIME_VERSIONS.python.replace('.', '_')}`;
+
+/**
  * The interpreter uv pins for a generated Python project, as the Lambda runtime's
  * `major.minor`.
  *

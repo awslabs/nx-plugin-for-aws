@@ -1,0 +1,204 @@
+terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "<%- awsProviderVersion %>"
+    }
+    archive = {
+      source  = "hashicorp/archive"
+      version = "<%- archiveProviderVersion %>"
+    }
+  }
+}
+
+# Code packaging for an AgentCore Runtime: archives the built package, stages it
+# in the shared asset bucket, and delegates the runtime itself to the generic
+# `agent-core` module. Swap this module for `agent-core-container` to deploy a
+# container image instead — the inputs below are the only difference.
+
+variable "agent_runtime_name" {
+  description = "Name of the agent runtime"
+  type        = string
+}
+
+variable "code_dir" {
+  description = "Directory holding the packaged agent code, archived and staged in the asset bucket"
+  type        = string
+}
+
+variable "code_runtime" {
+  description = "Managed language runtime executing the packaged code (e.g. NODE_22, PYTHON_3_14)"
+  type        = string
+}
+
+variable "code_entry_point" {
+  description = "Entry point file within the packaged code, run by the managed runtime"
+  type        = string
+}
+
+variable "asset_bucket_name" {
+  description = "Name of the shared asset S3 bucket used to stage the agent code zip. Instantiate the `core/asset-bucket` module once per deployment and pass its `bucket_name` output here."
+  type        = string
+}
+
+variable "asset_bucket_arn" {
+  description = "ARN of the shared asset S3 bucket, used to scope the runtime's read grant to the staged object."
+  type        = string
+}
+
+variable "server_protocol" {
+  description = "Server protocol for the agent runtime (HTTP, MCP, or A2A)"
+  type        = string
+  default     = "HTTP"
+}
+
+variable "authorizer_configuration" {
+  description = "Authorization configuration for authenticating incoming requests"
+  type = object({
+    custom_jwt_authorizer = optional(object({
+      discovery_url    = string
+      allowed_audience = optional(list(string))
+      allowed_clients  = optional(list(string))
+    }))
+  })
+  default = null
+}
+
+variable "env" {
+  description = "Environment variables to pass to the agent core runtime"
+  type        = map(string)
+  default     = {}
+}
+
+variable "additional_iam_policy_statements" {
+  description = "Additional IAM policy statements to attach to the agent core runtime role"
+  type = list(object({
+    Effect   = string
+    Action   = list(string)
+    Resource = list(string)
+  }))
+  default = []
+}
+
+variable "enable_vpc" {
+  description = "Run the agent core runtime inside a VPC. Set alongside vpc_id/subnet_ids."
+  type        = bool
+  default     = false
+}
+
+variable "vpc_id" {
+  description = "VPC ID to run the agent core runtime in. Required when enable_vpc is true."
+  type        = string
+  default     = null
+}
+
+variable "subnet_ids" {
+  description = "Subnet IDs to run the agent core runtime in. Required when enable_vpc is true."
+  type        = list(string)
+  default     = null
+}
+
+variable "tags" {
+  description = "Tags to apply to resources"
+  type        = map(string)
+  default     = {}
+}
+
+data "archive_file" "agent_core_code" {
+  type        = "zip"
+  source_dir  = var.code_dir
+  output_path = "${var.code_dir}.zip"
+}
+
+# Keyed on the hex digest rather than `output_base64sha256`, whose `/` and `=`
+# characters would read as a key prefix and leave the object unresolvable.
+resource "aws_s3_object" "agent_core_code" {
+  bucket      = var.asset_bucket_name
+  key         = "agent-core/${var.agent_runtime_name}/${data.archive_file.agent_core_code.output_sha256}.zip"
+  source      = data.archive_file.agent_core_code.output_path
+  source_hash = data.archive_file.agent_core_code.output_base64sha256
+  etag        = data.archive_file.agent_core_code.output_md5
+
+  tags = var.tags
+}
+
+module "runtime" {
+  source = "../agent-core"
+
+  agent_runtime_name       = var.agent_runtime_name
+  server_protocol          = var.server_protocol
+  authorizer_configuration = var.authorizer_configuration
+  env                      = var.env
+  enable_vpc               = var.enable_vpc
+  vpc_id                   = var.vpc_id
+  subnet_ids               = var.subnet_ids
+  tags                     = var.tags
+
+  code_configuration = {
+    # The `opentelemetry-instrument` prefix auto-instruments with the AWS Distro
+    # for OpenTelemetry packaged alongside the code.
+    # https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html
+    entry_point = ["opentelemetry-instrument", var.code_entry_point]
+    runtime     = var.code_runtime
+    s3_bucket   = aws_s3_object.agent_core_code.bucket
+    s3_key      = aws_s3_object.agent_core_code.key
+  }
+
+  # The runtime downloads the package, so grant it read access to the object.
+  additional_iam_policy_statements = concat([
+    {
+      Effect = "Allow"
+      Action = [
+        "s3:GetObject",
+        "s3:GetObjectVersion"
+      ]
+      Resource = [
+        "${var.asset_bucket_arn}/agent-core/${var.agent_runtime_name}/*"
+      ]
+    }
+  ], var.additional_iam_policy_statements)
+
+  artifact_dependencies = [aws_s3_object.agent_core_code]
+}
+
+output "agent_core_runtime_role_arn" {
+  description = "ARN of the Agent Core Runtime IAM role"
+  value       = module.runtime.agent_core_runtime_role_arn
+}
+
+output "agent_core_runtime_role_name" {
+  description = "Name of the Agent Core Runtime IAM role"
+  value       = module.runtime.agent_core_runtime_role_name
+}
+
+output "agent_runtime_name" {
+  description = "Name of the deployed agent runtime"
+  value       = module.runtime.agent_runtime_name
+}
+
+output "agent_core_runtime_arn" {
+  description = "ARN of the Bedrock Agent Core runtime. For MCP runtimes the value flows through the readiness probe, so consumers wait until the runtime serves MCP."
+  value       = module.runtime.agent_core_runtime_arn
+}
+
+output "invocation_url" {
+  description = "HTTPS invocation URL of the runtime. MCP runtimes get the MCP endpoint (e.g. for use as a Gateway target endpoint), A2A runtimes the A2A endpoint (trailing slash required). For MCP runtimes the value flows through the readiness probe, so consumers wait until the runtime serves MCP."
+  value       = module.runtime.invocation_url
+}
+
+output "agent_runtime_id" {
+  description = "ID of the Bedrock Agent Core runtime"
+  value       = module.runtime.agent_runtime_id
+}
+
+output "agent_runtime_version" {
+  description = "Version of the Bedrock Agent Core runtime"
+  value       = module.runtime.agent_runtime_version
+}
+
+output "security_group_id" {
+  description = "Security group ID of the agent core runtime, for use in ingress rules on resources it must reach (e.g. a database). Null unless enable_vpc is true."
+  value       = module.runtime.security_group_id
+}

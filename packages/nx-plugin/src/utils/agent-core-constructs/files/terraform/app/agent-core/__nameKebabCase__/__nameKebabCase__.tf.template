@@ -63,6 +63,18 @@ variable "appconfig_application_id" {
   type        = string
 }
 
+<%_ if (!container) { _%>
+variable "asset_bucket_name" {
+  description = "Name of the shared asset S3 bucket used to stage the agent code zip. Instantiate the `core/asset-bucket` module once per deployment and pass its `bucket_name` output here."
+  type        = string
+}
+
+variable "asset_bucket_arn" {
+  description = "ARN of the shared asset S3 bucket (from `core/asset-bucket.bucket_arn`), used to scope the runtime's read grant to the staged object."
+  type        = string
+}
+<%_ } _%>
+
 <%_ if (hasSessionBucket) { _%>
 variable "session_force_destroy" {
   description = "Whether to allow the session bucket to be destroyed even if it still contains objects."
@@ -288,9 +300,18 @@ resource "aws_dynamodb_table" "session" {
 
 <%_ } _%>
 module "agent_core_runtime" {
-  source = "../../../core/agent-core"
+  source = "../../../core/<%= terraformPackagingModule %>"
   agent_runtime_name = "<%= nameClassName %>"
+<%_ if (container) { _%>
   docker_image_tag = "<%= dockerImageTag %>"
+<%_ } else { _%>
+  # The walk up from path.module reaches the workspace root.
+  code_dir = "${path.module}/../../../../../../../<%= artifactOutputDir %>"
+  code_runtime = "<%= codeRuntime %>"
+  code_entry_point = "<%= codeEntryPoint %>"
+  asset_bucket_name = var.asset_bucket_name
+  asset_bucket_arn = var.asset_bucket_arn
+<%_ } _%>
   server_protocol = "<%= serverProtocol.toUpperCase() %>"
   enable_vpc = var.enable_vpc
   vpc_id = var.vpc_id

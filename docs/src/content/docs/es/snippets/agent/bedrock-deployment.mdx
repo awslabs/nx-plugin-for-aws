@@ -6,7 +6,7 @@ import Infrastructure from '@components/infrastructure.astro';
 
 ### Infraestructura como Código
 
-Si seleccionaste `agentcore` para `infra`, se genera la infraestructura CDK o Terraform relevante que puedes usar para desplegar tu Agent en [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html).
+Si seleccionaste `agentcore` o `agentcore-ecr` para `infra`, se genera la infraestructura CDK o Terraform relevante que puedes usar para desplegar tu Agent en [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html).
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -31,14 +31,22 @@ Este constructo usa el [módulo `aws-cdk-lib/aws-bedrockagentcore`](https://docs
 <Fragment slot="terraform">
 Se genera un módulo Terraform para ti, nombrado según el `name` que elegiste al ejecutar el generador, o `<ProjectName>-agent` por defecto.
 
-Pasa las salidas del módulo compartido <Link path="/guides/runtime-config#writing-configuration">`runtime_config_appconfig`</Link> al módulo del agente:
+Pasa las salidas del módulo compartido <Link path="/es/guides/runtime-config#writing-configuration">`runtime_config_appconfig`</Link> al módulo del agente. Bajo el empaquetado predeterminado `agentcore`, el código del agente se almacena en el bucket de activos compartido, así que pasa eso también — instancia el módulo `core/asset-bucket` una vez por despliegue, como ya lo hacen los módulos Lambda y API:
 
 ```terraform
+module "asset_bucket" {
+  source = "../../common/terraform/src/core/asset-bucket"
+}
+
 module "my_project_agent" {
   source = "../../common/terraform/src/app/agents/my-project-agent"
 
   appconfig_application_id  = module.runtime_config_appconfig.application_id
   appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
+  # Only for `agentcore` packaging; `agentcore-ecr` publishes to ECR instead.
+  asset_bucket_name = module.asset_bucket.bucket_name
+  asset_bucket_arn  = module.asset_bucket.bucket_arn
 }
 ```
 </Fragment>
@@ -48,14 +56,6 @@ module "my_project_agent" {
 El constructo de agente generado otorga permiso para invocar todos los modelos de fundación y perfiles de inferencia de Bedrock por defecto (`bedrock:InvokeModel` y `bedrock:InvokeModelWithResponseStream` en `arn:aws:bedrock:*:*:foundation-model/*` y `arn:aws:bedrock:*:*:inference-profile/*`).
 
 Es posible que desees limitar esto a los modelos específicos que usa tu agente. Puedes encontrar el modelo predeterminado utilizado por los agentes Strands en la [documentación de Strands](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/model-providers/amazon-bedrock/#default-model); consulta la [guía de proveedores de modelos de Strands](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/model-providers/) para configurar un modelo diferente.
-:::
-
-:::caution[Docker Requerido]
-Se requiere [Docker](https://www.docker.com/) para construir y desplegar tu Agent. Asegúrate de haber instalado e iniciado Docker para evitar errores como:
-
-```
-ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
-```
 :::
 
 ### Autenticación
@@ -94,7 +94,11 @@ export class ExampleStack extends Stack {
 ```
 </Fragment>
 <Fragment slot="terraform">
-```terraform {5-6}
+```terraform {9-10}
+module "asset_bucket" {
+  source = "../../common/terraform/src/core/asset-bucket"
+}
+
 # Agent
 module "my_project_agent" {
   # Relative path to the generated module in the common/terraform project
@@ -102,6 +106,10 @@ module "my_project_agent" {
 
   appconfig_application_id  = module.runtime_config_appconfig.application_id
   appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
+  # Only for `agentcore` packaging; `agentcore-ecr` publishes to ECR instead.
+  asset_bucket_name = module.asset_bucket.bucket_name
+  asset_bucket_arn  = module.asset_bucket.bucket_arn
 }
 ```
 
@@ -144,7 +152,7 @@ export class ExampleStack extends Stack {
 }
 ```
 
-El constructo `UserIdentity` se puede generar usando el <Link path="/guides/react-website-auth">generador `ts#website#auth`</Link>, o puedes crear tu propio `UserPool` y `UserPoolClient` de CDK.
+El constructo `UserIdentity` se puede generar usando el <Link path="/es/guides/react-website-auth">generador `ts#website#auth`</Link>, o puedes crear tu propio `UserPool` y `UserPoolClient` de CDK.
 </Fragment>
 <Fragment slot="terraform">
 El módulo generado acepta las variables `user_pool_id` y `user_pool_client_ids` para la autenticación Cognito:

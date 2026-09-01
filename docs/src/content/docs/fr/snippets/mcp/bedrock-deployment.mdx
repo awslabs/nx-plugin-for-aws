@@ -6,7 +6,7 @@ import Infrastructure from '@components/infrastructure.astro';
 
 ### Infrastructure as Code
 
-Si vous avez sélectionné `agentcore` pour `infra`, l'infrastructure CDK ou Terraform pertinente est générée et vous pouvez l'utiliser pour déployer votre serveur MCP sur [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html).
+Si vous avez sélectionné `agentcore` ou `agentcore-ecr` pour `infra`, l'infrastructure CDK ou Terraform pertinente est générée et vous pouvez l'utiliser pour déployer votre serveur MCP sur [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html).
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -32,26 +32,26 @@ Ce construct utilise le [module `aws-cdk-lib/aws-bedrockagentcore`](https://docs
 <Fragment slot="terraform">
 Un module Terraform est généré pour vous, nommé en fonction du `name` que vous avez choisi lors de l'exécution du générateur, ou `<ProjectName>-mcp-server` par défaut.
 
-Passez les sorties du module partagé <Link path="/guides/runtime-config#writing-configuration">`runtime_config_appconfig`</Link> dans le module du serveur MCP :
+Passez les sorties du module partagé <Link path="/guides/runtime-config#writing-configuration">`runtime_config_appconfig`</Link> dans le module du serveur MCP. Avec le packaging `agentcore` par défaut, le code du serveur est placé dans le bucket d'assets partagé, donc passez-le également — instanciez le module `core/asset-bucket` une fois par déploiement, comme le font déjà les modules Lambda et API :
 
 ```terraform
+module "asset_bucket" {
+  source = "../../common/terraform/src/core/asset-bucket"
+}
+
 module "my_project_mcp_server" {
   source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
 
   appconfig_application_id  = module.runtime_config_appconfig.application_id
   appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
+  # Only for `agentcore` packaging; `agentcore-ecr` publishes to ECR instead.
+  asset_bucket_name = module.asset_bucket.bucket_name
+  asset_bucket_arn  = module.asset_bucket.bucket_arn
 }
 ```
 </Fragment>
 </Infrastructure>
-
-:::caution[Docker requis]
-[Docker](https://www.docker.com/) est requis pour construire et déployer votre serveur MCP. Assurez-vous d'avoir installé et lancé Docker pour éviter des erreurs telles que :
-
-```
-ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
-```
-:::
 
 ### Authentification
 

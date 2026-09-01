@@ -6,7 +6,7 @@ import Infrastructure from '@components/infrastructure.astro';
 
 ### Infrastructure as Code
 
-`infra` に `agentcore` を選択した場合、関連する CDK または Terraform インフラストラクチャが生成され、これを使用して Agent を [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html) にデプロイできます。
+`infra` に `agentcore` または `agentcore-ecr` を選択した場合、関連する CDK または Terraform インフラストラクチャが生成され、これを使用して Agent を [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html) にデプロイできます。
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -31,14 +31,22 @@ export class ExampleStack extends Stack {
 <Fragment slot="terraform">
 Terraform モジュールが生成されます。名前はジェネレーター実行時に選択した `name` に基づくか、デフォルトでは `<ProjectName>-agent` となります。
 
-共有の <Link path="/guides/runtime-config#writing-configuration">`runtime_config_appconfig`</Link> モジュールの出力を agent モジュールに渡します:
+共有の <Link path="/jp/guides/runtime-config#writing-configuration">`runtime_config_appconfig`</Link> モジュールの出力を agent モジュールに渡します。デフォルトの `agentcore` パッケージングでは、エージェントのコードは共有アセットバケットにステージングされるため、それも渡します。Lambda および API モジュールがすでに行っているように、デプロイメントごとに `core/asset-bucket` モジュールを一度インスタンス化します:
 
 ```terraform
+module "asset_bucket" {
+  source = "../../common/terraform/src/core/asset-bucket"
+}
+
 module "my_project_agent" {
   source = "../../common/terraform/src/app/agents/my-project-agent"
 
   appconfig_application_id  = module.runtime_config_appconfig.application_id
   appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
+  # Only for `agentcore` packaging; `agentcore-ecr` publishes to ECR instead.
+  asset_bucket_name = module.asset_bucket.bucket_name
+  asset_bucket_arn  = module.asset_bucket.bucket_arn
 }
 ```
 </Fragment>
@@ -48,14 +56,6 @@ module "my_project_agent" {
 生成された agent コンストラクトは、デフォルトですべての Bedrock 基盤モデルと推論プロファイルを呼び出す権限を付与します（`arn:aws:bedrock:*:*:foundation-model/*` および `arn:aws:bedrock:*:*:inference-profile/*` に対する `bedrock:InvokeModel` と `bedrock:InvokeModelWithResponseStream`）。
 
 Agent が使用する特定のモデルにスコープを絞ることをお勧めします。Strands エージェントが使用するデフォルトモデルは [Strands ドキュメント](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/model-providers/amazon-bedrock/#default-model)で確認できます。別のモデルを設定する方法については、[Strands モデルプロバイダーガイド](https://strandsagents.com/latest/documentation/docs/user-guide/concepts/model-providers/)を参照してください。
-:::
-
-:::caution[Docker が必要]
-Agent をビルドおよびデプロイするには [Docker](https://www.docker.com/) が必要です。次のようなエラーを回避するために、Docker がインストールされ起動していることを確認してください:
-
-```
-ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
-```
 :::
 
 ### 認証
@@ -94,7 +94,11 @@ export class ExampleStack extends Stack {
 ```
 </Fragment>
 <Fragment slot="terraform">
-```terraform {5-6}
+```terraform {9-10}
+module "asset_bucket" {
+  source = "../../common/terraform/src/core/asset-bucket"
+}
+
 # Agent
 module "my_project_agent" {
   # Relative path to the generated module in the common/terraform project
@@ -102,6 +106,10 @@ module "my_project_agent" {
 
   appconfig_application_id  = module.runtime_config_appconfig.application_id
   appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
+  # Only for `agentcore` packaging; `agentcore-ecr` publishes to ECR instead.
+  asset_bucket_name = module.asset_bucket.bucket_name
+  asset_bucket_arn  = module.asset_bucket.bucket_arn
 }
 ```
 
@@ -144,7 +152,7 @@ export class ExampleStack extends Stack {
 }
 ```
 
-`UserIdentity` コンストラクトは <Link path="/guides/react-website-auth">`ts#website#auth` ジェネレーター</Link>を使用して生成するか、独自の CDK `UserPool` と `UserPoolClient` を作成できます。
+`UserIdentity` コンストラクトは <Link path="/jp/guides/react-website-auth">`ts#website#auth` ジェネレーター</Link>を使用して生成するか、独自の CDK `UserPool` と `UserPoolClient` を作成できます。
 </Fragment>
 <Fragment slot="terraform">
 生成されたモジュールは、Cognito 認証用の `user_pool_id` と `user_pool_client_ids` 変数を受け入れます:

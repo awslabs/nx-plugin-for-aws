@@ -1,0 +1,283 @@
+terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "<%- awsProviderVersion %>"
+    }
+    external = {
+      source  = "hashicorp/external"
+      version = "<%- externalProviderVersion %>"
+    }
+    null = {
+      source  = "hashicorp/null"
+      version = "<%- nullProviderVersion %>"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "<%- randomProviderVersion %>"
+    }
+  }
+}
+
+# Container packaging for an AgentCore Runtime: owns the ECR repository and the
+# image publish, and delegates the runtime itself to the generic `agent-core`
+# module. Swap this module for `agent-core-code` to deploy a code package
+# instead — the inputs below are the only difference.
+
+variable "agent_runtime_name" {
+  description = "Name of the agent runtime"
+  type        = string
+}
+
+variable "docker_image_tag" {
+  description = "Name of the docker image tag to use as the agent core runtime"
+  type        = string
+}
+
+variable "server_protocol" {
+  description = "Server protocol for the agent runtime (HTTP, MCP, or A2A)"
+  type        = string
+  default     = "HTTP"
+}
+
+variable "authorizer_configuration" {
+  description = "Authorization configuration for authenticating incoming requests"
+  type = object({
+    custom_jwt_authorizer = optional(object({
+      discovery_url    = string
+      allowed_audience = optional(list(string))
+      allowed_clients  = optional(list(string))
+    }))
+  })
+  default = null
+}
+
+variable "env" {
+  description = "Environment variables to pass to the agent core runtime"
+  type        = map(string)
+  default     = {}
+}
+
+variable "additional_iam_policy_statements" {
+  description = "Additional IAM policy statements to attach to the agent core runtime role"
+  type = list(object({
+    Effect   = string
+    Action   = list(string)
+    Resource = list(string)
+  }))
+  default = []
+}
+
+variable "enable_vpc" {
+  description = "Run the agent core runtime inside a VPC. Set alongside vpc_id/subnet_ids."
+  type        = bool
+  default     = false
+}
+
+variable "vpc_id" {
+  description = "VPC ID to run the agent core runtime in. Required when enable_vpc is true."
+  type        = string
+  default     = null
+}
+
+variable "subnet_ids" {
+  description = "Subnet IDs to run the agent core runtime in. Required when enable_vpc is true."
+  type        = list(string)
+  default     = null
+}
+
+variable "tags" {
+  description = "Tags to apply to resources"
+  type        = map(string)
+  default     = {}
+}
+
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
+
+locals {
+  aws_account_id = data.aws_caller_identity.current.account_id
+  aws_region     = data.aws_region.current.id
+}
+
+# Uniquifies the repository name so this module can be deployed more than once
+# (e.g. across stages) within the same account/region. Owned here rather than
+# read from the shared module, which consumes this repository's URL — reading it
+# back would be a dependency cycle.
+resource "random_id" "repository_suffix" {
+  byte_length = 4
+}
+
+# ECR Repository
+resource "aws_ecr_repository" "agent_core_repository" {
+  #checkov:skip=CKV_AWS_136:AES256 encryption is sufficient for ECR repositories
+  name = "${lower(var.agent_runtime_name)}_repository_${random_id.repository_suffix.hex}"
+
+  image_tag_mutability = "IMMUTABLE"
+  force_delete         = true
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  tags = var.tags
+}
+
+# ECR Repository Policy
+resource "aws_ecr_repository_policy" "agent_core_ecr_policy" {
+  repository = aws_ecr_repository.agent_core_repository.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowPushPull"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${local.aws_account_id}:root"
+        }
+        Action = [
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchGetImage",
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:PutImage",
+          "ecr:InitiateLayerUpload",
+          "ecr:UploadLayerPart",
+          "ecr:CompleteLayerUpload"
+        ]
+      }
+    ]
+  })
+}
+
+# Data source to get container image digest
+data "external" "docker_digest" {
+  program = ["sh", "-c", "echo '{\"digest\":\"'$(<%= containers %> inspect ${var.docker_image_tag} --format '{{.Id}}')'\"}' "]
+}
+
+locals {
+  # Content-based, immutable image tag derived from the local image digest
+  image_tag = replace(data.external.docker_digest.result.digest, "sha256:", "")
+}
+
+# Null resource for container image publish
+resource "null_resource" "docker_publish" {
+  triggers = {
+    docker_digest    = data.external.docker_digest.result.digest
+    repository_url   = aws_ecr_repository.agent_core_repository.repository_url
+    docker_image_tag = var.docker_image_tag
+    image_tag        = local.image_tag
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      # Get ECR login token
+      aws ecr get-login-password --region "$AWS_REGION" | <%= containers %> login --username AWS --password-stdin "$REPOSITORY_URL"
+
+      # Tag the image with the immutable content-based tag
+      <%= containers %> tag "$DOCKER_IMAGE_TAG" "$REPOSITORY_URL:$IMAGE_TAG"
+
+      # Push the image
+      <%= containers %> push "$REPOSITORY_URL:$IMAGE_TAG"
+    EOT
+    environment = {
+      AWS_REGION       = local.aws_region
+      REPOSITORY_URL   = self.triggers.repository_url
+      DOCKER_IMAGE_TAG = self.triggers.docker_image_tag
+      IMAGE_TAG        = self.triggers.image_tag
+    }
+  }
+
+  depends_on = [aws_ecr_repository_policy.agent_core_ecr_policy]
+}
+
+module "runtime" {
+  source = "../agent-core"
+
+  agent_runtime_name       = var.agent_runtime_name
+  server_protocol          = var.server_protocol
+  authorizer_configuration = var.authorizer_configuration
+  env                      = var.env
+  enable_vpc               = var.enable_vpc
+  vpc_id                   = var.vpc_id
+  subnet_ids               = var.subnet_ids
+  tags                     = var.tags
+
+  container_configuration = {
+    container_uri = "${aws_ecr_repository.agent_core_repository.repository_url}:${local.image_tag}"
+  }
+
+  # The runtime pulls the image, so grant it read access to the repository.
+  additional_iam_policy_statements = concat([
+    {
+      Sid    = "ECRImageAccess"
+      Effect = "Allow"
+      Action = [
+        "ecr:BatchGetImage",
+        "ecr:GetDownloadUrlForLayer"
+      ]
+      Resource = [
+        aws_ecr_repository.agent_core_repository.arn
+      ]
+    },
+    {
+      Sid    = "ECRTokenAccess"
+      Effect = "Allow"
+      Action = [
+        "ecr:GetAuthorizationToken"
+      ]
+      Resource = [
+        "*"
+      ]
+    }
+  ], var.additional_iam_policy_statements)
+
+  artifact_dependencies = [null_resource.docker_publish]
+}
+
+output "agent_core_runtime_role_arn" {
+  description = "ARN of the Agent Core Runtime IAM role"
+  value       = module.runtime.agent_core_runtime_role_arn
+}
+
+output "agent_core_runtime_role_name" {
+  description = "Name of the Agent Core Runtime IAM role"
+  value       = module.runtime.agent_core_runtime_role_name
+}
+
+output "agent_runtime_name" {
+  description = "Name of the deployed agent runtime"
+  value       = module.runtime.agent_runtime_name
+}
+
+output "agent_core_runtime_arn" {
+  description = "ARN of the Bedrock Agent Core runtime. For MCP runtimes the value flows through the readiness probe, so consumers wait until the runtime serves MCP."
+  value       = module.runtime.agent_core_runtime_arn
+}
+
+output "invocation_url" {
+  description = "HTTPS invocation URL of the runtime. MCP runtimes get the MCP endpoint (e.g. for use as a Gateway target endpoint), A2A runtimes the A2A endpoint (trailing slash required). For MCP runtimes the value flows through the readiness probe, so consumers wait until the runtime serves MCP."
+  value       = module.runtime.invocation_url
+}
+
+output "agent_runtime_id" {
+  description = "ID of the Bedrock Agent Core runtime"
+  value       = module.runtime.agent_runtime_id
+}
+
+output "agent_runtime_version" {
+  description = "Version of the Bedrock Agent Core runtime"
+  value       = module.runtime.agent_runtime_version
+}
+
+output "security_group_id" {
+  description = "Security group ID of the agent core runtime, for use in ingress rules on resources it must reach (e.g. a database). Null unless enable_vpc is true."
+  value       = module.runtime.security_group_id
+}
+
+output "ecr_repository_url" {
+  description = "URL of the ECR repository holding the runtime's image"
+  value       = aws_ecr_repository.agent_core_repository.repository_url
+}

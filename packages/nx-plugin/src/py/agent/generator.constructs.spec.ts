@@ -201,7 +201,7 @@ dev-dependencies = []
   it('should handle docker target dependencies correctly for BedrockAgentCoreRuntime', async () => {
     await pyAgentGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'cdk',
     });
 
@@ -262,7 +262,7 @@ dev-dependencies = []
     await pyAgentGenerator(tree, {
       project: 'test-project',
       name: 'snapshot-bedrock-agent',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'cdk',
     });
 
@@ -306,7 +306,7 @@ dev-dependencies = []
     await pyAgentGenerator(tree, {
       project: 'test-project',
       name: 'in-memory-agent',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       session: 'in-memory',
       iac: 'cdk',
     });
@@ -325,7 +325,7 @@ dev-dependencies = []
       project: 'test-project',
       name: 'dynamodb-agent',
       framework: 'langchain',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       session: 'dynamodb-s3',
       iac: 'cdk',
     });
@@ -354,24 +354,85 @@ dev-dependencies = []
     expectHasMetricTags(tree, PY_AGENT_GENERATOR_INFO.metric);
   });
 
-  it('should handle default computeType as BedrockAgentCoreRuntime', async () => {
+  it('should default to code packaging on AgentCore Runtime', async () => {
     await pyAgentGenerator(tree, {
       project: 'test-project',
-      // No computeType specified, should default to BedrockAgentCoreRuntime
+      // No infra specified, should default to code packaging on agentcore
       iac: 'cdk',
     });
 
-    // Should include Dockerfile by default
+    // Code packaging needs no Dockerfile or image build
     expect(
       tree.exists('apps/test-project/proj_test_project/agent/Dockerfile'),
-    ).toBeTruthy();
+    ).toBeFalsy();
 
-    // Should have docker and bundle targets
+    // Should have package and bundle targets, and no container targets
     const projectConfig = JSON.parse(
       tree.read('apps/test-project/project.json', 'utf-8'),
     );
     expect(projectConfig.targets['bundle-arm']).toBeDefined();
-    expect(projectConfig.targets['agent-docker']).toBeDefined();
+    expect(projectConfig.targets['agent-package']).toBeDefined();
+    expect(projectConfig.targets['agent-docker']).toBeUndefined();
+    expect(projectConfig.targets['agent-trivy']).toBeUndefined();
+  });
+
+  it('should vend a root entry point importing the agent absolutely for code packaging', async () => {
+    await pyAgentGenerator(tree, {
+      project: 'test-project',
+      infra: 'agentcore',
+      iac: 'cdk',
+    });
+
+    // The entry point sits at the package root, since AgentCore runs it by file
+    // path and a relative import would have no parent package there.
+    const entryPoint = tree.read(
+      'apps/test-project/package/agent/main.py',
+      'utf-8',
+    );
+    expect(entryPoint).toContain(
+      'from proj_test_project.agent.main import app',
+    );
+    expect(entryPoint).toContain('uvicorn.run(app, host="0.0.0.0", port=8080)');
+  });
+
+  it('should assemble the arm64 bundle, module tree and entry point for code packaging', async () => {
+    await pyAgentGenerator(tree, {
+      project: 'test-project',
+      infra: 'agentcore',
+      iac: 'cdk',
+    });
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+    const packageTarget = projectConfig.targets['agent-package'];
+    expect(packageTarget.dependsOn).toEqual(['bundle-arm']);
+    expect(packageTarget.options.commands).toEqual([
+      'rimraf dist/apps/test-project/package/test-project-agent',
+      'make-dir dist/apps/test-project/package/test-project-agent',
+      'ncp dist/apps/test-project/bundle-arm dist/apps/test-project/package/test-project-agent',
+      'ncp apps/test-project/proj_test_project dist/apps/test-project/package/test-project-agent/proj_test_project',
+      'ncp apps/test-project/package/agent/main.py dist/apps/test-project/package/test-project-agent/main.py',
+    ]);
+  });
+
+  it('should reference the code asset with the Python runtime for code packaging', async () => {
+    await pyAgentGenerator(tree, {
+      project: 'test-project',
+      infra: 'agentcore',
+      iac: 'cdk',
+    });
+
+    const construct = tree.read(
+      'packages/common/constructs/src/app/agents/test-project-agent/test-project-agent.ts',
+      'utf-8',
+    );
+    expect(construct).toContain('AgentRuntimeArtifact.fromCodeAsset');
+    expect(construct).toContain('AgentCoreRuntime.PYTHON_3_14');
+    expect(construct).toContain(
+      "entrypoint: ['opentelemetry-instrument', 'main.py']",
+    );
+    expect(construct).not.toContain('Platform.LINUX_ARM64');
   });
 
   it('should handle project name with dots correctly for docker image tag', async () => {
@@ -403,7 +464,7 @@ dev-dependencies = []
 
     await pyAgentGenerator(tree, {
       project: 'my.dotted.project',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'cdk',
     });
 

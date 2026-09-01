@@ -373,10 +373,52 @@ dev-dependencies = []
     expect(pyprojectToml).toMatchSnapshot('updated-pyproject.toml');
   });
 
+  it('should default to code packaging on AgentCore Runtime', async () => {
+    await pyMcpServerGenerator(tree, {
+      project: 'test-project',
+      // No infra specified, should default to code packaging on agentcore
+      iac: 'cdk',
+    });
+
+    // Code packaging needs no Dockerfile or image build
+    expect(
+      tree.exists('apps/test-project/proj_test_project/mcp_server/Dockerfile'),
+    ).toBeFalsy();
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+    expect(projectConfig.targets['bundle-arm']).toBeDefined();
+    expect(projectConfig.targets['mcp-server-package']).toBeDefined();
+    expect(projectConfig.targets['mcp-server-docker']).toBeUndefined();
+    expect(projectConfig.targets['mcp-server-trivy']).toBeUndefined();
+
+    // The entry point sits at the package root, since AgentCore runs it by file
+    // path and a relative import would have no parent package there.
+    const entryPoint = tree.read(
+      'apps/test-project/package/mcp_server/main.py',
+      'utf-8',
+    );
+    expect(entryPoint).toContain(
+      'from proj_test_project.mcp_server.http import app',
+    );
+    expect(entryPoint).toContain('uvicorn.run(app, host="0.0.0.0", port=8000)');
+
+    const construct = tree.read(
+      'packages/common/constructs/src/app/mcp-servers/test-project-mcp-server/test-project-mcp-server.ts',
+      'utf-8',
+    );
+    expect(construct).toContain('AgentRuntimeArtifact.fromCodeAsset');
+    expect(construct).toContain('AgentCoreRuntime.PYTHON_3_14');
+    expect(construct).toContain(
+      "entrypoint: ['opentelemetry-instrument', 'main.py']",
+    );
+  });
+
   it('should generate MCP server with BedrockAgentCoreRuntime and default name', async () => {
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'cdk',
     });
 
@@ -477,7 +519,7 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'custom-bedrock-server',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'cdk',
     });
 
@@ -622,7 +664,7 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'snapshot-bedrock-server',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'cdk',
     });
 
@@ -741,7 +783,7 @@ dev-dependencies = []
   it('should handle docker target dependencies correctly for BedrockAgentCoreRuntime', async () => {
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'cdk',
     });
 
@@ -767,7 +809,7 @@ dev-dependencies = []
   it('should generate MCP server with Terraform provider and default name', async () => {
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'terraform',
     });
 
@@ -813,7 +855,7 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'custom-terraform-server',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'terraform',
     });
 
@@ -861,7 +903,7 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'terraform-snapshot-server',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'terraform',
     });
 
@@ -893,7 +935,7 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'terraform-server',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'terraform',
     });
 
@@ -938,7 +980,7 @@ dev-dependencies = []
   it('should handle Python bundle target configuration for Terraform provider', async () => {
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'terraform',
     });
 
