@@ -278,7 +278,7 @@ describe('template fidelity', () => {
 
   it.each([
     ['ts/agent/files/deploy/Dockerfile.template', agentDockerfile],
-    ['ts/mcp-server/files/Dockerfile.template', agentDockerfile],
+    ['ts/mcp-server/files/deploy/Dockerfile.template', agentDockerfile],
     ['ts/rdb/files/Dockerfile.template', rdbDockerfile],
     ['py/agent/files/deploy/Dockerfile.template', pythonAgentDockerfile],
     [

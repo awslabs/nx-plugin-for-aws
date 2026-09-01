@@ -163,21 +163,23 @@ export const tsMcpServerGenerator = async (
     ? readJson(tree, projectPackageJsonPath).type === 'module'
     : isEsmWorkspace(tree);
 
+  const templateContext = {
+    name,
+    esm,
+    distDir,
+    adotVersion:
+      TS_VERSIONS['@aws/aws-distro-opentelemetry-node-autoinstrumentation'],
+    jaegerVersion: TS_VERSIONS['@opentelemetry/propagator-jaeger'],
+    nodeBaseImage: BASE_IMAGES.node,
+    ...nodeImageVersions(),
+  };
+
   // Generate example server
   generateFiles(
     tree,
-    joinPathFragments(import.meta.dirname, 'files'),
+    joinPathFragments(import.meta.dirname, 'files', 'app'),
     targetSourceDir,
-    {
-      name,
-      esm,
-      distDir,
-      adotVersion:
-        TS_VERSIONS['@aws/aws-distro-opentelemetry-node-autoinstrumentation'],
-      jaegerVersion: TS_VERSIONS['@opentelemetry/propagator-jaeger'],
-      nodeBaseImage: BASE_IMAGES.node,
-      ...nodeImageVersions(),
-    },
+    templateContext,
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
@@ -209,6 +211,15 @@ export const tsMcpServerGenerator = async (
     let artifact: AgentCoreArtifact;
 
     if (container) {
+      // Add the Dockerfile
+      generateFiles(
+        tree,
+        joinPathFragments(import.meta.dirname, 'files', 'deploy'),
+        targetSourceDir,
+        templateContext,
+        { overwriteStrategy: OverwriteStrategy.KeepExisting },
+      );
+
       const dockerTargetName = `${mcpTargetPrefix}-docker`;
 
       const fs = new FsCommands(tree, DEPENDENCIES);
@@ -289,9 +300,6 @@ export const tsMcpServerGenerator = async (
       auth,
       containers,
     });
-  } else {
-    // No Dockerfile needed for non-hosted MCP
-    tree.delete(joinPathFragments(targetSourceDir, 'Dockerfile'));
   }
 
   // @modelcontextprotocol/sdk declares zod as a peer dependency with a wide range

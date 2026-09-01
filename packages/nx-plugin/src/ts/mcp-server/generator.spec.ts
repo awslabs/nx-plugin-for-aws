@@ -456,9 +456,11 @@ describe('ts#mcp-server generator', () => {
       iac: 'cdk',
     });
 
-    // The vended Dockerfile is left in place — harmless without an image build,
-    // and kept so switching to `agentcore-ecr` needs no regeneration. What
-    // matters is that no image is built.
+    // Code packaging needs no Dockerfile or image build
+    expect(
+      tree.exists('apps/test-project/src/mcp-server/Dockerfile'),
+    ).toBeFalsy();
+
     const projectConfig = JSON.parse(
       tree.read('apps/test-project/project.json', 'utf-8'),
     );
