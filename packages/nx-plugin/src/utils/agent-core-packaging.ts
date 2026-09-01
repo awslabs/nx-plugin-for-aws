@@ -15,8 +15,8 @@ import {
 import { FS_DEPENDENCIES, FsCommands } from './fs.js';
 import { addArtifactDependencyToTargets } from './nx.js';
 import {
+  agentCoreRuntime,
   type ITsDepVersion,
-  LAMBDA_RUNTIME_VERSIONS,
   TS_VERSIONS,
 } from './versions.js';
 
@@ -42,85 +42,11 @@ export const isAgentCoreHosted = (infra: AgentCoreInfra): boolean =>
 export const isContainerHosted = (infra: AgentCoreInfra): boolean =>
   infra === 'agentcore-ecr';
 
-/**
- * The AgentCore managed runtime for the Node version generated projects target,
- * e.g. `NODE_22`.
- *
- * AgentCore only publishes a Node 22 runtime, so the major is pinned here
- * rather than derived from {@link LAMBDA_RUNTIME_VERSIONS}: those track Lambda,
- * which offers newer majors AgentCore would reject.
- */
-export const agentCoreNodeRuntime = (): string => 'NODE_22';
+/** The AgentCore managed runtime a TypeScript component targets. */
+export const agentCoreNodeRuntime = (): string => agentCoreRuntime('node');
 
-/**
- * The AgentCore managed runtime for the Python version generated projects
- * target, e.g. `PYTHON_3_14`, derived from the same pin the bundle resolves
- * wheels against so the two cannot drift.
- */
-export const agentCorePythonRuntime = (): string =>
-  `PYTHON_${LAMBDA_RUNTIME_VERSIONS.python.replace('.', '_')}`;
-
-export interface RemoveContainerArtifactsOptions {
-  /** Project configuration to remove the container targets from (mutated in place). */
-  readonly project: ProjectConfiguration;
-  /** Component source directory that may hold a `Dockerfile`. */
-  readonly sourceDir: string;
-  /** Component target prefix, e.g. `agent` or `my-mcp-server`. */
-  readonly targetPrefix: string;
-}
-
-/**
- * Remove the container build artifacts a previous `agentcore-ecr` run left
- * behind, so re-running with `agentcore` fully switches the component to code
- * packaging rather than leaving an orphaned `Dockerfile` and image build.
- *
- * The aggregate `docker` and `trivy` targets are dropped only once no component
- * target remains under them, since a project can host several components and
- * only some may use containers.
- */
-export const removeContainerArtifacts = (
-  tree: Tree,
-  options: RemoveContainerArtifactsOptions,
-): void => {
-  const { project, sourceDir, targetPrefix } = options;
-
-  const dockerfilePath = joinPathFragments(sourceDir, 'Dockerfile');
-  if (tree.exists(dockerfilePath)) {
-    tree.delete(dockerfilePath);
-    // Generated infrastructure is user-owned, so the existing construct or
-    // module still references the container artifact this run removed.
-    console.warn(
-      `Warning: ${targetPrefix} was previously generated with infra 'agentcore-ecr'. Its generated infrastructure is yours to edit, so it still builds a container image and will fail now that the Dockerfile is gone. Delete the generated infrastructure for ${targetPrefix} and re-run this generator to have it rewritten for code packaging.`,
-    );
-  }
-
-  project.targets ??= {};
-  for (const suffix of ['docker', 'trivy'] as const) {
-    const componentTargetName = `${targetPrefix}-${suffix}`;
-    delete project.targets[componentTargetName];
-
-    const aggregate = project.targets[suffix];
-    if (!aggregate?.dependsOn) {
-      continue;
-    }
-    aggregate.dependsOn = aggregate.dependsOn.filter(
-      (dependency) => dependency !== componentTargetName,
-    );
-    // An aggregate with nothing left under it would be an empty target, so drop
-    // it along with the `build`/`assemble` edges that fan out to it.
-    if (aggregate.dependsOn.length === 0) {
-      delete project.targets[suffix];
-      for (const parent of ['build', 'assemble'] as const) {
-        const parentTarget = project.targets[parent];
-        if (parentTarget?.dependsOn) {
-          parentTarget.dependsOn = parentTarget.dependsOn.filter(
-            (dependency) => dependency !== suffix,
-          );
-        }
-      }
-    }
-  }
-};
+/** The AgentCore managed runtime a Python component targets. */
+export const agentCorePythonRuntime = (): string => agentCoreRuntime('python');
 
 /**
  * Dependencies a caller must declare to add a code (`.zip`) packaging target.

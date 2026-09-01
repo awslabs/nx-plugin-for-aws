@@ -120,21 +120,24 @@ export interface AddAgentCoreInfraProps {
 }
 
 /**
+ * The Terraform packaging module a given artifact uses, under `core/`.
+ *
+ * Each packaging module owns only its own artifact plumbing — an ECR repository
+ * and image push, or a code archive staged in the shared asset bucket — and
+ * delegates the runtime itself to the generic `core/agent-core` module. A
+ * workspace mixing both packagings therefore vends one copy of the runtime.
+ */
+const terraformPackagingModule = (artifact: AgentCoreArtifact): string =>
+  artifact.type === 'container' ? 'agent-core-container' : 'agent-core-code';
+
+/**
  * Template substitution variables describing the runtime artifact, shared by
  * the CDK and Terraform branches so both read the same fields.
  */
-/**
- * The shared Terraform module directory a given packaging uses, under
- * `core/`. Container packaging keeps the original `agent-core` name so
- * existing workspaces are untouched.
- */
-const terraformAgentCoreModule = (artifact: AgentCoreArtifact): string =>
-  artifact.type === 'container' ? 'agent-core' : 'agent-core-code';
-
 const artifactTemplateVars = (artifact: AgentCoreArtifact) => ({
   container: artifact.type === 'container',
   artifactOutputDir: artifact.outputDir,
-  terraformAgentCoreModule: terraformAgentCoreModule(artifact),
+  terraformPackagingModule: terraformPackagingModule(artifact),
   dockerImageTag:
     artifact.type === 'container' ? artifact.dockerImageTag : undefined,
   codeRuntime: artifact.type === 'code' ? artifact.runtime : undefined,
@@ -224,10 +227,20 @@ const addAgentCoreTerraformInfra = (
   tree: Tree,
   options: AddAgentCoreInfraProps,
 ) => {
-  // Add the AgentCore shared module. Each packaging gets its own module
-  // directory: the shared modules are written `KeepExisting` (so they stay
-  // user-owned), and a workspace may host both packagings at once, which a
-  // single directory could only serve for whichever was generated first.
+  const terraformCoreDir = joinPathFragments(
+    PACKAGES_DIR,
+    SHARED_TERRAFORM_DIR,
+    'src',
+    'core',
+  );
+  const sharedModuleContext = {
+    containers: options.containers,
+    boto3Version: PY_VERSIONS.boto3,
+    ...artifactTemplateVars(options.artifact),
+    ...terraformProviderVersions(),
+  };
+
+  // The generic runtime module, shared by both packagings.
   generateFiles(
     tree,
     joinPathFragments(
@@ -237,19 +250,28 @@ const addAgentCoreTerraformInfra = (
       'core',
       'agent-core',
     ),
-    joinPathFragments(
-      PACKAGES_DIR,
-      SHARED_TERRAFORM_DIR,
-      'src',
-      'core',
-      terraformAgentCoreModule(options.artifact),
-    ),
+    joinPathFragments(terraformCoreDir, 'agent-core'),
+    sharedModuleContext,
     {
-      containers: options.containers,
-      boto3Version: PY_VERSIONS.boto3,
-      ...artifactTemplateVars(options.artifact),
-      ...terraformProviderVersions(),
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
+  );
+
+  // The packaging module wrapping it, which owns this artifact's plumbing. Only
+  // the packaging in use is vended, so a code-only workspace carries no ECR
+  // resources and a container-only one carries no archive/upload.
+  const packagingModule = terraformPackagingModule(options.artifact);
+  generateFiles(
+    tree,
+    joinPathFragments(
+      import.meta.dirname,
+      'files',
+      'terraform',
+      'core',
+      packagingModule,
+    ),
+    joinPathFragments(terraformCoreDir, packagingModule),
+    sharedModuleContext,
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },

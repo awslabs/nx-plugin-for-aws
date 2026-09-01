@@ -282,6 +282,17 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
             outputs.ts_agent_arn,
             'TypeScript Agent',
           );
+
+          // Container-packaged agents, proving `agentcore-ecr` still boots and
+          // serves now that code packaging is the default.
+          await invokeTrpcAgentCoreAgent(
+            outputs.ts_ecr_agent_arn,
+            'TypeScript Agent (container)',
+          );
+          await invokeAgentCoreAgent(
+            outputs.py_ecr_agent_arn,
+            'Python Agent (container)',
+          );
           // Python LangChain agents across all three protocols.
           await invokeAgentCoreAgUi(
             outputs.py_langchain_agent_arn,

@@ -34,7 +34,6 @@ import {
   agentCorePythonRuntime,
   isAgentCoreHosted,
   isContainerHosted,
-  removeContainerArtifacts,
 } from '../../utils/agent-core-packaging.js';
 import { addPythonBundleTarget } from '../../utils/bundle/bundle.js';
 import { resolveContainers } from '../../utils/containers.js';
@@ -448,14 +447,6 @@ export const pyAgentGenerator = async (
         outputDir: dockerOutputDir,
       };
     } else {
-      // The managed runtime loads the code from a zip, so no Dockerfile or
-      // image build is involved. Remove one left by a previous container run.
-      removeContainerArtifacts(tree, {
-        project,
-        sourceDir: targetSourceDir,
-        targetPrefix: agentTargetPrefix,
-      });
-
       // The entry point the managed runtime runs, at the package root.
       generateFiles(
         tree,

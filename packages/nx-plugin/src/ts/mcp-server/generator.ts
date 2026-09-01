@@ -25,7 +25,6 @@ import {
   CODE_PACKAGE_DEPENDENCIES,
   isAgentCoreHosted,
   isContainerHosted,
-  removeContainerArtifacts,
 } from '../../utils/agent-core-packaging.js';
 import {
   addTypeScriptBundleTarget,
@@ -245,14 +244,6 @@ export const tsMcpServerGenerator = async (
         outputDir: bundleOutputDir,
       };
     } else {
-      // The managed runtime loads the code from a zip, so no Dockerfile or
-      // image build is involved. Remove one left by a previous container run.
-      removeContainerArtifacts(tree, {
-        project,
-        sourceDir: targetSourceDir,
-        targetPrefix: mcpTargetPrefix,
-      });
-
       const packageOutputDir = joinPathFragments(
         'dist',
         project.root,

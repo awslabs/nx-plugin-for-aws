@@ -23,6 +23,10 @@ import {
 import { parseDocument } from 'yaml';
 import { applyGritQL } from '../packages/nx-plugin/src/utils/ast';
 import {
+  resolveAgentCoreRuntimes,
+  unresolvedAgentCoreRuntimeWarning,
+} from '../packages/nx-plugin/src/utils/agent-core-runtime-resolution.js';
+import {
   type RuntimeResolution,
   resolveLambdaRuntimes,
   unresolvedRuntimeWarning,
@@ -31,6 +35,7 @@ import { RUFF_WASM_VERSION } from '../packages/nx-plugin/src/utils/ruff';
 import { isNxPackage } from '../packages/nx-plugin/src/utils/version-upgrade-migration/nx-package-updates';
 import { registerNxPackageUpdates } from '../packages/nx-plugin/src/utils/version-upgrade-migration/register';
 import {
+  AGENT_CORE_RUNTIME_VERSIONS,
   type IJavaVersion,
   type IMiseVersion,
   JAVA_ARTIFACTS,
@@ -501,6 +506,45 @@ const getUpdatedLambdaRuntimeVersions =
     return resolution;
   };
 
+/**
+ * The latest managed AgentCore Runtime runtimes, and the languages this could not
+ * resolve.
+ *
+ * Read from the `AgentCoreRuntime` members `aws-cdk-lib` publishes — the same
+ * source and the same failure handling as the Lambda runtimes, but a distinct
+ * list: AgentCore offers fewer runtimes than Lambda, so the pins must move
+ * independently or a create call is rejected.
+ */
+const getUpdatedAgentCoreRuntimeVersions =
+  async (): Promise<RuntimeResolution> => {
+    let identifiers: string[] = [];
+    try {
+      const { AgentCoreRuntime } = await import(
+        'aws-cdk-lib/aws-bedrockagentcore'
+      );
+      identifiers = Object.getOwnPropertyNames(AgentCoreRuntime)
+        .map((name) => (AgentCoreRuntime as Record<string, unknown>)[name])
+        .filter(
+          (member): member is { value: string } =>
+            typeof member === 'object' &&
+            member !== null &&
+            typeof (member as { value?: unknown }).value === 'string',
+        )
+        .map((member) => member.value);
+    } catch (error) {
+      console.warn(
+        'Could not read the aws-cdk-lib AgentCoreRuntime list:',
+        error,
+      );
+    }
+
+    const resolution = resolveAgentCoreRuntimes(identifiers);
+    for (const entry of resolution.unresolved) {
+      console.warn(unresolvedAgentCoreRuntimeWarning(entry));
+    }
+    return resolution;
+  };
+
 /** The latest version mise can install of every tool in {@link MISE_VERSIONS}. */
 const getUpdatedMiseVersions = (): Record<string, string> =>
   Object.fromEntries(
@@ -640,6 +684,27 @@ const main = async () => {
       lambdaRuntimeChanges.push({ note: unresolvedRuntimeWarning(entry) });
     }
 
+    // Get the latest managed AgentCore runtimes, which agents and MCP servers
+    // packaged as code run on.
+    const {
+      versions: updatedAgentCoreRuntimeVersions,
+      unresolved: unresolvedAgentCoreRuntimes,
+    } = await getUpdatedAgentCoreRuntimeVersions();
+
+    const agentCoreRuntimeChanges: ReportChange[] = await applyUpdatedVersions(
+      tree,
+      AGENT_CORE_RUNTIME_VERSIONS,
+      updatedAgentCoreRuntimeVersions,
+      'packages/nx-plugin/src/utils/versions.ts',
+      'AGENT_CORE_RUNTIME_VERSIONS',
+    );
+
+    for (const entry of unresolvedAgentCoreRuntimes) {
+      agentCoreRuntimeChanges.push({
+        note: unresolvedAgentCoreRuntimeWarning(entry),
+      });
+    }
+
     // Keep the Smithy CLI CI installs on Windows in step with the mise pin
     const smithyChange = miseChanges.find((change) => change.name === 'smithy');
     if (smithyChange) {
@@ -679,6 +744,7 @@ const main = async () => {
       { title: 'Java Dependencies', changes: javaChanges },
       { title: 'mise Tools', changes: miseChanges },
       { title: 'Lambda Runtimes', changes: lambdaRuntimeChanges },
+      { title: 'AgentCore Runtimes', changes: agentCoreRuntimeChanges },
       ...(vendoredChanges.length > 0
         ? [{ title: 'Vendored Tools', changes: vendoredChanges }]
         : []),

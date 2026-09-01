@@ -248,6 +248,22 @@ export const internalTestMatrixGenerator = async (
     iac: 'inherit',
     ...defaults,
   });
+  // Container-packaged variants, so both packagings are covered and a workspace
+  // mixing them vends one copy of the shared runtime module.
+  await tsMcpServerGenerator(tree, {
+    project: 'ts-project',
+    name: 'ecr-mcp-server',
+    infra: 'agentcore-ecr',
+    iac: 'inherit',
+    ...defaults,
+  });
+  await pyMcpServerGenerator(tree, {
+    project: 'py_project',
+    name: 'ecr-mcp-server',
+    infra: 'agentcore-ecr',
+    iac: 'inherit',
+    ...defaults,
+  });
 
   // OAuth DCR proxy for Cognito-authenticated MCP servers.
   await tsDcrProxyGenerator(tree, {
@@ -266,6 +282,12 @@ export const internalTestMatrixGenerator = async (
       iac: 'inherit',
     },
     { project: 'ts-project', infra: 'agentcore', iac: 'inherit' },
+    {
+      project: 'ts-project',
+      name: 'my-ts-ecr-agent',
+      infra: 'agentcore-ecr',
+      iac: 'inherit',
+    },
     {
       project: 'ts-project',
       name: 'my-ts-a2a-agent',
@@ -301,6 +323,12 @@ export const internalTestMatrixGenerator = async (
       project: 'py_project',
       name: 'my-agent',
       infra: 'agentcore',
+      iac: 'inherit',
+    },
+    {
+      project: 'py_project',
+      name: 'my-py-ecr-agent',
+      infra: 'agentcore-ecr',
       iac: 'inherit',
     },
     {
