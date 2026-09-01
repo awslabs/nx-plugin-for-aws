@@ -326,11 +326,17 @@ function chatStreamsReply(
     let out = '';
     let sent = false;
     let settled = false;
+    let resend: NodeJS.Timeout | undefined;
     const clean = () => stripVTControlCharacters(out);
+    const stopResending = () => {
+      clearInterval(resend);
+      resend = undefined;
+    };
     const finish = (err?: Error) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      stopResending();
       try {
         term.kill();
       } catch {
@@ -351,9 +357,24 @@ function chatStreamsReply(
       out += d;
       process.stdout.write(`[${target}] ${d}`);
       const text = clean();
-      if (!sent && text.includes('Connected to ')) {
+      // `Connected to ` is printed before the Clack prompt attaches to stdin, so
+      // a message written on that signal alone can land while nothing is reading
+      // and be dropped — the PTY still echoes it, so the run then waits out the
+      // full timeout on a message the agent never received. Wait for the
+      // prompt's own placeholder, which is only rendered once it is reading.
+      if (!sent && text.includes('Type a message')) {
         sent = true;
-        setTimeout(() => term.write(`${message}\r`), 1000);
+        // Re-send until Clack marks this prompt submitted (`◇  You → `, vs `◆`
+        // while it is still active), since even the placeholder can be painted a
+        // beat before the prompt will accept a submission.
+        term.write(`${message}\r`);
+        resend = setInterval(() => {
+          if (/◇\s+You → /.test(clean())) {
+            stopResending();
+            return;
+          }
+          term.write(`${message}\r`);
+        }, 5000);
       }
       if (
         sent &&
