@@ -72,7 +72,7 @@ import {
 } from '../../utils/shared-constructs.js';
 import type { IacMetadata } from '../../utils/shared-constructs-constants.js';
 import { BASE_IMAGES, TS_VERSIONS } from '../../utils/versions.js';
-import type { TsAgentGeneratorSchema } from './schema';
+import type { TsAgentGeneratorSchema, TsAgentInfra } from './schema';
 
 /** The metadata this generator records, which its predicates read. */
 export interface TsAgentMetadata extends IacMetadata {
@@ -81,6 +81,11 @@ export interface TsAgentMetadata extends IacMetadata {
   readonly auth: string;
   readonly protocol: string;
   readonly session: string;
+  /**
+   * How this component is packaged and hosted, so a consumer can tell a
+   * code-packaged runtime from a container-packaged one without re-deriving it.
+   */
+  readonly infra: TsAgentInfra;
 }
 
 // Each entry names the branch it belongs to, so the same declaration drives both
@@ -401,6 +406,7 @@ export const tsAgentGenerator = async (
   // Recorded below and read by the declaration's predicates, so the packages
   // added here are exactly the ones the version sync will own.
   const metadata: TsAgentMetadata = {
+    infra,
     port: localDevPort,
     rc: agentNameClassName,
     auth,

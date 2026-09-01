@@ -82,6 +82,7 @@ import type {
   AgentProtocol,
   PyAgentFramework,
   PyAgentGeneratorSchema,
+  PyAgentInfra,
   PyAgentSession,
 } from './schema';
 
@@ -97,6 +98,11 @@ export interface PyAgentMetadata extends IacMetadata {
    */
   readonly framework: PyAgentFramework;
   readonly session: PyAgentSession;
+  /**
+   * How this component is packaged and hosted, so a consumer can tell a
+   * code-packaged runtime from a container-packaged one without re-deriving it.
+   */
+  readonly infra: PyAgentInfra;
 }
 
 /** Whether the chat CLI signs its requests, which only IAM auth needs. */
@@ -525,6 +531,7 @@ export const pyAgentGenerator = async (
   // Recorded below and read by the declaration's predicates, so the packages
   // added here are exactly the ones the version sync will own.
   const metadata: PyAgentMetadata = {
+    infra,
     port: localDevPort,
     rc: agentNameClassName,
     auth,

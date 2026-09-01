@@ -69,13 +69,18 @@ import {
 } from '../../utils/shared-constructs.js';
 import type { IacMetadata } from '../../utils/shared-constructs-constants.js';
 import { BASE_IMAGES, TS_VERSIONS } from '../../utils/versions.js';
-import type { TsMcpServerGeneratorSchema } from './schema';
+import type { TsMcpServerGeneratorSchema, TsMcpServerInfra } from './schema';
 
 /** The metadata this generator records, which its predicates read. */
 export interface TsMcpServerMetadata extends IacMetadata {
   readonly port: number;
   readonly rc: string;
   readonly auth: string;
+  /**
+   * How this component is packaged and hosted, so a consumer can tell a
+   * code-packaged runtime from a container-packaged one without re-deriving it.
+   */
+  readonly infra: TsMcpServerInfra;
 }
 
 export const DEPENDENCIES = declareDependencies<TsMcpServerMetadata>()({
@@ -316,6 +321,7 @@ export const tsMcpServerGenerator = async (
   // Recorded below and read by the declaration's predicates, so the packages
   // added here are exactly the ones the version sync will own.
   const metadata: TsMcpServerMetadata = {
+    infra,
     port: localDevPort,
     rc: mcpServerNameClassName,
     auth,

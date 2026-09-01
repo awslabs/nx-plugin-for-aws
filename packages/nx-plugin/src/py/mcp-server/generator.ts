@@ -60,13 +60,18 @@ import {
 } from '../../utils/shared-constructs.js';
 import type { IacMetadata } from '../../utils/shared-constructs-constants.js';
 import { BASE_IMAGES } from '../../utils/versions.js';
-import type { PyMcpServerGeneratorSchema } from './schema';
+import type { PyMcpServerGeneratorSchema, PyMcpServerInfra } from './schema';
 
 /** The metadata this generator records, which its predicates read. */
 export interface PyMcpServerMetadata extends IacMetadata {
   readonly port: number;
   readonly rc: string;
   readonly auth: string;
+  /**
+   * How this component is packaged and hosted, so a consumer can tell a
+   * code-packaged runtime from a container-packaged one without re-deriving it.
+   */
+  readonly infra: PyMcpServerInfra;
 }
 
 export const DEPENDENCIES = declareDependencies<PyMcpServerMetadata>()({
@@ -307,6 +312,7 @@ export const pyMcpServerGenerator = async (
   // Recorded below and read by the declaration's predicates, so the packages
   // added here are exactly the ones the version sync will own.
   const metadata: PyMcpServerMetadata = {
+    infra,
     port: localDevPort,
     rc: mcpServerNameClassName,
     auth,
