@@ -306,18 +306,19 @@ function startServer(
 }
 
 /**
- * Drive `agent-chat` through a PTY (the Clack prompt needs a TTY), send one
- * message once connected, and resolve when the agent streams `expected` back.
- * Proves the standalone chat boots, connects, submits input and renders the
- * reply end-to-end. Rejects if not seen before the timeout.
+ * One attempt at driving `agent-chat` through a PTY: send the message once the
+ * prompt is up, and resolve when the agent streams `expected` back.
+ *
+ * Resolves `false` (rather than rejecting) when the prompt never consumed the
+ * message, so the caller can relaunch — see `chatStreamsReply`.
  */
-function chatStreamsReply(
+function chatAttempt(
   cwd: string,
   target: string,
   expected: string,
   timeoutMs: number,
-  message = 'What is 3 times 5?',
-): Promise<void> {
+  message: string,
+): Promise<{ ok: boolean; consumed: boolean; out: string }> {
   return new Promise((resolve, reject) => {
     const term = pty.spawn('pnpm', ['exec', 'nx', 'run', target], {
       cwd,
@@ -326,65 +327,92 @@ function chatStreamsReply(
     let out = '';
     let sent = false;
     let settled = false;
-    let resend: NodeJS.Timeout | undefined;
     const clean = () => stripVTControlCharacters(out);
-    const stopResending = () => {
-      clearInterval(resend);
-      resend = undefined;
-    };
-    const finish = (err?: Error) => {
+    // Clack reads in raw mode with echo off and repaints the line itself, so the
+    // message appearing back is proof the prompt actually consumed stdin.
+    const consumed = () => clean().includes(message);
+    const finish = (result?: { ok: boolean }, err?: Error) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      stopResending();
       try {
         term.kill();
       } catch {
         // already dead
       }
-      err ? reject(err) : resolve();
+      err
+        ? reject(err)
+        : resolve({ ok: result!.ok, consumed: consumed(), out: clean() });
     };
-    const timer = setTimeout(
-      () =>
-        finish(
-          new Error(
-            `Chat target ${target} did not stream "${expected}" within ${timeoutMs}ms. Output:\n${clean()}`,
-          ),
-        ),
-      timeoutMs,
-    );
+    const timer = setTimeout(() => finish({ ok: false }), timeoutMs);
     term.onData((d) => {
       out += d;
       process.stdout.write(`[${target}] ${d}`);
       const text = clean();
-      // `Connected to ` is printed before the Clack prompt attaches to stdin, so
-      // a message written on that signal alone can land while nothing is reading
-      // and be dropped — the PTY still echoes it, so the run then waits out the
-      // full timeout on a message the agent never received. Wait for the
-      // prompt's own placeholder, which is only rendered once it is reading.
+      // `Connected to ` prints before the Clack prompt attaches to stdin, so wait
+      // for the prompt's own placeholder before typing.
       if (!sent && text.includes('Type a message')) {
         sent = true;
-        // Re-send until Clack marks this prompt submitted (`◇  You → `, vs `◆`
-        // while it is still active), since even the placeholder can be painted a
-        // beat before the prompt will accept a submission.
-        term.write(`${message}\r`);
-        resend = setInterval(() => {
-          if (/◇\s+You → /.test(clean())) {
-            stopResending();
-            return;
-          }
-          term.write(`${message}\r`);
-        }, 5000);
+        setTimeout(() => term.write(`${message}\r`), 1000);
       }
       if (
         sent &&
+        consumed() &&
         text.slice(text.indexOf(message) + message.length).includes(expected)
       ) {
-        finish();
+        finish({ ok: true });
       }
     });
-    term.onExit(() => finish(new Error(`Chat target ${target} exited early`)));
+    term.onExit(() =>
+      finish(undefined, new Error(`Chat target ${target} exited early`)),
+    );
   });
+}
+
+/**
+ * Drive `agent-chat` through a PTY (the Clack prompt needs a TTY), send one
+ * message once connected, and resolve when the agent streams `expected` back.
+ * Proves the standalone chat boots, connects, submits input and renders the
+ * reply end-to-end. Rejects if not seen before the timeout.
+ *
+ * Occasionally the prompt never receives what we type: `agent-chat` runs as a
+ * grandchild (pnpm → nx → tsx), and if the intermediate processes have not wired
+ * the PTY through to it by the time we write, the input goes nowhere. Clack
+ * renders its own input, so an attempt whose output never shows the message
+ * never consumed it — relaunch rather than spend the whole budget waiting on a
+ * process that will never answer.
+ */
+async function chatStreamsReply(
+  cwd: string,
+  target: string,
+  expected: string,
+  timeoutMs: number,
+  message = 'What is 3 times 5?',
+): Promise<void> {
+  const attempts = 3;
+  let last = '';
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const { ok, consumed, out } = await chatAttempt(
+      cwd,
+      target,
+      expected,
+      timeoutMs,
+      message,
+    );
+    if (ok) return;
+    last = out;
+    // The prompt did receive the message and still did not answer — a real
+    // failure, so report it rather than masking it behind a retry.
+    if (consumed) break;
+    if (attempt < attempts) {
+      console.warn(
+        `Chat target ${target} never consumed the typed message (attempt ${attempt}/${attempts}); relaunching`,
+      );
+    }
+  }
+  throw new Error(
+    `Chat target ${target} did not stream "${expected}" within ${timeoutMs}ms. Output:\n${last}`,
+  );
 }
 
 function killProcess(child: ChildProcess): Promise<void> {
