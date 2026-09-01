@@ -616,7 +616,6 @@ Il s'agit du point d'entrée de l'agent. Parce que nous avons sélectionné `--p
 ```ts
 // common/constructs/src/app/agents/story-agent/story-agent.ts
 import { Fn, Lazy, Names, RemovalPolicy, Stack } from 'aws-cdk-lib';
-import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { Connections, IConnectable } from 'aws-cdk-lib/aws-ec2';
 import {
   BlockPublicAccess,
@@ -635,6 +634,7 @@ import { Construct } from 'constructs';
 import * as path from 'path';
 import * as url from 'url';
 import {
+  AgentCoreRuntime,
   AgentRuntimeArtifact,
   ProtocolType,
   Runtime,
@@ -678,7 +678,7 @@ export type StoryAgentProps = Omit<
 };
 
 export class StoryAgent extends Construct implements IGrantable, IConnectable {
-  public readonly dockerImage: AgentRuntimeArtifact;
+  public readonly code: AgentRuntimeArtifact;
   public readonly agentCoreRuntime: Runtime;
   /** Default Gateway target name for this agent. */
   public readonly agentName = 'story-agent';
@@ -690,14 +690,19 @@ export class StoryAgent extends Construct implements IGrantable, IConnectable {
 
     const rc = RuntimeConfig.ensure(this);
 
-    // Resolve the bundle output directory containing the Dockerfile and built artifacts
+    // Resolve the packaged code directory, uploaded as a zip asset
     const bundleDir = path.join(
       findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
-      'dist/packages/story/docker/story-agent',
+      'dist/packages/story/package/story-agent',
     );
 
-    this.dockerImage = AgentRuntimeArtifact.fromAsset(bundleDir, {
-      platform: Platform.LINUX_ARM64,
+    // The `opentelemetry-instrument` prefix auto-instruments with the AWS Distro
+    // for OpenTelemetry packaged alongside the code.
+    // https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html
+    this.code = AgentRuntimeArtifact.fromCodeAsset({
+      path: bundleDir,
+      runtime: AgentCoreRuntime.PYTHON_3_14,
+      entrypoint: ['opentelemetry-instrument', 'main.py'],
     });
 
     const {
@@ -817,7 +822,7 @@ export class StoryAgent extends Construct implements IGrantable, IConnectable {
           Names.uniqueResourceName(this.agentCoreRuntime, { maxLength: 40 }),
       }),
       protocolConfiguration: ProtocolType.HTTP,
-      agentRuntimeArtifact: this.dockerImage,
+      agentRuntimeArtifact: this.code,
       authorizerConfiguration: RuntimeAuthorizerConfiguration.usingCognito(
         identity.userPool,
         [identity.userPoolClient],

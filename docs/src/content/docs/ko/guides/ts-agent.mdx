@@ -63,7 +63,7 @@ import OptionFilter from '@components/option-filter.astro';
         - session.ts Resolves the SessionManager used to persist conversation state
         - client.ts Vended client for invoking your agent
         - agent-core-trpc-client.ts Client factory for connecting to agents on AgentCore Runtime
-        - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - package.json Updated with Strands dependencies
     - project.json Updated with agent serve targets
 </FileTree>
@@ -81,7 +81,7 @@ import OptionFilter from '@components/option-filter.astro';
         - index.ts A2A Express server entry point
         - agent.ts Main agent definition with sample tools
         - session.ts Resolves the SessionManager used to persist conversation state
-        - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - package.json Updated with Strands and Express dependencies
     - project.json Updated with agent serve targets
 </FileTree>
@@ -99,7 +99,7 @@ import OptionFilter from '@components/option-filter.astro';
         - index.ts AG-UI server entry point (Express + SSE)
         - agent.ts Main agent definition with sample tools
         - session.ts Resolves the SessionManager used to persist conversation state
-        - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - package.json Updated with Strands and AG-UI dependencies
     - project.json Updated with agent serve targets
 </FileTree>
@@ -107,7 +107,9 @@ import OptionFilter from '@components/option-filter.astro';
 
 ### 인프라
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment">
+<Snippet name="agentcore-hosting" />
+
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Bedrock AgentCore Runtime deployment">
 <Snippet name="shared-constructs" />
 
 Agent를 배포하기 위해 다음 파일이 생성됩니다:
@@ -132,6 +134,10 @@ Agent를 배포하기 위해 다음 파일이 생성됩니다:
     - core
       - agent-core
         - runtime.tf Generic module for deploying to Bedrock AgentCore Runtime
+      - agent-core-code (when `infra` is `agentcore`)
+        - runtime.tf Packages your agent's code and delegates to `agent-core`
+      - agent-core-container (when `infra` is `agentcore-ecr`)
+        - runtime.tf Builds and publishes your agent's image and delegates to `agent-core`
 </FileTree>
 </Fragment>
 </Infrastructure>
@@ -249,7 +255,7 @@ Strands 에이전트 작성에 대한 더 심층적인 가이드는 [Strands 문
 
 생성된 `index.ts`는 [Strands A2A Express Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent)를 Express 앱에 마운트하여 생성된 에이전트가 `/ping` 헬스 체크와 함께 A2A 프로토콜 엔드포인트를 노출하도록 합니다. 에이전트 카드에 광고되는 URL은 `AGENTCORE_RUNTIME_URL` 환경 변수에서 가져오며, 로컬 개발의 경우 `http://localhost:<port>/`로 대체됩니다.
 
-대부분의 사용자는 이 파일을 수정할 필요가 없습니다. 도구나 시스템 프롬프트를 변경하려면 `agent.ts`를 편집하세요. A2A 에이전트는 포트 `9000`에서 수신 대기하며(HTTP의 경우 `8080`), 생성된 Dockerfile 및 인프라가 이미 이에 맞게 구성되어 있습니다.
+대부분의 사용자는 이 파일을 수정할 필요가 없습니다. 도구나 시스템 프롬프트를 변경하려면 `agent.ts`를 편집하세요. A2A 에이전트는 포트 `9000`에서 수신 대기하며(HTTP의 경우 `8080`), 생성된 인프라가 이미 이에 맞게 구성되어 있습니다.
 </OptionFilter>
 
 <OptionFilter when={{ protocol: 'ag-ui' }} description="AG-UI server details">
@@ -259,7 +265,7 @@ Strands 에이전트 작성에 대한 더 심층적인 가이드는 [Strands 문
 
 AG-UI 에이전트는 프론트엔드에서 직접 사용되도록 설계되었습니다. <Link path="/guides/connection/react-agui">`connection` 생성기</Link>를 사용하여 [CopilotKit](https://docs.copilotkit.ai/aws-strands) 제공자 및 [AG-UI HttpAgent](https://docs.ag-ui.com/) 클라이언트로 React 웹사이트를 에이전트에 연결하세요.
 
-대부분의 사용자는 `index.ts`를 수정할 필요가 없습니다. 도구나 시스템 프롬프트를 변경하려면 `agent.ts`를 편집하세요. AG-UI 에이전트는 포트 `8080`에서 수신 대기하며(HTTP와 동일), 생성된 Dockerfile 및 인프라가 이미 이에 맞게 구성되어 있습니다.
+대부분의 사용자는 `index.ts`를 수정할 필요가 없습니다. 도구나 시스템 프롬프트를 변경하려면 `agent.ts`를 편집하세요. AG-UI 에이전트는 포트 `8080`에서 수신 대기하며(HTTP와 동일), 생성된 인프라가 이미 이에 맞게 구성되어 있습니다.
 </OptionFilter>
 
 ## Agent 실행
@@ -290,7 +296,7 @@ Agent(및 연결된 모든 것)를 로컬에서 실행하려면 프로젝트의 
 
 생성기는 모든 프로토콜에 대해 `scripts/<your-agent-name>/chat.ts`를 생성합니다. 에이전트의 입력 형태가 발전함에 따라 이를 커스터마이징할 수 있습니다. 기본적으로 로컬 에이전트에 연결하거나 `RUNTIME_CONFIG_APP_ID`가 설정된 경우 배포된 에이전트에 연결합니다(아래 [배포된 에이전트와 채팅](#chat-with-your-deployed-agent) 참조).
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Deployed agent chat details">
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Deployed agent chat details">
 #### 배포된 에이전트와 채팅
 
 Bedrock AgentCore에 배포된 에이전트와 채팅하려면 `RUNTIME_CONFIG_APP_ID` 환경 변수를 배포의 AppConfig 애플리케이션 ID(배포된 스택에서 `RuntimeConfigApplicationId`로 출력됨)로 설정하세요. 채팅 스크립트는 런타임 구성에서 에이전트의 런타임 ARN을 확인하고 배포된 엔드포인트에 연결합니다:
@@ -322,7 +328,7 @@ aws cognito-idp admin-initiate-auth \
 </Tabs>
 </OptionFilter>
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment details">
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Bedrock AgentCore Runtime deployment details">
 ## Bedrock AgentCore Runtime에 Agent 배포
 
 <Snippet name="agent/bedrock-deployment" parentHeading="Bedrock AgentCore Runtime에 Agent 배포" />
@@ -333,6 +339,13 @@ aws cognito-idp admin-initiate-auth \
 
 번들 타겟은 Bedrock AgentCore Runtime에서 호스팅할 WebSocket 서버의 엔트리포인트로 `index.ts`를 사용합니다.
 
+<OptionFilter when={{ infra: 'agentcore' }} description="Code package target">
+### 패키지 타겟
+
+생성기는 배포 가능한 코드 패키지를 조립하는 `<your-agent-name>-package` 타겟을 구성합니다: 번들된 `index.js`와 AgentCore가 패키지에 존재해야 하는 AWS Distro for OpenTelemetry의 벤더 설치가 포함됩니다. 생성된 인프라는 이 디렉토리를 `.zip`으로 업로드합니다 — CDK에서는 `AgentRuntimeArtifact.fromCodeAsset`을 통해, Terraform에서는 공유 자산 버킷에 아카이브됩니다.
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'agentcore-ecr' }} description="Container image build and scan">
 ### Docker 타겟
 
 생성기는 에이전트 소스 디렉토리에서 번들 출력 디렉토리로 `Dockerfile`을 복사하는 `<your-agent-name>-docker` 타겟을 구성합니다. 이는 `Dockerfile`을 번들된 아티팩트와 함께 배치하여 CDK가 `AgentRuntimeArtifact.fromAsset`을 사용하여 Docker 이미지를 직접 빌드할 수 있도록 합니다.
@@ -342,10 +355,11 @@ aws cognito-idp admin-initiate-auth \
 ### 이미지 스캔
 
 <Snippet name="trivy-image-scan" parentHeading="이미지 스캔" />
+</OptionFilter>
 
 ### 관찰성
 
-에이전트는 `Dockerfile`에서 자동 계측을 구성하여 [AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT)를 사용한 관찰성으로 자동 구성됩니다.
+에이전트는 [AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT)를 사용한 관찰성으로 자동 구성됩니다.
 
 CloudWatch AWS 콘솔에서 메뉴의 "GenAI Observability"를 선택하여 추적을 찾을 수 있습니다. 추적이 채워지려면 [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html)를 활성화해야 합니다.
 

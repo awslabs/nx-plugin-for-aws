@@ -55,7 +55,7 @@ Python Agent를 생성하는 두 가지 방법이 있습니다:
           - \_\_init\_\_.py Python package initialization
           - session_id_middleware.py Binds the inbound AgentCore session ID for the request
         - main.py FastAPI entry point for Bedrock AgentCore Runtime
-        - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - pyproject.toml Updated with Strands dependencies
     - project.json Updated with agent serve targets
 </FileTree>
@@ -77,7 +77,7 @@ Python Agent를 생성하는 두 가지 방법이 있습니다:
           - \_\_init\_\_.py Python package initialization
           - session_id_middleware.py Binds the inbound AgentCore session ID for the request
         - main.py A2A server entry point
-        - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - pyproject.toml Updated with framework and A2A dependencies
     - project.json Updated with agent serve targets
 </FileTree>
@@ -99,7 +99,7 @@ Python Agent를 생성하는 두 가지 방법이 있습니다:
           - \_\_init\_\_.py Python package initialization
           - session_id_middleware.py Binds the inbound AgentCore session ID for the request
         - main.py AG-UI server entry point
-        - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - pyproject.toml Updated with framework and AG-UI dependencies
     - project.json Updated with agent serve targets
 </FileTree>
@@ -111,7 +111,9 @@ AG-UI 에이전트는 <Link path="/guides/connection/react-agui">`connection` �
 
 ### 인프라
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment">
+<Snippet name="agentcore-hosting" />
+
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Bedrock AgentCore Runtime deployment">
 <Snippet name="shared-constructs" />
 
 에이전트 배포를 위해 다음 파일들이 생성됩니다:
@@ -136,6 +138,10 @@ AG-UI 에이전트는 <Link path="/guides/connection/react-agui">`connection` �
     - core
       - agent-core
         - runtime.tf Generic module for deploying to Bedrock AgentCore Runtime
+      - agent-core-code (when `infra` is `agentcore`)
+        - runtime.tf Packages your agent's code and delegates to `agent-core`
+      - agent-core-container (when `infra` is `agentcore-ecr`)
+        - runtime.tf Builds and publishes your agent's image and delegates to `agent-core`
 </FileTree>
 </Fragment>
 </Infrastructure>
@@ -296,7 +302,7 @@ model = ChatBedrockConverse(
 
 서버 엔트리 포인트는 프레임워크에 따라 다르지만 (Strands는 컨텍스트 관리되는 `Agent`를 생성하고, LangChain은 컴파일된 `create_agent` 그래프를 구동), 각 프로토콜의 외부 계약은 동일합니다.
 
-모든 프로토콜은 AgentCore 런타임 헬스 체크 계약을 위해 `/ping`을 노출합니다. A2A 에이전트는 포트 `9000`에서 수신하고, HTTP 및 AG-UI 에이전트는 포트 `8080`에서 수신합니다. 생성된 Dockerfile과 인프라는 자동으로 구성됩니다.
+모든 프로토콜은 AgentCore 런타임 헬스 체크 계약을 위해 `/ping`을 노출합니다. A2A 에이전트는 포트 `9000`에서 수신하고, HTTP 및 AG-UI 에이전트는 포트 `8080`에서 수신합니다. 생성된 인프라는 자동으로 구성됩니다.
 
 <OptionFilter when={{ protocol: 'http' }} description="FastAPI HTTP server details">
 ## FastAPI 서버 (HTTP 프로토콜)
@@ -441,7 +447,7 @@ AG-UI 에이전트는 프론트엔드에서 직접 사용하도록 설계되었�
 
 에이전트의 입력 형태를 커스터마이즈할 때 (예: `InvokeInput`에 새 필드 추가), `chat.ts`를 업데이트하여 에이전트 호출 시 새 필드를 전달하면 나머지는 자동으로 작동합니다.
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Deployed agent chat details">
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Deployed agent chat details">
 #### 배포된 에이전트와 채팅하기
 
 Bedrock AgentCore에 배포된 에이전트와 채팅하려면 `RUNTIME_CONFIG_APP_ID` 환경 변수를 배포 스택에서 `RuntimeConfigApplicationId`로 출력된 AppConfig 애플리케이션 ID로 설정하세요. 채팅 스크립트는 런타임 구성에서 에이전트의 런타임 ARN을 확인하고 배포된 엔드포인트에 연결합니다:
@@ -473,7 +479,7 @@ aws cognito-idp admin-initiate-auth \
 </Tabs>
 </OptionFilter>
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment details">
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Bedrock AgentCore Runtime deployment details">
 ## Bedrock AgentCore Runtime에 에이전트 배포하기
 
 <Snippet name="agent/bedrock-deployment" parentHeading="Bedrock AgentCore Runtime에 에이전트 배포하기" />
@@ -485,15 +491,21 @@ Bedrock AgentCore Runtime을 위해 에이전트를 빌드하기 위해 프로�
 - `uv export`를 사용하여 Python 의존성을 `requirements.txt` 파일로 내보냅니다
 - 대상 플랫폼(`aarch64-manylinux_2_28`)용 의존성을 `uv pip install`로 설치합니다
 
+<OptionFilter when={{ infra: 'agentcore' }} description="Code package target">
+`<your-agent-name>-package` 타겟도 추가되며, 배포 가능한 코드 패키지를 조립합니다: `aarch64` 의존성 번들, Python 모듈 트리, 그리고 루트 `main.py` 엔트리 포인트. 생성된 인프라는 이 디렉토리를 `.zip`으로 업로드합니다 — CDK에서는 `AgentRuntimeArtifact.fromCodeAsset`을 통해, Terraform에서는 공유 자산 버킷에 아카이브됩니다.
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'agentcore-ecr' }} description="Container image build and scan">
 에이전트에 특화된 `docker` 타겟도 추가되며, `Dockerfile`과 번들된 아티팩트를 docker 컨텍스트 디렉토리에 복사합니다. 이렇게 하면 `Dockerfile`이 빌드 출력과 함께 위치하여 CDK가 `AgentRuntimeArtifact.fromAsset`을 사용하여 Docker 이미지를 직접 빌드할 수 있습니다.
 
 ### 이미지 스캔
 
 <Snippet name="trivy-image-scan" parentHeading="이미지 스캔" />
+</OptionFilter>
 
 ### 관찰 가능성
 
-에이전트는 `Dockerfile`에서 자동 계측을 구성하여 [AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT)를 사용한 관찰 가능성으로 자동 구성됩니다.
+에이전트는 [AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT)를 사용한 관찰 가능성으로 자동 구성됩니다.
 
 CloudWatch AWS 콘솔에서 메뉴의 "GenAI Observability"를 선택하여 추적을 찾을 수 있습니다. 추적이 채워지려면 [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html)를 활성화해야 합니다.
 

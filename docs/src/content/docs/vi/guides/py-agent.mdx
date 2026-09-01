@@ -55,7 +55,7 @@ Generator sẽ thêm các tệp sau vào dự án Python hiện có của bạn.
           - \_\_init\_\_.py Python package initialization
           - session_id_middleware.py Binds the inbound AgentCore session ID for the request
         - main.py FastAPI entry point for Bedrock AgentCore Runtime
-        - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - pyproject.toml Updated with Strands dependencies
     - project.json Updated with agent serve targets
 </FileTree>
@@ -77,7 +77,7 @@ Generator sẽ thêm các tệp sau vào dự án Python hiện có của bạn.
           - \_\_init\_\_.py Python package initialization
           - session_id_middleware.py Binds the inbound AgentCore session ID for the request
         - main.py A2A server entry point
-        - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - pyproject.toml Updated with framework and A2A dependencies
     - project.json Updated with agent serve targets
 </FileTree>
@@ -99,7 +99,7 @@ Generator sẽ thêm các tệp sau vào dự án Python hiện có của bạn.
           - \_\_init\_\_.py Python package initialization
           - session_id_middleware.py Binds the inbound AgentCore session ID for the request
         - main.py AG-UI server entry point
-        - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - pyproject.toml Updated with framework and AG-UI dependencies
     - project.json Updated with agent serve targets
 </FileTree>
@@ -111,7 +111,9 @@ Các agent AG-UI có thể được kết nối với frontend React bằng các
 
 ### Hạ tầng
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment">
+<Snippet name="agentcore-hosting" />
+
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Bedrock AgentCore Runtime deployment">
 <Snippet name="shared-constructs" />
 
 Để triển khai Agent của bạn, các tệp sau được tạo ra:
@@ -136,6 +138,10 @@ Các agent AG-UI có thể được kết nối với frontend React bằng các
     - core
       - agent-core
         - runtime.tf Generic module for deploying to Bedrock AgentCore Runtime
+      - agent-core-code (when `infra` is `agentcore`)
+        - runtime.tf Packages your agent's code and delegates to `agent-core`
+      - agent-core-container (when `infra` is `agentcore-ecr`)
+        - runtime.tf Builds and publishes your agent's image and delegates to `agent-core`
 </FileTree>
 </Fragment>
 </Infrastructure>
@@ -296,7 +302,7 @@ Giao thức máy chủ của agent xác định cách nó giao tiếp. Tất c�
 
 Điểm vào máy chủ khác nhau theo framework (Strands tạo ra một `Agent` được quản lý theo context, trong khi LangChain điều khiển một graph `create_agent` đã được biên dịch), nhưng hợp đồng bên ngoài cho mỗi giao thức là như nhau.
 
-Tất cả các giao thức đều hiển thị `/ping` cho hợp đồng kiểm tra sức khỏe runtime AgentCore. Các agent A2A lắng nghe trên cổng `9000`; các agent HTTP và AG-UI lắng nghe trên cổng `8080`. Dockerfile và hạ tầng được tạo ra đã được cấu hình sẵn cho bạn.
+Tất cả các giao thức đều hiển thị `/ping` cho hợp đồng kiểm tra sức khỏe runtime AgentCore. Các agent A2A lắng nghe trên cổng `9000`; các agent HTTP và AG-UI lắng nghe trên cổng `8080`. Hạ tầng được tạo ra đã được cấu hình sẵn cho bạn.
 
 <OptionFilter when={{ protocol: 'http' }} description="FastAPI HTTP server details">
 ## Máy chủ FastAPI (giao thức HTTP)
@@ -441,7 +447,7 @@ Generator tạo ra một `scripts/<your-agent-name>/chat.ts` cho mỗi giao th�
 
 Khi bạn tùy chỉnh hình dạng đầu vào của agent (ví dụ: thêm các trường mới vào `InvokeInput`), hãy cập nhật `chat.ts` để truyền các trường mới khi gọi agent và phần còn lại hoạt động tự động.
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Deployed agent chat details">
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Deployed agent chat details">
 #### Chat với agent đã triển khai của bạn
 
 Để chat với agent của bạn đã triển khai lên Bedrock AgentCore, đặt biến môi trường `RUNTIME_CONFIG_APP_ID` thành id ứng dụng AppConfig của việc triển khai (được xuất ra là `RuntimeConfigApplicationId` bởi stack đã triển khai). Script chat giải quyết ARN runtime của agent từ cấu hình runtime và kết nối với endpoint đã triển khai:
@@ -473,7 +479,7 @@ aws cognito-idp admin-initiate-auth \
 </Tabs>
 </OptionFilter>
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment details">
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Bedrock AgentCore Runtime deployment details">
 ## Triển khai Agent của bạn lên Bedrock AgentCore Runtime
 
 <Snippet name="agent/bedrock-deployment" parentHeading="Triển khai Agent của bạn lên Bedrock AgentCore Runtime" />
@@ -485,15 +491,21 @@ aws cognito-idp admin-initiate-auth \
 - Xuất các phụ thuộc Python của bạn sang tệp `requirements.txt` bằng `uv export`
 - Cài đặt các phụ thuộc cho nền tảng đích (`aarch64-manylinux_2_28`) bằng `uv pip install`
 
+<OptionFilter when={{ infra: 'agentcore' }} description="Code package target">
+Một target `<your-agent-name>-package` cũng được thêm vào, tập hợp gói mã có thể triển khai: bundle phụ thuộc `aarch64`, cây module Python của bạn, và một điểm vào `main.py` gốc. Hạ tầng được tạo ra tải thư mục này lên dưới dạng `.zip` — thông qua `AgentRuntimeArtifact.fromCodeAsset` dưới CDK, hoặc được lưu trữ vào shared asset bucket dưới Terraform.
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'agentcore-ecr' }} description="Container image build and scan">
 Một target `docker` dành riêng cho Agent của bạn cũng được thêm vào, sao chép `Dockerfile` và các artifact đã bundle vào một thư mục docker context. Điều này đặt `Dockerfile` cùng vị trí với đầu ra đã build, cho phép CDK build Docker image trực tiếp bằng `AgentRuntimeArtifact.fromAsset`.
 
 ### Quét Image
 
 <Snippet name="trivy-image-scan" parentHeading="Quét Image" />
+</OptionFilter>
 
 ### Khả năng Quan sát
 
-Agent của bạn được tự động cấu hình với khả năng quan sát bằng cách sử dụng [AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT), bằng cách cấu hình auto-instrumentation trong `Dockerfile` của bạn.
+Agent của bạn được tự động cấu hình với khả năng quan sát bằng cách sử dụng [AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT).
 
 Bạn có thể tìm thấy các trace trong AWS Console CloudWatch, bằng cách chọn "GenAI Observability" trong menu. Lưu ý rằng để các trace được điền vào, bạn sẽ cần bật [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html).
 

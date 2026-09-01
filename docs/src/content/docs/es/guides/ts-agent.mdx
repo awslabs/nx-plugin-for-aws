@@ -63,7 +63,7 @@ El generador agregará los siguientes archivos a tu proyecto TypeScript existent
         - session.ts Resolves the SessionManager used to persist conversation state
         - client.ts Vended client for invoking your agent
         - agent-core-trpc-client.ts Client factory for connecting to agents on AgentCore Runtime
-        - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - package.json Updated with Strands dependencies
     - project.json Updated with agent serve targets
 </FileTree>
@@ -81,7 +81,7 @@ El punto de entrada utiliza el [Strands A2A Express Server](https://strandsagent
         - index.ts A2A Express server entry point
         - agent.ts Main agent definition with sample tools
         - session.ts Resolves the SessionManager used to persist conversation state
-        - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - package.json Updated with Strands and Express dependencies
     - project.json Updated with agent serve targets
 </FileTree>
@@ -99,7 +99,7 @@ El punto de entrada utiliza [`@ag-ui/aws-strands`](https://www.npmjs.com/package
         - index.ts AG-UI server entry point (Express + SSE)
         - agent.ts Main agent definition with sample tools
         - session.ts Resolves the SessionManager used to persist conversation state
-        - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - package.json Updated with Strands and AG-UI dependencies
     - project.json Updated with agent serve targets
 </FileTree>
@@ -107,7 +107,9 @@ El punto de entrada utiliza [`@ag-ui/aws-strands`](https://www.npmjs.com/package
 
 ### Infraestructura
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment">
+<Snippet name="agentcore-hosting" />
+
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Bedrock AgentCore Runtime deployment">
 <Snippet name="shared-constructs" />
 
 Para desplegar tu Agent, se generan los siguientes archivos:
@@ -132,6 +134,10 @@ Para desplegar tu Agent, se generan los siguientes archivos:
     - core
       - agent-core
         - runtime.tf Generic module for deploying to Bedrock AgentCore Runtime
+      - agent-core-code (when `infra` is `agentcore`)
+        - runtime.tf Packages your agent's code and delegates to `agent-core`
+      - agent-core-container (when `infra` is `agentcore-ecr`)
+        - runtime.tf Builds and publishes your agent's image and delegates to `agent-core`
 </FileTree>
 </Fragment>
 </Infrastructure>
@@ -249,7 +255,7 @@ Para una guía más detallada sobre cómo escribir agentes Strands, consulta la 
 
 El `index.ts` generado monta el [Strands A2A Express Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) en una aplicación Express para que el agente generado exponga los endpoints del protocolo A2A junto con un health check `/ping`. La URL anunciada en la tarjeta del agente proviene de la variable de entorno `AGENTCORE_RUNTIME_URL`, recurriendo a `http://localhost:<port>/` para desarrollo local.
 
-La mayoría de los usuarios no necesitarán modificar este archivo — edita `agent.ts` para cambiar herramientas o el prompt del sistema. Los agentes A2A escuchan en el puerto `9000` (vs `8080` para HTTP), para lo cual el Dockerfile y la infraestructura generados ya están configurados.
+La mayoría de los usuarios no necesitarán modificar este archivo — edita `agent.ts` para cambiar herramientas o el prompt del sistema. Los agentes A2A escuchan en el puerto `9000` (vs `8080` para HTTP), para lo cual la infraestructura generada ya está configurada.
 </OptionFilter>
 
 <OptionFilter when={{ protocol: 'ag-ui' }} description="AG-UI server details">
@@ -259,7 +265,7 @@ El `index.ts` generado envuelve tu `Agent` de Strands en un `StrandsAgent` de [`
 
 Los agentes AG-UI están diseñados para ser consumidos directamente por un frontend. Usa el <Link path="/guides/connection/react-agui">generador `connection`</Link> para conectar tu sitio web React al agente con un proveedor [CopilotKit](https://docs.copilotkit.ai/aws-strands) y un cliente [AG-UI HttpAgent](https://docs.ag-ui.com/).
 
-La mayoría de los usuarios no necesitarán modificar `index.ts` — edita `agent.ts` para cambiar herramientas o el prompt del sistema. Los agentes AG-UI escuchan en el puerto `8080` (igual que HTTP), para lo cual el Dockerfile y la infraestructura generados ya están configurados.
+La mayoría de los usuarios no necesitarán modificar `index.ts` — edita `agent.ts` para cambiar herramientas o el prompt del sistema. Los agentes AG-UI escuchan en el puerto `8080` (igual que HTTP), para lo cual la infraestructura generada ya está configurada.
 </OptionFilter>
 
 ## Ejecutar tu Agent
@@ -290,7 +296,7 @@ Luego, en otra terminal, inicia el chat:
 
 El generador emite un `scripts/<your-agent-name>/chat.ts` para cada protocolo. Puedes personalizarlo a medida que evoluciona la forma de entrada del agente. Se conecta al agente local por defecto, o a tu agente desplegado cuando se establece `RUNTIME_CONFIG_APP_ID` (consulta [Chat con tu agente desplegado](#chat-con-tu-agente-desplegado) a continuación).
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Deployed agent chat details">
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Deployed agent chat details">
 #### Chat con tu agente desplegado
 
 Para chatear con tu agente desplegado en Bedrock AgentCore, establece la variable de entorno `RUNTIME_CONFIG_APP_ID` al id de aplicación AppConfig del despliegue (salida como `RuntimeConfigApplicationId` por el stack desplegado). El script de chat resuelve el ARN del runtime de tu agente desde la configuración del runtime y se conecta al endpoint desplegado:
@@ -322,7 +328,7 @@ aws cognito-idp admin-initiate-auth \
 </Tabs>
 </OptionFilter>
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment details">
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Bedrock AgentCore Runtime deployment details">
 ## Desplegar tu Agent en Bedrock AgentCore Runtime
 
 <Snippet name="agent/bedrock-deployment" parentHeading="Desplegar tu Agent en Bedrock AgentCore Runtime" />
@@ -333,6 +339,13 @@ aws cognito-idp admin-initiate-auth \
 
 El target bundle usa `index.ts` como punto de entrada para el servidor WebSocket a alojar en Bedrock AgentCore Runtime.
 
+<OptionFilter when={{ infra: 'agentcore' }} description="Code package target">
+### Target Package
+
+El generador configura un target `<your-agent-name>-package` que ensambla el paquete de código desplegable: el `index.js` empaquetado más una instalación vendorizada del AWS Distro for OpenTelemetry, que AgentCore requiere que esté presente en el paquete. La infraestructura generada sube este directorio como un `.zip` — a través de `AgentRuntimeArtifact.fromCodeAsset` bajo CDK, o archivado en el bucket de activos compartido bajo Terraform.
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'agentcore-ecr' }} description="Container image build and scan">
 ### Target Docker
 
 El generador configura un target `<your-agent-name>-docker` que copia el `Dockerfile` desde el directorio fuente de tu agente al directorio de salida del bundle. Esto co-localiza el `Dockerfile` con los artefactos empaquetados, permitiendo que CDK construya la imagen Docker directamente usando `AgentRuntimeArtifact.fromAsset`.
@@ -342,10 +355,11 @@ También se genera un target `docker` que prepara el contexto docker para todos 
 ### Escaneo de imágenes
 
 <Snippet name="trivy-image-scan" parentHeading="Escaneo de imágenes" />
+</OptionFilter>
 
 ### Observabilidad
 
-Tu agente se configura automáticamente con observabilidad usando [AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT), configurando auto-instrumentación en tu `Dockerfile`.
+Tu agente se configura automáticamente con observabilidad usando [AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT).
 
 Puedes encontrar trazas en la consola AWS de CloudWatch, seleccionando "GenAI Observability" en el menú. Ten en cuenta que para que las trazas se pueblen necesitarás habilitar [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html).
 
@@ -550,7 +564,7 @@ Usa el generador <Link path="guides/connection">`connection`</Link> para integra
   <ConnectionCard
     title="React to TypeScript Agent"
     description="Call a TypeScript Agent from a React website"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-ts-agent`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'es'}/guides/connection/react-ts-agent`}
     source="react"
     target="strands"
     targetBadge="typescript"
@@ -558,14 +572,14 @@ Usa el generador <Link path="guides/connection">`connection`</Link> para integra
   <ConnectionCard
     title="React to AG-UI Agent"
     description="Call an Agent exposing the AG-UI protocol from a React website via CopilotKit"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-agui`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'es'}/guides/connection/react-agui`}
     source="react"
     target="copilotkit"
   />
   <ConnectionCard
     title="TypeScript Agent to MCP"
     description="Connect a TypeScript Agent to an MCP server"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/ts-agent-mcp`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'es'}/guides/connection/ts-agent-mcp`}
     source="strands"
     sourceBadge="typescript"
     target="mcp"
@@ -573,7 +587,7 @@ Usa el generador <Link path="guides/connection">`connection`</Link> para integra
   <ConnectionCard
     title="TypeScript Agent to A2A Agent"
     description="Connect a TypeScript Agent to a remote A2A agent"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/ts-agent-a2a`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'es'}/guides/connection/ts-agent-a2a`}
     source="strands"
     sourceBadge="typescript"
     target="a2a"
@@ -581,7 +595,7 @@ Usa el generador <Link path="guides/connection">`connection`</Link> para integra
   <ConnectionCard
     title="Python Agent to A2A Agent"
     description="Connect a Python Agent to a remote A2A agent"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-a2a`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'es'}/guides/connection/py-agent-a2a`}
     source="strands"
     sourceBadge="python"
     target="a2a"
@@ -589,7 +603,7 @@ Usa el generador <Link path="guides/connection">`connection`</Link> para integra
   <ConnectionCard
     title="TypeScript Agent to Relational Database"
     description="Connect a TypeScript Agent to an Aurora relational database"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/ts-agent-rdb`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'es'}/guides/connection/ts-agent-rdb`}
     source="strands"
     sourceBadge="typescript"
     target="aurora"
@@ -597,7 +611,7 @@ Usa el generador <Link path="guides/connection">`connection`</Link> para integra
   <ConnectionCard
     title="TypeScript Agent to TypeScript DynamoDB"
     description="Connect a TypeScript Agent to a DynamoDB table"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/ts-agent-dynamodb`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'es'}/guides/connection/ts-agent-dynamodb`}
     source="strands"
     sourceBadge="typescript"
     target="dynamodb"
@@ -605,7 +619,7 @@ Usa el generador <Link path="guides/connection">`connection`</Link> para integra
   <ConnectionCard
     title="TypeScript Agent to AgentCore Gateway"
     description="Connect a TypeScript Agent to an AgentCore Gateway"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/ts-agent-gateway`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'es'}/guides/connection/ts-agent-gateway`}
     source="strands"
     sourceBadge="typescript"
     target="agentcore"
@@ -613,7 +627,7 @@ Usa el generador <Link path="guides/connection">`connection`</Link> para integra
   <ConnectionCard
     title="AgentCore Gateway to Agent"
     description="Front an agent with an AgentCore Gateway as a runtime target"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/agentcore-gateway-agent`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'es'}/guides/connection/agentcore-gateway-agent`}
     source="agentcore"
     target="strands"
   />

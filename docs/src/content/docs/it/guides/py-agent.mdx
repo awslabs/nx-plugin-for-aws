@@ -55,7 +55,7 @@ Il generatore aggiungerà i seguenti file al tuo progetto Python esistente. I fi
           - \_\_init\_\_.py Python package initialization
           - session_id_middleware.py Binds the inbound AgentCore session ID for the request
         - main.py FastAPI entry point for Bedrock AgentCore Runtime
-        - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - pyproject.toml Updated with Strands dependencies
     - project.json Updated with agent serve targets
 </FileTree>
@@ -77,7 +77,7 @@ Il punto di ingresso espone il tuo agente tramite il protocollo A2A (Strands uti
           - \_\_init\_\_.py Python package initialization
           - session_id_middleware.py Binds the inbound AgentCore session ID for the request
         - main.py A2A server entry point
-        - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - pyproject.toml Updated with framework and A2A dependencies
     - project.json Updated with agent serve targets
 </FileTree>
@@ -99,7 +99,7 @@ Il punto di ingresso espone il tuo agente tramite il protocollo [AG-UI](https://
           - \_\_init\_\_.py Python package initialization
           - session_id_middleware.py Binds the inbound AgentCore session ID for the request
         - main.py AG-UI server entry point
-        - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - pyproject.toml Updated with framework and AG-UI dependencies
     - project.json Updated with agent serve targets
 </FileTree>
@@ -111,7 +111,9 @@ Gli agenti AG-UI possono essere connessi a un frontend React utilizzando il <Lin
 
 ### Infrastruttura
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment">
+<Snippet name="agentcore-hosting" />
+
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Bedrock AgentCore Runtime deployment">
 <Snippet name="shared-constructs" />
 
 Per distribuire il tuo Agent, vengono generati i seguenti file:
@@ -136,6 +138,10 @@ Per distribuire il tuo Agent, vengono generati i seguenti file:
     - core
       - agent-core
         - runtime.tf Generic module for deploying to Bedrock AgentCore Runtime
+      - agent-core-code (when `infra` is `agentcore`)
+        - runtime.tf Packages your agent's code and delegates to `agent-core`
+      - agent-core-container (when `infra` is `agentcore-ecr`)
+        - runtime.tf Builds and publishes your agent's image and delegates to `agent-core`
 </FileTree>
 </Fragment>
 </Infrastructure>
@@ -296,7 +302,7 @@ Il protocollo server del tuo agente determina come comunica. Tutte le opzioni so
 
 Il punto di ingresso del server differisce per framework (Strands produce un `Agent` gestito dal contesto, mentre LangChain guida un grafo `create_agent` compilato), ma il contratto esterno per ogni protocollo è lo stesso.
 
-Tutti i protocolli espongono `/ping` per il contratto di controllo dello stato del runtime AgentCore. Gli agenti A2A ascoltano sulla porta `9000`; gli agenti HTTP e AG-UI ascoltano sulla porta `8080`. Il Dockerfile e l'infrastruttura generati sono configurati per te.
+Tutti i protocolli espongono `/ping` per il contratto di controllo dello stato del runtime AgentCore. Gli agenti A2A ascoltano sulla porta `9000`; gli agenti HTTP e AG-UI ascoltano sulla porta `8080`. L'infrastruttura generata è configurata per te.
 
 <OptionFilter when={{ protocol: 'http' }} description="FastAPI HTTP server details">
 ## Server FastAPI (protocollo HTTP)
@@ -441,7 +447,7 @@ Per gli agenti **HTTP**, lo script di chat utilizza un client TypeScript type-sa
 
 Quando personalizzi la forma di input dell'agente (ad es. aggiungi nuovi campi a `InvokeInput`), aggiorna `chat.ts` per passare i nuovi campi quando invochi l'agente e il resto funziona automaticamente.
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Deployed agent chat details">
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Deployed agent chat details">
 #### Chattare con il tuo agente distribuito
 
 Per chattare con il tuo agente distribuito su Bedrock AgentCore, imposta la variabile d'ambiente `RUNTIME_CONFIG_APP_ID` sull'id dell'applicazione AppConfig della distribuzione (output come `RuntimeConfigApplicationId` dallo stack distribuito). Lo script di chat risolve l'ARN del runtime del tuo agente dalla configurazione del runtime e si connette all'endpoint distribuito:
@@ -473,7 +479,7 @@ aws cognito-idp admin-initiate-auth \
 </Tabs>
 </OptionFilter>
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment details">
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Bedrock AgentCore Runtime deployment details">
 ## Distribuire il Tuo Agent su Bedrock AgentCore Runtime
 
 <Snippet name="agent/bedrock-deployment" parentHeading="Distribuire il Tuo Agent su Bedrock AgentCore Runtime" />
@@ -485,15 +491,21 @@ Per costruire il tuo Agent per Bedrock AgentCore Runtime, viene aggiunto un targ
 - Esporta le tue dipendenze Python in un file `requirements.txt` utilizzando `uv export`
 - Installa le dipendenze per la piattaforma di destinazione (`aarch64-manylinux_2_28`) utilizzando `uv pip install`
 
+<OptionFilter when={{ infra: 'agentcore' }} description="Code package target">
+Viene anche aggiunto un target `<your-agent-name>-package`, che assembla il pacchetto di codice distribuibile: il bundle di dipendenze `aarch64`, l'albero dei moduli Python e un punto di ingresso `main.py` radice. L'infrastruttura generata carica questa directory come `.zip` — tramite `AgentRuntimeArtifact.fromCodeAsset` sotto CDK, o archiviata nel bucket di asset condiviso sotto Terraform.
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'agentcore-ecr' }} description="Container image build and scan">
 Viene anche aggiunto un target `docker` specifico per il tuo Agent, che copia il `Dockerfile` e gli artefatti raggruppati in una directory di contesto docker. Questo co-localizza il `Dockerfile` con l'output costruito, consentendo a CDK di costruire l'immagine Docker direttamente utilizzando `AgentRuntimeArtifact.fromAsset`.
 
 ### Scansione delle Immagini
 
 <Snippet name="trivy-image-scan" parentHeading="Scansione delle Immagini" />
+</OptionFilter>
 
 ### Osservabilità
 
-Il tuo agente è automaticamente configurato con l'osservabilità utilizzando l'[AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT), configurando l'auto-instrumentazione nel tuo `Dockerfile`.
+Il tuo agente è automaticamente configurato con l'osservabilità utilizzando l'[AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT).
 
 Puoi trovare le tracce nella Console AWS CloudWatch, selezionando "GenAI Observability" nel menu. Nota che affinché le tracce vengano popolate dovrai abilitare [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html).
 

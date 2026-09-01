@@ -63,7 +63,7 @@ Generator sẽ thêm các file sau vào project TypeScript hiện có của bạ
         - session.ts Resolves the SessionManager used to persist conversation state
         - client.ts Vended client for invoking your agent
         - agent-core-trpc-client.ts Client factory for connecting to agents on AgentCore Runtime
-        - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - package.json Updated with Strands dependencies
     - project.json Updated with agent serve targets
 </FileTree>
@@ -81,7 +81,7 @@ Entry point sử dụng [Strands A2A Express Server](https://strandsagents.com/d
         - index.ts A2A Express server entry point
         - agent.ts Main agent definition with sample tools
         - session.ts Resolves the SessionManager used to persist conversation state
-        - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - package.json Updated with Strands and Express dependencies
     - project.json Updated with agent serve targets
 </FileTree>
@@ -99,7 +99,7 @@ Entry point sử dụng [`@ag-ui/aws-strands`](https://www.npmjs.com/package/@ag
         - index.ts AG-UI server entry point (Express + SSE)
         - agent.ts Main agent definition with sample tools
         - session.ts Resolves the SessionManager used to persist conversation state
-        - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - package.json Updated with Strands and AG-UI dependencies
     - project.json Updated with agent serve targets
 </FileTree>
@@ -107,7 +107,9 @@ Entry point sử dụng [`@ag-ui/aws-strands`](https://www.npmjs.com/package/@ag
 
 ### Hạ tầng
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment">
+<Snippet name="agentcore-hosting" />
+
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Bedrock AgentCore Runtime deployment">
 <Snippet name="shared-constructs" />
 
 Để triển khai Agent của bạn, các file sau được tạo:
@@ -132,6 +134,10 @@ Entry point sử dụng [`@ag-ui/aws-strands`](https://www.npmjs.com/package/@ag
     - core
       - agent-core
         - runtime.tf Generic module for deploying to Bedrock AgentCore Runtime
+      - agent-core-code (when `infra` is `agentcore`)
+        - runtime.tf Packages your agent's code and delegates to `agent-core`
+      - agent-core-container (when `infra` is `agentcore-ecr`)
+        - runtime.tf Builds and publishes your agent's image and delegates to `agent-core`
 </FileTree>
 </Fragment>
 </Infrastructure>
@@ -249,7 +255,7 @@ Tham khảo <Link path="/guides/connection/ts-agent-mcp">hướng dẫn `connect
 
 File `index.ts` được tạo mount [Strands A2A Express Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) lên một Express app để agent được tạo expose các endpoint giao thức A2A cùng với health check `/ping`. URL được quảng cáo trong agent card đến từ biến môi trường `AGENTCORE_RUNTIME_URL`, quay lại `http://localhost:<port>/` cho phát triển cục bộ.
 
-Hầu hết người dùng sẽ không cần sửa đổi file này — chỉnh sửa `agent.ts` để thay đổi công cụ hoặc system prompt. Các A2A agent lắng nghe trên cổng `9000` (so với `8080` cho HTTP), mà Dockerfile và hạ tầng được tạo đã được cấu hình sẵn.
+Hầu hết người dùng sẽ không cần sửa đổi file này — chỉnh sửa `agent.ts` để thay đổi công cụ hoặc system prompt. Các A2A agent lắng nghe trên cổng `9000` (so với `8080` cho HTTP), mà hạ tầng được tạo đã được cấu hình sẵn.
 </OptionFilter>
 
 <OptionFilter when={{ protocol: 'ag-ui' }} description="AG-UI server details">
@@ -259,7 +265,7 @@ File `index.ts` được tạo bọc Strands `Agent` của bạn trong một [`@
 
 Các AG-UI agent được thiết kế để được sử dụng trực tiếp bởi frontend. Sử dụng <Link path="/guides/connection/react-agui">`connection` generator</Link> để kết nối React website của bạn với agent thông qua [CopilotKit](https://docs.copilotkit.ai/aws-strands) provider và [AG-UI HttpAgent](https://docs.ag-ui.com/) client.
 
-Hầu hết người dùng sẽ không cần sửa đổi `index.ts` — chỉnh sửa `agent.ts` để thay đổi công cụ hoặc system prompt. Các AG-UI agent lắng nghe trên cổng `8080` (giống như HTTP), mà Dockerfile và hạ tầng được tạo đã được cấu hình sẵn.
+Hầu hết người dùng sẽ không cần sửa đổi `index.ts` — chỉnh sửa `agent.ts` để thay đổi công cụ hoặc system prompt. Các AG-UI agent lắng nghe trên cổng `8080` (giống như HTTP), mà hạ tầng được tạo đã được cấu hình sẵn.
 </OptionFilter>
 
 ## Chạy Agent của bạn
@@ -290,7 +296,7 @@ Sau đó, trong một terminal khác, khởi động chat:
 
 Generator tạo một `scripts/<your-agent-name>/chat.ts` cho mỗi giao thức. Bạn có thể tùy chỉnh nó khi bạn phát triển hình dạng đầu vào của agent. Nó kết nối với agent cục bộ theo mặc định, hoặc với agent đã triển khai của bạn khi `RUNTIME_CONFIG_APP_ID` được thiết lập (xem [Chat với agent đã triển khai của bạn](#chat-với-agent-đã-triển-khai-của-bạn) bên dưới).
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Deployed agent chat details">
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Deployed agent chat details">
 #### Chat với agent đã triển khai của bạn
 
 Để chat với agent của bạn được triển khai lên Bedrock AgentCore, thiết lập biến môi trường `RUNTIME_CONFIG_APP_ID` thành AppConfig application id của deployment (được xuất ra dưới dạng `RuntimeConfigApplicationId` bởi stack đã triển khai). Script chat resolve ARN runtime của agent từ cấu hình runtime và kết nối với endpoint đã triển khai:
@@ -322,7 +328,7 @@ aws cognito-idp admin-initiate-auth \
 </Tabs>
 </OptionFilter>
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment details">
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Bedrock AgentCore Runtime deployment details">
 ## Triển khai Agent của bạn lên Bedrock AgentCore Runtime
 
 <Snippet name="agent/bedrock-deployment" parentHeading="Triển khai Agent của bạn lên Bedrock AgentCore Runtime" />
@@ -333,6 +339,13 @@ aws cognito-idp admin-initiate-auth \
 
 Bundle target sử dụng `index.ts` làm entrypoint cho WebSocket server để host trên Bedrock AgentCore Runtime.
 
+<OptionFilter when={{ infra: 'agentcore' }} description="Code package target">
+### Package Target
+
+Generator cấu hình một target `<your-agent-name>-package` tập hợp gói mã có thể triển khai: `index.js` đã bundle cộng với cài đặt vendored của AWS Distro for OpenTelemetry, mà AgentCore yêu cầu phải có trong gói. Hạ tầng được tạo tải lên thư mục này dưới dạng `.zip` — thông qua `AgentRuntimeArtifact.fromCodeAsset` trong CDK, hoặc được lưu trữ vào shared asset bucket trong Terraform.
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'agentcore-ecr' }} description="Container image build and scan">
 ### Docker Target
 
 Generator cấu hình một target `<your-agent-name>-docker` sao chép `Dockerfile` từ thư mục nguồn agent của bạn vào thư mục đầu ra bundle. Điều này đặt `Dockerfile` cùng với các artifact đã bundle, cho phép CDK xây dựng Docker image trực tiếp bằng `AgentRuntimeArtifact.fromAsset`.
@@ -342,10 +355,11 @@ Một target `docker` cũng được tạo để chuẩn bị docker context cho
 ### Quét Image
 
 <Snippet name="trivy-image-scan" parentHeading="Quét Image" />
+</OptionFilter>
 
 ### Khả năng quan sát
 
-Agent của bạn được tự động cấu hình với khả năng quan sát sử dụng [AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT), bằng cách cấu hình auto-instrumentation trong `Dockerfile` của bạn.
+Agent của bạn được tự động cấu hình với khả năng quan sát sử dụng [AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT).
 
 Bạn có thể tìm thấy trace trong CloudWatch AWS Console, bằng cách chọn "GenAI Observability" trong menu. Lưu ý rằng để trace được điền, bạn sẽ cần bật [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html).
 
