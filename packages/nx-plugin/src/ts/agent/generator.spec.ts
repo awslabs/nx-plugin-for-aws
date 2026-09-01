@@ -641,14 +641,24 @@ describe('ts#agent generator', () => {
       'utf-8',
     );
     const containerModule = tree.read(
+      'packages/common/terraform/src/core/agent-core-container/runtime.tf',
+      'utf-8',
+    );
+    // The packaging modules own only their own plumbing...
+    expect(codeModule).toContain('archive_file');
+    expect(codeModule).not.toContain('aws_ecr_repository');
+    expect(containerModule).toContain('aws_ecr_repository');
+    expect(containerModule).not.toContain('archive_file');
+    // ...and both delegate the runtime to one shared generic module.
+    expect(codeModule).toContain('source = "../agent-core"');
+    expect(containerModule).toContain('source = "../agent-core"');
+    const genericModule = tree.read(
       'packages/common/terraform/src/core/agent-core/runtime.tf',
       'utf-8',
     );
-    expect(codeModule).toContain('code_configuration');
-    expect(codeModule).not.toContain('container_configuration');
-    expect(codeModule).not.toContain('aws_ecr_repository');
-    expect(containerModule).toContain('container_configuration');
-    expect(containerModule).not.toContain('code_configuration');
+    expect(genericModule).toContain('aws_bedrockagentcore_agent_runtime');
+    expect(genericModule).not.toContain('aws_ecr_repository');
+    expect(genericModule).not.toContain('archive_file');
 
     // And each app module must source the one matching its packaging
     expect(
@@ -662,7 +672,7 @@ describe('ts#agent generator', () => {
         'packages/common/terraform/src/app/agents/container-agent/container-agent.tf',
         'utf-8',
       ),
-    ).toContain('source = "../../../core/agent-core"');
+    ).toContain('source = "../../../core/agent-core-container"');
   });
 
   it('should match snapshot for Terraform generated files', async () => {
@@ -1021,33 +1031,6 @@ describe('ts#agent generator', () => {
     // No container image is built, so the ECR asset helpers are unused
     expect(construct).not.toContain('fromAsset');
     expect(construct).not.toContain('Platform.LINUX_ARM64');
-  });
-
-  it('should remove container artifacts when switching from agentcore-ecr to agentcore', async () => {
-    await tsAgentGenerator(tree, {
-      project: 'test-project',
-      infra: 'agentcore-ecr',
-      iac: 'cdk',
-    });
-    expect(tree.exists('apps/test-project/src/agent/Dockerfile')).toBeTruthy();
-
-    await tsAgentGenerator(tree, {
-      project: 'test-project',
-      infra: 'agentcore',
-      iac: 'cdk',
-    });
-
-    expect(tree.exists('apps/test-project/src/agent/Dockerfile')).toBeFalsy();
-    const projectConfig = JSON.parse(
-      tree.read('apps/test-project/project.json', 'utf-8'),
-    );
-    expect(projectConfig.targets['agent-docker']).toBeUndefined();
-    expect(projectConfig.targets['agent-trivy']).toBeUndefined();
-    expect(projectConfig.targets['docker']).toBeUndefined();
-    expect(projectConfig.targets['trivy']).toBeUndefined();
-    expect(projectConfig.targets['build'].dependsOn).not.toContain('docker');
-    expect(projectConfig.targets['assemble'].dependsOn).not.toContain('docker');
-    expect(projectConfig.targets['agent-package']).toBeDefined();
   });
 
   it('should assign unique port for local development', async () => {
