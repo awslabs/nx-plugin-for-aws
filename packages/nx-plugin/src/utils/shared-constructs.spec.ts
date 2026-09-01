@@ -165,6 +165,10 @@ describe('shared-constructs utils', () => {
       // Image-packaged Lambdas pull through the service principal, so the
       // repository policy must admit it.
       expect(assetEcr).toContain('Service = "lambda.amazonaws.com"');
+      // Images are encrypted with a customer managed key.
+      expect(assetEcr).toContain('resource "aws_kms_key" "assets"');
+      expect(assetEcr).toContain('encryption_type = "KMS"');
+      expect(assetEcr).toContain('kms_key         = aws_kms_key.assets.arn');
     });
 
     it('should declare no cached outputs on the shared terraform build target', async () => {

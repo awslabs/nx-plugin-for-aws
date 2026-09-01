@@ -19,6 +19,12 @@ variable "repository_name_prefix" {
   default     = "assets"
 }
 
+variable "enable_key_rotation" {
+  description = "Whether to enable automatic key rotation on the KMS key used to encrypt the images in the repository."
+  type        = bool
+  default     = true
+}
+
 variable "tags" {
   description = "Tags to apply to all resources"
   type        = map(string)
@@ -33,17 +39,40 @@ resource "random_string" "suffix" {
   upper   = false
 }
 
+# KMS key encrypting the images in the shared asset repository.
+resource "aws_kms_key" "assets" {
+  description             = "KMS key for ${var.repository_name_prefix} asset repository images"
+  enable_key_rotation     = var.enable_key_rotation
+  deletion_window_in_days = 30
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "EnableIAMUserPermissions"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      }
+    ]
+  })
+
+  tags = var.tags
+}
+
 # Shared asset container registry. Every container image the workspace deploys is
-# pushed here under a tag namespaced by the image's owner, so a workspace needs
-# one registry rather than one per container.
+# pushed here under a tag namespaced by the image's owner.
 resource "aws_ecr_repository" "assets" {
-  #checkov:skip=CKV_AWS_136:AES256 (ECR-managed) encryption is sufficient for build artefacts
   name = "${var.repository_name_prefix}-${random_string.suffix.result}"
 
-  # Consumers tag by image content digest, so an existing tag already names the
-  # image it would be overwritten with.
   image_tag_mutability = "IMMUTABLE"
   force_delete         = true
+
+  encryption_configuration {
+    encryption_type = "KMS"
+    kms_key         = aws_kms_key.assets.arn
+  }
 
   image_scanning_configuration {
     scan_on_push = true
@@ -95,8 +124,6 @@ output "repository_name" {
   value       = aws_ecr_repository.assets.name
 }
 
-# Routed through the repository policy so a consumer that pushes to this URL
-# waits until the policy allowing that push exists.
 output "repository_url" {
   description = "URL of the shared asset repository — pass to app modules' `asset_ecr_repository_url` input."
   value       = aws_ecr_repository.assets.repository_url
