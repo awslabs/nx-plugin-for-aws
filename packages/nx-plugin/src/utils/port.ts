@@ -8,7 +8,7 @@ import { getProjects, type ProjectConfiguration, type Tree } from '@nx/devkit';
  * Return the first port already registered in a project's own metadata, if any.
  * Supports both the metadata.ports array and the legacy metadata.port.
  */
-const getExistingProjectPort = (
+export const getExistingProjectPort = (
   project: ProjectConfiguration,
 ): number | undefined => {
   const metadata = project.metadata as any;

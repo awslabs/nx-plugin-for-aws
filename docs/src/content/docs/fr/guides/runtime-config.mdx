@@ -12,17 +12,19 @@ La configuration d'exécution est le mécanisme utilisé par Nx Plugin for AWS p
 
 La configuration d'exécution est organisée en **espaces de noms**. Chaque espace de noms est un regroupement logique de valeurs de configuration associées. Au moment du déploiement, tous les espaces de noms sont stockés dans **AWS AppConfig** en tant que profils de configuration.
 
-Deux espaces de noms intégrés sont utilisés par les constructions générées :
+Quatre espaces de noms intégrés sont utilisés par les constructions générées :
 
 - **`connection`** — configuration qui permet aux projets générés de se connecter les uns aux autres :
   - **URL d'API** — enregistrées automatiquement par les constructions d'API
   - **Paramètres Cognito** — enregistrés automatiquement par la construction UserIdentity
   - **ARN d'exécution d'agent** — ajoutés par le générateur de connexion lorsque vous connectez un site web React à un agent
 - **`agentcore`** — ARN d'exécution AgentCore pour les agents et les serveurs MCP. Enregistrés automatiquement par les constructions agent/MCP et utilisés pour la découverte côté serveur (agent → agent via A2A, agent → serveur MCP).
+- **`dynamodb`** — noms de tables, enregistrés automatiquement par les constructions de tables DynamoDB et lus par le client de table généré.
+- **`database`** — détails de connexion Aurora, enregistrés automatiquement par les constructions de bases de données relationnelles et lus par le client de base de données généré.
 
-L'espace de noms `connection` est également déployé sous forme de fichier `runtime-config.json` dans le bucket S3 de votre site web, permettant la découverte côté client des ressources backend. L'espace de noms `agentcore` est uniquement côté serveur (via AppConfig) afin que les ARN d'exécution d'agent ne soient pas exposés au frontend à moins que vous ne connectiez explicitement un site web à un agent.
+L'espace de noms `connection` est également déployé sous forme de fichier `runtime-config.json` dans le bucket S3 de votre site web, permettant la découverte côté client des ressources backend. Les autres espaces de noms sont uniquement côté serveur (via AppConfig), de sorte que les valeurs telles que les ARN d'exécution d'agent et les noms de tables ne sont pas exposées au frontend à moins que vous ne connectiez explicitement un site web à eux.
 
-Vous pouvez définir autant d'espaces de noms supplémentaires que vous le souhaitez, offrant une alternative pratique aux variables d'environnement pour transmettre des valeurs de déploiement telles que les noms de tables DynamoDB à vos fonctions Lambda ou autres ressources de calcul.
+Vous pouvez définir autant d'espaces de noms supplémentaires que vous le souhaitez, offrant une alternative pratique aux variables d'environnement pour transmettre des valeurs de déploiement à vos fonctions Lambda ou autres ressources de calcul.
 
 ```d2
 direction: down
@@ -104,6 +106,17 @@ Terraform connecte la configuration d'exécution à travers trois modules `core/
      source = "../../common/terraform/src/core/runtime-config/appconfig"
 
      application_name = "my-app-runtime-config"
+   }
+   ```
+
+   La variable `namespaces` est par défaut définie sur tous les espaces de noms intégrés, de sorte que les modules générés fonctionnent sans la configurer. Pour ajouter vos propres espaces de noms, listez-les aux côtés des espaces de noms intégrés :
+
+   ```hcl title="packages/infra/src/main.tf"
+   module "runtime_config_appconfig" {
+     source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+     application_name = "my-app-runtime-config"
+     namespaces       = ["connection", "agentcore", "database", "dynamodb", "tables"]
    }
    ```
 

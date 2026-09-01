@@ -6,15 +6,16 @@ import { addProjectConfiguration, type Tree } from '@nx/devkit';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
-} from '../../utils/config/utils';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { TypeScriptVerifier } from '../../utils/test/ts.spec';
+} from '../../utils/config/utils.js';
+import { expectHasMetricTags } from '../../utils/metrics.spec.js';
+import { TypeScriptVerifier } from '../../utils/test/ts.spec.js';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import { terraformLambdaRuntime } from '../../utils/versions.js';
 import {
   TS_LAMBDA_FUNCTION_GENERATOR_INFO,
   tsLambdaFunctionGenerator,
-} from './generator';
-import { TS_HANDLER_RETURN_TYPES } from './io';
+} from './generator.js';
+import { TS_HANDLER_RETURN_TYPES } from './io.js';
 import type { EventSource, TsLambdaFunctionGeneratorSchema } from './schema';
 
 describe('ts-lambda-function generator', () => {
@@ -483,7 +484,9 @@ describe('ts-lambda-function generator', () => {
 
       // Verify lambda function configuration
       expect(terraformContent).toMatch(/handler\s+=\s+"index\.handler"/);
-      expect(terraformContent).toMatch(/runtime\s+=\s+"nodejs22\.x"/);
+      expect(terraformContent).toMatch(
+        new RegExp(`runtime\\s+=\\s+"${terraformLambdaRuntime('node')}"`),
+      );
       expect(terraformContent).toContain('test-project-test-function');
 
       // Snapshot terraform file
@@ -550,7 +553,9 @@ describe('ts-lambda-function generator', () => {
 
       // Verify lambda function configuration is still correct regardless of event source
       expect(terraformContent).toMatch(/handler\s+=\s+"index\.handler"/);
-      expect(terraformContent).toMatch(/runtime\s+=\s+"nodejs22\.x"/);
+      expect(terraformContent).toMatch(
+        new RegExp(`runtime\\s+=\\s+"${terraformLambdaRuntime('node')}"`),
+      );
     });
 
     it('should configure project targets and dependencies correctly for terraform', async () => {

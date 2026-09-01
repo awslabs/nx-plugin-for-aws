@@ -6,16 +6,16 @@ import { addProjectConfiguration, type Tree, writeJson } from '@nx/devkit';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
-} from '../../utils/config/utils';
-import { declareDependencies } from '../../utils/declared-dependencies';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
+} from '../../utils/config/utils.js';
+import { declareDependencies } from '../../utils/declared-dependencies.js';
+import { expectHasMetricTags } from '../../utils/metrics.spec.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../utils/shared-constructs';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { CONTAINER_VERSIONS } from '../../utils/versions';
-import { TS_AGENT_GENERATOR_INFO, tsAgentGenerator } from './generator';
+} from '../../utils/shared-constructs.js';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import { CONTAINER_VERSIONS, TS_VERSIONS } from '../../utils/versions.js';
+import { TS_AGENT_GENERATOR_INFO, tsAgentGenerator } from './generator.js';
 
 const sharedConstructsDeclaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
@@ -340,7 +340,7 @@ describe('ts#agent generator', () => {
   it('should generate strands agent with BedrockAgentCoreRuntime and default name', async () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'cdk',
     });
 
@@ -372,14 +372,14 @@ describe('ts#agent generator', () => {
     ]);
     expect(projectConfig.targets['agent-docker'].options.parallel).toBe(false);
     expect(projectConfig.targets['agent-docker'].dependsOn).toEqual(['bundle']);
-    expect(projectConfig.targets['agent-docker'].outputs).toEqual([
-      '{workspaceRoot}/dist/apps/test-project/bundle/agent/test-project-agent/Dockerfile',
-    ]);
+    // The built image lives in the container engine rather than under any
+    // outputs path, so there is nothing for a cache hit to restore.
+    expect(projectConfig.targets['agent-docker'].cache).toBe(false);
+    expect(projectConfig.targets['agent-docker'].outputs).toBeUndefined();
 
-    // Check that a cacheable trivy scan target was added
+    // Check that a non-cacheable trivy scan target was added
     expect(projectConfig.targets['agent-trivy']).toEqual({
-      cache: true,
-      inputs: ['default', '^production'],
+      cache: false,
       outputs: [
         '{workspaceRoot}/dist/apps/test-project/trivy/proj-test-project-agent-latest',
       ],
@@ -407,7 +407,7 @@ describe('ts#agent generator', () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
       name: 'custom-bedrock-agent',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'cdk',
     });
 
@@ -503,7 +503,7 @@ describe('ts#agent generator', () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
       name: 'snapshot-bedrock-agent',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'cdk',
     });
 
@@ -562,7 +562,7 @@ describe('ts#agent generator', () => {
   it('should generate strands agent with Terraform provider and default name', async () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'terraform',
     });
 
@@ -595,7 +595,7 @@ describe('ts#agent generator', () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
       name: 'custom-terraform-agent',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'terraform',
     });
 
@@ -620,11 +620,114 @@ describe('ts#agent generator', () => {
     ).toBeTruthy();
   });
 
+  it('should keep the code and container Terraform modules separate', async () => {
+    await tsAgentGenerator(tree, {
+      project: 'test-project',
+      name: 'code-agent',
+      infra: 'agentcore',
+      iac: 'terraform',
+    });
+    await tsAgentGenerator(tree, {
+      project: 'test-project',
+      name: 'container-agent',
+      infra: 'agentcore-ecr',
+      iac: 'terraform',
+    });
+
+    // The shared modules are written KeepExisting, so each packaging needs its
+    // own directory for a workspace hosting both to work.
+    const codeModule = tree.read(
+      'packages/common/terraform/src/core/agent-core-code/runtime.tf',
+      'utf-8',
+    );
+    const containerModule = tree.read(
+      'packages/common/terraform/src/core/agent-core-container/runtime.tf',
+      'utf-8',
+    );
+    // The packaging modules own only their own plumbing — a code archive
+    // staged in the shared asset bucket, or an image pushed to the shared
+    // asset registry. Neither provisions the shared resource it targets.
+    expect(codeModule).toContain('archive_file');
+    expect(codeModule).toContain('var.asset_bucket_name');
+    expect(codeModule).not.toContain('docker_publish');
+    expect(containerModule).toContain('docker_publish');
+    expect(containerModule).toContain('var.asset_ecr_repository_url');
+    expect(containerModule).not.toContain('archive_file');
+    expect(codeModule).not.toContain('aws_ecr_repository');
+    expect(containerModule).not.toContain('aws_ecr_repository');
+    // ...and both delegate the runtime to one shared generic module.
+    expect(codeModule).toContain('source = "../agent-core"');
+    expect(containerModule).toContain('source = "../agent-core"');
+    const genericModule = tree.read(
+      'packages/common/terraform/src/core/agent-core/runtime.tf',
+      'utf-8',
+    );
+    expect(genericModule).toContain('aws_bedrockagentcore_agent_runtime');
+    expect(genericModule).not.toContain('aws_ecr_repository');
+    expect(genericModule).not.toContain('archive_file');
+
+    // And each app module must source the one matching its packaging
+    expect(
+      tree.read(
+        'packages/common/terraform/src/app/agents/code-agent/code-agent.tf',
+        'utf-8',
+      ),
+    ).toContain('source = "../../../core/agent-core-code"');
+    expect(
+      tree.read(
+        'packages/common/terraform/src/app/agents/container-agent/container-agent.tf',
+        'utf-8',
+      ),
+    ).toContain('source = "../../../core/agent-core-container"');
+  });
+
+  it('should host container-packaged agents in the shared asset registry', async () => {
+    await tsAgentGenerator(tree, {
+      project: 'test-project',
+      name: 'first-container-agent',
+      infra: 'agentcore-ecr',
+      iac: 'terraform',
+    });
+    await tsAgentGenerator(tree, {
+      project: 'test-project',
+      name: 'second-container-agent',
+      infra: 'agentcore-ecr',
+      iac: 'terraform',
+    });
+
+    // Both agents thread the one shared registry through, rather than each
+    // provisioning a repository of its own.
+    for (const name of ['first-container-agent', 'second-container-agent']) {
+      const appModule = tree.read(
+        `packages/common/terraform/src/app/agents/${name}/${name}.tf`,
+        'utf-8',
+      );
+      expect(appModule).toContain('variable "asset_ecr_repository_url"');
+      expect(appModule).toContain(
+        'asset_ecr_repository_url = var.asset_ecr_repository_url',
+      );
+      expect(appModule).toContain(
+        'asset_ecr_repository_arn = var.asset_ecr_repository_arn',
+      );
+      expect(appModule).not.toContain('aws_ecr_repository');
+    }
+
+    // Sharing one repository means the image tags must not collide, so each
+    // runtime namespaces its content-addressed tag with its own name.
+    const containerModule = tree.read(
+      'packages/common/terraform/src/core/agent-core-container/runtime.tf',
+      'utf-8',
+    );
+    expect(containerModule).toContain(
+      'image_tag = "agent-core-${lower(var.agent_runtime_name)}-${replace(data.external.docker_digest.result.digest, "sha256:", "")}"',
+    );
+  });
+
   it('should match snapshot for Terraform generated files', async () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
       name: 'terraform-snapshot-agent',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'terraform',
     });
 
@@ -654,7 +757,7 @@ describe('ts#agent generator', () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
       name: 'terraform-agent',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'terraform',
     });
 
@@ -701,7 +804,7 @@ describe('ts#agent generator', () => {
 
     await tsAgentGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'inherit',
     });
 
@@ -738,7 +841,7 @@ describe('ts#agent generator', () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
       name: 'path-test-agent',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'cdk',
     });
 
@@ -764,7 +867,7 @@ describe('ts#agent generator', () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
       name: 'first-agent',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'cdk',
     });
 
@@ -772,7 +875,7 @@ describe('ts#agent generator', () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
       name: 'second-agent',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'cdk',
     });
 
@@ -903,22 +1006,79 @@ describe('ts#agent generator', () => {
     expect(projectConfig.metadata.components[0].port).toBeDefined();
   });
 
-  it('should handle default computeType as BedrockAgentCoreRuntime', async () => {
+  it('should default to code packaging on AgentCore Runtime', async () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
-      // No computeType specified, should default to BedrockAgentCoreRuntime
+      // No infra specified, should default to code packaging on agentcore
       iac: 'cdk',
     });
 
-    // Should include Dockerfile by default
-    expect(tree.exists('apps/test-project/src/agent/Dockerfile')).toBeTruthy();
+    // Code packaging needs no Dockerfile or image build
+    expect(tree.exists('apps/test-project/src/agent/Dockerfile')).toBeFalsy();
 
-    // Should have docker and bundle targets
     const projectConfig = JSON.parse(
       tree.read('apps/test-project/project.json', 'utf-8'),
     );
     expect(projectConfig.targets['bundle']).toBeDefined();
-    expect(projectConfig.targets['agent-docker']).toBeDefined();
+    expect(projectConfig.targets['agent-package']).toBeDefined();
+    expect(projectConfig.targets['agent-docker']).toBeUndefined();
+    expect(projectConfig.targets['agent-trivy']).toBeUndefined();
+    // No aggregate container targets either, since nothing remains under them
+    expect(projectConfig.targets['docker']).toBeUndefined();
+    expect(projectConfig.targets['trivy']).toBeUndefined();
+  });
+
+  it('should package the bundle with a vendored ADOT install for code packaging', async () => {
+    await tsAgentGenerator(tree, {
+      project: 'test-project',
+      infra: 'agentcore',
+      iac: 'cdk',
+    });
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+    const packageTarget = projectConfig.targets['agent-package'];
+    expect(packageTarget.dependsOn).toEqual(['bundle']);
+    expect(packageTarget.outputs).toEqual([
+      '{workspaceRoot}/dist/apps/test-project/package/agent/test-project-agent',
+    ]);
+    expect(packageTarget.options.commands).toEqual([
+      'rimraf dist/apps/test-project/package/agent/test-project-agent',
+      'make-dir dist/apps/test-project/package/agent/test-project-agent',
+      'ncp dist/apps/test-project/bundle/agent/test-project-agent/index.js dist/apps/test-project/package/agent/test-project-agent/index.js',
+      `npm install --prefix dist/apps/test-project/package/agent/test-project-agent --no-save --no-audit --no-fund --omit=dev @aws/aws-distro-opentelemetry-node-autoinstrumentation@${TS_VERSIONS['@aws/aws-distro-opentelemetry-node-autoinstrumentation']}`,
+    ]);
+
+    // The build must produce the package it deploys
+    expect(projectConfig.targets['build'].dependsOn).toContain('agent-package');
+    expect(projectConfig.targets['assemble'].dependsOn).toContain(
+      'agent-package',
+    );
+  });
+
+  it('should reference the code asset with an ADOT entry point for code packaging', async () => {
+    await tsAgentGenerator(tree, {
+      project: 'test-project',
+      infra: 'agentcore',
+      iac: 'cdk',
+    });
+
+    const construct = tree.read(
+      'packages/common/constructs/src/app/agents/test-project-agent/test-project-agent.ts',
+      'utf-8',
+    );
+    expect(construct).toContain('AgentRuntimeArtifact.fromCodeAsset');
+    expect(construct).toContain('AgentCoreRuntime.NODE_22');
+    expect(construct).toContain(
+      "entrypoint: ['opentelemetry-instrument', 'index.js']",
+    );
+    expect(construct).toContain(
+      'dist/apps/test-project/package/agent/test-project-agent',
+    );
+    // No container image is built, so the ECR asset helpers are unused
+    expect(construct).not.toContain('fromAsset');
+    expect(construct).not.toContain('Platform.LINUX_ARM64');
   });
 
   it('should assign unique port for local development', async () => {
@@ -1405,7 +1565,7 @@ describe('ts#agent generator', () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
       name: 'in-memory-agent',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       session: 'in-memory',
       iac: 'cdk',
     });
@@ -1423,7 +1583,7 @@ describe('ts#agent generator', () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
       name: 'in-memory-terraform-agent',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       session: 'in-memory',
       iac: 'terraform',
     });
@@ -1460,9 +1620,15 @@ describe('ts#agent generator', () => {
       iac: 'cdk',
     });
 
+    // Code packaging needs no Dockerfile, so the upgrade adds the package
+    // target and the infrastructure that deploys it.
     expect(
       tree.exists('apps/test-project/src/upgrade-agent/Dockerfile'),
-    ).toBeTruthy();
+    ).toBeFalsy();
     expect(tree.exists('packages/common/constructs')).toBeTruthy();
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+    expect(projectConfig.targets['upgrade-agent-package']).toBeDefined();
   });
 });

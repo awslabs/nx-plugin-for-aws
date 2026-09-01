@@ -102,7 +102,7 @@ new ApplicationStage(app, 'my-app-sandbox', {
 
 Thuộc tính `env` cho CDK biết tài khoản AWS và vùng nào để triển khai. `CDK_DEFAULT_ACCOUNT` và `CDK_DEFAULT_REGION` được CDK CLI tự động phân giải từ thông tin xác thực AWS đang hoạt động của bạn. Xem [tài liệu môi trường CDK](https://docs.aws.amazon.com/cdk/v2/guide/environments.html) để biết thêm chi tiết.
 
-Sandbox stage là stage mà <Link path="guides/typescript-infrastructure#deploying-your-sandbox-stage">target `deploy-sandbox`</Link> triển khai.
+Sandbox stage là stage mà các target <Link path="guides/typescript-infrastructure#deploying-your-sandbox-stage">`deploy-sandbox`</Link> và <Link path="guides/typescript-infrastructure#tearing-down-your-sandbox-stage">`destroy-sandbox`</Link> hoạt động trên.
 
 Nếu bạn tạo với `stageConfig`, `main.ts` đọc tài khoản và vùng từ file cấu hình tập trung thay vì, quay lại biến môi trường khi không có cấu hình nào được đặt:
 
@@ -321,6 +321,8 @@ Như một phần của target `build` của bạn, cũng như chạy <Link path
 
 Bạn sẽ tìm thấy cloud assembly đã được synthesized trong thư mục `dist` gốc, dưới `dist/packages/<my-infra-project>/cdk.out`.
 
+`synth` phụ thuộc vào `^assemble`, vì vậy việc synthesizing xây dựng các artifact mà stack của bạn triển khai, chẳng hạn như các Lambda bundle, container image và specification được tạo ra, mà không chạy các cổng kiểm tra lint, test và type-check của mọi dự án upstream. Xem <Link path="guides/typescript-project#assembling">Assembling</Link> để biết thêm chi tiết về `assemble`.
+
 ## Kiểm tra Bảo mật
 
 Một target `checkov` được thêm vào dự án của bạn để chạy kiểm tra bảo mật trên hạ tầng của bạn bằng [Checkov](https://www.checkov.io/).
@@ -383,6 +385,12 @@ Dự án của bạn có ba target triển khai, mỗi target phù hợp với m
 | `deploy`         | Triển khai bất kỳ stage nào, bằng cách đặt tên stage hoặc stack bạn muốn.                   |
 | `deploy-ci`      | Triển khai từ một CI/CD pipeline, sử dụng một cloud assembly đã được synthesized trước.     |
 
+`deploy-sandbox` và `deploy` phụ thuộc vào `^assemble`, vì vậy chúng xây dựng các artifact mà chúng sắp triển khai và không có gì khác. `deploy-ci` triển khai một assembly mà pipeline của bạn đã xây dựng, vì vậy nó không có bất kỳ phụ thuộc xây dựng nào cả.
+
+:::caution[Sử dụng `build` trong pipeline của bạn]
+`assemble` được sử dụng để lặp lại nhanh hơn trong quá trình phát triển. Chạy `build` trong CI pipeline của bạn để đảm bảo dự án của bạn vượt qua các cổng chất lượng trước khi triển khai production.
+:::
+
 Đầu tiên, đảm bảo bạn đã cấu hình thông tin xác thực AWS. Nếu bạn tạo với `stageConfig` và đã cấu hình thông tin xác thực stage trong `packages/common/infra-config/src/stages.config.ts`, lệnh deploy sẽ tự động phân giải và áp dụng thông tin xác thực chính xác cho stage đích. Nếu không, đảm bảo thông tin xác thực AWS của bạn được đặt trong môi trường của bạn (ví dụ: thông qua `AWS_PROFILE` hoặc biến môi trường). Xem [tài liệu thông tin xác thực AWS](https://docs.aws.amazon.com/sdkref/latest/guide/access.html) cho các tùy chọn có sẵn.
 
 ### Triển khai Sandbox Stage của bạn
@@ -421,9 +429,33 @@ Target này khác một chút so với target `deploy` thông thường ở ch�
 
 ## Phá bỏ Hạ tầng AWS
 
-Sử dụng target `destroy` để phá bỏ các tài nguyên của bạn:
+Dự án của bạn có ba target phá bỏ, phản ánh các target triển khai:
+
+| Target            | Sử dụng nó cho                                                                |
+| ----------------- | ----------------------------------------------------------------------------- |
+| `destroy-sandbox` | Phá bỏ sandbox stage của riêng bạn. Không cần đối số stage.                  |
+| `destroy`         | Phá bỏ bất kỳ stage nào, bằng cách đặt tên stage hoặc stack bạn muốn.        |
+| `destroy-ci`      | Phá bỏ từ một CI/CD pipeline, sử dụng một cloud assembly đã được synthesized trước. |
+
+### Phá bỏ Sandbox Stage của bạn
+
+Target `destroy-sandbox` phá bỏ sandbox stage mà `main.ts` khai báo, vì vậy bạn không cần nhớ tên stage của nó:
+
+<NxCommands commands={['destroy-sandbox <my-infra>']} />
+
+Việc phá bỏ là không thể đảo ngược, vì vậy CDK yêu cầu bạn xác nhận các stack mà nó sắp xóa. Truyền `--force` để bỏ qua xác nhận đó, đây là điều bạn muốn khi không có terminal được gắn kết (ví dụ trong một script):
+
+<NxCommands commands={['destroy-sandbox <my-infra> --force']} />
+
+### Phá bỏ một Stage cụ thể
+
+Target `destroy` phá bỏ bất kỳ stage hoặc stack nào bạn đặt tên:
 
 <NxCommands commands={['destroy <my-infra> <my-infra>-sandbox/*']} />
+
+Để phá bỏ một stack riêng lẻ, cung cấp tên stack đầy đủ:
+
+<NxCommands commands={['destroy <my-infra> <my-infra>-sandbox/Application']} />
 
 ## Thông tin thêm
 

@@ -16,31 +16,36 @@ import {
   updateNxJson,
 } from '@nx/devkit';
 import { join, relative } from 'path';
-import { getTsLibDetails } from '../../ts/lib/generator';
-import { addTsDependencies } from '../../utils/add-dependencies';
+import { addLicenseCheckToLintTarget } from '../../license/config.js';
+import { getTsLibDetails } from '../../ts/lib/generator.js';
+import { addTsDependencies } from '../../utils/add-dependencies.js';
 import {
   declareDependencies,
   ownedElsewhere,
-} from '../../utils/declared-dependencies';
-import { updateGitIgnore } from '../../utils/git';
-import { installDependencies } from '../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { kebabCase } from '../../utils/names';
+} from '../../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../../utils/format.js';
+import { updateGitIgnore } from '../../utils/git.js';
+import { installDependencies } from '../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
+import { kebabCase } from '../../utils/names.js';
 import {
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   projectExists,
-} from '../../utils/nx';
-import { sortObjectKeys } from '../../utils/object';
-import { uvxCommand } from '../../utils/py';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+} from '../../utils/nx.js';
+import { sortObjectKeys } from '../../utils/object.js';
+import { uvxCommand } from '../../utils/py.js';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   SHARED_TERRAFORM_DIR,
   SHARED_TERRAFORM_NAME,
-} from '../../utils/shared-constructs-constants';
-import { terraformProviderVersions, withVersions } from '../../utils/versions';
+} from '../../utils/shared-constructs-constants.js';
+import {
+  terraformProviderVersions,
+  withVersions,
+} from '../../utils/versions.js';
 import type { TerraformProjectGeneratorSchema } from './schema';
 
 // Terraform projects carry no package.json, so their build tooling and the AWS
@@ -66,6 +71,35 @@ const NX_EXTEND_PLUGIN = '@nx-extend/terraform';
 export const TERRAFORM_PROJECT_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(import.meta.filename);
 
+/**
+ * Checks formatting, mirroring the TypeScript and Python `format` targets: the
+ * base target fails on an unformatted file and the `fix` configuration rewrites
+ * it. Writing from the base target would rewrite the `default` input the hash is
+ * computed over, so the target could never cache-hit.
+ *
+ * Scoped to the project's own `src` rather than `-recursive`, so it checks the
+ * files the vended templates cover. `-diff` names what to fix when it fails.
+ */
+export const TERRAFORM_FORMAT_TARGET: TargetConfiguration = {
+  executor: 'nx:run-commands',
+  cache: true,
+  inputs: ['default'],
+  options: {
+    command: 'terraform fmt -check -diff',
+    forwardAllArgs: true,
+    cwd: '{projectRoot}/src',
+  },
+  configurations: {
+    fix: {
+      command: 'terraform fmt',
+    },
+    'skip-lint': {
+      // Cross-platform no-op (`true` is not available on Windows cmd).
+      command: 'node -e ""',
+    },
+  },
+};
+
 export async function terraformProjectGenerator(
   tree: Tree,
   schema: TerraformProjectGeneratorSchema,
@@ -90,6 +124,28 @@ export async function terraformProjectGenerator(
     distDir,
     'checkov',
     'checkov_report.json',
+  );
+  // `test` keeps its `.terraform` here rather than in `src`, so initialising it
+  // never races the backend-configured targets over the shared one.
+  const testDataDir = joinPathFragments(distDir, 'terraform-test');
+
+  // Provider downloads persist here, so a target whose `.terraform` was cleaned
+  // links the providers it already has rather than re-downloading them. Nx does
+  // not interpolate `{workspaceRoot}` inside `env`, so this is relative to the
+  // target's `cwd`. It sits under `.terraform`, which this generator gitignores
+  // — that is also what keeps the providers out of Nx's file walk — and unlike
+  // `.nx/cache` it survives `nx reset`.
+  //
+  // One cache per project rather than one for the workspace: two `terraform
+  // init` runs filling a shared cache concurrently each compute a different hash
+  // for the same provider, because the hash covers a directory the other is
+  // still writing, and terraform then rejects the mismatch against the lock
+  // file. Per project, no two writers ever meet, so the targets stay parallel.
+  const pluginCacheDir = joinPathFragments(
+    outDirToRootRelativePath,
+    '.terraform',
+    'plugin-cache',
+    '{projectRoot}',
   );
 
   // Calculate relative path from current project to common/terraform/metrics
@@ -130,15 +186,21 @@ export async function terraformProjectGenerator(
       executor: 'nx:run-commands',
       options: {
         forwardAllArgs: true,
-        command: `terraform destroy -state=${tfDistDir}/bootstrap.tfstate`,
-        cwd: '{projectRoot}/bootstrap',
+        commands: [
+          'tsx {projectRoot}/scripts/bootstrap-destroy.ts {projectRoot}',
+        ],
+        cwd: '{workspaceRoot}',
       },
     },
     build: {
-      dependsOn: ['fmt', 'test', `${sharedTfProjectName}:build`],
+      dependsOn: ['format', 'checkov', 'test', `${sharedTfProjectName}:build`],
     },
     deploy: {
       dependsOn: ['apply'],
+    },
+    // The artifact-only sibling of build, which `plan` depends on.
+    assemble: {
+      dependsOn: [`${sharedTfProjectName}:assemble`],
     },
     destroy: {
       executor: 'nx:run-commands',
@@ -195,7 +257,7 @@ export async function terraformProjectGenerator(
         cwd: '{projectRoot}/src',
         parallel: false,
       },
-      dependsOn: ['init', 'validate', '^validate', 'build'],
+      dependsOn: ['init', 'validate', '^validate', 'assemble'],
     },
   };
 
@@ -203,42 +265,85 @@ export async function terraformProjectGenerator(
     [targetName: string]: TargetConfiguration;
   } = {
     build: {
-      dependsOn: ['fmt', 'test'],
+      dependsOn: ['format', 'checkov', 'test'],
     },
-    fmt: {
-      executor: 'nx:run-commands',
-      cache: true,
-      inputs: ['default'],
-      options: {
-        command: 'terraform fmt',
-        forwardAllArgs: true,
-        cwd: '{projectRoot}/src',
-      },
+    // A Terraform library vends modules rather than a deployable artifact, so
+    // its `assemble` carries only whatever the consuming projects register on it.
+    assemble: {
+      executor: 'nx:noop',
+    },
+    format: TERRAFORM_FORMAT_TARGET,
+    // Terraform has no linter of its own, so `lint` orchestrates the format
+    // check. It exists so `nx run-many --target lint` reaches terraform
+    // projects, and so `--configuration=fix` and `--configuration=skip-lint`
+    // propagate to `format` the way they do for TypeScript and Python projects.
+    lint: {
+      dependsOn: ['format'],
     },
     init: {
       executor: 'nx:run-commands',
       defaultConfiguration: 'dev',
       configurations: {
         dev: {
-          command: 'terraform init',
+          commands: [
+            { command: `make-dir ${pluginCacheDir}`, forwardAllArgs: false },
+            'terraform init',
+          ],
         },
       },
       options: {
         forwardAllArgs: true,
         cwd: '{projectRoot}/src',
+        parallel: false,
+        env: { TF_PLUGIN_CACHE_DIR: pluginCacheDir },
       },
     },
-    test: {
+    // `^production` mirrors `test`: checkov resolves the relative modules a
+    // project consumes, so a change in one must invalidate the scan.
+    checkov: {
       executor: 'nx:run-commands',
       cache: true,
+      inputs: ['default', '^production'],
       outputs: ['{workspaceRoot}/dist/{projectRoot}/checkov'],
       options: {
         command: uvxCommand(
           'checkov',
-          `--directory . -o cli -o json --output-file-path console,${checkovReportJsonPath}`,
+          `--config-file ../checkov.yml --directory . -o cli -o json --output-file-path console,${checkovReportJsonPath}`,
         ),
         forwardAllArgs: true,
         cwd: '{projectRoot}/src',
+      },
+    },
+    // Terraform's native test framework, which runs any `.tftest.hcl` files.
+    // A project with none is a no-op success.
+    //
+    // `-backend=false` installs the modules and providers the tests need
+    // without configuring the S3 backend, so this runs before `bootstrap` and
+    // needs no credentials. `TF_DATA_DIR` keeps that `.terraform` out of `src`,
+    // so it never races the backend-configured targets over the shared one.
+    // `^production` is what invalidates the cache when a consumed module
+    // changes; `{projectRoot}/**/*` alone would serve a stale pass.
+    //
+    // `TF_DATA_DIR` is terraform's working directory, not an artifact: its
+    // provider entries are symlinks into the shared plugin cache, so restoring
+    // it on another machine would yield dangling links while the commands that
+    // repopulate them are skipped. Declaring no outputs keeps a cache hit to
+    // what it actually asserts — that the tests passed for these inputs.
+    test: {
+      executor: 'nx:run-commands',
+      cache: true,
+      inputs: ['default', '^production'],
+      outputs: [],
+      options: {
+        commands: [
+          { command: `make-dir ${pluginCacheDir}`, forwardAllArgs: false },
+          'terraform init -backend=false',
+          'terraform test',
+        ],
+        forwardAllArgs: true,
+        cwd: '{projectRoot}/src',
+        parallel: false,
+        env: { TF_DATA_DIR: testDataDir, TF_PLUGIN_CACHE_DIR: pluginCacheDir },
       },
     },
     validate: {
@@ -269,6 +374,11 @@ export async function terraformProjectGenerator(
   if (!projectExists(tree, lib.fullyQualifiedName)) {
     addProjectConfiguration(tree, lib.fullyQualifiedName, projectConfiguration);
   }
+
+  // The `lint` target checks licenses alongside formatting, as it does for
+  // TypeScript and Python projects.
+  addLicenseCheckToLintTarget(tree, lib.fullyQualifiedName);
+
   // This generator IS the Terraform project, so the provider is fixed.
   addGeneratorMetadata(
     tree,
@@ -288,6 +398,17 @@ export async function terraformProjectGenerator(
     },
     {
       overwriteStrategy: OverwriteStrategy.Overwrite,
+    },
+  );
+
+  // Checkov skips are the user's to curate, so preserve any they have added.
+  generateFiles(
+    tree,
+    joinPathFragments(import.meta.dirname, './files/checkov'),
+    lib.dir,
+    {},
+    {
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
   );
 
@@ -326,6 +447,10 @@ export async function terraformProjectGenerator(
       return packageJson;
     });
   }
+
+  // `updateProjectConfiguration` re-serialises project.json with every inline
+  // array expanded, which the vended `format` target rejects.
+  await formatFilesInSubtree(tree);
 
   // `@nx-extend/terraform` is registered as an Nx plugin in nx.json, so Nx
   // loads it when computing the project graph — it must resolve even if the

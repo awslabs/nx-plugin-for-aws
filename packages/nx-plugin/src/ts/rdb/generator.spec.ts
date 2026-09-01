@@ -5,23 +5,52 @@
 
 import type { Tree } from '@nx/devkit';
 import * as devkit from '@nx/devkit';
-import { declareDependencies } from '../../utils/declared-dependencies';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
-import { readProjectConfigurationUnqualified } from '../../utils/nx';
+import { declareDependencies } from '../../utils/declared-dependencies.js';
+import { expectHasMetricTags } from '../../utils/metrics.spec.js';
+import { readProjectConfigurationUnqualified } from '../../utils/nx.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../utils/shared-constructs';
+} from '../../utils/shared-constructs.js';
 import {
   createTreeUsingTsSolutionSetup,
   snapshotTreeDir,
-} from '../../utils/test';
-import { TS_VERSIONS } from '../../utils/versions';
-import { TS_RDB_GENERATOR_INFO, tsRdbGenerator } from './generator';
+} from '../../utils/test.js';
+import { TS_VERSIONS } from '../../utils/versions.js';
+import { TS_RDB_GENERATOR_INFO, tsRdbGenerator } from './generator.js';
 
 const sharedConstructsDeclaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
 });
+
+const TERRAFORM_AURORA_CORE =
+  'packages/common/terraform/src/core/rdb/aurora/aurora.tf';
+const TERRAFORM_AURORA_APP = 'packages/common/terraform/src/app/dbs/db/db.tf';
+
+/** Declared name to default value for every optional variable in a module. */
+const readTerraformVariableDefaults = (
+  tree: Tree,
+  filePath: string,
+): Record<string, string> =>
+  Object.fromEntries(
+    [
+      // Nested blocks are indented, so an unindented `}` closes the variable.
+      ...tree
+        .read(filePath, 'utf-8')
+        .matchAll(/variable "(?<name>\w+)" \{\n(?<body>.*?)\n\}/gs),
+    ]
+      .map(({ groups }) => [
+        groups.name,
+        /^\s*default\s*=\s*(?<value>.+)$/m.exec(groups.body)?.groups.value,
+      ])
+      .filter(([, value]) => value !== undefined),
+  );
+
+/** The app module's call into the core module, with alignment padding collapsed. */
+const readTerraformAuroraModuleCall = (tree: Tree): string =>
+  /module "aurora" \{\n.*?\n\}/s
+    .exec(tree.read(TERRAFORM_AURORA_APP, 'utf-8'))[0]
+    .replace(/ +/g, ' ');
 
 describe('ts#rdb generator', () => {
   let tree: Tree;
@@ -77,6 +106,7 @@ describe('ts#rdb generator', () => {
     ).toMatchSnapshot();
     expect(projectConfig.targets.bundle).toEqual({
       cache: true,
+      inputs: ['default'],
       outputs: ['{workspaceRoot}/dist/{projectRoot}/bundle'],
       executor: 'nx:run-commands',
       options: {
@@ -110,6 +140,7 @@ describe('ts#rdb generator', () => {
     });
     expect(projectConfig.targets['dev']).toEqual({
       executor: 'nx:run-commands',
+      dependsOn: ['pull-image'],
       options: {
         command: 'tsx ../common/scripts/src/rdb/start-container.ts',
         cwd: '{projectRoot}',
@@ -222,6 +253,7 @@ describe('ts#rdb generator', () => {
     });
     expect(mysqlProjectConfig.targets['dev']).toEqual({
       executor: 'nx:run-commands',
+      dependsOn: ['pull-image'],
       options: {
         command: 'tsx ../common/scripts/src/rdb/start-container.ts',
         cwd: '{projectRoot}',
@@ -320,6 +352,137 @@ describe('ts#rdb generator', () => {
     );
   });
 
+  it('should host database container images in the shared asset registry', async () => {
+    await tsRdbGenerator(tree, { ...defaultOptions, iac: 'terraform' });
+    await tsRdbGenerator(tree, {
+      ...defaultOptions,
+      name: 'other-db',
+      iac: 'terraform',
+    });
+
+    // Both databases publish their migration image to the one shared registry
+    // rather than each provisioning a repository of its own.
+    for (const [name, prefix] of [
+      ['db', 'db'],
+      ['other-db', 'other-db'],
+    ]) {
+      const dbModule = tree.read(
+        `packages/common/terraform/src/app/dbs/${name}/${name}.tf`,
+        'utf-8',
+      );
+      expect(dbModule).toContain('variable "asset_ecr_repository_url"');
+      expect(dbModule).not.toContain('aws_ecr_repository');
+      expect(dbModule).toContain(
+        'image_uri     = "${var.asset_ecr_repository_url}:${local.image_tag}"',
+      );
+      // Sharing one repository means the tags must not collide, so each
+      // database namespaces its content-addressed tag with its own name.
+      expect(dbModule).toContain(
+        `image_tag = "${prefix}-migration-\${replace(data.external.docker_digest.result.digest, "sha256:", "")}"`,
+      );
+    }
+  });
+
+  it('should protect the aurora cluster and its key from destruction in terraform', async () => {
+    await tsRdbGenerator(tree, {
+      ...defaultOptions,
+      iac: 'terraform',
+    });
+
+    const aurora = tree.read(
+      'packages/common/terraform/src/core/rdb/aurora/aurora.tf',
+      'utf-8',
+    );
+
+    // Terraform-side guard, independent of the RDS-side deletion_protection
+    // flag, so clearing that variable alone cannot destroy the cluster. It must
+    // be a literal — prevent_destroy cannot reference a variable.
+    expect(aurora).toContain('prevent_destroy = true');
+
+    // The maximum KMS pending window, matching the CDK default, so a snapshot
+    // of an encrypted cluster stays restorable for as long as possible.
+    expect(aurora).toContain('deletion_window_in_days = 30');
+  });
+
+  it('should agree on every aurora variable default between the terraform app and core modules', async () => {
+    await tsRdbGenerator(tree, { ...defaultOptions, iac: 'terraform' });
+
+    const core = readTerraformVariableDefaults(tree, TERRAFORM_AURORA_CORE);
+    const app = readTerraformVariableDefaults(tree, TERRAFORM_AURORA_APP);
+
+    // A root configuration instantiates the app module, which forwards its own
+    // value down, so a differing default there silently overrides the core one.
+    const shared = Object.keys(core).filter((name) => name in app);
+    expect(Object.fromEntries(shared.map((n) => [n, app[n]]))).toEqual(
+      Object.fromEntries(shared.map((n) => [n, core[n]])),
+    );
+
+    // Every re-declared variable must forward its own value down, so the app
+    // module's default is the one that takes effect.
+    const moduleCall = readTerraformAuroraModuleCall(tree);
+    for (const name of shared) {
+      expect(moduleCall).toContain(`${name} = var.${name}`);
+    }
+
+    // Any optional core variable the app module does not re-declare is
+    // unreachable from a root configuration. `engine` is the one exception —
+    // the generator fixes it from the chosen engine.
+    expect(Object.keys(core).filter((name) => !(name in app))).toEqual([
+      'engine',
+    ]);
+  });
+
+  it.each([
+    ['postgres', '["postgresql"]', 'log_statement'],
+    ['mysql', '["audit", "error"]', 'server_audit_events'],
+  ] as const)(
+    'should export %s engine logs and create the cluster parameter group by default in terraform',
+    async (engine, exports, parameter) => {
+      await tsRdbGenerator(tree, {
+        ...defaultOptions,
+        iac: 'terraform',
+        engine,
+      });
+
+      expect(
+        readTerraformVariableDefaults(tree, TERRAFORM_AURORA_APP)
+          .enable_cloudwatch_logs,
+      ).toBe('true');
+
+      // The same variable count-gates the cluster parameter group, which is what
+      // configures the engine to emit the logs it exports.
+      const core = tree.read(TERRAFORM_AURORA_CORE, 'utf-8');
+      expect(core).toContain('count = var.enable_cloudwatch_logs ? 1 : 0');
+      expect(core).toContain(exports);
+      expect(core).toContain(parameter);
+    },
+  );
+
+  it.each(['postgres', 'mysql'] as const)(
+    'should grant the terraform rds proxy role only rds-db:connect for %s',
+    async (engine) => {
+      await tsRdbGenerator(tree, {
+        ...defaultOptions,
+        iac: 'terraform',
+        engine,
+      });
+
+      const db = tree.read(TERRAFORM_AURORA_APP, 'utf-8');
+
+      // The proxy is created with default_auth_scheme = IAM_AUTH and no secrets
+      // registered, so rds-db:connect for the application user is the only
+      // permission it needs to reach the cluster — on either engine.
+      expect(db).toContain('Action = ["rds-db:connect"]');
+
+      const proxyPolicy = db?.slice(
+        db.indexOf('resource "aws_iam_role_policy" "proxy_db_user_connect"'),
+        db.indexOf('module "add_rdb_to_runtime_config"'),
+      );
+      expect(proxyPolicy).not.toContain('secretsmanager:GetSecretValue');
+      expect(proxyPolicy).not.toContain('kms:Decrypt');
+    },
+  );
+
   it('should keep an existing aurora shared construct', async () => {
     await sharedConstructsGenerator(
       tree,
@@ -387,6 +550,15 @@ describe('ts#rdb generator', () => {
       tree.read('packages/db/project.json', 'utf-8'),
     );
     expect(updatedProjectJson.targets['bundle']).toBeDefined();
+  });
+
+  it('should place the project in a subDirectory when provided', async () => {
+    await tsRdbGenerator(tree, { ...defaultOptions, subDirectory: 'nested' });
+
+    const projectConfig = readProjectConfigurationUnqualified(tree, '@proj/db');
+    expect(projectConfig.root).toBe('packages/nested');
+    expect(tree.exists('packages/nested/package.json')).toBe(true);
+    expect(tree.exists('packages/db/package.json')).toBe(false);
   });
 
   it('should be idempotent when re-run with same options', async () => {

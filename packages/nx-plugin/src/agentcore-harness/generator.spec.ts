@@ -7,15 +7,18 @@ import yaml from 'js-yaml';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
-} from '../utils/config/utils';
-import { expectHasMetricTags } from '../utils/metrics.spec';
-import { createTreeUsingTsSolutionSetup, snapshotTreeDir } from '../utils/test';
-import { TS_VERSIONS } from '../utils/versions';
+} from '../utils/config/utils.js';
+import { expectHasMetricTags } from '../utils/metrics.spec.js';
+import {
+  createTreeUsingTsSolutionSetup,
+  snapshotTreeDir,
+} from '../utils/test.js';
+import { TS_VERSIONS } from '../utils/versions.js';
 import {
   AGENTCORE_HARNESS_GENERATOR_INFO,
   agentcoreHarnessGenerator,
   readAgentCoreHarnessMetadata,
-} from './generator';
+} from './generator.js';
 import type { AgentcoreHarnessGeneratorSchema } from './schema';
 import harnessSchema from './schema.json' with { type: 'json' };
 
@@ -80,11 +83,15 @@ const SCHEMA_INTERFACE_OPTIONS: Record<
 };
 
 /**
- * Every wildcard-resource IAM statement in the Terraform module, justified
- * inline. The rule ids differ from the CDK template's because checkov ships
- * separate rule sets for HCL and CloudFormation.
+ * Every checkov finding the Terraform module suppresses, justified inline —
+ * the wildcard-resource IAM statements, plus the security group whose
+ * attachment checkov cannot resolve. The rule ids differ from the CDK
+ * template's because checkov ships separate rule sets for HCL and
+ * CloudFormation.
  */
 const TF_CHECKOV_SKIPS = [
+  'CKV2_AWS_5:Attached to the Harness via its network configuration; Checkov cannot resolve this reference',
+  'CKV_AWS_355:EcrManagedImageToken requires a wildcard resource; ecr:GetAuthorizationToken has no resource-level permission',
   'CKV_AWS_355:EcrPublicTokenAccess requires a wildcard resource; ecr-public:GetAuthorizationToken has no resource-level permission',
   'CKV_AWS_355:StsForEcrPublicPull requires a wildcard resource; sts:GetServiceBearerToken has no resource-level permission',
   'CKV_AWS_355:XRayTracingAccess requires a wildcard resource; the X-Ray segment and sampling APIs have no resource-level permission',
@@ -376,7 +383,23 @@ describe('agentcore-harness generator', () => {
       expect(construct).toContain('systemPrompt: [{ text: systemPrompt }],');
     });
 
-    it('suppresses the three unscopeable IAM statements on the role policy', () => {
+    it('grants the private ECR pull a VPC Harness needs, and only then', () => {
+      // In a VPC the Harness pulls its managed container from a private ECR
+      // repository rather than ECR Public, so the role needs pull permissions
+      // on it or sessions fail to start.
+      expect(construct).toContain("sid: 'EcrManagedImagePull',");
+      expect(construct).toContain(
+        '`arn:${stack.partition}:ecr:${stack.region}:*:repository/harness-*`',
+      );
+      expect(construct).toContain("sid: 'EcrManagedImageToken',");
+      // Conditional on the VPC prop, spread into the baseline statements.
+      expect(construct).toContain('...(vpc\n');
+
+      // ECR Public remains the non-VPC path, so both stay.
+      expect(construct).toContain("sid: 'EcrPublicTokenAccess',");
+    });
+
+    it('suppresses the four unscopeable IAM statements on the role policy', () => {
       // App-level specifier: the construct sits three directories below core/.
       expect(construct).toContain(
         "import { suppressRules } from '../../../core/checkov.js';",
@@ -389,7 +412,7 @@ describe('agentcore-harness generator', () => {
       expect(construct).toContain(
         'const isPolicy = (c: IConstruct) => c instanceof iam.Policy;',
       );
-      expect(construct.match(/suppressRules\(\n/g)).toHaveLength(3);
+      expect(construct.match(/suppressRules\(\n/g)).toHaveLength(4);
       for (const reason of [
         'EcrPublicTokenAccess: ecr-public:GetAuthorizationToken has no resource-level permission.',
         'StsForEcrPublicPull: sts:GetServiceBearerToken has no resource-level permission.',
@@ -397,14 +420,27 @@ describe('agentcore-harness generator', () => {
       ]) {
         expect(construct, reason).toContain(`        '${reason}',`);
       }
+      // The VPC-only grant is suppressed inside the matching conditional, so it
+      // is indented one level further.
+      expect(construct).toContain(
+        "          'EcrManagedImageToken: ecr:GetAuthorizationToken has no resource-level permission.',",
+      );
     });
 
     it('configures no tools on the resource but exposes allowedTools as props', () => {
-      // From the resource literal onwards, so an allowedTools assignment
-      // anywhere in the resource or after it fails.
+      // The service treats an absent allowedTools as every tool, so the
+      // construct defaults it to none and always passes it explicitly.
+      expect(construct).toContain('allowedTools = [],');
+
+      // Assigned after the harnessProps spread, so an undefined value from a
+      // caller cannot reinstate the service's every-tool default.
       const resourceStart = construct.indexOf('new agentcore.CfnHarness(');
       expect(resourceStart).toBeGreaterThan(0);
-      expect(construct.slice(resourceStart)).not.toContain('allowedTools');
+      const resource = construct.slice(resourceStart);
+      expect(resource).toContain('allowedTools,');
+      expect(resource.indexOf('...harnessProps,')).toBeLessThan(
+        resource.indexOf('allowedTools,'),
+      );
 
       // Omitted from the inherited native props, so the optional field below
       // is the only route by which a caller can supply tools.
@@ -476,21 +512,117 @@ describe('agentcore-harness generator', () => {
       expect(tree.exists(CDK_HARNESSES_INDEX_PATH)).toBe(false);
     });
 
-    it('declares only the three retained input variables', () => {
-      // Set equality, so a reintroduced system_prompt, allowed_tools,
-      // max_iterations, max_tokens or timeout_seconds variable fails.
+    it('declares exactly the retained input variables', () => {
+      // Set equality, so a variable added or removed here is deliberate. The
+      // system prompt stays a file read rather than a variable.
       expect(
         [...tf.matchAll(/^variable "([a-z_]+)"/gm)].map(([, name]) => name),
       ).toEqual([
         'model_id',
+        'allowed_tools',
+        'memory',
+        'environment_variables',
+        'max_iterations',
+        'timeout_seconds',
+        'create_execution_role',
+        'execution_role_arn',
         'model_resource_arns',
         'additional_execution_role_policy_statements',
+        'enable_vpc',
+        'vpc_id',
+        'subnet_ids',
+        'tags',
       ]);
-      // No validation block survives, and nothing references the removed
-      // variables or assigns tools to the resource.
-      expect(tf).not.toContain('validation {');
       expect(tf).not.toContain('var.system_prompt');
-      expect(tf).not.toContain('allowed_tools');
+    });
+
+    it('defaults allowed_tools to none and always sends it', () => {
+      // The service treats an absent allowed_tools as every tool, so the
+      // module defaults to none and assigns the variable unconditionally.
+      expect(tf).toMatch(
+        /variable "allowed_tools" \{[^}]*type {8}= list\(string\)\n {2}default {5}= \[\]/,
+      );
+      expect(tf).toContain('allowed_tools         = var.allowed_tools');
+    });
+
+    it('cross-validates the variables that cannot be combined', () => {
+      // enable_vpc needs both network inputs; a supplied role cannot be shaped
+      // by the generated role's variables; memory takes exactly one form.
+      expect(tf).toContain(
+        'error_message = "vpc_id and subnet_ids must be set when enable_vpc is true."',
+      );
+      expect(tf).toContain(
+        'error_message = "execution_role_arn must be set when create_execution_role is false."',
+      );
+      expect(tf).toContain(
+        'error_message = "model_resource_arns and additional_execution_role_policy_statements configure the generated execution role, which is not created when create_execution_role is false. Grant those permissions on the supplied role instead."',
+      );
+      expect(tf).toContain(
+        'error_message = "Set exactly one of memory.managed_memory_configuration, memory.agentcore_memory_configuration or memory.disabled."',
+      );
+    });
+
+    it('creates the role and its baseline policy only when none is supplied', () => {
+      // Counted off a plain input, not a computed value: a count derived from a
+      // supplied ARN is unknown at plan time whenever that ARN is itself a
+      // resource attribute, which fails the plan outright.
+      for (const resource of [
+        'resource "aws_iam_role" "execution_role"',
+        'resource "aws_iam_role_policy" "execution_role"',
+      ]) {
+        expect(tf, resource).toContain(
+          `${resource} {\n  count = var.create_execution_role ? 1 : 0`,
+        );
+      }
+      // The harness and the output both follow whichever role is in use.
+      expect(tf).toContain(
+        'execution_role_arn = var.create_execution_role ? aws_iam_role.execution_role[0].arn : var.execution_role_arn',
+      );
+      expect(tf).toContain('execution_role_arn = local.execution_role_arn');
+    });
+
+    it('places the harness in a VPC only when enable_vpc is set', () => {
+      // The security group and its egress rule are counted off enable_vpc, as
+      // is the network configuration block.
+      for (const resource of [
+        'resource "aws_security_group" "harness"',
+        'resource "aws_vpc_security_group_egress_rule" "harness_https"',
+      ]) {
+        expect(tf, resource).toContain(
+          `${resource} {\n  count = var.enable_vpc ? 1 : 0`,
+        );
+      }
+      // Egress is HTTPS only, to AWS service endpoints.
+      expect(tf).toContain('from_port         = 443');
+      expect(tf).toContain('to_port           = 443');
+
+      expect(tf).toContain(
+        'dynamic "environment" {\n    for_each = var.enable_vpc ? [1] : []',
+      );
+      expect(tf).toContain('network_mode = "VPC"');
+      expect(tf).toContain(
+        'security_groups = [aws_security_group.harness[0].id]',
+      );
+
+      // Exposed so resources the harness reaches can reference it.
+      expect(tf).toContain(
+        'value       = var.enable_vpc ? aws_security_group.harness[0].id : null',
+      );
+    });
+
+    it('grants the private ECR pull VPC mode needs, and only then', () => {
+      // In VPC mode the harness pulls its managed container from a private ECR
+      // repository rather than ECR Public, so the role needs pull permissions
+      // on it or sessions fail to start.
+      expect(tf).toContain('var.enable_vpc ? [');
+      expect(tf).toContain('Sid    = "EcrManagedImagePull"');
+      expect(tf).toContain(
+        'Resource = ["arn:${local.partition}:ecr:${local.region}:*:repository/harness-*"]',
+      );
+      expect(tf).toContain('Sid      = "EcrManagedImageToken"');
+
+      // ECR Public remains the non-VPC path, so both stay.
+      expect(tf).toContain('Sid      = "EcrPublicTokenAccess"');
     });
 
     it('justifies every wildcard IAM statement inline', () => {
@@ -544,14 +676,35 @@ describe('agentcore-harness generator', () => {
       expect(tf).not.toContain('regexall(');
     });
 
-    it('scopes the managed memory statement to the name the service assigns', () => {
-      // The service names the managed memory `<harness_name>-<10 chars>`, so it
-      // carries neither the runtime's `harness_` prefix nor an `_` separator.
-      // The provider exposes no memory ARN attribute, hence the wildcard.
+    it('scopes the managed memory grant to the ARN the service assigns', () => {
+      // The provider exposes the assigned ARN via memory_actual, so the grant
+      // names the exact resource rather than guessing at its name.
       expect(tf).toContain(
-        'Resource = [\n          "arn:${local.partition}:bedrock-agentcore:${local.region}:${local.account_id}:memory/${local.harness_name}-*",',
+        'Resource = [\n        aws_bedrockagentcore_harness.this.memory_actual[0].managed_memory_configuration[0].arn,',
       );
-      expect(tf).not.toContain(':memory/harness_');
+      expect(tf).not.toContain(':memory/');
+
+      // Reading a deployed attribute means it cannot live in the baseline
+      // policy, which the harness itself depends on.
+      expect(tf).toContain('resource "aws_iam_role_policy" "managed_memory"');
+      expect(tf).toContain(
+        'count = var.create_execution_role && local.has_managed_memory ? 1 : 0',
+      );
+    });
+
+    it('grants managed memory access only where it applies', () => {
+      // Granted while the service provisions the memory; not for a memory
+      // resource the user owns, nor when memory is off.
+      expect(tf).toContain(
+        'has_managed_memory = var.memory == null || var.memory.managed_memory_configuration != null',
+      );
+
+      // The baseline policy carries no memory statement of its own.
+      const baseline = tf.slice(
+        tf.indexOf('resource "aws_iam_role_policy" "execution_role"'),
+        tf.indexOf('# Security group for the Harness'),
+      );
+      expect(baseline).not.toContain('AgentCoreManagedMemory');
     });
   });
 

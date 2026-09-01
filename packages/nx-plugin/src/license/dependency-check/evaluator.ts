@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import spdxSatisfies from 'spdx-satisfies';
-import type { AllowlistEntry, LicenseStatus } from './types';
+import type { AllowlistEntry, LicenseStatus } from './types.js';
 
 export interface EvaluatorOptions {
   allow: AllowlistEntry[];

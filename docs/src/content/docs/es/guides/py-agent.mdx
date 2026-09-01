@@ -4,7 +4,7 @@ description: Genera un Python Agent para construir agentes de IA con herramienta
 generator: py#agent
 ---
 
-import { FileTree, Tabs, TabItem, CardGrid } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem, CardGrid, Steps } from '@astrojs/starlight/components';
 import Astro from '@astrojs/react';
 import ConnectionCard from '@components/connection-card.astro';
 import RunGenerator from '@components/run-generator.astro';
@@ -51,8 +51,11 @@ El generador agregará los siguientes archivos a tu proyecto Python existente. L
         - init.py FastAPI application setup with CORS and error handling middleware
         - agent.py Main agent definition with sample tools
         - session.py Resolves the framework-specific session persistence implementation
+        - middleware/
+          - \_\_init\_\_.py Python package initialization
+          - session_id_middleware.py Binds the inbound AgentCore session ID for the request
         - main.py FastAPI entry point for Bedrock AgentCore Runtime
-        - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - pyproject.toml Updated with Strands dependencies
     - project.json Updated with agent serve targets
 </FileTree>
@@ -70,8 +73,11 @@ El punto de entrada expone tu agente a través del protocolo A2A (Strands usa el
         - \_\_init\_\_.py Python package initialization
         - agent.py Main agent definition with sample tools
         - session.py Resolves the framework-specific session persistence implementation
+        - middleware/
+          - \_\_init\_\_.py Python package initialization
+          - session_id_middleware.py Binds the inbound AgentCore session ID for the request
         - main.py A2A server entry point
-        - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - pyproject.toml Updated with framework and A2A dependencies
     - project.json Updated with agent serve targets
 </FileTree>
@@ -89,8 +95,11 @@ El punto de entrada expone tu agente a través del protocolo [AG-UI](https://doc
         - \_\_init\_\_.py Python package initialization
         - agent.py Main agent definition with sample tools
         - session.py Resolves the framework-specific session persistence implementation
+        - middleware/
+          - \_\_init\_\_.py Python package initialization
+          - session_id_middleware.py Binds the inbound AgentCore session ID for the request
         - main.py AG-UI server entry point
-        - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - pyproject.toml Updated with framework and AG-UI dependencies
     - project.json Updated with agent serve targets
 </FileTree>
@@ -102,7 +111,9 @@ Los agentes AG-UI pueden conectarse a un frontend React usando el <Link path="/g
 
 ### Infraestructura
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment">
+<Snippet name="agentcore-hosting" />
+
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Bedrock AgentCore Runtime deployment">
 <Snippet name="shared-constructs" />
 
 Para desplegar tu Agente, se generan los siguientes archivos:
@@ -113,8 +124,8 @@ Para desplegar tu Agente, se generan los siguientes archivos:
   - packages/common/constructs/src
     - app
       - agents
-        - \<project-name>
-          - \<project-name>.ts CDK construct for deploying your agent
+        - \<agent-name>
+          - \<agent-name>.ts CDK construct for deploying your agent
 </FileTree>
 </Fragment>
 <Fragment slot="terraform">
@@ -122,11 +133,15 @@ Para desplegar tu Agente, se generan los siguientes archivos:
   - packages/common/terraform/src
     - app
       - agents
-        - \<project-name>
-          - \<project-name>.tf Module for deploying your agent
+        - \<agent-name>
+          - \<agent-name>.tf Module for deploying your agent
     - core
       - agent-core
         - runtime.tf Generic module for deploying to Bedrock AgentCore Runtime
+      - agent-core-code (when `infra` is `agentcore`)
+        - runtime.tf Packages your agent's code and delegates to `agent-core`
+      - agent-core-container (when `infra` is `agentcore-ecr`)
+        - runtime.tf Builds and publishes your agent's image and delegates to `agent-core`
 </FileTree>
 </Fragment>
 </Infrastructure>
@@ -232,7 +247,7 @@ agent = create_agent(
 
 <Tabs syncKey="agent-framework">
 <TabItem label="Strands" _filter={{ framework: 'strands' }}>
-Por defecto, los agentes Strands usan Claude 4 Sonnet, pero puedes personalizar el proveedor del modelo. Consulta la [documentación de Strands sobre proveedores de modelos](https://strandsagents.com/docs/user-guide/concepts/model-providers/) para opciones de configuración:
+Por defecto, los agentes Strands usan Claude Sonnet 4.6 en Amazon Bedrock, pero puedes personalizar el proveedor del modelo. Consulta la [documentación de Strands sobre proveedores de modelos](https://strandsagents.com/docs/user-guide/concepts/model-providers/) para opciones de configuración:
 
 ```python
 from strands import Agent
@@ -287,7 +302,7 @@ El protocolo del servidor de tu agente determina cómo se comunica. Todas las op
 
 El punto de entrada del servidor difiere según el framework (Strands produce un `Agent` gestionado por contexto, mientras que LangChain impulsa un grafo `create_agent` compilado), pero el contrato externo para cada protocolo es el mismo.
 
-Todos los protocolos exponen `/ping` para el contrato de verificación de salud del runtime AgentCore. Los agentes A2A escuchan en el puerto `9000`; los agentes HTTP y AG-UI escuchan en el puerto `8080`. El Dockerfile y la infraestructura generados están configurados para ti.
+Todos los protocolos exponen `/ping` para el contrato de verificación de salud del runtime AgentCore. Los agentes A2A escuchan en el puerto `9000`; los agentes HTTP y AG-UI escuchan en el puerto `8080`. La infraestructura generada está configurada para ti.
 
 <OptionFilter when={{ protocol: 'http' }} description="FastAPI HTTP server details">
 ## Servidor FastAPI (protocolo HTTP)
@@ -308,10 +323,10 @@ El endpoint de invocación del agente usa modelos [Pydantic](https://docs.pydant
 El modelo `InvokeInput` predeterminado acepta un prompt.
 
 ```python
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 class InvokeInput(BaseModel):
-    prompt: str
+    prompt: str = Field(max_length=100000)
 ```
 
 Puedes extender este modelo para incluir cualquier campo adicional que tu agente necesite.
@@ -376,7 +391,7 @@ Dado que el generador proporciona infraestructura CDK o Terraform que gestiona e
 <OptionFilter when={{ protocol: 'a2a' }} description="A2A server details">
 ## Servidor A2A (protocolo A2A)
 
-El `main.py` generado monta un servidor A2A en una aplicación FastAPI padre que también expone `/ping`. Los agentes Strands usan el `A2AServer` de Strands; los agentes LangChain envuelven el grafo compilado en un `AgentExecutor` de [`a2a-sdk`](https://a2a-protocol.org/). Cuando se despliega en AgentCore, el punto de entrada resuelve el ARN público del runtime desde AppConfig y lo anuncia en la tarjeta del agente.
+El `main.py` generado monta un servidor A2A en una aplicación FastAPI padre que también expone `/ping`. Los agentes Strands usan el `A2AServer` de Strands; los agentes LangChain envuelven el grafo compilado en un `AgentExecutor` de [`a2a-sdk`](https://a2a-protocol.org/). La URL anunciada en la tarjeta del agente proviene de la variable de entorno `AGENTCORE_RUNTIME_URL`, recurriendo a `http://localhost:<port>/` para desarrollo local.
 
 La mayoría de los usuarios no necesitarán modificar este archivo; edita `agent.py` para cambiar herramientas o el prompt del sistema. El servidor A2A completa la tarjeta del agente (`/.well-known/agent-card.json`) a partir del `name` y `description` del agente.
 </OptionFilter>
@@ -422,7 +437,7 @@ Luego, en otra terminal, inicia el chat:
 
 <NxCommands commands={['run your-project:agent-chat']} />
 
-El generador emite un `scripts/<your-agent-name>/chat.ts` para cada protocolo. Se conecta al agente local por defecto, o a tu agente desplegado cuando se establece `RUNTIME_CONFIG_APP_ID` (consulta [Chatear con tu agente desplegado](#chat-with-your-deployed-agent) a continuación).
+El generador emite un `scripts/<your-agent-name>/chat.ts` para cada protocolo. Se conecta al agente local por defecto, o a tu agente desplegado cuando se establece `RUNTIME_CONFIG_APP_ID` (consulta [Chatear con tu agente desplegado](#chatear-con-tu-agente-desplegado) a continuación).
 
 Para agentes **HTTP**, el script de chat usa un cliente TypeScript con seguridad de tipos generado a partir de la especificación OpenAPI del agente. El generador también emite:
 
@@ -432,7 +447,7 @@ Para agentes **HTTP**, el script de chat usa un cliente TypeScript con seguridad
 
 Cuando personalices la forma de entrada del agente (por ejemplo, agregar nuevos campos a `InvokeInput`), actualiza `chat.ts` para pasar los nuevos campos al invocar el agente y el resto funciona automáticamente.
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Deployed agent chat details">
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Deployed agent chat details">
 #### Chatear con tu agente desplegado
 
 Para chatear con tu agente desplegado en Bedrock AgentCore, establece la variable de entorno `RUNTIME_CONFIG_APP_ID` al id de aplicación AppConfig del despliegue (salida como `RuntimeConfigApplicationId` por el stack desplegado). El script de chat resuelve el ARN del runtime de tu agente desde la configuración del runtime y se conecta al endpoint desplegado:
@@ -464,7 +479,7 @@ aws cognito-idp admin-initiate-auth \
 </Tabs>
 </OptionFilter>
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment details">
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Bedrock AgentCore Runtime deployment details">
 ## Desplegar tu Agente en Bedrock AgentCore Runtime
 
 <Snippet name="agent/bedrock-deployment" parentHeading="Desplegar tu Agente en Bedrock AgentCore Runtime" />
@@ -476,15 +491,21 @@ Para construir tu Agente para Bedrock AgentCore Runtime, se agrega un target `bu
 - Exporta tus dependencias de Python a un archivo `requirements.txt` usando `uv export`
 - Instala dependencias para la plataforma objetivo (`aarch64-manylinux_2_28`) usando `uv pip install`
 
+<OptionFilter when={{ infra: 'agentcore' }} description="Code package target">
+También se agrega un target `<your-agent-name>-package`, que ensambla el paquete de código desplegable: el bundle de dependencias `aarch64`, tu árbol de módulos Python y un punto de entrada `main.py` raíz. La infraestructura generada sube este directorio como un `.zip` — a través de `AgentRuntimeArtifact.fromCodeAsset` bajo CDK, o archivado en el bucket de activos compartido bajo Terraform.
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'agentcore-ecr' }} description="Container image build and scan">
 También se agrega un target `docker` específico para tu Agente, que copia el `Dockerfile` y los artefactos empaquetados en un directorio de contexto docker. Esto coloca el `Dockerfile` junto con la salida construida, permitiendo que CDK construya la imagen Docker directamente usando `AgentRuntimeArtifact.fromAsset`.
 
 ### Escaneo de Imágenes
 
 <Snippet name="trivy-image-scan" parentHeading="Escaneo de Imágenes" />
+</OptionFilter>
 
 ### Observabilidad
 
-Tu agente se configura automáticamente con observabilidad usando [AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT), configurando la auto-instrumentación en tu `Dockerfile`.
+Tu agente se configura automáticamente con observabilidad usando [AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT).
 
 Puedes encontrar trazas en la Consola AWS de CloudWatch, seleccionando "GenAI Observability" en el menú. Ten en cuenta que para que las trazas se completen necesitarás habilitar [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html).
 
@@ -507,6 +528,23 @@ El ID de sesión en sí proviene de la sesión de AgentCore Runtime (propagada a
 :::note[Desarrollo Local]
 Al ejecutarse localmente (`LOCAL_DEV=true`, establecido automáticamente por el target `-dev`), los datos de sesión siempre se almacenan en disco bajo `tmp/agents/strands/<agent-name>` en la raíz del workspace, independientemente de la opción `session` configurada, por conveniencia.
 :::
+
+#### Restringir sesiones a su propietario
+
+El ID de sesión llega desde el llamador, por lo que por sí solo identifica una conversación pero no a quién pertenece la conversación. AgentCore Runtime autoriza una invocación contra el ARN del recurso del runtime del agente en lugar de contra una sesión individual, lo que deja al agente libre para decidir qué significa una sesión para tu aplicación.
+
+:::caution[La sesión también selecciona la microVM]
+Un ID de sesión selecciona la [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html) que sirve la solicitud, por lo que su sistema de archivos, `/tmp` y cachés en proceso son compartidos por cada solicitud que se resuelve a esa sesión. Dos llamadores que envían el mismo ID de sesión comparten esos recursos incluso cuando sus conversaciones almacenadas están separadas.
+:::
+
+Para restringir a cada usuario a sus propias conversaciones:
+
+<Steps>
+  1. Agrega una API para crear una sesión, usando <Link path="guides/trpc">tRPC</Link>, <Link path="guides/fastapi">FastAPI</Link> o <Link path="guides/ts-smithy-api">Smithy</Link>. Genera un ID de sesión opaco (al menos 33 caracteres) y almacénalo junto con el ID del usuario que llama — por ejemplo en una tabla creada con el generador <Link path="guides/py-dynamodb">`py#dynamodb`</Link>. Cada guía de API muestra cómo recuperar el ID del usuario que llama.
+  2. En tu agente, busca el ID de usuario almacenado para el ID de sesión que se le dio, y rechaza la solicitud cuando no coincida con el llamador. Con `auth=cognito` el JWT del llamador llega a tu código del agente, por lo que su claim `sub` los identifica.
+</Steps>
+
+Genera el ID de sesión en lugar de derivarlo de valores proporcionados por el usuario como un nombre de conversación — cualquier cosa que un llamador pueda predecir, un llamador puede enviar.
 </OptionFilter>
 
 <OptionFilter when={{ framework: 'langchain' }} description="LangChain session management (session.py)">
@@ -558,7 +596,7 @@ acurl <region> bedrock-agentcore -N -X POST \
 -H 'Content-Type: application/json'
 ```
 
-<Drawer title="Sigv4 enabled curl" trigger="Haz clic aquí para más detalles sobre cómo configurar el comando acurl anterior">
+<Drawer title="Sigv4 enabled curl" trigger="Click here for more details on configuring the above acurl command">
 <Snippet name="tools/acurl" />
 </Drawer>
 </TabItem>

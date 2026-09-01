@@ -150,6 +150,41 @@ The narrow exceptions:
 - Formatting or stylistic changes to vended templates
 - Changes that only affect the *choices offered* at generation time (a new option whose default leaves existing output unchanged)
 - Removing a file the generator no longer vends, where the leftover copy is harmless
+- Changes to a generator marked `experimental` (see [Experimental generators](#experimental-generators))
+
+#### Experimental generators
+
+A generator whose shape is still settling can be marked experimental by adding `"experimental": true` to its `generators.json` entry:
+
+```json
+"agentcore-harness": {
+  "factory": "./src/agentcore-harness/generator",
+  "schema": "./src/agentcore-harness/schema.json",
+  "description": "Generate an AgentCore Harness project",
+  "metric": "g71",
+  "guidePages": ["agentcore-harness"],
+  "experimental": true
+}
+```
+
+An experimental generator is **permitted to change without a migration** being published to carry an existing workspace across, so its output can be reshaped freely while it stabilises. Users upgrading reconcile those changes themselves.
+
+Most surfaces pick the flag up on their own: its guide page (any page carrying `generator: <id>` in its frontmatter) automatically shows a banner saying so, the MCP `list-generators` / `generator-guide` tools include the same warning for agents, and the generated `SKILL.md` / `POWER.md` tables and the README vended into new workspaces mark the generator experimental.
+
+The one surface to update by hand is the generator table in `packages/nx-plugin/README.md` — a curated subset with its own descriptions, so it isn't generated from `generators.json`. Add `(experimental)` to the generator's description there and copy the file to the root `README.md` (the pre-commit hook does this for you). A unit test fails if you forget.
+
+Remove the flag once the generator is stable — from then on it follows the normal migration rules above.
+
+#### Migrations that change infrastructure
+
+A migration that touches IaC changes the resources a workspace deploys, so the diff isn't the whole story — the **transition** from the deployed stack to the migrated one has to be exercised with a real deployment. Deploy on the published version, apply the migration, deploy again, and confirm the update succeeds against live resources.
+
+Some transitions can't be made safely, and those are the ones not to ship:
+
+- **The update would break a user's deployment.** If the change can't be applied to an already-deployed stack — a replacement the platform refuses, a resource that can't be updated in place — don't provide a migration.
+- **The change would cause data loss.** A resource replacement that discards a bucket, table or database takes the user's data with it. Don't provide a migration, whatever the deployed stack's contents happen to be in your test.
+
+In either case leave existing workspaces on the shape they already deploy: new workspaces get the new resources from today's generators, and existing ones keep working. **Justify the missing migration in the PR description** so the omission is a recorded decision rather than an oversight.
 
 #### Choosing the kind: prefer deterministic
 
@@ -376,7 +411,7 @@ All authoring happens in `docs/src/content/docs/en/`. Translations under other l
 
 #### Linking a guide to its generator
 
-Add `generator: <id>` to the page's frontmatter. This wires the page into the option-filter bar and enables the build-time validator that checks every `<OptionFilter>` predicate against the generator's JSON schema.
+Add `generator: <id>` to the page's frontmatter. This wires the page into the option-filter bar, adds the experimental banner when the generator is marked as such, and enables the build-time validator that checks every `<OptionFilter>` predicate against the generator's JSON schema.
 
 ```mdx
 ---

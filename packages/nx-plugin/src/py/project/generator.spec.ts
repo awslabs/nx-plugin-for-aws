@@ -4,15 +4,25 @@
  */
 
 import { parse } from '@iarna/toml';
-import { getProjects, readJson, type Tree } from '@nx/devkit';
-import { declareDependencies } from '../../utils/declared-dependencies';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
+import {
+  getProjects,
+  readJson,
+  readNxJson,
+  type Tree,
+  updateNxJson,
+} from '@nx/devkit';
+import { declareDependencies } from '../../utils/declared-dependencies.js';
+import { expectHasMetricTags } from '../../utils/metrics.spec.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../utils/shared-constructs';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { PY_PROJECT_GENERATOR_INFO, pyProjectGenerator } from './generator';
+} from '../../utils/shared-constructs.js';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import {
+  PY_PROJECT_GENERATOR_INFO,
+  PYTHON_TEST_FILE_EXCLUSIONS,
+  pyProjectGenerator,
+} from './generator.js';
 
 const sharedConstructsDeclaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
@@ -425,5 +435,99 @@ describe('python project generator', () => {
     const projectNames = [...getProjects(tree).keys()];
     expect(projectNames).toContain('proj.test_project');
     expect(projectNames).toContain('proj.other_project');
+  });
+
+  describe('python test file input scoping', () => {
+    const generate = () =>
+      pyProjectGenerator(tree, {
+        name: 'test-project',
+        directory: 'apps',
+        type: 'application',
+      });
+
+    it('should exclude python test files from the production named input', async () => {
+      await generate();
+
+      expect(readNxJson(tree)?.namedInputs?.production).toEqual(
+        expect.arrayContaining(PYTHON_TEST_FILE_EXCLUSIONS),
+      );
+    });
+
+    it('should preserve existing production entries, including user additions', async () => {
+      updateNxJson(tree, {
+        ...readNxJson(tree),
+        namedInputs: {
+          ...readNxJson(tree)?.namedInputs,
+          production: ['default', '!{projectRoot}/my-custom-fixtures/**/*'],
+        },
+      });
+
+      await generate();
+
+      const production = readNxJson(tree)?.namedInputs?.production;
+      expect(production).toEqual([
+        'default',
+        '!{projectRoot}/my-custom-fixtures/**/*',
+        ...PYTHON_TEST_FILE_EXCLUSIONS,
+      ]);
+    });
+
+    it('should create the production named input when the workspace has none', async () => {
+      const nxJson = readNxJson(tree);
+      updateNxJson(tree, {
+        ...nxJson,
+        namedInputs: Object.fromEntries(
+          Object.entries(nxJson?.namedInputs ?? {}).filter(
+            ([name]) => name !== 'production',
+          ),
+        ),
+      });
+
+      await generate();
+
+      expect(readNxJson(tree)?.namedInputs?.production).toEqual([
+        'default',
+        ...PYTHON_TEST_FILE_EXCLUSIONS,
+      ]);
+    });
+
+    it('should not duplicate exclusions when run more than once', async () => {
+      await generate();
+
+      await pyProjectGenerator(tree, {
+        name: 'other-project',
+        directory: 'apps',
+        type: 'application',
+      });
+
+      const production = readNxJson(tree)?.namedInputs?.production ?? [];
+      expect(production).toEqual([...new Set(production)]);
+    });
+
+    it('should scope compile to production inputs so tests do not invalidate it', async () => {
+      await generate();
+
+      const projectConfig = JSON.parse(
+        tree.read('apps/test_project/project.json', 'utf-8'),
+      );
+
+      expect(projectConfig.targets.compile.inputs).toEqual([
+        'production',
+        '^production',
+      ]);
+    });
+
+    it('should keep typecheck on default inputs since ty checks the tests directory', async () => {
+      await generate();
+
+      const projectConfig = JSON.parse(
+        tree.read('apps/test_project/project.json', 'utf-8'),
+      );
+
+      expect(projectConfig.targets.typecheck.inputs).toEqual([
+        'default',
+        '^production',
+      ]);
+    });
   });
 });

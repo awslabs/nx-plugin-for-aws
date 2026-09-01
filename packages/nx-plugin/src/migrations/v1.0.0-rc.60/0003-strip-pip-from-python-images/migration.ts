@@ -9,8 +9,8 @@ import {
   type ProjectConfiguration,
   type Tree,
 } from '@nx/devkit';
-import { formatFilesInSubtree } from '../../../utils/format';
-import type { ComponentMetadata } from '../../../utils/nx';
+import { formatFilesInSubtree } from '../../../utils/format.js';
+import type { ComponentMetadata } from '../../../utils/nx.js';
 
 /**
  * Remove pip from the vended Python agent / MCP server images.

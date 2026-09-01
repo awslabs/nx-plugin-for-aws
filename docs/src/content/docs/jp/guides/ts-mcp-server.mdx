@@ -55,13 +55,15 @@ TypeScript MCP サーバーは 2 つの方法で生成できます：
           - divide.ts Sample tool
         - resources/
           - sample-guidance.ts Sample resource
-        - Dockerfile Entry point for hosting your MCP server (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - project.json Updated with MCP server serve target
 </FileTree>
 
 ### インフラストラクチャ
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment">
+<Snippet name="agentcore-hosting" />
+
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Bedrock AgentCore Runtime deployment">
 <Snippet name="shared-constructs" />
 
 <Snippet name="mcp/shared-constructs" />
@@ -100,12 +102,18 @@ export const registerMyTool = (server: McpServer) => {
 };
 ```
 
-次に、`server.ts` に登録します：
+次に、`server.ts` の `createServer` 内に登録します：
 
-```typescript title="server.ts"
+```typescript title="server.ts" {6}
 import { registerMyTool } from './tools/my-tool.js';
 
-registerMyTool(server);
+export const createServer = async () => {
+  const server = new McpServer({ name: 'my-server', version: '1.0.0' });
+
+  registerMyTool(server);
+
+  return server;
+};
 ```
 
 ### リソースの追加
@@ -178,7 +186,7 @@ MCP サーバーをテストして使用する最も簡単な方法は、イン�
 
 このコマンドは `tsx --watch` を使用して、ファイルが変更されたときにサーバーを自動的に再起動します。
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment details">
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Bedrock AgentCore Runtime deployment details">
 ## MCP サーバーを Bedrock AgentCore Runtime にデプロイする
 
 <Snippet name="mcp/bedrock-deployment" parentHeading="MCP サーバーを Bedrock AgentCore Runtime にデプロイする" />
@@ -189,6 +197,13 @@ MCP サーバーをテストして使用する最も簡単な方法は、イン�
 
 bundle ターゲットは、Bedrock AgentCore Runtime でホストする Streamable HTTP MCP サーバーのエントリーポイントとして `http.ts` を使用します。
 
+<OptionFilter when={{ infra: 'agentcore' }} description="Code package target">
+### Package ターゲット
+
+ジェネレーターは `<your-server-name>-package` ターゲットを設定します。これは、デプロイ可能なコードパッケージを組み立てます：バンドルされた `index.js` と、AgentCore がパッケージに存在することを要求する AWS Distro for OpenTelemetry のベンダーインストール。生成されたインフラストラクチャは、このディレクトリを `.zip` としてアップロードします — CDK では `AgentRuntimeArtifact.fromCodeAsset` 経由で、Terraform では共有アセットバケットにアーカイブされます。
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'agentcore-ecr' }} description="Container image build and scan">
 ### Docker ターゲット
 
 ジェネレーターは `<your-server-name>-docker` ターゲットを設定します。これは、MCP サーバーのソースディレクトリから `Dockerfile` をバンドル出力ディレクトリにコピーします。これにより、`Dockerfile` がバンドルされたアーティファクトと同じ場所に配置され、CDK が `AgentRuntimeArtifact.fromAsset` を使用して Docker イメージを直接ビルドできるようになります。
@@ -198,6 +213,7 @@ bundle ターゲットは、Bedrock AgentCore Runtime でホストする Streama
 ### イメージスキャン
 
 <Snippet name="trivy-image-scan" parentHeading="イメージスキャン" />
+</OptionFilter>
 
 ### 可観測性
 

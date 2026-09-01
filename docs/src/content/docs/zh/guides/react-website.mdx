@@ -18,7 +18,7 @@ import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
 import OptionFilter from '@components/option-filter.astro';
 
-此生成器创建一个新的 [React](https://react.dev/) 网站，默认配置了 [shadcn/ui](https://ui.shadcn.com/)，以及用于将您的网站部署到云端的 AWS CDK 或 Terraform 基础设施，作为托管在 [S3](https://aws.amazon.com/s3/) 中的静态网站，由 [CloudFront](https://aws.amazon.com/cloudfront/) 提供服务，并受 [WAF](https://aws.amazon.com/waf/) 保护。
+此生成器创建一个新的 [React](https://react.dev/) 网站，默认配置了 [shadcn/ui](https://ui.shadcn.com/)，以及用于将网站部署到云端的 AWS CDK 或 Terraform 基础设施，作为托管在 [S3](https://aws.amazon.com/s3/) 中的静态网站，由 [CloudFront](https://aws.amazon.com/cloudfront/) 提供服务，并受 [WAF](https://aws.amazon.com/waf/) 保护。
 
 生成的应用程序使用 [Vite](https://vite.dev/) 作为构建工具和打包器。它使用 [TanStack Router](https://tanstack.com/router/v1) 进行类型安全的路由。
 
@@ -51,7 +51,7 @@ import OptionFilter from '@components/option-filter.astro';
     - components
       - AppLayout 整体布局和导航栏的组件
     - hooks
-      - useAppLayout.tsx 用于从嵌套组件调整 AppLayout 的 Hook（仅限 Cloudscape）
+      - useAppLayout.tsx 用于从嵌套组件调整 AppLayout 的钩子（仅限 Cloudscape）
     - routes
       - index.tsx TanStack Router 的示例路由（或页面）
     - styles.css 全局样式
@@ -78,7 +78,7 @@ import OptionFilter from '@components/option-filter.astro';
   - packages/common/constructs/src
     - app
       - static-websites
-        - \<name>.ts 特定于您的网站的基础设施
+        - \<name>.ts 特定于您网站的基础设施
     - core
       - static-website.ts 通用 StaticWebsite 构造
 </FileTree>
@@ -89,7 +89,7 @@ import OptionFilter from '@components/option-filter.astro';
     - app
       - static-websites
         - \<name>
-          - \<name>.tf 特定于您的网站的模块
+          - \<name>.tf 特定于您网站的模块
     - core
       - static-website
         - static-website.tf 通用静态网站模块
@@ -129,60 +129,9 @@ waf -> cloudfront
 cloudfront -> s3
 ```
 
-#### 安全标头
+## 实现您的网站
 
-CloudFront 分发应用响应标头策略，在所有响应上设置 `Strict-Transport-Security`、`X-Content-Type-Options`、`X-Frame-Options: DENY`、`Referrer-Policy` 和 `Content-Security-Policy`。
-
-强制执行默认的 `Content-Security-Policy`。它限制脚本和框架以缓解 XSS 和点击劫持，同时允许 HTTPS 和 WSS 连接，以便网站可以调用 AWS 服务端点（如 API Gateway、Cognito 和 Bedrock AgentCore），这些 URL 仅在部署时才知道。要调整策略（例如将 `connect-src` 收紧到您的特定来源），请编辑生成的 `static-website.ts`（CDK）或 `static-website.tf`（Terraform）中的 `content_security_policy` 值。
-
-`runtime-config.json` 使用 `Cache-Control: no-cache` 提供服务，以便浏览器在重新部署后始终获取最新配置，而不是使用过时的缓存副本。
-
-#### 自定义域名和 TLS
-
-默认情况下，分发使用默认的 CloudFront 域名（`*.cloudfront.net`）及其默认证书，该证书不支持强制执行最低 TLS 版本 1.2。要从您自己的域名提供网站服务，请提供 [ACM 证书](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html)（必须位于 `us-east-1` 才能与 CloudFront 一起使用）和您的域名 — 然后为查看者强制执行最低 TLS 版本 1.2：
-
-<Infrastructure>
-<Fragment slot="cdk">
-在 `packages/common/constructs/src/app/static-websites` 中生成的网站构造中传递 `certificate` 和 `domainNames` 属性：
-
-```ts {6-8}
-export class MyWebsite extends StaticWebsite {
-  constructor(scope: Construct, id: string) {
-    super(scope, id, {
-      websiteName: 'MyWebsite',
-      websiteFilePath: ...,
-      domainNames: ['www.example.com'],
-      certificate: Certificate.fromCertificateArn(scope, 'Cert',
-        'arn:aws:acm:us-east-1:123456789012:certificate/...'),
-    });
-  }
-}
-```
-</Fragment>
-<Fragment slot="terraform">
-在 `packages/common/terraform/src/app/static-websites` 中生成的网站模块中设置 `custom_domain_names` 和 `acm_certificate_arn` 变量：
-
-```hcl {5-6}
-module "static_website" {
-  source            = "../../../core/static-website"
-  website_name      = "my-website"
-  website_file_path = ...
-  custom_domain_names = ["www.example.com"]
-  acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/..."
-
-  providers = {
-    aws.us_east_1 = aws.us_east_1
-  }
-}
-```
-</Fragment>
-</Infrastructure>
-
-您还需要创建 DNS 记录（例如在 Route 53 中），将您的域名指向 CloudFront 分发。
-
-## 实现您的 React 网站
-
-[React 文档](https://react.dev/learn)是学习使用 React 构建基础知识的好地方。
+[React 文档](https://react.dev/learn)是学习使用 React 构建的基础知识的好地方。
 
 <OptionFilter when={{ ux: 'cloudscape' }} description="Cloudscape component docs pointer">
 您可以参考 [Cloudscape 文档](https://cloudscape.design/components/)了解可用组件的详细信息以及如何使用它们。
@@ -201,12 +150,12 @@ module "static_website" {
 <Steps>
   1. [运行本地开发服务器](#local-development-server)
   2. 在 `src/routes` 中创建一个新的 `<page-name>.tsx` 文件，其在文件树中的位置代表路径
-  3. 注意会自动为您生成 `Route` 和 `RouteComponent`。您可以在这里开始构建您的页面！
+  3. 注意 `Route` 和 `RouteComponent` 会自动为您生成。您可以在这里开始构建您的页面！
 </Steps>
 
 #### 在页面之间导航
 
-您可以使用 `Link` 组件或 `useNavigate` hook 在页面之间导航：
+您可以使用 `Link` 组件或 `useNavigate` 钩子在页面之间导航：
 
 ```tsx {1, 4, 8-9, 14}
 import { Link, useNavigate } from '@tanstack/react-router';
@@ -231,15 +180,330 @@ export const MyComponent = () => {
 
 有关更多详细信息，请查看 [TanStack Router](https://tanstack.com/router/latest/docs/framework/react/overview) 文档。
 
+## 部署您的网站
+
+React 网站生成器根据您选择的 `iac` 创建 CDK 或 Terraform 基础设施即代码。您可以使用它来部署您的网站。
+
+<Infrastructure>
+<Fragment slot="cdk">
+要部署您的网站，我们建议使用 <Link path="guides/typescript-infrastructure">`ts#infra` 生成器</Link>创建 CDK 应用程序。
+
+您可以使用在 `packages/common/constructs` 中为您生成的 CDK 构造来部署您的网站。
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {3, 9}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { MyWebsite } from '@my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    new MyWebsite(this, 'MyWebsite');
+  }
+}
+```
+
+这将设置：
+
+1. 用于托管静态网站文件的 S3 存储桶
+2. 用于全球内容分发的 CloudFront 分配
+3. 用于安全保护的 WAF Web ACL
+4. 用于安全 S3 访问的源访问控制
+5. 自动部署网站文件和运行时配置
+</Fragment>
+<Fragment slot="terraform">
+要部署您的网站，我们建议使用 <Link path="/guides/terraform-project">`terraform#project` 生成器</Link>创建 Terraform 项目。
+
+您可以使用在 `packages/common/terraform` 中为您生成的 Terraform 模块来部署您的网站。
+
+```hcl title="packages/infra/src/main.tf" {3}
+# Deploy website
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+}
+```
+
+这将设置：
+
+1. 用于托管静态网站文件的 S3 存储桶
+2. 用于全球内容分发的 CloudFront 分配
+3. 用于安全保护的 WAF Web ACL（部署在 us-east-1）
+4. 用于安全 S3 访问的源访问控制
+5. 自动部署网站文件和运行时配置
+
+:::note[WAF 提供者区域]
+CloudFront 和 WAF 资源需要 `aws.us_east_1` 提供者，它们必须部署在 us-east-1 区域。确保您的 Terraform 配置包含此提供者：
+
+```hcl title="packages/infra/src/providers.tf"
+provider "aws" {
+  alias  = "us_east_1"
+  region = "us-east-1"
+}
+```
+:::
+</Fragment>
+</Infrastructure>
+
+### 安全标头
+
+CloudFront 分配应用响应标头策略，在所有响应上设置 `Strict-Transport-Security`、`X-Content-Type-Options`、`X-Frame-Options: DENY`、`Referrer-Policy` 和 `Content-Security-Policy`。
+
+强制执行默认的 `Content-Security-Policy`。它限制脚本和框架以减轻 XSS 和点击劫持，同时允许 HTTPS 和 WSS 连接，以便网站可以调用 AWS 服务端点（如 API Gateway、Cognito 和 Bedrock AgentCore），这些 URL 仅在部署时才知道。要调整策略（例如将 `connect-src` 收紧到您的特定源），请编辑生成的 `static-website.ts`（CDK）或 `static-website.tf`（Terraform）中的 `content_security_policy` 值。
+
+`runtime-config.json` 使用 `Cache-Control: no-cache` 提供服务，以便浏览器在重新部署后始终获取最新配置，而不是使用过时的缓存副本。
+
+### WAF
+
+默认情况下，CloudFront 分配受 [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACL 保护。Web ACL 使用 AWS 托管的默认规则集（[`AWSManagedRulesCommonRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-crs) 和 [`AWSManagedRulesKnownBadInputsRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-known-bad-inputs)），提供针对常见 Web 漏洞（包括 OWASP Top 10）的保护。
+
+<Infrastructure>
+<Fragment slot="cdk">
+要选择退出，在创建网站时将 `enableWaf` 设置为 `false`：
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {10,15-18}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { MyWebsite, suppressRules } from '@my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    const website = new MyWebsite(this, 'MyWebsite', {
+      enableWaf: false,
+    });
+
+    // Disabling WAF fails the checkov CKV_AWS_68 check ("CloudFront
+    // Distribution should have WAF enabled"). Suppress it explicitly.
+    suppressRules(
+      website.cloudFrontDistribution,
+      ['CKV_AWS_68'],
+      'WAF is intentionally disabled for this distribution',
+    );
+  }
+}
+```
+
+:::caution[禁用 WAF 时抑制 CKV_AWS_68]
+禁用 WAF 意味着合成的 CloudFront 分配没有关联的 Web ACL，这会导致 `checkov` 安全扫描失败，错误为 `CKV_AWS_68: "CloudFront Distribution should have WAF enabled"`，除非如上所示进行抑制。
+:::
+</Fragment>
+<Fragment slot="terraform">
+要选择退出，将 `enable_waf` 设置为 `false`：
+
+```hcl title="packages/infra/src/main.tf" {7}
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+  enable_waf = false
+}
+```
+</Fragment>
+</Infrastructure>
+
+### 存储桶加密
+
+网站存储桶、CloudFront 分配日志存储桶以及接收其服务器访问日志的 CloudWatch Logs 组默认使用客户管理的 [AWS KMS](https://aws.amazon.com/kms/) 密钥进行加密。此密钥会自动为您创建，并启用密钥轮换。
+
+<Infrastructure>
+<Fragment slot="cdk">
+如果您想使用不同的加密配置，请在创建网站时传递 `encryption`、`encryptionKey` 和 `enableKeyRotation` 属性：
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {11}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { BucketEncryption } from 'aws-cdk-lib/aws-s3';
+import { MyWebsite } from '@my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    new MyWebsite(this, 'MyWebsite', {
+      encryption: BucketEncryption.S3_MANAGED,
+    });
+  }
+}
+```
+
+:::caution[使用 S3_MANAGED 时抑制 CKV_AWS_158]
+选择 `BucketEncryption.S3_MANAGED` 意味着访问日志组不再使用 KMS 加密，这会导致 `checkov` 安全扫描失败，错误为 `CKV_AWS_158`。抑制它：
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { LogGroup } from 'aws-cdk-lib/aws-logs';
+import { suppressRules } from '@my-scope/common-constructs';
+
+suppressRules(
+  website,
+  ['CKV_AWS_158'],
+  'Access log group is not KMS encrypted when encryption is S3_MANAGED',
+  (c) => c instanceof LogGroup,
+);
+```
+:::
+
+要使用您自己的 KMS 密钥而不是自动创建的密钥，请传递 `encryptionKey`：
+
+```ts {2}
+new MyWebsite(this, 'MyWebsite', {
+  encryptionKey: myKey,
+});
+```
+
+:::caution[导入的密钥需要自己的权限]
+通过 `Key.fromKeyArn` 导入的密钥必须在其自己的密钥策略中已经授予 CloudWatch Logs、S3 和 CloudFront 服务主体所需的权限。`addToResourcePolicy` 在导入的密钥上是无操作的，因此此构造无法为您授予它们，并且 `cdk synth` 不会警告您 - 失败仅在部署时显示。在同一应用程序中创建的密钥（`new Key(this, 'WebsiteKey')`）没有此问题，因为 CDK 可以直接更新其策略。
+:::
+
+`enableKeyRotation`（默认为 `true`）仅适用于自动创建的密钥，即当 `encryption` 为 `BucketEncryption.KMS`（默认值）且未提供 `encryptionKey` 时：
+
+```ts {2}
+new MyWebsite(this, 'MyWebsite', {
+  enableKeyRotation: false,
+});
+```
+
+:::caution[禁用密钥轮换时抑制 CKV_AWS_7]
+在自动创建的密钥上禁用密钥轮换会导致 `checkov` 安全扫描失败，错误为 `CKV_AWS_7`。抑制它：
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { Key } from 'aws-cdk-lib/aws-kms';
+import { suppressRules } from '@my-scope/common-constructs';
+
+suppressRules(
+  website,
+  ['CKV_AWS_7'],
+  'Key rotation is managed externally',
+  (c) => c instanceof Key,
+);
+```
+:::
+</Fragment>
+<Fragment slot="terraform">
+如果您想使用不同的加密配置，请设置 `encryption`、`kms_key_arn`、`create_kms_key` 和 `enable_key_rotation` 变量：
+
+```hcl title="packages/infra/src/main.tf" {7}
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+  encryption = "S3_MANAGED"
+}
+```
+
+:::caution[Checkov: S3_MANAGED]
+选择 `S3_MANAGED` 会导致 `checkov` 安全扫描在网站和分配日志存储桶上失败，错误为 `CKV_AWS_145`。提供的 `test` 目标不接受 `--config-file`，但 `checkov` 会自动发现其工作目录中的 `.checkov.yaml`，因此在 `packages/infra/src` 中放置一个：
+
+```yaml title="packages/infra/src/.checkov.yaml"
+skip-check:
+  - CKV_AWS_145
+```
+:::
+
+要使用您自己的 KMS 密钥而不是自动创建的密钥，请传递 `kms_key_arn` 并将 `create_kms_key` 设置为 `false`：
+
+```hcl title="packages/infra/src/main.tf" {7-8}
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+  kms_key_arn    = aws_kms_key.website.arn
+  create_kms_key = false
+}
+```
+
+客户提供的密钥必须在其自己的密钥策略中已经授予 CloudWatch Logs、S3 和 CloudFront 服务主体所需的权限。
+
+`enable_key_rotation`（默认为 `true`）仅适用于自动创建的密钥，即当 `encryption` 为 `"KMS"`（默认值）且 `create_kms_key` 为 `true` 时：
+
+```hcl title="packages/infra/src/main.tf" {7}
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+  enable_key_rotation = false
+}
+```
+
+:::caution[Checkov: 禁用密钥轮换]
+在自动创建的密钥上禁用密钥轮换会导致 `checkov` 安全扫描失败，错误为 `CKV_AWS_7`。将其添加到同一个 `.checkov.yaml`：
+
+```yaml title="packages/infra/src/.checkov.yaml"
+skip-check:
+  - CKV_AWS_7
+```
+:::
+</Fragment>
+</Infrastructure>
+
+### 自定义域名和 TLS
+
+默认情况下，分配使用默认的 CloudFront 域名（`*.cloudfront.net`）及其默认证书，不支持强制执行最低 TLS 版本 1.2。要从您自己的域名提供网站服务，请提供 [ACM 证书](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html)（必须位于 `us-east-1` 才能与 CloudFront 一起使用）和您的域名。然后为查看者强制执行最低 TLS 版本 1.2：
+
+<Infrastructure>
+<Fragment slot="cdk">
+在创建网站时传递 `certificate` 和 `domainNames` 属性：
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {11-13}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { Certificate } from 'aws-cdk-lib/aws-certificatemanager';
+import { MyWebsite } from '@my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    new MyWebsite(this, 'MyWebsite', {
+      domainNames: ['www.example.com'],
+      certificate: Certificate.fromCertificateArn(this, 'Cert',
+        'arn:aws:acm:us-east-1:123456789012:certificate/...'),
+    });
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+设置 `custom_domain_names` 和 `acm_certificate_arn` 变量：
+
+```hcl title="packages/infra/src/main.tf" {7-8}
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+  custom_domain_names = ["www.example.com"]
+  acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/..."
+}
+```
+</Fragment>
+</Infrastructure>
+
+您还需要创建 DNS 记录（例如在 Route 53 中）将您的域名指向 CloudFront 分配。
+
 ## 运行时配置
 
-来自您的基础设施的配置通过<Link href="guides/runtime-config">运行时配置</Link>提供给您的网站。这允许您的网站访问诸如 API URL 之类的详细信息，这些信息在应用程序部署之前是未知的。
+来自基础设施的配置通过<Link path="guides/runtime-config">运行时配置</Link>提供给您的网站。这允许您的网站访问诸如 API URL 之类的详细信息，这些信息在应用程序部署之前是未知的。
 
 ### 基础设施
 
 <Infrastructure>
 <Fragment slot="cdk">
-`RuntimeConfig` CDK 构造可用于在您的 CDK 基础设施中添加和检索配置。由 `@aws/nx-plugin` 生成器生成的 CDK 构造（如 <Link path="guides/trpc">`ts#api`</Link> 和 <Link path="guides/fastapi">`py#api`</Link>）将自动向 `RuntimeConfig` 添加适当的值。
+`RuntimeConfig` CDK 构造可用于在 CDK 基础设施中添加和检索配置。由 `@aws/nx-plugin` 生成器生成的 CDK 构造（如 <Link path="guides/trpc">`ts#api`</Link> 和 <Link path="guides/fastapi">`py#api`</Link>）将自动向 `RuntimeConfig` 添加适当的值。
 
 您的网站 CDK 构造将把运行时配置的 `connection` 命名空间作为 `runtime-config.json` 文件部署到 S3 存储桶的根目录。
 
@@ -252,7 +516,7 @@ export class ApplicationStack extends Stack {
   constructor(scope: Construct, id: string) {
     super(scope, id);
 
-    // Website can be declared at any point — runtime config is resolved lazily
+    // Website can be declared at any point, since runtime config is resolved lazily
     new MyWebsite(this, 'MyWebsite');
 
     // Automatically adds values to the RuntimeConfig
@@ -264,11 +528,11 @@ export class ApplicationStack extends Stack {
 ```
 
 :::note[CDK 网站构造]
-使用 CDK 时，网站构造可以在堆栈中的任何位置声明。运行时配置在合成时延迟解析，因此无论声明顺序如何，都将包含所有值。
+使用 CDK，网站构造可以在堆栈中的任何位置声明。运行时配置在合成时延迟解析，因此无论声明顺序如何，所有值都将包含在内。
 :::
 </Fragment>
 <Fragment slot="terraform">
-使用 Terraform 时，运行时配置通过 runtime-config 模块进行管理。由 `@aws/nx-plugin` 生成器生成的 Terraform 模块（如 <Link path="guides/trpc">`ts#api`</Link> 和 <Link path="guides/fastapi">`py#api`</Link>）将自动向运行时配置添加适当的值。
+使用 Terraform，运行时配置通过 runtime-config 模块管理。由 `@aws/nx-plugin` 生成器生成的 Terraform 模块（如 <Link path="guides/trpc">`ts#api`</Link> 和 <Link path="guides/fastapi">`py#api`</Link>）将自动向运行时配置添加适当的值。
 
 您的网站 Terraform 模块将把运行时配置的 `connection` 命名空间作为 `runtime-config.json` 文件部署到 S3 存储桶的根目录。
 
@@ -298,14 +562,14 @@ module "my_website" {
 ```
 
 :::caution[模块顺序]
-您必须确保在添加到运行时配置的任何模块_之后_声明您的网站模块，并配置适当的 `depends_on` 以确保顺序，否则它们将在您的 `runtime-config.json` 文件中丢失。
+您必须确保在添加到运行时配置的任何模块_之后_声明您的网站模块，并配置适当的 `depends_on` 以确保顺序，否则它们将在您的 `runtime-config.json` 文件中缺失。
 :::
 </Fragment>
 </Infrastructure>
 
 ### 网站代码
 
-在您的网站中，您可以使用 `useRuntimeConfig` hook 从运行时配置中检索值：
+在您的网站中，您可以使用 `useRuntimeConfig` 钩子从运行时配置中检索值：
 
 ```tsx {1,4}
 import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
@@ -338,18 +602,18 @@ const MyComponent = () => {
 此外值得注意的是，`load-runtime-config` 目标假设您的应用程序的单个阶段已部署到您拥有 AWS 凭证的环境中。如果您将多个阶段部署到同一账户和区域，则需要调整命令。
 </Fragment>
 <Fragment slot="terraform">
-对于 Terraform 项目，`load-runtime-config` 目标会复制在最近一次本地 `terraform apply` 后创建的 `runtime-config.json` 文件。
+对于 Terraform 项目，`load-runtime-config` 目标会从 `dist/packages/common/terraform/runtime-config/connection.json` 复制您最近一次本地 `terraform apply` 聚合的运行时配置。
 </Fragment>
 </Infrastructure>
 :::
 
 ## 本地开发服务器
 
-本地开发的规范命令是 `dev`，它使用一个命令启动您的网站（以及您已连接到它的任何 API 的本地服务器）：
+本地开发的规范命令是 `dev`，它使用一个命令启动您的网站（以及您连接到它的任何 API 的本地服务器）：
 
 <NxCommands commands={['dev <my-website>']} />
 
-当您需要控制应用程序在本地运行的部分与指向已部署的 AWS 基础设施的部分时，`serve` 目标也可用。有关跨连接项目的本地开发的更广泛概述，包括 `dev` 对具有多个组件的项目的行为方式，请参阅<Link path="guides/local-development">本地开发</Link>指南。
+当您需要控制应用程序的多少部分在本地运行与指向已部署的 AWS 基础设施时，`serve` 目标也可用。有关跨连接项目的本地开发的更广泛概述，包括 `dev` 如何为具有多个组件的项目运行，请参阅<Link path="guides/local-development">本地开发</Link>指南。
 
 ### Serve 目标
 
@@ -359,11 +623,11 @@ const MyComponent = () => {
 
 <NxCommands commands={['serve <my-website>']} />
 
-此目标对于在指向"真实"已部署的 API 和其他基础设施时处理网站更改非常有用。
+此目标对于在指向"真实"已部署的 API 和其他基础设施时处理网站更改很有用。
 
 ### Dev 目标
 
-`dev` 目标为您的网站启动本地开发服务器（将 [Vite `MODE`](https://vite.dev/guide/env-and-mode) 设置为 `local-dev`），并为您通过<Link path="/guides/connection">连接生成器</Link>连接到网站的任何 API 启动本地服务器。
+`dev` 目标为您的网站启动本地开发服务器（[Vite `MODE`](https://vite.dev/guide/env-and-mode) 设置为 `local-dev`），并为您通过<Link path="/guides/connection">连接生成器</Link>连接到网站的任何 API 启动本地服务器。
 
 当您的本地网站服务器通过此目标运行时，`runtime-config.json` 会自动覆盖以指向您本地运行的 API URL。
 
@@ -371,18 +635,18 @@ const MyComponent = () => {
 
 <NxCommands commands={['dev <my-website>']} />
 
-当您跨网站和 API 工作并希望快速迭代而无需部署基础设施时，此目标非常有用。
+当您跨网站和 API 工作并希望快速迭代而无需部署基础设施时，此目标很有用。
 
 :::note[工作区 `dev` 脚本]
-您的工作区的根 `package.json` 包含一个 `dev` 脚本，该脚本为每个拥有该目标的项目运行 `dev` 目标：
+您的工作区的根 `package.json` 包含一个 `dev` 脚本，该脚本为每个具有 `dev` 目标的项目运行该目标：
 
 <PackageManagerShortCommand commands={["dev"]} />
 
-这会在一个命令中启动您的网站（以及任何其他具有 `dev` 目标的项目）的本地开发服务器。要仅运行此网站，请使用其自己的 `dev` 目标（例如 `nx dev <my-website>`）。
+这将在一个命令中启动您的网站（以及任何其他具有 `dev` 目标的项目）的本地开发服务器。要仅运行此网站，请使用其自己的 `dev` 目标（例如 `nx dev <my-website>`）。
 :::
 
 :::warning[模拟身份验证]
-在此模式下运行且不存在 `runtime-config.json` 时，如果您已配置 Cognito 身份验证（通过 <Link path="/guides/react-website-auth">`ts#website#auth` 生成器</Link>），将跳过登录，对本地服务器的请求将不包含身份验证标头。
+在此模式下运行且不存在 `runtime-config.json` 时，如果您已配置 Cognito 身份验证（通过 <Link path="/guides/react-website-auth">`ts#website#auth` 生成器</Link>），将跳过登录，并且对本地服务器的请求将不包含身份验证标头。
 
 要为 `dev` 启用登录和身份验证，请部署您的基础设施并加载运行时配置。
 :::
@@ -409,80 +673,11 @@ const MyComponent = () => {
 
 测试您的网站与在标准 TypeScript 项目中编写测试非常相似，因此请参阅 <Link path="guides/typescript-project#testing">TypeScript 项目指南</Link>了解更多详细信息。
 
-对于 React 特定的测试，React Testing Library 已经安装并可供您用于编写测试。有关其用法的更多详细信息，请参阅 [React Testing Library 文档](https://testing-library.com/docs/react-testing-library/example-intro)。
+对于 React 特定的测试，React Testing Library 已经安装并可供您使用来编写测试。有关其用法的更多详细信息，请参阅 [React Testing Library 文档](https://testing-library.com/docs/react-testing-library/example-intro)。
 
 您可以使用 `test` 目标运行测试：
 
 <NxCommands commands={['test <my-website>']} />
-
-## 部署您的网站
-
-React 网站生成器根据您选择的 `iac` 创建 CDK 或 Terraform 基础设施即代码。您可以使用它来部署您的网站。
-
-<Infrastructure>
-<Fragment slot="cdk">
-要部署您的网站，我们建议使用 <Link path="guides/typescript-infrastructure">`ts#infra` 生成器</Link>创建 CDK 应用程序。
-
-您可以使用在 `packages/common/constructs` 中为您生成的 CDK 构造来部署您的网站。
-
-```ts title="packages/infra/src/stacks/application-stack.ts" {3, 9}
-import { Stack } from 'aws-cdk-lib';
-import { Construct } from 'constructs';
-import { MyWebsite } from '@my-scope/common-constructs';
-
-export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
-
-    new MyWebsite(this, 'MyWebsite');
-  }
-}
-```
-
-这会设置：
-
-1. 用于托管静态网站文件的 S3 存储桶
-2. 用于全球内容交付的 CloudFront 分发
-3. 用于安全保护的 WAF Web ACL
-4. 用于安全 S3 访问的源访问控制
-5. 自动部署网站文件和运行时配置
-</Fragment>
-<Fragment slot="terraform">
-要部署您的网站，我们建议使用 <Link path="/guides/terraform-project">`terraform#project` 生成器</Link>创建 Terraform 项目。
-
-您可以使用在 `packages/common/terraform` 中为您生成的 Terraform 模块来部署您的网站。
-
-```hcl title="packages/infra/src/main.tf" {3}
-# Deploy website
-module "my_website" {
-  source = "../../common/terraform/src/app/static-websites/my-website"
-
-  providers = {
-    aws.us_east_1 = aws.us_east_1
-  }
-}
-```
-
-这会设置：
-
-1. 用于托管静态网站文件的 S3 存储桶
-2. 用于全球内容交付的 CloudFront 分发
-3. 用于安全保护的 WAF Web ACL（部署在 us-east-1）
-4. 用于安全 S3 访问的源访问控制
-5. 自动部署网站文件和运行时配置
-
-:::note[WAF 提供者区域]
-CloudFront 和 WAF 资源需要 `aws.us_east_1` 提供者，这些资源必须部署在 us-east-1 区域。确保您的 Terraform 配置包含此提供者：
-
-```hcl title="packages/infra/src/providers.tf"
-provider "aws" {
-  alias  = "us_east_1"
-  region = "us-east-1"
-}
-```
-:::
-</Fragment>
-</Infrastructure>
 
 ## 连接
 
@@ -490,54 +685,55 @@ provider "aws" {
 
 <CardGrid>
   <ConnectionCard
-    title="React to tRPC"
+    title="React 到 tRPC"
     description="从 React 网站调用 tRPC API"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-trpc`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'zh'}/guides/connection/react-trpc`}
     source="react"
     target="trpc"
   />
   <ConnectionCard
-    title="React to FastAPI"
+    title="React 到 FastAPI"
     description="从 React 网站调用 Python FastAPI"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-fastapi`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'zh'}/guides/connection/react-fastapi`}
     source="react"
     target="fastapi"
   />
   <ConnectionCard
-    title="React to Smithy API"
+    title="React 到 Smithy API"
     description="从 React 网站调用 Smithy API"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-smithy`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'zh'}/guides/connection/react-smithy`}
     source="react"
     target="smithy"
   />
   <ConnectionCard
-    title="React to Python Agent"
+    title="React 到 Python Agent"
     description="从 React 网站调用 Python Agent"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-py-agent`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'zh'}/guides/connection/react-py-agent`}
     source="react"
     target="strands"
     targetBadge="python"
   />
   <ConnectionCard
-    title="React to TypeScript Agent"
+    title="React 到 TypeScript Agent"
     description="从 React 网站调用 TypeScript Agent"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-ts-agent`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'zh'}/guides/connection/react-ts-agent`}
     source="react"
     target="strands"
     targetBadge="typescript"
   />
   <ConnectionCard
-    title="React to AG-UI Agent"
+    title="React 到 AG-UI Agent"
     description="通过 CopilotKit 从 React 网站调用公开 AG-UI 协议的 Agent"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-agui`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'zh'}/guides/connection/react-agui`}
     source="react"
     target="copilotkit"
   />
   <ConnectionCard
-    title="React Website to AgentCore Gateway"
+    title="React 网站到 AgentCore Gateway"
     description="通过 AgentCore Gateway 将 React 网站连接到代理"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-agentcore-gateway`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'zh'}/guides/connection/react-agentcore-gateway`}
     source="react"
     target="agentcore"
   />
 </CardGrid>
+

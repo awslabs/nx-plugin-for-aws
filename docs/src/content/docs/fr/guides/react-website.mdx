@@ -70,7 +70,7 @@ Si vous avez choisi de ne pas utiliser [TanStack Router](https://tanstack.com/ro
 
 <Snippet name="shared-constructs" />
 
-Le générateur crée l'infrastructure en tant que code pour déployer votre site Web en fonction de votre `iac` sélectionné :
+Le générateur crée l'infrastructure as code pour déployer votre site Web en fonction de votre `iac` sélectionné :
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -129,58 +129,7 @@ waf -> cloudfront
 cloudfront -> s3
 ```
 
-#### En-têtes de sécurité
-
-La distribution CloudFront applique une politique d'en-têtes de réponse qui définit `Strict-Transport-Security`, `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy` et une `Content-Security-Policy` sur toutes les réponses.
-
-Une `Content-Security-Policy` par défaut est appliquée. Elle restreint les scripts et le framing pour atténuer les attaques XSS et de clickjacking, tout en permettant les connexions HTTPS et WSS afin que le site Web puisse appeler les points de terminaison des services AWS (tels que API Gateway, Cognito et Bedrock AgentCore) dont les URL ne sont connues qu'au moment du déploiement. Pour ajuster la politique (par exemple pour restreindre `connect-src` à vos origines spécifiques), modifiez la valeur `content_security_policy` dans votre `static-website.ts` (CDK) ou `static-website.tf` (Terraform) généré.
-
-`runtime-config.json` est servi avec `Cache-Control: no-cache` afin que les navigateurs récupèrent toujours la dernière configuration après un redéploiement, plutôt que d'utiliser une copie en cache obsolète.
-
-#### Domaine personnalisé et TLS
-
-Par défaut, la distribution utilise le nom de domaine CloudFront par défaut (`*.cloudfront.net`) et son certificat par défaut, qui ne prend pas en charge l'application d'une version TLS minimale de 1.2. Pour servir votre site Web depuis votre propre domaine, fournissez un [certificat ACM](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html) (qui doit résider dans `us-east-1` pour une utilisation avec CloudFront) et vos noms de domaine — une version TLS minimale de 1.2 est alors appliquée pour les visiteurs :
-
-<Infrastructure>
-<Fragment slot="cdk">
-Passez les props `certificate` et `domainNames` dans votre construct de site Web généré dans `packages/common/constructs/src/app/static-websites` :
-
-```ts {6-8}
-export class MyWebsite extends StaticWebsite {
-  constructor(scope: Construct, id: string) {
-    super(scope, id, {
-      websiteName: 'MyWebsite',
-      websiteFilePath: ...,
-      domainNames: ['www.example.com'],
-      certificate: Certificate.fromCertificateArn(scope, 'Cert',
-        'arn:aws:acm:us-east-1:123456789012:certificate/...'),
-    });
-  }
-}
-```
-</Fragment>
-<Fragment slot="terraform">
-Définissez les variables `custom_domain_names` et `acm_certificate_arn` dans votre module de site Web généré dans `packages/common/terraform/src/app/static-websites` :
-
-```hcl {5-6}
-module "static_website" {
-  source            = "../../../core/static-website"
-  website_name      = "my-website"
-  website_file_path = ...
-  custom_domain_names = ["www.example.com"]
-  acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/..."
-
-  providers = {
-    aws.us_east_1 = aws.us_east_1
-  }
-}
-```
-</Fragment>
-</Infrastructure>
-
-Vous devrez également créer des enregistrements DNS (par exemple dans Route 53) pointant votre domaine vers la distribution CloudFront.
-
-## Implémenter votre site Web React
+## Implémenter votre site Web
 
 La [documentation React](https://react.dev/learn) est un bon point de départ pour apprendre les bases de la construction avec React.
 
@@ -199,8 +148,8 @@ Vous pouvez vous référer à la [documentation shadcn/ui](https://ui.shadcn.com
 Votre site Web est livré avec [TanStack Router](https://tanstack.com/router/v1) configuré par défaut. Cela facilite l'ajout de nouvelles routes :
 
 <Steps>
-  1. [Exécutez le serveur de développement local](#serveur-de-développement-local)
-  2. Créez un nouveau fichier `<page-name>.tsx` dans `src/routes`, avec sa position dans l'arborescence de fichiers représentant le chemin
+  1. [Exécuter le serveur de développement local](#serveur-de-développement-local)
+  2. Créer un nouveau fichier `<page-name>.tsx` dans `src/routes`, avec sa position dans l'arborescence de fichiers représentant le chemin
   3. Remarquez qu'une `Route` et un `RouteComponent` sont automatiquement générés pour vous. Vous pouvez commencer à construire votre page ici !
 </Steps>
 
@@ -231,9 +180,324 @@ export const MyComponent = () => {
 
 Pour plus de détails, consultez la documentation [TanStack Router](https://tanstack.com/router/latest/docs/framework/react/overview).
 
+## Déployer votre site Web
+
+Le générateur de site Web React crée l'infrastructure as code CDK ou Terraform en fonction de votre `iac` sélectionné. Vous pouvez l'utiliser pour déployer votre site Web.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Pour déployer votre site Web, nous recommandons d'utiliser le <Link path="guides/typescript-infrastructure">générateur `ts#infra`</Link> pour créer une application CDK.
+
+Vous pouvez utiliser le construct CDK généré pour vous dans `packages/common/constructs` pour déployer votre site Web.
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {3, 9}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { MyWebsite } from '@my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    new MyWebsite(this, 'MyWebsite');
+  }
+}
+```
+
+Cela configure :
+
+1. Un bucket S3 pour héberger vos fichiers de site Web statique
+2. Une distribution CloudFront pour la diffusion de contenu globale
+3. Une Web ACL WAF pour la protection de sécurité
+4. Un contrôle d'accès d'origine pour un accès S3 sécurisé
+5. Le déploiement automatique des fichiers du site Web et de la configuration d'exécution
+</Fragment>
+<Fragment slot="terraform">
+Pour déployer votre site Web, nous recommandons d'utiliser le <Link path="/guides/terraform-project">générateur `terraform#project`</Link> pour créer un projet Terraform.
+
+Vous pouvez utiliser le module Terraform généré pour vous dans `packages/common/terraform` pour déployer votre site Web.
+
+```hcl title="packages/infra/src/main.tf" {3}
+# Deploy website
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+}
+```
+
+Cela configure :
+
+1. Un bucket S3 pour héberger vos fichiers de site Web statique
+2. Une distribution CloudFront pour la diffusion de contenu globale
+3. Une Web ACL WAF pour la protection de sécurité (déployée dans us-east-1)
+4. Un contrôle d'accès d'origine pour un accès S3 sécurisé
+5. Le déploiement automatique des fichiers du site Web et de la configuration d'exécution
+
+:::note[Région du fournisseur WAF]
+Le fournisseur `aws.us_east_1` est requis pour les ressources CloudFront et WAF, qui doivent être déployées dans la région us-east-1. Assurez-vous que votre configuration Terraform inclut ce fournisseur :
+
+```hcl title="packages/infra/src/providers.tf"
+provider "aws" {
+  alias  = "us_east_1"
+  region = "us-east-1"
+}
+```
+:::
+</Fragment>
+</Infrastructure>
+
+### En-têtes de sécurité
+
+La distribution CloudFront applique une politique d'en-têtes de réponse qui définit `Strict-Transport-Security`, `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy` et une `Content-Security-Policy` sur toutes les réponses.
+
+Une `Content-Security-Policy` par défaut est appliquée. Elle restreint les scripts et le framing pour atténuer XSS et le clickjacking, tout en permettant les connexions HTTPS et WSS afin que le site Web puisse appeler les points de terminaison de service AWS (tels que API Gateway, Cognito et Bedrock AgentCore) dont les URL ne sont connues qu'au moment du déploiement. Pour ajuster la politique (par exemple pour resserrer `connect-src` à vos origines spécifiques), modifiez la valeur `content_security_policy` dans votre `static-website.ts` (CDK) ou `static-website.tf` (Terraform) généré.
+
+`runtime-config.json` est servi avec `Cache-Control: no-cache` afin que les navigateurs récupèrent toujours la dernière configuration après un redéploiement, plutôt que d'utiliser une copie en cache obsolète.
+
+### WAF
+
+La distribution CloudFront est protégée par une Web ACL [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) par défaut. La Web ACL utilise l'ensemble de règles par défaut géré par AWS ([`AWSManagedRulesCommonRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-crs) et [`AWSManagedRulesKnownBadInputsRuleSet`](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-baseline.html#aws-managed-rule-groups-baseline-known-bad-inputs)), offrant une protection contre les exploits Web courants, y compris le Top 10 OWASP.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Pour désactiver, définissez `enableWaf` sur `false` lorsque vous créez votre site Web :
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {10,15-18}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { MyWebsite, suppressRules } from '@my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    const website = new MyWebsite(this, 'MyWebsite', {
+      enableWaf: false,
+    });
+
+    // Disabling WAF fails the checkov CKV_AWS_68 check ("CloudFront
+    // Distribution should have WAF enabled"). Suppress it explicitly.
+    suppressRules(
+      website.cloudFrontDistribution,
+      ['CKV_AWS_68'],
+      'WAF is intentionally disabled for this distribution',
+    );
+  }
+}
+```
+
+:::caution[Supprimer CKV_AWS_68 lors de la désactivation de WAF]
+La désactivation de WAF signifie que la distribution CloudFront synthétisée n'a pas de Web ACL associée, ce qui échoue l'analyse de sécurité `checkov` avec `CKV_AWS_68: "CloudFront Distribution should have WAF enabled"` sauf si elle est supprimée comme indiqué ci-dessus.
+:::
+</Fragment>
+<Fragment slot="terraform">
+Pour désactiver, définissez `enable_waf` sur `false` :
+
+```hcl title="packages/infra/src/main.tf" {7}
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+  enable_waf = false
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Chiffrement du bucket
+
+Le bucket du site Web, le bucket de logs de la distribution CloudFront et le groupe CloudWatch Logs recevant leurs logs d'accès au serveur sont chiffrés avec une clé [AWS KMS](https://aws.amazon.com/kms/) gérée par le client par défaut. Cette clé est créée automatiquement pour vous, avec la rotation de clé activée.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Si vous souhaitez utiliser une configuration de chiffrement différente, passez les props `encryption`, `encryptionKey` et `enableKeyRotation` lorsque vous créez votre site Web :
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {11}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { BucketEncryption } from 'aws-cdk-lib/aws-s3';
+import { MyWebsite } from '@my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    new MyWebsite(this, 'MyWebsite', {
+      encryption: BucketEncryption.S3_MANAGED,
+    });
+  }
+}
+```
+
+:::caution[Supprimer CKV_AWS_158 lors de l'utilisation de S3_MANAGED]
+Choisir `BucketEncryption.S3_MANAGED` signifie que le groupe de logs d'accès n'est plus chiffré par KMS, ce qui échoue l'analyse de sécurité `checkov` avec `CKV_AWS_158`. Supprimez-le :
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { LogGroup } from 'aws-cdk-lib/aws-logs';
+import { suppressRules } from '@my-scope/common-constructs';
+
+suppressRules(
+  website,
+  ['CKV_AWS_158'],
+  'Access log group is not KMS encrypted when encryption is S3_MANAGED',
+  (c) => c instanceof LogGroup,
+);
+```
+:::
+
+Pour utiliser votre propre clé KMS au lieu d'une créée automatiquement, passez `encryptionKey` :
+
+```ts {2}
+new MyWebsite(this, 'MyWebsite', {
+  encryptionKey: myKey,
+});
+```
+
+:::caution[Les clés importées ont besoin de leurs propres permissions]
+Une clé importée via `Key.fromKeyArn` doit déjà accorder aux principaux de service CloudWatch Logs, S3 et CloudFront les permissions dont ils ont besoin dans sa propre politique de clé. `addToResourcePolicy` est un no-op sur une clé importée, donc ce construct ne peut pas les accorder pour vous, et `cdk synth` ne vous avertira pas - l'échec n'apparaît qu'au moment du déploiement. Une clé créée dans la même application (`new Key(this, 'WebsiteKey')`) n'a pas ce problème, car CDK peut mettre à jour sa politique directement.
+:::
+
+`enableKeyRotation` (par défaut `true`) ne s'applique qu'à la clé créée automatiquement, c'est-à-dire lorsque `encryption` est `BucketEncryption.KMS` (par défaut) et qu'aucune `encryptionKey` n'est fournie :
+
+```ts {2}
+new MyWebsite(this, 'MyWebsite', {
+  enableKeyRotation: false,
+});
+```
+
+:::caution[Supprimer CKV_AWS_7 lors de la désactivation de la rotation de clé]
+La désactivation de la rotation de clé sur la clé créée automatiquement échoue l'analyse de sécurité `checkov` avec `CKV_AWS_7`. Supprimez-le :
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { Key } from 'aws-cdk-lib/aws-kms';
+import { suppressRules } from '@my-scope/common-constructs';
+
+suppressRules(
+  website,
+  ['CKV_AWS_7'],
+  'Key rotation is managed externally',
+  (c) => c instanceof Key,
+);
+```
+:::
+</Fragment>
+<Fragment slot="terraform">
+Si vous souhaitez utiliser une configuration de chiffrement différente, définissez les variables `encryption`, `kms_key_arn`, `create_kms_key` et `enable_key_rotation` :
+
+```hcl title="packages/infra/src/main.tf" {7}
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+  encryption = "S3_MANAGED"
+}
+```
+
+:::caution[Checkov: S3_MANAGED]
+Choisir `S3_MANAGED` échoue l'analyse de sécurité `checkov` avec `CKV_AWS_145` sur les buckets du site Web et des logs de distribution. La cible `test` fournie n'accepte pas de `--config-file`, mais `checkov` découvre automatiquement un `.checkov.yaml` dans son répertoire de travail, donc déposez-en un dans `packages/infra/src` :
+
+```yaml title="packages/infra/src/.checkov.yaml"
+skip-check:
+  - CKV_AWS_145
+```
+:::
+
+Pour utiliser votre propre clé KMS au lieu d'une créée automatiquement, passez `kms_key_arn` et définissez `create_kms_key` sur `false` :
+
+```hcl title="packages/infra/src/main.tf" {7-8}
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+  kms_key_arn    = aws_kms_key.website.arn
+  create_kms_key = false
+}
+```
+
+Une clé fournie par le client doit déjà accorder aux principaux de service CloudWatch Logs, S3 et CloudFront les permissions dont ils ont besoin dans sa propre politique de clé.
+
+`enable_key_rotation` (par défaut `true`) ne s'applique qu'à la clé créée automatiquement, c'est-à-dire lorsque `encryption` est `"KMS"` (par défaut) et que `create_kms_key` est `true` :
+
+```hcl title="packages/infra/src/main.tf" {7}
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+  enable_key_rotation = false
+}
+```
+
+:::caution[Checkov: rotation de clé désactivée]
+La désactivation de la rotation de clé sur la clé créée automatiquement échoue l'analyse de sécurité `checkov` avec `CKV_AWS_7`. Ajoutez-le au même `.checkov.yaml` :
+
+```yaml title="packages/infra/src/.checkov.yaml"
+skip-check:
+  - CKV_AWS_7
+```
+:::
+</Fragment>
+</Infrastructure>
+
+### Domaine personnalisé et TLS
+
+Par défaut, la distribution utilise le nom de domaine CloudFront par défaut (`*.cloudfront.net`) et son certificat par défaut, qui ne prend pas en charge l'application d'une version TLS minimale de 1.2. Pour servir votre site Web depuis votre propre domaine, fournissez un [certificat ACM](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html) (qui doit résider dans `us-east-1` pour une utilisation avec CloudFront) et vos noms de domaine. Une version TLS minimale de 1.2 est alors appliquée pour les visiteurs :
+
+<Infrastructure>
+<Fragment slot="cdk">
+Passez les props `certificate` et `domainNames` lorsque vous créez votre site Web :
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {11-13}
+import { Stack } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { Certificate } from 'aws-cdk-lib/aws-certificatemanager';
+import { MyWebsite } from '@my-scope/common-constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    new MyWebsite(this, 'MyWebsite', {
+      domainNames: ['www.example.com'],
+      certificate: Certificate.fromCertificateArn(this, 'Cert',
+        'arn:aws:acm:us-east-1:123456789012:certificate/...'),
+    });
+  }
+}
+```
+</Fragment>
+<Fragment slot="terraform">
+Définissez les variables `custom_domain_names` et `acm_certificate_arn` :
+
+```hcl title="packages/infra/src/main.tf" {7-8}
+module "my_website" {
+  source = "../../common/terraform/src/app/static-websites/my-website"
+
+  providers = {
+    aws.us_east_1 = aws.us_east_1
+  }
+  custom_domain_names = ["www.example.com"]
+  acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/..."
+}
+```
+</Fragment>
+</Infrastructure>
+
+Vous devrez également créer des enregistrements DNS (par exemple dans Route 53) pointant votre domaine vers la distribution CloudFront.
+
 ## Configuration d'exécution
 
-La configuration de votre infrastructure est fournie à votre site Web via la <Link href="guides/runtime-config">Configuration d'exécution</Link>. Cela permet à votre site Web d'accéder à des détails tels que les URL d'API qui ne sont pas connus avant le déploiement de votre application.
+La configuration de votre infrastructure est fournie à votre site Web via la <Link path="guides/runtime-config">Configuration d'exécution</Link>. Cela permet à votre site Web d'accéder à des détails tels que les URL d'API qui ne sont pas connus avant le déploiement de votre application.
 
 ### Infrastructure
 
@@ -252,7 +516,7 @@ export class ApplicationStack extends Stack {
   constructor(scope: Construct, id: string) {
     super(scope, id);
 
-    // Website can be declared at any point — runtime config is resolved lazily
+    // Website can be declared at any point, since runtime config is resolved lazily
     new MyWebsite(this, 'MyWebsite');
 
     // Automatically adds values to the RuntimeConfig
@@ -263,8 +527,8 @@ export class ApplicationStack extends Stack {
 }
 ```
 
-:::note[Construct de site Web CDK]
-Avec CDK, le construct de site Web peut être déclaré à n'importe quel moment dans votre stack. La configuration d'exécution est résolue de manière paresseuse au moment de la synthèse, donc toutes les valeurs seront incluses quel que soit l'ordre de déclaration.
+:::note[Construct CDK de site Web]
+Avec CDK, le construct de site Web peut être déclaré à n'importe quel point de votre stack. La configuration d'exécution est résolue paresseusement au moment de la synthèse, donc toutes les valeurs seront incluses quel que soit l'ordre de déclaration.
 :::
 </Fragment>
 <Fragment slot="terraform">
@@ -324,7 +588,7 @@ Pour plus de détails sur la façon dont la configuration d'exécution est stock
 
 ### Configuration d'exécution locale
 
-Lors de l'exécution du [serveur de développement local](#serveur-de-développement-local), vous aurez besoin d'un fichier `runtime-config.json` dans votre répertoire `public` pour que votre site Web local connaisse les URL backend, la configuration d'identité, etc.
+Lors de l'exécution du [serveur de développement local](#serveur-de-développement-local), vous aurez besoin d'un fichier `runtime-config.json` dans votre répertoire `public` afin que votre site Web local connaisse les URL backend, la configuration d'identité, etc.
 
 Votre projet de site Web est configuré avec une cible `load-runtime-config` que vous pouvez utiliser pour télécharger le fichier `runtime-config.json` depuis une application déployée :
 
@@ -335,10 +599,10 @@ Votre projet de site Web est configuré avec une cible `load-runtime-config` que
 <Fragment slot="cdk">
 Si vous modifiez le préfixe de vos noms de stage dans le `src/main.ts` de votre projet d'infrastructure, vous devrez mettre à jour la cible `load-runtime-config` dans le fichier `project.json` de votre site Web en conséquence.
 
-De plus, il convient de noter que la cible `load-runtime-config` suppose qu'un seul stage de votre application est déployé dans l'environnement pour lequel vous avez des identifiants AWS. Vous devrez ajuster la commande si vous déployez plusieurs stages dans le même compte et la même région.
+De plus, il convient de noter que la cible `load-runtime-config` suppose qu'un seul stage de votre application est déployé dans l'environnement pour lequel vous avez des informations d'identification AWS. Vous devrez ajuster la commande si vous déployez plusieurs stages dans le même compte et la même région.
 </Fragment>
 <Fragment slot="terraform">
-Pour les projets Terraform, la cible `load-runtime-config` copie le fichier `runtime-config.json` qui a été créé après votre `terraform apply` local le plus récent.
+Pour les projets Terraform, la cible `load-runtime-config` copie la configuration d'exécution que votre `terraform apply` local le plus récent a agrégée, depuis `dist/packages/common/terraform/runtime-config/connection.json`.
 </Fragment>
 </Infrastructure>
 :::
@@ -349,7 +613,7 @@ La commande canonique pour le développement local est `dev`, qui démarre votre
 
 <NxCommands commands={['dev <my-website>']} />
 
-La cible `serve` est également disponible lorsque vous devez contrôler quelle partie de votre application s'exécute localement par rapport à pointer vers l'infrastructure AWS déployée. Pour un aperçu plus large du développement local à travers les projets connectés, y compris comment `dev` se comporte pour les projets avec plusieurs composants, consultez le guide <Link path="guides/local-development">Développement local</Link>.
+La cible `serve` est également disponible lorsque vous devez contrôler quelle partie de votre application s'exécute localement par rapport au pointage vers l'infrastructure AWS déployée. Pour un aperçu plus large du développement local à travers les projets connectés, y compris comment `dev` se comporte pour les projets avec plusieurs composants, consultez le guide <Link path="guides/local-development">Développement local</Link>.
 
 ### Cible Serve
 
@@ -365,7 +629,7 @@ Cette cible est utile pour travailler sur les modifications du site Web tout en 
 
 La cible `dev` démarre un serveur de développement local pour votre site Web (avec [Vite `MODE`](https://vite.dev/guide/env-and-mode) défini sur `local-dev`), ainsi que le démarrage de tous les serveurs locaux pour les API auxquelles vous avez connecté votre site Web via le <Link path="/guides/connection">générateur Connection</Link>.
 
-Lorsque votre serveur de site Web local est exécuté via cette cible, `runtime-config.json` est automatiquement remplacé pour pointer vers vos URL d'API s'exécutant localement.
+Lorsque votre serveur de site Web local est exécuté via cette cible, `runtime-config.json` est automatiquement remplacé pour pointer vers vos URL d'API en cours d'exécution localement.
 
 Vous pouvez exécuter cette cible avec la commande suivante :
 
@@ -392,12 +656,12 @@ Lors de l'exécution avec `dev`, vous pouvez spécifier toutes les variables d'e
 
 <NxCommands env={{DYNAMODB_TABLE_NAME: 'xxxxx'}} commands={['dev <my-website>']} />
 
-Notez que vos serveurs d'API locaux s'exécuteront avec les identifiants AWS que vous avez configurés localement.
+Notez que vos serveurs d'API locaux s'exécuteront avec les informations d'identification AWS que vous avez configurées localement.
 :::
 
-## Construction
+## Building
 
-Vous pouvez construire votre site Web en utilisant la cible `build`. Cela exécute les cibles `bundle`, `compile`, `test` et `lint`, en vérifiant les types, en regroupant, en testant et en lintant votre site Web.
+Vous pouvez construire votre site Web en utilisant la cible `build`. Cela exécute les cibles `bundle`, `compile`, `test` et `lint`, vérifiant les types, regroupant, testant et lintant votre site Web.
 
 <NxCommands commands={['build <my-website>']} />
 
@@ -405,84 +669,15 @@ La cible `bundle` utilise Vite pour créer un bundle de production dans le répe
 
 <NxCommands commands={['bundle <my-website>']} />
 
-## Tests
+## Testing
 
-Tester votre site Web est très similaire à l'écriture de tests dans un projet TypeScript standard, veuillez donc vous référer au <Link path="guides/typescript-project#testing">guide du projet TypeScript</Link> pour plus de détails.
+Tester votre site Web ressemble beaucoup à l'écriture de tests dans un projet TypeScript standard, veuillez donc vous référer au <Link path="guides/typescript-project#testing">guide du projet TypeScript</Link> pour plus de détails.
 
 Pour les tests spécifiques à React, React Testing Library est déjà installé et disponible pour que vous puissiez l'utiliser pour écrire des tests. Pour plus de détails sur son utilisation, veuillez vous référer à la [documentation React Testing Library](https://testing-library.com/docs/react-testing-library/example-intro).
 
 Vous pouvez exécuter vos tests en utilisant la cible `test` :
 
 <NxCommands commands={['test <my-website>']} />
-
-## Déployer votre site Web
-
-Le générateur de site Web React crée l'infrastructure en tant que code CDK ou Terraform en fonction de votre `iac` sélectionné. Vous pouvez l'utiliser pour déployer votre site Web.
-
-<Infrastructure>
-<Fragment slot="cdk">
-Pour déployer votre site Web, nous recommandons d'utiliser le <Link path="guides/typescript-infrastructure">générateur `ts#infra`</Link> pour créer une application CDK.
-
-Vous pouvez utiliser le construct CDK généré pour vous dans `packages/common/constructs` pour déployer votre site Web.
-
-```ts title="packages/infra/src/stacks/application-stack.ts" {3, 9}
-import { Stack } from 'aws-cdk-lib';
-import { Construct } from 'constructs';
-import { MyWebsite } from '@my-scope/common-constructs';
-
-export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
-
-    new MyWebsite(this, 'MyWebsite');
-  }
-}
-```
-
-Cela configure :
-
-1. Un bucket S3 pour héberger vos fichiers de site Web statique
-2. Une distribution CloudFront pour la diffusion de contenu mondiale
-3. Une Web ACL WAF pour la protection de sécurité
-4. Un contrôle d'accès d'origine pour un accès S3 sécurisé
-5. Le déploiement automatique des fichiers du site Web et de la configuration d'exécution
-</Fragment>
-<Fragment slot="terraform">
-Pour déployer votre site Web, nous recommandons d'utiliser le <Link path="/guides/terraform-project">générateur `terraform#project`</Link> pour créer un projet Terraform.
-
-Vous pouvez utiliser le module Terraform généré pour vous dans `packages/common/terraform` pour déployer votre site Web.
-
-```hcl title="packages/infra/src/main.tf" {3}
-# Deploy website
-module "my_website" {
-  source = "../../common/terraform/src/app/static-websites/my-website"
-
-  providers = {
-    aws.us_east_1 = aws.us_east_1
-  }
-}
-```
-
-Cela configure :
-
-1. Un bucket S3 pour héberger vos fichiers de site Web statique
-2. Une distribution CloudFront pour la diffusion de contenu mondiale
-3. Une Web ACL WAF pour la protection de sécurité (déployée dans us-east-1)
-4. Un contrôle d'accès d'origine pour un accès S3 sécurisé
-5. Le déploiement automatique des fichiers du site Web et de la configuration d'exécution
-
-:::note[Région du fournisseur WAF]
-Le fournisseur `aws.us_east_1` est requis pour les ressources CloudFront et WAF, qui doivent être déployées dans la région us-east-1. Assurez-vous que votre configuration Terraform inclut ce fournisseur :
-
-```hcl title="packages/infra/src/providers.tf"
-provider "aws" {
-  alias  = "us_east_1"
-  region = "us-east-1"
-}
-```
-:::
-</Fragment>
-</Infrastructure>
 
 ## Connexions
 

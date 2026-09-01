@@ -10,18 +10,18 @@ import {
   type Tree,
   updateJson,
 } from '@nx/devkit';
-import { addStarExport } from '../ast';
+import { addStarExport } from '../ast.js';
 import {
   type DeclaredPyDependency,
   type DeclaredTsDependency,
   type DependencyDeclaration,
   forDependencies,
   type MustDeclare,
-} from '../declared-dependencies';
-import { addDependenciesToPackageJson } from '../dependencies';
-import type { Iac } from '../iac';
-import { esmVars } from '../module-format';
-import { addDependencyToTargetIfNotPresent } from '../nx';
+} from '../declared-dependencies.js';
+import { addDependenciesToPackageJson } from '../dependencies.js';
+import type { Iac } from '../iac.js';
+import { esmVars } from '../module-format.js';
+import { addArtifactProjectToTargets } from '../nx.js';
 import {
   generatedInfrastructure,
   generatedTerraform,
@@ -29,14 +29,16 @@ import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
-} from '../shared-constructs-constants';
+} from '../shared-constructs-constants.js';
 import {
+  cdkLambdaRuntimeVars,
   type IPyDepVersion,
   type ITsDepVersion,
   PY_VERSIONS,
+  terraformLambdaRuntimeVars,
   terraformProviderVersions,
   withVersions,
-} from '../versions';
+} from '../versions.js';
 
 /**
  * Dependencies a caller must declare to add API Gateway infrastructure.
@@ -65,6 +67,18 @@ export const API_CONSTRUCTS_PY_DEPENDENCIES = [
   IPyDepVersion,
   IacMetadata
 >[];
+
+/**
+ * Path segments a REST API operation may have in the generated Terraform.
+ *
+ * API Gateway REST APIs need a resource per path segment, and instances of a
+ * Terraform resource cannot reference one another
+ * (https://github.com/hashicorp/terraform/issues/26697), so the module declares
+ * one resource per level up to this depth. Deeper paths fail the plan with a
+ * message pointing at the fix. Empty levels create no resources, so the only
+ * cost of the headroom is the generated configuration itself.
+ */
+const MAX_REST_PATH_DEPTH = 16;
 
 interface BackendOptions {
   type: 'trpc' | 'fastapi' | 'smithy';
@@ -120,11 +134,7 @@ export const addApiGatewayInfra = async <const D extends DependencyDeclaration>(
       'project.json',
     ),
     (config: ProjectConfiguration) => {
-      addDependencyToTargetIfNotPresent(
-        config,
-        'build',
-        `${options.apiProjectName}:build`,
-      );
+      addArtifactProjectToTargets(config, options.apiProjectName);
       return config;
     },
   );
@@ -156,7 +166,7 @@ const addApiGatewayCdkConstructs = async (
         'core',
         'api',
       ),
-      { ...esmVars(tree) },
+      { ...esmVars(tree), ...cdkLambdaRuntimeVars() },
       {
         overwriteStrategy: OverwriteStrategy.KeepExisting,
       },
@@ -211,7 +221,7 @@ const addApiGatewayCdkConstructs = async (
       'app',
       'apis',
     ),
-    { ...options, ...esmVars(tree) },
+    { ...options, ...esmVars(tree), ...cdkLambdaRuntimeVars() },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
@@ -280,7 +290,12 @@ const addApiGatewayTerraformModules = (
       options.constructType,
     ),
     joinPathFragments(PACKAGES_DIR, SHARED_TERRAFORM_DIR, 'src', 'app', 'apis'),
-    { ...options, ...terraformProviderVersions() },
+    {
+      ...options,
+      maxRestPathDepth: MAX_REST_PATH_DEPTH,
+      ...terraformProviderVersions(),
+      ...terraformLambdaRuntimeVars(),
+    },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },

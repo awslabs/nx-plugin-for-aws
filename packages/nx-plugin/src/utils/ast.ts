@@ -6,8 +6,8 @@
 import { QueryBuilder } from '@getgrit/gritql';
 import type { Tree } from '@nx/devkit';
 import * as path from 'path';
-import { updateGitIgnore } from './git';
-import { isEsmWorkspace } from './module-format';
+import { updateGitIgnore } from './git.js';
+import { isEsmWorkspace } from './module-format.js';
 
 const GRIT_DIR = '.grit';
 
@@ -169,6 +169,19 @@ export const addSingleImport = async (
   );
   if (alreadyImported) {
     return;
+  }
+
+  // The same identifier bound to a different module would be a duplicate
+  // declaration, so refuse rather than emit a file that cannot compile.
+  const identifierTaken = await matchGritQL(
+    tree,
+    filePath,
+    `\`import ${variableName} from $module\``,
+  );
+  if (identifierTaken) {
+    throw new Error(
+      `Cannot import ${variableName} from '${from}' in ${filePath}: ${variableName} is already imported from a different module. Rename the project so its generated identifier does not collide.`,
+    );
   }
 
   // Prepend new import to file
@@ -339,6 +352,46 @@ export const captureGritQLVariable = async (
     const query = new QueryBuilder(pattern);
     query.filter((node) => {
       captured ??= node.var(name) ?? undefined;
+      return true;
+    });
+    await query.applyToFile({ path: filePath, content: source });
+  } catch {
+    return undefined;
+  }
+  return captured;
+};
+
+/**
+ * Like {@link captureAllGritQL}, but returns one metavariable's binding for every
+ * match rather than the whole matched node.
+ *
+ * This is what lets a caller work on the value a pattern isolated — matching
+ * `` `runtime: $value` `` and reading `$value` gives `Runtime.NODEJS_24_X` alone,
+ * so nothing downstream has to re-derive the assignment around it.
+ *
+ * A match whose metavariable is unbound contributes nothing, so the result holds
+ * only real bindings. Returns undefined if the pattern could not be applied,
+ * which an empty array cannot express.
+ */
+export const captureAllGritQLVariable = async (
+  tree: Tree,
+  filePath: string,
+  pattern: string,
+  variableName: string,
+): Promise<string[] | undefined> => {
+  if (!tree.exists(filePath)) return undefined;
+  ensureGritDir(tree);
+  const source = tree.read(filePath)!.toString();
+  // The underlying binding lookup requires the `$` sigil.
+  const name = variableName.startsWith('$') ? variableName : `$${variableName}`;
+  const captured: string[] = [];
+  try {
+    const query = new QueryBuilder(pattern);
+    query.filter((node) => {
+      const bound = node.var(name);
+      if (bound !== null && bound !== undefined) {
+        captured.push(bound);
+      }
       return true;
     });
     await query.applyToFile({ path: filePath, content: source });

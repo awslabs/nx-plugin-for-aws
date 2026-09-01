@@ -12,21 +12,21 @@ import type {
   DeclaredTsDependency,
   DependencyDeclaration,
   MustDeclare,
-} from './declared-dependencies';
-import { addDependenciesToPackageJson } from './dependencies';
-import { formatFilesInSubtree } from './format';
-import { esmVars } from './module-format';
-import { getNpmScopePrefix } from './npm-scope';
-import { getPackageManagerDisplayCommands } from './pkg-manager';
+} from './declared-dependencies.js';
+import { addDependenciesToPackageJson } from './dependencies.js';
+import { formatFilesInSubtree } from './format.js';
+import { esmVars } from './module-format.js';
+import { getNpmScopePrefix } from './npm-scope.js';
+import { getPackageManagerDisplayCommands } from './pkg-manager.js';
 import {
   generatedInfrastructure,
   type IacMetadata,
   PACKAGES_DIR,
   SHARED_SCRIPTS_DIR,
   SHARED_SCRIPTS_NAME,
-} from './shared-constructs-constants';
-import { ensureSharedScriptsProject } from './shared-scripts';
-import { type ITsDepVersion, withVersions } from './versions';
+} from './shared-constructs-constants.js';
+import { ensureSharedScriptsProject } from './shared-scripts.js';
+import { type ITsDepVersion, withVersions } from './versions.js';
 
 /**
  * Dependencies a caller must declare to use the shared infra scripts.

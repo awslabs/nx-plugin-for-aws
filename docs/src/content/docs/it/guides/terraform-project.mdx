@@ -9,6 +9,7 @@ import Link from '@components/link.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import OptionFilter from '@components/option-filter.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 
 [Terraform](https://www.terraform.io/) è uno strumento software open-source di infrastructure as code che consente di creare, modificare e migliorare l'infrastruttura in modo sicuro e prevedibile.
 
@@ -48,10 +49,13 @@ Per i progetti application (`--type=application`), il generatore crea un'applica
     - main.tf Bucket S3 e policy per l'archiviazione dello stato
     - providers.tf Configurazione del provider AWS
     - variables.tf Definizioni delle variabili di bootstrap
-  - scripts Helper Node eseguiti dai target nx `bootstrap` e `init`
+  - scripts Helper Node eseguiti dai target nx `bootstrap`, `bootstrap-destroy` e `init`
     - aws-config.ts Risolve account + regione tramite la catena di credenziali AWS SDK
     - bootstrap.ts Esegue pull/push del tfstate di bootstrap ed esegue `terraform apply`
+    - bootstrap-destroy.ts Svuota il bucket di stato ed esegue `terraform destroy`
     - init.ts Esegue `terraform init` con la configurazione del backend S3
+    - env.ts Punta `terraform init` alla cache condivisa dei provider
+  - checkov.yml Configurazione di Checkov, inclusi i controlli da saltare
   - project.json Configurazione del progetto e target di build
 
 </FileTree>
@@ -71,6 +75,7 @@ Per i progetti library (`--type=library`), il generatore crea una struttura più
 
   - src
     - main.tf File del modulo Terraform principale
+  - checkov.yml Configurazione di Checkov, inclusi i controlli da saltare
   - project.json Configurazione del progetto e target di build
 
 </FileTree>
@@ -242,19 +247,113 @@ Puoi validare la tua configurazione Terraform utilizzando il target `validate`:
 
 <NxCommands commands={['validate tf-infra']} />
 
-#### Formattare il tuo codice
+#### Linting
 
-Formatta il tuo codice Terraform utilizzando il target `fmt`:
+I progetti Terraform utilizzano [`terraform fmt`](https://developer.hashicorp.com/terraform/cli/commands/fmt) per verificare la formattazione.
 
-<NxCommands commands={['fmt tf-infra']} />
+##### Eseguire il Linter
+
+Per invocare il linter per controllare il tuo progetto, puoi eseguire il target `lint`.
+
+<NxCommands commands={["lint tf-infra"]} />
+
+##### Correggere i problemi di Lint
+
+La maggior parte dei problemi di linting o formattazione può essere corretta automaticamente eseguendo con l'argomento `--configuration=fix`.
+
+<NxCommands commands={["lint tf-infra --configuration=fix"]} />
+
+Allo stesso modo, se desideri correggere tutti i problemi di lint in tutti i pacchetti nel tuo workspace, puoi eseguire:
+
+<NxCommands commands={["run-many --target lint --all --configuration=fix"]} />
+
+:::tip[Comando abbreviato]
+Questo ha un comando abbreviato dalla radice del tuo workspace:
+
+<PackageManagerShortCommand commands={["lint"]} />
+:::
+
+##### Saltare i problemi di Lint
+
+Per evitare che i problemi di linting ti rallentino durante lo sviluppo (in particolare se hai problemi non correggibili automaticamente nel tuo progetto), puoi eseguire una build con la configurazione `skip-lint`:
+
+<NxCommands commands={["run-many --target build --configuration=skip-lint"]} />
+
+Questo salta completamente il controllo di formattazione durante la build.
+
+:::tip[Comando abbreviato]
+Questo ha un comando abbreviato dalla radice del tuo workspace:
+
+<PackageManagerShortCommand commands={["build:skip-lint"]} />
+:::
 
 #### Test di sicurezza
 
-Esegui controlli di sicurezza sulla tua infrastruttura utilizzando Checkov con il target `test`:
+Esegui controlli di sicurezza sulla tua infrastruttura utilizzando Checkov con il target `checkov`:
+
+<NxCommands commands={['checkov tf-infra']} />
+
+Troverai i risultati dei test di sicurezza nella cartella `dist` principale, sotto `dist/packages/<my-terraform-project>/checkov`.
+
+Checkov viene eseguito come parte di `build`.
+
+I controlli sono configurati nel file `checkov.yml` del progetto. Aggiungi un id di controllo a `skip-check` per sopprimerlo nell'intero progetto:
+
+```yaml title="checkov.yml"
+skip-check:
+  - CKV_AWS_115 # Concurrent execution limit
+  - CKV_AWS_116 # Dead Letter Queue
+```
+
+Per sopprimere un controllo per una singola risorsa invece, aggiungi un commento `#checkov:skip=<id>:<reason>` all'interno del blocco della risorsa:
+
+```hcl
+resource "aws_s3_bucket" "example" {
+  #checkov:skip=CKV_AWS_18:Access logging not required for this bucket
+  bucket = "example"
+}
+```
+
+#### Eseguire i test Terraform
+
+Il target `test` esegue il [framework di test nativo di Terraform](https://developer.hashicorp.com/terraform/language/tests) su qualsiasi file `.tftest.hcl` nel tuo progetto:
 
 <NxCommands commands={['test tf-infra']} />
 
-Troverai i risultati dei test di sicurezza nella cartella `dist` principale, sotto `dist/packages/<my-terraform-project>/checkov`.
+Un progetto senza file di test è un successo senza operazioni, quindi puoi aggiungere test quando ne hai bisogno. `build` esegue questo target, quindi i tuoi test vengono eseguiti come parte di una build normale.
+
+Ogni blocco `run` valuta la tua configurazione. Usa `command = plan` per verificare cosa _farebbe_ Terraform (questo espande l'intero grafo dei moduli, quindi cattura errori in fase di pianificazione che `validate` non può rilevare), oppure `command = apply` per creare risorse reali e fare asserzioni sui loro output. Dichiarare `mock_provider` significa che non vengono effettuate chiamate API e non sono necessarie credenziali AWS, il che mantiene i test `plan` veloci e sicuri da eseguire in CI:
+
+```hcl title="src/main.tftest.hcl"
+mock_provider "aws" {
+  mock_data "aws_caller_identity" {
+    defaults = { account_id = "123456789012" }
+  }
+  mock_data "aws_region" {
+    defaults = { region = "us-east-1" }
+  }
+}
+
+variables {
+  aws_region  = "us-east-1"
+  environment = "dev"
+}
+
+run "plan_is_valid" {
+  command = plan
+
+  assert {
+    condition     = data.aws_caller_identity.current.account_id == "123456789012"
+    error_message = "Unexpected account id"
+  }
+}
+```
+
+Imposta ogni variabile richiesta dalla tua configurazione nel blocco `variables`, altrimenti l'esecuzione fallisce con "has a required variable ... with no set value".
+
+Ogni target che esegue `terraform init` riutilizza una cache dei provider in `.terraform/plugin-cache` nella radice del tuo workspace, quindi i provider vengono scaricati una sola volta anziché ad ogni esecuzione. Ogni progetto ottiene la propria directory lì: due esecuzioni di `terraform init` che riempiono una cache contemporaneamente possono ciascuna calcolare un hash diverso per lo stesso provider, che terraform poi rifiuta confrontandolo con il tuo `.terraform.lock.hcl`. Consulta la [documentazione Terraform](https://developer.hashicorp.com/terraform/cli/config/config-file#provider-plugin-cache) per ulteriori informazioni.
+
+Imposta `TF_PLUGIN_CACHE_DIR` nel tuo ambiente per puntare lo script `init` fornito a una cache che gestisci tu stesso — ad esempio un volume condiviso tra workspace. Nota che il target `test` legge il suo percorso da `project.json`, quindi modificalo anche lì.
 
 <OptionFilter when={{ type: 'application' }} description="Application-only targets: plan / apply / destroy / etc.">
 ### Target solo per Application
@@ -268,6 +367,12 @@ Prima di applicare le modifiche, puoi vedere cosa farà Terraform eseguendo il t
 <NxCommands commands={['plan tf-infra']} />
 
 Questo creerà un file di piano in `dist/packages/<my-terraform-project>/terraform/dev.tfplan`.
+
+`plan` dipende da `assemble`, quindi produce gli artefatti a cui fanno riferimento i tuoi moduli, come i bundle Lambda e i metadati delle operazioni generate, senza eseguire i gate di lint, test e type-check.
+
+:::caution[Usa `build` nella tua pipeline]
+`assemble` viene utilizzato per un'iterazione più rapida durante lo sviluppo. Esegui `build` nella tua pipeline CI per assicurarti che il tuo progetto superi i gate di qualità prima di un deployment in produzione.
+:::
 
 #### Inizializzare Terraform
 
@@ -310,6 +415,12 @@ Questo eliminerà permanentemente tutte le risorse gestite da questa configurazi
 Per pulire le risorse di bootstrap (bucket S3 per l'archiviazione dello stato):
 
 <NxCommands commands={['bootstrap-destroy tf-infra']} />
+
+Questo svuota il bucket di stato prima di distruggerlo e risolve la regione dalla catena di credenziali AWS SDK, quindi viene eseguito in modo automatico in CI.
+
+:::caution[Distruggi prima la tua infrastruttura]
+Il bucket di stato contiene lo stato per ogni ambiente, quindi esegui `destroy` per ogni ambiente prima di questo. Una volta che il bucket è stato eliminato, Terraform non conosce più le risorse che ha creato.
+:::
 </OptionFilter>
 
 ## Ulteriori informazioni

@@ -3,14 +3,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { joinPathFragments, type Tree } from '@nx/devkit';
-import { appendToArrayViaGritQL, applyGritQL, captureAllGritQL } from './ast';
-import { formatFilesInSubtree } from './format';
-import { getPackageVersion, type NxGeneratorInfo } from './nx';
+import {
+  appendToArrayViaGritQL,
+  applyGritQL,
+  captureAllGritQL,
+} from './ast.js';
+import { formatFilesInSubtree } from './format.js';
+import { getPackageVersion, type NxGeneratorInfo } from './nx.js';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
-} from './shared-constructs-constants';
+} from './shared-constructs-constants.js';
 
 // Used to identify @aws/nx-plugin in AWS metrics
 export const METRIC_ID = 'uksb-4wk0bqpg5s';

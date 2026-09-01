@@ -225,6 +225,24 @@ export type DatabaseSecret = {
   port: number;
 };
 
+/**
+ * Connection details for the admin credentials secret. RDS-managed secrets hold
+ * only \`username\` and \`password\`, so the host, port and database name are taken
+ * from the environment when the secret omits them.
+ */
+type SecretConnectionOverrides = Partial<
+  Omit<DatabaseSecret, 'username' | 'password'>
+>;
+
+const connectionOverridesFromEnv = (): SecretConnectionOverrides => {
+  const { DATABASE_HOST, DATABASE_PORT, DATABASE_NAME } = process.env;
+  return {
+    ...(DATABASE_HOST ? { host: DATABASE_HOST } : {}),
+    ...(DATABASE_PORT ? { port: Number(DATABASE_PORT) } : {}),
+    ...(DATABASE_NAME ? { dbname: DATABASE_NAME } : {}),
+  };
+};
+
 const databaseConfigPromises: Record<string, Promise<DatabaseConfig>> = {};
 
 const getSecretValue = async (secretArn: string): Promise<string> => {
@@ -251,7 +269,18 @@ export const getDatabaseSecret = async (): Promise<DatabaseSecret> => {
     );
   }
 
-  return JSON.parse(await getSecretValue(secretArn)) as DatabaseSecret;
+  const secret = JSON.parse(await getSecretValue(secretArn)) as DatabaseSecret;
+  const secretWithConnection = { ...secret, ...connectionOverridesFromEnv() };
+
+  for (const key of ['host', 'port', 'dbname'] as const) {
+    if (secretWithConnection[key] == null) {
+      throw new Error(
+        \`Database secret is missing \${key} and no override was provided in the environment.\`,
+      );
+    }
+  }
+
+  return secretWithConnection;
 };
 
 const loadDatabaseConfig = async (
@@ -539,6 +568,20 @@ export interface AuroraDatabaseProps extends _AuroraDatabaseProps {
    * @default true
    */
   readonly enablePerformanceInsights?: boolean;
+
+  /**
+   * Minimum Aurora Serverless v2 ACUs.
+   *
+   * @default 0.5
+   */
+  readonly serverlessV2MinCapacity?: number;
+
+  /**
+   * Maximum Aurora Serverless v2 ACUs.
+   *
+   * @default 4
+   */
+  readonly serverlessV2MaxCapacity?: number;
 }
 
 /**
@@ -568,6 +611,8 @@ export abstract class AuroraDatabase extends Construct {
       enableKeyRotation = true,
       enableCloudwatchLogs = true,
       enablePerformanceInsights = true,
+      serverlessV2MinCapacity = 0.5,
+      serverlessV2MaxCapacity = 4,
       engine,
       engineVersion,
       ...clusterProps
@@ -583,6 +628,8 @@ export abstract class AuroraDatabase extends Construct {
       vpc,
       vpcSubnets,
       engine: engine.clusterEngine(engineVersion ?? engine.defaultVersion),
+      serverlessV2MinCapacity,
+      serverlessV2MaxCapacity,
       writer:
         writer ??
         ClusterInstance.serverlessV2('writer', {
@@ -792,7 +839,8 @@ export default defineConfig({
 
 exports[`ts#rdb generator > should generate terraform modules when iac is Terraform 1`] = `
 "# Core Aurora module
-# This module creates an Aurora cluster and a generated admin secret.
+# This module creates an Aurora cluster whose admin credentials are generated
+# and rotated by RDS in Secrets Manager.
 
 terraform {
   required_version = ">= 1.0"
@@ -800,7 +848,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "6.60.0"
+      version = "6.62.0"
     }
     null = {
       source  = "hashicorp/null"
@@ -833,11 +881,6 @@ variable "vpc_id" {
 
 variable "subnet_ids" {
   description = "Subnet IDs for the Aurora DB subnet group and RDS Proxy. These subnets do not need outbound egress — private isolated subnets are fine."
-  type        = list(string)
-}
-
-variable "lambda_subnet_ids" {
-  description = "Subnet IDs for the credential-rotation Lambda. Must have outbound egress to AWS service endpoints (e.g. Secrets Manager) — use private subnets with a NAT gateway."
   type        = list(string)
 }
 
@@ -906,12 +949,6 @@ variable "skip_final_snapshot" {
 
 variable "enable_rds_proxy" {
   description = "Whether to provision an RDS Proxy in front of the Aurora cluster."
-  type        = bool
-  default     = true
-}
-
-variable "enable_credential_rotation" {
-  description = "Whether to enable automatic credential rotation for the admin secret."
   type        = bool
   default     = true
 }
@@ -1008,6 +1045,8 @@ resource "aws_kms_key" "database" {
   description         = "KMS key for Aurora cluster \${var.name}"
   enable_key_rotation = var.enable_key_rotation
 
+  deletion_window_in_days = 30
+
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -1033,6 +1072,20 @@ resource "aws_kms_key" "database" {
           "kms:GenerateDataKey*",
           "kms:DescribeKey",
           "kms:CreateGrant"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "AllowSecretsManagerService"
+        Effect = "Allow"
+        Principal = {
+          Service = "secretsmanager.amazonaws.com"
+        }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
         ]
         Resource = "*"
       }
@@ -1089,35 +1142,6 @@ resource "aws_db_subnet_group" "database" {
   })
 }
 
-resource "random_password" "master_password" {
-  length           = 32
-  special          = true
-  override_special = "!#$%&*()-_=+[]{}<>:?"
-}
-
-resource "aws_secretsmanager_secret" "credentials" {
-  #checkov:skip=CKV2_AWS_57:Rotation is configured via aws_cloudformation_stack.credentials_rotation using the AWS::SecretsManager-2024-09-16 transform; Checkov cannot resolve rotation schedules created by CloudFormation transforms
-  name_prefix = "\${var.name}-aurora-credentials-"
-  kms_key_id  = aws_kms_key.database.arn
-
-  tags = merge(var.tags, {
-    Name = "\${var.name}-aurora-credentials"
-  })
-}
-
-resource "aws_secretsmanager_secret_version" "credentials" {
-  secret_id = aws_secretsmanager_secret.credentials.id
-  secret_string = jsonencode({
-    engine              = var.engine == "aurora-mysql" ? "mysql" : "postgres"
-    username            = var.admin_user
-    password            = random_password.master_password.result
-    host                = aws_rds_cluster.database.endpoint
-    port                = aws_rds_cluster.database.port
-    dbname              = var.database_name
-    dbClusterIdentifier = aws_rds_cluster.database.cluster_identifier
-  })
-}
-
 resource "aws_rds_cluster" "database" {
   #checkov:skip=CKV2_AWS_27:Query logging is enabled by default via enable_cloudwatch_logs; checkov cannot resolve the conditional count expression on aws_rds_cluster_parameter_group.database
   #checkov:skip=CKV_AWS_139:Deletion protection is enabled but checkov is unable to detect it correctly
@@ -1126,7 +1150,8 @@ resource "aws_rds_cluster" "database" {
   engine_version                      = coalesce(var.engine_version, local.default_engine_version)
   database_name                       = var.database_name
   master_username                     = var.admin_user
-  master_password                     = random_password.master_password.result
+  manage_master_user_password         = true
+  master_user_secret_kms_key_id       = aws_kms_key.database.arn
   db_subnet_group_name                = aws_db_subnet_group.database.name
   db_cluster_parameter_group_name     = var.enable_cloudwatch_logs ? aws_rds_cluster_parameter_group.database[0].name : null
   vpc_security_group_ids              = [aws_security_group.database.id]
@@ -1150,6 +1175,10 @@ resource "aws_rds_cluster" "database" {
   tags = merge(var.tags, {
     Name = "\${var.name}-aurora"
   })
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_rds_cluster_instance" "database" {
@@ -1172,75 +1201,6 @@ resource "aws_rds_cluster_instance" "database" {
   tags = merge(var.tags, {
     Name = "\${var.name}-aurora-\${count.index + 1}"
   })
-}
-
-resource "aws_security_group" "rotation" {
-  #checkov:skip=CKV2_AWS_5:Security group is attached to the hosted rotation Lambda created by AWS::SecretsManager::RotationSchedule; Checkov cannot resolve resources created by the CloudFormation transform
-  count       = var.enable_credential_rotation ? 1 : 0
-  name_prefix = "\${var.name}-aurora-rotation-"
-  description = "Security group for Aurora secret rotation \${var.name}"
-  vpc_id      = var.vpc_id
-
-  tags = merge(var.tags, {
-    Name = "\${var.name}-aurora-rotation"
-  })
-}
-
-resource "aws_vpc_security_group_egress_rule" "rotation_to_database" {
-  count                        = var.enable_credential_rotation ? 1 : 0
-  security_group_id            = aws_security_group.rotation[0].id
-  referenced_security_group_id = aws_security_group.database.id
-  from_port                    = coalesce(var.port, local.default_port)
-  to_port                      = coalesce(var.port, local.default_port)
-  ip_protocol                  = "tcp"
-  description                  = "Allow outbound database traffic from secret rotation Lambda"
-}
-
-resource "aws_vpc_security_group_ingress_rule" "rotation_to_database" {
-  count                        = var.enable_credential_rotation ? 1 : 0
-  security_group_id            = aws_security_group.database.id
-  referenced_security_group_id = aws_security_group.rotation[0].id
-  from_port                    = coalesce(var.port, local.default_port)
-  to_port                      = coalesce(var.port, local.default_port)
-  ip_protocol                  = "tcp"
-  description                  = "Allow inbound database traffic from secret rotation Lambda"
-}
-
-resource "aws_cloudformation_stack" "credentials_rotation" {
-  #checkov:skip=CKV_AWS_124:SNS event notifications are not required for the credentials rotation stack
-  count = var.enable_credential_rotation ? 1 : 0
-  name  = "\${local.cluster_name}-credentials-rotation"
-
-  capabilities = ["CAPABILITY_IAM", "CAPABILITY_AUTO_EXPAND"]
-
-  template_body = jsonencode({
-    AWSTemplateFormatVersion = "2010-09-09"
-    Transform                = "AWS::SecretsManager-2024-09-16"
-    Resources = {
-      CredentialsRotationSchedule = {
-        Type = "AWS::SecretsManager::RotationSchedule"
-        Properties = {
-          SecretId = aws_secretsmanager_secret.credentials.arn
-          HostedRotationLambda = {
-            RotationType        = var.engine == "aurora-mysql" ? "MySQLSingleUser" : "PostgreSQLSingleUser"
-            RotationLambdaName  = "\${local.cluster_name}-credentials-rotation"
-            VpcSecurityGroupIds = aws_security_group.rotation[0].id
-            VpcSubnetIds        = join(",", var.lambda_subnet_ids)
-          }
-          RotationRules = {
-            AutomaticallyAfterDays = 30
-          }
-        }
-      }
-    }
-  })
-
-  depends_on = [
-    aws_secretsmanager_secret_version.credentials,
-    aws_rds_cluster_instance.database,
-    aws_vpc_security_group_egress_rule.rotation_to_database,
-    aws_vpc_security_group_ingress_rule.rotation_to_database,
-  ]
 }
 
 resource "aws_iam_role" "proxy" {
@@ -1481,6 +1441,11 @@ output "cluster_endpoint" {
   value       = var.enable_rds_proxy ? aws_db_proxy.aurora[0].endpoint : aws_rds_cluster.database.endpoint
 }
 
+output "writer_endpoint" {
+  description = "Writer endpoint of the Aurora cluster itself, bypassing the RDS Proxy. Used by the admin-credentialled handlers, which connect directly to the cluster."
+  value       = aws_rds_cluster.database.endpoint
+}
+
 output "reader_endpoint" {
   description = "Reader endpoint of the Aurora cluster."
   value       = aws_rds_cluster.database.reader_endpoint
@@ -1507,12 +1472,12 @@ output "proxy_role_name" {
 }
 
 output "secret_arn" {
-  description = "ARN of the generated admin credentials secret."
-  value       = aws_secretsmanager_secret.credentials.arn
+  description = "ARN of the RDS-managed admin credentials secret. Its value is a JSON object with username and password only — connection details come from this module's other outputs."
+  value       = one(aws_rds_cluster.database.master_user_secret[*].secret_arn)
 }
 
 output "kms_key_arn" {
-  description = "ARN of the KMS key protecting Aurora and the generated secret."
+  description = "ARN of the KMS key protecting Aurora and its admin credentials secret."
   value       = aws_kms_key.database.arn
 }
 
@@ -1537,8 +1502,8 @@ output "database_name" {
 }
 
 output "admin_user" {
-  description = "Admin username stored in the generated secret."
-  value       = jsondecode(aws_secretsmanager_secret_version.credentials.secret_string).username
+  description = "Admin username stored in the RDS-managed credentials secret."
+  value       = aws_rds_cluster.database.master_username
 }
 "
 `;
@@ -1554,7 +1519,11 @@ exports[`ts#rdb generator > should generate terraform modules when iac is Terraf
     }
     aws = {
       source  = "hashicorp/aws"
-      version = "6.60.0"
+      version = "6.62.0"
+    }
+    external = {
+      source  = "hashicorp/external"
+      version = "2.4.1"
     }
     null = {
       source  = "hashicorp/null"
@@ -1630,16 +1599,10 @@ variable "enable_rds_proxy" {
   default     = true
 }
 
-variable "enable_credential_rotation" {
-  description = "Whether to enable automatic credential rotation for the admin secret."
+variable "enable_cloudwatch_logs" {
+  description = "Whether to export Aurora engine logs to CloudWatch. PostgreSQL logs DDL statements only (log_statement=ddl); MySQL enables Advanced Auditing scoped to connections and DDL (server_audit_events=CONNECT,QUERY_DDL). Neither logs statement parameter values, to avoid leaking PII into log data."
   type        = bool
   default     = true
-}
-
-variable "enable_cloudwatch_logs" {
-  description = "Whether to export Aurora engine logs to CloudWatch. PostgreSQL also enables verbose statement logging."
-  type        = bool
-  default     = false
 }
 
 variable "enable_performance_insights" {
@@ -1660,6 +1623,12 @@ variable "enable_backup" {
   default     = false
 }
 
+variable "enable_key_rotation" {
+  description = "Whether to enable automatic key rotation on the KMS key used to encrypt the Aurora cluster and its credentials secret."
+  type        = bool
+  default     = true
+}
+
 variable "tags" {
   description = "Tags to apply to all resources."
   type        = map(string)
@@ -1675,6 +1644,11 @@ variable "migration_docker_image_tag" {
 
 variable "asset_bucket_name" {
   description = "Name of the shared asset S3 bucket used to stage the Lambda deployment zip. Instantiate the \`core/asset-bucket\` module once per deployment and pass its \`bucket_name\` output here."
+  type        = string
+}
+
+variable "asset_ecr_repository_url" {
+  description = "URL of the shared asset ECR repository the Lambda container images are published to. Instantiate the \`core/asset-ecr\` module once per deployment and pass its \`repository_url\` output here."
   type        = string
 }
 
@@ -1702,7 +1676,6 @@ module "aurora" {
   name                                  = "db"
   vpc_id                                = var.vpc_id
   subnet_ids                            = var.database_subnet_ids
-  lambda_subnet_ids                     = var.lambda_subnet_ids
   engine                                = "aurora-postgresql"
   engine_version                        = var.engine_version
   database_name                         = "database_name"
@@ -1714,11 +1687,11 @@ module "aurora" {
   deletion_protection                   = var.deletion_protection
   skip_final_snapshot                   = var.skip_final_snapshot
   enable_rds_proxy                      = var.enable_rds_proxy
-  enable_credential_rotation            = var.enable_credential_rotation
   enable_cloudwatch_logs                = var.enable_cloudwatch_logs
   enable_performance_insights           = var.enable_performance_insights
   performance_insights_retention_period = var.performance_insights_retention_period
   enable_backup                         = var.enable_backup
+  enable_key_rotation                   = var.enable_key_rotation
   tags                                  = var.tags
 }
 
@@ -1770,69 +1743,19 @@ module "add_rdb_to_runtime_config" {
   }
 }
 
-resource "aws_ecr_repository" "migration_handler" {
-  #checkov:skip=CKV_AWS_136:AES256 encryption is sufficient for ECR repositories
-  name                 = "db-migration-\${random_string.suffix.result}"
-  image_tag_mutability = "IMMUTABLE"
-  force_delete         = true
-
-  image_scanning_configuration {
-    scan_on_push = true
-  }
-
-  tags = var.tags
-}
-
-resource "aws_ecr_repository_policy" "migration_handler" {
-  repository = aws_ecr_repository.migration_handler.name
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid    = "AllowPushPull"
-        Effect = "Allow"
-        Principal = {
-          AWS = "arn:aws:iam::\${data.aws_caller_identity.current.account_id}:root"
-        }
-        Action = [
-          "ecr:BatchCheckLayerAvailability",
-          "ecr:CompleteLayerUpload",
-          "ecr:GetDownloadUrlForLayer",
-          "ecr:InitiateLayerUpload",
-          "ecr:PutImage",
-          "ecr:UploadLayerPart"
-        ]
-      },
-      {
-        Sid    = "AllowLambdaPull"
-        Effect = "Allow"
-        Principal = {
-          Service = "lambda.amazonaws.com"
-        }
-        Action = [
-          "ecr:BatchCheckLayerAvailability",
-          "ecr:BatchGetImage",
-          "ecr:GetDownloadUrlForLayer"
-        ]
-      }
-    ]
-  })
-}
-
 data "external" "docker_digest" {
   program = ["sh", "-c", "echo '{\\"digest\\":\\"'$(docker inspect \${var.migration_docker_image_tag} --format '{{.Id}}')'\\"}' "]
 }
 
 locals {
   # Content-based, immutable image tag derived from the local image digest
-  image_tag = replace(data.external.docker_digest.result.digest, "sha256:", "")
+  image_tag = "db-migration-\${replace(data.external.docker_digest.result.digest, "sha256:", "")}"
 }
 
 resource "null_resource" "docker_publish" {
   triggers = {
     docker_digest    = data.external.docker_digest.result.digest
-    repository_url   = aws_ecr_repository.migration_handler.repository_url
+    repository_url   = var.asset_ecr_repository_url
     migration_docker_image_tag = var.migration_docker_image_tag
     image_tag        = local.image_tag
   }
@@ -1850,8 +1773,6 @@ resource "null_resource" "docker_publish" {
       IMAGE_TAG        = self.triggers.image_tag
     }
   }
-
-  depends_on = [aws_ecr_repository_policy.migration_handler]
 }
 
 resource "aws_iam_role" "migration_handler" {
@@ -2082,6 +2003,9 @@ resource "aws_lambda_function" "create_db_user" {
   environment {
     variables = {
       DATABASE_SECRET_ARN = module.aurora.secret_arn
+      DATABASE_HOST       = module.aurora.writer_endpoint
+      DATABASE_PORT       = module.aurora.cluster_port
+      DATABASE_NAME       = module.aurora.database_name
       NODE_EXTRA_CA_CERTS = "/var/runtime/ca-cert.pem"
     }
   }
@@ -2142,7 +2066,7 @@ resource "aws_lambda_function" "migration_handler" {
   package_type  = "Image"
   function_name = local.migration_function_name
   role          = aws_iam_role.migration_handler.arn
-  image_uri     = "\${aws_ecr_repository.migration_handler.repository_url}:\${local.image_tag}"
+  image_uri     = "\${var.asset_ecr_repository_url}:\${local.image_tag}"
   memory_size   = 1024
   timeout       = 300
   architectures = ["arm64"]
@@ -2159,6 +2083,9 @@ resource "aws_lambda_function" "migration_handler" {
   environment {
     variables = {
       DATABASE_SECRET_ARN = module.aurora.secret_arn
+      DATABASE_HOST       = module.aurora.writer_endpoint
+      DATABASE_PORT       = module.aurora.cluster_port
+      DATABASE_NAME       = module.aurora.database_name
     }
   }
 
@@ -2278,7 +2205,8 @@ output "database_runtime_user" {
 
 exports[`ts#rdb generator > should generate terraform modules with MySQL engine 1`] = `
 "# Core Aurora module
-# This module creates an Aurora cluster and a generated admin secret.
+# This module creates an Aurora cluster whose admin credentials are generated
+# and rotated by RDS in Secrets Manager.
 
 terraform {
   required_version = ">= 1.0"
@@ -2286,7 +2214,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "6.60.0"
+      version = "6.62.0"
     }
     null = {
       source  = "hashicorp/null"
@@ -2319,11 +2247,6 @@ variable "vpc_id" {
 
 variable "subnet_ids" {
   description = "Subnet IDs for the Aurora DB subnet group and RDS Proxy. These subnets do not need outbound egress — private isolated subnets are fine."
-  type        = list(string)
-}
-
-variable "lambda_subnet_ids" {
-  description = "Subnet IDs for the credential-rotation Lambda. Must have outbound egress to AWS service endpoints (e.g. Secrets Manager) — use private subnets with a NAT gateway."
   type        = list(string)
 }
 
@@ -2392,12 +2315,6 @@ variable "skip_final_snapshot" {
 
 variable "enable_rds_proxy" {
   description = "Whether to provision an RDS Proxy in front of the Aurora cluster."
-  type        = bool
-  default     = true
-}
-
-variable "enable_credential_rotation" {
-  description = "Whether to enable automatic credential rotation for the admin secret."
   type        = bool
   default     = true
 }
@@ -2494,6 +2411,8 @@ resource "aws_kms_key" "database" {
   description         = "KMS key for Aurora cluster \${var.name}"
   enable_key_rotation = var.enable_key_rotation
 
+  deletion_window_in_days = 30
+
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -2519,6 +2438,20 @@ resource "aws_kms_key" "database" {
           "kms:GenerateDataKey*",
           "kms:DescribeKey",
           "kms:CreateGrant"
+        ]
+        Resource = "*"
+      },
+      {
+        Sid    = "AllowSecretsManagerService"
+        Effect = "Allow"
+        Principal = {
+          Service = "secretsmanager.amazonaws.com"
+        }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
         ]
         Resource = "*"
       }
@@ -2575,35 +2508,6 @@ resource "aws_db_subnet_group" "database" {
   })
 }
 
-resource "random_password" "master_password" {
-  length           = 32
-  special          = true
-  override_special = "!#$%&*()-_=+[]{}<>:?"
-}
-
-resource "aws_secretsmanager_secret" "credentials" {
-  #checkov:skip=CKV2_AWS_57:Rotation is configured via aws_cloudformation_stack.credentials_rotation using the AWS::SecretsManager-2024-09-16 transform; Checkov cannot resolve rotation schedules created by CloudFormation transforms
-  name_prefix = "\${var.name}-aurora-credentials-"
-  kms_key_id  = aws_kms_key.database.arn
-
-  tags = merge(var.tags, {
-    Name = "\${var.name}-aurora-credentials"
-  })
-}
-
-resource "aws_secretsmanager_secret_version" "credentials" {
-  secret_id = aws_secretsmanager_secret.credentials.id
-  secret_string = jsonencode({
-    engine              = var.engine == "aurora-mysql" ? "mysql" : "postgres"
-    username            = var.admin_user
-    password            = random_password.master_password.result
-    host                = aws_rds_cluster.database.endpoint
-    port                = aws_rds_cluster.database.port
-    dbname              = var.database_name
-    dbClusterIdentifier = aws_rds_cluster.database.cluster_identifier
-  })
-}
-
 resource "aws_rds_cluster" "database" {
   #checkov:skip=CKV2_AWS_27:Query logging is enabled by default via enable_cloudwatch_logs; checkov cannot resolve the conditional count expression on aws_rds_cluster_parameter_group.database
   #checkov:skip=CKV_AWS_139:Deletion protection is enabled but checkov is unable to detect it correctly
@@ -2612,7 +2516,8 @@ resource "aws_rds_cluster" "database" {
   engine_version                      = coalesce(var.engine_version, local.default_engine_version)
   database_name                       = var.database_name
   master_username                     = var.admin_user
-  master_password                     = random_password.master_password.result
+  manage_master_user_password         = true
+  master_user_secret_kms_key_id       = aws_kms_key.database.arn
   db_subnet_group_name                = aws_db_subnet_group.database.name
   db_cluster_parameter_group_name     = var.enable_cloudwatch_logs ? aws_rds_cluster_parameter_group.database[0].name : null
   vpc_security_group_ids              = [aws_security_group.database.id]
@@ -2636,6 +2541,10 @@ resource "aws_rds_cluster" "database" {
   tags = merge(var.tags, {
     Name = "\${var.name}-aurora"
   })
+
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_rds_cluster_instance" "database" {
@@ -2658,75 +2567,6 @@ resource "aws_rds_cluster_instance" "database" {
   tags = merge(var.tags, {
     Name = "\${var.name}-aurora-\${count.index + 1}"
   })
-}
-
-resource "aws_security_group" "rotation" {
-  #checkov:skip=CKV2_AWS_5:Security group is attached to the hosted rotation Lambda created by AWS::SecretsManager::RotationSchedule; Checkov cannot resolve resources created by the CloudFormation transform
-  count       = var.enable_credential_rotation ? 1 : 0
-  name_prefix = "\${var.name}-aurora-rotation-"
-  description = "Security group for Aurora secret rotation \${var.name}"
-  vpc_id      = var.vpc_id
-
-  tags = merge(var.tags, {
-    Name = "\${var.name}-aurora-rotation"
-  })
-}
-
-resource "aws_vpc_security_group_egress_rule" "rotation_to_database" {
-  count                        = var.enable_credential_rotation ? 1 : 0
-  security_group_id            = aws_security_group.rotation[0].id
-  referenced_security_group_id = aws_security_group.database.id
-  from_port                    = coalesce(var.port, local.default_port)
-  to_port                      = coalesce(var.port, local.default_port)
-  ip_protocol                  = "tcp"
-  description                  = "Allow outbound database traffic from secret rotation Lambda"
-}
-
-resource "aws_vpc_security_group_ingress_rule" "rotation_to_database" {
-  count                        = var.enable_credential_rotation ? 1 : 0
-  security_group_id            = aws_security_group.database.id
-  referenced_security_group_id = aws_security_group.rotation[0].id
-  from_port                    = coalesce(var.port, local.default_port)
-  to_port                      = coalesce(var.port, local.default_port)
-  ip_protocol                  = "tcp"
-  description                  = "Allow inbound database traffic from secret rotation Lambda"
-}
-
-resource "aws_cloudformation_stack" "credentials_rotation" {
-  #checkov:skip=CKV_AWS_124:SNS event notifications are not required for the credentials rotation stack
-  count = var.enable_credential_rotation ? 1 : 0
-  name  = "\${local.cluster_name}-credentials-rotation"
-
-  capabilities = ["CAPABILITY_IAM", "CAPABILITY_AUTO_EXPAND"]
-
-  template_body = jsonencode({
-    AWSTemplateFormatVersion = "2010-09-09"
-    Transform                = "AWS::SecretsManager-2024-09-16"
-    Resources = {
-      CredentialsRotationSchedule = {
-        Type = "AWS::SecretsManager::RotationSchedule"
-        Properties = {
-          SecretId = aws_secretsmanager_secret.credentials.arn
-          HostedRotationLambda = {
-            RotationType        = var.engine == "aurora-mysql" ? "MySQLSingleUser" : "PostgreSQLSingleUser"
-            RotationLambdaName  = "\${local.cluster_name}-credentials-rotation"
-            VpcSecurityGroupIds = aws_security_group.rotation[0].id
-            VpcSubnetIds        = join(",", var.lambda_subnet_ids)
-          }
-          RotationRules = {
-            AutomaticallyAfterDays = 30
-          }
-        }
-      }
-    }
-  })
-
-  depends_on = [
-    aws_secretsmanager_secret_version.credentials,
-    aws_rds_cluster_instance.database,
-    aws_vpc_security_group_egress_rule.rotation_to_database,
-    aws_vpc_security_group_ingress_rule.rotation_to_database,
-  ]
 }
 
 resource "aws_iam_role" "proxy" {
@@ -2967,6 +2807,11 @@ output "cluster_endpoint" {
   value       = var.enable_rds_proxy ? aws_db_proxy.aurora[0].endpoint : aws_rds_cluster.database.endpoint
 }
 
+output "writer_endpoint" {
+  description = "Writer endpoint of the Aurora cluster itself, bypassing the RDS Proxy. Used by the admin-credentialled handlers, which connect directly to the cluster."
+  value       = aws_rds_cluster.database.endpoint
+}
+
 output "reader_endpoint" {
   description = "Reader endpoint of the Aurora cluster."
   value       = aws_rds_cluster.database.reader_endpoint
@@ -2993,12 +2838,12 @@ output "proxy_role_name" {
 }
 
 output "secret_arn" {
-  description = "ARN of the generated admin credentials secret."
-  value       = aws_secretsmanager_secret.credentials.arn
+  description = "ARN of the RDS-managed admin credentials secret. Its value is a JSON object with username and password only — connection details come from this module's other outputs."
+  value       = one(aws_rds_cluster.database.master_user_secret[*].secret_arn)
 }
 
 output "kms_key_arn" {
-  description = "ARN of the KMS key protecting Aurora and the generated secret."
+  description = "ARN of the KMS key protecting Aurora and its admin credentials secret."
   value       = aws_kms_key.database.arn
 }
 
@@ -3023,8 +2868,8 @@ output "database_name" {
 }
 
 output "admin_user" {
-  description = "Admin username stored in the generated secret."
-  value       = jsondecode(aws_secretsmanager_secret_version.credentials.secret_string).username
+  description = "Admin username stored in the RDS-managed credentials secret."
+  value       = aws_rds_cluster.database.master_username
 }
 "
 `;
@@ -3040,7 +2885,11 @@ exports[`ts#rdb generator > should generate terraform modules with MySQL engine 
     }
     aws = {
       source  = "hashicorp/aws"
-      version = "6.60.0"
+      version = "6.62.0"
+    }
+    external = {
+      source  = "hashicorp/external"
+      version = "2.4.1"
     }
     null = {
       source  = "hashicorp/null"
@@ -3116,16 +2965,10 @@ variable "enable_rds_proxy" {
   default     = true
 }
 
-variable "enable_credential_rotation" {
-  description = "Whether to enable automatic credential rotation for the admin secret."
+variable "enable_cloudwatch_logs" {
+  description = "Whether to export Aurora engine logs to CloudWatch. PostgreSQL logs DDL statements only (log_statement=ddl); MySQL enables Advanced Auditing scoped to connections and DDL (server_audit_events=CONNECT,QUERY_DDL). Neither logs statement parameter values, to avoid leaking PII into log data."
   type        = bool
   default     = true
-}
-
-variable "enable_cloudwatch_logs" {
-  description = "Whether to export Aurora engine logs to CloudWatch. PostgreSQL also enables verbose statement logging."
-  type        = bool
-  default     = false
 }
 
 variable "enable_performance_insights" {
@@ -3146,6 +2989,12 @@ variable "enable_backup" {
   default     = false
 }
 
+variable "enable_key_rotation" {
+  description = "Whether to enable automatic key rotation on the KMS key used to encrypt the Aurora cluster and its credentials secret."
+  type        = bool
+  default     = true
+}
+
 variable "tags" {
   description = "Tags to apply to all resources."
   type        = map(string)
@@ -3161,6 +3010,11 @@ variable "migration_docker_image_tag" {
 
 variable "asset_bucket_name" {
   description = "Name of the shared asset S3 bucket used to stage the Lambda deployment zip. Instantiate the \`core/asset-bucket\` module once per deployment and pass its \`bucket_name\` output here."
+  type        = string
+}
+
+variable "asset_ecr_repository_url" {
+  description = "URL of the shared asset ECR repository the Lambda container images are published to. Instantiate the \`core/asset-ecr\` module once per deployment and pass its \`repository_url\` output here."
   type        = string
 }
 
@@ -3188,7 +3042,6 @@ module "aurora" {
   name                                  = "db"
   vpc_id                                = var.vpc_id
   subnet_ids                            = var.database_subnet_ids
-  lambda_subnet_ids                     = var.lambda_subnet_ids
   engine                                = "aurora-mysql"
   engine_version                        = var.engine_version
   database_name                         = "database_name"
@@ -3200,11 +3053,11 @@ module "aurora" {
   deletion_protection                   = var.deletion_protection
   skip_final_snapshot                   = var.skip_final_snapshot
   enable_rds_proxy                      = var.enable_rds_proxy
-  enable_credential_rotation            = var.enable_credential_rotation
   enable_cloudwatch_logs                = var.enable_cloudwatch_logs
   enable_performance_insights           = var.enable_performance_insights
   performance_insights_retention_period = var.performance_insights_retention_period
   enable_backup                         = var.enable_backup
+  enable_key_rotation                   = var.enable_key_rotation
   tags                                  = var.tags
 }
 
@@ -3218,17 +3071,10 @@ resource "aws_iam_role_policy" "proxy_db_user_connect" {
     Statement = [
       {
         Effect = "Allow"
-        Action = [
-          "secretsmanager:GetSecretValue"
+        Action = ["rds-db:connect"]
+        Resource = [
+          "arn:aws:rds-db:\${data.aws_region.current.region}:\${data.aws_caller_identity.current.account_id}:dbuser:\${module.aurora.cluster_resource_id}/\${local.database_runtime_user}"
         ]
-        Resource = [module.aurora.secret_arn]
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "kms:Decrypt"
-        ]
-        Resource = [module.aurora.kms_key_arn]
       }
     ]
   })
@@ -3263,69 +3109,19 @@ module "add_rdb_to_runtime_config" {
   }
 }
 
-resource "aws_ecr_repository" "migration_handler" {
-  #checkov:skip=CKV_AWS_136:AES256 encryption is sufficient for ECR repositories
-  name                 = "db-migration-\${random_string.suffix.result}"
-  image_tag_mutability = "IMMUTABLE"
-  force_delete         = true
-
-  image_scanning_configuration {
-    scan_on_push = true
-  }
-
-  tags = var.tags
-}
-
-resource "aws_ecr_repository_policy" "migration_handler" {
-  repository = aws_ecr_repository.migration_handler.name
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid    = "AllowPushPull"
-        Effect = "Allow"
-        Principal = {
-          AWS = "arn:aws:iam::\${data.aws_caller_identity.current.account_id}:root"
-        }
-        Action = [
-          "ecr:BatchCheckLayerAvailability",
-          "ecr:CompleteLayerUpload",
-          "ecr:GetDownloadUrlForLayer",
-          "ecr:InitiateLayerUpload",
-          "ecr:PutImage",
-          "ecr:UploadLayerPart"
-        ]
-      },
-      {
-        Sid    = "AllowLambdaPull"
-        Effect = "Allow"
-        Principal = {
-          Service = "lambda.amazonaws.com"
-        }
-        Action = [
-          "ecr:BatchCheckLayerAvailability",
-          "ecr:BatchGetImage",
-          "ecr:GetDownloadUrlForLayer"
-        ]
-      }
-    ]
-  })
-}
-
 data "external" "docker_digest" {
   program = ["sh", "-c", "echo '{\\"digest\\":\\"'$(docker inspect \${var.migration_docker_image_tag} --format '{{.Id}}')'\\"}' "]
 }
 
 locals {
   # Content-based, immutable image tag derived from the local image digest
-  image_tag = replace(data.external.docker_digest.result.digest, "sha256:", "")
+  image_tag = "db-migration-\${replace(data.external.docker_digest.result.digest, "sha256:", "")}"
 }
 
 resource "null_resource" "docker_publish" {
   triggers = {
     docker_digest    = data.external.docker_digest.result.digest
-    repository_url   = aws_ecr_repository.migration_handler.repository_url
+    repository_url   = var.asset_ecr_repository_url
     migration_docker_image_tag = var.migration_docker_image_tag
     image_tag        = local.image_tag
   }
@@ -3343,8 +3139,6 @@ resource "null_resource" "docker_publish" {
       IMAGE_TAG        = self.triggers.image_tag
     }
   }
-
-  depends_on = [aws_ecr_repository_policy.migration_handler]
 }
 
 resource "aws_iam_role" "migration_handler" {
@@ -3575,6 +3369,9 @@ resource "aws_lambda_function" "create_db_user" {
   environment {
     variables = {
       DATABASE_SECRET_ARN = module.aurora.secret_arn
+      DATABASE_HOST       = module.aurora.writer_endpoint
+      DATABASE_PORT       = module.aurora.cluster_port
+      DATABASE_NAME       = module.aurora.database_name
       NODE_EXTRA_CA_CERTS = "/var/runtime/ca-cert.pem"
     }
   }
@@ -3635,7 +3432,7 @@ resource "aws_lambda_function" "migration_handler" {
   package_type  = "Image"
   function_name = local.migration_function_name
   role          = aws_iam_role.migration_handler.arn
-  image_uri     = "\${aws_ecr_repository.migration_handler.repository_url}:\${local.image_tag}"
+  image_uri     = "\${var.asset_ecr_repository_url}:\${local.image_tag}"
   memory_size   = 1024
   timeout       = 300
   architectures = ["arm64"]
@@ -3652,6 +3449,9 @@ resource "aws_lambda_function" "migration_handler" {
   environment {
     variables = {
       DATABASE_SECRET_ARN = module.aurora.secret_arn
+      DATABASE_HOST       = module.aurora.writer_endpoint
+      DATABASE_PORT       = module.aurora.cluster_port
+      DATABASE_NAME       = module.aurora.database_name
     }
   }
 
@@ -4018,6 +3818,24 @@ export type DatabaseSecret = {
   port: number;
 };
 
+/**
+ * Connection details for the admin credentials secret. RDS-managed secrets hold
+ * only \`username\` and \`password\`, so the host, port and database name are taken
+ * from the environment when the secret omits them.
+ */
+type SecretConnectionOverrides = Partial<
+  Omit<DatabaseSecret, 'username' | 'password'>
+>;
+
+const connectionOverridesFromEnv = (): SecretConnectionOverrides => {
+  const { DATABASE_HOST, DATABASE_PORT, DATABASE_NAME } = process.env;
+  return {
+    ...(DATABASE_HOST ? { host: DATABASE_HOST } : {}),
+    ...(DATABASE_PORT ? { port: Number(DATABASE_PORT) } : {}),
+    ...(DATABASE_NAME ? { dbname: DATABASE_NAME } : {}),
+  };
+};
+
 const databaseConfigPromises: Record<string, Promise<DatabaseConfig>> = {};
 
 const getSecretValue = async (secretArn: string): Promise<string> => {
@@ -4044,7 +3862,18 @@ export const getDatabaseSecret = async (): Promise<DatabaseSecret> => {
     );
   }
 
-  return JSON.parse(await getSecretValue(secretArn)) as DatabaseSecret;
+  const secret = JSON.parse(await getSecretValue(secretArn)) as DatabaseSecret;
+  const secretWithConnection = { ...secret, ...connectionOverridesFromEnv() };
+
+  for (const key of ['host', 'port', 'dbname'] as const) {
+    if (secretWithConnection[key] == null) {
+      throw new Error(
+        \`Database secret is missing \${key} and no override was provided in the environment.\`,
+      );
+    }
+  }
+
+  return secretWithConnection;
 };
 
 const loadDatabaseConfig = async (
@@ -4332,6 +4161,20 @@ export interface AuroraDatabaseProps extends _AuroraDatabaseProps {
    * @default true
    */
   readonly enablePerformanceInsights?: boolean;
+
+  /**
+   * Minimum Aurora Serverless v2 ACUs.
+   *
+   * @default 0.5
+   */
+  readonly serverlessV2MinCapacity?: number;
+
+  /**
+   * Maximum Aurora Serverless v2 ACUs.
+   *
+   * @default 4
+   */
+  readonly serverlessV2MaxCapacity?: number;
 }
 
 /**
@@ -4361,6 +4204,8 @@ export abstract class AuroraDatabase extends Construct {
       enableKeyRotation = true,
       enableCloudwatchLogs = true,
       enablePerformanceInsights = true,
+      serverlessV2MinCapacity = 0.5,
+      serverlessV2MaxCapacity = 4,
       engine,
       engineVersion,
       ...clusterProps
@@ -4376,6 +4221,8 @@ export abstract class AuroraDatabase extends Construct {
       vpc,
       vpcSubnets,
       engine: engine.clusterEngine(engineVersion ?? engine.defaultVersion),
+      serverlessV2MinCapacity,
+      serverlessV2MaxCapacity,
       writer:
         writer ??
         ClusterInstance.serverlessV2('writer', {
@@ -4622,7 +4469,7 @@ export class Db extends AuroraDatabase {
       ...baseProps,
       code: Code.fromAsset(createDbUserBundleDir),
       handler: 'index.handler',
-      runtime: Runtime.NODEJS_LATEST,
+      runtime: Runtime.NODEJS_24_X,
       environment: {
         NODE_EXTRA_CA_CERTS: '/var/runtime/ca-cert.pem',
       },
@@ -4690,7 +4537,7 @@ WORKDIR \${LAMBDA_TASK_ROOT}
 # binary directly, and npm's bundled dependencies would otherwise carry known
 # HIGH/CRITICAL vulnerabilities into the image.
 RUN printf 'allow-scripts[]=prisma\\nallow-scripts[]=@prisma/engines\\n' > .npmrc \\
-    && npm install prisma@7.9.1 \\
+    && npm install prisma@7.10.0 \\
     && rm .npmrc \\
     && npm uninstall -g npm
 

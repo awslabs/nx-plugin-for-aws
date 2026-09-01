@@ -2,8 +2,9 @@
 title: Triển khai DynamoDB Table của bạn
 ---
 import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
 
-Trình tạo DynamoDB tạo ra cơ sở hạ tầng CDK hoặc Terraform dựa trên `iac` bạn đã chọn.
+Generator DynamoDB tạo cơ sở hạ tầng CDK hoặc Terraform dựa trên `iac` bạn đã chọn.
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -25,7 +26,7 @@ export class ApplicationStack extends Stack {
 - `pk` (partition key) và `sk` (sort key), cả hai đều là kiểu `String`
 - Global Secondary Indexes như được định nghĩa trong `config.json`
 - Thanh toán theo yêu cầu (`PAY_PER_REQUEST`)
-- Mã hóa KMS do khách hàng quản lý với tự động xoay khóa
+- Mã hóa KMS do khách hàng quản lý với tự động xoay vòng khóa
 - Khôi phục theo thời điểm được bật
 - Bảo vệ xóa được bật
 - Tên bảng được đăng ký trong Runtime Config dưới namespace `dynamodb` trong AWS AppConfig
@@ -43,29 +44,44 @@ module "my_table" {
 - `pk` (partition key) và `sk` (sort key), cả hai đều là kiểu `String`
 - Global Secondary Indexes như được định nghĩa trong `config.json`
 - Thanh toán theo yêu cầu (`PAY_PER_REQUEST`)
-- Mã hóa KMS do khách hàng quản lý với tự động xoay khóa
+- Mã hóa KMS do khách hàng quản lý với tự động xoay vòng khóa
 - Khôi phục theo thời điểm được bật
-- Bảo vệ xóa được bật
-- Tên bảng được đăng ký trong Runtime Config
+- Bảo vệ xóa được bật, cùng với bảo vệ vòng đời `prevent_destroy`
+- Tên bảng được đăng ký trong Runtime Config dưới namespace `dynamodb` trong AWS AppConfig
+
+Module `core/runtime-config/appconfig` hiển thị namespace `dynamodb` theo mặc định, vì vậy tên bảng được triển khai mà không cần cấu hình thêm. Nếu bạn truyền `namespaces` vào module đó một cách rõ ràng, hãy giữ `dynamodb` trong danh sách — nếu không, không có configuration profile nào được tạo cho nó và table client được tạo ra không thể phân giải tên bảng.
 </Fragment>
 </Infrastructure>
 
 ### Bảo vệ Xóa
 
-Bảo vệ xóa được bật mặc định để ngăn chặn việc xóa bảng một cách vô tình.
+Bảng được bảo vệ bởi hai biện pháp bảo vệ độc lập, do đó việc tắt một trong hai không thể xóa dữ liệu của bạn:
 
-#### Tắt Bảo vệ Xóa
+<Infrastructure>
+<Fragment slot="cdk">
+- `deletionProtection`, được thực thi bởi DynamoDB.
+- `RemovalPolicy.RETAIN`, được thực thi bởi CloudFormation, giữ bảng tại chỗ khi nó bị xóa khỏi stack.
+</Fragment>
+<Fragment slot="terraform">
+- `deletion_protection_enabled`, được thực thi bởi DynamoDB.
+- `lifecycle { prevent_destroy = true }` trên bảng trong `common/terraform/src/core/dynamodb/dynamodb.tf`, được thực thi bởi Terraform, làm thất bại bất kỳ kế hoạch nào sẽ phá hủy bảng.
+</Fragment>
+</Infrastructure>
 
-Tắt nó cho các môi trường mà việc xóa bảng được mong đợi, chẳng hạn như các stack phát triển hoặc xem trước có thời gian tồn tại ngắn.
+#### Xóa Bảng
+
+Vô hiệu hóa bảo vệ cho các môi trường mà việc xóa bảng được mong đợi, chẳng hạn như các stack phát triển hoặc xem trước có thời gian tồn tại ngắn.
 
 <Infrastructure>
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
 import { MyTable } from '@my-scope/common-constructs';
 
 const table = new MyTable(this, 'Table', {
   deletionProtection: false,
+  removalPolicy: RemovalPolicy.DESTROY,
 });
 ```
 </Fragment>
@@ -77,6 +93,22 @@ module "my_table" {
   deletion_protection_enabled = false
 }
 ```
+
+`prevent_destroy` phải là một giá trị cố định — Terraform không cho phép nó tham chiếu đến một biến — vì vậy nó không thể được tắt từ `main.tf`. Cũng xóa khối `lifecycle` khỏi bảng trong `common/terraform/src/core/dynamodb/dynamodb.tf`:
+
+```hcl title="packages/common/terraform/src/core/dynamodb/dynamodb.tf" del={4-6}
+resource "aws_dynamodb_table" "table" {
+  # ...
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+```
+
+:::caution
+Module này được chia sẻ bởi mọi bảng trong workspace của bạn, vì vậy việc xóa khối này sẽ xóa biện pháp bảo vệ đó cho tất cả chúng.
+:::
 </Fragment>
 </Infrastructure>
 
@@ -113,7 +145,7 @@ module "my_table" {
 
 [Khôi phục theo thời điểm](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Point-in-time-recovery.html) được bật mặc định, cho phép bạn khôi phục bảng về bất kỳ thời điểm nào trong 35 ngày qua.
 
-#### Tắt Khôi phục Theo Thời điểm
+#### Vô hiệu hóa Khôi phục Theo Thời điểm
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -137,30 +169,8 @@ module "my_table" {
 </Fragment>
 </Infrastructure>
 
-### Xoay Khóa Mã hóa
+### Mã hóa
 
-Khóa KMS được sử dụng để mã hóa bảng có tính năng tự động xoay khóa được bật mặc định. Tắt nó nếu chính sách bảo mật của bạn quản lý việc xoay khóa từ bên ngoài.
+Bảng được mã hóa với khóa KMS do khách hàng quản lý theo mặc định, được tạo tự động cho bạn. Chuyển sang khóa do AWS quản lý, khóa thuộc sở hữu của AWS, hoặc mang khóa KMS của riêng bạn, nếu bạn quản lý mã hóa theo cách khác.
 
-#### Tắt Xoay Khóa Mã hóa
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyTable } from '@my-scope/common-constructs';
-
-const table = new MyTable(this, 'Table', {
-  enableKeyRotation: false,
-});
-```
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "my_table" {
-  source              = "../../common/terraform/src/app/dynamodb/my-table"
-  enable_key_rotation = false
-}
-```
-</Fragment>
-</Infrastructure>
+<Snippet name="dynamodb/encryption-options" parentHeading="Mã hóa" />

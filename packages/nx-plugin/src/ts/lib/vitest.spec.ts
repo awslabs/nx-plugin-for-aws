@@ -3,11 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import { declareDependencies } from '../../utils/declared-dependencies';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { expectTypeScriptToCompile } from '../../utils/test/ts.spec';
-import tsProjectGenerator from './generator';
-import { configureVitest, VITEST_DEPENDENCIES } from './vitest';
+import { declareDependencies } from '../../utils/declared-dependencies.js';
+import { expectTypeScriptToCompile } from '../../utils/test/ts.spec.js';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import tsProjectGenerator from './generator.js';
+import { configureVitest, VITEST_DEPENDENCIES } from './vitest.js';
 
 const declaration = declareDependencies()({ ts: [...VITEST_DEPENDENCIES] });
 
@@ -60,6 +60,76 @@ describe('vitest utils', () => {
     // `configLoader: 'native'` and will reject once that becomes the default.
     expect(content).toContain('root: import.meta.dirname');
     expect(content).not.toContain('root: __dirname');
+  });
+
+  it('should write coverage under the project dist directory', async () => {
+    await configureVitest(
+      tree,
+      {
+        dir: 'test',
+        fullyQualifiedName: 'test',
+      },
+      declaration,
+    );
+    const content = tree.read('test/vitest.config.mts', 'utf8');
+    // Coverage inside the project would be formatted by the `format` target and
+    // counted as an input to every task in the project.
+    expect(content).toContain(
+      `reportsDirectory: '../dist/test/test-output/vitest/coverage'`,
+    );
+    expect(content).not.toContain(`'./test-output`);
+  });
+
+  it('should resolve the coverage depth of a nested project', async () => {
+    tree.write(
+      'packages/nested/lib/vitest.config.mts',
+      wrapConfig(`test: {
+    coverage: {
+      reportsDirectory: './test-output/vitest/coverage',
+      provider: 'v8' as const,
+    },
+  },`),
+    );
+
+    await configureVitest(
+      tree,
+      {
+        dir: 'packages/nested/lib',
+        fullyQualifiedName: '@proj/lib',
+      },
+      declaration,
+    );
+
+    expect(
+      tree.read('packages/nested/lib/vitest.config.mts', 'utf8'),
+    ).toContain(
+      `reportsDirectory: '../../../dist/packages/nested/lib/test-output/vitest/coverage'`,
+    );
+  });
+
+  it('should leave a coverage directory the user repointed alone', async () => {
+    tree.write(
+      'test/vitest.config.mts',
+      wrapConfig(`test: {
+    coverage: {
+      reportsDirectory: './my-coverage',
+      provider: 'v8' as const,
+    },
+  },`),
+    );
+
+    await configureVitest(
+      tree,
+      {
+        dir: 'test',
+        fullyQualifiedName: 'test',
+      },
+      declaration,
+    );
+
+    expect(tree.read('test/vitest.config.mts', 'utf8')).toContain(
+      `reportsDirectory: './my-coverage'`,
+    );
   });
 
   it('should generate a valid vitest.config.mts without a double comma', () => {

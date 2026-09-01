@@ -13,7 +13,7 @@ import Snippet from '@components/snippet.astro';
 
 Generator Xác thực Website React thêm xác thực vào website React của bạn bằng cách sử dụng [Amazon Cognito](https://aws.amazon.com/cognito/).
 
-Generator này cấu hình cơ sở hạ tầng CDK hoặc Terraform để tạo Cognito User Pool và Identity Pool liên quan, cũng như giao diện người dùng được lưu trữ để xử lý luồng đăng nhập người dùng và tích hợp với website React của bạn.
+Generator này cấu hình cơ sở hạ tầng CDK hoặc Terraform để tạo Cognito User Pool và Identity Pool liên kết, cũng như giao diện người dùng được lưu trữ để xử lý luồng đăng nhập người dùng và tích hợp nó với website React của bạn.
 
 ## Cách sử dụng
 
@@ -27,7 +27,7 @@ Bạn có thể thêm xác thực vào website React của mình theo hai cách:
 
 <GeneratorParameters generator="ts#website#auth" />
 
-## Đầu ra của Generator
+## Kết quả của Generator
 
 Bạn sẽ tìm thấy các thay đổi sau trong website React của mình:
 
@@ -106,9 +106,9 @@ browser -> backend: IAM/Cognito
 
 #### Bảo vệ khỏi mối đe dọa
 
-User Pool được tạo trên [gói tính năng Plus](https://docs.aws.amazon.com/cognito/latest/developerguide/feature-plans-features-plus.html) của Cognito với [bảo vệ khỏi mối đe dọa](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pool-settings-threat-protection.html) được đặt ở chế độ `AUDIT` cho xác thực tiêu chuẩn. Trong chế độ kiểm toán, Cognito gán một mức độ rủi ro cho mỗi lần đăng nhập và ghi lại đánh giá vào CloudWatch mà không chặn người dùng.
+User Pool được tạo trên [gói tính năng Plus](https://docs.aws.amazon.com/cognito/latest/developerguide/feature-plans-features-plus.html) của Cognito với [bảo vệ khỏi mối đe dọa](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pool-settings-threat-protection.html) được đặt ở chế độ `AUDIT` cho xác thực tiêu chuẩn. Ở chế độ kiểm toán, Cognito gán một mức độ rủi ro cho mỗi lần đăng nhập và ghi lại đánh giá vào CloudWatch mà không chặn người dùng.
 
-Sau khi bạn đã quan sát các đánh giá rủi ro cho người dùng của mình, bạn có thể chuyển sang thực thi đầy đủ chức năng để tự động phản hồi hoạt động rủi ro (ví dụ: yêu cầu MFA hoặc chặn đăng nhập):
+Sau khi bạn đã quan sát các đánh giá rủi ro cho người dùng của mình, bạn có thể chuyển sang chế độ thực thi đầy đủ chức năng để tự động phản hồi hoạt động rủi ro (ví dụ: yêu cầu MFA hoặc chặn đăng nhập):
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -119,9 +119,45 @@ Sau khi bạn đã quan sát các đánh giá rủi ro cho người dùng của 
 </Fragment>
 </Infrastructure>
 
+#### Xác thực đa yếu tố (MFA)
+
+Theo mặc định, người dùng phải cấu hình MFA (mã SMS hoặc mật khẩu một lần dựa trên thời gian) trước khi họ có thể đăng nhập. Bạn có thể làm cho MFA là tùy chọn, tắt hoàn toàn hoặc hạn chế các phương thức yếu tố thứ hai có sẵn:
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts
+import { Mfa } from 'aws-cdk-lib/aws-cognito';
+
+new UserIdentity(this, 'Identity', {
+  mfa: Mfa.OPTIONAL,
+  mfaSecondFactor: { sms: false, otp: true },
+});
+```
+
+`mfa` chấp nhận `Mfa.OFF` / `Mfa.OPTIONAL` / `Mfa.REQUIRED`. `mfaSecondFactor.sms` và `mfaSecondFactor.otp` bật hoặc tắt từng phương thức yếu tố thứ hai một cách độc lập; chúng không có hiệu lực khi `mfa` là `Mfa.OFF`. Đặt `mfa: Mfa.REQUIRED` với cả hai phương thức bị tắt sẽ bị từ chối tại thời điểm synth, vì không ai có thể hoàn thành đăng nhập.
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+
+  mfa = "OPTIONAL"
+  mfa_second_factor_sms = false
+  mfa_second_factor_otp = true
+}
+```
+
+`mfa` chấp nhận `"OFF"` / `"OPTIONAL"` / `"ON"`. `mfa_second_factor_sms` và `mfa_second_factor_otp` bật hoặc tắt từng phương thức yếu tố thứ hai một cách độc lập; chúng không có hiệu lực khi `mfa` là `"OFF"`.
+</Fragment>
+</Infrastructure>
+
+:::caution[SMS MFA được liên kết với xác minh số điện thoại]
+Cognito từ chối xác minh số điện thoại dựa trên SMS trừ khi SMS cũng là một phương thức MFA được bật bất cứ khi nào MFA không tắt, trong cả CDK và Terraform. Do đó, việc tắt `mfaSecondFactor.sms` / `mfa_second_factor_sms` trong khi `mfa` đang bật cũng sẽ tắt xác minh số điện thoại dựa trên SMS cho user pool.
+:::
+
 #### Web Application Firewall (WAF)
 
-Theo mặc định, User Pool được liên kết với [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACL sử dụng các nhóm quy tắc được quản lý `AWSManagedRulesCommonRuleSet` và `AWSManagedRulesKnownBadInputsRuleSet`. Bạn có thể tắt tính năng này nếu muốn quản lý Web ACL của riêng mình hoặc không yêu cầu:
+Theo mặc định, User Pool được liên kết với một [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACL sử dụng các nhóm quy tắc được quản lý `AWSManagedRulesCommonRuleSet` và `AWSManagedRulesKnownBadInputsRuleSet`. Bạn có thể tắt điều này nếu muốn quản lý Web ACL của riêng mình hoặc không yêu cầu:
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -141,7 +177,7 @@ module "user_identity" {
 </Infrastructure>
 
 :::caution[`EC2MetaDataSSRF_QUERYARGUMENTS` được đặt thành Count]
-Quy tắc này đánh dấu các địa chỉ loopback trong tham số truy vấn là các nỗ lực [SSRF](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-list.html), điều này sẽ chặn đăng nhập cục bộ vì Hosted UI nhận được `redirect_uri` là `localhost`. Do đó, nó được đặt thành [Count](https://docs.aws.amazon.com/waf/latest/developerguide/web-acl-rule-action.html#web-acl-rule-action-count) trong khi các URL callback cục bộ được cấu hình — các kết quả khớp vẫn được ghi lại và mọi quy tắc khác đều chặn. Xóa các URL callback cục bộ để khôi phục nó về Block.
+Quy tắc này đánh dấu các địa chỉ loopback trong tham số truy vấn là các nỗ lực [SSRF](https://docs.aws.amazon.com/waf/latest/developerguide/aws-managed-rule-groups-list.html), điều này sẽ chặn đăng nhập cục bộ vì Hosted UI nhận một `redirect_uri` là `localhost`. Do đó, nó được đặt thành [Count](https://docs.aws.amazon.com/waf/latest/developerguide/web-acl-rule-action.html#web-acl-rule-action-count) trong khi các URL callback cục bộ được cấu hình — các kết quả khớp vẫn được ghi lại và mọi quy tắc khác đều chặn. Xóa các URL callback cục bộ để khôi phục nó về Block.
 :::
 
 ## Sử dụng Cơ sở hạ tầng
@@ -199,7 +235,7 @@ Module user identity tự động thêm <Link path="guides/react-website#runtime
 </Infrastructure>
 
 :::caution[Xóa URL callback localhost cho môi trường production]
-User Pool client được tạo cho phép URL phân phối CloudFront của bạn (và bất kỳ tên miền tùy chỉnh nào được cấu hình trên đó) làm URL callback/logout OAuth, cộng với `http://localhost:4200` và `http://localhost:4300` để phát triển cục bộ với pool đã triển khai.
+User Pool client được tạo cho phép URL phân phối CloudFront của bạn (và bất kỳ tên miền tùy chỉnh nào được cấu hình trên đó) làm URL callback/logout OAuth, cộng với các URL dev-server cục bộ và preview của mỗi website được kết nối (ví dụ: `http://localhost:4200` và `http://localhost:4300` cho website đầu tiên được tạo trong workspace) để phát triển cục bộ với pool đã triển khai. Mỗi website được tạo bằng `ts#website` được gán các cổng riêng biệt, vì vậy một workspace có nhiều website sẽ có nhiều hơn một cặp `http://localhost:<port>` được cho phép ở đây.
 
 Khuyến nghị **xóa các URL callback/logout `http://localhost` cho các giai đoạn production**, giữ danh sách cho phép giới hạn ở các nguồn gốc ứng dụng thực của bạn.
 
@@ -229,7 +265,9 @@ export class ApplicationStack extends Stack {
     super(scope, id);
 
     const identity = new UserIdentity(this, 'Identity');
-    const api = new MyApi(this, 'MyApi');
+    const api = new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this).build(),
+    });
 
     api.grantInvokeAccess(identity.identityPool.authenticatedRole);
 

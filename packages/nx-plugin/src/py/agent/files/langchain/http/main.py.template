@@ -2,14 +2,11 @@ import uuid
 
 import uvicorn
 from bedrock_agentcore.runtime.models import PingStatus
-from fastapi import Request
 from pydantic import BaseModel, Field
-from starlette.middleware.base import BaseHTTPMiddleware
 from <%- agentConnectionModuleName %> import get_current_session_id, session_id_context
 
 from .init import JsonStreamingResponse, app
-
-SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
+from .middleware.session_id_middleware import SessionIdMiddleware
 
 
 class InvokeInput(BaseModel):
@@ -59,16 +56,7 @@ async def invoke(input: InvokeInput) -> JsonStreamingResponse:
     return JsonStreamingResponse(handle_invoke(input, session_id))
 
 
-class _SessionIdMiddleware(BaseHTTPMiddleware):
-    """Bind the inbound session (or a fresh UUID) to async context."""
-
-    async def dispatch(self, request: Request, call_next):
-        session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
-        with session_id_context(session_id):
-            return await call_next(request)
-
-
-app.add_middleware(_SessionIdMiddleware)
+app.add_middleware(SessionIdMiddleware)
 
 
 @app.get("/ping")

@@ -5,7 +5,7 @@
 import { addProjectConfiguration, type Tree, writeJson } from '@nx/devkit';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { esmVars, isEsmWorkspace } from './module-format';
+import { esmVars, isEsmWorkspace } from './module-format.js';
 
 /**
  * Register a project with its own package.json declaring the given module

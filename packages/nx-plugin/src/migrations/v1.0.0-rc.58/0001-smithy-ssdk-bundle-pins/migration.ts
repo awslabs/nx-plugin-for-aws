@@ -8,10 +8,10 @@ import {
   type MigrationReturnObject,
   type Tree,
 } from '@nx/devkit';
-import { SMITHY_PROJECT_GENERATOR_INFO } from '../../../smithy/project/generator';
-import { applyGritQL } from '../../../utils/ast';
-import { formatFilesInSubtree } from '../../../utils/format';
-import { isVendedUpgrade } from '../../../utils/version-upgrade-migration/vended-upgrade';
+import { SMITHY_PROJECT_GENERATOR_INFO } from '../../../smithy/project/generator.js';
+import { applyGritQL } from '../../../utils/ast.js';
+import { formatFilesInSubtree } from '../../../utils/format.js';
+import { isVendedUpgrade } from '../../../utils/version-upgrade-migration/vended-upgrade.js';
 
 /**
  * Move a Smithy `build.Dockerfile` onto the SSDK bundle pins this release fixes.

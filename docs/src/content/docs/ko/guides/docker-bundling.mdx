@@ -8,14 +8,12 @@ import NxCommands from '@components/nx-commands.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 import Link from '@components/link.astro';
 import Infrastructure from '@components/infrastructure.astro';
-import TrivyVersion from '@components/trivy-version.astro';
 import { CONTAINER_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/versions';
 
 export const trivyTarget = `{
   "targets": {
     "trivy": {
-      "cache": true,
-      "inputs": ["default", "^production"],
+      "cache": false,
       "outputs": ["{workspaceRoot}/dist/{projectRoot}/trivy"],
       "executor": "nx:run-commands",
       "options": {
@@ -68,7 +66,7 @@ Docker 빌드 컨텍스트는 프로젝트의 `dist` 폴더에 작성됩니다. 
 :::tip[Dockerfile 외부에서 번들링하는 이유는?]
 번들 단계를 Nx에 유지하면(`Dockerfile` 내부가 아닌) 다음과 같은 이점이 있습니다:
 
-- Nx가 번들 타겟을 **캐시**할 수 있어 반복 빌드가 빠릅니다.
+- Nx가 번들 타겟을 **캐시**할 수 있습니다 — 출력이 디스크의 디렉토리이므로 캐시 히트 시 실제로 복원됩니다.
 - `Dockerfile`은 모노레포, 프라이빗 레지스트리 또는 빌드 시간 시크릿에 액세스할 필요가 없습니다.
 - 이미지 레이어가 작습니다 — 이미 빌드된 아티팩트의 단일 `COPY`이며, 전이적인 `node_modules` 또는 빌드 툴체인이 없습니다.
 :::
@@ -84,6 +82,7 @@ Rolldown을 호출하는 `bundle` 타겟을 구성합니다. <Link path="/ko/gui
   "targets": {
     "bundle": {
       "cache": true,
+      "inputs": ["default"],
       "executor": "nx:run-commands",
       "outputs": ["{workspaceRoot}/dist/{projectRoot}/bundle"],
       "options": {
@@ -167,7 +166,7 @@ CMD ["node", "index.js"]
 {
   "targets": {
     "docker": {
-      "cache": true,
+      "cache": false,
       "executor": "nx:run-commands",
       "options": {
         "commands": [
@@ -181,6 +180,10 @@ CMD ["node", "index.js"]
   }
 }
 ```
+
+:::caution[이미지 빌드를 캐시하지 마세요]
+이미지 빌드 타겟에 `"cache": false`를 설정하세요. 빌드된 이미지는 파일 시스템의 `outputs` 경로에 작성되지 않으므로 Nx는 캐시 히트 시 복원할 것이 없습니다. 컨테이너 엔진은 어쨌든 이미지 레이어를 캐시하므로 성능 저하가 없습니다.
+:::
 
 :::tip[크로스 플랫폼 파일 복사]
 `ncp` 패키지는 크로스 플랫폼 파일/디렉토리 복사 명령을 제공하여 `cp`(Windows에서 사용 불가)를 피합니다. 워크스페이스 루트에 `pnpm add -D -w ncp`로 설치하세요.
@@ -256,7 +259,7 @@ CMD ["python", "-m", "my_project.main"]
 {
   "targets": {
     "docker": {
-      "cache": true,
+      "cache": false,
       "executor": "nx:run-commands",
       "options": {
         "commands": [
@@ -294,10 +297,6 @@ CMD ["python", "-m", "my_project.main"]
 Trivy의 취약점 데이터베이스가 새로운 CVE로 지속적으로 업데이트되므로 개발 중 반복 작업 시 불필요한 마찰을 초래할 수 있어 스캔은 의도적으로 `build`에 연결되지 않습니다.
 
 대신 프로덕션 단계에 배포하기 전에 CI 파이프라인에서 전용 단계로 위 명령을 실행하는 것을 권장합니다.
-:::
-
-:::tip[캐싱은 변경되지 않은 이미지를 건너뜀]
-이미지는 프로젝트 소스에 의해 완전히 결정되므로 `inputs`를 선언하면(여기서는 `bundle` 타겟과 일치하는 `default` 및 `^production`) Nx가 스캔을 캐시하고 변경되지 않은 이미지의 재스캔을 건너뛸 수 있습니다. Trivy 이미지 버전을 고정하여(예: <code>trivy:<TrivyVersion /></code>) 스캔을 재현 가능하게 만드세요.
 :::
 
 :::note[발견 사항 억제]
@@ -380,9 +379,11 @@ CDK는 `bundle`/`docker` 타겟을 자동으로 실행하지 않습니다 — `c
 Terraform의 AWS 프로바이더에는 일급 "Docker 이미지 빌드 및 푸시" 리소스가 없습니다. 제너레이터가 사용하는 패턴은 다음과 같습니다:
 
 1. 프로젝트의 `build` 타겟이 `docker build`를 실행하여 `my-scope-my-project:latest` 태그가 지정된 로컬 이미지를 생성합니다.
-2. 이미지를 보관할 `aws_ecr_repository`입니다.
+2. `core/asset-ecr` 모듈을 사용하는 공유 ECR 리포지토리
 3. ECR에 인증하고, 로컬로 빌드된 이미지를 콘텐츠 다이제스트로 다시 태그하고, 푸시하는 `local-exec` 프로비저너가 있는 `null_resource`입니다.
 4. 다운스트림 리소스(예: `aws_ecs_task_definition`)는 불변의 다이제스트 기반 태그로 이미지를 참조합니다.
+
+하나의 리포지토리가 모든 이미지를 보관하기 때문에 각 태그는 이미지 소유자와 다이제스트로 네임스페이스가 지정되므로 레지스트리를 공유하는 이미지가 충돌하지 않습니다.
 
 ```d2
 direction: down
@@ -408,7 +409,7 @@ app: Application {
 infra: Infrastructure {
   direction: right
   publish: "null_resource\nlocal-exec: docker push"
-  repo: aws_ecr_repository
+  repo: "core/asset-ecr\n(shared)"
   publish -> repo: tag + push
 }
 
@@ -422,10 +423,8 @@ infra.repo -> ecr
 
 
 ```hcl
-resource "aws_ecr_repository" "repo" {
-  name                 = "my-project-repository"
-  image_tag_mutability = "IMMUTABLE"
-  force_delete         = true
+module "asset_ecr" {
+  source = "../../common/terraform/src/core/asset-ecr"
 }
 
 # Invalidate the push whenever the locally-built image digest changes
@@ -434,14 +433,15 @@ data "external" "docker_digest" {
 }
 
 locals {
-  # Content-based, immutable image tag derived from the local image digest
-  image_tag = replace(data.external.docker_digest.result.digest, "sha256:", "")
+  # Content-based, immutable image tag derived from the local image digest, and
+  # namespaced by owner so images sharing the registry never collide
+  image_tag = "my-project-${replace(data.external.docker_digest.result.digest, "sha256:", "")}"
 }
 
 resource "null_resource" "docker_publish" {
   triggers = {
     docker_digest  = data.external.docker_digest.result.digest
-    repository_url = aws_ecr_repository.repo.repository_url
+    repository_url = module.asset_ecr.repository_url
     image_tag      = local.image_tag
   }
 
@@ -456,7 +456,7 @@ resource "null_resource" "docker_publish" {
 }
 ```
 
-`data.external.docker_digest` 블록은 로컬 이미지 해시가 변경될 때마다 `null_resource`가 다시 실행되도록 하여 의미 있는 코드 변경마다 새로운 푸시를 트리거합니다. 이미지는 다이제스트에서 파생된 불변의 콘텐츠 기반 태그로 푸시되므로 ECR 리포지토리는 `IMMUTABLE` 태그 변경 가능성을 사용하고 기존 태그를 덮어쓰려는 모든 시도를 거부할 수 있습니다.
+`data.external.docker_digest` 블록은 로컬 이미지 해시가 변경될 때마다 `null_resource`가 다시 실행되도록 하여 의미 있는 코드 변경마다 새로운 푸시를 트리거합니다. 이미지는 다이제스트에서 파생된 불변의 콘텐츠 기반 태그로 푸시되므로 공유 리포지토리는 `IMMUTABLE` 태그 변경 가능성을 사용하고 기존 태그를 덮어쓰려는 모든 시도를 거부합니다.
 
 :::note[apply 전에 번들 실행]
 `nx apply <project>`는 이미지 태그 `my-scope-my-project:latest`가 이미 로컬에 존재해야 합니다. `nx apply <project>` 전에 `nx build my-project`(또는 `nx docker my-project`)를 실행하세요.

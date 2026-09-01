@@ -2,7 +2,7 @@
 title: React から AG-UI Agent へ
 description: CopilotKit を使用して AG-UI プロトコル経由で React ウェブサイトを Agent に接続する
 when:
-  sourceType: react
+  sourceType: ts#react-website
   targetType:
     - ts#agent
     - py#agent
@@ -91,6 +91,25 @@ React ウェブサイトをソースプロジェクトとして、AG-UI Agent �
 
 - **IAM**（デフォルト）：AWS SigV4 署名付き HTTP リクエストを使用します。認証情報は、ウェブサイトの認証で設定された Cognito Identity Pool から取得されます。
 - **Cognito**：JWT アクセストークンを Bearer トークンとして `Authorization` ヘッダーに埋め込みます。
+
+### セッションとスレッド
+
+AG-UI と AgentCore Runtime はそれぞれ異なる方法で会話を識別し、生成されたフックがそれらを結び付けます：
+
+- **`threadId`** — AG-UI の会話識別子で、リクエストボディで送信されます。CopilotKit は、明示的な `threadId` を渡さない限り、チャットごとにランダムな UUID を生成します。
+- **Session ID** — AgentCore Runtime のセッションで、`X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` ヘッダーで送信されます。これはリクエストを処理する [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html) を選択し、Agent の `session.ts` / `session.py` が会話状態をキーとするものです。
+
+フックは、スレッド ID からセッション ID を導出し、AgentCore Runtime が必要とする 33 文字に右パディングします：
+
+```ts
+function agentCoreSessionId(input: RunAgentInput): string {
+  return (input.threadId ?? '').padEnd(33, '0');
+}
+```
+
+`threadId` を未設定のままにするのが最も簡単です — CopilotKit が生成する UUID はすでに 36 文字です。明示的に渡す場合は、少なくとも 33 文字にしてください。パディングにより、末尾の文字のみが異なるスレッド ID が同じセッションにマッピングされるためです。
+
+Session ID と Thread ID の両方はブラウザーによって提供されます。各ユーザーを自分の会話に制限するには、<Link path="guides/py-agent">`py#agent`</Link> または <Link path="guides/ts-agent">`ts#agent`</Link> ガイドを参照してください。
 
 ## インフラストラクチャ
 

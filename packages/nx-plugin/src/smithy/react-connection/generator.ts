@@ -13,21 +13,21 @@ import {
 import {
   addOpenApiReactClient,
   OPEN_API_REACT_DEPENDENCIES,
-} from '../../utils/connection/open-api/react';
-import { declareDependencies } from '../../utils/declared-dependencies';
-import { formatFilesInSubtree } from '../../utils/format';
-import { installDependencies } from '../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { toClassName } from '../../utils/names';
+} from '../../utils/connection/open-api/react.js';
+import { declareDependencies } from '../../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../../utils/format.js';
+import { installDependencies } from '../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
+import { toClassName } from '../../utils/names.js';
 import {
   addComponentGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
-} from '../../utils/nx';
-import { toProjectRelativePath } from '../../utils/paths';
-import { SMITHY_PROJECT_GENERATOR_INFO } from '../project/generator';
-import { TS_SMITHY_API_GENERATOR_INFO } from '../ts/api/generator';
+} from '../../utils/nx.js';
+import { toProjectRelativePath } from '../../utils/paths.js';
+import { SMITHY_PROJECT_GENERATOR_INFO } from '../project/generator.js';
+import { TS_SMITHY_API_GENERATOR_INFO } from '../ts/api/generator.js';
 import type { SmithyReactConnectionGeneratorSchema } from './schema';
 
 // `addOpenApiReactClient` conditions these on the API's auth, which this

@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { describe, expect, it } from 'vitest';
-import { getNpmScope, getNpmScopePrefix } from './npm-scope';
-import { createTreeUsingTsSolutionSetup } from './test';
+import { getNpmScope, getNpmScopePrefix } from './npm-scope.js';
+import { createTreeUsingTsSolutionSetup } from './test.js';
 
 describe('npm-scope utils', () => {
   describe('getNpmScope', () => {

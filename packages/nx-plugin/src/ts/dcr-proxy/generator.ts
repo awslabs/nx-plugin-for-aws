@@ -10,38 +10,38 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import tsProjectGenerator from '../../ts/lib/generator';
-import { addTsDependencies } from '../../utils/add-dependencies';
+import tsProjectGenerator from '../../ts/lib/generator.js';
+import { addTsDependencies } from '../../utils/add-dependencies.js';
 import {
   addTypeScriptBundleTarget,
   BUNDLE_DEPENDENCIES,
-} from '../../utils/bundle/bundle';
+} from '../../utils/bundle/bundle.js';
 import {
   addDcrProxyInfra,
   DCR_PROXY_HANDLERS,
   type DcrProxyHandler,
-} from '../../utils/dcr-proxy-constructs/dcr-proxy-constructs';
+} from '../../utils/dcr-proxy-constructs/dcr-proxy-constructs.js';
 import {
   declareDependencies,
   ownedElsewhere,
-} from '../../utils/declared-dependencies';
-import { formatFilesInSubtree } from '../../utils/format';
-import { resolveIac } from '../../utils/iac';
-import { installDependencies } from '../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { kebabCase, toClassName } from '../../utils/names';
-import { getNpmScopePrefix } from '../../utils/npm-scope';
+} from '../../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../../utils/format.js';
+import { resolveIac } from '../../utils/iac.js';
+import { installDependencies } from '../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
+import { kebabCase, toClassName } from '../../utils/names.js';
+import { getNpmScopePrefix } from '../../utils/npm-scope.js';
 import {
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
-} from '../../utils/nx';
-import { sortObjectKeys } from '../../utils/object';
+} from '../../utils/nx.js';
+import { sortObjectKeys } from '../../utils/object.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../utils/shared-constructs';
+} from '../../utils/shared-constructs.js';
 import type { TsDcrProxyGeneratorSchema } from './schema';
 
 export const DEPENDENCIES = declareDependencies()({

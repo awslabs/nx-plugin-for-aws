@@ -94,7 +94,7 @@ const harness = new MyHarness(this, 'MyHarness', {
 
 Il costrutto accetta anche:
 
-- `allowedTools` — gli strumenti che l'Harness può utilizzare. L'Harness viene distribuito senza strumenti a meno che tu non li fornisca, vedi <a href="#configuring-tools">Configurazione degli strumenti</a>.
+- `allowedTools` — gli strumenti che l'Harness può utilizzare. Il valore predefinito è nessuno, vedi <a href="#configuring-tools">Configurazione degli strumenti</a>.
 - `executionRole` — un ruolo IAM esistente da utilizzare al posto del ruolo generato. Un ruolo fornito viene utilizzato così com'è: le autorizzazioni di base non vengono aggiunte ad esso e il suo ARN alimenta sempre l'Harness (la stringa `executionRoleArn` grezza non può essere sovrascritta).
 - `modelResourceArns` — gli ARN del modello Bedrock e del profilo di inferenza che il ruolo di esecuzione generato può invocare, sostituendo l'elenco predefinito.
 - `vpc`, `vpcSubnets` e `securityGroups` — esegui l'Harness in un VPC in modo che possa raggiungere risorse private, vedi <a href="#running-in-a-vpc">Esecuzione in un VPC</a>.
@@ -112,15 +112,21 @@ module "my_harness" {
 }
 ```
 
-Il modulo espone tre variabili:
+Il modulo espone le seguenti variabili:
 
 - `model_id` — il modello Bedrock o il profilo di inferenza che l'Harness utilizza per impostazione predefinita.
-- `model_resource_arns` — gli ARN del modello Bedrock e del profilo di inferenza che il ruolo di esecuzione può invocare, sostituendo l'elenco predefinito.
-- `additional_execution_role_policy_statements` — un elenco di oggetti di istruzione IAM (`Effect`, `Action`, `Resource`, `Sid` e `Condition` opzionali) aggiunti alla policy del ruolo di esecuzione.
+- `allowed_tools` — gli strumenti che l'Harness può utilizzare. Il valore predefinito è nessuno, vedi <a href="#configuring-tools">Configurazione degli strumenti</a>.
+- `memory` — la configurazione della memoria dell'Harness, vedi <a href="#configuring-memory">Configurazione della memoria</a>.
+- `environment_variables`, `max_iterations`, `timeout_seconds` — i corrispondenti campi nativi dell'Harness.
+- `execution_role_arn` — un ruolo IAM esistente da utilizzare al posto del ruolo generato. Un ruolo fornito viene utilizzato così com'è: né il ruolo né la sua policy di base vengono creati, quindi `model_resource_arns` e `additional_execution_role_policy_statements` non possono essere combinati con esso.
+- `model_resource_arns` — gli ARN del modello Bedrock e del profilo di inferenza che il ruolo di esecuzione generato può invocare, sostituendo l'elenco predefinito.
+- `additional_execution_role_policy_statements` — un elenco di oggetti di istruzione IAM (`Effect`, `Action`, `Resource`, `Sid` e `Condition` opzionali) aggiunti alla policy del ruolo di esecuzione generato.
+- `enable_vpc`, `vpc_id`, `subnet_ids` — esegui l'Harness in un VPC in modo che possa raggiungere risorse private, vedi <a href="#running-in-a-vpc">Esecuzione in un VPC</a>.
+- `tags` — tag applicati alle risorse create dal modulo.
 
-Tutto il resto è configurato sulla risorsa `aws_bedrockagentcore_harness` generata nel modulo stesso.
+Gli altri campi nativi del provider sono configurati modificando la risorsa `aws_bedrockagentcore_harness` generata nel modulo stesso, vedi <a href="#customizing-your-harness">Personalizzazione del tuo Harness</a>.
 
-Il modulo restituisce `harness_id`, `harness_arn` e `execution_role_arn`.
+Il modulo restituisce `harness_id`, `harness_arn`, `execution_role_arn` e `security_group_id`.
 
 Distribuisci con il consueto flusso di lavoro plan/apply del tuo progetto Terraform — vedi la <Link path="guides/terraform-project">guida al progetto Terraform</Link>.
   </Fragment>
@@ -196,7 +202,7 @@ Se nessuno dei due è impostato, lo script fallisce con un errore che nomina ent
 Ogni proprietà nativa dell'Harness del modulo `aws-cdk-lib/aws-bedrockagentcore` bloccato è disponibile attraverso le props del costrutto — provider di modelli alternativi, definizioni di strumenti, memoria, competenze, configurazione dell'ambiente, troncamento, autorizzazione JWT personalizzata e limiti di esecuzione — e le props esplicite hanno la precedenza sui valori predefiniti generati. In alternativa, modifica il costrutto generato in `packages/common/constructs/src/app/harnesses/<name>/<name>.ts`.
   </Fragment>
   <Fragment slot="terraform">
-Il modulo generato mantiene la risorsa nativa `aws_bedrockagentcore_harness` direttamente modificabile, quindi i campi nativi del provider — provider di modelli alternativi (`gemini_model_config`, `openai_model_config`), blocchi `tool`, `memory`, blocchi `skill`, ambienti (`environment`, `environment_variables`, `environment_artifact`), `truncation` e `authorizer_configuration` con un `custom_jwt_authorizer` — sono configurati modificando `packages/common/terraform/src/app/harnesses/<name>/<name>.tf`.
+Le variabili del modulo coprono i campi che la maggior parte delle distribuzioni configura — `model_id`, `allowed_tools`, `memory`, `environment_variables`, `max_iterations`, `timeout_seconds` — più il ruolo di esecuzione e il posizionamento VPC. Terraform non ha un equivalente dello spread delle props del costrutto CDK, quindi i restanti campi nativi del provider sono configurati modificando la risorsa `aws_bedrockagentcore_harness` in `packages/common/terraform/src/app/harnesses/<name>/<name>.tf`: provider di modelli alternativi (`gemini_model_config`, `openai_model_config`), blocchi `tool`, blocchi `skill`, `environment_artifact`, configurazione del filesystem e del ciclo di vita sotto `environment`, `truncation` e `authorizer_configuration` con un `custom_jwt_authorizer`.
   </Fragment>
 </Infrastructure>
 
@@ -213,18 +219,46 @@ new MyHarness(this, 'Harness', { allowedTools: ['@builtin'] });
 ```
   </Fragment>
   <Fragment slot="terraform">
-```hcl title="packages/common/terraform/src/app/harnesses/my-harness/my-harness.tf"
-resource "aws_bedrockagentcore_harness" "this" {
-  # ...
+```hcl title="packages/infra/src/main.tf"
+module "my_harness" {
+  source        = "../../common/terraform/src/app/harnesses/my-harness"
   allowed_tools = ["@builtin"]
 }
 ```
-
-Aggiungi una variabile `allowed_tools` al modulo se preferisci impostarla come argomento del modulo dove fai riferimento al modulo.
   </Fragment>
 </Infrastructure>
 
 Restringi `@builtin` a pattern specifici come `@builtin/file_operations` per limitare ciò che il ciclo dell'agente può fare. Vedi [Strumenti Harness](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-tools.html) per gli strumenti integrati che puoi aggiungere.
+
+### Configurazione della memoria
+
+Il servizio fornisce memoria gestita per l'Harness per impostazione predefinita, e al ruolo di esecuzione generato viene concesso l'accesso ad essa — limitato all'ARN della memoria che il servizio assegna, e concesso solo mentre l'Harness utilizza la memoria gestita creata dall'infrastruttura. Configura la memoria esplicitamente per ottimizzare quella memoria gestita, puntare l'Harness a una risorsa di memoria che possiedi o disattivare la memoria:
+
+<Infrastructure>
+  <Fragment slot="cdk">
+```ts
+new MyHarness(this, 'MyHarness', {
+  memory: { managedMemoryConfiguration: { strategies: ['SUMMARIZATION'] } },
+});
+```
+
+Fornire `memory` sostituisce completamente la memoria gestita predefinita, quindi il costrutto non include la concessione di memoria nel ruolo di esecuzione: aggiungi ciò di cui la configurazione ha bisogno con `addToRolePolicy`.
+  </Fragment>
+  <Fragment slot="terraform">
+```hcl
+module "my_harness" {
+  source = "../../common/terraform/src/app/harnesses/my-harness"
+  memory = {
+    managed_memory_configuration = {
+      strategies = ["SUMMARIZATION"]
+    }
+  }
+}
+```
+
+Imposta esattamente uno tra `managed_memory_configuration` (ottimizza la memoria gestita del servizio), `agentcore_memory_configuration` (usa una risorsa di memoria che possiedi, tramite ARN) o `disabled` (nessuna memoria). Scegliere `agentcore_memory_configuration` o `disabled` rimuove la concessione di memoria gestita dal ruolo di esecuzione; per la tua risorsa di memoria, concedi l'accesso tramite `additional_execution_role_policy_statements`.
+  </Fragment>
+</Infrastructure>
 
 ### Esecuzione in un VPC
 
@@ -241,28 +275,31 @@ database.connections.allowDefaultPortFrom(harness, 'Harness to database');
 L'Harness viene posizionato nelle subnet private del VPC con egress, in un gruppo di sicurezza creato per esso. Sovrascrivi uno dei due con `vpcSubnets` e `securityGroups`. Entrambi richiedono `vpc`, e `connections` è disponibile solo quando l'Harness viene eseguito in un VPC.
   </Fragment>
   <Fragment slot="terraform">
-Aggiungi un blocco `network_configuration` all'`environment.agent_core_runtime_environment` della risorsa `aws_bedrockagentcore_harness` generata, quindi fai riferimento al gruppo di sicurezza in cui lo posizioni dalle regole delle tue altre risorse:
+Imposta `enable_vpc` insieme a `vpc_id` e `subnet_ids` per eseguire l'Harness all'interno di un VPC, in modo che possa raggiungere risorse private come un database:
 
-```hcl title="packages/common/terraform/src/app/harnesses/my-harness/my-harness.tf"
-resource "aws_security_group" "harness" {
-  vpc_id = var.vpc_id
-}
-
-resource "aws_bedrockagentcore_harness" "this" {
-  # ...
-  environment {
-    agent_core_runtime_environment {
-      network_configuration {
-        network_mode = "VPC"
-        network_mode_config {
-          security_groups = [aws_security_group.harness.id]
-          subnets         = var.subnet_ids
-        }
-      }
-    }
-  }
+```hcl
+module "my_harness" {
+  source     = "../../common/terraform/src/app/harnesses/my-harness"
+  enable_vpc = true
+  vpc_id     = var.vpc_id
+  subnet_ids = var.private_subnet_ids
 }
 ```
+
+Il modulo crea un gruppo di sicurezza per l'Harness, consentendo solo HTTPS in uscita. Il suo output `security_group_id` è ciò a cui le risorse che l'Harness deve raggiungere fanno riferimento nelle proprie regole di ingresso:
+
+```hcl
+resource "aws_vpc_security_group_ingress_rule" "harness_to_database" {
+  security_group_id            = aws_security_group.database.id
+  referenced_security_group_id = module.my_harness.security_group_id
+  from_port                    = 5432
+  to_port                      = 5432
+  ip_protocol                  = "tcp"
+  description                  = "Harness to database"
+}
+```
+
+`security_group_id` è null a meno che `enable_vpc` non sia true, e `vpc_id` e `subnet_ids` sono entrambi richiesti quando lo è.
   </Fragment>
 </Infrastructure>
 

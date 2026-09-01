@@ -9,6 +9,7 @@ import Link from '@components/link.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import OptionFilter from '@components/option-filter.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 
 [Terraform](https://www.terraform.io/) is an open-source infrastructure as code software tool that enables you to safely and predictably create, change, and improve infrastructure.
 
@@ -48,10 +49,13 @@ For application projects (`--type=application`), the generator creates a complet
     - main.tf S3 bucket and policies for state storage
     - providers.tf AWS provider configuration
     - variables.tf Bootstrap variable definitions
-  - scripts Node helpers run by the nx `bootstrap` and `init` targets
+  - scripts Node helpers run by the nx `bootstrap`, `bootstrap-destroy` and `init` targets
     - aws-config.ts Resolves account + region via the AWS SDK credential chain
     - bootstrap.ts Pulls/pushes the bootstrap tfstate and runs `terraform apply`
+    - bootstrap-destroy.ts Empties the state bucket and runs `terraform destroy`
     - init.ts Runs `terraform init` with the S3 backend config
+    - env.ts Points `terraform init` at the shared provider cache
+  - checkov.yml Checkov configuration, including the checks to skip
   - project.json Project configuration and build targets
 
 </FileTree>
@@ -71,6 +75,7 @@ For library projects (`--type=library`), the generator creates a simpler structu
 
   - src
     - main.tf Main Terraform module file
+  - checkov.yml Checkov configuration, including the checks to skip
   - project.json Project configuration and build targets
 
 </FileTree>
@@ -242,19 +247,113 @@ You can validate your Terraform configuration using the `validate` target:
 
 <NxCommands commands={['validate tf-infra']} />
 
-#### Formatting your Code
+#### Linting
 
-Format your Terraform code using the `fmt` target:
+Terraform projects use [`terraform fmt`](https://developer.hashicorp.com/terraform/cli/commands/fmt) to check formatting.
 
-<NxCommands commands={['fmt tf-infra']} />
+##### Running the Linter
+
+To invoke the linter to check your project, you can run the `lint` target.
+
+<NxCommands commands={["lint tf-infra"]} />
+
+##### Fixing Lint Issues
+
+The majority of linting or formatting issues can be fixed automatically by running with the `--configuration=fix` argument.
+
+<NxCommands commands={["lint tf-infra --configuration=fix"]} />
+
+Similarly if you would like to fix all lint issues in all packages in your workspace, you can run:
+
+<NxCommands commands={["run-many --target lint --all --configuration=fix"]} />
+
+:::tip[Shorthand Command]
+This has a shorthand command from the root of your workspace:
+
+<PackageManagerShortCommand commands={["lint"]} />
+:::
+
+##### Skipping Lint Issues
+
+To avoid linting issues slowing you down during development (particularly if you have non auto-fixable issues in your project), you can run a build with the `skip-lint` configuration:
+
+<NxCommands commands={["run-many --target build --configuration=skip-lint"]} />
+
+This skips the format check entirely during build.
+
+:::tip[Shorthand Command]
+This has a shorthand command from the root of your workspace:
+
+<PackageManagerShortCommand commands={["build:skip-lint"]} />
+:::
 
 #### Security Testing
 
-Run security checks on your infrastructure using Checkov with the `test` target:
+Run security checks on your infrastructure using Checkov with the `checkov` target:
+
+<NxCommands commands={['checkov tf-infra']} />
+
+You will find your security test results in the root `dist` folder, under `dist/packages/<my-terraform-project>/checkov`.
+
+Checkov runs as part of `build`.
+
+Checks are configured in the project's `checkov.yml`. Add a check id to `skip-check` to suppress it across the whole project:
+
+```yaml title="checkov.yml"
+skip-check:
+  - CKV_AWS_115 # Concurrent execution limit
+  - CKV_AWS_116 # Dead Letter Queue
+```
+
+To suppress a check for a single resource instead, add a `#checkov:skip=<id>:<reason>` comment inside the resource block:
+
+```hcl
+resource "aws_s3_bucket" "example" {
+  #checkov:skip=CKV_AWS_18:Access logging not required for this bucket
+  bucket = "example"
+}
+```
+
+#### Running Terraform Tests
+
+The `test` target runs [Terraform's native test framework](https://developer.hashicorp.com/terraform/language/tests) over any `.tftest.hcl` files in your project:
 
 <NxCommands commands={['test tf-infra']} />
 
-You will find your security test results in the root `dist` folder, under `dist/packages/<my-terraform-project>/checkov`.
+A project with no test files is a no-op success, so you can add tests when you need them. `build` runs this target, so your tests run as part of a normal build.
+
+Each `run` block evaluates your configuration. Use `command = plan` to check what Terraform _would_ do (this expands the whole module graph, so it catches plan-time errors that `validate` cannot), or `command = apply` to create real resources and assert on their outputs. Declaring `mock_provider` means no API calls are made and no AWS credentials are needed, which keeps `plan` tests fast and safe to run in CI:
+
+```hcl title="src/main.tftest.hcl"
+mock_provider "aws" {
+  mock_data "aws_caller_identity" {
+    defaults = { account_id = "123456789012" }
+  }
+  mock_data "aws_region" {
+    defaults = { region = "us-east-1" }
+  }
+}
+
+variables {
+  aws_region  = "us-east-1"
+  environment = "dev"
+}
+
+run "plan_is_valid" {
+  command = plan
+
+  assert {
+    condition     = data.aws_caller_identity.current.account_id == "123456789012"
+    error_message = "Unexpected account id"
+  }
+}
+```
+
+Set every variable your configuration requires in the `variables` block, otherwise the run fails with "has a required variable ... with no set value".
+
+Every target that runs `terraform init` reuses a provider cache under `.terraform/plugin-cache` in your workspace root, so providers are downloaded once rather than on every run. Each project gets its own directory there: two `terraform init` runs filling one cache at the same time can each compute a different hash for the same provider, which terraform then rejects against your `.terraform.lock.hcl`. See the [Terraform documentation](https://developer.hashicorp.com/terraform/cli/config/config-file#provider-plugin-cache) for more information.
+
+Set `TF_PLUGIN_CACHE_DIR` in your environment to point the vended `init` script at a cache you manage yourself — a volume shared between workspaces, say. Note that the `test` target reads its path from `project.json`, so change it there too.
 
 <OptionFilter when={{ type: 'application' }} description="Application-only targets: plan / apply / destroy / etc.">
 ### Application-Only Targets
@@ -268,6 +367,12 @@ Before applying changes, you can see what Terraform will do by running the `plan
 <NxCommands commands={['plan tf-infra']} />
 
 This will create a plan file in `dist/packages/<my-terraform-project>/terraform/dev.tfplan`.
+
+`plan` depends on `assemble`, so it produces the artifacts your modules reference, such as the Lambda bundles and generated operations metadata, without running the lint, test and type-check gates.
+
+:::caution[Use `build` in your pipeline]
+`assemble` is used for faster iteration during development. Run `build` in your CI pipeline to ensure your project passes quality gates prior to a production deployment.
+:::
 
 #### Initializing Terraform
 
@@ -310,6 +415,12 @@ This will permanently delete all resources managed by this Terraform configurati
 To clean up the bootstrap resources (S3 bucket for state storage):
 
 <NxCommands commands={['bootstrap-destroy tf-infra']} />
+
+This empties the state bucket before destroying it, and resolves the region from the AWS SDK credential chain, so it runs unattended in CI.
+
+:::caution[Destroy your infrastructure first]
+The state bucket holds the state for every environment, so run `destroy` for each environment before this. Once the bucket is gone, Terraform no longer knows about the resources it created.
+:::
 </OptionFilter>
 
 ## More Information

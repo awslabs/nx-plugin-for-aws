@@ -12,17 +12,19 @@ import Link from '@components/link.astro';
 
 런타임 구성은 **네임스페이스**로 구성됩니다. 각 네임스페이스는 관련 구성 값의 논리적 그룹입니다. 배포 시점에 모든 네임스페이스는 **AWS AppConfig**에 구성 프로필로 저장됩니다.
 
-생성된 구성 요소에서 사용하는 두 가지 내장 네임스페이스가 있습니다:
+생성된 구성 요소에서 사용하는 네 가지 내장 네임스페이스가 있습니다:
 
 - **`connection`** — 생성된 프로젝트가 서로 연결될 수 있도록 하는 구성:
   - **API URL** — API 구성 요소에 의해 자동으로 등록됨
   - **Cognito 설정** — UserIdentity 구성 요소에 의해 자동으로 등록됨
   - **Agent 런타임 ARN** — React 웹사이트를 Agent에 연결할 때 연결 생성기에 의해 추가됨
 - **`agentcore`** — 에이전트 및 MCP 서버를 위한 AgentCore 런타임 ARN. 에이전트/MCP 구성 요소에 의해 자동으로 등록되며 서버 측 검색(A2A를 통한 에이전트 → 에이전트, 에이전트 → MCP 서버)에 사용됩니다.
+- **`dynamodb`** — 테이블 이름, DynamoDB 테이블 구성 요소에 의해 자동으로 등록되며 생성된 테이블 클라이언트에 의해 읽힙니다.
+- **`database`** — Aurora 연결 세부 정보, 관계형 데이터베이스 구성 요소에 의해 자동으로 등록되며 생성된 데이터베이스 클라이언트에 의해 읽힙니다.
 
-`connection` 네임스페이스는 웹사이트의 S3 버킷에 `runtime-config.json` 파일로도 배포되어 백엔드 리소스의 클라이언트 측 검색을 가능하게 합니다. `agentcore` 네임스페이스는 서버 측 전용(AppConfig를 통해)이므로 웹사이트를 에이전트에 명시적으로 연결하지 않는 한 에이전트 런타임 ARN이 프론트엔드에 노출되지 않습니다.
+`connection` 네임스페이스는 웹사이트의 S3 버킷에 `runtime-config.json` 파일로도 배포되어 백엔드 리소스의 클라이언트 측 검색을 가능하게 합니다. 다른 네임스페이스는 서버 측 전용(AppConfig를 통해)이므로 웹사이트를 명시적으로 연결하지 않는 한 에이전트 런타임 ARN 및 테이블 이름과 같은 값이 프론트엔드에 노출되지 않습니다.
 
-원하는 만큼 추가 네임스페이스를 정의할 수 있으며, 이는 DynamoDB 테이블 이름과 같은 배포 시점 값을 Lambda 함수나 기타 컴퓨팅 리소스에 전달하기 위한 환경 변수의 편리한 대안을 제공합니다.
+원하는 만큼 추가 네임스페이스를 정의할 수 있으며, 이는 배포 시점 값을 Lambda 함수나 기타 컴퓨팅 리소스에 전달하기 위한 환경 변수의 편리한 대안을 제공합니다.
 
 ```d2
 direction: down
@@ -104,6 +106,17 @@ Terraform은 세 개의 `core/runtime-config/*` 모듈을 통해 런타임 구�
      source = "../../common/terraform/src/core/runtime-config/appconfig"
 
      application_name = "my-app-runtime-config"
+   }
+   ```
+
+   `namespaces` 변수는 기본적으로 모든 내장 네임스페이스로 설정되므로 생성된 모듈은 구성 없이 작동합니다. 자신의 네임스페이스를 추가하려면 내장 네임스페이스와 함께 나열합니다:
+
+   ```hcl title="packages/infra/src/main.tf"
+   module "runtime_config_appconfig" {
+     source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+     application_name = "my-app-runtime-config"
+     namespaces       = ["connection", "agentcore", "database", "dynamodb", "tables"]
    }
    ```
 

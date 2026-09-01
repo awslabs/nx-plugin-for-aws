@@ -7,9 +7,10 @@ import { addProjectConfiguration, type Tree } from '@nx/devkit';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
-} from '../../utils/config/utils';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { PY_AGENT_GENERATOR_INFO, pyAgentGenerator } from './generator';
+} from '../../utils/config/utils.js';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import { LAMBDA_RUNTIME_VERSIONS } from '../../utils/versions.js';
+import { PY_AGENT_GENERATOR_INFO, pyAgentGenerator } from './generator.js';
 
 describe('py#agent generator', () => {
   let tree: Tree;
@@ -51,7 +52,7 @@ dev-dependencies = []
   it('should generate strands agent with Terraform provider and default name', async () => {
     await pyAgentGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'terraform',
     });
 
@@ -94,7 +95,7 @@ dev-dependencies = []
     await pyAgentGenerator(tree, {
       project: 'test-project',
       name: 'custom-terraform-agent',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'terraform',
     });
 
@@ -137,7 +138,7 @@ dev-dependencies = []
     await pyAgentGenerator(tree, {
       project: 'test-project',
       name: 'terraform-snapshot-agent',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'terraform',
     });
 
@@ -162,7 +163,7 @@ dev-dependencies = []
     await pyAgentGenerator(tree, {
       project: 'test-project',
       name: 'in-memory-terraform-agent',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       session: 'in-memory',
       iac: 'terraform',
     });
@@ -181,7 +182,7 @@ dev-dependencies = []
       project: 'test-project',
       name: 'dynamodb-terraform-agent',
       framework: 'langchain',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       session: 'dynamodb-s3',
       iac: 'terraform',
     });
@@ -204,7 +205,7 @@ dev-dependencies = []
     await pyAgentGenerator(tree, {
       project: 'test-project',
       name: 'terraform-agent',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'terraform',
     });
 
@@ -247,7 +248,7 @@ dev-dependencies = []
   it('should handle Python bundle target configuration for Terraform provider', async () => {
     await pyAgentGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'terraform',
     });
 
@@ -265,7 +266,7 @@ dev-dependencies = []
     const commands = projectConfig.targets['bundle-arm'].options.commands;
     expect(commands).toEqual([
       'uv export --frozen --no-dev --no-editable --project {projectRoot} --package test-project -o dist/{projectRoot}/bundle-arm/requirements.txt',
-      'uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform aarch64-manylinux_2_28 --target dist/{projectRoot}/bundle-arm -r dist/{projectRoot}/bundle-arm/requirements.txt',
+      `uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform aarch64-manylinux_2_28 --python-version ${LAMBDA_RUNTIME_VERSIONS.python} --target dist/{projectRoot}/bundle-arm -r dist/{projectRoot}/bundle-arm/requirements.txt`,
     ]);
 
     // Check that docker target was added
@@ -275,21 +276,23 @@ dev-dependencies = []
     );
   });
 
-  it('should handle default computeType as BedrockAgentCoreRuntime with Terraform', async () => {
+  it('should default to code packaging on AgentCore Runtime with Terraform', async () => {
     await pyAgentGenerator(tree, {
       project: 'test-project',
-      // No computeType specified, should default to BedrockAgentCoreRuntime
+      // No infra specified, should default to code packaging on agentcore
       iac: 'terraform',
     });
 
-    // Should include Dockerfile by default
+    // Code packaging needs no Dockerfile or image build
     expect(
       tree.exists('apps/test-project/proj_test_project/agent/Dockerfile'),
-    ).toBeTruthy();
+    ).toBeFalsy();
 
-    // Should have Terraform files generated
+    // Should have Terraform files generated, from the code packaging module
     expect(
-      tree.exists('packages/common/terraform/src/core/agent-core/runtime.tf'),
+      tree.exists(
+        'packages/common/terraform/src/core/agent-core-code/runtime.tf',
+      ),
     ).toBeTruthy();
     expect(
       tree.exists(
@@ -297,12 +300,13 @@ dev-dependencies = []
       ),
     ).toBeTruthy();
 
-    // Should have docker and bundle targets
+    // Should have package and bundle targets, and no container targets
     const projectConfig = JSON.parse(
       tree.read('apps/test-project/project.json', 'utf-8'),
     );
     expect(projectConfig.targets['bundle-arm']).toBeDefined();
-    expect(projectConfig.targets['agent-docker']).toBeDefined();
+    expect(projectConfig.targets['agent-package']).toBeDefined();
+    expect(projectConfig.targets['agent-docker']).toBeUndefined();
   });
 
   it('should inherit iac from config when set to Inherit', async () => {
@@ -316,7 +320,7 @@ dev-dependencies = []
 
     await pyAgentGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'inherit',
     });
 

@@ -2,6 +2,7 @@
 title: Deploying your DynamoDB Table
 ---
 import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
 
 The DynamoDB generator creates CDK or Terraform infrastructure based on your selected `iac`.
 
@@ -45,27 +46,42 @@ This provisions a DynamoDB table with:
 - On-demand (`PAY_PER_REQUEST`) billing
 - Customer-managed KMS encryption with automatic key rotation
 - Point-in-time recovery enabled
-- Deletion protection enabled
-- Table name registered in Runtime Config
+- Deletion protection enabled, plus a `prevent_destroy` lifecycle guard
+- Table name registered in Runtime Config under the `dynamodb` namespace in AWS AppConfig
+
+The `core/runtime-config/appconfig` module exposes the `dynamodb` namespace by default, so the table name is deployed without further configuration. If you pass `namespaces` to that module explicitly, keep `dynamodb` in the list — otherwise no configuration profile is created for it and the generated table client cannot resolve the table name.
 </Fragment>
 </Infrastructure>
 
 ### Deletion Protection
 
-Deletion protection is enabled by default to prevent accidental table deletion.
+The table is protected by two independent guards, so that turning off either one alone cannot delete your data:
 
-#### Disable Deletion Protection
+<Infrastructure>
+<Fragment slot="cdk">
+- `deletionProtection`, enforced by DynamoDB.
+- `RemovalPolicy.RETAIN`, enforced by CloudFormation, which leaves the table in place when it is removed from the stack.
+</Fragment>
+<Fragment slot="terraform">
+- `deletion_protection_enabled`, enforced by DynamoDB.
+- `lifecycle { prevent_destroy = true }` on the table in `common/terraform/src/core/dynamodb/dynamodb.tf`, enforced by Terraform, which fails any plan that would destroy the table.
+</Fragment>
+</Infrastructure>
 
-Disable it for environments where table deletion is expected, such as short-lived development or preview stacks.
+#### Deleting the Table
+
+Disable protection for environments where table deletion is expected, such as short-lived development or preview stacks.
 
 <Infrastructure>
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
 import { MyTable } from '@my-scope/common-constructs';
 
 const table = new MyTable(this, 'Table', {
   deletionProtection: false,
+  removalPolicy: RemovalPolicy.DESTROY,
 });
 ```
 </Fragment>
@@ -77,6 +93,22 @@ module "my_table" {
   deletion_protection_enabled = false
 }
 ```
+
+`prevent_destroy` must be a literal — Terraform does not allow it to reference a variable — so it cannot be turned off from `main.tf`. Also remove the `lifecycle` block from the table in `common/terraform/src/core/dynamodb/dynamodb.tf`:
+
+```hcl title="packages/common/terraform/src/core/dynamodb/dynamodb.tf" del={4-6}
+resource "aws_dynamodb_table" "table" {
+  # ...
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+```
+
+:::caution
+This module is shared by every table in your workspace, so removing the block removes that guard for all of them.
+:::
 </Fragment>
 </Infrastructure>
 
@@ -137,30 +169,8 @@ module "my_table" {
 </Fragment>
 </Infrastructure>
 
-### Encryption Key Rotation
+### Encryption
 
-The KMS key used to encrypt the table has automatic key rotation enabled by default. Disable it if your security policy manages rotation externally.
+The table is encrypted with a customer-managed KMS key by default, created automatically for you. Switch to an AWS managed key, the AWS owned key, or bring your own KMS key, if you manage encryption differently.
 
-#### Disable Encryption Key Rotation
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyTable } from '@my-scope/common-constructs';
-
-const table = new MyTable(this, 'Table', {
-  enableKeyRotation: false,
-});
-```
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "my_table" {
-  source              = "../../common/terraform/src/app/dynamodb/my-table"
-  enable_key_rotation = false
-}
-```
-</Fragment>
-</Infrastructure>
+<Snippet name="dynamodb/encryption-options" parentHeading="Encryption" />

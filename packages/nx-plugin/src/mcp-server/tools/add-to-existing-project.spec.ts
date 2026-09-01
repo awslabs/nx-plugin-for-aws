@@ -6,7 +6,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { addToExistingProjectTool } from './add-to-existing-project';
+import { addToExistingProjectTool } from './add-to-existing-project.js';
 
 describe('add-to-existing-project tool', () => {
   let client: Client;

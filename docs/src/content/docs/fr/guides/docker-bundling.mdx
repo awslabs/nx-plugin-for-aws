@@ -8,14 +8,12 @@ import NxCommands from '@components/nx-commands.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 import Link from '@components/link.astro';
 import Infrastructure from '@components/infrastructure.astro';
-import TrivyVersion from '@components/trivy-version.astro';
 import { CONTAINER_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/versions';
 
 export const trivyTarget = `{
   "targets": {
     "trivy": {
-      "cache": true,
-      "inputs": ["default", "^production"],
+      "cache": false,
       "outputs": ["{workspaceRoot}/dist/{projectRoot}/trivy"],
       "executor": "nx:run-commands",
       "options": {
@@ -68,7 +66,7 @@ Le contexte de construction Docker est écrit dans le dossier `dist` de votre pr
 :::tip[Pourquoi bundler en dehors du Dockerfile ?]
 Garder l'étape de bundling dans Nx (plutôt qu'à l'intérieur du `Dockerfile`) signifie :
 
-- Nx peut **mettre en cache** la cible bundle, donc les constructions répétées sont rapides.
+- Nx peut **mettre en cache** la cible bundle — sa sortie est un répertoire sur le disque, donc un succès de cache la restaure véritablement.
 - Le `Dockerfile` n'a pas besoin d'accéder à votre monorepo, aux registres privés ou aux secrets de construction.
 - La couche d'image est minuscule — un simple `COPY` d'artefacts déjà construits, sans `node_modules` transitifs ni chaîne d'outils de construction.
 :::
@@ -84,6 +82,7 @@ Configurez une cible `bundle` qui invoque Rolldown. Si vous partez d'un <Link pa
   "targets": {
     "bundle": {
       "cache": true,
+      "inputs": ["default"],
       "executor": "nx:run-commands",
       "outputs": ["{workspaceRoot}/dist/{projectRoot}/bundle"],
       "options": {
@@ -167,7 +166,7 @@ Ajoutez une cible `docker` qui :
 {
   "targets": {
     "docker": {
-      "cache": true,
+      "cache": false,
       "executor": "nx:run-commands",
       "options": {
         "commands": [
@@ -181,6 +180,10 @@ Ajoutez une cible `docker` qui :
   }
 }
 ```
+
+:::caution[Ne mettez pas en cache les constructions d'images]
+Définissez `"cache": false` sur les cibles de construction d'images. Une image construite n'est pas écrite dans un chemin `outputs` dans le système de fichiers, donc Nx n'a rien à restaurer lors d'un succès de cache. Les moteurs de conteneurs mettent en cache les couches d'images de toute façon, il n'y a donc aucune pénalité de performance.
+:::
 
 :::tip[Copie de fichiers multiplateforme]
 Le package `ncp` fournit une commande de copie de fichier/répertoire multiplateforme, évitant `cp` (indisponible sur Windows). Installez-le à la racine de votre espace de travail avec `pnpm add -D -w ncp`.
@@ -256,7 +259,7 @@ Ajoutez une cible `docker` qui copie le `Dockerfile` dans le répertoire de sort
 {
   "targets": {
     "docker": {
-      "cache": true,
+      "cache": false,
       "executor": "nx:run-commands",
       "options": {
         "commands": [
@@ -294,10 +297,6 @@ Les cibles d'analyse par image de chaque projet sont agrégées sous une cible `
 L'analyse n'est intentionnellement pas connectée à `build` car cela peut introduire des frictions inutiles lors de l'itération pendant le développement, car la base de données de vulnérabilités de Trivy est continuellement mise à jour avec de nouveaux CVE.
 
 Nous recommandons plutôt d'exécuter la commande ci-dessus comme une étape dédiée dans votre pipeline CI avant le déploiement vers les environnements de production.
-:::
-
-:::tip[La mise en cache ignore les images inchangées]
-Comme l'image est entièrement déterminée par le code source de votre projet, déclarer des `inputs` (ici `default` et `^production`, correspondant à la cible `bundle`) permet à Nx de mettre en cache l'analyse et d'ignorer la réanalyse d'une image qui n'a pas changé. Épinglez la version de l'image Trivy (par exemple <code>trivy:<TrivyVersion /></code>) pour que les analyses soient reproductibles.
 :::
 
 :::note[Suppression des découvertes]
@@ -380,9 +379,11 @@ Utilisez le `DockerImageAsset` avec n'importe quel construct AWS qui accepte une
 Le provider AWS de Terraform n'a pas de ressource de première classe "build and push a Docker image". Le modèle utilisé par les générateurs est :
 
 1. La cible `build` du projet exécute `docker build`, produisant une image locale taguée `my-scope-my-project:latest`.
-2. Un `aws_ecr_repository` pour contenir l'image.
+2. Un dépôt ECR partagé utilisant le module `core/asset-ecr`
 3. Une `null_resource` avec un provisionneur `local-exec` qui s'authentifie auprès d'ECR, re-tague l'image construite localement avec son digest de contenu, et la pousse.
 4. La ressource en aval (par exemple `aws_ecs_task_definition`) référence l'image par son tag immuable basé sur le digest.
+
+Comme un seul dépôt contient toutes les images, chaque tag est espacé par le propriétaire de l'image ainsi que par son digest, de sorte que les images partageant le registre n'entrent jamais en collision.
 
 ```d2
 direction: down
@@ -408,7 +409,7 @@ app: Application {
 infra: Infrastructure {
   direction: right
   publish: "null_resource\nlocal-exec: docker push"
-  repo: aws_ecr_repository
+  repo: "core/asset-ecr\n(shared)"
   publish -> repo: tag + push
 }
 
@@ -422,10 +423,8 @@ infra.repo -> ecr
 
 
 ```hcl
-resource "aws_ecr_repository" "repo" {
-  name                 = "my-project-repository"
-  image_tag_mutability = "IMMUTABLE"
-  force_delete         = true
+module "asset_ecr" {
+  source = "../../common/terraform/src/core/asset-ecr"
 }
 
 # Invalidate the push whenever the locally-built image digest changes
@@ -434,14 +433,15 @@ data "external" "docker_digest" {
 }
 
 locals {
-  # Content-based, immutable image tag derived from the local image digest
-  image_tag = replace(data.external.docker_digest.result.digest, "sha256:", "")
+  # Content-based, immutable image tag derived from the local image digest, and
+  # namespaced by owner so images sharing the registry never collide
+  image_tag = "my-project-${replace(data.external.docker_digest.result.digest, "sha256:", "")}"
 }
 
 resource "null_resource" "docker_publish" {
   triggers = {
     docker_digest  = data.external.docker_digest.result.digest
-    repository_url = aws_ecr_repository.repo.repository_url
+    repository_url = module.asset_ecr.repository_url
     image_tag      = local.image_tag
   }
 
@@ -456,7 +456,7 @@ resource "null_resource" "docker_publish" {
 }
 ```
 
-Le bloc `data.external.docker_digest` garantit que la `null_resource` se réexécute chaque fois que le hash de l'image locale change, déclenchant un nouveau push à chaque changement de code significatif. L'image est poussée sous un tag immuable basé sur le contenu dérivé de son digest, de sorte que le dépôt ECR peut utiliser la mutabilité de tag `IMMUTABLE` et rejeter toute tentative d'écrasement d'un tag existant.
+Le bloc `data.external.docker_digest` garantit que la `null_resource` se réexécute chaque fois que le hash de l'image locale change, déclenchant un nouveau push à chaque changement de code significatif. L'image est poussée sous un tag immuable basé sur le contenu dérivé de son digest, de sorte que le dépôt partagé utilise la mutabilité de tag `IMMUTABLE` et rejette toute tentative d'écrasement d'un tag existant.
 
 :::note[Exécuter bundle avant apply]
 `nx apply <project>` nécessite que le tag d'image `my-scope-my-project:latest` existe déjà localement. Exécutez `nx build my-project` (ou `nx docker my-project`) avant `nx apply <project>`.

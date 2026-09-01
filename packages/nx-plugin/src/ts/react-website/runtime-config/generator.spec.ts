@@ -3,17 +3,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import { declareDependencies } from '../../../utils/declared-dependencies';
-import { expectHasMetricTags } from '../../../utils/metrics.spec';
+import { declareDependencies } from '../../../utils/declared-dependencies.js';
+import { expectHasMetricTags } from '../../../utils/metrics.spec.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../../utils/shared-constructs';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
+} from '../../../utils/shared-constructs.js';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
 import {
   RUNTIME_CONFIG_GENERATOR_INFO,
   runtimeConfigGenerator,
-} from './generator';
+} from './generator.js';
 import type { RuntimeConfigGeneratorSchema } from './schema';
 
 const sharedConstructsDeclaration = declareDependencies()({

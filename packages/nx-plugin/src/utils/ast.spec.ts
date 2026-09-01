@@ -13,9 +13,10 @@ import {
   addStarExport,
   appendToArrayViaGritQL,
   applyGritQL,
+  captureAllGritQLVariable,
   hasExportDeclaration,
   matchGritQL,
-} from './ast';
+} from './ast.js';
 
 describe('ast utils', () => {
   let tree: Tree;
@@ -137,6 +138,17 @@ describe('ast utils', () => {
 
       const writtenContent = tree.read('file.ts', 'utf-8');
       expect(writtenContent).toBe(initialContent);
+    });
+
+    it('should refuse to bind the same identifier to a second module', async () => {
+      const initialContent = `import DefaultImport from '@scope/package';`;
+      tree.write('file.ts', initialContent);
+
+      await expect(
+        addSingleImport(tree, 'file.ts', 'DefaultImport', '@scope/other'),
+      ).rejects.toThrow(/already imported from a different module/);
+
+      expect(tree.read('file.ts', 'utf-8')).toBe(initialContent);
     });
   });
 
@@ -495,6 +507,95 @@ class MyClass implements SomeInterface {
       expect(
         await matchGritQL(tree, 'file.py', 'language python\n`unused($msg)`'),
       ).toBe(false);
+    });
+  });
+
+  describe('captureAllGritQLVariable', () => {
+    // The binding is the value alone, so a caller never re-derives the syntax
+    // around it.
+    it('should return the bound value of every match', async () => {
+      tree.write(
+        'file.ts',
+        `const a = { runtime: Runtime.NODEJS_24_X };
+const b = { runtime: lambda.Runtime.PYTHON_3_14 };
+`,
+      );
+
+      expect(
+        await captureAllGritQLVariable(
+          tree,
+          'file.ts',
+          '`runtime: $value`',
+          'value',
+        ),
+      ).toEqual(['Runtime.NODEJS_24_X', 'lambda.Runtime.PYTHON_3_14']);
+    });
+
+    it('should accept a variable name with or without the sigil', async () => {
+      tree.write('file.ts', 'const a = { runtime: X };\n');
+
+      expect(
+        await captureAllGritQLVariable(
+          tree,
+          'file.ts',
+          '`runtime: $value`',
+          '$value',
+        ),
+      ).toEqual(['X']);
+    });
+
+    // Matched structurally, so a commented-out property is not a match.
+    it('should not match inside a comment', async () => {
+      tree.write(
+        'file.ts',
+        '// runtime: Runtime.NODEJS_18_X\nexport const x = 1;\n',
+      );
+
+      expect(
+        await captureAllGritQLVariable(
+          tree,
+          'file.ts',
+          '`runtime: $value`',
+          'value',
+        ),
+      ).toEqual([]);
+    });
+
+    it('should bind a value in another language', async () => {
+      tree.write(
+        'file.tf',
+        'resource "r" "n" {\n  runtime = "nodejs24.x"\n}\n',
+      );
+
+      expect(
+        await captureAllGritQLVariable(
+          tree,
+          'file.tf',
+          'language hcl\n`runtime = $value`',
+          'value',
+        ),
+      ).toEqual(['"nodejs24.x"']);
+    });
+
+    // An empty result and a failure must be distinguishable, or a caller cannot
+    // tell "nothing to do" from "the pattern never ran".
+    it('should return undefined for a pattern that cannot be applied', async () => {
+      tree.write('file.ts', 'export const x = 1;\n');
+
+      expect(
+        await captureAllGritQLVariable(tree, 'file.ts', '`unclosed(', 'value'),
+      ).toBeUndefined();
+    });
+
+    it('should return undefined for a missing file', async () => {
+      expect(
+        await captureAllGritQLVariable(
+          tree,
+          'nope.ts',
+          '`runtime: $value`',
+          'value',
+        ),
+      ).toBeUndefined();
     });
   });
 

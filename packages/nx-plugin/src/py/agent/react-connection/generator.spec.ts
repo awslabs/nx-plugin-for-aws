@@ -3,21 +3,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { readProjectConfiguration, type Tree } from '@nx/devkit';
-import { tsReactWebsiteGenerator } from '../../../ts/react-website/app/generator';
-import { matchGritQL } from '../../../utils/ast';
-import { declareDependencies } from '../../../utils/declared-dependencies';
-import { expectHasMetricTags } from '../../../utils/metrics.spec';
+import { tsReactWebsiteGenerator } from '../../../ts/react-website/app/generator.js';
+import { matchGritQL } from '../../../utils/ast.js';
+import { declareDependencies } from '../../../utils/declared-dependencies.js';
+import { expectHasMetricTags } from '../../../utils/metrics.spec.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../../utils/shared-constructs';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import { pyProjectGenerator } from '../../project/generator';
-import { pyAgentGenerator } from '../generator';
+} from '../../../utils/shared-constructs.js';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
+import { pyProjectGenerator } from '../../project/generator.js';
+import { pyAgentGenerator } from '../generator.js';
 import {
   PY_AGENT_REACT_CONNECTION_GENERATOR_INFO,
   pyAgentReactConnectionGenerator,
-} from './generator';
+} from './generator.js';
 
 const sharedConstructsDeclaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
@@ -127,6 +127,14 @@ export function Main() {
     expect(projectConfig.targets['agent-openapi'].outputs).toEqual([
       '{workspaceRoot}/dist/{projectRoot}/openapi/agent',
     ]);
+    // The spec serialises models a dependency may own, and this target has no
+    // `dependsOn` for `default`'s transitive `dependentTasksOutputFiles` to
+    // resolve against — so `^production` is the only edge to the dependency, and
+    // without it a dependency's model change serves a stale spec.
+    expect(projectConfig.targets['agent-openapi'].inputs).toEqual([
+      'production',
+      '^production',
+    ]);
   });
 
   it('should update frontend project configuration with client generation target', async () => {
@@ -150,7 +158,7 @@ export function Main() {
     // Verify client generation target was added
     expect(projectConfig.targets['generate:test-agent-client']).toBeDefined();
     expect(projectConfig.targets['generate:test-agent-client'].executor).toBe(
-      'nx:run-commands',
+      '@aws/nx-plugin:open-api-codegen',
     );
     expect(
       projectConfig.targets['generate:test-agent-client'].dependsOn,

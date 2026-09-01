@@ -13,24 +13,24 @@ import {
 } from '@nx/devkit';
 import camelCase from 'lodash.camelcase';
 import PackageJson from '../../../package.json' with { type: 'json' };
-import { addStarExport, applyGritQL } from '../../utils/ast';
-import { declareDependencies } from '../../utils/declared-dependencies';
-import { formatFilesInSubtree } from '../../utils/format';
-import { installDependencies } from '../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { esmVars } from '../../utils/module-format';
-import { kebabCase, pascalCase, snakeCase } from '../../utils/names';
+import { addStarExport, applyGritQL } from '../../utils/ast.js';
+import { declareDependencies } from '../../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../../utils/format.js';
+import { installDependencies } from '../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
+import { esmVars } from '../../utils/module-format.js';
+import { kebabCase, pascalCase, snakeCase } from '../../utils/names.js';
 import {
   addComponentGeneratorMetadata,
   getGeneratorInfo,
   readProjectConfigurationUnqualified,
-} from '../../utils/nx';
-import { sortObjectKeys } from '../../utils/object';
-import { getRelativePathToRootByDirectory } from '../../utils/paths';
+} from '../../utils/nx.js';
+import { sortObjectKeys } from '../../utils/object.js';
+import { getRelativePathToRootByDirectory } from '../../utils/paths.js';
 import {
   configureTsProjectAsNxPlugin,
   NX_PLUGIN_DEPENDENCIES,
-} from '../nx-plugin/utils';
+} from '../nx-plugin/utils.js';
 import type { TsNxGeneratorGeneratorSchema } from './schema';
 
 export const DEPENDENCIES = declareDependencies()({

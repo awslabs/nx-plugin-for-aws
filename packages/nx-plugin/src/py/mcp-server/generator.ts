@@ -13,46 +13,65 @@ import {
 import {
   addPyDependencies,
   addTsDependencies,
-} from '../../utils/add-dependencies';
-import { addMcpServerInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
-import { addPythonBundleTarget } from '../../utils/bundle/bundle';
-import { resolveContainers } from '../../utils/containers';
+} from '../../utils/add-dependencies.js';
+import {
+  type AgentCoreArtifact,
+  addMcpServerInfra,
+} from '../../utils/agent-core-constructs/agent-core-constructs.js';
+import {
+  addPythonCodePackageTarget,
+  agentCorePythonRuntime,
+  isAgentCoreHosted,
+  isContainerHosted,
+} from '../../utils/agent-core-packaging.js';
+import { addPythonBundleTarget } from '../../utils/bundle/bundle.js';
+import { resolveContainers } from '../../utils/containers.js';
 import {
   declareDependencies,
   ownedElsewhere,
-} from '../../utils/declared-dependencies';
-import { addDockerScanTarget, DOCKER_DEPENDENCIES } from '../../utils/docker';
-import { formatFilesInSubtree } from '../../utils/format';
-import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs';
-import { resolveIac } from '../../utils/iac';
-import { installDependencies } from '../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { kebabCase, toClassName, toSnakeCase } from '../../utils/names';
-import { getNpmScope } from '../../utils/npm-scope';
+} from '../../utils/declared-dependencies.js';
 import {
+  addDockerScanTarget,
+  DOCKER_DEPENDENCIES,
+  IMAGE_BUILD_CACHE,
+} from '../../utils/docker.js';
+import { formatFilesInSubtree } from '../../utils/format.js';
+import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs.js';
+import { resolveIac } from '../../utils/iac.js';
+import { installDependencies } from '../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
+import { kebabCase, toClassName, toSnakeCase } from '../../utils/names.js';
+import { getNpmScope } from '../../utils/npm-scope.js';
+import {
+  addArtifactDependencyToTargets,
   addComponentDevTarget,
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
-} from '../../utils/nx';
-import { toProjectRelativePath } from '../../utils/paths';
-import { registerPnpmBuiltDependencies } from '../../utils/pnpm-workspace';
-import { assignPort } from '../../utils/port';
+} from '../../utils/nx.js';
+import { toProjectRelativePath } from '../../utils/paths.js';
+import { registerPnpmBuiltDependencies } from '../../utils/pnpm-workspace.js';
+import { assignPort } from '../../utils/port.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../utils/shared-constructs';
-import type { IacMetadata } from '../../utils/shared-constructs-constants';
-import { BASE_IMAGES } from '../../utils/versions';
-import type { PyMcpServerGeneratorSchema } from './schema';
+} from '../../utils/shared-constructs.js';
+import type { IacMetadata } from '../../utils/shared-constructs-constants.js';
+import { BASE_IMAGES } from '../../utils/versions.js';
+import type { PyMcpServerGeneratorSchema, PyMcpServerInfra } from './schema';
 
 /** The metadata this generator records, which its predicates read. */
 export interface PyMcpServerMetadata extends IacMetadata {
   readonly port: number;
   readonly rc: string;
   readonly auth: string;
+  /**
+   * How this component is packaged and hosted, so a consumer can tell a
+   * code-packaged runtime from a container-packaged one without re-deriving it.
+   */
+  readonly infra: PyMcpServerInfra;
 }
 
 export const DEPENDENCIES = declareDependencies<PyMcpServerMetadata>()({
@@ -145,7 +164,8 @@ export const pyMcpServerGenerator = async (
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
-  if (infra === 'agentcore') {
+  if (isAgentCoreHosted(infra)) {
+    const container = isContainerHosted(infra);
     const containers = await resolveContainers(tree, 'inherit');
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
 
@@ -157,62 +177,118 @@ export const pyMcpServerGenerator = async (
       },
     );
 
-    generateFiles(
-      tree,
-      joinPathFragments(import.meta.dirname, 'files', 'deploy'),
-      targetSourceDir,
-      {
-        mcpServerNameSnakeCase,
-        moduleName,
-        bundleOutputDir,
-        pythonBaseImage: BASE_IMAGES.python,
-      },
-      { overwriteStrategy: OverwriteStrategy.KeepExisting },
-    );
+    let artifact: AgentCoreArtifact;
 
-    const dockerOutputDir = joinPathFragments(
-      'dist',
-      project.root,
-      'docker',
-      name,
-    );
-    const dockerTargetName = `${mcpTargetPrefix}-docker`;
+    if (container) {
+      generateFiles(
+        tree,
+        joinPathFragments(import.meta.dirname, 'files', 'deploy'),
+        targetSourceDir,
+        {
+          mcpServerNameSnakeCase,
+          moduleName,
+          bundleOutputDir,
+          pythonBaseImage: BASE_IMAGES.python,
+        },
+        { overwriteStrategy: OverwriteStrategy.KeepExisting },
+      );
 
-    // Add a docker target that prepares the docker context and builds the image
-    const fs = new FsCommands(tree, DEPENDENCIES);
-    project.targets[dockerTargetName] = {
-      cache: true,
-      executor: 'nx:run-commands',
-      options: {
-        commands: [
-          fs.rm(dockerOutputDir),
-          fs.mkdir(dockerOutputDir),
-          fs.cp(bundleOutputDir, dockerOutputDir),
-          fs.cp(
-            `${targetSourceDir}/Dockerfile`,
-            `${dockerOutputDir}/Dockerfile`,
+      const dockerOutputDir = joinPathFragments(
+        'dist',
+        project.root,
+        'docker',
+        name,
+      );
+      const dockerTargetName = `${mcpTargetPrefix}-docker`;
+
+      // Add a docker target that prepares the docker context and builds the image
+      const fs = new FsCommands(tree, DEPENDENCIES);
+      project.targets[dockerTargetName] = {
+        cache: IMAGE_BUILD_CACHE,
+        executor: 'nx:run-commands',
+        options: {
+          commands: [
+            fs.rm(dockerOutputDir),
+            fs.mkdir(dockerOutputDir),
+            fs.cp(bundleOutputDir, dockerOutputDir),
+            fs.cp(
+              `${targetSourceDir}/Dockerfile`,
+              `${dockerOutputDir}/Dockerfile`,
+            ),
+            `${containers} build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
+          ],
+          parallel: false,
+        },
+        dependsOn: [bundleTargetName],
+      };
+
+      addDependencyToTargetIfNotPresent(project, 'docker', dockerTargetName);
+      addArtifactDependencyToTargets(project, 'docker');
+
+      addDockerScanTarget(
+        tree,
+        {
+          project,
+          containerEngine: containers,
+          trivyTargetName: `${mcpTargetPrefix}-trivy`,
+          dockerTargetName,
+          imageTags: [dockerImageTag],
+        },
+        DEPENDENCIES,
+      );
+
+      artifact = {
+        type: 'container',
+        dockerImageTag,
+        outputDir: dockerOutputDir,
+      };
+    } else {
+      // The entry point the managed runtime runs, at the package root.
+      generateFiles(
+        tree,
+        joinPathFragments(import.meta.dirname, 'files', 'package'),
+        joinPathFragments(project.root, 'package', mcpServerNameSnakeCase),
+        {
+          mcpServerNameSnakeCase,
+          moduleName,
+        },
+        { overwriteStrategy: OverwriteStrategy.KeepExisting },
+      );
+
+      const packageOutputDir = joinPathFragments(
+        'dist',
+        project.root,
+        'package',
+        name,
+      );
+      addPythonCodePackageTarget(
+        tree,
+        {
+          project,
+          targetName: `${mcpTargetPrefix}-package`,
+          bundleTargetName,
+          bundleOutputDir,
+          packageOutputDir,
+          sourceRoot: project.sourceRoot,
+          moduleName,
+          entryPointPath: joinPathFragments(
+            project.root,
+            'package',
+            mcpServerNameSnakeCase,
+            'main.py',
           ),
-          `${containers} build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
-        ],
-        parallel: false,
-      },
-      dependsOn: [bundleTargetName],
-    };
+          entryPointFileName: 'main.py',
+        },
+        DEPENDENCIES,
+      );
 
-    addDependencyToTargetIfNotPresent(project, 'docker', dockerTargetName);
-    addDependencyToTargetIfNotPresent(project, 'build', 'docker');
-
-    addDockerScanTarget(
-      tree,
-      {
-        project,
-        containerEngine: containers,
-        trivyTargetName: `${mcpTargetPrefix}-trivy`,
-        dockerTargetName,
-        imageTags: [dockerImageTag],
-      },
-      DEPENDENCIES,
-    );
+      artifact = {
+        type: 'code',
+        outputDir: packageOutputDir,
+        runtime: agentCorePythonRuntime(),
+        entryPoint: 'main.py',
+      };
+    }
 
     // Add shared constructs
     await sharedConstructsGenerator(tree, { iac }, DEPENDENCIES);
@@ -222,8 +298,7 @@ export const pyMcpServerGenerator = async (
       mcpServerNameKebabCase: name,
       mcpServerNameClassName,
       projectName: project.name,
-      dockerImageTag,
-      dockerOutputDir,
+      artifact,
       iac,
       auth,
       containers,
@@ -237,6 +312,7 @@ export const pyMcpServerGenerator = async (
   // Recorded below and read by the declaration's predicates, so the packages
   // added here are exactly the ones the version sync will own.
   const metadata: PyMcpServerMetadata = {
+    infra,
     port: localDevPort,
     rc: mcpServerNameClassName,
     auth,

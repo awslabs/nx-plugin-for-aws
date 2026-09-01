@@ -8,13 +8,13 @@ import {
   readProjectConfiguration,
   type Tree,
 } from '@nx/devkit';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
-import { toKebabCase } from '../../utils/names';
+import { expectHasMetricTags } from '../../utils/metrics.spec.js';
+import { toKebabCase } from '../../utils/names.js';
 import {
   createTreeUsingTsSolutionSetup,
   snapshotTreeDir,
-} from '../../utils/test';
-import { INFRA_APP_GENERATOR_INFO, tsInfraGenerator } from './generator';
+} from '../../utils/test.js';
+import { INFRA_APP_GENERATOR_INFO, tsInfraGenerator } from './generator.js';
 import type { TsInfraGeneratorSchema } from './schema';
 
 describe('infra generator', () => {
@@ -74,7 +74,7 @@ describe('infra generator', () => {
       cache: true,
       executor: 'nx:run-commands',
       outputs: ['{workspaceRoot}/dist/{projectRoot}/cdk.out'],
-      dependsOn: ['^build', 'compile'],
+      dependsOn: ['^assemble', 'compile'],
       options: {
         cwd: '{projectRoot}',
         command: 'cdk synth',
@@ -87,7 +87,7 @@ describe('infra generator', () => {
         cwd: '{projectRoot}',
         command: 'cdk deploy --require-approval=never',
       },
-      dependsOn: ['^build', 'compile'],
+      dependsOn: ['^assemble', 'compile'],
     });
     expect(config.targets['deploy-sandbox']).toMatchObject({
       executor: 'nx:run-commands',
@@ -95,7 +95,7 @@ describe('infra generator', () => {
         cwd: '{projectRoot}',
         command: 'cdk deploy --require-approval=never "proj-test-sandbox/*"',
       },
-      dependsOn: ['^build', 'compile'],
+      dependsOn: ['^assemble', 'compile'],
     });
     expect(config.targets['deploy-ci']).toMatchObject({
       executor: 'nx:run-commands',
@@ -110,16 +110,23 @@ describe('infra generator', () => {
       executor: 'nx:run-commands',
       options: {
         cwd: '{projectRoot}',
-        command: 'cdk destroy --require-approval=never',
+        command: 'cdk destroy',
       },
-      dependsOn: ['^build', 'compile'],
+      dependsOn: ['^assemble', 'compile'],
+    });
+    expect(config.targets['destroy-sandbox']).toMatchObject({
+      executor: 'nx:run-commands',
+      options: {
+        cwd: '{projectRoot}',
+        command: 'cdk destroy "proj-test-sandbox/*"',
+      },
+      dependsOn: ['^assemble', 'compile'],
     });
     expect(config.targets['destroy-ci']).toMatchObject({
       executor: 'nx:run-commands',
       options: {
         cwd: '{projectRoot}',
-        command:
-          'cdk destroy --require-approval=never --app ../../dist/{projectRoot}/cdk.out',
+        command: 'cdk destroy --app ../../dist/{projectRoot}/cdk.out',
       },
     });
     expect(config.targets.cdk).toMatchObject({
@@ -305,9 +312,7 @@ describe('infra generator', () => {
       'cdk deploy --require-approval=never',
     );
     expect(config.targets.deploy.options.cwd).toBe('{projectRoot}');
-    expect(config.targets.destroy.options.command).toBe(
-      'cdk destroy --require-approval=never',
-    );
+    expect(config.targets.destroy.options.command).toBe('cdk destroy');
     expect(config.targets.destroy.options.cwd).toBe('{projectRoot}');
   });
 
@@ -337,9 +342,15 @@ describe('infra generator', () => {
     );
   });
 
-  describe('deploy-sandbox target', () => {
+  // `cdk destroy` has no --require-approval option, so only deploys carry it.
+  describe.each([
+    { action: 'deploy', cdkCommand: 'cdk deploy --require-approval=never' },
+    { action: 'destroy', cdkCommand: 'cdk destroy' },
+  ])('$action-sandbox target', ({ action, cdkCommand }) => {
+    const target = `${action}-sandbox`;
+
     // The stage pattern must match the stage main.ts instantiates, otherwise
-    // cdk deploys nothing. Derived from the scope-prefixed project name.
+    // cdk acts on nothing. Derived from the scope-prefixed project name.
     it.each([
       { name: 'test', subDirectory: undefined, stage: 'proj-test-sandbox' },
       { name: 'infra', subDirectory: undefined, stage: 'proj-infra-sandbox' },
@@ -361,8 +372,8 @@ describe('infra generator', () => {
         const mainTs = tree.read(`${config.root}/src/main.ts`).toString();
 
         expect(mainTs).toContain(`new ApplicationStage(app, '${stage}'`);
-        expect(config.targets['deploy-sandbox'].options.command).toBe(
-          `cdk deploy --require-approval=never "${stage}/*"`,
+        expect(config.targets[target].options.command).toBe(
+          `${cdkCommand} "${stage}/*"`,
         );
       },
     );
@@ -370,16 +381,16 @@ describe('infra generator', () => {
     it('should quote the stage pattern so the shell does not glob it', async () => {
       await tsInfraGenerator(tree, options);
       const config = readProjectConfiguration(tree, '@proj/test');
-      expect(config.targets['deploy-sandbox'].options.command).toContain(
+      expect(config.targets[target].options.command).toContain(
         '"proj-test-sandbox/*"',
       );
     });
 
-    it('should build before deploying, like the deploy target', async () => {
+    it(`should assemble first, like the ${action} target`, async () => {
       await tsInfraGenerator(tree, options);
       const config = readProjectConfiguration(tree, '@proj/test');
-      expect(config.targets['deploy-sandbox'].dependsOn).toEqual([
-        '^build',
+      expect(config.targets[target].dependsOn).toEqual([
+        '^assemble',
         'compile',
       ]);
     });
@@ -411,19 +422,22 @@ describe('infra generator', () => {
       );
     });
 
-    it('should pass the sandbox stage to infra-deploy for deploy-sandbox', async () => {
-      await tsInfraGenerator(tree, stageConfigOptions);
-      const config = readProjectConfiguration(tree, '@proj/test');
-      // The stage is the first positional arg after the project path, which is
-      // where infra-deploy looks it up in stages.config.ts.
-      expect(config.targets['deploy-sandbox'].options.command).toBe(
-        'tsx packages/common/scripts/src/infra/infra-deploy.ts packages/test "proj-test-sandbox/*"',
-      );
-      expect(config.targets['deploy-sandbox'].dependsOn).toEqual([
-        '^build',
-        'compile',
-      ]);
-    });
+    it.each(['deploy', 'destroy'] as const)(
+      'should pass the sandbox stage to infra-%s for %s-sandbox',
+      async (action) => {
+        await tsInfraGenerator(tree, stageConfigOptions);
+        const config = readProjectConfiguration(tree, '@proj/test');
+        // The stage is the first positional arg after the project path, which is
+        // where the script looks it up in stages.config.ts.
+        expect(config.targets[`${action}-sandbox`].options.command).toBe(
+          `tsx packages/common/scripts/src/infra/infra-${action}.ts packages/test "proj-test-sandbox/*"`,
+        );
+        expect(config.targets[`${action}-sandbox`].dependsOn).toEqual([
+          '^assemble',
+          'compile',
+        ]);
+      },
+    );
 
     it('should generate infra-config package with stages types and config', async () => {
       await tsInfraGenerator(tree, stageConfigOptions);
@@ -525,7 +539,7 @@ describe('infra generator', () => {
       const config = readProjectConfiguration(tree, '@proj/test');
       expect(config.targets.deploy).toMatchObject({
         executor: 'nx:run-commands',
-        dependsOn: ['^build', 'compile'],
+        dependsOn: ['^assemble', 'compile'],
         options: {
           command:
             'tsx packages/common/scripts/src/infra/infra-deploy.ts packages/test',
@@ -533,7 +547,7 @@ describe('infra generator', () => {
       });
       expect(config.targets.destroy).toMatchObject({
         executor: 'nx:run-commands',
-        dependsOn: ['^build', 'compile'],
+        dependsOn: ['^assemble', 'compile'],
         options: {
           command:
             'tsx packages/common/scripts/src/infra/infra-destroy.ts packages/test',
@@ -584,5 +598,43 @@ describe('infra generator', () => {
     expect(readProjectConfiguration(tree, '@proj/test')).toBeDefined();
     expect(readProjectConfiguration(tree, '@proj/other')).toBeDefined();
     expect(tree.exists('packages/other/cdk.json')).toBeTruthy();
+  });
+
+  describe('assemble target', () => {
+    it('should produce the cloud assembly without the build quality gates', async () => {
+      await tsInfraGenerator(tree, options);
+      const config = readProjectConfiguration(tree, '@proj/test');
+
+      // `synth` is the deployable artifact, so it belongs on assemble; lint,
+      // test and checkov are quality gates, which stay on build alone.
+      expect(config.targets.assemble.dependsOn).toContain('synth');
+      expect(config.targets.assemble.dependsOn).not.toContain('lint');
+      expect(config.targets.assemble.dependsOn).not.toContain('test');
+      expect(config.targets.assemble.dependsOn).not.toContain('checkov');
+    });
+
+    it('should keep build running every quality gate', async () => {
+      await tsInfraGenerator(tree, options);
+      const config = readProjectConfiguration(tree, '@proj/test');
+
+      // Narrowing the deploy path must not narrow `build`, which is still the
+      // target that runs everything.
+      for (const gate of ['lint', 'test', 'synth', 'checkov']) {
+        expect(config.targets.build.dependsOn).toContain(gate);
+      }
+    });
+
+    it('should not grow either target on a re-run', async () => {
+      await tsInfraGenerator(tree, options);
+      const first = readProjectConfiguration(tree, '@proj/test');
+      const build = [...first.targets.build.dependsOn];
+      const assemble = [...first.targets.assemble.dependsOn];
+
+      await tsInfraGenerator(tree, options);
+      const second = readProjectConfiguration(tree, '@proj/test');
+
+      expect(second.targets.build.dependsOn).toEqual(build);
+      expect(second.targets.assemble.dependsOn).toEqual(assemble);
+    });
   });
 });

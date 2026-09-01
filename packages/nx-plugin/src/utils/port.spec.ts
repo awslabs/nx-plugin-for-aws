@@ -4,7 +4,7 @@
  */
 import type { ProjectConfiguration, Tree } from '@nx/devkit';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
-import { assignPort } from './port';
+import { assignPort } from './port.js';
 
 describe('port utilities', () => {
   let tree: Tree;

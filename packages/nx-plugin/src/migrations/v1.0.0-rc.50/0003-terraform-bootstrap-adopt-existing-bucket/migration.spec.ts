@@ -5,9 +5,9 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Tree } from '@nx/devkit';
-import { terraformProjectGenerator } from '../../../terraform/project/generator';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import migration from './migration';
+import { terraformProjectGenerator } from '../../../terraform/project/generator.js';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
+import migration from './migration.js';
 
 const BOOTSTRAP_FILE = 'packages/infra/scripts/bootstrap.ts';
 

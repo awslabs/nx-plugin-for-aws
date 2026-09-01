@@ -10,8 +10,8 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { snakeCase } from '../../../utils/names';
-import { sortObjectKeys } from '../../../utils/object';
+import { snakeCase } from '../../../utils/names.js';
+import { sortObjectKeys } from '../../../utils/object.js';
 
 export interface AddOpenApiGenerationOptions {
   project: ProjectConfiguration;
@@ -43,21 +43,30 @@ export const addOpenApiGeneration = (
   // Instrument the script as part of the fastapi project build
   const fastApiOpenApiDist = joinPathFragments('dist', project.root, 'openapi');
   const specPath = joinPathFragments(fastApiOpenApiDist, 'openapi.json');
+  const withOpenApi = (target: string) => ({
+    ...project.targets?.[target],
+    dependsOn: [
+      ...(project.targets?.[target]?.dependsOn ?? []).filter(
+        (t) => t !== 'openapi',
+      ),
+      'openapi',
+    ],
+  });
   updateProjectConfiguration(tree, project.name, {
     ...project,
     targets: sortObjectKeys({
       ...project.targets,
-      build: {
-        ...project.targets?.build,
-        dependsOn: [
-          ...(project.targets?.build?.dependsOn ?? []).filter(
-            (t) => t !== 'openapi',
-          ),
-          'openapi',
-        ],
-      },
+      build: withOpenApi('build'),
+      // The spec is a deployable artifact: the infrastructure derives the API's
+      // routes from it, so a deploy needs it as much as a build does.
+      assemble: withOpenApi('assemble'),
       openapi: {
         cache: true,
+        // The spec serialises models a dependency may own, and this target has
+        // no `dependsOn` for `default`'s transitive `dependentTasksOutputFiles`
+        // to resolve against — so `^production` is the only edge to the
+        // dependency, and without it a model change there serves a stale spec.
+        inputs: ['production', '^production'],
         executor: 'nx:run-commands',
         outputs: ['{workspaceRoot}/dist/{projectRoot}/openapi'],
         options: {

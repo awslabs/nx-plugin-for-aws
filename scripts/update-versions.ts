@@ -22,13 +22,25 @@ import {
 } from 'pip-requirements-js';
 import { parseDocument } from 'yaml';
 import { applyGritQL } from '../packages/nx-plugin/src/utils/ast';
+import {
+  resolveAgentCoreRuntimes,
+  unresolvedAgentCoreRuntimeWarning,
+} from '../packages/nx-plugin/src/utils/agent-core-runtime-resolution.js';
+import {
+  type RuntimeResolution,
+  resolveLambdaRuntimes,
+  unresolvedRuntimeWarning,
+} from '../packages/nx-plugin/src/utils/lambda-runtime-resolution';
+import { RUFF_WASM_VERSION } from '../packages/nx-plugin/src/utils/ruff';
 import { isNxPackage } from '../packages/nx-plugin/src/utils/version-upgrade-migration/nx-package-updates';
 import { registerNxPackageUpdates } from '../packages/nx-plugin/src/utils/version-upgrade-migration/register';
 import {
+  AGENT_CORE_RUNTIME_VERSIONS,
   type IJavaVersion,
   type IMiseVersion,
   JAVA_ARTIFACTS,
   JAVA_VERSIONS,
+  LAMBDA_RUNTIME_VERSIONS,
   MISE_TOOLS,
   MISE_VERSIONS,
   PY_VERSIONS,
@@ -48,7 +60,12 @@ interface TemplateChange {
   path: string;
 }
 
-type ReportChange = VersionChange | TemplateChange;
+/** Something the run could not do, reported so it reaches the PR body. */
+interface ReportNote {
+  note: string;
+}
+
+type ReportChange = VersionChange | TemplateChange | ReportNote;
 
 interface ChangeGroup {
   title: string;
@@ -163,6 +180,35 @@ const getUpdatedPythonVersions = (tmpDir: string): Record<string, string> => {
 
   console.log('Updated Python versions:', updatedVersions);
   return updatedVersions;
+};
+
+/**
+ * Holds the vended `ruff` on the release `@astral-sh/ruff-wasm-nodejs` is built
+ * from, which is what actually formats generated Python.
+ *
+ * The two move on different clocks: the wasm package is an npm dependency, so
+ * `npm-check-updates` only takes it once its `cooldown` has elapsed, while
+ * `pip-check-updates` has no such delay and takes the ruff released hours
+ * earlier. Left alone the pins land a release apart and generated files fail the
+ * vended `format --check`, which `ruff.spec.ts` asserts against.
+ *
+ * The wasm build leads because it is the one already installed and running here;
+ * the held-back ruff is taken next run, once the bindings catch up.
+ */
+const holdRuffToWasmBuild = (
+  updatedVersions: Record<string, string>,
+): ReportNote[] => {
+  const proposed = updatedVersions.ruff;
+  const wasmPin = `==${RUFF_WASM_VERSION}`;
+  if (!proposed || proposed === wasmPin) {
+    return [];
+  }
+  updatedVersions.ruff = wasmPin;
+  return [
+    {
+      note: `ruff held at ${wasmPin} (${proposed} available): @astral-sh/ruff-wasm-nodejs is still on ${RUFF_WASM_VERSION}, and the two must match`,
+    },
+  ];
 };
 
 /**
@@ -292,6 +338,10 @@ const writeReport = (changeGroups: ChangeGroup[]): void => {
       group.changes.forEach((change) => {
         if ('oldVersion' in change) {
           reportContent += `- ${change.name} ${change.oldVersion} -> ${change.newVersion}\n`;
+          return;
+        }
+        if ('note' in change) {
+          reportContent += `- ${change.note}\n`;
           return;
         }
         reportContent += `- ${change.path}\n`;
@@ -427,6 +477,74 @@ const getUpdatedJavaVersions = async (): Promise<Record<string, string>> =>
     ),
   );
 
+/**
+ * The latest managed Lambda runtimes, and the languages this could not resolve.
+ *
+ * Read from `Runtime.ALL` in `aws-cdk-lib`, a curated list that omits runtimes
+ * still in public preview. `aws-cdk-lib` is a dev dependency of this repo for the
+ * scripts only — never a dependency of the published plugin.
+ *
+ * A failure is isolated to this bump: the current pins are kept, a warning is
+ * logged, and the caller reports it in the PR body. Taking the whole run down
+ * would drop that week's TypeScript, Python, Terraform, Java and mise bumps too.
+ */
+const getUpdatedLambdaRuntimeVersions =
+  async (): Promise<RuntimeResolution> => {
+    let identifiers: string[] = [];
+    try {
+      const { Runtime } = await import('aws-cdk-lib/aws-lambda');
+      // Deduped: an alias such as `NODEJS_LATEST` repeats a runtime's name.
+      identifiers = [...new Set(Runtime.ALL.map((runtime) => runtime.name))];
+    } catch (error) {
+      console.warn('Could not read the aws-cdk-lib runtime list:', error);
+    }
+
+    const resolution = resolveLambdaRuntimes(identifiers);
+    for (const entry of resolution.unresolved) {
+      console.warn(unresolvedRuntimeWarning(entry));
+    }
+    return resolution;
+  };
+
+/**
+ * The latest managed AgentCore Runtime runtimes, and the languages this could not
+ * resolve.
+ *
+ * Read from the `AgentCoreRuntime` members `aws-cdk-lib` publishes — the same
+ * source and the same failure handling as the Lambda runtimes, but a distinct
+ * list: AgentCore offers fewer runtimes than Lambda, so the pins must move
+ * independently or a create call is rejected.
+ */
+const getUpdatedAgentCoreRuntimeVersions =
+  async (): Promise<RuntimeResolution> => {
+    let identifiers: string[] = [];
+    try {
+      const { AgentCoreRuntime } = await import(
+        'aws-cdk-lib/aws-bedrockagentcore'
+      );
+      identifiers = Object.getOwnPropertyNames(AgentCoreRuntime)
+        .map((name) => (AgentCoreRuntime as Record<string, unknown>)[name])
+        .filter(
+          (member): member is { value: string } =>
+            typeof member === 'object' &&
+            member !== null &&
+            typeof (member as { value?: unknown }).value === 'string',
+        )
+        .map((member) => member.value);
+    } catch (error) {
+      console.warn(
+        'Could not read the aws-cdk-lib AgentCoreRuntime list:',
+        error,
+      );
+    }
+
+    const resolution = resolveAgentCoreRuntimes(identifiers);
+    for (const entry of resolution.unresolved) {
+      console.warn(unresolvedAgentCoreRuntimeWarning(entry));
+    }
+    return resolution;
+  };
+
 /** The latest version mise can install of every tool in {@link MISE_VERSIONS}. */
 const getUpdatedMiseVersions = (): Record<string, string> =>
   Object.fromEntries(
@@ -495,14 +613,18 @@ const main = async () => {
     // Get updated Python versions
     const updatedPyVersions = getUpdatedPythonVersions(tmpDir);
 
+    // Applied before the rewrite so the held version is never written
+    const ruffHold = holdRuffToWasmBuild(updatedPyVersions);
+
     // Apply updated Python versions to the versions file
-    const pyChanges = await applyUpdatedVersions(
+    const pyChanges: ReportChange[] = await applyUpdatedVersions(
       tree,
       PY_VERSIONS,
       updatedPyVersions,
       'packages/nx-plugin/src/utils/versions.ts',
       'PY_VERSIONS',
     );
+    pyChanges.push(...ruffHold);
 
     // Get updated Terraform provider versions
     const updatedTerraformVersions = await getUpdatedTerraformVersions();
@@ -539,6 +661,49 @@ const main = async () => {
       'packages/nx-plugin/src/utils/versions.ts',
       'MISE_VERSIONS',
     );
+
+    // Get the latest managed Lambda runtimes
+    const {
+      versions: updatedLambdaRuntimeVersions,
+      unresolved: unresolvedRuntimes,
+    } = await getUpdatedLambdaRuntimeVersions();
+
+    // Apply updated Lambda runtimes to the versions file. Both IaC providers and
+    // the uv project Python version derive from these, so one rewrite moves them.
+    const lambdaRuntimeChanges: ReportChange[] = await applyUpdatedVersions(
+      tree,
+      LAMBDA_RUNTIME_VERSIONS,
+      updatedLambdaRuntimeVersions,
+      'packages/nx-plugin/src/utils/versions.ts',
+      'LAMBDA_RUNTIME_VERSIONS',
+    );
+
+    // Reported in the PR body, so a resolution failure is visible without reading
+    // the CI logs and can't be mistaken for "already up to date".
+    for (const entry of unresolvedRuntimes) {
+      lambdaRuntimeChanges.push({ note: unresolvedRuntimeWarning(entry) });
+    }
+
+    // Get the latest managed AgentCore runtimes, which agents and MCP servers
+    // packaged as code run on.
+    const {
+      versions: updatedAgentCoreRuntimeVersions,
+      unresolved: unresolvedAgentCoreRuntimes,
+    } = await getUpdatedAgentCoreRuntimeVersions();
+
+    const agentCoreRuntimeChanges: ReportChange[] = await applyUpdatedVersions(
+      tree,
+      AGENT_CORE_RUNTIME_VERSIONS,
+      updatedAgentCoreRuntimeVersions,
+      'packages/nx-plugin/src/utils/versions.ts',
+      'AGENT_CORE_RUNTIME_VERSIONS',
+    );
+
+    for (const entry of unresolvedAgentCoreRuntimes) {
+      agentCoreRuntimeChanges.push({
+        note: unresolvedAgentCoreRuntimeWarning(entry),
+      });
+    }
 
     // Keep the Smithy CLI CI installs on Windows in step with the mise pin
     const smithyChange = miseChanges.find((change) => change.name === 'smithy');
@@ -578,6 +743,8 @@ const main = async () => {
       { title: 'Terraform Providers', changes: terraformChanges },
       { title: 'Java Dependencies', changes: javaChanges },
       { title: 'mise Tools', changes: miseChanges },
+      { title: 'Lambda Runtimes', changes: lambdaRuntimeChanges },
+      { title: 'AgentCore Runtimes', changes: agentCoreRuntimeChanges },
       ...(vendoredChanges.length > 0
         ? [{ title: 'Vendored Tools', changes: vendoredChanges }]
         : []),

@@ -119,6 +119,42 @@ Set `advanced_security_mode` to `ENFORCED` in the `user_pool_add_ons` block in `
 </Fragment>
 </Infrastructure>
 
+#### Multi-factor authentication (MFA)
+
+By default users must configure MFA (an SMS code or a time-based one time password) before they can sign in. You can make MFA optional, turn it off entirely, or restrict which second-factor methods are available:
+
+<Infrastructure>
+<Fragment slot="cdk">
+```ts
+import { Mfa } from 'aws-cdk-lib/aws-cognito';
+
+new UserIdentity(this, 'Identity', {
+  mfa: Mfa.OPTIONAL,
+  mfaSecondFactor: { sms: false, otp: true },
+});
+```
+
+`mfa` accepts `Mfa.OFF` / `Mfa.OPTIONAL` / `Mfa.REQUIRED`. `mfaSecondFactor.sms` and `mfaSecondFactor.otp` enable or disable each second-factor method independently; they have no effect when `mfa` is `Mfa.OFF`. Setting `mfa: Mfa.REQUIRED` with both methods disabled is rejected at synth time, since nobody could then complete sign-in.
+</Fragment>
+<Fragment slot="terraform">
+```hcl
+module "user_identity" {
+  source = "../../common/terraform/src/core/user-identity"
+
+  mfa = "OPTIONAL"
+  mfa_second_factor_sms = false
+  mfa_second_factor_otp = true
+}
+```
+
+`mfa` accepts `"OFF"` / `"OPTIONAL"` / `"ON"`. `mfa_second_factor_sms` and `mfa_second_factor_otp` enable or disable each second-factor method independently; they have no effect when `mfa` is `"OFF"`.
+</Fragment>
+</Infrastructure>
+
+:::caution[SMS MFA is tied to phone number verification]
+Cognito rejects SMS-based phone number verification unless SMS is also an enabled MFA method whenever MFA is not off, in both CDK and Terraform. Disabling `mfaSecondFactor.sms` / `mfa_second_factor_sms` while `mfa` is on therefore also disables SMS-based phone number verification for the user pool.
+:::
+
 #### Web Application Firewall (WAF)
 
 By default the User Pool is associated with an [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACL using the `AWSManagedRulesCommonRuleSet` and `AWSManagedRulesKnownBadInputsRuleSet` managed rule groups. You can disable this if you wish to manage your own Web ACL or do not require one:
@@ -199,7 +235,7 @@ The user identity module automatically adds the necessary <Link path="guides/rea
 </Infrastructure>
 
 :::caution[Remove localhost callback URLs for production]
-The generated User Pool client allows your CloudFront distribution URL (and any custom domain names configured on it) as OAuth callback/logout URLs, plus `http://localhost:4200` and `http://localhost:4300` for local development against the deployed pool.
+The generated User Pool client allows your CloudFront distribution URL (and any custom domain names configured on it) as OAuth callback/logout URLs, plus each connected website's own local dev-server and preview URLs (e.g. `http://localhost:4200` and `http://localhost:4300` for the first website generated in a workspace) for local development against the deployed pool. Each website generated with `ts#website` is assigned its own distinct ports, so a workspace with multiple websites will have more than one `http://localhost:<port>` pair allow-listed here.
 
 It is recommended to **remove the `http://localhost` callback/logout URLs for production stages**, keeping the allowlist limited to your real application origins.
 
@@ -229,7 +265,9 @@ export class ApplicationStack extends Stack {
     super(scope, id);
 
     const identity = new UserIdentity(this, 'Identity');
-    const api = new MyApi(this, 'MyApi');
+    const api = new MyApi(this, 'MyApi', {
+      integrations: MyApi.defaultIntegrations(this).build(),
+    });
 
     api.grantInvokeAccess(identity.identityPool.authenticatedRole);
 

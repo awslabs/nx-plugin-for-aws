@@ -10,19 +10,20 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { addTargetToLocalDev } from '../../../connection/local-dev';
-import runtimeConfigGenerator from '../../../ts/react-website/runtime-config/generator';
-import { addSingleImport, applyGritQL } from '../../ast';
+import { addTargetToLocalDev } from '../../../connection/local-dev.js';
+import runtimeConfigGenerator from '../../../ts/react-website/runtime-config/generator.js';
+import { addSingleImport, applyGritQL } from '../../ast.js';
 import {
   type DependencyDeclaration,
   forDependencies,
   type MustDeclare,
-} from '../../declared-dependencies';
-import { addDependenciesToPackageJson } from '../../dependencies';
-import { updateGitIgnore } from '../../git';
-import { kebabCase, toClassName } from '../../names';
-import { sortObjectKeys } from '../../object';
-import { type ITsDepVersion, withVersions } from '../../versions';
+} from '../../declared-dependencies.js';
+import { addDependenciesToPackageJson } from '../../dependencies.js';
+import { updateGitIgnore } from '../../git.js';
+import { kebabCase, toClassName } from '../../names.js';
+import { sortObjectKeys } from '../../object.js';
+import { openApiCodegenTarget } from '../../open-api-codegen-target.js';
+import { type ITsDepVersion, withVersions } from '../../versions.js';
 
 /** Dependencies a caller must declare to add an OpenAPI React client. */
 export const OPEN_API_REACT_DEPENDENCIES = [
@@ -142,24 +143,15 @@ export const addOpenApiReactClient = async <
           },
         ]),
       ),
-      [clientGenTarget]: {
-        cache: true,
-        executor: 'nx:run-commands',
-        inputs: [
-          {
-            dependentTasksOutputFiles: '**/*.json',
-          },
-        ],
+      [clientGenTarget]: openApiCodegenTarget({
+        generator: 'ts-hooks',
+        openApiSpecPath: specPath,
+        outputPath: generatedClientDirFromRoot,
+        specBuildTargetName,
         outputs: [
           joinPathFragments('{workspaceRoot}', generatedClientDirFromRoot),
         ],
-        options: {
-          commands: [
-            `nx g @aws/nx-plugin:open-api#ts-hooks --openApiSpecPath="${specPath}" --outputPath="${generatedClientDirFromRoot}" --no-interactive`,
-          ],
-        },
-        dependsOn: [specBuildTargetName],
-      },
+      }),
       // Watch target for regenerating the client
       [clientGenWatchTarget]: {
         executor: 'nx:run-commands',

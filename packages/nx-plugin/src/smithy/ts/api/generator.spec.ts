@@ -6,18 +6,19 @@ import { readJson, type Tree } from '@nx/devkit';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
-} from '../../../utils/config/utils';
-import { declareDependencies } from '../../../utils/declared-dependencies';
-import { expectHasMetricTags } from '../../../utils/metrics.spec';
+} from '../../../utils/config/utils.js';
+import { declareDependencies } from '../../../utils/declared-dependencies.js';
+import { expectHasMetricTags } from '../../../utils/metrics.spec.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../../utils/shared-constructs';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
+} from '../../../utils/shared-constructs.js';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
+import { terraformLambdaRuntime } from '../../../utils/versions.js';
 import {
   TS_SMITHY_API_GENERATOR_INFO,
   tsSmithyApiGenerator,
-} from './generator';
+} from './generator.js';
 
 const sharedConstructsDeclaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
@@ -570,9 +571,12 @@ describe('tsSmithyApiGenerator', () => {
     const openApiTarget =
       sharedConstructsConfig.targets['generate:test-api-metadata'];
     expect(openApiTarget.dependsOn).toContain('@proj/test-api-model:build');
-    expect(openApiTarget.options.commands).toContain(
-      'nx g @aws/nx-plugin:open-api#ts-metadata --openApiSpecPath="dist/test-api/model/build/openapi/openapi.json" --outputPath="packages/common/constructs/src/generated/test-api" --no-interactive',
-    );
+    expect(openApiTarget.executor).toBe('@aws/nx-plugin:open-api-codegen');
+    expect(openApiTarget.options).toEqual({
+      generator: 'ts-metadata',
+      openApiSpecPath: 'dist/test-api/model/build/openapi/openapi.json',
+      outputPath: 'packages/common/constructs/src/generated/test-api',
+    });
   });
 
   it('should handle kebab-case API names correctly', async () => {
@@ -637,7 +641,9 @@ describe('tsSmithyApiGenerator', () => {
 
       // Verify Smithy-specific handler configuration
       expect(appApiContent).toMatch(/handler\s+=\s+"index\.handler"/);
-      expect(appApiContent).toMatch(/runtime\s+=\s+"nodejs22\.x"/);
+      expect(appApiContent).toMatch(
+        new RegExp(`runtime\\s+=\\s+"${terraformLambdaRuntime('node')}"`),
+      );
 
       // Snapshot terraform files
       const terraformFileContents = {
@@ -683,7 +689,9 @@ describe('tsSmithyApiGenerator', () => {
 
       // Verify Smithy-specific handler configuration
       expect(appApiContent).toMatch(/handler\s+=\s+"index\.handler"/);
-      expect(appApiContent).toMatch(/runtime\s+=\s+"nodejs22\.x"/);
+      expect(appApiContent).toMatch(
+        new RegExp(`runtime\\s+=\\s+"${terraformLambdaRuntime('node')}"`),
+      );
 
       // Snapshot terraform files
       const terraformFileContents = {

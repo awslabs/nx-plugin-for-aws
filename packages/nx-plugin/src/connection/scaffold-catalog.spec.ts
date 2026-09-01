@@ -12,9 +12,9 @@ import {
   CONNECTION_PREFERENCES,
   deriveScaffoldRecipe,
   SELF_CONNECTION_DISALLOWED,
-} from './scaffold-catalog';
-import { nodeSchemaResolver, SCAFFOLD_RECIPES } from './schema-resolver';
-import { SUPPORTED_CONNECTIONS } from './supported-connections';
+} from './scaffold-catalog.js';
+import { nodeSchemaResolver, SCAFFOLD_RECIPES } from './schema-resolver.js';
+import { SUPPORTED_CONNECTIONS } from './supported-connections.js';
 
 /**
  * The docs graph builder derives its palette and edges from this catalogue, so a

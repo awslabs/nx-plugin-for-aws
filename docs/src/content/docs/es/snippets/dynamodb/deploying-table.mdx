@@ -1,7 +1,8 @@
 ---
-title: Desplegando tu Tabla de DynamoDB
+title: Desplegando tu tabla de DynamoDB
 ---
 import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
 
 El generador de DynamoDB crea infraestructura CDK o Terraform basada en tu `iac` seleccionado.
 
@@ -22,11 +23,11 @@ export class ApplicationStack extends Stack {
 ```
 
 Esto aprovisiona una tabla de DynamoDB con:
-- `pk` (clave de partición) y `sk` (clave de ordenamiento), ambas de tipo `String`
+- `pk` (clave de partición) y `sk` (clave de ordenación), ambas de tipo `String`
 - Índices Secundarios Globales según se definen en `config.json`
 - Facturación bajo demanda (`PAY_PER_REQUEST`)
 - Cifrado KMS gestionado por el cliente con rotación automática de claves
-- Recuperación point-in-time habilitada
+- Recuperación a un punto en el tiempo habilitada
 - Protección contra eliminación habilitada
 - Nombre de tabla registrado en Runtime Config bajo el espacio de nombres `dynamodb` en AWS AppConfig
 </Fragment>
@@ -40,32 +41,47 @@ module "my_table" {
 ```
 
 Esto aprovisiona una tabla de DynamoDB con:
-- `pk` (clave de partición) y `sk` (clave de ordenamiento), ambas de tipo `String`
+- `pk` (clave de partición) y `sk` (clave de ordenación), ambas de tipo `String`
 - Índices Secundarios Globales según se definen en `config.json`
 - Facturación bajo demanda (`PAY_PER_REQUEST`)
 - Cifrado KMS gestionado por el cliente con rotación automática de claves
-- Recuperación point-in-time habilitada
-- Protección contra eliminación habilitada
-- Nombre de tabla registrado en Runtime Config
+- Recuperación a un punto en el tiempo habilitada
+- Protección contra eliminación habilitada, más una protección de ciclo de vida `prevent_destroy`
+- Nombre de tabla registrado en Runtime Config bajo el espacio de nombres `dynamodb` en AWS AppConfig
+
+El módulo `core/runtime-config/appconfig` expone el espacio de nombres `dynamodb` por defecto, por lo que el nombre de la tabla se despliega sin configuración adicional. Si pasas `namespaces` a ese módulo explícitamente, mantén `dynamodb` en la lista; de lo contrario, no se crea ningún perfil de configuración para él y el cliente de tabla generado no puede resolver el nombre de la tabla.
 </Fragment>
 </Infrastructure>
 
-### Protección contra Eliminación
+### Protección contra eliminación
 
-La protección contra eliminación está habilitada por defecto para prevenir la eliminación accidental de la tabla.
+La tabla está protegida por dos protecciones independientes, de modo que desactivar cualquiera de ellas por sí sola no puede eliminar tus datos:
 
-#### Deshabilitar la Protección contra Eliminación
+<Infrastructure>
+<Fragment slot="cdk">
+- `deletionProtection`, aplicada por DynamoDB.
+- `RemovalPolicy.RETAIN`, aplicada por CloudFormation, que deja la tabla en su lugar cuando se elimina del stack.
+</Fragment>
+<Fragment slot="terraform">
+- `deletion_protection_enabled`, aplicada por DynamoDB.
+- `lifecycle { prevent_destroy = true }` en la tabla en `common/terraform/src/core/dynamodb/dynamodb.tf`, aplicada por Terraform, que falla cualquier plan que destruiría la tabla.
+</Fragment>
+</Infrastructure>
 
-Deshabilítala para entornos donde se espera la eliminación de tablas, como stacks de desarrollo o preview de corta duración.
+#### Eliminando la tabla
+
+Deshabilita la protección para entornos donde se espera la eliminación de tablas, como stacks de desarrollo o vista previa de corta duración.
 
 <Infrastructure>
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
 import { MyTable } from '@my-scope/common-constructs';
 
 const table = new MyTable(this, 'Table', {
   deletionProtection: false,
+  removalPolicy: RemovalPolicy.DESTROY,
 });
 ```
 </Fragment>
@@ -77,12 +93,28 @@ module "my_table" {
   deletion_protection_enabled = false
 }
 ```
+
+`prevent_destroy` debe ser un literal — Terraform no permite que haga referencia a una variable — por lo que no se puede desactivar desde `main.tf`. También elimina el bloque `lifecycle` de la tabla en `common/terraform/src/core/dynamodb/dynamodb.tf`:
+
+```hcl title="packages/common/terraform/src/core/dynamodb/dynamodb.tf" del={4-6}
+resource "aws_dynamodb_table" "table" {
+  # ...
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+```
+
+:::caution
+Este módulo es compartido por todas las tablas en tu espacio de trabajo, por lo que eliminar el bloque elimina esa protección para todas ellas.
+:::
 </Fragment>
 </Infrastructure>
 
-### Modo de Facturación
+### Modo de facturación
 
-La tabla usa por defecto facturación bajo demanda (`PAY_PER_REQUEST`). Cambia a capacidad aprovisionada para cargas de trabajo predecibles de alto rendimiento.
+La tabla utiliza por defecto facturación bajo demanda (`PAY_PER_REQUEST`). Cambia a capacidad aprovisionada para cargas de trabajo predecibles de alto rendimiento.
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -109,11 +141,11 @@ module "my_table" {
 </Fragment>
 </Infrastructure>
 
-### Recuperación Point-in-time
+### Recuperación a un punto en el tiempo
 
-La [recuperación point-in-time](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Point-in-time-recovery.html) está habilitada por defecto, permitiéndote restaurar la tabla a cualquier punto en los últimos 35 días.
+La [recuperación a un punto en el tiempo](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Point-in-time-recovery.html) está habilitada por defecto, permitiéndote restaurar la tabla a cualquier punto en los últimos 35 días.
 
-#### Deshabilitar la Recuperación Point-in-time
+#### Deshabilitar la recuperación a un punto en el tiempo
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -137,30 +169,8 @@ module "my_table" {
 </Fragment>
 </Infrastructure>
 
-### Rotación de Clave de Cifrado
+### Cifrado
 
-La clave KMS utilizada para cifrar la tabla tiene la rotación automática de claves habilitada por defecto. Deshabilítala si tu política de seguridad gestiona la rotación externamente.
+La tabla está cifrada con una clave KMS gestionada por el cliente por defecto, creada automáticamente para ti. Cambia a una clave gestionada por AWS, la clave propiedad de AWS, o trae tu propia clave KMS, si gestionas el cifrado de manera diferente.
 
-#### Deshabilitar la Rotación de Clave de Cifrado
-
-<Infrastructure>
-<Fragment slot="cdk">
-
-```ts title="packages/infra/src/stacks/application-stack.ts"
-import { MyTable } from '@my-scope/common-constructs';
-
-const table = new MyTable(this, 'Table', {
-  enableKeyRotation: false,
-});
-```
-</Fragment>
-<Fragment slot="terraform">
-
-```hcl title="packages/infra/src/main.tf"
-module "my_table" {
-  source              = "../../common/terraform/src/app/dynamodb/my-table"
-  enable_key_rotation = false
-}
-```
-</Fragment>
-</Infrastructure>
+<Snippet name="dynamodb/encryption-options" parentHeading="Cifrado" />

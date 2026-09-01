@@ -55,13 +55,15 @@ Le générateur ajoutera les fichiers suivants à votre projet TypeScript exista
           - divide.ts Sample tool
         - resources/
           - sample-guidance.ts Sample resource
-        - Dockerfile Entry point for hosting your MCP server (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - project.json Updated with MCP server serve target
 </FileTree>
 
 ### Infrastructure
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment">
+<Snippet name="agentcore-hosting" />
+
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Bedrock AgentCore Runtime deployment">
 <Snippet name="shared-constructs" />
 
 <Snippet name="mcp/shared-constructs" />
@@ -100,12 +102,18 @@ export const registerMyTool = (server: McpServer) => {
 };
 ```
 
-Ensuite, enregistrez-le dans `server.ts` :
+Ensuite, enregistrez-le à l'intérieur de `createServer` dans `server.ts` :
 
-```typescript title="server.ts"
+```typescript title="server.ts" {6}
 import { registerMyTool } from './tools/my-tool.js';
 
-registerMyTool(server);
+export const createServer = async () => {
+  const server = new McpServer({ name: 'my-server', version: '1.0.0' });
+
+  registerMyTool(server);
+
+  return server;
+};
 ```
 
 ### Ajouter des ressources
@@ -178,7 +186,7 @@ Si vous souhaitez exécuter votre serveur MCP localement en utilisant le [transp
 
 Cette commande utilise `tsx --watch` pour redémarrer automatiquement le serveur lorsque les fichiers changent.
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment details">
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Bedrock AgentCore Runtime deployment details">
 ## Déployer votre serveur MCP sur Bedrock AgentCore Runtime
 
 <Snippet name="mcp/bedrock-deployment" parentHeading="Déployer votre serveur MCP sur Bedrock AgentCore Runtime" />
@@ -189,6 +197,13 @@ Cette commande utilise `tsx --watch` pour redémarrer automatiquement le serveur
 
 La cible de bundle utilise `http.ts` comme point d'entrée pour le serveur MCP HTTP Streamable à héberger sur Bedrock AgentCore Runtime.
 
+<OptionFilter when={{ infra: 'agentcore' }} description="Code package target">
+### Cible de package
+
+Le générateur configure une cible `<your-server-name>-package` qui assemble le package de code déployable : le `index.js` regroupé plus une installation vendorisée de AWS Distro for OpenTelemetry, qu'AgentCore exige d'être présent dans le package. L'infrastructure générée télécharge ce répertoire sous forme de `.zip` — via `AgentRuntimeArtifact.fromCodeAsset` sous CDK, ou archivé dans le bucket d'actifs partagé sous Terraform.
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'agentcore-ecr' }} description="Container image build and scan">
 ### Cible Docker
 
 Le générateur configure une cible `<your-server-name>-docker` qui copie le `Dockerfile` depuis le répertoire source de votre serveur MCP dans le répertoire de sortie du bundle. Cela co-localise le `Dockerfile` avec les artefacts regroupés, permettant à CDK de construire l'image Docker directement en utilisant `AgentRuntimeArtifact.fromAsset`.
@@ -198,6 +213,7 @@ Une cible `docker` est également générée qui prépare le contexte docker pou
 ### Analyse d'image
 
 <Snippet name="trivy-image-scan" parentHeading="Analyse d'image" />
+</OptionFilter>
 
 ### Observabilité
 

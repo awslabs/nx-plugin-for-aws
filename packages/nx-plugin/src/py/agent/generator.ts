@@ -10,13 +10,13 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { ensureLicenseExceptions } from '../../license/config';
-import { AG_UI_LANGGRAPH_EXCEPTIONS } from '../../license/known-exceptions';
+import { ensureLicenseExceptions } from '../../license/config.js';
+import { AG_UI_LANGGRAPH_EXCEPTIONS } from '../../license/known-exceptions.js';
 import {
   addPyDependencies,
   addTsDependencies,
-} from '../../utils/add-dependencies';
-import { addAgentChatScripts } from '../../utils/agent-chat/agent-chat';
+} from '../../utils/add-dependencies.js';
+import { addAgentChatScripts } from '../../utils/agent-chat/agent-chat.js';
 import {
   AGENT_CONNECTION_PY_DEPENDENCIES,
   addPythonFrameworkBase,
@@ -24,24 +24,38 @@ import {
   ensurePythonAgentConnectionProject,
   getPythonAgentConnectionModuleName,
   getPythonAgentConnectionProject,
-} from '../../utils/agent-connection/agent-connection';
-import { addAgentInfra } from '../../utils/agent-core-constructs/agent-core-constructs';
-import { addPythonBundleTarget } from '../../utils/bundle/bundle';
-import { resolveContainers } from '../../utils/containers';
+} from '../../utils/agent-connection/agent-connection.js';
+import {
+  type AgentCoreArtifact,
+  addAgentInfra,
+} from '../../utils/agent-core-constructs/agent-core-constructs.js';
+import {
+  addPythonCodePackageTarget,
+  agentCorePythonRuntime,
+  isAgentCoreHosted,
+  isContainerHosted,
+} from '../../utils/agent-core-packaging.js';
+import { addPythonBundleTarget } from '../../utils/bundle/bundle.js';
+import { resolveContainers } from '../../utils/containers.js';
 import {
   declareDependencies,
   ownedElsewhere,
-} from '../../utils/declared-dependencies';
-import { addDockerScanTarget, DOCKER_DEPENDENCIES } from '../../utils/docker';
-import { formatFilesInSubtree } from '../../utils/format';
-import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs';
-import { updateGitIgnore } from '../../utils/git';
-import { resolveIac } from '../../utils/iac';
-import { installDependencies } from '../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { kebabCase, toClassName, toSnakeCase } from '../../utils/names';
-import { getNpmScope } from '../../utils/npm-scope';
+} from '../../utils/declared-dependencies.js';
 import {
+  addDockerScanTarget,
+  DOCKER_DEPENDENCIES,
+  IMAGE_BUILD_CACHE,
+} from '../../utils/docker.js';
+import { formatFilesInSubtree } from '../../utils/format.js';
+import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs.js';
+import { updateGitIgnore } from '../../utils/git.js';
+import { resolveIac } from '../../utils/iac.js';
+import { installDependencies } from '../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
+import { kebabCase, toClassName, toSnakeCase } from '../../utils/names.js';
+import { getNpmScope } from '../../utils/npm-scope.js';
+import {
+  addArtifactDependencyToTargets,
   addComponentDevTarget,
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
@@ -49,24 +63,26 @@ import {
   type NxGeneratorInfo,
   normalizeTargetKeyOrder,
   readProjectConfigurationUnqualified,
-} from '../../utils/nx';
-import { sortObjectKeys } from '../../utils/object';
+} from '../../utils/nx.js';
+import { sortObjectKeys } from '../../utils/object.js';
+import { openApiCodegenTarget } from '../../utils/open-api-codegen-target.js';
 import {
   getRelativePathToRootByDirectory,
   toProjectRelativePath,
-} from '../../utils/paths';
-import { assignPort } from '../../utils/port';
-import { addWorkspaceDependencyToPyProject } from '../../utils/py';
+} from '../../utils/paths.js';
+import { assignPort } from '../../utils/port.js';
+import { addWorkspaceDependencyToPyProject } from '../../utils/py.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../utils/shared-constructs';
-import type { IacMetadata } from '../../utils/shared-constructs-constants';
-import { BASE_IMAGES } from '../../utils/versions';
+} from '../../utils/shared-constructs.js';
+import type { IacMetadata } from '../../utils/shared-constructs-constants.js';
+import { BASE_IMAGES } from '../../utils/versions.js';
 import type {
   AgentProtocol,
   PyAgentFramework,
   PyAgentGeneratorSchema,
+  PyAgentInfra,
   PyAgentSession,
 } from './schema';
 
@@ -82,6 +98,11 @@ export interface PyAgentMetadata extends IacMetadata {
    */
   readonly framework: PyAgentFramework;
   readonly session: PyAgentSession;
+  /**
+   * How this component is packaged and hosted, so a consumer can tell a
+   * code-packaged runtime from a container-packaged one without re-deriving it.
+   */
+  readonly infra: PyAgentInfra;
 }
 
 /** Whether the chat CLI signs its requests, which only IAM auth needs. */
@@ -351,7 +372,8 @@ export const pyAgentGenerator = async (
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
-  if (infra === 'agentcore') {
+  if (isAgentCoreHosted(infra)) {
+    const container = isContainerHosted(infra);
     const containers = await resolveContainers(tree, 'inherit');
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
 
@@ -363,64 +385,121 @@ export const pyAgentGenerator = async (
       },
     );
 
-    // Add the Dockerfile
-    generateFiles(
-      tree,
-      joinPathFragments(import.meta.dirname, 'files', 'deploy'),
-      targetSourceDir,
-      {
-        agentNameSnakeCase,
-        moduleName,
-        bundleOutputDir,
-        protocol,
-        pythonBaseImage: BASE_IMAGES.python,
-      },
-      { overwriteStrategy: OverwriteStrategy.KeepExisting },
-    );
+    let artifact: AgentCoreArtifact;
 
-    const dockerOutputDir = joinPathFragments(
-      'dist',
-      project.root,
-      'docker',
-      name,
-    );
-    const dockerTargetName = `${agentTargetPrefix}-docker`;
+    if (container) {
+      // Add the Dockerfile
+      generateFiles(
+        tree,
+        joinPathFragments(import.meta.dirname, 'files', 'deploy'),
+        targetSourceDir,
+        {
+          agentNameSnakeCase,
+          moduleName,
+          bundleOutputDir,
+          protocol,
+          pythonBaseImage: BASE_IMAGES.python,
+        },
+        { overwriteStrategy: OverwriteStrategy.KeepExisting },
+      );
 
-    // Add a docker target that prepares the docker context and builds the image
-    const fs = new FsCommands(tree, DEPENDENCIES);
-    project.targets[dockerTargetName] = {
-      cache: true,
-      executor: 'nx:run-commands',
-      options: {
-        commands: [
-          fs.rm(dockerOutputDir),
-          fs.mkdir(dockerOutputDir),
-          fs.cp(bundleOutputDir, dockerOutputDir),
-          fs.cp(
-            `${targetSourceDir}/Dockerfile`,
-            `${dockerOutputDir}/Dockerfile`,
+      const dockerOutputDir = joinPathFragments(
+        'dist',
+        project.root,
+        'docker',
+        name,
+      );
+      const dockerTargetName = `${agentTargetPrefix}-docker`;
+
+      // Add a docker target that prepares the docker context and builds the image
+      const fs = new FsCommands(tree, DEPENDENCIES);
+      project.targets[dockerTargetName] = {
+        cache: IMAGE_BUILD_CACHE,
+        executor: 'nx:run-commands',
+        options: {
+          commands: [
+            fs.rm(dockerOutputDir),
+            fs.mkdir(dockerOutputDir),
+            fs.cp(bundleOutputDir, dockerOutputDir),
+            fs.cp(
+              `${targetSourceDir}/Dockerfile`,
+              `${dockerOutputDir}/Dockerfile`,
+            ),
+            `${containers} build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
+          ],
+          parallel: false,
+        },
+        dependsOn: [bundleTargetName],
+      };
+
+      addDependencyToTargetIfNotPresent(project, 'docker', dockerTargetName);
+      addArtifactDependencyToTargets(project, 'docker');
+
+      addDockerScanTarget(
+        tree,
+        {
+          project,
+          containerEngine: containers,
+          trivyTargetName: `${agentTargetPrefix}-trivy`,
+          dockerTargetName,
+          imageTags: [dockerImageTag],
+        },
+        DEPENDENCIES,
+      );
+
+      artifact = {
+        type: 'container',
+        dockerImageTag,
+        outputDir: dockerOutputDir,
+      };
+    } else {
+      // The entry point the managed runtime runs, at the package root.
+      generateFiles(
+        tree,
+        joinPathFragments(import.meta.dirname, 'files', 'package'),
+        joinPathFragments(project.root, 'package', agentNameSnakeCase),
+        {
+          agentNameSnakeCase,
+          moduleName,
+          port: protocol === 'a2a' ? 9000 : 8080,
+        },
+        { overwriteStrategy: OverwriteStrategy.KeepExisting },
+      );
+
+      const packageOutputDir = joinPathFragments(
+        'dist',
+        project.root,
+        'package',
+        name,
+      );
+      addPythonCodePackageTarget(
+        tree,
+        {
+          project,
+          targetName: `${agentTargetPrefix}-package`,
+          bundleTargetName,
+          bundleOutputDir,
+          packageOutputDir,
+          sourceRoot: project.sourceRoot,
+          moduleName,
+          entryPointPath: joinPathFragments(
+            project.root,
+            'package',
+            agentNameSnakeCase,
+            'main.py',
           ),
-          `${containers} build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
-        ],
-        parallel: false,
-      },
-      dependsOn: [bundleTargetName],
-    };
+          entryPointFileName: 'main.py',
+        },
+        DEPENDENCIES,
+      );
 
-    addDependencyToTargetIfNotPresent(project, 'docker', dockerTargetName);
-    addDependencyToTargetIfNotPresent(project, 'build', 'docker');
-
-    addDockerScanTarget(
-      tree,
-      {
-        project,
-        containerEngine: containers,
-        trivyTargetName: `${agentTargetPrefix}-trivy`,
-        dockerTargetName,
-        imageTags: [dockerImageTag],
-      },
-      DEPENDENCIES,
-    );
+      artifact = {
+        type: 'code',
+        outputDir: packageOutputDir,
+        runtime: agentCorePythonRuntime(),
+        entryPoint: 'main.py',
+      };
+    }
 
     // Add shared constructs
     await sharedConstructsGenerator(tree, { iac }, DEPENDENCIES);
@@ -432,8 +511,7 @@ export const pyAgentGenerator = async (
     await addAgentInfra(tree, {
       agentNameKebabCase: name,
       agentNameClassName,
-      dockerImageTag,
-      dockerOutputDir,
+      artifact,
       iac,
       projectName: project.name,
       auth,
@@ -453,6 +531,7 @@ export const pyAgentGenerator = async (
   // Recorded below and read by the declaration's predicates, so the packages
   // added here are exactly the ones the version sync will own.
   const metadata: PyAgentMetadata = {
+    infra,
     port: localDevPort,
     rc: agentNameClassName,
     auth,
@@ -534,6 +613,12 @@ export const pyAgentGenerator = async (
       ? {
           [openApiTargetName]: {
             cache: true,
+            // The spec serialises models a dependency may own, and this target
+            // has no `dependsOn` for `default`'s transitive
+            // `dependentTasksOutputFiles` to resolve against — so `^production`
+            // is the only edge to the dependency, and without it a model change
+            // there serves a stale spec.
+            inputs: ['production', '^production'],
             executor: 'nx:run-commands',
             outputs: [
               `{workspaceRoot}/dist/{projectRoot}/openapi/${agentNameSnakeCase}`,
@@ -544,22 +629,13 @@ export const pyAgentGenerator = async (
               ],
             },
           },
-          [clientGenTargetName]: {
-            cache: true,
-            executor: 'nx:run-commands',
-            dependsOn: [openApiTargetName],
-            inputs: [
-              {
-                dependentTasksOutputFiles: '**/*.json',
-              },
-            ],
+          [clientGenTargetName]: openApiCodegenTarget({
+            generator: 'ts-client',
+            openApiSpecPath: `dist/${project.root}/openapi/${agentNameSnakeCase}/openapi.json`,
+            outputPath: `${project.root}/scripts/${agentTargetPrefix}/generated`,
+            specBuildTargetName: openApiTargetName,
             outputs: [`{projectRoot}/scripts/${agentTargetPrefix}/generated`],
-            options: {
-              commands: [
-                `nx g @aws/nx-plugin:open-api#ts-client --openApiSpecPath="dist/${project.root}/openapi/${agentNameSnakeCase}/openapi.json" --outputPath="${project.root}/scripts/${agentTargetPrefix}/generated" --no-interactive`,
-              ],
-            },
-          },
+          }),
         }
       : {};
 

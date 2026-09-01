@@ -16,6 +16,13 @@ module "asset_bucket" {
   bucket_name_prefix = "e2e-rdb-assets-<% TEST_RUN_ID %>"
 }
 
+# Shared asset registry — hosts every database's Lambda container images.
+module "asset_ecr" {
+  source = "../../common/terraform/src/core/asset-ecr"
+
+  repository_name_prefix = "e2e-rdb-assets-<% TEST_RUN_ID %>"
+}
+
 # ---------------------------------------------------------------------------
 # VPC (shared by both relational database modules)
 # ---------------------------------------------------------------------------
@@ -103,10 +110,11 @@ module "postgres_db" {
   lambda_subnet_ids   = [aws_subnet.rdb_a.id, aws_subnet.rdb_b.id]
   asset_bucket_name   = module.asset_bucket.bucket_name
 
+  asset_ecr_repository_url = module.asset_ecr.repository_url
+
   deletion_protection        = false
   skip_final_snapshot        = true
   enable_rds_proxy           = false
-  enable_credential_rotation = false
   enable_backup              = false
 }
 
@@ -118,15 +126,17 @@ module "my_sql_db" {
   lambda_subnet_ids   = [aws_subnet.rdb_a.id, aws_subnet.rdb_b.id]
   asset_bucket_name   = module.asset_bucket.bucket_name
 
+  asset_ecr_repository_url = module.asset_ecr.repository_url
+
   deletion_protection        = false
   skip_final_snapshot        = true
   enable_rds_proxy           = false
-  enable_credential_rotation = false
   enable_backup              = false
 }
 
-# Python (SQLModel) databases use Docker-bundled Lambda handlers, so they
-# don't need the asset bucket used by the zip-bundled TypeScript handlers.
+# Python (SQLModel) databases bundle both Lambda handlers as container images,
+# so they don't need the asset bucket the zip-bundled TypeScript
+# create-db-user handler stages into.
 module "py_postgres_db" {
   source = "../../common/terraform/src/app/dbs/py-postgres-db"
 
@@ -134,10 +144,11 @@ module "py_postgres_db" {
   database_subnet_ids = [aws_subnet.rdb_a.id, aws_subnet.rdb_b.id]
   lambda_subnet_ids   = [aws_subnet.rdb_a.id, aws_subnet.rdb_b.id]
 
+  asset_ecr_repository_url = module.asset_ecr.repository_url
+
   deletion_protection        = false
   skip_final_snapshot        = true
   enable_rds_proxy           = false
-  enable_credential_rotation = false
   enable_backup              = false
 }
 
@@ -148,9 +159,10 @@ module "py_mysql_db" {
   database_subnet_ids = [aws_subnet.rdb_a.id, aws_subnet.rdb_b.id]
   lambda_subnet_ids   = [aws_subnet.rdb_a.id, aws_subnet.rdb_b.id]
 
+  asset_ecr_repository_url = module.asset_ecr.repository_url
+
   deletion_protection        = false
   skip_final_snapshot        = true
   enable_rds_proxy           = false
-  enable_credential_rotation = false
   enable_backup              = false
 }

@@ -4,10 +4,10 @@
  */
 
 import type { Tree } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { expectTypeScriptToCompile } from '../../utils/test/ts.spec';
-import type { Spec } from '../utils/types';
-import { openApiTsClientGenerator } from './generator';
+import { expectTypeScriptToCompile } from '../../utils/test/ts.spec.js';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import type { Spec } from '../utils/types.js';
+import { openApiTsClientGenerator } from './generator.js';
 
 /**
  * Regression coverage for parser defects surfaced by differentially testing a

@@ -2,7 +2,7 @@
 title: React a Agente AG-UI
 description: Conecta un sitio web React a un Agente a través del protocolo AG-UI usando CopilotKit
 when:
-  sourceType: react
+  sourceType: ts#react-website
   targetType:
     - ts#agent
     - py#agent
@@ -91,6 +91,25 @@ El código generado maneja la autenticación dependiendo de la configuración de
 
 - **IAM** (predeterminado): usa solicitudes HTTP firmadas con AWS SigV4. Las credenciales se obtienen del Identity Pool de Cognito configurado con la autenticación de tu sitio web.
 - **Cognito**: incrusta el token de acceso JWT en el encabezado `Authorization` como un token Bearer.
+
+### Sesiones e hilos
+
+AG-UI y AgentCore Runtime identifican una conversación de manera diferente, y el hook generado los vincula:
+
+- **`threadId`** — el identificador de conversación de AG-UI, enviado en el cuerpo de la solicitud. CopilotKit genera un UUID aleatorio por chat a menos que pases un `threadId` explícito.
+- **Session ID** — la sesión de AgentCore Runtime, enviada en el encabezado `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`. Selecciona la [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html) que atiende la solicitud, y es en lo que el `session.ts` / `session.py` de tu agente basa el estado de la conversación.
+
+El hook deriva el ID de sesión del ID de hilo, rellenándolo a la derecha hasta los 33 caracteres que requiere AgentCore Runtime:
+
+```ts
+function agentCoreSessionId(input: RunAgentInput): string {
+  return (input.threadId ?? '').padEnd(33, '0');
+}
+```
+
+Dejar `threadId` sin establecer es lo más simple — el UUID generado por CopilotKit ya tiene 36 caracteres. Si pasas uno explícitamente, hazlo de al menos 33 caracteres, ya que el relleno mapea IDs de hilo que difieren solo en caracteres finales a la misma sesión.
+
+Tanto el Session ID como el Thread ID son proporcionados por el navegador. Para restringir a cada usuario a sus propias conversaciones, consulta la guía <Link path="guides/py-agent">`py#agent`</Link> o <Link path="guides/ts-agent">`ts#agent`</Link>.
 
 ## Infraestructura
 

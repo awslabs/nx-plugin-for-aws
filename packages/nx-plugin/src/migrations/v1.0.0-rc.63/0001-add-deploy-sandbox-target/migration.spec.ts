@@ -8,9 +8,9 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { INFRA_APP_GENERATOR_INFO } from '../../../infra/app/generator';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import migration from './migration';
+import { INFRA_APP_GENERATOR_INFO } from '../../../infra/app/generator.js';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
+import migration from './migration.js';
 
 const TARGET = 'deploy-sandbox';
 

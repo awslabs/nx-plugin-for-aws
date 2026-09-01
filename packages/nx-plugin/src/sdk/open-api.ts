@@ -3,14 +3,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+export { openApiJsonMetadataGenerator } from '../open-api/json-metadata/generator.js';
+export type { OpenApiJsonMetadataGeneratorSchema } from '../open-api/json-metadata/schema';
 export {
   buildOpenApiCodeGenerationData,
   openApiTsClientGenerator,
-} from '../open-api/ts-client/generator';
+} from '../open-api/ts-client/generator.js';
 export type { OpenApiTsClientGeneratorSchema } from '../open-api/ts-client/schema';
 
-export { openApiTsHooksGenerator } from '../open-api/ts-hooks/generator';
+export { openApiTsHooksGenerator } from '../open-api/ts-hooks/generator.js';
 export type { OpenApiTsHooksGeneratorSchema } from '../open-api/ts-hooks/schema';
 
-export { openApiTsMetadataGenerator } from '../open-api/ts-metadata/generator';
+export { openApiTsMetadataGenerator } from '../open-api/ts-metadata/generator.js';
 export type { OpenApiTsMetadataGeneratorSchema } from '../open-api/ts-metadata/schema';

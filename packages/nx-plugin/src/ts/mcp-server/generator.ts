@@ -13,59 +13,74 @@ import {
   updateJson,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { addTsDependencies } from '../../utils/add-dependencies';
+import { addTsDependencies } from '../../utils/add-dependencies.js';
 import {
   AGENT_CORE_CONSTRUCTS_PY_DEPENDENCIES,
+  type AgentCoreArtifact,
   addMcpServerInfra,
-} from '../../utils/agent-core-constructs/agent-core-constructs';
+} from '../../utils/agent-core-constructs/agent-core-constructs.js';
+import {
+  addTypeScriptCodePackageTarget,
+  agentCoreNodeRuntime,
+  CODE_PACKAGE_DEPENDENCIES,
+  isAgentCoreHosted,
+  isContainerHosted,
+} from '../../utils/agent-core-packaging.js';
 import {
   addTypeScriptBundleTarget,
   BUNDLE_DEPENDENCIES,
-} from '../../utils/bundle/bundle';
-import { resolveContainers } from '../../utils/containers';
+} from '../../utils/bundle/bundle.js';
+import { resolveContainers } from '../../utils/containers.js';
 import {
   declareDependencies,
   ownedElsewhere,
-} from '../../utils/declared-dependencies';
+} from '../../utils/declared-dependencies.js';
 import {
   ADOT_IMAGE_DEPENDENCIES,
   addDockerScanTarget,
   DOCKER_DEPENDENCIES,
+  IMAGE_BUILD_CACHE,
   NODE_IMAGE_DEPENDENCIES,
   nodeImageVersions,
-} from '../../utils/docker';
-import { formatFilesInSubtree } from '../../utils/format';
-import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs';
-import { resolveIac } from '../../utils/iac';
-import { installDependencies } from '../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { isEsmWorkspace } from '../../utils/module-format';
-import { kebabCase, toClassName } from '../../utils/names';
-import { getNpmScope } from '../../utils/npm-scope';
+} from '../../utils/docker.js';
+import { formatFilesInSubtree } from '../../utils/format.js';
+import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs.js';
+import { resolveIac } from '../../utils/iac.js';
+import { installDependencies } from '../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
+import { isEsmWorkspace } from '../../utils/module-format.js';
+import { kebabCase, toClassName } from '../../utils/names.js';
+import { getNpmScope } from '../../utils/npm-scope.js';
 import {
+  addArtifactDependencyToTargets,
   addComponentDevTarget,
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
-} from '../../utils/nx';
-import { sortObjectKeys } from '../../utils/object';
-import { registerPnpmBuiltDependencies } from '../../utils/pnpm-workspace';
-import { assignPort } from '../../utils/port';
+} from '../../utils/nx.js';
+import { sortObjectKeys } from '../../utils/object.js';
+import { registerPnpmBuiltDependencies } from '../../utils/pnpm-workspace.js';
+import { assignPort } from '../../utils/port.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../utils/shared-constructs';
-import type { IacMetadata } from '../../utils/shared-constructs-constants';
-import { BASE_IMAGES, TS_VERSIONS } from '../../utils/versions';
-import type { TsMcpServerGeneratorSchema } from './schema';
+} from '../../utils/shared-constructs.js';
+import type { IacMetadata } from '../../utils/shared-constructs-constants.js';
+import { BASE_IMAGES, TS_VERSIONS } from '../../utils/versions.js';
+import type { TsMcpServerGeneratorSchema, TsMcpServerInfra } from './schema';
 
 /** The metadata this generator records, which its predicates read. */
 export interface TsMcpServerMetadata extends IacMetadata {
   readonly port: number;
   readonly rc: string;
   readonly auth: string;
+  /**
+   * How this component is packaged and hosted, so a consumer can tell a
+   * code-packaged runtime from a container-packaged one without re-deriving it.
+   */
+  readonly infra: TsMcpServerInfra;
 }
 
 export const DEPENDENCIES = declareDependencies<TsMcpServerMetadata>()({
@@ -85,6 +100,7 @@ export const DEPENDENCIES = declareDependencies<TsMcpServerMetadata>()({
     ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
     ...ownedElsewhere(NODE_IMAGE_DEPENDENCIES),
     ...ownedElsewhere(ADOT_IMAGE_DEPENDENCIES),
+    ...ownedElsewhere(CODE_PACKAGE_DEPENDENCIES),
   ],
   py: ownedElsewhere(AGENT_CORE_CONSTRUCTS_PY_DEPENDENCIES),
 });
@@ -147,26 +163,29 @@ export const tsMcpServerGenerator = async (
     ? readJson(tree, projectPackageJsonPath).type === 'module'
     : isEsmWorkspace(tree);
 
+  const templateContext = {
+    name,
+    esm,
+    distDir,
+    adotVersion:
+      TS_VERSIONS['@aws/aws-distro-opentelemetry-node-autoinstrumentation'],
+    jaegerVersion: TS_VERSIONS['@opentelemetry/propagator-jaeger'],
+    nodeBaseImage: BASE_IMAGES.node,
+    ...nodeImageVersions(),
+  };
+
   // Generate example server
   generateFiles(
     tree,
-    joinPathFragments(import.meta.dirname, 'files'),
+    joinPathFragments(import.meta.dirname, 'files', 'app'),
     targetSourceDir,
-    {
-      name,
-      esm,
-      distDir,
-      adotVersion:
-        TS_VERSIONS['@aws/aws-distro-opentelemetry-node-autoinstrumentation'],
-      jaegerVersion: TS_VERSIONS['@opentelemetry/propagator-jaeger'],
-      nodeBaseImage: BASE_IMAGES.node,
-      ...nodeImageVersions(),
-    },
+    templateContext,
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
   // Add hosting based on infra
-  if (infra === 'agentcore') {
+  if (isAgentCoreHosted(infra)) {
+    const container = isContainerHosted(infra);
     const containers = await resolveContainers(tree, 'inherit');
     const dockerImageTag = `${getNpmScope(tree)}-${name}:latest`;
 
@@ -181,47 +200,92 @@ export const tsMcpServerGenerator = async (
       DEPENDENCIES,
     );
 
-    const dockerOutputDir = joinPathFragments(
+    const bundleOutputDir = joinPathFragments(
       'dist',
       project.root,
       'bundle',
       'mcp',
       name,
     );
-    const dockerTargetName = `${mcpTargetPrefix}-docker`;
 
-    const fs = new FsCommands(tree, DEPENDENCIES);
-    project.targets[dockerTargetName] = {
-      cache: true,
-      outputs: [`{workspaceRoot}/${dockerOutputDir}/Dockerfile`],
-      executor: 'nx:run-commands',
-      options: {
-        commands: [
-          fs.cp(
-            `${targetSourceDir}/Dockerfile`,
-            `${dockerOutputDir}/Dockerfile`,
-          ),
-          `${containers} build --platform linux/arm64 -t ${dockerImageTag} ${dockerOutputDir}`,
-        ],
-        parallel: false,
-      },
-      dependsOn: ['bundle'],
-    };
+    let artifact: AgentCoreArtifact;
 
-    addDependencyToTargetIfNotPresent(project, 'docker', dockerTargetName);
-    addDependencyToTargetIfNotPresent(project, 'build', 'docker');
+    if (container) {
+      // Add the Dockerfile
+      generateFiles(
+        tree,
+        joinPathFragments(import.meta.dirname, 'files', 'deploy'),
+        targetSourceDir,
+        templateContext,
+        { overwriteStrategy: OverwriteStrategy.KeepExisting },
+      );
 
-    addDockerScanTarget(
-      tree,
-      {
-        project,
-        containerEngine: containers,
-        trivyTargetName: `${mcpTargetPrefix}-trivy`,
-        dockerTargetName,
-        imageTags: [dockerImageTag],
-      },
-      DEPENDENCIES,
-    );
+      const dockerTargetName = `${mcpTargetPrefix}-docker`;
+
+      const fs = new FsCommands(tree, DEPENDENCIES);
+      project.targets[dockerTargetName] = {
+        cache: IMAGE_BUILD_CACHE,
+        executor: 'nx:run-commands',
+        options: {
+          commands: [
+            fs.cp(
+              `${targetSourceDir}/Dockerfile`,
+              `${bundleOutputDir}/Dockerfile`,
+            ),
+            `${containers} build --platform linux/arm64 -t ${dockerImageTag} ${bundleOutputDir}`,
+          ],
+          parallel: false,
+        },
+        dependsOn: ['bundle'],
+      };
+
+      addDependencyToTargetIfNotPresent(project, 'docker', dockerTargetName);
+      addArtifactDependencyToTargets(project, 'docker');
+
+      addDockerScanTarget(
+        tree,
+        {
+          project,
+          containerEngine: containers,
+          trivyTargetName: `${mcpTargetPrefix}-trivy`,
+          dockerTargetName,
+          imageTags: [dockerImageTag],
+        },
+        DEPENDENCIES,
+      );
+
+      artifact = {
+        type: 'container',
+        dockerImageTag,
+        outputDir: bundleOutputDir,
+      };
+    } else {
+      const packageOutputDir = joinPathFragments(
+        'dist',
+        project.root,
+        'package',
+        'mcp',
+        name,
+      );
+      addTypeScriptCodePackageTarget(
+        tree,
+        {
+          project,
+          targetName: `${mcpTargetPrefix}-package`,
+          bundleTargetName: 'bundle',
+          bundleOutputDir,
+          packageOutputDir,
+        },
+        DEPENDENCIES,
+      );
+
+      artifact = {
+        type: 'code',
+        outputDir: packageOutputDir,
+        runtime: agentCoreNodeRuntime(),
+        entryPoint: 'index.js',
+      };
+    }
 
     // Add shared constructs
     await sharedConstructsGenerator(tree, { iac }, DEPENDENCIES);
@@ -231,15 +295,11 @@ export const tsMcpServerGenerator = async (
       mcpServerNameKebabCase: name,
       mcpServerNameClassName,
       projectName: project.name,
-      dockerImageTag,
-      dockerOutputDir,
+      artifact,
       iac,
       auth,
       containers,
     });
-  } else {
-    // No Dockerfile needed for non-hosted MCP
-    tree.delete(joinPathFragments(targetSourceDir, 'Dockerfile'));
   }
 
   // @modelcontextprotocol/sdk declares zod as a peer dependency with a wide range
@@ -269,6 +329,7 @@ export const tsMcpServerGenerator = async (
   // Recorded below and read by the declaration's predicates, so the packages
   // added here are exactly the ones the version sync will own.
   const metadata: TsMcpServerMetadata = {
+    infra,
     port: localDevPort,
     rc: mcpServerNameClassName,
     auth,

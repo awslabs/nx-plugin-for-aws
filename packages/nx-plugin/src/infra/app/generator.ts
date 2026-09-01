@@ -13,44 +13,45 @@ import {
   updateJson,
 } from '@nx/devkit';
 import path from 'path';
-import tsProjectGenerator, { getTsLibDetails } from '../../ts/lib/generator';
-import { mergeTsReferences } from '../../ts/lib/ts-project-utils';
-import { addTsDependencies } from '../../utils/add-dependencies';
-import { resolveContainers } from '../../utils/containers';
+import tsProjectGenerator, { getTsLibDetails } from '../../ts/lib/generator.js';
+import { mergeTsReferences } from '../../ts/lib/ts-project-utils.js';
+import { addTsDependencies } from '../../utils/add-dependencies.js';
+import { resolveContainers } from '../../utils/containers.js';
 import {
   declareDependencies,
   ownedElsewhere,
-} from '../../utils/declared-dependencies';
-import { formatFilesInSubtree } from '../../utils/format';
-import { installDependencies } from '../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { esmVars } from '../../utils/module-format';
-import { kebabCase } from '../../utils/names';
-import { getNpmScopePrefix } from '../../utils/npm-scope';
+} from '../../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../../utils/format.js';
+import { installDependencies } from '../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
+import { esmVars } from '../../utils/module-format.js';
+import { kebabCase } from '../../utils/names.js';
+import { getNpmScopePrefix } from '../../utils/npm-scope.js';
 import {
+  addArtifactDependencyToTargets,
   addDependencyToTargetIfNotPresent,
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   projectExists,
-} from '../../utils/nx';
-import { sortObjectKeys } from '../../utils/object';
-import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
-import { uvxCommand } from '../../utils/py';
+} from '../../utils/nx.js';
+import { sortObjectKeys } from '../../utils/object.js';
+import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager.js';
+import { uvxCommand } from '../../utils/py.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../utils/shared-constructs';
+} from '../../utils/shared-constructs.js';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   SHARED_INFRA_CONFIG_DIR,
-} from '../../utils/shared-constructs-constants';
-import { sharedInfraConfigGenerator } from '../../utils/shared-infra-config';
+} from '../../utils/shared-constructs-constants.js';
+import { sharedInfraConfigGenerator } from '../../utils/shared-infra-config.js';
 import {
   SHARED_INFRA_SCRIPTS_DEPENDENCIES,
   sharedInfraScriptsGenerator,
-} from '../../utils/shared-infra-scripts';
+} from '../../utils/shared-infra-scripts.js';
 import type { TsInfraGeneratorSchema } from './schema';
 
 // This generator records no metadata, so nothing a predicate could read: the
@@ -166,7 +167,9 @@ export async function tsInfraGenerator(
     `${libraryRoot}/project.json`,
     (config: ProjectConfiguration) => {
       config.projectType = 'application';
-      addDependencyToTargetIfNotPresent(config, 'build', 'synth');
+      // `synth` is the CDK artifact, so it belongs on `assemble` too; `checkov`
+      // is a quality gate, so it stays on `build` alone.
+      addArtifactDependencyToTargets(config, 'synth');
       addDependencyToTargetIfNotPresent(config, 'build', 'checkov');
       config.targets.compile.outputs = [
         '{workspaceRoot}/dist/{projectRoot}/tsc',
@@ -176,7 +179,7 @@ export async function tsInfraGenerator(
         executor: 'nx:run-commands',
         inputs: ['default'],
         outputs: ['{workspaceRoot}/dist/{projectRoot}/cdk.out'],
-        dependsOn: ['^build', 'compile'], // compile clobbers dist directory, so ensure synth runs afterwards
+        dependsOn: ['^assemble', 'compile'], // compile clobbers dist directory, so ensure synth runs afterwards
         options: withCdkEnv({
           cwd: '{projectRoot}',
           command: 'cdk synth',
@@ -197,7 +200,7 @@ export async function tsInfraGenerator(
       };
       config.targets.deploy = {
         executor: 'nx:run-commands',
-        dependsOn: ['^build', 'compile'],
+        dependsOn: ['^assemble', 'compile'],
         options: stageConfig
           ? withCdkEnv({
               command: `tsx packages/common/scripts/src/infra/infra-deploy.ts ${libraryRoot}`,
@@ -209,7 +212,7 @@ export async function tsInfraGenerator(
       };
       config.targets['deploy-sandbox'] = {
         executor: 'nx:run-commands',
-        dependsOn: ['^build', 'compile'],
+        dependsOn: ['^assemble', 'compile'],
         options: stageConfig
           ? withCdkEnv({
               command: `tsx packages/common/scripts/src/infra/infra-deploy.ts ${libraryRoot} ${sandboxStagePattern}`,
@@ -228,21 +231,33 @@ export async function tsInfraGenerator(
       };
       config.targets.destroy = {
         executor: 'nx:run-commands',
-        dependsOn: ['^build', 'compile'],
+        dependsOn: ['^assemble', 'compile'],
         options: stageConfig
           ? withCdkEnv({
               command: `tsx packages/common/scripts/src/infra/infra-destroy.ts ${libraryRoot}`,
             })
           : withCdkEnv({
               cwd: '{projectRoot}',
-              command: 'cdk destroy --require-approval=never',
+              command: 'cdk destroy',
+            }),
+      };
+      config.targets['destroy-sandbox'] = {
+        executor: 'nx:run-commands',
+        dependsOn: ['^assemble', 'compile'],
+        options: stageConfig
+          ? withCdkEnv({
+              command: `tsx packages/common/scripts/src/infra/infra-destroy.ts ${libraryRoot} ${sandboxStagePattern}`,
+            })
+          : withCdkEnv({
+              cwd: '{projectRoot}',
+              command: `cdk destroy ${sandboxStagePattern}`,
             }),
       };
       config.targets['destroy-ci'] = {
         executor: 'nx:run-commands',
         options: withCdkEnv({
           cwd: '{projectRoot}',
-          command: `cdk destroy --require-approval=never --app ${distDirFromProjectRoot}`,
+          command: `cdk destroy --app ${distDirFromProjectRoot}`,
         }),
       };
       config.targets.cdk = {

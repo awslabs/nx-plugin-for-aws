@@ -9,6 +9,7 @@ import Link from '@components/link.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import OptionFilter from '@components/option-filter.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 
 [Terraform](https://www.terraform.io/)은 인프라를 안전하고 예측 가능하게 생성, 변경 및 개선할 수 있는 오픈 소스 코드형 인프라 소프트웨어 도구입니다.
 
@@ -48,10 +49,13 @@ Terraform 인프라 생성기는 Terraform 인프라 프로젝트를 생성합�
     - main.tf 상태 저장을 위한 S3 버킷 및 정책
     - providers.tf AWS 프로바이더 구성
     - variables.tf 부트스트랩 변수 정의
-  - scripts nx `bootstrap` 및 `init` 타겟에서 실행되는 Node 헬퍼
+  - scripts nx `bootstrap`, `bootstrap-destroy` 및 `init` 타겟에서 실행되는 Node 헬퍼
     - aws-config.ts AWS SDK 자격 증명 체인을 통해 계정 + 리전 확인
     - bootstrap.ts 부트스트랩 tfstate를 가져오기/푸시하고 `terraform apply` 실행
+    - bootstrap-destroy.ts 상태 버킷을 비우고 `terraform destroy` 실행
     - init.ts S3 백엔드 구성으로 `terraform init` 실행
+    - env.ts 공유 프로바이더 캐시에서 `terraform init`을 가리킴
+  - checkov.yml 건너뛸 검사를 포함한 Checkov 구성
   - project.json 프로젝트 구성 및 빌드 타겟
 
 </FileTree>
@@ -71,6 +75,7 @@ Terraform 인프라 생성기는 Terraform 인프라 프로젝트를 생성합�
 
   - src
     - main.tf 메인 Terraform 모듈 파일
+  - checkov.yml 건너뛸 검사를 포함한 Checkov 구성
   - project.json 프로젝트 구성 및 빌드 타겟
 
 </FileTree>
@@ -242,19 +247,113 @@ region      = "us-west-2"
 
 <NxCommands commands={['validate tf-infra']} />
 
-#### 코드 포맷팅
+#### 린팅
 
-`fmt` 타겟을 사용하여 Terraform 코드를 포맷합니다:
+Terraform 프로젝트는 [`terraform fmt`](https://developer.hashicorp.com/terraform/cli/commands/fmt)를 사용하여 포맷팅을 확인합니다.
 
-<NxCommands commands={['fmt tf-infra']} />
+##### 린터 실행
+
+프로젝트를 확인하기 위해 린터를 호출하려면 `lint` 타겟을 실행할 수 있습니다.
+
+<NxCommands commands={["lint tf-infra"]} />
+
+##### 린트 문제 수정
+
+대부분의 린팅 또는 포맷팅 문제는 `--configuration=fix` 인수를 사용하여 자동으로 수정할 수 있습니다.
+
+<NxCommands commands={["lint tf-infra --configuration=fix"]} />
+
+마찬가지로 워크스페이스의 모든 패키지에서 모든 린트 문제를 수정하려면 다음을 실행할 수 있습니다:
+
+<NxCommands commands={["run-many --target lint --all --configuration=fix"]} />
+
+:::tip[단축 명령]
+워크스페이스 루트에서 다음 단축 명령을 사용할 수 있습니다:
+
+<PackageManagerShortCommand commands={["lint"]} />
+:::
+
+##### 린트 문제 건너뛰기
+
+개발 중에 린팅 문제로 인해 속도가 느려지는 것을 방지하려면(특히 프로젝트에 자동으로 수정할 수 없는 문제가 있는 경우) `skip-lint` 구성으로 빌드를 실행할 수 있습니다:
+
+<NxCommands commands={["run-many --target build --configuration=skip-lint"]} />
+
+이렇게 하면 빌드 중에 포맷 검사를 완전히 건너뜁니다.
+
+:::tip[단축 명령]
+워크스페이스 루트에서 다음 단축 명령을 사용할 수 있습니다:
+
+<PackageManagerShortCommand commands={["build:skip-lint"]} />
+:::
 
 #### 보안 테스트
 
-`test` 타겟을 사용하여 Checkov로 인프라에 대한 보안 검사를 실행합니다:
+`checkov` 타겟을 사용하여 Checkov로 인프라에 대한 보안 검사를 실행합니다:
+
+<NxCommands commands={['checkov tf-infra']} />
+
+보안 테스트 결과는 루트 `dist` 폴더의 `dist/packages/<my-terraform-project>/checkov` 아래에서 찾을 수 있습니다.
+
+Checkov는 `build`의 일부로 실행됩니다.
+
+검사는 프로젝트의 `checkov.yml`에서 구성됩니다. 전체 프로젝트에서 검사를 억제하려면 `skip-check`에 검사 ID를 추가하세요:
+
+```yaml title="checkov.yml"
+skip-check:
+  - CKV_AWS_115 # Concurrent execution limit
+  - CKV_AWS_116 # Dead Letter Queue
+```
+
+단일 리소스에 대한 검사만 억제하려면 리소스 블록 내부에 `#checkov:skip=<id>:<reason>` 주석을 추가하세요:
+
+```hcl
+resource "aws_s3_bucket" "example" {
+  #checkov:skip=CKV_AWS_18:Access logging not required for this bucket
+  bucket = "example"
+}
+```
+
+#### Terraform 테스트 실행
+
+`test` 타겟은 프로젝트의 모든 `.tftest.hcl` 파일에 대해 [Terraform의 네이티브 테스트 프레임워크](https://developer.hashicorp.com/terraform/language/tests)를 실행합니다:
 
 <NxCommands commands={['test tf-infra']} />
 
-보안 테스트 결과는 루트 `dist` 폴더의 `dist/packages/<my-terraform-project>/checkov` 아래에서 찾을 수 있습니다.
+테스트 파일이 없는 프로젝트는 성공으로 처리되므로 필요할 때 테스트를 추가할 수 있습니다. `build`는 이 타겟을 실행하므로 테스트는 일반 빌드의 일부로 실행됩니다.
+
+각 `run` 블록은 구성을 평가합니다. `command = plan`을 사용하여 Terraform이 _수행할_ 작업을 확인하거나(전체 모듈 그래프를 확장하므로 `validate`가 감지할 수 없는 계획 시간 오류를 포착합니다), `command = apply`를 사용하여 실제 리소스를 생성하고 출력을 검증할 수 있습니다. `mock_provider`를 선언하면 API 호출이 이루어지지 않고 AWS 자격 증명이 필요하지 않으므로 `plan` 테스트를 빠르고 안전하게 CI에서 실행할 수 있습니다:
+
+```hcl title="src/main.tftest.hcl"
+mock_provider "aws" {
+  mock_data "aws_caller_identity" {
+    defaults = { account_id = "123456789012" }
+  }
+  mock_data "aws_region" {
+    defaults = { region = "us-east-1" }
+  }
+}
+
+variables {
+  aws_region  = "us-east-1"
+  environment = "dev"
+}
+
+run "plan_is_valid" {
+  command = plan
+
+  assert {
+    condition     = data.aws_caller_identity.current.account_id == "123456789012"
+    error_message = "Unexpected account id"
+  }
+}
+```
+
+`variables` 블록에 구성에 필요한 모든 변수를 설정하세요. 그렇지 않으면 "has a required variable ... with no set value" 오류와 함께 실행이 실패합니다.
+
+`terraform init`을 실행하는 모든 타겟은 워크스페이스 루트의 `.terraform/plugin-cache` 아래에 있는 프로바이더 캐시를 재사용하므로 프로바이더는 매번 실행할 때마다가 아니라 한 번만 다운로드됩니다. 각 프로젝트는 거기에 자체 디렉터리를 가지고 있습니다: 동시에 하나의 캐시를 채우는 두 개의 `terraform init` 실행은 각각 동일한 프로바이더에 대해 다른 해시를 계산할 수 있으며, terraform은 이를 `.terraform.lock.hcl`에 대해 거부합니다. 자세한 내용은 [Terraform 문서](https://developer.hashicorp.com/terraform/cli/config/config-file#provider-plugin-cache)를 참조하세요.
+
+환경에서 `TF_PLUGIN_CACHE_DIR`을 설정하여 제공된 `init` 스크립트가 직접 관리하는 캐시(예: 워크스페이스 간에 공유되는 볼륨)를 가리키도록 할 수 있습니다. `test` 타겟은 `project.json`에서 경로를 읽으므로 거기에서도 변경해야 합니다.
 
 <OptionFilter when={{ type: 'application' }} description="Application-only targets: plan / apply / destroy / etc.">
 ### 애플리케이션 전용 타겟
@@ -268,6 +367,12 @@ region      = "us-west-2"
 <NxCommands commands={['plan tf-infra']} />
 
 이렇게 하면 `dist/packages/<my-terraform-project>/terraform/dev.tfplan`에 계획 파일이 생성됩니다.
+
+`plan`은 `assemble`에 의존하므로 Lambda 번들 및 생성된 작업 메타데이터와 같이 모듈이 참조하는 아티팩트를 생성하지만, lint, test 및 type-check 게이트는 실행하지 않습니다.
+
+:::caution[파이프라인에서 `build` 사용]
+`assemble`은 개발 중 더 빠른 반복을 위해 사용됩니다. 프로덕션 배포 전에 프로젝트가 품질 게이트를 통과하는지 확인하려면 CI 파이프라인에서 `build`를 실행하세요.
+:::
 
 #### Terraform 초기화
 
@@ -310,6 +415,12 @@ Terraform 구성에서 출력 값을 검색합니다:
 부트스트랩 리소스(상태 저장을 위한 S3 버킷)를 정리하려면:
 
 <NxCommands commands={['bootstrap-destroy tf-infra']} />
+
+이렇게 하면 상태 버킷을 파괴하기 전에 비우고, AWS SDK 자격 증명 체인에서 리전을 확인하므로 CI에서 무인으로 실행됩니다.
+
+:::caution[먼저 인프라를 삭제하세요]
+상태 버킷은 모든 환경의 상태를 보유하므로 이 작업을 수행하기 전에 각 환경에 대해 `destroy`를 실행하세요. 버킷이 사라지면 Terraform은 더 이상 생성한 리소스에 대해 알지 못합니다.
+:::
 </OptionFilter>
 
 ## 추가 정보

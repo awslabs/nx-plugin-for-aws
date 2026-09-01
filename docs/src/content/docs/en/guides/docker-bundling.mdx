@@ -8,14 +8,12 @@ import NxCommands from '@components/nx-commands.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 import Link from '@components/link.astro';
 import Infrastructure from '@components/infrastructure.astro';
-import TrivyVersion from '@components/trivy-version.astro';
 import { CONTAINER_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/versions';
 
 export const trivyTarget = `{
   "targets": {
     "trivy": {
-      "cache": true,
-      "inputs": ["default", "^production"],
+      "cache": false,
       "outputs": ["{workspaceRoot}/dist/{projectRoot}/trivy"],
       "executor": "nx:run-commands",
       "options": {
@@ -68,7 +66,7 @@ The Docker build context is written to your project's `dist` folder. Your infras
 :::tip[Why bundle outside the Dockerfile?]
 Keeping the bundle step in Nx (rather than inside the `Dockerfile`) means:
 
-- Nx can **cache** the bundle target, so repeated builds are fast.
+- Nx can **cache** the bundle target — its output is a directory on disk, so a cache hit genuinely restores it.
 - The `Dockerfile` does not need access to your monorepo, private registries, or build-time secrets.
 - The image layer is tiny — a single `COPY` of already-built artifacts, with no transitive `node_modules` or build toolchain.
 :::
@@ -84,6 +82,7 @@ Configure a `bundle` target that invokes Rolldown. If you are starting from a <L
   "targets": {
     "bundle": {
       "cache": true,
+      "inputs": ["default"],
       "executor": "nx:run-commands",
       "outputs": ["{workspaceRoot}/dist/{projectRoot}/bundle"],
       "options": {
@@ -167,7 +166,7 @@ Add a `docker` target which:
 {
   "targets": {
     "docker": {
-      "cache": true,
+      "cache": false,
       "executor": "nx:run-commands",
       "options": {
         "commands": [
@@ -181,6 +180,10 @@ Add a `docker` target which:
   }
 }
 ```
+
+:::caution[Do not cache image builds]
+Set `"cache": false` on image build targets. A built image is not written to an `outputs` path in the filesystem, so Nx has nothing to restore on a cache hit. Container engines cache image layers regardless, so there is no performance penalty.
+:::
 
 :::tip[Cross-platform file copy]
 The `ncp` package provides a cross-platform file/directory copy command, avoiding `cp` (unavailable on Windows). Install it at the root of your workspace with `pnpm add -D -w ncp`.
@@ -256,7 +259,7 @@ Add a `docker` target which copies the `Dockerfile` into the bundle output direc
 {
   "targets": {
     "docker": {
-      "cache": true,
+      "cache": false,
       "executor": "nx:run-commands",
       "options": {
         "commands": [
@@ -294,10 +297,6 @@ Each project's per-image scan targets are aggregated under a workspace-wide `tri
 The scan is intentionally not wired into `build` since this can introduce unnecessary friction when iterating during development, as Trivy's vulnerabilty database is continually updated with new CVEs.
 
 Instead we recommend running the above command as a dedicated step in your CI pipeline prior to deployment to production stages.
-:::
-
-:::tip[Caching skips unchanged images]
-Because the image is fully determined by your project source, declaring `inputs` (here `default` and `^production`, matching the `bundle` target) lets Nx cache the scan and skip re-scanning an image that hasn't changed. Pin the Trivy image version (e.g. <code>trivy:<TrivyVersion /></code>) so scans are reproducible.
 :::
 
 :::note[Suppressing findings]
@@ -380,9 +379,11 @@ Use the `DockerImageAsset` with any AWS construct that accepts a container image
 Terraform's AWS provider does not have a first-class "build and push a Docker image" resource. The pattern used by the generators is:
 
 1. The project's `build` target runs `docker build`, producing a local image tagged `my-scope-my-project:latest`.
-2. An `aws_ecr_repository` to hold the image.
+2. A shared ECR repository using the `core/asset-ecr` module
 3. A `null_resource` with a `local-exec` provisioner that authenticates to ECR, re-tags the locally-built image with its content digest, and pushes it.
 4. The downstream resource (e.g. `aws_ecs_task_definition`) references the image by its immutable, digest-based tag.
+
+Because one repository holds every image, each tag is namespaced by the image's owner as well as its digest, so images sharing the registry never collide.
 
 ```d2
 direction: down
@@ -408,7 +409,7 @@ app: Application {
 infra: Infrastructure {
   direction: right
   publish: "null_resource\nlocal-exec: docker push"
-  repo: aws_ecr_repository
+  repo: "core/asset-ecr\n(shared)"
   publish -> repo: tag + push
 }
 
@@ -422,10 +423,8 @@ infra.repo -> ecr
 
 
 ```hcl
-resource "aws_ecr_repository" "repo" {
-  name                 = "my-project-repository"
-  image_tag_mutability = "IMMUTABLE"
-  force_delete         = true
+module "asset_ecr" {
+  source = "../../common/terraform/src/core/asset-ecr"
 }
 
 # Invalidate the push whenever the locally-built image digest changes
@@ -434,14 +433,15 @@ data "external" "docker_digest" {
 }
 
 locals {
-  # Content-based, immutable image tag derived from the local image digest
-  image_tag = replace(data.external.docker_digest.result.digest, "sha256:", "")
+  # Content-based, immutable image tag derived from the local image digest, and
+  # namespaced by owner so images sharing the registry never collide
+  image_tag = "my-project-${replace(data.external.docker_digest.result.digest, "sha256:", "")}"
 }
 
 resource "null_resource" "docker_publish" {
   triggers = {
     docker_digest  = data.external.docker_digest.result.digest
-    repository_url = aws_ecr_repository.repo.repository_url
+    repository_url = module.asset_ecr.repository_url
     image_tag      = local.image_tag
   }
 
@@ -456,7 +456,7 @@ resource "null_resource" "docker_publish" {
 }
 ```
 
-The `data.external.docker_digest` block ensures the `null_resource` re-runs whenever the local image hash changes, triggering a new push on every meaningful code change. The image is pushed under an immutable, content-based tag derived from its digest, so the ECR repository can use `IMMUTABLE` tag mutability and reject any attempt to overwrite an existing tag.
+The `data.external.docker_digest` block ensures the `null_resource` re-runs whenever the local image hash changes, triggering a new push on every meaningful code change. The image is pushed under an immutable, content-based tag derived from its digest, so the shared repository uses `IMMUTABLE` tag mutability and rejects any attempt to overwrite an existing tag.
 
 :::note[Running bundle before apply]
 `nx apply <project>` requires the image tag `my-scope-my-project:latest` to already exist locally. Run `nx build my-project` (or `nx docker my-project`) before `nx apply <project>`.

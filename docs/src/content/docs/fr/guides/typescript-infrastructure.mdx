@@ -102,7 +102,7 @@ new ApplicationStage(app, 'my-app-sandbox', {
 
 La propriété `env` indique à CDK dans quel compte AWS et quelle région déployer. `CDK_DEFAULT_ACCOUNT` et `CDK_DEFAULT_REGION` sont résolus automatiquement par la CLI CDK à partir de vos identifiants AWS actifs. Consultez la [documentation sur les environnements CDK](https://docs.aws.amazon.com/cdk/v2/guide/environments.html) pour plus de détails.
 
-Le stage sandbox est celui que la <Link path="guides/typescript-infrastructure#deploying-your-sandbox-stage">cible `deploy-sandbox`</Link> déploie.
+Le stage sandbox est celui sur lequel agissent les cibles <Link path="fr/guides/typescript-infrastructure#déployer-votre-stage-sandbox">`deploy-sandbox`</Link> et <Link path="fr/guides/typescript-infrastructure#détruire-votre-stage-sandbox">`destroy-sandbox`</Link>.
 
 Si vous avez généré avec `stageConfig`, le fichier `main.ts` lit le compte et la région à partir d'un fichier de configuration centralisé, en se repliant sur les variables d'environnement lorsqu'aucune configuration n'est définie :
 
@@ -321,6 +321,8 @@ Dans le cadre de votre cible `build`, en plus d'exécuter les <Link path="guides
 
 Vous trouverez votre assemblage cloud synthétisé dans le dossier `dist` racine, sous `dist/packages/<my-infra-project>/cdk.out`.
 
+`synth` dépend de `^assemble`, donc la synthèse construit les artefacts que vos stacks déploient, tels que les bundles Lambda, les images de conteneurs et les spécifications générées, sans exécuter les contrôles de lint, test et vérification de type de chaque projet en amont. Consultez <Link path="guides/typescript-project#assembling">Assembling</Link> pour plus de détails sur `assemble`.
+
 ## Tests de sécurité
 
 Une cible `checkov` est ajoutée à votre projet qui exécute des vérifications de sécurité sur votre infrastructure en utilisant [Checkov](https://www.checkov.io/).
@@ -383,6 +385,12 @@ Votre projet dispose de trois cibles de déploiement, chacune adaptée à une si
 | `deploy`         | Déployer n'importe quel stage, en nommant le stage ou les stacks que vous voulez. |
 | `deploy-ci`      | Déployer depuis un pipeline CI/CD, en utilisant un assemblage cloud pré-synthétisé. |
 
+`deploy-sandbox` et `deploy` dépendent de `^assemble`, donc ils construisent les artefacts qu'ils sont sur le point de déployer et rien d'autre. `deploy-ci` déploie un assemblage que votre pipeline a déjà construit, donc il n'a aucune dépendance de construction.
+
+:::caution[Utilisez `build` dans votre pipeline]
+`assemble` est utilisé pour une itération plus rapide pendant le développement. Exécutez `build` dans votre pipeline CI pour vous assurer que votre projet passe les contrôles de qualité avant un déploiement en production.
+:::
+
 Tout d'abord, assurez-vous d'avoir configuré les identifiants AWS. Si vous avez généré avec `stageConfig` et avez configuré les identifiants de stage dans `packages/common/infra-config/src/stages.config.ts`, la commande de déploiement résoudra et appliquera automatiquement les identifiants corrects pour le stage cible. Sinon, assurez-vous que vos identifiants AWS sont définis dans votre environnement (par exemple, via `AWS_PROFILE` ou des variables d'environnement). Consultez la [documentation sur les identifiants AWS](https://docs.aws.amazon.com/sdkref/latest/guide/access.html) pour les options disponibles.
 
 ### Déployer votre stage sandbox
@@ -421,9 +429,33 @@ Cette cible diffère légèrement de la cible `deploy` normale en ce qu'elle dé
 
 ## Détruire l'infrastructure AWS
 
-Utilisez la cible `destroy` pour détruire vos ressources :
+Votre projet dispose de trois cibles de destruction, reflétant celles de déploiement :
+
+| Cible            | Utilisez-la pour                                                                |
+| ----------------- | ------------------------------------------------------------------------- |
+| `destroy-sandbox` | Détruire votre propre stage sandbox. Aucun argument de stage nécessaire.             |
+| `destroy`         | Détruire n'importe quel stage, en nommant le stage ou les stacks que vous voulez.            |
+| `destroy-ci`      | Détruire depuis un pipeline CI/CD, en utilisant un assemblage cloud pré-synthétisé. |
+
+### Détruire votre stage sandbox
+
+La cible `destroy-sandbox` détruit le stage sandbox que `main.ts` déclare, vous n'avez donc pas besoin de vous souvenir de son nom de stage :
+
+<NxCommands commands={['destroy-sandbox <my-infra>']} />
+
+La destruction est irréversible, donc CDK vous demande de confirmer les stacks qu'il est sur le point de supprimer. Passez `--force` pour ignorer cette confirmation, ce que vous voulez lorsqu'il n'y a pas de terminal attaché (dans un script, par exemple) :
+
+<NxCommands commands={['destroy-sandbox <my-infra> --force']} />
+
+### Détruire un stage spécifique
+
+La cible `destroy` détruit le stage ou les stacks que vous nommez :
 
 <NxCommands commands={['destroy <my-infra> <my-infra>-sandbox/*']} />
+
+Pour détruire une stack individuelle, donnez le nom complet de la stack :
+
+<NxCommands commands={['destroy <my-infra> <my-infra>-sandbox/Application']} />
 
 ## Plus d'informations
 

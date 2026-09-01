@@ -14,24 +14,27 @@ import yaml from 'js-yaml';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
-} from '../../utils/config/utils';
-import { declareDependencies } from '../../utils/declared-dependencies';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
-import type { UVPyprojectToml } from '../../utils/nxlv-python';
+} from '../../utils/config/utils.js';
+import { declareDependencies } from '../../utils/declared-dependencies.js';
+import { expectHasMetricTags } from '../../utils/metrics.spec.js';
+import type { UVPyprojectToml } from '../../utils/nxlv-python.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../utils/shared-constructs';
+} from '../../utils/shared-constructs.js';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
-} from '../../utils/shared-constructs-constants';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { CONTAINER_VERSIONS } from '../../utils/versions';
+} from '../../utils/shared-constructs-constants.js';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import {
+  CONTAINER_VERSIONS,
+  LAMBDA_RUNTIME_VERSIONS,
+} from '../../utils/versions.js';
 import {
   PY_MCP_SERVER_GENERATOR_INFO,
   pyMcpServerGenerator,
-} from './generator';
+} from './generator.js';
 
 const sharedConstructsDeclaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
@@ -370,10 +373,52 @@ dev-dependencies = []
     expect(pyprojectToml).toMatchSnapshot('updated-pyproject.toml');
   });
 
+  it('should default to code packaging on AgentCore Runtime', async () => {
+    await pyMcpServerGenerator(tree, {
+      project: 'test-project',
+      // No infra specified, should default to code packaging on agentcore
+      iac: 'cdk',
+    });
+
+    // Code packaging needs no Dockerfile or image build
+    expect(
+      tree.exists('apps/test-project/proj_test_project/mcp_server/Dockerfile'),
+    ).toBeFalsy();
+
+    const projectConfig = JSON.parse(
+      tree.read('apps/test-project/project.json', 'utf-8'),
+    );
+    expect(projectConfig.targets['bundle-arm']).toBeDefined();
+    expect(projectConfig.targets['mcp-server-package']).toBeDefined();
+    expect(projectConfig.targets['mcp-server-docker']).toBeUndefined();
+    expect(projectConfig.targets['mcp-server-trivy']).toBeUndefined();
+
+    // The entry point sits at the package root, since AgentCore runs it by file
+    // path and a relative import would have no parent package there.
+    const entryPoint = tree.read(
+      'apps/test-project/package/mcp_server/main.py',
+      'utf-8',
+    );
+    expect(entryPoint).toContain(
+      'from proj_test_project.mcp_server.http import app',
+    );
+    expect(entryPoint).toContain('uvicorn.run(app, host="0.0.0.0", port=8000)');
+
+    const construct = tree.read(
+      'packages/common/constructs/src/app/mcp-servers/test-project-mcp-server/test-project-mcp-server.ts',
+      'utf-8',
+    );
+    expect(construct).toContain('AgentRuntimeArtifact.fromCodeAsset');
+    expect(construct).toContain('AgentCoreRuntime.PYTHON_3_14');
+    expect(construct).toContain(
+      "entrypoint: ['opentelemetry-instrument', 'main.py']",
+    );
+  });
+
   it('should generate MCP server with BedrockAgentCoreRuntime and default name', async () => {
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'cdk',
     });
 
@@ -432,6 +477,10 @@ dev-dependencies = []
       false,
     );
 
+    // The built image lives in the container engine rather than under any
+    // outputs path, so there is nothing for a cache hit to restore.
+    expect(projectConfig.targets['mcp-server-docker'].cache).toBe(false);
+
     // Check that docker target depends on bundle-arm
     expect(projectConfig.targets['mcp-server-docker'].dependsOn).toContain(
       'bundle-arm',
@@ -440,10 +489,9 @@ dev-dependencies = []
     // Check that build target depends on docker
     expect(projectConfig.targets.build.dependsOn).toContain('docker');
 
-    // Check that a cacheable trivy scan target was added
+    // Check that a non-cacheable trivy scan target was added
     expect(projectConfig.targets['mcp-server-trivy']).toEqual({
-      cache: true,
-      inputs: ['default', '^production'],
+      cache: false,
       outputs: [
         '{workspaceRoot}/dist/apps/test-project/trivy/proj-test-project-mcp-server-latest',
       ],
@@ -471,7 +519,7 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'custom-bedrock-server',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'cdk',
     });
 
@@ -616,7 +664,7 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'snapshot-bedrock-server',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'cdk',
     });
 
@@ -670,7 +718,7 @@ dev-dependencies = []
     const commands = projectConfig.targets['bundle-arm'].options.commands;
     expect(commands).toEqual([
       'uv export --frozen --no-dev --no-editable --project {projectRoot} --package test-project -o dist/{projectRoot}/bundle-arm/requirements.txt',
-      'uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform aarch64-manylinux_2_28 --target dist/{projectRoot}/bundle-arm -r dist/{projectRoot}/bundle-arm/requirements.txt',
+      `uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform aarch64-manylinux_2_28 --python-version ${LAMBDA_RUNTIME_VERSIONS.python} --target dist/{projectRoot}/bundle-arm -r dist/{projectRoot}/bundle-arm/requirements.txt`,
     ]);
   });
 
@@ -735,7 +783,7 @@ dev-dependencies = []
   it('should handle docker target dependencies correctly for BedrockAgentCoreRuntime', async () => {
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'cdk',
     });
 
@@ -761,7 +809,7 @@ dev-dependencies = []
   it('should generate MCP server with Terraform provider and default name', async () => {
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'terraform',
     });
 
@@ -807,7 +855,7 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'custom-terraform-server',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'terraform',
     });
 
@@ -855,7 +903,7 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'terraform-snapshot-server',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'terraform',
     });
 
@@ -887,7 +935,7 @@ dev-dependencies = []
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
       name: 'terraform-server',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'terraform',
     });
 
@@ -932,7 +980,7 @@ dev-dependencies = []
   it('should handle Python bundle target configuration for Terraform provider', async () => {
     await pyMcpServerGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'terraform',
     });
 
@@ -950,7 +998,7 @@ dev-dependencies = []
     const commands = projectConfig.targets['bundle-arm'].options.commands;
     expect(commands).toEqual([
       'uv export --frozen --no-dev --no-editable --project {projectRoot} --package test-project -o dist/{projectRoot}/bundle-arm/requirements.txt',
-      'uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform aarch64-manylinux_2_28 --target dist/{projectRoot}/bundle-arm -r dist/{projectRoot}/bundle-arm/requirements.txt',
+      `uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform aarch64-manylinux_2_28 --python-version ${LAMBDA_RUNTIME_VERSIONS.python} --target dist/{projectRoot}/bundle-arm -r dist/{projectRoot}/bundle-arm/requirements.txt`,
     ]);
 
     // Check that docker target was added

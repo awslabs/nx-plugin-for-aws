@@ -8,19 +8,19 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import camelCase from 'lodash.camelcase';
-import { addDestructuredImport, applyGritQL } from '../../../utils/ast';
-import { formatFilesInSubtree } from '../../../utils/format';
-import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
-import { pascalCase } from '../../../utils/names';
+import { addDestructuredImport, applyGritQL } from '../../../utils/ast.js';
+import { formatFilesInSubtree } from '../../../utils/format.js';
+import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics.js';
+import { pascalCase } from '../../../utils/names.js';
 import {
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
-} from '../../../utils/nx';
-import { toProjectRelativePath } from '../../../utils/paths';
-import { injectRdsCaBundleIntoDockerfile } from '../utils';
+} from '../../../utils/nx.js';
+import { toProjectRelativePath } from '../../../utils/paths.js';
+import { injectRdsCaBundleIntoDockerfile } from '../utils.js';
 import type { TsRdbMcpServerConnectionGeneratorSchema } from './schema';
 
 export const TS_RDB_MCP_SERVER_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =

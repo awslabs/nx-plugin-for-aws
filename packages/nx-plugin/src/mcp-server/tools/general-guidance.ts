@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import type { NxGeneratorInfo } from '../../utils/generators';
-import { IAC_PROVIDERS } from '../../utils/iac-providers';
-import { buildNxCommand, fetchGuidePages } from '../generator-info';
-import { PACKAGE_MANAGERS } from '../schema';
+import type { NxGeneratorInfo } from '../../utils/generators.js';
+import { IAC_PROVIDERS } from '../../utils/iac-providers.js';
+import { buildNxCommand, fetchGuidePages } from '../generator-info.js';
+import { PACKAGE_MANAGERS } from '../schema.js';
 
 export const TOOL_SELECTION_GUIDE = `## Tool Selection Guide
 
@@ -78,7 +78,7 @@ ${PACKAGE_MANAGERS.map((pm) => buildNxCommand('<options>', pm)).join(' - \n')}
 - Generate all projects into the \`packages/\` directory
 - After making changes to your projects, fix linting issues, then run a full build
 - When it's time to start testing a project, suggest to the user that infrastructure is deployed to AWS. For websites, if a runtime-config.json is needed, use the load-runtime-config target after a deployment to point a local website at a sandbox stack.
-- For CDK infrastructure projects, deploy the sandbox stage with the \`deploy-sandbox\` target (eg \`nx deploy-sandbox infra\`) rather than passing a stage pattern to \`deploy\` — it already targets the sandbox stage declared in \`main.ts\`.
+- For CDK infrastructure projects, deploy the sandbox stage with the \`deploy-sandbox\` target (eg \`nx deploy-sandbox infra\`) rather than passing a stage pattern to \`deploy\` — it already targets the sandbox stage declared in \`main.ts\`. Likewise \`destroy-sandbox\` tears that stage back down.
 
 ## Batching Generators
 
@@ -88,7 +88,7 @@ When scaffolding several projects in one go, chain generators to avoid a slow de
 
 ${PACKAGE_MANAGERS.map(
   (pm) => `  \`\`\`bash
-  ${buildNxCommand('g @aws/nx-plugin:ts#trpc-api --no-interactive --name=my-app-api --auth=IAM --prefer-install-dependencies=false', pm)} && \\
+  ${buildNxCommand('g @aws/nx-plugin:ts#trpc-api --no-interactive --name=my-app-api --auth=iam --prefer-install-dependencies=false', pm)} && \\
     ${buildNxCommand('g @aws/nx-plugin:ts#react-website --no-interactive --name=my-app-website --prefer-install-dependencies=false', pm)} && \\
     ${buildNxCommand('g @aws/nx-plugin:connection --no-interactive --sourceProject=@my-app/my-app-website --targetProject=@my-app/my-app-api --prefer-install-dependencies=false', pm)} && \\
     ${buildNxCommand('g @aws/nx-plugin:ts#infra --no-interactive --name=infra', pm)} && \\

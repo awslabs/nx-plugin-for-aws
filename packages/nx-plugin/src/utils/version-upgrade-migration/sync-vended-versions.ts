@@ -15,19 +15,35 @@ import yaml from 'js-yaml';
 import { getCatalogManager } from 'nx/src/utils/catalog';
 import { parsePipRequirementsLine } from 'pip-requirements-js';
 import { coerce, parse, satisfies, validRange } from 'semver';
-import { applyGritQL, captureAllGritQL } from '../ast';
-import { buildInstallCommand } from '../commands';
-import { formatFilesInSubtree } from '../format';
-import { updateToml } from '../toml';
-import { PY_VERSIONS, TERRAFORM_VERSIONS, TS_VERSIONS } from '../versions';
-import { isNxPackage } from './nx-package-updates';
+import { applyGritQL, captureAllGritQLVariable } from '../ast.js';
+import { buildInstallCommand } from '../commands.js';
+import { formatFilesInSubtree } from '../format.js';
+import {
+  PACKAGES_DIR,
+  SHARED_CONSTRUCTS_DIR,
+  SHARED_TERRAFORM_DIR,
+} from '../shared-constructs-constants.js';
+import { updateToml } from '../toml.js';
+import {
+  cdkLambdaRuntime,
+  PY_VERSIONS,
+  TERRAFORM_VERSIONS,
+  TS_VERSIONS,
+  terraformLambdaRuntime,
+} from '../versions.js';
+import { isNxPackage } from './nx-package-updates.js';
 import {
   type OwnedDependencies,
   ownedDependencies,
-} from './owned-dependencies';
-import { syncEmbeddedVersions } from './sync-embedded-versions';
-import { syncMetricsVersion } from './sync-metrics-version';
-import { isVendedUpgrade } from './vended-upgrade';
+} from './owned-dependencies.js';
+import { syncEmbeddedVersions } from './sync-embedded-versions.js';
+import { syncLambdaRuntimes, type VendedIac } from './sync-lambda-runtimes.js';
+import { syncMetricsVersion } from './sync-metrics-version.js';
+import {
+  syncProjectPythonVersion,
+  syncPythonBundleVersion,
+} from './sync-python-language-version.js';
+import { isVendedUpgrade } from './vended-upgrade.js';
 
 /**
  * Syncs the versions a generated workspace pins to those this release vends:
@@ -599,13 +615,15 @@ const declaredProviderVersion = async (
   path: string,
   provider: string,
 ): Promise<string | undefined> => {
-  const [captured] = await captureAllGritQL(
-    tree,
-    path,
-    providerVersionPattern(provider),
-  );
-  // The match is the whole attribute, e.g. `version = "6.40.0"`.
-  return /"([^"]+)"/.exec(captured ?? '')?.[1];
+  const [bound] =
+    (await captureAllGritQLVariable(
+      tree,
+      path,
+      providerVersionPattern(provider),
+      'version',
+    )) ?? [];
+  // The binding is the quoted version, e.g. `"6.40.0"`.
+  return bound?.replace(/^"|"$/g, '');
 };
 
 /** Sync vended provider versions in every `.tf` file. */
@@ -642,6 +660,18 @@ const syncTerraformProviders = async (tree: Tree): Promise<string[]> => {
 };
 
 /**
+ * The projects this plugin generates infrastructure into, per provider.
+ *
+ * A runtime is not a dependency, so there is no per-package ownership to consult —
+ * these directories are the scope. A Lambda a user defined in their own project
+ * keeps whatever runtime they chose, even though it is the same shape.
+ */
+const OWNED_INFRA_DIRS: Readonly<Record<VendedIac, string>> = {
+  cdk: `${PACKAGES_DIR}/${SHARED_CONSTRUCTS_DIR}`,
+  terraform: `${PACKAGES_DIR}/${SHARED_TERRAFORM_DIR}`,
+};
+
+/**
  * Sync the versions this release vends, for the dependencies the workspace's
  * generators own.
  */
@@ -656,6 +686,9 @@ export const syncVendedVersions = async (
   const overrides = syncOverrides(tree, owned);
   const pyProjects = syncPyProjects(tree, owned);
   const terraformFiles = await syncTerraformProviders(tree);
+  const lambdaRuntimes = await syncLambdaRuntimes(tree, OWNED_INFRA_DIRS);
+  const projectPython = syncProjectPythonVersion(tree);
+  const pythonBundles = syncPythonBundleVersion(tree);
   const skippedEmbedded = await syncEmbeddedVersions(tree, owned);
   await syncMetricsVersion(tree);
 
@@ -668,9 +701,20 @@ export const syncVendedVersions = async (
       )}\` to update the lock file.`,
     );
   }
-  if (pyProjects.length > 0) {
+  if (
+    pyProjects.length > 0 ||
+    projectPython.length > 0 ||
+    pythonBundles.length > 0
+  ) {
     nextSteps.push(
-      `Python dependency versions were updated in ${pyProjects.join(', ')}. Run \`uv sync\` to update uv.lock.`,
+      `Python dependency versions were updated in ${[...new Set([...pyProjects, ...projectPython, ...pythonBundles])].join(', ')}. Run \`uv sync\` to update uv.lock.`,
+    );
+  }
+  // A runtime the sync recognised is simply moved; one it doesn't recognise is
+  // the user's choice, so it is reported rather than rewritten.
+  if (lambdaRuntimes.diverged.length > 0) {
+    nextSteps.push(
+      `Lambda runtimes in ${[...new Set(lambdaRuntimes.diverged)].join(', ')} have diverged from the generated shape and were left untouched. Set them to \`${cdkLambdaRuntime('node')}\` (CDK) or \`"${terraformLambdaRuntime('node')}"\` (Terraform) if you want them on the runtime this release vends.`,
     );
   }
   if (terraformFiles.length > 0) {

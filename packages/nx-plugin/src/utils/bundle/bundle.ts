@@ -11,19 +11,24 @@ import {
   type TargetConfiguration,
   type Tree,
 } from '@nx/devkit';
-import { applyGritQL } from '../ast';
+import { applyGritQL } from '../ast.js';
 import {
   type DependencyDeclaration,
   forDependencies,
   type MustDeclare,
-} from '../declared-dependencies';
-import { addDependenciesToPackageJson } from '../dependencies';
+} from '../declared-dependencies.js';
+import { addDependenciesToPackageJson } from '../dependencies.js';
 import {
+  addArtifactDependencyToTargets,
   addDependencyToTargetIfNotPresent,
   normalizeTargetKeyOrder,
-} from '../nx';
-import { getRelativePathToRoot } from '../paths';
-import { type ITsDepVersion, withVersions } from '../versions';
+} from '../nx.js';
+import { getRelativePathToRoot } from '../paths.js';
+import {
+  type ITsDepVersion,
+  LAMBDA_RUNTIME_VERSIONS,
+  withVersions,
+} from '../versions.js';
 
 /** Dependencies a caller must declare to add a TypeScript bundle target. */
 export const BUNDLE_DEPENDENCIES = [
@@ -61,13 +66,18 @@ const createPythonBundleTarget = ({
 }: CreatePythonBundleTargetOptions): TargetConfiguration => {
   return {
     cache: true,
-    inputs: ['default', '^production'],
+    // The bundle holds exported dependencies and the entrypoint script, never
+    // test files, so tests are excluded via `production`.
+    inputs: ['production', '^production'],
     executor: 'nx:run-commands',
     outputs: [`{workspaceRoot}/dist/{projectRoot}/${bundleTargetName}`],
     options: {
       commands: [
         `uv export --frozen --no-dev --no-editable --project {projectRoot} --package ${packageName} -o dist/{projectRoot}/${bundleTargetName}/requirements.txt`,
-        `uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform ${pythonPlatform} --target dist/{projectRoot}/${bundleTargetName} -r dist/{projectRoot}/${bundleTargetName}/requirements.txt`,
+        // `--python-version` pins wheel resolution to the Lambda Python runtime,
+        // so the bundle cannot be built against whichever interpreter happens to
+        // be on the build machine.
+        `uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform ${pythonPlatform} --python-version ${LAMBDA_RUNTIME_VERSIONS.python} --target dist/{projectRoot}/${bundleTargetName} -r dist/{projectRoot}/${bundleTargetName}/requirements.txt`,
       ],
       parallel: false,
     },
@@ -102,7 +112,7 @@ export const addPythonBundleTarget = (
 
   // Add a "bundle" target which depends on either bundle-arm or bundle-x86 (or both)
   addDependencyToTargetIfNotPresent(project, 'bundle', bundleTargetName);
-  addDependencyToTargetIfNotPresent(project, 'build', 'bundle');
+  addArtifactDependencyToTargets(project, 'bundle');
 
   return {
     bundleTargetName,
@@ -160,6 +170,11 @@ export const addTypeScriptBundleTarget = async <
   if (!project.targets.bundle) {
     project.targets.bundle = normalizeTargetKeyOrder({
       cache: true,
+      // Declared rather than left to Nx's implicit `["default", "^default"]`,
+      // which reads a dependency's whole project directory: rolldown resolves
+      // dependencies through the build artifacts `default` already tracks, so
+      // `^default` only adds files no bundle can contain.
+      inputs: ['default'],
       outputs: [`{workspaceRoot}/dist/{projectRoot}/bundle`],
       executor: 'nx:run-commands',
       options: {
@@ -171,7 +186,7 @@ export const addTypeScriptBundleTarget = async <
   }
 
   // Add bundle to the build target
-  addDependencyToTargetIfNotPresent(project, 'build', 'bundle');
+  addArtifactDependencyToTargets(project, 'bundle');
 
   const rolldownConfigPath = joinPathFragments(
     project.root,

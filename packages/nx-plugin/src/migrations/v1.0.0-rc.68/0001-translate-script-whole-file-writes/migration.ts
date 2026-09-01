@@ -10,11 +10,11 @@ import {
   type MigrationReturnObject,
   type Tree,
 } from '@nx/devkit';
-import { TS_ASTRO_DOCS_GENERATOR_INFO } from '../../../ts/astro-docs/generator';
-import { insertViaGritQL, matchGritQL } from '../../../utils/ast';
-import { formatFilesInSubtree } from '../../../utils/format';
-import { isEsmWorkspace } from '../../../utils/module-format';
-import { getPackageManagerDisplayCommands } from '../../../utils/pkg-manager';
+import { TS_ASTRO_DOCS_GENERATOR_INFO } from '../../../ts/astro-docs/generator.js';
+import { insertViaGritQL, matchGritQL } from '../../../utils/ast.js';
+import { formatFilesInSubtree } from '../../../utils/format.js';
+import { isEsmWorkspace } from '../../../utils/module-format.js';
+import { getPackageManagerDisplayCommands } from '../../../utils/pkg-manager.js';
 
 /**
  * Rewrite the docs translate script so it writes whole translated files.

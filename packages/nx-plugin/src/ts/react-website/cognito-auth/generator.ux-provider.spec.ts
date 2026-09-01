@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import { SUPPORTED_UX_PROVIDERS } from '../app/generator';
-import { tsReactWebsiteAuthGenerator } from './generator';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
+import { SUPPORTED_UX_PROVIDERS } from '../app/generator.js';
+import { tsReactWebsiteAuthGenerator } from './generator.js';
 import type { TsReactWebsiteAuthGeneratorSchema } from './schema';
 
 describe('cognito-auth generator ux tests', () => {

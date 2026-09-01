@@ -3,15 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { expectTypeScriptToCompile } from '../../utils/test/ts.spec';
-import type { Spec } from '../utils/types';
-import openApiTsClientGenerator from './generator';
+import { expectTypeScriptToCompile } from '../../utils/test/ts.spec.js';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import type { Spec } from '../utils/types.js';
+import openApiTsClientGenerator from './generator.js';
 import {
   callGeneratedClientStreaming,
   mockJsonlStreamingFetch,
   mockStreamingFetch,
-} from './generator.utils.spec';
+} from './generator.utils.spec.js';
 
 describe('openApiTsClientGenerator - streaming', () => {
   let tree: Tree;

@@ -265,6 +265,16 @@ describe('smoke test - cdk-deploy', () => {
         findOutput('TsAgentArn'),
         'TypeScript Agent',
       );
+      // Container-packaged agents, proving `agentcore-ecr` still boots and
+      // serves now that code packaging is the default.
+      await invokeTrpcAgentCoreAgent(
+        findOutput('TsEcrAgentArn'),
+        'TypeScript Agent (container)',
+      );
+      await invokeAgentCoreAgent(
+        findOutput('PyEcrAgentArn'),
+        'Python Agent (container)',
+      );
       // Python LangChain agents across all three protocols — proves a deployed
       // langchain runtime boots and serves over each protocol.
       await invokeAgentCoreAgUi(

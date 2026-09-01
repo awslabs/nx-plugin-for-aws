@@ -10,30 +10,32 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import tsProjectGenerator, { getTsLibDetails } from '../../../ts/lib/generator';
-import { addTsDependencies } from '../../../utils/add-dependencies';
+import tsProjectGenerator, {
+  getTsLibDetails,
+} from '../../../ts/lib/generator.js';
+import { addTsDependencies } from '../../../utils/add-dependencies.js';
 import {
   API_CONSTRUCTS_DEPENDENCIES,
   API_CONSTRUCTS_PY_DEPENDENCIES,
   addApiGatewayInfra,
-} from '../../../utils/api-constructs/api-constructs';
-import { addSharedConstructsOpenApiMetadataGenerateTarget } from '../../../utils/api-constructs/open-api-metadata';
+} from '../../../utils/api-constructs/api-constructs.js';
+import { addSharedConstructsOpenApiMetadataGenerateTarget } from '../../../utils/api-constructs/open-api-metadata.js';
 import {
   addTypeScriptBundleTarget,
   BUNDLE_DEPENDENCIES,
-} from '../../../utils/bundle/bundle';
+} from '../../../utils/bundle/bundle.js';
 import {
   declareDependencies,
   ownedElsewhere,
-} from '../../../utils/declared-dependencies';
-import { formatFilesInSubtree } from '../../../utils/format';
-import { FS_DEPENDENCIES, FsCommands } from '../../../utils/fs';
-import { updateGitIgnore } from '../../../utils/git';
-import { resolveIac } from '../../../utils/iac';
-import { installDependencies } from '../../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
-import { esmVars } from '../../../utils/module-format';
-import { toClassName, toKebabCase } from '../../../utils/names';
+} from '../../../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../../../utils/format.js';
+import { FS_DEPENDENCIES, FsCommands } from '../../../utils/fs.js';
+import { updateGitIgnore } from '../../../utils/git.js';
+import { resolveIac } from '../../../utils/iac.js';
+import { installDependencies } from '../../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics.js';
+import { esmVars } from '../../../utils/module-format.js';
+import { toClassName, toKebabCase } from '../../../utils/names.js';
 import {
   addDependencyToTargetIfNotPresent,
   addGeneratorMetadata,
@@ -41,14 +43,14 @@ import {
   type NxGeneratorInfo,
   normalizeTargetKeyOrder,
   readProjectConfigurationUnqualified,
-} from '../../../utils/nx';
-import { assignPort } from '../../../utils/port';
+} from '../../../utils/nx.js';
+import { assignPort } from '../../../utils/port.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../../utils/shared-constructs';
-import type { IacMetadata } from '../../../utils/shared-constructs-constants';
-import smithyProjectGenerator from '../../project/generator';
+} from '../../../utils/shared-constructs.js';
+import type { IacMetadata } from '../../../utils/shared-constructs-constants.js';
+import smithyProjectGenerator from '../../project/generator.js';
 import type { TsSmithyApiGeneratorSchema } from './schema';
 
 /** The metadata this generator records, which its predicates read. */
@@ -263,6 +265,7 @@ export const tsSmithyApiGenerator = async (
         'openapi.json',
       ),
       specBuildTargetName: `${modelProjectConfig.name}:build`,
+      integrationPattern,
     });
 
     // Add bundle target using rolldown

@@ -11,11 +11,11 @@ import path from 'path';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
-} from '../../utils/config/utils';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { initTestGitRepo, useIsolatedGitEnv } from '../../utils/test-git';
-import type { LicenseSourceConfig } from '../config-types';
-import { licenseSyncGenerator } from './generator';
+} from '../../utils/config/utils.js';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import { initTestGitRepo, useIsolatedGitEnv } from '../../utils/test-git.js';
+import type { LicenseSourceConfig } from '../config-types.js';
+import { licenseSyncGenerator } from './generator.js';
 
 describe('licenseSyncGenerator', () => {
   let tree: Tree;

@@ -5,7 +5,7 @@
 
 import * as childProcess from 'node:child_process';
 import { logger } from '@nx/devkit';
-import { javaMavenDependency, MISE_VERSIONS, TS_VERSIONS } from './versions';
+import { javaMavenDependency, MISE_VERSIONS, TS_VERSIONS } from './versions.js';
 
 /**
  * How a generated Smithy project runs the Smithy CLI.

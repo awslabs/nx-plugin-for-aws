@@ -3,25 +3,25 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { getProjects, logger, type Tree } from '@nx/devkit';
-import { addGatewayTargetToLocalDev } from '../../connection/agent-local-dev';
-import { addGatewayUrlToConnectionNamespace } from '../../connection/gateway-runtime-config';
-import { PY_AGENT_GENERATOR_INFO } from '../../py/agent/generator';
-import { pyAgentReactConnectionGenerator } from '../../py/agent/react-connection/generator';
-import { TS_AGENT_GENERATOR_INFO } from '../../ts/agent/generator';
-import { tsAgentReactConnectionGenerator } from '../../ts/agent/react-connection/generator';
-import { formatFilesInSubtree } from '../../utils/format';
-import { installDependencies } from '../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { kebabCase } from '../../utils/names';
+import { addGatewayTargetToLocalDev } from '../../connection/agent-local-dev.js';
+import { addGatewayUrlToConnectionNamespace } from '../../connection/gateway-runtime-config.js';
+import { PY_AGENT_GENERATOR_INFO } from '../../py/agent/generator.js';
+import { pyAgentReactConnectionGenerator } from '../../py/agent/react-connection/generator.js';
+import { TS_AGENT_GENERATOR_INFO } from '../../ts/agent/generator.js';
+import { tsAgentReactConnectionGenerator } from '../../ts/agent/react-connection/generator.js';
+import { formatFilesInSubtree } from '../../utils/format.js';
+import { installDependencies } from '../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
+import { kebabCase } from '../../utils/names.js';
 import {
   addComponentGeneratorMetadata,
   type ComponentMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
-} from '../../utils/nx';
-import { AGENTCORE_GATEWAY_AGENT_CONNECTION_GENERATOR_INFO } from '../agent-connection/generator';
-import { readAgentCoreGatewayMetadata } from '../generator';
+} from '../../utils/nx.js';
+import { AGENTCORE_GATEWAY_AGENT_CONNECTION_GENERATOR_INFO } from '../agent-connection/generator.js';
+import { readAgentCoreGatewayMetadata } from '../generator.js';
 import type { AgentcoreGatewayReactConnectionGeneratorSchema } from './schema';
 
 export const AGENTCORE_GATEWAY_REACT_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =

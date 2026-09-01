@@ -37,7 +37,13 @@ A infraestrutura gerada cria dois usuários de banco de dados:
 <Fragment slot="terraform">
 O módulo Terraform é criado em `common/terraform`. Exemplo de uso:
 
+A Lambda de migração é implantada como uma imagem de contêiner, publicada no registro de ativos compartilhado. Instancie o módulo `core/asset-ecr` uma vez por implantação e passe seu `repository_url` para cada módulo de banco de dados:
+
 ```hcl title="packages/infra/src/main.tf"
+module "asset_ecr" {
+  source = "../../common/terraform/src/core/asset-ecr"
+}
+
 module "my_database" {
   source = "../../common/terraform/src/app/dbs/my-database"
 
@@ -46,22 +52,15 @@ module "my_database" {
   database_subnet_ids = aws_subnet.database[*].id
   lambda_subnet_ids   = aws_subnet.private[*].id
 
+  asset_ecr_repository_url = module.asset_ecr.repository_url
+
   tags = local.common_tags
 }
 ```
 
-Isso provisiona um cluster Aurora com RDS Proxy, credenciais de administrador, Lambda create-db-user, registro de configuração de runtime, Lambda de migração e recursos de registro de contêiner.
+Isso provisiona um cluster Aurora com RDS Proxy, credenciais de administrador, Lambda create-db-user, registro de configuração de runtime e Lambda de migração.
 
-O módulo de banco de dados registra seus detalhes de conexão sob o namespace de configuração de runtime `database`. Inclua este namespace ao instanciar a aplicação AppConfig de configuração de runtime compartilhada:
-
-```hcl title="packages/infra/src/main.tf"
-module "runtime_config_appconfig" {
-  source = "../../common/terraform/src/core/runtime-config/appconfig"
-
-  application_name = "my-app-runtime-config"
-  namespaces       = ["connection", "agentcore", "database"]
-}
-```
+O módulo de banco de dados registra seus detalhes de conexão sob o namespace de <Link path="guides/runtime-config">configuração de runtime</Link> `database`, que a aplicação AppConfig de configuração de runtime compartilhada expõe por padrão.
 
 A infraestrutura gerada cria dois usuários de banco de dados:
 - **Usuário administrador** - Criado durante o provisionamento do cluster com credenciais armazenadas no AWS Secrets Manager
@@ -185,3 +184,4 @@ resource "aws_route_table_association" "private" {
 </Drawer>
 
 Use o gerador <Link path="guides/connection">`connection`</Link> para conectar um projeto a este banco de dados — consulte o guia de conexão para o tipo de computação relevante (por exemplo, FastAPI, servidor MCP, agente) para a configuração de infraestrutura necessária para alcançá-lo.
+

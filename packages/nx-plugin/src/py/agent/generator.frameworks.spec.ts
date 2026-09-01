@@ -5,9 +5,9 @@
 
 import { parse } from '@iarna/toml';
 import { addProjectConfiguration, type Tree } from '@nx/devkit';
-import type { UVPyprojectToml } from '../../utils/nxlv-python';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { pyAgentGenerator } from './generator';
+import type { UVPyprojectToml } from '../../utils/nxlv-python.js';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import { pyAgentGenerator } from './generator.js';
 
 describe('py#agent generator', () => {
   let tree: Tree;
@@ -66,13 +66,36 @@ dev-dependencies = []
     expect(mainContent).toContain('async def lifespan(app: FastAPI)');
     expect(mainContent).toContain('app.state.agui_agent');
 
+    // AG-UI builds a fresh Agent per thread_id and copies the template Agent's
+    // kwargs, but skips `hooks` (Strands only keeps the built HookRegistry), so
+    // the hooks must be handed to the adapter as well or model/tool failures go
+    // unreported for every served request.
+    const aguiAgentContent = tree.read(
+      'apps/test-project/proj_test_project/agent/agent.py',
+      'utf-8',
+    );
+    expect(aguiAgentContent).toContain(
+      'AGENT_HOOKS: list[HookProvider | HookCallback] = [log_model_errors, log_tool_errors]',
+    );
+    expect(aguiAgentContent).toContain('hooks=AGENT_HOOKS,');
+    expect(mainContent).toContain('from .agent import AGENT_HOOKS, get_agent');
+    expect(mainContent).toContain('hooks=AGENT_HOOKS,');
+
     // AG-UI must bind the inbound AgentCore session ID into the ContextVar
     // so downstream MCP / A2A connection clients forward it on outbound
     // calls. (AG-UI handles its own per-thread conversation isolation, so
     // we don't wrap the agent in `with_session_id` here — only the
-    // downstream forwarding path matters.)
+    // downstream forwarding path matters.) The binding middleware itself
+    // lives in a shared module rather than being defined inline.
     expect(mainContent).toContain('session_id_context');
     expect(mainContent).toContain(
+      'from .middleware.session_id_middleware import SESSION_ID_HEADER, SessionIdMiddleware',
+    );
+    const middlewareContent = tree.read(
+      'apps/test-project/proj_test_project/agent/middleware/session_id_middleware.py',
+      'utf-8',
+    );
+    expect(middlewareContent).toContain(
       'x-amzn-bedrock-agentcore-runtime-session-id',
     );
 
@@ -167,11 +190,22 @@ dev-dependencies = []
     expect(
       projectConfig.targets['agent-openapi'].options.commands[0],
     ).toContain('scripts/agent_openapi.py');
+    // The spec serialises models a dependency may own, and this target has no
+    // `dependsOn` for `default`'s transitive `dependentTasksOutputFiles` to
+    // resolve against — so `^production` is the only edge to the dependency, and
+    // without it a dependency's model change serves a stale spec.
+    expect(projectConfig.targets['agent-openapi'].inputs).toEqual([
+      'production',
+      '^production',
+    ]);
 
     expect(projectConfig.targets['agent-generate-client']).toBeDefined();
+    expect(projectConfig.targets['agent-generate-client'].executor).toBe(
+      '@aws/nx-plugin:open-api-codegen',
+    );
     expect(
-      projectConfig.targets['agent-generate-client'].options.commands[0],
-    ).toContain('@aws/nx-plugin:open-api#ts-client');
+      projectConfig.targets['agent-generate-client'].options.generator,
+    ).toBe('ts-client');
     expect(projectConfig.targets['agent-generate-client'].dependsOn).toEqual([
       'agent-openapi',
     ]);
@@ -381,9 +415,17 @@ dev-dependencies = []
       expect(mainContent).not.toContain('create_strands_app');
       expect(mainContent).not.toContain('StrandsAgent');
 
-      // The session ID is still bound for downstream forwarding.
+      // The session ID is still bound for downstream forwarding, via the
+      // shared middleware module rather than an inline class.
       expect(mainContent).toContain('session_id_context');
       expect(mainContent).toContain(
+        'from .middleware.session_id_middleware import SESSION_ID_HEADER, SessionIdMiddleware',
+      );
+      const middlewareContent = tree.read(
+        'apps/test-project/proj_test_project/agent/middleware/session_id_middleware.py',
+        'utf-8',
+      );
+      expect(middlewareContent).toContain(
         'x-amzn-bedrock-agentcore-runtime-session-id',
       );
 
@@ -500,10 +542,12 @@ dev-dependencies = []
       );
       expect(mainContent).toContain('get_agent');
       expect(mainContent).toContain('/ping');
-      expect(mainContent).toContain('session_id_context');
+      // The session-binding middleware itself lives in a shared module (see
+      // below), imported rather than defined inline.
       expect(mainContent).toContain(
-        'x-amzn-bedrock-agentcore-runtime-session-id',
+        'from .middleware.session_id_middleware import SessionIdMiddleware',
       );
+      expect(mainContent).toContain('app.add_middleware(SessionIdMiddleware)');
       // The graph reply is published as a task artifact so streaming A2A clients
       // (e.g. the chat CLI) render it.
       expect(mainContent).toContain('add_artifact');
@@ -512,6 +556,20 @@ dev-dependencies = []
       expect(mainContent).not.toContain('strands.multiagent.a2a');
       expect(mainContent).not.toContain('A2AServer');
       expect(mainContent).not.toContain('from strands');
+
+      // The shared middleware module binds the inbound session (or a fresh
+      // UUID) to async context for every framework/protocol combination.
+      const middlewareContent = tree.read(
+        'apps/test-project/proj_test_project/agent/middleware/session_id_middleware.py',
+        'utf-8',
+      );
+      expect(middlewareContent).toContain('session_id_context');
+      expect(middlewareContent).toContain(
+        'x-amzn-bedrock-agentcore-runtime-session-id',
+      );
+      expect(middlewareContent).toContain(
+        'class SessionIdMiddleware(BaseHTTPMiddleware):',
+      );
     });
 
     it('should add per-protocol langchain dependencies', async () => {

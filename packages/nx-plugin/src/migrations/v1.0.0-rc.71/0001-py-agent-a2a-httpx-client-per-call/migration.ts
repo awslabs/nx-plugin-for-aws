@@ -7,8 +7,8 @@ import {
   type Tree,
   visitNotIgnoredFiles,
 } from '@nx/devkit';
-import { applyGritQL, matchGritQL } from '../../../utils/ast';
-import { formatFilesInSubtree } from '../../../utils/format';
+import { applyGritQL, matchGritQL } from '../../../utils/ast.js';
+import { formatFilesInSubtree } from '../../../utils/format.js';
 
 /**
  * Rebuild the `httpx.AsyncClient` (and, for Strands, the `A2AAgent`) fresh on

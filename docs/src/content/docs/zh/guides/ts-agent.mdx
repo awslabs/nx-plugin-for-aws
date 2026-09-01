@@ -4,7 +4,7 @@ description: 生成用于构建带工具的 AI 代理的 TypeScript Agent，并�
 generator: ts#agent
 ---
 
-import { FileTree, Tabs, TabItem, CardGrid } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem, CardGrid, Steps } from '@astrojs/starlight/components';
 import Astro from '@astrojs/react';
 import ConnectionCard from '@components/connection-card.astro';
 import RunGenerator from '@components/run-generator.astro';
@@ -63,7 +63,7 @@ import OptionFilter from '@components/option-filter.astro';
         - session.ts Resolves the SessionManager used to persist conversation state
         - client.ts Vended client for invoking your agent
         - agent-core-trpc-client.ts Client factory for connecting to agents on AgentCore Runtime
-        - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - package.json Updated with Strands dependencies
     - project.json Updated with agent serve targets
 </FileTree>
@@ -81,7 +81,7 @@ import OptionFilter from '@components/option-filter.astro';
         - index.ts A2A Express server entry point
         - agent.ts Main agent definition with sample tools
         - session.ts Resolves the SessionManager used to persist conversation state
-        - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - package.json Updated with Strands and Express dependencies
     - project.json Updated with agent serve targets
 </FileTree>
@@ -99,7 +99,7 @@ import OptionFilter from '@components/option-filter.astro';
         - index.ts AG-UI server entry point (Express + SSE)
         - agent.ts Main agent definition with sample tools
         - session.ts Resolves the SessionManager used to persist conversation state
-        - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - package.json Updated with Strands and AG-UI dependencies
     - project.json Updated with agent serve targets
 </FileTree>
@@ -107,7 +107,9 @@ import OptionFilter from '@components/option-filter.astro';
 
 ### 基础设施
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment">
+<Snippet name="agentcore-hosting" />
+
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Bedrock AgentCore Runtime deployment">
 <Snippet name="shared-constructs" />
 
 为了部署您的 Agent，将生成以下文件：
@@ -118,8 +120,8 @@ import OptionFilter from '@components/option-filter.astro';
   - packages/common/constructs/src
     - app
       - agents
-        - \<project-name>
-          - \<project-name>.ts CDK construct for deploying your agent
+        - \<agent-name>
+          - \<agent-name>.ts CDK construct for deploying your agent
 </FileTree>
 </Fragment>
 <Fragment slot="terraform">
@@ -127,11 +129,15 @@ import OptionFilter from '@components/option-filter.astro';
   - packages/common/terraform/src
     - app
       - agents
-        - \<project-name>
-          - \<project-name>.tf Module for deploying your agent
+        - \<agent-name>
+          - \<agent-name>.tf Module for deploying your agent
     - core
       - agent-core
         - runtime.tf Generic module for deploying to Bedrock AgentCore Runtime
+      - agent-core-code (when `infra` is `agentcore`)
+        - runtime.tf Packages your agent's code and delegates to `agent-core`
+      - agent-core-container (when `infra` is `agentcore-ecr`)
+        - runtime.tf Builds and publishes your agent's image and delegates to `agent-core`
 </FileTree>
 </Fragment>
 </Infrastructure>
@@ -203,7 +209,7 @@ Strands 框架会自动处理：
 
 ### 模型配置
 
-默认情况下，Strands 代理使用 Claude 4 Sonnet，但您可以轻松地在模型提供商之间切换：
+默认情况下，Strands 代理在 Amazon Bedrock 上使用 Claude Sonnet 4.6，但您可以轻松地在模型提供商之间切换：
 
 ```typescript
 import { Agent } from '@strands-agents/sdk';
@@ -247,19 +253,19 @@ response = await agent.invoke('What can you help me with?');
 <OptionFilter when={{ protocol: 'a2a' }} description="A2A Express server details">
 ## A2A 服务器（A2A 协议）
 
-生成的 `index.ts` 将 [Strands A2A Express Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) 挂载到 Express 应用程序上，因此生成的代理会公开 A2A 协议端点以及 `/ping` 健康检查。部署到 AgentCore 时，入口点会从 AppConfig 解析运行时的公共 ARN，并在代理卡中公布它。
+生成的 `index.ts` 将 [Strands A2A Express Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) 挂载到 Express 应用程序上，因此生成的代理会公开 A2A 协议端点以及 `/ping` 健康检查。代理卡中公布的 URL 来自 `AGENTCORE_RUNTIME_URL` 环境变量，对于本地开发则回退到 `http://localhost:<port>/`。
 
-大多数用户不需要修改此文件 — 编辑 `agent.ts` 以更改工具或系统提示。A2A 代理监听端口 `9000`（而 HTTP 为 `8080`），生成的 Dockerfile 和基础设施已经为此进行了配置。
+大多数用户不需要修改此文件 — 编辑 `agent.ts` 以更改工具或系统提示。A2A 代理监听端口 `9000`（而 HTTP 为 `8080`），生成的基础设施已经为此进行了配置。
 </OptionFilter>
 
 <OptionFilter when={{ protocol: 'ag-ui' }} description="AG-UI server details">
 ## AG-UI 服务器（AG-UI 协议）
 
-生成的 `index.ts` 将您的 Strands `Agent` 包装在 [`@ag-ui/aws-strands`](https://www.npmjs.com/package/@ag-ui/aws-strands) `StrandsAgent` 中，并通过 `createStrandsApp()` 创建一个 Express 应用程序。生成的应用程序公开一个单一的 POST 端点，通过服务器发送事件（SSE）流式传输 [AG-UI](https://docs.ag-ui.com/) 事件，以及用于 AgentCore 运行时健康检查的 `/ping`。
+生成的 `index.ts` 将您的 Strands `Agent` 包装在 [`@ag-ui/aws-strands`](https://www.npmjs.com/package/@ag-ui/aws-strands) `StrandsAgent` 中，并构建一个 Express 应用程序。生成的应用程序公开一个单一的 POST 端点，通过服务器发送事件（SSE）流式传输 [AG-UI](https://docs.ag-ui.com/) 事件，以及用于 AgentCore 运行时健康检查的 `/ping`。
 
 AG-UI 代理旨在直接由前端使用。使用 <Link path="/guides/connection/react-agui">`connection` 生成器</Link>将您的 React 网站与代理连接，使用 [CopilotKit](https://docs.copilotkit.ai/aws-strands) 提供程序和 [AG-UI HttpAgent](https://docs.ag-ui.com/) 客户端。
 
-大多数用户不需要修改 `index.ts` — 编辑 `agent.ts` 以更改工具或系统提示。AG-UI 代理监听端口 `8080`（与 HTTP 相同），生成的 Dockerfile 和基础设施已经为此进行了配置。
+大多数用户不需要修改 `index.ts` — 编辑 `agent.ts` 以更改工具或系统提示。AG-UI 代理监听端口 `8080`（与 HTTP 相同），生成的基础设施已经为此进行了配置。
 </OptionFilter>
 
 ## 运行您的 Agent
@@ -290,7 +296,7 @@ AG-UI 代理旨在直接由前端使用。使用 <Link path="/guides/connection/
 
 生成器为每个协议生成一个 `scripts/<your-agent-name>/chat.ts`。您可以在演进代理的输入形状时对其进行自定义。默认情况下，它连接到本地代理，或者在设置了 `RUNTIME_CONFIG_APP_ID` 时连接到已部署的代理（请参阅下面的[与已部署的代理聊天](#与已部署的代理聊天)）。
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Deployed agent chat details">
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Deployed agent chat details">
 #### 与已部署的代理聊天
 
 要与部署到 Bedrock AgentCore 的代理聊天，请将 `RUNTIME_CONFIG_APP_ID` 环境变量设置为部署的 AppConfig 应用程序 ID（由已部署的堆栈输出为 `RuntimeConfigApplicationId`）。聊天脚本从运行时配置解析您的代理的运行时 ARN，并连接到已部署的端点：
@@ -322,7 +328,7 @@ aws cognito-idp admin-initiate-auth \
 </Tabs>
 </OptionFilter>
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment details">
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Bedrock AgentCore Runtime deployment details">
 ## 将您的 Agent 部署到 Bedrock AgentCore Runtime
 
 <Snippet name="agent/bedrock-deployment" parentHeading="将您的 Agent 部署到 Bedrock AgentCore Runtime" />
@@ -333,6 +339,13 @@ aws cognito-idp admin-initiate-auth \
 
 bundle 目标使用 `index.ts` 作为 WebSocket 服务器的入口点，以托管在 Bedrock AgentCore Runtime 上。
 
+<OptionFilter when={{ infra: 'agentcore' }} description="Code package target">
+### Package 目标
+
+生成器配置了一个 `<your-agent-name>-package` 目标，它组装可部署的代码包：打包的 `index.js` 加上 AWS Distro for OpenTelemetry 的供应商安装，AgentCore 要求它存在于包中。生成的基础设施将此目录上传为 `.zip` — 在 CDK 下通过 `AgentRuntimeArtifact.fromCodeAsset`，或在 Terraform 下归档到共享资产存储桶中。
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'agentcore-ecr' }} description="Container image build and scan">
 ### Docker 目标
 
 生成器配置了一个 `<your-agent-name>-docker` 目标，它将 `Dockerfile` 从您的代理源目录复制到 bundle 输出目录。这将 `Dockerfile` 与打包的工件放在一起，允许 CDK 直接使用 `AgentRuntimeArtifact.fromAsset` 构建 Docker 镜像。
@@ -342,10 +355,11 @@ bundle 目标使用 `index.ts` 作为 WebSocket 服务器的入口点，以托�
 ### 镜像扫描
 
 <Snippet name="trivy-image-scan" parentHeading="镜像扫描" />
+</OptionFilter>
 
 ### 可观测性
 
-您的代理会自动配置可观测性，使用 [AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT)，通过在您的 `Dockerfile` 中配置自动检测。
+您的代理会自动配置可观测性，使用 [AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT)。
 
 您可以在 CloudWatch AWS 控制台中找到追踪，方法是在菜单中选择"GenAI Observability"。请注意，要填充追踪，您需要启用 [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html)。
 
@@ -365,6 +379,23 @@ bundle 目标使用 `index.ts` 作为 WebSocket 服务器的入口点，以托�
 :::note[本地开发]
 在本地运行时（`LOCAL_DEV=true`，由 `-dev` 目标自动设置），无论配置的 `session` 选项如何，会话数据始终存储在工作区根目录的 `tmp/agents/strands/<agent-name>` 下的磁盘上，以方便使用。
 :::
+
+#### 将会话限制为其所有者
+
+会话 ID 来自调用者，因此它本身只能识别对话，但不能识别对话属于谁。AgentCore Runtime 针对代理运行时资源 ARN 而不是针对单个会话授权调用，这使代理可以自由决定会话对您的应用程序意味着什么。
+
+:::caution[会话还会选择 microVM]
+会话 ID 选择为请求提供服务的 [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html)，因此其文件系统、`/tmp` 和进程内缓存由解析到该会话的每个请求共享。发送相同会话 ID 的两个调用者共享这些资源，即使他们存储的对话是分开的。
+:::
+
+要将每个用户限制为他们自己的对话：
+
+<Steps>
+  1. 添加一个 API 来创建会话，使用 <Link path="guides/trpc">tRPC</Link>、<Link path="guides/fastapi">FastAPI</Link> 或 <Link path="guides/ts-smithy-api">Smithy</Link>。生成一个不透明的会话 ID（至少 33 个字符）并将其与调用用户的 ID 一起存储 — 例如在使用 <Link path="guides/ts-dynamodb">`ts#dynamodb`</Link> 生成器创建的表中。每个 API 指南都展示了如何检索调用用户的 ID。
+  2. 在您的代理中，查找给定会话 ID 的存储用户 ID，并在它与调用者不匹配时拒绝请求。使用 `auth=cognito` 时，调用者的 JWT 会到达您的代理代码，因此其 `sub` 声明可以识别他们。
+</Steps>
+
+生成会话 ID，而不是从用户提供的值（如对话名称）派生它 — 调用者可以预测的任何内容，调用者都可以发送。
 </OptionFilter>
 
 ## 调用您的 Agent
@@ -378,11 +409,13 @@ bundle 目标使用 `index.ts` 作为 WebSocket 服务器的入口点，以托�
 
 例如，您可以在工作区中创建一个名为 `scripts/test.ts` 的文件，该文件导入客户端：
 
+客户端类以您的代理命名，因此名为 `my-agent` 的代理会导出 `MyAgentClient`。
+
 ```typescript
 // scripts/test.ts
-import { AgentClient } from '../packages/<project>/src/agent/client.js';
+import { MyAgentClient } from '../packages/<project>/src/agent/client.js';
 
-const client = AgentClient.local({ url: 'http://localhost:8081/ws' });
+const client = MyAgentClient.local({ url: 'http://localhost:8081/ws' });
 
 client.invoke.subscribe({ prompt: 'what is 1 plus 1?' }, { onData: console.log });
 ```
@@ -412,9 +445,9 @@ client.invoke.subscribe({ prompt: 'what is 1 plus 1?' }, { onData: console.log }
 您可以通过将其 ARN 传递给 `withIamAuth` 工厂方法来调用已部署的代理：
 
 ```typescript
-import { AgentClient } from './agent/client.js';
+import { MyAgentClient } from './agent/client.js';
 
-const client = AgentClient.withIamAuth({
+const client = MyAgentClient.withIamAuth({
   agentRuntimeArn: 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent',
 });
 
@@ -436,7 +469,7 @@ client.invoke.subscribe({ prompt: 'what is 1 plus 1?' }, {
 使用 `withJwtAuth` 工厂方法通过 JWT / Cognito 访问令牌进行身份验证。
 
 ```typescript
-const client = AgentClient.withJwtAuth({
+const client = MyAgentClient.withJwtAuth({
   agentRuntimeArn: 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent',
   accessTokenProvider: async () => `<access-token>`,
 });
@@ -453,7 +486,7 @@ import { CognitoIdentityProvider } from "@aws-sdk/client-cognito-identity-provid
 
 const cognito = new CognitoIdentityProvider();
 
-const jwtClient = AgentClient.withJwtAuth({
+const jwtClient = MyAgentClient.withJwtAuth({
   agentRuntimeArn: 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent',
   accessTokenProvider: async () => {
     const response = await cognito.adminInitiateAuth({

@@ -4,8 +4,8 @@
  */
 
 import type { Tree } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { pyFastApiProjectGenerator } from './generator';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import { pyFastApiProjectGenerator } from './generator.js';
 
 describe('fastapi project generator', () => {
   let tree: Tree;
@@ -424,6 +424,52 @@ describe('fastapi project generator', () => {
       expect(terraformContent).toContain(
         'authorization = "COGNITO_USER_POOLS"',
       );
+    });
+
+    it('should generate the operations metadata the isolated module reads', async () => {
+      await pyFastApiProjectGenerator(tree, {
+        name: 'test-api',
+        directory: 'apps',
+        infra: 'http-lambda',
+        auth: 'iam',
+        integrationPattern: 'isolated',
+        iac: 'terraform',
+      });
+
+      const terraformConfig = JSON.parse(
+        tree.read('packages/common/terraform/project.json', 'utf-8'),
+      );
+      const target = terraformConfig.targets['generate:test-api-operations'];
+
+      // The module reads the metadata with `file()`, so it must be generated
+      // before the shared terraform project is planned
+      expect(target).toBeDefined();
+      expect(target.executor).toBe('@aws/nx-plugin:open-api-codegen');
+      expect(target.options.generator).toBe('json-metadata');
+      expect(target.options.outputPath).toBe(
+        'packages/common/terraform/src/generated/test-api',
+      );
+      expect(terraformConfig.targets.build.dependsOn).toContain(
+        'generate:test-api-operations',
+      );
+    });
+
+    it('should not generate operations metadata for the shared pattern', async () => {
+      await pyFastApiProjectGenerator(tree, {
+        name: 'test-api',
+        directory: 'apps',
+        infra: 'http-lambda',
+        auth: 'iam',
+        integrationPattern: 'shared',
+        iac: 'terraform',
+      });
+
+      const terraformConfig = JSON.parse(
+        tree.read('packages/common/terraform/project.json', 'utf-8'),
+      );
+      expect(
+        terraformConfig.targets['generate:test-api-operations'],
+      ).toBeUndefined();
     });
   });
 });

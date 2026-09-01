@@ -4,8 +4,8 @@
  */
 import { readProjectConfiguration, type Tree } from '@nx/devkit';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import { pyRdbFastApiConnectionGenerator } from './generator';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
+import { pyRdbFastApiConnectionGenerator } from './generator.js';
 
 describe('py#rdb fast-api-connection generator', () => {
   let tree: Tree;

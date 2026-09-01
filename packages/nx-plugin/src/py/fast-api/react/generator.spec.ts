@@ -3,20 +3,20 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { type Tree, updateJson } from '@nx/devkit';
-import { tsReactWebsiteGenerator } from '../../../ts/react-website/app/generator';
-import { matchGritQL } from '../../../utils/ast';
-import { declareDependencies } from '../../../utils/declared-dependencies';
-import { expectHasMetricTags } from '../../../utils/metrics.spec';
+import { tsReactWebsiteGenerator } from '../../../ts/react-website/app/generator.js';
+import { matchGritQL } from '../../../utils/ast.js';
+import { declareDependencies } from '../../../utils/declared-dependencies.js';
+import { expectHasMetricTags } from '../../../utils/metrics.spec.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../../utils/shared-constructs';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import { pyFastApiProjectGenerator } from '../generator';
+} from '../../../utils/shared-constructs.js';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
+import { pyFastApiProjectGenerator } from '../generator.js';
 import {
   FAST_API_REACT_GENERATOR_INFO,
   fastApiReactGenerator,
-} from './generator';
+} from './generator.js';
 
 const sharedConstructsDeclaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
@@ -120,14 +120,14 @@ export function Main() {
     // Verify client generation target was added
     expect(projectConfig.targets['generate:test-api-client']).toBeDefined();
     expect(projectConfig.targets['generate:test-api-client'].executor).toBe(
-      'nx:run-commands',
+      '@aws/nx-plugin:open-api-codegen',
     );
 
-    expect(
-      projectConfig.targets['generate:test-api-client'].options.commands,
-    ).toEqual([
-      'nx g @aws/nx-plugin:open-api#ts-hooks --openApiSpecPath="dist/apps/backend/openapi/openapi.json" --outputPath="apps/frontend/src/generated/test-api" --no-interactive',
-    ]);
+    expect(projectConfig.targets['generate:test-api-client'].options).toEqual({
+      generator: 'ts-hooks',
+      openApiSpecPath: 'dist/apps/backend/openapi/openapi.json',
+      outputPath: 'apps/frontend/src/generated/test-api',
+    });
 
     expect(
       projectConfig.targets['generate:test-api-client'].dependsOn,

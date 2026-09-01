@@ -15,25 +15,25 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { libraryGenerator } from '@nx/js';
-import { declareDependencies } from '../../utils/declared-dependencies';
-import { formatFilesInSubtree } from '../../utils/format';
-import { installDependencies } from '../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { isEsmWorkspace } from '../../utils/module-format';
-import { toKebabCase } from '../../utils/names';
-import { getNpmScopePrefix } from '../../utils/npm-scope';
+import { declareDependencies } from '../../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../../utils/format.js';
+import { installDependencies } from '../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
+import { isEsmWorkspace } from '../../utils/module-format.js';
+import { toKebabCase } from '../../utils/names.js';
+import { getNpmScopePrefix } from '../../utils/npm-scope.js';
 import {
   addGeneratorMetadata,
   getGeneratorInfo,
   mergeTargetDefault,
   type NxGeneratorInfo,
   projectExists,
-} from '../../utils/nx';
-import { sortObjectKeys } from '../../utils/object';
-import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
+} from '../../utils/nx.js';
+import { sortObjectKeys } from '../../utils/object.js';
+import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager.js';
 import type { TsProjectGeneratorSchema } from './schema';
-import { configureTsProject } from './ts-project-utils';
-import { VITEST_DEPENDENCIES } from './vitest';
+import { configureTsProject } from './ts-project-utils.js';
+import { VITEST_DEPENDENCIES } from './vitest.js';
 
 export const DEPENDENCIES = declareDependencies()({
   ts: [...VITEST_DEPENDENCIES],
@@ -42,6 +42,32 @@ export const DEPENDENCIES = declareDependencies()({
 export const TS_LIB_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
   import.meta.filename,
 );
+
+/**
+ * Consumes build artifacts produced by a project's dependencies, so a task
+ * re-runs when the output it actually reads changes.
+ *
+ * Test reports are excluded rather than build artifacts included: several
+ * generators emit generated sources outside `dist` (an OpenAPI client under a
+ * website's `src/generated`, a Smithy SSDK, the Prisma client) and add them to
+ * `.gitignore`, which keeps them out of the project's own fileset — so this
+ * input is the only thing that hashes them. `reports/` and `coverage/` hold
+ * pytest's JUnit and coverage XML, which carry a wall-clock timestamp and so
+ * mint a fresh hash on every test run that would cascade through the graph.
+ */
+export const DEPENDENT_TASKS_OUTPUT_FILES_INPUT = {
+  dependentTasksOutputFiles: '!{reports,coverage}/**',
+  transitive: true,
+};
+
+// Globs this generator has vended for the dependent-task-output input. Any of
+// them is replaced in place, so the entry is neither duplicated nor left at a
+// different scope when a generator re-runs.
+const VENDED_DEPENDENT_TASKS_OUTPUT_GLOBS = [
+  '**/*',
+  'dist/**',
+  DEPENDENT_TASKS_OUTPUT_FILES_INPUT.dependentTasksOutputFiles,
+];
 
 export interface TsLibDetails {
   /**
@@ -143,6 +169,10 @@ export const tsProjectGenerator = async (
   targets['build'] = {
     dependsOn: ['lint', 'compile', 'test'],
   };
+  // The artifact-only sibling of build, which the deploy targets depend on.
+  targets['assemble'] = {
+    dependsOn: ['compile'],
+  };
   projectConfiguration.targets = sortObjectKeys(targets);
 
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfiguration);
@@ -157,12 +187,13 @@ export const tsProjectGenerator = async (
           (input) =>
             typeof input !== 'object' ||
             !('dependentTasksOutputFiles' in input) ||
-            !(input.dependentTasksOutputFiles === '**/*' && input.transitive),
+            !(
+              VENDED_DEPENDENT_TASKS_OUTPUT_GLOBS.includes(
+                input.dependentTasksOutputFiles as string,
+              ) && input.transitive
+            ),
         ),
-        {
-          dependentTasksOutputFiles: '**/*',
-          transitive: true,
-        },
+        DEPENDENT_TASKS_OUTPUT_FILES_INPUT,
       ],
     };
 

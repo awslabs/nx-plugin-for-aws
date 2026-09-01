@@ -8,14 +8,12 @@ import NxCommands from '@components/nx-commands.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 import Link from '@components/link.astro';
 import Infrastructure from '@components/infrastructure.astro';
-import TrivyVersion from '@components/trivy-version.astro';
 import { CONTAINER_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/versions';
 
 export const trivyTarget = `{
   "targets": {
     "trivy": {
-      "cache": true,
-      "inputs": ["default", "^production"],
+      "cache": false,
       "outputs": ["{workspaceRoot}/dist/{projectRoot}/trivy"],
       "executor": "nx:run-commands",
       "options": {
@@ -68,7 +66,7 @@ Docker build context được ghi vào thư mục `dist` của dự án bạn. I
 :::tip[Tại sao bundle bên ngoài Dockerfile?]
 Giữ bước bundle trong Nx (thay vì bên trong `Dockerfile`) có nghĩa là:
 
-- Nx có thể **cache** bundle target, do đó các bản build lặp lại sẽ nhanh.
+- Nx có thể **cache** bundle target — đầu ra của nó là một thư mục trên đĩa, do đó một cache hit thực sự khôi phục nó.
 - `Dockerfile` không cần truy cập vào monorepo của bạn, private registries, hoặc build-time secrets.
 - Image layer rất nhỏ — một `COPY` duy nhất của các artifact đã được xây dựng, không có `node_modules` bắc cầu hoặc build toolchain.
 :::
@@ -84,6 +82,7 @@ Cấu hình một `bundle` target gọi Rolldown. Nếu bạn đang bắt đầu
   "targets": {
     "bundle": {
       "cache": true,
+      "inputs": ["default"],
       "executor": "nx:run-commands",
       "outputs": ["{workspaceRoot}/dist/{projectRoot}/bundle"],
       "options": {
@@ -167,7 +166,7 @@ Thêm target `docker` để:
 {
   "targets": {
     "docker": {
-      "cache": true,
+      "cache": false,
       "executor": "nx:run-commands",
       "options": {
         "commands": [
@@ -181,6 +180,10 @@ Thêm target `docker` để:
   }
 }
 ```
+
+:::caution[Không cache image builds]
+Đặt `"cache": false` trên các image build targets. Một built image không được ghi vào đường dẫn `outputs` trong filesystem, do đó Nx không có gì để khôi phục khi cache hit. Container engines cache image layers bất kể điều gì, do đó không có hình phạt về hiệu suất.
+:::
 
 :::tip[Sao chép file đa nền tảng]
 Package `ncp` cung cấp lệnh sao chép file/thư mục đa nền tảng, tránh `cp` (không khả dụng trên Windows). Cài đặt nó tại thư mục gốc của workspace với `pnpm add -D -w ncp`.
@@ -256,7 +259,7 @@ Thêm một `docker` target sao chép `Dockerfile` vào thư mục đầu ra bun
 {
   "targets": {
     "docker": {
-      "cache": true,
+      "cache": false,
       "executor": "nx:run-commands",
       "options": {
         "commands": [
@@ -294,10 +297,6 @@ Các scan targets per-image của mỗi dự án được tổng hợp dưới m
 Scan cố ý không được kết nối vào `build` vì điều này có thể gây ra ma sát không cần thiết khi lặp lại trong quá trình phát triển, vì cơ sở dữ liệu lỗ hổng của Trivy được cập nhật liên tục với các CVE mới.
 
 Thay vào đó, chúng tôi khuyến nghị chạy lệnh trên như một bước riêng biệt trong CI pipeline của bạn trước khi triển khai đến các giai đoạn production.
-:::
-
-:::tip[Caching bỏ qua các images không thay đổi]
-Vì image được xác định hoàn toàn bởi nguồn dự án của bạn, khai báo `inputs` (ở đây là `default` và `^production`, khớp với `bundle` target) cho phép Nx cache scan và bỏ qua việc quét lại một image không thay đổi. Ghim phiên bản Trivy image (ví dụ: <code>trivy:<TrivyVersion /></code>) để các lần quét có thể tái tạo.
 :::
 
 :::note[Ngăn chặn các phát hiện]
@@ -380,9 +379,11 @@ Sử dụng `DockerImageAsset` với bất kỳ AWS construct nào chấp nhận
 AWS provider của Terraform không có resource "build and push a Docker image" hạng nhất. Mẫu được sử dụng bởi các generators là:
 
 1. `build` target của dự án chạy `docker build`, tạo ra một local image được gắn thẻ `my-scope-my-project:latest`.
-2. Một `aws_ecr_repository` để giữ image.
+2. Một shared ECR repository sử dụng module `core/asset-ecr`
 3. Một `null_resource` với một `local-exec` provisioner xác thực với ECR, gắn lại thẻ locally-built image với content digest của nó, và đẩy nó.
 4. Resource downstream (ví dụ: `aws_ecs_task_definition`) tham chiếu image bằng thẻ bất biến, dựa trên digest của nó.
+
+Vì một repository giữ mọi image, mỗi thẻ được đặt tên theo chủ sở hữu của image cũng như digest của nó, do đó các images chia sẻ registry không bao giờ xung đột.
 
 ```d2
 direction: down
@@ -408,7 +409,7 @@ app: Application {
 infra: Infrastructure {
   direction: right
   publish: "null_resource\nlocal-exec: docker push"
-  repo: aws_ecr_repository
+  repo: "core/asset-ecr\n(shared)"
   publish -> repo: tag + push
 }
 
@@ -422,10 +423,8 @@ infra.repo -> ecr
 
 
 ```hcl
-resource "aws_ecr_repository" "repo" {
-  name                 = "my-project-repository"
-  image_tag_mutability = "IMMUTABLE"
-  force_delete         = true
+module "asset_ecr" {
+  source = "../../common/terraform/src/core/asset-ecr"
 }
 
 # Invalidate the push whenever the locally-built image digest changes
@@ -434,14 +433,15 @@ data "external" "docker_digest" {
 }
 
 locals {
-  # Content-based, immutable image tag derived from the local image digest
-  image_tag = replace(data.external.docker_digest.result.digest, "sha256:", "")
+  # Content-based, immutable image tag derived from the local image digest, and
+  # namespaced by owner so images sharing the registry never collide
+  image_tag = "my-project-${replace(data.external.docker_digest.result.digest, "sha256:", "")}"
 }
 
 resource "null_resource" "docker_publish" {
   triggers = {
     docker_digest  = data.external.docker_digest.result.digest
-    repository_url = aws_ecr_repository.repo.repository_url
+    repository_url = module.asset_ecr.repository_url
     image_tag      = local.image_tag
   }
 
@@ -456,7 +456,7 @@ resource "null_resource" "docker_publish" {
 }
 ```
 
-Block `data.external.docker_digest` đảm bảo `null_resource` chạy lại bất cứ khi nào local image hash thay đổi, kích hoạt một push mới trên mọi thay đổi code có ý nghĩa. Image được đẩy dưới một thẻ bất biến, dựa trên nội dung được lấy từ digest của nó, do đó ECR repository có thể sử dụng `IMMUTABLE` tag mutability và từ chối bất kỳ nỗ lực nào ghi đè một thẻ hiện có.
+Block `data.external.docker_digest` đảm bảo `null_resource` chạy lại bất cứ khi nào local image hash thay đổi, kích hoạt một push mới trên mọi thay đổi code có ý nghĩa. Image được đẩy dưới một thẻ bất biến, dựa trên nội dung được lấy từ digest của nó, do đó repository được chia sẻ sử dụng `IMMUTABLE` tag mutability và từ chối bất kỳ nỗ lực nào ghi đè một thẻ hiện có.
 
 :::note[Chạy bundle trước apply]
 `nx apply <project>` yêu cầu image tag `my-scope-my-project:latest` đã tồn tại cục bộ. Chạy `nx build my-project` (hoặc `nx docker my-project`) trước `nx apply <project>`.

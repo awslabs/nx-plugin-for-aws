@@ -2,8 +2,8 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import type { DeclaredTsDependency } from './declared-dependencies';
-import type { ITsDepVersion } from './versions';
+import type { DeclaredTsDependency } from './declared-dependencies.js';
+import type { ITsDepVersion } from './versions.js';
 
 export const PACKAGES_DIR = 'packages';
 export const SHARED_CONSTRUCTS_NAME = 'common-constructs';
@@ -18,6 +18,26 @@ export const SHARED_SCRIPTS_NAME = 'common-scripts';
 export const SHARED_SCRIPTS_DIR = 'common/scripts';
 
 export const DYNAMODB_GENERATOR_IDS = ['ts#dynamodb', 'py#dynamodb'];
+
+/**
+ * Directory the vended Terraform runtime-config modules aggregate into at apply
+ * time, relative to the workspace root. The `entry` module writes leaf files
+ * under `entries/<namespace>/`, and the `read` / `appconfig-deployment` modules
+ * merge those into one `<namespace>.json` here.
+ */
+export const TERRAFORM_RUNTIME_CONFIG_DIR = `dist/${PACKAGES_DIR}/${SHARED_TERRAFORM_DIR}/runtime-config`;
+
+/**
+ * Runtime-config namespace the static website publishes to and reads back, as
+ * passed to the `read` module by the vended static-website Terraform module.
+ */
+export const WEBSITE_RUNTIME_CONFIG_NAMESPACE = 'connection';
+
+/**
+ * File the Terraform aggregation writes the website's runtime config to,
+ * relative to the workspace root.
+ */
+export const TERRAFORM_WEBSITE_RUNTIME_CONFIG_FILE = `${TERRAFORM_RUNTIME_CONFIG_DIR}/${WEBSITE_RUNTIME_CONFIG_NAMESPACE}.json`;
 
 /**
  * What a generator records about the infrastructure it generated.
@@ -50,6 +70,12 @@ export const generatedInfrastructure = (m: IacMetadata): boolean =>
  */
 export const generatedTerraform = (m: IacMetadata): boolean =>
   m.iac === 'terraform';
+
+/**
+ * Whether CDK infrastructure was generated, for the packages only a construct
+ * imports.
+ */
+export const generatedCdk = (m: IacMetadata): boolean => m.iac === 'cdk';
 
 /**
  * Dependencies a caller must declare to use the shared constructs project.

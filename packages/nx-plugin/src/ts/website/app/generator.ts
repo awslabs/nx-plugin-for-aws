@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { GeneratorCallback, Tree } from '@nx/devkit';
-import { getGeneratorInfo, type NxGeneratorInfo } from '../../../utils/nx';
-import { tsReactWebsiteGenerator } from '../../react-website/app/generator';
+import { getGeneratorInfo, type NxGeneratorInfo } from '../../../utils/nx.js';
+import { tsReactWebsiteGenerator } from '../../react-website/app/generator.js';
 import type { TsWebsiteGeneratorSchema } from './schema';
 
 export const TS_WEBSITE_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(

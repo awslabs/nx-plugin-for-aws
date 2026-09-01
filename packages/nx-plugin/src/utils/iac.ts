@@ -6,11 +6,11 @@ import type { Tree } from '@nx/devkit';
 import {
   AWS_NX_PLUGIN_CONFIG_FILE_NAME,
   readAwsNxPluginConfig,
-} from './config/utils';
+} from './config/utils.js';
 
-export { IAC_PROVIDERS, type Iac, type IacOption } from './iac-providers';
+export { IAC_PROVIDERS, type Iac, type IacOption } from './iac-providers.js';
 
-import { IAC_PROVIDERS } from './iac-providers';
+import { IAC_PROVIDERS } from './iac-providers.js';
 
 /**
  * Configuration for infrastructure as code

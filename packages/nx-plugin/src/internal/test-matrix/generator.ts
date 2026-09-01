@@ -3,13 +3,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { GeneratorCallback, Tree } from '@nx/devkit';
-import { agentcoreGatewayGenerator } from '../../sdk/agentcore-gateway';
-import { agentcoreHarnessGenerator } from '../../sdk/agentcore-harness';
+import { agentcoreGatewayGenerator } from '../../sdk/agentcore-gateway.js';
+import { agentcoreHarnessGenerator } from '../../sdk/agentcore-harness.js';
 import {
   type ConnectionGeneratorSchema,
   connectionGenerator,
-} from '../../sdk/connection';
-import { licenseGenerator } from '../../sdk/license';
+} from '../../sdk/connection.js';
+import { licenseGenerator } from '../../sdk/license.js';
 import {
   type PyAgentGeneratorSchema,
   type PyApiGeneratorSchema,
@@ -21,8 +21,9 @@ import {
   pyMcpServerGenerator,
   pyProjectGenerator,
   pyRdbGenerator,
-} from '../../sdk/py';
-import { terraformProjectGenerator } from '../../sdk/terraform';
+} from '../../sdk/py.js';
+import { smithyProjectGenerator } from '../../sdk/smithy.js';
+import { terraformProjectGenerator } from '../../sdk/terraform.js';
 import {
   type TsAgentGeneratorSchema,
   type TsApiGeneratorSchema,
@@ -43,10 +44,10 @@ import {
   tsRdbGenerator,
   tsWebsiteAuthGenerator,
   tsWebsiteGenerator,
-} from '../../sdk/ts';
-import { installDependencies } from '../../utils/install';
-import { toSnakeCase } from '../../utils/names';
-import { getNpmScope, getNpmScopePrefix } from '../../utils/npm-scope';
+} from '../../sdk/ts.js';
+import { installDependencies } from '../../utils/install.js';
+import { toSnakeCase } from '../../utils/names.js';
+import { getNpmScope, getNpmScopePrefix } from '../../utils/npm-scope.js';
 import type { InternalTestMatrixGeneratorSchema } from './schema';
 
 /**
@@ -135,6 +136,22 @@ export const internalTestMatrixGenerator = async (
   const tsApis: TsApiGeneratorSchema[] = [
     { name: 'my-api', infra: 'rest-lambda', auth: 'iam', iac: 'inherit' },
     { name: 'my-api-http', infra: 'http-lambda', auth: 'iam', iac: 'inherit' },
+    // The APIs above take the default `isolated` integration pattern; these
+    // cover `shared`.
+    {
+      name: 'my-api-shared',
+      infra: 'rest-lambda',
+      auth: 'iam',
+      integrationPattern: 'shared',
+      iac: 'inherit',
+    },
+    {
+      name: 'my-api-shared-http',
+      infra: 'http-lambda',
+      auth: 'iam',
+      integrationPattern: 'shared',
+      iac: 'inherit',
+    },
     {
       name: 'my-api-cognito',
       infra: 'rest-lambda',
@@ -164,6 +181,13 @@ export const internalTestMatrixGenerator = async (
   for (const api of tsApis) {
     await tsApiGenerator(tree, { ...api, ...projectDefaults });
   }
+
+  // A Smithy shape library; `my-smithy-api` covers consuming one.
+  await smithyProjectGenerator(tree, {
+    name: 'my-shapes',
+    type: 'shapes',
+    ...projectDefaults,
+  });
 
   // Python FastAPI — REST + HTTP, with Cognito and custom auth.
   const pyApis: PyApiGeneratorSchema[] = [
@@ -230,6 +254,22 @@ export const internalTestMatrixGenerator = async (
     iac: 'inherit',
     ...defaults,
   });
+  // Container-packaged variants, so both packagings are covered and a workspace
+  // mixing them vends one copy of the shared runtime module.
+  await tsMcpServerGenerator(tree, {
+    project: 'ts-project',
+    name: 'ecr-mcp-server',
+    infra: 'agentcore-ecr',
+    iac: 'inherit',
+    ...defaults,
+  });
+  await pyMcpServerGenerator(tree, {
+    project: 'py_project',
+    name: 'ecr-mcp-server',
+    infra: 'agentcore-ecr',
+    iac: 'inherit',
+    ...defaults,
+  });
 
   // OAuth DCR proxy for Cognito-authenticated MCP servers.
   await tsDcrProxyGenerator(tree, {
@@ -248,6 +288,12 @@ export const internalTestMatrixGenerator = async (
       iac: 'inherit',
     },
     { project: 'ts-project', infra: 'agentcore', iac: 'inherit' },
+    {
+      project: 'ts-project',
+      name: 'my-ts-ecr-agent',
+      infra: 'agentcore-ecr',
+      iac: 'inherit',
+    },
     {
       project: 'ts-project',
       name: 'my-ts-a2a-agent',
@@ -283,6 +329,12 @@ export const internalTestMatrixGenerator = async (
       project: 'py_project',
       name: 'my-agent',
       infra: 'agentcore',
+      iac: 'inherit',
+    },
+    {
+      project: 'py_project',
+      name: 'my-py-ecr-agent',
+      infra: 'agentcore-ecr',
       iac: 'inherit',
     },
     {
@@ -369,6 +421,7 @@ export const internalTestMatrixGenerator = async (
   // under each auth mode the api supports.
   await agentcoreHarnessGenerator(tree, {
     name: 'my-harness',
+    infra: 'agentcore',
     iac: 'inherit',
     ...projectDefaults,
   });

@@ -10,30 +10,30 @@ import {
   OverwriteStrategy,
   type Tree,
 } from '@nx/devkit';
-import { getTsLibDetails } from '../../ts/lib/generator';
-import { addTsDependencies } from '../../utils/add-dependencies';
+import { getTsLibDetails } from '../../ts/lib/generator.js';
+import { addTsDependencies } from '../../utils/add-dependencies.js';
 import {
   declareDependencies,
   ownedElsewhere,
-} from '../../utils/declared-dependencies';
-import { formatFilesInSubtree } from '../../utils/format';
-import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs';
-import { installDependencies } from '../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { toClassName, toKebabCase } from '../../utils/names';
-import { getNpmScope } from '../../utils/npm-scope';
+} from '../../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../../utils/format.js';
+import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs.js';
+import { installDependencies } from '../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
+import { toClassName, toKebabCase } from '../../utils/names.js';
+import { getNpmScope } from '../../utils/npm-scope.js';
 import {
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   projectExists,
-} from '../../utils/nx';
-import { getRelativePathToRootByDirectory } from '../../utils/paths';
+} from '../../utils/nx.js';
+import { getRelativePathToRootByDirectory } from '../../utils/paths.js';
 import {
   smithyCliCommand,
   smithyMavenVersions,
   warnIfSmithyMissing,
-} from '../../utils/smithy';
+} from '../../utils/smithy.js';
 import type { SmithyProjectGeneratorSchema } from './schema';
 
 /** The metadata this generator records, which its predicates read. */
@@ -213,6 +213,12 @@ export const smithyProjectGenerator = async (
       projectType: 'library',
       targets: {
         build: {
+          dependsOn:
+            type === 'shapes' ? ['compile'] : ['compile', 'generate-ssdk'],
+        },
+        // Everything this project's build does is artifact production, so
+        // `assemble` carries the same dependencies.
+        assemble: {
           dependsOn:
             type === 'shapes' ? ['compile'] : ['compile', 'generate-ssdk'],
         },

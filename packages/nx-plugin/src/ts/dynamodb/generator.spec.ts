@@ -3,19 +3,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import { resolveContainers } from '../../utils/containers';
-import { declareDependencies } from '../../utils/declared-dependencies';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
-import { readProjectConfigurationUnqualified } from '../../utils/nx';
+import { resolveContainers } from '../../utils/containers.js';
+import { declareDependencies } from '../../utils/declared-dependencies.js';
+import { expectHasMetricTags } from '../../utils/metrics.spec.js';
+import { readProjectConfigurationUnqualified } from '../../utils/nx.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../utils/shared-constructs';
+} from '../../utils/shared-constructs.js';
 import {
   createTreeUsingTsSolutionSetup,
   snapshotTreeDir,
-} from '../../utils/test';
-import { TS_DYNAMODB_GENERATOR_INFO, tsDynamoDBGenerator } from './generator';
+} from '../../utils/test.js';
+import {
+  TS_DYNAMODB_GENERATOR_INFO,
+  tsDynamoDBGenerator,
+} from './generator.js';
 
 const sharedConstructsDeclaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
@@ -79,6 +82,7 @@ describe('ts#dynamodb generator', () => {
     });
     expect(projectConfig.targets['dev']).toEqual({
       executor: 'nx:run-commands',
+      dependsOn: ['pull-image'],
       continuous: true,
       options: {
         commands: [
@@ -154,6 +158,29 @@ describe('ts#dynamodb generator', () => {
     expect(sharedTerraformConfig.targets.build.dependsOn).toContain(
       '@proj/my-table:build',
     );
+  });
+
+  it('should protect the table and its key from destruction in terraform', async () => {
+    await tsDynamoDBGenerator(tree, {
+      ...defaultOptions,
+      iac: 'terraform',
+    });
+
+    const dynamodb = tree.read(
+      'packages/common/terraform/src/core/dynamodb/dynamodb.tf',
+      'utf-8',
+    );
+
+    // Terraform-side guard, independent of the DynamoDB-side
+    // deletion_protection_enabled flag, so clearing that variable alone cannot
+    // destroy the table. It must be a literal — prevent_destroy cannot
+    // reference a variable.
+    expect(dynamodb).toContain('prevent_destroy = true');
+
+    // The maximum KMS pending window, matching the CDK default, so a
+    // point-in-time restore of the table stays possible for as long as
+    // possible.
+    expect(dynamodb).toContain('deletion_window_in_days = 30');
   });
 
   it('should keep an existing dynamodb app construct', async () => {
@@ -249,6 +276,21 @@ describe('ts#dynamodb generator', () => {
     expect(buildDeps.filter((d) => d === '@proj/my-table:build')).toHaveLength(
       1,
     );
+  });
+
+  it('should place the project in a subDirectory when provided', async () => {
+    await tsDynamoDBGenerator(tree, {
+      ...defaultOptions,
+      subDirectory: 'nested',
+    });
+
+    const projectConfig = readProjectConfigurationUnqualified(
+      tree,
+      '@proj/my-table',
+    );
+    expect(projectConfig.root).toBe('packages/nested');
+    expect(tree.exists('packages/nested/package.json')).toBe(true);
+    expect(tree.exists('packages/my-table/package.json')).toBe(false);
   });
 
   it('should use custom tableName when provided', async () => {

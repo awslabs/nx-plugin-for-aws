@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { IacOption } from '../../utils/iac';
+import { IacOption } from '../../utils/iac.js';
 
 type EventSource =
   | 'Any'
@@ -20,7 +20,7 @@ type EventSource =
   | 'CloudFormationCustomResourceCreateModel'
   | 'CloudFormationCustomResourceUpdateModel'
   | 'CloudFormationCustomResourceDeleteModel'
-  | 'CloudwatchLogsModel'
+  | 'CloudWatchLogsModel'
   | 'DynamoDBStreamModel'
   | 'EventBridgeModel'
   | 'IoTCoreThingEvent'

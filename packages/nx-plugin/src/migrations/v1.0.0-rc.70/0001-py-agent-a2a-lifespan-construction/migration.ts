@@ -9,15 +9,15 @@ import {
   type Tree,
   visitNotIgnoredFiles,
 } from '@nx/devkit';
-import { PY_AGENT_GENERATOR_INFO } from '../../../py/agent/generator';
+import { PY_AGENT_GENERATOR_INFO } from '../../../py/agent/generator.js';
 import {
   addPythonDestructuredImport,
   applyGritQL,
   captureGritQLVariable,
   matchGritQL,
-} from '../../../utils/ast';
-import { formatFilesInSubtree } from '../../../utils/format';
-import type { ComponentMetadata } from '../../../utils/nx';
+} from '../../../utils/ast.js';
+import { formatFilesInSubtree } from '../../../utils/format.js';
+import type { ComponentMetadata } from '../../../utils/nx.js';
 
 /**
  * Move py#agent A2A agent construction (Strands and LangChain) out of module

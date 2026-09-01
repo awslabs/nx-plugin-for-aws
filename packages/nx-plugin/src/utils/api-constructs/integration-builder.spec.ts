@@ -5,8 +5,8 @@
 import type { Tree } from '@nx/devkit';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { createTreeUsingTsSolutionSetup } from '../test';
-import { TypeScriptVerifier } from '../test/ts.spec';
+import { TypeScriptVerifier } from '../test/ts.spec.js';
+import { createTreeUsingTsSolutionSetup } from '../test.js';
 
 /**
  * These tests verify the type-safety of the generated IntegrationBuilder, in particular

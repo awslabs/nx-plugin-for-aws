@@ -13,72 +13,72 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { AGENTCORE_GATEWAY_GATEWAY_CONNECTION_GENERATOR_INFO } from '../../../agentcore-gateway/gateway-connection/generator';
-import { AGENTCORE_GATEWAY_GENERATOR_INFO } from '../../../agentcore-gateway/generator';
-import { AGENTCORE_GATEWAY_MCP_CONNECTION_GENERATOR_INFO } from '../../../agentcore-gateway/mcp-connection/generator';
-import { PY_AGENT_A2A_CONNECTION_GENERATOR_INFO } from '../../../py/agent/a2a-connection/generator';
-import { PY_AGENT_GATEWAY_CONNECTION_GENERATOR_INFO } from '../../../py/agent/gateway-connection/generator';
-import { PY_AGENT_GENERATOR_INFO } from '../../../py/agent/generator';
-import { PY_AGENT_MCP_CONNECTION_GENERATOR_INFO } from '../../../py/agent/mcp-connection/generator';
-import { PY_AGENT_REACT_CONNECTION_GENERATOR_INFO } from '../../../py/agent/react-connection/generator';
-import { PY_DYNAMODB_AGENT_CONNECTION_GENERATOR_INFO } from '../../../py/dynamodb/agent-connection/generator';
-import { PY_DYNAMODB_FAST_API_CONNECTION_GENERATOR_INFO } from '../../../py/dynamodb/fast-api-connection/generator';
-import { PY_DYNAMODB_GENERATOR_INFO } from '../../../py/dynamodb/generator';
-import { PY_DYNAMODB_MCP_SERVER_CONNECTION_GENERATOR_INFO } from '../../../py/dynamodb/mcp-server-connection/generator';
-import { FAST_API_GENERATOR_INFO } from '../../../py/fast-api/generator';
-import { FAST_API_REACT_GENERATOR_INFO } from '../../../py/fast-api/react/generator';
-import { LAMBDA_FUNCTION_GENERATOR_INFO as PY_LAMBDA_FUNCTION_GENERATOR_INFO } from '../../../py/lambda-function/generator';
-import { PY_MCP_SERVER_GENERATOR_INFO } from '../../../py/mcp-server/generator';
-import { PY_RDB_AGENT_CONNECTION_GENERATOR_INFO } from '../../../py/rdb/agent-connection/generator';
-import { PY_RDB_FAST_API_CONNECTION_GENERATOR_INFO } from '../../../py/rdb/fast-api-connection/generator';
-import { PY_RDB_GENERATOR_INFO } from '../../../py/rdb/generator';
-import { PY_RDB_MCP_SERVER_CONNECTION_GENERATOR_INFO } from '../../../py/rdb/mcp-server-connection/generator';
-import { SMITHY_PROJECT_GENERATOR_INFO } from '../../../smithy/project/generator';
-import { SMITHY_REACT_CONNECTION_GENERATOR_INFO } from '../../../smithy/react-connection/generator';
-import { TS_SMITHY_API_GENERATOR_INFO } from '../../../smithy/ts/api/generator';
-import { TRPC_BACKEND_GENERATOR_INFO } from '../../../trpc/backend/generator';
-import { TRPC_REACT_GENERATOR_INFO } from '../../../trpc/react/generator';
-import { TS_AGENT_A2A_CONNECTION_GENERATOR_INFO } from '../../../ts/agent/a2a-connection/generator';
-import { TS_AGENT_GATEWAY_CONNECTION_GENERATOR_INFO } from '../../../ts/agent/gateway-connection/generator';
-import { TS_AGENT_GENERATOR_INFO } from '../../../ts/agent/generator';
-import { TS_AGENT_MCP_CONNECTION_GENERATOR_INFO } from '../../../ts/agent/mcp-connection/generator';
-import { TS_AGENT_REACT_CONNECTION_GENERATOR_INFO } from '../../../ts/agent/react-connection/generator';
-import { TS_DCR_PROXY_GENERATOR_INFO } from '../../../ts/dcr-proxy/generator';
-import { TS_DYNAMODB_AGENT_CONNECTION_GENERATOR_INFO } from '../../../ts/dynamodb/agent-connection/generator';
-import { TS_DYNAMODB_GENERATOR_INFO } from '../../../ts/dynamodb/generator';
-import { TS_DYNAMODB_MCP_SERVER_CONNECTION_GENERATOR_INFO } from '../../../ts/dynamodb/mcp-server-connection/generator';
-import { TS_DYNAMODB_SMITHY_CONNECTION_GENERATOR_INFO } from '../../../ts/dynamodb/smithy-connection/generator';
-import { TS_DYNAMODB_TRPC_CONNECTION_GENERATOR_INFO } from '../../../ts/dynamodb/trpc-connection/generator';
-import { TS_LAMBDA_FUNCTION_GENERATOR_INFO } from '../../../ts/lambda-function/generator';
-import { TS_LIB_GENERATOR_INFO } from '../../../ts/lib/generator';
-import { TS_MCP_SERVER_GENERATOR_INFO } from '../../../ts/mcp-server/generator';
-import { TS_RDB_AGENT_CONNECTION_GENERATOR_INFO } from '../../../ts/rdb/agent-connection/generator';
-import { TS_RDB_GENERATOR_INFO } from '../../../ts/rdb/generator';
-import { TS_RDB_MCP_SERVER_CONNECTION_GENERATOR_INFO } from '../../../ts/rdb/mcp-server-connection/generator';
-import { TS_RDB_SMITHY_CONNECTION_GENERATOR_INFO } from '../../../ts/rdb/smithy-connection/generator';
-import { TS_RDB_TRPC_CONNECTION_GENERATOR_INFO } from '../../../ts/rdb/trpc-connection/generator';
-import { REACT_WEBSITE_APP_GENERATOR_INFO } from '../../../ts/react-website/app/generator';
-import { COGNITO_AUTH_GENERATOR_INFO } from '../../../ts/react-website/cognito-auth/generator';
+import { AGENTCORE_GATEWAY_GATEWAY_CONNECTION_GENERATOR_INFO } from '../../../agentcore-gateway/gateway-connection/generator.js';
+import { AGENTCORE_GATEWAY_GENERATOR_INFO } from '../../../agentcore-gateway/generator.js';
+import { AGENTCORE_GATEWAY_MCP_CONNECTION_GENERATOR_INFO } from '../../../agentcore-gateway/mcp-connection/generator.js';
+import { PY_AGENT_A2A_CONNECTION_GENERATOR_INFO } from '../../../py/agent/a2a-connection/generator.js';
+import { PY_AGENT_GATEWAY_CONNECTION_GENERATOR_INFO } from '../../../py/agent/gateway-connection/generator.js';
+import { PY_AGENT_GENERATOR_INFO } from '../../../py/agent/generator.js';
+import { PY_AGENT_MCP_CONNECTION_GENERATOR_INFO } from '../../../py/agent/mcp-connection/generator.js';
+import { PY_AGENT_REACT_CONNECTION_GENERATOR_INFO } from '../../../py/agent/react-connection/generator.js';
+import { PY_DYNAMODB_AGENT_CONNECTION_GENERATOR_INFO } from '../../../py/dynamodb/agent-connection/generator.js';
+import { PY_DYNAMODB_FAST_API_CONNECTION_GENERATOR_INFO } from '../../../py/dynamodb/fast-api-connection/generator.js';
+import { PY_DYNAMODB_GENERATOR_INFO } from '../../../py/dynamodb/generator.js';
+import { PY_DYNAMODB_MCP_SERVER_CONNECTION_GENERATOR_INFO } from '../../../py/dynamodb/mcp-server-connection/generator.js';
+import { FAST_API_GENERATOR_INFO } from '../../../py/fast-api/generator.js';
+import { FAST_API_REACT_GENERATOR_INFO } from '../../../py/fast-api/react/generator.js';
+import { LAMBDA_FUNCTION_GENERATOR_INFO as PY_LAMBDA_FUNCTION_GENERATOR_INFO } from '../../../py/lambda-function/generator.js';
+import { PY_MCP_SERVER_GENERATOR_INFO } from '../../../py/mcp-server/generator.js';
+import { PY_RDB_AGENT_CONNECTION_GENERATOR_INFO } from '../../../py/rdb/agent-connection/generator.js';
+import { PY_RDB_FAST_API_CONNECTION_GENERATOR_INFO } from '../../../py/rdb/fast-api-connection/generator.js';
+import { PY_RDB_GENERATOR_INFO } from '../../../py/rdb/generator.js';
+import { PY_RDB_MCP_SERVER_CONNECTION_GENERATOR_INFO } from '../../../py/rdb/mcp-server-connection/generator.js';
+import { SMITHY_PROJECT_GENERATOR_INFO } from '../../../smithy/project/generator.js';
+import { SMITHY_REACT_CONNECTION_GENERATOR_INFO } from '../../../smithy/react-connection/generator.js';
+import { TS_SMITHY_API_GENERATOR_INFO } from '../../../smithy/ts/api/generator.js';
+import { TRPC_BACKEND_GENERATOR_INFO } from '../../../trpc/backend/generator.js';
+import { TRPC_REACT_GENERATOR_INFO } from '../../../trpc/react/generator.js';
+import { TS_AGENT_A2A_CONNECTION_GENERATOR_INFO } from '../../../ts/agent/a2a-connection/generator.js';
+import { TS_AGENT_GATEWAY_CONNECTION_GENERATOR_INFO } from '../../../ts/agent/gateway-connection/generator.js';
+import { TS_AGENT_GENERATOR_INFO } from '../../../ts/agent/generator.js';
+import { TS_AGENT_MCP_CONNECTION_GENERATOR_INFO } from '../../../ts/agent/mcp-connection/generator.js';
+import { TS_AGENT_REACT_CONNECTION_GENERATOR_INFO } from '../../../ts/agent/react-connection/generator.js';
+import { TS_DCR_PROXY_GENERATOR_INFO } from '../../../ts/dcr-proxy/generator.js';
+import { TS_DYNAMODB_AGENT_CONNECTION_GENERATOR_INFO } from '../../../ts/dynamodb/agent-connection/generator.js';
+import { TS_DYNAMODB_GENERATOR_INFO } from '../../../ts/dynamodb/generator.js';
+import { TS_DYNAMODB_MCP_SERVER_CONNECTION_GENERATOR_INFO } from '../../../ts/dynamodb/mcp-server-connection/generator.js';
+import { TS_DYNAMODB_SMITHY_CONNECTION_GENERATOR_INFO } from '../../../ts/dynamodb/smithy-connection/generator.js';
+import { TS_DYNAMODB_TRPC_CONNECTION_GENERATOR_INFO } from '../../../ts/dynamodb/trpc-connection/generator.js';
+import { TS_LAMBDA_FUNCTION_GENERATOR_INFO } from '../../../ts/lambda-function/generator.js';
+import { TS_LIB_GENERATOR_INFO } from '../../../ts/lib/generator.js';
+import { TS_MCP_SERVER_GENERATOR_INFO } from '../../../ts/mcp-server/generator.js';
+import { TS_RDB_AGENT_CONNECTION_GENERATOR_INFO } from '../../../ts/rdb/agent-connection/generator.js';
+import { TS_RDB_GENERATOR_INFO } from '../../../ts/rdb/generator.js';
+import { TS_RDB_MCP_SERVER_CONNECTION_GENERATOR_INFO } from '../../../ts/rdb/mcp-server-connection/generator.js';
+import { TS_RDB_SMITHY_CONNECTION_GENERATOR_INFO } from '../../../ts/rdb/smithy-connection/generator.js';
+import { TS_RDB_TRPC_CONNECTION_GENERATOR_INFO } from '../../../ts/rdb/trpc-connection/generator.js';
+import { REACT_WEBSITE_APP_GENERATOR_INFO } from '../../../ts/react-website/app/generator.js';
+import { COGNITO_AUTH_GENERATOR_INFO } from '../../../ts/react-website/cognito-auth/generator.js';
 import {
   PY_CLIENT_NAMING,
   resolveAgentFramework,
-} from '../../../utils/agent-connection/agent-connection';
-import { matchGritQL } from '../../../utils/ast';
-import { DCR_PROXY_HANDLERS } from '../../../utils/dcr-proxy-constructs/dcr-proxy-constructs';
-import { formatFilesInSubtree } from '../../../utils/format';
+} from '../../../utils/agent-connection/agent-connection.js';
+import { matchGritQL } from '../../../utils/ast.js';
+import { DCR_PROXY_HANDLERS } from '../../../utils/dcr-proxy-constructs/dcr-proxy-constructs.js';
+import { formatFilesInSubtree } from '../../../utils/format.js';
 import {
   camelCase,
   kebabCase,
   pascalCase,
   toClassName,
   toSnakeCase,
-} from '../../../utils/names';
-import type { ComponentMetadata } from '../../../utils/nx';
+} from '../../../utils/names.js';
+import type { ComponentMetadata } from '../../../utils/nx.js';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
-} from '../../../utils/shared-constructs-constants';
+} from '../../../utils/shared-constructs-constants.js';
 
 /**
  * Backfill the project metadata the version sync reads.

@@ -3,15 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { type Tree, updateProjectConfiguration } from '@nx/devkit';
-import { formatFilesInSubtree } from '../../../utils/format';
-import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
+import { formatFilesInSubtree } from '../../../utils/format.js';
+import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics.js';
 import {
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
-} from '../../../utils/nx';
+} from '../../../utils/nx.js';
 import type { TsDynamoDBMcpServerConnectionGeneratorSchema } from './schema';
 
 export const TS_DYNAMODB_MCP_SERVER_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =

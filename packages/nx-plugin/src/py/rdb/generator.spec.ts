@@ -3,20 +3,24 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import { resolveContainers } from '../../utils/containers';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
-import { readProjectConfigurationUnqualified } from '../../utils/nx';
-import { sharedConstructsGenerator } from '../../utils/shared-constructs';
+import { resolveContainers } from '../../utils/containers.js';
+import { expectHasMetricTags } from '../../utils/metrics.spec.js';
+import { readProjectConfigurationUnqualified } from '../../utils/nx.js';
+import { sharedConstructsGenerator } from '../../utils/shared-constructs.js';
 import {
   createTreeUsingTsSolutionSetup,
   snapshotTreeDir,
-} from '../../utils/test';
-import { CONTAINER_VERSIONS, withPyVersions } from '../../utils/versions';
+} from '../../utils/test.js';
+import {
+  CONTAINER_VERSIONS,
+  LAMBDA_RUNTIME_VERSIONS,
+  withPyVersions,
+} from '../../utils/versions.js';
 import {
   DEPENDENCIES,
   PY_RDB_GENERATOR_INFO,
   pyRdbGenerator,
-} from './generator';
+} from './generator.js';
 
 vi.mock('../../utils/containers', () => ({
   resolveContainers: vi.fn(),
@@ -72,13 +76,13 @@ describe('py#rdb generator', () => {
 
     expect(projectConfig.targets['bundle-arm']).toEqual({
       cache: true,
-      inputs: ['default', '^production'],
+      inputs: ['production', '^production'],
       executor: 'nx:run-commands',
       outputs: ['{workspaceRoot}/dist/{projectRoot}/bundle-arm'],
       options: {
         commands: [
           'uv export --frozen --no-dev --no-editable --project {projectRoot} --package proj.db -o dist/{projectRoot}/bundle-arm/requirements.txt',
-          'uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform aarch64-manylinux_2_28 --target dist/{projectRoot}/bundle-arm -r dist/{projectRoot}/bundle-arm/requirements.txt',
+          `uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform aarch64-manylinux_2_28 --python-version ${LAMBDA_RUNTIME_VERSIONS.python} --target dist/{projectRoot}/bundle-arm -r dist/{projectRoot}/bundle-arm/requirements.txt`,
         ],
         parallel: false,
       },
@@ -86,6 +90,7 @@ describe('py#rdb generator', () => {
     });
     expect(projectConfig.targets['bundle-migration']).toEqual({
       cache: true,
+      inputs: ['default'],
       outputs: ['{workspaceRoot}/dist/{projectRoot}/docker/migration'],
       executor: 'nx:run-commands',
       options: {
@@ -103,6 +108,7 @@ describe('py#rdb generator', () => {
     });
     expect(projectConfig.targets['bundle-create-db-user']).toEqual({
       cache: true,
+      inputs: ['default'],
       outputs: ['{workspaceRoot}/dist/{projectRoot}/docker/create-db-user'],
       executor: 'nx:run-commands',
       options: {
@@ -194,7 +200,7 @@ describe('py#rdb generator', () => {
     ).toMatchSnapshot();
     const projectConfig = readProjectConfigurationUnqualified(tree, 'proj.db');
     expect(projectConfig.targets.docker).toEqual({
-      cache: true,
+      cache: false,
       executor: 'nx:run-commands',
       options: {
         commands: [
@@ -207,10 +213,9 @@ describe('py#rdb generator', () => {
     });
     expect(projectConfig.targets.build.dependsOn).toContain('docker');
 
-    // Check that a cacheable trivy scan target was added covering both images
+    // Check that a non-cacheable trivy scan target was added covering both images
     expect(projectConfig.targets.trivy).toEqual({
-      cache: true,
-      inputs: ['default', '^production'],
+      cache: false,
       outputs: [
         '{workspaceRoot}/dist/packages/db/trivy/proj-db-migration-latest',
       ],
@@ -231,6 +236,34 @@ describe('py#rdb generator', () => {
     });
     // Trivy is not wired into build (its result depends on the vulnerability DB).
     expect(projectConfig.targets.build.dependsOn ?? []).not.toContain('trivy');
+  });
+
+  it('should host both database images in the shared asset registry', async () => {
+    await pyRdbGenerator(tree, { ...defaultOptions, iac: 'terraform' });
+
+    const dbModule = tree.read(
+      'packages/common/terraform/src/app/dbs/db/db.tf',
+      'utf-8',
+    );
+
+    // SQLModel databases publish two images, both to the one shared registry.
+    expect(dbModule).toContain('variable "asset_ecr_repository_url"');
+    expect(dbModule).not.toContain('aws_ecr_repository');
+    expect(dbModule).toContain(
+      'image_uri     = "${var.asset_ecr_repository_url}:${local.image_tag}"',
+    );
+    expect(dbModule).toContain(
+      'image_uri     = "${var.asset_ecr_repository_url}:${local.create_db_user_image_tag}"',
+    );
+
+    // Sharing one repository means the two images' tags must not collide, so
+    // each namespaces its content-addressed tag with the handler it holds.
+    expect(dbModule).toContain(
+      'image_tag = "db-migration-${replace(data.external.docker_digest.result.digest, "sha256:", "")}"',
+    );
+    expect(dbModule).toContain(
+      'create_db_user_image_tag = "db-create-db-user-${replace(data.external.create_db_user_docker_digest.result.digest, "sha256:", "")}"',
+    );
   });
 
   it('should generate local database support without infrastructure', async () => {

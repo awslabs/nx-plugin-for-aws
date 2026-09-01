@@ -94,7 +94,7 @@ const harness = new MyHarness(this, 'MyHarness', {
 
 构造还接受：
 
-- `allowedTools` — Harness 可以使用的工具。除非您提供工具，否则 Harness 部署时不带任何工具，请参阅<a href="#configuring-tools">配置工具</a>。
+- `allowedTools` — Harness 可以使用的工具。默认为无，请参阅<a href="#configuring-tools">配置工具</a>。
 - `executionRole` — 要使用的现有 IAM 角色，而不是生成的角色。提供的角色按原样使用：不会向其添加基线权限，其 ARN 始终提供给 Harness（原始 `executionRoleArn` 字符串无法被覆盖）。
 - `modelResourceArns` — 生成的执行角色可以调用的 Bedrock 模型和推理配置文件 ARN，替换默认列表。
 - `vpc`、`vpcSubnets` 和 `securityGroups` — 在 VPC 中运行 Harness，以便它可以访问私有资源，请参阅<a href="#running-in-a-vpc">在 VPC 中运行</a>。
@@ -112,15 +112,21 @@ module "my_harness" {
 }
 ```
 
-该模块公开三个变量：
+该模块公开以下变量：
 
 - `model_id` — Harness 默认使用的 Bedrock 模型或推理配置文件。
-- `model_resource_arns` — 执行角色可以调用的 Bedrock 模型和推理配置文件 ARN，替换默认列表。
-- `additional_execution_role_policy_statements` — 附加到执行角色策略的 IAM 语句对象列表（`Effect`、`Action`、`Resource`、可选的 `Sid` 和 `Condition`）。
+- `allowed_tools` — Harness 可以使用的工具。默认为无，请参阅<a href="#configuring-tools">配置工具</a>。
+- `memory` — Harness 内存配置，请参阅<a href="#configuring-memory">配置内存</a>。
+- `environment_variables`、`max_iterations`、`timeout_seconds` — 相应的原生 Harness 字段。
+- `execution_role_arn` — 要使用的现有 IAM 角色，而不是生成的角色。提供的角色按原样使用：既不创建角色也不创建其基线策略，因此 `model_resource_arns` 和 `additional_execution_role_policy_statements` 不能与其组合使用。
+- `model_resource_arns` — 生成的执行角色可以调用的 Bedrock 模型和推理配置文件 ARN，替换默认列表。
+- `additional_execution_role_policy_statements` — 附加到生成的执行角色策略的 IAM 语句对象列表（`Effect`、`Action`、`Resource`、可选的 `Sid` 和 `Condition`）。
+- `enable_vpc`、`vpc_id`、`subnet_ids` — 在 VPC 中运行 Harness，以便它可以访问私有资源，请参阅<a href="#running-in-a-vpc">在 VPC 中运行</a>。
+- `tags` — 应用于模块创建的资源的标签。
 
-其他所有内容都在模块本身生成的 `aws_bedrockagentcore_harness` 资源上配置。
+其他提供程序原生字段通过编辑模块本身生成的 `aws_bedrockagentcore_harness` 资源进行配置，请参阅<a href="#customizing-your-harness">自定义您的 Harness</a>。
 
-该模块输出 `harness_id`、`harness_arn` 和 `execution_role_arn`。
+该模块输出 `harness_id`、`harness_arn`、`execution_role_arn` 和 `security_group_id`。
 
 像往常一样使用 Terraform 项目的 plan/apply 工作流进行部署 — 请参阅 <Link path="guides/terraform-project">Terraform 项目指南</Link>。
   </Fragment>
@@ -196,7 +202,7 @@ Harness ARN 按以下顺序解析：
 固定的 `aws-cdk-lib/aws-bedrockagentcore` 模块的每个原生 Harness 属性都可以通过构造的 props 使用 — 备用模型提供程序、工具定义、内存、技能、环境配置、截断、自定义 JWT 授权和执行限制 — 显式 props 优先于生成的默认值。或者，编辑 `packages/common/constructs/src/app/harnesses/<name>/<name>.ts` 中生成的构造。
   </Fragment>
   <Fragment slot="terraform">
-生成的模块保持原生 `aws_bedrockagentcore_harness` 资源直接可编辑，因此提供程序原生字段 — 备用模型提供程序（`gemini_model_config`、`openai_model_config`）、`tool` 块、`memory`、`skill` 块、环境（`environment`、`environment_variables`、`environment_artifact`）、`truncation` 和带有 `custom_jwt_authorizer` 的 `authorizer_configuration` — 通过编辑 `packages/common/terraform/src/app/harnesses/<name>/<name>.tf` 进行配置。
+该模块的变量涵盖了大多数部署配置的字段 — `model_id`、`allowed_tools`、`memory`、`environment_variables`、`max_iterations`、`timeout_seconds` — 以及执行角色和 VPC 放置。Terraform 没有与 CDK 构造的 prop 展开等效的功能，因此其余提供程序原生字段通过编辑 `packages/common/terraform/src/app/harnesses/<name>/<name>.tf` 中的 `aws_bedrockagentcore_harness` 资源进行配置：备用模型提供程序（`gemini_model_config`、`openai_model_config`）、`tool` 块、`skill` 块、`environment_artifact`、`environment` 下的文件系统和生命周期配置、`truncation` 以及带有 `custom_jwt_authorizer` 的 `authorizer_configuration`。
   </Fragment>
 </Infrastructure>
 
@@ -213,18 +219,46 @@ new MyHarness(this, 'Harness', { allowedTools: ['@builtin'] });
 ```
   </Fragment>
   <Fragment slot="terraform">
-```hcl title="packages/common/terraform/src/app/harnesses/my-harness/my-harness.tf"
-resource "aws_bedrockagentcore_harness" "this" {
-  # ...
+```hcl title="packages/infra/src/main.tf"
+module "my_harness" {
+  source        = "../../common/terraform/src/app/harnesses/my-harness"
   allowed_tools = ["@builtin"]
 }
 ```
-
-如果您希望在引用模块的位置将其设置为模块参数，请向模块添加 `allowed_tools` 变量。
   </Fragment>
 </Infrastructure>
 
 将 `@builtin` 缩小到特定模式（如 `@builtin/file_operations`）以限制代理循环可以执行的操作。有关可以添加的内置工具，请参阅 [Harness 工具](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-tools.html)。
+
+### 配置内存
+
+默认情况下，该服务为 Harness 提供托管内存，并且生成的执行角色被授予访问权限 — 范围限定为服务分配的内存 ARN，并且仅在 Harness 使用基础设施创建的托管内存时授予。显式配置内存以调整该托管内存、将 Harness 指向您拥有的内存资源或关闭内存：
+
+<Infrastructure>
+  <Fragment slot="cdk">
+```ts
+new MyHarness(this, 'MyHarness', {
+  memory: { managedMemoryConfiguration: { strategies: ['SUMMARIZATION'] } },
+});
+```
+
+提供 `memory` 会完全替换默认的托管内存，因此构造会从执行角色中省略内存授权：使用 `addToRolePolicy` 添加配置所需的任何内容。
+  </Fragment>
+  <Fragment slot="terraform">
+```hcl
+module "my_harness" {
+  source = "../../common/terraform/src/app/harnesses/my-harness"
+  memory = {
+    managed_memory_configuration = {
+      strategies = ["SUMMARIZATION"]
+    }
+  }
+}
+```
+
+设置 `managed_memory_configuration`（调整服务的托管内存）、`agentcore_memory_configuration`（使用您拥有的内存资源，通过 ARN）或 `disabled`（无内存）中的一个。选择 `agentcore_memory_configuration` 或 `disabled` 会从执行角色中删除托管内存授权；对于您自己的内存资源，通过 `additional_execution_role_policy_statements` 授予访问权限。
+  </Fragment>
+</Infrastructure>
 
 ### 在 VPC 中运行
 
@@ -241,28 +275,31 @@ database.connections.allowDefaultPortFrom(harness, 'Harness to database');
 Harness 被放置在 VPC 的具有出口的私有子网中，位于为其创建的安全组中。使用 `vpcSubnets` 和 `securityGroups` 覆盖任一项。两者都需要 `vpc`，并且 `connections` 仅在 Harness 在 VPC 中运行时可用。
   </Fragment>
   <Fragment slot="terraform">
-将 `network_configuration` 块添加到生成的 `aws_bedrockagentcore_harness` 资源的 `environment.agent_core_runtime_environment`，然后从其他资源的规则中引用您放置它的安全组：
+将 `enable_vpc` 与 `vpc_id` 和 `subnet_ids` 一起设置，以在 VPC 内运行 Harness，以便它可以访问私有资源（如数据库）：
 
-```hcl title="packages/common/terraform/src/app/harnesses/my-harness/my-harness.tf"
-resource "aws_security_group" "harness" {
-  vpc_id = var.vpc_id
-}
-
-resource "aws_bedrockagentcore_harness" "this" {
-  # ...
-  environment {
-    agent_core_runtime_environment {
-      network_configuration {
-        network_mode = "VPC"
-        network_mode_config {
-          security_groups = [aws_security_group.harness.id]
-          subnets         = var.subnet_ids
-        }
-      }
-    }
-  }
+```hcl
+module "my_harness" {
+  source     = "../../common/terraform/src/app/harnesses/my-harness"
+  enable_vpc = true
+  vpc_id     = var.vpc_id
+  subnet_ids = var.private_subnet_ids
 }
 ```
+
+该模块为 Harness 创建一个安全组，仅允许出站 HTTPS。其 `security_group_id` 输出是 Harness 必须访问的资源在其自己的入站规则中引用的内容：
+
+```hcl
+resource "aws_vpc_security_group_ingress_rule" "harness_to_database" {
+  security_group_id            = aws_security_group.database.id
+  referenced_security_group_id = module.my_harness.security_group_id
+  from_port                    = 5432
+  to_port                      = 5432
+  ip_protocol                  = "tcp"
+  description                  = "Harness to database"
+}
+```
+
+除非 `enable_vpc` 为 true，否则 `security_group_id` 为 null，并且当它为 true 时，`vpc_id` 和 `subnet_ids` 都是必需的。
   </Fragment>
 </Infrastructure>
 

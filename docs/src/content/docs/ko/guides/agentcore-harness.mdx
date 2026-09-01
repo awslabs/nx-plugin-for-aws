@@ -94,7 +94,7 @@ const harness = new MyHarness(this, 'MyHarness', {
 
 구성은 다음도 허용합니다:
 
-- `allowedTools` — Harness가 사용할 수 있는 도구. 제공하지 않으면 Harness는 도구 없이 배포됩니다. <a href="#configuring-tools">도구 구성</a>을 참조하세요.
+- `allowedTools` — Harness가 사용할 수 있는 도구. 기본값은 없음입니다. <a href="#configuring-tools">도구 구성</a>을 참조하세요.
 - `executionRole` — 생성된 역할 대신 사용할 기존 IAM 역할. 제공된 역할은 있는 그대로 사용됩니다: 기본 권한이 추가되지 않으며, 해당 ARN은 항상 Harness에 제공됩니다(원시 `executionRoleArn` 문자열은 재정의할 수 없음).
 - `modelResourceArns` — 생성된 실행 역할이 호출할 수 있는 Bedrock 모델 및 추론 프로필 ARN으로, 기본 목록을 대체합니다.
 - `vpc`, `vpcSubnets` 및 `securityGroups` — VPC에서 Harness를 실행하여 프라이빗 리소스에 도달할 수 있도록 합니다. <a href="#running-in-a-vpc">VPC에서 실행</a>을 참조하세요.
@@ -112,15 +112,21 @@ module "my_harness" {
 }
 ```
 
-모듈은 세 가지 변수를 노출합니다:
+모듈은 다음 변수를 노출합니다:
 
 - `model_id` — Harness가 기본적으로 사용하는 Bedrock 모델 또는 추론 프로필.
-- `model_resource_arns` — 실행 역할이 호출할 수 있는 Bedrock 모델 및 추론 프로필 ARN으로, 기본 목록을 대체합니다.
-- `additional_execution_role_policy_statements` — 실행 역할 정책에 추가되는 IAM 문 객체 목록(`Effect`, `Action`, `Resource`, 선택적 `Sid` 및 `Condition`).
+- `allowed_tools` — Harness가 사용할 수 있는 도구. 기본값은 없음입니다. <a href="#configuring-tools">도구 구성</a>을 참조하세요.
+- `memory` — Harness 메모리 구성. <a href="#configuring-memory">메모리 구성</a>을 참조하세요.
+- `environment_variables`, `max_iterations`, `timeout_seconds` — 해당하는 네이티브 Harness 필드.
+- `execution_role_arn` — 생성된 역할 대신 사용할 기존 IAM 역할. 제공된 역할은 있는 그대로 사용됩니다: 역할과 기본 정책 모두 생성되지 않으므로 `model_resource_arns` 및 `additional_execution_role_policy_statements`와 함께 사용할 수 없습니다.
+- `model_resource_arns` — 생성된 실행 역할이 호출할 수 있는 Bedrock 모델 및 추론 프로필 ARN으로, 기본 목록을 대체합니다.
+- `additional_execution_role_policy_statements` — 생성된 실행 역할 정책에 추가되는 IAM 문 객체 목록(`Effect`, `Action`, `Resource`, 선택적 `Sid` 및 `Condition`).
+- `enable_vpc`, `vpc_id`, `subnet_ids` — VPC에서 Harness를 실행하여 프라이빗 리소스에 도달할 수 있도록 합니다. <a href="#running-in-a-vpc">VPC에서 실행</a>을 참조하세요.
+- `tags` — 모듈이 생성하는 리소스에 적용되는 태그.
 
-그 외의 모든 것은 모듈 자체의 생성된 `aws_bedrockagentcore_harness` 리소스에서 구성됩니다.
+다른 공급자 네이티브 필드는 모듈 자체의 생성된 `aws_bedrockagentcore_harness` 리소스를 편집하여 구성됩니다. <a href="#customizing-your-harness">Harness 사용자 정의</a>를 참조하세요.
 
-모듈은 `harness_id`, `harness_arn`, `execution_role_arn`을 출력합니다.
+모듈은 `harness_id`, `harness_arn`, `execution_role_arn` 및 `security_group_id`를 출력합니다.
 
 평소와 같이 Terraform 프로젝트의 plan/apply 워크플로로 배포하세요 — <Link path="guides/terraform-project">Terraform 프로젝트 가이드</Link>를 참조하세요.
   </Fragment>
@@ -196,7 +202,7 @@ Harness ARN은 다음 순서로 확인됩니다:
 고정된 `aws-cdk-lib/aws-bedrockagentcore` 모듈의 모든 네이티브 Harness 속성은 구성의 props를 통해 사용할 수 있습니다 — 대체 모델 공급자, 도구 정의, 메모리, 스킬, 환경 구성, 잘림, 사용자 정의 JWT 권한 부여 및 실행 제한 — 명시적 props는 생성된 기본값보다 우선합니다. 또는 `packages/common/constructs/src/app/harnesses/<name>/<name>.ts`에서 생성된 구성을 편집하세요.
   </Fragment>
   <Fragment slot="terraform">
-생성된 모듈은 네이티브 `aws_bedrockagentcore_harness` 리소스를 직접 편집 가능하게 유지하므로 공급자 네이티브 필드 — 대체 모델 공급자(`gemini_model_config`, `openai_model_config`), `tool` 블록, `memory`, `skill` 블록, 환경(`environment`, `environment_variables`, `environment_artifact`), `truncation`, `custom_jwt_authorizer`가 있는 `authorizer_configuration` — 은 `packages/common/terraform/src/app/harnesses/<name>/<name>.tf`를 편집하여 구성됩니다.
+모듈의 변수는 대부분의 배포가 구성하는 필드를 다룹니다 — `model_id`, `allowed_tools`, `memory`, `environment_variables`, `max_iterations`, `timeout_seconds` — 그리고 실행 역할 및 VPC 배치. Terraform에는 CDK 구성의 prop spread와 동등한 것이 없으므로 나머지 공급자 네이티브 필드는 `packages/common/terraform/src/app/harnesses/<name>/<name>.tf`의 `aws_bedrockagentcore_harness` 리소스를 편집하여 구성됩니다: 대체 모델 공급자(`gemini_model_config`, `openai_model_config`), `tool` 블록, `skill` 블록, `environment_artifact`, `environment` 아래의 파일 시스템 및 수명 주기 구성, `truncation`, `custom_jwt_authorizer`가 있는 `authorizer_configuration`.
   </Fragment>
 </Infrastructure>
 
@@ -213,18 +219,46 @@ new MyHarness(this, 'Harness', { allowedTools: ['@builtin'] });
 ```
   </Fragment>
   <Fragment slot="terraform">
-```hcl title="packages/common/terraform/src/app/harnesses/my-harness/my-harness.tf"
-resource "aws_bedrockagentcore_harness" "this" {
-  # ...
+```hcl title="packages/infra/src/main.tf"
+module "my_harness" {
+  source        = "../../common/terraform/src/app/harnesses/my-harness"
   allowed_tools = ["@builtin"]
 }
 ```
-
-모듈을 참조하는 곳에서 모듈 인수로 설정하려면 모듈에 `allowed_tools` 변수를 추가하세요.
   </Fragment>
 </Infrastructure>
 
 `@builtin`을 `@builtin/file_operations`와 같은 특정 패턴으로 좁혀 에이전트 루프가 수행할 수 있는 작업을 제한하세요. 추가할 수 있는 내장 도구는 [Harness tools](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-tools.html)를 참조하세요.
+
+### 메모리 구성
+
+서비스는 기본적으로 Harness를 위한 관리형 메모리를 프로비저닝하며, 생성된 실행 역할에는 이에 대한 액세스 권한이 부여됩니다 — 서비스가 할당하는 메모리 ARN으로 범위가 지정되며, Harness가 인프라가 생성한 관리형 메모리를 사용하는 동안에만 부여됩니다. 관리형 메모리를 조정하거나, Harness를 소유한 메모리 리소스로 지정하거나, 메모리를 끄려면 메모리를 명시적으로 구성하세요:
+
+<Infrastructure>
+  <Fragment slot="cdk">
+```ts
+new MyHarness(this, 'MyHarness', {
+  memory: { managedMemoryConfiguration: { strategies: ['SUMMARIZATION'] } },
+});
+```
+
+`memory`를 제공하면 기본 관리형 메모리가 대체되므로 구성은 실행 역할에서 메모리 권한을 제외합니다: 구성에 필요한 것을 `addToRolePolicy`로 추가하세요.
+  </Fragment>
+  <Fragment slot="terraform">
+```hcl
+module "my_harness" {
+  source = "../../common/terraform/src/app/harnesses/my-harness"
+  memory = {
+    managed_memory_configuration = {
+      strategies = ["SUMMARIZATION"]
+    }
+  }
+}
+```
+
+`managed_memory_configuration`(서비스의 관리형 메모리 조정), `agentcore_memory_configuration`(ARN으로 소유한 메모리 리소스 사용) 또는 `disabled`(메모리 없음) 중 정확히 하나를 설정하세요. `agentcore_memory_configuration` 또는 `disabled`를 선택하면 실행 역할에서 관리형 메모리 권한이 제거됩니다. 자체 메모리 리소스의 경우 `additional_execution_role_policy_statements`를 통해 액세스 권한을 부여하세요.
+  </Fragment>
+</Infrastructure>
 
 ### VPC에서 실행
 
@@ -241,28 +275,31 @@ database.connections.allowDefaultPortFrom(harness, 'Harness to database');
 Harness는 VPC의 프라이빗 서브넷에 배치되며, 이를 위해 생성된 보안 그룹에 배치됩니다. `vpcSubnets` 및 `securityGroups`로 둘 중 하나를 재정의할 수 있습니다. 둘 다 `vpc`가 필요하며, `connections`는 Harness가 VPC에서 실행될 때만 사용할 수 있습니다.
   </Fragment>
   <Fragment slot="terraform">
-생성된 `aws_bedrockagentcore_harness` 리소스의 `environment.agent_core_runtime_environment`에 `network_configuration` 블록을 추가한 다음, 다른 리소스의 규칙에서 배치한 보안 그룹을 참조하세요:
+`enable_vpc`를 `vpc_id` 및 `subnet_ids`와 함께 설정하여 VPC 내에서 Harness를 실행하면 데이터베이스와 같은 프라이빗 리소스에 도달할 수 있습니다:
 
-```hcl title="packages/common/terraform/src/app/harnesses/my-harness/my-harness.tf"
-resource "aws_security_group" "harness" {
-  vpc_id = var.vpc_id
-}
-
-resource "aws_bedrockagentcore_harness" "this" {
-  # ...
-  environment {
-    agent_core_runtime_environment {
-      network_configuration {
-        network_mode = "VPC"
-        network_mode_config {
-          security_groups = [aws_security_group.harness.id]
-          subnets         = var.subnet_ids
-        }
-      }
-    }
-  }
+```hcl
+module "my_harness" {
+  source     = "../../common/terraform/src/app/harnesses/my-harness"
+  enable_vpc = true
+  vpc_id     = var.vpc_id
+  subnet_ids = var.private_subnet_ids
 }
 ```
+
+모듈은 Harness를 위한 보안 그룹을 생성하여 아웃바운드 HTTPS만 허용합니다. `security_group_id` 출력은 Harness가 도달해야 하는 리소스가 자체 인그레스 규칙에서 참조하는 것입니다:
+
+```hcl
+resource "aws_vpc_security_group_ingress_rule" "harness_to_database" {
+  security_group_id            = aws_security_group.database.id
+  referenced_security_group_id = module.my_harness.security_group_id
+  from_port                    = 5432
+  to_port                      = 5432
+  ip_protocol                  = "tcp"
+  description                  = "Harness to database"
+}
+```
+
+`security_group_id`는 `enable_vpc`가 true가 아니면 null이며, `vpc_id`와 `subnet_ids`는 true일 때 모두 필요합니다.
   </Fragment>
 </Infrastructure>
 

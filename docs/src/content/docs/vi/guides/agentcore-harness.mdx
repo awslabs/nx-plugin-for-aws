@@ -94,7 +94,7 @@ const harness = new MyHarness(this, 'MyHarness', {
 
 Construct cũng chấp nhận:
 
-- `allowedTools` — các công cụ mà Harness có thể sử dụng. Harness triển khai mà không có công cụ nào trừ khi bạn cung cấp chúng, xem <a href="#configuring-tools">Configuring tools</a>.
+- `allowedTools` — các công cụ mà Harness có thể sử dụng. Mặc định là không có, xem <a href="#configuring-tools">Configuring tools</a>.
 - `executionRole` — một IAM role hiện có để sử dụng thay vì role được tạo. Một role được cung cấp được sử dụng nguyên trạng: các quyền cơ bản không được thêm vào nó, và ARN của nó luôn cung cấp cho Harness (chuỗi `executionRoleArn` thô không thể bị ghi đè).
 - `modelResourceArns` — các ARN của Bedrock model và inference-profile mà execution role được tạo có thể gọi, thay thế danh sách mặc định.
 - `vpc`, `vpcSubnets` và `securityGroups` — chạy Harness trong một VPC để nó có thể tiếp cận các tài nguyên riêng tư, xem <a href="#running-in-a-vpc">Running in a VPC</a>.
@@ -112,15 +112,21 @@ module "my_harness" {
 }
 ```
 
-Module hiển thị ba biến:
+Module hiển thị các biến sau:
 
 - `model_id` — Bedrock model hoặc inference profile mà Harness sử dụng theo mặc định.
-- `model_resource_arns` — các ARN của Bedrock model và inference-profile mà execution role có thể gọi, thay thế danh sách mặc định.
-- `additional_execution_role_policy_statements` — một danh sách các đối tượng IAM statement (`Effect`, `Action`, `Resource`, `Sid` và `Condition` tùy chọn) được thêm vào execution role policy.
+- `allowed_tools` — các công cụ mà Harness có thể sử dụng. Mặc định là không có, xem <a href="#configuring-tools">Configuring tools</a>.
+- `memory` — cấu hình memory của Harness, xem <a href="#configuring-memory">Configuring memory</a>.
+- `environment_variables`, `max_iterations`, `timeout_seconds` — các trường Harness gốc tương ứng.
+- `execution_role_arn` — một IAM role hiện có để sử dụng thay vì role được tạo. Một role được cung cấp được sử dụng nguyên trạng: cả role và baseline policy của nó đều không được tạo, vì vậy `model_resource_arns` và `additional_execution_role_policy_statements` không thể kết hợp với nó.
+- `model_resource_arns` — các ARN của Bedrock model và inference-profile mà execution role được tạo có thể gọi, thay thế danh sách mặc định.
+- `additional_execution_role_policy_statements` — một danh sách các đối tượng IAM statement (`Effect`, `Action`, `Resource`, `Sid` và `Condition` tùy chọn) được thêm vào execution role policy được tạo.
+- `enable_vpc`, `vpc_id`, `subnet_ids` — chạy Harness trong một VPC để nó có thể tiếp cận các tài nguyên riêng tư, xem <a href="#running-in-a-vpc">Running in a VPC</a>.
+- `tags` — các tag được áp dụng cho các tài nguyên mà module tạo ra.
 
-Mọi thứ khác được cấu hình trên tài nguyên `aws_bedrockagentcore_harness` được tạo trong chính module.
+Các trường gốc khác của nhà cung cấp được cấu hình bằng cách chỉnh sửa tài nguyên `aws_bedrockagentcore_harness` được tạo trong chính module, xem <a href="#customizing-your-harness">Customizing your Harness</a>.
 
-Module xuất ra `harness_id`, `harness_arn`, và `execution_role_arn`.
+Module xuất ra `harness_id`, `harness_arn`, `execution_role_arn` và `security_group_id`.
 
 Triển khai với quy trình plan/apply của dự án Terraform của bạn như thường lệ — xem <Link path="guides/terraform-project">hướng dẫn dự án Terraform</Link>.
   </Fragment>
@@ -196,7 +202,7 @@ Nếu không đặt cả hai, script sẽ thất bại với lỗi nêu tên c�
 Mọi thuộc tính Harness gốc của module `aws-cdk-lib/aws-bedrockagentcore` được ghim đều có sẵn thông qua props của construct — các nhà cung cấp model thay thế, định nghĩa công cụ, memory, skills, cấu hình environment, truncation, custom JWT authorization và execution limits — và các props rõ ràng được ưu tiên hơn các giá trị mặc định được tạo. Ngoài ra, chỉnh sửa construct được tạo trong `packages/common/constructs/src/app/harnesses/<name>/<name>.ts`.
   </Fragment>
   <Fragment slot="terraform">
-Module được tạo giữ tài nguyên `aws_bedrockagentcore_harness` gốc có thể chỉnh sửa trực tiếp, vì vậy các trường gốc của nhà cung cấp — các nhà cung cấp model thay thế (`gemini_model_config`, `openai_model_config`), các khối `tool`, `memory`, các khối `skill`, environments (`environment`, `environment_variables`, `environment_artifact`), `truncation`, và `authorizer_configuration` với `custom_jwt_authorizer` — được cấu hình bằng cách chỉnh sửa `packages/common/terraform/src/app/harnesses/<name>/<name>.tf`.
+Các biến của module bao gồm các trường mà hầu hết các triển khai cấu hình — `model_id`, `allowed_tools`, `memory`, `environment_variables`, `max_iterations`, `timeout_seconds` — cộng với execution role và vị trí VPC. Terraform không có tương đương với prop spread của CDK construct, vì vậy các trường gốc còn lại của nhà cung cấp được cấu hình bằng cách chỉnh sửa tài nguyên `aws_bedrockagentcore_harness` trong `packages/common/terraform/src/app/harnesses/<name>/<name>.tf`: các nhà cung cấp model thay thế (`gemini_model_config`, `openai_model_config`), các khối `tool`, các khối `skill`, `environment_artifact`, cấu hình filesystem và lifecycle trong `environment`, `truncation`, và `authorizer_configuration` với `custom_jwt_authorizer`.
   </Fragment>
 </Infrastructure>
 
@@ -213,18 +219,46 @@ new MyHarness(this, 'Harness', { allowedTools: ['@builtin'] });
 ```
   </Fragment>
   <Fragment slot="terraform">
-```hcl title="packages/common/terraform/src/app/harnesses/my-harness/my-harness.tf"
-resource "aws_bedrockagentcore_harness" "this" {
-  # ...
+```hcl title="packages/infra/src/main.tf"
+module "my_harness" {
+  source        = "../../common/terraform/src/app/harnesses/my-harness"
   allowed_tools = ["@builtin"]
 }
 ```
-
-Thêm một biến `allowed_tools` vào module nếu bạn muốn đặt nó làm đối số module nơi bạn tham chiếu module.
   </Fragment>
 </Infrastructure>
 
 Thu hẹp `@builtin` thành các mẫu cụ thể như `@builtin/file_operations` để hạn chế những gì vòng lặp agent có thể làm. Xem [Harness tools](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-tools.html) cho các công cụ tích hợp sẵn mà bạn có thể thêm.
+
+### Cấu hình memory
+
+Dịch vụ cung cấp managed memory cho Harness theo mặc định, và execution role được tạo được cấp quyền truy cập vào nó — giới hạn trong memory ARN mà dịch vụ chỉ định, và chỉ được cấp trong khi Harness sử dụng managed memory mà hạ tầng đã tạo. Cấu hình memory một cách rõ ràng để điều chỉnh managed memory đó, trỏ Harness đến một tài nguyên memory bạn sở hữu, hoặc tắt memory:
+
+<Infrastructure>
+  <Fragment slot="cdk">
+```ts
+new MyHarness(this, 'MyHarness', {
+  memory: { managedMemoryConfiguration: { strategies: ['SUMMARIZATION'] } },
+});
+```
+
+Cung cấp `memory` sẽ thay thế managed memory mặc định, vì vậy construct bỏ qua memory grant khỏi execution role: thêm bất cứ thứ gì mà cấu hình cần với `addToRolePolicy`.
+  </Fragment>
+  <Fragment slot="terraform">
+```hcl
+module "my_harness" {
+  source = "../../common/terraform/src/app/harnesses/my-harness"
+  memory = {
+    managed_memory_configuration = {
+      strategies = ["SUMMARIZATION"]
+    }
+  }
+}
+```
+
+Đặt chính xác một trong `managed_memory_configuration` (điều chỉnh managed memory của dịch vụ), `agentcore_memory_configuration` (sử dụng tài nguyên memory bạn sở hữu, theo ARN) hoặc `disabled` (không có memory). Chọn `agentcore_memory_configuration` hoặc `disabled` sẽ loại bỏ managed-memory grant khỏi execution role; đối với tài nguyên memory của riêng bạn, cấp quyền truy cập thông qua `additional_execution_role_policy_statements`.
+  </Fragment>
+</Infrastructure>
 
 ### Chạy trong một VPC
 
@@ -241,28 +275,31 @@ database.connections.allowDefaultPortFrom(harness, 'Harness to database');
 Harness được đặt trong các subnet riêng tư của VPC với egress, trong một security group được tạo cho nó. Ghi đè một trong hai với `vpcSubnets` và `securityGroups`. Cả hai đều yêu cầu `vpc`, và `connections` chỉ khả dụng khi Harness chạy trong một VPC.
   </Fragment>
   <Fragment slot="terraform">
-Thêm một khối `network_configuration` vào `environment.agent_core_runtime_environment` của tài nguyên `aws_bedrockagentcore_harness` được tạo, sau đó tham chiếu security group mà bạn đặt nó vào từ các quy tắc của các tài nguyên khác của bạn:
+Đặt `enable_vpc` cùng với `vpc_id` và `subnet_ids` để chạy Harness bên trong một VPC, để nó có thể tiếp cận các tài nguyên riêng tư như cơ sở dữ liệu:
 
-```hcl title="packages/common/terraform/src/app/harnesses/my-harness/my-harness.tf"
-resource "aws_security_group" "harness" {
-  vpc_id = var.vpc_id
-}
-
-resource "aws_bedrockagentcore_harness" "this" {
-  # ...
-  environment {
-    agent_core_runtime_environment {
-      network_configuration {
-        network_mode = "VPC"
-        network_mode_config {
-          security_groups = [aws_security_group.harness.id]
-          subnets         = var.subnet_ids
-        }
-      }
-    }
-  }
+```hcl
+module "my_harness" {
+  source     = "../../common/terraform/src/app/harnesses/my-harness"
+  enable_vpc = true
+  vpc_id     = var.vpc_id
+  subnet_ids = var.private_subnet_ids
 }
 ```
+
+Module tạo một security group cho Harness, chỉ cho phép outbound HTTPS. Đầu ra `security_group_id` của nó là những gì các tài nguyên mà Harness phải tiếp cận tham chiếu trong các quy tắc ingress của riêng chúng:
+
+```hcl
+resource "aws_vpc_security_group_ingress_rule" "harness_to_database" {
+  security_group_id            = aws_security_group.database.id
+  referenced_security_group_id = module.my_harness.security_group_id
+  from_port                    = 5432
+  to_port                      = 5432
+  ip_protocol                  = "tcp"
+  description                  = "Harness to database"
+}
+```
+
+`security_group_id` là null trừ khi `enable_vpc` là true, và `vpc_id` và `subnet_ids` đều được yêu cầu khi nó là true.
   </Fragment>
 </Infrastructure>
 

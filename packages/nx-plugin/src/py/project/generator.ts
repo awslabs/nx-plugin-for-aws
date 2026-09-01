@@ -15,32 +15,36 @@ import {
 import {
   addLicenseCheckToLintTarget,
   ensurePythonLicenseCollector,
-} from '../../license/config';
+} from '../../license/config.js';
 import {
   addPyDependencies,
   addTsDependencies,
-} from '../../utils/add-dependencies';
-import { declareDependencies } from '../../utils/declared-dependencies';
-import { updateGitIgnore } from '../../utils/git';
-import { installDependencies } from '../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { normalizeDistributionName, toSnakeCase } from '../../utils/names';
-import { getNpmScope } from '../../utils/npm-scope';
+} from '../../utils/add-dependencies.js';
+import { declareDependencies } from '../../utils/declared-dependencies.js';
+import { updateGitIgnore } from '../../utils/git.js';
+import { installDependencies } from '../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
+import { normalizeDistributionName, toSnakeCase } from '../../utils/names.js';
+import { getNpmScope } from '../../utils/npm-scope.js';
 import {
   addDependencyToTargetIfNotPresent,
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   projectExists,
-} from '../../utils/nx';
-import type { UVPyprojectToml } from '../../utils/nxlv-python';
+} from '../../utils/nx.js';
+import type { UVPyprojectToml } from '../../utils/nxlv-python.js';
 import {
   migrateToSharedVenvGenerator,
   uvProjectGenerator,
-} from '../../utils/nxlv-python';
-import { sortObjectKeys } from '../../utils/object';
-import { updateToml } from '../../utils/toml';
-import { withVersions } from '../../utils/versions';
+} from '../../utils/nxlv-python.js';
+import { sortObjectKeys } from '../../utils/object.js';
+import { updateToml } from '../../utils/toml.js';
+import {
+  pyenvPythonVersion,
+  pyprojectPythonDependency,
+  withVersions,
+} from '../../utils/versions.js';
 import type { PyProjectGeneratorSchema } from './schema';
 
 export const DEPENDENCIES = declareDependencies()({
@@ -72,6 +76,45 @@ const PYTHON_TRANSIENT_ARTIFACTS = [
   'pytest-cache-files-*',
   '.ruff_cache',
 ];
+
+// Python test files, excluded from the `production` named input so that editing
+// a test does not invalidate targets whose output cannot contain it.
+//
+// Anchored to the `tests` directory, which is where the generated project puts
+// them and the only path the build excludes (`ignorePaths` is matched against
+// the project root's top-level entries). An unanchored `**/test_*.py` would also
+// match a production module inside the packaged source directory — a
+// `test_data_loader.py` helper ships in the wheel, so excluding it would leave
+// the wheel stale after a fix to it.
+export const PYTHON_TEST_FILE_EXCLUSIONS = ['!{projectRoot}/tests/**/*'];
+
+/**
+ * Excludes Python test files from the `production` named input, preserving any
+ * entries already present (including user additions).
+ *
+ * The input is created when absent: the Python targets reference `production`,
+ * and Nx fails hard on a named input that is not defined.
+ */
+export const addPythonTestExclusionsToProductionInput = (tree: Tree) => {
+  const nxJson = readNxJson(tree);
+  if (!nxJson) {
+    return;
+  }
+  const production = nxJson.namedInputs?.production ?? ['default'];
+  const missing = PYTHON_TEST_FILE_EXCLUSIONS.filter(
+    (exclusion) => !production.includes(exclusion),
+  );
+  if (missing.length === 0 && nxJson.namedInputs?.production) {
+    return;
+  }
+  updateNxJson(tree, {
+    ...nxJson,
+    namedInputs: {
+      ...nxJson.namedInputs,
+      production: [...production, ...missing],
+    },
+  });
+};
 
 export interface PyProjectDetails {
   /**
@@ -142,6 +185,8 @@ export const pyProjectGenerator = async (
 
   addTsDependencies(tree, DEPENDENCIES);
 
+  addPythonTestExclusionsToProductionInput(tree);
+
   const pythonPlugin = withVersions(DEPENDENCIES, ['@nxlv/python']);
   Object.entries(pythonPlugin).forEach(([name, version]) =>
     ensurePackage(name, version),
@@ -179,8 +224,8 @@ export const pyProjectGenerator = async (
         autoActivate: true,
         packageManager: 'uv',
         moveDevDependencies: false,
-        pyenvPythonVersion: '3.14.0',
-        pyprojectPythonDependency: '>=3.14',
+        pyenvPythonVersion: pyenvPythonVersion(),
+        pyprojectPythonDependency: pyprojectPythonDependency(),
       });
     }
 
@@ -198,8 +243,8 @@ export const pyProjectGenerator = async (
       buildBundleLocalDependencies: true,
       linter: 'ruff',
       rootPyprojectDependencyGroup: 'main',
-      pyenvPythonVersion: '3.14.0',
-      pyprojectPythonDependency: '>=3.14',
+      pyenvPythonVersion: pyenvPythonVersion(),
+      pyprojectPythonDependency: pyprojectPythonDependency(),
       projectType: schema.type,
       projectNameAndRootFormat: 'as-provided',
       moduleName: normalizedModuleName,
@@ -242,7 +287,9 @@ export const pyProjectGenerator = async (
     const buildTarget = projectConfiguration.targets.build;
     projectConfiguration.targets.compile = {
       ...buildTarget,
-      inputs: ['default', '^production'],
+      // `tests` is in `ignorePaths` below, so test files cannot reach the built
+      // distribution and must not invalidate it.
+      inputs: ['production', '^production'],
       outputs: [buildOutputPath],
       options: {
         ...buildTarget.options,
@@ -265,6 +312,10 @@ export const pyProjectGenerator = async (
       options: {
         outputPath,
       },
+    };
+    // The artifact-only sibling of build, which the deploy targets depend on.
+    projectConfiguration.targets.assemble = {
+      dependsOn: ['compile'],
     };
   }
   projectConfiguration.targets.typecheck = {

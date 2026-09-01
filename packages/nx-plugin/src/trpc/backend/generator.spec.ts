@@ -6,13 +6,17 @@ import { readJson, readProjectConfiguration, type Tree } from '@nx/devkit';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
-} from '../../utils/config/utils';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
+} from '../../utils/config/utils.js';
+import { expectHasMetricTags } from '../../utils/metrics.spec.js';
 import {
   createTreeUsingTsSolutionSetup,
   snapshotTreeDir,
-} from '../../utils/test';
-import { TRPC_BACKEND_GENERATOR_INFO, tsTrpcApiGenerator } from './generator';
+} from '../../utils/test.js';
+import { terraformLambdaRuntime } from '../../utils/versions.js';
+import {
+  TRPC_BACKEND_GENERATOR_INFO,
+  tsTrpcApiGenerator,
+} from './generator.js';
 import type { TsTrpcApiGeneratorSchema } from './schema';
 
 describe('trpc backend generator', () => {
@@ -490,6 +494,80 @@ describe('trpc backend generator', () => {
     expect(tree.exists('apps/test-api/src/authorizer.ts')).toBe(true);
   });
 
+  // The authorizer result cache TTL must stay aligned across CDK and Terraform,
+  // and across HTTP and REST, so the same workspace behaves the same whichever
+  // it is generated with. Caching is keyed on the identity source, so the TTL is
+  // only meaningful alongside one.
+  describe('custom authorizer result cache TTL', () => {
+    it.each(['http-lambda', 'rest-lambda'] as const)(
+      'should leave the 300s aws-cdk-lib default in place for %s on CDK',
+      async (infra) => {
+        await tsTrpcApiGenerator(tree, {
+          name: 'TestApi',
+          directory: 'apps',
+          infra,
+          auth: 'custom',
+          integrationPattern: 'isolated',
+          iac: 'cdk',
+        });
+
+        const construct = tree.read(
+          'packages/common/constructs/src/app/apis/test-api.ts',
+          'utf-8',
+        );
+
+        // Both HttpLambdaAuthorizer and TokenAuthorizer default resultsCacheTtl
+        // to Duration.minutes(5), which is the value we want, so the construct
+        // must not override it.
+        expect(construct).not.toContain('resultsCacheTtl');
+      },
+    );
+
+    it('should pin 300s alongside an identity source for HTTP on Terraform', async () => {
+      await tsTrpcApiGenerator(tree, {
+        name: 'TestApi',
+        directory: 'apps',
+        infra: 'http-lambda',
+        auth: 'custom',
+        iac: 'terraform',
+      });
+
+      const module = tree.read(
+        'packages/common/terraform/src/app/apis/test-api/test-api.tf',
+        'utf-8',
+      );
+
+      expect(module).toMatch(/authorizer_result_ttl_in_seconds\s+=\s+300/);
+      // API Gateway keys the cache on the identity sources, and requires at
+      // least one for caching to be enabled at all.
+      expect(module).toMatch(
+        /identity_sources\s+=\s+\["\$request\.header\.Authorization"\]/,
+      );
+    });
+
+    it('should leave the 300s provider default in place for REST on Terraform', async () => {
+      await tsTrpcApiGenerator(tree, {
+        name: 'TestApi',
+        directory: 'apps',
+        infra: 'rest-lambda',
+        auth: 'custom',
+        iac: 'terraform',
+      });
+
+      const module = tree.read(
+        'packages/common/terraform/src/app/apis/test-api/test-api.tf',
+        'utf-8',
+      );
+
+      // aws_api_gateway_authorizer defaults authorizer_result_ttl_in_seconds to
+      // 300, so the module must not override it.
+      expect(module).not.toContain('authorizer_result_ttl_in_seconds');
+      expect(module).toMatch(
+        /identity_source\s+=\s+"method\.request\.header\.Authorization"/,
+      );
+    });
+  });
+
   it('should generate a single router lambda for REST APIs when using the shared integration pattern', async () => {
     await tsTrpcApiGenerator(tree, {
       name: 'TestApi',
@@ -656,7 +734,9 @@ describe('trpc backend generator', () => {
 
       // Verify tRPC-specific handler configuration
       expect(appApiContent).toMatch(/handler\s+=\s+"index\.handler"/);
-      expect(appApiContent).toMatch(/runtime\s+=\s+"nodejs22\.x"/);
+      expect(appApiContent).toMatch(
+        new RegExp(`runtime\\s+=\\s+"${terraformLambdaRuntime('node')}"`),
+      );
 
       // Snapshot terraform files
       const terraformFileContents = {
@@ -703,7 +783,9 @@ describe('trpc backend generator', () => {
 
       // Verify tRPC-specific handler configuration
       expect(appApiContent).toMatch(/handler\s+=\s+"index\.handler"/);
-      expect(appApiContent).toMatch(/runtime\s+=\s+"nodejs22\.x"/);
+      expect(appApiContent).toMatch(
+        new RegExp(`runtime\\s+=\\s+"${terraformLambdaRuntime('node')}"`),
+      );
 
       // Snapshot terraform files
       const terraformFileContents = {
@@ -751,7 +833,9 @@ describe('trpc backend generator', () => {
 
       // Verify tRPC-specific handler configuration
       expect(appApiContent).toMatch(/handler\s+=\s+"index\.handler"/);
-      expect(appApiContent).toMatch(/runtime\s+=\s+"nodejs22\.x"/);
+      expect(appApiContent).toMatch(
+        new RegExp(`runtime\\s+=\\s+"${terraformLambdaRuntime('node')}"`),
+      );
 
       // Snapshot terraform files
       const terraformFileContents = {
@@ -799,7 +883,9 @@ describe('trpc backend generator', () => {
 
       // Verify tRPC-specific handler configuration
       expect(appApiContent).toMatch(/handler\s+=\s+"index\.handler"/);
-      expect(appApiContent).toMatch(/runtime\s+=\s+"nodejs22\.x"/);
+      expect(appApiContent).toMatch(
+        new RegExp(`runtime\\s+=\\s+"${terraformLambdaRuntime('node')}"`),
+      );
 
       // Snapshot terraform files
       const terraformFileContents = {
@@ -846,7 +932,9 @@ describe('trpc backend generator', () => {
 
       // Verify tRPC-specific handler configuration
       expect(appApiContent).toMatch(/handler\s+=\s+"index\.handler"/);
-      expect(appApiContent).toMatch(/runtime\s+=\s+"nodejs22\.x"/);
+      expect(appApiContent).toMatch(
+        new RegExp(`runtime\\s+=\\s+"${terraformLambdaRuntime('node')}"`),
+      );
 
       // Snapshot terraform files
       const terraformFileContents = {
@@ -894,7 +982,9 @@ describe('trpc backend generator', () => {
 
       // Verify tRPC-specific handler configuration
       expect(appApiContent).toMatch(/handler\s+=\s+"index\.handler"/);
-      expect(appApiContent).toMatch(/runtime\s+=\s+"nodejs22\.x"/);
+      expect(appApiContent).toMatch(
+        new RegExp(`runtime\\s+=\\s+"${terraformLambdaRuntime('node')}"`),
+      );
 
       // Snapshot terraform files
       const terraformFileContents = {
@@ -1024,6 +1114,91 @@ describe('trpc backend generator', () => {
         (f) => f.includes('terraform') && f.endsWith('.tf'),
       );
       expect(terraformFiles.length).toBeGreaterThan(0);
+    });
+
+    it.each(['http-lambda', 'rest-lambda'] as const)(
+      'should generate one lambda function per operation for %s with the isolated pattern',
+      async (infra) => {
+        await tsTrpcApiGenerator(tree, {
+          name: 'TestApi',
+          directory: 'apps',
+          infra,
+          auth: 'iam',
+          integrationPattern: 'isolated',
+          iac: 'terraform',
+        });
+
+        const appApiContent = tree.read(
+          'packages/common/terraform/src/app/apis/test-api/test-api.tf',
+          'utf-8',
+        );
+
+        // Operations drive the per-operation resources
+        expect(appApiContent).toContain(
+          'operations_file = "${path.module}/../../../generated/test-api/operations.json"',
+        );
+        // One lambda function and execution role per operation
+        expect(appApiContent).toMatch(
+          /resource "aws_lambda_function" "api_lambda" \{[^}]*for_each = local\.operations/,
+        );
+        expect(appApiContent).toMatch(
+          /resource "aws_iam_role" "lambda_execution_role" \{[^}]*for_each = local\.operations/,
+        );
+        // The proxy catch-all belongs to the shared pattern only
+        expect(appApiContent).not.toContain('{proxy+}');
+        expect(appApiContent).not.toContain('/{proxy+}');
+
+        // Outputs are keyed per operation
+        expect(appApiContent).toContain('output "lambda_function_names"');
+        expect(appApiContent).not.toContain('output "lambda_function_name"');
+
+        // A script/target generates the operations metadata the module reads
+        const projectConfig = JSON.parse(
+          tree.read('apps/test-api/project.json', 'utf-8'),
+        );
+        expect(projectConfig.targets.operations).toBeDefined();
+        expect(projectConfig.targets.build.dependsOn).toContain('operations');
+        expect(
+          tree.exists('apps/test-api/scripts/generate-operations.ts'),
+        ).toBeTruthy();
+
+        // The shared terraform project must have the file before it is planned
+        const terraformConfig = JSON.parse(
+          tree.read('packages/common/terraform/project.json', 'utf-8'),
+        );
+        expect(terraformConfig.targets.build.dependsOn).toContain(
+          '@proj/test-api:operations',
+        );
+      },
+    );
+
+    it('should generate a single router lambda with the shared pattern', async () => {
+      await tsTrpcApiGenerator(tree, {
+        name: 'TestApi',
+        directory: 'apps',
+        infra: 'http-lambda',
+        auth: 'iam',
+        integrationPattern: 'shared',
+        iac: 'terraform',
+      });
+
+      const appApiContent = tree.read(
+        'packages/common/terraform/src/app/apis/test-api/test-api.tf',
+        'utf-8',
+      );
+
+      expect(appApiContent).not.toContain('local.operations');
+      expect(appApiContent).toContain('/{proxy+}');
+      expect(appApiContent).toContain('output "lambda_function_name"');
+
+      // No operations metadata is needed for the shared pattern
+      const projectConfig = JSON.parse(
+        tree.read('apps/test-api/project.json', 'utf-8'),
+      );
+      expect(projectConfig.targets.operations).toBeUndefined();
+      expect(
+        tree.exists('apps/test-api/scripts/generate-operations.ts'),
+      ).toBeFalsy();
     });
   });
 

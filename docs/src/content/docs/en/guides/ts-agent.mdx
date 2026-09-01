@@ -4,7 +4,7 @@ description: Generate a TypeScript Agent for building AI agents with tools and d
 generator: ts#agent
 ---
 
-import { FileTree, Tabs, TabItem, CardGrid } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem, CardGrid, Steps } from '@astrojs/starlight/components';
 import Astro from '@astrojs/react';
 import ConnectionCard from '@components/connection-card.astro';
 import RunGenerator from '@components/run-generator.astro';
@@ -63,7 +63,7 @@ The generator will add the following files to your existing TypeScript project. 
         - session.ts Resolves the SessionManager used to persist conversation state
         - client.ts Vended client for invoking your agent
         - agent-core-trpc-client.ts Client factory for connecting to agents on AgentCore Runtime
-        - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - package.json Updated with Strands dependencies
     - project.json Updated with agent serve targets
 </FileTree>
@@ -81,7 +81,7 @@ The entry point uses the [Strands A2A Express Server](https://strandsagents.com/
         - index.ts A2A Express server entry point
         - agent.ts Main agent definition with sample tools
         - session.ts Resolves the SessionManager used to persist conversation state
-        - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - package.json Updated with Strands and Express dependencies
     - project.json Updated with agent serve targets
 </FileTree>
@@ -99,7 +99,7 @@ The entry point uses [`@ag-ui/aws-strands`](https://www.npmjs.com/package/@ag-ui
         - index.ts AG-UI server entry point (Express + SSE)
         - agent.ts Main agent definition with sample tools
         - session.ts Resolves the SessionManager used to persist conversation state
-        - Dockerfile Entry point for hosting your agent (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - package.json Updated with Strands and AG-UI dependencies
     - project.json Updated with agent serve targets
 </FileTree>
@@ -107,7 +107,9 @@ The entry point uses [`@ag-ui/aws-strands`](https://www.npmjs.com/package/@ag-ui
 
 ### Infrastructure
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment">
+<Snippet name="agentcore-hosting" />
+
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Bedrock AgentCore Runtime deployment">
 <Snippet name="shared-constructs" />
 
 For deploying your Agent, the following files are generated:
@@ -118,8 +120,8 @@ For deploying your Agent, the following files are generated:
   - packages/common/constructs/src
     - app
       - agents
-        - \<project-name>
-          - \<project-name>.ts CDK construct for deploying your agent
+        - \<agent-name>
+          - \<agent-name>.ts CDK construct for deploying your agent
 </FileTree>
 </Fragment>
 <Fragment slot="terraform">
@@ -127,11 +129,15 @@ For deploying your Agent, the following files are generated:
   - packages/common/terraform/src
     - app
       - agents
-        - \<project-name>
-          - \<project-name>.tf Module for deploying your agent
+        - \<agent-name>
+          - \<agent-name>.tf Module for deploying your agent
     - core
       - agent-core
         - runtime.tf Generic module for deploying to Bedrock AgentCore Runtime
+      - agent-core-code (when `infra` is `agentcore`)
+        - runtime.tf Packages your agent's code and delegates to `agent-core`
+      - agent-core-container (when `infra` is `agentcore-ecr`)
+        - runtime.tf Builds and publishes your agent's image and delegates to `agent-core`
 </FileTree>
 </Fragment>
 </Infrastructure>
@@ -203,7 +209,7 @@ The Strands framework automatically handles:
 
 ### Model Configuration
 
-By default, Strands agents use Claude 4 Sonnet, but you can easily switch between model providers:
+By default, Strands agents use Claude Sonnet 4.6 on Amazon Bedrock, but you can easily switch between model providers:
 
 ```typescript
 import { Agent } from '@strands-agents/sdk';
@@ -247,19 +253,19 @@ For a more in-depth guide to writing Strands agents, refer to the [Strands docum
 <OptionFilter when={{ protocol: 'a2a' }} description="A2A Express server details">
 ## A2A Server (A2A protocol)
 
-The generated `index.ts` mounts the [Strands A2A Express Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) onto an Express app so the generated agent exposes the A2A protocol endpoints alongside a `/ping` health check. When deployed to AgentCore, the entry point resolves the runtime's public ARN from AppConfig and advertises it in the agent card.
+The generated `index.ts` mounts the [Strands A2A Express Server](https://strandsagents.com/docs/user-guide/concepts/multi-agent/agent-to-agent) onto an Express app so the generated agent exposes the A2A protocol endpoints alongside a `/ping` health check. The URL advertised in the agent card comes from the `AGENTCORE_RUNTIME_URL` environment variable, falling back to `http://localhost:<port>/` for local development.
 
-Most users will not need to modify this file — edit `agent.ts` to change tools or the system prompt. A2A agents listen on port `9000` (vs `8080` for HTTP), which the generated Dockerfile and infrastructure are already configured for.
+Most users will not need to modify this file — edit `agent.ts` to change tools or the system prompt. A2A agents listen on port `9000` (vs `8080` for HTTP), which the generated infrastructure is already configured for.
 </OptionFilter>
 
 <OptionFilter when={{ protocol: 'ag-ui' }} description="AG-UI server details">
 ## AG-UI Server (AG-UI protocol)
 
-The generated `index.ts` wraps your Strands `Agent` in an [`@ag-ui/aws-strands`](https://www.npmjs.com/package/@ag-ui/aws-strands) `StrandsAgent` and creates an Express app via `createStrandsApp()`. The resulting app exposes a single POST endpoint that streams [AG-UI](https://docs.ag-ui.com/) events over Server-Sent Events (SSE), as well as `/ping` for the AgentCore runtime health check.
+The generated `index.ts` wraps your Strands `Agent` in an [`@ag-ui/aws-strands`](https://www.npmjs.com/package/@ag-ui/aws-strands) `StrandsAgent` and builds an Express app. The resulting app exposes a single POST endpoint that streams [AG-UI](https://docs.ag-ui.com/) events over Server-Sent Events (SSE), as well as `/ping` for the AgentCore runtime health check.
 
 AG-UI agents are designed to be consumed directly by a frontend. Use the <Link path="/guides/connection/react-agui">`connection` generator</Link> to wire your React website up to the agent with a [CopilotKit](https://docs.copilotkit.ai/aws-strands) provider and [AG-UI HttpAgent](https://docs.ag-ui.com/) client.
 
-Most users will not need to modify `index.ts` — edit `agent.ts` to change tools or the system prompt. AG-UI agents listen on port `8080` (same as HTTP), which the generated Dockerfile and infrastructure are already configured for.
+Most users will not need to modify `index.ts` — edit `agent.ts` to change tools or the system prompt. AG-UI agents listen on port `8080` (same as HTTP), which the generated infrastructure is already configured for.
 </OptionFilter>
 
 ## Running Your Agent
@@ -290,7 +296,7 @@ Then, in another terminal, start the chat:
 
 The generator emits a `scripts/<your-agent-name>/chat.ts` for every protocol. You can customize it as you evolve the agent's input shape. It connects to the local agent by default, or to your deployed agent when `RUNTIME_CONFIG_APP_ID` is set (see [Chat with your deployed agent](#chat-with-your-deployed-agent) below).
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Deployed agent chat details">
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Deployed agent chat details">
 #### Chat with your deployed agent
 
 To chat with your agent deployed to Bedrock AgentCore, set the `RUNTIME_CONFIG_APP_ID` environment variable to the AppConfig application id of the deployment (output as `RuntimeConfigApplicationId` by the deployed stack). The chat script resolves your agent's runtime ARN from runtime configuration and connects to the deployed endpoint:
@@ -322,7 +328,7 @@ aws cognito-idp admin-initiate-auth \
 </Tabs>
 </OptionFilter>
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment details">
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Bedrock AgentCore Runtime deployment details">
 ## Deploying Your Agent to Bedrock AgentCore Runtime
 
 <Snippet name="agent/bedrock-deployment" parentHeading="Deploying Your Agent to Bedrock AgentCore Runtime" />
@@ -333,6 +339,13 @@ aws cognito-idp admin-initiate-auth \
 
 The bundle target uses `index.ts` as the entrypoint for the WebSocket server to host on Bedrock AgentCore Runtime.
 
+<OptionFilter when={{ infra: 'agentcore' }} description="Code package target">
+### Package Target
+
+The generator configures a `<your-agent-name>-package` target which assembles the deployable code package: the bundled `index.js` plus a vendored install of the AWS Distro for OpenTelemetry, which AgentCore requires to be present in the package. The generated infrastructure uploads this directory as a `.zip` — via `AgentRuntimeArtifact.fromCodeAsset` under CDK, or archived into the shared asset bucket under Terraform.
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'agentcore-ecr' }} description="Container image build and scan">
 ### Docker Target
 
 The generator configures a `<your-agent-name>-docker` target which copies the `Dockerfile` from your agent source directory into the bundle output directory. This co-locates the `Dockerfile` with the bundled artifacts, allowing CDK to build the Docker image directly using `AgentRuntimeArtifact.fromAsset`.
@@ -342,10 +355,11 @@ A `docker` target is also generated which prepares the docker context for all ag
 ### Image Scanning
 
 <Snippet name="trivy-image-scan" parentHeading="Image Scanning" />
+</OptionFilter>
 
 ### Observability
 
-Your agent is automatically configured with observability using the [AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT), by configuring auto-instrumentation in your `Dockerfile`.
+Your agent is automatically configured with observability using the [AWS Distro for Open Telemetry](https://aws.amazon.com/otel/) (ADOT).
 
 You can find traces in the CloudWatch AWS Console, by selecting "GenAI Observability" in the menu. Note that for traces to be populated you will need to enable [Transaction Search](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Transaction-Search.html).
 
@@ -365,6 +379,23 @@ The session ID itself comes from the AgentCore Runtime session (propagated via t
 :::note[Local Development]
 When running locally (`LOCAL_DEV=true`, set automatically by the `-dev` target), session data is always stored on disk under `tmp/agents/strands/<agent-name>` at the workspace root, regardless of the configured `session` option, for convenience.
 :::
+
+#### Restricting sessions to their owner
+
+The session ID arrives from the caller, so on its own it identifies a conversation but not who the conversation belongs to. AgentCore Runtime authorizes an invocation against the agent runtime resource ARN rather than against an individual session, which leaves the agent free to decide what a session means to your application.
+
+:::caution[The session also selects the microVM]
+A session ID selects the [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html) that serves the request, so its filesystem, `/tmp` and in-process caches are shared by every request resolving to that session. Two callers who send the same session ID share those resources even when their stored conversations are separate.
+:::
+
+To restrict each user to their own conversations:
+
+<Steps>
+  1. Add an API to create a session, using <Link path="guides/trpc">tRPC</Link>, <Link path="guides/fastapi">FastAPI</Link> or <Link path="guides/ts-smithy-api">Smithy</Link>. Generate an opaque session ID (at least 33 characters) and store it alongside the calling user's ID — for example in a table created with the <Link path="guides/ts-dynamodb">`ts#dynamodb`</Link> generator. Each API guide shows how to retrieve the calling user's ID.
+  2. In your agent, look up the stored user ID for the session ID it was given, and reject the request when it does not match the caller. With `auth=cognito` the caller's JWT reaches your agent code, so its `sub` claim identifies them.
+</Steps>
+
+Generate the session ID rather than deriving it from user-supplied values such as a conversation name — anything a caller can predict, a caller can send.
 </OptionFilter>
 
 ## Invoking your Agent
@@ -378,11 +409,13 @@ You can invoke a locally running agent using the `.local` factory method from th
 
 You can, for example create a file named `scripts/test.ts` in your workspace which imports the client:
 
+The client class is named after your agent, so an agent named `my-agent` exports `MyAgentClient`.
+
 ```typescript
 // scripts/test.ts
-import { AgentClient } from '../packages/<project>/src/agent/client.js';
+import { MyAgentClient } from '../packages/<project>/src/agent/client.js';
 
-const client = AgentClient.local({ url: 'http://localhost:8081/ws' });
+const client = MyAgentClient.local({ url: 'http://localhost:8081/ws' });
 
 client.invoke.subscribe({ prompt: 'what is 1 plus 1?' }, { onData: console.log });
 ```
@@ -412,9 +445,9 @@ The client factory uses HTTP headers in the WebSocket handshake to authenticate 
 You can invoke your deployed agent by passing its ARN to the `withIamAuth` factory method:
 
 ```typescript
-import { AgentClient } from './agent/client.js';
+import { MyAgentClient } from './agent/client.js';
 
-const client = AgentClient.withIamAuth({
+const client = MyAgentClient.withIamAuth({
   agentRuntimeArn: 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent',
 });
 
@@ -436,7 +469,7 @@ This will use the default AWS credential provider chain to authenticate requests
 Use the `withJwtAuth` factory method to authenticate with the JWT / Cognito access token.
 
 ```typescript
-const client = AgentClient.withJwtAuth({
+const client = MyAgentClient.withJwtAuth({
   agentRuntimeArn: 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent',
   accessTokenProvider: async () => `<access-token>`,
 });
@@ -453,7 +486,7 @@ import { CognitoIdentityProvider } from "@aws-sdk/client-cognito-identity-provid
 
 const cognito = new CognitoIdentityProvider();
 
-const jwtClient = AgentClient.withJwtAuth({
+const jwtClient = MyAgentClient.withJwtAuth({
   agentRuntimeArn: 'arn:aws:bedrock-agentcore:us-west-2:123456789012:runtime/my-agent',
   accessTokenProvider: async () => {
     const response = await cognito.adminInitiateAuth({

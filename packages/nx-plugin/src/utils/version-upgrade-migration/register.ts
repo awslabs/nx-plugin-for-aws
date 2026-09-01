@@ -3,11 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { type Tree, writeJson } from '@nx/devkit';
-import { LATEST_MIGRATIONS_DIR } from '../migration-versions';
+import { LATEST_MIGRATIONS_DIR } from '../migration-versions.js';
 import {
   nxPackageJsonUpdates,
   type PackageJsonUpdates,
-} from './nx-package-updates';
+} from './nx-package-updates.js';
 
 const PACKAGE_JSON_UPDATES_PATH = 'packages/nx-plugin/packageJsonUpdates.json';
 

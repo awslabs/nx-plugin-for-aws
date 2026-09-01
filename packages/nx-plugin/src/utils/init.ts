@@ -14,38 +14,43 @@ import {
 import { initGenerator } from '@nx/js';
 import { readFileSync } from 'fs';
 import yaml from 'js-yaml';
-import GeneratorsJson from '../../generators.json' with { type: 'json' };
-import { SYNC_GENERATOR_NAME as TS_SYNC_GENERATOR_NAME } from '../ts/sync/generator';
-import { BASE_TSCONFIG_COMPILER_OPTIONS } from './base-tsconfig';
+import { SYNC_GENERATOR_NAME as TS_SYNC_GENERATOR_NAME } from '../ts/sync/generator.js';
+import { BASE_TSCONFIG_COMPILER_OPTIONS } from './base-tsconfig.js';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
-} from './config/utils';
-import { type Containers, inferContainers } from './containers';
+} from './config/utils.js';
+import { type Containers, inferContainers } from './containers.js';
 import {
   type DependencyDeclaration,
   forDependencies,
   type MustDeclare,
-} from './declared-dependencies';
+} from './declared-dependencies.js';
 import {
   addDependenciesToPackageJson,
   detectWorkspacePackageManager,
-} from './dependencies';
-import { getDefaultBiomeConfig } from './format';
-import type { Iac } from './iac';
-import { configureMcpServers } from './mcp';
-import { getNpmScope } from './npm-scope';
+} from './dependencies.js';
+import { getDefaultBiomeConfig } from './format.js';
+import {
+  describeGeneratorForCatalogue,
+  generatorsJsonEntries,
+} from './generators.js';
+import type { Iac } from './iac.js';
+import { configureMcpServers } from './mcp.js';
+import { getNpmScope } from './npm-scope.js';
 import {
   mergeTargetDefault,
   nxPluginMcpDependency,
   nxPluginSelfDependency,
-} from './nx';
-import { getPackageManagerDisplayCommands } from './pkg-manager';
-import { workspaceGlobs } from './project-package-json';
-import { type ITsDepVersion, withVersions } from './versions';
+} from './nx.js';
+import { getPackageManagerDisplayCommands } from './pkg-manager.js';
+import { workspaceGlobs } from './project-package-json.js';
+import { type ITsDepVersion, withVersions } from './versions.js';
 
 const WORKSPACES = ['packages/*'];
 const NX_TYPESCRIPT_SYNC_GENERATOR = '@nx/js:typescript-sync';
+
+export const DEFAULT_PARALLEL = 8;
 
 /** Dependencies a caller must declare to apply the workspace init. */
 export const INIT_DEPENDENCIES = [
@@ -294,6 +299,7 @@ export const applyWorkspaceInit = async <const D extends DependencyDeclaration>(
     ...nxJson,
     // Preserve an explicit analytics choice in an existing workspace.
     analytics: (nxJson as { analytics?: boolean }).analytics ?? false,
+    parallel: nxJson.parallel ?? DEFAULT_PARALLEL,
     targetDefaults: {
       ...nxJson.targetDefaults,
       compile: mergeTargetDefault(nxJson.targetDefaults?.compile, (base) => ({
@@ -379,9 +385,12 @@ export const applyWorkspaceInit = async <const D extends DependencyDeclaration>(
     '.',
     {
       projectName: getNpmScope(tree),
-      generators: Object.entries(GeneratorsJson.generators)
-        .filter(([_, v]) => !v['hidden'])
-        .map(([k, v]) => ({ name: k, description: v.description })),
+      generators: Object.entries(generatorsJsonEntries)
+        .filter(([, info]) => !info.hidden)
+        .map(([id, info]) => ({
+          name: id,
+          description: describeGeneratorForCatalogue(info),
+        })),
       ...(() => {
         const cmds = getPackageManagerDisplayCommands();
         return {

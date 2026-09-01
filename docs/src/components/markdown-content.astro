@@ -4,9 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import Default from '@astrojs/starlight/components/MarkdownContent.astro';
-import { postProcessGuide } from '../../../packages/nx-plugin/src/mcp-server/generator-info';
+import {
+  postProcessGuide,
+  renderExperimentalWarning,
+} from '../../../packages/nx-plugin/src/mcp-server/generator-info';
 import type { SnippetContentProvider } from '../../../packages/nx-plugin/src/mcp-server/generator-info';
-import { buildGeneratorInfoList } from '../../../packages/nx-plugin/src/utils/generators';
+import {
+  buildGeneratorInfoList,
+  findGeneratorsJsonEntry,
+} from '../../../packages/nx-plugin/src/utils/generators';
+import ExperimentalBanner from './experimental-banner.astro';
 import OptionFilterBar from './option-filter-bar.astro';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -90,9 +97,18 @@ if (!isSnippet && starlightRoute?.entry?.id) {
         .replace(/<Snippet name="[^"]*">\n?/g, '')
         .replace(/<\/Snippet>/g, '');
 
+      // Carry the experimental caveat into the copied markdown, so pasting a
+      // guide into an agent keeps the warning the MCP tools also emit.
+      const experimental =
+        generatorFrontmatter !== undefined &&
+        findGeneratorsJsonEntry(generatorFrontmatter)?.experimental === true;
+      const body = experimental
+        ? `${renderExperimentalWarning(generatorFrontmatter)}\n\n${cleanedMarkdown.trim()}`
+        : cleanedMarkdown.trim();
+
       // Add the page title
       const title = starlightRoute.entry.data.title;
-      resolvedMarkdown = title ? `# ${title}\n\n${cleanedMarkdown.trim()}` : cleanedMarkdown.trim();
+      resolvedMarkdown = title ? `# ${title}\n\n${body}` : body;
     }
   } catch {
     // If anything fails, we just won't have the copy button
@@ -101,6 +117,7 @@ if (!isSnippet && starlightRoute?.entry?.id) {
 ---
 
 {resolvedMarkdown && <div data-copy-markdown={resolvedMarkdown} style="display:none" />}
+{generatorFrontmatter && <ExperimentalBanner generatorId={generatorFrontmatter} />}
 {generatorFrontmatter && rawMdxForFilter && (
   <OptionFilterBar generatorId={generatorFrontmatter} rawMdx={rawMdxForFilter} />
 )}

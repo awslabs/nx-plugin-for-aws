@@ -5,18 +5,18 @@
 
 import { joinPathFragments, type Tree } from '@nx/devkit';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { declareDependencies } from './declared-dependencies';
+import { declareDependencies } from './declared-dependencies.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from './shared-constructs';
+} from './shared-constructs.js';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   SHARED_CONSTRUCTS_NAME,
   SHARED_TERRAFORM_DIR,
-} from './shared-constructs-constants';
-import { createTreeUsingTsSolutionSetup, snapshotTreeDir } from './test';
+} from './shared-constructs-constants.js';
+import { createTreeUsingTsSolutionSetup, snapshotTreeDir } from './test.js';
 
 const declaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
@@ -136,6 +136,39 @@ describe('shared-constructs utils', () => {
 
       // Check if marker file still exists (meaning the directory wasn't recreated)
       expect(tree.exists(markerFilePath)).toBeTruthy();
+    });
+
+    it('should vend the shared asset bucket and asset registry once', async () => {
+      await sharedConstructsGenerator(tree, { iac: 'terraform' }, declaration);
+
+      const coreDir = joinPathFragments(
+        PACKAGES_DIR,
+        SHARED_TERRAFORM_DIR,
+        'src',
+        'core',
+      );
+
+      // Every container image the workspace deploys goes to this one registry,
+      // the way every Lambda zip goes to the one asset bucket.
+      expect(
+        tree.exists(joinPathFragments(coreDir, 'asset-bucket/asset-bucket.tf')),
+      ).toBeTruthy();
+      const assetEcr = tree.read(
+        joinPathFragments(coreDir, 'asset-ecr/asset-ecr.tf'),
+        'utf-8',
+      );
+      expect(assetEcr).toContain('resource "aws_ecr_repository" "assets"');
+      expect(assetEcr).toContain('output "repository_url"');
+      expect(assetEcr).toContain('output "repository_arn"');
+      // Consumers tag by content digest, so tags never need overwriting.
+      expect(assetEcr).toContain('image_tag_mutability = "IMMUTABLE"');
+      // Image-packaged Lambdas pull through the service principal, so the
+      // repository policy must admit it.
+      expect(assetEcr).toContain('Service = "lambda.amazonaws.com"');
+      // Images are encrypted with a customer managed key.
+      expect(assetEcr).toContain('resource "aws_kms_key" "assets"');
+      expect(assetEcr).toContain('encryption_type = "KMS"');
+      expect(assetEcr).toContain('kms_key         = aws_kms_key.assets.arn');
     });
 
     it('should declare no cached outputs on the shared terraform build target', async () => {

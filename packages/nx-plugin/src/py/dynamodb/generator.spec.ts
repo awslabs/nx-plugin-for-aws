@@ -3,19 +3,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import { resolveContainers } from '../../utils/containers';
-import { declareDependencies } from '../../utils/declared-dependencies';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
-import { readProjectConfigurationUnqualified } from '../../utils/nx';
+import { resolveContainers } from '../../utils/containers.js';
+import { declareDependencies } from '../../utils/declared-dependencies.js';
+import { expectHasMetricTags } from '../../utils/metrics.spec.js';
+import { readProjectConfigurationUnqualified } from '../../utils/nx.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../utils/shared-constructs';
+} from '../../utils/shared-constructs.js';
 import {
   createTreeUsingTsSolutionSetup,
   snapshotTreeDir,
-} from '../../utils/test';
-import { PY_DYNAMODB_GENERATOR_INFO, pyDynamoDBGenerator } from './generator';
+} from '../../utils/test.js';
+import {
+  PY_DYNAMODB_GENERATOR_INFO,
+  pyDynamoDBGenerator,
+} from './generator.js';
 
 const sharedConstructsDeclaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],

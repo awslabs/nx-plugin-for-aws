@@ -11,33 +11,33 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import camelCase from 'lodash.camelcase';
-import { addTsDependencies } from '../../utils/add-dependencies';
+import { addTsDependencies } from '../../utils/add-dependencies.js';
 import {
   addTypeScriptBundleTarget,
   BUNDLE_DEPENDENCIES,
-} from '../../utils/bundle/bundle';
+} from '../../utils/bundle/bundle.js';
 import {
   declareDependencies,
   ownedElsewhere,
-} from '../../utils/declared-dependencies';
-import { formatFilesInSubtree } from '../../utils/format';
-import { addLambdaFunctionInfra } from '../../utils/function-constructs/function-constructs';
-import { resolveIac } from '../../utils/iac';
-import { installDependencies } from '../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { pascalCase, toClassName, toKebabCase } from '../../utils/names';
+} from '../../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../../utils/format.js';
+import { addLambdaFunctionInfra } from '../../utils/function-constructs/function-constructs.js';
+import { resolveIac } from '../../utils/iac.js';
+import { installDependencies } from '../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
+import { pascalCase, toClassName, toKebabCase } from '../../utils/names.js';
 import {
   addComponentGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
-} from '../../utils/nx';
-import { sortObjectKeys } from '../../utils/object';
+} from '../../utils/nx.js';
+import { sortObjectKeys } from '../../utils/object.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../utils/shared-constructs';
-import { TS_HANDLER_RETURN_TYPES } from './io';
+} from '../../utils/shared-constructs.js';
+import { TS_HANDLER_RETURN_TYPES } from './io.js';
 import type { TsLambdaFunctionGeneratorSchema } from './schema';
 
 export const DEPENDENCIES = declareDependencies()({

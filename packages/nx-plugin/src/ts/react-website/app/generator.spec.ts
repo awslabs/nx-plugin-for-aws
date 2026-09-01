@@ -2,21 +2,38 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { readJson, type Tree } from '@nx/devkit';
+import { execSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, posix } from 'node:path';
+import * as devkit from '@nx/devkit';
+import {
+  readJson,
+  readProjectConfiguration,
+  type Tree,
+  updateJson,
+} from '@nx/devkit';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
-} from '../../../utils/config/utils';
-import { expectHasMetricTags } from '../../../utils/metrics.spec';
+} from '../../../utils/config/utils.js';
+import { expectHasMetricTags } from '../../../utils/metrics.spec.js';
+import { getNpmScopePrefix } from '../../../utils/npm-scope.js';
+import {
+  PACKAGES_DIR,
+  SHARED_TERRAFORM_DIR,
+} from '../../../utils/shared-constructs-constants.js';
 import {
   createTreeUsingTsSolutionSetup,
   snapshotTreeDir,
-} from '../../../utils/test';
+} from '../../../utils/test.js';
+import { syncVendedVersions } from '../../../utils/version-upgrade-migration/sync-vended-versions.js';
+import { TS_VERSIONS } from '../../../utils/versions.js';
 import {
   REACT_WEBSITE_APP_GENERATOR_INFO,
   SUPPORTED_UX_PROVIDERS,
   tsReactWebsiteGenerator,
-} from './generator';
+} from './generator.js';
 import type { TsReactWebsiteGeneratorSchema } from './schema';
 
 describe('react-website generator', () => {
@@ -74,6 +91,28 @@ describe('react-website generator', () => {
     expect(viteConfig).toMatchSnapshot('vite.config.mts');
   });
 
+  it('should assign each website its own dev-server and preview port', async () => {
+    await tsReactWebsiteGenerator(tree, { ...options, name: 'first-app' });
+    await tsReactWebsiteGenerator(tree, { ...options, name: 'second-app' });
+
+    // Projects register under the scoped name (e.g. `@proj/first-app`);
+    // file paths on the tree stay unscoped.
+    const scopePrefix = getNpmScopePrefix(tree);
+    expect(
+      readProjectConfiguration(tree, `${scopePrefix}first-app`).metadata,
+    ).toMatchObject({ ports: [4200] });
+    expect(
+      readProjectConfiguration(tree, `${scopePrefix}second-app`).metadata,
+    ).toMatchObject({ ports: [4201] });
+
+    const first = tree.read('first-app/vite.config.mts', 'utf-8');
+    expect(first).toContain('port: 4200');
+    expect(first).toContain('port: 4300');
+    const second = tree.read('second-app/vite.config.mts', 'utf-8');
+    expect(second).toContain('port: 4201');
+    expect(second).toContain('port: 4301');
+  });
+
   it('keeps a single react copy: declared only on the website and deduped', async () => {
     await tsReactWebsiteGenerator(tree, options);
 
@@ -95,6 +134,47 @@ describe('react-website generator', () => {
     // become a second React instance at build time.
     const viteConfig = tree.read('test-app/vite.config.mts')?.toString();
     expect(viteConfig).toContain("dedupe: ['react', 'react-dom']");
+  });
+
+  it("should pin the express @nx/react resolves to via npm's overrides", async () => {
+    vi.spyOn(devkit, 'detectPackageManager').mockReturnValue('npm');
+
+    await tsReactWebsiteGenerator(tree, options);
+
+    // @nx/react's optional express peer sits a major behind the vended express,
+    // and npm fails the whole install on a peer it cannot satisfy.
+    expect(readJson(tree, 'package.json').overrides?.['@nx/react']).toEqual({
+      express: TS_VERSIONS.express,
+    });
+  });
+
+  it.each(['pnpm', 'yarn', 'bun'] as const)(
+    'should not add the @nx/react express override for %s, which only warns',
+    async (pkgMgr) => {
+      vi.spyOn(devkit, 'detectPackageManager').mockReturnValue(pkgMgr);
+
+      await tsReactWebsiteGenerator(tree, options);
+
+      expect(readJson(tree, 'package.json').overrides).toBeUndefined();
+    },
+  );
+
+  // `express` is declared `versionOnly` so the version sync owns it: the pin is
+  // only reachable through the override, and a stale one leaves npm unable to
+  // resolve once the vended express moves on.
+  it('should let the version sync carry the express override forward', async () => {
+    vi.spyOn(devkit, 'detectPackageManager').mockReturnValue('npm');
+    await tsReactWebsiteGenerator(tree, options);
+    updateJson(tree, 'package.json', (json) => ({
+      ...json,
+      overrides: { '@nx/react': { express: '5.0.0' } },
+    }));
+
+    await syncVendedVersions(tree);
+
+    expect(readJson(tree, 'package.json').overrides['@nx/react'].express).toBe(
+      TS_VERSIONS.express,
+    );
   });
 
   it('should generate shared constructs', async () => {
@@ -644,7 +724,8 @@ describe('react-website generator', () => {
         'fs.copyFileSync',
       );
       expect(loadRuntimeConfigTarget.options.env).toEqual({
-        SRC_FILE: 'dist/packages/common/terraform/runtime-config.json',
+        SRC_FILE:
+          'dist/packages/common/terraform/runtime-config/connection.json',
         DEST_DIR: '{projectRoot}/public',
         DEST_FILE: '{projectRoot}/public/runtime-config.json',
       });
@@ -672,7 +753,7 @@ describe('react-website generator', () => {
 
       expect(loadRuntimeConfigTarget).toBeDefined();
       expect(loadRuntimeConfigTarget.options.env.SRC_FILE).toBe(
-        'dist/packages/common/terraform/runtime-config.json',
+        'dist/packages/common/terraform/runtime-config/connection.json',
       );
       expect(loadRuntimeConfigTarget.options.env.DEST_DIR).toBe(
         '{projectRoot}/public',
@@ -705,6 +786,94 @@ describe('react-website generator', () => {
       expect(loadRuntimeConfigTarget.options.command).toContain(
         'TestAppWebsiteBucketName',
       );
+    });
+
+    /**
+     * The Terraform target copies a file the vended `.tf` modules write at apply
+     * time, so `SRC_FILE` is derived from those modules rather than restated
+     * here — a change to either the aggregation's output directory or the
+     * namespace the website reads fails this rather than silently breaking the
+     * target.
+     */
+    const deriveAggregatedConfigFile = (tree: Tree): string => {
+      const readModuleDir = `${PACKAGES_DIR}/${SHARED_TERRAFORM_DIR}/src/core/runtime-config/read`;
+
+      // The `read` module resolves its aggregation directory relative to itself.
+      const readTf = tree.read(`${readModuleDir}/read.tf`, 'utf-8')!;
+      const configDir = /config_dir\s*=\s*"\$\{path\.module\}\/(.+?)"/.exec(
+        readTf,
+      )![1];
+
+      // It aggregates the namespace's entries into `<config_dir>/<namespace>.json`.
+      expect(readTf).toContain(
+        'namespace_path  = "${local.config_dir}/${var.namespace}.json"',
+      );
+
+      // The website reads one namespace from that directory.
+      const staticWebsiteTf = tree.read(
+        `${PACKAGES_DIR}/${SHARED_TERRAFORM_DIR}/src/core/static-website/static-website.tf`,
+        'utf-8',
+      )!;
+      const namespace =
+        /module "runtime_config_reader" \{[^}]*?namespace\s*=\s*"(.+?)"/s.exec(
+          staticWebsiteTf,
+        )![1];
+
+      return `${posix.join(readModuleDir, configDir)}/${namespace}.json`;
+    };
+
+    it('should point SRC_FILE at the file the terraform aggregation writes', async () => {
+      await tsReactWebsiteGenerator(tree, {
+        ...options,
+        iac: 'terraform',
+      });
+
+      const projectConfig = readJson(tree, 'test-app/project.json');
+      expect(
+        projectConfig.targets['load-runtime-config'].options.env.SRC_FILE,
+      ).toBe(deriveAggregatedConfigFile(tree));
+    });
+
+    it("should copy the aggregated config into the website's public directory", async () => {
+      await tsReactWebsiteGenerator(tree, {
+        ...options,
+        iac: 'terraform',
+      });
+
+      const { command, env } = readJson(tree, 'test-app/project.json').targets[
+        'load-runtime-config'
+      ].options;
+
+      // Stand the aggregation's output up on disk exactly where the vended
+      // Terraform writes it, then run the target's real command against it.
+      const workspaceRoot = mkdtempSync(join(tmpdir(), 'load-runtime-config-'));
+      const runtimeConfig = { apis: { MyApi: 'https://example.com' } };
+      const srcFile = join(workspaceRoot, env.SRC_FILE);
+      mkdirSync(dirname(srcFile), { recursive: true });
+      writeFileSync(srcFile, JSON.stringify(runtimeConfig));
+
+      // `{projectRoot}` is substituted by nx before the executor runs.
+      const resolveTokens = (value: string) =>
+        value.replace(/\{projectRoot\}/g, 'test-app');
+
+      execSync(command, {
+        cwd: workspaceRoot,
+        env: {
+          ...process.env,
+          DEST_DIR: resolveTokens(env.DEST_DIR),
+          DEST_FILE: resolveTokens(env.DEST_FILE),
+          SRC_FILE: env.SRC_FILE,
+        },
+      });
+
+      expect(
+        JSON.parse(
+          readFileSync(
+            join(workspaceRoot, 'test-app/public/runtime-config.json'),
+            'utf-8',
+          ),
+        ),
+      ).toEqual(runtimeConfig);
     });
   });
 

@@ -3,12 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { MigrationReturnObject, Tree } from '@nx/devkit';
-import { applyGritQL } from '../../../utils/ast';
-import { formatFilesInSubtree } from '../../../utils/format';
+import { applyGritQL } from '../../../utils/ast.js';
+import { formatFilesInSubtree } from '../../../utils/format.js';
 import {
   PACKAGES_DIR,
   SHARED_SCRIPTS_DIR,
-} from '../../../utils/shared-constructs-constants';
+} from '../../../utils/shared-constructs-constants.js';
 
 /**
  * Drop -optimizeDbBeforeStartup from the vended DynamoDB Local container script

@@ -12,28 +12,28 @@ import {
   writeJson,
 } from '@nx/devkit';
 import PackageJson from '../../../package.json' with { type: 'json' };
-import { declareDependencies } from '../../utils/declared-dependencies';
-import { formatFilesInSubtree } from '../../utils/format';
-import { installDependencies } from '../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
+import { declareDependencies } from '../../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../../utils/format.js';
+import { installDependencies } from '../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
 import {
   LATEST_MIGRATIONS_DIR,
   migrationKey,
-} from '../../utils/migration-versions';
-import { isEsmWorkspace } from '../../utils/module-format';
-import { kebabCase } from '../../utils/names';
+} from '../../utils/migration-versions.js';
+import { isEsmWorkspace } from '../../utils/module-format.js';
+import { kebabCase } from '../../utils/names.js';
 import {
   getGeneratorInfo,
   isNxPluginForAwsWorkspace,
   type NxGeneratorInfo,
-} from '../../utils/nx';
-import { sortObjectKeys } from '../../utils/object';
+} from '../../utils/nx.js';
+import { sortObjectKeys } from '../../utils/object.js';
 import {
   addNxPluginDependencies,
   configureNxPluginPackageJson,
   NX_PLUGIN_DEPENDENCIES,
   readNxPluginProject,
-} from '../nx-plugin/utils';
+} from '../nx-plugin/utils.js';
 import type { TsNxMigrationGeneratorSchema } from './schema';
 
 export const DEPENDENCIES = declareDependencies()({

@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { TypeScriptVerifier } from '../../utils/test/ts.spec';
-import type { Spec } from '../utils/types';
-import { openApiTsHooksGenerator } from './generator';
+import { TypeScriptVerifier } from '../../utils/test/ts.spec.js';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import type { Spec } from '../utils/types.js';
+import { openApiTsHooksGenerator } from './generator.js';
 
 describe('openApiTsHooksGenerator - Duplicate Types', () => {
   let tree: Tree;

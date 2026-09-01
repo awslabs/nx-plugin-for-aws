@@ -9,7 +9,7 @@ import {
   orderPrefix,
   readShippedMigrationVersions,
   stampMigrationVersions,
-} from './migration-versions';
+} from './migration-versions.js';
 
 describe('migration versions', () => {
   describe('readShippedMigrationVersions', () => {

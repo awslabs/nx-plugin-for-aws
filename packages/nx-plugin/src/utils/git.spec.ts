@@ -7,9 +7,13 @@ import { mkdtempSync, rmSync } from 'fs';
 import { FsTree, flushChanges, type Tree } from 'nx/src/generators/tree';
 import * as os from 'os';
 import * as path from 'path';
-import { getGitIncludedFiles, isWithinGitRepo, updateGitIgnore } from './git';
-import { createTreeUsingTsSolutionSetup } from './test';
-import { initTestGitRepo, runGit, useIsolatedGitEnv } from './test-git';
+import {
+  getGitIncludedFiles,
+  isWithinGitRepo,
+  updateGitIgnore,
+} from './git.js';
+import { createTreeUsingTsSolutionSetup } from './test.js';
+import { initTestGitRepo, runGit, useIsolatedGitEnv } from './test-git.js';
 
 describe('git utils', () => {
   describe('getGitIncludedFiles', () => {

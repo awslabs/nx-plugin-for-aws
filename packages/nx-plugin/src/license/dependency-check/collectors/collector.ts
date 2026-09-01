@@ -33,7 +33,7 @@ export const npmCollector = (): LicenseCollector => ({
     return 'pnpm why <package>';
   },
   async collect({ workspaceRoot }) {
-    const { collectNpmDependencies } = await import('./npm-collector');
+    const { collectNpmDependencies } = await import('./npm-collector.js');
     return (await collectNpmDependencies({ start: workspaceRoot })).map(
       (d) => ({ ...d, ecosystem: 'npm' }),
     );
@@ -44,8 +44,10 @@ export const pythonCollector = (): LicenseCollector => ({
   name: 'python',
   traceCommand: 'uv tree --invert --package <package>',
   async collect({ workspaceRoot }) {
-    const { collectPythonDependencies } = await import('./python-collector');
-    const { findWorkspacePyProjectNames } = await import('./python-collector');
+    const { collectPythonDependencies } = await import('./python-collector.js');
+    const { findWorkspacePyProjectNames } = await import(
+      './python-collector.js'
+    );
     const excludePackages = await findWorkspacePyProjectNames(workspaceRoot);
     return (
       await collectPythonDependencies({ start: workspaceRoot, excludePackages })

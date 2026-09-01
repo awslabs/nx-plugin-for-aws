@@ -8,13 +8,13 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { declareDependencies } from '../../utils/declared-dependencies';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
+import { declareDependencies } from '../../utils/declared-dependencies.js';
+import { expectHasMetricTags } from '../../utils/metrics.spec.js';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
 import {
   AGENTCORE_GATEWAY_GATEWAY_CONNECTION_GENERATOR_INFO,
   agentcoreGatewayGatewayConnectionGenerator,
-} from './generator';
+} from './generator.js';
 
 describe('agentcore-gateway#gateway-connection generator', () => {
   let tree: Tree;
@@ -303,7 +303,7 @@ describe('agentcore-gateway#gateway-connection generator', () => {
     const outer = addGateway('outer-gateway', 'OuterGateway', 8100);
     const inner = addGateway('inner-gateway', 'InnerGateway', 8101);
     const { SHARED_CONSTRUCTS_DEPENDENCIES, sharedConstructsGenerator } =
-      await import('../../utils/shared-constructs');
+      await import('../../utils/shared-constructs.js');
     await sharedConstructsGenerator(
       tree,
       { iac: 'cdk' },

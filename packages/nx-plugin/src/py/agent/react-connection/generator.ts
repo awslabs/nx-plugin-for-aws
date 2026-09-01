@@ -9,27 +9,27 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { addAgentRuntimeToConnectionNamespace } from '../../../connection/agent-runtime-config';
-import type { ResolvedConnectionOptions } from '../../../connection/generator';
-import type { AgentGatewayRoute } from '../../../ts/agent/react-connection/generator';
+import { addAgentRuntimeToConnectionNamespace } from '../../../connection/agent-runtime-config.js';
+import type { ResolvedConnectionOptions } from '../../../connection/generator.js';
+import type { AgentGatewayRoute } from '../../../ts/agent/react-connection/generator.js';
 import {
   DEPENDENCIES as AGUI_DEPENDENCIES,
   type AgUiAuth,
   addAgUiReactConnection,
   resolveAgUiTheme,
-} from '../../../ts/react-website/agui/generator';
+} from '../../../ts/react-website/agui/generator.js';
 import {
   addOpenApiReactClient,
   OPEN_API_REACT_DEPENDENCIES,
-} from '../../../utils/connection/open-api/react';
+} from '../../../utils/connection/open-api/react.js';
 import {
   declareDependencies,
   onlyWhen,
-} from '../../../utils/declared-dependencies';
-import { formatFilesInSubtree } from '../../../utils/format';
-import { installDependencies } from '../../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
-import { kebabCase, toClassName, toSnakeCase } from '../../../utils/names';
+} from '../../../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../../../utils/format.js';
+import { installDependencies } from '../../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics.js';
+import { kebabCase, toClassName, toSnakeCase } from '../../../utils/names.js';
 import {
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
@@ -37,13 +37,13 @@ import {
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
-} from '../../../utils/nx';
-import { sortObjectKeys } from '../../../utils/object';
-import { toProjectRelativePath } from '../../../utils/paths';
+} from '../../../utils/nx.js';
+import { sortObjectKeys } from '../../../utils/object.js';
+import { toProjectRelativePath } from '../../../utils/paths.js';
 import {
   addPyAgentTargetToLocalDev,
   openApiClientLocalDevDeps,
-} from './local-dev';
+} from './local-dev.js';
 
 /** The metadata this generator records, which its predicates read. */
 export interface PyAgentReactConnectionMetadata {
@@ -164,6 +164,12 @@ export const pyAgentReactConnectionGenerator = async (
         ...agentProjectConfig.targets,
         [openApiTargetName]: {
           cache: true,
+          // The spec serialises models a dependency may own, and this target
+          // has no `dependsOn` for `default`'s transitive
+          // `dependentTasksOutputFiles` to resolve against — so `^production` is
+          // the only edge to the dependency, and without it a model change there
+          // serves a stale spec.
+          inputs: ['production', '^production'],
           executor: 'nx:run-commands',
           outputs: [
             `{workspaceRoot}/dist/{projectRoot}/openapi/${agentNameSnakeCase}`,

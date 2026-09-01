@@ -665,6 +665,7 @@ exports[`py#agent generator > should match snapshot for generated files > agent-
 
 from proj_agent_connection import log_model_errors, log_tool_errors
 from strands import Agent, tool
+from strands.hooks import HookCallback, HookProvider
 from strands_tools import current_time
 
 from .session import get_session_manager
@@ -673,6 +674,9 @@ from .session import get_session_manager
 @tool
 def subtract(a: int, b: int) -> int:
     return a - b
+
+
+AGENT_HOOKS: list[HookProvider | HookCallback] = [log_model_errors, log_tool_errors]
 
 
 @contextmanager
@@ -686,25 +690,19 @@ Use your tools for mathematical tasks.
 Refer to tools as your 'spellbook'.
 """,
         tools=[subtract, current_time],
-        hooks=[log_model_errors, log_tool_errors],
+        hooks=AGENT_HOOKS,
         session_manager=get_session_manager(),
     )
 "
 `;
 
 exports[`py#agent generator > should match snapshot for generated files > agent-main.py 1`] = `
-"import uuid
-
-import uvicorn
+"import uvicorn
 from bedrock_agentcore.runtime.models import PingStatus
-from fastapi import Request
-from proj_agent_connection import session_id_context
 from pydantic import BaseModel, Field
-from starlette.middleware.base import BaseHTTPMiddleware
 
 from .init import JsonStreamingResponse, app
-
-SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
+from .middleware.session_id_middleware import SessionIdMiddleware
 
 
 class InvokeInput(BaseModel):
@@ -745,16 +743,7 @@ async def invoke(input: InvokeInput) -> JsonStreamingResponse:
     return JsonStreamingResponse(handle_invoke(input))
 
 
-class _SessionIdMiddleware(BaseHTTPMiddleware):
-    """Bind the inbound session (or a fresh UUID) to async context."""
-
-    async def dispatch(self, request: Request, call_next):
-        session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
-        with session_id_context(session_id):
-            return await call_next(request)
-
-
-app.add_middleware(_SessionIdMiddleware)
+app.add_middleware(SessionIdMiddleware)
 
 
 @app.get("/ping")
@@ -776,13 +765,13 @@ dependencies = [
   "proj-agent-connection",
   "aws-lambda-powertools==3.34.0",
   "aws-opentelemetry-distro==0.19.0",
-  "bedrock-agentcore==1.21.0",
-  "boto3==1.43.72",
+  "bedrock-agentcore==1.22.0",
+  "boto3==1.43.83",
   "fastapi==0.141.1",
   "mcp==1.28.1",
-  "strands-agents==1.52.0",
-  "strands-agents-tools==0.8.6",
-  "uvicorn==0.52.3"
+  "strands-agents==1.54.0",
+  "strands-agents-tools==0.8.7",
+  "uvicorn==0.52.4"
 ]
 
 [dependency-groups]

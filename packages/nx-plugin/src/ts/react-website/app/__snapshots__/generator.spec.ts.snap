@@ -48,7 +48,7 @@ export default defineConfig(() => ({
     include: ['{src,tests}/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
     reporters: ['default'],
     coverage: {
-      reportsDirectory: './test-output/vitest/coverage',
+      reportsDirectory: '../dist/test-app/test-output/vitest/coverage',
       provider: 'v8' as const,
     },
   },
@@ -104,7 +104,7 @@ export default defineConfig(() => ({
     include: ['{src,tests}/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
     reporters: ['default'],
     coverage: {
-      reportsDirectory: './test-output/vitest/coverage',
+      reportsDirectory: '../dist/test-app/test-output/vitest/coverage',
       provider: 'v8' as const,
     },
   },
@@ -131,8 +131,12 @@ exports[`react-website generator > TailwindCSS integration > terraform iac > sho
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "6.60.0"
+      version = "6.62.0"
       configuration_aliases = [aws.us_east_1]
+    }
+    null = {
+      source  = "hashicorp/null"
+      version = "3.3.1"
     }
     random = {
       source  = "hashicorp/random"
@@ -164,6 +168,41 @@ variable "acm_certificate_arn" {
   default     = null
 }
 
+variable "enable_waf" {
+  description = "Whether to protect the CloudFront distribution with an AWS WAF Web ACL."
+  type        = bool
+  default     = true
+}
+
+variable "encryption" {
+  description = "Server-side encryption for the website and distribution log buckets. One of KMS or S3_MANAGED."
+  type        = string
+  default     = "KMS"
+
+  validation {
+    condition     = contains(["KMS", "S3_MANAGED"], var.encryption)
+    error_message = "encryption must be one of KMS or S3_MANAGED."
+  }
+}
+
+variable "kms_key_arn" {
+  description = "ARN of an existing KMS key used to encrypt the website and distribution log buckets when encryption is KMS. When not provided and create_kms_key is true, a new key is created. Note that a customer-supplied key must already grant the CloudWatch Logs, S3 and CloudFront service principals the necessary permissions in its own key policy."
+  type        = string
+  default     = null
+}
+
+variable "create_kms_key" {
+  description = "Whether to create a KMS key for the website. Only applies when encryption is KMS. Set to false when supplying kms_key_arn."
+  type        = bool
+  default     = true
+}
+
+variable "enable_key_rotation" {
+  description = "Whether the automatically created KMS key has rotation enabled. Only applies when encryption is KMS and create_kms_key is true."
+  type        = bool
+  default     = true
+}
+
 # Content-Security-Policy enforced on all responses. Restricts scripts and
 # framing to mitigate XSS and clickjacking, while permitting HTTPS/WSS calls
 # (connect-src) to AWS service endpoints such as API Gateway, Cognito and
@@ -175,6 +214,13 @@ locals {
   # Delivery source/destination names have a 60 character maximum. Truncate the
   # website name so the longest delivery name stays within the limit.
   access_logs_name_prefix = substr(lower(var.website_name), 0, 16)
+
+  create_website_key = var.encryption == "KMS" && var.create_kms_key
+  website_kms_key_arn = (
+    var.encryption != "KMS" ? null :
+    local.create_website_key ? aws_kms_key.website_key[0].arn :
+    var.kms_key_arn
+  )
 }
 
 
@@ -185,9 +231,11 @@ data "aws_region" "current" {}
 
 # KMS Key for encryption
 resource "aws_kms_key" "website_key" {
+  count = local.create_website_key ? 1 : 0
+
   description             = "KMS key for \${var.website_name} website encryption"
   deletion_window_in_days = 7
-  enable_key_rotation     = true
+  enable_key_rotation     = var.enable_key_rotation
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -260,8 +308,10 @@ resource "aws_kms_key" "website_key" {
 }
 
 resource "aws_kms_alias" "website_key_alias" {
+  count = local.create_website_key ? 1 : 0
+
   name          = "alias/\${lower(var.website_name)}-website-key-\${random_id.unique_suffix.hex}"
-  target_key_id = aws_kms_key.website_key.key_id
+  target_key_id = aws_kms_key.website_key[0].key_id
 }
 
 # CloudWatch log group receiving S3 server access logs for the website and
@@ -269,7 +319,7 @@ resource "aws_kms_alias" "website_key_alias" {
 resource "aws_cloudwatch_log_group" "access_logs" {
   name              = "/aws/s3/\${lower(var.website_name)}-access-logs-\${random_id.bucket_suffix.hex}"
   retention_in_days = 365
-  kms_key_id        = aws_kms_key.website_key.arn
+  kms_key_id        = local.website_kms_key_arn
 }
 
 resource "random_id" "unique_suffix" {
@@ -306,8 +356,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "website_encryptio
 
   rule {
     apply_server_side_encryption_by_default {
-      kms_master_key_id = aws_kms_key.website_key.arn
-      sse_algorithm     = "aws:kms"
+      kms_master_key_id = var.encryption == "KMS" ? local.website_kms_key_arn : null
+      sse_algorithm     = var.encryption == "KMS" ? "aws:kms" : "AES256"
     }
   }
 }
@@ -371,8 +421,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "distribution_logs
 
   rule {
     apply_server_side_encryption_by_default {
-      kms_master_key_id = aws_kms_key.website_key.arn
-      sse_algorithm     = "aws:kms"
+      kms_master_key_id = var.encryption == "KMS" ? local.website_kms_key_arn : null
+      sse_algorithm     = var.encryption == "KMS" ? "aws:kms" : "AES256"
     }
   }
 }
@@ -442,6 +492,8 @@ resource "aws_s3_bucket_policy" "distribution_logs_ssl_policy" {
 
 # WAF Web ACL (must be in us-east-1 for CloudFront)
 resource "aws_wafv2_web_acl" "cloudfront_waf" {
+  count = var.enable_waf ? 1 : 0
+
   #checkov:skip=CKV2_AWS_31:WAF logging disabled
   provider = aws.us_east_1
   name     = "\${lower(var.website_name)}-cloudfront-waf-\${random_id.unique_suffix.hex}"
@@ -566,7 +618,7 @@ resource "aws_cloudfront_distribution" "website" {
   enabled             = true
   is_ipv6_enabled     = true
   default_root_object = "index.html"
-  web_acl_id          = aws_wafv2_web_acl.cloudfront_waf.arn
+  web_acl_id          = var.enable_waf ? aws_wafv2_web_acl.cloudfront_waf[0].arn : null
   aliases             = var.custom_domain_names
 
   logging_config {
@@ -622,12 +674,6 @@ resource "aws_cloudfront_distribution" "website" {
 
   tags = {
     Name = "\${lower(var.website_name)}-distribution-\${random_id.unique_suffix.hex}"
-  }
-
-  lifecycle {
-    replace_triggered_by = [
-      aws_wafv2_web_acl.cloudfront_waf
-    ]
   }
 
   # CloudFront validates access to the distribution logs bucket when it
@@ -699,7 +745,7 @@ resource "null_resource" "upload_website_files" {
   provisioner "local-exec" {
     command = <<-EOT
       cd "$ROOT_PATH"
-      uv run --with boto3==1.43.72 python3 -c "
+      uv run --with boto3==1.43.83 python3 -c "
 import os
 import sys
 import boto3
@@ -822,7 +868,7 @@ resource "null_resource" "cloudfront_invalidation" {
 
   provisioner "local-exec" {
     command = <<-EOT
-      uv run --with boto3==1.43.72 python3 -c "
+      uv run --with boto3==1.43.83 python3 -c "
 import boto3
 import os
 import sys
@@ -902,16 +948,63 @@ output "cloudfront_domain_name" {
 
 output "waf_web_acl_arn" {
   description = "ARN of the WAF Web ACL"
-  value       = aws_wafv2_web_acl.cloudfront_waf.arn
+  value       = var.enable_waf ? aws_wafv2_web_acl.cloudfront_waf[0].arn : null
 }",
   "test-app.tf": "terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "6.60.0"
+      version = "6.62.0"
       configuration_aliases = [aws.us_east_1]
     }
   }
+}
+
+variable "custom_domain_names" {
+  description = "Custom domain names (aliases) for the CloudFront distribution. Requires acm_certificate_arn."
+  type        = list(string)
+  default     = []
+}
+
+variable "acm_certificate_arn" {
+  description = "ARN of an ACM certificate (in us-east-1) for the custom domain names. When set, viewers are required to use TLS 1.2 or later."
+  type        = string
+  default     = null
+}
+
+variable "enable_waf" {
+  description = "Whether to protect the CloudFront distribution with an AWS WAF Web ACL."
+  type        = bool
+  default     = true
+}
+
+variable "encryption" {
+  description = "Server-side encryption for the website and distribution log buckets. One of KMS or S3_MANAGED."
+  type        = string
+  default     = "KMS"
+
+  validation {
+    condition     = contains(["KMS", "S3_MANAGED"], var.encryption)
+    error_message = "encryption must be one of KMS or S3_MANAGED."
+  }
+}
+
+variable "kms_key_arn" {
+  description = "ARN of an existing KMS key used to encrypt the website and distribution log buckets when encryption is KMS. When not provided and create_kms_key is true, a new key is created. Note that a customer-supplied key must already grant the CloudWatch Logs, S3 and CloudFront service principals the necessary permissions in its own key policy."
+  type        = string
+  default     = null
+}
+
+variable "create_kms_key" {
+  description = "Whether to create a KMS key for the website. Only applies when encryption is KMS. Set to false when supplying kms_key_arn."
+  type        = bool
+  default     = true
+}
+
+variable "enable_key_rotation" {
+  description = "Whether the automatically created KMS key has rotation enabled. Only applies when encryption is KMS and create_kms_key is true."
+  type        = bool
+  default     = true
 }
 
 # Static website module configured for the web package
@@ -920,6 +1013,14 @@ module "static_website" {
 
   website_name      = "test-app"
   website_file_path = "\${path.module}/../../../../../../../dist/test-app/bundle"
+
+  custom_domain_names = var.custom_domain_names
+  acm_certificate_arn = var.acm_certificate_arn
+  enable_waf          = var.enable_waf
+  encryption          = var.encryption
+  kms_key_arn         = var.kms_key_arn
+  create_kms_key      = var.create_kms_key
+  enable_key_rotation = var.enable_key_rotation
 
   providers = {
     aws.us_east_1 = aws.us_east_1
@@ -961,7 +1062,7 @@ exports[`react-website generator > Tanstack router integration > should generate
 
 exports[`react-website generator > Tanstack router integration > should generate website with no router correctly > biome.json 1`] = `
 "{
-  "$schema": "https://biomejs.dev/schemas/2.5.8/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.5.11/schema.json",
   "root": true,
   "formatter": {
     "enabled": true,
@@ -1007,6 +1108,7 @@ exports[`react-website generator > Tanstack router integration > should generate
       "**",
       "!**/dist",
       "!**/out-tsc",
+      "!**/test-output",
       "!**/node_modules",
       "!**/.nx",
       "!**/.venv",
@@ -1126,7 +1228,7 @@ exports[`react-website generator > Tanstack router integration > should generate
     "biome": ["default", "{workspaceRoot}/biome.json"],
     "default": [
       {
-        "dependentTasksOutputFiles": "**/*",
+        "dependentTasksOutputFiles": "!{reports,coverage}/**",
         "transitive": true
       }
     ]
@@ -1140,11 +1242,11 @@ exports[`react-website generator > Tanstack router integration > should generate
   "name": "@proj/source",
   "dependencies": {},
   "devDependencies": {
-    "@nx/js": "23.1.1",
+    "@nx/js": "23.1.2",
     "@nx/react": "catalog:",
-    "@nx/vite": "23.1.1",
-    "@nx/vitest": "23.1.1",
-    "@nx/web": "23.1.1",
+    "@nx/vite": "23.1.2",
+    "@nx/vitest": "23.1.2",
+    "@nx/web": "23.1.2",
     "@swc/helpers": "~0.5.18",
     "@tailwindcss/vite": "catalog:",
     "@testing-library/dom": "10.4.0",
@@ -1166,7 +1268,12 @@ exports[`react-website generator > Tanstack router integration > should generate
     "packages/*",
     "test-app",
     "packages/common/constructs"
-  ]
+  ],
+  "overrides": {
+    "@nx/react": {
+      "express": "5.2.1"
+    }
+  }
 }
 "
 `;
@@ -1178,27 +1285,27 @@ This library was generated with [@aws/nx-plugin](https://github.com/awslabs/nx-p
 
 ## Building
 
-Run \`pnpm nx build @proj/common-constructs [--skip-nx-cache]\` to build the application.
+Run \`npx nx build @proj/common-constructs [--skip-nx-cache]\` to build the application.
 
 ## Running unit tests
 
-Run \`pnpm nx test @proj/common-constructs\` to execute the unit tests via Vitest.
+Run \`npx nx test @proj/common-constructs\` to execute the unit tests via Vitest.
 
 ### Updating snapshots
 
 To update snapshots, run the following command:
 
-\`pnpm nx test @proj/common-constructs --configuration=update-snapshot\`
+\`npx nx test @proj/common-constructs --configuration=update-snapshot\`
 
 ## Run lint
 
-Run \`pnpm nx lint @proj/common-constructs\`
+Run \`npx nx lint @proj/common-constructs\`
 
 ### Fixable issues
 
 You can also automatiaclly fix some lint errors by running the following command:
 
-\`pnpm nx lint @proj/common-constructs --configuration=fix\`
+\`npx nx lint @proj/common-constructs --configuration=fix\`
 
 ## Useful links
 
@@ -1237,6 +1344,9 @@ exports[`react-website generator > Tanstack router integration > should generate
     "generator": "ts#project"
   },
   "targets": {
+    "assemble": {
+      "dependsOn": ["compile", "@proj/test-app:assemble"]
+    },
     "build": {
       "dependsOn": ["lint", "compile", "test", "@proj/test-app:build"]
     },
@@ -1299,11 +1409,17 @@ exports[`react-website generator > Tanstack router integration > should generate
 exports[`react-website generator > Tanstack router integration > should generate website with no router correctly > packages/common/constructs/src/app/static-websites/test-app.ts 1`] = `
 "import * as url from 'url';
 import { Construct } from 'constructs';
-import { StaticWebsite } from '../../core/index.js';
+import { StaticWebsite, StaticWebsiteProps } from '../../core/index.js';
+
+export type TestAppProps = Omit<
+  StaticWebsiteProps,
+  'websiteName' | 'websiteFilePath'
+>;
 
 export class TestApp extends StaticWebsite {
-  constructor(scope: Construct, id: string) {
+  constructor(scope: Construct, id: string, props?: TestAppProps) {
     super(scope, id, {
+      ...props,
       websiteName: 'TestApp',
       websiteFilePath: url.fileURLToPath(
         new URL('../../../../../../dist/test-app/bundle', import.meta.url),
@@ -1641,7 +1757,7 @@ import {
 } from 'aws-cdk-lib/aws-s3-deployment';
 import { Construct } from 'constructs';
 import { RuntimeConfig } from './runtime-config.js';
-import { Key } from 'aws-cdk-lib/aws-kms';
+import { IKey, Key } from 'aws-cdk-lib/aws-kms';
 import {
   CfnDelivery,
   CfnDeliveryDestination,
@@ -1684,6 +1800,33 @@ export interface StaticWebsiteProps {
    * When provided, viewers are required to use TLS 1.2 or later.
    */
   readonly certificate?: ICertificate;
+  /**
+   * Whether to protect the CloudFront distribution with an AWS WAF Web ACL.
+   *
+   * @default true
+   */
+  readonly enableWaf?: boolean;
+  /**
+   * Server-side encryption for the website and distribution log buckets.
+   *
+   * @default BucketEncryption.KMS
+   */
+  readonly encryption?: BucketEncryption;
+  /**
+   * KMS key used to encrypt the website and distribution log buckets. Only used when \`encryption\` is
+   * \`BucketEncryption.KMS\`. When not provided, a new key is created. Note that a key imported via
+   * \`Key.fromKeyArn\` must already grant the CloudWatch Logs, S3 and CloudFront service principals the
+   * necessary permissions in its own key policy - \`addToResourcePolicy\` is a no-op on an imported key,
+   * so this construct cannot grant them on your behalf.
+   */
+  readonly encryptionKey?: IKey;
+  /**
+   * Whether the automatically created KMS key has rotation enabled. Only applies when \`encryption\` is
+   * \`BucketEncryption.KMS\` and no \`encryptionKey\` is supplied.
+   *
+   * @default true
+   */
+  readonly enableKeyRotation?: boolean;
 }
 
 /**
@@ -1707,17 +1850,22 @@ export class StaticWebsite extends Construct {
       websiteName,
       domainNames,
       certificate,
+      enableWaf = true,
+      encryption = BucketEncryption.KMS,
+      encryptionKey,
+      enableKeyRotation = true,
     }: StaticWebsiteProps,
   ) {
     super(scope, id);
 
-    const websiteKey = new Key(this, 'WebsiteKey', {
-      enableKeyRotation: true,
-    });
+    const websiteKey: IKey | undefined =
+      encryption === BucketEncryption.KMS
+        ? (encryptionKey ?? new Key(this, 'WebsiteKey', { enableKeyRotation }))
+        : undefined;
 
     // Allow CloudWatch Logs to use the website key for server access log delivery.
     const stack = Stack.of(this);
-    websiteKey.addToResourcePolicy(
+    websiteKey?.addToResourcePolicy(
       new PolicyStatement({
         effect: Effect.ALLOW,
         principals: [
@@ -1751,7 +1899,7 @@ export class StaticWebsite extends Construct {
       enforceSSL: true,
       autoDeleteObjects: true,
       removalPolicy: RemovalPolicy.DESTROY,
-      encryption: BucketEncryption.KMS,
+      encryption,
       encryptionKey: websiteKey,
       objectOwnership: ObjectOwnership.BUCKET_OWNER_ENFORCED,
       publicReadAccess: false,
@@ -1768,7 +1916,7 @@ export class StaticWebsite extends Construct {
       accessLogs,
     );
     // Web ACL
-    const wafStack = new CloudfrontWebAcl(this, 'waf');
+    const wafStack = enableWaf ? new CloudfrontWebAcl(this, 'waf') : undefined;
 
     // Bucket holding CloudFront standard access logs. CloudFront delivers its
     // own logs to S3 only, so this bucket is retained; its S3 server access
@@ -1777,7 +1925,7 @@ export class StaticWebsite extends Construct {
       enforceSSL: true,
       autoDeleteObjects: true,
       removalPolicy: RemovalPolicy.DESTROY,
-      encryption: BucketEncryption.KMS,
+      encryption,
       encryptionKey: websiteKey,
       objectOwnership: ObjectOwnership.BUCKET_OWNER_PREFERRED,
       publicReadAccess: false,
@@ -1830,7 +1978,7 @@ export class StaticWebsite extends Construct {
       this,
       'CloudfrontDistribution',
       {
-        webAclId: wafStack.wafArn,
+        webAclId: wafStack?.wafArn,
         enableLogging: true,
         logBucket: logBucket,
         ...(certificate
@@ -2163,7 +2311,8 @@ export default defineConfig(() => ({
     include: ['{src,tests}/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
     reporters: ['default'],
     coverage: {
-      reportsDirectory: './test-output/vitest/coverage',
+      reportsDirectory:
+        '../../../dist/packages/common/constructs/test-output/vitest/coverage',
       provider: 'v8' as const,
     },
   },
@@ -2177,20 +2326,20 @@ exports[`react-website generator > Tanstack router integration > should generate
   - test-app
   - packages/common/*
 catalog:
-  vite: 8.2.1
-  vitest: 4.1.10
-  '@vitest/coverage-v8': 4.1.10
+  vite: 8.2.2
+  vitest: 4.1.11
+  '@vitest/coverage-v8': 4.1.11
   constructs: 10.8.1
-  aws-cdk-lib: 2.265.0
-  '@types/node': 26.2.0
+  aws-cdk-lib: 2.267.0
+  '@types/node': 26.4.0
   react: 19.2.8
   react-dom: 19.2.8
-  '@cloudscape-design/components': 3.0.1347
-  '@cloudscape-design/board-components': 3.0.218
-  '@cloudscape-design/global-styles': 1.0.66
+  '@cloudscape-design/components': 3.0.1356
+  '@cloudscape-design/board-components': 3.0.221
+  '@cloudscape-design/global-styles': 1.0.67
   tailwindcss: 4.3.3
-  '@nx/react': 23.1.1
-  '@vitest/ui': 4.1.10
+  '@nx/react': 23.1.2
+  '@vitest/ui': 4.1.11
   '@tailwindcss/vite': 4.3.3
 "
 `;
@@ -2201,37 +2350,37 @@ This library was generated with [@aws/nx-plugin](https://github.com/awslabs/nx-p
 
 ## Building
 
-Run \`pnpm nx build @proj/test-app [--skip-nx-cache]\` to build the application.
+Run \`npx nx build @proj/test-app [--skip-nx-cache]\` to build the application.
 
 ## Run dev server
 
-Run \`pnpm nx serve @proj/test-app\`
+Run \`npx nx serve @proj/test-app\`
 
 ## Running unit tests
 
-Run \`pnpm nx test @proj/test-app\` to execute the unit tests via Vitest.
+Run \`npx nx test @proj/test-app\` to execute the unit tests via Vitest.
 
 ### Updating snapshots
 
 To update snapshots, run the following command:
 
-\`pnpm nx test @proj/test-app --configuration=update-snapshot\`
+\`npx nx test @proj/test-app --configuration=update-snapshot\`
 
 ## Run lint
 
-Run \`pnpm nx lint @proj/test-app\`
+Run \`npx nx lint @proj/test-app\`
 
 ### Fixable issues
 
 You can also automatically fix some lint errors by running the following command:
 
-\`pnpm nx lint @proj/test-app --configuration=fix\`
+\`npx nx lint @proj/test-app --configuration=fix\`
 
 ### Runtime config
 
 In order to integrate with cognito or trpc backends, you need to have a \`runtime-config.json\` file in your \`/public\` website directory. You can fetch this is follows:
 
-\`pnpm nx load-runtime-config @proj/test-app\`
+\`npx nx load-runtime-config @proj/test-app\`
 
 > [!IMPORTANT]
 > Ensure you have AWS CLI and curl installed
@@ -2292,6 +2441,7 @@ exports[`react-website generator > Tanstack router integration > should generate
   "projectType": "application",
   "tags": [],
   "metadata": {
+    "ports": [4200],
     "generator": "ts#react-website",
     "ux": "cloudscape",
     "framework": "react",
@@ -2301,11 +2451,14 @@ exports[`react-website generator > Tanstack router integration > should generate
     "iac": "cdk"
   },
   "targets": {
+    "assemble": {
+      "dependsOn": ["compile", "bundle"]
+    },
     "build": {
       "dependsOn": ["lint", "compile", "test", "bundle"]
     },
     "compile": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["^compile"],
       "executor": "nx:run-commands",
       "outputs": ["{workspaceRoot}/dist/{projectRoot}/tsc"],
       "options": {
@@ -2357,7 +2510,7 @@ exports[`react-website generator > Tanstack router integration > should generate
     "load-runtime-config": {
       "executor": "nx:run-commands",
       "metadata": {
-        "description": "Load runtime config from your deployed stack for dev purposes. You must set your AWS CLI credentials whilst calling 'pnpm nx load-runtime-config @proj/test-app'"
+        "description": "Load runtime config from your deployed stack for dev purposes. You must set your AWS CLI credentials whilst calling 'npx nx load-runtime-config @proj/test-app'"
       },
       "options": {
         "command": "aws s3 cp s3://\`aws cloudformation describe-stacks --query \\"Stacks[?starts_with(StackName, 'proj-')][].Outputs[] | [?contains(OutputKey, 'TestAppWebsiteBucketName')].OutputValue\\" --output text\`/runtime-config.json \\"{projectRoot}/public/runtime-config.json\\""
@@ -2709,7 +2862,7 @@ export default defineConfig(() => ({
     include: ['{src,tests}/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
     reporters: ['default'],
     coverage: {
-      reportsDirectory: './test-output/vitest/coverage',
+      reportsDirectory: '../dist/test-app/test-output/vitest/coverage',
       provider: 'v8' as const,
     },
   },
@@ -2782,7 +2935,7 @@ exports[`react-website generator > Tanstack router integration > should generate
 
 exports[`react-website generator > Tanstack router integration > should generate website with router correctly > biome.json 1`] = `
 "{
-  "$schema": "https://biomejs.dev/schemas/2.5.8/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.5.11/schema.json",
   "root": true,
   "formatter": {
     "enabled": true,
@@ -2828,6 +2981,7 @@ exports[`react-website generator > Tanstack router integration > should generate
       "**",
       "!**/dist",
       "!**/out-tsc",
+      "!**/test-output",
       "!**/node_modules",
       "!**/.nx",
       "!**/.venv",
@@ -2947,7 +3101,7 @@ exports[`react-website generator > Tanstack router integration > should generate
     "biome": ["default", "{workspaceRoot}/biome.json"],
     "default": [
       {
-        "dependentTasksOutputFiles": "**/*",
+        "dependentTasksOutputFiles": "!{reports,coverage}/**",
         "transitive": true
       }
     ]
@@ -2961,11 +3115,11 @@ exports[`react-website generator > Tanstack router integration > should generate
   "name": "@proj/source",
   "dependencies": {},
   "devDependencies": {
-    "@nx/js": "23.1.1",
+    "@nx/js": "23.1.2",
     "@nx/react": "catalog:",
-    "@nx/vite": "23.1.1",
-    "@nx/vitest": "23.1.1",
-    "@nx/web": "23.1.1",
+    "@nx/vite": "23.1.2",
+    "@nx/vitest": "23.1.2",
+    "@nx/web": "23.1.2",
     "@swc/helpers": "~0.5.18",
     "@tailwindcss/vite": "catalog:",
     "@tanstack/router-generator": "catalog:",
@@ -2991,7 +3145,12 @@ exports[`react-website generator > Tanstack router integration > should generate
     "packages/*",
     "test-app",
     "packages/common/constructs"
-  ]
+  ],
+  "overrides": {
+    "@nx/react": {
+      "express": "5.2.1"
+    }
+  }
 }
 "
 `;
@@ -3003,27 +3162,27 @@ This library was generated with [@aws/nx-plugin](https://github.com/awslabs/nx-p
 
 ## Building
 
-Run \`pnpm nx build @proj/common-constructs [--skip-nx-cache]\` to build the application.
+Run \`npx nx build @proj/common-constructs [--skip-nx-cache]\` to build the application.
 
 ## Running unit tests
 
-Run \`pnpm nx test @proj/common-constructs\` to execute the unit tests via Vitest.
+Run \`npx nx test @proj/common-constructs\` to execute the unit tests via Vitest.
 
 ### Updating snapshots
 
 To update snapshots, run the following command:
 
-\`pnpm nx test @proj/common-constructs --configuration=update-snapshot\`
+\`npx nx test @proj/common-constructs --configuration=update-snapshot\`
 
 ## Run lint
 
-Run \`pnpm nx lint @proj/common-constructs\`
+Run \`npx nx lint @proj/common-constructs\`
 
 ### Fixable issues
 
 You can also automatiaclly fix some lint errors by running the following command:
 
-\`pnpm nx lint @proj/common-constructs --configuration=fix\`
+\`npx nx lint @proj/common-constructs --configuration=fix\`
 
 ## Useful links
 
@@ -3062,6 +3221,9 @@ exports[`react-website generator > Tanstack router integration > should generate
     "generator": "ts#project"
   },
   "targets": {
+    "assemble": {
+      "dependsOn": ["compile", "@proj/test-app:assemble"]
+    },
     "build": {
       "dependsOn": ["lint", "compile", "test", "@proj/test-app:build"]
     },
@@ -3124,11 +3286,17 @@ exports[`react-website generator > Tanstack router integration > should generate
 exports[`react-website generator > Tanstack router integration > should generate website with router correctly > packages/common/constructs/src/app/static-websites/test-app.ts 1`] = `
 "import * as url from 'url';
 import { Construct } from 'constructs';
-import { StaticWebsite } from '../../core/index.js';
+import { StaticWebsite, StaticWebsiteProps } from '../../core/index.js';
+
+export type TestAppProps = Omit<
+  StaticWebsiteProps,
+  'websiteName' | 'websiteFilePath'
+>;
 
 export class TestApp extends StaticWebsite {
-  constructor(scope: Construct, id: string) {
+  constructor(scope: Construct, id: string, props?: TestAppProps) {
     super(scope, id, {
+      ...props,
       websiteName: 'TestApp',
       websiteFilePath: url.fileURLToPath(
         new URL('../../../../../../dist/test-app/bundle', import.meta.url),
@@ -3466,7 +3634,7 @@ import {
 } from 'aws-cdk-lib/aws-s3-deployment';
 import { Construct } from 'constructs';
 import { RuntimeConfig } from './runtime-config.js';
-import { Key } from 'aws-cdk-lib/aws-kms';
+import { IKey, Key } from 'aws-cdk-lib/aws-kms';
 import {
   CfnDelivery,
   CfnDeliveryDestination,
@@ -3509,6 +3677,33 @@ export interface StaticWebsiteProps {
    * When provided, viewers are required to use TLS 1.2 or later.
    */
   readonly certificate?: ICertificate;
+  /**
+   * Whether to protect the CloudFront distribution with an AWS WAF Web ACL.
+   *
+   * @default true
+   */
+  readonly enableWaf?: boolean;
+  /**
+   * Server-side encryption for the website and distribution log buckets.
+   *
+   * @default BucketEncryption.KMS
+   */
+  readonly encryption?: BucketEncryption;
+  /**
+   * KMS key used to encrypt the website and distribution log buckets. Only used when \`encryption\` is
+   * \`BucketEncryption.KMS\`. When not provided, a new key is created. Note that a key imported via
+   * \`Key.fromKeyArn\` must already grant the CloudWatch Logs, S3 and CloudFront service principals the
+   * necessary permissions in its own key policy - \`addToResourcePolicy\` is a no-op on an imported key,
+   * so this construct cannot grant them on your behalf.
+   */
+  readonly encryptionKey?: IKey;
+  /**
+   * Whether the automatically created KMS key has rotation enabled. Only applies when \`encryption\` is
+   * \`BucketEncryption.KMS\` and no \`encryptionKey\` is supplied.
+   *
+   * @default true
+   */
+  readonly enableKeyRotation?: boolean;
 }
 
 /**
@@ -3532,17 +3727,22 @@ export class StaticWebsite extends Construct {
       websiteName,
       domainNames,
       certificate,
+      enableWaf = true,
+      encryption = BucketEncryption.KMS,
+      encryptionKey,
+      enableKeyRotation = true,
     }: StaticWebsiteProps,
   ) {
     super(scope, id);
 
-    const websiteKey = new Key(this, 'WebsiteKey', {
-      enableKeyRotation: true,
-    });
+    const websiteKey: IKey | undefined =
+      encryption === BucketEncryption.KMS
+        ? (encryptionKey ?? new Key(this, 'WebsiteKey', { enableKeyRotation }))
+        : undefined;
 
     // Allow CloudWatch Logs to use the website key for server access log delivery.
     const stack = Stack.of(this);
-    websiteKey.addToResourcePolicy(
+    websiteKey?.addToResourcePolicy(
       new PolicyStatement({
         effect: Effect.ALLOW,
         principals: [
@@ -3576,7 +3776,7 @@ export class StaticWebsite extends Construct {
       enforceSSL: true,
       autoDeleteObjects: true,
       removalPolicy: RemovalPolicy.DESTROY,
-      encryption: BucketEncryption.KMS,
+      encryption,
       encryptionKey: websiteKey,
       objectOwnership: ObjectOwnership.BUCKET_OWNER_ENFORCED,
       publicReadAccess: false,
@@ -3593,7 +3793,7 @@ export class StaticWebsite extends Construct {
       accessLogs,
     );
     // Web ACL
-    const wafStack = new CloudfrontWebAcl(this, 'waf');
+    const wafStack = enableWaf ? new CloudfrontWebAcl(this, 'waf') : undefined;
 
     // Bucket holding CloudFront standard access logs. CloudFront delivers its
     // own logs to S3 only, so this bucket is retained; its S3 server access
@@ -3602,7 +3802,7 @@ export class StaticWebsite extends Construct {
       enforceSSL: true,
       autoDeleteObjects: true,
       removalPolicy: RemovalPolicy.DESTROY,
-      encryption: BucketEncryption.KMS,
+      encryption,
       encryptionKey: websiteKey,
       objectOwnership: ObjectOwnership.BUCKET_OWNER_PREFERRED,
       publicReadAccess: false,
@@ -3655,7 +3855,7 @@ export class StaticWebsite extends Construct {
       this,
       'CloudfrontDistribution',
       {
-        webAclId: wafStack.wafArn,
+        webAclId: wafStack?.wafArn,
         enableLogging: true,
         logBucket: logBucket,
         ...(certificate
@@ -3988,7 +4188,8 @@ export default defineConfig(() => ({
     include: ['{src,tests}/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
     reporters: ['default'],
     coverage: {
-      reportsDirectory: './test-output/vitest/coverage',
+      reportsDirectory:
+        '../../../dist/packages/common/constructs/test-output/vitest/coverage',
       provider: 'v8' as const,
     },
   },
@@ -4002,24 +4203,24 @@ exports[`react-website generator > Tanstack router integration > should generate
   - test-app
   - packages/common/*
 catalog:
-  vite: 8.2.1
-  vitest: 4.1.10
-  '@vitest/coverage-v8': 4.1.10
+  vite: 8.2.2
+  vitest: 4.1.11
+  '@vitest/coverage-v8': 4.1.11
   constructs: 10.8.1
-  aws-cdk-lib: 2.265.0
-  '@types/node': 26.2.0
+  aws-cdk-lib: 2.267.0
+  '@types/node': 26.4.0
   react: 19.2.8
   react-dom: 19.2.8
-  '@cloudscape-design/components': 3.0.1347
-  '@cloudscape-design/board-components': 3.0.218
-  '@cloudscape-design/global-styles': 1.0.66
+  '@cloudscape-design/components': 3.0.1356
+  '@cloudscape-design/board-components': 3.0.221
+  '@cloudscape-design/global-styles': 1.0.67
   tailwindcss: 4.3.3
-  '@tanstack/react-router': 1.170.29
-  '@nx/react': 23.1.1
-  '@vitest/ui': 4.1.10
+  '@tanstack/react-router': 1.170.32
+  '@nx/react': 23.1.2
+  '@vitest/ui': 4.1.11
   '@tailwindcss/vite': 4.3.3
-  '@tanstack/router-plugin': 1.168.32
-  '@tanstack/router-generator': 1.167.30
+  '@tanstack/router-plugin': 1.168.35
+  '@tanstack/router-generator': 1.167.33
   '@tanstack/virtual-file-routes': 1.162.0
   '@tanstack/router-utils': 1.162.2
 "
@@ -4031,37 +4232,37 @@ This library was generated with [@aws/nx-plugin](https://github.com/awslabs/nx-p
 
 ## Building
 
-Run \`pnpm nx build @proj/test-app [--skip-nx-cache]\` to build the application.
+Run \`npx nx build @proj/test-app [--skip-nx-cache]\` to build the application.
 
 ## Run dev server
 
-Run \`pnpm nx serve @proj/test-app\`
+Run \`npx nx serve @proj/test-app\`
 
 ## Running unit tests
 
-Run \`pnpm nx test @proj/test-app\` to execute the unit tests via Vitest.
+Run \`npx nx test @proj/test-app\` to execute the unit tests via Vitest.
 
 ### Updating snapshots
 
 To update snapshots, run the following command:
 
-\`pnpm nx test @proj/test-app --configuration=update-snapshot\`
+\`npx nx test @proj/test-app --configuration=update-snapshot\`
 
 ## Run lint
 
-Run \`pnpm nx lint @proj/test-app\`
+Run \`npx nx lint @proj/test-app\`
 
 ### Fixable issues
 
 You can also automatically fix some lint errors by running the following command:
 
-\`pnpm nx lint @proj/test-app --configuration=fix\`
+\`npx nx lint @proj/test-app --configuration=fix\`
 
 ### Runtime config
 
 In order to integrate with cognito or trpc backends, you need to have a \`runtime-config.json\` file in your \`/public\` website directory. You can fetch this is follows:
 
-\`pnpm nx load-runtime-config @proj/test-app\`
+\`npx nx load-runtime-config @proj/test-app\`
 
 > [!IMPORTANT]
 > Ensure you have AWS CLI and curl installed
@@ -4123,6 +4324,7 @@ exports[`react-website generator > Tanstack router integration > should generate
   "projectType": "application",
   "tags": [],
   "metadata": {
+    "ports": [4200],
     "generator": "ts#react-website",
     "ux": "cloudscape",
     "framework": "react",
@@ -4132,11 +4334,14 @@ exports[`react-website generator > Tanstack router integration > should generate
     "iac": "cdk"
   },
   "targets": {
+    "assemble": {
+      "dependsOn": ["compile", "bundle"]
+    },
     "build": {
       "dependsOn": ["lint", "compile", "test", "bundle"]
     },
     "compile": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["^compile"],
       "executor": "nx:run-commands",
       "outputs": ["{workspaceRoot}/dist/{projectRoot}/tsc"],
       "options": {
@@ -4188,7 +4393,7 @@ exports[`react-website generator > Tanstack router integration > should generate
     "load-runtime-config": {
       "executor": "nx:run-commands",
       "metadata": {
-        "description": "Load runtime config from your deployed stack for dev purposes. You must set your AWS CLI credentials whilst calling 'pnpm nx load-runtime-config @proj/test-app'"
+        "description": "Load runtime config from your deployed stack for dev purposes. You must set your AWS CLI credentials whilst calling 'npx nx load-runtime-config @proj/test-app'"
       },
       "options": {
         "command": "aws s3 cp s3://\`aws cloudformation describe-stacks --query \\"Stacks[?starts_with(StackName, 'proj-')][].Outputs[] | [?contains(OutputKey, 'TestAppWebsiteBucketName')].OutputValue\\" --output text\`/runtime-config.json \\"{projectRoot}/public/runtime-config.json\\""
@@ -4733,7 +4938,7 @@ export default defineConfig(() => ({
     include: ['{src,tests}/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
     reporters: ['default'],
     coverage: {
-      reportsDirectory: './test-output/vitest/coverage',
+      reportsDirectory: '../dist/test-app/test-output/vitest/coverage',
       provider: 'v8' as const,
     },
   },
@@ -4862,7 +5067,7 @@ export default defineConfig(() => ({
     include: ['{src,tests}/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
     reporters: ['default'],
     coverage: {
-      reportsDirectory: './test-output/vitest/coverage',
+      reportsDirectory: '../dist/test-app/test-output/vitest/coverage',
       provider: 'v8' as const,
     },
   },
@@ -5151,7 +5356,7 @@ import {
 } from 'aws-cdk-lib/aws-s3-deployment';
 import { Construct } from 'constructs';
 import { RuntimeConfig } from './runtime-config.js';
-import { Key } from 'aws-cdk-lib/aws-kms';
+import { IKey, Key } from 'aws-cdk-lib/aws-kms';
 import {
   CfnDelivery,
   CfnDeliveryDestination,
@@ -5194,6 +5399,33 @@ export interface StaticWebsiteProps {
    * When provided, viewers are required to use TLS 1.2 or later.
    */
   readonly certificate?: ICertificate;
+  /**
+   * Whether to protect the CloudFront distribution with an AWS WAF Web ACL.
+   *
+   * @default true
+   */
+  readonly enableWaf?: boolean;
+  /**
+   * Server-side encryption for the website and distribution log buckets.
+   *
+   * @default BucketEncryption.KMS
+   */
+  readonly encryption?: BucketEncryption;
+  /**
+   * KMS key used to encrypt the website and distribution log buckets. Only used when \`encryption\` is
+   * \`BucketEncryption.KMS\`. When not provided, a new key is created. Note that a key imported via
+   * \`Key.fromKeyArn\` must already grant the CloudWatch Logs, S3 and CloudFront service principals the
+   * necessary permissions in its own key policy - \`addToResourcePolicy\` is a no-op on an imported key,
+   * so this construct cannot grant them on your behalf.
+   */
+  readonly encryptionKey?: IKey;
+  /**
+   * Whether the automatically created KMS key has rotation enabled. Only applies when \`encryption\` is
+   * \`BucketEncryption.KMS\` and no \`encryptionKey\` is supplied.
+   *
+   * @default true
+   */
+  readonly enableKeyRotation?: boolean;
 }
 
 /**
@@ -5217,17 +5449,22 @@ export class StaticWebsite extends Construct {
       websiteName,
       domainNames,
       certificate,
+      enableWaf = true,
+      encryption = BucketEncryption.KMS,
+      encryptionKey,
+      enableKeyRotation = true,
     }: StaticWebsiteProps,
   ) {
     super(scope, id);
 
-    const websiteKey = new Key(this, 'WebsiteKey', {
-      enableKeyRotation: true,
-    });
+    const websiteKey: IKey | undefined =
+      encryption === BucketEncryption.KMS
+        ? (encryptionKey ?? new Key(this, 'WebsiteKey', { enableKeyRotation }))
+        : undefined;
 
     // Allow CloudWatch Logs to use the website key for server access log delivery.
     const stack = Stack.of(this);
-    websiteKey.addToResourcePolicy(
+    websiteKey?.addToResourcePolicy(
       new PolicyStatement({
         effect: Effect.ALLOW,
         principals: [
@@ -5261,7 +5498,7 @@ export class StaticWebsite extends Construct {
       enforceSSL: true,
       autoDeleteObjects: true,
       removalPolicy: RemovalPolicy.DESTROY,
-      encryption: BucketEncryption.KMS,
+      encryption,
       encryptionKey: websiteKey,
       objectOwnership: ObjectOwnership.BUCKET_OWNER_ENFORCED,
       publicReadAccess: false,
@@ -5278,7 +5515,7 @@ export class StaticWebsite extends Construct {
       accessLogs,
     );
     // Web ACL
-    const wafStack = new CloudfrontWebAcl(this, 'waf');
+    const wafStack = enableWaf ? new CloudfrontWebAcl(this, 'waf') : undefined;
 
     // Bucket holding CloudFront standard access logs. CloudFront delivers its
     // own logs to S3 only, so this bucket is retained; its S3 server access
@@ -5287,7 +5524,7 @@ export class StaticWebsite extends Construct {
       enforceSSL: true,
       autoDeleteObjects: true,
       removalPolicy: RemovalPolicy.DESTROY,
-      encryption: BucketEncryption.KMS,
+      encryption,
       encryptionKey: websiteKey,
       objectOwnership: ObjectOwnership.BUCKET_OWNER_PREFERRED,
       publicReadAccess: false,
@@ -5340,7 +5577,7 @@ export class StaticWebsite extends Construct {
       this,
       'CloudfrontDistribution',
       {
-        webAclId: wafStack.wafArn,
+        webAclId: wafStack?.wafArn,
         enableLogging: true,
         logBucket: logBucket,
         ...(certificate
@@ -5539,11 +5776,17 @@ export class CloudfrontWebAcl extends Stack {
 exports[`react-website generator > should generate shared constructs > test-app.ts 1`] = `
 "import * as url from 'url';
 import { Construct } from 'constructs';
-import { StaticWebsite } from '../../core/index.js';
+import { StaticWebsite, StaticWebsiteProps } from '../../core/index.js';
+
+export type TestAppProps = Omit<
+  StaticWebsiteProps,
+  'websiteName' | 'websiteFilePath'
+>;
 
 export class TestApp extends StaticWebsite {
-  constructor(scope: Construct, id: string) {
+  constructor(scope: Construct, id: string, props?: TestAppProps) {
     super(scope, id, {
+      ...props,
       websiteName: 'TestApp',
       websiteFilePath: url.fileURLToPath(
         new URL('../../../../../../dist/test-app/bundle', import.meta.url),

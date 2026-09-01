@@ -4,9 +4,9 @@
  */
 import { generateFiles, type Tree } from '@nx/devkit';
 import path from 'path';
-import { formatFilesInSubtree } from '../../utils/format';
-import { buildOpenApiCodeGenerationData } from '../ts-client/generator';
-import type { CodeGenData } from '../utils/codegen-data/types';
+import { formatFilesInSubtree } from '../../utils/format.js';
+import { buildOpenApiCodeGenerationData } from '../ts-client/generator.js';
+import type { CodeGenData } from '../utils/codegen-data/types.js';
 import type { OpenApiTsMetadataGeneratorSchema } from './schema';
 
 /**

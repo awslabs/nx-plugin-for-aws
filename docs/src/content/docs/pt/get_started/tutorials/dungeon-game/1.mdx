@@ -41,7 +41,7 @@ Isso configurará um monorepo NX dentro do diretório `dungeon-adventure`. Quand
 - packages/ aqui é onde seus sub-projetos residirão
 - .gitignore
 - biome.json configura o Biome para linting e formatação
-- nx.json configura o Nx CLI e padrões do monorepo
+- nx.json configura o CLI do Nx e os padrões do monorepo
 - package.json todas as dependências node são definidas aqui
 - pnpm-lock.yaml ou bun.lock, yarn.lock, package-lock.json dependendo do gerenciador de pacotes
 - pnpm-workspace.yaml se estiver usando pnpm
@@ -53,11 +53,11 @@ Isso configurará um monorepo NX dentro do diretório `dungeon-adventure`. Quand
 
 <Aside type="tip" title="Faça Commits Frequentes">É uma boa prática garantir que todos os seus arquivos não preparados estejam commitados no Git antes de executar qualquer gerador. Isso permite que você veja o que mudou após executar seu gerador via `git diff`.</Aside>
 
-## Tarefa 2: Estruturar o Jogo Dungeon Adventure
+## Tarefa 2: Estruturar o Jogo de Aventura em Masmorra
 
 Com o workspace configurado, estruturamos os sub-projetos do jogo — a API do Jogo, Agente de História, servidor MCP de Inventário, banco de dados do jogo e website — juntamente com as conexões que os conectam. Existem duas maneiras de fazer isso:
 
-- **Rápido** — copie os comandos diretamente do diagrama abaixo e execute-os. A maneira mais rápida de alcançar o mesmo ponto de partida.
+- **Rápido** — copie os comandos diretamente do diagrama abaixo e execute-os. A maneira mais rápida de chegar ao mesmo ponto de partida.
 - **Passo a Passo** — expanda a seção abaixo para executar cada gerador você mesmo e examinar exatamente o que cada um produz.
 
 O diagrama abaixo _é_ o workspace Dungeon Adventure: cada projeto, componente e conexão que você construirá neste módulo. Clique em **Copy commands** para pegar toda a série, depois execute-os de dentro do diretório `dungeon-adventure` que você criou na Tarefa 1.
@@ -84,7 +84,7 @@ Para mais detalhes sobre como trabalhar com projetos TypeScript, consulte o <Lin
 </Aside>
 
 <details>
-<summary>Examine os arquivos gerados por `ts#api` em detalhes</summary>
+<summary>Examine os arquivos gerados pelo `ts#api` em detalhes</summary>
 
 Abaixo está uma lista de todos os arquivos que foram gerados pelo gerador `ts#api`. Vamos examinar alguns dos arquivos principais destacados na árvore de arquivos:
 <FileTree>
@@ -269,7 +269,7 @@ export class GameApi<
       pattern: 'isolated',
       operations: routerToOperations(appRouter),
       defaultIntegrationOptions: {
-        runtime: Runtime.NODEJS_LATEST,
+        runtime: Runtime.NODEJS_24_X,
         handler: 'index.handler',
         code: Code.fromAsset(
           url.fileURLToPath(
@@ -406,7 +406,7 @@ Para criar um projeto Python:
 
 Você verá alguns novos arquivos aparecerem na sua árvore de arquivos.
 <details>
-<summary>Examine os arquivos gerados por `py#project` em detalhes</summary>
+<summary>Examine os arquivos gerados pelo `py#project` em detalhes</summary>
 
 O `py#project` gera estes arquivos:
 
@@ -419,7 +419,7 @@ O `py#project` gera estes arquivos:
     - .python-version
     - pyproject.toml
     - project.json
-- .python-version versão python fixada do uv
+- .python-version versão python do uv fixada
 - pyproject.toml
 - uv.lock
 </FileTree>
@@ -428,7 +428,7 @@ Isso configurou um projeto Python e [UV Workspace](https://docs.astral.sh/uv/con
 
 </details>
 
-###### Agente de história
+###### Story agent
 
 Para adicionar um agente Strands ao projeto com o gerador `py#agent`:
 
@@ -440,7 +440,7 @@ Escolhemos `--protocol=ag-ui` para que o agente fale o [protocolo Agent-User Int
 
 Você verá alguns novos arquivos aparecerem na sua árvore de arquivos.
 <details>
-<summary>Examine os arquivos gerados por `py#agent` em detalhes</summary>
+<summary>Examine os arquivos gerados pelo `py#agent` em detalhes</summary>
 
 O `py#agent` gera estes arquivos:
 
@@ -450,8 +450,10 @@ O `py#agent` gera estes arquivos:
     - dungeon_adventure_story/ módulo python
       - agent/
         - main.py ponto de entrada para seu agente no Bedrock AgentCore Runtime
-        - agent.py define um agente de exemplo e ferramentas
-        - session.py resolve um SessionManager para persistir o estado da conversação
+        - agent.py define um agente e ferramentas de exemplo
+        - session.py resolve um SessionManager para persistir o estado da conversa
+        - middleware/
+          - session_id_middleware.py vincula o ID de sessão AgentCore de entrada para a requisição
         - Dockerfile define a imagem docker para implantação no AgentCore Runtime
   - common/constructs/
     - src
@@ -459,13 +461,14 @@ O `py#agent` gera estes arquivos:
         - story-agent.ts construct para implantar seu agente Story no AgentCore Runtime
 </FileTree>
 
-Vamos dar uma olhada em alguns dos arquivos em detalhes:
+Vamos examinar alguns dos arquivos em detalhes:
 
 ```python
 # agent/agent.py
 from contextlib import contextmanager
 
 from strands import Agent, tool
+from strands.hooks import HookCallback, HookProvider
 from strands_tools import current_time
 from dungeon_adventure_agent_connection import log_model_errors, log_tool_errors
 
@@ -473,6 +476,9 @@ from dungeon_adventure_agent_connection import log_model_errors, log_tool_errors
 @tool
 def subtract(a: int, b: int) -> int:
     return a - b
+
+
+AGENT_HOOKS: list[HookProvider | HookCallback] = [log_model_errors, log_tool_errors]
 
 
 @contextmanager
@@ -486,11 +492,34 @@ Use your tools for mathematical tasks.
 Refer to tools as your 'spellbook'.
 """,
         tools=[subtract, current_time],
-        hooks=[log_model_errors, log_tool_errors],
+        hooks=AGENT_HOOKS,
     )
 ```
 
 Isso cria um agente Strands de exemplo e define uma ferramenta de subtração. `log_model_errors` e `log_tool_errors` são hooks do projeto compartilhado `dungeon_adventure_agent_connection` que registram falhas de modelo/ferramenta em vez de deixá-las falhar silenciosamente.
+
+```python
+# agent/middleware/session_id_middleware.py
+import uuid
+
+from fastapi import Request
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from dungeon_adventure_agent_connection import session_id_context
+
+SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
+
+
+class SessionIdMiddleware(BaseHTTPMiddleware):
+    """Bind the session ID for this request so downstream MCP / A2A clients forward it on outbound calls."""
+
+    async def dispatch(self, request: Request, call_next):
+        session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
+        with session_id_context(session_id):
+            return await call_next(request)
+```
+
+O `SessionIdMiddleware` vincula o ID de sessão do runtime AgentCore de entrada em um `ContextVar` pela duração da requisição.
 
 ```python
 # agent/main.py
@@ -505,14 +534,12 @@ from dungeon_adventure_agent_connection import get_current_session_id, session_i
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from starlette.middleware.base import BaseHTTPMiddleware
 
-from .agent import get_agent
+from .agent import AGENT_HOOKS, get_agent
+from .middleware.session_id_middleware import SESSION_ID_HEADER, SessionIdMiddleware
 from .session import get_session_manager
 
 logging.basicConfig(level=logging.INFO)
-
-SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
 
 
 @asynccontextmanager
@@ -525,17 +552,12 @@ async def lifespan(app: FastAPI):
             # A per-thread session manager, not the template Agent's own, since
             # AG-UI caches one Strands agent per thread_id.
             config=StrandsAgentConfig(session_manager_provider=lambda _input_data: get_session_manager()),
+            # Required as well as on the template Agent: AG-UI keeps only the
+            # built HookRegistry, so hooks it can't read back are never
+            # registered and model/tool failures go unreported.
+            hooks=AGENT_HOOKS,
         )
         yield
-
-
-class _SessionIdMiddleware(BaseHTTPMiddleware):
-    """Bind the session ID for this request so downstream MCP / A2A clients forward it on outbound calls."""
-
-    async def dispatch(self, request: Request, call_next):
-        session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
-        with session_id_context(session_id):
-            return await call_next(request)
 
 
 app = FastAPI(title="AWS Strands - StoryAgent", lifespan=lifespan)
@@ -546,7 +568,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.add_middleware(_SessionIdMiddleware)
+app.add_middleware(SessionIdMiddleware)
 
 
 @app.post("/invocations")
@@ -589,12 +611,11 @@ async def ping():
     return {"status": "healthy"}
 ```
 
-Este é o ponto de entrada para o agente. Como selecionamos `--protocol=ag-ui`, o gerador envolve nosso `Agent` Strands com `StrandsAgent` de [`ag_ui_strands`](https://docs.copilotkit.ai/aws-strands/integration) e o monta em um app FastAPI que fala o [protocolo AG-UI](https://docs.copilotkit.ai/aws-strands/protocol) — é com isso que o CopilotKit conversará a partir do website React. O agente é construído dentro de um handler `lifespan` — não no momento da importação — então a inicialização do container, não a importação do módulo, possui a construção, e cada sessão AgentCore obtém seu próprio container. O `_SessionIdMiddleware` vincula o ID de sessão do AgentCore Runtime de entrada a um `ContextVar` para que qualquer cliente MCP/A2A downstream que conectarmos mais tarde (por exemplo, o servidor MCP de Inventário no <Link path="get_started/tutorials/dungeon-game/2">Módulo 2</Link>) o encaminhe automaticamente em suas chamadas de saída. Como o AG-UI armazena em cache um agente Strands por `thread_id`, conectamos um `session_manager_provider` em vez do gerenciador de sessão do próprio agente de template — isso dá a cada thread seu próprio `SessionManager` para que o histórico de conversação persista entre turnos. Essa função `get_session_manager()` vem de um `session.py` irmão gerado: implantado, ele retorna um `strands.session.S3SessionManager` apoiado por um bucket S3 que o gerador provisiona automaticamente; sob `agent-dev` (`LOCAL_DEV=true`) ele sempre retorna um `FileSessionManager` escrevendo em um diretório temporário local, independentemente da configuração implantada.
+Este é o ponto de entrada para o agente. Como selecionamos `--protocol=ag-ui`, o gerador envolve nosso `Agent` Strands com `StrandsAgent` de [`ag_ui_strands`](https://docs.copilotkit.ai/aws-strands/integration) e o monta em um aplicativo FastAPI que fala o [protocolo AG-UI](https://docs.copilotkit.ai/aws-strands/protocol) — é com isso que o CopilotKit conversará a partir do website React. O agente é construído dentro de um handler `lifespan` — não no momento da importação — então a inicialização do contêiner, não a importação do módulo, possui a construção, e cada sessão AgentCore obtém seu próprio contêiner. O `SessionIdMiddleware` que vimos acima encaminha o ID de sessão do runtime AgentCore de entrada para que qualquer cliente MCP/A2A downstream que conectarmos mais tarde (por exemplo, o servidor MCP de Inventário no <Link path="get_started/tutorials/dungeon-game/2">Módulo 2</Link>) o encaminhe automaticamente em suas chamadas de saída. Como AG-UI armazena em cache um agente Strands por `thread_id`, conectamos um `session_manager_provider` em vez do gerenciador de sessão do próprio agente de template — isso dá a cada thread seu próprio `SessionManager` para que o histórico de conversação persista entre turnos. Essa função `get_session_manager()` vem de um `session.py` irmão gerado: implantado, ele retorna um `strands.session.S3SessionManager` apoiado por um bucket S3 que o gerador provisiona automaticamente; sob `agent-dev` (`LOCAL_DEV=true`) ele sempre retorna um `FileSessionManager` escrevendo em um diretório temporário local, independentemente da configuração implantada.
 
 ```ts
 // common/constructs/src/app/agents/story-agent/story-agent.ts
 import { Fn, Lazy, Names, RemovalPolicy, Stack } from 'aws-cdk-lib';
-import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { Connections, IConnectable } from 'aws-cdk-lib/aws-ec2';
 import {
   BlockPublicAccess,
@@ -613,6 +634,7 @@ import { Construct } from 'constructs';
 import * as path from 'path';
 import * as url from 'url';
 import {
+  AgentCoreRuntime,
   AgentRuntimeArtifact,
   ProtocolType,
   Runtime,
@@ -656,7 +678,7 @@ export type StoryAgentProps = Omit<
 };
 
 export class StoryAgent extends Construct implements IGrantable, IConnectable {
-  public readonly dockerImage: AgentRuntimeArtifact;
+  public readonly code: AgentRuntimeArtifact;
   public readonly agentCoreRuntime: Runtime;
   /** Default Gateway target name for this agent. */
   public readonly agentName = 'story-agent';
@@ -668,14 +690,19 @@ export class StoryAgent extends Construct implements IGrantable, IConnectable {
 
     const rc = RuntimeConfig.ensure(this);
 
-    // Resolve the bundle output directory containing the Dockerfile and built artifacts
+    // Resolve the packaged code directory, uploaded as a zip asset
     const bundleDir = path.join(
       findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
-      'dist/packages/story/docker/story-agent',
+      'dist/packages/story/package/story-agent',
     );
 
-    this.dockerImage = AgentRuntimeArtifact.fromAsset(bundleDir, {
-      platform: Platform.LINUX_ARM64,
+    // The `opentelemetry-instrument` prefix auto-instruments with the AWS Distro
+    // for OpenTelemetry packaged alongside the code.
+    // https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html
+    this.code = AgentRuntimeArtifact.fromCodeAsset({
+      path: bundleDir,
+      runtime: AgentCoreRuntime.PYTHON_3_14,
+      entrypoint: ['opentelemetry-instrument', 'main.py'],
     });
 
     const {
@@ -795,7 +822,7 @@ export class StoryAgent extends Construct implements IGrantable, IConnectable {
           Names.uniqueResourceName(this.agentCoreRuntime, { maxLength: 40 }),
       }),
       protocolConfiguration: ProtocolType.HTTP,
-      agentRuntimeArtifact: this.dockerImage,
+      agentRuntimeArtifact: this.code,
       authorizerConfiguration: RuntimeAuthorizerConfiguration.usingCognito(
         identity.userPool,
         [identity.userPoolClient],
@@ -877,9 +904,9 @@ export class StoryAgent extends Construct implements IGrantable, IConnectable {
 }
 ```
 
-Isso configura um `AgentRuntimeArtifact` CDK que faz upload da imagem Docker do seu agente para o ECR e o hospeda usando o AgentCore Runtime. Como escolhemos `--auth=cognito`, o construct requer a identidade do user pool/client e autoriza invocações do AgentCore Runtime através do Cognito, encaminhando o cabeçalho `Authorization` do chamador. Ele também provisiona o bucket de sessão que o `session.py` do Story Agent lê de volta em tempo de execução — um bucket S3 criptografado com KMS com logs de acesso do servidor entregues ao CloudWatch Logs — concede ao agente acesso de leitura/gravação a ele, concede acesso para invocar modelos Bedrock e registra seu ARN e nome do bucket no `RuntimeConfig` para que tanto o agente (em tempo de execução, via AppConfig) quanto a API do Jogo (em tempo de synth, via `invocationUrl`) possam encontrá-lo.
+Isso configura um `AgentRuntimeArtifact` CDK que faz upload da imagem Docker do seu agente para o ECR e a hospeda usando AgentCore Runtime. Como escolhemos `--auth=cognito`, o construct requer a identidade do user pool/client e autoriza invocações do AgentCore Runtime através do Cognito, encaminhando o cabeçalho `Authorization` do chamador. Ele também provisiona o bucket de sessão que o `session.py` do Story Agent lê de volta em tempo de execução — um bucket S3 criptografado com KMS com logs de acesso do servidor entregues ao CloudWatch Logs — concede ao agente acesso de leitura/gravação a ele, concede acesso para invocar modelos Bedrock e registra seu ARN e nome do bucket no `RuntimeConfig` para que tanto o agente (em tempo de execução, via AppConfig) quanto a Game API (em tempo de synth, via `invocationUrl`) possam encontrá-lo.
 
-Você pode notar um `Dockerfile` extra, que referencia a imagem Docker do projeto `story`, permitindo-nos co-localizar o Dockerfile e o código-fonte do agente.
+Você pode notar um `Dockerfile` extra que referencia a imagem Docker do projeto `story`, permitindo co-localizar o Dockerfile e o código-fonte do agente.
 
 </details>
 
@@ -887,7 +914,7 @@ Você pode notar um `Dockerfile` extra, que referencia a imagem Docker do projet
 
 ###### Inventário: Projeto TypeScript
 
-Vamos criar um servidor MCP para fornecer ferramentas para nosso Agente de História gerenciar o inventário de um jogador.
+Vamos criar um servidor MCP para fornecer ferramentas para nosso Story Agent gerenciar o inventário de um jogador.
 
 Primeiro, criamos um projeto TypeScript:
 
@@ -896,7 +923,7 @@ Primeiro, criamos um projeto TypeScript:
 Isso criará um projeto TypeScript vazio.
 
 <details>
-<summary>Examine os arquivos gerados por `ts#project` em detalhes</summary>
+<summary>Examine os arquivos gerados pelo `ts#project` em detalhes</summary>
 
 O gerador `ts#project` gera estes arquivos.
 
@@ -923,7 +950,7 @@ Em seguida, adicionaremos um servidor MCP ao nosso projeto TypeScript:
 
 Isso adicionará um servidor MCP.
 <details>
-<summary>Examine os arquivos gerados por `ts#mcp-server` em detalhes</summary>
+<summary>Examine os arquivos gerados pelo `ts#mcp-server` em detalhes</summary>
 
 O gerador `ts#mcp-server` gera estes arquivos.
 
@@ -956,12 +983,12 @@ O estado do nosso jogo — jogos salvos e o inventário de cada jogador — vive
 <RunGenerator generator="ts#dynamodb" requiredParameters={{name:"DungeonDb"}} noInteractive />
 
 :::tip[Desenvolvimento local-first]
-O gerador `ts#dynamodb` fornece um target `dev` que executa [DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html) em um container. Combinado com o gerador `connection` (que executamos abaixo), isso significa que **o jogo inteiro roda na sua máquina sem uma implantação** até o final do tutorial.
+O gerador `ts#dynamodb` fornece um target `dev` que executa [DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html) em um contêiner. Combinado com o gerador `connection` (que executamos abaixo), isso significa que **o jogo inteiro roda na sua máquina sem uma implantação** até o final do tutorial.
 :::
 
 Você verá alguns novos arquivos aparecerem na sua árvore de arquivos.
 <details>
-<summary>Examine os arquivos gerados por `ts#dynamodb` em detalhes</summary>
+<summary>Examine os arquivos gerados pelo `ts#dynamodb` em detalhes</summary>
 
 O gerador `ts#dynamodb` gera estes arquivos.
 
@@ -999,9 +1026,9 @@ Para mais detalhes, consulte o <Link path="guides/ts-dynamodb">guia do gerador t
 
 ##### Criar a Interface do Usuário (UI)
 
-Em seguida, criaremos a UI que permitirá que você interaja com o jogo.
+Em seguida, criaremos a UI que permitirá interagir com o jogo.
 
-###### UI do Jogo: Website
+###### Game UI: Website
 
 Para criar a UI, crie um website chamado `GameUI` usando estas etapas:
 
@@ -1014,7 +1041,7 @@ Selecionamos `--ux=shadcn` para que o website gerado use componentes [shadcn/ui]
 Você verá alguns novos arquivos aparecerem na sua árvore de arquivos.
 
 <details>
-<summary>Examine os arquivos gerados por `ts#website` em detalhes</summary>
+<summary>Examine os arquivos gerados pelo `ts#website` em detalhes</summary>
 
 O `ts#website` gera estes arquivos. Vamos examinar alguns dos arquivos principais destacados na árvore de arquivos:
 
@@ -1058,11 +1085,17 @@ O `ts#website` gera estes arquivos. Vamos examinar alguns dos arquivos principai
 // packages/common/constructs/src/app/static-websites/game-ui.ts
 import * as url from 'url';
 import { Construct } from 'constructs';
-import { StaticWebsite } from '../../core/index.js';
+import { StaticWebsite, StaticWebsiteProps } from '../../core/index.js';
+
+export type GameUIProps = Omit<
+  StaticWebsiteProps,
+  'websiteName' | 'websiteFilePath'
+>;
 
 export class GameUI extends StaticWebsite {
-  constructor(scope: Construct, id: string) {
+  constructor(scope: Construct, id: string, props?: GameUIProps) {
     super(scope, id, {
+      ...props,
       websiteName: 'GameUI',
       websiteFilePath: url.fileURLToPath(
         new URL(
@@ -1132,16 +1165,16 @@ Um componente será renderizado ao navegar para a rota `/`. `@tanstack/react-rou
 
 </details>
 
-###### UI do Jogo: Autenticação
+###### Game UI: Auth
 
-Vamos configurar nossa UI do Jogo para exigir acesso autenticado via Amazon Cognito usando estas etapas:
+Vamos configurar nossa Game UI para exigir acesso autenticado via Amazon Cognito usando estas etapas:
 
 <RunGenerator generator="ts#website#auth" requiredParameters={{cognitoDomain:"game-ui", project:"@dungeon-adventure/game-ui", allowSignup:true}} noInteractive />
 
 Você verá alguns novos arquivos aparecerem/mudarem na sua árvore de arquivos.
 
 <details>
-<summary>Examine os arquivos gerados por `ts#website#auth` em detalhes</summary>
+<summary>Examine os arquivos gerados pelo `ts#website#auth` em detalhes</summary>
 
 O gerador `ts#website#auth` atualiza/gera estes arquivos. Vamos examinar alguns dos arquivos principais destacados na árvore de arquivos:
 
@@ -1216,9 +1249,9 @@ Os componentes `RuntimeConfigProvider` e `CognitoAuth` foram adicionados ao arqu
 
 </details>
 
-###### UI do Jogo: Conectar à API do Jogo
+###### Game UI: Conectar à Game API
 
-Vamos configurar nossa UI do Jogo para se conectar à nossa API do Jogo criada anteriormente.
+Vamos configurar nossa Game UI para se conectar à nossa Game API criada anteriormente.
 
 <RunGenerator generator="connection" requiredParameters={{sourceProject:"@dungeon-adventure/game-ui", targetProject:"@dungeon-adventure/game-api"}} noInteractive />
 
@@ -1269,7 +1302,7 @@ export const useGameApiClient = () => {
 Este hook fornece acesso ao cliente tRPC para chamar a GameApi. Para exemplos de como chamar APIs tRPC, consulte o <Link path="guides/connection/react-trpc#using-the-generated-code">guia de uso do hook tRPC</Link>.
 
 <Aside title="Hooks Type-Safe">
-Graças à [inferência TypeScript](https://trpc.io/docs/concepts) do tRPC, `useGameApi` não precisa de uma etapa de build para que as mudanças do backend cheguem ao frontend — edições no router ou em qualquer procedimento são capturadas pelo verificador de tipos instantaneamente.
+Graças à [inferência TypeScript](https://trpc.io/docs/concepts) do tRPC, `useGameApi` não precisa de uma etapa de build para que mudanças no backend cheguem ao frontend — edições no roteador ou em qualquer procedimento são detectadas pelo verificador de tipos instantaneamente.
 </Aside>
 
 ```diff lang="tsx"
@@ -1307,9 +1340,9 @@ O arquivo `main.tsx` foi atualizado via uma transformação AST para injetar os 
 
 </details>
 
-###### Agente de História: Conectar ao Servidor MCP de Inventário
+###### Story Agent: Conectar ao Servidor MCP de Inventário
 
-Vamos conectar nosso Agente de História ao servidor MCP de Inventário para que o agente possa descobrir e invocar as ferramentas do servidor MCP.
+Vamos conectar nosso Story Agent ao servidor MCP de Inventário para que o agente possa descobrir e invocar as ferramentas do servidor MCP.
 
 <RunGenerator generator="connection" requiredParameters={{sourceProject:"story", targetProject:"inventory"}} noInteractive />
 
@@ -1347,9 +1380,9 @@ O gerador:
 Para mais detalhes, consulte o <Link path="guides/connection/py-agent-mcp">guia de conexão Python Agent para MCP</Link>.
 </details>
 
-###### UI do Jogo: Conectar ao Agente de História
+###### Game UI: Conectar ao Story Agent
 
-Vamos conectar nossa UI do Jogo ao Agente de História. Como o agente fala AG-UI, o gerador `connection` conecta o [CopilotKit](https://docs.copilotkit.ai/): um componente de chat com tema e um `HttpAgent` `@ag-ui/client` pronto para renderizar.
+Vamos conectar nossa Game UI ao Story Agent. Como o agente fala AG-UI, o gerador `connection` conecta o [CopilotKit](https://docs.copilotkit.ai/): um componente de chat com tema e um `HttpAgent` do `@ag-ui/client` pronto para renderizar.
 
 <RunGenerator generator="connection" requiredParameters={{sourceProject:"@dungeon-adventure/game-ui", targetProject:"story"}} noInteractive />
 
@@ -1381,19 +1414,19 @@ O gerador:
 Para mais detalhes, consulte o <Link path="guides/connection/react-agui">guia de conexão React para AG-UI</Link>.
 </details>
 
-###### Conectar a API do Jogo e o servidor MCP de Inventário ao banco de dados
+###### Conectar a Game API e o servidor MCP de Inventário ao banco de dados
 
-Tanto a API do Jogo quanto o servidor MCP de Inventário leem e escrevem nossa tabela DynamoDB, então vamos conectá-los ao projeto `DungeonDb`. O gerador `connection` detecta que o alvo é um projeto `ts#dynamodb` e conecta o target `dev` de cada projeto de origem para iniciar o DynamoDB Local automaticamente.
+Tanto a Game API quanto o servidor MCP de Inventário leem e escrevem em nossa tabela DynamoDB, então vamos conectá-los ao projeto `DungeonDb`. O gerador `connection` detecta que o alvo é um projeto `ts#dynamodb` e conecta o target `dev` de cada projeto de origem para iniciar o DynamoDB Local automaticamente.
 
 <RunGenerator generator="connection" requiredParameters={{sourceProject:"@dungeon-adventure/game-api", targetProject:"@dungeon-adventure/dungeon-db"}} noInteractive />
 
 <RunGenerator generator="connection" requiredParameters={{sourceProject:"@dungeon-adventure/inventory", targetProject:"@dungeon-adventure/dungeon-db"}} noInteractive />
 
-<Aside type="tip" title="Um comando inicializa toda a stack localmente">
-Como o `agent-dev` do Agente de História já depende do `mcp-server-dev` do servidor MCP de Inventário (via a conexão `story → inventory` acima), e tanto a API do Jogo quanto o servidor MCP agora dependem de `dungeon-db:dev`, executar o target `dev` de qualquer projeto inicia todas as dependências necessárias na ordem correta.
+<Aside type="tip" title="Um comando inicializa toda a pilha localmente">
+Como o `agent-dev` do Story Agent já depende do `mcp-server-dev` do servidor MCP de Inventário (via a conexão `story → inventory` acima), e tanto a Game API quanto o servidor MCP agora dependem de `dungeon-db:dev`, executar o target `dev` de qualquer projeto inicia todas as dependências necessárias na ordem correta.
 </Aside>
 
-###### UI do Jogo: Infraestrutura
+###### Game UI: Infraestrutura
 
 Vamos criar o sub-projeto final para a infraestrutura CDK.
 
@@ -1402,7 +1435,7 @@ Vamos criar o sub-projeto final para a infraestrutura CDK.
 Você verá alguns novos arquivos aparecerem/mudarem na sua árvore de arquivos.
 
 <details>
-<summary>Examine os arquivos gerados por `ts#infra` em detalhes</summary>
+<summary>Examine os arquivos gerados pelo `ts#infra` em detalhes</summary>
 
 O gerador `ts#infra` gera/atualiza estes. Vamos examinar alguns dos arquivos principais destacados na árvore de arquivos:
 
@@ -1449,7 +1482,7 @@ new ApplicationStage(app, 'dungeon-adventure-infra-sandbox', {
 app.synth();
 ```
 
-<Aside type="tip" title="Corrigindo Erros de Importação">Se você vir um erro de importação dentro da sua IDE, isso ocorre porque nosso projeto de infraestrutura ainda não tem uma referência typescript configurada no `tsconfig.json`. O Nx foi [configurado](https://nx.dev/nx-api/js/generators/typescript-sync) para criar essas referências *dinamicamente* sempre que um build/compile é executado ou se você executar o comando `nx sync` manualmente. Para mais informações, consulte o <Link path="guides/typescript-project#importing-your-library-code-in-other-projects">guia TypeScript</Link>.</Aside>
+<Aside type="tip" title="Corrigindo Erros de Importação">Se você vir um erro de importação no seu IDE, é porque nosso projeto de infraestrutura ainda não tem uma referência typescript configurada no `tsconfig.json`. O Nx foi [configurado](https://nx.dev/nx-api/js/generators/typescript-sync) para criar essas referências *dinamicamente* sempre que um build/compilação é executado ou se você executar o comando `nx sync` manualmente. Para mais informações, consulte o <Link path="guides/typescript-project#importing-your-library-code-in-other-projects">guia de Typescript</Link>.</Aside>
 
 Este é o ponto de entrada para sua aplicação CDK.
 
@@ -1475,12 +1508,12 @@ Vamos instanciar nossos constructs CDK para construir nosso jogo de aventura em 
 
 ## Tarefa 3: Atualizar nossa infraestrutura
 
-Vamos atualizar `packages/infra/src/stacks/application-stack.ts` para instanciar alguns de nossos constructs gerados:
+Vamos atualizar `packages/infra/src/stacks/application-stack.ts` para instanciar alguns dos nossos constructs gerados:
 
 <E2EDiff before="dungeon-adventure/1/application-stack.ts.original.template" after="dungeon-adventure/1/application-stack.ts.template" lang="ts" />
 
 :::note[Integrações Padrão]
-Fornecemos integrações padrão para nossa API do Jogo. Por padrão, cada operação em nossa API é mapeada para uma função Lambda individual para lidar com essa operação.
+Fornecemos integrações padrão para nossa Game API. Por padrão, cada operação em nossa API é mapeada para uma função Lambda individual para lidar com essa operação.
 :::
 
 ## Tarefa 4: Construir o código
@@ -1489,9 +1522,9 @@ Fornecemos integrações padrão para nossa API do Jogo. Por padrão, cada opera
 
 ###### Targets únicos vs múltiplos
 
-O comando `run-many` executará um target em múltiplos sub-projetos listados (`--all` irá direcionar todos eles). Isso garante que as dependências sejam executadas na ordem correta.
+O comando `run-many` executará um target em múltiplos sub-projetos listados (`--all` irá direcioná-los todos). Isso garante que as dependências sejam executadas na ordem correta.
 
-Você também pode acionar um build (ou qualquer outra tarefa) para um único target de projeto executando o target no projeto diretamente. Por exemplo, para construir o projeto `@dungeon-adventure/infra`, execute o seguinte comando:
+Você também pode acionar um build (ou qualquer outra tarefa) para um target de projeto único executando o target diretamente no projeto. Por exemplo, para construir o projeto `@dungeon-adventure/infra`, execute o seguinte comando:
 
 <NxCommands commands={['build infra']} />
 
@@ -1510,7 +1543,7 @@ Para visualizar suas dependências, execute:
 
 ###### Cache
 
-O Nx depende de [cache](https://nx.dev/concepts/how-caching-works) para que você possa reutilizar artefatos de builds anteriores para acelerar o desenvolvimento. Há alguma configuração necessária para que isso funcione corretamente e pode haver casos em que você queira realizar um build **sem usar o cache**. Para fazer isso, simplesmente adicione o argumento `--skip-nx-cache` ao seu comando. Por exemplo:
+O Nx depende de [cache](https://nx.dev/concepts/how-caching-works) para que você possa reutilizar artefatos de builds anteriores a fim de acelerar o desenvolvimento. Há alguma configuração necessária para que isso funcione corretamente e pode haver casos em que você queira realizar um build **sem usar o cache**. Para isso, basta adicionar o argumento `--skip-nx-cache` ao seu comando. Por exemplo:
 
 <NxCommands commands={['build infra --skip-nx-cache']} />
 Se por algum motivo você quiser limpar seu cache (armazenado na pasta `.nx`), você pode executar o seguinte comando:
@@ -1541,10 +1574,10 @@ Yes, sync the changes and run the tasks
 No, run the tasks without syncing the changes
 ```
 
-Esta mensagem indica que o NX detectou alguns arquivos que podem ser atualizados automaticamente para você. Neste caso, está se referindo aos arquivos `tsconfig.json` que não têm referências TypeScript configuradas em projetos referenciados.
+Esta mensagem indica que o NX detectou alguns arquivos que podem ser atualizados automaticamente para você. Neste caso, está se referindo aos arquivos `tsconfig.json` que não têm referências Typescript configuradas em projetos referenciados.
 
-Selecione a opção **Yes, sync the changes and run the tasks** para prosseguir. Você deve notar que todos os seus erros de importação relacionados à IDE são resolvidos automaticamente, pois o gerador de sincronização adicionará as referências typescript ausentes automaticamente!
+Selecione a opção **Yes, sync the changes and run the tasks** para prosseguir. Você deve notar que todos os seus erros de importação relacionados ao IDE são resolvidos automaticamente, pois o gerador de sincronização adicionará as referências typescript ausentes automaticamente!
 
 Todos os artefatos construídos agora estão disponíveis dentro da pasta `dist/` localizada na raiz do monorepo. Esta é uma prática padrão ao usar projetos gerados pelo `@aws/nx-plugin`, pois não polui sua árvore de arquivos com arquivos gerados. No caso de você querer limpar seus arquivos, exclua a pasta `dist/` sem se preocupar com artefatos de build espalhados por toda a árvore de arquivos.
 
-Parabéns! Você criou todos os sub-projetos necessários para começar a implementar o núcleo do nosso jogo AI Dungeon Adventure.  🎉🎉🎉
+Parabéns! Você criou todos os sub-projetos necessários para começar a implementar o núcleo do nosso jogo de Aventura em Masmorra com IA.  🎉🎉🎉

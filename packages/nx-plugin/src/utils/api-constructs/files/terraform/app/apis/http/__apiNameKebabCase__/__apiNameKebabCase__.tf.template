@@ -2,9 +2,17 @@ terraform {
   required_version = ">= 1.0"
 
   required_providers {
+    archive = {
+      source  = "hashicorp/archive"
+      version = "<%- archiveProviderVersion %>"
+    }
     aws = {
       source  = "hashicorp/aws"
       version = "<%- awsProviderVersion %>"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "<%- randomProviderVersion %>"
     }
   }
 }
@@ -127,6 +135,51 @@ resource "random_string" "suffix" {
   upper   = false
 }
 
+<%_ if (backend.integrationPattern === 'isolated') { _%>
+locals {
+  # Generated at build time from the API definition
+  operations_file = "${path.module}/../../../generated/<%- apiNameKebabCase %>/operations.json"
+  operations      = fileexists(local.operations_file) ? jsondecode(file(local.operations_file)) : {}
+
+  operation_slug = { for op in keys(local.operations) : op => replace(op, "/[^a-zA-Z0-9-_]/", "-") }
+  operation_hash = { for op in keys(local.operations) : op => substr(sha256(op), 0, 8) }
+
+  function_name = { for op in keys(local.operations) : op =>
+    "${substr("<%- apiNameClassName %>-${local.operation_slug[op]}", 0, 64 - length(local.operation_hash[op]) - length(random_string.suffix.result) - 2)}-${local.operation_hash[op]}-${random_string.suffix.result}"
+  }
+  role_name = { for op in keys(local.operations) : op =>
+    "${substr("<%- apiNameClassName %>-${local.operation_slug[op]}-role", 0, 64 - length(local.operation_hash[op]) - length(random_string.suffix.result) - 2)}-${local.operation_hash[op]}-${random_string.suffix.result}"
+  }
+
+  operation_path = { for op, details in local.operations : op =>
+    startswith(details.path, "/") ? details.path : "/${details.path}"
+  }
+  route_key = { for op, details in local.operations : op =>
+    "${upper(details.method)} ${local.operation_path[op]}"
+  }
+
+  permission_source_suffix = { for op, details in local.operations : op =>
+    "${upper(details.method)}${replace(local.operation_path[op], "/{[^}]*}/", "*")}"
+  }
+}
+
+resource "terraform_data" "operations_metadata" {
+  # Fails the plan when the operations metadata has not been generated
+  input = local.operations_file
+
+  lifecycle {
+    precondition {
+      condition     = fileexists(local.operations_file)
+      error_message = "Operations metadata not found at ${local.operations_file}. Build the <%- apiNameClassName %> project to generate it."
+    }
+    precondition {
+      condition     = length(local.operations) > 0
+      error_message = "No operations found in ${local.operations_file}. The <%- apiNameClassName %> API must define at least one operation."
+    }
+  }
+}
+<%_ } _%>
+
 # Resources
 
 # Create Lambda ZIP file from the bundle directory
@@ -187,9 +240,14 @@ resource "aws_vpc_security_group_egress_rule" "api_lambda_https" {
   description       = "Allow outbound HTTPS to AWS service endpoints"
 }
 
-# Lambda function
-# This configures a single "router" lambda to serve all requests
 resource "aws_lambda_function" "api_lambda" {
+  <%_ if (backend.integrationPattern === 'isolated') { _%>
+  # One lambda function per operation, each serving just that operation
+  for_each = local.operations
+
+  <%_ } else { _%>
+  # A single "router" lambda serving all requests
+  <%_ } _%>
   #checkov:skip=CKV_AWS_117:Lambda function is optionally deployed into a VPC via vpc_id/subnet_ids; not required for this use case
   #checkov:skip=CKV_AWS_116:Dead Letter Queue not required for this simple API use case
   #checkov:skip=CKV_AWS_272:Code signing not required for this use case
@@ -198,14 +256,19 @@ resource "aws_lambda_function" "api_lambda" {
   s3_bucket         = aws_s3_object.lambda_zip.bucket
   s3_key            = aws_s3_object.lambda_zip.key
   s3_object_version = aws_s3_object.lambda_zip.version_id
+  <%_ if (backend.integrationPattern === 'isolated') { _%>
+  function_name    = local.function_name[each.key]
+  role            = aws_iam_role.lambda_execution_role[each.key].arn
+  <%_ } else { _%>
   function_name    = "<%- apiNameClassName %>Handler-${random_string.suffix.result}"
   role            = aws_iam_role.lambda_execution_role.arn
+  <%_ } _%>
   <%_ if (['trpc', 'smithy'].includes(backend.type)) { _%>
   handler         = "index.handler"
-  runtime         = "nodejs22.x"
+  runtime         = "<%- nodeRuntime %>"
   <%_ } else if (backend.type === 'fastapi') { _%>
   handler         = "run.sh"
-  runtime         = "python3.14"
+  runtime         = "<%- pythonRuntime %>"
   layers          = ["arn:aws:lambda:${data.aws_region.current.region}:753240598075:layer:LambdaAdapterLayerX86:24"]
   <%_ } _%>
   timeout         = 30
@@ -255,7 +318,13 @@ resource "aws_lambda_function" "api_lambda" {
 
 # IAM role for Lambda execution
 resource "aws_iam_role" "lambda_execution_role" {
+  <%_ if (backend.integrationPattern === 'isolated') { _%>
+  for_each = local.operations
+
+  name = local.role_name[each.key]
+  <%_ } else { _%>
   name = "<%- apiNameClassName %>Handler-execution-role-${random_string.suffix.result}"
+  <%_ } _%>
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -275,25 +344,57 @@ resource "aws_iam_role" "lambda_execution_role" {
 
 # Attach basic execution policy to Lambda role
 resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
+  <%_ if (backend.integrationPattern === 'isolated') { _%>
+  for_each = local.operations
+
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+  role       = aws_iam_role.lambda_execution_role[each.key].name
+  <%_ } else { _%>
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
   role       = aws_iam_role.lambda_execution_role.name
+  <%_ } _%>
 }
 
 # Attach X-Ray tracing policy to Lambda role
 resource "aws_iam_role_policy_attachment" "lambda_xray_execution" {
+  <%_ if (backend.integrationPattern === 'isolated') { _%>
+  for_each = local.operations
+
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+  role       = aws_iam_role.lambda_execution_role[each.key].name
+  <%_ } else { _%>
   policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
   role       = aws_iam_role.lambda_execution_role.name
+  <%_ } _%>
 }
 
 # Attach VPC access policy to Lambda role when deployed into a VPC
 resource "aws_iam_role_policy_attachment" "lambda_vpc_access" {
+  <%_ if (backend.integrationPattern === 'isolated') { _%>
+  for_each = var.enable_vpc ? local.operations : {}
+
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+  role       = aws_iam_role.lambda_execution_role[each.key].name
+  <%_ } else { _%>
   count      = var.enable_vpc ? 1 : 0
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
   role       = aws_iam_role.lambda_execution_role.name
+  <%_ } _%>
 }
 
 # Additional IAM policies for Lambda (if provided)
 resource "aws_iam_role_policy" "lambda_additional_policies" {
+  <%_ if (backend.integrationPattern === 'isolated') { _%>
+  for_each = local.operations
+
+  name = "${substr(local.function_name[each.key], 0, 55)}-policies"
+  role = aws_iam_role.lambda_execution_role[each.key].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = local.lambda_policy_document_statements
+  })
+  <%_ } else { _%>
   count = length(local.lambda_policy_statements) > 0 ? 1 : 0
   name  = "<%- apiNameClassName %>Handler-additional-policies-${random_string.suffix.result}"
   role  = aws_iam_role.lambda_execution_role.id
@@ -302,6 +403,7 @@ resource "aws_iam_role_policy" "lambda_additional_policies" {
     Version = "2012-10-17"
     Statement = local.lambda_policy_statements
   })
+  <%_ } _%>
 }
 
 locals {
@@ -316,6 +418,17 @@ locals {
       Resource = ["${var.appconfig_application_arn}/*"]
     }
   ] : [], var.additional_iam_policy_statements)
+<%_ if (backend.integrationPattern === 'isolated') { _%>
+
+  # IAM rejects an empty statement list, so fall back to a no-op deny
+  lambda_policy_document_statements = length(local.lambda_policy_statements) > 0 ? local.lambda_policy_statements : [
+    {
+      Effect   = "Deny"
+      Action   = ["appconfig:GetLatestConfiguration"]
+      Resource = ["arn:aws:appconfig:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:application/none"]
+    }
+  ]
+<%_ } _%>
 }
 
 # CloudWatch Log Group for Lambda
@@ -323,16 +436,31 @@ resource "aws_cloudwatch_log_group" "lambda_logs" {
   #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
   #checkov:skip=CKV_AWS_338:Log retention set to forever
   #checkov:skip=CKV_AWS_66:Log retention set to forever
+  <%_ if (backend.integrationPattern === 'isolated') { _%>
+  for_each = local.operations
+
+  name = "/aws/lambda/${local.function_name[each.key]}"
+  tags = var.tags
+  <%_ } else { _%>
   name              = "/aws/lambda/<%- apiNameClassName %>Handler-${random_string.suffix.result}"
   tags              = var.tags
+  <%_ } _%>
 }
 
 <%_ if (backend.type === 'fastapi') { _%>
 # Lambda alias pointing to the latest published version for SnapStart
 resource "aws_lambda_alias" "live" {
+  <%_ if (backend.integrationPattern === 'isolated') { _%>
+  for_each = local.operations
+
+  name             = "live"
+  function_name    = aws_lambda_function.api_lambda[each.key].function_name
+  function_version = aws_lambda_function.api_lambda[each.key].version
+  <%_ } else { _%>
   name             = "live"
   function_name    = aws_lambda_function.api_lambda.function_name
   function_version = aws_lambda_function.api_lambda.version
+  <%_ } _%>
 
   depends_on = [aws_lambda_function.api_lambda]
 }
@@ -366,10 +494,10 @@ resource "aws_lambda_function" "authorizer_lambda" {
   role            = aws_iam_role.authorizer_execution_role.arn
   <%_ if (['trpc', 'smithy'].includes(backend.type)) { _%>
   handler         = "index.handler"
-  runtime         = "nodejs22.x"
+  runtime         = "<%- nodeRuntime %>"
   <%_ } else if (backend.type === 'fastapi') { _%>
   handler         = "<%- backend.moduleName %>.authorizer.handler"
-  runtime         = "python3.14"
+  runtime         = "<%- pythonRuntime %>"
   <%_ } _%>
   timeout         = 10
   memory_size     = 128
@@ -447,7 +575,8 @@ resource "aws_apigatewayv2_authorizer" "custom_authorizer" {
   authorizer_type                   = "REQUEST"
   authorizer_uri                    = aws_lambda_function.authorizer_lambda.invoke_arn
   authorizer_payload_format_version = "2.0"
-  authorizer_result_ttl_in_seconds  = 0
+  authorizer_result_ttl_in_seconds  = 300
+  identity_sources                  = ["$request.header.Authorization"]
   enable_simple_responses           = true
   name                              = "<%- apiNameClassName %>Authorizer-${random_string.suffix.result}"
 }
@@ -463,12 +592,24 @@ resource "aws_lambda_permission" "authorizer_invoke" {
 
 # Lambda integration for HTTP API
 resource "aws_apigatewayv2_integration" "lambda_integration" {
+  <%_ if (backend.integrationPattern === 'isolated') { _%>
+  for_each = local.operations
+
+  api_id           = module.http_api.api_id
+  integration_type = "AWS_PROXY"
+  <%_ if (backend.type === 'fastapi') { _%>
+  integration_uri  = aws_lambda_alias.live[each.key].invoke_arn
+  <%_ } else { _%>
+  integration_uri  = aws_lambda_function.api_lambda[each.key].invoke_arn
+  <%_ } _%>
+  <%_ } else { _%>
   api_id           = module.http_api.api_id
   integration_type = "AWS_PROXY"
   <%_ if (backend.type === 'fastapi') { _%>
   integration_uri  = aws_lambda_alias.live.invoke_arn
   <%_ } else { _%>
   integration_uri  = aws_lambda_function.api_lambda.invoke_arn
+  <%_ } _%>
   <%_ } _%>
 
   payload_format_version = "2.0"
@@ -481,6 +622,28 @@ resource "aws_apigatewayv2_integration" "lambda_integration" {
   <%_ } _%>
 }
 
+<%_ if (backend.integrationPattern === 'isolated') { _%>
+# One route per operation, each targeting that operation's integration
+resource "aws_apigatewayv2_route" "operation_routes" {
+  for_each = local.operations
+
+  api_id    = module.http_api.api_id
+  route_key = local.route_key[each.key]
+  target    = "integrations/${aws_apigatewayv2_integration.lambda_integration[each.key].id}"
+
+  <%_ if (auth === 'iam') { _%>
+  authorization_type = "AWS_IAM"
+  <%_ } else if (auth === 'cognito') { _%>
+  authorization_type = "JWT"
+  authorizer_id      = aws_apigatewayv2_authorizer.cognito_authorizer.id
+  <%_ } else if (auth === 'custom') { _%>
+  authorization_type = "CUSTOM"
+  authorizer_id      = aws_apigatewayv2_authorizer.custom_authorizer.id
+  <%_ } _%>
+
+  depends_on = [aws_apigatewayv2_integration.lambda_integration<% if (auth === 'cognito') { %>, aws_apigatewayv2_authorizer.cognito_authorizer<% } else if (auth === 'custom') { %>, aws_apigatewayv2_authorizer.custom_authorizer<% } %>]
+}
+<%_ } else { _%>
 # Route for proxy integration (catches all requests)
 resource "aws_apigatewayv2_route" "proxy_routes" {
   # NB: OPTIONS is omitted here since API Gateway manages responding to preflight requests
@@ -503,6 +666,7 @@ resource "aws_apigatewayv2_route" "proxy_routes" {
 
   depends_on = [aws_apigatewayv2_integration.lambda_integration<% if (auth === 'cognito') { %>, aws_apigatewayv2_authorizer.cognito_authorizer<% } else if (auth === 'custom') { %>, aws_apigatewayv2_authorizer.custom_authorizer<% } %>]
 }
+<%_ } _%>
 
 # Add API url to runtime config
 module "add_url_to_runtime_config" {
@@ -517,6 +681,18 @@ module "add_url_to_runtime_config" {
 
 # Lambda permission for API Gateway to invoke the function<% if (backend.type === 'fastapi') { %> via alias<% } %>
 resource "aws_lambda_permission" "api_gateway_invoke" {
+  <%_ if (backend.integrationPattern === 'isolated') { _%>
+  for_each = local.operations
+
+  statement_id  = "AllowExecutionFromAPIGateway"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.api_lambda[each.key].function_name
+  <%_ if (backend.type === 'fastapi') { _%>
+  qualifier     = aws_lambda_alias.live[each.key].name
+  <%_ } _%>
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${module.http_api.api_execution_arn}/*/${local.permission_source_suffix[each.key]}"
+  <%_ } else { _%>
   statement_id  = "AllowExecutionFromAPIGateway"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.api_lambda.function_name
@@ -525,6 +701,7 @@ resource "aws_lambda_permission" "api_gateway_invoke" {
   <%_ } _%>
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${module.http_api.api_execution_arn}/*/*"
+  <%_ } _%>
 
   <%_ if (backend.type === 'fastapi') { _%>
   depends_on = [module.http_api, aws_lambda_alias.live]
@@ -571,6 +748,76 @@ output "stage_execution_arn" {
   value       = module.http_api.stage_execution_arn
 }
 
+<%_ if (backend.integrationPattern === 'isolated') { _%>
+# Lambda Function Outputs, keyed by operation name
+output "operations" {
+  description = "Names of the API operations, each with its own Lambda function"
+  value       = keys(local.operations)
+}
+
+output "lambda_function_names" {
+  description = "Name of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.function_name }
+}
+
+output "lambda_function_arns" {
+  description = "ARN of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.arn }
+}
+
+output "lambda_invoke_arns" {
+  description = "Invoke ARN of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.invoke_arn }
+}
+
+output "lambda_qualified_arns" {
+  description = "Qualified ARN of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.qualified_arn }
+}
+
+output "lambda_versions" {
+  description = "Version of each operation's Lambda function, keyed by operation name"
+  value       = { for op, fn in aws_lambda_function.api_lambda : op => fn.version }
+}
+
+output "lambda_source_code_hash" {
+  description = "Base64-encoded SHA256 hash of the Lambda deployment package, shared by every operation"
+  value       = data.archive_file.lambda_zip.output_base64sha256
+}
+
+# IAM Role Outputs, keyed by operation name
+output "lambda_execution_role_arns" {
+  description = "ARN of each operation's Lambda execution role, keyed by operation name"
+  value       = { for op, role in aws_iam_role.lambda_execution_role : op => role.arn }
+}
+
+output "lambda_execution_role_names" {
+  description = "Name of each operation's Lambda execution role, keyed by operation name. Attach additional policies to a specific operation's role by name."
+  value       = { for op, role in aws_iam_role.lambda_execution_role : op => role.name }
+}
+
+output "security_group_id" {
+  description = "Security group ID shared by the API Lambda functions, for use in ingress rules on resources they must reach (e.g. a database). Null unless enable_vpc is true."
+  value       = var.enable_vpc ? aws_security_group.api_lambda[0].id : null
+}
+
+# Integration Outputs, keyed by operation name
+output "integration_ids" {
+  description = "ID of each operation's Lambda integration, keyed by operation name"
+  value       = { for op, i in aws_apigatewayv2_integration.lambda_integration : op => i.id }
+}
+
+# CloudWatch Log Groups, keyed by operation name
+output "lambda_log_group_names" {
+  description = "Name of each operation's Lambda CloudWatch log group, keyed by operation name"
+  value       = { for op, lg in aws_cloudwatch_log_group.lambda_logs : op => lg.name }
+}
+
+output "lambda_log_group_arns" {
+  description = "ARN of each operation's Lambda CloudWatch log group, keyed by operation name"
+  value       = { for op, lg in aws_cloudwatch_log_group.lambda_logs : op => lg.arn }
+}
+<%_ } else { _%>
 # Lambda Function Outputs
 output "lambda_function_name" {
   description = "Name of the Lambda function"
@@ -639,6 +886,7 @@ output "lambda_log_group_arn" {
   description = "ARN of the Lambda CloudWatch log group"
   value       = aws_cloudwatch_log_group.lambda_logs.arn
 }
+<%_ } _%>
 
 output "api_log_group_name" {
   description = "Name of the API Gateway CloudWatch log group"

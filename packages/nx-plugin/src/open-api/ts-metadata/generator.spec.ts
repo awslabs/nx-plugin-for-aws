@@ -3,11 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import { importTypeScriptModule } from '../../utils/js';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { TypeScriptVerifier } from '../../utils/test/ts.spec';
-import type { Spec } from '../utils/types';
-import { openApiTsMetadataGenerator } from './generator';
+import { importTypeScriptModule } from '../../utils/js.js';
+import { TypeScriptVerifier } from '../../utils/test/ts.spec.js';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import type { Spec } from '../utils/types.js';
+import { openApiTsMetadataGenerator } from './generator.js';
 
 describe('openApiTsMetadataGenerator', () => {
   let tree: Tree;

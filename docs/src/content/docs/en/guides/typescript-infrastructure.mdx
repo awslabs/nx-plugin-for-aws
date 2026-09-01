@@ -102,7 +102,7 @@ new ApplicationStage(app, 'my-app-sandbox', {
 
 The `env` property tells CDK which AWS account and region to deploy to. `CDK_DEFAULT_ACCOUNT` and `CDK_DEFAULT_REGION` are resolved automatically by the CDK CLI from your active AWS credentials. See the [CDK environments documentation](https://docs.aws.amazon.com/cdk/v2/guide/environments.html) for more details.
 
-The sandbox stage is the one the <Link path="guides/typescript-infrastructure#deploying-your-sandbox-stage">`deploy-sandbox` target</Link> deploys.
+The sandbox stage is the one the <Link path="guides/typescript-infrastructure#deploying-your-sandbox-stage">`deploy-sandbox`</Link> and <Link path="guides/typescript-infrastructure#tearing-down-your-sandbox-stage">`destroy-sandbox`</Link> targets act on.
 
 If you generated with `stageConfig`, the `main.ts` reads account and region from a centralized config file instead, falling back to environment variables when no config is set:
 
@@ -321,6 +321,8 @@ As part of your `build` target, as well as running the <Link path="guides/typesc
 
 You will find your synthesized cloud assembly in the root `dist` folder, under `dist/packages/<my-infra-project>/cdk.out`.
 
+`synth` depends on `^assemble`, so synthesizing builds the artifacts your stacks deploy, such as the Lambda bundles, container images and generated specifications, without running every upstream project's lint, test and type-check gates. See <Link path="guides/typescript-project#assembling">Assembling</Link> for more detail on `assemble`.
+
 ## Security Testing
 
 A `checkov` target is added to your project which runs security checks on your infrastructure using [Checkov](https://www.checkov.io/).
@@ -383,6 +385,12 @@ Your project has three deploy targets, each suited to a different situation:
 | `deploy`         | Deploying any stage, by naming the stage or stacks you want.                      |
 | `deploy-ci`      | Deploying from a CI/CD pipeline, using a pre-synthesized cloud assembly.          |
 
+`deploy-sandbox` and `deploy` depend on `^assemble`, so they build the artifacts they are about to deploy and nothing else. `deploy-ci` deploys an assembly your pipeline already built, so it has no build dependencies at all.
+
+:::caution[Use `build` in your pipeline]
+`assemble` is used for faster iteration during development. Run `build` in your CI pipeline to ensure your project passes quality gates prior to a production deployment.
+:::
+
 First, make sure you have AWS credentials configured. If you generated with `stageConfig` and have configured stage credentials in `packages/common/infra-config/src/stages.config.ts`, the deploy command will automatically resolve and apply the correct credentials for the target stage. Otherwise, ensure your AWS credentials are set in your environment (e.g., via `AWS_PROFILE` or environment variables). See the [AWS credentials documentation](https://docs.aws.amazon.com/sdkref/latest/guide/access.html) for the available options.
 
 ### Deploying your Sandbox Stage
@@ -421,9 +429,33 @@ This target differs slightly from the regular `deploy` target in that it deploys
 
 ## Tearing Down AWS Infrastructure
 
-Use the `destroy` target to tear down your resources:
+Your project has three destroy targets, mirroring the deploy ones:
+
+| Target            | Use it for                                                                |
+| ----------------- | ------------------------------------------------------------------------- |
+| `destroy-sandbox` | Tearing down your own sandbox stage. No stage argument needed.             |
+| `destroy`         | Tearing down any stage, by naming the stage or stacks you want.            |
+| `destroy-ci`      | Tearing down from a CI/CD pipeline, using a pre-synthesized cloud assembly. |
+
+### Tearing Down your Sandbox Stage
+
+The `destroy-sandbox` target tears down the sandbox stage that `main.ts` declares, so you don't need to remember its stage name:
+
+<NxCommands commands={['destroy-sandbox <my-infra>']} />
+
+Destroying is irreversible, so CDK asks you to confirm the stacks it is about to delete. Pass `--force` to skip that confirmation, which is what you want when there is no terminal attached (in a script, say):
+
+<NxCommands commands={['destroy-sandbox <my-infra> --force']} />
+
+### Tearing Down a Specific Stage
+
+The `destroy` target tears down whichever stage or stacks you name:
 
 <NxCommands commands={['destroy <my-infra> <my-infra>-sandbox/*']} />
+
+To tear down an individual stack, give the full stack name:
+
+<NxCommands commands={['destroy <my-infra> <my-infra>-sandbox/Application']} />
 
 ## More Information
 

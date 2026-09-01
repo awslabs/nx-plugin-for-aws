@@ -12,17 +12,19 @@ import Link from '@components/link.astro';
 
 运行时配置被组织成**命名空间**。每个命名空间是相关配置值的逻辑分组。在部署时，所有命名空间都作为配置文件存储在 **AWS AppConfig** 中。
 
-生成的构造使用两个内置命名空间：
+生成的构造使用四个内置命名空间：
 
 - **`connection`** — 使生成的项目能够相互连接的配置：
   - **API URLs** — 由 API 构造自动注册
   - **Cognito 设置** — 由 UserIdentity 构造自动注册
   - **Agent 运行时 ARN** — 当您将 React 网站连接到 Agent 时，由连接生成器添加
 - **`agentcore`** — 用于 agent 和 MCP 服务器的 AgentCore 运行时 ARN。由 agent/MCP 构造自动注册，用于服务器端发现（agent → agent 通过 A2A，agent → MCP 服务器）。
+- **`dynamodb`** — 表名，由 DynamoDB 表构造自动注册，并由生成的表客户端读取。
+- **`database`** — Aurora 连接详细信息，由关系数据库构造自动注册，并由生成的数据库客户端读取。
 
-`connection` 命名空间还会作为 `runtime-config.json` 文件部署到您网站的 S3 存储桶中，从而实现后端资源的客户端发现。`agentcore` 命名空间仅用于服务器端（通过 AppConfig），因此 agent 运行时 ARN 不会暴露给前端，除非您明确将网站连接到 agent。
+`connection` 命名空间还会作为 `runtime-config.json` 文件部署到您网站的 S3 存储桶中，从而实现后端资源的客户端发现。其他命名空间仅用于服务器端（通过 AppConfig），因此 agent 运行时 ARN 和表名等值不会暴露给前端，除非您明确将网站连接到它们。
 
-您可以根据需要定义任意数量的额外命名空间，为将部署时值（如 DynamoDB 表名）传递给 Lambda 函数或其他计算资源提供了一种方便的环境变量替代方案。
+您可以根据需要定义任意数量的额外命名空间，为将部署时值传递给 Lambda 函数或其他计算资源提供了一种方便的环境变量替代方案。
 
 ```d2
 direction: down
@@ -104,6 +106,17 @@ Terraform 通过三个 `core/runtime-config/*` 模块连接运行时配置。在
      source = "../../common/terraform/src/core/runtime-config/appconfig"
 
      application_name = "my-app-runtime-config"
+   }
+   ```
+
+   `namespaces` 变量默认为每个内置命名空间，因此生成的模块无需配置即可工作。要添加您自己的命名空间，请将它们与内置命名空间一起列出：
+
+   ```hcl title="packages/infra/src/main.tf"
+   module "runtime_config_appconfig" {
+     source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+     application_name = "my-app-runtime-config"
+     namespaces       = ["connection", "agentcore", "database", "dynamodb", "tables"]
    }
    ```
 

@@ -55,13 +55,15 @@ Generator sẽ thêm các tệp sau vào dự án TypeScript hiện có của b�
           - divide.ts Sample tool
         - resources/
           - sample-guidance.ts Sample resource
-        - Dockerfile Entry point for hosting your MCP server (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - project.json Updated with MCP server serve target
 </FileTree>
 
 ### Cơ sở hạ tầng
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment">
+<Snippet name="agentcore-hosting" />
+
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Bedrock AgentCore Runtime deployment">
 <Snippet name="shared-constructs" />
 
 <Snippet name="mcp/shared-constructs" />
@@ -100,12 +102,18 @@ export const registerMyTool = (server: McpServer) => {
 };
 ```
 
-Sau đó đăng ký nó trong `server.ts`:
+Sau đó đăng ký nó bên trong `createServer` trong `server.ts`:
 
-```typescript title="server.ts"
+```typescript title="server.ts" {6}
 import { registerMyTool } from './tools/my-tool.js';
 
-registerMyTool(server);
+export const createServer = async () => {
+  const server = new McpServer({ name: 'my-server', version: '1.0.0' });
+
+  registerMyTool(server);
+
+  return server;
+};
 ```
 
 ### Thêm Tài nguyên
@@ -178,7 +186,7 @@ Nếu bạn muốn chạy MCP server của mình ở cục bộ bằng [Streamab
 
 Lệnh này sử dụng `tsx --watch` để tự động khởi động lại server khi các tệp thay đổi.
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment details">
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Bedrock AgentCore Runtime deployment details">
 ## Triển khai MCP Server của bạn lên Bedrock AgentCore Runtime
 
 <Snippet name="mcp/bedrock-deployment" parentHeading="Triển khai MCP Server của bạn lên Bedrock AgentCore Runtime" />
@@ -189,6 +197,13 @@ Lệnh này sử dụng `tsx --watch` để tự động khởi động lại se
 
 Bundle target sử dụng `http.ts` làm điểm vào cho Streamable HTTP MCP server để lưu trữ trên Bedrock AgentCore Runtime.
 
+<OptionFilter when={{ infra: 'agentcore' }} description="Code package target">
+### Package Target
+
+Generator cấu hình một target `<your-server-name>-package` để lắp ráp gói mã có thể triển khai: `index.js` được đóng gói cùng với bản cài đặt vendored của AWS Distro for OpenTelemetry, mà AgentCore yêu cầu phải có trong gói. Cơ sở hạ tầng được tạo ra sẽ tải thư mục này lên dưới dạng `.zip` — thông qua `AgentRuntimeArtifact.fromCodeAsset` trong CDK, hoặc được lưu trữ vào shared asset bucket trong Terraform.
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'agentcore-ecr' }} description="Container image build and scan">
 ### Docker Target
 
 Generator cấu hình một target `<your-server-name>-docker` sao chép `Dockerfile` từ thư mục nguồn MCP server của bạn vào thư mục đầu ra bundle. Điều này đặt `Dockerfile` cùng vị trí với các artifact được đóng gói, cho phép CDK xây dựng Docker image trực tiếp bằng cách sử dụng `AgentRuntimeArtifact.fromAsset`.
@@ -198,6 +213,7 @@ Một target `docker` cũng được tạo để chuẩn bị ngữ cảnh docke
 ### Quét Image
 
 <Snippet name="trivy-image-scan" parentHeading="Quét Image" />
+</OptionFilter>
 
 ### Khả năng quan sát
 

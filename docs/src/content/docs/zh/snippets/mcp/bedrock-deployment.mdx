@@ -6,7 +6,7 @@ import Infrastructure from '@components/infrastructure.astro';
 
 ### 基础设施即代码
 
-如果您为 `infra` 选择了 `agentcore`，将生成相关的 CDK 或 Terraform 基础设施，您可以使用它将 MCP 服务器部署到 [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html)。
+如果您为 `infra` 选择了 `agentcore` 或 `agentcore-ecr`，将生成相关的 CDK 或 Terraform 基础设施，您可以使用它将 MCP 服务器部署到 [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html)。
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -32,26 +32,43 @@ export class ExampleStack extends Stack {
 <Fragment slot="terraform">
 将为您生成一个 Terraform 模块，根据您运行生成器时选择的 `name` 命名，或默认为 `<ProjectName>-mcp-server`。
 
-将共享的 <Link path="/zh/guides/runtime-config#writing-configuration">`runtime_config_appconfig`</Link> 模块的输出传递到 MCP 服务器模块：
+将共享的 <Link path="/zh/guides/runtime-config#writing-configuration">`runtime_config_appconfig`</Link> 模块的输出传递到 MCP 服务器模块，以及其打包所使用的共享工件存储。在默认的 `agentcore` 打包方式下，服务器的代码会暂存在共享资产存储桶中，因此像 Lambda 和 API 模块已经做的那样，每个部署实例化一次 `core/asset-bucket` 模块：
 
 ```terraform
+module "asset_bucket" {
+  source = "../../common/terraform/src/core/asset-bucket"
+}
+
 module "my_project_mcp_server" {
   source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
 
   appconfig_application_id  = module.runtime_config_appconfig.application_id
   appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
+  asset_bucket_name = module.asset_bucket.bucket_name
+  asset_bucket_arn  = module.asset_bucket.bucket_arn
+}
+```
+
+在 `agentcore-ecr` 打包方式下，服务器的镜像会发布到共享资产注册表，因此传递 `core/asset-ecr` 的输出而不是存储桶的输出。一个注册表为工作区中的所有容器提供服务，因此任何 MCP 服务器都不需要自己的仓库：
+
+```terraform
+module "asset_ecr" {
+  source = "../../common/terraform/src/core/asset-ecr"
+}
+
+module "my_project_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
+  asset_ecr_repository_url = module.asset_ecr.repository_url
+  asset_ecr_repository_arn = module.asset_ecr.repository_arn
 }
 ```
 </Fragment>
 </Infrastructure>
-
-:::caution[需要 Docker]
-构建和部署 MCP 服务器需要 [Docker](https://www.docker.com/)。请确保您已安装并启动 Docker 以避免以下错误：
-
-```
-ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
-```
-:::
 
 ### 身份验证
 

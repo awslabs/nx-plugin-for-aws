@@ -10,16 +10,20 @@ import {
   type Tree,
   updateJson,
 } from '@nx/devkit';
-import { addStarExport } from '../ast';
-import type { Iac } from '../iac';
-import { esmVars } from '../module-format';
-import { addDependencyToTargetIfNotPresent } from '../nx';
+import { addStarExport } from '../ast.js';
+import type { Iac } from '../iac.js';
+import { esmVars } from '../module-format.js';
+import { addArtifactProjectToTargets } from '../nx.js';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
-} from '../shared-constructs-constants';
-import { terraformProviderVersions } from '../versions';
+} from '../shared-constructs-constants.js';
+import {
+  cdkLambdaRuntimeVars,
+  terraformLambdaRuntimeVars,
+  terraformProviderVersions,
+} from '../versions.js';
 
 /**
  * The DCR proxy Lambda handlers. Each is bundled independently and wired to a
@@ -86,11 +90,7 @@ export const addDcrProxyInfra = async (
       'project.json',
     ),
     (config: ProjectConfiguration) => {
-      addDependencyToTargetIfNotPresent(
-        config,
-        'build',
-        `${options.proxyProjectName}:build`,
-      );
+      addArtifactProjectToTargets(config, options.proxyProjectName);
       return config;
     },
   );
@@ -154,6 +154,7 @@ const addDcrProxyCdkConstructs = async (
       nameKebabCase: options.dcrProxyNameKebabCase,
       bundlePathsFromRoot: options.bundlePathsFromRoot,
       ...esmVars(tree),
+      ...cdkLambdaRuntimeVars(),
     },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
@@ -236,6 +237,7 @@ const addDcrProxyTerraformModules = (
       nameKebabCase: options.dcrProxyNameKebabCase,
       bundlePathsFromRoot: options.bundlePathsFromRoot,
       ...terraformProviderVersions(),
+      ...terraformLambdaRuntimeVars(),
     },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,

@@ -3,10 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { IacOption } from '../../utils/iac';
+import { AgentCoreInfra } from '../../utils/agent-core-packaging.js';
+import { IacOption } from '../../utils/iac.js';
 
 export type TsAgentFramework = 'strands';
-export type TsAgentInfra = 'agentcore' | 'none';
+export type TsAgentInfra = AgentCoreInfra;
 export type AgentProtocol = 'http' | 'a2a' | 'ag-ui';
 
 export type TsAgentAuth = 'iam' | 'cognito';

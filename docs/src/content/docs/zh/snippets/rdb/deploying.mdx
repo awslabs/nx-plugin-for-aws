@@ -37,7 +37,13 @@ export class ApplicationStack extends Stack {
 <Fragment slot="terraform">
 Terraform 模块在 `common/terraform` 中创建。使用示例：
 
+迁移 Lambda 作为容器镜像部署，发布到共享资产注册表。每次部署实例化一次 `core/asset-ecr` 模块，并将其 `repository_url` 传递给每个数据库模块：
+
 ```hcl title="packages/infra/src/main.tf"
+module "asset_ecr" {
+  source = "../../common/terraform/src/core/asset-ecr"
+}
+
 module "my_database" {
   source = "../../common/terraform/src/app/dbs/my-database"
 
@@ -46,22 +52,15 @@ module "my_database" {
   database_subnet_ids = aws_subnet.database[*].id
   lambda_subnet_ids   = aws_subnet.private[*].id
 
+  asset_ecr_repository_url = module.asset_ecr.repository_url
+
   tags = local.common_tags
 }
 ```
 
-这将配置一个带有 RDS Proxy、管理员凭证、create-db-user Lambda、运行时配置注册、迁移 Lambda 和容器注册表资源的 Aurora 集群。
+这将配置一个带有 RDS Proxy、管理员凭证、create-db-user Lambda、运行时配置注册和迁移 Lambda 的 Aurora 集群。
 
-数据库模块在 `database` 运行时配置命名空间下注册其连接详细信息。在实例化共享运行时配置 AppConfig 应用程序时包含此命名空间：
-
-```hcl title="packages/infra/src/main.tf"
-module "runtime_config_appconfig" {
-  source = "../../common/terraform/src/core/runtime-config/appconfig"
-
-  application_name = "my-app-runtime-config"
-  namespaces       = ["connection", "agentcore", "database"]
-}
-```
+数据库模块在 `database` <Link path="guides/runtime-config">运行时配置</Link>命名空间下注册其连接详细信息，共享运行时配置 AppConfig 应用程序默认会公开该命名空间。
 
 生成的基础设施会创建两个数据库用户：
 - **管理员用户** - 在集群配置期间创建，凭证存储在 AWS Secrets Manager 中

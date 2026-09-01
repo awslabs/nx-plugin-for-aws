@@ -4,12 +4,12 @@
  */
 import { generateFiles, logger, type Tree } from '@nx/devkit';
 import * as path from 'path';
-import { formatFilesInSubtree } from '../../utils/format';
-import { esmVars } from '../../utils/module-format';
-import { buildOpenApiCodeGenData } from '../utils/codegen-data';
-import type { CodeGenData } from '../utils/codegen-data/types';
-import { parseOpenApiSpec } from '../utils/parse';
-import type { Spec } from '../utils/types';
+import { formatFilesInSubtree } from '../../utils/format.js';
+import { esmVars } from '../../utils/module-format.js';
+import type { CodeGenData } from '../utils/codegen-data/types.js';
+import { buildOpenApiCodeGenData } from '../utils/codegen-data.js';
+import { parseOpenApiSpec } from '../utils/parse.js';
+import type { Spec } from '../utils/types.js';
 import type { OpenApiTsClientGeneratorSchema } from './schema';
 
 /**

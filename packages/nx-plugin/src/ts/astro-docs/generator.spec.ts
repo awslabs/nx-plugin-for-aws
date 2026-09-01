@@ -3,18 +3,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { getProjects, readJson, type Tree, updateJson } from '@nx/devkit';
-import { declareDependencies } from '../../utils/declared-dependencies';
-import { expectHasMetricTags } from '../../utils/metrics.spec';
+import { declareDependencies } from '../../utils/declared-dependencies.js';
+import { expectHasMetricTags } from '../../utils/metrics.spec.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../utils/shared-constructs';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { TypeScriptVerifier } from '../../utils/test/ts.spec';
+} from '../../utils/shared-constructs.js';
+import { TypeScriptVerifier } from '../../utils/test/ts.spec.js';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
 import {
   TS_ASTRO_DOCS_GENERATOR_INFO,
   tsAstroDocsGenerator,
-} from './generator';
+} from './generator.js';
 
 const sharedConstructsDeclaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
@@ -110,6 +110,9 @@ describe('ts#astro-docs generator', () => {
     };
     expect(deps).toHaveProperty('astro');
     expect(deps).toHaveProperty('@astrojs/starlight');
+    // Astro's prerender output imports `cookie` directly, so a compatible copy
+    // has to be reachable from this project.
+    expect(deps).toHaveProperty('cookie');
     // Blog on by default.
     expect(deps).toHaveProperty('starlight-blog');
     // Translation on by default — its scripts import these at runtime.

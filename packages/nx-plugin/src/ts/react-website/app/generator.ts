@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import {
+  detectPackageManager,
   generateFiles,
   joinPathFragments,
   names,
@@ -15,50 +16,53 @@ import {
 } from '@nx/devkit';
 import { applicationGenerator } from '@nx/react';
 import { relative, sep } from 'path';
-import { addTsDependencies } from '../../../utils/add-dependencies';
+import { addTsDependencies } from '../../../utils/add-dependencies.js';
 import {
   addDestructuredImport,
   addSingleImport,
   appendToArrayViaGritQL,
   applyGritQL,
-} from '../../../utils/ast';
+} from '../../../utils/ast.js';
 import {
   declareDependencies,
   ownedElsewhere,
-} from '../../../utils/declared-dependencies';
-import { formatFilesInSubtree } from '../../../utils/format';
-import { resolveIac } from '../../../utils/iac';
-import { installDependencies } from '../../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
-import { kebabCase, toClassName, toKebabCase } from '../../../utils/names';
-import { getNpmScopePrefix } from '../../../utils/npm-scope';
+} from '../../../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../../../utils/format.js';
+import { resolveIac } from '../../../utils/iac.js';
+import { installDependencies } from '../../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics.js';
+import { kebabCase, toClassName, toKebabCase } from '../../../utils/names.js';
+import { getNpmScopePrefix } from '../../../utils/npm-scope.js';
 import {
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
-} from '../../../utils/nx';
-import { sortObjectKeys } from '../../../utils/object';
-import { getRelativePathToRoot } from '../../../utils/paths';
-import { getPackageManagerDisplayCommands } from '../../../utils/pkg-manager';
+} from '../../../utils/nx.js';
+import { sortObjectKeys } from '../../../utils/object.js';
+import { getRelativePathToRoot } from '../../../utils/paths.js';
+import { getPackageManagerDisplayCommands } from '../../../utils/pkg-manager.js';
+import { assignPort } from '../../../utils/port.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../../utils/shared-constructs';
+} from '../../../utils/shared-constructs.js';
 import {
   type IacMetadata,
   PACKAGES_DIR,
   SHARED_SHADCN_DIR,
-} from '../../../utils/shared-constructs-constants';
+  TERRAFORM_WEBSITE_RUNTIME_CONFIG_FILE,
+} from '../../../utils/shared-constructs-constants.js';
 import {
   SHADCN_DEPENDENCIES,
   sharedShadcnGenerator,
-} from '../../../utils/shared-shadcn';
+} from '../../../utils/shared-shadcn.js';
+import { withVersions } from '../../../utils/versions.js';
 import {
   addWebsiteInfra,
   WEBSITE_CONSTRUCTS_PY_DEPENDENCIES,
-} from '../../../utils/website-constructs/website-constructs';
-import { configureTsProject } from '../../lib/ts-project-utils';
-import { VITEST_DEPENDENCIES } from '../../lib/vitest';
+} from '../../../utils/website-constructs/website-constructs.js';
+import { configureTsProject } from '../../lib/ts-project-utils.js';
+import { VITEST_DEPENDENCIES } from '../../lib/vitest.js';
 // typescript factory imports removed — now using GritQL for vite config transforms
 import type {
   TsReactWebsiteGeneratorSchema,
@@ -134,6 +138,8 @@ export const DEPENDENCIES = declareDependencies<TsReactWebsiteMetadata>()({
       dev: true,
       root: true,
     },
+    // Declared for its pinned version, which goes into npm's `overrides` below.
+    { name: 'express', versionOnly: true },
     ...ownedElsewhere(SHADCN_DEPENDENCIES),
     ...ownedElsewhere(VITEST_DEPENDENCIES),
     ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
@@ -236,6 +242,17 @@ export async function tsReactWebsiteGenerator(
 
   const targets = projectConfiguration.targets;
 
+  // Each website gets its own explicit dev-server port. Vite itself already
+  // auto-increments past a port already in use, so two websites don't actually
+  // collide — but which port each one lands on then depends on start order and
+  // can't be known ahead of time. An explicit, per-project port is what lets
+  // the Cognito callback URL allow-list (added when auth is configured) be
+  // computed deterministically instead.
+  const port = assignPort(tree, projectConfiguration, 4200);
+  // @nx/react's vite config defaults to 4200 for the dev server and 4300 for
+  // preview; keep that +100 relationship so the pair stays predictable.
+  const previewPort = port + 100;
+
   const infra = schema.infra ?? 'cloudfront-s3';
 
   // Configure load-runtime-config target based on IaC provider (only when infra is not none)
@@ -262,7 +279,7 @@ export async function tsReactWebsiteGenerator(
         command:
           'node -e "const fs=require(\'fs\');fs.mkdirSync(process.env.DEST_DIR,{recursive:true});fs.copyFileSync(process.env.SRC_FILE,process.env.DEST_FILE);"',
         env: {
-          SRC_FILE: 'dist/packages/common/terraform/runtime-config.json',
+          SRC_FILE: TERRAFORM_WEBSITE_RUNTIME_CONFIG_FILE,
           DEST_DIR: `{projectRoot}/public`,
           DEST_FILE: `{projectRoot}/public/runtime-config.json`,
         },
@@ -272,7 +289,9 @@ export async function tsReactWebsiteGenerator(
 
   if (!projectAlreadyExists) {
     targets['compile'] = {
-      dependsOn: ['^build'],
+      // `tsc` needs its dependencies' declarations, which `compile` emits — not
+      // their lint or test results.
+      dependsOn: ['^compile'],
       executor: 'nx:run-commands',
       outputs: ['{workspaceRoot}/dist/{projectRoot}/tsc'],
       options: {
@@ -285,6 +304,9 @@ export async function tsReactWebsiteGenerator(
     // artifact. build aggregates lint/compile/test/bundle.
     targets['build'] = {
       dependsOn: ['lint', 'compile', 'test', 'bundle'],
+    };
+    targets['assemble'] = {
+      dependsOn: ['compile', 'bundle'],
     };
 
     // Run the website and its connected dependencies locally. Mirrors the
@@ -514,6 +536,21 @@ export async function tsReactWebsiteGenerator(
       `\`build: { $bprops }\` where { $bprops <: contains \`outDir: $_\` => \`outDir: '${outDir}'\` }`,
     );
 
+    // Replace @nx/react's default dev-server port (4200) with the one assigned above.
+    await applyGritQL(
+      tree,
+      viteConfigPath,
+      `\`server: { $sprops }\` where { $sprops <: contains \`port: $_\` => \`port: ${port}\` }`,
+    );
+
+    // Likewise for the preview port (@nx/react's default is 4300), so `vite preview`
+    // doesn't collide across websites either.
+    await applyGritQL(
+      tree,
+      viteConfigPath,
+      `\`preview: { $pprops }\` where { $pprops <: contains \`port: $_\` => \`port: ${previewPort}\` }`,
+    );
+
     // Add plugins to the plugins array
     if (tanstackRouter) {
       // Prepend tanstackRouter (must be first plugin) — rewrite works for both single/multi-element
@@ -601,6 +638,23 @@ export async function tsReactWebsiteGenerator(
   );
 
   addTsDependencies(tree, DEPENDENCIES, { metadata, projectRoot: libraryRoot });
+
+  // @nx/react declares an optional `express` peer on the major behind the one
+  // vended here, for a module-federation dev-server this never runs. npm alone
+  // fails the whole install on an optional peer it cannot satisfy, so it gets a
+  // scoped override; the other package managers only warn.
+  if (detectPackageManager() === 'npm') {
+    updateJson(tree, 'package.json', (packageJson) => {
+      packageJson.overrides = {
+        ...packageJson.overrides,
+        '@nx/react': {
+          ...packageJson.overrides?.['@nx/react'],
+          ...withVersions(DEPENDENCIES, ['express']),
+        },
+      };
+      return packageJson;
+    });
+  }
 
   // @nx/react's applicationGenerator seeds react/react-dom into the root
   // manifest. The website now declares its own pinned versions, so drop the

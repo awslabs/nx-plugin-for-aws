@@ -8,11 +8,11 @@ import { parsePipRequirementsLine } from 'pip-requirements-js';
 import type {
   DeclaredPy,
   DependencyDeclaration,
-} from './declared-dependencies';
-import { normalizeDistributionName } from './names';
-import type { UVPyprojectToml } from './nxlv-python';
-import { readToml, updateToml } from './toml';
-import { type IPyDepVersion, PY_VERSIONS, withPyVersions } from './versions';
+} from './declared-dependencies.js';
+import { normalizeDistributionName } from './names.js';
+import type { UVPyprojectToml } from './nxlv-python.js';
+import { readToml, updateToml } from './toml.js';
+import { type IPyDepVersion, PY_VERSIONS, withPyVersions } from './versions.js';
 
 // Dedup key that distinguishes bare packages from the same package with
 // extras (e.g. `foo` vs `foo[bar]`), so adding a bare dep doesn't drop a

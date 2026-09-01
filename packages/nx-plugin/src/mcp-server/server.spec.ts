@@ -8,7 +8,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import fs from 'fs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createServer } from './server';
+import { createServer } from './server.js';
 
 describe('MCP Server', () => {
   let client: Client;

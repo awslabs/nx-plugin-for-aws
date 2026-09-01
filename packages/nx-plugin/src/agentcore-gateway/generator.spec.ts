@@ -2,13 +2,17 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+import { spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { readProjectConfiguration, type Tree } from '@nx/devkit';
-import { expectHasMetricTags } from '../utils/metrics.spec';
-import { createTreeUsingTsSolutionSetup } from '../utils/test';
+import { expectHasMetricTags } from '../utils/metrics.spec.js';
+import { createTreeUsingTsSolutionSetup } from '../utils/test.js';
 import {
   AGENTCORE_GATEWAY_GENERATOR_INFO,
   agentcoreGatewayGenerator,
-} from './generator';
+} from './generator.js';
 
 describe('agentcore-gateway generator', () => {
   let tree: Tree;
@@ -421,7 +425,7 @@ describe('agentcore-gateway generator', () => {
       ).toBe(false);
     });
 
-    it('renders Cedar policies via the ejs render script', () => {
+    it('renders Cedar policies via the render script', () => {
       expect(
         tree.exists(
           'packages/common/terraform/src/app/gateways/my-gateway/render-cedar.cjs',
@@ -499,6 +503,92 @@ describe('agentcore-gateway generator', () => {
       expect(module).toContain(
         'null_resource.gateway_ready[0].triggers.gateway_url',
       );
+    });
+
+    // The script runs in the shared terraform project, which has no
+    // package.json, so it resolves ejs from the workspace root.
+    describe('render-cedar.cjs', () => {
+      const GATEWAY_ARN =
+        'arn:aws:bedrock-agentcore:us-west-2:123456789012:gateway/MyGateway-1a2b3c4d';
+
+      it('declares ejs at the workspace root, not the gateway project', () => {
+        const root = JSON.parse(tree.read('package.json', 'utf-8')!);
+        expect({
+          ...root.dependencies,
+          ...root.devDependencies,
+        }).toHaveProperty('ejs');
+
+        const gateway = JSON.parse(
+          tree.read('packages/my-gateway/package.json', 'utf-8')!,
+        );
+        expect({
+          ...gateway.dependencies,
+          ...gateway.devDependencies,
+        }).not.toHaveProperty('ejs');
+      });
+
+      // Run as apply does: from the module directory, query on stdin, with ejs
+      // reachable only from the root manifest. NODE_PATH is cleared so pnpm's
+      // bin shims can't supply a copy from the hoisted virtual store.
+      it('resolves ejs from the workspace root and renders the vended policy', () => {
+        const root = mkdtempSync(join(tmpdir(), 'render-cedar-'));
+        const moduleDir = join(
+          root,
+          'packages/common/terraform/src/app/gateways/my-gateway',
+        );
+        mkdirSync(moduleDir, { recursive: true });
+        writeFileSync(
+          join(root, 'package.json'),
+          JSON.stringify({ name: 'root', private: true }),
+        );
+        // Stand in for the installed root node_modules/ejs.
+        const ejsDir = join(root, 'node_modules', 'ejs');
+        mkdirSync(ejsDir, { recursive: true });
+        writeFileSync(
+          join(ejsDir, 'package.json'),
+          JSON.stringify({ name: 'ejs', version: '6.0.1', main: 'index.js' }),
+        );
+        writeFileSync(
+          join(ejsDir, 'index.js'),
+          // Minimal stand-in for ejs.render covering `<%= name %>`.
+          'exports.render = (s, v) => s.replace(/<%=\\s*([A-Za-z_$][\\w$]*)\\s*%>/g, (m, k) => String(v[k]));\n',
+        );
+
+        const scriptPath = join(moduleDir, 'render-cedar.cjs');
+        const policyPath = join(root, 'permit-all.cedar');
+        writeFileSync(
+          scriptPath,
+          tree
+            .read(
+              'packages/common/terraform/src/app/gateways/my-gateway/render-cedar.cjs',
+            )!
+            .toString(),
+        );
+        writeFileSync(
+          policyPath,
+          tree
+            .read('packages/my-gateway/policies/permit-all.cedar')!
+            .toString(),
+        );
+
+        const result = spawnSync(process.execPath, [scriptPath], {
+          cwd: moduleDir,
+          input: JSON.stringify({
+            template: policyPath,
+            gatewayArn: GATEWAY_ARN,
+            accountId: '123456789012',
+          }),
+          encoding: 'utf-8',
+          env: { ...process.env, NODE_PATH: '' },
+        });
+
+        expect(result.stderr).not.toContain('Cannot find module');
+        expect(result.status).toBe(0);
+        const { rendered } = JSON.parse(result.stdout);
+        expect(rendered).toContain(`AgentCore::Gateway::"${GATEWAY_ARN}"`);
+        expect(rendered).toContain('123456789012');
+        expect(rendered).not.toContain('<%=');
+      });
     });
   });
 

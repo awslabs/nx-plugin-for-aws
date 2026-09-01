@@ -16,6 +16,7 @@ import {
   FeaturePlan,
   ManagedLoginVersion,
   Mfa,
+  type MfaSecondFactor,
   OAuthScope,
   StandardThreatProtectionMode,
   UserPool,
@@ -28,6 +29,8 @@ import {
   CfnWebACLAssociation,
 } from 'aws-cdk-lib/aws-wafv2';
 import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
+import { Key } from 'aws-cdk-lib/aws-kms';
+import { Effect, PolicyStatement, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
 import { RuntimeConfig } from './runtime-config<% if (esm) { %>.js<% } %>';
 import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
@@ -37,7 +40,7 @@ import { suppressRules } from './checkov<% if (esm) { %>.js<% } %>';
 const WEB_CLIENT_ID = 'WebClient';
 
 /** Local dev server origins permitted to complete the sign-in redirect */
-const LOCAL_CALLBACK_URLS = ['http://localhost:4200', 'http://localhost:4300'];
+const LOCAL_CALLBACK_URLS = [];
 
 export interface UserIdentityProps {
   /**
@@ -48,6 +51,20 @@ export interface UserIdentityProps {
    * @default true
    */
   readonly enableWaf?: boolean;
+
+  /**
+   * Whether users must configure MFA, may optionally configure MFA, or cannot use MFA at all.
+   *
+   * @default Mfa.REQUIRED
+   */
+  readonly mfa?: Mfa;
+
+  /**
+   * The MFA methods available to users when MFA is not off.
+   *
+   * @default { sms: true, otp: true }
+   */
+  readonly mfaSecondFactor?: MfaSecondFactor;
 }
 
 /**
@@ -63,11 +80,25 @@ export class UserIdentity extends Construct {
   /** The WAFv2 Web ACL associated with the user pool, if WAF is enabled */
   public readonly webAcl?: CfnWebACL;
 
-  constructor(scope: Construct, id: string, { enableWaf = true }: UserIdentityProps = {}) {
+  constructor(
+    scope: Construct,
+    id: string,
+    {
+      enableWaf = true,
+      mfa = Mfa.REQUIRED,
+      mfaSecondFactor = { sms: true, otp: true },
+    }: UserIdentityProps = {},
+  ) {
     super(scope, id);
 
+    if (mfa === Mfa.REQUIRED && !mfaSecondFactor.sms && !mfaSecondFactor.otp) {
+      throw new Error(
+        'UserIdentity: mfa is REQUIRED but mfaSecondFactor has no methods enabled (sms and otp are both false)',
+      );
+    }
+
     this.region = Stack.of(this).region;
-    this.userPool = this.createUserPool();
+    this.userPool = this.createUserPool(mfa, mfaSecondFactor);
 
     if (enableWaf) {
       this.webAcl = this.createWebAcl(
@@ -115,7 +146,12 @@ export class UserIdentity extends Construct {
     });
   }
 
-  private createUserPool = () => {
+  private createUserPool = (mfa: Mfa, mfaSecondFactor: MfaSecondFactor) => {
+    // Cognito rejects SmsConfiguration (emitted whenever phone is auto-verified) unless SMS is
+    // also an enabled MFA method, for any non-OFF MfaConfiguration. So phone verification via SMS
+    // can only be offered when SMS is actually usable as a second factor.
+    const phoneVerificationEnabled = mfa === Mfa.OFF || mfaSecondFactor.sms;
+
     const userPool = new UserPool(this, 'UserPool', {
       deletionProtection: true,
       passwordPolicy: {
@@ -126,11 +162,11 @@ export class UserIdentity extends Construct {
         requireSymbols: true,
         tempPasswordValidity: Duration.days(3),
       },
-      mfa: Mfa.REQUIRED,
+      mfa,
       featurePlan: FeaturePlan.PLUS,
       // Audit-only logs threat assessments without blocking sign-in. Switch to FULL_FUNCTION to enforce automatic responses.
       standardThreatProtectionMode: StandardThreatProtectionMode.AUDIT_ONLY,
-      mfaSecondFactor: { sms: true, otp: true },
+      mfaSecondFactor,
       signInCaseSensitive: false,
       signInAliases: { username: true, email: true },
       accountRecovery: AccountRecovery.EMAIL_ONLY,
@@ -143,11 +179,11 @@ export class UserIdentity extends Construct {
       },
       autoVerify: {
         email: true,
-        phone: true,
+        phone: phoneVerificationEnabled,
       },
       keepOriginal: {
         email: true,
-        phone: true,
+        phone: phoneVerificationEnabled,
       },
     });
     // Retain the SMS role alongside the pool so the pool can still be updated and deleted manually
@@ -231,18 +267,41 @@ export class UserIdentity extends Construct {
       webAclArn: webAcl.attrArn,
     });
 
-    // Send WAF request logs to CloudWatch. The log group name must start with
-    // `aws-waf-logs-` to satisfy the WAFv2 logging destination requirement.
+    // The log group name must start with `aws-waf-logs-` to satisfy the WAFv2
+    // logging destination requirement.
+    const stack = Stack.of(this);
+    const wafLogGroupName = `aws-waf-logs-${id}-${this.node.addr.slice(-8)}`;
+
+    // KMS key for encrypting WAF logs at rest, usable by CloudWatch Logs
+    const logsKey = new Key(this, 'WebAclLogsKey', {
+      enableKeyRotation: true,
+    });
+    logsKey.addToResourcePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        principals: [new ServicePrincipal(`logs.${stack.region}.amazonaws.com`)],
+        actions: [
+          'kms:Encrypt',
+          'kms:Decrypt',
+          'kms:ReEncrypt*',
+          'kms:GenerateDataKey*',
+          'kms:DescribeKey',
+        ],
+        resources: ['*'],
+        conditions: {
+          ArnEquals: {
+            'kms:EncryptionContext:aws:logs:arn': `arn:aws:logs:${stack.region}:${stack.account}:log-group:${wafLogGroupName}`,
+          },
+        },
+      }),
+    );
+
     const wafLogGroup = new LogGroup(this, 'WebAclLogs', {
-      logGroupName: `aws-waf-logs-${id}-${this.node.addr.slice(-8)}`,
+      logGroupName: wafLogGroupName,
       retention: RetentionDays.ONE_MONTH,
+      encryptionKey: logsKey,
       removalPolicy: RemovalPolicy.DESTROY,
     });
-    suppressRules(
-      wafLogGroup,
-      ['CKV_AWS_158'],
-      'Using default CloudWatch log encryption for WAF logs',
-    );
 
     new CfnLoggingConfiguration(this, 'WebAclLoggingConfig', {
       resourceArn: webAcl.attrArn,

@@ -35,7 +35,10 @@ export interface <%- nameClassName %>Props
   executionRole?: iam.IRole;
   /** Model resources the generated execution role may invoke. */
   modelResourceArns?: string[];
-  /** Tools the Harness may use. Deploys with none unless supplied here. */
+  /**
+   * Tools the Harness may use. Defaults to none; pass `['@builtin']` for every
+   * built-in tool, or name individual tools.
+   */
   allowedTools?: agentcore.CfnHarnessProps['allowedTools'];
   /**
    * Run the Harness in a VPC so it can reach private resources. Selects private
@@ -68,6 +71,9 @@ export class <%- nameClassName %>
         `arn:${stack.partition}:bedrock:*::foundation-model/*`,
         `arn:${stack.partition}:bedrock:${stack.region}:${stack.account}:*`,
       ],
+      // The service treats an absent allowedTools as every tool, so this
+      // defaults to none and is always passed explicitly.
+      allowedTools = [],
       vpc,
       vpcSubnets,
       securityGroups,
@@ -137,6 +143,29 @@ export class <%- nameClassName %>
           actions: ['sts:GetServiceBearerToken'],
           resources: ['*'],
         }),
+        // In a VPC the Harness pulls its managed container from a private ECR
+        // repository in the region rather than ECR Public. The repository is
+        // service-owned, hence the wildcard account.
+        ...(vpc
+          ? [
+              new iam.PolicyStatement({
+                sid: 'EcrManagedImagePull',
+                actions: [
+                  'ecr:BatchGetImage',
+                  'ecr:GetDownloadUrlForLayer',
+                  'ecr:BatchCheckLayerAvailability',
+                ],
+                resources: [
+                  `arn:${stack.partition}:ecr:${stack.region}:*:repository/harness-*`,
+                ],
+              }),
+              new iam.PolicyStatement({
+                sid: 'EcrManagedImageToken',
+                actions: ['ecr:GetAuthorizationToken'],
+                resources: ['*'],
+              }),
+            ]
+          : []),
         new iam.PolicyStatement({
           sid: 'XRayTracingAccess',
           actions: [
@@ -239,6 +268,14 @@ export class <%- nameClassName %>
         'XRayTracingAccess: X-Ray segment and sampling APIs have no resource-level permission.',
         isPolicy,
       );
+      if (vpc) {
+        suppressRules(
+          this.executionRole,
+          WILDCARD_IAM_RULES,
+          'EcrManagedImageToken: ecr:GetAuthorizationToken has no resource-level permission.',
+          isPolicy,
+        );
+      }
     }
 
     // Rendered lazily so security groups added through `connections` after
@@ -281,6 +318,7 @@ export class <%- nameClassName %>
       },
       systemPrompt: [{ text: systemPrompt }],
       ...harnessProps,
+      allowedTools,
       // Set after harnessProps so the deployed name always matches the
       // execution role's workload-identity resource pattern.
       harnessName,

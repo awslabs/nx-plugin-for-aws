@@ -5,7 +5,7 @@
 
 import TOML from '@iarna/toml';
 import { createTree } from '@nx/devkit/testing';
-import { tryReadToml, updateToml } from './toml';
+import { tryReadToml, updateToml } from './toml.js';
 
 describe('toml utils', () => {
   describe('updateToml', () => {

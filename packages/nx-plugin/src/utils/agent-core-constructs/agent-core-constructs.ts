@@ -10,47 +10,51 @@ import {
   type Tree,
   updateJson,
 } from '@nx/devkit';
-import { addStarExport } from '../ast';
-import type { Containers } from '../containers';
+import { addStarExport } from '../ast.js';
+import type { Containers } from '../containers.js';
 import {
   type DeclaredPyDependency,
   type DeclaredTsDependency,
   type DependencyDeclaration,
   forDependencies,
   type MustDeclare,
-} from '../declared-dependencies';
-import { addDependenciesToPackageJson } from '../dependencies';
-import type { Iac } from '../iac';
-import { esmVars } from '../module-format';
-import { addDependencyToTargetIfNotPresent } from '../nx';
+} from '../declared-dependencies.js';
+import { addDependenciesToPackageJson } from '../dependencies.js';
+import type { Iac } from '../iac.js';
+import { esmVars } from '../module-format.js';
+import { addArtifactProjectToTargets } from '../nx.js';
 import {
-  generatedInfrastructure,
+  generatedCdk,
   generatedTerraform,
   type IacMetadata,
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
-} from '../shared-constructs-constants';
+} from '../shared-constructs-constants.js';
 import {
+  cdkLambdaRuntimeVars,
   type IPyDepVersion,
   type ITsDepVersion,
   PY_VERSIONS,
   terraformProviderVersions,
   withVersions,
-} from '../versions';
+} from '../versions.js';
 
 type IACProvider = { iac: Iac };
 
 /**
  * Dependencies a caller must declare to add an AgentCore Gateway construct.
  *
- * Gated on infrastructure having been generated, since the construct helpers only
- * run on that branch.
+ * Both providers render Cedar policies with `ejs`, each from a different
+ * manifest: the CDK construct imports it from the shared constructs project,
+ * while Terraform's `render-cedar.cjs` resolves it from the workspace root,
+ * since the shared terraform project it runs in has no `package.json`.
  */
 export const AGENT_CORE_CONSTRUCTS_DEPENDENCIES = [
-  { name: 'ejs', when: generatedInfrastructure },
-  { name: '@aws-sdk/client-bedrock-agentcore', when: generatedInfrastructure },
-  { name: '@types/ejs', when: generatedInfrastructure },
+  { name: 'ejs', when: generatedCdk },
+  { name: '@aws-sdk/client-bedrock-agentcore', when: generatedCdk },
+  { name: '@types/ejs', when: generatedCdk },
+  { name: 'ejs', when: generatedTerraform, dev: true, root: true },
 ] as const satisfies readonly DeclaredTsDependency<
   ITsDepVersion,
   IacMetadata
@@ -77,12 +81,36 @@ export type AgentCoreAuth = 'iam' | 'cognito';
 
 export type AgentCoreSession = 's3' | 'dynamodb-s3' | 'in-memory';
 
+/**
+ * How the runtime's artifact is packaged, and the details each packaging needs.
+ *
+ * `container` builds an arm64 image from a Dockerfile and hosts it from ECR.
+ * `code` uploads a zip of the built code to S3 and runs it on an AgentCore
+ * managed language runtime.
+ */
+export type AgentCoreArtifact =
+  | {
+      readonly type: 'container';
+      /** Local image tag the build produces, published to ECR by Terraform. */
+      readonly dockerImageTag: string;
+      /** Build context directory, holding the Dockerfile and built artifacts. */
+      readonly outputDir: string;
+    }
+  | {
+      readonly type: 'code';
+      /** Packaged code directory, archived and uploaded as the artifact. */
+      readonly outputDir: string;
+      /** Managed language runtime, e.g. `NODE_22` or `PYTHON_3_14`. */
+      readonly runtime: string;
+      /** Entry point file within the package, run by the managed runtime. */
+      readonly entryPoint: string;
+    };
+
 export interface AddAgentCoreInfraProps {
   nameClassName: string;
   nameKebabCase: string;
   projectName: string;
-  dockerImageTag: string;
-  dockerOutputDir: string;
+  artifact: AgentCoreArtifact;
   appDirectory: string;
   serverProtocol: 'mcp' | 'http' | 'a2a';
   auth: AgentCoreAuth;
@@ -90,6 +118,31 @@ export interface AddAgentCoreInfraProps {
   session: AgentCoreSession;
   containers: Containers;
 }
+
+/**
+ * The Terraform packaging module a given artifact uses, under `core/`.
+ *
+ * Each packaging module owns only its own artifact plumbing — an ECR repository
+ * and image push, or a code archive staged in the shared asset bucket — and
+ * delegates the runtime itself to the generic `core/agent-core` module. A
+ * workspace mixing both packagings therefore vends one copy of the runtime.
+ */
+const terraformPackagingModule = (artifact: AgentCoreArtifact): string =>
+  artifact.type === 'container' ? 'agent-core-container' : 'agent-core-code';
+
+/**
+ * Template substitution variables describing the runtime artifact, shared by
+ * the CDK and Terraform branches so both read the same fields.
+ */
+const artifactTemplateVars = (artifact: AgentCoreArtifact) => ({
+  container: artifact.type === 'container',
+  artifactOutputDir: artifact.outputDir,
+  terraformPackagingModule: terraformPackagingModule(artifact),
+  dockerImageTag:
+    artifact.type === 'container' ? artifact.dockerImageTag : undefined,
+  codeRuntime: artifact.type === 'code' ? artifact.runtime : undefined,
+  codeEntryPoint: artifact.type === 'code' ? artifact.entryPoint : undefined,
+});
 
 const addAgentCoreInfra = async (
   tree: Tree,
@@ -113,11 +166,7 @@ const addAgentCoreInfra = async (
       'project.json',
     ),
     (config: ProjectConfiguration) => {
-      addDependencyToTargetIfNotPresent(
-        config,
-        'build',
-        `${options.projectName}:build`,
-      );
+      addArtifactProjectToTargets(config, options.projectName);
       return config;
     },
   );
@@ -138,7 +187,11 @@ const addAgentCoreCDKInfra = async (
       'app',
       options.appDirectory,
     ),
-    { ...options, ...esmVars(tree) },
+    {
+      ...options,
+      ...artifactTemplateVars(options.artifact),
+      ...esmVars(tree),
+    },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
@@ -174,7 +227,20 @@ const addAgentCoreTerraformInfra = (
   tree: Tree,
   options: AddAgentCoreInfraProps,
 ) => {
-  // Add the AgentCore shared module
+  const terraformCoreDir = joinPathFragments(
+    PACKAGES_DIR,
+    SHARED_TERRAFORM_DIR,
+    'src',
+    'core',
+  );
+  const sharedModuleContext = {
+    containers: options.containers,
+    boto3Version: PY_VERSIONS.boto3,
+    ...artifactTemplateVars(options.artifact),
+    ...terraformProviderVersions(),
+  };
+
+  // The generic runtime module, shared by both packagings.
   generateFiles(
     tree,
     joinPathFragments(
@@ -184,18 +250,28 @@ const addAgentCoreTerraformInfra = (
       'core',
       'agent-core',
     ),
-    joinPathFragments(
-      PACKAGES_DIR,
-      SHARED_TERRAFORM_DIR,
-      'src',
-      'core',
-      'agent-core',
-    ),
+    joinPathFragments(terraformCoreDir, 'agent-core'),
+    sharedModuleContext,
     {
-      containers: options.containers,
-      boto3Version: PY_VERSIONS.boto3,
-      ...terraformProviderVersions(),
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
+  );
+
+  // The packaging module wrapping it, which owns this artifact's plumbing. Only
+  // the packaging in use is vended, so a code-only workspace carries no ECR
+  // resources and a container-only one carries no archive/upload.
+  const packagingModule = terraformPackagingModule(options.artifact);
+  generateFiles(
+    tree,
+    joinPathFragments(
+      import.meta.dirname,
+      'files',
+      'terraform',
+      'core',
+      packagingModule,
+    ),
+    joinPathFragments(terraformCoreDir, packagingModule),
+    sharedModuleContext,
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
@@ -218,7 +294,11 @@ const addAgentCoreTerraformInfra = (
       'app',
       options.appDirectory,
     ),
-    { ...options, ...terraformProviderVersions() },
+    {
+      ...options,
+      ...artifactTemplateVars(options.artifact),
+      ...terraformProviderVersions(),
+    },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
@@ -229,8 +309,7 @@ export interface AddMcpServerInfraProps {
   mcpServerNameClassName: string;
   mcpServerNameKebabCase: string;
   projectName: string;
-  dockerImageTag: string;
-  dockerOutputDir: string;
+  artifact: AgentCoreArtifact;
   auth: AgentCoreAuth;
   containers: Containers;
 }
@@ -245,8 +324,7 @@ export const addMcpServerInfra = async (
   await addAgentCoreInfra(tree, {
     nameClassName: options.mcpServerNameClassName,
     nameKebabCase: options.mcpServerNameKebabCase,
-    dockerImageTag: options.dockerImageTag,
-    dockerOutputDir: options.dockerOutputDir,
+    artifact: options.artifact,
     projectName: options.projectName,
     appDirectory: 'mcp-servers',
     serverProtocol: 'mcp',
@@ -262,8 +340,7 @@ export interface AddAgentInfraProps {
   agentNameClassName: string;
   agentNameKebabCase: string;
   projectName: string;
-  dockerImageTag: string;
-  dockerOutputDir: string;
+  artifact: AgentCoreArtifact;
   auth: AgentCoreAuth;
   session: AgentCoreSession;
   serverProtocol?: 'http' | 'a2a';
@@ -281,8 +358,7 @@ export const addAgentInfra = async (
     nameClassName: options.agentNameClassName,
     nameKebabCase: options.agentNameKebabCase,
     projectName: options.projectName,
-    dockerImageTag: options.dockerImageTag,
-    dockerOutputDir: options.dockerOutputDir,
+    artifact: options.artifact,
     appDirectory: 'agents',
     session: options.session,
     serverProtocol: options.serverProtocol ?? 'http',
@@ -318,7 +394,7 @@ export const addAgentCoreGatewayInfra = async <
       await addAgentCoreGatewayCDKInfra(tree, options, declaration);
       break;
     case 'terraform':
-      addAgentCoreGatewayTerraformInfra(tree, options);
+      addAgentCoreGatewayTerraformInfra(tree, options, declaration);
       break;
   }
 
@@ -330,11 +406,7 @@ export const addAgentCoreGatewayInfra = async <
       'project.json',
     ),
     (config: ProjectConfiguration) => {
-      addDependencyToTargetIfNotPresent(
-        config,
-        'build',
-        `${options.projectName}:build`,
-      );
+      addArtifactProjectToTargets(config, options.projectName);
       return config;
     },
   );
@@ -363,7 +435,7 @@ const addAgentCoreGatewayCDKInfra = async (
       'core',
       'agentcore-gateway',
     ),
-    { ...esmVars(tree) },
+    { ...esmVars(tree), ...cdkLambdaRuntimeVars() },
     {
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
@@ -453,6 +525,7 @@ const addAgentCoreGatewayCDKInfra = async (
 const addAgentCoreGatewayTerraformInfra = (
   tree: Tree,
   options: AddAgentCoreGatewayInfraProps,
+  declaration: DependencyDeclaration,
 ) => {
   generateFiles(
     tree,
@@ -523,7 +596,19 @@ const addAgentCoreGatewayTerraformInfra = (
     if (tree.exists(renderScript)) {
       tree.delete(renderScript);
     }
+    return;
   }
+
+  // render-cedar.cjs resolves ejs from the workspace root, since the shared
+  // terraform project it runs in has no package.json.
+  addDependenciesToPackageJson(
+    tree,
+    {},
+    withVersions(
+      forDependencies<typeof AGENT_CORE_CONSTRUCTS_DEPENDENCIES>(declaration),
+      ['ejs'],
+    ),
+  );
 };
 
 export interface AddAgentCoreHarnessInfraProps {

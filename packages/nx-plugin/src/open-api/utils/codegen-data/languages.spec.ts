@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { describe, expect, it } from 'vitest';
-import { toPythonName, toPythonType, toTypeScriptType } from './languages';
-import type { Model } from './types';
+import { toPythonName, toPythonType, toTypeScriptType } from './languages.js';
+import type { Model } from './types.js';
 
 const createModel = (partial: Partial<Model>): Model => ({
   $refs: [],

@@ -6,7 +6,7 @@ import Infrastructure from '@components/infrastructure.astro';
 
 ### Infrastructure as Code
 
-`infra` に `agentcore` を選択した場合、関連する CDK または Terraform インフラストラクチャが生成され、MCP サーバーを [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html) にデプロイするために使用できます。
+`infra` に `agentcore` または `agentcore-ecr` を選択した場合、関連する CDK または Terraform インフラストラクチャが生成され、MCP サーバーを [Amazon Bedrock AgentCore Runtime](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/agents-tools-runtime.html) にデプロイするために使用できます。
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -32,26 +32,43 @@ export class ExampleStack extends Stack {
 <Fragment slot="terraform">
 Terraform モジュールが生成されます。名前はジェネレーター実行時に選択した `name` に基づいて付けられるか、デフォルトでは `<ProjectName>-mcp-server` となります。
 
-共有の <Link path="/guides/runtime-config#writing-configuration">`runtime_config_appconfig`</Link> モジュールの出力を MCP サーバーモジュールに渡します:
+共有の <Link path="/guides/runtime-config#writing-configuration">`runtime_config_appconfig`</Link> モジュールの出力を、そのパッケージングが使用する共有アーティファクトストアと共に MCP サーバーモジュールに渡します。デフォルトの `agentcore` パッケージングでは、サーバーのコードが共有アセットバケットにステージングされるため、Lambda および API モジュールがすでに行っているように、デプロイメントごとに `core/asset-bucket` モジュールを一度インスタンス化します:
 
 ```terraform
+module "asset_bucket" {
+  source = "../../common/terraform/src/core/asset-bucket"
+}
+
 module "my_project_mcp_server" {
   source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
 
   appconfig_application_id  = module.runtime_config_appconfig.application_id
   appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
+  asset_bucket_name = module.asset_bucket.bucket_name
+  asset_bucket_arn  = module.asset_bucket.bucket_arn
+}
+```
+
+`agentcore-ecr` では、サーバーのイメージが代わりに共有アセットレジストリに公開されるため、バケットの代わりに `core/asset-ecr` の出力を渡します。1つのレジストリがワークスペース内のすべてのコンテナにサービスを提供するため、MCP サーバーは独自のリポジトリを必要としません:
+
+```terraform
+module "asset_ecr" {
+  source = "../../common/terraform/src/core/asset-ecr"
+}
+
+module "my_project_mcp_server" {
+  source = "../../common/terraform/src/app/mcp-servers/my-project-mcp-server"
+
+  appconfig_application_id  = module.runtime_config_appconfig.application_id
+  appconfig_application_arn = module.runtime_config_appconfig.application_arn
+
+  asset_ecr_repository_url = module.asset_ecr.repository_url
+  asset_ecr_repository_arn = module.asset_ecr.repository_arn
 }
 ```
 </Fragment>
 </Infrastructure>
-
-:::caution[Docker が必要]
-MCP サーバーをビルドおよびデプロイするには [Docker](https://www.docker.com/) が必要です。次のようなエラーを回避するために、Docker がインストールされ起動していることを確認してください:
-
-```
-ERROR: Cannot connect to the Docker daemon at unix://path/to/docker.sock.
-```
-:::
 
 ### 認証
 

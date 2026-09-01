@@ -9,14 +9,12 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from <%- agentConnectionModuleName %> import get_current_session_id, session_id_context
-from starlette.middleware.base import BaseHTTPMiddleware
 
-from .agent import get_agent
+from .agent import AGENT_HOOKS, get_agent
+from .middleware.session_id_middleware import SESSION_ID_HEADER, SessionIdMiddleware
 from .session import get_session_manager
 
 logging.basicConfig(level=logging.INFO)
-
-SESSION_ID_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
 
 
 @asynccontextmanager
@@ -29,17 +27,12 @@ async def lifespan(app: FastAPI):
             # A per-thread session manager, not the template Agent's own, since
             # AG-UI caches one Strands agent per thread_id.
             config=StrandsAgentConfig(session_manager_provider=lambda _input_data: get_session_manager()),
+            # Required as well as on the template Agent: AG-UI keeps only the
+            # built HookRegistry, so hooks it can't read back are never
+            # registered and model/tool failures go unreported.
+            hooks=AGENT_HOOKS,
         )
         yield
-
-
-class _SessionIdMiddleware(BaseHTTPMiddleware):
-    """Bind the session ID for this request so downstream MCP / A2A clients forward it on outbound calls."""
-
-    async def dispatch(self, request: Request, call_next):
-        session_id = request.headers.get(SESSION_ID_HEADER) or str(uuid.uuid4())
-        with session_id_context(session_id):
-            return await call_next(request)
 
 
 app = FastAPI(title="AWS Strands - <%= agentNameClassName %>", lifespan=lifespan)
@@ -50,7 +43,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.add_middleware(_SessionIdMiddleware)
+app.add_middleware(SessionIdMiddleware)
 
 
 @app.post("/invocations")

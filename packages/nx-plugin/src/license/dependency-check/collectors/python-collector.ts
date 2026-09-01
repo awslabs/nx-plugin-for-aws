@@ -8,7 +8,7 @@ import { execSync } from 'child_process';
 import fastGlob from 'fast-glob';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { uvxCommand } from '../../../utils/py';
+import { uvxCommand } from '../../../utils/py.js';
 
 export interface PythonDependency {
   name: string;
@@ -31,6 +31,14 @@ interface PipLicensesEntry {
 
 const isUsable = (value: string | undefined): value is string =>
   !!value && value !== 'UNKNOWN';
+
+// Package names and interpreter paths are interpolated into a shell command, so
+// only accept the characters PEP 508 permits in a name, and paths without shell
+// metacharacters.
+const isSafePackageName = (name: string): boolean =>
+  /^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(name);
+
+const isSafePath = (path: string): boolean => !/[^\w./\\:@+-]/.test(path);
 
 // Priority: License-Expression (PEP 639) > License-Metadata (legacy) > License-Classifier (deprecated classifiers)
 const pickLicense = (entry: PipLicensesEntry): string => {
@@ -59,7 +67,7 @@ export const findWorkspacePyProjectNames = async (
       const content = readFileSync(join(start, tomlFile), 'utf-8');
       const parsed = TOML.parse(content);
       const name = (parsed.project as TOML.JsonMap | undefined)?.name;
-      if (typeof name === 'string') names.push(name);
+      if (typeof name === 'string' && isSafePackageName(name)) names.push(name);
     } catch {
       // skip unreadable or malformed files
     }
@@ -100,7 +108,7 @@ const findVenvPythons = async (start: string): Promise<string[]> => {
     }
   }
 
-  return pythons.filter((p) => existsSync(p));
+  return pythons.filter((p) => existsSync(p) && isSafePath(p));
 };
 
 /**
@@ -114,8 +122,9 @@ export const collectPythonDependencies = async (
   if (pythons.length === 0) return [];
 
   const seen = new Map<string, PythonDependency>();
-  const ignoreFlag = options.excludePackages?.length
-    ? ` --ignore-packages ${options.excludePackages.join(' ')}`
+  const excluded = options.excludePackages?.filter(isSafePackageName) ?? [];
+  const ignoreFlag = excluded.length
+    ? ` --ignore-packages ${excluded.join(' ')}`
     : '';
   const cmd = uvxCommand(
     'pip-licenses',

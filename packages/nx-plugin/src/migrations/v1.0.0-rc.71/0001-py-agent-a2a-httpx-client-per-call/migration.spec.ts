@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import type { Tree } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import migration from './migration';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
+import migration from './migration.js';
 
 const AC_DIR = 'packages/common/agent_connection/proj_agent_connection/core';
 const LANGCHAIN_PATH = `${AC_DIR}/agentcore_a2a_client_langchain.py`;

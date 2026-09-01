@@ -55,13 +55,15 @@ import OptionFilter from '@components/option-filter.astro';
           - divide.ts Sample tool
         - resources/
           - sample-guidance.ts Sample resource
-        - Dockerfile Entry point for hosting your MCP server (excluded when `infra` is set to `None`)
+        - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - project.json Updated with MCP server serve target
 </FileTree>
 
 ### 인프라
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment">
+<Snippet name="agentcore-hosting" />
+
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Bedrock AgentCore Runtime deployment">
 <Snippet name="shared-constructs" />
 
 <Snippet name="mcp/shared-constructs" />
@@ -100,12 +102,18 @@ export const registerMyTool = (server: McpServer) => {
 };
 ```
 
-그런 다음 `server.ts`에 등록합니다:
+그런 다음 `server.ts`의 `createServer` 내부에 등록합니다:
 
-```typescript title="server.ts"
+```typescript title="server.ts" {6}
 import { registerMyTool } from './tools/my-tool.js';
 
-registerMyTool(server);
+export const createServer = async () => {
+  const server = new McpServer({ name: 'my-server', version: '1.0.0' });
+
+  registerMyTool(server);
+
+  return server;
+};
 ```
 
 ### 리소스 추가
@@ -178,7 +186,7 @@ MCP 서버를 테스트하고 사용하는 가장 쉬운 방법은 인스펙터�
 
 이 명령은 `tsx --watch`를 사용하여 파일이 변경될 때 서버를 자동으로 다시 시작합니다.
 
-<OptionFilter when={{ infra: 'agentcore' }} description="Bedrock AgentCore Runtime deployment details">
+<OptionFilter when={{ infra: ['agentcore', 'agentcore-ecr'] }} description="Bedrock AgentCore Runtime deployment details">
 ## Bedrock AgentCore Runtime에 MCP Server 배포
 
 <Snippet name="mcp/bedrock-deployment" parentHeading="Bedrock AgentCore Runtime에 MCP Server 배포" />
@@ -189,6 +197,13 @@ MCP 서버를 테스트하고 사용하는 가장 쉬운 방법은 인스펙터�
 
 번들 타겟은 Bedrock AgentCore Runtime에서 호스팅할 Streamable HTTP MCP 서버의 진입점으로 `http.ts`를 사용합니다.
 
+<OptionFilter when={{ infra: 'agentcore' }} description="Code package target">
+### Package 타겟
+
+제너레이터는 배포 가능한 코드 패키지를 조립하는 `<your-server-name>-package` 타겟을 구성합니다: 번들된 `index.js`와 AgentCore가 패키지에 존재해야 하는 AWS Distro for OpenTelemetry의 벤더 설치가 포함됩니다. 생성된 인프라는 이 디렉터리를 `.zip`으로 업로드합니다 — CDK에서는 `AgentRuntimeArtifact.fromCodeAsset`을 통해, Terraform에서는 공유 자산 버킷에 아카이브됩니다.
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'agentcore-ecr' }} description="Container image build and scan">
 ### Docker 타겟
 
 제너레이터는 MCP 서버 소스 디렉터리에서 번들 출력 디렉터리로 `Dockerfile`을 복사하는 `<your-server-name>-docker` 타겟을 구성합니다. 이렇게 하면 `Dockerfile`이 번들된 아티팩트와 함께 배치되어 CDK가 `AgentRuntimeArtifact.fromAsset`을 사용하여 Docker 이미지를 직접 빌드할 수 있습니다.
@@ -198,6 +213,7 @@ MCP 서버를 테스트하고 사용하는 가장 쉬운 방법은 인스펙터�
 ### 이미지 스캔
 
 <Snippet name="trivy-image-scan" parentHeading="이미지 스캔" />
+</OptionFilter>
 
 ### 관찰 가능성
 

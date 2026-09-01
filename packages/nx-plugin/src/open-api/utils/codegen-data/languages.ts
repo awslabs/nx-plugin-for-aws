@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { camelCase, snakeCase, toClassName } from '../../../utils/names';
-import { type Model, PRIMITIVE_TYPES } from './types';
+import { camelCase, snakeCase, toClassName } from '../../../utils/names.js';
+import { type Model, PRIMITIVE_TYPES } from './types.js';
 
 const toTypescriptPrimitive = (property: Model): string => {
   if (

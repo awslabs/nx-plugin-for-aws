@@ -12,17 +12,19 @@ Runtime configuration is the mechanism used by Nx Plugin for AWS to pass deploy-
 
 Runtime configuration is organised into **namespaces**. Each namespace is a logical grouping of related configuration values. At deploy time, all namespaces are stored in **AWS AppConfig** as Configuration Profiles.
 
-Two built-in namespaces are used by generated constructs:
+Four built-in namespaces are used by generated constructs:
 
 - **`connection`** — configuration that enables generated projects to connect to each other:
   - **API URLs** — registered automatically by API constructs
   - **Cognito settings** — registered automatically by the UserIdentity construct
   - **Agent runtime ARNs** — added by the connection generator when you connect a React website to an Agent
 - **`agentcore`** — AgentCore runtime ARNs for agents and MCP servers. Registered automatically by the agent/MCP constructs and used for server-side discovery (agent → agent via A2A, agent → MCP server).
+- **`dynamodb`** — table names, registered automatically by DynamoDB table constructs and read by the generated table client.
+- **`database`** — Aurora connection details, registered automatically by relational database constructs and read by the generated database client.
 
-The `connection` namespace is also deployed as a `runtime-config.json` file to your website's S3 bucket, enabling client-side discovery of backend resources. The `agentcore` namespace is server-side only (via AppConfig) so agent runtime ARNs are not exposed to the frontend unless you explicitly connect a website to an agent.
+The `connection` namespace is also deployed as a `runtime-config.json` file to your website's S3 bucket, enabling client-side discovery of backend resources. The other namespaces are server-side only (via AppConfig), so values such as agent runtime ARNs and table names are not exposed to the frontend unless you explicitly connect a website to them.
 
-You can define as many additional namespaces as you like, providing a convenient alternative to environment variables for passing deploy-time values such as DynamoDB table names to your Lambda functions or other compute resources.
+You can define as many additional namespaces as you like, providing a convenient alternative to environment variables for passing deploy-time values to your Lambda functions or other compute resources.
 
 ```d2
 direction: down
@@ -104,6 +106,17 @@ Terraform wires runtime configuration across three `core/runtime-config/*` modul
      source = "../../common/terraform/src/core/runtime-config/appconfig"
 
      application_name = "my-app-runtime-config"
+   }
+   ```
+
+   The `namespaces` variable defaults to every built-in namespace, so generated modules work without configuring it. To add namespaces of your own, list them alongside the built-in ones:
+
+   ```hcl title="packages/infra/src/main.tf"
+   module "runtime_config_appconfig" {
+     source = "../../common/terraform/src/core/runtime-config/appconfig"
+
+     application_name = "my-app-runtime-config"
+     namespaces       = ["connection", "agentcore", "database", "dynamodb", "tables"]
    }
    ```
 

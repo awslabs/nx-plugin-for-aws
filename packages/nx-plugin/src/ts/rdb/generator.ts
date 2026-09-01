@@ -15,57 +15,59 @@ import {
   updateProjectConfiguration,
   writeJson,
 } from '@nx/devkit';
-import { addTsDependencies } from '../../utils/add-dependencies';
-import { addStarExport } from '../../utils/ast';
+import { addTsDependencies } from '../../utils/add-dependencies.js';
+import { addStarExport } from '../../utils/ast.js';
 import {
   addTypeScriptBundleTarget,
   BUNDLE_DEPENDENCIES,
-} from '../../utils/bundle/bundle';
-import { resolveContainers } from '../../utils/containers';
+} from '../../utils/bundle/bundle.js';
+import { resolveContainers } from '../../utils/containers.js';
 import {
   declareDependencies,
   ownedElsewhere,
-} from '../../utils/declared-dependencies';
+} from '../../utils/declared-dependencies.js';
 import {
   addDockerScanTarget,
   DOCKER_DEPENDENCIES,
+  IMAGE_BUILD_CACHE,
   NODE_IMAGE_DEPENDENCIES,
   nodeImageVersions,
-} from '../../utils/docker';
-import { formatFilesInSubtree } from '../../utils/format';
-import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs';
-import { updateGitIgnore } from '../../utils/git';
-import { resolveIac } from '../../utils/iac';
-import { installDependencies } from '../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { esmVars } from '../../utils/module-format';
-import { kebabCase, snakeCase, toClassName } from '../../utils/names';
-import { getNpmScope } from '../../utils/npm-scope';
+} from '../../utils/docker.js';
+import { formatFilesInSubtree } from '../../utils/format.js';
+import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs.js';
+import { updateGitIgnore } from '../../utils/git.js';
+import { resolveIac } from '../../utils/iac.js';
+import { installDependencies } from '../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
+import { esmVars } from '../../utils/module-format.js';
+import { kebabCase, snakeCase, toClassName } from '../../utils/names.js';
+import { getNpmScope } from '../../utils/npm-scope.js';
 import {
+  addArtifactDependencyToTargets,
   addDependencyToTargetIfNotPresent,
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
-} from '../../utils/nx';
-import { getRelativePathToRootByDirectory } from '../../utils/paths';
-import { registerPnpmBuiltDependencies } from '../../utils/pnpm-workspace';
-import { assignPort } from '../../utils/port';
-import { addRdbInfra } from '../../utils/rdb-constructs/rdb-constructs';
+} from '../../utils/nx.js';
+import { getRelativePathToRootByDirectory } from '../../utils/paths.js';
+import { registerPnpmBuiltDependencies } from '../../utils/pnpm-workspace.js';
+import { assignPort } from '../../utils/port.js';
+import { addRdbInfra } from '../../utils/rdb-constructs/rdb-constructs.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../utils/shared-constructs';
+} from '../../utils/shared-constructs.js';
 import {
   type IacMetadata,
   PACKAGES_DIR,
   SHARED_SCRIPTS_DIR,
-} from '../../utils/shared-constructs-constants';
+} from '../../utils/shared-constructs-constants.js';
 import {
   SHARED_RDB_SCRIPTS_DEPENDENCIES,
   sharedRdbScriptsGenerator,
-} from '../../utils/shared-rdb-scripts';
-import { TS_VERSIONS } from '../../utils/versions';
-import tsProjectGenerator, { getTsLibDetails } from '../lib/generator';
+} from '../../utils/shared-rdb-scripts.js';
+import { TS_VERSIONS } from '../../utils/versions.js';
+import tsProjectGenerator, { getTsLibDetails } from '../lib/generator.js';
 import type { TsRdbGeneratorSchema } from './schema';
 
 /** The metadata this generator records, which its predicates read. */
@@ -131,6 +133,7 @@ export const tsRdbGenerator = async (
     await tsProjectGenerator(tree, {
       name: options.name,
       directory: options.directory,
+      subDirectory: options.subDirectory,
       preferInstallDependencies: false,
     });
   }
@@ -305,6 +308,7 @@ export const tsRdbGenerator = async (
   };
   projectConfig.targets['dev'] = {
     executor: 'nx:run-commands',
+    dependsOn: ['pull-image'],
     options: {
       command: `tsx ${scriptsDir}/start-container.ts`,
       cwd: '{projectRoot}',
@@ -339,14 +343,14 @@ export const tsRdbGenerator = async (
   if (options.infra !== 'none') {
     if (iac === 'terraform') {
       projectConfig.targets['docker'] = {
-        cache: true,
+        cache: IMAGE_BUILD_CACHE,
         executor: 'nx:run-commands',
         options: {
           command: `${containerEngine} build --platform linux/arm64 --provenance=false -t ${migrationDockerImageTag} ${migrationBundleDir}`,
         },
         dependsOn: ['bundle'],
       };
-      addDependencyToTargetIfNotPresent(projectConfig, 'build', 'docker');
+      addArtifactDependencyToTargets(projectConfig, 'docker');
 
       addDockerScanTarget(
         tree,
@@ -360,7 +364,7 @@ export const tsRdbGenerator = async (
         DEPENDENCIES,
       );
     }
-    addDependencyToTargetIfNotPresent(projectConfig, 'build', 'bundle');
+    addArtifactDependencyToTargets(projectConfig, 'bundle');
   }
   addDependencyToTargetIfNotPresent(projectConfig, 'compile', 'generate');
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfig);

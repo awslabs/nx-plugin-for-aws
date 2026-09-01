@@ -11,13 +11,26 @@ import {
   type DependencyDeclaration,
   forDependencies,
   type MustDeclare,
-} from './declared-dependencies';
-import { FS_DEPENDENCIES, FsCommands } from './fs';
-import { addDependencyToTargetIfNotPresent } from './nx';
-import { containerImage, type ITsDepVersion, TS_VERSIONS } from './versions';
+} from './declared-dependencies.js';
+import { FS_DEPENDENCIES, FsCommands } from './fs.js';
+import { addDependencyToTargetIfNotPresent } from './nx.js';
+import { containerImage, type ITsDepVersion, TS_VERSIONS } from './versions.js';
 
 /** Dependencies a caller must declare to add a Docker scan target. */
 export const DOCKER_DEPENDENCIES = [...FS_DEPENDENCIES] as const;
+
+/**
+ * The `cache` setting every target that builds a container image must use.
+ *
+ * A built image lives in the container engine's own store, not under any
+ * `outputs` path, so Nx has nothing to restore a cache hit from: it would
+ * report the build complete while the image is missing, and the `trivy` scan
+ * that depends on it would report a cached pass against an image that isn't
+ * there. The container engine's layer cache is the sound cache here — it is
+ * keyed on the build context and lives alongside the image, so an unchanged
+ * context rebuilds in well under a second and always leaves the image present.
+ */
+export const IMAGE_BUILD_CACHE = false;
 
 const TRIVY_IGNORE_FILE = '.trivyignore';
 
@@ -85,17 +98,17 @@ export interface DockerScanTargetOptions {
 }
 
 /**
- * Add a cacheable Trivy scan target for the images built by a docker target
- * and wire it under the aggregate \`trivy\` target. The scan is not part of
- * \`build\` — run \`nx run-many --target trivy\` (the root \`trivy\` script) in CI.
+ * Add a Trivy scan target for the images built by a docker target and wire it
+ * under the aggregate \`trivy\` target. The scan is not part of \`build\` — run
+ * \`nx run-many --target trivy\` (the root \`trivy\` script) in CI.
  *
- * The scan target depends on the docker target and declares the project source
- * as its inputs, so an unchanged image is never re-scanned (a cache hit skips
- * the scan entirely). Each image is saved to a tarball under
- * \`dist/<projectRoot>/trivy/<scan-key>\` (kept out of any Docker build context)
- * and scanned with the pinned ECR-hosted Trivy image via a workspace-relative
- * bind mount, so the same commands work under both docker and finch. The scan
- * exits non-zero (exit code 1) on HIGH/CRITICAL vulnerabilities.
+ * The scan target depends on the docker target and is not cacheable, because
+ * what it scans lives in the container engine rather than under its \`outputs\`.
+ * Each image is saved to a tarball under \`dist/<projectRoot>/trivy/<scan-key>\`
+ * (kept out of any Docker build context) and scanned with the pinned ECR-hosted
+ * Trivy image via a workspace-relative bind mount, so the same commands work
+ * under both docker and finch. The scan exits non-zero (exit code 1) on
+ * HIGH/CRITICAL vulnerabilities.
  *
  * A \`.trivyignore\` is vended at the project root (kept if it already exists)
  * for suppressing findings.
@@ -143,10 +156,12 @@ export const addDockerScanTarget = <const D extends DependencyDeclaration>(
 
   project.targets ??= {};
   project.targets[trivyTargetName] = {
-    cache: true,
-    // The scanned image is fully determined by the project source, so caching
-    // on the source ensures an unchanged image is never re-scanned.
-    inputs: ['default', '^production'],
+    // The image being scanned is only reachable through the container engine,
+    // so a restored cache entry would report a pass for an image that may no
+    // longer exist. The scan re-runs and either scans the real image or fails.
+    // Nx only hashes a cacheable task, so declaring `inputs` here would have no
+    // effect.
+    cache: false,
     outputs: [`{workspaceRoot}/${scanDir}`],
     executor: 'nx:run-commands',
     options: {

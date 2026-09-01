@@ -7,8 +7,8 @@ import {
   readProjectConfiguration,
   type Tree,
 } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import migration from './migration';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
+import migration from './migration.js';
 
 const OLD_TARGET = 'load:runtime-config';
 const NEW_TARGET = 'load-runtime-config';
@@ -25,6 +25,12 @@ const cdkTarget = () => ({
   },
 });
 
+/**
+ * The target as workspaces of this era carried it. `SRC_FILE` names a path
+ * nothing writes — the `terraform-load-runtime-config-src-path` migration
+ * corrects that separately. This migration clones the target verbatim, so the
+ * fixture stays as-generated-then.
+ */
 const terraformTarget = () => ({
   executor: 'nx:run-commands',
   metadata: {

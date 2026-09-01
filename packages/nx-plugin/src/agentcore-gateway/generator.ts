@@ -13,49 +13,45 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { addTsDependencies } from '../utils/add-dependencies';
+import { addTsDependencies } from '../utils/add-dependencies.js';
 import {
   AGENT_CORE_CONSTRUCTS_DEPENDENCIES,
   AGENT_CORE_CONSTRUCTS_PY_DEPENDENCIES,
   addAgentCoreGatewayInfra,
-} from '../utils/agent-core-constructs/agent-core-constructs';
+} from '../utils/agent-core-constructs/agent-core-constructs.js';
 import {
   declareDependencies,
   ownedElsewhere,
-} from '../utils/declared-dependencies';
-import { formatFilesInSubtree } from '../utils/format';
-import { resolveIac } from '../utils/iac';
-import { installDependencies } from '../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../utils/metrics';
-import { kebabCase, toClassName } from '../utils/names';
-import { getNpmScopePrefix } from '../utils/npm-scope';
+} from '../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../utils/format.js';
+import { resolveIac } from '../utils/iac.js';
+import { installDependencies } from '../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../utils/metrics.js';
+import { kebabCase, toClassName } from '../utils/names.js';
+import { getNpmScopePrefix } from '../utils/npm-scope.js';
 import {
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   projectExists,
   readProjectConfigurationUnqualified,
-} from '../utils/nx';
-import { assignPort } from '../utils/port';
-import { ensureProjectPackageJson } from '../utils/project-package-json';
+} from '../utils/nx.js';
+import { assignPort } from '../utils/port.js';
+import { ensureProjectPackageJson } from '../utils/project-package-json.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../utils/shared-constructs';
-import type { IacMetadata } from '../utils/shared-constructs-constants';
+} from '../utils/shared-constructs.js';
+import type { IacMetadata } from '../utils/shared-constructs-constants.js';
 import type { AgentcoreGatewayGeneratorSchema } from './schema';
 
-// The gateway's local-dev server and Cedar policy rendering need these
-// whatever the auth; only the MCP SDK is protocol-specific (the http local
-// gateway is a plain proxy).
+// The gateway's local-dev server needs these whatever the auth; only the MCP
+// SDK is protocol-specific (the http local gateway is a plain proxy).
 export const DEPENDENCIES = declareDependencies<AgentCoreGatewayMetadata>()({
   ts: [
     { name: '@modelcontextprotocol/sdk', when: (m) => m.protocol === 'mcp' },
     { name: 'express' },
     { name: '@types/express', dev: true },
-    // ejs renders the Cedar policy in the shared gateway construct.
-    { name: 'ejs', dev: true },
-    { name: '@types/ejs', dev: true },
     // local-dev.ts runs via tsx, which is shared tooling.
     { name: 'tsx', dev: true, root: true },
     ...ownedElsewhere(AGENT_CORE_CONSTRUCTS_DEPENDENCIES),

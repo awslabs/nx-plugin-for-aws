@@ -3,17 +3,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { type Tree, updateJson } from '@nx/devkit';
-import { declareDependencies } from '../../../utils/declared-dependencies';
-import { expectHasMetricTags } from '../../../utils/metrics.spec';
+import { declareDependencies } from '../../../utils/declared-dependencies.js';
+import { expectHasMetricTags } from '../../../utils/metrics.spec.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../../utils/shared-constructs';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
+} from '../../../utils/shared-constructs.js';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
 import {
   COGNITO_AUTH_GENERATOR_INFO,
   tsReactWebsiteAuthGenerator,
-} from './generator';
+} from './generator.js';
 import type { TsReactWebsiteAuthGeneratorSchema } from './schema';
 
 const sharedConstructsDeclaration = declareDependencies()({
@@ -628,5 +628,115 @@ describe('cognito-auth generator', () => {
 
     // Verify the metric was added to app.ts
     expectHasMetricTags(tree, COGNITO_AUTH_GENERATOR_INFO.metric);
+  });
+
+  it('should allow-list each websites dev-server and preview ports, without duplicates', async () => {
+    const mainTsx = `
+      import { RuntimeConfigProvider } from './components/RuntimeConfig';
+      import { RouterProvider, createRouter } from '@tanstack/react-router';
+
+      export function App() {
+        const App = () => <RouterProvider router={router} />;
+
+        return (
+          <RuntimeConfigProvider>
+            <App/>
+          </RuntimeConfigProvider>
+        );
+      }
+    `;
+    tree.write('packages/test-project/src/main.tsx', mainTsx);
+    // A second website, assigned a different local dev port by the react-website
+    // app generator (simulated here via project metadata).
+    tree.write(
+      'packages/test-project-2/project.json',
+      JSON.stringify({
+        name: 'test-project-2',
+        sourceRoot: 'packages/test-project-2/src',
+        metadata: {
+          ux,
+          ports: [4201],
+        },
+      }),
+    );
+    tree.write(
+      'packages/test-project-2/package.json',
+      JSON.stringify({ name: '@proj/test-project-2', type: 'module' }),
+    );
+    tree.write('packages/test-project-2/src/main.tsx', mainTsx);
+
+    await tsReactWebsiteAuthGenerator(tree, options);
+    await tsReactWebsiteAuthGenerator(tree, {
+      ...options,
+      project: 'test-project-2',
+      cognitoDomain: 'test-2',
+    });
+    // Re-running the first website must not duplicate its own entry.
+    await tsReactWebsiteAuthGenerator(tree, options);
+
+    const userIdentity = tree
+      .read('packages/common/constructs/src/core/user-identity.ts', 'utf-8')
+      ?.toString();
+    // Dev-server ports
+    expect(userIdentity?.match(/'http:\/\/localhost:4200'/g)).toHaveLength(1);
+    expect(userIdentity?.match(/'http:\/\/localhost:4201'/g)).toHaveLength(1);
+    // Preview ports (dev-server port + 100), also allow-listed and deduped
+    expect(userIdentity?.match(/'http:\/\/localhost:4300'/g)).toHaveLength(1);
+    expect(userIdentity?.match(/'http:\/\/localhost:4301'/g)).toHaveLength(1);
+  });
+
+  it('should allow-list each websites dev-server and preview ports, without duplicates (terraform)', async () => {
+    const mainTsx = `
+      import { RuntimeConfigProvider } from './components/RuntimeConfig';
+      import { RouterProvider, createRouter } from '@tanstack/react-router';
+
+      export function App() {
+        const App = () => <RouterProvider router={router} />;
+
+        return (
+          <RuntimeConfigProvider>
+            <App/>
+          </RuntimeConfigProvider>
+        );
+      }
+    `;
+    tree.write('packages/test-project/src/main.tsx', mainTsx);
+    tree.write(
+      'packages/test-project-2/project.json',
+      JSON.stringify({
+        name: 'test-project-2',
+        sourceRoot: 'packages/test-project-2/src',
+        metadata: {
+          ux,
+          ports: [4201],
+        },
+      }),
+    );
+    tree.write(
+      'packages/test-project-2/package.json',
+      JSON.stringify({ name: '@proj/test-project-2', type: 'module' }),
+    );
+    tree.write('packages/test-project-2/src/main.tsx', mainTsx);
+
+    const terraformOptions = { ...options, iac: 'terraform' } as const;
+    await tsReactWebsiteAuthGenerator(tree, terraformOptions);
+    await tsReactWebsiteAuthGenerator(tree, {
+      ...terraformOptions,
+      project: 'test-project-2',
+      cognitoDomain: 'test-2',
+    });
+    // Re-running the first website must not duplicate its own entry.
+    await tsReactWebsiteAuthGenerator(tree, terraformOptions);
+
+    const identityTf = tree
+      .read(
+        'packages/common/terraform/src/core/user-identity/identity/identity.tf',
+        'utf-8',
+      )
+      ?.toString();
+    expect(identityTf?.match(/"http:\/\/localhost:4200"/g)).toHaveLength(1);
+    expect(identityTf?.match(/"http:\/\/localhost:4201"/g)).toHaveLength(1);
+    expect(identityTf?.match(/"http:\/\/localhost:4300"/g)).toHaveLength(1);
+    expect(identityTf?.match(/"http:\/\/localhost:4301"/g)).toHaveLength(1);
   });
 });

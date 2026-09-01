@@ -4,12 +4,12 @@
  */
 
 import type { Tree } from '@nx/devkit';
-import { importTypeScriptModule } from '../../utils/js';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { expectTypeScriptToCompile } from '../../utils/test/ts.spec';
-import type { Spec } from '../utils/types';
-import { openApiTsClientGenerator } from './generator';
-import { baseUrl, callGeneratedClient } from './generator.utils.spec';
+import { importTypeScriptModule } from '../../utils/js.js';
+import { expectTypeScriptToCompile } from '../../utils/test/ts.spec.js';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import type { Spec } from '../utils/types.js';
+import { openApiTsClientGenerator } from './generator.js';
+import { baseUrl, callGeneratedClient } from './generator.utils.spec.js';
 
 describe('openApiTsClientGenerator - composite schemas', () => {
   let tree: Tree;

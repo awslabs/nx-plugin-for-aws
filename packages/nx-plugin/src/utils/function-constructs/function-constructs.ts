@@ -10,16 +10,20 @@ import {
   type Tree,
   updateJson,
 } from '@nx/devkit';
-import { addStarExport } from '../ast';
-import type { Iac } from '../iac';
-import { esmVars } from '../module-format';
-import { addDependencyToTargetIfNotPresent } from '../nx';
+import { addStarExport } from '../ast.js';
+import type { Iac } from '../iac.js';
+import { esmVars } from '../module-format.js';
+import { addArtifactProjectToTargets } from '../nx.js';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
   SHARED_TERRAFORM_DIR,
-} from '../shared-constructs-constants';
-import { terraformProviderVersions } from '../versions';
+} from '../shared-constructs-constants.js';
+import {
+  cdkLambdaRuntime,
+  terraformLambdaRuntime,
+  terraformProviderVersions,
+} from '../versions.js';
 
 export interface AddLambdaFunctionConstructOptions {
   functionProjectName: string;
@@ -55,11 +59,7 @@ export const addLambdaFunctionInfra = async (
       'project.json',
     ),
     (config: ProjectConfiguration) => {
-      addDependencyToTargetIfNotPresent(
-        config,
-        'build',
-        `${options.functionProjectName}:build`,
-      );
+      addArtifactProjectToTargets(config, options.functionProjectName);
       return config;
     },
   );
@@ -88,7 +88,7 @@ const addLambdaFunctionCdkConstructs = async (
     ),
     {
       ...options,
-      runtime: `Runtime.${options.runtime === 'python' ? 'PYTHON_3_14' : 'NODEJS_LATEST'}`,
+      runtime: cdkLambdaRuntime(options.runtime),
       ...esmVars(tree),
     },
     {
@@ -145,7 +145,7 @@ const addLambdaFunctionTerraformModules = (
     ),
     {
       ...options,
-      runtime: options.runtime === 'python' ? 'python3.14' : 'nodejs22.x',
+      runtime: terraformLambdaRuntime(options.runtime),
       ...terraformProviderVersions(),
     },
     {

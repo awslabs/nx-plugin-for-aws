@@ -3,21 +3,34 @@ title: Bảo Vệ Xóa
 ---
 import Infrastructure from '@components/infrastructure.astro';
 
-Bảo vệ xóa được bật theo mặc định (`deletionProtection: true` trong CDK, `deletion_protection = true` trong Terraform) để bảo vệ cụm Aurora khỏi bị xóa do nhầm lẫn.
+Cụm Aurora được bảo vệ bởi hai lớp bảo vệ độc lập, do đó việc tắt một trong hai không thể xóa dữ liệu của bạn:
 
-#### Tắt Bảo Vệ Xóa
+<Infrastructure>
+<Fragment slot="cdk">
+- `deletionProtection`, được thực thi bởi RDS.
+- `RemovalPolicy.RETAIN`, được thực thi bởi CloudFormation, giữ cụm tại chỗ khi nó bị xóa khỏi stack.
+</Fragment>
+<Fragment slot="terraform">
+- `deletion_protection`, được thực thi bởi RDS.
+- `lifecycle { prevent_destroy = true }` trên cụm trong `common/terraform/src/core/rdb/aurora/aurora.tf`, được thực thi bởi Terraform, làm thất bại bất kỳ kế hoạch nào có thể phá hủy cụm.
+</Fragment>
+</Infrastructure>
 
-Bạn có thể tắt bảo vệ xóa cho các môi trường mà việc xóa cơ sở dữ liệu được mong đợi, chẳng hạn như các stack phát triển hoặc xem trước có thời gian tồn tại ngắn.
+#### Xóa Cơ Sở Dữ Liệu
+
+Bạn có thể tắt bảo vệ cho các môi trường mà việc xóa cơ sở dữ liệu được mong đợi, chẳng hạn như các stack phát triển hoặc xem trước có thời gian tồn tại ngắn.
 
 <Infrastructure>
 <Fragment slot="cdk">
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
+import { RemovalPolicy } from 'aws-cdk-lib';
 import { MyDatabase } from '@my-scope/common-constructs';
 
 const db = new MyDatabase(this, 'Db', {
   ...
   deletionProtection: false,
+  removalPolicy: RemovalPolicy.DESTROY,
 });
 ```
 </Fragment>
@@ -28,7 +41,24 @@ module "my_database" {
   source = "../../common/terraform/src/app/dbs/my-database"
   ...
   deletion_protection = false
+  skip_final_snapshot = true
 }
 ```
+
+`prevent_destroy` phải là một giá trị cố định — Terraform không cho phép nó tham chiếu đến một biến — do đó nó không thể được tắt từ `main.tf`. Đồng thời xóa khối `lifecycle` khỏi cụm trong `common/terraform/src/core/rdb/aurora/aurora.tf`:
+
+```hcl title="packages/common/terraform/src/core/rdb/aurora/aurora.tf" del={4-6}
+resource "aws_rds_cluster" "database" {
+  # ...
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+```
+
+:::caution
+Module này được chia sẻ bởi mọi cơ sở dữ liệu trong workspace của bạn, do đó việc xóa khối này sẽ xóa lớp bảo vệ đó cho tất cả chúng.
+:::
 </Fragment>
 </Infrastructure>

@@ -67,6 +67,17 @@ export const runGeneratorMatrix = async (
     opts,
   );
 
+  // tRPC APIs using the shared integration pattern — the APIs above take the
+  // default `isolated` pattern, so both are covered.
+  await runCLI(
+    `generate @aws/nx-plugin:ts#api --name=my-api-shared --infra=rest-lambda --integrationPattern=shared --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:ts#api --name=my-api-shared-http --infra=http-lambda --integrationPattern=shared --no-interactive${deferFlag}`,
+    opts,
+  );
+
   // tRPC APIs with Custom auth — REST + HTTP variants.
   await runCLI(
     `generate @aws/nx-plugin:ts#api --name=my-api-custom --infra=rest-lambda --auth=custom --no-interactive${deferFlag}`,
@@ -123,7 +134,15 @@ export const runGeneratorMatrix = async (
     opts,
   );
   await runCLI(
+    `generate @aws/nx-plugin:py#mcp-server --project=py_project --name=ecr-mcp-server --infra=agentcore-ecr --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
     `generate @aws/nx-plugin:py#agent --project=py_project --name=my-agent --infra=agentcore --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-ecr-agent --infra=agentcore-ecr --no-interactive${deferFlag}`,
     opts,
   );
 
@@ -146,6 +165,10 @@ export const runGeneratorMatrix = async (
     `generate @aws/nx-plugin:ts#mcp-server --project=ts-project --name=hosted-mcp-server --infra=agentcore --no-interactive${deferFlag}`,
     opts,
   );
+  await runCLI(
+    `generate @aws/nx-plugin:ts#mcp-server --project=ts-project --name=ecr-mcp-server --infra=agentcore-ecr --no-interactive${deferFlag}`,
+    opts,
+  );
 
   // OAuth DCR proxy for Cognito-authenticated MCP servers — iacProvider inherited.
   await runCLI(
@@ -160,6 +183,10 @@ export const runGeneratorMatrix = async (
   );
   await runCLI(
     `generate @aws/nx-plugin:ts#agent --project=ts-project --infra=agentcore --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:ts#agent --project=ts-project --name=my-ts-ecr-agent --infra=agentcore-ecr --no-interactive${deferFlag}`,
     opts,
   );
 

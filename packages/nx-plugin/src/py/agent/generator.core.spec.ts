@@ -5,10 +5,10 @@
 
 import { parse } from '@iarna/toml';
 import { addProjectConfiguration, type Tree } from '@nx/devkit';
-import type { UVPyprojectToml } from '../../utils/nxlv-python';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { CONTAINER_VERSIONS } from '../../utils/versions';
-import { pyAgentGenerator } from './generator';
+import type { UVPyprojectToml } from '../../utils/nxlv-python.js';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import { CONTAINER_VERSIONS } from '../../utils/versions.js';
+import { pyAgentGenerator } from './generator.js';
 
 describe('py#agent generator', () => {
   let tree: Tree;
@@ -63,9 +63,10 @@ dev-dependencies = []
     expect(
       tree.exists('apps/test-project/proj_test_project/agent/main.py'),
     ).toBeTruthy();
+    // Code packaging is the default, so there is no Dockerfile
     expect(
       tree.exists('apps/test-project/proj_test_project/agent/Dockerfile'),
-    ).toBeTruthy();
+    ).toBeFalsy();
 
     // The agent server imports the framework base helpers, so they must be
     // emitted + re-exported even without any connection client.
@@ -135,11 +136,12 @@ dev-dependencies = []
     expect(
       tree.exists('apps/test-project/proj_test_project/custom_agent/main.py'),
     ).toBeTruthy();
+    // Code packaging is the default, so there is no Dockerfile
     expect(
       tree.exists(
         'apps/test-project/proj_test_project/custom_agent/Dockerfile',
       ),
-    ).toBeTruthy();
+    ).toBeFalsy();
 
     // Check that project configuration was updated with custom serve target
     const projectConfig = JSON.parse(
@@ -253,7 +255,7 @@ dev-dependencies = []
   it('should generate strands agent with BedrockAgentCoreRuntime (default)', async () => {
     await pyAgentGenerator(tree, {
       project: 'test-project',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'cdk',
     });
 
@@ -296,6 +298,10 @@ dev-dependencies = []
     ]);
     expect(projectConfig.targets['agent-docker'].options.parallel).toBe(false);
 
+    // The built image lives in the container engine rather than under any
+    // outputs path, so there is nothing for a cache hit to restore.
+    expect(projectConfig.targets['agent-docker'].cache).toBe(false);
+
     // Check that docker target depends on bundle-arm
     expect(projectConfig.targets['agent-docker'].dependsOn).toContain(
       'bundle-arm',
@@ -304,10 +310,9 @@ dev-dependencies = []
     // Check that build target depends on docker
     expect(projectConfig.targets.build.dependsOn).toContain('docker');
 
-    // Check that a cacheable trivy scan target was added
+    // Check that a non-cacheable trivy scan target was added
     expect(projectConfig.targets['agent-trivy']).toEqual({
-      cache: true,
-      inputs: ['default', '^production'],
+      cache: false,
       outputs: [
         '{workspaceRoot}/dist/apps/test-project/trivy/proj-test-project-agent-latest',
       ],
@@ -333,7 +338,7 @@ dev-dependencies = []
     await pyAgentGenerator(tree, {
       project: 'test-project',
       name: 'custom-bedrock-agent',
-      infra: 'agentcore',
+      infra: 'agentcore-ecr',
       iac: 'cdk',
     });
 

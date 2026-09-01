@@ -10,37 +10,37 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { addTsDependencies } from '../../../utils/add-dependencies';
+import { addTsDependencies } from '../../../utils/add-dependencies.js';
 import {
   AGENT_CONNECTION_DEPENDENCIES,
   AGENT_CONNECTION_PROJECT_DIR,
   addTypeScriptCoreClient,
   ensureTypeScriptAgentConnectionProject,
-} from '../../../utils/agent-connection/agent-connection';
+} from '../../../utils/agent-connection/agent-connection.js';
 import {
   addDestructuredImport,
   addStarExport,
   appendToArrayViaGritQL,
   applyGritQL,
-} from '../../../utils/ast';
+} from '../../../utils/ast.js';
 import {
   declareDependencies,
   ownedElsewhere,
-} from '../../../utils/declared-dependencies';
-import { formatFilesInSubtree } from '../../../utils/format';
-import { installDependencies } from '../../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics';
-import { esmVars } from '../../../utils/module-format';
-import { kebabCase } from '../../../utils/names';
-import { getNpmScope } from '../../../utils/npm-scope';
+} from '../../../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../../../utils/format.js';
+import { installDependencies } from '../../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics.js';
+import { esmVars } from '../../../utils/module-format.js';
+import { kebabCase } from '../../../utils/names.js';
+import { getNpmScope } from '../../../utils/npm-scope.js';
 import {
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
-} from '../../../utils/nx';
-import { toProjectRelativePath } from '../../../utils/paths';
+} from '../../../utils/nx.js';
+import { toProjectRelativePath } from '../../../utils/paths.js';
 import type { TsAgentA2aConnectionGeneratorSchema } from './schema';
 
 // The A2A core client + vended client need these whatever the connection's

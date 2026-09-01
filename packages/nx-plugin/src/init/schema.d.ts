@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Containers } from '../utils/containers';
-import { Iac } from '../utils/iac';
+import { Containers } from '../utils/containers.js';
+import { Iac } from '../utils/iac.js';
 
 export type InitContainersOption = Containers | 'infer';
 

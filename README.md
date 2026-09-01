@@ -26,106 +26,24 @@
 
 ---
 
-**@aws/nx-plugin** is a collection of code generators that scaffold full-stack, production-ready AWS applications inside an [Nx](https://nx.dev) monorepo. Every generator produces best-practice application code **and** the infrastructure to deploy it — type-safe, locally runnable, and ready to deploy.
+**@aws/nx-plugin** is a collection of code generators that scaffold full-stack AWS applications inside an [Nx](https://nx.dev) monorepo. Every generator produces best-practice application code **and** the infrastructure to deploy it — type-safe, locally runnable, and deployable from the start, getting you closer to production.
 
 ## Quick Start
 
 ### Build with AI
 
-Add the MCP server to your AI assistant and let it build for you.
+**1. Create a workspace**
 
 ```bash
-claude mcp add nx-plugin-for-aws -- npx -y @aws/nx-plugin-mcp
+pnpm create @aws/nx-workspace my-project
+cd my-project
 ```
 
-<details>
-<summary><strong>Kiro</strong></summary>
+**2. Open your AI assistant in the created workspace and prompt it**
 
-Install the [Kiro Power](https://kiro.dev/docs/powers/) for the best experience — no manual MCP configuration needed:
+> _"Use the Nx Plugin for AWS to build a full-stack application consisting of a React website with shadcn and Cognito authentication, connected to a TypeScript Strands agent via the AG-UI protocol, and infrastructure to deploy it."_
 
-1. Open the Kiro Powers panel from the sidebar
-2. Click `+` to add a custom power
-3. Paste: `https://github.com/awslabs/nx-plugin-for-aws/tree/main/powers/nx-plugin-for-aws`
-4. Click install
-
-Or add the MCP server manually in `.kiro/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "nx-plugin-for-aws": {
-      "command": "npx",
-      "args": ["-y", "@aws/nx-plugin-mcp"]
-    }
-  }
-}
-```
-
-</details>
-
-<details>
-<summary><strong>Claude Code</strong></summary>
-
-```bash
-claude mcp add nx-plugin-for-aws -- npx -y @aws/nx-plugin-mcp
-```
-
-</details>
-
-<details>
-<summary><strong>Cursor</strong></summary>
-
-Add to `~/.cursor/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "nx-plugin-for-aws": {
-      "command": "npx",
-      "args": ["-y", "@aws/nx-plugin-mcp"]
-    }
-  }
-}
-```
-
-</details>
-
-<details>
-<summary><strong>Codex</strong></summary>
-
-Add to `~/.codex/config.toml`:
-
-```toml
-[mcp_servers.nx-plugin-for-aws]
-command = "npx"
-args = ["-y", "@aws/nx-plugin-mcp"]
-```
-
-</details>
-
-<details>
-<summary><strong>Other assistants</strong></summary>
-
-Most MCP-compatible assistants use a JSON configuration file. Add the following entry:
-
-```json
-{
-  "mcpServers": {
-    "nx-plugin-for-aws": {
-      "command": "npx",
-      "args": ["-y", "@aws/nx-plugin-mcp"]
-    }
-  }
-}
-```
-
-</details>
-
-Then just ask:
-
-> _"Use the Nx Plugin for AWS to build a full-stack app with a React website, a tRPC API, Cognito auth, and CDK infrastructure."_
-
-Your AI assistant will use the MCP tools to scaffold, connect, and configure everything. See the [Building with AI guide](https://awslabs.github.io/nx-plugin-for-aws/en/get_started/building-with-ai/) for more details.
+Your AI assistant will use the Nx Plugin for AWS MCP server, which is preconfigured in every workspace you create with the command above, to scaffold, connect, and configure everything. See the [Building with AI guide](https://awslabs.github.io/nx-plugin-for-aws/en/get_started/building-with-ai/) for more details.
 
 ### Build with the CLI
 
@@ -159,28 +77,28 @@ pnpm nx g @aws/nx-plugin:ts#infra
 
 ## Available Generators
 
-| Generator               | Description                                                                                                       |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `ts#project`            | TypeScript library                                                                                                |
-| `ts#api`                | TypeScript API (tRPC or Smithy) with API Gateway + Lambda + [Powertools](https://github.com/aws-powertools/powertools-lambda-typescript) |
-| `ts#rdb`                | Relational databases with Aurora RDS                                                                              |
-| `ts#website`            | React app (Vite)                                                                                                  |
-| `ts#website#auth`       | Add Cognito auth to a website                                                                                     |
-| `ts#infra`              | AWS CDK infrastructure project                                                                                    |
-| `ts#lambda-function`    | TypeScript Lambda with type-safe event sources                                                                    |
-| `ts#mcp-server`         | MCP server (TypeScript)                                                                                           |
-| `ts#agent`              | [Strands Agent](https://strandsagents.com/) (TypeScript)                                                          |
-| `ts#nx-generator`       | Nx generator scaffold                                                                                             |
-| `smithy#project`        | Smithy model project — a service model, or a shape library shared between Smithy projects                          |
-| `py#project`            | Python project (uv)                                                                                               |
-| `py#api`                | Python API (FastAPI) with API Gateway + Lambda + [Powertools](https://github.com/aws-powertools/powertools-lambda-python)      |
-| `py#lambda-function`    | Python Lambda with type-safe event sources                                                                        |
-| `py#mcp-server`         | MCP server (Python)                                                                                               |
-| `py#agent`              | [Strands Agent](https://strandsagents.com/) (Python)                                                              |
-| `agentcore-harness`     | [AgentCore Harness](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness.html) agent loop        |
-| `connection`            | Connect projects together (e.g. frontend to API)                                                                  |
-| `terraform#project`     | Terraform project                                                                                                 |
-| `license`               | Manage LICENSE files and source headers                                                                           |
+| Generator            | Description                                                                                                                              |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `ts#project`         | TypeScript library                                                                                                                       |
+| `ts#api`             | TypeScript API (tRPC or Smithy) with API Gateway + Lambda + [Powertools](https://github.com/aws-powertools/powertools-lambda-typescript) |
+| `ts#rdb`             | Relational databases with Aurora RDS                                                                                                     |
+| `ts#website`         | React app (Vite)                                                                                                                         |
+| `ts#website#auth`    | Add Cognito auth to a website                                                                                                            |
+| `ts#infra`           | AWS CDK infrastructure project                                                                                                           |
+| `ts#lambda-function` | TypeScript Lambda with type-safe event sources                                                                                           |
+| `ts#mcp-server`      | MCP server (TypeScript)                                                                                                                  |
+| `ts#agent`           | [Strands Agent](https://strandsagents.com/) (TypeScript)                                                                                 |
+| `ts#nx-generator`    | Nx generator scaffold                                                                                                                    |
+| `smithy#project`     | Smithy model project — a service model, or a shape library shared between Smithy projects                                                |
+| `py#project`         | Python project (uv)                                                                                                                      |
+| `py#api`             | Python API (FastAPI) with API Gateway + Lambda + [Powertools](https://github.com/aws-powertools/powertools-lambda-python)                |
+| `py#lambda-function` | Python Lambda with type-safe event sources                                                                                               |
+| `py#mcp-server`      | MCP server (Python)                                                                                                                      |
+| `py#agent`           | [Strands Agent](https://strandsagents.com/) (Python)                                                                                     |
+| `agentcore-harness`  | [AgentCore Harness](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness.html) agent loop (experimental)                |
+| `connection`         | Connect projects together (e.g. frontend to API)                                                                                         |
+| `terraform#project`  | Terraform project                                                                                                                        |
+| `license`            | Manage LICENSE files and source headers                                                                                                  |
 
 ## Community
 

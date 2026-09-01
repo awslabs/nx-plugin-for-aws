@@ -5,23 +5,30 @@
 
 import fs from 'fs';
 import path from 'path';
-import type { NxGeneratorInfo } from '../utils/generators';
-import { kebabCase } from '../utils/names';
-import { parseMdx, postProcessGuideWithRemark } from './guide-pipeline';
+import type { NxGeneratorInfo } from '../utils/generators.js';
+import { kebabCase } from '../utils/names.js';
+import { parseMdx, postProcessGuideWithRemark } from './guide-pipeline.js';
 import {
   buildNxCommand,
   renderGeneratorCommand,
   renderSchema,
-} from './guide-render';
-import { collectFilterableKeysFromJsx, extractFrontmatter } from './mdx-ast';
-import { evaluatePredicate } from './option-filter';
+} from './guide-render.js';
+import { collectFilterableKeysFromJsx, extractFrontmatter } from './mdx-ast.js';
+import { evaluatePredicate } from './option-filter.js';
 import {
   filterableOptionsFromSchema,
   type GeneratorSchema,
-} from './schema-registry';
+} from './schema-registry.js';
 
 // Re-export so existing callers of `generator-info` continue working.
-export { buildNxCommand } from './guide-render';
+export { buildNxCommand } from './guide-render.js';
+
+/**
+ * Warn agents that an experimental generator's output may change in a future
+ * release without a migration to carry an existing workspace across.
+ */
+export const renderExperimentalWarning = (generatorId: string): string =>
+  `> [!WARNING] Experimental: the \`${generatorId}\` generator's behaviour and generated output may change in a future release without a migration being published to apply the change to an existing workspace.`;
 
 /**
  * Render summary information about a generator
@@ -35,7 +42,7 @@ export const renderGeneratorInfo = (
   return `${info.id}
 
 Description: ${info.description}
-
+${info.experimental ? `\n${renderExperimentalWarning(info.id)}\n` : ''}
 Available Parameters:
 ${renderSchema(schema)}
 
@@ -44,7 +51,7 @@ ${renderGeneratorCommand(info.id, schema, packageManager)}
 `;
 };
 
-export type FilterableOption = import('./schema-registry').FilterableOption;
+export type FilterableOption = import('./schema-registry.js').FilterableOption;
 
 /**
  * Enum properties from the generator's JSON schema — the options a user
@@ -164,7 +171,7 @@ const renderUnsupportedMessage = (
   return `## ${info.id}
 
 > [!WARNING] Unsupported combination: ${requestedDesc}. The \`${info.id}\` generator has no guide variant matching this combination — running it will likely fail.
-
+${info.experimental ? `\n${renderExperimentalWarning(info.id)}\n` : ''}
 Supported combinations:
 ${supportedList}
 

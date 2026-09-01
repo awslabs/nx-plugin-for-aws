@@ -8,10 +8,10 @@ import { addProjectConfiguration, readJson, type Tree } from '@nx/devkit';
 import {
   SMITHY_PROJECT_GENERATOR_INFO,
   smithyProjectGenerator,
-} from '../../../smithy/project/generator';
-import { createTreeUsingTsSolutionSetup } from '../../../utils/test';
-import { MISE_VERSIONS, TS_VERSIONS } from '../../../utils/versions';
-import migration from './migration';
+} from '../../../smithy/project/generator.js';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
+import { MISE_VERSIONS, TS_VERSIONS } from '../../../utils/versions.js';
+import migration from './migration.js';
 
 /**
  * The `build.Dockerfile` a legacy container-building service project holds, and

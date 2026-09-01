@@ -4,7 +4,7 @@
  */
 
 import type { Tree } from '@nx/devkit';
-import { addDestructuredImport, applyGritQL, matchGritQL } from '../ast';
+import { addDestructuredImport, applyGritQL, matchGritQL } from '../ast.js';
 
 export interface AddHookResultToRouterProviderContextProps {
   hook: string; // eg useAuth

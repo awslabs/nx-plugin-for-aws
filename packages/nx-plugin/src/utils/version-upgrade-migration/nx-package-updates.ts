@@ -2,8 +2,8 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { migrationKey } from '../migration-versions';
-import { NX_PACKAGES, NX_VERSION } from '../versions';
+import { migrationKey } from '../migration-versions.js';
+import { NX_PACKAGES, NX_VERSION } from '../versions.js';
 
 /**
  * `packageJsonUpdates` for the nx packages a generated workspace pins.

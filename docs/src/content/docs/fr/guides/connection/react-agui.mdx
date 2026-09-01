@@ -2,7 +2,7 @@
 title: React vers Agent AG-UI
 description: Connecter un site web React à un Agent via le protocole AG-UI en utilisant CopilotKit
 when:
-  sourceType: react
+  sourceType: ts#react-website
   targetType:
     - ts#agent
     - py#agent
@@ -91,6 +91,25 @@ Le code généré gère l'authentification en fonction de la configuration de vo
 
 - **IAM** (par défaut) : utilise des requêtes HTTP signées AWS SigV4. Les identifiants sont obtenus à partir du pool d'identités Cognito configuré avec l'authentification de votre site web.
 - **Cognito** : intègre le jeton d'accès JWT dans l'en-tête `Authorization` en tant que jeton Bearer.
+
+### Sessions et Threads
+
+AG-UI et AgentCore Runtime identifient chacun une conversation différemment, et le hook généré les relie ensemble :
+
+- **`threadId`** — l'identifiant de conversation AG-UI, envoyé dans le corps de la requête. CopilotKit génère un UUID aléatoire par chat sauf si vous passez un `threadId` explicite.
+- **Session ID** — la session AgentCore Runtime, envoyée dans l'en-tête `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`. Elle sélectionne la [microVM](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-how-it-works.html) qui traite la requête, et c'est ce sur quoi le `session.ts` / `session.py` de votre agent indexe l'état de la conversation.
+
+Le hook dérive l'ID de session à partir de l'ID de thread, en le complétant à droite jusqu'aux 33 caractères requis par AgentCore Runtime :
+
+```ts
+function agentCoreSessionId(input: RunAgentInput): string {
+  return (input.threadId ?? '').padEnd(33, '0');
+}
+```
+
+Laisser `threadId` non défini est le plus simple — l'UUID généré par CopilotKit fait déjà 36 caractères. Si vous en passez un explicitement, assurez-vous qu'il fasse au moins 33 caractères, car le remplissage mappe les ID de thread qui ne diffèrent que par les caractères de fin sur la même session.
+
+L'ID de session et l'ID de thread sont tous deux fournis par le navigateur. Pour restreindre chaque utilisateur à ses propres conversations, consultez le guide <Link path="guides/py-agent">`py#agent`</Link> ou <Link path="guides/ts-agent">`ts#agent`</Link>.
 
 ## Infrastructure
 

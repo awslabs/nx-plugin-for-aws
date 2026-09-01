@@ -14,14 +14,14 @@ import {
 } from '@nx/devkit';
 import * as path from 'path';
 import PackageJson from '../../package.json' with { type: 'json' };
-import { NX_PLUGIN_MCP_PACKAGE_NAME } from './mcp';
-import { toSnakeCase } from './names';
-import { getNpmScope, getNpmScopePrefix } from './npm-scope';
+import { NX_PLUGIN_MCP_PACKAGE_NAME } from './mcp.js';
+import { toSnakeCase } from './names.js';
+import { getNpmScope, getNpmScopePrefix } from './npm-scope.js';
 
-export type { GeneratorInfo, NxGeneratorInfo } from './generators';
-export { buildGeneratorInfoList } from './generators';
+export type { GeneratorInfo, NxGeneratorInfo } from './generators.js';
+export { buildGeneratorInfoList } from './generators.js';
 
-import { buildGeneratorInfoList, type GeneratorInfo } from './generators';
+import { buildGeneratorInfoList, type GeneratorInfo } from './generators.js';
 
 const GENERATORS = buildGeneratorInfoList(
   path.resolve(import.meta.dirname, '..', '..'),
@@ -341,6 +341,47 @@ export const addDependencyToTargetIfNotPresent = (
   }
   // Keep key order aligned with Nx's so first run matches subsequent runs.
   project.targets[target] = normalizeTargetKeyOrder(project.targets[target]);
+};
+
+/**
+ * Register a dependency that produces a deployable artifact on both `build` and
+ * `assemble`.
+ *
+ * `build` is the everything target: artifacts plus the quality gates (lint,
+ * test, typecheck). `assemble` is its artifact-only sibling, which the deploy
+ * targets depend on so a deploy builds what it deploys and nothing else.
+ */
+export const addArtifactDependencyToTargets = (
+  project: ProjectConfiguration,
+  dependency: TargetDependency,
+) => {
+  addDependencyToTargetIfNotPresent(project, 'build', dependency);
+  addDependencyToTargetIfNotPresent(project, 'assemble', dependency);
+};
+
+/**
+ * Register another project whose artifacts this one consumes, on both `build`
+ * and `assemble`.
+ *
+ * The shared infrastructure project reads the artifacts of every project it
+ * deploys, and those cross-project edges are explicit because Nx's `^` operator
+ * only follows package dependencies. `assemble` mirrors the list against the
+ * consumed projects' own `assemble`, keeping the artifact-only chain closed.
+ */
+export const addArtifactProjectToTargets = (
+  project: ProjectConfiguration,
+  consumedProjectName: string,
+) => {
+  addDependencyToTargetIfNotPresent(
+    project,
+    'build',
+    `${consumedProjectName}:build`,
+  );
+  addDependencyToTargetIfNotPresent(
+    project,
+    'assemble',
+    `${consumedProjectName}:assemble`,
+  );
 };
 
 /**

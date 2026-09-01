@@ -170,6 +170,27 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
         );
       }
 
+      // The data-bearing modules guard themselves with
+      // `lifecycle { prevent_destroy = true }`, which cannot be driven by a
+      // variable. Flip the literal to false so `terraform destroy` can tear the
+      // test stack down; the server-side deletion_protection flags are already
+      // disabled by the main.tf wiring templates.
+      for (const relativeTfPath of [
+        'core/dynamodb/dynamodb.tf',
+        'core/rdb/aurora/aurora.tf',
+      ]) {
+        const tfPath = `${opts.cwd}/packages/common/terraform/src/${relativeTfPath}`;
+        if (existsSync(tfPath)) {
+          writeFileSync(
+            tfPath,
+            readFileSync(tfPath, 'utf-8').replace(
+              /prevent_destroy\s*=\s*true/g,
+              'prevent_destroy = false',
+            ),
+          );
+        }
+      }
+
       if (config.requiresRdsServiceLinkedRole) {
         ensureRdsServiceLinkedRole();
       }
@@ -183,9 +204,19 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
           const outputs = readTerraformOutputs(opts.cwd);
           console.log('Terraform outputs:', outputs);
 
-          // tRPC
+          // tRPC — the isolated integration pattern (one Lambda per procedure)
           await invokeTrpcApi(outputs.my_api_endpoint, 'tRPC REST API');
           await invokeTrpcApi(outputs.my_api_http_endpoint, 'tRPC HTTP API');
+
+          // tRPC — the shared integration pattern (a single router Lambda)
+          await invokeTrpcApi(
+            outputs.my_api_shared_endpoint,
+            'tRPC REST API (shared)',
+          );
+          await invokeTrpcApi(
+            outputs.my_api_shared_http_endpoint,
+            'tRPC HTTP API (shared)',
+          );
 
           // FastAPI
           await invokeRestApi(outputs.py_api_endpoint, 'FastAPI REST');
@@ -250,6 +281,17 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
           await invokeTrpcAgentCoreAgent(
             outputs.ts_agent_arn,
             'TypeScript Agent',
+          );
+
+          // Container-packaged agents, proving `agentcore-ecr` still boots and
+          // serves now that code packaging is the default.
+          await invokeTrpcAgentCoreAgent(
+            outputs.ts_ecr_agent_arn,
+            'TypeScript Agent (container)',
+          );
+          await invokeAgentCoreAgent(
+            outputs.py_ecr_agent_arn,
+            'Python Agent (container)',
           );
           // Python LangChain agents across all three protocols.
           await invokeAgentCoreAgUi(

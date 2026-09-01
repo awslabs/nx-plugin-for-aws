@@ -3,9 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { readProjectConfiguration, type Tree } from '@nx/devkit';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test';
-import { configureBiomeLint } from './biome';
-import tsProjectGenerator from './generator';
+import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import { configureBiomeLint } from './biome.js';
+import tsProjectGenerator from './generator.js';
 
 describe('configureBiomeLint', () => {
   let tree: Tree;

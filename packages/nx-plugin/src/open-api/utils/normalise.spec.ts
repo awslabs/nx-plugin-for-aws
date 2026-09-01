@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { describe, expect, it } from 'vitest';
-import { normaliseOpenApiSpecForCodeGen } from './normalise';
-import type { Spec } from './types';
+import { normaliseOpenApiSpecForCodeGen } from './normalise.js';
+import type { Spec } from './types.js';
 
 describe('normaliseOpenApiSpecForCodeGen', () => {
   it('should initialize empty components and schemas if not present', () => {

@@ -11,22 +11,22 @@ import {
   type ProjectConfiguration,
   type Tree,
 } from '@nx/devkit';
-import { addTsDependencies } from '../../utils/add-dependencies';
-import { declareDependencies } from '../../utils/declared-dependencies';
-import { formatFilesInSubtree } from '../../utils/format';
-import { installDependencies } from '../../utils/install';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
-import { isEsmWorkspace } from '../../utils/module-format';
-import { toKebabCase } from '../../utils/names';
-import { getNpmScopePrefix } from '../../utils/npm-scope';
+import { addTsDependencies } from '../../utils/add-dependencies.js';
+import { declareDependencies } from '../../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../../utils/format.js';
+import { installDependencies } from '../../utils/install.js';
+import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
+import { isEsmWorkspace } from '../../utils/module-format.js';
+import { toKebabCase } from '../../utils/names.js';
+import { getNpmScopePrefix } from '../../utils/npm-scope.js';
 import {
   addGeneratorMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   projectExists,
-} from '../../utils/nx';
-import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager';
-import { ensureProjectPackageJson } from '../../utils/project-package-json';
+} from '../../utils/nx.js';
+import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager.js';
+import { ensureProjectPackageJson } from '../../utils/project-package-json.js';
 import type { TsAstroDocsGeneratorSchema } from './schema';
 
 /** The metadata this generator records, which its predicates read. */
@@ -41,6 +41,11 @@ export interface TsAstroDocsMetadata {
 export const DEPENDENCIES = declareDependencies<TsAstroDocsMetadata>()({
   ts: [
     { name: 'astro' },
+    // Astro leaves `cookie` external in the prerender bundle, so the emitted
+    // `dist` entry imports it directly. Node resolves that from `dist`, which
+    // cannot reach astro's own nested copy, so the docs project declares it to
+    // keep a compatible one in reach.
+    { name: 'cookie' },
     { name: '@astrojs/starlight' },
     { name: 'starlight-blog', when: (m) => m.includeBlog },
     { name: '@strands-agents/sdk', when: (m) => m.includeTranslation },
@@ -76,6 +81,11 @@ export const tsAstroDocsGenerator = async (
   const alreadyExists = projectExists(tree, fullyQualifiedName);
 
   const targets: ProjectConfiguration['targets'] = {
+    // Inputs are left to Nx's implicit `["default", "^default"]`. Astro resolves
+    // imports from a dependency's source rather than its build output, and this
+    // target declares no `dependsOn` for `default`'s transitive
+    // `dependentTasksOutputFiles` to resolve against — so `^default` is the only
+    // thing keeping a dependency's content in the hash.
     build: {
       executor: 'nx:run-commands',
       options: {

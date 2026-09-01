@@ -7,7 +7,7 @@ exports[`agentcore-gateway generator > protocol: http > omits protocol_type from
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "6.60.0"
+      version = "6.62.0"
     }
     time = {
       source  = "hashicorp/time"
@@ -43,6 +43,8 @@ data "aws_region" "current" {}
 locals {
   aws_account_id = data.aws_caller_identity.current.account_id
   aws_region     = data.aws_region.current.id
+
+  gateway_waf_log_group_name = var.enable_waf ? "aws-waf-logs-my-gateway-\${random_id.unique_suffix.hex}" : null
 }
 
 resource "random_id" "unique_suffix" {
@@ -205,14 +207,61 @@ resource "aws_wafv2_web_acl_association" "gateway_waf" {
   web_acl_arn  = aws_wafv2_web_acl.gateway_waf[0].arn
 }
 
+# KMS key for encrypting WAF request logs at rest
+resource "aws_kms_key" "gateway_waf_logs" {
+  count = var.enable_waf ? 1 : 0
+
+  description             = "MyGateway gateway WAF log encryption"
+  deletion_window_in_days = 7
+  enable_key_rotation     = true
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "Enable IAM User Permissions"
+        Effect    = "Allow"
+        Principal = { AWS = "arn:aws:iam::\${local.aws_account_id}:root" }
+        Action    = "kms:*"
+        Resource  = "*"
+      },
+      {
+        Sid       = "Allow CloudWatch Logs"
+        Effect    = "Allow"
+        Principal = { Service = "logs.\${local.aws_region}.amazonaws.com" }
+        Action = [
+          "kms:Encrypt",
+          "kms:Decrypt",
+          "kms:ReEncrypt*",
+          "kms:GenerateDataKey*",
+          "kms:DescribeKey"
+        ]
+        Resource = "*"
+        Condition = {
+          ArnEquals = {
+            "kms:EncryptionContext:aws:logs:arn" = "arn:aws:logs:\${local.aws_region}:\${local.aws_account_id}:log-group:\${local.gateway_waf_log_group_name}"
+          }
+        }
+      }
+    ]
+  })
+}
+
+resource "aws_kms_alias" "gateway_waf_logs" {
+  count = var.enable_waf ? 1 : 0
+
+  name          = "alias/my-gateway-\${random_id.unique_suffix.hex}-waf-logs"
+  target_key_id = aws_kms_key.gateway_waf_logs[0].key_id
+}
+
 # WAF request logs. WAFv2 requires the \`aws-waf-logs-\` name prefix.
 resource "aws_cloudwatch_log_group" "gateway_waf_logs" {
-  #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
   #checkov:skip=CKV_AWS_338:Log retention set to one year which is sufficient for WAF logs
   count = var.enable_waf ? 1 : 0
 
-  name              = "aws-waf-logs-my-gateway-\${random_id.unique_suffix.hex}"
+  name              = local.gateway_waf_log_group_name
   retention_in_days = 365
+  kms_key_id        = aws_kms_key.gateway_waf_logs[0].arn
 }
 
 resource "aws_wafv2_web_acl_logging_configuration" "gateway_waf_logging" {
