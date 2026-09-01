@@ -37,6 +37,7 @@ import {
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx.js';
 import { toProjectRelativePath } from '../../../utils/paths.js';
+import { getExistingProjectPort } from '../../../utils/port.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
@@ -99,11 +100,29 @@ export async function tsReactWebsiteAuthGenerator(
     DEPENDENCIES,
   );
 
-  await addIdentityInfra(tree, {
+  // Falls back to Vite's own defaults when the website predates per-project
+  // port assignment, matching the shared construct's own defaults.
+  const localDevServerPort = getExistingProjectPort(projectConfig) ?? 4200;
+  const localPreviewPort = localDevServerPort + 100;
+
+  const portsNotAllowListed = await addIdentityInfra(tree, {
     iac,
     allowSignup: options.allowSignup,
     cognitoDomain,
+    localCallbackPorts: [localDevServerPort, localPreviewPort],
   });
+
+  if (portsNotAllowListed.length > 0) {
+    console.warn(
+      `Could not add ${portsNotAllowListed
+        .map((p) => `http://localhost:${p}`)
+        .join(
+          ', ',
+        )} to the local callback/logout URLs in the shared user identity ${
+        iac === 'cdk' ? 'construct' : 'module'
+      }, since it no longer matches the generated shape. Add them by hand, otherwise signing in against ${options.project}'s local dev server will fail.`,
+    );
+  }
 
   generateFiles(
     tree,

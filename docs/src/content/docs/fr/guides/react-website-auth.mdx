@@ -69,7 +69,7 @@ Vous trouverez également le code d'infrastructure suivant généré en fonction
 
 #### Architecture
 
-Ce générateur ajoute un pool d'utilisateurs Amazon Cognito (pour la connexion) et un pool d'identités (pour fédérer les utilisateurs connectés aux informations d'identification IAM délimitées) à l'architecture de site Web statique existante :
+Ce générateur ajoute un user pool Amazon Cognito (pour la connexion) et un identity pool (pour fédérer les utilisateurs connectés vers des informations d'identification IAM délimitées) à l'architecture de site Web statique existante :
 
 ```d2 inline=true
 direction: right
@@ -108,7 +108,7 @@ browser -> backend: IAM/Cognito
 
 Le User Pool est créé sur le [plan de fonctionnalités Plus](https://docs.aws.amazon.com/cognito/latest/developerguide/feature-plans-features-plus.html) de Cognito avec la [protection contre les menaces](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pool-settings-threat-protection.html) définie en mode `AUDIT` pour l'authentification standard. En mode audit, Cognito attribue un niveau de risque à chaque connexion et enregistre l'évaluation dans CloudWatch sans bloquer les utilisateurs.
 
-Une fois que vous avez observé les évaluations de risque pour vos utilisateurs, vous pouvez passer à l'application complète pour répondre automatiquement aux activités à risque (par exemple, exiger l'authentification multifacteur ou bloquer la connexion) :
+Une fois que vous avez observé les évaluations de risque pour vos utilisateurs, vous pouvez passer à l'application complète pour répondre automatiquement aux activités à risque (par exemple en exigeant MFA ou en bloquant la connexion) :
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -119,9 +119,9 @@ Définissez `advanced_security_mode` sur `ENFORCED` dans le bloc `user_pool_add_
 </Fragment>
 </Infrastructure>
 
-#### Authentification multifacteur (MFA)
+#### Authentification multi-facteurs (MFA)
 
-Par défaut, les utilisateurs doivent configurer l'authentification multifacteur (un code SMS ou un mot de passe à usage unique basé sur le temps) avant de pouvoir se connecter. Vous pouvez rendre l'authentification multifacteur facultative, la désactiver entièrement ou restreindre les méthodes de second facteur disponibles :
+Par défaut, les utilisateurs doivent configurer MFA (un code SMS ou un mot de passe à usage unique basé sur le temps) avant de pouvoir se connecter. Vous pouvez rendre MFA optionnel, le désactiver entièrement ou restreindre les méthodes de second facteur disponibles :
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -151,13 +151,13 @@ module "user_identity" {
 </Fragment>
 </Infrastructure>
 
-:::caution[L'authentification multifacteur par SMS est liée à la vérification du numéro de téléphone]
-Cognito rejette la vérification du numéro de téléphone par SMS sauf si le SMS est également une méthode d'authentification multifacteur activée lorsque l'authentification multifacteur n'est pas désactivée, à la fois dans CDK et Terraform. Désactiver `mfaSecondFactor.sms` / `mfa_second_factor_sms` lorsque `mfa` est activé désactive donc également la vérification du numéro de téléphone par SMS pour le pool d'utilisateurs.
+:::caution[Le MFA par SMS est lié à la vérification du numéro de téléphone]
+Cognito rejette la vérification du numéro de téléphone par SMS à moins que le SMS ne soit également une méthode MFA activée chaque fois que MFA n'est pas désactivé, à la fois dans CDK et Terraform. Désactiver `mfaSecondFactor.sms` / `mfa_second_factor_sms` alors que `mfa` est activé désactive donc également la vérification du numéro de téléphone par SMS pour le user pool.
 :::
 
-#### Pare-feu d'application Web (WAF)
+#### Web Application Firewall (WAF)
 
-Par défaut, le User Pool est associé à un Web ACL [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) utilisant les groupes de règles gérées `AWSManagedRulesCommonRuleSet` et `AWSManagedRulesKnownBadInputsRuleSet`. Vous pouvez désactiver cela si vous souhaitez gérer votre propre Web ACL ou si vous n'en avez pas besoin :
+Par défaut, le User Pool est associé à une Web ACL [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) utilisant les groupes de règles gérées `AWSManagedRulesCommonRuleSet` et `AWSManagedRulesKnownBadInputsRuleSet`. Vous pouvez désactiver cela si vous souhaitez gérer votre propre Web ACL ou si vous n'en avez pas besoin :
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -235,9 +235,9 @@ Le module d'identité utilisateur ajoute automatiquement la <Link path="guides/r
 </Infrastructure>
 
 :::caution[Supprimez les URL de rappel localhost pour la production]
-Le client User Pool généré autorise l'URL de votre distribution CloudFront (et tous les noms de domaine personnalisés configurés dessus) comme URL de rappel/déconnexion OAuth, plus `http://localhost:4200` et `http://localhost:4300` pour le développement local contre le pool déployé.
+Le client User Pool généré autorise l'URL de votre distribution CloudFront (et tous les noms de domaine personnalisés configurés dessus) comme URL de rappel/déconnexion OAuth, plus les propres URL de serveur de développement local et de prévisualisation de chaque site Web connecté (par exemple `http://localhost:4200` et `http://localhost:4300` pour le premier site Web généré dans un espace de travail) pour le développement local contre le pool déployé. Chaque site Web généré avec `ts#website` se voit attribuer ses propres ports distincts, donc un espace de travail avec plusieurs sites Web aura plus d'une paire `http://localhost:<port>` autorisée ici.
 
-Il est recommandé de **supprimer les URL de rappel/déconnexion `http://localhost` pour les environnements de production**, en gardant la liste d'autorisation limitée aux origines réelles de votre application.
+Il est recommandé de **supprimer les URL de rappel/déconnexion `http://localhost` pour les environnements de production**, en gardant la liste d'autorisation limitée à vos origines d'application réelles.
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -251,7 +251,7 @@ Modifiez les `callback_urls`/`logout_urls` dans `packages/common/terraform/src/c
 
 ### Accorder l'accès aux utilisateurs authentifiés
 
-Afin d'accorder aux utilisateurs authentifiés l'accès pour effectuer certaines actions, comme accorder des autorisations pour invoquer une API, vous pouvez ajouter des instructions de politique IAM au rôle authentifié du pool d'identités :
+Afin d'accorder aux utilisateurs authentifiés l'accès pour effectuer certaines actions, comme accorder des permissions pour invoquer une API, vous pouvez ajouter des déclarations de politique IAM au rôle authentifié de l'identity pool :
 
 <Infrastructure>
 <Fragment slot="cdk">

@@ -41,6 +41,7 @@ import {
 import { sortObjectKeys } from '../../../utils/object.js';
 import { getRelativePathToRoot } from '../../../utils/paths.js';
 import { getPackageManagerDisplayCommands } from '../../../utils/pkg-manager.js';
+import { assignPort } from '../../../utils/port.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
@@ -240,6 +241,17 @@ export async function tsReactWebsiteGenerator(
   );
 
   const targets = projectConfiguration.targets;
+
+  // Each website gets its own explicit dev-server port. Vite itself already
+  // auto-increments past a port already in use, so two websites don't actually
+  // collide — but which port each one lands on then depends on start order and
+  // can't be known ahead of time. An explicit, per-project port is what lets
+  // the Cognito callback URL allow-list (added when auth is configured) be
+  // computed deterministically instead.
+  const port = assignPort(tree, projectConfiguration, 4200);
+  // @nx/react's vite config defaults to 4200 for the dev server and 4300 for
+  // preview; keep that +100 relationship so the pair stays predictable.
+  const previewPort = port + 100;
 
   const infra = schema.infra ?? 'cloudfront-s3';
 
@@ -522,6 +534,21 @@ export async function tsReactWebsiteGenerator(
       tree,
       viteConfigPath,
       `\`build: { $bprops }\` where { $bprops <: contains \`outDir: $_\` => \`outDir: '${outDir}'\` }`,
+    );
+
+    // Replace @nx/react's default dev-server port (4200) with the one assigned above.
+    await applyGritQL(
+      tree,
+      viteConfigPath,
+      `\`server: { $sprops }\` where { $sprops <: contains \`port: $_\` => \`port: ${port}\` }`,
+    );
+
+    // Likewise for the preview port (@nx/react's default is 4300), so `vite preview`
+    // doesn't collide across websites either.
+    await applyGritQL(
+      tree,
+      viteConfigPath,
+      `\`preview: { $pprops }\` where { $pprops <: contains \`port: $_\` => \`port: ${previewPort}\` }`,
     );
 
     // Add plugins to the plugins array

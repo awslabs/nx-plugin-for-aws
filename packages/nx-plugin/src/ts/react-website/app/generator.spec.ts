@@ -7,12 +7,18 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, posix } from 'node:path';
 import * as devkit from '@nx/devkit';
-import { readJson, type Tree, updateJson } from '@nx/devkit';
+import {
+  readJson,
+  readProjectConfiguration,
+  type Tree,
+  updateJson,
+} from '@nx/devkit';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
 } from '../../../utils/config/utils.js';
 import { expectHasMetricTags } from '../../../utils/metrics.spec.js';
+import { getNpmScopePrefix } from '../../../utils/npm-scope.js';
 import {
   PACKAGES_DIR,
   SHARED_TERRAFORM_DIR,
@@ -83,6 +89,28 @@ describe('react-website generator', () => {
     const viteConfig = tree.read('test-app/vite.config.mts')?.toString();
     expect(viteConfig).toBeDefined();
     expect(viteConfig).toMatchSnapshot('vite.config.mts');
+  });
+
+  it('should assign each website its own dev-server and preview port', async () => {
+    await tsReactWebsiteGenerator(tree, { ...options, name: 'first-app' });
+    await tsReactWebsiteGenerator(tree, { ...options, name: 'second-app' });
+
+    // Projects register under the scoped name (e.g. `@proj/first-app`);
+    // file paths on the tree stay unscoped.
+    const scopePrefix = getNpmScopePrefix(tree);
+    expect(
+      readProjectConfiguration(tree, `${scopePrefix}first-app`).metadata,
+    ).toMatchObject({ ports: [4200] });
+    expect(
+      readProjectConfiguration(tree, `${scopePrefix}second-app`).metadata,
+    ).toMatchObject({ ports: [4201] });
+
+    const first = tree.read('first-app/vite.config.mts', 'utf-8');
+    expect(first).toContain('port: 4200');
+    expect(first).toContain('port: 4300');
+    const second = tree.read('second-app/vite.config.mts', 'utf-8');
+    expect(second).toContain('port: 4201');
+    expect(second).toContain('port: 4301');
   });
 
   it('keeps a single react copy: declared only on the website and deduped', async () => {
