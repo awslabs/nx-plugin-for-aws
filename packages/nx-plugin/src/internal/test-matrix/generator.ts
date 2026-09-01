@@ -482,6 +482,12 @@ export const internalTestMatrixGenerator = async (
 
   // Every connection edge the matrix covers.
   const connections: ConnectionGeneratorSchema[] = [
+    // tRPC API -> AgentCore Harness (iam + cognito). Must precede the
+    // website -> API connections below: the website connection generates a
+    // CopilotKit hook per Harness already connected to the api, so the api
+    // must front its Harness(es) before a website connects to it.
+    { sourceProject: ts('my-api'), targetProject: ts('my-harness') },
+    { sourceProject: ts('my-api-cognito'), targetProject: ts('my-harness') },
     // Website -> API
     { sourceProject: ts('website'), targetProject: ts('my-api') },
     { sourceProject: ts('website-no-router'), targetProject: ts('my-api') },
@@ -576,9 +582,6 @@ export const internalTestMatrixGenerator = async (
       targetComponent: 'my-mcp-server',
     },
     { sourceProject: ts('parent-gateway'), targetProject: ts('my-gateway') },
-    // tRPC API -> AgentCore Harness (iam + cognito)
-    { sourceProject: ts('my-api'), targetProject: ts('my-harness') },
-    { sourceProject: ts('my-api-cognito'), targetProject: ts('my-harness') },
     // Gateway -> agent (http gateway fronting agent runtime targets: every
     // supported protocol permutation), then website -> gateway.
     {
