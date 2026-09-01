@@ -48,6 +48,10 @@ import {
   TS_VERSIONS,
   VENDORED_VERSIONS,
 } from '../packages/nx-plugin/src/utils/versions';
+import {
+  type LockstepGroup,
+  holdGroupsInLockstep,
+} from '../packages/nx-plugin/src/utils/version-lockstep/lockstep';
 import { refreshShadcnTemplates } from './update-versions/shadcn';
 
 interface VersionChange {
@@ -183,33 +187,87 @@ const getUpdatedPythonVersions = (tmpDir: string): Record<string, string> => {
 };
 
 /**
- * Holds the vended `ruff` on the release `@astral-sh/ruff-wasm-nodejs` is built
- * from, which is what actually formats generated Python.
- *
- * The two move on different clocks: the wasm package is an npm dependency, so
- * `npm-check-updates` only takes it once its `cooldown` has elapsed, while
- * `pip-check-updates` has no such delay and takes the ruff released hours
- * earlier. Left alone the pins land a release apart and generated files fail the
- * vended `format --check`, which `ruff.spec.ts` asserts against.
- *
- * The wasm build leads because it is the one already installed and running here;
- * the held-back ruff is taken next run, once the bindings catch up.
+ * The version an npm package depends on for one of its dependencies, for a
+ * constraint that lives in a dependant's manifest rather than in a pin of ours.
+ * `undefined` when the registry cannot be read, which leaves the group as
+ * proposed and reports it.
  */
-const holdRuffToWasmBuild = (
-  updatedVersions: Record<string, string>,
-): ReportNote[] => {
-  const proposed = updatedVersions.ruff;
-  const wasmPin = `==${RUFF_WASM_VERSION}`;
-  if (!proposed || proposed === wasmPin) {
-    return [];
+const dependencyOf = (
+  packageName: string,
+  packageVersion: string | undefined,
+  dependencyName: string,
+): string | undefined => {
+  if (!packageVersion) return undefined;
+  try {
+    const dependencies = JSON.parse(
+      execSync(
+        `npm view ${packageName}@${packageVersion} dependencies --json`,
+        { encoding: 'utf-8' },
+      ),
+    );
+    return dependencies?.[dependencyName];
+  } catch {
+    return undefined;
   }
-  updatedVersions.ruff = wasmPin;
-  return [
-    {
-      note: `ruff held at ${wasmPin} (${proposed} available): @astral-sh/ruff-wasm-nodejs is still on ${RUFF_WASM_VERSION}, and the two must match`,
-    },
-  ];
 };
+
+/**
+ * Pins that are only correct at matching versions.
+ *
+ * Each group names a leader the rest follow, so the pins move as a unit. See
+ * `version-lockstep/lockstep.ts` for how a group is applied.
+ */
+const LOCKSTEP_GROUPS: readonly LockstepGroup[] = [
+  {
+    // The two move on different clocks: the wasm package is an npm dependency, so
+    // `npm-check-updates` only takes it once its `cooldown` has elapsed, while
+    // `pip-check-updates` has no such delay and takes the ruff released hours
+    // earlier. Left a release apart, generated files fail the vended
+    // `format --check`, which `ruff.spec.ts` asserts against.
+    //
+    // The wasm build leads because it is the one already installed and running
+    // here, and it is what actually formats generated Python.
+    reason:
+      '@astral-sh/ruff-wasm-nodejs is what formats generated Python, and the two must match',
+    // Read from the installed bindings rather than a pin: that is the build
+    // actually running here, and it is what `ruff.spec.ts` asserts against.
+    leader: {
+      name: '@astral-sh/ruff-wasm-nodejs',
+      resolve: () => RUFF_WASM_VERSION,
+    },
+    followers: [{ name: 'ruff', format: 'pep440' }],
+  },
+  {
+    // `@copilotkit/react-core` depends on an exact `@ag-ui/client` / `@ag-ui/core`,
+    // and the generated website hands an `@ag-ui/client` agent to CopilotKit's
+    // provider. Ahead of what CopilotKit asks for, a second copy is installed and
+    // the two `AbstractAgent` declarations are structurally incompatible (private
+    // `_debug`) — every generated website then fails to compile with TS2322.
+    //
+    // CopilotKit leads because its dependency range is the exact constraint.
+    // `@ag-ui/encoder` ships from the same release train as client/core.
+    // `@ag-ui/aws-strands` and `@ag-ui/a2ui-toolkit` are agent-side only and
+    // cannot duplicate against CopilotKit, so they are left free.
+    reason:
+      '@copilotkit/react-core pins these exactly, and a duplicate copy breaks the generated website build',
+    // The constraint lives in CopilotKit's own dependency range rather than in a
+    // pin of ours, so it is resolved from the registry.
+    leader: {
+      name: '@ag-ui/client',
+      resolve: (versions) =>
+        dependencyOf(
+          '@copilotkit/react-core',
+          versions['@copilotkit/react-core'],
+          '@ag-ui/client',
+        ),
+    },
+    followers: [
+      { name: '@ag-ui/client' },
+      { name: '@ag-ui/core' },
+      { name: '@ag-ui/encoder' },
+    ],
+  },
+];
 
 /**
  * Compares two `major.minor.patch` version strings.
@@ -598,8 +656,17 @@ const main = async () => {
     // Create FsTree from nx devkit pointing at project root
     const tree = new FsTree(process.cwd(), false);
 
-    // Get updated TypeScript versions
+    // Get updated TypeScript and Python versions. Both are resolved before either
+    // is written, since a lockstep group may span the two.
     const updatedTsVersions = getUpdatedTypeScriptVersions(tmpDir);
+    const updatedPyVersions = getUpdatedPythonVersions(tmpDir);
+
+    // Applied before the rewrites so a held version is never written
+    const lockstepNotes = holdGroupsInLockstep(
+      LOCKSTEP_GROUPS,
+      updatedTsVersions,
+      updatedPyVersions,
+    );
 
     // Apply updated TypeScript versions to the versions file
     const tsChanges = await applyUpdatedVersions(
@@ -610,12 +677,6 @@ const main = async () => {
       'TS_VERSIONS',
     );
 
-    // Get updated Python versions
-    const updatedPyVersions = getUpdatedPythonVersions(tmpDir);
-
-    // Applied before the rewrite so the held version is never written
-    const ruffHold = holdRuffToWasmBuild(updatedPyVersions);
-
     // Apply updated Python versions to the versions file
     const pyChanges: ReportChange[] = await applyUpdatedVersions(
       tree,
@@ -624,7 +685,7 @@ const main = async () => {
       'packages/nx-plugin/src/utils/versions.ts',
       'PY_VERSIONS',
     );
-    pyChanges.push(...ruffHold);
+    pyChanges.push(...lockstepNotes);
 
     // Get updated Terraform provider versions
     const updatedTerraformVersions = await getUpdatedTerraformVersions();
