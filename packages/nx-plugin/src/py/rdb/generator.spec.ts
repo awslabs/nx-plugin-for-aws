@@ -238,6 +238,34 @@ describe('py#rdb generator', () => {
     expect(projectConfig.targets.build.dependsOn ?? []).not.toContain('trivy');
   });
 
+  it('should host both database images in the shared asset registry', async () => {
+    await pyRdbGenerator(tree, { ...defaultOptions, iac: 'terraform' });
+
+    const dbModule = tree.read(
+      'packages/common/terraform/src/app/dbs/db/db.tf',
+      'utf-8',
+    );
+
+    // SQLModel databases publish two images, both to the one shared registry.
+    expect(dbModule).toContain('variable "asset_ecr_repository_url"');
+    expect(dbModule).not.toContain('aws_ecr_repository');
+    expect(dbModule).toContain(
+      'image_uri     = "${var.asset_ecr_repository_url}:${local.image_tag}"',
+    );
+    expect(dbModule).toContain(
+      'image_uri     = "${var.asset_ecr_repository_url}:${local.create_db_user_image_tag}"',
+    );
+
+    // Sharing one repository means the two images' tags must not collide, so
+    // each namespaces its content-addressed tag with the handler it holds.
+    expect(dbModule).toContain(
+      'image_tag = "db-migration-${replace(data.external.docker_digest.result.digest, "sha256:", "")}"',
+    );
+    expect(dbModule).toContain(
+      'create_db_user_image_tag = "db-create-db-user-${replace(data.external.create_db_user_docker_digest.result.digest, "sha256:", "")}"',
+    );
+  });
+
   it('should generate local database support without infrastructure', async () => {
     await pyRdbGenerator(tree, { ...defaultOptions, infra: 'none' });
 

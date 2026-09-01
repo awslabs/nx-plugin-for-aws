@@ -1,0 +1,110 @@
+terraform {
+  required_version = ">= 1.0"
+
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "<%- awsProviderVersion %>"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "<%- randomProviderVersion %>"
+    }
+  }
+}
+
+variable "repository_name_prefix" {
+  description = "Optional prefix to apply to the generated repository name. Useful when you want a stable, human-recognisable identifier in addition to the random suffix."
+  type        = string
+  default     = "assets"
+}
+
+variable "tags" {
+  description = "Tags to apply to all resources"
+  type        = map(string)
+  default     = {}
+}
+
+data "aws_caller_identity" "current" {}
+
+resource "random_string" "suffix" {
+  length  = 8
+  special = false
+  upper   = false
+}
+
+# Shared asset container registry. Every container image the workspace deploys is
+# pushed here under a tag namespaced by the image's owner, so a workspace needs
+# one registry rather than one per container.
+resource "aws_ecr_repository" "assets" {
+  #checkov:skip=CKV_AWS_136:AES256 (ECR-managed) encryption is sufficient for build artefacts
+  name = "${var.repository_name_prefix}-${random_string.suffix.result}"
+
+  # Consumers tag by image content digest, so an existing tag already names the
+  # image it would be overwritten with.
+  image_tag_mutability = "IMMUTABLE"
+  force_delete         = true
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  tags = var.tags
+}
+
+resource "aws_ecr_repository_policy" "assets" {
+  repository = aws_ecr_repository.assets.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid    = "AllowPushPull"
+        Effect = "Allow"
+        Principal = {
+          AWS = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:root"
+        }
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:BatchGetImage",
+          "ecr:CompleteLayerUpload",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:InitiateLayerUpload",
+          "ecr:PutImage",
+          "ecr:UploadLayerPart"
+        ]
+      },
+      {
+        Sid    = "AllowLambdaPull"
+        Effect = "Allow"
+        Principal = {
+          Service = "lambda.amazonaws.com"
+        }
+        Action = [
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:BatchGetImage",
+          "ecr:GetDownloadUrlForLayer"
+        ]
+      }
+    ]
+  })
+}
+
+output "repository_name" {
+  description = "Name of the shared asset repository"
+  value       = aws_ecr_repository.assets.name
+}
+
+# Routed through the repository policy so a consumer that pushes to this URL
+# waits until the policy allowing that push exists.
+output "repository_url" {
+  description = "URL of the shared asset repository — pass to app modules' `asset_ecr_repository_url` input."
+  value       = aws_ecr_repository.assets.repository_url
+
+  depends_on = [aws_ecr_repository_policy.assets]
+}
+
+output "repository_arn" {
+  description = "ARN of the shared asset repository — pass to app modules' `asset_ecr_repository_arn` input, which scopes their image pull grants to it."
+  value       = aws_ecr_repository.assets.arn
+}

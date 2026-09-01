@@ -21,6 +21,13 @@ module "asset_bucket" {
   bucket_name_prefix = "e2e-assets-<% TEST_RUN_ID %>"
 }
 
+# Shared asset registry — hosts every container image.
+module "asset_ecr" {
+  source = "../../common/terraform/src/core/asset-ecr"
+
+  repository_name_prefix = "e2e-assets-<% TEST_RUN_ID %>"
+}
+
 # Shared runtime-config AppConfig application.
 module "runtime_config_appconfig" {
   source = "../../common/terraform/src/core/runtime-config/appconfig"
@@ -609,13 +616,16 @@ module "ts_agent" {
 }
 
 # Container-packaged agents, proving `agentcore-ecr` still deploys and serves
-# now that code packaging is the default. These take no asset bucket: the
-# container packaging module publishes to ECR instead.
+# now that code packaging is the default. These take the shared asset registry
+# rather than the asset bucket: the container packaging module publishes an
+# image instead of staging a code zip. Both share the one registry.
 module "ts_ecr_agent" {
   source = "../../common/terraform/src/app/agents/my-ts-ecr-agent"
 
   appconfig_application_id  = module.runtime_config_appconfig.application_id
   appconfig_application_arn = module.runtime_config_appconfig.application_arn
+  asset_ecr_repository_url  = module.asset_ecr.repository_url
+  asset_ecr_repository_arn  = module.asset_ecr.repository_arn
 }
 
 module "py_ecr_agent" {
@@ -623,6 +633,8 @@ module "py_ecr_agent" {
 
   appconfig_application_id  = module.runtime_config_appconfig.application_id
   appconfig_application_arn = module.runtime_config_appconfig.application_arn
+  asset_ecr_repository_url  = module.asset_ecr.repository_url
+  asset_ecr_repository_arn  = module.asset_ecr.repository_arn
 }
 
 # Authenticated users can invoke every AgentCore runtime.

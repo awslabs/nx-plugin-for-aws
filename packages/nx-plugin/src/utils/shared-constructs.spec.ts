@@ -138,6 +138,35 @@ describe('shared-constructs utils', () => {
       expect(tree.exists(markerFilePath)).toBeTruthy();
     });
 
+    it('should vend the shared asset bucket and asset registry once', async () => {
+      await sharedConstructsGenerator(tree, { iac: 'terraform' }, declaration);
+
+      const coreDir = joinPathFragments(
+        PACKAGES_DIR,
+        SHARED_TERRAFORM_DIR,
+        'src',
+        'core',
+      );
+
+      // Every container image the workspace deploys goes to this one registry,
+      // the way every Lambda zip goes to the one asset bucket.
+      expect(
+        tree.exists(joinPathFragments(coreDir, 'asset-bucket/asset-bucket.tf')),
+      ).toBeTruthy();
+      const assetEcr = tree.read(
+        joinPathFragments(coreDir, 'asset-ecr/asset-ecr.tf'),
+        'utf-8',
+      );
+      expect(assetEcr).toContain('resource "aws_ecr_repository" "assets"');
+      expect(assetEcr).toContain('output "repository_url"');
+      expect(assetEcr).toContain('output "repository_arn"');
+      // Consumers tag by content digest, so tags never need overwriting.
+      expect(assetEcr).toContain('image_tag_mutability = "IMMUTABLE"');
+      // Image-packaged Lambdas pull through the service principal, so the
+      // repository policy must admit it.
+      expect(assetEcr).toContain('Service = "lambda.amazonaws.com"');
+    });
+
     it('should declare no cached outputs on the shared terraform build target', async () => {
       await sharedConstructsGenerator(tree, { iac: 'terraform' }, declaration);
 
