@@ -2,21 +2,23 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+import { coerce, compare } from 'semver';
 
 /**
  * Groups of pins that must move together.
  *
- * Packages published as a family are often only mutually resolvable at the same
- * version, but their bumps arrive independently — so left alone a run takes one
- * and leaves the rest behind, and the mismatch fails the build.
+ * Packages published as a family are often only correct at the same version, but
+ * their bumps arrive independently — and one may skip a release the others got.
+ * Left alone a run takes whichever moved and leaves the rest behind, and the
+ * mismatch fails the build.
  *
  * A group is held at the lowest version proposed across its members, so it only
  * moves once every member can. Whichever member is furthest behind is the
  * constraint; the rest are taken on a later run, once it catches up.
  *
- * This assumes the members share a version line, which is what makes "lowest"
- * meaningful. A package coupled to something on an unrelated line (a dependant
- * that pins it exactly, say) needs its own hold instead.
+ * This assumes members share a version line, which is what makes "lowest"
+ * meaningful. A package coupled to something on an unrelated line needs its own
+ * hold instead.
  */
 
 /** A note explaining a pin the run deliberately did not take. */
@@ -30,39 +32,22 @@ export interface LockstepNote {
  */
 export type LockstepGroup = readonly string[];
 
-/** Strip a range prefix (`==`, `^`, `~`, …) to leave a bare version. */
-const bare = (version: string): string =>
-  version.replace(/^[=~^><!\s]+/, '').trim();
+/**
+ * The bare version in a pin, whatever range syntax it was written with — `==` for
+ * the Python pins, a plain version or `^`/`~` for the npm ones.
+ */
+const bare = (version: string): string | undefined =>
+  coerce(version, { includePrerelease: true })?.version;
 
 /** The range prefix a pin was written with, so it can be preserved. */
-const prefixOf = (version: string): string =>
-  version.slice(0, version.indexOf(bare(version)));
-
-/**
- * Compare bare `major.minor.patch[...]` versions segment by segment. Numeric
- * segments compare numerically; anything else (prereleases) compares as a
- * string, which is enough to order the pins these tables hold.
- */
-export const compareVersions = (a: string, b: string): number => {
-  const as = bare(a).split(/[.\-+]/);
-  const bs = bare(b).split(/[.\-+]/);
-  for (let i = 0; i < Math.max(as.length, bs.length); i++) {
-    const x = as[i] ?? '';
-    const y = bs[i] ?? '';
-    if (x === y) continue;
-    const nx = Number(x);
-    const ny = Number(y);
-    if (Number.isNaN(nx) || Number.isNaN(ny)) return x < y ? -1 : 1;
-    return nx - ny;
-  }
-  return 0;
-};
+const prefixOf = (version: string, bareVersion: string): string =>
+  version.slice(0, version.indexOf(bareVersion));
 
 /**
  * Hold every member of each group at the lowest version proposed across it.
  *
  * Applied to the *proposed* versions before they are written, so a held pin is
- * never recorded. Each pin keeps the range prefix it was written with, so a
+ * never recorded. Each pin keeps the range syntax it was written with, so a
  * `==x.y.z` Python pin stays in that form.
  *
  * @param groups the coupling declarations to enforce
@@ -76,24 +61,24 @@ export const holdGroupsInLockstep = (
   const notes: LockstepNote[] = [];
 
   for (const group of groups) {
-    // A group can only be held where the run actually proposed something for at
-    // least two of its members; a single pin has nothing to stay in step with.
+    // Only members the run proposed a comparable version for can take part. A
+    // group with fewer than two has nothing to stay in step with, so it is left
+    // alone rather than held against a version nothing proposed.
     const members = group.flatMap((name) => {
       const table = tables.find((candidate) => name in candidate);
-      return table ? [{ name, table }] : [];
+      const version = table && bare(table[name]);
+      return table && version ? [{ name, table, version }] : [];
     });
     if (members.length < 2) continue;
 
     const lowest = members
-      .map(({ name, table }) => table[name])
-      .reduce((min, version) =>
-        compareVersions(version, min) < 0 ? version : min,
-      );
+      .map(({ version }) => version)
+      .reduce((min, version) => (compare(version, min) < 0 ? version : min));
 
-    for (const { name, table } of members) {
+    for (const { name, table, version } of members) {
+      if (version === lowest) continue;
       const proposed = table[name];
-      const held = `${prefixOf(proposed)}${bare(lowest)}`;
-      if (proposed === held) continue;
+      const held = `${prefixOf(proposed, version)}${lowest}`;
       table[name] = held;
       notes.push({
         note: `${name} held at ${held} (${proposed} available): must move in step with ${group

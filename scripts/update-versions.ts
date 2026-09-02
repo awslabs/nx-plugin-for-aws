@@ -20,6 +20,7 @@ import {
   parsePipRequirementsLine,
   VersionOperator,
 } from 'pip-requirements-js';
+import { coerce } from 'semver';
 import { parseDocument } from 'yaml';
 import { applyGritQL } from '../packages/nx-plugin/src/utils/ast';
 import {
@@ -31,7 +32,6 @@ import {
   resolveLambdaRuntimes,
   unresolvedRuntimeWarning,
 } from '../packages/nx-plugin/src/utils/lambda-runtime-resolution';
-import { BIOME_WASM_VERSION } from '../packages/nx-plugin/src/utils/format';
 import { RUFF_WASM_VERSION } from '../packages/nx-plugin/src/utils/ruff';
 import { isNxPackage } from '../packages/nx-plugin/src/utils/version-upgrade-migration/nx-package-updates';
 import { registerNxPackageUpdates } from '../packages/nx-plugin/src/utils/version-upgrade-migration/register';
@@ -78,6 +78,66 @@ interface ChangeGroup {
 }
 
 /**
+ * npm packages this repo depends on directly that a lockstep group couples to a
+ * vended pin: the wasm formatter bindings, which format generated files here
+ * while the vended pin is the CLI a generated project runs.
+ */
+const REPO_LOCKSTEP_MEMBERS = [
+  '@astral-sh/ruff-wasm-nodejs',
+  '@biomejs/wasm-nodejs',
+] as const;
+
+/**
+ * Every manifest declaring them. Both the root and the plugin do, and they must
+ * agree — pnpm resolves one copy for the workspace.
+ */
+const REPO_MANIFESTS = ['package.json', 'packages/nx-plugin/package.json'];
+
+/** The versions the plugin's manifest declares for the given dependencies. */
+const readRepoDependencies = (
+  names: readonly string[],
+): Record<string, string> => {
+  const manifest = JSON.parse(
+    readFileSync('packages/nx-plugin/package.json', 'utf-8'),
+  );
+  return Object.fromEntries(
+    names.flatMap((name) => {
+      const version =
+        manifest.dependencies?.[name] ?? manifest.devDependencies?.[name];
+      return version ? [[name, version] as const] : [];
+    }),
+  );
+};
+
+/**
+ * Write resolved versions for `REPO_LOCKSTEP_MEMBERS` back to a manifest. Only
+ * touches entries it already declares, and only when the value actually changed.
+ */
+const writeRepoDependencies = (
+  tree: FsTree,
+  manifestPath: string,
+  versions: Record<string, string>,
+): void => {
+  const contents = tree.read(manifestPath, 'utf-8');
+  if (!contents) return;
+  const manifest = JSON.parse(contents);
+  let changed = false;
+  for (const name of REPO_LOCKSTEP_MEMBERS) {
+    const version = versions[name];
+    if (!version) continue;
+    for (const field of ['dependencies', 'devDependencies'] as const) {
+      if (manifest[field]?.[name] && manifest[field][name] !== version) {
+        manifest[field][name] = version;
+        changed = true;
+      }
+    }
+  }
+  if (changed) {
+    tree.write(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  }
+};
+
+/**
  * Gets updated TypeScript versions by running npm-check-updates
  * @param tmpDir - Temporary directory to use for the operation
  * @returns Updated versions mapping
@@ -92,10 +152,16 @@ const getUpdatedTypeScriptVersions = (
   execSync('mkdir -p ts', { cwd: tmpDir });
   execSync('pnpm init', { cwd: tsDir, stdio: 'inherit' });
 
-  // Update ts/package.json to add all dependencies from TS_VERSIONS
+  // Update ts/package.json to add all dependencies from TS_VERSIONS, plus the
+  // npm packages a lockstep group couples them to that are dependencies of this
+  // repo rather than vended pins (the wasm formatter bindings). Their proposed
+  // versions are what the group is held against.
   const packageJsonPath = join(tsDir, 'package.json');
   const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
-  packageJson.dependencies = { ...TS_VERSIONS };
+  packageJson.dependencies = {
+    ...TS_VERSIONS,
+    ...readRepoDependencies(REPO_LOCKSTEP_MEMBERS),
+  };
   writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2));
 
   // Copy root .ncurc.cjs to ts directory
@@ -188,36 +254,29 @@ const getUpdatedPythonVersions = (tmpDir: string): Record<string, string> => {
 };
 
 /**
- * Hold a vended formatter pin at the release of the wasm bindings that actually
- * run here.
+ * Hold the vended `ruff` pin at the release of the wasm bindings that run here.
  *
- * The plugin formats generated files in-process through wasm bindings, while the
- * vended `format`/`lint` targets run the CLI at the pinned version. The two are
- * published together and must agree, but the bindings are an npm dependency of
- * this repo rather than a vended pin, so they are not expressible as a group of
- * pin names — hence a hold rather than a `LOCKSTEP_GROUPS` entry.
- *
- * The bindings lead because they are the build already installed and running; the
- * held-back pin is taken next run, once they catch up.
+ * Unlike the other couplings this one spans registries: the bindings are on npm
+ * and `ruff` is on PyPI, resolved by a different tool with no cooldown. So one
+ * side's proposed version is not comparable to the other's as a group — the
+ * bindings simply lead, and the held-back `ruff` is taken next run once they
+ * catch up.
  */
-const holdFormatterToWasmBuild = (
-  updatedVersions: Record<string, string>,
-  { pin, wasmVersion, bindings, format = (v: string) => v }: {
-    pin: string;
-    wasmVersion: string;
-    bindings: string;
-    format?: (version: string) => string;
-  },
+const holdRuffToWasmBuild = (
+  updatedPyVersions: Record<string, string>,
+  updatedTsVersions: Record<string, string>,
 ): ReportNote[] => {
-  const proposed = updatedVersions[pin];
-  const required = format(wasmVersion);
+  const proposed = updatedPyVersions.ruff;
+  const bindings =
+    updatedTsVersions['@astral-sh/ruff-wasm-nodejs'] ?? RUFF_WASM_VERSION;
+  const required = `==${coerce(bindings) ?? bindings}`;
   if (!proposed || proposed === required) {
     return [];
   }
-  updatedVersions[pin] = required;
+  updatedPyVersions.ruff = required;
   return [
     {
-      note: `${pin} held at ${required} (${proposed} available): ${bindings} is still on ${wasmVersion}, and the two must match`,
+      note: `ruff held at ${required} (${proposed} available): @astral-sh/ruff-wasm-nodejs is on ${bindings}, and the two must match`,
     },
   ];
 };
@@ -241,6 +300,13 @@ const LOCKSTEP_GROUPS: readonly LockstepGroup[] = [
   // `@ag-ui/aws-strands` and `@ag-ui/a2ui-toolkit` version independently of the
   // train and cannot duplicate against CopilotKit, so they are left free.
   ['@ag-ui/client', '@ag-ui/core', '@ag-ui/encoder'],
+  // `@biomejs/wasm-nodejs` formats generated TypeScript/JSON in-process here,
+  // while `@biomejs/biome` is the CLI a generated project's `format`/`lint`
+  // targets run and the version its vended `biome.json` `$schema` points at. Both
+  // are npm packages published together (minutes apart, same version line), so
+  // whichever the run proposes lower holds the other back — out of step, generated
+  // files are formatted by one release and checked against another.
+  ['@biomejs/wasm-nodejs', '@biomejs/biome'],
 ];
 
 /**
@@ -642,18 +708,16 @@ const main = async () => {
         updatedTsVersions,
         updatedPyVersions,
       ),
-      ...holdFormatterToWasmBuild(updatedPyVersions, {
-        pin: 'ruff',
-        wasmVersion: RUFF_WASM_VERSION,
-        bindings: '@astral-sh/ruff-wasm-nodejs',
-        format: (version) => `==${version}`,
-      }),
-      ...holdFormatterToWasmBuild(updatedTsVersions, {
-        pin: '@biomejs/biome',
-        wasmVersion: BIOME_WASM_VERSION,
-        bindings: '@biomejs/wasm-nodejs',
-      }),
+      ...holdRuffToWasmBuild(updatedPyVersions, updatedTsVersions),
     ];
+
+    // A group may hold back one of this repo's own npm dependencies, which
+    // `npm-check-updates` already bumped in the manifests before this script ran.
+    // Write those back so the repo and the vended pin agree (the assertions in
+    // `format.spec.ts` / `ruff.spec.ts` check exactly that).
+    for (const manifestPath of REPO_MANIFESTS) {
+      writeRepoDependencies(tree, manifestPath, updatedTsVersions);
+    }
 
     // Apply updated TypeScript versions to the versions file
     const tsChanges = await applyUpdatedVersions(

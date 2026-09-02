@@ -3,25 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { describe, expect, it } from 'vitest';
-import { compareVersions, holdGroupsInLockstep } from './lockstep.js';
-
-describe('compareVersions', () => {
-  it('orders by numeric segment, not lexically', () => {
-    // '9' > '10' lexically, which is the bug this guards against.
-    expect(compareVersions('0.0.9', '0.0.10')).toBeLessThan(0);
-    expect(compareVersions('1.2.0', '1.10.0')).toBeLessThan(0);
-    expect(compareVersions('2.0.0', '1.99.99')).toBeGreaterThan(0);
-  });
-
-  it('ignores range prefixes', () => {
-    expect(compareVersions('==1.2.3', '1.2.3')).toBe(0);
-    expect(compareVersions('^1.2.3', '==1.2.4')).toBeLessThan(0);
-  });
-
-  it('treats a missing segment as lower', () => {
-    expect(compareVersions('1.2', '1.2.1')).toBeLessThan(0);
-  });
-});
+import { holdGroupsInLockstep } from './lockstep.js';
 
 describe('holdGroupsInLockstep', () => {
   it('holds every member at the lowest version proposed across the group', () => {
@@ -55,9 +37,18 @@ describe('holdGroupsInLockstep', () => {
   });
 
   it('picks the lowest numerically rather than lexically', () => {
+    // '0.0.9' > '0.0.10' lexically, which is the bug semver ordering avoids.
     const ts = { a: '0.0.10', b: '0.0.9' };
     holdGroupsInLockstep([['a', 'b']], ts);
     expect(ts).toEqual({ a: '0.0.9', b: '0.0.9' });
+  });
+
+  it('ignores a member whose pin is not a comparable version', () => {
+    // A tag or protocol specifier has no version to compare, so the group is
+    // left alone rather than held against something meaningless.
+    const ts = { a: 'workspace:*', b: '2.0.0' };
+    expect(holdGroupsInLockstep([['a', 'b']], ts)).toEqual([]);
+    expect(ts).toEqual({ a: 'workspace:*', b: '2.0.0' });
   });
 
   it('skips a group the run proposed fewer than two members for', () => {
