@@ -33,7 +33,16 @@ import {
   withVersions,
 } from '../versions.js';
 
-/** TypeScript dependencies a caller must declare to emit agent-connection clients. */
+/**
+ * TypeScript dependencies a caller must declare to emit agent-connection clients.
+ *
+ * `@aws-sdk/client-s3` is an optional peer of `@strands-agents/sdk` that this
+ * project's own code never imports. It is declared anyway so the catalog pins the
+ * version: left undeclared, pnpm auto-installs its own copy here while a project
+ * that does declare it gets the catalog's, and the two resolutions give
+ * `@strands-agents/sdk` two peer-suffixed instances of the same version. Anything
+ * importing both projects then sees two nominal identities of every SDK type.
+ */
 export const AGENT_CONNECTION_DEPENDENCIES = [
   { name: '@aws-lambda-powertools/parameters' },
   { name: '@aws-sdk/credential-providers' },
@@ -41,6 +50,7 @@ export const AGENT_CONNECTION_DEPENDENCIES = [
   { name: '@modelcontextprotocol/sdk' },
   { name: '@a2a-js/sdk' },
   { name: '@strands-agents/sdk' },
+  { name: '@aws-sdk/client-s3' },
 ] as const satisfies readonly { name: ITsDepVersion }[];
 
 /** Python dependencies a caller must declare to emit agent-connection clients. */
@@ -310,10 +320,14 @@ const TS_TEMPLATE_DEPS: Record<
     '@modelcontextprotocol/sdk',
   ],
   'core-a2a': ['@aws-sdk/credential-providers', '@a2a-js/sdk'],
-  'core-strands/base': ['@strands-agents/sdk'],
-  'core-strands/mcp': ['@strands-agents/sdk'],
-  'core-strands/gateway': ['@strands-agents/sdk'],
-  'core-strands/a2a': ['@strands-agents/sdk'],
+  // `@aws-sdk/client-s3` rides along with every strands client: it is an
+  // optional peer of `@strands-agents/sdk` that this project never imports, and
+  // declaring it keeps its version on the catalog (see
+  // AGENT_CONNECTION_DEPENDENCIES).
+  'core-strands/base': ['@strands-agents/sdk', '@aws-sdk/client-s3'],
+  'core-strands/mcp': ['@strands-agents/sdk', '@aws-sdk/client-s3'],
+  'core-strands/gateway': ['@strands-agents/sdk', '@aws-sdk/client-s3'],
+  'core-strands/a2a': ['@strands-agents/sdk', '@aws-sdk/client-s3'],
 };
 
 const emitTs = (
