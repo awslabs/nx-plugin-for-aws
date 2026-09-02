@@ -14,6 +14,7 @@ describe('ignore-package-manager-temp-files migration', () => {
 
   beforeEach(() => {
     tree = createTreeUsingTsSolutionSetup();
+    tree.write('pnpm-lock.yaml', "lockfileVersion: '9.0'\n");
   });
 
   it('should ignore the temporary files pnpm writes', async () => {
@@ -48,5 +49,14 @@ describe('ignore-package-manager-temp-files migration', () => {
     await migration(tree);
 
     expect(readGitIgnore(tree)).toContain('_tmp_*');
+  });
+
+  it('should leave a workspace on another package manager alone', async () => {
+    tree.delete('pnpm-lock.yaml');
+    tree.write('.gitignore', 'node_modules\ndist\n');
+
+    await migration(tree);
+
+    expect(readGitIgnore(tree)).not.toContain('_tmp_*');
   });
 });

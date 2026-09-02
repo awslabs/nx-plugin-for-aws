@@ -112,7 +112,8 @@ describe('init generator', () => {
     expect(workspace.allowBuilds['@swc/core']).toBe(true);
   });
 
-  it('should ignore the temp files a package manager writes while installing', async () => {
+  it('should ignore the temp files pnpm writes while installing', async () => {
+    tree.write('pnpm-workspace.yaml', 'packages:\n  - packages/*\n');
     await initGenerator(tree, { iac: 'cdk', containers: 'docker' });
     expect(tree.read('.gitignore', 'utf-8')!.split('\n')).toContain('_tmp_*');
   });

@@ -10,16 +10,18 @@ import { updateGitIgnore } from '../../../utils/git.js';
 const TEMP_FILE_PATTERN = '_tmp_*';
 
 /**
- * pnpm writes `_tmp_<pid>_<hash>` files at the workspace root while it
- * materialises packages into the virtual store.
- *
- * Nx watches the workspace, and an unignored file appearing and vanishing
- * invalidates the project graph. So a watch-mode `dev` target running while any
- * install happens — the `dev` cascade installing a dependency, or a generator
- * run in another terminal — rebuilds the graph continuously and never starts
- * the command it wraps.
+ * pnpm creates `_tmp_<pid>_<hash>` files at the workspace root while it
+ * materialises packages. Left unignored, Nx's watcher invalidates the project
+ * graph on every install, so a watch-mode `dev` target running at the time
+ * rebuilds the graph continuously and never starts the command it wraps.
  */
 export default async function migration(tree: Tree): Promise<void> {
+  // Only pnpm writes these, so key off its lockfile rather than the workspace
+  // file — a workspace on another package manager may still carry one.
+  if (!tree.exists('pnpm-lock.yaml')) {
+    return;
+  }
+
   updateGitIgnore(tree, '.', (patterns) =>
     patterns.includes(TEMP_FILE_PATTERN)
       ? patterns

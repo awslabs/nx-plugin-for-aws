@@ -168,15 +168,10 @@ const setUpPnpmWorkspace = (tree: Tree, catalogs: boolean) => {
  * manager reads the `workspaces` field of the root `package.json`.
  */
 const setUpWorkspaces = (tree: Tree, catalogs: boolean) => {
-  // pnpm writes `_tmp_<pid>_<hash>` files at the workspace root while it
-  // materialises packages. Nx watches the workspace, and an unignored file
-  // appearing and vanishing invalidates the project graph — so a watch-mode
-  // `dev` target running while any install happens would otherwise rebuild the
-  // graph continuously and never start its command.
-  updateGitIgnore(tree, '.', (patterns) => [...patterns, '_tmp_*']);
-
   if (detectWorkspacePackageManager(tree) === 'pnpm') {
     setUpPnpmWorkspace(tree, catalogs);
+    // pnpm creates these at the workspace root while it materialises packages.
+    updateGitIgnore(tree, '.', (patterns) => [...patterns, '_tmp_*']);
   } else {
     updateJson(tree, 'package.json', (json) => {
       // The `workspaces` field may be the object form ({ "packages": [...] })
