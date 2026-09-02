@@ -10,7 +10,6 @@ import { ensureDirSync } from 'fs-extra';
 import type { MockServer } from 'llm-mock-server';
 import { createConnection } from 'net';
 import * as pty from 'node-pty';
-import { join } from 'path';
 import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
 import { startLlmMock } from '../utils/llm-mock';
 import {
@@ -307,110 +306,34 @@ function startServer(
 }
 
 /**
- * Resolve a `<agent>-chat` target to what it actually runs, from the generated
- * `project.json`. Read rather than hardcoded so this follows whatever the
- * generators emit.
- */
-function readChatTarget(
-  projectRoot: string,
-  target: string,
-): {
-  command: string;
-  cwd: string;
-  env: Record<string, string>;
-  dependsOn: string[];
-} {
-  const [projectName, targetName] = target.split(':');
-  const project = JSON.parse(
-    execSync(`pnpm exec nx show project ${projectName} --json`, {
-      cwd: projectRoot,
-      encoding: 'utf-8',
-      windowsHide: true,
-    }),
-  );
-  const chat = project.targets?.[targetName];
-  if (!chat) {
-    throw new Error(
-      `Target "${targetName}" not found on project ${projectName}`,
-    );
-  }
-  const command: string =
-    chat.options?.command ?? chat.options?.commands?.[0] ?? '';
-  if (!command) {
-    throw new Error(`Target "${target}" declares no command`);
-  }
-  // Nx templates `cwd`/`env` with {projectRoot} / {workspaceRoot}.
-  const expand = (value: string) =>
-    value
-      .replaceAll('{projectRoot}', project.root)
-      .replaceAll('{workspaceRoot}', '.');
-  return {
-    command: expand(command),
-    cwd: expand(chat.options?.cwd ?? '{workspaceRoot}'),
-    env: Object.fromEntries(
-      Object.entries(chat.options?.env ?? {}).map(([k, v]) => [
-        k,
-        expand(String(v)),
-      ]),
-    ),
-    // Only same-project string deps are used here (the generated chat targets
-    // declare at most the client-codegen target).
-    dependsOn: (chat.dependsOn ?? []).filter(
-      (d: unknown): d is string => typeof d === 'string',
-    ),
-  };
-}
-
-/**
- * Drive a generated `<agent>-chat` script through a PTY (the Clack prompt needs
- * a TTY), send one message once the prompt is up, and resolve when the agent
- * streams `expected` back. Proves the chat CLI boots, connects, submits input
- * and renders the reply end-to-end.
+ * Drive a generated `<agent>-chat` target through a PTY (the Clack prompt needs a
+ * TTY), send one message once the prompt is up, and resolve when the agent
+ * streams `expected` back. Proves the chat CLI boots, connects, submits input and
+ * renders the reply end-to-end, through the same `nx run` a user would type.
  *
- * The chat script is spawned directly rather than via `nx run <target>`. Going
- * through Nx puts the CLI two processes down (`pnpm → nx → tsx`), and when those
- * intermediates have not wired the PTY through by the time we type, the input is
- * silently dropped and the prompt never reads it — the flake this avoids. Any
- * `dependsOn` codegen is run first, without a PTY, so the PTY has exactly one
- * process in it.
+ * `NX_NATIVE_COMMAND_RUNNER=false` matters: `nx:run-commands` otherwise wraps the
+ * command in Nx's own Rust pseudo-terminal whenever stdout is a TTY, so what we
+ * type goes to *that* terminal and only reaches the CLI if Nx has finished wiring
+ * the two together — a race that silently swallowed the message and left the run
+ * waiting out its whole timeout. With the native runner off, Nx spawns the command
+ * with `stdio: ['inherit', ...]`, so the CLI inherits this PTY directly and reads
+ * the keystrokes itself.
  */
-async function chatStreamsReply(
-  projectRoot: string,
+function chatStreamsReply(
+  cwd: string,
   target: string,
   expected: string,
   timeoutMs: number,
   message = 'What is 3 times 5?',
 ): Promise<void> {
-  const [projectName] = target.split(':');
-  const { command, cwd, env, dependsOn } = readChatTarget(projectRoot, target);
-
-  // HTTP chat imports a generated client, so run the target's `dependsOn` first.
-  // Ordinary (non-PTY) execution — only the chat script itself needs a TTY.
-  for (const dep of dependsOn) {
-    await runCLI(`run ${projectName}:${dep}`, { cwd: projectRoot });
-  }
-
-  // Spawn the binary directly so the PTY holds exactly one process — no shell
-  // or package-manager wrapper between us and the prompt. The dependency may be
-  // linked into either the project's or the workspace root's `.bin`.
-  const [bin, ...args] = command.split(' ');
-  const binPath = [
-    join(projectRoot, cwd, 'node_modules', '.bin', bin),
-    join(projectRoot, 'node_modules', '.bin', bin),
-  ].find((candidate) => existsSync(candidate));
-  if (!binPath) {
-    throw new Error(
-      `Could not resolve "${bin}" for ${target} in ${cwd} or the workspace root`,
-    );
-  }
   return new Promise((resolve, reject) => {
-    const term = pty.spawn(binPath, args, {
-      cwd: join(projectRoot, cwd),
+    const term = pty.spawn('pnpm', ['exec', 'nx', 'run', target], {
+      cwd,
       env: {
         ...process.env,
-        ...env,
         NX_DAEMON: 'true',
         RUNTIME_CONFIG_APP_ID: '',
+        NX_NATIVE_COMMAND_RUNNER: 'false',
       },
     });
     let out = '';
@@ -441,7 +364,7 @@ async function chatStreamsReply(
       out += d;
       process.stdout.write(`[${target}] ${d}`);
       const text = clean();
-      // `Connected to ` prints before the Clack prompt attaches to stdin, so wait
+      // `Connected to ` is printed before the prompt starts reading stdin, so wait
       // for the prompt's own placeholder before typing.
       if (!sent && text.includes('Type a message')) {
         sent = true;
