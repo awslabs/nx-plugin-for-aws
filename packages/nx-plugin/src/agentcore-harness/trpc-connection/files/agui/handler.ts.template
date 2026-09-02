@@ -14,6 +14,7 @@ import { actorIdFromEvent, runtimeSessionIdFor } from './session<% if (esm) { %>
 
 const HARNESS_ARN = process.env.HARNESS_ARN!;
 const client = new BedrockAgentCoreClient({});
+<%_ if (auth !== 'iam') { _%>
 
 function getAllowedOrigin(event: APIGatewayProxyEvent): string {
   const origin = event.headers?.origin ?? event.headers?.Origin;
@@ -22,8 +23,9 @@ function getAllowedOrigin(event: APIGatewayProxyEvent): string {
     ? origin
     : (allowedOrigins[0] ?? '*');
 }
+<%_ } _%>
 
-// POST /agui — body is an AG-UI RunAgentInput; response is AG-UI SSE. Only
+// Body is an AG-UI RunAgentInput; response is AG-UI SSE. Only
 // `messages` and `threadId` are read from the client input. Every other
 // Harness-invocation field (systemPrompt, model, tools, allowedTools, skills,
 // actorId) is pinned server-side, per the AgentCore Harness security guidance:
@@ -37,16 +39,25 @@ export const handler = awslambda.streamifyResponse(
         statusCode: 200,
         headers: {
           'Content-Type': encoder.getContentType(),
+          <%_ if (auth !== 'iam') { _%>
           'Access-Control-Allow-Origin': getAllowedOrigin(event),
+          <%_ } _%>
           'Cache-Control': 'no-cache',
         },
       },
     );
 
+    <%_ if (auth === 'iam') { _%>
+    // A long, event-free stretch (e.g. a slow tool call) can trip the Function
+    // URL's idle timeout, so send an SSE keepalive comment periodically to hold
+    // the stream open until the Harness resumes emitting events or the Lambda
+    // times out.
+    <%_ } else { _%>
     // The edge-optimized REST API closes the connection after 30s of silence.
     // A long, event-free stretch (e.g. a slow tool call) can exceed that, so
     // send an SSE keepalive comment periodically to hold the stream open until
     // the Harness resumes emitting events or the Lambda times out.
+    <%_ } _%>
     const heartbeat = setInterval(() => {
       httpResponseStream.write(': keepalive\n\n');
     }, 15000);

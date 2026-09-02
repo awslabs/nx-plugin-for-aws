@@ -51,6 +51,16 @@ async function hydrateFromHistory(
   const { messages } = await historyClient.history.query({
     threadId: agent.threadId,
   });
+  // AgentCore Memory is eventually consistent: a rehydrate triggered by
+  // onRunFinalized can read the thread before the just-finished turn is
+  // listable, returning fewer messages than are already on screen. Applying
+  // that stale snapshot would delete the message the user just watched stream
+  // in. Memory is append-only, so never let a rehydrate shrink the transcript
+  // — only apply a read at least as complete as the current client state (an
+  // equal count still heals a partial/dropped turn with the same message).
+  if (messages.length < agent.messages.length) {
+    return;
+  }
   agent.setMessages(
     messages.map((m): Message => {
       if (m.role === 'tool') {
@@ -139,6 +149,16 @@ async function hydrateFromHistory(
   const { messages } = await historyClient.history.query({
     threadId: agent.threadId,
   });
+  // AgentCore Memory is eventually consistent: a rehydrate triggered by
+  // onRunFinalized can read the thread before the just-finished turn is
+  // listable, returning fewer messages than are already on screen. Applying
+  // that stale snapshot would delete the message the user just watched stream
+  // in. Memory is append-only, so never let a rehydrate shrink the transcript
+  // — only apply a read at least as complete as the current client state (an
+  // equal count still heals a partial/dropped turn with the same message).
+  if (messages.length < agent.messages.length) {
+    return;
+  }
   agent.setMessages(
     messages.map((m): Message => {
       if (m.role === 'tool') {
@@ -168,7 +188,13 @@ export const useAguiMyHarness = (): Record<string, AbstractAgent> => {
   const historyClient = useTestApiClient();
   const sigv4 = useSigV4();
 
-  const url = useMemo(() => \`\${apiUrl.replace(/\\/$/, '')}/agui\`, [apiUrl]);
+  // Deployed: a Lambda Function URL (RESPONSE_STREAM) exposed as \`apis.Agui\`;
+  // aws4fetch signs it for the 'lambda' service automatically from its host.
+  // Local dev: fall back to the tRPC dev server's \`/agui\` route.
+  const url = useMemo(
+    () => runtimeConfig.apis.Agui ?? \`\${apiUrl.replace(/\\/$/, '')}/agui\`,
+    [runtimeConfig.apis.Agui, apiUrl],
+  );
 
   const agent = useMemo((): AbstractAgent => {
     return new HttpAgent({

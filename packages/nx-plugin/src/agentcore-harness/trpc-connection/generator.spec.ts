@@ -243,9 +243,46 @@ describe('agentcore-harness#trpc-connection generator', () => {
       'utf-8',
     )!;
     expect(construct).toContain('public addAguiRoute(harness: MyHarness)');
-    expect(construct).toContain("this.api.root.addResource('agui')");
     expect(construct).toContain('harness.grantInvokeAccess(aguiHandler)');
+    // IAM auth streams over a Lambda Function URL (RESPONSE_STREAM), not an
+    // API Gateway route. The handle is stored on an injected field and its
+    // invoke permission is granted from the existing grantInvokeAccess method.
+    expect(construct).toContain(
+      'this.aguiFunctionUrl = aguiHandler.addFunctionUrl(',
+    );
+    expect(construct).toContain('InvokeMode.RESPONSE_STREAM');
+    expect(construct).toContain('FunctionUrlAuthType.AWS_IAM');
+    expect(construct).toContain('public aguiFunctionUrl?: FunctionUrl;');
+    expect(construct).toContain(
+      'this.aguiFunctionUrl?.grantInvokeUrl(grantee);',
+    );
+    expect(construct).not.toContain("this.api.root.addResource('agui')");
     expect(construct).toMatchSnapshot('api-construct.ts');
+  });
+
+  it('falls back to an API Gateway route for non-iam auth', async () => {
+    // Function URLs only support AWS_IAM/NONE auth, so a cognito API keeps the
+    // '/agui' route on API Gateway (inheriting its Cognito authorizer) and
+    // gains none of the Function URL members.
+    setupTrpcApi('api', { auth: 'cognito' });
+    setupHarness();
+    setupApiConstruct();
+    setupHarnessConstruct();
+
+    await trpcAgentCoreHarnessConnectionGenerator(tree, {
+      sourceProject: 'api',
+      targetProject: 'harness',
+    });
+
+    const construct = tree.read(
+      'packages/common/constructs/src/app/apis/api.ts',
+      'utf-8',
+    )!;
+    expect(construct).toContain('public addAguiRoute(harness: MyHarness)');
+    expect(construct).toContain("this.api.root.addResource('agui')");
+    expect(construct).toContain('ResponseTransferMode.STREAM');
+    expect(construct).not.toContain('addFunctionUrl');
+    expect(construct).not.toContain('aguiFunctionUrl');
   });
 
   it('records connection metadata on the source project', async () => {

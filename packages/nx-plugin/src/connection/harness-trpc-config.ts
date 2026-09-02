@@ -2,8 +2,9 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { joinPathFragments, logger, type Tree } from '@nx/devkit';
+
 import * as posixPath from 'node:path/posix';
+import { joinPathFragments, logger, type Tree } from '@nx/devkit';
 import { addDestructuredImport } from '../utils/ast';
 import { isEsmWorkspace } from '../utils/module-format';
 import {
@@ -20,6 +21,12 @@ export interface HarnessTrpcConfigOptions {
   readonly harnessNameClassName: string;
   /** The API's `iac`; only 'cdk' is wired by this generator today. */
   readonly iac?: string;
+  /**
+   * The API's auth mode. Only 'iam' gets the streaming Lambda Function URL
+   * (its SigV4 client model matches the Function URL's AWS_IAM auth); other
+   * modes fall back to the API Gateway route.
+   */
+  readonly auth?: string;
 }
 
 const relativeModuleSpecifier = (fromFile: string, toFile: string): string => {
@@ -112,6 +119,18 @@ export const addAguiRouteToApi = async (
     ['Grant'],
     'aws-cdk-lib/aws-iam',
   );
+  const isIam = options.auth === 'iam';
+  if (isIam) {
+    // The Function URL type + enums used by the injected `aguiFunctionUrl`
+    // field and `addAguiRoute`. Kept out of the base API construct so a plain
+    // tRPC API (no Harness) carries no AG-UI-specific members.
+    await addDestructuredImport(
+      tree,
+      constructPath,
+      ['FunctionUrl', 'FunctionUrlAuthType', 'HttpMethod', 'InvokeMode'],
+      'aws-cdk-lib/aws-lambda',
+    );
+  }
   await addDestructuredImport(
     tree,
     constructPath,
@@ -135,13 +154,58 @@ export const addAguiRouteToApi = async (
     }
   }
 
+  const endpointDoc = isIam
+    ? `   *
+   * The endpoint is a Lambda Function URL in RESPONSE_STREAM mode rather than
+   * an API Gateway route: REST integrations cap a streamed response at the
+   * endpoint's idle timeout (30s for edge-optimized), which truncates long
+   * generations, whereas a Function URL streams for up to the Lambda timeout.`
+    : '';
+
+  const endpointText = isIam
+    ? `
+    // Stream over a Function URL in RESPONSE_STREAM mode. IAM auth matches the
+    // API's SigV4 model: the browser signs with Cognito Identity Pool
+    // credentials (aws4fetch resolves the service to 'lambda' from the
+    // *.lambda-url.*.on.aws host). CORS is configured on the Function URL so
+    // the unsigned browser preflight is answered without invoking the function.
+    this.aguiFunctionUrl = aguiHandler.addFunctionUrl({
+      authType: FunctionUrlAuthType.AWS_IAM,
+      invokeMode: InvokeMode.RESPONSE_STREAM,
+      cors: {
+        allowedOrigins: [...this.allowedOrigins],
+        allowedMethods: [HttpMethod.POST],
+        allowedHeaders: [
+          'authorization',
+          'content-type',
+          'x-amz-date',
+          'x-amz-content-sha256',
+          'x-amz-security-token',
+        ],
+        maxAge: Duration.days(1),
+      },
+    });
+    rc.set('connection', 'apis', {
+      ...rc.get('connection').apis,
+      Agui: this.aguiFunctionUrl.url,
+    });`
+    : `
+    const aguiResource = this.api.root.addResource('agui');
+    aguiResource.addMethod(
+      'POST',
+      new LambdaIntegration(aguiHandler, {
+        responseTransferMode: ResponseTransferMode.STREAM,
+      }),
+    );`;
+
   const methodText = `
   /**
-   * Adds a POST /agui route backed by ${options.harnessNameClassName},
+   * Adds an AG-UI streaming endpoint backed by ${options.harnessNameClassName},
    * translating its Converse-style stream into AG-UI server-sent events.
    * Only 'messages' and 'threadId' are read from the request; every other
    * Harness field (systemPrompt, model, tools, allowedTools, skills,
    * actorId) is pinned server-side by the generated handler.
+${endpointDoc}
    */
   public addAguiRoute(harness: ${options.harnessNameClassName}): void {
     const rc = RuntimeConfig.ensure(this);
@@ -167,14 +231,7 @@ export const addAguiRouteToApi = async (
     );
     rc.grantReadAppConfig(aguiHandler);
     harness.grantInvokeAccess(aguiHandler);
-
-    const aguiResource = this.api.root.addResource('agui');
-    aguiResource.addMethod(
-      'POST',
-      new LambdaIntegration(aguiHandler, {
-        responseTransferMode: ResponseTransferMode.STREAM,
-      }),
-    );
+${endpointText}
 
     // Grants every existing tRPC operation handler Memory-read access, so an
     // optional 'history' procedure can reconstruct a conversation from
@@ -202,10 +259,50 @@ export const addAguiRouteToApi = async (
   }
 `;
 
-  const updated = tree.read(constructPath, 'utf-8')!;
+  // For IAM auth the '/agui' endpoint is a Lambda Function URL. Its handle is
+  // stored on a class field so `grantInvokeAccess` can grant the caller invoke
+  // access alongside the REST API. The field lives here (injected with the
+  // method) rather than in the base API construct template, so a plain tRPC
+  // API that never connects a Harness carries no AG-UI-specific members.
+  const fieldText = isIam
+    ? `
+  /**
+   * The Lambda Function URL that streams AG-UI events, set by \`addAguiRoute\`.
+   */
+  public aguiFunctionUrl?: FunctionUrl;
+`
+    : '';
+
+  let updated = tree.read(constructPath, 'utf-8')!;
+
+  // Grant the Function URL's invoke permission wherever the API grants its own
+  // invoke access, so the same principal (e.g. the website's authenticated
+  // identity) can call both. Anchored on `arnForExecuteApi` — unique to the
+  // IAM `grantInvokeAccess` method and independent of the workspace's quote
+  // style — inserting the grant right after that statement's `});`.
+  if (isIam) {
+    const anchor = 'arnForExecuteApi';
+    const anchorIndex = updated.indexOf(anchor);
+    if (anchorIndex >= 0) {
+      const closeIndex = updated.indexOf('});', anchorIndex);
+      if (closeIndex >= 0) {
+        const insertAt = closeIndex + '});'.length;
+        updated = `${updated.slice(0, insertAt)}\n\n    // The AG-UI stream is a Lambda Function URL (AWS_IAM), so it needs its own\n    // invoke grant alongside the REST API's.\n    this.aguiFunctionUrl?.grantInvokeUrl(grantee);${updated.slice(insertAt)}`;
+      } else {
+        logger.warn(
+          `Could not locate the end of 'grantInvokeAccess' in ${constructPath}; add 'this.aguiFunctionUrl?.grantInvokeUrl(grantee);' to it manually so the '/agui' Function URL is invokable.`,
+        );
+      }
+    } else {
+      logger.warn(
+        `Could not find a 'grantInvokeAccess' method in ${constructPath}; add 'this.aguiFunctionUrl?.grantInvokeUrl(grantee);' to your invoke grant manually so the '/agui' Function URL is invokable.`,
+      );
+    }
+  }
+
   const lastBrace = updated.lastIndexOf('}');
   tree.write(
     constructPath,
-    `${updated.slice(0, lastBrace)}${methodText}${updated.slice(lastBrace)}`,
+    `${updated.slice(0, lastBrace)}${fieldText}${methodText}${updated.slice(lastBrace)}`,
   );
 };

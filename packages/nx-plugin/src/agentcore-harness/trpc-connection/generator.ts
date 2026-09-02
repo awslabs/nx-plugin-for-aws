@@ -9,11 +9,11 @@ import {
   OverwriteStrategy,
   type Tree,
 } from '@nx/devkit';
-import { readAgentCoreHarnessMetadata } from '../generator';
+import { addAguiRouteToApi } from '../../connection/harness-trpc-config';
+import type { TsTrpcApiMetadata } from '../../trpc/backend/generator';
 import { addTsDependencies } from '../../utils/add-dependencies';
 import { addDestructuredImport, applyGritQL } from '../../utils/ast';
 import { declareDependencies } from '../../utils/declared-dependencies';
-import { addAguiRouteToApi } from '../../connection/harness-trpc-config';
 import { formatFilesInSubtree } from '../../utils/format';
 import { installDependencies } from '../../utils/install';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics';
@@ -25,7 +25,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx';
-import type { TsTrpcApiMetadata } from '../../trpc/backend/generator';
+import { readAgentCoreHarnessMetadata } from '../generator';
 import type { AgentcoreHarnessTrpcConnectionGeneratorSchema } from './schema';
 
 // The AG-UI route + mapper need these regardless of the connection's options.
@@ -86,7 +86,7 @@ export const trpcAgentCoreHarnessConnectionGenerator = async (
     tree,
     joinPathFragments(import.meta.dirname, 'files', 'agui'),
     joinPathFragments(apiProject.root, 'src', 'agui'),
-    { ...esm },
+    { ...esm, auth: apiMetadata.auth },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
@@ -117,6 +117,7 @@ export const trpcAgentCoreHarnessConnectionGenerator = async (
     harnessNameKebabCase: harnessMetadata.name,
     harnessNameClassName: harnessMetadata.rc,
     iac: apiMetadata.iac,
+    auth: apiMetadata.auth,
   });
 
   logger.info(

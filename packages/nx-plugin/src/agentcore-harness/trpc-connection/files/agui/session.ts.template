@@ -21,18 +21,31 @@ export function runtimeSessionIdFor(actorId: string, threadId: string): string {
 // with, without needing to know the auth mode at generation time:
 // - Cognito (COGNITO_USER_POOLS authorizer): the JWT `sub` claim.
 // - IAM (SigV4): no JWT, so the caller's IAM principal ARN is the closest
-//   server-derived identity available.
+//   server-derived identity available. The ARN lives in a different place
+//   depending on the event source, so both are checked and resolve to the
+//   same value for a given caller — keeping the '/agui' Function URL handler
+//   (payload format 2.0: `requestContext.authorizer.iam.userArn`) and the
+//   REST `history` procedure (payload format 1.0: `requestContext.identity
+//   .userArn`) on the same actor id, so history reconstructs what '/agui' wrote.
 // Sanitized because both ARNs (':' and '/') and, in principle, claim values
 // can contain characters InvokeHarness rejects in the actorId field.
 // `requestContext` itself is optional-chained too: local dev's tRPC adapter
 // invokes procedures with an empty mock event (no `requestContext` at all),
 // which otherwise throws before falling through to the 'anonymous' default.
 export function actorIdFromEvent(event: APIGatewayProxyEvent): string {
-  const claims = (
-    event.requestContext?.authorizer as
-      | { claims?: { sub?: string } }
-      | undefined
-  )?.claims;
-  const id = claims?.sub ?? event.requestContext?.identity?.userArn ?? 'anonymous';
+  const requestContext = event.requestContext as
+    | {
+        authorizer?: {
+          claims?: { sub?: string };
+          iam?: { userArn?: string };
+        };
+        identity?: { userArn?: string };
+      }
+    | undefined;
+  const id =
+    requestContext?.authorizer?.claims?.sub ??
+    requestContext?.identity?.userArn ??
+    requestContext?.authorizer?.iam?.userArn ??
+    'anonymous';
   return id.replace(/[^a-zA-Z0-9_-]/g, '-');
 }

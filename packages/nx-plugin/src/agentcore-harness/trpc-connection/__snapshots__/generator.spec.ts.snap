@@ -24,6 +24,10 @@ import {
   Function,
   FunctionProps,
   Tracing,
+  FunctionUrl,
+  FunctionUrlAuthType,
+  HttpMethod,
+  InvokeMode,
 } from 'aws-cdk-lib/aws-lambda';
 import { RuntimeConfig } from '../../core/runtime-config.js';
 import { AddCorsPreflightAspect, RestApi } from '../../core/api/rest-api.js';
@@ -46,14 +50,28 @@ export class TestApi extends RestApi {
       actions: ['execute-api:Invoke'],
       resourceArns: [this.api.arnForExecuteApi('*', '/*', '*')],
     });
+
+    // The AG-UI stream is a Lambda Function URL (AWS_IAM), so it needs its own
+    // invoke grant alongside the REST API's.
+    this.aguiFunctionUrl?.grantInvokeUrl(grantee);
   }
 
   /**
-   * Adds a POST /agui route backed by MyHarness,
+   * The Lambda Function URL that streams AG-UI events, set by \`addAguiRoute\`.
+   */
+  public aguiFunctionUrl?: FunctionUrl;
+
+  /**
+   * Adds an AG-UI streaming endpoint backed by MyHarness,
    * translating its Converse-style stream into AG-UI server-sent events.
    * Only 'messages' and 'threadId' are read from the request; every other
    * Harness field (systemPrompt, model, tools, allowedTools, skills,
    * actorId) is pinned server-side by the generated handler.
+   *
+   * The endpoint is a Lambda Function URL in RESPONSE_STREAM mode rather than
+   * an API Gateway route: REST integrations cap a streamed response at the
+   * endpoint's idle timeout (30s for edge-optimized), which truncates long
+   * generations, whereas a Function URL streams for up to the Lambda timeout.
    */
   public addAguiRoute(harness: MyHarness): void {
     const rc = RuntimeConfig.ensure(this);
@@ -82,13 +100,31 @@ export class TestApi extends RestApi {
     rc.grantReadAppConfig(aguiHandler);
     harness.grantInvokeAccess(aguiHandler);
 
-    const aguiResource = this.api.root.addResource('agui');
-    aguiResource.addMethod(
-      'POST',
-      new LambdaIntegration(aguiHandler, {
-        responseTransferMode: ResponseTransferMode.STREAM,
-      }),
-    );
+    // Stream over a Function URL in RESPONSE_STREAM mode. IAM auth matches the
+    // API's SigV4 model: the browser signs with Cognito Identity Pool
+    // credentials (aws4fetch resolves the service to 'lambda' from the
+    // *.lambda-url.*.on.aws host). CORS is configured on the Function URL so
+    // the unsigned browser preflight is answered without invoking the function.
+    this.aguiFunctionUrl = aguiHandler.addFunctionUrl({
+      authType: FunctionUrlAuthType.AWS_IAM,
+      invokeMode: InvokeMode.RESPONSE_STREAM,
+      cors: {
+        allowedOrigins: [...this.allowedOrigins],
+        allowedMethods: [HttpMethod.POST],
+        allowedHeaders: [
+          'authorization',
+          'content-type',
+          'x-amz-date',
+          'x-amz-content-sha256',
+          'x-amz-security-token',
+        ],
+        maxAge: Duration.days(1),
+      },
+    });
+    rc.set('connection', 'apis', {
+      ...rc.get('connection').apis,
+      Agui: this.aguiFunctionUrl.url,
+    });
 
     // Grants every existing tRPC operation handler Memory-read access, so an
     // optional 'history' procedure can reconstruct a conversation from
@@ -285,15 +321,7 @@ import { actorIdFromEvent, runtimeSessionIdFor } from './session.js';
 const HARNESS_ARN = process.env.HARNESS_ARN!;
 const client = new BedrockAgentCoreClient({});
 
-function getAllowedOrigin(event: APIGatewayProxyEvent): string {
-  const origin = event.headers?.origin ?? event.headers?.Origin;
-  const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') ?? [];
-  return allowedOrigins.length > 0 && origin && allowedOrigins.includes(origin)
-    ? origin
-    : (allowedOrigins[0] ?? '*');
-}
-
-// POST /agui — body is an AG-UI RunAgentInput; response is AG-UI SSE. Only
+// Body is an AG-UI RunAgentInput; response is AG-UI SSE. Only
 // \`messages\` and \`threadId\` are read from the client input. Every other
 // Harness-invocation field (systemPrompt, model, tools, allowedTools, skills,
 // actorId) is pinned server-side, per the AgentCore Harness security guidance:
@@ -307,16 +335,15 @@ export const handler = awslambda.streamifyResponse(
         statusCode: 200,
         headers: {
           'Content-Type': encoder.getContentType(),
-          'Access-Control-Allow-Origin': getAllowedOrigin(event),
           'Cache-Control': 'no-cache',
         },
       },
     );
 
-    // The edge-optimized REST API closes the connection after 30s of silence.
-    // A long, event-free stretch (e.g. a slow tool call) can exceed that, so
-    // send an SSE keepalive comment periodically to hold the stream open until
-    // the Harness resumes emitting events or the Lambda times out.
+    // A long, event-free stretch (e.g. a slow tool call) can trip the Function
+    // URL's idle timeout, so send an SSE keepalive comment periodically to hold
+    // the stream open until the Harness resumes emitting events or the Lambda
+    // times out.
     const heartbeat = setInterval(() => {
       httpResponseStream.write(': keepalive\\n\\n');
     }, 15000);
@@ -376,20 +403,32 @@ export function runtimeSessionIdFor(actorId: string, threadId: string): string {
 // with, without needing to know the auth mode at generation time:
 // - Cognito (COGNITO_USER_POOLS authorizer): the JWT \`sub\` claim.
 // - IAM (SigV4): no JWT, so the caller's IAM principal ARN is the closest
-//   server-derived identity available.
+//   server-derived identity available. The ARN lives in a different place
+//   depending on the event source, so both are checked and resolve to the
+//   same value for a given caller — keeping the '/agui' Function URL handler
+//   (payload format 2.0: \`requestContext.authorizer.iam.userArn\`) and the
+//   REST \`history\` procedure (payload format 1.0: \`requestContext.identity
+//   .userArn\`) on the same actor id, so history reconstructs what '/agui' wrote.
 // Sanitized because both ARNs (':' and '/') and, in principle, claim values
 // can contain characters InvokeHarness rejects in the actorId field.
 // \`requestContext\` itself is optional-chained too: local dev's tRPC adapter
 // invokes procedures with an empty mock event (no \`requestContext\` at all),
 // which otherwise throws before falling through to the 'anonymous' default.
 export function actorIdFromEvent(event: APIGatewayProxyEvent): string {
-  const claims = (
-    event.requestContext?.authorizer as
-      | { claims?: { sub?: string } }
-      | undefined
-  )?.claims;
+  const requestContext = event.requestContext as
+    | {
+        authorizer?: {
+          claims?: { sub?: string };
+          iam?: { userArn?: string };
+        };
+        identity?: { userArn?: string };
+      }
+    | undefined;
   const id =
-    claims?.sub ?? event.requestContext?.identity?.userArn ?? 'anonymous';
+    requestContext?.authorizer?.claims?.sub ??
+    requestContext?.identity?.userArn ??
+    requestContext?.authorizer?.iam?.userArn ??
+    'anonymous';
   return id.replace(/[^a-zA-Z0-9_-]/g, '-');
 }
 "

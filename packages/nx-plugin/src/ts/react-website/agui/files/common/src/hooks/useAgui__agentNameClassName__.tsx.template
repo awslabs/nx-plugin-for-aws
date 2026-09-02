@@ -59,6 +59,16 @@ async function hydrateFromHistory(
   const { messages } = await historyClient.history.query({
     threadId: agent.threadId,
   });
+  // AgentCore Memory is eventually consistent: a rehydrate triggered by
+  // onRunFinalized can read the thread before the just-finished turn is
+  // listable, returning fewer messages than are already on screen. Applying
+  // that stale snapshot would delete the message the user just watched stream
+  // in. Memory is append-only, so never let a rehydrate shrink the transcript
+  // — only apply a read at least as complete as the current client state (an
+  // equal count still heals a partial/dropped turn with the same message).
+  if (messages.length < agent.messages.length) {
+    return;
+  }
   agent.setMessages(
     messages.map((m): Message => {
       if (m.role === 'tool') {
@@ -92,7 +102,17 @@ export const useAgui<%= agentNameClassName %> = (): Record<string, AbstractAgent
   const auth = useAuth();
   <%_ } _%>
 
+  <%_ if (auth === 'iam') { _%>
+  // Deployed: a Lambda Function URL (RESPONSE_STREAM) exposed as `apis.Agui`;
+  // aws4fetch signs it for the 'lambda' service automatically from its host.
+  // Local dev: fall back to the tRPC dev server's `/agui` route.
+  const url = useMemo(
+    () => runtimeConfig.apis.Agui ?? `${apiUrl.replace(/\/$/, '')}/agui`,
+    [runtimeConfig.apis.Agui, apiUrl],
+  );
+  <%_ } else { _%>
   const url = useMemo(() => `${apiUrl.replace(/\/$/, '')}/agui`, [apiUrl]);
+  <%_ } _%>
 
   const agent = useMemo((): AbstractAgent => {
     <%_ if (auth === 'iam') { _%>
