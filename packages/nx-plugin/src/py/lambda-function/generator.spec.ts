@@ -9,7 +9,7 @@ import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
 } from '../../utils/config/utils.js';
-import { expectHasMetricTags } from '../../utils/metrics.spec.js';
+import { expectHasMetricTags } from '../../utils/metrics-assertions.js';
 import type { UVPyprojectToml } from '../../utils/nxlv-python.js';
 import { sortObjectKeys } from '../../utils/object.js';
 import {

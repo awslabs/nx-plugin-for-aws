@@ -72,21 +72,53 @@ const normaliseSchemaNames = (spec: Spec): Spec => {
     return spec;
   }
 
+  /** The renamed form of a schema reference, or undefined if it is unaffected. */
+  const renamedRef = (ref: string): string | undefined => {
+    const parts = splitRef(ref);
+    if (
+      parts.length !== 3 ||
+      parts[0] !== 'components' ||
+      parts[1] !== 'schemas'
+    ) {
+      return undefined;
+    }
+    const newName = schemaNameMapping[parts[2]];
+    return newName ? `#/components/schemas/${newName}` : undefined;
+  };
+
   // Update all $ref references throughout the spec
   spec = cloneDeepWith(spec, (v) => {
     if (isRef(v)) {
-      const parts = splitRef(v.$ref);
-      if (
-        parts.length === 3 &&
-        parts[0] === 'components' &&
-        parts[1] === 'schemas'
-      ) {
-        const oldName = parts[2];
-        const newName = schemaNameMapping[oldName];
-        if (newName) {
-          return { $ref: `#/components/schemas/${newName}` };
-        }
+      const renamed = renamedRef(v.$ref);
+      if (renamed) {
+        return { $ref: renamed };
       }
+    }
+    // A `discriminator.mapping` value is a bare reference string, not a `$ref`
+    // object, so it is rewritten here. Left stale it no longer resolves, and a
+    // tagged union silently degrades to an untagged one — which can parse a
+    // response into the wrong branch rather than failing.
+    if (
+      v &&
+      typeof v === 'object' &&
+      !Array.isArray(v) &&
+      typeof (v as { propertyName?: unknown }).propertyName === 'string' &&
+      (v as { mapping?: unknown }).mapping &&
+      typeof (v as { mapping?: unknown }).mapping === 'object'
+    ) {
+      const discriminator = v as {
+        propertyName: string;
+        mapping: Record<string, string>;
+      };
+      return {
+        ...discriminator,
+        mapping: Object.fromEntries(
+          Object.entries(discriminator.mapping).map(([value, ref]) => [
+            value,
+            typeof ref === 'string' ? (renamedRef(ref) ?? ref) : ref,
+          ]),
+        ),
+      };
     }
   });
 
@@ -114,10 +146,21 @@ const isCompositeSchema = (schema: OpenAPIV3.SchemaObject) =>
  * The media type whose schema is hoisted for a request/response: prefer
  * `application/json`, falling back to any `+json` vendored type (e.g.
  * `application/problem+json`).
+ *
+ * Parameters are stripped before matching, as they are for the `+json` fallback:
+ * a media type's parameters do not identify it (RFC 9110 §8.3), and matching
+ * `application/json` exactly meant `application/json; charset=utf-8` — a common
+ * spelling — hoisted nothing, so the response type resolved to a name that was
+ * never declared.
  */
+const baseMediaType = (mediaType: string): string =>
+  mediaType.split(';')[0].trim();
+
 const preferredJsonMediaType = (mediaTypes: string[]): string | undefined =>
-  mediaTypes.find((mediaType) => mediaType === 'application/json') ??
-  mediaTypes.find((mediaType) => mediaType.split(';')[0].endsWith('+json'));
+  mediaTypes.find(
+    (mediaType) => baseMediaType(mediaType) === 'application/json',
+  ) ??
+  mediaTypes.find((mediaType) => baseMediaType(mediaType).endsWith('+json'));
 
 const FORM_MEDIA_TYPES = [
   'multipart/form-data',
@@ -140,31 +183,55 @@ const isBinaryContentMediaType = (contentMediaType: string): boolean =>
   );
 
 /**
- * Rewrite file string fields of a form body to `format: binary` so the
- * generator types them as `Blob`. FastAPI emits an identical schema
+ * Rewrite a binary string schema, and any nested within it, to `format: binary`
+ * so the generator types it as a file rather than text.
+ *
+ * A base64 `contentEncoding` or a textual/JSON `contentMediaType` keeps the
+ * schema a string, and `format: binary` is left untouched (already binary
+ * anywhere). Nesting is walked because a file is not always a bare property:
+ * `list[UploadFile]` puts it under `items` and `UploadFile | None` under
+ * `anyOf`, and an element left unmarked stayed a `str`, so it was sent as a text
+ * part the server rejected.
+ *
+ * Callers decide *where* this applies, since FastAPI emits the same schema
  * (`{type: string, contentMediaType: ...}`) for a multipart file field and for
- * `bytes` in a JSON body; only the enclosing media type distinguishes them, so
- * this promotion is scoped to form bodies. A base64 `contentEncoding` or a
- * textual/JSON `contentMediaType` keeps the field a string. `format: binary` is
- * left untouched (already binary anywhere).
+ * `bytes` in a JSON body — only the enclosing media type tells them apart.
  */
+const markBinaryStringSchema = (schema: unknown): void => {
+  if (!schema || typeof schema !== 'object' || isRef(schema)) return;
+  const s = schema as OpenAPIV3.SchemaObject & {
+    contentMediaType?: string;
+    contentEncoding?: string;
+    // `items` is declared only on the array branch of `SchemaObject`, and
+    // `prefixItems` not at all; both are read here without narrowing `type`
+    // first, since a form body may omit it.
+    items?: unknown;
+    prefixItems?: unknown[];
+  };
+  if (
+    s.type === 'string' &&
+    s.format !== 'binary' &&
+    s.contentMediaType &&
+    !s.contentEncoding &&
+    isBinaryContentMediaType(s.contentMediaType)
+  ) {
+    s.format = 'binary';
+    return;
+  }
+  markBinaryStringSchema(s.items);
+  for (const member of [
+    ...(s.anyOf ?? []),
+    ...(s.oneOf ?? []),
+    ...(s.allOf ?? []),
+    ...(s.prefixItems ?? []),
+  ]) {
+    markBinaryStringSchema(member);
+  }
+};
+
+/** A form body's binary string fields are file uploads. */
 const markFormBinaryFields = (schema: OpenAPIV3.SchemaObject): void => {
-  Object.values(schema.properties ?? {}).forEach((prop) => {
-    if (isRef(prop)) return;
-    const s = prop as OpenAPIV3.SchemaObject & {
-      contentMediaType?: string;
-      contentEncoding?: string;
-    };
-    if (
-      s.type === 'string' &&
-      s.format !== 'binary' &&
-      s.contentMediaType &&
-      !s.contentEncoding &&
-      isBinaryContentMediaType(s.contentMediaType)
-    ) {
-      s.format = 'binary';
-    }
-  });
+  Object.values(schema.properties ?? {}).forEach(markBinaryStringSchema);
 };
 
 const hasSubSchemasToVisit = (
@@ -223,17 +290,21 @@ const createUniqueModelName = (
   // schema whose reference (`StorePhotos`) no longer resolves.
   const candidateName = nameParts.map(toClassName).join('');
 
-  const seenModelNameCount = seenModelNameCounts[candidateName];
-
   // We have not seen this name so we're free to use it
-  if (seenModelNameCount === undefined) {
+  if (seenModelNameCounts[candidateName] === undefined) {
     seenModelNameCounts[candidateName] = 1;
     return candidateName;
   }
 
-  // We have seen the name before, so we must disambiguate
-  seenModelNameCounts[candidateName]++;
-  return `${candidateName}${seenModelNameCount}`;
+  // We have seen the name before, so we must disambiguate. The suffixed name
+  // needs checking too: a declared schema may already be called `FooBar1`, and
+  // taking it silently replaced the user's schema with the hoisted one.
+  let suffixed = `${candidateName}${seenModelNameCounts[candidateName]++}`;
+  while (seenModelNameCounts[suffixed] !== undefined) {
+    suffixed = `${candidateName}${seenModelNameCounts[candidateName]++}`;
+  }
+  seenModelNameCounts[suffixed] = 1;
+  return suffixed;
 };
 
 const hoistInlineObjectSubSchemas = (
@@ -446,6 +517,55 @@ const rewriteCompositeSiblingProperties = (spec: Spec): Spec => {
 };
 
 /**
+ * Upper-cases wildcard response status codes (`2xx` to `2XX`), drops spec
+ * extensions, and rejects a key that is neither.
+ *
+ * OpenAPI treats the range codes case-insensitively, but every consumer
+ * downstream matches the upper-case form — a lower-case key would otherwise be
+ * taken for a literal status code and emitted as one, which is not valid Python
+ * or TypeScript. A key that is no kind of status code was emitted as a bare name
+ * either way: `x-vendor-note` did not parse, and an alphabetic one like `unknown`
+ * parsed and imported, then raised `NameError` from `response.status_code ==
+ * unknown` only once that status arrived.
+ */
+const RESPONSE_CODE_PATTERN = /^(?:\d{3}|\d[xX]{2}|default)$/;
+
+const normaliseResponseCodeCase = (spec: Spec): void => {
+  for (const [path, pathItem] of Object.entries(spec.paths ?? {})) {
+    for (const [method, operation] of Object.entries(pathItem ?? {})) {
+      const responses = (operation as { responses?: Record<string, unknown> })
+        ?.responses;
+      if (!responses || typeof responses !== 'object') continue;
+      for (const code of Object.keys(responses)) {
+        // A `x-` extension is legal on the Responses Object and describes nothing
+        // to generate, so it is dropped rather than rejected.
+        if (code.startsWith('x-')) {
+          delete responses[code];
+          continue;
+        }
+        if (!RESPONSE_CODE_PATTERN.test(code)) {
+          throw new Error(
+            `Operation "${method.toUpperCase()} ${path}" declares a response keyed "${code}", which is not a status code, a wildcard range (such as "5XX") or "default". Please correct it in your OpenAPI specification.`,
+          );
+        }
+        if (!/^\d[xX]{2}$/.test(code) || code === code.toUpperCase()) continue;
+        const upper = code.toUpperCase();
+        // Both spellings name the same range, so one would silently overwrite
+        // the other — and which survived would depend on key order. The repo
+        // throws on a schema-name collision for the same reason.
+        if (upper in responses) {
+          throw new Error(
+            `Response code conflict: "${code}" and "${upper}" describe the same status range. Please declare only one of them in your OpenAPI specification.`,
+          );
+        }
+        responses[upper] = responses[code];
+        delete responses[code];
+      }
+    }
+  }
+};
+
+/**
  * Rewrites an OpenAPI 3.1 multi-type schema (`type: ['integer', 'string']`)
  * into the equivalent `anyOf` of single-type schemas, dropping `null` from the
  * list and marking the schema nullable instead. This lets the parser render a
@@ -520,6 +640,7 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
   let spec = cloneDeepWith(inSpec);
 
   inlinePathItemRefs(spec);
+  normaliseResponseCodeCase(spec);
   spec = rewriteConstToEnum(spec);
   spec = rewriteMultiTypeToAnyOf(spec);
   spec = rewriteCompositeSiblingProperties(spec);
@@ -537,14 +658,19 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
   const seenOperationIds = new Set<string>();
   const duplicatedOperationIds = new Set<string>();
 
+  // camelCasing is lossy — ids differing only in punctuation converge, and one
+  // written entirely in punctuation converges on the empty string. Keep what the
+  // document said so a rejection can name the operations the author has to change.
+  const writtenOperationIds = new Map<object, string>();
+
   // Make sure all operationIds are camelCase, and find which ones are duplicated
   Object.entries(spec.paths ?? {}).forEach(([path, pathOps]) =>
     Object.entries(pathOps ?? {}).forEach(([method, op]) => {
       const operation = resolveIfRef(spec, op);
       if (operation && typeof operation === 'object') {
-        const operationId = camelCase(
-          (operation as any).operationId ?? `${method}-${path}`,
-        );
+        const written = (operation as any).operationId ?? `${method}-${path}`;
+        const operationId = camelCase(written);
+        writtenOperationIds.set(operation, String(written));
         (operation as any).operationId = operationId;
         if (seenOperationIds.has(operationId)) {
           duplicatedOperationIds.add(operationId);
@@ -588,16 +714,30 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
 
         seenOperationIds.add(deduplicatedOpId);
 
-        // Throw an error for any duplicated operation ids with the same tag, or untagged
-        [...(tags.length === 0 ? [untagged] : tags)].forEach((tag) => {
+        // Throw an error for any duplicated operation ids with the same tag, or
+        // untagged. Keyed on the *normalised* tag: two tags that differ only in
+        // punctuation (`my-tag` and `my.tag`) become one namespace downstream, so
+        // ids that clash there clash for the client — and deduplicating by tag
+        // cannot separate them, which silently dropped an operation.
+        const normalisedTags: (string | symbol)[] =
+          tags.length === 0
+            ? [untagged]
+            : [...new Set(tags.map((t) => camelCase(t)))];
+        normalisedTags.forEach((tag) => {
           if (
             seenOperationIdsByTag[tag] &&
             seenOperationIdsByTag[tag].has(operationId)
           ) {
+            // Report tag and id as written: either normalises to the empty
+            // string when spelt with no alphanumerics, which names nothing to
+            // the reader. `path` and `method` pin down which operation to edit.
+            const tagsAsWritten = tags.map((t) => `"${t}"`).join(', ');
+            const idAsWritten = `"${writtenOperationIds.get(operation) ?? operationId}"`;
+            const at = `${method.toUpperCase()} ${path}`;
             throw new Error(
               tag === untagged
-                ? `Untagged operations cannot have the same operationId (${operationId})`
-                : `Operations with the same tag (${String(tag)}) cannot have the same operationId (${operationId})`,
+                ? `Untagged operations cannot have the same operationId (${idAsWritten}, at ${at})`
+                : `Operations with the same tag (${tagsAsWritten}) cannot have the same operationId (${idAsWritten}, at ${at})`,
             );
           }
 
@@ -674,6 +814,25 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
               | undefined;
             if (resolved) markFormBinaryFields(resolved);
           }
+          // A whole body under a binary media type is itself the file. FastAPI
+          // writes `bytes` as `{type: string, contentMediaType: ...}`, which
+          // without this stayed a `str` and was sent as `repr(bytes)`.
+          for (const mediaType of contentMediaTypes) {
+            if (
+              isFormMediaType(mediaType) ||
+              !isBinaryContentMediaType(mediaType)
+            ) {
+              continue;
+            }
+            const schema = requestBody!.content![mediaType]?.schema;
+            if (
+              schema &&
+              !isRef(schema) &&
+              (schema as OpenAPIV3.SchemaObject).type === 'string'
+            ) {
+              (schema as OpenAPIV3.SchemaObject).format = 'binary';
+            }
+          }
           if (
             bodyContentSchema &&
             !isRef(bodyContentSchema) &&
@@ -698,15 +857,32 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
             const paramSchema = param?.schema as
               | OpenAPIV3.SchemaObject
               | undefined;
-            if (
-              paramSchema &&
-              !isRef(paramSchema) &&
-              (isCompositeSchema(paramSchema) ||
-                (paramSchema.type === 'object' && !!paramSchema.properties))
-            ) {
-              const schemaName = `${upperFirst(deduplicatedOpId)}Request${upperFirst(param.in)}${upperFirst(camelCase(param.name))}`;
+            if (!paramSchema || isRef(paramSchema)) return;
+            const schemaName = `${upperFirst(deduplicatedOpId)}Request${upperFirst(param.in)}${upperFirst(camelCase(param.name))}`;
+            const needsName = (schema: OpenAPIV3.SchemaObject): boolean =>
+              isCompositeSchema(schema) ||
+              (schema.type === 'object' && !!schema.properties);
+            if (needsName(paramSchema)) {
               spec.components!.schemas![schemaName] = paramSchema;
               param.schema = { $ref: `#/components/schemas/${schemaName}` };
+              return;
+            }
+            // An array's items need a name of their own: left inline, a composite
+            // there rendered as a member type nothing declared — `list[U]`, since
+            // the anonymous schema's name escapes to nothing.
+            // `items` is declared only on the array branch of `SchemaObject`.
+            const items = (paramSchema as { items?: unknown }).items as
+              | OpenAPIV3.SchemaObject
+              | undefined;
+            if (
+              paramSchema.type === 'array' &&
+              items &&
+              !isRef(items) &&
+              needsName(items)
+            ) {
+              const itemName = `${schemaName}Item`;
+              spec.components!.schemas![itemName] = items;
+              paramSchema.items = { $ref: `#/components/schemas/${itemName}` };
             }
           });
         }
@@ -743,8 +919,9 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
   // The substituted body is itself walked for refs, so a chain — an array whose
   // items are a named scalar — collapses in one pass. Substituting the array
   // without following through left `items` pointing at a schema this same pass
-  // deletes, so the client referred to a type nothing declared and the emitted
-  // TypeScript did not compile.
+  // deletes, so the client referred to a type nothing declared — the emitted
+  // TypeScript did not compile, and the Python raised `AttributeError` on every
+  // call, which neither parsing nor importing the package reveals.
   const inlinedRefs: Set<string> = new Set();
   const inlineNonObjectRefs = (value: unknown): unknown =>
     cloneDeepWith(value, (v) => {

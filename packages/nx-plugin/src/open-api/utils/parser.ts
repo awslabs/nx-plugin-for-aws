@@ -281,7 +281,7 @@ export const buildInlineModel = (
     // `nullable` beside a `$ref` describes this use of the schema, not the schema
     // itself. OpenAPI 3.0 ignores a `$ref`'s siblings, but normalisation puts it
     // here when it hoists a nullable inline schema — dropping it made a required
-    // nullable object property non-nullable.
+    // nullable object property reject the null its own spec permits.
     return createModel({
       export: 'reference',
       type: name,

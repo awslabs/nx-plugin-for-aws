@@ -1,0 +1,271 @@
+/**
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+import type { Tree } from '@nx/devkit';
+import type { Spec } from '../utils/types.js';
+import {
+  callGeneratedClient,
+  callGeneratedClientAsync,
+  createPythonClientVerifier,
+  createTree,
+  generateAndRead,
+  requestBody,
+  requestHeader,
+  requestUrl,
+} from './generator.utils.spec.js';
+
+describe('openApiPyClientGenerator - requests', () => {
+  let tree: Tree;
+  const verifier = createPythonClientVerifier();
+
+  beforeEach(() => {
+    tree = createTree();
+  });
+
+  it('should generate valid Python for parameters and responses', async () => {
+    const spec: Spec = {
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/test/{id}': {
+          get: {
+            operationId: 'getTest',
+            parameters: [
+              {
+                name: 'id',
+                in: 'path',
+                required: true,
+                schema: { type: 'string' },
+              },
+              {
+                name: 'filter',
+                in: 'query',
+                schema: { type: 'string' },
+              },
+              {
+                name: 'tags',
+                in: 'query',
+                explode: true,
+                schema: { type: 'array', items: { type: 'string' } },
+              },
+              {
+                name: 'x-api-key',
+                in: 'header',
+                required: true,
+                schema: { type: 'string' },
+              },
+            ],
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      required: ['result'],
+                      properties: { result: { type: 'string' } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+    const { types, client } = await generateAndRead(verifier, tree, spec);
+    expect(types).toMatchSnapshot('types.py');
+    expect(client).toMatchSnapshot('client.py');
+
+    const res = await callGeneratedClient(
+      verifier,
+      'get_test',
+      {
+        id: 'test123',
+        filter: 'active',
+        tags: ['tag1', 'tag2'],
+        x_api_key: 'api-key-123',
+      },
+      { status: 200, json: { result: 'success' } },
+    );
+    expect(res.ok).toBe(true);
+    expect(res.value).toEqual({ result: 'success' });
+    expect(requestUrl(res)).toContain('/test/test123');
+    expect(requestUrl(res)).toMatch(/filter=active/);
+    expect(requestUrl(res)).toMatch(/tags=tag1/);
+    expect(requestUrl(res)).toMatch(/tags=tag2/);
+    expect(requestHeader(res, 'x-api-key')).toBe('api-key-123');
+  });
+
+  it('should encode path parameters containing URL-unsafe characters', async () => {
+    const spec: Spec = {
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/widget/{id}': {
+          get: {
+            operationId: 'widget',
+            parameters: [
+              {
+                name: 'id',
+                in: 'path',
+                required: true,
+                schema: { type: 'string' },
+              },
+            ],
+            responses: {
+              '200': {
+                description: 'OK',
+                content: { 'application/json': { schema: { type: 'string' } } },
+              },
+            },
+          },
+        },
+      },
+    };
+    await generateAndRead(verifier, tree, spec);
+    const res = await callGeneratedClient(
+      verifier,
+      'widget',
+      { id: 'a b/c' },
+      { json: 'ok' },
+    );
+    expect(res.ok).toBe(true);
+    expect(requestUrl(res)).toContain('/widget/a%20b%2Fc');
+  });
+
+  it('should handle operations with simple request bodies and query parameters', async () => {
+    const spec: Spec = {
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/test': {
+          post: {
+            operationId: 'postTest',
+            parameters: [
+              {
+                name: 'filter',
+                in: 'query',
+                required: true,
+                schema: { type: 'string' },
+              },
+            ],
+            requestBody: {
+              required: true,
+              content: {
+                'application/json': {
+                  schema: { $ref: '#/components/schemas/Body' },
+                },
+              },
+            },
+            responses: {
+              '200': {
+                description: 'OK',
+                content: { 'application/json': { schema: { type: 'string' } } },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          Body: {
+            type: 'object',
+            required: ['data'],
+            properties: { data: { type: 'string' } },
+          },
+        },
+      },
+    };
+    const { client } = await generateAndRead(verifier, tree, spec);
+    // Body fields are flattened into the request as kwargs alongside `filter`.
+    expect(client).toMatch(/filter:\s*str/);
+    expect(client).toMatch(/data:\s*str/);
+
+    const res = await callGeneratedClient(
+      verifier,
+      'post_test',
+      { filter: 'active', data: 'hello' },
+      { json: 'ok' },
+    );
+    expect(res.ok).toBe(true);
+    expect(requestUrl(res)).toMatch(/filter=active/);
+    expect(JSON.parse(requestBody(res) ?? '{}')).toEqual({ data: 'hello' });
+  });
+
+  it('async client round-trips the same parameters', async () => {
+    const spec: Spec = {
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/ping': {
+          get: {
+            operationId: 'ping',
+            responses: {
+              '200': {
+                description: 'OK',
+                content: { 'application/json': { schema: { type: 'string' } } },
+              },
+            },
+          },
+        },
+      },
+    };
+    await generateAndRead(verifier, tree, spec);
+    const res = await callGeneratedClientAsync(
+      verifier,
+      'ping',
+      {},
+      { json: 'pong' },
+    );
+    expect(res.ok).toBe(true);
+    expect(res.value).toBe('pong');
+  });
+
+  it('serialises a deepObject query parameter as key[prop]=value pairs', async () => {
+    const spec: Spec = {
+      openapi: '3.0.3',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/search': {
+          get: {
+            operationId: 'search',
+            parameters: [
+              {
+                name: 'filter',
+                in: 'query',
+                style: 'deepObject',
+                explode: true,
+                schema: {
+                  type: 'object',
+                  properties: {
+                    colour: { type: 'string' },
+                    size: { type: 'integer' },
+                  },
+                },
+              },
+            ],
+            responses: {
+              '200': {
+                description: 'OK',
+                content: { 'application/json': { schema: { type: 'string' } } },
+              },
+            },
+          },
+        },
+      },
+    };
+    await generateAndRead(verifier, tree, spec);
+    const res = await callGeneratedClient(
+      verifier,
+      'search',
+      { filter: { colour: 'red', size: 5 } },
+      { json: 'ok' },
+    );
+    expect(res.ok).toBe(true);
+    const url = decodeURIComponent(requestUrl(res));
+    expect(url).toMatch(/filter\[colour\]=red/);
+    expect(url).toMatch(/filter\[size\]=5/);
+  });
+});

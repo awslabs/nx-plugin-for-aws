@@ -6,7 +6,7 @@ import { type Tree, updateJson } from '@nx/devkit';
 import { tsReactWebsiteGenerator } from '../../../ts/react-website/app/generator.js';
 import { matchGritQL } from '../../../utils/ast.js';
 import { declareDependencies } from '../../../utils/declared-dependencies.js';
-import { expectHasMetricTags } from '../../../utils/metrics.spec.js';
+import { expectHasMetricTags } from '../../../utils/metrics-assertions.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
