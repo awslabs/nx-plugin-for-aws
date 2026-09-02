@@ -380,10 +380,10 @@ npx cdk bootstrap aws://<account-id>/<region>
 您的项目有三个部署目标，每个都适合不同的情况：
 
 | 目标           | 用途                                                                       |
-| ---------------- | ----------------------------------------------------------------------------------------------- |
-| `deploy-sandbox` | 在开发期间部署您自己的沙箱阶段。不需要阶段参数。使用快速模式。 |
-| `deploy`         | 在开发期间通过命名您想要的阶段或堆栈来部署任何阶段。使用快速模式。 |
-| `deploy-ci`      | 从 CI/CD 管道部署，使用预合成的云程序集。等待完全稳定。 |
+| ---------------- | ------------------------------------------------------------------------------------------------------ |
+| `deploy-sandbox` | 在开发期间部署您自己的沙箱阶段。不需要阶段参数。使用快速模式。        |
+| `deploy`         | 通过命名您想要的阶段或堆栈来部署任何阶段。                                            |
+| `deploy-ci`      | 从 CI/CD 管道部署，使用预合成的云程序集。等待完全稳定。   |
 
 `deploy-sandbox` 和 `deploy` 依赖于 `^assemble`，因此它们构建即将部署的工件，仅此而已。`deploy-ci` 部署您的管道已经构建的程序集，因此它根本没有构建依赖项。
 
@@ -402,15 +402,11 @@ npx cdk bootstrap aws://<account-id>/<region>
 这是在开发时让您自己的应用程序副本在 AWS 中运行的最快方法。
 
 :::tip[快速模式以实现更快的部署]
-`deploy-sandbox` 和 `deploy` 目标默认使用 [CloudFormation 快速模式](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html)（通过 CDK 的 `--express` 标志）。快速模式在确认应用资源配置后立即完成，而不是等待完全稳定，传播在后台继续进行，从而显著加快迭代周期。
+`deploy-sandbox` 目标默认使用 [CloudFormation 快速模式](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html)（通过 CDK 的 `--express` 标志）。快速模式在确认应用资源配置后立即完成，而不是等待完全稳定，传播在后台继续进行，从而显著加快迭代周期。
 
-要等待完全的资源稳定，请传递 `--no-express`：
+由于它在资源完成稳定之前返回，快速模式适合您迭代的沙箱阶段，而不适合 CI/CD 或生产部署 — 对于这些情况，请使用 [`deploy-ci`](#deploying-to-aws-in-a-cicd-pipeline)。要在这里也等待完全的资源稳定，请传递 `--no-express`：
 
 <NxCommands commands={['deploy-sandbox <my-infra> --no-express']} />
-:::
-
-:::caution[`deploy-sandbox` 和 `deploy` 仅用于开发]
-由于快速模式在资源完成稳定之前返回，`deploy-sandbox` 和 `deploy` 旨在用于开发和迭代，而不是用于 CI/CD 或生产部署。在管道中使用 [`deploy-ci`](#deploying-to-aws-in-a-cicd-pipeline) — 它从不使用快速模式，因此始终等待完全稳定。
 :::
 
 ### 部署特定阶段
@@ -423,13 +419,15 @@ npx cdk bootstrap aws://<account-id>/<region>
 
 <NxCommands commands={['deploy <my-infra> <my-infra>-sandbox/Application']} />
 
+由于此目标可以命名任何阶段，包括您的生产阶段，因此当您使用 `stageConfig` 生成时，它会等待完全的资源稳定。对于您正在迭代的阶段，传递 `--express` 以选择使用快速模式。
+
 ## 在 CI/CD 管道中部署到 AWS
 
 如果您要作为 CI/CD 管道的一部分部署到 AWS，请使用 `deploy-ci` 目标。
 
 <NxCommands commands={['deploy-ci <my-infra> my-stage/*']} />
 
-此目标与 `deploy` 和 `deploy-sandbox` 目标在两个方面有所不同。首先，它部署预合成的云程序集，而不是即时合成，避免了包版本更改带来的潜在非确定性，并确保每个管道阶段使用相同的云程序集进行部署。其次，它不使用快速模式，因此在报告成功之前会等待每个资源完全稳定。
+此目标与 `deploy` 和 `deploy-sandbox` 目标在两个方面有所不同。首先，它部署预合成的云程序集，而不是即时合成，避免了包版本更改带来的潜在非确定性，并确保每个管道阶段使用相同的云程序集进行部署。其次，它从不使用快速模式，因此在报告成功之前始终等待每个资源完全稳定。
 
 ## 拆除 AWS 基础设施
 

@@ -382,7 +382,7 @@ npx cdk bootstrap aws://<account-id>/<region>
 | ターゲット           | 使用目的                                                                                      |
 | ---------------- | ----------------------------------------------------------------------------------------------- |
 | `deploy-sandbox` | 開発中に独自のサンドボックスステージをデプロイする。ステージ引数は不要。Expressモードを使用。 |
-| `deploy`         | 開発中に任意のステージをデプロイする。デプロイしたいステージまたはスタックを指定する。Expressモードを使用。 |
+| `deploy`         | デプロイしたいステージまたはスタックを指定して、任意のステージをデプロイする。                                            |
 | `deploy-ci`      | CI/CDパイプラインからデプロイする。事前に合成されたクラウドアセンブリを使用する。完全な安定化を待機。 |
 
 `deploy-sandbox`と`deploy`は`^assemble`に依存しているため、デプロイしようとしているアーティファクトのみをビルドします。`deploy-ci`はパイプラインが既にビルドしたアセンブリをデプロイするため、ビルド依存関係は一切ありません。
@@ -402,15 +402,11 @@ npx cdk bootstrap aws://<account-id>/<region>
 これは、開発中にAWSでアプリケーションの独自のコピーを実行する最も迅速な方法です。
 
 :::tip[より高速なデプロイのためのExpressモード]
-`deploy-sandbox`と`deploy`ターゲットは、デフォルトで[CloudFormation expressモード](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html)を使用します（CDKの`--express`フラグ経由）。Expressモードは、完全な安定化を待つのではなく、リソース設定が適用されたことが確認されると終了し、伝播はバックグラウンドで継続されるため、反復サイクルが大幅に高速化されます。
+`deploy-sandbox`ターゲットは、デフォルトで[CloudFormation expressモード](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html)を使用します（CDKの`--express`フラグ経由）。Expressモードは、完全な安定化を待つのではなく、リソース設定が適用されたことが確認されると終了し、伝播はバックグラウンドで継続されるため、反復サイクルが大幅に高速化されます。
 
-完全なリソースの安定化を待つには、`--no-express`を渡します：
+リソースの安定化が完了する前に戻るため、Expressモードは反復作業を行うサンドボックスステージに適しており、CI/CDや本番デプロイには適していません — それらには[`deploy-ci`](#deploying-to-aws-in-a-cicd-pipeline)を使用してください。ここでも完全なリソースの安定化を待つには、`--no-express`を渡します：
 
 <NxCommands commands={['deploy-sandbox <my-infra> --no-express']} />
-:::
-
-:::caution[`deploy-sandbox`と`deploy`は開発専用]
-Expressモードはリソースの安定化が完了する前に戻るため、`deploy-sandbox`と`deploy`は開発と反復を目的としており、CI/CDや本番デプロイには適していません。パイプラインでは[`deploy-ci`](#deploying-to-aws-in-a-cicd-pipeline)を使用してください — これはExpressモードを使用しないため、常に完全な安定化を待機します。
 :::
 
 ### 特定のステージのデプロイ
@@ -423,13 +419,15 @@ Expressモードはリソースの安定化が完了する前に戻るため、`
 
 <NxCommands commands={['deploy <my-infra> <my-infra>-sandbox/Application']} />
 
+このターゲットは本番環境を含む任意のステージを指定できるため、`stageConfig`を使用して生成した場合は完全なリソースの安定化を待ちます。反復作業を行っているステージでExpressモードを使用するには、`--express`を渡します。
+
 ## CI/CDパイプラインでのAWSへのデプロイ
 
 CI/CDパイプラインの一部としてAWSにデプロイする場合は、`deploy-ci`ターゲットを使用します。
 
 <NxCommands commands={['deploy-ci <my-infra> my-stage/*']} />
 
-このターゲットは、`deploy`と`deploy-sandbox`ターゲットとは2つの点で異なります。第一に、その場で合成するのではなく、事前に合成されたクラウドアセンブリをデプロイします。これにより、パッケージバージョンの変更による潜在的な非決定性を回避し、すべてのパイプラインステージが同じクラウドアセンブリを使用してデプロイすることを保証します。第二に、Expressモードを使用しないため、成功を報告する前にすべてのリソースが完全に安定化するのを待ちます。
+このターゲットは、`deploy`と`deploy-sandbox`ターゲットとは2つの点で異なります。第一に、その場で合成するのではなく、事前に合成されたクラウドアセンブリをデプロイします。これにより、パッケージバージョンの変更による潜在的な非決定性を回避し、すべてのパイプラインステージが同じクラウドアセンブリを使用してデプロイすることを保証します。第二に、Expressモードを使用しないため、成功を報告する前にすべてのリソースが完全に安定化するのを常に待ちます。
 
 ## AWSインフラストラクチャの削除
 
