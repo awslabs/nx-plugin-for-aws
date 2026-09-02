@@ -306,10 +306,18 @@ function startServer(
 }
 
 /**
- * Drive `agent-chat` through a PTY (the Clack prompt needs a TTY), send one
- * message once connected, and resolve when the agent streams `expected` back.
- * Proves the standalone chat boots, connects, submits input and renders the
- * reply end-to-end. Rejects if not seen before the timeout.
+ * Drive a generated `<agent>-chat` target through a PTY (the Clack prompt needs a
+ * TTY), send one message once the prompt is up, and resolve when the agent
+ * streams `expected` back. Proves the chat CLI boots, connects, submits input and
+ * renders the reply end-to-end, through the same `nx run` a user would type.
+ *
+ * `NX_NATIVE_COMMAND_RUNNER=false` matters: `nx:run-commands` otherwise wraps the
+ * command in Nx's own Rust pseudo-terminal whenever stdout is a TTY, so what we
+ * type goes to *that* terminal and only reaches the CLI if Nx has finished wiring
+ * the two together — a race that silently swallowed the message and left the run
+ * waiting out its whole timeout. With the native runner off, Nx spawns the command
+ * with `stdio: ['inherit', ...]`, so the CLI inherits this PTY directly and reads
+ * the keystrokes itself.
  */
 function chatStreamsReply(
   cwd: string,
@@ -321,7 +329,12 @@ function chatStreamsReply(
   return new Promise((resolve, reject) => {
     const term = pty.spawn('pnpm', ['exec', 'nx', 'run', target], {
       cwd,
-      env: { ...process.env, NX_DAEMON: 'true', RUNTIME_CONFIG_APP_ID: '' },
+      env: {
+        ...process.env,
+        NX_DAEMON: 'true',
+        RUNTIME_CONFIG_APP_ID: '',
+        NX_NATIVE_COMMAND_RUNNER: 'false',
+      },
     });
     let out = '';
     let sent = false;
@@ -351,7 +364,9 @@ function chatStreamsReply(
       out += d;
       process.stdout.write(`[${target}] ${d}`);
       const text = clean();
-      if (!sent && text.includes('Connected to ')) {
+      // `Connected to ` is printed before the prompt starts reading stdin, so wait
+      // for the prompt's own placeholder before typing.
+      if (!sent && text.includes('Type a message')) {
         sent = true;
         setTimeout(() => term.write(`${message}\r`), 1000);
       }
