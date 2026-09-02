@@ -1039,7 +1039,7 @@ describe('ts#agent generator', () => {
       tree.read('apps/test-project/project.json', 'utf-8'),
     );
     const packageTarget = projectConfig.targets['agent-package'];
-    expect(packageTarget.dependsOn).toEqual(['bundle']);
+    expect(packageTarget.dependsOn).toEqual(['bundle', 'agent-core-vendor']);
     expect(packageTarget.outputs).toEqual([
       '{workspaceRoot}/dist/apps/test-project/package/agent/test-project-agent',
     ]);
@@ -1047,8 +1047,28 @@ describe('ts#agent generator', () => {
       'shx rm -rf dist/apps/test-project/package/agent/test-project-agent',
       'shx mkdir -p dist/apps/test-project/package/agent/test-project-agent',
       'shx cp dist/apps/test-project/bundle/agent/test-project-agent/index.js dist/apps/test-project/package/agent/test-project-agent/index.js',
-      `npm install --prefix dist/apps/test-project/package/agent/test-project-agent --no-save --no-audit --no-fund --omit=dev @aws/aws-distro-opentelemetry-node-autoinstrumentation@${TS_VERSIONS['@aws/aws-distro-opentelemetry-node-autoinstrumentation']}`,
+      'shx cp -R dist/apps/test-project/agent-core-vendor/node_modules/. dist/apps/test-project/package/agent/test-project-agent/node_modules',
     ]);
+
+    // Vendoring is cached on the pinned version alone, so a source edit replays
+    // the copy rather than re-running the install.
+    const vendorTarget = projectConfig.targets['agent-core-vendor'];
+    expect(vendorTarget.inputs).toEqual([]);
+    expect(vendorTarget.outputs).toEqual([
+      '{workspaceRoot}/dist/apps/test-project/agent-core-vendor',
+    ]);
+    expect(vendorTarget.options.commands).toEqual([
+      'shx rm -rf dist/apps/test-project/agent-core-vendor',
+      'shx mkdir -p dist/apps/test-project/agent-core-vendor',
+      `npm install --prefix dist/apps/test-project/agent-core-vendor --no-save --no-audit --no-fund --omit=dev @aws/aws-distro-opentelemetry-node-autoinstrumentation@${TS_VERSIONS['@aws/aws-distro-opentelemetry-node-autoinstrumentation']}`,
+    ]);
+    // Nested outputs would have each target wipe the other's work on a cache hit.
+    expect(vendorTarget.outputs[0].startsWith(packageTarget.outputs[0])).toBe(
+      false,
+    );
+    expect(packageTarget.outputs[0].startsWith(vendorTarget.outputs[0])).toBe(
+      false,
+    );
 
     // The build must produce the package it deploys
     expect(projectConfig.targets['build'].dependsOn).toContain('agent-package');
