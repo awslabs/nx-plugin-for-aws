@@ -530,7 +530,7 @@ describe('ts#mcp-server generator', () => {
     expect(projectConfig.targets['mcp-server-docker']).toBeDefined();
     expect(projectConfig.targets['mcp-server-docker'].options.commands).toEqual(
       [
-        'ncp apps/test-project/src/mcp-server/Dockerfile dist/apps/test-project/bundle/mcp/test-project-mcp-server/Dockerfile',
+        'node -e "require(\'fs\').cpSync(process.argv[1],process.argv[2],{recursive:true,verbatimSymlinks:true})" "apps/test-project/src/mcp-server/Dockerfile" "dist/apps/test-project/bundle/mcp/test-project-mcp-server/Dockerfile"',
         'docker build --platform linux/arm64 -t proj-test-project-mcp-server:latest dist/apps/test-project/bundle/mcp/test-project-mcp-server',
       ],
     );
@@ -556,7 +556,7 @@ describe('ts#mcp-server generator', () => {
         commands: [
           'rimraf dist/apps/test-project/trivy/proj-test-project-mcp-server-latest',
           'make-dir dist/apps/test-project/trivy/proj-test-project-mcp-server-latest',
-          'ncp apps/test-project/.trivyignore dist/apps/test-project/trivy/proj-test-project-mcp-server-latest/.trivyignore',
+          'node -e "require(\'fs\').cpSync(process.argv[1],process.argv[2],{recursive:true,verbatimSymlinks:true})" "apps/test-project/.trivyignore" "dist/apps/test-project/trivy/proj-test-project-mcp-server-latest/.trivyignore"',
           'docker save -o dist/apps/test-project/trivy/proj-test-project-mcp-server-latest/image-0.tar proj-test-project-mcp-server:latest',
           `docker run --rm -v "./dist/apps/test-project/trivy/proj-test-project-mcp-server-latest":/scan public.ecr.aws/aquasecurity/trivy:${CONTAINER_VERSIONS.trivy} image --input /scan/image-0.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q`,
         ],

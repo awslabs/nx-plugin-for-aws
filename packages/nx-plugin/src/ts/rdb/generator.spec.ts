@@ -113,9 +113,9 @@ describe('ts#rdb generator', () => {
         commands: [
           'rimraf ../../dist/{projectRoot}/bundle/migration',
           'make-dir ../../dist/{projectRoot}/bundle/migration',
-          'ncp prisma ../../dist/{projectRoot}/bundle/migration/prisma',
-          'ncp prisma.config.ts ../../dist/{projectRoot}/bundle/migration/prisma.config.ts',
-          'ncp Dockerfile ../../dist/{projectRoot}/bundle/migration/Dockerfile',
+          'node -e "require(\'fs\').cpSync(process.argv[1],process.argv[2],{recursive:true,verbatimSymlinks:true})" "prisma" "../../dist/{projectRoot}/bundle/migration/prisma"',
+          'node -e "require(\'fs\').cpSync(process.argv[1],process.argv[2],{recursive:true,verbatimSymlinks:true})" "prisma.config.ts" "../../dist/{projectRoot}/bundle/migration/prisma.config.ts"',
+          'node -e "require(\'fs\').cpSync(process.argv[1],process.argv[2],{recursive:true,verbatimSymlinks:true})" "Dockerfile" "../../dist/{projectRoot}/bundle/migration/Dockerfile"',
           'rolldown -c rolldown.config.ts',
         ],
         cwd: '{projectRoot}',
@@ -220,7 +220,6 @@ describe('ts#rdb generator', () => {
     // Pure build/test tooling stays in the workspace root devDependencies
     expect(packageJson.devDependencies['tsx']).toBeDefined();
     expect(packageJson.devDependencies.prisma).toBeDefined();
-    expect(packageJson.devDependencies.ncp).toBeDefined();
     expect(packageJson.devDependencies.rimraf).toBeDefined();
     expect(packageJson.devDependencies['make-dir-cli']).toBeDefined();
   });

@@ -13,7 +13,6 @@ import { type ITsDepVersion, withVersions } from './versions.js';
 
 /** Dependencies a caller must declare to use `FsCommands`. */
 export const FS_DEPENDENCIES = [
-  { name: 'ncp' },
   { name: 'rimraf' },
   { name: 'make-dir-cli' },
   { name: 'cpy-cli' },
@@ -35,9 +34,18 @@ export class FsCommands<D extends DependencyDeclaration> {
     this.declaration = declaration;
   }
 
+  /**
+   * Copy a file or directory recursively, creating missing parents and merging
+   * into an existing destination directory.
+   *
+   * Node's own `cpSync` rather than a CLI: it is several times faster than any
+   * of them on large trees, and needs nothing installed. Paths are passed as
+   * argv rather than interpolated into the script so they cannot break out of
+   * it, and quoted so they survive spaces. `verbatimSymlinks` keeps relative
+   * link targets relative, which a bundled `node_modules` tree depends on.
+   */
   public cp(src: string, dst: string) {
-    this.add('ncp');
-    return `ncp ${src} ${dst}`;
+    return `node -e "require('fs').cpSync(process.argv[1],process.argv[2],{recursive:true,verbatimSymlinks:true})" "${src}" "${dst}"`;
   }
 
   public rm(dir: string) {

@@ -127,7 +127,6 @@ export const TS_VERSIONS = {
   'make-dir-cli': '4.0.0',
   mariadb: '3.5.3',
   mise: '2026.8.14',
-  ncp: '2.0.0',
   npm: '12.0.2',
   'npm-check-updates': '23.1.0',
   'oidc-client-ts': '3.5.0',

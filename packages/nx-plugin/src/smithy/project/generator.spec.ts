@@ -460,7 +460,7 @@ describe('smithyProjectGenerator', () => {
         'rimraf dist/{projectRoot}/smithy',
         'make-dir dist/{projectRoot}/build',
         `npx -y mise@${TS_VERSIONS.mise} exec smithy@${MISE_VERSIONS.smithy} -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy`,
-        'ncp dist/{projectRoot}/smithy/source/model/model.json dist/{projectRoot}/build/model.json',
+        'node -e "require(\'fs\').cpSync(process.argv[1],process.argv[2],{recursive:true,verbatimSymlinks:true})" "dist/{projectRoot}/smithy/source/model/model.json" "dist/{projectRoot}/build/model.json"',
       ]);
     });
 

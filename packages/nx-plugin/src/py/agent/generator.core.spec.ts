@@ -292,8 +292,8 @@ dev-dependencies = []
     expect(projectConfig.targets['agent-docker'].options.commands).toEqual([
       'rimraf dist/apps/test-project/docker/test-project-agent',
       'make-dir dist/apps/test-project/docker/test-project-agent',
-      'ncp dist/apps/test-project/bundle-arm dist/apps/test-project/docker/test-project-agent',
-      'ncp apps/test-project/proj_test_project/agent/Dockerfile dist/apps/test-project/docker/test-project-agent/Dockerfile',
+      'node -e "require(\'fs\').cpSync(process.argv[1],process.argv[2],{recursive:true,verbatimSymlinks:true})" "dist/apps/test-project/bundle-arm" "dist/apps/test-project/docker/test-project-agent"',
+      'node -e "require(\'fs\').cpSync(process.argv[1],process.argv[2],{recursive:true,verbatimSymlinks:true})" "apps/test-project/proj_test_project/agent/Dockerfile" "dist/apps/test-project/docker/test-project-agent/Dockerfile"',
       'docker build --platform linux/arm64 -t proj-test-project-agent:latest dist/apps/test-project/docker/test-project-agent',
     ]);
     expect(projectConfig.targets['agent-docker'].options.parallel).toBe(false);
@@ -321,7 +321,7 @@ dev-dependencies = []
         commands: [
           'rimraf dist/apps/test-project/trivy/proj-test-project-agent-latest',
           'make-dir dist/apps/test-project/trivy/proj-test-project-agent-latest',
-          'ncp apps/test-project/.trivyignore dist/apps/test-project/trivy/proj-test-project-agent-latest/.trivyignore',
+          'node -e "require(\'fs\').cpSync(process.argv[1],process.argv[2],{recursive:true,verbatimSymlinks:true})" "apps/test-project/.trivyignore" "dist/apps/test-project/trivy/proj-test-project-agent-latest/.trivyignore"',
           'docker save -o dist/apps/test-project/trivy/proj-test-project-agent-latest/image-0.tar proj-test-project-agent:latest',
           `docker run --rm -v "./dist/apps/test-project/trivy/proj-test-project-agent-latest":/scan public.ecr.aws/aquasecurity/trivy:${CONTAINER_VERSIONS.trivy} image --input /scan/image-0.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q`,
         ],

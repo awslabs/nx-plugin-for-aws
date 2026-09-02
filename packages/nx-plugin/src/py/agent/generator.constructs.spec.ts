@@ -410,9 +410,9 @@ dev-dependencies = []
     expect(packageTarget.options.commands).toEqual([
       'rimraf dist/apps/test-project/package/test-project-agent',
       'make-dir dist/apps/test-project/package/test-project-agent',
-      'ncp dist/apps/test-project/bundle-arm dist/apps/test-project/package/test-project-agent',
-      'ncp apps/test-project/proj_test_project dist/apps/test-project/package/test-project-agent/proj_test_project',
-      'ncp apps/test-project/package/agent/main.py dist/apps/test-project/package/test-project-agent/main.py',
+      'node -e "require(\'fs\').cpSync(process.argv[1],process.argv[2],{recursive:true,verbatimSymlinks:true})" "dist/apps/test-project/bundle-arm" "dist/apps/test-project/package/test-project-agent"',
+      'node -e "require(\'fs\').cpSync(process.argv[1],process.argv[2],{recursive:true,verbatimSymlinks:true})" "apps/test-project/proj_test_project" "dist/apps/test-project/package/test-project-agent/proj_test_project"',
+      'node -e "require(\'fs\').cpSync(process.argv[1],process.argv[2],{recursive:true,verbatimSymlinks:true})" "apps/test-project/package/agent/main.py" "dist/apps/test-project/package/test-project-agent/main.py"',
     ]);
   });
 
