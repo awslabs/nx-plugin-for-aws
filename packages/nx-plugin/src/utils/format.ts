@@ -5,10 +5,19 @@
 
 import { Biome } from '@biomejs/js-api/nodejs';
 import { getProjects, type Tree } from '@nx/devkit';
+import { createRequire } from 'module';
 import path from 'path';
 import { type RuffOptions, ruffFixAndFormat } from './ruff.js';
 import { tryReadToml } from './toml.js';
 import { TS_VERSIONS } from './versions.js';
+
+/**
+ * The Biome release the wasm bindings are built from. Must match
+ * `TS_VERSIONS['@biomejs/biome']`, the CLI the vended targets run.
+ */
+export const BIOME_WASM_VERSION: string = createRequire(import.meta.url)(
+  '@biomejs/wasm-nodejs/package.json',
+).version;
 
 /**
  * Excludes test reports — including the vendored scripts vitest's coverage HTML

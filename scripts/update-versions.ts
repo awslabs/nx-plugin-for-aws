@@ -20,6 +20,7 @@ import {
   parsePipRequirementsLine,
   VersionOperator,
 } from 'pip-requirements-js';
+import fastGlob from 'fast-glob';
 import { parseDocument } from 'yaml';
 import { applyGritQL } from '../packages/nx-plugin/src/utils/ast';
 import {
@@ -31,7 +32,6 @@ import {
   resolveLambdaRuntimes,
   unresolvedRuntimeWarning,
 } from '../packages/nx-plugin/src/utils/lambda-runtime-resolution';
-import { RUFF_WASM_VERSION } from '../packages/nx-plugin/src/utils/ruff';
 import { isNxPackage } from '../packages/nx-plugin/src/utils/version-upgrade-migration/nx-package-updates';
 import { registerNxPackageUpdates } from '../packages/nx-plugin/src/utils/version-upgrade-migration/register';
 import {
@@ -41,6 +41,7 @@ import {
   JAVA_ARTIFACTS,
   JAVA_VERSIONS,
   LAMBDA_RUNTIME_VERSIONS,
+  LOCKSTEP_GROUPS,
   MISE_TOOLS,
   MISE_VERSIONS,
   PY_VERSIONS,
@@ -48,6 +49,7 @@ import {
   TS_VERSIONS,
   VENDORED_VERSIONS,
 } from '../packages/nx-plugin/src/utils/versions';
+import { holdGroupsInLockstep } from '../packages/nx-plugin/src/utils/version-lockstep/lockstep';
 import { refreshShadcnTemplates } from './update-versions/shadcn';
 
 interface VersionChange {
@@ -73,6 +75,93 @@ interface ChangeGroup {
 }
 
 /**
+ * Manifests whose npm dependencies are resolved alongside the vended pins: the
+ * workspace root plus every package `pnpm-workspace.yaml` lists.
+ */
+const repoManifests = (): string[] => {
+  const workspace = parseDocument(readFileSync('pnpm-workspace.yaml', 'utf-8'));
+  const patterns = (workspace.toJS().packages ?? []) as string[];
+  return [
+    'package.json',
+    ...fastGlob
+      .sync(
+        patterns.map((pattern) => `${pattern}/package.json`),
+        { onlyFiles: true },
+      )
+      .sort(),
+  ];
+};
+
+/**
+ * Every npm dependency `manifestPath` declares, including whatever its
+ * `packageManager` field pins so that moves too.
+ */
+const readManifestDependencies = (
+  manifestPath: string,
+): Record<string, string> => {
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+  const [packageManager, packageManagerVersion] = String(
+    manifest.packageManager ?? '',
+  ).split('@');
+  return {
+    ...(packageManager && packageManagerVersion
+      ? { [packageManager]: packageManagerVersion }
+      : {}),
+    ...manifest.peerDependencies,
+    ...manifest.devDependencies,
+    ...manifest.dependencies,
+  };
+};
+
+/**
+ * Apply resolved versions to a manifest's own dependencies, including the
+ * `packageManager` pin.
+ */
+const applyManifestVersions = (
+  tree: FsTree,
+  manifestPath: string,
+  versions: Record<string, string>,
+): VersionChange[] => {
+  const contents = tree.read(manifestPath, 'utf-8');
+  if (!contents) return [];
+  const manifest = JSON.parse(contents);
+  const changes: VersionChange[] = [];
+
+  const [packageManager, packageManagerVersion] = String(
+    manifest.packageManager ?? '',
+  ).split('@');
+  const resolvedPackageManager = versions[packageManager];
+  if (
+    packageManagerVersion &&
+    resolvedPackageManager &&
+    resolvedPackageManager !== packageManagerVersion
+  ) {
+    manifest.packageManager = `${packageManager}@${resolvedPackageManager}`;
+    changes.push({
+      name: 'packageManager',
+      oldVersion: packageManagerVersion,
+      newVersion: resolvedPackageManager,
+    });
+  }
+
+  for (const field of ['dependencies', 'devDependencies', 'peerDependencies']) {
+    for (const [name, current] of Object.entries<string>(
+      manifest[field] ?? {},
+    )) {
+      const resolved = versions[name];
+      if (resolved && resolved !== current) {
+        manifest[field][name] = resolved;
+        changes.push({ name, oldVersion: current, newVersion: resolved });
+      }
+    }
+  }
+  if (changes.length > 0) {
+    tree.write(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  }
+  return changes;
+};
+
+/**
  * Gets updated TypeScript versions by running npm-check-updates
  * @param tmpDir - Temporary directory to use for the operation
  * @returns Updated versions mapping
@@ -87,10 +176,13 @@ const getUpdatedTypeScriptVersions = (
   execSync('mkdir -p ts', { cwd: tmpDir });
   execSync('pnpm init', { cwd: tsDir, stdio: 'inherit' });
 
-  // Update ts/package.json to add all dependencies from TS_VERSIONS
+  // Vended pins win over this repo's own where both declare a package.
   const packageJsonPath = join(tsDir, 'package.json');
   const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
-  packageJson.dependencies = { ...TS_VERSIONS };
+  packageJson.dependencies = {
+    ...Object.assign({}, ...repoManifests().map(readManifestDependencies)),
+    ...TS_VERSIONS,
+  };
   writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2));
 
   // Copy root .ncurc.cjs to ts directory
@@ -182,34 +274,6 @@ const getUpdatedPythonVersions = (tmpDir: string): Record<string, string> => {
   return updatedVersions;
 };
 
-/**
- * Holds the vended `ruff` on the release `@astral-sh/ruff-wasm-nodejs` is built
- * from, which is what actually formats generated Python.
- *
- * The two move on different clocks: the wasm package is an npm dependency, so
- * `npm-check-updates` only takes it once its `cooldown` has elapsed, while
- * `pip-check-updates` has no such delay and takes the ruff released hours
- * earlier. Left alone the pins land a release apart and generated files fail the
- * vended `format --check`, which `ruff.spec.ts` asserts against.
- *
- * The wasm build leads because it is the one already installed and running here;
- * the held-back ruff is taken next run, once the bindings catch up.
- */
-const holdRuffToWasmBuild = (
-  updatedVersions: Record<string, string>,
-): ReportNote[] => {
-  const proposed = updatedVersions.ruff;
-  const wasmPin = `==${RUFF_WASM_VERSION}`;
-  if (!proposed || proposed === wasmPin) {
-    return [];
-  }
-  updatedVersions.ruff = wasmPin;
-  return [
-    {
-      note: `ruff held at ${wasmPin} (${proposed} available): @astral-sh/ruff-wasm-nodejs is still on ${RUFF_WASM_VERSION}, and the two must match`,
-    },
-  ];
-};
 
 /**
  * Compares two `major.minor.patch` version strings.
@@ -598,8 +662,21 @@ const main = async () => {
     // Create FsTree from nx devkit pointing at project root
     const tree = new FsTree(process.cwd(), false);
 
-    // Get updated TypeScript versions
+    // Both resolved before either is written, since a group may span them.
     const updatedTsVersions = getUpdatedTypeScriptVersions(tmpDir);
+    const updatedPyVersions = getUpdatedPythonVersions(tmpDir);
+
+    // Applied before the rewrites so a held version is never written.
+    const lockstepNotes = holdGroupsInLockstep(
+      LOCKSTEP_GROUPS,
+      updatedTsVersions,
+      updatedPyVersions,
+    );
+
+    // This repo's manifests, from the same pass as the vended pins.
+    const manifestChanges = repoManifests().flatMap((manifestPath) =>
+      applyManifestVersions(tree, manifestPath, updatedTsVersions),
+    );
 
     // Apply updated TypeScript versions to the versions file
     const tsChanges = await applyUpdatedVersions(
@@ -610,12 +687,6 @@ const main = async () => {
       'TS_VERSIONS',
     );
 
-    // Get updated Python versions
-    const updatedPyVersions = getUpdatedPythonVersions(tmpDir);
-
-    // Applied before the rewrite so the held version is never written
-    const ruffHold = holdRuffToWasmBuild(updatedPyVersions);
-
     // Apply updated Python versions to the versions file
     const pyChanges: ReportChange[] = await applyUpdatedVersions(
       tree,
@@ -624,7 +695,7 @@ const main = async () => {
       'packages/nx-plugin/src/utils/versions.ts',
       'PY_VERSIONS',
     );
-    pyChanges.push(...ruffHold);
+    pyChanges.push(...lockstepNotes);
 
     // Get updated Terraform provider versions
     const updatedTerraformVersions = await getUpdatedTerraformVersions();
@@ -739,6 +810,9 @@ const main = async () => {
     // Write the report
     writeReport([
       { title: 'TypeScript Dependencies', changes: tsChanges },
+      ...(manifestChanges.length > 0
+        ? [{ title: 'Repo Dependencies', changes: manifestChanges }]
+        : []),
       { title: 'Python Dependencies', changes: pyChanges },
       { title: 'Terraform Providers', changes: terraformChanges },
       { title: 'Java Dependencies', changes: javaChanges },

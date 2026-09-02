@@ -156,6 +156,21 @@ export const TS_VERSIONS = {
 export type ITsDepVersion = keyof typeof TS_VERSIONS;
 
 /**
+ * Dependencies that must move as a unit, held at the lowest version proposed
+ * across each group by the version update. Members must share a version line.
+ *
+ * The wasm formatter bindings are dependencies of this repo rather than vended
+ * pins, so they are named here but versioned in the manifests.
+ */
+export const LOCKSTEP_GROUPS = [
+  // A duplicate `@ag-ui/client` fails every generated website with TS2322.
+  ['@ag-ui/client', '@ag-ui/core', '@ag-ui/encoder'],
+  // The wasm bindings format generated files; the CLI checks them.
+  ['@biomejs/wasm-nodejs', '@biomejs/biome'],
+  ['@astral-sh/ruff-wasm-nodejs', 'ruff'],
+] as const satisfies readonly (readonly [string, string, ...string[]])[];
+
+/**
  * Add versions to the given dependencies, which the declaration must own.
  *
  * @param declaration the calling generator's `DEPENDENCIES`
