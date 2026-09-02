@@ -379,11 +379,11 @@ Para mais detalhes, consulte a [documentação de bootstrap do CDK](https://docs
 
 Seu projeto tem três targets de implantação, cada um adequado para uma situação diferente:
 
-| Target           | Use para                                                                          |
-| ---------------- | --------------------------------------------------------------------------------- |
-| `deploy-sandbox` | Implantar seu próprio stage sandbox durante o desenvolvimento. Nenhum argumento de stage necessário. |
-| `deploy`         | Implantar qualquer stage, nomeando o stage ou stacks que você deseja.             |
-| `deploy-ci`      | Implantar a partir de um pipeline CI/CD, usando um cloud assembly pré-sintetizado. |
+| Target           | Use para                                                                                      |
+| ---------------- | --------------------------------------------------------------------------------------------- |
+| `deploy-sandbox` | Implantar seu próprio stage sandbox durante o desenvolvimento. Nenhum argumento de stage necessário. Usa modo express. |
+| `deploy`         | Implantar qualquer stage durante o desenvolvimento, nomeando o stage ou stacks que você deseja. Usa modo express. |
+| `deploy-ci`      | Implantar a partir de um pipeline CI/CD, usando um cloud assembly pré-sintetizado. Aguarda estabilização completa. |
 
 `deploy-sandbox` e `deploy` dependem de `^assemble`, então eles constroem os artefatos que estão prestes a implantar e nada mais. `deploy-ci` implanta um assembly que seu pipeline já construiu, então não tem dependências de build.
 
@@ -402,11 +402,15 @@ O target `deploy-sandbox` implanta o stage sandbox que `main.ts` declara, então
 Esta é a maneira mais rápida de ter sua própria cópia da aplicação rodando na AWS enquanto você desenvolve.
 
 :::tip[Modo Express para Implantações Mais Rápidas]
-Os targets de implantação aguardam a estabilização completa dos recursos por padrão, favorecendo consistência em vez de velocidade. Para acelerar a iteração durante o desenvolvimento, opte pelo [modo express do CloudFormation](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html) passando a flag `--express` do CDK:
+Os targets `deploy-sandbox` e `deploy` usam o [modo express do CloudFormation](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html) por padrão (através da flag `--express` do CDK). O modo express termina assim que a configuração do recurso é confirmada como aplicada, em vez de esperar pela estabilização completa, com a propagação continuando em segundo plano, para ciclos de iteração significativamente mais rápidos.
 
-<NxCommands commands={['deploy-sandbox <my-infra> --express']} />
+Para aguardar a estabilização completa dos recursos, passe `--no-express`:
 
-O modo express termina assim que a configuração do recurso é confirmada como aplicada, em vez de esperar pela estabilização completa, com a propagação continuando em segundo plano, para ciclos de iteração significativamente mais rápidos. É destinado para desenvolvimento e iteração.
+<NxCommands commands={['deploy-sandbox <my-infra> --no-express']} />
+:::
+
+:::caution[`deploy-sandbox` e `deploy` são apenas para desenvolvimento]
+Como o modo express retorna antes que os recursos tenham terminado de estabilizar, `deploy-sandbox` e `deploy` são destinados para desenvolvimento e iteração, não para CI/CD ou implantações em produção. Use [`deploy-ci`](#implantando-na-aws-em-um-pipeline-cicd) em seu pipeline — ele nunca usa modo express, então sempre aguarda a estabilização completa.
 :::
 
 ### Implantando um Stage Específico
@@ -425,7 +429,45 @@ Use o target `deploy-ci` se você está implantando na AWS como parte de um pipe
 
 <NxCommands commands={['deploy-ci <my-infra> my-stage/*']} />
 
-Este target difere ligeiramente do target `deploy` regular, pois implanta um cloud assembly pré-sintetizado em vez de sintetizar em tempo real. Isso evita potencial não-determinismo de mudanças de versão de pacotes, garantindo que cada estágio do pipeline implante usando o mesmo cloud assembly.
+Este target difere dos targets `deploy` e `deploy-sandbox` de duas maneiras. Primeiro, ele implanta um cloud assembly pré-sintetizado em vez de sintetizar em tempo real, evitando potencial não-determinismo de mudanças de versão de pacotes e garantindo que cada estágio do pipeline implante usando o mesmo cloud assembly. Segundo, ele não usa modo express, então aguarda que cada recurso estabilize completamente antes de reportar sucesso.
+
+:::caution[Sempre use `deploy-ci` para produção]
+`deploy` e `deploy-sandbox` usam modo express e retornam antes que os recursos tenham terminado de estabilizar, o que os torna inadequados para CI/CD e implantações em produção. Use `deploy-ci` para esses casos.
+:::
+
+## Desmontando Infraestrutura AWS
+
+Seu projeto tem três targets de desmontagem, espelhando os de implantação:
+
+| Target            | Use para                                                                |
+| ----------------- | ----------------------------------------------------------------------- |
+| `destroy-sandbox` | Desmontar seu próprio stage sandbox. Nenhum argumento de stage necessário. |
+| `destroy`         | Desmontar qualquer stage, nomeando o stage ou stacks que você deseja.  |
+| `destroy-ci`      | Desmontar a partir de um pipeline CI/CD, usando um cloud assembly pré-sintetizado. |
+
+### Desmontando seu Stage Sandbox
+
+O target `destroy-sandbox` desmonta o stage sandbox que `main.ts` declara, então você não precisa lembrar seu nome de stage:
+
+<NxCommands commands={['destroy-sandbox <my-infra>']} />
+
+Desmontar é irreversível, então o CDK pede que você confirme os stacks que está prestes a excluir. Passe `--force` para pular essa confirmação, que é o que você deseja quando não há terminal conectado (em um script, por exemplo):
+
+<NxCommands commands={['destroy-sandbox <my-infra> --force']} />
+
+### Desmontando um Stage Específico
+
+O target `destroy` desmonta qualquer stage ou stacks que você nomear:
+
+<NxCommands commands={['destroy <my-infra> <my-infra>-sandbox/*']} />
+
+Para desmontar um stack individual, forneça o nome completo do stack:
+
+<NxCommands commands={['destroy <my-infra> <my-infra>-sandbox/Application']} />
+
+## Mais Informações
+
+Para mais informações sobre o CDK, consulte o [Guia do Desenvolvedor CDK](https://docs.aws.amazon.com/cdk/v2/guide/core_concepts.html) e a [Referência da API](https://docs.aws.amazon.com/cdk/api/v2/docs/aws-construct-library.html).
 
 ## Desmontando Infraestrutura AWS
 

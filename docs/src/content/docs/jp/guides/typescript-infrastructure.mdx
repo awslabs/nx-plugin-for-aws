@@ -102,7 +102,7 @@ new ApplicationStage(app, 'my-app-sandbox', {
 
 `env`プロパティは、CDKにどのAWSアカウントとリージョンにデプロイするかを指示します。`CDK_DEFAULT_ACCOUNT`と`CDK_DEFAULT_REGION`は、アクティブなAWS認証情報からCDK CLIによって自動的に解決されます。詳細については、[CDK環境のドキュメント](https://docs.aws.amazon.com/cdk/v2/guide/environments.html)を参照してください。
 
-サンドボックスステージは、<Link path="guides/typescript-infrastructure#deploying-your-sandbox-stage">`deploy-sandbox`</Link>と<Link path="guides/typescript-infrastructure#tearing-down-your-sandbox-stage">`destroy-sandbox`</Link>ターゲットが作用するステージです。
+サンドボックスステージは、<Link path="jp/guides/typescript-infrastructure#deploying-your-sandbox-stage">`deploy-sandbox`</Link>と<Link path="jp/guides/typescript-infrastructure#tearing-down-your-sandbox-stage">`destroy-sandbox`</Link>ターゲットが作用するステージです。
 
 `stageConfig`を使用して生成した場合、`main.ts`は環境変数にフォールバックする代わりに、集中管理された設定ファイルからアカウントとリージョンを読み取ります：
 
@@ -321,6 +321,8 @@ CDKでは、Webサイトコンストラクトはスタック内の任意の時�
 
 合成されたクラウドアセンブリは、ルートの`dist`フォルダー内の`dist/packages/<my-infra-project>/cdk.out`にあります。
 
+`synth`は`^assemble`に依存しているため、合成はスタックがデプロイするアーティファクト（Lambdaバンドル、コンテナイメージ、生成された仕様など）をビルドしますが、すべての上流プロジェクトのリント、テスト、型チェックゲートは実行しません。`assemble`の詳細については、<Link path="guides/typescript-project#assembling">アセンブル</Link>を参照してください。
+
 ## セキュリティテスト
 
 プロジェクトには、[Checkov](https://www.checkov.io/)を使用してインフラストラクチャのセキュリティチェックを実行する`checkov`ターゲットが追加されます。
@@ -377,11 +379,11 @@ npx cdk bootstrap aws://<account-id>/<region>
 
 プロジェクトには3つのデプロイターゲットがあり、それぞれ異なる状況に適しています：
 
-| ターゲット           | 使用目的                                                                       |
-| ---------------- | -------------------------------------------------------------------------------- |
-| `deploy-sandbox` | 開発中に独自のサンドボックスステージをデプロイする。ステージ引数は不要。    |
-| `deploy`         | 任意のステージをデプロイする。デプロイしたいステージまたはスタックを指定する。                      |
-| `deploy-ci`      | CI/CDパイプラインからデプロイする。事前に合成されたクラウドアセンブリを使用する。          |
+| ターゲット           | 使用目的                                                                                      |
+| ---------------- | ----------------------------------------------------------------------------------------------- |
+| `deploy-sandbox` | 開発中に独自のサンドボックスステージをデプロイする。ステージ引数は不要。Expressモードを使用。 |
+| `deploy`         | 開発中に任意のステージをデプロイする。デプロイしたいステージまたはスタックを指定する。Expressモードを使用。 |
+| `deploy-ci`      | CI/CDパイプラインからデプロイする。事前に合成されたクラウドアセンブリを使用する。完全な安定化を待機。 |
 
 `deploy-sandbox`と`deploy`は`^assemble`に依存しているため、デプロイしようとしているアーティファクトのみをビルドします。`deploy-ci`はパイプラインが既にビルドしたアセンブリをデプロイするため、ビルド依存関係は一切ありません。
 
@@ -400,11 +402,15 @@ npx cdk bootstrap aws://<account-id>/<region>
 これは、開発中にAWSでアプリケーションの独自のコピーを実行する最も迅速な方法です。
 
 :::tip[より高速なデプロイのためのExpressモード]
-デプロイターゲットは、デフォルトで完全なリソースの安定化を待機し、速度よりも一貫性を優先します。開発中の反復を高速化するには、CDKの`--express`フラグを渡すことで[CloudFormation expressモード](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html)を選択します：
+`deploy-sandbox`と`deploy`ターゲットは、デフォルトで[CloudFormation expressモード](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html)を使用します（CDKの`--express`フラグ経由）。Expressモードは、完全な安定化を待つのではなく、リソース設定が適用されたことが確認されると終了し、伝播はバックグラウンドで継続されるため、反復サイクルが大幅に高速化されます。
 
-<NxCommands commands={['deploy-sandbox <my-infra> --express']} />
+完全なリソースの安定化を待つには、`--no-express`を渡します：
 
-Expressモードは、完全な安定化を待つのではなく、リソース設定が適用されたことが確認されると終了し、伝播はバックグラウンドで継続されるため、反復サイクルが大幅に高速化されます。これは開発と反復を目的としています。
+<NxCommands commands={['deploy-sandbox <my-infra> --no-express']} />
+:::
+
+:::caution[`deploy-sandbox`と`deploy`は開発専用]
+Expressモードはリソースの安定化が完了する前に戻るため、`deploy-sandbox`と`deploy`は開発と反復を目的としており、CI/CDや本番デプロイには適していません。パイプラインでは[`deploy-ci`](#deploying-to-aws-in-a-cicd-pipeline)を使用してください — これはExpressモードを使用しないため、常に完全な安定化を待機します。
 :::
 
 ### 特定のステージのデプロイ
@@ -423,7 +429,11 @@ CI/CDパイプラインの一部としてAWSにデプロイする場合は、`de
 
 <NxCommands commands={['deploy-ci <my-infra> my-stage/*']} />
 
-このターゲットは、通常の`deploy`ターゲットとは少し異なり、その場で合成するのではなく、事前に合成されたクラウドアセンブリをデプロイします。これにより、パッケージバージョンの変更による潜在的な非決定性を回避し、すべてのパイプラインステージが同じクラウドアセンブリを使用してデプロイすることを保証します。
+このターゲットは、`deploy`と`deploy-sandbox`ターゲットとは2つの点で異なります。第一に、その場で合成するのではなく、事前に合成されたクラウドアセンブリをデプロイします。これにより、パッケージバージョンの変更による潜在的な非決定性を回避し、すべてのパイプラインステージが同じクラウドアセンブリを使用してデプロイすることを保証します。第二に、Expressモードを使用しないため、成功を報告する前にすべてのリソースが完全に安定化するのを待ちます。
+
+:::caution[本番環境では常に`deploy-ci`を使用]
+`deploy`と`deploy-sandbox`はExpressモードを使用し、リソースの安定化が完了する前に戻るため、CI/CDや本番デプロイには適していません。それらには`deploy-ci`を使用してください。
+:::
 
 ## AWSインフラストラクチャの削除
 

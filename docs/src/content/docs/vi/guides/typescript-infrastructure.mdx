@@ -379,11 +379,11 @@ npx cdk bootstrap aws://<account-id>/<region>
 
 Dự án của bạn có ba target triển khai, mỗi target phù hợp với một tình huống khác nhau:
 
-| Target           | Sử dụng nó cho                                                                       |
-| ---------------- | ------------------------------------------------------------------------------------ |
-| `deploy-sandbox` | Triển khai sandbox stage của riêng bạn trong quá trình phát triển. Không cần đối số stage. |
-| `deploy`         | Triển khai bất kỳ stage nào, bằng cách đặt tên stage hoặc stack bạn muốn.                   |
-| `deploy-ci`      | Triển khai từ một CI/CD pipeline, sử dụng một cloud assembly đã được synthesized trước.     |
+| Target           | Sử dụng nó cho                                                                                      |
+| ---------------- | --------------------------------------------------------------------------------------------------- |
+| `deploy-sandbox` | Triển khai sandbox stage của riêng bạn trong quá trình phát triển. Không cần đối số stage. Sử dụng express mode. |
+| `deploy`         | Triển khai bất kỳ stage nào trong quá trình phát triển, bằng cách đặt tên stage hoặc stack bạn muốn. Sử dụng express mode. |
+| `deploy-ci`      | Triển khai từ một CI/CD pipeline, sử dụng một cloud assembly đã được synthesized trước. Chờ đợi ổn định đầy đủ. |
 
 `deploy-sandbox` và `deploy` phụ thuộc vào `^assemble`, vì vậy chúng xây dựng các artifact mà chúng sắp triển khai và không có gì khác. `deploy-ci` triển khai một assembly mà pipeline của bạn đã xây dựng, vì vậy nó không có bất kỳ phụ thuộc xây dựng nào cả.
 
@@ -402,11 +402,15 @@ Target `deploy-sandbox` triển khai sandbox stage mà `main.ts` khai báo, vì 
 Đây là cách nhanh nhất để có bản sao ứng dụng của riêng bạn chạy trong AWS trong khi bạn phát triển.
 
 :::tip[Express Mode cho Triển khai Nhanh hơn]
-Các target triển khai chờ đợi ổn định tài nguyên đầy đủ theo mặc định, ưu tiên tính nhất quán hơn tốc độ. Để tăng tốc độ lặp lại trong quá trình phát triển, chọn vào [CloudFormation express mode](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html) bằng cách truyền cờ `--express` của CDK:
+Các target `deploy-sandbox` và `deploy` sử dụng [CloudFormation express mode](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html) theo mặc định (thông qua cờ `--express` của CDK). Express mode kết thúc khi cấu hình tài nguyên được xác nhận áp dụng thay vì chờ đợi ổn định đầy đủ, với việc lan truyền tiếp tục ở chế độ nền, cho các chu kỳ lặp lại nhanh hơn đáng kể.
 
-<NxCommands commands={['deploy-sandbox <my-infra> --express']} />
+Để chờ đợi ổn định tài nguyên đầy đủ thay vì, truyền `--no-express`:
 
-Express mode kết thúc khi cấu hình tài nguyên được xác nhận áp dụng thay vì chờ đợi ổn định đầy đủ, với việc lan truyền tiếp tục ở chế độ nền, cho các chu kỳ lặp lại nhanh hơn đáng kể. Nó được dành cho phát triển và lặp lại.
+<NxCommands commands={['deploy-sandbox <my-infra> --no-express']} />
+:::
+
+:::caution[`deploy-sandbox` và `deploy` chỉ dành cho phát triển]
+Vì express mode trả về trước khi tài nguyên hoàn tất ổn định, `deploy-sandbox` và `deploy` được dành cho phát triển và lặp lại, không dành cho CI/CD hoặc triển khai production. Sử dụng [`deploy-ci`](#deploying-to-aws-in-a-cicd-pipeline) trong pipeline của bạn — nó không bao giờ sử dụng express mode, vì vậy nó luôn chờ đợi ổn định đầy đủ.
 :::
 
 ### Triển khai một Stage cụ thể
@@ -425,7 +429,11 @@ Sử dụng target `deploy-ci` nếu bạn đang triển khai lên AWS như mộ
 
 <NxCommands commands={['deploy-ci <my-infra> my-stage/*']} />
 
-Target này khác một chút so với target `deploy` thông thường ở chỗ nó triển khai một cloud assembly đã được synthesized trước thay vì synthesizing ngay lập tức. Điều này tránh khả năng không xác định tiềm ẩn từ các thay đổi phiên bản gói, đảm bảo rằng mọi giai đoạn pipeline triển khai sử dụng cùng một cloud assembly.
+Target này khác với các target `deploy` và `deploy-sandbox` theo hai cách. Thứ nhất, nó triển khai một cloud assembly đã được synthesized trước thay vì synthesizing ngay lập tức, tránh khả năng không xác định tiềm ẩn từ các thay đổi phiên bản gói và đảm bảo rằng mọi giai đoạn pipeline triển khai sử dụng cùng một cloud assembly. Thứ hai, nó không sử dụng express mode, vì vậy nó chờ đợi mọi tài nguyên ổn định đầy đủ trước khi báo cáo thành công.
+
+:::caution[Luôn sử dụng `deploy-ci` cho production]
+`deploy` và `deploy-sandbox` sử dụng express mode và trả về trước khi tài nguyên hoàn tất ổn định, điều này khiến chúng không phù hợp cho CI/CD và triển khai production. Sử dụng `deploy-ci` cho những trường hợp đó.
+:::
 
 ## Phá bỏ Hạ tầng AWS
 
