@@ -89,7 +89,7 @@ export const buildOpenApiCodeGenData = (inSpec: Spec): CodeGenData => {
 
   for (const model of data.models) {
     assertNoClashingPropertyNames(model);
-    assertNoConflictingUnionMemberMarshalling(model);
+    assertNoConflictingUnionMemberMarshalling(model, modelsByName);
   }
 
   for (const op of allOperations) {
@@ -526,19 +526,54 @@ const assertNoClashingPropertyNames = (model: Model): void => {
  * The marshalling semantics of a property — two properties with the same key
  * convert identically on the wire (so either branch's conversion is safe).
  */
-const marshallingKey = (m: Model): string => {
+const marshallingKey = (
+  m: Model,
+  modelsByName: ModelsByName,
+  visiting: Set<string> = new Set(),
+): string => {
   if (['date', 'date-time'].includes(m.format ?? '')) return 'date';
   if (m.type === 'binary') return 'binary';
   // Enums serialise as their bare primitive (no conversion).
   if (m.isEnum || m.export === 'enum') return 'plain';
   if (COLLECTION_TYPES.has(m.export)) {
-    return `${m.export}<${m.link ? marshallingKey(m.link) : 'plain'}>`;
+    return `${m.export}<${m.link ? marshallingKey(m.link, modelsByName, visiting) : 'plain'}>`;
   }
   if (m.export === 'tuple') {
-    return `tuple<${m.properties.map(marshallingKey).join(',')}>`;
+    return `tuple<${m.properties.map((p) => marshallingKey(p, modelsByName, visiting)).join(',')}>`;
   }
   if (m.export === 'reference' && !PRIMITIVE_TYPES.has(m.type)) {
-    return `ref:${m.type}`;
+    // Key on what the reference marshals to, not what it is called. The
+    // normaliser hoists each inline schema to its own name, so two members
+    // declaring an identical property get different names — keying on the name
+    // alone rejected unions whose members convert identically.
+    const referenced = modelsByName[m.type];
+    if (!referenced || visiting.has(m.type)) return `ref:${m.type}`;
+    const nested = new Set(visiting).add(m.type);
+    if (referenced.export === 'one-of' || referenced.export === 'any-of') {
+      const members = [
+        ...(referenced.composedModels ?? []),
+        ...(referenced.composedPrimitives ?? []),
+      ]
+        .map((member) => marshallingKey(member, modelsByName, nested))
+        .sort();
+      return `union<${[...new Set(members)].join('|')}>`;
+    }
+    if (referenced.export === 'interface') {
+      // Keyed on the shape too, for the same reason: two members declaring an
+      // identical inline object property are hoisted to different names.
+      const fields = (referenced.properties ?? [])
+        .filter((property) => property.name)
+        .map(
+          (property) =>
+            `${property.name}:${property.isRequired ? '!' : '?'}${marshallingKey(property, modelsByName, nested)}`,
+        )
+        .sort();
+      return `object<${fields.join(',')}>`;
+    }
+    // An `all-of` composes members that are resolved later, so it keeps its name
+    // as its key rather than a shape this pass cannot see yet.
+    if (referenced.export === 'all-of') return `ref:${m.type}`;
+    return marshallingKey(referenced, modelsByName, nested);
   }
   return 'plain';
 };
@@ -551,7 +586,10 @@ const marshallingKey = (m: Model): string => {
  * otherwise the branch cannot be determined without guessing, so fail fast and
  * ask for a discriminator rather than corrupt data at runtime.
  */
-const assertNoConflictingUnionMemberMarshalling = (model: Model): void => {
+const assertNoConflictingUnionMemberMarshalling = (
+  model: Model,
+  modelsByName: ModelsByName,
+): void => {
   if (
     (model.export !== 'one-of' && model.export !== 'any-of') ||
     model.discriminator
@@ -562,7 +600,7 @@ const assertNoConflictingUnionMemberMarshalling = (model: Model): void => {
   for (const member of model.composedModels ?? []) {
     for (const property of member.properties) {
       if (!property.name) continue;
-      const key = marshallingKey(property);
+      const key = marshallingKey(property, modelsByName);
       const existing = seen.get(property.name);
       if (existing && existing.key !== key) {
         throw new Error(

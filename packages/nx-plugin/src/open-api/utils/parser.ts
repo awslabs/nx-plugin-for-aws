@@ -191,8 +191,17 @@ const schemaStructure = (spec: Spec, schema: Schema): Partial<Model> => {
     return { export: 'array', ...collectionValue(spec, items) };
   }
 
+  // Recorded whether or not this schema declares the properties it names: an
+  // `allOf` member may raise a sibling branch's property to mandatory, and a
+  // composite has to be able to tell that apart from an empty member.
+  const declaredRequired = schema.required ?? [];
+
   if (isDictionarySchema(schema)) {
-    return { export: 'dictionary', ...dictionaryValue(spec, schema) };
+    return {
+      export: 'dictionary',
+      declaredRequired,
+      ...dictionaryValue(spec, schema),
+    };
   }
 
   if (type === 'object' || schema.properties || schema.patternProperties) {
@@ -201,13 +210,14 @@ const schemaStructure = (spec: Spec, schema: Schema): Partial<Model> => {
       export: 'interface',
       type: 'unknown',
       properties,
+      declaredRequired,
       imports: collectImports(properties),
     };
   }
 
   // A schema with no type (e.g. `{}`) is an untyped object.
   if (type === undefined) {
-    return { export: 'interface', type: 'unknown' };
+    return { export: 'interface', type: 'unknown', declaredRequired };
   }
 
   return {
@@ -268,7 +278,18 @@ export const buildInlineModel = (
 ): Model => {
   if (isRef(schemaOrRef)) {
     const name = splitRef(schemaOrRef.$ref)[2];
-    return createModel({ export: 'reference', type: name, imports: [name] });
+    // `nullable` beside a `$ref` describes this use of the schema, not the schema
+    // itself. OpenAPI 3.0 ignores a `$ref`'s siblings, but normalisation puts it
+    // here when it hoists a nullable inline schema — dropping it made a required
+    // nullable object property non-nullable.
+    return createModel({
+      export: 'reference',
+      type: name,
+      imports: [name],
+      ...((schemaOrRef as { nullable?: boolean }).nullable
+        ? { isNullable: true }
+        : {}),
+    });
   }
   return createModel({
     description: schemaOrRef.description ?? null,
@@ -822,14 +843,76 @@ const resolveComposedModel = (
     );
   }
 
-  if (model.export === 'all-of' && composedPrimitives.length > 0) {
-    throw new Error(
-      `Schema "${model.name}" defines allOf with non-object types. allOf may only compose object types in the OpenAPI specification.`,
+  /**
+   * Whether a member constrains nothing, describing the empty object.
+   * `{description: "..."}`, `{example: ...}` and `{title: ...}` are how OpenAPI
+   * 3.0 annotates a `$ref`, whose own siblings are ignored there — the commonest
+   * `allOf` idiom in published specs, and counting it as a non-object made those
+   * documents fail outright.
+   *
+   * A bare `{description}` parses as an `interface` with no properties; an
+   * explicit `{type: object}` with none parses as a `dictionary` carrying no
+   * value type.
+   *
+   * A member declaring `required` is *not* empty even with no properties of its
+   * own: it raises a sibling branch's property to mandatory, and nothing here
+   * carries that across, so dropping it would quietly make a required field
+   * optional. Those keep failing loudly until the constraint can be honoured.
+   */
+  const isStructurallyEmpty = (m: Model): boolean =>
+    (m.properties ?? []).length === 0 &&
+    !m.hasAdditionalProperties &&
+    !m.hasPatternProperties &&
+    (m.declaredRequired ?? []).length === 0 &&
+    ((m.export === 'interface' && !m.link) ||
+      (m.export === 'dictionary' && m.type === 'unknown'));
+  const constrainingPrimitives = composedPrimitives.filter(
+    (m) => !isStructurallyEmpty(m),
+  );
+
+  // A single-member `allOf` composes to exactly that member, so a scalar one is
+  // unambiguous rather than a conjunction of incompatible types — it is how a
+  // description is attached to a scalar, and specs use it for enums especially.
+  const isSingleMemberAllOf =
+    model.export === 'all-of' &&
+    members.length === 1 &&
+    composedModels.length === 0 &&
+    constrainingPrimitives.length === 1;
+
+  if (
+    model.export === 'all-of' &&
+    constrainingPrimitives.length > 0 &&
+    !isSingleMemberAllOf
+  ) {
+    // Name what the offending members actually are: the old wording said
+    // "non-object types" even for a member that is explicitly an object, which
+    // sent readers looking for the wrong thing.
+    const requiresOnly = constrainingPrimitives.filter(
+      (m) => (m.declaredRequired ?? []).length > 0 && !m.properties?.length,
     );
+    const detail =
+      requiresOnly.length > 0
+        ? `an allOf member declares "required" (${requiresOnly
+            .flatMap((m) => m.declaredRequired ?? [])
+            .map((name) => `"${name}"`)
+            .join(
+              ', ',
+            )}) for properties it does not itself declare, which this generator cannot carry across branches. Declare the property in the same member, or mark it required where it is declared`
+        : `an allOf member is not an object type, and allOf may only compose object types`;
+    throw new Error(`Schema "${model.name}" cannot be composed: ${detail}.`);
   }
 
   model.composedModels = composedModels;
-  model.composedPrimitives = composedPrimitives;
+  model.composedPrimitives =
+    model.export === 'all-of' ? constrainingPrimitives : composedPrimitives;
+  // Drop the annotation-only members from what templates render, so an `allOf`
+  // that only carried a description composes to the member it annotates rather
+  // than to an intersection with the empty object.
+  if (model.export === 'all-of') {
+    model.properties = model.properties.filter(
+      (member) => member.name || !isStructurallyEmpty(member),
+    );
+  }
 };
 
 const resolveComposedModels = (data: ClientData): void => {
