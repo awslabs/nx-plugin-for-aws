@@ -4,11 +4,12 @@
  */
 
 import { execSync, spawn } from 'node:child_process';
-import { existsSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { output, type PackageManager } from '@nx/devkit';
 import { backOff } from 'exponential-backoff';
+import { parseDocument } from 'yaml';
 // eslint-disable-next-line
 import {
   buildCreateNxWorkspaceCommand,
@@ -65,9 +66,6 @@ export async function runCLI(
             // every lane. Drop it so each spawned package manager sets its
             // own.
             npm_config_user_agent: undefined,
-            // The local build is published to verdaccio moments before a test
-            // resolves it, and pnpm's release-age cutoff would hide it.
-            PNPM_CONFIG_MINIMUM_RELEASE_AGE: '0',
             ...opts.env,
           },
           shell: true,
@@ -293,6 +291,32 @@ export const pinAwsScopeToLocalRegistry = (
     ].join('\n'),
     { encoding: 'utf-8' },
   );
+};
+
+/**
+ * Record a "reviewed, do not build" decision in `pnpm-workspace.yaml` for each
+ * of `packages`.
+ *
+ * pnpm's strict dep-builds gate fails an install that would silently skip a
+ * dependency's build scripts. A test that installs with `--ignore-scripts`
+ * leaves exactly that state behind, so the next install a generator runs
+ * fails. `allowBuilds: false` is the explicit decision that clears the gate for
+ * a package without running its scripts — keeping the gate itself on, unlike
+ * disabling the check wholesale.
+ *
+ * `onlyBuiltDependencies` is pnpm 10's key and only lists packages that *do*
+ * build, so a declined package has no entry there.
+ */
+export const declinePnpmBuilds = (
+  projectRoot: string,
+  packages: string[],
+): void => {
+  const workspacePath = join(projectRoot, 'pnpm-workspace.yaml');
+  const doc = parseDocument(readFileSync(workspacePath, 'utf-8'));
+  for (const pkg of packages) {
+    doc.setIn(['allowBuilds', pkg], false);
+  }
+  writeFileSync(workspacePath, doc.toString(), { encoding: 'utf-8' });
 };
 
 /**

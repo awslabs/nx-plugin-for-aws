@@ -62,10 +62,11 @@ export const INIT_DEPENDENCIES = [
 ] as const satisfies readonly { name: ITsDepVersion }[];
 
 // Built dependencies whose install scripts the generated workspace trusts.
-// `onlyBuiltDependencies` is the pnpm 10 key (silently ignored by pnpm 11);
-// pnpm 11 reads `allowBuilds` instead. Any dep NOT in this allowlist will
-// have its install scripts skipped with a warning — matching pnpm 10's
-// default behaviour. The user can opt-in later via `pnpm approve-builds`.
+// `onlyBuiltDependencies` is the pnpm 10 key (silently ignored from pnpm 11
+// onwards); pnpm 11 and above read `allowBuilds` instead. Any dep NOT in this
+// allowlist will have its install scripts skipped with a warning — matching
+// pnpm 10's default behaviour. The user can opt-in later via
+// `pnpm approve-builds`.
 export const PNPM_BUILT_DEPENDENCIES = ['@swc/core', 'esbuild', 'nx', 'sharp'];
 
 /**

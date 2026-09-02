@@ -12,7 +12,12 @@ import {
   PY_VERSIONS,
   TS_VERSIONS,
 } from '../../../packages/nx-plugin/src/utils/versions';
-import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
+import {
+  createTestWorkspace,
+  declinePnpmBuilds,
+  runCLI,
+  tmpProjPath,
+} from '../utils';
 
 describe('smoke test - license-check', () => {
   const pkgMgr = 'pnpm';
@@ -37,12 +42,22 @@ describe('smoke test - license-check', () => {
       cwd: projectRoot,
       env: {
         NX_DAEMON: 'false',
-        // The installs below skip build scripts, since only license metadata is
-        // read. That leaves packages unbuilt, which pnpm otherwise refuses to
-        // install over on the next install a generator runs.
-        PNPM_CONFIG_STRICT_DEP_BUILDS: 'false',
       },
     };
+
+    // The tests below add every dependency in TS_VERSIONS to the workspace and
+    // install with `--ignore-scripts`, since only license metadata is read.
+    // pnpm then reports those packages' build scripts as unreviewed and fails
+    // the next install a generator runs. Record a decision for each one instead
+    // of relaxing the check, so the strict dep-builds gate stays on.
+    declinePnpmBuilds(projectRoot, [
+      '@modelcontextprotocol/inspector',
+      '@prisma/engines',
+      '@scarf/scarf',
+      'mise',
+      'prisma',
+      'protobufjs',
+    ]);
 
     await runCLI(`generate @aws/nx-plugin:license --no-interactive`, opts);
   });
