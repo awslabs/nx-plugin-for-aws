@@ -5,8 +5,10 @@
 import { joinPathFragments, logger, type Tree, updateJson } from '@nx/devkit';
 import { join, relative } from 'path';
 import { addLicenseCheckToLintTarget } from '../../license/config.js';
+import { addTsDependencies } from '../../utils/add-dependencies.js';
 import { AWS_NX_PLUGIN_CONFIG_FILE_NAME } from '../../utils/config/utils.js';
 import {
+  declareDependencies,
   type DependencyDeclaration,
   forDependencies,
   type MustDeclare,
@@ -20,6 +22,14 @@ import { configureVitest, type VITEST_DEPENDENCIES } from './vitest.js';
 interface TsConfigReference {
   path: string;
 }
+
+/**
+ * `@nx/js` writes `types: ['node']` into every project's `tsconfig.lib.json`,
+ * so `tsc` needs the types declared to resolve them.
+ */
+const TS_PROJECT_DEPENDENCIES = declareDependencies()({
+  ts: [{ name: '@types/node', dev: true }],
+});
 
 /**
  * Merges new TypeScript project references into existing ones, deduplicating by
@@ -127,6 +137,10 @@ export const configureTsProject = async <const D extends DependencyDeclaration>(
     dir: options.dir,
     fullyQualifiedName: options.fullyQualifiedName,
     esm,
+  });
+
+  addTsDependencies(tree, TS_PROJECT_DEPENDENCIES, {
+    projectRoot: options.dir,
   });
 
   await configureBiomeLint(tree, options);
