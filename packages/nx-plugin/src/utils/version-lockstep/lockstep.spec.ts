@@ -14,7 +14,7 @@ describe('holdGroupsInLockstep', () => {
     expect(ts).toEqual({ a: '1.5.0', b: '1.5.0', c: '1.5.0' });
     // Only the members that actually moved are reported.
     expect(notes).toHaveLength(2);
-    // The held name is reported separately, so callers can correct a manifest.
+    // The held name lets callers correct a manifest.
     expect(notes.map(({ name }) => name).sort()).toEqual(['a', 'c']);
     const reported = notes.map((note) => note.note).join('\n');
     expect(reported).toContain('a held at 1.5.0');
@@ -46,16 +46,14 @@ describe('holdGroupsInLockstep', () => {
   });
 
   it('ignores a member whose pin is not a comparable version', () => {
-    // A tag or protocol specifier has no version to compare, so the group is
-    // left alone rather than held against something meaningless.
+    // A tag or protocol specifier has no version to compare against.
     const ts = { a: 'workspace:*', b: '2.0.0' };
     expect(holdGroupsInLockstep([['a', 'b']], ts)).toEqual([]);
     expect(ts).toEqual({ a: 'workspace:*', b: '2.0.0' });
   });
 
   it('skips a group the run proposed fewer than two members for', () => {
-    // One pin has nothing to stay in step with, so leave the bump alone rather
-    // than holding it against a version nothing proposed.
+    // One pin has nothing to stay in step with.
     const ts = { a: '2.0.0' };
     expect(holdGroupsInLockstep([['a', 'absent']], ts)).toEqual([]);
     expect(ts.a).toBe('2.0.0');

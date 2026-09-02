@@ -19,11 +19,8 @@ import { TS_VERSIONS } from './versions.js';
 
 describe('biome wasm version', () => {
   it('should match the biome pinned for generated projects', () => {
-    // Generated files are formatted here by the wasm bindings, but checked by the
-    // project's `format` target, which runs the `TS_VERSIONS` biome CLI — and the
-    // vended `biome.json` points its `$schema` at that same version. A drift
-    // between the two would make generated files fail `biome check` on a
-    // formatting change, so the two pins must be bumped together.
+    // Files formatted by the bindings are checked by the vended CLI, so a drift
+    // between the two fails `biome check` on a formatting change.
     expect(BIOME_WASM_VERSION).toBe(TS_VERSIONS['@biomejs/biome']);
   });
 });

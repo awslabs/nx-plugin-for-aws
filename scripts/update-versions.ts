@@ -78,45 +78,73 @@ interface ChangeGroup {
 /** Manifests whose npm dependencies are resolved alongside the vended pins. */
 const REPO_MANIFESTS = ['package.json', 'packages/nx-plugin/package.json'];
 
-/** Every npm dependency `manifestPath` declares. */
+/**
+ * Every npm dependency `manifestPath` declares, including whatever its
+ * `packageManager` field pins so that moves too.
+ */
 const readManifestDependencies = (
   manifestPath: string,
 ): Record<string, string> => {
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
-  return { ...manifest.devDependencies, ...manifest.dependencies };
+  const [packageManager, packageManagerVersion] = String(
+    manifest.packageManager ?? '',
+  ).split('@');
+  return {
+    ...(packageManager && packageManagerVersion
+      ? { [packageManager]: packageManagerVersion }
+      : {}),
+    ...manifest.peerDependencies,
+    ...manifest.devDependencies,
+    ...manifest.dependencies,
+  };
 };
 
 /**
- * Roll back the named dependencies in a manifest to `versions`.
- *
- * `npm-check-updates` bumps this repo's own manifests before this script runs, so
- * a pin a lockstep group held back is already on disk at the newer version and has
- * to be corrected. Scoped to the held names so the run never re-does ncu's job —
- * it writes no lockfile, and `pnpm i` has already run by this point.
+ * Apply resolved versions to a manifest's own dependencies, including the
+ * `packageManager` pin.
  */
-const rollBackManifestVersions = (
+const applyManifestVersions = (
   tree: FsTree,
   manifestPath: string,
   versions: Record<string, string>,
-  names: readonly string[],
-): void => {
+): VersionChange[] => {
   const contents = tree.read(manifestPath, 'utf-8');
-  if (!contents) return;
+  if (!contents) return [];
   const manifest = JSON.parse(contents);
-  let changed = false;
-  for (const name of names) {
-    const held = versions[name];
-    if (!held) continue;
-    for (const field of ['dependencies', 'devDependencies'] as const) {
-      if (manifest[field]?.[name] && manifest[field][name] !== held) {
-        manifest[field][name] = held;
-        changed = true;
+  const changes: VersionChange[] = [];
+
+  const [packageManager, packageManagerVersion] = String(
+    manifest.packageManager ?? '',
+  ).split('@');
+  const resolvedPackageManager = versions[packageManager];
+  if (
+    packageManagerVersion &&
+    resolvedPackageManager &&
+    resolvedPackageManager !== packageManagerVersion
+  ) {
+    manifest.packageManager = `${packageManager}@${resolvedPackageManager}`;
+    changes.push({
+      name: 'packageManager',
+      oldVersion: packageManagerVersion,
+      newVersion: resolvedPackageManager,
+    });
+  }
+
+  for (const field of ['dependencies', 'devDependencies', 'peerDependencies']) {
+    for (const [name, current] of Object.entries<string>(
+      manifest[field] ?? {},
+    )) {
+      const resolved = versions[name];
+      if (resolved && resolved !== current) {
+        manifest[field][name] = resolved;
+        changes.push({ name, oldVersion: current, newVersion: resolved });
       }
     }
   }
-  if (changed) {
+  if (changes.length > 0) {
     tree.write(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   }
+  return changes;
 };
 
 /**
@@ -134,8 +162,7 @@ const getUpdatedTypeScriptVersions = (
   execSync('mkdir -p ts', { cwd: tmpDir });
   execSync('pnpm init', { cwd: tsDir, stdio: 'inherit' });
 
-  // Include this repo's own npm dependencies so a lockstep group can span them
-  // and the vended pins. The vended pin wins where both declare a package.
+  // Vended pins win over this repo's own where both declare a package.
   const packageJsonPath = join(tsDir, 'package.json');
   const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
   packageJson.dependencies = {
@@ -234,18 +261,12 @@ const getUpdatedPythonVersions = (tmpDir: string): Record<string, string> => {
 };
 
 /**
- * Pins that must move as a unit. Each group is held at the lowest version
- * proposed across it, so members must share a version line.
+ * Pins that must move as a unit. Members must share a version line.
  */
 const LOCKSTEP_GROUPS: readonly LockstepGroup[] = [
-  // One release train, only mutually resolvable at the same version. This also
-  // keeps them on the release `@copilotkit/react-core` pins, since a duplicate
-  // `@ag-ui/client` fails every generated website with TS2322. `@ag-ui/aws-strands`
-  // and `@ag-ui/a2ui-toolkit` version independently, so they are left free.
+  // A duplicate `@ag-ui/client` fails every generated website with TS2322.
   ['@ag-ui/client', '@ag-ui/core', '@ag-ui/encoder'],
-  // The wasm bindings format generated files here; the CLI is what a generated
-  // project's `format`/`lint` targets run. Out of step, files are formatted by one
-  // release and checked against another.
+  // The wasm bindings format generated files; the CLI checks them.
   ['@biomejs/wasm-nodejs', '@biomejs/biome'],
   ['@astral-sh/ruff-wasm-nodejs', 'ruff'],
 ];
@@ -637,30 +658,21 @@ const main = async () => {
     // Create FsTree from nx devkit pointing at project root
     const tree = new FsTree(process.cwd(), false);
 
-    // Get updated TypeScript and Python versions. Both are resolved before either
-    // is written, since a lockstep group may span the two.
+    // Both resolved before either is written, since a group may span them.
     const updatedTsVersions = getUpdatedTypeScriptVersions(tmpDir);
     const updatedPyVersions = getUpdatedPythonVersions(tmpDir);
 
-    // Applied before the rewrites so a held version is never written
-    const lockstepNotes = [
-      ...holdGroupsInLockstep(
-        LOCKSTEP_GROUPS,
-        updatedTsVersions,
-        updatedPyVersions,
-      ),
-    ];
+    // Applied before the rewrites so a held version is never written.
+    const lockstepNotes = holdGroupsInLockstep(
+      LOCKSTEP_GROUPS,
+      updatedTsVersions,
+      updatedPyVersions,
+    );
 
-    // Correct any of this repo's own manifest pins a group held back.
-    const heldNames = lockstepNotes.map(({ name }) => name);
-    for (const manifestPath of REPO_MANIFESTS) {
-      rollBackManifestVersions(
-        tree,
-        manifestPath,
-        updatedTsVersions,
-        heldNames,
-      );
-    }
+    // This repo's manifests, from the same pass as the vended pins.
+    const manifestChanges = REPO_MANIFESTS.flatMap((manifestPath) =>
+      applyManifestVersions(tree, manifestPath, updatedTsVersions),
+    );
 
     // Apply updated TypeScript versions to the versions file
     const tsChanges = await applyUpdatedVersions(
@@ -794,6 +806,9 @@ const main = async () => {
     // Write the report
     writeReport([
       { title: 'TypeScript Dependencies', changes: tsChanges },
+      ...(manifestChanges.length > 0
+        ? [{ title: 'Repo Dependencies', changes: manifestChanges }]
+        : []),
       { title: 'Python Dependencies', changes: pyChanges },
       { title: 'Terraform Providers', changes: terraformChanges },
       { title: 'Java Dependencies', changes: javaChanges },

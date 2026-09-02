@@ -12,15 +12,8 @@ import { tryReadToml } from './toml.js';
 import { TS_VERSIONS } from './versions.js';
 
 /**
- * The Biome release the wasm bindings here are built from. Those bindings format
- * generated TypeScript/JSON in-process, while `TS_VERSIONS['@biomejs/biome']` is
- * the CLI the vended `format`/`lint` targets run and the version the vended
- * `biome.json` `$schema` points at — so keep the two in step, or generated files
- * are formatted by one release and checked against another. A test asserts they
- * agree.
- *
- * The package exposes no version API (unlike ruff's `Workspace.version()`), so
- * this reads its manifest.
+ * The Biome release the wasm bindings are built from. Must match
+ * `TS_VERSIONS['@biomejs/biome']`, the CLI the vended targets run.
  */
 export const BIOME_WASM_VERSION: string = createRequire(import.meta.url)(
   '@biomejs/wasm-nodejs/package.json',
