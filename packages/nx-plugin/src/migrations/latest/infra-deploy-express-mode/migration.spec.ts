@@ -87,28 +87,28 @@ describe('infra-deploy-express-mode migration', () => {
     expect(targets.destroy.options.command).not.toContain('express');
   });
 
-  it('should add --express after the stage pattern for stage-config projects', async () => {
+  // With stages configured, `deploy` takes a stage name that may well be beta or
+  // prod, so only its sandbox counterpart opts into express mode.
+  it('should only migrate deploy-sandbox for stage-config projects', async () => {
+    const stageConfigDeploy =
+      'tsx packages/common/scripts/src/infra/infra-deploy.ts packages/infra';
     addProjectConfiguration(
       tree,
       'infra',
       infraProject({
-        deploy:
-          'tsx packages/common/scripts/src/infra/infra-deploy.ts packages/infra',
-        'deploy-sandbox':
-          'tsx packages/common/scripts/src/infra/infra-deploy.ts packages/infra "proj-infra-sandbox/*"',
+        deploy: stageConfigDeploy,
+        'deploy-sandbox': `${stageConfigDeploy} "proj-infra-sandbox/*"`,
       }),
     );
 
     const { nextSteps } = await migration(tree);
 
     const { targets } = readProjectConfiguration(tree, 'infra');
-    expect(targets.deploy.options.command).toBe(
-      'tsx packages/common/scripts/src/infra/infra-deploy.ts packages/infra --express',
-    );
+    expect(targets.deploy.options.command).toBe(stageConfigDeploy);
     // The stage pattern must stay the first positional argument, since that is
     // where the deploy script reads the stage name from.
     expect(targets['deploy-sandbox'].options.command).toBe(
-      'tsx packages/common/scripts/src/infra/infra-deploy.ts packages/infra "proj-infra-sandbox/*" --express',
+      `${stageConfigDeploy} "proj-infra-sandbox/*" --express`,
     );
     expect(nextSteps).toHaveLength(0);
   });
@@ -162,33 +162,40 @@ describe('infra-deploy-express-mode migration', () => {
     expect(nextSteps[0]).toContain('--express');
   });
 
-  it('should converge a generated project stripped of the flag the generator vends', async () => {
-    await tsInfraGenerator(tree, {
-      name: 'infra',
-      directory: 'packages',
-    } as any);
+  it.each([false, true])(
+    'should converge a generated project (stageConfig=%s) stripped of the flag the generator vends',
+    async (stageConfig) => {
+      await tsInfraGenerator(tree, {
+        name: 'infra',
+        directory: 'packages',
+        stageConfig,
+      } as any);
 
-    const generated = readProjectConfigurationUnqualified(tree, 'infra');
-    const vended = structuredClone(generated.targets);
-    expect(vended.deploy.options.command).toContain('--express');
-    expect(vended['deploy-sandbox'].options.command).toContain('--express');
+      const generated = readProjectConfigurationUnqualified(tree, 'infra');
+      const vended = structuredClone(generated.targets);
+      // deploy only carries the flag when stages are not configured.
+      expect(vended.deploy.options.command.includes('--express')).toBe(
+        !stageConfig,
+      );
+      expect(vended['deploy-sandbox'].options.command).toContain('--express');
 
-    for (const target of ['deploy', 'deploy-sandbox']) {
-      generated.targets[target].options.command = generated.targets[
-        target
-      ].options.command
-        .replace(' --express', '')
-        .trim();
-    }
-    updateProjectConfiguration(tree, generated.name, generated);
+      for (const target of ['deploy', 'deploy-sandbox']) {
+        generated.targets[target].options.command = generated.targets[
+          target
+        ].options.command
+          .replace(' --express', '')
+          .trim();
+      }
+      updateProjectConfiguration(tree, generated.name, generated);
 
-    const { nextSteps } = await migration(tree);
+      const { nextSteps } = await migration(tree);
 
-    expect(nextSteps).toHaveLength(0);
-    expect(readProjectConfigurationUnqualified(tree, 'infra').targets).toEqual(
-      vended,
-    );
-  });
+      expect(nextSteps).toHaveLength(0);
+      expect(
+        readProjectConfigurationUnqualified(tree, 'infra').targets,
+      ).toEqual(vended);
+    },
+  );
 
   it('should be idempotent', async () => {
     addProjectConfiguration(tree, 'infra', infraProject());

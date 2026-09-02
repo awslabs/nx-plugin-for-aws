@@ -421,8 +421,9 @@ describe('infra generator', () => {
     it('should use tsx infra-deploy/infra-destroy for deploy and destroy targets', async () => {
       await tsInfraGenerator(tree, stageConfigOptions);
       const config = readProjectConfiguration(tree, '@proj/test');
+      // No --express: this target deploys whichever stage is named.
       expect(config.targets.deploy.options.command).toBe(
-        'tsx packages/common/scripts/src/infra/infra-deploy.ts packages/test --express',
+        'tsx packages/common/scripts/src/infra/infra-deploy.ts packages/test',
       );
       expect(config.targets.destroy.options.command).toBe(
         'tsx packages/common/scripts/src/infra/infra-destroy.ts packages/test',
@@ -550,7 +551,7 @@ describe('infra generator', () => {
         dependsOn: ['^assemble', 'compile'],
         options: {
           command:
-            'tsx packages/common/scripts/src/infra/infra-deploy.ts packages/test --express',
+            'tsx packages/common/scripts/src/infra/infra-deploy.ts packages/test',
         },
       });
       expect(config.targets.destroy).toMatchObject({

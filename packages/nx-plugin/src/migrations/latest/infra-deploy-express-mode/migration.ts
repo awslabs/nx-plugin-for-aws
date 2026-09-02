@@ -18,9 +18,11 @@ import { formatFilesInSubtree } from '../../../utils/format.js';
  *
  * Express mode completes each resource operation as soon as its configuration
  * is applied rather than waiting for full stabilization, which is a much faster
- * iteration cycle for the development deploys these two targets serve.
- * `deploy-ci` is deliberately left alone: pipeline deployments still wait for
- * every resource to stabilize.
+ * iteration cycle for development deploys.
+ *
+ * Two targets keep waiting for full stabilization: `deploy-ci`, since pipeline
+ * deployments should never skip it, and - when stages are configured - `deploy`,
+ * which deploys whichever stage is named, including beta and prod.
  */
 
 const DEPLOY_TARGETS = ['deploy', 'deploy-sandbox'];
@@ -35,6 +37,10 @@ const EXPRESS_FLAG = '--express';
  */
 const isGeneratedDeployCommand = (command: string): boolean =>
   /(^|\s)cdk\s+deploy(\s|$)/.test(command) ||
+  command.includes('infra-deploy.ts');
+
+/** Whether the command runs the stage-config deploy script. */
+const isStageConfigDeploy = (command: string): boolean =>
   command.includes('infra-deploy.ts');
 
 const divergedNextStep = (projectName: string, target: string): string =>
@@ -78,6 +84,13 @@ export default async function migration(
 
       if (!isGeneratedDeployCommand(command)) {
         nextSteps.push(divergedNextStep(name, targetName));
+        continue;
+      }
+
+      // When stages are configured, `deploy` deploys whichever stage is named,
+      // including beta and prod, so it stays on full stabilization. Only its
+      // sandbox counterpart opts into express mode.
+      if (targetName === 'deploy' && isStageConfigDeploy(command)) {
         continue;
       }
 
