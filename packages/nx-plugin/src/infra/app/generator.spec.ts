@@ -94,7 +94,7 @@ describe('infra generator', () => {
       options: {
         cwd: '{projectRoot}',
         command:
-          'cdk deploy --require-approval=never --express "proj-test-sandbox/*"',
+          'cdk deploy --require-approval=never "proj-test-sandbox/*" --express',
       },
       dependsOn: ['^assemble', 'compile'],
     });
@@ -348,10 +348,12 @@ describe('infra generator', () => {
   describe.each([
     {
       action: 'deploy',
-      cdkCommand: 'cdk deploy --require-approval=never --express',
+      cdkCommand: 'cdk deploy --require-approval=never',
+      // Trails the stage pattern so the pattern stays the first positional arg.
+      suffix: ' --express',
     },
-    { action: 'destroy', cdkCommand: 'cdk destroy' },
-  ])('$action-sandbox target', ({ action, cdkCommand }) => {
+    { action: 'destroy', cdkCommand: 'cdk destroy', suffix: '' },
+  ])('$action-sandbox target', ({ action, cdkCommand, suffix }) => {
     const target = `${action}-sandbox`;
 
     // The stage pattern must match the stage main.ts instantiates, otherwise
@@ -378,7 +380,7 @@ describe('infra generator', () => {
 
         expect(mainTs).toContain(`new ApplicationStage(app, '${stage}'`);
         expect(config.targets[target].options.command).toBe(
-          `${cdkCommand} "${stage}/*"`,
+          `${cdkCommand} "${stage}/*"${suffix}`,
         );
       },
     );
@@ -420,7 +422,7 @@ describe('infra generator', () => {
       await tsInfraGenerator(tree, stageConfigOptions);
       const config = readProjectConfiguration(tree, '@proj/test');
       expect(config.targets.deploy.options.command).toBe(
-        'tsx packages/common/scripts/src/infra/infra-deploy.ts packages/test',
+        'tsx packages/common/scripts/src/infra/infra-deploy.ts packages/test --express',
       );
       expect(config.targets.destroy.options.command).toBe(
         'tsx packages/common/scripts/src/infra/infra-destroy.ts packages/test',
@@ -433,9 +435,10 @@ describe('infra generator', () => {
         await tsInfraGenerator(tree, stageConfigOptions);
         const config = readProjectConfiguration(tree, '@proj/test');
         // The stage is the first positional arg after the project path, which is
-        // where the script looks it up in stages.config.ts.
+        // where the script looks it up in stages.config.ts - so any flags must
+        // trail it.
         expect(config.targets[`${action}-sandbox`].options.command).toBe(
-          `tsx packages/common/scripts/src/infra/infra-${action}.ts packages/test "proj-test-sandbox/*"`,
+          `tsx packages/common/scripts/src/infra/infra-${action}.ts packages/test "proj-test-sandbox/*"${action === 'deploy' ? ' --express' : ''}`,
         );
         expect(config.targets[`${action}-sandbox`].dependsOn).toEqual([
           '^assemble',
@@ -547,7 +550,7 @@ describe('infra generator', () => {
         dependsOn: ['^assemble', 'compile'],
         options: {
           command:
-            'tsx packages/common/scripts/src/infra/infra-deploy.ts packages/test',
+            'tsx packages/common/scripts/src/infra/infra-deploy.ts packages/test --express',
         },
       });
       expect(config.targets.destroy).toMatchObject({

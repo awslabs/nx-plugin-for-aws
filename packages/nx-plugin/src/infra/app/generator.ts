@@ -203,7 +203,7 @@ export async function tsInfraGenerator(
         dependsOn: ['^assemble', 'compile'],
         options: stageConfig
           ? withCdkEnv({
-              command: `tsx packages/common/scripts/src/infra/infra-deploy.ts ${libraryRoot}`,
+              command: `tsx packages/common/scripts/src/infra/infra-deploy.ts ${libraryRoot} --express`,
             })
           : withCdkEnv({
               cwd: '{projectRoot}',
@@ -215,11 +215,11 @@ export async function tsInfraGenerator(
         dependsOn: ['^assemble', 'compile'],
         options: stageConfig
           ? withCdkEnv({
-              command: `tsx packages/common/scripts/src/infra/infra-deploy.ts ${libraryRoot} ${sandboxStagePattern}`,
+              command: `tsx packages/common/scripts/src/infra/infra-deploy.ts ${libraryRoot} ${sandboxStagePattern} --express`,
             })
           : withCdkEnv({
               cwd: '{projectRoot}',
-              command: `cdk deploy --require-approval=never --express ${sandboxStagePattern}`,
+              command: `cdk deploy --require-approval=never ${sandboxStagePattern} --express`,
             }),
       };
       config.targets['deploy-ci'] = {
