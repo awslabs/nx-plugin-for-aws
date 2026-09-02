@@ -53,6 +53,7 @@ import {
   TERRAFORM_WEBSITE_RUNTIME_CONFIG_FILE,
 } from '../../../utils/shared-constructs-constants.js';
 import {
+  addSharedShadcnDependency,
   SHADCN_DEPENDENCIES,
   sharedShadcnGenerator,
 } from '../../../utils/shared-shadcn.js';
@@ -355,6 +356,7 @@ export async function tsReactWebsiteGenerator(
 
   if (ux === 'shadcn') {
     await sharedShadcnGenerator(tree, DEPENDENCIES);
+    addSharedShadcnDependency(tree, websiteContentPath);
   }
 
   if (iac) {

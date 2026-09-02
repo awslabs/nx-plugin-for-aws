@@ -24,6 +24,7 @@ import { kebabCase } from '../../../utils/names.js';
 import { getNpmScopePrefix } from '../../../utils/npm-scope.js';
 import { registerPnpmBuiltDependencies } from '../../../utils/pnpm-workspace.js';
 import {
+  addSharedShadcnDependency,
   SHADCN_DEPENDENCIES,
   sharedShadcnGenerator,
 } from '../../../utils/shared-shadcn.js';
@@ -136,6 +137,7 @@ export const addAgUiReactConnection = async (
   // Shadcn theme imports from the shared shadcn library, so it must exist.
   if (theme === 'shadcn') {
     await sharedShadcnGenerator(tree, DEPENDENCIES);
+    addSharedShadcnDependency(tree, frontendProjectConfig.root);
   }
   generateFiles(
     tree,
