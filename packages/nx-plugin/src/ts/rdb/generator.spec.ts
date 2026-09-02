@@ -220,9 +220,7 @@ describe('ts#rdb generator', () => {
     // Pure build/test tooling stays in the workspace root devDependencies
     expect(packageJson.devDependencies['tsx']).toBeDefined();
     expect(packageJson.devDependencies.prisma).toBeDefined();
-    expect(packageJson.devDependencies.ncp).toBeDefined();
-    expect(packageJson.devDependencies.rimraf).toBeDefined();
-    expect(packageJson.devDependencies['make-dir-cli']).toBeDefined();
+    expect(packageJson.devDependencies.shx).toBeDefined();
   });
 
   it('should add mysql prisma dependencies when engine is MySQL', async () => {
