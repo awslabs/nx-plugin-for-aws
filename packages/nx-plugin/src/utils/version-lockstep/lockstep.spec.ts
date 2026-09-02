@@ -3,162 +3,87 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { describe, expect, it } from 'vitest';
-import { type LockstepGroup, holdGroupsInLockstep } from './lockstep.js';
+import { compareVersions, holdGroupsInLockstep } from './lockstep.js';
+
+describe('compareVersions', () => {
+  it('orders by numeric segment, not lexically', () => {
+    // '9' > '10' lexically, which is the bug this guards against.
+    expect(compareVersions('0.0.9', '0.0.10')).toBeLessThan(0);
+    expect(compareVersions('1.2.0', '1.10.0')).toBeLessThan(0);
+    expect(compareVersions('2.0.0', '1.99.99')).toBeGreaterThan(0);
+  });
+
+  it('ignores range prefixes', () => {
+    expect(compareVersions('==1.2.3', '1.2.3')).toBe(0);
+    expect(compareVersions('^1.2.3', '==1.2.4')).toBeLessThan(0);
+  });
+
+  it('treats a missing segment as lower', () => {
+    expect(compareVersions('1.2', '1.2.1')).toBeLessThan(0);
+  });
+});
 
 describe('holdGroupsInLockstep', () => {
-  it('holds a follower at the leader version', () => {
-    const ts = { leader: '1.2.3', follower: '2.0.0' };
-    const notes = holdGroupsInLockstep(
-      [
-        {
-          reason: 'they must match',
-          leader: { name: 'leader' },
-          followers: [{ name: 'follower' }],
-        },
-      ],
-      ts,
-    );
+  it('holds every member at the lowest version proposed across the group', () => {
+    const ts = { a: '2.0.0', b: '1.5.0', c: '3.0.0' };
 
-    expect(ts.follower).toBe('1.2.3');
-    expect(ts.leader).toBe('1.2.3');
-    expect(notes).toHaveLength(1);
-    expect(notes[0].note).toContain('follower held at 1.2.3');
-    expect(notes[0].note).toContain('2.0.0 available');
-    expect(notes[0].note).toContain('they must match');
+    const notes = holdGroupsInLockstep([['a', 'b', 'c']], ts);
+
+    expect(ts).toEqual({ a: '1.5.0', b: '1.5.0', c: '1.5.0' });
+    // Only the members that actually moved are reported.
+    expect(notes).toHaveLength(2);
+    const reported = notes.map((note) => note.note).join('\n');
+    expect(reported).toContain('a held at 1.5.0');
+    expect(reported).toContain('2.0.0 available');
   });
 
   it('reports nothing when the group already agrees', () => {
-    const ts = { leader: '1.2.3', follower: '1.2.3' };
-    expect(
-      holdGroupsInLockstep(
-        [
-          {
-            reason: 'they must match',
-            leader: { name: 'leader' },
-            followers: [{ name: 'follower' }],
-          },
-        ],
-        ts,
-      ),
-    ).toEqual([]);
+    const ts = { a: '1.2.3', b: '1.2.3' };
+    expect(holdGroupsInLockstep([['a', 'b']], ts)).toEqual([]);
+    expect(ts).toEqual({ a: '1.2.3', b: '1.2.3' });
   });
 
-  it('spans tables, rewriting a follower declared in another one', () => {
-    const ts = { '@astral-sh/ruff-wasm-nodejs': '0.16.5' };
-    const py = { ruff: '==0.17.0' };
+  it('spans tables, so a group may mix TypeScript and Python pins', () => {
+    const ts = { tool: '0.16.5' };
+    const py = { 'tool-cli': '==0.17.0' };
 
-    const notes = holdGroupsInLockstep(
-      [
-        {
-          reason: 'the formatter and its bindings must match',
-          leader: { name: '@astral-sh/ruff-wasm-nodejs' },
-          followers: [{ name: 'ruff', format: 'pep440' }],
-        },
-      ],
-      ts,
-      py,
-    );
+    holdGroupsInLockstep([['tool', 'tool-cli']], ts, py);
 
-    // Rewritten in the PEP 440 form the Python pins use.
-    expect(py.ruff).toBe('==0.16.5');
-    expect(notes[0].note).toContain('ruff held at ==0.16.5');
+    // Each pin keeps the range prefix it was written with.
+    expect(ts.tool).toBe('0.16.5');
+    expect(py['tool-cli']).toBe('==0.16.5');
   });
 
-  it('normalises the leader range before applying it', () => {
-    const ts = { leader: '^1.2.3', follower: '2.0.0' };
-    holdGroupsInLockstep(
-      [
-        {
-          reason: 'r',
-          leader: { name: 'leader' },
-          followers: [{ name: 'follower' }],
-        },
-      ],
-      ts,
-    );
-    expect(ts.follower).toBe('1.2.3');
+  it('picks the lowest numerically rather than lexically', () => {
+    const ts = { a: '0.0.10', b: '0.0.9' };
+    holdGroupsInLockstep([['a', 'b']], ts);
+    expect(ts).toEqual({ a: '0.0.9', b: '0.0.9' });
   });
 
-  it('supports a leader resolved from outside the tables', () => {
-    const ts = { '@ag-ui/client': '0.0.59', '@ag-ui/core': '0.0.59' };
-
-    const notes = holdGroupsInLockstep(
-      [
-        {
-          reason: 'the dependant pins these exactly',
-          leader: { name: '@ag-ui/client', resolve: () => '0.0.57' },
-          followers: [{ name: '@ag-ui/client' }, { name: '@ag-ui/core' }],
-        },
-      ],
-      ts,
-    );
-
-    expect(ts['@ag-ui/client']).toBe('0.0.57');
-    expect(ts['@ag-ui/core']).toBe('0.0.57');
-    expect(notes).toHaveLength(2);
+  it('skips a group the run proposed fewer than two members for', () => {
+    // One pin has nothing to stay in step with, so leave the bump alone rather
+    // than holding it against a version nothing proposed.
+    const ts = { a: '2.0.0' };
+    expect(holdGroupsInLockstep([['a', 'absent']], ts)).toEqual([]);
+    expect(ts.a).toBe('2.0.0');
   });
 
-  it('passes the merged proposed versions to a resolver', () => {
-    const ts = { dependant: '9.9.9', follower: '2.0.0' };
-    let seen: string | undefined;
-
-    holdGroupsInLockstep(
-      [
-        {
-          reason: 'r',
-          leader: {
-            name: 'follower',
-            resolve: (versions) => {
-              seen = versions.dependant;
-              return '1.0.0';
-            },
-          },
-          followers: [{ name: 'follower' }],
-        },
-      ],
-      ts,
-    );
-
-    expect(seen).toBe('9.9.9');
-    expect(ts.follower).toBe('1.0.0');
-  });
-
-  it('leaves the group as proposed and reports when the leader is unresolvable', () => {
-    const ts = { follower: '2.0.0' };
-
-    const notes = holdGroupsInLockstep(
-      [
-        {
-          reason: 'r',
-          leader: { name: 'missing', resolve: () => undefined },
-          followers: [{ name: 'follower' }],
-        },
-      ],
-      ts,
-    );
-
-    // Better to take the bump and let CI catch it than to silently write a
-    // wrong pin.
-    expect(ts.follower).toBe('2.0.0');
-    expect(notes).toHaveLength(1);
-    expect(notes[0].note).toContain('could not resolve missing');
-    expect(notes[0].note).toContain('follower');
-  });
-
-  it('ignores followers no run proposed a version for', () => {
-    const ts = { leader: '1.0.0' };
-    expect(
-      holdGroupsInLockstep(
-        [
-          {
-            reason: 'r',
-            leader: { name: 'leader' },
-            followers: [{ name: 'absent' }],
-          },
-        ],
-        ts,
-      ),
-    ).toEqual([]);
+  it('ignores members no table declares', () => {
+    const ts = { a: '2.0.0', b: '1.0.0' };
+    holdGroupsInLockstep([['a', 'b', 'absent']], ts);
+    expect(ts).toEqual({ a: '1.0.0', b: '1.0.0' });
     expect(ts).not.toHaveProperty('absent');
+  });
+
+  it('handles several groups independently', () => {
+    const ts = { a: '2.0.0', b: '1.0.0', c: '5.0.0', d: '4.0.0' };
+    holdGroupsInLockstep(
+      [
+        ['a', 'b'],
+        ['c', 'd'],
+      ],
+      ts,
+    );
+    expect(ts).toEqual({ a: '1.0.0', b: '1.0.0', c: '4.0.0', d: '4.0.0' });
   });
 });

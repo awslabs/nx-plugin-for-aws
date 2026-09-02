@@ -31,6 +31,7 @@ import {
   resolveLambdaRuntimes,
   unresolvedRuntimeWarning,
 } from '../packages/nx-plugin/src/utils/lambda-runtime-resolution';
+import { BIOME_WASM_VERSION } from '../packages/nx-plugin/src/utils/format';
 import { RUFF_WASM_VERSION } from '../packages/nx-plugin/src/utils/ruff';
 import { isNxPackage } from '../packages/nx-plugin/src/utils/version-upgrade-migration/nx-package-updates';
 import { registerNxPackageUpdates } from '../packages/nx-plugin/src/utils/version-upgrade-migration/register';
@@ -187,86 +188,59 @@ const getUpdatedPythonVersions = (tmpDir: string): Record<string, string> => {
 };
 
 /**
- * The version an npm package depends on for one of its dependencies, for a
- * constraint that lives in a dependant's manifest rather than in a pin of ours.
- * `undefined` when the registry cannot be read, which leaves the group as
- * proposed and reports it.
+ * Hold a vended formatter pin at the release of the wasm bindings that actually
+ * run here.
+ *
+ * The plugin formats generated files in-process through wasm bindings, while the
+ * vended `format`/`lint` targets run the CLI at the pinned version. The two are
+ * published together and must agree, but the bindings are an npm dependency of
+ * this repo rather than a vended pin, so they are not expressible as a group of
+ * pin names — hence a hold rather than a `LOCKSTEP_GROUPS` entry.
+ *
+ * The bindings lead because they are the build already installed and running; the
+ * held-back pin is taken next run, once they catch up.
  */
-const dependencyOf = (
-  packageName: string,
-  packageVersion: string | undefined,
-  dependencyName: string,
-): string | undefined => {
-  if (!packageVersion) return undefined;
-  try {
-    const dependencies = JSON.parse(
-      execSync(
-        `npm view ${packageName}@${packageVersion} dependencies --json`,
-        { encoding: 'utf-8' },
-      ),
-    );
-    return dependencies?.[dependencyName];
-  } catch {
-    return undefined;
+const holdFormatterToWasmBuild = (
+  updatedVersions: Record<string, string>,
+  { pin, wasmVersion, bindings, format = (v: string) => v }: {
+    pin: string;
+    wasmVersion: string;
+    bindings: string;
+    format?: (version: string) => string;
+  },
+): ReportNote[] => {
+  const proposed = updatedVersions[pin];
+  const required = format(wasmVersion);
+  if (!proposed || proposed === required) {
+    return [];
   }
+  updatedVersions[pin] = required;
+  return [
+    {
+      note: `${pin} held at ${required} (${proposed} available): ${bindings} is still on ${wasmVersion}, and the two must match`,
+    },
+  ];
 };
 
 /**
- * Pins that are only correct at matching versions.
+ * Pins that must move as a unit, as groups of names.
  *
- * Each group names a leader the rest follow, so the pins move as a unit. See
- * `version-lockstep/lockstep.ts` for how a group is applied.
+ * A group is held at the lowest version proposed across it, so it only moves once
+ * every member can — see `version-lockstep/lockstep.ts`. Members must share a
+ * version line for that to be meaningful, so this is for families published
+ * together rather than for a package and an unrelated dependant.
  */
 const LOCKSTEP_GROUPS: readonly LockstepGroup[] = [
-  {
-    // The two move on different clocks: the wasm package is an npm dependency, so
-    // `npm-check-updates` only takes it once its `cooldown` has elapsed, while
-    // `pip-check-updates` has no such delay and takes the ruff released hours
-    // earlier. Left a release apart, generated files fail the vended
-    // `format --check`, which `ruff.spec.ts` asserts against.
-    //
-    // The wasm build leads because it is the one already installed and running
-    // here, and it is what actually formats generated Python.
-    reason:
-      '@astral-sh/ruff-wasm-nodejs is what formats generated Python, and the two must match',
-    // Read from the installed bindings rather than a pin: that is the build
-    // actually running here, and it is what `ruff.spec.ts` asserts against.
-    leader: {
-      name: '@astral-sh/ruff-wasm-nodejs',
-      resolve: () => RUFF_WASM_VERSION,
-    },
-    followers: [{ name: 'ruff', format: 'pep440' }],
-  },
-  {
-    // `@copilotkit/react-core` depends on an exact `@ag-ui/client` / `@ag-ui/core`,
-    // and the generated website hands an `@ag-ui/client` agent to CopilotKit's
-    // provider. Ahead of what CopilotKit asks for, a second copy is installed and
-    // the two `AbstractAgent` declarations are structurally incompatible (private
-    // `_debug`) — every generated website then fails to compile with TS2322.
-    //
-    // CopilotKit leads because its dependency range is the exact constraint.
-    // `@ag-ui/encoder` ships from the same release train as client/core.
-    // `@ag-ui/aws-strands` and `@ag-ui/a2ui-toolkit` are agent-side only and
-    // cannot duplicate against CopilotKit, so they are left free.
-    reason:
-      '@copilotkit/react-core pins these exactly, and a duplicate copy breaks the generated website build',
-    // The constraint lives in CopilotKit's own dependency range rather than in a
-    // pin of ours, so it is resolved from the registry.
-    leader: {
-      name: '@ag-ui/client',
-      resolve: (versions) =>
-        dependencyOf(
-          '@copilotkit/react-core',
-          versions['@copilotkit/react-core'],
-          '@ag-ui/client',
-        ),
-    },
-    followers: [
-      { name: '@ag-ui/client' },
-      { name: '@ag-ui/core' },
-      { name: '@ag-ui/encoder' },
-    ],
-  },
+  // The `@ag-ui/*` packages ship from one release train and are only mutually
+  // resolvable at the same version. Holding them together also keeps them on the
+  // release `@copilotkit/react-core` depends on, since CopilotKit pins them
+  // exactly and a second copy of `@ag-ui/client` makes the two `AbstractAgent`
+  // declarations structurally incompatible (private `_debug`) — which fails every
+  // generated website with TS2322.
+  //
+  // `@ag-ui/aws-strands` and `@ag-ui/a2ui-toolkit` version independently of the
+  // train and cannot duplicate against CopilotKit, so they are left free.
+  ['@ag-ui/client', '@ag-ui/core', '@ag-ui/encoder'],
 ];
 
 /**
@@ -662,11 +636,24 @@ const main = async () => {
     const updatedPyVersions = getUpdatedPythonVersions(tmpDir);
 
     // Applied before the rewrites so a held version is never written
-    const lockstepNotes = holdGroupsInLockstep(
-      LOCKSTEP_GROUPS,
-      updatedTsVersions,
-      updatedPyVersions,
-    );
+    const lockstepNotes = [
+      ...holdGroupsInLockstep(
+        LOCKSTEP_GROUPS,
+        updatedTsVersions,
+        updatedPyVersions,
+      ),
+      ...holdFormatterToWasmBuild(updatedPyVersions, {
+        pin: 'ruff',
+        wasmVersion: RUFF_WASM_VERSION,
+        bindings: '@astral-sh/ruff-wasm-nodejs',
+        format: (version) => `==${version}`,
+      }),
+      ...holdFormatterToWasmBuild(updatedTsVersions, {
+        pin: '@biomejs/biome',
+        wasmVersion: BIOME_WASM_VERSION,
+        bindings: '@biomejs/wasm-nodejs',
+      }),
+    ];
 
     // Apply updated TypeScript versions to the versions file
     const tsChanges = await applyUpdatedVersions(

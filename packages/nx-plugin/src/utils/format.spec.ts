@@ -9,8 +9,24 @@ import { FsTree } from 'nx/src/generators/tree';
 import { tmpdir } from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { formatFilesInSubtree, requiresPythonToRuffTarget } from './format.js';
+import {
+  BIOME_WASM_VERSION,
+  formatFilesInSubtree,
+  requiresPythonToRuffTarget,
+} from './format.js';
 import { createTreeUsingTsSolutionSetup } from './test.js';
+import { TS_VERSIONS } from './versions.js';
+
+describe('biome wasm version', () => {
+  it('should match the biome pinned for generated projects', () => {
+    // Generated files are formatted here by the wasm bindings, but checked by the
+    // project's `format` target, which runs the `TS_VERSIONS` biome CLI — and the
+    // vended `biome.json` points its `$schema` at that same version. A drift
+    // between the two would make generated files fail `biome check` on a
+    // formatting change, so the two pins must be bumped together.
+    expect(BIOME_WASM_VERSION).toBe(TS_VERSIONS['@biomejs/biome']);
+  });
+});
 
 describe('requiresPythonToRuffTarget', () => {
   it('maps a lower-bound specifier to a ruff target', () => {

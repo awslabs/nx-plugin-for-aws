@@ -6,15 +6,17 @@
 /**
  * Groups of pins that must move together.
  *
- * Some packages are only correct at matching versions: a Python formatter and the
- * wasm build of it that actually runs, or an npm library and a second library
- * that depends on an exact release of it. The bumps behind those pins arrive
- * independently, so left alone a run takes one and leaves the other behind and
- * the mismatch fails the build.
+ * Packages published as a family are often only mutually resolvable at the same
+ * version, but their bumps arrive independently — so left alone a run takes one
+ * and leaves the rest behind, and the mismatch fails the build.
  *
- * A group nominates one member as the leader. Every other member is rewritten to
- * whatever the leader resolves to, so a group only ever moves as a unit — one
- * place to declare the constraint instead of a bespoke hold per pair.
+ * A group is held at the lowest version proposed across its members, so it only
+ * moves once every member can. Whichever member is furthest behind is the
+ * constraint; the rest are taken on a later run, once it catches up.
+ *
+ * This assumes the members share a version line, which is what makes "lowest"
+ * meaningful. A package coupled to something on an unrelated line (a dependant
+ * that pins it exactly, say) needs its own hold instead.
  */
 
 /** A note explaining a pin the run deliberately did not take. */
@@ -23,85 +25,49 @@ export interface LockstepNote {
 }
 
 /**
- * How a member's version is written, for groups that span registries or
- * manifests. `plain` is a bare version (npm); `pep440` is the `==x.y.z` form
- * `PY_VERSIONS` uses.
+ * The pins in one group, named as they appear in the versions tables. Members may
+ * live in different tables (e.g. the TypeScript and Python pins).
  */
-export type VersionFormat = 'plain' | 'pep440';
+export type LockstepGroup = readonly string[];
 
-export interface LockstepMember {
-  /** Key in the versions table this member lives in. */
-  readonly name: string;
-  /** Defaults to `plain`. */
-  readonly format?: VersionFormat;
-  /**
-   * Resolve the version to hold against, for a constraint that lives somewhere
-   * other than one of our own pins — e.g. a dependant's dependency range, read
-   * from the registry. Receives the merged proposed versions. Returning
-   * `undefined` leaves the group untouched and reports why.
-   */
-  readonly resolve?: (versions: Record<string, string>) => string | undefined;
-}
+/** Strip a range prefix (`==`, `^`, `~`, …) to leave a bare version. */
+const bare = (version: string): string =>
+  version.replace(/^[=~^><!\s]+/, '').trim();
 
-export interface LockstepGroup {
-  /** Shown in the report to explain why the group is coupled. */
-  readonly reason: string;
-  /**
-   * The member the rest follow. Chosen as whichever is the harder constraint to
-   * move — typically the one already installed and running, or the one whose
-   * dependant pins it exactly.
-   */
-  readonly leader: LockstepMember;
-  readonly followers: readonly LockstepMember[];
-}
-
-const stripFormat = (version: string): string =>
-  version.replace(/^[=~^><!]+/, '').trim();
-
-const applyFormat = (
-  version: string,
-  format: VersionFormat = 'plain',
-): string =>
-  format === 'pep440' ? `==${stripFormat(version)}` : stripFormat(version);
+/** The range prefix a pin was written with, so it can be preserved. */
+const prefixOf = (version: string): string =>
+  version.slice(0, version.indexOf(bare(version)));
 
 /**
- * Read a member's version from whichever of the supplied tables declares it, so
- * a group can span the TypeScript and Python pins.
+ * Compare bare `major.minor.patch[...]` versions segment by segment. Numeric
+ * segments compare numerically; anything else (prereleases) compares as a
+ * string, which is enough to order the pins these tables hold.
  */
-const readMember = (
-  member: LockstepMember,
-  tables: readonly Record<string, string>[],
-): string | undefined => {
-  for (const table of tables) {
-    const version = table[member.name];
-    if (version !== undefined) return version;
+export const compareVersions = (a: string, b: string): number => {
+  const as = bare(a).split(/[.\-+]/);
+  const bs = bare(b).split(/[.\-+]/);
+  for (let i = 0; i < Math.max(as.length, bs.length); i++) {
+    const x = as[i] ?? '';
+    const y = bs[i] ?? '';
+    if (x === y) continue;
+    const nx = Number(x);
+    const ny = Number(y);
+    if (Number.isNaN(nx) || Number.isNaN(ny)) return x < y ? -1 : 1;
+    return nx - ny;
   }
-  return undefined;
-};
-
-const writeMember = (
-  member: LockstepMember,
-  version: string,
-  tables: readonly Record<string, string>[],
-): boolean => {
-  for (const table of tables) {
-    if (member.name in table) {
-      table[member.name] = version;
-      return true;
-    }
-  }
-  return false;
+  return 0;
 };
 
 /**
- * Hold every follower in each group at the version its leader resolves to.
+ * Hold every member of each group at the lowest version proposed across it.
  *
  * Applied to the *proposed* versions before they are written, so a held pin is
- * never recorded. Followers are taken next run, once the leader catches up.
+ * never recorded. Each pin keeps the range prefix it was written with, so a
+ * `==x.y.z` Python pin stays in that form.
  *
  * @param groups the coupling declarations to enforce
- * @param tables the proposed-version tables to read and rewrite, in precedence
- *   order — a member is looked up in the first table that declares it
+ * @param tables the proposed-version tables to read and rewrite; a member is
+ *   looked up in the first table that declares it
  */
 export const holdGroupsInLockstep = (
   groups: readonly LockstepGroup[],
@@ -109,34 +75,30 @@ export const holdGroupsInLockstep = (
 ): LockstepNote[] => {
   const notes: LockstepNote[] = [];
 
-  const merged = Object.assign({}, ...[...tables].reverse()) as Record<
-    string,
-    string
-  >;
-
   for (const group of groups) {
-    const leaderVersion = group.leader.resolve
-      ? group.leader.resolve(merged)
-      : readMember(group.leader, tables);
-    if (leaderVersion === undefined) {
+    // A group can only be held where the run actually proposed something for at
+    // least two of its members; a single pin has nothing to stay in step with.
+    const members = group.flatMap((name) => {
+      const table = tables.find((candidate) => name in candidate);
+      return table ? [{ name, table }] : [];
+    });
+    if (members.length < 2) continue;
+
+    const lowest = members
+      .map(({ name, table }) => table[name])
+      .reduce((min, version) =>
+        compareVersions(version, min) < 0 ? version : min,
+      );
+
+    for (const { name, table } of members) {
+      const proposed = table[name];
+      const held = `${prefixOf(proposed)}${bare(lowest)}`;
+      if (proposed === held) continue;
+      table[name] = held;
       notes.push({
-        note: `could not resolve ${group.leader.name} to hold its group against — ${group.followers
-          .map((f) => f.name)
-          .join(', ')} left as proposed`,
-      });
-      continue;
-    }
-
-    for (const follower of group.followers) {
-      const proposed = readMember(follower, tables);
-      if (proposed === undefined) continue;
-
-      const required = applyFormat(leaderVersion, follower.format);
-      if (proposed === required) continue;
-
-      if (!writeMember(follower, required, tables)) continue;
-      notes.push({
-        note: `${follower.name} held at ${required} (${proposed} available): ${group.reason}`,
+        note: `${name} held at ${held} (${proposed} available): must move in step with ${group
+          .filter((other) => other !== name)
+          .join(', ')}`,
       });
     }
   }
