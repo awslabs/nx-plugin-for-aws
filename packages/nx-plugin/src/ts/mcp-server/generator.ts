@@ -228,7 +228,7 @@ export const tsMcpServerGenerator = async (
         executor: 'nx:run-commands',
         options: {
           commands: [
-            fs.cp(
+            fs.cpFile(
               `${targetSourceDir}/Dockerfile`,
               `${bundleOutputDir}/Dockerfile`,
             ),

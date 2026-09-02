@@ -143,7 +143,7 @@ export const addDockerScanTarget = <const D extends DependencyDeclaration>(
   const commands = [
     fs.rm(scanDir),
     fs.mkdir(scanDir),
-    fs.cp(ignoreFilePath, joinPathFragments(scanDir, TRIVY_IGNORE_FILE)),
+    fs.cpFile(ignoreFilePath, joinPathFragments(scanDir, TRIVY_IGNORE_FILE)),
   ];
 
   imageTags.forEach((imageTag, index) => {

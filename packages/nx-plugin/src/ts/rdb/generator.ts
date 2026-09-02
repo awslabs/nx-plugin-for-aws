@@ -272,15 +272,15 @@ export const tsRdbGenerator = async (
         commands: [
           fs.rm(`${relativePathToRoot}dist/{projectRoot}/bundle/migration`),
           fs.mkdir(`${relativePathToRoot}dist/{projectRoot}/bundle/migration`),
-          fs.cp(
+          fs.cpDir(
             'prisma',
             `${relativePathToRoot}dist/{projectRoot}/bundle/migration/prisma`,
           ),
-          fs.cp(
+          fs.cpFile(
             'prisma.config.ts',
             `${relativePathToRoot}dist/{projectRoot}/bundle/migration/prisma.config.ts`,
           ),
-          fs.cp(
+          fs.cpFile(
             'Dockerfile',
             `${relativePathToRoot}dist/{projectRoot}/bundle/migration/Dockerfile`,
           ),

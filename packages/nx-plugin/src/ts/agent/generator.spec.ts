@@ -367,7 +367,7 @@ describe('ts#agent generator', () => {
     // Check that docker target was added
     expect(projectConfig.targets['agent-docker']).toBeDefined();
     expect(projectConfig.targets['agent-docker'].options.commands).toEqual([
-      'ncp apps/test-project/src/agent/Dockerfile dist/apps/test-project/bundle/agent/test-project-agent/Dockerfile',
+      'shx cp apps/test-project/src/agent/Dockerfile dist/apps/test-project/bundle/agent/test-project-agent/Dockerfile',
       'docker build --platform linux/arm64 -t proj-test-project-agent:latest dist/apps/test-project/bundle/agent/test-project-agent',
     ]);
     expect(projectConfig.targets['agent-docker'].options.parallel).toBe(false);
@@ -386,9 +386,9 @@ describe('ts#agent generator', () => {
       executor: 'nx:run-commands',
       options: {
         commands: [
-          'rimraf dist/apps/test-project/trivy/proj-test-project-agent-latest',
-          'make-dir dist/apps/test-project/trivy/proj-test-project-agent-latest',
-          'ncp apps/test-project/.trivyignore dist/apps/test-project/trivy/proj-test-project-agent-latest/.trivyignore',
+          'shx rm -rf dist/apps/test-project/trivy/proj-test-project-agent-latest',
+          'shx mkdir -p dist/apps/test-project/trivy/proj-test-project-agent-latest',
+          'shx cp apps/test-project/.trivyignore dist/apps/test-project/trivy/proj-test-project-agent-latest/.trivyignore',
           'docker save -o dist/apps/test-project/trivy/proj-test-project-agent-latest/image-0.tar proj-test-project-agent:latest',
           `docker run --rm -v "./dist/apps/test-project/trivy/proj-test-project-agent-latest":/scan public.ecr.aws/aquasecurity/trivy:${CONTAINER_VERSIONS.trivy} image --input /scan/image-0.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q`,
         ],
@@ -1044,9 +1044,9 @@ describe('ts#agent generator', () => {
       '{workspaceRoot}/dist/apps/test-project/package/agent/test-project-agent',
     ]);
     expect(packageTarget.options.commands).toEqual([
-      'rimraf dist/apps/test-project/package/agent/test-project-agent',
-      'make-dir dist/apps/test-project/package/agent/test-project-agent',
-      'ncp dist/apps/test-project/bundle/agent/test-project-agent/index.js dist/apps/test-project/package/agent/test-project-agent/index.js',
+      'shx rm -rf dist/apps/test-project/package/agent/test-project-agent',
+      'shx mkdir -p dist/apps/test-project/package/agent/test-project-agent',
+      'shx cp dist/apps/test-project/bundle/agent/test-project-agent/index.js dist/apps/test-project/package/agent/test-project-agent/index.js',
       `npm install --prefix dist/apps/test-project/package/agent/test-project-agent --no-save --no-audit --no-fund --omit=dev @aws/aws-distro-opentelemetry-node-autoinstrumentation@${TS_VERSIONS['@aws/aws-distro-opentelemetry-node-autoinstrumentation']}`,
     ]);
 

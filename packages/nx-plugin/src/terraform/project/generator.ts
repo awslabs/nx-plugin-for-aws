@@ -54,7 +54,7 @@ import type { TerraformProjectGeneratorSchema } from './schema';
 export const DEPENDENCIES = declareDependencies()({
   ts: [
     { name: '@nx-extend/terraform', dev: true, root: true },
-    { name: 'make-dir-cli', dev: true, root: true },
+    { name: 'shx', dev: true, root: true },
     { name: 'tsx', dev: true, root: true },
     { name: '@aws-sdk/client-s3', dev: true, root: true },
     { name: '@aws-sdk/client-sts', dev: true, root: true },
@@ -247,7 +247,7 @@ export async function terraformProjectGenerator(
       configurations: {
         dev: {
           commands: [
-            `make-dir ${tfDistDir}`,
+            `shx mkdir -p ${tfDistDir}`,
             `terraform plan -var-file=env/dev.tfvars -out=${tfDistDir}/dev.tfplan`,
           ],
         },
@@ -286,7 +286,10 @@ export async function terraformProjectGenerator(
       configurations: {
         dev: {
           commands: [
-            { command: `make-dir ${pluginCacheDir}`, forwardAllArgs: false },
+            {
+              command: `shx mkdir -p ${pluginCacheDir}`,
+              forwardAllArgs: false,
+            },
             'terraform init',
           ],
         },
@@ -336,7 +339,7 @@ export async function terraformProjectGenerator(
       outputs: [],
       options: {
         commands: [
-          { command: `make-dir ${pluginCacheDir}`, forwardAllArgs: false },
+          { command: `shx mkdir -p ${pluginCacheDir}`, forwardAllArgs: false },
           'terraform init -backend=false',
           'terraform test',
         ],

@@ -138,8 +138,8 @@ const projectJsonWithPackageTarget = (adot = '0.9.0') => ({
       executor: 'nx:run-commands',
       options: {
         commands: [
-          'rimraf dist/packages/agent/package/agent/agent',
-          'make-dir dist/packages/agent/package/agent/agent',
+          'shx rm -rf dist/packages/agent/package/agent/agent',
+          'shx mkdir -p dist/packages/agent/package/agent/agent',
           `npm install --prefix dist/packages/agent/package/agent/agent --no-save --no-audit --no-fund --omit=dev --ignore-scripts @aws/aws-distro-opentelemetry-node-autoinstrumentation@${adot}`,
         ],
         parallel: false,

@@ -111,11 +111,11 @@ describe('ts#rdb generator', () => {
       executor: 'nx:run-commands',
       options: {
         commands: [
-          'rimraf ../../dist/{projectRoot}/bundle/migration',
-          'make-dir ../../dist/{projectRoot}/bundle/migration',
-          'ncp prisma ../../dist/{projectRoot}/bundle/migration/prisma',
-          'ncp prisma.config.ts ../../dist/{projectRoot}/bundle/migration/prisma.config.ts',
-          'ncp Dockerfile ../../dist/{projectRoot}/bundle/migration/Dockerfile',
+          'shx rm -rf ../../dist/{projectRoot}/bundle/migration',
+          'shx mkdir -p ../../dist/{projectRoot}/bundle/migration',
+          'shx cp -R prisma/. ../../dist/{projectRoot}/bundle/migration/prisma',
+          'shx cp prisma.config.ts ../../dist/{projectRoot}/bundle/migration/prisma.config.ts',
+          'shx cp Dockerfile ../../dist/{projectRoot}/bundle/migration/Dockerfile',
           'rolldown -c rolldown.config.ts',
         ],
         cwd: '{projectRoot}',

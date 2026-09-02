@@ -466,10 +466,10 @@ dev-dependencies = []
     );
     expect(projectConfig.targets['mcp-server-docker'].options.commands).toEqual(
       [
-        'rimraf dist/apps/test-project/docker/test-project-mcp-server',
-        'make-dir dist/apps/test-project/docker/test-project-mcp-server',
-        'ncp dist/apps/test-project/bundle-arm dist/apps/test-project/docker/test-project-mcp-server',
-        'ncp apps/test-project/proj_test_project/mcp_server/Dockerfile dist/apps/test-project/docker/test-project-mcp-server/Dockerfile',
+        'shx rm -rf dist/apps/test-project/docker/test-project-mcp-server',
+        'shx mkdir -p dist/apps/test-project/docker/test-project-mcp-server',
+        'shx cp -R dist/apps/test-project/bundle-arm/. dist/apps/test-project/docker/test-project-mcp-server',
+        'shx cp apps/test-project/proj_test_project/mcp_server/Dockerfile dist/apps/test-project/docker/test-project-mcp-server/Dockerfile',
         'docker build --platform linux/arm64 -t proj-test-project-mcp-server:latest dist/apps/test-project/docker/test-project-mcp-server',
       ],
     );
@@ -498,9 +498,9 @@ dev-dependencies = []
       executor: 'nx:run-commands',
       options: {
         commands: [
-          'rimraf dist/apps/test-project/trivy/proj-test-project-mcp-server-latest',
-          'make-dir dist/apps/test-project/trivy/proj-test-project-mcp-server-latest',
-          'ncp apps/test-project/.trivyignore dist/apps/test-project/trivy/proj-test-project-mcp-server-latest/.trivyignore',
+          'shx rm -rf dist/apps/test-project/trivy/proj-test-project-mcp-server-latest',
+          'shx mkdir -p dist/apps/test-project/trivy/proj-test-project-mcp-server-latest',
+          'shx cp apps/test-project/.trivyignore dist/apps/test-project/trivy/proj-test-project-mcp-server-latest/.trivyignore',
           'docker save -o dist/apps/test-project/trivy/proj-test-project-mcp-server-latest/image-0.tar proj-test-project-mcp-server:latest',
           `docker run --rm -v "./dist/apps/test-project/trivy/proj-test-project-mcp-server-latest":/scan public.ecr.aws/aquasecurity/trivy:${CONTAINER_VERSIONS.trivy} image --input /scan/image-0.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q`,
         ],

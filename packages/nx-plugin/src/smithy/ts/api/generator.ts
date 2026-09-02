@@ -309,7 +309,7 @@ export const tsSmithyApiGenerator = async (
       commands: [
         cmd.rm(generatedSrcDirFromRoot),
         cmd.mkdir(generatedSrcDirFromRoot),
-        cmd.cp(
+        cmd.cpDir(
           joinPathFragments('dist', modelProjectConfig.root, 'build', 'ssdk'),
           joinPathFragments(generatedSrcDirFromRoot, 'ssdk'),
         ),

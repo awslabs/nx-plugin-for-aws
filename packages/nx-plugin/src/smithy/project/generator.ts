@@ -110,7 +110,7 @@ export const smithyCompileCommands = (
   `${smithyCliCommand()} build -c {projectRoot}/smithy-build.json --output ${SMITHY_OUT_DIR}`,
   ...(type === 'shapes'
     ? [
-        cmd.cp(
+        cmd.cpFile(
           `${SOURCE_PROJECTION}/model/model.json`,
           `${BUILD_DIR}/model.json`,
         ),

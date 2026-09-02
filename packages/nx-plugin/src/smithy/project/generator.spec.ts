@@ -56,11 +56,11 @@ describe('smithyProjectGenerator', () => {
     // Verify compile target configuration: the model build only
     expect(projectConfig.targets.compile.executor).toBe('nx:run-commands');
     expect(projectConfig.targets.compile.options.commands).toEqual([
-      'rimraf dist/{projectRoot}/build',
-      'rimraf dist/{projectRoot}/smithy',
-      'make-dir dist/{projectRoot}/build',
+      'shx rm -rf dist/{projectRoot}/build',
+      'shx rm -rf dist/{projectRoot}/smithy',
+      'shx mkdir -p dist/{projectRoot}/build',
       `npx -y mise@${TS_VERSIONS.mise} exec smithy@${MISE_VERSIONS.smithy} -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy`,
-      'cpy "dist/{projectRoot}/smithy/source/openapi/*.openapi.json" dist/{projectRoot}/build/openapi --flat --rename=openapi.json',
+      'shx mkdir -p dist/{projectRoot}/build/openapi && shx cp "dist/{projectRoot}/smithy/source/openapi/*.openapi.json" dist/{projectRoot}/build/openapi/openapi.json',
     ]);
     // Per artifact rather than the whole build dir, which generate-ssdk shares
     expect(projectConfig.targets.compile.outputs).toEqual([
@@ -456,11 +456,11 @@ describe('smithyProjectGenerator', () => {
       const projectConfig = readJson(tree, 'test-shapes/project.json');
       expect(projectConfig.targets.build.dependsOn).toEqual(['compile']);
       expect(projectConfig.targets.compile.options.commands).toEqual([
-        'rimraf dist/{projectRoot}/build',
-        'rimraf dist/{projectRoot}/smithy',
-        'make-dir dist/{projectRoot}/build',
+        'shx rm -rf dist/{projectRoot}/build',
+        'shx rm -rf dist/{projectRoot}/smithy',
+        'shx mkdir -p dist/{projectRoot}/build',
         `npx -y mise@${TS_VERSIONS.mise} exec smithy@${MISE_VERSIONS.smithy} -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy`,
-        'ncp dist/{projectRoot}/smithy/source/model/model.json dist/{projectRoot}/build/model.json',
+        'shx cp dist/{projectRoot}/smithy/source/model/model.json dist/{projectRoot}/build/model.json',
       ]);
     });
 
