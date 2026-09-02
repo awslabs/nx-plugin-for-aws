@@ -41,6 +41,7 @@ import {
   JAVA_ARTIFACTS,
   JAVA_VERSIONS,
   LAMBDA_RUNTIME_VERSIONS,
+  LOCKSTEP_GROUPS,
   MISE_TOOLS,
   MISE_VERSIONS,
   PY_VERSIONS,
@@ -48,10 +49,7 @@ import {
   TS_VERSIONS,
   VENDORED_VERSIONS,
 } from '../packages/nx-plugin/src/utils/versions';
-import {
-  type LockstepGroup,
-  holdGroupsInLockstep,
-} from '../packages/nx-plugin/src/utils/version-lockstep/lockstep';
+import { holdGroupsInLockstep } from '../packages/nx-plugin/src/utils/version-lockstep/lockstep';
 import { refreshShadcnTemplates } from './update-versions/shadcn';
 
 interface VersionChange {
@@ -276,16 +274,6 @@ const getUpdatedPythonVersions = (tmpDir: string): Record<string, string> => {
   return updatedVersions;
 };
 
-/**
- * Pins that must move as a unit. Members must share a version line.
- */
-const LOCKSTEP_GROUPS: readonly LockstepGroup[] = [
-  // A duplicate `@ag-ui/client` fails every generated website with TS2322.
-  ['@ag-ui/client', '@ag-ui/core', '@ag-ui/encoder'],
-  // The wasm bindings format generated files; the CLI checks them.
-  ['@biomejs/wasm-nodejs', '@biomejs/biome'],
-  ['@astral-sh/ruff-wasm-nodejs', 'ruff'],
-];
 
 /**
  * Compares two `major.minor.patch` version strings.
