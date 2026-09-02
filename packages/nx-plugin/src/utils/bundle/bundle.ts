@@ -18,6 +18,8 @@ import {
   type MustDeclare,
 } from '../declared-dependencies.js';
 import { addDependenciesToPackageJson } from '../dependencies.js';
+import { ROLLDOWN_CONFIG_BUNDLE_GLOB } from '../format.js';
+import { updateGitIgnore } from '../git.js';
 import {
   addArtifactDependencyToTargets,
   addDependencyToTargetIfNotPresent,
@@ -164,6 +166,16 @@ export const addTypeScriptBundleTarget = async <
     project.root,
     {},
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
+  );
+
+  // Loading a TypeScript config bundles it to `rolldown.config.<hash>.js` beside
+  // itself, imports it, then unlinks it. Kept out of git so the transient file
+  // can never be committed, nor picked up by `license#sync`, which builds its
+  // candidate set from git-visible files.
+  updateGitIgnore(tree, project.root, (patterns) =>
+    patterns.includes(ROLLDOWN_CONFIG_BUNDLE_GLOB)
+      ? patterns
+      : [...patterns, ROLLDOWN_CONFIG_BUNDLE_GLOB],
   );
 
   // Add the bundle target
