@@ -20,6 +20,7 @@ import {
   parsePipRequirementsLine,
   VersionOperator,
 } from 'pip-requirements-js';
+import fastGlob from 'fast-glob';
 import { parseDocument } from 'yaml';
 import { applyGritQL } from '../packages/nx-plugin/src/utils/ast';
 import {
@@ -75,8 +76,23 @@ interface ChangeGroup {
   changes: ReportChange[];
 }
 
-/** Manifests whose npm dependencies are resolved alongside the vended pins. */
-const REPO_MANIFESTS = ['package.json', 'packages/nx-plugin/package.json'];
+/**
+ * Manifests whose npm dependencies are resolved alongside the vended pins: the
+ * workspace root plus every package `pnpm-workspace.yaml` lists.
+ */
+const repoManifests = (): string[] => {
+  const workspace = parseDocument(readFileSync('pnpm-workspace.yaml', 'utf-8'));
+  const patterns = (workspace.toJS().packages ?? []) as string[];
+  return [
+    'package.json',
+    ...fastGlob
+      .sync(
+        patterns.map((pattern) => `${pattern}/package.json`),
+        { onlyFiles: true },
+      )
+      .sort(),
+  ];
+};
 
 /**
  * Every npm dependency `manifestPath` declares, including whatever its
@@ -166,7 +182,7 @@ const getUpdatedTypeScriptVersions = (
   const packageJsonPath = join(tsDir, 'package.json');
   const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
   packageJson.dependencies = {
-    ...Object.assign({}, ...REPO_MANIFESTS.map(readManifestDependencies)),
+    ...Object.assign({}, ...repoManifests().map(readManifestDependencies)),
     ...TS_VERSIONS,
   };
   writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2));
@@ -670,7 +686,7 @@ const main = async () => {
     );
 
     // This repo's manifests, from the same pass as the vended pins.
-    const manifestChanges = REPO_MANIFESTS.flatMap((manifestPath) =>
+    const manifestChanges = repoManifests().flatMap((manifestPath) =>
       applyManifestVersions(tree, manifestPath, updatedTsVersions),
     );
 
