@@ -84,17 +84,19 @@ describe('CDK command construction', () => {
     buildCdkCommand = mod.buildCdkCommand;
   });
 
-  it('should build basic deploy command with default --require-approval', () => {
+  it('should build basic deploy command with default --require-approval and --express', () => {
     expect(buildCdkCommand('deploy', ['my-app-dev/*'])).toEqual([
       'cdk',
       'deploy',
       '--require-approval=never',
+      '--express',
       'my-app-dev/*',
     ]);
   });
 
-  // `cdk destroy` has no --require-approval option, so it is not added.
-  it('should build destroy command without --require-approval', () => {
+  // `cdk destroy` has no --require-approval or --express option, so neither is
+  // added.
+  it('should build destroy command without --require-approval or --express', () => {
     expect(buildCdkCommand('destroy', ['my-app-dev/*'])).toEqual([
       'cdk',
       'destroy',
@@ -120,6 +122,7 @@ describe('CDK command construction', () => {
     ).toEqual([
       'cdk',
       'deploy',
+      '--express',
       '--require-approval=broadening',
       'my-app-dev/*',
     ]);
@@ -128,10 +131,16 @@ describe('CDK command construction', () => {
   it('should respect bare --require-approval flag', () => {
     expect(
       buildCdkCommand('deploy', ['--require-approval', 'my-app-dev/*']),
-    ).toEqual(['cdk', 'deploy', '--require-approval', 'my-app-dev/*']);
+    ).toEqual([
+      'cdk',
+      'deploy',
+      '--express',
+      '--require-approval',
+      'my-app-dev/*',
+    ]);
   });
 
-  it('should pass through --express when opted into explicitly', () => {
+  it('should not duplicate --express when user passes it explicitly', () => {
     expect(buildCdkCommand('deploy', ['--express', 'my-app-dev/*'])).toEqual([
       'cdk',
       'deploy',
@@ -141,11 +150,24 @@ describe('CDK command construction', () => {
     ]);
   });
 
+  it('should allow opting out of express mode with --no-express', () => {
+    expect(buildCdkCommand('deploy', ['--no-express', 'my-app-dev/*'])).toEqual(
+      [
+        'cdk',
+        'deploy',
+        '--require-approval=never',
+        '--no-express',
+        'my-app-dev/*',
+      ],
+    );
+  });
+
   it('should handle empty remaining args', () => {
     expect(buildCdkCommand('deploy', [])).toEqual([
       'cdk',
       'deploy',
       '--require-approval=never',
+      '--express',
     ]);
   });
 
@@ -156,6 +178,7 @@ describe('CDK command construction', () => {
       'cdk',
       'deploy',
       '--require-approval=never',
+      '--express',
       'my-app-dev/*',
       '--verbose',
       '--ci',
@@ -165,9 +188,16 @@ describe('CDK command construction', () => {
   it('should handle --require-approval=never explicitly', () => {
     expect(
       buildCdkCommand('deploy', ['--require-approval=never', 'my-app-dev/*']),
-    ).toEqual(['cdk', 'deploy', '--require-approval=never', 'my-app-dev/*']);
+    ).toEqual([
+      'cdk',
+      'deploy',
+      '--express',
+      '--require-approval=never',
+      'my-app-dev/*',
+    ]);
   });
 
+  // Express mode is only defaulted for deploy, not other actions.
   it('should work with any action string', () => {
     expect(buildCdkCommand('synth', ['my-app-dev/*'])).toEqual([
       'cdk',

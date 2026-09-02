@@ -207,7 +207,7 @@ export async function tsInfraGenerator(
             })
           : withCdkEnv({
               cwd: '{projectRoot}',
-              command: 'cdk deploy --require-approval=never',
+              command: 'cdk deploy --require-approval=never --express',
             }),
       };
       config.targets['deploy-sandbox'] = {
@@ -219,7 +219,7 @@ export async function tsInfraGenerator(
             })
           : withCdkEnv({
               cwd: '{projectRoot}',
-              command: `cdk deploy --require-approval=never ${sandboxStagePattern}`,
+              command: `cdk deploy --require-approval=never --express ${sandboxStagePattern}`,
             }),
       };
       config.targets['deploy-ci'] = {

@@ -85,7 +85,7 @@ describe('infra generator', () => {
       executor: 'nx:run-commands',
       options: {
         cwd: '{projectRoot}',
-        command: 'cdk deploy --require-approval=never',
+        command: 'cdk deploy --require-approval=never --express',
       },
       dependsOn: ['^assemble', 'compile'],
     });
@@ -93,7 +93,8 @@ describe('infra generator', () => {
       executor: 'nx:run-commands',
       options: {
         cwd: '{projectRoot}',
-        command: 'cdk deploy --require-approval=never "proj-test-sandbox/*"',
+        command:
+          'cdk deploy --require-approval=never --express "proj-test-sandbox/*"',
       },
       dependsOn: ['^assemble', 'compile'],
     });
@@ -309,7 +310,7 @@ describe('infra generator', () => {
     await tsInfraGenerator(tree, options);
     const config = readProjectConfiguration(tree, '@proj/test');
     expect(config.targets.deploy.options.command).toBe(
-      'cdk deploy --require-approval=never',
+      'cdk deploy --require-approval=never --express',
     );
     expect(config.targets.deploy.options.cwd).toBe('{projectRoot}');
     expect(config.targets.destroy.options.command).toBe('cdk destroy');
@@ -342,9 +343,13 @@ describe('infra generator', () => {
     );
   });
 
-  // `cdk destroy` has no --require-approval option, so only deploys carry it.
+  // `cdk destroy` has no --require-approval or --express option, so only
+  // deploys carry them.
   describe.each([
-    { action: 'deploy', cdkCommand: 'cdk deploy --require-approval=never' },
+    {
+      action: 'deploy',
+      cdkCommand: 'cdk deploy --require-approval=never --express',
+    },
     { action: 'destroy', cdkCommand: 'cdk destroy' },
   ])('$action-sandbox target', ({ action, cdkCommand }) => {
     const target = `${action}-sandbox`;
