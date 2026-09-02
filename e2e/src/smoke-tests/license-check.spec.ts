@@ -37,6 +37,10 @@ describe('smoke test - license-check', () => {
       cwd: projectRoot,
       env: {
         NX_DAEMON: 'false',
+        // The installs below skip build scripts, since only license metadata is
+        // read. That leaves packages unbuilt, which pnpm otherwise refuses to
+        // install over on the next install a generator runs.
+        PNPM_CONFIG_STRICT_DEP_BUILDS: 'false',
       },
     };
 

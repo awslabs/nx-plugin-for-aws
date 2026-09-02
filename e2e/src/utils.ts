@@ -65,6 +65,9 @@ export async function runCLI(
             // every lane. Drop it so each spawned package manager sets its
             // own.
             npm_config_user_agent: undefined,
+            // The local build is published to verdaccio moments before a test
+            // resolves it, and pnpm's release-age cutoff would hide it.
+            PNPM_CONFIG_MINIMUM_RELEASE_AGE: '0',
             ...opts.env,
           },
           shell: true,
