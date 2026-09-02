@@ -120,6 +120,34 @@ const terraformWithQuotedScript = (boto3 = '1.40.0') =>
 }
 `;
 
+/**
+ * A `project.json` carrying the package target a code-packaged AgentCore
+ * component gets, which vendors ADOT into the built package.
+ */
+const projectJsonWithPackageTarget = (adot = '0.9.0') => ({
+  name: 'agent',
+  root: 'packages/agent',
+  // The vendoring pins are ownership-scoped, so the metadata recording which
+  // generator owns ADOT has to survive this fixture replacing the file.
+  metadata: {
+    generator: 'ts#agent',
+    components: [{ generator: 'ts#mcp-server' }],
+  },
+  targets: {
+    'agent-package': {
+      executor: 'nx:run-commands',
+      options: {
+        commands: [
+          'rimraf dist/packages/agent/package/agent/agent',
+          'make-dir dist/packages/agent/package/agent/agent',
+          `npm install --prefix dist/packages/agent/package/agent/agent --no-save --no-audit --no-fund --omit=dev --ignore-scripts @aws/aws-distro-opentelemetry-node-autoinstrumentation@${adot}`,
+        ],
+        parallel: false,
+      },
+    },
+  },
+});
+
 /** A `project.json` carrying the trivy scan target the docker helper adds. */
 const projectJsonWithTrivyTarget = (trivy = '0.60.0') => ({
   name: 'agent',
@@ -542,6 +570,78 @@ COPY --from=builder /out /
       const projectJson = tree.read('packages/agent/project.json', 'utf-8')!;
       expect(projectJson).toContain('--severity HIGH,CRITICAL');
       expect(projectJson).toContain('rm -rf dist/packages/agent/trivy/agent');
+    });
+
+    // The ADOT the code package target vendors sits in a target command rather
+    // than in any manifest, so nothing but this sync reaches it.
+    it('should upgrade the ADOT a code package target vendors', async () => {
+      writeJson(
+        tree,
+        'packages/agent/project.json',
+        projectJsonWithPackageTarget(),
+      );
+
+      await syncVendedVersions(tree);
+
+      expect(tree.read('packages/agent/project.json', 'utf-8')).toContain(
+        `@aws/aws-distro-opentelemetry-node-autoinstrumentation@${VENDED_ADOT}`,
+      );
+    });
+
+    it('should leave the rest of a vendoring command untouched', async () => {
+      writeJson(
+        tree,
+        'packages/agent/project.json',
+        projectJsonWithPackageTarget(),
+      );
+
+      await syncVendedVersions(tree);
+
+      const projectJson = tree.read('packages/agent/project.json', 'utf-8')!;
+      expect(projectJson).toContain('--ignore-scripts');
+      expect(projectJson).toContain('--omit=dev');
+      expect(projectJson).toContain(
+        '--prefix dist/packages/agent/package/agent/agent',
+      );
+    });
+
+    it('should leave a vendored version the user raised alone', async () => {
+      writeJson(
+        tree,
+        'packages/agent/project.json',
+        projectJsonWithPackageTarget('99.0.0'),
+      );
+
+      await syncVendedVersions(tree);
+
+      expect(tree.read('packages/agent/project.json', 'utf-8')).toContain(
+        'aws-distro-opentelemetry-node-autoinstrumentation@99.0.0',
+      );
+    });
+
+    it('should leave a package no generator owns alone', async () => {
+      writeJson(tree, 'packages/agent/project.json', {
+        name: 'agent',
+        root: 'packages/agent',
+        metadata: {
+          generator: 'ts#agent',
+          components: [{ generator: 'ts#mcp-server' }],
+        },
+        targets: {
+          custom: {
+            executor: 'nx:run-commands',
+            options: {
+              commands: ['npm install --prefix out some-other-package@1.0.0'],
+            },
+          },
+        },
+      });
+
+      await syncVendedVersions(tree);
+
+      expect(tree.read('packages/agent/project.json', 'utf-8')).toContain(
+        'some-other-package@1.0.0',
+      );
     });
 
     it('should leave a trivy version the user raised alone', async () => {

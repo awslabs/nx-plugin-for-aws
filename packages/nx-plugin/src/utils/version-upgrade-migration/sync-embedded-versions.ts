@@ -351,6 +351,20 @@ const UVX_PIN_SHAPES: readonly ((name: string) => string)[] = [
 ];
 
 /**
+ * The way a `project.json` target command vendors an npm package into a build
+ * output, e.g. the AWS Distro for OpenTelemetry a code-packaged AgentCore
+ * runtime carries.
+ *
+ * Reuses the `Dockerfile` install shape: both are shell `npm install` lines, and
+ * a command string being JSON only narrows what can terminate the version — which
+ * `VERSION_TERMINATORS` already covers. Driven off the owned set like every other
+ * pin, so a package a later release vendors this way is covered without a change
+ * here.
+ */
+const TARGET_NPM_INSTALL_SHAPE = (name: string): string =>
+  `npm (?:install|i|add)[^\\n]*?\\s${name}@([0-9][^${VERSION_TERMINATORS}']*)`;
+
+/**
  * Sync the pinned tools a `project.json` target command runs: a container image,
  * and the Python versions a `uvx` invocation pins.
  *
@@ -364,7 +378,10 @@ const UVX_PIN_SHAPES: readonly ((name: string) => string)[] = [
  * the project, so there is no dependency for a generator to own. A version is only
  * rewritten where this release vends that exact package at a higher one.
  */
-const syncTargetToolPins = async (tree: Tree): Promise<string[]> => {
+const syncTargetToolPins = async (
+  tree: Tree,
+  owned: OwnedDependencies,
+): Promise<string[]> => {
   const projectJsons: string[] = [];
 
   visitNotIgnoredFiles(tree, '.', (path) => {
@@ -403,7 +420,21 @@ const syncTargetToolPins = async (tree: Tree): Promise<string[]> => {
 
   const skipped: string[] = [];
   for (const path of projectJsons) {
-    if ((await applyPins(tree, path, pins)).skipped) {
+    // The vendoring pins are ownership-scoped, unlike the tooling ones above: a
+    // vendored package is declared by the generator that vendors it, so a
+    // package the user pinned in a command of their own is never rewritten.
+    const vendoringPins: EmbeddedPin[] = [];
+    for (const name of ownedForFile(owned, path).ts) {
+      const vended = vendedTsVersion(name);
+      if (vended) {
+        vendoringPins.push({
+          pattern: TARGET_NPM_INSTALL_SHAPE(escapeRegExp(name)),
+          vended,
+        });
+      }
+    }
+
+    if ((await applyPins(tree, path, [...pins, ...vendoringPins])).skipped) {
       skipped.push(path);
     }
   }
@@ -469,6 +500,6 @@ export const syncEmbeddedVersions = async (
 ): Promise<string[]> => [
   ...(await syncDockerfiles(tree, owned)),
   ...(await syncTerraformScriptPins(tree, owned)),
-  ...(await syncTargetToolPins(tree)),
+  ...(await syncTargetToolPins(tree, owned)),
   ...(await syncSmithyMavenPins(tree)),
 ];
