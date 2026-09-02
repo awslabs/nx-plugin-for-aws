@@ -85,7 +85,7 @@ describe('infra generator', () => {
       executor: 'nx:run-commands',
       options: {
         cwd: '{projectRoot}',
-        command: 'cdk deploy --require-approval=never',
+        command: 'cdk deploy --require-approval=never --express',
       },
       dependsOn: ['^assemble', 'compile'],
     });
@@ -93,7 +93,8 @@ describe('infra generator', () => {
       executor: 'nx:run-commands',
       options: {
         cwd: '{projectRoot}',
-        command: 'cdk deploy --require-approval=never "proj-test-sandbox/*"',
+        command:
+          'cdk deploy --require-approval=never "proj-test-sandbox/*" --express',
       },
       dependsOn: ['^assemble', 'compile'],
     });
@@ -309,7 +310,7 @@ describe('infra generator', () => {
     await tsInfraGenerator(tree, options);
     const config = readProjectConfiguration(tree, '@proj/test');
     expect(config.targets.deploy.options.command).toBe(
-      'cdk deploy --require-approval=never',
+      'cdk deploy --require-approval=never --express',
     );
     expect(config.targets.deploy.options.cwd).toBe('{projectRoot}');
     expect(config.targets.destroy.options.command).toBe('cdk destroy');
@@ -342,11 +343,17 @@ describe('infra generator', () => {
     );
   });
 
-  // `cdk destroy` has no --require-approval option, so only deploys carry it.
+  // `cdk destroy` has no --require-approval or --express option, so only
+  // deploys carry them.
   describe.each([
-    { action: 'deploy', cdkCommand: 'cdk deploy --require-approval=never' },
-    { action: 'destroy', cdkCommand: 'cdk destroy' },
-  ])('$action-sandbox target', ({ action, cdkCommand }) => {
+    {
+      action: 'deploy',
+      cdkCommand: 'cdk deploy --require-approval=never',
+      // Trails the stage pattern so the pattern stays the first positional arg.
+      suffix: ' --express',
+    },
+    { action: 'destroy', cdkCommand: 'cdk destroy', suffix: '' },
+  ])('$action-sandbox target', ({ action, cdkCommand, suffix }) => {
     const target = `${action}-sandbox`;
 
     // The stage pattern must match the stage main.ts instantiates, otherwise
@@ -373,7 +380,7 @@ describe('infra generator', () => {
 
         expect(mainTs).toContain(`new ApplicationStage(app, '${stage}'`);
         expect(config.targets[target].options.command).toBe(
-          `${cdkCommand} "${stage}/*"`,
+          `${cdkCommand} "${stage}/*"${suffix}`,
         );
       },
     );
@@ -414,6 +421,7 @@ describe('infra generator', () => {
     it('should use tsx infra-deploy/infra-destroy for deploy and destroy targets', async () => {
       await tsInfraGenerator(tree, stageConfigOptions);
       const config = readProjectConfiguration(tree, '@proj/test');
+      // No --express: this target deploys whichever stage is named.
       expect(config.targets.deploy.options.command).toBe(
         'tsx packages/common/scripts/src/infra/infra-deploy.ts packages/test',
       );
@@ -428,9 +436,10 @@ describe('infra generator', () => {
         await tsInfraGenerator(tree, stageConfigOptions);
         const config = readProjectConfiguration(tree, '@proj/test');
         // The stage is the first positional arg after the project path, which is
-        // where the script looks it up in stages.config.ts.
+        // where the script looks it up in stages.config.ts - so any flags must
+        // trail it.
         expect(config.targets[`${action}-sandbox`].options.command).toBe(
-          `tsx packages/common/scripts/src/infra/infra-${action}.ts packages/test "proj-test-sandbox/*"`,
+          `tsx packages/common/scripts/src/infra/infra-${action}.ts packages/test "proj-test-sandbox/*"${action === 'deploy' ? ' --express' : ''}`,
         );
         expect(config.targets[`${action}-sandbox`].dependsOn).toEqual([
           '^assemble',

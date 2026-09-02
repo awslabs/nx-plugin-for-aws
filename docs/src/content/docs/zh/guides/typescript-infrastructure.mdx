@@ -102,7 +102,7 @@ new ApplicationStage(app, 'my-app-sandbox', {
 
 `env` 属性告诉 CDK 要部署到哪个 AWS 账户和区域。`CDK_DEFAULT_ACCOUNT` 和 `CDK_DEFAULT_REGION` 由 CDK CLI 从您的活动 AWS 凭证自动解析。有关更多详细信息，请参阅 [CDK 环境文档](https://docs.aws.amazon.com/cdk/v2/guide/environments.html)。
 
-沙箱阶段是 <Link path="guides/typescript-infrastructure#deploying-your-sandbox-stage">`deploy-sandbox`</Link> 和 <Link path="guides/typescript-infrastructure#tearing-down-your-sandbox-stage">`destroy-sandbox`</Link> 目标操作的阶段。
+沙箱阶段是 <Link path="zh/guides/typescript-infrastructure#deploying-your-sandbox-stage">`deploy-sandbox`</Link> 和 <Link path="zh/guides/typescript-infrastructure#tearing-down-your-sandbox-stage">`destroy-sandbox`</Link> 目标操作的阶段。
 
 如果您使用 `stageConfig` 生成，`main.ts` 会从集中配置文件中读取账户和区域，当没有设置配置时回退到环境变量：
 
@@ -321,6 +321,8 @@ export class ApplicationStack extends Stack {
 
 您将在根 `dist` 文件夹中找到您合成的云程序集，位于 `dist/packages/<my-infra-project>/cdk.out` 下。
 
+`synth` 依赖于 `^assemble`，因此合成会构建您的堆栈部署的工件，例如 Lambda 包、容器镜像和生成的规范，而无需运行每个上游项目的检查、测试和类型检查门控。有关 `assemble` 的更多详细信息，请参阅 <Link path="guides/typescript-project#assembling">组装</Link>。
+
 ## 安全测试
 
 一个 `checkov` 目标被添加到您的项目中，它使用 [Checkov](https://www.checkov.io/) 对您的基础设施运行安全检查。
@@ -378,10 +380,10 @@ npx cdk bootstrap aws://<account-id>/<region>
 您的项目有三个部署目标，每个都适合不同的情况：
 
 | 目标           | 用途                                                                       |
-| ---------------- | -------------------------------------------------------------------------------- |
-| `deploy-sandbox` | 在开发期间部署您自己的沙箱阶段。不需要阶段参数。    |
-| `deploy`         | 通过命名您想要的阶段或堆栈来部署任何阶段。                      |
-| `deploy-ci`      | 从 CI/CD 管道部署，使用预合成的云程序集。          |
+| ---------------- | ------------------------------------------------------------------------------------------------------ |
+| `deploy-sandbox` | 在开发期间部署您自己的沙箱阶段。不需要阶段参数。使用快速模式。        |
+| `deploy`         | 通过命名您想要的阶段或堆栈来部署任何阶段。                                            |
+| `deploy-ci`      | 从 CI/CD 管道部署，使用预合成的云程序集。等待完全稳定。   |
 
 `deploy-sandbox` 和 `deploy` 依赖于 `^assemble`，因此它们构建即将部署的工件，仅此而已。`deploy-ci` 部署您的管道已经构建的程序集，因此它根本没有构建依赖项。
 
@@ -399,12 +401,12 @@ npx cdk bootstrap aws://<account-id>/<region>
 
 这是在开发时让您自己的应用程序副本在 AWS 中运行的最快方法。
 
-:::tip[快速部署的快速模式]
-默认情况下，部署目标等待完全的资源稳定，优先考虑一致性而不是速度。要在开发期间加快迭代速度，请通过传递 CDK 的 `--express` 标志来选择 [CloudFormation 快速模式](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html)：
+:::tip[快速模式以实现更快的部署]
+`deploy-sandbox` 目标默认使用 [CloudFormation 快速模式](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html)（通过 CDK 的 `--express` 标志）。快速模式在确认应用资源配置后立即完成，而不是等待完全稳定，传播在后台继续进行，从而显著加快迭代周期。
 
-<NxCommands commands={['deploy-sandbox <my-infra> --express']} />
+由于它在资源完成稳定之前返回，快速模式适合您迭代的沙箱阶段，而不适合 CI/CD 或生产部署 — 对于这些情况，请使用 [`deploy-ci`](#deploying-to-aws-in-a-cicd-pipeline)。要在这里也等待完全的资源稳定，请传递 `--no-express`：
 
-快速模式在确认应用资源配置后立即完成，而不是等待完全稳定，传播在后台继续进行，从而显著加快迭代周期。它适用于开发和迭代。
+<NxCommands commands={['deploy-sandbox <my-infra> --no-express']} />
 :::
 
 ### 部署特定阶段
@@ -417,13 +419,15 @@ npx cdk bootstrap aws://<account-id>/<region>
 
 <NxCommands commands={['deploy <my-infra> <my-infra>-sandbox/Application']} />
 
+由于此目标可以命名任何阶段，包括您的生产阶段，因此当您使用 `stageConfig` 生成时，它会等待完全的资源稳定。对于您正在迭代的阶段，传递 `--express` 以选择使用快速模式。
+
 ## 在 CI/CD 管道中部署到 AWS
 
 如果您要作为 CI/CD 管道的一部分部署到 AWS，请使用 `deploy-ci` 目标。
 
 <NxCommands commands={['deploy-ci <my-infra> my-stage/*']} />
 
-此目标与常规 `deploy` 目标略有不同，因为它部署预合成的云程序集，而不是即时合成。这避免了包版本更改带来的潜在非确定性，确保每个管道阶段使用相同的云程序集进行部署。
+此目标与 `deploy` 和 `deploy-sandbox` 目标在两个方面有所不同。首先，它部署预合成的云程序集，而不是即时合成，避免了包版本更改带来的潜在非确定性，并确保每个管道阶段使用相同的云程序集进行部署。其次，它从不使用快速模式，因此在报告成功之前始终等待每个资源完全稳定。
 
 ## 拆除 AWS 基础设施
 

@@ -379,11 +379,11 @@ For more details, please refer to the [CDK bootstrapping documentation](https://
 
 Your project has three deploy targets, each suited to a different situation:
 
-| Target           | Use it for                                                                       |
-| ---------------- | -------------------------------------------------------------------------------- |
-| `deploy-sandbox` | Deploying your own sandbox stage during development. No stage argument needed.    |
-| `deploy`         | Deploying any stage, by naming the stage or stacks you want.                      |
-| `deploy-ci`      | Deploying from a CI/CD pipeline, using a pre-synthesized cloud assembly.          |
+| Target           | Use it for                                                                                             |
+| ---------------- | ------------------------------------------------------------------------------------------------------ |
+| `deploy-sandbox` | Deploying your own sandbox stage during development. No stage argument needed. Uses express mode.        |
+| `deploy`         | Deploying any stage, by naming the stage or stacks you want.                                            |
+| `deploy-ci`      | Deploying from a CI/CD pipeline, using a pre-synthesized cloud assembly. Waits for full stabilization.   |
 
 `deploy-sandbox` and `deploy` depend on `^assemble`, so they build the artifacts they are about to deploy and nothing else. `deploy-ci` deploys an assembly your pipeline already built, so it has no build dependencies at all.
 
@@ -402,11 +402,11 @@ The `deploy-sandbox` target deploys the sandbox stage that `main.ts` declares, s
 This is the quickest way to get your own copy of the application running in AWS while you develop.
 
 :::tip[Express Mode for Faster Deployments]
-The deploy targets wait for full resource stabilization by default, favouring consistency over speed. To speed up iteration during development, opt into [CloudFormation express mode](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html) by passing CDK's `--express` flag:
+The `deploy-sandbox` target uses [CloudFormation express mode](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html) by default (via CDK's `--express` flag). Express mode finishes once resource configuration is confirmed applied rather than waiting for full stabilization, with propagation continuing in the background, for significantly faster iteration cycles.
 
-<NxCommands commands={['deploy-sandbox <my-infra> --express']} />
+Since it returns before resources have finished stabilizing, express mode suits the sandbox stage you iterate on, not CI/CD or production deployments — use [`deploy-ci`](#deploying-to-aws-in-a-cicd-pipeline) for those. To wait for full resource stabilization here too, pass `--no-express`:
 
-Express mode finishes once resource configuration is confirmed applied rather than waiting for full stabilization, with propagation continuing in the background, for significantly faster iteration cycles. It is intended for development and iteration.
+<NxCommands commands={['deploy-sandbox <my-infra> --no-express']} />
 :::
 
 ### Deploying a Specific Stage
@@ -419,13 +419,15 @@ You can specify any stage so long as it is defined in `main.ts`. To deploy an in
 
 <NxCommands commands={['deploy <my-infra> <my-infra>-sandbox/Application']} />
 
+Since this target can name any stage, including your production one, it waits for full resource stabilization when you generate with `stageConfig`. Pass `--express` to opt into express mode for a stage you are iterating on.
+
 ## Deploying to AWS in a CI/CD Pipeline
 
 Use the `deploy-ci` target if you are deploying to AWS as part of a CI/CD pipeline.
 
 <NxCommands commands={['deploy-ci <my-infra> my-stage/*']} />
 
-This target differs slightly from the regular `deploy` target in that it deploys a pre-synthesized cloud assembly rather than synthesizing on the fly. This avoids potential non-determinism from package version changes, ensuring that every pipeline stage deploys using the same cloud assembly.
+This target differs from the `deploy` and `deploy-sandbox` targets in two ways. First, it deploys a pre-synthesized cloud assembly rather than synthesizing on the fly, avoiding potential non-determinism from package version changes and ensuring that every pipeline stage deploys using the same cloud assembly. Second, it never uses express mode, so it always waits for every resource to fully stabilize before reporting success.
 
 ## Tearing Down AWS Infrastructure
 

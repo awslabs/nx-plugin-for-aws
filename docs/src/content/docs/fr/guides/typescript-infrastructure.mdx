@@ -379,11 +379,11 @@ Pour plus de détails, veuillez vous référer à la [documentation sur le boots
 
 Votre projet dispose de trois cibles de déploiement, chacune adaptée à une situation différente :
 
-| Cible            | Utilisez-la pour                                                                 |
-| ---------------- | -------------------------------------------------------------------------------- |
-| `deploy-sandbox` | Déployer votre propre stage sandbox pendant le développement. Aucun argument de stage nécessaire. |
-| `deploy`         | Déployer n'importe quel stage, en nommant le stage ou les stacks que vous voulez. |
-| `deploy-ci`      | Déployer depuis un pipeline CI/CD, en utilisant un assemblage cloud pré-synthétisé. |
+| Cible            | Utilisez-la pour                                                                                             |
+| ---------------- | ------------------------------------------------------------------------------------------------------------ |
+| `deploy-sandbox` | Déployer votre propre stage sandbox pendant le développement. Aucun argument de stage nécessaire. Utilise le mode express. |
+| `deploy`         | Déployer n'importe quel stage, en nommant le stage ou les stacks que vous voulez.                                            |
+| `deploy-ci`      | Déployer depuis un pipeline CI/CD, en utilisant un assemblage cloud pré-synthétisé. Attend la stabilisation complète.   |
 
 `deploy-sandbox` et `deploy` dépendent de `^assemble`, donc ils construisent les artefacts qu'ils sont sur le point de déployer et rien d'autre. `deploy-ci` déploie un assemblage que votre pipeline a déjà construit, donc il n'a aucune dépendance de construction.
 
@@ -402,11 +402,11 @@ La cible `deploy-sandbox` déploie le stage sandbox que `main.ts` déclare, vous
 C'est le moyen le plus rapide d'obtenir votre propre copie de l'application en cours d'exécution dans AWS pendant que vous développez.
 
 :::tip[Mode Express pour des déploiements plus rapides]
-Les cibles de déploiement attendent la stabilisation complète des ressources par défaut, privilégiant la cohérence à la vitesse. Pour accélérer l'itération pendant le développement, optez pour le [mode express CloudFormation](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html) en passant le flag `--express` de CDK :
+La cible `deploy-sandbox` utilise le [mode express CloudFormation](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html) par défaut (via le flag `--express` de CDK). Le mode express se termine une fois que la configuration des ressources est confirmée appliquée plutôt que d'attendre la stabilisation complète, avec la propagation se poursuivant en arrière-plan, pour des cycles d'itération nettement plus rapides.
 
-<NxCommands commands={['deploy-sandbox <my-infra> --express']} />
+Puisqu'il retourne avant que les ressources aient fini de se stabiliser, le mode express convient au stage sandbox sur lequel vous itérez, pas aux déploiements CI/CD ou en production — utilisez [`deploy-ci`](#déployer-vers-aws-dans-un-pipeline-cicd) pour ceux-ci. Pour attendre la stabilisation complète des ressources ici aussi, passez `--no-express` :
 
-Le mode express se termine une fois que la configuration des ressources est confirmée appliquée plutôt que d'attendre la stabilisation complète, avec la propagation se poursuivant en arrière-plan, pour des cycles d'itération nettement plus rapides. Il est destiné au développement et à l'itération.
+<NxCommands commands={['deploy-sandbox <my-infra> --no-express']} />
 :::
 
 ### Déployer un stage spécifique
@@ -419,20 +419,22 @@ Vous pouvez spécifier n'importe quel stage tant qu'il est défini dans `main.ts
 
 <NxCommands commands={['deploy <my-infra> <my-infra>-sandbox/Application']} />
 
+Puisque cette cible peut nommer n'importe quel stage, y compris votre stage de production, elle attend la stabilisation complète des ressources lorsque vous générez avec `stageConfig`. Passez `--express` pour opter pour le mode express pour un stage sur lequel vous itérez.
+
 ## Déployer vers AWS dans un pipeline CI/CD
 
 Utilisez la cible `deploy-ci` si vous déployez vers AWS dans le cadre d'un pipeline CI/CD.
 
 <NxCommands commands={['deploy-ci <my-infra> my-stage/*']} />
 
-Cette cible diffère légèrement de la cible `deploy` normale en ce qu'elle déploie un assemblage cloud pré-synthétisé plutôt que de synthétiser à la volée. Cela évite le non-déterminisme potentiel des changements de version de package, garantissant que chaque étape du pipeline déploie en utilisant le même assemblage cloud.
+Cette cible diffère des cibles `deploy` et `deploy-sandbox` de deux manières. Premièrement, elle déploie un assemblage cloud pré-synthétisé plutôt que de synthétiser à la volée, évitant le non-déterminisme potentiel des changements de version de package et garantissant que chaque étape du pipeline déploie en utilisant le même assemblage cloud. Deuxièmement, elle n'utilise jamais le mode express, donc elle attend toujours que chaque ressource se stabilise complètement avant de signaler le succès.
 
 ## Détruire l'infrastructure AWS
 
 Votre projet dispose de trois cibles de destruction, reflétant celles de déploiement :
 
-| Cible            | Utilisez-la pour                                                                |
-| ----------------- | ------------------------------------------------------------------------- |
+| Cible             | Utilisez-la pour                                                                |
+| ----------------- | ------------------------------------------------------------------------------- |
 | `destroy-sandbox` | Détruire votre propre stage sandbox. Aucun argument de stage nécessaire.             |
 | `destroy`         | Détruire n'importe quel stage, en nommant le stage ou les stacks que vous voulez.            |
 | `destroy-ci`      | Détruire depuis un pipeline CI/CD, en utilisant un assemblage cloud pré-synthétisé. |

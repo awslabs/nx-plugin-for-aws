@@ -379,11 +379,11 @@ Para obtener más detalles, consulta la [documentación de inicialización de CD
 
 Tu proyecto tiene tres targets de despliegue, cada uno adecuado para una situación diferente:
 
-| Target           | Úsalo para                                                                       |
-| ---------------- | -------------------------------------------------------------------------------- |
-| `deploy-sandbox` | Desplegar tu propio stage sandbox durante el desarrollo. No se necesita argumento de stage. |
-| `deploy`         | Desplegar cualquier stage, nombrando el stage o stacks que deseas.              |
-| `deploy-ci`      | Desplegar desde un pipeline de CI/CD, usando un ensamblaje en la nube pre-sintetizado. |
+| Target           | Úsalo para                                                                                             |
+| ---------------- | ------------------------------------------------------------------------------------------------------ |
+| `deploy-sandbox` | Desplegar tu propio stage sandbox durante el desarrollo. No se necesita argumento de stage. Usa modo express. |
+| `deploy`         | Desplegar cualquier stage, nombrando el stage o stacks que deseas.                                     |
+| `deploy-ci`      | Desplegar desde un pipeline de CI/CD, usando un ensamblaje en la nube pre-sintetizado. Espera la estabilización completa. |
 
 `deploy-sandbox` y `deploy` dependen de `^assemble`, por lo que construyen los artefactos que están a punto de desplegar y nada más. `deploy-ci` despliega un ensamblaje que tu pipeline ya construyó, por lo que no tiene dependencias de construcción en absoluto.
 
@@ -402,11 +402,11 @@ El target `deploy-sandbox` despliega el stage sandbox que declara `main.ts`, por
 Esta es la forma más rápida de tener tu propia copia de la aplicación ejecutándose en AWS mientras desarrollas.
 
 :::tip[Modo Express para Despliegues Más Rápidos]
-Los targets de despliegue esperan la estabilización completa de recursos por defecto, favoreciendo la consistencia sobre la velocidad. Para acelerar la iteración durante el desarrollo, opta por el [modo express de CloudFormation](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html) pasando la bandera `--express` de CDK:
+El target `deploy-sandbox` usa el [modo express de CloudFormation](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html) por defecto (a través de la bandera `--express` de CDK). El modo express finaliza una vez que se confirma que la configuración del recurso está aplicada en lugar de esperar la estabilización completa, con la propagación continuando en segundo plano, para ciclos de iteración significativamente más rápidos.
 
-<NxCommands commands={['deploy-sandbox <my-infra> --express']} />
+Dado que retorna antes de que los recursos hayan terminado de estabilizarse, el modo express es adecuado para el stage sandbox en el que iteras, no para CI/CD o despliegues de producción — usa [`deploy-ci`](#desplegar-en-aws-en-un-pipeline-de-cicd) para esos. Para esperar la estabilización completa del recurso aquí también, pasa `--no-express`:
 
-El modo express finaliza una vez que se confirma que la configuración del recurso está aplicada en lugar de esperar la estabilización completa, con la propagación continuando en segundo plano, para ciclos de iteración significativamente más rápidos. Está destinado para desarrollo e iteración.
+<NxCommands commands={['deploy-sandbox <my-infra> --no-express']} />
 :::
 
 ### Desplegar un Stage Específico
@@ -419,13 +419,15 @@ Puedes especificar cualquier stage siempre que esté definido en `main.ts`. Para
 
 <NxCommands commands={['deploy <my-infra> <my-infra>-sandbox/Application']} />
 
+Dado que este target puede nombrar cualquier stage, incluido el de producción, espera la estabilización completa del recurso cuando generas con `stageConfig`. Pasa `--express` para optar por el modo express para un stage en el que estés iterando.
+
 ## Desplegar en AWS en un Pipeline de CI/CD
 
 Usa el target `deploy-ci` si estás desplegando en AWS como parte de un pipeline de CI/CD.
 
 <NxCommands commands={['deploy-ci <my-infra> my-stage/*']} />
 
-Este target difiere ligeramente del target `deploy` regular en que despliega un ensamblaje en la nube pre-sintetizado en lugar de sintetizar sobre la marcha. Esto evita el potencial no determinismo de los cambios de versión de paquetes, asegurando que cada etapa del pipeline despliegue usando el mismo ensamblaje en la nube.
+Este target difiere de los targets `deploy` y `deploy-sandbox` de dos maneras. Primero, despliega un ensamblaje en la nube pre-sintetizado en lugar de sintetizar sobre la marcha, evitando el potencial no determinismo de los cambios de versión de paquetes y asegurando que cada etapa del pipeline despliegue usando el mismo ensamblaje en la nube. Segundo, nunca usa el modo express, por lo que siempre espera a que cada recurso se estabilice completamente antes de reportar éxito.
 
 ## Desmantelar Infraestructura de AWS
 

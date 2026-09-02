@@ -379,11 +379,11 @@ Per maggiori dettagli, consulta la [documentazione sul bootstrap CDK](https://do
 
 Il tuo progetto ha tre target di distribuzione, ciascuno adatto a una situazione diversa:
 
-| Target           | Usalo per                                                                        |
-| ---------------- | -------------------------------------------------------------------------------- |
-| `deploy-sandbox` | Distribuire il tuo stage sandbox personale durante lo sviluppo. Non è necessario un argomento stage. |
-| `deploy`         | Distribuire qualsiasi stage, nominando lo stage o gli stack che desideri.        |
-| `deploy-ci`      | Distribuire da una pipeline CI/CD, utilizzando un cloud assembly pre-sintetizzato. |
+| Target           | Usalo per                                                                                             |
+| ---------------- | ------------------------------------------------------------------------------------------------------ |
+| `deploy-sandbox` | Distribuire il tuo stage sandbox personale durante lo sviluppo. Non è necessario un argomento stage. Utilizza la modalità express.        |
+| `deploy`         | Distribuire qualsiasi stage, nominando lo stage o gli stack che desideri.                                            |
+| `deploy-ci`      | Distribuire da una pipeline CI/CD, utilizzando un cloud assembly pre-sintetizzato. Attende la stabilizzazione completa.   |
 
 `deploy-sandbox` e `deploy` dipendono da `^assemble`, quindi costruiscono gli artefatti che stanno per distribuire e nient'altro. `deploy-ci` distribuisce un assembly che la tua pipeline ha già costruito, quindi non ha alcuna dipendenza di build.
 
@@ -402,11 +402,11 @@ Il target `deploy-sandbox` distribuisce lo stage sandbox che `main.ts` dichiara,
 Questo è il modo più rapido per ottenere la tua copia dell'applicazione in esecuzione su AWS mentre sviluppi.
 
 :::tip[Modalità Express per distribuzioni più veloci]
-I target di distribuzione attendono per impostazione predefinita la stabilizzazione completa delle risorse, favorendo la coerenza rispetto alla velocità. Per accelerare l'iterazione durante lo sviluppo, opta per la [modalità express di CloudFormation](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html) passando il flag `--express` di CDK:
+Il target `deploy-sandbox` utilizza la [modalità express di CloudFormation](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html) per impostazione predefinita (tramite il flag `--express` di CDK). La modalità Express termina una volta che la configurazione della risorsa è confermata applicata piuttosto che attendere la stabilizzazione completa, con la propagazione che continua in background, per cicli di iterazione significativamente più veloci.
 
-<NxCommands commands={['deploy-sandbox <my-infra> --express']} />
+Poiché ritorna prima che le risorse abbiano terminato la stabilizzazione, la modalità express è adatta allo stage sandbox su cui iteri, non per distribuzioni CI/CD o in produzione — usa [`deploy-ci`](#distribuire-su-aws-in-una-pipeline-cicd) per quelle. Per attendere la stabilizzazione completa delle risorse anche qui, passa `--no-express`:
 
-La modalità Express termina una volta che la configurazione della risorsa è confermata applicata piuttosto che attendere la stabilizzazione completa, con la propagazione che continua in background, per cicli di iterazione significativamente più veloci. È destinata allo sviluppo e all'iterazione.
+<NxCommands commands={['deploy-sandbox <my-infra> --no-express']} />
 :::
 
 ### Distribuire uno stage specifico
@@ -419,13 +419,15 @@ Puoi specificare qualsiasi stage purché sia definito in `main.ts`. Per distribu
 
 <NxCommands commands={['deploy <my-infra> <my-infra>-sandbox/Application']} />
 
+Poiché questo target può nominare qualsiasi stage, incluso quello di produzione, attende la stabilizzazione completa delle risorse quando generi con `stageConfig`. Passa `--express` per optare per la modalità express per uno stage su cui stai iterando.
+
 ## Distribuire su AWS in una pipeline CI/CD
 
 Usa il target `deploy-ci` se stai distribuendo su AWS come parte di una pipeline CI/CD.
 
 <NxCommands commands={['deploy-ci <my-infra> my-stage/*']} />
 
-Questo target differisce leggermente dal target `deploy` normale in quanto distribuisce un cloud assembly pre-sintetizzato piuttosto che sintetizzare al volo. Questo evita potenziali non-determinismi da cambiamenti di versione dei pacchetti, assicurando che ogni fase della pipeline distribuisca utilizzando lo stesso cloud assembly.
+Questo target differisce dai target `deploy` e `deploy-sandbox` in due modi. Primo, distribuisce un cloud assembly pre-sintetizzato piuttosto che sintetizzare al volo, evitando potenziali non-determinismi da cambiamenti di versione dei pacchetti e assicurando che ogni fase della pipeline distribuisca utilizzando lo stesso cloud assembly. Secondo, non utilizza mai la modalità express, quindi attende sempre che ogni risorsa si stabilizzi completamente prima di segnalare il successo.
 
 ## Smantellare l'infrastruttura AWS
 

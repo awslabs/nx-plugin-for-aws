@@ -201,13 +201,15 @@ export async function tsInfraGenerator(
       config.targets.deploy = {
         executor: 'nx:run-commands',
         dependsOn: ['^assemble', 'compile'],
+        // No --express here when stages are configured: this target deploys
+        // whichever stage is named, including beta and prod.
         options: stageConfig
           ? withCdkEnv({
               command: `tsx packages/common/scripts/src/infra/infra-deploy.ts ${libraryRoot}`,
             })
           : withCdkEnv({
               cwd: '{projectRoot}',
-              command: 'cdk deploy --require-approval=never',
+              command: 'cdk deploy --require-approval=never --express',
             }),
       };
       config.targets['deploy-sandbox'] = {
@@ -215,11 +217,11 @@ export async function tsInfraGenerator(
         dependsOn: ['^assemble', 'compile'],
         options: stageConfig
           ? withCdkEnv({
-              command: `tsx packages/common/scripts/src/infra/infra-deploy.ts ${libraryRoot} ${sandboxStagePattern}`,
+              command: `tsx packages/common/scripts/src/infra/infra-deploy.ts ${libraryRoot} ${sandboxStagePattern} --express`,
             })
           : withCdkEnv({
               cwd: '{projectRoot}',
-              command: `cdk deploy --require-approval=never ${sandboxStagePattern}`,
+              command: `cdk deploy --require-approval=never ${sandboxStagePattern} --express`,
             }),
       };
       config.targets['deploy-ci'] = {
