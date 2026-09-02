@@ -116,6 +116,7 @@ export const smithyCompileCommands = (
         ),
       ]
     : [
+        cmd.mkdir(`${BUILD_DIR}/openapi`),
         // Named after the service shape by the OpenAPI plugin, so it is matched
         // rather than named, and published under a stable name.
         cmd.cpGlobToFile(

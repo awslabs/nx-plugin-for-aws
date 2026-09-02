@@ -60,7 +60,8 @@ describe('smithyProjectGenerator', () => {
       'shx rm -rf dist/{projectRoot}/smithy',
       'shx mkdir -p dist/{projectRoot}/build',
       `npx -y mise@${TS_VERSIONS.mise} exec smithy@${MISE_VERSIONS.smithy} -- smithy build -c {projectRoot}/smithy-build.json --output dist/{projectRoot}/smithy`,
-      'shx mkdir -p dist/{projectRoot}/build/openapi && shx cp "dist/{projectRoot}/smithy/source/openapi/*.openapi.json" dist/{projectRoot}/build/openapi/openapi.json',
+      'shx mkdir -p dist/{projectRoot}/build/openapi',
+      'shx cp "dist/{projectRoot}/smithy/source/openapi/*.openapi.json" dist/{projectRoot}/build/openapi/openapi.json',
     ]);
     // Per artifact rather than the whole build dir, which generate-ssdk shares
     expect(projectConfig.targets.compile.outputs).toEqual([

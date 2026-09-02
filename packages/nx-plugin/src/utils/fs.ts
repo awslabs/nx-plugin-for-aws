@@ -69,12 +69,12 @@ export class FsCommands<D extends DependencyDeclaration> {
    * `<ServiceShape>.openapi.json`. Fails rather than silently doing nothing when
    * the glob matches nothing, or when it matches more than one file.
    *
-   * `dstDir` is created first: `shx cp` writes through to a named destination
-   * file and fails if its parent is missing.
+   * The caller must {@link mkdir} `dstDir` first: `shx cp` writes through to a
+   * named destination file and fails if its parent is missing.
    */
   public cpGlobToFile(srcGlob: string, dstDir: string, dstFileName: string) {
     this.add('shx');
-    return `shx mkdir -p ${dstDir} && shx cp "${srcGlob}" ${dstDir}/${dstFileName}`;
+    return `shx cp "${srcGlob}" ${dstDir}/${dstFileName}`;
   }
 
   private add(dep: (typeof FS_DEPENDENCIES)[number]['name']) {

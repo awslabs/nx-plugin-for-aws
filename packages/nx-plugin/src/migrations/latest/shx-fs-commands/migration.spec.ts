@@ -28,9 +28,11 @@ const addTarget = (
     },
   });
 
+const optionsOf = (tree: Tree, projectName: string, targetName: string) =>
+  readProjectConfiguration(tree, projectName).targets?.[targetName]?.options;
+
 const commandsOf = (tree: Tree, projectName: string, targetName: string) =>
-  readProjectConfiguration(tree, projectName).targets?.[targetName]?.options
-    ?.commands;
+  optionsOf(tree, projectName, targetName)?.commands;
 
 describe('shx-fs-commands migration', () => {
   let tree: Tree;
@@ -122,7 +124,7 @@ describe('shx-fs-commands migration', () => {
     ]);
   });
 
-  it('should rewrite the glob copy, creating the destination directory', async () => {
+  it('should rewrite the glob copy into a mkdir and a cp', async () => {
     addTarget(tree, 'model', 'compile', [
       'cpy "dist/packages/model/smithy/source/openapi/*.openapi.json" dist/packages/model/build/openapi --flat --rename=openapi.json',
     ]);
@@ -130,7 +132,77 @@ describe('shx-fs-commands migration', () => {
     await migration(tree);
 
     expect(commandsOf(tree, 'model', 'compile')).toEqual([
-      'shx mkdir -p dist/packages/model/build/openapi && shx cp "dist/packages/model/smithy/source/openapi/*.openapi.json" dist/packages/model/build/openapi/openapi.json',
+      'shx mkdir -p dist/packages/model/build/openapi',
+      'shx cp "dist/packages/model/smithy/source/openapi/*.openapi.json" dist/packages/model/build/openapi/openapi.json',
+    ]);
+  });
+
+  it('should pin a target whose command it split to running in order', async () => {
+    addProjectConfiguration(tree, 'model', {
+      root: 'packages/model',
+      targets: {
+        compile: {
+          executor: 'nx:run-commands',
+          options: {
+            commands: [
+              'cpy "dist/packages/model/openapi/*.openapi.json" dist/packages/model/build/openapi --flat --rename=openapi.json',
+            ],
+          },
+        },
+      },
+    });
+
+    await migration(tree);
+
+    expect(optionsOf(tree, 'model', 'compile')?.parallel).toBe(false);
+  });
+
+  it('should turn a split single command option into commands', async () => {
+    addProjectConfiguration(tree, 'model', {
+      root: 'packages/model',
+      targets: {
+        compile: {
+          executor: 'nx:run-commands',
+          options: {
+            command:
+              'cpy "dist/packages/model/openapi/*.openapi.json" dist/packages/model/build/openapi --flat --rename=openapi.json',
+          },
+        },
+      },
+    });
+
+    await migration(tree);
+
+    const options = optionsOf(tree, 'model', 'compile');
+    expect(options?.command).toBeUndefined();
+    expect(options?.commands).toEqual([
+      'shx mkdir -p dist/packages/model/build/openapi',
+      'shx cp "dist/packages/model/openapi/*.openapi.json" dist/packages/model/build/openapi/openapi.json',
+    ]);
+    expect(options?.parallel).toBe(false);
+  });
+
+  it('should split a glob copy given as an object, preserving its other keys', async () => {
+    addTarget(tree, 'model', 'compile', [
+      {
+        command:
+          'cpy "dist/packages/model/openapi/*.openapi.json" dist/packages/model/build/openapi --flat --rename=openapi.json',
+        forwardAllArgs: false,
+      },
+    ]);
+
+    await migration(tree);
+
+    expect(commandsOf(tree, 'model', 'compile')).toEqual([
+      {
+        command: 'shx mkdir -p dist/packages/model/build/openapi',
+        forwardAllArgs: false,
+      },
+      {
+        command:
+          'shx cp "dist/packages/model/openapi/*.openapi.json" dist/packages/model/build/openapi/openapi.json',
+        forwardAllArgs: false,
+      },
     ]);
   });
 

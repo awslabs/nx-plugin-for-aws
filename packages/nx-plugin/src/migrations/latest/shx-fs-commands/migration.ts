@@ -31,6 +31,9 @@ import { TS_VERSIONS } from '../../../utils/versions.js';
  * command that matches none of them has been edited by the user, and is left
  * alone and reported: rewriting it with the wrong form would either nest a
  * directory a level too deep or fail outright.
+ *
+ * A `cpy` becomes two commands rather than one joined by `&&`, which is a shell
+ * operator and so no more portable than the builtins `shx` replaces.
  */
 
 /** The four CLIs this replaces, dropped from the root manifest. */
@@ -97,28 +100,31 @@ const MAKE_DIR = /^make-dir\s+(\S+)$/;
 const CPY = /^cpy\s+"([^"]+)"\s+(\S+)\s+--flat\s+--rename=(\S+)$/;
 
 /**
- * Rewrite one command, or return null to leave it alone. Anything already using
- * `shx` is returned unchanged so a re-run is a no-op.
+ * Rewrite one command into the commands that replace it, or return null to leave
+ * it alone. Anything already using `shx` is returned unchanged so a re-run is a
+ * no-op.
  */
-const rewrite = (command: string): string | null => {
+const rewrite = (command: string): string[] | null => {
   const trimmed = command.trim();
 
   const rimraf = RIMRAF.exec(trimmed);
-  if (rimraf) return `shx rm -rf ${rimraf[1]}`;
+  if (rimraf) return [`shx rm -rf ${rimraf[1]}`];
 
   const makeDir = MAKE_DIR.exec(trimmed);
-  if (makeDir) return `shx mkdir -p ${makeDir[1]}`;
+  if (makeDir) return [`shx mkdir -p ${makeDir[1]}`];
 
   const cpy = CPY.exec(trimmed);
   if (cpy) {
-    return `shx mkdir -p ${cpy[2]} && shx cp "${cpy[1]}" ${cpy[2]}/${cpy[3]}`;
+    // `shx cp` writes through to a named destination file and fails if its
+    // parent is missing, so the destination directory is a step of its own.
+    return [`shx mkdir -p ${cpy[2]}`, `shx cp "${cpy[1]}" ${cpy[2]}/${cpy[3]}`];
   }
 
   const ncp = NCP.exec(trimmed);
   if (ncp) {
     const [, src, dst] = ncp;
-    if (isDirectorySource(src, dst)) return `shx cp -R ${src}/. ${dst}`;
-    if (isFileCopy(src, dst)) return `shx cp ${src} ${dst}`;
+    if (isDirectorySource(src, dst)) return [`shx cp -R ${src}/. ${dst}`];
+    if (isFileCopy(src, dst)) return [`shx cp ${src} ${dst}`];
     return null;
   }
 
@@ -139,6 +145,10 @@ const divergedStep = (
 /**
  * Rewrite every command a target runs, in place. Commands are either strings or
  * `{ command }` objects, and a target uses `command` for a single one.
+ *
+ * One command can become several, which are steps of the same operation and so
+ * must run in order — the target is pinned to `parallel: false` when that
+ * happens.
  */
 const migrateTarget = (
   projectName: string,
@@ -147,29 +157,37 @@ const migrateTarget = (
   nextSteps: string[],
 ): boolean => {
   const options = target.options as
-    | { command?: unknown; commands?: unknown }
+    | { command?: unknown; commands?: unknown; parallel?: unknown }
     | undefined;
   if (!options) return false;
 
   let changed = false;
+  let split = false;
 
-  const rewriteOne = (command: string): string => {
-    if (!isReplacedCommand(command)) return command;
+  /** The commands replacing one, or the original where it is left alone. */
+  const rewriteOne = (command: string): string[] => {
+    if (!isReplacedCommand(command)) return [command];
     const replacement = rewrite(command);
     if (replacement === null) {
       nextSteps.push(divergedStep(projectName, targetName, command.trim()));
-      return command;
+      return [command];
     }
     changed = true;
+    if (replacement.length > 1) split = true;
     return replacement;
   };
 
   if (typeof options.command === 'string') {
-    options.command = rewriteOne(options.command);
-  }
-
-  if (Array.isArray(options.commands)) {
-    options.commands = options.commands.map((entry) => {
+    const replacement = rewriteOne(options.command);
+    if (replacement.length > 1) {
+      // `commands` is the only option that runs more than one.
+      delete options.command;
+      options.commands = replacement;
+    } else {
+      options.command = replacement[0];
+    }
+  } else if (Array.isArray(options.commands)) {
+    options.commands = options.commands.flatMap((entry) => {
       if (typeof entry === 'string') return rewriteOne(entry);
       if (
         entry &&
@@ -177,11 +195,13 @@ const migrateTarget = (
         typeof (entry as { command?: unknown }).command === 'string'
       ) {
         const e = entry as { command: string };
-        return { ...e, command: rewriteOne(e.command) };
+        return rewriteOne(e.command).map((command) => ({ ...e, command }));
       }
-      return entry;
+      return [entry];
     });
   }
+
+  if (split) options.parallel = false;
 
   return changed;
 };
