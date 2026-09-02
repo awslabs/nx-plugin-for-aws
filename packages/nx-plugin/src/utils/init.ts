@@ -35,6 +35,7 @@ import {
   describeGeneratorForCatalogue,
   generatorsJsonEntries,
 } from './generators.js';
+import { updateGitIgnore } from './git.js';
 import type { Iac } from './iac.js';
 import { configureMcpServers } from './mcp.js';
 import { getNpmScope } from './npm-scope.js';
@@ -167,6 +168,13 @@ const setUpPnpmWorkspace = (tree: Tree, catalogs: boolean) => {
  * manager reads the `workspaces` field of the root `package.json`.
  */
 const setUpWorkspaces = (tree: Tree, catalogs: boolean) => {
+  // pnpm writes `_tmp_<pid>_<hash>` files at the workspace root while it
+  // materialises packages. Nx watches the workspace, and an unignored file
+  // appearing and vanishing invalidates the project graph — so a watch-mode
+  // `dev` target running while any install happens would otherwise rebuild the
+  // graph continuously and never start its command.
+  updateGitIgnore(tree, '.', (patterns) => [...patterns, '_tmp_*']);
+
   if (detectWorkspacePackageManager(tree) === 'pnpm') {
     setUpPnpmWorkspace(tree, catalogs);
   } else {
