@@ -26,6 +26,24 @@ export const BIOME_WASM_VERSION: string = createRequire(import.meta.url)(
 export const BIOME_TEST_OUTPUT_EXCLUDE = '!**/test-output';
 
 /**
+ * The transient bundle rolldown writes beside a `rolldown.config.ts` while
+ * loading it.
+ *
+ * Loading a TypeScript config bundles it to `rolldown.config.<hash>.js` in the
+ * config's own directory, imports it, then unlinks it. That file exists for as
+ * long as the bundle takes, so a `format` or `lint` target running concurrently
+ * in the same project sees a machine-generated file — reported unformatted,
+ * failing the target for no fault of the source.
+ *
+ * `.*js` rather than `.js`, since the extension follows the config's own: a
+ * `.mts` config bundles to `.mjs`, a `.cts` one to `.cjs`.
+ */
+export const ROLLDOWN_CONFIG_BUNDLE_GLOB = '**/rolldown.config.*.*js';
+
+/** Keeps rolldown's transient config bundle out of formatting and linting. */
+export const BIOME_ROLLDOWN_CONFIG_BUNDLE_EXCLUDE = `!${ROLLDOWN_CONFIG_BUNDLE_GLOB}`;
+
+/**
  * The biome.json vended into a new workspace. The pnpm catalog resolver is only
  * included on pnpm workspaces, since `experimentalPnpmCatalogs` is Biome's only
  * catalog resolver and reads `pnpm-workspace.yaml` exclusively — it does nothing
@@ -82,6 +100,7 @@ export const getDefaultBiomeConfig = (tree: Tree) => ({
       '!**/dist',
       '!**/out-tsc',
       BIOME_TEST_OUTPUT_EXCLUDE,
+      BIOME_ROLLDOWN_CONFIG_BUNDLE_EXCLUDE,
       '!**/node_modules',
       '!**/.nx',
       '!**/.venv',
