@@ -150,6 +150,8 @@ export const TS_VERSIONS = {
   vite: '8.2.2',
   typescript: '6.0.3',
   vitest: '4.1.11',
+  // The `testEnvironment` @nx/vitest writes into every generated config.
+  jsdom: '27.4.0',
   zod: '4.5.4',
   ws: '8.21.3',
 } as const;

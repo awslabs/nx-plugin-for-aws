@@ -85,6 +85,8 @@ export const VITEST_DEPENDENCIES = [
   { name: 'vite' },
   { name: 'vitest' },
   { name: '@vitest/coverage-v8' },
+  // `@nx/vitest` writes `environment: 'jsdom'` into the config it generates.
+  { name: 'jsdom' },
 ] as const satisfies readonly { name: ITsDepVersion }[];
 
 export const configureVitest = async <const D extends DependencyDeclaration>(
@@ -139,6 +141,7 @@ export const configureVitest = async <const D extends DependencyDeclaration>(
       'vite',
       'vitest',
       '@vitest/coverage-v8',
+      'jsdom',
     ]),
   );
 };
