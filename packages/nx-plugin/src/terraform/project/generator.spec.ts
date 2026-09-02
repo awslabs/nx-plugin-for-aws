@@ -159,7 +159,7 @@ describe('terraformProjectGenerator', () => {
       // survives `nx reset`.
       const pluginCacheDir = '../../../.terraform/plugin-cache/{projectRoot}';
       const makeDir = {
-        command: `make-dir ${pluginCacheDir}`,
+        command: `shx mkdir -p ${pluginCacheDir}`,
         forwardAllArgs: false,
       };
 
@@ -171,7 +171,7 @@ describe('terraformProjectGenerator', () => {
       // not exist, so it is created before `terraform init` reads it.
       expect(testTarget.options.commands[0]).toEqual(makeDir);
       expect(testTarget.options.parallel).toBe(false);
-      // `make-dir` takes no terraform flags, so args are not forwarded to it.
+      // `shx mkdir` takes no terraform flags, so args are not forwarded to it.
       expect(testTarget.options.forwardAllArgs).toBe(true);
 
       // An application's `init` delegates to the vended script, which resolves
@@ -308,7 +308,7 @@ describe('terraformProjectGenerator', () => {
       const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
       for (const dep of [
         '@nx-extend/terraform',
-        'make-dir-cli',
+        'shx',
         'tsx',
         '@aws-sdk/client-s3',
         '@aws-sdk/client-sts',
@@ -394,7 +394,9 @@ describe('terraformProjectGenerator', () => {
 
       expect(planTarget.executor).toBe('nx:run-commands');
       expect(planTarget.defaultConfiguration).toBe('dev');
-      expect(planTarget.configurations.dev.commands[0]).toContain('make-dir');
+      expect(planTarget.configurations.dev.commands[0]).toContain(
+        'shx mkdir -p',
+      );
       expect(planTarget.configurations.dev.commands[1]).toContain(
         'terraform plan',
       );
@@ -523,7 +525,8 @@ describe('terraformProjectGenerator', () => {
       // would need a bootstrapped bucket — so `build` works before bootstrap.
       expect(testTarget.options.commands).toEqual([
         {
-          command: 'make-dir ../../../.terraform/plugin-cache/{projectRoot}',
+          command:
+            'shx mkdir -p ../../../.terraform/plugin-cache/{projectRoot}',
           forwardAllArgs: false,
         },
         'terraform init -backend=false',
@@ -546,7 +549,7 @@ describe('terraformProjectGenerator', () => {
       const initTarget = projectConfig.targets['init'];
       expect(initTarget.options.env.TF_PLUGIN_CACHE_DIR).toBe(pluginCacheDir);
       expect(initTarget.configurations.dev.commands).toEqual([
-        { command: `make-dir ${pluginCacheDir}`, forwardAllArgs: false },
+        { command: `shx mkdir -p ${pluginCacheDir}`, forwardAllArgs: false },
         'terraform init',
       ]);
       expect(initTarget.options.parallel).toBe(false);

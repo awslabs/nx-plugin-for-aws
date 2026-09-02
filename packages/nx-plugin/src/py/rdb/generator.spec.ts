@@ -95,12 +95,12 @@ describe('py#rdb generator', () => {
       executor: 'nx:run-commands',
       options: {
         commands: [
-          'rimraf dist/packages/db/docker/migration',
-          'make-dir dist/packages/db/docker/migration',
-          'ncp dist/packages/db/bundle-arm dist/packages/db/docker/migration',
-          'ncp packages/db/migrations dist/packages/db/docker/migration/migrations',
-          'ncp packages/db/alembic.ini dist/packages/db/docker/migration/alembic.ini',
-          'ncp packages/db/Dockerfile.migration dist/packages/db/docker/migration/Dockerfile',
+          'shx rm -rf dist/packages/db/docker/migration',
+          'shx mkdir -p dist/packages/db/docker/migration',
+          'shx cp -R dist/packages/db/bundle-arm/. dist/packages/db/docker/migration',
+          'shx cp -R packages/db/migrations/. dist/packages/db/docker/migration/migrations',
+          'shx cp packages/db/alembic.ini dist/packages/db/docker/migration/alembic.ini',
+          'shx cp packages/db/Dockerfile.migration dist/packages/db/docker/migration/Dockerfile',
         ],
         parallel: false,
       },
@@ -113,10 +113,10 @@ describe('py#rdb generator', () => {
       executor: 'nx:run-commands',
       options: {
         commands: [
-          'rimraf dist/packages/db/docker/create-db-user',
-          'make-dir dist/packages/db/docker/create-db-user',
-          'ncp dist/packages/db/bundle-arm dist/packages/db/docker/create-db-user',
-          'ncp packages/db/Dockerfile.create-db-user dist/packages/db/docker/create-db-user/Dockerfile',
+          'shx rm -rf dist/packages/db/docker/create-db-user',
+          'shx mkdir -p dist/packages/db/docker/create-db-user',
+          'shx cp -R dist/packages/db/bundle-arm/. dist/packages/db/docker/create-db-user',
+          'shx cp packages/db/Dockerfile.create-db-user dist/packages/db/docker/create-db-user/Dockerfile',
         ],
         parallel: false,
       },
@@ -222,9 +222,9 @@ describe('py#rdb generator', () => {
       executor: 'nx:run-commands',
       options: {
         commands: [
-          'rimraf dist/packages/db/trivy/proj-db-migration-latest',
-          'make-dir dist/packages/db/trivy/proj-db-migration-latest',
-          'ncp packages/db/.trivyignore dist/packages/db/trivy/proj-db-migration-latest/.trivyignore',
+          'shx rm -rf dist/packages/db/trivy/proj-db-migration-latest',
+          'shx mkdir -p dist/packages/db/trivy/proj-db-migration-latest',
+          'shx cp packages/db/.trivyignore dist/packages/db/trivy/proj-db-migration-latest/.trivyignore',
           'docker save -o dist/packages/db/trivy/proj-db-migration-latest/image-0.tar proj-db-migration:latest',
           `docker run --rm -v "./dist/packages/db/trivy/proj-db-migration-latest":/scan public.ecr.aws/aquasecurity/trivy:${CONTAINER_VERSIONS.trivy} image --input /scan/image-0.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q`,
           'docker save -o dist/packages/db/trivy/proj-db-migration-latest/image-1.tar proj-db-create-db-user:latest',

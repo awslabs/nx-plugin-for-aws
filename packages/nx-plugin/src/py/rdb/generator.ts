@@ -258,16 +258,16 @@ export const pyRdbGenerator = async (
         commands: [
           fs.rm(migrationBundleDir),
           fs.mkdir(migrationBundleDir),
-          fs.cp(bundleOutputDir, migrationBundleDir),
-          fs.cp(
+          fs.cpDir(bundleOutputDir, migrationBundleDir),
+          fs.cpDir(
             joinPathFragments(dir, 'migrations'),
             joinPathFragments(migrationBundleDir, 'migrations'),
           ),
-          fs.cp(
+          fs.cpFile(
             joinPathFragments(dir, 'alembic.ini'),
             joinPathFragments(migrationBundleDir, 'alembic.ini'),
           ),
-          fs.cp(
+          fs.cpFile(
             joinPathFragments(dir, 'Dockerfile.migration'),
             joinPathFragments(migrationBundleDir, 'Dockerfile'),
           ),
@@ -285,8 +285,8 @@ export const pyRdbGenerator = async (
         commands: [
           fs.rm(createDbUserBundleDir),
           fs.mkdir(createDbUserBundleDir),
-          fs.cp(bundleOutputDir, createDbUserBundleDir),
-          fs.cp(
+          fs.cpDir(bundleOutputDir, createDbUserBundleDir),
+          fs.cpFile(
             joinPathFragments(dir, 'Dockerfile.create-db-user'),
             joinPathFragments(createDbUserBundleDir, 'Dockerfile'),
           ),

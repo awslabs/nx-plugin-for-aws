@@ -123,7 +123,7 @@ export const addTypeScriptCodePackageTarget = <
       commands: [
         fs.rm(packageOutputDir),
         fs.mkdir(packageOutputDir),
-        fs.cp(
+        fs.cpFile(
           joinPathFragments(bundleOutputDir, 'index.js'),
           joinPathFragments(packageOutputDir, 'index.js'),
         ),
@@ -214,9 +214,9 @@ export const addPythonCodePackageTarget = <
       commands: [
         fs.rm(packageOutputDir),
         fs.mkdir(packageOutputDir),
-        fs.cp(bundleOutputDir, packageOutputDir),
-        fs.cp(sourceRoot, joinPathFragments(packageOutputDir, moduleName)),
-        fs.cp(
+        fs.cpDir(bundleOutputDir, packageOutputDir),
+        fs.cpDir(sourceRoot, joinPathFragments(packageOutputDir, moduleName)),
+        fs.cpFile(
           entryPointPath,
           joinPathFragments(packageOutputDir, entryPointFileName),
         ),
