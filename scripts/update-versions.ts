@@ -20,7 +20,6 @@ import {
   parsePipRequirementsLine,
   VersionOperator,
 } from 'pip-requirements-js';
-import { coerce } from 'semver';
 import { parseDocument } from 'yaml';
 import { applyGritQL } from '../packages/nx-plugin/src/utils/ast';
 import {
@@ -32,7 +31,6 @@ import {
   resolveLambdaRuntimes,
   unresolvedRuntimeWarning,
 } from '../packages/nx-plugin/src/utils/lambda-runtime-resolution';
-import { RUFF_WASM_VERSION } from '../packages/nx-plugin/src/utils/ruff';
 import { isNxPackage } from '../packages/nx-plugin/src/utils/version-upgrade-migration/nx-package-updates';
 import { registerNxPackageUpdates } from '../packages/nx-plugin/src/utils/version-upgrade-migration/register';
 import {
@@ -77,57 +75,41 @@ interface ChangeGroup {
   changes: ReportChange[];
 }
 
-/**
- * npm packages this repo depends on directly that a lockstep group couples to a
- * vended pin: the wasm formatter bindings, which format generated files here
- * while the vended pin is the CLI a generated project runs.
- */
-const REPO_LOCKSTEP_MEMBERS = [
-  '@astral-sh/ruff-wasm-nodejs',
-  '@biomejs/wasm-nodejs',
-] as const;
-
-/**
- * Every manifest declaring them. Both the root and the plugin do, and they must
- * agree — pnpm resolves one copy for the workspace.
- */
+/** Manifests whose npm dependencies are resolved alongside the vended pins. */
 const REPO_MANIFESTS = ['package.json', 'packages/nx-plugin/package.json'];
 
-/** The versions the plugin's manifest declares for the given dependencies. */
-const readRepoDependencies = (
-  names: readonly string[],
+/** Every npm dependency `manifestPath` declares. */
+const readManifestDependencies = (
+  manifestPath: string,
 ): Record<string, string> => {
-  const manifest = JSON.parse(
-    readFileSync('packages/nx-plugin/package.json', 'utf-8'),
-  );
-  return Object.fromEntries(
-    names.flatMap((name) => {
-      const version =
-        manifest.dependencies?.[name] ?? manifest.devDependencies?.[name];
-      return version ? [[name, version] as const] : [];
-    }),
-  );
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+  return { ...manifest.devDependencies, ...manifest.dependencies };
 };
 
 /**
- * Write resolved versions for `REPO_LOCKSTEP_MEMBERS` back to a manifest. Only
- * touches entries it already declares, and only when the value actually changed.
+ * Roll back the named dependencies in a manifest to `versions`.
+ *
+ * `npm-check-updates` bumps this repo's own manifests before this script runs, so
+ * a pin a lockstep group held back is already on disk at the newer version and has
+ * to be corrected. Scoped to the held names so the run never re-does ncu's job —
+ * it writes no lockfile, and `pnpm i` has already run by this point.
  */
-const writeRepoDependencies = (
+const rollBackManifestVersions = (
   tree: FsTree,
   manifestPath: string,
   versions: Record<string, string>,
+  names: readonly string[],
 ): void => {
   const contents = tree.read(manifestPath, 'utf-8');
   if (!contents) return;
   const manifest = JSON.parse(contents);
   let changed = false;
-  for (const name of REPO_LOCKSTEP_MEMBERS) {
-    const version = versions[name];
-    if (!version) continue;
+  for (const name of names) {
+    const held = versions[name];
+    if (!held) continue;
     for (const field of ['dependencies', 'devDependencies'] as const) {
-      if (manifest[field]?.[name] && manifest[field][name] !== version) {
-        manifest[field][name] = version;
+      if (manifest[field]?.[name] && manifest[field][name] !== held) {
+        manifest[field][name] = held;
         changed = true;
       }
     }
@@ -152,15 +134,13 @@ const getUpdatedTypeScriptVersions = (
   execSync('mkdir -p ts', { cwd: tmpDir });
   execSync('pnpm init', { cwd: tsDir, stdio: 'inherit' });
 
-  // Update ts/package.json to add all dependencies from TS_VERSIONS, plus the
-  // npm packages a lockstep group couples them to that are dependencies of this
-  // repo rather than vended pins (the wasm formatter bindings). Their proposed
-  // versions are what the group is held against.
+  // Include this repo's own npm dependencies so a lockstep group can span them
+  // and the vended pins. The vended pin wins where both declare a package.
   const packageJsonPath = join(tsDir, 'package.json');
   const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8'));
   packageJson.dependencies = {
+    ...Object.assign({}, ...REPO_MANIFESTS.map(readManifestDependencies)),
     ...TS_VERSIONS,
-    ...readRepoDependencies(REPO_LOCKSTEP_MEMBERS),
   };
   writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2));
 
@@ -254,59 +234,20 @@ const getUpdatedPythonVersions = (tmpDir: string): Record<string, string> => {
 };
 
 /**
- * Hold the vended `ruff` pin at the release of the wasm bindings that run here.
- *
- * Unlike the other couplings this one spans registries: the bindings are on npm
- * and `ruff` is on PyPI, resolved by a different tool with no cooldown. So one
- * side's proposed version is not comparable to the other's as a group — the
- * bindings simply lead, and the held-back `ruff` is taken next run once they
- * catch up.
- */
-const holdRuffToWasmBuild = (
-  updatedPyVersions: Record<string, string>,
-  updatedTsVersions: Record<string, string>,
-): ReportNote[] => {
-  const proposed = updatedPyVersions.ruff;
-  const bindings =
-    updatedTsVersions['@astral-sh/ruff-wasm-nodejs'] ?? RUFF_WASM_VERSION;
-  const required = `==${coerce(bindings) ?? bindings}`;
-  if (!proposed || proposed === required) {
-    return [];
-  }
-  updatedPyVersions.ruff = required;
-  return [
-    {
-      note: `ruff held at ${required} (${proposed} available): @astral-sh/ruff-wasm-nodejs is on ${bindings}, and the two must match`,
-    },
-  ];
-};
-
-/**
- * Pins that must move as a unit, as groups of names.
- *
- * A group is held at the lowest version proposed across it, so it only moves once
- * every member can — see `version-lockstep/lockstep.ts`. Members must share a
- * version line for that to be meaningful, so this is for families published
- * together rather than for a package and an unrelated dependant.
+ * Pins that must move as a unit. Each group is held at the lowest version
+ * proposed across it, so members must share a version line.
  */
 const LOCKSTEP_GROUPS: readonly LockstepGroup[] = [
-  // The `@ag-ui/*` packages ship from one release train and are only mutually
-  // resolvable at the same version. Holding them together also keeps them on the
-  // release `@copilotkit/react-core` depends on, since CopilotKit pins them
-  // exactly and a second copy of `@ag-ui/client` makes the two `AbstractAgent`
-  // declarations structurally incompatible (private `_debug`) — which fails every
-  // generated website with TS2322.
-  //
-  // `@ag-ui/aws-strands` and `@ag-ui/a2ui-toolkit` version independently of the
-  // train and cannot duplicate against CopilotKit, so they are left free.
+  // One release train, only mutually resolvable at the same version. This also
+  // keeps them on the release `@copilotkit/react-core` pins, since a duplicate
+  // `@ag-ui/client` fails every generated website with TS2322. `@ag-ui/aws-strands`
+  // and `@ag-ui/a2ui-toolkit` version independently, so they are left free.
   ['@ag-ui/client', '@ag-ui/core', '@ag-ui/encoder'],
-  // `@biomejs/wasm-nodejs` formats generated TypeScript/JSON in-process here,
-  // while `@biomejs/biome` is the CLI a generated project's `format`/`lint`
-  // targets run and the version its vended `biome.json` `$schema` points at. Both
-  // are npm packages published together (minutes apart, same version line), so
-  // whichever the run proposes lower holds the other back — out of step, generated
-  // files are formatted by one release and checked against another.
+  // The wasm bindings format generated files here; the CLI is what a generated
+  // project's `format`/`lint` targets run. Out of step, files are formatted by one
+  // release and checked against another.
   ['@biomejs/wasm-nodejs', '@biomejs/biome'],
+  ['@astral-sh/ruff-wasm-nodejs', 'ruff'],
 ];
 
 /**
@@ -708,15 +649,17 @@ const main = async () => {
         updatedTsVersions,
         updatedPyVersions,
       ),
-      ...holdRuffToWasmBuild(updatedPyVersions, updatedTsVersions),
     ];
 
-    // A group may hold back one of this repo's own npm dependencies, which
-    // `npm-check-updates` already bumped in the manifests before this script ran.
-    // Write those back so the repo and the vended pin agree (the assertions in
-    // `format.spec.ts` / `ruff.spec.ts` check exactly that).
+    // Correct any of this repo's own manifest pins a group held back.
+    const heldNames = lockstepNotes.map(({ name }) => name);
     for (const manifestPath of REPO_MANIFESTS) {
-      writeRepoDependencies(tree, manifestPath, updatedTsVersions);
+      rollBackManifestVersions(
+        tree,
+        manifestPath,
+        updatedTsVersions,
+        heldNames,
+      );
     }
 
     // Apply updated TypeScript versions to the versions file

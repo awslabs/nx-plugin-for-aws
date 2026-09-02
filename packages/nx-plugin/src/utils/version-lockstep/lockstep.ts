@@ -21,16 +21,28 @@ import { coerce, compare } from 'semver';
  * hold instead.
  */
 
-/** A note explaining a pin the run deliberately did not take. */
+/** A pin the run deliberately did not take, and why. */
 export interface LockstepNote {
+  /** The dependency held back. */
+  name: string;
   note: string;
 }
 
+/** A table of proposed versions, keyed by dependency name. */
+export type ProposedVersions<Name extends string = string> = Partial<
+  Record<Name, string>
+>;
+
 /**
- * The pins in one group, named as they appear in the versions tables. Members may
- * live in different tables (e.g. the TypeScript and Python pins).
+ * The pins in one group, named as they appear in the versions tables. At least
+ * two, since one pin has nothing to stay in step with. Members may live in
+ * different tables (e.g. the TypeScript and Python pins).
  */
-export type LockstepGroup = readonly string[];
+export type LockstepGroup<Name extends string = string> = readonly [
+  Name,
+  Name,
+  ...Name[],
+];
 
 /**
  * The bare version in a pin, whatever range syntax it was written with — `==` for
@@ -54,9 +66,9 @@ const prefixOf = (version: string, bareVersion: string): string =>
  * @param tables the proposed-version tables to read and rewrite; a member is
  *   looked up in the first table that declares it
  */
-export const holdGroupsInLockstep = (
-  groups: readonly LockstepGroup[],
-  ...tables: readonly Record<string, string>[]
+export const holdGroupsInLockstep = <Name extends string>(
+  groups: readonly LockstepGroup<Name>[],
+  ...tables: readonly ProposedVersions<Name>[]
 ): LockstepNote[] => {
   const notes: LockstepNote[] = [];
 
@@ -65,9 +77,12 @@ export const holdGroupsInLockstep = (
     // group with fewer than two has nothing to stay in step with, so it is left
     // alone rather than held against a version nothing proposed.
     const members = group.flatMap((name) => {
-      const table = tables.find((candidate) => name in candidate);
-      const version = table && bare(table[name]);
-      return table && version ? [{ name, table, version }] : [];
+      const table = tables.find((candidate) => candidate[name] !== undefined);
+      const proposed = table?.[name];
+      const version = proposed && bare(proposed);
+      return table && proposed && version
+        ? [{ name, table, proposed, version }]
+        : [];
     });
     if (members.length < 2) continue;
 
@@ -75,12 +90,12 @@ export const holdGroupsInLockstep = (
       .map(({ version }) => version)
       .reduce((min, version) => (compare(version, min) < 0 ? version : min));
 
-    for (const { name, table, version } of members) {
+    for (const { name, table, proposed, version } of members) {
       if (version === lowest) continue;
-      const proposed = table[name];
       const held = `${prefixOf(proposed, version)}${lowest}`;
       table[name] = held;
       notes.push({
+        name,
         note: `${name} held at ${held} (${proposed} available): must move in step with ${group
           .filter((other) => other !== name)
           .join(', ')}`,

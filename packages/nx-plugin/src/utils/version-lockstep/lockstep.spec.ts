@@ -14,6 +14,8 @@ describe('holdGroupsInLockstep', () => {
     expect(ts).toEqual({ a: '1.5.0', b: '1.5.0', c: '1.5.0' });
     // Only the members that actually moved are reported.
     expect(notes).toHaveLength(2);
+    // The held name is reported separately, so callers can correct a manifest.
+    expect(notes.map(({ name }) => name).sort()).toEqual(['a', 'c']);
     const reported = notes.map((note) => note.note).join('\n');
     expect(reported).toContain('a held at 1.5.0');
     expect(reported).toContain('2.0.0 available');
