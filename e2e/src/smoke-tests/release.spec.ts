@@ -40,7 +40,7 @@ const RELEASE_DIST_TAG = 'release-e2e';
  * mistaken for one, and unique per run so nx always performs a real publish
  * rather than re-tagging a version the registry already holds.
  */
-const releaseTestVersion = () => `9.9.9-release-e2e.${process.pid}`;
+const releaseTestVersion = () => `999.9.9-release-e2e.${process.pid}`;
 
 const workspaceRoot = join(__dirname, '../../..');
 const distManifest = (pkg: string) =>
