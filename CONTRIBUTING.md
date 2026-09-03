@@ -34,7 +34,7 @@ To send us a pull request, please:
 1. (Optional) Update snapshots if required `pnpm nx run @aws/nx-plugin:test -u`
 1. Ensure local tests pass (run a full build with `pnpm nx run-many --target build --all`).
 1. Update and run any integration tests relevant to your changes.
-1. Commit to your fork using clear commit messages ([see section below](#end-to-end-tests))
+1. Commit to your fork using clear commit messages ([see section below](#commit-messages))
 1. Send us a pull request, answering any default questions in the pull request interface.
 1. Pay attention to any automated CI failures reported in the pull request, and stay involved in the conversation.
 
@@ -42,6 +42,24 @@ GitHub provides additional document on [forking a repository](https://help.githu
 [creating a pull request](https://help.github.com/articles/creating-a-pull-request/).
 
 For a detailed guide on contributing a generator, check out the [Contributing a Generator tutorial here](https://awslabs.github.io/nx-plugin-for-aws/get_started/tutorials/contribute-generator).
+
+### Commit Messages
+
+Commits follow [conventional commits](https://www.conventionalcommits.org/), enforced by commitlint on `commit-msg`. Scope a commit to the generator it touches, eg `feat(ts#project): my commit message`.
+
+The type also chooses the release: `nx release` derives the semver bump from the commits since the last tag, taking the highest bump across them.
+
+| Type                                         | Bump  | In release notes |
+| -------------------------------------------- | ----- | ---------------- |
+| `feat`                                       | minor | yes              |
+| `fix`                                        | patch | yes              |
+| `deps`                                       | patch | yes              |
+| `perf`, `revert`                             | patch | no               |
+| `docs`, `test`, `chore`, `refactor`, `ci`, … | none  | no               |
+
+Use `deps` for bumping the dependency versions vended to users — a version bump ships in a patch, not a minor. This is the type the weekly `update-versions` PR uses.
+
+Any type plus `!` (or a `BREAKING CHANGE:` footer) forces a major, so a breaking upgrade of something we vend still needs `deps!:`.
 
 ### Generator Idempotency
 

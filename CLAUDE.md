@@ -51,6 +51,6 @@ Before raising a PR, validate changed generators in an example workspace using l
 
 - Always ensure the build passes before raising a PR.
 - Update snapshots if there are failures due to snapshot changes.
-- Use conventional commits, referencing the generator you are working on, eg "feat(ts#project): my commit message".
+- Use conventional commits, referencing the generator you are working on, eg "feat(ts#project): my commit message". Use the `deps` type for bumping dependency versions vended to users — see [Commit Messages](./CONTRIBUTING.md#commit-messages) for the type-to-release-bump mapping.
 - Raise PRs following the PR template.
 - After pushing to a PR, monitor the checks and iterate on any failures until all are green.
