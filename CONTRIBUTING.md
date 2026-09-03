@@ -49,13 +49,14 @@ Commits follow [conventional commits](https://www.conventionalcommits.org/), enf
 
 The type also chooses the release: `nx release` derives the semver bump from the commits since the last tag, taking the highest bump across them.
 
-| Type                                         | Bump  | In release notes |
-| -------------------------------------------- | ----- | ---------------- |
-| `feat`                                       | minor | yes              |
-| `fix`                                        | patch | yes              |
-| `deps`                                       | patch | yes              |
-| `perf`, `revert`                             | patch | no               |
-| `docs`, `test`, `chore`, `refactor`, `ci`, … | none  | no               |
+| Type                                         | Bump  | Release notes section |
+| -------------------------------------------- | ----- | --------------------- |
+| `feat`                                       | minor | 🚀 Features            |
+| `fix`                                        | patch | 🩹 Fixes               |
+| `deps`                                       | patch | 📦 Dependencies        |
+| `perf`                                       | patch | 🔥 Performance         |
+| `revert`                                     | patch | hidden                |
+| `docs`, `test`, `chore`, `refactor`, `ci`, … | none  | hidden                |
 
 Use `deps` for bumping the dependency versions vended to users — a version bump ships in a patch, not a minor. This is the type the weekly `update-versions` PR uses.
 
