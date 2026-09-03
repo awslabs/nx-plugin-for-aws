@@ -35,6 +35,7 @@ import {
   describeGeneratorForCatalogue,
   generatorsJsonEntries,
 } from './generators.js';
+import { updateGitIgnore } from './git.js';
 import type { Iac } from './iac.js';
 import { configureMcpServers } from './mcp.js';
 import { getNpmScope } from './npm-scope.js';
@@ -62,10 +63,11 @@ export const INIT_DEPENDENCIES = [
 ] as const satisfies readonly { name: ITsDepVersion }[];
 
 // Built dependencies whose install scripts the generated workspace trusts.
-// `onlyBuiltDependencies` is the pnpm 10 key (silently ignored by pnpm 11);
-// pnpm 11 reads `allowBuilds` instead. Any dep NOT in this allowlist will
-// have its install scripts skipped with a warning — matching pnpm 10's
-// default behaviour. The user can opt-in later via `pnpm approve-builds`.
+// `onlyBuiltDependencies` is the pnpm 10 key (silently ignored from pnpm 11
+// onwards); pnpm 11 and above read `allowBuilds` instead. Any dep NOT in this
+// allowlist will have its install scripts skipped with a warning — matching
+// pnpm 10's default behaviour. The user can opt-in later via
+// `pnpm approve-builds`.
 export const PNPM_BUILT_DEPENDENCIES = ['@swc/core', 'esbuild', 'nx', 'sharp'];
 
 /**
@@ -168,6 +170,8 @@ const setUpPnpmWorkspace = (tree: Tree, catalogs: boolean) => {
 const setUpWorkspaces = (tree: Tree, catalogs: boolean) => {
   if (detectWorkspacePackageManager(tree) === 'pnpm') {
     setUpPnpmWorkspace(tree, catalogs);
+    // pnpm creates these at the workspace root while it materialises packages.
+    updateGitIgnore(tree, '.', (patterns) => [...patterns, '_tmp_*']);
   } else {
     updateJson(tree, 'package.json', (json) => {
       // The `workspaces` field may be the object form ({ "packages": [...] })

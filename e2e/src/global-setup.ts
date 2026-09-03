@@ -41,6 +41,12 @@ const restoreBackup = (path: string) => {
 
 export default async function () {
   try {
+    // Every smoke test installs the build this run publishes to verdaccio
+    // seconds earlier, which pnpm's release-age cutoff hides. Scoped to this
+    // process — which every spawned command inherits — so the cutoff still
+    // applies to anything installing from the public registry.
+    process.env.PNPM_CONFIG_MINIMUM_RELEASE_AGE = '0';
+
     // On shared Windows runners the verdaccio storage outlives the process
     // and `clearStorage: true` below doesn't fully reset it, so publishes
     // on the next run hit "409 Conflict: already present". Wipe first.

@@ -41,6 +41,7 @@ export const AGENT_CONNECTION_DEPENDENCIES = [
   { name: '@modelcontextprotocol/sdk' },
   { name: '@a2a-js/sdk' },
   { name: '@strands-agents/sdk' },
+  { name: '@aws-sdk/client-s3' },
 ] as const satisfies readonly { name: ITsDepVersion }[];
 
 /** Python dependencies a caller must declare to emit agent-connection clients. */
@@ -310,10 +311,10 @@ const TS_TEMPLATE_DEPS: Record<
     '@modelcontextprotocol/sdk',
   ],
   'core-a2a': ['@aws-sdk/credential-providers', '@a2a-js/sdk'],
-  'core-strands/base': ['@strands-agents/sdk'],
-  'core-strands/mcp': ['@strands-agents/sdk'],
-  'core-strands/gateway': ['@strands-agents/sdk'],
-  'core-strands/a2a': ['@strands-agents/sdk'],
+  'core-strands/base': ['@strands-agents/sdk', '@aws-sdk/client-s3'],
+  'core-strands/mcp': ['@strands-agents/sdk', '@aws-sdk/client-s3'],
+  'core-strands/gateway': ['@strands-agents/sdk', '@aws-sdk/client-s3'],
+  'core-strands/a2a': ['@strands-agents/sdk', '@aws-sdk/client-s3'],
 };
 
 const emitTs = (
