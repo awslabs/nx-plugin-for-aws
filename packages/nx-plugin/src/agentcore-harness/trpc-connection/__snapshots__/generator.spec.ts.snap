@@ -1,0 +1,435 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`agentcore-harness#trpc-connection generator > adds an addAguiRoute method to the api CDK construct > api-construct.ts 1`] = `
+"import { MyHarness } from '../harnesses/my-harness/my-harness.js';
+import { NodejsFunction, OutputFormat } from 'aws-cdk-lib/aws-lambda-nodejs';
+import * as url from 'url';
+import {
+  AuthorizationType,
+  LambdaIntegration,
+  ResponseTransferMode,
+} from 'aws-cdk-lib/aws-apigateway';
+import { Aspects, Duration } from 'aws-cdk-lib';
+import {
+  PolicyDocument,
+  PolicyStatement,
+  Effect,
+  AnyPrincipal,
+  IGrantable,
+  Grant,
+} from 'aws-cdk-lib/aws-iam';
+import {
+  Code,
+  Runtime,
+  Function,
+  FunctionProps,
+  Tracing,
+  FunctionUrl,
+  FunctionUrlAuthType,
+  HttpMethod,
+  InvokeMode,
+} from 'aws-cdk-lib/aws-lambda';
+import { RuntimeConfig } from '../../core/runtime-config.js';
+import { AddCorsPreflightAspect, RestApi } from '../../core/api/rest-api.js';
+
+export class TestApi extends RestApi {
+  private allowedOrigins = ['*'];
+
+  constructor(scope, id, props) {
+    super(scope, id, { ...props });
+    Aspects.of(this).add(new AddCorsPreflightAspect(() => this.allowedOrigins));
+  }
+
+  public restrictCorsTo(...origins) {
+    this.allowedOrigins = origins;
+  }
+
+  public grantInvokeAccess(grantee) {
+    Grant.addToPrincipal({
+      grantee,
+      actions: ['execute-api:Invoke'],
+      resourceArns: [this.api.arnForExecuteApi('*', '/*', '*')],
+    });
+
+    // The AG-UI stream is a Lambda Function URL (AWS_IAM), so it needs its own
+    // invoke grant alongside the REST API's.
+    this.aguiFunctionUrl?.grantInvokeUrl(grantee);
+  }
+
+  /**
+   * The Lambda Function URL that streams AG-UI events, set by \`addAguiRoute\`.
+   */
+  public aguiFunctionUrl?: FunctionUrl;
+
+  /**
+   * Adds an AG-UI streaming endpoint backed by MyHarness,
+   * translating its Converse-style stream into AG-UI server-sent events.
+   * Only 'messages' and 'threadId' are read from the request; every other
+   * Harness field (systemPrompt, model, tools, allowedTools, skills,
+   * actorId) is pinned server-side by the generated handler.
+   *
+   * The endpoint is a Lambda Function URL in RESPONSE_STREAM mode rather than
+   * an API Gateway route: REST integrations cap a streamed response at the
+   * endpoint's idle timeout (30s for edge-optimized), which truncates long
+   * generations, whereas a Function URL streams for up to the Lambda timeout.
+   */
+  public addAguiRoute(harness: MyHarness): void {
+    const rc = RuntimeConfig.ensure(this);
+    const aguiHandler = new NodejsFunction(this, 'AguiHandler', {
+      entry: url.fileURLToPath(
+        new URL('../../../../../api/src/agui/handler.ts', import.meta.url),
+      ),
+      runtime: Runtime.NODEJS_LATEST,
+      timeout: Duration.seconds(180),
+      tracing: Tracing.ACTIVE,
+      bundling: {
+        format: OutputFormat.ESM,
+        mainFields: ['module', 'main'],
+        banner:
+          "import { createRequire as __aguiCreateRequire } from 'module'; const require = __aguiCreateRequire(import.meta.url);",
+      },
+      environment: {
+        HARNESS_ARN: harness.harnessArn,
+        MEMORY_ARN: harness.harness.attrMemoryManagedMemoryConfigurationArn,
+      },
+    });
+    aguiHandler.addEnvironment(
+      'RUNTIME_CONFIG_APP_ID',
+      rc.appConfigApplicationId,
+    );
+    rc.grantReadAppConfig(aguiHandler);
+    harness.grantInvokeAccess(aguiHandler);
+
+    // Stream over a Function URL in RESPONSE_STREAM mode. IAM auth matches the
+    // API's SigV4 model: the browser signs with Cognito Identity Pool
+    // credentials (aws4fetch resolves the service to 'lambda' from the
+    // *.lambda-url.*.on.aws host). CORS is configured on the Function URL so
+    // the unsigned browser preflight is answered without invoking the function.
+    this.aguiFunctionUrl = aguiHandler.addFunctionUrl({
+      authType: FunctionUrlAuthType.AWS_IAM,
+      invokeMode: InvokeMode.RESPONSE_STREAM,
+      cors: {
+        allowedOrigins: [...this.allowedOrigins],
+        allowedMethods: [HttpMethod.POST],
+        allowedHeaders: [
+          'authorization',
+          'content-type',
+          'x-amz-date',
+          'x-amz-content-sha256',
+          'x-amz-security-token',
+        ],
+        maxAge: Duration.days(1),
+      },
+    });
+    rc.set('connection', 'apis', {
+      ...rc.get('connection').apis,
+      Agui: this.aguiFunctionUrl.url,
+    });
+
+    // Grants every existing tRPC operation handler Memory-read access, so an
+    // optional 'history' procedure can reconstruct a conversation from
+    // AgentCore Memory, decoupled from the '/agui' connection's lifetime.
+    Object.values(this.integrations).forEach((integration) => {
+      if ('handler' in integration && integration.handler instanceof Function) {
+        integration.handler.addEnvironment('HARNESS_ARN', harness.harnessArn);
+        integration.handler.addEnvironment(
+          'MEMORY_ARN',
+          harness.harness.attrMemoryManagedMemoryConfigurationArn,
+        );
+        Grant.addToPrincipal({
+          grantee: integration.handler,
+          actions: [
+            'bedrock-agentcore:ListEvents',
+            'bedrock-agentcore:GetEvent',
+            'bedrock-agentcore:RetrieveMemoryRecords',
+          ],
+          resourceArns: [
+            harness.harness.attrMemoryManagedMemoryConfigurationArn,
+          ],
+        });
+      }
+    });
+  }
+}
+"
+`;
+
+exports[`agentcore-harness#trpc-connection generator > generates the agui route handler, mapper and session helper > converse-to-agui.ts 1`] = `
+"import type { BaseEvent, RunAgentInput } from '@ag-ui/core';
+import { EventType } from '@ag-ui/core';
+import type {
+  HarnessMessage,
+  InvokeHarnessStreamOutput,
+} from '@aws-sdk/client-bedrock-agentcore';
+
+/**
+ * Builds the single Harness message to forward for this turn. The Harness owns
+ * conversation continuity via \`runtimeSessionId\`, so only the newest user
+ * message is sent — the full \`RunAgentInput.messages\` history is the client's
+ * local thread state, not what should be replayed to the Harness.
+ */
+export function toHarnessMessages(
+  messages: RunAgentInput['messages'],
+): HarnessMessage[] {
+  const last = messages.at(-1);
+  if (!last || last.role !== 'user') {
+    throw new Error(
+      'Expected the last message in RunAgentInput to be a user message',
+    );
+  }
+  const text =
+    typeof last.content === 'string'
+      ? last.content
+      : (last.content ?? [])
+          .filter(
+            (block): block is { type: 'text'; text: string } =>
+              block.type === 'text',
+          )
+          .map((block) => block.text)
+          .join('\\n');
+  return [{ role: 'user', content: [{ text }] }];
+}
+
+let idCounter = 0;
+function nextId(prefix: string): string {
+  idCounter += 1;
+  return \`\${prefix}_\${Date.now()}_\${idCounter}\`;
+}
+
+/**
+ * Maps the Harness's \`InvokeHarness\` stream (Converse-shaped events) to AG-UI
+ * events. Assistant text becomes TEXT_MESSAGE_*; tool-use content blocks
+ * become TOOL_CALL_* (contentBlockStart.toolUse -> TOOL_CALL_START,
+ * contentBlockDelta.toolUse.input -> TOOL_CALL_ARGS, contentBlockStop ->
+ * TOOL_CALL_END). Unrecognised event members (metadata, exceptions) are
+ * skipped rather than surfaced as AG-UI events.
+ */
+export async function* mapHarnessStreamToAgui(
+  stream: AsyncIterable<InvokeHarnessStreamOutput>,
+  ctx: { threadId: string; runId: string },
+): AsyncGenerator<BaseEvent> {
+  yield {
+    type: EventType.RUN_STARTED,
+    threadId: ctx.threadId,
+    runId: ctx.runId,
+  } as BaseEvent;
+
+  let textMessageId: string | undefined;
+  // contentBlockIndex -> the AG-UI toolCallId minted for that block.
+  const toolCallIdByBlockIndex = new Map<number, string>();
+
+  try {
+    for await (const event of stream) {
+      if (
+        event.contentBlockStart?.start &&
+        'toolUse' in event.contentBlockStart.start &&
+        event.contentBlockStart.start.toolUse
+      ) {
+        const { toolUseId, name } = event.contentBlockStart.start.toolUse;
+        const toolCallId = toolUseId ?? nextId('tool');
+        toolCallIdByBlockIndex.set(
+          event.contentBlockStart.contentBlockIndex ?? 0,
+          toolCallId,
+        );
+        yield {
+          type: EventType.TOOL_CALL_START,
+          toolCallId,
+          toolCallName: name ?? 'unknown',
+        } as BaseEvent;
+        continue;
+      }
+
+      const delta = event.contentBlockDelta?.delta;
+      if (delta && 'text' in delta && delta.text !== undefined) {
+        if (!textMessageId) {
+          textMessageId = nextId('msg');
+          yield {
+            type: EventType.TEXT_MESSAGE_START,
+            messageId: textMessageId,
+            role: 'assistant',
+          } as BaseEvent;
+        }
+        yield {
+          type: EventType.TEXT_MESSAGE_CONTENT,
+          messageId: textMessageId,
+          delta: delta.text,
+        } as BaseEvent;
+        continue;
+      }
+
+      if (delta && 'toolUse' in delta && delta.toolUse) {
+        const toolCallId = toolCallIdByBlockIndex.get(
+          event.contentBlockDelta?.contentBlockIndex ?? 0,
+        );
+        if (toolCallId) {
+          yield {
+            type: EventType.TOOL_CALL_ARGS,
+            toolCallId,
+            delta: delta.toolUse.input ?? '',
+          } as BaseEvent;
+        }
+        continue;
+      }
+
+      if (event.contentBlockStop) {
+        const toolCallId = toolCallIdByBlockIndex.get(
+          event.contentBlockStop.contentBlockIndex ?? 0,
+        );
+        if (toolCallId) {
+          yield { type: EventType.TOOL_CALL_END, toolCallId } as BaseEvent;
+          toolCallIdByBlockIndex.delete(
+            event.contentBlockStop.contentBlockIndex ?? 0,
+          );
+        }
+        continue;
+      }
+      // messageStart / messageStop / metadata / exceptions: no AG-UI equivalent, skipped.
+    }
+  } finally {
+    if (textMessageId) {
+      yield {
+        type: EventType.TEXT_MESSAGE_END,
+        messageId: textMessageId,
+      } as BaseEvent;
+    }
+  }
+
+  yield {
+    type: EventType.RUN_FINISHED,
+    threadId: ctx.threadId,
+    runId: ctx.runId,
+  } as BaseEvent;
+}
+"
+`;
+
+exports[`agentcore-harness#trpc-connection generator > generates the agui route handler, mapper and session helper > handler.ts 1`] = `
+"import type { RunAgentInput } from '@ag-ui/core';
+import { EventEncoder } from '@ag-ui/encoder';
+import {
+  BedrockAgentCoreClient,
+  InvokeHarnessCommand,
+} from '@aws-sdk/client-bedrock-agentcore';
+import type { APIGatewayProxyEvent } from 'aws-lambda';
+import type { Writable } from 'node:stream';
+import {
+  mapHarnessStreamToAgui,
+  toHarnessMessages,
+} from './converse-to-agui.js';
+import { actorIdFromEvent, runtimeSessionIdFor } from './session.js';
+
+const HARNESS_ARN = process.env.HARNESS_ARN!;
+const client = new BedrockAgentCoreClient({});
+
+// Body is an AG-UI RunAgentInput; response is AG-UI SSE. Only
+// \`messages\` and \`threadId\` are read from the client input. Every other
+// Harness-invocation field (systemPrompt, model, tools, allowedTools, skills,
+// actorId) is pinned server-side, per the AgentCore Harness security guidance:
+// https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-security.html
+export const handler = awslambda.streamifyResponse(
+  async (event: APIGatewayProxyEvent, responseStream: Writable) => {
+    const encoder = new EventEncoder();
+    const httpResponseStream = awslambda.HttpResponseStream.from(
+      responseStream,
+      {
+        statusCode: 200,
+        headers: {
+          'Content-Type': encoder.getContentType(),
+          'Cache-Control': 'no-cache',
+        },
+      },
+    );
+
+    // A long, event-free stretch (e.g. a slow tool call) can trip the Function
+    // URL's idle timeout, so send an SSE keepalive comment periodically to hold
+    // the stream open until the Harness resumes emitting events or the Lambda
+    // times out.
+    const heartbeat = setInterval(() => {
+      httpResponseStream.write(': keepalive\\n\\n');
+    }, 15000);
+
+    try {
+      const input = JSON.parse(event.body ?? '{}') as RunAgentInput;
+      const actorId = actorIdFromEvent(event);
+      const runtimeSessionId = runtimeSessionIdFor(actorId, input.threadId);
+
+      const { stream } = await client.send(
+        new InvokeHarnessCommand({
+          harnessArn: HARNESS_ARN,
+          runtimeSessionId,
+          actorId,
+          messages: toHarnessMessages(input.messages),
+        }),
+      );
+
+      for await (const aguiEvent of mapHarnessStreamToAgui(stream!, {
+        threadId: input.threadId,
+        runId: input.runId,
+      })) {
+        httpResponseStream.write(encoder.encodeSSE(aguiEvent));
+      }
+    } catch (err) {
+      console.error('agui handler error', err);
+    } finally {
+      clearInterval(heartbeat);
+      httpResponseStream.end();
+    }
+  },
+);
+"
+`;
+
+exports[`agentcore-harness#trpc-connection generator > generates the agui route handler, mapper and session helper > session.ts 1`] = `
+"import { createHash } from 'node:crypto';
+import type { APIGatewayProxyEvent } from 'aws-lambda';
+
+// AgentCore Runtime Session IDs must be >= 33 characters and match
+// [a-zA-Z0-9][a-zA-Z0-9-_]*. actorId and threadId are hashed to a fixed width
+// independently before being joined — concatenating the two raw strings and
+// then truncating the result silently drops the threadId suffix for long
+// actorIds (e.g. a full IAM principal ARN), collapsing every thread from the
+// same caller into one Memory session.
+function fixedWidthToken(value: string): string {
+  return createHash('sha256').update(value).digest('hex').slice(0, 32);
+}
+
+export function runtimeSessionIdFor(actorId: string, threadId: string): string {
+  return \`\${fixedWidthToken(actorId)}_\${fixedWidthToken(threadId)}\`;
+}
+
+// Never taken from the request body — always derived from the identity the
+// API's own authorizer already validated, so the caller cannot spoof another
+// user's actor id. Works for whichever authorizer the API is configured
+// with, without needing to know the auth mode at generation time:
+// - Cognito (COGNITO_USER_POOLS authorizer): the JWT \`sub\` claim.
+// - IAM (SigV4): no JWT, so the caller's IAM principal ARN is the closest
+//   server-derived identity available. The ARN lives in a different place
+//   depending on the event source, so both are checked and resolve to the
+//   same value for a given caller — keeping the '/agui' Function URL handler
+//   (payload format 2.0: \`requestContext.authorizer.iam.userArn\`) and the
+//   REST \`history\` procedure (payload format 1.0: \`requestContext.identity
+//   .userArn\`) on the same actor id, so history reconstructs what '/agui' wrote.
+// Sanitized because both ARNs (':' and '/') and, in principle, claim values
+// can contain characters InvokeHarness rejects in the actorId field.
+// \`requestContext\` itself is optional-chained too: local dev's tRPC adapter
+// invokes procedures with an empty mock event (no \`requestContext\` at all),
+// which otherwise throws before falling through to the 'anonymous' default.
+export function actorIdFromEvent(event: APIGatewayProxyEvent): string {
+  const requestContext = event.requestContext as
+    | {
+        authorizer?: {
+          claims?: { sub?: string };
+          iam?: { userArn?: string };
+        };
+        identity?: { userArn?: string };
+      }
+    | undefined;
+  const id =
+    requestContext?.authorizer?.claims?.sub ??
+    requestContext?.identity?.userArn ??
+    requestContext?.authorizer?.iam?.userArn ??
+    'anonymous';
+  return id.replace(/[^a-zA-Z0-9_-]/g, '-');
+}
+"
+`;

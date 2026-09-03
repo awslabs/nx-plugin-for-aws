@@ -183,6 +183,7 @@ const PRESENTATION: Record<string, { category: string; logo: string }> = {
   'ts#mcp-server': { category: 'Agentic', logo: 'mcp' },
   'py#mcp-server': { category: 'Agentic', logo: 'mcp' },
   'agentcore-gateway': { category: 'Agentic', logo: 'agentcore' },
+  'agentcore-harness': { category: 'Agentic', logo: 'agentcore' },
   'ts#rdb': { category: 'Database', logo: 'aurora' },
   'py#rdb': { category: 'Database', logo: 'aurora' },
   'ts#dynamodb': { category: 'Database', logo: 'dynamodb' },

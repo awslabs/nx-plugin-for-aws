@@ -1,0 +1,595 @@
+---
+title: tRPC API to AgentCore Harness
+description: Connect a tRPC API to an Amazon Bedrock AgentCore Harness, exposing it as a standard AG-UI endpoint
+when:
+  sourceType: ts#trpc-api
+  targetType: agentcore-harness
+---
+import { FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import NxCommands from '@components/nx-commands.astro';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+
+The `connection` generator wires a <Link path="guides/trpc">tRPC API</Link> to an <Link path="guides/agentcore-harness">AgentCore Harness</Link>, adding a streaming `POST /agui` route to the API that authenticates the caller, invokes the Harness on their behalf, and translates the response into a standard [AG-UI](https://docs.ag-ui.com/) server-sent-event stream. Because the translation happens server-side, the API becomes a drop-in AG-UI endpoint — the generated CopilotKit chat UI connects with a stock `@ag-ui/client` `HttpAgent`, and so can any AG-UI client.
+
+A Harness is never exposed to the browser directly. Per [AWS's guidance](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-security.html), an untrusted caller should only reach it through a trusted application layer. The generated `/agui` route is that layer: it reads only `messages` and `threadId` from the request and pins the system prompt, model, tools and actor id server-side.
+
+## Prerequisites
+
+1. A tRPC API generated with `ts#api --framework=trpc --infra=rest-lambda` (see the <Link path="guides/trpc">tRPC API guide</Link> — the AG-UI route needs the REST API's streaming Lambda integration, so `infra: http-lambda` is not supported).
+2. An <Link path="guides/agentcore-harness">AgentCore Harness</Link> project.
+
+## Usage
+
+<RunGenerator generator="connection" />
+
+Select your tRPC API project as the source and your AgentCore Harness project as the target.
+
+<GeneratorParameters generator="connection" />
+
+## Generator Output
+
+The generator adds the AG-UI application code to your tRPC API project, plus an `addAguiRoute` method to its generated CDK construct:
+
+<FileTree>
+
+- packages/api/src
+  - agui
+    - handler.ts The `POST /agui` Lambda handler — calls `InvokeHarness` and streams the response as AG-UI SSE
+    - converse-to-agui.ts Pure mapper from the Harness's Converse-style stream to AG-UI events
+    - session.ts Derives the AgentCore Memory actor id and runtime session id for the caller
+  - procedures
+    - history.ts Optional tRPC query that reconstructs a conversation from AgentCore Memory
+  - router.ts Updated to register `history`
+- packages/common/constructs/src/app/apis/api.ts Gains an `addAguiRoute(harness)` method
+
+</FileTree>
+
+Wire the new route into your application stack — the generator does not call `addAguiRoute` for you. Instantiate the Harness construct (see the <Link path="guides/agentcore-harness">AgentCore Harness guide</Link>) and your `Api`, then pass the harness to `addAguiRoute`:
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {7}
+import { MyApi, MyHarness } from '@my-project/common-constructs';
+
+const harness = new MyHarness(this, 'MyHarness');
+const api = new MyApi(this, 'Api', {
+  integrations: MyApi.defaultIntegrations(this).build(),
+});
+api.addAguiRoute(harness);
+
+```
+
+See [Deploying the full application](#deploying-the-full-application) below for the complete website → API → Harness setup.
+
+## How It Works
+
+`addAguiRoute` adds a dedicated streaming Lambda behind `POST /agui` on your API's existing REST API — not a tRPC procedure, since a stock AG-UI client expects a plain `text/event-stream`, not tRPC's subscription wire format. The route sits under the API's root resource, so it inherits the API's authorizer (IAM or Cognito) and CORS configuration automatically.
+
+For every request, the handler:
+
+1. Parses the AG-UI `RunAgentInput` body, reading **only** `messages` and `threadId`.
+2. Derives the AgentCore Memory `actorId` from the identity the authorizer already validated (never from the request body).
+3. Derives a `runtimeSessionId` from the actor id and `threadId`, so sessions are namespaced per caller — a thread id alone can't be replayed against another user's session.
+4. Calls `InvokeHarness` with the caller's messages and the pinned ids — the system prompt, model, tools and skills are never read from the request.
+5. Maps the returned Converse-style stream to AG-UI events (`RUN_STARTED`, `TEXT_MESSAGE_*`, `TOOL_CALL_*`, `RUN_FINISHED`) as they arrive.
+
+Authentication follows whichever mode your tRPC API was generated with. Under **IAM** (default) the caller signs with SigV4 and the actor id comes from the IAM principal ARN (`event.requestContext.identity.userArn`); under **Cognito** the caller presents a bearer JWT and the actor id comes from the validated `sub` claim (`event.requestContext.authorizer.claims.sub`). In both cases authentication terminates at the API — the Harness itself is invoked with the Lambda's own IAM execution role, and the caller's token is never forwarded to it. Per-user scoping is enforced by this handler (the derived `actorId`), not by the Harness, so its deployment-time `auth: iam` setting is unchanged.
+
+The generated `history` tRPC query reads AgentCore Memory directly (`ListEvents`, scoped to the same server-derived actor id and session) and reconstructs the **full** transcript, not just text: assistant tool calls become `toolCalls` on an assistant message, and their results (stored under role `USER` in Memory) become separate `tool` messages carrying a `toolCallId` that links back to the call. Because the Harness commits every exchange to Memory as it completes, `history` is the durable read path — a dropped connection, reload, or another device never loses a turn, tool-call chips included, so a reloaded conversation renders identically to the live stream. The generated CopilotKit UI calls it on mount and after every run; a bring-your-own frontend can call it too, or ignore it.
+
+Reloading only converges on that server transcript if the AG-UI agent instance handed to `CopilotKitProvider` is **stable** across renders — the generated `useAgui<HarnessName>` hook memoizes the agent, and (under `auth: iam`) `useSigV4`'s returned signing client is itself memoized so it doesn't change identity every render. An unstable agent gets torn down and rebuilt before `setMessages` from `history` ever reaches a render, producing an empty transcript on reload even though `/agui` and Memory are both working correctly. Keep this in mind if you swap in your own signing/auth hook in place of `useSigV4` — it must return a referentially stable object too.
+
+## Infrastructure
+
+`addAguiRoute` provisions:
+
+- A dedicated Node.js Lambda (`AguiHandler`) behind `POST /agui`, with a 180-second timeout and `HARNESS_ARN` / `MEMORY_ARN` environment variables.
+- An IAM grant letting that Lambda call `InvokeHarness` on the connected Harness.
+- IAM grants (plus the same env vars) on every existing tRPC operation handler so the `history` procedure can read Memory independently of the `/agui` Lambda.
+
+:::caution[Streaming duration limits]
+The `/agui` integration uses `ResponseTransferMode.STREAM`, so API Gateway's 29-second integration timeout does **not** apply — the SSE stream runs until the Lambda's 180-second timeout. The REST API is edge-optimized, which would drop the connection after a 30-second idle gap, so the handler emits an SSE keepalive comment every 15 seconds. A turn that outruns the Lambda timeout keeps running server-side, and the client falls back to `history` to read the rest. To keep longer turns streaming live, raise the `AguiHandler` timeout (up to API Gateway's 15-minute ceiling) in your `Api` construct; `history`/Memory remains the durable read path either way.
+:::
+
+Only CDK is wired by this generator. If your API's `iac` is `terraform`, the AG-UI application code is still generated, but you'll need to wire the Lambda, the API Gateway route, and the Harness invoke grant into your Terraform configuration by hand.
+
+## Deploying the full application
+
+The complete path from an empty machine to a deployed website talking to a Harness, using each generator's defaults.
+
+### 1. Create a workspace
+
+<CreateNxWorkspaceCommand workspace="my-project" iac="cdk" />
+
+### 2. Generate the projects
+
+Run every generator from the workspace root in one pass. `--no-interactive` accepts every default (tRPC API with `infra: rest-lambda` and `auth: iam`, a React website with Cognito auth, and a CDK infrastructure project). The `chat-sessions` DynamoDB project and its connection back the durable session list built in [Building the chat UI](#building-the-chat-ui). Connect the API to the Harness **first** so the harness is recorded on the API before the website-side connection generates its CopilotKit hook:
+
+```bash frame="none"
+# tRPC API (framework=trpc, infra=rest-lambda, auth=iam by default)
+pnpm nx g @aws/nx-plugin:ts#api trpc-api --no-interactive
+
+# AgentCore Harness
+pnpm nx g @aws/nx-plugin:agentcore-harness agentcore-harness --no-interactive
+
+# React website (framework=react, ux=shadcn by default)
+pnpm nx g @aws/nx-plugin:ts#website react-website --no-interactive
+
+# Cognito authentication for the website
+pnpm nx g @aws/nx-plugin:ts#website#auth --project=react-website --no-interactive
+
+# DynamoDB project for the durable session index (see Building the chat UI)
+pnpm nx g @aws/nx-plugin:ts#dynamodb chat-sessions --no-interactive
+
+# Connect the API to the Harness FIRST — adds the /agui route to the API
+pnpm nx g @aws/nx-plugin:connection --sourceProject=trpc-api --targetProject=agentcore-harness --no-interactive
+
+# Connect the website to the API — also generates the CopilotKit hook for the Harness connected above
+pnpm nx g @aws/nx-plugin:connection --sourceProject=react-website --targetProject=trpc-api --no-interactive
+
+# Connect the API to the DynamoDB table — wires the API's dev target to DynamoDB Local
+pnpm nx g @aws/nx-plugin:connection --sourceProject=trpc-api --targetProject=chat-sessions --no-interactive
+
+# CDK infrastructure project
+pnpm nx g @aws/nx-plugin:ts#infra infra --no-interactive
+```
+
+### 3. Wire the constructs into your stack
+
+Assemble the generated constructs into your infrastructure stack by hand. Instantiate each one, call `addAguiRoute` to attach the `/agui` route, and grant the website's authenticated users access to the API (replace `@my-project` with your workspace's npm scope):
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {20}
+import {
+  ReactWebsite,
+  TrpcApi,
+  AgentcoreHarness,
+  UserIdentity,
+} from '@my-project/common-constructs';
+import { Stack, StackProps } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    const identity = new UserIdentity(this, 'Identity');
+    const harness = new AgentcoreHarness(this, 'MyHarness');
+    const api = new TrpcApi(this, 'Api', {
+      integrations: TrpcApi.defaultIntegrations(this).build(),
+    });
+
+    api.addAguiRoute(harness);
+    api.grantInvokeAccess(identity.identityPool.authenticatedRole);
+
+    new ReactWebsite(this, 'Website');
+  }
+}
+
+```
+
+`grantInvokeAccess` lets your website's Cognito-authenticated users call the API — and therefore the `/agui` route, which shares the API's authorizer. Omit it only if you regenerated the API with `auth: cognito`.
+
+Don't deploy yet — continue to [Building the chat UI](#building-the-chat-ui) below, which adds the session UI and a final construct to this same stack. You'll bootstrap and deploy the whole application in one pass at the end.
+
+## Building the chat UI
+
+The website-side connection (step 2) wired the AG-UI plumbing into your website — the shared `<AguiProvider>` (already wrapping `<App />` in `main.tsx`) and the `useAgui<HarnessName>` hook pointed at this API's `/agui` route — but it does **not** add a chat component to any route. You render one yourself, importing the stock `<CopilotChat>` from `@copilotkit/react-core/v2`; the standard AG-UI frontend works against this project as-is, with no generated theming layer required.
+
+Two props drive it:
+
+- **`agentId`** — the Harness's name in kebab-case, the key returned by the generated `useAgui<HarnessName>` hook (`agentcore-harness` for the project above).
+- **`threadId`** — identifies the conversation. The hook hydrates the active thread from `history` on mount and after every run, so a reload or another device always restores the transcript from AgentCore Memory. Pass a **stable** id to make a conversation resumable; omit it to start a fresh thread. Wrapping the component in `key={threadId}` remounts it when the id changes, re-running the mount-time hydration so switching threads reloads that thread's history. Threads are scoped to the caller's server-derived actor id, so a user only ever sees their own conversations. (The <Link path="get_started/tutorials/dungeon-game/4">Dungeon Adventure tutorial</Link> uses this deterministic-`threadId` pattern to make each game route sharable and resumable.)
+
+`<CopilotChat>`, `<CopilotSidebar>` and `<CopilotPopup>` all take these same props for an inline chat, a docked panel, or a floating popup. This is the same stock CopilotKit frontend the <Link path="guides/connection/react-agui">React → AG-UI guide</Link> documents in full; the only difference is that the hook talks to your API's `/agui` route rather than an agent runtime directly.
+
+`<CopilotChat>` fills its parent, so give it a container with an explicit height and width (e.g. `flex: 1` inside a sized flex layout); dropping it into an unsized box collapses the message input and footer to their minimum width. The example below wraps it accordingly.
+
+Rather than hard-code a single `threadId`, the walkthrough below renders a **session picker** that lists a user's past conversations and opens each one — the shape most apps need.
+
+### List past conversations
+
+Listing a user's previous conversations is **not** generated for you: the `history` procedure reads a single thread by id, and there is no "list threads" endpoint (`threadId`s are chosen client-side, so nothing server-side enumerates them). To build a session list, persist the `threadId`s your app creates — each with a label — and render a picker that sets the active `threadId`; the selected thread's transcript then rehydrates automatically through `history`.
+
+Where you persist that index is your choice. For a single device, `localStorage` is simplest but isn't shared across devices. The walkthrough below is an opinionated **durable, cross-device** version that persists the index in DynamoDB over your tRPC API, using the `chat-sessions` project generated in [step 2 of the deploy walkthrough](#2-generate-the-projects) (a single-table [ElectroDB](https://electrodb.dev/) project, via <Link path="guides/ts-dynamodb">`ts#dynamodb`</Link>, already connected to the API). It stores only the session index — a row per `{ user, threadId, title }`; the transcript itself still lives in AgentCore Memory and is read back through `history`.
+
+#### 1. Model a session entity keyed on the caller
+
+Replace the generated example entity in `packages/chat-sessions/src/entities/index.ts` (and delete `packages/chat-sessions/src/entities/example.ts`). The partition key is the **owner's identity** and the sort key is the `threadId`, so one query returns exactly that user's threads:
+
+```ts title="packages/chat-sessions/src/entities/index.ts"
+import { Entity } from 'electrodb';
+import { getDynamoDBClient, resolveTableName } from '../client.js';
+
+export const createChatSessionEntity = async () =>
+  new Entity(
+    {
+      model: { entity: 'ChatSession', version: '1', service: 'chat' },
+      attributes: {
+        userId: { type: 'string', required: true, readOnly: true },
+        threadId: { type: 'string', required: true, readOnly: true },
+        title: { type: 'string', required: true },
+        lastUpdated: {
+          type: 'string',
+          required: true,
+          default: () => new Date().toISOString(),
+          watch: '*',
+          set: () => new Date().toISOString(),
+        },
+      },
+      indexes: {
+        primary: {
+          pk: { field: 'pk', composite: ['userId'] },
+          sk: { field: 'sk', composite: ['threadId'] },
+        },
+      },
+    },
+    { client: getDynamoDBClient(), table: await resolveTableName() },
+  );
+
+```
+
+#### 2. Declare the table as an API dependency
+
+The `connection` generator run in step 2 wired the `dev` targets together (starting DynamoDB Local for a `ts#dynamodb` target — see the <Link path="guides/connection/trpc-dynamodb">tRPC → DynamoDB guide</Link>) but did not add `chat-sessions` as a source dependency of `trpc-api`. Since the procedures below import from `@my-project/chat-sessions`, declare it in `packages/trpc-api/package.json` so the TypeScript project reference gets generated — otherwise the build fails with `File '…/chat-sessions/src/index.ts' is not under 'rootDir'`:
+
+```json title="packages/trpc-api/package.json" ins={3}
+{
+  "dependencies": {
+    "@my-project/chat-sessions": "workspace:*"
+  }
+}
+```
+
+Then install and let Nx regenerate the TypeScript project references:
+
+```bash frame="none"
+pnpm install
+pnpm nx sync
+```
+
+#### 3. Add procedures scoped to the same identity
+
+Add `packages/trpc-api/src/procedures/chat-sessions.ts`. The `userId` we key on is derived from `actorIdFromEvent` — **the exact helper this connection already generated** at `src/agui/session.ts` and that `/agui` and `history` use to pin the caller server-side. Reusing it means the session index is scoped per user by the same identity the transcript is, and a `userId` is never read from the request body:
+
+```ts title="packages/trpc-api/src/procedures/chat-sessions.ts"
+import { createChatSessionEntity } from '@my-project/chat-sessions';
+import { z } from 'zod';
+import { actorIdFromEvent } from '../agui/session.js';
+import { publicProcedure } from '../init.js';
+
+const ChatSessionSchema = z.object({
+  threadId: z.string(),
+  title: z.string(),
+  lastUpdated: z.string(),
+});
+
+export const listChatSessions = publicProcedure
+  .output(z.object({ sessions: z.array(ChatSessionSchema) }))
+  .query(async ({ ctx }) => {
+    const userId = actorIdFromEvent(ctx.event);
+    const entity = await createChatSessionEntity();
+    const { data } = await entity.query.primary({ userId }).go();
+    // Query returns rows ordered by threadId; present most-recently-used first.
+    const sessions = data
+      .sort((a, b) => b.lastUpdated.localeCompare(a.lastUpdated))
+      .map(({ threadId, title, lastUpdated }) => ({
+        threadId,
+        title,
+        lastUpdated,
+      }));
+    return { sessions };
+  });
+
+export const saveChatSession = publicProcedure
+  .input(z.object({ threadId: z.string(), title: z.string() }))
+  .output(ChatSessionSchema)
+  .mutation(async ({ input, ctx }) => {
+    const userId = actorIdFromEvent(ctx.event);
+    const entity = await createChatSessionEntity();
+    const { data } = await entity
+      .put({ userId, threadId: input.threadId, title: input.title })
+      .go();
+    return {
+      threadId: data.threadId,
+      title: data.title,
+      lastUpdated: data.lastUpdated,
+    };
+  });
+
+export const deleteChatSession = publicProcedure
+  .input(z.object({ threadId: z.string() }))
+  .mutation(async ({ input, ctx }) => {
+    const userId = actorIdFromEvent(ctx.event);
+    const entity = await createChatSessionEntity();
+    await entity.delete({ userId, threadId: input.threadId }).go();
+  });
+
+```
+
+Register them in `packages/trpc-api/src/router.ts` — grouping under a nested `chatSessions` router keeps the client calls tidy (`trpc.chatSessions.list`, `.save`, `.delete`):
+
+```ts title="packages/trpc-api/src/router.ts"
+import { t } from './init.js';
+import {
+  deleteChatSession,
+  listChatSessions,
+  saveChatSession,
+} from './procedures/chat-sessions.js';
+import { echo } from './procedures/echo.js';
+import { history } from './procedures/history.js';
+
+export const router = t.router;
+
+export const appRouter = router({
+  echo,
+  history,
+  chatSessions: router({
+    list: listChatSessions,
+    save: saveChatSession,
+    delete: deleteChatSession,
+  }),
+});
+
+export type AppRouter = typeof appRouter;
+
+```
+
+#### 4. Grant the API access to the table
+
+In the same `ApplicationStack` from [step 3 of the deploy walkthrough](#3-wire-the-constructs-into-your-stack), instantiate the table construct and grant every tRPC handler read/write access (this covers both the `history` Lambda and the new session procedures):
+
+```ts title="packages/infra/src/stacks/application-stack.ts" {1,6,14-16}
+import {
+  ReactWebsite,
+  TrpcApi,
+  AgentcoreHarness,
+  UserIdentity,
+  ChatSessions
+} from '@my-project/common-constructs';
+import { Stack, StackProps } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    const identity = new UserIdentity(this, 'Identity');
+    const harness = new AgentcoreHarness(this, 'MyHarness');
+    const chatSessions = new ChatSessions(this, 'ChatSessions');
+    const api = new TrpcApi(this, 'Api', {
+      integrations: TrpcApi.defaultIntegrations(this).build(),
+    });
+
+    api.addAguiRoute(harness);
+    api.grantInvokeAccess(identity.identityPool.authenticatedRole);
+
+    Object.entries(api.integrations).forEach(([, integration]) => {
+      chatSessions.grantReadWriteData(integration.handler);
+    });
+
+    new ReactWebsite(this, 'Website');
+  }
+}
+
+```
+
+`grantReadWriteData` grants both the DynamoDB and KMS permissions the handlers need. The `ChatSessions` construct also registers the deployed table name in <Link path="guides/runtime-config">Runtime Configuration</Link>, which `resolveTableName()` reads at runtime.
+
+#### 5. Render the chat page and a sidebar session picker
+
+Add the chat page. It reads the active `threadId` from the route's search params and renders the `<CopilotChat>` for that thread — `key={threadId}` remounts it when the id changes, so the durable `history` path reloads the selected thread. The session picker itself lives in the sidebar (next), which navigates here with `?threadId=<id>`, keeping the chat route itself minimal:
+
+```tsx title="packages/react-website/src/routes/chat.tsx"
+import '@copilotkit/react-core/v2/styles.css';
+import { CopilotChat } from '@copilotkit/react-core/v2';
+import { createFileRoute } from '@tanstack/react-router';
+
+export const Route = createFileRoute('/chat')({
+  component: ChatPage,
+  validateSearch: (search: Record<string, unknown>): { threadId?: string } => ({
+    threadId: typeof search.threadId === 'string' ? search.threadId : undefined,
+  }),
+});
+
+function ChatPage() {
+  const { threadId } = Route.useSearch();
+
+  // Stock CopilotChat fills its parent, so give it a sized container: an
+  // explicit height plus `minWidth`/`minHeight: 0` so it fills and shrinks
+  // rather than collapsing to its content's minimum width.
+  return (
+    <div style={{ height: 'calc(100svh - 9rem)', minWidth: 0, minHeight: 0 }}>
+      {threadId ? (
+        <CopilotChat
+          key={threadId}
+          agentId="agentcore-harness"
+          threadId={threadId}
+        />
+      ) : (
+        <div>Select a chat or start a new one from the sidebar.</div>
+      )}
+    </div>
+  );
+}
+
+```
+
+The route lives inside the `<AguiProvider>` wrapper that already wraps your app, and `validateSearch` is what lets the sidebar link to it with `?threadId=<id>`.
+
+Now put the session picker in the website's generated sidebar. The generated file already renders a nav group (Home, Chat); add a second **Chats** `SidebarGroup` that lists the user's saved threads — each a `<Link>` to `/chat?threadId=…` — plus a **New chat** action that creates a thread and navigates to it. This keeps thread navigation in the sidebar and the chat route itself minimal:
+
+```tsx title="packages/react-website/src/components/app-sidebar.tsx"
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupAction,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+} from '@my-project/common-shadcn/components/ui/sidebar';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link, useNavigate } from '@tanstack/react-router';
+import { Home, MessageSquare, Plus } from 'lucide-react';
+
+import Config from '../config';
+import { useTrpcApi } from '../hooks/useTrpcApi';
+
+export function AppSidebar() {
+  const trpc = useTrpcApi();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
+  const sessions = useQuery(trpc.chatSessions.list.queryOptions());
+  const saveSession = useMutation(
+    trpc.chatSessions.save.mutationOptions({
+      onSuccess: () =>
+        queryClient.invalidateQueries(trpc.chatSessions.list.queryFilter()),
+    }),
+  );
+
+  const newChat = () => {
+    // randomUUID is 36 chars, satisfying AgentCore's >= 33 char session id rule.
+    const id = crypto.randomUUID();
+    saveSession.mutate({
+      threadId: id,
+      title: `New chat ${new Date().toLocaleString()}`,
+    });
+    void navigate({ to: '/chat', search: { threadId: id } });
+  };
+
+  // Menu items.
+  const navItems = [
+    {
+      label: 'Home',
+      to: '/',
+      icon: Home,
+    },
+    {
+      label: 'Chat',
+      to: '/chat',
+      icon: MessageSquare,
+    },
+  ];
+
+  return (
+    <Sidebar>
+      <SidebarContent>
+        <SidebarGroup>
+          <SidebarGroupLabel>{Config.applicationName}</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {navItems.map((item) => (
+                <SidebarMenuItem key={item.label}>
+                  <SidebarMenuButton asChild>
+                    <Link to={item.to} preload="intent">
+                      <item.icon />
+                      <span>{item.label}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel>Chats</SidebarGroupLabel>
+          <SidebarGroupAction title="New chat" onClick={newChat}>
+            <Plus />
+            <span className="sr-only">New chat</span>
+          </SidebarGroupAction>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {sessions.data?.sessions.map((s) => (
+                <SidebarMenuItem key={s.threadId}>
+                  <SidebarMenuButton asChild>
+                    <Link
+                      to="/chat"
+                      search={{ threadId: s.threadId }}
+                      preload="intent"
+                    >
+                      <MessageSquare />
+                      <span className="truncate">{s.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </SidebarContent>
+    </Sidebar>
+  );
+}
+
+```
+
+Call `saveChatSession` again to rename a session (e.g. derive a title from the first user message once a run finishes). The <Link path="get_started/tutorials/dungeon-game/4">Dungeon Adventure tutorial</Link>'s "Continue" list is another worked example of this app-owned-index shape.
+
+With steps 1–5 complete, deploy the whole application in one pass.
+
+First bootstrap CDK once per account. Because the website is fronted by CloudFront with an AWS WAF WebACL, bootstrap **both** your target Region and `us-east-1`:
+
+<NxCommands commands={['bootstrap infra']} />
+
+Then deploy. Use `deploy-sandbox` rather than the bare `deploy` target: the website's WAF WebACL lives in its own `us-east-1` stack, so the stage contains more than one stack and `deploy-sandbox` deploys them all. This single deploy ships everything — the constructs wired in [step 3 of the deploy walkthrough](#3-wire-the-constructs-into-your-stack), the DynamoDB table and IAM grants from step 4 above, and the website changes from step 5 (the website's built assets are deployed by its construct, so any frontend edit needs a deploy to appear on the CloudFront URL):
+
+<NxCommands commands={['deploy-sandbox infra']} />
+
+The Harness also requires Amazon Bedrock model access to be enabled in the target Region. See the <Link path="guides/typescript-infrastructure">TypeScript Infrastructure guide</Link> for the `deploy-sandbox`/`deploy-ci` targets and how AWS credentials are resolved. Any later change takes effect by re-running `deploy-sandbox` (bootstrap is one-time).
+
+Once deployed, open the website's CloudFront URL (a CDK output). The generated User Pool defaults to `AllowAdminCreateUserOnly: true` (no self-signup), so create your first user with the AWS CLI rather than a signup form — the username can't be email-shaped, since the pool uses email as an alias:
+
+```bash
+aws cognito-idp admin-create-user --user-pool-id <POOL_ID> --region <REGION> \
+  --username <name> --user-attributes Name=email,Value=<you@example.com> Name=email_verified,Value=true --message-action SUPPRESS
+aws cognito-idp admin-set-user-password --user-pool-id <POOL_ID> --region <REGION> \
+  --username <name> --password '<TempPass!123>' --permanent
+```
+
+Sign in with that username and password, and the CopilotKit chat will stream from your Harness through the API's `/agui` route.
+
+:::note[Local dev shares one partition]
+Under the `dev` target there's no authorizer, so `actorIdFromEvent` resolves to `anonymous` (the same fallback `history` uses locally) — every session is stored under that single partition. Per-user isolation takes effect against a deployed stack, where the API's authorizer supplies a real IAM principal or Cognito `sub`.
+:::
+
+## Bring your own AG-UI frontend
+
+Because the `/agui` route speaks standard AG-UI over SSE, you don't need the generated React website or CopilotKit to use it. Any [AG-UI client](https://docs.ag-ui.com/) can connect by pointing an `@ag-ui/client` `HttpAgent` at the deployed API's URL plus `/agui`:
+
+```ts
+import { HttpAgent } from '@ag-ui/client';
+
+const agent = new HttpAgent({
+  url: 'https://<your-api-id>.execute-api.<region>.amazonaws.com/agui',
+  // IAM: sign the request with SigV4 (e.g. via aws4fetch), matching the API's authorizer.
+  // Cognito: attach `Authorization: Bearer <id or access token>` from your Cognito session.
+});
+
+```
+
+Authenticate exactly as you would any other request to this API — SigV4 for `auth: iam`, a bearer JWT for `auth: cognito`. For durable, cross-device hydration, call the `history` tRPC procedure the same way you'd call any other procedure on this API.
+
+`history`'s messages include tool calls and their results, not just text — map them into your AG-UI client's message model as an assistant message carrying `toolCalls` (`[{ id, type: 'function', function: { name, arguments } }]`) followed by a `tool` message whose `toolCallId` matches that call's `id`, the same linkage `@ag-ui/client`'s own `Message` type expects. And whatever object you feed your client's `fetch`/signing dependency on, make sure it's referentially stable across renders (memoize it) — an agent instance that's recreated every render discards a `setMessages`-based hydration before it ever paints, which looks identical to `history` returning nothing even though it isn't.
+
+## Local Development
+
+Your tRPC API's `dev` target serves the `history` procedure locally like any other tRPC procedure, scoped to an `anonymous` actor id (the local dev server's mock request has no authorizer context):
+
+<NxCommands commands={['dev <api-project-name>']} />
+
+:::note[`/agui` is not served by `dev`]
+`/agui` is a plain Lambda handler attached directly to API Gateway, not a tRPC procedure, so it isn't reachable through the `dev` target. Exercise it against a deployed stack — through the generated CopilotKit UI or by sending a signed request to the deployed API's `/agui` URL.
+:::
+
+## More Information
+
+- <Link path="guides/agentcore-harness">AgentCore Harness Guide</Link>
+- <Link path="guides/trpc">tRPC API Guide</Link>
+- <Link path="guides/connection/react-trpc">React to tRPC API Guide</Link>
+- [AG-UI Protocol Documentation](https://docs.ag-ui.com/)
+- [AgentCore Harness Security Guidance](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness-security.html)

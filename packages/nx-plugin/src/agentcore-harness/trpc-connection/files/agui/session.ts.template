@@ -1,0 +1,51 @@
+import { createHash } from 'node:crypto';
+import type { APIGatewayProxyEvent } from 'aws-lambda';
+
+// AgentCore Runtime Session IDs must be >= 33 characters and match
+// [a-zA-Z0-9][a-zA-Z0-9-_]*. actorId and threadId are hashed to a fixed width
+// independently before being joined — concatenating the two raw strings and
+// then truncating the result silently drops the threadId suffix for long
+// actorIds (e.g. a full IAM principal ARN), collapsing every thread from the
+// same caller into one Memory session.
+function fixedWidthToken(value: string): string {
+  return createHash('sha256').update(value).digest('hex').slice(0, 32);
+}
+
+export function runtimeSessionIdFor(actorId: string, threadId: string): string {
+  return `${fixedWidthToken(actorId)}_${fixedWidthToken(threadId)}`;
+}
+
+// Never taken from the request body — always derived from the identity the
+// API's own authorizer already validated, so the caller cannot spoof another
+// user's actor id. Works for whichever authorizer the API is configured
+// with, without needing to know the auth mode at generation time:
+// - Cognito (COGNITO_USER_POOLS authorizer): the JWT `sub` claim.
+// - IAM (SigV4): no JWT, so the caller's IAM principal ARN is the closest
+//   server-derived identity available. The ARN lives in a different place
+//   depending on the event source, so both are checked and resolve to the
+//   same value for a given caller — keeping the '/agui' Function URL handler
+//   (payload format 2.0: `requestContext.authorizer.iam.userArn`) and the
+//   REST `history` procedure (payload format 1.0: `requestContext.identity
+//   .userArn`) on the same actor id, so history reconstructs what '/agui' wrote.
+// Sanitized because both ARNs (':' and '/') and, in principle, claim values
+// can contain characters InvokeHarness rejects in the actorId field.
+// `requestContext` itself is optional-chained too: local dev's tRPC adapter
+// invokes procedures with an empty mock event (no `requestContext` at all),
+// which otherwise throws before falling through to the 'anonymous' default.
+export function actorIdFromEvent(event: APIGatewayProxyEvent): string {
+  const requestContext = event.requestContext as
+    | {
+        authorizer?: {
+          claims?: { sub?: string };
+          iam?: { userArn?: string };
+        };
+        identity?: { userArn?: string };
+      }
+    | undefined;
+  const id =
+    requestContext?.authorizer?.claims?.sub ??
+    requestContext?.identity?.userArn ??
+    requestContext?.authorizer?.iam?.userArn ??
+    'anonymous';
+  return id.replace(/[^a-zA-Z0-9_-]/g, '-');
+}

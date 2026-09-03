@@ -153,6 +153,12 @@ export const internalTestMatrixGenerator = async (
       iac: 'inherit',
     },
     {
+      name: 'my-api-cognito',
+      infra: 'rest-lambda',
+      auth: 'cognito',
+      iac: 'inherit',
+    },
+    {
       name: 'my-api-custom',
       infra: 'rest-lambda',
       auth: 'custom',
@@ -410,7 +416,9 @@ export const internalTestMatrixGenerator = async (
     ...projectDefaults,
   });
 
-  // AgentCore Harness — a standalone invocation project.
+  // AgentCore Harness, connected to both an iam-auth and a cognito-auth tRPC
+  // api, so the generated /agui route + history procedure are exercised
+  // under each auth mode the api supports.
   await agentcoreHarnessGenerator(tree, {
     name: 'my-harness',
     infra: 'agentcore',
@@ -474,6 +482,12 @@ export const internalTestMatrixGenerator = async (
 
   // Every connection edge the matrix covers.
   const connections: ConnectionGeneratorSchema[] = [
+    // tRPC API -> AgentCore Harness (iam + cognito). Must precede the
+    // website -> API connections below: the website connection generates a
+    // CopilotKit hook per Harness already connected to the api, so the api
+    // must front its Harness(es) before a website connects to it.
+    { sourceProject: ts('my-api'), targetProject: ts('my-harness') },
+    { sourceProject: ts('my-api-cognito'), targetProject: ts('my-harness') },
     // Website -> API
     { sourceProject: ts('website'), targetProject: ts('my-api') },
     { sourceProject: ts('website-no-router'), targetProject: ts('my-api') },
