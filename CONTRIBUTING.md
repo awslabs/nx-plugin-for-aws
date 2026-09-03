@@ -60,6 +60,8 @@ The type also chooses the release: `nx release` derives the semver bump from the
 
 Use `deps` for bumping the dependency versions vended to users — a version bump ships in a patch, not a minor. This is the type the weekly `update-versions` PR uses.
 
+Don't confuse it with `chore(deps):`, which is `chore` with a `deps` scope and releases nothing. That's for this repo's own tooling (the dependabot PRs bumping our devDependencies and GitHub Actions). The rule is what the bump reaches: `deps:` when it changes what a user's workspace gets, `chore(deps):` when it only changes how we build.
+
 Any type plus `!` (or a `BREAKING CHANGE:` footer) forces a major, so a breaking upgrade of something we vend still needs `deps!:`.
 
 ### Generator Idempotency
