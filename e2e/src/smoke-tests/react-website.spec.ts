@@ -2,12 +2,22 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { ensureDirSync } from 'fs-extra';
+// eslint-disable-next-line
+import {
+  PACKAGES_DIR,
+  SHARED_SHADCN_DIR,
+  SHARED_SHADCN_NAME,
+} from '../../../packages/nx-plugin/src/utils/shared-constructs-constants';
+// eslint-disable-next-line
+import { TS_VERSIONS } from '../../../packages/nx-plugin/src/utils/versions';
 import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
 
 describe('smoke test - react-website', () => {
   const pkgMgr = 'pnpm';
+  const workspaceName = 'react-website';
   const targetDir = `${tmpProjPath()}/react-website-${pkgMgr}`;
 
   beforeEach(() => {
@@ -22,7 +32,7 @@ describe('smoke test - react-website', () => {
     const projectRoot = await createTestWorkspace(
       pkgMgr,
       targetDir,
-      'react-website',
+      workspaceName,
       'cdk',
     );
     const opts = { cwd: projectRoot, env: { NX_DAEMON: 'false' } };
@@ -82,6 +92,55 @@ describe('smoke test - react-website', () => {
         opts,
       );
     }
+
+    // The shadcn CLI resolves `components.json`'s aliases through the shared
+    // package's `imports`/`exports` maps rather than a tsconfig `paths` entry.
+    // Both documented invocations are covered: a wrong alias shape makes the
+    // CLI join the alias against its own cwd and write the component to a
+    // doubled path (`packages/common/shadcn/packages/common/shadcn/...`)
+    // instead of the package's `src`.
+    const shadcnDir = `${PACKAGES_DIR}/${SHARED_SHADCN_DIR}`;
+    const shadcnRoot = join(projectRoot, shadcnDir);
+    const shadcnAddCommand = `pnpm dlx shadcn@${TS_VERSIONS.shadcn} add`;
+
+    await runCLI(`${shadcnAddCommand} dialog -c ${shadcnDir} --yes`, {
+      ...opts,
+      prefixWithPackageManagerCmd: false,
+    });
+
+    // Run from inside the package too — its README documents this form, and the
+    // CLI resolves relative to a different cwd each way.
+    await runCLI(`${shadcnAddCommand} popover --yes`, {
+      ...opts,
+      cwd: shadcnRoot,
+      prefixWithPackageManagerCmd: false,
+    });
+
+    for (const component of ['dialog', 'popover']) {
+      const componentPath = join(
+        shadcnRoot,
+        'src',
+        'components',
+        'ui',
+        `${component}.tsx`,
+      );
+      expect(existsSync(componentPath), componentPath).toBe(true);
+      // Aliases resolve to the package-local `#...` specifiers, not the
+      // public `<scope>/common-shadcn/...` name. The CLI writes its own quote
+      // style, so match either.
+      expect(readFileSync(componentPath, 'utf-8')).toMatch(
+        /from ['"]#lib\/utils['"]/,
+      );
+    }
+
+    expect(existsSync(join(shadcnRoot, 'packages'))).toBe(false);
+
+    // The shadcn CLI writes its own formatting, so the added components need a
+    // format pass before the shared package's `format` target is satisfied.
+    await runCLI(
+      `run @${workspaceName}/${SHARED_SHADCN_NAME}:format --configuration=fix`,
+      opts,
+    );
 
     await runCLI(`sync --verbose`, opts);
     await runCLI(
