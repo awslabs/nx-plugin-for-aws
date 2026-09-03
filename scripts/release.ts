@@ -82,15 +82,11 @@ const releaseArgs = (): string[] => {
   return onRcTag ? ['--specifier', STABLE_PROMOTION_BUMP, '--preid', 'rc'] : [];
 };
 
-/** Overrides for {@link publishWithRetry}, used by the release smoke test. */
+/** Overrides the `release` smoke test passes to publish to a local registry. */
 export interface PublishOptions {
-  /** Dist-tag to publish under. */
   tag?: string;
-  /** Extra `nx release publish` args — the smoke test pins a local registry. */
   additionalArgs?: string[];
-  /** Attempts before giving up. */
   attempts?: number;
-  /** Directory to run from; defaults to the current working directory. */
   cwd?: string;
 }
 
@@ -100,10 +96,6 @@ export interface PublishOptions {
  * tolerates an already-present 409 — so a retry only re-attempts what didn't
  * land, and a network blip or a version briefly hidden by npm's publish-time
  * scanning doesn't fail the release.
- *
- * Exported so the `release` smoke test drives this exact function against a
- * local registry: the command nx builds here depends on the active pnpm version,
- * and only running it catches a spelling the package manager rejects.
  */
 export const publishWithRetry = async ({
   tag = 'latest',
@@ -155,8 +147,7 @@ const main = async (): Promise<void> => {
   await publishWithRetry();
 };
 
-// Run as a CLI, but not when imported (the release smoke test imports
-// publishWithRetry).
+// Run as a CLI, but not when imported (the release smoke test imports a function).
 if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch((err) => {
     console.error(err);
