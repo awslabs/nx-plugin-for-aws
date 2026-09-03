@@ -116,7 +116,15 @@ function startServer(
   const child = spawn('pnpm', ['exec', 'nx', 'run', target], {
     cwd,
     detached: true,
-    env: { ...process.env, NX_DAEMON: 'true', ...env },
+    env: {
+      ...process.env,
+      // See local-dev.spec.ts: this server is a sibling run, so it starts its
+      // own invocation root rather than inheriting one and having a later
+      // `nx run` that shares a dependency refused as recursive.
+      NX_INVOCATION_ROOT_PID: undefined,
+      NX_DAEMON: 'true',
+      ...env,
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   child.stdout?.on('data', (d: Buffer) =>
