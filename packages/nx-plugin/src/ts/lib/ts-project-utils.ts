@@ -8,13 +8,13 @@ import { addLicenseCheckToLintTarget } from '../../license/config.js';
 import { addTsDependencies } from '../../utils/add-dependencies.js';
 import { AWS_NX_PLUGIN_CONFIG_FILE_NAME } from '../../utils/config/utils.js';
 import {
-  declareDependencies,
   type DependencyDeclaration,
   forDependencies,
   type MustDeclare,
 } from '../../utils/declared-dependencies.js';
 import { isEsmWorkspace } from '../../utils/module-format.js';
 import { ensureProjectPackageJson } from '../../utils/project-package-json.js';
+import type { ITsDepVersion } from '../../utils/versions.js';
 import { configureBiomeLint } from './biome.js';
 import type { ConfigureProjectOptions } from './types.js';
 import { configureVitest, type VITEST_DEPENDENCIES } from './vitest.js';
@@ -24,17 +24,20 @@ interface TsConfigReference {
 }
 
 /**
- * `@nx/js` writes `types: ['node']` into every project's `tsconfig.lib.json`,
- * so `tsc` needs the types declared to resolve them. Declared on the project and
- * at the root: a project whose `package.json` a generator later rewrites still
+ * Dependencies a caller must declare to configure a TypeScript project.
+ *
+ * `@nx/js` writes `types: ['node']` into every project's `tsconfig.lib.json`, so
+ * `tsc` needs the types declared to resolve them. Declared on the project and at
+ * the root: a project whose `package.json` a generator later rewrites still
  * resolves the types through the root, where shared tooling lives.
+ *
+ * Exported and spread into each caller's own declaration so the version sync
+ * migration sees it — ownership is read from a generator's exported
+ * `DEPENDENCIES`, and a package declared only here would never be synced.
  */
-const TS_PROJECT_DEPENDENCIES = declareDependencies()({
-  ts: [
-    { name: '@types/node', dev: true },
-    { name: '@types/node', dev: true, root: true },
-  ],
-});
+export const TS_PROJECT_DEPENDENCIES = [
+  { name: '@types/node', dev: true },
+] as const satisfies readonly { name: ITsDepVersion; dev?: boolean }[];
 
 /**
  * Merges new TypeScript project references into existing ones, deduplicating by
@@ -62,7 +65,9 @@ export const mergeTsReferences = (
 export const configureTsProject = async <const D extends DependencyDeclaration>(
   tree: Tree,
   options: ConfigureProjectOptions,
-  declaration: D & MustDeclare<typeof VITEST_DEPENDENCIES, D>,
+  declaration: D &
+    MustDeclare<typeof VITEST_DEPENDENCIES, D> &
+    MustDeclare<typeof TS_PROJECT_DEPENDENCIES, D>,
 ) => {
   // Point users at init when the workspace hasn't been configured, since
   // lint/format targets and workspace dependency sync depend on it.
@@ -144,9 +149,21 @@ export const configureTsProject = async <const D extends DependencyDeclaration>(
     esm,
   });
 
-  addTsDependencies(tree, TS_PROJECT_DEPENDENCIES, {
-    projectRoot: options.dir,
-  });
+  // This helper's own entries, taken from its constant rather than the caller's
+  // declaration: a caller wraps the spread in `ownedElsewhere` to say this helper
+  // installs them, which is exactly what happens here. Added to the project and
+  // to the root, so a project whose `package.json` a later generator rewrites
+  // still resolves the types through the root, where shared tooling is declared.
+  for (const root of [false, true]) {
+    addTsDependencies(
+      tree,
+      {
+        ts: TS_PROJECT_DEPENDENCIES.map((entry) => ({ ...entry, root })),
+        py: [],
+      },
+      { projectRoot: options.dir },
+    );
+  }
 
   await configureBiomeLint(tree, options);
   await configureVitest(

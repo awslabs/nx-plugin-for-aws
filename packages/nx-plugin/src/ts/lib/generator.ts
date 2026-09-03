@@ -32,11 +32,14 @@ import {
 import { sortObjectKeys } from '../../utils/object.js';
 import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager.js';
 import type { TsProjectGeneratorSchema } from './schema';
-import { configureTsProject } from './ts-project-utils.js';
+import {
+  configureTsProject,
+  TS_PROJECT_DEPENDENCIES,
+} from './ts-project-utils.js';
 import { VITEST_DEPENDENCIES } from './vitest.js';
 
 export const DEPENDENCIES = declareDependencies()({
-  ts: [...VITEST_DEPENDENCIES],
+  ts: [...VITEST_DEPENDENCIES, ...TS_PROJECT_DEPENDENCIES],
 });
 
 export const TS_LIB_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
