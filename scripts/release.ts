@@ -82,6 +82,14 @@ const releaseArgs = (): string[] => {
   return onRcTag ? ['--specifier', STABLE_PROMOTION_BUMP, '--preid', 'rc'] : [];
 };
 
+/** Overrides the `release` smoke test passes to publish to a local registry. */
+export interface PublishOptions {
+  tag?: string;
+  additionalArgs?: string[];
+  attempts?: number;
+  cwd?: string;
+}
+
 /**
  * Publish the release, retrying a transient failure with backoff. Each attempt
  * re-runs `nx release publish`, which skips packages already on the registry and
@@ -89,24 +97,27 @@ const releaseArgs = (): string[] => {
  * land, and a network blip or a version briefly hidden by npm's publish-time
  * scanning doesn't fail the release.
  */
-const publishWithRetry = async (): Promise<void> => {
-  for (let attempt = 1; attempt <= MAX_PUBLISH_ATTEMPTS; attempt++) {
+export const publishWithRetry = async ({
+  tag = 'latest',
+  additionalArgs = [],
+  attempts = MAX_PUBLISH_ATTEMPTS,
+  cwd,
+}: PublishOptions = {}): Promise<void> => {
+  for (let attempt = 1; attempt <= attempts; attempt++) {
     const result = spawnSync(
       'pnpm',
-      ['nx', 'release', 'publish', '--tag', 'latest'],
-      { stdio: 'inherit' },
+      ['nx', 'release', 'publish', '--tag', tag, ...additionalArgs],
+      { stdio: 'inherit', cwd },
     );
     if (result.status === 0) {
       return;
     }
-    if (attempt === MAX_PUBLISH_ATTEMPTS) {
-      throw new Error(
-        `nx release publish failed after ${MAX_PUBLISH_ATTEMPTS} attempts`,
-      );
+    if (attempt === attempts) {
+      throw new Error(`nx release publish failed after ${attempts} attempts`);
     }
     const backoffMs = 15000 * attempt;
     console.warn(
-      `nx release publish failed (attempt ${attempt}/${MAX_PUBLISH_ATTEMPTS}); retrying in ${backoffMs / 1000}s...`,
+      `nx release publish failed (attempt ${attempt}/${attempts}); retrying in ${backoffMs / 1000}s...`,
     );
     await sleep(backoffMs);
   }
@@ -136,7 +147,10 @@ const main = async (): Promise<void> => {
   await publishWithRetry();
 };
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+// Run as a CLI, but not when imported (the release smoke test imports a function).
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
