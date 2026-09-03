@@ -1,12 +1,29 @@
 import { ApplicationStage } from './stages/application-stage.js';
 import { App } from '@e2e-test/common-constructs';
-import { Aspects, IAspect, RemovalPolicy, Stack } from 'aws-cdk-lib';
+import { Aspects, IAspect, Mixins, RemovalPolicy, Stack } from 'aws-cdk-lib';
 import { IConstruct } from 'constructs';
 import { CfnResource } from 'aws-cdk-lib';
 import { CfnUserPool, CfnUserPoolDomain } from 'aws-cdk-lib/aws-cognito';
 import { CfnDBCluster } from 'aws-cdk-lib/aws-rds';
 import { CfnTable } from 'aws-cdk-lib/aws-dynamodb';
 import { CfnWebACLAssociation } from 'aws-cdk-lib/aws-wafv2';
+import { CfnBucket, mixins as s3Mixins } from 'aws-cdk-lib/aws-s3';
+
+const AUTO_DELETE_OBJECTS_RESOURCE_TYPE = 'Custom::S3AutoDeleteObjects';
+
+/**
+ * Whether the bucket's owning construct already vends an auto-delete custom
+ * resource, so the mixin isn't applied twice (which fails synth on a duplicate
+ * construct id).
+ */
+const hasAutoDeleteObjects = (bucket: CfnBucket): boolean =>
+  (bucket.node.scope ?? bucket).node.children.some((child) =>
+    [child, child.node.defaultChild].some(
+      (candidate) =>
+        candidate instanceof CfnResource &&
+        candidate.cfnResourceType === AUTO_DELETE_OBJECTS_RESOURCE_TYPE,
+    ),
+  );
 
 /**
  * Aspect to augment resources for integration tests
@@ -22,6 +39,11 @@ class IntegrationTestAspect implements IAspect {
     // Ensure no resources are retained for a complete teardown
     if (node instanceof CfnResource) {
       node.applyRemovalPolicy(RemovalPolicy.DESTROY);
+    }
+
+    // Empty buckets on delete, since CloudFormation cannot delete a non-empty bucket
+    if (node instanceof CfnBucket && !hasAutoDeleteObjects(node)) {
+      Mixins.of(node).apply(new s3Mixins.BucketAutoDeleteObjects());
     }
 
     // AssociateWebACL is capped at one call every 2 seconds per account per
