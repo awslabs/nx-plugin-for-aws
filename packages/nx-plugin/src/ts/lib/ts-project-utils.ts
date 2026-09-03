@@ -25,10 +25,15 @@ interface TsConfigReference {
 
 /**
  * `@nx/js` writes `types: ['node']` into every project's `tsconfig.lib.json`,
- * so `tsc` needs the types declared to resolve them.
+ * so `tsc` needs the types declared to resolve them. Declared on the project and
+ * at the root: a project whose `package.json` a generator later rewrites still
+ * resolves the types through the root, where shared tooling lives.
  */
 const TS_PROJECT_DEPENDENCIES = declareDependencies()({
-  ts: [{ name: '@types/node', dev: true }],
+  ts: [
+    { name: '@types/node', dev: true },
+    { name: '@types/node', dev: true, root: true },
+  ],
 });
 
 /**
