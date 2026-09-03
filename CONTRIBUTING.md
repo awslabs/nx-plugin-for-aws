@@ -55,7 +55,7 @@ The type also chooses the release: `nx release` derives the semver bump from the
 | `fix`                                        | patch | 🩹 Fixes               |
 | `deps`                                       | patch | 📦 Dependencies        |
 | `perf`                                       | patch | 🔥 Performance         |
-| `revert`                                     | patch | hidden                |
+| `revert`                                     | patch | ⏪ Revert              |
 | `docs`, `test`, `chore`, `refactor`, `ci`, … | none  | hidden                |
 
 Use `deps` for bumping the dependency versions vended to users — a version bump ships in a patch, not a minor. This is the type the weekly `update-versions` PR uses.
