@@ -133,10 +133,17 @@ Algunos paquetes npm no pueden ser empaquetados porque dependen de `require` din
 
 ### Dockerfile
 
-Crea un `Dockerfile` en el directorio fuente de tu proyecto. El archivo no hace más que hacer `COPY` del bundle en una imagen base de Node, más `npm install` de cualquier paquete `external` que no pudo ser empaquetado. Coloca el paso `RUN npm install` **antes** del `COPY`, para que Docker pueda cachear la capa de `node_modules` instalados y solo volver a ejecutarlo cuando la lista de dependencias realmente cambie:
+Crea un `Dockerfile` en el directorio fuente de tu proyecto. El archivo no hace más que [aplicar las actualizaciones de seguridad de la imagen base](#aplica-las-actualizaciones-de-seguridad-de-la-distribución), hacer `COPY` del bundle en una imagen base de Node, más `npm install` de cualquier paquete `external` que no pudo ser empaquetado. Coloca el paso `RUN npm install` **antes** del `COPY`, para que Docker pueda cachear la capa de `node_modules` instalados y solo volver a ejecutarlo cuando la lista de dependencias realmente cambie:
 
 ```dockerfile
 FROM public.ecr.aws/docker/library/node:lts
+
+# Apply the distribution's security updates: base image tags lag behind the
+# security suite, so their OS packages carry vulnerabilities that already have a
+# published fix.
+RUN apt-get update && \
+    apt-get upgrade -y --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -236,10 +243,17 @@ Ejecutar `nx bundle my-project` produce `dist/packages/my-project/bundle-arm/` c
 
 ### Dockerfile
 
-El `Dockerfile` simplemente copia el bundle en una imagen base de Python. Debido a que `uv` ya instaló todas las dependencias en el directorio del bundle, no necesitas ejecutar `pip install` dentro de la imagen:
+El `Dockerfile` [aplica las actualizaciones de seguridad de la imagen base](#aplica-las-actualizaciones-de-seguridad-de-la-distribución), luego copia el bundle en una imagen base de Python. Debido a que `uv` ya instaló todas las dependencias en el directorio del bundle, no necesitas ejecutar `pip install` dentro de la imagen:
 
 ```dockerfile
 FROM public.ecr.aws/docker/library/python:3.14-slim
+
+# Apply the distribution's security updates: base image tags lag behind the
+# security suite, so their OS packages carry vulnerabilities that already have a
+# published fix.
+RUN apt-get update && \
+    apt-get upgrade -y --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -288,7 +302,13 @@ Esto limpia el directorio de salida, luego copia tanto el contenido del bundle c
 
 Es una buena práctica escanear tus imágenes en busca de vulnerabilidades conocidas. Los generadores que siguen este patrón agregan un target `trivy` que escanea la imagen construida con [Trivy](https://trivy.dev/), ejecutándose desde la [imagen Trivy alojada en ECR](https://gallery.ecr.aws/aquasecurity/trivy), y sale con código distinto de cero en hallazgos `HIGH` o `CRITICAL`.
 
-Agrega un target `trivy` que tenga `dependsOn` en tu target `docker`. Guarda la imagen construida en un tarball y la escanea mediante un montaje de enlace relativo al espacio de trabajo, por lo que el mismo comando funciona tanto con `docker` como con `finch`:
+El target copia un `.trivyignore` desde la raíz de tu proyecto en el directorio de escaneo y lo pasa a Trivy con `--ignorefile`, así que crea ese archivo primero — uno vacío está bien, y es donde [suprimes hallazgos](#supresión-de-hallazgos) más tarde:
+
+```bash
+touch packages/my-project/.trivyignore
+```
+
+Luego agrega un target `trivy` que tenga `dependsOn` en tu target `docker`. Guarda la imagen construida en un tarball y la escanea mediante un montaje de enlace relativo al espacio de trabajo, por lo que el mismo comando funciona tanto con `docker` como con `finch`:
 
 <Code lang="json" code={trivyTarget} />
 

@@ -253,15 +253,27 @@ All generated API and agent constructs are automatically configured with:
 
 Use `getAppConfig` from [`@aws-lambda-powertools/parameters`](https://docs.aws.amazon.com/powertools/typescript/latest/features/parameters):
 
+`getAppConfig` returns any valid JSON value, so declare the shape you expect and cast the result — otherwise the property accesses do not compile under the workspace's strict `tsconfig`:
+
 ```ts
 import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
 
+interface ConnectionConfig {
+  apis?: Record<string, string>;
+  cognitoProps?: {
+    region: string;
+    userPoolId: string;
+    userPoolWebClientId: string;
+    identityPoolId: string;
+  };
+}
+
 // Retrieve the 'connection' namespace as a parsed JSON object
-const config = await getAppConfig('connection', {
+const config = (await getAppConfig('connection', {
   application: process.env.RUNTIME_CONFIG_APP_ID!,
   environment: 'default',
   transform: 'json',
-});
+})) as ConnectionConfig;
 
 // Access values
 const apiUrl = config.apis?.MyApi;
@@ -271,15 +283,23 @@ const cognitoProps = config.cognitoProps;
 You can also retrieve custom namespaces:
 
 ```ts
+interface TablesConfig {
+  users?: { tableName: string; tableArn: string };
+}
+
 // Retrieve a custom 'tables' namespace
-const tablesConfig = await getAppConfig('tables', {
+const tablesConfig = (await getAppConfig('tables', {
   application: process.env.RUNTIME_CONFIG_APP_ID!,
   environment: 'default',
   transform: 'json',
-});
+})) as TablesConfig;
 
 const usersTableName = tablesConfig.users?.tableName;
 ```
+
+:::tip[Validate at the boundary]
+A cast tells the compiler the shape but does not check it at runtime. For configuration you don't control, parse it with a [Zod](https://zod.dev/) schema instead, so a malformed value fails loudly rather than surfacing as `undefined` later.
+:::
 
   </TabItem>
   <TabItem label="Python" icon="seti:python">

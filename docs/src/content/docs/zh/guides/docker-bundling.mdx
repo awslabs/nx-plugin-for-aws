@@ -133,10 +133,17 @@ export default defineConfig([
 
 ### Dockerfile
 
-在项目源目录中创建一个 `Dockerfile`。该文件只是将打包结果 `COPY` 到 Node 基础镜像中，加上 `npm install` 任何无法打包的 `external` 包。将 `RUN npm install` 步骤放在 `COPY` **之前**，这样 Docker 可以缓存已安装的 `node_modules` 层，并且只在依赖项列表实际更改时重新运行它：
+在项目源目录中创建一个 `Dockerfile`。该文件只是[应用基础镜像的安全更新](#应用发行版的安全更新)，将打包结果 `COPY` 到 Node 基础镜像中，加上 `npm install` 任何无法打包的 `external` 包。将 `RUN npm install` 步骤放在 `COPY` **之前**，这样 Docker 可以缓存已安装的 `node_modules` 层，并且只在依赖项列表实际更改时重新运行它：
 
 ```dockerfile
 FROM public.ecr.aws/docker/library/node:lts
+
+# Apply the distribution's security updates: base image tags lag behind the
+# security suite, so their OS packages carry vulnerabilities that already have a
+# published fix.
+RUN apt-get update && \
+    apt-get upgrade -y --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -236,10 +243,17 @@ CMD ["node", "index.js"]
 
 ### Dockerfile
 
-`Dockerfile` 只是将打包结果复制到 Python 基础镜像中。由于 `uv` 已经将所有依赖项安装到打包目录中，因此您不需要在镜像内运行 `pip install`：
+`Dockerfile` [应用基础镜像的安全更新](#应用发行版的安全更新)，然后将打包结果复制到 Python 基础镜像中。由于 `uv` 已经将所有依赖项安装到打包目录中，因此您不需要在镜像内运行 `pip install`：
 
 ```dockerfile
 FROM public.ecr.aws/docker/library/python:3.14-slim
+
+# Apply the distribution's security updates: base image tags lag behind the
+# security suite, so their OS packages carry vulnerabilities that already have a
+# published fix.
+RUN apt-get update && \
+    apt-get upgrade -y --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -288,7 +302,13 @@ CMD ["python", "-m", "my_project.main"]
 
 扫描镜像以查找已知漏洞是一个好习惯。遵循此模式的生成器会添加一个 `trivy` 目标，该目标使用 [Trivy](https://trivy.dev/) 扫描构建的镜像，从 [ECR 托管的 Trivy 镜像](https://gallery.ecr.aws/aquasecurity/trivy)运行，并在发现 `HIGH` 或 `CRITICAL` 问题时以非零退出。
 
-添加一个 `dependsOn` 您的 `docker` 目标的 `trivy` 目标。它将构建的镜像保存到 tarball 并通过工作空间相对绑定挂载扫描它，因此相同的命令在 `docker` 和 `finch` 下都有效：
+该目标将项目根目录的 `.trivyignore` 复制到扫描目录，并使用 `--ignorefile` 将其传递给 Trivy，因此首先创建该文件——空文件也可以，这是您稍后[抑制发现](#抑制发现)的地方：
+
+```bash
+touch packages/my-project/.trivyignore
+```
+
+然后添加一个 `dependsOn` 您的 `docker` 目标的 `trivy` 目标。它将构建的镜像保存到 tarball 并通过工作空间相对绑定挂载扫描它，因此相同的命令在 `docker` 和 `finch` 下都有效：
 
 <Code lang="json" code={trivyTarget} />
 

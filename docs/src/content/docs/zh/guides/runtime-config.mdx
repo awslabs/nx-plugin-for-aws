@@ -253,15 +253,27 @@ Lambda 函数和 agent 等服务器端消费者可以使用 [AWS Lambda Powertoo
 
 使用 [`@aws-lambda-powertools/parameters`](https://docs.aws.amazon.com/powertools/typescript/latest/features/parameters) 中的 `getAppConfig`：
 
+`getAppConfig` 返回任何有效的 JSON 值，因此请声明您期望的形状并转换结果 — 否则在工作区的严格 `tsconfig` 下，属性访问将无法编译：
+
 ```ts
 import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
 
+interface ConnectionConfig {
+  apis?: Record<string, string>;
+  cognitoProps?: {
+    region: string;
+    userPoolId: string;
+    userPoolWebClientId: string;
+    identityPoolId: string;
+  };
+}
+
 // Retrieve the 'connection' namespace as a parsed JSON object
-const config = await getAppConfig('connection', {
+const config = (await getAppConfig('connection', {
   application: process.env.RUNTIME_CONFIG_APP_ID!,
   environment: 'default',
   transform: 'json',
-});
+})) as ConnectionConfig;
 
 // Access values
 const apiUrl = config.apis?.MyApi;
@@ -271,15 +283,23 @@ const cognitoProps = config.cognitoProps;
 您还可以检索自定义命名空间：
 
 ```ts
+interface TablesConfig {
+  users?: { tableName: string; tableArn: string };
+}
+
 // Retrieve a custom 'tables' namespace
-const tablesConfig = await getAppConfig('tables', {
+const tablesConfig = (await getAppConfig('tables', {
   application: process.env.RUNTIME_CONFIG_APP_ID!,
   environment: 'default',
   transform: 'json',
-});
+})) as TablesConfig;
 
 const usersTableName = tablesConfig.users?.tableName;
 ```
+
+:::tip[在边界处验证]
+类型转换告诉编译器形状，但不会在运行时检查它。对于您无法控制的配置，请改用 [Zod](https://zod.dev/) 模式解析它，这样格式错误的值会立即失败，而不是稍后显示为 `undefined`。
+:::
 
   </TabItem>
   <TabItem label="Python" icon="seti:python">

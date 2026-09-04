@@ -44,7 +44,7 @@ TypeScript 基础设施生成器创建一个用 TypeScript 编写的 AWS CDK 基
 
 </FileTree>
 
-如果您设置了 `stageConfig` 选项，生成器还会创建两个用于集中凭证管理的共享包（如果它们尚不存在）：
+如果您使用 `--stageConfig=true` 生成，生成器还会创建两个用于集中凭证管理的共享包（如果它们尚不存在）：
 
 <FileTree>
 
@@ -53,12 +53,17 @@ TypeScript 基础设施生成器创建一个用 TypeScript 编写的 AWS CDK 基
       - src
         - stages.types.ts Type definitions for stage credentials and config
         - stages.config.ts Your stage-to-credential mappings (edit this)
+        - resolve-stage.ts The `resolveStage` lookup your `main.ts` imports
         - index.ts Re-exports for importing from other packages
+      - README.md
     - scripts Centralized deploy/destroy scripts
       - src
-        - infra-deploy.ts Deploy bin script
-        - infra-destroy.ts Destroy bin script
-        - stage-credentials/ Shared logic (credential lookup, CDK command building)
+        - infra
+          - infra-deploy.ts Deploy bin script
+          - infra-destroy.ts Destroy bin script
+          - index.ts Re-exports for importing from other packages
+          - stage-credentials/ Shared logic (credential lookup, CDK command building)
+      - README.md
 
 </FileTree>
 
@@ -164,7 +169,11 @@ export class ApplicationStage extends Stage {
 ### 阶段凭证配置
 
 :::note[阶段配置]
-本节适用于使用 `stageConfig` 生成的情况。如果没有它，生成器会生成一个更简单的设置，您需要自己管理 AWS 凭证（例如，在部署前导出 `AWS_PROFILE`）。
+本节适用于使用 `stageConfig` 生成的情况：
+
+<NxCommands commands={['g @aws/nx-plugin:ts#infra --name=infra --stageConfig=true']} />
+
+如果没有它，生成器会生成一个更简单的设置，您需要自己管理 AWS 凭证（例如，在部署前导出 `AWS_PROFILE`）。
 :::
 
 当您有多个针对不同 AWS 账户的阶段时，手动管理凭证可能容易出错，特别是随着阶段数量的增加。
@@ -379,10 +388,10 @@ npx cdk bootstrap aws://<account-id>/<region>
 
 您的项目有三个部署目标，每个都适合不同的情况：
 
-| 目标           | 用途                                                                       |
+| 目标           | 用途                                                                                             |
 | ---------------- | ------------------------------------------------------------------------------------------------------ |
 | `deploy-sandbox` | 在开发期间部署您自己的沙箱阶段。不需要阶段参数。使用快速模式。        |
-| `deploy`         | 通过命名您想要的阶段或堆栈来部署任何阶段。                                            |
+| `deploy`         | 通过命名您想要的阶段或堆栈来部署任何阶段。等待完全稳定。               |
 | `deploy-ci`      | 从 CI/CD 管道部署，使用预合成的云程序集。等待完全稳定。   |
 
 `deploy-sandbox` 和 `deploy` 依赖于 `^assemble`，因此它们构建即将部署的工件，仅此而已。`deploy-ci` 部署您的管道已经构建的程序集，因此它根本没有构建依赖项。
@@ -419,7 +428,7 @@ npx cdk bootstrap aws://<account-id>/<region>
 
 <NxCommands commands={['deploy <my-infra> <my-infra>-sandbox/Application']} />
 
-由于此目标可以命名任何阶段，包括您的生产阶段，因此当您使用 `stageConfig` 生成时，它会等待完全的资源稳定。对于您正在迭代的阶段，传递 `--express` 以选择使用快速模式。
+由于此目标可以命名任何阶段，包括您的生产阶段，它会等待完全的资源稳定。对于您正在迭代的阶段，传递 `--express` 以选择使用快速模式。
 
 ## 在 CI/CD 管道中部署到 AWS
 
@@ -427,7 +436,7 @@ npx cdk bootstrap aws://<account-id>/<region>
 
 <NxCommands commands={['deploy-ci <my-infra> my-stage/*']} />
 
-此目标与 `deploy` 和 `deploy-sandbox` 目标在两个方面有所不同。首先，它部署预合成的云程序集，而不是即时合成，避免了包版本更改带来的潜在非确定性，并确保每个管道阶段使用相同的云程序集进行部署。其次，它从不使用快速模式，因此在报告成功之前始终等待每个资源完全稳定。
+此目标部署预合成的云程序集，而不是即时合成，避免了包版本更改带来的潜在非确定性，并确保每个管道阶段使用相同的云程序集进行部署。与 `deploy` 一样，它在报告成功之前等待每个资源完全稳定，并且与 `deploy` 不同，它不接受 `--express` 选择退出。
 
 ## 拆除 AWS 基础设施
 

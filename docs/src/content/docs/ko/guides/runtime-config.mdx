@@ -253,15 +253,27 @@ Lambda 함수 및 에이전트와 같은 서버 측 소비자는 [AWS Lambda Pow
 
 [`@aws-lambda-powertools/parameters`](https://docs.aws.amazon.com/powertools/typescript/latest/features/parameters)의 `getAppConfig`를 사용합니다:
 
+`getAppConfig`는 유효한 모든 JSON 값을 반환하므로, 예상하는 형태를 선언하고 결과를 캐스팅해야 합니다 — 그렇지 않으면 워크스페이스의 엄격한 `tsconfig`에서 속성 액세스가 컴파일되지 않습니다:
+
 ```ts
 import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
 
+interface ConnectionConfig {
+  apis?: Record<string, string>;
+  cognitoProps?: {
+    region: string;
+    userPoolId: string;
+    userPoolWebClientId: string;
+    identityPoolId: string;
+  };
+}
+
 // Retrieve the 'connection' namespace as a parsed JSON object
-const config = await getAppConfig('connection', {
+const config = (await getAppConfig('connection', {
   application: process.env.RUNTIME_CONFIG_APP_ID!,
   environment: 'default',
   transform: 'json',
-});
+})) as ConnectionConfig;
 
 // Access values
 const apiUrl = config.apis?.MyApi;
@@ -271,15 +283,23 @@ const cognitoProps = config.cognitoProps;
 사용자 정의 네임스페이스도 검색할 수 있습니다:
 
 ```ts
+interface TablesConfig {
+  users?: { tableName: string; tableArn: string };
+}
+
 // Retrieve a custom 'tables' namespace
-const tablesConfig = await getAppConfig('tables', {
+const tablesConfig = (await getAppConfig('tables', {
   application: process.env.RUNTIME_CONFIG_APP_ID!,
   environment: 'default',
   transform: 'json',
-});
+})) as TablesConfig;
 
 const usersTableName = tablesConfig.users?.tableName;
 ```
+
+:::tip[경계에서 검증하기]
+캐스트는 컴파일러에게 형태를 알려주지만 런타임에 검사하지는 않습니다. 제어할 수 없는 구성의 경우 [Zod](https://zod.dev/) 스키마로 파싱하여 잘못된 값이 나중에 `undefined`로 나타나는 대신 명확하게 실패하도록 하세요.
+:::
 
   </TabItem>
   <TabItem label="Python" icon="seti:python">
@@ -323,3 +343,4 @@ users_table_name = tables_config.get("users", {}).get("tableName")
 ## 클라이언트 측 액세스
 
 웹사이트의 경우 `connection` 네임스페이스는 S3 버킷에 `runtime-config.json` 파일로 배포됩니다. 프론트엔드 코드에서 이러한 값에 액세스하는 방법에 대한 자세한 내용은 <Link path="guides/react-website#runtime-configuration">React 웹사이트 런타임 구성</Link> 가이드를 참조하세요.
+

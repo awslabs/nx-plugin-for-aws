@@ -506,9 +506,18 @@ describe('terraformProjectGenerator', () => {
       const validateTarget = projectConfig.targets['validate'];
       expect(validateTarget.executor).toBe('nx:run-commands');
       expect(validateTarget.cache).toBe(true);
-      expect(validateTarget.options.command).toBe('terraform validate');
       expect(validateTarget.options.cwd).toBe('{projectRoot}/src');
-      expect(validateTarget.dependsOn).toEqual(['init']);
+      // Runs its own backendless init rather than depending on the
+      // backend-configured `init`, which needs a bootstrapped state bucket — so
+      // this works on a fresh workspace.
+      expect(validateTarget.options.commands).toContain(
+        'terraform init -backend=false',
+      );
+      expect(validateTarget.options.commands).toContain('terraform validate');
+      expect(validateTarget.dependsOn).toBeUndefined();
+      expect(validateTarget.options.env.TF_DATA_DIR).toContain(
+        'terraform-validate',
+      );
 
       // Test checkov target, which carries the security scan
       const checkovTarget = projectConfig.targets['checkov'];

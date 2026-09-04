@@ -253,15 +253,27 @@ Todos los constructos generados de API y agente se configuran automáticamente c
 
 Usa `getAppConfig` de [`@aws-lambda-powertools/parameters`](https://docs.aws.amazon.com/powertools/typescript/latest/features/parameters):
 
+`getAppConfig` devuelve cualquier valor JSON válido, así que declara la forma que esperas y convierte el resultado — de lo contrario, los accesos a propiedades no compilarán bajo el `tsconfig` estricto del workspace:
+
 ```ts
 import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
 
+interface ConnectionConfig {
+  apis?: Record<string, string>;
+  cognitoProps?: {
+    region: string;
+    userPoolId: string;
+    userPoolWebClientId: string;
+    identityPoolId: string;
+  };
+}
+
 // Retrieve the 'connection' namespace as a parsed JSON object
-const config = await getAppConfig('connection', {
+const config = (await getAppConfig('connection', {
   application: process.env.RUNTIME_CONFIG_APP_ID!,
   environment: 'default',
   transform: 'json',
-});
+})) as ConnectionConfig;
 
 // Access values
 const apiUrl = config.apis?.MyApi;
@@ -271,15 +283,23 @@ const cognitoProps = config.cognitoProps;
 También puedes recuperar espacios de nombres personalizados:
 
 ```ts
+interface TablesConfig {
+  users?: { tableName: string; tableArn: string };
+}
+
 // Retrieve a custom 'tables' namespace
-const tablesConfig = await getAppConfig('tables', {
+const tablesConfig = (await getAppConfig('tables', {
   application: process.env.RUNTIME_CONFIG_APP_ID!,
   environment: 'default',
   transform: 'json',
-});
+})) as TablesConfig;
 
 const usersTableName = tablesConfig.users?.tableName;
 ```
+
+:::tip[Valida en el límite]
+Una conversión le dice al compilador la forma pero no la verifica en tiempo de ejecución. Para configuración que no controlas, analízala con un esquema [Zod](https://zod.dev/) en su lugar, para que un valor malformado falle ruidosamente en lugar de aparecer como `undefined` más tarde.
+:::
 
   </TabItem>
   <TabItem label="Python" icon="seti:python">

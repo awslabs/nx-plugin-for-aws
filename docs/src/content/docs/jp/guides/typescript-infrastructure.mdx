@@ -44,7 +44,7 @@ TypeScriptインフラストラクチャジェネレーターは、TypeScriptで
 
 </FileTree>
 
-`stageConfig`オプションを設定すると、ジェネレーターは集中的な認証情報管理のための2つの共有パッケージも作成します（まだ存在しない場合）：
+`--stageConfig=true`を指定して生成すると、ジェネレーターは集中的な認証情報管理のための2つの共有パッケージも作成します（まだ存在しない場合）：
 
 <FileTree>
 
@@ -53,12 +53,17 @@ TypeScriptインフラストラクチャジェネレーターは、TypeScriptで
       - src
         - stages.types.ts Type definitions for stage credentials and config
         - stages.config.ts Your stage-to-credential mappings (edit this)
+        - resolve-stage.ts The `resolveStage` lookup your `main.ts` imports
         - index.ts Re-exports for importing from other packages
+      - README.md
     - scripts Centralized deploy/destroy scripts
       - src
-        - infra-deploy.ts Deploy bin script
-        - infra-destroy.ts Destroy bin script
-        - stage-credentials/ Shared logic (credential lookup, CDK command building)
+        - infra
+          - infra-deploy.ts Deploy bin script
+          - infra-destroy.ts Destroy bin script
+          - index.ts Re-exports for importing from other packages
+          - stage-credentials/ Shared logic (credential lookup, CDK command building)
+      - README.md
 
 </FileTree>
 
@@ -164,7 +169,11 @@ export class ApplicationStage extends Stage {
 ### ステージ認証情報の設定
 
 :::note[ステージ設定]
-このセクションは、`stageConfig`を使用して生成した場合に適用されます。これがない場合、ジェネレーターはAWS認証情報を自分で管理する（例：デプロイ前に`AWS_PROFILE`をエクスポートする）、よりシンプルなセットアップを生成します。
+このセクションは、`stageConfig`を使用して生成した場合に適用されます：
+
+<NxCommands commands={['g @aws/nx-plugin:ts#infra --name=infra --stageConfig=true']} />
+
+これがない場合、ジェネレーターはAWS認証情報を自分で管理する（例：デプロイ前に`AWS_PROFILE`をエクスポートする）、よりシンプルなセットアップを生成します。
 :::
 
 異なるAWSアカウントをターゲットとする複数のステージがある場合、認証情報を手動で管理することはエラーが発生しやすく、特にステージの数が増えるにつれてその傾向が強まります。
@@ -379,11 +388,11 @@ npx cdk bootstrap aws://<account-id>/<region>
 
 プロジェクトには3つのデプロイターゲットがあり、それぞれ異なる状況に適しています：
 
-| ターゲット           | 使用目的                                                                                      |
-| ---------------- | ----------------------------------------------------------------------------------------------- |
-| `deploy-sandbox` | 開発中に独自のサンドボックスステージをデプロイする。ステージ引数は不要。Expressモードを使用。 |
-| `deploy`         | デプロイしたいステージまたはスタックを指定して、任意のステージをデプロイする。                                            |
-| `deploy-ci`      | CI/CDパイプラインからデプロイする。事前に合成されたクラウドアセンブリを使用する。完全な安定化を待機。 |
+| ターゲット           | 使用目的                                                                                             |
+| ---------------- | ------------------------------------------------------------------------------------------------------ |
+| `deploy-sandbox` | 開発中に独自のサンドボックスステージをデプロイする。ステージ引数は不要。Expressモードを使用。        |
+| `deploy`         | デプロイしたいステージまたはスタックを指定して、任意のステージをデプロイする。完全な安定化を待機。               |
+| `deploy-ci`      | CI/CDパイプラインからデプロイする。事前に合成されたクラウドアセンブリを使用する。完全な安定化を待機。   |
 
 `deploy-sandbox`と`deploy`は`^assemble`に依存しているため、デプロイしようとしているアーティファクトのみをビルドします。`deploy-ci`はパイプラインが既にビルドしたアセンブリをデプロイするため、ビルド依存関係は一切ありません。
 
@@ -419,7 +428,7 @@ npx cdk bootstrap aws://<account-id>/<region>
 
 <NxCommands commands={['deploy <my-infra> <my-infra>-sandbox/Application']} />
 
-このターゲットは本番環境を含む任意のステージを指定できるため、`stageConfig`を使用して生成した場合は完全なリソースの安定化を待ちます。反復作業を行っているステージでExpressモードを使用するには、`--express`を渡します。
+このターゲットは本番環境を含む任意のステージを指定できるため、完全なリソースの安定化を待ちます。反復作業を行っているステージでExpressモードを使用するには、`--express`を渡します。
 
 ## CI/CDパイプラインでのAWSへのデプロイ
 
@@ -427,7 +436,7 @@ CI/CDパイプラインの一部としてAWSにデプロイする場合は、`de
 
 <NxCommands commands={['deploy-ci <my-infra> my-stage/*']} />
 
-このターゲットは、`deploy`と`deploy-sandbox`ターゲットとは2つの点で異なります。第一に、その場で合成するのではなく、事前に合成されたクラウドアセンブリをデプロイします。これにより、パッケージバージョンの変更による潜在的な非決定性を回避し、すべてのパイプラインステージが同じクラウドアセンブリを使用してデプロイすることを保証します。第二に、Expressモードを使用しないため、成功を報告する前にすべてのリソースが完全に安定化するのを常に待ちます。
+このターゲットは、その場で合成するのではなく、事前に合成されたクラウドアセンブリをデプロイします。これにより、パッケージバージョンの変更による潜在的な非決定性を回避し、すべてのパイプラインステージが同じクラウドアセンブリを使用してデプロイすることを保証します。`deploy`と同様に、成功を報告する前にすべてのリソースが完全に安定化するのを待ちます。また、`deploy`とは異なり、`--express`オプトアウトは受け付けません。
 
 ## AWSインフラストラクチャの削除
 

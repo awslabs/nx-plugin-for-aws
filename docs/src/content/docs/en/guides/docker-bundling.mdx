@@ -133,10 +133,17 @@ Some npm packages cannot be bundled because they rely on dynamic `require`, nati
 
 ### Dockerfile
 
-Create a `Dockerfile` in your project source directory. The file does nothing more than `COPY` the bundle into a Node base image, plus `npm install` any `external` packages that could not be bundled. Place the `RUN npm install` step **before** the `COPY`, so Docker can cache the installed `node_modules` layer and only re-run it when the dependency list actually changes:
+Create a `Dockerfile` in your project source directory. The file does nothing more than [apply the base image's security updates](#apply-the-distributions-security-updates), `COPY` the bundle into a Node base image, plus `npm install` any `external` packages that could not be bundled. Place the `RUN npm install` step **before** the `COPY`, so Docker can cache the installed `node_modules` layer and only re-run it when the dependency list actually changes:
 
 ```dockerfile
 FROM public.ecr.aws/docker/library/node:lts
+
+# Apply the distribution's security updates: base image tags lag behind the
+# security suite, so their OS packages carry vulnerabilities that already have a
+# published fix.
+RUN apt-get update && \
+    apt-get upgrade -y --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -236,10 +243,17 @@ Running `nx bundle my-project` produces `dist/packages/my-project/bundle-arm/` c
 
 ### Dockerfile
 
-The `Dockerfile` simply copies the bundle into a Python base image. Because `uv` already installed all dependencies into the bundle directory, you do not need to run `pip install` inside the image:
+The `Dockerfile` [applies the base image's security updates](#apply-the-distributions-security-updates), then copies the bundle into a Python base image. Because `uv` already installed all dependencies into the bundle directory, you do not need to run `pip install` inside the image:
 
 ```dockerfile
 FROM public.ecr.aws/docker/library/python:3.14-slim
+
+# Apply the distribution's security updates: base image tags lag behind the
+# security suite, so their OS packages carry vulnerabilities that already have a
+# published fix.
+RUN apt-get update && \
+    apt-get upgrade -y --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -288,7 +302,13 @@ This clears the output directory, then copies both the bundle contents and the `
 
 It's good practice to scan your images for known vulnerabilities. The generators that follow this pattern add a `trivy` target which scans the built image with [Trivy](https://trivy.dev/), running from the [ECR-hosted Trivy image](https://gallery.ecr.aws/aquasecurity/trivy), and exits non-zero on `HIGH` or `CRITICAL` findings.
 
-Add a `trivy` target which `dependsOn` your `docker` target. It saves the built image to a tarball and scans it via a workspace-relative bind mount, so the same command works under both `docker` and `finch`:
+The target copies a `.trivyignore` from the root of your project into the scan directory and passes it to Trivy with `--ignorefile`, so create that file first — an empty one is fine, and it is where you [suppress findings](#suppressing-findings) later:
+
+```bash
+touch packages/my-project/.trivyignore
+```
+
+Then add a `trivy` target which `dependsOn` your `docker` target. It saves the built image to a tarball and scans it via a workspace-relative bind mount, so the same command works under both `docker` and `finch`:
 
 <Code lang="json" code={trivyTarget} />
 

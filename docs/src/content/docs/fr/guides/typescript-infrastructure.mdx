@@ -44,7 +44,7 @@ Le générateur créera la structure de projet suivante dans le répertoire `<di
 
 </FileTree>
 
-Si vous définissez l'option `stageConfig`, le générateur crée également deux packages partagés pour la gestion centralisée des identifiants (s'ils n'existent pas déjà) :
+Si vous générez avec `--stageConfig=true`, le générateur crée également deux packages partagés pour la gestion centralisée des identifiants (s'ils n'existent pas déjà) :
 
 <FileTree>
 
@@ -53,12 +53,17 @@ Si vous définissez l'option `stageConfig`, le générateur crée également deu
       - src
         - stages.types.ts Type definitions for stage credentials and config
         - stages.config.ts Your stage-to-credential mappings (edit this)
+        - resolve-stage.ts The `resolveStage` lookup your `main.ts` imports
         - index.ts Re-exports for importing from other packages
+      - README.md
     - scripts Centralized deploy/destroy scripts
       - src
-        - infra-deploy.ts Deploy bin script
-        - infra-destroy.ts Destroy bin script
-        - stage-credentials/ Shared logic (credential lookup, CDK command building)
+        - infra
+          - infra-deploy.ts Deploy bin script
+          - infra-destroy.ts Destroy bin script
+          - index.ts Re-exports for importing from other packages
+          - stage-credentials/ Shared logic (credential lookup, CDK command building)
+      - README.md
 
 </FileTree>
 
@@ -164,7 +169,11 @@ export class ApplicationStage extends Stage {
 ### Configuration des identifiants de stage
 
 :::note[Configuration par stage]
-Cette section s'applique lorsque vous générez avec `stageConfig`. Sans cela, le générateur produit une configuration plus simple où vous gérez vous-même les identifiants AWS (par exemple, en exportant `AWS_PROFILE` avant le déploiement).
+Cette section s'applique lorsque vous générez avec `stageConfig` :
+
+<NxCommands commands={['g @aws/nx-plugin:ts#infra --name=infra --stageConfig=true']} />
+
+Sans cela, le générateur produit une configuration plus simple où vous gérez vous-même les identifiants AWS (par exemple, en exportant `AWS_PROFILE` avant le déploiement).
 :::
 
 Lorsque vous avez plusieurs stages ciblant différents comptes AWS, la gestion manuelle des identifiants peut être sujette aux erreurs, surtout à mesure que le nombre de stages augmente.
@@ -379,11 +388,11 @@ Pour plus de détails, veuillez vous référer à la [documentation sur le boots
 
 Votre projet dispose de trois cibles de déploiement, chacune adaptée à une situation différente :
 
-| Cible            | Utilisez-la pour                                                                                             |
-| ---------------- | ------------------------------------------------------------------------------------------------------------ |
+| Cible            | Utilisez-la pour                                                                                       |
+| ---------------- | ------------------------------------------------------------------------------------------------------ |
 | `deploy-sandbox` | Déployer votre propre stage sandbox pendant le développement. Aucun argument de stage nécessaire. Utilise le mode express. |
-| `deploy`         | Déployer n'importe quel stage, en nommant le stage ou les stacks que vous voulez.                                            |
-| `deploy-ci`      | Déployer depuis un pipeline CI/CD, en utilisant un assemblage cloud pré-synthétisé. Attend la stabilisation complète.   |
+| `deploy`         | Déployer n'importe quel stage, en nommant le stage ou les stacks que vous voulez. Attend la stabilisation complète. |
+| `deploy-ci`      | Déployer depuis un pipeline CI/CD, en utilisant un assemblage cloud pré-synthétisé. Attend la stabilisation complète. |
 
 `deploy-sandbox` et `deploy` dépendent de `^assemble`, donc ils construisent les artefacts qu'ils sont sur le point de déployer et rien d'autre. `deploy-ci` déploie un assemblage que votre pipeline a déjà construit, donc il n'a aucune dépendance de construction.
 
@@ -419,7 +428,7 @@ Vous pouvez spécifier n'importe quel stage tant qu'il est défini dans `main.ts
 
 <NxCommands commands={['deploy <my-infra> <my-infra>-sandbox/Application']} />
 
-Puisque cette cible peut nommer n'importe quel stage, y compris votre stage de production, elle attend la stabilisation complète des ressources lorsque vous générez avec `stageConfig`. Passez `--express` pour opter pour le mode express pour un stage sur lequel vous itérez.
+Puisque cette cible peut nommer n'importe quel stage, y compris votre stage de production, elle attend la stabilisation complète des ressources. Passez `--express` pour opter pour le mode express pour un stage sur lequel vous itérez.
 
 ## Déployer vers AWS dans un pipeline CI/CD
 
@@ -427,7 +436,7 @@ Utilisez la cible `deploy-ci` si vous déployez vers AWS dans le cadre d'un pipe
 
 <NxCommands commands={['deploy-ci <my-infra> my-stage/*']} />
 
-Cette cible diffère des cibles `deploy` et `deploy-sandbox` de deux manières. Premièrement, elle déploie un assemblage cloud pré-synthétisé plutôt que de synthétiser à la volée, évitant le non-déterminisme potentiel des changements de version de package et garantissant que chaque étape du pipeline déploie en utilisant le même assemblage cloud. Deuxièmement, elle n'utilise jamais le mode express, donc elle attend toujours que chaque ressource se stabilise complètement avant de signaler le succès.
+Cette cible déploie un assemblage cloud pré-synthétisé plutôt que de synthétiser à la volée, évitant le non-déterminisme potentiel des changements de version de package et garantissant que chaque étape du pipeline déploie en utilisant le même assemblage cloud. Comme `deploy`, elle attend que chaque ressource se stabilise complètement avant de signaler le succès, et contrairement à `deploy` elle n'accepte aucune option `--express`.
 
 ## Détruire l'infrastructure AWS
 

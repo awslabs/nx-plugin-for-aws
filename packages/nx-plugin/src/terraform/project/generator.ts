@@ -125,9 +125,11 @@ export async function terraformProjectGenerator(
     'checkov',
     'checkov_report.json',
   );
-  // `test` keeps its `.terraform` here rather than in `src`, so initialising it
-  // never races the backend-configured targets over the shared one.
+  // `test` and `validate` each keep their `.terraform` here rather than in
+  // `src`, so initialising one never races the backend-configured targets, or
+  // the other, over the shared one.
   const testDataDir = joinPathFragments(distDir, 'terraform-test');
+  const validateDataDir = joinPathFragments(distDir, 'terraform-validate');
 
   // Provider downloads persist here, so a target whose `.terraform` was cleaned
   // links the providers it already has rather than re-downloading them. Nx does
@@ -349,16 +351,31 @@ export async function terraformProjectGenerator(
         env: { TF_DATA_DIR: testDataDir, TF_PLUGIN_CACHE_DIR: pluginCacheDir },
       },
     },
+    // Mirrors `test`: `-backend=false` installs the modules and providers
+    // validation needs without configuring the S3 backend, so this runs on a
+    // fresh workspace before `bootstrap` and needs no credentials. `TF_DATA_DIR`
+    // keeps that `.terraform` out of `src`, so it never races the
+    // backend-configured targets over the shared one, and declaring no outputs
+    // keeps a cache hit to what it asserts (see `test` above).
     validate: {
       executor: 'nx:run-commands',
       cache: true,
-      inputs: ['default'],
+      inputs: ['default', '^production'],
+      outputs: [],
       options: {
-        command: 'terraform validate',
+        commands: [
+          { command: `shx mkdir -p ${pluginCacheDir}`, forwardAllArgs: false },
+          'terraform init -backend=false',
+          'terraform validate',
+        ],
         forwardAllArgs: true,
         cwd: '{projectRoot}/src',
+        parallel: false,
+        env: {
+          TF_DATA_DIR: validateDataDir,
+          TF_PLUGIN_CACHE_DIR: pluginCacheDir,
+        },
       },
-      dependsOn: ['init'],
     },
   };
 

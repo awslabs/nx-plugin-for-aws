@@ -133,10 +133,17 @@ export default defineConfig([
 
 ### Dockerfile
 
-プロジェクトのソースディレクトリに `Dockerfile` を作成します。このファイルは、バンドルを Node ベースイメージに `COPY` するだけで、バンドルできなかった `external` パッケージを `npm install` します。`RUN npm install` ステップを `COPY` の**前に**配置して、Docker がインストールされた `node_modules` レイヤーをキャッシュし、依存関係リストが実際に変更された場合にのみ再実行できるようにします：
+プロジェクトのソースディレクトリに `Dockerfile` を作成します。このファイルは、[ベースイメージのセキュリティアップデートを適用](#ディストリビューションのセキュリティアップデートを適用する)し、バンドルを Node ベースイメージに `COPY` するだけで、バンドルできなかった `external` パッケージを `npm install` します。`RUN npm install` ステップを `COPY` の**前に**配置して、Docker がインストールされた `node_modules` レイヤーをキャッシュし、依存関係リストが実際に変更された場合にのみ再実行できるようにします：
 
 ```dockerfile
 FROM public.ecr.aws/docker/library/node:lts
+
+# Apply the distribution's security updates: base image tags lag behind the
+# security suite, so their OS packages carry vulnerabilities that already have a
+# published fix.
+RUN apt-get update && \
+    apt-get upgrade -y --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -236,10 +243,17 @@ Docker イメージが x86_64 で実行される場合は、`--python-platform` 
 
 ### Dockerfile
 
-`Dockerfile` は、バンドルを Python ベースイメージに単純にコピーします。`uv` がすでにすべての依存関係をバンドルディレクトリにインストールしているため、イメージ内で `pip install` を実行する必要はありません：
+`Dockerfile` は、[ベースイメージのセキュリティアップデートを適用](#ディストリビューションのセキュリティアップデートを適用する)し、その後バンドルを Python ベースイメージにコピーします。`uv` がすでにすべての依存関係をバンドルディレクトリにインストールしているため、イメージ内で `pip install` を実行する必要はありません：
 
 ```dockerfile
 FROM public.ecr.aws/docker/library/python:3.14-slim
+
+# Apply the distribution's security updates: base image tags lag behind the
+# security suite, so their OS packages carry vulnerabilities that already have a
+# published fix.
+RUN apt-get update && \
+    apt-get upgrade -y --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -288,7 +302,13 @@ CMD ["python", "-m", "my_project.main"]
 
 イメージに既知の脆弱性がないかスキャンすることは良い習慣です。このパターンに従うジェネレーターは、[Trivy](https://trivy.dev/) でビルドされたイメージをスキャンする `trivy` ターゲットを追加します。これは [ECR でホストされている Trivy イメージ](https://gallery.ecr.aws/aquasecurity/trivy)から実行され、`HIGH` または `CRITICAL` の検出結果でゼロ以外の終了コードを返します。
 
-`docker` ターゲットに `dependsOn` する `trivy` ターゲットを追加します。ビルドされたイメージを tarball に保存し、ワークスペース相対のバインドマウントを介してスキャンするため、同じコマンドが `docker` と `finch` の両方で機能します：
+ターゲットは、プロジェクトのルートから `.trivyignore` をスキャンディレクトリにコピーし、`--ignorefile` で Trivy に渡すため、最初にそのファイルを作成します — 空のファイルで問題なく、後で[検出結果を抑制](#検出結果の抑制)する場所です：
+
+```bash
+touch packages/my-project/.trivyignore
+```
+
+次に、`docker` ターゲットに `dependsOn` する `trivy` ターゲットを追加します。ビルドされたイメージを tarball に保存し、ワークスペース相対のバインドマウントを介してスキャンするため、同じコマンドが `docker` と `finch` の両方で機能します：
 
 <Code lang="json" code={trivyTarget} />
 

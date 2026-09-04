@@ -185,10 +185,16 @@ export async function tsInfraGenerator(
           command: 'cdk synth',
         }),
       };
+      // `default` rather than the synth directory: `dist` is gitignored, so a
+      // fileset input pointed at it matches no tracked file and hashes to a
+      // constant — the scan would cache-hit forever and pass on infrastructure
+      // it never read. `default` carries the project's own sources plus the
+      // transitive `dependentTasksOutputFiles` entry, which resolves against
+      // the upstream `synth` task and so hashes the template actually scanned.
       config.targets.checkov = {
         cache: true,
         executor: 'nx:run-commands',
-        inputs: ['{workspaceRoot}/dist/{projectRoot}/cdk.out'],
+        inputs: ['default'],
         outputs: ['{workspaceRoot}/dist/{projectRoot}/checkov'],
         dependsOn: ['synth'],
         options: {
@@ -201,15 +207,16 @@ export async function tsInfraGenerator(
       config.targets.deploy = {
         executor: 'nx:run-commands',
         dependsOn: ['^assemble', 'compile'],
-        // No --express here when stages are configured: this target deploys
-        // whichever stage is named, including beta and prod.
+        // No --express: this target deploys whichever stage is named, including
+        // beta and prod, so it waits for full resource stabilization. Express
+        // mode belongs to `deploy-sandbox`, which only ever deploys a sandbox.
         options: stageConfig
           ? withCdkEnv({
               command: `tsx packages/common/scripts/src/infra/infra-deploy.ts ${libraryRoot}`,
             })
           : withCdkEnv({
               cwd: '{projectRoot}',
-              command: 'cdk deploy --require-approval=never --express',
+              command: 'cdk deploy --require-approval=never',
             }),
       };
       config.targets['deploy-sandbox'] = {

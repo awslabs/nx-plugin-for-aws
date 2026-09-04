@@ -62,15 +62,41 @@ describe('infra-deploy-express-mode migration', () => {
     tree = createTreeUsingTsSolutionSetup();
   });
 
-  it('should add --express to the deploy and deploy-sandbox targets', async () => {
+  it('should add --express to deploy-sandbox and leave deploy waiting', async () => {
     addProjectConfiguration(tree, 'infra', infraProject());
 
     const { nextSteps } = await migration(tree);
 
     const { targets } = readProjectConfiguration(tree, 'infra');
     expect(targets.deploy.options.command).toBe(
-      'cdk deploy --require-approval=never --express',
+      'cdk deploy --require-approval=never',
     );
+    expect(targets['deploy-sandbox'].options.command).toBe(
+      'cdk deploy --require-approval=never "proj-infra-sandbox/*" --express',
+    );
+    expect(nextSteps).toHaveLength(0);
+  });
+
+  // v1.0.0-rc.96 shipped --express on `deploy`, which returns before resources
+  // have stabilized - not what a target that can name a production stage wants.
+  it('should strip --express from a deploy target that already carries it', async () => {
+    addProjectConfiguration(
+      tree,
+      'infra',
+      infraProject({
+        deploy: 'cdk deploy --require-approval=never --express',
+        'deploy-sandbox':
+          'cdk deploy --require-approval=never "proj-infra-sandbox/*" --express',
+      }),
+    );
+
+    const { nextSteps } = await migration(tree);
+
+    const { targets } = readProjectConfiguration(tree, 'infra');
+    expect(targets.deploy.options.command).toBe(
+      'cdk deploy --require-approval=never',
+    );
+    // The sandbox keeps it, and the stage pattern stays the first positional arg.
     expect(targets['deploy-sandbox'].options.command).toBe(
       'cdk deploy --require-approval=never "proj-infra-sandbox/*" --express',
     );
@@ -87,8 +113,8 @@ describe('infra-deploy-express-mode migration', () => {
     expect(targets.destroy.options.command).not.toContain('express');
   });
 
-  // With stages configured, `deploy` takes a stage name that may well be beta or
-  // prod, so only its sandbox counterpart opts into express mode.
+  // `deploy` takes a stage name that may well be beta or prod, so only its
+  // sandbox counterpart opts into express mode.
   it('should only migrate deploy-sandbox for stage-config projects', async () => {
     const stageConfigDeploy =
       'tsx packages/common/scripts/src/infra/infra-deploy.ts packages/infra';
@@ -145,21 +171,41 @@ describe('infra-deploy-express-mode migration', () => {
     expect(nextSteps).toHaveLength(0);
   });
 
-  it('should report a customised deploy command rather than rewriting it', async () => {
+  it('should report a customised deploy-sandbox command rather than rewriting it', async () => {
     addProjectConfiguration(
       tree,
       'infra',
-      infraProject({ deploy: './scripts/my-custom-deploy.sh' }),
+      infraProject({ 'deploy-sandbox': './scripts/my-custom-deploy.sh' }),
+    );
+
+    const { nextSteps } = await migration(tree);
+
+    expect(
+      readProjectConfiguration(tree, 'infra').targets['deploy-sandbox'].options
+        .command,
+    ).toBe('./scripts/my-custom-deploy.sh');
+    expect(nextSteps).toHaveLength(1);
+    expect(nextSteps[0]).toContain('deploy-sandbox');
+    expect(nextSteps[0]).toContain('--express');
+  });
+
+  // Only reported when there is something for the user to do: a custom `deploy`
+  // that already waits for stabilization is in the wanted state.
+  it('should report a customised deploy command only when it uses express mode', async () => {
+    addProjectConfiguration(
+      tree,
+      'infra',
+      infraProject({ deploy: './scripts/my-custom-deploy.sh --express' }),
     );
 
     const { nextSteps } = await migration(tree);
 
     expect(
       readProjectConfiguration(tree, 'infra').targets.deploy.options.command,
-    ).toBe('./scripts/my-custom-deploy.sh');
+    ).toBe('./scripts/my-custom-deploy.sh --express');
     expect(nextSteps).toHaveLength(1);
     expect(nextSteps[0]).toContain('deploy');
-    expect(nextSteps[0]).toContain('--express');
+    expect(nextSteps[0]).toContain('Remove');
   });
 
   it.each([false, true])(
@@ -173,19 +219,18 @@ describe('infra-deploy-express-mode migration', () => {
 
       const generated = readProjectConfigurationUnqualified(tree, 'infra');
       const vended = structuredClone(generated.targets);
-      // deploy only carries the flag when stages are not configured.
-      expect(vended.deploy.options.command.includes('--express')).toBe(
-        !stageConfig,
-      );
+      // Express mode is the sandbox's alone, whichever way it was generated.
+      expect(vended.deploy.options.command).not.toContain('--express');
       expect(vended['deploy-sandbox'].options.command).toContain('--express');
 
-      for (const target of ['deploy', 'deploy-sandbox']) {
-        generated.targets[target].options.command = generated.targets[
-          target
-        ].options.command
-          .replace(' --express', '')
-          .trim();
-      }
+      // Strip it from the sandbox, and add it to deploy - the two ways a
+      // workspace generated by an earlier version diverges from today's output.
+      generated.targets['deploy-sandbox'].options.command = generated.targets[
+        'deploy-sandbox'
+      ].options.command
+        .replace(' --express', '')
+        .trim();
+      generated.targets.deploy.options.command = `${generated.targets.deploy.options.command} --express`;
       updateProjectConfiguration(tree, generated.name, generated);
 
       const { nextSteps } = await migration(tree);
@@ -198,7 +243,12 @@ describe('infra-deploy-express-mode migration', () => {
   );
 
   it('should be idempotent', async () => {
-    addProjectConfiguration(tree, 'infra', infraProject());
+    addProjectConfiguration(
+      tree,
+      'infra',
+      // Both targets start wrong, so the first run has to change each of them.
+      infraProject({ deploy: 'cdk deploy --require-approval=never --express' }),
+    );
 
     await migration(tree);
     const afterFirst = tree.read('packages/infra/project.json', 'utf-8');
@@ -209,8 +259,12 @@ describe('infra-deploy-express-mode migration', () => {
     expect(tree.read('packages/infra/project.json', 'utf-8')).toEqual(
       afterFirst,
     );
-    expect(
-      readProjectConfiguration(tree, 'infra').targets.deploy.options.command,
-    ).toBe('cdk deploy --require-approval=never --express');
+    const { targets } = readProjectConfiguration(tree, 'infra');
+    expect(targets.deploy.options.command).toBe(
+      'cdk deploy --require-approval=never',
+    );
+    expect(targets['deploy-sandbox'].options.command).toBe(
+      'cdk deploy --require-approval=never "proj-infra-sandbox/*" --express',
+    );
   });
 });
