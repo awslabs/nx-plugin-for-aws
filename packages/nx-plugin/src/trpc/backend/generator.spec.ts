@@ -1271,4 +1271,74 @@ describe('trpc backend generator', () => {
     const projectConfig = JSON.parse(secondProjectJson);
     expect(projectConfig.metadata.ports).toEqual([2022]);
   });
+
+  // A project named after the core construct its infrastructure extends used to
+  // emit `export class HttpApi ... extends HttpApi` with `HttpApi` imported too.
+  describe.each([
+    {
+      name: 'http-api',
+      infra: 'http-lambda' as const,
+      coreClass: 'HttpApi',
+      corePath: '../../core/api/http-api.js',
+    },
+    {
+      name: 'rest-api',
+      infra: 'rest-lambda' as const,
+      coreClass: 'RestApi',
+      corePath: '../../core/api/rest-api.js',
+    },
+  ])(
+    'a project named $name, colliding with the core $coreClass',
+    ({ name, infra, coreClass, corePath }) => {
+      it('extends the aliased core construct rather than itself', async () => {
+        await tsTrpcApiGenerator(tree, {
+          name,
+          directory: 'apps',
+          infra,
+          integrationPattern: 'isolated',
+          auth: 'iam',
+          iac: 'cdk',
+        });
+
+        const construct =
+          tree.read(
+            `packages/common/constructs/src/app/apis/${name}.ts`,
+            'utf-8',
+          ) ?? '';
+
+        // The core class is imported under an alias, so the app class of the
+        // same name neither collides with nor extends itself.
+        expect(construct).toContain(`${coreClass} as Core${coreClass}`);
+        expect(construct).toContain(`from '${corePath}'`);
+        expect(construct).toContain(`extends Core${coreClass}<`);
+        expect(construct).toContain(`export class ${coreClass}<`);
+        expect(construct).not.toMatch(
+          new RegExp(`import \\{[^}]*\\b${coreClass}\\s*\\}`),
+        );
+        expect(construct).not.toContain(`extends ${coreClass}<`);
+      });
+
+      it('leaves the import unaliased for a name that does not collide', async () => {
+        await tsTrpcApiGenerator(tree, {
+          name: 'test-api',
+          directory: 'apps',
+          infra,
+          integrationPattern: 'isolated',
+          auth: 'iam',
+          iac: 'cdk',
+        });
+
+        const construct =
+          tree.read(
+            'packages/common/constructs/src/app/apis/test-api.ts',
+            'utf-8',
+          ) ?? '';
+
+        // Aliasing is applied only where it is needed, so the vended code for an
+        // ordinary name is unchanged.
+        expect(construct).toContain(`extends ${coreClass}<`);
+        expect(construct).not.toContain(`Core${coreClass}`);
+      });
+    },
+  );
 });
