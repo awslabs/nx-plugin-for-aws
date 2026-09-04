@@ -276,6 +276,108 @@ describe('ts#dynamodb generator', () => {
     expect(buildDeps.filter((d) => d === '@proj/my-table:build')).toHaveLength(
       1,
     );
+
+    // The barrel keeps exactly one export of the generated entity.
+    const entitiesBarrel = tree.read(
+      'packages/my-table/src/entities/index.ts',
+      'utf-8',
+    );
+    expect(entitiesBarrel.match(/createExampleEntity/g)).toHaveLength(1);
+
+    const indexBarrel = tree.read('packages/my-table/src/index.ts', 'utf-8');
+    expect(indexBarrel.match(/getDynamoDBClient/g)).toHaveLength(1);
+    expect(indexBarrel.match(/entities\/index/g)).toHaveLength(1);
+  });
+
+  it('should preserve the entities and GSIs the user authored', async () => {
+    await tsDynamoDBGenerator(tree, defaultOptions);
+
+    // Follow the guide's Data Modelling step: add an entity and export it.
+    const orderEntity = `import { Entity } from 'electrodb';\n\nexport const createOrderEntity = async () => new Entity({});\n`;
+    tree.write('packages/my-table/src/entities/order.ts', orderEntity);
+    tree.write(
+      'packages/my-table/src/entities/index.ts',
+      `export { createExampleEntity } from './example.js';\nexport { createOrderEntity } from './order.js';\n`,
+    );
+    // Customise the example entity the generator vends.
+    const editedExample = `export const createExampleEntity = async () => null;\n`;
+    tree.write('packages/my-table/src/entities/example.ts', editedExample);
+    // Follow the guide's "Adding/Removing Global Secondary Indexes" step.
+    const configPath = 'packages/my-table/config.json';
+    const config = JSON.parse(tree.read(configPath, 'utf-8'));
+    config.tableConfig.globalSecondaryIndexes.push({
+      indexName: 'gsi3pk-gsi3sk-index',
+      partitionKey: 'gsi3pk',
+      sortKey: 'gsi3sk',
+    });
+    tree.write(configPath, JSON.stringify(config, null, 2));
+
+    await tsDynamoDBGenerator(tree, defaultOptions);
+
+    expect(tree.read('packages/my-table/src/entities/order.ts', 'utf-8')).toBe(
+      orderEntity,
+    );
+    expect(
+      tree.read('packages/my-table/src/entities/example.ts', 'utf-8'),
+    ).toBe(editedExample);
+    const entitiesBarrel = tree.read(
+      'packages/my-table/src/entities/index.ts',
+      'utf-8',
+    );
+    expect(entitiesBarrel).toContain('createOrderEntity');
+    expect(entitiesBarrel).toContain('createExampleEntity');
+    expect(
+      JSON.parse(
+        tree.read(configPath, 'utf-8'),
+      ).tableConfig.globalSecondaryIndexes.map(
+        (gsi: { indexName: string }) => gsi.indexName,
+      ),
+    ).toEqual([
+      'gsi1pk-gsi1sk-index',
+      'gsi2pk-gsi2sk-index',
+      'gsi3pk-gsi3sk-index',
+    ]);
+  });
+
+  it('should register a removed entity export back into a curated barrel', async () => {
+    // The barrel is merged rather than replaced, so the generated entity is
+    // re-registered without discarding the user's own exports.
+    await tsDynamoDBGenerator(tree, defaultOptions);
+    tree.write(
+      'packages/my-table/src/entities/index.ts',
+      `export { createOrderEntity } from './order.js';\n`,
+    );
+
+    await tsDynamoDBGenerator(tree, defaultOptions);
+
+    const entitiesBarrel = tree.read(
+      'packages/my-table/src/entities/index.ts',
+      'utf-8',
+    );
+    expect(entitiesBarrel).toContain('createExampleEntity');
+    expect(entitiesBarrel).toContain('createOrderEntity');
+  });
+
+  it('should converge the framework-owned config values on a re-run', async () => {
+    // The localDev block is derived from the generator's options, so changing
+    // them takes effect while the user's GSI list is carried through.
+    await tsDynamoDBGenerator(tree, defaultOptions);
+    const configPath = 'packages/my-table/config.json';
+    const config = JSON.parse(tree.read(configPath, 'utf-8'));
+    config.tableConfig.globalSecondaryIndexes.push({
+      indexName: 'gsi3pk-gsi3sk-index',
+      partitionKey: 'gsi3pk',
+    });
+    tree.write(configPath, JSON.stringify(config, null, 2));
+
+    await tsDynamoDBGenerator(tree, {
+      ...defaultOptions,
+      tableName: 'RenamedTable',
+    });
+
+    const updated = JSON.parse(tree.read(configPath, 'utf-8'));
+    expect(updated.localDev.tableName).toBe('proj-renamed-table');
+    expect(updated.tableConfig.globalSecondaryIndexes).toHaveLength(3);
   });
 
   it('should place the project in a subDirectory when provided', async () => {

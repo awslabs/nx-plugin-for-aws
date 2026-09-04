@@ -8,6 +8,7 @@ import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   addDestructuredImport,
+  addNamedExport,
   addPythonDestructuredImport,
   addSingleImport,
   addStarExport,
@@ -178,6 +179,61 @@ describe('ast utils', () => {
 
       const writtenContent = tree.read('index.ts', 'utf-8');
       expect(writtenContent).toContain("export * from './module'");
+    });
+  });
+
+  describe('addNamedExport', () => {
+    it('should add a named export if none exists', async () => {
+      tree.write('index.ts', '// Some content\n');
+
+      await addNamedExport(tree, 'index.ts', ['createFoo'], './foo');
+
+      expect(tree.read('index.ts', 'utf-8')).toContain(
+        "export { createFoo } from './foo'",
+      );
+    });
+
+    it('should create the file if it does not exist', async () => {
+      await addNamedExport(tree, 'index.ts', ['createFoo'], './foo');
+
+      expect(tree.read('index.ts', 'utf-8')).toBe(
+        "export { createFoo } from './foo';\n",
+      );
+    });
+
+    it('should not duplicate an existing named export', async () => {
+      const initialContent = "export { createFoo } from './foo';\n";
+      tree.write('index.ts', initialContent);
+
+      await addNamedExport(tree, 'index.ts', ['createFoo'], './foo');
+
+      expect(tree.read('index.ts', 'utf-8')).toBe(initialContent);
+    });
+
+    it('should merge into an existing export of the same module', async () => {
+      tree.write('index.ts', "export { createFoo } from './foo';\n");
+
+      await addNamedExport(
+        tree,
+        'index.ts',
+        ['createFoo', 'createBar'],
+        './foo',
+      );
+
+      const written = tree.read('index.ts', 'utf-8');
+      expect(written).toContain('createFoo');
+      expect(written).toContain('createBar');
+      expect(written.match(/from '\.\/foo'/g)).toHaveLength(1);
+    });
+
+    it('should leave a user’s other exports in the barrel alone', async () => {
+      tree.write('index.ts', "export { createBaz } from './baz';\n");
+
+      await addNamedExport(tree, 'index.ts', ['createFoo'], './foo');
+
+      const written = tree.read('index.ts', 'utf-8');
+      expect(written).toContain("export { createBaz } from './baz'");
+      expect(written).toContain("export { createFoo } from './foo'");
     });
   });
 

@@ -222,6 +222,62 @@ export const addStarExport = async (
 };
 
 /**
+ * Adds an `export { <names> } from '<from>';` statement to the given TypeScript
+ * file, merging into an existing re-export of the same module when there is one.
+ * Note that this will create the file if it does not exist in the tree.
+ *
+ * Adding to whatever is already there is what lets a barrel the user curates —
+ * their own entities, models or components — survive a generator re-run while
+ * the generated entry is still registered.
+ */
+export const addNamedExport = async (
+  tree: Tree,
+  filePath: string,
+  names: string[],
+  from: string,
+) => {
+  from = normalizeModuleSpecifier(tree, from);
+  const contents = tree.read(filePath)?.toString() ?? '';
+
+  if (!contents.trim()) {
+    tree.write(filePath, `export { ${names.join(', ')} } from '${from}';\n`);
+    return;
+  }
+
+  const hasExistingExport = await matchGritQL(
+    tree,
+    filePath,
+    `\`export { $_ } from '${from}'\``,
+  );
+
+  if (hasExistingExport) {
+    for (const name of names) {
+      await applyGritQL(
+        tree,
+        filePath,
+        `\`export { $names } from '${from}'\` => \`export { $names, ${name} } from '${from}'\` where { $names <: not contains \`${name}\` }`,
+      );
+    }
+    return;
+  }
+
+  const missing: string[] = [];
+  for (const name of names) {
+    if (!(await matchGritQL(tree, filePath, `\`${name}\``))) {
+      missing.push(name);
+    }
+  }
+  if (missing.length === 0) {
+    return;
+  }
+
+  tree.write(
+    filePath,
+    `export { ${missing.join(', ')} } from '${from}';\n${contents}`,
+  );
+};
+
+/**
  * Return whether or not the given identifier is exported in the source file.
  * Checks for both `export { Identifier }` and `export type Identifier = ...`.
  */

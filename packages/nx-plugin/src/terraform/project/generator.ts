@@ -390,17 +390,22 @@ export async function terraformProjectGenerator(
     { iac: 'terraform' },
   );
 
+  // The guides tell the reader to declare resources in `main.tf`, add variables
+  // and outputs, and configure environments in `env/*.tfvars`, so everything
+  // here is scaffolded once and then left alone. Provider version bumps reach
+  // `providers.tf` through the vended version sync, which rewrites the pin in
+  // place rather than the whole file.
   generateFiles(
-    tree, // the virtual file system
-    joinPathFragments(import.meta.dirname, `./files/${schema.type}`), // path to the file templates
-    lib.dir, // destination path of the files
+    tree,
+    joinPathFragments(import.meta.dirname, `./files/${schema.type}`),
+    lib.dir,
     {
       metricsModulePath,
       stateKeyPrefix: kebabCase(lib.fullyQualifiedName),
       ...terraformProviderVersions(),
     },
     {
-      overwriteStrategy: OverwriteStrategy.Overwrite,
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
   );
 
