@@ -3,11 +3,35 @@ title: Python プロジェクト
 description: Python プロジェクトのリファレンスドキュメント
 generator: py#project
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { Code, FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
+import { LAMBDA_RUNTIME_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/versions';
+
+export const bundleTarget = `{
+  "targets": {
+    "bundle": {
+      "dependsOn": ["bundle-x86"]
+    },
+    "bundle-x86": {
+      "cache": true,
+      "inputs": ["production", "^production"],
+      "executor": "nx:run-commands",
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}/bundle-x86"],
+      "options": {
+        "commands": [
+          "uv export --frozen --no-dev --no-editable --project {projectRoot} --package my_scope.my_library -o dist/{projectRoot}/bundle-x86/requirements.txt",
+          "uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform x86_64-manylinux_2_28 --python-version ${LAMBDA_RUNTIME_VERSIONS.python} --target dist/{projectRoot}/bundle-x86 -r dist/{projectRoot}/bundle-x86/requirements.txt"
+        ],
+        "parallel": false
+      },
+      "dependsOn": ["compile"]
+    }
+  }
+}`;
 
 Python プロジェクトジェネレーターは、ベストプラクティスで構成された最新の [Python](https://www.python.org/) ライブラリまたはアプリケーションを作成するために使用できます。[UV](https://docs.astral.sh/uv/) で管理され、[UV ワークスペース](https://docs.astral.sh/uv/concepts/projects/workspaces/)内で単一のロックファイルと仮想環境を使用し、テスト実行には [pytest](https://docs.pytest.org/en/stable/)、静的解析には [Ruff](https://docs.astral.sh/ruff/)、型チェックには [ty](https://docs.astral.sh/ty/) を使用します。
 
@@ -87,30 +111,9 @@ from my_scope_my_lib.my_module import my_function
 
 #### ランタイムコード
 
-Python プロジェクトをランタイムコードとして使用する場合（例えば AWS Lambda 関数のハンドラーとして）、ソースコードとすべての依存関係のバンドルを作成する必要があります。これは、`project.json` ファイルに以下のようなターゲットを追加することで実現できます：
+Python プロジェクトをランタイムコードとして使用する場合（例えば AWS Lambda 関数のハンドラーとして）、ソースコードとすべての依存関係のバンドルを作成する必要があります。<Link path="guides/python-lambda-function">`py#lambda-function`</Link>、<Link path="guides/fastapi">`py#api`</Link>、<Link path="guides/py-mcp-server">`py#mcp-server`</Link> ジェネレーターはこれを自動的に追加します。手動で追加するには、これらのジェネレーターが提供する形式に合わせて、`project.json` ファイルに以下のようなターゲットを追加します：
 
-```json title="project.json"
-{
-  ...
-  "targets": {
-    ...
-    "bundle": {
-      "cache": true,
-      "inputs": ["production", "^production"],
-      "executor": "nx:run-commands",
-      "outputs": ["{workspaceRoot}/dist/packages/my_library/bundle"],
-      "options": {
-        "commands": [
-          "uv export --frozen --no-dev --no-editable --project packages/my_library --package my_scope.my_library -o dist/packages/my_library/bundle/requirements.txt",
-          "uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform x86_64-manylinux_2_28 --python `uv python pin` --target dist/packages/my_library/bundle -r dist/packages/my_library/bundle/requirements.txt"
-        ],
-        "parallel": false
-      },
-      "dependsOn": ["compile"]
-    },
-  },
-}
-```
+<Code lang="json" title="project.json" code={bundleTarget} />
 
 ### インストール
 
@@ -158,7 +161,7 @@ Python プロジェクトには `build` ターゲット（`project.json` で定�
 
 ### テストの記述
 
-テストは、プロジェクト内の `test` ディレクトリに、`test_` で始まる Python ファイルに記述する必要があります。例えば：
+テストは、プロジェクト内の `tests` ディレクトリに、`test_` で始まる Python ファイルに記述する必要があります。例えば：
 
 <FileTree>
   - my_library
