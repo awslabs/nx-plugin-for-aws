@@ -195,6 +195,36 @@ describe('gateway-url-accessor migration', () => {
     ]);
   });
 
+  it('should leave app constructs alone when the core construct could not be migrated', async () => {
+    tree.write(
+      GATEWAY_CONSTRUCT_FILE,
+      `export class AgentCoreGateway { /* fully customised */ }`,
+    );
+    tree.write(APP_GATEWAY_CONSTRUCT_FILE, OLD_APP_GATEWAY_CONSTRUCT_FILE);
+
+    const result = await migration(tree);
+
+    // Pointing an app construct at an accessor the core construct does not have
+    // would leave the workspace failing to compile.
+    expect(tree.read(APP_GATEWAY_CONSTRUCT_FILE, 'utf-8')).toEqual(
+      OLD_APP_GATEWAY_CONSTRUCT_FILE,
+    );
+    expect(result.nextSteps).toEqual([
+      expect.stringContaining('diverged from the generated shape'),
+    ]);
+  });
+
+  it('should leave app constructs alone when no core construct is vended', async () => {
+    tree.write(APP_GATEWAY_CONSTRUCT_FILE, OLD_APP_GATEWAY_CONSTRUCT_FILE);
+
+    const result = await migration(tree);
+
+    expect(tree.read(APP_GATEWAY_CONSTRUCT_FILE, 'utf-8')).toEqual(
+      OLD_APP_GATEWAY_CONSTRUCT_FILE,
+    );
+    expect(result.nextSteps).toEqual([]);
+  });
+
   it('should leave a construct with a user-added gatewayUrl accessor alone', async () => {
     tree.write(
       GATEWAY_CONSTRUCT_FILE,

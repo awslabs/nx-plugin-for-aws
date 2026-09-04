@@ -47,14 +47,16 @@ const divergedCoreMessage = `${GATEWAY_CONSTRUCT_FILE}: the AgentCoreGateway con
 
 /**
  * Add the `gatewayUrl` accessor to the vended core construct, and route
- * `addGateway` and the shape it requires of its argument through it.
+ * `addGateway` and the shape it requires of its argument through it. Returns
+ * whether the core construct ends up carrying the accessor — app-level
+ * constructs may only be pointed at it once it exists.
  */
 const migrateCoreConstruct = async (
   tree: Tree,
   nextSteps: string[],
-): Promise<void> => {
+): Promise<boolean> => {
   if (!tree.exists(GATEWAY_CONSTRUCT_FILE)) {
-    return;
+    return false;
   }
 
   const hasAccessor = await matchGritQL(
@@ -75,7 +77,7 @@ const migrateCoreConstruct = async (
     );
     if (!added) {
       nextSteps.push(divergedCoreMessage);
-      return;
+      return false;
     }
   }
 
@@ -107,6 +109,8 @@ const migrateCoreConstruct = async (
     })\``,
     );
   }
+
+  return true;
 };
 
 /**
@@ -135,8 +139,11 @@ export default async function migration(
 ): Promise<MigrationReturnObject> {
   const nextSteps: string[] = [];
 
-  await migrateCoreConstruct(tree, nextSteps);
-  await migrateAppConstructs(tree);
+  // The app constructs read the accessor, so they may only be migrated once the
+  // core construct carries it.
+  if (await migrateCoreConstruct(tree, nextSteps)) {
+    await migrateAppConstructs(tree);
+  }
 
   await formatFilesInSubtree(tree);
 
