@@ -280,7 +280,17 @@ describe('agentcore-gateway generator', () => {
         )!
         .toString();
       expect(construct).toContain("rc.set('agentcore', 'gateways'");
-      expect(construct).toContain('MyGateway: this.gateway.gatewayUrl');
+      expect(construct).toContain('MyGateway: this.gatewayUrl');
+    });
+
+    it('exposes a non-optional gatewayUrl accessor on the core construct', () => {
+      const construct = tree
+        .read(
+          'packages/common/constructs/src/core/agentcore-gateway/agentcore-gateway.ts',
+        )!
+        .toString();
+      expect(construct).toContain('public get gatewayUrl(): string');
+      expect(construct).toContain('.attrGatewayUrl');
     });
 
     it('exposes grantInvokeAccess + addMcpServerTarget public methods', () => {

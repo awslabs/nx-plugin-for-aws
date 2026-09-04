@@ -47,7 +47,7 @@ export const addGatewayUrlToConnectionNamespace = async (
 
     rc.set('connection', 'gateways', {
       ...rc.get('connection').gateways,
-      ${options.gatewayNameClassName}: this.gateway.gatewayUrl,
+      ${options.gatewayNameClassName}: this.gatewayUrl,
     });\` where { $program <: not contains \`rc.set('connection', 'gateways', $_)\` }`,
     );
   }
