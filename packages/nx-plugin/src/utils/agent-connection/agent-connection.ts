@@ -962,7 +962,8 @@ export const PY_MCP_FAMILY_CONNECTIONS: Record<
 
 /**
  * Add a re-export to the Python agent-connection module's __init__.py.
- * Equivalent to addStarExport for TS.
+ * Equivalent to addStarExport for TS, including creating the file when it does
+ * not yet exist in the tree.
  * Uses `__all__` to mark re-exports as public (satisfies ruff F401).
  * Uses GritQL for AST-aware transforms where possible.
  */
@@ -979,6 +980,11 @@ export async function addPythonReExport(
 
   const importLine = `from ${fromModule} import ${importName}`;
   const allEntry = `"${importName}"`;
+
+  if (!tree.exists(initFilePath)) {
+    tree.write(initFilePath, `${importLine}\n\n__all__ = [${allEntry}]\n`);
+    return;
+  }
 
   // If there's already an import from the same module, merge into its name list
   // (ruff I001 rejects two `from X import ...` lines for the same module).

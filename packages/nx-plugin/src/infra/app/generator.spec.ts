@@ -619,6 +619,76 @@ describe('infra generator', () => {
     );
   });
 
+  it('should preserve the infrastructure the user authored', async () => {
+    await tsInfraGenerator(tree, options);
+
+    // Everything the guide tells the reader to author: resources in the stack,
+    // extra stages in main.ts, stacks of their own, and the Checkov skips.
+    const authored = {
+      'src/stacks/application-stack.ts': `import { Stack, StackProps } from 'aws-cdk-lib';
+import { Bucket } from 'aws-cdk-lib/aws-s3';
+import { Construct } from 'constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    new Bucket(this, 'MyPreciousBucket');
+  }
+}
+`,
+      'src/main.ts': `import { ApplicationStage } from './stages/application-stage.js';
+import { App } from '@proj/common-constructs';
+
+const app = new App();
+
+new ApplicationStage(app, 'proj-test-beta', {
+  env: { account: '123456789012', region: 'us-west-2' },
+});
+
+app.synth();
+`,
+      'src/stages/application-stage.ts': `import { Stage, StageProps } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { ApplicationStack } from '../stacks/application-stack.js';
+
+export class ApplicationStage extends Stage {
+  constructor(scope: Construct, id: string, props?: StageProps) {
+    super(scope, id, props);
+
+    new ApplicationStack(this, 'Application');
+  }
+}
+`,
+      // A stack of the user's own, which the scaffold never vends.
+      'src/stacks/data-stack.ts': `export class DataStack {}\n`,
+      'checkov.yml': 'skip-check:\n  - CKV_AWS_999 # my rule\n',
+    };
+    for (const [path, contents] of Object.entries(authored)) {
+      tree.write(`packages/test/${path}`, contents);
+    }
+
+    await tsInfraGenerator(tree, options);
+
+    for (const [path, contents] of Object.entries(authored)) {
+      expect(tree.read(`packages/test/${path}`, 'utf-8')).toBe(contents);
+    }
+  });
+
+  it('should keep a file the user added under src on a re-run', async () => {
+    // The CDK app layout replaces the library `src` the project generator
+    // scaffolds, which only happens on creation — on a re-run that directory is
+    // the user's infrastructure, so nothing in it is deleted.
+    await tsInfraGenerator(tree, options);
+    tree.write('packages/test/src/constructs/my-construct.ts', 'export {};\n');
+
+    await tsInfraGenerator(tree, options);
+
+    expect(tree.exists('packages/test/src/constructs/my-construct.ts')).toBe(
+      true,
+    );
+  });
+
   it('should create an independent project when run with a different name', async () => {
     await tsInfraGenerator(tree, options);
     await tsInfraGenerator(tree, { ...options, name: 'other' });

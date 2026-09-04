@@ -81,7 +81,8 @@ export async function tsInfraGenerator(
 ): Promise<GeneratorCallback> {
   const lib = getTsLibDetails(tree, schema);
 
-  if (!projectExists(tree, lib.fullyQualifiedName)) {
+  const isNewProject = !projectExists(tree, lib.fullyQualifiedName);
+  if (isNewProject) {
     await tsProjectGenerator(tree, {
       ...schema,
       preferInstallDependencies: false,
@@ -140,12 +141,20 @@ export async function tsInfraGenerator(
   const namespace = kebabCase(fullyQualifiedName);
   // The stage instantiated in main.ts. Quoted so the shell does not glob `*`.
   const sandboxStagePattern = `"${namespace}-sandbox/*"`;
-  tree.delete(joinPathFragments(libraryRoot, 'src'));
 
+  // `tsProjectGenerator` scaffolds a library `src`, which the CDK app layout
+  // replaces. Only on creation — on a re-run this is the user's infrastructure.
+  if (isNewProject) {
+    tree.delete(joinPathFragments(libraryRoot, 'src'));
+  }
+
+  // The guide walks through declaring resources in
+  // `src/stacks/application-stack.ts` and adding stages to `src/main.ts`, so
+  // everything here is scaffolded once and then left alone.
   generateFiles(
-    tree, // the virtual file system
-    joinPathFragments(import.meta.dirname, './files/app'), // path to the file templates
-    libraryRoot, // destination path of the files
+    tree,
+    joinPathFragments(import.meta.dirname, './files/app'),
+    libraryRoot,
     {
       synthDir: synthDirFromProject,
       scopeAlias: scopeAlias,
@@ -158,7 +167,7 @@ export async function tsInfraGenerator(
       ...esmVars(tree),
     },
     {
-      overwriteStrategy: OverwriteStrategy.Overwrite,
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
   );
 

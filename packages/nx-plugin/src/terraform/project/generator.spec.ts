@@ -848,6 +848,85 @@ describe('terraformProjectGenerator', () => {
       ).toEqual(mainTfAfterFirstRun);
     });
 
+    it('should preserve the infrastructure the user authored under src', async () => {
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      // Everything the guides tell the reader to author: resources in main.tf,
+      // their own variables and outputs, and the environment tfvars.
+      const authored = {
+        'src/main.tf': `resource "aws_s3_bucket" "my_bucket" {\n  bucket = "my-unique-bucket-name"\n}\n`,
+        'src/variables.tf': `variable "my_var" {\n  type    = string\n  default = "x"\n}\n`,
+        'src/outputs.tf': `output "my_out" {\n  value = "y"\n}\n`,
+        'src/env/dev.tfvars': `environment = "dev"\nmy_var      = "z"\n`,
+        // Another environment added per the guide's "Environment Configuration".
+        'src/env/prod.tfvars': `environment = "prod"\n`,
+        // A module split out of main.tf, which the scaffold never vends.
+        'src/networking.tf': `module "vpc" {\n  source = "../../my-lib/src"\n}\n`,
+      };
+      for (const [path, contents] of Object.entries(authored)) {
+        tree.write(`packages/my-terraform-project/${path}`, contents);
+      }
+
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      for (const [path, contents] of Object.entries(authored)) {
+        expect(
+          tree.read(`packages/my-terraform-project/${path}`, 'utf-8'),
+        ).toBe(contents);
+      }
+    });
+
+    it('should preserve a library project’s authored modules', async () => {
+      const librarySchema: TerraformProjectGeneratorSchema = {
+        name: 'my-terraform-lib',
+        type: 'library',
+        directory: 'packages',
+      };
+      await terraformProjectGenerator(tree, librarySchema);
+
+      const authored = `variable "name" {\n  type = string\n}\n`;
+      tree.write('packages/my-terraform-lib/src/main.tf', authored);
+
+      await terraformProjectGenerator(tree, librarySchema);
+
+      expect(tree.read('packages/my-terraform-lib/src/main.tf', 'utf-8')).toBe(
+        authored,
+      );
+    });
+
+    it('should preserve curated checkov skips when re-run', async () => {
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      const authored = 'skip-check:\n  - CKV_AWS_999 # my rule\n';
+      tree.write('packages/my-terraform-project/checkov.yml', authored);
+
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      expect(
+        tree.read('packages/my-terraform-project/checkov.yml', 'utf-8'),
+      ).toBe(authored);
+    });
+
+    it('should preserve edits to the bootstrap and the vended scripts', async () => {
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      const authored = {
+        'bootstrap/main.tf': '# my own state bucket\n',
+        'scripts/init.ts': '// my own init\n',
+      };
+      for (const [path, contents] of Object.entries(authored)) {
+        tree.write(`packages/my-terraform-project/${path}`, contents);
+      }
+
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      for (const [path, contents] of Object.entries(authored)) {
+        expect(
+          tree.read(`packages/my-terraform-project/${path}`, 'utf-8'),
+        ).toBe(contents);
+      }
+    });
+
     it('should keep the license-check lint dependency across a re-run', async () => {
       // The license generator wires every project's `lint` to the root
       // license-check, so a project generated after it must claim that wiring
