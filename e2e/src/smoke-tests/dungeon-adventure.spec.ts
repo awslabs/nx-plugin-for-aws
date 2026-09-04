@@ -324,7 +324,15 @@ describe('smoke test - dungeon-adventure', () => {
     );
 
     writeFromTemplate(applicationStackPath, '1/application-stack.ts.template');
+    // Module 1 Task 4's documented sequence: sync, then lint, then build. The
+    // `lint` step applies biome's fixes (notably import ordering), so running it
+    // here is what makes the Module 2 "before" templates below match the state a
+    // reader following the guide actually has on disk.
     await runCLI(`sync --verbose`, opts);
+    await runCLI(`${buildPackageManagerShortCommand(pkgMgr, 'lint')}`, {
+      ...opts,
+      prefixWithPackageManagerCmd: false,
+    });
     await runCLI(
       `${buildPackageManagerShortCommand(pkgMgr, 'build')} --output-style=stream --skip-nx-cache --verbose`,
       { ...opts, prefixWithPackageManagerCmd: false },

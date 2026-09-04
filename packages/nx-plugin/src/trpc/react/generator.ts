@@ -15,6 +15,7 @@ import { addSingleImport, applyGritQL } from '../../utils/ast.js';
 import { declareDependencies } from '../../utils/declared-dependencies.js';
 import { formatFilesInSubtree } from '../../utils/format.js';
 import { installDependencies } from '../../utils/install.js';
+import { addLocalProjectDependency } from '../../utils/local-project-dependency.js';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
 import { toClassName } from '../../utils/names.js';
 import {
@@ -190,6 +191,12 @@ export async function reactGenerator(
   addTsDependencies(tree, DEPENDENCIES, {
     metadata: connectionMetadata,
     projectRoot: frontendProjectConfig.root,
+  });
+
+  // The generated client provider imports the API project's router type.
+  addLocalProjectDependency(tree, {
+    consumerRoot: frontendProjectConfig.root,
+    dependencyRoot: backendProjectConfig.root,
   });
 
   // Recorded so the version sync knows this connection's dependencies are ours.

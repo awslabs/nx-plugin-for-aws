@@ -20,6 +20,7 @@ import {
 } from '../declared-dependencies.js';
 import { addDependenciesToPackageJson } from '../dependencies.js';
 import type { Iac } from '../iac.js';
+import { addLocalProjectDependency } from '../local-project-dependency.js';
 import { esmVars } from '../module-format.js';
 import { addArtifactProjectToTargets } from '../nx.js';
 import {
@@ -88,6 +89,11 @@ interface BackendOptions {
 export interface TrpcBackendOptions extends BackendOptions {
   type: 'trpc';
   projectAlias: string;
+  /**
+   * Root of the tRPC project. The generated construct imports its router, so
+   * shared constructs declares a dependency and project reference on it.
+   */
+  projectRoot: string;
   bundleOutputDir: string;
   authorizerBundleOutputDir?: string;
 }
@@ -226,6 +232,14 @@ const addApiGatewayCdkConstructs = async (
       overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
   );
+
+  // The generated tRPC construct imports the API project's router.
+  if (options.backend.type === 'trpc') {
+    addLocalProjectDependency(tree, {
+      consumerRoot: joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR),
+      dependencyRoot: options.backend.projectRoot,
+    });
+  }
 
   // Export app specific CDK construct
   await addStarExport(
