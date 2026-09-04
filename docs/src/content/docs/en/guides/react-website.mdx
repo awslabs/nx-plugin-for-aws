@@ -50,12 +50,10 @@ The generator will create the following project structure in the `<directory>/<n
     - config.ts Application configuration (eg. logo)
     - components
       - AppLayout Components for the overall layout and navigation bar
-      - RuntimeConfig Provider which loads `runtime-config.json` at startup
       - app-sidebar.tsx Sidebar navigation (shadcn only)
       - alert.tsx Alert component wrapping your UX provider's own
       - spinner.tsx Spinner component wrapping your UX provider's own
     - hooks
-      - useRuntimeConfig.tsx Hook for reading the [Runtime Configuration](#runtime-configuration)
       - useAppLayout.tsx Hook for adjusting the AppLayout from nested components (Cloudscape only)
     - routes
       - \_\_root.tsx Root route, wrapping every page in the AppLayout
@@ -418,19 +416,11 @@ module "my_website" {
 :::caution[Checkov: S3_MANAGED]
 Choosing `S3_MANAGED` fails your project's `checkov` target with `CKV_AWS_145` on the website and distribution log buckets. The target runs `checkov` against your project's own `checkov.yml`, so add the check to its `skip-check` list:
 
-```yaml title="packages/infra/checkov.yml" {9}
-# Defines the checks to skip entirely. Remove if your requirements differ.
+```yaml title="packages/infra/checkov.yml" {3}
 skip-check:
-  # Lambda function suppressions
-  - CKV_AWS_115 # Concurrent execution limit
-  - CKV_AWS_116 # Dead Letter Queue
-  - CKV_AWS_117 # Lambda functions in VPC
-  - CKV_AWS_173 # Encrypt Lambda environment variables
-  - CKV_AWS_272 # Code signing
-  - CKV_AWS_145 # S3 buckets are not KMS encrypted with encryption = "S3_MANAGED"
+  # ...
+  - CKV_AWS_145 # S3 buckets are not KMS encrypted when encryption is S3_MANAGED
 ```
-
-The `checkov` target passes `--config-file`, which turns off `checkov`'s own discovery of a `.checkov.yaml` — a config file dropped anywhere else is ignored.
 :::
 
 To use your own KMS key instead of one created automatically, pass `kms_key_arn` and set `create_kms_key` to `false`:
@@ -594,7 +584,7 @@ You must ensure that you declare your website module _after_ any modules which a
 
 ### Website Code
 
-Your website is generated with a `RuntimeConfigProvider` (in `src/components/RuntimeConfig`) which loads `runtime-config.json` before rendering your application, and a `useRuntimeConfig` hook for reading values out of it:
+In your website, you can use the `useRuntimeConfig` hook to retrieve values from the runtime configuration:
 
 ```tsx {1,4}
 import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
@@ -607,7 +597,9 @@ const MyComponent = () => {
 };
 ```
 
-The provider falls back to an empty configuration when no `runtime-config.json` is served, so a website with nothing deployed yet still renders. `IRuntimeConfig` is typed `any` by default — narrow it in `src/components/RuntimeConfig/index.tsx` if you would like type-safe access.
+:::note[Added when you need it]
+`src/hooks/useRuntimeConfig.tsx` and `src/components/RuntimeConfig` are added to your website by the <Link path="/guides/react-website-auth">`ts#website#auth`</Link> generator and the <Link path="guides/connection">`connection`</Link> generators, since those are what put values into the runtime configuration. A website with neither has no runtime configuration to read, so the hook is not vended until one has run.
+:::
 
 :::note[Runtime Configuration]
 For details on how runtime configuration is stored in AWS AppConfig and how server-side consumers (Lambda functions, agents) can retrieve it, see the <Link path="guides/runtime-config">Runtime Configuration</Link> guide.

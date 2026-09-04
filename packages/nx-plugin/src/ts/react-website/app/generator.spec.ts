@@ -950,25 +950,6 @@ describe('react-website generator', () => {
       expect(tree.read(configPath, 'utf-8')).toBe(userConfig);
     });
 
-    it('should preserve user edits to the runtime config provider and hook on re-run', async () => {
-      await tsReactWebsiteGenerator(tree, options);
-
-      const providerPath = 'test-app/src/components/RuntimeConfig/index.tsx';
-      const hookPath = 'test-app/src/hooks/useRuntimeConfig.tsx';
-
-      const userProvider =
-        '// user edited provider\nexport const PROVIDER = true;\n';
-      const userHook = '// user edited hook\nexport const HOOK = true;\n';
-
-      tree.write(providerPath, userProvider);
-      tree.write(hookPath, userHook);
-
-      await tsReactWebsiteGenerator(tree, options);
-
-      expect(tree.read(providerPath, 'utf-8')).toBe(userProvider);
-      expect(tree.read(hookPath, 'utf-8')).toBe(userHook);
-    });
-
     it('should not duplicate the shared shadcn tsconfig reference on re-run', async () => {
       const shadcnOptions: TsReactWebsiteGeneratorSchema = {
         ...options,
@@ -1018,6 +999,37 @@ describe('react-website generator', () => {
       ).filter((ref) => ref.path.startsWith('../packages/common/shadcn'));
       expect(refs).toEqual([
         { path: '../packages/common/shadcn/tsconfig.lib.json' },
+      ]);
+    });
+
+    it('should preserve the order of existing references on re-run', async () => {
+      const shadcnOptions: TsReactWebsiteGeneratorSchema = {
+        ...options,
+        ux: 'shadcn',
+      };
+      await tsReactWebsiteGenerator(tree, shadcnOptions);
+
+      const tsconfigAppPath = 'test-app/tsconfig.app.json';
+      // The shadcn reference resolved by `nx sync`, with another project's
+      // reference after it - the shape a website connected to an API is in.
+      updateJson(tree, tsconfigAppPath, (tsconfig) => ({
+        ...tsconfig,
+        references: [
+          { path: '../packages/common/shadcn/tsconfig.lib.json' },
+          { path: '../packages/my-api/tsconfig.lib.json' },
+        ],
+      }));
+
+      await tsReactWebsiteGenerator(tree, shadcnOptions);
+
+      // Re-appending the shadcn reference rather than recognising the resolved
+      // one would swap these two, which leaves the workspace out of sync.
+      expect(
+        readJson<{ references?: { path: string }[] }>(tree, tsconfigAppPath)
+          .references,
+      ).toEqual([
+        { path: '../packages/common/shadcn/tsconfig.lib.json' },
+        { path: '../packages/my-api/tsconfig.lib.json' },
       ]);
     });
   });

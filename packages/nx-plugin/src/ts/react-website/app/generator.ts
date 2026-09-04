@@ -68,7 +68,6 @@ import {
   TS_PROJECT_DEPENDENCIES,
 } from '../../lib/ts-project-utils.js';
 import { VITEST_DEPENDENCIES } from '../../lib/vitest.js';
-import { runtimeConfigGenerator } from '../runtime-config/generator.js';
 // typescript factory imports removed — now using GritQL for vite config transforms
 import type {
   TsReactWebsiteGeneratorSchema,
@@ -675,18 +674,6 @@ export async function tsReactWebsiteGenerator(
     ignore: tanstackRouter
       ? [joinPathFragments(libraryRoot, 'src', 'routeTree.gen.ts')]
       : [],
-  });
-
-  // Every website reads its backend URLs and identity configuration from runtime
-  // config, so the `RuntimeConfigProvider` and `useRuntimeConfig` hook ship with
-  // all of them. The provider falls back to an empty config when no
-  // `runtime-config.json` is served, so a website with no backend still renders.
-  //
-  // Runs after the format above so the route tree stays excluded from the
-  // formatting this generator performs too.
-  await runtimeConfigGenerator(tree, {
-    project: fullyQualifiedName,
-    preferInstallDependencies: false,
   });
 
   // The generated vite.config.mts imports these, and Nx's inferred `@nx/vite`
