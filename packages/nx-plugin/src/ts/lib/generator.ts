@@ -25,6 +25,7 @@ import { getNpmScopePrefix } from '../../utils/npm-scope.js';
 import {
   addGeneratorMetadata,
   getGeneratorInfo,
+  mergeTarget,
   mergeTargetDefault,
   type NxGeneratorInfo,
   projectExists,
@@ -161,21 +162,25 @@ export const tsProjectGenerator = async (
   );
   const targets = projectConfiguration.targets;
 
-  targets['compile'] = {
+  // Merged rather than assigned so a re-run converges this generator's own
+  // configuration without discarding what other generators contributed to the
+  // same targets — the `bundle` that ts#lambda-function adds to build and
+  // assemble, say, which those targets must keep depending on.
+  targets['compile'] = mergeTarget(targets['compile'], {
     executor: 'nx:run-commands',
     outputs: ['{workspaceRoot}/dist/{projectRoot}/tsc'],
     options: {
       command: 'tsc --build tsconfig.lib.json',
       cwd: '{projectRoot}',
     },
-  };
-  targets['build'] = {
+  });
+  targets['build'] = mergeTarget(targets['build'], {
     dependsOn: ['lint', 'compile', 'test'],
-  };
+  });
   // The artifact-only sibling of build, which the deploy targets depend on.
-  targets['assemble'] = {
+  targets['assemble'] = mergeTarget(targets['assemble'], {
     dependsOn: ['compile'],
-  };
+  });
   projectConfiguration.targets = sortObjectKeys(targets);
 
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfiguration);

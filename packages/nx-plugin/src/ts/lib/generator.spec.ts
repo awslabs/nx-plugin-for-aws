@@ -5,8 +5,8 @@
 import { readJson, readNxJson, type Tree, writeJson } from '@nx/devkit';
 import uniqBy from 'lodash.uniqby';
 import {
-  declaredNames,
   declareDependencies,
+  declaredNames,
 } from '../../utils/declared-dependencies.js';
 import { expectHasMetricTags } from '../../utils/metrics.spec.js';
 import {
@@ -15,6 +15,7 @@ import {
 } from '../../utils/shared-constructs.js';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
 import { ownedDependencies } from '../../utils/version-upgrade-migration/owned-dependencies.js';
+import { tsLambdaFunctionGenerator } from '../lambda-function/generator.js';
 import {
   DEPENDENCIES,
   TS_LIB_GENERATOR_INFO,
@@ -282,6 +283,68 @@ describe('ts lib generator', () => {
     expect(readJson(tree, 'test-lib/project.json').targets).toEqual(
       targetsBefore,
     );
+  });
+
+  // Another generator wiring an artifact target into this project's build and
+  // assemble is the state a re-run must converge into rather than replace: the
+  // `bundle` target survives on its own, so losing the wiring is silent until a
+  // clean synth fails on the missing artifact.
+  it('should preserve target wiring added by other generators on re-run', async () => {
+    await tsProjectGenerator(tree, {
+      name: 'test-lib',
+      preferInstallDependencies: false,
+    });
+
+    await tsLambdaFunctionGenerator(tree, {
+      project: '@proj/test-lib',
+      name: 'MyFunction',
+      event: 'EventBridgeSchema',
+      iac: 'cdk',
+      preferInstallDependencies: false,
+    });
+
+    await tsProjectGenerator(tree, {
+      name: 'test-lib',
+      preferInstallDependencies: false,
+    });
+
+    const { targets } = readJson(tree, 'test-lib/project.json');
+    expect(targets.build.dependsOn).toEqual([
+      'lint',
+      'compile',
+      'test',
+      'bundle',
+    ]);
+    expect(targets.assemble.dependsOn).toEqual(['compile', 'bundle']);
+    expect(targets.bundle).toBeDefined();
+  });
+
+  it('should not duplicate target wiring across repeated re-runs', async () => {
+    await tsProjectGenerator(tree, {
+      name: 'test-lib',
+      preferInstallDependencies: false,
+    });
+
+    await tsLambdaFunctionGenerator(tree, {
+      project: '@proj/test-lib',
+      name: 'MyFunction',
+      event: 'EventBridgeSchema',
+      iac: 'cdk',
+      preferInstallDependencies: false,
+    });
+
+    await tsProjectGenerator(tree, {
+      name: 'test-lib',
+      preferInstallDependencies: false,
+    });
+    const afterFirstReRun = tree.read('test-lib/project.json', 'utf-8');
+
+    await tsProjectGenerator(tree, {
+      name: 'test-lib',
+      preferInstallDependencies: false,
+    });
+
+    expect(tree.read('test-lib/project.json', 'utf-8')).toBe(afterFirstReRun);
   });
 
   it('should mark the workspace as ESM by default', async () => {
