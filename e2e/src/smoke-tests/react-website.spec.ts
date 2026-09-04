@@ -125,12 +125,16 @@ describe('smoke test - react-website', () => {
         `${component}.tsx`,
       );
       expect(existsSync(componentPath), componentPath).toBe(true);
-      // Aliases resolve to the package-local `#...` specifiers, not the
-      // public `<scope>/common-shadcn/...` name. The CLI writes its own quote
+      const contents = readFileSync(componentPath, 'utf-8');
+      // A wrong alias shape leaves the registry's own `@/...` specifiers in
+      // place; a resolved one rewrites them to the package-local `#...`
+      // specifiers, never the public `<scope>/common-shadcn/...` name.
+      expect(contents).not.toMatch(/from ['"]@\//);
+      expect(contents).not.toMatch(SHARED_SHADCN_NAME);
+      // `cn` comes from the package's own `#lib/utils` unless the registry item
+      // declares a dependency on the `cn` package. The CLI writes its own quote
       // style, so match either.
-      expect(readFileSync(componentPath, 'utf-8')).toMatch(
-        /from ['"]#lib\/utils['"]/,
-      );
+      expect(contents).toMatch(/from ['"](?:#lib\/utils|cn)['"]/);
     }
 
     expect(existsSync(join(shadcnRoot, 'packages'))).toBe(false);
