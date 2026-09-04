@@ -31,7 +31,7 @@ Key capabilities:
 - [Node >= 22](https://nodejs.org/en/download) (We recommend using something like [NVM](https://github.com/nvm-sh/nvm) to manage your node versions)
   - verify by running `node --version`
 - [UV >= 0.5.29](https://docs.astral.sh/uv/getting-started/installation/)
-  1. install Python 3.14 by running: `uv python install 3.14.0`
+  1. install Python 3.14 by running: `uv python install 3.14`
   2. verify with `uv python list --only-installed`
 
 #### Recommended

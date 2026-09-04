@@ -8,6 +8,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import * as path from 'path';
 import PackageJson from '../../nx-plugin/package.json';
 import { addToExistingProjectTool } from '../../nx-plugin/src/mcp-server/tools/add-to-existing-project';
+import { addBestPracticesTool } from '../../nx-plugin/src/mcp-server/tools/best-practices';
 import { addCreateWorkspaceCommandTool } from '../../nx-plugin/src/mcp-server/tools/create-workspace-command';
 import {
   addGeneralGuidanceTool,
@@ -48,6 +49,7 @@ ${TOOL_SELECTION_GUIDE}
   );
 
   addGeneralGuidanceTool(server, generators);
+  addBestPracticesTool(server, generators);
   addCreateWorkspaceCommandTool(server);
   addListGeneratorsTool(server, generators);
   addGeneratorGuideTool(server, generators);
