@@ -64,9 +64,11 @@ import {
 } from '../../../utils/website-constructs/website-constructs.js';
 import {
   configureTsProject,
+  mergeTsProjectDirReference,
   TS_PROJECT_DEPENDENCIES,
 } from '../../lib/ts-project-utils.js';
 import { VITEST_DEPENDENCIES } from '../../lib/vitest.js';
+import { runtimeConfigGenerator } from '../runtime-config/generator.js';
 // typescript factory imports removed — now using GritQL for vite config transforms
 import type {
   TsReactWebsiteGeneratorSchema,
@@ -396,14 +398,9 @@ export async function tsReactWebsiteGenerator(
   )
     .split(sep)
     .join('/');
-  const sharedShadcnTsconfigRef = relative(
+  const sharedShadcnProjectRef = relative(
     joinPathFragments(tree.root, websiteContentPath),
-    joinPathFragments(
-      tree.root,
-      PACKAGES_DIR,
-      SHARED_SHADCN_DIR,
-      'tsconfig.json',
-    ),
+    joinPathFragments(tree.root, PACKAGES_DIR, SHARED_SHADCN_DIR),
   )
     .split(sep)
     .join('/');
@@ -631,14 +628,10 @@ export async function tsReactWebsiteGenerator(
       },
       references:
         ux === 'shadcn'
-          ? [
-              ...(tsconfig.references ?? []).filter(
-                (ref) => ref.path !== sharedShadcnTsconfigRef,
-              ),
-              {
-                path: sharedShadcnTsconfigRef,
-              },
-            ]
+          ? mergeTsProjectDirReference(
+              tsconfig.references,
+              sharedShadcnProjectRef,
+            )
           : tsconfig.references,
     }),
   );
@@ -683,6 +676,19 @@ export async function tsReactWebsiteGenerator(
       ? [joinPathFragments(libraryRoot, 'src', 'routeTree.gen.ts')]
       : [],
   });
+
+  // Every website reads its backend URLs and identity configuration from runtime
+  // config, so the `RuntimeConfigProvider` and `useRuntimeConfig` hook ship with
+  // all of them. The provider falls back to an empty config when no
+  // `runtime-config.json` is served, so a website with no backend still renders.
+  //
+  // Runs after the format above so the route tree stays excluded from the
+  // formatting this generator performs too.
+  await runtimeConfigGenerator(tree, {
+    project: fullyQualifiedName,
+    preferInstallDependencies: false,
+  });
+
   // The generated vite.config.mts imports these, and Nx's inferred `@nx/vite`
   // plugin loads that config when computing the project graph — so they must be
   // installed even if the caller would otherwise prefer to defer.
