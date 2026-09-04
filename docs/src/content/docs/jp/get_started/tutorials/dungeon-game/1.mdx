@@ -130,8 +130,9 @@ TypeScriptプロジェクトの操作の詳細については、<Link path="guid
       - local-server.ts tRPCサーバーをローカルで実行する際に使用
       - **router.ts** tRPCルーターとすべてのプロシージャを定義
     - project.json
+    - vitest.config.mts テスト設定
     - ...
-- vitest.workspace.ts
+- vitest.config.mts すべてのプロジェクトのテストを検出するルートテスト設定
 </FileTree>
 
 これらの主要なファイルを見てみましょう:
@@ -151,13 +152,10 @@ export type AppRouter = typeof appRouter;
 ```
 ルーターはAPIのtRPCルーターを定義し、すべてのAPIメソッドを宣言する場所です。上記のように、`echo`というメソッドがあり、その実装は`./procedures/echo.ts`ファイルにあります。Lambdaハンドラーエントリーポイントは`handler.ts`にあり、ジェネレーターによって自動的に設定されます。
 
-```ts {7-10}
+```ts {4-6}
 // packages/game-api/src/procedures/echo.ts
 import { publicProcedure } from '../init.js';
-import {
-  EchoInputSchema,
-  EchoOutputSchema,
-} from '../schema/echo.js';
+import { EchoInputSchema, EchoOutputSchema } from '../schema/index.js';
 
 export const echo = publicProcedure
   .input(EchoInputSchema)
@@ -454,7 +452,6 @@ Pythonプロジェクトを作成するには:
         - session.py 会話状態を永続化するためのSessionManagerを解決
         - middleware/
           - session_id_middleware.py リクエストのインバウンドAgentCoreセッションIDをバインド
-        - Dockerfile AgentCore Runtimeへのデプロイ用のDockerイメージを定義
   - common/constructs/
     - src
       - app/agents/story-agent/
@@ -904,9 +901,7 @@ export class StoryAgent extends Construct implements IGrantable, IConnectable {
 }
 ```
 
-これは、エージェントDockerイメージをECRにアップロードし、AgentCore Runtimeを使用してホストするCDK `AgentRuntimeArtifact`を設定します。`--auth=cognito`を選択したため、コンストラクトはユーザープール/クライアントIDを必要とし、Cognitoを通じてAgentCore Runtime呼び出しを認証し、呼び出し元の`Authorization`ヘッダーを転送します。また、Story Agentの`session.py`が実行時に読み取るセッションバケット（CloudWatch Logsに配信されるサーバーアクセスログを持つKMS暗号化S3バケット）をプロビジョニングし、エージェントに読み取り/書き込みアクセスを付与し、Bedrockモデルを呼び出すアクセスを付与し、そのARNとバケット名を`RuntimeConfig`に登録して、エージェント（実行時、AppConfig経由）とGame API（synth時、`invocationUrl`経由）の両方が見つけられるようにします。
-
-エージェントソースコードと同じ場所に配置できるように、`story`プロジェクトからDockerイメージを参照する追加の`Dockerfile`があることに気付くかもしれません。
+これは、エージェントのビルドされたコードをzipアセットとしてパッケージ化し、AgentCore Runtimeを使用してホストするCDK `AgentRuntimeArtifact`を設定します。`--auth=cognito`を選択したため、コンストラクトはユーザープール/クライアントIDを必要とし、Cognitoを通じてAgentCore Runtime呼び出しを認証し、呼び出し元の`Authorization`ヘッダーを転送します。また、Story Agentの`session.py`が実行時に読み取るセッションバケット（CloudWatch Logsに配信されるサーバーアクセスログを持つKMS暗号化S3バケット）をプロビジョニングし、エージェントに読み取り/書き込みアクセスを付与し、Bedrockモデルを呼び出すアクセスを付与し、そのARNとバケット名を`RuntimeConfig`に登録して、エージェント（実行時、AppConfig経由）とGame API（synth時、`invocationUrl`経由）の両方が見つけられるようにします。
 
 </details>
 
@@ -966,7 +961,6 @@ Story Agentがプレイヤーのインベントリを管理するためのツー
         - sample-guidance.ts サンプルリソース
       - stdio.ts STDIOトランスポートを使用したMCPのエントリーポイント
       - http.ts ストリーマブルHTTPトランスポートを使用したMCPのエントリーポイント
-      - Dockerfile AgentCore Runtimeへのデプロイ用のイメージをビルド
     - rolldown.config.ts AgentCore Runtimeへのデプロイ用にMCPサーバーをバンドルするための設定
   - common/constructs/
     - src
@@ -1278,9 +1272,12 @@ root &&
 ```tsx
 // packages/game-ui/src/hooks/useGameApi.tsx
 import { useContext } from 'react';
-import { GameApiTRPCContext } from '../components/GameApiClientProvider';
+import {
+  GameApiTRPCContext,
+  type GameApiTRPCContextValue,
+} from '../components/GameApiClientProvider';
 
-export const useGameApi = () => {
+export const useGameApi = (): GameApiTRPCContextValue['optionsProxy'] => {
   const container = useContext(GameApiTRPCContext);
   if (!container) {
     throw new Error('useGameApi must be used within GameApiClientProvider');
@@ -1288,7 +1285,7 @@ export const useGameApi = () => {
   return container.optionsProxy;
 };
 
-export const useGameApiClient = () => {
+export const useGameApiClient = (): GameApiTRPCContextValue['client'] => {
   const container = useContext(GameApiTRPCContext);
   if (!container) {
     throw new Error(
@@ -1560,7 +1557,7 @@ Nxは[キャッシング](https://nx.dev/concepts/how-caching-works)に依存し
 
 <PackageManagerShortCommand commands={["build"]} />
 
-次のプロンプトが表示されます:
+次のプロンプトが表示される場合があります:
 
 ```bash
  NX   The workspace is out of sync

@@ -179,6 +179,7 @@ export async function tsTrpcApiGenerator(
         backend: {
           type: 'trpc',
           projectAlias: enhancedOptions.backendProjectAlias,
+          projectRoot: backendRoot,
           bundleOutputDir: joinPathFragments('dist', backendRoot, 'bundle'),
           integrationPattern: getIntegrationPattern(options),
           ...(options.auth === 'custom' && {

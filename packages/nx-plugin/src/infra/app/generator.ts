@@ -23,6 +23,7 @@ import {
 } from '../../utils/declared-dependencies.js';
 import { formatFilesInSubtree } from '../../utils/format.js';
 import { installDependencies } from '../../utils/install.js';
+import { addLocalProjectDependency } from '../../utils/local-project-dependency.js';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
 import { esmVars } from '../../utils/module-format.js';
 import { kebabCase } from '../../utils/names.js';
@@ -320,6 +321,18 @@ export async function tsInfraGenerator(
         : []),
     ]),
   }));
+
+  // `main.ts` and the application stack import the shared constructs.
+  addLocalProjectDependency(tree, {
+    consumerRoot: libraryRoot,
+    dependencyRoot: joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR),
+  });
+  if (stageConfig) {
+    addLocalProjectDependency(tree, {
+      consumerRoot: libraryRoot,
+      dependencyRoot: joinPathFragments(PACKAGES_DIR, SHARED_INFRA_CONFIG_DIR),
+    });
+  }
 
   await addGeneratorMetricsIfApplicable(tree, [INFRA_APP_GENERATOR_INFO]);
 
