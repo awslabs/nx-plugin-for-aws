@@ -425,6 +425,10 @@ AG-UI 代理旨在由前端直接使用。使用 <Link path="/guides/connection/
 
 这使用 `uv run` 使用 [Bedrock AgentCore Python SDK](https://github.com/aws/bedrock-agentcore-sdk-python) 执行您的 Agent。
 
+代理监听在生成时从工作区池分配的端口。从项目的 `project.json` 中的 `metadata.ports` 读取它，或从 `<your-agent-name>-dev` 目标的命令中的 `--port` 标志读取它。下面的示例使用 `8081`，这是在全新工作区中为第一个 HTTP 代理分配的端口。
+
+<Snippet name="agent/dev-vs-serve" parentHeading="本地开发" />
+
 ### 与您的代理聊天
 
 生成器配置了一个 `<your-agent-name>-chat` Nx 目标，可让您进入与代理的交互式终端聊天。
@@ -439,11 +443,13 @@ AG-UI 代理旨在由前端直接使用。使用 <Link path="/guides/connection/
 
 生成器为每个协议生成一个 `scripts/<your-agent-name>/chat.ts`。默认情况下，它连接到本地代理，或者在设置 `RUNTIME_CONFIG_APP_ID` 时连接到您部署的代理（请参阅下面的[与您部署的代理聊天](#chat-with-your-deployed-agent)）。
 
-对于 **HTTP** 代理，聊天脚本使用从代理的 OpenAPI 规范生成的类型安全 TypeScript 客户端。生成器还生成：
+<OptionFilter when={{ protocol: 'http' }} description="OpenAPI client generation for the chat script">
+对于 HTTP 代理，聊天脚本使用从代理的 OpenAPI 规范生成的类型安全 TypeScript 客户端。生成器还生成：
 
-- `scripts/<your-agent-name>_openapi.py` — 一个导出代理的 OpenAPI 规范的小脚本
+- `scripts/<your_agent_name>_openapi.py` — 一个导出代理的 OpenAPI 规范的小脚本（使用您的代理名称的 `snake_case` 命名）
 - 一个运行它的 `<your-agent-name>-openapi` Nx 目标
 - 一个在 `scripts/<your-agent-name>/generated/` 下生成类型安全 TypeScript 客户端的 `<your-agent-name>-generate-client` Nx 目标
+</OptionFilter>
 
 当您自定义代理的输入形状（例如向 `InvokeInput` 添加新字段）时，更新 `chat.ts` 以在调用代理时传递新字段，其余部分将自动工作。
 
@@ -567,7 +573,11 @@ aws cognito-idp admin-initiate-auth \
 <OptionFilter when={{ protocol: 'http' }} description="FastAPI HTTP invocation details">
 ### 调用本地服务器
 
-要通过 `<your-agent-name>-serve` 目标调用本地运行的 Agent，您可以向本地代理运行的端口上的 `/invocations` 发送一个简单的 POST 请求。例如，使用 `curl`：
+使用 `<your-agent-name>-dev` 目标启动您的代理：
+
+<NxCommands commands={['agent-dev your-project']} />
+
+然后向您的本地代理运行的端口上的 `/invocations` 发送 POST 请求。替换分配给您的代理的端口 — 从项目的 `project.json` 中的 `metadata.ports` 读取它，或从 `<your-agent-name>-dev` 目标的命令中的 `--port` 标志读取它。在全新工作区中，第一个 HTTP 代理被分配 `8081`：
 
 ```bash
 curl -N -X POST http://localhost:8081/invocations \
@@ -577,6 +587,10 @@ curl -N -X POST http://localhost:8081/invocations \
 
 :::note[Curl 流式标志]
 给 `curl` 的 `-N` 参数禁用缓冲输出流，因此您可以实时看到流式响应。
+:::
+
+:::caution[使用 `-dev`，而不是 `-serve`]
+为此使用 `<your-agent-name>-dev`，而不是 `<your-agent-name>-serve`。`-serve` 运行部署的代码路径，因此它需要设置 `RUNTIME_CONFIG_APP_ID` — 请参阅 <Link path="guides/py-agent#-dev-vs--serve">`-dev` vs `-serve`</Link>。如果没有它，在代理尝试解析其会话存储时流式传输已经开始，因此请求返回一个空的 `200`，没有错误，失败仅出现在服务器日志中。
 :::
 
 ### 调用部署的代理

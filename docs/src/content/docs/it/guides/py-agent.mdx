@@ -425,6 +425,10 @@ Se hai aggiunto più componenti al tuo progetto (agenti, server MCP, ecc.), ques
 
 Questo utilizza `uv run` per eseguire il tuo Agent utilizzando il [Bedrock AgentCore Python SDK](https://github.com/aws/bedrock-agentcore-sdk-python).
 
+L'agente ascolta su una porta assegnata dal pool del workspace quando è stato generato. Leggila da `metadata.ports` nel `project.json` del progetto, o dal flag `--port` nel comando del target `<your-agent-name>-dev`. Gli esempi seguenti utilizzano `8081`, la porta assegnata a un primo agente HTTP in un workspace nuovo.
+
+<Snippet name="agent/dev-vs-serve" parentHeading="Sviluppo Locale" />
+
 ### Chattare con il Tuo Agent
 
 Il generatore configura un target Nx `<your-agent-name>-chat` che ti porta in una chat interattiva da terminale con il tuo agente.
@@ -439,11 +443,13 @@ Quindi, in un altro terminale, avvia la chat:
 
 Il generatore emette uno `scripts/<your-agent-name>/chat.ts` per ogni protocollo. Si connette all'agente locale per impostazione predefinita, o al tuo agente distribuito quando `RUNTIME_CONFIG_APP_ID` è impostato (vedi [Chattare con il tuo agente distribuito](#chattare-con-il-tuo-agente-distribuito) di seguito).
 
-Per gli agenti **HTTP**, lo script di chat utilizza un client TypeScript type-safe generato dalla specifica OpenAPI dell'agente. Il generatore emette anche:
+<OptionFilter when={{ protocol: 'http' }} description="OpenAPI client generation for the chat script">
+Per gli agenti HTTP, lo script di chat utilizza un client TypeScript type-safe generato dalla specifica OpenAPI dell'agente. Il generatore emette anche:
 
-- `scripts/<your-agent-name>_openapi.py` — un piccolo script che esporta la specifica OpenAPI dell'agente
+- `scripts/<your_agent_name>_openapi.py` — un piccolo script che esporta la specifica OpenAPI dell'agente (denominato con il nome del tuo agente in `snake_case`)
 - Un target Nx `<your-agent-name>-openapi` che lo esegue
 - Un target Nx `<your-agent-name>-generate-client` che produce un client TypeScript type-safe sotto `scripts/<your-agent-name>/generated/`
+</OptionFilter>
 
 Quando personalizzi la forma di input dell'agente (ad es. aggiungi nuovi campi a `InvokeInput`), aggiorna `chat.ts` per passare i nuovi campi quando invochi l'agente e il resto funziona automaticamente.
 
@@ -567,7 +573,11 @@ Quando si esegue localmente (`LOCAL_DEV=true`, impostato automaticamente dal tar
 <OptionFilter when={{ protocol: 'http' }} description="FastAPI HTTP invocation details">
 ### Invocare il Server Locale
 
-Per invocare un Agent in esecuzione localmente tramite il target `<your-agent-name>-serve`, puoi inviare una semplice richiesta POST a `/invocations` sulla porta su cui è in esecuzione il tuo agente locale. Ad esempio, con `curl`:
+Avvia il tuo agente con il target `<your-agent-name>-dev`:
+
+<NxCommands commands={['agent-dev your-project']} />
+
+Quindi invia una richiesta POST a `/invocations` sulla porta su cui è in esecuzione il tuo agente locale. Sostituisci la porta assegnata al tuo agente — leggila da `metadata.ports` nel `project.json` del progetto, o dal flag `--port` nel comando del target `<your-agent-name>-dev`. Un primo agente HTTP in un workspace nuovo viene assegnato `8081`:
 
 ```bash
 curl -N -X POST http://localhost:8081/invocations \
@@ -577,6 +587,10 @@ curl -N -X POST http://localhost:8081/invocations \
 
 :::note[Flag di Streaming di Curl]
 L'argomento `-N` dato a `curl` disabilita il buffering del flusso di output, quindi puoi vedere la risposta in streaming in tempo reale.
+:::
+
+:::caution[Usa `-dev`, non `-serve`]
+Usa `<your-agent-name>-dev` per questo, non `<your-agent-name>-serve`. `-serve` esegue il percorso del codice distribuito, quindi necessita di `RUNTIME_CONFIG_APP_ID` impostato — vedi <Link path="guides/py-agent#-dev-vs--serve">`-dev` vs `-serve`</Link>. Senza di esso, lo streaming è già iniziato quando l'agente tenta di risolvere il suo storage di sessione, quindi la richiesta restituisce un `200` vuoto senza errore e il fallimento appare solo nel log del server.
 :::
 
 ### Invocare l'Agent Distribuito
