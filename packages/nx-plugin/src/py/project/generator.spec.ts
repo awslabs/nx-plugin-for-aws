@@ -12,7 +12,7 @@ import {
   updateNxJson,
 } from '@nx/devkit';
 import { readFileSync } from 'fs';
-import { convertAliases, getPromptsForSchema } from 'nx/src/utils/params';
+import { getPromptsForSchema } from 'nx/src/utils/params';
 import { join } from 'path';
 import { declareDependencies } from '../../utils/declared-dependencies.js';
 import { expectHasMetricTags } from '../../utils/metrics.spec.js';
@@ -401,16 +401,6 @@ describe('python project generator', () => {
         ).toBe(type);
       },
     );
-
-    it('should accept projectType as an alias for type', () => {
-      expect(
-        convertAliases(
-          { name: 'test-project', projectType: 'library' },
-          schema,
-          false,
-        ),
-      ).toEqual({ name: 'test-project', type: 'library' });
-    });
 
     it('should prompt for type when it is not supplied', () => {
       const prompt = getPromptsForSchema(
