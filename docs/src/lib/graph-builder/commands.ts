@@ -23,10 +23,43 @@ import type { Graph, GraphEdge, GraphNode } from './model';
  * one per project and component, and one per connection.
  */
 
+/**
+ * Option values pinned onto one node's emitted commands, over and above what the
+ * graph itself expresses.
+ *
+ * A page showing a graph beside prose that walks through the same generators
+ * needs both routes to reach one workspace, and some of what the prose passes
+ * has nowhere to live in the graph: the exact casing a generated construct's
+ * class name follows, an option belonging to a follow-up generator, or leaving
+ * `--name` off so the generator derives one itself.
+ */
+export interface NodeOverride {
+  /**
+   * The name passed to the node's own generator, where it differs from the label
+   * the graph shows. `null` leaves the name off the command, so the generator
+   * derives one.
+   */
+  readonly generatorName?: string | null;
+  /**
+   * The component name the generator records, for the connection commands
+   * referring to this node. Needed alongside `generatorName: null`, where the
+   * name is the generator's to choose.
+   */
+  readonly componentName?: string;
+  /** Option values for the node's own generator. */
+  readonly options?: Readonly<Record<string, string | boolean>>;
+  /** Option values for a follow-up generator, keyed by its generator id. */
+  readonly followUps?: Readonly<
+    Record<string, Readonly<Record<string, string | boolean>>>
+  >;
+}
+
 export interface EmitOptions {
   readonly packageManager: string;
   readonly workspace: string;
   readonly iac: 'cdk' | 'terraform';
+  /** Pinned option values, keyed by node name. */
+  readonly overrides?: Readonly<Record<string, NodeOverride>>;
 }
 
 /** A single emitted command, with the graph element it came from. */
@@ -65,18 +98,46 @@ const INFRA_GENERATORS = {
  * always explicit so the command reads unambiguously.
  */
 const shouldEmit = (
-  node: GraphNode,
+  options: Readonly<Record<string, string | boolean>>,
   type: NodeType,
   option: string,
 ): boolean => {
   if (option in type.variantOptions) return true;
-  if (!(option in node.options)) return false;
+  if (!(option in options)) return false;
   const property = type.properties.find((p) => p.name === option);
-  return node.options[option] !== property?.default;
+  return options[option] !== property?.default;
 };
 
 const flag = (option: string, value: string | boolean) =>
   `--${option}=${value}`;
+
+const NO_OVERRIDE: NodeOverride = {};
+
+/** The override pinned for a node, keyed by the name the graph gives it. */
+const overrideFor = (node: GraphNode, options: EmitOptions): NodeOverride =>
+  options.overrides?.[node.name] ?? NO_OVERRIDE;
+
+/** A node's option values with any pinned ones layered on top. */
+const nodeOptions = (
+  node: GraphNode,
+  override: NodeOverride,
+): Readonly<Record<string, string | boolean>> => ({
+  ...node.options,
+  ...override.options,
+});
+
+/**
+ * The name passed to a node's own generator. Overriding it lets a page pin the
+ * exact spelling the generated class names follow, and `null` leaves the name
+ * off so the generator derives one.
+ */
+const generatorName = (
+  node: GraphNode,
+  override: NodeOverride,
+): string | undefined =>
+  override.generatorName === null
+    ? undefined
+    : (override.generatorName ?? kebabCase(node.name));
 
 /**
  * The name a generator will give the project it creates, and by which later
@@ -130,20 +191,28 @@ interface NodeReference {
   readonly component?: string;
 }
 
-const nodeReferences = (graph: Graph): Map<string, NodeReference> => {
+const nodeReferences = (
+  graph: Graph,
+  options: EmitOptions,
+): Map<string, NodeReference> => {
   const references = new Map<string, NodeReference>();
   for (const node of graph.nodes) {
     const type = nodeType(node.type);
+    const override = overrideFor(node, options);
     if (type.kind === 'component' && type.host) {
+      const component = override.componentName ?? generatorName(node, override);
       references.set(node.id, {
         project: projectReference(node.hostName ?? '', type.host.snakeCaseName),
-        component: node.name,
+        ...(component ? { component } : {}),
       });
     } else {
       // Python project-level endpoint types are snake_cased too; today every
       // project-kind endpoint whose generator is a py# one behaves this way.
       references.set(node.id, {
-        project: projectReference(node.name, type.generator.startsWith('py#')),
+        project: projectReference(
+          generatorName(node, override) ?? node.name,
+          type.generator.startsWith('py#'),
+        ),
       });
     }
   }
@@ -199,16 +268,17 @@ const orderedEdges = (graph: Graph): GraphEdge[] => {
 const followUpCommands = (
   node: GraphNode,
   type: NodeType,
-  projectReferenceOverride?: string,
+  project: string,
+  override: NodeOverride,
 ): EmittedCommand[] => {
   const followUps = ENDPOINT_FOLLOW_UPS[type.id] ?? [];
-  const project =
-    projectReferenceOverride ??
-    projectReference(node.name, type.generator.startsWith('py#'));
   return followUps.map((followUp) => ({
     command: generatorCommand(followUp.generator, [
       `--project=${project}`,
-      ...Object.entries(followUp.options ?? {}).map(([k, v]) => flag(k, v)),
+      ...Object.entries({
+        ...followUp.options,
+        ...override.followUps?.[followUp.generator],
+      }).map(([k, v]) => flag(k, v)),
     ]),
     comment: `Add ${followUp.adds} to ${node.name}`,
     nodeId: node.id,
@@ -266,43 +336,57 @@ export const emitCommands = (
     (n) => nodeType(n.type).kind === 'component',
   );
 
+  const references = nodeReferences(graph, options);
+
   for (const node of projectNodes) {
     const type = nodeType(node.type);
+    const override = overrideFor(node, options);
+    const nodeOpts = nodeOptions(node, override);
+    const name = generatorName(node, override);
     const args = [
-      kebabCase(node.name),
+      ...(name ? [name] : []),
       ...Object.entries(type.variantOptions).map(([k, v]) => flag(k, v)),
       ...type.properties
-        .filter((p) => shouldEmit(node, type, p.name))
-        .map((p) => flag(p.name, node.options[p.name])),
+        .filter((p) => shouldEmit(nodeOpts, type, p.name))
+        .map((p) => flag(p.name, nodeOpts[p.name])),
     ];
     commands.push({
       command: generatorCommand(type.generator, args),
       comment: `Create ${node.name} (${type.label})`,
       nodeId: node.id,
     });
-    commands.push(...followUpCommands(node, type));
+    commands.push(
+      ...followUpCommands(
+        node,
+        type,
+        references.get(node.id)!.project,
+        override,
+      ),
+    );
   }
 
   for (const node of componentNodes) {
     const type = nodeType(node.type);
-    const reference = nodeReferences(graph).get(node.id)!;
+    const override = overrideFor(node, options);
+    const nodeOpts = nodeOptions(node, override);
+    const reference = references.get(node.id)!;
+    const name = generatorName(node, override);
     const args = [
       `--project=${reference.project}`,
-      `--name=${node.name}`,
+      ...(name ? [flag('name', name)] : []),
       ...Object.entries(type.variantOptions).map(([k, v]) => flag(k, v)),
       ...type.properties
-        .filter((p) => shouldEmit(node, type, p.name))
-        .map((p) => flag(p.name, node.options[p.name])),
+        .filter((p) => shouldEmit(nodeOpts, type, p.name))
+        .map((p) => flag(p.name, nodeOpts[p.name])),
     ];
     commands.push({
       command: generatorCommand(type.generator, args),
       comment: `Add ${node.name} (${type.label}) to ${reference.project}`,
       nodeId: node.id,
     });
-    commands.push(...followUpCommands(node, type, reference.project));
+    commands.push(...followUpCommands(node, type, reference.project, override));
   }
 
-  const references = nodeReferences(graph);
   const emittedPairs = new Set<string>();
   for (const edge of orderedEdges(graph)) {
     const source = graph.nodes.find((n) => n.id === edge.source);
