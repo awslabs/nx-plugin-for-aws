@@ -50,16 +50,25 @@ import OptionFilter from '@components/option-filter.astro';
     - config.ts 애플리케이션 구성 (예: 로고)
     - components
       - AppLayout 전체 레이아웃 및 네비게이션 바를 위한 컴포넌트
+      - RuntimeConfig 시작 시 `runtime-config.json`을 로드하는 프로바이더
+      - app-sidebar.tsx 사이드바 네비게이션 (shadcn 전용)
+      - alert.tsx UX 프로바이더의 자체 컴포넌트를 래핑하는 Alert 컴포넌트
+      - spinner.tsx UX 프로바이더의 자체 컴포넌트를 래핑하는 Spinner 컴포넌트
     - hooks
+      - useRuntimeConfig.tsx [런타임 구성](#runtime-configuration)을 읽기 위한 훅
       - useAppLayout.tsx 중첩된 컴포넌트에서 AppLayout을 조정하기 위한 훅 (Cloudscape 전용)
     - routes
+      - \_\_root.tsx 모든 페이지를 AppLayout으로 래핑하는 루트 라우트
       - index.tsx TanStack Router를 위한 예제 라우트 (또는 페이지)
+    - routeTree.gen.ts TanStack Router에 의해 생성되고 유지되는 라우트 트리
     - styles.css 전역 스타일
   - vite.config.mts Vite 및 Vitest 구성
+  - project.json 프로젝트의 타겟을 정의하는 Nx 프로젝트
   - tsconfig.json 소스 및 테스트를 위한 기본 TypeScript 구성
   - tsconfig.app.json 소스 코드를 위한 TypeScript 구성
   - tsconfig.spec.json 테스트를 위한 TypeScript 구성
   - package.json 프로젝트의 패키지 이름과 의존성을 정의하는 프로젝트 매니페스트
+  - README.md 프로젝트 README
 </FileTree>
 
 :::note[TanStack Router 없이]
@@ -157,26 +166,32 @@ cloudfront -> s3
 
 페이지 간 탐색을 위해 `Link` 컴포넌트 또는 `useNavigate` 훅을 사용할 수 있습니다:
 
-```tsx {1, 4, 8-9, 14}
+```tsx {1, 8, 12-13, 18}
 import { Link, useNavigate } from '@tanstack/react-router';
 
-export const MyComponent = () => {
+export const MyComponent = ({
+  createProduct,
+}: {
+  createProduct: () => Promise<string>;
+}) => {
   const navigate = useNavigate();
 
   const submit = async () => {
-    const id = await ...
+    const id = await createProduct();
     // Use `navigate` for redirecting after some asynchronous action
-    navigate({ to: '/products/$id', { params: { id }} });
+    navigate({ to: '/products/$id', params: { id } });
   };
 
   return (
     <>
       <Link to="/products">Cancel</Link>
-      <Button onClick={submit}>Submit</Button>
+      <button onClick={submit}>Submit</button>
     </>
-  )
+  );
 };
 ```
+
+`to` 경로의 `$id`는 `params`를 통해 제공되는 [경로 매개변수](https://tanstack.com/router/latest/docs/framework/react/guide/path-params)입니다. 필요에 따라 일반 `<button>`을 UX 키트의 자체 버튼 컴포넌트로 교체하세요.
 
 자세한 내용은 [TanStack Router](https://tanstack.com/router/latest/docs/framework/react/overview) 문서를 확인하세요.
 
@@ -191,13 +206,13 @@ React 웹사이트 생성기는 선택한 `iac`에 따라 CDK 또는 Terraform �
 `packages/common/constructs`에 생성된 CDK 구성을 사용하여 웹사이트를 배포할 수 있습니다.
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {3, 9}
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { MyWebsite } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     new MyWebsite(this, 'MyWebsite');
   }
@@ -266,13 +281,13 @@ CloudFront 배포는 기본적으로 [AWS WAFv2](https://docs.aws.amazon.com/waf
 비활성화하려면 웹사이트를 생성할 때 `enableWaf`를 `false`로 설정하세요:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {10,15-18}
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { MyWebsite, suppressRules } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     const website = new MyWebsite(this, 'MyWebsite', {
       enableWaf: false,
@@ -318,14 +333,14 @@ module "my_website" {
 다른 암호화 구성을 사용하려면 웹사이트를 생성할 때 `encryption`, `encryptionKey` 및 `enableKeyRotation` 속성을 전달하세요:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {11}
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { BucketEncryption } from 'aws-cdk-lib/aws-s3';
 import { MyWebsite } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     new MyWebsite(this, 'MyWebsite', {
       encryption: BucketEncryption.S3_MANAGED,
@@ -401,12 +416,21 @@ module "my_website" {
 ```
 
 :::caution[Checkov: S3_MANAGED]
-`S3_MANAGED`를 선택하면 웹사이트 및 배포 로그 버킷에서 `checkov` 보안 스캔이 `CKV_AWS_145`로 실패합니다. 제공된 `test` 타겟은 `--config-file`을 허용하지 않지만, `checkov`는 작업 디렉토리에서 `.checkov.yaml`을 자동으로 발견하므로 `packages/infra/src`에 하나를 추가하세요:
+`S3_MANAGED`를 선택하면 프로젝트의 `checkov` 타겟이 웹사이트 및 배포 로그 버킷에서 `CKV_AWS_145`로 실패합니다. 타겟은 프로젝트 자체의 `checkov.yml`에 대해 `checkov`를 실행하므로 `skip-check` 목록에 검사를 추가하세요:
 
-```yaml title="packages/infra/src/.checkov.yaml"
+```yaml title="packages/infra/checkov.yml" {9}
+# Defines the checks to skip entirely. Remove if your requirements differ.
 skip-check:
-  - CKV_AWS_145
+  # Lambda function suppressions
+  - CKV_AWS_115 # Concurrent execution limit
+  - CKV_AWS_116 # Dead Letter Queue
+  - CKV_AWS_117 # Lambda functions in VPC
+  - CKV_AWS_173 # Encrypt Lambda environment variables
+  - CKV_AWS_272 # Code signing
+  - CKV_AWS_145 # S3 buckets are not KMS encrypted with encryption = "S3_MANAGED"
 ```
+
+`checkov` 타겟은 `--config-file`을 전달하며, 이는 `checkov` 자체의 `.checkov.yaml` 발견을 끕니다 — 다른 곳에 놓인 구성 파일은 무시됩니다.
 :::
 
 자동으로 생성되는 대신 자체 KMS 키를 사용하려면 `kms_key_arn`을 전달하고 `create_kms_key`를 `false`로 설정하세요:
@@ -439,11 +463,12 @@ module "my_website" {
 ```
 
 :::caution[Checkov: 키 로테이션 비활성화]
-자동으로 생성된 키에서 키 로테이션을 비활성화하면 `checkov` 보안 스캔이 `CKV_AWS_7`로 실패합니다. 동일한 `.checkov.yaml`에 추가하세요:
+자동으로 생성된 키에서 키 로테이션을 비활성화하면 프로젝트의 `checkov` 타겟이 `CKV_AWS_7`로 실패합니다. `packages/infra/checkov.yml`의 동일한 `skip-check` 목록에 추가하세요:
 
-```yaml title="packages/infra/src/.checkov.yaml"
+```yaml title="packages/infra/checkov.yml" {3}
 skip-check:
-  - CKV_AWS_7
+  # ...
+  - CKV_AWS_7 # Key rotation is disabled on the website's KMS key
 ```
 :::
 </Fragment>
@@ -458,14 +483,14 @@ skip-check:
 웹사이트를 생성할 때 `certificate` 및 `domainNames` 속성을 전달하세요:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {11-13}
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { Certificate } from 'aws-cdk-lib/aws-certificatemanager';
 import { MyWebsite } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     new MyWebsite(this, 'MyWebsite', {
       domainNames: ['www.example.com'],
@@ -508,13 +533,13 @@ module "my_website" {
 웹사이트 CDK 구성은 런타임 구성의 `connection` 네임스페이스를 S3 버킷의 루트에 `runtime-config.json` 파일로 배포합니다.
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { MyWebsite, MyApi } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     // Website can be declared at any point, since runtime config is resolved lazily
     new MyWebsite(this, 'MyWebsite');
@@ -569,7 +594,7 @@ module "my_website" {
 
 ### 웹사이트 코드
 
-웹사이트에서 `useRuntimeConfig` 훅을 사용하여 런타임 구성에서 값을 검색할 수 있습니다:
+웹사이트는 애플리케이션을 렌더링하기 전에 `runtime-config.json`을 로드하는 `RuntimeConfigProvider`(`src/components/RuntimeConfig`에 있음)와 이로부터 값을 읽기 위한 `useRuntimeConfig` 훅과 함께 생성됩니다:
 
 ```tsx {1,4}
 import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
@@ -581,6 +606,8 @@ const MyComponent = () => {
   const apiUrl = runtimeConfig.apis.MyApi;
 };
 ```
+
+프로바이더는 `runtime-config.json`이 제공되지 않을 때 빈 구성으로 폴백하므로 아직 배포된 것이 없는 웹사이트도 여전히 렌더링됩니다. `IRuntimeConfig`는 기본적으로 `any`로 타입이 지정됩니다 — 타입 안전 액세스를 원하는 경우 `src/components/RuntimeConfig/index.tsx`에서 좁히세요.
 
 :::note[런타임 구성]
 런타임 구성이 AWS AppConfig에 저장되는 방법과 서버 측 소비자(Lambda 함수, 에이전트)가 이를 검색하는 방법에 대한 자세한 내용은 <Link path="guides/runtime-config">런타임 구성</Link> 가이드를 참조하세요.

@@ -50,16 +50,25 @@ import OptionFilter from '@components/option-filter.astro';
     - config.ts アプリケーション設定（例：ロゴ）
     - components
       - AppLayout 全体のレイアウトとナビゲーションバーのコンポーネント
+      - RuntimeConfig 起動時に`runtime-config.json`をロードするプロバイダー
+      - app-sidebar.tsx サイドバーナビゲーション（shadcnのみ）
+      - alert.tsx UXプロバイダー独自のものをラップするAlertコンポーネント
+      - spinner.tsx UXプロバイダー独自のものをラップするSpinnerコンポーネント
     - hooks
+      - useRuntimeConfig.tsx [ランタイム設定](#runtime-configuration)を読み取るためのフック
       - useAppLayout.tsx ネストされたコンポーネントからAppLayoutを調整するためのフック（Cloudscapeのみ）
     - routes
+      - \_\_root.tsx ルートルート、すべてのページをAppLayoutでラップ
       - index.tsx TanStack Routerのルート（またはページ）の例
+    - routeTree.gen.ts TanStack Routerによって生成および管理されるルートツリー
     - styles.css グローバルスタイル
   - vite.config.mts ViteとVitestの設定
+  - project.json プロジェクトのターゲットを定義するNxプロジェクト
   - tsconfig.json ソースとテストのベースTypeScript設定
   - tsconfig.app.json ソースコード用のTypeScript設定
   - tsconfig.spec.json テスト用のTypeScript設定
   - package.json プロジェクトのパッケージ名と依存関係を定義するプロジェクトマニフェスト
+  - README.md プロジェクトREADME
 </FileTree>
 
 :::note[TanStack Routerを使用しない場合]
@@ -157,26 +166,32 @@ cloudfront -> s3
 
 ページ間を移動するには、`Link`コンポーネントまたは`useNavigate`フックを使用できます：
 
-```tsx {1, 4, 8-9, 14}
+```tsx {1, 8, 12-13, 18}
 import { Link, useNavigate } from '@tanstack/react-router';
 
-export const MyComponent = () => {
+export const MyComponent = ({
+  createProduct,
+}: {
+  createProduct: () => Promise<string>;
+}) => {
   const navigate = useNavigate();
 
   const submit = async () => {
-    const id = await ...
+    const id = await createProduct();
     // Use `navigate` for redirecting after some asynchronous action
-    navigate({ to: '/products/$id', { params: { id }} });
+    navigate({ to: '/products/$id', params: { id } });
   };
 
   return (
     <>
       <Link to="/products">Cancel</Link>
-      <Button onClick={submit}>Submit</Button>
+      <button onClick={submit}>Submit</button>
     </>
-  )
+  );
 };
 ```
+
+`to`パスの`$id`は[パスパラメーター](https://tanstack.com/router/latest/docs/framework/react/guide/path-params)で、`params`を通じて提供されます。必要に応じて、プレーンな`<button>`をUXキット独自のボタンコンポーネントに置き換えてください。
 
 詳細については、[TanStack Router](https://tanstack.com/router/latest/docs/framework/react/overview)ドキュメントを確認してください。
 
@@ -191,13 +206,13 @@ React websiteジェネレーターは、選択した`iac`に基づいてCDKま�
 `packages/common/constructs`に生成されたCDKコンストラクトを使用してウェブサイトをデプロイできます。
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {3, 9}
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { MyWebsite } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     new MyWebsite(this, 'MyWebsite');
   }
@@ -266,13 +281,13 @@ CloudFrontディストリビューションは、デフォルトで[AWS WAFv2](h
 オプトアウトするには、ウェブサイトを作成する際に`enableWaf`を`false`に設定します：
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {10,15-18}
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { MyWebsite, suppressRules } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     const website = new MyWebsite(this, 'MyWebsite', {
       enableWaf: false,
@@ -318,14 +333,14 @@ module "my_website" {
 異なる暗号化設定を使用する場合は、ウェブサイトを作成する際に`encryption`、`encryptionKey`、および`enableKeyRotation`プロパティを渡します：
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {11}
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { BucketEncryption } from 'aws-cdk-lib/aws-s3';
 import { MyWebsite } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     new MyWebsite(this, 'MyWebsite', {
       encryption: BucketEncryption.S3_MANAGED,
@@ -401,12 +416,21 @@ module "my_website" {
 ```
 
 :::caution[Checkov: S3_MANAGED]
-`S3_MANAGED`を選択すると、ウェブサイトおよびディストリビューションログバケットで`checkov`セキュリティスキャンが`CKV_AWS_145`で失敗します。提供された`test`ターゲットは`--config-file`を受け入れませんが、`checkov`は作業ディレクトリ内の`.checkov.yaml`を自動検出するため、`packages/infra/src`に配置してください：
+`S3_MANAGED`を選択すると、ウェブサイトおよびディストリビューションログバケットで、プロジェクトの`checkov`ターゲットが`CKV_AWS_145`で失敗します。ターゲットはプロジェクト独自の`checkov.yml`に対して`checkov`を実行するため、その`skip-check`リストにチェックを追加してください：
 
-```yaml title="packages/infra/src/.checkov.yaml"
+```yaml title="packages/infra/checkov.yml" {9}
+# Defines the checks to skip entirely. Remove if your requirements differ.
 skip-check:
-  - CKV_AWS_145
+  # Lambda function suppressions
+  - CKV_AWS_115 # Concurrent execution limit
+  - CKV_AWS_116 # Dead Letter Queue
+  - CKV_AWS_117 # Lambda functions in VPC
+  - CKV_AWS_173 # Encrypt Lambda environment variables
+  - CKV_AWS_272 # Code signing
+  - CKV_AWS_145 # S3 buckets are not KMS encrypted with encryption = "S3_MANAGED"
 ```
+
+`checkov`ターゲットは`--config-file`を渡すため、`checkov`独自の`.checkov.yaml`の検出がオフになります — 他の場所に配置された設定ファイルは無視されます。
 :::
 
 自動的に作成されるキーの代わりに独自のKMSキーを使用するには、`kms_key_arn`を渡し、`create_kms_key`を`false`に設定します：
@@ -439,11 +463,12 @@ module "my_website" {
 ```
 
 :::caution[Checkov: キーローテーション無効]
-自動的に作成されたキーでキーローテーションを無効にすると、`checkov`セキュリティスキャンが`CKV_AWS_7`で失敗します。同じ`.checkov.yaml`に追加してください：
+自動的に作成されたキーでキーローテーションを無効にすると、プロジェクトの`checkov`ターゲットが`CKV_AWS_7`で失敗します。`packages/infra/checkov.yml`の同じ`skip-check`リストに追加してください：
 
-```yaml title="packages/infra/src/.checkov.yaml"
+```yaml title="packages/infra/checkov.yml" {3}
 skip-check:
-  - CKV_AWS_7
+  # ...
+  - CKV_AWS_7 # Key rotation is disabled on the website's KMS key
 ```
 :::
 </Fragment>
@@ -458,14 +483,14 @@ skip-check:
 ウェブサイトを作成する際に`certificate`と`domainNames`プロパティを渡します：
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {11-13}
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { Certificate } from 'aws-cdk-lib/aws-certificatemanager';
 import { MyWebsite } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     new MyWebsite(this, 'MyWebsite', {
       domainNames: ['www.example.com'],
@@ -508,13 +533,13 @@ module "my_website" {
 ウェブサイトCDKコンストラクトは、ランタイム設定の`connection`名前空間を`runtime-config.json`ファイルとしてS3バケットのルートにデプロイします。
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { MyWebsite, MyApi } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     // Website can be declared at any point, since runtime config is resolved lazily
     new MyWebsite(this, 'MyWebsite');
@@ -569,7 +594,7 @@ module "my_website" {
 
 ### ウェブサイトコード
 
-ウェブサイトでは、`useRuntimeConfig`フックを使用してランタイム設定から値を取得できます：
+ウェブサイトは、アプリケーションをレンダリングする前に`runtime-config.json`をロードする`RuntimeConfigProvider`（`src/components/RuntimeConfig`内）と、そこから値を読み取るための`useRuntimeConfig`フックとともに生成されます：
 
 ```tsx {1,4}
 import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
@@ -581,6 +606,8 @@ const MyComponent = () => {
   const apiUrl = runtimeConfig.apis.MyApi;
 };
 ```
+
+プロバイダーは、`runtime-config.json`が提供されていない場合は空の設定にフォールバックするため、まだ何もデプロイされていないウェブサイトでもレンダリングされます。`IRuntimeConfig`はデフォルトで`any`型です — 型安全なアクセスが必要な場合は、`src/components/RuntimeConfig/index.tsx`で絞り込んでください。
 
 :::note[ランタイム設定]
 ランタイム設定がAWS AppConfigにどのように保存されるか、およびサーバーサイドコンシューマー（Lambda関数、エージェント）がそれを取得する方法の詳細については、<Link path="guides/runtime-config">ランタイム設定</Link>ガイドを参照してください。

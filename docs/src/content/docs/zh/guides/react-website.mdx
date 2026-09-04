@@ -50,16 +50,25 @@ import OptionFilter from '@components/option-filter.astro';
     - config.ts 应用程序配置（例如 logo）
     - components
       - AppLayout 整体布局和导航栏的组件
+      - RuntimeConfig 在启动时加载 `runtime-config.json` 的提供者
+      - app-sidebar.tsx 侧边栏导航（仅限 shadcn）
+      - alert.tsx 包装您的 UX 提供者自己的 Alert 组件
+      - spinner.tsx 包装您的 UX 提供者自己的 Spinner 组件
     - hooks
+      - useRuntimeConfig.tsx 用于读取[运行时配置](#runtime-configuration)的钩子
       - useAppLayout.tsx 用于从嵌套组件调整 AppLayout 的钩子（仅限 Cloudscape）
     - routes
+      - \_\_root.tsx 根路由，将每个页面包装在 AppLayout 中
       - index.tsx TanStack Router 的示例路由（或页面）
+    - routeTree.gen.ts 路由树，由 TanStack Router 生成和维护
     - styles.css 全局样式
   - vite.config.mts Vite 和 Vitest 配置
+  - project.json 定义项目目标的 Nx 项目
   - tsconfig.json 源代码和测试的基础 TypeScript 配置
   - tsconfig.app.json 源代码的 TypeScript 配置
   - tsconfig.spec.json 测试的 TypeScript 配置
   - package.json 定义项目包名称和依赖项的项目清单
+  - README.md 项目 README
 </FileTree>
 
 :::note[不使用 TanStack Router]
@@ -157,26 +166,32 @@ cloudfront -> s3
 
 您可以使用 `Link` 组件或 `useNavigate` 钩子在页面之间导航：
 
-```tsx {1, 4, 8-9, 14}
+```tsx {1, 8, 12-13, 18}
 import { Link, useNavigate } from '@tanstack/react-router';
 
-export const MyComponent = () => {
+export const MyComponent = ({
+  createProduct,
+}: {
+  createProduct: () => Promise<string>;
+}) => {
   const navigate = useNavigate();
 
   const submit = async () => {
-    const id = await ...
+    const id = await createProduct();
     // Use `navigate` for redirecting after some asynchronous action
-    navigate({ to: '/products/$id', { params: { id }} });
+    navigate({ to: '/products/$id', params: { id } });
   };
 
   return (
     <>
       <Link to="/products">Cancel</Link>
-      <Button onClick={submit}>Submit</Button>
+      <button onClick={submit}>Submit</button>
     </>
-  )
+  );
 };
 ```
+
+`to` 路径中的 `$id` 是一个[路径参数](https://tanstack.com/router/latest/docs/framework/react/guide/path-params)，通过 `params` 提供。根据需要将普通的 `<button>` 替换为您的 UX 套件自己的按钮组件。
 
 有关更多详细信息，请查看 [TanStack Router](https://tanstack.com/router/latest/docs/framework/react/overview) 文档。
 
@@ -191,13 +206,13 @@ React 网站生成器根据您选择的 `iac` 创建 CDK 或 Terraform 基础设
 您可以使用在 `packages/common/constructs` 中为您生成的 CDK 构造来部署您的网站。
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {3, 9}
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { MyWebsite } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     new MyWebsite(this, 'MyWebsite');
   }
@@ -266,13 +281,13 @@ CloudFront 分配应用响应标头策略，在所有响应上设置 `Strict-Tra
 要选择退出，在创建网站时将 `enableWaf` 设置为 `false`：
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {10,15-18}
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { MyWebsite, suppressRules } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     const website = new MyWebsite(this, 'MyWebsite', {
       enableWaf: false,
@@ -318,14 +333,14 @@ module "my_website" {
 如果您想使用不同的加密配置，请在创建网站时传递 `encryption`、`encryptionKey` 和 `enableKeyRotation` 属性：
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {11}
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { BucketEncryption } from 'aws-cdk-lib/aws-s3';
 import { MyWebsite } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     new MyWebsite(this, 'MyWebsite', {
       encryption: BucketEncryption.S3_MANAGED,
@@ -401,12 +416,21 @@ module "my_website" {
 ```
 
 :::caution[Checkov: S3_MANAGED]
-选择 `S3_MANAGED` 会导致 `checkov` 安全扫描在网站和分配日志存储桶上失败，错误为 `CKV_AWS_145`。提供的 `test` 目标不接受 `--config-file`，但 `checkov` 会自动发现其工作目录中的 `.checkov.yaml`，因此在 `packages/infra/src` 中放置一个：
+选择 `S3_MANAGED` 会导致您项目的 `checkov` 目标在网站和分配日志存储桶上失败，错误为 `CKV_AWS_145`。该目标针对您项目自己的 `checkov.yml` 运行 `checkov`，因此将检查添加到其 `skip-check` 列表中：
 
-```yaml title="packages/infra/src/.checkov.yaml"
+```yaml title="packages/infra/checkov.yml" {9}
+# Defines the checks to skip entirely. Remove if your requirements differ.
 skip-check:
-  - CKV_AWS_145
+  # Lambda function suppressions
+  - CKV_AWS_115 # Concurrent execution limit
+  - CKV_AWS_116 # Dead Letter Queue
+  - CKV_AWS_117 # Lambda functions in VPC
+  - CKV_AWS_173 # Encrypt Lambda environment variables
+  - CKV_AWS_272 # Code signing
+  - CKV_AWS_145 # S3 buckets are not KMS encrypted with encryption = "S3_MANAGED"
 ```
+
+`checkov` 目标传递 `--config-file`，这会关闭 `checkov` 自己对 `.checkov.yaml` 的发现 — 在其他任何地方放置的配置文件都会被忽略。
 :::
 
 要使用您自己的 KMS 密钥而不是自动创建的密钥，请传递 `kms_key_arn` 并将 `create_kms_key` 设置为 `false`：
@@ -439,11 +463,12 @@ module "my_website" {
 ```
 
 :::caution[Checkov: 禁用密钥轮换]
-在自动创建的密钥上禁用密钥轮换会导致 `checkov` 安全扫描失败，错误为 `CKV_AWS_7`。将其添加到同一个 `.checkov.yaml`：
+在自动创建的密钥上禁用密钥轮换会导致您项目的 `checkov` 目标失败，错误为 `CKV_AWS_7`。将其添加到 `packages/infra/checkov.yml` 中的同一个 `skip-check` 列表中：
 
-```yaml title="packages/infra/src/.checkov.yaml"
+```yaml title="packages/infra/checkov.yml" {3}
 skip-check:
-  - CKV_AWS_7
+  # ...
+  - CKV_AWS_7 # Key rotation is disabled on the website's KMS key
 ```
 :::
 </Fragment>
@@ -458,14 +483,14 @@ skip-check:
 在创建网站时传递 `certificate` 和 `domainNames` 属性：
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {11-13}
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { Certificate } from 'aws-cdk-lib/aws-certificatemanager';
 import { MyWebsite } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     new MyWebsite(this, 'MyWebsite', {
       domainNames: ['www.example.com'],
@@ -508,13 +533,13 @@ module "my_website" {
 您的网站 CDK 构造将把运行时配置的 `connection` 命名空间作为 `runtime-config.json` 文件部署到 S3 存储桶的根目录。
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { MyWebsite, MyApi } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     // Website can be declared at any point, since runtime config is resolved lazily
     new MyWebsite(this, 'MyWebsite');
@@ -569,7 +594,7 @@ module "my_website" {
 
 ### 网站代码
 
-在您的网站中，您可以使用 `useRuntimeConfig` 钩子从运行时配置中检索值：
+您的网站生成时带有一个 `RuntimeConfigProvider`（在 `src/components/RuntimeConfig` 中），它在渲染应用程序之前加载 `runtime-config.json`，以及一个用于从中读取值的 `useRuntimeConfig` 钩子：
 
 ```tsx {1,4}
 import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
@@ -581,6 +606,8 @@ const MyComponent = () => {
   const apiUrl = runtimeConfig.apis.MyApi;
 };
 ```
+
+当没有提供 `runtime-config.json` 时，提供者会回退到空配置，因此尚未部署任何内容的网站仍然可以渲染。`IRuntimeConfig` 默认类型为 `any` — 如果您想要类型安全的访问，请在 `src/components/RuntimeConfig/index.tsx` 中缩小它。
 
 :::note[运行时配置]
 有关运行时配置如何存储在 AWS AppConfig 中以及服务器端消费者（Lambda 函数、代理）如何检索它的详细信息，请参阅<Link path="guides/runtime-config">运行时配置</Link>指南。

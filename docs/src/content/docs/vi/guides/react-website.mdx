@@ -50,16 +50,25 @@ Generator sẽ tạo cấu trúc dự án sau trong thư mục `<directory>/<nam
     - config.ts Application configuration (eg. logo)
     - components
       - AppLayout Components for the overall layout and navigation bar
+      - RuntimeConfig Provider which loads `runtime-config.json` at startup
+      - app-sidebar.tsx Sidebar navigation (shadcn only)
+      - alert.tsx Alert component wrapping your UX provider's own
+      - spinner.tsx Spinner component wrapping your UX provider's own
     - hooks
+      - useRuntimeConfig.tsx Hook for reading the [Runtime Configuration](#runtime-configuration)
       - useAppLayout.tsx Hook for adjusting the AppLayout from nested components (Cloudscape only)
     - routes
+      - \_\_root.tsx Root route, wrapping every page in the AppLayout
       - index.tsx Example route (or page) for TanStack Router
+    - routeTree.gen.ts Route tree, generated and maintained by TanStack Router
     - styles.css Global styles
   - vite.config.mts Vite and Vitest configuration
+  - project.json Nx project defining the project's targets
   - tsconfig.json Base TypeScript configuration for source and tests
   - tsconfig.app.json TypeScript configuration for source code
   - tsconfig.spec.json TypeScript configuration for tests
   - package.json Project manifest defining the project's package name and dependencies
+  - README.md Project README
 </FileTree>
 
 :::note[Không có TanStack Router]
@@ -157,26 +166,32 @@ Website của bạn đi kèm với [TanStack Router](https://tanstack.com/router
 
 Bạn có thể sử dụng component `Link` hoặc hook `useNavigate` để điều hướng giữa các trang:
 
-```tsx {1, 4, 8-9, 14}
+```tsx {1, 8, 12-13, 18}
 import { Link, useNavigate } from '@tanstack/react-router';
 
-export const MyComponent = () => {
+export const MyComponent = ({
+  createProduct,
+}: {
+  createProduct: () => Promise<string>;
+}) => {
   const navigate = useNavigate();
 
   const submit = async () => {
-    const id = await ...
+    const id = await createProduct();
     // Use `navigate` for redirecting after some asynchronous action
-    navigate({ to: '/products/$id', { params: { id }} });
+    navigate({ to: '/products/$id', params: { id } });
   };
 
   return (
     <>
       <Link to="/products">Cancel</Link>
-      <Button onClick={submit}>Submit</Button>
+      <button onClick={submit}>Submit</button>
     </>
-  )
+  );
 };
 ```
+
+`$id` trong đường dẫn `to` là một [path parameter](https://tanstack.com/router/latest/docs/framework/react/guide/path-params), được cung cấp thông qua `params`. Thay thế `<button>` thông thường bằng button component của bộ UX của bạn nếu cần.
 
 Để biết thêm chi tiết, hãy xem tài liệu [TanStack Router](https://tanstack.com/router/latest/docs/framework/react/overview).
 
@@ -191,13 +206,13 @@ Generator React website tạo infrastructure as code CDK hoặc Terraform dựa 
 Bạn có thể sử dụng CDK construct được tạo cho bạn trong `packages/common/constructs` để triển khai website của mình.
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {3, 9}
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { MyWebsite } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     new MyWebsite(this, 'MyWebsite');
   }
@@ -266,13 +281,13 @@ CloudFront distribution được bảo vệ bởi một [AWS WAFv2](https://docs
 Để từ chối, đặt `enableWaf` thành `false` khi bạn tạo website của mình:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {10,15-18}
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { MyWebsite, suppressRules } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     const website = new MyWebsite(this, 'MyWebsite', {
       enableWaf: false,
@@ -318,14 +333,14 @@ Website bucket, CloudFront distribution log bucket, và CloudWatch Logs group nh
 Nếu bạn muốn sử dụng cấu hình mã hóa khác, hãy truyền các props `encryption`, `encryptionKey` và `enableKeyRotation` khi bạn tạo website của mình:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {11}
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { BucketEncryption } from 'aws-cdk-lib/aws-s3';
 import { MyWebsite } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     new MyWebsite(this, 'MyWebsite', {
       encryption: BucketEncryption.S3_MANAGED,
@@ -401,12 +416,21 @@ module "my_website" {
 ```
 
 :::caution[Checkov: S3_MANAGED]
-Chọn `S3_MANAGED` làm thất bại quét bảo mật `checkov` với `CKV_AWS_145` trên website và distribution log buckets. Target `test` được cung cấp không chấp nhận `--config-file`, nhưng `checkov` tự động phát hiện một `.checkov.yaml` trong thư mục làm việc của nó, vì vậy hãy đặt một cái trong `packages/infra/src`:
+Chọn `S3_MANAGED` làm thất bại target `checkov` của dự án của bạn với `CKV_AWS_145` trên website và distribution log buckets. Target chạy `checkov` đối với `checkov.yml` của chính dự án của bạn, vì vậy hãy thêm check vào danh sách `skip-check` của nó:
 
-```yaml title="packages/infra/src/.checkov.yaml"
+```yaml title="packages/infra/checkov.yml" {9}
+# Defines the checks to skip entirely. Remove if your requirements differ.
 skip-check:
-  - CKV_AWS_145
+  # Lambda function suppressions
+  - CKV_AWS_115 # Concurrent execution limit
+  - CKV_AWS_116 # Dead Letter Queue
+  - CKV_AWS_117 # Lambda functions in VPC
+  - CKV_AWS_173 # Encrypt Lambda environment variables
+  - CKV_AWS_272 # Code signing
+  - CKV_AWS_145 # S3 buckets are not KMS encrypted with encryption = "S3_MANAGED"
 ```
+
+Target `checkov` truyền `--config-file`, điều này tắt khả năng tự động phát hiện `.checkov.yaml` của chính `checkov` — một file cấu hình được đặt ở bất kỳ đâu khác sẽ bị bỏ qua.
 :::
 
 Để sử dụng khóa KMS của riêng bạn thay vì khóa được tạo tự động, hãy truyền `kms_key_arn` và đặt `create_kms_key` thành `false`:
@@ -439,11 +463,12 @@ module "my_website" {
 ```
 
 :::caution[Checkov: xoay khóa bị vô hiệu hóa]
-Vô hiệu hóa xoay khóa trên khóa được tạo tự động làm thất bại quét bảo mật `checkov` với `CKV_AWS_7`. Thêm nó vào cùng một `.checkov.yaml`:
+Vô hiệu hóa xoay khóa trên khóa được tạo tự động làm thất bại target `checkov` của dự án của bạn với `CKV_AWS_7`. Thêm nó vào cùng danh sách `skip-check` trong `packages/infra/checkov.yml`:
 
-```yaml title="packages/infra/src/.checkov.yaml"
+```yaml title="packages/infra/checkov.yml" {3}
 skip-check:
-  - CKV_AWS_7
+  # ...
+  - CKV_AWS_7 # Key rotation is disabled on the website's KMS key
 ```
 :::
 </Fragment>
@@ -458,14 +483,14 @@ Theo mặc định, distribution sử dụng tên miền CloudFront mặc địn
 Truyền các props `certificate` và `domainNames` khi bạn tạo website của mình:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {11-13}
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { Certificate } from 'aws-cdk-lib/aws-certificatemanager';
 import { MyWebsite } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     new MyWebsite(this, 'MyWebsite', {
       domainNames: ['www.example.com'],
@@ -508,13 +533,13 @@ CDK construct `RuntimeConfig` có thể được sử dụng để thêm và tru
 CDK construct website của bạn sẽ triển khai namespace `connection` của runtime configuration dưới dạng file `runtime-config.json` vào thư mục gốc của S3 bucket của bạn.
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { MyWebsite, MyApi } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     // Website can be declared at any point, since runtime config is resolved lazily
     new MyWebsite(this, 'MyWebsite');
@@ -569,7 +594,7 @@ Bạn phải đảm bảo rằng bạn khai báo website module của mình _sau
 
 ### Website Code
 
-Trong website của bạn, bạn có thể sử dụng hook `useRuntimeConfig` để truy xuất các giá trị từ runtime configuration:
+Website của bạn được tạo với một `RuntimeConfigProvider` (trong `src/components/RuntimeConfig`) tải `runtime-config.json` trước khi render ứng dụng của bạn, và một hook `useRuntimeConfig` để đọc các giá trị từ nó:
 
 ```tsx {1,4}
 import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
@@ -581,6 +606,8 @@ const MyComponent = () => {
   const apiUrl = runtimeConfig.apis.MyApi;
 };
 ```
+
+Provider sẽ fallback về một cấu hình rỗng khi không có `runtime-config.json` được phục vụ, vì vậy một website chưa triển khai gì vẫn render được. `IRuntimeConfig` được gõ là `any` theo mặc định — thu hẹp nó trong `src/components/RuntimeConfig/index.tsx` nếu bạn muốn truy cập an toàn kiểu.
 
 :::note[Runtime Configuration]
 Để biết chi tiết về cách runtime configuration được lưu trữ trong AWS AppConfig và cách các consumers phía server (Lambda functions, agents) có thể truy xuất nó, hãy xem hướng dẫn <Link path="guides/runtime-config">Runtime Configuration</Link>.

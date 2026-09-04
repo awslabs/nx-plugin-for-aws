@@ -106,9 +106,9 @@ browser -> backend: IAM/Cognito
 
 #### Protección contra amenazas
 
-El User Pool se crea en el [plan de características Plus](https://docs.aws.amazon.com/cognito/latest/developerguide/feature-plans-features-plus.html) de Cognito con [protección contra amenazas](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pool-settings-threat-protection.html) configurada en modo `AUDIT` para autenticación estándar. En modo auditoría, Cognito asigna un nivel de riesgo a cada inicio de sesión y registra la evaluación en CloudWatch sin bloquear a los usuarios.
+El User Pool se crea en el [plan de características Plus](https://docs.aws.amazon.com/cognito/latest/developerguide/feature-plans-features-plus.html) de Cognito con [protección contra amenazas](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pool-settings-threat-protection.html) en aplicación de **solo auditoría** para autenticación estándar. En solo auditoría, Cognito asigna un nivel de riesgo a cada inicio de sesión y registra la evaluación sin bloquear a los usuarios.
 
-Una vez que hayas observado las evaluaciones de riesgo para tus usuarios, puedes cambiar a la aplicación de función completa para responder automáticamente a actividades riesgosas (por ejemplo, requerir MFA o bloquear el inicio de sesión):
+Una vez que hayas observado las evaluaciones de riesgo para tus usuarios, puedes cambiar a la aplicación de función completa para responder automáticamente a actividades riesgosas (por ejemplo, requerir MFA o bloquear el inicio de sesión), luego configurar la respuesta por nivel de riesgo a través de [autenticación adaptativa](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pool-settings-adaptive-authentication.html):
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -118,6 +118,8 @@ Establece `standardThreatProtectionMode` a `StandardThreatProtectionMode.FULL_FU
 Establece `advanced_security_mode` a `ENFORCED` en el bloque `user_pool_add_ons` en `packages/common/terraform/src/core/user-identity/identity/identity.tf`.
 </Fragment>
 </Infrastructure>
+
+A diferencia de las opciones `enableWaf` y MFA a continuación, el modo de aplicación no se expone como una propiedad o variable, por lo que esta edición se aplica a cada `UserIdentity` en tu workspace.
 
 #### Autenticación multifactor (MFA)
 
@@ -187,13 +189,13 @@ Esta regla marca las direcciones de loopback en argumentos de consulta como inte
 Necesitarás agregar la infraestructura de identidad de usuario a tu stack, declarándola _antes_ del sitio web:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {3,9}
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { MyWebsite, UserIdentity } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     new UserIdentity(this, 'Identity');
 
@@ -256,13 +258,13 @@ Para otorgar a los usuarios autenticados acceso para realizar ciertas acciones, 
 <Infrastructure>
 <Fragment slot="cdk">
 ```ts title="packages/infra/src/stacks/application-stack.ts" {12}
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { MyWebsite, UserIdentity, MyApi } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     const identity = new UserIdentity(this, 'Identity');
     const api = new MyApi(this, 'MyApi', {
