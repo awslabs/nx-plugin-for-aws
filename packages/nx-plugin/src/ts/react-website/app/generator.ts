@@ -62,7 +62,10 @@ import {
   addWebsiteInfra,
   WEBSITE_CONSTRUCTS_PY_DEPENDENCIES,
 } from '../../../utils/website-constructs/website-constructs.js';
-import { configureTsProject } from '../../lib/ts-project-utils.js';
+import {
+  configureTsProject,
+  TS_PROJECT_DEPENDENCIES,
+} from '../../lib/ts-project-utils.js';
 import { VITEST_DEPENDENCIES } from '../../lib/vitest.js';
 // typescript factory imports removed — now using GritQL for vite config transforms
 import type {
@@ -141,6 +144,7 @@ export const DEPENDENCIES = declareDependencies<TsReactWebsiteMetadata>()({
     },
     // Declared for its pinned version, which goes into npm's `overrides` below.
     { name: 'express', versionOnly: true },
+    ...ownedElsewhere(TS_PROJECT_DEPENDENCIES),
     ...ownedElsewhere(SHADCN_DEPENDENCIES),
     ...ownedElsewhere(VITEST_DEPENDENCIES),
     ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),

@@ -10,7 +10,10 @@ import {
   updateJson,
 } from '@nx/devkit';
 import tsProjectGenerator from '../ts/lib/generator.js';
-import { configureTsProject } from '../ts/lib/ts-project-utils.js';
+import {
+  configureTsProject,
+  TS_PROJECT_DEPENDENCIES,
+} from '../ts/lib/ts-project-utils.js';
 import { VITEST_DEPENDENCIES } from '../ts/lib/vitest.js';
 import {
   type DependencyDeclaration,
@@ -43,7 +46,8 @@ export const SHADCN_DEPENDENCIES = [
   { name: 'tw-animate-css' },
   { name: 'radix-ui' },
   ...VITEST_DEPENDENCIES,
-] as const satisfies readonly { name: ITsDepVersion }[];
+  ...TS_PROJECT_DEPENDENCIES,
+] as const satisfies readonly { name: ITsDepVersion; dev?: boolean }[];
 
 /** The shared shadcn package's fully-qualified npm name for this workspace. */
 export const getSharedShadcnFullyQualifiedName = (tree: Tree): string =>

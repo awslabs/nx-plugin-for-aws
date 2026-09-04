@@ -79,7 +79,7 @@ describe('addDependenciesToPackageJson', () => {
     expect(packageJson.catalog.zod).toBe('4.4.3');
   });
 
-  it('should keep direct ranges on bun for packages Nx generators introspect', () => {
+  it('should catalogue the packages Nx generators introspect on bun', () => {
     mockPackageManager(tree, 'bun', '1.3.0');
 
     addDependenciesToPackageJson(
@@ -89,17 +89,17 @@ describe('addDependenciesToPackageJson', () => {
     );
 
     const packageJson = readJson(tree, 'package.json');
-    // Nx 23 devkit has no bun catalog manager, so `catalog:` refs for
-    // packages generators read without a null guard (vite, react) crash them.
-    expect(packageJson.dependencies.react).toBe('19.2.7');
-    expect(packageJson.devDependencies.vite).toBe('8.1.5');
-    // Packages generators don't introspect are still catalogued.
+    expect(packageJson.dependencies.react).toBe('catalog:');
+    expect(packageJson.devDependencies.vite).toBe('catalog:');
     expect(packageJson.devDependencies.vitest).toBe('catalog:');
-    expect(packageJson.catalog.vitest).toBe('4.1.10');
-    expect(packageJson.catalog.vite).toBeUndefined();
+    expect(packageJson.catalog).toEqual({
+      react: '19.2.7',
+      vite: '8.1.5',
+      vitest: '4.1.10',
+    });
   });
 
-  it('should catalogue introspected packages on pnpm, where devkit resolves catalog refs', () => {
+  it('should catalogue introspected packages on pnpm', () => {
     mockPackageManager(tree, 'pnpm', '10.0.0');
 
     addDependenciesToPackageJson(tree, {}, { vite: '8.1.5' });

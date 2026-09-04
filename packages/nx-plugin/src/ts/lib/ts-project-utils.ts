@@ -5,6 +5,7 @@
 import { joinPathFragments, logger, type Tree, updateJson } from '@nx/devkit';
 import { join, relative } from 'path';
 import { addLicenseCheckToLintTarget } from '../../license/config.js';
+import { addTsDependencies } from '../../utils/add-dependencies.js';
 import { AWS_NX_PLUGIN_CONFIG_FILE_NAME } from '../../utils/config/utils.js';
 import {
   type DependencyDeclaration,
@@ -13,6 +14,7 @@ import {
 } from '../../utils/declared-dependencies.js';
 import { isEsmWorkspace } from '../../utils/module-format.js';
 import { ensureProjectPackageJson } from '../../utils/project-package-json.js';
+import type { ITsDepVersion } from '../../utils/versions.js';
 import { configureBiomeLint } from './biome.js';
 import type { ConfigureProjectOptions } from './types.js';
 import { configureVitest, type VITEST_DEPENDENCIES } from './vitest.js';
@@ -20,6 +22,23 @@ import { configureVitest, type VITEST_DEPENDENCIES } from './vitest.js';
 interface TsConfigReference {
   path: string;
 }
+
+/**
+ * Dependencies a caller must declare to configure a TypeScript project.
+ *
+ * `@nx/js` writes `types: ['node']` into every project's `tsconfig.lib.json`, so
+ * the types must be declared for `tsc` to resolve them. Declared twice: on the
+ * project whose tsconfig names them, and at the root, which `@nx/js` seeded until
+ * Nx 23.2 stopped.
+ */
+export const TS_PROJECT_DEPENDENCIES = [
+  { name: '@types/node', dev: true },
+  { name: '@types/node', dev: true, root: true },
+] as const satisfies readonly {
+  name: ITsDepVersion;
+  dev?: boolean;
+  root?: boolean;
+}[];
 
 /**
  * Merges new TypeScript project references into existing ones, deduplicating by
@@ -47,7 +66,9 @@ export const mergeTsReferences = (
 export const configureTsProject = async <const D extends DependencyDeclaration>(
   tree: Tree,
   options: ConfigureProjectOptions,
-  declaration: D & MustDeclare<typeof VITEST_DEPENDENCIES, D>,
+  declaration: D &
+    MustDeclare<typeof VITEST_DEPENDENCIES, D> &
+    MustDeclare<typeof TS_PROJECT_DEPENDENCIES, D>,
 ) => {
   // Point users at init when the workspace hasn't been configured, since
   // lint/format targets and workspace dependency sync depend on it.
@@ -128,6 +149,14 @@ export const configureTsProject = async <const D extends DependencyDeclaration>(
     fullyQualifiedName: options.fullyQualifiedName,
     esm,
   });
+
+  // From this helper's constant, not the caller's declaration, which marks these
+  // `ownedElsewhere` because the install happens here.
+  addTsDependencies(
+    tree,
+    { ts: [...TS_PROJECT_DEPENDENCIES], py: [] },
+    { projectRoot: options.dir },
+  );
 
   await configureBiomeLint(tree, options);
   await configureVitest(

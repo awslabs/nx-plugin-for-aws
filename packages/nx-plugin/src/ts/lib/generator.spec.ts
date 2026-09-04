@@ -4,14 +4,22 @@
  */
 import { readJson, readNxJson, type Tree, writeJson } from '@nx/devkit';
 import uniqBy from 'lodash.uniqby';
-import { declareDependencies } from '../../utils/declared-dependencies.js';
+import {
+  declaredNames,
+  declareDependencies,
+} from '../../utils/declared-dependencies.js';
 import { expectHasMetricTags } from '../../utils/metrics.spec.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
 } from '../../utils/shared-constructs.js';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
-import { TS_LIB_GENERATOR_INFO, tsProjectGenerator } from './generator.js';
+import { ownedDependencies } from '../../utils/version-upgrade-migration/owned-dependencies.js';
+import {
+  DEPENDENCIES,
+  TS_LIB_GENERATOR_INFO,
+  tsProjectGenerator,
+} from './generator.js';
 
 const sharedConstructsDeclaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
@@ -326,5 +334,43 @@ describe('ts lib generator', () => {
     expect(
       readJson(tree, 'second-lib/tsconfig.lib.json').compilerOptions?.module,
     ).toBe('node16');
+  });
+
+  // The generated tsconfig and vitest config name packages that must be
+  // installed for `tsc` and the test target to run. `@nx/js` and `@nx/vitest`
+  // write those references but only install them when they manage
+  // package.json, which these generators opt out of.
+  it('should declare the packages the generated configs reference', async () => {
+    await tsProjectGenerator(tree, {
+      name: 'test-lib',
+      preferInstallDependencies: false,
+    });
+
+    // `types: ['node']` in tsconfig.lib.json resolves @types/node.
+    expect(
+      readJson(tree, 'test-lib/tsconfig.lib.json').compilerOptions?.types,
+    ).toContain('node');
+    expect(
+      readJson(tree, 'test-lib/package.json').devDependencies?.['@types/node'],
+    ).toBeDefined();
+
+    // `environment: 'jsdom'` in the vitest config resolves jsdom.
+    expect(tree.read('test-lib/vitest.config.mts', 'utf-8')).toContain('jsdom');
+    expect(readJson(tree, 'package.json').devDependencies?.jsdom).toBeDefined();
+  });
+
+  // Ownership is read from a generator's exported `DEPENDENCIES`, so a package
+  // added by a helper but missing from that declaration installs correctly and
+  // is then never upgraded again.
+  it('should own every dependency it adds, so the version sync covers them', async () => {
+    await tsProjectGenerator(tree, {
+      name: 'test-lib',
+      preferInstallDependencies: false,
+    });
+
+    const owned = await ownedDependencies(tree);
+    for (const name of declaredNames(DEPENDENCIES.ts)) {
+      expect(owned.ts, `${name} is added but not owned`).toContain(name);
+    }
   });
 });
