@@ -50,12 +50,10 @@ Generator sẽ tạo cấu trúc dự án sau trong thư mục `<directory>/<nam
     - config.ts Application configuration (eg. logo)
     - components
       - AppLayout Components for the overall layout and navigation bar
-      - RuntimeConfig Provider which loads `runtime-config.json` at startup
       - app-sidebar.tsx Sidebar navigation (shadcn only)
       - alert.tsx Alert component wrapping your UX provider's own
       - spinner.tsx Spinner component wrapping your UX provider's own
     - hooks
-      - useRuntimeConfig.tsx Hook for reading the [Runtime Configuration](#runtime-configuration)
       - useAppLayout.tsx Hook for adjusting the AppLayout from nested components (Cloudscape only)
     - routes
       - \_\_root.tsx Root route, wrapping every page in the AppLayout
@@ -418,19 +416,11 @@ module "my_website" {
 :::caution[Checkov: S3_MANAGED]
 Chọn `S3_MANAGED` làm thất bại target `checkov` của dự án của bạn với `CKV_AWS_145` trên website và distribution log buckets. Target chạy `checkov` đối với `checkov.yml` của chính dự án của bạn, vì vậy hãy thêm check vào danh sách `skip-check` của nó:
 
-```yaml title="packages/infra/checkov.yml" {9}
-# Defines the checks to skip entirely. Remove if your requirements differ.
+```yaml title="packages/infra/checkov.yml" {3}
 skip-check:
-  # Lambda function suppressions
-  - CKV_AWS_115 # Concurrent execution limit
-  - CKV_AWS_116 # Dead Letter Queue
-  - CKV_AWS_117 # Lambda functions in VPC
-  - CKV_AWS_173 # Encrypt Lambda environment variables
-  - CKV_AWS_272 # Code signing
-  - CKV_AWS_145 # S3 buckets are not KMS encrypted with encryption = "S3_MANAGED"
+  # ...
+  - CKV_AWS_145 # S3 buckets are not KMS encrypted when encryption is S3_MANAGED
 ```
-
-Target `checkov` truyền `--config-file`, điều này tắt khả năng tự động phát hiện `.checkov.yaml` của chính `checkov` — một file cấu hình được đặt ở bất kỳ đâu khác sẽ bị bỏ qua.
 :::
 
 Để sử dụng khóa KMS của riêng bạn thay vì khóa được tạo tự động, hãy truyền `kms_key_arn` và đặt `create_kms_key` thành `false`:
@@ -594,7 +584,7 @@ Bạn phải đảm bảo rằng bạn khai báo website module của mình _sau
 
 ### Website Code
 
-Website của bạn được tạo với một `RuntimeConfigProvider` (trong `src/components/RuntimeConfig`) tải `runtime-config.json` trước khi render ứng dụng của bạn, và một hook `useRuntimeConfig` để đọc các giá trị từ nó:
+Trong website của bạn, bạn có thể sử dụng hook `useRuntimeConfig` để truy xuất các giá trị từ runtime configuration:
 
 ```tsx {1,4}
 import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
@@ -607,7 +597,9 @@ const MyComponent = () => {
 };
 ```
 
-Provider sẽ fallback về một cấu hình rỗng khi không có `runtime-config.json` được phục vụ, vì vậy một website chưa triển khai gì vẫn render được. `IRuntimeConfig` được gõ là `any` theo mặc định — thu hẹp nó trong `src/components/RuntimeConfig/index.tsx` nếu bạn muốn truy cập an toàn kiểu.
+:::note[Added when you need it]
+`src/hooks/useRuntimeConfig.tsx` và `src/components/RuntimeConfig` được thêm vào website của bạn bởi generator <Link path="/guides/react-website-auth">`ts#website#auth`</Link> và các generators <Link path="guides/connection">`connection`</Link>, vì đó là những gì đưa các giá trị vào runtime configuration. Một website không có cả hai sẽ không có runtime configuration để đọc, vì vậy hook không được cung cấp cho đến khi một trong số chúng đã chạy.
+:::
 
 :::note[Runtime Configuration]
 Để biết chi tiết về cách runtime configuration được lưu trữ trong AWS AppConfig và cách các consumers phía server (Lambda functions, agents) có thể truy xuất nó, hãy xem hướng dẫn <Link path="guides/runtime-config">Runtime Configuration</Link>.

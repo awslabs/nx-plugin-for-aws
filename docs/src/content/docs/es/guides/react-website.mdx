@@ -50,12 +50,10 @@ El generador creará la siguiente estructura de proyecto en el directorio `<dire
     - config.ts Application configuration (eg. logo)
     - components
       - AppLayout Components for the overall layout and navigation bar
-      - RuntimeConfig Provider which loads `runtime-config.json` at startup
       - app-sidebar.tsx Sidebar navigation (shadcn only)
       - alert.tsx Alert component wrapping your UX provider's own
       - spinner.tsx Spinner component wrapping your UX provider's own
     - hooks
-      - useRuntimeConfig.tsx Hook for reading the [Runtime Configuration](#runtime-configuration)
       - useAppLayout.tsx Hook for adjusting the AppLayout from nested components (Cloudscape only)
     - routes
       - \_\_root.tsx Root route, wrapping every page in the AppLayout
@@ -418,19 +416,11 @@ module "my_website" {
 :::caution[Checkov: S3_MANAGED]
 Elegir `S3_MANAGED` falla el objetivo `checkov` de tu proyecto con `CKV_AWS_145` en los buckets del sitio web y de logs de distribución. El objetivo ejecuta `checkov` contra el `checkov.yml` de tu propio proyecto, así que agrega la verificación a su lista `skip-check`:
 
-```yaml title="packages/infra/checkov.yml" {9}
-# Defines the checks to skip entirely. Remove if your requirements differ.
+```yaml title="packages/infra/checkov.yml" {3}
 skip-check:
-  # Lambda function suppressions
-  - CKV_AWS_115 # Concurrent execution limit
-  - CKV_AWS_116 # Dead Letter Queue
-  - CKV_AWS_117 # Lambda functions in VPC
-  - CKV_AWS_173 # Encrypt Lambda environment variables
-  - CKV_AWS_272 # Code signing
-  - CKV_AWS_145 # S3 buckets are not KMS encrypted with encryption = "S3_MANAGED"
+  # ...
+  - CKV_AWS_145 # S3 buckets are not KMS encrypted when encryption is S3_MANAGED
 ```
-
-El objetivo `checkov` pasa `--config-file`, lo que desactiva el descubrimiento propio de `checkov` de un `.checkov.yaml` — un archivo de configuración colocado en cualquier otro lugar es ignorado.
 :::
 
 Para usar tu propia clave KMS en lugar de una creada automáticamente, pasa `kms_key_arn` y establece `create_kms_key` en `false`:
@@ -594,7 +584,7 @@ Debes asegurarte de declarar tu módulo de sitio web _después_ de cualquier mó
 
 ### Código del Sitio Web
 
-Tu sitio web se genera con un `RuntimeConfigProvider` (en `src/components/RuntimeConfig`) que carga `runtime-config.json` antes de renderizar tu aplicación, y un hook `useRuntimeConfig` para leer valores de él:
+En tu sitio web, puedes usar el hook `useRuntimeConfig` para recuperar valores de la configuración en tiempo de ejecución:
 
 ```tsx {1,4}
 import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
@@ -607,7 +597,9 @@ const MyComponent = () => {
 };
 ```
 
-El proveedor recurre a una configuración vacía cuando no se sirve `runtime-config.json`, por lo que un sitio web sin nada desplegado aún se renderiza. `IRuntimeConfig` está tipado como `any` por defecto — restringe el tipo en `src/components/RuntimeConfig/index.tsx` si deseas acceso con seguridad de tipos.
+:::note[Agregado cuando lo necesitas]
+`src/hooks/useRuntimeConfig.tsx` y `src/components/RuntimeConfig` se agregan a tu sitio web por el generador <Link path="/guides/react-website-auth">`ts#website#auth`</Link> y los generadores <Link path="guides/connection">`connection`</Link>, ya que son los que ponen valores en la configuración en tiempo de ejecución. Un sitio web sin ninguno de estos no tiene configuración en tiempo de ejecución para leer, por lo que el hook no se proporciona hasta que uno se haya ejecutado.
+:::
 
 :::note[Configuración en Tiempo de Ejecución]
 Para obtener detalles sobre cómo se almacena la configuración en tiempo de ejecución en AWS AppConfig y cómo los consumidores del lado del servidor (funciones Lambda, agentes) pueden recuperarla, consulta la guía de <Link path="guides/runtime-config">Configuración en Tiempo de Ejecución</Link>.

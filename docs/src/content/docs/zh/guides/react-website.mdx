@@ -50,12 +50,10 @@ import OptionFilter from '@components/option-filter.astro';
     - config.ts 应用程序配置（例如 logo）
     - components
       - AppLayout 整体布局和导航栏的组件
-      - RuntimeConfig 在启动时加载 `runtime-config.json` 的提供者
       - app-sidebar.tsx 侧边栏导航（仅限 shadcn）
       - alert.tsx 包装您的 UX 提供者自己的 Alert 组件
       - spinner.tsx 包装您的 UX 提供者自己的 Spinner 组件
     - hooks
-      - useRuntimeConfig.tsx 用于读取[运行时配置](#runtime-configuration)的钩子
       - useAppLayout.tsx 用于从嵌套组件调整 AppLayout 的钩子（仅限 Cloudscape）
     - routes
       - \_\_root.tsx 根路由，将每个页面包装在 AppLayout 中
@@ -418,19 +416,11 @@ module "my_website" {
 :::caution[Checkov: S3_MANAGED]
 选择 `S3_MANAGED` 会导致您项目的 `checkov` 目标在网站和分配日志存储桶上失败，错误为 `CKV_AWS_145`。该目标针对您项目自己的 `checkov.yml` 运行 `checkov`，因此将检查添加到其 `skip-check` 列表中：
 
-```yaml title="packages/infra/checkov.yml" {9}
-# Defines the checks to skip entirely. Remove if your requirements differ.
+```yaml title="packages/infra/checkov.yml" {3}
 skip-check:
-  # Lambda function suppressions
-  - CKV_AWS_115 # Concurrent execution limit
-  - CKV_AWS_116 # Dead Letter Queue
-  - CKV_AWS_117 # Lambda functions in VPC
-  - CKV_AWS_173 # Encrypt Lambda environment variables
-  - CKV_AWS_272 # Code signing
-  - CKV_AWS_145 # S3 buckets are not KMS encrypted with encryption = "S3_MANAGED"
+  # ...
+  - CKV_AWS_145 # S3 buckets are not KMS encrypted when encryption is S3_MANAGED
 ```
-
-`checkov` 目标传递 `--config-file`，这会关闭 `checkov` 自己对 `.checkov.yaml` 的发现 — 在其他任何地方放置的配置文件都会被忽略。
 :::
 
 要使用您自己的 KMS 密钥而不是自动创建的密钥，请传递 `kms_key_arn` 并将 `create_kms_key` 设置为 `false`：
@@ -594,7 +584,7 @@ module "my_website" {
 
 ### 网站代码
 
-您的网站生成时带有一个 `RuntimeConfigProvider`（在 `src/components/RuntimeConfig` 中），它在渲染应用程序之前加载 `runtime-config.json`，以及一个用于从中读取值的 `useRuntimeConfig` 钩子：
+在您的网站中，您可以使用 `useRuntimeConfig` 钩子从运行时配置中检索值：
 
 ```tsx {1,4}
 import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
@@ -607,7 +597,9 @@ const MyComponent = () => {
 };
 ```
 
-当没有提供 `runtime-config.json` 时，提供者会回退到空配置，因此尚未部署任何内容的网站仍然可以渲染。`IRuntimeConfig` 默认类型为 `any` — 如果您想要类型安全的访问，请在 `src/components/RuntimeConfig/index.tsx` 中缩小它。
+:::note[在您需要时添加]
+`src/hooks/useRuntimeConfig.tsx` 和 `src/components/RuntimeConfig` 由 <Link path="/guides/react-website-auth">`ts#website#auth`</Link> 生成器和 <Link path="guides/connection">`connection`</Link> 生成器添加到您的网站，因为它们会将值放入运行时配置中。没有这两者的网站没有要读取的运行时配置，因此在其中一个运行之前不会提供该钩子。
+:::
 
 :::note[运行时配置]
 有关运行时配置如何存储在 AWS AppConfig 中以及服务器端消费者（Lambda 函数、代理）如何检索它的详细信息，请参阅<Link path="guides/runtime-config">运行时配置</Link>指南。

@@ -50,12 +50,10 @@ import OptionFilter from '@components/option-filter.astro';
     - config.ts アプリケーション設定（例：ロゴ）
     - components
       - AppLayout 全体のレイアウトとナビゲーションバーのコンポーネント
-      - RuntimeConfig 起動時に`runtime-config.json`をロードするプロバイダー
       - app-sidebar.tsx サイドバーナビゲーション（shadcnのみ）
       - alert.tsx UXプロバイダー独自のものをラップするAlertコンポーネント
       - spinner.tsx UXプロバイダー独自のものをラップするSpinnerコンポーネント
     - hooks
-      - useRuntimeConfig.tsx [ランタイム設定](#runtime-configuration)を読み取るためのフック
       - useAppLayout.tsx ネストされたコンポーネントからAppLayoutを調整するためのフック（Cloudscapeのみ）
     - routes
       - \_\_root.tsx ルートルート、すべてのページをAppLayoutでラップ
@@ -418,19 +416,11 @@ module "my_website" {
 :::caution[Checkov: S3_MANAGED]
 `S3_MANAGED`を選択すると、ウェブサイトおよびディストリビューションログバケットで、プロジェクトの`checkov`ターゲットが`CKV_AWS_145`で失敗します。ターゲットはプロジェクト独自の`checkov.yml`に対して`checkov`を実行するため、その`skip-check`リストにチェックを追加してください：
 
-```yaml title="packages/infra/checkov.yml" {9}
-# Defines the checks to skip entirely. Remove if your requirements differ.
+```yaml title="packages/infra/checkov.yml" {3}
 skip-check:
-  # Lambda function suppressions
-  - CKV_AWS_115 # Concurrent execution limit
-  - CKV_AWS_116 # Dead Letter Queue
-  - CKV_AWS_117 # Lambda functions in VPC
-  - CKV_AWS_173 # Encrypt Lambda environment variables
-  - CKV_AWS_272 # Code signing
-  - CKV_AWS_145 # S3 buckets are not KMS encrypted with encryption = "S3_MANAGED"
+  # ...
+  - CKV_AWS_145 # S3 buckets are not KMS encrypted when encryption is S3_MANAGED
 ```
-
-`checkov`ターゲットは`--config-file`を渡すため、`checkov`独自の`.checkov.yaml`の検出がオフになります — 他の場所に配置された設定ファイルは無視されます。
 :::
 
 自動的に作成されるキーの代わりに独自のKMSキーを使用するには、`kms_key_arn`を渡し、`create_kms_key`を`false`に設定します：
@@ -594,7 +584,7 @@ module "my_website" {
 
 ### ウェブサイトコード
 
-ウェブサイトは、アプリケーションをレンダリングする前に`runtime-config.json`をロードする`RuntimeConfigProvider`（`src/components/RuntimeConfig`内）と、そこから値を読み取るための`useRuntimeConfig`フックとともに生成されます：
+ウェブサイトでは、`useRuntimeConfig`フックを使用してランタイム設定から値を取得できます：
 
 ```tsx {1,4}
 import { useRuntimeConfig } from '../hooks/useRuntimeConfig';
@@ -607,7 +597,9 @@ const MyComponent = () => {
 };
 ```
 
-プロバイダーは、`runtime-config.json`が提供されていない場合は空の設定にフォールバックするため、まだ何もデプロイされていないウェブサイトでもレンダリングされます。`IRuntimeConfig`はデフォルトで`any`型です — 型安全なアクセスが必要な場合は、`src/components/RuntimeConfig/index.tsx`で絞り込んでください。
+:::note[必要なときに追加]
+`src/hooks/useRuntimeConfig.tsx`と`src/components/RuntimeConfig`は、<Link path="/guides/react-website-auth">`ts#website#auth`</Link>ジェネレーターと<Link path="guides/connection">`connection`</Link>ジェネレーターによってウェブサイトに追加されます。これらはランタイム設定に値を入れるものであるためです。どちらも持たないウェブサイトには読み取るランタイム設定がないため、いずれかが実行されるまでフックは提供されません。
+:::
 
 :::note[ランタイム設定]
 ランタイム設定がAWS AppConfigにどのように保存されるか、およびサーバーサイドコンシューマー（Lambda関数、エージェント）がそれを取得する方法の詳細については、<Link path="guides/runtime-config">ランタイム設定</Link>ガイドを参照してください。
