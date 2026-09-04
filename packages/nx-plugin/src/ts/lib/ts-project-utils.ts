@@ -27,17 +27,18 @@ interface TsConfigReference {
  * Dependencies a caller must declare to configure a TypeScript project.
  *
  * `@nx/js` writes `types: ['node']` into every project's `tsconfig.lib.json`, so
- * `tsc` needs the types declared to resolve them. Declared on the project and at
- * the root: a project whose `package.json` a generator later rewrites still
- * resolves the types through the root, where shared tooling lives.
- *
- * Exported and spread into each caller's own declaration so the version sync
- * migration sees it — ownership is read from a generator's exported
- * `DEPENDENCIES`, and a package declared only here would never be synced.
+ * the types must be declared for `tsc` to resolve them. Declared twice: on the
+ * project whose tsconfig names them, and at the root, which `@nx/js` seeded until
+ * Nx 23.2 stopped.
  */
 export const TS_PROJECT_DEPENDENCIES = [
   { name: '@types/node', dev: true },
-] as const satisfies readonly { name: ITsDepVersion; dev?: boolean }[];
+  { name: '@types/node', dev: true, root: true },
+] as const satisfies readonly {
+  name: ITsDepVersion;
+  dev?: boolean;
+  root?: boolean;
+}[];
 
 /**
  * Merges new TypeScript project references into existing ones, deduplicating by
@@ -149,21 +150,13 @@ export const configureTsProject = async <const D extends DependencyDeclaration>(
     esm,
   });
 
-  // This helper's own entries, taken from its constant rather than the caller's
-  // declaration: a caller wraps the spread in `ownedElsewhere` to say this helper
-  // installs them, which is exactly what happens here. Added to the project and
-  // to the root, so a project whose `package.json` a later generator rewrites
-  // still resolves the types through the root, where shared tooling is declared.
-  for (const root of [false, true]) {
-    addTsDependencies(
-      tree,
-      {
-        ts: TS_PROJECT_DEPENDENCIES.map((entry) => ({ ...entry, root })),
-        py: [],
-      },
-      { projectRoot: options.dir },
-    );
-  }
+  // From this helper's constant, not the caller's declaration, which marks these
+  // `ownedElsewhere` because the install happens here.
+  addTsDependencies(
+    tree,
+    { ts: [...TS_PROJECT_DEPENDENCIES], py: [] },
+    { projectRoot: options.dir },
+  );
 
   await configureBiomeLint(tree, options);
   await configureVitest(
