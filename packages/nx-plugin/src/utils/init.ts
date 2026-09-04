@@ -348,12 +348,13 @@ export const applyWorkspaceInit = async <const D extends DependencyDeclaration>(
       : { ...CONVENIENCE_SCRIPTS, ...packageJson.scripts },
   }));
 
-  // Pin the workspace's `nx` to the version the plugin's @nx/* packages are
-  // built against. A mismatched workspace nx (even a patch apart) hoists a
-  // second nested nx under @nx/js, and the two instances deadlock `nx sync`.
-  // `@nx/js` must be a root dependency for the `@nx/js:typescript-sync`
-  // generator registered in nx.json to resolve (npm doesn't hoist the
-  // plugin's own copy reliably).
+  // Declare the `nx` version the plugin's @nx/* packages are built against. A
+  // mismatched workspace nx (even a patch apart) hoists a second nested nx
+  // under @nx/js, and the two instances deadlock `nx sync` — but a workspace
+  // already on a newer nx keeps it, since devkit never downgrades an existing
+  // range. `@nx/js` must be a root dependency for the
+  // `@nx/js:typescript-sync` generator registered in nx.json to resolve (npm
+  // doesn't hoist the plugin's own copy reliably).
   addDependenciesToPackageJson(
     tree,
     {},
