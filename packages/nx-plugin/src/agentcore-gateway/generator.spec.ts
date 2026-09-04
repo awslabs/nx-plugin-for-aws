@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readProjectConfiguration, type Tree } from '@nx/devkit';
+import { readJson, readProjectConfiguration, type Tree } from '@nx/devkit';
 import { expectHasMetricTags } from '../utils/metrics.spec.js';
 import { createTreeUsingTsSolutionSetup } from '../utils/test.js';
 import {
@@ -51,6 +51,33 @@ describe('agentcore-gateway generator', () => {
           'tsx local-dev.ts',
         );
       }
+    });
+
+    it('adds the quality gate targets and a noEmit tsconfig so local-dev.ts is built', async () => {
+      await agentcoreGatewayGenerator(tree, {
+        name: 'my-gateway',
+        iac: 'cdk',
+      });
+
+      const config = readProjectConfiguration(tree, '@proj/my-gateway');
+      expect(config.targets?.build.dependsOn).toEqual(['lint', 'typecheck']);
+      expect(config.targets?.typecheck.options.command).toBe(
+        'tsc --noEmit -p tsconfig.json',
+      );
+      expect(config.targets?.lint.dependsOn).toEqual(['format']);
+      expect(config.targets?.format).toBeDefined();
+
+      // A noEmit project produces no declarations, so it stays out of the
+      // workspace's project-reference graph (which would disable typecheck).
+      const tsConfig = readJson(tree, 'packages/my-gateway/tsconfig.json');
+      expect(tsConfig.compilerOptions.noEmit).toBe(true);
+      expect(tsConfig.compilerOptions.composite).toBe(false);
+      expect(tsConfig.include).toEqual(['**/*.ts']);
+      expect(
+        (readJson(tree, 'tsconfig.json').references ?? []).map(
+          (reference: { path: string }) => reference.path,
+        ),
+      ).not.toContain('./packages/my-gateway');
     });
 
     it('registers project metadata with rc/protocol/auth fields', async () => {
@@ -106,6 +133,17 @@ describe('agentcore-gateway generator', () => {
         'packages/my-gateway/policies/permit-all.cedar',
         '// user-edited',
       );
+      tree.write(
+        'packages/my-gateway/local-dev.ts',
+        '// user-edited local dev server\n',
+      );
+      tree.write(
+        'packages/my-gateway/tsconfig.json',
+        JSON.stringify({
+          extends: '../../tsconfig.base.json',
+          compilerOptions: { noEmit: true, strict: false },
+        }),
+      );
       const config = readProjectConfiguration(tree, '@proj/my-gateway');
       config.targets!['dev'].dependsOn = [
         { projects: ['@proj/some-mcp'], target: 'some-mcp-dev' },
@@ -124,6 +162,13 @@ describe('agentcore-gateway generator', () => {
       expect(
         tree.read('packages/my-gateway/policies/permit-all.cedar')!.toString(),
       ).toContain('user-edited');
+      expect(
+        tree.read('packages/my-gateway/local-dev.ts')!.toString(),
+      ).toContain('user-edited local dev server');
+      expect(
+        readJson(tree, 'packages/my-gateway/tsconfig.json').compilerOptions
+          .strict,
+      ).toBe(false);
       const rerunConfig = readProjectConfiguration(tree, '@proj/my-gateway');
       expect(rerunConfig.targets?.['dev'].dependsOn).toContainEqual(
         expect.objectContaining({ target: 'some-mcp-dev' }),

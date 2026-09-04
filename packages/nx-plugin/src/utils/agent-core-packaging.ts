@@ -13,7 +13,10 @@ import {
   type MustDeclare,
 } from './declared-dependencies.js';
 import { FS_DEPENDENCIES, FsCommands } from './fs.js';
-import { addArtifactDependencyToTargets } from './nx.js';
+import {
+  addArtifactDependencyToTargets,
+  normalizeTargetKeyOrder,
+} from './nx.js';
 import {
   agentCoreRuntime,
   type ITsDepVersion,
@@ -154,7 +157,7 @@ export const addTypeScriptCodePackageTarget = <
     },
   };
 
-  project.targets[targetName] = {
+  project.targets[targetName] = normalizeTargetKeyOrder({
     cache: true,
     inputs: ['default'],
     outputs: [`{workspaceRoot}/${packageOutputDir}`],
@@ -175,7 +178,7 @@ export const addTypeScriptCodePackageTarget = <
       parallel: false,
     },
     dependsOn: [bundleTargetName, ADOT_VENDOR_TARGET_NAME],
-  };
+  });
 
   addArtifactDependencyToTargets(project, targetName);
 };
@@ -248,7 +251,7 @@ export const addPythonCodePackageTarget = <
   );
 
   project.targets ??= {};
-  project.targets[targetName] = {
+  project.targets[targetName] = normalizeTargetKeyOrder({
     cache: true,
     inputs: ['production', '^production'],
     outputs: [`{workspaceRoot}/${packageOutputDir}`],
@@ -267,7 +270,7 @@ export const addPythonCodePackageTarget = <
       parallel: false,
     },
     dependsOn: [bundleTargetName],
-  };
+  });
 
   addArtifactDependencyToTargets(project, targetName);
 };

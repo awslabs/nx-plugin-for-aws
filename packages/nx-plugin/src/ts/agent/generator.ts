@@ -61,6 +61,7 @@ import {
   addDependencyToTargetIfNotPresent,
   getGeneratorInfo,
   type NxGeneratorInfo,
+  normalizeTargetKeyOrder,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx.js';
 import { sortObjectKeys } from '../../utils/object.js';
@@ -312,7 +313,7 @@ export const tsAgentGenerator = async (
       const dockerTargetName = `${agentTargetPrefix}-docker`;
 
       const fs = new FsCommands(tree, DEPENDENCIES);
-      project.targets[dockerTargetName] = {
+      project.targets[dockerTargetName] = normalizeTargetKeyOrder({
         cache: IMAGE_BUILD_CACHE,
         executor: 'nx:run-commands',
         options: {
@@ -326,7 +327,7 @@ export const tsAgentGenerator = async (
           parallel: false,
         },
         dependsOn: ['bundle'],
-      };
+      });
 
       addDependencyToTargetIfNotPresent(project, 'docker', dockerTargetName);
       addArtifactDependencyToTargets(project, 'docker');

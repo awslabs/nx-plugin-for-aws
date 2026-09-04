@@ -13,6 +13,7 @@ import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
 
 `connection` 생성기는 <Link path="guides/ts-agent">TypeScript Agent</Link>를 MCP 서버(<Link path="guides/ts-mcp-server">TypeScript</Link> 또는 <Link path="guides/py-mcp-server">Python</Link>)에 연결할 수 있습니다.
 
@@ -51,6 +52,7 @@ import Infrastructure from '@components/infrastructure.astro';
     - core
       - agentcore-endpoints.ts Framework-agnostic ARN/URL resolution
       - agentcore-fetch.ts Framework-agnostic SigV4 / JWT / session-forwarding fetch
+      - agentcore-transport.ts Shared AgentCore transport plumbing
       - agentcore-mcp-transport.ts Framework-agnostic MCP transport
       - agentcore-mcp-client-strands.ts Strands MCP client wrapping the transport
     - index.ts Exports all clients
@@ -72,8 +74,8 @@ import Infrastructure from '@components/infrastructure.astro';
 import { Agent, tool } from '@strands-agents/sdk';
 import { MyMcpServerClientStrands } from '@my-scope/agent-connection';
 
-export const getAgent = async (sessionId: string) => {
-  const myMcpServerClient = await MyMcpServerClientStrands.create(sessionId);
+export const getAgent = async () => {
+  const myMcpServerClient = await MyMcpServerClientStrands.create();
   return new Agent({
     systemPrompt: '...',
     tools: [myMcpServerClient],
@@ -81,9 +83,11 @@ export const getAgent = async (sessionId: string) => {
 };
 ```
 
-`sessionId` 매개변수는 호출자로부터 전달되어 [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html)의 일관성을 보장합니다.
+AgentCore 세션 ID는 `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` 헤더를 통해 MCP 서버로 자동으로 전파되므로 `create()`는 인수를 받지 않습니다: 에이전트 서버는 인바운드 요청의 세션을 [`AsyncLocalStorage`](https://nodejs.org/api/async_context.html#class-asynclocalstorage) 컨텍스트에 바인딩하고(생성된 `router.ts`의 `enterSessionContext` 또는 A2A/AG-UI 세션 미들웨어의 `runWithSessionId`), 연결 클라이언트의 `agentcore-fetch.ts`에 있는 fetch가 모든 아웃바운드 호출에 이를 찍어냅니다 — [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html)의 일관성을 보장합니다.
 
 ## 인프라
+
+<Snippet name="connection/infra-project-prerequisite" />
 
 <Infrastructure>
 <Fragment slot="cdk">

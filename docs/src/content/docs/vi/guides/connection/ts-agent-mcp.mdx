@@ -13,6 +13,7 @@ import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
 
 Trình tạo `connection` có thể kết nối <Link path="guides/ts-agent">TypeScript Agent</Link> của bạn với máy chủ MCP (có thể là <Link path="guides/ts-mcp-server">TypeScript</Link> hoặc <Link path="guides/py-mcp-server">Python</Link>).
 
@@ -51,6 +52,7 @@ Trình tạo tạo ra một gói `agent-connection` được chia sẻ và sửa
     - core
       - agentcore-endpoints.ts Framework-agnostic ARN/URL resolution
       - agentcore-fetch.ts Framework-agnostic SigV4 / JWT / session-forwarding fetch
+      - agentcore-transport.ts Shared AgentCore transport plumbing
       - agentcore-mcp-transport.ts Framework-agnostic MCP transport
       - agentcore-mcp-client-strands.ts Strands MCP client wrapping the transport
     - index.ts Exports all clients
@@ -72,8 +74,8 @@ Trình tạo chuyển đổi `agent.ts` của agent để sử dụng các công
 import { Agent, tool } from '@strands-agents/sdk';
 import { MyMcpServerClientStrands } from '@my-scope/agent-connection';
 
-export const getAgent = async (sessionId: string) => {
-  const myMcpServerClient = await MyMcpServerClientStrands.create(sessionId);
+export const getAgent = async () => {
+  const myMcpServerClient = await MyMcpServerClientStrands.create();
   return new Agent({
     systemPrompt: '...',
     tools: [myMcpServerClient],
@@ -81,9 +83,11 @@ export const getAgent = async (sessionId: string) => {
 };
 ```
 
-Tham số `sessionId` được truyền từ người gọi, đảm bảo tính nhất quán cho [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
+ID phiên AgentCore được truyền tự động đến máy chủ MCP thông qua header `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`, vì vậy `create()` không nhận tham số nào: máy chủ agent liên kết phiên của yêu cầu đến vào ngữ cảnh [`AsyncLocalStorage`](https://nodejs.org/api/async_context.html#class-asynclocalstorage) (`enterSessionContext` trong `router.ts` được tạo, hoặc `runWithSessionId` trong middleware phiên A2A/AG-UI), và fetch của client kết nối trong `agentcore-fetch.ts` đánh dấu nó trên mọi cuộc gọi đi — đảm bảo tính nhất quán cho [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
 
 ## Cơ sở hạ tầng
+
+<Snippet name="connection/infra-project-prerequisite" />
 
 <Infrastructure>
 <Fragment slot="cdk">
