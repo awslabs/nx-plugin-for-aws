@@ -82,6 +82,10 @@ export default defineConfig({
       },
     },
     testTimeout: 120 * 60 * 1000, /// 120 mins for long running e2e tests (eg deploy)
-    hookTimeout: 2 * 60 * 1000, /// 2 mins — corepack activation + rmSync on Windows can be slow
+    // Several suites create a workspace in `beforeAll`, which installs from the
+    // network and retries a failed create. The timeout has to exceed the whole
+    // retry budget, otherwise a single slow install kills the suite before the
+    // retry that would have recovered it.
+    hookTimeout: 30 * 60 * 1000,
   },
 });
