@@ -425,6 +425,10 @@ If you have added multiple components to your project (agents, MCP servers, etc.
 
 This uses `uv run` to execute your Agent using the [Bedrock AgentCore Python SDK](https://github.com/aws/bedrock-agentcore-sdk-python).
 
+The agent listens on a port assigned from the workspace pool when it was generated. Read it from `metadata.ports` in the project's `project.json`, or from the `--port` flag in the `<your-agent-name>-dev` target's command. The examples below use `8081`, the port a first HTTP agent is assigned in a fresh workspace.
+
+<Snippet name="agent/dev-vs-serve" parentHeading="Local Development" />
+
 ### Chat with Your Agent
 
 The generator configures a `<your-agent-name>-chat` Nx target that drops you into an interactive terminal chat with your agent.
@@ -439,11 +443,13 @@ Then, in another terminal, start the chat:
 
 The generator emits a `scripts/<your-agent-name>/chat.ts` for every protocol. It connects to the local agent by default, or to your deployed agent when `RUNTIME_CONFIG_APP_ID` is set (see [Chat with your deployed agent](#chat-with-your-deployed-agent) below).
 
-For **HTTP** agents, the chat script uses a type-safe TypeScript client generated from the agent's OpenAPI spec. The generator also emits:
+<OptionFilter when={{ protocol: 'http' }} description="OpenAPI client generation for the chat script">
+For HTTP agents, the chat script uses a type-safe TypeScript client generated from the agent's OpenAPI spec. The generator also emits:
 
-- `scripts/<your-agent-name>_openapi.py` — a small script that exports the agent's OpenAPI spec
+- `scripts/<your_agent_name>_openapi.py` — a small script that exports the agent's OpenAPI spec (named with your agent's name in `snake_case`)
 - An `<your-agent-name>-openapi` Nx target that runs it
 - An `<your-agent-name>-generate-client` Nx target that produces a type-safe TypeScript client under `scripts/<your-agent-name>/generated/`
+</OptionFilter>
 
 When you customize the agent's input shape (e.g. add new fields to `InvokeInput`), update `chat.ts` to pass the new fields when invoking the agent and the rest works automatically.
 
@@ -567,7 +573,11 @@ When running locally (`LOCAL_DEV=true`, set automatically by the `-dev` target),
 <OptionFilter when={{ protocol: 'http' }} description="FastAPI HTTP invocation details">
 ### Invoke the Local Server
 
-To invoke an Agent running locally via the `<your-agent-name>-serve` target, you can send a simple POST request to `/invocations` on the port your local agent is running on. For example, with `curl`:
+Start your agent with the `<your-agent-name>-dev` target:
+
+<NxCommands commands={['agent-dev your-project']} />
+
+Then send a POST request to `/invocations` on the port your local agent is running on. Substitute the port assigned to your agent — read it from `metadata.ports` in the project's `project.json`, or from the `--port` flag in the `<your-agent-name>-dev` target's command. A first HTTP agent in a fresh workspace is assigned `8081`:
 
 ```bash
 curl -N -X POST http://localhost:8081/invocations \
@@ -577,6 +587,10 @@ curl -N -X POST http://localhost:8081/invocations \
 
 :::note[Curl Streaming Flag]
 The `-N` argument given to `curl` disables buffering the output stream, so you can see the streaming response in real-time.
+:::
+
+:::caution[Use `-dev`, not `-serve`]
+Use `<your-agent-name>-dev` for this, not `<your-agent-name>-serve`. `-serve` runs the deployed code path, so it needs `RUNTIME_CONFIG_APP_ID` set — see <Link path="guides/py-agent#-dev-vs--serve">`-dev` vs `-serve`</Link>. Without it, streaming has already begun by the time the agent tries to resolve its session storage, so the request returns an empty `200` with no error and the failure appears only in the server log.
 :::
 
 ### Invoke the Deployed Agent
