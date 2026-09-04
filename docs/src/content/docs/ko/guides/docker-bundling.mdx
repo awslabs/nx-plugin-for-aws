@@ -133,10 +133,17 @@ export default defineConfig([
 
 ### Dockerfile
 
-프로젝트 소스 디렉토리에 `Dockerfile`을 생성합니다. 이 파일은 번들을 Node 베이스 이미지에 `COPY`하는 것 외에는 아무것도 하지 않으며, 번들링할 수 없는 `external` 패키지를 `npm install`합니다. `RUN npm install` 단계를 `COPY` **이전에** 배치하여 Docker가 설치된 `node_modules` 레이어를 캐시하고 종속성 목록이 실제로 변경될 때만 다시 실행하도록 합니다:
+프로젝트 소스 디렉토리에 `Dockerfile`을 생성합니다. 이 파일은 [베이스 이미지의 보안 업데이트를 적용](#배포판의-보안-업데이트-적용)하고, 번들을 Node 베이스 이미지에 `COPY`하며, 번들링할 수 없는 `external` 패키지를 `npm install`하는 것 외에는 아무것도 하지 않습니다. `RUN npm install` 단계를 `COPY` **이전에** 배치하여 Docker가 설치된 `node_modules` 레이어를 캐시하고 종속성 목록이 실제로 변경될 때만 다시 실행하도록 합니다:
 
 ```dockerfile
 FROM public.ecr.aws/docker/library/node:lts
+
+# Apply the distribution's security updates: base image tags lag behind the
+# security suite, so their OS packages carry vulnerabilities that already have a
+# published fix.
+RUN apt-get update && \
+    apt-get upgrade -y --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -236,10 +243,17 @@ Docker 이미지가 x86_64에서 실행될 경우 `--python-platform`을 `x86_64
 
 ### Dockerfile
 
-`Dockerfile`은 단순히 번들을 Python 베이스 이미지에 복사합니다. `uv`가 이미 모든 종속성을 번들 디렉토리에 설치했기 때문에 이미지 내부에서 `pip install`을 실행할 필요가 없습니다:
+`Dockerfile`은 [베이스 이미지의 보안 업데이트를 적용](#배포판의-보안-업데이트-적용)한 다음 번들을 Python 베이스 이미지에 복사합니다. `uv`가 이미 모든 종속성을 번들 디렉토리에 설치했기 때문에 이미지 내부에서 `pip install`을 실행할 필요가 없습니다:
 
 ```dockerfile
 FROM public.ecr.aws/docker/library/python:3.14-slim
+
+# Apply the distribution's security updates: base image tags lag behind the
+# security suite, so their OS packages carry vulnerabilities that already have a
+# published fix.
+RUN apt-get update && \
+    apt-get upgrade -y --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -288,7 +302,13 @@ CMD ["python", "-m", "my_project.main"]
 
 알려진 취약점에 대해 이미지를 스캔하는 것이 좋습니다. 이 패턴을 따르는 제너레이터는 [Trivy](https://trivy.dev/)로 빌드된 이미지를 스캔하는 `trivy` 타겟을 추가하며, [ECR 호스팅 Trivy 이미지](https://gallery.ecr.aws/aquasecurity/trivy)에서 실행되고 `HIGH` 또는 `CRITICAL` 발견 시 0이 아닌 값으로 종료합니다.
 
-`docker` 타겟에 `dependsOn`하는 `trivy` 타겟을 추가합니다. 빌드된 이미지를 tarball로 저장하고 워크스페이스 상대 바인드 마운트를 통해 스캔하므로 `docker`와 `finch` 모두에서 동일한 명령이 작동합니다:
+타겟은 프로젝트 루트에서 `.trivyignore`를 스캔 디렉토리로 복사하고 `--ignorefile`로 Trivy에 전달하므로 먼저 해당 파일을 생성하세요 — 빈 파일도 괜찮으며, 나중에 [발견 사항을 억제](#발견-사항-억제)하는 곳입니다:
+
+```bash
+touch packages/my-project/.trivyignore
+```
+
+그런 다음 `docker` 타겟에 `dependsOn`하는 `trivy` 타겟을 추가합니다. 빌드된 이미지를 tarball로 저장하고 워크스페이스 상대 바인드 마운트를 통해 스캔하므로 `docker`와 `finch` 모두에서 동일한 명령이 작동합니다:
 
 <Code lang="json" code={trivyTarget} />
 

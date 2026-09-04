@@ -44,7 +44,7 @@ Il generatore creerà la seguente struttura di progetto nella directory `<direct
 
 </FileTree>
 
-Se imposti l'opzione `stageConfig`, il generatore crea anche due pacchetti condivisi per la gestione centralizzata delle credenziali (se non esistono già):
+Se generi con `--stageConfig=true`, il generatore crea anche due pacchetti condivisi per la gestione centralizzata delle credenziali (se non esistono già):
 
 <FileTree>
 
@@ -53,12 +53,17 @@ Se imposti l'opzione `stageConfig`, il generatore crea anche due pacchetti condi
       - src
         - stages.types.ts Type definitions for stage credentials and config
         - stages.config.ts Your stage-to-credential mappings (edit this)
+        - resolve-stage.ts The `resolveStage` lookup your `main.ts` imports
         - index.ts Re-exports for importing from other packages
+      - README.md
     - scripts Centralized deploy/destroy scripts
       - src
-        - infra-deploy.ts Deploy bin script
-        - infra-destroy.ts Destroy bin script
-        - stage-credentials/ Shared logic (credential lookup, CDK command building)
+        - infra
+          - infra-deploy.ts Deploy bin script
+          - infra-destroy.ts Destroy bin script
+          - index.ts Re-exports for importing from other packages
+          - stage-credentials/ Shared logic (credential lookup, CDK command building)
+      - README.md
 
 </FileTree>
 
@@ -164,7 +169,11 @@ export class ApplicationStage extends Stage {
 ### Configurazione delle credenziali per stage
 
 :::note[Configurazione per stage]
-Questa sezione si applica quando generi con `stageConfig`. Senza di essa, il generatore produce una configurazione più semplice in cui gestisci le credenziali AWS da solo (ad esempio, esportando `AWS_PROFILE` prima della distribuzione).
+Questa sezione si applica quando generi con `stageConfig`:
+
+<NxCommands commands={['g @aws/nx-plugin:ts#infra --name=infra --stageConfig=true']} />
+
+Senza di essa, il generatore produce una configurazione più semplice in cui gestisci le credenziali AWS da solo (ad esempio, esportando `AWS_PROFILE` prima della distribuzione).
 :::
 
 Quando hai più stage che puntano a diversi account AWS, gestire le credenziali manualmente può essere soggetto a errori, specialmente man mano che il numero di stage cresce.
@@ -379,11 +388,11 @@ Per maggiori dettagli, consulta la [documentazione sul bootstrap CDK](https://do
 
 Il tuo progetto ha tre target di distribuzione, ciascuno adatto a una situazione diversa:
 
-| Target           | Usalo per                                                                                             |
-| ---------------- | ------------------------------------------------------------------------------------------------------ |
+| Target           | Usalo per                                                                                                                     |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | `deploy-sandbox` | Distribuire il tuo stage sandbox personale durante lo sviluppo. Non è necessario un argomento stage. Utilizza la modalità express.        |
-| `deploy`         | Distribuire qualsiasi stage, nominando lo stage o gli stack che desideri.                                            |
-| `deploy-ci`      | Distribuire da una pipeline CI/CD, utilizzando un cloud assembly pre-sintetizzato. Attende la stabilizzazione completa.   |
+| `deploy`         | Distribuire qualsiasi stage, nominando lo stage o gli stack che desideri. Utilizza la modalità express a meno che non generi con `stageConfig`.  |
+| `deploy-ci`      | Distribuire da una pipeline CI/CD, utilizzando un cloud assembly pre-sintetizzato. Attende la stabilizzazione completa.                  |
 
 `deploy-sandbox` e `deploy` dipendono da `^assemble`, quindi costruiscono gli artefatti che stanno per distribuire e nient'altro. `deploy-ci` distribuisce un assembly che la tua pipeline ha già costruito, quindi non ha alcuna dipendenza di build.
 
@@ -419,7 +428,14 @@ Puoi specificare qualsiasi stage purché sia definito in `main.ts`. Per distribu
 
 <NxCommands commands={['deploy <my-infra> <my-infra>-sandbox/Application']} />
 
-Poiché questo target può nominare qualsiasi stage, incluso quello di produzione, attende la stabilizzazione completa delle risorse quando generi con `stageConfig`. Passa `--express` per optare per la modalità express per uno stage su cui stai iterando.
+Se questo target utilizza la modalità express dipende da come hai generato il progetto:
+
+- **Con `stageConfig`** attende la stabilizzazione completa delle risorse, poiché il target può nominare qualsiasi stage incluso quello di produzione. Passa `--express` per optare per la modalità express per uno stage su cui stai iterando.
+- **Senza `stageConfig`** utilizza la modalità express, come fa `deploy-sandbox`. Poiché lo stage che nomini potrebbe essere uno di produzione, passa `--no-express` per attendere la stabilizzazione completa delle risorse:
+
+  <NxCommands commands={['deploy <my-infra> <my-infra>-prod/* --no-express']} />
+
+  Usa [`deploy-ci`](#distribuire-su-aws-in-una-pipeline-cicd) da una pipeline invece — non utilizza mai la modalità express.
 
 ## Distribuire su AWS in una pipeline CI/CD
 

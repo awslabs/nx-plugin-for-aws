@@ -89,7 +89,7 @@ Các dự án Application bao gồm khả năng triển khai đầy đủ với 
 
 Bạn có thể bắt đầu viết hạ tầng Terraform của mình bên trong `src/main.tf`, ví dụ:
 
-```diff title="src/main.tf" {16-19}
+```diff title="src/main.tf" {16-49}
 -locals {
 -  account_id = data.aws_caller_identity.current.account_id
 -  aws_region = data.aws_region.current.id
@@ -107,9 +107,42 @@ Bạn có thể bắt đầu viết hạ tầng Terraform của mình bên trong
 +
 +# Declare your infrastructure here
 +resource "aws_s3_bucket" "my_bucket" {
++  #checkov:skip=CKV_AWS_18:Access logging not required for this bucket
++  #checkov:skip=CKV_AWS_144:Cross-region replication not required for this bucket
++  #checkov:skip=CKV_AWS_145:AES256 (S3-managed) encryption is sufficient for this bucket
++  #checkov:skip=CKV2_AWS_61:Lifecycle configuration not required for this bucket
++  #checkov:skip=CKV2_AWS_62:Event notifications not required for this bucket
 +  bucket = "my-unique-bucket-name"
 +}
++
++resource "aws_s3_bucket_versioning" "my_bucket" {
++  bucket = aws_s3_bucket.my_bucket.id
++  versioning_configuration {
++    status = "Enabled"
++  }
++}
++
++resource "aws_s3_bucket_server_side_encryption_configuration" "my_bucket" {
++  bucket = aws_s3_bucket.my_bucket.id
++
++  rule {
++    apply_server_side_encryption_by_default {
++      sse_algorithm = "AES256"
++    }
++  }
++}
++
++resource "aws_s3_bucket_public_access_block" "my_bucket" {
++  bucket = aws_s3_bucket.my_bucket.id
++
++  block_public_acls       = true
++  block_public_policy     = true
++  ignore_public_acls      = true
++  restrict_public_buckets = true
++}
 ```
+
+Một `aws_s3_bucket` đơn thuần sẽ thất bại trong quá trình quét [Checkov](#kiểm-tra-bảo-mật) mà `build` chạy, vì vậy ví dụ này khai báo các tài nguyên versioning, encryption và public-access-block mà quá trình quét mong đợi, và bỏ qua các kiểm tra còn lại cho mỗi tài nguyên bằng các comment `#checkov:skip` nêu rõ lý do. Xem xét từng việc bỏ qua theo yêu cầu của riêng bạn — xem [Kiểm tra Bảo mật](#kiểm-tra-bảo-mật) cho cả hai cơ chế bỏ qua.
 
 ### Phụ thuộc giữa các dự án
 
@@ -134,8 +167,12 @@ Cấu hình các biến cụ thể cho môi trường trong các tệp `src/env/
 ```hcl
 # Production environment variables
 environment = "prod"
-region      = "us-west-2"
+aws_region  = "us-west-2"
 ```
+
+:::note[Variable names]
+Mọi tên bạn đặt ở đây phải được khai báo trong `src/variables.tf` — scaffold khai báo `aws_region` và `environment`. Terraform chỉ cảnh báo về một giá trị cho một biến chưa được khai báo, vì vậy một tên bị viết sai sẽ bị bỏ qua thầm lặng thay vì được áp dụng.
+:::
 </TabItem>
 <TabItem label="project.json">
 ```diff
@@ -200,7 +237,7 @@ region      = "us-west-2"
                     "command": "terraform plan -var-file=env/dev.tfvars -out=../../../dist/packages/infra/terraform/dev.tfplan"
                 },
 +                "prod": {
-+                    "command": "terraform plan -var-file=env/dev.tfvars -out=../../../dist/packages/infra/terraform/prod.tfplan"
++                    "command": "terraform plan -var-file=env/prod.tfvars -out=../../../dist/packages/infra/terraform/prod.tfplan"
 +                }
             },
             "options": {
@@ -246,6 +283,8 @@ Các target khả dụng phụ thuộc vào loại dự án của bạn:
 Bạn có thể xác thực cấu hình Terraform của mình bằng cách sử dụng target `validate`:
 
 <NxCommands commands={['validate tf-infra']} />
+
+Giống như `test`, điều này chạy `terraform init -backend=false` trước, vì vậy nó cài đặt các module và provider mà validation cần mà không cấu hình S3 backend. Do đó nó chạy trên một dự án mới, trước <Link path="guides/terraform-project#bootstrap-trạng-thái-từ-xa-chỉ-dự-án-application">`bootstrap`</Link> và không cần thông tin xác thực AWS, cũng như `lint`, `test` và `checkov`.
 
 #### Linting
 
@@ -353,7 +392,7 @@ run "plan_is_valid" {
 
 Mọi target chạy `terraform init` đều tái sử dụng một provider cache dưới `.terraform/plugin-cache` trong workspace root của bạn, vì vậy các provider được tải xuống một lần thay vì mỗi lần chạy. Mỗi dự án có thư mục riêng ở đó: hai lần chạy `terraform init` cùng điền vào một cache có thể mỗi cái tính toán một hash khác nhau cho cùng một provider, sau đó terraform sẽ từ chối so với `.terraform.lock.hcl` của bạn. Xem [tài liệu Terraform](https://developer.hashicorp.com/terraform/cli/config/config-file#provider-plugin-cache) để biết thêm thông tin.
 
-Đặt `TF_PLUGIN_CACHE_DIR` trong môi trường của bạn để trỏ script `init` được cung cấp đến một cache mà bạn tự quản lý — ví dụ như một volume được chia sẻ giữa các workspace. Lưu ý rằng target `test` đọc đường dẫn của nó từ `project.json`, vì vậy hãy thay đổi nó ở đó nữa.
+Đặt `TF_PLUGIN_CACHE_DIR` trong môi trường của bạn để trỏ script `init` được cung cấp đến một cache mà bạn tự quản lý — ví dụ như một volume được chia sẻ giữa các workspace. Điều đó chỉ đến được các target đi qua script, đó là `init` của dự án application. Mọi target khác khai báo đường dẫn như một mục `env` trong `project.json`, và khối `env` của Nx thắng so với môi trường xung quanh, vì vậy hãy thay đổi nó ở đó nữa — trên `test` và `validate` cho cả hai loại dự án, và trên `init` cũng vậy cho dự án library.
 
 <OptionFilter when={{ type: 'application' }} description="Application-only targets: plan / apply / destroy / etc.">
 ### Các Target Chỉ dành cho Application

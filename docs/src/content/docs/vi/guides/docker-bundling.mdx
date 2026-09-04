@@ -133,10 +133,17 @@ Một số npm packages không thể được bundle vì chúng dựa vào `requ
 
 ### Dockerfile
 
-Tạo một `Dockerfile` trong thư mục nguồn dự án của bạn. File này không làm gì nhiều hơn là `COPY` bundle vào một Node base image, cộng với `npm install` bất kỳ packages `external` nào không thể được bundle. Đặt bước `RUN npm install` **trước** `COPY`, để Docker có thể cache layer `node_modules` đã cài đặt và chỉ chạy lại nó khi danh sách dependencies thực sự thay đổi:
+Tạo một `Dockerfile` trong thư mục nguồn dự án của bạn. File này không làm gì nhiều hơn là [áp dụng các bản cập nhật bảo mật của base image](#áp-dụng-các-bản-cập-nhật-bảo-mật-của-bản-phân-phối), `COPY` bundle vào một Node base image, cộng với `npm install` bất kỳ packages `external` nào không thể được bundle. Đặt bước `RUN npm install` **trước** `COPY`, để Docker có thể cache layer `node_modules` đã cài đặt và chỉ chạy lại nó khi danh sách dependencies thực sự thay đổi:
 
 ```dockerfile
 FROM public.ecr.aws/docker/library/node:lts
+
+# Apply the distribution's security updates: base image tags lag behind the
+# security suite, so their OS packages carry vulnerabilities that already have a
+# published fix.
+RUN apt-get update && \
+    apt-get upgrade -y --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -236,10 +243,17 @@ Chạy `nx bundle my-project` tạo ra `dist/packages/my-project/bundle-arm/` ch
 
 ### Dockerfile
 
-`Dockerfile` đơn giản sao chép bundle vào Python base image. Vì `uv` đã cài đặt tất cả dependency vào thư mục bundle, bạn không cần chạy `pip install` bên trong image:
+`Dockerfile` [áp dụng các bản cập nhật bảo mật của base image](#áp-dụng-các-bản-cập-nhật-bảo-mật-của-bản-phân-phối), sau đó sao chép bundle vào Python base image. Vì `uv` đã cài đặt tất cả dependency vào thư mục bundle, bạn không cần chạy `pip install` bên trong image:
 
 ```dockerfile
 FROM public.ecr.aws/docker/library/python:3.14-slim
+
+# Apply the distribution's security updates: base image tags lag behind the
+# security suite, so their OS packages carry vulnerabilities that already have a
+# published fix.
+RUN apt-get update && \
+    apt-get upgrade -y --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -288,7 +302,13 @@ Thêm một `docker` target sao chép `Dockerfile` vào thư mục đầu ra bun
 
 Thực hành tốt là quét images của bạn để tìm các lỗ hổng đã biết. Các generators tuân theo mẫu này thêm một `trivy` target quét built image với [Trivy](https://trivy.dev/), chạy từ [ECR-hosted Trivy image](https://gallery.ecr.aws/aquasecurity/trivy), và thoát với mã khác không khi có phát hiện `HIGH` hoặc `CRITICAL`.
 
-Thêm một `trivy` target `dependsOn` `docker` target của bạn. Nó lưu built image vào một tarball và quét nó thông qua một bind mount tương đối với workspace, do đó cùng một lệnh hoạt động dưới cả `docker` và `finch`:
+Target sao chép một `.trivyignore` từ thư mục gốc của dự án bạn vào thư mục scan và truyền nó cho Trivy với `--ignorefile`, vì vậy hãy tạo file đó trước — một file trống là được, và đó là nơi bạn [ngăn chặn các phát hiện](#ngăn-chặn-các-phát-hiện) sau này:
+
+```bash
+touch packages/my-project/.trivyignore
+```
+
+Sau đó thêm một `trivy` target `dependsOn` `docker` target của bạn. Nó lưu built image vào một tarball và quét nó thông qua một bind mount tương đối với workspace, do đó cùng một lệnh hoạt động dưới cả `docker` và `finch`:
 
 <Code lang="json" code={trivyTarget} />
 

@@ -44,7 +44,7 @@ Trình tạo sẽ tạo cấu trúc dự án sau trong thư mục `<directory>/<
 
 </FileTree>
 
-Nếu bạn đặt tùy chọn `stageConfig`, trình tạo cũng tạo hai gói chia sẻ để quản lý thông tin xác thực tập trung (nếu chúng chưa tồn tại):
+Nếu bạn tạo với `--stageConfig=true`, trình tạo cũng tạo hai gói chia sẻ để quản lý thông tin xác thực tập trung (nếu chúng chưa tồn tại):
 
 <FileTree>
 
@@ -53,12 +53,17 @@ Nếu bạn đặt tùy chọn `stageConfig`, trình tạo cũng tạo hai gói 
       - src
         - stages.types.ts Type definitions for stage credentials and config
         - stages.config.ts Your stage-to-credential mappings (edit this)
+        - resolve-stage.ts The `resolveStage` lookup your `main.ts` imports
         - index.ts Re-exports for importing from other packages
+      - README.md
     - scripts Centralized deploy/destroy scripts
       - src
-        - infra-deploy.ts Deploy bin script
-        - infra-destroy.ts Destroy bin script
-        - stage-credentials/ Shared logic (credential lookup, CDK command building)
+        - infra
+          - infra-deploy.ts Deploy bin script
+          - infra-destroy.ts Destroy bin script
+          - index.ts Re-exports for importing from other packages
+          - stage-credentials/ Shared logic (credential lookup, CDK command building)
+      - README.md
 
 </FileTree>
 
@@ -164,7 +169,11 @@ export class ApplicationStage extends Stage {
 ### Cấu hình Thông tin xác thực Stage
 
 :::note[Cấu hình theo Stage]
-Phần này áp dụng khi bạn tạo với `stageConfig`. Nếu không có nó, trình tạo tạo ra một thiết lập đơn giản hơn nơi bạn tự quản lý thông tin xác thực AWS (ví dụ: bằng cách export `AWS_PROFILE` trước khi triển khai).
+Phần này áp dụng khi bạn tạo với `stageConfig`:
+
+<NxCommands commands={['g @aws/nx-plugin:ts#infra --name=infra --stageConfig=true']} />
+
+Nếu không có nó, trình tạo tạo ra một thiết lập đơn giản hơn nơi bạn tự quản lý thông tin xác thực AWS (ví dụ: bằng cách export `AWS_PROFILE` trước khi triển khai).
 :::
 
 Khi bạn có nhiều stage nhắm đến các tài khoản AWS khác nhau, việc quản lý thông tin xác thực thủ công có thể dễ xảy ra lỗi, đặc biệt khi số lượng stage tăng lên.
@@ -379,11 +388,11 @@ npx cdk bootstrap aws://<account-id>/<region>
 
 Dự án của bạn có ba target triển khai, mỗi target phù hợp với một tình huống khác nhau:
 
-| Target           | Sử dụng nó cho                                                                                             |
-| ---------------- | ---------------------------------------------------------------------------------------------------------- |
-| `deploy-sandbox` | Triển khai sandbox stage của riêng bạn trong quá trình phát triển. Không cần đối số stage. Sử dụng express mode. |
-| `deploy`         | Triển khai bất kỳ stage nào, bằng cách đặt tên stage hoặc stack bạn muốn.                                 |
-| `deploy-ci`      | Triển khai từ một CI/CD pipeline, sử dụng một cloud assembly đã được synthesized trước. Chờ đợi ổn định đầy đủ. |
+| Target           | Sử dụng nó cho                                                                                                                       |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `deploy-sandbox` | Triển khai sandbox stage của riêng bạn trong quá trình phát triển. Không cần đối số stage. Sử dụng express mode.                    |
+| `deploy`         | Triển khai bất kỳ stage nào, bằng cách đặt tên stage hoặc stack bạn muốn. Sử dụng express mode trừ khi bạn tạo với `stageConfig`.   |
+| `deploy-ci`      | Triển khai từ một CI/CD pipeline, sử dụng một cloud assembly đã được synthesized trước. Chờ đợi ổn định đầy đủ.                     |
 
 `deploy-sandbox` và `deploy` phụ thuộc vào `^assemble`, vì vậy chúng xây dựng các artifact mà chúng sắp triển khai và không có gì khác. `deploy-ci` triển khai một assembly mà pipeline của bạn đã xây dựng, vì vậy nó không có bất kỳ phụ thuộc xây dựng nào cả.
 
@@ -419,7 +428,14 @@ Bạn có thể chỉ định bất kỳ stage nào miễn là nó được đ�
 
 <NxCommands commands={['deploy <my-infra> <my-infra>-sandbox/Application']} />
 
-Vì target này có thể đặt tên bất kỳ stage nào, bao gồm cả stage production của bạn, nó chờ đợi ổn định tài nguyên đầy đủ khi bạn tạo với `stageConfig`. Truyền `--express` để chọn vào express mode cho một stage mà bạn đang lặp lại.
+Việc target này có sử dụng express mode hay không phụ thuộc vào cách bạn tạo dự án:
+
+- **Với `stageConfig`** nó chờ đợi ổn định tài nguyên đầy đủ, vì target có thể đặt tên bất kỳ stage nào bao gồm cả stage production của bạn. Truyền `--express` để chọn vào express mode cho một stage mà bạn đang lặp lại.
+- **Không có `stageConfig`** nó sử dụng express mode, như `deploy-sandbox` làm. Vì stage bạn đặt tên có thể là một stage production, truyền `--no-express` để chờ đợi ổn định tài nguyên đầy đủ:
+
+  <NxCommands commands={['deploy <my-infra> <my-infra>-prod/* --no-express']} />
+
+  Sử dụng [`deploy-ci`](#deploying-to-aws-in-a-cicd-pipeline) từ một pipeline thay thế — nó không bao giờ sử dụng express mode.
 
 ## Triển khai lên AWS trong một CI/CD Pipeline
 

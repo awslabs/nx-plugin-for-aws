@@ -34,6 +34,7 @@ Trình tạo sẽ tạo cấu trúc dự án sau trong thư mục `<directory>/<
 
   - src Mã nguồn TypeScript
     - index.ts
+  - README.md
   - package.json Tệp kê khai dự án xác định tên package và các phụ thuộc của dự án
   - project.json Cấu hình dự án và các target build
   - tsconfig.json Cấu hình TypeScript cơ bản cho dự án này (kế thừa từ tsconfig.base.json ở thư mục gốc workspace)
@@ -54,6 +55,10 @@ Bạn cũng sẽ nhận thấy một số thay đổi đối với các tệp sa
   - nx.json Cấu hình Nx được cập nhật để cấu hình plugin @nx/js/typescript cho dự án của bạn
   - tsconfig.base.json một alias TypeScript được thiết lập cho dự án của bạn để nó có thể được import bởi các dự án khác trong workspace của bạn
   - tsconfig.json một project reference TypeScript được thêm cho dự án của bạn
+  - vitest.config.mts cấu hình Vitest dùng chung mà vitest.config.mts của dự án bạn kế thừa (được tạo bởi dự án TypeScript đầu tiên)
+  - package.json các công cụ build và test dùng chung được thêm vào
+  - pnpm-workspace.yaml dự án được thêm vào workspace, và các phiên bản phụ thuộc vào [catalog](#catalogs) (tệp tương đương cho trình quản lý package của bạn)
+  - .gitignore các đường dẫn đầu ra build và test được bỏ qua
 
 </FileTree>
 
@@ -270,15 +275,20 @@ Bạn có thể đạt được điều này bằng cách thêm một target nh�
     ...
     "bundle": {
       "cache": true,
+      "inputs": ["default"],
       "executor": "nx:run-commands",
       "outputs": ["{workspaceRoot}/dist/packages/my-library/bundle"],
       "options": {
-        "command": "rolldown -c rolldown.config.ts"
-      }
+        "command": "rolldown -c rolldown.config.ts",
+        "cwd": "{projectRoot}"
+      },
+      "dependsOn": ["compile"]
     },
   },
 }
 ```
+
+`cwd` là thứ cho phép `rolldown` tìm thấy cấu hình của nó: nếu không có nó, lệnh sẽ chạy từ thư mục gốc workspace, nơi `rolldown.config.ts` không tồn tại.
 
 Và thêm tệp `rolldown.config.ts` như sau:
 
@@ -288,12 +298,14 @@ import { defineConfig } from 'rolldown';
 
 export default defineConfig([
   {
+    tsconfig: 'tsconfig.lib.json',
     input: 'src/index.ts',
     output: {
       file: '../../dist/packages/my-library/bundle/index.js',
       format: 'cjs',
       codeSplitting: false,
     },
+    platform: 'node',
   },
 ]);
 ```
@@ -366,13 +378,10 @@ Vitest cung cấp cú pháp giống Jest để định nghĩa các bài kiểm t
 import { sayHello } from './hello.js';
 
 describe('sayHello', () => {
-
   it('should greet the caller', () => {
     expect(sayHello('Darth Vader')).toBe('Hello, Darth Vader!');
   });
-
 });
-
 ```
 
 Để biết thêm chi tiết về cách viết kiểm thử và các tính năng như mocking phụ thuộc, hãy tham khảo [tài liệu Vitest](https://vitest.dev/guide/#writing-tests)

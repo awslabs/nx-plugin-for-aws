@@ -89,7 +89,7 @@ Terraform 基础设施生成器创建一个 Terraform 基础设施项目。生�
 
 您可以在 `src/main.tf` 中开始编写您的 Terraform 基础设施，例如：
 
-```diff title="src/main.tf" {16-19}
+```diff title="src/main.tf" {16-49}
 -locals {
 -  account_id = data.aws_caller_identity.current.account_id
 -  aws_region = data.aws_region.current.id
@@ -107,9 +107,42 @@ Terraform 基础设施生成器创建一个 Terraform 基础设施项目。生�
 +
 +# Declare your infrastructure here
 +resource "aws_s3_bucket" "my_bucket" {
++  #checkov:skip=CKV_AWS_18:Access logging not required for this bucket
++  #checkov:skip=CKV_AWS_144:Cross-region replication not required for this bucket
++  #checkov:skip=CKV_AWS_145:AES256 (S3-managed) encryption is sufficient for this bucket
++  #checkov:skip=CKV2_AWS_61:Lifecycle configuration not required for this bucket
++  #checkov:skip=CKV2_AWS_62:Event notifications not required for this bucket
 +  bucket = "my-unique-bucket-name"
 +}
++
++resource "aws_s3_bucket_versioning" "my_bucket" {
++  bucket = aws_s3_bucket.my_bucket.id
++  versioning_configuration {
++    status = "Enabled"
++  }
++}
++
++resource "aws_s3_bucket_server_side_encryption_configuration" "my_bucket" {
++  bucket = aws_s3_bucket.my_bucket.id
++
++  rule {
++    apply_server_side_encryption_by_default {
++      sse_algorithm = "AES256"
++    }
++  }
++}
++
++resource "aws_s3_bucket_public_access_block" "my_bucket" {
++  bucket = aws_s3_bucket.my_bucket.id
++
++  block_public_acls       = true
++  block_public_policy     = true
++  ignore_public_acls      = true
++  restrict_public_buckets = true
++}
 ```
+
+一个简单的 `aws_s3_bucket` 无法通过 `build` 运行的 [Checkov](#安全测试) 扫描，因此示例声明了扫描所期望的版本控制、加密和公共访问阻止资源，并通过 `#checkov:skip` 注释说明原因来抑制每个资源的其余检查。根据您自己的要求审查每个抑制——请参阅[安全测试](#安全测试)了解两种抑制机制。
 
 ### 跨项目依赖
 
@@ -134,8 +167,12 @@ module "lib_module" {
 ```hcl
 # Production environment variables
 environment = "prod"
-region      = "us-west-2"
+aws_region  = "us-west-2"
 ```
+
+:::note[变量名称]
+您在此处设置的每个名称都必须在 `src/variables.tf` 中声明——脚手架声明了 `aws_region` 和 `environment`。Terraform 只会对未声明变量的值发出警告，因此拼写错误的名称会被静默忽略而不是应用。
+:::
 </TabItem>
 <TabItem label="project.json">
 ```diff
@@ -200,7 +237,7 @@ region      = "us-west-2"
                     "command": "terraform plan -var-file=env/dev.tfvars -out=../../../dist/packages/infra/terraform/dev.tfplan"
                 },
 +                "prod": {
-+                    "command": "terraform plan -var-file=env/dev.tfvars -out=../../../dist/packages/infra/terraform/prod.tfplan"
++                    "command": "terraform plan -var-file=env/prod.tfvars -out=../../../dist/packages/infra/terraform/prod.tfplan"
 +                }
             },
             "options": {
@@ -246,6 +283,8 @@ region      = "us-west-2"
 您可以使用 `validate` 目标验证您的 Terraform 配置：
 
 <NxCommands commands={['validate tf-infra']} />
+
+与 `test` 类似，这首先运行 `terraform init -backend=false`，因此它会安装验证所需的模块和提供程序，而无需配置 S3 后端。因此，它可以在新项目上运行，在 <Link path="guides/terraform-project#远程状态引导仅限应用程序项目">`bootstrap`</Link> 之前且无需 AWS 凭证，就像 `lint`、`test` 和 `checkov` 一样。
 
 #### Linting
 
@@ -353,7 +392,7 @@ run "plan_is_valid" {
 
 每个运行 `terraform init` 的目标都在工作区根目录的 `.terraform/plugin-cache` 下重用提供程序缓存，因此提供程序只下载一次而不是每次运行时都下载。每个项目在那里都有自己的目录：两个 `terraform init` 运行同时填充一个缓存时，每个都可能为同一个提供程序计算不同的哈希值，然后 terraform 会根据您的 `.terraform.lock.hcl` 拒绝它。有关更多信息，请参阅 [Terraform 文档](https://developer.hashicorp.com/terraform/cli/config/config-file#provider-plugin-cache)。
 
-在您的环境中设置 `TF_PLUGIN_CACHE_DIR` 以将提供的 `init` 脚本指向您自己管理的缓存——例如在工作区之间共享的卷。请注意，`test` 目标从 `project.json` 读取其路径，因此也要在那里更改它。
+在您的环境中设置 `TF_PLUGIN_CACHE_DIR` 以将提供的 `init` 脚本指向您自己管理的缓存——例如在工作区之间共享的卷。这只会影响通过脚本的目标，即应用程序项目的 `init`。其他每个目标都在 `project.json` 中将路径声明为 `env` 条目，而 Nx 的 `env` 块优先于环境变量，因此也要在那里更改它——对于任一项目类型的 `test` 和 `validate`，以及对于库项目的 `init`。
 
 <OptionFilter when={{ type: 'application' }} description="Application-only targets: plan / apply / destroy / etc.">
 ### 仅限应用程序的目标

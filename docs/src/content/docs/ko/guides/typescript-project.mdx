@@ -34,6 +34,7 @@ TypeScript 프로젝트 생성기는 [ECMAScript Modules (ESM)](https://www.type
 
   - src TypeScript 소스 코드
     - index.ts
+  - README.md
   - package.json 프로젝트의 패키지 이름과 의존성을 정의하는 프로젝트 매니페스트
   - project.json 프로젝트 구성 및 빌드 타겟
   - tsconfig.json 이 프로젝트의 기본 TypeScript 구성 (워크스페이스 루트 tsconfig.base.json을 확장)
@@ -54,6 +55,10 @@ TypeScript 프로젝트 생성기는 [ECMAScript Modules (ESM)](https://www.type
   - nx.json Nx 구성이 업데이트되어 프로젝트에 대한 @nx/js/typescript 플러그인을 구성합니다
   - tsconfig.base.json 워크스페이스의 다른 프로젝트에서 가져올 수 있도록 프로젝트에 대한 TypeScript 별칭이 설정됩니다
   - tsconfig.json 프로젝트에 대한 TypeScript 프로젝트 참조가 추가됩니다
+  - vitest.config.mts 프로젝트 자체의 vitest.config.mts가 확장하는 공유 Vitest 구성 (첫 번째 TypeScript 프로젝트에 의해 생성됨)
+  - package.json 공유 빌드 및 테스트 도구가 추가됩니다
+  - pnpm-workspace.yaml 프로젝트가 워크스페이스에 추가되고 의존성 버전이 [카탈로그](#catalogs)에 추가됩니다 (패키지 매니저에 해당하는 파일)
+  - .gitignore 빌드 및 테스트 출력 경로가 무시됩니다
 
 </FileTree>
 
@@ -270,15 +275,20 @@ TypeScript 프로젝트를 런타임 코드로 사용하는 경우 (예: AWS Lam
     ...
     "bundle": {
       "cache": true,
+      "inputs": ["default"],
       "executor": "nx:run-commands",
       "outputs": ["{workspaceRoot}/dist/packages/my-library/bundle"],
       "options": {
-        "command": "rolldown -c rolldown.config.ts"
-      }
+        "command": "rolldown -c rolldown.config.ts",
+        "cwd": "{projectRoot}"
+      },
+      "dependsOn": ["compile"]
     },
   },
 }
 ```
+
+`cwd`는 `rolldown`이 구성을 찾을 수 있게 해줍니다: 이것이 없으면 명령이 워크스페이스 루트에서 실행되는데, 거기에는 `rolldown.config.ts`가 존재하지 않습니다.
 
 그리고 다음과 같이 `rolldown.config.ts` 파일을 추가하세요:
 
@@ -288,12 +298,14 @@ import { defineConfig } from 'rolldown';
 
 export default defineConfig([
   {
+    tsconfig: 'tsconfig.lib.json',
     input: 'src/index.ts',
     output: {
       file: '../../dist/packages/my-library/bundle/index.js',
       format: 'cjs',
       codeSplitting: false,
     },
+    platform: 'node',
   },
 ]);
 ```
@@ -366,13 +378,10 @@ Vitest는 `describe`, `it`, `test` 및 `expect`와 같은 유틸리티와 함께
 import { sayHello } from './hello.js';
 
 describe('sayHello', () => {
-
   it('should greet the caller', () => {
     expect(sayHello('Darth Vader')).toBe('Hello, Darth Vader!');
   });
-
 });
-
 ```
 
 테스트 작성 방법 및 의존성 모킹과 같은 기능에 대한 자세한 내용은 [Vitest 문서](https://vitest.dev/guide/#writing-tests)를 참조하세요.

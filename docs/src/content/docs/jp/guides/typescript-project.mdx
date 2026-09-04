@@ -34,6 +34,7 @@ TypeScript プロジェクトジェネレーターは、[ECMAScript Modules (ESM
 
   - src TypeScript ソースコード
     - index.ts
+  - README.md
   - package.json プロジェクトのパッケージ名と依存関係を定義するプロジェクトマニフェスト
   - project.json プロジェクト設定とビルドターゲット
   - tsconfig.json このプロジェクトのベース TypeScript 設定（ワークスペースルートの tsconfig.base.json を拡張）
@@ -54,6 +55,10 @@ TypeScript プロジェクトジェネレーターは、[ECMAScript Modules (ESM
   - nx.json Nx 設定が更新され、プロジェクト用に @nx/js/typescript プラグインが設定されます
   - tsconfig.base.json プロジェクト用に TypeScript エイリアスが設定され、ワークスペース内の他のプロジェクトからインポートできるようになります
   - tsconfig.json プロジェクト用に TypeScript プロジェクト参照が追加されます
+  - vitest.config.mts プロジェクト独自の vitest.config.mts が拡張する共有 Vitest 設定（最初の TypeScript プロジェクトによって作成されます）
+  - package.json 共有ビルドおよびテストツールが追加されます
+  - pnpm-workspace.yaml プロジェクトがワークスペースに追加され、依存関係のバージョンが[カタログ](#catalogs)に追加されます（お使いのパッケージマネージャーの同等のファイル）
+  - .gitignore ビルドおよびテスト出力パスが無視されます
 
 </FileTree>
 
@@ -270,15 +275,20 @@ TypeScript プロジェクトをランタイムコードとして使用する場
     ...
     "bundle": {
       "cache": true,
+      "inputs": ["default"],
       "executor": "nx:run-commands",
       "outputs": ["{workspaceRoot}/dist/packages/my-library/bundle"],
       "options": {
-        "command": "rolldown -c rolldown.config.ts"
-      }
+        "command": "rolldown -c rolldown.config.ts",
+        "cwd": "{projectRoot}"
+      },
+      "dependsOn": ["compile"]
     },
   },
 }
 ```
+
+`cwd` は `rolldown` が設定を見つけるために必要です：これがないと、コマンドはワークスペースルートから実行され、そこには `rolldown.config.ts` が存在しません。
 
 そして、次のように `rolldown.config.ts` ファイルを追加します：
 
@@ -288,12 +298,14 @@ import { defineConfig } from 'rolldown';
 
 export default defineConfig([
   {
+    tsconfig: 'tsconfig.lib.json',
     input: 'src/index.ts',
     output: {
       file: '../../dist/packages/my-library/bundle/index.js',
       format: 'cjs',
       codeSplitting: false,
     },
+    platform: 'node',
   },
 ]);
 ```
@@ -366,13 +378,10 @@ Vitest は、`describe`、`it`、`test`、`expect` などのユーティリテ�
 import { sayHello } from './hello.js';
 
 describe('sayHello', () => {
-
   it('should greet the caller', () => {
     expect(sayHello('Darth Vader')).toBe('Hello, Darth Vader!');
   });
-
 });
-
 ```
 
 テストの記述方法や依存関係のモック化などの機能の詳細については、[Vitest ドキュメント](https://vitest.dev/guide/#writing-tests)を参照してください。

@@ -253,15 +253,27 @@ Todos os constructs gerados de API e agent são automaticamente configurados com
 
 Use `getAppConfig` de [`@aws-lambda-powertools/parameters`](https://docs.aws.amazon.com/powertools/typescript/latest/features/parameters):
 
+`getAppConfig` retorna qualquer valor JSON válido, então declare a forma que você espera e faça o cast do resultado — caso contrário, os acessos de propriedade não compilam sob o `tsconfig` estrito do workspace:
+
 ```ts
 import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
 
+interface ConnectionConfig {
+  apis?: Record<string, string>;
+  cognitoProps?: {
+    region: string;
+    userPoolId: string;
+    userPoolWebClientId: string;
+    identityPoolId: string;
+  };
+}
+
 // Retrieve the 'connection' namespace as a parsed JSON object
-const config = await getAppConfig('connection', {
+const config = (await getAppConfig('connection', {
   application: process.env.RUNTIME_CONFIG_APP_ID!,
   environment: 'default',
   transform: 'json',
-});
+})) as ConnectionConfig;
 
 // Access values
 const apiUrl = config.apis?.MyApi;
@@ -271,15 +283,23 @@ const cognitoProps = config.cognitoProps;
 Você também pode recuperar namespaces personalizados:
 
 ```ts
+interface TablesConfig {
+  users?: { tableName: string; tableArn: string };
+}
+
 // Retrieve a custom 'tables' namespace
-const tablesConfig = await getAppConfig('tables', {
+const tablesConfig = (await getAppConfig('tables', {
   application: process.env.RUNTIME_CONFIG_APP_ID!,
   environment: 'default',
   transform: 'json',
-});
+})) as TablesConfig;
 
 const usersTableName = tablesConfig.users?.tableName;
 ```
+
+:::tip[Valide na fronteira]
+Um cast informa ao compilador a forma, mas não a verifica em tempo de execução. Para configuração que você não controla, analise-a com um schema [Zod](https://zod.dev/) em vez disso, para que um valor malformado falhe de forma ruidosa em vez de aparecer como `undefined` mais tarde.
+:::
 
   </TabItem>
   <TabItem label="Python" icon="seti:python">

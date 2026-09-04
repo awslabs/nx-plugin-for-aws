@@ -34,6 +34,7 @@ TypeScript 项目生成器可用于创建现代化的 [TypeScript](https://www.t
 
   - src TypeScript 源代码
     - index.ts
+  - README.md
   - package.json 定义项目包名称和依赖项的项目清单
   - project.json 项目配置和构建目标
   - tsconfig.json 此项目的基础 TypeScript 配置（扩展工作区根目录的 tsconfig.base.json）
@@ -54,6 +55,10 @@ TypeScript 项目生成器可用于创建现代化的 [TypeScript](https://www.t
   - nx.json Nx 配置已更新，为您的项目配置 @nx/js/typescript 插件
   - tsconfig.base.json 为您的项目设置了 TypeScript 别名，以便工作区中的其他项目可以导入它
   - tsconfig.json 为您的项目添加了 TypeScript 项目引用
+  - vitest.config.mts 您的项目自己的 vitest.config.mts 扩展的共享 Vitest 配置（由第一个 TypeScript 项目创建）
+  - package.json 添加了共享的构建和测试工具
+  - pnpm-workspace.yaml 项目被添加到工作区，依赖项版本被添加到[目录](#catalogs)（您的包管理器的等效文件）
+  - .gitignore 忽略构建和测试输出路径
 
 </FileTree>
 
@@ -270,15 +275,20 @@ export default {
     ...
     "bundle": {
       "cache": true,
+      "inputs": ["default"],
       "executor": "nx:run-commands",
       "outputs": ["{workspaceRoot}/dist/packages/my-library/bundle"],
       "options": {
-        "command": "rolldown -c rolldown.config.ts"
-      }
+        "command": "rolldown -c rolldown.config.ts",
+        "cwd": "{projectRoot}"
+      },
+      "dependsOn": ["compile"]
     },
   },
 }
 ```
+
+`cwd` 是让 `rolldown` 找到其配置的关键：没有它，命令会从工作区根目录运行，而那里不存在 `rolldown.config.ts`。
 
 并按如下方式添加 `rolldown.config.ts` 文件：
 
@@ -288,12 +298,14 @@ import { defineConfig } from 'rolldown';
 
 export default defineConfig([
   {
+    tsconfig: 'tsconfig.lib.json',
     input: 'src/index.ts',
     output: {
       file: '../../dist/packages/my-library/bundle/index.js',
       format: 'cjs',
       codeSplitting: false,
     },
+    platform: 'node',
   },
 ]);
 ```
@@ -366,13 +378,10 @@ Vitest 提供类似 Jest 的语法来定义测试，包括 `describe`、`it`、`
 import { sayHello } from './hello.js';
 
 describe('sayHello', () => {
-
   it('should greet the caller', () => {
     expect(sayHello('Darth Vader')).toBe('Hello, Darth Vader!');
   });
-
 });
-
 ```
 
 有关如何编写测试以及模拟依赖项等功能的更多详细信息，请参阅 [Vitest 文档](https://vitest.dev/guide/#writing-tests)
