@@ -47,6 +47,12 @@ export default async function () {
     // applies to anything installing from the public registry.
     process.env.PNPM_CONFIG_MINIMUM_RELEASE_AGE = '0';
 
+    // Skip the registry audit on every install these tests run. The advisory
+    // endpoint stalls for minutes at a time, and the smoke tests install
+    // throwaway workspaces whose dependencies the `audit` lane already covers.
+    process.env.npm_config_audit = 'false';
+    process.env.npm_config_fund = 'false';
+
     // On shared Windows runners the verdaccio storage outlives the process
     // and `clearStorage: true` below doesn't fully reset it, so publishes
     // on the next run hit "409 Conflict: already present". Wipe first.
