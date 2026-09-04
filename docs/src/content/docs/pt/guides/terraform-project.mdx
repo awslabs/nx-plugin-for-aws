@@ -89,7 +89,7 @@ Projetos de aplicação incluem capacidades completas de implantação com geren
 
 Você pode começar a escrever sua infraestrutura Terraform dentro de `src/main.tf`, por exemplo:
 
-```diff title="src/main.tf" {16-49}
+```diff title="src/main.tf" {16-19}
 -locals {
 -  account_id = data.aws_caller_identity.current.account_id
 -  aws_region = data.aws_region.current.id
@@ -107,42 +107,11 @@ Você pode começar a escrever sua infraestrutura Terraform dentro de `src/main.
 +
 +# Declare your infrastructure here
 +resource "aws_s3_bucket" "my_bucket" {
-+  #checkov:skip=CKV_AWS_18:Access logging not required for this bucket
-+  #checkov:skip=CKV_AWS_144:Cross-region replication not required for this bucket
-+  #checkov:skip=CKV_AWS_145:AES256 (S3-managed) encryption is sufficient for this bucket
-+  #checkov:skip=CKV2_AWS_61:Lifecycle configuration not required for this bucket
-+  #checkov:skip=CKV2_AWS_62:Event notifications not required for this bucket
 +  bucket = "my-unique-bucket-name"
-+}
-+
-+resource "aws_s3_bucket_versioning" "my_bucket" {
-+  bucket = aws_s3_bucket.my_bucket.id
-+  versioning_configuration {
-+    status = "Enabled"
-+  }
-+}
-+
-+resource "aws_s3_bucket_server_side_encryption_configuration" "my_bucket" {
-+  bucket = aws_s3_bucket.my_bucket.id
-+
-+  rule {
-+    apply_server_side_encryption_by_default {
-+      sse_algorithm = "AES256"
-+    }
-+  }
-+}
-+
-+resource "aws_s3_bucket_public_access_block" "my_bucket" {
-+  bucket = aws_s3_bucket.my_bucket.id
-+
-+  block_public_acls       = true
-+  block_public_policy     = true
-+  ignore_public_acls      = true
-+  restrict_public_buckets = true
 +}
 ```
 
-Um `aws_s3_bucket` simples falha na verificação do [Checkov](#testes-de-segurança) que o `build` executa, então o exemplo declara os recursos de versionamento, criptografia e bloqueio de acesso público que a verificação espera, e suprime as verificações restantes por recurso com comentários `#checkov:skip` indicando o motivo. Revise cada supressão de acordo com seus próprios requisitos — veja [Testes de Segurança](#testes-de-segurança) para ambos os mecanismos de supressão.
+Observe que o bucket S3 acima falharia na verificação de segurança do Checkov, que verifica se o bucket tem as configurações de segurança apropriadas habilitadas.
 
 ### Dependências entre projetos
 
@@ -171,7 +140,7 @@ aws_region  = "us-west-2"
 ```
 
 :::note[Nomes de variáveis]
-Cada nome que você definir aqui deve ser declarado em `src/variables.tf` — o scaffold declara `aws_region` e `environment`. O Terraform apenas avisa sobre um valor para uma variável não declarada, então um nome com erro de digitação é silenciosamente ignorado em vez de aplicado.
+Cada nome que você definir aqui deve ser declarado em `src/variables.tf` — o gerador declara `aws_region` e `environment`.
 :::
 </TabItem>
 <TabItem label="project.json">
@@ -284,8 +253,6 @@ Você pode validar sua configuração Terraform usando o target `validate`:
 
 <NxCommands commands={['validate tf-infra']} />
 
-Como o `test`, isso executa `terraform init -backend=false` primeiro, então instala os módulos e provedores que a validação precisa sem configurar o backend S3. Portanto, ele é executado em um projeto novo, antes do <Link path="guides/terraform-project#bootstrap-de-estado-remoto-somente-projetos-application">`bootstrap`</Link> e sem credenciais AWS, assim como `lint`, `test` e `checkov`.
-
 #### Linting
 
 Projetos Terraform usam [`terraform fmt`](https://developer.hashicorp.com/terraform/cli/commands/fmt) para verificar a formatação.
@@ -392,7 +359,7 @@ Defina todas as variáveis que sua configuração requer no bloco `variables`, c
 
 Cada target que executa `terraform init` reutiliza um cache de provedores em `.terraform/plugin-cache` na raiz do seu workspace, então os provedores são baixados uma vez em vez de a cada execução. Cada projeto obtém seu próprio diretório lá: duas execuções de `terraform init` preenchendo um cache ao mesmo tempo podem cada uma calcular um hash diferente para o mesmo provedor, que o terraform então rejeita contra seu `.terraform.lock.hcl`. Consulte a [documentação do Terraform](https://developer.hashicorp.com/terraform/cli/config/config-file#provider-plugin-cache) para mais informações.
 
-Defina `TF_PLUGIN_CACHE_DIR` no seu ambiente para apontar o script `init` fornecido para um cache que você gerencia — um volume compartilhado entre workspaces, por exemplo. Isso só alcança os targets que passam pelo script, que é o `init` de um projeto application. Todos os outros targets declaram o caminho como uma entrada `env` no `project.json`, e o bloco `env` do Nx prevalece sobre o ambiente externo, então altere-o lá também — em `test` e `validate` para qualquer tipo de projeto, e em `init` também para um projeto library.
+Defina `TF_PLUGIN_CACHE_DIR` no seu ambiente para apontar o script `init` fornecido para um cache que você gerencia — um volume compartilhado entre workspaces, por exemplo. Observe que o target `test` lê seu caminho do `project.json`, então altere-o lá também.
 
 <OptionFilter when={{ type: 'application' }} description="Application-only targets: plan / apply / destroy / etc.">
 ### Targets Exclusivos de Application

@@ -89,7 +89,7 @@ Terraform インフラストラクチャジェネレーターは、Terraform イ
 
 `src/main.tf` 内で Terraform インフラストラクチャの記述を開始できます。例えば：
 
-```diff title="src/main.tf" {16-49}
+```diff title="src/main.tf" {16-19}
 -locals {
 -  account_id = data.aws_caller_identity.current.account_id
 -  aws_region = data.aws_region.current.id
@@ -107,42 +107,11 @@ Terraform インフラストラクチャジェネレーターは、Terraform イ
 +
 +# Declare your infrastructure here
 +resource "aws_s3_bucket" "my_bucket" {
-+  #checkov:skip=CKV_AWS_18:Access logging not required for this bucket
-+  #checkov:skip=CKV_AWS_144:Cross-region replication not required for this bucket
-+  #checkov:skip=CKV_AWS_145:AES256 (S3-managed) encryption is sufficient for this bucket
-+  #checkov:skip=CKV2_AWS_61:Lifecycle configuration not required for this bucket
-+  #checkov:skip=CKV2_AWS_62:Event notifications not required for this bucket
 +  bucket = "my-unique-bucket-name"
-+}
-+
-+resource "aws_s3_bucket_versioning" "my_bucket" {
-+  bucket = aws_s3_bucket.my_bucket.id
-+  versioning_configuration {
-+    status = "Enabled"
-+  }
-+}
-+
-+resource "aws_s3_bucket_server_side_encryption_configuration" "my_bucket" {
-+  bucket = aws_s3_bucket.my_bucket.id
-+
-+  rule {
-+    apply_server_side_encryption_by_default {
-+      sse_algorithm = "AES256"
-+    }
-+  }
-+}
-+
-+resource "aws_s3_bucket_public_access_block" "my_bucket" {
-+  bucket = aws_s3_bucket.my_bucket.id
-+
-+  block_public_acls       = true
-+  block_public_policy     = true
-+  ignore_public_acls      = true
-+  restrict_public_buckets = true
 +}
 ```
 
-単純な `aws_s3_bucket` は `build` が実行する [Checkov](#セキュリティテスト) スキャンに失敗するため、この例ではスキャンが期待するバージョニング、暗号化、パブリックアクセスブロックのリソースを宣言し、残りのチェックをリソースごとに `#checkov:skip` コメントで理由を記述して抑制しています。各抑制を自分の要件に照らして確認してください — 両方の抑制メカニズムについては[セキュリティテスト](#セキュリティテスト)を参照してください。
+上記の S3 バケットは、バケットに適切なセキュリティ設定が有効になっているかをチェックする Checkov セキュリティスキャンに失敗することに注意してください。
 
 ### プロジェクト間の依存関係
 
@@ -171,7 +140,7 @@ aws_region  = "us-west-2"
 ```
 
 :::note[変数名]
-ここで設定するすべての名前は `src/variables.tf` で宣言されている必要があります — スキャフォールドは `aws_region` と `environment` を宣言します。Terraform は宣言されていない変数の値について警告するだけなので、スペルミスした名前は適用されずに黙って無視されます。
+ここで設定するすべての名前は `src/variables.tf` で宣言されている必要があります — ジェネレーターは `aws_region` と `environment` を宣言します。
 :::
 </TabItem>
 <TabItem label="project.json">
@@ -284,8 +253,6 @@ bootstrap ターゲットはアプリケーションタイプのプロジェク�
 
 <NxCommands commands={['validate tf-infra']} />
 
-`test` と同様に、これは最初に `terraform init -backend=false` を実行するため、S3 バックエンドを設定せずに検証に必要なモジュールとプロバイダーをインストールします。したがって、<Link path="jp/guides/terraform-project#リモート状態のブートストラップアプリケーションプロジェクトのみ">`bootstrap`</Link> の前、AWS 認証情報なしで新しいプロジェクトで実行でき、`lint`、`test`、`checkov` も同様です。
-
 #### リンティング
 
 Terraform プロジェクトは [`terraform fmt`](https://developer.hashicorp.com/terraform/cli/commands/fmt) を使用してフォーマットをチェックします。
@@ -392,7 +359,7 @@ run "plan_is_valid" {
 
 `terraform init` を実行するすべてのターゲットは、ワークスペースルートの `.terraform/plugin-cache` にあるプロバイダーキャッシュを再利用するため、プロバイダーは毎回ではなく一度だけダウンロードされます。各プロジェクトはそこに独自のディレクトリを持ちます：2つの `terraform init` 実行が同時に1つのキャッシュを埋める場合、それぞれが同じプロバイダーに対して異なるハッシュを計算する可能性があり、terraform はそれを `.terraform.lock.hcl` に対して拒否します。詳細については、[Terraform ドキュメント](https://developer.hashicorp.com/terraform/cli/config/config-file#provider-plugin-cache)を参照してください。
 
-環境で `TF_PLUGIN_CACHE_DIR` を設定して、提供される `init` スクリプトを自分で管理するキャッシュ（たとえば、ワークスペース間で共有されるボリューム）に向けることができます。これはスクリプトを経由するターゲットにのみ到達し、それはアプリケーションプロジェクトの `init` です。他のすべてのターゲットは `project.json` の `env` エントリとしてパスを宣言し、Nx の `env` ブロックは環境変数よりも優先されるため、そこでも変更してください — どちらのプロジェクトタイプでも `test` と `validate` で、ライブラリプロジェクトでは `init` でも同様です。
+環境で `TF_PLUGIN_CACHE_DIR` を設定して、提供される `init` スクリプトを自分で管理するキャッシュ（たとえば、ワークスペース間で共有されるボリューム）に向けることができます。`test` ターゲットは `project.json` からパスを読み取るため、そこでも変更してください。
 
 <OptionFilter when={{ type: 'application' }} description="Application-only targets: plan / apply / destroy / etc.">
 ### アプリケーション専用ターゲット
