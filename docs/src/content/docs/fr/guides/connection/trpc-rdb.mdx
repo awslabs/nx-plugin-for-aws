@@ -35,15 +35,26 @@ Sélectionnez votre projet d'API tRPC comme source et votre projet de base de do
 
 ## Sortie du Générateur
 
-Le générateur crée un fichier middleware dans votre projet d'API tRPC :
+Le générateur crée un fichier middleware dans votre projet d'API tRPC, et élargit le contexte racine dans `init.ts` :
 
 <FileTree>
 
 - packages/api/src
   - middleware
     - \<db-name>.ts tRPC plugin exposing the Prisma client in procedure context
+  - init.ts The database's context interface added to `Context`
 
 </FileTree>
+
+```ts title="packages/api/src/init.ts" {1,3}
+import { IMyDbContext } from './middleware/my-db.js';
+
+export type Context = IMiddlewareContext & IMyDbContext;
+
+export const t = initTRPC.context<Context>().create();
+```
+
+L'élargissement de `Context` est ce qui permet aux procédures de composer le plugin — sans cela, `concat()` rejette le plugin avec une erreur de type `"Context mismatch"`.
 
 De plus, il met à jour la cible `dev` de votre API tRPC pour démarrer automatiquement la base de données lors de l'exécution locale.
 
@@ -53,12 +64,11 @@ De plus, il met à jour la cible `dev` de votre API tRPC pour démarrer automati
 
 Ajoutez le plugin généré à votre routeur tRPC afin que toutes les procédures qui l'utilisent aient accès à la base de données :
 
-```ts title="packages/api/src/router.ts" {2,5}
+```ts title="packages/api/src/router.ts" {2,4}
 import { t } from './init.js';
 import { createMyDbPlugin } from './middleware/my-db.js';
 
-export const authenticatedProcedure = t.procedure
-  .concat(createMyDbPlugin());
+export const dbProcedure = t.procedure.concat(createMyDbPlugin());
 ```
 
 ### Accéder à la Base de Données dans les Procédures
@@ -67,9 +77,9 @@ Le plugin fusionne `IMyDbContext` dans le contexte de votre procédure, rendant 
 
 ```ts title="packages/api/src/procedures/users.ts" {7-8}
 import { z } from 'zod';
-import { authenticatedProcedure } from '../router.js';
+import { dbProcedure } from '../router.js';
 
-export const listUsers = authenticatedProcedure
+export const listUsers = dbProcedure
   .output(z.array(z.object({ id: z.string(), name: z.string() })))
   .query(async ({ ctx }) => {
     // ctx.myDb is the Prisma client — typed as Awaited<ReturnType<typeof getPrisma>>
@@ -102,7 +112,11 @@ Les tokens IAM RDS expirent après **15 minutes**. L'adaptateur MySQL capture le
 
 ## Bases de Données Multiples
 
-Vous pouvez connecter des bases de données supplémentaires en exécutant à nouveau le générateur avec une cible différente. Chaque base de données obtient son propre plugin et interface de contexte :
+Vous pouvez connecter des bases de données supplémentaires en exécutant à nouveau le générateur avec une cible différente. Chaque base de données obtient son propre plugin et interface de contexte, et chacune est ajoutée à `Context` :
+
+```ts title="packages/api/src/init.ts"
+export type Context = IMiddlewareContext & IMyDbContext & IOtherDbContext;
+```
 
 ```ts title="packages/api/src/router.ts"
 export const dbProcedure = t.procedure
