@@ -77,9 +77,6 @@ export default defineConfig({
     coverage: { reportsDirectory: '../coverage/e2e', provider: 'v8' },
     pool: 'threads',
     isolate: true,
-    // One worker: each test already spawns an nx build that saturates the
-    // machine, and parallelism comes from sharding across machines.
-    maxWorkers: 1,
     testTimeout: 120 * 60 * 1000, /// 120 mins for long running e2e tests (eg deploy)
     hookTimeout: 2 * 60 * 1000, /// 2 mins — corepack activation + rmSync on Windows can be slow
   },
