@@ -987,6 +987,89 @@ describe('react-website generator', () => {
       expect(tree.read(indexRoutePath, 'utf-8')).toBe(userIndexRoute);
       expect(tree.read(configPath, 'utf-8')).toBe(userConfig);
     });
+
+    it('should not duplicate the shared shadcn tsconfig reference on re-run', async () => {
+      const shadcnOptions: TsReactWebsiteGeneratorSchema = {
+        ...options,
+        ux: 'shadcn',
+      };
+      await tsReactWebsiteGenerator(tree, shadcnOptions);
+
+      const tsconfigAppPath = 'test-app/tsconfig.app.json';
+      const sharedShadcnRefs = () =>
+        (
+          readJson<{ references?: { path: string }[] }>(tree, tsconfigAppPath)
+            .references ?? []
+        ).filter((ref) => ref.path.startsWith('../packages/common/shadcn'));
+
+      expect(sharedShadcnRefs()).toHaveLength(1);
+
+      await tsReactWebsiteGenerator(tree, shadcnOptions);
+
+      expect(sharedShadcnRefs()).toHaveLength(1);
+    });
+
+    it('should not duplicate the shared shadcn tsconfig reference after nx sync has resolved it', async () => {
+      const shadcnOptions: TsReactWebsiteGeneratorSchema = {
+        ...options,
+        ux: 'shadcn',
+      };
+      await tsReactWebsiteGenerator(tree, shadcnOptions);
+
+      const tsconfigAppPath = 'test-app/tsconfig.app.json';
+      // `nx sync` rewrites a reference to a project's tsconfig.json into the
+      // specific tsconfig it resolves to, which is the state a real workspace
+      // is in by the time the generator is re-run.
+      updateJson(tree, tsconfigAppPath, (tsconfig) => ({
+        ...tsconfig,
+        references: (tsconfig.references ?? []).map((ref: { path: string }) =>
+          ref.path.endsWith('common/shadcn/tsconfig.json')
+            ? { path: ref.path.replace(/tsconfig\.json$/, 'tsconfig.lib.json') }
+            : ref,
+        ),
+      }));
+
+      await tsReactWebsiteGenerator(tree, shadcnOptions);
+
+      const refs = (
+        readJson<{ references?: { path: string }[] }>(tree, tsconfigAppPath)
+          .references ?? []
+      ).filter((ref) => ref.path.startsWith('../packages/common/shadcn'));
+      expect(refs).toEqual([
+        { path: '../packages/common/shadcn/tsconfig.lib.json' },
+      ]);
+    });
+
+    it('should preserve the order of existing references on re-run', async () => {
+      const shadcnOptions: TsReactWebsiteGeneratorSchema = {
+        ...options,
+        ux: 'shadcn',
+      };
+      await tsReactWebsiteGenerator(tree, shadcnOptions);
+
+      const tsconfigAppPath = 'test-app/tsconfig.app.json';
+      // The shadcn reference resolved by `nx sync`, with another project's
+      // reference after it - the shape a website connected to an API is in.
+      updateJson(tree, tsconfigAppPath, (tsconfig) => ({
+        ...tsconfig,
+        references: [
+          { path: '../packages/common/shadcn/tsconfig.lib.json' },
+          { path: '../packages/my-api/tsconfig.lib.json' },
+        ],
+      }));
+
+      await tsReactWebsiteGenerator(tree, shadcnOptions);
+
+      // Re-appending the shadcn reference rather than recognising the resolved
+      // one would swap these two, which leaves the workspace out of sync.
+      expect(
+        readJson<{ references?: { path: string }[] }>(tree, tsconfigAppPath)
+          .references,
+      ).toEqual([
+        { path: '../packages/common/shadcn/tsconfig.lib.json' },
+        { path: '../packages/my-api/tsconfig.lib.json' },
+      ]);
+    });
   });
 
   describe('infra=none idempotency', () => {

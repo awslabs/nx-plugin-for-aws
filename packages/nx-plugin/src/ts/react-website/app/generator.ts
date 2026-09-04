@@ -64,6 +64,7 @@ import {
 } from '../../../utils/website-constructs/website-constructs.js';
 import {
   configureTsProject,
+  mergeTsProjectDirReference,
   TS_PROJECT_DEPENDENCIES,
 } from '../../lib/ts-project-utils.js';
 import { VITEST_DEPENDENCIES } from '../../lib/vitest.js';
@@ -396,14 +397,9 @@ export async function tsReactWebsiteGenerator(
   )
     .split(sep)
     .join('/');
-  const sharedShadcnTsconfigRef = relative(
+  const sharedShadcnProjectRef = relative(
     joinPathFragments(tree.root, websiteContentPath),
-    joinPathFragments(
-      tree.root,
-      PACKAGES_DIR,
-      SHARED_SHADCN_DIR,
-      'tsconfig.json',
-    ),
+    joinPathFragments(tree.root, PACKAGES_DIR, SHARED_SHADCN_DIR),
   )
     .split(sep)
     .join('/');
@@ -631,14 +627,10 @@ export async function tsReactWebsiteGenerator(
       },
       references:
         ux === 'shadcn'
-          ? [
-              ...(tsconfig.references ?? []).filter(
-                (ref) => ref.path !== sharedShadcnTsconfigRef,
-              ),
-              {
-                path: sharedShadcnTsconfigRef,
-              },
-            ]
+          ? mergeTsProjectDirReference(
+              tsconfig.references,
+              sharedShadcnProjectRef,
+            )
           : tsconfig.references,
     }),
   );
@@ -683,6 +675,7 @@ export async function tsReactWebsiteGenerator(
       ? [joinPathFragments(libraryRoot, 'src', 'routeTree.gen.ts')]
       : [],
   });
+
   // The generated vite.config.mts imports these, and Nx's inferred `@nx/vite`
   // plugin loads that config when computing the project graph — so they must be
   // installed even if the caller would otherwise prefer to defer.

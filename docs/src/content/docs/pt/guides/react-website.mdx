@@ -50,16 +50,23 @@ O gerador criará a seguinte estrutura de projeto no diretório `<directory>/<na
     - config.ts Application configuration (eg. logo)
     - components
       - AppLayout Components for the overall layout and navigation bar
+      - app-sidebar.tsx Sidebar navigation (shadcn only)
+      - alert.tsx Alert component wrapping your UX provider's own
+      - spinner.tsx Spinner component wrapping your UX provider's own
     - hooks
       - useAppLayout.tsx Hook for adjusting the AppLayout from nested components (Cloudscape only)
     - routes
+      - \_\_root.tsx Root route, wrapping every page in the AppLayout
       - index.tsx Example route (or page) for TanStack Router
+    - routeTree.gen.ts Route tree, generated and maintained by TanStack Router
     - styles.css Global styles
   - vite.config.mts Vite and Vitest configuration
+  - project.json Nx project defining the project's targets
   - tsconfig.json Base TypeScript configuration for source and tests
   - tsconfig.app.json TypeScript configuration for source code
   - tsconfig.spec.json TypeScript configuration for tests
   - package.json Project manifest defining the project's package name and dependencies
+  - README.md Project README
 </FileTree>
 
 :::note[Sem TanStack Router]
@@ -157,26 +164,32 @@ Seu site vem com [TanStack Router](https://tanstack.com/router/v1) configurado p
 
 Você pode usar o componente `Link` ou o hook `useNavigate` para navegar entre páginas:
 
-```tsx {1, 4, 8-9, 14}
+```tsx {1, 8, 12-13, 18}
 import { Link, useNavigate } from '@tanstack/react-router';
 
-export const MyComponent = () => {
+export const MyComponent = ({
+  createProduct,
+}: {
+  createProduct: () => Promise<string>;
+}) => {
   const navigate = useNavigate();
 
   const submit = async () => {
-    const id = await ...
+    const id = await createProduct();
     // Use `navigate` for redirecting after some asynchronous action
-    navigate({ to: '/products/$id', { params: { id }} });
+    navigate({ to: '/products/$id', params: { id } });
   };
 
   return (
     <>
       <Link to="/products">Cancel</Link>
-      <Button onClick={submit}>Submit</Button>
+      <button onClick={submit}>Submit</button>
     </>
-  )
+  );
 };
 ```
+
+`$id` no caminho `to` é um [parâmetro de caminho](https://tanstack.com/router/latest/docs/framework/react/guide/path-params), fornecido através de `params`. Troque o `<button>` simples pelo componente de botão do seu kit de UX conforme necessário.
 
 Para mais detalhes, confira a documentação do [TanStack Router](https://tanstack.com/router/latest/docs/framework/react/overview).
 
@@ -191,13 +204,13 @@ Para implantar seu site, recomendamos usar o <Link path="guides/typescript-infra
 Você pode usar o construct CDK gerado para você em `packages/common/constructs` para implantar seu site.
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {3, 9}
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { MyWebsite } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     new MyWebsite(this, 'MyWebsite');
   }
@@ -266,13 +279,13 @@ A distribuição CloudFront é protegida por um [AWS WAFv2](https://docs.aws.ama
 Para desativar, defina `enableWaf` como `false` ao criar seu site:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {10,15-18}
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { MyWebsite, suppressRules } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     const website = new MyWebsite(this, 'MyWebsite', {
       enableWaf: false,
@@ -318,14 +331,14 @@ O bucket do site, o bucket de log da distribuição CloudFront e o grupo CloudWa
 Se você quiser usar uma configuração de criptografia diferente, passe as props `encryption`, `encryptionKey` e `enableKeyRotation` ao criar seu site:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {11}
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { BucketEncryption } from 'aws-cdk-lib/aws-s3';
 import { MyWebsite } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     new MyWebsite(this, 'MyWebsite', {
       encryption: BucketEncryption.S3_MANAGED,
@@ -401,11 +414,12 @@ module "my_website" {
 ```
 
 :::caution[Checkov: S3_MANAGED]
-Escolher `S3_MANAGED` falha na verificação de segurança `checkov` com `CKV_AWS_145` nos buckets de site e log de distribuição. O target `test` fornecido não aceita um `--config-file`, mas `checkov` descobre automaticamente um `.checkov.yaml` em seu diretório de trabalho, então coloque um em `packages/infra/src`:
+Escolher `S3_MANAGED` falha no target `checkov` do seu projeto com `CKV_AWS_145` nos buckets de site e log de distribuição. O target executa `checkov` contra o `checkov.yml` do seu próprio projeto, então adicione a verificação à sua lista `skip-check`:
 
-```yaml title="packages/infra/src/.checkov.yaml"
+```yaml title="packages/infra/checkov.yml" {3}
 skip-check:
-  - CKV_AWS_145
+  # ...
+  - CKV_AWS_145 # S3 buckets are not KMS encrypted when encryption is S3_MANAGED
 ```
 :::
 
@@ -439,11 +453,12 @@ module "my_website" {
 ```
 
 :::caution[Checkov: rotação de chave desativada]
-Desativar a rotação de chave na chave criada automaticamente falha na verificação de segurança `checkov` com `CKV_AWS_7`. Adicione-o ao mesmo `.checkov.yaml`:
+Desativar a rotação de chave na chave criada automaticamente falha no target `checkov` do seu projeto com `CKV_AWS_7`. Adicione-o à mesma lista `skip-check` em `packages/infra/checkov.yml`:
 
-```yaml title="packages/infra/src/.checkov.yaml"
+```yaml title="packages/infra/checkov.yml" {3}
 skip-check:
-  - CKV_AWS_7
+  # ...
+  - CKV_AWS_7 # Key rotation is disabled on the website's KMS key
 ```
 :::
 </Fragment>
@@ -458,14 +473,14 @@ Por padrão, a distribuição usa o nome de domínio padrão do CloudFront (`*.c
 Passe as props `certificate` e `domainNames` ao criar seu site:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {11-13}
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { Certificate } from 'aws-cdk-lib/aws-certificatemanager';
 import { MyWebsite } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     new MyWebsite(this, 'MyWebsite', {
       domainNames: ['www.example.com'],
@@ -508,13 +523,13 @@ O construct CDK `RuntimeConfig` pode ser usado para adicionar e recuperar config
 Seu construct CDK de site implantará o namespace `connection` da configuração de runtime como um arquivo `runtime-config.json` na raiz do seu bucket S3.
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { MyWebsite, MyApi } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     // Website can be declared at any point, since runtime config is resolved lazily
     new MyWebsite(this, 'MyWebsite');
@@ -581,6 +596,10 @@ const MyComponent = () => {
   const apiUrl = runtimeConfig.apis.MyApi;
 };
 ```
+
+:::note[Adicionado quando você precisa]
+`src/hooks/useRuntimeConfig.tsx` e `src/components/RuntimeConfig` são adicionados ao seu site pelo gerador <Link path="/guides/react-website-auth">`ts#website#auth`</Link> e pelos geradores <Link path="guides/connection">`connection`</Link>, já que são eles que colocam valores na configuração de runtime. Um site sem nenhum dos dois não tem configuração de runtime para ler, então o hook não é fornecido até que um deles seja executado.
+:::
 
 :::note[Configuração de Runtime]
 Para detalhes sobre como a configuração de runtime é armazenada no AWS AppConfig e como consumidores do lado do servidor (funções Lambda, agentes) podem recuperá-la, consulte o guia <Link path="guides/runtime-config">Configuração de Runtime</Link>.

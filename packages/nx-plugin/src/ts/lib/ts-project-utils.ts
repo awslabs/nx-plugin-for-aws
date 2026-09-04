@@ -61,6 +61,34 @@ export const mergeTsReferences = (
 };
 
 /**
+ * Merges a reference to another project's directory into existing TypeScript
+ * project references, treating any reference that resolves inside that
+ * directory as the same reference.
+ *
+ * `nx sync` rewrites a reference to a project's `tsconfig.json` into the
+ * specific `tsconfig.lib.json` it resolves to, so matching on the exact path
+ * alone would append a second reference to the same project on every re-run —
+ * which leaves the workspace out of sync and fails the next `build`.
+ *
+ * `projectDirRef` is the referenced project's directory, relative to the
+ * tsconfig being updated (eg `../common/shadcn`).
+ */
+export const mergeTsProjectDirReference = (
+  existing: TsConfigReference[] | undefined,
+  projectDirRef: string,
+): TsConfigReference[] => {
+  const references = [...(existing ?? [])];
+  const alreadyReferenced = references.some(
+    (ref) =>
+      ref.path === projectDirRef ||
+      ref.path.startsWith(`${projectDirRef}/tsconfig`),
+  );
+  return alreadyReferenced
+    ? references
+    : [...references, { path: `${projectDirRef}/tsconfig.json` }];
+};
+
+/**
  * Updates typescript projects
  */
 export const configureTsProject = async <const D extends DependencyDeclaration>(
