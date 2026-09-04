@@ -207,15 +207,16 @@ export async function tsInfraGenerator(
       config.targets.deploy = {
         executor: 'nx:run-commands',
         dependsOn: ['^assemble', 'compile'],
-        // No --express here when stages are configured: this target deploys
-        // whichever stage is named, including beta and prod.
+        // No --express: this target deploys whichever stage is named, including
+        // beta and prod, so it waits for full resource stabilization. Express
+        // mode belongs to `deploy-sandbox`, which only ever deploys a sandbox.
         options: stageConfig
           ? withCdkEnv({
               command: `tsx packages/common/scripts/src/infra/infra-deploy.ts ${libraryRoot}`,
             })
           : withCdkEnv({
               cwd: '{projectRoot}',
-              command: 'cdk deploy --require-approval=never --express',
+              command: 'cdk deploy --require-approval=never',
             }),
       };
       config.targets['deploy-sandbox'] = {

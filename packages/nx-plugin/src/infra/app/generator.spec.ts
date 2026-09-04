@@ -85,7 +85,7 @@ describe('infra generator', () => {
       executor: 'nx:run-commands',
       options: {
         cwd: '{projectRoot}',
-        command: 'cdk deploy --require-approval=never --express',
+        command: 'cdk deploy --require-approval=never',
       },
       dependsOn: ['^assemble', 'compile'],
     });
@@ -314,12 +314,27 @@ describe('infra generator', () => {
     await tsInfraGenerator(tree, options);
     const config = readProjectConfiguration(tree, '@proj/test');
     expect(config.targets.deploy.options.command).toBe(
-      'cdk deploy --require-approval=never --express',
+      'cdk deploy --require-approval=never',
     );
     expect(config.targets.deploy.options.cwd).toBe('{projectRoot}');
     expect(config.targets.destroy.options.command).toBe('cdk destroy');
     expect(config.targets.destroy.options.cwd).toBe('{projectRoot}');
   });
+
+  // Express mode returns before resources have stabilized, so it belongs to the
+  // sandbox alone: `deploy` can name any stage, including a production one.
+  it.each([[true], [false]])(
+    'should reserve express mode for deploy-sandbox with stageConfig=%s',
+    async (stageConfig) => {
+      await tsInfraGenerator(tree, { ...options, stageConfig });
+      const { targets } = readProjectConfiguration(tree, '@proj/test');
+
+      expect(targets.deploy.options.command).not.toContain('--express');
+      expect(targets['deploy-sandbox'].options.command).toContain('--express');
+      // `deploy-ci` deploys a pre-synthesized assembly from a pipeline.
+      expect(targets['deploy-ci'].options.command).not.toContain('--express');
+    },
+  );
 
   it('should not import from infra-config in main.ts by default', async () => {
     await tsInfraGenerator(tree, options);
