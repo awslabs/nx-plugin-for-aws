@@ -547,6 +547,124 @@ describe('commands', () => {
     });
   });
 
+  describe('overrides', () => {
+    it('should pass an overridden name to a project generator', () => {
+      const commands = emitCommands(graph([node('my-api', 'ts#trpc-api')]), {
+        ...EMIT,
+        overrides: { 'my-api': { generatorName: 'MyApi' } },
+      });
+      expect(commands.map((c) => c.command)).toContain(
+        'nx g @aws/nx-plugin:ts#api MyApi --framework=trpc',
+      );
+    });
+
+    it('should still reference an overridden project by its kebab-cased name', () => {
+      const commands = emitCommands(
+        graph(
+          [node('website', 'ts#react-website'), node('my-api', 'ts#trpc-api')],
+          [{ id: 'e1', source: 'website', target: 'my-api' }],
+        ),
+        {
+          ...EMIT,
+          overrides: {
+            website: { generatorName: 'MyWebsite' },
+            'my-api': { generatorName: 'MyApi' },
+          },
+        },
+      );
+      expect(commands.map((c) => c.command)).toContain(
+        'nx g @aws/nx-plugin:connection --sourceProject=my-website --targetProject=my-api',
+      );
+    });
+
+    it('should target a follow-up generator at the overridden project', () => {
+      const commands = emitCommands(
+        graph([node('website', 'ts#react-website')]),
+        { ...EMIT, overrides: { website: { generatorName: 'GameUI' } } },
+      );
+      expect(commands.map((c) => c.command)).toContain(
+        'nx g @aws/nx-plugin:ts#website#auth --project=game-ui',
+      );
+    });
+
+    it('should leave the name off when the generator should derive it', () => {
+      const commands = emitCommands(
+        graph([node('mcp', 'ts#mcp-server', { hostName: 'tools' })]),
+        { ...EMIT, overrides: { mcp: { generatorName: null } } },
+      );
+      expect(commands.map((c) => c.command)).toContain(
+        'nx g @aws/nx-plugin:ts#mcp-server --project=tools',
+      );
+    });
+
+    it('should reference a derived component by the name the generator records', () => {
+      const commands = emitCommands(
+        graph(
+          [
+            node('agent', 'py#agent', {
+              hostName: 'py-agents',
+              options: { protocol: 'a2a' },
+            }),
+            node('mcp', 'ts#mcp-server', { hostName: 'tools' }),
+          ],
+          [{ id: 'e1', source: 'agent', target: 'mcp' }],
+        ),
+        {
+          ...EMIT,
+          overrides: {
+            agent: { generatorName: null, componentName: 'agent' },
+            mcp: { generatorName: null, componentName: 'mcp-server' },
+          },
+        },
+      );
+      expect(commands.map((c) => c.command)).toContain(
+        'nx g @aws/nx-plugin:connection --sourceProject=py_agents --targetProject=tools --sourceComponent=agent --targetComponent=mcp-server',
+      );
+    });
+
+    it('should pin option values on a node generator', () => {
+      const commands = emitCommands(graph([node('my-api', 'ts#trpc-api')]), {
+        ...EMIT,
+        overrides: { 'my-api': { options: { auth: 'cognito' } } },
+      });
+      expect(commands.map((c) => c.command)).toContain(
+        'nx g @aws/nx-plugin:ts#api my-api --framework=trpc --auth=cognito',
+      );
+    });
+
+    it('should pin option values on a follow-up generator', () => {
+      const commands = emitCommands(
+        graph([node('website', 'ts#react-website')]),
+        {
+          ...EMIT,
+          overrides: {
+            website: {
+              followUps: {
+                'ts#website#auth': {
+                  cognitoDomain: 'my-demo',
+                  allowSignup: true,
+                },
+              },
+            },
+          },
+        },
+      );
+      expect(commands.map((c) => c.command)).toContain(
+        'nx g @aws/nx-plugin:ts#website#auth --project=website --cognitoDomain=my-demo --allowSignup=true',
+      );
+    });
+
+    it('should leave a node with no override untouched', () => {
+      const withOverrides = emitCommands(
+        graph([node('my-api', 'ts#trpc-api'), node('db', 'ts#dynamodb')]),
+        { ...EMIT, overrides: { db: { generatorName: 'MyTable' } } },
+      );
+      expect(withOverrides.map((c) => c.command)).toContain(
+        'nx g @aws/nx-plugin:ts#api my-api --framework=trpc',
+      );
+    });
+  });
+
   describe('infrastructure project', () => {
     it('should append a CDK infra project last', () => {
       const commands = emitCommands(

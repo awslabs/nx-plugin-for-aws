@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { findEdgeType } from '../../lib/graph-builder/catalog';
+import type { NodeOverride } from '../../lib/graph-builder/commands';
 import type { Graph } from '../../lib/graph-builder/model';
 import { NODE_HEIGHT, NODE_WIDTH } from './geometry';
 
@@ -31,6 +32,22 @@ export interface Preset {
   readonly nodes: readonly PresetNode[];
   /** Connections as `[sourceName, targetName]` pairs. */
   readonly edges: readonly [string, string][];
+  /**
+   * Option values the commands copied from the read-only embedded graph pin,
+   * keyed by node name.
+   *
+   * A preset backing a guide that also walks the reader through the same
+   * generators in prose must scaffold exactly what the prose does, down to the
+   * name casing the generated construct classes follow and the options belonging
+   * to a follow-up generator. Those go beyond what a node in the graph can
+   * express, so they are declared here and layered onto the emitted commands.
+   *
+   * The graph itself is unaffected: a node keeps the name the diagram shows.
+   * Only the embedded graph applies these — the interactive builder hands the
+   * preset over as an editable starting point, where the graph is what the user
+   * sees and edits, so it stays the single source of the commands.
+   */
+  readonly overrides?: Readonly<Record<string, NodeOverride>>;
 }
 
 export const PRESETS: readonly Preset[] = [
@@ -39,8 +56,9 @@ export const PRESETS: readonly Preset[] = [
     label: 'Dungeon Adventure',
     description:
       'The full-stack agentic game from the Dungeon Adventure tutorial: a React website, a tRPC API, a Python story agent, an inventory MCP server, and a DynamoDB table.',
+    // Listed in the order the tutorial's step-by-step route runs the generators,
+    // so the copied commands read the same way round as the prose.
     nodes: [
-      { type: 'ts#react-website', name: 'game-ui', column: 0, row: 0 },
       { type: 'ts#trpc-api', name: 'game-api', column: 1, row: 0 },
       {
         type: 'py#agent',
@@ -58,25 +76,48 @@ export const PRESETS: readonly Preset[] = [
         row: 1,
       },
       { type: 'ts#dynamodb', name: 'dungeon-db', column: 3, row: 0 },
+      { type: 'ts#react-website', name: 'game-ui', column: 0, row: 0 },
     ],
     edges: [
       ['game-ui', 'game-api'],
+      ['story-agent', 'inventory-server'],
       ['game-ui', 'story-agent'],
       ['game-api', 'dungeon-db'],
-      ['story-agent', 'inventory-server'],
       ['inventory-server', 'dungeon-db'],
     ],
+    // Pinned to what the tutorial's step-by-step route runs, so both routes
+    // reach one workspace: the names the tutorial's code samples refer to
+    // (`GameApi`, `GameUI`, `DungeonDb`, and the generator-derived agent and MCP
+    // server names) and the auth options Module 4 relies on.
+    overrides: {
+      'game-api': { generatorName: 'GameApi' },
+      'game-ui': {
+        generatorName: 'GameUI',
+        followUps: {
+          'ts#website#auth': { cognitoDomain: 'game-ui', allowSignup: true },
+        },
+      },
+      'dungeon-db': { generatorName: 'DungeonDb' },
+      'story-agent': { generatorName: null, componentName: 'agent' },
+      'inventory-server': { generatorName: null, componentName: 'mcp-server' },
+    },
   },
   {
     id: 'quick-start',
     label: 'Quick start',
     description:
       'The full-stack starter from the Quick Start guide: a React website with Cognito authentication calling a type-safe tRPC API.',
+    // The API first, matching the order the guide's own steps run in.
     nodes: [
-      { type: 'ts#react-website', name: 'demo-website', column: 0, row: 0 },
       { type: 'ts#trpc-api', name: 'demo-api', column: 1, row: 0 },
+      { type: 'ts#react-website', name: 'demo-website', column: 0, row: 0 },
     ],
     edges: [['demo-website', 'demo-api']],
+    overrides: {
+      'demo-website': {
+        followUps: { 'ts#website#auth': { cognitoDomain: 'my-demo' } },
+      },
+    },
   },
   {
     id: 'trpc-web-app',

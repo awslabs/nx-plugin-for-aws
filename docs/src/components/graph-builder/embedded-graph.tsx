@@ -4,7 +4,10 @@
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { nodeType } from '../../lib/graph-builder/catalog';
-import type { EmitOptions } from '../../lib/graph-builder/commands';
+import type {
+  EmitOptions,
+  NodeOverride,
+} from '../../lib/graph-builder/commands';
 import { toScript } from '../../lib/graph-builder/commands';
 import {
   edgePath,
@@ -37,6 +40,13 @@ interface Props {
    * inside a workspace the page has already had the reader create.
    */
   skipWorkspace?: boolean;
+  /**
+   * Option values the copied commands pin, keyed by node name, layered over any
+   * the preset declares. A page walking the reader through the same generators
+   * in prose uses these to pin what the prose passes, so both routes scaffold
+   * one workspace.
+   */
+  overrides?: Readonly<Record<string, NodeOverride>>;
 }
 
 /** Padding kept around the diagram inside its box. */
@@ -59,12 +69,18 @@ export const EmbeddedGraph = ({
   iac = 'cdk',
   orientation = 'vertical',
   skipWorkspace = false,
+  overrides,
 }: Props) => {
   const preset = PRESETS.find((entry) => entry.id === presetId);
 
   const options: EmitOptions = useMemo(
-    () => ({ workspace, packageManager, iac }),
-    [workspace, packageManager, iac],
+    () => ({
+      workspace,
+      packageManager,
+      iac,
+      overrides: { ...preset?.overrides, ...overrides },
+    }),
+    [workspace, packageManager, iac, preset, overrides],
   );
 
   // Lay the preset out from its authored grid, honouring the flow axis: for a
@@ -124,9 +140,10 @@ export const EmbeddedGraph = ({
     return () => clearTimeout(timer);
   }, [copied]);
 
+  // Unannotated: the script is only ever copied, never shown, so it hands over
+  // commands that paste straight into a shell.
   const script = useMemo(
-    () =>
-      graph ? toScript(graph, options, { annotate: true, skipWorkspace }) : '',
+    () => (graph ? toScript(graph, options, { skipWorkspace }) : ''),
     [graph, options, skipWorkspace],
   );
 
