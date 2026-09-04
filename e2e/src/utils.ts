@@ -410,6 +410,52 @@ export const assertWorkspaceUsesPackageManager = (
   }
 };
 
+/** The package a plugin entry in `nx.json` resolves to, e.g. `@nx/js/typescript` -> `@nx/js`. */
+const pluginPackageName = (plugin: string): string => {
+  const parts = plugin.split('/');
+  return plugin.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0];
+};
+
+/**
+ * Assert every plugin registered in `nx.json` is declared in a package.json.
+ *
+ * A plugin is loaded by Nx itself, not imported by any source file, so nothing
+ * else catches an undeclared one: lint only sees imports, and Nx resolves
+ * plugins from its own directory, where a package manager may have placed the
+ * package as a transitive of another dependency. That makes the workspace build
+ * fine here while failing for a user whose install lays node_modules out
+ * differently.
+ */
+export const assertNxPluginsAreDeclared = (workspaceDir: string) => {
+  const readJson = (path: string) =>
+    existsSync(path) ? JSON.parse(readFileSync(path, 'utf-8')) : undefined;
+
+  const nxJson = readJson(join(workspaceDir, 'nx.json')) ?? {};
+  const rootPkg = readJson(join(workspaceDir, 'package.json')) ?? {};
+  const declared = new Set([
+    ...Object.keys(rootPkg.dependencies ?? {}),
+    ...Object.keys(rootPkg.devDependencies ?? {}),
+  ]);
+
+  const undeclared = (nxJson.plugins ?? [])
+    .map((entry: string | { plugin: string }) =>
+      typeof entry === 'string' ? entry : entry.plugin,
+    )
+    .map(pluginPackageName)
+    // Plugins the plugin itself provides are resolved from the workspace source.
+    .filter((name: string) => name !== '@aws/nx-plugin')
+    .filter((name: string) => !declared.has(name));
+
+  if (undeclared.length > 0) {
+    throw new Error(
+      `Plugins registered in nx.json but not declared in the root package.json: ${[
+        ...new Set<string>(undeclared),
+      ].join(', ')} — Nx may resolve them transitively here, but a user's ` +
+        `install can lay node_modules out so they are missing. Declare them in the generator.`,
+    );
+  }
+};
+
 // The ts#dynamodb generator already adds electrodb and @aws-sdk/client-dynamodb.
 // The Game API's actions.query procedure additionally needs the S3 client to
 // read the agent's conversation history.

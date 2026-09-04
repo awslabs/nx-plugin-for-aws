@@ -7,7 +7,12 @@ import { join } from 'node:path';
 import { ensureDirSync } from 'fs-extra';
 import { describe, it } from 'vitest';
 import type { ConnectionKey } from '../../../packages/nx-plugin/src/connection/supported-connections';
-import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
+import {
+  assertNxPluginsAreDeclared,
+  createTestWorkspace,
+  runCLI,
+  tmpProjPath,
+} from '../utils';
 
 /**
  * Verifies every generator builds in isolation, catching a generator that
@@ -168,6 +173,7 @@ const freshWorkspace = async (generator: string): Promise<string> => {
 
 const syncAndBuild = async (cwd: string) => {
   const opts = { cwd, env: { NX_DAEMON: 'false' } };
+  assertNxPluginsAreDeclared(cwd);
   await runCLI(`sync --verbose`, opts);
   await runCLI(
     `run-many --target build --all --output-style=stream --verbose`,
