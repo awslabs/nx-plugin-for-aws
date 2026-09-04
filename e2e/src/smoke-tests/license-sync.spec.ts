@@ -53,7 +53,7 @@ describe('smoke test - license-sync', () => {
 
     // Generate a Python project (after license generator)
     await runCLI(
-      `generate @aws/nx-plugin:py#project --name=py-lib --projectType=application --no-interactive`,
+      `generate @aws/nx-plugin:py#project --name=py-lib --type=application --no-interactive`,
       opts,
     );
 

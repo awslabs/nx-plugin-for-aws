@@ -120,7 +120,7 @@ export const runGeneratorMatrix = async (
 
   // Python project + lambda function.
   await runCLI(
-    `generate @aws/nx-plugin:py#project --name=py-project --projectType=application --no-interactive${deferFlag}`,
+    `generate @aws/nx-plugin:py#project --name=py-project --type=application --no-interactive${deferFlag}`,
     opts,
   );
   await runCLI(
@@ -226,7 +226,7 @@ export const runGeneratorMatrix = async (
   // `py-project/my-function` Lambda would push that Lambda past the 250 MB
   // unzipped limit, since the bundle exports the whole package's deps.
   await runCLI(
-    `generate @aws/nx-plugin:py#project --name=py-langchain-project --projectType=application --no-interactive${deferFlag}`,
+    `generate @aws/nx-plugin:py#project --name=py-langchain-project --type=application --no-interactive${deferFlag}`,
     opts,
   );
   await runCLI(
