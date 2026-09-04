@@ -2,7 +2,8 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { defineConfig, transformWithEsbuild } from 'vite';
+import { transformWithEsbuild } from 'vite';
+import { defineConfig } from 'vitest/config';
 import { nxViteTsPaths } from '@nx/vite/plugins/nx-tsconfig-paths.plugin';
 import { nxCopyAssetsPlugin } from '@nx/vite/plugins/nx-copy-assets.plugin';
 import * as fs from 'fs';
@@ -75,12 +76,7 @@ export default defineConfig({
     globalSetup: 'src/global-setup.ts',
     coverage: { reportsDirectory: '../coverage/e2e', provider: 'v8' },
     pool: 'threads',
-    poolOptions: {
-      threads: {
-        isolate: true,
-        singleThread: true,
-      },
-    },
+    isolate: true,
     testTimeout: 120 * 60 * 1000, /// 120 mins for long running e2e tests (eg deploy)
     hookTimeout: 2 * 60 * 1000, /// 2 mins — corepack activation + rmSync on Windows can be slow
   },
