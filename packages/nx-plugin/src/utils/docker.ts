@@ -64,6 +64,17 @@ export const NODE_IMAGE_DEPENDENCIES = [
 ] as const satisfies readonly { name: ITsDepVersion }[];
 
 /**
+ * Packages the prisma CLI install in a vended RDB migration `Dockerfile` pins.
+ * The CLI's own ranges resolve both below a known HIGH vulnerability's fix, so
+ * the image overrides them. Spread through `ownedElsewhere` for the same reason
+ * as {@link NODE_IMAGE_DEPENDENCIES}.
+ */
+export const PRISMA_IMAGE_DEPENDENCIES = [
+  { name: 'deepmerge-ts' },
+  { name: 'mysql2' },
+] as const satisfies readonly { name: ITsDepVersion }[];
+
+/**
  * Packages the AWS Distro for OpenTelemetry install in a vended `Dockerfile`
  * pins, for the images that auto-instrument with it. Spread through
  * `ownedElsewhere` for the same reason as {@link NODE_IMAGE_DEPENDENCIES}.

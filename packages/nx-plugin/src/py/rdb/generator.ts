@@ -355,33 +355,34 @@ export const pyRdbGenerator = async (
   };
 
   if (options.infra !== 'none') {
-    if (iac === 'terraform') {
-      projectConfig.targets.docker = {
-        cache: IMAGE_BUILD_CACHE,
-        executor: 'nx:run-commands',
-        options: {
-          commands: [
-            `${containerEngine} build --platform linux/arm64 --provenance=false -t ${migrationDockerImageTag} ${migrationBundleDir}`,
-            `${containerEngine} build --platform linux/arm64 --provenance=false -t ${createDbUserDockerImageTag} ${createDbUserBundleDir}`,
-          ],
-          parallel: false,
-        },
-        dependsOn: ['bundle-migration', 'bundle-create-db-user'],
-      };
-      addArtifactDependencyToTargets(projectConfig, 'docker');
+    // Both images ship under either provider — Terraform pushes the locally
+    // built tags, CDK builds the same contexts as image assets — so the build
+    // and its scan are wired up for either.
+    projectConfig.targets.docker = {
+      cache: IMAGE_BUILD_CACHE,
+      executor: 'nx:run-commands',
+      options: {
+        commands: [
+          `${containerEngine} build --platform linux/arm64 --provenance=false -t ${migrationDockerImageTag} ${migrationBundleDir}`,
+          `${containerEngine} build --platform linux/arm64 --provenance=false -t ${createDbUserDockerImageTag} ${createDbUserBundleDir}`,
+        ],
+        parallel: false,
+      },
+      dependsOn: ['bundle-migration', 'bundle-create-db-user'],
+    };
+    addArtifactDependencyToTargets(projectConfig, 'docker');
 
-      addDockerScanTarget(
-        tree,
-        {
-          project: projectConfig,
-          containerEngine,
-          trivyTargetName: 'trivy',
-          dockerTargetName: 'docker',
-          imageTags: [migrationDockerImageTag, createDbUserDockerImageTag],
-        },
-        DEPENDENCIES,
-      );
-    }
+    addDockerScanTarget(
+      tree,
+      {
+        project: projectConfig,
+        containerEngine,
+        trivyTargetName: 'trivy',
+        dockerTargetName: 'docker',
+        imageTags: [migrationDockerImageTag, createDbUserDockerImageTag],
+      },
+      DEPENDENCIES,
+    );
     addDependencyToTargetIfNotPresent(
       projectConfig,
       'build',

@@ -32,6 +32,7 @@ import {
   IMAGE_BUILD_CACHE,
   NODE_IMAGE_DEPENDENCIES,
   nodeImageVersions,
+  PRISMA_IMAGE_DEPENDENCIES,
 } from '../../utils/docker.js';
 import { formatFilesInSubtree } from '../../utils/format.js';
 import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs.js';
@@ -99,6 +100,7 @@ export const DEPENDENCIES = declareDependencies<TsRdbMetadata>()({
     ...ownedElsewhere(SHARED_CONSTRUCTS_DEPENDENCIES),
     ...ownedElsewhere(SHARED_RDB_SCRIPTS_DEPENDENCIES),
     ...ownedElsewhere(NODE_IMAGE_DEPENDENCIES),
+    ...ownedElsewhere(PRISMA_IMAGE_DEPENDENCIES),
   ],
 });
 
@@ -164,6 +166,8 @@ export const tsRdbGenerator = async (
     databasePackageAlias: fullyQualifiedName,
     databaseProvider: options.engine === 'mysql' ? 'mysql' : 'postgresql',
     prismaVersion: TS_VERSIONS.prisma,
+    deepmergeTsVersion: TS_VERSIONS['deepmerge-ts'],
+    mysql2Version: TS_VERSIONS.mysql2,
     ...nodeImageVersions(),
     prismaAdapterPackage:
       options.engine === 'mysql'
@@ -341,29 +345,30 @@ export const tsRdbGenerator = async (
     options.infra !== 'none' ? await resolveIac(tree, options.iac) : undefined;
 
   if (options.infra !== 'none') {
-    if (iac === 'terraform') {
-      projectConfig.targets['docker'] = {
-        cache: IMAGE_BUILD_CACHE,
-        executor: 'nx:run-commands',
-        options: {
-          command: `${containerEngine} build --platform linux/arm64 --provenance=false -t ${migrationDockerImageTag} ${migrationBundleDir}`,
-        },
-        dependsOn: ['bundle'],
-      };
-      addArtifactDependencyToTargets(projectConfig, 'docker');
+    // The migration image ships under both providers — Terraform pushes the
+    // locally built tag, CDK builds the same context as an image asset — so the
+    // build and its scan are wired up for either.
+    projectConfig.targets['docker'] = {
+      cache: IMAGE_BUILD_CACHE,
+      executor: 'nx:run-commands',
+      options: {
+        command: `${containerEngine} build --platform linux/arm64 --provenance=false -t ${migrationDockerImageTag} ${migrationBundleDir}`,
+      },
+      dependsOn: ['bundle'],
+    };
+    addArtifactDependencyToTargets(projectConfig, 'docker');
 
-      addDockerScanTarget(
-        tree,
-        {
-          project: projectConfig,
-          containerEngine,
-          trivyTargetName: 'trivy',
-          dockerTargetName: 'docker',
-          imageTags: [migrationDockerImageTag],
-        },
-        DEPENDENCIES,
-      );
-    }
+    addDockerScanTarget(
+      tree,
+      {
+        project: projectConfig,
+        containerEngine,
+        trivyTargetName: 'trivy',
+        dockerTargetName: 'docker',
+        imageTags: [migrationDockerImageTag],
+      },
+      DEPENDENCIES,
+    );
     addArtifactDependencyToTargets(projectConfig, 'bundle');
   }
   addDependencyToTargetIfNotPresent(projectConfig, 'compile', 'generate');
