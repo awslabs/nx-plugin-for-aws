@@ -245,7 +245,7 @@ const createItem = useMutation({
   onSettled: () => {
     // This will run when the mutation completes (success or error)
     // Good place to invalidate queries that might be affected
-    queryClient.invalidateQueries({ queryKey: api.listItems.queryKey() });
+    queryClient.invalidateQueries({ queryKey: api.listItems.queryKey({}) });
   }
 });
 ```
@@ -456,7 +456,9 @@ function ItemList() {
 
 ### Xử lý lỗi
 
-Tích hợp bao gồm xử lý lỗi tích hợp sẵn với các response lỗi được định kiểu. Một kiểu `<operation-name>Error` được tạo ra để đóng gói các response lỗi có thể xảy ra được định nghĩa trong Smithy model. Mỗi lỗi có thuộc tính `status` và `error`, và bằng cách kiểm tra giá trị của `status`, bạn có thể thu hẹp đến một loại lỗi cụ thể.
+Tích hợp bao gồm xử lý lỗi tích hợp sẵn với các response lỗi được định kiểu. Một kiểu `<OperationName>Error` được tạo ra là một union của một thành viên `<OperationName><StatusCode>Error` cho mỗi trạng thái lỗi mà operation mô hình hóa. Mỗi thành viên có thuộc tính `status` và `error`, vì vậy việc chuyển đổi trên `status` sẽ thu hẹp `error` thành payload của trạng thái đó.
+
+Ví dụ dưới đây giả định `CreateItem` mô hình hóa [các cấu trúc lỗi được định nghĩa ở phần dưới của trang này](#errors) — một `InvalidRequestError` `422`, một `UnauthorizedError` `403` và một `InternalServerError` `500`. Chỉ các trạng thái mà model của bạn khai báo mới xuất hiện trong union, vì vậy một `case` cho trạng thái bạn chưa mô hình hóa là một lỗi biên dịch.
 
 ```tsx {12}
 import { useMutation } from '@tanstack/react-query';
@@ -471,8 +473,8 @@ function MyComponent() {
 
   if (createItem.error) {
     switch (createItem.error.status) {
-      case 400:
-        // error.error is typed as CreateItem400Response
+      case 422:
+        // error.error is typed as InvalidRequestErrorResponseContent
         return (
           <div>
             <h2>Invalid input:</h2>
@@ -480,7 +482,7 @@ function MyComponent() {
           </div>
         );
       case 403:
-        // error.error is typed as CreateItem403Response
+        // error.error is typed as UnauthorizedErrorResponseContent
         return (
           <div>
             <h2>Not authorized:</h2>
@@ -488,8 +490,7 @@ function MyComponent() {
           </div>
         );
       case 500:
-      case 502:
-        // error.error is typed as CreateItem5XXResponse
+        // error.error is typed as InternalServerErrorResponseContent
         return (
           <div>
             <h2>Server error:</h2>
@@ -520,8 +521,8 @@ function MyComponent() {
 
   if (error) {
     switch (error.status) {
-      case 400:
-        // error.error is typed as CreateItem400Response
+      case 422:
+        // error.error is typed as InvalidRequestErrorResponseContent
         return (
           <div>
             <h2>Invalid input:</h2>
@@ -529,7 +530,7 @@ function MyComponent() {
           </div>
         );
       case 403:
-        // error.error is typed as CreateItem403Response
+        // error.error is typed as UnauthorizedErrorResponseContent
         return (
           <div>
             <h2>Not authorized:</h2>
@@ -537,8 +538,7 @@ function MyComponent() {
           </div>
         );
       case 500:
-      case 502:
-        // error.error is typed as CreateItem5XXResponse
+        // error.error is typed as InternalServerErrorResponseContent
         return (
           <div>
             <h2>Server error:</h2>
@@ -573,21 +573,21 @@ Chúng ánh xạ đến OpenAPI vendor extensions bằng cách sử dụng [`@sp
 
 #### @query
 
-Sau đó áp dụng trait `@query` cho Smithy operation của bạn để buộc nó được coi là query:
+Áp dụng trait `@query` cho Smithy operation của bạn để buộc nó được coi là query:
 
 ```smithy
-@http(method: "POST", uri: "/items")
+@http(method: "POST", uri: "/search-items")
 @query
-operation ListItems {
-    input: ListItemsInput
-    output: ListItemsOutput
+operation SearchItems {
+    input: SearchItemsInput
+    output: SearchItemsOutput
 }
 ```
 
 Hook được tạo ra sẽ cung cấp `queryOptions` ngay cả khi nó sử dụng phương thức HTTP `POST`:
 
 ```tsx
-const items = useQuery(api.listItems.queryOptions());
+const items = useQuery(api.searchItems.queryOptions({ term: 'widget' }));
 ```
 
 #### @mutation
@@ -607,6 +607,8 @@ Hook được tạo ra sẽ cung cấp `mutationOptions` ngay cả khi nó sử 
 
 ```tsx
 const startProcessing = useMutation(api.startProcessing.mutationOptions());
+
+startProcessing.mutate({ id: 'some-id' });
 ```
 
 ### Custom Pagination Cursor
@@ -616,38 +618,59 @@ Mặc định, các hook được tạo ra giả định phân trang dựa trên
 Áp dụng trait `@cursor` với `inputToken` để thay đổi tên của tham số đầu vào được sử dụng cho token phân trang:
 
 ```smithy
-@http(method: "GET", uri: "/items")
+@http(method: "GET", uri: "/paged-items")
 @cursor(inputToken: "nextToken")
-operation ListItems {
+operation ListPagedItems {
     input := {
+      @httpQuery("nextToken")
       nextToken: String
+      @httpQuery("limit")
       limit: Integer
     }
     output := {
+      @required
       items: ItemList
       nextToken: String
     }
 }
 ```
 
+`infiniteQueryOptions` sau đó phân trang trên `nextToken`:
+
+```tsx
+const items = useInfiniteQuery({
+  ...api.listPagedItems.infiniteQueryOptions(
+    { limit: 10 },
+    { getNextPageParam: (lastPage) => lastPage.nextToken || undefined },
+  ),
+});
+```
+
 Nếu bạn không muốn tạo `infiniteQueryOptions` cho một operation có tham số đầu vào có tên `cursor`, bạn có thể vô hiệu hóa phân trang dựa trên cursor:
 
 ```smithy
+@http(method: "GET", uri: "/unpaged-items")
 @cursor(enabled: false)
-operation ListItems {
+operation ListUnpagedItems {
     input := {
       // Input parameter named 'cursor' will cause this operation to be treated as a paginated operation by default
+      @httpQuery("cursor")
       cursor: String
     }
     output := {
-      ...
+      @required
+      items: ItemList
     }
 }
 ```
 
+`api.listUnpagedItems` sau đó chỉ cung cấp `queryOptions`, `queryKey` và `queryFilter`.
+
 ### Nhóm các Operation
 
 Các hook và phương thức client được tạo ra tự động được tổ chức dựa trên [`@tags` trait](https://smithy.io/2.0/spec/documentation-traits.html#tags-trait) trong các Smithy operation của bạn. Các operation có cùng tag được nhóm lại với nhau, điều này giúp giữ cho các lời gọi API của bạn được tổ chức và cung cấp hoàn thành mã tốt hơn trong IDE của bạn.
+
+Trong một nhóm, mỗi operation giữ tên camelCased riêng của nó, vì vậy một operation có tên `ListItems` được gắn thẻ `"items"` được truy cập tại `api.items.listItems` — không phải `api.items.list`.
 
 Ví dụ, với Smithy model này:
 
@@ -657,27 +680,51 @@ service MyService {
 }
 
 @tags(["items"])
+@http(method: "GET", uri: "/items")
+@readonly
 operation ListItems {
-    input: ListItemsInput
-    output: ListItemsOutput
+    input := {}
+    output := {
+      @required
+      items: ItemList
+    }
 }
 
 @tags(["items"])
+@http(method: "POST", uri: "/items")
 operation CreateItem {
-    input: CreateItemInput
-    output: CreateItemOutput
+    input := {
+      @required
+      name: String
+    }
+    output := {
+      @required
+      id: String
+    }
 }
 
 @tags(["users"])
+@http(method: "GET", uri: "/users")
+@readonly
 operation ListUsers {
-    input: ListUsersInput
-    output: ListUsersOutput
+    input := {}
+    output := {
+      @required
+      users: UserList
+    }
 }
 
 @tags(["users"])
+@http(method: "POST", uri: "/users")
 operation CreateUser {
-    input: CreateUserInput
-    output: CreateUserOutput
+    input := {
+      @required
+      name: String
+    }
+    output := {
+      @required
+      id: String
+    }
 }
 ```
 
@@ -706,7 +753,7 @@ function ItemsAndUsers() {
     <div>
       <h2>Items</h2>
       <ul>
-        {items.data?.map(item => (
+        {items.data?.items.map(item => (
           <li key={item.id}>{item.name}</li>
         ))}
       </ul>
@@ -714,7 +761,7 @@ function ItemsAndUsers() {
 
       <h2>Users</h2>
       <ul>
-        {users.data?.map(user => (
+        {users.data?.users.map(user => (
           <li key={user.id}>{user.name}</li>
         ))}
       </ul>
@@ -805,7 +852,7 @@ Bạn có thể tùy chỉnh các response lỗi trong Smithy API của mình b�
 
 ```smithy
 @error("client")
-@httpError(400)
+@httpError(422)
 structure InvalidRequestError {
     @required
     message: String
@@ -841,6 +888,10 @@ structure FieldError {
     message: String
 }
 ```
+
+:::caution[400 đã được sử dụng]
+Service của bạn đã khai báo `ValidationException` của Smithy trên `400`, vì vậy mọi operation đều có một trường hợp `400` mang `ValidationExceptionResponseContent`. Hãy đặt cho lỗi client của riêng bạn một trạng thái khác (`422` ở trên) — hai lỗi trên cùng một trạng thái sẽ xung đột và chỉ một payload đến được client được tạo ra.
+:::
 
 #### Thêm lỗi vào các Operation
 
@@ -884,37 +935,21 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 function ItemComponent() {
   const api = useMyApi();
 
-  // Query with typed error handling
-  const getItem = useQuery({
-    ...api.getItem.queryOptions({ itemId: '123' }),
-    onError: (error) => {
-      // Error is typed based on the errors in your Smithy model
-      switch (error.status) {
-        case 404:
-          // error.error is typed as ItemNotFoundError
-          console.error('Not found:', error.error.message);
-          break;
-        case 500:
-          // error.error is typed as InternalServerError
-          console.error('Server error:', error.error.message);
-          console.error('Trace ID:', error.error.traceId);
-          break;
-      }
-    }
-  });
+  const getItem = useQuery(api.getItem.queryOptions({ itemId: '123' }));
 
   // Mutation with typed error handling
   const createItem = useMutation({
     ...api.createItem.mutationOptions(),
     onError: (error) => {
+      // Error is typed based on the errors in your Smithy model
       switch (error.status) {
-        case 400:
-          // error.error is typed as InvalidRequestError
+        case 422:
+          // error.error is typed as InvalidRequestErrorResponseContent
           console.error('Validation error:', error.error.message);
           console.error('Field errors:', error.error.fieldErrors);
           break;
         case 403:
-          // error.error is typed as UnauthorizedError
+          // error.error is typed as UnauthorizedErrorResponseContent
           console.error('Unauthorized:', error.error.reason);
           break;
       }
@@ -923,10 +958,13 @@ function ItemComponent() {
 
   // Component rendering with error handling
   if (getItem.isError) {
-    if (getItem.error.status === 404) {
-      return <NotFoundMessage message={getItem.error.error.message} />;
-    } else if (getItem.error.status === 500) {
-      return <ErrorMessage message={getItem.error.error.message} />;
+    switch (getItem.error.status) {
+      case 404:
+        // error.error is typed as ItemNotFoundErrorResponseContent
+        return <NotFoundMessage message={getItem.error.error.message} />;
+      case 500:
+        // error.error is typed as InternalServerErrorResponseContent
+        return <ErrorMessage message={getItem.error.error.message} />;
     }
   }
 
@@ -937,6 +975,10 @@ function ItemComponent() {
   );
 }
 ```
+
+:::note[Lỗi Query]
+TanStack Query v5 đã xóa `onError` khỏi `useQuery`, vì vậy lỗi query được xử lý bằng cách thu hẹp trên `error.status` nơi bạn render. `useMutation` vẫn nhận `onError`.
+:::
 
 <Drawer title="Xử lý lỗi tùy chỉnh với client trực tiếp" trigger="Nhấp vào đây để xem ví dụ sử dụng client trực tiếp.">
 ```tsx
@@ -962,11 +1004,11 @@ function ItemComponent() {
 
         switch (err.status) {
           case 404:
-            // err.error is typed as ItemNotFoundError
+            // err.error is typed as ItemNotFoundErrorResponseContent
             console.error('Not found:', err.error.message);
             break;
           case 500:
-            // err.error is typed as InternalServerError
+            // err.error is typed as InternalServerErrorResponseContent
             console.error('Server error:', err.error.message);
             console.error('Trace ID:', err.error.traceId);
             break;
@@ -987,13 +1029,13 @@ function ItemComponent() {
       const err = e as CreateItemError;
 
       switch (err.status) {
-        case 400:
-          // err.error is typed as InvalidRequestError
+        case 422:
+          // err.error is typed as InvalidRequestErrorResponseContent
           console.error('Validation error:', err.error.message);
           console.error('Field errors:', err.error.fieldErrors);
           break;
         case 403:
-          // err.error is typed as UnauthorizedError
+          // err.error is typed as UnauthorizedErrorResponseContent
           console.error('Unauthorized:', err.error.reason);
           break;
       }
@@ -1037,7 +1079,7 @@ import { useQuery } from '@tanstack/react-query';
 
 function ItemList() {
   const api = useMyApi();
-  const items = useQuery(api.listItems.queryOptions());
+  const items = useQuery(api.listItems.queryOptions({}));
 
   if (items.isLoading) {
     return <LoadingSpinner />;
@@ -1047,11 +1089,10 @@ function ItemList() {
     const err = items.error;
     switch (err.status) {
       case 403:
-        // err.error is typed as ListItems403Response
+        // err.error is typed as UnauthorizedErrorResponseContent
         return <ErrorMessage message={err.error.reason} />;
       case 500:
-      case 502:
-        // err.error is typed as ListItems5XXResponse
+        // err.error is typed as InternalServerErrorResponseContent
         return (
           <ErrorMessage
             message={err.error.message}
@@ -1064,7 +1105,7 @@ function ItemList() {
 
   return (
     <ul>
-      {items.data.map((item) => (
+      {items.data?.items.map((item) => (
         <li key={item.id}>{item.name}</li>
       ))}
     </ul>
@@ -1083,7 +1124,7 @@ function ItemList() {
   useEffect(() => {
     const fetchItems = async () => {
       try {
-        const data = await api.listItems();
+        const data = await api.listItems({});
         setItems(data);
       } catch (err) {
         setError(err);
@@ -1102,11 +1143,10 @@ function ItemList() {
     const err = error as ListItemsError;
     switch (err.status) {
       case 403:
-        // err.error is typed as ListItems403Response
+        // err.error is typed as UnauthorizedErrorResponseContent
         return <ErrorMessage message={err.error.reason} />;
       case 500:
-      case 502:
-        // err.error is typed as ListItems5XXResponse
+        // err.error is typed as InternalServerErrorResponseContent
         return (
           <ErrorMessage
             message={err.error.message}
@@ -1134,41 +1174,53 @@ Triển khai cập nhật lạc quan để có trải nghiệm người dùng t�
 
 ```tsx
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import type { ListItemsResponseContent } from '../generated/my-api/types.gen';
 
 function ItemList() {
   const api = useMyApi();
   const queryClient = useQueryClient();
 
   // Query to fetch items
-  const itemsQuery = useQuery(api.listItems.queryOptions());
+  const itemsQuery = useQuery(api.listItems.queryOptions({}));
 
   // Mutation for deleting items with optimistic updates
   const deleteMutation = useMutation({
     ...api.deleteItem.mutationOptions(),
-    onMutate: async (itemId) => {
+    onMutate: async ({ itemId }) => {
       // Cancel any outgoing refetches
-      await queryClient.cancelQueries({ queryKey: api.listItems.queryKey() });
+      await queryClient.cancelQueries({
+        queryKey: api.listItems.queryKey({}),
+      });
 
       // Snapshot the previous value
-      const previousItems = queryClient.getQueryData(api.listItems.queryKey());
+      const previousItems = queryClient.getQueryData<ListItemsResponseContent>(
+        api.listItems.queryKey({}),
+      );
 
       // Optimistically update to the new value
-      queryClient.setQueryData(
-        api.listItems.queryKey(),
-        (old) => old.filter((item) => item.id !== itemId)
+      queryClient.setQueryData<ListItemsResponseContent>(
+        api.listItems.queryKey({}),
+        (old) =>
+          old && {
+            ...old,
+            items: old.items.filter((item) => item.id !== itemId),
+          },
       );
 
       // Return a context object with the snapshot
       return { previousItems };
     },
-    onError: (err, itemId, context) => {
+    onError: (err, _input, context) => {
       // If the mutation fails, use the context returned from onMutate to roll back
-      queryClient.setQueryData(api.listItems.queryKey(), context.previousItems);
+      queryClient.setQueryData(
+        api.listItems.queryKey({}),
+        context?.previousItems,
+      );
       console.error('Failed to delete item:', err);
     },
     onSettled: () => {
       // Always refetch after error or success to ensure data is in sync with server
-      queryClient.invalidateQueries({ queryKey: api.listItems.queryKey() });
+      queryClient.invalidateQueries({ queryKey: api.listItems.queryKey({}) });
     },
   });
 
@@ -1182,11 +1234,11 @@ function ItemList() {
 
   return (
     <ul>
-      {itemsQuery.data.map((item) => (
+      {itemsQuery.data?.items.map((item) => (
         <li key={item.id}>
           {item.name}
           <button
-            onClick={() => deleteMutation.mutate(item.id)}
+            onClick={() => deleteMutation.mutate({ itemId: item.id })}
             disabled={deleteMutation.isPending}
           >
             {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
@@ -1261,8 +1313,8 @@ function ItemForm() {
   if (createItem.error) {
     const error = createItem.error;
     switch (error.status) {
-      case 400:
-        // error.error is typed as InvalidRequestError
+      case 422:
+        // error.error is typed as InvalidRequestErrorResponseContent
         return (
           <FormError
             message="Invalid input"
@@ -1270,10 +1322,10 @@ function ItemForm() {
           />
         );
       case 403:
-        // error.error is typed as UnauthorizedError
+        // error.error is typed as UnauthorizedErrorResponseContent
         return <AuthError reason={error.error.reason} />;
       default:
-        // error.error is typed as InternalServerError for 500, etc.
+        // error.error is typed as InternalServerErrorResponseContent for 500, etc.
         return <ServerError message={error.error.message} />;
     }
   }
@@ -1309,16 +1361,16 @@ function ItemForm() {
       // ✅ Error type includes all possible error responses
       const err = e as CreateItemError;
       switch (err.status) {
-        case 400:
-          // err.error is typed as InvalidRequestError
+        case 422:
+          // err.error is typed as InvalidRequestErrorResponseContent
           console.error('Validation errors:', err.error.fieldErrors);
           break;
         case 403:
-          // err.error is typed as UnauthorizedError
+          // err.error is typed as UnauthorizedErrorResponseContent
           console.error('Not authorized:', err.error.reason);
           break;
         case 500:
-          // err.error is typed as InternalServerError
+          // err.error is typed as InternalServerErrorResponseContent
           console.error('Server error:', err.error.message);
           break;
       }
@@ -1329,7 +1381,7 @@ function ItemForm() {
   // Error UI can use type narrowing to handle different error types
   if (error) {
     switch (error.status) {
-      case 400:
+      case 422:
         return (
           <FormError
             message="Invalid input"
@@ -1353,3 +1405,4 @@ Các kiểu được tự động tạo từ schema OpenAPI của Smithy API, đ
 ## Xác thực tùy chỉnh
 
 Nếu Smithy API của bạn sử dụng xác thực `Custom` (Lambda Authorizer), bạn sẽ cần chỉnh sửa provider client được tạo ra để thêm các header ủy quyền mà authorizer của bạn mong đợi. Tìm cấu hình `fetch` trong `<ApiName>Provider.tsx` được tạo ra và thêm token hoặc API key của bạn vào các header yêu cầu.
+iName>Provider.tsx` được tạo ra và thêm token hoặc API key của bạn vào các header yêu cầu.

@@ -46,16 +46,17 @@ Nx Plugin for AWS 提供了一个生成器，用于将 React 网站连接到公�
 - src
   - components
     - AguiProvider.tsx 为每个 AG-UI agent 提供单一的 `CopilotKitProvider`。在第一次运行 `connection` 时创建，在后续运行时更新以注册每个新 agent。
+    - \<agent-name>-chat.tsx 绑定到此 agent id 的主题化 `<AgentName>Chat`。每次运行 `connection` 生成一个文件。
     - copilot
       - index.tsx 重新导出 `CopilotChat`、`CopilotSidebar` 和 `CopilotPopup`，并使用与您网站的 `ux`（Cloudscape、Shadcn 或无主题）匹配的插槽默认值。
       - *ThemeComponents*.tsx 每个插槽的主题组件（例如 `CloudscapeAssistantMessage.tsx`、`ShadcnChatInput.tsx`）。仅在 `ux` 为 `cloudscape` 或 `shadcn` 时提供。
   - hooks
-    - useAgui\<AgentName>.tsx 注册一个 AG-UI agent。每次运行 `connection` 生成一个文件。
+    - useAgui\<AgentName>.tsx 注册一个 AG-UI agent 并将其 id 导出为 `<AGENT_NAME>_ID`。每次运行 `connection` 生成一个文件。
     - useSigV4.tsx SigV4 签名（仅限 IAM）
 
 </FileTree>
 
-第二次为不同的 agent 运行 `connection` 会**添加一个新的 `useAgui<AgentName>.tsx` hook** 并更新 `AguiProvider.tsx` 以注册两个 hook——您对 provider 所做的任何自定义编辑都会被保留。`main.tsx` 保持其单一的 `<AguiProvider>` 包装器——您永远不会得到嵌套的 provider。
+第二次为不同的 agent 运行 `connection` 会**添加一个新的 `useAgui<AgentName>.tsx` hook 和 `<agent-name>-chat.tsx` 组件**并更新 `AguiProvider.tsx` 以注册两个 hook——您对 provider 所做的任何自定义编辑都会被保留。`main.tsx` 保持其单一的 `<AguiProvider>` 包装器——您永远不会得到嵌套的 provider。
 
 以下依赖项将添加到根 `package.json`：
 
@@ -119,17 +120,14 @@ Session ID 和 Thread ID 都由浏览器提供。要将每个用户限制为他�
 
 ### 添加聊天界面
 
-使用 `agentId` 实例化 CopilotKit 组件以选择要使用的 agent。该 id 是 agent 的名称——与您运行 <Link path="guides/ts-agent">`ts#agent`</Link> 或 <Link path="guides/py-agent">`py#agent`</Link> 生成器时选择的名称相同——您也可以在生成的 hook 文件中找到它（例如从 `packages/web/src/hooks/useAgui<AgentName>.tsx` 返回的键）。
-
-从生成的 `./components/copilot` 模块导入聊天组件，以便自动应用与您网站的 `ux` 匹配的主题：
+生成器为每个连接的 agent 提供一个 `<AgentName>Chat` 组件，该组件已绑定到该 agent 的 id 并主题化以匹配您网站的 `ux`。将其放置在 `<AguiProvider>` 包装器内的任何位置：
 
 ```tsx
-import { CopilotChat } from './components/copilot';
+import { StoryAgentChat } from './components/story-agent-chat';
 
 function ChatPage() {
   return (
-    <CopilotChat
-      agentId="agent"
+    <StoryAgentChat
       labels={{
         welcomeMessageText: 'How can I help you today?',
         chatInputPlaceholder: 'Ask me anything...',
@@ -139,15 +137,24 @@ function ChatPage() {
 }
 ```
 
+它转发除 `agentId` 之外的每个 `CopilotChat` prop，因此您可以传递给 `<CopilotChat />` 的任何内容在这里也适用。
+
 ### 连接多个 AG-UI Agent
 
-每个 agent 运行一次 `connection` 生成器。通过共享的 `AguiProvider` 注册的每个 agent 在应用程序的任何位置都可见——使用不同的 `agentId` 实例化 CopilotKit 组件，以将每个聊天路由到您想要的 agent：
+每个 agent 运行一次 `connection` 生成器。每次运行都会提供该 agent 自己的聊天组件，因此将聊天路由到特定 agent 只需渲染相应的组件：
 
 ```tsx
-import { CopilotChat } from './components/copilot';
+import { StoryAgentChat } from './components/story-agent-chat';
+import { ResearchAgentChat } from './components/research-agent-chat';
 
-<CopilotChat agentId="story" />    {/* talks to StoryAgent */}
-<CopilotChat agentId="research" /> {/* talks to ResearchAgent */}
+<StoryAgentChat />    {/* talks to StoryAgent */}
+<ResearchAgentChat /> {/* talks to ResearchAgent */}
+```
+
+如果您需要原始 id——例如调用 CopilotKit 自己的 hook——每个生成的 hook 都会导出它：
+
+```tsx
+import { STORY_AGENT_ID } from './hooks/useAguiStoryAgent';
 ```
 
 ## 自定义外观和感觉
@@ -164,12 +171,13 @@ import { CopilotChat } from './components/copilot';
 | `shadcn` | 助手消息在 `bg-muted` 气泡中渲染，带有 `Sparkles` 头像；用户消息在 `bg-primary` 气泡中右对齐渲染，带有 `User` 头像。输入是圆角 `Textarea` + 药丸形状的发送/停止 `Button`（Enter 提交，Shift+Enter 换行）。使用来自共享 `common-shadcn` 包的 shadcn 原语。 |
 | `none`（或其他任何值） | 无主题——模块只是重新导出默认的 CopilotKit 组件。 |
 
-从**本地主题模块**导入主题组件（而不是直接从 `@copilotkit/react-core/v2` 导入），以便自动应用主题：
+提供的 `<AgentName>Chat` 组件已经主题化。对于您自己连接的聊天，从**本地主题模块**导入（而不是直接从 `@copilotkit/react-core/v2` 导入），以便自动应用主题：
 
 ```tsx
 import { CopilotChat } from './components/copilot';
+import { STORY_AGENT_ID } from './hooks/useAguiStoryAgent';
 
-<CopilotChat agentId="agent" />
+<CopilotChat agentId={STORY_AGENT_ID} />
 ```
 
 主题作为插槽默认值应用，因此您显式传递的任何插槽仍然优先——每当您需要一次性覆盖时，您都可以保持完全控制。
@@ -188,8 +196,7 @@ import { CopilotChat } from './components/copilot';
 每个聊天的覆盖仍然可以与主题一起工作——您作为插槽 prop 传递的任何内容都会覆盖主题默认值：
 
 ```tsx
-<CopilotChat
-  agentId="agent"
+<StoryAgentChat
   // style the input and its children
   input={{
     textArea: 'text-blue-600',
@@ -208,25 +215,23 @@ import { CopilotChat } from './components/copilot';
 任何插槽都可以接受 React 组件而不是 className，因此您可以完全替换默认值：
 
 ```tsx
-import { CopilotChat } from './components/copilot';
+import { StoryAgentChat } from './components/story-agent-chat';
 
-const MySendButton: React.FC<{ onClick: () => void }> = ({ onClick }) => (
+const MySendButton: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement>> = ({
+  onClick,
+}) => (
   <button onClick={onClick} className="my-send-btn">
     Send
   </button>
 );
 
-<CopilotChat
-  agentId="agent"
-  input={{ sendButton: MySendButton }}
-/>;
+<StoryAgentChat input={{ sendButton: MySendButton }} />;
 ```
 
 更深层次的覆盖遵循相同的形状——例如，仅替换助手消息上的复制按钮：
 
 ```tsx
-<CopilotChat
-  agentId="agent"
+<StoryAgentChat
   messageView={{
     assistantMessage: {
       copyButton: ({ onClick }) => <button onClick={onClick}>Copy</button>,

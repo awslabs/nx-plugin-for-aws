@@ -248,7 +248,7 @@ const createItem = useMutation({
   onSettled: () => {
     // This will run when the mutation completes (success or error)
     // Good place to invalidate queries that might be affected
-    queryClient.invalidateQueries({ queryKey: api.listItems.queryKey() });
+    queryClient.invalidateQueries({ queryKey: api.listItems.queryKey({}) });
   }
 });
 ```
@@ -495,7 +495,9 @@ function ItemList() {
 
 ### Gestione degli Errori
 
-L'integrazione include una gestione errori integrata con risposte tipizzate. Viene generato un tipo `<operation-name>Error` che incapsula le possibili risposte di errore definite nella specifica OpenAPI. Ogni errore ha una proprietà `status` e `error`, e controllando il valore di `status` puoi restringere a un tipo specifico di errore.
+L'integrazione include una gestione errori integrata con risposte tipizzate. Viene generato un tipo `<OperationName>Error` che è un'unione di un membro `<OperationName><StatusCode>Error` per ogni stato di errore che le `responses` dell'operazione dichiarano. Ogni membro ha una proprietà `status` e `error`, quindi lo switch su `status` restringe `error` al modello di quello stato.
+
+L'esempio seguente presuppone che `create_item` dichiari le [`responses` definite più avanti in questa pagina](#specifica-dei-modelli-di-risposta) — un `400` `ValidationErrorDetails`, un `403` `str` e un `500` `ErrorDetails`. Solo gli stati che dichiari appaiono nell'unione (più il `422` proprio di FastAPI), quindi un `case` per uno stato che non hai dichiarato è un errore di compilazione.
 
 ```tsx {12}
 import { useMutation } from '@tanstack/react-query';
@@ -511,34 +513,32 @@ function MyComponent() {
   if (createItem.error) {
     switch (createItem.error.status) {
       case 400:
-        // error.error is typed as CreateItem400Response
+        // error.error is typed as ValidationErrorDetails
         return (
           <div>
             <h2>Invalid input:</h2>
             <p>{createItem.error.error.message}</p>
             <ul>
-              {createItem.error.error.validationErrors.map((err) => (
-                <li key={err.field}>{err.message}</li>
+              {createItem.error.error.fieldErrors.map((err) => (
+                <li key={err}>{err}</li>
               ))}
             </ul>
           </div>
         );
       case 403:
-        // error.error is typed as CreateItem403Response
+        // error.error is a string as specified in the responses
         return (
           <div>
             <h2>Not authorized:</h2>
-            <p>{createItem.error.error.reason}</p>
+            <p>{createItem.error.error}</p>
           </div>
         );
       case 500:
-      case 502:
-        // error.error is typed as CreateItem5XXResponse
+        // error.error is typed as ErrorDetails
         return (
           <div>
             <h2>Server error:</h2>
             <p>{createItem.error.error.message}</p>
-            <p>Trace ID: {createItem.error.error.traceId}</p>
           </div>
         );
     }
@@ -547,6 +547,10 @@ function MyComponent() {
   return <button onClick={handleClick}>Create Item</button>;
 }
 ```
+
+:::note[Nomi dei campi Python]
+Il client generato converte i campi del modello in camelCase, quindi un modello Pydantic che dichiara `field_errors` viene letto come `error.fieldErrors`.
+:::
 
 <Drawer title="Gestione degli errori utilizzando direttamente il client API" trigger="Clicca qui per un esempio utilizzando direttamente il client vanilla.">
 ```tsx {9,15}
@@ -566,34 +570,32 @@ function MyComponent() {
   if (error) {
     switch (error.status) {
       case 400:
-        // error.error is typed as CreateItem400Response
+        // error.error is typed as ValidationErrorDetails
         return (
           <div>
             <h2>Invalid input:</h2>
             <p>{error.error.message}</p>
             <ul>
-              {error.error.validationErrors.map((err) => (
-                <li key={err.field}>{err.message}</li>
+              {error.error.fieldErrors.map((err) => (
+                <li key={err}>{err}</li>
               ))}
             </ul>
           </div>
         );
       case 403:
-        // error.error is typed as CreateItem403Response
+        // error.error is a string as specified in the responses
         return (
           <div>
             <h2>Not authorized:</h2>
-            <p>{error.error.reason}</p>
+            <p>{error.error}</p>
           </div>
         );
       case 500:
-      case 502:
-        // error.error is typed as CreateItem5XXResponse
+        // error.error is typed as ErrorDetails
         return (
           <div>
             <h2>Server error:</h2>
             <p>{error.error.message}</p>
-            <p>Trace ID: {error.error.traceId}</p>
           </div>
         );
     }
@@ -784,6 +786,8 @@ def list_items(page: int = 1, limit: int = 10):
 
 Gli hook e i metodi del client generati sono organizzati automaticamente in base ai tag OpenAPI nei tuoi endpoint FastAPI. Questo aiuta a mantenere organizzate le tue chiamate API e rende più facile trovare le operazioni correlate.
 
+All'interno di un gruppo ogni operazione mantiene il proprio nome in camelCase, preso dal nome della funzione del tuo endpoint — quindi `def list_items()` con tag `"items"` è raggiungibile a `api.items.listItems`.
+
 Esempio:
 
 ```python title="items.py"
@@ -791,7 +795,7 @@ Esempio:
     "/items",
     tags=["items"],
 )
-def list():
+def list(cursor: str | None = None):
     # ...
 
 @app.post(
@@ -811,6 +815,10 @@ def list():
     # ...
 ```
 
+:::tip[Nomi di funzione ripetuti]
+Due endpoint denominati `list` in tag diversi non entrano in conflitto — il generatore qualifica un nome duplicato con il suo tag, quindi entrambi sono raggiungibili a `api.items.list` e `api.users.list`.
+:::
+
 Gli hook generati saranno raggruppati per tag:
 
 ```tsx
@@ -821,7 +829,7 @@ function ItemsAndUsers() {
   const api = useMyApi();
 
   // Items operations are grouped under api.items
-  const items = useQuery(api.items.list.queryOptions());
+  const items = useQuery(api.items.list.queryOptions({}));
   const createItem = useMutation(api.items.create.mutationOptions());
 
   // Users operations are grouped under api.users
@@ -873,7 +881,7 @@ function ItemsAndUsers() {
         setIsLoading(true);
 
         // Items operations are grouped under api.items
-        const itemsData = await api.items.list();
+        const itemsData = await api.items.list({});
         setItems(itemsData);
 
         // Users operations are grouped under api.users
@@ -943,7 +951,7 @@ from pydantic import BaseModel
 class ErrorDetails(BaseModel):
     message: str
 
-class ValidationError(BaseModel):
+class ValidationErrorDetails(BaseModel):
     message: str
     field_errors: list[str]
 ```
@@ -958,7 +966,7 @@ class NotFoundException(Exception):
         self.message = message
 
 class ValidationException(Exception):
-    def __init__(self, details: ValidationError):
+    def __init__(self, details: ValidationErrorDetails):
         self.details = details
 ```
 
@@ -997,8 +1005,8 @@ Infine, specifica i modelli di risposta per diversi codici di stato di errore ne
 @app.get(
     "/items/{item_id}",
     responses={
-        404: {"model": str}
-        500: {"model": ErrorDetails}
+        404: {"model": str},
+        500: {"model": ErrorDetails},
     }
 )
 def get_item(item_id: str) -> Item:
@@ -1010,14 +1018,15 @@ def get_item(item_id: str) -> Item:
 @app.post(
     "/items",
     responses={
-        400: {"model": ValidationError},
-        403: {"model": str}
+        400: {"model": ValidationErrorDetails},
+        403: {"model": str},
+        500: {"model": ErrorDetails},
     }
 )
 def create_item(item: Item) -> Item:
     if not is_valid(item):
         raise ValidationException(
-            ValidationError(
+            ValidationErrorDetails(
                 message="Invalid item data",
                 field_errors=["name is required"]
             )
@@ -1035,33 +1044,18 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 function ItemComponent() {
   const api = useMyApi();
 
-  // Query with typed error handling
-  const getItem = useQuery({
-    ...api.getItem.queryOptions({ itemId: '123' }),
-    onError: (error) => {
-      // Error is typed based on the responses in your FastAPI
-      switch (error.status) {
-        case 404:
-          // error.error is a string as specified in the responses
-          console.error('Not found:', error.error);
-          break;
-        case 500:
-          // error.error is typed as ErrorDetails
-          console.error('Server error:', error.error.message);
-          break;
-      }
-    }
-  });
+  const getItem = useQuery(api.getItem.queryOptions({ itemId: '123' }));
 
   // Mutation with typed error handling
   const createItem = useMutation({
     ...api.createItem.mutationOptions(),
     onError: (error) => {
+      // Error is typed based on the responses in your FastAPI
       switch (error.status) {
         case 400:
-          // error.error is typed as ValidationError
+          // error.error is typed as ValidationErrorDetails
           console.error('Validation error:', error.error.message);
-          console.error('Field errors:', error.error.field_errors);
+          console.error('Field errors:', error.error.fieldErrors);
           break;
         case 403:
           // error.error is a string as specified in the responses
@@ -1073,10 +1067,13 @@ function ItemComponent() {
 
   // Component rendering with error handling
   if (getItem.isError) {
-    if (getItem.error.status === 404) {
-      return <NotFoundMessage message={getItem.error.error} />;
-    } else {
-      return <ErrorMessage message={getItem.error.error.message} />;
+    switch (getItem.error.status) {
+      case 404:
+        // error.error is a string as specified in the responses
+        return <NotFoundMessage message={getItem.error.error} />;
+      case 500:
+        // error.error is typed as ErrorDetails
+        return <ErrorMessage message={getItem.error.error.message} />;
     }
   }
 
@@ -1137,9 +1134,9 @@ function ItemComponent() {
 
       switch (err.status) {
         case 400:
-          // err.error is typed as ValidationError
+          // err.error is typed as ValidationErrorDetails
           console.error('Validation error:', err.error.message);
-          console.error('Field errors:', err.error.field_errors);
+          console.error('Field errors:', err.error.fieldErrors);
           break;
         case 403:
           // err.error is a string as specified in the responses
@@ -1186,7 +1183,7 @@ import { useQuery } from '@tanstack/react-query';
 
 function ItemList() {
   const api = useMyApi();
-  const items = useQuery(api.listItems.queryOptions());
+  const items = useQuery(api.listItems.queryOptions({}));
 
   if (items.isLoading) {
     return <LoadingSpinner />;
@@ -1196,17 +1193,11 @@ function ItemList() {
     const err = items.error;
     switch (err.status) {
       case 403:
-        // err.error is typed as ListItems403Response
-        return <ErrorMessage message={err.error.reason} />;
+        // err.error is a string as specified in the responses
+        return <ErrorMessage message={err.error} />;
       case 500:
-      case 502:
-        // err.error is typed as ListItems5XXResponse
-        return (
-          <ErrorMessage
-            message={err.error.message}
-            details={`Trace ID: ${err.error.traceId}`}
-          />
-        );
+        // err.error is typed as ErrorDetails
+        return <ErrorMessage message={err.error.message} />;
       default:
         return <ErrorMessage message="An unknown error occurred" />;
     }
@@ -1214,7 +1205,7 @@ function ItemList() {
 
   return (
     <ul>
-      {items.data.map((item) => (
+      {items.data?.items.map((item) => (
         <li key={item.id}>{item.name}</li>
       ))}
     </ul>
@@ -1233,7 +1224,7 @@ function ItemList() {
   useEffect(() => {
     const fetchItems = async () => {
       try {
-        const data = await api.listItems();
+        const data = await api.listItems({});
         setItems(data);
       } catch (err) {
         setError(err);
@@ -1252,17 +1243,11 @@ function ItemList() {
     const err = error as ListItemsError;
     switch (err.status) {
       case 403:
-        // err.error is typed as ListItems403Response
-        return <ErrorMessage message={err.error.reason} />;
+        // err.error is a string as specified in the responses
+        return <ErrorMessage message={err.error} />;
       case 500:
-      case 502:
-        // err.error is typed as ListItems5XXResponse
-        return (
-          <ErrorMessage
-            message={err.error.message}
-            details={`Trace ID: ${err.error.traceId}`}
-          />
-        );
+        // err.error is typed as ErrorDetails
+        return <ErrorMessage message={err.error.message} />;
       default:
         return <ErrorMessage message="An unknown error occurred" />;
     }
@@ -1285,41 +1270,53 @@ Implementa aggiornamenti ottimistici per una migliore esperienza utente:
 
 ```tsx
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import type { ListItemsOutput } from '../generated/my-api/types.gen';
 
 function ItemList() {
   const api = useMyApi();
   const queryClient = useQueryClient();
 
   // Query to fetch items
-  const itemsQuery = useQuery(api.listItems.queryOptions());
+  const itemsQuery = useQuery(api.listItems.queryOptions({}));
 
   // Mutation for deleting items with optimistic updates
   const deleteMutation = useMutation({
     ...api.deleteItem.mutationOptions(),
-    onMutate: async (itemId) => {
+    onMutate: async ({ itemId }) => {
       // Cancel any outgoing refetches
-      await queryClient.cancelQueries({ queryKey: api.listItems.queryKey() });
+      await queryClient.cancelQueries({
+        queryKey: api.listItems.queryKey({}),
+      });
 
       // Snapshot the previous value
-      const previousItems = queryClient.getQueryData(api.listItems.queryKey());
+      const previousItems = queryClient.getQueryData<ListItemsOutput>(
+        api.listItems.queryKey({}),
+      );
 
       // Optimistically update to the new value
-      queryClient.setQueryData(
-        api.listItems.queryKey(),
-        (old) => old.filter((item) => item.id !== itemId)
+      queryClient.setQueryData<ListItemsOutput>(
+        api.listItems.queryKey({}),
+        (old) =>
+          old && {
+            ...old,
+            items: old.items.filter((item) => item.id !== itemId),
+          },
       );
 
       // Return a context object with the snapshot
       return { previousItems };
     },
-    onError: (err, itemId, context) => {
+    onError: (err, _input, context) => {
       // If the mutation fails, use the context returned from onMutate to roll back
-      queryClient.setQueryData(api.listItems.queryKey(), context.previousItems);
+      queryClient.setQueryData(
+        api.listItems.queryKey({}),
+        context?.previousItems,
+      );
       console.error('Failed to delete item:', err);
     },
     onSettled: () => {
       // Always refetch after error or success to ensure data is in sync with server
-      queryClient.invalidateQueries({ queryKey: api.listItems.queryKey() });
+      queryClient.invalidateQueries({ queryKey: api.listItems.queryKey({}) });
     },
   });
 
@@ -1333,11 +1330,11 @@ function ItemList() {
 
   return (
     <ul>
-      {itemsQuery.data.map((item) => (
+      {itemsQuery.data?.items.map((item) => (
         <li key={item.id}>
           {item.name}
           <button
-            onClick={() => deleteMutation.mutate(item.id)}
+            onClick={() => deleteMutation.mutate({ itemId: item.id })}
             disabled={deleteMutation.isPending}
           >
             {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
@@ -1413,19 +1410,22 @@ function ItemForm() {
     const error = createItem.error;
     switch (error.status) {
       case 400:
-        // error.error is typed as CreateItem400Response
+        // error.error is typed as ValidationErrorDetails
         return (
           <FormError
             message="Invalid input"
-            errors={error.error.validationErrors}
+            errors={error.error.fieldErrors}
           />
         );
       case 403:
-        // error.error is typed as CreateItem403Response
-        return <AuthError reason={error.error.reason} />;
-      default:
-        // error.error is typed as CreateItem5XXResponse for 500, 502, etc.
+        // error.error is a string as specified in the responses
+        return <AuthError reason={error.error} />;
+      case 500:
+        // error.error is typed as ErrorDetails
         return <ServerError message={error.error.message} />;
+      default:
+        // FastAPI adds a 422 to every endpoint, so `default` isn't narrowed
+        return <ServerError message="An unknown error occurred" />;
     }
   }
 
@@ -1461,22 +1461,16 @@ function ItemForm() {
       const err = e as CreateItemError;
       switch (err.status) {
         case 400:
-          // err.error is typed as CreateItem400Response
-          console.error('Validation errors:', err.error.validationErrors);
+          // err.error is typed as ValidationErrorDetails
+          console.error('Validation errors:', err.error.fieldErrors);
           break;
         case 403:
-          // err.error is typed as CreateItem403Response
-          console.error('Not authorized:', err.error.reason);
+          // err.error is a string as specified in the responses
+          console.error('Not authorized:', err.error);
           break;
         case 500:
-        case 502:
-          // err.error is typed as CreateItem5XXResponse
-          console.error(
-            'Server error:',
-            err.error.message,
-            'Trace:',
-            err.error.traceId,
-          );
+          // err.error is typed as ErrorDetails
+          console.error('Server error:', err.error.message);
           break;
       }
       setError(err);
@@ -1490,13 +1484,15 @@ function ItemForm() {
         return (
           <FormError
             message="Invalid input"
-            errors={error.error.validationErrors}
+            errors={error.error.fieldErrors}
           />
         );
       case 403:
-        return <AuthError reason={error.error.reason} />;
-      default:
+        return <AuthError reason={error.error} />;
+      case 500:
         return <ServerError message={error.error.message} />;
+      default:
+        return <ServerError message="An unknown error occurred" />;
     }
   }
 
