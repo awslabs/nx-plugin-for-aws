@@ -6,6 +6,12 @@
 import { QueryBuilder } from '@getgrit/gritql';
 import type { Tree } from '@nx/devkit';
 import * as path from 'path';
+import {
+  LANGUAGE_COMMENT_SYNTAX,
+  readLicenseConfig,
+} from '../license/config.js';
+import type { CommentSyntax } from '../license/config-types.js';
+import { parseFile } from '../license/sync/generator.js';
 import { updateGitIgnore } from './git.js';
 import { isEsmWorkspace } from './module-format.js';
 
@@ -39,6 +45,55 @@ const assertFilePath = (tree: Tree, filePath: string) => {
   }
 };
 
+/**
+ * Insert `statement` at the top of a file, below any hashbang and leading
+ * comment block. Keeps a license header first in the file, so `license#sync`
+ * doesn't see it displaced and prepend a second one.
+ *
+ * The leading comment is skipped whatever it says — a header, a placeholder or a
+ * note — so nothing here has to identify a license.
+ *
+ * Splits the file with the sync generator's own `parseFile`, resolving the
+ * comment syntax the way the sync does: the workspace's configured
+ * `commentSyntax` for the extension first, then the built-in table. That way an
+ * extension only the user's config covers is still recognised. An extension
+ * neither covers has no comment syntax to find, so the statement goes at the top.
+ */
+const insertBelowLeadingComments = async (
+  tree: Tree,
+  filePath: string,
+  contents: string,
+  statement: string,
+): Promise<string> => {
+  const extension = filePath.split('.').pop() ?? '';
+  let syntax: CommentSyntax | undefined;
+  try {
+    syntax = (await readLicenseConfig(tree))?.source?.header?.commentSyntax?.[
+      extension
+    ];
+  } catch {
+    // Reading the config evaluates it, which throws on a config that doesn't
+    // load — including this file itself while a generator is mid-edit. A config
+    // we can't read must not stop an import being added, so fall back to the
+    // defaults. (A config that simply doesn't exist reads as undefined.)
+  }
+  syntax ??= LANGUAGE_COMMENT_SYNTAX[extension];
+  if (!syntax) {
+    return `${statement}\n${contents}`;
+  }
+
+  const { hashbang, header, body } = parseFile(contents, syntax);
+  if (!hashbang && !header) {
+    return `${statement}\n${contents}`;
+  }
+  return [
+    ...(hashbang ? [hashbang] : []),
+    ...(header ? [header] : []),
+    statement,
+    body,
+  ].join('\n');
+};
+
 export const addDestructuredImport = async (
   tree: Tree,
   filePath: string,
@@ -69,19 +124,18 @@ export const addDestructuredImport = async (
       );
     }
   } else {
-    // No existing import — prepend a new one (after shebang if present)
+    // No existing import — add a new one below any hashbang and leading comment
     const specifiers = variableNames.join(', ');
     const contents = tree.read(filePath)!.toString();
-    const newImport = `import { ${specifiers} } from '${from}';\n`;
-    if (contents.startsWith('#!')) {
-      const newlineIndex = contents.indexOf('\n');
-      tree.write(
+    tree.write(
+      filePath,
+      await insertBelowLeadingComments(
+        tree,
         filePath,
-        `${contents.substring(0, newlineIndex + 1)}${newImport}${contents.substring(newlineIndex + 1)}`,
-      );
-    } else {
-      tree.write(filePath, `${newImport}${contents}`);
-    }
+        contents,
+        `import { ${specifiers} } from '${from}';`,
+      ),
+    );
   }
 };
 
@@ -142,10 +196,19 @@ export const addPythonDestructuredImport = async (
     return;
   }
 
-  // No existing `from <module> import` line — prepend one. Ruff's import
-  // sorter will place it in the right group on the next formatter pass.
+  // No existing `from <module> import` line — add one below any hashbang and
+  // leading comment. Ruff's import sorter will place it in the right group on
+  // the next formatter pass.
   const specifiers = variableNames.join(', ');
-  tree.write(filePath, `from ${from} import ${specifiers}\n${beforeContents}`);
+  tree.write(
+    filePath,
+    await insertBelowLeadingComments(
+      tree,
+      filePath,
+      beforeContents,
+      `from ${from} import ${specifiers}`,
+    ),
+  );
 };
 
 /**
@@ -184,9 +247,17 @@ export const addSingleImport = async (
     );
   }
 
-  // Prepend new import to file
+  // Add the import below any hashbang and leading comment
   const contents = tree.read(filePath)!.toString();
-  tree.write(filePath, `import ${variableName} from '${from}';\n${contents}`);
+  tree.write(
+    filePath,
+    await insertBelowLeadingComments(
+      tree,
+      filePath,
+      contents,
+      `import ${variableName} from '${from}';`,
+    ),
+  );
 };
 
 /**
@@ -217,8 +288,15 @@ export const addStarExport = async (
     return;
   }
 
-  // Prepend new export to file
-  tree.write(filePath, `export * from '${from}';\n${contents}`);
+  tree.write(
+    filePath,
+    await insertBelowLeadingComments(
+      tree,
+      filePath,
+      contents,
+      `export * from '${from}';`,
+    ),
+  );
 };
 
 /**
@@ -273,7 +351,12 @@ export const addNamedExport = async (
 
   tree.write(
     filePath,
-    `export { ${missing.join(', ')} } from '${from}';\n${contents}`,
+    await insertBelowLeadingComments(
+      tree,
+      filePath,
+      contents,
+      `export { ${missing.join(', ')} } from '${from}';`,
+    ),
   );
 };
 

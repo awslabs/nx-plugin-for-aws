@@ -18,6 +18,10 @@ import {
   hasExportDeclaration,
   matchGritQL,
 } from './ast.js';
+import {
+  ensureAwsNxPluginConfig,
+  updateAwsNxPluginConfig,
+} from './config/utils.js';
 
 describe('ast utils', () => {
   let tree: Tree;
@@ -153,6 +157,65 @@ describe('ast utils', () => {
     });
   });
 
+  // Every helper that writes a new statement to the top of a file must land
+  // below the shebang and leading comment, so a license header stays first.
+  describe('inserting below leading comments', () => {
+    const header = `/**\n * Copyright Test Inc.\n */`;
+
+    it('addDestructuredImport should insert below a leading block comment', async () => {
+      tree.write('file.ts', `${header}\nconst x = 1;\n`);
+
+      await addDestructuredImport(tree, 'file.ts', ['foo'], '@scope/pkg');
+
+      expect(tree.read('file.ts', 'utf-8')).toBe(
+        `${header}\nimport { foo } from '@scope/pkg';\nconst x = 1;\n`,
+      );
+    });
+
+    it('addSingleImport should insert below a leading block comment', async () => {
+      tree.write('file.ts', `${header}\nconst x = 1;\n`);
+
+      await addSingleImport(tree, 'file.ts', 'foo', '@scope/pkg');
+
+      expect(tree.read('file.ts', 'utf-8')).toBe(
+        `${header}\nimport foo from '@scope/pkg';\nconst x = 1;\n`,
+      );
+    });
+
+    it('addNamedExport should insert below a leading block comment', async () => {
+      tree.write('index.ts', `${header}\nconst x = 1;\n`);
+
+      await addNamedExport(tree, 'index.ts', ['createFoo'], './foo');
+
+      expect(tree.read('index.ts', 'utf-8')).toBe(
+        `${header}\nexport { createFoo } from './foo';\nconst x = 1;\n`,
+      );
+    });
+
+    it('addPythonDestructuredImport should insert below a leading comment', async () => {
+      // Python comments are `#`, so the block is only found via the syntax
+      // resolved for the `py` extension.
+      const pyHeader = `# Copyright Test Inc.`;
+      tree.write('mod.py', `${pyHeader}\nx = 1\n`);
+
+      await addPythonDestructuredImport(tree, 'mod.py', ['foo'], 'pkg');
+
+      expect(tree.read('mod.py', 'utf-8')).toBe(
+        `${pyHeader}\nfrom pkg import foo\nx = 1\n`,
+      );
+    });
+
+    it('should insert below a hashbang and leading comment', async () => {
+      tree.write('cli.ts', `#!/usr/bin/env node\n${header}\nconst x = 1;\n`);
+
+      await addSingleImport(tree, 'cli.ts', 'foo', '@scope/pkg');
+
+      expect(tree.read('cli.ts', 'utf-8')).toBe(
+        `#!/usr/bin/env node\n${header}\nimport foo from '@scope/pkg';\nconst x = 1;\n`,
+      );
+    });
+  });
+
   describe('addStarExport', () => {
     it('should add star export if none exists', async () => {
       const initialContent = `// Some content`;
@@ -179,6 +242,100 @@ describe('ast utils', () => {
 
       const writtenContent = tree.read('index.ts', 'utf-8');
       expect(writtenContent).toContain("export * from './module'");
+    });
+
+    // license#sync writes the header as the file's leading comment; an export
+    // inserted above it would leave the header stranded, so the next sync adds
+    // a second one.
+    it('should add the export below a leading block comment', async () => {
+      const header = `/**\n * Copyright Test Inc.\n */`;
+      tree.write('index.ts', `${header}\nexport const x = 1;\n`);
+
+      await addStarExport(tree, 'index.ts', './module');
+
+      expect(tree.read('index.ts', 'utf-8')).toBe(
+        `${header}\nexport * from './module';\nexport const x = 1;\n`,
+      );
+    });
+
+    it('should add the export below a leading run of line comments', async () => {
+      const header = `// Copyright Test Inc.\n// All rights reserved`;
+      tree.write('index.ts', `${header}\nexport const x = 1;\n`);
+
+      await addStarExport(tree, 'index.ts', './module');
+
+      expect(tree.read('index.ts', 'utf-8')).toBe(
+        `${header}\nexport * from './module';\nexport const x = 1;\n`,
+      );
+    });
+
+    it('should add the export below a hashbang and leading comment', async () => {
+      const header = `#!/usr/bin/env node\n/**\n * Copyright Test Inc.\n */`;
+      tree.write('index.ts', `${header}\nexport const x = 1;\n`);
+
+      await addStarExport(tree, 'index.ts', './module');
+
+      expect(tree.read('index.ts', 'utf-8')).toBe(
+        `${header}\nexport * from './module';\nexport const x = 1;\n`,
+      );
+    });
+
+    it('should still insert below the comment when the config fails to load', async () => {
+      // Reading the config evaluates it. An unreadable config must not stop the
+      // import being added — the default syntax for the extension is used.
+      tree.write(
+        'aws-nx-plugin.config.mts',
+        `import { missing } from './does-not-exist.js';\nexport default missing;\n`,
+      );
+      const header = `/**\n * Copyright Test Inc.\n */`;
+      tree.write('index.ts', `${header}\nexport const x = 1;\n`);
+
+      await addStarExport(tree, 'index.ts', './module');
+
+      expect(tree.read('index.ts', 'utf-8')).toBe(
+        `${header}\nexport * from './module';\nexport const x = 1;\n`,
+      );
+    });
+
+    it('should use commentSyntax from config for an extension the defaults do not cover', async () => {
+      // `xyz` is absent from LANGUAGE_COMMENT_SYNTAX, so without the config read
+      // the comment block would not be found and the export would go above it.
+      await ensureAwsNxPluginConfig(tree);
+      await updateAwsNxPluginConfig(tree, {
+        license: {
+          source: {
+            spdx: 'Apache-2.0',
+            copyrightHolder: 'Test',
+            header: {
+              content: { lines: ['Copyright Test Inc.'] },
+              format: { '**/*.xyz': { lineStart: '## ' } },
+              commentSyntax: { xyz: { line: '##' } },
+            },
+          },
+        },
+      });
+
+      const comment = `## Copyright Test Inc.`;
+      tree.write('index.xyz', `${comment}\nexport const x = 1;\n`);
+
+      await addStarExport(tree, 'index.xyz', './module');
+
+      expect(tree.read('index.xyz', 'utf-8')).toBe(
+        `${comment}\nexport * from './module';\nexport const x = 1;\n`,
+      );
+    });
+
+    it('should add the export below a leading comment that is not a license header', async () => {
+      // The comment block is skipped whatever it says, so no license config is
+      // needed and nothing has to guess what a header looks like.
+      const comment = `// Export your library code here`;
+      tree.write('index.ts', `${comment}\n`);
+
+      await addStarExport(tree, 'index.ts', './module');
+
+      expect(tree.read('index.ts', 'utf-8')).toBe(
+        `${comment}\nexport * from './module';\n`,
+      );
     });
   });
 

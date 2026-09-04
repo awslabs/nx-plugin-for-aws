@@ -7,6 +7,7 @@ import {
   type ProjectConfiguration,
   type Tree,
   updateJson,
+  updateProjectConfiguration,
   writeJson,
 } from '@nx/devkit';
 import type { PackageJson } from 'nx/src/utils/package-json';
@@ -50,6 +51,63 @@ export const readNxPluginProject = (
 
 /** `package.json` field pointing Nx at one of a plugin's manifests. */
 type NxPluginManifestField = 'generators' | 'nx-migrations';
+
+/**
+ * The manifests Nx reads from a published plugin, copied beside the compiled
+ * code by the `package` target. `nx migrate` resolves `migrations.json` from the
+ * tarball, so it ships even though only `ts#nx-migration` writes it.
+ */
+export const NX_PLUGIN_MANIFESTS = [
+  'generators.json',
+  'executors.json',
+  'migrations.json',
+] as const;
+
+/** The `package` target assets that copy the plugin's manifests into dist. */
+export const nxPluginManifestAssets = (): {
+  input: string;
+  glob: string;
+  output: string;
+}[] =>
+  NX_PLUGIN_MANIFESTS.map((glob) => ({
+    input: './{projectRoot}',
+    glob,
+    output: '.',
+  }));
+
+/**
+ * Ensure the plugin's `package` target copies every manifest into dist, so a
+ * manifest added after the project was generated is still published.
+ *
+ * Anchored to the `generators.json` asset the target is vended with: a `package`
+ * target without it belongs to something other than an Nx Plugin, or has been
+ * rewritten, so it is left as it is.
+ */
+export const addNxPluginManifestAssets = (
+  tree: Tree,
+  project: ProjectConfiguration,
+): void => {
+  const assets = project.targets?.package?.options?.assets;
+  if (!Array.isArray(assets)) {
+    return;
+  }
+  const globs = new Set(
+    assets
+      .filter((asset) => typeof asset === 'object' && asset !== null)
+      .map((asset) => asset.glob),
+  );
+  if (!globs.has('generators.json')) {
+    return;
+  }
+  const missing = nxPluginManifestAssets().filter(
+    (asset) => !globs.has(asset.glob),
+  );
+  if (missing.length === 0) {
+    return;
+  }
+  project.targets.package.options.assets = [...assets, ...missing];
+  updateProjectConfiguration(tree, project.name, project);
+};
 
 /**
  * Create the plugin project's package.json if absent and point it at the given

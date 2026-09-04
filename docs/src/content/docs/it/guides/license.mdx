@@ -9,7 +9,6 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import Drawer from '@components/drawer.astro';
 import LicenseAllowlist from '@components/license-allowlist.astro';
 import NxCommands from '@components/nx-commands.astro';
-import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 
 Gestisci le licenze in tutto il tuo workspace: sincronizza i file `LICENSE` e le intestazioni del codice sorgente per il tuo codice (`license.source`), e verifica che ogni dipendenza sia conforme a una lista di licenze consentite (`license.dependencies`).
 
@@ -45,7 +44,7 @@ Ogni volta che compili i tuoi progetti (e viene eseguito un target `lint`), il g
 
 [@aws/nx-plugin:license#sync]: Project LICENSE files are out of sync:
 - LICENSE
-- packages/<my-project>LICENSE
+- packages/<my-project>/LICENSE
 
 Project package.json files are out of sync:
 - package.json
@@ -66,6 +65,10 @@ No, run the tasks without syncing the changes
 ```
 
 Seleziona `Yes` per sincronizzare le modifiche.
+
+:::note[Terminali non interattivi]
+Il prompt appare solo in un terminale interattivo. In CI — o in qualsiasi ambiente non-TTY — il task fallisce invece, e Nx stampa le istruzioni per eseguire `nx sync` (o `nx sync:check` per visualizzare l'anteprima). Imposta `sync.applyChanges` a `true` nel tuo `nx.json` per saltare il prompt e sincronizzare sempre automaticamente.
+:::
 
 :::note[Rivedi le Modifiche]
 Assicurati di controllare le modifiche apportate dal generatore di sincronizzazione delle licenze nel controllo di versione per garantire che eventuali task di build di integrazione continua non falliscano a causa di licenze non sincronizzate.
@@ -348,7 +351,7 @@ Ciò significa che non è necessario eseguire il controllo esplicitamente, anche
 
 Il collegamento è un `dependsOn` cross-project sul target `lint` di ogni progetto che punta al target `license-check` radice. Per saltare il controllo durante un lint o build, imposta la variabile d'ambiente `LICENSE_DEPENDENCY_CHECK=skip`:
 
-<PackageManagerShortCommand commands={["LICENSE_DEPENDENCY_CHECK=skip lint"]} />
+<NxCommands commands={['run-many --target lint --all']} env={{ LICENSE_DEPENDENCY_CHECK: 'skip' }} />
 
 ### Configurazione
 
@@ -381,7 +384,14 @@ Per limitare la lista consentita, sostituisci `DEFAULT_LICENSE_ALLOWLIST` con il
 
 #### Eccezioni per singoli pacchetti
 
-Utilizza `exceptions` per i pacchetti che falliscono il controllo — sia perché la loro licenza non è nella lista consentita, sia perché vengono forniti senza metadati di licenza rilevabili. Il campo `reason` è obbligatorio in modo che i revisori possano vedere perché è stata concessa l'eccezione.
+Utilizza `exceptions` per i pacchetti che falliscono il controllo — sia perché la loro licenza non è nella lista consentita, sia perché vengono forniti senza metadati di licenza rilevabili.
+
+Ogni voce accetta:
+
+- `package` (obbligatorio): il nome del pacchetto a cui si applica l'eccezione
+- `reason` (obbligatorio): perché l'eccezione è stata concessa, in modo che i revisori possano vederlo
+- `version` (facoltativo): limita l'eccezione a una singola versione, in modo che una versione successiva venga controllata di nuovo
+- `spdx` (facoltativo): la licenza da trattare come dichiarata dal pacchetto, per un pacchetto che fornisce il testo della licenza senza dichiararla nei suoi metadati. Questo è ciò che l'hook `onDependency` qui sotto riporta
 
 ```typescript
 exceptions: [
@@ -389,6 +399,7 @@ exceptions: [
     package: 'union',
     version: '0.5.0',
     reason: 'Package ships verbatim MIT text without declaring license',
+    spdx: 'MIT',
   },
 ];
 ```
@@ -397,7 +408,24 @@ I generatori che introducono dipendenze con metadati problematici (ad es. il gen
 
 #### Collector
 
-I collector scoprono le dipendenze ed estraggono i metadati delle licenze. I collector integrati sono `npmCollector()` (scansiona `node_modules`) e `pythonCollector()` (scansiona gli ambienti virtuali Python). Il generatore di licenze configura `npmCollector()` per impostazione predefinita e aggiunge `pythonCollector()` quando sono presenti progetti Python.
+I collector scoprono le dipendenze ed estraggono i metadati delle licenze. I collector integrati sono `npmCollector()` (scansiona `node_modules`) e `pythonCollector()` (scansiona gli ambienti virtuali Python), entrambi esportati da `@aws/nx-plugin/sdk/license`. Il generatore di licenze configura `npmCollector()` per impostazione predefinita e aggiunge `pythonCollector()` quando sono presenti progetti Python.
+
+```typescript title="aws-nx-plugin.config.mts"
+import {
+  DEFAULT_LICENSE_ALLOWLIST,
+  npmCollector,
+  pythonCollector,
+} from '@aws/nx-plugin/sdk/license';
+
+export default {
+  license: {
+    dependencies: {
+      allow: DEFAULT_LICENSE_ALLOWLIST,
+      collectors: [npmCollector(), pythonCollector()],
+    },
+  },
+} satisfies AwsNxPluginConfig;
+```
 
 Per implementare un collector personalizzato, conformati all'interfaccia `LicenseCollector`:
 
@@ -443,6 +471,6 @@ Il controllo delle licenze delle dipendenze è abilitato dalla presenza della ch
 
 Per disabilitare i controlli per una singola esecuzione, imposta la variabile d'ambiente `LICENSE_DEPENDENCY_CHECK=skip`:
 
-<PackageManagerShortCommand commands={["LICENSE_DEPENDENCY_CHECK=skip lint"]} />
+<NxCommands commands={['run-many --target lint --all']} env={{ LICENSE_DEPENDENCY_CHECK: 'skip' }} />
 
 Per disabilitare permanentemente, rimuovi la chiave `license.dependencies` dalla tua configurazione in `aws-nx-plugin.config.mts`. Puoi anche rieseguire il generatore `license` con `--dependencyCheck=false` per generare lo scaffold senza di esso.

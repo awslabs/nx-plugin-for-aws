@@ -301,7 +301,7 @@ const validateFormat = (
  * Parse the hashbang, header and body from a file.
  * The header is the first block comment, or consecutive series of line comments found in the file, after the hashbang
  */
-const parseFile = (
+export const parseFile = (
   content: string,
   syntax: CommentSyntax,
 ): { hashbang: string; header: string; body: string } => {
