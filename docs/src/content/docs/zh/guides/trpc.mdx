@@ -16,6 +16,8 @@ import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
 import OptionFilter from '@components/option-filter.astro';
+import InstallCommand from '@components/install-command.astro';
+import { TS_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/versions';
 
 [tRPC](https://trpc.io/) 是一个用于在 TypeScript 中构建 API 的框架,具有端到端的类型安全性。使用 tRPC,对 API 操作输入和输出的更新会立即反映在客户端代码中,并在 IDE 中可见,无需重新构建项目。
 
@@ -49,15 +51,18 @@ tRPC API 生成器创建一个新的 tRPC API,并配置 AWS CDK 或 Terraform �
 
 <FileTree>
   - src
+    - index.ts Package entrypoint re-exporting the router, context, client and schema
     - init.ts 后端 tRPC 初始化
     - handler.ts Lambda 处理程序入口点
     - router.ts tRPC 路由器定义
     - schema 使用 Zod 的模式定义
+      - index.ts Barrel re-exporting every schema
       - echo.ts "echo" 过程的输入和输出示例定义
-      - z-async-iterable.ts 用于订阅的 Zod 辅助工具（仅限 REST API）
-    - procedures API 公开的过程（或操作）
+      - z-async-iterable.ts 用于订阅的 Zod 辅助工具(仅限 REST API)
+    - procedures API 公开的过程(或操作)
       - echo.ts 示例过程
     - middleware
+      - index.ts Barrel re-exporting the middleware, and the procedure context type
       - error.ts 用于错误处理的中间件
       - logger.ts 用于配置 AWS Powertools for Lambda 日志记录的中间件
       - tracer.ts 用于配置 AWS Powertools for Lambda 跟踪的中间件
@@ -65,9 +70,15 @@ tRPC API 生成器创建一个新的 tRPC API,并配置 AWS CDK 或 Terraform �
     - local-server.ts 用于本地开发服务器的 tRPC 独立适配器入口点
     - client
       - index.ts 用于机器对机器 API 调用的类型安全客户端
+  - rolldown.config.ts Bundle configuration for the Lambda deployment package
   - tsconfig.json TypeScript 配置
+  - tsconfig.lib.json TypeScript configuration for the library sources
+  - tsconfig.spec.json TypeScript configuration for the tests
+  - vitest.config.mts Vitest configuration
   - package.json 定义项目包名称和依赖项的项目清单
   - project.json 项目配置和构建目标
+  - README.md Project readme
+  - .gitignore Ignores the project's build output
 
 </FileTree>
 
@@ -297,6 +308,10 @@ export const echo = publicProcedure
 <OptionFilter when={{ auth: 'iam' }} description="IAM 身份验证 API 的身份中间件示例">
 此示例演示了 `IAM` 身份验证的身份中间件。我们使用从 API Gateway 事件中提取的 sub 在 Cognito 中查找调用者。
 
+查找使用 Cognito Identity Provider 客户端,它不是生成的 tRPC API 的依赖项。首先将其安装到您的 API 项目中:
+
+<InstallCommand pkg={`@aws-sdk/client-cognito-identity-provider@${TS_VERSIONS['@aws-sdk/client-cognito-identity-provider']}`} project="@my-scope/my-api" />
+
 首先,我们定义要添加到上下文的内容:
 
 ```ts
@@ -334,8 +349,8 @@ export const createIdentityPlugin = () => {
 ```ts
 import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
 import { initTRPC, TRPCError } from '@trpc/server';
-import { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
-import { APIGatewayProxyEvent } from 'aws-lambda';
+import type { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
+import type { APIGatewayProxyEvent } from 'aws-lambda';
 
 export interface IIdentityContext {
   identity?: {
@@ -345,12 +360,17 @@ export interface IIdentityContext {
 }
 
 export const createIdentityPlugin = () => {
-  const t = initTRPC.context<IIdentityContext & CreateAWSLambdaContextOptions<APIGatewayProxyEvent>>().create();
+  const t = initTRPC
+    .context<
+      IIdentityContext & CreateAWSLambdaContextOptions<APIGatewayProxyEvent>
+    >()
+    .create();
 
   const cognito = new CognitoIdentityProvider();
 
   return t.procedure.use(async (opts) => {
-    const cognitoAuthenticationProvider = opts.ctx.event.requestContext?.identity?.cognitoAuthenticationProvider;
+    const cognitoAuthenticationProvider =
+      opts.ctx.event.requestContext?.identity?.cognitoAuthenticationProvider;
 
     let sub: string | undefined = undefined;
     if (cognitoAuthenticationProvider) {
@@ -397,8 +417,8 @@ export const createIdentityPlugin = () => {
 ```ts
 import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
 import { initTRPC, TRPCError } from '@trpc/server';
-import { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
-import { APIGatewayProxyEventV2WithIAMAuthorizer } from 'aws-lambda';
+import type { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
+import type { APIGatewayProxyEventV2WithIAMAuthorizer } from 'aws-lambda';
 
 export interface IIdentityContext {
   identity?: {
@@ -408,7 +428,12 @@ export interface IIdentityContext {
 }
 
 export const createIdentityPlugin = () => {
-  const t = initTRPC.context<IIdentityContext & CreateAWSLambdaContextOptions<APIGatewayProxyEventV2WithIAMAuthorizer>>().create();
+  const t = initTRPC
+    .context<
+      IIdentityContext &
+        CreateAWSLambdaContextOptions<APIGatewayProxyEventV2WithIAMAuthorizer>
+    >()
+    .create();
 
   const cognito = new CognitoIdentityProvider();
 
@@ -479,14 +504,18 @@ export interface IIdentityContext {
 }
 ```
 
-请注意，我们在上下文上定义了一个额外的_可选_属性。tRPC 管理确保在正确配置了此中间件的过程中定义此属性。
+请注意,我们在上下文上定义了一个额外的_可选_属性。tRPC 管理确保在正确配置了此中间件的过程中定义此属性。
 
-接下来是中间件本身：
+接下来是中间件本身。事件类型和声明的位置在 REST API 和 HTTP API 之间有所不同,因此实现取决于您选择的 `infra`:
+
+<Tabs syncKey="http-rest">
+<TabItem label="REST API" _filter={{ infra: 'rest-lambda' }}>
+REST API 的 Cognito User Pools 授权器将声明放在 `event.requestContext.authorizer.claims`:
 
 ```ts
 import { initTRPC, TRPCError } from '@trpc/server';
-import { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
-import { APIGatewayProxyEvent } from 'aws-lambda';
+import type { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
+import type { APIGatewayProxyEvent } from 'aws-lambda';
 
 export interface IIdentityContext {
   identity?: {
@@ -497,7 +526,9 @@ export interface IIdentityContext {
 
 export const createIdentityPlugin = () => {
   const t = initTRPC
-    .context<IIdentityContext & CreateAWSLambdaContextOptions<APIGatewayProxyEvent>>()
+    .context<
+      IIdentityContext & CreateAWSLambdaContextOptions<APIGatewayProxyEvent>
+    >()
     .create();
 
   return t.procedure.use(async (opts) => {
@@ -506,7 +537,7 @@ export const createIdentityPlugin = () => {
       | undefined;
 
     const sub = claims?.sub;
-    const username = claims?.username;
+    const username = claims?.username ?? claims?.['cognito:username'];
 
     if (!sub || !username) {
       throw new TRPCError({
@@ -527,8 +558,61 @@ export const createIdentityPlugin = () => {
   });
 };
 ```
+</TabItem>
+<TabItem label="HTTP API" _filter={{ infra: 'http-lambda' }}>
+HTTP API 的 JWT 授权器提供 payload-v2 事件,其声明位于更深一层,在 `event.requestContext.authorizer.jwt.claims`。上下文必须在 `APIGatewayProxyEventV2WithJWTAuthorizer` 上进行类型化,以匹配生成的 `publicProcedure` 使用的上下文 — 否则 `.concat()` 会失败并出现 tRPC 的 `Context mismatch` 错误:
 
-然后，您可以将插件混合到任何需要调用者身份的过程中：
+```ts
+import { initTRPC, TRPCError } from '@trpc/server';
+import type { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
+import type { APIGatewayProxyEventV2WithJWTAuthorizer } from 'aws-lambda';
+
+export interface IIdentityContext {
+  identity?: {
+    sub: string;
+    username: string;
+  };
+}
+
+export const createIdentityPlugin = () => {
+  const t = initTRPC
+    .context<
+      IIdentityContext &
+        CreateAWSLambdaContextOptions<APIGatewayProxyEventV2WithJWTAuthorizer>
+    >()
+    .create();
+
+  return t.procedure.use(async (opts) => {
+    const claims = opts.ctx.event.requestContext?.authorizer?.jwt?.claims as
+      | Record<string, string>
+      | undefined;
+
+    const sub = claims?.sub;
+    const username = claims?.username ?? claims?.['cognito:username'];
+
+    if (!sub || !username) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Unable to determine calling user',
+      });
+    }
+
+    return await opts.next({
+      ctx: {
+        ...opts.ctx,
+        identity: {
+          sub,
+          username,
+        },
+      },
+    });
+  });
+};
+```
+</TabItem>
+</Tabs>
+
+然后,您可以将插件混合到任何需要调用者身份的过程中:
 
 ```ts
 import { publicProcedure } from '../init.js';

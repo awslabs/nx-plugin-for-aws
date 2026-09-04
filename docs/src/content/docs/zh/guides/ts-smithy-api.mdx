@@ -18,6 +18,8 @@ import PackageManagerShortCommand from '@components/package-manager-short-comman
 import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
 import OptionFilter from '@components/option-filter.astro';
+import InstallCommand from '@components/install-command.astro';
+import { TS_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/versions';
 
 [Smithy](https://smithy.io/) 是一种与协议无关的接口定义语言，用于以模型驱动的方式编写 API。
 
@@ -46,7 +48,6 @@ Smithy TypeScript API 生成器使用 Smithy 进行服务定义，并使用 [Smi
 <FileTree>
 
 - **model/** Smithy 模型项目
-  - package.json 定义项目包名称和依赖项的项目清单
   - project.json 项目配置和构建目标
   - smithy-build.json Smithy 构建配置
   - ssdk.rolldown.config.mjs 打包生成的 TypeScript Server SDK
@@ -55,9 +56,15 @@ Smithy TypeScript API 生成器使用 Smithy 进行服务定义，并使用 [Smi
     - operations/
       - echo.smithy 示例操作定义
 - **backend/** TypeScript 后端实现
+  - package.json 定义项目包名称和依赖项的项目清单
   - project.json 项目配置和构建目标
   - rolldown.config.ts 打包配置
+  - tsconfig.json TypeScript 配置
+  - tsconfig.lib.json TypeScript 配置（用于库源代码）
+  - tsconfig.spec.json TypeScript 配置（用于测试）
+  - vitest.config.mts Vitest 配置
   - src/
+    - index.ts 包入口点
     - handler.ts AWS Lambda 处理程序
     - local-server.ts 本地开发服务器
     - service.ts 服务实现
@@ -91,7 +98,7 @@ Smithy TypeScript API 生成器使用 Smithy 进行服务定义，并使用 [Smi
 </FileTree>
 
 :::note[生成的项目]
-此项目使用 [`ts#project`](guides/typescript-project) 生成器生成，因此配置相同的构建目标。
+此项目使用 <Link path="/guides/typescript-project">`ts#project`</Link> 生成器生成，因此配置相同的构建目标。
 :::
 </Fragment>
 <Fragment slot="terraform">
@@ -110,7 +117,7 @@ Smithy TypeScript API 生成器使用 Smithy 进行服务定义，并使用 [Smi
 </FileTree>
 
 :::note[生成的项目]
-此项目使用 [`terraform#project`](guides/terraform-project) 生成器生成，因此配置相同的构建目标。
+此项目使用 <Link path="/guides/terraform-project">`terraform#project`</Link> 生成器生成，因此配置相同的构建目标。
 :::
 </Fragment>
 </Infrastructure>
@@ -475,7 +482,9 @@ export interface ServiceContext {
 接下来，在 `src/identity.ts` 中编写解析器。当无法确定调用者时，它会抛出 `UnauthorizedError`。实现取决于您选择的 `auth` 方法：
 
 <OptionFilter when={{ auth: 'iam' }} description="IAM 身份验证 API 的身份解析">
-对于 `IAM` 身份验证，我们使用从 API Gateway 事件中提取的 sub 在 Cognito 中查找调用者：
+对于 `IAM` 身份验证，我们使用从 API Gateway 事件中提取的 sub 在 Cognito 中查找调用者。查找使用 Cognito Identity Provider 客户端，它不是生成的 Smithy 后端的依赖项，因此首先将其安装到后端项目中：
+
+<InstallCommand pkg={`@aws-sdk/client-cognito-identity-provider@${TS_VERSIONS['@aws-sdk/client-cognito-identity-provider']}`} project="@my-scope/my-api" projectDir="packages/my-api/backend" />
 
 ```ts
 import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
@@ -498,7 +507,9 @@ export const getIdentity = async (
   }
 
   if (!sub) {
-    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
+    throw new UnauthorizedError({
+      message: 'Unable to determine calling user',
+    });
   }
 
   const { Users } = await cognito.listUsers({
@@ -509,7 +520,9 @@ export const getIdentity = async (
   });
 
   if (!Users || Users.length !== 1) {
-    throw new UnauthorizedError({ message: `No user found with subjectId ${sub}` });
+    throw new UnauthorizedError({
+      message: `No user found with subjectId ${sub}`,
+    });
   }
 
   return { sub, username: Users[0].Username! };
@@ -536,7 +549,9 @@ export const getIdentity = async (
   const username = claims?.username;
 
   if (!sub || !username) {
-    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
+    throw new UnauthorizedError({
+      message: 'Unable to determine calling user',
+    });
   }
 
   return { sub, username };
@@ -562,7 +577,18 @@ const httpResponse = await serviceHandler.handle(httpRequest, {
 });
 ```
 
-现在我们可以在操作中使用已解析的身份，例如在 `src/operations/echo.ts` 中：
+`getIdentity` 是 `ServiceContext` 上的必需字段，正如[上面的注意事项](#服务上下文)所述，上下文在**两个**入口点中构造 - 因此 `src/local-server.ts` 也需要它。本地服务器前面没有 API Gateway 授权器，因此为本地开发提供一个存根身份：
+
+```ts {5} ins={5}
+const httpResponse = await serviceHandler.handle(httpRequest, {
+  tracer,
+  logger,
+  metrics,
+  getIdentity: async () => ({ sub: 'local', username: 'local' }),
+});
+```
+
+我们现在可以在操作中使用已解析的身份，例如在 `src/operations/echo.ts` 中：
 
 ```ts
 import { ServiceContext } from '../context.js';
@@ -800,6 +826,49 @@ output "lambda_function_name" {
 <Snippet name="api/access-logging" parentHeading="访问日志记录" />
 
 ### 集成
+
+<Infrastructure>
+<Fragment slot="cdk">
+:::caution[CDK 中的操作名称为 camelCase]
+Smithy 操作以 PascalCase（`Echo`）声明，您的后端以该名称导出它们。CDK 集成键是相同名称的 **camelCase** 形式，因此操作 `Echo` 在您的堆栈中的任何地方都是 `echo`：
+
+```ts
+const api = new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this)
+    // `Echo` in the model, `echo` here
+    .withOperationOptions({ echo: { timeout: Duration.seconds(60) } })
+    .build(),
+});
+
+api.integrations.echo.handler.addToRolePolicy(...);
+```
+:::
+</Fragment>
+<Fragment slot="terraform">
+:::note[Terraform 中的操作名称为 camelCase]
+生成的模块的操作键输出及其 `operations.json` 使用 Smithy 操作名称的 **camelCase** 形式，因此 Smithy 操作 `Echo` 的键为 `echo`：
+
+```hcl
+# `Echo` in the model, `echo` here
+resource "aws_iam_role_policy" "echo_permissions" {
+  name = "echo-additional-permissions"
+  role = module.my_api.lambda_execution_role_names["echo"]
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = "arn:aws:s3:::my-bucket/*"
+      }
+    ]
+  })
+}
+```
+:::
+</Fragment>
+</Infrastructure>
 
 <Snippet name="api/type-safe-api-integrations" parentHeading="集成" />
 

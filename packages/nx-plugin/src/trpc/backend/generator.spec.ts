@@ -1341,4 +1341,74 @@ describe('trpc backend generator', () => {
       });
     },
   );
+  it('should preserve user-authored implementation files when re-run', async () => {
+    const options: TsTrpcApiGeneratorSchema = {
+      name: 'TestApi',
+      directory: 'apps',
+      infra: 'rest-lambda',
+      integrationPattern: 'isolated',
+      auth: 'iam',
+      iac: 'cdk',
+    };
+    await tsTrpcApiGenerator(tree, options);
+
+    // Stand in for what the guide has the reader write: a registered nested
+    // router, a new procedure, an edited schema and edited middleware.
+    const userOwned = {
+      'apps/test-api/src/router.ts': `import { echo } from './procedures/echo.js';
+import { listUsers } from './procedures/users/list.js';
+import { t } from './init.js';
+
+export const router = t.router;
+
+export const appRouter = router({
+  echo,
+  users: router({
+    list: listUsers,
+  }),
+});
+
+export type AppRouter = typeof appRouter;
+`,
+      'apps/test-api/src/procedures/echo.ts': `// MY CUSTOM CODE
+export const echo = publicProcedure.query(() => ({ message: 'hi' }));
+`,
+      'apps/test-api/src/procedures/users/list.ts':
+        'export const listUsers = 1;\n',
+      'apps/test-api/src/schema/index.ts': "export * from './users.js';\n",
+      'apps/test-api/src/schema/z-async-iterable.ts':
+        '// MY STREAMING HELPER\n',
+      'apps/test-api/src/init.ts': '// MY CUSTOM INIT\n',
+      'apps/test-api/src/index.ts': '// MY CUSTOM BARREL\n',
+      'apps/test-api/src/local-server.ts': '// MY CUSTOM LOCAL SERVER\n',
+      'apps/test-api/src/middleware/logger.ts': '// MY CUSTOM LOGGER\n',
+      'apps/test-api/src/middleware/metrics.ts': '// MY CUSTOM METRICS\n',
+      'apps/test-api/src/middleware/tracer.ts': '// MY CUSTOM TRACER\n',
+      'apps/test-api/src/middleware/error.ts': '// MY CUSTOM ERROR HANDLING\n',
+    };
+    Object.entries(userOwned).forEach(([path, contents]) =>
+      tree.write(path, contents),
+    );
+
+    await tsTrpcApiGenerator(tree, options);
+
+    Object.entries(userOwned).forEach(([path, contents]) =>
+      expect(tree.read(path, 'utf-8')).toBe(contents),
+    );
+  });
+
+  it('should vend its own entrypoint over the ts#project placeholder', async () => {
+    await tsTrpcApiGenerator(tree, {
+      name: 'TestApi',
+      directory: 'apps',
+      infra: 'rest-lambda',
+      integrationPattern: 'isolated',
+      auth: 'iam',
+      iac: 'cdk',
+    });
+
+    expect(tree.read('apps/test-api/src/index.ts', 'utf-8')).toContain(
+      "export { appRouter } from './router",
+    );
+  });
 });

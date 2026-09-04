@@ -18,6 +18,8 @@ import PackageManagerShortCommand from '@components/package-manager-short-comman
 import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
 import OptionFilter from '@components/option-filter.astro';
+import InstallCommand from '@components/install-command.astro';
+import { TS_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/versions';
 
 [Smithy](https://smithy.io/) là một ngôn ngữ định nghĩa giao diện độc lập với giao thức để tạo API theo cách hướng mô hình.
 
@@ -46,7 +48,6 @@ Trình tạo tạo hai dự án liên quan trong thư mục `<directory>/<api-na
 <FileTree>
 
 - **model/** Dự án mô hình Smithy
-  - package.json Tệp kê khai dự án định nghĩa tên gói và các phụ thuộc của dự án
   - project.json Cấu hình dự án và các target build
   - smithy-build.json Cấu hình build Smithy
   - ssdk.rolldown.config.mjs Đóng gói TypeScript Server SDK được tạo
@@ -55,9 +56,15 @@ Trình tạo tạo hai dự án liên quan trong thư mục `<directory>/<api-na
     - operations/
       - echo.smithy Định nghĩa thao tác ví dụ
 - **backend/** Triển khai backend TypeScript
+  - package.json Tệp kê khai dự án định nghĩa tên gói và các phụ thuộc của dự án
   - project.json Cấu hình dự án và các target build
   - rolldown.config.ts Cấu hình bundle
+  - tsconfig.json TypeScript configuration
+  - tsconfig.lib.json TypeScript configuration for the library sources
+  - tsconfig.spec.json TypeScript configuration for the tests
+  - vitest.config.mts Vitest configuration
   - src/
+    - index.ts Package entrypoint
     - handler.ts AWS Lambda handler
     - local-server.ts Server phát triển cục bộ
     - service.ts Triển khai dịch vụ
@@ -91,7 +98,7 @@ Dự án mã cơ sở hạ tầng chung được cấu trúc như sau:
 </FileTree>
 
 :::note[Dự án được tạo]
-Dự án này được tạo bằng trình tạo [`ts#project`](guides/typescript-project) và do đó cấu hình các build targets giống nhau.
+Dự án này được tạo bằng trình tạo <Link path="/guides/typescript-project">`ts#project`</Link> và do đó cấu hình các build targets giống nhau.
 :::
 </Fragment>
 <Fragment slot="terraform">
@@ -110,7 +117,7 @@ Dự án này được tạo bằng trình tạo [`ts#project`](guides/typescrip
 </FileTree>
 
 :::note[Dự án được tạo]
-Dự án này được tạo bằng trình tạo [`terraform#project`](guides/terraform-project) và do đó cấu hình các build targets giống nhau.
+Dự án này được tạo bằng trình tạo <Link path="/guides/terraform-project">`terraform#project`</Link> và do đó cấu hình các build targets giống nhau.
 :::
 </Fragment>
 </Infrastructure>
@@ -475,7 +482,9 @@ export interface ServiceContext {
 Tiếp theo, viết resolver trong `src/identity.ts`. Nó ném `UnauthorizedError` khi không thể xác định người gọi. Việc triển khai phụ thuộc vào phương thức `auth` bạn đã chọn:
 
 <OptionFilter when={{ auth: 'iam' }} description="Giải quyết danh tính cho các API được xác thực IAM">
-Đối với xác thực `IAM`, chúng ta tra cứu người gọi trong Cognito bằng sub được trích xuất từ sự kiện API Gateway:
+Đối với xác thực `IAM`, chúng ta tra cứu người gọi trong Cognito bằng sub được trích xuất từ sự kiện API Gateway. Việc tra cứu sử dụng Cognito Identity Provider client, không phải là một phụ thuộc của backend Smithy được tạo, vì vậy hãy cài đặt nó vào dự án backend trước:
+
+<InstallCommand pkg={`@aws-sdk/client-cognito-identity-provider@${TS_VERSIONS['@aws-sdk/client-cognito-identity-provider']}`} project="@my-scope/my-api" projectDir="packages/my-api/backend" />
 
 ```ts
 import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
@@ -498,7 +507,9 @@ export const getIdentity = async (
   }
 
   if (!sub) {
-    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
+    throw new UnauthorizedError({
+      message: 'Unable to determine calling user',
+    });
   }
 
   const { Users } = await cognito.listUsers({
@@ -509,7 +520,9 @@ export const getIdentity = async (
   });
 
   if (!Users || Users.length !== 1) {
-    throw new UnauthorizedError({ message: `No user found with subjectId ${sub}` });
+    throw new UnauthorizedError({
+      message: `No user found with subjectId ${sub}`,
+    });
   }
 
   return { sub, username: Users[0].Username! };
@@ -536,7 +549,9 @@ export const getIdentity = async (
   const username = claims?.username;
 
   if (!sub || !username) {
-    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
+    throw new UnauthorizedError({
+      message: 'Unable to determine calling user',
+    });
   }
 
   return { sub, username };
@@ -559,6 +574,17 @@ const httpResponse = await serviceHandler.handle(httpRequest, {
   logger,
   metrics,
   getIdentity: () => getIdentity(event),
+});
+```
+
+`getIdentity` là một trường bắt buộc trên `ServiceContext`, và như [cảnh báo ở trên](#ngữ-cảnh-dịch-vụ) lưu ý, ngữ cảnh được xây dựng trong **cả hai** điểm vào — vì vậy `src/local-server.ts` cũng cần nó. Không có API Gateway authorizer ở phía trước local server, vì vậy hãy cung cấp một danh tính stub cho phát triển cục bộ:
+
+```ts {5} ins={5}
+const httpResponse = await serviceHandler.handle(httpRequest, {
+  tracer,
+  logger,
+  metrics,
+  getIdentity: async () => ({ sub: 'local', username: 'local' }),
 });
 ```
 
@@ -800,6 +826,49 @@ output "lambda_function_name" {
 <Snippet name="api/access-logging" parentHeading="Ghi log truy cập" />
 
 ### Tích hợp
+
+<Infrastructure>
+<Fragment slot="cdk">
+:::caution[Tên operation là camelCase trong CDK]
+Các operation Smithy được khai báo ở dạng PascalCase (`Echo`), và backend của bạn xuất chúng dưới tên đó. Các khóa tích hợp CDK là dạng **camelCase** của cùng một tên, vì vậy một operation `Echo` là `echo` ở mọi nơi trong stack của bạn:
+
+```ts
+const api = new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this)
+    // `Echo` in the model, `echo` here
+    .withOperationOptions({ echo: { timeout: Duration.seconds(60) } })
+    .build(),
+});
+
+api.integrations.echo.handler.addToRolePolicy(...);
+```
+:::
+</Fragment>
+<Fragment slot="terraform">
+:::note[Tên operation là camelCase trong Terraform]
+Các đầu ra được khóa theo operation của module được tạo và `operations.json` của nó sử dụng dạng **camelCase** của tên operation Smithy, vì vậy một operation Smithy `Echo` được khóa là `echo`:
+
+```hcl
+# `Echo` in the model, `echo` here
+resource "aws_iam_role_policy" "echo_permissions" {
+  name = "echo-additional-permissions"
+  role = module.my_api.lambda_execution_role_names["echo"]
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = "arn:aws:s3:::my-bucket/*"
+      }
+    ]
+  })
+}
+```
+:::
+</Fragment>
+</Infrastructure>
 
 <Snippet name="api/type-safe-api-integrations" parentHeading="Tích hợp" />
 

@@ -18,6 +18,8 @@ import PackageManagerShortCommand from '@components/package-manager-short-comman
 import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
 import OptionFilter from '@components/option-filter.astro';
+import InstallCommand from '@components/install-command.astro';
+import { TS_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/versions';
 
 [Smithy](https://smithy.io/)는 모델 기반 방식으로 API를 작성하기 위한 프로토콜 독립적 인터페이스 정의 언어입니다.
 
@@ -46,7 +48,6 @@ Smithy TypeScript API 생성기는 서비스 정의를 위해 Smithy를 사용�
 <FileTree>
 
 - **model/** Smithy 모델 프로젝트
-  - package.json 프로젝트의 패키지 이름과 의존성을 정의하는 프로젝트 매니페스트
   - project.json 프로젝트 구성 및 빌드 타겟
   - smithy-build.json Smithy 빌드 구성
   - ssdk.rolldown.config.mjs 생성된 TypeScript Server SDK를 번들링
@@ -55,9 +56,15 @@ Smithy TypeScript API 생성기는 서비스 정의를 위해 Smithy를 사용�
     - operations/
       - echo.smithy 예제 작업 정의
 - **backend/** TypeScript 백엔드 구현
+  - package.json 프로젝트의 패키지 이름과 의존성을 정의하는 프로젝트 매니페스트
   - project.json 프로젝트 구성 및 빌드 타겟
   - rolldown.config.ts 번들 구성
+  - tsconfig.json TypeScript 구성
+  - tsconfig.lib.json TypeScript 구성 (라이브러리 소스용)
+  - tsconfig.spec.json TypeScript 구성 (테스트용)
+  - vitest.config.mts Vitest 구성
   - src/
+    - index.ts 패키지 진입점
     - handler.ts AWS Lambda 핸들러
     - local-server.ts 로컬 개발 서버
     - service.ts 서비스 구현
@@ -91,7 +98,7 @@ Smithy TypeScript API 생성기는 서비스 정의를 위해 Smithy를 사용�
 </FileTree>
 
 :::note[생성된 프로젝트]
-이 프로젝트는 [`ts#project`](guides/typescript-project) 생성기를 사용하여 생성되므로 동일한 빌드 타겟을 구성합니다.
+이 프로젝트는 <Link path="/guides/typescript-project">`ts#project`</Link> 생성기를 사용하여 생성되므로 동일한 빌드 타겟을 구성합니다.
 :::
 </Fragment>
 <Fragment slot="terraform">
@@ -110,7 +117,7 @@ Smithy TypeScript API 생성기는 서비스 정의를 위해 Smithy를 사용�
 </FileTree>
 
 :::note[생성된 프로젝트]
-이 프로젝트는 [`terraform#project`](guides/terraform-project) 생성기를 사용하여 생성되므로 동일한 빌드 타겟을 구성합니다.
+이 프로젝트는 <Link path="/guides/terraform-project">`terraform#project`</Link> 생성기를 사용하여 생성되므로 동일한 빌드 타겟을 구성합니다.
 :::
 </Fragment>
 </Infrastructure>
@@ -475,7 +482,9 @@ export interface ServiceContext {
 다음으로, `src/identity.ts`에 리졸버를 작성합니다. 호출자를 확인할 수 없을 때 `UnauthorizedError`를 던집니다. 구현은 선택한 `auth` 방법에 따라 다릅니다:
 
 <OptionFilter when={{ auth: 'iam' }} description="IAM 인증 API에 대한 신원 확인">
-`IAM` 인증의 경우, API Gateway 이벤트에서 추출한 sub를 사용하여 Cognito에서 호출자를 조회합니다:
+`IAM` 인증의 경우, API Gateway 이벤트에서 추출한 sub를 사용하여 Cognito에서 호출자를 조회합니다. 조회는 Cognito Identity Provider 클라이언트를 사용하는데, 이는 생성된 Smithy 백엔드의 의존성이 아니므로 먼저 백엔드 프로젝트에 설치하세요:
+
+<InstallCommand pkg={`@aws-sdk/client-cognito-identity-provider@${TS_VERSIONS['@aws-sdk/client-cognito-identity-provider']}`} project="@my-scope/my-api" projectDir="packages/my-api/backend" />
 
 ```ts
 import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
@@ -498,7 +507,9 @@ export const getIdentity = async (
   }
 
   if (!sub) {
-    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
+    throw new UnauthorizedError({
+      message: 'Unable to determine calling user',
+    });
   }
 
   const { Users } = await cognito.listUsers({
@@ -509,7 +520,9 @@ export const getIdentity = async (
   });
 
   if (!Users || Users.length !== 1) {
-    throw new UnauthorizedError({ message: `No user found with subjectId ${sub}` });
+    throw new UnauthorizedError({
+      message: `No user found with subjectId ${sub}`,
+    });
   }
 
   return { sub, username: Users[0].Username! };
@@ -536,7 +549,9 @@ export const getIdentity = async (
   const username = claims?.username;
 
   if (!sub || !username) {
-    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
+    throw new UnauthorizedError({
+      message: 'Unable to determine calling user',
+    });
   }
 
   return { sub, username };
@@ -559,6 +574,17 @@ const httpResponse = await serviceHandler.handle(httpRequest, {
   logger,
   metrics,
   getIdentity: () => getIdentity(event),
+});
+```
+
+`getIdentity`는 `ServiceContext`의 필수 필드이며, [위의 주의사항](#서비스-컨텍스트)에서 언급한 것처럼 컨텍스트는 **두** 진입점 모두에서 구성됩니다 — 따라서 `src/local-server.ts`에도 필요합니다. 로컬 서버 앞에는 API Gateway 권한 부여자가 없으므로 로컬 개발을 위한 스텁 신원을 제공하세요:
+
+```ts {5} ins={5}
+const httpResponse = await serviceHandler.handle(httpRequest, {
+  tracer,
+  logger,
+  metrics,
+  getIdentity: async () => ({ sub: 'local', username: 'local' }),
 });
 ```
 
@@ -800,6 +826,49 @@ output "lambda_function_name" {
 <Snippet name="api/access-logging" parentHeading="액세스 로깅" />
 
 ### 통합
+
+<Infrastructure>
+<Fragment slot="cdk">
+:::caution[CDK에서 작업 이름은 camelCase입니다]
+Smithy 작업은 PascalCase(`Echo`)로 선언되며, 백엔드는 해당 이름으로 내보냅니다. CDK 통합 키는 동일한 이름의 **camelCase** 형식이므로 작업 `Echo`는 스택의 모든 곳에서 `echo`입니다:
+
+```ts
+const api = new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this)
+    // `Echo` in the model, `echo` here
+    .withOperationOptions({ echo: { timeout: Duration.seconds(60) } })
+    .build(),
+});
+
+api.integrations.echo.handler.addToRolePolicy(...);
+```
+:::
+</Fragment>
+<Fragment slot="terraform">
+:::note[Terraform에서 작업 이름은 camelCase입니다]
+생성된 모듈의 작업 키 출력과 `operations.json`은 Smithy 작업 이름의 **camelCase** 형식을 사용하므로 Smithy 작업 `Echo`는 `echo`로 키가 지정됩니다:
+
+```hcl
+# `Echo` in the model, `echo` here
+resource "aws_iam_role_policy" "echo_permissions" {
+  name = "echo-additional-permissions"
+  role = module.my_api.lambda_execution_role_names["echo"]
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = "arn:aws:s3:::my-bucket/*"
+      }
+    ]
+  })
+}
+```
+:::
+</Fragment>
+</Infrastructure>
 
 <Snippet name="api/type-safe-api-integrations" parentHeading="통합" />
 
