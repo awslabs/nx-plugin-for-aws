@@ -35,13 +35,14 @@ tRPC API 프로젝트를 소스로, 관계형 데이터베이스 프로젝트를
 
 ## 생성기 출력
 
-생성기는 tRPC API 프로젝트에 미들웨어 파일을 생성합니다:
+생성기는 tRPC API 프로젝트에 미들웨어 파일을 생성하고, 이를 tRPC 컨텍스트에 추가합니다:
 
 <FileTree>
 
 - packages/api/src
   - middleware
     - \<db-name>.ts 프로시저 컨텍스트에서 Prisma 클라이언트를 노출하는 tRPC 플러그인
+  - init.ts `Context`에 추가된 데이터베이스의 컨텍스트 인터페이스
 
 </FileTree>
 
@@ -53,12 +54,11 @@ tRPC API 프로젝트를 소스로, 관계형 데이터베이스 프로젝트를
 
 생성된 플러그인을 tRPC 라우터에 추가하여 이를 사용하는 모든 프로시저가 데이터베이스에 액세스할 수 있도록 합니다:
 
-```ts title="packages/api/src/router.ts" {2,5}
+```ts title="packages/api/src/router.ts" {2,4}
 import { t } from './init.js';
 import { createMyDbPlugin } from './middleware/my-db.js';
 
-export const authenticatedProcedure = t.procedure
-  .concat(createMyDbPlugin());
+export const dbProcedure = t.procedure.concat(createMyDbPlugin());
 ```
 
 ### 프로시저에서 데이터베이스 액세스
@@ -67,9 +67,9 @@ export const authenticatedProcedure = t.procedure
 
 ```ts title="packages/api/src/procedures/users.ts" {7-8}
 import { z } from 'zod';
-import { authenticatedProcedure } from '../router.js';
+import { dbProcedure } from '../router.js';
 
-export const listUsers = authenticatedProcedure
+export const listUsers = dbProcedure
   .output(z.array(z.object({ id: z.string(), name: z.string() })))
   .query(async ({ ctx }) => {
     // ctx.myDb is the Prisma client — typed as Awaited<ReturnType<typeof getPrisma>>
@@ -102,7 +102,7 @@ RDS IAM 토큰은 **15분** 후에 만료됩니다. MySQL 어댑터는 연결 �
 
 ## 여러 데이터베이스
 
-다른 타겟으로 생성기를 다시 실행하여 추가 데이터베이스를 연결할 수 있습니다. 각 데이터베이스는 자체 플러그인과 컨텍스트 인터페이스를 갖습니다:
+다른 타겟으로 생성기를 다시 실행하여 추가 데이터베이스를 연결할 수 있습니다. 각 데이터베이스는 자체 플러그인과 컨텍스트 인터페이스를 가집니다:
 
 ```ts title="packages/api/src/router.ts"
 export const dbProcedure = t.procedure
@@ -125,3 +125,4 @@ export const dbProcedure = t.procedure
 <NxCommands commands={["dev <api-project-name>"]} />
 
 API와 함께 로컬 데이터베이스가 자동으로 시작됩니다.
+
