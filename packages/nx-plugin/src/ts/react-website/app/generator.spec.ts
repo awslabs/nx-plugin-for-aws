@@ -217,6 +217,44 @@ describe('react-website generator', () => {
     ).toMatchSnapshot('common/constructs-core-static-website.ts');
   });
 
+  // A website named after the core construct it extends used to emit
+  // `export class StaticWebsite ... extends StaticWebsite` with the core
+  // `StaticWebsite` imported unaliased.
+  it('extends the aliased core construct when named static-website', async () => {
+    await tsReactWebsiteGenerator(tree, { ...options, name: 'static-website' });
+
+    const construct =
+      tree.read(
+        'packages/common/constructs/src/app/static-websites/static-website.ts',
+        'utf-8',
+      ) ?? '';
+
+    expect(construct).toContain('StaticWebsite as CoreStaticWebsite');
+    expect(construct).toContain('StaticWebsiteProps as CoreStaticWebsiteProps');
+    expect(construct).toContain('extends CoreStaticWebsite');
+    expect(construct).toContain('export class StaticWebsite');
+    expect(construct).not.toMatch(/import \{[^}]*\bStaticWebsite\s*,/);
+    expect(construct).not.toContain('extends StaticWebsite');
+  });
+
+  it('leaves the core import unaliased for a name that does not collide', async () => {
+    await tsReactWebsiteGenerator(tree, options);
+
+    const construct =
+      tree.read(
+        'packages/common/constructs/src/app/static-websites/test-app.ts',
+        'utf-8',
+      ) ?? '';
+
+    // Aliasing is applied only where it is needed, so the vended code for an
+    // ordinary name is unchanged.
+    expect(construct).toContain(
+      "import { StaticWebsite, StaticWebsiteProps } from '../../core/index.js'",
+    );
+    expect(construct).toContain('extends StaticWebsite');
+    expect(construct).not.toContain('CoreStaticWebsite');
+  });
+
   it('should update package.json with required dependencies', async () => {
     await tsReactWebsiteGenerator(tree, options);
     // The website's runtime dependencies live in its own project manifest
