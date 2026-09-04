@@ -133,7 +133,7 @@ A infraestrutura gerada consome um user pool e cliente Cognito existentes — el
 O construto gerado requer uma propriedade `identity` fornecendo o user pool e cliente:
 
 ```ts {7,9-11} title="packages/infra/src/stacks/application-stack.ts"
-import { MyGateway, UserIdentity } from ':my-scope/common-constructs';
+import { MyGateway, UserIdentity } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
@@ -179,7 +179,9 @@ Consulte a [documentação AWS sobre políticas do AgentCore Gateway](https://do
 
 ### Adicionando uma política
 
-Para adicionar uma política, crie um novo arquivo `.cedar` ao lado de `permit-all.cedar`. Cada arquivo `.cedar` em `policies/` deve conter exatamente **uma** declaração `permit` ou `forbid` e é implantado como um único recurso `AWS::BedrockAgentCore::Policy`. O nome do recurso de política é derivado do nome do arquivo: `permit-all.cedar` se torna `PermitAll` (kebab/snake-case é convertido para PascalCase). Arquivos contendo múltiplas declarações produzem erros `unexpected token 'forbid'` no momento da implantação — divida-os em arquivos separados.
+Para adicionar uma política, crie um novo arquivo `.cedar` ao lado de `permit-all.cedar`. Cada arquivo `.cedar` em `policies/` deve conter exatamente **uma** declaração `permit` ou `forbid` e é implantado como um único recurso `AWS::BedrockAgentCore::Policy`. Arquivos contendo múltiplas declarações produzem erros `unexpected token 'forbid'` no momento da implantação — divida-os em arquivos separados.
+
+Os nomes de políticas devem ser únicos em toda a conta, portanto o nome implantado nunca é apenas o nome do arquivo: o CDK o deriva do caminho do construto, e o Terraform converte o nome do arquivo para PascalCase (`permit-all.cedar` → `PermitAll`) e então anexa o sufixo aleatório do gateway. A **descrição** da política é o que identifica seu arquivo de origem — `Policy loaded from permit-all.cedar` — então corresponda a isso ao inspecionar políticas implantadas.
 
 Por exemplo, para permitir apenas uma função de agente específica invocar uma ferramenta particular, crie:
 
@@ -332,7 +334,7 @@ A infraestrutura gerada cria políticas com `IGNORE_ALL_FINDINGS`: o analisador 
 
 Uma restrição de ordenação ainda se aplica: uma política referenciando `AgentCore::Action::"<target>___<tool>"` só valida uma vez que o destino tenha registrado essa ferramenta com o Gateway, razão pela qual a infraestrutura gerada cria políticas após os destinos do Gateway.
 
-Se uma política falhar ao implantar, o CloudFormation apresenta a rejeição como um erro opaco `Resource stabilization failed` — execute `aws bedrock-agentcore-control list-policies --policy-engine-id <id>` para recuperar os `statusReasons` do validador, que contêm o motivo real.
+Se uma política falhar ao implantar, o CloudFormation apresenta a rejeição como um erro opaco `Resource stabilization failed` — execute `aws bedrock-agentcore-control list-policies --policy-engine-id <id>` para recuperar os `statusReasons` do validador, que contêm o motivo real. Identifique a política problemática por sua `description` (`Policy loaded from <file>.cedar`) em vez de seu `name` com sufixo.
 
 ### Exemplo: proibir uma ferramenta mantendo um permit mais amplo
 

@@ -133,7 +133,7 @@ gateway -> targets
 生成されたコンストラクトは、ユーザープールとクライアントを提供する`identity`プロパティを必要とします：
 
 ```ts {7,9-11} title="packages/infra/src/stacks/application-stack.ts"
-import { MyGateway, UserIdentity } from ':my-scope/common-constructs';
+import { MyGateway, UserIdentity } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
@@ -179,7 +179,9 @@ Cedarは、AgentCore Gatewayがツール呼び出しを承認するために使�
 
 ### ポリシーの追加
 
-ポリシーを追加するには、`permit-all.cedar`と並んで新しい`.cedar`ファイルを作成します。`policies/`内の各`.cedar`ファイルは、正確に**1つ**の`permit`または`forbid`ステートメントを含む必要があり、単一の`AWS::BedrockAgentCore::Policy`リソースとしてデプロイされます。ポリシーリソースの名前はファイル名から派生します：`permit-all.cedar`は`PermitAll`になります（kebab/snake-caseはPascalCaseに変換されます）。複数のステートメントを含むファイルは、デプロイ時に`unexpected token 'forbid'`エラーを生成します — それらを別々のファイルに分割してください。
+ポリシーを追加するには、`permit-all.cedar`と並んで新しい`.cedar`ファイルを作成します。`policies/`内の各`.cedar`ファイルは、正確に**1つ**の`permit`または`forbid`ステートメントを含む必要があり、単一の`AWS::BedrockAgentCore::Policy`リソースとしてデプロイされます。複数のステートメントを含むファイルは、デプロイ時に`unexpected token 'forbid'`エラーを生成します — それらを別々のファイルに分割してください。
+
+ポリシー名はアカウント全体で一意である必要があるため、デプロイされる名前はファイル名だけではありません：CDKはコンストラクトパスから派生させ、TerraformはファイルをPascalCase化（`permit-all.cedar` → `PermitAll`）してからゲートウェイのランダムサフィックスを追加します。ポリシーの**description**がソースファイルを識別するものです — `Policy loaded from permit-all.cedar` — そのため、デプロイされたポリシーを検査する際はそれで一致させます。
 
 たとえば、特定のエージェントロールのみが特定のツールを呼び出すことを許可するには、次のように作成します：
 
@@ -332,7 +334,7 @@ resource == AgentCore::Gateway::"<%= gatewayArn %>"
 
 1つの順序制約が依然として適用されます：`AgentCore::Action::"<target>___<tool>"`を参照するポリシーは、ターゲットがそのツールをGatewayに登録した後にのみ検証されます。これが、生成されたインフラストラクチャがGatewayターゲットの後にポリシーを作成する理由です。
 
-ポリシーのデプロイに失敗した場合、CloudFormationは拒否を不透明な`Resource stabilization failed`エラーとして表示します — `aws bedrock-agentcore-control list-policies --policy-engine-id <id>`を実行して、実際の理由を含むバリデーターの`statusReasons`を取得します。
+ポリシーのデプロイに失敗した場合、CloudFormationは拒否を不透明な`Resource stabilization failed`エラーとして表示します — `aws bedrock-agentcore-control list-policies --policy-engine-id <id>`を実行して、実際の理由を含むバリデーターの`statusReasons`を取得します。問題のあるポリシーは、サフィックス付きの`name`ではなく、その`description`（`Policy loaded from <file>.cedar`）で識別します。
 
 ### 例：より広範なpermitを維持しながら1つのツールを禁止する
 
