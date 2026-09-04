@@ -2,7 +2,7 @@
 title: Workspace
 description: Reference documentation for workspaces
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { Aside, FileTree } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
@@ -29,6 +29,7 @@ When you create a new workspace with `@aws/nx-plugin`, the preset generator sets
   - tsconfig.base.json Root TypeScript configuration
   - aws-nx-plugin.config.mts Nx Plugin for AWS configuration
   - .git-secrets/ Vendored git-secrets bash script for credential scanning
+  - .gitallowed Patterns git-secrets treats as false positives
   - .husky/ Git hooks
   - .mcp.json Nx Plugin for AWS MCP server configuration for Claude Code
   - .cursor/mcp.json ...and for Cursor
@@ -167,21 +168,26 @@ New workspaces are configured with [Biome](https://biomejs.dev/) for static anal
 
 ### Git Secrets
 
-New workspaces include [git-secrets](https://github.com/awslabs/git-secrets) pre-commit hooks that scan staged files for AWS credential patterns before each commit. This prevents accidentally committing access keys, secret keys, and other sensitive values.
+Workspaces are set up with [git-secrets](https://github.com/awslabs/git-secrets) pre-commit hooks that scan staged files for AWS credential patterns before each commit. This prevents accidentally committing access keys, secret keys, and other sensitive values.
+
+The script is vendored into the workspace at `.git-secrets/git-secrets` and run by the `.husky/pre-commit` hook, so there is nothing to install — but it is not on your `PATH`, so invoke it by path rather than as `git secrets`.
 
 #### Suppressing False Positives
 
 Patterns in git-secrets use [egrep-compatible regular expressions](https://github.com/awslabs/git-secrets#options-for-add). If git-secrets blocks a commit that does not contain real credentials:
 
 ```sh
-# Allow a specific regex pattern
-git secrets --add --allowed 'my-regex-pattern'
+# Allow a specific regex pattern (-a is the allowed flag)
+bash .git-secrets/git-secrets --add -a -- 'my-regex-pattern'
 
-# Allow a literal string (special characters are escaped)
-git secrets --add --allowed --literal 'my-literal+string'
+# Allow a literal string, escaping special characters (-l is the literal flag)
+bash .git-secrets/git-secrets --add -a -l -- 'my-literal+string'
+
+# List what is currently allowed
+git config --get-all secrets.allowed
 ```
 
-You can also create a `.gitallowed` file at the repository root with one egrep-compatible regex per line (shared with your team via version control):
+These are recorded in your local git config, so they apply only to your own clone. To share a suppression with your team, add it to the `.gitallowed` file at the repository root instead — one egrep-compatible regex per line, matched against `<path>:<line-number>:<line-contents>`:
 
 ```text title=".gitallowed"
 # Allow test fixtures

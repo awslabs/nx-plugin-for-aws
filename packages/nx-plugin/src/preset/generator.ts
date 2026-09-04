@@ -4,29 +4,29 @@
  */
 import {
   type GeneratorCallback,
-  joinPathFragments,
   OverwriteStrategy,
   type Tree,
   updateJson,
 } from '@nx/devkit';
 import { execSync } from 'child_process';
 import enquirer from 'enquirer';
-import { readFileSync } from 'fs';
 import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
 } from '../utils/config/utils.js';
 import { declareDependencies } from '../utils/declared-dependencies.js';
-import { addDependenciesToPackageJson } from '../utils/dependencies.js';
 import { formatFilesInSubtree } from '../utils/format.js';
+import {
+  GIT_SECRETS_DEPENDENCIES,
+  setUpGitSecrets,
+} from '../utils/git-secrets.js';
 import { applyWorkspaceInit, INIT_DEPENDENCIES } from '../utils/init.js';
 import { installDependencies } from '../utils/install.js';
 import { getGeneratorInfo, type NxGeneratorInfo } from '../utils/nx.js';
-import { withVersions } from '../utils/versions.js';
 import type { PresetGeneratorSchema } from './schema';
 
 export const DEPENDENCIES = declareDependencies()({
-  ts: [{ name: 'husky' }, ...INIT_DEPENDENCIES],
+  ts: [...GIT_SECRETS_DEPENDENCIES, ...INIT_DEPENDENCIES],
 });
 
 export const PRESET_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
@@ -84,39 +84,6 @@ export function isAmazonian(): boolean {
     return false;
   }
 }
-
-const setUpGitSecrets = (tree: Tree) => {
-  const gitSecretsDir = joinPathFragments(
-    import.meta.dirname,
-    'git-secrets-files',
-    'git-secrets-dir',
-  );
-  const huskyDir = joinPathFragments(
-    import.meta.dirname,
-    'git-secrets-files',
-    'husky-dir',
-  );
-
-  tree.write(
-    '.git-secrets/git-secrets',
-    readFileSync(joinPathFragments(gitSecretsDir, 'git-secrets'), 'utf-8'),
-  );
-  tree.write(
-    '.husky/pre-commit',
-    readFileSync(joinPathFragments(huskyDir, 'pre-commit'), 'utf-8'),
-  );
-  tree.write('.gitallowed', '\\.git-secrets/git-secrets:\n');
-
-  updateJson(tree, 'package.json', (json) => ({
-    ...json,
-    scripts: {
-      ...json.scripts,
-      prepare: 'husky',
-    },
-  }));
-
-  addDependenciesToPackageJson(tree, {}, withVersions(DEPENDENCIES, ['husky']));
-};
 
 export const presetGenerator = async (
   tree: Tree,
@@ -181,7 +148,7 @@ export const presetGenerator = async (
   tree.write('packages/.gitkeep', '');
 
   if (gitSecrets !== false) {
-    setUpGitSecrets(tree);
+    setUpGitSecrets(tree, DEPENDENCIES);
   }
 
   await formatFilesInSubtree(tree);
