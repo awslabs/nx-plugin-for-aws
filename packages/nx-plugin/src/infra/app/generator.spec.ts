@@ -179,13 +179,17 @@ describe('infra generator', () => {
     expect(config.targets.checkov).toMatchObject({
       cache: true,
       executor: 'nx:run-commands',
-      inputs: ['{workspaceRoot}/dist/{projectRoot}/cdk.out'],
+      // Matches the `synth` sibling that produces the template the scan reads,
+      // so the scan's hash follows that template. A fileset input pointed at
+      // the gitignored synth directory would match no tracked file.
+      inputs: ['default'],
       outputs: ['{workspaceRoot}/dist/{projectRoot}/checkov'],
       dependsOn: ['synth'],
       options: {
         command: expect.stringContaining('uvx --from checkov=='),
       },
     });
+    expect(config.targets.checkov.inputs).toEqual(config.targets.synth.inputs);
 
     // Verify Checkov is included in build dependencies
     expect(config.targets.build.dependsOn).toContain('checkov');

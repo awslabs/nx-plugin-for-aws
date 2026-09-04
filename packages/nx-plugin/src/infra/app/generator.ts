@@ -185,10 +185,16 @@ export async function tsInfraGenerator(
           command: 'cdk synth',
         }),
       };
+      // `default` rather than the synth directory: `dist` is gitignored, so a
+      // fileset input pointed at it matches no tracked file and hashes to a
+      // constant — the scan would cache-hit forever and pass on infrastructure
+      // it never read. `default` carries the project's own sources plus the
+      // transitive `dependentTasksOutputFiles` entry, which resolves against
+      // the upstream `synth` task and so hashes the template actually scanned.
       config.targets.checkov = {
         cache: true,
         executor: 'nx:run-commands',
-        inputs: ['{workspaceRoot}/dist/{projectRoot}/cdk.out'],
+        inputs: ['default'],
         outputs: ['{workspaceRoot}/dist/{projectRoot}/checkov'],
         dependsOn: ['synth'],
         options: {
