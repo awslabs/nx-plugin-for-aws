@@ -131,7 +131,7 @@ describe('smoke test - license-check', () => {
   it('passes license-check with Python dependencies', async () => {
     // Generate a Python project — this adds pythonCollector to the config
     await runCLI(
-      `generate @aws/nx-plugin:py#project --name=py-deps --projectType=application --no-interactive`,
+      `generate @aws/nx-plugin:py#project --name=py-deps --type=application --no-interactive`,
       opts,
     );
 

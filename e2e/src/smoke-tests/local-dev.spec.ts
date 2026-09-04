@@ -542,7 +542,7 @@ describe('smoke test - local-dev', { timeout: 30 * 60 * 1000 }, () => {
         opts,
       );
       await runCLI(
-        `generate @aws/nx-plugin:py#project --name=py-project --projectType=application --no-interactive`,
+        `generate @aws/nx-plugin:py#project --name=py-project --type=application --no-interactive`,
         opts,
       );
       await runCLI(
