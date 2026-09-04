@@ -11,6 +11,9 @@ import {
   type Tree,
   updateNxJson,
 } from '@nx/devkit';
+import { readFileSync } from 'fs';
+import { convertAliases, getPromptsForSchema } from 'nx/src/utils/params';
+import { join } from 'path';
 import { declareDependencies } from '../../utils/declared-dependencies.js';
 import { expectHasMetricTags } from '../../utils/metrics.spec.js';
 import {
@@ -377,6 +380,59 @@ describe('python project generator', () => {
     });
     expect(tree.exists('packages/libs')).toBeTruthy();
     expect(tree.exists('packages/libs/pyproject.toml')).toBeTruthy();
+  });
+
+  describe('type option', () => {
+    const schema = JSON.parse(
+      readFileSync(join(__dirname, 'schema.json'), 'utf-8'),
+    );
+
+    it.each(['application', 'library'] as const)(
+      'should set projectType to %s',
+      async (type) => {
+        await pyProjectGenerator(tree, {
+          name: 'test-project',
+          directory: 'packages',
+          type,
+        });
+
+        expect(
+          readJson(tree, 'packages/test_project/project.json').projectType,
+        ).toBe(type);
+      },
+    );
+
+    it('should accept projectType as an alias for type', () => {
+      expect(
+        convertAliases(
+          { name: 'test-project', projectType: 'library' },
+          schema,
+          false,
+        ),
+      ).toEqual({ name: 'test-project', type: 'library' });
+    });
+
+    it('should prompt for type when it is not supplied', () => {
+      const prompt = getPromptsForSchema(
+        { name: 'test-project' },
+        schema,
+        undefined,
+      ).find((question) => question.name === 'type');
+
+      expect(prompt).toBeDefined();
+      expect(prompt.choices).toEqual(['application', 'library']);
+      expect(prompt.initial).toBe('application');
+    });
+
+    it('should not prompt for type when it is supplied', () => {
+      expect(
+        getPromptsForSchema(
+          { name: 'test-project', type: 'library' },
+          schema,
+          undefined,
+        ).map((question) => question.name),
+      ).not.toContain('type');
+    });
   });
 
   it('should be idempotent when re-run with same options', async () => {
