@@ -125,8 +125,8 @@ Per un controllo più granulare, puoi utilizzare il target `watch-generate:<ApiN
 />
 :::
 
-:::warning[Dipendenza File Watcher]
-`watch-generate:<ApiName>-client` si basa sul comando [`nx watch`](https://nx.dev/docs/guides/tasks--caching/workspace-watching), che richiede che il [Nx Daemon](https://nx.dev/docs/concepts/nx-daemon) sia in esecuzione. Pertanto, se hai disabilitato il daemon, il client non si rigenererà automaticamente quando apporti modifiche al tuo FastAPI.
+:::note[Il target dev richiede il Nx Daemon]
+Il target `dev` ricarica a caldo i server di sviluppo locali. Molti di questi si basano su [`nx watch`](https://nx.dev/docs/guides/tasks--caching/workspace-watching) per ottenere questo risultato, il che richiede che il [Nx Daemon](https://nx.dev/docs/concepts/nx-daemon) sia abilitato.
 :::
 
 ### Utilizzo dell'Hook API
@@ -146,12 +146,14 @@ function MyComponent() {
   const api = useMyApi();
   const item = useQuery(api.getItem.queryOptions({ itemId: 'some-id' }));
 
-  if (item.isLoading) return <div>Loading...</div>;
-  if (item.isError) return <div>Error: {item.error.message}</div>;
+  if (item.isPending) return <div>Loading...</div>;
+  if (item.isError) return <div>Error: {JSON.stringify(item.error.error)}</div>;
 
   return <div>Item: {item.data.name}</div>;
 }
 ```
+
+L'errore è un'unione discriminata di oggetti `{ status, error }` piuttosto che un `Error`, quindi non c'è un `message` di livello superiore da renderizzare. Restringi su `status` per leggere un corpo di risposta specifico — vedi [Gestione degli Errori](#gestione-degli-errori) di seguito.
 
 <Drawer title="Utilizzo diretto del client API" trigger="Clicca qui per un esempio utilizzando direttamente il client vanilla.">
 ```tsx {5,13}
@@ -222,7 +224,7 @@ function CreateItemForm() {
 
       {createItem.isError && (
         <div className="error">
-          Error: {createItem.error.message}
+          Error: {JSON.stringify(createItem.error.error)}
         </div>
       )}
     </form>
@@ -370,12 +372,12 @@ function ItemList() {
       }),
   });
 
-  if (items.isLoading) {
+  if (items.isPending) {
     return <LoadingSpinner />;
   }
 
   if (items.isError) {
-    return <ErrorMessage message={items.error.message} />;
+    return <ErrorMessage message={JSON.stringify(items.error.error)} />;
   }
 
   return (

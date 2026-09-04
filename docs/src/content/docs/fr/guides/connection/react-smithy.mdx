@@ -126,6 +126,10 @@ Pour un contrôle plus précis, vous pouvez utiliser la cible `watch-generate:<A
 />
 :::
 
+:::note[La cible dev nécessite le Nx Daemon]
+La cible `dev` recharge à chaud les serveurs de développement locaux. Beaucoup d'entre eux s'appuient sur [`nx watch`](https://nx.dev/docs/guides/tasks--caching/workspace-watching) pour y parvenir, ce qui nécessite que le [Nx Daemon](https://nx.dev/docs/concepts/nx-daemon) soit activé.
+:::
+
 ### Utilisation du hook API
 
 Le générateur fournit un hook `use<ApiName>` que vous pouvez utiliser pour appeler votre API avec TanStack Query.
@@ -143,12 +147,14 @@ function MyComponent() {
   const api = useMyApi();
   const item = useQuery(api.getItem.queryOptions({ itemId: 'some-id' }));
 
-  if (item.isLoading) return <div>Loading...</div>;
-  if (item.isError) return <div>Error: {item.error.message}</div>;
+  if (item.isPending) return <div>Loading...</div>;
+  if (item.isError) return <div>Error: {JSON.stringify(item.error.error)}</div>;
 
   return <div>Item: {item.data.name}</div>;
 }
 ```
+
+L'erreur est une union discriminée d'objets `{ status, error }` plutôt qu'une `Error`, il n'y a donc pas de `message` de niveau supérieur à afficher. Réduisez sur `status` pour lire un corps de réponse spécifique — voir [Gestion des erreurs](#gestion-des-erreurs) ci-dessous.
 
 <Drawer title="Utilisation directe du client API" trigger="Cliquez ici pour un exemple utilisant directement le client vanilla.">
 ```tsx {5,13}
@@ -219,7 +225,7 @@ function CreateItemForm() {
 
       {createItem.isError && (
         <div className="error">
-          Error: {createItem.error.message}
+          Error: {JSON.stringify(createItem.error.error)}
         </div>
       )}
     </form>
@@ -331,12 +337,12 @@ function ItemList() {
       }),
   });
 
-  if (items.isLoading) {
+  if (items.isPending) {
     return <LoadingSpinner />;
   }
 
   if (items.isError) {
-    return <ErrorMessage message={items.error.message} />;
+    return <ErrorMessage message={JSON.stringify(items.error.error)} />;
   }
 
   return (
