@@ -163,15 +163,25 @@ Bạn có thể chỉnh sửa `agent.py` để thêm công cụ, cấu hình mô
 
 Công cụ là các hàm mà AI agent có thể gọi để thực hiện các hành động. Cả hai framework đều sử dụng cách tiếp cận dựa trên decorator để định nghĩa công cụ, lấy tên và mô tả công cụ từ tên hàm và docstring, và tạo schema đầu vào từ các type hint của bạn.
 
+Định nghĩa công cụ, sau đó thêm nó vào danh sách `tools` bên trong `get_agent()`:
+
 <Tabs syncKey="agent-framework">
 <TabItem label="Strands" _filter={{ framework: 'strands' }}>
-```python
+```python title="packages/my-project/my_module/agent/agent.py" {16-20,32}
+from contextlib import contextmanager
+
 from strands import Agent, tool
+from strands.hooks import HookCallback, HookProvider
+from strands_tools import current_time
+from my_scope_agent_connection import log_model_errors, log_tool_errors
+
+from .session import get_session_manager
+
 
 @tool
-def calculate_sum(numbers: list[int]) -> int:
-    """Calculate the sum of a list of numbers"""
-    return sum(numbers)
+def subtract(a: int, b: int) -> int:
+    return a - b
+
 
 @tool
 def get_weather(city: str) -> str:
@@ -179,23 +189,41 @@ def get_weather(city: str) -> str:
     # Your weather API integration here
     return f"Weather in {city}: Sunny, 25°C"
 
-# Add tools to your agent
-agent = Agent(
-    system_prompt="You are a helpful assistant with access to various tools.",
-    tools=[calculate_sum, get_weather],
-)
+
+AGENT_HOOKS: list[HookProvider | HookCallback] = [log_model_errors, log_tool_errors]
+
+
+@contextmanager
+def get_agent():
+    yield Agent(
+        name="MyAgent",
+        description="MyAgent Strands Agent",
+        system_prompt="You are a helpful assistant with access to various tools.",
+        tools=[subtract, current_time, get_weather],
+        hooks=AGENT_HOOKS,
+        session_manager=get_session_manager(),
+    )
 ```
 </TabItem>
 <TabItem label="LangChain" _filter={{ framework: 'langchain' }}>
-```python
+```python title="packages/my-project/my_module/agent/agent.py" {19-23,30}
+import os
+
 from langchain.agents import create_agent
 from langchain_aws import ChatBedrockConverse
 from langchain_core.tools import tool
 
+from .session import get_checkpointer
+
+REGION = os.environ.get("AWS_REGION", "us-east-1")
+MODEL_ID = os.environ.get("MODEL_ID", "global.anthropic.claude-haiku-4-5-20251001-v1:0")
+
+
 @tool
-def calculate_sum(numbers: list[int]) -> int:
-    """Calculate the sum of a list of numbers"""
-    return sum(numbers)
+def subtract(a: int, b: int) -> int:
+    """Subtract b from a."""
+    return a - b
+
 
 @tool
 def get_weather(city: str) -> str:
@@ -203,12 +231,15 @@ def get_weather(city: str) -> str:
     # Your weather API integration here
     return f"Weather in {city}: Sunny, 25°C"
 
-# Add tools to your agent
-agent = create_agent(
-    model=ChatBedrockConverse(model=MODEL_ID, region_name=REGION),
-    tools=[calculate_sum, get_weather],
-    system_prompt="You are a helpful assistant with access to various tools.",
-)
+
+def get_agent():
+    model = ChatBedrockConverse(model=MODEL_ID, region_name=REGION)
+    return create_agent(
+        model=model,
+        tools=[subtract, get_weather],
+        system_prompt="You are a helpful assistant with access to various tools.",
+        checkpointer=get_checkpointer(),
+    )
 ```
 </TabItem>
 </Tabs>
@@ -217,28 +248,45 @@ agent = create_agent(
 
 <Tabs syncKey="agent-framework">
 <TabItem label="Strands" _filter={{ framework: 'strands' }}>
-Strands cung cấp một bộ sưu tập các công cụ dựng sẵn thông qua gói `strands-tools`:
+Strands cung cấp một bộ sưu tập các công cụ dựng sẵn thông qua gói `strands-agents-tools`, mà generator đã thêm vào `pyproject.toml` của dự án bạn. Import các công cụ bạn muốn và thêm chúng vào `get_agent()`:
 
-```python
-from strands_tools import current_time, http_request, file_read
+```python title="packages/my-project/my_module/agent/agent.py" {1,11}
+from strands_tools import current_time, file_read, http_request
 
-agent = Agent(
-    system_prompt="You are a helpful assistant.",
-    tools=[current_time, http_request, file_read],
-)
+# ...
+
+@contextmanager
+def get_agent():
+    yield Agent(
+        name="MyAgent",
+        description="MyAgent Strands Agent",
+        system_prompt="You are a helpful assistant.",
+        tools=[current_time, file_read, http_request],
+        hooks=AGENT_HOOKS,
+        session_manager=get_session_manager(),
+    )
 ```
 </TabItem>
 <TabItem label="LangChain" _filter={{ framework: 'langchain' }}>
-LangChain cung cấp một hệ sinh thái lớn các [công cụ và tích hợp](https://docs.langchain.com/oss/python/integrations/tools). Cài đặt package tích hợp liên quan, sau đó truyền các công cụ vào `create_agent`:
+LangChain cung cấp một hệ sinh thái lớn các [công cụ và tích hợp](https://docs.langchain.com/oss/python/integrations/tools), mỗi công cụ được phân phối trong gói riêng của nó. Generator không thêm những công cụ này, vì vậy hãy cài đặt công cụ bạn cần trước — ví dụ `langchain-community`, nơi công cụ tìm kiếm bên dưới đến từ:
 
-```python
+<NxCommands commands={['run <project-name>:add langchain-community']} />
+
+Sau đó import các công cụ và thêm chúng vào `get_agent()`:
+
+```python title="packages/my-project/my_module/agent/agent.py" {1,9}
 from langchain_community.tools import DuckDuckGoSearchRun
 
-agent = create_agent(
-    model=ChatBedrockConverse(model=MODEL_ID, region_name=REGION),
-    tools=[DuckDuckGoSearchRun()],
-    system_prompt="You are a helpful assistant.",
-)
+# ...
+
+def get_agent():
+    model = ChatBedrockConverse(model=MODEL_ID, region_name=REGION)
+    return create_agent(
+        model=model,
+        tools=[DuckDuckGoSearchRun()],
+        system_prompt="You are a helpful assistant.",
+        checkpointer=get_checkpointer(),
+    )
 ```
 </TabItem>
 </Tabs>
@@ -247,38 +295,55 @@ agent = create_agent(
 
 <Tabs syncKey="agent-framework">
 <TabItem label="Strands" _filter={{ framework: 'strands' }}>
-Theo mặc định, các agent Strands sử dụng Claude Sonnet 4.6 trên Amazon Bedrock, nhưng bạn có thể tùy chỉnh nhà cung cấp mô hình. Xem [tài liệu Strands về nhà cung cấp mô hình](https://strandsagents.com/docs/user-guide/concepts/model-providers/) để biết các tùy chọn cấu hình:
+Agent được tạo ra sử dụng mô hình Strands mặc định trên Amazon Bedrock. Để cấu hình nó, truyền một `model` vào `Agent`. Xem [tài liệu Strands về nhà cung cấp mô hình](https://strandsagents.com/docs/user-guide/concepts/model-providers/) để biết các nhà cung cấp có sẵn và các tùy chọn của chúng:
 
-```python
-from strands import Agent
+```python title="packages/my-project/my_module/agent/agent.py" {1,5-9,14}
 from strands.models import BedrockModel
 
-# Create a BedrockModel
-bedrock_model = BedrockModel(
+# ...
+
+MODEL = BedrockModel(
     model_id="anthropic.claude-sonnet-4-20250514-v1:0",
     region_name="us-west-2",
     temperature=0.3,
 )
 
-agent = Agent(model=bedrock_model)
+@contextmanager
+def get_agent():
+    yield Agent(
+        model=MODEL,
+        name="MyAgent",
+        description="MyAgent Strands Agent",
+        system_prompt="You are a helpful assistant.",
+        tools=[subtract, current_time],
+        hooks=AGENT_HOOKS,
+        session_manager=get_session_manager(),
+    )
 ```
 </TabItem>
 <TabItem label="LangChain" _filter={{ framework: 'langchain' }}>
-Các agent LangChain sử dụng mô hình [`ChatBedrockConverse`](https://docs.langchain.com/oss/python/integrations/chat/bedrock_converse). Agent được tạo ra đọc id mô hình và region từ các biến môi trường `MODEL_ID` và `AWS_REGION`, nhưng bạn có thể cấu hình mô hình trực tiếp trong `agent.py`:
+Các agent LangChain sử dụng mô hình [`ChatBedrockConverse`](https://docs.langchain.com/oss/python/integrations/chat/bedrock_converse). Agent được tạo ra đọc id mô hình và region từ các biến môi trường `MODEL_ID` và `AWS_REGION`, mà hạ tầng đặt cho agent đã triển khai. Để cấu hình mô hình thêm, thêm các đối số nơi nó được khởi tạo trong `get_agent()`:
 
-```python
-from langchain_aws import ChatBedrockConverse
+```python title="packages/my-project/my_module/agent/agent.py" {4-8}
+# ...
 
-model = ChatBedrockConverse(
-    model="anthropic.claude-sonnet-4-20250514-v1:0",
-    region_name="us-west-2",
-    temperature=0.3,
-)
+def get_agent():
+    model = ChatBedrockConverse(
+        model=MODEL_ID,
+        region_name=REGION,
+        temperature=0.3,
+    )
+    return create_agent(
+        model=model,
+        tools=[subtract],
+        system_prompt="You are a helpful assistant.",
+        checkpointer=get_checkpointer(),
+    )
 ```
 </TabItem>
 </Tabs>
 
-### Sử dụng MCP Server
+### Consuming MCP Servers
 
 Để sử dụng các MCP Server mà bạn đã tạo bằng generator <Link path="/guides/py-mcp-server">`py#mcp-server`</Link> hoặc <Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link>, bạn có thể sử dụng <Link path="/guides/connection/py-agent-mcp">generator `connection`</Link>, kết nối các công cụ của MCP server vào agent của bạn cho cả hai framework.
 
@@ -719,7 +784,7 @@ Sử dụng generator <Link path="guides/connection">`connection`</Link> để t
   <ConnectionCard
     title="React to Python Agent"
     description="Gọi Python Agent từ một website React"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-py-agent`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'vi'}/guides/connection/react-py-agent`}
     source="react"
     target="strands"
     targetBadge="python"
@@ -727,14 +792,14 @@ Sử dụng generator <Link path="guides/connection">`connection`</Link> để t
   <ConnectionCard
     title="React to AG-UI Agent"
     description="Gọi một Agent expose giao thức AG-UI từ một website React thông qua CopilotKit"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-agui`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'vi'}/guides/connection/react-agui`}
     source="react"
     target="copilotkit"
   />
   <ConnectionCard
     title="Python Agent to MCP"
     description="Kết nối Python Agent với một MCP server"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-mcp`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'vi'}/guides/connection/py-agent-mcp`}
     source="strands"
     sourceBadge="python"
     target="mcp"
@@ -742,7 +807,7 @@ Sử dụng generator <Link path="guides/connection">`connection`</Link> để t
   <ConnectionCard
     title="Python Agent to A2A Agent"
     description="Kết nối Python Agent với một agent A2A từ xa"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-a2a`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'vi'}/guides/connection/py-agent-a2a`}
     source="strands"
     sourceBadge="python"
     target="a2a"
@@ -750,7 +815,7 @@ Sử dụng generator <Link path="guides/connection">`connection`</Link> để t
   <ConnectionCard
     title="TypeScript Agent to A2A Agent"
     description="Kết nối TypeScript Agent với một agent A2A từ xa"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/ts-agent-a2a`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'vi'}/guides/connection/ts-agent-a2a`}
     source="strands"
     sourceBadge="typescript"
     target="a2a"
@@ -758,7 +823,7 @@ Sử dụng generator <Link path="guides/connection">`connection`</Link> để t
   <ConnectionCard
     title="Python Agent to Python DynamoDB"
     description="Kết nối Python Agent với một DynamoDB table"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-dynamodb`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'vi'}/guides/connection/py-agent-dynamodb`}
     source="strands"
     sourceBadge="python"
     target="dynamodb"
@@ -767,7 +832,7 @@ Sử dụng generator <Link path="guides/connection">`connection`</Link> để t
   <ConnectionCard
     title="Python Agent to AgentCore Gateway"
     description="Kết nối Python Agent với một AgentCore Gateway"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-agent-gateway`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'vi'}/guides/connection/py-agent-gateway`}
     source="strands"
     sourceBadge="python"
     target="agentcore"
@@ -775,7 +840,7 @@ Sử dụng generator <Link path="guides/connection">`connection`</Link> để t
   <ConnectionCard
     title="AgentCore Gateway to Agent"
     description="Đặt một agent phía trước với một AgentCore Gateway như một runtime target"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/agentcore-gateway-agent`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'vi'}/guides/connection/agentcore-gateway-agent`}
     source="agentcore"
     target="strands"
   />

@@ -163,15 +163,25 @@ AG-UI 에이전트는 <Link path="/guides/connection/react-agui">`connection` �
 
 도구는 AI 에이전트가 작업을 수행하기 위해 호출할 수 있는 함수입니다. 두 프레임워크 모두 도구 정의에 데코레이터 기반 접근 방식을 사용하며, 함수 이름과 독스트링에서 도구 이름과 설명을 도출하고, 타입 힌트에서 입력 스키마를 생성합니다.
 
+도구를 정의한 다음 `get_agent()` 내부의 `tools` 목록에 추가하세요:
+
 <Tabs syncKey="agent-framework">
 <TabItem label="Strands" _filter={{ framework: 'strands' }}>
-```python
+```python title="packages/my-project/my_module/agent/agent.py" {16-20,32}
+from contextlib import contextmanager
+
 from strands import Agent, tool
+from strands.hooks import HookCallback, HookProvider
+from strands_tools import current_time
+from my_scope_agent_connection import log_model_errors, log_tool_errors
+
+from .session import get_session_manager
+
 
 @tool
-def calculate_sum(numbers: list[int]) -> int:
-    """Calculate the sum of a list of numbers"""
-    return sum(numbers)
+def subtract(a: int, b: int) -> int:
+    return a - b
+
 
 @tool
 def get_weather(city: str) -> str:
@@ -179,23 +189,41 @@ def get_weather(city: str) -> str:
     # Your weather API integration here
     return f"Weather in {city}: Sunny, 25°C"
 
-# Add tools to your agent
-agent = Agent(
-    system_prompt="You are a helpful assistant with access to various tools.",
-    tools=[calculate_sum, get_weather],
-)
+
+AGENT_HOOKS: list[HookProvider | HookCallback] = [log_model_errors, log_tool_errors]
+
+
+@contextmanager
+def get_agent():
+    yield Agent(
+        name="MyAgent",
+        description="MyAgent Strands Agent",
+        system_prompt="You are a helpful assistant with access to various tools.",
+        tools=[subtract, current_time, get_weather],
+        hooks=AGENT_HOOKS,
+        session_manager=get_session_manager(),
+    )
 ```
 </TabItem>
 <TabItem label="LangChain" _filter={{ framework: 'langchain' }}>
-```python
+```python title="packages/my-project/my_module/agent/agent.py" {19-23,30}
+import os
+
 from langchain.agents import create_agent
 from langchain_aws import ChatBedrockConverse
 from langchain_core.tools import tool
 
+from .session import get_checkpointer
+
+REGION = os.environ.get("AWS_REGION", "us-east-1")
+MODEL_ID = os.environ.get("MODEL_ID", "global.anthropic.claude-haiku-4-5-20251001-v1:0")
+
+
 @tool
-def calculate_sum(numbers: list[int]) -> int:
-    """Calculate the sum of a list of numbers"""
-    return sum(numbers)
+def subtract(a: int, b: int) -> int:
+    """Subtract b from a."""
+    return a - b
+
 
 @tool
 def get_weather(city: str) -> str:
@@ -203,12 +231,15 @@ def get_weather(city: str) -> str:
     # Your weather API integration here
     return f"Weather in {city}: Sunny, 25°C"
 
-# Add tools to your agent
-agent = create_agent(
-    model=ChatBedrockConverse(model=MODEL_ID, region_name=REGION),
-    tools=[calculate_sum, get_weather],
-    system_prompt="You are a helpful assistant with access to various tools.",
-)
+
+def get_agent():
+    model = ChatBedrockConverse(model=MODEL_ID, region_name=REGION)
+    return create_agent(
+        model=model,
+        tools=[subtract, get_weather],
+        system_prompt="You are a helpful assistant with access to various tools.",
+        checkpointer=get_checkpointer(),
+    )
 ```
 </TabItem>
 </Tabs>
@@ -217,28 +248,45 @@ agent = create_agent(
 
 <Tabs syncKey="agent-framework">
 <TabItem label="Strands" _filter={{ framework: 'strands' }}>
-Strands는 `strands-tools` 패키지를 통해 사전 구축된 도구 모음을 제공합니다:
+Strands는 `strands-agents-tools` 패키지를 통해 사전 구축된 도구 모음을 제공하며, 생성기는 이미 프로젝트의 `pyproject.toml`에 이를 추가합니다. 원하는 도구를 임포트하고 `get_agent()`에 추가하세요:
 
-```python
-from strands_tools import current_time, http_request, file_read
+```python title="packages/my-project/my_module/agent/agent.py" {1,11}
+from strands_tools import current_time, file_read, http_request
 
-agent = Agent(
-    system_prompt="You are a helpful assistant.",
-    tools=[current_time, http_request, file_read],
-)
+# ...
+
+@contextmanager
+def get_agent():
+    yield Agent(
+        name="MyAgent",
+        description="MyAgent Strands Agent",
+        system_prompt="You are a helpful assistant.",
+        tools=[current_time, file_read, http_request],
+        hooks=AGENT_HOOKS,
+        session_manager=get_session_manager(),
+    )
 ```
 </TabItem>
 <TabItem label="LangChain" _filter={{ framework: 'langchain' }}>
-LangChain은 방대한 [도구 및 통합 생태계](https://docs.langchain.com/oss/python/integrations/tools)를 제공합니다. 관련 통합 패키지를 설치한 후 `create_agent`에 도구를 전달하세요:
+LangChain은 방대한 [도구 및 통합 생태계](https://docs.langchain.com/oss/python/integrations/tools)를 제공하며, 각각 자체 패키지로 배포됩니다. 생성기는 이를 추가하지 않으므로 먼저 필요한 것을 설치하세요 — 예를 들어 아래 검색 도구가 포함된 `langchain-community`:
 
-```python
+<NxCommands commands={['run <project-name>:add langchain-community']} />
+
+그런 다음 도구를 임포트하고 `get_agent()`에 추가하세요:
+
+```python title="packages/my-project/my_module/agent/agent.py" {1,9}
 from langchain_community.tools import DuckDuckGoSearchRun
 
-agent = create_agent(
-    model=ChatBedrockConverse(model=MODEL_ID, region_name=REGION),
-    tools=[DuckDuckGoSearchRun()],
-    system_prompt="You are a helpful assistant.",
-)
+# ...
+
+def get_agent():
+    model = ChatBedrockConverse(model=MODEL_ID, region_name=REGION)
+    return create_agent(
+        model=model,
+        tools=[DuckDuckGoSearchRun()],
+        system_prompt="You are a helpful assistant.",
+        checkpointer=get_checkpointer(),
+    )
 ```
 </TabItem>
 </Tabs>
@@ -247,33 +295,50 @@ agent = create_agent(
 
 <Tabs syncKey="agent-framework">
 <TabItem label="Strands" _filter={{ framework: 'strands' }}>
-기본적으로 Strands 에이전트는 Amazon Bedrock의 Claude Sonnet 4.6을 사용하지만, 모델 공급자를 커스터마이즈할 수 있습니다. 구성 옵션은 [Strands 모델 공급자 문서](https://strandsagents.com/docs/user-guide/concepts/model-providers/)를 참조하세요:
+생성된 에이전트는 Amazon Bedrock의 기본 Strands 모델을 사용합니다. 이를 구성하려면 `Agent`에 `model`을 전달하세요. 사용 가능한 공급자와 옵션은 [Strands 모델 공급자 문서](https://strandsagents.com/docs/user-guide/concepts/model-providers/)를 참조하세요:
 
-```python
-from strands import Agent
+```python title="packages/my-project/my_module/agent/agent.py" {1,5-9,14}
 from strands.models import BedrockModel
 
-# Create a BedrockModel
-bedrock_model = BedrockModel(
+# ...
+
+MODEL = BedrockModel(
     model_id="anthropic.claude-sonnet-4-20250514-v1:0",
     region_name="us-west-2",
     temperature=0.3,
 )
 
-agent = Agent(model=bedrock_model)
+@contextmanager
+def get_agent():
+    yield Agent(
+        model=MODEL,
+        name="MyAgent",
+        description="MyAgent Strands Agent",
+        system_prompt="You are a helpful assistant.",
+        tools=[subtract, current_time],
+        hooks=AGENT_HOOKS,
+        session_manager=get_session_manager(),
+    )
 ```
 </TabItem>
 <TabItem label="LangChain" _filter={{ framework: 'langchain' }}>
-LangChain 에이전트는 [`ChatBedrockConverse`](https://docs.langchain.com/oss/python/integrations/chat/bedrock_converse) 모델을 사용합니다. 생성된 에이전트는 `MODEL_ID` 및 `AWS_REGION` 환경 변수에서 모델 ID와 리전을 읽지만, `agent.py`에서 직접 모델을 구성할 수도 있습니다:
+LangChain 에이전트는 [`ChatBedrockConverse`](https://docs.langchain.com/oss/python/integrations/chat/bedrock_converse) 모델을 사용합니다. 생성된 에이전트는 `MODEL_ID` 및 `AWS_REGION` 환경 변수에서 모델 ID와 리전을 읽으며, 인프라가 배포된 에이전트에 대해 이를 설정합니다. 모델을 추가로 구성하려면 `get_agent()`에서 구성되는 위치에 인수를 추가하세요:
 
-```python
-from langchain_aws import ChatBedrockConverse
+```python title="packages/my-project/my_module/agent/agent.py" {4-8}
+# ...
 
-model = ChatBedrockConverse(
-    model="anthropic.claude-sonnet-4-20250514-v1:0",
-    region_name="us-west-2",
-    temperature=0.3,
-)
+def get_agent():
+    model = ChatBedrockConverse(
+        model=MODEL_ID,
+        region_name=REGION,
+        temperature=0.3,
+    )
+    return create_agent(
+        model=model,
+        tools=[subtract],
+        system_prompt="You are a helpful assistant.",
+        checkpointer=get_checkpointer(),
+    )
 ```
 </TabItem>
 </Tabs>
