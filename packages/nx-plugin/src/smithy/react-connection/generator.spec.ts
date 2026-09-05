@@ -305,6 +305,34 @@ export function Main() {
       expect(extensionsContent).toContain('structure cursor {');
     });
 
+    it('should alias each trait to the vendor extension the client generator reads', async () => {
+      await smithyReactConnectionGenerator(tree, {
+        frontendProjectName: 'frontend',
+        smithyModelOrBackendProjectName: 'api-model',
+      });
+
+      const extensionsContent = tree.read(
+        'apps/api-model/src/extensions.smithy',
+        'utf-8',
+      );
+
+      // Without the alias Smithy derives the key from the trait's shape id and
+      // emits a namespace-prefixed `x-<namespace>-query`, which the code
+      // generator does not read.
+      expect(extensionsContent).toContain(
+        '@specificationExtension(as: "x-query")',
+      );
+      expect(extensionsContent).toContain(
+        '@specificationExtension(as: "x-mutation")',
+      );
+      expect(extensionsContent).toContain(
+        '@specificationExtension(as: "x-cursor")',
+      );
+      expect(extensionsContent).not.toMatch(
+        /@specificationExtension\s*\n\s*structure/,
+      );
+    });
+
     it('should use correct namespace in extensions.smithy file', async () => {
       await smithyReactConnectionGenerator(tree, {
         frontendProjectName: 'frontend',

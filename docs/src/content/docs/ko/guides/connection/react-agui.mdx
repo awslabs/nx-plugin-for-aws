@@ -46,16 +46,17 @@ Nx Plugin for AWS는 [AG-UI 프로토콜](https://docs.ag-ui.com/)을 노출하�
 - src
   - components
     - AguiProvider.tsx 모든 AG-UI 에이전트를 위한 단일 `CopilotKitProvider`. 첫 번째 `connection` 실행 시 생성되고 후속 실행 시 각 새 에이전트를 등록하도록 업데이트됩니다.
+    - \<agent-name>-chat.tsx 이 에이전트의 id에 바인딩된 테마가 적용된 `<AgentName>Chat`. `connection` 실행당 하나의 파일.
     - copilot
       - index.tsx 웹사이트의 `ux`(Cloudscape, Shadcn 또는 테마 없음)와 일치하는 슬롯 기본값으로 `CopilotChat`, `CopilotSidebar` 및 `CopilotPopup`을 재내보냅니다.
       - *ThemeComponents*.tsx 슬롯별 테마 컴포넌트(예: `CloudscapeAssistantMessage.tsx`, `ShadcnChatInput.tsx`). `ux`가 `cloudscape` 또는 `shadcn`일 때만 제공됩니다.
   - hooks
-    - useAgui\<AgentName>.tsx 하나의 AG-UI 에이전트를 등록합니다. `connection` 실행당 하나의 파일.
+    - useAgui\<AgentName>.tsx 하나의 AG-UI 에이전트를 등록하고 해당 id를 `<AGENT_NAME>_ID`로 내보냅니다. `connection` 실행당 하나의 파일.
     - useSigV4.tsx SigV4 서명 (IAM 전용)
 
 </FileTree>
 
-다른 에이전트에 대해 두 번째로 `connection`을 실행하면 **새로운 `useAgui<AgentName>.tsx` 훅이 추가**되고 `AguiProvider.tsx`가 두 훅을 모두 등록하도록 업데이트됩니다 — 프로바이더에 대한 사용자 정의 편집 내용은 보존됩니다. `main.tsx`는 단일 `<AguiProvider>` 래퍼를 유지하므로 중첩된 프로바이더가 생기지 않습니다.
+다른 에이전트에 대해 두 번째로 `connection`을 실행하면 **새로운 `useAgui<AgentName>.tsx` 훅과 `<agent-name>-chat.tsx` 컴포넌트가 추가**되고 `AguiProvider.tsx`가 두 훅을 모두 등록하도록 업데이트됩니다 — 프로바이더에 대한 사용자 정의 편집 내용은 보존됩니다. `main.tsx`는 단일 `<AguiProvider>` 래퍼를 유지하므로 중첩된 프로바이더가 생기지 않습니다.
 
 다음 종속성이 루트 `package.json`에 추가됩니다:
 
@@ -119,17 +120,14 @@ Session ID와 Thread ID는 모두 브라우저에서 제공됩니다. 각 사용
 
 ### 채팅 인터페이스 추가
 
-사용할 에이전트를 선택하려면 `agentId`와 함께 CopilotKit 컴포넌트를 인스턴스화합니다. id는 에이전트의 이름입니다 — <Link path="guides/ts-agent">`ts#agent`</Link> 또는 <Link path="guides/py-agent">`py#agent`</Link> 생성기를 실행할 때 선택한 것과 동일하며 — 생성된 훅 파일(예: `packages/web/src/hooks/useAgui<AgentName>.tsx`에서 반환된 키)에서도 찾을 수 있습니다.
-
-웹사이트의 `ux`와 일치하는 테마가 자동으로 적용되도록 생성된 `./components/copilot` 모듈에서 채팅 컴포넌트를 가져옵니다:
+생성기는 연결된 에이전트당 `<AgentName>Chat` 컴포넌트를 제공하며, 이미 해당 에이전트의 id에 바인딩되어 있고 웹사이트의 `ux`와 일치하도록 테마가 적용되어 있습니다. `<AguiProvider>` 래퍼 내부 어디에나 배치할 수 있습니다:
 
 ```tsx
-import { CopilotChat } from './components/copilot';
+import { StoryAgentChat } from './components/story-agent-chat';
 
 function ChatPage() {
   return (
-    <CopilotChat
-      agentId="agent"
+    <StoryAgentChat
       labels={{
         welcomeMessageText: 'How can I help you today?',
         chatInputPlaceholder: 'Ask me anything...',
@@ -139,15 +137,24 @@ function ChatPage() {
 }
 ```
 
+이는 `agentId`를 제외한 모든 `CopilotChat` prop을 전달하므로 `<CopilotChat />`에 전달할 수 있는 모든 것이 여기서도 작동합니다.
+
 ### 여러 AG-UI Agent 연결
 
-에이전트당 한 번씩 `connection` 생성기를 실행합니다. 공유 `AguiProvider`를 통해 등록된 모든 에이전트는 앱의 어디에서나 볼 수 있습니다 — 각 채팅을 원하는 에이전트로 라우팅하려면 다른 `agentId`로 CopilotKit 컴포넌트를 인스턴스화합니다:
+에이전트당 한 번씩 `connection` 생성기를 실행합니다. 각 실행은 해당 에이전트의 자체 채팅 컴포넌트를 제공하므로 특정 에이전트로 채팅을 라우팅하는 것은 어떤 컴포넌트를 렌더링하느냐의 문제입니다:
 
 ```tsx
-import { CopilotChat } from './components/copilot';
+import { StoryAgentChat } from './components/story-agent-chat';
+import { ResearchAgentChat } from './components/research-agent-chat';
 
-<CopilotChat agentId="story" />    {/* talks to StoryAgent */}
-<CopilotChat agentId="research" /> {/* talks to ResearchAgent */}
+<StoryAgentChat />    {/* talks to StoryAgent */}
+<ResearchAgentChat /> {/* talks to ResearchAgent */}
+```
+
+원시 id가 필요한 경우 — 예를 들어 CopilotKit의 자체 훅을 호출하려면 — 각 생성된 훅이 이를 내보냅니다:
+
+```tsx
+import { STORY_AGENT_ID } from './hooks/useAguiStoryAgent';
 ```
 
 ## 모양과 느낌 사용자 정의
@@ -164,12 +171,13 @@ import { CopilotChat } from './components/copilot';
 | `shadcn` | 어시스턴트 메시지는 `Sparkles` 아바타가 있는 `bg-muted` 버블에 렌더링됩니다; 사용자 메시지는 `User` 아바타가 있는 `bg-primary` 버블에 오른쪽 정렬로 렌더링됩니다. 입력은 둥근 `Textarea` + 알약 모양의 전송/중지 `Button`입니다(Enter는 제출, Shift+Enter는 줄바꿈). 공유 `common-shadcn` 패키지의 shadcn 프리미티브를 사용합니다. |
 | `none` (또는 기타) | 테마 없음 — 모듈은 기본 CopilotKit 컴포넌트를 재내보냅니다. |
 
-테마가 자동으로 적용되도록 **로컬 테마 모듈**에서 테마 컴포넌트를 가져옵니다(`@copilotkit/react-core/v2`에서 직접 가져오지 않음):
+제공된 `<AgentName>Chat` 컴포넌트는 이미 테마가 적용되어 있습니다. 직접 연결하는 채팅의 경우, 테마가 자동으로 적용되도록 **로컬 테마 모듈**에서 가져옵니다(`@copilotkit/react-core/v2`에서 직접 가져오지 않음):
 
 ```tsx
 import { CopilotChat } from './components/copilot';
+import { STORY_AGENT_ID } from './hooks/useAguiStoryAgent';
 
-<CopilotChat agentId="agent" />
+<CopilotChat agentId={STORY_AGENT_ID} />
 ```
 
 테마는 슬롯 기본값으로 적용되므로 명시적으로 전달하는 슬롯은 여전히 우선합니다 — 일회성 재정의가 필요할 때마다 완전한 제어를 유지합니다.
@@ -188,8 +196,7 @@ import { CopilotChat } from './components/copilot';
 채팅별 재정의는 테마와 함께 작동합니다 — 슬롯 prop으로 전달하는 모든 것은 테마 기본값을 재정의합니다:
 
 ```tsx
-<CopilotChat
-  agentId="agent"
+<StoryAgentChat
   // style the input and its children
   input={{
     textArea: 'text-blue-600',
@@ -208,25 +215,23 @@ import { CopilotChat } from './components/copilot';
 모든 슬롯은 className 대신 React 컴포넌트를 사용할 수 있으므로 기본값을 완전히 교체할 수 있습니다:
 
 ```tsx
-import { CopilotChat } from './components/copilot';
+import { StoryAgentChat } from './components/story-agent-chat';
 
-const MySendButton: React.FC<{ onClick: () => void }> = ({ onClick }) => (
+const MySendButton: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement>> = ({
+  onClick,
+}) => (
   <button onClick={onClick} className="my-send-btn">
     Send
   </button>
 );
 
-<CopilotChat
-  agentId="agent"
-  input={{ sendButton: MySendButton }}
-/>;
+<StoryAgentChat input={{ sendButton: MySendButton }} />;
 ```
 
 더 깊은 재정의는 동일한 형태를 따릅니다 — 예를 들어 어시스턴트 메시지의 복사 버튼만 교체:
 
 ```tsx
-<CopilotChat
-  agentId="agent"
+<StoryAgentChat
   messageView={{
     assistantMessage: {
       copyButton: ({ onClick }) => <button onClick={onClick}>Copy</button>,

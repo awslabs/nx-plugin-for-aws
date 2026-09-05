@@ -46,16 +46,17 @@ O gerador cria um componente `AguiProvider` **único compartilhado**, um hook po
 - src
   - components
     - AguiProvider.tsx `CopilotKitProvider` único para cada agente AG-UI. Criado na primeira execução de `connection` e atualizado em execuções subsequentes para registrar cada novo agente.
+    - \<agent-name>-chat.tsx Um `<AgentName>Chat` temático vinculado ao id deste agente. Um arquivo por execução de `connection`.
     - copilot
       - index.tsx Re-exporta `CopilotChat`, `CopilotSidebar` e `CopilotPopup` com padrões de slot que correspondem ao `ux` do seu site (Cloudscape, Shadcn, ou nenhum tema).
       - *ThemeComponents*.tsx Componentes de tema por slot (por exemplo, `CloudscapeAssistantMessage.tsx`, `ShadcnChatInput.tsx`). Fornecidos apenas quando `ux` é `cloudscape` ou `shadcn`.
   - hooks
-    - useAgui\<AgentName>.tsx Registra um agente AG-UI. Um arquivo por execução de `connection`.
+    - useAgui\<AgentName>.tsx Registra um agente AG-UI e exporta seu id como `<AGENT_NAME>_ID`. Um arquivo por execução de `connection`.
     - useSigV4.tsx Assinatura SigV4 (apenas IAM)
 
 </FileTree>
 
-Executar `connection` uma segunda vez para um agente diferente **adiciona um novo hook `useAgui<AgentName>.tsx`** e atualiza `AguiProvider.tsx` para registrar ambos os hooks — quaisquer edições personalizadas que você tenha feito no provider são preservadas. `main.tsx` mantém seu único wrapper `<AguiProvider>` — você nunca acaba com providers aninhados.
+Executar `connection` uma segunda vez para um agente diferente **adiciona um novo hook `useAgui<AgentName>.tsx` e componente `<agent-name>-chat.tsx`** e atualiza `AguiProvider.tsx` para registrar ambos os hooks — quaisquer edições personalizadas que você tenha feito no provider são preservadas. `main.tsx` mantém seu único wrapper `<AguiProvider>` — você nunca acaba com providers aninhados.
 
 As seguintes dependências são adicionadas ao `package.json` raiz:
 
@@ -119,17 +120,14 @@ Tanto o Session ID quanto o Thread ID são fornecidos pelo navegador. Para restr
 
 ### Adicionando uma Interface de Chat
 
-Instancie componentes CopilotKit com `agentId` para selecionar qual agente usar. O id é o nome do agente — o mesmo que você escolheu quando executou o gerador <Link path="guides/ts-agent">`ts#agent`</Link> ou <Link path="guides/py-agent">`py#agent`</Link> — e você também pode encontrá-lo no arquivo de hook gerado (por exemplo, a chave retornada de `packages/web/src/hooks/useAgui<AgentName>.tsx`).
-
-Importe os componentes de chat do módulo `./components/copilot` gerado para que o tema que corresponde ao `ux` do seu site seja aplicado automaticamente:
+O gerador fornece um componente `<AgentName>Chat` por agente conectado, já vinculado ao id desse agente e temático para corresponder ao `ux` do seu site. Coloque-o em qualquer lugar dentro do wrapper `<AguiProvider>`:
 
 ```tsx
-import { CopilotChat } from './components/copilot';
+import { StoryAgentChat } from './components/story-agent-chat';
 
 function ChatPage() {
   return (
-    <CopilotChat
-      agentId="agent"
+    <StoryAgentChat
       labels={{
         welcomeMessageText: 'How can I help you today?',
         chatInputPlaceholder: 'Ask me anything...',
@@ -139,15 +137,24 @@ function ChatPage() {
 }
 ```
 
+Ele encaminha todas as props de `CopilotChat` exceto `agentId`, então qualquer coisa que você possa passar para `<CopilotChat />` funciona aqui também.
+
 ### Conectando Múltiplos Agentes AG-UI
 
-Execute o gerador `connection` uma vez por agente. Cada agente registrado via `AguiProvider` compartilhado é visível de qualquer lugar no aplicativo — instancie um componente CopilotKit com um `agentId` diferente para rotear cada chat para o agente que você deseja:
+Execute o gerador `connection` uma vez por agente. Cada execução fornece o componente de chat próprio desse agente, então rotear um chat para um agente específico é uma questão de qual componente você renderiza:
 
 ```tsx
-import { CopilotChat } from './components/copilot';
+import { StoryAgentChat } from './components/story-agent-chat';
+import { ResearchAgentChat } from './components/research-agent-chat';
 
-<CopilotChat agentId="story" />    {/* talks to StoryAgent */}
-<CopilotChat agentId="research" /> {/* talks to ResearchAgent */}
+<StoryAgentChat />    {/* talks to StoryAgent */}
+<ResearchAgentChat /> {/* talks to ResearchAgent */}
+```
+
+Se você precisar do id bruto — para chamar os próprios hooks do CopilotKit, digamos — cada hook gerado o exporta:
+
+```tsx
+import { STORY_AGENT_ID } from './hooks/useAguiStoryAgent';
 ```
 
 ## Personalizando a Aparência
@@ -164,12 +171,13 @@ O gerador lê `metadata.ux` do seu projeto de site React e fornece um módulo wr
 | `shadcn` | Mensagens do assistente renderizadas em uma bolha `bg-muted` com um avatar `Sparkles`; mensagens do usuário renderizadas alinhadas à direita em uma bolha `bg-primary` com um avatar `User`. A entrada é um `Textarea` arredondado + `Button` de enviar/parar em forma de pílula (Enter envia, Shift+Enter nova linha). Usa primitivos shadcn do pacote compartilhado `common-shadcn`. |
 | `none` (ou qualquer outra coisa) | Sem tema — o módulo apenas re-exporta os componentes padrão do CopilotKit. |
 
-Importe os componentes temáticos do **módulo de tema local** (não diretamente de `@copilotkit/react-core/v2`) para que o tema seja aplicado automaticamente:
+Os componentes `<AgentName>Chat` fornecidos já estão temáticos. Para um chat que você configura manualmente, importe do **módulo de tema local** (não diretamente de `@copilotkit/react-core/v2`) para que o tema seja aplicado automaticamente:
 
 ```tsx
 import { CopilotChat } from './components/copilot';
+import { STORY_AGENT_ID } from './hooks/useAguiStoryAgent';
 
-<CopilotChat agentId="agent" />
+<CopilotChat agentId={STORY_AGENT_ID} />
 ```
 
 O tema é aplicado como padrões de slot, então qualquer slot que você passar explicitamente ainda prevalece — você mantém controle total sempre que precisar de uma substituição pontual.
@@ -188,8 +196,7 @@ Por exemplo, para inserir seu próprio renderizador de mensagem de usuário mant
 Substituições por chat ainda funcionam junto com o tema — qualquer coisa que você passar como prop de slot substitui o padrão temático:
 
 ```tsx
-<CopilotChat
-  agentId="agent"
+<StoryAgentChat
   // style the input and its children
   input={{
     textArea: 'text-blue-600',
@@ -208,25 +215,23 @@ Substituições por chat ainda funcionam junto com o tema — qualquer coisa que
 Qualquer slot pode receber um componente React em vez de um className, então você pode substituir o padrão inteiramente:
 
 ```tsx
-import { CopilotChat } from './components/copilot';
+import { StoryAgentChat } from './components/story-agent-chat';
 
-const MySendButton: React.FC<{ onClick: () => void }> = ({ onClick }) => (
+const MySendButton: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement>> = ({
+  onClick,
+}) => (
   <button onClick={onClick} className="my-send-btn">
     Send
   </button>
 );
 
-<CopilotChat
-  agentId="agent"
-  input={{ sendButton: MySendButton }}
-/>;
+<StoryAgentChat input={{ sendButton: MySendButton }} />;
 ```
 
 Substituições mais profundas seguem a mesma forma — por exemplo, substitua apenas o botão de copiar nas mensagens do assistente:
 
 ```tsx
-<CopilotChat
-  agentId="agent"
+<StoryAgentChat
   messageView={{
     assistantMessage: {
       copyButton: ({ onClick }) => <button onClick={onClick}>Copy</button>,

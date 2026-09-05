@@ -245,7 +245,7 @@ const createItem = useMutation({
   onSettled: () => {
     // This will run when the mutation completes (success or error)
     // Good place to invalidate queries that might be affected
-    queryClient.invalidateQueries({ queryKey: api.listItems.queryKey() });
+    queryClient.invalidateQueries({ queryKey: api.listItems.queryKey({}) });
   }
 });
 ```
@@ -456,7 +456,9 @@ function ItemList() {
 
 ### エラーハンドリング
 
-統合には、型付きエラーレスポンスを使用した組み込みのエラーハンドリングが含まれています。`<operation-name>Error`型が生成され、Smithyモデルで定義された可能性のあるエラーレスポンスをカプセル化します。各エラーには`status`と`error`プロパティがあり、`status`の値をチェックすることで、特定のタイプのエラーに絞り込むことができます。
+統合には、型付きエラーレスポンスを使用した組み込みのエラーハンドリングが含まれています。`<OperationName>Error`型が生成され、これは操作がモデル化する各エラーステータスごとに1つの`<OperationName><StatusCode>Error`メンバーのユニオンです。各メンバーには`status`と`error`プロパティがあるため、`status`で切り替えることで、`error`がそのステータスのペイロードに絞り込まれます。
+
+以下の例では、`CreateItem`が[このページの下部で定義されているエラー構造](#errors)をモデル化していることを前提としています — `422` `InvalidRequestError`、`403` `UnauthorizedError`、`500` `InternalServerError`。モデルで宣言したステータスのみがユニオンに表示されるため、モデル化していないステータスの`case`はコンパイルエラーになります。
 
 ```tsx {12}
 import { useMutation } from '@tanstack/react-query';
@@ -471,8 +473,8 @@ function MyComponent() {
 
   if (createItem.error) {
     switch (createItem.error.status) {
-      case 400:
-        // error.error is typed as CreateItem400Response
+      case 422:
+        // error.error is typed as InvalidRequestErrorResponseContent
         return (
           <div>
             <h2>Invalid input:</h2>
@@ -480,7 +482,7 @@ function MyComponent() {
           </div>
         );
       case 403:
-        // error.error is typed as CreateItem403Response
+        // error.error is typed as UnauthorizedErrorResponseContent
         return (
           <div>
             <h2>Not authorized:</h2>
@@ -488,8 +490,7 @@ function MyComponent() {
           </div>
         );
       case 500:
-      case 502:
-        // error.error is typed as CreateItem5XXResponse
+        // error.error is typed as InternalServerErrorResponseContent
         return (
           <div>
             <h2>Server error:</h2>
@@ -520,8 +521,8 @@ function MyComponent() {
 
   if (error) {
     switch (error.status) {
-      case 400:
-        // error.error is typed as CreateItem400Response
+      case 422:
+        // error.error is typed as InvalidRequestErrorResponseContent
         return (
           <div>
             <h2>Invalid input:</h2>
@@ -529,7 +530,7 @@ function MyComponent() {
           </div>
         );
       case 403:
-        // error.error is typed as CreateItem403Response
+        // error.error is typed as UnauthorizedErrorResponseContent
         return (
           <div>
             <h2>Not authorized:</h2>
@@ -537,8 +538,7 @@ function MyComponent() {
           </div>
         );
       case 500:
-      case 502:
-        // error.error is typed as CreateItem5XXResponse
+        // error.error is typed as InternalServerErrorResponseContent
         return (
           <div>
             <h2>Server error:</h2>
@@ -576,18 +576,18 @@ function MyComponent() {
 Smithy操作に`@query`特性を適用して、クエリとして扱うように強制します：
 
 ```smithy
-@http(method: "POST", uri: "/items")
+@http(method: "POST", uri: "/search-items")
 @query
-operation ListItems {
-    input: ListItemsInput
-    output: ListItemsOutput
+operation SearchItems {
+    input: SearchItemsInput
+    output: SearchItemsOutput
 }
 ```
 
 生成されたフックは、`POST` HTTPメソッドを使用していても`queryOptions`を提供します：
 
 ```tsx
-const items = useQuery(api.listItems.queryOptions());
+const items = useQuery(api.searchItems.queryOptions({ term: 'widget' }));
 ```
 
 #### @mutation
@@ -607,6 +607,8 @@ operation StartProcessing {
 
 ```tsx
 const startProcessing = useMutation(api.startProcessing.mutationOptions());
+
+startProcessing.mutate({ id: 'some-id' });
 ```
 
 ### カスタムページネーションカーソル
@@ -616,38 +618,59 @@ const startProcessing = useMutation(api.startProcessing.mutationOptions());
 ページネーショントークンに使用される入力パラメータの名前を変更するには、`inputToken`を指定して`@cursor`特性を適用します：
 
 ```smithy
-@http(method: "GET", uri: "/items")
+@http(method: "GET", uri: "/paged-items")
 @cursor(inputToken: "nextToken")
-operation ListItems {
+operation ListPagedItems {
     input := {
+      @httpQuery("nextToken")
       nextToken: String
+      @httpQuery("limit")
       limit: Integer
     }
     output := {
+      @required
       items: ItemList
       nextToken: String
     }
 }
 ```
 
+`infiniteQueryOptions`は`nextToken`でページングします：
+
+```tsx
+const items = useInfiniteQuery({
+  ...api.listPagedItems.infiniteQueryOptions(
+    { limit: 10 },
+    { getNextPageParam: (lastPage) => lastPage.nextToken || undefined },
+  ),
+});
+```
+
 `cursor`という名前の入力パラメータを持つ操作に対して`infiniteQueryOptions`を生成したくない場合は、カーソルベースのページネーションを無効にできます：
 
 ```smithy
+@http(method: "GET", uri: "/unpaged-items")
 @cursor(enabled: false)
-operation ListItems {
+operation ListUnpagedItems {
     input := {
       // Input parameter named 'cursor' will cause this operation to be treated as a paginated operation by default
+      @httpQuery("cursor")
       cursor: String
     }
     output := {
-      ...
+      @required
+      items: ItemList
     }
 }
 ```
 
+`api.listUnpagedItems`は`queryOptions`、`queryKey`、`queryFilter`のみを提供します。
+
 ### 操作のグループ化
 
 生成されたフックとクライアントメソッドは、Smithy操作の[`@tags`特性](https://smithy.io/2.0/spec/documentation-traits.html#tags-trait)に基づいて自動的に整理されます。同じタグを持つ操作はグループ化され、API呼び出しを整理し、IDEでより良いコード補完を提供します。
+
+グループ内では、各操作は独自のキャメルケース名を保持するため、`"items"`とタグ付けされた`ListItems`という名前の操作は`api.items.listItems`でアクセスされます — `api.items.list`ではありません。
 
 例えば、このSmithy モデルの場合：
 
@@ -657,27 +680,51 @@ service MyService {
 }
 
 @tags(["items"])
+@http(method: "GET", uri: "/items")
+@readonly
 operation ListItems {
-    input: ListItemsInput
-    output: ListItemsOutput
+    input := {}
+    output := {
+      @required
+      items: ItemList
+    }
 }
 
 @tags(["items"])
+@http(method: "POST", uri: "/items")
 operation CreateItem {
-    input: CreateItemInput
-    output: CreateItemOutput
+    input := {
+      @required
+      name: String
+    }
+    output := {
+      @required
+      id: String
+    }
 }
 
 @tags(["users"])
+@http(method: "GET", uri: "/users")
+@readonly
 operation ListUsers {
-    input: ListUsersInput
-    output: ListUsersOutput
+    input := {}
+    output := {
+      @required
+      users: UserList
+    }
 }
 
 @tags(["users"])
+@http(method: "POST", uri: "/users")
 operation CreateUser {
-    input: CreateUserInput
-    output: CreateUserOutput
+    input := {
+      @required
+      name: String
+    }
+    output := {
+      @required
+      id: String
+    }
 }
 ```
 
@@ -706,7 +753,7 @@ function ItemsAndUsers() {
     <div>
       <h2>Items</h2>
       <ul>
-        {items.data?.map(item => (
+        {items.data?.items.map(item => (
           <li key={item.id}>{item.name}</li>
         ))}
       </ul>
@@ -714,7 +761,7 @@ function ItemsAndUsers() {
 
       <h2>Users</h2>
       <ul>
-        {users.data?.map(user => (
+        {users.data?.users.map(user => (
           <li key={user.id}>{user.name}</li>
         ))}
       </ul>
@@ -805,7 +852,7 @@ Smithyモデルでエラー構造を定義します：
 
 ```smithy
 @error("client")
-@httpError(400)
+@httpError(422)
 structure InvalidRequestError {
     @required
     message: String
@@ -841,6 +888,10 @@ structure FieldError {
     message: String
 }
 ```
+
+:::caution[400は使用済み]
+サービスはすでに`400`でSmithy の`ValidationException`を宣言しているため、すべての操作が`ValidationExceptionResponseContent`を運ぶ`400`ケースを取得します。独自のクライアントエラーには別のステータス（上記の`422`）を指定してください — 同じステータスの2つのエラーは衝突し、1つのペイロードのみが生成されたクライアントに到達します。
+:::
 
 #### 操作へのエラーの追加
 
@@ -884,37 +935,21 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 function ItemComponent() {
   const api = useMyApi();
 
-  // Query with typed error handling
-  const getItem = useQuery({
-    ...api.getItem.queryOptions({ itemId: '123' }),
-    onError: (error) => {
-      // Error is typed based on the errors in your Smithy model
-      switch (error.status) {
-        case 404:
-          // error.error is typed as ItemNotFoundError
-          console.error('Not found:', error.error.message);
-          break;
-        case 500:
-          // error.error is typed as InternalServerError
-          console.error('Server error:', error.error.message);
-          console.error('Trace ID:', error.error.traceId);
-          break;
-      }
-    }
-  });
+  const getItem = useQuery(api.getItem.queryOptions({ itemId: '123' }));
 
   // Mutation with typed error handling
   const createItem = useMutation({
     ...api.createItem.mutationOptions(),
     onError: (error) => {
+      // Error is typed based on the errors in your Smithy model
       switch (error.status) {
-        case 400:
-          // error.error is typed as InvalidRequestError
+        case 422:
+          // error.error is typed as InvalidRequestErrorResponseContent
           console.error('Validation error:', error.error.message);
           console.error('Field errors:', error.error.fieldErrors);
           break;
         case 403:
-          // error.error is typed as UnauthorizedError
+          // error.error is typed as UnauthorizedErrorResponseContent
           console.error('Unauthorized:', error.error.reason);
           break;
       }
@@ -923,10 +958,13 @@ function ItemComponent() {
 
   // Component rendering with error handling
   if (getItem.isError) {
-    if (getItem.error.status === 404) {
-      return <NotFoundMessage message={getItem.error.error.message} />;
-    } else if (getItem.error.status === 500) {
-      return <ErrorMessage message={getItem.error.error.message} />;
+    switch (getItem.error.status) {
+      case 404:
+        // error.error is typed as ItemNotFoundErrorResponseContent
+        return <NotFoundMessage message={getItem.error.error.message} />;
+      case 500:
+        // error.error is typed as InternalServerErrorResponseContent
+        return <ErrorMessage message={getItem.error.error.message} />;
     }
   }
 
@@ -962,11 +1000,11 @@ function ItemComponent() {
 
         switch (err.status) {
           case 404:
-            // err.error is typed as ItemNotFoundError
+            // err.error is typed as ItemNotFoundErrorResponseContent
             console.error('Not found:', err.error.message);
             break;
           case 500:
-            // err.error is typed as InternalServerError
+            // err.error is typed as InternalServerErrorResponseContent
             console.error('Server error:', err.error.message);
             console.error('Trace ID:', err.error.traceId);
             break;
@@ -987,13 +1025,13 @@ function ItemComponent() {
       const err = e as CreateItemError;
 
       switch (err.status) {
-        case 400:
-          // err.error is typed as InvalidRequestError
+        case 422:
+          // err.error is typed as InvalidRequestErrorResponseContent
           console.error('Validation error:', err.error.message);
           console.error('Field errors:', err.error.fieldErrors);
           break;
         case 403:
-          // err.error is typed as UnauthorizedError
+          // err.error is typed as UnauthorizedErrorResponseContent
           console.error('Unauthorized:', err.error.reason);
           break;
       }
@@ -1037,7 +1075,7 @@ import { useQuery } from '@tanstack/react-query';
 
 function ItemList() {
   const api = useMyApi();
-  const items = useQuery(api.listItems.queryOptions());
+  const items = useQuery(api.listItems.queryOptions({}));
 
   if (items.isLoading) {
     return <LoadingSpinner />;
@@ -1047,11 +1085,10 @@ function ItemList() {
     const err = items.error;
     switch (err.status) {
       case 403:
-        // err.error is typed as ListItems403Response
+        // err.error is typed as UnauthorizedErrorResponseContent
         return <ErrorMessage message={err.error.reason} />;
       case 500:
-      case 502:
-        // err.error is typed as ListItems5XXResponse
+        // err.error is typed as InternalServerErrorResponseContent
         return (
           <ErrorMessage
             message={err.error.message}
@@ -1064,7 +1101,7 @@ function ItemList() {
 
   return (
     <ul>
-      {items.data.map((item) => (
+      {items.data?.items.map((item) => (
         <li key={item.id}>{item.name}</li>
       ))}
     </ul>
@@ -1083,7 +1120,7 @@ function ItemList() {
   useEffect(() => {
     const fetchItems = async () => {
       try {
-        const data = await api.listItems();
+        const data = await api.listItems({});
         setItems(data);
       } catch (err) {
         setError(err);
@@ -1102,11 +1139,10 @@ function ItemList() {
     const err = error as ListItemsError;
     switch (err.status) {
       case 403:
-        // err.error is typed as ListItems403Response
+        // err.error is typed as UnauthorizedErrorResponseContent
         return <ErrorMessage message={err.error.reason} />;
       case 500:
-      case 502:
-        // err.error is typed as ListItems5XXResponse
+        // err.error is typed as InternalServerErrorResponseContent
         return (
           <ErrorMessage
             message={err.error.message}
@@ -1134,41 +1170,53 @@ function ItemList() {
 
 ```tsx
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import type { ListItemsResponseContent } from '../generated/my-api/types.gen';
 
 function ItemList() {
   const api = useMyApi();
   const queryClient = useQueryClient();
 
   // Query to fetch items
-  const itemsQuery = useQuery(api.listItems.queryOptions());
+  const itemsQuery = useQuery(api.listItems.queryOptions({}));
 
   // Mutation for deleting items with optimistic updates
   const deleteMutation = useMutation({
     ...api.deleteItem.mutationOptions(),
-    onMutate: async (itemId) => {
+    onMutate: async ({ itemId }) => {
       // Cancel any outgoing refetches
-      await queryClient.cancelQueries({ queryKey: api.listItems.queryKey() });
+      await queryClient.cancelQueries({
+        queryKey: api.listItems.queryKey({}),
+      });
 
       // Snapshot the previous value
-      const previousItems = queryClient.getQueryData(api.listItems.queryKey());
+      const previousItems = queryClient.getQueryData<ListItemsResponseContent>(
+        api.listItems.queryKey({}),
+      );
 
       // Optimistically update to the new value
-      queryClient.setQueryData(
-        api.listItems.queryKey(),
-        (old) => old.filter((item) => item.id !== itemId)
+      queryClient.setQueryData<ListItemsResponseContent>(
+        api.listItems.queryKey({}),
+        (old) =>
+          old && {
+            ...old,
+            items: old.items.filter((item) => item.id !== itemId),
+          },
       );
 
       // Return a context object with the snapshot
       return { previousItems };
     },
-    onError: (err, itemId, context) => {
+    onError: (err, _input, context) => {
       // If the mutation fails, use the context returned from onMutate to roll back
-      queryClient.setQueryData(api.listItems.queryKey(), context.previousItems);
+      queryClient.setQueryData(
+        api.listItems.queryKey({}),
+        context?.previousItems,
+      );
       console.error('Failed to delete item:', err);
     },
     onSettled: () => {
       // Always refetch after error or success to ensure data is in sync with server
-      queryClient.invalidateQueries({ queryKey: api.listItems.queryKey() });
+      queryClient.invalidateQueries({ queryKey: api.listItems.queryKey({}) });
     },
   });
 
@@ -1182,11 +1230,11 @@ function ItemList() {
 
   return (
     <ul>
-      {itemsQuery.data.map((item) => (
+      {itemsQuery.data?.items.map((item) => (
         <li key={item.id}>
           {item.name}
           <button
-            onClick={() => deleteMutation.mutate(item.id)}
+            onClick={() => deleteMutation.mutate({ itemId: item.id })}
             disabled={deleteMutation.isPending}
           >
             {deleteMutation.isPending ? 'Deleting...' : 'Delete'}
@@ -1261,8 +1309,8 @@ function ItemForm() {
   if (createItem.error) {
     const error = createItem.error;
     switch (error.status) {
-      case 400:
-        // error.error is typed as InvalidRequestError
+      case 422:
+        // error.error is typed as InvalidRequestErrorResponseContent
         return (
           <FormError
             message="Invalid input"
@@ -1270,10 +1318,10 @@ function ItemForm() {
           />
         );
       case 403:
-        // error.error is typed as UnauthorizedError
+        // error.error is typed as UnauthorizedErrorResponseContent
         return <AuthError reason={error.error.reason} />;
       default:
-        // error.error is typed as InternalServerError for 500, etc.
+        // error.error is typed as InternalServerErrorResponseContent for 500, etc.
         return <ServerError message={error.error.message} />;
     }
   }
@@ -1309,16 +1357,16 @@ function ItemForm() {
       // ✅ Error type includes all possible error responses
       const err = e as CreateItemError;
       switch (err.status) {
-        case 400:
-          // err.error is typed as InvalidRequestError
+        case 422:
+          // err.error is typed as InvalidRequestErrorResponseContent
           console.error('Validation errors:', err.error.fieldErrors);
           break;
         case 403:
-          // err.error is typed as UnauthorizedError
+          // err.error is typed as UnauthorizedErrorResponseContent
           console.error('Not authorized:', err.error.reason);
           break;
         case 500:
-          // err.error is typed as InternalServerError
+          // err.error is typed as InternalServerErrorResponseContent
           console.error('Server error:', err.error.message);
           break;
       }
@@ -1329,7 +1377,7 @@ function ItemForm() {
   // Error UI can use type narrowing to handle different error types
   if (error) {
     switch (error.status) {
-      case 400:
+      case 422:
         return (
           <FormError
             message="Invalid input"

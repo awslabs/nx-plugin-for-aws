@@ -23,7 +23,7 @@ Trước khi sử dụng generator này, hãy đảm bảo bạn có:
 
 1. Một trang web React (được tạo bằng <Link path="guides/react-website">generator `ts#website`</Link>)
 2. Một TypeScript hoặc Python Agent với `protocol=ag-ui` (được tạo bằng generator <Link path="guides/ts-agent">`ts#agent`</Link> hoặc <Link path="guides/py-agent">`py#agent`</Link>)
-3. Đối với các agent đã triển khai, Cognito Auth được thêm qua <Link path="/guides/react-website-auth">generator `ts#website#auth`</Link>
+3. Đối với các agent đã triển khai, Cognito Auth được thêm qua <Link path="/vi/guides/react-website-auth">generator `ts#website#auth`</Link>
 
 ## Cách sử dụng
 
@@ -46,16 +46,17 @@ Generator tạo ra một component `AguiProvider` **được chia sẻ duy nhấ
 - src
   - components
     - AguiProvider.tsx `CopilotKitProvider` duy nhất cho mọi AG-UI agent. Được tạo trong lần chạy `connection` đầu tiên và được cập nhật trong các lần chạy tiếp theo để đăng ký từng agent mới.
+    - \<agent-name>-chat.tsx Một `<AgentName>Chat` có theme được liên kết với id của agent này. Một file cho mỗi lần chạy `connection`.
     - copilot
       - index.tsx Re-export `CopilotChat`, `CopilotSidebar` và `CopilotPopup` với các slot mặc định khớp với `ux` của trang web của bạn (Cloudscape, Shadcn, hoặc không có theme).
       - *ThemeComponents*.tsx Các component theme theo từng slot (ví dụ: `CloudscapeAssistantMessage.tsx`, `ShadcnChatInput.tsx`). Chỉ được cung cấp khi `ux` là `cloudscape` hoặc `shadcn`.
   - hooks
-    - useAgui\<AgentName>.tsx Đăng ký một AG-UI agent. Một file cho mỗi lần chạy `connection`.
+    - useAgui\<AgentName>.tsx Đăng ký một AG-UI agent và export id của nó dưới dạng `<AGENT_NAME>_ID`. Một file cho mỗi lần chạy `connection`.
     - useSigV4.tsx Ký SigV4 (chỉ IAM)
 
 </FileTree>
 
-Chạy `connection` lần thứ hai cho một agent khác **thêm một hook `useAgui<AgentName>.tsx` mới** và cập nhật `AguiProvider.tsx` để đăng ký cả hai hook — mọi chỉnh sửa tùy chỉnh mà bạn đã thực hiện đối với provider đều được giữ nguyên. `main.tsx` giữ wrapper `<AguiProvider>` duy nhất của nó — bạn sẽ không bao giờ có các provider lồng nhau.
+Chạy `connection` lần thứ hai cho một agent khác **thêm một hook `useAgui<AgentName>.tsx` mới và component `<agent-name>-chat.tsx`** và cập nhật `AguiProvider.tsx` để đăng ký cả hai hook — mọi chỉnh sửa tùy chỉnh mà bạn đã thực hiện đối với provider đều được giữ nguyên. `main.tsx` giữ wrapper `<AguiProvider>` duy nhất của nó — bạn sẽ không bao giờ có các provider lồng nhau.
 
 Các dependency sau được thêm vào `package.json` gốc:
 
@@ -119,17 +120,14 @@ Cả Session ID và Thread ID đều được cung cấp bởi trình duyệt. �
 
 ### Thêm giao diện Chat
 
-Khởi tạo các component CopilotKit với `agentId` để chọn agent nào sẽ sử dụng. Id là tên của agent — cùng tên mà bạn đã chọn khi chạy generator <Link path="guides/ts-agent">`ts#agent`</Link> hoặc <Link path="guides/py-agent">`py#agent`</Link> — và bạn cũng có thể tìm thấy nó trong file hook được tạo (ví dụ: key được trả về từ `packages/web/src/hooks/useAgui<AgentName>.tsx`).
-
-Import các component chat từ module `./components/copilot` được tạo để theme khớp với `ux` của trang web của bạn được áp dụng tự động:
+Generator cung cấp một component `<AgentName>Chat` cho mỗi agent được kết nối, đã được liên kết với id của agent đó và có theme khớp với `ux` của trang web của bạn. Đặt nó ở bất kỳ đâu bên trong wrapper `<AguiProvider>`:
 
 ```tsx
-import { CopilotChat } from './components/copilot';
+import { StoryAgentChat } from './components/story-agent-chat';
 
 function ChatPage() {
   return (
-    <CopilotChat
-      agentId="agent"
+    <StoryAgentChat
       labels={{
         welcomeMessageText: 'How can I help you today?',
         chatInputPlaceholder: 'Ask me anything...',
@@ -139,15 +137,24 @@ function ChatPage() {
 }
 ```
 
+Nó chuyển tiếp mọi prop của `CopilotChat` ngoại trừ `agentId`, vì vậy bất cứ thứ gì bạn có thể truyền cho `<CopilotChat />` đều hoạt động ở đây.
+
 ### Kết nối nhiều AG-UI Agent
 
-Chạy generator `connection` một lần cho mỗi agent. Mọi agent được đăng ký qua `AguiProvider` được chia sẻ đều hiển thị từ bất kỳ đâu trong ứng dụng — khởi tạo một component CopilotKit với `agentId` khác nhau để định tuyến mỗi cuộc trò chuyện đến agent bạn muốn:
+Chạy generator `connection` một lần cho mỗi agent. Mỗi lần chạy cung cấp component chat riêng của agent đó, vì vậy việc định tuyến một cuộc trò chuyện đến một agent cụ thể là vấn đề của component nào bạn render:
 
 ```tsx
-import { CopilotChat } from './components/copilot';
+import { StoryAgentChat } from './components/story-agent-chat';
+import { ResearchAgentChat } from './components/research-agent-chat';
 
-<CopilotChat agentId="story" />    {/* talks to StoryAgent */}
-<CopilotChat agentId="research" /> {/* talks to ResearchAgent */}
+<StoryAgentChat />    {/* talks to StoryAgent */}
+<ResearchAgentChat /> {/* talks to ResearchAgent */}
+```
+
+Nếu bạn cần id thô — để gọi các hook riêng của CopilotKit chẳng hạn — mỗi hook được tạo đều export nó:
+
+```tsx
+import { STORY_AGENT_ID } from './hooks/useAguiStoryAgent';
 ```
 
 ## Tùy chỉnh giao diện
@@ -164,12 +171,13 @@ Generator đọc `metadata.ux` từ project trang web React của bạn và cung
 | `shadcn` | Tin nhắn của assistant được render trong bubble `bg-muted` với avatar `Sparkles`; tin nhắn của người dùng được render căn phải trong bubble `bg-primary` với avatar `User`. Input là `Textarea` bo tròn + `Button` gửi/dừng hình viên thuốc (Enter để gửi, Shift+Enter để xuống dòng). Sử dụng các primitive shadcn từ package `common-shadcn` được chia sẻ. |
 | `none` (hoặc bất kỳ giá trị nào khác) | Không có theme — module chỉ re-export các component CopilotKit mặc định. |
 
-Import các component có theme từ **module theme cục bộ** (không phải trực tiếp từ `@copilotkit/react-core/v2`) để theme được áp dụng tự động:
+Các component `<AgentName>Chat` được cung cấp đã có theme. Đối với một chat bạn tự kết nối, hãy import từ **module theme cục bộ** (không phải trực tiếp từ `@copilotkit/react-core/v2`) để theme được áp dụng tự động:
 
 ```tsx
 import { CopilotChat } from './components/copilot';
+import { STORY_AGENT_ID } from './hooks/useAguiStoryAgent';
 
-<CopilotChat agentId="agent" />
+<CopilotChat agentId={STORY_AGENT_ID} />
 ```
 
 Theme được áp dụng dưới dạng các slot mặc định, vì vậy bất kỳ slot nào bạn truyền một cách rõ ràng vẫn được ưu tiên — bạn vẫn giữ toàn quyền kiểm soát bất cứ khi nào bạn cần ghi đè một lần.
@@ -188,8 +196,7 @@ Ví dụ: để thay thế renderer tin nhắn người dùng của riêng bạn
 Các ghi đè theo từng chat vẫn hoạt động cùng với theme — bất kỳ thứ gì bạn truyền dưới dạng slot prop đều ghi đè mặc định có theme:
 
 ```tsx
-<CopilotChat
-  agentId="agent"
+<StoryAgentChat
   // style the input and its children
   input={{
     textArea: 'text-blue-600',
@@ -208,25 +215,23 @@ Các ghi đè theo từng chat vẫn hoạt động cùng với theme — bất 
 Bất kỳ slot nào cũng có thể nhận một component React thay vì className, vì vậy bạn có thể thay thế hoàn toàn mặc định:
 
 ```tsx
-import { CopilotChat } from './components/copilot';
+import { StoryAgentChat } from './components/story-agent-chat';
 
-const MySendButton: React.FC<{ onClick: () => void }> = ({ onClick }) => (
+const MySendButton: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement>> = ({
+  onClick,
+}) => (
   <button onClick={onClick} className="my-send-btn">
     Send
   </button>
 );
 
-<CopilotChat
-  agentId="agent"
-  input={{ sendButton: MySendButton }}
-/>;
+<StoryAgentChat input={{ sendButton: MySendButton }} />;
 ```
 
 Các ghi đè sâu hơn tuân theo cùng một hình dạng — ví dụ: chỉ thay thế nút sao chép trên tin nhắn của assistant:
 
 ```tsx
-<CopilotChat
-  agentId="agent"
+<StoryAgentChat
   messageView={{
     assistantMessage: {
       copyButton: ({ onClick }) => <button onClick={onClick}>Copy</button>,

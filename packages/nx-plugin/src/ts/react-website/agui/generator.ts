@@ -20,7 +20,7 @@ import {
   declareDependencies,
   ownedElsewhere,
 } from '../../../utils/declared-dependencies.js';
-import { kebabCase } from '../../../utils/names.js';
+import { kebabCase, snakeCase } from '../../../utils/names.js';
 import { getNpmScopePrefix } from '../../../utils/npm-scope.js';
 import { registerPnpmBuiltDependencies } from '../../../utils/pnpm-workspace.js';
 import {
@@ -123,14 +123,23 @@ export const addAgUiReactConnection = async (
   const metadata: AgUiMetadata = { theme, auth };
   const scopeAlias = getNpmScopePrefix(tree);
 
-  // Generates `src/components/AguiProvider.tsx` (if absent) and
+  // Generates `src/components/AguiProvider.tsx` (if absent),
+  // `src/components/<agent-name>-chat.tsx` and
   // `src/hooks/useAgui<AgentName>.tsx`. Existing files are kept so re-running
   // the generator is idempotent.
   generateFiles(
     tree,
     joinPathFragments(import.meta.dirname, 'files', 'common'),
     frontendProjectConfig.root,
-    { agentName, agentNameClassName, auth, gatewayRoute },
+    {
+      agentName,
+      agentNameClassName,
+      agentNameKebabCase: kebabCase(agentNameClassName),
+      // STORY_AGENT, naming the exported `<name>_ID` constant
+      agentNameConstantName: snakeCase(agentNameClassName).toUpperCase(),
+      auth,
+      gatewayRoute,
+    },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 

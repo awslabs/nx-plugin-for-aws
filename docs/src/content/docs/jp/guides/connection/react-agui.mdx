@@ -46,16 +46,17 @@ React ウェブサイトをソースプロジェクトとして、AG-UI Agent �
 - src
   - components
     - AguiProvider.tsx すべての AG-UI Agent 用の単一の `CopilotKitProvider`。最初の `connection` 実行時に作成され、後続の実行で各新しい Agent を登録するために更新されます。
+    - \<agent-name>-chat.tsx この Agent の id にバインドされたテーマ付き `<AgentName>Chat`。`connection` 実行ごとに 1 つのファイル。
     - copilot
       - index.tsx ウェブサイトの `ux`（Cloudscape、Shadcn、またはテーマなし）に一致するスロットデフォルトを持つ `CopilotChat`、`CopilotSidebar`、`CopilotPopup` を再エクスポートします。
       - *ThemeComponents*.tsx スロットごとのテーマコンポーネント（例：`CloudscapeAssistantMessage.tsx`、`ShadcnChatInput.tsx`）。`ux` が `cloudscape` または `shadcn` の場合のみ提供されます。
   - hooks
-    - useAgui\<AgentName>.tsx 1 つの AG-UI Agent を登録します。`connection` 実行ごとに 1 つのファイル。
+    - useAgui\<AgentName>.tsx 1 つの AG-UI Agent を登録し、その id を `<AGENT_NAME>_ID` としてエクスポートします。`connection` 実行ごとに 1 つのファイル。
     - useSigV4.tsx SigV4 署名（IAM のみ）
 
 </FileTree>
 
-異なる Agent に対して 2 回目の `connection` を実行すると、**新しい `useAgui<AgentName>.tsx` フックが追加**され、`AguiProvider.tsx` が更新されて両方のフックが登録されます — プロバイダーに加えたカスタム編集は保持されます。`main.tsx` は単一の `<AguiProvider>` ラッパーを保持します — ネストされたプロバイダーになることはありません。
+異なる Agent に対して 2 回目の `connection` を実行すると、**新しい `useAgui<AgentName>.tsx` フックと `<agent-name>-chat.tsx` コンポーネントが追加**され、`AguiProvider.tsx` が更新されて両方のフックが登録されます — プロバイダーに加えたカスタム編集は保持されます。`main.tsx` は単一の `<AguiProvider>` ラッパーを保持します — ネストされたプロバイダーになることはありません。
 
 以下の依存関係がルートの `package.json` に追加されます：
 
@@ -119,17 +120,14 @@ Session ID と Thread ID の両方はブラウザーによって提供されま�
 
 ### チャットインターフェースの追加
 
-使用する Agent を選択するために `agentId` を指定して CopilotKit コンポーネントをインスタンス化します。id は Agent の名前です — <Link path="guides/ts-agent">`ts#agent`</Link> または <Link path="guides/py-agent">`py#agent`</Link> ジェネレーターを実行したときに選択したものと同じです — また、生成されたフックファイル（例：`packages/web/src/hooks/useAgui<AgentName>.tsx` から返されるキー）でも確認できます。
-
-ウェブサイトの `ux` に一致するテーマが自動的に適用されるように、生成された `./components/copilot` モジュールからチャットコンポーネントをインポートします：
+ジェネレーターは、接続された Agent ごとに `<AgentName>Chat` コンポーネントを提供します。これはすでにその Agent の id にバインドされており、ウェブサイトの `ux` に一致するようにテーマが設定されています。`<AguiProvider>` ラッパー内の任意の場所に配置します：
 
 ```tsx
-import { CopilotChat } from './components/copilot';
+import { StoryAgentChat } from './components/story-agent-chat';
 
 function ChatPage() {
   return (
-    <CopilotChat
-      agentId="agent"
+    <StoryAgentChat
       labels={{
         welcomeMessageText: 'How can I help you today?',
         chatInputPlaceholder: 'Ask me anything...',
@@ -139,15 +137,24 @@ function ChatPage() {
 }
 ```
 
+これは `agentId` を除くすべての `CopilotChat` プロップを転送するため、`<CopilotChat />` に渡せるものはすべてここでも機能します。
+
 ### 複数の AG-UI Agent の接続
 
-Agent ごとに 1 回 `connection` ジェネレーターを実行します。共有 `AguiProvider` 経由で登録されたすべての Agent は、アプリ内のどこからでも表示されます — 異なる `agentId` を持つ CopilotKit コンポーネントをインスタンス化して、各チャットを目的の Agent にルーティングします：
+Agent ごとに 1 回 `connection` ジェネレーターを実行します。各実行はその Agent 独自のチャットコンポーネントを提供するため、特定の Agent にチャットをルーティングするのは、どのコンポーネントをレンダリングするかの問題です：
 
 ```tsx
-import { CopilotChat } from './components/copilot';
+import { StoryAgentChat } from './components/story-agent-chat';
+import { ResearchAgentChat } from './components/research-agent-chat';
 
-<CopilotChat agentId="story" />    {/* talks to StoryAgent */}
-<CopilotChat agentId="research" /> {/* talks to ResearchAgent */}
+<StoryAgentChat />    {/* talks to StoryAgent */}
+<ResearchAgentChat /> {/* talks to ResearchAgent */}
+```
+
+生の id が必要な場合 — たとえば CopilotKit 独自のフックを呼び出すために — 各生成されたフックはそれをエクスポートします：
+
+```tsx
+import { STORY_AGENT_ID } from './hooks/useAguiStoryAgent';
 ```
 
 ## ルック＆フィールのカスタマイズ
@@ -164,12 +171,13 @@ import { CopilotChat } from './components/copilot';
 | `shadcn` | アシスタントメッセージは `bg-muted` バブル内に `Sparkles` アバターとともにレンダリングされます；ユーザーメッセージは `bg-primary` バブル内に `User` アバターとともに右揃えでレンダリングされます。入力は丸みを帯びた `Textarea` + ピル型の送信/停止 `Button` です（Enter で送信、Shift+Enter で改行）。共有 `common-shadcn` パッケージの shadcn プリミティブを使用します。 |
 | `none`（またはその他） | テーマなし — モジュールはデフォルトの CopilotKit コンポーネントを再エクスポートするだけです。 |
 
-テーマが自動的に適用されるように、**ローカルテーマモジュール**からテーマ付きコンポーネントをインポートします（`@copilotkit/react-core/v2` から直接ではなく）：
+提供される `<AgentName>Chat` コンポーネントはすでにテーマが設定されています。自分で配線するチャットの場合は、テーマが自動的に適用されるように、**ローカルテーマモジュール**からインポートします（`@copilotkit/react-core/v2` から直接ではなく）：
 
 ```tsx
 import { CopilotChat } from './components/copilot';
+import { STORY_AGENT_ID } from './hooks/useAguiStoryAgent';
 
-<CopilotChat agentId="agent" />
+<CopilotChat agentId={STORY_AGENT_ID} />
 ```
 
 テーマはスロットデフォルトとして適用されるため、明示的に渡すスロットは引き続き優先されます — 一回限りのオーバーライドが必要な場合でも、完全な制御を維持できます。
@@ -188,8 +196,7 @@ import { CopilotChat } from './components/copilot';
 チャットごとのオーバーライドは、テーマと並行して機能します — スロットプロップとして渡すものは、テーマのデフォルトをオーバーライドします：
 
 ```tsx
-<CopilotChat
-  agentId="agent"
+<StoryAgentChat
   // style the input and its children
   input={{
     textArea: 'text-blue-600',
@@ -208,25 +215,23 @@ import { CopilotChat } from './components/copilot';
 任意のスロットは className の代わりに React コンポーネントを取ることができるため、デフォルトを完全に置き換えることができます：
 
 ```tsx
-import { CopilotChat } from './components/copilot';
+import { StoryAgentChat } from './components/story-agent-chat';
 
-const MySendButton: React.FC<{ onClick: () => void }> = ({ onClick }) => (
+const MySendButton: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement>> = ({
+  onClick,
+}) => (
   <button onClick={onClick} className="my-send-btn">
     Send
   </button>
 );
 
-<CopilotChat
-  agentId="agent"
-  input={{ sendButton: MySendButton }}
-/>;
+<StoryAgentChat input={{ sendButton: MySendButton }} />;
 ```
 
 より深いオーバーライドも同じ形状に従います — 例えば、アシスタントメッセージのコピーボタンだけを置き換える：
 
 ```tsx
-<CopilotChat
-  agentId="agent"
+<StoryAgentChat
   messageView={{
     assistantMessage: {
       copyButton: ({ onClick }) => <button onClick={onClick}>Copy</button>,
