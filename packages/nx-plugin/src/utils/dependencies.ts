@@ -2,18 +2,18 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { basename } from 'node:path';
 import {
   detectPackageManager,
   addDependenciesToPackageJson as devkitAddDependenciesToPackageJson,
   removeDependenciesFromPackageJson as devkitRemoveDependenciesFromPackageJson,
   type GeneratorCallback,
   getPackageManagerVersion,
+  getProjects,
+  joinPathFragments,
   type PackageManager,
   readJson,
   type Tree,
   updateJson,
-  visitNotIgnoredFiles,
 } from '@nx/devkit';
 import yaml from 'js-yaml';
 import { coerce, gt, gte } from 'semver';
@@ -184,8 +184,14 @@ export const removeDependenciesFromPackageJson = (
   );
 
   if (catalogsEnabled(tree)) {
+    const manifests = workspaceManifests(tree, packageJsonPath);
     const removed = [...new Set([...dependencies, ...devDependencies])].filter(
-      (packageName) => !isDeclaredAnywhere(tree, packageName),
+      (packageName) =>
+        !manifests.some((manifest) =>
+          MANIFEST_DEPENDENCY_FIELDS.some(
+            (field) => manifest[field]?.[packageName] !== undefined,
+          ),
+        ),
     );
     removeCatalogVersions(tree, removed);
   }
@@ -193,23 +199,25 @@ export const removeDependenciesFromPackageJson = (
   return callback;
 };
 
-/** Whether any manifest in the workspace still declares the package. */
-const isDeclaredAnywhere = (tree: Tree, packageName: string): boolean => {
-  let declared = false;
-  visitNotIgnoredFiles(tree, '', (filePath) => {
-    if (declared || basename(filePath) !== 'package.json') {
-      return;
-    }
-    const json = readJson<Record<string, Record<string, string> | undefined>>(
-      tree,
-      filePath,
-    );
-    declared = MANIFEST_DEPENDENCY_FIELDS.some(
-      (field) => json[field]?.[packageName] !== undefined,
-    );
-  });
-  return declared;
-};
+type Manifest = Record<string, Record<string, string> | undefined>;
+
+/**
+ * Every manifest that can hold a catalog reference: the root, each project's,
+ * and the one just written. Project manifests come from the project graph
+ * rather than a tree walk, so a manifest belonging to no project is not seen.
+ */
+const workspaceManifests = (tree: Tree, packageJsonPath: string): Manifest[] =>
+  [
+    ...new Set([
+      'package.json',
+      packageJsonPath,
+      ...Array.from(getProjects(tree).values()).map((project) =>
+        joinPathFragments(project.root, 'package.json'),
+      ),
+    ]),
+  ]
+    .filter((path) => tree.exists(path))
+    .map((path) => readJson<Manifest>(tree, path));
 
 const MANIFEST_DEPENDENCY_FIELDS = [
   'dependencies',

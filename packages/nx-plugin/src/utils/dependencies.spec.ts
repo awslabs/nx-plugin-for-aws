@@ -3,7 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import * as devkit from '@nx/devkit';
-import { readJson, type Tree, updateJson } from '@nx/devkit';
+import {
+  addProjectConfiguration,
+  readJson,
+  type Tree,
+  updateJson,
+} from '@nx/devkit';
 import yaml from 'js-yaml';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -472,6 +477,7 @@ describe('removeDependenciesFromPackageJson', () => {
   it('should keep a catalog entry another manifest still declares', () => {
     mockPackageManager(tree, 'pnpm', '10.0.0');
     addDependenciesToPackageJson(tree, { zod: '4.4.3' }, {});
+    addProjectConfiguration(tree, 'other', { root: 'packages/other' });
     tree.write(
       'packages/other/package.json',
       JSON.stringify({ name: 'other', dependencies: { zod: 'catalog:' } }),
@@ -488,6 +494,7 @@ describe('removeDependenciesFromPackageJson', () => {
 
   it('should remove from a project manifest and drop the catalog entry', () => {
     mockPackageManager(tree, 'pnpm', '10.0.0');
+    addProjectConfiguration(tree, 'lib', { root: 'packages/lib' });
     tree.write(
       'packages/lib/package.json',
       JSON.stringify({ name: 'lib', dependencies: {} }),
