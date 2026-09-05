@@ -2,7 +2,8 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { readJson, type Tree } from '@nx/devkit';
+import { readJson, type Tree, updateJson } from '@nx/devkit';
+import yaml from 'js-yaml';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
 import { TS_VERSIONS } from '../../../utils/versions.js';
 import migration from './migration.js';
@@ -123,6 +124,38 @@ describe('shadcn-cn-package migration', () => {
     expect(dependencies.clsx).toBeUndefined();
     expect(dependencies['tailwind-merge']).toBeUndefined();
     expect(dependencies['class-variance-authority']).toBe('0.7.1');
+  });
+
+  it('should drop the catalog entries for clsx and tailwind-merge', async () => {
+    givenSharedShadcnPackage(tree);
+    updateJson(tree, PACKAGE_JSON, (json) => ({
+      ...json,
+      dependencies: {
+        ...json.dependencies,
+        clsx: 'catalog:',
+        'tailwind-merge': 'catalog:',
+      },
+    }));
+    tree.write(
+      'pnpm-workspace.yaml',
+      yaml.dump({
+        packages: ['packages/*'],
+        catalog: {
+          clsx: '2.1.1',
+          'tailwind-merge': '3.6.0',
+          'class-variance-authority': '0.7.1',
+        },
+      }),
+    );
+
+    await migration(tree);
+
+    const workspaceYaml = yaml.load(
+      tree.read('pnpm-workspace.yaml', 'utf-8') ?? '',
+    ) as { catalog: Record<string, string> };
+    expect(workspaceYaml.catalog.clsx).toBeUndefined();
+    expect(workspaceYaml.catalog['tailwind-merge']).toBeUndefined();
+    expect(workspaceYaml.catalog['class-variance-authority']).toBe('0.7.1');
   });
 
   it('should keep clsx while a file still imports it', async () => {

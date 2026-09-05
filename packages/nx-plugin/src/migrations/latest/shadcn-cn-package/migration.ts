@@ -7,10 +7,12 @@ import {
   type MigrationReturnObject,
   readJson,
   type Tree,
-  updateJson,
 } from '@nx/devkit';
 import { applyGritQL, matchGritQL } from '../../../utils/ast.js';
-import { addDependenciesToPackageJson } from '../../../utils/dependencies.js';
+import {
+  addDependenciesToPackageJson,
+  removeDependenciesFromPackageJson,
+} from '../../../utils/dependencies.js';
 import { formatFilesInSubtree } from '../../../utils/format.js';
 import {
   PACKAGES_DIR,
@@ -135,15 +137,8 @@ export default async function migration(
     }
   }
 
-  updateJson(tree, packageJsonPath, (json) => {
-    for (const name of DROPPED_PACKAGES) {
-      if (!stillImported.has(name)) {
-        delete json.dependencies?.[name];
-        delete json.devDependencies?.[name];
-      }
-    }
-    return json;
-  });
+  const dropped = DROPPED_PACKAGES.filter((name) => !stillImported.has(name));
+  removeDependenciesFromPackageJson(tree, dropped, dropped, packageJsonPath);
 
   await formatFilesInSubtree(tree);
 

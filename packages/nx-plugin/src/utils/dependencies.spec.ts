@@ -8,6 +8,7 @@ import yaml from 'js-yaml';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   addDependenciesToPackageJson,
+  removeDependenciesFromPackageJson,
   resetCatalogSupportCache,
 } from './dependencies.js';
 import { createTreeUsingTsSolutionSetup } from './test.js';
@@ -417,6 +418,111 @@ describe('addDependenciesToPackageJson', () => {
     const workspaceYamlBefore = tree.read('pnpm-workspace.yaml', 'utf-8');
 
     addDependenciesToPackageJson(tree, { zod: '4.4.3' }, {});
+
+    expect(tree.read('package.json', 'utf-8')).toEqual(packageJsonBefore);
+    expect(tree.read('pnpm-workspace.yaml', 'utf-8')).toEqual(
+      workspaceYamlBefore,
+    );
+  });
+});
+
+describe('removeDependenciesFromPackageJson', () => {
+  let tree: Tree;
+
+  beforeEach(() => {
+    tree = createTreeUsingTsSolutionSetup();
+    vi.mocked(devkit.detectPackageManager).mockReset();
+    vi.mocked(devkit.getPackageManagerVersion).mockReset();
+    resetCatalogSupportCache();
+  });
+
+  it('should drop the catalog entry from pnpm-workspace.yaml', () => {
+    mockPackageManager(tree, 'pnpm', '10.0.0');
+    addDependenciesToPackageJson(tree, { zod: '4.4.3' }, { tsx: '4.20.0' });
+
+    removeDependenciesFromPackageJson(tree, ['zod'], ['zod']);
+
+    expect(readJson(tree, 'package.json').dependencies.zod).toBeUndefined();
+    const workspaceYaml = yaml.load(
+      tree.read('pnpm-workspace.yaml', 'utf-8'),
+    ) as any;
+    expect(workspaceYaml.catalog.zod).toBeUndefined();
+    expect(workspaceYaml.catalog.tsx).toBe('4.20.0');
+  });
+
+  it('should drop the catalog entry from .yarnrc.yml', () => {
+    mockPackageManager(tree, 'yarn', '4.10.0');
+    addDependenciesToPackageJson(tree, { zod: '4.4.3' }, {});
+
+    removeDependenciesFromPackageJson(tree, ['zod'], []);
+
+    const yarnRc = yaml.load(tree.read('.yarnrc.yml', 'utf-8')) as any;
+    expect(yarnRc.catalog.zod).toBeUndefined();
+  });
+
+  it("should drop the catalog entry from bun's package.json", () => {
+    mockPackageManager(tree, 'bun', '1.2.14');
+    addDependenciesToPackageJson(tree, { zod: '4.4.3' }, {});
+
+    removeDependenciesFromPackageJson(tree, ['zod'], []);
+
+    expect(readJson(tree, 'package.json').catalog?.zod).toBeUndefined();
+  });
+
+  it('should keep a catalog entry another manifest still declares', () => {
+    mockPackageManager(tree, 'pnpm', '10.0.0');
+    addDependenciesToPackageJson(tree, { zod: '4.4.3' }, {});
+    tree.write(
+      'packages/other/package.json',
+      JSON.stringify({ name: 'other', dependencies: { zod: 'catalog:' } }),
+    );
+
+    removeDependenciesFromPackageJson(tree, ['zod'], []);
+
+    expect(readJson(tree, 'package.json').dependencies.zod).toBeUndefined();
+    const workspaceYaml = yaml.load(
+      tree.read('pnpm-workspace.yaml', 'utf-8'),
+    ) as any;
+    expect(workspaceYaml.catalog.zod).toBe('4.4.3');
+  });
+
+  it('should remove from a project manifest and drop the catalog entry', () => {
+    mockPackageManager(tree, 'pnpm', '10.0.0');
+    tree.write(
+      'packages/lib/package.json',
+      JSON.stringify({ name: 'lib', dependencies: {} }),
+    );
+    addDependenciesToPackageJson(
+      tree,
+      { zod: '4.4.3' },
+      {},
+      'packages/lib/package.json',
+    );
+
+    removeDependenciesFromPackageJson(
+      tree,
+      ['zod'],
+      [],
+      'packages/lib/package.json',
+    );
+
+    expect(
+      readJson(tree, 'packages/lib/package.json').dependencies.zod,
+    ).toBeUndefined();
+    const workspaceYaml = yaml.load(
+      tree.read('pnpm-workspace.yaml', 'utf-8'),
+    ) as any;
+    expect(workspaceYaml.catalog.zod).toBeUndefined();
+  });
+
+  it('should be idempotent when re-run', () => {
+    mockPackageManager(tree, 'pnpm', '10.0.0');
+    addDependenciesToPackageJson(tree, { zod: '4.4.3' }, {});
+    removeDependenciesFromPackageJson(tree, ['zod'], []);
+    const packageJsonBefore = tree.read('package.json', 'utf-8');
+    const workspaceYamlBefore = tree.read('pnpm-workspace.yaml', 'utf-8');
+
+    removeDependenciesFromPackageJson(tree, ['zod'], []);
 
     expect(tree.read('package.json', 'utf-8')).toEqual(packageJsonBefore);
     expect(tree.read('pnpm-workspace.yaml', 'utf-8')).toEqual(

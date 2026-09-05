@@ -2,15 +2,18 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+import { basename } from 'node:path';
 import {
   detectPackageManager,
   addDependenciesToPackageJson as devkitAddDependenciesToPackageJson,
+  removeDependenciesFromPackageJson as devkitRemoveDependenciesFromPackageJson,
   type GeneratorCallback,
   getPackageManagerVersion,
   type PackageManager,
   readJson,
   type Tree,
   updateJson,
+  visitNotIgnoredFiles,
 } from '@nx/devkit';
 import yaml from 'js-yaml';
 import { coerce, gt, gte } from 'semver';
@@ -156,6 +159,128 @@ export const addDependenciesToPackageJson = (
   }
 
   return callback;
+};
+
+/**
+ * Drop-in replacement for devkit's `removeDependenciesFromPackageJson` that
+ * also drops the package manager's catalog entry, which devkit leaves behind
+ * pointing at a package nothing declares any more.
+ *
+ * The entry is only dropped once no manifest in the workspace declares the
+ * package, so removing it from one project leaves another project's reference
+ * resolvable.
+ */
+export const removeDependenciesFromPackageJson = (
+  tree: Tree,
+  dependencies: string[],
+  devDependencies: string[],
+  packageJsonPath = 'package.json',
+): GeneratorCallback => {
+  const callback = devkitRemoveDependenciesFromPackageJson(
+    tree,
+    dependencies,
+    devDependencies,
+    packageJsonPath,
+  );
+
+  if (catalogsEnabled(tree)) {
+    const removed = [...new Set([...dependencies, ...devDependencies])].filter(
+      (packageName) => !isDeclaredAnywhere(tree, packageName),
+    );
+    removeCatalogVersions(tree, removed);
+  }
+
+  return callback;
+};
+
+/** Whether any manifest in the workspace still declares the package. */
+const isDeclaredAnywhere = (tree: Tree, packageName: string): boolean => {
+  let declared = false;
+  visitNotIgnoredFiles(tree, '', (filePath) => {
+    if (declared || basename(filePath) !== 'package.json') {
+      return;
+    }
+    const json = readJson<Record<string, Record<string, string> | undefined>>(
+      tree,
+      filePath,
+    );
+    declared = MANIFEST_DEPENDENCY_FIELDS.some(
+      (field) => json[field]?.[packageName] !== undefined,
+    );
+  });
+  return declared;
+};
+
+const MANIFEST_DEPENDENCY_FIELDS = [
+  'dependencies',
+  'devDependencies',
+  'optionalDependencies',
+  'peerDependencies',
+] as const;
+
+// Drop entries from the default catalog, mirroring `writeCatalogVersions`.
+const removeCatalogVersions = (tree: Tree, packageNames: string[]): void => {
+  if (packageNames.length === 0) {
+    return;
+  }
+
+  const withoutRemoved = (
+    catalog: Record<string, string> | undefined,
+  ): Record<string, string> | undefined => {
+    if (!catalog || !packageNames.some((name) => name in catalog)) {
+      return undefined;
+    }
+    return Object.fromEntries(
+      Object.entries(catalog).filter(([name]) => !packageNames.includes(name)),
+    );
+  };
+
+  switch (detectWorkspacePackageManager(tree)) {
+    case 'pnpm': {
+      const workspaceYaml =
+        (yaml.load(tree.read('pnpm-workspace.yaml', 'utf-8') ?? '') as Record<
+          string,
+          unknown
+        >) ?? {};
+      const catalog = withoutRemoved(
+        workspaceYaml.catalog as Record<string, string> | undefined,
+      );
+      if (catalog) {
+        tree.write(
+          'pnpm-workspace.yaml',
+          yaml.dump({ ...workspaceYaml, catalog }, { quotingType: "'" }),
+        );
+      }
+      break;
+    }
+    case 'yarn': {
+      const yarnRc =
+        (yaml.load(tree.read('.yarnrc.yml', 'utf-8') ?? '') as Record<
+          string,
+          unknown
+        >) ?? {};
+      const catalog = withoutRemoved(
+        yarnRc.catalog as Record<string, string> | undefined,
+      );
+      if (catalog) {
+        tree.write(
+          '.yarnrc.yml',
+          yaml.dump({ ...yarnRc, catalog }, { quotingType: "'" }),
+        );
+      }
+      break;
+    }
+    case 'bun': {
+      const catalog = withoutRemoved(
+        readJson<{ catalog?: Record<string, string> }>(tree, 'package.json')
+          .catalog,
+      );
+      if (catalog) {
+        updateJson(tree, 'package.json', (json) => ({ ...json, catalog }));
+      }
+      break;
+    }
+  }
 };
 
 // Convert direct version ranges to `catalog:` references in a single manifest
