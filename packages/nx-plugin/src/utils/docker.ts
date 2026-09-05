@@ -13,7 +13,10 @@ import {
   type MustDeclare,
 } from './declared-dependencies.js';
 import { FS_DEPENDENCIES, FsCommands } from './fs.js';
-import { addDependencyToTargetIfNotPresent } from './nx.js';
+import {
+  addDependencyToTargetIfNotPresent,
+  normalizeTargetKeyOrder,
+} from './nx.js';
 import { containerImage, type ITsDepVersion, TS_VERSIONS } from './versions.js';
 
 /** Dependencies a caller must declare to add a Docker scan target. */
@@ -166,7 +169,7 @@ export const addDockerScanTarget = <const D extends DependencyDeclaration>(
   });
 
   project.targets ??= {};
-  project.targets[trivyTargetName] = {
+  project.targets[trivyTargetName] = normalizeTargetKeyOrder({
     // The image being scanned is only reachable through the container engine,
     // so a restored cache entry would report a pass for an image that may no
     // longer exist. The scan re-runs and either scans the real image or fails.
@@ -180,7 +183,7 @@ export const addDockerScanTarget = <const D extends DependencyDeclaration>(
       parallel: false,
     },
     dependsOn: [dockerTargetName],
-  };
+  });
 
   // Aggregate per-component scan targets under a single `trivy` target. The
   // scan is intentionally NOT wired into `build`: image scanning is slow and

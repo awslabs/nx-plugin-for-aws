@@ -961,6 +961,39 @@ describe('ts#agent generator', () => {
     expect(secondProjectJson).toEqual(firstProjectJson);
   });
 
+  it.each([
+    ['agentcore', 'agent-package'],
+    ['agentcore-ecr', 'agent-docker'],
+  ] as const)(
+    'should leave project.json byte-identical on re-run with infra %s',
+    async (infra, packagingTarget) => {
+      const options = { project: 'test-project', infra, iac: 'cdk' as const };
+      await tsAgentGenerator(tree, options);
+      const firstProjectJson = tree.read(
+        'apps/test-project/project.json',
+        'utf-8',
+      );
+      // User content written between the runs must survive it.
+      tree.write('apps/test-project/src/agent/agent.ts', '// user agent\n');
+
+      await tsAgentGenerator(tree, options);
+
+      // The packaging target's keys must not be reordered: Nx moves `options`
+      // and `configurations` last when it rewrites a project.json, so the
+      // authored order has to match or every re-run rewrites the file.
+      const target = JSON.parse(firstProjectJson).targets[packagingTarget];
+      expect(Object.keys(target).indexOf('dependsOn')).toBeLessThan(
+        Object.keys(target).indexOf('options'),
+      );
+      expect(tree.read('apps/test-project/project.json', 'utf-8')).toEqual(
+        firstProjectJson,
+      );
+      expect(tree.read('apps/test-project/src/agent/agent.ts', 'utf-8')).toBe(
+        '// user agent\n',
+      );
+    },
+  );
+
   it('should add component generator metadata with default name', async () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',

@@ -13,6 +13,7 @@ import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
 
 Le générateur `connection` peut connecter votre <Link path="guides/ts-agent">Agent TypeScript</Link> à un serveur MCP (soit <Link path="guides/ts-mcp-server">TypeScript</Link> soit <Link path="guides/py-mcp-server">Python</Link>).
 
@@ -51,6 +52,7 @@ Le générateur crée un package partagé `agent-connection` et modifie le code 
     - core
       - agentcore-endpoints.ts Résolution ARN/URL indépendante du framework
       - agentcore-fetch.ts Fetch SigV4 / JWT / session-forwarding indépendant du framework
+      - agentcore-transport.ts Plomberie de transport AgentCore partagée
       - agentcore-mcp-transport.ts Transport MCP indépendant du framework
       - agentcore-mcp-client-strands.ts Client MCP Strands encapsulant le transport
     - index.ts Exporte tous les clients
@@ -72,8 +74,8 @@ Le générateur transforme le fichier `agent.ts` de votre agent pour utiliser le
 import { Agent, tool } from '@strands-agents/sdk';
 import { MyMcpServerClientStrands } from '@my-scope/agent-connection';
 
-export const getAgent = async (sessionId: string) => {
-  const myMcpServerClient = await MyMcpServerClientStrands.create(sessionId);
+export const getAgent = async () => {
+  const myMcpServerClient = await MyMcpServerClientStrands.create();
   return new Agent({
     systemPrompt: '...',
     tools: [myMcpServerClient],
@@ -81,9 +83,11 @@ export const getAgent = async (sessionId: string) => {
 };
 ```
 
-Le paramètre `sessionId` est transmis depuis l'appelant, garantissant la cohérence pour l'[observabilité Bedrock AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
+L'ID de session AgentCore est propagé automatiquement au serveur MCP via l'en-tête `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`, donc `create()` ne prend aucun argument : le serveur de l'agent lie la session de la requête entrante dans un contexte [`AsyncLocalStorage`](https://nodejs.org/api/async_context.html#class-asynclocalstorage) (`enterSessionContext` dans le `router.ts` généré, ou `runWithSessionId` dans le middleware de session A2A/AG-UI), et le fetch du client de connexion dans `agentcore-fetch.ts` l'appose sur chaque appel sortant — garantissant la cohérence pour l'[observabilité Bedrock AgentCore](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
 
 ## Infrastructure
+
+<Snippet name="connection/infra-project-prerequisite" />
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -153,4 +157,3 @@ Exécutez l'agent localement avec :
 <NxCommands commands={["<agent-name>-dev <project-name>"]} />
 
 Cela démarrera à la fois l'agent et tous les serveurs MCP connectés, l'agent se connectant aux serveurs MCP directement via HTTP sur leurs ports locaux assignés.
-

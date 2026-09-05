@@ -73,8 +73,8 @@ import { Agent, tool } from '@strands-agents/sdk';
 import { RemoteAgentClientStrands } from '@my-scope/agent-connection';
 import { z } from 'zod';
 
-export const getAgent = async (sessionId: string) => {
-  const remoteAgent = await RemoteAgentClientStrands.create(sessionId);
+export const getAgent = async () => {
+  const remoteAgent = await RemoteAgentClientStrands.create();
   const remoteAgentTool = tool({
     name: 'askRemoteAgent',
     description: 'Delegate a question to the remote RemoteAgent A2A agent and return its reply.',
@@ -88,9 +88,9 @@ export const getAgent = async (sessionId: string) => {
 };
 ```
 
-`sessionId` 매개변수는 호출자로부터 전달되어 [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html)의 일관성을 보장합니다.
+AgentCore 세션 ID는 `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` 헤더를 통해 원격 에이전트로 자동으로 전파되므로 `create()`는 인수를 받지 않습니다. 에이전트 서버는 인바운드 요청의 세션을 [`AsyncLocalStorage`](https://nodejs.org/api/async_context.html#class-asynclocalstorage) 컨텍스트에 바인딩하고(생성된 `router.ts`의 `enterSessionContext` 또는 A2A/AG-UI 세션 미들웨어의 `runWithSessionId`), 연결 클라이언트의 `agentcore-fetch.ts`에 있는 fetch가 모든 아웃바운드 호출에 이를 스탬프하여 [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html)의 일관성을 보장합니다.
 
-내부적으로 `RemoteAgentClientStrands.create(sessionId)`는 AWS에 배포된 경우 SigV4 서명 `clientFactory`로 구성된 Strands `A2AAgent`를 반환하고, `LOCAL_DEV=true`인 경우 일반 `http://localhost:<port>/` 엔드포인트를 반환합니다. 서명 및 엔드포인트 해석은 프레임워크 독립적인 `agentcore-a2a-client-config.ts`에 있으며, 얇은 `agentcore-a2a-client-strands.ts`만 Strands에 의존합니다.
+내부적으로 `RemoteAgentClientStrands.create()`는 AWS에 배포된 경우 SigV4 서명 `clientFactory`로 구성된 Strands `A2AAgent`를 반환하고, `LOCAL_DEV=true`인 경우 일반 `http://localhost:<port>/` 엔드포인트를 반환합니다. 서명 및 엔드포인트 해석은 프레임워크 독립적인 `agentcore-a2a-client-config.ts`에 있으며, 얇은 `agentcore-a2a-client-strands.ts`만 Strands에 의존합니다.
 
 ## 인프라
 
@@ -107,3 +107,4 @@ export const getAgent = async (sessionId: string) => {
 <NxCommands commands={["<agent-name>-dev <project-name>"]} />
 
 이렇게 하면 호스트 에이전트와 연결된 모든 A2A 에이전트가 시작되며, 호스트 에이전트는 할당된 로컬 포트에서 일반 HTTP를 통해 원격 에이전트를 호출합니다.
+

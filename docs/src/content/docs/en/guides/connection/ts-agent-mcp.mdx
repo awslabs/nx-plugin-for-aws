@@ -13,6 +13,7 @@ import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
 
 The `connection` generator can connect your <Link path="guides/ts-agent">TypeScript Agent</Link> to an MCP server (either <Link path="guides/ts-mcp-server">TypeScript</Link> or <Link path="guides/py-mcp-server">Python</Link>).
 
@@ -51,6 +52,7 @@ The generator creates a shared `agent-connection` package and modifies your agen
     - core
       - agentcore-endpoints.ts Framework-agnostic ARN/URL resolution
       - agentcore-fetch.ts Framework-agnostic SigV4 / JWT / session-forwarding fetch
+      - agentcore-transport.ts Shared AgentCore transport plumbing
       - agentcore-mcp-transport.ts Framework-agnostic MCP transport
       - agentcore-mcp-client-strands.ts Strands MCP client wrapping the transport
     - index.ts Exports all clients
@@ -72,8 +74,8 @@ The generator transforms your agent's `agent.ts` to use the MCP server's tools:
 import { Agent, tool } from '@strands-agents/sdk';
 import { MyMcpServerClientStrands } from '@my-scope/agent-connection';
 
-export const getAgent = async (sessionId: string) => {
-  const myMcpServerClient = await MyMcpServerClientStrands.create(sessionId);
+export const getAgent = async () => {
+  const myMcpServerClient = await MyMcpServerClientStrands.create();
   return new Agent({
     systemPrompt: '...',
     tools: [myMcpServerClient],
@@ -81,9 +83,11 @@ export const getAgent = async (sessionId: string) => {
 };
 ```
 
-The `sessionId` parameter is plumbed through from the caller, ensuring consistency for [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
+The AgentCore session ID is propagated to the MCP server automatically via the `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` header, so `create()` takes no arguments: the agent server binds the inbound request's session into an [`AsyncLocalStorage`](https://nodejs.org/api/async_context.html#class-asynclocalstorage) context (`enterSessionContext` in the generated `router.ts`, or `runWithSessionId` in the A2A/AG-UI session middleware), and the connection client's fetch in `agentcore-fetch.ts` stamps it on every outbound call — ensuring consistency for [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
 
 ## Infrastructure
+
+<Snippet name="connection/infra-project-prerequisite" />
 
 <Infrastructure>
 <Fragment slot="cdk">
