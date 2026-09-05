@@ -3,6 +3,7 @@ title: Quick Start Guide
 description: "A quick start on how to use @aws/nx-plugin."
 ---
 import { Steps } from '@astrojs/starlight/components';
+import Drawer from '@components/drawer.astro';
 import Link from '@components/link.astro';
 import Snippet from '@components/snippet.astro';
 import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
@@ -42,6 +43,8 @@ You will be prompted for your preferred infrastructure as code (IaC) provider, e
 <CreateNxWorkspaceCommand workspace="my-project" iac="terraform" />
 </Fragment>
 </Infrastructure>
+
+You are also prompted for the container engine used by generators which build container images. Accept the default (`infer`) to select Docker if it is installed, otherwise Finch.
 :::
 
 Once complete, navigate to the project directory:
@@ -122,8 +125,12 @@ Changes to both your website and API will be reflected in real-time as both the 
 Open `packages/infra/src/stacks/application-stack.ts` and add the following code:
 
 ```typescript
+import {
+  DemoApi,
+  DemoWebsite,
+  UserIdentity,
+} from '@my-project/common-constructs';
 import { Stack, StackProps } from 'aws-cdk-lib';
-import { DemoApi, DemoWebsite, UserIdentity } from '@my-project/common-constructs';
 import { Construct } from 'constructs';
 
 export class ApplicationStack extends Stack {
@@ -178,8 +185,8 @@ resource "aws_iam_policy" "api_invoke_policy" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect = "Allow"
-        Action = "execute-api:Invoke"
+        Effect   = "Allow"
+        Action   = "execute-api:Invoke"
         Resource = "${module.demo_api.api_execution_arn}/*/*"
       }
     ]
@@ -218,8 +225,8 @@ Next, run the following command to build your project:
 
 <PackageManagerShortCommand commands={["build"]} />
 
-:::tip[Fixing Lint Errors]
-If you encounter any lint errors, you can run the following command to automatically fix them.
+:::tip[Fixing Lint and Formatting Errors]
+If you encounter any lint or formatting errors, you can run the following command to automatically fix them.
 
 <PackageManagerShortCommand commands={["lint"]} />
 :::
@@ -279,6 +286,44 @@ This command will first run `terraform plan` to show you what changes will be ma
 </Steps>
 
 Your website will be available at `http://localhost:4200`, and will point to the resources you deployed for the API and authentication.
+
+To sign in, you will need to [create a user in the Cognito user pool](https://docs.aws.amazon.com/cognito/latest/developerguide/how-to-create-user-accounts.html).
+
+<Drawer title="Creating a user with the AWS CLI" trigger="Click here for instructions using the AWS CLI">
+
+The following command creates a user in a user pool. You can find the user pool id in your deployment outputs, or in the [Amazon Cognito console](https://console.aws.amazon.com/cognito/). Substitute values for username, email, first and last name, and the temporary password.
+
+```sh
+aws cognito-idp admin-create-user \
+  --user-pool-id <user pool id> \
+  --username <username> \
+  --user-attributes Name=email,Value=<email> Name=email_verified,Value=true Name=given_name,Value=<first name> Name=family_name,Value=<last name> \
+  --temporary-password '<temporary password>' \
+  --message-action SUPPRESS
+```
+
+The first time you sign in as this user you are prompted to choose a new password, then to set up multi-factor authentication with either a code sent by SMS or a time-based one time password from an authenticator app.
+
+</Drawer>
+
+Your website is also served from CloudFront. Open its distribution domain name (which is printed to your terminal after deployment) to use the version running entirely on AWS.
+
+## Step 6: Clean Up
+
+When you have finished, delete the resources you deployed to avoid ongoing costs:
+
+<Infrastructure>
+<Fragment slot="cdk">
+<NxCommands commands={['destroy-sandbox infra']} />
+</Fragment>
+<Fragment slot="terraform">
+<NxCommands commands={['destroy infra']} />
+</Fragment>
+</Infrastructure>
+
+:::note[Retained Resources]
+The Cognito user pool is created with deletion protection enabled, so it is not removed automatically. Delete it (and the IAM role Cognito uses to send SMS messages) manually if you no longer need them.
+:::
 
 ---
 

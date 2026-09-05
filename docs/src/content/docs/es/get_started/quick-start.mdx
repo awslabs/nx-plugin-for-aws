@@ -3,6 +3,7 @@ title: Guía de Inicio Rápido
 description: "Un inicio rápido sobre cómo usar @aws/nx-plugin."
 ---
 import { Steps } from '@astrojs/starlight/components';
+import Drawer from '@components/drawer.astro';
 import Link from '@components/link.astro';
 import Snippet from '@components/snippet.astro';
 import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
@@ -42,6 +43,8 @@ Se te pedirá tu proveedor preferido de infraestructura como código (IaC), ya s
 <CreateNxWorkspaceCommand workspace="my-project" iac="terraform" />
 </Fragment>
 </Infrastructure>
+
+También se te pedirá el motor de contenedores utilizado por los generadores que construyen imágenes de contenedores. Acepta el valor predeterminado (`infer`) para seleccionar Docker si está instalado, de lo contrario Finch.
 :::
 
 Una vez completado, navega al directorio del proyecto:
@@ -122,8 +125,12 @@ Los cambios tanto en tu sitio web como en la API se reflejarán en tiempo real y
 Abre `packages/infra/src/stacks/application-stack.ts` y agrega el siguiente código:
 
 ```typescript
+import {
+  DemoApi,
+  DemoWebsite,
+  UserIdentity,
+} from '@my-project/common-constructs';
 import { Stack, StackProps } from 'aws-cdk-lib';
-import { DemoApi, DemoWebsite, UserIdentity } from '@my-project/common-constructs';
 import { Construct } from 'constructs';
 
 export class ApplicationStack extends Stack {
@@ -178,8 +185,8 @@ resource "aws_iam_policy" "api_invoke_policy" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect = "Allow"
-        Action = "execute-api:Invoke"
+        Effect   = "Allow"
+        Action   = "execute-api:Invoke"
         Resource = "${module.demo_api.api_execution_arn}/*/*"
       }
     ]
@@ -218,8 +225,8 @@ A continuación, ejecuta el siguiente comando para construir tu proyecto:
 
 <PackageManagerShortCommand commands={["build"]} />
 
-:::tip[Corregir Errores de Lint]
-Si encuentras algún error de lint, puedes ejecutar el siguiente comando para corregirlos automáticamente.
+:::tip[Corregir Errores de Lint y Formato]
+Si encuentras algún error de lint o formato, puedes ejecutar el siguiente comando para corregirlos automáticamente.
 
 <PackageManagerShortCommand commands={["lint"]} />
 :::
@@ -279,6 +286,44 @@ Este comando primero ejecutará `terraform plan` para mostrarte qué cambios se 
 </Steps>
 
 Tu sitio web estará disponible en `http://localhost:4200`, y apuntará a los recursos que desplegaste para la API y la autenticación.
+
+Para iniciar sesión, necesitarás [crear un usuario en el grupo de usuarios de Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/how-to-create-user-accounts.html).
+
+<Drawer title="Crear un usuario con el AWS CLI" trigger="Haz clic aquí para ver las instrucciones usando el AWS CLI">
+
+El siguiente comando crea un usuario en un grupo de usuarios. Puedes encontrar el id del grupo de usuarios en las salidas de tu despliegue, o en la [consola de Amazon Cognito](https://console.aws.amazon.com/cognito/). Sustituye los valores para nombre de usuario, correo electrónico, nombre y apellido, y la contraseña temporal.
+
+```sh
+aws cognito-idp admin-create-user \
+  --user-pool-id <user pool id> \
+  --username <username> \
+  --user-attributes Name=email,Value=<email> Name=email_verified,Value=true Name=given_name,Value=<first name> Name=family_name,Value=<last name> \
+  --temporary-password '<temporary password>' \
+  --message-action SUPPRESS
+```
+
+La primera vez que inicies sesión como este usuario, se te pedirá que elijas una nueva contraseña, luego que configures la autenticación multifactor con un código enviado por SMS o una contraseña de un solo uso basada en tiempo desde una aplicación de autenticación.
+
+</Drawer>
+
+Tu sitio web también se sirve desde CloudFront. Abre el nombre de dominio de su distribución (que se imprime en tu terminal después del despliegue) para usar la versión que se ejecuta completamente en AWS.
+
+## Paso 6: Limpiar
+
+Cuando hayas terminado, elimina los recursos que desplegaste para evitar costos continuos:
+
+<Infrastructure>
+<Fragment slot="cdk">
+<NxCommands commands={['destroy-sandbox infra']} />
+</Fragment>
+<Fragment slot="terraform">
+<NxCommands commands={['destroy infra']} />
+</Fragment>
+</Infrastructure>
+
+:::note[Recursos Retenidos]
+El grupo de usuarios de Cognito se crea con protección contra eliminación habilitada, por lo que no se elimina automáticamente. Elimínalo (y el rol IAM que Cognito usa para enviar mensajes SMS) manualmente si ya no los necesitas.
+:::
 
 ---
 

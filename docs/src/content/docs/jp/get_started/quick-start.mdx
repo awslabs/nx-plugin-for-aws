@@ -3,6 +3,7 @@ title: クイックスタートガイド
 description: "@aws/nx-plugin の使用方法に関するクイックスタート。"
 ---
 import { Steps } from '@astrojs/starlight/components';
+import Drawer from '@components/drawer.astro';
 import Link from '@components/link.astro';
 import Snippet from '@components/snippet.astro';
 import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
@@ -42,6 +43,8 @@ import EmbeddedGraph from '@components/embedded-graph.astro';
 <CreateNxWorkspaceCommand workspace="my-project" iac="terraform" />
 </Fragment>
 </Infrastructure>
+
+また、コンテナイメージをビルドするジェネレーターで使用されるコンテナエンジンについても尋ねられます。デフォルト（`infer`）を受け入れると、Docker がインストールされている場合は Docker が選択され、そうでない場合は Finch が選択されます。
 :::
 
 完了したら、プロジェクトディレクトリに移動します：
@@ -122,8 +125,12 @@ cd my-project
 `packages/infra/src/stacks/application-stack.ts` を開き、以下のコードを追加します：
 
 ```typescript
+import {
+  DemoApi,
+  DemoWebsite,
+  UserIdentity,
+} from '@my-project/common-constructs';
 import { Stack, StackProps } from 'aws-cdk-lib';
-import { DemoApi, DemoWebsite, UserIdentity } from '@my-project/common-constructs';
 import { Construct } from 'constructs';
 
 export class ApplicationStack extends Stack {
@@ -178,8 +185,8 @@ resource "aws_iam_policy" "api_invoke_policy" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect = "Allow"
-        Action = "execute-api:Invoke"
+        Effect   = "Allow"
+        Action   = "execute-api:Invoke"
         Resource = "${module.demo_api.api_execution_arn}/*/*"
       }
     ]
@@ -218,8 +225,8 @@ module "demo_website" {
 
 <PackageManagerShortCommand commands={["build"]} />
 
-:::tip[Lint エラーの修正]
-Lint エラーが発生した場合は、以下のコマンドを実行して自動的に修正できます。
+:::tip[Lint とフォーマットエラーの修正]
+Lint またはフォーマットエラーが発生した場合は、以下のコマンドを実行して自動的に修正できます。
 
 <PackageManagerShortCommand commands={["lint"]} />
 :::
@@ -279,6 +286,44 @@ Terraform ブートストラップは、Terraform ステートファイルを保
 </Steps>
 
 ウェブサイトは `http://localhost:4200` で利用でき、API と認証用にデプロイしたリソースを指します。
+
+サインインするには、[Cognito ユーザープールでユーザーを作成する](https://docs.aws.amazon.com/cognito/latest/developerguide/how-to-create-user-accounts.html)必要があります。
+
+<Drawer title="AWS CLI でユーザーを作成する" trigger="AWS CLI を使用した手順についてはここをクリックしてください">
+
+以下のコマンドは、ユーザープールにユーザーを作成します。ユーザープール ID は、デプロイメント出力または [Amazon Cognito コンソール](https://console.aws.amazon.com/cognito/)で確認できます。ユーザー名、メール、名、姓、および一時パスワードの値を置き換えてください。
+
+```sh
+aws cognito-idp admin-create-user \
+  --user-pool-id <user pool id> \
+  --username <username> \
+  --user-attributes Name=email,Value=<email> Name=email_verified,Value=true Name=given_name,Value=<first name> Name=family_name,Value=<last name> \
+  --temporary-password '<temporary password>' \
+  --message-action SUPPRESS
+```
+
+このユーザーとして初めてサインインすると、新しいパスワードを選択するよう求められ、次に SMS で送信されるコードまたは認証アプリからの時間ベースのワンタイムパスワードを使用して多要素認証を設定するよう求められます。
+
+</Drawer>
+
+ウェブサイトは CloudFront からも提供されます。そのディストリビューションドメイン名（デプロイ後にターミナルに出力されます）を開いて、完全に AWS 上で実行されているバージョンを使用してください。
+
+## ステップ 6: クリーンアップ
+
+完了したら、継続的なコストを避けるためにデプロイしたリソースを削除します：
+
+<Infrastructure>
+<Fragment slot="cdk">
+<NxCommands commands={['destroy-sandbox infra']} />
+</Fragment>
+<Fragment slot="terraform">
+<NxCommands commands={['destroy infra']} />
+</Fragment>
+</Infrastructure>
+
+:::note[保持されるリソース]
+Cognito ユーザープールは削除保護が有効になった状態で作成されるため、自動的には削除されません。不要になった場合は、手動で削除してください（Cognito が SMS メッセージの送信に使用する IAM ロールも含む）。
+:::
 
 ---
 
