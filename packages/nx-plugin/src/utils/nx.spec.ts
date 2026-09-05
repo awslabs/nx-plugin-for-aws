@@ -11,6 +11,7 @@ import {
   addComponentGeneratorMetadata,
   addDependencyToTargetIfNotPresent,
   addGeneratorMetadata,
+  mergeTarget,
   mergeTargetDefault,
   type NxGeneratorInfo,
   normalizeTargetKeyOrder,
@@ -555,6 +556,88 @@ describe('addDependencyToTargetIfNotPresent', () => {
       '@e2e/website-no-router:build',
       '^build',
     ]);
+  });
+});
+
+describe('mergeTarget', () => {
+  it('should author the target when it does not exist', () => {
+    expect(
+      mergeTarget(undefined, { dependsOn: ['lint', 'compile', 'test'] }),
+    ).toEqual({ dependsOn: ['lint', 'compile', 'test'] });
+  });
+
+  it('should keep dependencies another generator added', () => {
+    expect(
+      mergeTarget(
+        { dependsOn: ['lint', 'compile', 'test', 'bundle'] },
+        { dependsOn: ['lint', 'compile', 'test'] },
+      ),
+    ).toEqual({ dependsOn: ['lint', 'compile', 'test', 'bundle'] });
+  });
+
+  it('should add a missing dependency without duplicating the existing ones', () => {
+    expect(
+      mergeTarget({ dependsOn: ['compile'] }, { dependsOn: ['compile'] }),
+    ).toEqual({ dependsOn: ['compile'] });
+    expect(
+      mergeTarget({ dependsOn: ['bundle'] }, { dependsOn: ['compile'] }),
+    ).toEqual({ dependsOn: ['bundle', 'compile'] });
+  });
+
+  it('should deduplicate object dependencies', () => {
+    expect(
+      mergeTarget(
+        { dependsOn: [{ projects: 'other', target: 'build' }] },
+        { dependsOn: [{ projects: ['other'], target: 'build' }] },
+      ).dependsOn,
+    ).toEqual([{ projects: 'other', target: 'build' }]);
+  });
+
+  it('should let the generator own every key other than dependsOn', () => {
+    expect(
+      mergeTarget(
+        {
+          executor: 'nx:noop',
+          cache: false,
+          options: { command: 'stale' },
+        },
+        {
+          executor: 'nx:run-commands',
+          outputs: ['{workspaceRoot}/dist/{projectRoot}/tsc'],
+          options: { command: 'tsc --build tsconfig.lib.json' },
+        },
+      ),
+    ).toEqual({
+      executor: 'nx:run-commands',
+      cache: false,
+      outputs: ['{workspaceRoot}/dist/{projectRoot}/tsc'],
+      options: { command: 'tsc --build tsconfig.lib.json' },
+    });
+  });
+
+  it('should serialize in the same key order whether authored or merged', () => {
+    const desired = {
+      executor: 'nx:run-commands',
+      dependsOn: ['compile'],
+      options: { command: 'rolldown -c rolldown.config.ts' },
+      cache: true,
+    };
+    expect(Object.keys(mergeTarget(undefined, desired))).toEqual(
+      Object.keys(mergeTarget(mergeTarget(undefined, desired), desired)),
+    );
+  });
+
+  it('should be idempotent when applied repeatedly', () => {
+    let target = mergeTarget(
+      { dependsOn: ['bundle'] },
+      {
+        dependsOn: ['compile'],
+      },
+    );
+    for (let i = 0; i < 5; i++) {
+      target = mergeTarget(target, { dependsOn: ['compile'] });
+    }
+    expect(target.dependsOn).toEqual(['bundle', 'compile']);
   });
 });
 
