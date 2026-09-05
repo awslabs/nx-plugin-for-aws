@@ -30,6 +30,7 @@ import {
 import { sortObjectKeys } from '../../utils/object.js';
 import {
   addNxPluginDependencies,
+  addNxPluginManifestAssets,
   configureNxPluginPackageJson,
   NX_PLUGIN_DEPENDENCIES,
   readNxPluginProject,
@@ -96,6 +97,9 @@ export const tsNxMigrationGenerator = async (
     'nx-migrations',
     { migrations: './migrations.json' },
   );
+
+  // migrations.json must reach the published tarball the package.json points at
+  addNxPluginManifestAssets(tree, plugin);
 
   // Migrations sit three levels below the source root, so in this repo the
   // shared utils are relative. Elsewhere they come from the SDK.

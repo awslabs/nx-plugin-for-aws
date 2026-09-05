@@ -210,6 +210,20 @@ describe('smoke test - nx-plugin', () => {
 
       // The scaffolded codemods must type-check against @nx/devkit
       await runCLI(`run ${project}:compile`, opts);
+
+      // `nx migrate <plugin>@latest` resolves the manifest the package.json
+      // points at from the published tarball, so it must reach dist.
+      await runCLI(`run ${project}:package`, opts);
+      expect(
+        existsSync(
+          join(projectRoot, 'dist/tools/plugin/package/migrations.json'),
+        ),
+      ).toBe(true);
+      expect(
+        existsSync(
+          join(projectRoot, 'dist/tools/plugin/package/generators.json'),
+        ),
+      ).toBe(true);
     },
     15 * 60 * 1000,
   );

@@ -9,7 +9,6 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import Drawer from '@components/drawer.astro';
 import LicenseAllowlist from '@components/license-allowlist.astro';
 import NxCommands from '@components/nx-commands.astro';
-import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 
 ワークスペース全体のライセンス管理：自分のコードの`LICENSE`ファイルとソースコードヘッダーを同期し（`license.source`）、すべての依存関係がライセンス許可リストに準拠しているかをチェックします（`license.dependencies`）。
 
@@ -45,7 +44,7 @@ import PackageManagerShortCommand from '@components/package-manager-short-comman
 
 [@aws/nx-plugin:license#sync]: Project LICENSE files are out of sync:
 - LICENSE
-- packages/<my-project>LICENSE
+- packages/<my-project>/LICENSE
 
 Project package.json files are out of sync:
 - package.json
@@ -348,7 +347,7 @@ export default {
 
 配線は、各プロジェクトの`lint`ターゲット上のクロスプロジェクト`dependsOn`で、ルートの`license-check`ターゲットを指します。lintまたはbuild中にチェックをスキップするには、`LICENSE_DEPENDENCY_CHECK=skip`環境変数を設定します：
 
-<PackageManagerShortCommand commands={["LICENSE_DEPENDENCY_CHECK=skip lint"]} />
+<NxCommands commands={['run-many --target lint --all']} env={{ LICENSE_DEPENDENCY_CHECK: 'skip' }} />
 
 ### 設定
 
@@ -381,7 +380,14 @@ export default {
 
 #### パッケージごとの例外
 
-チェックに失敗するパッケージには`exceptions`を使用します — ライセンスが許可リストにない場合、または検出可能なライセンスメタデータなしで出荷されている場合のいずれかです。`reason`フィールドは必須で、レビュアーが例外が付与された理由を確認できるようにします。
+チェックに失敗するパッケージには`exceptions`を使用します — ライセンスが許可リストにない場合、または検出可能なライセンスメタデータなしで出荷されている場合のいずれかです。
+
+各エントリは以下を受け入れます：
+
+- `package`（必須）：例外が適用されるパッケージ名
+- `reason`（必須）：例外が付与された理由。レビュアーが確認できるようにします
+- `version`（オプション）：例外を単一のバージョンに制限し、後のバージョンが再度チェックされるようにします
+- `spdx`（オプション）：メタデータでライセンスを宣言せずにライセンステキストを出荷するパッケージに対して、パッケージが宣言しているものとして扱うライセンス。これは以下の`onDependency`フックが報告するものです
 
 ```typescript
 exceptions: [
@@ -389,6 +395,7 @@ exceptions: [
     package: 'union',
     version: '0.5.0',
     reason: 'Package ships verbatim MIT text without declaring license',
+    spdx: 'MIT',
   },
 ];
 ```
@@ -397,7 +404,24 @@ exceptions: [
 
 #### コレクター
 
-コレクターは依存関係を検出し、ライセンスメタデータを抽出します。組み込みのコレクターは`npmCollector()`（`node_modules`をスキャン）と`pythonCollector()`（Python仮想環境をスキャン）です。licenseジェネレーターはデフォルトで`npmCollector()`を設定し、Pythonプロジェクトが存在する場合は`pythonCollector()`を追加します。
+コレクターは依存関係を検出し、ライセンスメタデータを抽出します。組み込みのコレクターは`npmCollector()`（`node_modules`をスキャン）と`pythonCollector()`（Python仮想環境をスキャン）で、どちらも`@aws/nx-plugin/sdk/license`からエクスポートされています。licenseジェネレーターはデフォルトで`npmCollector()`を設定し、Pythonプロジェクトが存在する場合は`pythonCollector()`を追加します。
+
+```typescript title="aws-nx-plugin.config.mts"
+import {
+  DEFAULT_LICENSE_ALLOWLIST,
+  npmCollector,
+  pythonCollector,
+} from '@aws/nx-plugin/sdk/license';
+
+export default {
+  license: {
+    dependencies: {
+      allow: DEFAULT_LICENSE_ALLOWLIST,
+      collectors: [npmCollector(), pythonCollector()],
+    },
+  },
+} satisfies AwsNxPluginConfig;
+```
 
 カスタムコレクターを実装するには、`LicenseCollector`インターフェースに準拠します：
 
@@ -443,6 +467,6 @@ export default {
 
 単一の実行でチェックを無効にするには、`LICENSE_DEPENDENCY_CHECK=skip`環境変数を設定します：
 
-<PackageManagerShortCommand commands={["LICENSE_DEPENDENCY_CHECK=skip lint"]} />
+<NxCommands commands={['run-many --target lint --all']} env={{ LICENSE_DEPENDENCY_CHECK: 'skip' }} />
 
 永続的に無効にするには、`aws-nx-plugin.config.mts`の設定から`license.dependencies`キーを削除します。また、`license`ジェネレーターを`--dependencyCheck=false`で再実行して、それなしでスキャフォールドすることもできます。

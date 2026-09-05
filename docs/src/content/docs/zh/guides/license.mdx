@@ -9,7 +9,6 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import Drawer from '@components/drawer.astro';
 import LicenseAllowlist from '@components/license-allowlist.astro';
 import NxCommands from '@components/nx-commands.astro';
-import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 
 管理工作区中的许可证：同步您自己代码的 `LICENSE` 文件和源代码头部（`license.source`），并检查每个依赖项是否符合许可证允许列表（`license.dependencies`）。
 
@@ -45,7 +44,7 @@ import PackageManagerShortCommand from '@components/package-manager-short-comman
 
 [@aws/nx-plugin:license#sync]: Project LICENSE files are out of sync:
 - LICENSE
-- packages/<my-project>LICENSE
+- packages/<my-project>/LICENSE
 
 Project package.json files are out of sync:
 - package.json
@@ -65,7 +64,7 @@ Yes, sync the changes and run the tasks
 No, run the tasks without syncing the changes
 ```
 
-选择 `Yes` 来同步更改。
+选择 `Yes` 以同步更改。
 
 :::note[审查更改]
 确保检查许可证同步生成器所做的更改并提交到版本控制，以确保任何持续集成构建任务不会因许可证不同步而失败。
@@ -348,7 +347,7 @@ export default {
 
 连接是每个项目的 `lint` 目标上的跨项目 `dependsOn`，指向根 `license-check` 目标。要在 lint 或 build 期间跳过检查，请设置 `LICENSE_DEPENDENCY_CHECK=skip` 环境变量：
 
-<PackageManagerShortCommand commands={["LICENSE_DEPENDENCY_CHECK=skip lint"]} />
+<NxCommands commands={['run-many --target lint --all']} env={{ LICENSE_DEPENDENCY_CHECK: 'skip' }} />
 
 ### 配置
 
@@ -381,7 +380,14 @@ export default {
 
 #### 每个包的例外
 
-对于检查失败的包使用 `exceptions`——要么是因为它们的许可证不在允许列表中，要么是因为它们没有可检测的许可证元数据。`reason` 字段是必需的，以便审查者可以看到为什么授予例外。
+对于检查失败的包使用 `exceptions`——要么是因为它们的许可证不在允许列表中，要么是因为它们没有可检测的许可证元数据。
+
+每个条目接受：
+
+- `package`（必需）：例外适用的包名称
+- `reason`（必需）：授予例外的原因，以便审查者可以看到
+- `version`（可选）：将例外限制为单个版本，以便再次检查更高版本
+- `spdx`（可选）：将包视为声明的许可证，用于在其元数据中未声明许可证文本的包。这是下面的 `onDependency` 钩子报告的内容
 
 ```typescript
 exceptions: [
@@ -389,6 +395,7 @@ exceptions: [
     package: 'union',
     version: '0.5.0',
     reason: 'Package ships verbatim MIT text without declaring license',
+    spdx: 'MIT',
   },
 ];
 ```
@@ -397,7 +404,24 @@ exceptions: [
 
 #### 收集器
 
-收集器发现依赖项并提取许可证元数据。内置收集器是 `npmCollector()`（扫描 `node_modules`）和 `pythonCollector()`（扫描 Python 虚拟环境）。许可证生成器默认配置 `npmCollector()`，并在存在 Python 项目时添加 `pythonCollector()`。
+收集器发现依赖项并提取许可证元数据。内置收集器是 `npmCollector()`（扫描 `node_modules`）和 `pythonCollector()`（扫描 Python 虚拟环境），两者都从 `@aws/nx-plugin/sdk/license` 导出。许可证生成器默认配置 `npmCollector()`，并在存在 Python 项目时添加 `pythonCollector()`。
+
+```typescript title="aws-nx-plugin.config.mts"
+import {
+  DEFAULT_LICENSE_ALLOWLIST,
+  npmCollector,
+  pythonCollector,
+} from '@aws/nx-plugin/sdk/license';
+
+export default {
+  license: {
+    dependencies: {
+      allow: DEFAULT_LICENSE_ALLOWLIST,
+      collectors: [npmCollector(), pythonCollector()],
+    },
+  },
+} satisfies AwsNxPluginConfig;
+```
 
 要实现自定义收集器，请符合 `LicenseCollector` 接口：
 
@@ -443,6 +467,6 @@ export default {
 
 要在单次运行中禁用检查，请设置 `LICENSE_DEPENDENCY_CHECK=skip` 环境变量：
 
-<PackageManagerShortCommand commands={["LICENSE_DEPENDENCY_CHECK=skip lint"]} />
+<NxCommands commands={['run-many --target lint --all']} env={{ LICENSE_DEPENDENCY_CHECK: 'skip' }} />
 
 要永久禁用，请从 `aws-nx-plugin.config.mts` 中的配置中删除 `license.dependencies` 键。您还可以使用 `--dependencyCheck=false` 重新运行 `license` 生成器以在没有它的情况下进行脚手架。
