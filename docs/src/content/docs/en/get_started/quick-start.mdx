@@ -42,6 +42,8 @@ You will be prompted for your preferred infrastructure as code (IaC) provider, e
 <CreateNxWorkspaceCommand workspace="my-project" iac="terraform" />
 </Fragment>
 </Infrastructure>
+
+You are also prompted for the container engine used by generators which build container images. Accept the default (`infer`) to select Docker if it is installed, otherwise Finch.
 :::
 
 Once complete, navigate to the project directory:
@@ -122,8 +124,12 @@ Changes to both your website and API will be reflected in real-time as both the 
 Open `packages/infra/src/stacks/application-stack.ts` and add the following code:
 
 ```typescript
+import {
+  DemoApi,
+  DemoWebsite,
+  UserIdentity,
+} from '@my-project/common-constructs';
 import { Stack, StackProps } from 'aws-cdk-lib';
-import { DemoApi, DemoWebsite, UserIdentity } from '@my-project/common-constructs';
 import { Construct } from 'constructs';
 
 export class ApplicationStack extends Stack {
@@ -178,8 +184,8 @@ resource "aws_iam_policy" "api_invoke_policy" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect = "Allow"
-        Action = "execute-api:Invoke"
+        Effect   = "Allow"
+        Action   = "execute-api:Invoke"
         Resource = "${module.demo_api.api_execution_arn}/*/*"
       }
     ]
@@ -218,8 +224,8 @@ Next, run the following command to build your project:
 
 <PackageManagerShortCommand commands={["build"]} />
 
-:::tip[Fixing Lint Errors]
-If you encounter any lint errors, you can run the following command to automatically fix them.
+:::tip[Fixing Lint and Formatting Errors]
+If you encounter any lint or formatting errors, you can run the following command to automatically fix them.
 
 <PackageManagerShortCommand commands={["lint"]} />
 :::
@@ -266,7 +272,28 @@ This command will first run `terraform plan` to show you what changes will be ma
 </Fragment>
 </Infrastructure>
 
-## Step 5: Test the Website with Deployed Cloud Resources
+## Step 5: Create a User
+
+Your website is protected by Amazon Cognito, and self sign-up is disabled by default, so create your first user in the user pool you deployed. You can find the user pool id in your deployment outputs, or in the [Amazon Cognito console](https://console.aws.amazon.com/cognito/):
+
+```sh
+aws cognito-idp admin-create-user \
+  --user-pool-id <user pool id> \
+  --username <username> \
+  --user-attributes Name=email,Value=<email> Name=email_verified,Value=true Name=given_name,Value=<first name> Name=family_name,Value=<last name> \
+  --temporary-password '<temporary password>' \
+  --message-action SUPPRESS
+```
+
+You can also create users from the **Users** tab of your user pool in the Cognito console.
+
+The first time you sign in as this user you are prompted to choose a new password, then to set up multi-factor authentication with either a code sent by SMS or a time-based one time password from an authenticator app.
+
+:::tip[Self Sign-Up]
+Run the <Link path="guides/react-website-auth">`ts#website#auth`</Link> generator with `--allowSignup=true` if you would prefer users to register themselves from the sign-in page rather than creating each user yourself.
+:::
+
+## Step 6: Test the Website with Deployed Cloud Resources
 
 <Steps>
 1. Fetch the `runtime-config.json` file:
@@ -278,7 +305,26 @@ This command will first run `terraform plan` to show you what changes will be ma
     <NxCommands commands={['serve demo-website']} />
 </Steps>
 
-Your website will be available at `http://localhost:4200`, and will point to the resources you deployed for the API and authentication.
+Your website will be available at `http://localhost:4200`, and will point to the resources you deployed for the API and authentication. Sign in with the user you created to see it in action.
+
+Your website is also served from CloudFront — open its distribution domain name to use the version running entirely on AWS.
+
+## Step 7: Clean Up
+
+When you have finished, delete the resources you deployed to avoid ongoing costs:
+
+<Infrastructure>
+<Fragment slot="cdk">
+<NxCommands commands={['destroy-sandbox infra']} />
+</Fragment>
+<Fragment slot="terraform">
+<NxCommands commands={['destroy infra']} />
+</Fragment>
+</Infrastructure>
+
+:::note[Retained Resources]
+The Cognito user pool is created with deletion protection enabled, so it is not removed automatically. Delete it (and the IAM role Cognito uses to send SMS messages) manually if you no longer need them.
+:::
 
 ---
 
