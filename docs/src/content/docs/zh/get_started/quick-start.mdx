@@ -42,6 +42,8 @@ import EmbeddedGraph from '@components/embedded-graph.astro';
 <CreateNxWorkspaceCommand workspace="my-project" iac="terraform" />
 </Fragment>
 </Infrastructure>
+
+系统还会提示您选择用于构建容器镜像的生成器所使用的容器引擎。接受默认值（`infer`）以在已安装 Docker 时选择 Docker，否则选择 Finch。
 :::
 
 完成后，导航到项目目录：
@@ -122,8 +124,12 @@ cd my-project
 打开 `packages/infra/src/stacks/application-stack.ts` 并添加以下代码：
 
 ```typescript
+import {
+  DemoApi,
+  DemoWebsite,
+  UserIdentity,
+} from '@my-project/common-constructs';
 import { Stack, StackProps } from 'aws-cdk-lib';
-import { DemoApi, DemoWebsite, UserIdentity } from '@my-project/common-constructs';
 import { Construct } from 'constructs';
 
 export class ApplicationStack extends Stack {
@@ -178,8 +184,8 @@ resource "aws_iam_policy" "api_invoke_policy" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect = "Allow"
-        Action = "execute-api:Invoke"
+        Effect   = "Allow"
+        Action   = "execute-api:Invoke"
         Resource = "${module.demo_api.api_execution_arn}/*/*"
       }
     ]
@@ -218,8 +224,8 @@ module "demo_website" {
 
 <PackageManagerShortCommand commands={["build"]} />
 
-:::tip[修复 Lint 错误]
-如果遇到任何 lint 错误，您可以运行以下命令自动修复它们。
+:::tip[修复 Lint 和格式化错误]
+如果遇到任何 lint 或格式化错误，您可以运行以下命令自动修复它们。
 
 <PackageManagerShortCommand commands={["lint"]} />
 :::
@@ -266,7 +272,28 @@ Terraform 引导会创建一个 S3 存储桶来存储您的 Terraform 状态文�
 </Fragment>
 </Infrastructure>
 
-## 步骤 5：使用已部署的云资源测试网站
+## 步骤 5：创建用户
+
+您的网站受 Amazon Cognito 保护，并且默认情况下禁用自助注册，因此请在您部署的用户池中创建您的第一个用户。您可以在部署输出中找到用户池 ID，或在 [Amazon Cognito 控制台](https://console.aws.amazon.com/cognito/)中找到：
+
+```sh
+aws cognito-idp admin-create-user \
+  --user-pool-id <user pool id> \
+  --username <username> \
+  --user-attributes Name=email,Value=<email> Name=email_verified,Value=true Name=given_name,Value=<first name> Name=family_name,Value=<last name> \
+  --temporary-password '<temporary password>' \
+  --message-action SUPPRESS
+```
+
+您还可以从 Cognito 控制台中用户池的 **Users** 选项卡创建用户。
+
+首次以该用户身份登录时，系统会提示您选择新密码，然后设置多因素身份验证，可以使用通过短信发送的代码或来自身份验证器应用程序的基于时间的一次性密码。
+
+:::tip[自助注册]
+如果您希望用户从登录页面自行注册，而不是自己创建每个用户，请使用 `--allowSignup=true` 运行 <Link path="guides/react-website-auth">`ts#website#auth`</Link> 生成器。
+:::
+
+## 步骤 6：使用已部署的云资源测试网站
 
 <Steps>
 1. 获取 `runtime-config.json` 文件：
@@ -278,7 +305,26 @@ Terraform 引导会创建一个 S3 存储桶来存储您的 Terraform 状态文�
     <NxCommands commands={['serve demo-website']} />
 </Steps>
 
-您的网站将在 `http://localhost:4200` 上可用，并将指向您为 API 和身份验证部署的资源。
+您的网站将在 `http://localhost:4200` 上可用，并将指向您为 API 和身份验证部署的资源。使用您创建的用户登录以查看其运行情况。
+
+您的网站也通过 CloudFront 提供服务 — 打开其分发域名以使用完全在 AWS 上运行的版本。
+
+## 步骤 7：清理
+
+完成后，删除您部署的资源以避免持续产生费用：
+
+<Infrastructure>
+<Fragment slot="cdk">
+<NxCommands commands={['destroy-sandbox infra']} />
+</Fragment>
+<Fragment slot="terraform">
+<NxCommands commands={['destroy infra']} />
+</Fragment>
+</Infrastructure>
+
+:::note[保留的资源]
+Cognito 用户池在创建时启用了删除保护，因此不会自动删除。如果您不再需要它们，请手动删除它（以及 Cognito 用于发送短信的 IAM 角色）。
+:::
 
 ---
 

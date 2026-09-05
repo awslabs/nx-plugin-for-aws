@@ -42,6 +42,8 @@ Vous serez invité à choisir votre fournisseur d'infrastructure en tant que cod
 <CreateNxWorkspaceCommand workspace="my-project" iac="terraform" />
 </Fragment>
 </Infrastructure>
+
+Vous serez également invité à choisir le moteur de conteneur utilisé par les générateurs qui construisent des images de conteneur. Acceptez la valeur par défaut (`infer`) pour sélectionner Docker s'il est installé, sinon Finch.
 :::
 
 Une fois terminé, naviguez vers le répertoire du projet :
@@ -122,8 +124,12 @@ Les modifications apportées à votre site web et à votre API seront reflétée
 Ouvrez `packages/infra/src/stacks/application-stack.ts` et ajoutez le code suivant :
 
 ```typescript
+import {
+  DemoApi,
+  DemoWebsite,
+  UserIdentity,
+} from '@my-project/common-constructs';
 import { Stack, StackProps } from 'aws-cdk-lib';
-import { DemoApi, DemoWebsite, UserIdentity } from '@my-project/common-constructs';
 import { Construct } from 'constructs';
 
 export class ApplicationStack extends Stack {
@@ -178,8 +184,8 @@ resource "aws_iam_policy" "api_invoke_policy" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect = "Allow"
-        Action = "execute-api:Invoke"
+        Effect   = "Allow"
+        Action   = "execute-api:Invoke"
         Resource = "${module.demo_api.api_execution_arn}/*/*"
       }
     ]
@@ -218,8 +224,8 @@ Ensuite, exécutez la commande suivante pour construire votre projet :
 
 <PackageManagerShortCommand commands={["build"]} />
 
-:::tip[Corriger les erreurs de lint]
-Si vous rencontrez des erreurs de lint, vous pouvez exécuter la commande suivante pour les corriger automatiquement.
+:::tip[Corriger les erreurs de lint et de formatage]
+Si vous rencontrez des erreurs de lint ou de formatage, vous pouvez exécuter la commande suivante pour les corriger automatiquement.
 
 <PackageManagerShortCommand commands={["lint"]} />
 :::
@@ -266,7 +272,28 @@ Cette commande exécutera d'abord `terraform plan` pour vous montrer quels chang
 </Fragment>
 </Infrastructure>
 
-## Étape 5 : Tester le site web avec les ressources cloud déployées
+## Étape 5 : Créer un utilisateur
+
+Votre site web est protégé par Amazon Cognito, et l'auto-inscription est désactivée par défaut, alors créez votre premier utilisateur dans le pool d'utilisateurs que vous avez déployé. Vous pouvez trouver l'identifiant du pool d'utilisateurs dans vos sorties de déploiement, ou dans la [console Amazon Cognito](https://console.aws.amazon.com/cognito/) :
+
+```sh
+aws cognito-idp admin-create-user \
+  --user-pool-id <user pool id> \
+  --username <username> \
+  --user-attributes Name=email,Value=<email> Name=email_verified,Value=true Name=given_name,Value=<first name> Name=family_name,Value=<last name> \
+  --temporary-password '<temporary password>' \
+  --message-action SUPPRESS
+```
+
+Vous pouvez également créer des utilisateurs à partir de l'onglet **Users** de votre pool d'utilisateurs dans la console Cognito.
+
+La première fois que vous vous connectez en tant que cet utilisateur, vous êtes invité à choisir un nouveau mot de passe, puis à configurer l'authentification multifacteur avec soit un code envoyé par SMS, soit un mot de passe à usage unique basé sur le temps provenant d'une application d'authentification.
+
+:::tip[Auto-inscription]
+Exécutez le générateur <Link path="guides/react-website-auth">`ts#website#auth`</Link> avec `--allowSignup=true` si vous préférez que les utilisateurs s'inscrivent eux-mêmes depuis la page de connexion plutôt que de créer chaque utilisateur vous-même.
+:::
+
+## Étape 6 : Tester le site web avec les ressources cloud déployées
 
 <Steps>
 1. Récupérez le fichier `runtime-config.json` :
@@ -278,7 +305,26 @@ Cette commande exécutera d'abord `terraform plan` pour vous montrer quels chang
     <NxCommands commands={['serve demo-website']} />
 </Steps>
 
-Votre site web sera disponible à l'adresse `http://localhost:4200` et pointera vers les ressources que vous avez déployées pour l'API et l'authentification.
+Votre site web sera disponible à l'adresse `http://localhost:4200` et pointera vers les ressources que vous avez déployées pour l'API et l'authentification. Connectez-vous avec l'utilisateur que vous avez créé pour le voir en action.
+
+Votre site web est également servi depuis CloudFront — ouvrez son nom de domaine de distribution pour utiliser la version fonctionnant entièrement sur AWS.
+
+## Étape 7 : Nettoyer
+
+Lorsque vous avez terminé, supprimez les ressources que vous avez déployées pour éviter les coûts continus :
+
+<Infrastructure>
+<Fragment slot="cdk">
+<NxCommands commands={['destroy-sandbox infra']} />
+</Fragment>
+<Fragment slot="terraform">
+<NxCommands commands={['destroy infra']} />
+</Fragment>
+</Infrastructure>
+
+:::note[Ressources conservées]
+Le pool d'utilisateurs Cognito est créé avec la protection contre la suppression activée, il n'est donc pas supprimé automatiquement. Supprimez-le (ainsi que le rôle IAM que Cognito utilise pour envoyer des messages SMS) manuellement si vous n'en avez plus besoin.
+:::
 
 ---
 

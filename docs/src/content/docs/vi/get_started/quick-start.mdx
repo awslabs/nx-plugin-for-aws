@@ -42,6 +42,8 @@ Bạn sẽ được nhắc chọn nhà cung cấp infrastructure as code (IaC) �
 <CreateNxWorkspaceCommand workspace="my-project" iac="terraform" />
 </Fragment>
 </Infrastructure>
+
+Bạn cũng sẽ được nhắc chọn container engine được sử dụng bởi các generators xây dựng container images. Chấp nhận giá trị mặc định (`infer`) để chọn Docker nếu nó đã được cài đặt, nếu không sẽ chọn Finch.
 :::
 
 Sau khi hoàn tất, di chuyển đến thư mục dự án:
@@ -122,8 +124,12 @@ Các thay đổi đối với cả website và API sẽ được phản ánh the
 Mở `packages/infra/src/stacks/application-stack.ts` và thêm đoạn mã sau:
 
 ```typescript
+import {
+  DemoApi,
+  DemoWebsite,
+  UserIdentity,
+} from '@my-project/common-constructs';
 import { Stack, StackProps } from 'aws-cdk-lib';
-import { DemoApi, DemoWebsite, UserIdentity } from '@my-project/common-constructs';
 import { Construct } from 'constructs';
 
 export class ApplicationStack extends Stack {
@@ -178,8 +184,8 @@ resource "aws_iam_policy" "api_invoke_policy" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect = "Allow"
-        Action = "execute-api:Invoke"
+        Effect   = "Allow"
+        Action   = "execute-api:Invoke"
         Resource = "${module.demo_api.api_execution_arn}/*/*"
       }
     ]
@@ -218,8 +224,8 @@ Tiếp theo, chạy lệnh sau để build dự án của bạn:
 
 <PackageManagerShortCommand commands={["build"]} />
 
-:::tip[Sửa Lỗi Lint]
-Nếu bạn gặp bất kỳ lỗi lint nào, bạn có thể chạy lệnh sau để tự động sửa chúng.
+:::tip[Sửa Lỗi Lint và Formatting]
+Nếu bạn gặp bất kỳ lỗi lint hoặc formatting nào, bạn có thể chạy lệnh sau để tự động sửa chúng.
 
 <PackageManagerShortCommand commands={["lint"]} />
 :::
@@ -266,7 +272,28 @@ Lệnh này sẽ chạy `terraform plan` trước để hiển thị những tha
 </Fragment>
 </Infrastructure>
 
-## Bước 5: Kiểm Tra Website với Cloud Resources Đã Triển Khai
+## Bước 5: Tạo User
+
+Website của bạn được bảo vệ bởi Amazon Cognito, và tính năng tự đăng ký bị vô hiệu hóa theo mặc định, vì vậy hãy tạo user đầu tiên của bạn trong user pool mà bạn đã triển khai. Bạn có thể tìm thấy user pool id trong deployment outputs của mình, hoặc trong [Amazon Cognito console](https://console.aws.amazon.com/cognito/):
+
+```sh
+aws cognito-idp admin-create-user \
+  --user-pool-id <user pool id> \
+  --username <username> \
+  --user-attributes Name=email,Value=<email> Name=email_verified,Value=true Name=given_name,Value=<first name> Name=family_name,Value=<last name> \
+  --temporary-password '<temporary password>' \
+  --message-action SUPPRESS
+```
+
+Bạn cũng có thể tạo users từ tab **Users** của user pool trong Cognito console.
+
+Lần đầu tiên bạn đăng nhập với user này, bạn sẽ được nhắc chọn mật khẩu mới, sau đó thiết lập xác thực đa yếu tố bằng mã được gửi qua SMS hoặc mật khẩu một lần dựa trên thời gian từ ứng dụng authenticator.
+
+:::tip[Tự Đăng Ký]
+Chạy generator <Link path="guides/react-website-auth">`ts#website#auth`</Link> với `--allowSignup=true` nếu bạn muốn users tự đăng ký từ trang đăng nhập thay vì tự tạo từng user.
+:::
+
+## Bước 6: Kiểm Tra Website với Cloud Resources Đã Triển Khai
 
 <Steps>
 1. Tải tệp `runtime-config.json`:
@@ -278,7 +305,26 @@ Lệnh này sẽ chạy `terraform plan` trước để hiển thị những tha
     <NxCommands commands={['serve demo-website']} />
 </Steps>
 
-Website của bạn sẽ có sẵn tại `http://localhost:4200`, và sẽ trỏ đến các tài nguyên bạn đã triển khai cho API và authentication.
+Website của bạn sẽ có sẵn tại `http://localhost:4200`, và sẽ trỏ đến các tài nguyên bạn đã triển khai cho API và authentication. Đăng nhập với user bạn đã tạo để xem nó hoạt động.
+
+Website của bạn cũng được phục vụ từ CloudFront — mở distribution domain name của nó để sử dụng phiên bản chạy hoàn toàn trên AWS.
+
+## Bước 7: Dọn Dẹp
+
+Khi bạn đã hoàn tất, hãy xóa các tài nguyên bạn đã triển khai để tránh chi phí liên tục:
+
+<Infrastructure>
+<Fragment slot="cdk">
+<NxCommands commands={['destroy-sandbox infra']} />
+</Fragment>
+<Fragment slot="terraform">
+<NxCommands commands={['destroy infra']} />
+</Fragment>
+</Infrastructure>
+
+:::note[Tài Nguyên Được Giữ Lại]
+Cognito user pool được tạo với tính năng bảo vệ xóa được bật, vì vậy nó không được xóa tự động. Hãy xóa nó (và IAM role mà Cognito sử dụng để gửi tin nhắn SMS) theo cách thủ công nếu bạn không còn cần chúng nữa.
+:::
 
 ---
 
