@@ -2,7 +2,7 @@
 title: Workspace
 description: Tài liệu tham khảo cho workspace
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { Aside, FileTree } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
@@ -29,6 +29,7 @@ Khi bạn tạo một workspace mới với `@aws/nx-plugin`, preset generator s
   - tsconfig.base.json Root TypeScript configuration
   - aws-nx-plugin.config.mts Nx Plugin for AWS configuration
   - .git-secrets/ Vendored git-secrets bash script for credential scanning
+  - .gitallowed Patterns git-secrets treats as false positives
   - .husky/ Git hooks
   - .mcp.json Nx Plugin for AWS MCP server configuration for Claude Code
   - .cursor/mcp.json ...and for Cursor
@@ -167,21 +168,26 @@ Các workspace mới được cấu hình với [Biome](https://biomejs.dev/) ch
 
 ### Git Secrets
 
-Các workspace mới bao gồm các pre-commit hook của [git-secrets](https://github.com/awslabs/git-secrets) quét các file được staged để tìm các mẫu credential của AWS trước mỗi commit. Điều này ngăn chặn việc vô tình commit các access key, secret key và các giá trị nhạy cảm khác.
+Các workspace được thiết lập với các pre-commit hook của [git-secrets](https://github.com/awslabs/git-secrets) quét các file được staged để tìm các mẫu credential của AWS trước mỗi commit. Điều này ngăn chặn việc vô tình commit các access key, secret key và các giá trị nhạy cảm khác.
+
+Script được vendored vào workspace tại `.git-secrets/git-secrets` và chạy bởi hook `.husky/pre-commit`, vì vậy không có gì cần cài đặt — nhưng nó không có trong `PATH` của bạn, vì vậy hãy gọi nó bằng đường dẫn thay vì dùng `git secrets`.
 
 #### Loại Bỏ False Positive
 
 Các mẫu trong git-secrets sử dụng [biểu thức chính quy tương thích egrep](https://github.com/awslabs/git-secrets#options-for-add). Nếu git-secrets chặn một commit không chứa credential thực:
 
 ```sh
-# Allow a specific regex pattern
-git secrets --add --allowed 'my-regex-pattern'
+# Allow a specific regex pattern (-a is the allowed flag)
+bash .git-secrets/git-secrets --add -a -- 'my-regex-pattern'
 
-# Allow a literal string (special characters are escaped)
-git secrets --add --allowed --literal 'my-literal+string'
+# Allow a literal string, escaping special characters (-l is the literal flag)
+bash .git-secrets/git-secrets --add -a -l -- 'my-literal+string'
+
+# List what is currently allowed
+git config --get-all secrets.allowed
 ```
 
-Bạn cũng có thể tạo một file `.gitallowed` ở root của repository với một regex tương thích egrep trên mỗi dòng (được chia sẻ với nhóm của bạn thông qua version control):
+Những cấu hình này được ghi lại trong git config cục bộ của bạn, vì vậy chúng chỉ áp dụng cho bản clone của riêng bạn. Để chia sẻ một suppression với nhóm của bạn, hãy thêm nó vào file `.gitallowed` ở root của repository — một regex tương thích egrep trên mỗi dòng, được khớp với `<path>:<line-number>:<line-contents>`:
 
 ```text title=".gitallowed"
 # Allow test fixtures

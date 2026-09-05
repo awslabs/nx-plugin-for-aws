@@ -2,7 +2,7 @@
 title: 워크스페이스
 description: 워크스페이스에 대한 참조 문서
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { Aside, FileTree } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
@@ -29,6 +29,7 @@ import GeneratorParameters from '@components/generator-parameters.astro';
   - tsconfig.base.json Root TypeScript configuration
   - aws-nx-plugin.config.mts Nx Plugin for AWS configuration
   - .git-secrets/ Vendored git-secrets bash script for credential scanning
+  - .gitallowed Patterns git-secrets treats as false positives
   - .husky/ Git hooks
   - .mcp.json Nx Plugin for AWS MCP server configuration for Claude Code
   - .cursor/mcp.json ...and for Cursor
@@ -167,21 +168,26 @@ Python 관점에서 이는 모노레포의 루트에 단일 `.venv`가 있고 �
 
 ### Git Secrets
 
-새 워크스페이스에는 각 커밋 전에 스테이징된 파일에서 AWS 자격 증명 패턴을 스캔하는 [git-secrets](https://github.com/awslabs/git-secrets) 사전 커밋 훅이 포함되어 있습니다. 이는 액세스 키, 시크릿 키 및 기타 민감한 값을 실수로 커밋하는 것을 방지합니다.
+워크스페이스는 각 커밋 전에 스테이징된 파일에서 AWS 자격 증명 패턴을 스캔하는 [git-secrets](https://github.com/awslabs/git-secrets) 사전 커밋 훅으로 설정됩니다. 이는 액세스 키, 시크릿 키 및 기타 민감한 값을 실수로 커밋하는 것을 방지합니다.
+
+스크립트는 `.git-secrets/git-secrets`에 워크스페이스에 포함되어 있으며 `.husky/pre-commit` 훅에 의해 실행되므로 설치할 것이 없습니다. 하지만 `PATH`에 없으므로 `git secrets`가 아닌 경로로 호출하세요.
 
 #### 거짓 양성 억제
 
 git-secrets의 패턴은 [egrep 호환 정규 표현식](https://github.com/awslabs/git-secrets#options-for-add)을 사용합니다. git-secrets가 실제 자격 증명을 포함하지 않는 커밋을 차단하는 경우:
 
 ```sh
-# Allow a specific regex pattern
-git secrets --add --allowed 'my-regex-pattern'
+# Allow a specific regex pattern (-a is the allowed flag)
+bash .git-secrets/git-secrets --add -a -- 'my-regex-pattern'
 
-# Allow a literal string (special characters are escaped)
-git secrets --add --allowed --literal 'my-literal+string'
+# Allow a literal string, escaping special characters (-l is the literal flag)
+bash .git-secrets/git-secrets --add -a -l -- 'my-literal+string'
+
+# List what is currently allowed
+git config --get-all secrets.allowed
 ```
 
-리포지토리 루트에 `.gitallowed` 파일을 생성하여 한 줄에 하나의 egrep 호환 정규식을 작성할 수도 있습니다(버전 관리를 통해 팀과 공유됨):
+이들은 로컬 git 구성에 기록되므로 자신의 클론에만 적용됩니다. 팀과 억제를 공유하려면 대신 리포지토리 루트의 `.gitallowed` 파일에 추가하세요. 한 줄에 하나의 egrep 호환 정규식을 작성하며, `<path>:<line-number>:<line-contents>`와 일치합니다:
 
 ```text title=".gitallowed"
 # Allow test fixtures
@@ -220,4 +226,3 @@ export default {
 <Link path="guides/license">license 제너레이터</Link>는 자체 동작을 구성하기 위해 이 동일한 파일에 `license` 키를 추가합니다.
 
 언제든지 모든 설정을 편집할 수 있으며, 이후 제너레이터 실행 시 새 값을 선택합니다.
-

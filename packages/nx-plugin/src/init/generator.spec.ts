@@ -2,7 +2,13 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { readJson, readNxJson, type Tree, updateNxJson } from '@nx/devkit';
+import {
+  readJson,
+  readNxJson,
+  type Tree,
+  updateJson,
+  updateNxJson,
+} from '@nx/devkit';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
 import yaml from 'js-yaml';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -142,6 +148,60 @@ describe('init generator', () => {
     await initGenerator(tree, { iac: 'cdk', containers: 'docker' });
     const base = readJson(tree, 'tsconfig.base.json');
     expect(base.compilerOptions.module).toBe('commonjs');
+  });
+
+  it('should set up the git-secrets pre-commit hook', async () => {
+    await initGenerator(tree, { iac: 'cdk', containers: 'docker' });
+
+    expect(tree.exists('.git-secrets/git-secrets')).toBe(true);
+    expect(tree.read('.husky/pre-commit', 'utf-8')).toContain(
+      '--pre_commit_hook',
+    );
+    expect(tree.read('.gitallowed', 'utf-8')).toContain(
+      '.git-secrets/git-secrets:',
+    );
+    const packageJson = readJson(tree, 'package.json');
+    expect(packageJson.scripts.prepare).toContain('husky');
+    expect(packageJson.devDependencies.husky).toBeDefined();
+  });
+
+  it('should not set up git-secrets when gitSecrets is false', async () => {
+    await initGenerator(tree, {
+      iac: 'cdk',
+      containers: 'docker',
+      gitSecrets: false,
+    });
+
+    expect(tree.exists('.git-secrets/git-secrets')).toBe(false);
+    expect(tree.exists('.husky/pre-commit')).toBe(false);
+    expect(tree.exists('.gitallowed')).toBe(false);
+  });
+
+  it('should preserve a pre-existing pre-commit hook and prepare script', async () => {
+    // An existing workspace commonly has its own hooks; init must not clobber
+    // them, so it reports what to add instead.
+    tree.write('.husky/pre-commit', 'pnpm my-own-checks\n');
+    updateJson(tree, 'package.json', (json) => ({
+      ...json,
+      scripts: { ...json.scripts, prepare: 'my-own-setup' },
+    }));
+
+    await initGenerator(tree, { iac: 'cdk', containers: 'docker' });
+
+    expect(tree.read('.husky/pre-commit', 'utf-8')).toBe(
+      'pnpm my-own-checks\n',
+    );
+    expect(readJson(tree, 'package.json').scripts.prepare).toBe('my-own-setup');
+  });
+
+  it('should preserve allowlist entries the user has added', async () => {
+    tree.write('.gitallowed', 'tests/fixtures/.*\n');
+
+    await initGenerator(tree, { iac: 'cdk', containers: 'docker' });
+
+    const gitallowed = tree.read('.gitallowed', 'utf-8') ?? '';
+    expect(gitallowed).toContain('tests/fixtures/.*');
+    expect(gitallowed).toContain('.git-secrets/git-secrets:');
   });
 
   it('should be idempotent when re-run', async () => {

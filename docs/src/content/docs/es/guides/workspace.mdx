@@ -2,7 +2,7 @@
 title: Workspace
 description: Documentación de referencia para workspaces
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { Aside, FileTree } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
@@ -29,6 +29,7 @@ Cuando creas un nuevo workspace con `@aws/nx-plugin`, el generador preset config
   - tsconfig.base.json Root TypeScript configuration
   - aws-nx-plugin.config.mts Nx Plugin for AWS configuration
   - .git-secrets/ Vendored git-secrets bash script for credential scanning
+  - .gitallowed Patterns git-secrets treats as false positives
   - .husky/ Git hooks
   - .mcp.json Nx Plugin for AWS MCP server configuration for Claude Code
   - .cursor/mcp.json ...and for Cursor
@@ -167,21 +168,26 @@ Los nuevos workspaces están configurados con [Biome](https://biomejs.dev/) para
 
 ### Git Secrets
 
-Los nuevos workspaces incluyen hooks pre-commit de [git-secrets](https://github.com/awslabs/git-secrets) que escanean archivos preparados en busca de patrones de credenciales de AWS antes de cada commit. Esto previene la confirmación accidental de claves de acceso, claves secretas y otros valores sensibles.
+Los workspaces están configurados con hooks pre-commit de [git-secrets](https://github.com/awslabs/git-secrets) que escanean archivos preparados en busca de patrones de credenciales de AWS antes de cada commit. Esto previene la confirmación accidental de claves de acceso, claves secretas y otros valores sensibles.
+
+El script está incluido en el workspace en `.git-secrets/git-secrets` y es ejecutado por el hook `.husky/pre-commit`, por lo que no hay nada que instalar — pero no está en tu `PATH`, así que invócalo por ruta en lugar de como `git secrets`.
 
 #### Suprimir Falsos Positivos
 
 Los patrones en git-secrets usan [expresiones regulares compatibles con egrep](https://github.com/awslabs/git-secrets#options-for-add). Si git-secrets bloquea un commit que no contiene credenciales reales:
 
 ```sh
-# Allow a specific regex pattern
-git secrets --add --allowed 'my-regex-pattern'
+# Allow a specific regex pattern (-a is the allowed flag)
+bash .git-secrets/git-secrets --add -a -- 'my-regex-pattern'
 
-# Allow a literal string (special characters are escaped)
-git secrets --add --allowed --literal 'my-literal+string'
+# Allow a literal string, escaping special characters (-l is the literal flag)
+bash .git-secrets/git-secrets --add -a -l -- 'my-literal+string'
+
+# List what is currently allowed
+git config --get-all secrets.allowed
 ```
 
-También puedes crear un archivo `.gitallowed` en la raíz del repositorio con una regex compatible con egrep por línea (compartida con tu equipo a través del control de versiones):
+Estos se registran en tu configuración local de git, por lo que se aplican solo a tu propio clon. Para compartir una supresión con tu equipo, agrégala al archivo `.gitallowed` en la raíz del repositorio en su lugar — una regex compatible con egrep por línea, comparada contra `<path>:<line-number>:<line-contents>`:
 
 ```text title=".gitallowed"
 # Allow test fixtures
