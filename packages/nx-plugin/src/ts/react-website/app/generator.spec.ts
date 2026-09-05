@@ -1160,8 +1160,7 @@ describe('react-website generator ux tests', () => {
       );
       expect(packageJson.dependencies).toMatchObject({
         'class-variance-authority': expect.any(String),
-        clsx: expect.any(String),
-        'tailwind-merge': expect.any(String),
+        cn: expect.any(String),
         'tw-animate-css': expect.any(String),
         'lucide-react': expect.any(String),
         'radix-ui': expect.any(String),
