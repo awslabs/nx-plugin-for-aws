@@ -437,14 +437,46 @@ export const emitCommands = (
   return commands;
 };
 
+/** One line of the script, ready to run, with what it does and where it came from. */
+export interface ScriptLine {
+  readonly command: string;
+  /** What the command does. The `cd` following a workspace create has none. */
+  readonly comment?: string;
+  readonly nodeId?: string;
+  readonly edgeId?: string;
+}
+
 /**
- * The emitted commands as a copyable shell script: the workspace command, then a
- * `cd` into it, then each generator command prefixed for the chosen package
- * manager and run non-interactively.
+ * The emitted commands as runnable script lines: the workspace command, a `cd`
+ * into it, then each generator command prefixed for the package manager and run
+ * non-interactively.
  *
- * `skipWorkspace` drops the workspace-create and `cd` lines, emitting only the
- * generator commands — for a page that has already had the reader create the
- * workspace, so the copied commands run straight inside it.
+ * `skipWorkspace` drops the first two, for a page whose reader has already
+ * created the workspace.
+ */
+export const toScriptLines = (
+  graph: Graph,
+  options: EmitOptions,
+  { skipWorkspace }: { skipWorkspace?: boolean } = {},
+): ScriptLine[] => {
+  const [create, ...rest] = emitCommands(graph, options);
+  const workspace = kebabCase(options.workspace) || 'my-project';
+
+  return [
+    ...(skipWorkspace ? [] : [create, { command: `cd ${workspace}` }]),
+    ...rest.map((command) => ({
+      ...command,
+      command: buildPackageManagerExecCommand(
+        options.packageManager,
+        `${command.command} --no-interactive`,
+      ),
+    })),
+  ];
+};
+
+/**
+ * The script as copyable text, one command per line, optionally with a comment
+ * above each saying what it does.
  */
 export const toScript = (
   graph: Graph,
@@ -454,28 +486,14 @@ export const toScript = (
     skipWorkspace,
   }: { annotate?: boolean; skipWorkspace?: boolean } = {},
 ): string => {
-  const commands = emitCommands(graph, options);
-  const [create, ...rest] = commands;
-  const workspace = kebabCase(options.workspace) || 'my-project';
-
   const lines: string[] = [];
-  if (!skipWorkspace) {
-    if (annotate) lines.push(`# ${create.comment}`);
-    lines.push(create.command);
-    lines.push(`cd ${workspace}`);
+  for (const line of toScriptLines(graph, options, { skipWorkspace })) {
+    if (annotate && line.comment) {
+      // Blank line between annotated commands, but not above the first.
+      if (lines.length > 0) lines.push('');
+      lines.push(`# ${line.comment}`);
+    }
+    lines.push(line.command);
   }
-
-  for (const command of rest) {
-    if (annotate) lines.push('', `# ${command.comment}`);
-    lines.push(
-      buildPackageManagerExecCommand(
-        options.packageManager,
-        `${command.command} --no-interactive`,
-      ),
-    );
-  }
-
-  // With the workspace lines dropped, the first command would otherwise be
-  // preceded by a leading blank line from the annotation spacing.
-  return lines.join('\n').replace(/^\n/, '');
+  return lines.join('\n');
 };

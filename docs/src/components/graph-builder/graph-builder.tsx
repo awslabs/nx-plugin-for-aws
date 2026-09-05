@@ -350,6 +350,19 @@ export const GraphBuilder = () => {
     [commit, orientation],
   );
 
+  // A `?preset=` in the URL opens the builder on that example, so a page showing
+  // one can hand it over to be edited. Only on the first run — the canvas reports
+  // its width in its own mount effect, which flushes before this one, so the
+  // preset is laid out to fit, and a later orientation swap must not reload it
+  // over whatever the user has since built.
+  const urlPresetHandled = useRef(false);
+  useEffect(() => {
+    if (urlPresetHandled.current) return;
+    urlPresetHandled.current = true;
+    const requested = new URLSearchParams(window.location.search).get('preset');
+    if (requested) loadPreset(requested);
+  }, [loadPreset]);
+
   // Stable identity, so the canvas's resize observer isn't torn down and
   // re-established on every render.
   const handleCanvasResize = useCallback((width: number) => {
