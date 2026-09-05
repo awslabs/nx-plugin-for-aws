@@ -550,6 +550,45 @@ describe('ts#rdb generator', () => {
     expect(updatedProjectJson.targets['bundle']).toBeDefined();
   });
 
+  it.each(['cdk', 'terraform'] as const)(
+    'should build and scan the migration image when iac is %s',
+    async (iac) => {
+      await tsRdbGenerator(tree, { ...defaultOptions, iac });
+
+      const projectConfig = readProjectConfigurationUnqualified(
+        tree,
+        '@proj/db',
+      );
+
+      expect(projectConfig.targets['docker'].options.command).toContain(
+        '-t proj-db-migration:latest',
+      );
+      expect(projectConfig.targets['trivy'].dependsOn).toEqual(['docker']);
+      expect(tree.exists('packages/db/.trivyignore')).toBe(true);
+
+      // The prisma CLI the image installs to run migrations resolves two of its
+      // own dependencies below their fixes, so the build overrides them rather
+      // than suppressing the findings.
+      const dockerfile = tree.read('packages/db/Dockerfile', 'utf-8');
+      expect(dockerfile).toContain(
+        `npm pkg set "overrides.deepmerge-ts=${TS_VERSIONS['deepmerge-ts']}"`,
+      );
+      expect(dockerfile).toContain(
+        `npm pkg set "overrides.mysql2=${TS_VERSIONS.mysql2}"`,
+      );
+    },
+  );
+
+  it('should not add image targets when no infrastructure is generated', async () => {
+    await tsRdbGenerator(tree, { ...defaultOptions, infra: 'none' });
+
+    const projectConfig = readProjectConfigurationUnqualified(tree, '@proj/db');
+
+    expect(projectConfig.targets['docker']).toBeUndefined();
+    expect(projectConfig.targets['trivy']).toBeUndefined();
+    expect(tree.exists('packages/db/.trivyignore')).toBe(false);
+  });
+
   it('should place the project in a subDirectory when provided', async () => {
     await tsRdbGenerator(tree, { ...defaultOptions, subDirectory: 'nested' });
 

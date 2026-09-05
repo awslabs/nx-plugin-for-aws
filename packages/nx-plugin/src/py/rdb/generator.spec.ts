@@ -266,12 +266,46 @@ describe('py#rdb generator', () => {
     );
   });
 
+  it.each(['cdk', 'terraform'] as const)(
+    'should build and scan both images when iac is %s',
+    async (iac) => {
+      await pyRdbGenerator(tree, { ...defaultOptions, iac });
+
+      const projectConfig = readProjectConfigurationUnqualified(
+        tree,
+        'proj.db',
+      );
+
+      expect(projectConfig.targets['docker'].options.commands).toEqual([
+        expect.stringContaining('-t proj-db-migration:latest'),
+        expect.stringContaining('-t proj-db-create-db-user:latest'),
+      ]);
+      expect(projectConfig.targets['trivy'].dependsOn).toEqual(['docker']);
+      expect(tree.exists('packages/db/.trivyignore')).toBe(true);
+
+      // pip's vendored msgpack and setuptools carry HIGH findings, and nothing
+      // installs packages at runtime, so both images drop pip rather than
+      // suppressing the findings.
+      for (const dockerfile of [
+        'Dockerfile.migration',
+        'Dockerfile.create-db-user',
+      ]) {
+        expect(tree.read(`packages/db/${dockerfile}`, 'utf-8')).toContain(
+          'rm -rf /var/lang/lib/python*/site-packages/pip',
+        );
+      }
+    },
+  );
+
   it('should generate local database support without infrastructure', async () => {
     await pyRdbGenerator(tree, { ...defaultOptions, infra: 'none' });
 
     const projectConfig = readProjectConfigurationUnqualified(tree, 'proj.db');
     expect(projectConfig.targets['bundle-migration']).toBeUndefined();
     expect(projectConfig.targets['bundle-create-db-user']).toBeUndefined();
+    expect(projectConfig.targets['docker']).toBeUndefined();
+    expect(projectConfig.targets['trivy']).toBeUndefined();
+    expect(tree.exists('packages/db/.trivyignore')).toBe(false);
     expect(projectConfig.targets.dev).toBeDefined();
     expect(projectConfig.targets.migrate).toBeDefined();
     expect(tree.exists('packages/common/constructs')).toBe(false);

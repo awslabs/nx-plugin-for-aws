@@ -24,6 +24,12 @@ export const TS_VERSIONS = {
   // as fixed. Overriding brace-expansion directly is not viable — 5.x drops the
   // CommonJS default export that minimatch 9 calls.
   minimatch: '10.2.6',
+  // Both overridden in the vended RDB migration image build, which installs the
+  // prisma CLI to run migrations: its own ranges resolve deepmerge-ts below the
+  // CVE-2026-40345 fix (HIGH) and mysql2 below the GHSA-3f6p-5ww8-9rcr fix
+  // (HIGH). Neither is imported by the handler, which drives the schema engine.
+  'deepmerge-ts': '8.0.0',
+  mysql2: '3.22.0',
   '@aws-sdk/client-dynamodb': '3.1121.0',
   '@aws-sdk/client-api-gateway': '3.1121.0',
   '@aws-sdk/client-iam': '3.1121.0',

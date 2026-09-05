@@ -125,8 +125,8 @@ Para controle mais refinado, você pode usar o target `watch-generate:<ApiName>-
 />
 :::
 
-:::warning[Dependência do File Watcher]
-`watch-generate:<ApiName>-client` depende do comando [`nx watch`](https://nx.dev/docs/guides/tasks--caching/workspace-watching), que requer que o [Nx Daemon](https://nx.dev/docs/concepts/nx-daemon) esteja em execução. Portanto, se você desabilitou o daemon, o cliente não será regenerado automaticamente ao fazer alterações em seu FastAPI.
+:::note[O target dev requer o Nx Daemon]
+O target `dev` faz hot-reload de servidores de desenvolvimento locais. Muitos deles dependem do [`nx watch`](https://nx.dev/docs/guides/tasks--caching/workspace-watching) para conseguir isso, o que requer que o [Nx Daemon](https://nx.dev/docs/concepts/nx-daemon) esteja habilitado.
 :::
 
 ### Usando o Hook da API
@@ -146,12 +146,14 @@ function MyComponent() {
   const api = useMyApi();
   const item = useQuery(api.getItem.queryOptions({ itemId: 'some-id' }));
 
-  if (item.isLoading) return <div>Loading...</div>;
-  if (item.isError) return <div>Error: {item.error.message}</div>;
+  if (item.isPending) return <div>Loading...</div>;
+  if (item.isError) return <div>Error: {JSON.stringify(item.error.error)}</div>;
 
   return <div>Item: {item.data.name}</div>;
 }
 ```
+
+O erro é uma união discriminada de objetos `{ status, error }` em vez de um `Error`, então não há `message` de nível superior para renderizar. Restrinja em `status` para ler um corpo de resposta específico — veja [Tratamento de Erros](#tratamento-de-erros) abaixo.
 
 <Drawer title="Usando o cliente de API diretamente" trigger="Clique aqui para um exemplo usando o cliente vanilla diretamente.">
 ```tsx {5,13}
@@ -222,7 +224,7 @@ function CreateItemForm() {
 
       {createItem.isError && (
         <div className="error">
-          Error: {createItem.error.message}
+          Error: {JSON.stringify(createItem.error.error)}
         </div>
       )}
     </form>
@@ -370,12 +372,12 @@ function ItemList() {
       }),
   });
 
-  if (items.isLoading) {
+  if (items.isPending) {
     return <LoadingSpinner />;
   }
 
   if (items.isError) {
-    return <ErrorMessage message={items.error.message} />;
+    return <ErrorMessage message={JSON.stringify(items.error.error)} />;
   }
 
   return (

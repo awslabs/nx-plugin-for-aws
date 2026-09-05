@@ -126,6 +126,10 @@ React 애플리케이션과 Smithy API를 함께 적극적으로 작업하는 �
 />
 :::
 
+:::note[dev 타겟은 Nx Daemon이 필요합니다]
+`dev` 타겟은 로컬 개발 서버를 핫 리로드합니다. 이들 중 많은 것들이 이를 달성하기 위해 [`nx watch`](https://nx.dev/docs/guides/tasks--caching/workspace-watching)에 의존하며, 이는 [Nx Daemon](https://nx.dev/docs/concepts/nx-daemon)이 활성화되어 있어야 합니다.
+:::
+
 ### API 훅 사용
 
 생성기는 TanStack Query로 API를 호출하는 데 사용할 수 있는 `use<ApiName>` 훅을 제공합니다.
@@ -143,12 +147,14 @@ function MyComponent() {
   const api = useMyApi();
   const item = useQuery(api.getItem.queryOptions({ itemId: 'some-id' }));
 
-  if (item.isLoading) return <div>Loading...</div>;
-  if (item.isError) return <div>Error: {item.error.message}</div>;
+  if (item.isPending) return <div>Loading...</div>;
+  if (item.isError) return <div>Error: {JSON.stringify(item.error.error)}</div>;
 
   return <div>Item: {item.data.name}</div>;
 }
 ```
+
+오류는 `Error`가 아니라 `{ status, error }` 객체의 판별된 유니온이므로 렌더링할 최상위 `message`가 없습니다. 특정 응답 본문을 읽으려면 `status`로 좁히세요 — 아래 [오류 처리](#error-handling)를 참조하세요.
 
 <Drawer title="API 클라이언트를 직접 사용" trigger="바닐라 클라이언트를 직접 사용하는 예시를 보려면 여기를 클릭하세요.">
 ```tsx {5,13}
@@ -219,7 +225,7 @@ function CreateItemForm() {
 
       {createItem.isError && (
         <div className="error">
-          Error: {createItem.error.message}
+          Error: {JSON.stringify(createItem.error.error)}
         </div>
       )}
     </form>
@@ -331,12 +337,12 @@ function ItemList() {
       }),
   });
 
-  if (items.isLoading) {
+  if (items.isPending) {
     return <LoadingSpinner />;
   }
 
   if (items.isError) {
-    return <ErrorMessage message={items.error.message} />;
+    return <ErrorMessage message={JSON.stringify(items.error.error)} />;
   }
 
   return (

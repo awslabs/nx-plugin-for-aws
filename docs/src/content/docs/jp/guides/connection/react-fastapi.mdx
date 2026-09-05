@@ -125,8 +125,8 @@ ReactアプリケーションとFastAPIの両方を積極的に開発してい�
 />
 :::
 
-:::warning[ファイルウォッチャーの依存関係]
-`watch-generate:<ApiName>-client`は[`nx watch`](https://nx.dev/docs/guides/tasks--caching/workspace-watching)コマンドに依存しており、[Nx Daemon](https://nx.dev/docs/concepts/nx-daemon)が実行されている必要があります。したがって、デーモンを無効にしている場合、FastAPIに変更を加えてもクライアントは自動的に再生成されません。
+:::note[devターゲットにはNx Daemonが必要です]
+`dev`ターゲットはローカル開発サーバーをホットリロードします。これらの多くは[`nx watch`](https://nx.dev/docs/guides/tasks--caching/workspace-watching)に依存しており、[Nx Daemon](https://nx.dev/docs/concepts/nx-daemon)が有効になっている必要があります。
 :::
 
 ### APIフックの使用
@@ -146,12 +146,14 @@ function MyComponent() {
   const api = useMyApi();
   const item = useQuery(api.getItem.queryOptions({ itemId: 'some-id' }));
 
-  if (item.isLoading) return <div>Loading...</div>;
-  if (item.isError) return <div>Error: {item.error.message}</div>;
+  if (item.isPending) return <div>Loading...</div>;
+  if (item.isError) return <div>Error: {JSON.stringify(item.error.error)}</div>;
 
   return <div>Item: {item.data.name}</div>;
 }
 ```
+
+エラーは`Error`ではなく`{ status, error }`オブジェクトの判別共用体であるため、レンダリングするトップレベルの`message`はありません。特定のレスポンスボディを読み取るには、`status`で絞り込んでください。詳細は以下の[エラーハンドリング](#エラーハンドリング)を参照してください。
 
 <Drawer title="APIクライアントを直接使用する" trigger="バニラクライアントを直接使用する例はこちらをクリックしてください。">
 ```tsx {5,13}
@@ -222,7 +224,7 @@ function CreateItemForm() {
 
       {createItem.isError && (
         <div className="error">
-          Error: {createItem.error.message}
+          Error: {JSON.stringify(createItem.error.error)}
         </div>
       )}
     </form>
@@ -370,12 +372,12 @@ function ItemList() {
       }),
   });
 
-  if (items.isLoading) {
+  if (items.isPending) {
     return <LoadingSpinner />;
   }
 
   if (items.isError) {
-    return <ErrorMessage message={items.error.message} />;
+    return <ErrorMessage message={JSON.stringify(items.error.error)} />;
   }
 
   return (
