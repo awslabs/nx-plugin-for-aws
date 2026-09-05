@@ -252,6 +252,22 @@ export const PRESETS: readonly Preset[] = [
   },
 ];
 
+/**
+ * The presets the landing page's showcase cycles through, in the order it shows
+ * them: a spread of what the plugin builds, opening on the tutorial's workspace.
+ *
+ * Every id must name a preset above — a stale one would quietly drop an example
+ * from the showcase.
+ */
+export const SHOWCASE_PRESET_IDS: readonly string[] = [
+  'dungeon-adventure',
+  'trpc-web-app',
+  'agentic-app',
+  'multi-agent',
+  'fastapi-web-app',
+  'gateway-fronted-agents',
+];
+
 /** Comfortable spacing between columns, used when the canvas is wide enough. */
 const PREFERRED_COLUMN_GAP = NODE_WIDTH + 120;
 /** The tightest column spacing still leaving a visible gap between nodes. */

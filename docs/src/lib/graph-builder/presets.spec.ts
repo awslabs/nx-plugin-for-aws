@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildPresetGraph,
   PRESETS,
+  SHOWCASE_PRESET_IDS,
 } from '../../components/graph-builder/presets';
 import { emitCommands } from './commands';
 import { validate } from './model';
@@ -43,6 +44,15 @@ describe('graph builder presets', () => {
       expect(commands.length).toBeGreaterThanOrEqual(
         preset.nodes.length + preset.edges.length + 2,
       );
+    },
+  );
+
+  // The showcase drops an id it cannot resolve rather than rendering an empty
+  // stage, so a renamed preset would silently lose an example from the homepage.
+  it.each(SHOWCASE_PRESET_IDS)(
+    'should have a preset for the %s example the showcase names',
+    (id) => {
+      expect(PRESETS.map((preset) => preset.id)).toContain(id);
     },
   );
 });

@@ -23,7 +23,12 @@ import {
   NODE_TYPES,
   nodeType,
 } from './catalog';
-import { type EmitOptions, emitCommands, toScript } from './commands';
+import {
+  type EmitOptions,
+  emitCommands,
+  toScript,
+  toScriptLines,
+} from './commands';
 import {
   autoFixesForConnection,
   type Graph,
@@ -477,6 +482,40 @@ describe('commands', () => {
     );
     expect(toScript(single, { ...EMIT, packageManager: 'bun' })).toContain(
       'bunx nx g',
+    );
+  });
+
+  it('should keep the graph element each script line came from', () => {
+    const website = node('website', 'ts#react-website');
+    const api = node('my-api', 'ts#trpc-api');
+    const lines = toScriptLines(
+      graph(
+        [website, api],
+        [{ id: 'e1', source: 'website', target: 'my-api' }],
+      ),
+      EMIT,
+    );
+
+    // The workspace create and the `cd` belong to no element; every generator
+    // line points back at the node or edge it scaffolds, so a view showing the
+    // graph beside the commands can tie the two together.
+    expect(lines[0].nodeId).toBeUndefined();
+    expect(lines[1].command).toBe('cd my-project');
+    expect(lines[1].comment).toBeUndefined();
+    expect(
+      lines.find((line) => line.command.includes(':ts#website '))?.nodeId,
+    ).toBe('website');
+    expect(
+      lines.find((line) => line.command.includes(':connection'))?.edgeId,
+    ).toBe('e1');
+  });
+
+  it('should skip the workspace lines when asked', () => {
+    const lines = toScriptLines(graph([node('my-api', 'ts#trpc-api')]), EMIT, {
+      skipWorkspace: true,
+    });
+    expect(lines[0].command).toBe(
+      'pnpm nx g @aws/nx-plugin:ts#api my-api --framework=trpc --no-interactive',
     );
   });
 
