@@ -2,11 +2,12 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { EmitOptions } from '../../lib/graph-builder/commands';
 import { toScript, toScriptLines } from '../../lib/graph-builder/commands';
 import type { Graph, Issue } from '../../lib/graph-builder/model';
 import { CommandList } from './command-list';
+import { CopyButton } from './copy-button';
 
 interface Props {
   graph: Graph;
@@ -19,7 +20,6 @@ const PACKAGE_MANAGERS = ['pnpm', 'npm', 'yarn', 'bun'] as const;
 
 export const Output = ({ graph, issues, options, onOptionsChange }: Props) => {
   const [annotate, setAnnotate] = useState(true);
-  const [copied, setCopied] = useState(false);
 
   const errors = issues.filter((issue) => issue.severity === 'error');
   const warnings = issues.filter((issue) => issue.severity === 'warning');
@@ -34,21 +34,6 @@ export const Output = ({ graph, issues, options, onOptionsChange }: Props) => {
     () => toScript(graph, options, { annotate }),
     [graph, options, annotate],
   );
-
-  useEffect(() => {
-    if (!copied) return;
-    const timer = setTimeout(() => setCopied(false), 1600);
-    return () => clearTimeout(timer);
-  }, [copied]);
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(script);
-      setCopied(true);
-    } catch {
-      // Clipboard access can be denied; the script stays selectable.
-    }
-  };
 
   return (
     <div className="gb-output">
@@ -107,39 +92,11 @@ export const Output = ({ graph, issues, options, onOptionsChange }: Props) => {
             />
             <span>Comments</span>
           </label>
-          <button
-            type="button"
-            className={`gb-copy-btn${copied ? ' is-copied' : ''}`}
-            onClick={copy}
+          <CopyButton
+            text={script}
+            label="Copy"
             disabled={graph.nodes.length === 0}
-          >
-            <svg
-              className="gb-copy-icon gb-copy-icon--copy"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-            </svg>
-            <svg
-              className="gb-copy-icon gb-copy-icon--check"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
-            <span>{copied ? 'Copied' : 'Copy'}</span>
-          </button>
+          />
         </div>
       </div>
 

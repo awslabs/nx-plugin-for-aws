@@ -3,8 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { toScriptLines } from '../../lib/graph-builder/commands';
+import { toScript, toScriptLines } from '../../lib/graph-builder/commands';
 import { CommandList } from '../graph-builder/command-list';
+import { CopyButton } from '../graph-builder/copy-button';
 import { buildPresetGraph, PRESETS } from '../graph-builder/presets';
 
 /**
@@ -13,6 +14,9 @@ import { buildPresetGraph, PRESETS } from '../graph-builder/presets';
  * example is scaffolded with.
  */
 const PRESET_ID = 'agentic-app';
+
+/** The command the first step runs, which its window offers to copy. */
+const CREATE_COMMAND = 'pnpm create @aws/nx-workspace';
 
 /** What the reader is shown asking for, matching what that preset scaffolds. */
 const PROMPT =
@@ -25,13 +29,15 @@ const TOOL_CALLS = ['list-generators', 'generator-guide'];
  * The assistants the workspace is shown being opened in. A new workspace
  * configures the MCP server for both, so either is one step away.
  *
- * `tint` is only used for the mark in the window chrome, so the two passes are
- * told apart at a glance.
+ * `mark` and `tint` draw the glyph in the window chrome — a shape and a colour
+ * each assistant is known by, next to its name, rather than its own artwork.
  */
 const ASSISTANTS = [
-  { name: 'Claude Code', tint: '#d97757' },
-  { name: 'Kiro', tint: '#8b5cf6' },
+  { name: 'Claude Code', mark: 'burst', tint: '#d97757' },
+  { name: 'Kiro', mark: 'ghost', tint: '#8b5cf6' },
 ] as const;
+
+type Mark = (typeof ASSISTANTS)[number]['mark'];
 
 type Phase = 'create' | 'ask' | 'build';
 
@@ -45,10 +51,18 @@ const PHASES: readonly { id: Phase; ms: number }[] = [
 const TYPE_MS = 26;
 const COMMAND_MS = 420;
 
-/** A mark for the assistant, tinted to tell one from the other. */
-const AssistantMark = ({ tint }: { tint: string }) => (
+/** The assistant's glyph, so which window this is reads without the name. */
+const AssistantMark = ({ mark, tint }: { mark: Mark; tint: string }) => (
   <svg className="af-mark" viewBox="0 0 24 24" aria-hidden="true" fill={tint}>
-    <path d="M12 2.6l1.7 6.1 4.6-4.3-2.6 5.7 6.2-1.1-5.6 2.9 5.6 2.9-6.2-1.1 2.6 5.7-4.6-4.3L12 21.4l-1.7-6.1-4.6 4.3 2.6-5.7-6.2 1.1 5.6-2.9-5.6-2.9 6.2 1.1-2.6-5.7 4.6 4.3z" />
+    {mark === 'burst' ? (
+      <path d="M12 2.6l1.7 6.1 4.6-4.3-2.6 5.7 6.2-1.1-5.6 2.9 5.6 2.9-6.2-1.1 2.6 5.7-4.6-4.3L12 21.4l-1.7-6.1-4.6 4.3 2.6-5.7-6.2 1.1 5.6-2.9-5.6-2.9 6.2 1.1-2.6-5.7 4.6 4.3z" />
+    ) : (
+      <>
+        <path d="M12 2.5c-3.9 0-6.8 3-6.8 6.9v10.2c0 .8.9 1.1 1.4.6l1.5-1.5c.3-.3.8-.3 1.1 0l1.3 1.3c.3.3.8.3 1.1 0l1.3-1.3c.3-.3.8-.3 1.1 0l1.5 1.5c.5.5 1.4.1 1.4-.6V9.4c0-3.9-2.9-6.9-6.9-6.9z" />
+        <circle cx="9.6" cy="9.8" r="1.35" fill="var(--gb-surface)" />
+        <circle cx="14.4" cy="9.8" r="1.35" fill="var(--gb-surface)" />
+      </>
+    )}
   </svg>
 );
 
@@ -71,21 +85,23 @@ const WindowDots = () => (
  * and holds still at the finished state for a reduced-motion preference.
  */
 export const AiFlow = () => {
-  const lines = useMemo(() => {
+  const { lines, script } = useMemo(() => {
     const preset = PRESETS.find((entry) => entry.id === PRESET_ID);
-    if (!preset) return [];
-    return toScriptLines(
-      buildPresetGraph(preset),
-      {
-        workspace: 'my-project',
-        packageManager: 'pnpm',
-        iac: 'cdk',
-        overrides: preset.overrides,
-      },
-      // The workspace already exists by this step: the reader created it in the
-      // first one.
-      { skipWorkspace: true },
-    );
+    if (!preset) return { lines: [], script: '' };
+    const graph = buildPresetGraph(preset);
+    const options = {
+      workspace: 'my-project',
+      packageManager: 'pnpm',
+      iac: 'cdk' as const,
+      overrides: preset.overrides,
+    };
+    // The workspace already exists by this step: the reader created it in the
+    // first one.
+    const emit = { skipWorkspace: true };
+    return {
+      lines: toScriptLines(graph, options, emit),
+      script: toScript(graph, options, emit),
+    };
   }, []);
 
   const [phaseIndex, setPhaseIndex] = useState(0);
@@ -199,6 +215,7 @@ export const AiFlow = () => {
             <div className="gb-window-chrome">
               <WindowDots />
               <span className="gb-window-name">zsh</span>
+              <CopyButton text={CREATE_COMMAND} title="Copy the command" />
             </div>
 
             <div className="af-body af-body--terminal" key={`create-${pass}`}>
@@ -241,7 +258,7 @@ export const AiFlow = () => {
               {/* Keyed on the assistant, so its name and mark arrive together on
                   each pass rather than changing in place. */}
               <span className="gb-window-name" key={assistant.name}>
-                <AssistantMark tint={assistant.tint} />
+                <AssistantMark mark={assistant.mark} tint={assistant.tint} />
                 {assistant.name}
               </span>
             </div>
@@ -289,6 +306,7 @@ export const AiFlow = () => {
             <div className="gb-window-chrome">
               <WindowDots />
               <span className="gb-window-name">my-project — zsh</span>
+              <CopyButton text={script} title="Copy the commands" />
             </div>
 
             <div className="af-body af-body--commands">

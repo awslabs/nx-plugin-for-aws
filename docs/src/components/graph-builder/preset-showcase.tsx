@@ -15,6 +15,7 @@ import type { EmitOptions, ScriptLine } from '../../lib/graph-builder/commands';
 import { toScript, toScriptLines } from '../../lib/graph-builder/commands';
 import type { Graph } from '../../lib/graph-builder/model';
 import { type CommandFocus, CommandList } from './command-list';
+import { CopyButton } from './copy-button';
 import {
   edgePath,
   loopPath,
@@ -123,7 +124,6 @@ export const PresetShowcase = ({ builderHref }: Props) => {
   const [isFocused, setIsFocused] = useState(false);
   const [isVisible, setIsVisible] = useState(true);
   const [focus, setFocus] = useState<CommandFocus | undefined>();
-  const [copied, setCopied] = useState(false);
   const tabsId = useId();
   const tabsRef = useRef<HTMLDivElement>(null);
 
@@ -166,12 +166,6 @@ export const PresetShowcase = ({ builderHref }: Props) => {
     return () =>
       document.removeEventListener('visibilitychange', onVisibilityChange);
   }, []);
-
-  useEffect(() => {
-    if (!copied) return;
-    const timer = setTimeout(() => setCopied(false), 1600);
-    return () => clearTimeout(timer);
-  }, [copied]);
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const [canvasWidth, setCanvasWidth] = useState<number | undefined>();
@@ -220,15 +214,6 @@ export const PresetShowcase = ({ builderHref }: Props) => {
         `#${CSS.escape(`${tabsId}-tab-${next}`)}`,
       )
       ?.focus();
-  };
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(stage.script);
-      setCopied(true);
-    } catch {
-      // Clipboard access can be denied; nothing to fall back to here.
-    }
   };
 
   const { graph, lines, preset } = stage;
@@ -477,38 +462,7 @@ export const PresetShowcase = ({ builderHref }: Props) => {
             <span className="ps-terminal-hint">
               {lines.length} commands, run in order
             </span>
-            <button
-              type="button"
-              className={`gb-copy-btn${copied ? ' is-copied' : ''}`}
-              onClick={copy}
-            >
-              <svg
-                className="gb-copy-icon gb-copy-icon--copy"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-              </svg>
-              <svg
-                className="gb-copy-icon gb-copy-icon--check"
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-              <span>{copied ? 'Copied' : 'Copy commands'}</span>
-            </button>
+            <CopyButton text={stage.script} label="Copy commands" />
           </div>
         </div>
       </div>
