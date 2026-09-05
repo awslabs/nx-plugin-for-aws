@@ -1601,7 +1601,34 @@
 
 .ps-stage {
   display: grid;
-  gap: 0.75rem;
+  gap: 0.6rem;
+}
+
+/* A caret pointing from the steps down at the diagram, so the diagram reads as
+ * what they produced. */
+.ps-link {
+  --ps-link-color: var(--gb-border);
+
+  position: relative;
+  height: 2rem;
+}
+
+/* Lit once the generators are running, when the diagram is what they produce. */
+.ps-link.is-active {
+  --ps-link-color: var(--gb-accent);
+}
+
+.ps-link::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-right: 2px solid var(--ps-link-color);
+  border-bottom: 2px solid var(--ps-link-color);
+  transform: translate(-50%, -60%) rotate(45deg);
+  transition: border-color 300ms ease;
 }
 
 .ps-panel {
@@ -1694,73 +1721,84 @@
   transform-origin: top center;
 }
 
-/* ---------- Build-in animation ---------- */
+/* ---------- The diagram arriving ---------- */
 
-/* Each element fills only *backwards*, so it waits its turn off-stage and then
- * hands its styles back to the rules above — leaving the hover states below free
- * to take over once an example has finished arriving. */
-
-.ps-node {
-  animation: ps-node-in 460ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+/* The whole plan fades in together when the example changes, so nothing pops in
+ * node by node. */
+.ps-extent {
+  animation: ps-plan-in 320ms ease backwards;
 }
 
-@keyframes ps-node-in {
-  from {
-    opacity: 0;
-    transform: translateY(10px) scale(0.96);
-  }
-}
-
-.ps-edge {
-  animation: ps-edge-in 520ms ease backwards;
-}
-
-@keyframes ps-edge-in {
+@keyframes ps-plan-in {
   from {
     opacity: 0;
   }
 }
 
-/* `pathLength` is 1 on the line, so a dash of 1 is the whole path and the
- * offset draws it in without measuring anything. */
+/* A connection is drawn as dashes travelling its path rather than a solid line,
+ * so which way it runs reads at a glance. Its colour comes from the state rules
+ * below, the same as a solid line's would. */
 .ps-edge-line {
-  stroke-dasharray: 1;
-  animation: ps-draw 720ms cubic-bezier(0.4, 0, 0.2, 1) backwards;
-  animation-delay: inherit;
-}
-
-@keyframes ps-draw {
-  from {
-    stroke-dashoffset: 1;
-  }
-}
-
-/* Dashes travelling the path, so a connection reads as a direction of flow. */
-.ps-edge-flow {
-  fill: none;
-  stroke: var(--gb-accent);
-  stroke-width: 2;
   stroke-linecap: round;
-  stroke-dasharray: 2 12;
-  opacity: 0.6;
+  stroke-dasharray: 9 7;
   animation: ps-flow 900ms linear infinite;
 }
 
 @keyframes ps-flow {
   to {
-    stroke-dashoffset: -14;
+    stroke-dashoffset: -16;
   }
 }
 
-.ps-root .gb-command {
-  animation: ps-line-in 420ms ease backwards;
+/* ---------- The plan, and what has been built ---------- */
+
+/* A project or connection is greyed out until the command that scaffolds it runs,
+ * arrives in full colour with the accent border a selected node carries, and
+ * settles to a plain one as the next command runs. */
+
+.ps-node {
+  transition:
+    border-color 300ms ease,
+    box-shadow 300ms ease,
+    opacity 300ms ease,
+    filter 300ms ease;
 }
 
-@keyframes ps-line-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
+.ps-node.is-planned {
+  opacity: 0.45;
+  border-style: dashed;
+  box-shadow: none;
+  filter: grayscale(1);
+}
+
+.ps-node.is-arriving {
+  border-color: var(--gb-accent);
+  box-shadow:
+    0 0 0 3px var(--gb-accent-soft),
+    0 8px 20px -14px rgb(0 0 0 / 0.5);
+}
+
+.ps-edge.is-planned {
+  opacity: 0.22;
+}
+
+.ps-edge.is-arriving .gb-edge-line {
+  stroke: var(--gb-accent);
+  stroke-width: 3;
+}
+
+/* Marks the diagram as what the three steps above it produced. */
+.ps-panel-chip {
+  margin-right: 0.55rem;
+  padding: 0.12rem 0.45rem;
+  border-radius: 9999px;
+  background: var(--gb-accent-soft);
+  color: var(--sl-color-text-accent);
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  vertical-align: 0.1em;
 }
 
 /* ---------- Cross-highlighting ---------- */
@@ -1781,33 +1819,6 @@
 
 /* ---------- Commands ---------- */
 
-.ps-panel--commands {
-  display: flex;
-  flex-direction: column;
-}
-
-/* Shorter than the builder's, so the diagram stays the biggest thing on the
- * page and the commands read as its output. */
-.ps-panel--commands .gb-commands {
-  max-height: 18rem;
-}
-
-.ps-terminal-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.55rem 0.85rem;
-  background: var(--gb-panel);
-  border-top: 1px solid var(--gb-border-soft);
-}
-
-.ps-terminal-hint {
-  font-size: 0.75rem;
-  color: var(--gb-muted);
-}
-
 /* ---------- Actions ---------- */
 
 .ps-actions {
@@ -1822,16 +1833,16 @@
   height: 28rem;
 }
 
-/* The build-in reads as motion for its own sake to anyone who has asked for
- * less of it, so it lands in place instead: the delays go, and the travelling
- * dashes with them. */
+/* Motion for its own sake is unwelcome to anyone who has asked for less of it, so
+ * the diagram lands in place: the delays go, and the connections' dashes hold
+ * still rather than travelling. */
 @media (prefers-reduced-motion: reduce) {
   .ps-root * {
     animation-delay: 0ms !important;
   }
 
-  .ps-edge-flow {
-    display: none;
+  .ps-edge-line {
+    animation: none;
   }
 }
 
@@ -1843,29 +1854,21 @@
  * command list and tokens above.
  * ============================================================ */
 
-.af-shell {
-  margin-block: 1rem;
-}
-
-.af-root {
-  gap: 1.25rem;
-  text-align: left;
-}
-
 .af-steps {
   list-style: none;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  /* Leaves the gap the connector runs through. */
-  gap: 3rem;
+  /* Leaves the gap the caret sits in. */
+  gap: 2.5rem;
   margin: 0;
   padding: 0;
 }
 
 @media (min-width: 62rem) {
   .af-steps {
-    grid-template-columns: 0.95fr 1.15fr 1.15fr;
-    gap: 3.25rem;
+    /* The third step holds the commands, so it takes the room. */
+    grid-template-columns: 0.85fr 1.05fr 1.55fr;
+    gap: 2.75rem;
   }
 }
 
@@ -1888,85 +1891,57 @@
   opacity: 1;
 }
 
-/* A track through the gap to the next step, with a pulse travelling along it
- * while this step is the one playing — so the direction of the flow is visible,
- * and where it has got to. */
-.af-step:not(:last-child)::after {
-  content: '';
-  position: absolute;
-  left: 50%;
-  bottom: -3rem;
-  width: 2px;
-  height: 2.25rem;
-  transform: translateX(-50%);
-  background:
-    linear-gradient(180deg, transparent, var(--gb-accent), transparent) 0 0 /
-    100% 55% no-repeat,
-    var(--gb-border);
+/* A caret pointing at the next step: grey while the flow has yet to reach it,
+ * accent once it has passed. The caret below the steps is drawn the same way. */
+.af-step {
+  --af-link-color: var(--gb-border);
 }
 
-/* The arrowhead at the far end of the track. */
-.af-step:not(:last-child)::before {
+.af-step.is-done {
+  --af-link-color: var(--gb-accent);
+}
+
+.af-step::after {
   content: '';
   position: absolute;
   left: 50%;
-  bottom: -3rem;
-  width: 0.4rem;
-  height: 0.4rem;
-  border-right: 2px solid var(--gb-border);
-  border-bottom: 2px solid var(--gb-border);
+  bottom: -1.55rem;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-right: 2px solid var(--af-link-color);
+  border-bottom: 2px solid var(--af-link-color);
   transform: translateX(-50%) rotate(45deg);
+  transition: border-color 300ms ease;
 }
 
-.af-step.is-active:not(:last-child)::after {
-  animation: af-travel-y 1.6s linear infinite;
+/* The caret below the steps points at the diagram, so the last one is dropped. */
+.af-step:last-child::after {
+  display: none;
 }
 
-@keyframes af-travel-y {
-  from {
-    background-position-y: 0%;
-  }
-  to {
-    background-position-y: 100%;
-  }
-}
-
+/* Read as a row, the caret sits in the gap beside the window it points from —
+ * anchored to the window rather than the whole step, so the carets line up
+ * whatever the headings and notes around them come to. */
 @media (min-width: 62rem) {
-  .af-step:not(:last-child)::before {
-    left: auto;
-    right: -3rem;
+  .af-step::after {
+    display: none;
+  }
+
+  .af-frame {
+    position: relative;
+  }
+
+  .af-step:not(:last-child) .af-frame::after {
+    content: '';
+    position: absolute;
     top: 50%;
-    bottom: auto;
-    border-bottom: none;
-    border-top: 2px solid var(--gb-border);
+    right: -1.7rem;
+    width: 0.6rem;
+    height: 0.6rem;
+    border-top: 2px solid var(--af-link-color);
+    border-right: 2px solid var(--af-link-color);
     transform: translateY(-50%) rotate(45deg);
-  }
-
-  .af-step:not(:last-child)::after {
-    left: auto;
-    right: -3rem;
-    top: 50%;
-    bottom: auto;
-    width: 2.25rem;
-    height: 2px;
-    transform: translateY(-50%);
-    background:
-      linear-gradient(90deg, transparent, var(--gb-accent), transparent) 0 0 /
-      55% 100% no-repeat,
-      var(--gb-border);
-  }
-
-  .af-step.is-active:not(:last-child)::after {
-    animation: af-travel-x 1.6s linear infinite;
-  }
-}
-
-@keyframes af-travel-x {
-  from {
-    background-position-x: 0%;
-  }
-  to {
-    background-position-x: 100%;
+    transition: border-color 300ms ease;
   }
 }
 
@@ -2072,11 +2047,6 @@
   animation-delay: 1600ms;
 }
 
-.af-line--fourth {
-  animation: af-line-in 400ms ease backwards;
-  animation-delay: 2300ms;
-}
-
 .af-tick {
   color: oklch(0.72 0.17 150);
 }
@@ -2166,24 +2136,25 @@
 /* Filling the window, and each command on one line: the generator being run is
  * the part that matters here, and a wrapped flag would push the next one out of
  * view. */
-.af-root .gb-commands {
+.af-flow .gb-commands {
   height: 100%;
   max-height: none;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 0.5rem;
   font-size: 0.66rem;
   line-height: 1.45;
 }
 
-.af-root .gb-command {
+.af-flow .gb-command {
   animation: af-line-in 280ms ease backwards;
 }
 
-.af-root .gb-command-line {
+.af-flow .gb-command-line {
   min-width: 0;
 }
 
-.af-root .gb-command code {
+.af-flow .gb-command code {
   display: block;
   flex: 1;
   min-width: 0;
@@ -2216,18 +2187,13 @@
   justify-content: center;
 }
 
-.gb-loading--flow {
-  height: 22rem;
-}
-
 /* The loop is the point of this view, so with less motion asked for it holds at
  * the finished state: the component stops advancing, and the pulses stop here. */
 @media (prefers-reduced-motion: reduce) {
-  .af-root * {
+  .af-flow * {
     animation-delay: 0ms !important;
   }
 
-  .af-step::after,
   .af-caret,
   .af-tool-icon {
     animation: none !important;

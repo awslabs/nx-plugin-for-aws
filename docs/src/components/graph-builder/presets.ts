@@ -29,6 +29,12 @@ export interface Preset {
   readonly id: string;
   readonly label: string;
   readonly description: string;
+  /**
+   * What to ask an AI assistant for to have it build this, as the landing page
+   * shows it being typed. Phrased the way someone would actually ask, and
+   * covering what the graph holds, so the commands that follow match.
+   */
+  readonly prompt?: string;
   readonly nodes: readonly PresetNode[];
   /** Connections as `[sourceName, targetName]` pairs. */
   readonly edges: readonly [string, string][];
@@ -56,6 +62,8 @@ export const PRESETS: readonly Preset[] = [
     label: 'Dungeon Adventure',
     description:
       'The full-stack agentic game from the Dungeon Adventure tutorial: a React website, a tRPC API, a Python story agent, an inventory MCP server, and a DynamoDB table.',
+    prompt:
+      'Build a dungeon adventure game: a React website, a tRPC API, a Python story agent, an inventory MCP server and a DynamoDB table.',
     // Listed in the order the tutorial's step-by-step route runs the generators,
     // so the copied commands read the same way round as the prose.
     nodes: [
@@ -123,6 +131,8 @@ export const PRESETS: readonly Preset[] = [
     id: 'trpc-web-app',
     label: 'tRPC web app',
     description: 'A React website calling a type-safe tRPC API.',
+    prompt:
+      'Add a React website, a type-safe tRPC API and a DynamoDB table, and connect them.',
     nodes: [
       { type: 'ts#react-website', name: 'website', column: 0, row: 0 },
       { type: 'ts#trpc-api', name: 'my-api', column: 1, row: 0 },
@@ -137,6 +147,8 @@ export const PRESETS: readonly Preset[] = [
     id: 'fastapi-web-app',
     label: 'FastAPI web app',
     description: 'A React website calling a Python FastAPI backed by Aurora.',
+    prompt:
+      'Add a React website, a Python FastAPI and an Aurora database, and connect them.',
     nodes: [
       { type: 'ts#react-website', name: 'website', column: 0, row: 0 },
       { type: 'py#fast-api', name: 'py-api', column: 1, row: 0 },
@@ -152,6 +164,8 @@ export const PRESETS: readonly Preset[] = [
     label: 'Agentic app',
     description:
       'An AG-UI agent driving a React frontend, with an MCP server for tools.',
+    prompt:
+      'Add a React website with an AG-UI agent, an MCP server for its tools and a DynamoDB table, and wire them together.',
     nodes: [
       { type: 'ts#react-website', name: 'website', column: 0, row: 0 },
       {
@@ -182,6 +196,8 @@ export const PRESETS: readonly Preset[] = [
     label: 'Multi-agent',
     description:
       'A TypeScript agent orchestrating a Python A2A agent, with tools behind a gateway.',
+    prompt:
+      'Add a TypeScript orchestrator agent that calls a Python A2A agent, with its tools behind an AgentCore Gateway.',
     nodes: [
       {
         type: 'ts#agent',
@@ -218,6 +234,8 @@ export const PRESETS: readonly Preset[] = [
     label: 'Gateway-fronted agents',
     description:
       'A React website reaching agents through an AgentCore Gateway, so the agent runtimes can sit inside a VPC.',
+    prompt:
+      'Put a TypeScript and a Python agent behind an AgentCore Gateway, and have a React website talk to the gateway.',
     nodes: [
       { type: 'ts#react-website', name: 'website', column: 0, row: 0 },
       {

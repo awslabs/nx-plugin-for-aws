@@ -14,8 +14,8 @@ import { nodeType } from '../../lib/graph-builder/catalog';
 import type { EmitOptions, ScriptLine } from '../../lib/graph-builder/commands';
 import { toScript, toScriptLines } from '../../lib/graph-builder/commands';
 import type { Graph } from '../../lib/graph-builder/model';
-import { type CommandFocus, CommandList } from './command-list';
-import { CopyButton } from './copy-button';
+import type { CommandFocus } from './command-list';
+import { FLOW_PHASES, FlowSteps } from './flow-steps';
 import {
   edgePath,
   loopPath,
@@ -32,9 +32,6 @@ import {
   SHOWCASE_PRESET_IDS,
 } from './presets';
 
-/** How long an example holds before the showcase moves to the next. */
-const CYCLE_MS = 11000;
-
 /** Where the grid starts, and the spacing between its cells on each axis. */
 const ORIGIN = 24;
 const X_GAP = NODE_WIDTH + 90;
@@ -42,8 +39,15 @@ const Y_GAP = NODE_HEIGHT + 60;
 /** Padding kept around the diagram inside its panel. */
 const PADDING = 24;
 
-/** The stagger between each node, edge and command as an example builds itself. */
-const STEP_MS = 90;
+/** How fast the assistant is shown typing, and running what it writes. */
+const TYPE_MS = 26;
+const COMMAND_MS = 560;
+/**
+ * What the asking step holds for beyond typing the prompt: long enough for the
+ * tool calls to land and be read, and no longer — the prompts differ in length,
+ * so the step is timed from the one being typed rather than fixed.
+ */
+const ASK_TAIL_MS = 1400;
 
 /** The smallest the diagram is scaled before it is scrolled sideways instead. */
 const MIN_SCALE = 0.6;
@@ -53,7 +57,12 @@ const MAX_SCALE = 1.25;
 interface Stage {
   readonly preset: Preset;
   readonly graph: Graph;
+  /**
+   * The commands the assistant is shown running. The workspace-create is left
+   * off: the first step of the flow already did that.
+   */
   readonly lines: readonly ScriptLine[];
+  /** The whole script, workspace and all, for the copy button. */
   readonly script: string;
   /** The diagram's natural size, before it is scaled to the panel. */
   readonly width: number;
@@ -65,12 +74,12 @@ interface Stage {
  *
  * Positions come straight from the grid rather than the builder's auto-packing,
  * so an example lands exactly as authored, and the commands come from the same
- * emitter the graph builder and the docs pages use — so what the homepage hands
- * over is what the plugin actually runs.
+ * emitter the graph builder and the docs pages use — so what the homepage shows
+ * being run is what the plugin actually runs.
  */
 const toStage = (preset: Preset): Stage => {
   const options: EmitOptions = {
-    workspace: preset.id,
+    workspace: 'my-project',
     packageManager: 'pnpm',
     iac: 'cdk',
     overrides: preset.overrides,
@@ -85,7 +94,7 @@ const toStage = (preset: Preset): Stage => {
   return {
     preset,
     graph,
-    lines: toScriptLines(graph, options),
+    lines: toScriptLines(graph, options, { skipWorkspace: true }),
     script: toScript(graph, options),
     width: Math.max(...nodes.map((node) => node.x + NODE_WIDTH)) + PADDING,
     height: Math.max(...nodes.map((node) => node.y + NODE_HEIGHT)) + PADDING,
@@ -98,14 +107,16 @@ interface Props {
 }
 
 /**
- * The homepage showcase: a read-only graph of an example workspace beside the
- * commands that scaffold it, cycling through the examples on its own.
+ * The landing page's showcase: one example workspace at a time, from the command
+ * that creates it to the diagram of what you end up with.
  *
- * Each example builds itself in — nodes, then the connections between them, then
- * the commands — and hovering either a node or a command lights up the other, so
- * the diagram and the commands read as one thing. Cycling pauses while the
- * pointer or keyboard focus is inside, and while the tab is in the background,
- * so nothing moves underneath someone reading it.
+ * The three steps above the diagram and the diagram itself are the same story —
+ * the prompt asks for the example, the commands beneath it are the ones the
+ * generators run, and the diagram fills in project by project as each command
+ * appears. Hovering a node lights the commands that build it, and vice versa.
+ *
+ * Cycling pauses while the pointer or keyboard focus is inside, and while the tab
+ * is in the background, so nothing moves underneath someone reading it.
  */
 export const PresetShowcase = ({ builderHref }: Props) => {
   const stages = useMemo(
@@ -119,41 +130,90 @@ export const PresetShowcase = ({ builderHref }: Props) => {
   );
 
   const [index, setIndex] = useState(0);
+  const [phaseIndex, setPhaseIndex] = useState(0);
+  // How many examples have played. Picks the assistant, and keeps the workspace
+  // step from replaying once it has been created.
+  const [pass, setPass] = useState(0);
+  const [typed, setTyped] = useState(0);
+  const [revealed, setRevealed] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
   const [isHovered, setIsHovered] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
   const [isVisible, setIsVisible] = useState(true);
+  const [isOnScreen, setIsOnScreen] = useState(false);
+  const [reduceMotion, setReduceMotion] = useState(false);
   const [focus, setFocus] = useState<CommandFocus | undefined>();
   const tabsId = useId();
+  const rootRef = useRef<HTMLDivElement>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
 
   const stage = stages[index];
-  const isCycling = isPlaying && !isHovered && !isFocused && isVisible;
+  const preset = stage.preset;
+  const phase = FLOW_PHASES[phaseIndex].id;
+  const prompt = preset.prompt ?? preset.description;
+  // How long each step of this example holds. Memoised: the step timer restarts
+  // whenever this changes, and typing re-renders many times a second.
+  const durations = useMemo(
+    () =>
+      FLOW_PHASES.map((entry) =>
+        entry.id === 'ask' ? prompt.length * TYPE_MS + ASK_TAIL_MS : entry.ms,
+      ),
+    [prompt],
+  );
+  const isPlayingThrough =
+    isPlaying &&
+    !isHovered &&
+    !isFocused &&
+    isVisible &&
+    isOnScreen &&
+    !reduceMotion;
 
-  /** Move to an example, dropping whatever the last one had lit. */
+  /** Jump to an example, and play it from the first step. */
   const show = (next: number) => {
     setIndex(next);
+    setPhaseIndex(0);
+    setPass((current) => current + 1);
     setFocus(undefined);
   };
 
-  // A timeout rather than an interval, so picking an example by hand — or coming
-  // back from a pause — restarts the full dwell rather than landing mid-cycle.
+  // Each step holds for its own length, then the next takes over; after the last
+  // one the next example starts again from the first step.
   useEffect(() => {
-    if (!isCycling) return;
+    if (!isPlayingThrough) return;
     const timer = setTimeout(() => {
-      setIndex((index + 1) % stages.length);
+      if (phaseIndex < FLOW_PHASES.length - 1) {
+        setPhaseIndex(phaseIndex + 1);
+        return;
+      }
+      setIndex((current) => (current + 1) % stages.length);
+      setPhaseIndex(0);
+      setPass((current) => current + 1);
       setFocus(undefined);
-    }, CYCLE_MS);
+    }, durations[phaseIndex]);
     return () => clearTimeout(timer);
-  }, [index, isCycling, stages.length]);
+  }, [phaseIndex, isPlayingThrough, stages.length, durations]);
 
   // Content that advances on its own is exactly what a reduced-motion preference
-  // asks for less of, so the showcase starts held on the first example and waits
-  // to be driven by the tabs or the play button.
+  // asks for less of, so the showcase holds on the first example, finished, and
+  // waits to be driven by the tabs or the play button.
   useEffect(() => {
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      setIsPlaying(false);
-    }
+    if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    setReduceMotion(true);
+    setIsPlaying(false);
+    setPhaseIndex(FLOW_PHASES.length - 1);
+  }, []);
+
+  // Nothing plays until the showcase is scrolled to, so the reader arrives at the
+  // first step rather than partway through the sequence.
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => setIsOnScreen(entry.isIntersecting),
+      { threshold: 0.25 },
+    );
+    observer.observe(root);
+    return () => observer.disconnect();
   }, []);
 
   // A background tab animates nothing, so the examples would otherwise all have
@@ -166,6 +226,28 @@ export const PresetShowcase = ({ builderHref }: Props) => {
     return () =>
       document.removeEventListener('visibilitychange', onVisibilityChange);
   }, []);
+
+  // The prompt types itself out while the assistant is being asked.
+  useEffect(() => {
+    if (phase !== 'ask') return;
+    setTyped(0);
+    const timer = setInterval(
+      () => setTyped((count) => Math.min(count + 1, prompt.length)),
+      TYPE_MS,
+    );
+    return () => clearInterval(timer);
+  }, [phase, prompt]);
+
+  // Then the commands arrive one at a time, and the diagram fills in with them.
+  useEffect(() => {
+    if (phase !== 'build') return;
+    setRevealed(0);
+    const timer = setInterval(
+      () => setRevealed((count) => count + 1),
+      COMMAND_MS,
+    );
+    return () => clearInterval(timer);
+  }, [phase]);
 
   const canvasRef = useRef<HTMLDivElement>(null);
   const [canvasWidth, setCanvasWidth] = useState<number | undefined>();
@@ -216,7 +298,43 @@ export const PresetShowcase = ({ builderHref }: Props) => {
       ?.focus();
   };
 
-  const { graph, lines, preset } = stage;
+  const { graph, lines } = stage;
+
+  // Nothing has been asked or run until those steps come round: before then the
+  // prompt is empty and the third step waits, with the diagram standing as the
+  // plan, then both fill in together, command by command, until the whole graph
+  // is built. Derived rather than reset, so starting an example over — by cycling
+  // to it or by picking its tab — always starts from nothing.
+  const typedPrompt = reduceMotion
+    ? prompt.length
+    : phase === 'create'
+      ? 0
+      : typed;
+  const revealedLines =
+    phase === 'build' ? revealed : phase === 'result' ? lines.length : 0;
+  const built = useMemo(() => {
+    if (phase !== 'build') return undefined;
+    const ids = new Set<string>();
+    for (const line of lines.slice(0, revealed)) {
+      if (line.nodeId) ids.add(line.nodeId);
+      if (line.edgeId) ids.add(line.edgeId);
+    }
+    return ids;
+  }, [phase, lines, revealed]);
+  const isPlanned = (id: string) =>
+    phase === 'create' || phase === 'ask' || (built ? !built.has(id) : false);
+
+  // What the command that just appeared scaffolded, so the diagram draws that
+  // project or connection in rather than leaving the reader to spot the change.
+  const arriving = useMemo(() => {
+    if (phase !== 'build' || revealed === 0) return undefined;
+    const line = lines[revealed - 1];
+    if (!line) return undefined;
+    return new Set(
+      [line.nodeId, line.edgeId].filter((id): id is string => id !== undefined),
+    );
+  }, [phase, lines, revealed]);
+
   const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
   const focusedEdge = focus?.edgeId
     ? graph.edges.find((edge) => edge.id === focus.edgeId)
@@ -229,8 +347,18 @@ export const PresetShowcase = ({ builderHref }: Props) => {
     ),
   );
 
+  /** How long an example holds altogether, for the fill on its tab. */
+  const cycleMs = durations.reduce((total, ms) => total + ms, 0);
+
+  const summary = `${graph.nodes.length} project${
+    graph.nodes.length === 1 ? '' : 's'
+  } and ${graph.edges.length} connection${
+    graph.edges.length === 1 ? '' : 's'
+  }, wired together.`;
+
   return (
     <div
+      ref={rootRef}
       className="gb-root ps-root"
       data-graph-builder
       onPointerEnter={() => setIsHovered(true)}
@@ -269,13 +397,13 @@ export const PresetShowcase = ({ builderHref }: Props) => {
             {entryIndex === index && (
               <span
                 // Keyed on the example and the cycling state so the fill
-                // restarts with each dwell rather than carrying on from where
+                // restarts with each example rather than carrying on from where
                 // the last one left off.
-                key={`${index}-${isCycling}`}
+                key={`${index}-${pass}-${isPlayingThrough}`}
                 className="ps-tab-progress"
                 style={{
-                  animationDuration: `${CYCLE_MS}ms`,
-                  animationPlayState: isCycling ? 'running' : 'paused',
+                  animationDuration: `${cycleMs}ms`,
+                  animationPlayState: isPlayingThrough ? 'running' : 'paused',
                 }}
                 aria-hidden="true"
               />
@@ -291,9 +419,36 @@ export const PresetShowcase = ({ builderHref }: Props) => {
         role="tabpanel"
         aria-labelledby={`${tabsId}-tab-${index}`}
       >
+        <div className="af-flow">
+          <FlowSteps
+            phase={phase}
+            pass={pass}
+            prompt={prompt}
+            typed={typedPrompt}
+            lines={lines}
+            revealed={revealedLines}
+            script={stage.script}
+            summary={summary}
+            focus={focus}
+            onFocus={setFocus}
+          />
+        </div>
+
+        {/* Points from the steps down at the diagram, so it reads as what they
+            produced. */}
+        <div
+          className={`ps-link${
+            phase === 'build' || phase === 'result' ? ' is-active' : ''
+          }`}
+          aria-hidden="true"
+        />
+
         <div className="ps-panel ps-panel--graph">
           <div className="ps-panel-bar">
-            <p className="ps-panel-title">{preset.label}</p>
+            <p className="ps-panel-title">
+              <span className="ps-panel-chip">Result</span>
+              {preset.label}
+            </p>
             <div className="ps-stats">
               <span className="ps-stat">
                 {graph.nodes.length} project
@@ -314,7 +469,7 @@ export const PresetShowcase = ({ builderHref }: Props) => {
             style={{ height: canvasHeight }}
           >
             {/* Keyed on the example, so switching remounts the diagram and its
-                build-in animation replays. */}
+                plan arrives again. */}
             <div
               key={preset.id}
               className="ps-extent"
@@ -358,7 +513,7 @@ export const PresetShowcase = ({ builderHref }: Props) => {
                   </marker>
                 </defs>
 
-                {graph.edges.map((edge, edgeIndex) => {
+                {graph.edges.map((edge) => {
                   const source = nodeById.get(edge.source);
                   const target = nodeById.get(edge.target);
                   if (!source || !target) return null;
@@ -376,27 +531,23 @@ export const PresetShowcase = ({ builderHref }: Props) => {
                       key={edge.id}
                       className={`gb-edge ps-edge${isLit ? ' is-active' : ''}${
                         focus && !isLit ? ' is-dimmed' : ''
+                      }${isPlanned(edge.id) ? ' is-planned' : ''}${
+                        arriving?.has(edge.id) ? ' is-arriving' : ''
                       }`}
-                      style={{
-                        // Edges draw in behind the nodes they join.
-                        animationDelay: `${(graph.nodes.length + edgeIndex) * STEP_MS}ms`,
-                      }}
                     >
+                      {/* Dashes travelling the path, so a connection reads as a
+                          direction of flow. */}
                       <path
                         className="gb-edge-line ps-edge-line"
                         d={path}
-                        pathLength={1}
                         markerEnd="url(#ps-arrow)"
                       />
-                      {/* Dashes travelling the path, so a connection reads as a
-                          direction of flow rather than a static line. */}
-                      <path className="ps-edge-flow" d={path} />
                     </g>
                   );
                 })}
               </svg>
 
-              {graph.nodes.map((node, nodeIndex) => {
+              {graph.nodes.map((node) => {
                 const type = nodeType(node.type);
                 const isLit = litNodeIds.has(node.id);
                 return (
@@ -404,12 +555,10 @@ export const PresetShowcase = ({ builderHref }: Props) => {
                     key={node.id}
                     className={`gb-node gb-node--static ps-node${
                       isLit ? ' is-lit' : ''
-                    }${focus && !isLit ? ' is-dimmed' : ''}`}
-                    style={{
-                      left: node.x,
-                      top: node.y,
-                      animationDelay: `${nodeIndex * STEP_MS}ms`,
-                    }}
+                    }${focus && !isLit ? ' is-dimmed' : ''}${
+                      isPlanned(node.id) ? ' is-planned' : ''
+                    }${arriving?.has(node.id) ? ' is-arriving' : ''}`}
+                    style={{ left: node.x, top: node.y }}
                     onPointerEnter={() => setFocus({ nodeId: node.id })}
                   >
                     <NodeLogo
@@ -438,31 +587,6 @@ export const PresetShowcase = ({ builderHref }: Props) => {
                 );
               })}
             </div>
-          </div>
-        </div>
-
-        <div className="ps-panel ps-panel--commands">
-          <div className="gb-window-chrome" aria-hidden="true">
-            <span className="gb-window-dot gb-window-dot--red" />
-            <span className="gb-window-dot gb-window-dot--yellow" />
-            <span className="gb-window-dot gb-window-dot--green" />
-            <span className="gb-window-name">{preset.id} — zsh</span>
-          </div>
-
-          {/* Keyed on the example, so the lines arrive again with each one. */}
-          <CommandList
-            key={preset.id}
-            lines={lines}
-            focus={focus}
-            onFocus={setFocus}
-            stagger={STEP_MS}
-          />
-
-          <div className="ps-terminal-bar">
-            <span className="ps-terminal-hint">
-              {lines.length} commands, run in order
-            </span>
-            <CopyButton text={stage.script} label="Copy commands" />
           </div>
         </div>
       </div>

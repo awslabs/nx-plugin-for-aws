@@ -2,6 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+import { useEffect, useRef } from 'react';
 import type { ScriptLine } from '../../lib/graph-builder/commands';
 
 /** A piece of a command that gets its own colour. */
@@ -70,6 +71,8 @@ interface Props {
   onFocus?: (focus: CommandFocus | undefined) => void;
   /** Milliseconds between each line arriving. Omit to have them all at once. */
   stagger?: number;
+  /** Keep the newest command in view as lines arrive, for a list that scrolls. */
+  followTail?: boolean;
   /** What to say instead when there are no commands to run. */
   empty?: string;
 }
@@ -88,14 +91,23 @@ export const CommandList = ({
   focus,
   onFocus,
   stagger,
+  followTail,
   empty,
 }: Props) => {
+  const listRef = useRef<HTMLOListElement>(null);
+
+  useEffect(() => {
+    const list = listRef.current;
+    if (!followTail || !list || lines.length === 0) return;
+    list.scrollTop = list.scrollHeight;
+  }, [followTail, lines.length]);
+
   if (lines.length === 0 && empty) {
     return <p className="gb-commands-empty">{empty}</p>;
   }
 
   return (
-    <ol className="gb-commands">
+    <ol className="gb-commands" ref={listRef}>
       {lines.map((line, index) => {
         const isLit =
           (line.nodeId !== undefined && line.nodeId === focus?.nodeId) ||
