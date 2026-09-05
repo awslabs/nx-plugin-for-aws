@@ -16,6 +16,7 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@astrojs/react';
 import * as fs from 'fs';
 
+import remarkLinkValidator from './src/plugins/remark-link-validator.ts';
 import remarkOptionFilter from './src/plugins/remark-option-filter.ts';
 import remarkTabFilter from './src/plugins/remark-tab-filter.ts';
 
@@ -46,7 +47,7 @@ export default defineConfig({
     shikiConfig: {
       langs: [smithySyntax()],
     },
-    remarkPlugins: [remarkOptionFilter, remarkTabFilter],
+    remarkPlugins: [remarkLinkValidator, remarkOptionFilter, remarkTabFilter],
   },
   integrations: [
     starlight({
