@@ -45,7 +45,7 @@ export const runGeneratorMatrix = async (
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:ts#astro-docs --name=docs-site --no-interactive${deferFlag}`,
+    `generate @aws/nx-plugin:ts#docs --name=docs-site --no-interactive${deferFlag}`,
     opts,
   );
   await runCLI(
