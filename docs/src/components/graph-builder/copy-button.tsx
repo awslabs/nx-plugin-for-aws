@@ -7,10 +7,7 @@ import { useEffect, useState } from 'react';
 interface Props {
   /** What lands on the clipboard. */
   text: string;
-  /**
-   * The button's label. Left off, the button is the icon alone — for a window's
-   * title bar, where there is no room for words.
-   */
+  /** The label. Left off, the button is the icon alone — for a window's title bar. */
   label?: string;
   /** The label the button takes while showing that it copied. */
   copiedLabel?: string;
@@ -19,10 +16,7 @@ interface Props {
   disabled?: boolean;
 }
 
-/**
- * A copy-to-clipboard button that reports back, in the plugin's accent, whether
- * it is labelled or icon-only.
- */
+/** A copy-to-clipboard button that reports back once it has copied. */
 export const CopyButton = ({
   text,
   label,

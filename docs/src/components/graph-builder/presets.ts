@@ -31,8 +31,7 @@ export interface Preset {
   readonly description: string;
   /**
    * What to ask an AI assistant for to have it build this, as the landing page
-   * shows it being typed. Phrased the way someone would actually ask, and
-   * covering what the graph holds, so the commands that follow match.
+   * shows it being typed. Covers what the graph holds, so the commands match.
    */
   readonly prompt?: string;
   readonly nodes: readonly PresetNode[];
@@ -283,7 +282,6 @@ export const SHOWCASE_PRESET_IDS: readonly string[] = [
   'multi-agent',
   'fastapi-web-app',
   'gateway-fronted-agents',
-  'dungeon-adventure',
 ];
 
 /** Comfortable spacing between columns, used when the canvas is wide enough. */

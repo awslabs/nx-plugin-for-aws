@@ -81,8 +81,8 @@ interface Props {
  * The commands that scaffold a graph, as a terminal transcript: one line each,
  * the generator being run picked out of it.
  *
- * Given `focus` and `onFocus` the lines pair up with a diagram of the same graph
- * — pointing at either lights the other, since every command carries the node or
+ * With `focus` and `onFocus` the lines pair up with a diagram of the same graph —
+ * pointing at either lights the other, since every command carries the node or
  * edge it came from.
  */
 export const CommandList = ({
@@ -132,6 +132,7 @@ export const CommandList = ({
                     : undefined,
                 ))
             }
+            onPointerLeave={onFocus && (() => onFocus(undefined))}
           >
             {annotate && line.comment && (
               <span className="gb-command-comment"># {line.comment}</span>

@@ -42,11 +42,7 @@ const PADDING = 24;
 /** How fast the assistant is shown typing, and running what it writes. */
 const TYPE_MS = 26;
 const COMMAND_MS = 560;
-/**
- * What the asking step holds for beyond typing the prompt: long enough for the
- * tool calls to land and be read, and no longer — the prompts differ in length,
- * so the step is timed from the one being typed rather than fixed.
- */
+/** What the asking step holds for once the prompt is typed, so the tool calls read. */
 const ASK_TAIL_MS = 1400;
 
 /** The smallest the diagram is scaled before it is scrolled sideways instead. */
@@ -70,12 +66,9 @@ interface Stage {
 }
 
 /**
- * Lay a preset out from its authored grid and emit the commands that build it.
- *
- * Positions come straight from the grid rather than the builder's auto-packing,
- * so an example lands exactly as authored, and the commands come from the same
- * emitter the graph builder and the docs pages use — so what the homepage shows
- * being run is what the plugin actually runs.
+ * Lay a preset out from its authored grid, and emit the commands that build it
+ * with the same emitter the builder and the docs pages use — so what the homepage
+ * shows being run is what the plugin runs.
  */
 const toStage = (preset: Preset): Stage => {
   const options: EmitOptions = {
@@ -110,13 +103,9 @@ interface Props {
  * The landing page's showcase: one example workspace at a time, from the command
  * that creates it to the diagram of what you end up with.
  *
- * The three steps above the diagram and the diagram itself are the same story —
- * the prompt asks for the example, the commands beneath it are the ones the
- * generators run, and the diagram fills in project by project as each command
- * appears. Hovering a node lights the commands that build it, and vice versa.
- *
- * Cycling pauses while the pointer or keyboard focus is inside, and while the tab
- * is in the background, so nothing moves underneath someone reading it.
+ * The steps and the diagram are one story — the prompt asks for the example, the
+ * commands are the ones the generators run, and the diagram fills in as each
+ * appears. Pointing at a node lights the commands that build it, and vice versa.
  */
 export const PresetShowcase = ({ builderHref }: Props) => {
   const stages = useMemo(
@@ -131,8 +120,7 @@ export const PresetShowcase = ({ builderHref }: Props) => {
 
   const [index, setIndex] = useState(0);
   const [phaseIndex, setPhaseIndex] = useState(0);
-  // How many examples have played. Picks the assistant, and keeps the workspace
-  // step from replaying once it has been created.
+  // How many examples have played, which picks the assistant and replays step one.
   const [pass, setPass] = useState(0);
   const [typed, setTyped] = useState(0);
   const [revealed, setRevealed] = useState(0);
@@ -151,8 +139,8 @@ export const PresetShowcase = ({ builderHref }: Props) => {
   const preset = stage.preset;
   const phase = FLOW_PHASES[phaseIndex].id;
   const prompt = preset.prompt ?? preset.description;
-  // How long each step of this example holds. Memoised: the step timer restarts
-  // whenever this changes, and typing re-renders many times a second.
+  // How long each step of this example holds. Memoised, since the step timer
+  // restarts whenever it changes and typing re-renders many times a second.
   const durations = useMemo(
     () =>
       FLOW_PHASES.map((entry) =>
@@ -160,28 +148,51 @@ export const PresetShowcase = ({ builderHref }: Props) => {
       ),
     [prompt],
   );
-  const isPlayingThrough =
-    isPlaying &&
-    !isHovered &&
-    !isFocused &&
-    isVisible &&
-    isOnScreen &&
-    !reduceMotion;
+  // Paused, or less motion asked for: the example reads finished rather than
+  // waiting partway through a sequence that will not play.
+  const isHeld = !isPlaying || reduceMotion;
+  const isPlayingThrough = !isHeld && isVisible && isOnScreen;
+  // Only moving on to the next example would pull the page out from under a
+  // reader, so that alone waits for the pointer to leave.
+  const canAdvanceExample = isPlayingThrough && !isHovered && !isFocused;
 
-  /** Jump to an example, and play it from the first step. */
+  /** The last step, which an example held rather than playing reads at. */
+  const LAST_PHASE = FLOW_PHASES.length - 1;
+
+  /** Jump to an example: play it from the first step, or show it finished. */
   const show = (next: number) => {
     setIndex(next);
-    setPhaseIndex(0);
+    setPhaseIndex(isHeld ? LAST_PHASE : 0);
     setPass((current) => current + 1);
     setFocus(undefined);
   };
 
-  // Each step holds for its own length, then the next takes over; after the last
-  // one the next example starts again from the first step.
+  /**
+   * Pausing settles on the finished example rather than freezing mid-sequence;
+   * starting again begins from the first step with nothing done.
+   */
+  const togglePlay = () => {
+    if (isPlaying) {
+      setIsPlaying(false);
+      setPhaseIndex(LAST_PHASE);
+      return;
+    }
+    setIsPlaying(true);
+    setPhaseIndex(0);
+    setTyped(0);
+    setRevealed(0);
+    setPass((current) => current + 1);
+    setFocus(undefined);
+  };
+
+  // Each step holds for its own length; after the last one the next example
+  // starts again from the first step.
   useEffect(() => {
     if (!isPlayingThrough) return;
+    const isLastPhase = phaseIndex === FLOW_PHASES.length - 1;
+    if (isLastPhase && !canAdvanceExample) return;
     const timer = setTimeout(() => {
-      if (phaseIndex < FLOW_PHASES.length - 1) {
+      if (!isLastPhase) {
         setPhaseIndex(phaseIndex + 1);
         return;
       }
@@ -191,11 +202,16 @@ export const PresetShowcase = ({ builderHref }: Props) => {
       setFocus(undefined);
     }, durations[phaseIndex]);
     return () => clearTimeout(timer);
-  }, [phaseIndex, isPlayingThrough, stages.length, durations]);
+  }, [
+    phaseIndex,
+    isPlayingThrough,
+    canAdvanceExample,
+    stages.length,
+    durations,
+  ]);
 
-  // Content that advances on its own is exactly what a reduced-motion preference
-  // asks for less of, so the showcase holds on the first example, finished, and
-  // waits to be driven by the tabs or the play button.
+  // Content that advances on its own is what a reduced-motion preference asks for
+  // less of, so the showcase holds on the first example, finished.
   useEffect(() => {
     if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     setReduceMotion(true);
@@ -203,8 +219,8 @@ export const PresetShowcase = ({ builderHref }: Props) => {
     setPhaseIndex(FLOW_PHASES.length - 1);
   }, []);
 
-  // Nothing plays until the showcase is scrolled to, so the reader arrives at the
-  // first step rather than partway through the sequence.
+  // Nothing plays until the showcase is scrolled to, so a reader arrives at the
+  // first step.
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
@@ -216,8 +232,7 @@ export const PresetShowcase = ({ builderHref }: Props) => {
     return () => observer.disconnect();
   }, []);
 
-  // A background tab animates nothing, so the examples would otherwise all have
-  // gone by before the reader came back.
+  // A background tab animates nothing, so the examples would go by unseen.
   useEffect(() => {
     const onVisibilityChange = () =>
       setIsVisible(document.visibilityState === 'visible');
@@ -262,11 +277,10 @@ export const PresetShowcase = ({ builderHref }: Props) => {
     return () => observer.disconnect();
   }, []);
 
-  // One scale for every example, set by the widest of them: it fills the panel on
-  // a big screen and holds its size as the showcase cycles, rather than nodes
-  // growing and shrinking between examples. Below the floor a phone scrolls the
-  // diagram sideways instead of shrinking the labels past reading. The panel
-  // stands as tall as the tallest example needs, so its height is steady too.
+  // One scale for every example, set by the widest: it fills a big panel and holds
+  // its size as the showcase cycles. Below the floor a phone scrolls the diagram
+  // sideways rather than shrinking labels past reading, and the panel stands as
+  // tall as the tallest example so its height is steady too.
   const scale = canvasWidth
     ? Math.min(
         MAX_SCALE,
@@ -300,40 +314,39 @@ export const PresetShowcase = ({ builderHref }: Props) => {
 
   const { graph, lines } = stage;
 
-  // Nothing has been asked or run until those steps come round: before then the
-  // prompt is empty and the third step waits, with the diagram standing as the
-  // plan, then both fill in together, command by command, until the whole graph
-  // is built. Derived rather than reset, so starting an example over — by cycling
-  // to it or by picking its tab — always starts from nothing.
-  const typedPrompt = reduceMotion
-    ? prompt.length
-    : phase === 'create'
-      ? 0
-      : typed;
+  // Nothing is asked or run until those steps come round, then the commands and
+  // the diagram fill in together. Derived rather than reset, so starting an
+  // example over always starts from nothing.
+  const typedPrompt = isHeld ? prompt.length : phase === 'create' ? 0 : typed;
   const revealedLines =
-    phase === 'build' ? revealed : phase === 'result' ? lines.length : 0;
+    isHeld || phase === 'result'
+      ? lines.length
+      : phase === 'build'
+        ? revealed
+        : 0;
   const built = useMemo(() => {
-    if (phase !== 'build') return undefined;
+    if (isHeld || phase !== 'build') return undefined;
     const ids = new Set<string>();
     for (const line of lines.slice(0, revealed)) {
       if (line.nodeId) ids.add(line.nodeId);
       if (line.edgeId) ids.add(line.edgeId);
     }
     return ids;
-  }, [phase, lines, revealed]);
+  }, [isHeld, phase, lines, revealed]);
   const isPlanned = (id: string) =>
-    phase === 'create' || phase === 'ask' || (built ? !built.has(id) : false);
+    !isHeld &&
+    (phase === 'create' || phase === 'ask' || (built ? !built.has(id) : false));
 
-  // What the command that just appeared scaffolded, so the diagram draws that
-  // project or connection in rather than leaving the reader to spot the change.
+  // What the command that just appeared scaffolded, so the diagram lights it up
+  // rather than leaving the change to be spotted.
   const arriving = useMemo(() => {
-    if (phase !== 'build' || revealed === 0) return undefined;
+    if (isHeld || phase !== 'build' || revealed === 0) return undefined;
     const line = lines[revealed - 1];
     if (!line) return undefined;
     return new Set(
       [line.nodeId, line.edgeId].filter((id): id is string => id !== undefined),
     );
-  }, [phase, lines, revealed]);
+  }, [isHeld, phase, lines, revealed]);
 
   const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
   const focusedEdge = focus?.edgeId
@@ -408,11 +421,10 @@ export const PresetShowcase = ({ builderHref }: Props) => {
                 aria-hidden="true"
               />
             )}
-            <span className="ps-tab-label">{entry.preset.label}</span>
+            {entry.preset.label}
           </button>
         ))}
       </div>
-
       <div
         className="ps-stage"
         id={`${tabsId}-panel`}
@@ -422,6 +434,7 @@ export const PresetShowcase = ({ builderHref }: Props) => {
         <div className="af-flow">
           <FlowSteps
             phase={phase}
+            held={isHeld}
             pass={pass}
             prompt={prompt}
             typed={typedPrompt}
@@ -449,7 +462,7 @@ export const PresetShowcase = ({ builderHref }: Props) => {
               <span className="ps-panel-chip">Result</span>
               {preset.label}
             </p>
-            <div className="ps-stats">
+            <div className="ps-panel-actions">
               <span className="ps-stat">
                 {graph.nodes.length} project
                 {graph.nodes.length === 1 ? '' : 's'}
@@ -458,6 +471,24 @@ export const PresetShowcase = ({ builderHref }: Props) => {
                 {graph.edges.length} connection
                 {graph.edges.length === 1 ? '' : 's'}
               </span>
+              <a
+                className="gb-action gb-action--primary gb-action--small"
+                href={`${builderHref}?preset=${preset.id}`}
+              >
+                <span>Customize</span>
+                <svg
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <line x1="5" y1="12" x2="18" y2="12" />
+                  <polyline points="12 6 18 12 12 18" />
+                </svg>
+              </a>
             </div>
           </div>
 
@@ -534,7 +565,12 @@ export const PresetShowcase = ({ builderHref }: Props) => {
                       }${isPlanned(edge.id) ? ' is-planned' : ''}${
                         arriving?.has(edge.id) ? ' is-arriving' : ''
                       }`}
+                      onPointerEnter={() => setFocus({ edgeId: edge.id })}
+                      onPointerLeave={() => setFocus(undefined)}
                     >
+                      {/* A connection is a thin line to hit, so pointing at it is
+                          picked up by a wider invisible path over the top. */}
+                      <path className="gb-edge-hit" d={path} />
                       {/* Dashes travelling the path, so a connection reads as a
                           direction of flow. */}
                       <path
@@ -560,6 +596,7 @@ export const PresetShowcase = ({ builderHref }: Props) => {
                     }${arriving?.has(node.id) ? ' is-arriving' : ''}`}
                     style={{ left: node.x, top: node.y }}
                     onPointerEnter={() => setFocus({ nodeId: node.id })}
+                    onPointerLeave={() => setFocus(undefined)}
                   >
                     <NodeLogo
                       logo={type.logo}
@@ -591,11 +628,13 @@ export const PresetShowcase = ({ builderHref }: Props) => {
         </div>
       </div>
 
-      <div className="ps-actions">
+      {/* A rule closing the section off, with the play control at the end of it. */}
+      <div className="ps-bar">
+        <span className="ps-bar-rule" aria-hidden="true" />
         <button
           type="button"
-          className="gb-action"
-          onClick={() => setIsPlaying((playing) => !playing)}
+          className="ps-bar-button"
+          onClick={togglePlay}
           aria-pressed={!isPlaying}
         >
           {isPlaying ? (
@@ -610,25 +649,6 @@ export const PresetShowcase = ({ builderHref }: Props) => {
           )}
           <span>{isPlaying ? 'Pause' : 'Play'}</span>
         </button>
-
-        <a
-          className="gb-action gb-action--primary"
-          href={`${builderHref}?preset=${preset.id}`}
-        >
-          <span>Open this in the graph builder</span>
-          <svg
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <line x1="5" y1="12" x2="18" y2="12" />
-            <polyline points="12 6 18 12 12 18" />
-          </svg>
-        </a>
       </div>
     </div>
   );

@@ -13,11 +13,9 @@ const CREATE_COMMAND = 'pnpm create @aws/nx-workspace';
 const TOOL_CALLS = ['list-generators', 'generator-guide'];
 
 /**
- * The assistants the workspace is shown being opened in. A new workspace
- * configures the MCP server for both, so either is one step away.
- *
- * `mark` and `tint` draw the glyph in the window chrome — a shape and a colour
- * each assistant is known by, next to its name, rather than its own artwork.
+ * The assistants the workspace is shown being opened in — a new workspace
+ * configures the MCP server for both. `mark` and `tint` draw the glyph beside the
+ * name: a shape and a colour each is known by, not its own artwork.
  */
 const ASSISTANTS = [
   { name: 'Claude Code', mark: 'burst', tint: '#d97757' },
@@ -33,9 +31,8 @@ type Mark = (typeof ASSISTANTS)[number]['mark'];
 export type FlowPhase = 'create' | 'ask' | 'build' | 'result';
 
 /**
- * The phases in order, with how long each holds before the flow moves on. The
- * asking step is timed from the prompt being typed, so its value here only
- * stands in until that is known.
+ * The phases in order, with how long each holds. The asking step is timed from the
+ * prompt being typed, so its value here only stands in.
  */
 export const FLOW_PHASES: readonly { id: FlowPhase; ms: number }[] = [
   { id: 'create', ms: 3200 },
@@ -70,6 +67,8 @@ const WindowDots = () => (
 interface Props {
   /** Which step is playing. */
   phase: FlowPhase;
+  /** Shown finished rather than playing, so nothing arrives a line at a time. */
+  held?: boolean;
   /** How many examples have played, which picks the assistant shown. */
   pass: number;
   /** What is being asked for, and how much of it has been typed so far. */
@@ -89,15 +88,15 @@ interface Props {
 
 /**
  * The three steps between one command and a working application: create the
- * workspace, open it in an AI assistant and ask, and watch it run the
- * generators. The last step's commands are the ones that build the diagram
- * below it.
+ * workspace, open it in an AI assistant and ask, and watch it run the generators
+ * that build the diagram below.
  *
- * Purely a view — what is typed, what has appeared and which step is playing all
+ * Purely a view: what is typed, what has appeared and which step is playing all
  * come from the timeline that drives it.
  */
 export const FlowSteps = ({
   phase,
+  held,
   pass,
   prompt,
   typed,
@@ -137,9 +136,11 @@ export const FlowSteps = ({
               <CopyButton text={CREATE_COMMAND} title="Copy the command" />
             </div>
 
-            {/* Keyed on the pass, so the output types itself out again each time
-                the sequence starts over. */}
-            <div className="af-body af-body--terminal" key={pass}>
+            {/* Keyed on the pass, so the output arrives again each time over. */}
+            <div
+              className={`af-body af-body--terminal${held ? ' is-complete' : ''}`}
+              key={pass}
+            >
               <p className="af-line">
                 <span className="gb-prompt">❯</span>
                 <code>
@@ -173,8 +174,7 @@ export const FlowSteps = ({
           <div className="af-window">
             <div className="gb-window-chrome">
               <WindowDots />
-              {/* Keyed on the assistant, so its name and mark arrive together when
-                the example changes rather than changing in place. */}
+              {/* Keyed on the assistant, so its name and mark arrive together. */}
               <span className="gb-window-name" key={assistant.name}>
                 <AssistantMark mark={assistant.mark} tint={assistant.tint} />
                 {assistant.name}

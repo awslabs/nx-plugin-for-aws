@@ -447,13 +447,12 @@ export interface ScriptLine {
 }
 
 /**
- * The emitted commands as runnable script lines: the workspace command, then a
- * `cd` into it, then each generator command prefixed for the chosen package
- * manager and run non-interactively.
+ * The emitted commands as runnable script lines: the workspace command, a `cd`
+ * into it, then each generator command prefixed for the package manager and run
+ * non-interactively.
  *
- * `skipWorkspace` drops the workspace-create and `cd` lines, emitting only the
- * generator commands — for a page that has already had the reader create the
- * workspace, so the commands run straight inside it.
+ * `skipWorkspace` drops the first two, for a page whose reader has already
+ * created the workspace.
  */
 export const toScriptLines = (
   graph: Graph,
