@@ -18,6 +18,8 @@ import PackageManagerShortCommand from '@components/package-manager-short-comman
 import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
 import OptionFilter from '@components/option-filter.astro';
+import InstallCommand from '@components/install-command.astro';
+import { TS_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/versions';
 
 [Smithy](https://smithy.io/) é uma linguagem de definição de interface independente de protocolo para criar APIs de forma orientada a modelos.
 
@@ -46,7 +48,6 @@ O gerador cria dois projetos relacionados no diretório `<directory>/<api-name>`
 <FileTree>
 
 - **model/** Projeto de modelo Smithy
-  - package.json Manifesto do projeto definindo o nome do pacote e dependências
   - project.json Configuração do projeto e alvos de build
   - smithy-build.json Configuração de build do Smithy
   - ssdk.rolldown.config.mjs Empacota o TypeScript Server SDK gerado
@@ -55,9 +56,15 @@ O gerador cria dois projetos relacionados no diretório `<directory>/<api-name>`
     - operations/
       - echo.smithy Definição de operação de exemplo
 - **backend/** Implementação backend TypeScript
+  - package.json Manifesto do projeto definindo o nome do pacote e dependências
   - project.json Configuração do projeto e alvos de build
   - rolldown.config.ts Configuração de empacotamento
+  - tsconfig.json Configuração TypeScript
+  - tsconfig.lib.json Configuração TypeScript para as fontes da biblioteca
+  - tsconfig.spec.json Configuração TypeScript para os testes
+  - vitest.config.mts Configuração Vitest
   - src/
+    - index.ts Ponto de entrada do pacote
     - handler.ts Handler do AWS Lambda
     - local-server.ts Servidor de desenvolvimento local
     - service.ts Implementação do serviço
@@ -91,7 +98,7 @@ O projeto comum de infraestrutura como código é estruturado da seguinte forma:
 </FileTree>
 
 :::note[Projeto Gerado]
-Este projeto é gerado usando o gerador [`ts#project`](guides/typescript-project) e, portanto, configura os mesmos alvos de build.
+Este projeto é gerado usando o gerador <Link path="/guides/typescript-project">`ts#project`</Link> e, portanto, configura os mesmos alvos de build.
 :::
 </Fragment>
 <Fragment slot="terraform">
@@ -110,7 +117,7 @@ Este projeto é gerado usando o gerador [`ts#project`](guides/typescript-project
 </FileTree>
 
 :::note[Projeto Gerado]
-Este projeto é gerado usando o gerador [`terraform#project`](guides/terraform-project) e, portanto, configura os mesmos alvos de build.
+Este projeto é gerado usando o gerador <Link path="/guides/terraform-project">`terraform#project`</Link> e, portanto, configura os mesmos alvos de build.
 :::
 </Fragment>
 </Infrastructure>
@@ -475,7 +482,9 @@ export interface ServiceContext {
 Em seguida, escreva o resolvedor em `src/identity.ts`. Ele lança `UnauthorizedError` quando o chamador não pode ser determinado. A implementação depende do seu método `auth` selecionado:
 
 <OptionFilter when={{ auth: 'iam' }} description="Resolução de identidade para APIs autenticadas por IAM">
-Para autenticação `IAM`, procuramos o chamador no Cognito usando o sub extraído do evento do API Gateway:
+Para autenticação `IAM`, procuramos o chamador no Cognito usando o sub extraído do evento do API Gateway. A busca usa o cliente Cognito Identity Provider, que não é uma dependência de um backend Smithy gerado, então instale-o no projeto backend primeiro:
+
+<InstallCommand pkg={`@aws-sdk/client-cognito-identity-provider@${TS_VERSIONS['@aws-sdk/client-cognito-identity-provider']}`} project="@my-scope/my-api" projectDir="packages/my-api/backend" />
 
 ```ts
 import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
@@ -498,7 +507,9 @@ export const getIdentity = async (
   }
 
   if (!sub) {
-    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
+    throw new UnauthorizedError({
+      message: 'Unable to determine calling user',
+    });
   }
 
   const { Users } = await cognito.listUsers({
@@ -509,7 +520,9 @@ export const getIdentity = async (
   });
 
   if (!Users || Users.length !== 1) {
-    throw new UnauthorizedError({ message: `No user found with subjectId ${sub}` });
+    throw new UnauthorizedError({
+      message: `No user found with subjectId ${sub}`,
+    });
   }
 
   return { sub, username: Users[0].Username! };
@@ -536,7 +549,9 @@ export const getIdentity = async (
   const username = claims?.username;
 
   if (!sub || !username) {
-    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
+    throw new UnauthorizedError({
+      message: 'Unable to determine calling user',
+    });
   }
 
   return { sub, username };
@@ -559,6 +574,17 @@ const httpResponse = await serviceHandler.handle(httpRequest, {
   logger,
   metrics,
   getIdentity: () => getIdentity(event),
+});
+```
+
+`getIdentity` é um campo obrigatório em `ServiceContext`, e como a [observação acima](#contexto-do-serviço) nota, o contexto é construído em **ambos** os pontos de entrada — então `src/local-server.ts` também precisa dele. Não há autorizador do API Gateway na frente do servidor local, então forneça uma identidade stub para desenvolvimento local:
+
+```ts {5} ins={5}
+const httpResponse = await serviceHandler.handle(httpRequest, {
+  tracer,
+  logger,
+  metrics,
+  getIdentity: async () => ({ sub: 'local', username: 'local' }),
 });
 ```
 
@@ -800,6 +826,49 @@ output "lambda_function_name" {
 <Snippet name="api/access-logging" parentHeading="Logging de acesso" />
 
 ### Integrações
+
+<Infrastructure>
+<Fragment slot="cdk">
+:::caution[Nomes de operações são camelCase no CDK]
+As operações Smithy são declaradas em PascalCase (`Echo`), e seu backend as exporta sob esse nome. As chaves de integração CDK são a forma **camelCase** do mesmo nome, então uma operação `Echo` é `echo` em todos os lugares na sua stack:
+
+```ts
+const api = new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this)
+    // `Echo` in the model, `echo` here
+    .withOperationOptions({ echo: { timeout: Duration.seconds(60) } })
+    .build(),
+});
+
+api.integrations.echo.handler.addToRolePolicy(...);
+```
+:::
+</Fragment>
+<Fragment slot="terraform">
+:::note[Nomes de operações são camelCase no Terraform]
+As saídas com chave de operação do módulo gerado e seu `operations.json` usam a forma **camelCase** do nome da operação Smithy, então uma operação Smithy `Echo` tem a chave `echo`:
+
+```hcl
+# `Echo` in the model, `echo` here
+resource "aws_iam_role_policy" "echo_permissions" {
+  name = "echo-additional-permissions"
+  role = module.my_api.lambda_execution_role_names["echo"]
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = "arn:aws:s3:::my-bucket/*"
+      }
+    ]
+  })
+}
+```
+:::
+</Fragment>
+</Infrastructure>
 
 <Snippet name="api/type-safe-api-integrations" parentHeading="Integrações" />
 

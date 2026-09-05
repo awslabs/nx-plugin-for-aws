@@ -145,6 +145,11 @@ export async function tsTrpcApiGenerator(
   );
   const backendRoot = projectConfig.root;
 
+  if (!projectExists) {
+    // Clear the placeholder barrel from ts#project so the API's own is written.
+    tree.delete(joinPathFragments(backendRoot, 'src', 'index.ts'));
+  }
+
   const port = assignPort(tree, projectConfig, 2022);
 
   const enhancedOptions = {
@@ -275,13 +280,14 @@ export async function tsTrpcApiGenerator(
 
   updateProjectConfiguration(tree, projectConfig.name, projectConfig);
 
+  // The API's source is user-owned, so a re-run leaves existing files alone.
   generateFiles(
     tree,
     joinPathFragments(import.meta.dirname, 'files'),
     backendRoot,
     enhancedOptions,
     {
-      overwriteStrategy: OverwriteStrategy.Overwrite,
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
   );
 

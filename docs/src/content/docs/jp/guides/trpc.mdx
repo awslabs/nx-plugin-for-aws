@@ -16,6 +16,8 @@ import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
 import OptionFilter from '@components/option-filter.astro';
+import InstallCommand from '@components/install-command.astro';
+import { TS_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/versions';
 
 [tRPC](https://trpc.io/)は、TypeScriptでエンドツーエンドの型安全性を備えたAPIを構築するためのフレームワークです。tRPCを使用すると、API操作の入力と出力の更新がクライアントコードに即座に反映され、プロジェクトを再ビルドする必要なくIDEで確認できます。
 
@@ -49,15 +51,18 @@ tRPC APIジェネレーターは、AWS CDKまたはTerraformインフラスト�
 
 <FileTree>
   - src
+    - index.ts Package entrypoint re-exporting the router, context, client and schema
     - init.ts Backend tRPC initialisation
     - handler.ts Lambda handler entrypoint
     - router.ts tRPC router definition
     - schema Schema definitions using Zod
+      - index.ts Barrel re-exporting every schema
       - echo.ts Example definitions for the input and output of the "echo" procedure
       - z-async-iterable.ts Zod helper for subscriptions (REST API only)
     - procedures Procedures (or operations) exposed by your API
       - echo.ts Example procedure
     - middleware
+      - index.ts Barrel re-exporting the middleware, and the procedure context type
       - error.ts Middleware for error handling
       - logger.ts middleware for configuring AWS Powertools for Lambda logging
       - tracer.ts middleware for configuring AWS Powertools for Lambda tracing
@@ -65,9 +70,15 @@ tRPC APIジェネレーターは、AWS CDKまたはTerraformインフラスト�
     - local-server.ts tRPC standalone adapter entrypoint for local development server
     - client
       - index.ts Type-safe client for machine-to-machine API calls
+  - rolldown.config.ts Bundle configuration for the Lambda deployment package
   - tsconfig.json TypeScript configuration
+  - tsconfig.lib.json TypeScript configuration for the library sources
+  - tsconfig.spec.json TypeScript configuration for the tests
+  - vitest.config.mts Vitest configuration
   - package.json Project manifest defining the project's package name and dependencies
   - project.json Project configuration and build targets
+  - README.md Project readme
+  - .gitignore Ignores the project's build output
 
 </FileTree>
 
@@ -297,6 +308,10 @@ export const echo = publicProcedure
 <OptionFilter when={{ auth: 'iam' }} description="Identity middleware example for IAM-authenticated APIs">
 この例では、`IAM`認証のIDミドルウェアについて説明します。API Gatewayイベントから抽出されたsubを使用して、Cognitoで呼び出し元を検索します。
 
+検索にはCognito Identity Providerクライアントを使用しますが、これは生成されたtRPC APIの依存関係ではありません。まず、APIプロジェクトにインストールしてください：
+
+<InstallCommand pkg={`@aws-sdk/client-cognito-identity-provider@${TS_VERSIONS['@aws-sdk/client-cognito-identity-provider']}`} project="@my-scope/my-api" />
+
 まず、コンテキストに追加する内容を定義します：
 
 ```ts
@@ -334,8 +349,8 @@ export const createIdentityPlugin = () => {
 ```ts
 import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
 import { initTRPC, TRPCError } from '@trpc/server';
-import { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
-import { APIGatewayProxyEvent } from 'aws-lambda';
+import type { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
+import type { APIGatewayProxyEvent } from 'aws-lambda';
 
 export interface IIdentityContext {
   identity?: {
@@ -345,12 +360,17 @@ export interface IIdentityContext {
 }
 
 export const createIdentityPlugin = () => {
-  const t = initTRPC.context<IIdentityContext & CreateAWSLambdaContextOptions<APIGatewayProxyEvent>>().create();
+  const t = initTRPC
+    .context<
+      IIdentityContext & CreateAWSLambdaContextOptions<APIGatewayProxyEvent>
+    >()
+    .create();
 
   const cognito = new CognitoIdentityProvider();
 
   return t.procedure.use(async (opts) => {
-    const cognitoAuthenticationProvider = opts.ctx.event.requestContext?.identity?.cognitoAuthenticationProvider;
+    const cognitoAuthenticationProvider =
+      opts.ctx.event.requestContext?.identity?.cognitoAuthenticationProvider;
 
     let sub: string | undefined = undefined;
     if (cognitoAuthenticationProvider) {
@@ -397,8 +417,8 @@ export const createIdentityPlugin = () => {
 ```ts
 import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
 import { initTRPC, TRPCError } from '@trpc/server';
-import { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
-import { APIGatewayProxyEventV2WithIAMAuthorizer } from 'aws-lambda';
+import type { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
+import type { APIGatewayProxyEventV2WithIAMAuthorizer } from 'aws-lambda';
 
 export interface IIdentityContext {
   identity?: {
@@ -408,7 +428,12 @@ export interface IIdentityContext {
 }
 
 export const createIdentityPlugin = () => {
-  const t = initTRPC.context<IIdentityContext & CreateAWSLambdaContextOptions<APIGatewayProxyEventV2WithIAMAuthorizer>>().create();
+  const t = initTRPC
+    .context<
+      IIdentityContext &
+        CreateAWSLambdaContextOptions<APIGatewayProxyEventV2WithIAMAuthorizer>
+    >()
+    .create();
 
   const cognito = new CognitoIdentityProvider();
 
@@ -481,12 +506,16 @@ export interface IIdentityContext {
 
 コンテキストに追加の_オプション_プロパティを定義することに注意してください。tRPCは、このミドルウェアを正しく構成したプロシージャでこれが定義されていることを保証します。
 
-次に、ミドルウェア自体：
+次に、ミドルウェア自体です。イベントタイプとクレームの場所はREST APIとHTTP APIで異なるため、実装は選択した`infra`によって異なります：
+
+<Tabs syncKey="http-rest">
+<TabItem label="REST API" _filter={{ infra: 'rest-lambda' }}>
+REST APIのCognito User Poolsオーソライザーは、クレームを`event.requestContext.authorizer.claims`に配置します：
 
 ```ts
 import { initTRPC, TRPCError } from '@trpc/server';
-import { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
-import { APIGatewayProxyEvent } from 'aws-lambda';
+import type { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
+import type { APIGatewayProxyEvent } from 'aws-lambda';
 
 export interface IIdentityContext {
   identity?: {
@@ -497,7 +526,9 @@ export interface IIdentityContext {
 
 export const createIdentityPlugin = () => {
   const t = initTRPC
-    .context<IIdentityContext & CreateAWSLambdaContextOptions<APIGatewayProxyEvent>>()
+    .context<
+      IIdentityContext & CreateAWSLambdaContextOptions<APIGatewayProxyEvent>
+    >()
     .create();
 
   return t.procedure.use(async (opts) => {
@@ -506,7 +537,7 @@ export const createIdentityPlugin = () => {
       | undefined;
 
     const sub = claims?.sub;
-    const username = claims?.username;
+    const username = claims?.username ?? claims?.['cognito:username'];
 
     if (!sub || !username) {
       throw new TRPCError({
@@ -527,6 +558,59 @@ export const createIdentityPlugin = () => {
   });
 };
 ```
+</TabItem>
+<TabItem label="HTTP API" _filter={{ infra: 'http-lambda' }}>
+HTTP APIのJWTオーソライザーは、クレームが1レベル深い`event.requestContext.authorizer.jwt.claims`にあるpayload-v2イベントを配信します。コンテキストは、生成された`publicProcedure`が使用するものと一致するように`APIGatewayProxyEventV2WithJWTAuthorizer`で型付けする必要があります。そうしないと、`.concat()`がtRPCの`Context mismatch`エラーで失敗します：
+
+```ts
+import { initTRPC, TRPCError } from '@trpc/server';
+import type { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
+import type { APIGatewayProxyEventV2WithJWTAuthorizer } from 'aws-lambda';
+
+export interface IIdentityContext {
+  identity?: {
+    sub: string;
+    username: string;
+  };
+}
+
+export const createIdentityPlugin = () => {
+  const t = initTRPC
+    .context<
+      IIdentityContext &
+        CreateAWSLambdaContextOptions<APIGatewayProxyEventV2WithJWTAuthorizer>
+    >()
+    .create();
+
+  return t.procedure.use(async (opts) => {
+    const claims = opts.ctx.event.requestContext?.authorizer?.jwt?.claims as
+      | Record<string, string>
+      | undefined;
+
+    const sub = claims?.sub;
+    const username = claims?.username ?? claims?.['cognito:username'];
+
+    if (!sub || !username) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Unable to determine calling user',
+      });
+    }
+
+    return await opts.next({
+      ctx: {
+        ...opts.ctx,
+        identity: {
+          sub,
+          username,
+        },
+      },
+    });
+  });
+};
+```
+</TabItem>
+</Tabs>
 
 その後、呼び出し元のIDが必要なプロシージャにプラグインをミックスできます：
 

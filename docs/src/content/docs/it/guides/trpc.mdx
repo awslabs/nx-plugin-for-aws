@@ -16,6 +16,8 @@ import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
 import OptionFilter from '@components/option-filter.astro';
+import InstallCommand from '@components/install-command.astro';
+import { TS_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/versions';
 
 [tRPC](https://trpc.io/) è un framework per la creazione di API in TypeScript con type safety end-to-end. Utilizzando tRPC, gli aggiornamenti agli input e output delle operazioni API si riflettono immediatamente nel codice client e sono visibili nel tuo IDE senza la necessità di ricostruire il progetto.
 
@@ -49,15 +51,18 @@ Il generatore creerà la seguente struttura di progetto nella directory `<direct
 
 <FileTree>
   - src
+    - index.ts Package entrypoint re-exporting the router, context, client and schema
     - init.ts Backend tRPC initialisation
     - handler.ts Lambda handler entrypoint
     - router.ts tRPC router definition
     - schema Schema definitions using Zod
+      - index.ts Barrel re-exporting every schema
       - echo.ts Example definitions for the input and output of the "echo" procedure
       - z-async-iterable.ts Zod helper for subscriptions (REST API only)
     - procedures Procedures (or operations) exposed by your API
       - echo.ts Example procedure
     - middleware
+      - index.ts Barrel re-exporting the middleware, and the procedure context type
       - error.ts Middleware for error handling
       - logger.ts middleware for configuring AWS Powertools for Lambda logging
       - tracer.ts middleware for configuring AWS Powertools for Lambda tracing
@@ -65,9 +70,15 @@ Il generatore creerà la seguente struttura di progetto nella directory `<direct
     - local-server.ts tRPC standalone adapter entrypoint for local development server
     - client
       - index.ts Type-safe client for machine-to-machine API calls
+  - rolldown.config.ts Bundle configuration for the Lambda deployment package
   - tsconfig.json TypeScript configuration
+  - tsconfig.lib.json TypeScript configuration for the library sources
+  - tsconfig.spec.json TypeScript configuration for the tests
+  - vitest.config.mts Vitest configuration
   - package.json Project manifest defining the project's package name and dependencies
   - project.json Project configuration and build targets
+  - README.md Project readme
+  - .gitignore Ignores the project's build output
 
 </FileTree>
 
@@ -297,6 +308,10 @@ Come esempio, implementiamo un middleware per estrarre alcuni dettagli sull'uten
 <OptionFilter when={{ auth: 'iam' }} description="Identity middleware example for IAM-authenticated APIs">
 Questo esempio illustra il middleware di identità per l'autenticazione `IAM`. Cerchiamo il chiamante in Cognito utilizzando il sub estratto dall'evento API Gateway.
 
+La ricerca utilizza il client Cognito Identity Provider, che non è una dipendenza di un'API tRPC generata. Installalo prima nel tuo progetto API:
+
+<InstallCommand pkg={`@aws-sdk/client-cognito-identity-provider@${TS_VERSIONS['@aws-sdk/client-cognito-identity-provider']}`} project="@my-scope/my-api" />
+
 Prima, definiamo cosa aggiungeremo al contesto:
 
 ```ts
@@ -334,8 +349,8 @@ Nel nostro caso, vogliamo estrarre dettagli sull'utente Cognito chiamante. Lo fa
 ```ts
 import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
 import { initTRPC, TRPCError } from '@trpc/server';
-import { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
-import { APIGatewayProxyEvent } from 'aws-lambda';
+import type { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
+import type { APIGatewayProxyEvent } from 'aws-lambda';
 
 export interface IIdentityContext {
   identity?: {
@@ -345,12 +360,17 @@ export interface IIdentityContext {
 }
 
 export const createIdentityPlugin = () => {
-  const t = initTRPC.context<IIdentityContext & CreateAWSLambdaContextOptions<APIGatewayProxyEvent>>().create();
+  const t = initTRPC
+    .context<
+      IIdentityContext & CreateAWSLambdaContextOptions<APIGatewayProxyEvent>
+    >()
+    .create();
 
   const cognito = new CognitoIdentityProvider();
 
   return t.procedure.use(async (opts) => {
-    const cognitoAuthenticationProvider = opts.ctx.event.requestContext?.identity?.cognitoAuthenticationProvider;
+    const cognitoAuthenticationProvider =
+      opts.ctx.event.requestContext?.identity?.cognitoAuthenticationProvider;
 
     let sub: string | undefined = undefined;
     if (cognitoAuthenticationProvider) {
@@ -397,8 +417,8 @@ export const createIdentityPlugin = () => {
 ```ts
 import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
 import { initTRPC, TRPCError } from '@trpc/server';
-import { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
-import { APIGatewayProxyEventV2WithIAMAuthorizer } from 'aws-lambda';
+import type { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
+import type { APIGatewayProxyEventV2WithIAMAuthorizer } from 'aws-lambda';
 
 export interface IIdentityContext {
   identity?: {
@@ -408,7 +428,12 @@ export interface IIdentityContext {
 }
 
 export const createIdentityPlugin = () => {
-  const t = initTRPC.context<IIdentityContext & CreateAWSLambdaContextOptions<APIGatewayProxyEventV2WithIAMAuthorizer>>().create();
+  const t = initTRPC
+    .context<
+      IIdentityContext &
+        CreateAWSLambdaContextOptions<APIGatewayProxyEventV2WithIAMAuthorizer>
+    >()
+    .create();
 
   const cognito = new CognitoIdentityProvider();
 
@@ -481,12 +506,16 @@ export interface IIdentityContext {
 
 Nota che definiamo una proprietà aggiuntiva _opzionale_ sul contesto. tRPC gestisce l'assicurazione che questa sia definita nelle procedure che hanno configurato correttamente questo middleware.
 
-Successivamente, il middleware stesso:
+Successivamente, il middleware stesso. Il tipo di evento e la posizione dei claim differiscono tra una REST API e un'HTTP API, quindi l'implementazione dipende dal tuo `infra` selezionato:
+
+<Tabs syncKey="http-rest">
+<TabItem label="REST API" _filter={{ infra: 'rest-lambda' }}>
+L'autorizzatore Cognito User Pools di una REST API posiziona i claim in `event.requestContext.authorizer.claims`:
 
 ```ts
 import { initTRPC, TRPCError } from '@trpc/server';
-import { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
-import { APIGatewayProxyEvent } from 'aws-lambda';
+import type { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
+import type { APIGatewayProxyEvent } from 'aws-lambda';
 
 export interface IIdentityContext {
   identity?: {
@@ -497,7 +526,9 @@ export interface IIdentityContext {
 
 export const createIdentityPlugin = () => {
   const t = initTRPC
-    .context<IIdentityContext & CreateAWSLambdaContextOptions<APIGatewayProxyEvent>>()
+    .context<
+      IIdentityContext & CreateAWSLambdaContextOptions<APIGatewayProxyEvent>
+    >()
     .create();
 
   return t.procedure.use(async (opts) => {
@@ -506,7 +537,7 @@ export const createIdentityPlugin = () => {
       | undefined;
 
     const sub = claims?.sub;
-    const username = claims?.username;
+    const username = claims?.username ?? claims?.['cognito:username'];
 
     if (!sub || !username) {
       throw new TRPCError({
@@ -527,6 +558,59 @@ export const createIdentityPlugin = () => {
   });
 };
 ```
+</TabItem>
+<TabItem label="HTTP API" _filter={{ infra: 'http-lambda' }}>
+L'autorizzatore JWT di un'HTTP API fornisce un evento payload-v2 i cui claim si trovano un livello più in profondità, in `event.requestContext.authorizer.jwt.claims`. Il contesto deve essere tipizzato su `APIGatewayProxyEventV2WithJWTAuthorizer` per corrispondere a quello utilizzato dal `publicProcedure` generato — altrimenti `.concat()` fallisce con l'errore `Context mismatch` di tRPC:
+
+```ts
+import { initTRPC, TRPCError } from '@trpc/server';
+import type { CreateAWSLambdaContextOptions } from '@trpc/server/adapters/aws-lambda';
+import type { APIGatewayProxyEventV2WithJWTAuthorizer } from 'aws-lambda';
+
+export interface IIdentityContext {
+  identity?: {
+    sub: string;
+    username: string;
+  };
+}
+
+export const createIdentityPlugin = () => {
+  const t = initTRPC
+    .context<
+      IIdentityContext &
+        CreateAWSLambdaContextOptions<APIGatewayProxyEventV2WithJWTAuthorizer>
+    >()
+    .create();
+
+  return t.procedure.use(async (opts) => {
+    const claims = opts.ctx.event.requestContext?.authorizer?.jwt?.claims as
+      | Record<string, string>
+      | undefined;
+
+    const sub = claims?.sub;
+    const username = claims?.username ?? claims?.['cognito:username'];
+
+    if (!sub || !username) {
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: 'Unable to determine calling user',
+      });
+    }
+
+    return await opts.next({
+      ctx: {
+        ...opts.ctx,
+        identity: {
+          sub,
+          username,
+        },
+      },
+    });
+  });
+};
+```
+</TabItem>
+</Tabs>
 
 Puoi quindi mescolare il plugin in qualsiasi procedura che necessita dell'identità del chiamante:
 
@@ -595,7 +679,7 @@ export class ExampleStack extends Stack {
 }
 ```
 
-Il costrutto `UserIdentity` può essere generato utilizzando il <Link path="/guides/react-website-auth">generatore `ts#website#auth`</Link>.
+Il costrutto `UserIdentity` può essere generato utilizzando il <Link path="/it/guides/react-website-auth">generatore `ts#website#auth`</Link>.
 </OptionFilter>
 
 Questo configura l'infrastruttura della tua API, inclusa un'API AWS API Gateway REST o HTTP, funzioni AWS Lambda per la logica di business e autenticazione basata sul tuo metodo `auth` scelto.
@@ -605,7 +689,7 @@ Questo configura l'infrastruttura della tua API, inclusa un'API AWS API Gateway 
 <Fragment slot="terraform">
 I moduli Terraform per il deploy della tua API sono in the `common/terraform` folder. Puoi usare questo in una configurazione Terraform.
 
-Il modulo API prepara il suo zip di deployment Lambda in un bucket S3 di asset condiviso — vedi la <Link path="/guides/terraform-project">guida all'infrastruttura Terraform</Link> per i dettagli. Istanzia il modulo `core/asset-bucket` una volta per deployment e passa il suo output `bucket_name` in ogni modulo API / Lambda tramite l'input `asset_bucket_name`:
+Il modulo API prepara il suo zip di deployment Lambda in un bucket S3 di asset condiviso — vedi la <Link path="/it/guides/terraform-project">guida all'infrastruttura Terraform</Link> per i dettagli. Istanzia il modulo `core/asset-bucket` una volta per deployment e passa il suo output `bucket_name` in ogni modulo API / Lambda tramite l'input `asset_bucket_name`:
 
 <OptionFilter when={{ auth: ['iam', 'custom'] }} description="Terraform usage for IAM or Custom authentication">
 ```hcl {1-3, 8}

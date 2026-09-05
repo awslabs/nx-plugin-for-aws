@@ -37,6 +37,7 @@ export const TS_VERSIONS = {
   '@aws-sdk/client-bedrock-runtime': '3.1121.0',
   '@aws-sdk/client-s3': '3.1121.0',
   '@aws-sdk/client-sts': '3.1121.0',
+  '@aws-sdk/client-cognito-identity-provider': '3.1121.0',
   '@aws-sdk/credential-providers': '3.1121.0',
   '@aws-sdk/credential-provider-cognito-identity': '3.972.69',
   '@aws-sdk/client-secrets-manager': '3.1121.0',
