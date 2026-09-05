@@ -25,9 +25,10 @@ import { TS_VERSIONS } from '../../../utils/versions.js';
  * package and declares it as a registry dependency, so a component added by
  * `shadcn add` no longer resolves the package's own `#lib/utils` helper. This
  * carries an existing workspace onto that shape: the components import `cn`,
- * `src/lib/utils.ts` re-exports it so the `utils` alias the shadcn CLI needs
- * still resolves, and clsx / tailwind-merge are dropped now that nothing
- * imports them.
+ * `src/lib/utils.ts` becomes the single-line re-export shadcn's own install
+ * guide prescribes, which keeps every consumer importing `cn` through
+ * `<scope>common-shadcn/lib/utils` working, and clsx / tailwind-merge are
+ * dropped now that nothing imports them.
  *
  * How to write a migration:
  * - https://nx.dev/docs/kb/migration-generators
@@ -113,7 +114,7 @@ export default async function migration(
       tree.write(utilsPath, REEXPORT_UTILS);
     } else if (tree.read(utilsPath, 'utf-8') !== REEXPORT_UTILS) {
       nextSteps.push(
-        `${utilsPath}: no longer holds the generated cn helper - left untouched. Re-export cn from the 'cn' package by hand so the shadcn CLI's utils alias keeps resolving.`,
+        `${utilsPath}: no longer holds the generated cn helper - left untouched. Re-export cn from the 'cn' package by hand so consumers importing it from here keep working.`,
       );
     }
   }
