@@ -367,7 +367,7 @@ export const PresetShowcase = ({ builderHref }: Props) => {
     graph.nodes.length === 1 ? '' : 's'
   } and ${graph.edges.length} connection${
     graph.edges.length === 1 ? '' : 's'
-  }, wired together.`;
+  }, ready to run and deploy.`;
 
   return (
     <div
