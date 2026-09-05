@@ -4,8 +4,9 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import type { EmitOptions } from '../../lib/graph-builder/commands';
-import { toScript } from '../../lib/graph-builder/commands';
+import { toScript, toScriptLines } from '../../lib/graph-builder/commands';
 import type { Graph, Issue } from '../../lib/graph-builder/model';
+import { CommandList } from './command-list';
 
 interface Props {
   graph: Graph;
@@ -23,6 +24,12 @@ export const Output = ({ graph, issues, options, onOptionsChange }: Props) => {
   const errors = issues.filter((issue) => issue.severity === 'error');
   const warnings = issues.filter((issue) => issue.severity === 'warning');
 
+  // An empty graph still emits a workspace to create, which is nothing to show
+  // before anything has been drawn.
+  const lines = useMemo(
+    () => (graph.nodes.length === 0 ? [] : toScriptLines(graph, options)),
+    [graph, options],
+  );
   const script = useMemo(
     () => toScript(graph, options, { annotate }),
     [graph, options, annotate],
@@ -150,13 +157,11 @@ export const Output = ({ graph, issues, options, onOptionsChange }: Props) => {
       )}
 
       <section aria-label="Generated commands">
-        <pre className="gb-script">
-          <code>
-            {graph.nodes.length === 0
-              ? '# Add components to build your workspace'
-              : script}
-          </code>
-        </pre>
+        <CommandList
+          lines={lines}
+          annotate={annotate}
+          empty="Add components to build your workspace"
+        />
       </section>
 
       {errors.length > 0 && (

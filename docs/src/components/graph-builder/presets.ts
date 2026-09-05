@@ -254,18 +254,18 @@ export const PRESETS: readonly Preset[] = [
 
 /**
  * The presets the landing page's showcase cycles through, in the order it shows
- * them: a spread of what the plugin builds, opening on the tutorial's workspace.
+ * them: a spread of what the plugin builds, opening on an agentic app.
  *
  * Every id must name a preset above — a stale one would quietly drop an example
  * from the showcase.
  */
 export const SHOWCASE_PRESET_IDS: readonly string[] = [
-  'dungeon-adventure',
-  'trpc-web-app',
   'agentic-app',
+  'trpc-web-app',
   'multi-agent',
   'fastapi-web-app',
   'gateway-fronted-agents',
+  'dungeon-adventure',
 ];
 
 /** Comfortable spacing between columns, used when the canvas is wide enough. */

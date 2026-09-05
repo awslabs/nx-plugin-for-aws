@@ -14,6 +14,7 @@ import { nodeType } from '../../lib/graph-builder/catalog';
 import type { EmitOptions, ScriptLine } from '../../lib/graph-builder/commands';
 import { toScript, toScriptLines } from '../../lib/graph-builder/commands';
 import type { Graph } from '../../lib/graph-builder/model';
+import { type CommandFocus, CommandList } from './command-list';
 import {
   edgePath,
   loopPath,
@@ -45,6 +46,8 @@ const STEP_MS = 90;
 
 /** The smallest the diagram is scaled before it is scrolled sideways instead. */
 const MIN_SCALE = 0.6;
+/** How far the diagram is enlarged to fill a wide panel. */
+const MAX_SCALE = 1.25;
 
 interface Stage {
   readonly preset: Preset;
@@ -88,62 +91,6 @@ const toStage = (preset: Preset): Stage => {
   };
 };
 
-/** The graph element a hovered command belongs to, or a hovered node. */
-interface Focus {
-  readonly nodeId?: string;
-  readonly edgeId?: string;
-}
-
-/** A piece of a command that gets its own colour. */
-interface CommandPart {
-  readonly key: string;
-  readonly text: string;
-  readonly kind: 'plain' | 'namespace' | 'generator' | 'flag';
-}
-
-const PART_CLASS: Record<CommandPart['kind'], string | undefined> = {
-  plain: undefined,
-  namespace: 'ps-token--pkg',
-  generator: 'ps-token--generator',
-  flag: 'ps-token--flag',
-};
-
-/**
- * Split a command so the generator being run reads at a glance: the plugin's
- * namespace held back, the generator id picked out, its flags dimmed.
- */
-const commandParts = (command: string): CommandPart[] =>
-  command.split(' ').flatMap((token, position) => {
-    const key = `${position}-${token}`;
-    const space: CommandPart[] =
-      position > 0 ? [{ key: `${key}-space`, text: ' ', kind: 'plain' }] : [];
-    const [before, generator] = token.split('@aws/nx-plugin:');
-    if (generator) {
-      return [
-        ...space,
-        ...(before
-          ? [{ key: `${key}-before`, text: before, kind: 'plain' as const }]
-          : []),
-        { key: `${key}-namespace`, text: '@aws/nx-plugin:', kind: 'namespace' },
-        { key: `${key}-generator`, text: generator, kind: 'generator' },
-      ];
-    }
-    return [
-      ...space,
-      { key, text: token, kind: token.startsWith('--') ? 'flag' : 'plain' },
-    ];
-  });
-
-const CommandText = ({ command }: { command: string }) => (
-  <>
-    {commandParts(command).map((part) => (
-      <span key={part.key} className={PART_CLASS[part.kind]}>
-        {part.text}
-      </span>
-    ))}
-  </>
-);
-
 interface Props {
   /** The graph builder page, which each example can be opened in to edit. */
   builderHref: string;
@@ -175,7 +122,7 @@ export const PresetShowcase = ({ builderHref }: Props) => {
   const [isHovered, setIsHovered] = useState(false);
   const [isFocused, setIsFocused] = useState(false);
   const [isVisible, setIsVisible] = useState(true);
-  const [focus, setFocus] = useState<Focus | undefined>();
+  const [focus, setFocus] = useState<CommandFocus | undefined>();
   const [copied, setCopied] = useState(false);
   const tabsId = useId();
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -239,18 +186,21 @@ export const PresetShowcase = ({ builderHref }: Props) => {
     return () => observer.disconnect();
   }, []);
 
-  // Shrink to fit the panel, never enlarge past the natural size, and never past
-  // the point where the labels stop being readable — a phone scrolls the diagram
-  // sideways instead. The panel stands as tall as the tallest example needs, so
-  // it doesn't resize as the showcase cycles.
-  const scaleOf = (entry: Stage) =>
-    canvasWidth && entry.width > canvasWidth
-      ? Math.max(MIN_SCALE, canvasWidth / entry.width)
-      : 1;
-  const scale = scaleOf(stage);
-  const canvasHeight = Math.max(
-    ...stages.map((entry) => entry.height * scaleOf(entry)),
-  );
+  // One scale for every example, set by the widest of them: it fills the panel on
+  // a big screen and holds its size as the showcase cycles, rather than nodes
+  // growing and shrinking between examples. Below the floor a phone scrolls the
+  // diagram sideways instead of shrinking the labels past reading. The panel
+  // stands as tall as the tallest example needs, so its height is steady too.
+  const scale = canvasWidth
+    ? Math.min(
+        MAX_SCALE,
+        Math.max(
+          MIN_SCALE,
+          Math.min(...stages.map((entry) => canvasWidth / entry.width)),
+        ),
+      )
+    : 1;
+  const canvasHeight = Math.max(...stages.map((entry) => entry.height * scale));
   const fitsCanvas = !canvasWidth || stage.width * scale <= canvasWidth;
 
   /** Arrows move between the examples, Home and End jump to the ends. */
@@ -507,44 +457,21 @@ export const PresetShowcase = ({ builderHref }: Props) => {
         </div>
 
         <div className="ps-panel ps-panel--commands">
-          <div className="ps-terminal-chrome" aria-hidden="true">
-            <span className="ps-dot ps-dot--red" />
-            <span className="ps-dot ps-dot--yellow" />
-            <span className="ps-dot ps-dot--green" />
-            <span className="ps-terminal-name">{preset.id} — zsh</span>
+          <div className="gb-window-chrome" aria-hidden="true">
+            <span className="gb-window-dot gb-window-dot--red" />
+            <span className="gb-window-dot gb-window-dot--yellow" />
+            <span className="gb-window-dot gb-window-dot--green" />
+            <span className="gb-window-name">{preset.id} — zsh</span>
           </div>
 
-          <ol key={preset.id} className="ps-commands">
-            {lines.map((line, lineIndex) => {
-              const isLit =
-                (line.nodeId !== undefined && line.nodeId === focus?.nodeId) ||
-                (line.edgeId !== undefined && line.edgeId === focus?.edgeId);
-              return (
-                <li
-                  key={line.command}
-                  className={`ps-command${isLit ? ' is-lit' : ''}${
-                    focus && !isLit ? ' is-dimmed' : ''
-                  }`}
-                  style={{ animationDelay: `${lineIndex * STEP_MS}ms` }}
-                  title={line.comment}
-                  onPointerEnter={() =>
-                    setFocus(
-                      line.nodeId || line.edgeId
-                        ? { nodeId: line.nodeId, edgeId: line.edgeId }
-                        : undefined,
-                    )
-                  }
-                >
-                  <span className="ps-prompt" aria-hidden="true">
-                    ❯
-                  </span>
-                  <code>
-                    <CommandText command={line.command} />
-                  </code>
-                </li>
-              );
-            })}
-          </ol>
+          {/* Keyed on the example, so the lines arrive again with each one. */}
+          <CommandList
+            key={preset.id}
+            lines={lines}
+            focus={focus}
+            onFocus={setFocus}
+            stagger={STEP_MS}
+          />
 
           <div className="ps-terminal-bar">
             <span className="ps-terminal-hint">
@@ -589,7 +516,7 @@ export const PresetShowcase = ({ builderHref }: Props) => {
       <div className="ps-actions">
         <button
           type="button"
-          className="ps-action"
+          className="gb-action"
           onClick={() => setIsPlaying((playing) => !playing)}
           aria-pressed={!isPlaying}
         >
@@ -607,7 +534,7 @@ export const PresetShowcase = ({ builderHref }: Props) => {
         </button>
 
         <a
-          className="ps-action ps-action--primary"
+          className="gb-action gb-action--primary"
           href={`${builderHref}?preset=${preset.id}`}
         >
           <span>Open this in the graph builder</span>
