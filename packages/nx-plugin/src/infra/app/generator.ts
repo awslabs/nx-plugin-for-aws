@@ -140,8 +140,11 @@ export async function tsInfraGenerator(
   const scopeAlias = npmScopePrefix;
   const fullyQualifiedName = `${npmScopePrefix}${schema.name}`;
   const namespace = kebabCase(fullyQualifiedName);
-  // The stage instantiated in main.ts. Quoted so the shell does not glob `*`.
-  const sandboxStagePattern = `"${namespace}-sandbox/*"`;
+  // The stage instantiated in main.ts. `**` so the pattern also selects stacks
+  // nested below the stage's own stacks, such as the `us-east-1` WebACL stack a
+  // website creates - `cdk destroy` only deletes the stacks its pattern selects,
+  // so a single `*` leaves those behind. Quoted so the shell does not glob.
+  const sandboxStagePattern = `"${namespace}-sandbox/**"`;
 
   // `tsProjectGenerator` scaffolds a library `src`, which the CDK app layout
   // replaces. Only on creation — on a re-run this is the user's infrastructure.

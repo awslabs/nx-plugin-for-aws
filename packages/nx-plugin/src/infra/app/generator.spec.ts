@@ -94,7 +94,7 @@ describe('infra generator', () => {
       options: {
         cwd: '{projectRoot}',
         command:
-          'cdk deploy --require-approval=never "proj-test-sandbox/*" --express',
+          'cdk deploy --require-approval=never "proj-test-sandbox/**" --express',
       },
       dependsOn: ['^assemble', 'compile'],
     });
@@ -119,7 +119,7 @@ describe('infra generator', () => {
       executor: 'nx:run-commands',
       options: {
         cwd: '{projectRoot}',
-        command: 'cdk destroy "proj-test-sandbox/*"',
+        command: 'cdk destroy "proj-test-sandbox/**"',
       },
       dependsOn: ['^assemble', 'compile'],
     });
@@ -399,7 +399,7 @@ describe('infra generator', () => {
 
         expect(mainTs).toContain(`new ApplicationStage(app, '${stage}'`);
         expect(config.targets[target].options.command).toBe(
-          `${cdkCommand} "${stage}/*"${suffix}`,
+          `${cdkCommand} "${stage}/**"${suffix}`,
         );
       },
     );
@@ -408,7 +408,7 @@ describe('infra generator', () => {
       await tsInfraGenerator(tree, options);
       const config = readProjectConfiguration(tree, '@proj/test');
       expect(config.targets[target].options.command).toContain(
-        '"proj-test-sandbox/*"',
+        '"proj-test-sandbox/**"',
       );
     });
 
@@ -458,7 +458,7 @@ describe('infra generator', () => {
         // where the script looks it up in stages.config.ts - so any flags must
         // trail it.
         expect(config.targets[`${action}-sandbox`].options.command).toBe(
-          `tsx packages/common/scripts/src/infra/infra-${action}.ts packages/test "proj-test-sandbox/*"${action === 'deploy' ? ' --express' : ''}`,
+          `tsx packages/common/scripts/src/infra/infra-${action}.ts packages/test "proj-test-sandbox/**"${action === 'deploy' ? ' --express' : ''}`,
         );
         expect(config.targets[`${action}-sandbox`].dependsOn).toEqual([
           '^assemble',
