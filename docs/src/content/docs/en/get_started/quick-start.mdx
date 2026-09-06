@@ -13,6 +13,7 @@ import RunGenerator from '@components/run-generator.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import EmbeddedGraph from '@components/embedded-graph.astro';
+import Diff from '@components/diff.astro';
 import Prompt from '@components/prompt.astro';
 
 This guide walks you through the basics of installing and using `@aws/nx-plugin` to rapidly build projects on AWS.
@@ -23,77 +24,67 @@ The following global dependencies are needed before proceeding:
 
 <Snippet name="prerequisites" />
 
-## Step 1: Build Your Application
+## Step 1: Create a Workspace
+
+Create an <Link path="guides/workspace">Nx workspace</Link> with the package manager of your choice, and open the directory it creates:
+
+<CreateNxWorkspaceCommand workspace="my-project" />
+
+```sh
+cd my-project
+```
+
+You are prompted to choose your infrastructure as code provider, either [CDK](https://docs.aws.amazon.com/cdk/) or [Terraform](https://developer.hashicorp.com/terraform), and the container engine used by generators which build container images.
+
+## Step 2: Build Your Application
 
 We'll build a full-stack application: a tRPC API, a React website, Cognito authentication, and CDK or Terraform infrastructure. Ask an AI assistant to scaffold it for you, or run the generators yourself — both routes reach the same workspace.
 
 ### With AI
 
 <Steps>
-1. Create an <Link path="guides/workspace">Nx workspace</Link> with the package manager of your choice, and open the directory it creates:
-
-    <CreateNxWorkspaceCommand workspace="my-project" />
-
-    ```sh
-    cd my-project
-    ```
-
-    You are prompted to choose your infrastructure as code provider, either [CDK](https://docs.aws.amazon.com/cdk/) or [Terraform](https://developer.hashicorp.com/terraform), and the container engine used by generators which build container images.
-
-2. Open the workspace in your AI coding assistant.
+1. Open the workspace in your AI coding assistant.
 
     New workspaces come with the plugin's <Link path="get_started/building-with-ai">MCP server</Link> already configured for Kiro, Claude Code, Cursor, Gemini CLI, GitHub Copilot and OpenAI Codex, so your assistant can look up the plugin's generators and run them without any setup.
 
-3. Ask for the application:
+2. Ask for the application:
 
     <Prompt>
-    Create a tRPC API called demo-api with IAM authentication, and a React website called demo-website. Add Cognito authentication to the website with the domain my-demo, connect the website to the API, and add an infrastructure project called infra.
+    Create a tRPC API called demo-api, and a React website called demo-website. Add Cognito authentication to the website, connect the website to the API, and add an infrastructure project called infra. Then instantiate the generated infrastructure components so the website and API deploy, granting authenticated users access to the API.
     </Prompt>
 
-    Your assistant discovers the generators through the MCP server and runs them, in the order their dependencies need. Review the changes it makes, then carry on at Step 2.
+    Your assistant discovers the generators through the MCP server and runs them, in the order their dependencies need. Review the changes it makes, then carry on at Step 3.
 </Steps>
 
 ### With the CLI
 
-<Steps>
-1. Create an <Link path="guides/workspace">Nx workspace</Link> with the package manager of your choice, and open the directory it creates:
+Run the generators that scaffold the application. Use the button below to copy them all, or run each one yourself as described beneath the diagram.
 
-    <CreateNxWorkspaceCommand workspace="my-project" />
-
-    ```sh
-    cd my-project
-    ```
-
-    You are prompted for your infrastructure as code provider and container engine, as above.
-
-2. Run the generators that scaffold the application. Use the button below to copy them all, or run each one yourself as described beneath the diagram.
-
-    <EmbeddedGraph preset="quick-start" workspace="my-project" iac="cdk" orientation="horizontal" skipWorkspace />
-</Steps>
+<EmbeddedGraph preset="quick-start" workspace="my-project" iac="cdk" orientation="horizontal" skipWorkspace />
 
 Depending on the type of project you're building, you can choose any combination of generators to quickly bootstrap your project. Check out the __Generators__ in the navigation bar to the left to see the full list of options, or try the <Link path="get_started/graph-builder">graph builder</Link> to construct your workspace visually.
 
 #### Add a tRPC API
 
-<RunGenerator generator="ts#api" requiredParameters={{ name: 'demo-api', framework: 'trpc', auth: 'iam' }} noInteractive />
+<RunGenerator generator="ts#api" requiredParameters={{ name: 'demo-api', framework: 'trpc' }} positional={['name']} noInteractive />
 
 This will create the API inside the `packages/demo-api` folder.
 
 #### Add a React Website
 
-<RunGenerator generator="ts#website" requiredParameters={{ name: 'demo-website' }} noInteractive />
+<RunGenerator generator="ts#website" requiredParameters={{ name: 'demo-website' }} positional={['name']} noInteractive />
 
 This scaffolds a new React website in `packages/demo-website`.
 
 #### Add Cognito Authentication
 
-<RunGenerator generator="ts#website#auth" requiredParameters={{ project: '@my-project/demo-website', cognitoDomain: 'my-demo' }} noInteractive />
+<RunGenerator generator="ts#website#auth" requiredParameters={{ project: 'demo-website' }} noInteractive />
 
 This sets up the necessary infrastructure and React code to add Cognito Authentication to your website.
 
 #### Connect Frontend to Backend
 
-<RunGenerator generator="connection" requiredParameters={{ sourceProject: '@my-project/demo-website', targetProject: '@my-project/demo-api' }} noInteractive />
+<RunGenerator generator="connection" requiredParameters={{ sourceProject: 'demo-website', targetProject: 'demo-api' }} noInteractive />
 
 This configures the necessary providers to ensure your website can call your tRPC API.
 
@@ -103,18 +94,18 @@ Add the infrastructure project based on your chosen IAC provider.
 
 <Infrastructure>
 <Fragment slot="cdk">
-<RunGenerator generator="ts#infra" requiredParameters={{ name: 'infra' }} noInteractive />
+<RunGenerator generator="ts#infra" requiredParameters={{ name: 'infra' }} positional={['name']} noInteractive />
 
 This configures a CDK App which you can use to deploy your infrastructure on AWS.
 </Fragment>
 <Fragment slot="terraform">
-<RunGenerator generator="terraform#project" requiredParameters={{ name: 'infra' }} noInteractive />
+<RunGenerator generator="terraform#project" requiredParameters={{ name: 'infra' }} positional={['name']} noInteractive />
 
 This configures a Terraform project which you can use to deploy your infrastructure on AWS.
 </Fragment>
 </Infrastructure>
 
-## Step 2: Run your Website and API Locally
+## Step 3: Run your Website and API Locally
 
 Use the following command to start local dev servers for your website and its connected APIs:
 
@@ -124,7 +115,68 @@ Your website will be available at `http://localhost:4200`.
 
 Changes to both your website and API will be reflected in real-time as both the local website and API servers will hot-reload.
 
-## Step 3: Define Cloud Resources and Deploy to AWS
+<Drawer title="Calling your API from your website" trigger="Try it: call the API from your website">
+
+Connecting the website to the API added a `useDemoApi` hook, which returns a [tRPC options proxy](https://trpc.io/docs/client/tanstack-react-query): every procedure on your API offers `queryOptions` and `mutationOptions` to hand to [TanStack Query](https://tanstack.com/query/latest).
+
+Update `packages/demo-website/src/routes/index.tsx` to call the API's `echo` procedure, showing a spinner while the request is in flight:
+
+<Diff lang="tsx" before={`import { createFileRoute } from '@tanstack/react-router';
+
+export const Route = createFileRoute('/')({
+  component: RouteComponent,
+});
+
+function RouteComponent() {
+  return (
+    <div className="text-center">
+      <header>
+        <h1>Welcome</h1>
+        <p>Welcome to your new React website!</p>
+      </header>
+    </div>
+  );
+}
+`} after={`import { useQuery } from '@tanstack/react-query';
+import { createFileRoute } from '@tanstack/react-router';
+import { Spinner } from '../components/spinner';
+import { useDemoApi } from '../hooks/useDemoApi';
+
+export const Route = createFileRoute('/')({
+  component: RouteComponent,
+});
+
+function RouteComponent() {
+  const trpc = useDemoApi();
+  const echo = useQuery(
+    trpc.echo.queryOptions({ message: 'Hello from the API!' }),
+  );
+
+  return (
+    <div className="text-center">
+      <header>
+        <h1>Welcome</h1>
+        <p>Welcome to your new React website!</p>
+      </header>
+      {echo.isLoading ? (
+        <Spinner />
+      ) : echo.error ? (
+        <p>Error: {echo.error.message}</p>
+      ) : (
+        <p>{echo.data?.message}</p>
+      )}
+    </div>
+  );
+}
+`} />
+
+Save the file and the page reloads with the message your API echoed back. The call is type-safe end to end — rename `message` in `packages/demo-api/src/schema/echo.ts` and your website stops compiling until you follow the change through.
+
+See the <Link path="guides/connection/react-trpc">React to tRPC connection guide</Link> for mutations, subscriptions, error handling and optimistic updates.
+
+</Drawer>
+
+## Step 4: Define Cloud Resources and Deploy to AWS
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -160,11 +212,6 @@ This is all the CDK we need to write to deploy our full stack application.
 Open `packages/infra/src/main.tf` and add the following code:
 
 ```hcl
-# Include metrics tracking for @aws/nx-plugin usage
-module "metrics" {
-  source = "../../common/terraform/src/metrics"
-}
-
 # Deploy user identity
 module "user_identity" {
   source = "../../common/terraform/src/core/user-identity"
@@ -252,7 +299,9 @@ Bootstrap your infrastructure:
 <NxCommands commands={['bootstrap infra']} />
 
 :::tip[Bootstrap Regions]
-CDK bootstrapping is required for both your target deployment AWS region, and `us-east-1` to allow deployment of the AWS WAF WebACL for the website.
+CDK bootstrapping is required for both your target deployment AWS region, and `us-east-1` to allow deployment of the AWS WAF WebACL for the website. If you are deploying elsewhere, bootstrap `us-east-1` too:
+
+<NxCommands commands={['run infra:bootstrap --args="aws://<account-id>/us-east-1"']} />
 :::
 </Fragment>
 <Fragment slot="terraform">
@@ -279,7 +328,7 @@ This command will first run `terraform plan` to show you what changes will be ma
 </Fragment>
 </Infrastructure>
 
-## Step 4: Test the Website with Deployed Cloud Resources
+## Step 5: Test the Website with Deployed Cloud Resources
 
 <Steps>
 1. Fetch the `runtime-config.json` file:
@@ -314,7 +363,7 @@ The first time you sign in as this user you are prompted to choose a new passwor
 
 Your website is also served from CloudFront. Open its distribution domain name (which is printed to your terminal after deployment) to use the version running entirely on AWS.
 
-## Step 5: Clean Up
+## Step 6: Clean Up
 
 When you have finished, delete the resources you deployed to avoid ongoing costs:
 
