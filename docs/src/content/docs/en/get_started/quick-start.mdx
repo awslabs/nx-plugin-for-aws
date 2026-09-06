@@ -60,7 +60,14 @@ We'll build a full-stack application: a tRPC API, a React website, Cognito authe
 
 Run the generators that scaffold the application. Use the button below to copy them all, or run each one yourself as described beneath the diagram.
 
+<Infrastructure>
+<Fragment slot="cdk">
 <EmbeddedGraph preset="quick-start" workspace="my-project" iac="cdk" orientation="horizontal" skipWorkspace />
+</Fragment>
+<Fragment slot="terraform">
+<EmbeddedGraph preset="quick-start" workspace="my-project" iac="terraform" orientation="horizontal" skipWorkspace />
+</Fragment>
+</Infrastructure>
 
 Depending on the type of project you're building, you can choose any combination of generators to quickly bootstrap your project. Check out the __Generators__ in the navigation bar to the left to see the full list of options, or try the <Link path="get_started/graph-builder">graph builder</Link> to construct your workspace visually.
 
@@ -266,9 +273,22 @@ module "demo_website" {
 
   depends_on = [module.user_identity, module.demo_api]
 }
+
+# Print the website URL and user pool id when the deployment finishes
+output "website_url" {
+  value = module.demo_website.website_url
+}
+
+output "user_pool_id" {
+  value = module.user_identity.user_pool_id
+}
 ```
 
 This is all the Terraform we need to write to deploy our full stack application.
+
+:::note[Root Module Outputs]
+Terraform only prints the outputs declared in `packages/infra/src`, so anything you want to read after a deployment must be re-exported from the module that produces it — hence the two `output` blocks above.
+:::
 </Fragment>
 </Infrastructure>
 
@@ -361,7 +381,7 @@ The first time you sign in as this user you are prompted to choose a new passwor
 
 </Drawer>
 
-Your website is also served from CloudFront. Open its distribution domain name (which is printed to your terminal after deployment) to use the version running entirely on AWS.
+Your website is also served from CloudFront. Open the distribution domain name printed in your deployment outputs — the output ending in `DistributionDomainName` for CDK, or `website_url` for Terraform — to use the version running entirely on AWS.
 
 ## Step 6: Clean Up
 
@@ -376,14 +396,27 @@ When you have finished, delete the resources you deployed to avoid ongoing costs
 </Fragment>
 </Infrastructure>
 
+The Cognito user pool is created with deletion protection enabled, so it survives the commands above. Turn deletion protection off in the [Amazon Cognito console](https://console.aws.amazon.com/cognito/) before removing it.
+
+<Infrastructure>
+<Fragment slot="cdk">
 :::note[Retained Resources]
-The Cognito user pool is created with deletion protection enabled, so it is not removed automatically. Delete it (and the IAM role Cognito uses to send SMS messages) manually if you no longer need them.
+Deleting the stacks leaves the user pool behind, along with the IAM role Cognito uses to send SMS messages, the IAM role API Gateway uses to write to CloudWatch Logs, the KMS keys encrypting the website bucket and the API and WAF log groups, and the log groups themselves. Delete the pool, roles and log groups, and schedule the keys for deletion, once you no longer need them.
 :::
+</Fragment>
+<Fragment slot="terraform">
+:::caution[Destroy Fails Until Deletion Protection Is Off]
+Terraform tries to delete the user pool, so `destroy` stops with `The user pool cannot be deleted because deletion protection is activated` and leaves the resources it had not yet reached in place. Turn deletion protection off, then run the destroy command again to remove everything — the user pool and the IAM role Cognito uses to send SMS messages included.
+:::
+</Fragment>
+</Infrastructure>
 
 ---
 
 Congratulations! 🎉 You have successfully built and deployed a full-stack application using `@aws/nx-plugin`!
 
-:::tip[Next: Full-Stack Tutorial]
-For a more in-depth tutorial for building a full-stack application, check out the <Link path="get_started/tutorials/dungeon-game/overview">Dungeon Adventure Tutorial</Link>.
-:::
+## Next Steps
+
+- <Link path="get_started/tutorials/dungeon-game/overview">Dungeon Adventure Tutorial</Link> — build a full-stack AI dungeon adventure game, for a more in-depth walkthrough than this guide.
+- <Link path="guides/workspace">Workspaces</Link> — how your workspace is laid out, and the configuration the generators share.
+- <Link path="get_started/existing-project">Add to an Existing Project</Link> — adopt the plugin in an Nx workspace or monorepo you already have.
