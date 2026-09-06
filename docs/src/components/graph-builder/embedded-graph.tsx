@@ -2,6 +2,9 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+import cdkLogo from '@assets/logos/cdk.svg';
+import cdkLogoDark from '@assets/logos/cdk-white.svg';
+import terraformLogo from '@assets/logos/terraform.svg';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { nodeType } from '../../lib/graph-builder/catalog';
 import type {
@@ -51,6 +54,20 @@ interface Props {
 
 /** Padding kept around the diagram inside its box. */
 const PADDING = 24;
+
+/**
+ * The mark identifying which IaC provider the copied commands scaffold, in each
+ * provider's own brand artwork. Terraform's is HashiCorp purple, which reads on
+ * both themes; the AWS CDK product icon ships as Squid Ink plus a white variant
+ * for dark backgrounds.
+ */
+const IAC_BRANDS: Record<
+  NonNullable<Props['iac']>,
+  { label: string; light: string; dark?: string }
+> = {
+  cdk: { label: 'AWS CDK', light: cdkLogo.src, dark: cdkLogoDark.src },
+  terraform: { label: 'Terraform', light: terraformLogo.src },
+};
 
 /**
  * A read-only view of a preset: the graph laid out top to bottom, with a button
@@ -161,6 +178,7 @@ export const EmbeddedGraph = ({
   }
 
   const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+  const brand = IAC_BRANDS[iac];
 
   return (
     <div className="gb-root gb-embed" data-graph-builder>
@@ -296,6 +314,30 @@ export const EmbeddedGraph = ({
             );
           })}
         </div>
+
+        <span
+          className={`gb-embed-iac${brand.dark ? ' gb-embed-iac--has-dark' : ''}`}
+          role="img"
+          aria-label={`Scaffolds ${brand.label} infrastructure`}
+          title={`Scaffolds ${brand.label} infrastructure`}
+        >
+          <img
+            className="gb-embed-iac-logo gb-embed-iac-logo--light"
+            src={brand.light}
+            alt=""
+            loading="lazy"
+            draggable={false}
+          />
+          {brand.dark && (
+            <img
+              className="gb-embed-iac-logo gb-embed-iac-logo--dark"
+              src={brand.dark}
+              alt=""
+              loading="lazy"
+              draggable={false}
+            />
+          )}
+        </span>
       </div>
     </div>
   );
