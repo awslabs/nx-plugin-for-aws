@@ -285,10 +285,6 @@ output "user_pool_id" {
 ```
 
 Questo è tutto il Terraform che dobbiamo scrivere per distribuire la nostra applicazione full-stack.
-
-:::note[Output del Modulo Root]
-Terraform stampa solo gli output dichiarati in `packages/infra/src`, quindi qualsiasi cosa tu voglia leggere dopo una distribuzione deve essere ri-esportata dal modulo che la produce — da qui i due blocchi `output` sopra.
-:::
 </Fragment>
 </Infrastructure>
 
@@ -381,7 +377,7 @@ La prima volta che accedi come questo utente ti verrà richiesto di scegliere un
 
 </Drawer>
 
-Il tuo sito web è anche servito da CloudFront. Apri il nome di dominio della distribuzione stampato negli output della distribuzione — l'output che termina con `DistributionDomainName` per CDK, o `website_url` per Terraform — per utilizzare la versione in esecuzione interamente su AWS.
+Il tuo sito web è anche servito da CloudFront. Apri il nome di dominio della sua distribuzione (che viene stampato sul tuo terminale dopo la distribuzione) per utilizzare la versione in esecuzione interamente su AWS.
 
 ## Passaggio 6: Pulizia
 
@@ -396,17 +392,38 @@ Quando hai finito, elimina le risorse che hai distribuito per evitare costi cont
 </Fragment>
 </Infrastructure>
 
-Il pool di utenti Cognito viene creato con la protezione dall'eliminazione abilitata, quindi sopravvive ai comandi sopra. Disattiva la protezione dall'eliminazione nella [console Amazon Cognito](https://console.aws.amazon.com/cognito/) prima di rimuoverlo.
+:::note[Risorse Conservate]
+Il pool di utenti Cognito viene creato con la protezione dall'eliminazione abilitata, quindi non viene rimosso automaticamente. Eliminalo (insieme al ruolo IAM che Cognito utilizza per inviare messaggi SMS) manualmente se non ne hai più bisogno.
+:::
+
+### Rimuovere le Risorse di Bootstrap
+
+Le risorse di cui hai eseguito il bootstrap sono condivise da ogni progetto che distribuisce su quell'account AWS e regione, e costano quasi nulla da lasciare in posizione. Rimuovile solo se nient'altro distribuisce lì.
 
 <Infrastructure>
 <Fragment slot="cdk">
-:::note[Risorse Conservate]
-L'eliminazione degli stack lascia il pool di utenti, insieme al ruolo IAM che Cognito utilizza per inviare messaggi SMS, al ruolo IAM che API Gateway utilizza per scrivere su CloudWatch Logs, alle chiavi KMS che crittografano il bucket del sito web e i gruppi di log dell'API e WAF, e i gruppi di log stessi. Elimina il pool, i ruoli e i gruppi di log, e pianifica l'eliminazione delle chiavi, una volta che non ne hai più bisogno.
-:::
+Elimina lo stack di bootstrap in ogni regione di cui hai eseguito il bootstrap, inclusa `us-east-1`. Questo rimuove i ruoli di bootstrap e il repository delle immagini container:
+
+```sh
+aws cloudformation delete-stack --stack-name CDKToolkit --region <region>
+```
+
+Il bucket degli asset viene conservato di proposito, quindi eliminalo separatamente. È versionato, cosa che `aws s3 rb --force` non può gestire, quindi rimuovi prima ogni versione e marcatore di eliminazione:
+
+```sh
+BUCKET=cdk-hnb659fds-assets-<account-id>-<region>
+aws s3api delete-objects --bucket $BUCKET --delete "$(aws s3api list-object-versions --bucket $BUCKET --output json --query '{Objects: Versions[].{Key: Key, VersionId: VersionId}}')"
+aws s3api delete-objects --bucket $BUCKET --delete "$(aws s3api list-object-versions --bucket $BUCKET --output json --query '{Objects: DeleteMarkers[].{Key: Key, VersionId: VersionId}}')"
+aws s3 rb s3://$BUCKET
+```
+
+Ogni `delete-objects` riporta un errore invece di non fare nulla quando non c'è più nulla di quel tipo da rimuovere, il che è sicuro da ignorare.
 </Fragment>
 <Fragment slot="terraform">
-:::caution[Destroy Fallisce Finché la Protezione dall'Eliminazione È Attiva]
-Terraform tenta di eliminare il pool di utenti, quindi `destroy` si ferma con `The user pool cannot be deleted because deletion protection is activated` e lascia in posizione le risorse che non aveva ancora raggiunto. Disattiva la protezione dall'eliminazione, quindi esegui nuovamente il comando destroy per rimuovere tutto — inclusi il pool di utenti e il ruolo IAM che Cognito utilizza per inviare messaggi SMS.
+<NxCommands commands={['bootstrap-destroy infra']} />
+
+:::caution[Anche il Tuo Stato Terraform Viene Eliminato]
+Questo svuota ed elimina il bucket S3 che contiene il tuo stato Terraform, quindi eseguilo solo una volta che nulla a cui tieni è ancora distribuito da quello stato.
 :::
 </Fragment>
 </Infrastructure>
@@ -419,4 +436,4 @@ Congratulazioni! 🎉 Hai costruito e distribuito con successo un'applicazione f
 
 - <Link path="get_started/tutorials/dungeon-game/overview">Dungeon Adventure Tutorial</Link> — costruisci un gioco di avventura dungeon AI full-stack, per una guida più approfondita di questa.
 - <Link path="guides/workspace">Workspaces</Link> — come è strutturato il tuo workspace e la configurazione che i generatori condividono.
-- <Link path="get_started/existing-project">Aggiungere a un Progetto Esistente</Link> — adotta il plugin in un workspace Nx o monorepo che hai già.
+- <Link path="get_started/existing-project">Aggiungere a un Progetto Esistente</Link> — adotta il plugin nella tua codebase esistente.

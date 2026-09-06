@@ -285,10 +285,6 @@ output "user_pool_id" {
 ```
 
 これが、フルスタックアプリケーションをデプロイするために記述する必要のあるすべての Terraform です。
-
-:::note[ルートモジュールの出力]
-Terraform は `packages/infra/src` で宣言された出力のみを表示するため、デプロイ後に読み取りたいものは、それを生成するモジュールから再エクスポートする必要があります。そのため、上記の 2 つの `output` ブロックがあります。
-:::
 </Fragment>
 </Infrastructure>
 
@@ -381,7 +377,7 @@ aws cognito-idp admin-create-user \
 
 </Drawer>
 
-ウェブサイトは CloudFront からも提供されます。デプロイメント出力に表示されるディストリビューションドメイン名（CDK の場合は `DistributionDomainName` で終わる出力、Terraform の場合は `website_url`）を開いて、完全に AWS 上で実行されているバージョンを使用してください。
+ウェブサイトは CloudFront からも提供されます。デプロイ後にターミナルに表示されるディストリビューションドメイン名を開いて、完全に AWS 上で実行されているバージョンを使用してください。
 
 ## ステップ 6: クリーンアップ
 
@@ -396,17 +392,38 @@ aws cognito-idp admin-create-user \
 </Fragment>
 </Infrastructure>
 
-Cognito ユーザープールは削除保護が有効になった状態で作成されるため、上記のコマンドでは削除されません。削除する前に、[Amazon Cognito コンソール](https://console.aws.amazon.com/cognito/)で削除保護をオフにしてください。
+:::note[保持されるリソース]
+Cognito ユーザープールは削除保護が有効になった状態で作成されるため、自動的には削除されません。不要になったら、ユーザープールと Cognito が SMS メッセージの送信に使用する IAM ロールを手動で削除してください。
+:::
+
+### ブートストラップリソースを削除する
+
+ブートストラップしたリソースは、その AWS アカウントとリージョンにデプロイするすべてのプロジェクトで共有され、そのまま残しておいてもほとんどコストがかかりません。他に何もデプロイしない場合にのみ削除してください。
 
 <Infrastructure>
 <Fragment slot="cdk">
-:::note[保持されるリソース]
-スタックを削除すると、ユーザープール、Cognito が SMS メッセージの送信に使用する IAM ロール、API Gateway が CloudWatch Logs への書き込みに使用する IAM ロール、ウェブサイトバケットと API および WAF ログ グループを暗号化する KMS キー、およびログ グループ自体が残ります。不要になったら、プール、ロール、ログ グループを削除し、キーの削除をスケジュールしてください。
-:::
+`us-east-1` を含む、ブートストラップしたすべてのリージョンでブートストラップスタックを削除します。これにより、ブートストラップロールとコンテナイメージリポジトリが削除されます：
+
+```sh
+aws cloudformation delete-stack --stack-name CDKToolkit --region <region>
+```
+
+アセットバケットは意図的に保持されるため、別途削除してください。バージョン管理されているため、`aws s3 rb --force` では処理できないので、最初にすべてのバージョンと削除マーカーを削除します：
+
+```sh
+BUCKET=cdk-hnb659fds-assets-<account-id>-<region>
+aws s3api delete-objects --bucket $BUCKET --delete "$(aws s3api list-object-versions --bucket $BUCKET --output json --query '{Objects: Versions[].{Key: Key, VersionId: VersionId}}')"
+aws s3api delete-objects --bucket $BUCKET --delete "$(aws s3api list-object-versions --bucket $BUCKET --output json --query '{Objects: DeleteMarkers[].{Key: Key, VersionId: VersionId}}')"
+aws s3 rb s3://$BUCKET
+```
+
+各 `delete-objects` は、削除するものが残っていない場合、何もしないのではなくエラーを報告しますが、これは無視しても安全です。
 </Fragment>
 <Fragment slot="terraform">
-:::caution[削除保護がオフになるまで Destroy は失敗します]
-Terraform はユーザープールを削除しようとするため、`destroy` は `The user pool cannot be deleted because deletion protection is activated` で停止し、まだ到達していないリソースが残ります。削除保護をオフにしてから、destroy コマンドを再度実行してすべてを削除してください。ユーザープールと Cognito が SMS メッセージの送信に使用する IAM ロールも含まれます。
+<NxCommands commands={['bootstrap-destroy infra']} />
+
+:::caution[Terraform ステートも削除されます]
+これにより、Terraform ステートを保持している S3 バケットが空にされて削除されるため、そのステートからまだデプロイされている重要なものがなくなった場合にのみ実行してください。
 :::
 </Fragment>
 </Infrastructure>
@@ -419,4 +436,4 @@ Terraform はユーザープールを削除しようとするため、`destroy` 
 
 - <Link path="get_started/tutorials/dungeon-game/overview">Dungeon Adventure チュートリアル</Link> — このガイドよりも詳細なウォークスルーとして、フルスタック AI ダンジョンアドベンチャーゲームを構築します。
 - <Link path="guides/workspace">ワークスペース</Link> — ワークスペースのレイアウトと、ジェネレーターが共有する設定について説明します。
-- <Link path="get_started/existing-project">既存のプロジェクトに追加する</Link> — すでにお持ちの Nx ワークスペースまたはモノレポでプラグインを採用します。
+- <Link path="get_started/existing-project">既存のプロジェクトに追加する</Link> — 既存のコードベースでプラグインを採用します。

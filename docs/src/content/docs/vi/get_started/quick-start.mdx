@@ -285,10 +285,6 @@ output "user_pool_id" {
 ```
 
 Đây là tất cả Terraform chúng ta cần viết để triển khai ứng dụng full stack của mình.
-
-:::note[Root Module Outputs]
-Terraform chỉ in ra các outputs được khai báo trong `packages/infra/src`, vì vậy bất cứ thứ gì bạn muốn đọc sau khi triển khai phải được xuất lại từ module tạo ra nó — do đó có hai khối `output` ở trên.
-:::
 </Fragment>
 </Infrastructure>
 
@@ -381,7 +377,7 @@ Lần đầu tiên bạn đăng nhập với user này, bạn sẽ được nh�
 
 </Drawer>
 
-Website của bạn cũng được phục vụ từ CloudFront. Mở distribution domain name được in trong deployment outputs của bạn — output kết thúc bằng `DistributionDomainName` cho CDK, hoặc `website_url` cho Terraform — để sử dụng phiên bản chạy hoàn toàn trên AWS.
+Website của bạn cũng được phục vụ từ CloudFront. Mở distribution domain name của nó (được in ra terminal của bạn sau khi triển khai) để sử dụng phiên bản chạy hoàn toàn trên AWS.
 
 ## Bước 6: Dọn Dẹp
 
@@ -396,17 +392,38 @@ Khi bạn đã hoàn tất, hãy xóa các tài nguyên bạn đã triển khai 
 </Fragment>
 </Infrastructure>
 
-Cognito user pool được tạo với tính năng bảo vệ xóa được bật, vì vậy nó tồn tại sau các lệnh trên. Tắt tính năng bảo vệ xóa trong [Amazon Cognito console](https://console.aws.amazon.com/cognito/) trước khi xóa nó.
+:::note[Tài Nguyên Được Giữ Lại]
+Cognito user pool được tạo với tính năng bảo vệ xóa được bật, vì vậy nó không được xóa tự động. Xóa nó (và IAM role mà Cognito sử dụng để gửi tin nhắn SMS) thủ công nếu bạn không còn cần chúng nữa.
+:::
+
+### Xóa Bootstrap Resources
+
+Các tài nguyên bạn đã bootstrap được chia sẻ bởi mọi dự án triển khai đến AWS account và region đó, và chi phí gần như không đáng kể để giữ lại. Chỉ xóa chúng nếu không có gì khác triển khai ở đó.
 
 <Infrastructure>
 <Fragment slot="cdk">
-:::note[Tài Nguyên Được Giữ Lại]
-Xóa các stacks sẽ để lại user pool, cùng với IAM role mà Cognito sử dụng để gửi tin nhắn SMS, IAM role mà API Gateway sử dụng để ghi vào CloudWatch Logs, các KMS keys mã hóa website bucket và các log groups của API và WAF, và chính các log groups. Xóa pool, roles và log groups, và lên lịch xóa các keys, khi bạn không còn cần chúng nữa.
-:::
+Xóa bootstrap stack trong mọi region bạn đã bootstrap, bao gồm cả `us-east-1`. Điều này xóa các bootstrap roles và container image repository:
+
+```sh
+aws cloudformation delete-stack --stack-name CDKToolkit --region <region>
+```
+
+Asset bucket được giữ lại có chủ đích, vì vậy hãy xóa nó riêng. Nó được versioned, mà `aws s3 rb --force` không thể xử lý, vì vậy hãy xóa mọi version và delete marker trước:
+
+```sh
+BUCKET=cdk-hnb659fds-assets-<account-id>-<region>
+aws s3api delete-objects --bucket $BUCKET --delete "$(aws s3api list-object-versions --bucket $BUCKET --output json --query '{Objects: Versions[].{Key: Key, VersionId: VersionId}}')"
+aws s3api delete-objects --bucket $BUCKET --delete "$(aws s3api list-object-versions --bucket $BUCKET --output json --query '{Objects: DeleteMarkers[].{Key: Key, VersionId: VersionId}}')"
+aws s3 rb s3://$BUCKET
+```
+
+Mỗi `delete-objects` báo lỗi thay vì không làm gì khi không còn gì thuộc loại đó để xóa, điều này an toàn để bỏ qua.
 </Fragment>
 <Fragment slot="terraform">
-:::caution[Destroy Thất Bại Cho Đến Khi Tắt Deletion Protection]
-Terraform cố gắng xóa user pool, vì vậy `destroy` dừng lại với thông báo `The user pool cannot be deleted because deletion protection is activated` và để lại các tài nguyên mà nó chưa đạt tới. Tắt tính năng bảo vệ xóa, sau đó chạy lại lệnh destroy để xóa mọi thứ — bao gồm cả user pool và IAM role mà Cognito sử dụng để gửi tin nhắn SMS.
+<NxCommands commands={['bootstrap-destroy infra']} />
+
+:::caution[Terraform State Của Bạn Cũng Bị Xóa]
+Lệnh này làm trống và xóa S3 bucket chứa Terraform state của bạn, vì vậy chỉ chạy nó khi không còn gì bạn quan tâm vẫn được triển khai từ state đó.
 :::
 </Fragment>
 </Infrastructure>
@@ -419,4 +436,4 @@ Chúc mừng! 🎉 Bạn đã xây dựng và triển khai thành công một �
 
 - <Link path="get_started/tutorials/dungeon-game/overview">Dungeon Adventure Tutorial</Link> — xây dựng một trò chơi phiêu lưu dungeon AI full-stack, để có hướng dẫn chi tiết hơn hướng dẫn này.
 - <Link path="guides/workspace">Workspaces</Link> — cách workspace của bạn được bố trí, và cấu hình mà các generators chia sẻ.
-- <Link path="get_started/existing-project">Add to an Existing Project</Link> — áp dụng plugin trong Nx workspace hoặc monorepo mà bạn đã có.
+- <Link path="get_started/existing-project">Add to an Existing Project</Link> — áp dụng plugin trong codebase hiện có của bạn.
