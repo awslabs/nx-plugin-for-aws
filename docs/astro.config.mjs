@@ -31,10 +31,13 @@ const smithySyntax = () => ({
 });
 
 const basePath = process.env.DOCS_BASE_PATH || '/nx-plugin-for-aws';
+const site = 'https://awslabs.github.io';
+/** Absolute, since a link preview is fetched by a crawler with no page to resolve against. */
+const previewImage = `${site}${basePath}/og-image.png`;
 
 // https://astro.build/config
 export default defineConfig({
-  site: 'https://awslabs.github.io',
+  site,
   base: basePath,
   redirects: {
     '/': `${basePath}/en`,
@@ -67,10 +70,31 @@ export default defineConfig({
       head: [
         {
           tag: 'meta',
+          attrs: { property: 'og:image', content: previewImage },
+        },
+        {
+          tag: 'meta',
+          attrs: { property: 'og:image:width', content: '1200' },
+        },
+        {
+          tag: 'meta',
+          attrs: { property: 'og:image:height', content: '630' },
+        },
+        {
+          tag: 'meta',
           attrs: {
-            property: 'og:image',
-            content: `${basePath}/favicon.svg`,
+            property: 'og:image:alt',
+            content:
+              'The three steps from creating a workspace to an AI assistant running the generators, and the diagram of the workspace they build.',
           },
+        },
+        {
+          tag: 'meta',
+          attrs: { name: 'twitter:card', content: 'summary_large_image' },
+        },
+        {
+          tag: 'meta',
+          attrs: { name: 'twitter:image', content: previewImage },
         },
       ],
       components: {

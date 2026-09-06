@@ -120,11 +120,6 @@ export const PRESETS: readonly Preset[] = [
       { type: 'ts#react-website', name: 'demo-website', column: 0, row: 0 },
     ],
     edges: [['demo-website', 'demo-api']],
-    overrides: {
-      'demo-website': {
-        followUps: { 'ts#website#auth': { cognitoDomain: 'my-demo' } },
-      },
-    },
   },
   {
     id: 'trpc-web-app',
