@@ -60,7 +60,14 @@ Costruiremo un'applicazione full-stack: un'API tRPC, un sito web React, l'autent
 
 Esegui i generatori che strutturano l'applicazione. Usa il pulsante qui sotto per copiarli tutti, oppure esegui ciascuno tu stesso come descritto sotto il diagramma.
 
+<Infrastructure>
+<Fragment slot="cdk">
 <EmbeddedGraph preset="quick-start" workspace="my-project" iac="cdk" orientation="horizontal" skipWorkspace />
+</Fragment>
+<Fragment slot="terraform">
+<EmbeddedGraph preset="quick-start" workspace="my-project" iac="terraform" orientation="horizontal" skipWorkspace />
+</Fragment>
+</Infrastructure>
 
 A seconda del tipo di progetto che stai costruendo, puoi scegliere qualsiasi combinazione di generatori per avviare rapidamente il tuo progetto. Consulta i __Generatori__ nella barra di navigazione a sinistra per vedere l'elenco completo delle opzioni, oppure prova il <Link path="get_started/graph-builder">graph builder</Link> per costruire il tuo workspace visivamente.
 
@@ -266,9 +273,22 @@ module "demo_website" {
 
   depends_on = [module.user_identity, module.demo_api]
 }
+
+# Print the website URL and user pool id when the deployment finishes
+output "website_url" {
+  value = module.demo_website.website_url
+}
+
+output "user_pool_id" {
+  value = module.user_identity.user_pool_id
+}
 ```
 
 Questo è tutto il Terraform che dobbiamo scrivere per distribuire la nostra applicazione full-stack.
+
+:::note[Output del Modulo Root]
+Terraform stampa solo gli output dichiarati in `packages/infra/src`, quindi qualsiasi cosa tu voglia leggere dopo una distribuzione deve essere ri-esportata dal modulo che la produce — da qui i due blocchi `output` sopra.
+:::
 </Fragment>
 </Infrastructure>
 
@@ -361,7 +381,7 @@ La prima volta che accedi come questo utente ti verrà richiesto di scegliere un
 
 </Drawer>
 
-Il tuo sito web è anche servito da CloudFront. Apri il nome di dominio della sua distribuzione (che viene stampato sul tuo terminale dopo la distribuzione) per utilizzare la versione in esecuzione interamente su AWS.
+Il tuo sito web è anche servito da CloudFront. Apri il nome di dominio della distribuzione stampato negli output della distribuzione — l'output che termina con `DistributionDomainName` per CDK, o `website_url` per Terraform — per utilizzare la versione in esecuzione interamente su AWS.
 
 ## Passaggio 6: Pulizia
 
@@ -376,14 +396,27 @@ Quando hai finito, elimina le risorse che hai distribuito per evitare costi cont
 </Fragment>
 </Infrastructure>
 
+Il pool di utenti Cognito viene creato con la protezione dall'eliminazione abilitata, quindi sopravvive ai comandi sopra. Disattiva la protezione dall'eliminazione nella [console Amazon Cognito](https://console.aws.amazon.com/cognito/) prima di rimuoverlo.
+
+<Infrastructure>
+<Fragment slot="cdk">
 :::note[Risorse Conservate]
-Il pool di utenti Cognito viene creato con la protezione dall'eliminazione abilitata, quindi non viene rimosso automaticamente. Eliminalo (e il ruolo IAM che Cognito utilizza per inviare messaggi SMS) manualmente se non ne hai più bisogno.
+L'eliminazione degli stack lascia il pool di utenti, insieme al ruolo IAM che Cognito utilizza per inviare messaggi SMS, al ruolo IAM che API Gateway utilizza per scrivere su CloudWatch Logs, alle chiavi KMS che crittografano il bucket del sito web e i gruppi di log dell'API e WAF, e i gruppi di log stessi. Elimina il pool, i ruoli e i gruppi di log, e pianifica l'eliminazione delle chiavi, una volta che non ne hai più bisogno.
 :::
+</Fragment>
+<Fragment slot="terraform">
+:::caution[Destroy Fallisce Finché la Protezione dall'Eliminazione È Attiva]
+Terraform tenta di eliminare il pool di utenti, quindi `destroy` si ferma con `The user pool cannot be deleted because deletion protection is activated` e lascia in posizione le risorse che non aveva ancora raggiunto. Disattiva la protezione dall'eliminazione, quindi esegui nuovamente il comando destroy per rimuovere tutto — inclusi il pool di utenti e il ruolo IAM che Cognito utilizza per inviare messaggi SMS.
+:::
+</Fragment>
+</Infrastructure>
 
 ---
 
 Congratulazioni! 🎉 Hai costruito e distribuito con successo un'applicazione full-stack utilizzando `@aws/nx-plugin`!
 
-:::tip[Prossimo: Tutorial Full-Stack]
-Per un tutorial più approfondito sulla costruzione di un'applicazione full-stack, consulta il <Link path="get_started/tutorials/dungeon-game/overview">Tutorial Dungeon Adventure</Link>.
-:::
+## Prossimi Passi
+
+- <Link path="get_started/tutorials/dungeon-game/overview">Dungeon Adventure Tutorial</Link> — costruisci un gioco di avventura dungeon AI full-stack, per una guida più approfondita di questa.
+- <Link path="guides/workspace">Workspaces</Link> — come è strutturato il tuo workspace e la configurazione che i generatori condividono.
+- <Link path="get_started/existing-project">Aggiungere a un Progetto Esistente</Link> — adotta il plugin in un workspace Nx o monorepo che hai già.

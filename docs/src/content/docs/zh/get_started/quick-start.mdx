@@ -60,7 +60,14 @@ cd my-project
 
 运行搭建应用程序的生成器。使用下面的按钮复制所有命令,或者按照图表下方的说明自己运行每个命令。
 
+<Infrastructure>
+<Fragment slot="cdk">
 <EmbeddedGraph preset="quick-start" workspace="my-project" iac="cdk" orientation="horizontal" skipWorkspace />
+</Fragment>
+<Fragment slot="terraform">
+<EmbeddedGraph preset="quick-start" workspace="my-project" iac="terraform" orientation="horizontal" skipWorkspace />
+</Fragment>
+</Infrastructure>
 
 根据您正在构建的项目类型,您可以选择任意生成器组合来快速启动您的项目。查看左侧导航栏中的 __生成器__ 以查看完整的选项列表,或尝试使用 <Link path="get_started/graph-builder">图形构建器</Link> 以可视化方式构建您的工作空间。
 
@@ -266,9 +273,22 @@ module "demo_website" {
 
   depends_on = [module.user_identity, module.demo_api]
 }
+
+# Print the website URL and user pool id when the deployment finishes
+output "website_url" {
+  value = module.demo_website.website_url
+}
+
+output "user_pool_id" {
+  value = module.user_identity.user_pool_id
+}
 ```
 
 这就是我们部署全栈应用程序所需编写的全部 Terraform 代码。
+
+:::note[根模块输出]
+Terraform 仅打印在 `packages/infra/src` 中声明的输出,因此您希望在部署后读取的任何内容都必须从生成它的模块重新导出——因此上面有两个 `output` 块。
+:::
 </Fragment>
 </Infrastructure>
 
@@ -361,7 +381,7 @@ aws cognito-idp admin-create-user \
 
 </Drawer>
 
-您的网站也通过 CloudFront 提供服务。打开其分发域名(在部署后打印到您的终端)以使用完全在 AWS 上运行的版本。
+您的网站也通过 CloudFront 提供服务。打开部署输出中打印的分发域名——对于 CDK 是以 `DistributionDomainName` 结尾的输出,对于 Terraform 是 `website_url`——以使用完全在 AWS 上运行的版本。
 
 ## 步骤 6:清理
 
@@ -376,14 +396,27 @@ aws cognito-idp admin-create-user \
 </Fragment>
 </Infrastructure>
 
+Cognito 用户池在创建时启用了删除保护,因此它在上述命令后仍然存在。在删除它之前,请在 [Amazon Cognito 控制台](https://console.aws.amazon.com/cognito/)中关闭删除保护。
+
+<Infrastructure>
+<Fragment slot="cdk">
 :::note[保留的资源]
-Cognito 用户池在创建时启用了删除保护,因此不会自动删除。如果您不再需要它们,请手动删除它(以及 Cognito 用于发送短信的 IAM 角色)。
+删除堆栈会留下用户池,以及 Cognito 用于发送短信的 IAM 角色、API Gateway 用于写入 CloudWatch Logs 的 IAM 角色、加密网站存储桶和 API 及 WAF 日志组的 KMS 密钥,以及日志组本身。一旦您不再需要它们,请删除池、角色和日志组,并安排密钥删除。
 :::
+</Fragment>
+<Fragment slot="terraform">
+:::caution[删除保护关闭前销毁会失败]
+Terraform 会尝试删除用户池,因此 `destroy` 会因 `The user pool cannot be deleted because deletion protection is activated` 而停止,并将尚未到达的资源留在原处。关闭删除保护,然后再次运行销毁命令以删除所有内容——包括用户池和 Cognito 用于发送短信的 IAM 角色。
+:::
+</Fragment>
+</Infrastructure>
 
 ---
 
 恭喜!🎉 您已成功使用 `@aws/nx-plugin` 构建并部署了一个全栈应用程序!
 
-:::tip[下一步:全栈教程]
-如需更深入的全栈应用程序构建教程,请查看 <Link path="get_started/tutorials/dungeon-game/overview">Dungeon Adventure 教程</Link>。
-:::
+## 下一步
+
+- <Link path="get_started/tutorials/dungeon-game/overview">Dungeon Adventure 教程</Link> — 构建一个全栈 AI 地牢冒险游戏,获得比本指南更深入的演练。
+- <Link path="guides/workspace">工作空间</Link> — 了解工作空间的布局以及生成器共享的配置。
+- <Link path="get_started/existing-project">添加到现有项目</Link> — 在您已有的 Nx 工作空间或 monorepo 中采用该插件。

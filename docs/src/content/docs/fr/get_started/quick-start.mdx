@@ -60,7 +60,14 @@ Nous allons construire une application full-stack : une API tRPC, un site web Re
 
 Exécutez les générateurs qui structurent l'application. Utilisez le bouton ci-dessous pour les copier tous, ou exécutez chacun vous-même comme décrit sous le diagramme.
 
+<Infrastructure>
+<Fragment slot="cdk">
 <EmbeddedGraph preset="quick-start" workspace="my-project" iac="cdk" orientation="horizontal" skipWorkspace />
+</Fragment>
+<Fragment slot="terraform">
+<EmbeddedGraph preset="quick-start" workspace="my-project" iac="terraform" orientation="horizontal" skipWorkspace />
+</Fragment>
+</Infrastructure>
 
 Selon le type de projet que vous construisez, vous pouvez choisir n'importe quelle combinaison de générateurs pour démarrer rapidement votre projet. Consultez les __Générateurs__ dans la barre de navigation à gauche pour voir la liste complète des options, ou essayez le <Link path="get_started/graph-builder">constructeur de graphe</Link> pour construire votre espace de travail visuellement.
 
@@ -266,9 +273,22 @@ module "demo_website" {
 
   depends_on = [module.user_identity, module.demo_api]
 }
+
+# Print the website URL and user pool id when the deployment finishes
+output "website_url" {
+  value = module.demo_website.website_url
+}
+
+output "user_pool_id" {
+  value = module.user_identity.user_pool_id
+}
 ```
 
 C'est tout le Terraform dont nous avons besoin pour déployer notre application full-stack.
+
+:::note[Sorties du module racine]
+Terraform n'affiche que les sorties déclarées dans `packages/infra/src`, donc tout ce que vous souhaitez lire après un déploiement doit être ré-exporté depuis le module qui le produit — d'où les deux blocs `output` ci-dessus.
+:::
 </Fragment>
 </Infrastructure>
 
@@ -361,7 +381,7 @@ La première fois que vous vous connectez en tant que cet utilisateur, vous ête
 
 </Drawer>
 
-Votre site web est également servi depuis CloudFront. Ouvrez son nom de domaine de distribution (qui est affiché dans votre terminal après le déploiement) pour utiliser la version fonctionnant entièrement sur AWS.
+Votre site web est également servi depuis CloudFront. Ouvrez le nom de domaine de distribution affiché dans vos sorties de déploiement — la sortie se terminant par `DistributionDomainName` pour CDK, ou `website_url` pour Terraform — pour utiliser la version fonctionnant entièrement sur AWS.
 
 ## Étape 6 : Nettoyer
 
@@ -376,14 +396,27 @@ Lorsque vous avez terminé, supprimez les ressources que vous avez déployées p
 </Fragment>
 </Infrastructure>
 
+Le pool d'utilisateurs Cognito est créé avec la protection contre la suppression activée, il survit donc aux commandes ci-dessus. Désactivez la protection contre la suppression dans la [console Amazon Cognito](https://console.aws.amazon.com/cognito/) avant de le supprimer.
+
+<Infrastructure>
+<Fragment slot="cdk">
 :::note[Ressources conservées]
-Le pool d'utilisateurs Cognito est créé avec la protection contre la suppression activée, il n'est donc pas supprimé automatiquement. Supprimez-le (ainsi que le rôle IAM que Cognito utilise pour envoyer des messages SMS) manuellement si vous n'en avez plus besoin.
+La suppression des stacks laisse le pool d'utilisateurs derrière, ainsi que le rôle IAM que Cognito utilise pour envoyer des messages SMS, le rôle IAM qu'API Gateway utilise pour écrire dans CloudWatch Logs, les clés KMS chiffrant le bucket du site web et les groupes de journaux de l'API et du WAF, et les groupes de journaux eux-mêmes. Supprimez le pool, les rôles et les groupes de journaux, et planifiez la suppression des clés, une fois que vous n'en avez plus besoin.
 :::
+</Fragment>
+<Fragment slot="terraform">
+:::caution[La destruction échoue tant que la protection contre la suppression est activée]
+Terraform tente de supprimer le pool d'utilisateurs, donc `destroy` s'arrête avec `The user pool cannot be deleted because deletion protection is activated` et laisse en place les ressources qu'il n'avait pas encore atteintes. Désactivez la protection contre la suppression, puis exécutez à nouveau la commande de destruction pour tout supprimer — le pool d'utilisateurs et le rôle IAM que Cognito utilise pour envoyer des messages SMS inclus.
+:::
+</Fragment>
+</Infrastructure>
 
 ---
 
 Félicitations ! 🎉 Vous avez réussi à construire et déployer une application full-stack en utilisant `@aws/nx-plugin` !
 
-:::tip[Suivant : Tutoriel Full-Stack]
-Pour un tutoriel plus approfondi sur la création d'une application full-stack, consultez le <Link path="get_started/tutorials/dungeon-game/overview">Tutoriel Dungeon Adventure</Link>.
-:::
+## Prochaines étapes
+
+- <Link path="get_started/tutorials/dungeon-game/overview">Dungeon Adventure Tutorial</Link> — construisez un jeu d'aventure de donjon IA full-stack, pour une présentation plus approfondie que ce guide.
+- <Link path="guides/workspace">Workspaces</Link> — comment votre espace de travail est organisé, et la configuration que les générateurs partagent.
+- <Link path="get_started/existing-project">Add to an Existing Project</Link> — adoptez le plugin dans un espace de travail Nx ou un monorepo que vous avez déjà.
