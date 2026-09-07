@@ -102,6 +102,7 @@ export default defineConfig({
         PageSidebar: './src/components/page-sidebar.astro',
         MarkdownContent: './src/components/markdown-content.astro',
         PageTitle: './src/components/page-title.astro',
+        ThemeProvider: './src/components/theme-provider.astro',
       },
       tableOfContents: {
         minHeadingLevel: 2,
