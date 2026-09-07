@@ -434,6 +434,8 @@ However you will still need to make changes to any "after" files manually to ens
 
 Note that if you are running e2e tests that use `pnpm` as the package manager, you may need to run `pnpm store prune` to ensure that your changes are picked up in the tests.
 
+In CI, the smoke tests are skipped when every changed file is under `docs/`, since a change confined to the docs site cannot affect generated projects. Touching anything outside `docs/` runs the full set.
+
 ### Writing Documentation
 
 Each generator has a guide page under `docs/src/content/docs/en/guides/`. These pages are consumed both by the docs site (at `https://awslabs.github.io/nx-plugin-for-aws/`) and by the MCP `generator-guide` tool, so they should read well as prose _and_ slice cleanly when an MCP agent asks for a specific option combination.

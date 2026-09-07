@@ -1,0 +1,25 @@
+name: Docs Only Change
+description: Work out whether a change touches nothing outside the docs directory, so the smoke tests can be skipped.
+
+outputs:
+  docs-only:
+    description: '"true" when every changed file is under docs/, otherwise "false".'
+    value: ${{ steps.detect.outputs.docs-only }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      with:
+        node-version: 22
+    - name: Detect docs only change
+      id: detect
+      shell: bash
+      # Passed as environment variables rather than interpolated into the script.
+      env:
+        # A pull request checks out a merge commit, so diff the branch head to
+        # leave out commits that landed on the base since the branch forked.
+        BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      # Node strips the types, so this job needs no dependencies installed.
+      run: node ./scripts/docs-only-change.mts
