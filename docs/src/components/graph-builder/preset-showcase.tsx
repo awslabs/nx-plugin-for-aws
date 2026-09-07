@@ -24,6 +24,7 @@ import {
   sourceAnchor,
   targetAnchor,
 } from './geometry';
+import { IacMark } from './iac-mark';
 import { NodeLogo } from './node-logo';
 import {
   buildPresetGraph,
@@ -492,139 +493,144 @@ export const PresetShowcase = ({ builderHref }: Props) => {
             </div>
           </div>
 
-          <p className="ps-panel-description">{preset.description}</p>
-
-          <div
-            ref={canvasRef}
-            className="ps-canvas"
-            style={{ height: canvasHeight }}
-          >
-            {/* Keyed on the example, so switching remounts the diagram and its
-                plan arrives again. */}
+          {/* The mark sits outside the scrolling canvas, so it stays pinned to
+              the corner when a wide diagram is scrolled sideways. */}
+          <div className="ps-canvas-frame">
             <div
-              key={preset.id}
-              className="ps-extent"
-              style={{
-                width: stage.width,
-                height: stage.height,
-                // Centred across the panel while it fits; pinned to the left once
-                // it doesn't, so the overflow is somewhere the canvas can scroll.
-                ...(fitsCanvas
-                  ? {
-                      left: '50%',
-                      transform: `translateX(-50%) scale(${scale})`,
-                    }
-                  : {
-                      left: 0,
-                      transformOrigin: 'top left',
-                      transform: `scale(${scale})`,
-                    }),
-                // Centred in the panel, which is as tall as the tallest example.
-                marginTop: (canvasHeight - stage.height * scale) / 2,
-              }}
+              ref={canvasRef}
+              className="ps-canvas"
+              style={{ height: canvasHeight }}
             >
-              <svg
-                className="gb-edges"
-                width={stage.width}
-                height={stage.height}
-                aria-hidden="true"
+              {/* Keyed on the example, so switching remounts the diagram and its
+                plan arrives again. */}
+              <div
+                key={preset.id}
+                className="ps-extent"
+                style={{
+                  width: stage.width,
+                  height: stage.height,
+                  // Centred across the panel while it fits; pinned to the left once
+                  // it doesn't, so the overflow is somewhere the canvas can scroll.
+                  ...(fitsCanvas
+                    ? {
+                        left: '50%',
+                        transform: `translateX(-50%) scale(${scale})`,
+                      }
+                    : {
+                        left: 0,
+                        transformOrigin: 'top left',
+                        transform: `scale(${scale})`,
+                      }),
+                  // Centred in the panel, which is as tall as the tallest example.
+                  marginTop: (canvasHeight - stage.height * scale) / 2,
+                }}
               >
-                <defs>
-                  <marker
-                    id="ps-arrow"
-                    viewBox="0 0 10 10"
-                    refX="9"
-                    refY="5"
-                    markerWidth="5"
-                    markerHeight="5"
-                    markerUnits="strokeWidth"
-                    orient="auto-start-reverse"
-                  >
-                    <path d="M 0 1.5 L 9 5 L 0 8.5 z" fill="context-stroke" />
-                  </marker>
-                </defs>
+                <svg
+                  className="gb-edges"
+                  width={stage.width}
+                  height={stage.height}
+                  aria-hidden="true"
+                >
+                  <defs>
+                    <marker
+                      id="ps-arrow"
+                      viewBox="0 0 10 10"
+                      refX="9"
+                      refY="5"
+                      markerWidth="5"
+                      markerHeight="5"
+                      markerUnits="strokeWidth"
+                      orient="auto-start-reverse"
+                    >
+                      <path d="M 0 1.5 L 9 5 L 0 8.5 z" fill="context-stroke" />
+                    </marker>
+                  </defs>
 
-                {graph.edges.map((edge) => {
-                  const source = nodeById.get(edge.source);
-                  const target = nodeById.get(edge.target);
-                  if (!source || !target) return null;
-                  const path =
-                    source.id === target.id
-                      ? loopPath(source, 'horizontal')
-                      : edgePath(
-                          sourceAnchor(source, 'horizontal'),
-                          targetAnchor(target, 'horizontal'),
-                          'horizontal',
-                        );
-                  const isLit = focus?.edgeId === edge.id;
+                  {graph.edges.map((edge) => {
+                    const source = nodeById.get(edge.source);
+                    const target = nodeById.get(edge.target);
+                    if (!source || !target) return null;
+                    const path =
+                      source.id === target.id
+                        ? loopPath(source, 'horizontal')
+                        : edgePath(
+                            sourceAnchor(source, 'horizontal'),
+                            targetAnchor(target, 'horizontal'),
+                            'horizontal',
+                          );
+                    const isLit = focus?.edgeId === edge.id;
+                    return (
+                      <g
+                        key={edge.id}
+                        className={`gb-edge ps-edge${isLit ? ' is-active' : ''}${
+                          focus && !isLit ? ' is-dimmed' : ''
+                        }${isPlanned(edge.id) ? ' is-planned' : ''}${
+                          arriving?.has(edge.id) ? ' is-arriving' : ''
+                        }`}
+                        onPointerEnter={() => setFocus({ edgeId: edge.id })}
+                        onPointerLeave={() => setFocus(undefined)}
+                      >
+                        {/* A connection is a thin line to hit, so pointing at it is
+                          picked up by a wider invisible path over the top. */}
+                        <path className="gb-edge-hit" d={path} />
+                        {/* Dashes travelling the path, so a connection reads as a
+                          direction of flow. */}
+                        <path
+                          className="gb-edge-line ps-edge-line"
+                          d={path}
+                          markerEnd="url(#ps-arrow)"
+                        />
+                      </g>
+                    );
+                  })}
+                </svg>
+
+                {graph.nodes.map((node) => {
+                  const type = nodeType(node.type);
+                  const isLit = litNodeIds.has(node.id);
                   return (
-                    <g
-                      key={edge.id}
-                      className={`gb-edge ps-edge${isLit ? ' is-active' : ''}${
-                        focus && !isLit ? ' is-dimmed' : ''
-                      }${isPlanned(edge.id) ? ' is-planned' : ''}${
-                        arriving?.has(edge.id) ? ' is-arriving' : ''
-                      }`}
-                      onPointerEnter={() => setFocus({ edgeId: edge.id })}
+                    <div
+                      key={node.id}
+                      className={`gb-node gb-node--static ps-node${
+                        isLit ? ' is-lit' : ''
+                      }${focus && !isLit ? ' is-dimmed' : ''}${
+                        isPlanned(node.id) ? ' is-planned' : ''
+                      }${arriving?.has(node.id) ? ' is-arriving' : ''}`}
+                      style={{ left: node.x, top: node.y }}
+                      onPointerEnter={() => setFocus({ nodeId: node.id })}
                       onPointerLeave={() => setFocus(undefined)}
                     >
-                      {/* A connection is a thin line to hit, so pointing at it is
-                          picked up by a wider invisible path over the top. */}
-                      <path className="gb-edge-hit" d={path} />
-                      {/* Dashes travelling the path, so a connection reads as a
-                          direction of flow. */}
-                      <path
-                        className="gb-edge-line ps-edge-line"
-                        d={path}
-                        markerEnd="url(#ps-arrow)"
+                      <NodeLogo
+                        logo={type.logo}
+                        badge={type.badge}
+                        alt={type.label}
                       />
-                    </g>
+                      <span className="gb-node-text">
+                        <span className="gb-node-name">{node.name}</span>
+                        <span className="gb-node-type">{type.label}</span>
+                      </span>
+
+                      {type.roles.includes('target') && (
+                        <span
+                          className="gb-port gb-port--in gb-port--in-horizontal"
+                          aria-hidden="true"
+                        />
+                      )}
+                      {type.roles.includes('source') && (
+                        <span
+                          className="gb-port gb-port--out gb-port--out-horizontal"
+                          aria-hidden="true"
+                        />
+                      )}
+                    </div>
                   );
                 })}
-              </svg>
-
-              {graph.nodes.map((node) => {
-                const type = nodeType(node.type);
-                const isLit = litNodeIds.has(node.id);
-                return (
-                  <div
-                    key={node.id}
-                    className={`gb-node gb-node--static ps-node${
-                      isLit ? ' is-lit' : ''
-                    }${focus && !isLit ? ' is-dimmed' : ''}${
-                      isPlanned(node.id) ? ' is-planned' : ''
-                    }${arriving?.has(node.id) ? ' is-arriving' : ''}`}
-                    style={{ left: node.x, top: node.y }}
-                    onPointerEnter={() => setFocus({ nodeId: node.id })}
-                    onPointerLeave={() => setFocus(undefined)}
-                  >
-                    <NodeLogo
-                      logo={type.logo}
-                      badge={type.badge}
-                      alt={type.label}
-                    />
-                    <span className="gb-node-text">
-                      <span className="gb-node-name">{node.name}</span>
-                      <span className="gb-node-type">{type.label}</span>
-                    </span>
-
-                    {type.roles.includes('target') && (
-                      <span
-                        className="gb-port gb-port--in gb-port--in-horizontal"
-                        aria-hidden="true"
-                      />
-                    )}
-                    {type.roles.includes('source') && (
-                      <span
-                        className="gb-port gb-port--out gb-port--out-horizontal"
-                        aria-hidden="true"
-                      />
-                    )}
-                  </div>
-                );
-              })}
+              </div>
             </div>
+            <IacMark iac="cdk" />
           </div>
+
+          <p className="ps-panel-description">{preset.description}</p>
         </div>
       </div>
 
