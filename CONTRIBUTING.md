@@ -411,6 +411,8 @@ A generator that adds to a project rather than taking part in a connection — a
 
 Every node type in the palette needs a blueprint — `infrastructure.spec.ts` fails by name if one is missing, since a type without it would draw an empty box.
 
+A page describing a *mechanism* rather than a generator's own infrastructure — how runtime configuration reaches the things that read it, say — declares its diagram outright in `docs/src/lib/graph-builder/diagrams.ts` and renders it with `<EmbeddedGraph diagram="runtime-config" />`. Same boxes, tiles and arrows, so the docs' diagrams read as one set; a tile without an icon is something no AWS service stands for.
+
 ### End to End Tests
 
 The end to end tests run our generators and check that generated projects function correctly (usually by performing a build).
