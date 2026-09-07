@@ -16,7 +16,11 @@ import type {
   NodeOverride,
 } from '../../lib/graph-builder/commands';
 import { toScript } from '../../lib/graph-builder/commands';
-import { buildInfrastructureLayout } from '../../lib/graph-builder/infrastructure';
+import { declaredDiagram } from '../../lib/graph-builder/diagrams';
+import {
+  buildDeclaredLayout,
+  buildInfrastructureLayout,
+} from '../../lib/graph-builder/infrastructure';
 import type { Graph } from '../../lib/graph-builder/model';
 import {
   edgePath,
@@ -57,6 +61,12 @@ interface Props {
    * runs as a local process. A guide pins these to the variant it is describing.
    */
   options?: Readonly<Record<string, string | boolean>>;
+  /**
+   * A diagram declared outright, by name, for a page describing a mechanism
+   * rather than a project's own infrastructure. There is nothing to switch to and
+   * no commands to copy: it is one drawing.
+   */
+  diagram?: string;
   /**
    * Take the option values the reader has picked in the page's filter bar, for
    * every option the diagram is not pinning. A guide's diagram then shows the
@@ -110,6 +120,7 @@ export const EmbeddedGraph = ({
   preset: presetId,
   type,
   name,
+  diagram,
   options: nodeOptions,
   followPageOptions = false,
   view: initialView = 'projects',
@@ -124,10 +135,11 @@ export const EmbeddedGraph = ({
   const preset = PRESETS.find((entry) => entry.id === presetId);
   /** A guide's diagram: one project, and only the architecture of it. */
   const single = type !== undefined;
+  const declared = diagram ? declaredDiagram(diagram) : undefined;
   const [chosenView, setView] = useState<DiagramView>(initialView);
   // Nothing to switch to for a single project, so it stays on its architecture
   // — which is also the only view a generator without a palette node type has.
-  const view: DiagramView = single ? 'infrastructure' : chosenView;
+  const view: DiagramView = single || declared ? 'infrastructure' : chosenView;
   const markerId = `${useId()}-arrow`;
   const pageOptions = usePageOptions(followPageOptions);
 
@@ -180,22 +192,24 @@ export const EmbeddedGraph = ({
   // column has height to spare and width to save.
   const infrastructure = useMemo(
     () =>
-      graph
-        ? buildInfrastructureLayout(graph, { from: orientation })
-        : undefined,
-    [graph, orientation],
+      declared
+        ? buildDeclaredLayout(declared)
+        : graph
+          ? buildInfrastructureLayout(graph, { from: orientation })
+          : undefined,
+    [declared, graph, orientation],
   );
 
   // The diagram's natural size, so it can be scaled to fit the content column.
   const layout = useMemo(() => {
-    if (!graph || graph.nodes.length === 0) {
-      return { width: PADDING * 2, height: PADDING * 2 };
-    }
     if (view === 'infrastructure' && infrastructure) {
       return {
         width: infrastructure.width,
         height: infrastructure.height,
       };
+    }
+    if (!graph || graph.nodes.length === 0) {
+      return { width: PADDING * 2, height: PADDING * 2 };
     }
     return {
       width:
@@ -228,6 +242,8 @@ export const EmbeddedGraph = ({
   const offset = containerWidth
     ? Math.max(0, (containerWidth - layout.width * scale) / 2)
     : 0;
+  /** Room for the switch or the mark, where the diagram has one. */
+  const headroom = declared ? 0 : TOGGLE_ROOM;
 
   const [copied, setCopied] = useState(false);
   useEffect(() => {
@@ -254,11 +270,11 @@ export const EmbeddedGraph = ({
     }
   };
 
-  if (!graph) {
+  if (!graph && !infrastructure) {
     return null;
   }
 
-  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+  const nodeById = new Map((graph?.nodes ?? []).map((node) => [node.id, node]));
 
   const summary =
     view === 'infrastructure' && infrastructure
@@ -267,60 +283,65 @@ export const EmbeddedGraph = ({
         }, ${infrastructure.connectionCount} connection${
           infrastructure.connectionCount === 1 ? '' : 's'
         }`
-      : graph.nodes.length === 1
+      : graph && graph.nodes.length === 1
         ? '1 project'
-        : `${graph.nodes.length} projects and components, ${
-            graph.edges.length
-          } connection${graph.edges.length === 1 ? '' : 's'}`;
+        : `${graph?.nodes.length ?? 0} projects and components, ${
+            graph?.edges.length ?? 0
+          } connection${graph?.edges.length === 1 ? '' : 's'}`;
 
   return (
     <div className="gb-root gb-embed" data-graph-builder>
-      <div className="gb-embed-bar">
-        <span className="gb-embed-hint">{summary}</span>
-        {preset && copyable && (
-          <button
-            type="button"
-            className={`gb-copy-btn${copied ? ' is-copied' : ''}`}
-            onClick={copy}
-          >
-            <svg
-              className="gb-copy-icon gb-copy-icon--copy"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
+      {/* A declared diagram is one drawing of a mechanism: there is nothing to
+          count up or to scaffold. */}
+      {!declared && (
+        <div className="gb-embed-bar">
+          <span className="gb-embed-hint">{summary}</span>
+          {preset && copyable && (
+            <button
+              type="button"
+              className={`gb-copy-btn${copied ? ' is-copied' : ''}`}
+              onClick={copy}
             >
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-            </svg>
-            <svg
-              className="gb-copy-icon gb-copy-icon--check"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
-            <span>{copied ? 'Copied' : 'Copy commands'}</span>
-          </button>
-        )}
-      </div>
+              <svg
+                className="gb-copy-icon gb-copy-icon--copy"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+              </svg>
+              <svg
+                className="gb-copy-icon gb-copy-icon--check"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+              <span>{copied ? 'Copied' : 'Copy commands'}</span>
+            </button>
+          )}
+        </div>
+      )}
 
       <div
         ref={containerRef}
         className="gb-embed-canvas"
-        style={{ height: layout.height * scale + TOGGLE_ROOM }}
+        style={{ height: layout.height * scale + headroom }}
       >
         {/* One project has only its own architecture to show, so the guide
-            diagrams say which view this is rather than offering the other. */}
-        {single ? (
+            diagrams say which view this is rather than offering the other, and a
+            declared diagram is the only thing it could be. */}
+        {declared ? null : single ? (
           <ViewMark view={view} />
         ) : (
           <ViewToggle view={view} onChange={setView} />
@@ -329,7 +350,7 @@ export const EmbeddedGraph = ({
         <div
           className="gb-embed-extent"
           style={{
-            top: TOGGLE_ROOM,
+            top: headroom,
             left: offset,
             width: layout.width,
             height: layout.height,
@@ -422,9 +443,11 @@ export const EmbeddedGraph = ({
           )}
         </div>
 
-        {/* Which provider declares the infrastructure says nothing about what it
-            is, so a single project's architecture leaves the mark off. */}
-        {!single && <IacMark iac={iac} />}
+        {/* Only a workspace has a provider to name: which one declares the
+            infrastructure says nothing about what the infrastructure is, so a
+            single project's architecture and a declared diagram leave the mark
+            off. */}
+        {preset && <IacMark iac={iac} />}
       </div>
     </div>
   );
