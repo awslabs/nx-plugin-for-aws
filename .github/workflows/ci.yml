@@ -378,13 +378,15 @@ jobs:
           NX_E2E_SHARD: ${{ matrix.shard }}/6
           NX_E2E_CODEBUILD_WINDOWS: "true"
         run: pnpm nx run @aws/nx-plugin-e2e:smoke-test --name=standalone
-  # Passes when every smoke test succeeded or was skipped, fails otherwise. A
-  # skipped matrix job reports one check under its unexpanded name rather than one
-  # per leg, so this is the context `main` requires in place of the legs.
+  # The context `main` requires in place of the individual legs, since a skipped
+  # matrix job reports one check under its unexpanded name rather than one per leg.
+  # Passes when every smoke test and everything they need succeeded or was skipped.
   smoke_tests_complete:
     name: Smoke Tests Complete
     needs:
       [
+        changes,
+        package,
         smoke_tests,
         smoke_tests_migrate,
         smoke_tests_standalone,
@@ -412,10 +414,11 @@ jobs:
           done
   release:
     name: Release
-    needs: [package, build, unit_tests, smoke_tests_complete]
-    # A docs only push skips the smoke tests, and a skip propagates to every job
-    # downstream of it unless that job sets its own condition.
-    if: ${{ !cancelled() && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
+    needs: [changes, package, build, unit_tests, smoke_tests_complete]
+    # A docs only change releases nothing. It also skips the smoke tests, and a
+    # skip propagates to every job downstream of it unless that job opts out with
+    # a status function of its own.
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
     runs-on: ubuntu-22.04
     outputs:
       latest_commit: ${{ steps.git_remote.outputs.latest_commit }}
@@ -450,8 +453,11 @@ jobs:
   deploy_docs:
     name: Deploy Docs
     runs-on: ubuntu-latest
-    if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.release.outputs.latest_commit == github.sha }}
-    needs: [release]
+    # Deploys once everything the docs ride on is green. The release job holds the
+    # "still the tip of main" check, so that guard applies only when it ran - a
+    # docs only push skips it.
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && (needs.release.result == 'skipped' || needs.release.outputs.latest_commit == github.sha) }}
+    needs: [build, unit_tests, smoke_tests_complete, release]
     steps:
       - name: Download docs artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
