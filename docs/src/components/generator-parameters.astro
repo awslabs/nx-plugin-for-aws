@@ -13,6 +13,7 @@
  */
 import GeneratorsJson from '../../../packages/nx-plugin/generators.json';
 import schemaTranslations from '../i18n/schema-translations.json';
+import { readGeneratorOptions } from '../lib/generator-options';
 
 const { generator } = Astro.props;
 const schemas = Object.entries(import.meta.glob('../../../packages/nx-plugin/**/schema.json', { eager: true, query: '?raw' }));
@@ -109,27 +110,10 @@ const getDescription = (parameter, fallback) => {
 // (e.g. every Powertools event schema) stays one row tall.
 const COLLAPSE_AFTER = 6;
 
-// The order the reader meets the options in: what they must supply, then what
-// the generator considers important, then the rest, with anything marked
-// internal last. Schema order breaks ties.
-const RANKS = { required: 0, important: 1, normal: 2, internal: 3 };
-const rankOf = (parameterSchema, isRequired) => {
-  if (isRequired) return RANKS.required;
-  return RANKS[parameterSchema['x-priority']] ?? RANKS.normal;
-};
-
-const required = schema.required ?? [];
-const parameters = Object.entries(schema.properties)
-  .map(([key, parameterSchema]) => ({
-    key,
-    required: required.includes(key),
-    rank: rankOf(parameterSchema, required.includes(key)),
-    type: parameterSchema.enum ? 'enum' : parameterSchema.type ?? 'string',
-    values: (parameterSchema.enum ?? []).map(String),
-    default: parameterSchema.default === undefined ? undefined : String(parameterSchema.default),
-    description: getDescription(key, parameterSchema.description),
-  }))
-  .sort((a, b) => a.rank - b.rank);
+const parameters = readGeneratorOptions(schema).map((option) => ({
+  ...option,
+  description: getDescription(option.key, option.description),
+}));
 ---
 
 <div class="gen-params not-content" data-gen-params>

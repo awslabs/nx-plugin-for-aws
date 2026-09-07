@@ -1,8 +1,114 @@
 ---
-import PackageManagerCommand from './package-manager-command.astro';
-import { buildCreateNxWorkspaceCommand } from '../../../packages/nx-plugin/src/utils/commands';
+/**
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
-const { workspace, iac, tag, module, extraArgs } = Astro.props;
-const buildCommand = (pm) => buildCreateNxWorkspaceCommand(pm, workspace, iac, tag, module, extraArgs);
+/**
+ * The command that creates a workspace, in the same card the generators use: the
+ * reader picks their IaC provider, container engine and the rest of the preset's
+ * options and the command rewrites as they go.
+ *
+ * `readonly` marks a walkthrough step whose prose is written around the values it
+ * passes, leaving `editable` the options the reader still chooses for themselves.
+ */
+import {
+  createSchemaLookup,
+  resolveGeneratorsJson,
+} from '../../../packages/nx-plugin/src/mcp-server/schema-registry';
+import { emittedValues, type WorkspaceCardConfig } from '../lib/command-card';
+import { commandCardStrings } from '../lib/command-card-strings';
+import {
+  readGeneratorOptions,
+  type GeneratorOption,
+} from '../lib/generator-options';
+import CommandCard from './command-card.astro';
+import CommandCardTerminals from './command-card-terminals.astro';
+
+const {
+  workspace,
+  iac,
+  module,
+  tag,
+  extraArgs,
+  values: pinnedValues = {},
+  readonly = false,
+  editable = [],
+} = Astro.props;
+const locale = Astro.currentLocale || 'en';
+const strings = commandCardStrings(locale);
+
+// The workspace name is the preset's own argument rather than one of its options,
+// so it leads the list the card shows.
+const NAME_OPTION: GeneratorOption = {
+  key: 'workspace',
+  control: 'text',
+  type: 'string',
+  values: [],
+  required: true,
+};
+
+let options: GeneratorOption[] = [NAME_OPTION];
+try {
+  const generatorsJson = resolveGeneratorsJson(process.cwd());
+  if (generatorsJson) {
+    options = [
+      NAME_OPTION,
+      ...readGeneratorOptions(createSchemaLookup(generatorsJson)('preset')),
+    ];
+  }
+} catch {
+  options = [NAME_OPTION];
+}
+
+const prescribed: Record<string, string> = Object.fromEntries(
+  Object.entries({ workspace, iac, module, ...pinnedValues })
+    .filter(([, value]) => value !== undefined)
+    .map(([key, value]) => [key, String(value)]),
+);
+const initial: Record<string, string> = Object.fromEntries(
+  options.map((option) => [
+    option.key,
+    prescribed[option.key] ??
+      (option.control === 'boolean' ? option.default ?? 'false' : ''),
+  ]),
+);
+const locked = new Set(
+  readonly
+    ? options
+        .map((option) => option.key)
+        .filter((key) => !editable.includes(key))
+    : [],
+);
+
+const config: WorkspaceCardConfig = {
+  kind: 'workspace',
+  tag,
+  extraArgs,
+  positional: ['workspace'],
+  order: options.map((option) => option.key),
+  prescribed: Object.keys(prescribed),
+  options: options.map(({ key, control, default: fallback }) => ({
+    key,
+    control,
+    default: fallback,
+  })),
+};
+const values = emittedValues(initial, options);
 ---
-<PackageManagerCommand buildCommand={buildCommand} />
+
+<CommandCard
+  config={config}
+  options={options}
+  initial={initial}
+  title={strings.workspaceTitle}
+  target={tag ? `@aws/nx-workspace@${tag}` : '@aws/nx-workspace'}
+  locked={locked}
+  strings={strings}
+>
+  <CommandCardTerminals
+    config={config}
+    values={values}
+    copyLabel={strings.copyCommand}
+  />
+</CommandCard>
