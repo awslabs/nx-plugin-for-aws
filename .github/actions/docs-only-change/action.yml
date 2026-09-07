@@ -1,0 +1,54 @@
+name: Docs Only Change
+description: Work out whether a change touches nothing outside the docs directory, so the smoke tests can be skipped.
+
+outputs:
+  docs-only:
+    description: '"true" when every changed file is under docs/, otherwise "false".'
+    value: ${{ steps.detect.outputs.docs-only }}
+
+runs:
+  using: composite
+  steps:
+    - name: Detect docs only change
+      id: detect
+      shell: bash
+      env:
+        # On a pull request the checked out commit is a merge of the branch into
+        # the base, so diff the branch head itself - otherwise commits that
+        # landed on the base since the branch forked count as changes here.
+        BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      run: |
+        set -euo pipefail
+
+        # Without both commits in hand (a workflow_dispatch run, a new branch, a
+        # force push whose previous head is gone) there is no diff to inspect, so
+        # assume the change is not docs only and run everything.
+        for sha in "${BASE_SHA:-}" "${HEAD_SHA:-}"; do
+          if [ -z "$sha" ] || ! git cat-file -e "${sha}^{commit}" 2>/dev/null; then
+            echo "No commit range to diff - treating as a non-docs change"
+            echo "docs-only=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+        done
+
+        changed=$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}")
+
+        if [ -z "$changed" ] || echo "$changed" | grep -qv '^docs/'; then
+          docs_only=false
+        else
+          docs_only=true
+        fi
+
+        echo "docs-only=${docs_only}" >> "$GITHUB_OUTPUT"
+        {
+          echo "### Docs only change: \`${docs_only}\`"
+          echo
+          echo "<details><summary>Changed files</summary>"
+          echo
+          echo '```'
+          echo "${changed:-<none>}"
+          echo '```'
+          echo
+          echo "</details>"
+        } >> "$GITHUB_STEP_SUMMARY"
