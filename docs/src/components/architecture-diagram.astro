@@ -1,0 +1,89 @@
+---
+/**
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+import { NODE_TYPES } from '../lib/graph-builder/catalog';
+import { hasBlueprint } from '../lib/graph-builder/infrastructure';
+import EmbeddedGraph from './embedded-graph.astro';
+
+/**
+ * The architecture a single generator deploys, as one project box of AWS
+ * resources — the same diagram the quick start and the tutorial show for a whole
+ * workspace, narrowed to the project this guide covers, and switchable to the
+ * project view.
+ *
+ * The project type comes from the page's own `generator` and `when` frontmatter,
+ * so a snippet shared by the TypeScript and Python versions of a guide draws the
+ * right one without being told. A generator with no node type in the graph
+ * builder's palette — one that adds to a project rather than taking part in a
+ * connection — is drawn straight from its own blueprint.
+ *
+ * Usage, from a guide or a snippet a guide includes:
+ *   <ArchitectureDiagram />
+ *   <ArchitectureDiagram options={{ infra: 'rest-lambda' }} />
+ *
+ * The diagram draws the architecture the reader's own option values deploy,
+ * following the page's filter bar. `options` pins values on top of that, for a
+ * diagram inside a block that describes one variant — a filtered <Tabs> whose
+ * prose is specific to it — so that block always draws what it is describing.
+ */
+interface Props {
+  options?: Readonly<Record<string, string | boolean>>;
+  /** The project name on the box. Defaults to one derived from the type. */
+  name?: string;
+}
+
+const { options, name } = Astro.props;
+
+const frontmatter = Astro.locals.starlightRoute?.entry?.data as
+  | { generator?: string; when?: Record<string, string | string[]> }
+  | undefined;
+const generator = frontmatter?.generator;
+const when = frontmatter?.when ?? {};
+
+// The page's generator, narrowed by the option values its frontmatter pins: the
+// `ts#api` guides share one generator, and `when: framework: [trpc]` is what says
+// which of its project types this page is about.
+const candidates = NODE_TYPES.filter(
+  (type) =>
+    type.generator === generator &&
+    hasBlueprint(type.id) &&
+    Object.entries(type.variantOptions).every(([option, value]) => {
+      const allowed = when[option];
+      if (allowed === undefined) return true;
+      return (Array.isArray(allowed) ? allowed : [allowed]).includes(value);
+    }),
+);
+
+// A generator outside the palette stands for itself.
+const subject =
+  candidates.length === 1
+    ? candidates[0].id
+    : generator !== undefined && hasBlueprint(generator)
+      ? generator
+      : undefined;
+
+// A guide naming a generator with no blueprint has nothing to draw, which is an
+// authoring mistake worth failing the build over. A snippet also renders as a page
+// of its own, with no generator behind it — there the diagram belongs to whichever
+// guide includes the snippet, so it is left out.
+if (generator !== undefined && subject === undefined) {
+  throw new Error(
+    `Architecture diagram: the page's 'generator: ${generator}' frontmatter (narrowed by 'when') matched ${candidates.length} project types with an infrastructure blueprint, and the generator has none of its own`,
+  );
+}
+---
+
+{
+  subject && (
+    <EmbeddedGraph
+      type={subject}
+      name={name}
+      options={options}
+      followPageOptions
+      view="infrastructure"
+      orientation="horizontal"
+    />
+  )
+}

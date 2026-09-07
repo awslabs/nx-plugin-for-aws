@@ -13,6 +13,10 @@ import {
 import { nodeType } from '../../lib/graph-builder/catalog';
 import type { EmitOptions, ScriptLine } from '../../lib/graph-builder/commands';
 import { toScript, toScriptLines } from '../../lib/graph-builder/commands';
+import {
+  buildInfrastructureLayout,
+  type InfraLayout,
+} from '../../lib/graph-builder/infrastructure';
 import type { Graph } from '../../lib/graph-builder/model';
 import type { CommandFocus } from './command-list';
 import { FLOW_PHASES, FlowSteps } from './flow-steps';
@@ -25,6 +29,7 @@ import {
   targetAnchor,
 } from './geometry';
 import { type Iac, IacMark } from './iac-mark';
+import { InfraDiagram } from './infra-diagram';
 import { NodeLogo } from './node-logo';
 import {
   buildPresetGraph,
@@ -32,6 +37,7 @@ import {
   type Preset,
   SHOWCASE_PRESET_IDS,
 } from './presets';
+import { type DiagramView, ViewToggle } from './view-toggle';
 
 /** Where the grid starts, and the spacing between its cells on each axis. */
 const ORIGIN = 24;
@@ -39,6 +45,8 @@ const X_GAP = NODE_WIDTH + 90;
 const Y_GAP = NODE_HEIGHT + 60;
 /** Padding kept around the diagram inside its panel. */
 const PADDING = 24;
+/** Room left at the top of the canvas for the view switch, clear of the diagram. */
+const TOGGLE_ROOM = 40;
 
 /** How fast the assistant is shown typing, and running what it writes. */
 const TYPE_MS = 26;
@@ -57,6 +65,8 @@ interface Stage {
   /** The diagram's natural size, before it is scaled to the panel. */
   readonly width: number;
   readonly height: number;
+  /** The same workspace as the AWS infrastructure it deploys. */
+  readonly infrastructure: InfraLayout;
 }
 
 /**
@@ -76,8 +86,20 @@ const toStage = (preset: Preset): Stage => {
     graph,
     width: Math.max(...nodes.map((node) => node.x + NODE_WIDTH)) + PADDING,
     height: Math.max(...nodes.map((node) => node.y + NODE_HEIGHT)) + PADDING,
+    // The showcase panel is as wide as the landing page, so its boxes flow the
+    // same way across as the projects they were built from.
+    infrastructure: buildInfrastructureLayout(graph, {
+      from: 'horizontal',
+      flow: 'horizontal',
+    }),
   };
 };
+
+/** The size of a stage's diagram in the view being shown. */
+const sizeOf = (stage: Stage, view: DiagramView) =>
+  view === 'infrastructure'
+    ? { width: stage.infrastructure.width, height: stage.infrastructure.height }
+    : { width: stage.width, height: stage.height };
 
 interface Props {
   /** The graph builder page, which each example can be opened in to edit. */
@@ -118,7 +140,9 @@ export const PresetShowcase = ({ builderHref }: Props) => {
   const [focus, setFocus] = useState<CommandFocus | undefined>();
   /** Set by the mark on the diagram, overriding the example's own provider. */
   const [iacOverride, setIacOverride] = useState<Iac | undefined>();
+  const [view, setView] = useState<DiagramView>('projects');
   const tabsId = useId();
+  const markerId = `${useId()}-arrow`;
   const rootRef = useRef<HTMLDivElement>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
 
@@ -284,20 +308,32 @@ export const PresetShowcase = ({ builderHref }: Props) => {
   }, []);
 
   // One scale for every example, set by the widest: it fills a big panel and holds
-  // its size as the showcase cycles. Below the floor a phone scrolls the diagram
-  // sideways rather than shrinking labels past reading, and the panel stands as
-  // tall as the tallest example so its height is steady too.
+  // its size as the showcase cycles, so labels never change size between
+  // examples. Below the floor a phone scrolls the diagram sideways rather than
+  // shrinking labels past reading.
+  const size = sizeOf(stage, view);
   const scale = canvasWidth
     ? Math.min(
         MAX_SCALE,
         Math.max(
           MIN_SCALE,
-          Math.min(...stages.map((entry) => canvasWidth / entry.width)),
+          Math.min(
+            ...stages.map((entry) => canvasWidth / sizeOf(entry, view).width),
+          ),
         ),
       )
     : 1;
-  const canvasHeight = Math.max(...stages.map((entry) => entry.height * scale));
-  const fitsCanvas = !canvasWidth || stage.width * scale <= canvasWidth;
+  // Project diagrams are all much of a height, so the panel stands as tall as the
+  // tallest and holds still as the showcase cycles. Boxes of AWS resources are
+  // not: the deepest example is three times the shallowest, which would leave the
+  // small ones in a band of empty canvas, so there the panel is as tall as the
+  // example on show. The stylesheet eases the change, so it settles rather than
+  // jumps.
+  const canvasHeight =
+    view === 'infrastructure'
+      ? sizeOf(stage, view).height * scale
+      : Math.max(...stages.map((entry) => sizeOf(entry, view).height * scale));
+  const fitsCanvas = !canvasWidth || size.width * scale <= canvasWidth;
 
   /** Arrows move between the examples, Home and End jump to the ends. */
   const onTabsKeyDown = (event: React.KeyboardEvent) => {
@@ -368,6 +404,22 @@ export const PresetShowcase = ({ builderHref }: Props) => {
 
   /** How long an example holds altogether, for the fill on its tab. */
   const cycleMs = durations.reduce((total, ms) => total + ms, 0);
+
+  // The infrastructure view tells the same story from ids rather than a callback
+  // per node, so what has been scaffolded is gathered up for it.
+  const plannedIds = new Set(
+    [...graph.nodes, ...graph.edges]
+      .map((entry) => entry.id)
+      .filter((id) => isPlanned(id)),
+  );
+  const litIds = new Set([
+    ...litNodeIds,
+    ...(focus?.edgeId ? [focus.edgeId] : []),
+  ]);
+  const connections =
+    view === 'infrastructure'
+      ? stage.infrastructure.connectionCount
+      : graph.edges.length;
 
   const summary = `${graph.nodes.length} project${
     graph.nodes.length === 1 ? '' : 's'
@@ -470,12 +522,14 @@ export const PresetShowcase = ({ builderHref }: Props) => {
             </p>
             <div className="ps-panel-actions">
               <span className="ps-stat">
-                {graph.nodes.length} project
-                {graph.nodes.length === 1 ? '' : 's'}
+                {view === 'infrastructure'
+                  ? `${stage.infrastructure.resourceCount} AWS resources`
+                  : `${graph.nodes.length} project${
+                      graph.nodes.length === 1 ? '' : 's'
+                    }`}
               </span>
               <span className="ps-stat">
-                {graph.edges.length} connection
-                {graph.edges.length === 1 ? '' : 's'}
+                {connections} connection{connections === 1 ? '' : 's'}
               </span>
               <a
                 className="gb-action gb-action--primary gb-action--small"
@@ -498,22 +552,25 @@ export const PresetShowcase = ({ builderHref }: Props) => {
             </div>
           </div>
 
-          {/* The mark sits outside the scrolling canvas, so it stays pinned to
-              the corner when a wide diagram is scrolled sideways. */}
+          {/* The switch and the mark sit outside the scrolling canvas, so they
+              stay pinned to their corners when a wide diagram is scrolled
+              sideways. */}
           <div className="ps-canvas-frame">
+            <ViewToggle view={view} onChange={setView} />
             <div
               ref={canvasRef}
               className="ps-canvas"
-              style={{ height: canvasHeight }}
+              style={{ height: canvasHeight + TOGGLE_ROOM }}
             >
-              {/* Keyed on the example, so switching remounts the diagram and its
-                plan arrives again. */}
+              {/* Keyed on the example and the view, so switching remounts the
+                diagram and its plan arrives again. */}
               <div
-                key={preset.id}
+                key={`${preset.id}-${view}`}
                 className="ps-extent"
                 style={{
-                  width: stage.width,
-                  height: stage.height,
+                  top: TOGGLE_ROOM,
+                  width: size.width,
+                  height: size.height,
                   // Centred across the panel while it fits; pinned to the left once
                   // it doesn't, so the overflow is somewhere the canvas can scroll.
                   ...(fitsCanvas
@@ -527,109 +584,127 @@ export const PresetShowcase = ({ builderHref }: Props) => {
                         transform: `scale(${scale})`,
                       }),
                   // Centred in the panel, which is as tall as the tallest example.
-                  marginTop: (canvasHeight - stage.height * scale) / 2,
+                  marginTop: (canvasHeight - size.height * scale) / 2,
                 }}
               >
-                <svg
-                  className="gb-edges"
-                  width={stage.width}
-                  height={stage.height}
-                  aria-hidden="true"
-                >
-                  <defs>
-                    <marker
-                      id="ps-arrow"
-                      viewBox="0 0 10 10"
-                      refX="9"
-                      refY="5"
-                      markerWidth="5"
-                      markerHeight="5"
-                      markerUnits="strokeWidth"
-                      orient="auto-start-reverse"
+                {view === 'infrastructure' ? (
+                  <InfraDiagram
+                    layout={stage.infrastructure}
+                    markerId={markerId}
+                    planned={plannedIds}
+                    arriving={arriving}
+                    lit={litIds}
+                    onFocus={setFocus}
+                    edgeClassName="ps-edge"
+                    lineClassName="ps-edge-line"
+                  />
+                ) : (
+                  <>
+                    <svg
+                      className="gb-edges"
+                      width={size.width}
+                      height={size.height}
+                      aria-hidden="true"
                     >
-                      <path d="M 0 1.5 L 9 5 L 0 8.5 z" fill="context-stroke" />
-                    </marker>
-                  </defs>
+                      <defs>
+                        <marker
+                          id="ps-arrow"
+                          viewBox="0 0 10 10"
+                          refX="9"
+                          refY="5"
+                          markerWidth="5"
+                          markerHeight="5"
+                          markerUnits="strokeWidth"
+                          orient="auto-start-reverse"
+                        >
+                          <path
+                            d="M 0 1.5 L 9 5 L 0 8.5 z"
+                            fill="context-stroke"
+                          />
+                        </marker>
+                      </defs>
 
-                  {graph.edges.map((edge) => {
-                    const source = nodeById.get(edge.source);
-                    const target = nodeById.get(edge.target);
-                    if (!source || !target) return null;
-                    const path =
-                      source.id === target.id
-                        ? loopPath(source, 'horizontal')
-                        : edgePath(
-                            sourceAnchor(source, 'horizontal'),
-                            targetAnchor(target, 'horizontal'),
-                            'horizontal',
-                          );
-                    const isLit = focus?.edgeId === edge.id;
-                    return (
-                      <g
-                        key={edge.id}
-                        className={`gb-edge ps-edge${isLit ? ' is-active' : ''}${
-                          focus && !isLit ? ' is-dimmed' : ''
-                        }${isPlanned(edge.id) ? ' is-planned' : ''}${
-                          arriving?.has(edge.id) ? ' is-arriving' : ''
-                        }`}
-                        onPointerEnter={() => setFocus({ edgeId: edge.id })}
-                        onPointerLeave={() => setFocus(undefined)}
-                      >
-                        {/* A connection is a thin line to hit, so pointing at it is
+                      {graph.edges.map((edge) => {
+                        const source = nodeById.get(edge.source);
+                        const target = nodeById.get(edge.target);
+                        if (!source || !target) return null;
+                        const path =
+                          source.id === target.id
+                            ? loopPath(source, 'horizontal')
+                            : edgePath(
+                                sourceAnchor(source, 'horizontal'),
+                                targetAnchor(target, 'horizontal'),
+                                'horizontal',
+                              );
+                        const isLit = focus?.edgeId === edge.id;
+                        return (
+                          <g
+                            key={edge.id}
+                            className={`gb-edge ps-edge${isLit ? ' is-active' : ''}${
+                              focus && !isLit ? ' is-dimmed' : ''
+                            }${isPlanned(edge.id) ? ' is-planned' : ''}${
+                              arriving?.has(edge.id) ? ' is-arriving' : ''
+                            }`}
+                            onPointerEnter={() => setFocus({ edgeId: edge.id })}
+                            onPointerLeave={() => setFocus(undefined)}
+                          >
+                            {/* A connection is a thin line to hit, so pointing at it is
                           picked up by a wider invisible path over the top. */}
-                        <path className="gb-edge-hit" d={path} />
-                        {/* Dashes travelling the path, so a connection reads as a
+                            <path className="gb-edge-hit" d={path} />
+                            {/* Dashes travelling the path, so a connection reads as a
                           direction of flow. */}
-                        <path
-                          className="gb-edge-line ps-edge-line"
-                          d={path}
-                          markerEnd="url(#ps-arrow)"
-                        />
-                      </g>
-                    );
-                  })}
-                </svg>
+                            <path
+                              className="gb-edge-line ps-edge-line"
+                              d={path}
+                              markerEnd="url(#ps-arrow)"
+                            />
+                          </g>
+                        );
+                      })}
+                    </svg>
 
-                {graph.nodes.map((node) => {
-                  const type = nodeType(node.type);
-                  const isLit = litNodeIds.has(node.id);
-                  return (
-                    <div
-                      key={node.id}
-                      className={`gb-node gb-node--static ps-node${
-                        isLit ? ' is-lit' : ''
-                      }${focus && !isLit ? ' is-dimmed' : ''}${
-                        isPlanned(node.id) ? ' is-planned' : ''
-                      }${arriving?.has(node.id) ? ' is-arriving' : ''}`}
-                      style={{ left: node.x, top: node.y }}
-                      onPointerEnter={() => setFocus({ nodeId: node.id })}
-                      onPointerLeave={() => setFocus(undefined)}
-                    >
-                      <NodeLogo
-                        logo={type.logo}
-                        badge={type.badge}
-                        alt={type.label}
-                      />
-                      <span className="gb-node-text">
-                        <span className="gb-node-name">{node.name}</span>
-                        <span className="gb-node-type">{type.label}</span>
-                      </span>
+                    {graph.nodes.map((node) => {
+                      const type = nodeType(node.type);
+                      const isLit = litNodeIds.has(node.id);
+                      return (
+                        <div
+                          key={node.id}
+                          className={`gb-node gb-node--static ps-node${
+                            isLit ? ' is-lit' : ''
+                          }${focus && !isLit ? ' is-dimmed' : ''}${
+                            isPlanned(node.id) ? ' is-planned' : ''
+                          }${arriving?.has(node.id) ? ' is-arriving' : ''}`}
+                          style={{ left: node.x, top: node.y }}
+                          onPointerEnter={() => setFocus({ nodeId: node.id })}
+                          onPointerLeave={() => setFocus(undefined)}
+                        >
+                          <NodeLogo
+                            logo={type.logo}
+                            badge={type.badge}
+                            alt={type.label}
+                          />
+                          <span className="gb-node-text">
+                            <span className="gb-node-name">{node.name}</span>
+                            <span className="gb-node-type">{type.label}</span>
+                          </span>
 
-                      {type.roles.includes('target') && (
-                        <span
-                          className="gb-port gb-port--in gb-port--in-horizontal"
-                          aria-hidden="true"
-                        />
-                      )}
-                      {type.roles.includes('source') && (
-                        <span
-                          className="gb-port gb-port--out gb-port--out-horizontal"
-                          aria-hidden="true"
-                        />
-                      )}
-                    </div>
-                  );
-                })}
+                          {type.roles.includes('target') && (
+                            <span
+                              className="gb-port gb-port--in gb-port--in-horizontal"
+                              aria-hidden="true"
+                            />
+                          )}
+                          {type.roles.includes('source') && (
+                            <span
+                              className="gb-port gb-port--out gb-port--out-horizontal"
+                              aria-hidden="true"
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </>
+                )}
               </div>
             </div>
             <IacMark iac={iac} onSwitch={setIacOverride} />

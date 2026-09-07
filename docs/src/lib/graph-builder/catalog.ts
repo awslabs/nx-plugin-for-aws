@@ -309,6 +309,15 @@ export const CATEGORY_ORDER = [
   'Other',
 ] as const;
 
+/**
+ * The options a generator with no node type of its own exposes — a Lambda
+ * function, a website's authentication — so the infrastructure view can resolve
+ * its option values the same way it does for a node in the palette.
+ */
+export const generatorProperties = (
+  generatorId: string,
+): readonly NodeProperty[] => toProperties(schemaOf(generatorId), {});
+
 export const nodeType = (id: string): NodeType => {
   const found = NODE_TYPES.find((t) => t.id === id);
   if (!found) throw new Error(`Graph builder: unknown node type '${id}'`);
