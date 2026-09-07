@@ -10,6 +10,7 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
+import ArchitectureDiagram from '@components/architecture-diagram.astro';
 
 React Webサイト認証ジェネレーターは、[Amazon Cognito](https://aws.amazon.com/cognito/)を使用してReact Webサイトに認証を追加します。
 
@@ -71,44 +72,13 @@ React Webサイトに次の変更が加えられます：
 
 このジェネレーターは、既存のstatic-websiteアーキテクチャにAmazon Cognito User Pool（サインイン用）とIdentity Pool（サインインしたユーザーをスコープ付きIAM認証情報にフェデレートするため）を追加します：
 
-```d2 inline=true
-direction: right
-
-browser: Web Browser {
-  shape: image
-  icon: /nx-plugin-for-aws/icons/aws/client.svg
-}
-
-waf: WAF {
-  shape: image
-  icon: /nx-plugin-for-aws/icons/aws/waf.svg
-}
-
-cognito: Cognito\n(User + Identity Pool) {
-  shape: image
-  icon: /nx-plugin-for-aws/icons/aws/cognito.svg
-}
-
-iam: Scoped IAM\nCredentials {
-  shape: image
-  icon: /nx-plugin-for-aws/icons/aws/iam.svg
-}
-
-backend: Authenticated\nAWS Resources {
-  shape: rectangle
-}
-
-browser -> waf: Sign in
-waf -> cognito
-cognito -> iam
-browser -> backend: IAM/Cognito
-```
+<ArchitectureDiagram name="my-website" />
 
 #### 脅威保護
 
-User Poolは、標準認証に対して[脅威保護](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pool-settings-threat-protection.html)を`AUDIT`モードに設定したCognito [Plus機能プラン](https://docs.aws.amazon.com/cognito/latest/developerguide/feature-plans-features-plus.html)で作成されます。監査モードでは、Cognitoは各サインインにリスクレベルを割り当て、ユーザーをブロックすることなく評価をCloudWatchに記録します。
+User Poolは、標準認証に対して[脅威保護](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pool-settings-threat-protection.html)を**監査のみ**の強制に設定したCognito [Plus機能プラン](https://docs.aws.amazon.com/cognito/latest/developerguide/feature-plans-features-plus.html)で作成されます。監査のみモードでは、Cognitoは各サインインにリスクレベルを割り当て、ユーザーをブロックすることなく評価を記録します。
 
-ユーザーのリスク評価を観察した後、完全機能の強制に切り替えて、リスクの高いアクティビティに自動的に対応できます（例：MFAの要求やサインインのブロック）：
+ユーザーのリスク評価を観察した後、完全機能の強制に切り替えて、リスクの高いアクティビティに自動的に対応し（例：MFAの要求やサインインのブロック）、[適応認証](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pool-settings-adaptive-authentication.html)を介してリスクレベルごとに応答を設定できます：
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -187,13 +157,13 @@ module "user_identity" {
 スタックにユーザーIDインフラストラクチャを追加する必要があります。Webサイトの_前に_宣言してください：
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {3,9}
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { MyWebsite, UserIdentity } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     new UserIdentity(this, 'Identity');
 
@@ -256,13 +226,13 @@ APIの呼び出し権限の付与など、認証されたユーザーが特定�
 <Infrastructure>
 <Fragment slot="cdk">
 ```ts title="packages/infra/src/stacks/application-stack.ts" {12}
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { MyWebsite, UserIdentity, MyApi } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     const identity = new UserIdentity(this, 'Identity');
     const api = new MyApi(this, 'MyApi', {

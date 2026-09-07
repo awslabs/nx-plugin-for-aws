@@ -401,6 +401,16 @@ Everything else is inferred — whether the generator creates a project or adds 
 
 Finally, add the node's artwork and palette grouping to `PRESENTATION` in `docs/src/lib/graph-builder/catalog.ts`, alongside a logo in `docs/src/content/docs/assets/logos/`. A type without an entry still appears, just under "Other" with a generic mark.
 
+### Infrastructure Blueprints
+
+The read-only diagrams — the quick start, the tutorial, the homepage showcase and each generator guide's **Architecture** section — switch between two views of the same graph: the projects in the workspace, and the AWS infrastructure they deploy. The second comes from a **blueprint** per node type in `docs/src/lib/graph-builder/infrastructure.ts`: the resources the generator provisions, each with an icon from `docs/public/icons/aws/`, their position in the project's own little grid, and the request path through them.
+
+A resource can declare the option values it is provisioned for — `when: { infra: 'rest-lambda' }` puts a WAF in front of a REST API and leaves it out of an HTTP one — and the request path skips whatever the options leave out, so variants of the same step sit at the same grid position. That is what keeps a guide's diagram in step with the option filters the rest of the guide is written against: `<ArchitectureDiagram />` follows the reader's selection in the filter bar, and `<ArchitectureDiagram options={{ infra: 'none' }} />` pins a block that only describes one variant.
+
+A generator that adds to a project rather than taking part in a connection — a Lambda function, a website's authentication — has no node type in the palette, so its blueprint is keyed by the generator id and carries its own `label`. Everything else works the same, and its guide's `<ArchitectureDiagram />` finds it from the page's `generator:` frontmatter.
+
+Every node type in the palette needs a blueprint — `infrastructure.spec.ts` fails by name if one is missing, since a type without it would draw an empty box.
+
 ### End to End Tests
 
 The end to end tests run our generators and check that generated projects function correctly (usually by performing a build).
