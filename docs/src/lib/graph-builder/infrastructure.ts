@@ -673,6 +673,50 @@ const rankAxis = (values: readonly number[]): Map<number, number> => {
   return ranks;
 };
 
+/** A box's cell in the diagram's grid, and how much room it needs in it. */
+interface Cell {
+  readonly column: number;
+  readonly row: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/**
+ * Size the grid the boxes sit on: each column as wide as the widest box in it and
+ * each row as tall as the tallest, so a project deploying five resources doesn't
+ * crowd one deploying a single table.
+ */
+const gridOf = (cells: readonly Cell[]) => {
+  const columns = Math.max(...cells.map((cell) => cell.column)) + 1;
+  const rows = Math.max(...cells.map((cell) => cell.row)) + 1;
+  const columnWidths = Array.from({ length: columns }, (_, column) =>
+    Math.max(
+      ...cells
+        .filter((cell) => cell.column === column)
+        .map((cell) => cell.width),
+    ),
+  );
+  const rowHeights = Array.from({ length: rows }, (_, row) =>
+    Math.max(
+      ...cells.filter((cell) => cell.row === row).map((cell) => cell.height),
+    ),
+  );
+  const offsets = (sizes: readonly number[]) =>
+    sizes.map((_, index) =>
+      sizes
+        .slice(0, index)
+        .reduce((total, size) => total + size + BOX_GAP, ORIGIN),
+    );
+  return {
+    columns,
+    rows,
+    columnWidths,
+    rowHeights,
+    columnX: offsets(columnWidths),
+    rowY: offsets(rowHeights),
+  };
+};
+
 /** Map the grid positions in use onto consecutive ones, in order. */
 const compact = (positions: readonly number[]): Map<number, number> =>
   new Map(
@@ -830,31 +874,8 @@ export const buildInfrastructureLayout = (
     ...resolveBox(node),
   }));
 
-  const columns = Math.max(...resolved.map((entry) => entry.column)) + 1;
-  const rows = Math.max(...resolved.map((entry) => entry.row)) + 1;
-  const columnWidths = Array.from({ length: columns }, (_, column) =>
-    Math.max(
-      ...resolved
-        .filter((entry) => entry.column === column)
-        .map((entry) => entry.width),
-    ),
-  );
-  const rowHeights = Array.from({ length: rows }, (_, row) =>
-    Math.max(
-      ...resolved
-        .filter((entry) => entry.row === row)
-        .map((entry) => entry.height),
-    ),
-  );
-
-  const offsets = (sizes: readonly number[]) =>
-    sizes.map((_, index) =>
-      sizes
-        .slice(0, index)
-        .reduce((total, size) => total + size + BOX_GAP, ORIGIN),
-    );
-  const columnX = offsets(columnWidths);
-  const rowY = offsets(rowHeights);
+  const { columns, rows, columnWidths, rowHeights, columnX, rowY } =
+    gridOf(resolved);
 
   // Boxes with nothing pointing at them are what a caller reaches, and boxes
   // pointing at nothing are where the diagram hands off, so those tiles sit at
@@ -1050,5 +1071,134 @@ const bareTile = (
       },
     ],
     links: [],
+  };
+};
+
+/* ---------- Diagrams declared outright ---------- */
+
+/** One box in a declared diagram, holding tiles at its own grid positions. */
+export interface DeclaredBox {
+  readonly id: string;
+  /** The box's title. A bare box has none: it is a tile standing on its own. */
+  readonly name?: string;
+  readonly typeLabel?: string;
+  /** Something outside the workspace, drawn without a frame around it. */
+  readonly bare?: boolean;
+  readonly column: number;
+  readonly row: number;
+  readonly resources: readonly Omit<BlueprintResource, 'when'>[];
+  readonly links?: readonly BlueprintLink[];
+}
+
+/**
+ * A diagram declared outright, for a page describing a mechanism rather than a
+ * project's own infrastructure — how runtime configuration reaches the things
+ * that read it, say. Drawn with the same boxes, tiles and arrows as the rest, so
+ * the docs' diagrams read as one set.
+ */
+export interface DeclaredDiagram {
+  readonly boxes: readonly DeclaredBox[];
+  /** Connections, as `boxId:resourceId` at each end. */
+  readonly connections: readonly [string, string][];
+}
+
+/** Lay a declared diagram out on the same grid the infrastructure view uses. */
+export const buildDeclaredLayout = (diagram: DeclaredDiagram): InfraLayout => {
+  const sized = diagram.boxes.map((box) => {
+    const resources: PlacedResource[] = box.resources.map((resource) => ({
+      id: resource.id,
+      label: resource.label,
+      ...(resource.detail ? { detail: resource.detail } : {}),
+      ...(resource.icon ? { icon: resource.icon } : {}),
+      x: box.bare
+        ? resource.column * (RESOURCE_WIDTH + RESOURCE_GAP_X)
+        : BOX_PADDING + resource.column * (RESOURCE_WIDTH + RESOURCE_GAP_X),
+      y: box.bare
+        ? resource.row * (RESOURCE_HEIGHT + RESOURCE_GAP_Y)
+        : BOX_HEADER + resource.row * (RESOURCE_HEIGHT + RESOURCE_GAP_Y),
+      width: RESOURCE_WIDTH,
+      height: RESOURCE_HEIGHT,
+    }));
+    const padding = box.bare ? 0 : BOX_PADDING;
+    return {
+      box,
+      resources,
+      column: box.column,
+      row: box.row,
+      width: Math.max(
+        Math.max(...resources.map((resource) => resource.x + resource.width)) +
+          padding,
+        box.bare ? 0 : headerWidth(box.name ?? '', box.typeLabel ?? ''),
+      ),
+      height:
+        Math.max(...resources.map((resource) => resource.y + resource.height)) +
+        padding,
+    };
+  });
+
+  const { columnWidths, rowHeights, columnX, rowY } = gridOf(sized);
+
+  const boxes: InfraBox[] = sized.map((entry) => {
+    const byId = new Map(
+      entry.resources.map((resource) => [resource.id, resource]),
+    );
+    return {
+      id: entry.box.id,
+      name: entry.box.name ?? entry.resources[0].label,
+      typeLabel: entry.box.typeLabel ?? '',
+      ...(entry.box.bare ? { bare: true } : {}),
+      x: columnX[entry.column] + (columnWidths[entry.column] - entry.width) / 2,
+      y: rowY[entry.row] + (rowHeights[entry.row] - entry.height) / 2,
+      width: entry.width,
+      height: entry.height,
+      resources: entry.resources,
+      links: (entry.box.links ?? []).flatMap((link) => {
+        const from = byId.get(link.from);
+        const to = byId.get(link.to);
+        return from && to ? [{ id: `${link.from}-${link.to}`, from, to }] : [];
+      }),
+    };
+  });
+
+  const boxById = new Map(boxes.map((box) => [box.id, box]));
+  const anchorOf = (ref: string): InfraAnchor | undefined => {
+    const [boxId, resourceId] = ref.split(':');
+    const box = boxById.get(boxId);
+    const resource = box?.resources.find((entry) => entry.id === resourceId);
+    if (!box || !resource) return undefined;
+    return {
+      boxId,
+      box,
+      resource: {
+        x: box.x + resource.x,
+        y: box.y + resource.y,
+        width: resource.width,
+        height: resource.height,
+      },
+    };
+  };
+
+  const connections: InfraConnection[] = diagram.connections.flatMap(
+    ([from, to]) => {
+      const source = anchorOf(from);
+      const target = anchorOf(to);
+      return source && target
+        ? [{ id: `${from}-${to}`, from: source, to: target }]
+        : [];
+    },
+  );
+
+  return {
+    boxes,
+    connections,
+    width: Math.max(...boxes.map((box) => box.x + box.width)) + ORIGIN,
+    height: Math.max(...boxes.map((box) => box.y + box.height)) + ORIGIN,
+    resourceCount: boxes.reduce(
+      (total, box) => total + box.resources.length,
+      0,
+    ),
+    connectionCount:
+      connections.length +
+      boxes.reduce((total, box) => total + box.links.length, 0),
   };
 };

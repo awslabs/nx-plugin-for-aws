@@ -411,6 +411,8 @@ A generator that adds to a project rather than taking part in a connection — a
 
 Every node type in the palette needs a blueprint — `infrastructure.spec.ts` fails by name if one is missing, since a type without it would draw an empty box.
 
+A page describing a *mechanism* rather than a generator's own infrastructure — how runtime configuration reaches the things that read it, say — declares its diagram outright in `docs/src/lib/graph-builder/diagrams.ts` and renders it with `<EmbeddedGraph diagram="runtime-config" />`. Same boxes, tiles and arrows, so the docs' diagrams read as one set; a tile without an icon is something no AWS service stands for.
+
 ### End to End Tests
 
 The end to end tests run our generators and check that generated projects function correctly (usually by performing a build).
@@ -431,6 +433,8 @@ Note that we have a test which runs through our main tutorial (the Dungeon Adven
 However you will still need to make changes to any "after" files manually to ensure the tutorial works end to end. You can also use `pnpm nx start docs` to run the docs site locally and follow the tutorial yourself.
 
 Note that if you are running e2e tests that use `pnpm` as the package manager, you may need to run `pnpm store prune` to ensure that your changes are picked up in the tests.
+
+In CI, the smoke tests are skipped when every changed file is under `docs/`, since a change confined to the docs site cannot affect generated projects. Touching anything outside `docs/` runs the full set.
 
 ### Writing Documentation
 
