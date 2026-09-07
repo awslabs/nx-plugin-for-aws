@@ -28,12 +28,13 @@ permissions:
   id-token: write
 
 jobs:
-  # The smoke tests exercise generated projects, which a change confined to the
-  # docs site cannot affect, so they are skipped for docs only changes. Skipped
-  # jobs report as successful, so required checks still pass.
+  # The smoke tests exercise generated projects, which a docs only change cannot
+  # affect, so they are skipped for one.
   changes:
     name: Detect Changes
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       docs_only: ${{ steps.docs_only.outputs.docs-only }}
     steps:
@@ -354,3 +355,35 @@ jobs:
           NX_E2E_SHARD: ${{ matrix.shard }}/6
           NX_E2E_CODEBUILD_WINDOWS: "true"
         run: pnpm nx run @aws/nx-plugin-e2e:smoke-test --name=standalone
+  # Passes when every smoke test succeeded or was skipped, fails otherwise. A
+  # skipped matrix job reports one check under its unexpanded name rather than one
+  # per leg, so this is the context `main` requires in place of the legs.
+  smoke_tests_complete:
+    name: Smoke Tests Complete
+    needs:
+      [
+        smoke_tests,
+        smoke_tests_migrate,
+        smoke_tests_standalone,
+        smoke_tests_macos_standalone,
+        smoke_tests_windows,
+        smoke_tests_windows_standalone,
+      ]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Check smoke test results
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Smoke test results: $RESULTS"
+          for result in $RESULTS; do
+            case "$result" in
+              success | skipped) ;;
+              *)
+                echo "::error::A smoke test job did not pass ($result)"
+                exit 1
+                ;;
+            esac
+          done
