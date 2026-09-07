@@ -17,6 +17,7 @@ import PackageManagerShortCommand from '@components/package-manager-short-comman
 import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
 import OptionFilter from '@components/option-filter.astro';
+import ArchitectureDiagram from '@components/architecture-diagram.astro';
 
 Questo generatore crea un nuovo sito web [React](https://react.dev/) con [shadcn/ui](https://ui.shadcn.com/) configurato di default, insieme all'infrastruttura AWS CDK o Terraform per distribuire il tuo sito web nel cloud come sito web statico ospitato in [S3](https://aws.amazon.com/s3/), servito da [CloudFront](https://aws.amazon.com/cloudfront/) e protetto da [WAF](https://aws.amazon.com/waf/).
 
@@ -99,35 +100,9 @@ Il generatore crea infrastruttura come codice per distribuire il tuo sito web in
 
 #### Architettura
 
-Il sito web distribuito ha la seguente architettura:
+Il sito web distribuito ha la seguente architettura: le tue risorse compilate in un bucket S3, servite da una distribuzione CloudFront con un AWS WAFv2 Web ACL davanti ad essa.
 
-```d2 inline=true
-direction: right
-
-browser: Web Browser {
-  shape: image
-  icon: /nx-plugin-for-aws/icons/aws/client.svg
-}
-
-waf: WAF {
-  shape: image
-  icon: /nx-plugin-for-aws/icons/aws/waf.svg
-}
-
-cloudfront: CloudFront {
-  shape: image
-  icon: /nx-plugin-for-aws/icons/aws/cloudfront.svg
-}
-
-s3: Static Assets\n(S3) {
-  shape: image
-  icon: /nx-plugin-for-aws/icons/aws/s3.svg
-}
-
-browser -> waf
-waf -> cloudfront
-cloudfront -> s3
-```
+<ArchitectureDiagram />
 
 ## Implementare il tuo sito web
 
@@ -160,21 +135,25 @@ Puoi utilizzare il componente `Link` o l'hook `useNavigate` per navigare tra le 
 ```tsx {1, 4, 8-9, 14}
 import { Link, useNavigate } from '@tanstack/react-router';
 
-export const MyComponent = () => {
+export const MyComponent = ({
+  createProduct,
+}: {
+  createProduct: () => Promise<string>;
+}) => {
   const navigate = useNavigate();
 
   const submit = async () => {
-    const id = await ...
+    const id = await createProduct();
     // Use `navigate` for redirecting after some asynchronous action
-    navigate({ to: '/products/$id', { params: { id }} });
+    navigate({ to: '/products/$id', params: { id } });
   };
 
   return (
     <>
       <Link to="/products">Cancel</Link>
-      <Button onClick={submit}>Submit</Button>
+      <button onClick={submit}>Submit</button>
     </>
-  )
+  );
 };
 ```
 
@@ -191,13 +170,13 @@ Per distribuire il tuo sito web, consigliamo di utilizzare il <Link path="guides
 Puoi utilizzare il costrutto CDK generato per te in `packages/common/constructs` per distribuire il tuo sito web.
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {3, 9}
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { MyWebsite } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     new MyWebsite(this, 'MyWebsite');
   }
@@ -266,13 +245,13 @@ La distribuzione CloudFront è protetta da un [AWS WAFv2](https://docs.aws.amazo
 Per disattivare, imposta `enableWaf` su `false` quando crei il tuo sito web:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {10,15-18}
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { MyWebsite, suppressRules } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     const website = new MyWebsite(this, 'MyWebsite', {
       enableWaf: false,
@@ -318,14 +297,14 @@ Il bucket del sito web, il bucket dei log della distribuzione CloudFront e il gr
 Se desideri utilizzare una configurazione di crittografia diversa, passa le proprietà `encryption`, `encryptionKey` e `enableKeyRotation` quando crei il tuo sito web:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {11}
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { BucketEncryption } from 'aws-cdk-lib/aws-s3';
 import { MyWebsite } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     new MyWebsite(this, 'MyWebsite', {
       encryption: BucketEncryption.S3_MANAGED,
@@ -405,7 +384,8 @@ Scegliere `S3_MANAGED` fa fallire la scansione di sicurezza `checkov` con `CKV_A
 
 ```yaml title="packages/infra/src/.checkov.yaml"
 skip-check:
-  - CKV_AWS_145
+  # ...
+  - CKV_AWS_145 # S3 buckets are not KMS encrypted when encryption is S3_MANAGED
 ```
 :::
 
@@ -443,7 +423,8 @@ Disabilitare la rotazione delle chiavi sulla chiave creata automaticamente fa fa
 
 ```yaml title="packages/infra/src/.checkov.yaml"
 skip-check:
-  - CKV_AWS_7
+  # ...
+  - CKV_AWS_7 # Key rotation is disabled on the website's KMS key
 ```
 :::
 </Fragment>
@@ -458,14 +439,14 @@ Di default, la distribuzione utilizza il nome di dominio CloudFront predefinito 
 Passa le proprietà `certificate` e `domainNames` quando crei il tuo sito web:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {11-13}
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { Certificate } from 'aws-cdk-lib/aws-certificatemanager';
 import { MyWebsite } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     new MyWebsite(this, 'MyWebsite', {
       domainNames: ['www.example.com'],
@@ -508,13 +489,13 @@ Il costrutto CDK `RuntimeConfig` può essere utilizzato per aggiungere e recuper
 Il tuo costrutto CDK del sito web distribuirà il namespace `connection` della configurazione runtime come file `runtime-config.json` nella radice del tuo bucket S3.
 
 ```ts title="packages/infra/src/stacks/application-stack.ts"
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { MyWebsite, MyApi } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     // Website can be declared at any point, since runtime config is resolved lazily
     new MyWebsite(this, 'MyWebsite');
