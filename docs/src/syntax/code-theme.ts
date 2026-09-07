@@ -27,6 +27,8 @@ const palette = {
     variable: '#d0dae6',
     /** oklch(0.740 0.022 290) */
     punctuation: '#aaa9b8',
+    /** oklch(0.815 0.018 290) — the receding part of a shell command */
+    commandDim: '#c2c1ce',
     /** oklch(0.680 0.038 300) */
     comment: '#9c93ad',
     /** oklch(0.675 0.180 016) — scarlet */
@@ -59,6 +61,8 @@ const palette = {
     variable: '#2c3947',
     /** oklch(0.470 0.020 290) */
     punctuation: '#5a5966',
+    /** oklch(0.470 0.020 290) — a light surface needs no lift here */
+    commandDim: '#5a5966',
     /** oklch(0.520 0.032 300) */
     comment: '#6b6579',
     /** oklch(0.450 0.190 018) — scarlet */
@@ -266,7 +270,7 @@ const tokenColors = (c: Palette) => [
       'constant.other.option',
       'constant.other.option.dash.shell',
     ],
-    settings: { foreground: c.punctuation },
+    settings: { foreground: c.commandDim },
   },
   {
     scope: [
