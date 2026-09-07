@@ -1,5 +1,16 @@
 ---
-import { Badge } from '@astrojs/starlight/components';
+/**
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/**
+ * The options a generator accepts, as a compact scrollable reference panel.
+ *
+ * Enum values are rendered as chips. On pages with an <OptionFilter> bar, the
+ * chips for keys the bar exposes double as filter controls: picking one filters
+ * the guide, and the row for a filtered key is highlighted.
+ */
 import GeneratorsJson from '../../../packages/nx-plugin/generators.json';
 import schemaTranslations from '../i18n/schema-translations.json';
 
@@ -9,27 +20,27 @@ const schema = JSON.parse(schemas.find(([file]) => file.endsWith(GeneratorsJson.
 
 const locale = Astro.currentLocale || 'en';
 const strings = {
-  parameter: {
-    en: 'Parameter',
-    jp: 'パラメータ',
-    ko: '매개변수',
-    fr: 'Paramètre',
-    it: 'Parametro',
-    es: 'Parámetro',
-    pt: 'Parâmetro',
-    zh: '参数',
-    vi: 'Tham số'
+  title: {
+    en: 'Generator Options',
+    jp: 'ジェネレーターオプション',
+    ko: '제너레이터 옵션',
+    fr: 'Options du générateur',
+    it: 'Opzioni del generatore',
+    es: 'Opciones del generador',
+    pt: 'Opções do gerador',
+    zh: '生成器选项',
+    vi: 'Tùy chọn của generator'
   },
-  type: {
-    en: 'Type',
-    jp: '型',
-    ko: '타입',
-    fr: 'Type',
-    it: 'Tipo',
-    es: 'Tipo',
-    pt: 'Tipo',
-    zh: '类型',
-    vi: 'Kiểu'
+  options: {
+    en: 'options',
+    jp: 'オプション',
+    ko: '옵션',
+    fr: 'options',
+    it: 'opzioni',
+    es: 'opciones',
+    pt: 'opções',
+    zh: '个选项',
+    vi: 'tùy chọn'
   },
   default: {
     en: 'Default',
@@ -42,17 +53,6 @@ const strings = {
     zh: '默认值',
     vi: 'Mặc định'
   },
-  description: {
-    en: 'Description',
-    jp: '説明',
-    ko: '설명',
-    fr: 'Description',
-    it: 'Descrizione',
-    es: 'Descripción',
-    pt: 'Descrição',
-    zh: '描述',
-    vi: 'Mô tả'
-  },
   required: {
     en: 'Required',
     jp: '必須',
@@ -64,6 +64,39 @@ const strings = {
     zh: '必需',
     vi: 'Bắt buộc'
   },
+  showAll: {
+    en: 'Show all',
+    jp: 'すべて表示',
+    ko: '전체 보기',
+    fr: 'Tout afficher',
+    it: 'Mostra tutti',
+    es: 'Mostrar todo',
+    pt: 'Mostrar tudo',
+    zh: '显示全部',
+    vi: 'Hiện tất cả'
+  },
+  showFewer: {
+    en: 'Show fewer',
+    jp: '折りたたむ',
+    ko: '접기',
+    fr: 'Réduire',
+    it: 'Mostra meno',
+    es: 'Mostrar menos',
+    pt: 'Mostrar menos',
+    zh: '收起',
+    vi: 'Thu gọn'
+  },
+  filterHint: {
+    en: 'Pick a value to filter this guide',
+    jp: '値を選ぶとガイドを絞り込めます',
+    ko: '값을 선택하면 가이드가 필터링됩니다',
+    fr: 'Choisissez une valeur pour filtrer ce guide',
+    it: 'Scegli un valore per filtrare questa guida',
+    es: 'Elige un valor para filtrar esta guía',
+    pt: 'Escolha um valor para filtrar este guia',
+    zh: '选择一个值以筛选本指南',
+    vi: 'Chọn một giá trị để lọc hướng dẫn này'
+  },
 };
 const localeString = (name) => strings[name][locale] || strings[name]['en'];
 const getDescription = (parameter, fallback) => {
@@ -71,23 +104,186 @@ const getDescription = (parameter, fallback) => {
     ?? schemaTranslations?.[generator]?.[parameter]?.['en']
     ?? fallback;
 };
+
+// Enum values past this point are collapsed behind a toggle, so a long list
+// (e.g. every Powertools event schema) stays one row tall.
+const COLLAPSE_AFTER = 6;
+
+// The order the reader meets the options in: what they must supply, then what
+// the generator considers important, then the rest, with anything marked
+// internal last. Schema order breaks ties.
+const RANKS = { required: 0, important: 1, normal: 2, internal: 3 };
+const rankOf = (parameterSchema, isRequired) => {
+  if (isRequired) return RANKS.required;
+  return RANKS[parameterSchema['x-priority']] ?? RANKS.normal;
+};
+
+const required = schema.required ?? [];
+const parameters = Object.entries(schema.properties)
+  .map(([key, parameterSchema]) => ({
+    key,
+    required: required.includes(key),
+    rank: rankOf(parameterSchema, required.includes(key)),
+    type: parameterSchema.enum ? 'enum' : parameterSchema.type ?? 'string',
+    values: (parameterSchema.enum ?? []).map(String),
+    default: parameterSchema.default === undefined ? undefined : String(parameterSchema.default),
+    description: getDescription(key, parameterSchema.description),
+  }))
+  .sort((a, b) => a.rank - b.rank);
 ---
 
-<table>
-  <tr>
-    <th>{localeString('parameter')}</th>
-    <th>{localeString('type')}</th>
-    <th>{localeString('default')}</th>
-    <th>{localeString('description')}</th>
-  </tr>
-  {
-    Object.entries(schema.properties).map(([parameter, parameterSchema]) => (
-      <tr>
-        <td>{parameter} {(schema.required ?? []).includes(parameter) ? <Badge text={localeString('required')} variant="note" /> : null}</td>
-        <td>{parameterSchema.enum ? parameterSchema.enum.join(' | ') : parameterSchema.type}</td>
-        <td>{parameterSchema.default ?? '-'}</td>
-        <td>{getDescription(parameter, parameterSchema.description) ?? '-'}</td>
-      </tr>
-    ))
+<div class="gen-params not-content" data-gen-params>
+  <div class="gen-params-head">
+    <span class="gen-params-title">{localeString('title')}</span>
+    <span class="gen-params-count">{parameters.length} {localeString('options')}</span>
+    <span class="gen-params-hint" data-gen-params-hint hidden>
+      {localeString('filterHint')}
+    </span>
+  </div>
+  <dl class="gen-params-list">
+    {parameters.map((parameter) => (
+      <div class="gen-param" data-gen-param={parameter.key}>
+        <dt class="gen-param-head">
+          <code class="gen-param-name">{parameter.key}</code>
+          {parameter.required && (
+            <span class="gen-param-required">{localeString('required')}</span>
+          )}
+          <span class="gen-param-type">{parameter.type}</span>
+          {parameter.default !== undefined && (
+            <span class="gen-param-default">
+              {localeString('default')}: <code>{parameter.default}</code>
+            </span>
+          )}
+        </dt>
+        <dd class="gen-param-body">
+          {parameter.description && (
+            <p class="gen-param-desc">{parameter.description}</p>
+          )}
+          {parameter.values.length > 0 && (
+            <div class="gen-param-values">
+              {parameter.values.map((value, index) => (
+                <span
+                  class:list={[
+                    'gen-param-value',
+                    { 'is-overflow': index >= COLLAPSE_AFTER },
+                  ]}
+                  data-gen-param-value={value}
+                >
+                  {value}
+                </span>
+              ))}
+              {parameter.values.length > COLLAPSE_AFTER && (
+                <button
+                  type="button"
+                  class="gen-param-more"
+                  data-gen-param-more
+                  data-label-more={`${localeString('showAll')} ${parameter.values.length}`}
+                  data-label-fewer={localeString('showFewer')}
+                >
+                  {localeString('showAll')} {parameter.values.length}
+                </button>
+              )}
+            </div>
+          )}
+        </dd>
+      </div>
+    ))}
+  </dl>
+</div>
+
+<script>
+  // Ties the options panel to the page's <OptionFilter> bar, when there is one:
+  //   - Chips for keys the bar exposes become filter controls.
+  //   - A key with a value selected is highlighted and collapsed down to the
+  //     chip for the selected value.
+  // Reads each control's value off the bar's own DOM rather than waiting for its
+  // first change event, so the two are in sync whichever script runs first.
+  const run = () => {
+    const panels = document.querySelectorAll<HTMLElement>('[data-gen-params]');
+    if (panels.length === 0) return;
+
+    const bar = document.querySelector<HTMLElement>('[data-option-filter-bar]');
+    const controls = new Map<string, HTMLElement>();
+    for (const control of bar?.querySelectorAll<HTMLElement>(
+      '[data-option-filter-control]',
+    ) ?? []) {
+      if (control.dataset.key) controls.set(control.dataset.key, control);
+    }
+
+    for (const panel of panels) {
+      const rows = Array.from(
+        panel.querySelectorAll<HTMLElement>('[data-gen-param]'),
+      );
+      const hint = panel.querySelector<HTMLElement>('[data-gen-params-hint]');
+
+      for (const row of rows) {
+        const values = Array.from(
+          row.querySelectorAll<HTMLElement>('[data-gen-param-value]'),
+        );
+        const more = row.querySelector<HTMLElement>('[data-gen-param-more]');
+
+        more?.addEventListener('click', () => {
+          const expanded = row.classList.toggle('is-expanded');
+          more.textContent = expanded
+            ? more.dataset.labelFewer!
+            : more.dataset.labelMore!;
+        });
+
+        const control = controls.get(row.dataset.genParam!);
+        if (!control || values.length === 0) continue;
+
+        row.classList.add('is-interactive');
+        hint?.removeAttribute('hidden');
+
+        // Picking the value already selected clears the filter for the key,
+        // matching the "Any" entry in the bar's own menu.
+        const choose = (chip: HTMLElement) => {
+          const value = chip.dataset.genParamValue!;
+          document.dispatchEvent(
+            new CustomEvent('npfa:option-filter-set', {
+              detail: {
+                key: row.dataset.genParam,
+                value: control.dataset.value === value ? '' : value,
+              },
+            }),
+          );
+        };
+
+        for (const chip of values) {
+          chip.setAttribute('role', 'button');
+          chip.setAttribute('tabindex', '0');
+          chip.addEventListener('click', () => choose(chip));
+          chip.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            choose(chip);
+          });
+        }
+      }
+
+      const sync = () => {
+        for (const row of rows) {
+          if (!row.classList.contains('is-interactive')) continue;
+          const selected = controls.get(row.dataset.genParam!)!.dataset.value;
+          row.classList.toggle('is-filtered', !!selected);
+          for (const chip of row.querySelectorAll<HTMLElement>(
+            '[data-gen-param-value]',
+          )) {
+            const isSelected = chip.dataset.genParamValue === selected;
+            chip.classList.toggle('is-selected', isSelected);
+            chip.setAttribute('aria-pressed', String(isSelected));
+          }
+        }
+      };
+
+      document.addEventListener('npfa:option-filter-change', sync);
+      sync();
+    }
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', run);
+  } else {
+    run();
   }
-</table>
+</script>
