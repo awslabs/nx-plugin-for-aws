@@ -24,6 +24,7 @@ import {
   sourceAnchor,
   targetAnchor,
 } from './geometry';
+import { type Iac, IacMark } from './iac-mark';
 import { NodeLogo } from './node-logo';
 import {
   buildPresetGraph,
@@ -53,30 +54,16 @@ const MAX_SCALE = 1.25;
 interface Stage {
   readonly preset: Preset;
   readonly graph: Graph;
-  /**
-   * The commands the assistant is shown running. The workspace-create is left
-   * off: the first step of the flow already did that.
-   */
-  readonly lines: readonly ScriptLine[];
-  /** The whole script, workspace and all, for the copy button. */
-  readonly script: string;
   /** The diagram's natural size, before it is scaled to the panel. */
   readonly width: number;
   readonly height: number;
 }
 
 /**
- * Lay a preset out from its authored grid, and emit the commands that build it
- * with the same emitter the builder and the docs pages use — so what the homepage
- * shows being run is what the plugin runs.
+ * Lay a preset out from its authored grid. The commands it scaffolds with are
+ * emitted separately, since they depend on the IaC provider in play.
  */
 const toStage = (preset: Preset): Stage => {
-  const options: EmitOptions = {
-    workspace: 'my-project',
-    packageManager: 'pnpm',
-    iac: 'cdk',
-    overrides: preset.overrides,
-  };
   const built = buildPresetGraph(preset);
   const nodes = built.nodes.map((node, index) => ({
     ...node,
@@ -87,8 +74,6 @@ const toStage = (preset: Preset): Stage => {
   return {
     preset,
     graph,
-    lines: toScriptLines(graph, options, { skipWorkspace: true }),
-    script: toScript(graph, options),
     width: Math.max(...nodes.map((node) => node.x + NODE_WIDTH)) + PADDING,
     height: Math.max(...nodes.map((node) => node.y + NODE_HEIGHT)) + PADDING,
   };
@@ -131,6 +116,8 @@ export const PresetShowcase = ({ builderHref }: Props) => {
   const [isOnScreen, setIsOnScreen] = useState(false);
   const [reduceMotion, setReduceMotion] = useState(false);
   const [focus, setFocus] = useState<CommandFocus | undefined>();
+  /** Set by the mark on the diagram, overriding the example's own provider. */
+  const [iacOverride, setIacOverride] = useState<Iac | undefined>();
   const tabsId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -139,6 +126,23 @@ export const PresetShowcase = ({ builderHref }: Props) => {
   const preset = stage.preset;
   const phase = FLOW_PHASES[phaseIndex].id;
   const prompt = preset.prompt ?? preset.description;
+  // Examples alternate provider as the showcase moves through them, so both are
+  // shown without the reader having to ask; the mark on the diagram overrides it.
+  const iac: Iac = iacOverride ?? (index % 2 === 0 ? 'cdk' : 'terraform');
+  const { lines, script } = useMemo(() => {
+    const options: EmitOptions = {
+      workspace: 'my-project',
+      packageManager: 'pnpm',
+      iac,
+      overrides: stage.preset.overrides,
+    };
+    return {
+      // The workspace-create is left off the shown commands: the first step of
+      // the flow already did that. The copy button hands over the whole script.
+      lines: toScriptLines(stage.graph, options, { skipWorkspace: true }),
+      script: toScript(stage.graph, options),
+    };
+  }, [stage, iac]);
   // How long each step of this example holds. Memoised, since the step timer
   // restarts whenever it changes and typing re-renders many times a second.
   const durations = useMemo(
@@ -165,6 +169,7 @@ export const PresetShowcase = ({ builderHref }: Props) => {
     setPhaseIndex(isHeld ? LAST_PHASE : 0);
     setPass((current) => current + 1);
     setFocus(undefined);
+    setIacOverride(undefined);
   };
 
   /**
@@ -200,6 +205,7 @@ export const PresetShowcase = ({ builderHref }: Props) => {
       setPhaseIndex(0);
       setPass((current) => current + 1);
       setFocus(undefined);
+      setIacOverride(undefined);
     }, durations[phaseIndex]);
     return () => clearTimeout(timer);
   }, [
@@ -312,7 +318,7 @@ export const PresetShowcase = ({ builderHref }: Props) => {
       ?.focus();
   };
 
-  const { graph, lines } = stage;
+  const { graph } = stage;
 
   // Nothing is asked or run until those steps come round, then the commands and
   // the diagram fill in together. Derived rather than reset, so starting an
@@ -440,7 +446,7 @@ export const PresetShowcase = ({ builderHref }: Props) => {
             typed={typedPrompt}
             lines={lines}
             revealed={revealedLines}
-            script={stage.script}
+            script={script}
             summary={summary}
             focus={focus}
             onFocus={setFocus}
@@ -492,139 +498,144 @@ export const PresetShowcase = ({ builderHref }: Props) => {
             </div>
           </div>
 
-          <p className="ps-panel-description">{preset.description}</p>
-
-          <div
-            ref={canvasRef}
-            className="ps-canvas"
-            style={{ height: canvasHeight }}
-          >
-            {/* Keyed on the example, so switching remounts the diagram and its
-                plan arrives again. */}
+          {/* The mark sits outside the scrolling canvas, so it stays pinned to
+              the corner when a wide diagram is scrolled sideways. */}
+          <div className="ps-canvas-frame">
             <div
-              key={preset.id}
-              className="ps-extent"
-              style={{
-                width: stage.width,
-                height: stage.height,
-                // Centred across the panel while it fits; pinned to the left once
-                // it doesn't, so the overflow is somewhere the canvas can scroll.
-                ...(fitsCanvas
-                  ? {
-                      left: '50%',
-                      transform: `translateX(-50%) scale(${scale})`,
-                    }
-                  : {
-                      left: 0,
-                      transformOrigin: 'top left',
-                      transform: `scale(${scale})`,
-                    }),
-                // Centred in the panel, which is as tall as the tallest example.
-                marginTop: (canvasHeight - stage.height * scale) / 2,
-              }}
+              ref={canvasRef}
+              className="ps-canvas"
+              style={{ height: canvasHeight }}
             >
-              <svg
-                className="gb-edges"
-                width={stage.width}
-                height={stage.height}
-                aria-hidden="true"
+              {/* Keyed on the example, so switching remounts the diagram and its
+                plan arrives again. */}
+              <div
+                key={preset.id}
+                className="ps-extent"
+                style={{
+                  width: stage.width,
+                  height: stage.height,
+                  // Centred across the panel while it fits; pinned to the left once
+                  // it doesn't, so the overflow is somewhere the canvas can scroll.
+                  ...(fitsCanvas
+                    ? {
+                        left: '50%',
+                        transform: `translateX(-50%) scale(${scale})`,
+                      }
+                    : {
+                        left: 0,
+                        transformOrigin: 'top left',
+                        transform: `scale(${scale})`,
+                      }),
+                  // Centred in the panel, which is as tall as the tallest example.
+                  marginTop: (canvasHeight - stage.height * scale) / 2,
+                }}
               >
-                <defs>
-                  <marker
-                    id="ps-arrow"
-                    viewBox="0 0 10 10"
-                    refX="9"
-                    refY="5"
-                    markerWidth="5"
-                    markerHeight="5"
-                    markerUnits="strokeWidth"
-                    orient="auto-start-reverse"
-                  >
-                    <path d="M 0 1.5 L 9 5 L 0 8.5 z" fill="context-stroke" />
-                  </marker>
-                </defs>
+                <svg
+                  className="gb-edges"
+                  width={stage.width}
+                  height={stage.height}
+                  aria-hidden="true"
+                >
+                  <defs>
+                    <marker
+                      id="ps-arrow"
+                      viewBox="0 0 10 10"
+                      refX="9"
+                      refY="5"
+                      markerWidth="5"
+                      markerHeight="5"
+                      markerUnits="strokeWidth"
+                      orient="auto-start-reverse"
+                    >
+                      <path d="M 0 1.5 L 9 5 L 0 8.5 z" fill="context-stroke" />
+                    </marker>
+                  </defs>
 
-                {graph.edges.map((edge) => {
-                  const source = nodeById.get(edge.source);
-                  const target = nodeById.get(edge.target);
-                  if (!source || !target) return null;
-                  const path =
-                    source.id === target.id
-                      ? loopPath(source, 'horizontal')
-                      : edgePath(
-                          sourceAnchor(source, 'horizontal'),
-                          targetAnchor(target, 'horizontal'),
-                          'horizontal',
-                        );
-                  const isLit = focus?.edgeId === edge.id;
+                  {graph.edges.map((edge) => {
+                    const source = nodeById.get(edge.source);
+                    const target = nodeById.get(edge.target);
+                    if (!source || !target) return null;
+                    const path =
+                      source.id === target.id
+                        ? loopPath(source, 'horizontal')
+                        : edgePath(
+                            sourceAnchor(source, 'horizontal'),
+                            targetAnchor(target, 'horizontal'),
+                            'horizontal',
+                          );
+                    const isLit = focus?.edgeId === edge.id;
+                    return (
+                      <g
+                        key={edge.id}
+                        className={`gb-edge ps-edge${isLit ? ' is-active' : ''}${
+                          focus && !isLit ? ' is-dimmed' : ''
+                        }${isPlanned(edge.id) ? ' is-planned' : ''}${
+                          arriving?.has(edge.id) ? ' is-arriving' : ''
+                        }`}
+                        onPointerEnter={() => setFocus({ edgeId: edge.id })}
+                        onPointerLeave={() => setFocus(undefined)}
+                      >
+                        {/* A connection is a thin line to hit, so pointing at it is
+                          picked up by a wider invisible path over the top. */}
+                        <path className="gb-edge-hit" d={path} />
+                        {/* Dashes travelling the path, so a connection reads as a
+                          direction of flow. */}
+                        <path
+                          className="gb-edge-line ps-edge-line"
+                          d={path}
+                          markerEnd="url(#ps-arrow)"
+                        />
+                      </g>
+                    );
+                  })}
+                </svg>
+
+                {graph.nodes.map((node) => {
+                  const type = nodeType(node.type);
+                  const isLit = litNodeIds.has(node.id);
                   return (
-                    <g
-                      key={edge.id}
-                      className={`gb-edge ps-edge${isLit ? ' is-active' : ''}${
-                        focus && !isLit ? ' is-dimmed' : ''
-                      }${isPlanned(edge.id) ? ' is-planned' : ''}${
-                        arriving?.has(edge.id) ? ' is-arriving' : ''
-                      }`}
-                      onPointerEnter={() => setFocus({ edgeId: edge.id })}
+                    <div
+                      key={node.id}
+                      className={`gb-node gb-node--static ps-node${
+                        isLit ? ' is-lit' : ''
+                      }${focus && !isLit ? ' is-dimmed' : ''}${
+                        isPlanned(node.id) ? ' is-planned' : ''
+                      }${arriving?.has(node.id) ? ' is-arriving' : ''}`}
+                      style={{ left: node.x, top: node.y }}
+                      onPointerEnter={() => setFocus({ nodeId: node.id })}
                       onPointerLeave={() => setFocus(undefined)}
                     >
-                      {/* A connection is a thin line to hit, so pointing at it is
-                          picked up by a wider invisible path over the top. */}
-                      <path className="gb-edge-hit" d={path} />
-                      {/* Dashes travelling the path, so a connection reads as a
-                          direction of flow. */}
-                      <path
-                        className="gb-edge-line ps-edge-line"
-                        d={path}
-                        markerEnd="url(#ps-arrow)"
+                      <NodeLogo
+                        logo={type.logo}
+                        badge={type.badge}
+                        alt={type.label}
                       />
-                    </g>
+                      <span className="gb-node-text">
+                        <span className="gb-node-name">{node.name}</span>
+                        <span className="gb-node-type">{type.label}</span>
+                      </span>
+
+                      {type.roles.includes('target') && (
+                        <span
+                          className="gb-port gb-port--in gb-port--in-horizontal"
+                          aria-hidden="true"
+                        />
+                      )}
+                      {type.roles.includes('source') && (
+                        <span
+                          className="gb-port gb-port--out gb-port--out-horizontal"
+                          aria-hidden="true"
+                        />
+                      )}
+                    </div>
                   );
                 })}
-              </svg>
-
-              {graph.nodes.map((node) => {
-                const type = nodeType(node.type);
-                const isLit = litNodeIds.has(node.id);
-                return (
-                  <div
-                    key={node.id}
-                    className={`gb-node gb-node--static ps-node${
-                      isLit ? ' is-lit' : ''
-                    }${focus && !isLit ? ' is-dimmed' : ''}${
-                      isPlanned(node.id) ? ' is-planned' : ''
-                    }${arriving?.has(node.id) ? ' is-arriving' : ''}`}
-                    style={{ left: node.x, top: node.y }}
-                    onPointerEnter={() => setFocus({ nodeId: node.id })}
-                    onPointerLeave={() => setFocus(undefined)}
-                  >
-                    <NodeLogo
-                      logo={type.logo}
-                      badge={type.badge}
-                      alt={type.label}
-                    />
-                    <span className="gb-node-text">
-                      <span className="gb-node-name">{node.name}</span>
-                      <span className="gb-node-type">{type.label}</span>
-                    </span>
-
-                    {type.roles.includes('target') && (
-                      <span
-                        className="gb-port gb-port--in gb-port--in-horizontal"
-                        aria-hidden="true"
-                      />
-                    )}
-                    {type.roles.includes('source') && (
-                      <span
-                        className="gb-port gb-port--out gb-port--out-horizontal"
-                        aria-hidden="true"
-                      />
-                    )}
-                  </div>
-                );
-              })}
+              </div>
             </div>
+            <IacMark iac={iac} onSwitch={setIacOverride} />
           </div>
+
+          <p className="ps-panel-description">{preset.description}</p>
         </div>
       </div>
 

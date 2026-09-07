@@ -18,6 +18,7 @@ import {
   sourceAnchor,
   targetAnchor,
 } from './geometry';
+import { IacMark } from './iac-mark';
 import { NodeLogo } from './node-logo';
 import { buildPresetGraph, PRESETS } from './presets';
 
@@ -296,6 +297,8 @@ export const EmbeddedGraph = ({
             );
           })}
         </div>
+
+        <IacMark iac={iac} />
       </div>
     </div>
   );

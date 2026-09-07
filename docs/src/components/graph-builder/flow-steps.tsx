@@ -184,7 +184,7 @@ export const FlowSteps = ({
 
             <div className="af-body af-body--chat">
               <p className="af-prompt">
-                <span className="gb-prompt">›</span>
+                <span className="gb-prompt">❯</span>
                 <span>
                   {prompt.slice(0, typed)}
                   {!isTyped && <span className="af-caret" />}
@@ -231,8 +231,11 @@ export const FlowSteps = ({
 
             <div className="af-body af-body--commands">
               {shown.length === 0 ? (
-                <p className="af-line af-line--output">
-                  <span className="af-caret" />
+                <p className="af-prompt af-prompt--commands">
+                  <span className="gb-prompt">❯</span>
+                  <span>
+                    <span className="af-caret" />
+                  </span>
                 </p>
               ) : (
                 <CommandList
