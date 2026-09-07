@@ -128,6 +128,11 @@ const tokenColors = (c: Palette) => [
       'entity.name.tag',
       'support.type.builtin',
       'markup.deleted.diff',
+      /* `resource`, `module`, `variable` — HCL's block keywords, which its
+         grammar scopes as type names. They open a block the way `class` does,
+         so they read as keywords and leave teal for the labels that follow. */
+      'entity.name.type.hcl',
+      'entity.name.type.terraform',
     ],
     settings: { foreground: c.keyword },
   },
@@ -158,9 +163,13 @@ const tokenColors = (c: Palette) => [
       'constant.language',
       'constant.other',
       'support.constant',
-      'variable.other.constant',
       'constant.other.caps',
       'entity.name.constant',
+      /* A reference to a named constant. Deliberately not `variable.other.constant`,
+         which TypeScript puts on every `const` binding — that would colour an
+         ordinary local at its declaration and not at its uses. */
+      'variable.other.constant.property',
+      'variable.other.constant.object',
     ],
     settings: { foreground: c.number },
   },
@@ -188,6 +197,9 @@ const tokenColors = (c: Palette) => [
       'support.class',
       'support.type.primitive',
       'meta.type.annotation entity.name.type',
+      /* The labels on an HCL block — the resource type and the name it is being
+         declared under. */
+      'variable.other.enummember.hcl',
     ],
     settings: { foreground: c.type },
   },
@@ -202,8 +214,10 @@ const tokenColors = (c: Palette) => [
       'entity.name.tag.yaml',
       'meta.mapping.key string',
       'meta.mapping.key variable.other.readwrite',
-      'variable.other.enummember',
       'support.variable',
+      /* An HCL attribute, so it matches the keys inside an object literal below
+         it rather than reading as a bare variable. */
+      'variable.declaration.hcl variable.other.readwrite.hcl',
     ],
     settings: { foreground: c.property },
   },
@@ -231,6 +245,36 @@ const tokenColors = (c: Palette) => [
       'meta.template.expression punctuation.definition',
     ],
     settings: { foreground: c.special },
+  },
+  /* A shell block is a command a reader is about to run, so it is coloured like
+     the command cards rather than like source: the command itself carries the
+     weight, its arguments stay plain, its flags recede, and only a value —
+     a quoted string or an expanded variable — takes a colour. Without this a
+     line reads as a violet word followed by a run of gold, since the shell
+     grammar scopes every bare argument as an unquoted string. */
+  {
+    scope: [
+      'entity.name.command',
+      'entity.name.function.call.shell',
+      'support.function.builtin.shell',
+    ],
+    settings: { foreground: c.text, fontStyle: 'bold' },
+  },
+  {
+    scope: [
+      'string.unquoted.argument',
+      'constant.other.option',
+      'constant.other.option.dash.shell',
+    ],
+    settings: { foreground: c.punctuation },
+  },
+  {
+    scope: [
+      'variable.other.normal.shell',
+      'variable.other.bracket.shell',
+      'punctuation.definition.variable.shell',
+    ],
+    settings: { foreground: c.function },
   },
   {
     scope: ['markup.inserted', 'markup.inserted.diff'],
