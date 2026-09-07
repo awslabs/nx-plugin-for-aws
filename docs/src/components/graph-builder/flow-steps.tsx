@@ -231,9 +231,11 @@ export const FlowSteps = ({
 
             <div className="af-body af-body--commands">
               {shown.length === 0 ? (
-                <p className="af-line">
+                <p className="af-prompt af-prompt--commands">
                   <span className="gb-prompt">❯</span>
-                  <span className="af-caret" />
+                  <span>
+                    <span className="af-caret" />
+                  </span>
                 </p>
               ) : (
                 <CommandList
