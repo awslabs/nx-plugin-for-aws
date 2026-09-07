@@ -24,7 +24,7 @@ import {
   sourceAnchor,
   targetAnchor,
 } from './geometry';
-import { IacMark } from './iac-mark';
+import { type Iac, IacMark } from './iac-mark';
 import { NodeLogo } from './node-logo';
 import {
   buildPresetGraph,
@@ -54,30 +54,16 @@ const MAX_SCALE = 1.25;
 interface Stage {
   readonly preset: Preset;
   readonly graph: Graph;
-  /**
-   * The commands the assistant is shown running. The workspace-create is left
-   * off: the first step of the flow already did that.
-   */
-  readonly lines: readonly ScriptLine[];
-  /** The whole script, workspace and all, for the copy button. */
-  readonly script: string;
   /** The diagram's natural size, before it is scaled to the panel. */
   readonly width: number;
   readonly height: number;
 }
 
 /**
- * Lay a preset out from its authored grid, and emit the commands that build it
- * with the same emitter the builder and the docs pages use — so what the homepage
- * shows being run is what the plugin runs.
+ * Lay a preset out from its authored grid. The commands it scaffolds with are
+ * emitted separately, since they depend on the IaC provider in play.
  */
 const toStage = (preset: Preset): Stage => {
-  const options: EmitOptions = {
-    workspace: 'my-project',
-    packageManager: 'pnpm',
-    iac: 'cdk',
-    overrides: preset.overrides,
-  };
   const built = buildPresetGraph(preset);
   const nodes = built.nodes.map((node, index) => ({
     ...node,
@@ -88,8 +74,6 @@ const toStage = (preset: Preset): Stage => {
   return {
     preset,
     graph,
-    lines: toScriptLines(graph, options, { skipWorkspace: true }),
-    script: toScript(graph, options),
     width: Math.max(...nodes.map((node) => node.x + NODE_WIDTH)) + PADDING,
     height: Math.max(...nodes.map((node) => node.y + NODE_HEIGHT)) + PADDING,
   };
@@ -132,6 +116,8 @@ export const PresetShowcase = ({ builderHref }: Props) => {
   const [isOnScreen, setIsOnScreen] = useState(false);
   const [reduceMotion, setReduceMotion] = useState(false);
   const [focus, setFocus] = useState<CommandFocus | undefined>();
+  /** Set by the mark on the diagram, overriding the example's own provider. */
+  const [iacOverride, setIacOverride] = useState<Iac | undefined>();
   const tabsId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
@@ -140,6 +126,23 @@ export const PresetShowcase = ({ builderHref }: Props) => {
   const preset = stage.preset;
   const phase = FLOW_PHASES[phaseIndex].id;
   const prompt = preset.prompt ?? preset.description;
+  // Examples alternate provider as the showcase moves through them, so both are
+  // shown without the reader having to ask; the mark on the diagram overrides it.
+  const iac: Iac = iacOverride ?? (index % 2 === 0 ? 'cdk' : 'terraform');
+  const { lines, script } = useMemo(() => {
+    const options: EmitOptions = {
+      workspace: 'my-project',
+      packageManager: 'pnpm',
+      iac,
+      overrides: stage.preset.overrides,
+    };
+    return {
+      // The workspace-create is left off the shown commands: the first step of
+      // the flow already did that. The copy button hands over the whole script.
+      lines: toScriptLines(stage.graph, options, { skipWorkspace: true }),
+      script: toScript(stage.graph, options),
+    };
+  }, [stage, iac]);
   // How long each step of this example holds. Memoised, since the step timer
   // restarts whenever it changes and typing re-renders many times a second.
   const durations = useMemo(
@@ -166,6 +169,7 @@ export const PresetShowcase = ({ builderHref }: Props) => {
     setPhaseIndex(isHeld ? LAST_PHASE : 0);
     setPass((current) => current + 1);
     setFocus(undefined);
+    setIacOverride(undefined);
   };
 
   /**
@@ -201,6 +205,7 @@ export const PresetShowcase = ({ builderHref }: Props) => {
       setPhaseIndex(0);
       setPass((current) => current + 1);
       setFocus(undefined);
+      setIacOverride(undefined);
     }, durations[phaseIndex]);
     return () => clearTimeout(timer);
   }, [
@@ -313,7 +318,7 @@ export const PresetShowcase = ({ builderHref }: Props) => {
       ?.focus();
   };
 
-  const { graph, lines } = stage;
+  const { graph } = stage;
 
   // Nothing is asked or run until those steps come round, then the commands and
   // the diagram fill in together. Derived rather than reset, so starting an
@@ -441,7 +446,7 @@ export const PresetShowcase = ({ builderHref }: Props) => {
             typed={typedPrompt}
             lines={lines}
             revealed={revealedLines}
-            script={stage.script}
+            script={script}
             summary={summary}
             focus={focus}
             onFocus={setFocus}
@@ -627,7 +632,7 @@ export const PresetShowcase = ({ builderHref }: Props) => {
                 })}
               </div>
             </div>
-            <IacMark iac="cdk" />
+            <IacMark iac={iac} onSwitch={setIacOverride} />
           </div>
 
           <p className="ps-panel-description">{preset.description}</p>
