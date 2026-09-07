@@ -34,7 +34,7 @@ const MAX_PUBLISH_ATTEMPTS = 3;
  * tag promotes it to the stable version (dropping the -rc suffix) and subsequent
  * runs follow conventional-commits semver (1.0.1, 1.1.0, …).
  */
-const RELEASE_TRAIN: 'rc' | 'stable' = 'rc';
+const RELEASE_TRAIN: 'rc' | 'stable' = 'stable';
 /**
  * The bump applied when promoting the current rc series to its first stable
  * release (e.g. `major`: 1.0.0-rc.x → 1.0.0). Only used on that transition.
