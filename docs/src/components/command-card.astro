@@ -202,6 +202,12 @@ const isPinned = shown.every((option) => locked.has(option.key));
         card.querySelectorAll<HTMLElement>('[data-command-card-field]'),
       ).map((field) => [field.dataset.commandCardField!, field]),
     );
+    // The controls the guide itself fixes, which stay that way whatever applies.
+    const locked = new Set<HTMLInputElement | HTMLButtonElement>([
+      ...inputs.filter((input) => input.readOnly),
+      ...checks.filter((check) => check.disabled),
+      ...pills.filter((pill) => pill.disabled),
+    ]);
     const dryRun = card.querySelector<HTMLInputElement>(
       '[data-command-card-dry-run]',
     );
@@ -283,15 +289,27 @@ const isPinned = shown.every((option) => locked.has(option.key));
       }
     };
 
-    // An option only applies under some values of another — the Smithy namespace
-    // under `framework=smithy`. Its control goes when it stops applying, and so
-    // does whatever was entered in it.
+    // An option only applies under some values of another — a gateway's `auth`
+    // under an `infra` that hosts something. While another choice rules it out its
+    // controls are disabled rather than removed, so the reader can see the
+    // condition they'd have to change, and whatever was entered in it leaves the
+    // command.
     const applyApplicability = (values: Record<string, string>) => {
       const dropped: string[] = [];
       for (const option of config.options) {
         const applies = isApplicable(option, values);
         const field = fields.get(option.key);
-        if (field) field.hidden = !applies;
+        field?.classList.toggle('is-inapplicable', !applies);
+        for (const control of field?.querySelectorAll<
+          HTMLInputElement | HTMLButtonElement
+        >('[data-option-pill], [data-option-check], [data-option-input]') ?? []) {
+          const fixed = locked.has(control);
+          if (control instanceof HTMLInputElement && control.type === 'text') {
+            control.readOnly = fixed || !applies;
+          } else {
+            control.disabled = fixed || !applies;
+          }
+        }
         if (!applies) dropped.push(option.key);
       }
       return Object.fromEntries(
