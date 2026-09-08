@@ -5,11 +5,13 @@
  */
 
 /**
- * The options a generator accepts, as a compact scrollable reference panel.
+ * The options a generator accepts, as a compact panel.
  *
- * Enum values are rendered as chips. On pages with an <OptionFilter> bar, the
- * chips for keys the bar exposes double as filter controls: picking one filters
- * the guide, and the row for a filtered key is highlighted.
+ * Enum values are rendered as chips, with the generator's own default marked.
+ * The panel is a second way into the values the page's run-generator card holds:
+ * picking a chip sets that option on the command, and the panel follows the
+ * command in turn — the row for an option the command carries is highlighted, and
+ * an option that doesn't apply under the current values is left out.
  */
 import GeneratorsJson from '../../../packages/nx-plugin/generators.json';
 import schemaTranslations from '../i18n/schema-translations.json';
@@ -103,17 +105,6 @@ const strings = {
     zh: '仅在这些选项值下适用',
     vi: 'Chỉ áp dụng với các giá trị tùy chọn này'
   },
-  filterHint: {
-    en: 'Pick a value to filter this guide',
-    jp: '値を選ぶとガイドを絞り込めます',
-    ko: '값을 선택하면 가이드가 필터링됩니다',
-    fr: 'Choisissez une valeur pour filtrer ce guide',
-    it: 'Scegli un valore per filtrare questa guida',
-    es: 'Elige un valor para filtrar esta guía',
-    pt: 'Escolha um valor para filtrar este guia',
-    zh: '选择一个值以筛选本指南',
-    vi: 'Chọn một giá trị để lọc hướng dẫn này'
-  },
 };
 const localeString = (name) => strings[name][locale] || strings[name]['en'];
 const getDescription = (parameter, fallback) => {
@@ -149,9 +140,6 @@ const parameters = readGeneratorOptions(schema)
     <span class="gen-params-title">{localeString('title')}</span>
     <span class="gen-params-count">
       <span data-gen-params-count>{parameters.length}</span> {localeString('options')}
-    </span>
-    <span class="gen-params-hint" data-gen-params-hint hidden>
-      {localeString('filterHint')}
     </span>
   </div>
   <dl class="gen-params-list">
@@ -221,30 +209,27 @@ const parameters = readGeneratorOptions(schema)
 <script>
   import { isApplicable } from '../lib/generator-options';
 
-  // Ties the options panel to the page's <OptionFilter> bar, when there is one:
-  //   - Chips for keys the bar exposes become filter controls.
-  //   - A key with a value selected is highlighted, as is the chip for the value.
-  //   - An option that only applies under other values goes when the selection
-  //     rules it out.
-  // Reads each control's value off the bar's own DOM rather than waiting for its
-  // first change event, so the two are in sync whichever script runs first.
+  /**
+   * Keeps the panel and the page's command in step, in both directions:
+   *   - picking a value asks the run-generator card to set it, which rebuilds the
+   *     command and announces the new values,
+   *   - and every announcement highlights the row and chip for an option the
+   *     command carries, and hides an option that no longer applies.
+   */
   const run = () => {
     const panels = document.querySelectorAll<HTMLElement>('[data-gen-params]');
     if (panels.length === 0) return;
 
-    const bar = document.querySelector<HTMLElement>('[data-option-filter-bar]');
-    const controls = new Map<string, HTMLElement>();
-    for (const control of bar?.querySelectorAll<HTMLElement>(
-      '[data-option-filter-control]',
-    ) ?? []) {
-      if (control.dataset.key) controls.set(control.dataset.key, control);
-    }
+    // The card that runs the generator this page is about; without one there is
+    // no command for the panel to drive.
+    const card = document.querySelector<HTMLElement>(
+      '[data-command-card-owns-page]',
+    );
 
     for (const panel of panels) {
       const rows = Array.from(
         panel.querySelectorAll<HTMLElement>('[data-gen-param]'),
       );
-      const hint = panel.querySelector<HTMLElement>('[data-gen-params-hint]');
       const count = panel.querySelector<HTMLElement>('[data-gen-params-count]');
       // The values the page itself is written around, which the reader's
       // selection adds to rather than replaces.
@@ -256,7 +241,8 @@ const parameters = readGeneratorOptions(schema)
       }
 
       for (const row of rows) {
-        const values = Array.from(
+        const key = row.dataset.genParam!;
+        const chips = Array.from(
           row.querySelectorAll<HTMLElement>('[data-gen-param-value]'),
         );
         const more = row.querySelector<HTMLElement>('[data-gen-param-more]');
@@ -268,27 +254,26 @@ const parameters = readGeneratorOptions(schema)
             : more.dataset.labelMore!;
         });
 
-        const control = controls.get(row.dataset.genParam!);
-        if (!control || values.length === 0) continue;
+        // Only values the card offers can be set from here: an option it fixes
+        // (the tRPC guide's framework) stays as the guide wrote it.
+        const control = card?.querySelector<HTMLButtonElement>(
+          `[data-option-pill="${key}"]`,
+        );
+        if (chips.length === 0 || !control || control.disabled) continue;
 
         row.classList.add('is-interactive');
-        hint?.removeAttribute('hidden');
-
-        // Picking the value already selected clears the filter for the key,
-        // matching the "Any" entry in the bar's own menu.
+        // Picking the value already set clears it, so the option goes back to
+        // whatever the generator would prompt for.
         const choose = (chip: HTMLElement) => {
-          const value = chip.dataset.genParamValue!;
+          const value = chip.classList.contains('is-selected')
+            ? ''
+            : chip.dataset.genParamValue!;
           document.dispatchEvent(
-            new CustomEvent('npfa:option-filter-set', {
-              detail: {
-                key: row.dataset.genParam,
-                value: control.dataset.value === value ? '' : value,
-              },
-            }),
+            new CustomEvent('npfa:option-set', { detail: { key, value } }),
           );
         };
 
-        for (const chip of values) {
+        for (const chip of chips) {
           chip.setAttribute('role', 'button');
           chip.setAttribute('tabindex', '0');
           chip.addEventListener('click', () => choose(chip));
@@ -300,36 +285,49 @@ const parameters = readGeneratorOptions(schema)
         }
       }
 
-      const sync = () => {
-        const values = { ...pinned };
-        for (const [key, control] of controls) {
-          if (control.dataset.value) values[key] = control.dataset.value;
-        }
+      const sync = (
+        values: Record<string, string>,
+        command: Record<string, string>,
+      ) => {
+        const context = { ...pinned, ...values };
 
         let shown = 0;
         for (const row of rows) {
           const when = row.dataset.genParamWhen;
           const applies =
-            !when || isApplicable({ when: JSON.parse(when) }, values);
+            !when || isApplicable({ when: JSON.parse(when) }, context);
           row.hidden = !applies;
           if (applies) shown += 1;
 
-          if (!row.classList.contains('is-interactive')) continue;
-          const selected = controls.get(row.dataset.genParam!)!.dataset.value;
-          row.classList.toggle('is-filtered', !!selected);
+          const carried = command[row.dataset.genParam!];
+          row.classList.toggle('is-filtered', !!carried);
           for (const chip of row.querySelectorAll<HTMLElement>(
             '[data-gen-param-value]',
           )) {
-            const isSelected = chip.dataset.genParamValue === selected;
+            const isSelected = chip.dataset.genParamValue === carried;
             chip.classList.toggle('is-selected', isSelected);
-            chip.setAttribute('aria-pressed', String(isSelected));
+            if (chip.getAttribute('role') === 'button') {
+              chip.setAttribute('aria-pressed', String(isSelected));
+            }
           }
         }
         if (count) count.textContent = String(shown);
       };
 
-      document.addEventListener('npfa:option-filter-change', sync);
-      sync();
+      document.addEventListener('npfa:page-options', (event) => {
+        const detail = (event as CustomEvent).detail ?? {};
+        sync(detail.values ?? {}, detail.command ?? {});
+      });
+
+      // The card may have announced before this script ran, so start from what it
+      // last published.
+      let announced: { values?: Record<string, string>; command?: Record<string, string> } = {};
+      try {
+        announced = JSON.parse(card?.dataset.pageOptions || '{}');
+      } catch {
+        // A malformed announcement is nothing to act on.
+      }
+      sync(announced.values ?? {}, announced.command ?? {});
     }
   };
 

@@ -405,7 +405,7 @@ Finally, add the node's artwork and palette grouping to `PRESENTATION` in `docs/
 
 The read-only diagrams — the quick start, the tutorial, the homepage showcase and each generator guide's **Architecture** section — switch between two views of the same graph: the projects in the workspace, and the AWS infrastructure they deploy. The second comes from a **blueprint** per node type in `docs/src/lib/graph-builder/infrastructure.ts`: the resources the generator provisions, each with an icon from `docs/public/icons/aws/`, their position in the project's own little grid, and the request path through them.
 
-A resource can declare the option values it is provisioned for — `when: { infra: 'rest-lambda' }` puts a WAF in front of a REST API and leaves it out of an HTTP one — and the request path skips whatever the options leave out, so variants of the same step sit at the same grid position. That is what keeps a guide's diagram in step with the option filters the rest of the guide is written against: `<ArchitectureDiagram />` follows the reader's selection in the filter bar, and `<ArchitectureDiagram options={{ infra: 'none' }} />` pins a block that only describes one variant.
+A resource can declare the option values it is provisioned for — `when: { infra: 'rest-lambda' }` puts a WAF in front of a REST API and leaves it out of an HTTP one — and the request path skips whatever the options leave out, so variants of the same step sit at the same grid position. That is what keeps a guide's diagram in step with the option filters the rest of the guide is written against: `<ArchitectureDiagram />` follows the values the reader enters in the guide's run-generator card, and `<ArchitectureDiagram options={{ infra: 'none' }} />` pins a block that only describes one variant.
 
 A generator that adds to a project rather than taking part in a connection — a Lambda function, a website's authentication — has no node type in the palette, so its blueprint is keyed by the generator id and carries its own `label`. Everything else works the same, and its guide's `<ArchitectureDiagram />` finds it from the page's `generator:` frontmatter.
 
@@ -446,7 +446,7 @@ All authoring happens in `docs/src/content/docs/en/`. Translations under other l
 
 #### Linking a guide to its generator
 
-Add `generator: <id>` to the page's frontmatter. This wires the page into the option-filter bar, adds the experimental banner when the generator is marked as such, and enables the build-time validator that checks every `<OptionFilter>` predicate against the generator's JSON schema.
+Add `generator: <id>` to the page's frontmatter. This resolves the generator's schema for the page — its options panel, its run-generator card and the option values the page is read under — adds the experimental banner when the generator is marked as such, and enables the build-time validator that checks every `<OptionFilter>` predicate against the generator's JSON schema.
 
 ```mdx
 ---
@@ -456,9 +456,23 @@ generator: ts#api
 ---
 ```
 
+#### x-when: options that only apply sometimes
+
+An option that only applies for certain values of another can say so in its `schema.json` with `x-when`. It's our own convention — Nx neither reads nor enforces it — and only the docs site consumes it: the guide's options panel and its run-generator card leave the option out where it doesn't apply, state the condition where it does, and drop the control the moment another choice rules it out.
+
+```json
+"namespace": {
+  "type": "string",
+  "description": "The namespace for the Smithy API",
+  "x-when": { "framework": "smithy" }
+}
+```
+
+Keys are AND'd and a list of values is OR'd within a key, matching `<OptionFilter when={{…}}>`. Reach for it where a description already has to explain that an option is conditional (`"only applicable for the smithy framework"`), and leave the description saying so too — the MCP server renders descriptions, not `x-when`. The generator itself still has to validate or ignore what doesn't apply to the run it was given.
+
 #### OptionFilter: conditional sections
 
-Wrap any content that only applies to a subset of option values in `<OptionFilter>`. The docs site shows a filter bar above the page (one dropdown per referenced option key, pulled from the schema enum) that hides mismatching blocks; the MCP server drops mismatching blocks from the response when the agent passes `options`.
+Wrap any content that only applies to a subset of option values in `<OptionFilter>`. On the docs site the reader picks their option values in the page's run-generator card — the same controls that build the command — and blocks that don't match are hidden, along with their table-of-contents entries; the MCP server drops mismatching blocks from the response when the agent passes `options`.
 
 ```mdx
 import OptionFilter from '@components/option-filter.astro';
@@ -526,7 +540,7 @@ Array values are OR'd within a key (`protocol: [HTTP, A2A]` matches either), and
 - **`<Tabs _filter>`** — any other "A vs B" switch where the site benefits from both variants being visible but an MCP agent should only see one. Also the right choice for option-dependent content inside an `<OptionFilter>` section.
 - **Frontmatter `when:`** — one guide page per supported combination, for generators like `connection` where every combination wants its own prose.
 
-Running `pnpm nx start docs` shows your changes with the filter bar live. Running `pnpm nx mcp-inspect @aws/nx-plugin` starts the MCP server against your local guides so you can call `generator-guide` with various `options` and verify the output an agent would receive.
+Running `pnpm nx start docs` shows your changes with the option controls live. Running `pnpm nx mcp-inspect @aws/nx-plugin` starts the MCP server against your local guides so you can call `generator-guide` with various `options` and verify the output an agent would receive.
 
 ### Documentation Translation
 

@@ -75,6 +75,18 @@ const initial: Record<string, string> = {
   ),
 };
 
+// The guide's own generator, whose card the reader picks the page's option values
+// in: its controls drive the sections the guide shows. A page runs other
+// generators too (the connections at the end of an agent guide), which speak only
+// for their own command.
+const pageGenerator = (
+  Astro.locals.starlightRoute?.entry?.data as { generator?: string } | undefined
+)?.generator;
+const pageOwnerSymbol = Symbol.for('npfa:page-options-owner');
+const ownerLocals = Astro.locals as Record<symbol, boolean>;
+const ownsPage = generator === pageGenerator && !ownerLocals[pageOwnerSymbol];
+if (ownsPage) ownerLocals[pageOwnerSymbol] = true;
+
 // A guide written for one variant of a generator — the tRPC guide's
 // `when: framework: [trpc]` — is that variant: readers come for its command, so
 // an option the page both fixes and passes is shown rather than offered.
@@ -104,7 +116,7 @@ const config: GeneratorCardConfig = {
   positional,
   noInteractive,
   order: applicable.map((option) => option.key),
-  // The options this guide pins, which a filter-bar selection must not overwrite.
+  // The options this guide pins, which a restored selection must not overwrite.
   prescribed: Object.keys(prescribed),
   options: applicable.map(({ key, control, default: fallback, when }) => ({
     key,
@@ -216,6 +228,7 @@ const vscodeString = (name) =>
   target={`${namespace}:${generator}`}
   locked={locked}
   strings={strings}
+  ownsPage={ownsPage}
   showDryRun
 >
   <Tabs syncKey="generator-usage">
