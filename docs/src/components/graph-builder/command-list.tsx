@@ -139,7 +139,7 @@ export const CommandList = ({
             )}
             <span className="gb-command-line">
               <span className="gb-prompt" aria-hidden="true">
-                ❯
+                $
               </span>
               <code>
                 <CommandText command={line.command} />
