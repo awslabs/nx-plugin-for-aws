@@ -13,6 +13,8 @@ import {
   buildGeneratorInfoList,
   findGeneratorsJsonEntry,
 } from '../../../packages/nx-plugin/src/utils/generators';
+import { parseMdx } from '../../../packages/nx-plugin/src/mcp-server/guide-pipeline';
+import { stripFrontmatterAndEsm } from '../../../packages/nx-plugin/src/mcp-server/mdx-ast';
 import ExperimentalBanner from './experimental-banner.astro';
 import PageOptions from './page-options.astro';
 import Snippet from './snippet.astro';
@@ -56,12 +58,9 @@ if (!isSnippet && starlightRoute?.entry?.id) {
       const pluginDir = path.resolve(docsDir, '..', 'packages', 'nx-plugin');
       const generators = buildGeneratorInfoList(pluginDir);
 
-      // Strip frontmatter and imports from MDX content
-      const stripMdxPreamble = (content: string) =>
-        content
-          .replace(/^---\n[\s\S]*?\n---\n/, '')
-          .replace(/^import\s+.*$\n?/gm, '')
-          .trim();
+      // Strip frontmatter and ESM statements from MDX content
+      const stripMdxPreamble = async (content: string) =>
+        stripFrontmatterAndEsm(content, await parseMdx(content));
 
       // Create a local filesystem snippet provider (reads from en locale)
       const snippetsDir = path.join(docsContentDir, 'en', 'snippets');
@@ -74,16 +73,7 @@ if (!isSnippet && starlightRoute?.entry?.id) {
         }
       };
 
-      // Strip frontmatter
-      const frontmatterEnd = rawMdx.match(/^---\n[\s\S]*?\n---\n/);
-      const bodyWithoutFrontmatter = frontmatterEnd
-        ? rawMdx.slice(frontmatterEnd[0].length)
-        : rawMdx;
-
-      // Strip import statements
-      const bodyWithoutImports = bodyWithoutFrontmatter
-        .replace(/^import\s+.*$\n?/gm, '')
-        .trim();
+      const bodyWithoutImports = await stripMdxPreamble(rawMdx);
 
       // Run the same resolution as the MCP server
       const processed = await postProcessGuide(
