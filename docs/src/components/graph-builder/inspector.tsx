@@ -94,12 +94,19 @@ export const Inspector = ({
       )}
 
       <div className="gb-field">
-        <label htmlFor={`gb-name-${node.id}`}>Name</label>
+        <label
+          className="command-card-field-name"
+          htmlFor={`gb-name-${node.id}`}
+        >
+          name
+        </label>
         <input
           id={`gb-name-${node.id}`}
+          className="command-card-input"
           type="text"
           value={node.name}
           spellCheck={false}
+          autoComplete="off"
           onChange={(event) => onChange({ name: event.target.value })}
         />
         <p className="gb-field-hint">
@@ -111,12 +118,19 @@ export const Inspector = ({
 
       {type.kind === 'component' && type.host && (
         <div className="gb-field">
-          <label htmlFor={`gb-host-${node.id}`}>Host project</label>
+          <label
+            className="command-card-field-name"
+            htmlFor={`gb-host-${node.id}`}
+          >
+            hostProject
+          </label>
           <input
             id={`gb-host-${node.id}`}
+            className="command-card-input"
             type="text"
             value={node.hostName ?? ''}
             spellCheck={false}
+            autoComplete="off"
             onChange={(event) => onChange({ hostName: event.target.value })}
           />
           <p className="gb-field-hint">
@@ -133,7 +147,7 @@ export const Inspector = ({
         if (property.type === 'boolean') {
           return (
             <div className="gb-field gb-field--switch" key={property.name}>
-              <label htmlFor={id}>
+              <label className="command-card-check" htmlFor={id}>
                 <input
                   id={id}
                   type="checkbox"
@@ -142,7 +156,7 @@ export const Inspector = ({
                     onOptionChange(property.name, event.target.checked)
                   }
                 />
-                <span>{property.name}</span>
+                <span className="command-card-field-name">{property.name}</span>
               </label>
               {property.description && (
                 <p className="gb-field-hint">{property.description}</p>
@@ -157,13 +171,18 @@ export const Inspector = ({
           if (property.enum.length <= 3) {
             return (
               <div className="gb-field" key={property.name}>
-                <span className="gb-field-label">{property.name}</span>
-                <fieldset className="gb-segmented" aria-label={property.name}>
+                <span className="command-card-field-name">{property.name}</span>
+                <fieldset
+                  className="command-card-pills"
+                  aria-label={property.name}
+                >
                   {property.enum.map((option) => (
                     <button
                       key={option}
                       type="button"
-                      className={`gb-segment${value === option ? ' is-active' : ''}`}
+                      className={`command-card-pill${
+                        option === property.default ? ' is-default' : ''
+                      }`}
                       aria-pressed={value === option}
                       onClick={() => onOptionChange(property.name, option)}
                     >
@@ -179,9 +198,12 @@ export const Inspector = ({
           }
           return (
             <div className="gb-field" key={property.name}>
-              <label htmlFor={id}>{property.name}</label>
+              <label className="command-card-field-name" htmlFor={id}>
+                {property.name}
+              </label>
               <select
                 id={id}
+                className="gb-select"
                 value={String(value)}
                 onChange={(event) =>
                   onOptionChange(property.name, event.target.value)
@@ -202,12 +224,16 @@ export const Inspector = ({
 
         return (
           <div className="gb-field" key={property.name}>
-            <label htmlFor={id}>{property.name}</label>
+            <label className="command-card-field-name" htmlFor={id}>
+              {property.name}
+            </label>
             <input
               id={id}
+              className="command-card-input"
               type="text"
               value={String(value)}
               spellCheck={false}
+              autoComplete="off"
               placeholder={
                 property.default !== undefined ? String(property.default) : ''
               }
