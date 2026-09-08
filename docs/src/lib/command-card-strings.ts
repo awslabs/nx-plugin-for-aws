@@ -76,6 +76,17 @@ const STRINGS = {
     zh: '默认值',
     vi: 'Mặc định',
   },
+  appliesWhen: {
+    en: 'Only applies with these option values',
+    jp: 'これらのオプション値の場合のみ適用されます',
+    ko: '이 옵션 값에서만 적용됩니다',
+    fr: "Ne s'applique qu'avec ces valeurs d'options",
+    it: 'Si applica solo con questi valori delle opzioni',
+    es: 'Solo se aplica con estos valores de opciones',
+    pt: 'Aplica-se apenas com estes valores de opções',
+    zh: '仅在这些选项值下适用',
+    vi: 'Chỉ áp dụng với các giá trị tùy chọn này',
+  },
   reset: {
     en: 'Reset',
     jp: 'リセット',

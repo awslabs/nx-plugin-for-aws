@@ -11,6 +11,8 @@
  * flags, shortening the command without changing what the Nx Console lists.
  * `readonly` marks a walkthrough step whose prose is written around the values it
  * passes, leaving `editable` the options the reader still chooses for themselves.
+ * `noOptions` drops the option controls altogether, for a command recorded at a
+ * point in time — a migration write-up — which shouldn't follow later renames.
  */
 import { Steps, TabItem, Tabs } from '@astrojs/starlight/components';
 import {
@@ -36,6 +38,7 @@ const {
   noInteractive = false,
   readonly = false,
   editable = [],
+  noOptions = false,
 } = Astro.props;
 const locale = Astro.currentLocale || 'en';
 const strings = commandCardStrings(locale);
@@ -45,7 +48,7 @@ const strings = commandCardStrings(locale);
 let options: GeneratorOption[] = [];
 try {
   const generatorsJson = resolveGeneratorsJson(process.cwd());
-  if (generatorsJson && namespace === '@aws/nx-plugin') {
+  if (generatorsJson && namespace === '@aws/nx-plugin' && !noOptions) {
     options = readGeneratorOptions(
       createSchemaLookup(generatorsJson)(generator),
     );
@@ -104,10 +107,14 @@ const locked = new Set(
     ),
 );
 
-// An option that doesn't apply under the values this page is written around has
-// nothing to contribute — the Smithy namespace on the tRPC guide.
-const context = { ...pinnedByPage, ...prescribed };
-const applicable = options.filter((option) => isApplicable(option, context));
+// An option that can't apply, because the guide fixes the value it depends on,
+// has nothing to contribute — the Smithy namespace on the tRPC guide. One that
+// depends on a value the reader can still change stays, and the card disables it
+// while it doesn't apply.
+const forced: Record<string, string> = Object.fromEntries(
+  [...locked].map((key) => [key, initial[key]]).filter(([, value]) => !!value),
+);
+const applicable = options.filter((option) => isApplicable(option, forced));
 
 const config: GeneratorCardConfig = {
   kind: 'generator',
