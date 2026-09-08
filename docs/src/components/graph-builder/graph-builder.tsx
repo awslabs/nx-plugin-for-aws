@@ -17,6 +17,7 @@ import {
   type GraphNode,
   validate,
 } from '../../lib/graph-builder/model';
+import { reconcileNode } from '../../lib/graph-builder/node-options';
 import { readPackageManager } from '../../lib/package-manager';
 import { Canvas } from './canvas';
 import {
@@ -315,7 +316,13 @@ export const GraphBuilder = () => {
         ...current,
         nodes: current.nodes.map((node) =>
           node.id === id
-            ? { ...node, options: { ...node.options, [option]: value } }
+            ? // Setting one option can rule another out — a gateway with no
+              // infrastructure has nothing to authenticate — so the rest are put
+              // right here, where the change lands.
+              reconcileNode(
+                { ...node, options: { ...node.options, [option]: value } },
+                nodeType(node.type),
+              )
             : node,
         ),
       }));
