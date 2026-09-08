@@ -21,13 +21,13 @@ import remarkOptionFilter from './src/plugins/remark-option-filter.ts';
 import remarkTabFilter from './src/plugins/remark-tab-filter.ts';
 
 /**
- * Load Smithy syntax highlighting
+ * Load a grammar Shiki doesn't bundle.
  */
-const smithySyntax = () => ({
+const syntax = (name) => ({
   ...JSON.parse(
-    fs.readFileSync('./src/syntax/smithy/smithy.tmLanguage.json', 'utf-8'),
+    fs.readFileSync(`./src/syntax/${name}/${name}.tmLanguage.json`, 'utf-8'),
   ),
-  name: 'smithy',
+  name,
 });
 
 const basePath = process.env.DOCS_BASE_PATH || '/nx-plugin-for-aws';
@@ -48,7 +48,7 @@ export default defineConfig({
   outDir: './dist',
   markdown: {
     shikiConfig: {
-      langs: [smithySyntax()],
+      langs: [syntax('smithy'), syntax('cedar'), syntax('ejs')],
     },
     remarkPlugins: [remarkLinkValidator, remarkOptionFilter, remarkTabFilter],
   },
