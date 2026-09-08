@@ -470,6 +470,19 @@ An option that only applies for certain values of another can say so in its `sch
 
 Keys are AND'd and a list of values is OR'd within a key, matching `<OptionFilter when={{…}}>`. Reach for it where a description already has to explain that an option is conditional (`"only applicable for the smithy framework"`), and leave the description saying so too — the MCP server renders descriptions, not `x-when`. The generator itself still has to validate or ignore what doesn't apply to the run it was given.
 
+Where it's one _value_ of an option that only applies sometimes, put the condition on the value with `x-value-when`:
+
+```json
+"infra": {
+  "type": "string",
+  "enum": ["rest-lambda", "http-lambda", "none"],
+  "default": "rest-lambda",
+  "x-value-when": { "http-lambda": { "framework": "trpc" } }
+}
+```
+
+A value the guide has ruled out is left off the list; one the reader's own choice rules out is disabled, with the condition in a tooltip. If picking it would leave the command invalid — because the value a run falls back to is the ruled-out one — the card names the first value that does apply, so what a guide shows always runs. Encode a constraint here whenever a generator throws on a combination (`session 'dynamodb-s3' is not implemented for the strands framework`) or quietly substitutes one (`ts#api` maps `http-lambda` to a REST API under Smithy), and evaluate it against the values a run would use: a condition on an option nobody has chosen is read against that option's own default.
+
 #### OptionFilter: conditional sections
 
 Wrap any content that only applies to a subset of option values in `<OptionFilter>`. On the docs site the reader picks their option values in the page's run-generator card — the same controls that build the command — and blocks that don't match are hidden, along with their table-of-contents entries; the MCP server drops mismatching blocks from the response when the agent passes `options`.

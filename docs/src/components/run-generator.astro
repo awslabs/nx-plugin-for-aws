@@ -22,7 +22,9 @@ import {
 import { emittedValues, type GeneratorCardConfig } from '../lib/command-card';
 import { commandCardStrings } from '../lib/command-card-strings';
 import {
+  effectiveValues,
   isApplicable,
+  isValueApplicable,
   readGeneratorOptions,
   type GeneratorOption,
 } from '../lib/generator-options';
@@ -111,10 +113,24 @@ const locked = new Set(
 // has nothing to contribute — the Smithy namespace on the tRPC guide. One that
 // depends on a value the reader can still change stays, and the card disables it
 // while it doesn't apply.
-const forced: Record<string, string> = Object.fromEntries(
-  [...locked].map((key) => [key, initial[key]]).filter(([, value]) => !!value),
+// Only the options the guide fixes count as forced: the rest are the reader's to
+// choose, and the card follows along as they do.
+const forced = effectiveValues(
+  Object.fromEntries(
+    [...locked].map((key) => [key, initial[key]]).filter(([, value]) => !!value),
+  ),
+  options.filter((option) => locked.has(option.key)),
 );
-const applicable = options.filter((option) => isApplicable(option, forced));
+const applicable = options
+  .filter((option) => isApplicable(option, forced))
+  // A value the guide has ruled out is no choice at all: `http-lambda` can't
+  // apply on a guide written for the Smithy framework.
+  .map((option) => ({
+    ...option,
+    values: option.values.filter((value) =>
+      isValueApplicable(option, value, forced),
+    ),
+  }));
 
 const config: GeneratorCardConfig = {
   kind: 'generator',
@@ -125,12 +141,15 @@ const config: GeneratorCardConfig = {
   order: applicable.map((option) => option.key),
   // The options this guide pins, which a restored selection must not overwrite.
   prescribed: Object.keys(prescribed),
-  options: applicable.map(({ key, control, default: fallback, when }) => ({
-    key,
-    control,
-    default: fallback,
-    when,
-  })),
+  options: applicable.map(
+    ({ key, control, default: fallback, when, valueWhen }) => ({
+      key,
+      control,
+      default: fallback,
+      when,
+      valueWhen,
+    }),
+  ),
 };
 const inapplicable = new Set(
   options
