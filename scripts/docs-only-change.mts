@@ -16,17 +16,13 @@ import { appendFileSync } from 'node:fs';
 
 const COMMIT_SHA = /^[0-9a-f]{40}$/;
 
-const {
-  BASE_SHA,
-  HEAD_SHA,
-  GITHUB_TOKEN,
-  GITHUB_API_URL = 'https://api.github.com',
-  GITHUB_EVENT_NAME,
-  GITHUB_REPOSITORY,
-  GITHUB_REF_NAME,
-  GITHUB_RUN_ID,
-  GITHUB_OUTPUT,
-} = process.env;
+/**
+ * Ref holding the last commit whose CI run went green, moved by the
+ * `mark_validated` job in ci.yml.
+ */
+const LAST_VALIDATED_REF = 'refs/ci/last-validated';
+
+const { BASE_SHA, HEAD_SHA, GITHUB_EVENT_NAME, GITHUB_OUTPUT } = process.env;
 
 const git = (...args: string[]) =>
   execFileSync('git', args, { encoding: 'utf-8' });
@@ -53,48 +49,16 @@ const isAncestorOf = (sha: string, descendant: string) => {
   }
 };
 
-const api = async (path: string) => {
-  const response = await fetch(`${GITHUB_API_URL}${path}`, {
-    headers: {
-      accept: 'application/vnd.github+json',
-      authorization: `Bearer ${GITHUB_TOKEN}`,
-    },
-  });
-  if (!response.ok) {
-    throw new Error(`${response.status} from ${path}`);
-  }
-  return response.json();
-};
-
 /**
- * The most recent commit on this branch whose CI run went green.
- *
- * A push compares against this rather than against the commit it displaced,
- * because a run that was cancelled - which is how a batch of pushes is usually
- * collapsed - leaves its commits untested. Comparing against the last green
- * commit folds those commits into the diff, so a docs push landing on top of
- * untested code still runs the smoke tests.
+ * A push compares against the last validated commit rather than against the
+ * commit it displaced: a run that was cancelled - which is how a batch of pushes
+ * is usually collapsed - leaves its commits untested, and the ref stays where it
+ * was until a run goes green. So those commits fold into the diff and a docs
+ * push landing on top of untested code still runs the smoke tests.
  */
-const lastValidatedCommit = async (headSha: string) => {
-  // Resolving the id from this run is exact; the same endpoint keyed on the
-  // workflow's file name can answer for a stale copy of the workflow.
-  const { workflow_id } = await api(
-    `/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}`,
-  );
-  const { workflow_runs } = await api(
-    `/repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow_id}/runs` +
-      `?branch=${GITHUB_REF_NAME}&status=success&per_page=50`,
-  );
-  return (workflow_runs as { head_sha: string }[])
-    .map((run) => run.head_sha)
-    .find(
-      (sha) =>
-        sha !== headSha &&
-        isHeldCommit(sha) &&
-        // A run that finished out of order, or one from before a force push,
-        // says nothing about this commit.
-        isAncestorOf(sha, headSha),
-    );
+const lastValidatedCommit = () => {
+  const sha = git('ls-remote', 'origin', LAST_VALIDATED_REF).split(/\s/)[0];
+  return COMMIT_SHA.test(sha) ? sha : undefined;
 };
 
 const isDocsOnly = (baseSha: string, headSha: string) => {
@@ -106,30 +70,22 @@ const isDocsOnly = (baseSha: string, headSha: string) => {
   );
 };
 
-const resolveBaseSha = async (headSha: string) => {
+const resolveBaseSha = () => {
   if (BASE_SHA) {
     return BASE_SHA;
   }
-  if (GITHUB_EVENT_NAME !== 'push') {
-    return undefined;
-  }
-  try {
-    return await lastValidatedCommit(headSha);
-  } catch (e) {
-    console.log(`Could not resolve the last green commit: ${e}`);
-    return undefined;
-  }
+  return GITHUB_EVENT_NAME === 'push' ? lastValidatedCommit() : undefined;
 };
 
 // Without a pair of commits to compare - a manually dispatched run, a branch
-// with no green run behind it, a force push whose previous head is gone - the
+// with no green run behind it yet, a ref left behind by a force push - the
 // change is treated as touching more than the docs and everything runs.
-const baseSha = isHeldCommit(HEAD_SHA)
-  ? await resolveBaseSha(HEAD_SHA)
-  : undefined;
+const baseSha = resolveBaseSha();
 
 const docsOnly =
-  isHeldCommit(baseSha) && isHeldCommit(HEAD_SHA)
+  isHeldCommit(baseSha) &&
+  isHeldCommit(HEAD_SHA) &&
+  isAncestorOf(baseSha, HEAD_SHA)
     ? isDocsOnly(baseSha, HEAD_SHA)
     : false;
 

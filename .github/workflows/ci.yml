@@ -35,15 +35,20 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      actions: read
     outputs:
       docs_only: ${{ steps.docs_only.outputs.docs-only }}
+      skip_release: ${{ steps.should_skip_release.outputs.skip_release }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
       - id: docs_only
         uses: ./.github/actions/docs-only-change
+      # Read here rather than in the release job, which needs the answer to
+      # decide whether to run at all.
+      - name: Should skip release
+        id: should_skip_release
+        run: echo "skip_release=$(git log $(git describe --tags --abbrev=0)..HEAD --oneline | grep -qE 'feat\(?.*\)?:|fix\(?.*\)?:|revert\(?.*\)?:|perf\(?.*\)?:|deps\(?.*\)?:' && echo false || echo true)" >> $GITHUB_OUTPUT
   package:
     name: Package
     runs-on: codebuild-nx-plugin-for-aws-runner-${{ github.run_id }}-${{ github.run_attempt }}-large
@@ -413,17 +418,44 @@ jobs:
                 ;;
             esac
           done
+  # Records this commit as validated so the next push knows what it may skip -
+  # see scripts/docs-only-change.mts. A cancelled or failed run leaves the ref
+  # where it is, folding its commits into the next run's diff.
+  mark_validated:
+    name: Mark Validated
+    needs: [changes, package, build, unit_tests, smoke_tests_complete]
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - name: Move the last validated ref
+        env:
+          REF: refs/ci/last-validated
+        run: |
+          current=$(git ls-remote origin "$REF" | cut -f1)
+          # Only ever forwards, so a run finishing out of order cannot rewind it
+          # onto a commit whose successors are unvalidated.
+          if [ -n "$current" ] && ! git merge-base --is-ancestor "$current" HEAD; then
+            echo "$REF is at $current, which this commit does not descend from - leaving it"
+            exit 0
+          fi
+          git push origin "HEAD:$REF"
   release:
     name: Release
     needs: [changes, package, build, unit_tests, smoke_tests_complete]
-    # A docs only change releases nothing. It also skips the smoke tests, and a
+    # A docs only change releases nothing of its own, but it still has to publish
+    # anything an earlier run left unreleased - a run whose release was skipped
+    # because the branch had moved on, say. It also skips the smoke tests, and a
     # skip propagates to every job downstream of it unless that job opts out with
     # a status function of its own.
-    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
+    if: ${{ !cancelled() && (needs.changes.outputs.docs_only != 'true' || needs.changes.outputs.skip_release != 'true') && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
     runs-on: ubuntu-22.04
     outputs:
       latest_commit: ${{ steps.git_remote.outputs.latest_commit }}
-      skip_release: ${{ steps.should_skip_release.outputs.skip_release }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -439,13 +471,10 @@ jobs:
       - name: Check for new commits
         id: git_remote
         run: echo "latest_commit=$(git ls-remote origin -h ${{ github.ref }} | cut -f1)" >> $GITHUB_OUTPUT
-      - name: Should skip release
-        id: should_skip_release
-        run: echo "skip_release=$(git log $(git describe --tags --abbrev=0)..HEAD --oneline | grep -qE 'feat\(?.*\)?:|fix\(?.*\)?:|revert\(?.*\)?:|perf\(?.*\)?:|deps\(?.*\)?:' && echo false || echo true)" >> $GITHUB_OUTPUT
       # Version, stamp migrations, tag + changelog, then publish (with retry on a
       # transient failure). The whole flow lives in scripts/release.ts.
       - name: Release
-        if: ${{ steps.should_skip_release.outputs.skip_release != 'true' && github.event_name == 'push' && steps.git_remote.outputs.latest_commit == github.sha }}
+        if: ${{ needs.changes.outputs.skip_release != 'true' && github.event_name == 'push' && steps.git_remote.outputs.latest_commit == github.sha }}
         env:
           # Publishing uses npm OIDC trusted publishing (no token needed).
           GITHUB_TOKEN: ${{ secrets.RELEASE_GITHUB_TOKEN }}
