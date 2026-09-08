@@ -168,7 +168,11 @@ const isPinned = shown.every((option) => locked.has(option.key));
     type CardConfig,
     type CommandToken,
   } from '../lib/command-card';
-  import { isApplicable } from '../lib/generator-options';
+  import {
+    effectiveValues,
+    isApplicable,
+    isValueApplicable,
+  } from '../lib/generator-options';
   import { readPageSelection } from '../lib/page-options';
 
   /**
@@ -294,10 +298,14 @@ const isPinned = shown.every((option) => locked.has(option.key));
     // controls are disabled rather than removed, so the reader can see the
     // condition they'd have to change, and whatever was entered in it leaves the
     // command.
-    const applyApplicability = (values: Record<string, string>) => {
-      const dropped: string[] = [];
+    const applyApplicability = () => {
+      // Read against the values a run would use, so a condition on an option the
+      // reader hasn't touched is read against that option's own default.
+      const context = effectiveValues(entered(), config.options);
+      const dropped = new Set<string>();
+
       for (const option of config.options) {
-        const applies = isApplicable(option, values);
+        const applies = isApplicable(option, context);
         const field = fields.get(option.key);
         field?.classList.toggle('is-inapplicable', !applies);
         for (const control of field?.querySelectorAll<
@@ -310,15 +318,54 @@ const isPinned = shown.every((option) => locked.has(option.key));
             control.disabled = fixed || !applies;
           }
         }
-        if (!applies) dropped.push(option.key);
+        if (!applies) dropped.add(option.key);
       }
+
+      // One of an option's values can be ruled out on its own — an API's
+      // `http-lambda` under the Smithy framework.
+      for (const option of config.options) {
+        if (!option.valueWhen || dropped.has(option.key)) continue;
+        const owned = pills.filter(
+          (pill) => pill.dataset.optionPill === option.key,
+        );
+        const applicable = owned.filter((pill) =>
+          isValueApplicable(option, pill.dataset.value!, context),
+        );
+        for (const pill of owned) {
+          const applies = applicable.includes(pill);
+          pill.classList.toggle('is-inapplicable', !applies);
+          if (!locked.has(pill)) pill.disabled = !applies;
+          // A value that has just stopped applying is let go rather than left to
+          // make a command the generator would refuse.
+          if (!applies && pill.getAttribute('aria-pressed') === 'true') {
+            setPill(option.key, '');
+          }
+        }
+        // Where the value a run would fall back to is a ruled-out one, the command
+        // has to name a value that isn't, or the generator refuses it.
+        const chosen = owned.find(
+          (pill) => pill.getAttribute('aria-pressed') === 'true',
+        );
+        const fallback = chosen?.dataset.value ?? option.default ?? '';
+        if (
+          !locked.has(owned[0]) &&
+          applicable.length > 0 &&
+          fallback &&
+          !isValueApplicable(option, fallback, context)
+        ) {
+          setPill(option.key, applicable[0].dataset.value!);
+        }
+      }
+
       return Object.fromEntries(
-        Object.entries(values).filter(([key]) => !dropped.includes(key)),
+        Object.entries(emittedValues(entered(), config.options)).filter(
+          ([key]) => !dropped.has(key),
+        ),
       );
     };
 
     const render = () => {
-      const values = applyApplicability(emittedValues(entered(), config.options));
+      const values = applyApplicability();
       for (const block of blocks) {
         paint(
           block,

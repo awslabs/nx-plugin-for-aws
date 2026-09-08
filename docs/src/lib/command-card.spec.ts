@@ -16,7 +16,9 @@ import {
 } from './command-card';
 import {
   describeWhen,
+  effectiveValues,
   isApplicable,
+  isValueApplicable,
   readGeneratorOptions,
 } from './generator-options';
 import { pinnedPageOptions } from './page-options';
@@ -141,6 +143,74 @@ describe('option applicability', () => {
     expect(describeWhen(auth.when ?? {})).toBe(
       'infra = agentcore | agentcore-ecr',
     );
+  });
+});
+
+describe('value applicability', () => {
+  const schema = {
+    properties: {
+      framework: { type: 'string', enum: ['trpc', 'smithy'], default: 'trpc' },
+      infra: {
+        type: 'string',
+        enum: ['rest-lambda', 'http-lambda', 'none'],
+        default: 'rest-lambda',
+        'x-value-when': { 'http-lambda': { framework: 'trpc' } },
+      },
+      session: {
+        type: 'string',
+        enum: ['s3', 'dynamodb-s3', 'in-memory'],
+        'x-value-when': { 'dynamodb-s3': { framework: ['langchain'] } },
+      },
+    },
+  };
+  const [framework, infra, session] = readGeneratorOptions(schema);
+
+  it('should normalise the condition on each value', () => {
+    expect(infra.valueWhen).toEqual({ 'http-lambda': { framework: ['trpc'] } });
+    expect(session.valueWhen).toEqual({
+      'dynamodb-s3': { framework: ['langchain'] },
+    });
+    expect(framework.valueWhen).toBeUndefined();
+  });
+
+  it('should apply a value with no condition of its own', () => {
+    expect(isValueApplicable(infra, 'none', { framework: 'smithy' })).toBe(
+      true,
+    );
+  });
+
+  it('should apply a conditional value under the values it names', () => {
+    expect(isValueApplicable(infra, 'http-lambda', { framework: 'trpc' })).toBe(
+      true,
+    );
+  });
+
+  it('should rule a conditional value out under any other value', () => {
+    expect(
+      isValueApplicable(infra, 'http-lambda', { framework: 'smithy' }),
+    ).toBe(false);
+  });
+
+  it('should read a condition against the values a run would use', () => {
+    // `--session=dynamodb-s3` alone fails: `framework` falls back to its default.
+    const values = effectiveValues({ session: 'dynamodb-s3' }, [
+      framework,
+      infra,
+      session,
+    ]);
+
+    expect(values).toEqual({
+      framework: 'trpc',
+      infra: 'rest-lambda',
+      session: 'dynamodb-s3',
+    });
+    expect(isValueApplicable(session, 'dynamodb-s3', values)).toBe(false);
+  });
+
+  it('should leave an entered value alone when working out what a run would use', () => {
+    expect(
+      effectiveValues({ framework: 'smithy' }, [framework, infra]),
+    ).toEqual({ framework: 'smithy', infra: 'rest-lambda' });
   });
 });
 
