@@ -14,7 +14,12 @@ import {
   renderCommand,
   type WorkspaceCardConfig,
 } from './command-card';
-import { readGeneratorOptions } from './generator-options';
+import {
+  describeWhen,
+  isApplicable,
+  readGeneratorOptions,
+} from './generator-options';
+import { pinnedPageOptions } from './page-options';
 
 const command = (config: CardConfig, request: CommandRequest) =>
   renderCommand(buildCommandTokens(config, request));
@@ -90,6 +95,73 @@ describe('generator options', () => {
 
   it('should have no options without a schema', () => {
     expect(readGeneratorOptions(undefined)).toEqual([]);
+  });
+});
+
+describe('option applicability', () => {
+  const schema = {
+    properties: {
+      framework: { type: 'string', enum: ['trpc', 'smithy'], default: 'trpc' },
+      namespace: { type: 'string', 'x-when': { framework: 'smithy' } },
+      auth: {
+        type: 'string',
+        enum: ['iam', 'cognito'],
+        'x-when': { infra: ['agentcore', 'agentcore-ecr'] },
+      },
+    },
+  };
+  const [framework, namespace, auth] = readGeneratorOptions(schema);
+
+  it('should normalise a single value and a list of them alike', () => {
+    expect(namespace.when).toEqual({ framework: ['smithy'] });
+    expect(auth.when).toEqual({ infra: ['agentcore', 'agentcore-ecr'] });
+    expect(framework.when).toBeUndefined();
+  });
+
+  it('should apply an unconditional option whatever is chosen', () => {
+    expect(isApplicable(framework, { framework: 'smithy' })).toBe(true);
+  });
+
+  it('should apply an option under the values it names', () => {
+    expect(isApplicable(namespace, { framework: 'smithy' })).toBe(true);
+    expect(isApplicable(auth, { infra: 'agentcore-ecr' })).toBe(true);
+  });
+
+  it('should not apply an option under any other value', () => {
+    expect(isApplicable(namespace, { framework: 'trpc' })).toBe(false);
+    expect(isApplicable(auth, { infra: 'none' })).toBe(false);
+  });
+
+  it('should apply an option while the value it depends on is unchosen', () => {
+    expect(isApplicable(namespace, {})).toBe(true);
+    expect(isApplicable(namespace, { framework: '' })).toBe(true);
+  });
+
+  it('should describe the condition for the reader', () => {
+    expect(describeWhen(auth.when ?? {})).toBe(
+      'infra = agentcore | agentcore-ecr',
+    );
+  });
+});
+
+describe('page options', () => {
+  it('should fix an option a page names one value for', () => {
+    expect(pinnedPageOptions({ framework: ['trpc'] })).toEqual({
+      framework: 'trpc',
+    });
+    expect(pinnedPageOptions({ framework: 'smithy' })).toEqual({
+      framework: 'smithy',
+    });
+  });
+
+  it('should leave an option naming several values open', () => {
+    expect(
+      pinnedPageOptions({ infra: ['rest-lambda', 'http-lambda'] }),
+    ).toEqual({});
+  });
+
+  it('should fix nothing without a predicate', () => {
+    expect(pinnedPageOptions(undefined)).toEqual({});
   });
 });
 

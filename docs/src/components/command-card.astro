@@ -157,6 +157,7 @@ const isPinned = shown.every((option) => locked.has(option.key));
     type CardConfig,
     type CommandToken,
   } from '../lib/command-card';
+  import { isApplicable } from '../lib/generator-options';
 
   /**
    * Rebuilds a card's command from its controls, on every keystroke and click.
@@ -184,6 +185,11 @@ const isPinned = shown.every((option) => locked.has(option.key));
     );
     const pills = Array.from(
       card.querySelectorAll<HTMLButtonElement>('[data-option-pill]'),
+    );
+    const fields = new Map(
+      Array.from(
+        card.querySelectorAll<HTMLElement>('[data-command-card-field]'),
+      ).map((field) => [field.dataset.commandCardField!, field]),
     );
     const dryRun = card.querySelector<HTMLInputElement>(
       '[data-command-card-dry-run]',
@@ -267,8 +273,24 @@ const isPinned = shown.every((option) => locked.has(option.key));
       }
     };
 
+    // An option only applies under some values of another — the Smithy namespace
+    // under `framework=smithy`. Its control goes when it stops applying, and so
+    // does whatever was entered in it.
+    const applyApplicability = (values: Record<string, string>) => {
+      const dropped: string[] = [];
+      for (const option of config.options) {
+        const applies = isApplicable(option, values);
+        const field = fields.get(option.key);
+        if (field) field.hidden = !applies;
+        if (!applies) dropped.push(option.key);
+      }
+      return Object.fromEntries(
+        Object.entries(values).filter(([key]) => !dropped.includes(key)),
+      );
+    };
+
     const render = () => {
-      const values = emittedValues(entered(), config.options);
+      const values = applyApplicability(emittedValues(entered(), config.options));
       for (const block of blocks) {
         paint(
           block,

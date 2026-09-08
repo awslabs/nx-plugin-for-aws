@@ -65,6 +65,17 @@ const STRINGS = {
     zh: '复制命令',
     vi: 'Sao chép lệnh',
   },
+  defaultValue: {
+    en: 'Default',
+    jp: 'デフォルト',
+    ko: '기본값',
+    fr: 'Par défaut',
+    it: 'Predefinito',
+    es: 'Predeterminado',
+    pt: 'Padrão',
+    zh: '默认值',
+    vi: 'Mặc định',
+  },
   reset: {
     en: 'Reset',
     jp: 'リセット',

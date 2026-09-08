@@ -13,7 +13,12 @@
  */
 import GeneratorsJson from '../../../packages/nx-plugin/generators.json';
 import schemaTranslations from '../i18n/schema-translations.json';
-import { readGeneratorOptions } from '../lib/generator-options';
+import {
+  describeWhen,
+  isApplicable,
+  readGeneratorOptions,
+} from '../lib/generator-options';
+import { pinnedPageOptions, type PageWhen } from '../lib/page-options';
 
 const { generator } = Astro.props;
 const schemas = Object.entries(import.meta.glob('../../../packages/nx-plugin/**/schema.json', { eager: true, query: '?raw' }));
@@ -87,6 +92,17 @@ const strings = {
     zh: '收起',
     vi: 'Thu gọn'
   },
+  appliesWhen: {
+    en: 'Only applies with these option values',
+    jp: 'これらのオプション値の場合のみ適用されます',
+    ko: '이 옵션 값에서만 적용됩니다',
+    fr: 'Ne s\'applique qu\'avec ces valeurs d\'options',
+    it: 'Si applica solo con questi valori delle opzioni',
+    es: 'Solo se aplica con estos valores de opciones',
+    pt: 'Aplica-se apenas com estes valores de opções',
+    zh: '仅在这些选项值下适用',
+    vi: 'Chỉ áp dụng với các giá trị tùy chọn này'
+  },
   filterHint: {
     en: 'Pick a value to filter this guide',
     jp: '値を選ぶとガイドを絞り込めます',
@@ -110,29 +126,52 @@ const getDescription = (parameter, fallback) => {
 // (e.g. every Powertools event schema) stays one row tall.
 const COLLAPSE_AFTER = 6;
 
-const parameters = readGeneratorOptions(schema).map((option) => ({
-  ...option,
-  description: getDescription(option.key, option.description),
-}));
+// A guide written for one variant of a generator leaves out the options that
+// variant doesn't take — the Smithy namespace on the tRPC guide.
+const pinnedByPage = pinnedPageOptions(
+  (Astro.locals.starlightRoute?.entry?.data as { when?: PageWhen } | undefined)
+    ?.when,
+);
+const parameters = readGeneratorOptions(schema)
+  .filter((option) => isApplicable(option, pinnedByPage))
+  .map((option) => ({
+    ...option,
+    description: getDescription(option.key, option.description),
+  }));
 ---
 
-<div class="gen-params not-content" data-gen-params>
+<div
+  class="gen-params not-content"
+  data-gen-params
+  data-gen-params-pinned={JSON.stringify(pinnedByPage)}
+>
   <div class="gen-params-head">
     <span class="gen-params-title">{localeString('title')}</span>
-    <span class="gen-params-count">{parameters.length} {localeString('options')}</span>
+    <span class="gen-params-count">
+      <span data-gen-params-count>{parameters.length}</span> {localeString('options')}
+    </span>
     <span class="gen-params-hint" data-gen-params-hint hidden>
       {localeString('filterHint')}
     </span>
   </div>
   <dl class="gen-params-list">
     {parameters.map((parameter) => (
-      <div class="gen-param" data-gen-param={parameter.key}>
+      <div
+        class="gen-param"
+        data-gen-param={parameter.key}
+        data-gen-param-when={parameter.when ? JSON.stringify(parameter.when) : undefined}
+      >
         <dt class="gen-param-head">
           <code class="gen-param-name">{parameter.key}</code>
           {parameter.required && (
             <span class="gen-param-required">{localeString('required')}</span>
           )}
           <span class="gen-param-type">{parameter.type}</span>
+          {parameter.when && (
+            <span class="gen-param-when" title={localeString('appliesWhen')}>
+              {describeWhen(parameter.when)}
+            </span>
+          )}
           {parameter.default !== undefined && (
             <span class="gen-param-default">
               {localeString('default')}: <code>{parameter.default}</code>
@@ -149,8 +188,12 @@ const parameters = readGeneratorOptions(schema).map((option) => ({
                 <span
                   class:list={[
                     'gen-param-value',
-                    { 'is-overflow': index >= COLLAPSE_AFTER },
+                    {
+                      'is-overflow': index >= COLLAPSE_AFTER,
+                      'is-default': value === parameter.default,
+                    },
                   ]}
+                  title={value === parameter.default ? localeString('default') : undefined}
                   data-gen-param-value={value}
                 >
                   {value}
@@ -176,9 +219,13 @@ const parameters = readGeneratorOptions(schema).map((option) => ({
 </div>
 
 <script>
+  import { isApplicable } from '../lib/generator-options';
+
   // Ties the options panel to the page's <OptionFilter> bar, when there is one:
   //   - Chips for keys the bar exposes become filter controls.
   //   - A key with a value selected is highlighted, as is the chip for the value.
+  //   - An option that only applies under other values goes when the selection
+  //     rules it out.
   // Reads each control's value off the bar's own DOM rather than waiting for its
   // first change event, so the two are in sync whichever script runs first.
   const run = () => {
@@ -198,6 +245,15 @@ const parameters = readGeneratorOptions(schema).map((option) => ({
         panel.querySelectorAll<HTMLElement>('[data-gen-param]'),
       );
       const hint = panel.querySelector<HTMLElement>('[data-gen-params-hint]');
+      const count = panel.querySelector<HTMLElement>('[data-gen-params-count]');
+      // The values the page itself is written around, which the reader's
+      // selection adds to rather than replaces.
+      let pinned: Record<string, string> = {};
+      try {
+        pinned = JSON.parse(panel.dataset.genParamsPinned || '{}');
+      } catch {
+        // A malformed value is nothing to act on.
+      }
 
       for (const row of rows) {
         const values = Array.from(
@@ -245,7 +301,19 @@ const parameters = readGeneratorOptions(schema).map((option) => ({
       }
 
       const sync = () => {
+        const values = { ...pinned };
+        for (const [key, control] of controls) {
+          if (control.dataset.value) values[key] = control.dataset.value;
+        }
+
+        let shown = 0;
         for (const row of rows) {
+          const when = row.dataset.genParamWhen;
+          const applies =
+            !when || isApplicable({ when: JSON.parse(when) }, values);
+          row.hidden = !applies;
+          if (applies) shown += 1;
+
           if (!row.classList.contains('is-interactive')) continue;
           const selected = controls.get(row.dataset.genParam!)!.dataset.value;
           row.classList.toggle('is-filtered', !!selected);
@@ -257,6 +325,7 @@ const parameters = readGeneratorOptions(schema).map((option) => ({
             chip.setAttribute('aria-pressed', String(isSelected));
           }
         }
+        if (count) count.textContent = String(shown);
       };
 
       document.addEventListener('npfa:option-filter-change', sync);
