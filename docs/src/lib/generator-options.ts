@@ -17,6 +17,12 @@ export interface SchemaProperty {
   default?: unknown;
   description?: string;
   'x-priority'?: string;
+  /**
+   * The option values this option applies under, e.g. `{ "framework": "smithy" }`
+   * on an option only the Smithy framework takes. AND across keys, OR within a
+   * key, and a key the reader hasn't chosen a value for has no opinion.
+   */
+  'x-when'?: Record<string, string | string[]>;
 }
 
 export interface GeneratorSchema {
@@ -37,6 +43,8 @@ export interface GeneratorOption {
   default?: string;
   required: boolean;
   description?: string;
+  /** Normalised `x-when`: the values this option applies under. */
+  when?: Record<string, string[]>;
 }
 
 /**
@@ -48,6 +56,20 @@ const REQUIRED_RANK = 0;
 
 const isEnum = (property: SchemaProperty) =>
   Array.isArray(property.enum) && property.enum.length > 0;
+
+/** Normalise `x-when` so a single value and a list of them read the same. */
+const whenOf = (
+  property: SchemaProperty,
+): Record<string, string[]> | undefined => {
+  const when = property['x-when'];
+  if (!when) return undefined;
+  return Object.fromEntries(
+    Object.entries(when).map(([key, value]) => [
+      key,
+      (Array.isArray(value) ? value : [value]).map(String),
+    ]),
+  );
+};
 
 const controlFor = (property: SchemaProperty): OptionControl => {
   if (isEnum(property)) return 'enum';
@@ -72,6 +94,7 @@ export const readGeneratorOptions = (
           property.default === undefined ? undefined : String(property.default),
         required: required.has(key),
         description: property.description,
+        when: whenOf(property),
         rank: required.has(key)
           ? REQUIRED_RANK
           : (RANKS[property['x-priority'] ?? 'normal'] ?? RANKS.normal),
@@ -81,3 +104,28 @@ export const readGeneratorOptions = (
       .map(({ rank: _rank, ...option }) => option)
   );
 };
+
+/**
+ * Whether an option applies given the values chosen so far.
+ *
+ * Mirrors `<OptionFilter when>`: AND across keys, OR within a key, and a key with
+ * no value chosen doesn't rule the option out — the generator would prompt for it.
+ */
+export const isApplicable = (
+  option: Pick<GeneratorOption, 'when'>,
+  values: Record<string, string>,
+): boolean => {
+  if (!option.when) return true;
+  for (const [key, allowed] of Object.entries(option.when)) {
+    const value = values[key];
+    if (value === undefined || value === '') continue;
+    if (!allowed.includes(value)) return false;
+  }
+  return true;
+};
+
+/** `key = a | b` for the values an option applies under, for a short label. */
+export const describeWhen = (when: Record<string, string[]>): string =>
+  Object.entries(when)
+    .map(([key, values]) => `${key} = ${values.join(' | ')}`)
+    .join(', ');

@@ -68,7 +68,7 @@ interface Props {
    */
   diagram?: string;
   /**
-   * Take the option values the reader has picked in the page's filter bar, for
+   * Take the option values the reader has picked in the page's command, for
    * every option the diagram is not pinning. A guide's diagram then shows the
    * architecture of the options the rest of the guide is filtered to.
    */

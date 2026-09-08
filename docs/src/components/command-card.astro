@@ -30,6 +30,11 @@ interface Props {
   /** Options whose controls state their value without offering to change it. */
   locked: Set<string>;
   strings: CommandCardStrings;
+  /**
+   * Whether this card's values are the page's: the guide shows the sections that
+   * apply to what the reader enters here.
+   */
+  ownsPage?: boolean;
   /** Offered where the command supports it, which the create wrapper doesn't. */
   showDryRun?: boolean;
 }
@@ -42,6 +47,7 @@ const {
   target,
   locked,
   strings,
+  ownsPage = false,
   showDryRun = false,
 } = Astro.props as Props;
 
@@ -67,7 +73,12 @@ const shown = options.filter(
 const isPinned = shown.every((option) => locked.has(option.key));
 ---
 
-<div class="command-card not-content" data-command-card data-config={JSON.stringify(config)}>
+<div
+  class="command-card not-content"
+  data-command-card
+  data-command-card-owns-page={ownsPage ? '' : undefined}
+  data-config={JSON.stringify(config)}
+>
   <p class="command-card-head">
     <span class="command-card-mark" aria-hidden="true">
       <svg
@@ -157,13 +168,14 @@ const isPinned = shown.every((option) => locked.has(option.key));
     type CardConfig,
     type CommandToken,
   } from '../lib/command-card';
+  import { isApplicable } from '../lib/generator-options';
+  import { readPageSelection } from '../lib/page-options';
 
   /**
    * Rebuilds a card's command from its controls, on every keystroke and click.
    *
-   * Enum options the page's filter bar also exposes are kept in step with it, so
-   * picking a value here narrows the guide and picking one there lands in the
-   * command.
+   * The card of the generator a guide is about also owns the option values the
+   * page is read under: what the reader enters here is what the guide shows.
    */
   const wire = (card: HTMLElement) => {
     let config: CardConfig;
@@ -185,6 +197,11 @@ const isPinned = shown.every((option) => locked.has(option.key));
     const pills = Array.from(
       card.querySelectorAll<HTMLButtonElement>('[data-option-pill]'),
     );
+    const fields = new Map(
+      Array.from(
+        card.querySelectorAll<HTMLElement>('[data-command-card-field]'),
+      ).map((field) => [field.dataset.commandCardField!, field]),
+    );
     const dryRun = card.querySelector<HTMLInputElement>(
       '[data-command-card-dry-run]',
     );
@@ -202,15 +219,14 @@ const isPinned = shown.every((option) => locked.has(option.key));
       pills: pills.map((pill) => pill.getAttribute('aria-pressed') === 'true'),
     };
 
-    const filterBar = document.querySelector<HTMLElement>(
-      '[data-option-filter-bar]',
+    // The page's option selection, which this card owns when it runs the
+    // generator the guide is about.
+    const pageOptions = document.querySelector<HTMLElement>(
+      '[data-page-options]',
     );
+    const owns = card.dataset.commandCardOwnsPage !== undefined;
     const filterKeys = new Set(
-      Array.from(
-        filterBar?.querySelectorAll<HTMLElement>(
-          '[data-option-filter-control]',
-        ) ?? [],
-      ).map((control) => control.dataset.key),
+      (pageOptions?.dataset.keys ?? '').split(',').filter(Boolean),
     );
 
     const entered = (): Record<string, string> => {
@@ -267,8 +283,24 @@ const isPinned = shown.every((option) => locked.has(option.key));
       }
     };
 
+    // An option only applies under some values of another — the Smithy namespace
+    // under `framework=smithy`. Its control goes when it stops applying, and so
+    // does whatever was entered in it.
+    const applyApplicability = (values: Record<string, string>) => {
+      const dropped: string[] = [];
+      for (const option of config.options) {
+        const applies = isApplicable(option, values);
+        const field = fields.get(option.key);
+        if (field) field.hidden = !applies;
+        if (!applies) dropped.push(option.key);
+      }
+      return Object.fromEntries(
+        Object.entries(values).filter(([key]) => !dropped.includes(key)),
+      );
+    };
+
     const render = () => {
-      const values = emittedValues(entered(), config.options);
+      const values = applyApplicability(emittedValues(entered(), config.options));
       for (const block of blocks) {
         paint(
           block,
@@ -292,6 +324,8 @@ const isPinned = shown.every((option) => locked.has(option.key));
         }
       }
 
+      if (owns) publish(values);
+
       if (reset) {
         const changed =
           inputs.some((input, i) => input.value !== initial.inputs[i]) ||
@@ -304,6 +338,22 @@ const isPinned = shown.every((option) => locked.has(option.key));
           dryRun?.checked === true;
         reset.hidden = !changed;
       }
+    };
+
+    // What the rest of the page reads. `values` is everything the controls hold,
+    // so a flag left at its default still counts as a choice for the sections
+    // written around it; `command` is what the command actually carries, which is
+    // what the options panel highlights.
+    let published = '';
+    const publish = (command: Record<string, string>) => {
+      const detail = { values: entered(), command };
+      const payload = JSON.stringify(detail);
+      if (payload === published) return;
+      published = payload;
+      card.dataset.pageOptions = payload;
+      document.dispatchEvent(
+        new CustomEvent('npfa:page-options', { detail }),
+      );
     };
 
     const setPill = (key: string, value: string) => {
@@ -343,13 +393,6 @@ const isPinned = shown.every((option) => locked.has(option.key));
             : pill.dataset.value!;
         setPill(key, value);
         render();
-        if (filterKeys.has(key)) {
-          document.dispatchEvent(
-            new CustomEvent('npfa:option-filter-set', {
-              detail: { key, value },
-            }),
-          );
-        }
       });
     }
 
@@ -406,33 +449,36 @@ const isPinned = shown.every((option) => locked.has(option.key));
       });
     }
 
-    // A value picked in the filter bar (or in the options panel that drives it)
-    // belongs in the command too — except where this guide pins the option, whose
-    // value the guide's prose is written around.
+    // A shared link or a reload arrives with a selection already made, which the
+    // card picks up — except where this guide pins the option, whose value the
+    // guide's prose is written around.
     const pinned = new Set(config.prescribed);
-    const applyFilterSelection = (selected: Record<string, string>) => {
-      let changed = false;
+    const restore = (selected: Record<string, string>) => {
       for (const [key, value] of Object.entries(selected)) {
         if (!filterKeys.has(key) || pinned.has(key)) continue;
         const owned = pills.filter((pill) => pill.dataset.optionPill === key);
         if (!owned.some((pill) => pill.dataset.value === value)) continue;
         setPill(key, value);
-        changed = true;
       }
-      if (changed) render();
     };
+    if (owns && pageOptions) {
+      restore(readPageSelection(pageOptions.dataset.storageKey!, filterKeys));
+    }
 
-    document.addEventListener('npfa:option-filter-change', (event) => {
-      applyFilterSelection(
-        ((event as CustomEvent).detail ?? {}) as Record<string, string>,
-      );
-    });
-    if (filterBar?.dataset.selection) {
-      try {
-        applyFilterSelection(JSON.parse(filterBar.dataset.selection));
-      } catch {
-        // A malformed selection is nothing to act on.
-      }
+    // The options panel is the other way into the same values: it asks for a
+    // change, this card makes it, and the page follows from here as usual.
+    if (owns) {
+      document.addEventListener('npfa:option-set', (event) => {
+        const { key, value } = (event as CustomEvent).detail ?? {};
+        if (typeof key !== 'string' || typeof value !== 'string') return;
+        const owned = pills.filter((pill) => pill.dataset.optionPill === key);
+        if (owned.length === 0 || owned.some((pill) => pill.disabled)) return;
+        if (value !== '' && !owned.some((pill) => pill.dataset.value === value)) {
+          return;
+        }
+        setPill(key, value);
+        render();
+      });
     }
 
     render();
