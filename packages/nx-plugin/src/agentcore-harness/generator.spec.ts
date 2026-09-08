@@ -545,6 +545,24 @@ describe('agentcore-harness generator', () => {
       expect(tree.exists(CDK_HARNESSES_INDEX_PATH)).toBe(false);
     });
 
+    it('waits for the execution role to propagate before creating the Harness', () => {
+      // CreateHarness validates the execution role by assuming it, and IAM is
+      // eventually consistent: depending on the policy alone, the validation can
+      // run first and the Harness lands in CREATE_FAILED with "Role validation
+      // failed".
+      expect(tf).toMatch(
+        /resource "time_sleep" "execution_role_propagation" \{\n {2}count = var\.create_execution_role \? 1 : 0/,
+      );
+      expect(tf).toContain(
+        'depends_on = [aws_iam_role.execution_role, aws_iam_role_policy.execution_role]',
+      );
+      expect(tf).toContain(
+        'depends_on = [time_sleep.execution_role_propagation]',
+      );
+      // The wait's provider is pinned like every other the module uses.
+      expect(tf).toContain('source  = "hashicorp/time"');
+    });
+
     it('declares exactly the retained input variables', () => {
       // Set equality, so a variable added or removed here is deliberate. The
       // system prompt stays a file read rather than a variable.
