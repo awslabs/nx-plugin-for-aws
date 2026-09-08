@@ -125,11 +125,15 @@ export async function terraformProjectGenerator(
     'checkov',
     'checkov_report.json',
   );
-  // `test` and `validate` each keep their `.terraform` here rather than in
-  // `src`, so initialising one never races the backend-configured targets, or
-  // the other, over the shared one.
+  // `test`, `validate` and `install-providers` each keep their `.terraform` here
+  // rather than in `src`, so initialising one never races the
+  // backend-configured targets, or each other, over the shared one.
   const testDataDir = joinPathFragments(distDir, 'terraform-test');
   const validateDataDir = joinPathFragments(distDir, 'terraform-validate');
+  const installProvidersDataDir = joinPathFragments(
+    distDir,
+    'terraform-providers',
+  );
 
   // Provider downloads persist here, so a target whose `.terraform` was cleaned
   // links the providers it already has rather than re-downloading them. Nx does
@@ -142,7 +146,8 @@ export async function terraformProjectGenerator(
   // init` runs filling a shared cache concurrently each compute a different hash
   // for the same provider, because the hash covers a directory the other is
   // still writing, and terraform then rejects the mismatch against the lock
-  // file. Per project, no two writers ever meet, so the targets stay parallel.
+  // file. `install-providers` is the only target that fills it, and every target
+  // that runs `terraform init` depends on that one, so no two writers ever meet.
   const pluginCacheDir = joinPathFragments(
     outDirToRootRelativePath,
     '.terraform',
@@ -231,7 +236,7 @@ export async function terraformProjectGenerator(
         commands: ['tsx {projectRoot}/scripts/init.ts {projectRoot}'],
         cwd: '{workspaceRoot}',
       },
-      dependsOn: ['^init'],
+      dependsOn: ['install-providers', '^init'],
     },
     output: {
       executor: 'nx:run-commands',
@@ -302,6 +307,36 @@ export async function terraformProjectGenerator(
         parallel: false,
         env: { TF_PLUGIN_CACHE_DIR: pluginCacheDir },
       },
+      dependsOn: ['install-providers'],
+    },
+    // Fills the shared plugin cache, and is the only target that does. Every
+    // other target runs `terraform init` for its own `.terraform`, and Nx
+    // schedules those concurrently — `plan` depends on both `init` and
+    // `validate` — so without one writer ahead of them they race over the cache
+    // and terraform rejects the resulting hash against the lock file. They each
+    // depend on this, so by the time they run the cache is warm and they only
+    // link out of it.
+    //
+    // `-backend=false` installs the providers without configuring the S3
+    // backend, so this needs no credentials and runs on a fresh workspace before
+    // `bootstrap`. Deliberately uncached: a cache hit on another machine would
+    // report success over an empty cache and hand the race back to the targets
+    // that depend on it.
+    'install-providers': {
+      executor: 'nx:run-commands',
+      options: {
+        commands: [
+          { command: `shx mkdir -p ${pluginCacheDir}`, forwardAllArgs: false },
+          'terraform init -backend=false',
+        ],
+        forwardAllArgs: true,
+        cwd: '{projectRoot}/src',
+        parallel: false,
+        env: {
+          TF_DATA_DIR: installProvidersDataDir,
+          TF_PLUGIN_CACHE_DIR: pluginCacheDir,
+        },
+      },
     },
     // `^production` mirrors `test`: checkov resolves the relative modules a
     // project consumes, so a change in one must invalidate the scan.
@@ -350,6 +385,7 @@ export async function terraformProjectGenerator(
         parallel: false,
         env: { TF_DATA_DIR: testDataDir, TF_PLUGIN_CACHE_DIR: pluginCacheDir },
       },
+      dependsOn: ['install-providers'],
     },
     // Mirrors `test`: `-backend=false` installs the modules and providers
     // validation needs without configuring the S3 backend, so this runs on a
@@ -376,6 +412,7 @@ export async function terraformProjectGenerator(
           TF_PLUGIN_CACHE_DIR: pluginCacheDir,
         },
       },
+      dependsOn: ['install-providers'],
     },
   };
 

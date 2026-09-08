@@ -88,6 +88,7 @@ describe('terraformProjectGenerator', () => {
         'destroy',
         'format',
         'init',
+        'install-providers',
         'lint',
         'output',
         'plan',
@@ -182,21 +183,42 @@ describe('terraformProjectGenerator', () => {
       ]);
     });
 
-    it('should give each project its own cache so the targets stay parallel', async () => {
+    it('should give the provider cache a single writer', async () => {
       await terraformProjectGenerator(tree, applicationSchema);
 
       const { targets } = readProjectConfiguration(
         tree,
         '@proj/my-terraform-project',
       );
+      const pluginCacheDir = '../../../.terraform/plugin-cache/{projectRoot}';
 
       // Two `terraform init` runs filling one cache concurrently fail the run:
       // the provider hash covers a directory the other is still writing, and
-      // terraform rejects the mismatch against the lock file. A directory per
-      // project means no two writers ever meet, so nothing has to serialise.
+      // terraform rejects the mismatch against the lock file. Nx schedules the
+      // targets that run `terraform init` concurrently — `plan` depends on both
+      // `init` and `validate` — so one target fills the cache ahead of them all.
+      const installProviders = targets['install-providers'];
+      expect(installProviders.options.commands).toEqual([
+        { command: `shx mkdir -p ${pluginCacheDir}`, forwardAllArgs: false },
+        'terraform init -backend=false',
+      ]);
+      expect(installProviders.options.env).toEqual({
+        TF_DATA_DIR: '../../../dist/{projectRoot}/terraform-providers',
+        TF_PLUGIN_CACHE_DIR: pluginCacheDir,
+      });
+      expect(installProviders.options.cwd).toBe('{projectRoot}/src');
+      expect(installProviders.options.parallel).toBe(false);
+      // A cache hit on another machine would report success over an empty cache
+      // and hand the race back to the targets that depend on it.
+      expect(installProviders.cache).toBeUndefined();
+
+      // A cache per project too, so the projects themselves stay parallel.
       expect(targets.test.options.env.TF_PLUGIN_CACHE_DIR).toContain(
         '{projectRoot}',
       );
+      for (const targetName of ['init', 'test', 'validate']) {
+        expect(targets[targetName].dependsOn).toContain('install-providers');
+      }
       for (const targetName of ['init', 'test', 'validate', 'plan', 'format']) {
         expect(targets[targetName]).toBeDefined();
         expect(targets[targetName].parallelism).toBeUndefined();
@@ -427,7 +449,9 @@ describe('terraformProjectGenerator', () => {
       ]);
       expect(initTarget.options.cwd).toBe('{workspaceRoot}');
       expect(initTarget.configurations.dev.env.TF_ENV).toBe('dev');
-      expect(initTarget.dependsOn).toEqual(['^init']);
+      // `install-providers` fills the plugin cache this then reads, so the two
+      // never write it at once.
+      expect(initTarget.dependsOn).toEqual(['install-providers', '^init']);
     });
 
     it('should configure destroy target correctly', async () => {
@@ -514,7 +538,7 @@ describe('terraformProjectGenerator', () => {
         'terraform init -backend=false',
       );
       expect(validateTarget.options.commands).toContain('terraform validate');
-      expect(validateTarget.dependsOn).toBeUndefined();
+      expect(validateTarget.dependsOn).toEqual(['install-providers']);
       expect(validateTarget.options.env.TF_DATA_DIR).toContain(
         'terraform-validate',
       );
@@ -541,7 +565,7 @@ describe('terraformProjectGenerator', () => {
         'terraform init -backend=false',
         'terraform test',
       ]);
-      expect(testTarget.dependsOn).toBeUndefined();
+      expect(testTarget.dependsOn).toEqual(['install-providers']);
     });
 
     it("should share provider downloads from a library's init", async () => {
