@@ -9,7 +9,7 @@ import {
   SHOWCASE_PRESET_IDS,
 } from '../../components/graph-builder/presets';
 import { nodeType } from './catalog';
-import { emitCommands } from './commands';
+import { emitCommands, toScriptLines } from './commands';
 import { validate } from './model';
 import {
   effectiveNodeOptions,
@@ -52,6 +52,43 @@ describe('graph builder presets', () => {
       );
     },
   );
+
+  // The polyglot example is the widest spread of the plugin in one graph, and the
+  // commands it hands over are the ones a reader runs, so they are pinned here in
+  // full: a change to the emitter or the catalogue that rewrites them shows up as
+  // a diff rather than as a workspace that doesn't build.
+  it('should emit the commands the polyglot full-stack example is written around', () => {
+    const preset = PRESETS.find((p) => p.id === 'polyglot-full-stack');
+    if (!preset) throw new Error('the polyglot preset is missing');
+    const lines = toScriptLines(buildPresetGraph(preset), {
+      workspace: 'my-project',
+      packageManager: 'pnpm',
+      iac: 'cdk',
+    });
+
+    expect(lines.map((line) => line.command)).toEqual([
+      'pnpm create @aws/nx-workspace my-project --iac=cdk --interactive=false',
+      'cd my-project',
+      'pnpm nx g @aws/nx-plugin:py#project py-app --type=application --no-interactive',
+      'pnpm nx g @aws/nx-plugin:ts#project app --no-interactive',
+      'pnpm nx g @aws/nx-plugin:ts#website frontend --framework=react --no-interactive',
+      'pnpm nx g @aws/nx-plugin:ts#website#auth --project=frontend --no-interactive',
+      'pnpm nx g @aws/nx-plugin:ts#api backend --framework=trpc --no-interactive',
+      'pnpm nx g @aws/nx-plugin:agentcore-gateway mcp-gateway --no-interactive',
+      'pnpm nx g @aws/nx-plugin:ts#dynamodb dynamodb --no-interactive',
+      'pnpm nx g @aws/nx-plugin:py#agent --project=py_app --name=agent --protocol=ag-ui --no-interactive',
+      'pnpm nx g @aws/nx-plugin:ts#mcp-server --project=app --name=typescript-mcp --no-interactive',
+      'pnpm nx g @aws/nx-plugin:py#mcp-server --project=py_app --name=python-mcp --no-interactive',
+      'pnpm nx g @aws/nx-plugin:connection --sourceProject=frontend --targetProject=backend --no-interactive',
+      'pnpm nx g @aws/nx-plugin:connection --sourceProject=frontend --targetProject=py_app --targetComponent=agent --no-interactive',
+      'pnpm nx g @aws/nx-plugin:connection --sourceProject=py_app --targetProject=mcp-gateway --sourceComponent=agent --no-interactive',
+      'pnpm nx g @aws/nx-plugin:connection --sourceProject=mcp-gateway --targetProject=app --targetComponent=typescript-mcp --no-interactive',
+      'pnpm nx g @aws/nx-plugin:connection --sourceProject=mcp-gateway --targetProject=py_app --targetComponent=python-mcp --no-interactive',
+      'pnpm nx g @aws/nx-plugin:connection --sourceProject=app --targetProject=dynamodb --sourceComponent=typescript-mcp --no-interactive',
+      'pnpm nx g @aws/nx-plugin:connection --sourceProject=backend --targetProject=dynamodb --no-interactive',
+      'pnpm nx g @aws/nx-plugin:ts#infra infra --no-interactive',
+    ]);
+  });
 
   // Every option a preset pins has to be one the node still takes, and one the
   // generator would accept alongside the rest.

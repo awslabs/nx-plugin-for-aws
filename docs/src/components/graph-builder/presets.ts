@@ -224,6 +224,51 @@ export const PRESETS: readonly Preset[] = [
     ],
   },
   {
+    id: 'polyglot-full-stack',
+    label: 'Polyglot full-stack app',
+    description:
+      'A React frontend over a tRPC API and a Python AG-UI agent, whose TypeScript and Python tools sit behind an AgentCore Gateway, sharing a DynamoDB table.',
+    prompt:
+      'Build a full-stack app: a React frontend with a tRPC API and a Python AG-UI agent, TypeScript and Python MCP servers behind an AgentCore Gateway, and a DynamoDB table the API and the TypeScript tools share.',
+    nodes: [
+      { type: 'ts#react-website', name: 'frontend', column: 0, row: 0 },
+      { type: 'ts#trpc-api', name: 'backend', column: 1, row: 0 },
+      { type: 'agentcore-gateway', name: 'mcp-gateway', column: 2, row: 1 },
+      { type: 'ts#dynamodb', name: 'dynamodb', column: 2, row: 0 },
+      {
+        type: 'py#agent',
+        name: 'agent',
+        hostName: 'py-app',
+        options: { protocol: 'ag-ui' },
+        column: 1,
+        row: 1,
+      },
+      {
+        type: 'ts#mcp-server',
+        name: 'typescript-mcp',
+        hostName: 'app',
+        column: 3,
+        row: 1,
+      },
+      {
+        type: 'py#mcp-server',
+        name: 'python-mcp',
+        hostName: 'py-app',
+        column: 3,
+        row: 2,
+      },
+    ],
+    edges: [
+      ['frontend', 'backend'],
+      ['frontend', 'agent'],
+      ['agent', 'mcp-gateway'],
+      ['mcp-gateway', 'typescript-mcp'],
+      ['mcp-gateway', 'python-mcp'],
+      ['typescript-mcp', 'dynamodb'],
+      ['backend', 'dynamodb'],
+    ],
+  },
+  {
     id: 'gateway-fronted-agents',
     label: 'Gateway-fronted agents',
     description:
