@@ -142,7 +142,7 @@ export const FlowSteps = ({
               key={pass}
             >
               <p className="af-line">
-                <span className="gb-prompt">$</span>
+                <span className="gb-prompt">❯</span>
                 <code>
                   pnpm create{' '}
                   <span className="gb-token--generator">@aws/nx-workspace</span>
@@ -184,7 +184,7 @@ export const FlowSteps = ({
 
             <div className="af-body af-body--chat">
               <p className="af-prompt">
-                <span className="gb-prompt">$</span>
+                <span className="gb-prompt">❯</span>
                 <span>
                   {prompt.slice(0, typed)}
                   {!isTyped && <span className="af-caret" />}
@@ -232,7 +232,7 @@ export const FlowSteps = ({
             <div className="af-body af-body--commands">
               {shown.length === 0 ? (
                 <p className="af-prompt af-prompt--commands">
-                  <span className="gb-prompt">$</span>
+                  <span className="gb-prompt">❯</span>
                   <span>
                     <span className="af-caret" />
                   </span>
