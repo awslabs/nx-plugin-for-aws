@@ -179,4 +179,50 @@ describe('catalog guard parity', () => {
       ).resolves.toBeDefined();
     });
   });
+
+  describe('agent -> gateway accepts a cognito agent', () => {
+    // The agent's auth governs inbound requests to it. Its outbound call to the
+    // gateway is SigV4-signed from its execution role, so pinning it to IAM
+    // would rule out a topology that works.
+    it.each([
+      ['ts#agent -> agentcore-gateway'],
+      ['py#agent -> agentcore-gateway'],
+    ])('is not constrained to iam for %s', (key) => {
+      expect(
+        constraintsFor(key).filter(
+          (c) => c.side === 'source' && c.option === 'auth',
+        ),
+      ).toEqual([]);
+    });
+
+    it('connects a cognito ts#agent to a gateway', async () => {
+      const tree = await setup();
+      await tsAgent(tree, 'cog-agent', 'ag-ui', 'cognito');
+      await gateway(tree, 'mcp-gw', 'mcp', 'iam');
+
+      await expect(
+        connectionGenerator(tree, {
+          sourceProject: 'ts-host',
+          sourceComponent: 'cog-agent',
+          targetProject: 'mcp-gw',
+          preferInstallDependencies: false,
+        }),
+      ).resolves.toBeDefined();
+    });
+
+    it('connects a cognito py#agent to a gateway', async () => {
+      const tree = await setup();
+      await pyAgent(tree, 'cog-agent', 'ag-ui', 'cognito');
+      await gateway(tree, 'mcp-gw', 'mcp', 'iam');
+
+      await expect(
+        connectionGenerator(tree, {
+          sourceProject: 'py_host',
+          sourceComponent: 'cog-agent',
+          targetProject: 'mcp-gw',
+          preferInstallDependencies: false,
+        }),
+      ).resolves.toBeDefined();
+    });
+  });
 });

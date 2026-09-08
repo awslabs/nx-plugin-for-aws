@@ -1141,6 +1141,25 @@ describe('validate', () => {
       ]);
     });
 
+    // The agent's auth governs inbound requests to it, so it places no
+    // requirement on a gateway it reaches — it signs with SigV4 either way.
+    it('should accept a cognito agent reaching a gateway', () => {
+      const issues = validate(
+        graph(
+          [
+            node('a', 'ts#agent', {
+              name: 'agent',
+              hostName: 'app',
+              options: { auth: 'cognito' },
+            }),
+            node('g', 'agentcore-gateway', { name: 'gateway' }),
+          ],
+          [{ id: 'e1', source: 'a', target: 'g' }],
+        ),
+      );
+      expect(issues.filter((i) => i.message.includes('auth'))).toEqual([]);
+    });
+
     it('should reject a gateway connected to itself', () => {
       const issues = validate(
         graph(
