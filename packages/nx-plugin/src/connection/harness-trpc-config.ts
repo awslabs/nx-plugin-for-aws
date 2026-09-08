@@ -199,7 +199,11 @@ export const addAguiRouteToApi = async (
   }
 `;
 
-  let updated = source;
+  // Re-read the file: the `addDestructuredImport` calls above mutated it in
+  // the tree (adding EndpointType, Grant and the Harness construct imports).
+  // The original `source` snapshot predates those edits, so starting from it
+  // here would discard the added imports when we write below.
+  let updated = tree.read(constructPath, 'utf-8')!;
 
   // A regional endpoint is required for the '/agui' streamed response to get
   // the extended (5 min idle / 15 min total) timeout instead of the

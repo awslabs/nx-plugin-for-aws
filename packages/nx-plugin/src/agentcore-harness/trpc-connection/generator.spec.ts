@@ -296,6 +296,18 @@ describe('agentcore-harness#trpc-connection generator', () => {
     expect(construct).not.toContain('NodejsFunction');
     expect(construct).toContain('Code.fromAsset(');
     expect(construct).toContain('dist/packages/api/bundle/agui');
+    // The construct must import every name it now references, or it won't
+    // compile — the usages above can be present while the imports are silently
+    // dropped.
+    expect(construct).toMatch(
+      /import\s*\{[^}]*\bEndpointType\b[^}]*\}\s*from\s*'aws-cdk-lib\/aws-apigateway'/,
+    );
+    expect(construct).toMatch(
+      /import\s*\{[^}]*\bGrant\b[^}]*\}\s*from\s*'aws-cdk-lib\/aws-iam'/,
+    );
+    expect(construct).toMatch(
+      /import\s*\{[^}]*\bMyHarness\b[^}]*\}\s*from\s*'\.\.\/harnesses\//,
+    );
     expect(construct).toMatchSnapshot('api-construct.ts');
   });
 
