@@ -12,6 +12,7 @@ import {
   type GeneratorCardConfig,
   quoteValue,
   renderCommand,
+  resolveCardOptions,
   type WorkspaceCardConfig,
 } from './command-card';
 import {
@@ -365,6 +366,65 @@ describe('create workspace command', () => {
     ).toBe(
       'pnpm create @aws/nx-workspace my-project --iac=terraform --containers=finch',
     );
+  });
+});
+
+describe("resolving a card's options", () => {
+  const options = readGeneratorOptions({
+    properties: {
+      name: { type: 'string' },
+      framework: { type: 'string', enum: ['trpc', 'smithy'], default: 'trpc' },
+      namespace: { type: 'string', 'x-when': { framework: 'smithy' } },
+      infra: {
+        type: 'string',
+        enum: ['rest-lambda', 'http-lambda', 'none'],
+        default: 'rest-lambda',
+        'x-value-when': { 'http-lambda': { framework: 'trpc' } },
+      },
+    },
+    required: ['name'],
+  });
+
+  it('should carry the values a page passes onto its command', () => {
+    const { values } = resolveCardOptions(
+      options,
+      {},
+      {
+        name: 'demo-api',
+        framework: 'trpc',
+      },
+    );
+
+    expect(values).toEqual({ name: 'demo-api', framework: 'trpc' });
+  });
+
+  it('should carry a value for an option the schema does not declare', () => {
+    const { values } = resolveCardOptions(options, {}, { extra: 'yes' });
+
+    expect(values).toEqual({ extra: 'yes' });
+  });
+
+  it('should drop an option the page has ruled out, and its value with it', () => {
+    const { applicable, values } = resolveCardOptions(
+      options,
+      { framework: 'trpc' },
+      { name: 'demo-api', namespace: 'com.example' },
+    );
+
+    expect(applicable.map((option) => option.key)).not.toContain('namespace');
+    expect(values).toEqual({ name: 'demo-api' });
+  });
+
+  it('should drop a value the page has ruled out from its option', () => {
+    const { applicable } = resolveCardOptions(
+      options,
+      { framework: 'smithy' },
+      {},
+    );
+    const infra = applicable.find((option) => option.key === 'infra');
+
+    expect(infra?.values).toEqual(['rest-lambda', 'none']);
+    expect(applicable.map((option) => option.key)).toContain('namespace');
   });
 });
 
