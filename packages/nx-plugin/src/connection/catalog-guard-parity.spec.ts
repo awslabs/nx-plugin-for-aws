@@ -135,9 +135,10 @@ describe('catalog guard parity', () => {
     });
   });
 
-  describe('gateway -> agent accepts a cognito agent', () => {
+  describe('gateway -> agent accepts a cognito agent behind a cognito gateway', () => {
     // A gateway fronts a cognito agent by forwarding the caller's JWT, so
-    // pinning the agent to IAM would rule out a topology that works.
+    // pinning the agent to IAM would rule out a topology that works. The token
+    // has to come from somewhere, though, so the gateway must be cognito too.
     it.each([
       ['agentcore-gateway -> ts#agent'],
       ['agentcore-gateway -> py#agent'],
@@ -149,9 +150,25 @@ describe('catalog guard parity', () => {
       ).toEqual([]);
     });
 
-    it('connects a cognito ts#agent behind a gateway', async () => {
+    it.each([
+      ['agentcore-gateway -> ts#agent'],
+      ['agentcore-gateway -> py#agent'],
+    ])('requires a cognito gateway for a cognito agent in %s', (key) => {
+      expect(constraintsFor(key)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            side: 'source',
+            option: 'auth',
+            equals: 'cognito',
+            when: { side: 'target', option: 'auth', equals: 'cognito' },
+          }),
+        ]),
+      );
+    });
+
+    it('connects a cognito ts#agent behind a cognito gateway', async () => {
       const tree = await setup();
-      await gateway(tree, 'http-gw', 'http', 'iam');
+      await gateway(tree, 'http-gw', 'http', 'cognito');
       await tsAgent(tree, 'cog-agent', 'ag-ui', 'cognito');
 
       await expect(
@@ -164,9 +181,9 @@ describe('catalog guard parity', () => {
       ).resolves.toBeDefined();
     });
 
-    it('connects a cognito py#agent behind a gateway', async () => {
+    it('connects a cognito py#agent behind a cognito gateway', async () => {
       const tree = await setup();
-      await gateway(tree, 'http-gw', 'http', 'iam');
+      await gateway(tree, 'http-gw', 'http', 'cognito');
       await pyAgent(tree, 'cog-agent', 'ag-ui', 'cognito');
 
       await expect(
@@ -177,6 +194,21 @@ describe('catalog guard parity', () => {
           preferInstallDependencies: false,
         }),
       ).resolves.toBeDefined();
+    });
+
+    it('is enforced against an iam gateway', async () => {
+      const tree = await setup();
+      await gateway(tree, 'http-gw', 'http', 'iam');
+      await tsAgent(tree, 'cog-agent', 'ag-ui', 'cognito');
+
+      await expect(
+        connectionGenerator(tree, {
+          sourceProject: 'http-gw',
+          targetProject: 'ts-host',
+          targetComponent: 'cog-agent',
+          preferInstallDependencies: false,
+        }),
+      ).rejects.toThrow(/only a Cognito gateway receives/);
     });
   });
 });

@@ -349,6 +349,7 @@ describe('scaffold catalog', () => {
                 option: string;
                 equals?: string;
                 notEquals?: string;
+                when?: unknown;
               }[]
             >
           )[key] ?? [];
@@ -356,7 +357,10 @@ describe('scaffold catalog', () => {
           for (const constraint of constraints) {
             if (
               constraint.side !== preference.side ||
-              constraint.option !== preference.option
+              constraint.option !== preference.option ||
+              // A conditional rule binds only some configurations, so it can
+              // legitimately differ from the value preferred by default.
+              constraint.when
             ) {
               continue;
             }
@@ -413,28 +417,54 @@ describe('scaffold catalog', () => {
             option: string;
             equals?: string;
             notEquals?: string;
+            when?: {
+              side: 'source' | 'target';
+              option: string;
+              equals: string;
+            };
           }[]
         >,
       )) {
         const [source, target] = key.split(' -> ');
-        for (const constraint of constraints) {
-          const type = constraint.side === 'source' ? source : target;
+        // An option named by a constraint (or by its condition) has to exist on
+        // the end it belongs to, holding a value that end's enum allows —
+        // otherwise the rule could never be satisfied, violated or triggered.
+        const expectOptionHoldsValue = (
+          side: 'source' | 'target',
+          option: string,
+          value: string | undefined,
+          role: string,
+        ) => {
+          const type = side === 'source' ? source : target;
           const recipe = (SCAFFOLD_RECIPES as Record<string, any>)[type];
           const schema = readSchema(recipe.generator);
-          const property = schema.properties?.[constraint.option];
+          const property = schema.properties?.[option];
           expect(
             property,
-            `${key} constrains ${constraint.side}.${constraint.option}, absent from ${recipe.generator}'s schema`,
+            `${key} ${role} ${side}.${option}, absent from ${recipe.generator}'s schema`,
           ).toBeDefined();
-
-          // A constrained value must be one the option can hold, or the
-          // constraint could never be satisfied (or never violated).
-          const value = constraint.equals ?? constraint.notEquals;
           if (property.enum && value !== undefined) {
             expect(
               property.enum,
-              `${key} constrains ${constraint.option} to '${value}', not in its enum`,
+              `${key} ${role} ${option} as '${value}', not in its enum`,
             ).toContain(value);
+          }
+        };
+
+        for (const constraint of constraints) {
+          expectOptionHoldsValue(
+            constraint.side,
+            constraint.option,
+            constraint.equals ?? constraint.notEquals,
+            'constrains',
+          );
+          if (constraint.when) {
+            expectOptionHoldsValue(
+              constraint.when.side,
+              constraint.when.option,
+              constraint.when.equals,
+              'conditions on',
+            );
           }
         }
       }

@@ -96,6 +96,14 @@ export const agentcoreGatewayAgentConnectionGenerator = async (
       `Agent '${agentComponent.name}' uses auth='${agentAuth}', which a gateway cannot front. Supported: iam, cognito.`,
     );
   }
+  // JWT passthrough forwards the token the gateway validated on the way in, so
+  // a Cognito agent needs a Cognito gateway in front of it. An IAM gateway
+  // authenticates its callers with SigV4 and has no bearer token to forward.
+  if (agentAuth === 'cognito' && gateway.auth !== 'cognito') {
+    throw new Error(
+      `Agent '${agentComponent.name}' uses auth='cognito', but gateway '${gateway.name}' uses auth='${gateway.auth}'. A Cognito agent authorizes on the caller's forwarded JWT, which only a Cognito gateway receives — generate the gateway with --auth=cognito against the same user pool, or front an IAM agent instead.`,
+    );
+  }
 
   // The target name must match what the deployed Gateway uses (`agentName` on
   // the agent construct, derived from the project's class name) so the

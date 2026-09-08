@@ -270,6 +270,19 @@ export const buildScaffoldRecipes = (
   );
 
 /**
+ * An option value one end of a connection must hold for a constraint to apply,
+ * narrowing a rule that only binds some of a connection's configurations.
+ */
+export interface ConnectionConstraintCondition {
+  /** Which end of the connection the conditioning option belongs to. */
+  readonly side: 'source' | 'target';
+  /** The generator option whose value decides whether the constraint applies. */
+  readonly option: string;
+  /** The value that brings the constraint into effect. */
+  readonly equals: string;
+}
+
+/**
  * A requirement one end of a connection places on the other's options, mirroring
  * the guard the corresponding connection generator enforces.
  *
@@ -287,6 +300,11 @@ export interface ConnectionConstraint {
   readonly equals?: string;
   /** A value rejected, for options accepting all but one. */
   readonly notEquals?: string;
+  /**
+   * Limits the rule to connections whose endpoints read this way. Absent for a
+   * rule binding every connection of its kind.
+   */
+  readonly when?: ConnectionConstraintCondition;
   /** Why the constraint exists, phrased for the user choosing the option. */
   readonly reason: string;
 }
@@ -371,6 +389,14 @@ const GATEWAY_TO_AGENT: readonly ConnectionConstraint[] = [
     equals: 'http',
     reason:
       'Agent runtime targets can only be attached to an http-protocol gateway.',
+  },
+  {
+    side: 'source',
+    option: 'auth',
+    equals: 'cognito',
+    when: { side: 'target', option: 'auth', equals: 'cognito' },
+    reason:
+      "A Cognito agent authorizes on the caller's forwarded JWT, which only a Cognito gateway receives. An IAM gateway can front an IAM agent, which it invokes with its own role.",
   },
 ];
 
