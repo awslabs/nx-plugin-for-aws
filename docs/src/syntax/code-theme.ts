@@ -328,6 +328,26 @@ const markerColors = (c: Palette) => ({
   delDiffIndicatorColor: c.deleted,
 });
 
+/**
+ * The copy button, on the same tokens as the command cards' — see the copy
+ * button block in custom.css, which handles the shape and the copied state that
+ * these settings can't reach.
+ */
+const copyButtonColors = {
+  inlineButtonBorder: 'var(--copy-btn-border)',
+  inlineButtonBorderOpacity: '1',
+  inlineButtonForeground: 'var(--copy-btn-fg)',
+  /*
+   * The fill comes from the button itself (see custom.css). Expressive Code's own
+   * fill is an overlay element, which paints over the border and leaves the ring
+   * fainter than the one on a command card; turning it off lets the border show.
+   */
+  inlineButtonBackground: 'transparent',
+  inlineButtonBackgroundIdleOpacity: '0',
+  inlineButtonBackgroundHoverOrFocusOpacity: '0',
+  inlineButtonBackgroundActiveOpacity: '0',
+};
+
 const buildTheme = (type: 'dark' | 'light') => {
   const c = palette[type];
   const theme = new ExpressiveCodeTheme({
@@ -349,12 +369,17 @@ export const codeThemeDark = buildTheme('dark');
 export const codeThemeLight = buildTheme('light');
 
 /**
- * Re-applies the marker colours after Starlight has swapped in its own, which it
- * does on every theme it is handed.
+ * Re-applies the site's own values after Starlight has swapped in its own, which
+ * it does on every theme it is handed. The frames settings are merged rather
+ * than replaced, so the surfaces Starlight sets there are kept.
  */
-export const restoreMarkerColors = (theme: ExpressiveCodeTheme) => {
+export const applySiteStyleOverrides = (theme: ExpressiveCodeTheme) => {
   theme.styleOverrides.textMarkers = markerColors(
     palette[theme.type === 'light' ? 'light' : 'dark'],
   );
+  theme.styleOverrides.frames = {
+    ...theme.styleOverrides.frames,
+    ...copyButtonColors,
+  };
   return theme;
 };
