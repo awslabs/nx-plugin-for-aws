@@ -310,15 +310,19 @@ export const addAguiRouteToTerraformApi = (
           ? `authorization = "CUSTOM"
   authorizer_id = aws_api_gateway_authorizer.custom_authorizer.id`
           : `authorization = "NONE"`;
-  // Grants the API's existing tRPC handler(s) Memory-read access, so an
-  // optional `history` procedure can reconstruct a conversation from
-  // AgentCore Memory. Shape differs by integration pattern: a single shared
-  // router Lambda has one role, one per operation has a role per operation.
+  // Grants the API's existing tRPC handler(s) Memory-read access, so the
+  // `history` procedure can reconstruct a conversation from AgentCore Memory.
+  // Mirrors the CDK construct, which grants this unconditionally on every
+  // operation handler; gating on `agui_harness_memory_arn != null` is avoided
+  // because that ARN is only known after the Harness's Memory is provisioned,
+  // and a `count`/`for_each` over an apply-time value fails at plan. Shape
+  // differs by integration pattern: a single shared router Lambda has one role,
+  // one per operation has a role per operation.
   const memoryReadText =
     options.integrationPattern === 'isolated'
       ? `
 resource "aws_iam_role_policy" "agui_memory_read" {
-  for_each = var.agui_harness_memory_arn != null ? local.operations : {}
+  for_each = local.operations
 
   name = "\${substr(local.function_name[each.key], 0, 40)}-memory-read"
   role = aws_iam_role.lambda_execution_role[each.key].id
@@ -335,8 +339,6 @@ resource "aws_iam_role_policy" "agui_memory_read" {
 `
       : `
 resource "aws_iam_role_policy" "agui_memory_read" {
-  count = var.agui_harness_memory_arn != null ? 1 : 0
-
   name = "${options.apiNameClassName}Handler-memory-read-\${random_string.suffix.result}"
   role = aws_iam_role.lambda_execution_role.id
 
@@ -352,17 +354,16 @@ resource "aws_iam_role_policy" "agui_memory_read" {
 `;
   const agui = `
 # AG-UI streaming route, added by the agentcore-harness#trpc-connection
-# generator. Wire agui_harness_arn (and, for the 'history' procedure,
-# agui_harness_memory_arn) from the connected Harness module's outputs.
+# generator. Wire agui_harness_arn and agui_harness_memory_arn from the
+# connected Harness module's outputs.
 variable "agui_harness_arn" {
   description = "ARN of the connected AgentCore Harness (its module's harness_arn output)."
   type        = string
 }
 
 variable "agui_harness_memory_arn" {
-  description = "ARN of the connected Harness's Memory resource (its module's memory_arn output), for the optional history procedure. Null skips granting Memory-read access."
+  description = "ARN of the connected Harness's Memory resource (its module's memory_arn output), used by the history procedure to read conversation events."
   type        = string
-  default     = null
 }
 
 resource "aws_iam_role" "agui_handler" {

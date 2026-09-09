@@ -473,6 +473,11 @@ describe('agentcore-harness#trpc-connection generator', () => {
     expect(module).toContain(
       'resource "aws_iam_role_policy" "agui_memory_read"',
     );
+    // The memory-read grant must not gate count/for_each on the memory ARN: it
+    // is only known once the Harness's Memory is provisioned, and a
+    // count/for_each over an apply-time value fails `terraform plan`. The grant
+    // is unconditional, mirroring the CDK construct.
+    expect(module).not.toContain('var.agui_harness_memory_arn != null');
 
     // The /agui route must be wired into the existing API Gateway deployment,
     // otherwise a fresh apply creates the route but never redeploys the stage
