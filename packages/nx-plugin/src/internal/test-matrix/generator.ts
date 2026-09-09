@@ -482,10 +482,10 @@ export const internalTestMatrixGenerator = async (
 
   // Every connection edge the matrix covers.
   const connections: ConnectionGeneratorSchema[] = [
-    // tRPC API -> AgentCore Harness (iam + cognito). Must precede the
-    // website -> API connections below: the website connection generates a
-    // CopilotKit hook per Harness already connected to the api, so the api
-    // must front its Harness(es) before a website connects to it.
+    // tRPC API -> AgentCore Harness (iam + cognito), so the generated /agui
+    // route + history procedure are exercised under each auth mode the api
+    // supports. This is a server-side connection only: the website's chat
+    // wiring is documented rather than generated, so it touches no website.
     { sourceProject: ts('my-api'), targetProject: ts('my-harness') },
     { sourceProject: ts('my-api-cognito'), targetProject: ts('my-harness') },
     // Website -> API

@@ -101,9 +101,8 @@ export const runGeneratorMatrix = async (
   // tRPC API -> AgentCore Harness connections — both auth modes the API
   // supports (iam via my-api, cognito via a dedicated cognito-auth api), so
   // the generated /agui route and history procedure are exercised under each.
-  // These must precede the website -> API connections below: the website
-  // connection generates a CopilotKit hook per Harness already connected to
-  // the api, so the api must front its Harness(es) before a website connects.
+  // Server-side only: the website's chat wiring is documented rather than
+  // generated, so this connection touches no website project.
   await runCLI(
     `generate @aws/nx-plugin:ts#api --name=my-api-cognito --infra=rest-lambda --auth=cognito --no-interactive${deferFlag}`,
     opts,
