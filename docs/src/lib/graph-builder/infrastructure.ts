@@ -217,6 +217,52 @@ const BLUEPRINTS: Readonly<Record<string, Blueprint>> = {
     ],
   },
 
+  'agentcore-harness': {
+    resources: [
+      {
+        id: 'runtime',
+        label: 'AgentCore Runtime',
+        detail: 'Harness',
+        icon: 'bedrock-agentcore-runtime',
+        column: 1,
+        row: 0,
+        when: { infra: 'agentcore' },
+      },
+      {
+        id: 'local',
+        label: 'Harness',
+        detail: 'local process',
+        column: 1,
+        row: 0,
+        when: { infra: 'none' },
+      },
+      {
+        id: 'memory',
+        label: 'AgentCore Memory',
+        detail: 'Conversation history',
+        icon: 'bedrock-agentcore-memory',
+        column: 1,
+        row: 1,
+        when: { infra: 'agentcore' },
+      },
+      {
+        id: 'bedrock',
+        label: 'Bedrock',
+        detail: 'Model inference',
+        icon: 'bedrock',
+        column: 2,
+        row: 0,
+      },
+    ],
+    path: ['runtime', 'local'],
+    links: [
+      { from: 'runtime', to: 'memory' },
+      { from: 'runtime', to: 'bedrock' },
+      { from: 'local', to: 'bedrock' },
+    ],
+    caller: { label: 'Client' },
+  },
+
   ...dynamodbBlueprints('ts#dynamodb', 'py#dynamodb'),
   ...rdbBlueprints('ts#rdb', 'py#rdb'),
 

@@ -12,6 +12,8 @@ import agentcoreGatewayGatewayConnectionGenerator from '../agentcore-gateway/gat
 import { AGENTCORE_GATEWAY_GENERATOR_INFO } from '../agentcore-gateway/generator.js';
 import agentcoreGatewayMcpConnectionGenerator from '../agentcore-gateway/mcp-connection/generator.js';
 import agentcoreGatewayReactConnectionGenerator from '../agentcore-gateway/react-connection/generator.js';
+import { AGENTCORE_HARNESS_GENERATOR_INFO } from '../agentcore-harness/generator.js';
+import trpcAgentCoreHarnessConnectionGenerator from '../agentcore-harness/trpc-connection/generator.js';
 import pyAgentA2aConnectionGenerator from '../py/agent/a2a-connection/generator.js';
 import pyAgentGatewayConnectionGenerator from '../py/agent/gateway-connection/generator.js';
 import pyAgentMcpConnectionGenerator from '../py/agent/mcp-connection/generator.js';
@@ -162,6 +164,8 @@ const CONNECTION_GENERATORS = {
     agentcoreGatewayMcpConnectionGenerator(tree, options),
   'agentcore-gateway -> agentcore-gateway': (tree, options) =>
     agentcoreGatewayGatewayConnectionGenerator(tree, options),
+  'ts#trpc-api -> agentcore-harness': (tree, options) =>
+    trpcAgentCoreHarnessConnectionGenerator(tree, options),
   'py#fast-api -> py#dynamodb': (tree, options) =>
     pyDynamoDBFastApiConnectionGenerator(tree, options),
   'py#agent -> py#dynamodb': (tree, options) =>
@@ -453,6 +457,10 @@ const determineProjectTypeFromConfig = async (
     return 'agentcore-gateway';
   }
 
+  if (isAgentCoreHarness(projectConfiguration)) {
+    return 'agentcore-harness';
+  }
+
   return undefined;
 };
 
@@ -574,5 +582,11 @@ const isAgentCoreGateway = (
 ): boolean =>
   ((projectConfiguration.metadata as any) ?? {}).generator ===
   AGENTCORE_GATEWAY_GENERATOR_INFO.id;
+
+const isAgentCoreHarness = (
+  projectConfiguration: ProjectConfiguration,
+): boolean =>
+  ((projectConfiguration.metadata as any) ?? {}).generator ===
+  AGENTCORE_HARNESS_GENERATOR_INFO.id;
 
 export default connectionGenerator;

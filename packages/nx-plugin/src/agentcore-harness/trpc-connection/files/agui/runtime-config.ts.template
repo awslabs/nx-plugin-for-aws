@@ -1,0 +1,44 @@
+import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
+
+// The deployed Harness construct publishes both ARNs at
+// `agentcore.harnesses.<%- harnessNameClassName %>`, keyed by this class name.
+const HARNESS_RUNTIME_CONFIG_KEY = '<%- harnessNameClassName %>';
+
+interface HarnessRuntimeConfig {
+  harnesses?: Record<
+    string,
+    { arn: string; memoryArn?: string } | undefined
+  >;
+}
+
+export interface HarnessConnection {
+  harnessArn: string;
+  memoryArn?: string;
+}
+
+/**
+ * Reads the connected Harness's ARN (and Memory ARN, when the Harness uses
+ * managed memory) from the deployed infrastructure's runtime configuration.
+ * `RUNTIME_CONFIG_APP_ID` is set on this handler by the generated CDK/Terraform
+ * API construct.
+ */
+export async function getHarnessConnection(): Promise<HarnessConnection> {
+  const application = process.env.RUNTIME_CONFIG_APP_ID;
+  if (!application) {
+    throw new Error(
+      'RUNTIME_CONFIG_APP_ID is not set — cannot resolve the connected Harness from runtime configuration.',
+    );
+  }
+  const config = (await getAppConfig('agentcore', {
+    application,
+    environment: 'default',
+    transform: 'json',
+  })) as HarnessRuntimeConfig;
+  const entry = config?.harnesses?.[HARNESS_RUNTIME_CONFIG_KEY];
+  if (!entry?.arn) {
+    throw new Error(
+      `Runtime configuration for application '${application}' has no value at 'agentcore.harnesses.${HARNESS_RUNTIME_CONFIG_KEY}'. Deploy the Harness infrastructure first.`,
+    );
+  }
+  return { harnessArn: entry.arn, memoryArn: entry.memoryArn };
+}

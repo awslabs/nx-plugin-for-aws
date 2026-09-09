@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import type { Tree } from '@nx/devkit';
 import GeneratorsJson from '../../generators.json' with { type: 'json' };
 import { agentcoreGatewayGenerator } from '../sdk/agentcore-gateway.js';
+import { agentcoreHarnessGenerator } from '../sdk/agentcore-harness.js';
 import { connectionGenerator } from '../sdk/connection.js';
 import {
   pyAgentGenerator,
@@ -178,6 +179,13 @@ describe('scaffold catalog integration', () => {
     'agentcore-gateway': (tree, name, options) =>
       agentcoreGatewayGenerator(tree, {
         ...schemaDefaults('agentcore-gateway'),
+        name,
+        ...projectDefaults,
+        ...options,
+      } as any),
+    'agentcore-harness': (tree, name, options) =>
+      agentcoreHarnessGenerator(tree, {
+        ...schemaDefaults('agentcore-harness'),
         name,
         ...projectDefaults,
         ...options,
