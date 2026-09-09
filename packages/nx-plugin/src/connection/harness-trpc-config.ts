@@ -503,5 +503,29 @@ resource "aws_lambda_permission" "agui_invoke" {
 }
 ${memoryReadText}`;
 
-  tree.write(modulePath, `${source}\n${agui}`);
+  // Wire the appended /agui method + integration into the base module's API
+  // Gateway deployment. Its `triggers.redeployment` hash and `depends_on` only
+  // reference the base module's own methods/integrations, so without this a
+  // fresh apply creates the /agui route but never redeploys the stage to serve
+  // it (and could order the deployment before the route exists). Two rendered
+  // forms exist depending on the tRPC integration pattern: a `concat(...)` of
+  // per-operation lists, or a flat proxy list — only one renders per module.
+  let patched = source;
+  if (patched.includes('\n    )))')) {
+    patched = patched.replace(
+      '\n    )))',
+      '\n      [aws_api_gateway_method.agui.id],\n      [aws_api_gateway_integration.agui.id],\n    )))',
+    );
+  } else if (patched.includes('\n    ]))')) {
+    patched = patched.replace(
+      '\n    ]))',
+      '\n      aws_api_gateway_method.agui.id,\n      aws_api_gateway_integration.agui.id,\n    ]))',
+    );
+  }
+  patched = patched.replace(
+    '    aws_api_gateway_integration_response.options_integration_response,\n',
+    '    aws_api_gateway_integration_response.options_integration_response,\n    aws_api_gateway_method.agui,\n    aws_api_gateway_integration.agui,\n',
+  );
+
+  tree.write(modulePath, `${patched}\n${agui}`);
 };

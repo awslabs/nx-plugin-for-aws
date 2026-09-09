@@ -129,7 +129,37 @@ describe('agentcore-harness#trpc-connection generator', () => {
     );
   };
 
-  const setupTerraformApiModule = (apiNameKebabCase = 'api') => {
+  // The two rendered forms of the base module's deployment trigger hash: a flat
+  // list (proxy/router integration) or a concat(...) of per-operation lists.
+  const deploymentTriggers = (form: 'flat' | 'concat') =>
+    form === 'flat'
+      ? [
+          '  triggers = {',
+          '    redeployment = sha1(jsonencode([',
+          '      aws_api_gateway_resource.proxy_resource.id,',
+          '      aws_api_gateway_method.proxy_method.id,',
+          '      aws_api_gateway_integration.lambda_integration.id,',
+          '      aws_api_gateway_method.options_method.id,',
+          '      aws_api_gateway_integration.options_integration.id,',
+          '    ]))',
+          '  }',
+        ]
+      : [
+          '  triggers = {',
+          '    redeployment = sha1(jsonencode(concat(',
+          '      [for r in aws_api_gateway_resource.path_depth_0 : r.id],',
+          '      [for m in aws_api_gateway_method.operation_methods : m.id],',
+          '      [for i in aws_api_gateway_integration.lambda_integration : i.id],',
+          '      [for m in aws_api_gateway_method.options_method : m.id],',
+          '      [for i in aws_api_gateway_integration.options_integration : i.id],',
+          '    )))',
+          '  }',
+        ];
+
+  const setupTerraformApiModule = (
+    apiNameKebabCase = 'api',
+    deploymentForm: 'flat' | 'concat' = 'flat',
+  ) => {
     tree.write(
       `packages/common/terraform/src/app/apis/${apiNameKebabCase}/${apiNameKebabCase}.tf`,
       [
@@ -143,6 +173,17 @@ describe('agentcore-harness#trpc-connection generator', () => {
         '',
         'resource "aws_api_gateway_deployment" "api_deployment" {',
         '  rest_api_id = module.rest_api.api_id',
+        '',
+        ...deploymentTriggers(deploymentForm),
+        '',
+        '  depends_on = [',
+        '    aws_api_gateway_method.proxy_method,',
+        '    aws_api_gateway_integration.lambda_integration,',
+        '    aws_api_gateway_method.options_method,',
+        '    aws_api_gateway_integration.options_integration,',
+        '    aws_api_gateway_method_response.options_response,',
+        '    aws_api_gateway_integration_response.options_integration_response,',
+        '  ]',
         '}',
         '',
       ].join('\n'),
@@ -432,6 +473,49 @@ describe('agentcore-harness#trpc-connection generator', () => {
     expect(module).toContain(
       'resource "aws_iam_role_policy" "agui_memory_read"',
     );
+
+    // The /agui route must be wired into the existing API Gateway deployment,
+    // otherwise a fresh apply creates the route but never redeploys the stage
+    // to serve it. Both the redeployment trigger hash and depends_on reference
+    // the appended method + integration.
+    const deployment = module.slice(
+      module.indexOf(
+        'resource "aws_api_gateway_deployment" "api_deployment" {',
+      ),
+      module.indexOf('variable "agui_harness_arn"'),
+    );
+    expect(deployment).toContain('aws_api_gateway_method.agui.id');
+    expect(deployment).toContain('aws_api_gateway_integration.agui.id');
+    expect(deployment).toContain('aws_api_gateway_method.agui,');
+    expect(deployment).toContain('aws_api_gateway_integration.agui,');
+  });
+
+  it('wires the /agui route into a concat-form api deployment trigger', async () => {
+    setupTrpcApi('api', { iac: 'terraform' });
+    setupHarness('harness', { iac: 'terraform' });
+    setupTerraformApiModule('api', 'concat');
+    setupTerraformHarnessModule();
+
+    await trpcAgentCoreHarnessConnectionGenerator(tree, {
+      sourceProject: 'api',
+      targetProject: 'harness',
+    });
+
+    const module = tree.read(
+      'packages/common/terraform/src/app/apis/api/api.tf',
+      'utf-8',
+    )!;
+    const deployment = module.slice(
+      module.indexOf(
+        'resource "aws_api_gateway_deployment" "api_deployment" {',
+      ),
+      module.indexOf('variable "agui_harness_arn"'),
+    );
+    // In concat(...) form each trigger element is a list.
+    expect(deployment).toContain('[aws_api_gateway_method.agui.id]');
+    expect(deployment).toContain('[aws_api_gateway_integration.agui.id]');
+    expect(deployment).toContain('aws_api_gateway_method.agui,');
+    expect(deployment).toContain('aws_api_gateway_integration.agui,');
   });
 
   it('is idempotent when re-run against a terraform api', async () => {
