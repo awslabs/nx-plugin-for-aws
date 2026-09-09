@@ -14,6 +14,11 @@ import {
   schemaPathOf,
 } from '../../../../packages/nx-plugin/src/connection/scaffold-catalog';
 import { SUPPORTED_CONNECTIONS } from '../../../../packages/nx-plugin/src/connection/supported-connections';
+import {
+  isApplicable,
+  isValueApplicable,
+  readGeneratorOptions,
+} from '../generator-options';
 
 /**
  * The graph builder's catalogue of node types and edges, derived at build time
@@ -35,6 +40,12 @@ export interface NodeProperty {
   readonly required: boolean;
   /** Whether the generator marks this as an important option. */
   readonly important: boolean;
+  /** The option values this one applies under, from the schema's `x-when`. */
+  readonly when?: Readonly<Record<string, readonly string[]>>;
+  /** The values each of this option's own values needs, from `x-value-when`. */
+  readonly valueWhen?: Readonly<
+    Record<string, Readonly<Record<string, readonly string[]>>>
+  >;
 }
 
 /** A node type the user can drag onto the canvas. */
@@ -140,22 +151,42 @@ const toProperties = (
   variantOptions: Readonly<Record<string, string>>,
 ): NodeProperty[] => {
   const required = new Set(schema.required ?? []);
+  // Read through the same reader the guides use, so `x-when` and `x-value-when`
+  // mean here what they mean there.
+  const options = new Map(
+    readGeneratorOptions(schema).map((option) => [option.key, option]),
+  );
+  // Choosing this node type has already answered the variant options, so an
+  // option that can't apply under them is not one of this type's — the Smithy
+  // namespace on a tRPC API. Only those count as answered: an option the reader
+  // can still change stays, and the inspector disables it while it doesn't apply.
+  const fixed: Record<string, string> = { ...variantOptions };
+
   return Object.entries(schema.properties ?? {})
     .filter(
       ([name, prop]) =>
         !HIDDEN_OPTIONS.has(name) &&
         !(name in variantOptions) &&
-        (prop.type === 'string' || prop.type === 'boolean'),
+        (prop.type === 'string' || prop.type === 'boolean') &&
+        isApplicable(options.get(name) ?? {}, fixed),
     )
-    .map(([name, prop]) => ({
-      name,
-      type: prop.type,
-      ...(prop.description ? { description: prop.description } : {}),
-      ...(prop.enum ? { enum: prop.enum as string[] } : {}),
-      ...(prop.default !== undefined ? { default: prop.default } : {}),
-      required: required.has(name),
-      important: prop['x-priority'] === 'important',
-    }));
+    .map(([name, prop]) => {
+      const option = options.get(name);
+      const values = (prop.enum ?? []).filter((value) =>
+        isValueApplicable(option ?? {}, value, fixed),
+      );
+      return {
+        name,
+        type: prop.type as 'string' | 'boolean',
+        ...(prop.description ? { description: prop.description } : {}),
+        ...(prop.enum ? { enum: values } : {}),
+        ...(prop.default !== undefined ? { default: prop.default } : {}),
+        required: required.has(name),
+        important: prop['x-priority'] === 'important',
+        ...(option?.when ? { when: option.when } : {}),
+        ...(option?.valueWhen ? { valueWhen: option.valueWhen } : {}),
+      } as NodeProperty;
+    });
 };
 
 /**
@@ -309,6 +340,15 @@ export const CATEGORY_ORDER = [
   'Database',
   'Other',
 ] as const;
+
+/**
+ * The options a generator with no node type of its own exposes — a Lambda
+ * function, a website's authentication — so the infrastructure view can resolve
+ * its option values the same way it does for a node in the palette.
+ */
+export const generatorProperties = (
+  generatorId: string,
+): readonly NodeProperty[] => toProperties(schemaOf(generatorId), {});
 
 export const nodeType = (id: string): NodeType => {
   const found = NODE_TYPES.find((t) => t.id === id);

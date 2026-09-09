@@ -90,7 +90,8 @@ metrics: Metrics = Metrics()
 tracer: Tracer = Tracer()
 
 @tracer.capture_lambda_handler
-@metrics.log_metrics
+@logger.inject_lambda_context
+@metrics.log_metrics(capture_cold_start_metric=True)
 @event_parser(model=EventBridgeModel)
 def lambda_handler(event: EventBridgeModel, context: LambdaContext):
     logger.info("Received event", extra={"event": event.model_dump() })
@@ -127,11 +128,10 @@ def lambda_handler(event: EventBridgeModel, context: LambdaContext):
 Il est recommandé de définir l'ID de corrélation pour toutes les requêtes uniques afin de faciliter le débogage et la surveillance. Veuillez vous référer à la documentation [aws powertools logger](https://docs.powertools.aws.dev/lambda/python/2.22.0/core/logger/#setting-a-correlation-id) pour les meilleures pratiques concernant l'ID de corrélation.
 :::
 
-Le logger inclut automatiquement :
+Le gestionnaire est décoré avec [`@logger.inject_lambda_context`](https://docs.powertools.aws.dev/lambda/python/latest/core/logger/#inject-lambda-context), donc chaque enregistrement de journal qu'il émet contient également :
 
-- Les requêtes d'événements
-- Les informations de contexte Lambda
-- Les indicateurs de démarrage à froid
+- `function_name`, `function_memory_size`, `function_arn` et `function_request_id` du contexte Lambda
+- `cold_start`, indiquant si l'invocation a initialisé un nouvel environnement d'exécution
 
 #### Traçage
 
@@ -157,9 +157,9 @@ def lambda_handler(event: EventBridgeModel, context: LambdaContext):
 
 Les métriques par défaut incluent :
 
-- Compteurs d'invocations
-- Compteurs de succès/échec
-- Métriques de démarrage à froid
+- `InvocationCount`, ajouté à chaque invocation
+- `SuccessCount` et `ErrorCount`, ajoutés par le `try`/`except` du gestionnaire
+- `ColdStart`, émis par [`@metrics.log_metrics(capture_cold_start_metric=True)`](https://docs.powertools.aws.dev/lambda/python/latest/core/metrics/#capturing-cold-start-metric) lorsque l'invocation initialise un nouvel environnement d'exécution
 
 ### Sécurité de type
 

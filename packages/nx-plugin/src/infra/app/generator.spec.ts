@@ -93,7 +93,8 @@ describe('infra generator', () => {
       executor: 'nx:run-commands',
       options: {
         cwd: '{projectRoot}',
-        command: 'cdk deploy --require-approval=never "proj-test-sandbox/*"',
+        command:
+          'cdk deploy --require-approval=never "proj-test-sandbox/**" --express',
       },
       dependsOn: ['^assemble', 'compile'],
     });
@@ -118,7 +119,7 @@ describe('infra generator', () => {
       executor: 'nx:run-commands',
       options: {
         cwd: '{projectRoot}',
-        command: 'cdk destroy "proj-test-sandbox/*"',
+        command: 'cdk destroy "proj-test-sandbox/**"',
       },
       dependsOn: ['^assemble', 'compile'],
     });
@@ -178,13 +179,17 @@ describe('infra generator', () => {
     expect(config.targets.checkov).toMatchObject({
       cache: true,
       executor: 'nx:run-commands',
-      inputs: ['{workspaceRoot}/dist/{projectRoot}/cdk.out'],
+      // Matches the `synth` sibling that produces the template the scan reads,
+      // so the scan's hash follows that template. A fileset input pointed at
+      // the gitignored synth directory would match no tracked file.
+      inputs: ['default'],
       outputs: ['{workspaceRoot}/dist/{projectRoot}/checkov'],
       dependsOn: ['synth'],
       options: {
         command: expect.stringContaining('uvx --from checkov=='),
       },
     });
+    expect(config.targets.checkov.inputs).toEqual(config.targets.synth.inputs);
 
     // Verify Checkov is included in build dependencies
     expect(config.targets.build.dependsOn).toContain('checkov');
@@ -316,6 +321,21 @@ describe('infra generator', () => {
     expect(config.targets.destroy.options.cwd).toBe('{projectRoot}');
   });
 
+  // Express mode returns before resources have stabilized, so it belongs to the
+  // sandbox alone: `deploy` can name any stage, including a production one.
+  it.each([[true], [false]])(
+    'should reserve express mode for deploy-sandbox with stageConfig=%s',
+    async (stageConfig) => {
+      await tsInfraGenerator(tree, { ...options, stageConfig });
+      const { targets } = readProjectConfiguration(tree, '@proj/test');
+
+      expect(targets.deploy.options.command).not.toContain('--express');
+      expect(targets['deploy-sandbox'].options.command).toContain('--express');
+      // `deploy-ci` deploys a pre-synthesized assembly from a pipeline.
+      expect(targets['deploy-ci'].options.command).not.toContain('--express');
+    },
+  );
+
   it('should not import from infra-config in main.ts by default', async () => {
     await tsInfraGenerator(tree, options);
     const mainTs = tree.read('packages/test/src/main.ts').toString();
@@ -342,11 +362,17 @@ describe('infra generator', () => {
     );
   });
 
-  // `cdk destroy` has no --require-approval option, so only deploys carry it.
+  // `cdk destroy` has no --require-approval or --express option, so only
+  // deploys carry them.
   describe.each([
-    { action: 'deploy', cdkCommand: 'cdk deploy --require-approval=never' },
-    { action: 'destroy', cdkCommand: 'cdk destroy' },
-  ])('$action-sandbox target', ({ action, cdkCommand }) => {
+    {
+      action: 'deploy',
+      cdkCommand: 'cdk deploy --require-approval=never',
+      // Trails the stage pattern so the pattern stays the first positional arg.
+      suffix: ' --express',
+    },
+    { action: 'destroy', cdkCommand: 'cdk destroy', suffix: '' },
+  ])('$action-sandbox target', ({ action, cdkCommand, suffix }) => {
     const target = `${action}-sandbox`;
 
     // The stage pattern must match the stage main.ts instantiates, otherwise
@@ -373,7 +399,7 @@ describe('infra generator', () => {
 
         expect(mainTs).toContain(`new ApplicationStage(app, '${stage}'`);
         expect(config.targets[target].options.command).toBe(
-          `${cdkCommand} "${stage}/*"`,
+          `${cdkCommand} "${stage}/**"${suffix}`,
         );
       },
     );
@@ -382,7 +408,7 @@ describe('infra generator', () => {
       await tsInfraGenerator(tree, options);
       const config = readProjectConfiguration(tree, '@proj/test');
       expect(config.targets[target].options.command).toContain(
-        '"proj-test-sandbox/*"',
+        '"proj-test-sandbox/**"',
       );
     });
 
@@ -414,6 +440,7 @@ describe('infra generator', () => {
     it('should use tsx infra-deploy/infra-destroy for deploy and destroy targets', async () => {
       await tsInfraGenerator(tree, stageConfigOptions);
       const config = readProjectConfiguration(tree, '@proj/test');
+      // No --express: this target deploys whichever stage is named.
       expect(config.targets.deploy.options.command).toBe(
         'tsx packages/common/scripts/src/infra/infra-deploy.ts packages/test',
       );
@@ -428,9 +455,10 @@ describe('infra generator', () => {
         await tsInfraGenerator(tree, stageConfigOptions);
         const config = readProjectConfiguration(tree, '@proj/test');
         // The stage is the first positional arg after the project path, which is
-        // where the script looks it up in stages.config.ts.
+        // where the script looks it up in stages.config.ts - so any flags must
+        // trail it.
         expect(config.targets[`${action}-sandbox`].options.command).toBe(
-          `tsx packages/common/scripts/src/infra/infra-${action}.ts packages/test "proj-test-sandbox/*"`,
+          `tsx packages/common/scripts/src/infra/infra-${action}.ts packages/test "proj-test-sandbox/**"${action === 'deploy' ? ' --express' : ''}`,
         );
         expect(config.targets[`${action}-sandbox`].dependsOn).toEqual([
           '^assemble',
@@ -588,6 +616,76 @@ describe('infra generator', () => {
     expect(getProjects(tree).size).toBe(projectCountAfterFirstRun);
     expect(tree.read('packages/test/src/main.ts', 'utf-8')).toEqual(
       mainTsAfterFirstRun,
+    );
+  });
+
+  it('should preserve the infrastructure the user authored', async () => {
+    await tsInfraGenerator(tree, options);
+
+    // Everything the guide tells the reader to author: resources in the stack,
+    // extra stages in main.ts, stacks of their own, and the Checkov skips.
+    const authored = {
+      'src/stacks/application-stack.ts': `import { Stack, StackProps } from 'aws-cdk-lib';
+import { Bucket } from 'aws-cdk-lib/aws-s3';
+import { Construct } from 'constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    new Bucket(this, 'MyPreciousBucket');
+  }
+}
+`,
+      'src/main.ts': `import { ApplicationStage } from './stages/application-stage.js';
+import { App } from '@proj/common-constructs';
+
+const app = new App();
+
+new ApplicationStage(app, 'proj-test-beta', {
+  env: { account: '123456789012', region: 'us-west-2' },
+});
+
+app.synth();
+`,
+      'src/stages/application-stage.ts': `import { Stage, StageProps } from 'aws-cdk-lib';
+import { Construct } from 'constructs';
+import { ApplicationStack } from '../stacks/application-stack.js';
+
+export class ApplicationStage extends Stage {
+  constructor(scope: Construct, id: string, props?: StageProps) {
+    super(scope, id, props);
+
+    new ApplicationStack(this, 'Application');
+  }
+}
+`,
+      // A stack of the user's own, which the scaffold never vends.
+      'src/stacks/data-stack.ts': `export class DataStack {}\n`,
+      'checkov.yml': 'skip-check:\n  - CKV_AWS_999 # my rule\n',
+    };
+    for (const [path, contents] of Object.entries(authored)) {
+      tree.write(`packages/test/${path}`, contents);
+    }
+
+    await tsInfraGenerator(tree, options);
+
+    for (const [path, contents] of Object.entries(authored)) {
+      expect(tree.read(`packages/test/${path}`, 'utf-8')).toBe(contents);
+    }
+  });
+
+  it('should keep a file the user added under src on a re-run', async () => {
+    // The CDK app layout replaces the library `src` the project generator
+    // scaffolds, which only happens on creation — on a re-run that directory is
+    // the user's infrastructure, so nothing in it is deleted.
+    await tsInfraGenerator(tree, options);
+    tree.write('packages/test/src/constructs/my-construct.ts', 'export {};\n');
+
+    await tsInfraGenerator(tree, options);
+
+    expect(tree.exists('packages/test/src/constructs/my-construct.ts')).toBe(
+      true,
     );
   });
 

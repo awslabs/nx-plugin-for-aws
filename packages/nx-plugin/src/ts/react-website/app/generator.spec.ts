@@ -217,6 +217,44 @@ describe('react-website generator', () => {
     ).toMatchSnapshot('common/constructs-core-static-website.ts');
   });
 
+  // A website named after the core construct it extends used to emit
+  // `export class StaticWebsite ... extends StaticWebsite` with the core
+  // `StaticWebsite` imported unaliased.
+  it('extends the aliased core construct when named static-website', async () => {
+    await tsReactWebsiteGenerator(tree, { ...options, name: 'static-website' });
+
+    const construct =
+      tree.read(
+        'packages/common/constructs/src/app/static-websites/static-website.ts',
+        'utf-8',
+      ) ?? '';
+
+    expect(construct).toContain('StaticWebsite as CoreStaticWebsite');
+    expect(construct).toContain('StaticWebsiteProps as CoreStaticWebsiteProps');
+    expect(construct).toContain('extends CoreStaticWebsite');
+    expect(construct).toContain('export class StaticWebsite');
+    expect(construct).not.toMatch(/import \{[^}]*\bStaticWebsite\s*,/);
+    expect(construct).not.toContain('extends StaticWebsite');
+  });
+
+  it('leaves the core import unaliased for a name that does not collide', async () => {
+    await tsReactWebsiteGenerator(tree, options);
+
+    const construct =
+      tree.read(
+        'packages/common/constructs/src/app/static-websites/test-app.ts',
+        'utf-8',
+      ) ?? '';
+
+    // Aliasing is applied only where it is needed, so the vended code for an
+    // ordinary name is unchanged.
+    expect(construct).toContain(
+      "import { StaticWebsite, StaticWebsiteProps } from '../../core/index.js'",
+    );
+    expect(construct).toContain('extends StaticWebsite');
+    expect(construct).not.toContain('CoreStaticWebsite');
+  });
+
   it('should update package.json with required dependencies', async () => {
     await tsReactWebsiteGenerator(tree, options);
     // The website's runtime dependencies live in its own project manifest
@@ -949,6 +987,89 @@ describe('react-website generator', () => {
       expect(tree.read(indexRoutePath, 'utf-8')).toBe(userIndexRoute);
       expect(tree.read(configPath, 'utf-8')).toBe(userConfig);
     });
+
+    it('should not duplicate the shared shadcn tsconfig reference on re-run', async () => {
+      const shadcnOptions: TsReactWebsiteGeneratorSchema = {
+        ...options,
+        ux: 'shadcn',
+      };
+      await tsReactWebsiteGenerator(tree, shadcnOptions);
+
+      const tsconfigAppPath = 'test-app/tsconfig.app.json';
+      const sharedShadcnRefs = () =>
+        (
+          readJson<{ references?: { path: string }[] }>(tree, tsconfigAppPath)
+            .references ?? []
+        ).filter((ref) => ref.path.startsWith('../packages/common/shadcn'));
+
+      expect(sharedShadcnRefs()).toHaveLength(1);
+
+      await tsReactWebsiteGenerator(tree, shadcnOptions);
+
+      expect(sharedShadcnRefs()).toHaveLength(1);
+    });
+
+    it('should not duplicate the shared shadcn tsconfig reference after nx sync has resolved it', async () => {
+      const shadcnOptions: TsReactWebsiteGeneratorSchema = {
+        ...options,
+        ux: 'shadcn',
+      };
+      await tsReactWebsiteGenerator(tree, shadcnOptions);
+
+      const tsconfigAppPath = 'test-app/tsconfig.app.json';
+      // `nx sync` rewrites a reference to a project's tsconfig.json into the
+      // specific tsconfig it resolves to, which is the state a real workspace
+      // is in by the time the generator is re-run.
+      updateJson(tree, tsconfigAppPath, (tsconfig) => ({
+        ...tsconfig,
+        references: (tsconfig.references ?? []).map((ref: { path: string }) =>
+          ref.path.endsWith('common/shadcn/tsconfig.json')
+            ? { path: ref.path.replace(/tsconfig\.json$/, 'tsconfig.lib.json') }
+            : ref,
+        ),
+      }));
+
+      await tsReactWebsiteGenerator(tree, shadcnOptions);
+
+      const refs = (
+        readJson<{ references?: { path: string }[] }>(tree, tsconfigAppPath)
+          .references ?? []
+      ).filter((ref) => ref.path.startsWith('../packages/common/shadcn'));
+      expect(refs).toEqual([
+        { path: '../packages/common/shadcn/tsconfig.lib.json' },
+      ]);
+    });
+
+    it('should preserve the order of existing references on re-run', async () => {
+      const shadcnOptions: TsReactWebsiteGeneratorSchema = {
+        ...options,
+        ux: 'shadcn',
+      };
+      await tsReactWebsiteGenerator(tree, shadcnOptions);
+
+      const tsconfigAppPath = 'test-app/tsconfig.app.json';
+      // The shadcn reference resolved by `nx sync`, with another project's
+      // reference after it - the shape a website connected to an API is in.
+      updateJson(tree, tsconfigAppPath, (tsconfig) => ({
+        ...tsconfig,
+        references: [
+          { path: '../packages/common/shadcn/tsconfig.lib.json' },
+          { path: '../packages/my-api/tsconfig.lib.json' },
+        ],
+      }));
+
+      await tsReactWebsiteGenerator(tree, shadcnOptions);
+
+      // Re-appending the shadcn reference rather than recognising the resolved
+      // one would swap these two, which leaves the workspace out of sync.
+      expect(
+        readJson<{ references?: { path: string }[] }>(tree, tsconfigAppPath)
+          .references,
+      ).toEqual([
+        { path: '../packages/common/shadcn/tsconfig.lib.json' },
+        { path: '../packages/my-api/tsconfig.lib.json' },
+      ]);
+    });
   });
 
   describe('infra=none idempotency', () => {
@@ -1039,8 +1160,7 @@ describe('react-website generator ux tests', () => {
       );
       expect(packageJson.dependencies).toMatchObject({
         'class-variance-authority': expect.any(String),
-        clsx: expect.any(String),
-        'tailwind-merge': expect.any(String),
+        cn: expect.any(String),
         'tw-animate-css': expect.any(String),
         'lucide-react': expect.any(String),
         'radix-ui': expect.any(String),

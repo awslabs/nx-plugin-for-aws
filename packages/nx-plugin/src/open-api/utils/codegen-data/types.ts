@@ -123,6 +123,12 @@ export interface Model {
   isReadOnly: boolean;
   /** Whether the property/parameter is required. */
   isRequired: boolean;
+  /**
+   * The `required` list this schema declared, kept even when it declares none of
+   * the properties it names — an `allOf` member may raise a sibling branch's
+   * property to mandatory, which is not the same as constraining nothing.
+   */
+  declaredRequired?: string[];
   /** Whether an array enforces uniqueness (rendered as a `Set`). */
   uniqueItems?: boolean;
   /** For arrays/dictionaries, the model describing the element/value type. */

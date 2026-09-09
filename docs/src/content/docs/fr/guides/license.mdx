@@ -9,7 +9,6 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import Drawer from '@components/drawer.astro';
 import LicenseAllowlist from '@components/license-allowlist.astro';
 import NxCommands from '@components/nx-commands.astro';
-import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 
 Gérez les licences dans votre espace de travail : synchronisez les fichiers `LICENSE` et les en-têtes de code source pour votre propre code (`license.source`), et vérifiez que chaque dépendance est conforme à une liste de licences autorisées (`license.dependencies`).
 
@@ -45,7 +44,7 @@ Chaque fois que vous construisez vos projets (et qu'une cible `lint` s'exécute)
 
 [@aws/nx-plugin:license#sync]: Project LICENSE files are out of sync:
 - LICENSE
-- packages/<my-project>LICENSE
+- packages/<my-project>/LICENSE
 
 Project package.json files are out of sync:
 - package.json
@@ -348,7 +347,7 @@ Cela signifie que vous n'avez pas besoin d'exécuter la vérification explicitem
 
 Le câblage est un `dependsOn` inter-projets sur la cible `lint` de chaque projet qui pointe vers la cible `license-check` racine. Pour ignorer la vérification lors d'un lint ou d'une construction, définissez la variable d'environnement `LICENSE_DEPENDENCY_CHECK=skip` :
 
-<PackageManagerShortCommand commands={["LICENSE_DEPENDENCY_CHECK=skip lint"]} />
+<NxCommands commands={['run-many --target lint --all']} env={{ LICENSE_DEPENDENCY_CHECK: 'skip' }} />
 
 ### Configuration
 
@@ -381,7 +380,14 @@ Pour restreindre la liste autorisée, remplacez `DEFAULT_LICENSE_ALLOWLIST` par 
 
 #### Exceptions par paquet
 
-Utilisez `exceptions` pour les paquets qui échouent à la vérification — soit parce que leur licence ne figure pas dans la liste autorisée, soit parce qu'ils sont livrés sans métadonnées de licence détectables. Le champ `reason` est requis pour que les réviseurs puissent voir pourquoi l'exception a été accordée.
+Utilisez `exceptions` pour les paquets qui échouent à la vérification — soit parce que leur licence ne figure pas dans la liste autorisée, soit parce qu'ils sont livrés sans métadonnées de licence détectables.
+
+Chaque entrée accepte :
+
+- `package` (requis) : le nom du paquet auquel l'exception s'applique
+- `reason` (requis) : pourquoi l'exception a été accordée, afin que les réviseurs puissent le voir
+- `version` (optionnel) : restreindre l'exception à une seule version, afin qu'une version ultérieure soit vérifiée à nouveau
+- `spdx` (optionnel) : la licence à traiter comme déclarée par le paquet, pour un paquet qui livre du texte de licence sans le déclarer dans ses métadonnées. C'est ce que le hook `onDependency` ci-dessous rapporte
 
 ```typescript
 exceptions: [
@@ -389,6 +395,7 @@ exceptions: [
     package: 'union',
     version: '0.5.0',
     reason: 'Package ships verbatim MIT text without declaring license',
+    spdx: 'MIT',
   },
 ];
 ```
@@ -397,7 +404,24 @@ Les générateurs qui introduisent des dépendances avec des métadonnées probl
 
 #### Collecteurs
 
-Les collecteurs découvrent les dépendances et extraient les métadonnées de licence. Les collecteurs intégrés sont `npmCollector()` (analyse `node_modules`) et `pythonCollector()` (analyse les environnements virtuels Python). Le générateur de licence configure `npmCollector()` par défaut et ajoute `pythonCollector()` lorsque des projets Python sont présents.
+Les collecteurs découvrent les dépendances et extraient les métadonnées de licence. Les collecteurs intégrés sont `npmCollector()` (analyse `node_modules`) et `pythonCollector()` (analyse les environnements virtuels Python), tous deux exportés depuis `@aws/nx-plugin/sdk/license`. Le générateur de licence configure `npmCollector()` par défaut et ajoute `pythonCollector()` lorsque des projets Python sont présents.
+
+```typescript title="aws-nx-plugin.config.mts"
+import {
+  DEFAULT_LICENSE_ALLOWLIST,
+  npmCollector,
+  pythonCollector,
+} from '@aws/nx-plugin/sdk/license';
+
+export default {
+  license: {
+    dependencies: {
+      allow: DEFAULT_LICENSE_ALLOWLIST,
+      collectors: [npmCollector(), pythonCollector()],
+    },
+  },
+} satisfies AwsNxPluginConfig;
+```
 
 Pour implémenter un collecteur personnalisé, conformez-vous à l'interface `LicenseCollector` :
 
@@ -443,6 +467,6 @@ La vérification des licences des dépendances est activée par la présence de 
 
 Pour désactiver les vérifications pour une seule exécution, définissez la variable d'environnement `LICENSE_DEPENDENCY_CHECK=skip` :
 
-<PackageManagerShortCommand commands={["LICENSE_DEPENDENCY_CHECK=skip lint"]} />
+<NxCommands commands={['run-many --target lint --all']} env={{ LICENSE_DEPENDENCY_CHECK: 'skip' }} />
 
 Pour désactiver de manière permanente, supprimez la clé `license.dependencies` de votre configuration dans `aws-nx-plugin.config.mts`. Vous pouvez également réexécuter le générateur `license` avec `--dependencyCheck=false` pour générer sans elle.

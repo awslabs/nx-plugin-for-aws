@@ -5,6 +5,7 @@ description: 运行时配置如何使用 AWS AppConfig 连接您生成的项目
 import { Tabs, TabItem, Steps } from '@astrojs/starlight/components';
 import Infrastructure from '@components/infrastructure.astro';
 import Link from '@components/link.astro';
+import EmbeddedGraph from '@components/embedded-graph.astro';
 
 运行时配置是 Nx Plugin for AWS 用于在生成的项目和组件之间传递部署时值的机制，以便它们可以相互连接。例如，当您生成一个 API 时，其 URL 会自动注册到运行时配置中，以便连接的网站可以发现它。
 
@@ -26,40 +27,7 @@ import Link from '@components/link.astro';
 
 您可以根据需要定义任意数量的额外命名空间，为将部署时值传递给 Lambda 函数或其他计算资源提供了一种方便的环境变量替代方案。
 
-```d2
-direction: down
-
-iac: "Infrastructure as code\nRuntimeConfig.set(...)"
-
-appconfig: "AWS AppConfig" {
-  shape: cylinder
-  connection: "connection namespace"
-  agentcore: "agentcore namespace"
-  custom: "custom namespaces"
-}
-
-s3: "website S3 bucket" {
-  shape: cylinder
-  rcj: runtime-config.json {
-    shape: page
-  }
-}
-
-website: React website
-
-server: Lambda / agent
-
-iac -> appconfig.connection
-iac -> appconfig.agentcore
-iac -> appconfig.custom
-
-appconfig.connection -> s3.rcj: deployed
-s3.rcj -> website: fetched at load
-
-appconfig.connection -> server
-appconfig.agentcore -> server: Powertools getAppConfig
-appconfig.custom -> server
-```
+<EmbeddedGraph diagram="runtime-config" />
 
 ## 基础设施
 
@@ -253,15 +221,27 @@ Lambda 函数和 agent 等服务器端消费者可以使用 [AWS Lambda Powertoo
 
 使用 [`@aws-lambda-powertools/parameters`](https://docs.aws.amazon.com/powertools/typescript/latest/features/parameters) 中的 `getAppConfig`：
 
+`getAppConfig` 返回任何有效的 JSON 值，因此请声明您期望的形状并转换结果 — 否则在工作区的严格 `tsconfig` 下，属性访问将无法编译：
+
 ```ts
 import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
 
+interface ConnectionConfig {
+  apis?: Record<string, string>;
+  cognitoProps?: {
+    region: string;
+    userPoolId: string;
+    userPoolWebClientId: string;
+    identityPoolId: string;
+  };
+}
+
 // Retrieve the 'connection' namespace as a parsed JSON object
-const config = await getAppConfig('connection', {
+const config = (await getAppConfig('connection', {
   application: process.env.RUNTIME_CONFIG_APP_ID!,
   environment: 'default',
   transform: 'json',
-});
+})) as ConnectionConfig;
 
 // Access values
 const apiUrl = config.apis?.MyApi;
@@ -271,15 +251,23 @@ const cognitoProps = config.cognitoProps;
 您还可以检索自定义命名空间：
 
 ```ts
+interface TablesConfig {
+  users?: { tableName: string; tableArn: string };
+}
+
 // Retrieve a custom 'tables' namespace
-const tablesConfig = await getAppConfig('tables', {
+const tablesConfig = (await getAppConfig('tables', {
   application: process.env.RUNTIME_CONFIG_APP_ID!,
   environment: 'default',
   transform: 'json',
-});
+})) as TablesConfig;
 
 const usersTableName = tablesConfig.users?.tableName;
 ```
+
+:::tip[在边界处验证]
+类型转换告诉编译器形状，但不会在运行时检查它。对于您无法控制的配置，请改用 [Zod](https://zod.dev/) 模式解析它，这样格式错误的值会立即失败，而不是稍后显示为 `undefined`。
+:::
 
   </TabItem>
   <TabItem label="Python" icon="seti:python">

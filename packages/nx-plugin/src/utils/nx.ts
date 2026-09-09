@@ -318,6 +318,36 @@ export const normalizeTargetKeyOrder = <T extends object>(target: T): T =>
   ) as T;
 
 /**
+ * Merge the configuration a generator owns into a project's existing target, so
+ * re-running converges that configuration without discarding what other
+ * generators (or the user) contributed to the same target.
+ *
+ * `dependsOn` is unioned: existing entries keep their order and the desired ones
+ * are appended only when absent, so a re-run neither drops an entry (e.g. the
+ * `bundle` a lambda function adds to `build`) nor duplicates one. Every other
+ * key the caller passes wins, since those are the ones the generator owns.
+ *
+ * The result carries Nx's own key order, so a target authored on the first run
+ * serializes identically to the same target merged into on a re-run.
+ */
+export const mergeTarget = (
+  existing: TargetConfiguration | undefined,
+  desired: TargetConfiguration,
+): TargetConfiguration => {
+  const merged: TargetConfiguration = { ...existing, ...desired };
+  const dependsOn = [...(existing?.dependsOn ?? [])];
+  for (const dependency of desired.dependsOn ?? []) {
+    if (!dependsOn.some((d) => targetDependencyEquals(d, dependency))) {
+      dependsOn.push(dependency);
+    }
+  }
+  if (dependsOn.length > 0) {
+    merged.dependsOn = dependsOn;
+  }
+  return normalizeTargetKeyOrder(merged);
+};
+
+/**
  * Mutate the project to add the dependency to the target if not already present
  * Adds the target if not present.
  *

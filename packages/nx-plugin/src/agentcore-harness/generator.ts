@@ -31,6 +31,7 @@ import {
   projectExists,
   readProjectConfigurationUnqualified,
 } from '../utils/nx.js';
+import { addScriptProjectTargets } from '../utils/script-project-targets.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
@@ -111,6 +112,9 @@ export const agentcoreHarnessGenerator = async (
       cwd: '{projectRoot}',
     },
   };
+  // scripts/chat.ts is TypeScript the user runs and customises, so it goes
+  // through the workspace's build sweep.
+  addScriptProjectTargets(tree, { project });
   updateProjectConfiguration(tree, project.name, project);
 
   generateFiles(

@@ -61,6 +61,8 @@ O gerador adicionará os seguintes arquivos ao seu projeto TypeScript existente.
         - router.ts tRPC router with agent procedures
         - agent.ts Main agent definition with sample tools
         - session.ts Resolves the SessionManager used to persist conversation state
+        - schema/
+          - z-async-iterable.ts Zod schema for the router's streamed responses
         - client.ts Vended client for invoking your agent
         - agent-core-trpc-client.ts Client factory for connecting to agents on AgentCore Runtime
         - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
@@ -81,6 +83,8 @@ O ponto de entrada usa o [Strands A2A Express Server](https://strandsagents.com/
         - index.ts A2A Express server entry point
         - agent.ts Main agent definition with sample tools
         - session.ts Resolves the SessionManager used to persist conversation state
+        - middleware/
+          - session-id-middleware.ts Binds the inbound AgentCore session ID for the request
         - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - package.json Updated with Strands and Express dependencies
     - project.json Updated with agent serve targets
@@ -99,6 +103,8 @@ O ponto de entrada usa [`@ag-ui/aws-strands`](https://www.npmjs.com/package/@ag-
         - index.ts AG-UI server entry point (Express + SSE)
         - agent.ts Main agent definition with sample tools
         - session.ts Resolves the SessionManager used to persist conversation state
+        - middleware/
+          - session-id-middleware.ts Binds the inbound AgentCore session ID for the request
         - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - package.json Updated with Strands and AG-UI dependencies
     - project.json Updated with agent serve targets
@@ -280,7 +286,9 @@ Se você adicionou vários componentes ao seu projeto (agentes, servidores MCP, 
 
 <NxCommands commands={['agent-dev your-project']} />
 
-Isso usa `tsx --watch` para reiniciar automaticamente o servidor quando os arquivos mudam. O agente estará disponível em `http://localhost:8081` (ou a porta atribuída se você tiver vários agentes).
+Isso usa `tsx --watch` para reiniciar automaticamente o servidor quando os arquivos mudam. O agente estará disponível em `http://localhost:8081` (ou a porta atribuída se você tiver vários agentes — leia-a de `metadata.ports` no `project.json` do projeto).
+
+Um target `<your-agent-name>-serve` também é gerado, que executa o agente contra sua infraestrutura implantada e, portanto, requer que `RUNTIME_CONFIG_APP_ID` seja definido. Consulte o guia <Link path="guides/local-development">Desenvolvimento Local</Link> para a diferença entre `dev` e `serve`.
 
 ### Conversar com Seu Agent
 
@@ -401,12 +409,16 @@ Gere o ID da sessão em vez de derivá-lo de valores fornecidos pelo usuário, c
 
 ## Invocando seu Agent
 
+<OptionFilter when={{ protocol: 'http' }} description="tRPC-over-WebSocket client factory invocation details">
 A comunicação do agente é transmitida via tRPC sobre WebSocket. Como tal, é recomendado usar a fábrica de cliente com segurança de tipos gerada em `client.ts`.
 
-<OptionFilter when={{ protocol: 'http' }} description="tRPC-over-WebSocket client factory invocation details">
 ### Invocar o Servidor Local
 
-Você pode invocar um agente em execução local usando o método de fábrica `.local` da fábrica de cliente.
+Inicie seu agente com o target `<your-agent-name>-dev`:
+
+<NxCommands commands={['agent-dev your-project']} />
+
+Em seguida, invoque-o usando o método de fábrica `.local` da fábrica de cliente.
 
 Você pode, por exemplo, criar um arquivo chamado `scripts/test.ts` em seu workspace que importa o cliente:
 
@@ -420,6 +432,8 @@ const client = MyAgentClient.local({ url: 'http://localhost:8081/ws' });
 
 client.invoke.subscribe({ prompt: 'what is 1 plus 1?' }, { onData: console.log });
 ```
+
+Substitua a porta atribuída ao seu agente — leia-a de `metadata.ports` no `project.json` do projeto.
 
 :::tip[Teste Rápido]
 Execute com `tsx` como uma maneira rápida de testar seu agente.

@@ -130,7 +130,7 @@ export const pyFastApiProjectGenerator = async (
   // Add a command to copy run.sh to the bundle output for Lambda Web Adapter
   const fs = new FsCommands(tree, DEPENDENCIES);
   const bundleTarget = projectConfig.targets[bundleTargetName];
-  const copyRunShCommand = fs.cp(
+  const copyRunShCommand = fs.cpFile(
     `{projectRoot}/run.sh`,
     `dist/{projectRoot}/${bundleTargetName}/run.sh`,
   );

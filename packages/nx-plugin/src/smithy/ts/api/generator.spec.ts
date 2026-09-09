@@ -551,6 +551,47 @@ describe('tsSmithyApiGenerator', () => {
     expect(secondBackendJson).toEqual(firstBackendJson);
   });
 
+  it('should preserve user-authored implementation files when re-run', async () => {
+    const options = {
+      name: 'test-api',
+      infra: 'rest-lambda' as const,
+      auth: 'custom' as const,
+      iac: 'cdk' as const,
+    };
+    await tsSmithyApiGenerator(tree, options);
+
+    // Stand in for what the guide has the reader write: a registered operation,
+    // a context carrying the caller's identity, and both entrypoints supplying it.
+    const userOwned = {
+      'test-api/backend/src/service.ts': `import { ServiceContext } from './context.js';
+import { TestApiService } from './generated/ssdk/index.js';
+import { Echo } from './operations/echo.js';
+import { GetUser } from './operations/get-user.js';
+
+export const Service: TestApiService<ServiceContext> = {
+  Echo,
+  GetUser,
+};
+`,
+      'test-api/backend/src/context.ts': '// MY CUSTOM CONTEXT\n',
+      'test-api/backend/src/operations/echo.ts': '// MY CUSTOM ECHO\n',
+      'test-api/backend/src/operations/get-user.ts':
+        'export const GetUser = 1;\n',
+      'test-api/backend/src/handler.ts': '// MY CUSTOM HANDLER\n',
+      'test-api/backend/src/local-server.ts': '// MY CUSTOM LOCAL SERVER\n',
+      'test-api/backend/src/index.ts': '// MY CUSTOM BARREL\n',
+    };
+    Object.entries(userOwned).forEach(([path, contents]) =>
+      tree.write(path, contents),
+    );
+
+    await tsSmithyApiGenerator(tree, options);
+
+    Object.entries(userOwned).forEach(([path, contents]) =>
+      expect(tree.read(path, 'utf-8')).toBe(contents),
+    );
+  });
+
   it('should configure OpenAPI metadata generation target', async () => {
     await tsSmithyApiGenerator(tree, {
       name: 'test-api',

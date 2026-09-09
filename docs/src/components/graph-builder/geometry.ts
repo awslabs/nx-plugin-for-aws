@@ -90,6 +90,71 @@ export const loopPath = (
   return `M ${from.x} ${from.y} C ${from.x + 90} ${from.y - 70}, ${to.x - 90} ${to.y - 70}, ${to.x} ${to.y}`;
 };
 
+export interface Rect extends Point {
+  width: number;
+  height: number;
+}
+
+const centre = (rect: Rect): Point => ({
+  x: rect.x + rect.width / 2,
+  y: rect.y + rect.height / 2,
+});
+
+/**
+ * A bezier between two boxes, leaving and entering on the sides that face each
+ * other, aimed at a rectangle inside each.
+ *
+ * The infrastructure view uses this to join a resource in one project's box to a
+ * resource in another's: the line starts on the box's border rather than at the
+ * resource, so it travels the gap between boxes instead of crossing over their
+ * contents, while still lining up with the resources it connects.
+ *
+ * Side to side that means the resource's own height, so the line runs level with
+ * what it connects. Stacked, boxes are wide and their resources sit anywhere
+ * along them, so the line drops from the middle of one box to the middle of the
+ * next rather than leaning across to a resource's column.
+ */
+export const boxPath = (
+  from: { box: Rect; resource: Rect },
+  to: { box: Rect; resource: Rect },
+): string => {
+  const delta = {
+    x: centre(to.box).x - centre(from.box).x,
+    y: centre(to.box).y - centre(from.box).y,
+  };
+  const sideways = Math.abs(delta.x) >= Math.abs(delta.y);
+  const forward = (sideways ? delta.x : delta.y) >= 0;
+
+  const start = sideways
+    ? {
+        x: forward ? from.box.x + from.box.width : from.box.x,
+        y: centre(from.resource).y,
+      }
+    : {
+        x: centre(from.box).x,
+        y: forward ? from.box.y + from.box.height : from.box.y,
+      };
+  const end = sideways
+    ? {
+        x: forward ? to.box.x : to.box.x + to.box.width,
+        y: centre(to.resource).y,
+      }
+    : {
+        x: centre(to.box).x,
+        y: forward ? to.box.y : to.box.y + to.box.height,
+      };
+
+  const span = sideways ? Math.abs(end.x - start.x) : Math.abs(end.y - start.y);
+  const curve = Math.max(24, Math.min(span * 0.5, 110)) * (forward ? 1 : -1);
+  return sideways
+    ? `M ${start.x} ${start.y} C ${start.x + curve} ${start.y}, ${end.x - curve} ${end.y}, ${end.x} ${end.y}`
+    : `M ${start.x} ${start.y} C ${start.x} ${start.y + curve}, ${end.x} ${end.y - curve}, ${end.x} ${end.y}`;
+};
+
+/** A bezier between two rectangles, meeting the sides that face each other. */
+export const rectPath = (from: Rect, to: Rect): string =>
+  boxPath({ box: from, resource: from }, { box: to, resource: to });
+
 /** Where a self-edge's delete affordance sits, clear of the node it loops around. */
 export const loopMidpoint = (
   node: Point,

@@ -4,14 +4,23 @@
  */
 import { readJson, readNxJson, type Tree, writeJson } from '@nx/devkit';
 import uniqBy from 'lodash.uniqby';
-import { declareDependencies } from '../../utils/declared-dependencies.js';
+import {
+  declareDependencies,
+  declaredNames,
+} from '../../utils/declared-dependencies.js';
 import { expectHasMetricTags } from '../../utils/metrics.spec.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
 } from '../../utils/shared-constructs.js';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
-import { TS_LIB_GENERATOR_INFO, tsProjectGenerator } from './generator.js';
+import { ownedDependencies } from '../../utils/version-upgrade-migration/owned-dependencies.js';
+import { tsLambdaFunctionGenerator } from '../lambda-function/generator.js';
+import {
+  DEPENDENCIES,
+  TS_LIB_GENERATOR_INFO,
+  tsProjectGenerator,
+} from './generator.js';
 
 const sharedConstructsDeclaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
@@ -276,6 +285,68 @@ describe('ts lib generator', () => {
     );
   });
 
+  // Another generator wiring an artifact target into this project's build and
+  // assemble is the state a re-run must converge into rather than replace: the
+  // `bundle` target survives on its own, so losing the wiring is silent until a
+  // clean synth fails on the missing artifact.
+  it('should preserve target wiring added by other generators on re-run', async () => {
+    await tsProjectGenerator(tree, {
+      name: 'test-lib',
+      preferInstallDependencies: false,
+    });
+
+    await tsLambdaFunctionGenerator(tree, {
+      project: '@proj/test-lib',
+      name: 'MyFunction',
+      event: 'EventBridgeSchema',
+      iac: 'cdk',
+      preferInstallDependencies: false,
+    });
+
+    await tsProjectGenerator(tree, {
+      name: 'test-lib',
+      preferInstallDependencies: false,
+    });
+
+    const { targets } = readJson(tree, 'test-lib/project.json');
+    expect(targets.build.dependsOn).toEqual([
+      'lint',
+      'compile',
+      'test',
+      'bundle',
+    ]);
+    expect(targets.assemble.dependsOn).toEqual(['compile', 'bundle']);
+    expect(targets.bundle).toBeDefined();
+  });
+
+  it('should not duplicate target wiring across repeated re-runs', async () => {
+    await tsProjectGenerator(tree, {
+      name: 'test-lib',
+      preferInstallDependencies: false,
+    });
+
+    await tsLambdaFunctionGenerator(tree, {
+      project: '@proj/test-lib',
+      name: 'MyFunction',
+      event: 'EventBridgeSchema',
+      iac: 'cdk',
+      preferInstallDependencies: false,
+    });
+
+    await tsProjectGenerator(tree, {
+      name: 'test-lib',
+      preferInstallDependencies: false,
+    });
+    const afterFirstReRun = tree.read('test-lib/project.json', 'utf-8');
+
+    await tsProjectGenerator(tree, {
+      name: 'test-lib',
+      preferInstallDependencies: false,
+    });
+
+    expect(tree.read('test-lib/project.json', 'utf-8')).toBe(afterFirstReRun);
+  });
+
   it('should mark the workspace as ESM by default', async () => {
     await tsProjectGenerator(tree, {
       name: 'test-lib',
@@ -326,5 +397,43 @@ describe('ts lib generator', () => {
     expect(
       readJson(tree, 'second-lib/tsconfig.lib.json').compilerOptions?.module,
     ).toBe('node16');
+  });
+
+  // The generated tsconfig and vitest config name packages that must be
+  // installed for `tsc` and the test target to run. `@nx/js` and `@nx/vitest`
+  // write those references but only install them when they manage
+  // package.json, which these generators opt out of.
+  it('should declare the packages the generated configs reference', async () => {
+    await tsProjectGenerator(tree, {
+      name: 'test-lib',
+      preferInstallDependencies: false,
+    });
+
+    // `types: ['node']` in tsconfig.lib.json resolves @types/node.
+    expect(
+      readJson(tree, 'test-lib/tsconfig.lib.json').compilerOptions?.types,
+    ).toContain('node');
+    expect(
+      readJson(tree, 'test-lib/package.json').devDependencies?.['@types/node'],
+    ).toBeDefined();
+
+    // `environment: 'jsdom'` in the vitest config resolves jsdom.
+    expect(tree.read('test-lib/vitest.config.mts', 'utf-8')).toContain('jsdom');
+    expect(readJson(tree, 'package.json').devDependencies?.jsdom).toBeDefined();
+  });
+
+  // Ownership is read from a generator's exported `DEPENDENCIES`, so a package
+  // added by a helper but missing from that declaration installs correctly and
+  // is then never upgraded again.
+  it('should own every dependency it adds, so the version sync covers them', async () => {
+    await tsProjectGenerator(tree, {
+      name: 'test-lib',
+      preferInstallDependencies: false,
+    });
+
+    const owned = await ownedDependencies(tree);
+    for (const name of declaredNames(DEPENDENCIES.ts)) {
+      expect(owned.ts, `${name} is added but not owned`).toContain(name);
+    }
   });
 });

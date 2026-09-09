@@ -28,9 +28,25 @@ permissions:
   id-token: write
 
 jobs:
+  # The smoke tests exercise generated projects, which a docs only change cannot
+  # affect, so they are skipped for one.
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      docs_only: ${{ steps.docs_only.outputs.docs-only }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - id: docs_only
+        uses: ./.github/actions/docs-only-change
   package:
     name: Package
-    runs-on: codebuild-nx-plugin-for-aws-runner-${{ github.run_id }}-${{ github.run_attempt }}
+    runs-on: codebuild-nx-plugin-for-aws-runner-${{ github.run_id }}-${{ github.run_attempt }}-large
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -49,7 +65,7 @@ jobs:
           path: dist
   build:
     name: Build
-    runs-on: codebuild-nx-plugin-for-aws-runner-${{ github.run_id }}-${{ github.run_attempt }}
+    runs-on: codebuild-nx-plugin-for-aws-runner-${{ github.run_id }}-${{ github.run_attempt }}-xlarge
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -75,7 +91,7 @@ jobs:
           path: docs/dist
   unit_tests:
     name: Unit Tests - ${{ matrix.shard }}
-    runs-on: codebuild-nx-plugin-for-aws-runner-${{ github.run_id }}-${{ github.run_attempt }}
+    runs-on: codebuild-nx-plugin-for-aws-runner-${{ github.run_id }}-${{ github.run_attempt }}-large
     strategy:
       fail-fast: false
       matrix:
@@ -98,42 +114,77 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
   smoke_tests:
     name: Smoke Tests - ${{matrix.smoke_test}}
-    runs-on: codebuild-nx-plugin-for-aws-runner-${{ github.run_id }}-${{ github.run_attempt }}
-    needs: package
+    runs-on: codebuild-nx-plugin-for-aws-runner-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.size }}
+    needs: [changes, package]
+    if: ${{ needs.changes.outputs.docs_only != 'true' }}
     strategy:
       fail-fast: false
       matrix:
-        smoke_test:
-          - npm
-          - yarn-classic
-          - yarn-4
-          - pnpm-10
-          - pnpm-11
-          - bun
-          - create-workspace
-          - dungeon-adventure
-          - terraform
-          - rdb
-          - trpc-api
-          - fast-api
-          - smithy-api
-          - react-website
-          - infra-none
-          - existing-workspace
-          - idempotency
-          - cdk-deploy
-          - cdk-deploy-rdb
-          - terraform-deploy
-          - terraform-deploy-rdb
-          - license-sync
-          - mcp-server
-          - nx-plugin
-          - test-matrix
-          - local-dev
-          - git-secrets
-          - audit
-          - finch
-          - trivy
+        include:
+          - smoke_test: npm
+            size: xlarge
+          - smoke_test: yarn-classic
+            size: xlarge
+          - smoke_test: yarn-4
+            size: xlarge
+          - smoke_test: pnpm-10
+            size: xlarge
+          - smoke_test: pnpm-11
+            size: xlarge
+          - smoke_test: pnpm-12
+            size: xlarge
+          - smoke_test: bun
+            size: xlarge
+          - smoke_test: create-workspace
+            size: large
+          - smoke_test: dungeon-adventure
+            size: large
+          - smoke_test: terraform
+            size: xlarge
+          - smoke_test: rdb
+            size: xlarge
+          - smoke_test: trpc-api
+            size: large
+          - smoke_test: fast-api
+            size: large
+          - smoke_test: smithy-api
+            size: medium
+          - smoke_test: react-website
+            size: large
+          - smoke_test: infra-none
+            size: large
+          - smoke_test: existing-workspace
+            size: medium
+          - smoke_test: idempotency
+            size: xlarge
+          - smoke_test: cdk-deploy
+            size: xlarge
+          - smoke_test: cdk-deploy-rdb
+            size: xlarge
+          - smoke_test: terraform-deploy
+            size: xlarge
+          - smoke_test: terraform-deploy-rdb
+            size: xlarge
+          - smoke_test: license-sync
+            size: medium
+          - smoke_test: mcp-server
+            size: medium
+          - smoke_test: nx-plugin
+            size: medium
+          - smoke_test: test-matrix
+            size: large
+          - smoke_test: local-dev
+            size: large
+          - smoke_test: git-secrets
+            size: medium
+          - smoke_test: audit
+            size: medium
+          - smoke_test: finch
+            size: xlarge
+          - smoke_test: trivy
+            size: xlarge
+          - smoke_test: release
+            size: medium
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -148,7 +199,7 @@ jobs:
           aws-docker-login-role-arn: ${{ secrets.AWS_DOCKER_LOGIN_ROLE_ARN }}
           uv-cache-suffix: ${{ matrix.smoke_test }}
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6
         with:
           role-to-assume: ${{ secrets.DEPLOY_INTEG_TESTS_ROLE_ARN }}
           aws-region: us-west-2
@@ -162,8 +213,9 @@ jobs:
   # (NX_E2E_SHARD=<index>/<total>). Nothing here deploys, so no AWS credentials.
   smoke_tests_migrate:
     name: Smoke Tests - migrate (${{matrix.shard}}/5)
-    runs-on: codebuild-nx-plugin-for-aws-runner-${{ github.run_id }}-${{ github.run_attempt }}
-    needs: package
+    runs-on: codebuild-nx-plugin-for-aws-runner-${{ github.run_id }}-${{ github.run_attempt }}-xlarge
+    needs: [changes, package]
+    if: ${{ needs.changes.outputs.docs_only != 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -191,8 +243,9 @@ jobs:
   # comes from sharding across machines (NX_E2E_SHARD=<index>/<total>).
   smoke_tests_standalone:
     name: Smoke Tests - standalone (${{matrix.shard}}/6)
-    runs-on: codebuild-nx-plugin-for-aws-runner-${{ github.run_id }}-${{ github.run_attempt }}
-    needs: package
+    runs-on: codebuild-nx-plugin-for-aws-runner-${{ github.run_id }}-${{ github.run_attempt }}-2xlarge
+    needs: [changes, package]
+    if: ${{ needs.changes.outputs.docs_only != 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -220,7 +273,8 @@ jobs:
   smoke_tests_macos_standalone:
     name: macOS Smoke Tests - standalone (${{matrix.shard}}/6)
     runs-on: macos-latest
-    needs: package
+    needs: [changes, package]
+    if: ${{ needs.changes.outputs.docs_only != 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -251,7 +305,8 @@ jobs:
   smoke_tests_windows:
     name: Windows Smoke Tests - ${{matrix.smoke_test}}
     runs-on: windows-latest
-    needs: package
+    needs: [changes, package]
+    if: ${{ needs.changes.outputs.docs_only != 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -276,7 +331,7 @@ jobs:
         with:
           uv-cache-suffix: ${{ matrix.smoke_test }}
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6
         with:
           role-to-assume: ${{ secrets.DEPLOY_INTEG_TESTS_ROLE_ARN }}
           aws-region: us-west-2
@@ -289,7 +344,8 @@ jobs:
   smoke_tests_windows_standalone:
     name: Windows Smoke Tests - standalone (${{matrix.shard}}/6)
     runs-on: codebuild-nx-plugin-for-aws-windows-runner-${{ github.run_id }}-${{ github.run_attempt }}
-    needs: package
+    needs: [changes, package]
+    if: ${{ needs.changes.outputs.docs_only != 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -323,13 +379,15 @@ jobs:
           NX_E2E_SHARD: ${{ matrix.shard }}/6
           NX_E2E_CODEBUILD_WINDOWS: "true"
         run: pnpm nx run @aws/nx-plugin-e2e:smoke-test --name=standalone
-  release:
-    name: Release
+  # The context `main` requires in place of the individual legs, since a skipped
+  # matrix job reports one check under its unexpanded name rather than one per leg.
+  # Passes when every smoke test and everything they need succeeded or was skipped.
+  smoke_tests_complete:
+    name: Smoke Tests Complete
     needs:
       [
+        changes,
         package,
-        build,
-        unit_tests,
         smoke_tests,
         smoke_tests_migrate,
         smoke_tests_standalone,
@@ -337,6 +395,31 @@ jobs:
         smoke_tests_windows,
         smoke_tests_windows_standalone,
       ]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Check smoke test results
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Smoke test results: $RESULTS"
+          for result in $RESULTS; do
+            case "$result" in
+              success | skipped) ;;
+              *)
+                echo "::error::A smoke test job did not pass ($result)"
+                exit 1
+                ;;
+            esac
+          done
+  release:
+    name: Release
+    needs: [changes, package, build, unit_tests, smoke_tests_complete]
+    # A docs only change releases nothing. It also skips the smoke tests, and a
+    # skip propagates to every job downstream of it unless that job opts out with
+    # a status function of its own.
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
     runs-on: ubuntu-22.04
     outputs:
       latest_commit: ${{ steps.git_remote.outputs.latest_commit }}
@@ -358,7 +441,7 @@ jobs:
         run: echo "latest_commit=$(git ls-remote origin -h ${{ github.ref }} | cut -f1)" >> $GITHUB_OUTPUT
       - name: Should skip release
         id: should_skip_release
-        run: echo "skip_release=$(git log $(git describe --tags --abbrev=0)..HEAD --oneline | grep -qE 'feat\(?.*\)?:|fix\(?.*\)?:|revert\(?.*\)?:|perf\(?.*\)?:' && echo false || echo true)" >> $GITHUB_OUTPUT
+        run: echo "skip_release=$(git log $(git describe --tags --abbrev=0)..HEAD --oneline | grep -qE 'feat\(?.*\)?:|fix\(?.*\)?:|revert\(?.*\)?:|perf\(?.*\)?:|deps\(?.*\)?:' && echo false || echo true)" >> $GITHUB_OUTPUT
       # Version, stamp migrations, tag + changelog, then publish (with retry on a
       # transient failure). The whole flow lives in scripts/release.ts.
       - name: Release
@@ -371,8 +454,11 @@ jobs:
   deploy_docs:
     name: Deploy Docs
     runs-on: ubuntu-latest
-    if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.release.outputs.latest_commit == github.sha }}
-    needs: [release]
+    # Deploys once everything the docs ride on is green. The release job holds the
+    # "still the tip of main" check, so that guard applies only when it ran - a
+    # docs only push skips it.
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && (needs.release.result == 'skipped' || needs.release.outputs.latest_commit == github.sha) }}
+    needs: [build, unit_tests, smoke_tests_complete, release]
     steps:
       - name: Download docs artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -387,4 +473,4 @@ jobs:
           path: "docs-site"
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5

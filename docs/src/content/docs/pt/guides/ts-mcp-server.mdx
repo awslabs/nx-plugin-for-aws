@@ -88,16 +88,20 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 
 export const registerMyTool = (server: McpServer) => {
-  server.registerTool("toolName", {
-    description: "tool description",
-    inputSchema: { param1: z.string(), param2: z.number() } // Input schema using Zod
-  },
+  server.registerTool(
+    'toolName',
+    {
+      description: 'tool description',
+      // Input schema using Zod
+      inputSchema: { param1: z.string(), param2: z.number() },
+    },
     async ({ param1, param2 }) => {
       // Tool implementation
+      const result = `${param1} ${param2}`;
       return {
-        content: [{ type: "text", text: "Result" }]
+        content: [{ type: 'text' as const, text: result }],
       };
-    }
+    },
   );
 };
 ```
@@ -123,20 +127,46 @@ Recursos fornecem contexto ao assistente de IA. Como ferramentas, cada recurso f
 ```typescript title="resources/my-resource.ts"
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
+const fetchSomeData = async (): Promise<string> => 'some dynamic context';
+
 export const registerMyResource = (server: McpServer) => {
   const exampleContext = 'some context to return';
 
-  server.registerResource('resource-name', 'example://resource', {}, async (uri) => ({
-    contents: [{ uri: uri.href, text: exampleContext }],
-  }));
+  server.registerResource(
+    'resource-name',
+    'example://resource',
+    {},
+    async (uri) => ({
+      contents: [{ uri: uri.href, text: exampleContext }],
+    }),
+  );
 
   // Dynamic resource
-  server.registerResource('dynamic-resource', 'dynamic://resource', {}, async (uri) => {
-    const data = await fetchSomeData();
-    return {
-      contents: [{ uri: uri.href, text: data }],
-    };
-  });
+  server.registerResource(
+    'dynamic-resource',
+    'dynamic://resource',
+    {},
+    async (uri) => {
+      const data = await fetchSomeData();
+      return {
+        contents: [{ uri: uri.href, text: data }],
+      };
+    },
+  );
+};
+```
+
+Registre-o dentro de `createServer` em `server.ts` da mesma forma que uma ferramenta:
+
+```typescript title="server.ts" {6}
+import { registerMyResource } from './resources/my-resource.js';
+
+export const createServer = async () => {
+  const server = new McpServer({ name: 'my-server', version: '1.0.0' });
+
+  registerMyResource(server);
+
+  return server;
 };
 ```
 

@@ -10,13 +10,16 @@ import NxCommands from '@components/nx-commands.astro';
 import NxInitCommand from '@components/nx-init-command.astro';
 import TsConfigBaseCompilerOptions from '@components/tsconfig-base-compiler-options.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
+import Prompt from '@components/prompt.astro';
 
 并非每个项目都从 `pnpm create @aws/nx-workspace` 开始。如果您已经有一个 [Nx 工作区](https://nx.dev)——或者一个可以添加 Nx 的 monorepo——您可以逐步采用 `@aws/nx-plugin`，而无需重新创建项目。
 
-<Aside type="tip">
-您可以使用您选择的智能编码工具通过 <Link path="get_started/building-with-ai">MCP 服务器</Link>为您添加插件。尝试以下提示：
+<Aside type="tip" title="使用您的编码代理">
+您选择的智能编码工具可以使用 <Link path="get_started/building-with-ai">MCP 服务器</Link>为您添加插件。尝试以下提示：
 
-> Add the Nx Plugin for AWS to this project.
+<Prompt>
+Add the Nx Plugin for AWS to this project.
+</Prompt>
 </Aside>
 
 ## 前置条件
@@ -40,7 +43,7 @@ pnpm 仅为允许列表中的包运行安装脚本，而 `nx` 需要其安装脚
 
 ```yaml title="pnpm-workspace.yaml"
 allowBuilds:
-  - nx
+  nx: true
 ```
 </Aside>
 
@@ -56,7 +59,7 @@ Nx 和插件作为 npm 包分发，因此没有 Node.js 工具的项目需要一
 }
 ```
 
-创建该文件，然后像往常一样运行 `nx init` 并[添加插件](#adding-the-plugin)。您现有的语言工具不受影响——插件生成的 Nx 项目（包括 <Link path="guides/py-project">Python 项目</Link>）与您现有的代码并存，您可以逐步将现有的构建连接到 Nx。
+创建该文件，然后像往常一样运行 `nx init` 并[添加插件](#adding-the-plugin)。您现有的语言工具不受影响——插件生成的 Nx 项目（包括 <Link path="guides/python-project">Python 项目</Link>）与您现有的代码并存，您可以逐步将现有的构建连接到 Nx。
 
 要将现有项目纳入 Nx，您有几个选项，具体取决于语言：
 
@@ -124,12 +127,15 @@ Nx 和插件作为 npm 包分发，因此没有 Node.js 工具的项目需要一
 - tsconfig.json 引用工作区项目的根 TypeScript 配置，Nx 的 TypeScript 同步会保持其最新状态
 - tsconfig.base.json 插件的 TypeScript 项目扩展的共享编译器选项（请参阅下文了解其内容）
 - pnpm-workspace.yaml（仅限 pnpm）允许列表中插件依赖项需要的构建脚本（`@swc/core`、`esbuild`、`nx`、`sharp`）
-- package.json 常见任务的便捷脚本，以及 `@aws/nx-plugin`、`@aws/nx-plugin-mcp`、`nx`、`@nx/js`、`@nx/workspace`、`typescript` 和 Biome 开发依赖项
+- package.json 常见任务的便捷脚本，安装 git 钩子的 `prepare` 脚本，以及 `@aws/nx-plugin`、`@aws/nx-plugin-mcp`、`nx`、`@nx/js`、`@nx/workspace`、`typescript`、husky 和 Biome 开发依赖项
 - biome.json 默认的 Biome 格式化程序和 linter 配置
+- .git-secrets/ 供应商提供的 [git-secrets](https://github.com/awslabs/git-secrets) 脚本，带有用于误报的 `.gitallowed` 和运行它的 `.husky/pre-commit` 钩子——请参阅 <Link path="guides/workspace#git-secrets">Git Secrets</Link>
 - .mcp.json 为支持的编码代理配置 MCP 服务器，除非禁用（还有 .cursor/、.kiro/、.gemini/、.vscode/ 和 .codex/ 等效项）。它运行工作区自己的 `@aws/nx-plugin-mcp`，因此服务器始终与工作区中安装的版本匹配
 </FileTree>
 
-可以使用 `--mcp=false` 禁用 <Link path="get_started/building-with-ai">MCP 服务器</Link>配置。
+可以使用 `--mcp=false` 禁用 <Link path="get_started/building-with-ai">MCP 服务器</Link>配置，使用 `--gitSecrets=false` 禁用凭证扫描钩子。
+
+您已有的文件会被保留：现有的 `.husky/pre-commit` 钩子或 `prepare` 脚本保持原样，生成器会打印要添加的内容，以便凭证扫描与您自己的检查一起运行。现有的 `.gitallowed` 保留其所有模式。
 
 <Drawer title="tsconfig.base.json" trigger="点击此处查看创建的 tsconfig.base.json 包含的编译器选项。">
 插件的 TypeScript 项目依赖于这些编译器选项。如果 `tsconfig.base.json` 已经存在，则保持原样，因此如果您保留自己的选项，这些是要对齐的选项：
@@ -159,7 +165,7 @@ pnpm 跳过未列入允许列表的包的安装脚本。`init` 在 `pnpm-workspa
 
 #### `nx sync` 挂起，或 `plugin worker ... exited before the connection was established`
 
-如果同一个 node_modules 树中存在两个不同的 `nx` 版本（运行 `npm ls nx` 确认），它们的插件工作进程 IPC 会死锁。`init` 生成器将根 `nx` devDependency 固定到插件自己的 `@nx/*` 包解析的版本，但稍后在不同的补丁版本安装另一个 `@nx/*` 包可能会重新引入不匹配。将根 `package.json` 中的每个 `nx` 和 `@nx/*` 条目对齐到单个版本并重新安装。
+如果同一个 node_modules 树中存在两个不同的 `nx` 版本（运行 `npm ls nx` 确认），它们的插件工作进程 IPC 会死锁。`init` 声明插件所依据的 `nx` 和 `@nx/*` 版本，但它永远不会降级工作区已有的版本：已经使用较新 `nx` 的工作区会保留它，而插件自己的 `@nx/*` 包会在其旁边拉入自己的副本。将根 `package.json` 中的每个 `nx` 和 `@nx/*` 条目——以及包管理器使用依赖目录的情况下的依赖目录——对齐到单个版本，然后重新安装。
 
 #### `ts.readConfigFile is not a function`
 

@@ -367,7 +367,7 @@ describe('ts#agent generator', () => {
     // Check that docker target was added
     expect(projectConfig.targets['agent-docker']).toBeDefined();
     expect(projectConfig.targets['agent-docker'].options.commands).toEqual([
-      'ncp apps/test-project/src/agent/Dockerfile dist/apps/test-project/bundle/agent/test-project-agent/Dockerfile',
+      'shx cp apps/test-project/src/agent/Dockerfile dist/apps/test-project/bundle/agent/test-project-agent/Dockerfile',
       'docker build --platform linux/arm64 -t proj-test-project-agent:latest dist/apps/test-project/bundle/agent/test-project-agent',
     ]);
     expect(projectConfig.targets['agent-docker'].options.parallel).toBe(false);
@@ -386,9 +386,9 @@ describe('ts#agent generator', () => {
       executor: 'nx:run-commands',
       options: {
         commands: [
-          'rimraf dist/apps/test-project/trivy/proj-test-project-agent-latest',
-          'make-dir dist/apps/test-project/trivy/proj-test-project-agent-latest',
-          'ncp apps/test-project/.trivyignore dist/apps/test-project/trivy/proj-test-project-agent-latest/.trivyignore',
+          'shx rm -rf dist/apps/test-project/trivy/proj-test-project-agent-latest',
+          'shx mkdir -p dist/apps/test-project/trivy/proj-test-project-agent-latest',
+          'shx cp apps/test-project/.trivyignore dist/apps/test-project/trivy/proj-test-project-agent-latest/.trivyignore',
           'docker save -o dist/apps/test-project/trivy/proj-test-project-agent-latest/image-0.tar proj-test-project-agent:latest',
           `docker run --rm -v "./dist/apps/test-project/trivy/proj-test-project-agent-latest":/scan public.ecr.aws/aquasecurity/trivy:${CONTAINER_VERSIONS.trivy} image --input /scan/image-0.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q`,
         ],
@@ -961,6 +961,39 @@ describe('ts#agent generator', () => {
     expect(secondProjectJson).toEqual(firstProjectJson);
   });
 
+  it.each([
+    ['agentcore', 'agent-package'],
+    ['agentcore-ecr', 'agent-docker'],
+  ] as const)(
+    'should leave project.json byte-identical on re-run with infra %s',
+    async (infra, packagingTarget) => {
+      const options = { project: 'test-project', infra, iac: 'cdk' as const };
+      await tsAgentGenerator(tree, options);
+      const firstProjectJson = tree.read(
+        'apps/test-project/project.json',
+        'utf-8',
+      );
+      // User content written between the runs must survive it.
+      tree.write('apps/test-project/src/agent/agent.ts', '// user agent\n');
+
+      await tsAgentGenerator(tree, options);
+
+      // The packaging target's keys must not be reordered: Nx moves `options`
+      // and `configurations` last when it rewrites a project.json, so the
+      // authored order has to match or every re-run rewrites the file.
+      const target = JSON.parse(firstProjectJson).targets[packagingTarget];
+      expect(Object.keys(target).indexOf('dependsOn')).toBeLessThan(
+        Object.keys(target).indexOf('options'),
+      );
+      expect(tree.read('apps/test-project/project.json', 'utf-8')).toEqual(
+        firstProjectJson,
+      );
+      expect(tree.read('apps/test-project/src/agent/agent.ts', 'utf-8')).toBe(
+        '// user agent\n',
+      );
+    },
+  );
+
   it('should add component generator metadata with default name', async () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',
@@ -1039,16 +1072,36 @@ describe('ts#agent generator', () => {
       tree.read('apps/test-project/project.json', 'utf-8'),
     );
     const packageTarget = projectConfig.targets['agent-package'];
-    expect(packageTarget.dependsOn).toEqual(['bundle']);
+    expect(packageTarget.dependsOn).toEqual(['bundle', 'agent-core-vendor']);
     expect(packageTarget.outputs).toEqual([
       '{workspaceRoot}/dist/apps/test-project/package/agent/test-project-agent',
     ]);
     expect(packageTarget.options.commands).toEqual([
-      'rimraf dist/apps/test-project/package/agent/test-project-agent',
-      'make-dir dist/apps/test-project/package/agent/test-project-agent',
-      'ncp dist/apps/test-project/bundle/agent/test-project-agent/index.js dist/apps/test-project/package/agent/test-project-agent/index.js',
-      `npm install --prefix dist/apps/test-project/package/agent/test-project-agent --no-save --no-audit --no-fund --omit=dev @aws/aws-distro-opentelemetry-node-autoinstrumentation@${TS_VERSIONS['@aws/aws-distro-opentelemetry-node-autoinstrumentation']}`,
+      'shx rm -rf dist/apps/test-project/package/agent/test-project-agent',
+      'shx mkdir -p dist/apps/test-project/package/agent/test-project-agent',
+      'shx cp dist/apps/test-project/bundle/agent/test-project-agent/index.js dist/apps/test-project/package/agent/test-project-agent/index.js',
+      'shx cp -R dist/apps/test-project/agent-core-vendor/node_modules/. dist/apps/test-project/package/agent/test-project-agent/node_modules',
     ]);
+
+    // Vendoring is cached on the pinned version alone, so a source edit replays
+    // the copy rather than re-running the install.
+    const vendorTarget = projectConfig.targets['agent-core-vendor'];
+    expect(vendorTarget.inputs).toEqual([]);
+    expect(vendorTarget.outputs).toEqual([
+      '{workspaceRoot}/dist/apps/test-project/agent-core-vendor',
+    ]);
+    expect(vendorTarget.options.commands).toEqual([
+      'shx rm -rf dist/apps/test-project/agent-core-vendor',
+      'shx mkdir -p dist/apps/test-project/agent-core-vendor',
+      `npm install --prefix dist/apps/test-project/agent-core-vendor --no-save --no-audit --no-fund --omit=dev @aws/aws-distro-opentelemetry-node-autoinstrumentation@${TS_VERSIONS['@aws/aws-distro-opentelemetry-node-autoinstrumentation']}`,
+    ]);
+    // Nested outputs would have each target wipe the other's work on a cache hit.
+    expect(vendorTarget.outputs[0].startsWith(packageTarget.outputs[0])).toBe(
+      false,
+    );
+    expect(packageTarget.outputs[0].startsWith(vendorTarget.outputs[0])).toBe(
+      false,
+    );
 
     // The build must produce the package it deploys
     expect(projectConfig.targets['build'].dependsOn).toContain('agent-package');

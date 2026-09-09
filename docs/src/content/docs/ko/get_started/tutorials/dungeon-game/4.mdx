@@ -27,7 +27,7 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 <NxCommands commands={["dev game-ui"]} />
 
-`game-ui`의 `dev` 타겟은 `game-api:dev`와 `dungeon_adventure.story:agent-dev`에 `dependsOn`이 설정되어 있어, Nx가 모든 프로젝트의 로컬 서버를 병렬로 시작합니다. 모듈 1에서 설정한 연결을 통해 이들은 차례로 Inventory MCP 서버와 DynamoDB Local을 부팅합니다. 컨테이너 엔진이 실행 중인지 확인한 다음 브라우저에서 개발 서버를 엽니다.
+`game-ui`의 `dev` 타겟은 `game-api:dev`와 `dungeon_adventure.story:agent-dev`에 `dependsOn`이 설정되어 있어, Nx가 모든 프로젝트의 로컬 서버를 병렬로 시작합니다. 모듈 1에서 설정한 연결을 통해 이들은 차례로 Inventory MCP 서버와 DynamoDB Local을 부팅합니다. 컨테이너 엔진이 실행 중인지 확인한 다음 브라우저에서 `http://localhost:4200/`의 개발 서버를 엽니다.
 
 <Aside type="tip" title="로컬에서는 로그인 불필요">
 `local-dev` 모드에서 `CognitoAuth` 컴포넌트는 Cognito 로그인 플로우를 건너뜁니다(로컬에서 실행 중인 사용자 풀이 없음). 따라서 로그인 없이 바로 게임으로 이동합니다. 이 모듈의 마지막에 AWS에 배포할 때 실제 계정을 생성하게 됩니다.
@@ -48,6 +48,7 @@ import gameConversationPng from '@assets/game-conversation.png'
     - copilot/
       - index.tsx 테마가 적용된 `CopilotChat` / `CopilotSidebar` / `CopilotPopup`을 재내보냅니다.
       - ShadcnAssistantMessage.tsx, ShadcnUserMessage.tsx, ShadcnChatInput.tsx, ShadcnCursor.tsx, copilot.css
+    - story-agent-chat.tsx A `CopilotChat` pre-bound to the Story Agent's `agentId`.
   - hooks/
     - useAguiStoryAgent.tsx 배포된 Story Agent를 가리키는 `@ag-ui/client` `HttpAgent`를 인스턴스화하고 `threadId`를 AgentCore의 33자 최소 세션 ID로 패딩합니다.
   - main.tsx `<App />`을 `<AguiProvider>`로 래핑합니다.
@@ -90,7 +91,7 @@ React Query의 기본 캐시는 첫 번째 결과를 5분 동안 유지하므로
 </TabItem>
 </Tabs>
 
-저장하면 `http://localhost:4200/`의 개발 서버에서 이제 어드벤처를 시작하고 Story Agent와 채팅할 수 있어야 합니다.
+저장하면 개발 서버에서 이제 어드벤처를 시작하고 Story Agent와 채팅할 수 있어야 합니다.
 
 <Image src={gameSelectPng} alt="game-select.png" width="600" height="309" />
 <div style="margin-top: -100px; margin-left: 100px;">
@@ -117,7 +118,9 @@ AWS 계정/리전에서 첫 번째 CDK 배포인 경우, 먼저 부트스트랩�
 
 `deploy-sandbox` 타겟은 `packages/infra/src/main.ts`에 정의된 샌드박스 스테이지를 배포합니다.
 
-첫 번째 배포는 모든 리소스가 완전히 안정화되기를 기다리므로 약 6분이 걸립니다. 후속 배포는 더 빠릅니다. 개발 중 반복을 가속화하려면 `--express` 플래그를 전달하여 [CloudFormation express 모드](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html)를 선택할 수 있습니다. 이는 완전한 안정화를 기다리지 않고 구성이 적용되는 즉시 각 리소스 작업을 완료합니다.
+`deploy-sandbox` 타겟은 [CloudFormation express 모드](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html)를 사용하며, 이는 완전한 안정화를 기다리지 않고 구성이 적용되는 즉시 각 리소스 작업을 완료합니다. 첫 번째 배포는 약 4분이 걸리며, 일부 리소스(예: CloudFront 배포)는 그 후 잠시 동안 백그라운드에서 계속 프로비저닝될 수 있습니다. 후속 배포는 더 빠릅니다.
+
+express 모드는 리소스가 완전히 안정화되기 전에 반환되므로, `deploy-sandbox`는 개발 전용입니다. CI/CD 및 프로덕션 배포에는 항상 완전한 안정화를 기다리는 `deploy-ci` 타겟을 사용하세요.
 
 배포가 완료되면 다음과 유사한 출력이 표시됩니다:
 
@@ -127,7 +130,9 @@ dungeon-adventure-infra-sandbox-Application: deploying... [2/2]
 
  ✅  dungeon-adventure-infra-sandbox-Application
 
-✨  Deployment time: 354s
+✨  Deployment time: 220s
+
+⚠️  Stack deployed using Express Mode. Resources still stabilizing: GameUICloudfrontDistribution, UserIdentityWebAcl, ...and more...
 
 Outputs:
 dungeon-adventure-infra-sandbox-Application.GameApiEndpointXXX = https://xxx.execute-api.region.amazonaws.com/prod/
@@ -141,6 +146,10 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
 ```
 
 CloudFront URL(CDK 출력의 `GameUIDistributionDomainName`)로 이동하여 새 계정에 가입하고 완전히 AWS에서 실행되는 게임을 플레이하세요!
+
+:::note[처음 가입하기]
+Cognito는 계정을 확인하기 위해 코드를 이메일로 보낸 다음, 첫 로그인 전에 다단계 인증(인증 앱 또는 SMS 코드)을 설정하도록 요청합니다 — `ts#website#auth`가 제공하는 사용자 풀은 MFA를 요구합니다. 이를 완화하는 방법은 <Link path="guides/react-website-auth#multi-factor-authentication-mfa">다단계 인증</Link>을 참조하세요.
+:::
 
 ## 작업 6: 로컬 및 배포된 컴포넌트 혼합하기
 

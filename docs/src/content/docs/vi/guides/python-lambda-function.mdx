@@ -90,7 +90,8 @@ metrics: Metrics = Metrics()
 tracer: Tracer = Tracer()
 
 @tracer.capture_lambda_handler
-@metrics.log_metrics
+@logger.inject_lambda_context
+@metrics.log_metrics(capture_cold_start_metric=True)
 @event_parser(model=EventBridgeModel)
 def lambda_handler(event: EventBridgeModel, context: LambdaContext):
     logger.info("Received event", extra={"event": event.model_dump() })
@@ -127,11 +128,10 @@ def lambda_handler(event: EventBridgeModel, context: LambdaContext):
 Khuyến nghị thiết lập correlation id cho tất cả các yêu cầu duy nhất để dễ dàng gỡ lỗi và giám sát hơn. Vui lòng tham khảo tài liệu [aws powertools logger](https://docs.powertools.aws.dev/lambda/python/2.22.0/core/logger/#setting-a-correlation-id) để biết các phương pháp hay nhất về correlation id.
 :::
 
-Logger tự động bao gồm:
+Handler được trang trí với [`@logger.inject_lambda_context`](https://docs.powertools.aws.dev/lambda/python/latest/core/logger/#inject-lambda-context), do đó mỗi bản ghi log mà nó phát ra cũng mang theo:
 
-- Các yêu cầu event
-- Thông tin Lambda context
-- Chỉ báo cold start
+- `function_name`, `function_memory_size`, `function_arn` và `function_request_id` từ Lambda context
+- `cold_start`, cho biết liệu lần gọi có khởi tạo một môi trường thực thi mới hay không
 
 #### Tracing
 
@@ -157,9 +157,9 @@ def lambda_handler(event: EventBridgeModel, context: LambdaContext):
 
 Các metric mặc định bao gồm:
 
-- Số lần gọi
-- Số lần thành công/thất bại
-- Metrics cold start
+- `InvocationCount`, được thêm vào mỗi lần gọi
+- `SuccessCount` và `ErrorCount`, được thêm bởi `try`/`except` của handler
+- `ColdStart`, được phát ra bởi [`@metrics.log_metrics(capture_cold_start_metric=True)`](https://docs.powertools.aws.dev/lambda/python/latest/core/metrics/#capturing-cold-start-metric) khi lần gọi khởi tạo một môi trường thực thi mới
 
 ### Type Safety
 

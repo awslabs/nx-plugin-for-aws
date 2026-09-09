@@ -90,7 +90,8 @@ metrics: Metrics = Metrics()
 tracer: Tracer = Tracer()
 
 @tracer.capture_lambda_handler
-@metrics.log_metrics
+@logger.inject_lambda_context
+@metrics.log_metrics(capture_cold_start_metric=True)
 @event_parser(model=EventBridgeModel)
 def lambda_handler(event: EventBridgeModel, context: LambdaContext):
     logger.info("Received event", extra={"event": event.model_dump() })
@@ -127,11 +128,10 @@ def lambda_handler(event: EventBridgeModel, context: LambdaContext):
 Si consiglia di impostare il correlation id per tutte le richieste univoche per facilitare il debugging e il monitoraggio. Si prega di fare riferimento alla documentazione del [aws powertools logger](https://docs.powertools.aws.dev/lambda/python/2.22.0/core/logger/#setting-a-correlation-id) per le best practice relative al correlation id.
 :::
 
-Il logger include automaticamente:
+L'handler è decorato con [`@logger.inject_lambda_context`](https://docs.powertools.aws.dev/lambda/python/latest/core/logger/#inject-lambda-context), quindi ogni record di log che emette contiene anche:
 
-- Richieste di eventi
-- Informazioni sul contesto Lambda
-- Indicatori di cold start
+- `function_name`, `function_memory_size`, `function_arn` e `function_request_id` dal contesto Lambda
+- `cold_start`, che indica se l'invocazione ha inizializzato un nuovo ambiente di esecuzione
 
 #### Tracing
 
@@ -157,9 +157,9 @@ def lambda_handler(event: EventBridgeModel, context: LambdaContext):
 
 Le metriche predefinite includono:
 
-- Conteggi delle invocazioni
-- Conteggi di successo/fallimento
-- Metriche di cold start
+- `InvocationCount`, aggiunta ad ogni invocazione
+- `SuccessCount` e `ErrorCount`, aggiunte dal blocco `try`/`except` dell'handler
+- `ColdStart`, emessa da [`@metrics.log_metrics(capture_cold_start_metric=True)`](https://docs.powertools.aws.dev/lambda/python/latest/core/metrics/#capturing-cold-start-metric) quando l'invocazione inizializza un nuovo ambiente di esecuzione
 
 ### Type Safety
 

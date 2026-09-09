@@ -3,11 +3,35 @@ title: Projets Python
 description: Documentation de référence pour les projets Python
 generator: py#project
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { Code, FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
+import { LAMBDA_RUNTIME_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/versions';
+
+export const bundleTarget = `{
+  "targets": {
+    "bundle": {
+      "dependsOn": ["bundle-x86"]
+    },
+    "bundle-x86": {
+      "cache": true,
+      "inputs": ["production", "^production"],
+      "executor": "nx:run-commands",
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}/bundle-x86"],
+      "options": {
+        "commands": [
+          "uv export --frozen --no-dev --no-editable --project {projectRoot} --package my_scope.my_library -o dist/{projectRoot}/bundle-x86/requirements.txt",
+          "uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform x86_64-manylinux_2_28 --python-version ${LAMBDA_RUNTIME_VERSIONS.python} --target dist/{projectRoot}/bundle-x86 -r dist/{projectRoot}/bundle-x86/requirements.txt"
+        ],
+        "parallel": false
+      },
+      "dependsOn": ["compile"]
+    }
+  }
+}`;
 
 Le générateur de projet Python peut être utilisé pour créer une bibliothèque ou une application [Python](https://www.python.org/) moderne configurée avec les meilleures pratiques, gérée avec [UV](https://docs.astral.sh/uv/), un seul fichier de verrouillage et un environnement virtuel dans un [espace de travail UV](https://docs.astral.sh/uv/concepts/projects/workspaces/), [pytest](https://docs.pytest.org/en/stable/) pour exécuter les tests, [Ruff](https://docs.astral.sh/ruff/) pour l'analyse statique, et [ty](https://docs.astral.sh/ty/) pour la vérification de type.
 
@@ -87,30 +111,9 @@ Cela ajoutera la dépendance au fichier `pyproject.toml` de votre projet et mett
 
 #### Code d'exécution
 
-Lorsque vous utilisez votre projet Python comme code d'exécution (par exemple comme gestionnaire pour une fonction AWS lambda), vous devrez créer un bundle du code source et de toutes ses dépendances. Vous pouvez y parvenir en ajoutant une cible telle que la suivante à votre fichier `project.json` :
+Lorsque vous utilisez votre projet Python comme code d'exécution (par exemple comme gestionnaire pour une fonction AWS lambda), vous devrez créer un bundle du code source et de toutes ses dépendances. Les générateurs <Link path="guides/python-lambda-function">`py#lambda-function`</Link>, <Link path="guides/fastapi">`py#api`</Link> et <Link path="guides/py-mcp-server">`py#mcp-server`</Link> ajoutent cela pour vous. Pour en ajouter un manuellement, ajoutez des cibles telles que les suivantes à votre fichier `project.json`, en correspondant à la forme que ces générateurs fournissent :
 
-```json title="project.json"
-{
-  ...
-  "targets": {
-    ...
-    "bundle": {
-      "cache": true,
-      "inputs": ["production", "^production"],
-      "executor": "nx:run-commands",
-      "outputs": ["{workspaceRoot}/dist/packages/my_library/bundle"],
-      "options": {
-        "commands": [
-          "uv export --frozen --no-dev --no-editable --project packages/my_library --package my_scope.my_library -o dist/packages/my_library/bundle/requirements.txt",
-          "uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform x86_64-manylinux_2_28 --python `uv python pin` --target dist/packages/my_library/bundle -r dist/packages/my_library/bundle/requirements.txt"
-        ],
-        "parallel": false
-      },
-      "dependsOn": ["compile"]
-    },
-  },
-}
-```
+<Code lang="json" title="project.json" code={bundleTarget} />
 
 ### Installation
 
@@ -158,7 +161,7 @@ Les cibles de déploiement dépendent de `assemble`, donc le déploiement ne con
 
 ### Écrire des tests
 
-Les tests doivent être écrits dans le répertoire `test` de votre projet, dans des fichiers Python préfixés par `test_`, par exemple :
+Les tests doivent être écrits dans le répertoire `tests` de votre projet, dans des fichiers Python préfixés par `test_`, par exemple :
 
 <FileTree>
   - my_library

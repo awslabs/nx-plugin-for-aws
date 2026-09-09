@@ -23,6 +23,7 @@ import {
 } from '../../utils/declared-dependencies.js';
 import { formatFilesInSubtree } from '../../utils/format.js';
 import { installDependencies } from '../../utils/install.js';
+import { addLocalProjectDependency } from '../../utils/local-project-dependency.js';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
 import { esmVars } from '../../utils/module-format.js';
 import { kebabCase } from '../../utils/names.js';
@@ -81,7 +82,8 @@ export async function tsInfraGenerator(
 ): Promise<GeneratorCallback> {
   const lib = getTsLibDetails(tree, schema);
 
-  if (!projectExists(tree, lib.fullyQualifiedName)) {
+  const isNewProject = !projectExists(tree, lib.fullyQualifiedName);
+  if (isNewProject) {
     await tsProjectGenerator(tree, {
       ...schema,
       preferInstallDependencies: false,
@@ -138,14 +140,25 @@ export async function tsInfraGenerator(
   const scopeAlias = npmScopePrefix;
   const fullyQualifiedName = `${npmScopePrefix}${schema.name}`;
   const namespace = kebabCase(fullyQualifiedName);
-  // The stage instantiated in main.ts. Quoted so the shell does not glob `*`.
-  const sandboxStagePattern = `"${namespace}-sandbox/*"`;
-  tree.delete(joinPathFragments(libraryRoot, 'src'));
+  // The stage instantiated in main.ts. `**` so the pattern also selects stacks
+  // nested below the stage's own stacks, such as the `us-east-1` WebACL stack a
+  // website creates - `cdk destroy` only deletes the stacks its pattern selects,
+  // so a single `*` leaves those behind. Quoted so the shell does not glob.
+  const sandboxStagePattern = `"${namespace}-sandbox/**"`;
 
+  // `tsProjectGenerator` scaffolds a library `src`, which the CDK app layout
+  // replaces. Only on creation — on a re-run this is the user's infrastructure.
+  if (isNewProject) {
+    tree.delete(joinPathFragments(libraryRoot, 'src'));
+  }
+
+  // The guide walks through declaring resources in
+  // `src/stacks/application-stack.ts` and adding stages to `src/main.ts`, so
+  // everything here is scaffolded once and then left alone.
   generateFiles(
-    tree, // the virtual file system
-    joinPathFragments(import.meta.dirname, './files/app'), // path to the file templates
-    libraryRoot, // destination path of the files
+    tree,
+    joinPathFragments(import.meta.dirname, './files/app'),
+    libraryRoot,
     {
       synthDir: synthDirFromProject,
       scopeAlias: scopeAlias,
@@ -158,7 +171,7 @@ export async function tsInfraGenerator(
       ...esmVars(tree),
     },
     {
-      overwriteStrategy: OverwriteStrategy.Overwrite,
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
   );
 
@@ -185,10 +198,16 @@ export async function tsInfraGenerator(
           command: 'cdk synth',
         }),
       };
+      // `default` rather than the synth directory: `dist` is gitignored, so a
+      // fileset input pointed at it matches no tracked file and hashes to a
+      // constant — the scan would cache-hit forever and pass on infrastructure
+      // it never read. `default` carries the project's own sources plus the
+      // transitive `dependentTasksOutputFiles` entry, which resolves against
+      // the upstream `synth` task and so hashes the template actually scanned.
       config.targets.checkov = {
         cache: true,
         executor: 'nx:run-commands',
-        inputs: ['{workspaceRoot}/dist/{projectRoot}/cdk.out'],
+        inputs: ['default'],
         outputs: ['{workspaceRoot}/dist/{projectRoot}/checkov'],
         dependsOn: ['synth'],
         options: {
@@ -201,6 +220,9 @@ export async function tsInfraGenerator(
       config.targets.deploy = {
         executor: 'nx:run-commands',
         dependsOn: ['^assemble', 'compile'],
+        // No --express: this target deploys whichever stage is named, including
+        // beta and prod, so it waits for full resource stabilization. Express
+        // mode belongs to `deploy-sandbox`, which only ever deploys a sandbox.
         options: stageConfig
           ? withCdkEnv({
               command: `tsx packages/common/scripts/src/infra/infra-deploy.ts ${libraryRoot}`,
@@ -215,11 +237,11 @@ export async function tsInfraGenerator(
         dependsOn: ['^assemble', 'compile'],
         options: stageConfig
           ? withCdkEnv({
-              command: `tsx packages/common/scripts/src/infra/infra-deploy.ts ${libraryRoot} ${sandboxStagePattern}`,
+              command: `tsx packages/common/scripts/src/infra/infra-deploy.ts ${libraryRoot} ${sandboxStagePattern} --express`,
             })
           : withCdkEnv({
               cwd: '{projectRoot}',
-              command: `cdk deploy --require-approval=never ${sandboxStagePattern}`,
+              command: `cdk deploy --require-approval=never ${sandboxStagePattern} --express`,
             }),
       };
       config.targets['deploy-ci'] = {
@@ -302,6 +324,18 @@ export async function tsInfraGenerator(
         : []),
     ]),
   }));
+
+  // `main.ts` and the application stack import the shared constructs.
+  addLocalProjectDependency(tree, {
+    consumerRoot: libraryRoot,
+    dependencyRoot: joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR),
+  });
+  if (stageConfig) {
+    addLocalProjectDependency(tree, {
+      consumerRoot: libraryRoot,
+      dependencyRoot: joinPathFragments(PACKAGES_DIR, SHARED_INFRA_CONFIG_DIR),
+    });
+  }
 
   await addGeneratorMetricsIfApplicable(tree, [INFRA_APP_GENERATOR_INFO]);
 

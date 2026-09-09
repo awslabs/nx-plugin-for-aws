@@ -9,12 +9,12 @@ import { join } from 'node:path';
 
 const PATH_SEP = process.platform === 'win32' ? ';' : ':';
 
-// Corepack resolves `pm@<major>` against the registry on activation, so
-// passing a major (rather than a pinned version) means the smoke test
-// always runs against the current latest release of that line.
+// Corepack resolves the spec against the registry on activation, so passing a
+// major runs the smoke test against the current latest release of that line.
+// Pass an exact version to pin a lane to a known-good release.
 export const activatePackageManagerViaCorepack = (
   packageManager: 'pnpm' | 'yarn',
-  majorVersion: number,
+  version: number | string,
   envOverrides: Record<string, string> = {},
 ): (() => void) => {
   const originalPath = process.env.PATH ?? '';
@@ -24,13 +24,13 @@ export const activatePackageManagerViaCorepack = (
   const shimDir = join(
     tmpdir(),
     'nx-plugin-for-aws',
-    `corepack-${packageManager}-${majorVersion}-bin`,
+    `corepack-${packageManager}-${version}-bin`,
   );
   mkdirSync(shimDir, { recursive: true });
   execSync(`corepack enable --install-directory "${shimDir}"`, {
     stdio: 'inherit',
   });
-  execSync(`corepack prepare ${packageManager}@${majorVersion} --activate`, {
+  execSync(`corepack prepare ${packageManager}@${version} --activate`, {
     stdio: 'inherit',
   });
   process.env.PATH = `${shimDir}${PATH_SEP}${originalPath}`;

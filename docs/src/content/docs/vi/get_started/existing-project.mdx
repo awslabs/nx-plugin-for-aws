@@ -10,13 +10,16 @@ import NxCommands from '@components/nx-commands.astro';
 import NxInitCommand from '@components/nx-init-command.astro';
 import TsConfigBaseCompilerOptions from '@components/tsconfig-base-compiler-options.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
+import Prompt from '@components/prompt.astro';
 
 Không phải dự án nào cũng bắt đầu với `pnpm create @aws/nx-workspace`. Nếu bạn đã có một [Nx workspace](https://nx.dev) — hoặc một monorepo mà bạn có thể thêm Nx vào — bạn có thể áp dụng `@aws/nx-plugin` từng bước mà không cần tạo lại dự án.
 
-<Aside type="tip">
-Bạn có thể sử dụng công cụ coding agentic mà bạn chọn để thêm plugin cho bạn, sử dụng <Link path="get_started/building-with-ai">MCP server</Link>. Thử prompt:
+<Aside type="tip" title="Sử dụng coding agent của bạn">
+Công cụ coding agentic mà bạn chọn có thể thêm plugin cho bạn, sử dụng <Link path="get_started/building-with-ai">MCP server</Link>. Thử prompt:
 
-> Add the Nx Plugin for AWS to this project.
+<Prompt>
+Add the Nx Plugin for AWS to this project.
+</Prompt>
 </Aside>
 
 ## Yêu cầu
@@ -40,7 +43,7 @@ pnpm chỉ chạy install scripts cho các package được allow-list, và `nx`
 
 ```yaml title="pnpm-workspace.yaml"
 allowBuilds:
-  - nx
+  nx: true
 ```
 </Aside>
 
@@ -56,7 +59,7 @@ Nx và plugin được phân phối dưới dạng các package npm, vì vậy m
 }
 ```
 
-Tạo file đó, sau đó chạy `nx init` và [thêm plugin](#adding-the-plugin) như bình thường. Công cụ ngôn ngữ hiện có của bạn không bị ảnh hưởng — các dự án Nx được tạo bởi plugin (bao gồm <Link path="guides/py-project">dự án Python</Link>) nằm cùng với code hiện có của bạn, và bạn có thể kết nối build hiện có của mình vào Nx từng bước.
+Tạo file đó, sau đó chạy `nx init` và [thêm plugin](#adding-the-plugin) như bình thường. Công cụ ngôn ngữ hiện có của bạn không bị ảnh hưởng — các dự án Nx được tạo bởi plugin (bao gồm <Link path="guides/python-project">dự án Python</Link>) nằm cùng với code hiện có của bạn, và bạn có thể kết nối build hiện có của mình vào Nx từng bước.
 
 Để đưa các dự án hiện có của bạn vào Nx, bạn có một vài tùy chọn tùy thuộc vào ngôn ngữ:
 
@@ -124,12 +127,15 @@ Nó tạo hoặc cập nhật các file sau:
 - tsconfig.json một config TypeScript gốc tham chiếu các dự án của workspace, mà TypeScript sync của Nx giữ cập nhật
 - tsconfig.base.json các compiler options được chia sẻ mà các dự án TypeScript của plugin mở rộng (xem bên dưới để biết nó chứa gì)
 - pnpm-workspace.yaml (chỉ pnpm) allow-list các build scripts mà các dependency của plugin cần (`@swc/core`, `esbuild`, `nx`, `sharp`)
-- package.json các script tiện lợi cho các task phổ biến, cộng với các dev dependencies `@aws/nx-plugin`, `@aws/nx-plugin-mcp`, `nx`, `@nx/js`, `@nx/workspace`, `typescript` và Biome
+- package.json các script tiện lợi cho các task phổ biến, một script `prepare` cài đặt các git hooks, cộng với các dev dependencies `@aws/nx-plugin`, `@aws/nx-plugin-mcp`, `nx`, `@nx/js`, `@nx/workspace`, `typescript`, husky và Biome
 - biome.json cấu hình formatter và linter Biome mặc định
+- .git-secrets/ script [git-secrets](https://github.com/awslabs/git-secrets) được vendored, với `.gitallowed` cho các false positives và một hook `.husky/pre-commit` chạy nó — xem <Link path="guides/workspace#git-secrets">Git Secrets</Link>
 - .mcp.json cấu hình MCP server cho các coding agent được hỗ trợ trừ khi bị vô hiệu hóa (cũng bao gồm các tương đương .cursor/, .kiro/, .gemini/, .vscode/ và .codex/). Nó chạy `@aws/nx-plugin-mcp` của chính workspace, vì vậy server luôn khớp với phiên bản được cài đặt trong workspace của bạn
 </FileTree>
 
-Cấu hình <Link path="get_started/building-with-ai">MCP server</Link> có thể bị vô hiệu hóa với `--mcp=false`.
+Cấu hình <Link path="get_started/building-with-ai">MCP server</Link> có thể bị vô hiệu hóa với `--mcp=false`, và các hooks quét thông tin xác thực với `--gitSecrets=false`.
+
+Các file bạn đã có được bảo toàn: một hook `.husky/pre-commit` hoặc script `prepare` hiện có được giữ nguyên, và generator in ra những gì cần thêm để quét thông tin xác thực chạy cùng với các kiểm tra của riêng bạn. Một `.gitallowed` hiện có giữ mọi pattern mà nó có.
 
 <Drawer title="tsconfig.base.json" trigger="Nhấp vào đây để xem các compiler options mà một tsconfig.base.json được tạo mang theo.">
 Các dự án TypeScript của plugin dựa vào các compiler options này. Nếu một `tsconfig.base.json` đã tồn tại, nó được giữ nguyên, vì vậy nếu bạn giữ của riêng mình, đây là các options cần căn chỉnh:
@@ -159,7 +165,7 @@ pnpm bỏ qua install scripts cho các package không được allow-list. `init
 
 #### `nx sync` bị treo, hoặc `plugin worker ... exited before the connection was established`
 
-Nếu hai phiên bản `nx` khác nhau có mặt trong cùng một cây node_modules (chạy `npm ls nx` để xác nhận), IPC plugin-worker của chúng bị deadlock. Generator `init` ghim devDependency `nx` gốc vào phiên bản mà các package `@nx/*` của chính plugin giải quyết, nhưng một lần install sau của một package `@nx/*` khác ở phiên bản patch khác có thể tái tạo sự không khớp. Căn chỉnh mọi mục `nx` và `@nx/*` trong `package.json` gốc của bạn thành một phiên bản duy nhất và cài đặt lại.
+Nếu hai phiên bản `nx` khác nhau có mặt trong cùng một cây node_modules (chạy `npm ls nx` để xác nhận), IPC plugin-worker của chúng bị deadlock. `init` khai báo các phiên bản `nx` và `@nx/*` mà plugin được xây dựng dựa trên, nhưng nó không bao giờ hạ cấp một phiên bản mà workspace của bạn đã có: một workspace đã ở trên `nx` mới hơn sẽ giữ nó, và các package `@nx/*` của chính plugin kéo theo bản sao riêng của chúng bên cạnh nó. Căn chỉnh mọi mục `nx` và `@nx/*` trong `package.json` gốc của bạn — và, nơi package manager của bạn sử dụng, dependency catalog — thành một phiên bản duy nhất, sau đó cài đặt lại.
 
 #### `ts.readConfigFile is not a function`
 

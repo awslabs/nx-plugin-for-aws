@@ -1271,4 +1271,144 @@ describe('trpc backend generator', () => {
     const projectConfig = JSON.parse(secondProjectJson);
     expect(projectConfig.metadata.ports).toEqual([2022]);
   });
+
+  // A project named after the core construct its infrastructure extends used to
+  // emit `export class HttpApi ... extends HttpApi` with `HttpApi` imported too.
+  describe.each([
+    {
+      name: 'http-api',
+      infra: 'http-lambda' as const,
+      coreClass: 'HttpApi',
+      corePath: '../../core/api/http-api.js',
+    },
+    {
+      name: 'rest-api',
+      infra: 'rest-lambda' as const,
+      coreClass: 'RestApi',
+      corePath: '../../core/api/rest-api.js',
+    },
+  ])(
+    'a project named $name, colliding with the core $coreClass',
+    ({ name, infra, coreClass, corePath }) => {
+      it('extends the aliased core construct rather than itself', async () => {
+        await tsTrpcApiGenerator(tree, {
+          name,
+          directory: 'apps',
+          infra,
+          integrationPattern: 'isolated',
+          auth: 'iam',
+          iac: 'cdk',
+        });
+
+        const construct =
+          tree.read(
+            `packages/common/constructs/src/app/apis/${name}.ts`,
+            'utf-8',
+          ) ?? '';
+
+        // The core class is imported under an alias, so the app class of the
+        // same name neither collides with nor extends itself.
+        expect(construct).toContain(`${coreClass} as Core${coreClass}`);
+        expect(construct).toContain(`from '${corePath}'`);
+        expect(construct).toContain(`extends Core${coreClass}<`);
+        expect(construct).toContain(`export class ${coreClass}<`);
+        expect(construct).not.toMatch(
+          new RegExp(`import \\{[^}]*\\b${coreClass}\\s*\\}`),
+        );
+        expect(construct).not.toContain(`extends ${coreClass}<`);
+      });
+
+      it('leaves the import unaliased for a name that does not collide', async () => {
+        await tsTrpcApiGenerator(tree, {
+          name: 'test-api',
+          directory: 'apps',
+          infra,
+          integrationPattern: 'isolated',
+          auth: 'iam',
+          iac: 'cdk',
+        });
+
+        const construct =
+          tree.read(
+            'packages/common/constructs/src/app/apis/test-api.ts',
+            'utf-8',
+          ) ?? '';
+
+        // Aliasing is applied only where it is needed, so the vended code for an
+        // ordinary name is unchanged.
+        expect(construct).toContain(`extends ${coreClass}<`);
+        expect(construct).not.toContain(`Core${coreClass}`);
+      });
+    },
+  );
+  it('should preserve user-authored implementation files when re-run', async () => {
+    const options: TsTrpcApiGeneratorSchema = {
+      name: 'TestApi',
+      directory: 'apps',
+      infra: 'rest-lambda',
+      integrationPattern: 'isolated',
+      auth: 'iam',
+      iac: 'cdk',
+    };
+    await tsTrpcApiGenerator(tree, options);
+
+    // Stand in for what the guide has the reader write: a registered nested
+    // router, a new procedure, an edited schema and edited middleware.
+    const userOwned = {
+      'apps/test-api/src/router.ts': `import { echo } from './procedures/echo.js';
+import { listUsers } from './procedures/users/list.js';
+import { t } from './init.js';
+
+export const router = t.router;
+
+export const appRouter = router({
+  echo,
+  users: router({
+    list: listUsers,
+  }),
+});
+
+export type AppRouter = typeof appRouter;
+`,
+      'apps/test-api/src/procedures/echo.ts': `// MY CUSTOM CODE
+export const echo = publicProcedure.query(() => ({ message: 'hi' }));
+`,
+      'apps/test-api/src/procedures/users/list.ts':
+        'export const listUsers = 1;\n',
+      'apps/test-api/src/schema/index.ts': "export * from './users.js';\n",
+      'apps/test-api/src/schema/z-async-iterable.ts':
+        '// MY STREAMING HELPER\n',
+      'apps/test-api/src/init.ts': '// MY CUSTOM INIT\n',
+      'apps/test-api/src/index.ts': '// MY CUSTOM BARREL\n',
+      'apps/test-api/src/local-server.ts': '// MY CUSTOM LOCAL SERVER\n',
+      'apps/test-api/src/middleware/logger.ts': '// MY CUSTOM LOGGER\n',
+      'apps/test-api/src/middleware/metrics.ts': '// MY CUSTOM METRICS\n',
+      'apps/test-api/src/middleware/tracer.ts': '// MY CUSTOM TRACER\n',
+      'apps/test-api/src/middleware/error.ts': '// MY CUSTOM ERROR HANDLING\n',
+    };
+    Object.entries(userOwned).forEach(([path, contents]) =>
+      tree.write(path, contents),
+    );
+
+    await tsTrpcApiGenerator(tree, options);
+
+    Object.entries(userOwned).forEach(([path, contents]) =>
+      expect(tree.read(path, 'utf-8')).toBe(contents),
+    );
+  });
+
+  it('should vend its own entrypoint over the ts#project placeholder', async () => {
+    await tsTrpcApiGenerator(tree, {
+      name: 'TestApi',
+      directory: 'apps',
+      infra: 'rest-lambda',
+      integrationPattern: 'isolated',
+      auth: 'iam',
+      iac: 'cdk',
+    });
+
+    expect(tree.read('apps/test-api/src/index.ts', 'utf-8')).toContain(
+      "export { appRouter } from './router",
+    );
+  });
 });

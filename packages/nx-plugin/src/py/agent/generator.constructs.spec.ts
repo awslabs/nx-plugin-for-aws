@@ -408,11 +408,11 @@ dev-dependencies = []
     const packageTarget = projectConfig.targets['agent-package'];
     expect(packageTarget.dependsOn).toEqual(['bundle-arm']);
     expect(packageTarget.options.commands).toEqual([
-      'rimraf dist/apps/test-project/package/test-project-agent',
-      'make-dir dist/apps/test-project/package/test-project-agent',
-      'ncp dist/apps/test-project/bundle-arm dist/apps/test-project/package/test-project-agent',
-      'ncp apps/test-project/proj_test_project dist/apps/test-project/package/test-project-agent/proj_test_project',
-      'ncp apps/test-project/package/agent/main.py dist/apps/test-project/package/test-project-agent/main.py',
+      'shx rm -rf dist/apps/test-project/package/test-project-agent',
+      'shx mkdir -p dist/apps/test-project/package/test-project-agent',
+      'shx cp -R dist/apps/test-project/bundle-arm/. dist/apps/test-project/package/test-project-agent',
+      'shx cp -R apps/test-project/proj_test_project/. dist/apps/test-project/package/test-project-agent/proj_test_project',
+      'shx cp apps/test-project/package/agent/main.py dist/apps/test-project/package/test-project-agent/main.py',
     ]);
   });
 

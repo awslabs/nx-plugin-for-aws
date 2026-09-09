@@ -163,15 +163,25 @@ AG-UI 代理可以使用 <Link path="/guides/connection/react-agui">`connection`
 
 工具是 AI 代理可以调用以执行操作的函数。两个框架都使用基于装饰器的方法来定义工具，从函数名称和文档字符串派生工具名称和描述，并从您的类型提示生成输入模式。
 
+定义工具，然后将其添加到 `get_agent()` 内的 `tools` 列表中：
+
 <Tabs syncKey="agent-framework">
 <TabItem label="Strands" _filter={{ framework: 'strands' }}>
-```python
+```python title="packages/my-project/my_module/agent/agent.py" {16-20,32}
+from contextlib import contextmanager
+
 from strands import Agent, tool
+from strands.hooks import HookCallback, HookProvider
+from strands_tools import current_time
+from my_scope_agent_connection import log_model_errors, log_tool_errors
+
+from .session import get_session_manager
+
 
 @tool
-def calculate_sum(numbers: list[int]) -> int:
-    """Calculate the sum of a list of numbers"""
-    return sum(numbers)
+def subtract(a: int, b: int) -> int:
+    return a - b
+
 
 @tool
 def get_weather(city: str) -> str:
@@ -179,23 +189,41 @@ def get_weather(city: str) -> str:
     # Your weather API integration here
     return f"Weather in {city}: Sunny, 25°C"
 
-# Add tools to your agent
-agent = Agent(
-    system_prompt="You are a helpful assistant with access to various tools.",
-    tools=[calculate_sum, get_weather],
-)
+
+AGENT_HOOKS: list[HookProvider | HookCallback] = [log_model_errors, log_tool_errors]
+
+
+@contextmanager
+def get_agent():
+    yield Agent(
+        name="MyAgent",
+        description="MyAgent Strands Agent",
+        system_prompt="You are a helpful assistant with access to various tools.",
+        tools=[subtract, current_time, get_weather],
+        hooks=AGENT_HOOKS,
+        session_manager=get_session_manager(),
+    )
 ```
 </TabItem>
 <TabItem label="LangChain" _filter={{ framework: 'langchain' }}>
-```python
+```python title="packages/my-project/my_module/agent/agent.py" {19-23,30}
+import os
+
 from langchain.agents import create_agent
 from langchain_aws import ChatBedrockConverse
 from langchain_core.tools import tool
 
+from .session import get_checkpointer
+
+REGION = os.environ.get("AWS_REGION", "us-east-1")
+MODEL_ID = os.environ.get("MODEL_ID", "global.anthropic.claude-haiku-4-5-20251001-v1:0")
+
+
 @tool
-def calculate_sum(numbers: list[int]) -> int:
-    """Calculate the sum of a list of numbers"""
-    return sum(numbers)
+def subtract(a: int, b: int) -> int:
+    """Subtract b from a."""
+    return a - b
+
 
 @tool
 def get_weather(city: str) -> str:
@@ -203,12 +231,15 @@ def get_weather(city: str) -> str:
     # Your weather API integration here
     return f"Weather in {city}: Sunny, 25°C"
 
-# Add tools to your agent
-agent = create_agent(
-    model=ChatBedrockConverse(model=MODEL_ID, region_name=REGION),
-    tools=[calculate_sum, get_weather],
-    system_prompt="You are a helpful assistant with access to various tools.",
-)
+
+def get_agent():
+    model = ChatBedrockConverse(model=MODEL_ID, region_name=REGION)
+    return create_agent(
+        model=model,
+        tools=[subtract, get_weather],
+        system_prompt="You are a helpful assistant with access to various tools.",
+        checkpointer=get_checkpointer(),
+    )
 ```
 </TabItem>
 </Tabs>
@@ -217,28 +248,45 @@ agent = create_agent(
 
 <Tabs syncKey="agent-framework">
 <TabItem label="Strands" _filter={{ framework: 'strands' }}>
-Strands 通过 `strands-tools` 包提供了一系列预构建工具：
+Strands 通过 `strands-agents-tools` 包提供了一系列预构建工具，生成器已将其添加到您项目的 `pyproject.toml` 中。导入您想要的工具并将它们添加到 `get_agent()`：
 
-```python
-from strands_tools import current_time, http_request, file_read
+```python title="packages/my-project/my_module/agent/agent.py" {1,11}
+from strands_tools import current_time, file_read, http_request
 
-agent = Agent(
-    system_prompt="You are a helpful assistant.",
-    tools=[current_time, http_request, file_read],
-)
+# ...
+
+@contextmanager
+def get_agent():
+    yield Agent(
+        name="MyAgent",
+        description="MyAgent Strands Agent",
+        system_prompt="You are a helpful assistant.",
+        tools=[current_time, file_read, http_request],
+        hooks=AGENT_HOOKS,
+        session_manager=get_session_manager(),
+    )
 ```
 </TabItem>
 <TabItem label="LangChain" _filter={{ framework: 'langchain' }}>
-LangChain 提供了一个庞大的[工具和集成](https://docs.langchain.com/oss/python/integrations/tools)生态系统。安装相关的集成包，然后将工具传递给 `create_agent`：
+LangChain 提供了一个庞大的[工具和集成](https://docs.langchain.com/oss/python/integrations/tools)生态系统，每个都分布在自己的包中。生成器不会添加这些，因此请先安装您需要的那个 — 例如 `langchain-community`，下面的搜索工具来自该包：
 
-```python
+<NxCommands commands={['run <project-name>:add langchain-community']} />
+
+然后导入工具并将它们添加到 `get_agent()`：
+
+```python title="packages/my-project/my_module/agent/agent.py" {1,9}
 from langchain_community.tools import DuckDuckGoSearchRun
 
-agent = create_agent(
-    model=ChatBedrockConverse(model=MODEL_ID, region_name=REGION),
-    tools=[DuckDuckGoSearchRun()],
-    system_prompt="You are a helpful assistant.",
-)
+# ...
+
+def get_agent():
+    model = ChatBedrockConverse(model=MODEL_ID, region_name=REGION)
+    return create_agent(
+        model=model,
+        tools=[DuckDuckGoSearchRun()],
+        system_prompt="You are a helpful assistant.",
+        checkpointer=get_checkpointer(),
+    )
 ```
 </TabItem>
 </Tabs>
@@ -247,33 +295,50 @@ agent = create_agent(
 
 <Tabs syncKey="agent-framework">
 <TabItem label="Strands" _filter={{ framework: 'strands' }}>
-默认情况下，Strands 代理使用 Amazon Bedrock 上的 Claude Sonnet 4.6，但您可以自定义模型提供商。有关配置选项，请参阅 [Strands 关于模型提供商的文档](https://strandsagents.com/docs/user-guide/concepts/model-providers/)：
+生成的代理使用 Amazon Bedrock 上的默认 Strands 模型。要配置它，请将 `model` 传递给 `Agent`。有关可用提供商及其选项，请参阅 [Strands 关于模型提供商的文档](https://strandsagents.com/docs/user-guide/concepts/model-providers/)：
 
-```python
-from strands import Agent
+```python title="packages/my-project/my_module/agent/agent.py" {1,5-9,14}
 from strands.models import BedrockModel
 
-# Create a BedrockModel
-bedrock_model = BedrockModel(
+# ...
+
+MODEL = BedrockModel(
     model_id="anthropic.claude-sonnet-4-20250514-v1:0",
     region_name="us-west-2",
     temperature=0.3,
 )
 
-agent = Agent(model=bedrock_model)
+@contextmanager
+def get_agent():
+    yield Agent(
+        model=MODEL,
+        name="MyAgent",
+        description="MyAgent Strands Agent",
+        system_prompt="You are a helpful assistant.",
+        tools=[subtract, current_time],
+        hooks=AGENT_HOOKS,
+        session_manager=get_session_manager(),
+    )
 ```
 </TabItem>
 <TabItem label="LangChain" _filter={{ framework: 'langchain' }}>
-LangChain 代理使用 [`ChatBedrockConverse`](https://docs.langchain.com/oss/python/integrations/chat/bedrock_converse) 模型。生成的代理从 `MODEL_ID` 和 `AWS_REGION` 环境变量读取模型 ID 和区域，但您可以直接在 `agent.py` 中配置模型：
+LangChain 代理使用 [`ChatBedrockConverse`](https://docs.langchain.com/oss/python/integrations/chat/bedrock_converse) 模型。生成的代理从 `MODEL_ID` 和 `AWS_REGION` 环境变量读取模型 ID 和区域，基础设施为部署的代理设置这些变量。要进一步配置模型，请在 `get_agent()` 中构造它的位置添加参数：
 
-```python
-from langchain_aws import ChatBedrockConverse
+```python title="packages/my-project/my_module/agent/agent.py" {4-8}
+# ...
 
-model = ChatBedrockConverse(
-    model="anthropic.claude-sonnet-4-20250514-v1:0",
-    region_name="us-west-2",
-    temperature=0.3,
-)
+def get_agent():
+    model = ChatBedrockConverse(
+        model=MODEL_ID,
+        region_name=REGION,
+        temperature=0.3,
+    )
+    return create_agent(
+        model=model,
+        tools=[subtract],
+        system_prompt="You are a helpful assistant.",
+        checkpointer=get_checkpointer(),
+    )
 ```
 </TabItem>
 </Tabs>
@@ -425,6 +490,10 @@ AG-UI 代理旨在由前端直接使用。使用 <Link path="/guides/connection/
 
 这使用 `uv run` 使用 [Bedrock AgentCore Python SDK](https://github.com/aws/bedrock-agentcore-sdk-python) 执行您的 Agent。
 
+代理监听在生成时从工作区池分配的端口。从项目的 `project.json` 中的 `metadata.ports` 读取它，或从 `<your-agent-name>-dev` 目标的命令中的 `--port` 标志读取。下面的示例使用 `8081`，这是在新工作区中分配给第一个 HTTP 代理的端口。
+
+还会生成一个 `<your-agent-name>-serve` 目标，它针对您部署的基础设施运行代理，因此需要设置 `RUNTIME_CONFIG_APP_ID`。有关 `dev` 和 `serve` 之间的区别，请参阅<Link path="guides/local-development">本地开发</Link>指南。
+
 ### 与您的代理聊天
 
 生成器配置了一个 `<your-agent-name>-chat` Nx 目标，可让您进入与代理的交互式终端聊天。
@@ -439,11 +508,13 @@ AG-UI 代理旨在由前端直接使用。使用 <Link path="/guides/connection/
 
 生成器为每个协议生成一个 `scripts/<your-agent-name>/chat.ts`。默认情况下，它连接到本地代理，或者在设置 `RUNTIME_CONFIG_APP_ID` 时连接到您部署的代理（请参阅下面的[与您部署的代理聊天](#chat-with-your-deployed-agent)）。
 
-对于 **HTTP** 代理，聊天脚本使用从代理的 OpenAPI 规范生成的类型安全 TypeScript 客户端。生成器还生成：
+<OptionFilter when={{ protocol: 'http' }} description="OpenAPI client generation for the chat script">
+对于 HTTP 代理，聊天脚本使用从代理的 OpenAPI 规范生成的类型安全 TypeScript 客户端。生成器还生成：
 
-- `scripts/<your-agent-name>_openapi.py` — 一个导出代理的 OpenAPI 规范的小脚本
+- `scripts/<your_agent_name>_openapi.py` — 一个导出代理的 OpenAPI 规范的小脚本（使用您的代理名称的 `snake_case` 命名）
 - 一个运行它的 `<your-agent-name>-openapi` Nx 目标
 - 一个在 `scripts/<your-agent-name>/generated/` 下生成类型安全 TypeScript 客户端的 `<your-agent-name>-generate-client` Nx 目标
+</OptionFilter>
 
 当您自定义代理的输入形状（例如向 `InvokeInput` 添加新字段）时，更新 `chat.ts` 以在调用代理时传递新字段，其余部分将自动工作。
 
@@ -567,7 +638,11 @@ aws cognito-idp admin-initiate-auth \
 <OptionFilter when={{ protocol: 'http' }} description="FastAPI HTTP invocation details">
 ### 调用本地服务器
 
-要通过 `<your-agent-name>-serve` 目标调用本地运行的 Agent，您可以向本地代理运行的端口上的 `/invocations` 发送一个简单的 POST 请求。例如，使用 `curl`：
+使用 `<your-agent-name>-dev` 目标启动您的代理：
+
+<NxCommands commands={['agent-dev your-project']} />
+
+然后向您的本地代理运行的端口上的 `/invocations` 发送 POST 请求。替换分配给您的代理的端口 — 从项目的 `project.json` 中的 `metadata.ports` 读取它，或从 `<your-agent-name>-dev` 目标的命令中的 `--port` 标志读取。新工作区中的第一个 HTTP 代理被分配 `8081`：
 
 ```bash
 curl -N -X POST http://localhost:8081/invocations \

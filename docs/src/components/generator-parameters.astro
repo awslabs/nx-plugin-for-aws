@@ -1,7 +1,28 @@
 ---
-import { Badge } from '@astrojs/starlight/components';
+/**
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/**
+ * The options a generator accepts, as a compact panel.
+ *
+ * Enum values are rendered as chips, with the generator's own default marked.
+ * The panel is a second way into the values the page's run-generator card holds:
+ * picking a chip sets that option on the command, and the panel follows the
+ * command in turn — the row for an option the command carries is highlighted, and
+ * an option that doesn't apply under the current values is left out.
+ */
 import GeneratorsJson from '../../../packages/nx-plugin/generators.json';
 import schemaTranslations from '../i18n/schema-translations.json';
+import {
+  describeWhen,
+  effectiveValues,
+  isApplicable,
+  isValueApplicable,
+  readGeneratorOptions,
+} from '../lib/generator-options';
+import { pinnedPageOptions, type PageWhen } from '../lib/page-options';
 
 const { generator } = Astro.props;
 const schemas = Object.entries(import.meta.glob('../../../packages/nx-plugin/**/schema.json', { eager: true, query: '?raw' }));
@@ -9,27 +30,27 @@ const schema = JSON.parse(schemas.find(([file]) => file.endsWith(GeneratorsJson.
 
 const locale = Astro.currentLocale || 'en';
 const strings = {
-  parameter: {
-    en: 'Parameter',
-    jp: 'パラメータ',
-    ko: '매개변수',
-    fr: 'Paramètre',
-    it: 'Parametro',
-    es: 'Parámetro',
-    pt: 'Parâmetro',
-    zh: '参数',
-    vi: 'Tham số'
+  title: {
+    en: 'Generator Options',
+    jp: 'ジェネレーターオプション',
+    ko: '제너레이터 옵션',
+    fr: 'Options du générateur',
+    it: 'Opzioni del generatore',
+    es: 'Opciones del generador',
+    pt: 'Opções do gerador',
+    zh: '生成器选项',
+    vi: 'Tùy chọn của generator'
   },
-  type: {
-    en: 'Type',
-    jp: '型',
-    ko: '타입',
-    fr: 'Type',
-    it: 'Tipo',
-    es: 'Tipo',
-    pt: 'Tipo',
-    zh: '类型',
-    vi: 'Kiểu'
+  options: {
+    en: 'options',
+    jp: 'オプション',
+    ko: '옵션',
+    fr: 'options',
+    it: 'opzioni',
+    es: 'opciones',
+    pt: 'opções',
+    zh: '个选项',
+    vi: 'tùy chọn'
   },
   default: {
     en: 'Default',
@@ -42,17 +63,6 @@ const strings = {
     zh: '默认值',
     vi: 'Mặc định'
   },
-  description: {
-    en: 'Description',
-    jp: '説明',
-    ko: '설명',
-    fr: 'Description',
-    it: 'Descrizione',
-    es: 'Descripción',
-    pt: 'Descrição',
-    zh: '描述',
-    vi: 'Mô tả'
-  },
   required: {
     en: 'Required',
     jp: '必須',
@@ -64,6 +74,39 @@ const strings = {
     zh: '必需',
     vi: 'Bắt buộc'
   },
+  showAll: {
+    en: 'Show all',
+    jp: 'すべて表示',
+    ko: '전체 보기',
+    fr: 'Tout afficher',
+    it: 'Mostra tutti',
+    es: 'Mostrar todo',
+    pt: 'Mostrar tudo',
+    zh: '显示全部',
+    vi: 'Hiện tất cả'
+  },
+  showFewer: {
+    en: 'Show fewer',
+    jp: '折りたたむ',
+    ko: '접기',
+    fr: 'Réduire',
+    it: 'Mostra meno',
+    es: 'Mostrar menos',
+    pt: 'Mostrar menos',
+    zh: '收起',
+    vi: 'Thu gọn'
+  },
+  appliesWhen: {
+    en: 'Only applies with these option values',
+    jp: 'これらのオプション値の場合のみ適用されます',
+    ko: '이 옵션 값에서만 적용됩니다',
+    fr: 'Ne s\'applique qu\'avec ces valeurs d\'options',
+    it: 'Si applica solo con questi valori delle opzioni',
+    es: 'Solo se aplica con estos valores de opciones',
+    pt: 'Aplica-se apenas com estes valores de opções',
+    zh: '仅在这些选项值下适用',
+    vi: 'Chỉ áp dụng với các giá trị tùy chọn này'
+  },
 };
 const localeString = (name) => strings[name][locale] || strings[name]['en'];
 const getDescription = (parameter, fallback) => {
@@ -71,23 +114,277 @@ const getDescription = (parameter, fallback) => {
     ?? schemaTranslations?.[generator]?.[parameter]?.['en']
     ?? fallback;
 };
+
+// Enum values past this point are collapsed behind a toggle, so a long list
+// (e.g. every Powertools event schema) stays one row tall.
+const COLLAPSE_AFTER = 6;
+
+// A guide written for one variant of a generator leaves out the options that
+// variant doesn't take — the Smithy namespace on the tRPC guide.
+const pinnedByPage = pinnedPageOptions(
+  (Astro.locals.starlightRoute?.entry?.data as { when?: PageWhen } | undefined)
+    ?.when,
+);
+const forced = effectiveValues(pinnedByPage, []);
+const parameters = readGeneratorOptions(schema)
+  .filter((option) => isApplicable(option, forced))
+  .map((option) => ({
+    ...option,
+    description: getDescription(option.key, option.description),
+    // A value the guide has ruled out is not one of this variant's choices.
+    values: option.values.filter((value) =>
+      isValueApplicable(option, value, forced),
+    ),
+  }));
 ---
 
-<table>
-  <tr>
-    <th>{localeString('parameter')}</th>
-    <th>{localeString('type')}</th>
-    <th>{localeString('default')}</th>
-    <th>{localeString('description')}</th>
-  </tr>
-  {
-    Object.entries(schema.properties).map(([parameter, parameterSchema]) => (
-      <tr>
-        <td>{parameter} {(schema.required ?? []).includes(parameter) ? <Badge text={localeString('required')} variant="note" /> : null}</td>
-        <td>{parameterSchema.enum ? parameterSchema.enum.join(' | ') : parameterSchema.type}</td>
-        <td>{parameterSchema.default ?? '-'}</td>
-        <td>{getDescription(parameter, parameterSchema.description) ?? '-'}</td>
-      </tr>
-    ))
+<div
+  class="gen-params not-content"
+  data-gen-params
+  data-gen-params-pinned={JSON.stringify(pinnedByPage)}
+  data-gen-params-defaults={JSON.stringify(
+    Object.fromEntries(
+      parameters
+        .filter((parameter) => parameter.default !== undefined)
+        .map((parameter) => [parameter.key, parameter.default]),
+    ),
+  )}
+>
+  <div class="gen-params-head">
+    <span class="gen-params-title">{localeString('title')}</span>
+    <span class="gen-params-count">{parameters.length} {localeString('options')}</span>
+  </div>
+  <dl class="gen-params-list">
+    {parameters.map((parameter) => (
+      <div
+        class="gen-param"
+        data-gen-param={parameter.key}
+        data-gen-param-when={parameter.when ? JSON.stringify(parameter.when) : undefined}
+      >
+        <dt class="gen-param-head">
+          <code class="gen-param-name">{parameter.key}</code>
+          {parameter.required && (
+            <span class="gen-param-required">{localeString('required')}</span>
+          )}
+          <span class="gen-param-type">{parameter.type}</span>
+          {parameter.when && (
+            <span
+              class="gen-param-when doc-tooltip"
+              role="note"
+              data-tooltip={localeString('appliesWhen')}
+              aria-label={`${localeString('appliesWhen')}: ${describeWhen(parameter.when)}`}
+            >
+              {describeWhen(parameter.when)}
+            </span>
+          )}
+          {parameter.default !== undefined && (
+            <span class="gen-param-default">
+              {localeString('default')}: <code>{parameter.default}</code>
+            </span>
+          )}
+        </dt>
+        <dd class="gen-param-body">
+          {parameter.description && (
+            <p class="gen-param-desc">{parameter.description}</p>
+          )}
+          {parameter.values.length > 0 && (
+            <div class="gen-param-values">
+              {parameter.values.map((value, index) => (
+                <span
+                  class:list={[
+                    'gen-param-value',
+                    {
+                      'is-overflow': index >= COLLAPSE_AFTER,
+                      'is-default': value === parameter.default,
+                      'doc-tooltip': !!parameter.valueWhen?.[value],
+                    },
+                  ]}
+                  title={value === parameter.default ? localeString('default') : undefined}
+                  data-tooltip={
+                    parameter.valueWhen?.[value]
+                      ? `${localeString('appliesWhen')}: ${describeWhen(parameter.valueWhen[value])}`
+                      : undefined
+                  }
+                  data-gen-param-value={value}
+                  data-value-when={
+                    parameter.valueWhen?.[value]
+                      ? JSON.stringify(parameter.valueWhen[value])
+                      : undefined
+                  }
+                >
+                  {value}
+                </span>
+              ))}
+              {parameter.values.length > COLLAPSE_AFTER && (
+                <button
+                  type="button"
+                  class="gen-param-more"
+                  data-gen-param-more
+                  data-label-more={`${localeString('showAll')} ${parameter.values.length}`}
+                  data-label-fewer={localeString('showFewer')}
+                >
+                  {localeString('showAll')} {parameter.values.length}
+                </button>
+              )}
+            </div>
+          )}
+        </dd>
+      </div>
+    ))}
+  </dl>
+</div>
+
+<script>
+  import {
+    effectiveValues,
+    isApplicable,
+    isValueApplicable,
+  } from '../lib/generator-options';
+
+  /**
+   * Keeps the panel and the page's command in step, in both directions:
+   *   - picking a value asks the run-generator card to set it, which rebuilds the
+   *     command and announces the new values,
+   *   - and every announcement highlights the row and chip for an option the
+   *     command carries, and hides an option that no longer applies.
+   */
+  const run = () => {
+    const panels = document.querySelectorAll<HTMLElement>('[data-gen-params]');
+    if (panels.length === 0) return;
+
+    // The card that runs the generator this page is about; without one there is
+    // no command for the panel to drive.
+    const card = document.querySelector<HTMLElement>(
+      '[data-command-card-owns-page]',
+    );
+
+    for (const panel of panels) {
+      const rows = Array.from(
+        panel.querySelectorAll<HTMLElement>('[data-gen-param]'),
+      );
+      // The values the page itself is written around, which the reader's
+      // selection adds to rather than replaces.
+      let pinned: Record<string, string> = {};
+      let defaults: { key: string; default?: string }[] = [];
+      try {
+        pinned = JSON.parse(panel.dataset.genParamsPinned || '{}');
+        defaults = Object.entries(
+          JSON.parse(panel.dataset.genParamsDefaults || '{}') as Record<
+            string,
+            string
+          >,
+        ).map(([key, value]) => ({ key, default: value }));
+      } catch {
+        // A malformed value is nothing to act on.
+      }
+
+      for (const row of rows) {
+        const key = row.dataset.genParam!;
+        const chips = Array.from(
+          row.querySelectorAll<HTMLElement>('[data-gen-param-value]'),
+        );
+        const more = row.querySelector<HTMLElement>('[data-gen-param-more]');
+
+        more?.addEventListener('click', () => {
+          const expanded = row.classList.toggle('is-expanded');
+          more.textContent = expanded
+            ? more.dataset.labelFewer!
+            : more.dataset.labelMore!;
+        });
+
+        // Only values the card offers can be set from here: an option it fixes
+        // (the tRPC guide's framework) stays as the guide wrote it.
+        const control = card?.querySelector<HTMLButtonElement>(
+          `[data-option-pill="${key}"]`,
+        );
+        if (chips.length === 0 || !control || control.disabled) continue;
+
+        row.classList.add('is-interactive');
+        // Picking the value already set clears it, so the option goes back to
+        // whatever the generator would prompt for.
+        const choose = (chip: HTMLElement) => {
+          // A value another choice rules out isn't one to pick.
+          if (chip.classList.contains('is-inapplicable')) return;
+          const value = chip.classList.contains('is-selected')
+            ? ''
+            : chip.dataset.genParamValue!;
+          document.dispatchEvent(
+            new CustomEvent('npfa:option-set', { detail: { key, value } }),
+          );
+        };
+
+        for (const chip of chips) {
+          chip.setAttribute('role', 'button');
+          chip.setAttribute('tabindex', '0');
+          chip.addEventListener('click', () => choose(chip));
+          chip.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            choose(chip);
+          });
+        }
+      }
+
+      const sync = (
+        values: Record<string, string>,
+        command: Record<string, string>,
+      ) => {
+        // The values a run would use, so a condition on an option the reader
+        // hasn't touched is read against that option's own default.
+        const context = effectiveValues({ ...pinned, ...values }, defaults);
+
+        for (const row of rows) {
+          const when = row.dataset.genParamWhen;
+          const applies =
+            !when || isApplicable({ when: JSON.parse(when) }, context);
+          row.classList.toggle('is-inapplicable', !applies);
+
+          const carried = command[row.dataset.genParam!];
+          row.classList.toggle('is-filtered', !!carried);
+          for (const chip of row.querySelectorAll<HTMLElement>(
+            '[data-gen-param-value]',
+          )) {
+            const isSelected = chip.dataset.genParamValue === carried;
+            chip.classList.toggle('is-selected', isSelected);
+            if (chip.getAttribute('role') === 'button') {
+              chip.setAttribute('aria-pressed', String(isSelected));
+            }
+            // A value ruled out on its own — an API's `http-lambda` under the
+            // Smithy framework — reads as out of play like the option would.
+            const valueWhen = chip.dataset.valueWhen;
+            chip.classList.toggle(
+              'is-inapplicable',
+              !!valueWhen &&
+                !isValueApplicable(
+                  { valueWhen: { value: JSON.parse(valueWhen) } },
+                  'value',
+                  context,
+                ),
+            );
+          }
+        }
+      };
+
+      document.addEventListener('npfa:page-options', (event) => {
+        const detail = (event as CustomEvent).detail ?? {};
+        sync(detail.values ?? {}, detail.command ?? {});
+      });
+
+      // The card may have announced before this script ran, so start from what it
+      // last published.
+      let announced: { values?: Record<string, string>; command?: Record<string, string> } = {};
+      try {
+        announced = JSON.parse(card?.dataset.pageOptions || '{}');
+      } catch {
+        // A malformed announcement is nothing to act on.
+      }
+      sync(announced.values ?? {}, announced.command ?? {});
+    }
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', run);
+  } else {
+    run();
   }
-</table>
+</script>

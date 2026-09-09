@@ -77,7 +77,7 @@ describe('smoke test - rdb', () => {
           opts,
         );
         await runCLI(
-          `generate @aws/nx-plugin:py#project --name=py-agents --projectType=application --no-interactive`,
+          `generate @aws/nx-plugin:py#project --name=py-agents --type=application --no-interactive`,
           opts,
         );
         await runCLI(

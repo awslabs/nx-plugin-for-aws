@@ -22,11 +22,22 @@
       alt="Commit activity"
     />
   </a>
+  <p>
+    <a href="https://awslabs.github.io/nx-plugin-for-aws/"><b>Documentation Site</b></a>
+  </p>
 </div>
 
 ---
 
 **@aws/nx-plugin** is a collection of code generators that scaffold full-stack AWS applications inside an [Nx](https://nx.dev) monorepo. Every generator produces best-practice application code **and** the infrastructure to deploy it — type-safe, locally runnable, and deployable from the start, getting you closer to production.
+
+<div align="center">
+  <img
+    src="https://raw.githubusercontent.com/awslabs/nx-plugin-for-aws/main/docs/src/content/docs/assets/nx-plugin-showcase-desktop-dark.gif"
+    alt="Scaffolding, running and deploying a full-stack AWS application with the Nx Plugin for AWS"
+    width="900"
+  />
+</div>
 
 ## Quick Start
 

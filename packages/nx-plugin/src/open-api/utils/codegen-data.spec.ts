@@ -442,7 +442,7 @@ describe('openapi codegen data utils', () => {
       };
 
       expect(() => buildOpenApiCodeGenData(specWithInvalidAllOf)).toThrow(
-        /allOf with non-object types/,
+        /cannot be composed: an allOf member is not an object type/,
       );
     });
 

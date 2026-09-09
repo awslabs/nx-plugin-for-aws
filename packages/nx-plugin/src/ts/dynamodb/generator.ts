@@ -8,16 +8,22 @@ import {
   type GeneratorCallback,
   generateFiles,
   joinPathFragments,
+  OverwriteStrategy,
   readProjectConfiguration,
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { addTsDependencies } from '../../utils/add-dependencies.js';
+import { addNamedExport, addStarExport } from '../../utils/ast.js';
 import { resolveContainers } from '../../utils/containers.js';
 import {
   declareDependencies,
   ownedElsewhere,
 } from '../../utils/declared-dependencies.js';
+import {
+  DYNAMODB_LOCAL_IMAGE,
+  writeDynamoDBConfig,
+} from '../../utils/dynamodb-config.js';
 import { addDynamoDBInfra } from '../../utils/dynamodb-constructs/dynamodb-constructs.js';
 import { formatFilesInSubtree } from '../../utils/format.js';
 import { resolveIac } from '../../utils/iac.js';
@@ -111,19 +117,51 @@ export const tsDynamoDBGenerator = async (
 
   const templateOptions = {
     runtimeConfigKey: nameClassName,
-    localDynamoDBPort,
-    localTableName,
-    containerName,
-    containerEngine,
     ...esmVars(tree),
   };
 
+  // The entities and the client are the user's to author — the guide walks
+  // through adding entity files under `src/entities` — so a re-run leaves them
+  // alone.
   generateFiles(
     tree,
     joinPathFragments(import.meta.dirname, 'files'),
     dir,
     templateOptions,
+    { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
+
+  // The barrels re-export the generated example entity and the client. Adding to
+  // whatever is already there registers them without discarding the user's own
+  // entity exports on a re-run.
+  await addNamedExport(
+    tree,
+    joinPathFragments(dir, 'src', 'entities', 'index.ts'),
+    ['createExampleEntity'],
+    './example.js',
+  );
+  await addStarExport(
+    tree,
+    joinPathFragments(dir, 'src', 'index.ts'),
+    './entities/index.js',
+  );
+  await addNamedExport(
+    tree,
+    joinPathFragments(dir, 'src', 'index.ts'),
+    ['getDynamoDBClient', 'resolveTableName'],
+    './client.js',
+  );
+
+  writeDynamoDBConfig(tree, dir, {
+    runtimeConfigKey: nameClassName,
+    localDev: {
+      port: localDynamoDBPort,
+      tableName: localTableName,
+      image: DYNAMODB_LOCAL_IMAGE,
+      containerName,
+      containerEngine,
+    },
+  });
 
   await sharedDynamoDBScriptsGenerator(tree, DEPENDENCIES);
 

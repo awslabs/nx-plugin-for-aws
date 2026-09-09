@@ -7,6 +7,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import fs from 'fs';
+import { join } from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServer } from './server.js';
 
@@ -55,6 +56,7 @@ describe('MCP Server', () => {
     expect(toolNames).toContain('list-generators');
     expect(toolNames).toContain('generator-guide');
     expect(toolNames).toContain('add-to-existing-project');
+    expect(toolNames).toContain('best-practices');
   });
 
   it('should have a description for every tool', async () => {
@@ -139,6 +141,27 @@ describe('MCP Server', () => {
     expect(result.content[0].type).toBe('text');
     // Verify NxCommands are post-processed into code blocks with the package manager prefix
     expect(result.content[0].text).toContain('pnpm nx');
+  });
+
+  it('should register the same tools as the published nx-plugin-mcp entry point', async () => {
+    // `packages/nx-plugin-mcp/src/index.ts` builds its own McpServer rather
+    // than calling `createServer`, so a tool added here alone never reaches
+    // the published package.
+    const publishedEntryPoint = fs.readFileSync(
+      join(__dirname, '../../../nx-plugin-mcp/src/index.ts'),
+      'utf-8',
+    );
+
+    const registrars = [
+      ...fs
+        .readFileSync(join(__dirname, 'server.ts'), 'utf-8')
+        .matchAll(/^\s*(add\w+Tool)\(server/gm),
+    ].map(([, name]) => name);
+
+    expect(registrars.length).toBeGreaterThan(0);
+    for (const registrar of registrars) {
+      expect(publishedEntryPoint).toContain(`${registrar}(server`);
+    }
   });
 
   it('should throw an error when generator-guide is called with an invalid generator', async () => {

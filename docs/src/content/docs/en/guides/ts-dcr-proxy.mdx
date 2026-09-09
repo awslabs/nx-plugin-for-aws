@@ -41,6 +41,12 @@ The generator creates a standalone <Link path="/guides/typescript-project">TypeS
       - authorize.ts Redirects to the Cognito Hosted UI
       - token.ts Injects the App Client secret and exchanges the token
       - mcp-proxy.ts Proxies `/mcp` requests to the upstream MCP server
+    - index.ts Project entry point
+  - rolldown.config.ts Bundle configuration, one entry per handler
+  - README.md Project README
+  - package.json Declares the handlers' dependencies
+  - project.json Adds a bundle target per handler
+  - tsconfig.json / tsconfig.lib.json / tsconfig.spec.json TypeScript configuration
 
 </FileTree>
 
@@ -103,7 +109,7 @@ You provide:
 Instantiate the generated construct in your stack, passing the required properties:
 
 ```typescript
-import { DcrProxy } from ':my-scope/common-constructs';
+import { DcrProxy } from '@my-scope/common-constructs';
 
 new DcrProxy(this, 'DcrProxy', {
   userPoolId: userPool.userPoolId,
@@ -155,8 +161,9 @@ import {
   DcrProxy,
   MyProjectMcpServer,
   UserIdentity,
-} from ':my-scope/common-constructs';
+} from '@my-scope/common-constructs';
 import { OAuthScope } from 'aws-cdk-lib/aws-cognito';
+import * as kms from 'aws-cdk-lib/aws-kms';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 
 const identity = new UserIdentity(this, 'Identity');
@@ -179,6 +186,9 @@ const proxyClient = identity.userPool.addClient('DcrProxyClient', {
 // Store the App Client secret in Secrets Manager for the token handler to read
 const clientSecret = new secretsmanager.Secret(this, 'ClientSecret', {
   secretStringValue: proxyClient.userPoolClientSecret,
+  encryptionKey: new kms.Key(this, 'ClientSecretKey', {
+    enableKeyRotation: true,
+  }),
 });
 
 // The MCP server, authorizing JWTs issued for the same App Client
@@ -267,8 +277,9 @@ import {
   DcrProxy,
   MyGateway,
   UserIdentity,
-} from ':my-scope/common-constructs';
+} from '@my-scope/common-constructs';
 import { OAuthScope } from 'aws-cdk-lib/aws-cognito';
+import * as kms from 'aws-cdk-lib/aws-kms';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 
 const identity = new UserIdentity(this, 'Identity');
@@ -291,6 +302,9 @@ const proxyClient = identity.userPool.addClient('DcrProxyClient', {
 // Store the App Client secret in Secrets Manager for the token handler to read
 const clientSecret = new secretsmanager.Secret(this, 'ClientSecret', {
   secretStringValue: proxyClient.userPoolClientSecret,
+  encryptionKey: new kms.Key(this, 'ClientSecretKey', {
+    enableKeyRotation: true,
+  }),
 });
 
 // The gateway, authorizing JWTs issued for the same App Client
@@ -307,7 +321,7 @@ new DcrProxy(this, 'DcrProxy', {
   cognitoClientSecretArn: clientSecret.secretArn,
   cognitoHostedUiBase: identity.userPoolDomain.baseUrl(),
   // Use the gateway construct's URL rather than hardcoding it
-  upstreamUrl: gateway.gateway.gatewayUrl,
+  upstreamUrl: gateway.gatewayUrl,
 });
 ```
 </Fragment>
@@ -341,7 +355,7 @@ resource "aws_secretsmanager_secret_version" "client_secret" {
 
 # The gateway, authorizing JWTs issued for the same App Client
 module "my_gateway" {
-  source = "../../common/terraform/src/app/agentcore-gateway/my-gateway"
+  source = "../../common/terraform/src/app/gateways/my-gateway"
 
   user_pool_id         = module.user_identity.user_pool_id
   user_pool_client_ids = [aws_cognito_user_pool_client.dcr_proxy.id]
@@ -466,8 +480,9 @@ import {
   DcrProxy,
   MyProjectMcpServer,
   UserIdentity,
-} from ':my-scope/common-constructs';
+} from '@my-scope/common-constructs';
 import { OAuthScope, CfnManagedLoginBranding } from 'aws-cdk-lib/aws-cognito';
+import * as kms from 'aws-cdk-lib/aws-kms';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 
 // The user pool created by ts#website#auth for your website users
@@ -492,6 +507,9 @@ new CfnManagedLoginBranding(this, 'DcrProxyClientBranding', {
 
 const clientSecret = new secretsmanager.Secret(this, 'ClientSecret', {
   secretStringValue: proxyClient.userPoolClientSecret,
+  encryptionKey: new kms.Key(this, 'ClientSecretKey', {
+    enableKeyRotation: true,
+  }),
 });
 
 const mcpServer = new MyProjectMcpServer(this, 'MyProjectMcpServer', {

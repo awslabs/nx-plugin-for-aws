@@ -5,6 +5,7 @@ description: AWS AppConfigを使用して生成されたプロジェクトを接
 import { Tabs, TabItem, Steps } from '@astrojs/starlight/components';
 import Infrastructure from '@components/infrastructure.astro';
 import Link from '@components/link.astro';
+import EmbeddedGraph from '@components/embedded-graph.astro';
 
 ランタイム設定は、Nx Plugin for AWSが生成されたプロジェクトとコンポーネント間でデプロイ時の値を渡し、相互に接続できるようにするメカニズムです。例えば、APIを生成すると、そのURLは自動的にランタイム設定に登録され、接続されたウェブサイトがそれを検出できるようになります。
 
@@ -26,40 +27,7 @@ import Link from '@components/link.astro';
 
 必要に応じて追加の名前空間をいくつでも定義でき、デプロイ時の値をLambda関数や他のコンピュートリソースに渡すための環境変数の便利な代替手段を提供します。
 
-```d2
-direction: down
-
-iac: "Infrastructure as code\nRuntimeConfig.set(...)"
-
-appconfig: "AWS AppConfig" {
-  shape: cylinder
-  connection: "connection namespace"
-  agentcore: "agentcore namespace"
-  custom: "custom namespaces"
-}
-
-s3: "website S3 bucket" {
-  shape: cylinder
-  rcj: runtime-config.json {
-    shape: page
-  }
-}
-
-website: React website
-
-server: Lambda / agent
-
-iac -> appconfig.connection
-iac -> appconfig.agentcore
-iac -> appconfig.custom
-
-appconfig.connection -> s3.rcj: deployed
-s3.rcj -> website: fetched at load
-
-appconfig.connection -> server
-appconfig.agentcore -> server: Powertools getAppConfig
-appconfig.custom -> server
-```
+<EmbeddedGraph diagram="runtime-config" />
 
 ## インフラストラクチャ
 
@@ -253,15 +221,27 @@ Lambda関数やエージェントなどのサーバーサイドコンシュー�
 
 [`@aws-lambda-powertools/parameters`](https://docs.aws.amazon.com/powertools/typescript/latest/features/parameters)の`getAppConfig`を使用します：
 
+`getAppConfig`は任意の有効なJSON値を返すため、期待する形状を宣言して結果をキャストします — そうしないと、ワークスペースの厳格な`tsconfig`の下でプロパティアクセスがコンパイルされません：
+
 ```ts
 import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
 
+interface ConnectionConfig {
+  apis?: Record<string, string>;
+  cognitoProps?: {
+    region: string;
+    userPoolId: string;
+    userPoolWebClientId: string;
+    identityPoolId: string;
+  };
+}
+
 // Retrieve the 'connection' namespace as a parsed JSON object
-const config = await getAppConfig('connection', {
+const config = (await getAppConfig('connection', {
   application: process.env.RUNTIME_CONFIG_APP_ID!,
   environment: 'default',
   transform: 'json',
-});
+})) as ConnectionConfig;
 
 // Access values
 const apiUrl = config.apis?.MyApi;
@@ -271,15 +251,23 @@ const cognitoProps = config.cognitoProps;
 カスタム名前空間を取得することもできます：
 
 ```ts
+interface TablesConfig {
+  users?: { tableName: string; tableArn: string };
+}
+
 // Retrieve a custom 'tables' namespace
-const tablesConfig = await getAppConfig('tables', {
+const tablesConfig = (await getAppConfig('tables', {
   application: process.env.RUNTIME_CONFIG_APP_ID!,
   environment: 'default',
   transform: 'json',
-});
+})) as TablesConfig;
 
 const usersTableName = tablesConfig.users?.tableName;
 ```
+
+:::tip[境界でバリデーション]
+キャストはコンパイラに形状を伝えますが、ランタイムでチェックしません。制御できない設定の場合は、代わりに[Zod](https://zod.dev/)スキーマで解析することで、不正な値が後で`undefined`として現れるのではなく、明確に失敗するようにします。
+:::
 
   </TabItem>
   <TabItem label="Python" icon="seti:python">

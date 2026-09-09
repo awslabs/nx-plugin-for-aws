@@ -5,6 +5,7 @@ description: Xây dựng và triển khai Docker images cho các dự án TypeSc
 
 import { FileTree, Tabs, TabItem, Code } from '@astrojs/starlight/components';
 import NxCommands from '@components/nx-commands.astro';
+import InstallCommand from '@components/install-command.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 import Link from '@components/link.astro';
 import Infrastructure from '@components/infrastructure.astro';
@@ -18,9 +19,9 @@ export const trivyTarget = `{
       "executor": "nx:run-commands",
       "options": {
         "commands": [
-          "rimraf dist/packages/my-project/trivy",
-          "make-dir dist/packages/my-project/trivy",
-          "ncp packages/my-project/.trivyignore dist/packages/my-project/trivy/.trivyignore",
+          "shx rm -rf dist/packages/my-project/trivy",
+          "shx mkdir -p dist/packages/my-project/trivy",
+          "shx cp packages/my-project/.trivyignore dist/packages/my-project/trivy/.trivyignore",
           "docker save -o dist/packages/my-project/trivy/image.tar my-scope-my-project:latest",
           "docker run --rm -v \\"./dist/packages/my-project/trivy\\":/scan public.ecr.aws/aquasecurity/trivy:${CONTAINER_VERSIONS.trivy} image --input /scan/image.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q"
         ],
@@ -31,7 +32,7 @@ export const trivyTarget = `{
   }
 }`;
 
-Một số generators (như <Link path="/vi/guides/ts-agent">`ts#agent`</Link> và <Link path="/vi/guides/py-agent">`py#agent`</Link>) tạo ra một Docker image được đẩy lên Amazon ECR và được sử dụng bởi hạ tầng AWS. Hướng dẫn này mô tả mẫu mà chúng tuân theo để bạn có thể áp dụng nó cho các trường hợp sử dụng khác — ví dụ, chạy một dự án <Link path="/vi/guides/fastapi">FastAPI</Link> trên Amazon ECS, hoặc triển khai một Express server được container hóa.
+Một số generators (như <Link path="/guides/ts-agent">`ts#agent`</Link> và <Link path="/guides/py-agent">`py#agent`</Link>) tạo ra một Docker image được đẩy lên Amazon ECR và được sử dụng bởi hạ tầng AWS. Hướng dẫn này mô tả mẫu mà chúng tuân theo để bạn có thể áp dụng nó cho các trường hợp sử dụng khác — ví dụ, chạy một dự án <Link path="/guides/fastapi">FastAPI</Link> trên Amazon ECS, hoặc triển khai một Express server được container hóa.
 
 :::tip[Docker hoặc Finch]
 Container engine được sử dụng để xây dựng images được chọn tại thời điểm tạo workspace thông qua cờ `--containers` (`docker`, `finch`, hoặc `infer` — mặc định — tự động phát hiện những gì đã được cài đặt). [Finch](https://runfinch.com/) là một giải pháp thay thế mã nguồn mở, thay thế trực tiếp cho Docker. Lựa chọn được ghi lại trong `aws-nx-plugin.config.mts` và áp dụng cho mọi generator phát ra các lệnh xây dựng container. Các bản build image asset của CDK tôn trọng lựa chọn này thông qua biến môi trường `CDK_DOCKER`.
@@ -75,7 +76,7 @@ Giữ bước bundle trong Nx (thay vì bên trong `Dockerfile`) có nghĩa là:
 
 ### Bundle Target
 
-Cấu hình một `bundle` target gọi Rolldown. Nếu bạn đang bắt đầu từ một <Link path="/vi/guides/typescript-project">`ts#project`</Link>, thêm phần sau vào `project.json` của bạn:
+Cấu hình một `bundle` target gọi Rolldown. Nếu bạn đang bắt đầu từ một <Link path="/guides/typescript-project">`ts#project`</Link>, thêm phần sau vào `project.json` của bạn:
 
 ```json
 {
@@ -132,10 +133,17 @@ Một số npm packages không thể được bundle vì chúng dựa vào `requ
 
 ### Dockerfile
 
-Tạo một `Dockerfile` trong thư mục nguồn dự án của bạn. File này không làm gì nhiều hơn là `COPY` bundle vào một Node base image, cộng với `npm install` bất kỳ packages `external` nào không thể được bundle. Đặt bước `RUN npm install` **trước** `COPY`, để Docker có thể cache layer `node_modules` đã cài đặt và chỉ chạy lại nó khi danh sách dependencies thực sự thay đổi:
+Tạo một `Dockerfile` trong thư mục nguồn dự án của bạn. File này không làm gì nhiều hơn là [áp dụng các bản cập nhật bảo mật của base image](#áp-dụng-các-bản-cập-nhật-bảo-mật-của-bản-phân-phối), `COPY` bundle vào một Node base image, cộng với `npm install` bất kỳ packages `external` nào không thể được bundle. Đặt bước `RUN npm install` **trước** `COPY`, để Docker có thể cache layer `node_modules` đã cài đặt và chỉ chạy lại nó khi danh sách dependencies thực sự thay đổi:
 
 ```dockerfile
 FROM public.ecr.aws/docker/library/node:lts
+
+# Apply the distribution's security updates: base image tags lag behind the
+# security suite, so their OS packages carry vulnerabilities that already have a
+# published fix.
+RUN apt-get update && \
+    apt-get upgrade -y --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -170,7 +178,7 @@ Thêm target `docker` để:
       "executor": "nx:run-commands",
       "options": {
         "commands": [
-          "ncp packages/my-project/src/Dockerfile dist/packages/my-project/bundle/Dockerfile",
+          "shx cp packages/my-project/src/Dockerfile dist/packages/my-project/bundle/Dockerfile",
           "docker build --platform linux/arm64 -t my-scope-my-project:latest dist/packages/my-project/bundle"
         ],
         "parallel": false
@@ -186,7 +194,9 @@ Thêm target `docker` để:
 :::
 
 :::tip[Sao chép file đa nền tảng]
-Package `ncp` cung cấp lệnh sao chép file/thư mục đa nền tảng, tránh `cp` (không khả dụng trên Windows). Cài đặt nó tại thư mục gốc của workspace với `pnpm add -D -w ncp`.
+Package `shx` cung cấp các lệnh `cp`, `rm` và `mkdir` đa nền tảng, tránh các shell builtins (không khả dụng trên Windows). Cài đặt nó tại thư mục gốc của workspace của bạn:
+
+<InstallCommand pkg="shx" dev />
 :::
 
 Chạy target này tạo ra một local image được gắn thẻ `my-scope-my-project:latest`, được xây dựng từ context tối thiểu tại `dist/packages/my-project/bundle/`:
@@ -203,7 +213,7 @@ Nếu bạn chỉ triển khai với CDK, lệnh `docker build` ở trên là t�
 
 ### Bundle Target
 
-Cấu hình một `bundle` target sử dụng `uv` để export và cài đặt dependencies cho nền tảng mục tiêu của bạn. Generator <Link path="/vi/guides/python-project">`py#project`</Link> và generator <Link path="/vi/guides/python-lambda-function">`py#lambda-function`</Link> đều cấu hình điều này cho bạn. Cấu hình target trông như sau:
+Cấu hình một `bundle` target sử dụng `uv` để export và cài đặt dependencies cho nền tảng mục tiêu của bạn. Generator <Link path="/guides/python-project">`py#project`</Link> và generator <Link path="/guides/python-lambda-function">`py#lambda-function`</Link> đều cấu hình điều này cho bạn. Cấu hình target trông như sau:
 
 ```json
 {
@@ -233,10 +243,17 @@ Chạy `nx bundle my-project` tạo ra `dist/packages/my-project/bundle-arm/` ch
 
 ### Dockerfile
 
-`Dockerfile` đơn giản sao chép bundle vào Python base image. Vì `uv` đã cài đặt tất cả dependency vào thư mục bundle, bạn không cần chạy `pip install` bên trong image:
+`Dockerfile` [áp dụng các bản cập nhật bảo mật của base image](#áp-dụng-các-bản-cập-nhật-bảo-mật-của-bản-phân-phối), sau đó sao chép bundle vào Python base image. Vì `uv` đã cài đặt tất cả dependency vào thư mục bundle, bạn không cần chạy `pip install` bên trong image:
 
 ```dockerfile
 FROM public.ecr.aws/docker/library/python:3.14-slim
+
+# Apply the distribution's security updates: base image tags lag behind the
+# security suite, so their OS packages carry vulnerabilities that already have a
+# published fix.
+RUN apt-get update && \
+    apt-get upgrade -y --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -263,10 +280,10 @@ Thêm một `docker` target sao chép `Dockerfile` vào thư mục đầu ra bun
       "executor": "nx:run-commands",
       "options": {
         "commands": [
-          "rimraf dist/packages/my-project/docker",
-          "make-dir dist/packages/my-project/docker",
-          "ncp dist/packages/my-project/bundle-arm dist/packages/my-project/docker",
-          "ncp packages/my-project/src/Dockerfile dist/packages/my-project/docker/Dockerfile",
+          "shx rm -rf dist/packages/my-project/docker",
+          "shx mkdir -p dist/packages/my-project/docker",
+          "shx cp -R dist/packages/my-project/bundle-arm/. dist/packages/my-project/docker",
+          "shx cp packages/my-project/src/Dockerfile dist/packages/my-project/docker/Dockerfile",
           "docker build --platform linux/arm64 -t my-scope-my-project:latest dist/packages/my-project/docker"
         ],
         "parallel": false
@@ -285,7 +302,13 @@ Thêm một `docker` target sao chép `Dockerfile` vào thư mục đầu ra bun
 
 Thực hành tốt là quét images của bạn để tìm các lỗ hổng đã biết. Các generators tuân theo mẫu này thêm một `trivy` target quét built image với [Trivy](https://trivy.dev/), chạy từ [ECR-hosted Trivy image](https://gallery.ecr.aws/aquasecurity/trivy), và thoát với mã khác không khi có phát hiện `HIGH` hoặc `CRITICAL`.
 
-Thêm một `trivy` target `dependsOn` `docker` target của bạn. Nó lưu built image vào một tarball và quét nó thông qua một bind mount tương đối với workspace, do đó cùng một lệnh hoạt động dưới cả `docker` và `finch`:
+Target sao chép một `.trivyignore` từ thư mục gốc của dự án bạn vào thư mục scan và truyền nó cho Trivy với `--ignorefile`, vì vậy hãy tạo file đó trước — một file trống là được, và đó là nơi bạn [ngăn chặn các phát hiện](#ngăn-chặn-các-phát-hiện) sau này:
+
+```bash
+touch packages/my-project/.trivyignore
+```
+
+Sau đó thêm một `trivy` target `dependsOn` `docker` target của bạn. Nó lưu built image vào một tarball và quét nó thông qua một bind mount tương đối với workspace, do đó cùng một lệnh hoạt động dưới cả `docker` và `finch`:
 
 <Code lang="json" code={trivyTarget} />
 
@@ -367,7 +390,7 @@ const image = new DockerImageAsset(this, 'MyImage', {
 });
 ```
 
-Helper `findWorkspaceRoot` được tạo ra bởi generator <Link path="/vi/guides/typescript-infrastructure">`ts#infra`</Link> và được export từ `@my-scope/common-constructs`. Nếu bạn không sử dụng shared constructs, bạn có thể hardcode đường dẫn đến thư mục `dist` tương đối với nơi `cdk` được gọi từ — thường là workspace root — và bỏ qua hoàn toàn lời gọi `findWorkspaceRoot`.
+Helper `findWorkspaceRoot` được tạo ra bởi generator <Link path="/guides/typescript-infrastructure">`ts#infra`</Link> và được export từ `@my-scope/common-constructs`. Nếu bạn không sử dụng shared constructs, bạn có thể hardcode đường dẫn đến thư mục `dist` tương đối với nơi `cdk` được gọi từ — thường là workspace root — và bỏ qua hoàn toàn lời gọi `findWorkspaceRoot`.
 
 :::note[Chạy bundle trước synth]
 CDK không tự động chạy các `bundle`/`docker` targets — bạn phải chạy `nx build my-project` (hoặc kết nối deploy target để phụ thuộc vào `build`) trước `cdk deploy`. Các generators sử dụng mẫu này khai báo `docker` và `bundle` là dependencies của `build` để điều này xảy ra một cách minh bạch.
@@ -466,7 +489,7 @@ Block `data.external.docker_digest` đảm bảo `null_resource` chạy lại b�
 
 ## Đọc Thêm
 
-- <Link path="/vi/guides/ts-agent">Generator `ts#agent`</Link> — một ví dụ hoàn chỉnh về mẫu này cho một TypeScript agent được triển khai đến Bedrock AgentCore Runtime.
-- <Link path="/vi/guides/py-agent">Generator `py#agent`</Link> — tương đương cho Python.
+- <Link path="/guides/ts-agent">Generator `ts#agent`</Link> — một ví dụ hoàn chỉnh về mẫu này cho một TypeScript agent được triển khai đến Bedrock AgentCore Runtime.
+- <Link path="/guides/py-agent">Generator `py#agent`</Link> — tương đương cho Python.
 - [Tài liệu Rolldown](https://rolldown.rs/) — tham chiếu cấu hình cho TypeScript bundler.
 - [Tài liệu `uv`](https://docs.astral.sh/uv/) — tham chiếu cho Python dependency export và install.

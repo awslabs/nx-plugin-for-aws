@@ -95,6 +95,10 @@ export type GeneratorSchema = {
       enum?: string[];
       default?: unknown;
       'x-priority'?: string;
+      /** The option values this option applies under. */
+      'x-when'?: Record<string, string | string[]>;
+      /** The same, per value, where one of an option's values applies sometimes. */
+      'x-value-when'?: Record<string, Record<string, string | string[]>>;
     }
   >;
   required?: string[];

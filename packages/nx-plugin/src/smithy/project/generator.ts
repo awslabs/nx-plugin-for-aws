@@ -110,12 +110,13 @@ export const smithyCompileCommands = (
   `${smithyCliCommand()} build -c {projectRoot}/smithy-build.json --output ${SMITHY_OUT_DIR}`,
   ...(type === 'shapes'
     ? [
-        cmd.cp(
+        cmd.cpFile(
           `${SOURCE_PROJECTION}/model/model.json`,
           `${BUILD_DIR}/model.json`,
         ),
       ]
     : [
+        cmd.mkdir(`${BUILD_DIR}/openapi`),
         // Named after the service shape by the OpenAPI plugin, so it is matched
         // rather than named, and published under a stable name.
         cmd.cpGlobToFile(

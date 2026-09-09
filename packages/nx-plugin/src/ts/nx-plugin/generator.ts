@@ -30,6 +30,7 @@ import type { TsNxPluginGeneratorSchema } from './schema';
 import {
   configureTsProjectAsNxPlugin,
   NX_PLUGIN_DEPENDENCIES,
+  nxPluginManifestAssets,
 } from './utils.js';
 
 export const DEPENDENCIES = declareDependencies()({
@@ -79,16 +80,7 @@ export const tsNxPluginGenerator = async (
             glob: '**/*.d.ts',
             output: './src',
           },
-          {
-            input: './{projectRoot}',
-            glob: 'generators.json',
-            output: '.',
-          },
-          {
-            input: './{projectRoot}',
-            glob: 'executors.json',
-            output: '.',
-          },
+          ...nxPluginManifestAssets(),
         ],
       },
     },
@@ -103,6 +95,23 @@ export const tsNxPluginGenerator = async (
   project.targets = sortObjectKeys(project.targets);
   updateProjectConfiguration(tree, fullyQualifiedName, project);
 
+  const mcpPath = joinPathFragments(project.sourceRoot, 'mcp-server');
+
+  // The sample server and tools ts#mcp-server scaffolds are replaced by the
+  // generator MCP server below. Only the ones it creates in this run are
+  // removed, so a re-run leaves the server the user owns and has customised.
+  const SAMPLE_MCP_FILES = [
+    'server.ts',
+    'tools/add.ts',
+    'tools/divide.ts',
+    'resources/sample-guidance.ts',
+  ];
+  const preexistingSampleFiles = new Set(
+    SAMPLE_MCP_FILES.filter((file) =>
+      tree.exists(joinPathFragments(mcpPath, file)),
+    ),
+  );
+
   // Add an MCP Server
   await tsMcpServerGenerator(tree, {
     project: fullyQualifiedName,
@@ -111,13 +120,12 @@ export const tsNxPluginGenerator = async (
     preferInstallDependencies: false,
   });
 
-  const mcpPath = joinPathFragments(project.sourceRoot, 'mcp-server');
-  const mcpServerPath = joinPathFragments(mcpPath, 'server.ts');
-
-  // Remove the sample server and tools
-  tree.delete(mcpServerPath);
-  tree.delete(joinPathFragments(mcpPath, 'tools', 'add.ts'));
-  tree.delete(joinPathFragments(mcpPath, 'resources', 'sample-guidance.ts'));
+  for (const file of SAMPLE_MCP_FILES) {
+    const sampleFilePath = joinPathFragments(mcpPath, file);
+    if (!preexistingSampleFiles.has(file) && tree.exists(sampleFilePath)) {
+      tree.delete(sampleFilePath);
+    }
+  }
 
   // Add generator MCP server
   generateFiles(

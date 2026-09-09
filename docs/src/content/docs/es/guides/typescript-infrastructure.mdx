@@ -44,7 +44,7 @@ El generador creará la siguiente estructura de proyecto en el directorio `<dire
 
 </FileTree>
 
-Si estableces la opción `stageConfig`, el generador también crea dos paquetes compartidos para la gestión centralizada de credenciales (si aún no existen):
+Si generas con `--stageConfig=true`, el generador también crea dos paquetes compartidos para la gestión centralizada de credenciales (si aún no existen):
 
 <FileTree>
 
@@ -53,12 +53,17 @@ Si estableces la opción `stageConfig`, el generador también crea dos paquetes 
       - src
         - stages.types.ts Type definitions for stage credentials and config
         - stages.config.ts Your stage-to-credential mappings (edit this)
+        - resolve-stage.ts The `resolveStage` lookup your `main.ts` imports
         - index.ts Re-exports for importing from other packages
+      - README.md
     - scripts Centralized deploy/destroy scripts
       - src
-        - infra-deploy.ts Deploy bin script
-        - infra-destroy.ts Destroy bin script
-        - stage-credentials/ Shared logic (credential lookup, CDK command building)
+        - infra
+          - infra-deploy.ts Deploy bin script
+          - infra-destroy.ts Destroy bin script
+          - index.ts Re-exports for importing from other packages
+          - stage-credentials/ Shared logic (credential lookup, CDK command building)
+      - README.md
 
 </FileTree>
 
@@ -102,7 +107,7 @@ new ApplicationStage(app, 'my-app-sandbox', {
 
 La propiedad `env` le indica a CDK a qué cuenta y región de AWS desplegar. `CDK_DEFAULT_ACCOUNT` y `CDK_DEFAULT_REGION` son resueltos automáticamente por el CLI de CDK desde tus credenciales activas de AWS. Consulta la [documentación de entornos de CDK](https://docs.aws.amazon.com/cdk/v2/guide/environments.html) para obtener más detalles.
 
-El stage sandbox es el que los targets <Link path="es/guides/typescript-infrastructure#desplegando-tu-stage-sandbox">`deploy-sandbox`</Link> y <Link path="es/guides/typescript-infrastructure#desmantelando-tu-stage-sandbox">`destroy-sandbox`</Link> actúan sobre.
+El stage sandbox es el que los targets <Link path="/guides/typescript-infrastructure#desplegando-tu-stage-sandbox">`deploy-sandbox`</Link> y <Link path="/guides/typescript-infrastructure#desmantelando-tu-stage-sandbox">`destroy-sandbox`</Link> actúan sobre.
 
 Si generaste con `stageConfig`, el `main.ts` lee la cuenta y región desde un archivo de configuración centralizado, recurriendo a variables de entorno cuando no se establece ninguna configuración:
 
@@ -164,7 +169,11 @@ export class ApplicationStage extends Stage {
 ### Configuración de Credenciales de Stage
 
 :::note[Configuración por Stages]
-Esta sección aplica cuando generas con `stageConfig`. Sin ella, el generador produce una configuración más simple donde gestionas las credenciales de AWS tú mismo (por ejemplo, exportando `AWS_PROFILE` antes de desplegar).
+Esta sección aplica cuando generas con `stageConfig`:
+
+<NxCommands commands={['g @aws/nx-plugin:ts#infra --name=infra --stageConfig=true']} />
+
+Sin ella, el generador produce una configuración más simple donde gestionas las credenciales de AWS tú mismo (por ejemplo, exportando `AWS_PROFILE` antes de desplegar).
 :::
 
 Cuando tienes múltiples stages dirigidos a diferentes cuentas de AWS, gestionar las credenciales manualmente puede ser propenso a errores, especialmente a medida que crece el número de stages.
@@ -263,8 +272,13 @@ Los stages compartidos (bajo `shared.stages`) aplican a cualquier proyecto de in
 
 Los stages específicos del proyecto (bajo `projects['packages/infra'].stages`) solo aplican a ese proyecto. Cuando ambos existen para el mismo nombre de stage, la entrada específica del proyecto tiene prioridad.
 
-:::tip[Hacer Commit de la Configuración de Stage]
-Recomendamos hacer commit de `stages.config.ts` para que el equipo comparta una única fuente de verdad para las credenciales de stage. Si contiene nombres de perfiles personales, puedes agregarlo a `.gitignore` y usar una anulación local en su lugar.
+:::note[Hacer Commit de la Configuración de Stage]
+Si deseas hacer commit de `stages.config.ts` para que el equipo comparta una única fuente de verdad para las credenciales de stage, el escaneo de credenciales puede marcar cualquier ID de cuenta de AWS especificado en este archivo. Puedes suprimir esto en `.gitallowed` de la siguiente manera:
+
+```text title=".gitallowed"
+# Allow AWS Account IDs in the stage configuration
+stages\.config\.ts:[0-9]+:.*[0-9]{12}
+```
 :::
 
 ### Infraestructura de API
@@ -379,11 +393,11 @@ Para obtener más detalles, consulta la [documentación de inicialización de CD
 
 Tu proyecto tiene tres targets de despliegue, cada uno adecuado para una situación diferente:
 
-| Target           | Úsalo para                                                                       |
-| ---------------- | -------------------------------------------------------------------------------- |
-| `deploy-sandbox` | Desplegar tu propio stage sandbox durante el desarrollo. No se necesita argumento de stage. |
-| `deploy`         | Desplegar cualquier stage, nombrando el stage o stacks que deseas.              |
-| `deploy-ci`      | Desplegar desde un pipeline de CI/CD, usando un ensamblaje en la nube pre-sintetizado. |
+| Target           | Úsalo para                                                                                             |
+| ---------------- | ------------------------------------------------------------------------------------------------------ |
+| `deploy-sandbox` | Desplegar tu propio stage sandbox durante el desarrollo. No se necesita argumento de stage. Usa modo express.        |
+| `deploy`         | Desplegar cualquier stage, nombrando el stage o stacks que deseas. Espera la estabilización completa.               |
+| `deploy-ci`      | Desplegar desde un pipeline de CI/CD, usando un ensamblaje en la nube pre-sintetizado. Espera la estabilización completa.   |
 
 `deploy-sandbox` y `deploy` dependen de `^assemble`, por lo que construyen los artefactos que están a punto de desplegar y nada más. `deploy-ci` despliega un ensamblaje que tu pipeline ya construyó, por lo que no tiene dependencias de construcción en absoluto.
 
@@ -402,11 +416,11 @@ El target `deploy-sandbox` despliega el stage sandbox que declara `main.ts`, por
 Esta es la forma más rápida de tener tu propia copia de la aplicación ejecutándose en AWS mientras desarrollas.
 
 :::tip[Modo Express para Despliegues Más Rápidos]
-Los targets de despliegue esperan la estabilización completa de recursos por defecto, favoreciendo la consistencia sobre la velocidad. Para acelerar la iteración durante el desarrollo, opta por el [modo express de CloudFormation](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html) pasando la bandera `--express` de CDK:
+El target `deploy-sandbox` usa el [modo express de CloudFormation](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html) por defecto (a través de la bandera `--express` de CDK). El modo express finaliza una vez que se confirma que la configuración del recurso está aplicada en lugar de esperar la estabilización completa, con la propagación continuando en segundo plano, para ciclos de iteración significativamente más rápidos.
 
-<NxCommands commands={['deploy-sandbox <my-infra> --express']} />
+Dado que retorna antes de que los recursos hayan terminado de estabilizarse, el modo express es adecuado para el stage sandbox en el que iteras, no para CI/CD o despliegues de producción — usa [`deploy-ci`](#desplegar-en-aws-en-un-pipeline-de-cicd) para esos. Para esperar la estabilización completa del recurso aquí también, pasa `--no-express`:
 
-El modo express finaliza una vez que se confirma que la configuración del recurso está aplicada en lugar de esperar la estabilización completa, con la propagación continuando en segundo plano, para ciclos de iteración significativamente más rápidos. Está destinado para desarrollo e iteración.
+<NxCommands commands={['deploy-sandbox <my-infra> --no-express']} />
 :::
 
 ### Desplegar un Stage Específico
@@ -419,13 +433,15 @@ Puedes especificar cualquier stage siempre que esté definido en `main.ts`. Para
 
 <NxCommands commands={['deploy <my-infra> <my-infra>-sandbox/Application']} />
 
+Dado que este target puede nombrar cualquier stage, incluido el de producción, espera la estabilización completa del recurso. Pasa `--express` para optar por el modo express para un stage en el que estés iterando.
+
 ## Desplegar en AWS en un Pipeline de CI/CD
 
 Usa el target `deploy-ci` si estás desplegando en AWS como parte de un pipeline de CI/CD.
 
 <NxCommands commands={['deploy-ci <my-infra> my-stage/*']} />
 
-Este target difiere ligeramente del target `deploy` regular en que despliega un ensamblaje en la nube pre-sintetizado en lugar de sintetizar sobre la marcha. Esto evita el potencial no determinismo de los cambios de versión de paquetes, asegurando que cada etapa del pipeline despliegue usando el mismo ensamblaje en la nube.
+Este target despliega un ensamblaje en la nube pre-sintetizado en lugar de sintetizar sobre la marcha, evitando el potencial no determinismo de los cambios de versión de paquetes y asegurando que cada etapa del pipeline despliegue usando el mismo ensamblaje en la nube. Al igual que `deploy`, espera a que cada recurso se estabilice completamente antes de reportar éxito, y a diferencia de `deploy` no acepta ninguna exclusión de `--express`.
 
 ## Desmantelar Infraestructura de AWS
 
@@ -451,7 +467,9 @@ Desmantelar es irreversible, por lo que CDK te pide que confirmes los stacks que
 
 El target `destroy` desmantela el stage o stacks que nombres:
 
-<NxCommands commands={['destroy <my-infra> <my-infra>-sandbox/*']} />
+<NxCommands commands={['destroy <my-infra> <my-infra>-sandbox/**']} />
+
+Usa `/**` en lugar de `/*` para un stage completo: desmantelar solo elimina los stacks que el patrón selecciona, y `/*` omite los stacks anidados debajo de los stacks del stage, como el stack WebACL de `us-east-1` que un sitio web crea para su distribución de CloudFront.
 
 Para desmantelar un stack individual, proporciona el nombre completo del stack:
 

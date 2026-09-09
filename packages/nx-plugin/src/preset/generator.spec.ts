@@ -153,6 +153,18 @@ describe('preset generator', () => {
     expect(packageJson.devDependencies.husky).toBeDefined();
   });
 
+  it('should vend a git-secrets whose option parser takes the short flags the guides document', async () => {
+    await presetGenerator(tree, { iac: 'cdk' });
+
+    // The script is vendored verbatim from upstream and never edited here, so
+    // the guides must document the flags this copy actually parses: `-a` and
+    // `-l`. A long form is consumed as if it were the pattern, silently adding
+    // nothing — so if a bump ever changes these arms, the docs need revisiting.
+    const script = tree.read('.git-secrets/git-secrets', 'utf-8') ?? '';
+    expect(script).toContain('-a) ALLOWED=1 ;;');
+    expect(script).toContain('-l) LITERAL=1 ;;');
+  });
+
   it('should configure MCP servers by default', async () => {
     await presetGenerator(tree, { iac: 'cdk' });
 

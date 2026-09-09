@@ -376,6 +376,61 @@ export function Main() {
       packageJson.dependencies['@trpc/tanstack-react-query'],
     ).toBeUndefined();
   });
+
+  it('should export the registered agent id from the AG-UI hook', async () => {
+    await tsAgentReactConnectionGenerator(tree, {
+      sourceProject: 'frontend',
+      targetProject: 'agent-project',
+      targetComponent: {
+        generator: 'ts#agent',
+        name: 'my-agui-agent',
+        path: 'src/my-agui-agent',
+        port: 8081,
+        rc: 'MyAguiAgent',
+        auth: 'iam',
+        protocol: 'ag-ui',
+      },
+    });
+
+    const hook = tree.read(
+      'apps/frontend/src/hooks/useAguiMyAguiAgent.tsx',
+      'utf-8',
+    );
+
+    // The exported constant is the single source of truth for the id, so the
+    // vended chat component cannot drift from what the hook registers.
+    expect(hook).toContain("export const MY_AGUI_AGENT_ID = 'my-agui-agent';");
+    expect(hook).toContain('return { [MY_AGUI_AGENT_ID]: agent };');
+  });
+
+  it('should vend a chat component bound to the agent id', async () => {
+    await tsAgentReactConnectionGenerator(tree, {
+      sourceProject: 'frontend',
+      targetProject: 'agent-project',
+      targetComponent: {
+        generator: 'ts#agent',
+        name: 'my-agui-agent',
+        path: 'src/my-agui-agent',
+        port: 8081,
+        rc: 'MyAguiAgent',
+        auth: 'iam',
+        protocol: 'ag-ui',
+      },
+    });
+
+    const chat = tree.read(
+      'apps/frontend/src/components/my-agui-agent-chat.tsx',
+      'utf-8',
+    );
+
+    expect(chat).toContain('export const MyAguiAgentChat');
+    expect(chat).toContain(
+      "import { MY_AGUI_AGENT_ID } from '../hooks/useAguiMyAguiAgent'",
+    );
+    // agentId is bound, and every other CopilotChat prop is forwarded.
+    expect(chat).toContain('agentId={MY_AGUI_AGENT_ID}');
+    expect(chat).toContain("Omit<CopilotChatProps, 'agentId'>");
+  });
 });
 
 describe('ts strands agent react connection with real projects', () => {

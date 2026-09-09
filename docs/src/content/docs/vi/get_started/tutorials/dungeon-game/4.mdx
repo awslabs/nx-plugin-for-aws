@@ -27,7 +27,7 @@ Khởi động toàn bộ stack local — máy chủ dev game-ui cùng với Gam
 
 <NxCommands commands={["dev game-ui"]} />
 
-Target `dev` trên `game-ui` có `dependsOn` trên `game-api:dev` và `dungeon_adventure.story:agent-dev`, vì vậy Nx khởi động máy chủ local của mọi dự án song song. Thông qua các kết nối mà chúng ta thiết lập trong Module 1, chúng lần lượt khởi động máy chủ Inventory MCP và DynamoDB Local. Đảm bảo container engine của bạn đang chạy, sau đó mở máy chủ dev trong trình duyệt.
+Target `dev` trên `game-ui` có `dependsOn` trên `game-api:dev` và `dungeon_adventure.story:agent-dev`, vì vậy Nx khởi động máy chủ local của mọi dự án song song. Thông qua các kết nối mà chúng ta thiết lập trong Module 1, chúng lần lượt khởi động máy chủ Inventory MCP và DynamoDB Local. Đảm bảo container engine của bạn đang chạy, sau đó mở máy chủ dev tại `http://localhost:4200/` trong trình duyệt.
 
 <Aside type="tip" title="Không cần đăng nhập ở local">
 Trong chế độ `local-dev`, component `CognitoAuth` bỏ qua luồng đăng nhập Cognito (không có user pool chạy ở local), vì vậy bạn sẽ vào thẳng trò chơi mà không cần đăng nhập. Bạn sẽ tạo tài khoản thực khi chúng ta triển khai lên AWS ở cuối module này.
@@ -48,6 +48,7 @@ Khi bạn chạy generator `connection` cho `game-ui → story` trong <Link path
     - copilot/
       - index.tsx Re-exports themed `CopilotChat` / `CopilotSidebar` / `CopilotPopup`.
       - ShadcnAssistantMessage.tsx, ShadcnUserMessage.tsx, ShadcnChatInput.tsx, ShadcnCursor.tsx, copilot.css
+    - story-agent-chat.tsx A `CopilotChat` pre-bound to the Story Agent's `agentId`.
   - hooks/
     - useAguiStoryAgent.tsx Instantiates an `@ag-ui/client` `HttpAgent` pointing at the deployed Story Agent and pads `threadId` to AgentCore's 33-character minimum session id.
   - main.tsx Wraps `<App />` in `<AguiProvider>`
@@ -90,7 +91,7 @@ Cú pháp `$playerName` cho `@tanstack/react-router` biết coi `playerName` là
 </TabItem>
 </Tabs>
 
-Sau khi lưu, máy chủ dev tại `http://localhost:4200/` bây giờ sẽ cho phép bạn bắt đầu một cuộc phiêu lưu và trò chuyện với Story Agent.
+Sau khi lưu, máy chủ dev bây giờ sẽ cho phép bạn bắt đầu một cuộc phiêu lưu và trò chuyện với Story Agent.
 
 <Image src={gameSelectPng} alt="game-select.png" width="600" height="309" />
 <div style="margin-top: -100px; margin-left: 100px;">
@@ -117,7 +118,9 @@ Nếu đây là lần triển khai CDK đầu tiên trong tài khoản/khu vực
 
 Target `deploy-sandbox` triển khai stage sandbox được định nghĩa trong `packages/infra/src/main.ts`.
 
-Lần triển khai đầu tiên của bạn sẽ mất khoảng 6 phút để hoàn thành vì nó đợi tất cả các tài nguyên ổn định hoàn toàn. Các lần triển khai tiếp theo sẽ nhanh hơn. Để tăng tốc độ lặp lại trong quá trình phát triển, bạn có thể chọn [CloudFormation express mode](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html) bằng cách truyền flag `--express`, điều này hoàn thành mỗi thao tác tài nguyên ngay khi cấu hình của nó được áp dụng thay vì đợi ổn định hoàn toàn.
+Target `deploy-sandbox` sử dụng [CloudFormation express mode](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html), hoàn thành mỗi thao tác tài nguyên ngay khi cấu hình của nó được áp dụng thay vì đợi ổn định hoàn toàn. Lần triển khai đầu tiên của bạn sẽ mất khoảng 4 phút để hoàn thành, và một số tài nguyên (chẳng hạn như CloudFront distribution) có thể tiếp tục provisioning ở chế độ nền trong một thời gian ngắn sau đó. Các lần triển khai tiếp theo sẽ nhanh hơn.
+
+Vì express mode trả về trước khi các tài nguyên ổn định hoàn toàn, `deploy-sandbox` chỉ dành cho phát triển. Sử dụng target `deploy-ci` cho các triển khai CI/CD và production, luôn đợi ổn định hoàn toàn.
 
 Sau khi triển khai hoàn tất, bạn sẽ thấy các output tương tự như sau:
 
@@ -127,7 +130,9 @@ dungeon-adventure-infra-sandbox-Application: deploying... [2/2]
 
  ✅  dungeon-adventure-infra-sandbox-Application
 
-✨  Deployment time: 354s
+✨  Deployment time: 220s
+
+⚠️  Stack deployed using Express Mode. Resources still stabilizing: GameUICloudfrontDistribution, UserIdentityWebAcl, ...and more...
 
 Outputs:
 dungeon-adventure-infra-sandbox-Application.GameApiEndpointXXX = https://xxx.execute-api.region.amazonaws.com/prod/
@@ -141,6 +146,10 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
 ```
 
 Điều hướng đến CloudFront URL của bạn (`GameUIDistributionDomainName` từ CDK outputs), đăng ký tài khoản mới và chơi trò chơi của bạn chạy hoàn toàn trên AWS!
+
+:::note[Đăng ký lần đầu tiên]
+Cognito sẽ gửi email cho bạn một mã để xác nhận tài khoản, sau đó yêu cầu bạn thiết lập xác thực đa yếu tố (một ứng dụng xác thực hoặc mã SMS) trước khi đăng nhập lần đầu — user pool `ts#website#auth` cung cấp yêu cầu MFA. Xem <Link path="guides/react-website-auth#multi-factor-authentication-mfa">Multi-factor authentication</Link> để biết cách nới lỏng điều đó.
+:::
 
 ## Nhiệm vụ 6: Kết hợp các component local và đã triển khai
 

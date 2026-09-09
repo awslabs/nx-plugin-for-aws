@@ -34,7 +34,7 @@ To send us a pull request, please:
 1. (Optional) Update snapshots if required `pnpm nx run @aws/nx-plugin:test -u`
 1. Ensure local tests pass (run a full build with `pnpm nx run-many --target build --all`).
 1. Update and run any integration tests relevant to your changes.
-1. Commit to your fork using clear commit messages ([see section below](#end-to-end-tests))
+1. Commit to your fork using clear commit messages ([see section below](#commit-messages))
 1. Send us a pull request, answering any default questions in the pull request interface.
 1. Pay attention to any automated CI failures reported in the pull request, and stay involved in the conversation.
 
@@ -42,6 +42,27 @@ GitHub provides additional document on [forking a repository](https://help.githu
 [creating a pull request](https://help.github.com/articles/creating-a-pull-request/).
 
 For a detailed guide on contributing a generator, check out the [Contributing a Generator tutorial here](https://awslabs.github.io/nx-plugin-for-aws/get_started/tutorials/contribute-generator).
+
+### Commit Messages
+
+Commits follow [conventional commits](https://www.conventionalcommits.org/), enforced by commitlint on `commit-msg`. Scope a commit to the generator it touches, eg `feat(ts#project): my commit message`.
+
+The type also chooses the release: `nx release` derives the semver bump from the commits since the last tag, taking the highest bump across them.
+
+| Type                                         | Bump  | Release notes section |
+| -------------------------------------------- | ----- | --------------------- |
+| `feat`                                       | minor | 🚀 Features            |
+| `fix`                                        | patch | 🩹 Fixes               |
+| `deps`                                       | patch | 📦 Dependencies        |
+| `perf`                                       | patch | 🔥 Performance         |
+| `revert`                                     | patch | ⏪ Revert              |
+| `docs`, `test`, `chore`, `refactor`, `ci`, … | none  | hidden                |
+
+Use `deps` for bumping the dependency versions vended to users — a version bump ships in a patch, not a minor. This is the type the weekly `update-versions` PR uses.
+
+Don't confuse it with `chore(deps):`, which is `chore` with a `deps` scope and releases nothing. That's for this repo's own tooling (the dependabot PRs bumping our devDependencies and GitHub Actions). The rule is what the bump reaches: `deps:` when it changes what a user's workspace gets, `chore(deps):` when it only changes how we build.
+
+Any type plus `!` (or a `BREAKING CHANGE:` footer) forces a major, so a breaking upgrade of something we vend still needs `deps!:`.
 
 ### Generator Idempotency
 
@@ -380,6 +401,18 @@ Everything else is inferred — whether the generator creates a project or adds 
 
 Finally, add the node's artwork and palette grouping to `PRESENTATION` in `docs/src/lib/graph-builder/catalog.ts`, alongside a logo in `docs/src/content/docs/assets/logos/`. A type without an entry still appears, just under "Other" with a generic mark.
 
+### Infrastructure Blueprints
+
+The read-only diagrams — the quick start, the tutorial, the homepage showcase and each generator guide's **Architecture** section — switch between two views of the same graph: the projects in the workspace, and the AWS infrastructure they deploy. The second comes from a **blueprint** per node type in `docs/src/lib/graph-builder/infrastructure.ts`: the resources the generator provisions, each with an icon from `docs/public/icons/aws/`, their position in the project's own little grid, and the request path through them.
+
+A resource can declare the option values it is provisioned for — `when: { infra: 'rest-lambda' }` puts a WAF in front of a REST API and leaves it out of an HTTP one — and the request path skips whatever the options leave out, so variants of the same step sit at the same grid position. That is what keeps a guide's diagram in step with the option filters the rest of the guide is written against: `<ArchitectureDiagram />` follows the values the reader enters in the guide's run-generator card, and `<ArchitectureDiagram options={{ infra: 'none' }} />` pins a block that only describes one variant.
+
+A generator that adds to a project rather than taking part in a connection — a Lambda function, a website's authentication — has no node type in the palette, so its blueprint is keyed by the generator id and carries its own `label`. Everything else works the same, and its guide's `<ArchitectureDiagram />` finds it from the page's `generator:` frontmatter.
+
+Every node type in the palette needs a blueprint — `infrastructure.spec.ts` fails by name if one is missing, since a type without it would draw an empty box.
+
+A page describing a *mechanism* rather than a generator's own infrastructure — how runtime configuration reaches the things that read it, say — declares its diagram outright in `docs/src/lib/graph-builder/diagrams.ts` and renders it with `<EmbeddedGraph diagram="runtime-config" />`. Same boxes, tiles and arrows, so the docs' diagrams read as one set; a tile without an icon is something no AWS service stands for.
+
 ### End to End Tests
 
 The end to end tests run our generators and check that generated projects function correctly (usually by performing a build).
@@ -401,6 +434,8 @@ However you will still need to make changes to any "after" files manually to ens
 
 Note that if you are running e2e tests that use `pnpm` as the package manager, you may need to run `pnpm store prune` to ensure that your changes are picked up in the tests.
 
+In CI, the smoke tests are skipped when every changed file is under `docs/`, since a change confined to the docs site cannot affect generated projects. Touching anything outside `docs/` runs the full set.
+
 ### Writing Documentation
 
 Each generator has a guide page under `docs/src/content/docs/en/guides/`. These pages are consumed both by the docs site (at `https://awslabs.github.io/nx-plugin-for-aws/`) and by the MCP `generator-guide` tool, so they should read well as prose _and_ slice cleanly when an MCP agent asks for a specific option combination.
@@ -411,7 +446,7 @@ All authoring happens in `docs/src/content/docs/en/`. Translations under other l
 
 #### Linking a guide to its generator
 
-Add `generator: <id>` to the page's frontmatter. This wires the page into the option-filter bar, adds the experimental banner when the generator is marked as such, and enables the build-time validator that checks every `<OptionFilter>` predicate against the generator's JSON schema.
+Add `generator: <id>` to the page's frontmatter. This resolves the generator's schema for the page — its options panel, its run-generator card and the option values the page is read under — adds the experimental banner when the generator is marked as such, and enables the build-time validator that checks every `<OptionFilter>` predicate against the generator's JSON schema.
 
 ```mdx
 ---
@@ -421,9 +456,36 @@ generator: ts#api
 ---
 ```
 
+#### x-when: options that only apply sometimes
+
+An option that only applies for certain values of another can say so in its `schema.json` with `x-when`. It's our own convention — Nx neither reads nor enforces it — and only the docs site consumes it: the guide's options panel and its run-generator card leave the option out where it doesn't apply, state the condition where it does, and drop the control the moment another choice rules it out.
+
+```json
+"namespace": {
+  "type": "string",
+  "description": "The namespace for the Smithy API",
+  "x-when": { "framework": "smithy" }
+}
+```
+
+Keys are AND'd and a list of values is OR'd within a key, matching `<OptionFilter when={{…}}>`. Reach for it where a description already has to explain that an option is conditional (`"only applicable for the smithy framework"`), and leave the description saying so too — the MCP server renders descriptions, not `x-when`. The generator itself still has to validate or ignore what doesn't apply to the run it was given.
+
+Where it's one _value_ of an option that only applies sometimes, put the condition on the value with `x-value-when`:
+
+```json
+"infra": {
+  "type": "string",
+  "enum": ["rest-lambda", "http-lambda", "none"],
+  "default": "rest-lambda",
+  "x-value-when": { "http-lambda": { "framework": "trpc" } }
+}
+```
+
+A value the guide has ruled out is left off the list; one the reader's own choice rules out is disabled, with the condition in a tooltip. If picking it would leave the command invalid — because the value a run falls back to is the ruled-out one — the card names the first value that does apply, so what a guide shows always runs. Encode a constraint here whenever a generator throws on a combination (`session 'dynamodb-s3' is not implemented for the strands framework`) or quietly substitutes one (`ts#api` maps `http-lambda` to a REST API under Smithy), and evaluate it against the values a run would use: a condition on an option nobody has chosen is read against that option's own default.
+
 #### OptionFilter: conditional sections
 
-Wrap any content that only applies to a subset of option values in `<OptionFilter>`. The docs site shows a filter bar above the page (one dropdown per referenced option key, pulled from the schema enum) that hides mismatching blocks; the MCP server drops mismatching blocks from the response when the agent passes `options`.
+Wrap any content that only applies to a subset of option values in `<OptionFilter>`. On the docs site the reader picks their option values in the page's run-generator card — the same controls that build the command — and blocks that don't match are hidden, along with their table-of-contents entries; the MCP server drops mismatching blocks from the response when the agent passes `options`.
 
 ```mdx
 import OptionFilter from '@components/option-filter.astro';
@@ -491,7 +553,7 @@ Array values are OR'd within a key (`protocol: [HTTP, A2A]` matches either), and
 - **`<Tabs _filter>`** — any other "A vs B" switch where the site benefits from both variants being visible but an MCP agent should only see one. Also the right choice for option-dependent content inside an `<OptionFilter>` section.
 - **Frontmatter `when:`** — one guide page per supported combination, for generators like `connection` where every combination wants its own prose.
 
-Running `pnpm nx start docs` shows your changes with the filter bar live. Running `pnpm nx mcp-inspect @aws/nx-plugin` starts the MCP server against your local guides so you can call `generator-guide` with various `options` and verify the output an agent would receive.
+Running `pnpm nx start docs` shows your changes with the option controls live. Running `pnpm nx mcp-inspect @aws/nx-plugin` starts the MCP server against your local guides so you can call `generator-guide` with various `options` and verify the output an agent would receive.
 
 ### Documentation Translation
 

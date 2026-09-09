@@ -26,7 +26,7 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 Para crear un nuevo monorepo, desde el directorio deseado, ejecuta el siguiente comando:
 
-<CreateNxWorkspaceCommand workspace="dungeon-adventure" iac="cdk" />
+<CreateNxWorkspaceCommand workspace="dungeon-adventure" iac="cdk" readonly />
 
 :::note[CDK como proveedor de IaC]
 Usamos `--iac=cdk` ya que utilizaremos CDK para infraestructura como código en este tutorial. El Nx Plugin for AWS también soporta `terraform`.
@@ -72,7 +72,7 @@ En lugar de copiar todos los comandos a la vez, puedes ejecutar cada generador i
 
 Primero, creemos nuestra Game API. Para hacerlo, crea una API tRPC llamada `GameApi` siguiendo estos pasos:
 
-<RunGenerator generator="ts#api" requiredParameters={{ name: "GameApi", framework: "trpc" }} noInteractive />
+<RunGenerator generator="ts#api" requiredParameters={{ name: "GameApi", framework: "trpc" }} noInteractive readonly />
 
 <br />
 
@@ -130,8 +130,9 @@ A continuación se muestra una lista de todos los archivos que han sido generado
       - local-server.ts usado al ejecutar el servidor tRPC localmente
       - **router.ts** define el router tRPC y todos los procedimientos
     - project.json
+    - vitest.config.mts configuración de pruebas
     - ...
-- vitest.workspace.ts
+- vitest.config.mts configuración de pruebas raíz que descubre las pruebas de cada proyecto
 </FileTree>
 
 Veamos estos archivos clave:
@@ -151,13 +152,10 @@ export type AppRouter = typeof appRouter;
 ```
 El router define el router tRPC para tu API y es donde declararás todos tus métodos de API. Como puedes ver arriba, tenemos un método llamado `echo` con su implementación en el archivo `./procedures/echo.ts`. El punto de entrada del Lambda handler está en `handler.ts`, que se configura automáticamente por el generador.
 
-```ts {7-10}
+```ts {4-6}
 // packages/game-api/src/procedures/echo.ts
 import { publicProcedure } from '../init.js';
-import {
-  EchoInputSchema,
-  EchoOutputSchema,
-} from '../schema/echo.js';
+import { EchoInputSchema, EchoOutputSchema } from '../schema/index.js';
 
 export const echo = publicProcedure
   .input(EchoInputSchema)
@@ -284,7 +282,10 @@ export class GameApi<
       } as FunctionProps,
       buildDefaultIntegration: (op, props: FunctionProps) => {
         const handler = new Function(scope, `GameApi${op}Handler`, props);
-        handler.addEnvironment('RUNTIME_CONFIG_APP_ID', rc.appConfigApplicationId);
+        handler.addEnvironment(
+          'RUNTIME_CONFIG_APP_ID',
+          rc.appConfigApplicationId,
+        );
         rc.grantReadAppConfig(handler);
         return {
           handler,
@@ -402,7 +403,7 @@ Ahora creemos nuestro Story Agent.
 
 Para crear un proyecto Python:
 
-<RunGenerator generator="py#project" requiredParameters={{name:"story"}} noInteractive />
+<RunGenerator generator="py#project" requiredParameters={{name:"story"}} noInteractive readonly />
 
 Verás algunos archivos nuevos aparecer en tu árbol de archivos.
 <details>
@@ -432,7 +433,7 @@ Esto ha configurado un proyecto Python y un [UV Workspace](https://docs.astral.s
 
 Para agregar un agente Strands al proyecto con el generador `py#agent`:
 
-<RunGenerator generator="py#agent" requiredParameters={{project:"story", auth:"cognito", protocol:"ag-ui"}} noInteractive />
+<RunGenerator generator="py#agent" requiredParameters={{project:"story", auth:"cognito", protocol:"ag-ui"}} noInteractive readonly />
 
 :::note[Protocolo AG-UI]
 Elegimos `--protocol=ag-ui` para que el agente hable el [protocolo Agent-User Interaction](https://docs.copilotkit.ai/aws-strands/protocol) — esto permite que nuestro sitio web React se comunique directamente con él a través de [CopilotKit](https://docs.copilotkit.ai/), con streaming, llamadas a herramientas e historial de conversación gestionados por el protocolo en lugar de un cliente HTTP personalizado.
@@ -904,9 +905,7 @@ export class StoryAgent extends Construct implements IGrantable, IConnectable {
 }
 ```
 
-Esto configura un `AgentRuntimeArtifact` de CDK que sube tu imagen Docker del agente a ECR, y la aloja usando AgentCore Runtime. Debido a que elegimos `--auth=cognito`, el construct requiere la identidad del user pool/client y autoriza las invocaciones de AgentCore Runtime a través de Cognito, reenviando el encabezado `Authorization` del llamador. También aprovisiona el bucket de sesión que el `session.py` del Story Agent lee de vuelta en tiempo de ejecución — un bucket S3 cifrado con KMS con registros de acceso del servidor entregados a CloudWatch Logs — otorga al agente acceso de lectura/escritura a él, le otorga acceso para invocar modelos de Bedrock, y registra su ARN y nombre de bucket en `RuntimeConfig` para que tanto el agente (en tiempo de ejecución, a través de AppConfig) como la Game API (en tiempo de synth, a través de `invocationUrl`) puedan encontrarlo.
-
-Puedes notar un `Dockerfile` adicional, que referencia la imagen Docker del proyecto `story`, permitiéndonos ubicar conjuntamente el Dockerfile y el código fuente del agente.
+Esto configura un `AgentRuntimeArtifact` de CDK que empaqueta el código compilado de tu agente como un activo zip y lo aloja usando AgentCore Runtime. Debido a que elegimos `--auth=cognito`, el construct requiere la identidad del user pool/client y autoriza las invocaciones de AgentCore Runtime a través de Cognito, reenviando el encabezado `Authorization` del llamador. También aprovisiona el bucket de sesión que el `session.py` del Story Agent lee de vuelta en tiempo de ejecución — un bucket S3 cifrado con KMS con registros de acceso del servidor entregados a CloudWatch Logs — otorga al agente acceso de lectura/escritura a él, le otorga acceso para invocar modelos de Bedrock, y registra su ARN y nombre de bucket en `RuntimeConfig` para que tanto el agente (en tiempo de ejecución, a través de AppConfig) como la Game API (en tiempo de synth, a través de `invocationUrl`) puedan encontrarlo.
 
 </details>
 
@@ -918,7 +917,7 @@ Creemos un servidor MCP para proporcionar herramientas a nuestro Story Agent par
 
 Primero, creamos un proyecto TypeScript:
 
-<RunGenerator generator="ts#project" requiredParameters={{name:"inventory"}} noInteractive />
+<RunGenerator generator="ts#project" requiredParameters={{name:"inventory"}} noInteractive readonly />
 
 Esto creará un proyecto TypeScript vacío.
 
@@ -946,7 +945,7 @@ El generador `ts#project` genera estos archivos.
 
 A continuación, agregaremos un servidor MCP a nuestro proyecto TypeScript:
 
-<RunGenerator generator="ts#mcp-server" requiredParameters={{project:"inventory"}} noInteractive />
+<RunGenerator generator="ts#mcp-server" requiredParameters={{project:"inventory"}} noInteractive readonly />
 
 Esto agregará un servidor MCP.
 <details>
@@ -966,7 +965,6 @@ El generador `ts#mcp-server` genera estos archivos.
         - sample-guidance.ts recurso de ejemplo
       - stdio.ts punto de entrada para MCP con transporte STDIO
       - http.ts punto de entrada para MCP con transporte HTTP Streamable
-      - Dockerfile construye la imagen para AgentCore Runtime
     - rolldown.config.ts configuración para empaquetar el servidor MCP para despliegue en AgentCore
   - common/constructs/
     - src
@@ -980,7 +978,7 @@ El generador `ts#mcp-server` genera estos archivos.
 
 Nuestro estado de juego — partidas guardadas e inventario de cada jugador — vive en [Amazon DynamoDB](https://aws.amazon.com/dynamodb/). Crea un proyecto DynamoDB llamado `DungeonDb` con el generador `ts#dynamodb`:
 
-<RunGenerator generator="ts#dynamodb" requiredParameters={{name:"DungeonDb"}} noInteractive />
+<RunGenerator generator="ts#dynamodb" requiredParameters={{name:"DungeonDb"}} noInteractive readonly />
 
 :::tip[Desarrollo local primero]
 El generador `ts#dynamodb` vende un objetivo `dev` que ejecuta [DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html) en un contenedor. Combinado con el generador `connection` (que ejecutamos a continuación), esto significa que **el juego completo se ejecuta en tu máquina sin un despliegue** hasta el final del tutorial.
@@ -1032,7 +1030,7 @@ A continuación, crearemos la UI que te permitirá interactuar con el juego.
 
 Para crear la UI, crea un sitio web llamado `GameUI` siguiendo estos pasos:
 
-<RunGenerator generator="ts#website" requiredParameters={{name:"GameUI", ux:"shadcn"}} noInteractive />
+<RunGenerator generator="ts#website" requiredParameters={{name:"GameUI", ux:"shadcn"}} noInteractive readonly />
 
 :::note[Shadcn UI]
 Seleccionamos `--ux=shadcn` para que el sitio web generado use componentes de [shadcn/ui](https://ui.shadcn.com/) estilizados con Tailwind — todo nuestro código de rutas usa primitivas de shadcn como `Card`, `Button` e `Input`, y el generador `connection` más adelante conecta una superficie de chat de [CopilotKit](https://docs.copilotkit.ai/) con tema shadcn coincidente.
@@ -1169,7 +1167,7 @@ Un componente se renderizará al navegar a la ruta `/`. `@tanstack/react-router`
 
 Configuremos nuestra Game UI para requerir acceso autenticado a través de Amazon Cognito siguiendo estos pasos:
 
-<RunGenerator generator="ts#website#auth" requiredParameters={{cognitoDomain:"game-ui", project:"@dungeon-adventure/game-ui", allowSignup:true}} noInteractive />
+<RunGenerator generator="ts#website#auth" requiredParameters={{cognitoDomain:"game-ui", project:"@dungeon-adventure/game-ui", allowSignup:true}} noInteractive readonly />
 
 Verás algunos archivos nuevos aparecer/cambiar en tu árbol de archivos.
 
@@ -1253,7 +1251,7 @@ Los componentes `RuntimeConfigProvider` y `CognitoAuth` se han agregado al archi
 
 Configuremos nuestra Game UI para conectarse a nuestra Game API creada anteriormente.
 
-<RunGenerator generator="connection" requiredParameters={{sourceProject:"@dungeon-adventure/game-ui", targetProject:"@dungeon-adventure/game-api"}} noInteractive />
+<RunGenerator generator="connection" requiredParameters={{sourceProject:"@dungeon-adventure/game-ui", targetProject:"@dungeon-adventure/game-api"}} noInteractive readonly />
 
 Verás algunos archivos nuevos aparecer/cambiar en tu árbol de archivos.
 
@@ -1278,9 +1276,12 @@ El generador `connection` genera/actualiza estos archivos. Examinemos algunos de
 ```tsx
 // packages/game-ui/src/hooks/useGameApi.tsx
 import { useContext } from 'react';
-import { GameApiTRPCContext } from '../components/GameApiClientProvider';
+import {
+  GameApiTRPCContext,
+  type GameApiTRPCContextValue,
+} from '../components/GameApiClientProvider';
 
-export const useGameApi = () => {
+export const useGameApi = (): GameApiTRPCContextValue['optionsProxy'] => {
   const container = useContext(GameApiTRPCContext);
   if (!container) {
     throw new Error('useGameApi must be used within GameApiClientProvider');
@@ -1288,7 +1289,7 @@ export const useGameApi = () => {
   return container.optionsProxy;
 };
 
-export const useGameApiClient = () => {
+export const useGameApiClient = (): GameApiTRPCContextValue['client'] => {
   const container = useContext(GameApiTRPCContext);
   if (!container) {
     throw new Error(
@@ -1344,7 +1345,7 @@ El archivo `main.tsx` ha sido actualizado mediante una transformación AST para 
 
 Conectemos nuestro Story Agent al servidor MCP de inventario para que el agente pueda descubrir e invocar las herramientas del servidor MCP.
 
-<RunGenerator generator="connection" requiredParameters={{sourceProject:"story", targetProject:"inventory"}} noInteractive />
+<RunGenerator generator="connection" requiredParameters={{sourceProject:"story", targetProject:"inventory"}} noInteractive readonly />
 
 <details>
 <summary>Examinar los archivos de conexión Story Agent → Inventory MCP</summary>
@@ -1384,7 +1385,7 @@ Para más detalles, consulta la <Link path="guides/connection/py-agent-mcp">guí
 
 Conectemos nuestra Game UI al Story Agent. Dado que el agente habla AG-UI, el generador `connection` conecta [CopilotKit](https://docs.copilotkit.ai/): un componente de chat con tema y un `HttpAgent` de `@ag-ui/client` listo para renderizar.
 
-<RunGenerator generator="connection" requiredParameters={{sourceProject:"@dungeon-adventure/game-ui", targetProject:"story"}} noInteractive />
+<RunGenerator generator="connection" requiredParameters={{sourceProject:"@dungeon-adventure/game-ui", targetProject:"story"}} noInteractive readonly />
 
 <details>
 <summary>Examinar los archivos de conexión UI → Story Agent</summary>
@@ -1418,9 +1419,9 @@ Para más detalles, consulta la <Link path="guides/connection/react-agui">guía 
 
 Tanto la Game API como el servidor MCP de inventario leen y escriben en nuestra tabla DynamoDB, así que conectémoslos al proyecto `DungeonDb`. El generador `connection` detecta que el objetivo es un proyecto `ts#dynamodb` y conecta el objetivo `dev` de cada proyecto fuente para iniciar DynamoDB Local automáticamente.
 
-<RunGenerator generator="connection" requiredParameters={{sourceProject:"@dungeon-adventure/game-api", targetProject:"@dungeon-adventure/dungeon-db"}} noInteractive />
+<RunGenerator generator="connection" requiredParameters={{sourceProject:"@dungeon-adventure/game-api", targetProject:"@dungeon-adventure/dungeon-db"}} noInteractive readonly />
 
-<RunGenerator generator="connection" requiredParameters={{sourceProject:"@dungeon-adventure/inventory", targetProject:"@dungeon-adventure/dungeon-db"}} noInteractive />
+<RunGenerator generator="connection" requiredParameters={{sourceProject:"@dungeon-adventure/inventory", targetProject:"@dungeon-adventure/dungeon-db"}} noInteractive readonly />
 
 <Aside type="tip" title="Un comando inicia toda la pila localmente">
 Dado que el `agent-dev` del Story Agent ya depende del `mcp-server-dev` del servidor MCP de inventario (a través de la conexión `story → inventory` anterior), y tanto la Game API como el servidor MCP ahora dependen de `dungeon-db:dev`, ejecutar el objetivo `dev` de cualquier proyecto inicia todas las dependencias que necesita en el orden correcto.
@@ -1430,7 +1431,7 @@ Dado que el `agent-dev` del Story Agent ya depende del `mcp-server-dev` del serv
 
 Creemos el sub-proyecto final para la infraestructura CDK.
 
-<RunGenerator generator="ts#infra" requiredParameters={{name:"infra"}} noInteractive />
+<RunGenerator generator="ts#infra" requiredParameters={{name:"infra"}} noInteractive readonly />
 
 Verás algunos archivos nuevos aparecer/cambiar en tu árbol de archivos.
 
@@ -1478,6 +1479,8 @@ new ApplicationStage(app, 'dungeon-adventure-infra-sandbox', {
     region: process.env.CDK_DEFAULT_REGION,
   },
 });
+
+// Define other instances of stages, such as beta and prod, below
 
 app.synth();
 ```
@@ -1560,14 +1563,13 @@ Luego, ejecuta el siguiente comando para una compilación completa:
 
 <PackageManagerShortCommand commands={["build"]} />
 
-Se te presentará lo siguiente:
+Puede que se te presente lo siguiente:
 
 ```bash
  NX   The workspace is out of sync
 
-[@nx/js:typescript-sync]: Some TypeScript configuration files are missing project references to the projects they depend on or contain outdated project references.
-
-This will result in an error in CI.
+[@nx/js:typescript-sync]: Some TypeScript configuration files are missing project references to the projects they depend on, contain stale project references, or have duplicate project references.
+[@aws/nx-plugin:ts#sync]: Some files are out of sync.
 
 ? Would you like to sync the identified changes to get your workspace up to date? …
 Yes, sync the changes and run the tasks

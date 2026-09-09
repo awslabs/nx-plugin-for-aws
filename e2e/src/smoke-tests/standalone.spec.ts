@@ -333,7 +333,7 @@ const pyAgent = async (
   protocol = 'http',
 ): Promise<Side> => {
   await runCLI(
-    `generate @aws/nx-plugin:py#project --name=py-host-${s} --projectType=application --no-interactive`,
+    `generate @aws/nx-plugin:py#project --name=py-host-${s} --type=application --no-interactive`,
     opts,
   );
   await runCLI(
@@ -355,7 +355,7 @@ const tsMcp = async (opts: Opts, s: string): Promise<Side> => {
 };
 const pyMcp = async (opts: Opts, s: string): Promise<Side> => {
   await runCLI(
-    `generate @aws/nx-plugin:py#project --name=py-mcp-host-${s} --projectType=application --no-interactive`,
+    `generate @aws/nx-plugin:py#project --name=py-mcp-host-${s} --type=application --no-interactive`,
     opts,
   );
   await runCLI(

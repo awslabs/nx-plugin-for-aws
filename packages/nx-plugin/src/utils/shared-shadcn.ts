@@ -10,7 +10,10 @@ import {
   updateJson,
 } from '@nx/devkit';
 import tsProjectGenerator from '../ts/lib/generator.js';
-import { configureTsProject } from '../ts/lib/ts-project-utils.js';
+import {
+  configureTsProject,
+  TS_PROJECT_DEPENDENCIES,
+} from '../ts/lib/ts-project-utils.js';
 import { VITEST_DEPENDENCIES } from '../ts/lib/vitest.js';
 import {
   type DependencyDeclaration,
@@ -18,7 +21,10 @@ import {
   forDependencies,
   type MustDeclare,
 } from './declared-dependencies.js';
-import { addDependenciesToPackageJson } from './dependencies.js';
+import {
+  addDependenciesToPackageJson,
+  getLocalDependencySpecifier,
+} from './dependencies.js';
 import { formatFilesInSubtree } from './format.js';
 import { esmVars } from './module-format.js';
 import { getNpmScopePrefix } from './npm-scope.js';
@@ -34,21 +40,43 @@ export const SHADCN_DEPENDENCIES = [
   { name: 'react' },
   { name: 'react-dom' },
   { name: 'class-variance-authority' },
-  { name: 'clsx' },
-  { name: 'tailwind-merge' },
+  { name: 'cn' },
   { name: 'lucide-react' },
   { name: 'tw-animate-css' },
   { name: 'radix-ui' },
   ...VITEST_DEPENDENCIES,
-] as const satisfies readonly { name: ITsDepVersion }[];
+  ...TS_PROJECT_DEPENDENCIES,
+] as const satisfies readonly { name: ITsDepVersion; dev?: boolean }[];
+
+/** The shared shadcn package's fully-qualified npm name for this workspace. */
+export const getSharedShadcnFullyQualifiedName = (tree: Tree): string =>
+  `${getNpmScopePrefix(tree)}${SHARED_SHADCN_NAME}`;
+
+/**
+ * Declares a `workspace:*` dependency on the shared shadcn package in a
+ * consumer's own package.json, so it resolves through the shared package's
+ * `exports` map (real package resolution) rather than a tsconfig `paths`
+ * alias - see `sharedShadcnGenerator` for why.
+ */
+export const addSharedShadcnDependency = (
+  tree: Tree,
+  consumerDir: string,
+): void => {
+  addDependenciesToPackageJson(
+    tree,
+    {
+      [getSharedShadcnFullyQualifiedName(tree)]:
+        getLocalDependencySpecifier(tree),
+    },
+    {},
+    joinPathFragments(consumerDir, 'package.json'),
+  );
+};
 
 export async function sharedShadcnGenerator<
   const D extends DependencyDeclaration,
 >(tree: Tree, declaration: D & MustDeclare<typeof SHADCN_DEPENDENCIES, D>) {
-  const npmScopePrefix = getNpmScopePrefix(tree);
-  const scopeAlias = npmScopePrefix;
-  const sharedShadcnAlias = `${scopeAlias}${SHARED_SHADCN_NAME}`;
-  const fullyQualifiedName = `${npmScopePrefix}${SHARED_SHADCN_NAME}`;
+  const fullyQualifiedName = getSharedShadcnFullyQualifiedName(tree);
   const libraryRoot = joinPathFragments(PACKAGES_DIR, SHARED_SHADCN_DIR);
   const shadcnSrcRoot = joinPathFragments(libraryRoot, 'src');
 
@@ -65,10 +93,7 @@ export async function sharedShadcnGenerator<
       tree,
       joinPathFragments(import.meta.dirname, 'files', SHARED_SHADCN_DIR, 'src'),
       shadcnSrcRoot,
-      {
-        scopeAlias,
-        ...esmVars(tree),
-      },
+      esmVars(tree),
       {
         overwriteStrategy: OverwriteStrategy.KeepExisting,
       },
@@ -85,7 +110,6 @@ export async function sharedShadcnGenerator<
       libraryRoot,
       {
         fullyQualifiedName,
-        scopeAlias,
       },
       {
         overwriteStrategy: OverwriteStrategy.Overwrite,
@@ -128,20 +152,32 @@ export async function sharedShadcnGenerator<
       {},
       joinPathFragments(libraryRoot, 'package.json'),
     );
-  }
 
-  updateJson(tree, 'tsconfig.base.json', (json) => ({
-    ...json,
-    compilerOptions: {
-      ...json.compilerOptions,
-      paths: {
-        ...(json.compilerOptions?.paths ?? {}),
-        [`${sharedShadcnAlias}/*`]: [
-          `./${joinPathFragments(libraryRoot, 'src', '*')}`,
-        ],
-      },
-    },
-  }));
+    // shadcn 4.x's CLI resolves the `components.json` alias via `imports`/
+    // `exports` (Node's package resolution), not a tsconfig `paths` alias.
+    // `imports` covers this package's own internal component-to-component
+    // references (aliased in components.json below); `exports` covers every
+    // other consumer.
+    updateJson(
+      tree,
+      joinPathFragments(libraryRoot, 'package.json'),
+      (packageJson) => ({
+        ...packageJson,
+        imports: {
+          '#components/*': './src/components/*.tsx',
+          '#lib/*': './src/lib/*.ts',
+          '#hooks/*': './src/hooks/*.ts',
+        },
+        exports: {
+          '.': './src/index.ts',
+          './styles/*': './src/styles/*',
+          './components/*': './src/components/*.tsx',
+          './lib/*': './src/lib/*.ts',
+          './hooks/*': './src/hooks/*.ts',
+        },
+      }),
+    );
+  }
 
   // components.json lives in the package so `shadcn add` runs there and
   // installs component dependencies into the package's own manifest.
@@ -150,9 +186,7 @@ export async function sharedShadcnGenerator<
       tree,
       joinPathFragments(import.meta.dirname, 'files', 'shadcn'),
       libraryRoot,
-      {
-        sharedShadcnAlias,
-      },
+      {},
       {
         overwriteStrategy: OverwriteStrategy.KeepExisting,
       },

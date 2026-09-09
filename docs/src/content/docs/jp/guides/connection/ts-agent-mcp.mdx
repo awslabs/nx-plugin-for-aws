@@ -13,6 +13,7 @@ import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
 
 `connection` ジェネレーターは、<Link path="guides/ts-agent">TypeScript Agent</Link> を MCP サーバー（<Link path="guides/ts-mcp-server">TypeScript</Link> または <Link path="guides/py-mcp-server">Python</Link>）に接続できます。
 
@@ -51,6 +52,7 @@ import Infrastructure from '@components/infrastructure.astro';
     - core
       - agentcore-endpoints.ts フレームワークに依存しない ARN/URL 解決
       - agentcore-fetch.ts フレームワークに依存しない SigV4 / JWT / セッション転送 fetch
+      - agentcore-transport.ts 共有 AgentCore トランスポート配管
       - agentcore-mcp-transport.ts フレームワークに依存しない MCP トランスポート
       - agentcore-mcp-client-strands.ts トランスポートをラップする Strands MCP クライアント
     - index.ts すべてのクライアントをエクスポート
@@ -72,8 +74,8 @@ import Infrastructure from '@components/infrastructure.astro';
 import { Agent, tool } from '@strands-agents/sdk';
 import { MyMcpServerClientStrands } from '@my-scope/agent-connection';
 
-export const getAgent = async (sessionId: string) => {
-  const myMcpServerClient = await MyMcpServerClientStrands.create(sessionId);
+export const getAgent = async () => {
+  const myMcpServerClient = await MyMcpServerClientStrands.create();
   return new Agent({
     systemPrompt: '...',
     tools: [myMcpServerClient],
@@ -81,9 +83,11 @@ export const getAgent = async (sessionId: string) => {
 };
 ```
 
-`sessionId` パラメーターは呼び出し元から渡され、[Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html) の一貫性を確保します。
+AgentCore セッション ID は、`X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` ヘッダーを介して MCP サーバーに自動的に伝播されるため、`create()` は引数を取りません。エージェントサーバーは、受信リクエストのセッションを [`AsyncLocalStorage`](https://nodejs.org/api/async_context.html#class-asynclocalstorage) コンテキスト（生成された `router.ts` の `enterSessionContext`、または A2A/AG-UI セッションミドルウェアの `runWithSessionId`）にバインドし、`agentcore-fetch.ts` の接続クライアントの fetch がすべての送信呼び出しにそれをスタンプします。これにより、[Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html) の一貫性が確保されます。
 
 ## インフラストラクチャ
+
+<Snippet name="connection/infra-project-prerequisite" />
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -97,12 +101,14 @@ const myAgent = new MyAgent(this, 'MyAgent');
 mcpServer.grantInvokeAccess(myAgent);
 ```
 
+`grantInvokeAccess` は、MCP サーバーのランタイム ARN に対して AgentCore の呼び出しアクション（`InvokeAgentRuntime`、`InvokeAgentRuntimeForUser`、`InvokeAgentRuntimeWithWebSocketStream`）を設定します。
+
 MCP サーバーの AgentCore ランタイム ARN は、生成された CDK コンストラクトによって <Link path="guides/runtime-config">Runtime Configuration</Link> の `agentcore` 名前空間に自動的に登録されるため、エージェントは実行時にそれを検出できます。
 </Fragment>
 <Fragment slot="terraform">
 接続ジェネレーターを実行した後、Terraform 設定でエージェントに MCP サーバーを呼び出す権限を付与する必要があります：
 
-```hcl title="packages/infra/src/main.tf" {9-25}
+```hcl title="packages/infra/src/main.tf" {9-31}
 module "inventory_mcp_server" {
   source = "../../common/terraform/src/app/mcp-servers/inventory-mcp"
 }
@@ -117,9 +123,15 @@ resource "aws_iam_policy" "agent_invoke_mcp" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Effect   = "Allow"
-      Action   = "bedrock-agentcore:InvokeAgent"
-      Resource = module.inventory_mcp_server.agent_core_runtime_arn
+      Effect = "Allow"
+      Action = [
+        "bedrock-agentcore:InvokeAgentRuntime",
+        "bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream",
+      ]
+      Resource = [
+        module.inventory_mcp_server.agent_core_runtime_arn,
+        "${module.inventory_mcp_server.agent_core_runtime_arn}/*",
+      ]
     }]
   })
 }

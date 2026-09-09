@@ -19,7 +19,7 @@ Antes de usar este gerador, certifique-se de que sua aplicação React tenha:
 1. Um arquivo `main.tsx` que renderiza sua aplicação
 2. Um elemento JSX `<App/>` onde o provedor tRPC será automaticamente injetado
 3. Uma API tRPC funcionando (gerada usando o gerador de API tRPC)
-4. Cognito Auth adicionado via o <Link path="/pt/guides/react-website-auth">gerador `ts#website#auth`</Link> se estiver conectando uma API que usa autenticação Cognito ou IAM
+4. Cognito Auth adicionado via o <Link path="/guides/react-website-auth">gerador `ts#website#auth`</Link> se estiver conectando uma API que usa autenticação Cognito ou IAM
 
 <details>
 <summary>Exemplo da estrutura `main.tsx` necessária</summary>
@@ -63,8 +63,7 @@ O gerador cria a seguinte estrutura em sua aplicação React:
     - QueryClientProvider.tsx Provedor de cliente TanStack React Query
   - hooks
     - useSigV4.tsx Hook para assinar requisições HTTP com SigV4 (somente IAM)
-    - use\<ApiName>.tsx Um hook retornando o proxy de opções tRPC para integração com TanStack Query
-    - use\<ApiName>Client.tsx Um hook retornando o cliente tRPC vanilla para chamadas diretas à API
+    - use\<ApiName>.tsx Exporta tanto `use<ApiName>`, retornando o proxy de opções tRPC para integração com TanStack Query, quanto `use<ApiName>Client`, retornando o cliente tRPC vanilla para chamadas diretas à API
 
 </FileTree>
 
@@ -103,6 +102,8 @@ function MyComponent() {
   };
 
   if (isLoading) return <div>Loading...</div>;
+  if (error) return <div>Error: {error.message}</div>;
+  if (!data) return null;
 
   return (
     <ul>
@@ -113,6 +114,8 @@ function MyComponent() {
   );
 }
 ```
+
+`data` é `undefined` até que a consulta seja resolvida, então proteja-a antes de desreferenciar.
 
 ### Usando o Cliente tRPC Vanilla
 
@@ -157,6 +160,8 @@ function MyComponent() {
     );
   }
 
+  if (!data) return null;
+
   return (
     <ul>
       {data.map((user) => (
@@ -181,7 +186,7 @@ Para informações sobre como definir procedimentos de assinatura em seu backend
 
 Você pode consumir assinaturas usando o hook `useSubscription` com `subscriptionOptions` do proxy de opções:
 
-```tsx {1-2,7-22}
+```tsx {1-2,7-23}
 import { useSubscription } from '@trpc/tanstack-react-query';
 import { useMyApi } from './hooks/useMyApi';
 
@@ -278,7 +283,7 @@ function UserList() {
 
   const users = useQuery(trpc.users.list.queryOptions());
 
-  if (users.isLoading) {
+  if (users.isPending) {
     return <LoadingSpinner />;
   }
 
@@ -338,7 +343,7 @@ function UserList() {
 
   return (
     <ul>
-      {users.map((user) => (
+      {users.data?.map((user) => (
         <li key={user.id}>
           {user.name}
           <button onClick={() => deleteMutation.mutate(user.id)}>Delete</button>
@@ -366,7 +371,7 @@ function UserList() {
 
   return (
     <ul>
-      {users.map((user) => (
+      {users.data?.map((user) => (
         <li key={user.id} onMouseEnter={() => prefetchUser(user.id)}>
           <Link to={`/users/${user.id}`}>{user.name}</Link>
         </li>
@@ -417,11 +422,13 @@ function UserList() {
 A integração fornece segurança de tipo completa de ponta a ponta. Seu IDE fornecerá autocompletar completo e verificação de tipo para todas as suas chamadas de API:
 
 ```tsx
+import { useMutation } from '@tanstack/react-query';
+
 function UserForm() {
   const trpc = useMyApi();
 
   // ✅ Input is fully typed
-  const createUser = trpc.users.create.useMutation();
+  const createUser = useMutation(trpc.users.create.mutationOptions());
 
   const handleSubmit = (data: CreateUserInput) => {
     // ✅ Type error if input doesn't match schema

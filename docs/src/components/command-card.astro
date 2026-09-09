@@ -1,0 +1,565 @@
+---
+/**
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/**
+ * The card a guide's command lives in: a titled frame, the command itself (passed
+ * in, since the run-generator card offers an Nx Console route alongside it), and
+ * the controls that write it.
+ *
+ * A control per option — pills for a fixed set of values, a checkbox for a flag, a
+ * text box otherwise — rewrites the command as the reader types, so they leave
+ * with their own invocation rather than one to edit afterwards. A walkthrough
+ * whose prose is written around the values it passes locks them instead.
+ */
+import CommandCardField from './command-card-field.astro';
+import type { CardConfig } from '../lib/command-card';
+import type { CommandCardStrings } from '../lib/command-card-strings';
+import type { GeneratorOption } from '../lib/generator-options';
+
+interface Props {
+  config: CardConfig;
+  options: GeneratorOption[];
+  /** The value each option starts on, keyed by option name. */
+  initial: Record<string, string>;
+  title: string;
+  /** What the command runs, shown beside the title. */
+  target: string;
+  /** Options whose controls state their value without offering to change it. */
+  locked: Set<string>;
+  strings: CommandCardStrings;
+  /**
+   * Whether this card's values are the page's: the guide shows the sections that
+   * apply to what the reader enters here.
+   */
+  ownsPage?: boolean;
+  /** Offered where the command supports it, which the create wrapper doesn't. */
+  showDryRun?: boolean;
+}
+
+const {
+  config,
+  options,
+  initial,
+  title,
+  target,
+  locked,
+  strings,
+  ownsPage = false,
+  showDryRun = false,
+} = Astro.props as Props;
+
+// A page can run the same generator more than once (the tutorials wire several
+// connections in a row), so each card counts itself and keys its labels on that.
+const cardCountSymbol = Symbol.for('npfa:command-card-count');
+const locals = Astro.locals as Record<symbol, number>;
+locals[cardCountSymbol] = (locals[cardCountSymbol] ?? 0) + 1;
+const idPrefix = `cc${locals[cardCountSymbol]}`;
+
+// Enum values past this point are collapsed behind a toggle, matching the options
+// reference panel, so a long list stays one row tall.
+const COLLAPSE_AFTER = 6;
+
+// A locked option is only worth a row where the page pins it: the others would
+// restate a default the reader can neither see in the command nor change.
+const pinnedKeys = new Set(config.prescribed);
+const shown = options.filter(
+  (option) => !locked.has(option.key) || pinnedKeys.has(option.key),
+);
+// Everything is locked on a walkthrough card, so its options read as a summary of
+// the step rather than an invitation to change it.
+const isPinned = shown.every((option) => locked.has(option.key));
+---
+
+<div
+  class="command-card not-content"
+  data-command-card
+  data-command-card-owns-page={ownsPage ? '' : undefined}
+  data-config={JSON.stringify(config)}
+>
+  <p class="command-card-head">
+    <span class="command-card-mark" aria-hidden="true">
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.7"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <path d="M4 5.5h16a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-11a1 1 0 0 1 1-1Z" />
+        <path d="M7 10.2 9.4 12.5 7 14.8" />
+        <path d="M12.4 15h4.2" />
+      </svg>
+    </span>
+    <span class="command-card-title">{title}</span>
+    <code class="command-card-target">{target}</code>
+  </p>
+
+  <slot />
+
+  {
+    shown.length > 0 && (
+      <details class="command-card-builder">
+        <summary class="command-card-builder-summary">
+          <svg
+            class="command-card-chevron"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <polyline points="9 6 15 12 9 18" />
+          </svg>
+          <span class="command-card-builder-title">
+            {isPinned ? strings.pinned : strings.build}
+          </span>
+          <span class="command-card-builder-count">{shown.length}</span>
+          {!isPinned && (
+            <button
+              type="button"
+              class="command-card-reset"
+              data-command-card-reset
+              hidden
+            >
+              {strings.reset}
+            </button>
+          )}
+        </summary>
+
+        <div class="command-card-fields">
+          {shown.map((option) => (
+            <CommandCardField
+              option={option}
+              idPrefix={idPrefix}
+              value={initial[option.key] ?? ''}
+              locked={locked.has(option.key)}
+              collapseAfter={COLLAPSE_AFTER}
+              strings={strings}
+            />
+          ))}
+        </div>
+
+        {showDryRun && (
+          <p class="command-card-footer">
+            <label class="command-card-dry-run">
+              <input type="checkbox" data-command-card-dry-run />
+              <code>--dry-run</code>
+            </label>
+            <span class="command-card-footer-help">
+              {strings.dryRunSummary}
+            </span>
+          </p>
+        )}
+      </details>
+    )
+  }
+</div>
+
+<script>
+  import {
+    buildCommandTokens,
+    emittedValues,
+    type CardConfig,
+    type CommandToken,
+  } from '../lib/command-card';
+  import {
+    effectiveValues,
+    isApplicable,
+    isValueApplicable,
+  } from '../lib/generator-options';
+  import { readPageSelection } from '../lib/page-options';
+
+  /**
+   * Rebuilds a card's command from its controls, on every keystroke and click.
+   *
+   * The card of the generator a guide is about also owns the option values the
+   * page is read under: what the reader enters here is what the guide shows.
+   */
+  const wire = (card: HTMLElement) => {
+    let config: CardConfig;
+    try {
+      config = JSON.parse(card.dataset.config!);
+    } catch {
+      return;
+    }
+
+    const blocks = Array.from(
+      card.querySelectorAll<HTMLElement>('[data-command-card-command]'),
+    );
+    const inputs = Array.from(
+      card.querySelectorAll<HTMLInputElement>('[data-option-input]'),
+    );
+    const checks = Array.from(
+      card.querySelectorAll<HTMLInputElement>('[data-option-check]'),
+    );
+    const pills = Array.from(
+      card.querySelectorAll<HTMLButtonElement>('[data-option-pill]'),
+    );
+    const fields = new Map(
+      Array.from(
+        card.querySelectorAll<HTMLElement>('[data-command-card-field]'),
+      ).map((field) => [field.dataset.commandCardField!, field]),
+    );
+    // The controls the guide itself fixes, which stay that way whatever applies.
+    const locked = new Set<HTMLInputElement | HTMLButtonElement>([
+      ...inputs.filter((input) => input.readOnly),
+      ...checks.filter((check) => check.disabled),
+      ...pills.filter((pill) => pill.disabled),
+    ]);
+    const dryRun = card.querySelector<HTMLInputElement>(
+      '[data-command-card-dry-run]',
+    );
+    const reset = card.querySelector<HTMLButtonElement>(
+      '[data-command-card-reset]',
+    );
+    const vscodeValues = card.querySelector<HTMLElement>(
+      '[data-command-card-values]',
+    );
+
+    // Where the card started, to reset back to and to spot a reader's changes.
+    const initial = {
+      inputs: inputs.map((input) => input.value),
+      checks: checks.map((check) => check.checked),
+      pills: pills.map((pill) => pill.getAttribute('aria-pressed') === 'true'),
+    };
+
+    // The page's option selection, which this card owns when it runs the
+    // generator the guide is about.
+    const pageOptions = document.querySelector<HTMLElement>(
+      '[data-page-options]',
+    );
+    const owns = card.dataset.commandCardOwnsPage !== undefined;
+    const filterKeys = new Set(
+      (pageOptions?.dataset.keys ?? '').split(',').filter(Boolean),
+    );
+
+    const entered = (): Record<string, string> => {
+      const values: Record<string, string> = {};
+      for (const input of inputs) {
+        values[input.dataset.optionInput!] = input.value.trim();
+      }
+      for (const check of checks) {
+        values[check.dataset.optionCheck!] = String(check.checked);
+      }
+      for (const pill of pills) {
+        if (pill.getAttribute('aria-pressed') === 'true') {
+          values[pill.dataset.optionPill!] = pill.dataset.value!;
+        }
+      }
+      return values;
+    };
+
+    // Keys carried by the command last render, so only an option that has just
+    // appeared animates in rather than every token on every keystroke.
+    let previousKeys = new Set(
+      Array.from(
+        blocks[0]?.querySelectorAll<HTMLElement>('[data-token-key]') ?? [],
+      )
+        .map((token) => token.dataset.tokenKey!)
+        .filter(Boolean),
+    );
+
+    const paint = (block: HTMLElement, tokens: CommandToken[]) => {
+      const prompt = block.querySelector('.command-card-prompt');
+      block.textContent = '';
+      if (prompt) block.append(prompt);
+      for (const token of tokens) {
+        const span = document.createElement('span');
+        span.className = `command-card-token is-${token.kind}`;
+        if (token.key) {
+          span.dataset.tokenKey = token.key;
+          if (!previousKeys.has(token.key)) span.classList.add('is-new');
+        }
+        if (token.kind === 'option') {
+          const label = document.createElement('span');
+          label.className = 'command-card-token-label';
+          label.textContent = token.label!;
+          const value = document.createElement('span');
+          value.className = 'command-card-token-value';
+          value.textContent = token.value!;
+          span.append(label, value);
+        } else {
+          span.textContent = token.text;
+        }
+        // A real space between tokens, so selecting the line copies a command
+        // rather than one run-together word.
+        block.append(' ', span);
+      }
+    };
+
+    // An option only applies under some values of another — a gateway's `auth`
+    // under an `infra` that hosts something. While another choice rules it out its
+    // controls are disabled rather than removed, so the reader can see the
+    // condition they'd have to change, and whatever was entered in it leaves the
+    // command.
+    const applyApplicability = () => {
+      // Read against the values a run would use, so a condition on an option the
+      // reader hasn't touched is read against that option's own default.
+      const context = effectiveValues(entered(), config.options);
+      const dropped = new Set<string>();
+
+      for (const option of config.options) {
+        const applies = isApplicable(option, context);
+        const field = fields.get(option.key);
+        field?.classList.toggle('is-inapplicable', !applies);
+        for (const control of field?.querySelectorAll<
+          HTMLInputElement | HTMLButtonElement
+        >('[data-option-pill], [data-option-check], [data-option-input]') ?? []) {
+          const fixed = locked.has(control);
+          if (control instanceof HTMLInputElement && control.type === 'text') {
+            control.readOnly = fixed || !applies;
+          } else {
+            control.disabled = fixed || !applies;
+          }
+        }
+        if (!applies) dropped.add(option.key);
+      }
+
+      // One of an option's values can be ruled out on its own — an API's
+      // `http-lambda` under the Smithy framework.
+      for (const option of config.options) {
+        if (!option.valueWhen || dropped.has(option.key)) continue;
+        const owned = pills.filter(
+          (pill) => pill.dataset.optionPill === option.key,
+        );
+        const applicable = owned.filter((pill) =>
+          isValueApplicable(option, pill.dataset.value!, context),
+        );
+        for (const pill of owned) {
+          const applies = applicable.includes(pill);
+          pill.classList.toggle('is-inapplicable', !applies);
+          if (!locked.has(pill)) pill.disabled = !applies;
+          // A value that has just stopped applying is let go rather than left to
+          // make a command the generator would refuse.
+          if (!applies && pill.getAttribute('aria-pressed') === 'true') {
+            setPill(option.key, '');
+          }
+        }
+        // Where the value a run would fall back to is a ruled-out one, the command
+        // has to name a value that isn't, or the generator refuses it.
+        const chosen = owned.find(
+          (pill) => pill.getAttribute('aria-pressed') === 'true',
+        );
+        const fallback = chosen?.dataset.value ?? option.default ?? '';
+        if (
+          !locked.has(owned[0]) &&
+          applicable.length > 0 &&
+          fallback &&
+          !isValueApplicable(option, fallback, context)
+        ) {
+          setPill(option.key, applicable[0].dataset.value!);
+        }
+      }
+
+      return Object.fromEntries(
+        Object.entries(emittedValues(entered(), config.options)).filter(
+          ([key]) => !dropped.has(key),
+        ),
+      );
+    };
+
+    const render = () => {
+      const values = applyApplicability();
+      for (const block of blocks) {
+        paint(
+          block,
+          buildCommandTokens(config, {
+            packageManager: block.dataset.commandCardCommand!,
+            values,
+            dryRun: dryRun?.checked,
+          }),
+        );
+      }
+      previousKeys = new Set(Object.keys(values));
+
+      if (vscodeValues) {
+        vscodeValues.textContent = '';
+        for (const [key, value] of Object.entries(values)) {
+          const item = document.createElement('li');
+          const name = document.createElement('b');
+          name.textContent = `${key}:`;
+          item.append(name, ` ${value}`);
+          vscodeValues.append(item);
+        }
+      }
+
+      if (owns) publish(values);
+
+      if (reset) {
+        const changed =
+          inputs.some((input, i) => input.value !== initial.inputs[i]) ||
+          checks.some((check, i) => check.checked !== initial.checks[i]) ||
+          pills.some(
+            (pill, i) =>
+              (pill.getAttribute('aria-pressed') === 'true') !==
+              initial.pills[i],
+          ) ||
+          dryRun?.checked === true;
+        reset.hidden = !changed;
+      }
+    };
+
+    // What the rest of the page reads. `values` is everything the controls hold,
+    // so a flag left at its default still counts as a choice for the sections
+    // written around it; `command` is what the command actually carries, which is
+    // what the options panel highlights.
+    let published = '';
+    const publish = (command: Record<string, string>) => {
+      const detail = { values: entered(), command };
+      const payload = JSON.stringify(detail);
+      if (payload === published) return;
+      published = payload;
+      card.dataset.pageOptions = payload;
+      document.dispatchEvent(
+        new CustomEvent('npfa:page-options', { detail }),
+      );
+    };
+
+    const setPill = (key: string, value: string) => {
+      for (const pill of pills) {
+        if (pill.dataset.optionPill !== key) continue;
+        pill.setAttribute('aria-pressed', String(pill.dataset.value === value));
+      }
+    };
+
+    // Each box shows the value it passes, so `false` reads as deliberate.
+    const syncCheckLabel = (check: HTMLInputElement) => {
+      const label = check.parentElement?.querySelector<HTMLElement>(
+        '[data-option-check-label]',
+      );
+      if (label) label.textContent = String(check.checked);
+    };
+
+    for (const input of inputs) {
+      input.addEventListener('input', render);
+    }
+    for (const check of checks) {
+      check.addEventListener('change', () => {
+        syncCheckLabel(check);
+        render();
+      });
+    }
+    dryRun?.addEventListener('change', render);
+
+    for (const pill of pills) {
+      pill.addEventListener('click', () => {
+        const key = pill.dataset.optionPill!;
+        // Picking the value already picked clears it, so the option goes back to
+        // whatever the generator would prompt for.
+        const value =
+          pill.getAttribute('aria-pressed') === 'true'
+            ? ''
+            : pill.dataset.value!;
+        setPill(key, value);
+        render();
+      });
+    }
+
+    for (const more of card.querySelectorAll<HTMLElement>(
+      '[data-command-card-more]',
+    )) {
+      more.addEventListener('click', () => {
+        const expanded = more
+          .closest('.command-card-pills')!
+          .classList.toggle('is-expanded');
+        more.textContent = expanded
+          ? more.dataset.labelFewer!
+          : more.dataset.labelMore!;
+      });
+    }
+
+    reset?.addEventListener('click', (event) => {
+      // The button sits in the summary, whose default action would collapse the
+      // section the reader is resetting.
+      event.preventDefault();
+      inputs.forEach((input, i) => {
+        input.value = initial.inputs[i];
+      });
+      checks.forEach((check, i) => {
+        check.checked = initial.checks[i];
+        syncCheckLabel(check);
+      });
+      pills.forEach((pill, i) => {
+        pill.setAttribute('aria-pressed', String(initial.pills[i]));
+      });
+      if (dryRun) dryRun.checked = false;
+      render();
+    });
+
+    for (const button of card.querySelectorAll<HTMLButtonElement>(
+      '[data-command-card-copy]',
+    )) {
+      button.addEventListener('click', async () => {
+        const block = button
+          .closest('.command-card-terminal')
+          ?.querySelector<HTMLElement>('[data-command-card-command]');
+        const tokens = Array.from(
+          block?.querySelectorAll<HTMLElement>('.command-card-token') ?? [],
+        );
+        const text = tokens.map((token) => token.textContent).join(' ');
+        if (!text) return;
+        try {
+          await navigator.clipboard.writeText(text);
+          button.classList.add('is-copied');
+          setTimeout(() => button.classList.remove('is-copied'), 1600);
+        } catch {
+          // Clipboard access can be denied; the command stays selectable.
+        }
+      });
+    }
+
+    // A shared link or a reload arrives with a selection already made, which the
+    // card picks up — except where this guide pins the option, whose value the
+    // guide's prose is written around.
+    const pinned = new Set(config.prescribed);
+    const restore = (selected: Record<string, string>) => {
+      for (const [key, value] of Object.entries(selected)) {
+        if (!filterKeys.has(key) || pinned.has(key)) continue;
+        const owned = pills.filter((pill) => pill.dataset.optionPill === key);
+        if (!owned.some((pill) => pill.dataset.value === value)) continue;
+        setPill(key, value);
+      }
+    };
+    if (owns && pageOptions) {
+      restore(readPageSelection(pageOptions.dataset.storageKey!, filterKeys));
+    }
+
+    // The options panel is the other way into the same values: it asks for a
+    // change, this card makes it, and the page follows from here as usual.
+    if (owns) {
+      document.addEventListener('npfa:option-set', (event) => {
+        const { key, value } = (event as CustomEvent).detail ?? {};
+        if (typeof key !== 'string' || typeof value !== 'string') return;
+        const owned = pills.filter((pill) => pill.dataset.optionPill === key);
+        if (owned.length === 0 || owned.some((pill) => pill.disabled)) return;
+        if (value !== '' && !owned.some((pill) => pill.dataset.value === value)) {
+          return;
+        }
+        setPill(key, value);
+        render();
+      });
+    }
+
+    render();
+  };
+
+  const run = () => {
+    for (const card of document.querySelectorAll<HTMLElement>(
+      '[data-command-card]',
+    )) {
+      wire(card);
+    }
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', run);
+  } else {
+    run();
+  }
+</script>

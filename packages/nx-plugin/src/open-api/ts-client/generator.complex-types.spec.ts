@@ -1198,4 +1198,303 @@ describe('openApiTsClientGenerator - complex types', () => {
       }),
     );
   });
+
+  /**
+   * OpenAPI 3.0 ignores a `$ref`'s siblings, so attaching a description to a
+   * referenced schema means wrapping it in a one-member `allOf` — the commonest
+   * `allOf` idiom in published specs. Such a member constrains nothing, and
+   * counting it as a non-object failed the whole document.
+   */
+  it.each([
+    ['a description', { description: 'a link' }],
+    ['an example', { example: { href: 'x' } }],
+    ['a title', { title: 'Link' }],
+    ['nothing at all', {}],
+    ['an explicit object type', { type: 'object' }],
+  ])('composes an allOf member carrying %s', async (_label, member) => {
+    const spec: Spec = {
+      openapi: '3.0.0',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/a': {
+          get: {
+            operationId: 'getA',
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/Out' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          Link: {
+            type: 'object',
+            required: ['href'],
+            properties: { href: { type: 'string' } },
+          },
+          Out: {
+            allOf: [{ $ref: '#/components/schemas/Link' }, member],
+          },
+        },
+      },
+    } as unknown as Spec;
+
+    tree.write('openapi.json', JSON.stringify(spec));
+    await openApiTsClientGenerator(tree, {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    });
+    const types = tree.read('src/generated/types.gen.ts', 'utf-8')!;
+    // The annotation contributes nothing, so the composite is just the member it
+    // annotates rather than an intersection with the empty object.
+    expect(types).toContain('export type Out = Link;');
+    validateTypeScript(['src/generated/types.gen.ts']);
+  });
+
+  // A member declaring `required` is not empty: it raises a sibling branch's
+  // property to mandatory, and nothing carries that across branches, so dropping
+  // it would quietly make a required field optional.
+  it('still refuses an allOf member that requires a property it does not declare', async () => {
+    const spec: Spec = {
+      openapi: '3.0.0',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/a': {
+          get: {
+            operationId: 'getA',
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/Out' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          Base: { type: 'object', properties: { a: { type: 'string' } } },
+          Out: {
+            allOf: [
+              { $ref: '#/components/schemas/Base' },
+              { type: 'object', required: ['a'] },
+            ],
+          },
+        },
+      },
+    } as unknown as Spec;
+
+    tree.write('openapi.json', JSON.stringify(spec));
+    await expect(
+      openApiTsClientGenerator(tree, {
+        openApiSpecPath: 'openapi.json',
+        outputPath: 'src/generated',
+      }),
+    ).rejects.toThrow(/an allOf member declares "required"/);
+  });
+
+  // A named scalar reached through `items` is inlined, and the array wrapping it
+  // was substituted without following through — leaving `items` pointing at a
+  // schema the same pass deleted, so the client named a type nothing declared and
+  // the emitted TypeScript did not compile.
+  it('declares every type the client refers to for an array of a named scalar', async () => {
+    const spec: Spec = {
+      openapi: '3.0.0',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/x': {
+          get: {
+            operationId: 'getX',
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/IndexName' },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: { IndexName: { type: 'string', maxLength: 45 } },
+      },
+    } as unknown as Spec;
+
+    tree.write('openapi.json', JSON.stringify(spec));
+    await openApiTsClientGenerator(tree, {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    });
+    const client = tree.read('src/generated/client.gen.ts', 'utf-8')!;
+    // The chain collapses to the scalar rather than naming a schema that is gone.
+    expect(client).toContain('Promise<Array<string>>');
+    expect(client).not.toContain('IndexName');
+    // Compiling is what proves nothing dangles.
+    validateTypeScript([
+      'src/generated/types.gen.ts',
+      'src/generated/client.gen.ts',
+    ]);
+  });
+
+  // Two union members declaring a byte-identical inline object property were
+  // hoisted to distinct names, and the marshalling key was the name — so members
+  // that convert the same way were rejected as declaring "different types".
+  it('accepts a union whose members share an identical inline object property', async () => {
+    const branch = (extra: string) => ({
+      type: 'object',
+      properties: {
+        duration: {
+          type: 'object',
+          properties: { value: { type: 'string' } },
+        },
+        [extra]: { type: 'string' },
+      },
+    });
+    const spec: Spec = {
+      openapi: '3.0.0',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/x': {
+          get: {
+            operationId: 'getX',
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/Item' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: { Item: { anyOf: [branch('a'), branch('b')] } },
+      },
+    } as unknown as Spec;
+
+    tree.write('openapi.json', JSON.stringify(spec));
+    await openApiTsClientGenerator(tree, {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    });
+    validateTypeScript(['src/generated/types.gen.ts']);
+  });
+
+  // The same check must still catch members that genuinely convert differently.
+  it('still refuses a union whose members disagree on a property type', async () => {
+    const spec: Spec = {
+      openapi: '3.0.0',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/x': {
+          get: {
+            operationId: 'getX',
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': {
+                    schema: { $ref: '#/components/schemas/Item' },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      components: {
+        schemas: {
+          Item: {
+            anyOf: [
+              {
+                type: 'object',
+                properties: {
+                  when: { type: 'string', format: 'date-time' },
+                },
+              },
+              { type: 'object', properties: { when: { type: 'string' } } },
+            ],
+          },
+        },
+      },
+    } as unknown as Spec;
+
+    tree.write('openapi.json', JSON.stringify(spec));
+    await expect(
+      openApiTsClientGenerator(tree, {
+        openApiSpecPath: 'openapi.json',
+        outputPath: 'src/generated',
+      }),
+    ).rejects.toThrow(/non-discriminated anyOf/);
+  });
+
+  // Hoisting a nullable inline object property replaced it with a bare `$ref` and
+  // moved `nullable` onto the hoisted definition, where it applied to every other
+  // user of that schema and to this property not at all.
+  it('keeps a required nullable object property nullable', async () => {
+    const spec: Spec = {
+      openapi: '3.0.0',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/t': {
+          get: {
+            operationId: 'getT',
+            responses: {
+              '200': {
+                description: 'OK',
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      required: ['iso', 'scalar'],
+                      properties: {
+                        iso: {
+                          type: 'object',
+                          nullable: true,
+                          required: ['id'],
+                          properties: { id: { type: 'integer' } },
+                        },
+                        scalar: { type: 'string', nullable: true },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    } as unknown as Spec;
+
+    tree.write('openapi.json', JSON.stringify(spec));
+    await openApiTsClientGenerator(tree, {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    });
+    const types = tree.read('src/generated/types.gen.ts', 'utf-8')!;
+    expect(types).toMatch(/iso: GetT200ResponseIso \| null;/);
+    // The scalar case already worked and must stay that way.
+    expect(types).toMatch(/scalar: string \| null;/);
+    validateTypeScript(['src/generated/types.gen.ts']);
+  });
 });

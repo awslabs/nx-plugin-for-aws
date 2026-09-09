@@ -35,13 +35,14 @@ import Snippet from '@components/snippet.astro';
 
 ## ジェネレーターの出力
 
-ジェネレーターは、tRPC API プロジェクト内にミドルウェアファイルを作成します：
+ジェネレーターは、tRPC API プロジェクト内にミドルウェアファイルを作成し、tRPC コンテキストに追加します：
 
 <FileTree>
 
 - packages/api/src
   - middleware
     - \<db-name>.ts tRPC plugin exposing the Prisma client in procedure context
+  - init.ts The database's context interface added to `Context`
 
 </FileTree>
 
@@ -53,12 +54,11 @@ import Snippet from '@components/snippet.astro';
 
 生成されたプラグインを tRPC ルーターに追加して、それを使用するすべてのプロシージャがデータベースにアクセスできるようにします：
 
-```ts title="packages/api/src/router.ts" {2,5}
+```ts title="packages/api/src/router.ts" {2,4}
 import { t } from './init.js';
 import { createMyDbPlugin } from './middleware/my-db.js';
 
-export const authenticatedProcedure = t.procedure
-  .concat(createMyDbPlugin());
+export const dbProcedure = t.procedure.concat(createMyDbPlugin());
 ```
 
 ### プロシージャ内でのデータベースへのアクセス
@@ -67,9 +67,9 @@ export const authenticatedProcedure = t.procedure
 
 ```ts title="packages/api/src/procedures/users.ts" {7-8}
 import { z } from 'zod';
-import { authenticatedProcedure } from '../router.js';
+import { dbProcedure } from '../router.js';
 
-export const listUsers = authenticatedProcedure
+export const listUsers = dbProcedure
   .output(z.array(z.object({ id: z.string(), name: z.string() })))
   .query(async ({ ctx }) => {
     // ctx.myDb is the Prisma client — typed as Awaited<ReturnType<typeof getPrisma>>

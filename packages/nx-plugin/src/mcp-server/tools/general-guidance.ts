@@ -7,10 +7,23 @@ import type { NxGeneratorInfo } from '../../utils/generators.js';
 import { IAC_PROVIDERS } from '../../utils/iac-providers.js';
 import { buildNxCommand, fetchGuidePages } from '../generator-info.js';
 import { PACKAGE_MANAGERS } from '../schema.js';
+import { BEST_PRACTICE_PAGE_NAMES } from './best-practices.js';
+
+/**
+ * The cross-cutting pages every agent needs regardless of task, inlined here
+ * so a workspace's conventions land without a second tool call. The rest are
+ * served on demand by `best-practices`.
+ */
+const GENERAL_GUIDANCE_PAGES = [
+  'workspace',
+  'typescript-project',
+  'python-project',
+] as const;
 
 export const TOOL_SELECTION_GUIDE = `## Tool Selection Guide
 
 - Use the \`general-guidance\` tool for guidance and best practices for working with Nx and the Nx Plugin for AWS.
+- Use the \`best-practices\` tool for guidance which spans generators rather than applying to one in particular, such as workspace layout, security, runtime configuration, container builds and local development.
 - Use the \`create-workspace-command\` tool to discover how to create a workspace to start a new project.
 - Use the \`add-to-existing-project\` tool when adding the plugin to an existing Nx workspace or non-Nx monorepo, or when troubleshooting configuration errors in such a workspace.
 - Use the \`upgrade-workspace\` tool when upgrading Nx or the Nx Plugin for AWS to a newer version.
@@ -101,9 +114,13 @@ ${PACKAGE_MANAGERS.map(
 
 ## Detailed Guides
 
-Please refer to the below documentation for important details regarding workspaces and working with TypeScript or Python projects.
+Please refer to the below documentation for important details regarding workspaces and working with TypeScript or Python projects. Use the \`best-practices\` tool for the remaining cross-cutting guides (${BEST_PRACTICE_PAGE_NAMES.filter(
+            (p) => !GENERAL_GUIDANCE_PAGES.includes(p as never),
+          )
+            .map((p) => `\`${p}\``)
+            .join(', ')}).
 
-${await fetchGuidePages(['workspace', 'typescript-project', 'python-project'], generators)}
+${await fetchGuidePages([...GENERAL_GUIDANCE_PAGES], generators)}
 
     `,
         },

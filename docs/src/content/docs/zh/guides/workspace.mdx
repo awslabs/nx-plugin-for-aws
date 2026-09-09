@@ -2,7 +2,7 @@
 title: 工作区
 description: 工作区参考文档
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { Aside, FileTree } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
@@ -27,8 +27,10 @@ import GeneratorParameters from '@components/generator-parameters.astro';
   - package.json Root package.json for your monorepo
   - nx.json Nx configuration (common targets, sync generators, caching)
   - tsconfig.base.json Root TypeScript configuration
+  - biome.json Biome configuration for linting and formatting
   - aws-nx-plugin.config.mts Nx Plugin for AWS configuration
   - .git-secrets/ Vendored git-secrets bash script for credential scanning
+  - .gitallowed Patterns git-secrets treats as false positives
   - .husky/ Git hooks
   - .mcp.json Nx Plugin for AWS MCP server configuration for Claude Code
   - .cursor/mcp.json ...and for Cursor
@@ -71,7 +73,7 @@ Nx monorepo 由一个或多个项目组成，每个项目都有一个 `project.j
 
 ### 缓存
 
-Nx 缓存先前执行的目标的输出，并在输入未更改时重放它们。这大大加快了构建、测试和代码检查的速度——尤其是在 CI 中。如果您遇到过时或意外的行为，请使用以下命令重置缓存：
+Nx 缓存先前执行的目标的输出，并在输入未更改时重放它们。这大大加快了构建、测试和代码检查的速度。如果您遇到过时或意外的行为，请使用以下命令重置缓存：
 
 <NxCommands commands={['reset']} />
 
@@ -87,15 +89,7 @@ Nx 缓存先前执行的目标的输出，并在输入未更改时重放它们�
 }
 ```
 
-如果您在核心数较少或内存有限的机器上构建，请降低此值：
-
-```json title="nx.json"
-{
-  "parallel": 3
-}
-```
-
-您还可以在每次调用时覆盖它：
+如果您在核心数较少或内存有限的机器上构建，请降低此值。您还可以在每次调用时覆盖它：
 
 <NxCommands commands={['run-many --target build --parallel=4']} />
 
@@ -165,23 +159,32 @@ Nx 缓存先前执行的目标的输出，并在输入未更改时重放它们�
 
 新工作区配置了 [Biome](https://biomejs.dev/) 用于静态分析和代码格式化。运行 `lint` 检查所有项目的问题，`lint --configuration=fix` 自动修复它们。
 
+### MCP 配置
+
+该插件的 <Link path="get_started/building-with-ai">MCP 服务器</Link>被配置为 Claude Code、Cursor、Kiro、Gemini CLI、GitHub Copilot 和 OpenAI Codex 的项目级 MCP 服务器，因此您的编码助手可以在无需任何设置的情况下发现并运行该插件的生成器。该配置与您的工作区一起提交，使您团队中的每个人都拥有相同的设置。删除您和您的团队不使用的编码助手的任何配置。
+
 ### Git Secrets
 
-新工作区包含 [git-secrets](https://github.com/awslabs/git-secrets) 预提交钩子，在每次提交之前扫描暂存文件中的 AWS 凭证模式。这可以防止意外提交访问密钥、秘密密钥和其他敏感值。
+工作区设置了 [git-secrets](https://github.com/awslabs/git-secrets) 预提交钩子，在每次提交之前扫描暂存文件中的 AWS 凭证模式。这可以防止意外提交访问密钥、秘密密钥和其他敏感值。
+
+该脚本被供应到工作区的 `.git-secrets/git-secrets` 中，并由 `.husky/pre-commit` 钩子运行，因此无需安装任何东西——但它不在您的 `PATH` 中，因此请通过路径调用它，而不是使用 `git secrets`。
 
 #### 抑制误报
 
 git-secrets 中的模式使用 [egrep 兼容的正则表达式](https://github.com/awslabs/git-secrets#options-for-add)。如果 git-secrets 阻止了不包含真实凭证的提交：
 
 ```sh
-# Allow a specific regex pattern
-git secrets --add --allowed 'my-regex-pattern'
+# Allow a specific regex pattern (-a is the allowed flag)
+bash .git-secrets/git-secrets --add -a -- 'my-regex-pattern'
 
-# Allow a literal string (special characters are escaped)
-git secrets --add --allowed --literal 'my-literal+string'
+# Allow a literal string, escaping special characters (-l is the literal flag)
+bash .git-secrets/git-secrets --add -a -l -- 'my-literal+string'
+
+# List what is currently allowed
+git config --get-all secrets.allowed
 ```
 
-您还可以在仓库根目录创建一个 `.gitallowed` 文件，每行一个 egrep 兼容的正则表达式（通过版本控制与您的团队共享）：
+这些记录在您的本地 git 配置中，因此它们仅适用于您自己的克隆。要与您的团队共享抑制规则，请将其添加到仓库根目录的 `.gitallowed` 文件中——每行一个 egrep 兼容的正则表达式，与 `<path>:<line-number>:<line-contents>` 匹配：
 
 ```text title=".gitallowed"
 # Allow test fixtures
@@ -194,7 +197,7 @@ EXAMPLE[A-Z]{16}
 
 ## Nx Plugin for AWS 配置
 
-工作区在根目录附带一个 `aws-nx-plugin.config.mts` 文件。生成器读取此文件以选择合理的默认值，这样您就不必每次都传递相同的标志。两个设置特别有用：
+工作区在根目录附带一个 `aws-nx-plugin.config.mts` 文件。生成器读取此文件以选择合理的默认值，这样您就不必每次都传递相同的标志：
 
 ```typescript
 // aws-nx-plugin.config.mts
@@ -207,11 +210,16 @@ export default {
   containers: {
     engine: 'docker', // or 'finch'
   },
+  packageManager: {
+    catalogs: true, // or false
+  },
 } satisfies AwsNxPluginConfig;
 ```
 
 - **`iac.provider`** — 由生成基础设施的生成器（例如 `ts#infra`、`ts#api`、`py#api`）使用的默认基础设施即代码提供程序（`cdk` 或 `terraform`）。接受 `--iac` 标志的生成器默认为 `inherit`，它读取此值。
 - **`containers.engine`** — 嵌入到生成的构建/推送/登录命令中的容器 CLI（`docker` 或 `finch`）。CDK 镜像资产构建也通过 `CDK_DOCKER` 环境变量获取此值。有关详细信息，请参阅 <Link path="guides/docker-bundling">Docker 打包指南</Link>。
+- **`packageManager.catalogs`** — 生成器是否在包管理器的目录中记录依赖项版本并使用 `catalog:` 协议引用它们（请参阅[单一版本策略](#单一版本策略)）。将其设置为 `false` 可让生成器将直接版本范围写入每个项目的 `package.json` 中。它对没有目录功能的 npm 没有影响。
 
-您可以随时编辑任一设置——后续的生成器运行将获取新值。
+<Link path="guides/license">license 生成器</Link>会向同一文件添加一个 `license` 键来配置其自身的行为。
 
+您可以随时编辑任何设置——后续的生成器运行将获取新值。

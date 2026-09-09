@@ -237,7 +237,9 @@ Translate the prose. Everything else is copied from the source exactly as it is:
 Two things do change:
 
 - In frontmatter, translate only \`title\` and \`description\`. Leave every other key and value alone. Frontmatter is YAML, so wrap a value in double quotes whenever it would otherwise begin with a character YAML reserves — for example a title starting with \`@aws/nx-plugin\` must be written as \`"@aws/nx-plugin ..."\`.
-- Rewrite link paths that embed the source locale (\`/${config.sourceLanguage}/foo\` becomes \`/${targetLang}/foo\`), and make a \`parentHeading\` match the translated heading it sits under.
+- A \`parentHeading\` matches the translated heading it sits under.
+
+One thing that looks like it should change does not: a \`<Link path="...">\` value is locale-agnostic — the component resolves it against the reader's locale — so copy it exactly and never prepend \`${targetLang}\` to it.
 
 Write the finished file in one \`create\` call, and never with \`str_replace\` — a partial replacement silently duplicates or splices sections. Do not wrap the file in triple backticks.
 
@@ -333,6 +335,43 @@ async function restoreCodeBlocks(
 }
 
 /**
+ * Drop a leading locale segment from every `<Link path>` in the translation.
+ *
+ * The component resolves `path` against the reader's locale, so a value that
+ * already names one renders a doubled segment (`/jp/jp/...`) and 404s. The
+ * prompt says to copy these verbatim; this makes it so regardless.
+ *
+ * Only fenced code is skipped — a snippet demonstrating the component is
+ * documentation, not a link to resolve.
+ */
+async function stripLocaleFromLinkPaths(
+  targetAbsPath: string,
+  locales: string[],
+): Promise<void> {
+  const linkPath = new RegExp(
+    `(<Link\\b[^>]*?\\bpath=")/?(?:${locales.join('|')})(/|")`,
+    'g',
+  );
+
+  const original = await fs.readFile(targetAbsPath, 'utf-8');
+  const { prose, code } = splitOnFences(original);
+  const stripped = prose.map((chunk) =>
+    chunk.replace(linkPath, (_match, before: string, after: string) =>
+      // A bare locale is the locale's landing page, which is the docs root.
+      after === '"' ? `${before}"` : `${before}${after}`,
+    ),
+  );
+
+  const merged = stripped.flatMap((chunk, i) =>
+    i < code.length ? [chunk, code[i]] : [chunk],
+  );
+  const result = merged.join('\n');
+  if (result !== original) {
+    await fs.writeFile(targetAbsPath, result, 'utf-8');
+  }
+}
+
+/**
  * Number of times to retry a single (file x language) translation. Large files
  * occasionally hit transient Bedrock streaming errors; a fresh agent invocation
  * re-reads the files from disk, so retries are idempotent.
@@ -344,6 +383,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 async function translateFileForLanguage(
   file: FileToTranslate,
   targetLang: string,
+  locales: string[],
 ): Promise<void> {
   const targetAbsPath = path.join(DOCS_DIR, targetLang, file.relativePath);
 
@@ -384,6 +424,7 @@ async function translateFileForLanguage(
       try {
         assertFrontmatterIsParseable(await fs.readFile(targetAbsPath, 'utf-8'));
         await restoreCodeBlocks(file.sourceAbsPath, targetAbsPath);
+        await stripLocaleFromLinkPaths(targetAbsPath, locales);
         return;
       } catch (err) {
         lastError = err;
@@ -510,6 +551,10 @@ async function main() {
     return;
   }
 
+  // Every configured locale, not just the requested ones — a `<Link path>` can
+  // pick up any of them, whichever languages this run happens to cover.
+  const locales = [config.sourceLanguage, ...config.targetLanguages];
+
   // Build one task per (file × target language) — each is a fresh agent invocation,
   // so context windows stay small no matter how big the docs site is. A single
   // failing translation records its error rather than aborting the whole run, so
@@ -519,7 +564,7 @@ async function main() {
     files.map((file) => async () => {
       log.info(`  ${file.relativePath} → ${lang}`);
       try {
-        await translateFileForLanguage(file, lang);
+        await translateFileForLanguage(file, lang, locales);
       } catch (err) {
         log.error(
           `${file.relativePath} → ${lang}: ${err instanceof Error ? err.message : String(err)}`,

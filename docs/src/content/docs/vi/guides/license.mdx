@@ -9,7 +9,6 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import Drawer from '@components/drawer.astro';
 import LicenseAllowlist from '@components/license-allowlist.astro';
 import NxCommands from '@components/nx-commands.astro';
-import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 
 Quản lý giấy phép trong toàn bộ workspace của bạn: đồng bộ hóa các tệp `LICENSE` và tiêu đề mã nguồn cho mã của riêng bạn (`license.source`), và kiểm tra rằng mọi dependency tuân thủ danh sách giấy phép được phép (`license.dependencies`).
 
@@ -45,7 +44,7 @@ Bất cứ khi nào bạn build các dự án của mình (và target `lint` ch�
 
 [@aws/nx-plugin:license#sync]: Project LICENSE files are out of sync:
 - LICENSE
-- packages/<my-project>LICENSE
+- packages/<my-project>/LICENSE
 
 Project package.json files are out of sync:
 - package.json
@@ -66,6 +65,10 @@ No, run the tasks without syncing the changes
 ```
 
 Chọn `Yes` để đồng bộ các thay đổi.
+
+:::note[Terminal không tương tác]
+Lời nhắc chỉ xuất hiện trong terminal tương tác. Trong CI — hoặc bất kỳ môi trường không phải TTY nào — tác vụ sẽ thất bại thay vào đó, và Nx in hướng dẫn để chạy `nx sync` (hoặc `nx sync:check` để xem trước). Đặt `sync.applyChanges` thành `true` trong `nx.json` của bạn để bỏ qua lời nhắc và luôn đồng bộ tự động.
+:::
 
 :::note[Xem xét Thay đổi]
 Hãy đảm bảo bạn kiểm tra các thay đổi mà trình tạo đồng bộ license thực hiện vào version control để đảm bảo rằng bất kỳ tác vụ build tích hợp liên tục nào không thất bại do giấy phép không đồng bộ.
@@ -348,7 +351,7 @@ Kiểm tra license dependency chạy tự động bất cứ khi nào bạn `lin
 
 Kết nối là một `dependsOn` xuyên dự án trên target `lint` của mỗi dự án trỏ đến target `license-check` gốc. Để bỏ qua kiểm tra trong quá trình lint hoặc build, hãy đặt biến môi trường `LICENSE_DEPENDENCY_CHECK=skip`:
 
-<PackageManagerShortCommand commands={["LICENSE_DEPENDENCY_CHECK=skip lint"]} />
+<NxCommands commands={['run-many --target lint --all']} env={{ LICENSE_DEPENDENCY_CHECK: 'skip' }} />
 
 ### Cấu hình
 
@@ -381,7 +384,14 @@ export default {
 
 #### Ngoại lệ cho từng package
 
-Sử dụng `exceptions` cho các package không vượt qua kiểm tra — hoặc vì giấy phép của chúng không có trong danh sách cho phép, hoặc vì chúng được giao mà không có metadata giấy phép có thể phát hiện được. Trường `reason` là bắt buộc để người đánh giá có thể thấy lý do tại sao ngoại lệ được cấp.
+Sử dụng `exceptions` cho các package không vượt qua kiểm tra — hoặc vì giấy phép của chúng không có trong danh sách cho phép, hoặc vì chúng được giao mà không có metadata giấy phép có thể phát hiện được.
+
+Mỗi mục chấp nhận:
+
+- `package` (bắt buộc): tên package mà ngoại lệ áp dụng
+- `reason` (bắt buộc): lý do tại sao ngoại lệ được cấp, để người đánh giá có thể thấy
+- `version` (tùy chọn): hạn chế ngoại lệ cho một phiên bản duy nhất, để phiên bản sau được kiểm tra lại
+- `spdx` (tùy chọn): giấy phép để coi package đang khai báo, cho một package giao văn bản giấy phép mà không khai báo nó trong metadata của nó. Đây là những gì hook `onDependency` bên dưới báo cáo
 
 ```typescript
 exceptions: [
@@ -389,6 +399,7 @@ exceptions: [
     package: 'union',
     version: '0.5.0',
     reason: 'Package ships verbatim MIT text without declaring license',
+    spdx: 'MIT',
   },
 ];
 ```
@@ -397,7 +408,24 @@ Các trình tạo giới thiệu các dependency với metadata có vấn đề 
 
 #### Collectors
 
-Các collector khám phá các dependency và trích xuất metadata giấy phép. Các collector tích hợp sẵn là `npmCollector()` (quét `node_modules`) và `pythonCollector()` (quét các môi trường ảo Python). Trình tạo license cấu hình `npmCollector()` theo mặc định và thêm `pythonCollector()` khi có các dự án Python.
+Các collector khám phá các dependency và trích xuất metadata giấy phép. Các collector tích hợp sẵn là `npmCollector()` (quét `node_modules`) và `pythonCollector()` (quét các môi trường ảo Python), cả hai đều được xuất từ `@aws/nx-plugin/sdk/license`. Trình tạo license cấu hình `npmCollector()` theo mặc định và thêm `pythonCollector()` khi có các dự án Python.
+
+```typescript title="aws-nx-plugin.config.mts"
+import {
+  DEFAULT_LICENSE_ALLOWLIST,
+  npmCollector,
+  pythonCollector,
+} from '@aws/nx-plugin/sdk/license';
+
+export default {
+  license: {
+    dependencies: {
+      allow: DEFAULT_LICENSE_ALLOWLIST,
+      collectors: [npmCollector(), pythonCollector()],
+    },
+  },
+} satisfies AwsNxPluginConfig;
+```
 
 Để triển khai một collector tùy chỉnh, hãy tuân thủ giao diện `LicenseCollector`:
 
@@ -443,6 +471,6 @@ Kiểm tra license dependency được kích hoạt bởi sự hiện diện c�
 
 Để vô hiệu hóa kiểm tra cho một lần chạy duy nhất, hãy đặt biến môi trường `LICENSE_DEPENDENCY_CHECK=skip`:
 
-<PackageManagerShortCommand commands={["LICENSE_DEPENDENCY_CHECK=skip lint"]} />
+<NxCommands commands={['run-many --target lint --all']} env={{ LICENSE_DEPENDENCY_CHECK: 'skip' }} />
 
 Để vô hiệu hóa vĩnh viễn, hãy xóa khóa `license.dependencies` khỏi cấu hình của bạn trong `aws-nx-plugin.config.mts`. Bạn cũng có thể chạy lại trình tạo `license` với `--dependencyCheck=false` để tạo scaffold mà không có nó.

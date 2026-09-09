@@ -792,6 +792,26 @@ describe('nx-generator generator', () => {
       );
     });
 
+    it('should add the export to index.ts below the license header', async () => {
+      // license#sync writes the header as the file's leading comment; an export
+      // inserted above it leaves the header mid-file, so the next sync adds a
+      // second one.
+      const header = `/**\n * Copyright Test Inc.\n */`;
+      tree.write('tools/plugin/src/index.ts', `${header}\n`);
+
+      await tsNxGeneratorGenerator(tree, {
+        project: '@test/plugin',
+        name: 'export#test',
+        description: 'Generator with export test',
+      });
+
+      const indexContent = tree.read('tools/plugin/src/index.ts', 'utf-8');
+      expect(indexContent.startsWith(header)).toBe(true);
+      expect(indexContent).toContain(
+        "export * from './export-test/generator.js';",
+      );
+    });
+
     it('should preserve user-implemented files on same-name re-run', async () => {
       await tsNxGeneratorGenerator(tree, {
         project: '@test/plugin',

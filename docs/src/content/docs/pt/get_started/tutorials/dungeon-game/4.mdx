@@ -27,7 +27,7 @@ Inicie a pilha local completa — o servidor de desenvolvimento game-ui junto co
 
 <NxCommands commands={["dev game-ui"]} />
 
-O target `dev` em `game-ui` tem `dependsOn` em `game-api:dev` e `dungeon_adventure.story:agent-dev`, então o Nx inicia o servidor local de cada projeto em paralelo. Através das conexões que configuramos no Módulo 1, eles por sua vez inicializam o servidor Inventory MCP e o DynamoDB Local. Certifique-se de que seu mecanismo de contêiner está em execução e, em seguida, abra o servidor de desenvolvimento em um navegador.
+O target `dev` em `game-ui` tem `dependsOn` em `game-api:dev` e `dungeon_adventure.story:agent-dev`, então o Nx inicia o servidor local de cada projeto em paralelo. Através das conexões que configuramos no Módulo 1, eles por sua vez inicializam o servidor Inventory MCP e o DynamoDB Local. Certifique-se de que seu mecanismo de contêiner está em execução e, em seguida, abra o servidor de desenvolvimento em `http://localhost:4200/` em um navegador.
 
 <Aside type="tip" title="Sem login localmente">
 No modo `local-dev`, o componente `CognitoAuth` pula o fluxo de login do Cognito (não há pool de usuários em execução localmente), então você chegará direto ao jogo sem fazer login. Você criará uma conta real quando implantarmos na AWS no final deste módulo.
@@ -48,6 +48,7 @@ Quando você executou o gerador `connection` para `game-ui → story` no <Link p
     - copilot/
       - index.tsx Re-exporta `CopilotChat` / `CopilotSidebar` / `CopilotPopup` com tema.
       - ShadcnAssistantMessage.tsx, ShadcnUserMessage.tsx, ShadcnChatInput.tsx, ShadcnCursor.tsx, copilot.css
+    - story-agent-chat.tsx Um `CopilotChat` pré-vinculado ao `agentId` do Story Agent.
   - hooks/
     - useAguiStoryAgent.tsx Instancia um `HttpAgent` do `@ag-ui/client` apontando para o Story Agent implantado e preenche `threadId` para o mínimo de 33 caracteres de id de sessão do AgentCore.
   - main.tsx Envolve `<App />` em `<AguiProvider>`
@@ -90,7 +91,7 @@ A sintaxe `$playerName` diz ao `@tanstack/react-router` para tratar `playerName`
 </TabItem>
 </Tabs>
 
-Uma vez salvo, o servidor de desenvolvimento em `http://localhost:4200/` agora deve permitir que você inicie uma aventura e converse com o Story Agent.
+Uma vez salvo, o servidor de desenvolvimento agora deve permitir que você inicie uma aventura e converse com o Story Agent.
 
 <Image src={gameSelectPng} alt="game-select.png" width="600" height="309" />
 <div style="margin-top: -100px; margin-left: 100px;">
@@ -117,7 +118,9 @@ Se esta é a primeira implantação CDK na sua conta/região AWS, faça o bootst
 
 O target `deploy-sandbox` implanta o estágio sandbox definido em `packages/infra/src/main.ts`.
 
-Sua primeira implantação levará cerca de 6 minutos para ser concluída enquanto aguarda todos os recursos se estabilizarem completamente. Implantações subsequentes são mais rápidas. Para acelerar a iteração durante o desenvolvimento, você pode optar pelo [modo expresso do CloudFormation](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html) passando a flag `--express`, que completa cada operação de recurso assim que sua configuração é aplicada, em vez de esperar pela estabilização completa.
+O target `deploy-sandbox` usa o [modo expresso do CloudFormation](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html), que completa cada operação de recurso assim que sua configuração é aplicada, em vez de esperar pela estabilização completa. Sua primeira implantação levará cerca de 4 minutos para ser concluída, e alguns recursos (como a distribuição do CloudFront) podem continuar sendo provisionados em segundo plano por um curto período depois. Implantações subsequentes são mais rápidas.
+
+Como o modo expresso retorna antes que os recursos tenham se estabilizado completamente, `deploy-sandbox` é apenas para desenvolvimento. Use o target `deploy-ci` para implantações de CI/CD e produção, que sempre aguarda a estabilização completa.
 
 Uma vez que a implantação seja concluída, você verá saídas semelhantes às seguintes:
 
@@ -127,7 +130,9 @@ dungeon-adventure-infra-sandbox-Application: deploying... [2/2]
 
  ✅  dungeon-adventure-infra-sandbox-Application
 
-✨  Deployment time: 354s
+✨  Deployment time: 220s
+
+⚠️  Stack deployed using Express Mode. Resources still stabilizing: GameUICloudfrontDistribution, UserIdentityWebAcl, ...and more...
 
 Outputs:
 dungeon-adventure-infra-sandbox-Application.GameApiEndpointXXX = https://xxx.execute-api.region.amazonaws.com/prod/
@@ -141,6 +146,10 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
 ```
 
 Navegue até sua URL do CloudFront (`GameUIDistributionDomainName` das saídas do CDK), cadastre-se para uma nova conta e jogue seu jogo rodando inteiramente na AWS!
+
+:::note[Cadastrando-se pela primeira vez]
+O Cognito envia um código por e-mail para confirmar sua conta e, em seguida, solicita que você configure a autenticação multifator (um aplicativo autenticador ou um código SMS) antes do seu primeiro login — o pool de usuários que `ts#website#auth` fornece requer MFA. Consulte <Link path="guides/react-website-auth#multi-factor-authentication-mfa">Autenticação multifator</Link> para saber como relaxar isso.
+:::
 
 ## Tarefa 6: Misturando componentes locais e implantados
 

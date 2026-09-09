@@ -13,7 +13,10 @@ import {
   type MustDeclare,
 } from './declared-dependencies.js';
 import { FS_DEPENDENCIES, FsCommands } from './fs.js';
-import { addDependencyToTargetIfNotPresent } from './nx.js';
+import {
+  addDependencyToTargetIfNotPresent,
+  normalizeTargetKeyOrder,
+} from './nx.js';
 import { containerImage, type ITsDepVersion, TS_VERSIONS } from './versions.js';
 
 /** Dependencies a caller must declare to add a Docker scan target. */
@@ -61,6 +64,17 @@ export const nodeImageVersions = () => ({
 export const NODE_IMAGE_DEPENDENCIES = [
   { name: 'npm' },
   { name: 'minimatch' },
+] as const satisfies readonly { name: ITsDepVersion }[];
+
+/**
+ * Packages the prisma CLI install in a vended RDB migration `Dockerfile` pins.
+ * The CLI's own ranges resolve both below a known HIGH vulnerability's fix, so
+ * the image overrides them. Spread through `ownedElsewhere` for the same reason
+ * as {@link NODE_IMAGE_DEPENDENCIES}.
+ */
+export const PRISMA_IMAGE_DEPENDENCIES = [
+  { name: 'deepmerge-ts' },
+  { name: 'mysql2' },
 ] as const satisfies readonly { name: ITsDepVersion }[];
 
 /**
@@ -143,7 +157,7 @@ export const addDockerScanTarget = <const D extends DependencyDeclaration>(
   const commands = [
     fs.rm(scanDir),
     fs.mkdir(scanDir),
-    fs.cp(ignoreFilePath, joinPathFragments(scanDir, TRIVY_IGNORE_FILE)),
+    fs.cpFile(ignoreFilePath, joinPathFragments(scanDir, TRIVY_IGNORE_FILE)),
   ];
 
   imageTags.forEach((imageTag, index) => {
@@ -155,7 +169,7 @@ export const addDockerScanTarget = <const D extends DependencyDeclaration>(
   });
 
   project.targets ??= {};
-  project.targets[trivyTargetName] = {
+  project.targets[trivyTargetName] = normalizeTargetKeyOrder({
     // The image being scanned is only reachable through the container engine,
     // so a restored cache entry would report a pass for an image that may no
     // longer exist. The scan re-runs and either scans the real image or fails.
@@ -169,7 +183,7 @@ export const addDockerScanTarget = <const D extends DependencyDeclaration>(
       parallel: false,
     },
     dependsOn: [dockerTargetName],
-  };
+  });
 
   // Aggregate per-component scan targets under a single `trivy` target. The
   // scan is intentionally NOT wired into `build`: image scanning is slow and

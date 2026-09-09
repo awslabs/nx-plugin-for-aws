@@ -8,6 +8,7 @@ import Link from '@components/link.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Drawer from '@components/drawer.astro';
 import InstallCommand from '@components/install-command.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 
 The `CloudscapeReactTsWebsiteProject` used in the shopping list application configured a React website with CloudScape and Cognito authentication built in.
 
@@ -19,13 +20,13 @@ As part of the migration, we will also move from PDK's configured React Router t
 
 Run the <Link path="/guides/react-website">`ts#website` generator</Link> with `framework` set to `react` to set up your website project in `packages/website`. Since the shopping list application is built with CloudScape components, we also set `ux` to `cloudscape` (the default is `shadcn`):
 
-<RunGenerator generator="ts#website" noInteractive requiredParameters={{ name: 'website', framework: 'react', ux: 'cloudscape' }} />
+<RunGenerator generator="ts#website" noInteractive requiredParameters={{ name: 'website', framework: 'react', ux: 'cloudscape' }} noOptions />
 
 #### Add Cognito Authentication
 
 The React website generator above doesn't bundle cognito authentication by default like `CloudscapeReactTsWebsiteProject`, instead it's added explicitly via the <Link path="/guides/react-website-auth">`ts#website#auth` generator</Link>.
 
-<RunGenerator generator="ts#website#auth" noInteractive requiredParameters={{ project: 'website', cognitoDomain: 'shopping-list' }} />
+<RunGenerator generator="ts#website#auth" noInteractive requiredParameters={{ project: 'website', cognitoDomain: 'shopping-list' }} noOptions />
 
 This adds React components which manage the appropriate redirects to ensure users log in using the Cognito hosted UI. This also adds a CDK construct to deploy the Cognito resources in `packages/common/constructs`, called `UserIdentity`.
 
@@ -33,13 +34,12 @@ This adds React components which manage the appropriate redirects to ensure user
 The PDK `CloudscapeReactTsWebsiteProject` relied on `@aws-northstar/ui` to provide Cognito login components in-app. If you would prefer to use this approach instead of moving to the hosted UI, you can replace the generated `packages/common/constructs/src/core/user-identity.ts` with the [implementation from PDK](https://github.com/aws/aws-pdk/blob/mainline/packages/identity/src/user-identity.ts), replacing the constructs from `@aws-cdk/aws-cognito-identitypool-alpha` with those vended by `aws-cdk-lib`, and make sure to set the relevant values in `RuntimeConfig`:
 
 ```ts
-RuntimeConfig.ensure(this).config = {
-  ...RuntimeConfig.ensure(this).config,
+RuntimeConfig.ensure(this).set('connection', 'cognitoProps', {
   region: Stack.of(this).region,
   identityPoolId: this.identityPool.identityPoolId,
   userPoolId: this.userPool.userPoolId,
   userPoolWebClientId: this.userPoolClient.userPoolClientId,
-};
+});
 ```
 
 You can then reuse the `Auth` component from your `CloudscapeReactTsWebsiteProject`.
@@ -51,7 +51,7 @@ In PDK you could pass the vended Projen projects to one another to trigger integ
 
 With the Nx Plugin for AWS, API integration is supported via the <Link path="/guides/connection">`connection` generator</Link>. Next, we use this generator so that our website can invoke our Smithy API:
 
-<RunGenerator generator="connection" noInteractive requiredParameters={{ sourceProject: 'website', targetProject: 'api' }} />
+<RunGenerator generator="connection" noInteractive requiredParameters={{ sourceProject: 'website', targetProject: 'api' }} noOptions />
 
 This generates the necessary client providers and build targets for your website to call your API via a generated TypeScript client.
 
@@ -100,7 +100,7 @@ Since we're using [file-based routing](https://tanstack.com/router/latest/docs/f
 
 Let's start the local website server:
 
-<NxCommands commands={["dev website"]} />
+<PackageManagerShortCommand commands={["dev"]} />
 
 :::tip
 We're using the `dev` target here, which also starts local servers for any APIs which have been connected with `connection`, and hot-reloads if your website, model, or backend changes! This allows us to test our API and website locally before we've even written any CDK code.

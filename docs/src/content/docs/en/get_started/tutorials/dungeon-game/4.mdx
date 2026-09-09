@@ -27,7 +27,7 @@ Start the full local stack — the game-ui dev server together with a local Game
 
 <NxCommands commands={["dev game-ui"]} />
 
-The `dev` target on `game-ui` has `dependsOn` on `game-api:dev` and `dungeon_adventure.story:agent-dev`, so Nx spins up every project's local server in parallel. Through the connections we set up in Module 1, those in turn boot the Inventory MCP server and DynamoDB Local. Make sure your container engine is running, then open the dev server in a browser.
+The `dev` target on `game-ui` has `dependsOn` on `game-api:dev` and `dungeon_adventure.story:agent-dev`, so Nx spins up every project's local server in parallel. Through the connections we set up in Module 1, those in turn boot the Inventory MCP server and DynamoDB Local. Make sure your container engine is running, then open the dev server at `http://localhost:4200/` in a browser.
 
 <Aside type="tip" title="No login locally">
 In `local-dev` mode the `CognitoAuth` component skips the Cognito login flow (there's no user pool running locally), so you'll land straight on the game without signing in. You'll create a real account when we deploy to AWS at the end of this module.
@@ -48,6 +48,7 @@ When you ran the `connection` generator for `game-ui → story` in <Link path="g
     - copilot/
       - index.tsx Re-exports themed `CopilotChat` / `CopilotSidebar` / `CopilotPopup`.
       - ShadcnAssistantMessage.tsx, ShadcnUserMessage.tsx, ShadcnChatInput.tsx, ShadcnCursor.tsx, copilot.css
+    - story-agent-chat.tsx A `CopilotChat` pre-bound to the Story Agent's `agentId`.
   - hooks/
     - useAguiStoryAgent.tsx Instantiates an `@ag-ui/client` `HttpAgent` pointing at the deployed Story Agent and pads `threadId` to AgentCore's 33-character minimum session id.
   - main.tsx Wraps `<App />` in `<AguiProvider>`
@@ -90,7 +91,7 @@ The `$playerName` syntax tells `@tanstack/react-router` to treat `playerName` as
 </TabItem>
 </Tabs>
 
-Once saved, the dev server at `http://localhost:4200/` should now let you start an adventure and chat with the Story Agent.
+Once saved, the dev server should now let you start an adventure and chat with the Story Agent.
 
 <Image src={gameSelectPng} alt="game-select.png" width="600" height="309" />
 <div style="margin-top: -100px; margin-left: 100px;">
@@ -117,7 +118,9 @@ If this is the first CDK deployment in your AWS account/region, bootstrap it fir
 
 The `deploy-sandbox` target deploys the sandbox stage defined in `packages/infra/src/main.ts`.
 
-Your first deployment will take around 6 minutes to complete as it waits for all resources to fully stabilize. Subsequent deployments are faster. To speed up iteration during development you can opt into [CloudFormation express mode](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html) by passing the `--express` flag, which completes each resource operation as soon as its configuration is applied rather than waiting for full stabilization.
+The `deploy-sandbox` target uses [CloudFormation express mode](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/cloudformation-express-mode.html), which completes each resource operation as soon as its configuration is applied rather than waiting for full stabilization. Your first deployment will take around 4 minutes to complete, and some resources (such as the CloudFront distribution) may continue provisioning in the background for a short while afterwards. Subsequent deployments are faster.
+
+Because express mode returns before resources have fully stabilized, `deploy-sandbox` is for development only. Use the `deploy-ci` target for CI/CD and production deployments, which always waits for full stabilization.
 
 Once the deployment completes, you will see outputs similar to the following:
 
@@ -127,7 +130,9 @@ dungeon-adventure-infra-sandbox-Application: deploying... [2/2]
 
  ✅  dungeon-adventure-infra-sandbox-Application
 
-✨  Deployment time: 354s
+✨  Deployment time: 220s
+
+⚠️  Stack deployed using Express Mode. Resources still stabilizing: GameUICloudfrontDistribution, UserIdentityWebAcl, ...and more...
 
 Outputs:
 dungeon-adventure-infra-sandbox-Application.GameApiEndpointXXX = https://xxx.execute-api.region.amazonaws.com/prod/
@@ -141,6 +146,10 @@ dungeon-adventure-infra-sandbox-Application.UserIdentityUserIdentityUserPoolIdXX
 ```
 
 Navigate to your CloudFront URL (`GameUIDistributionDomainName` from the CDK outputs), sign up for a new account, and play your game running entirely on AWS!
+
+:::note[Signing up for the first time]
+Cognito emails you a code to confirm your account, then asks you to set up multi-factor authentication (an authenticator app or an SMS code) before your first sign-in — the user pool `ts#website#auth` vends requires MFA. See <Link path="guides/react-website-auth#multi-factor-authentication-mfa">Multi-factor authentication</Link> for how to relax that.
+:::
 
 ## Task 6: Mixing local and deployed components
 

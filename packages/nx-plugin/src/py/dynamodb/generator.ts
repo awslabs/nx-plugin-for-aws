@@ -8,16 +8,22 @@ import {
   type GeneratorCallback,
   generateFiles,
   joinPathFragments,
+  OverwriteStrategy,
   readProjectConfiguration,
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { addPyDependencies } from '../../utils/add-dependencies.js';
+import { addPythonReExport } from '../../utils/agent-connection/agent-connection.js';
 import { resolveContainers } from '../../utils/containers.js';
 import {
   declareDependencies,
   ownedElsewhere,
 } from '../../utils/declared-dependencies.js';
+import {
+  DYNAMODB_LOCAL_IMAGE,
+  writeDynamoDBConfig,
+} from '../../utils/dynamodb-config.js';
 import { addDynamoDBInfra } from '../../utils/dynamodb-constructs/dynamodb-constructs.js';
 import { formatFilesInSubtree } from '../../utils/format.js';
 import { resolveIac } from '../../utils/iac.js';
@@ -106,18 +112,51 @@ export const pyDynamoDBGenerator = async (
   const templateOptions = {
     name: normalizedModuleName,
     runtimeConfigKey: nameClassName,
-    localDynamoDBPort,
-    localTableName,
-    containerName,
-    containerEngine,
   };
 
+  // The entities and the client are the user's to author — the guide walks
+  // through adding entity modules under `entities/` — so a re-run leaves them
+  // alone.
   generateFiles(
     tree,
     joinPathFragments(import.meta.dirname, 'files'),
     dir,
     templateOptions,
+    { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
+
+  // The barrels re-export the generated base and example models. Adding to
+  // whatever is already there registers them without discarding the user's own
+  // entity exports on a re-run — which matters beyond the barrel itself, since
+  // PynamoDB only registers a model's discriminator once it is imported.
+  const entitiesInitPath = joinPathFragments(
+    dir,
+    normalizedModuleName,
+    'entities',
+    '__init__.py',
+  );
+  await addPythonReExport(tree, entitiesInitPath, '.base', 'BaseModel');
+  await addPythonReExport(tree, entitiesInitPath, '.example', 'ExampleModel');
+
+  const packageInitPath = joinPathFragments(
+    dir,
+    normalizedModuleName,
+    '__init__.py',
+  );
+  for (const importName of ['BaseModel', 'ExampleModel']) {
+    await addPythonReExport(tree, packageInitPath, '.entities', importName);
+  }
+
+  writeDynamoDBConfig(tree, dir, {
+    runtimeConfigKey: nameClassName,
+    localDev: {
+      port: localDynamoDBPort,
+      tableName: localTableName,
+      image: DYNAMODB_LOCAL_IMAGE,
+      containerName,
+      containerEngine,
+    },
+  });
 
   await sharedDynamoDBScriptsGenerator(tree, DEPENDENCIES);
 

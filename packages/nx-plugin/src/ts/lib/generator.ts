@@ -25,6 +25,7 @@ import { getNpmScopePrefix } from '../../utils/npm-scope.js';
 import {
   addGeneratorMetadata,
   getGeneratorInfo,
+  mergeTarget,
   mergeTargetDefault,
   type NxGeneratorInfo,
   projectExists,
@@ -32,11 +33,14 @@ import {
 import { sortObjectKeys } from '../../utils/object.js';
 import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager.js';
 import type { TsProjectGeneratorSchema } from './schema';
-import { configureTsProject } from './ts-project-utils.js';
+import {
+  configureTsProject,
+  TS_PROJECT_DEPENDENCIES,
+} from './ts-project-utils.js';
 import { VITEST_DEPENDENCIES } from './vitest.js';
 
 export const DEPENDENCIES = declareDependencies()({
-  ts: [...VITEST_DEPENDENCIES],
+  ts: [...VITEST_DEPENDENCIES, ...TS_PROJECT_DEPENDENCIES],
 });
 
 export const TS_LIB_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
@@ -158,21 +162,25 @@ export const tsProjectGenerator = async (
   );
   const targets = projectConfiguration.targets;
 
-  targets['compile'] = {
+  // Merged rather than assigned so a re-run converges this generator's own
+  // configuration without discarding what other generators contributed to the
+  // same targets — the `bundle` that ts#lambda-function adds to build and
+  // assemble, say, which those targets must keep depending on.
+  targets['compile'] = mergeTarget(targets['compile'], {
     executor: 'nx:run-commands',
     outputs: ['{workspaceRoot}/dist/{projectRoot}/tsc'],
     options: {
       command: 'tsc --build tsconfig.lib.json',
       cwd: '{projectRoot}',
     },
-  };
-  targets['build'] = {
+  });
+  targets['build'] = mergeTarget(targets['build'], {
     dependsOn: ['lint', 'compile', 'test'],
-  };
+  });
   // The artifact-only sibling of build, which the deploy targets depend on.
-  targets['assemble'] = {
+  targets['assemble'] = mergeTarget(targets['assemble'], {
     dependsOn: ['compile'],
-  };
+  });
   projectConfiguration.targets = sortObjectKeys(targets);
 
   updateProjectConfiguration(tree, fullyQualifiedName, projectConfiguration);

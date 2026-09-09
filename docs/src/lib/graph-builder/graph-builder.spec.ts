@@ -23,7 +23,12 @@ import {
   NODE_TYPES,
   nodeType,
 } from './catalog';
-import { type EmitOptions, emitCommands, toScript } from './commands';
+import {
+  type EmitOptions,
+  emitCommands,
+  toScript,
+  toScriptLines,
+} from './commands';
 import {
   autoFixesForConnection,
   type Graph,
@@ -480,6 +485,40 @@ describe('commands', () => {
     );
   });
 
+  it('should keep the graph element each script line came from', () => {
+    const website = node('website', 'ts#react-website');
+    const api = node('my-api', 'ts#trpc-api');
+    const lines = toScriptLines(
+      graph(
+        [website, api],
+        [{ id: 'e1', source: 'website', target: 'my-api' }],
+      ),
+      EMIT,
+    );
+
+    // The workspace create and the `cd` belong to no element; every generator
+    // line points back at the node or edge it scaffolds, so a view showing the
+    // graph beside the commands can tie the two together.
+    expect(lines[0].nodeId).toBeUndefined();
+    expect(lines[1].command).toBe('cd my-project');
+    expect(lines[1].comment).toBeUndefined();
+    expect(
+      lines.find((line) => line.command.includes(':ts#website '))?.nodeId,
+    ).toBe('website');
+    expect(
+      lines.find((line) => line.command.includes(':connection'))?.edgeId,
+    ).toBe('e1');
+  });
+
+  it('should skip the workspace lines when asked', () => {
+    const lines = toScriptLines(graph([node('my-api', 'ts#trpc-api')]), EMIT, {
+      skipWorkspace: true,
+    });
+    expect(lines[0].command).toBe(
+      'pnpm nx g @aws/nx-plugin:ts#api my-api --framework=trpc --no-interactive',
+    );
+  });
+
   it('should kebab-case a workspace name for the cd', () => {
     const script = toScript(graph([]), { ...EMIT, workspace: 'My Project' });
     expect(script).toContain('cd my-project');
@@ -544,6 +583,124 @@ describe('commands', () => {
       );
       // Workspace, the two projects, and infra — nothing extra.
       expect(commands).toHaveLength(4);
+    });
+  });
+
+  describe('overrides', () => {
+    it('should pass an overridden name to a project generator', () => {
+      const commands = emitCommands(graph([node('my-api', 'ts#trpc-api')]), {
+        ...EMIT,
+        overrides: { 'my-api': { generatorName: 'MyApi' } },
+      });
+      expect(commands.map((c) => c.command)).toContain(
+        'nx g @aws/nx-plugin:ts#api MyApi --framework=trpc',
+      );
+    });
+
+    it('should still reference an overridden project by its kebab-cased name', () => {
+      const commands = emitCommands(
+        graph(
+          [node('website', 'ts#react-website'), node('my-api', 'ts#trpc-api')],
+          [{ id: 'e1', source: 'website', target: 'my-api' }],
+        ),
+        {
+          ...EMIT,
+          overrides: {
+            website: { generatorName: 'MyWebsite' },
+            'my-api': { generatorName: 'MyApi' },
+          },
+        },
+      );
+      expect(commands.map((c) => c.command)).toContain(
+        'nx g @aws/nx-plugin:connection --sourceProject=my-website --targetProject=my-api',
+      );
+    });
+
+    it('should target a follow-up generator at the overridden project', () => {
+      const commands = emitCommands(
+        graph([node('website', 'ts#react-website')]),
+        { ...EMIT, overrides: { website: { generatorName: 'GameUI' } } },
+      );
+      expect(commands.map((c) => c.command)).toContain(
+        'nx g @aws/nx-plugin:ts#website#auth --project=game-ui',
+      );
+    });
+
+    it('should leave the name off when the generator should derive it', () => {
+      const commands = emitCommands(
+        graph([node('mcp', 'ts#mcp-server', { hostName: 'tools' })]),
+        { ...EMIT, overrides: { mcp: { generatorName: null } } },
+      );
+      expect(commands.map((c) => c.command)).toContain(
+        'nx g @aws/nx-plugin:ts#mcp-server --project=tools',
+      );
+    });
+
+    it('should reference a derived component by the name the generator records', () => {
+      const commands = emitCommands(
+        graph(
+          [
+            node('agent', 'py#agent', {
+              hostName: 'py-agents',
+              options: { protocol: 'a2a' },
+            }),
+            node('mcp', 'ts#mcp-server', { hostName: 'tools' }),
+          ],
+          [{ id: 'e1', source: 'agent', target: 'mcp' }],
+        ),
+        {
+          ...EMIT,
+          overrides: {
+            agent: { generatorName: null, componentName: 'agent' },
+            mcp: { generatorName: null, componentName: 'mcp-server' },
+          },
+        },
+      );
+      expect(commands.map((c) => c.command)).toContain(
+        'nx g @aws/nx-plugin:connection --sourceProject=py_agents --targetProject=tools --sourceComponent=agent --targetComponent=mcp-server',
+      );
+    });
+
+    it('should pin option values on a node generator', () => {
+      const commands = emitCommands(graph([node('my-api', 'ts#trpc-api')]), {
+        ...EMIT,
+        overrides: { 'my-api': { options: { auth: 'cognito' } } },
+      });
+      expect(commands.map((c) => c.command)).toContain(
+        'nx g @aws/nx-plugin:ts#api my-api --framework=trpc --auth=cognito',
+      );
+    });
+
+    it('should pin option values on a follow-up generator', () => {
+      const commands = emitCommands(
+        graph([node('website', 'ts#react-website')]),
+        {
+          ...EMIT,
+          overrides: {
+            website: {
+              followUps: {
+                'ts#website#auth': {
+                  cognitoDomain: 'my-demo',
+                  allowSignup: true,
+                },
+              },
+            },
+          },
+        },
+      );
+      expect(commands.map((c) => c.command)).toContain(
+        'nx g @aws/nx-plugin:ts#website#auth --project=website --cognitoDomain=my-demo --allowSignup=true',
+      );
+    });
+
+    it('should leave a node with no override untouched', () => {
+      const withOverrides = emitCommands(
+        graph([node('my-api', 'ts#trpc-api'), node('db', 'ts#dynamodb')]),
+        { ...EMIT, overrides: { db: { generatorName: 'MyTable' } } },
+      );
+      expect(withOverrides.map((c) => c.command)).toContain(
+        'nx g @aws/nx-plugin:ts#api my-api --framework=trpc',
+      );
     });
   });
 

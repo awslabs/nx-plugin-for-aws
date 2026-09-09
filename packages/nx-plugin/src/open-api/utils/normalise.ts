@@ -173,6 +173,13 @@ const hasSubSchemasToVisit = (
   !!schema &&
   !isRef(schema) &&
   (['object', 'array'].includes(schema.type as any) ||
+    // `type` is optional, and `properties` implies an object — which is how the
+    // parser already classifies one. Requiring the explicit `type` left such a
+    // schema unhoisted, so an `allOf` member written that way stayed inline and
+    // was taken for a non-object, rejecting the whole document.
+    !!schema.properties ||
+    // `patternProperties` is JSON Schema, so it is not on the 3.0 type.
+    !!(schema as { patternProperties?: unknown }).patternProperties ||
     isCompositeSchema(schema) ||
     !!schema.not ||
     (schema.type === 'string' && !!schema.enum));
@@ -325,13 +332,20 @@ const hoistInlineObjectSubSchemas = (
     hoistInlineObjectSubSchemas(s.nameParts, s.schema, seenModelNameCounts),
   );
 
-  // Clone the object subschemas to build the refs. Note that only objects with "properties" are hoisted as these are non-dictionary types
+  // Clone the object subschemas to build the refs. Note that only objects with
+  // "properties" are hoisted as these are non-dictionary types. `type` is
+  // optional in OpenAPI and `properties` implies an object, so a schema written
+  // without it counts — the parser classifies one the same way, and requiring
+  // the explicit `type` left it inline where an `allOf` member is then taken for
+  // a non-object and the whole document rejected.
+  const isObjectSchema = (s: OpenAPIV3.SchemaObject): boolean =>
+    (s.type === 'object' || s.type === undefined) &&
+    !!(s.properties || (s as any).patternProperties);
   const refs = inlineSubSchemas
     .filter(
       (s) =>
-        (s.schema.type === 'object' && s.schema.properties) ||
+        isObjectSchema(s.schema) ||
         isCompositeSchema(s.schema) ||
-        (s.schema.type === 'object' && (s.schema as any).patternProperties) ||
         (s.schema.type === 'string' && s.schema.enum),
     )
     .map((s) => {
@@ -347,7 +361,11 @@ const hoistInlineObjectSubSchemas = (
         }),
       };
 
-      // Replace each subschema with a ref in the spec
+      // Replace each subschema with a ref in the spec. `nullable` describes this
+      // use of the schema rather than the schema itself, so it stays beside the
+      // ref: moving it onto the hoisted definition made a required nullable
+      // object non-nullable here, and would have made every other user of the
+      // hoisted schema nullable instead.
       const schemaWithPropToReplace = s.propPath
         .slice(0, -1)
         .reduce(
@@ -355,7 +373,10 @@ const hoistInlineObjectSubSchemas = (
           schema,
         );
       if (schemaWithPropToReplace) {
-        schemaWithPropToReplace[s.propPath[s.propPath.length - 1]] = { $ref };
+        schemaWithPropToReplace[s.propPath[s.propPath.length - 1]] = s.schema
+          .nullable
+          ? { $ref, nullable: true }
+          : { $ref };
       }
 
       return ref;
@@ -717,22 +738,30 @@ export const normaliseOpenApiSpecForCodeGen = (inSpec: Spec): Spec => {
     }
   });
 
-  // "Inline" any refs to non objects/enums
+  // "Inline" any refs to non objects/enums.
+  //
+  // The substituted body is itself walked for refs, so a chain — an array whose
+  // items are a named scalar — collapses in one pass. Substituting the array
+  // without following through left `items` pointing at a schema this same pass
+  // deletes, so the client referred to a type nothing declared and the emitted
+  // TypeScript did not compile.
   const inlinedRefs: Set<string> = new Set();
-  spec = cloneDeepWith(spec, (v) => {
-    if (v && typeof v === 'object' && v.$ref) {
-      const resolved = resolveRef(spec, v.$ref);
-      if (
-        resolved &&
-        resolved.type &&
-        resolved.type !== 'object' &&
-        !(resolved.type === 'string' && resolved.enum)
-      ) {
-        inlinedRefs.add(v.$ref);
-        return resolved;
+  const inlineNonObjectRefs = (value: unknown): unknown =>
+    cloneDeepWith(value, (v) => {
+      if (v && typeof v === 'object' && v.$ref) {
+        const resolved = resolveRef(spec, v.$ref);
+        if (
+          resolved &&
+          resolved.type &&
+          resolved.type !== 'object' &&
+          !(resolved.type === 'string' && resolved.enum)
+        ) {
+          inlinedRefs.add(v.$ref);
+          return inlineNonObjectRefs(resolved);
+        }
       }
-    }
-  });
+    });
+  spec = inlineNonObjectRefs(spec) as Spec;
 
   // Delete the non object schemas that were inlined
   [...inlinedRefs].forEach((ref) => {

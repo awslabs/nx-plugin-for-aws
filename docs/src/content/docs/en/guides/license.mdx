@@ -9,7 +9,6 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import Drawer from '@components/drawer.astro';
 import LicenseAllowlist from '@components/license-allowlist.astro';
 import NxCommands from '@components/nx-commands.astro';
-import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 
 Manage licensing across your workspace: synchronise `LICENSE` files and source code headers for your own code (`license.source`), and check that every dependency conforms to a license allowlist (`license.dependencies`).
 
@@ -45,7 +44,7 @@ Whenever you build your projects (and a `lint` target runs), the license sync ge
 
 [@aws/nx-plugin:license#sync]: Project LICENSE files are out of sync:
 - LICENSE
-- packages/<my-project>LICENSE
+- packages/<my-project>/LICENSE
 
 Project package.json files are out of sync:
 - package.json
@@ -348,7 +347,7 @@ This means you don't need to run the check explicitly, though you can still do s
 
 The wiring is a cross-project `dependsOn` on each project's `lint` target that points at the root `license-check` target. To skip the check during a lint or build, set the `LICENSE_DEPENDENCY_CHECK=skip` environment variable:
 
-<PackageManagerShortCommand commands={["LICENSE_DEPENDENCY_CHECK=skip lint"]} />
+<NxCommands commands={['run-many --target lint --all']} env={{ LICENSE_DEPENDENCY_CHECK: 'skip' }} />
 
 ### Configuration
 
@@ -381,7 +380,14 @@ To restrict the allowlist, replace `DEFAULT_LICENSE_ALLOWLIST` with your own arr
 
 #### Per-package exceptions
 
-Use `exceptions` for packages that fail the check — either because their license is not in the allowlist, or because they ship without detectable license metadata. The `reason` field is required so reviewers can see why the exception was granted.
+Use `exceptions` for packages that fail the check — either because their license is not in the allowlist, or because they ship without detectable license metadata.
+
+Each entry accepts:
+
+- `package` (required): the package name the exception applies to
+- `reason` (required): why the exception was granted, so reviewers can see it
+- `version` (optional): restrict the exception to a single version, so a later version is checked again
+- `spdx` (optional): the license to treat the package as declaring, for a package that ships license text without declaring it in its metadata. This is what the `onDependency` hook below reports
 
 ```typescript
 exceptions: [
@@ -389,6 +395,7 @@ exceptions: [
     package: 'union',
     version: '0.5.0',
     reason: 'Package ships verbatim MIT text without declaring license',
+    spdx: 'MIT',
   },
 ];
 ```
@@ -397,7 +404,24 @@ Generators that introduce dependencies with problematic metadata (e.g. the MCP s
 
 #### Collectors
 
-Collectors discover dependencies and extract license metadata. The built-in collectors are `npmCollector()` (scans `node_modules`) and `pythonCollector()` (scans Python virtual environments). The license generator configures `npmCollector()` by default and adds `pythonCollector()` when Python projects are present.
+Collectors discover dependencies and extract license metadata. The built-in collectors are `npmCollector()` (scans `node_modules`) and `pythonCollector()` (scans Python virtual environments), both exported from `@aws/nx-plugin/sdk/license`. The license generator configures `npmCollector()` by default and adds `pythonCollector()` when Python projects are present.
+
+```typescript title="aws-nx-plugin.config.mts"
+import {
+  DEFAULT_LICENSE_ALLOWLIST,
+  npmCollector,
+  pythonCollector,
+} from '@aws/nx-plugin/sdk/license';
+
+export default {
+  license: {
+    dependencies: {
+      allow: DEFAULT_LICENSE_ALLOWLIST,
+      collectors: [npmCollector(), pythonCollector()],
+    },
+  },
+} satisfies AwsNxPluginConfig;
+```
 
 To implement a custom collector, conform to the `LicenseCollector` interface:
 
@@ -443,6 +467,6 @@ Dependency license checking is enabled by the presence of the `license.dependenc
 
 To disable the checks for a single run, set the `LICENSE_DEPENDENCY_CHECK=skip` environment variable:
 
-<PackageManagerShortCommand commands={["LICENSE_DEPENDENCY_CHECK=skip lint"]} />
+<NxCommands commands={['run-many --target lint --all']} env={{ LICENSE_DEPENDENCY_CHECK: 'skip' }} />
 
 To disable permanently, remove the `license.dependencies` key from your configuration in `aws-nx-plugin.config.mts`. You can also re-run the `license` generator with `--dependencyCheck=false` to scaffold without it.

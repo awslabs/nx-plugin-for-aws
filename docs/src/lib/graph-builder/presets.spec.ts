@@ -6,9 +6,16 @@ import { describe, expect, it } from 'vitest';
 import {
   buildPresetGraph,
   PRESETS,
+  SHOWCASE_PRESET_IDS,
 } from '../../components/graph-builder/presets';
+import { nodeType } from './catalog';
 import { emitCommands } from './commands';
 import { validate } from './model';
+import {
+  effectiveNodeOptions,
+  propertyApplies,
+  propertyValueApplies,
+} from './node-options';
 
 /**
  * A preset is a starting point users load and scaffold as-is, so every one must
@@ -43,6 +50,41 @@ describe('graph builder presets', () => {
       expect(commands.length).toBeGreaterThanOrEqual(
         preset.nodes.length + preset.edges.length + 2,
       );
+    },
+  );
+
+  // Every option a preset pins has to be one the node still takes, and one the
+  // generator would accept alongside the rest.
+  it.each(PRESETS.map((preset) => [preset.id, preset] as const))(
+    'should only pin options that apply for the %s preset',
+    (_id, preset) => {
+      for (const node of preset.nodes) {
+        const type = nodeType(node.type);
+        const values = effectiveNodeOptions(type, node.options ?? {});
+        for (const [option, value] of Object.entries(node.options ?? {})) {
+          const property = type.properties.find((p) => p.name === option);
+          if (!property) {
+            throw new Error(`${node.type} has no ${option} option`);
+          }
+          expect(
+            propertyApplies(property, values),
+            `${node.type}'s ${option} does not apply`,
+          ).toBe(true);
+          expect(
+            propertyValueApplies(property, String(value), values),
+            `${node.type}'s ${option}=${value} does not apply`,
+          ).toBe(true);
+        }
+      }
+    },
+  );
+
+  // The showcase drops an id it cannot resolve rather than rendering an empty
+  // stage, so a renamed preset would silently lose an example from the homepage.
+  it.each(SHOWCASE_PRESET_IDS)(
+    'should have a preset for the %s example the showcase names',
+    (id) => {
+      expect(PRESETS.map((preset) => preset.id)).toContain(id);
     },
   );
 });

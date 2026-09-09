@@ -1,5 +1,5 @@
-import { echo } from './procedures/echo.js';
 import { t } from './init.js';
+import { echo } from './procedures/echo.js';
 
 export const router = t.router;
 

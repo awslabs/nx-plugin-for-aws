@@ -14,7 +14,8 @@ import fs from 'fs';
  *   3. Component transforms — `<NxCommands>` / `<RunGenerator>` /
  *      `<GeneratorParameters>` / `<CreateNxWorkspaceCommand>` /
  *      `<InstallCommand>` / `<PackageManagerShortCommand>` /
- *      `<PackageManagerExecCommand>` render down to markdown.
+ *      `<PackageManagerExecCommand>` render down to markdown, and
+ *      `<ArchitectureDiagram>` drops out as it has no text form.
  */
 import type { Root, RootContent } from 'mdast';
 import type { MdxJsxFlowElement } from 'mdast-util-mdx-jsx';
@@ -488,6 +489,12 @@ const renderComponent = (
         ),
       ];
     }
+    // A diagram of the AWS resources a project deploys, drawn from the docs
+    // site's own artwork. There is nothing to render as text — the prose beside
+    // it describes the same architecture — so it is dropped rather than left as
+    // a stray tag.
+    case 'ArchitectureDiagram':
+      return [];
     default:
       return undefined;
   }

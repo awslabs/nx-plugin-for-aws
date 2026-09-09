@@ -90,7 +90,8 @@ metrics: Metrics = Metrics()
 tracer: Tracer = Tracer()
 
 @tracer.capture_lambda_handler
-@metrics.log_metrics
+@logger.inject_lambda_context
+@metrics.log_metrics(capture_cold_start_metric=True)
 @event_parser(model=EventBridgeModel)
 def lambda_handler(event: EventBridgeModel, context: LambdaContext):
     logger.info("Received event", extra={"event": event.model_dump() })
@@ -127,11 +128,10 @@ def lambda_handler(event: EventBridgeModel, context: LambdaContext):
 더 쉬운 디버깅과 모니터링을 위해 모든 고유 요청에 대해 correlation id를 설정하는 것이 권장됩니다. correlation id 모범 사례는 [aws powertools logger](https://docs.powertools.aws.dev/lambda/python/2.22.0/core/logger/#setting-a-correlation-id) 문서를 참조하세요.
 :::
 
-로거는 자동으로 다음을 포함합니다:
+핸들러는 [`@logger.inject_lambda_context`](https://docs.powertools.aws.dev/lambda/python/latest/core/logger/#inject-lambda-context)로 데코레이트되어 있으므로, 생성되는 모든 로그 레코드에는 다음도 포함됩니다:
 
-- 이벤트 요청
-- Lambda 컨텍스트 정보
-- 콜드 스타트 표시기
+- Lambda 컨텍스트의 `function_name`, `function_memory_size`, `function_arn` 및 `function_request_id`
+- 호출이 새로운 실행 환경을 초기화했는지 여부를 나타내는 `cold_start`
 
 #### 추적
 
@@ -157,9 +157,9 @@ def lambda_handler(event: EventBridgeModel, context: LambdaContext):
 
 기본 메트릭에는 다음이 포함됩니다:
 
-- 호출 횟수
-- 성공/실패 횟수
-- 콜드 스타트 메트릭
+- 모든 호출에 추가되는 `InvocationCount`
+- 핸들러의 `try`/`except`에 의해 추가되는 `SuccessCount` 및 `ErrorCount`
+- 호출이 새로운 실행 환경을 초기화할 때 [`@metrics.log_metrics(capture_cold_start_metric=True)`](https://docs.powertools.aws.dev/lambda/python/latest/core/metrics/#capturing-cold-start-metric)에 의해 생성되는 `ColdStart`
 
 ### 타입 안전성
 

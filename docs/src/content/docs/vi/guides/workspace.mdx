@@ -2,7 +2,7 @@
 title: Workspace
 description: Tài liệu tham khảo cho workspace
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { Aside, FileTree } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
@@ -27,8 +27,10 @@ Khi bạn tạo một workspace mới với `@aws/nx-plugin`, preset generator s
   - package.json Root package.json for your monorepo
   - nx.json Nx configuration (common targets, sync generators, caching)
   - tsconfig.base.json Root TypeScript configuration
+  - biome.json Biome configuration for linting and formatting
   - aws-nx-plugin.config.mts Nx Plugin for AWS configuration
   - .git-secrets/ Vendored git-secrets bash script for credential scanning
+  - .gitallowed Patterns git-secrets treats as false positives
   - .husky/ Git hooks
   - .mcp.json Nx Plugin for AWS MCP server configuration for Claude Code
   - .cursor/mcp.json ...and for Cursor
@@ -71,7 +73,7 @@ Ví dụ, một `project.json` có thể định nghĩa một `build` target ph�
 
 ### Caching
 
-Nx lưu cache đầu ra của các target đã thực thi trước đó và phát lại chúng khi các đầu vào không thay đổi. Điều này tăng tốc đáng kể quá trình build, test và linting — đặc biệt trong CI. Nếu bạn gặp phải hành vi cũ hoặc không mong đợi, hãy đặt lại cache bằng:
+Nx lưu cache đầu ra của các target đã thực thi trước đó và phát lại chúng khi các đầu vào không thay đổi. Điều này tăng tốc đáng kể quá trình build, test và linting. Nếu bạn gặp phải hành vi cũ hoặc không mong đợi, hãy đặt lại cache bằng:
 
 <NxCommands commands={['reset']} />
 
@@ -87,15 +89,7 @@ Các workspace mới đặt `parallel` trong `nx.json`, điều khiển số lư
 }
 ```
 
-Giảm nó xuống nếu bạn đang build trên một máy có ít core hơn hoặc bộ nhớ hạn chế:
-
-```json title="nx.json"
-{
-  "parallel": 3
-}
-```
-
-Bạn cũng có thể ghi đè nó cho mỗi lần gọi:
+Giảm nó xuống nếu bạn đang build trên một máy có ít core hơn hoặc bộ nhớ hạn chế. Bạn cũng có thể ghi đè nó cho mỗi lần gọi:
 
 <NxCommands commands={['run-many --target build --parallel=4']} />
 
@@ -165,23 +159,32 @@ Ví dụ:
 
 Các workspace mới được cấu hình với [Biome](https://biomejs.dev/) cho phân tích tĩnh và định dạng code. Chạy `lint` kiểm tra tất cả các project để tìm vấn đề, và `lint --configuration=fix` tự động sửa chúng.
 
+### Cấu hình MCP
+
+<Link path="get_started/building-with-ai">MCP server</Link> của plugin được cấu hình như một MCP server cấp project cho Claude Code, Cursor, Kiro, Gemini CLI, GitHub Copilot và OpenAI Codex, vì vậy trợ lý lập trình của bạn có thể khám phá và chạy các generator của plugin mà không cần thiết lập gì. Cấu hình được commit cùng với workspace của bạn, mang lại cho mọi người trong nhóm cùng một thiết lập. Xóa bất kỳ cấu hình nào cho các trợ lý lập trình mà bạn và nhóm của bạn không sử dụng.
+
 ### Git Secrets
 
-Các workspace mới bao gồm các pre-commit hook của [git-secrets](https://github.com/awslabs/git-secrets) quét các file được staged để tìm các mẫu credential của AWS trước mỗi commit. Điều này ngăn chặn việc vô tình commit các access key, secret key và các giá trị nhạy cảm khác.
+Các workspace được thiết lập với các pre-commit hook của [git-secrets](https://github.com/awslabs/git-secrets) quét các file được staged để tìm các mẫu credential của AWS trước mỗi commit. Điều này ngăn chặn việc vô tình commit các access key, secret key và các giá trị nhạy cảm khác.
+
+Script được vendored vào workspace tại `.git-secrets/git-secrets` và chạy bởi hook `.husky/pre-commit`, vì vậy không có gì cần cài đặt — nhưng nó không có trong `PATH` của bạn, vì vậy hãy gọi nó bằng đường dẫn thay vì dùng `git secrets`.
 
 #### Loại Bỏ False Positive
 
 Các mẫu trong git-secrets sử dụng [biểu thức chính quy tương thích egrep](https://github.com/awslabs/git-secrets#options-for-add). Nếu git-secrets chặn một commit không chứa credential thực:
 
 ```sh
-# Allow a specific regex pattern
-git secrets --add --allowed 'my-regex-pattern'
+# Allow a specific regex pattern (-a is the allowed flag)
+bash .git-secrets/git-secrets --add -a -- 'my-regex-pattern'
 
-# Allow a literal string (special characters are escaped)
-git secrets --add --allowed --literal 'my-literal+string'
+# Allow a literal string, escaping special characters (-l is the literal flag)
+bash .git-secrets/git-secrets --add -a -l -- 'my-literal+string'
+
+# List what is currently allowed
+git config --get-all secrets.allowed
 ```
 
-Bạn cũng có thể tạo một file `.gitallowed` ở root của repository với một regex tương thích egrep trên mỗi dòng (được chia sẻ với nhóm của bạn thông qua version control):
+Những cấu hình này được ghi lại trong git config cục bộ của bạn, vì vậy chúng chỉ áp dụng cho bản clone của riêng bạn. Để chia sẻ một suppression với nhóm của bạn, hãy thêm nó vào file `.gitallowed` ở root của repository — một regex tương thích egrep trên mỗi dòng, được khớp với `<path>:<line-number>:<line-contents>`:
 
 ```text title=".gitallowed"
 # Allow test fixtures
@@ -194,7 +197,7 @@ EXAMPLE[A-Z]{16}
 
 ## Cấu hình Nx Plugin for AWS
 
-Workspace đi kèm với một file `aws-nx-plugin.config.mts` ở root. Các generator đọc file này để chọn các giá trị mặc định hợp lý để bạn không phải truyền cùng các flag mỗi lần. Hai cài đặt đặc biệt hữu ích:
+Workspace đi kèm với một file `aws-nx-plugin.config.mts` ở root. Các generator đọc file này để chọn các giá trị mặc định hợp lý để bạn không phải truyền cùng các flag mỗi lần:
 
 ```typescript
 // aws-nx-plugin.config.mts
@@ -207,10 +210,16 @@ export default {
   containers: {
     engine: 'docker', // or 'finch'
   },
+  packageManager: {
+    catalogs: true, // or false
+  },
 } satisfies AwsNxPluginConfig;
 ```
 
 - **`iac.provider`** — infrastructure-as-code provider mặc định (`cdk` hoặc `terraform`) được sử dụng bởi các generator phát ra infrastructure (ví dụ: `ts#infra`, `ts#api`, `py#api`). Các generator chấp nhận flag `--iac` mặc định là `inherit`, đọc giá trị này.
 - **`containers.engine`** — container CLI (`docker` hoặc `finch`) được tích hợp vào các lệnh build/push/login được tạo ra. Các CDK image-asset build cũng nhận điều này thông qua biến môi trường `CDK_DOCKER`. Xem <Link path="guides/docker-bundling">hướng dẫn Docker bundling</Link> để biết chi tiết.
+- **`packageManager.catalogs`** — liệu các generator có ghi lại các phiên bản dependency trong catalog của package manager và tham chiếu chúng bằng protocol `catalog:` hay không (xem [Single Version Policy](#single-version-policy)). Đặt nó thành `false` để các generator ghi trực tiếp các version range vào `package.json` của mỗi project. Nó không có hiệu lực với npm, vốn không có catalog.
+
+<Link path="guides/license">License generator</Link> thêm một key `license` vào cùng file này để cấu hình hành vi của chính nó.
 
 Bạn có thể chỉnh sửa bất kỳ cài đặt nào bất cứ lúc nào — các lần chạy generator tiếp theo sẽ nhận giá trị mới.

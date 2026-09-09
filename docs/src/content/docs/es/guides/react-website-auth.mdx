@@ -10,6 +10,7 @@ import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
+import ArchitectureDiagram from '@components/architecture-diagram.astro';
 
 El generador de Autenticación de Sitio Web React agrega autenticación a tu sitio web React usando [Amazon Cognito](https://aws.amazon.com/cognito/).
 
@@ -71,44 +72,13 @@ También encontrarás el siguiente código de infraestructura generado según tu
 
 Este generador agrega un user pool de Amazon Cognito (para inicio de sesión) y un identity pool (para federar usuarios autenticados a credenciales IAM con alcance) a la arquitectura de sitio web estático existente:
 
-```d2 inline=true
-direction: right
-
-browser: Web Browser {
-  shape: image
-  icon: /nx-plugin-for-aws/icons/aws/client.svg
-}
-
-waf: WAF {
-  shape: image
-  icon: /nx-plugin-for-aws/icons/aws/waf.svg
-}
-
-cognito: Cognito\n(User + Identity Pool) {
-  shape: image
-  icon: /nx-plugin-for-aws/icons/aws/cognito.svg
-}
-
-iam: Scoped IAM\nCredentials {
-  shape: image
-  icon: /nx-plugin-for-aws/icons/aws/iam.svg
-}
-
-backend: Authenticated\nAWS Resources {
-  shape: rectangle
-}
-
-browser -> waf: Sign in
-waf -> cognito
-cognito -> iam
-browser -> backend: IAM/Cognito
-```
+<ArchitectureDiagram name="my-website" />
 
 #### Protección contra amenazas
 
-El User Pool se crea en el [plan de características Plus](https://docs.aws.amazon.com/cognito/latest/developerguide/feature-plans-features-plus.html) de Cognito con [protección contra amenazas](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pool-settings-threat-protection.html) configurada en modo `AUDIT` para autenticación estándar. En modo auditoría, Cognito asigna un nivel de riesgo a cada inicio de sesión y registra la evaluación en CloudWatch sin bloquear a los usuarios.
+El User Pool se crea en el [plan de características Plus](https://docs.aws.amazon.com/cognito/latest/developerguide/feature-plans-features-plus.html) de Cognito con [protección contra amenazas](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pool-settings-threat-protection.html) en **modo de solo auditoría** para autenticación estándar. En modo de solo auditoría, Cognito asigna un nivel de riesgo a cada inicio de sesión y registra la evaluación sin bloquear a los usuarios.
 
-Una vez que hayas observado las evaluaciones de riesgo para tus usuarios, puedes cambiar a la aplicación de función completa para responder automáticamente a actividades riesgosas (por ejemplo, requerir MFA o bloquear el inicio de sesión):
+Una vez que hayas observado las evaluaciones de riesgo para tus usuarios, puedes cambiar a la aplicación de función completa para responder automáticamente a actividades riesgosas (por ejemplo, requerir MFA o bloquear el inicio de sesión), luego configurar la respuesta por nivel de riesgo a través de [autenticación adaptativa](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pool-settings-adaptive-authentication.html):
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -187,13 +157,13 @@ Esta regla marca las direcciones de loopback en argumentos de consulta como inte
 Necesitarás agregar la infraestructura de identidad de usuario a tu stack, declarándola _antes_ del sitio web:
 
 ```ts title="packages/infra/src/stacks/application-stack.ts" {3,9}
-import { Stack } from 'aws-cdk-lib';
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { MyWebsite, UserIdentity } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     new UserIdentity(this, 'Identity');
 
@@ -255,14 +225,14 @@ Para otorgar a los usuarios autenticados acceso para realizar ciertas acciones, 
 
 <Infrastructure>
 <Fragment slot="cdk">
-```ts title="packages/infra/src/stacks/application-stack.ts" {12}
-import { Stack } from 'aws-cdk-lib';
+```ts title="packages/infra/src/stacks/application-stack.ts" {14}
+import { Stack, StackProps } from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import { MyWebsite, UserIdentity, MyApi } from '@my-scope/common-constructs';
 
 export class ApplicationStack extends Stack {
-  constructor(scope: Construct, id: string) {
-    super(scope, id);
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
 
     const identity = new UserIdentity(this, 'Identity');
     const api = new MyApi(this, 'MyApi', {

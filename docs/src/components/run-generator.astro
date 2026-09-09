@@ -1,11 +1,169 @@
 ---
-import { Tabs, TabItem, Steps } from '@astrojs/starlight/components';
-import NxCommands from './nx-commands.astro';
-const { namespace = '@aws/nx-plugin', generator, requiredParameters = {}, noInteractive = false } = Astro.props;
-const locale = Astro.currentLocale || 'en';
-const cliCommand = `g ${namespace}:${generator}${Object.keys(requiredParameters).length !== 0 ? ` ${Object.entries(requiredParameters).map(([k,v]) => `--${k}=${v}`).join(' ')}` : ''}${noInteractive ? ' --no-interactive' : ''}`;
+/**
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
-const strings = {
+/**
+ * The command that runs a generator — the thing a guide's reader came for.
+ *
+ * `positional` names the options the generator takes as arguments rather than
+ * flags, shortening the command without changing what the Nx Console lists.
+ * `readonly` marks a walkthrough step whose prose is written around the values it
+ * passes, leaving `editable` the options the reader still chooses for themselves.
+ * `noOptions` drops the option controls altogether, for a command recorded at a
+ * point in time — a migration write-up — which shouldn't follow later renames.
+ */
+import { Steps, TabItem, Tabs } from '@astrojs/starlight/components';
+import {
+  createSchemaLookup,
+  resolveGeneratorsJson,
+} from '../../../packages/nx-plugin/src/mcp-server/schema-registry';
+import { emittedValues, type GeneratorCardConfig } from '../lib/command-card';
+import { commandCardStrings } from '../lib/command-card-strings';
+import {
+  effectiveValues,
+  isApplicable,
+  isValueApplicable,
+  readGeneratorOptions,
+  type GeneratorOption,
+} from '../lib/generator-options';
+import { pinnedPageOptions, type PageWhen } from '../lib/page-options';
+import CommandCard from './command-card.astro';
+import CommandCardTerminals from './command-card-terminals.astro';
+
+const {
+  namespace = '@aws/nx-plugin',
+  generator,
+  requiredParameters = {},
+  positional = [],
+  noInteractive = false,
+  readonly = false,
+  editable = [],
+  noOptions = false,
+} = Astro.props;
+const locale = Astro.currentLocale || 'en';
+const strings = commandCardStrings(locale);
+
+// A tutorial may run a generator it has just written, which no schema describes.
+// Those cards show the command alone.
+let options: GeneratorOption[] = [];
+try {
+  const generatorsJson = resolveGeneratorsJson(process.cwd());
+  if (generatorsJson && namespace === '@aws/nx-plugin' && !noOptions) {
+    options = readGeneratorOptions(
+      createSchemaLookup(generatorsJson)(generator),
+    );
+  }
+} catch {
+  options = [];
+}
+
+// The values the page prescribes are the card's starting point, so the command
+// reads exactly as the guide intends until the reader changes something.
+const prescribed: Record<string, string> = Object.fromEntries(
+  Object.entries(requiredParameters).map(([key, value]) => [
+    key,
+    String(value),
+  ]),
+);
+const initial: Record<string, string> = {
+  // A page can pass an option the schema doesn't declare, which still makes the
+  // command even though there's no control for it.
+  ...prescribed,
+  ...Object.fromEntries(
+    options.map((option) => [
+      option.key,
+      prescribed[option.key] ??
+        (option.control === 'boolean' ? (option.default ?? 'false') : ''),
+    ]),
+  ),
+};
+
+// The guide's own generator, whose card the reader picks the page's option values
+// in: its controls drive the sections the guide shows. A page runs other
+// generators too (the connections at the end of an agent guide), which speak only
+// for their own command.
+const pageGenerator = (
+  Astro.locals.starlightRoute?.entry?.data as { generator?: string } | undefined
+)?.generator;
+const pageOwnerSymbol = Symbol.for('npfa:page-options-owner');
+const ownerLocals = Astro.locals as Record<symbol, boolean>;
+const ownsPage = generator === pageGenerator && !ownerLocals[pageOwnerSymbol];
+if (ownsPage) ownerLocals[pageOwnerSymbol] = true;
+
+// A guide written for one variant of a generator — the tRPC guide's
+// `when: framework: [trpc]` — is that variant: readers come for its command, so
+// an option the page both fixes and passes is shown rather than offered.
+const pinnedByPage = pinnedPageOptions(
+  (Astro.locals.starlightRoute?.entry?.data as { when?: PageWhen } | undefined)
+    ?.when,
+);
+const locked = new Set(
+  options
+    .map((option) => option.key)
+    .filter(
+      (key) =>
+        (readonly && !editable.includes(key)) ||
+        (pinnedByPage[key] !== undefined && prescribed[key] !== undefined),
+    ),
+);
+
+// An option that can't apply, because the guide fixes the value it depends on,
+// has nothing to contribute — the Smithy namespace on the tRPC guide. One that
+// depends on a value the reader can still change stays, and the card disables it
+// while it doesn't apply.
+// Only the options the guide fixes count as forced: the rest are the reader's to
+// choose, and the card follows along as they do.
+const forced = effectiveValues(
+  Object.fromEntries(
+    [...locked].map((key) => [key, initial[key]]).filter(([, value]) => !!value),
+  ),
+  options.filter((option) => locked.has(option.key)),
+);
+const applicable = options
+  .filter((option) => isApplicable(option, forced))
+  // A value the guide has ruled out is no choice at all: `http-lambda` can't
+  // apply on a guide written for the Smithy framework.
+  .map((option) => ({
+    ...option,
+    values: option.values.filter((value) =>
+      isValueApplicable(option, value, forced),
+    ),
+  }));
+
+const config: GeneratorCardConfig = {
+  kind: 'generator',
+  namespace,
+  generator,
+  positional,
+  noInteractive,
+  order: applicable.map((option) => option.key),
+  // The options this guide pins, which a restored selection must not overwrite.
+  prescribed: Object.keys(prescribed),
+  options: applicable.map(
+    ({ key, control, default: fallback, when, valueWhen }) => ({
+      key,
+      control,
+      default: fallback,
+      when,
+      valueWhen,
+    }),
+  ),
+};
+const inapplicable = new Set(
+  options
+    .filter((option) => !applicable.includes(option))
+    .map((option) => option.key),
+);
+const values = emittedValues(
+  Object.fromEntries(
+    Object.entries(initial).filter(([key]) => !inapplicable.has(key)),
+  ),
+  applicable,
+);
+
+const vscodeStrings = {
   installPlugin: {
     en: 'Install the',
     jp: 'インストール',
@@ -82,41 +240,49 @@ const strings = {
     pt: 'Preencha os parâmetros obrigatórios',
     zh: '填写必需参数',
     vi: 'Điền các tham số bắt buộc'
-  },
-  dryRunSummary: {
-    en: 'You can also perform a dry-run to see what files would be changed',
-    jp: '変更されるファイルを確認するためにドライランを実行することもできます',
-    ko: '어떤 파일이 변경될지 확인하기 위해 드라이 런을 수행할 수도 있습니다',
-    fr: 'Vous pouvez également effectuer une simulation pour voir quels fichiers seraient modifiés',
-    it: 'Puoi anche eseguire una prova per vedere quali file verrebbero modificati',
-    es: 'También puede realizar una ejecución en seco para ver qué archivos se cambiarían',
-    pt: 'Você também pode realizar uma execução simulada para ver quais arquivos seriam alterados',
-    zh: '您还可以执行试运行以查看哪些文件会被更改',
-    vi: 'Bạn cũng có thể thực hiện chạy thử để xem những tệp nào sẽ bị thay đổi'
   }
 };
-
-const localeString = (name) => strings[name][locale] || strings[name]['en'];
+const vscodeString = (name) =>
+  vscodeStrings[name][locale] || vscodeStrings[name]['en'];
 ---
 
-<Tabs syncKey="generator-usage">
-  <TabItem label="CLI">
-    <NxCommands commands={[cliCommand]} />
-    <details>
-      <summary>{localeString('dryRunSummary')}</summary>
-      <NxCommands commands={[`${cliCommand} --dry-run`]} />
-    </details>
-  </TabItem>
-  <TabItem label="VSCode">
-    <Steps>
-      <ol>
-        <li>{localeString('installPlugin')} <a href="https://marketplace.visualstudio.com/items?itemName=nrwl.angular-console">Nx Console VSCode Plugin</a> {localeString('ifNotAlready')}</li>
-        <li>{localeString('openNxConsole')}</li>
-        <li>{localeString('clickGenerate')} <code>Generate (UI)</code> {localeString('inCommonNxCommands')}</li>
-        <li>{localeString('searchFor')} <code>{namespace} - {generator}</code></li>
-        <li>{localeString('fillRequiredParams')}<ul>{Object.keys(requiredParameters).length !== 0 && Object.entries(requiredParameters).map(([k,v]) => <li><b>{k}:</b> {v}</li>)}</ul></li>
-        <li>{localeString('clickGenerate')} <code>Generate</code></li>
-      </ol>
-    </Steps>
-  </TabItem>
-</Tabs>
+<CommandCard
+  config={config}
+  options={applicable}
+  initial={initial}
+  title={strings.runTitle}
+  target={`${namespace}:${generator}`}
+  locked={locked}
+  strings={strings}
+  ownsPage={ownsPage}
+  showDryRun
+>
+  <Tabs syncKey="generator-usage">
+    <TabItem label="CLI">
+      <CommandCardTerminals
+        config={config}
+        values={values}
+        copyLabel={strings.copyCommand}
+      />
+    </TabItem>
+    <TabItem label="VSCode">
+      <Steps>
+        <ol>
+          <li>{vscodeString('installPlugin')} <a href="https://marketplace.visualstudio.com/items?itemName=nrwl.angular-console">Nx Console VSCode Plugin</a> {vscodeString('ifNotAlready')}</li>
+          <li>{vscodeString('openNxConsole')}</li>
+          <li>{vscodeString('clickGenerate')} <code>Generate (UI)</code> {vscodeString('inCommonNxCommands')}</li>
+          <li>{vscodeString('searchFor')} <code>{namespace} - {generator}</code></li>
+          <li>
+            {vscodeString('fillRequiredParams')}
+            <ul data-command-card-values>
+              {Object.entries(values).map(([key, value]) => (
+                <li><b>{key}:</b> {value}</li>
+              ))}
+            </ul>
+          </li>
+          <li>{vscodeString('clickGenerate')} <code>Generate</code></li>
+        </ol>
+      </Steps>
+    </TabItem>
+  </Tabs>
+</CommandCard>

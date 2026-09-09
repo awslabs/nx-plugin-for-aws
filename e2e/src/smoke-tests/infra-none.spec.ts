@@ -59,7 +59,7 @@ describe('smoke test - infra-none', () => {
 
     // Python project + lambda function with infra=none
     await runCLI(
-      `generate @aws/nx-plugin:py#project --name=py-project --projectType=application --no-interactive`,
+      `generate @aws/nx-plugin:py#project --name=py-project --type=application --no-interactive`,
       opts,
     );
     await runCLI(

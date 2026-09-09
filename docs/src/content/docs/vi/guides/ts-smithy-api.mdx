@@ -18,6 +18,9 @@ import PackageManagerShortCommand from '@components/package-manager-short-comman
 import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
 import OptionFilter from '@components/option-filter.astro';
+import InstallCommand from '@components/install-command.astro';
+import { TS_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/versions';
+import ArchitectureDiagram from '@components/architecture-diagram.astro';
 
 [Smithy](https://smithy.io/) là một ngôn ngữ định nghĩa giao diện độc lập với giao thức để tạo API theo cách hướng mô hình.
 
@@ -46,7 +49,6 @@ Trình tạo tạo hai dự án liên quan trong thư mục `<directory>/<api-na
 <FileTree>
 
 - **model/** Dự án mô hình Smithy
-  - package.json Tệp kê khai dự án định nghĩa tên gói và các phụ thuộc của dự án
   - project.json Cấu hình dự án và các target build
   - smithy-build.json Cấu hình build Smithy
   - ssdk.rolldown.config.mjs Đóng gói TypeScript Server SDK được tạo
@@ -55,9 +57,15 @@ Trình tạo tạo hai dự án liên quan trong thư mục `<directory>/<api-na
     - operations/
       - echo.smithy Định nghĩa thao tác ví dụ
 - **backend/** Triển khai backend TypeScript
+  - package.json Tệp kê khai dự án định nghĩa tên gói và các phụ thuộc của dự án
   - project.json Cấu hình dự án và các target build
   - rolldown.config.ts Cấu hình bundle
+  - tsconfig.json TypeScript configuration
+  - tsconfig.lib.json TypeScript configuration for the library sources
+  - tsconfig.spec.json TypeScript configuration for the tests
+  - vitest.config.mts Vitest configuration
   - src/
+    - index.ts Package entrypoint
     - handler.ts AWS Lambda handler
     - local-server.ts Server phát triển cục bộ
     - service.ts Triển khai dịch vụ
@@ -91,7 +99,7 @@ Dự án mã cơ sở hạ tầng chung được cấu trúc như sau:
 </FileTree>
 
 :::note[Dự án được tạo]
-Dự án này được tạo bằng trình tạo [`ts#project`](guides/typescript-project) và do đó cấu hình các build targets giống nhau.
+Dự án này được tạo bằng trình tạo <Link path="/guides/typescript-project">`ts#project`</Link> và do đó cấu hình các build targets giống nhau.
 :::
 </Fragment>
 <Fragment slot="terraform">
@@ -110,7 +118,7 @@ Dự án này được tạo bằng trình tạo [`ts#project`](guides/typescrip
 </FileTree>
 
 :::note[Dự án được tạo]
-Dự án này được tạo bằng trình tạo [`terraform#project`](guides/terraform-project) và do đó cấu hình các build targets giống nhau.
+Dự án này được tạo bằng trình tạo <Link path="/guides/terraform-project">`terraform#project`</Link> và do đó cấu hình các build targets giống nhau.
 :::
 </Fragment>
 </Infrastructure>
@@ -119,47 +127,7 @@ Dự án này được tạo bằng trình tạo [`terraform#project`](guides/te
 
 Smithy API được triển khai có kiến trúc sau, với [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACL ở phía trước API Gateway stage:
 
-```d2 inline=true
-direction: right
-
-client: Client {
-  shape: image
-  icon: /nx-plugin-for-aws/icons/aws/client.svg
-}
-
-waf: WAF {
-  shape: image
-  icon: /nx-plugin-for-aws/icons/aws/waf.svg
-}
-
-apigw: API Gateway\n(REST API) {
-  shape: image
-  icon: /nx-plugin-for-aws/icons/aws/api-gateway.svg
-}
-
-lambda: Lambda\n(Smithy Server SDK) {
-  shape: image
-  icon: /nx-plugin-for-aws/icons/aws/lambda.svg
-}
-
-cw: CloudWatch\n(Logs, Metrics) {
-  shape: image
-  icon: /nx-plugin-for-aws/icons/aws/cloudwatch.svg
-  near: top-right
-}
-
-xray: X-Ray\n(Traces) {
-  shape: image
-  icon: /nx-plugin-for-aws/icons/aws/xray.svg
-  near: bottom-right
-}
-
-client -> waf
-waf -> apigw
-apigw -> lambda
-lambda -> cw
-lambda -> xray
-```
+<ArchitectureDiagram options={{ infra: 'rest-lambda' }} />
 
 ## Triển khai Smithy API của bạn
 
@@ -308,7 +276,7 @@ Bạn phải tự xây dựng ngữ cảnh trong cả `handler.ts` (điểm vào
 
 Trình tạo cấu hình ghi log có cấu trúc bằng AWS Lambda Powertools với tự động chèn ngữ cảnh qua middleware Middy.
 
-```typescript {3}
+```typescript {4}
 // handler.ts
 export const handler = middy<APIGatewayProxyEvent, APIGatewayProxyResult>()
   .use(captureLambdaHandler(tracer))
@@ -319,7 +287,7 @@ export const handler = middy<APIGatewayProxyEvent, APIGatewayProxyResult>()
 
 Bạn có thể tham chiếu logger từ các triển khai operation của bạn thông qua context:
 
-```typescript {5}
+```typescript {6}
 // operations/echo.ts
 import { ServiceContext } from '../context.js';
 import { Echo as EchoOperation } from '../generated/ssdk/index.js';
@@ -334,7 +302,7 @@ export const Echo: EchoOperation<ServiceContext> = async (input, ctx) => {
 
 Theo dõi AWS X-Ray được cấu hình tự động qua middleware `captureLambdaHandler`.
 
-```typescript {2}
+```typescript {3}
 // handler.ts
 export const handler = middy<APIGatewayProxyEvent, APIGatewayProxyResult>()
   .use(captureLambdaHandler(tracer))
@@ -345,7 +313,7 @@ export const handler = middy<APIGatewayProxyEvent, APIGatewayProxyResult>()
 
 Bạn có thể thêm subsegments tùy chỉnh vào traces của bạn trong các operations:
 
-```typescript {6, 10, 13}
+```typescript {7, 11, 14}
 // operations/echo.ts
 import { ServiceContext } from '../context.js';
 import { Echo as EchoOperation } from '../generated/ssdk/index.js';
@@ -368,7 +336,7 @@ export const Echo: EchoOperation<ServiceContext> = async (input, ctx) => {
 
 Các số liệu CloudWatch được thu thập tự động cho mỗi yêu cầu qua middleware `logMetrics`.
 
-```typescript {4}
+```typescript {5}
 // handler.ts
 export const handler = middy<APIGatewayProxyEvent, APIGatewayProxyResult>()
   .use(captureLambdaHandler(tracer))
@@ -379,7 +347,7 @@ export const handler = middy<APIGatewayProxyEvent, APIGatewayProxyResult>()
 
 Bạn có thể thêm custom metrics trong các operations của bạn:
 
-```typescript {6}
+```typescript {7}
 // operations/echo.ts
 import { MetricUnit } from '@aws-lambda-powertools/metrics';
 import { ServiceContext } from '../context.js';
@@ -475,7 +443,9 @@ export interface ServiceContext {
 Tiếp theo, viết resolver trong `src/identity.ts`. Nó ném `UnauthorizedError` khi không thể xác định người gọi. Việc triển khai phụ thuộc vào phương thức `auth` bạn đã chọn:
 
 <OptionFilter when={{ auth: 'iam' }} description="Giải quyết danh tính cho các API được xác thực IAM">
-Đối với xác thực `IAM`, chúng ta tra cứu người gọi trong Cognito bằng sub được trích xuất từ sự kiện API Gateway:
+Đối với xác thực `IAM`, chúng ta tra cứu người gọi trong Cognito bằng sub được trích xuất từ sự kiện API Gateway. Việc tra cứu sử dụng Cognito Identity Provider client, không phải là một phụ thuộc của backend Smithy được tạo, vì vậy hãy cài đặt nó vào dự án backend trước:
+
+<InstallCommand pkg={`@aws-sdk/client-cognito-identity-provider@${TS_VERSIONS['@aws-sdk/client-cognito-identity-provider']}`} project="@my-scope/my-api" projectDir="packages/my-api/backend" />
 
 ```ts
 import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
@@ -498,7 +468,9 @@ export const getIdentity = async (
   }
 
   if (!sub) {
-    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
+    throw new UnauthorizedError({
+      message: 'Unable to determine calling user',
+    });
   }
 
   const { Users } = await cognito.listUsers({
@@ -509,7 +481,9 @@ export const getIdentity = async (
   });
 
   if (!Users || Users.length !== 1) {
-    throw new UnauthorizedError({ message: `No user found with subjectId ${sub}` });
+    throw new UnauthorizedError({
+      message: `No user found with subjectId ${sub}`,
+    });
   }
 
   return { sub, username: Users[0].Username! };
@@ -536,7 +510,9 @@ export const getIdentity = async (
   const username = claims?.username;
 
   if (!sub || !username) {
-    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
+    throw new UnauthorizedError({
+      message: 'Unable to determine calling user',
+    });
   }
 
   return { sub, username };
@@ -559,6 +535,17 @@ const httpResponse = await serviceHandler.handle(httpRequest, {
   logger,
   metrics,
   getIdentity: () => getIdentity(event),
+});
+```
+
+`getIdentity` là một trường bắt buộc trên `ServiceContext`, và như [cảnh báo ở trên](#ngữ-cảnh-dịch-vụ) lưu ý, ngữ cảnh được xây dựng trong **cả hai** điểm vào — vì vậy `src/local-server.ts` cũng cần nó. Không có API Gateway authorizer ở phía trước local server, vì vậy hãy cung cấp một danh tính stub cho phát triển cục bộ:
+
+```ts {5} ins={5}
+const httpResponse = await serviceHandler.handle(httpRequest, {
+  tracer,
+  logger,
+  metrics,
+  getIdentity: async () => ({ sub: 'local', username: 'local' }),
 });
 ```
 
@@ -690,7 +677,7 @@ export class ExampleStack extends Stack {
 }
 ```
 
-Construct `UserIdentity` có thể được tạo bằng trình tạo <Link path="/vi/guides/react-website-auth">`ts#website#auth`</Link>
+Construct `UserIdentity` có thể được tạo bằng trình tạo <Link path="/guides/react-website-auth">`ts#website#auth`</Link>
 :::
 </OptionFilter>
 
@@ -705,7 +692,7 @@ Kết quả của Authorizer được lưu vào bộ nhớ cache trong 5 phút, 
 <Fragment slot="terraform">
 Các module Terraform để triển khai API của bạn nằm trong thư mục `common/terraform`.
 
-Module API đặt zip triển khai Lambda của nó trong một S3 asset bucket được chia sẻ — xem <Link path="/vi/guides/terraform-project">hướng dẫn cơ sở hạ tầng Terraform</Link> để biết chi tiết. Khởi tạo module `core/asset-bucket` một lần cho mỗi triển khai và truyền đầu ra `bucket_name` của nó vào mọi module API / Lambda qua đầu vào `asset_bucket_name`:
+Module API đặt zip triển khai Lambda của nó trong một S3 asset bucket được chia sẻ — xem <Link path="/guides/terraform-project">hướng dẫn cơ sở hạ tầng Terraform</Link> để biết chi tiết. Khởi tạo module `core/asset-bucket` một lần cho mỗi triển khai và truyền đầu ra `bucket_name` của nó vào mọi module API / Lambda qua đầu vào `asset_bucket_name`:
 
 ```hcl {1-3, 8}
 module "asset_bucket" {
@@ -800,6 +787,49 @@ output "lambda_function_name" {
 <Snippet name="api/access-logging" parentHeading="Ghi log truy cập" />
 
 ### Tích hợp
+
+<Infrastructure>
+<Fragment slot="cdk">
+:::caution[Tên operation là camelCase trong CDK]
+Các operation Smithy được khai báo ở dạng PascalCase (`Echo`), và backend của bạn xuất chúng dưới tên đó. Các khóa tích hợp CDK là dạng **camelCase** của cùng một tên, vì vậy một operation `Echo` là `echo` ở mọi nơi trong stack của bạn:
+
+```ts
+const api = new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this)
+    // `Echo` in the model, `echo` here
+    .withOperationOptions({ echo: { timeout: Duration.seconds(60) } })
+    .build(),
+});
+
+api.integrations.echo.handler.addToRolePolicy(...);
+```
+:::
+</Fragment>
+<Fragment slot="terraform">
+:::note[Tên operation là camelCase trong Terraform]
+Các đầu ra được khóa theo operation của module được tạo và `operations.json` của nó sử dụng dạng **camelCase** của tên operation Smithy, vì vậy một operation Smithy `Echo` được khóa là `echo`:
+
+```hcl
+# `Echo` in the model, `echo` here
+resource "aws_iam_role_policy" "echo_permissions" {
+  name = "echo-additional-permissions"
+  role = module.my_api.lambda_execution_role_names["echo"]
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = "arn:aws:s3:::my-bucket/*"
+      }
+    ]
+  })
+}
+```
+:::
+</Fragment>
+</Infrastructure>
 
 <Snippet name="api/type-safe-api-integrations" parentHeading="Tích hợp" />
 

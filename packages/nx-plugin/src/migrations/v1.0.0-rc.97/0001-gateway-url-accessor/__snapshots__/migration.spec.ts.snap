@@ -1,0 +1,84 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`gateway-url-accessor migration > should add the gatewayUrl accessor to the vended core construct 1`] = `
+"import * as agentcore from 'aws-cdk-lib/aws-bedrockagentcore';
+import * as iam from 'aws-cdk-lib/aws-iam';
+import { Construct } from 'constructs';
+
+export class AgentCoreGateway extends Construct implements iam.IGrantable {
+  public readonly gateway: agentcore.Gateway;
+
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+    this.gateway = undefined as any;
+  }
+
+  /**
+   * The principal to grant permissions to.
+   */
+  public get grantPrincipal(): iam.IPrincipal {
+    return this.gateway.role.grantPrincipal;
+  }
+
+  /**
+   * The gateway's URL endpoint. The Gateway L2 types its own \`gatewayUrl\` as
+   * optional and only populates it when created from its own props, so fall
+   * back to the CloudFormation attribute.
+   */
+  public get gatewayUrl(): string {
+    return (
+      this.gateway.gatewayUrl ??
+      (this.gateway.node.defaultChild as agentcore.CfnGateway).attrGatewayUrl
+    );
+  }
+
+  public addGateway(
+    gateway: Construct & {
+      readonly gateway: agentcore.Gateway;
+      readonly gatewayName: string;
+      readonly gatewayUrl: string;
+    },
+    props?: {
+      gatewayTargetName?: string;
+    },
+  ): agentcore.CfnGatewayTarget {
+    const target = this.addGatewayTarget({
+      gatewayTargetName: props?.gatewayTargetName ?? gateway.gatewayName,
+      gatewayUrl: gateway.gatewayUrl,
+      gatewayArn: gateway.gateway.gatewayArn,
+    });
+    target.node.addDependency(gateway);
+    return target;
+  }
+
+  public addGatewayTarget(props: {
+    gatewayTargetName: string;
+    gatewayUrl: string;
+    gatewayArn: string;
+  }): agentcore.CfnGatewayTarget {
+    return undefined as any;
+  }
+}
+"
+`;
+
+exports[`gateway-url-accessor migration > should point vended app-level gateway constructs at the accessor 1`] = `
+"import { Construct } from 'constructs';
+import { AgentCoreGateway } from '../../../core/agentcore-gateway/agentcore-gateway';
+import { RuntimeConfig } from '../../../core/runtime-config';
+
+export class MyGateway extends AgentCoreGateway {
+  public readonly gatewayName = 'my-gateway';
+
+  constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    const rc = RuntimeConfig.ensure(this);
+    rc.set('agentcore', 'gateways', {
+      ...rc.get('agentcore').gateways,
+      MyGateway: this.gatewayUrl,
+    });
+  }
+}
+"
+`;

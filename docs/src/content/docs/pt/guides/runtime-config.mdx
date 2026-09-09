@@ -5,6 +5,7 @@ description: Como a configuração de runtime conecta seus projetos gerados usan
 import { Tabs, TabItem, Steps } from '@astrojs/starlight/components';
 import Infrastructure from '@components/infrastructure.astro';
 import Link from '@components/link.astro';
+import EmbeddedGraph from '@components/embedded-graph.astro';
 
 A configuração de runtime é o mecanismo usado pelo Nx Plugin for AWS para passar valores de tempo de implantação entre projetos e componentes gerados para que eles possam se conectar uns aos outros. Por exemplo, quando você gera uma API, sua URL é automaticamente registrada na configuração de runtime para que um site conectado possa descobri-la.
 
@@ -26,40 +27,7 @@ O namespace `connection` também é implantado como um arquivo `runtime-config.j
 
 Você pode definir quantos namespaces adicionais desejar, fornecendo uma alternativa conveniente às variáveis de ambiente para passar valores de tempo de implantação para suas funções Lambda ou outros recursos de computação.
 
-```d2
-direction: down
-
-iac: "Infrastructure as code\nRuntimeConfig.set(...)"
-
-appconfig: "AWS AppConfig" {
-  shape: cylinder
-  connection: "connection namespace"
-  agentcore: "agentcore namespace"
-  custom: "custom namespaces"
-}
-
-s3: "website S3 bucket" {
-  shape: cylinder
-  rcj: runtime-config.json {
-    shape: page
-  }
-}
-
-website: React website
-
-server: Lambda / agent
-
-iac -> appconfig.connection
-iac -> appconfig.agentcore
-iac -> appconfig.custom
-
-appconfig.connection -> s3.rcj: deployed
-s3.rcj -> website: fetched at load
-
-appconfig.connection -> server
-appconfig.agentcore -> server: Powertools getAppConfig
-appconfig.custom -> server
-```
+<EmbeddedGraph diagram="runtime-config" />
 
 ## Infraestrutura
 
@@ -253,15 +221,27 @@ Todos os constructs gerados de API e agent são automaticamente configurados com
 
 Use `getAppConfig` de [`@aws-lambda-powertools/parameters`](https://docs.aws.amazon.com/powertools/typescript/latest/features/parameters):
 
+`getAppConfig` retorna qualquer valor JSON válido, então declare a forma que você espera e faça o cast do resultado — caso contrário, os acessos de propriedade não compilam sob o `tsconfig` estrito do workspace:
+
 ```ts
 import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
 
+interface ConnectionConfig {
+  apis?: Record<string, string>;
+  cognitoProps?: {
+    region: string;
+    userPoolId: string;
+    userPoolWebClientId: string;
+    identityPoolId: string;
+  };
+}
+
 // Retrieve the 'connection' namespace as a parsed JSON object
-const config = await getAppConfig('connection', {
+const config = (await getAppConfig('connection', {
   application: process.env.RUNTIME_CONFIG_APP_ID!,
   environment: 'default',
   transform: 'json',
-});
+})) as ConnectionConfig;
 
 // Access values
 const apiUrl = config.apis?.MyApi;
@@ -271,15 +251,23 @@ const cognitoProps = config.cognitoProps;
 Você também pode recuperar namespaces personalizados:
 
 ```ts
+interface TablesConfig {
+  users?: { tableName: string; tableArn: string };
+}
+
 // Retrieve a custom 'tables' namespace
-const tablesConfig = await getAppConfig('tables', {
+const tablesConfig = (await getAppConfig('tables', {
   application: process.env.RUNTIME_CONFIG_APP_ID!,
   environment: 'default',
   transform: 'json',
-});
+})) as TablesConfig;
 
 const usersTableName = tablesConfig.users?.tableName;
 ```
+
+:::tip[Valide na fronteira]
+Um cast informa ao compilador a forma, mas não a verifica em tempo de execução. Para configuração que você não controla, analise-a com um schema [Zod](https://zod.dev/) em vez disso, para que um valor malformado falhe de forma ruidosa em vez de aparecer como `undefined` mais tarde.
+:::
 
   </TabItem>
   <TabItem label="Python" icon="seti:python">
