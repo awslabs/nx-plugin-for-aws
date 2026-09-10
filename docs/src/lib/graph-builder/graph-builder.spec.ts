@@ -1141,6 +1141,74 @@ describe('validate', () => {
       ]);
     });
 
+    it('should require a cognito gateway to front a cognito agent', () => {
+      const issues = validate(
+        graph(
+          [
+            node('g', 'agentcore-gateway', {
+              name: 'gateway',
+              options: { protocol: 'http' },
+            }),
+            node('a', 'ts#agent', {
+              name: 'agent',
+              hostName: 'app',
+              options: { protocol: 'ag-ui', auth: 'cognito' },
+            }),
+          ],
+          [{ id: 'e1', source: 'g', target: 'a' }],
+        ),
+      );
+      expect(issues).toEqual([
+        expect.objectContaining({
+          severity: 'error',
+          nodeId: 'g',
+          message: expect.stringContaining("auth must be 'cognito'"),
+        }),
+      ]);
+    });
+
+    it('should accept a cognito gateway fronting a cognito agent', () => {
+      const issues = validate(
+        graph(
+          [
+            node('g', 'agentcore-gateway', {
+              name: 'gateway',
+              options: { protocol: 'http', auth: 'cognito' },
+            }),
+            node('a', 'ts#agent', {
+              name: 'agent',
+              hostName: 'app',
+              options: { protocol: 'ag-ui', auth: 'cognito' },
+            }),
+          ],
+          [{ id: 'e1', source: 'g', target: 'a' }],
+        ),
+      );
+      expect(issues).toEqual([]);
+    });
+
+    // The gateway invokes an IAM agent with its own role, so the rule requiring
+    // a cognito gateway does not reach this pairing.
+    it('should accept an iam gateway fronting an iam agent', () => {
+      const issues = validate(
+        graph(
+          [
+            node('g', 'agentcore-gateway', {
+              name: 'gateway',
+              options: { protocol: 'http' },
+            }),
+            node('a', 'ts#agent', {
+              name: 'agent',
+              hostName: 'app',
+              options: { protocol: 'ag-ui' },
+            }),
+          ],
+          [{ id: 'e1', source: 'g', target: 'a' }],
+        ),
+      );
+      expect(issues).toEqual([]);
+    });
+
     it('should reject a gateway connected to itself', () => {
       const issues = validate(
         graph(

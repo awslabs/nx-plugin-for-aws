@@ -242,7 +242,12 @@ describe('scaffold catalog integration', () => {
         >
       )[key] ?? [];
     const options: Record<string, string> = {};
-    for (const constraint of constraints.filter((c) => c.side === side)) {
+    // Conditional constraints are keyed off option values the endpoints are not
+    // scaffolded with here, so they don't bind — see the connection generators'
+    // own specs for those pairings.
+    for (const constraint of constraints.filter(
+      (c) => c.side === side && !c.when,
+    )) {
       if (constraint.equals !== undefined) {
         options[constraint.option] = constraint.equals;
       } else if (constraint.notEquals !== undefined) {
