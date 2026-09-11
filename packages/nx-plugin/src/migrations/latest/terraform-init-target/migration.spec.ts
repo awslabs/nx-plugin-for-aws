@@ -13,8 +13,11 @@ import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
 import migration from './migration.js';
 
 const PROJECT = '@proj/infra';
-const INSTALL_PROVIDERS = 'install-providers';
+const TERRAFORM_INIT = 'terraform-init';
 const DEPENDENT_TARGETS = ['init', 'test', 'validate'];
+/** `packages/infra/src` is three levels below the root that holds `.terraform`. */
+const CACHE_DIR = '../../../.terraform/plugin-cache/{projectRoot}';
+const dataDir = (name: string) => `../../../dist/{projectRoot}/${name}`;
 
 const generateProject = (tree: Tree, type: 'application' | 'library') =>
   terraformProjectGenerator(tree, {
@@ -25,7 +28,9 @@ const generateProject = (tree: Tree, type: 'application' | 'library') =>
 
 /**
  * Generates a terraform project, then reverts what this migration adds back to
- * the shape the pre-fix generator produced.
+ * the shape the pre-fix generator produced: `test` and `validate` ran their own
+ * backendless `terraform init` into a `TF_DATA_DIR` of their own, behind the
+ * `shx mkdir` the plugin-cache fix added.
  */
 const generatePreFixProject = async (
   tree: Tree,
@@ -34,17 +39,31 @@ const generatePreFixProject = async (
   await generateProject(tree, type);
 
   const config = readProjectConfiguration(tree, PROJECT);
-  delete config.targets[INSTALL_PROVIDERS];
+  delete config.targets[TERRAFORM_INIT];
   for (const targetName of DEPENDENT_TARGETS) {
     const target = config.targets[targetName];
     const dependsOn = (target.dependsOn ?? []).filter(
-      (dependency) => dependency !== INSTALL_PROVIDERS,
+      (dependency) => dependency !== TERRAFORM_INIT,
     );
     if (dependsOn.length > 0) {
       target.dependsOn = dependsOn;
     } else {
       delete target.dependsOn;
     }
+  }
+  for (const verb of ['test', 'validate'] as const) {
+    const target = config.targets[verb];
+    delete target.options.command;
+    target.options.commands = [
+      { command: `shx mkdir -p ${CACHE_DIR}`, forwardAllArgs: false },
+      'terraform init -backend=false',
+      `terraform ${verb}`,
+    ];
+    target.options.parallel = false;
+    target.options.env = {
+      TF_DATA_DIR: dataDir(`terraform-${verb}`),
+      TF_PLUGIN_CACHE_DIR: CACHE_DIR,
+    };
   }
   updateProjectConfiguration(tree, PROJECT, config);
 };
@@ -56,7 +75,7 @@ const generatedTargets = async (type: 'application' | 'library') => {
   return readProjectConfiguration(tree, PROJECT).targets;
 };
 
-describe('terraform-install-providers-target migration', () => {
+describe('terraform-init-target migration', () => {
   let tree: Tree;
 
   beforeEach(() => {
@@ -74,12 +93,13 @@ describe('terraform-install-providers-target migration', () => {
     await generatePreFixProject(tree);
 
     const { targets } = readProjectConfiguration(tree, PROJECT);
-    expect(targets[INSTALL_PROVIDERS]).toBeUndefined();
+    expect(targets[TERRAFORM_INIT]).toBeUndefined();
     for (const targetName of DEPENDENT_TARGETS) {
-      expect(targets[targetName].dependsOn ?? []).not.toContain(
-        INSTALL_PROVIDERS,
-      );
+      expect(targets[targetName].dependsOn ?? []).not.toContain(TERRAFORM_INIT);
     }
+    expect(targets.test.options.commands).toContain(
+      'terraform init -backend=false',
+    );
   });
 
   it.each(['application', 'library'] as const)(
@@ -104,17 +124,15 @@ describe('terraform-install-providers-target migration', () => {
     await migration(tree);
 
     const target = readProjectConfiguration(tree, PROJECT).targets[
-      INSTALL_PROVIDERS
+      TERRAFORM_INIT
     ];
-    // `packages/infra/src` is three levels below the root that holds `.terraform`.
-    const cacheDir = '../../../.terraform/plugin-cache/{projectRoot}';
     expect(target.options.commands).toEqual([
-      { command: `shx mkdir -p ${cacheDir}`, forwardAllArgs: false },
+      { command: `shx mkdir -p ${CACHE_DIR}`, forwardAllArgs: false },
       'terraform init -backend=false',
     ]);
     expect(target.options.env).toEqual({
-      TF_DATA_DIR: '../../../dist/{projectRoot}/terraform-providers',
-      TF_PLUGIN_CACHE_DIR: cacheDir,
+      TF_DATA_DIR: dataDir(TERRAFORM_INIT),
+      TF_PLUGIN_CACHE_DIR: CACHE_DIR,
     });
     // `mkdir` has to complete before `terraform init` reads the cache.
     expect(target.options.parallel).toBe(false);
@@ -123,50 +141,100 @@ describe('terraform-install-providers-target migration', () => {
     expect(target.cache).toBeUndefined();
   });
 
-  it('should order every target that runs terraform init after it', async () => {
+  it('should stop test and validate running their own init', async () => {
+    await generatePreFixProject(tree);
+
+    await migration(tree);
+
+    const { targets } = readProjectConfiguration(tree, PROJECT);
+    for (const verb of ['test', 'validate'] as const) {
+      const target = targets[verb];
+      expect(target.options.command).toBe(`terraform ${verb}`);
+      expect(target.options.commands).toBeUndefined();
+      // The `TF_DATA_DIR` `terraform-init` prepared, rather than one of its own.
+      expect(target.options.env).toEqual({
+        TF_DATA_DIR: dataDir(TERRAFORM_INIT),
+      });
+      // Sequenced the init ahead of the command; there is one command left.
+      expect(target.options.parallel).toBeUndefined();
+      expect(target.dependsOn).toEqual([TERRAFORM_INIT]);
+    }
+  });
+
+  it('should order every target that needs the providers after it', async () => {
     await generatePreFixProject(tree);
 
     await migration(tree);
 
     const { targets } = readProjectConfiguration(tree, PROJECT);
     for (const targetName of DEPENDENT_TARGETS) {
-      expect(targets[targetName].dependsOn).toContain(INSTALL_PROVIDERS);
+      expect(targets[targetName].dependsOn).toContain(TERRAFORM_INIT);
     }
-    // An application's `init` keeps the dependency on its dependencies' init.
-    expect(targets.init.dependsOn).toEqual([INSTALL_PROVIDERS, '^init']);
+    // An application's `init` keeps its own backend-configured init, and the
+    // dependency on its dependencies' init.
+    expect(targets.init.dependsOn).toEqual([TERRAFORM_INIT, '^init']);
+    expect(targets.init.options.commands).toEqual([
+      'tsx {projectRoot}/scripts/init.ts {projectRoot}',
+    ]);
   });
 
-  it('should report a target whose commands no longer run terraform init', async () => {
+  it('should report a target that has taken on another command', async () => {
     await generatePreFixProject(tree);
     const config = readProjectConfiguration(tree, PROJECT);
-    config.targets.validate.options.commands = ['./scripts/my-validate.sh'];
+    config.targets.validate.options.commands = [
+      'terraform init -backend=false',
+      './scripts/my-checks.sh',
+      'terraform validate',
+    ];
     updateProjectConfiguration(tree, PROJECT, config);
 
     const result = await migration(tree);
 
     const { targets } = readProjectConfiguration(tree, PROJECT);
     expect(targets.validate.dependsOn).toBeUndefined();
-    expect(targets.validate.options.commands).toEqual([
-      './scripts/my-validate.sh',
-    ]);
+    expect(targets.validate.options.commands).toContain(
+      './scripts/my-checks.sh',
+    );
     expect(result.nextSteps).toEqual([
       expect.stringContaining("its 'validate' target no longer matches"),
     ]);
     // The targets it does recognise are still migrated.
-    expect(targets.test.dependsOn).toContain(INSTALL_PROVIDERS);
+    expect(targets.test.dependsOn).toContain(TERRAFORM_INIT);
   });
 
-  it('should preserve a dependsOn a user has added', async () => {
+  it('should report a target pointed at a data dir of its own choosing', async () => {
+    await generatePreFixProject(tree);
+    const config = readProjectConfiguration(tree, PROJECT);
+    config.targets.test.options.env.TF_DATA_DIR = '/mnt/shared/terraform-test';
+    updateProjectConfiguration(tree, PROJECT, config);
+
+    const result = await migration(tree);
+
+    const { targets } = readProjectConfiguration(tree, PROJECT);
+    expect(targets.test.options.env.TF_DATA_DIR).toBe(
+      '/mnt/shared/terraform-test',
+    );
+    expect(targets.test.dependsOn).toBeUndefined();
+    expect(result.nextSteps).toEqual([
+      expect.stringContaining("its 'test' target no longer matches"),
+    ]);
+  });
+
+  it('should preserve env vars and a dependsOn a user has added', async () => {
     await generatePreFixProject(tree);
     const config = readProjectConfiguration(tree, PROJECT);
     config.targets.test.dependsOn = ['my-fixtures'];
+    config.targets.test.options.env.TF_LOG = 'debug';
     updateProjectConfiguration(tree, PROJECT, config);
 
     await migration(tree);
 
-    expect(
-      readProjectConfiguration(tree, PROJECT).targets.test.dependsOn,
-    ).toEqual([INSTALL_PROVIDERS, 'my-fixtures']);
+    const { test } = readProjectConfiguration(tree, PROJECT).targets;
+    expect(test.dependsOn).toEqual([TERRAFORM_INIT, 'my-fixtures']);
+    expect(test.options.env).toEqual({
+      TF_LOG: 'debug',
+      TF_DATA_DIR: dataDir(TERRAFORM_INIT),
+    });
   });
 
   it('should be idempotent', async () => {
@@ -190,7 +258,7 @@ describe('terraform-install-providers-target migration', () => {
     const result = await migration(tree);
 
     expect(
-      readProjectConfiguration(tree, PROJECT).targets[INSTALL_PROVIDERS],
+      readProjectConfiguration(tree, PROJECT).targets[TERRAFORM_INIT],
     ).toBeUndefined();
     expect(result.nextSteps).toEqual([]);
   });

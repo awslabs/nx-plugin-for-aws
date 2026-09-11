@@ -125,15 +125,10 @@ export async function terraformProjectGenerator(
     'checkov',
     'checkov_report.json',
   );
-  // `test`, `validate` and `install-providers` each keep their `.terraform` here
-  // rather than in `src`, so initialising one never races the
-  // backend-configured targets, or each other, over the shared one.
-  const testDataDir = joinPathFragments(distDir, 'terraform-test');
-  const validateDataDir = joinPathFragments(distDir, 'terraform-validate');
-  const installProvidersDataDir = joinPathFragments(
-    distDir,
-    'terraform-providers',
-  );
+  // `terraform-init` keeps its `.terraform` here rather than in `src`, so it
+  // never races the backend-configured targets over the shared one. `test` and
+  // `validate` read this same directory rather than initialising their own.
+  const initDataDir = joinPathFragments(distDir, 'terraform-init');
 
   // Provider downloads persist here, so a target whose `.terraform` was cleaned
   // links the providers it already has rather than re-downloading them. Nx does
@@ -146,8 +141,8 @@ export async function terraformProjectGenerator(
   // init` runs filling a shared cache concurrently each compute a different hash
   // for the same provider, because the hash covers a directory the other is
   // still writing, and terraform then rejects the mismatch against the lock
-  // file. `install-providers` is the only target that fills it, and every target
-  // that runs `terraform init` depends on that one, so no two writers ever meet.
+  // file. `terraform-init` is the only target that fills it, and the targets that
+  // need the providers depend on that one, so no two writers ever meet.
   const pluginCacheDir = joinPathFragments(
     outDirToRootRelativePath,
     '.terraform',
@@ -236,7 +231,7 @@ export async function terraformProjectGenerator(
         commands: ['tsx {projectRoot}/scripts/init.ts {projectRoot}'],
         cwd: '{workspaceRoot}',
       },
-      dependsOn: ['install-providers', '^init'],
+      dependsOn: ['terraform-init', '^init'],
     },
     output: {
       executor: 'nx:run-commands',
@@ -307,22 +302,13 @@ export async function terraformProjectGenerator(
         parallel: false,
         env: { TF_PLUGIN_CACHE_DIR: pluginCacheDir },
       },
-      dependsOn: ['install-providers'],
+      dependsOn: ['terraform-init'],
     },
-    // Fills the shared plugin cache, and is the only target that does. Every
-    // other target runs `terraform init` for its own `.terraform`, and Nx
-    // schedules those concurrently — `plan` depends on both `init` and
-    // `validate` — so without one writer ahead of them they race over the cache
-    // and terraform rejects the resulting hash against the lock file. They each
-    // depend on this, so by the time they run the cache is warm and they only
-    // link out of it.
-    //
-    // `-backend=false` installs the providers without configuring the S3
-    // backend, so this needs no credentials and runs on a fresh workspace before
-    // `bootstrap`. Deliberately uncached: a cache hit on another machine would
-    // report success over an empty cache and hand the race back to the targets
-    // that depend on it.
-    'install-providers': {
+    // `-backend=false` installs the modules and providers without configuring
+    // the S3 backend, so this needs no credentials and runs on a fresh
+    // workspace before `bootstrap`. Uncached: a cache hit on another machine
+    // would report success over an empty `TF_DATA_DIR` and plugin cache.
+    'terraform-init': {
       executor: 'nx:run-commands',
       options: {
         commands: [
@@ -333,7 +319,7 @@ export async function terraformProjectGenerator(
         cwd: '{projectRoot}/src',
         parallel: false,
         env: {
-          TF_DATA_DIR: installProvidersDataDir,
+          TF_DATA_DIR: initDataDir,
           TF_PLUGIN_CACHE_DIR: pluginCacheDir,
         },
       },
@@ -355,14 +341,11 @@ export async function terraformProjectGenerator(
       },
     },
     // Terraform's native test framework, which runs any `.tftest.hcl` files.
-    // A project with none is a no-op success.
-    //
-    // `-backend=false` installs the modules and providers the tests need
-    // without configuring the S3 backend, so this runs before `bootstrap` and
-    // needs no credentials. `TF_DATA_DIR` keeps that `.terraform` out of `src`,
-    // so it never races the backend-configured targets over the shared one.
-    // `^production` is what invalidates the cache when a consumed module
-    // changes; `{projectRoot}/**/*` alone would serve a stale pass.
+    // A project with none is a no-op success. Runs against the `TF_DATA_DIR`
+    // `terraform-init` prepared, so it needs no credentials and works on a fresh
+    // workspace before `bootstrap`. `^production` is what invalidates the cache
+    // when a consumed module changes; `{projectRoot}/**/*` alone would serve a
+    // stale pass.
     //
     // `TF_DATA_DIR` is terraform's working directory, not an artifact: its
     // provider entries are symlinks into the shared plugin cache, so restoring
@@ -375,44 +358,27 @@ export async function terraformProjectGenerator(
       inputs: ['default', '^production'],
       outputs: [],
       options: {
-        commands: [
-          { command: `shx mkdir -p ${pluginCacheDir}`, forwardAllArgs: false },
-          'terraform init -backend=false',
-          'terraform test',
-        ],
+        command: 'terraform test',
         forwardAllArgs: true,
         cwd: '{projectRoot}/src',
-        parallel: false,
-        env: { TF_DATA_DIR: testDataDir, TF_PLUGIN_CACHE_DIR: pluginCacheDir },
+        env: { TF_DATA_DIR: initDataDir },
       },
-      dependsOn: ['install-providers'],
+      dependsOn: ['terraform-init'],
     },
-    // Mirrors `test`: `-backend=false` installs the modules and providers
-    // validation needs without configuring the S3 backend, so this runs on a
-    // fresh workspace before `bootstrap` and needs no credentials. `TF_DATA_DIR`
-    // keeps that `.terraform` out of `src`, so it never races the
-    // backend-configured targets over the shared one, and declaring no outputs
-    // keeps a cache hit to what it asserts (see `test` above).
+    // Mirrors `test`: validates against the `TF_DATA_DIR` `terraform-init`
+    // prepared, and declares no outputs for the same reason (see `test` above).
     validate: {
       executor: 'nx:run-commands',
       cache: true,
       inputs: ['default', '^production'],
       outputs: [],
       options: {
-        commands: [
-          { command: `shx mkdir -p ${pluginCacheDir}`, forwardAllArgs: false },
-          'terraform init -backend=false',
-          'terraform validate',
-        ],
+        command: 'terraform validate',
         forwardAllArgs: true,
         cwd: '{projectRoot}/src',
-        parallel: false,
-        env: {
-          TF_DATA_DIR: validateDataDir,
-          TF_PLUGIN_CACHE_DIR: pluginCacheDir,
-        },
+        env: { TF_DATA_DIR: initDataDir },
       },
-      dependsOn: ['install-providers'],
+      dependsOn: ['terraform-init'],
     },
   };
 
