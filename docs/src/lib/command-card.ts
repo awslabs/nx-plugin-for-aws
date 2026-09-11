@@ -6,7 +6,12 @@ import {
   buildPackageManagerExecCommand,
   PACKAGE_MANAGER_COMMANDS,
 } from '../../../packages/nx-plugin/src/utils/commands';
-import type { GeneratorOption, OptionControl } from './generator-options';
+import {
+  type GeneratorOption,
+  isApplicable,
+  isValueApplicable,
+  type OptionControl,
+} from './generator-options';
 
 /**
  * The command a card shows, assembled from the option values the reader entered.
@@ -115,6 +120,50 @@ export const emittedValues = (
     if (emitted !== undefined) out[key] = emitted;
   }
   return out;
+};
+
+/**
+ * The options a card offers, and the values its command carries, given the values
+ * the page fixes.
+ *
+ * An option the fixed values rule out is not one the reader can reach, so it goes
+ * along with anything entered in it, and a value they rule out leaves that
+ * option's list. Kept here, and keyed by option name rather than by object, since
+ * filtering an option's values means rebuilding it.
+ */
+export const resolveCardOptions = (
+  options: readonly GeneratorOption[],
+  forced: Record<string, string>,
+  entered: Record<string, string>,
+): { applicable: GeneratorOption[]; values: Record<string, string> } => {
+  const applies = new Set(
+    options
+      .filter((option) => isApplicable(option, forced))
+      .map((option) => option.key),
+  );
+  const applicable = options
+    .filter((option) => applies.has(option.key))
+    .map((option) => ({
+      ...option,
+      values: option.values.filter((value) =>
+        isValueApplicable(option, value, forced),
+      ),
+    }));
+  const known = new Set(options.map((option) => option.key));
+
+  return {
+    applicable,
+    values: emittedValues(
+      Object.fromEntries(
+        // A page can pass an option the schema doesn't declare, which no
+        // condition can rule out.
+        Object.entries(entered).filter(
+          ([key]) => applies.has(key) || !known.has(key),
+        ),
+      ),
+      applicable,
+    ),
+  };
 };
 
 const argumentTokens = (
