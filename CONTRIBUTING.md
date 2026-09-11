@@ -434,7 +434,7 @@ However you will still need to make changes to any "after" files manually to ens
 
 Note that if you are running e2e tests that use `pnpm` as the package manager, you may need to run `pnpm store prune` to ensure that your changes are picked up in the tests.
 
-In CI, the smoke tests are skipped when every changed file is under `docs/`, since a change confined to the docs site cannot affect generated projects. Touching anything outside `docs/` runs the full set.
+On a pull request, the smoke tests are skipped when every changed file is under `docs/`, since a change confined to the docs site cannot affect generated projects. Touching anything outside `docs/` runs the full set, and so does every push to `main`.
 
 ### Writing Documentation
 
