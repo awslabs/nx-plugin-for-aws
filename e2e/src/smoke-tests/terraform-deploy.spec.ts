@@ -7,7 +7,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ensureDirSync } from 'fs-extra';
 
-import { runCLI, tmpProjPath } from '../utils';
+import { type RunCmdOpts, runCLI, tmpProjPath } from '../utils';
 import {
   buildGatewayTargetUrl,
   invokeAgentCoreA2a,
@@ -76,6 +76,36 @@ function readTerraformOutputs(projectRoot: string): Record<string, string> {
     Object.entries(parsed).map(([k, v]) => [k, String(v.value)]),
   );
 }
+
+/**
+ * How many times `apply` is run before the test gives up, and how long it waits
+ * between attempts.
+ *
+ * Some of the AWS APIs this stack touches reject concurrent creates with an
+ * error only a later call can get past — `PutDeliverySource` answers
+ * ConflictException ("Requested resource is currently being updated") when the
+ * stack's S3 access-log delivery sources are created at once, and the provider
+ * does not retry it. Terraform apply is convergent, so a second run picks up
+ * from the state the failed one left behind and finishes the handful of
+ * resources that were left.
+ */
+const APPLY_ATTEMPTS = 3;
+const APPLY_RETRY_DELAY_MS = 30_000;
+
+const applyWithRetries = async (opts: RunCmdOpts): Promise<void> => {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await runCLI(`apply infra --output-style=stream`, opts);
+      return;
+    } catch (e) {
+      if (attempt >= APPLY_ATTEMPTS) throw e;
+      console.warn(
+        `apply attempt ${attempt}/${APPLY_ATTEMPTS} failed; retrying in ${APPLY_RETRY_DELAY_MS / 1000}s: ${e}`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, APPLY_RETRY_DELAY_MS));
+    }
+  }
+};
 
 interface TerraformDeployVariant {
   /** Suffix appended to the smoke-test name and target directory. */
@@ -198,7 +228,7 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
       try {
         await runCLI(`sync`, opts);
         await runCLI(`bootstrap infra --output-style=stream`, opts);
-        await runCLI(`apply infra --output-style=stream`, opts);
+        await applyWithRetries(opts);
 
         if (config.variant === 'terraform-deploy') {
           const outputs = readTerraformOutputs(opts.cwd);
