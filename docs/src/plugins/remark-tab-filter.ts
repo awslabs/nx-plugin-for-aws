@@ -6,18 +6,18 @@ import type { Root, RootContent } from 'mdast';
 import type { MdxJsxFlowElement } from 'mdast-util-mdx-jsx';
 import {
   isJsxElement,
-  readEstreeAttr,
   type JsxParent,
+  readEstreeAttr,
 } from '../../../packages/nx-plugin/src/mcp-server/mdx-ast';
 import { parseWhenExpression } from '../../../packages/nx-plugin/src/mcp-server/option-filter';
 
 /**
  * Lifts `<TabItem _filter={...}>` predicates onto a sibling `<div
- * data-tab-filters>` element that the option-filter bar's client script
+ * data-tab-filters>` element that the page options' client script
  * can read at runtime.
  *
  * Starlight's docs site strips `_filter` (it is only consumed by the MCP
- * server). To enable the filter bar to auto-switch the active tab when the
+ * server). To let the page auto-switch the active tab when the
  * user picks an option value, this plugin inserts a marker sibling
  * immediately before each `<Tabs>` element whose `<TabItem>` children carry
  * `_filter`. The marker carries the per-tab predicates as JSON so the

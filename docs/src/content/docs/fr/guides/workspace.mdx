@@ -2,7 +2,7 @@
 title: Espace de travail
 description: Documentation de référence pour les espaces de travail
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { Aside, FileTree } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
@@ -27,8 +27,10 @@ Lorsque vous créez un nouvel espace de travail avec `@aws/nx-plugin`, le géné
   - package.json Root package.json for your monorepo
   - nx.json Nx configuration (common targets, sync generators, caching)
   - tsconfig.base.json Root TypeScript configuration
+  - biome.json Biome configuration for linting and formatting
   - aws-nx-plugin.config.mts Nx Plugin for AWS configuration
   - .git-secrets/ Vendored git-secrets bash script for credential scanning
+  - .gitallowed Patterns git-secrets treats as false positives
   - .husky/ Git hooks
   - .mcp.json Nx Plugin for AWS MCP server configuration for Claude Code
   - .cursor/mcp.json ...and for Cursor
@@ -71,7 +73,7 @@ Pour plus de détails sur la configuration des projets TypeScript et Python, con
 
 ### Mise en cache
 
-Nx met en cache la sortie des targets précédemment exécutés et les rejoue lorsque les entrées n'ont pas changé. Cela accélère considérablement les builds, les tests et le linting — en particulier en CI. Si vous rencontrez un comportement obsolète ou inattendu, réinitialisez le cache avec :
+Nx met en cache la sortie des targets précédemment exécutés et les rejoue lorsque les entrées n'ont pas changé. Cela accélère considérablement les builds, les tests et le linting. Si vous rencontrez un comportement obsolète ou inattendu, réinitialisez le cache avec :
 
 <NxCommands commands={['reset']} />
 
@@ -87,15 +89,7 @@ Les nouveaux espaces de travail définissent `parallel` dans `nx.json`, qui cont
 }
 ```
 
-Réduisez-la si vous construisez sur une machine avec moins de cœurs ou une mémoire limitée :
-
-```json title="nx.json"
-{
-  "parallel": 3
-}
-```
-
-Vous pouvez également la remplacer par invocation :
+Réduisez-la si vous construisez sur une machine avec moins de cœurs ou une mémoire limitée. Vous pouvez également la remplacer par invocation :
 
 <NxCommands commands={['run-many --target build --parallel=4']} />
 
@@ -165,23 +159,32 @@ Cela exécutera le target choisi ainsi que les targets dont il dépend.
 
 Les nouveaux espaces de travail sont configurés avec [Biome](https://biomejs.dev/) pour l'analyse statique et le formatage du code. L'exécution de `lint` vérifie tous les projets pour détecter les problèmes, et `lint --configuration=fix` les corrige automatiquement.
 
+### Configuration MCP
+
+Le <Link path="get_started/building-with-ai">serveur MCP</Link> du plugin est configuré en tant que serveur MCP au niveau du projet pour Claude Code, Cursor, Kiro, Gemini CLI, GitHub Copilot et OpenAI Codex, afin que votre assistant de codage puisse découvrir et exécuter les générateurs du plugin sans aucune configuration. La configuration est commitée avec votre espace de travail, donnant à tous les membres de votre équipe la même configuration. Supprimez toutes les configurations pour les assistants de codage que vous et votre équipe n'utilisez pas.
+
 ### Git Secrets
 
-Les nouveaux espaces de travail incluent des hooks de pré-commit [git-secrets](https://github.com/awslabs/git-secrets) qui analysent les fichiers mis en staging pour détecter les modèles d'identifiants AWS avant chaque commit. Cela empêche de commiter accidentellement des clés d'accès, des clés secrètes et d'autres valeurs sensibles.
+Les espaces de travail sont configurés avec des hooks de pré-commit [git-secrets](https://github.com/awslabs/git-secrets) qui analysent les fichiers mis en staging pour détecter les modèles d'identifiants AWS avant chaque commit. Cela empêche de commiter accidentellement des clés d'accès, des clés secrètes et d'autres valeurs sensibles.
+
+Le script est intégré dans l'espace de travail à `.git-secrets/git-secrets` et exécuté par le hook `.husky/pre-commit`, il n'y a donc rien à installer — mais il n'est pas dans votre `PATH`, donc invoquez-le par chemin plutôt que comme `git secrets`.
 
 #### Suppression des faux positifs
 
 Les modèles dans git-secrets utilisent des [expressions régulières compatibles egrep](https://github.com/awslabs/git-secrets#options-for-add). Si git-secrets bloque un commit qui ne contient pas de véritables identifiants :
 
 ```sh
-# Allow a specific regex pattern
-git secrets --add --allowed 'my-regex-pattern'
+# Allow a specific regex pattern (-a is the allowed flag)
+bash .git-secrets/git-secrets --add -a -- 'my-regex-pattern'
 
-# Allow a literal string (special characters are escaped)
-git secrets --add --allowed --literal 'my-literal+string'
+# Allow a literal string, escaping special characters (-l is the literal flag)
+bash .git-secrets/git-secrets --add -a -l -- 'my-literal+string'
+
+# List what is currently allowed
+git config --get-all secrets.allowed
 ```
 
-Vous pouvez également créer un fichier `.gitallowed` à la racine du dépôt avec une regex compatible egrep par ligne (partagée avec votre équipe via le contrôle de version) :
+Ceux-ci sont enregistrés dans votre configuration git locale, ils ne s'appliquent donc qu'à votre propre clone. Pour partager une suppression avec votre équipe, ajoutez-la plutôt au fichier `.gitallowed` à la racine du dépôt — une regex compatible egrep par ligne, correspondant à `<path>:<line-number>:<line-contents>` :
 
 ```text title=".gitallowed"
 # Allow test fixtures
@@ -194,7 +197,7 @@ Pour tous les détails sur la gestion des modèles, consultez la [documentation 
 
 ## Configuration du Nx Plugin for AWS
 
-L'espace de travail est livré avec un fichier `aws-nx-plugin.config.mts` à la racine. Les générateurs lisent ce fichier pour choisir des valeurs par défaut sensées afin que vous n'ayez pas à passer les mêmes flags à chaque fois. Deux paramètres sont particulièrement utiles :
+L'espace de travail est livré avec un fichier `aws-nx-plugin.config.mts` à la racine. Les générateurs lisent ce fichier pour choisir des valeurs par défaut sensées afin que vous n'ayez pas à passer les mêmes flags à chaque fois :
 
 ```typescript
 // aws-nx-plugin.config.mts
@@ -207,10 +210,17 @@ export default {
   containers: {
     engine: 'docker', // or 'finch'
   },
+  packageManager: {
+    catalogs: true, // or false
+  },
 } satisfies AwsNxPluginConfig;
 ```
 
 - **`iac.provider`** — le fournisseur d'infrastructure-as-code par défaut (`cdk` ou `terraform`) utilisé par les générateurs qui émettent de l'infrastructure (par exemple `ts#infra`, `ts#api`, `py#api`). Les générateurs qui acceptent un flag `--iac` utilisent par défaut `inherit`, qui lit cette valeur.
 - **`containers.engine`** — l'interface CLI de conteneur (`docker` ou `finch`) intégrée dans les commandes de build/push/login générées. Les builds d'image-asset CDK récupèrent également cela via la variable d'environnement `CDK_DOCKER`. Consultez le <Link path="guides/docker-bundling">guide de bundling Docker</Link> pour plus de détails.
+- **`packageManager.catalogs`** — indique si les générateurs enregistrent les versions des dépendances dans le catalogue du gestionnaire de packages et les référencent avec le protocole `catalog:` (voir [Politique de version unique](#politique-de-version-unique)). Définissez-le sur `false` pour que les générateurs écrivent directement les plages de versions dans le `package.json` de chaque projet. Cela n'a aucun effet sur npm, qui n'a pas de catalogue.
 
-Vous pouvez modifier l'un ou l'autre paramètre à tout moment — les exécutions ultérieures du générateur récupéreront la nouvelle valeur.
+Le <Link path="guides/license">générateur de licence</Link> ajoute une clé `license` à ce même fichier pour configurer son propre comportement.
+
+Vous pouvez modifier n'importe quel paramètre à tout moment — les exécutions ultérieures du générateur récupéreront la nouvelle valeur.
+

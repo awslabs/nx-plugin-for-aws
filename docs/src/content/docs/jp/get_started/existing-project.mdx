@@ -10,13 +10,16 @@ import NxCommands from '@components/nx-commands.astro';
 import NxInitCommand from '@components/nx-init-command.astro';
 import TsConfigBaseCompilerOptions from '@components/tsconfig-base-compiler-options.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
+import Prompt from '@components/prompt.astro';
 
 すべてのプロジェクトが `pnpm create @aws/nx-workspace` から始まるわけではありません。既に [Nx workspace](https://nx.dev) を持っている場合、またはNxを追加できるモノレポがある場合は、プロジェクトを再作成することなく `@aws/nx-plugin` を段階的に採用できます。
 
-<Aside type="tip">
+<Aside type="tip" title="コーディングエージェントを使用する">
 <Link path="get_started/building-with-ai">MCPサーバー</Link>を使用して、お好みのエージェントコーディングツールでプラグインを追加できます。次のプロンプトを試してください：
 
-> Add the Nx Plugin for AWS to this project.
+<Prompt>
+Add the Nx Plugin for AWS to this project.
+</Prompt>
 </Aside>
 
 ## 前提条件
@@ -40,7 +43,7 @@ pnpmは許可リストに登録されたパッケージのインストールス�
 
 ```yaml title="pnpm-workspace.yaml"
 allowBuilds:
-  - nx
+  nx: true
 ```
 </Aside>
 
@@ -56,7 +59,7 @@ Nxとプラグインはnpmパッケージとして配布されるため、Node.j
 }
 ```
 
-このファイルを作成してから、`nx init` を実行し、通常どおり[プラグインを追加](#adding-the-plugin)してください。既存の言語ツールには影響しません。プラグインによって生成されたNxプロジェクト（<Link path="guides/py-project">Pythonプロジェクト</Link>を含む）は既存のコードと並んで存在し、既存のビルドを段階的にNxに組み込むことができます。
+このファイルを作成してから、`nx init` を実行し、通常どおり[プラグインを追加](#adding-the-plugin)してください。既存の言語ツールには影響しません。プラグインによって生成されたNxプロジェクト（<Link path="guides/python-project">Pythonプロジェクト</Link>を含む）は既存のコードと並んで存在し、既存のビルドを段階的にNxに組み込むことができます。
 
 既存のプロジェクトをNxの管理下に置くには、言語に応じていくつかのオプションがあります：
 
@@ -124,12 +127,15 @@ Nxとプラグインはnpmパッケージとして配布されるため、Node.j
 - tsconfig.json ワークスペースのプロジェクトを参照するルートTypeScript構成。NxのTypeScript同期が最新の状態に保ちます
 - tsconfig.base.json プラグインのTypeScriptプロジェクトが拡張する共有コンパイラオプション（以下で何を含むかを参照）
 - pnpm-workspace.yaml（pnpmのみ）プラグインの依存関係が必要とするビルドスクリプトを許可リストに登録します（`@swc/core`、`esbuild`、`nx`、`sharp`）
-- package.json 一般的なタスクのための便利なスクリプト、および `@aws/nx-plugin`、`@aws/nx-plugin-mcp`、`nx`、`@nx/js`、`@nx/workspace`、`typescript`、Biome開発依存関係
+- package.json 一般的なタスクのための便利なスクリプト、gitフックをインストールする `prepare` スクリプト、および `@aws/nx-plugin`、`@aws/nx-plugin-mcp`、`nx`、`@nx/js`、`@nx/workspace`、`typescript`、husky、Biome開発依存関係
 - biome.json デフォルトのBiomeフォーマッターとリンター構成
+- .git-secrets/ ベンダー化された [git-secrets](https://github.com/awslabs/git-secrets) スクリプト、誤検知用の `.gitallowed`、およびそれを実行する `.husky/pre-commit` フック — <Link path="guides/workspace#git-secrets">Git Secrets</Link>を参照
 - .mcp.json 無効にされていない限り、サポートされているコーディングエージェント用のMCPサーバーを構成します（.cursor/、.kiro/、.gemini/、.vscode/、.codex/ の同等物も含む）。ワークスペース自体の `@aws/nx-plugin-mcp` を実行するため、サーバーは常にワークスペースにインストールされているバージョンと一致します
 </FileTree>
 
-<Link path="get_started/building-with-ai">MCPサーバー</Link>の構成は `--mcp=false` で無効にできます。
+<Link path="get_started/building-with-ai">MCPサーバー</Link>の構成は `--mcp=false` で無効にでき、認証情報スキャンフックは `--gitSecrets=false` で無効にできます。
+
+既に持っているファイルは保持されます：既存の `.husky/pre-commit` フックまたは `prepare` スクリプトはそのまま残され、ジェネレーターは認証情報スキャンが独自のチェックと並行して実行されるように追加すべき内容を出力します。既存の `.gitallowed` は、持っているすべてのパターンを保持します。
 
 <Drawer title="tsconfig.base.json" trigger="作成されたtsconfig.base.jsonが持つコンパイラオプションを表示するにはここをクリックしてください。">
 プラグインのTypeScriptプロジェクトはこれらのコンパイラオプションに依存しています。`tsconfig.base.json` が既に存在する場合はそのまま残されるため、独自のものを保持する場合は、次のオプションに合わせてください：
@@ -159,7 +165,7 @@ pnpmは許可リストに登録されていないパッケージのインスト�
 
 #### `nx sync` がハングする、または `plugin worker ... exited before the connection was established`
 
-同じnode_modulesツリーに2つの異なる `nx` バージョンが存在する場合（`npm ls nx` を実行して確認）、それらのプラグインワーカーIPCがデッドロックします。`init` ジェネレーターは、プラグイン自体の `@nx/*` パッケージが解決するバージョンにルート `nx` devDependencyを固定しますが、後で別のパッチバージョンの別の `@nx/*` パッケージをインストールすると、不一致が再発する可能性があります。ルート `package.json` のすべての `nx` と `@nx/*` エントリを単一のバージョンに揃えて再インストールしてください。
+同じnode_modulesツリーに2つの異なる `nx` バージョンが存在する場合（`npm ls nx` を実行して確認）、それらのプラグインワーカーIPCがデッドロックします。`init` は、プラグインがビルドされた `nx` と `@nx/*` のバージョンを宣言しますが、ワークスペースが既に持っているバージョンをダウングレードすることはありません：既に新しい `nx` を使用しているワークスペースはそれを保持し、プラグイン自体の `@nx/*` パッケージはそれと並んで独自のコピーを取り込みます。ルート `package.json` のすべての `nx` と `@nx/*` エントリを、そしてパッケージマネージャーが使用する場合は依存関係カタログも、単一のバージョンに揃えて再インストールしてください。
 
 #### `ts.readConfigFile is not a function`
 

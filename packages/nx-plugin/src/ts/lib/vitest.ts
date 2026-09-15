@@ -85,7 +85,18 @@ export const VITEST_DEPENDENCIES = [
   { name: 'vite' },
   { name: 'vitest' },
   { name: '@vitest/coverage-v8' },
-] as const satisfies readonly { name: ITsDepVersion }[];
+  // `@nx/vitest` writes `environment: 'jsdom'` into the config it generates.
+  { name: 'jsdom' },
+  // Registered in nx.json as an inferred-target plugin, so it must resolve when
+  // Nx builds the project graph. `@nx/js` installed it until Nx 23.2, which now
+  // only reaches for it transiently while its generator runs. Like the other nx
+  // packages it upgrades through `packageJsonUpdates`, not the version sync.
+  { name: '@nx/vitest', dev: true, root: true },
+] as const satisfies readonly {
+  name: ITsDepVersion;
+  dev?: boolean;
+  root?: boolean;
+}[];
 
 export const configureVitest = async <const D extends DependencyDeclaration>(
   tree: Tree,
@@ -139,6 +150,8 @@ export const configureVitest = async <const D extends DependencyDeclaration>(
       'vite',
       'vitest',
       '@vitest/coverage-v8',
+      'jsdom',
+      '@nx/vitest',
     ]),
   );
 };

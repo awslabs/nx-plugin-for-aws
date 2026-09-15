@@ -171,6 +171,29 @@ describe('ts#astro-docs generator', () => {
     );
   });
 
+  it('should vend a translate script that keeps <Link path> locale-agnostic', async () => {
+    await tsAstroDocsGenerator(tree, {
+      name: 'docs',
+      preferInstallDependencies: false,
+    });
+
+    const translateScript = tree.read('docs/scripts/translate.ts', 'utf-8');
+
+    // `<Link>` resolves `path` against the reader's locale, so a `path` that
+    // already names one renders a doubled segment and 404s. The prompt says to
+    // copy these verbatim, and the script strips any locale the agent adds
+    // anyway.
+    expect(translateScript).toContain('never prepend');
+    expect(translateScript).toContain('stripLocaleFromLinkPaths');
+    expect(translateScript).toContain(
+      'await stripLocaleFromLinkPaths(targetAbsPath, locales);',
+    );
+
+    // The instruction to rewrite link paths into the target locale is what
+    // produced the doubled segments, so it must be gone.
+    expect(translateScript).not.toContain('Rewrite link paths');
+  });
+
   it('should use the project name as the site title', async () => {
     await tsAstroDocsGenerator(tree, {
       name: 'my-cool-docs',

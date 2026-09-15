@@ -8,24 +8,25 @@ import Link from '@components/link.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Drawer from '@components/drawer.astro';
 import InstallCommand from '@components/install-command.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 
 O `CloudscapeReactTsWebsiteProject` usado na aplicação de lista de compras configurou um website React com CloudScape e autenticação Cognito integrados.
 
-Este tipo de projeto aproveitava [`create-react-app`](https://github.com/facebook/create-react-app), que agora está obsoleto. Para migrar o website neste guia, usaremos o <Link path="/pt/guides/react-website">gerador `ts#website`</Link>, que usa tecnologias mais modernas e suportadas, nomeadamente [Vite](https://vite.dev/).
+Este tipo de projeto aproveitava [`create-react-app`](https://github.com/facebook/create-react-app), que agora está obsoleto. Para migrar o website neste guia, usaremos o <Link path="/guides/react-website">gerador `ts#website`</Link>, que usa tecnologias mais modernas e suportadas, nomeadamente [Vite](https://vite.dev/).
 
 Como parte da migração, também migraremos do React Router configurado pelo PDK para o [TanStack Router](https://tanstack.com/router), que adiciona segurança de tipo adicional ao roteamento do website.
 
 #### Gerar um Website React
 
-Execute o <Link path="/pt/guides/react-website">gerador `ts#website`</Link> com `framework` definido como `react` para configurar seu projeto de website em `packages/website`. Como a aplicação de lista de compras é construída com componentes CloudScape, também definimos `ux` como `cloudscape` (o padrão é `shadcn`):
+Execute o <Link path="/guides/react-website">gerador `ts#website`</Link> com `framework` definido como `react` para configurar seu projeto de website em `packages/website`. Como a aplicação de lista de compras é construída com componentes CloudScape, também definimos `ux` como `cloudscape` (o padrão é `shadcn`):
 
-<RunGenerator generator="ts#website" noInteractive requiredParameters={{ name: 'website', framework: 'react', ux: 'cloudscape' }} />
+<RunGenerator generator="ts#website" noInteractive requiredParameters={{ name: 'website', framework: 'react', ux: 'cloudscape' }} noOptions />
 
 #### Adicionar Autenticação Cognito
 
-O gerador de website React acima não inclui autenticação cognito por padrão como o `CloudscapeReactTsWebsiteProject`, em vez disso, é adicionado explicitamente através do <Link path="/pt/guides/react-website-auth">gerador `ts#website#auth`</Link>.
+O gerador de website React acima não inclui autenticação cognito por padrão como o `CloudscapeReactTsWebsiteProject`, em vez disso, é adicionado explicitamente através do <Link path="/guides/react-website-auth">gerador `ts#website#auth`</Link>.
 
-<RunGenerator generator="ts#website#auth" noInteractive requiredParameters={{ project: 'website', cognitoDomain: 'shopping-list' }} />
+<RunGenerator generator="ts#website#auth" noInteractive requiredParameters={{ project: 'website', cognitoDomain: 'shopping-list' }} noOptions />
 
 Isso adiciona componentes React que gerenciam os redirecionamentos apropriados para garantir que os usuários façam login usando a UI hospedada do Cognito. Isso também adiciona um construto CDK para implantar os recursos do Cognito em `packages/common/constructs`, chamado `UserIdentity`.
 
@@ -33,13 +34,12 @@ Isso adiciona componentes React que gerenciam os redirecionamentos apropriados p
 O `CloudscapeReactTsWebsiteProject` do PDK dependia de `@aws-northstar/ui` para fornecer componentes de login do Cognito no aplicativo. Se você preferir usar essa abordagem em vez de migrar para a UI hospedada, pode substituir o `packages/common/constructs/src/core/user-identity.ts` gerado pela [implementação do PDK](https://github.com/aws/aws-pdk/blob/mainline/packages/identity/src/user-identity.ts), substituindo os construtos de `@aws-cdk/aws-cognito-identitypool-alpha` pelos fornecidos por `aws-cdk-lib`, e certifique-se de definir os valores relevantes em `RuntimeConfig`:
 
 ```ts
-RuntimeConfig.ensure(this).config = {
-  ...RuntimeConfig.ensure(this).config,
+RuntimeConfig.ensure(this).set('connection', 'cognitoProps', {
   region: Stack.of(this).region,
   identityPoolId: this.identityPool.identityPoolId,
   userPoolId: this.userPool.userPoolId,
   userPoolWebClientId: this.userPoolClient.userPoolClientId,
-};
+});
 ```
 
 Você pode então reutilizar o componente `Auth` do seu `CloudscapeReactTsWebsiteProject`.
@@ -49,9 +49,9 @@ Você pode então reutilizar o componente `Auth` do seu `CloudscapeReactTsWebsit
 
 No PDK, você podia passar os projetos Projen fornecidos uns aos outros para acionar a geração de código de integração. Isso foi usado na aplicação de lista de compras para configurar o website para poder integrar com a API.
 
-Com o Nx Plugin for AWS, a integração de API é suportada através do <Link path="/pt/guides/connection">gerador `connection`</Link>. Em seguida, usamos este gerador para que nosso website possa invocar nossa API Smithy:
+Com o Nx Plugin for AWS, a integração de API é suportada através do <Link path="/guides/connection">gerador `connection`</Link>. Em seguida, usamos este gerador para que nosso website possa invocar nossa API Smithy:
 
-<RunGenerator generator="connection" noInteractive requiredParameters={{ sourceProject: 'website', targetProject: 'api' }} />
+<RunGenerator generator="connection" noInteractive requiredParameters={{ sourceProject: 'website', targetProject: 'api' }} noOptions />
 
 Isso gera os provedores de cliente necessários e alvos de build para que seu website chame sua API através de um cliente TypeScript gerado.
 
@@ -100,7 +100,7 @@ Como estamos usando [roteamento baseado em arquivos](https://tanstack.com/router
 
 Vamos iniciar o servidor local do website:
 
-<NxCommands commands={["dev website"]} />
+<PackageManagerShortCommand commands={["dev"]} />
 
 :::tip
 Estamos usando o alvo `dev` aqui, que também inicia servidores locais para quaisquer APIs que foram conectadas com `connection`, e recarrega automaticamente se seu website, modelo ou backend mudar! Isso nos permite testar nossa API e website localmente antes mesmo de termos escrito qualquer código CDK.

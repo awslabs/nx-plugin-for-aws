@@ -179,9 +179,12 @@ export const tsSmithyApiGenerator = async (
   );
   const port = assignPort(tree, backendProjectConfig, 3001);
 
-  // Delete default index.ts with "hello" function
-  tree.delete(joinPathFragments(backendProjectConfig.sourceRoot, 'index.ts'));
+  if (!projectExists) {
+    // Delete default index.ts with "hello" function
+    tree.delete(joinPathFragments(backendProjectConfig.sourceRoot, 'index.ts'));
+  }
 
+  // The API's source is user-owned, so a re-run leaves existing files alone.
   generateFiles(
     tree,
     joinPathFragments(import.meta.dirname, 'files'),
@@ -190,6 +193,9 @@ export const tsSmithyApiGenerator = async (
       apiNameClassName,
       port,
       ...esmVars(tree),
+    },
+    {
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
   );
 
@@ -309,7 +315,7 @@ export const tsSmithyApiGenerator = async (
       commands: [
         cmd.rm(generatedSrcDirFromRoot),
         cmd.mkdir(generatedSrcDirFromRoot),
-        cmd.cp(
+        cmd.cpDir(
           joinPathFragments('dist', modelProjectConfig.root, 'build', 'ssdk'),
           joinPathFragments(generatedSrcDirFromRoot, 'ssdk'),
         ),

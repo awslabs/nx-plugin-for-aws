@@ -44,6 +44,19 @@ const CHAT_TARGET = {
   },
 };
 
+/**
+ * Every target a harness project exposes: `chat`, plus the quality gates that
+ * put `scripts/chat.ts` through the workspace's build sweep. The gates' exact
+ * shape is covered by the project.json snapshot rather than restated here.
+ */
+const HARNESS_TARGET_NAMES = [
+  'build',
+  'chat',
+  'format',
+  'lint',
+  'typecheck',
+] as const;
+
 /** Exactly what `scripts/chat.ts` imports, sorted. */
 const CHAT_DEPENDENCIES = [
   '@aws-lambda-powertools/parameters',
@@ -132,18 +145,19 @@ describe('agentcore-harness generator', () => {
   });
 
   describe('common behaviour', () => {
-    it('generates exactly the four harness project files', async () => {
+    it('generates exactly the five harness project files', async () => {
       await agentcoreHarnessGenerator(tree, {
         name: 'my-harness',
         iac: 'cdk',
       });
 
-      // Set equality, so a leftover invoke.ts or tsconfig.json fails too.
+      // Set equality, so a leftover invoke.ts fails too.
       expect(filesUnder(tree, PROJECT_ROOT)).toEqual([
         'README.md',
         'project.json',
         'scripts/chat.ts',
         'src/PROMPT.md',
+        'tsconfig.json',
       ]);
 
       const config = readProjectConfiguration(tree, PROJECT_NAME);
@@ -151,15 +165,34 @@ describe('agentcore-harness generator', () => {
       expect(config.projectType).toBe('application');
     });
 
-    it('exposes exactly one target, chat, running the vended script', async () => {
+    it('exposes chat plus the quality gates covering the vended script', async () => {
       await agentcoreHarnessGenerator(tree, {
         name: 'my-harness',
         infra: 'none',
       });
 
-      // Set equality, so a leftover invoke or build target fails too.
+      // Set equality, so a leftover invoke target fails too.
       const config = readProjectConfiguration(tree, PROJECT_NAME);
-      expect(config.targets).toEqual({ chat: CHAT_TARGET });
+      expect(Object.keys(config.targets).sort()).toEqual([
+        ...HARNESS_TARGET_NAMES,
+      ]);
+      // `build` is what pulls the gates in when the workspace sweep runs.
+      expect(config.targets.build.dependsOn).toEqual(['lint', 'typecheck']);
+      expect(config.targets.lint.dependsOn).toEqual(['format']);
+      expect(config.targets.typecheck.options.command).toBe(
+        'tsc --noEmit -p tsconfig.json',
+      );
+      expect(config.targets.chat).toEqual(CHAT_TARGET);
+      // A noEmit tsconfig keeps the project out of the reference graph, which
+      // would otherwise disable the inferred typecheck.
+      const tsConfig = readJson(tree, `${PROJECT_ROOT}/tsconfig.json`);
+      expect(tsConfig.compilerOptions.noEmit).toBe(true);
+      expect(tsConfig.compilerOptions.composite).toBe(false);
+      expect(
+        (readJson(tree, 'tsconfig.json').references ?? []).map(
+          (reference: { path: string }) => reference.path,
+        ),
+      ).not.toContain(`./${PROJECT_ROOT}`);
     });
 
     it('records exactly the four metadata fields when no infra is written', async () => {
@@ -760,9 +793,12 @@ describe('agentcore-harness generator', () => {
       expectBytesPreserved(recorded);
       // `??=` keeps a target the user owns, so the first-run contract still
       // holds exactly, and the wiring stays unique rather than duplicated.
-      expect(readProjectConfiguration(tree, PROJECT_NAME).targets).toEqual({
-        chat: CHAT_TARGET,
-      });
+      const rerun = readProjectConfiguration(tree, PROJECT_NAME);
+      expect(Object.keys(rerun.targets).sort()).toEqual([
+        ...HARNESS_TARGET_NAMES,
+      ]);
+      expect(rerun.targets.chat).toEqual(CHAT_TARGET);
+      expect(rerun.targets.build.dependsOn).toEqual(['lint', 'typecheck']);
       expect(harnessExportLines()).toEqual([HARNESS_EXPORT_LINE]);
     });
 
@@ -797,6 +833,7 @@ describe('agentcore-harness generator', () => {
         'project.json',
         'scripts/chat.ts',
         'src/PROMPT.md',
+        'tsconfig.json',
       ]);
       // No construct, no Terraform module, and no vended index to export from.
       for (const path of [
@@ -832,7 +869,10 @@ describe('agentcore-harness generator', () => {
       // The upgrade adds infrastructure without disturbing the project.
       expectBytesPreserved(recorded);
       const upgraded = readProjectConfiguration(tree, PROJECT_NAME);
-      expect(upgraded.targets).toEqual({ chat: CHAT_TARGET });
+      expect(Object.keys(upgraded.targets).sort()).toEqual([
+        ...HARNESS_TARGET_NAMES,
+      ]);
+      expect(upgraded.targets.chat).toEqual(CHAT_TARGET);
       // The sole project.json change is the provider the upgrade resolved.
       expect(upgraded.metadata as any).toEqual({
         generator: AGENTCORE_HARNESS_GENERATOR_INFO.id,
@@ -848,7 +888,7 @@ describe('agentcore-harness generator', () => {
     // The project directory only. The vended construct and Terraform module
     // stay out: they are long and churn for reasons unrelated to this
     // generator, so the blocks above cover them with targeted assertions.
-    it('snapshots the four rendered harness project files', async () => {
+    it('snapshots the rendered harness project files', async () => {
       await agentcoreHarnessGenerator(tree, {
         name: 'my-harness',
         iac: 'cdk',

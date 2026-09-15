@@ -22,11 +22,22 @@
       alt="Commit activity"
     />
   </a>
+  <p>
+    <a href="https://awslabs.github.io/nx-plugin-for-aws/"><b>Documentation Site</b></a>
+  </p>
 </div>
 
 ---
 
 **@aws/nx-plugin** is a collection of code generators that scaffold full-stack AWS applications inside an [Nx](https://nx.dev) monorepo. Every generator produces best-practice application code **and** the infrastructure to deploy it — type-safe, locally runnable, and deployable from the start, getting you closer to production.
+
+<div align="center">
+  <img
+    src="https://raw.githubusercontent.com/awslabs/nx-plugin-for-aws/main/docs/src/content/docs/assets/nx-plugin-showcase-desktop-dark.gif"
+    alt="Scaffolding, running and deploying a full-stack AWS application with the Nx Plugin for AWS"
+    width="900"
+  />
+</div>
 
 ## Quick Start
 
@@ -79,22 +90,29 @@ pnpm nx g @aws/nx-plugin:ts#infra
 
 | Generator            | Description                                                                                                                              |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `init`               | Configure an existing Nx workspace to use the plugin                                                                                     |
 | `ts#project`         | TypeScript library                                                                                                                       |
 | `ts#api`             | TypeScript API (tRPC or Smithy) with API Gateway + Lambda + [Powertools](https://github.com/aws-powertools/powertools-lambda-typescript) |
 | `ts#rdb`             | Relational databases with Aurora RDS                                                                                                     |
+| `ts#dynamodb`        | Type-safe DynamoDB single-table design (TypeScript, ElectroDB)                                                                           |
 | `ts#website`         | React app (Vite)                                                                                                                         |
 | `ts#website#auth`    | Add Cognito auth to a website                                                                                                            |
 | `ts#infra`           | AWS CDK infrastructure project                                                                                                           |
 | `ts#lambda-function` | TypeScript Lambda with type-safe event sources                                                                                           |
 | `ts#mcp-server`      | MCP server (TypeScript)                                                                                                                  |
+| `ts#dcr-proxy`       | OAuth DCR proxy construct for Cognito-authenticated MCP servers                                                                          |
 | `ts#agent`           | [Strands Agent](https://strandsagents.com/) (TypeScript)                                                                                 |
 | `ts#nx-generator`    | Nx generator scaffold                                                                                                                    |
+| `ts#docs`            | Documentation site (Astro + Starlight)                                                                                                   |
 | `smithy#project`     | Smithy model project — a service model, or a shape library shared between Smithy projects                                                |
 | `py#project`         | Python project (uv)                                                                                                                      |
 | `py#api`             | Python API (FastAPI) with API Gateway + Lambda + [Powertools](https://github.com/aws-powertools/powertools-lambda-python)                |
+| `py#rdb`             | Relational databases with Aurora RDS (Python)                                                                                            |
+| `py#dynamodb`        | Python DynamoDB project                                                                                                                   |
 | `py#lambda-function` | Python Lambda with type-safe event sources                                                                                               |
 | `py#mcp-server`      | MCP server (Python)                                                                                                                      |
 | `py#agent`           | [Strands Agent](https://strandsagents.com/) (Python)                                                                                     |
+| `agentcore-gateway`  | [AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) project                                  |
 | `agentcore-harness`  | [AgentCore Harness](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness.html) agent loop (experimental)                |
 | `connection`         | Connect projects together (e.g. frontend to API)                                                                                         |
 | `terraform#project`  | Terraform project                                                                                                                        |

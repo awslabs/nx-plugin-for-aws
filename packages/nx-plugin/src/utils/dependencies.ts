@@ -5,8 +5,11 @@
 import {
   detectPackageManager,
   addDependenciesToPackageJson as devkitAddDependenciesToPackageJson,
+  removeDependenciesFromPackageJson as devkitRemoveDependenciesFromPackageJson,
   type GeneratorCallback,
   getPackageManagerVersion,
+  getProjects,
+  joinPathFragments,
   type PackageManager,
   readJson,
   type Tree,
@@ -158,18 +161,135 @@ export const addDependenciesToPackageJson = (
   return callback;
 };
 
-// Nx generators read these versions from the root manifest and coerce without
-// a null guard; Nx ships no bun catalog manager, so an unresolved `catalog:`
-// crashes them. Keep direct ranges on bun (react-dom pinned with react).
-const BUN_INTROSPECTED_PACKAGES = new Set<string>([
-  'vite',
-  'react',
-  'react-dom',
-]);
+/**
+ * Drop-in replacement for devkit's `removeDependenciesFromPackageJson` that
+ * also drops the package manager's catalog entry, which devkit leaves behind
+ * pointing at a package nothing declares any more.
+ *
+ * The entry is only dropped once no manifest in the workspace declares the
+ * package, so removing it from one project leaves another project's reference
+ * resolvable.
+ */
+export const removeDependenciesFromPackageJson = (
+  tree: Tree,
+  dependencies: string[],
+  devDependencies: string[],
+  packageJsonPath = 'package.json',
+): GeneratorCallback => {
+  const callback = devkitRemoveDependenciesFromPackageJson(
+    tree,
+    dependencies,
+    devDependencies,
+    packageJsonPath,
+  );
 
-const isCatalogExcluded = (tree: Tree, packageName: string): boolean =>
-  detectWorkspacePackageManager(tree) === 'bun' &&
-  BUN_INTROSPECTED_PACKAGES.has(packageName);
+  if (catalogsEnabled(tree)) {
+    const manifests = workspaceManifests(tree, packageJsonPath);
+    const removed = [...new Set([...dependencies, ...devDependencies])].filter(
+      (packageName) =>
+        !manifests.some((manifest) =>
+          MANIFEST_DEPENDENCY_FIELDS.some(
+            (field) => manifest[field]?.[packageName] !== undefined,
+          ),
+        ),
+    );
+    removeCatalogVersions(tree, removed);
+  }
+
+  return callback;
+};
+
+type Manifest = Record<string, Record<string, string> | undefined>;
+
+/**
+ * Every manifest that can hold a catalog reference: the root, each project's,
+ * and the one just written. Project manifests come from the project graph
+ * rather than a tree walk, so a manifest belonging to no project is not seen.
+ */
+const workspaceManifests = (tree: Tree, packageJsonPath: string): Manifest[] =>
+  [
+    ...new Set([
+      'package.json',
+      packageJsonPath,
+      ...Array.from(getProjects(tree).values()).map((project) =>
+        joinPathFragments(project.root, 'package.json'),
+      ),
+    ]),
+  ]
+    .filter((path) => tree.exists(path))
+    .map((path) => readJson<Manifest>(tree, path));
+
+const MANIFEST_DEPENDENCY_FIELDS = [
+  'dependencies',
+  'devDependencies',
+  'optionalDependencies',
+  'peerDependencies',
+] as const;
+
+// Drop entries from the default catalog, mirroring `writeCatalogVersions`.
+const removeCatalogVersions = (tree: Tree, packageNames: string[]): void => {
+  if (packageNames.length === 0) {
+    return;
+  }
+
+  const withoutRemoved = (
+    catalog: Record<string, string> | undefined,
+  ): Record<string, string> | undefined => {
+    if (!catalog || !packageNames.some((name) => name in catalog)) {
+      return undefined;
+    }
+    return Object.fromEntries(
+      Object.entries(catalog).filter(([name]) => !packageNames.includes(name)),
+    );
+  };
+
+  switch (detectWorkspacePackageManager(tree)) {
+    case 'pnpm': {
+      const workspaceYaml =
+        (yaml.load(tree.read('pnpm-workspace.yaml', 'utf-8') ?? '') as Record<
+          string,
+          unknown
+        >) ?? {};
+      const catalog = withoutRemoved(
+        workspaceYaml.catalog as Record<string, string> | undefined,
+      );
+      if (catalog) {
+        tree.write(
+          'pnpm-workspace.yaml',
+          yaml.dump({ ...workspaceYaml, catalog }, { quotingType: "'" }),
+        );
+      }
+      break;
+    }
+    case 'yarn': {
+      const yarnRc =
+        (yaml.load(tree.read('.yarnrc.yml', 'utf-8') ?? '') as Record<
+          string,
+          unknown
+        >) ?? {};
+      const catalog = withoutRemoved(
+        yarnRc.catalog as Record<string, string> | undefined,
+      );
+      if (catalog) {
+        tree.write(
+          '.yarnrc.yml',
+          yaml.dump({ ...yarnRc, catalog }, { quotingType: "'" }),
+        );
+      }
+      break;
+    }
+    case 'bun': {
+      const catalog = withoutRemoved(
+        readJson<{ catalog?: Record<string, string> }>(tree, 'package.json')
+          .catalog,
+      );
+      if (catalog) {
+        updateJson(tree, 'package.json', (json) => ({ ...json, catalog }));
+      }
+      break;
+    }
+  }
+};
 
 // Convert direct version ranges to `catalog:` references in a single manifest
 // and record the range in the workspace catalog. Protocol specifiers
@@ -185,11 +305,7 @@ const convertDependenciesToCatalog = (
     for (const field of ['dependencies', 'devDependencies'] as const) {
       for (const packageName of packageNames) {
         const version = json[field]?.[packageName];
-        if (
-          version &&
-          !version.includes(':') &&
-          !isCatalogExcluded(tree, packageName)
-        ) {
+        if (version && !version.includes(':')) {
           catalogUpdates[packageName] = version;
           json[field][packageName] = 'catalog:';
         }

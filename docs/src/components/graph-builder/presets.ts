@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { findEdgeType } from '../../lib/graph-builder/catalog';
+import type { NodeOverride } from '../../lib/graph-builder/commands';
 import type { Graph } from '../../lib/graph-builder/model';
 import { NODE_HEIGHT, NODE_WIDTH } from './geometry';
 
@@ -28,9 +29,30 @@ export interface Preset {
   readonly id: string;
   readonly label: string;
   readonly description: string;
+  /**
+   * What to ask an AI assistant for to have it build this, as the landing page
+   * shows it being typed. Covers what the graph holds, so the commands match.
+   */
+  readonly prompt?: string;
   readonly nodes: readonly PresetNode[];
   /** Connections as `[sourceName, targetName]` pairs. */
   readonly edges: readonly [string, string][];
+  /**
+   * Option values the commands copied from the read-only embedded graph pin,
+   * keyed by node name.
+   *
+   * A preset backing a guide that also walks the reader through the same
+   * generators in prose must scaffold exactly what the prose does, down to the
+   * name casing the generated construct classes follow and the options belonging
+   * to a follow-up generator. Those go beyond what a node in the graph can
+   * express, so they are declared here and layered onto the emitted commands.
+   *
+   * The graph itself is unaffected: a node keeps the name the diagram shows.
+   * Only the embedded graph applies these — the interactive builder hands the
+   * preset over as an editable starting point, where the graph is what the user
+   * sees and edits, so it stays the single source of the commands.
+   */
+  readonly overrides?: Readonly<Record<string, NodeOverride>>;
 }
 
 export const PRESETS: readonly Preset[] = [
@@ -39,8 +61,11 @@ export const PRESETS: readonly Preset[] = [
     label: 'Dungeon Adventure',
     description:
       'The full-stack agentic game from the Dungeon Adventure tutorial: a React website, a tRPC API, a Python story agent, an inventory MCP server, and a DynamoDB table.',
+    prompt:
+      'Build a dungeon adventure game: a React website, a tRPC API, a Python story agent, an inventory MCP server and a DynamoDB table.',
+    // Listed in the order the tutorial's step-by-step route runs the generators,
+    // so the copied commands read the same way round as the prose.
     nodes: [
-      { type: 'ts#react-website', name: 'game-ui', column: 0, row: 0 },
       { type: 'ts#trpc-api', name: 'game-api', column: 1, row: 0 },
       {
         type: 'py#agent',
@@ -58,23 +83,41 @@ export const PRESETS: readonly Preset[] = [
         row: 1,
       },
       { type: 'ts#dynamodb', name: 'dungeon-db', column: 3, row: 0 },
+      { type: 'ts#react-website', name: 'game-ui', column: 0, row: 0 },
     ],
     edges: [
       ['game-ui', 'game-api'],
+      ['story-agent', 'inventory-server'],
       ['game-ui', 'story-agent'],
       ['game-api', 'dungeon-db'],
-      ['story-agent', 'inventory-server'],
       ['inventory-server', 'dungeon-db'],
     ],
+    // Pinned to what the tutorial's step-by-step route runs, so both routes
+    // reach one workspace: the names the tutorial's code samples refer to
+    // (`GameApi`, `GameUI`, `DungeonDb`, and the generator-derived agent and MCP
+    // server names) and the auth options Module 4 relies on.
+    overrides: {
+      'game-api': { generatorName: 'GameApi' },
+      'game-ui': {
+        generatorName: 'GameUI',
+        followUps: {
+          'ts#website#auth': { cognitoDomain: 'game-ui', allowSignup: true },
+        },
+      },
+      'dungeon-db': { generatorName: 'DungeonDb' },
+      'story-agent': { generatorName: null, componentName: 'agent' },
+      'inventory-server': { generatorName: null, componentName: 'mcp-server' },
+    },
   },
   {
     id: 'quick-start',
     label: 'Quick start',
     description:
       'The full-stack starter from the Quick Start guide: a React website with Cognito authentication calling a type-safe tRPC API.',
+    // The API first, matching the order the guide's own steps run in.
     nodes: [
-      { type: 'ts#react-website', name: 'demo-website', column: 0, row: 0 },
       { type: 'ts#trpc-api', name: 'demo-api', column: 1, row: 0 },
+      { type: 'ts#react-website', name: 'demo-website', column: 0, row: 0 },
     ],
     edges: [['demo-website', 'demo-api']],
   },
@@ -82,6 +125,8 @@ export const PRESETS: readonly Preset[] = [
     id: 'trpc-web-app',
     label: 'tRPC web app',
     description: 'A React website calling a type-safe tRPC API.',
+    prompt:
+      'Add a React website, a type-safe tRPC API and a DynamoDB table, and connect them.',
     nodes: [
       { type: 'ts#react-website', name: 'website', column: 0, row: 0 },
       { type: 'ts#trpc-api', name: 'my-api', column: 1, row: 0 },
@@ -96,6 +141,8 @@ export const PRESETS: readonly Preset[] = [
     id: 'fastapi-web-app',
     label: 'FastAPI web app',
     description: 'A React website calling a Python FastAPI backed by Aurora.',
+    prompt:
+      'Add a React website, a Python FastAPI and an Aurora database, and connect them.',
     nodes: [
       { type: 'ts#react-website', name: 'website', column: 0, row: 0 },
       { type: 'py#fast-api', name: 'py-api', column: 1, row: 0 },
@@ -111,6 +158,8 @@ export const PRESETS: readonly Preset[] = [
     label: 'Agentic app',
     description:
       'An AG-UI agent driving a React frontend, with an MCP server for tools.',
+    prompt:
+      'Add a React website with an AG-UI agent, an MCP server for its tools and a DynamoDB table, and wire them together.',
     nodes: [
       { type: 'ts#react-website', name: 'website', column: 0, row: 0 },
       {
@@ -141,6 +190,8 @@ export const PRESETS: readonly Preset[] = [
     label: 'Multi-agent',
     description:
       'A TypeScript agent orchestrating a Python A2A agent, with tools behind a gateway.',
+    prompt:
+      'Add a TypeScript orchestrator agent that calls a Python A2A agent, with its tools behind an AgentCore Gateway.',
     nodes: [
       {
         type: 'ts#agent',
@@ -177,6 +228,8 @@ export const PRESETS: readonly Preset[] = [
     label: 'Gateway-fronted agents',
     description:
       'A React website reaching agents through an AgentCore Gateway, so the agent runtimes can sit inside a VPC.',
+    prompt:
+      'Put a TypeScript and a Python agent behind an AgentCore Gateway, and have a React website talk to the gateway.',
     nodes: [
       { type: 'ts#react-website', name: 'website', column: 0, row: 0 },
       {
@@ -209,6 +262,21 @@ export const PRESETS: readonly Preset[] = [
       ['website', 'gateway'],
     ],
   },
+];
+
+/**
+ * The presets the landing page's showcase cycles through, in the order it shows
+ * them: a spread of what the plugin builds, opening on an agentic app.
+ *
+ * Every id must name a preset above — a stale one would quietly drop an example
+ * from the showcase.
+ */
+export const SHOWCASE_PRESET_IDS: readonly string[] = [
+  'agentic-app',
+  'trpc-web-app',
+  'multi-agent',
+  'fastapi-web-app',
+  'gateway-fronted-agents',
 ];
 
 /** Comfortable spacing between columns, used when the canvas is wide enough. */

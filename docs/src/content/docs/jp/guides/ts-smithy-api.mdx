@@ -18,6 +18,9 @@ import PackageManagerShortCommand from '@components/package-manager-short-comman
 import Infrastructure from '@components/infrastructure.astro';
 import Snippet from '@components/snippet.astro';
 import OptionFilter from '@components/option-filter.astro';
+import InstallCommand from '@components/install-command.astro';
+import { TS_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/versions';
+import ArchitectureDiagram from '@components/architecture-diagram.astro';
 
 [Smithy](https://smithy.io/) は、モデル駆動型の方法で API を作成するためのプロトコルに依存しないインターフェース定義言語です。
 
@@ -46,7 +49,6 @@ Smithy TypeScript API ジェネレーターは、サービス定義に Smithy �
 <FileTree>
 
 - **model/** Smithy モデルプロジェクト
-  - package.json プロジェクトのパッケージ名と依存関係を定義するプロジェクトマニフェスト
   - project.json プロジェクト設定とビルドターゲット
   - smithy-build.json Smithy ビルド設定
   - ssdk.rolldown.config.mjs 生成された TypeScript Server SDK をバンドル
@@ -55,9 +57,15 @@ Smithy TypeScript API ジェネレーターは、サービス定義に Smithy �
     - operations/
       - echo.smithy サンプルオペレーション定義
 - **backend/** TypeScript バックエンド実装
+  - package.json プロジェクトのパッケージ名と依存関係を定義するプロジェクトマニフェスト
   - project.json プロジェクト設定とビルドターゲット
   - rolldown.config.ts バンドル設定
+  - tsconfig.json TypeScript 設定
+  - tsconfig.lib.json ライブラリソース用の TypeScript 設定
+  - tsconfig.spec.json テスト用の TypeScript 設定
+  - vitest.config.mts Vitest 設定
   - src/
+    - index.ts パッケージエントリーポイント
     - handler.ts AWS Lambda ハンドラー
     - local-server.ts ローカル開発サーバー
     - service.ts サービス実装
@@ -91,7 +99,7 @@ Smithy TypeScript API ジェネレーターは、サービス定義に Smithy �
 </FileTree>
 
 :::note[生成されたプロジェクト]
-このプロジェクトは[`ts#project`](guides/typescript-project)ジェネレータで生成されるため、同じビルドターゲットを設定します。
+このプロジェクトは <Link path="/guides/typescript-project">`ts#project`</Link> ジェネレーターで生成されるため、同じビルドターゲットを設定します。
 :::
 </Fragment>
 <Fragment slot="terraform">
@@ -110,7 +118,7 @@ Smithy TypeScript API ジェネレーターは、サービス定義に Smithy �
 </FileTree>
 
 :::note[生成されたプロジェクト]
-このプロジェクトは[`terraform#project`](guides/terraform-project)ジェネレータで生成されるため、同じビルドターゲットを設定します。
+このプロジェクトは <Link path="/guides/terraform-project">`terraform#project`</Link> ジェネレーターで生成されるため、同じビルドターゲットを設定します。
 :::
 </Fragment>
 </Infrastructure>
@@ -119,47 +127,7 @@ Smithy TypeScript API ジェネレーターは、サービス定義に Smithy �
 
 デプロイされた Smithy API は次のアーキテクチャを持ち、API Gateway ステージの前に [AWS WAFv2](https://docs.aws.amazon.com/waf/latest/developerguide/waf-chapter.html) Web ACL が配置されます：
 
-```d2 inline=true
-direction: right
-
-client: Client {
-  shape: image
-  icon: /nx-plugin-for-aws/icons/aws/client.svg
-}
-
-waf: WAF {
-  shape: image
-  icon: /nx-plugin-for-aws/icons/aws/waf.svg
-}
-
-apigw: API Gateway\n(REST API) {
-  shape: image
-  icon: /nx-plugin-for-aws/icons/aws/api-gateway.svg
-}
-
-lambda: Lambda\n(Smithy Server SDK) {
-  shape: image
-  icon: /nx-plugin-for-aws/icons/aws/lambda.svg
-}
-
-cw: CloudWatch\n(Logs, Metrics) {
-  shape: image
-  icon: /nx-plugin-for-aws/icons/aws/cloudwatch.svg
-  near: top-right
-}
-
-xray: X-Ray\n(Traces) {
-  shape: image
-  icon: /nx-plugin-for-aws/icons/aws/xray.svg
-  near: bottom-right
-}
-
-client -> waf
-waf -> apigw
-apigw -> lambda
-lambda -> cw
-lambda -> xray
-```
+<ArchitectureDiagram options={{ infra: 'rest-lambda' }} />
 
 ## Smithy API の実装
 
@@ -308,7 +276,7 @@ export interface ServiceContext {
 
 ジェネレーターは、Middy ミドルウェアによる自動コンテキスト注入を使用して、AWS Lambda Powertools で構造化ログを設定します。
 
-```typescript {3}
+```typescript {4}
 // handler.ts
 export const handler = middy<APIGatewayProxyEvent, APIGatewayProxyResult>()
   .use(captureLambdaHandler(tracer))
@@ -319,7 +287,7 @@ export const handler = middy<APIGatewayProxyEvent, APIGatewayProxyResult>()
 
 コンテキスト経由でオペレーション実装からロガーを参照できます：
 
-```typescript {5}
+```typescript {6}
 // operations/echo.ts
 import { ServiceContext } from '../context.js';
 import { Echo as EchoOperation } from '../generated/ssdk/index.js';
@@ -334,7 +302,7 @@ export const Echo: EchoOperation<ServiceContext> = async (input, ctx) => {
 
 AWS X-Ray トレースは `captureLambdaHandler` ミドルウェアによって自動的に設定されます。
 
-```typescript {2}
+```typescript {3}
 // handler.ts
 export const handler = middy<APIGatewayProxyEvent, APIGatewayProxyResult>()
   .use(captureLambdaHandler(tracer))
@@ -345,7 +313,7 @@ export const handler = middy<APIGatewayProxyEvent, APIGatewayProxyResult>()
 
 オペレーション内でトレースにカスタムサブセグメントを追加できます：
 
-```typescript {6, 10, 13}
+```typescript {7, 11, 14}
 // operations/echo.ts
 import { ServiceContext } from '../context.js';
 import { Echo as EchoOperation } from '../generated/ssdk/index.js';
@@ -368,7 +336,7 @@ export const Echo: EchoOperation<ServiceContext> = async (input, ctx) => {
 
 CloudWatch メトリクスは、`logMetrics` ミドルウェアによって各リクエストに対して自動的に収集されます。
 
-```typescript {4}
+```typescript {5}
 // handler.ts
 export const handler = middy<APIGatewayProxyEvent, APIGatewayProxyResult>()
   .use(captureLambdaHandler(tracer))
@@ -379,7 +347,7 @@ export const handler = middy<APIGatewayProxyEvent, APIGatewayProxyResult>()
 
 オペレーション内でカスタムメトリクスを追加できます：
 
-```typescript {6}
+```typescript {7}
 // operations/echo.ts
 import { MetricUnit } from '@aws-lambda-powertools/metrics';
 import { ServiceContext } from '../context.js';
@@ -475,7 +443,9 @@ export interface ServiceContext {
 次に、`src/identity.ts` にリゾルバーを記述します。呼び出し元を判別できない場合は `UnauthorizedError` をスローします。実装は選択した `auth` メソッドによって異なります：
 
 <OptionFilter when={{ auth: 'iam' }} description="IAM 認証 API の ID 解決">
-`IAM` 認証の場合、API Gateway イベントから抽出された sub を使用して Cognito で呼び出し元を検索します：
+`IAM` 認証の場合、API Gateway イベントから抽出された sub を使用して Cognito で呼び出し元を検索します。検索には Cognito Identity Provider クライアントを使用しますが、これは生成された Smithy バックエンドの依存関係ではないため、最初にバックエンドプロジェクトにインストールします：
+
+<InstallCommand pkg={`@aws-sdk/client-cognito-identity-provider@${TS_VERSIONS['@aws-sdk/client-cognito-identity-provider']}`} project="@my-scope/my-api" projectDir="packages/my-api/backend" />
 
 ```ts
 import { CognitoIdentityProvider } from '@aws-sdk/client-cognito-identity-provider';
@@ -498,7 +468,9 @@ export const getIdentity = async (
   }
 
   if (!sub) {
-    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
+    throw new UnauthorizedError({
+      message: 'Unable to determine calling user',
+    });
   }
 
   const { Users } = await cognito.listUsers({
@@ -509,7 +481,9 @@ export const getIdentity = async (
   });
 
   if (!Users || Users.length !== 1) {
-    throw new UnauthorizedError({ message: `No user found with subjectId ${sub}` });
+    throw new UnauthorizedError({
+      message: `No user found with subjectId ${sub}`,
+    });
   }
 
   return { sub, username: Users[0].Username! };
@@ -536,7 +510,9 @@ export const getIdentity = async (
   const username = claims?.username;
 
   if (!sub || !username) {
-    throw new UnauthorizedError({ message: 'Unable to determine calling user' });
+    throw new UnauthorizedError({
+      message: 'Unable to determine calling user',
+    });
   }
 
   return { sub, username };
@@ -559,6 +535,17 @@ const httpResponse = await serviceHandler.handle(httpRequest, {
   logger,
   metrics,
   getIdentity: () => getIdentity(event),
+});
+```
+
+`getIdentity` は `ServiceContext` の必須フィールドであり、[上記の注意](#サービスコンテキスト)で述べたように、コンテキストは**両方**のエントリーポイントで構築されます — したがって `src/local-server.ts` にも必要です。ローカルサーバーの前には API Gateway オーソライザーがないため、ローカル開発用のスタブ ID を提供します：
+
+```ts {5} ins={5}
+const httpResponse = await serviceHandler.handle(httpRequest, {
+  tracer,
+  logger,
+  metrics,
+  getIdentity: async () => ({ sub: 'local', username: 'local' }),
 });
 ```
 
@@ -690,7 +677,7 @@ export class ExampleStack extends Stack {
 }
 ```
 
-`UserIdentity` コンストラクトは <Link path="/jp/guides/react-website-auth">`ts#website#auth` ジェネレーター</Link>を使用して生成できます
+`UserIdentity` コンストラクトは <Link path="/guides/react-website-auth">`ts#website#auth` ジェネレーター</Link>を使用して生成できます
 :::
 </OptionFilter>
 
@@ -705,7 +692,7 @@ export class ExampleStack extends Stack {
 <Fragment slot="terraform">
 API をデプロイするための Terraform モジュールは `common/terraform` フォルダーにあります。
 
-API モジュールは、Lambda デプロイ zip を共有 S3 アセットバケットにステージングします — 詳細については <Link path="/jp/guides/terraform-project">Terraform インフラストラクチャガイド</Link>を参照してください。デプロイごとに `core/asset-bucket` モジュールを一度インスタンス化し、その `bucket_name` 出力を `asset_bucket_name` 入力を介してすべての API / Lambda モジュールに渡します：
+API モジュールは、Lambda デプロイ zip を共有 S3 アセットバケットにステージングします — 詳細については <Link path="/guides/terraform-project">Terraform インフラストラクチャガイド</Link>を参照してください。デプロイごとに `core/asset-bucket` モジュールを一度インスタンス化し、その `bucket_name` 出力を `asset_bucket_name` 入力を介してすべての API / Lambda モジュールに渡します：
 
 ```hcl {1-3, 8}
 module "asset_bucket" {
@@ -800,6 +787,49 @@ output "lambda_function_name" {
 <Snippet name="api/access-logging" parentHeading="アクセスログ" />
 
 ### 統合
+
+<Infrastructure>
+<Fragment slot="cdk">
+:::caution[CDK ではオペレーション名は camelCase]
+Smithy オペレーションは PascalCase（`Echo`）で宣言され、バックエンドはその名前でエクスポートします。CDK 統合キーは同じ名前の **camelCase** 形式であるため、オペレーション `Echo` はスタック内のすべての場所で `echo` になります：
+
+```ts
+const api = new MyApi(this, 'MyApi', {
+  integrations: MyApi.defaultIntegrations(this)
+    // `Echo` in the model, `echo` here
+    .withOperationOptions({ echo: { timeout: Duration.seconds(60) } })
+    .build(),
+});
+
+api.integrations.echo.handler.addToRolePolicy(...);
+```
+:::
+</Fragment>
+<Fragment slot="terraform">
+:::note[Terraform ではオペレーション名は camelCase]
+生成されたモジュールのオペレーションをキーとする出力とその `operations.json` は、Smithy オペレーション名の **camelCase** 形式を使用するため、Smithy オペレーション `Echo` はキー `echo` になります：
+
+```hcl
+# `Echo` in the model, `echo` here
+resource "aws_iam_role_policy" "echo_permissions" {
+  name = "echo-additional-permissions"
+  role = module.my_api.lambda_execution_role_names["echo"]
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = "arn:aws:s3:::my-bucket/*"
+      }
+    ]
+  })
+}
+```
+:::
+</Fragment>
+</Infrastructure>
 
 <Snippet name="api/type-safe-api-integrations" parentHeading="統合" />
 

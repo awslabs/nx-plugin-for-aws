@@ -90,7 +90,8 @@ metrics: Metrics = Metrics()
 tracer: Tracer = Tracer()
 
 @tracer.capture_lambda_handler
-@metrics.log_metrics
+@logger.inject_lambda_context
+@metrics.log_metrics(capture_cold_start_metric=True)
 @event_parser(model=EventBridgeModel)
 def lambda_handler(event: EventBridgeModel, context: LambdaContext):
     logger.info("Received event", extra={"event": event.model_dump() })
@@ -127,11 +128,10 @@ def lambda_handler(event: EventBridgeModel, context: LambdaContext):
 建议为所有唯一请求设置关联 ID，以便更轻松地进行调试和监控。请参阅 [aws powertools logger](https://docs.powertools.aws.dev/lambda/python/2.22.0/core/logger/#setting-a-correlation-id) 文档了解关联 ID 的最佳实践。
 :::
 
-日志记录器自动包含：
+处理程序使用 [`@logger.inject_lambda_context`](https://docs.powertools.aws.dev/lambda/python/latest/core/logger/#inject-lambda-context) 装饰，因此它发出的每条日志记录还包含：
 
-- 事件请求
-- Lambda 上下文信息
-- 冷启动指示器
+- 来自 Lambda 上下文的 `function_name`、`function_memory_size`、`function_arn` 和 `function_request_id`
+- `cold_start`，指示调用是否初始化了新的执行环境
 
 #### 追踪
 
@@ -157,9 +157,9 @@ def lambda_handler(event: EventBridgeModel, context: LambdaContext):
 
 默认指标包括：
 
-- 调用次数
-- 成功/失败次数
-- 冷启动指标
+- `InvocationCount`，在每次调用时添加
+- `SuccessCount` 和 `ErrorCount`，由处理程序的 `try`/`except` 添加
+- `ColdStart`，由 [`@metrics.log_metrics(capture_cold_start_metric=True)`](https://docs.powertools.aws.dev/lambda/python/latest/core/metrics/#capturing-cold-start-metric) 在调用初始化新执行环境时发出
 
 ### 类型安全
 

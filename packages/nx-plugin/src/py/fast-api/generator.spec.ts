@@ -573,4 +573,54 @@ describe('fastapi project generator', () => {
 
     expect(tree.exists('packages/common/constructs')).toBeTruthy();
   });
+
+  // The reserved name follows the infrastructure, not the framework: a REST API
+  // named `rest-api` collides where an HTTP one named `http-api` does.
+  describe.each([
+    { name: 'http-api', infra: 'http-lambda' as const, coreClass: 'HttpApi' },
+    { name: 'rest-api', infra: 'rest-lambda' as const, coreClass: 'RestApi' },
+  ])(
+    'a project named $name, colliding with the core $coreClass',
+    ({ name, infra, coreClass }) => {
+      it('extends the aliased core construct rather than itself', async () => {
+        await pyFastApiProjectGenerator(tree, {
+          name,
+          directory: 'apps',
+          infra,
+          auth: 'iam',
+          iac: 'cdk',
+        });
+
+        const construct =
+          tree.read(
+            `packages/common/constructs/src/app/apis/${name}.ts`,
+            'utf-8',
+          ) ?? '';
+
+        expect(construct).toContain(`${coreClass} as Core${coreClass}`);
+        expect(construct).toContain(`extends Core${coreClass}<`);
+        expect(construct).toContain(`export class ${coreClass}<`);
+        expect(construct).not.toContain(`extends ${coreClass}<`);
+      });
+
+      it('leaves the import unaliased for a name that does not collide', async () => {
+        await pyFastApiProjectGenerator(tree, {
+          name: 'test-api',
+          directory: 'apps',
+          infra,
+          auth: 'iam',
+          iac: 'cdk',
+        });
+
+        const construct =
+          tree.read(
+            'packages/common/constructs/src/app/apis/test-api.ts',
+            'utf-8',
+          ) ?? '';
+
+        expect(construct).toContain(`extends ${coreClass}<`);
+        expect(construct).not.toContain(`Core${coreClass}`);
+      });
+    },
+  );
 });

@@ -5,16 +5,20 @@
 import type { GeneratorCallback, Tree } from '@nx/devkit';
 import { declareDependencies } from '../utils/declared-dependencies.js';
 import { formatFilesInSubtree } from '../utils/format.js';
+import {
+  GIT_SECRETS_DEPENDENCIES,
+  setUpGitSecrets,
+} from '../utils/git-secrets.js';
 import { applyWorkspaceInit, INIT_DEPENDENCIES } from '../utils/init.js';
 import { installDependencies } from '../utils/install.js';
 import { addGeneratorMetricsIfApplicable } from '../utils/metrics.js';
 import { getGeneratorInfo, type NxGeneratorInfo } from '../utils/nx.js';
 import type { InitGeneratorSchema } from './schema';
 
-// `husky` comes from the preset, which is discovered as init: both mark the
-// workspace by writing aws-nx-plugin.config.mts, and only init has an id there.
+// `husky` is owned here rather than by the preset: both mark the workspace by
+// writing aws-nx-plugin.config.mts, and only init has an id there.
 export const DEPENDENCIES = declareDependencies()({
-  ts: [{ name: 'husky' }, ...INIT_DEPENDENCIES],
+  ts: [...GIT_SECRETS_DEPENDENCIES, ...INIT_DEPENDENCIES],
 });
 
 export const INIT_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
@@ -31,9 +35,19 @@ export const INIT_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
  */
 export const initGenerator = async (
   tree: Tree,
-  { iac, mcp, containers, preferInstallDependencies }: InitGeneratorSchema,
+  {
+    iac,
+    mcp,
+    containers,
+    gitSecrets,
+    preferInstallDependencies,
+  }: InitGeneratorSchema,
 ): Promise<GeneratorCallback> => {
   await applyWorkspaceInit(tree, { iac, containers, mcp }, DEPENDENCIES);
+
+  if (gitSecrets !== false) {
+    setUpGitSecrets(tree, DEPENDENCIES);
+  }
 
   await addGeneratorMetricsIfApplicable(tree, [INIT_GENERATOR_INFO]);
 

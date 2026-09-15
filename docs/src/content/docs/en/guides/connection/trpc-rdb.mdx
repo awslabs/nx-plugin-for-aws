@@ -35,13 +35,14 @@ Select your tRPC API project as the source and your relational database project 
 
 ## Generator Output
 
-The generator creates a middleware file in your tRPC API project:
+The generator creates a middleware file in your tRPC API project, and adds it to the tRPC context:
 
 <FileTree>
 
 - packages/api/src
   - middleware
     - \<db-name>.ts tRPC plugin exposing the Prisma client in procedure context
+  - init.ts The database's context interface added to `Context`
 
 </FileTree>
 
@@ -53,12 +54,11 @@ Additionally, it updates your tRPC API's `dev` target to start the database auto
 
 Add the generated plugin to your tRPC router so all procedures using it gain access to the database:
 
-```ts title="packages/api/src/router.ts" {2,5}
+```ts title="packages/api/src/router.ts" {2,4}
 import { t } from './init.js';
 import { createMyDbPlugin } from './middleware/my-db.js';
 
-export const authenticatedProcedure = t.procedure
-  .concat(createMyDbPlugin());
+export const dbProcedure = t.procedure.concat(createMyDbPlugin());
 ```
 
 ### Access the Database in Procedures
@@ -67,9 +67,9 @@ The plugin merges `IMyDbContext` into your procedure context, making `myDb` avai
 
 ```ts title="packages/api/src/procedures/users.ts" {7-8}
 import { z } from 'zod';
-import { authenticatedProcedure } from '../router.js';
+import { dbProcedure } from '../router.js';
 
-export const listUsers = authenticatedProcedure
+export const listUsers = dbProcedure
   .output(z.array(z.object({ id: z.string(), name: z.string() })))
   .query(async ({ ctx }) => {
     // ctx.myDb is the Prisma client — typed as Awaited<ReturnType<typeof getPrisma>>

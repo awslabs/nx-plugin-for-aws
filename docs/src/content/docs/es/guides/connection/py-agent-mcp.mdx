@@ -13,6 +13,7 @@ import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Infrastructure from '@components/infrastructure.astro';
+import Snippet from '@components/snippet.astro';
 
 El generador `connection` puede conectar tu <Link path="guides/py-agent">Agente Python</Link> a un servidor MCP (ya sea <Link path="guides/ts-mcp-server">TypeScript</Link> o <Link path="guides/py-mcp-server">Python</Link>).
 
@@ -48,11 +49,14 @@ El generador crea un proyecto Python compartido `agent_connection` en `packages/
   - \<scope>\_agent\_connection
     - \_\_init\_\_.py Re-exporta clientes por conexión
     - core
+      - \_\_init\_\_.py Inicialización del paquete Python
       - agentcore\_endpoints.py Resolución de ARN/URL independiente del framework
+      - agentcore\_transport.py Infraestructura de transporte AgentCore compartida
       - agentcore\_mcp\_transport.py Transporte MCP independiente del framework
       - agentcore\_mcp\_client\_\<framework>.py Cliente MCP que envuelve el transporte para el framework de tu agente
       - auth/ `httpx.Auth` independiente del framework para SigV4 / reenvío de sesión
     - app
+      - \_\_init\_\_.py Inicialización del paquete Python
       - \<mcp\_server\_name>\_client\_\<framework>.py Cliente por conexión para cada servidor MCP
 
 </FileTree>
@@ -70,7 +74,7 @@ El generador transforma el `agent.py` de tu agente para usar las herramientas de
 
 <Tabs syncKey="agent-framework">
 <TabItem label="Strands" _filter={{ framework: 'strands' }}>
-```python title="packages/my-project/my_module/agent/agent.py" {4,8,9-13}
+```python title="packages/my-project/my_module/agent/agent.py" {4,8-11,14}
 from contextlib import contextmanager
 from strands import Agent
 
@@ -114,6 +118,8 @@ El ID de sesión de AgentCore se propaga automáticamente al servidor MCP a trav
 
 ## Infraestructura
 
+<Snippet name="connection/infra-project-prerequisite" />
+
 <Infrastructure>
 <Fragment slot="cdk">
 Después de ejecutar el generador de conexión, necesitas otorgar al agente permiso para invocar el servidor MCP:
@@ -126,12 +132,14 @@ const myAgent = new MyAgent(this, 'MyAgent');
 mcpServer.grantInvokeAccess(myAgent);
 ```
 
+`grantInvokeAccess` conecta las acciones de invocación de AgentCore (`InvokeAgentRuntime`, `InvokeAgentRuntimeForUser` e `InvokeAgentRuntimeWithWebSocketStream`) en el ARN del runtime del servidor MCP.
+
 El ARN del runtime AgentCore del servidor MCP se registra automáticamente en el namespace `agentcore` de <Link path="guides/runtime-config">Runtime Configuration</Link> por el constructo CDK generado, para que el agente pueda descubrirlo en tiempo de ejecución.
 </Fragment>
 <Fragment slot="terraform">
 Después de ejecutar el generador de conexión, necesitas otorgar al agente permiso para invocar el servidor MCP en tu configuración de Terraform:
 
-```hcl title="packages/infra/src/main.tf" {9-25}
+```hcl title="packages/infra/src/main.tf" {9-31}
 module "inventory_mcp_server" {
   source = "../../common/terraform/src/app/mcp-servers/inventory-mcp"
 }
@@ -146,9 +154,15 @@ resource "aws_iam_policy" "agent_invoke_mcp" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Effect   = "Allow"
-      Action   = "bedrock-agentcore:InvokeAgent"
-      Resource = module.inventory_mcp_server.agent_core_runtime_arn
+      Effect = "Allow"
+      Action = [
+        "bedrock-agentcore:InvokeAgentRuntime",
+        "bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream",
+      ]
+      Resource = [
+        module.inventory_mcp_server.agent_core_runtime_arn,
+        "${module.inventory_mcp_server.agent_core_runtime_arn}/*",
+      ]
     }]
   })
 }

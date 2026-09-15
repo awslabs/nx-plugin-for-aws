@@ -12,5 +12,6 @@ export interface InitGeneratorSchema {
   readonly iac: Iac;
   readonly mcp?: boolean;
   readonly containers?: InitContainersOption;
+  readonly gitSecrets?: boolean;
   readonly preferInstallDependencies?: boolean;
 }

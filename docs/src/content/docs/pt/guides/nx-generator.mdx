@@ -40,14 +40,13 @@ O gerador criará os seguintes arquivos de projeto dentro do `project` fornecido
     - generator.ts Implementação stub do gerador
     - generator.spec.ts Testes para seu gerador
     - README.md Documentação para seu gerador
-  - generators.json Configuração Nx para definir seus geradores
-  - package.json Criado ou atualizado para adicionar uma entrada "generators"
-  - tsconfig.json Atualizado para usar CommonJS
+    - files/
+      - hello.ts.template Template de exemplo renderizado pelo gerador stub
+  - src/index.ts Atualizado para exportar seu gerador
+  - generators.json Criado ou atualizado para definir seus geradores
+  - project.json Atualizado para registrar o gerador no projeto
+  - package.json Criado se ausente, e apontado para `generators.json`
 </FileTree>
-
-:::warning[Modificação do Projeto]
-Este gerador atualizará o `project` selecionado para usar CommonJS, pois os Nx Generators atualmente suportam apenas CommonJS ([consulte este issue do GitHub para suporte ESM](https://github.com/nrwl/nx/issues/15682)).
-:::
 
 ## Geradores Locais
 
@@ -452,7 +451,7 @@ export const myGenerator = async (tree: Tree, schema: MyGeneratorSchema) => {
 Também expomos um método que permite construir uma estrutura de dados que pode ser usada para iterar sobre operações em uma especificação OpenAPI e, portanto, instrumentar sua própria geração de código, por exemplo:
 
 ```ts
-import { buildOpenApiCodeGenerationData } from '@aws/nx-plugin/sdk/open-api.js';
+import { buildOpenApiCodeGenerationData } from '@aws/nx-plugin/sdk/open-api';
 
 export const myGenerator = async (tree: Tree, schema: MyGeneratorSchema) => {
   const data = await buildOpenApiCodeGenerationData(tree, 'path/to/spec.json');
@@ -496,15 +495,15 @@ Se você não vir seu gerador na UI do plugin VSCode, você pode atualizar seu N
 Testes unitários para geradores são diretos de implementar. Aqui está um padrão típico:
 
 ```typescript
-import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
+import { createTreeUsingTsSolutionSetup } from '@aws/nx-plugin/sdk/utils/test';
 import { yourGenerator } from './generator.js';
 
 describe('your generator', () => {
   let tree;
 
   beforeEach(() => {
-    // Create an empty workspace tree
-    tree = createTreeWithEmptyWorkspace();
+    // Create a workspace tree matching the shape our preset generates
+    tree = createTreeUsingTsSolutionSetup();
 
     // Add any files that should already exist in the tree
     tree.write(
@@ -562,7 +561,7 @@ describe('your generator', () => {
 
 Pontos-chave para testar geradores:
 
-- Use `createTreeWithEmptyWorkspace()` para criar um sistema de arquivos virtual
+- Use `createTreeUsingTsSolutionSetup()` de `@aws/nx-plugin/sdk/utils/test` para criar um sistema de arquivos virtual. Ele semeia os marcadores de workspace que nosso preset escreve (`tsconfig.base.json`, `pnpm-workspace.yaml`, `biome.json`, um `package.json` raiz com `type: module`), que qualquer gerador compondo um gerador `@aws/nx-plugin` precisa
 - Configure quaisquer arquivos pré-requisitos antes de executar o gerador
 - Teste tanto a criação de novos arquivos quanto atualizações em arquivos existentes
 - Use snapshots para conteúdo de arquivo complexo

@@ -5,6 +5,7 @@ description: Build and deploy Docker images for TypeScript and Python projects i
 
 import { FileTree, Tabs, TabItem, Code } from '@astrojs/starlight/components';
 import NxCommands from '@components/nx-commands.astro';
+import InstallCommand from '@components/install-command.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 import Link from '@components/link.astro';
 import Infrastructure from '@components/infrastructure.astro';
@@ -18,9 +19,9 @@ export const trivyTarget = `{
       "executor": "nx:run-commands",
       "options": {
         "commands": [
-          "rimraf dist/packages/my-project/trivy",
-          "make-dir dist/packages/my-project/trivy",
-          "ncp packages/my-project/.trivyignore dist/packages/my-project/trivy/.trivyignore",
+          "shx rm -rf dist/packages/my-project/trivy",
+          "shx mkdir -p dist/packages/my-project/trivy",
+          "shx cp packages/my-project/.trivyignore dist/packages/my-project/trivy/.trivyignore",
           "docker save -o dist/packages/my-project/trivy/image.tar my-scope-my-project:latest",
           "docker run --rm -v \\"./dist/packages/my-project/trivy\\":/scan public.ecr.aws/aquasecurity/trivy:${CONTAINER_VERSIONS.trivy} image --input /scan/image.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q"
         ],
@@ -132,10 +133,17 @@ Some npm packages cannot be bundled because they rely on dynamic `require`, nati
 
 ### Dockerfile
 
-Create a `Dockerfile` in your project source directory. The file does nothing more than `COPY` the bundle into a Node base image, plus `npm install` any `external` packages that could not be bundled. Place the `RUN npm install` step **before** the `COPY`, so Docker can cache the installed `node_modules` layer and only re-run it when the dependency list actually changes:
+Create a `Dockerfile` in your project source directory. The file does nothing more than [apply the base image's security updates](#apply-the-distributions-security-updates), `COPY` the bundle into a Node base image, plus `npm install` any `external` packages that could not be bundled. Place the `RUN npm install` step **before** the `COPY`, so Docker can cache the installed `node_modules` layer and only re-run it when the dependency list actually changes:
 
 ```dockerfile
 FROM public.ecr.aws/docker/library/node:lts
+
+# Apply the distribution's security updates: base image tags lag behind the
+# security suite, so their OS packages carry vulnerabilities that already have a
+# published fix.
+RUN apt-get update && \
+    apt-get upgrade -y --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -170,7 +178,7 @@ Add a `docker` target which:
       "executor": "nx:run-commands",
       "options": {
         "commands": [
-          "ncp packages/my-project/src/Dockerfile dist/packages/my-project/bundle/Dockerfile",
+          "shx cp packages/my-project/src/Dockerfile dist/packages/my-project/bundle/Dockerfile",
           "docker build --platform linux/arm64 -t my-scope-my-project:latest dist/packages/my-project/bundle"
         ],
         "parallel": false
@@ -186,7 +194,9 @@ Set `"cache": false` on image build targets. A built image is not written to an 
 :::
 
 :::tip[Cross-platform file copy]
-The `ncp` package provides a cross-platform file/directory copy command, avoiding `cp` (unavailable on Windows). Install it at the root of your workspace with `pnpm add -D -w ncp`.
+The `shx` package provides cross-platform `cp`, `rm` and `mkdir` commands, avoiding the shell builtins (unavailable on Windows). Install it at the root of your workspace:
+
+<InstallCommand pkg="shx" dev />
 :::
 
 Running this target produces a local image tagged `my-scope-my-project:latest`, built from the minimal context at `dist/packages/my-project/bundle/`:
@@ -233,10 +243,17 @@ Running `nx bundle my-project` produces `dist/packages/my-project/bundle-arm/` c
 
 ### Dockerfile
 
-The `Dockerfile` simply copies the bundle into a Python base image. Because `uv` already installed all dependencies into the bundle directory, you do not need to run `pip install` inside the image:
+The `Dockerfile` [applies the base image's security updates](#apply-the-distributions-security-updates), then copies the bundle into a Python base image. Because `uv` already installed all dependencies into the bundle directory, you do not need to run `pip install` inside the image:
 
 ```dockerfile
 FROM public.ecr.aws/docker/library/python:3.14-slim
+
+# Apply the distribution's security updates: base image tags lag behind the
+# security suite, so their OS packages carry vulnerabilities that already have a
+# published fix.
+RUN apt-get update && \
+    apt-get upgrade -y --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -263,10 +280,10 @@ Add a `docker` target which copies the `Dockerfile` into the bundle output direc
       "executor": "nx:run-commands",
       "options": {
         "commands": [
-          "rimraf dist/packages/my-project/docker",
-          "make-dir dist/packages/my-project/docker",
-          "ncp dist/packages/my-project/bundle-arm dist/packages/my-project/docker",
-          "ncp packages/my-project/src/Dockerfile dist/packages/my-project/docker/Dockerfile",
+          "shx rm -rf dist/packages/my-project/docker",
+          "shx mkdir -p dist/packages/my-project/docker",
+          "shx cp -R dist/packages/my-project/bundle-arm/. dist/packages/my-project/docker",
+          "shx cp packages/my-project/src/Dockerfile dist/packages/my-project/docker/Dockerfile",
           "docker build --platform linux/arm64 -t my-scope-my-project:latest dist/packages/my-project/docker"
         ],
         "parallel": false
@@ -285,7 +302,13 @@ This clears the output directory, then copies both the bundle contents and the `
 
 It's good practice to scan your images for known vulnerabilities. The generators that follow this pattern add a `trivy` target which scans the built image with [Trivy](https://trivy.dev/), running from the [ECR-hosted Trivy image](https://gallery.ecr.aws/aquasecurity/trivy), and exits non-zero on `HIGH` or `CRITICAL` findings.
 
-Add a `trivy` target which `dependsOn` your `docker` target. It saves the built image to a tarball and scans it via a workspace-relative bind mount, so the same command works under both `docker` and `finch`:
+The target copies a `.trivyignore` from the root of your project into the scan directory and passes it to Trivy with `--ignorefile`, so create that file first — an empty one is fine, and it is where you [suppress findings](#suppressing-findings) later:
+
+```bash
+touch packages/my-project/.trivyignore
+```
+
+Then add a `trivy` target which `dependsOn` your `docker` target. It saves the built image to a tarball and scans it via a workspace-relative bind mount, so the same command works under both `docker` and `finch`:
 
 <Code lang="json" code={trivyTarget} />
 

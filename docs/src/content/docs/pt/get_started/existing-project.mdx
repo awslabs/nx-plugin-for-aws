@@ -10,13 +10,16 @@ import NxCommands from '@components/nx-commands.astro';
 import NxInitCommand from '@components/nx-init-command.astro';
 import TsConfigBaseCompilerOptions from '@components/tsconfig-base-compiler-options.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
+import Prompt from '@components/prompt.astro';
 
 Nem todo projeto começa com `pnpm create @aws/nx-workspace`. Se você já tem um [workspace Nx](https://nx.dev) — ou um monorepo ao qual você pode adicionar Nx — você pode adotar `@aws/nx-plugin` incrementalmente sem recriar seu projeto.
 
-<Aside type="tip">
-Você pode usar sua ferramenta de codificação agêntica de escolha para adicionar o plugin para você, usando o <Link path="get_started/building-with-ai">servidor MCP</Link>. Experimente o prompt:
+<Aside type="tip" title="Use seu agente de codificação">
+Sua ferramenta de codificação agêntica de escolha pode adicionar o plugin para você, usando o <Link path="get_started/building-with-ai">servidor MCP</Link>. Experimente o prompt:
 
-> Add the Nx Plugin for AWS to this project.
+<Prompt>
+Add the Nx Plugin for AWS to this project.
+</Prompt>
 </Aside>
 
 ## Pré-requisitos
@@ -40,7 +43,7 @@ pnpm executa scripts de instalação apenas para pacotes na lista de permissões
 
 ```yaml title="pnpm-workspace.yaml"
 allowBuilds:
-  - nx
+  nx: true
 ```
 </Aside>
 
@@ -56,7 +59,7 @@ Nx e o plugin são distribuídos como pacotes npm, então um projeto sem ferrame
 }
 ```
 
-Crie esse arquivo, então execute `nx init` e [adicione o plugin](#adding-the-plugin) normalmente. Suas ferramentas de linguagem existentes não são tocadas — projetos Nx gerados pelo plugin (incluindo <Link path="guides/py-project">projetos Python</Link>) vivem ao lado do seu código existente, e você pode integrar seu build existente ao Nx incrementalmente.
+Crie esse arquivo, então execute `nx init` e [adicione o plugin](#adding-the-plugin) normalmente. Suas ferramentas de linguagem existentes não são tocadas — projetos Nx gerados pelo plugin (incluindo <Link path="guides/python-project">projetos Python</Link>) vivem ao lado do seu código existente, e você pode integrar seu build existente ao Nx incrementalmente.
 
 Para trazer seus projetos existentes para o Nx, você tem algumas opções dependendo da linguagem:
 
@@ -124,12 +127,15 @@ Ele cria ou atualiza os seguintes arquivos:
 - tsconfig.json uma configuração TypeScript raiz referenciando os projetos do seu workspace, que a sincronização TypeScript do Nx mantém atualizada
 - tsconfig.base.json as opções de compilador compartilhadas que os projetos TypeScript do plugin estendem (veja abaixo o que ele contém)
 - pnpm-workspace.yaml (somente pnpm) lista de permissões dos scripts de build que as dependências do plugin precisam (`@swc/core`, `esbuild`, `nx`, `sharp`)
-- package.json scripts de conveniência para tarefas comuns, além das devDependencies `@aws/nx-plugin`, `@aws/nx-plugin-mcp`, `nx`, `@nx/js`, `@nx/workspace`, `typescript` e Biome
+- package.json scripts de conveniência para tarefas comuns, um script `prepare` que instala os git hooks, além das devDependencies `@aws/nx-plugin`, `@aws/nx-plugin-mcp`, `nx`, `@nx/js`, `@nx/workspace`, `typescript`, husky e Biome
 - biome.json configuração padrão do formatador e linter Biome
+- .git-secrets/ o script [git-secrets](https://github.com/awslabs/git-secrets) vendorizado, com `.gitallowed` para falsos positivos e um hook `.husky/pre-commit` que o executa — veja <Link path="guides/workspace#git-secrets">Git Secrets</Link>
 - .mcp.json configura o servidor MCP para agentes de codificação suportados, a menos que desabilitado (também equivalentes .cursor/, .kiro/, .gemini/, .vscode/ e .codex/). Ele executa o próprio `@aws/nx-plugin-mcp` do workspace, então o servidor sempre corresponde à versão instalada no seu workspace
 </FileTree>
 
-A configuração do <Link path="get_started/building-with-ai">servidor MCP</Link> pode ser desabilitada com `--mcp=false`.
+A configuração do <Link path="get_started/building-with-ai">servidor MCP</Link> pode ser desabilitada com `--mcp=false`, e os hooks de verificação de credenciais com `--gitSecrets=false`.
+
+Arquivos que você já possui são preservados: um hook `.husky/pre-commit` ou script `prepare` existente é deixado como está, e o gerador imprime o que adicionar para que a verificação de credenciais seja executada junto com suas próprias verificações. Um `.gitallowed` existente mantém todos os padrões que possui.
 
 <Drawer title="tsconfig.base.json" trigger="Clique aqui para ver as opções de compilador que um tsconfig.base.json criado contém.">
 Os projetos TypeScript do plugin dependem dessas opções de compilador. Se um `tsconfig.base.json` já existe, ele é deixado como está, então se você mantiver o seu próprio, estas são as opções para alinhar:
@@ -159,7 +165,7 @@ pnpm pula scripts de instalação para pacotes que não estão na lista de permi
 
 #### `nx sync` trava, ou `plugin worker ... exited before the connection was established`
 
-Se duas versões diferentes de `nx` estão presentes na mesma árvore node_modules (execute `npm ls nx` para confirmar), seu IPC de plugin-worker entra em deadlock. O gerador `init` fixa a devDependency `nx` raiz na versão que os próprios pacotes `@nx/*` do plugin resolvem, mas uma instalação posterior de outro pacote `@nx/*` em uma versão de patch diferente pode reintroduzir a incompatibilidade. Alinhe cada entrada `nx` e `@nx/*` no seu `package.json` raiz para uma única versão e reinstale.
+Se duas versões diferentes de `nx` estão presentes na mesma árvore node_modules (execute `npm ls nx` para confirmar), seu IPC de plugin-worker entra em deadlock. `init` declara as versões `nx` e `@nx/*` contra as quais o plugin é construído, mas nunca faz downgrade de uma versão que seu workspace já possui: um workspace já em uma versão mais recente de `nx` a mantém, e os próprios pacotes `@nx/*` do plugin trazem sua própria cópia ao lado dela. Alinhe cada entrada `nx` e `@nx/*` no seu `package.json` raiz — e, onde seu gerenciador de pacotes usa um, o catálogo de dependências — para uma única versão, então reinstale.
 
 #### `ts.readConfigFile is not a function`
 

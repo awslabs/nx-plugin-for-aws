@@ -293,7 +293,16 @@ function startServer(
   const child = spawn('pnpm', ['exec', 'nx', 'run', target], {
     cwd,
     detached: true,
-    env: { ...process.env, NX_DAEMON: 'true', ...env },
+    env: {
+      ...process.env,
+      // Nx keys its recursive-invocation guard on an invocation root pid it
+      // passes down to every task. This server is a sibling run, not a nested
+      // one, so it starts its own root — otherwise a later `nx run` sharing a
+      // dependency with it (`dev` -> `pull-image`) is refused as recursive.
+      NX_INVOCATION_ROOT_PID: undefined,
+      NX_DAEMON: 'true',
+      ...env,
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   child.stdout?.on('data', (d: Buffer) =>
@@ -533,7 +542,7 @@ describe('smoke test - local-dev', { timeout: 30 * 60 * 1000 }, () => {
         opts,
       );
       await runCLI(
-        `generate @aws/nx-plugin:py#project --name=py-project --projectType=application --no-interactive`,
+        `generate @aws/nx-plugin:py#project --name=py-project --type=application --no-interactive`,
         opts,
       );
       await runCLI(

@@ -85,9 +85,9 @@ const REFERENCE_PROTOCOL =
 /**
  * Whether devkit may be handed this specifier.
  *
- * `catalog:` is only safe where devkit has a catalog manager (pnpm, yarn).
- * It ships none for bun, and without one it rewrites the reference to a literal
- * version, severing the catalog — so bun's references are synced directly.
+ * `catalog:` is only safe where devkit has a catalog manager (pnpm, yarn, bun).
+ * Without one it rewrites the reference to a literal version, severing the
+ * catalog — so those references are synced directly instead.
  */
 const isSyncableSpecifier = (tree: Tree, declared: unknown): boolean => {
   // A manifest is the user's file and may hold anything. A version that isn't a
@@ -223,7 +223,7 @@ const readCatalogFiles = (tree: Tree): string =>
 
 /**
  * Upgrade vended catalog entries devkit cannot reach: those no manifest
- * references, and every bun entry (bun has no catalog manager).
+ * references.
  */
 const syncOrphanCatalogEntries = (
   tree: Tree,

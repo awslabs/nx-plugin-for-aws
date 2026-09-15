@@ -4,8 +4,10 @@
  */
 import {
   addProjectConfiguration,
+  readProjectConfiguration,
   type Tree,
   updateJson,
+  updateProjectConfiguration,
   writeJson,
 } from '@nx/devkit';
 import { declareDependencies } from '../../utils/declared-dependencies.js';
@@ -387,6 +389,57 @@ describe('nx-migration generator', () => {
       const pkg = JSON.parse(tree.read(PLUGIN_PKG, 'utf-8'));
       expect(pkg.version).toBe('1.0.0');
       expect(pkg['nx-migrations']).toEqual({ migrations: './migrations.json' });
+    });
+
+    it('should add the migrations.json asset to the package target', async () => {
+      // `nx migrate <plugin>@latest` reads the manifest from the published
+      // tarball, so the package.json field is useless without the asset.
+      updateProjectConfiguration(tree, PROJECT, {
+        root: 'tools/plugin',
+        sourceRoot: 'tools/plugin/src',
+        targets: {
+          package: {
+            executor: '@nx/js:tsc',
+            options: {
+              assets: [
+                '{projectRoot}/*.md',
+                {
+                  input: './{projectRoot}',
+                  glob: 'generators.json',
+                  output: '.',
+                },
+                {
+                  input: './{projectRoot}',
+                  glob: 'executors.json',
+                  output: '.',
+                },
+              ],
+            },
+          },
+        },
+      });
+
+      await tsNxMigrationGenerator(tree, {
+        project: PROJECT,
+        name: 'rename-foo-target',
+        description: 'Rename the foo target to bar',
+        preferInstallDependencies: false,
+      });
+
+      const assets = readProjectConfiguration(tree, PROJECT).targets?.package
+        ?.options?.assets;
+      expect(assets).toContainEqual({
+        input: './{projectRoot}',
+        glob: 'migrations.json',
+        output: '.',
+      });
+      // The existing assets are untouched
+      expect(assets).toContain('{projectRoot}/*.md');
+      expect(assets).toContainEqual({
+        input: './{projectRoot}',
+        glob: 'generators.json',
+        output: '.',
+      });
     });
 
     it('should not modify an existing nx-migrations field', async () => {

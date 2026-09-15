@@ -124,3 +124,26 @@ export const extractFrontmatter = (
       : {};
   return { data, bodyOffset: node.position?.end.offset ?? 0 };
 };
+
+/**
+ * Remove the frontmatter and every ESM `import`/`export` statement from an MDX
+ * source, leaving the content behind. The statements are located through the
+ * parsed tree, so `import` and `export` lines that appear inside code samples
+ * or template literals are kept — they are content, not preamble.
+ */
+export const stripFrontmatterAndEsm = (raw: string, tree: Root): string => {
+  const cuts = tree.children
+    .filter((c) => c.type === 'yaml' || c.type === 'mdxjsEsm')
+    .map((c) => c.position)
+    .filter(
+      (p): p is NonNullable<typeof p> =>
+        p?.start.offset !== undefined && p?.end.offset !== undefined,
+    );
+  let result = '';
+  let cursor = 0;
+  for (const { start, end } of cuts) {
+    result += raw.slice(cursor, start.offset);
+    cursor = end.offset!;
+  }
+  return (result + raw.slice(cursor)).trim();
+};

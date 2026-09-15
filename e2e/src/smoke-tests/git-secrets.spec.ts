@@ -4,7 +4,13 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ensureDirSync } from 'fs-extra';
@@ -101,5 +107,99 @@ describe('smoke test - git-secrets', () => {
     );
     git(['add', 'safe.ts'], projectRoot);
     git(['commit', '-m', 'add safe file'], projectRoot);
+
+    // The suppression commands the workspace guide documents must genuinely add
+    // a pattern. The vendored script parses only the short forms, so those are
+    // what the guide gives and what this asserts.
+    const gitSecrets = (args: string[]) =>
+      execFileSync('bash', ['.git-secrets/git-secrets', ...args], {
+        cwd: projectRoot,
+        encoding: 'utf-8',
+        stdio: 'pipe',
+        env: {
+          ...process.env,
+          GIT_CONFIG_GLOBAL: join(gitConfigDir, 'global'),
+          GIT_CONFIG_SYSTEM: join(gitConfigDir, 'system'),
+        },
+      });
+
+    gitSecrets(['--add', '-a', '--', 'my-regex-pattern']);
+    gitSecrets(['--add', '-a', '-l', '--', 'my-literal+string']);
+
+    const allowed = git(
+      ['config', '--get-all', 'secrets.allowed'],
+      projectRoot,
+    );
+    expect(allowed).toContain('my-regex-pattern');
+    // -l escapes the regex metacharacters.
+    expect(allowed).toContain('my-literal\\+string');
+
+    // A real secret is still caught after suppressing a false positive.
+    git(['add', 'secret.ts'], projectRoot);
+    let stillBlocked = false;
+    try {
+      git(['commit', '-m', 'add secret again'], projectRoot);
+    } catch (e) {
+      stillBlocked = true;
+      expect(e.stderr).toContain('Matched one or more prohibited patterns');
+    }
+    expect(stillBlocked).toBe(true);
+    git(['rm', '--cached', 'secret.ts'], projectRoot);
+
+    // The suppressed pattern is genuinely allowed through.
+    writeFileSync(
+      join(projectRoot, 'allowed.ts'),
+      `export const x = 'my-regex-pattern';\n`,
+    );
+    git(['add', 'allowed.ts'], projectRoot);
+    git(['commit', '-m', 'add allowed pattern'], projectRoot);
+  });
+
+  it('should commit a generated stages.config.ts once allowed', async () => {
+    await runCLI(
+      `${buildCreateNxWorkspaceCommand(pkgMgr, 'gs-stages', 'cdk')} --interactive=false`,
+      {
+        cwd: targetDir,
+        prefixWithPackageManagerCmd: false,
+        redirectStderr: true,
+        env: {
+          GIT_CONFIG_GLOBAL: join(gitConfigDir, 'global'),
+          GIT_CONFIG_SYSTEM: join(gitConfigDir, 'system'),
+        },
+      },
+    );
+    const projectRoot = `${targetDir}/gs-stages`;
+
+    await runCLI(
+      `generate @aws/nx-plugin:ts#infra --name=staged-infra --stageConfig=true --no-interactive`,
+      { cwd: projectRoot, env: { NX_DAEMON: 'false' } },
+    );
+
+    const stagesConfig = join(
+      projectRoot,
+      'packages/common/infra-config/src/stages.config.ts',
+    );
+    expect(existsSync(stagesConfig)).toBe(true);
+
+    // Account ids are flagged by default, so committing the stage config is
+    // blocked until the user allows them — as the infrastructure guide says.
+    git(['add', '-A'], projectRoot);
+    let blocked = false;
+    try {
+      git(['commit', '-m', 'add staged infra'], projectRoot);
+    } catch (e) {
+      blocked = true;
+      expect(e.stderr).toContain('Matched one or more prohibited patterns');
+    }
+    expect(blocked).toBe(true);
+
+    // The .gitallowed entry the guide documents unblocks it.
+    const gitallowed = join(projectRoot, '.gitallowed');
+    writeFileSync(
+      gitallowed,
+      `${readFileSync(gitallowed, 'utf-8')}stages\\.config\\.ts:[0-9]+:.*[0-9]{12}\n`,
+    );
+    git(['add', '-A'], projectRoot);
+    git(['commit', '-m', 'add staged infra'], projectRoot);
   });
 });

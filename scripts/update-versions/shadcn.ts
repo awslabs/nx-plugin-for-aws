@@ -13,7 +13,6 @@ import {
 import { execSync } from 'child_process';
 import { join, relative } from 'path';
 import { FsTree } from 'nx/src/generators/tree';
-import { SHARED_SHADCN_NAME } from '../../packages/nx-plugin/src/utils/shared-constructs-constants';
 
 const SHADCN_COMPONENTS = [
   'alert',
@@ -43,9 +42,6 @@ const SHADCN_TEMPLATE_ROOT = join(
   'src',
 );
 
-const applyShadcnTemplateAliases = (contents: string): string =>
-  contents.replace(/@\//g, `<%= scopeAlias %>${SHARED_SHADCN_NAME}/`);
-
 export const refreshShadcnTemplates = (
   tree: FsTree,
   tmpDir: string,
@@ -73,26 +69,11 @@ export const refreshShadcnTemplates = (
   );
 
   writeFileSync(
-    join(shadcnDir, 'package.json'),
-    JSON.stringify(
-      {
-        name: 'shadcn-template-refresh',
-        private: true,
-      },
-      null,
-      2,
-    ),
-  );
-
-  writeFileSync(
     join(shadcnDir, 'tsconfig.json'),
     JSON.stringify(
       {
         compilerOptions: {
-          baseUrl: '.',
-          paths: {
-            '@/*': ['src/*'],
-          },
+          moduleResolution: 'bundler',
         },
       },
       null,
@@ -100,6 +81,26 @@ export const refreshShadcnTemplates = (
     ),
   );
 
+  writeFileSync(
+    join(shadcnDir, 'package.json'),
+    JSON.stringify(
+      {
+        name: 'shadcn-template-refresh',
+        private: true,
+        imports: {
+          '#components/*': './src/components/*.tsx',
+          '#lib/*': './src/lib/*.ts',
+          '#hooks/*': './src/hooks/*.ts',
+        },
+      },
+      null,
+      2,
+    ),
+  );
+
+  // Mirrors the shared shadcn package's own components.json: aliases are
+  // local `#...` package imports, resolved via `package.json#imports` above,
+  // matching packages/nx-plugin/src/utils/files/shadcn/components.json.template.
   writeFileSync(
     join(shadcnDir, 'components.json'),
     JSON.stringify(
@@ -116,11 +117,11 @@ export const refreshShadcnTemplates = (
         },
         iconLibrary: 'lucide',
         aliases: {
-          components: '@/components',
-          utils: '@/lib/utils',
-          hooks: '@/hooks',
-          lib: '@/lib',
-          ui: '@/components/ui',
+          components: '#components',
+          utils: '#lib/utils',
+          hooks: '#hooks',
+          lib: '#lib',
+          ui: '#components/ui',
         },
       },
       null,
@@ -140,12 +141,11 @@ export const refreshShadcnTemplates = (
 
   const writeTemplateFile = (sourcePath: string, targetPath: string): void => {
     const sourceContents = readFileSync(sourcePath, 'utf-8');
-    const templatedContents = applyShadcnTemplateAliases(sourceContents);
     const targetRelativePath = relative(process.cwd(), targetPath);
 
     const previousContents = tree.read(targetRelativePath, 'utf-8');
-    if (previousContents !== templatedContents) {
-      tree.write(targetRelativePath, templatedContents);
+    if (previousContents !== sourceContents) {
+      tree.write(targetRelativePath, sourceContents);
       updatedTemplates.push(targetRelativePath);
     }
   };

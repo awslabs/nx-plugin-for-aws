@@ -19,7 +19,7 @@ Nx Plugin for AWS는 <Link path="guides/trpc">tRPC API</Link>를 React 웹사이
 1. 애플리케이션을 렌더링하는 `main.tsx` 파일
 2. tRPC 프로바이더가 자동으로 주입될 `<App/>` JSX 요소
 3. 작동하는 tRPC API (tRPC API 생성기를 사용하여 생성됨)
-4. Cognito 또는 IAM 인증을 사용하는 API에 연결하는 경우 <Link path="/ko/guides/react-website-auth">`ts#website#auth` 생성기</Link>를 통해 추가된 Cognito Auth
+4. Cognito 또는 IAM 인증을 사용하는 API에 연결하는 경우 <Link path="/guides/react-website-auth">`ts#website#auth` 생성기</Link>를 통해 추가된 Cognito Auth
 
 <details>
 <summary>필요한 `main.tsx` 구조 예시</summary>
@@ -63,8 +63,7 @@ root.render(
     - QueryClientProvider.tsx TanStack React Query client provider
   - hooks
     - useSigV4.tsx Hook for signing HTTP requests with SigV4 (IAM only)
-    - use\<ApiName>.tsx A hook returning the tRPC options proxy for TanStack Query integration
-    - use\<ApiName>Client.tsx A hook returning the vanilla tRPC client for direct API calls
+    - use\<ApiName>.tsx Exports both `use<ApiName>`, returning the tRPC options proxy for TanStack Query integration, and `use<ApiName>Client`, returning the vanilla tRPC client for direct API calls
 
 </FileTree>
 
@@ -103,6 +102,8 @@ function MyComponent() {
   };
 
   if (isLoading) return <div>Loading...</div>;
+  if (error) return <div>Error: {error.message}</div>;
+  if (!data) return null;
 
   return (
     <ul>
@@ -113,6 +114,8 @@ function MyComponent() {
   );
 }
 ```
+
+`data`는 쿼리가 해결될 때까지 `undefined`이므로 역참조하기 전에 가드해야 합니다.
 
 ### Vanilla tRPC 클라이언트 사용하기
 
@@ -157,6 +160,8 @@ function MyComponent() {
     );
   }
 
+  if (!data) return null;
+
   return (
     <ul>
       {data.map((user) => (
@@ -181,7 +186,7 @@ REST API tRPC 백엔드에 연결할 때, 생성된 클라이언트는 구독 �
 
 옵션 프록시의 `subscriptionOptions`와 함께 `useSubscription` 훅을 사용하여 구독을 사용할 수 있습니다:
 
-```tsx {1-2,7-22}
+```tsx {1-2,7-23}
 import { useSubscription } from '@trpc/tanstack-react-query';
 import { useMyApi } from './hooks/useMyApi';
 
@@ -278,7 +283,7 @@ function UserList() {
 
   const users = useQuery(trpc.users.list.queryOptions());
 
-  if (users.isLoading) {
+  if (users.isPending) {
     return <LoadingSpinner />;
   }
 
@@ -338,7 +343,7 @@ function UserList() {
 
   return (
     <ul>
-      {users.map((user) => (
+      {users.data?.map((user) => (
         <li key={user.id}>
           {user.name}
           <button onClick={() => deleteMutation.mutate(user.id)}>Delete</button>
@@ -366,7 +371,7 @@ function UserList() {
 
   return (
     <ul>
-      {users.map((user) => (
+      {users.data?.map((user) => (
         <li key={user.id} onMouseEnter={() => prefetchUser(user.id)}>
           <Link to={`/users/${user.id}`}>{user.name}</Link>
         </li>
@@ -417,11 +422,13 @@ function UserList() {
 통합은 완전한 엔드투엔드 타입 안전성을 제공합니다. IDE는 모든 API 호출에 대해 완전한 자동 완성 및 타입 검사를 제공합니다:
 
 ```tsx
+import { useMutation } from '@tanstack/react-query';
+
 function UserForm() {
   const trpc = useMyApi();
 
   // ✅ Input is fully typed
-  const createUser = trpc.users.create.useMutation();
+  const createUser = useMutation(trpc.users.create.mutationOptions());
 
   const handleSubmit = (data: CreateUserInput) => {
     // ✅ Type error if input doesn't match schema

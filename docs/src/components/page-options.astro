@@ -1,0 +1,295 @@
+---
+/**
+ * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+import { collectReferencedKeys } from '../plugins/collect-referenced-keys';
+import {
+  createSchemaLookup,
+  filterableOptionsFromSchema,
+  resolveGeneratorsJson,
+} from '../../../packages/nx-plugin/src/mcp-server/schema-registry';
+
+/**
+ * The option values a guide page is being read under, and everything that
+ * follows from them.
+ *
+ * The reader picks them in the page's run-generator card — the command they came
+ * for is the one place the choice belongs — and this controller carries the
+ * consequences: `<OptionFilter>` blocks that don't apply are hidden along with
+ * their table-of-contents entries, `<Tabs _filter>` groups switch to the matching
+ * tab, and the selection is published for anything that renders from it (the
+ * architecture diagrams) and persisted to `?f=…` and localStorage so a reload or
+ * a shared link opens the guide the same way.
+ *
+ * Emitted only for pages with at least one filterable option they reference.
+ */
+
+interface Props {
+  generatorId: string;
+  rawMdx: string;
+}
+
+const { generatorId, rawMdx } = Astro.props;
+
+// The keys worth tracking: those the page's own filters reference and the
+// generator offers a fixed set of values for.
+let keys: string[] = [];
+
+try {
+  const referenced = collectReferencedKeys(rawMdx);
+  if (referenced.length > 0) {
+    const generatorsJson = resolveGeneratorsJson(process.cwd());
+    if (generatorsJson) {
+      const schema = createSchemaLookup(generatorsJson)(generatorId);
+      const referencedSet = new Set(referenced);
+      keys = filterableOptionsFromSchema(schema)
+        .filter((option) => referencedSet.has(option.key))
+        .map((option) => option.key);
+    }
+  }
+} catch {
+  keys = [];
+}
+
+const storageKey = `npfa:optfilter:${generatorId}`;
+---
+
+{
+  keys.length > 0 && (
+    <div
+      data-page-options
+      data-storage-key={storageKey}
+      data-keys={keys.join(',')}
+      hidden
+    />
+  )
+}
+
+<script>
+  import { readPageSelection } from '../lib/page-options';
+
+  /**
+   * Applies the page's option selection:
+   *   1. Start from `?f=…` in the URL, then localStorage, so a shared link or a
+   *      reload opens the guide the way it was left.
+   *   2. Follow the run-generator card, which announces what the reader has
+   *      entered as they build the command.
+   *   3. For each `<OptionFilter>` block, evaluate its predicate against the
+   *      selection and toggle `hidden` on the block, on the matching
+   *      table-of-contents anchors, and switch any `<Tabs _filter>` group to the
+   *      tab that matches.
+   *   4. Publish and persist the selection for the rest of the page.
+   * The pill and left border on each block are rendered by option-filter.astro —
+   * this script doesn't mutate block chrome or convert anything into tabs.
+   */
+  type Filter = {
+    when: Record<string, string[]>;
+    not: boolean;
+    description?: string;
+  };
+
+  // Mirrors evaluatePredicate in packages/nx-plugin/src/mcp-server/option-filter.ts:
+  // AND across keys, OR within a key, `not` flips the final match, and a key
+  // the user hasn't picked a value for is treated as "Any — show".
+  const evaluate = (filter: Filter, selected: Record<string, string>) => {
+    let matched = true;
+    let anyKeyTested = false;
+    for (const [k, values] of Object.entries(filter.when)) {
+      const s = selected[k];
+      if (s === undefined) continue; // "Any" for this key — doesn't veto.
+      anyKeyTested = true;
+      if (!values.includes(s)) {
+        matched = false;
+        break;
+      }
+    }
+    if (!anyKeyTested) return true;
+    return filter.not ? !matched : matched;
+  };
+
+  const run = () => {
+    const root = document.querySelector<HTMLElement>('[data-page-options]');
+    if (!root) return;
+
+    const storageKey = root.dataset.storageKey!;
+    const keys = new Set((root.dataset.keys ?? '').split(',').filter(Boolean));
+
+    // Where the page starts: the card fills its controls from the same values, and
+    // announces them back before the reader has touched anything.
+    let selected = readPageSelection(storageKey, keys);
+
+    const applyTabFilters = () => {
+      // Each `<div data-tab-filters>` marker is inserted by the
+      // `remark-tab-filter` plugin immediately before a `<Tabs>` whose
+      // children carry `_filter`. Walk forward through siblings until we
+      // find the rendered `<starlight-tabs>` (Starlight injects an
+      // is:inline `<script>` for syncKey restore as the first sibling of
+      // the first synced tab group on the page). Then look up the tab
+      // whose predicate matches the user's selection and synthesise a
+      // click on it (Starlight's tab controller handles syncing across
+      // `syncKey` groups).
+      const markers = document.querySelectorAll<HTMLElement>(
+        '[data-tab-filters]',
+      );
+      for (const marker of markers) {
+        const raw = marker.dataset.tabFilters;
+        if (!raw) continue;
+        let filters: Array<{
+          label: string;
+          when: Record<string, string[]>;
+        }>;
+        try {
+          filters = JSON.parse(raw);
+        } catch {
+          continue;
+        }
+        // Walk forward through siblings looking for `<starlight-tabs>`.
+        // Starlight may inject an `is:inline` `<script>` for syncKey
+        // restore between the marker and the tabs the first time a
+        // synced tab group appears on the page; skip past it.
+        let starlightTabs: Element | null = null;
+        for (
+          let sibling = marker.nextElementSibling;
+          sibling;
+          sibling = sibling.nextElementSibling
+        ) {
+          if (sibling.matches('starlight-tabs')) {
+            starlightTabs = sibling;
+            break;
+          }
+          // Stop if we hit another tab-filters marker — we've walked past
+          // the tabs group we own.
+          if (sibling.matches('[data-tab-filters]')) break;
+        }
+        if (!starlightTabs) continue;
+        const tabLinks = Array.from(
+          starlightTabs.querySelectorAll<HTMLAnchorElement>(
+            ':scope > .tablist-wrapper [role="tab"]',
+          ),
+        );
+        if (tabLinks.length === 0) continue;
+        // Only auto-switch when at least one key referenced by this tab
+        // group's `_filter`s has been selected by the user — otherwise we
+        // would click the first-matching tab on every page load and undo
+        // Starlight's syncKey-restored selection.
+        const referencedKeys = new Set<string>();
+        for (const f of filters) {
+          for (const k of Object.keys(f.when)) referencedKeys.add(k);
+        }
+        const hasRelevantSelection = Array.from(referencedKeys).some(
+          (k) => selected[k] !== undefined,
+        );
+        if (!hasRelevantSelection) continue;
+        const matchIndex = filters.findIndex((f) =>
+          evaluate({ when: f.when, not: false }, selected),
+        );
+        if (matchIndex === -1) continue;
+        const matchLabel = filters[matchIndex].label;
+        const matchTab = tabLinks.find(
+          (t) => t.textContent?.trim() === matchLabel,
+        );
+        const currentTab = tabLinks.find(
+          (t) => t.getAttribute('aria-selected') === 'true',
+        );
+        if (matchTab && matchTab !== currentTab) {
+          matchTab.click();
+        }
+      }
+    };
+
+    const apply = () => {
+      // Published for anything on the page that renders from the selection
+      // rather than being shown or hidden by it — the architecture diagram draws
+      // the infrastructure the selected options deploy.
+      root.dataset.selection = JSON.stringify(selected);
+      document.dispatchEvent(
+        new CustomEvent('npfa:option-filter-change', { detail: selected }),
+      );
+      const blocks = document.querySelectorAll<HTMLElement>('.option-filter');
+      const hiddenIds = new Set<string>();
+      for (const block of blocks) {
+        const raw = block.dataset.optionFilter;
+        if (!raw) continue;
+        let filter: Filter;
+        try {
+          filter = JSON.parse(raw);
+        } catch {
+          continue;
+        }
+        const show = evaluate(filter, selected);
+        block.hidden = !show;
+        if (!show) {
+          for (const el of block.querySelectorAll<HTMLElement>('[id]')) {
+            hiddenIds.add(el.id);
+          }
+        }
+      }
+      applyTabFilters();
+      const tocLinks = document.querySelectorAll<HTMLAnchorElement>(
+        'starlight-toc a[href^="#"], .right-sidebar a[href^="#"]',
+      );
+      for (const link of tocLinks) {
+        const href = link.getAttribute('href');
+        if (!href) continue;
+        const id = decodeURIComponent(href.slice(1));
+        const li = link.closest('li');
+        if (!li) continue;
+        li.hidden = hiddenIds.has(id);
+      }
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(selected));
+      } catch {}
+      // Write the filter state to the query string, preserving any other
+      // query params and the hash (so TOC anchor clicks don't wipe it out).
+      const params = new URLSearchParams(location.search);
+      const parts = Object.entries(selected).map(([k, v]) => `${k}:${v}`);
+      if (parts.length > 0) {
+        params.set('f', parts.join(','));
+      } else {
+        params.delete('f');
+      }
+      const newSearch = params.toString() ? `?${params.toString()}` : '';
+      if (newSearch !== location.search) {
+        history.replaceState(
+          null,
+          '',
+          location.pathname + newSearch + location.hash,
+        );
+      }
+    };
+
+    // The run-generator card owns the selection once the page is interactive: it
+    // announces every value the reader has entered, of which the keys this page
+    // filters on are kept.
+    document.addEventListener('npfa:page-options', (event) => {
+      const values = ((event as CustomEvent).detail?.values ?? {}) as Record<
+        string,
+        string
+      >;
+      const next: Record<string, string> = {};
+      for (const [key, value] of Object.entries(values)) {
+        if (keys.has(key) && value !== '') next[key] = value;
+      }
+      if (JSON.stringify(next) === JSON.stringify(selected)) return;
+      selected = next;
+      apply();
+    });
+
+    apply();
+    // Re-run once Starlight's tab controller has registered, so the
+    // `applyTabFilters` step can rely on click handlers being wired up.
+    if (typeof customElements !== 'undefined') {
+      customElements
+        .whenDefined('starlight-tabs')
+        .then(apply)
+        .catch(() => {});
+    }
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', run);
+  } else {
+    run();
+  }
+</script>

@@ -54,7 +54,7 @@ import type { TerraformProjectGeneratorSchema } from './schema';
 export const DEPENDENCIES = declareDependencies()({
   ts: [
     { name: '@nx-extend/terraform', dev: true, root: true },
-    { name: 'make-dir-cli', dev: true, root: true },
+    { name: 'shx', dev: true, root: true },
     { name: 'tsx', dev: true, root: true },
     { name: '@aws-sdk/client-s3', dev: true, root: true },
     { name: '@aws-sdk/client-sts', dev: true, root: true },
@@ -125,9 +125,11 @@ export async function terraformProjectGenerator(
     'checkov',
     'checkov_report.json',
   );
-  // `test` keeps its `.terraform` here rather than in `src`, so initialising it
-  // never races the backend-configured targets over the shared one.
+  // `test` and `validate` each keep their `.terraform` here rather than in
+  // `src`, so initialising one never races the backend-configured targets, or
+  // the other, over the shared one.
   const testDataDir = joinPathFragments(distDir, 'terraform-test');
+  const validateDataDir = joinPathFragments(distDir, 'terraform-validate');
 
   // Provider downloads persist here, so a target whose `.terraform` was cleaned
   // links the providers it already has rather than re-downloading them. Nx does
@@ -247,7 +249,7 @@ export async function terraformProjectGenerator(
       configurations: {
         dev: {
           commands: [
-            `make-dir ${tfDistDir}`,
+            `shx mkdir -p ${tfDistDir}`,
             `terraform plan -var-file=env/dev.tfvars -out=${tfDistDir}/dev.tfplan`,
           ],
         },
@@ -286,7 +288,10 @@ export async function terraformProjectGenerator(
       configurations: {
         dev: {
           commands: [
-            { command: `make-dir ${pluginCacheDir}`, forwardAllArgs: false },
+            {
+              command: `shx mkdir -p ${pluginCacheDir}`,
+              forwardAllArgs: false,
+            },
             'terraform init',
           ],
         },
@@ -336,7 +341,7 @@ export async function terraformProjectGenerator(
       outputs: [],
       options: {
         commands: [
-          { command: `make-dir ${pluginCacheDir}`, forwardAllArgs: false },
+          { command: `shx mkdir -p ${pluginCacheDir}`, forwardAllArgs: false },
           'terraform init -backend=false',
           'terraform test',
         ],
@@ -346,16 +351,31 @@ export async function terraformProjectGenerator(
         env: { TF_DATA_DIR: testDataDir, TF_PLUGIN_CACHE_DIR: pluginCacheDir },
       },
     },
+    // Mirrors `test`: `-backend=false` installs the modules and providers
+    // validation needs without configuring the S3 backend, so this runs on a
+    // fresh workspace before `bootstrap` and needs no credentials. `TF_DATA_DIR`
+    // keeps that `.terraform` out of `src`, so it never races the
+    // backend-configured targets over the shared one, and declaring no outputs
+    // keeps a cache hit to what it asserts (see `test` above).
     validate: {
       executor: 'nx:run-commands',
       cache: true,
-      inputs: ['default'],
+      inputs: ['default', '^production'],
+      outputs: [],
       options: {
-        command: 'terraform validate',
+        commands: [
+          { command: `shx mkdir -p ${pluginCacheDir}`, forwardAllArgs: false },
+          'terraform init -backend=false',
+          'terraform validate',
+        ],
         forwardAllArgs: true,
         cwd: '{projectRoot}/src',
+        parallel: false,
+        env: {
+          TF_DATA_DIR: validateDataDir,
+          TF_PLUGIN_CACHE_DIR: pluginCacheDir,
+        },
       },
-      dependsOn: ['init'],
     },
   };
 
@@ -387,17 +407,22 @@ export async function terraformProjectGenerator(
     { iac: 'terraform' },
   );
 
+  // The guides tell the reader to declare resources in `main.tf`, add variables
+  // and outputs, and configure environments in `env/*.tfvars`, so everything
+  // here is scaffolded once and then left alone. Provider version bumps reach
+  // `providers.tf` through the vended version sync, which rewrites the pin in
+  // place rather than the whole file.
   generateFiles(
-    tree, // the virtual file system
-    joinPathFragments(import.meta.dirname, `./files/${schema.type}`), // path to the file templates
-    lib.dir, // destination path of the files
+    tree,
+    joinPathFragments(import.meta.dirname, `./files/${schema.type}`),
+    lib.dir,
     {
       metricsModulePath,
       stateKeyPrefix: kebabCase(lib.fullyQualifiedName),
       ...terraformProviderVersions(),
     },
     {
-      overwriteStrategy: OverwriteStrategy.Overwrite,
+      overwriteStrategy: OverwriteStrategy.KeepExisting,
     },
   );
 

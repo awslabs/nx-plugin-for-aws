@@ -159,7 +159,7 @@ describe('terraformProjectGenerator', () => {
       // survives `nx reset`.
       const pluginCacheDir = '../../../.terraform/plugin-cache/{projectRoot}';
       const makeDir = {
-        command: `make-dir ${pluginCacheDir}`,
+        command: `shx mkdir -p ${pluginCacheDir}`,
         forwardAllArgs: false,
       };
 
@@ -171,7 +171,7 @@ describe('terraformProjectGenerator', () => {
       // not exist, so it is created before `terraform init` reads it.
       expect(testTarget.options.commands[0]).toEqual(makeDir);
       expect(testTarget.options.parallel).toBe(false);
-      // `make-dir` takes no terraform flags, so args are not forwarded to it.
+      // `shx mkdir` takes no terraform flags, so args are not forwarded to it.
       expect(testTarget.options.forwardAllArgs).toBe(true);
 
       // An application's `init` delegates to the vended script, which resolves
@@ -308,7 +308,7 @@ describe('terraformProjectGenerator', () => {
       const rootPackageJson = JSON.parse(tree.read('package.json', 'utf-8'));
       for (const dep of [
         '@nx-extend/terraform',
-        'make-dir-cli',
+        'shx',
         'tsx',
         '@aws-sdk/client-s3',
         '@aws-sdk/client-sts',
@@ -394,7 +394,9 @@ describe('terraformProjectGenerator', () => {
 
       expect(planTarget.executor).toBe('nx:run-commands');
       expect(planTarget.defaultConfiguration).toBe('dev');
-      expect(planTarget.configurations.dev.commands[0]).toContain('make-dir');
+      expect(planTarget.configurations.dev.commands[0]).toContain(
+        'shx mkdir -p',
+      );
       expect(planTarget.configurations.dev.commands[1]).toContain(
         'terraform plan',
       );
@@ -504,9 +506,18 @@ describe('terraformProjectGenerator', () => {
       const validateTarget = projectConfig.targets['validate'];
       expect(validateTarget.executor).toBe('nx:run-commands');
       expect(validateTarget.cache).toBe(true);
-      expect(validateTarget.options.command).toBe('terraform validate');
       expect(validateTarget.options.cwd).toBe('{projectRoot}/src');
-      expect(validateTarget.dependsOn).toEqual(['init']);
+      // Runs its own backendless init rather than depending on the
+      // backend-configured `init`, which needs a bootstrapped state bucket — so
+      // this works on a fresh workspace.
+      expect(validateTarget.options.commands).toContain(
+        'terraform init -backend=false',
+      );
+      expect(validateTarget.options.commands).toContain('terraform validate');
+      expect(validateTarget.dependsOn).toBeUndefined();
+      expect(validateTarget.options.env.TF_DATA_DIR).toContain(
+        'terraform-validate',
+      );
 
       // Test checkov target, which carries the security scan
       const checkovTarget = projectConfig.targets['checkov'];
@@ -523,7 +534,8 @@ describe('terraformProjectGenerator', () => {
       // would need a bootstrapped bucket — so `build` works before bootstrap.
       expect(testTarget.options.commands).toEqual([
         {
-          command: 'make-dir ../../../.terraform/plugin-cache/{projectRoot}',
+          command:
+            'shx mkdir -p ../../../.terraform/plugin-cache/{projectRoot}',
           forwardAllArgs: false,
         },
         'terraform init -backend=false',
@@ -546,7 +558,7 @@ describe('terraformProjectGenerator', () => {
       const initTarget = projectConfig.targets['init'];
       expect(initTarget.options.env.TF_PLUGIN_CACHE_DIR).toBe(pluginCacheDir);
       expect(initTarget.configurations.dev.commands).toEqual([
-        { command: `make-dir ${pluginCacheDir}`, forwardAllArgs: false },
+        { command: `shx mkdir -p ${pluginCacheDir}`, forwardAllArgs: false },
         'terraform init',
       ]);
       expect(initTarget.options.parallel).toBe(false);
@@ -834,6 +846,85 @@ describe('terraformProjectGenerator', () => {
       expect(
         tree.read('packages/my-terraform-project/src/main.tf', 'utf-8'),
       ).toEqual(mainTfAfterFirstRun);
+    });
+
+    it('should preserve the infrastructure the user authored under src', async () => {
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      // Everything the guides tell the reader to author: resources in main.tf,
+      // their own variables and outputs, and the environment tfvars.
+      const authored = {
+        'src/main.tf': `resource "aws_s3_bucket" "my_bucket" {\n  bucket = "my-unique-bucket-name"\n}\n`,
+        'src/variables.tf': `variable "my_var" {\n  type    = string\n  default = "x"\n}\n`,
+        'src/outputs.tf': `output "my_out" {\n  value = "y"\n}\n`,
+        'src/env/dev.tfvars': `environment = "dev"\nmy_var      = "z"\n`,
+        // Another environment added per the guide's "Environment Configuration".
+        'src/env/prod.tfvars': `environment = "prod"\n`,
+        // A module split out of main.tf, which the scaffold never vends.
+        'src/networking.tf': `module "vpc" {\n  source = "../../my-lib/src"\n}\n`,
+      };
+      for (const [path, contents] of Object.entries(authored)) {
+        tree.write(`packages/my-terraform-project/${path}`, contents);
+      }
+
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      for (const [path, contents] of Object.entries(authored)) {
+        expect(
+          tree.read(`packages/my-terraform-project/${path}`, 'utf-8'),
+        ).toBe(contents);
+      }
+    });
+
+    it('should preserve a library project’s authored modules', async () => {
+      const librarySchema: TerraformProjectGeneratorSchema = {
+        name: 'my-terraform-lib',
+        type: 'library',
+        directory: 'packages',
+      };
+      await terraformProjectGenerator(tree, librarySchema);
+
+      const authored = `variable "name" {\n  type = string\n}\n`;
+      tree.write('packages/my-terraform-lib/src/main.tf', authored);
+
+      await terraformProjectGenerator(tree, librarySchema);
+
+      expect(tree.read('packages/my-terraform-lib/src/main.tf', 'utf-8')).toBe(
+        authored,
+      );
+    });
+
+    it('should preserve curated checkov skips when re-run', async () => {
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      const authored = 'skip-check:\n  - CKV_AWS_999 # my rule\n';
+      tree.write('packages/my-terraform-project/checkov.yml', authored);
+
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      expect(
+        tree.read('packages/my-terraform-project/checkov.yml', 'utf-8'),
+      ).toBe(authored);
+    });
+
+    it('should preserve edits to the bootstrap and the vended scripts', async () => {
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      const authored = {
+        'bootstrap/main.tf': '# my own state bucket\n',
+        'scripts/init.ts': '// my own init\n',
+      };
+      for (const [path, contents] of Object.entries(authored)) {
+        tree.write(`packages/my-terraform-project/${path}`, contents);
+      }
+
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      for (const [path, contents] of Object.entries(authored)) {
+        expect(
+          tree.read(`packages/my-terraform-project/${path}`, 'utf-8'),
+        ).toBe(contents);
+      }
     });
 
     it('should keep the license-check lint dependency across a re-run', async () => {

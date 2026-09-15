@@ -34,6 +34,7 @@ El generador creará la siguiente estructura de proyecto en el directorio `<dire
 
   - src Código fuente TypeScript
     - index.ts
+  - README.md
   - package.json Manifiesto del proyecto que define el nombre del paquete y las dependencias del proyecto
   - project.json Configuración del proyecto y objetivos de compilación
   - tsconfig.json Configuración base de TypeScript para este proyecto (extiende tsconfig.base.json de la raíz del workspace)
@@ -54,6 +55,10 @@ También notarás algunos cambios en los siguientes archivos en la raíz de tu w
   - nx.json La configuración de Nx se actualiza para configurar el plugin @nx/js/typescript para tu proyecto
   - tsconfig.base.json se configura un alias de TypeScript para tu proyecto para que pueda ser importado por otros proyectos en tu workspace
   - tsconfig.json se agrega una referencia de proyecto TypeScript para tu proyecto
+  - vitest.config.mts la configuración compartida de Vitest que extiende el vitest.config.mts de tu propio proyecto (creado por el primer proyecto TypeScript)
+  - package.json se agregan herramientas compartidas de compilación y prueba
+  - pnpm-workspace.yaml el proyecto se agrega al workspace, y las versiones de dependencias al [catálogo](#catálogos) (el archivo equivalente para tu gestor de paquetes)
+  - .gitignore las rutas de salida de compilación y prueba se ignoran
 
 </FileTree>
 
@@ -223,9 +228,9 @@ npm no tiene una función de catálogo, por lo que las versiones se declaran dir
 
 ##### Optar por no usar catálogos
 
-Los catálogos están habilitados por defecto. Para desactivarlos, crea tu workspace con `--catalog false`:
+Los catálogos están habilitados por defecto. Para desactivarlos, crea tu workspace con `--catalog=false`:
 
-<CreateNxWorkspaceCommand workspace="my-project" extraArgs="--catalog false" />
+<CreateNxWorkspaceCommand workspace="my-project" values={{ catalog: false }} />
 
 O configúralo en `aws-nx-plugin.config.mts` en cualquier momento:
 
@@ -270,11 +275,14 @@ Puedes lograr esto agregando un objetivo como el siguiente a tu archivo `project
     ...
     "bundle": {
       "cache": true,
+      "inputs": ["default"],
       "executor": "nx:run-commands",
       "outputs": ["{workspaceRoot}/dist/packages/my-library/bundle"],
       "options": {
-        "command": "rolldown -c rolldown.config.ts"
-      }
+        "command": "rolldown -c rolldown.config.ts",
+        "cwd": "{projectRoot}"
+      },
+      "dependsOn": ["compile"]
     },
   },
 }
@@ -288,12 +296,14 @@ import { defineConfig } from 'rolldown';
 
 export default defineConfig([
   {
+    tsconfig: 'tsconfig.lib.json',
     input: 'src/index.ts',
     output: {
       file: '../../dist/packages/my-library/bundle/index.js',
       format: 'cjs',
       codeSplitting: false,
     },
+    platform: 'node',
   },
 ]);
 ```
@@ -303,7 +313,7 @@ Ten en cuenta que en el objetivo anterior, elegimos `src/index.ts` como nuestro 
 :::
 
 :::tip[Funciones Lambda]
-Si estás construyendo una función AWS Lambda, consulta el generador <Link path="/es/guides/ts-lambda-function">`ts#lambda-function`</Link> ya que este configura el empaquetado por ti, además de generar infraestructura y agregar observabilidad y seguridad de tipos.
+Si estás construyendo una función AWS Lambda, consulta el generador <Link path="/guides/ts-lambda-function">`ts#lambda-function`</Link> ya que este configura el empaquetado por ti, además de generar infraestructura y agregar observabilidad y seguridad de tipos.
 :::
 
 ### Instalación
@@ -338,7 +348,7 @@ Tu proyecto también tiene un objetivo `assemble`, que produce lo que tu proyect
 
 <NxCommands commands={['assemble <project-name>']} />
 
-Los <Link path="/es/guides/typescript-infrastructure#deploying-to-aws">objetivos de despliegue</Link> dependen de `assemble`, por lo que desplegar solo construye lo que está a punto de desplegar.
+Los <Link path="/guides/typescript-infrastructure#deploying-to-aws">objetivos de despliegue</Link> dependen de `assemble`, por lo que desplegar solo construye lo que está a punto de desplegar.
 
 :::caution[Usa `build` en tu pipeline]
 `assemble` se usa para una iteración más rápida durante el desarrollo. Ejecuta `build` en tu pipeline de CI para asegurar que tu proyecto pase las compuertas de calidad antes de un despliegue a producción.
@@ -366,13 +376,10 @@ Vitest proporciona sintaxis similar a Jest para definir pruebas, con utilidades 
 import { sayHello } from './hello.js';
 
 describe('sayHello', () => {
-
   it('should greet the caller', () => {
     expect(sayHello('Darth Vader')).toBe('Hello, Darth Vader!');
   });
-
 });
-
 ```
 
 Para más detalles sobre cómo escribir pruebas, y características como simular dependencias, consulta la [documentación de Vitest](https://vitest.dev/guide/#writing-tests)

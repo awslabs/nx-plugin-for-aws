@@ -5,6 +5,7 @@ description: Cách cấu hình runtime kết nối các dự án được tạo 
 import { Tabs, TabItem, Steps } from '@astrojs/starlight/components';
 import Infrastructure from '@components/infrastructure.astro';
 import Link from '@components/link.astro';
+import EmbeddedGraph from '@components/embedded-graph.astro';
 
 Cấu hình runtime là cơ chế được Nx Plugin for AWS sử dụng để truyền các giá trị tại thời điểm triển khai giữa các dự án và thành phần được tạo để chúng có thể kết nối với nhau. Ví dụ, khi bạn tạo một API, URL của nó sẽ tự động được đăng ký trong cấu hình runtime để một website được kết nối có thể khám phá nó.
 
@@ -26,40 +27,7 @@ Namespace `connection` cũng được triển khai dưới dạng file `runtime-
 
 Bạn có thể định nghĩa bao nhiêu namespace bổ sung tùy thích, cung cấp một giải pháp thay thế thuận tiện cho các biến môi trường để truyền các giá trị tại thời điểm triển khai cho các hàm Lambda hoặc tài nguyên tính toán khác của bạn.
 
-```d2
-direction: down
-
-iac: "Infrastructure as code\nRuntimeConfig.set(...)"
-
-appconfig: "AWS AppConfig" {
-  shape: cylinder
-  connection: "connection namespace"
-  agentcore: "agentcore namespace"
-  custom: "custom namespaces"
-}
-
-s3: "website S3 bucket" {
-  shape: cylinder
-  rcj: runtime-config.json {
-    shape: page
-  }
-}
-
-website: React website
-
-server: Lambda / agent
-
-iac -> appconfig.connection
-iac -> appconfig.agentcore
-iac -> appconfig.custom
-
-appconfig.connection -> s3.rcj: deployed
-s3.rcj -> website: fetched at load
-
-appconfig.connection -> server
-appconfig.agentcore -> server: Powertools getAppConfig
-appconfig.custom -> server
-```
+<EmbeddedGraph diagram="runtime-config" />
 
 ## Infrastructure
 
@@ -253,15 +221,27 @@ Tất cả các construct API và agent được tạo đều được cấu hì
 
 Sử dụng `getAppConfig` từ [`@aws-lambda-powertools/parameters`](https://docs.aws.amazon.com/powertools/typescript/latest/features/parameters):
 
+`getAppConfig` trả về bất kỳ giá trị JSON hợp lệ nào, vì vậy hãy khai báo hình dạng bạn mong đợi và ép kiểu kết quả — nếu không, các truy cập thuộc tính sẽ không biên dịch được dưới `tsconfig` nghiêm ngặt của workspace:
+
 ```ts
 import { getAppConfig } from '@aws-lambda-powertools/parameters/appconfig';
 
+interface ConnectionConfig {
+  apis?: Record<string, string>;
+  cognitoProps?: {
+    region: string;
+    userPoolId: string;
+    userPoolWebClientId: string;
+    identityPoolId: string;
+  };
+}
+
 // Retrieve the 'connection' namespace as a parsed JSON object
-const config = await getAppConfig('connection', {
+const config = (await getAppConfig('connection', {
   application: process.env.RUNTIME_CONFIG_APP_ID!,
   environment: 'default',
   transform: 'json',
-});
+})) as ConnectionConfig;
 
 // Access values
 const apiUrl = config.apis?.MyApi;
@@ -271,15 +251,23 @@ const cognitoProps = config.cognitoProps;
 Bạn cũng có thể truy xuất các namespace tùy chỉnh:
 
 ```ts
+interface TablesConfig {
+  users?: { tableName: string; tableArn: string };
+}
+
 // Retrieve a custom 'tables' namespace
-const tablesConfig = await getAppConfig('tables', {
+const tablesConfig = (await getAppConfig('tables', {
   application: process.env.RUNTIME_CONFIG_APP_ID!,
   environment: 'default',
   transform: 'json',
-});
+})) as TablesConfig;
 
 const usersTableName = tablesConfig.users?.tableName;
 ```
+
+:::tip[Xác thực tại ranh giới]
+Một phép ép kiểu cho trình biên dịch biết hình dạng nhưng không kiểm tra nó tại runtime. Đối với cấu hình bạn không kiểm soát, hãy phân tích nó bằng schema [Zod](https://zod.dev/) thay vì vậy, để một giá trị không đúng định dạng thất bại rõ ràng thay vì xuất hiện dưới dạng `undefined` sau này.
+:::
 
   </TabItem>
   <TabItem label="Python" icon="seti:python">

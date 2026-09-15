@@ -15,14 +15,14 @@ interface PnpmWorkspaceYaml {
 }
 
 /**
- * Merge `allowBuilds` (pnpm 11) / `onlyBuiltDependencies` (pnpm 10) entries
- * into the generated workspace's `pnpm-workspace.yaml`. No-op for non-pnpm
- * workspaces.
+ * Merge `allowBuilds` (pnpm 11 and above) / `onlyBuiltDependencies` (pnpm 10)
+ * entries into the generated workspace's `pnpm-workspace.yaml`. No-op for
+ * non-pnpm workspaces.
  *
  * Generators call this when they introduce a dependency whose install
- * script pnpm would otherwise reject under pnpm 11's default
+ * script pnpm would otherwise reject under the default
  * `strictDepBuilds=true`. Keeping the allowlist explicit — rather than
- * globally disabling strictness — preserves the supply-chain audit pnpm 11
+ * globally disabling strictness — preserves the supply-chain audit pnpm
  * intends: each build-script dep is reviewed by the generator author and
  * entered as either `true` (run the script) or `false` (known dep we
  * don't want to run but have seen).

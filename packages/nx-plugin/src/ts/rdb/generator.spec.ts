@@ -111,11 +111,11 @@ describe('ts#rdb generator', () => {
       executor: 'nx:run-commands',
       options: {
         commands: [
-          'rimraf ../../dist/{projectRoot}/bundle/migration',
-          'make-dir ../../dist/{projectRoot}/bundle/migration',
-          'ncp prisma ../../dist/{projectRoot}/bundle/migration/prisma',
-          'ncp prisma.config.ts ../../dist/{projectRoot}/bundle/migration/prisma.config.ts',
-          'ncp Dockerfile ../../dist/{projectRoot}/bundle/migration/Dockerfile',
+          'shx rm -rf ../../dist/{projectRoot}/bundle/migration',
+          'shx mkdir -p ../../dist/{projectRoot}/bundle/migration',
+          'shx cp -R prisma/. ../../dist/{projectRoot}/bundle/migration/prisma',
+          'shx cp prisma.config.ts ../../dist/{projectRoot}/bundle/migration/prisma.config.ts',
+          'shx cp Dockerfile ../../dist/{projectRoot}/bundle/migration/Dockerfile',
           'rolldown -c rolldown.config.ts',
         ],
         cwd: '{projectRoot}',
@@ -220,9 +220,7 @@ describe('ts#rdb generator', () => {
     // Pure build/test tooling stays in the workspace root devDependencies
     expect(packageJson.devDependencies['tsx']).toBeDefined();
     expect(packageJson.devDependencies.prisma).toBeDefined();
-    expect(packageJson.devDependencies.ncp).toBeDefined();
-    expect(packageJson.devDependencies.rimraf).toBeDefined();
-    expect(packageJson.devDependencies['make-dir-cli']).toBeDefined();
+    expect(packageJson.devDependencies.shx).toBeDefined();
   });
 
   it('should add mysql prisma dependencies when engine is MySQL', async () => {
@@ -550,6 +548,45 @@ describe('ts#rdb generator', () => {
       tree.read('packages/db/project.json', 'utf-8'),
     );
     expect(updatedProjectJson.targets['bundle']).toBeDefined();
+  });
+
+  it.each(['cdk', 'terraform'] as const)(
+    'should build and scan the migration image when iac is %s',
+    async (iac) => {
+      await tsRdbGenerator(tree, { ...defaultOptions, iac });
+
+      const projectConfig = readProjectConfigurationUnqualified(
+        tree,
+        '@proj/db',
+      );
+
+      expect(projectConfig.targets['docker'].options.command).toContain(
+        '-t proj-db-migration:latest',
+      );
+      expect(projectConfig.targets['trivy'].dependsOn).toEqual(['docker']);
+      expect(tree.exists('packages/db/.trivyignore')).toBe(true);
+
+      // The prisma CLI the image installs to run migrations resolves two of its
+      // own dependencies below their fixes, so the build overrides them rather
+      // than suppressing the findings.
+      const dockerfile = tree.read('packages/db/Dockerfile', 'utf-8');
+      expect(dockerfile).toContain(
+        `npm pkg set "overrides.deepmerge-ts=${TS_VERSIONS['deepmerge-ts']}"`,
+      );
+      expect(dockerfile).toContain(
+        `npm pkg set "overrides.mysql2=${TS_VERSIONS.mysql2}"`,
+      );
+    },
+  );
+
+  it('should not add image targets when no infrastructure is generated', async () => {
+    await tsRdbGenerator(tree, { ...defaultOptions, infra: 'none' });
+
+    const projectConfig = readProjectConfigurationUnqualified(tree, '@proj/db');
+
+    expect(projectConfig.targets['docker']).toBeUndefined();
+    expect(projectConfig.targets['trivy']).toBeUndefined();
+    expect(tree.exists('packages/db/.trivyignore')).toBe(false);
   });
 
   it('should place the project in a subDirectory when provided', async () => {

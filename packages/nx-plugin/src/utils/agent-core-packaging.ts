@@ -13,7 +13,10 @@ import {
   type MustDeclare,
 } from './declared-dependencies.js';
 import { FS_DEPENDENCIES, FsCommands } from './fs.js';
-import { addArtifactDependencyToTargets } from './nx.js';
+import {
+  addArtifactDependencyToTargets,
+  normalizeTargetKeyOrder,
+} from './nx.js';
 import {
   agentCoreRuntime,
   type ITsDepVersion,
@@ -75,6 +78,23 @@ export interface AddTypeScriptCodePackageTargetOptions {
 }
 
 /**
+ * Name of the target that installs ADOT for the project's code packages. Every
+ * code package in a project vendors the same thing, so they share one.
+ */
+export const ADOT_VENDOR_TARGET_NAME = 'agent-core-vendor';
+
+/**
+ * Directory the vendor target installs into, relative to the workspace root.
+ *
+ * A sibling of the `package` directory rather than a path inside it: Nx replaces
+ * a cached target's whole declared output directory on restore, so an output
+ * nested inside another target's output would have each wipe the other's work on
+ * a cache hit.
+ */
+export const adotVendorDir = (projectRoot: string): string =>
+  joinPathFragments('dist', projectRoot, 'agent-core-vendor');
+
+/**
  * Add a target assembling the deployable code package for a TypeScript
  * AgentCore Runtime.
  *
@@ -85,11 +105,16 @@ export interface AddTypeScriptCodePackageTargetOptions {
  * being installed at runtime — the `opentelemetry-instrument` entry point
  * prefix resolves it from there.
  *
- * The install is scoped to the package directory with `--prefix` and
- * `--no-save`, so it never touches the project's own manifest. `--omit=dev`
- * keeps the package to what the runtime loads. ADOT is pure JavaScript with no
- * native binaries, so the package is architecture independent even though
- * AgentCore only runs arm64.
+ * The install is scoped to its own directory with `--prefix` and `--no-save`, so
+ * it never touches the project's own manifest. `--omit=dev` keeps the package to
+ * what the runtime loads. ADOT is pure JavaScript with no native binaries, so the
+ * package is architecture independent even though AgentCore only runs arm64.
+ *
+ * Vendoring is a separate target so Nx caches it independently of the source. It
+ * depends on nothing but the pinned ADOT version, which the install command
+ * carries and Nx hashes as part of the target's configuration, so it declares no
+ * `inputs`: editing an agent replays a directory copy rather than re-running the
+ * install, while bumping the version still invalidates it.
  */
 export const addTypeScriptCodePackageTarget = <
   const D extends DependencyDeclaration,
@@ -112,9 +137,27 @@ export const addTypeScriptCodePackageTarget = <
   );
   const adotVersion =
     TS_VERSIONS['@aws/aws-distro-opentelemetry-node-autoinstrumentation'];
+  const vendorDir = adotVendorDir(project.root);
 
   project.targets ??= {};
-  project.targets[targetName] = {
+
+  // Shared by every code package in the project, so only added once.
+  project.targets[ADOT_VENDOR_TARGET_NAME] ??= {
+    cache: true,
+    inputs: [],
+    outputs: [`{workspaceRoot}/${vendorDir}`],
+    executor: 'nx:run-commands',
+    options: {
+      commands: [
+        fs.rm(vendorDir),
+        fs.mkdir(vendorDir),
+        `npm install --prefix ${vendorDir} --no-save --no-audit --no-fund --omit=dev @aws/aws-distro-opentelemetry-node-autoinstrumentation@${adotVersion}`,
+      ],
+      parallel: false,
+    },
+  };
+
+  project.targets[targetName] = normalizeTargetKeyOrder({
     cache: true,
     inputs: ['default'],
     outputs: [`{workspaceRoot}/${packageOutputDir}`],
@@ -123,16 +166,19 @@ export const addTypeScriptCodePackageTarget = <
       commands: [
         fs.rm(packageOutputDir),
         fs.mkdir(packageOutputDir),
-        fs.cp(
+        fs.cpFile(
           joinPathFragments(bundleOutputDir, 'index.js'),
           joinPathFragments(packageOutputDir, 'index.js'),
         ),
-        `npm install --prefix ${packageOutputDir} --no-save --no-audit --no-fund --omit=dev @aws/aws-distro-opentelemetry-node-autoinstrumentation@${adotVersion}`,
+        fs.cpDir(
+          joinPathFragments(vendorDir, 'node_modules'),
+          joinPathFragments(packageOutputDir, 'node_modules'),
+        ),
       ],
       parallel: false,
     },
-    dependsOn: [bundleTargetName],
-  };
+    dependsOn: [bundleTargetName, ADOT_VENDOR_TARGET_NAME],
+  });
 
   addArtifactDependencyToTargets(project, targetName);
 };
@@ -205,7 +251,7 @@ export const addPythonCodePackageTarget = <
   );
 
   project.targets ??= {};
-  project.targets[targetName] = {
+  project.targets[targetName] = normalizeTargetKeyOrder({
     cache: true,
     inputs: ['production', '^production'],
     outputs: [`{workspaceRoot}/${packageOutputDir}`],
@@ -214,9 +260,9 @@ export const addPythonCodePackageTarget = <
       commands: [
         fs.rm(packageOutputDir),
         fs.mkdir(packageOutputDir),
-        fs.cp(bundleOutputDir, packageOutputDir),
-        fs.cp(sourceRoot, joinPathFragments(packageOutputDir, moduleName)),
-        fs.cp(
+        fs.cpDir(bundleOutputDir, packageOutputDir),
+        fs.cpDir(sourceRoot, joinPathFragments(packageOutputDir, moduleName)),
+        fs.cpFile(
           entryPointPath,
           joinPathFragments(packageOutputDir, entryPointFileName),
         ),
@@ -224,7 +270,7 @@ export const addPythonCodePackageTarget = <
       parallel: false,
     },
     dependsOn: [bundleTargetName],
-  };
+  });
 
   addArtifactDependencyToTargets(project, targetName);
 };

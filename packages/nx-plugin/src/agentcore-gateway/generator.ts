@@ -38,6 +38,7 @@ import {
 } from '../utils/nx.js';
 import { assignPort } from '../utils/port.js';
 import { ensureProjectPackageJson } from '../utils/project-package-json.js';
+import { addScriptProjectTargets } from '../utils/script-project-targets.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
@@ -143,6 +144,9 @@ export const agentcoreGatewayGenerator = async (
   project.targets ??= {};
   project.targets['serve'] ??= localGatewayTarget(port);
   project.targets['dev'] ??= localGatewayTarget(port);
+  // local-dev.ts is TypeScript the connection generators edit and the user is
+  // invited to tune, so it goes through the workspace's build sweep.
+  addScriptProjectTargets(tree, { project });
   updateProjectConfiguration(tree, project.name, project);
 
   // Scaffold the gateway project: local-dev.ts (+ Cedar policies if requested)

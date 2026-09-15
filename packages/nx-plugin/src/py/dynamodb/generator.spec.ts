@@ -238,6 +238,108 @@ describe('py#dynamodb generator', () => {
     expect(buildDeps.filter((d) => d === 'proj.my_table:build')).toHaveLength(
       1,
     );
+
+    // The barrels keep exactly one import of each generated model.
+    const entitiesInit = tree.read(
+      'packages/my_table/proj_my_table/entities/__init__.py',
+      'utf-8',
+    );
+    expect(entitiesInit.match(/BaseModel/g)).toHaveLength(2); // import + __all__
+    expect(entitiesInit.match(/ExampleModel/g)).toHaveLength(2);
+  });
+
+  it('should preserve the entities and GSIs the user authored', async () => {
+    await pyDynamoDBGenerator(tree, defaultOptions);
+
+    // Follow the guide's "Storing Multiple Entity Types" section, then its
+    // "Export the new entities from __init__.py" step.
+    const orderModel = `from .base import BaseModel\n\n\nclass OrderModel(BaseModel):\n    pass\n`;
+    tree.write('packages/my_table/proj_my_table/entities/order.py', orderModel);
+    tree.write(
+      'packages/my_table/proj_my_table/entities/__init__.py',
+      `from .base import BaseModel\nfrom .example import ExampleModel\nfrom .order import OrderModel\n\n__all__ = ["BaseModel", "ExampleModel", "OrderModel"]\n`,
+    );
+    // Reflect a third GSI in base.py, as the GSI section instructs.
+    const editedBase = `# my base model\n`;
+    tree.write('packages/my_table/proj_my_table/entities/base.py', editedBase);
+    const configPath = 'packages/my_table/config.json';
+    const config = JSON.parse(tree.read(configPath, 'utf-8'));
+    config.tableConfig.globalSecondaryIndexes.push({
+      indexName: 'gsi3pk-gsi3sk-index',
+      partitionKey: 'gsi3pk',
+      sortKey: 'gsi3sk',
+    });
+    tree.write(configPath, JSON.stringify(config, null, 2));
+
+    await pyDynamoDBGenerator(tree, defaultOptions);
+
+    expect(
+      tree.read('packages/my_table/proj_my_table/entities/order.py', 'utf-8'),
+    ).toBe(orderModel);
+    expect(
+      tree.read('packages/my_table/proj_my_table/entities/base.py', 'utf-8'),
+    ).toBe(editedBase);
+    const entitiesInit = tree.read(
+      'packages/my_table/proj_my_table/entities/__init__.py',
+      'utf-8',
+    );
+    expect(entitiesInit).toContain('OrderModel');
+    expect(entitiesInit).toContain('BaseModel');
+    expect(entitiesInit).toContain('ExampleModel');
+    expect(
+      JSON.parse(
+        tree.read(configPath, 'utf-8'),
+      ).tableConfig.globalSecondaryIndexes.map(
+        (gsi: { indexName: string }) => gsi.indexName,
+      ),
+    ).toEqual([
+      'gsi1pk-gsi1sk-index',
+      'gsi2pk-gsi2sk-index',
+      'gsi3pk-gsi3sk-index',
+    ]);
+  });
+
+  it('should register a removed model import back into a curated barrel', async () => {
+    // The barrel is merged rather than replaced, so the generated models are
+    // re-registered — which PynamoDB needs for their discriminators — without
+    // discarding the user's own imports.
+    await pyDynamoDBGenerator(tree, defaultOptions);
+    tree.write(
+      'packages/my_table/proj_my_table/entities/__init__.py',
+      `from .order import OrderModel\n\n__all__ = ["OrderModel"]\n`,
+    );
+
+    await pyDynamoDBGenerator(tree, defaultOptions);
+
+    const entitiesInit = tree.read(
+      'packages/my_table/proj_my_table/entities/__init__.py',
+      'utf-8',
+    );
+    expect(entitiesInit).toContain('OrderModel');
+    expect(entitiesInit).toContain('BaseModel');
+    expect(entitiesInit).toContain('ExampleModel');
+  });
+
+  it('should converge the framework-owned config values on a re-run', async () => {
+    // The localDev block is derived from the generator's options, so changing
+    // them takes effect while the user's GSI list is carried through.
+    await pyDynamoDBGenerator(tree, defaultOptions);
+    const configPath = 'packages/my_table/config.json';
+    const config = JSON.parse(tree.read(configPath, 'utf-8'));
+    config.tableConfig.globalSecondaryIndexes.push({
+      indexName: 'gsi3pk-gsi3sk-index',
+      partitionKey: 'gsi3pk',
+    });
+    tree.write(configPath, JSON.stringify(config, null, 2));
+
+    await pyDynamoDBGenerator(tree, {
+      ...defaultOptions,
+      tableName: 'RenamedTable',
+    });
+
+    const updated = JSON.parse(tree.read(configPath, 'utf-8'));
+    expect(updated.localDev.tableName).toBe('proj-renamed-table');
+    expect(updated.tableConfig.globalSecondaryIndexes).toHaveLength(3);
   });
 
   it('should use custom tableName when provided', async () => {

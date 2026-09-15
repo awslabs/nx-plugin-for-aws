@@ -136,7 +136,34 @@ describe('ts#nx-plugin generator', () => {
 
     // Should not have sample files
     expect(tree.exists(`${mcpPath}/tools/add.ts`)).toBe(false);
+    expect(tree.exists(`${mcpPath}/tools/divide.ts`)).toBe(false);
     expect(tree.exists(`${mcpPath}/resources/sample-guidance.ts`)).toBe(false);
+  });
+
+  it('should preserve a customised server.ts on re-run', async () => {
+    await tsNxPluginGenerator(tree, { name: 'test-plugin' });
+
+    // The guide tells users to extend the MCP server by editing server.ts
+    const serverPath = 'test-plugin/src/mcp-server/server.ts';
+    const userContent = `// my customised MCP server\nexport const createServer = () => undefined;\n`;
+    tree.write(serverPath, userContent);
+
+    await tsNxPluginGenerator(tree, { name: 'test-plugin' });
+
+    expect(tree.read(serverPath, 'utf-8')).toBe(userContent);
+  });
+
+  it('should package every Nx Plugin manifest', async () => {
+    await tsNxPluginGenerator(tree, { name: 'test-plugin' });
+
+    const project = readProjectConfiguration(tree, '@proj/test-plugin');
+
+    // `nx migrate` resolves migrations.json from the published tarball
+    expect(project.targets?.package?.options?.assets).toContainEqual({
+      input: './{projectRoot}',
+      glob: 'migrations.json',
+      output: '.',
+    });
   });
 
   it('should add required dependencies', async () => {

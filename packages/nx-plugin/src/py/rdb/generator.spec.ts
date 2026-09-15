@@ -95,12 +95,12 @@ describe('py#rdb generator', () => {
       executor: 'nx:run-commands',
       options: {
         commands: [
-          'rimraf dist/packages/db/docker/migration',
-          'make-dir dist/packages/db/docker/migration',
-          'ncp dist/packages/db/bundle-arm dist/packages/db/docker/migration',
-          'ncp packages/db/migrations dist/packages/db/docker/migration/migrations',
-          'ncp packages/db/alembic.ini dist/packages/db/docker/migration/alembic.ini',
-          'ncp packages/db/Dockerfile.migration dist/packages/db/docker/migration/Dockerfile',
+          'shx rm -rf dist/packages/db/docker/migration',
+          'shx mkdir -p dist/packages/db/docker/migration',
+          'shx cp -R dist/packages/db/bundle-arm/. dist/packages/db/docker/migration',
+          'shx cp -R packages/db/migrations/. dist/packages/db/docker/migration/migrations',
+          'shx cp packages/db/alembic.ini dist/packages/db/docker/migration/alembic.ini',
+          'shx cp packages/db/Dockerfile.migration dist/packages/db/docker/migration/Dockerfile',
         ],
         parallel: false,
       },
@@ -113,10 +113,10 @@ describe('py#rdb generator', () => {
       executor: 'nx:run-commands',
       options: {
         commands: [
-          'rimraf dist/packages/db/docker/create-db-user',
-          'make-dir dist/packages/db/docker/create-db-user',
-          'ncp dist/packages/db/bundle-arm dist/packages/db/docker/create-db-user',
-          'ncp packages/db/Dockerfile.create-db-user dist/packages/db/docker/create-db-user/Dockerfile',
+          'shx rm -rf dist/packages/db/docker/create-db-user',
+          'shx mkdir -p dist/packages/db/docker/create-db-user',
+          'shx cp -R dist/packages/db/bundle-arm/. dist/packages/db/docker/create-db-user',
+          'shx cp packages/db/Dockerfile.create-db-user dist/packages/db/docker/create-db-user/Dockerfile',
         ],
         parallel: false,
       },
@@ -222,9 +222,9 @@ describe('py#rdb generator', () => {
       executor: 'nx:run-commands',
       options: {
         commands: [
-          'rimraf dist/packages/db/trivy/proj-db-migration-latest',
-          'make-dir dist/packages/db/trivy/proj-db-migration-latest',
-          'ncp packages/db/.trivyignore dist/packages/db/trivy/proj-db-migration-latest/.trivyignore',
+          'shx rm -rf dist/packages/db/trivy/proj-db-migration-latest',
+          'shx mkdir -p dist/packages/db/trivy/proj-db-migration-latest',
+          'shx cp packages/db/.trivyignore dist/packages/db/trivy/proj-db-migration-latest/.trivyignore',
           'docker save -o dist/packages/db/trivy/proj-db-migration-latest/image-0.tar proj-db-migration:latest',
           `docker run --rm -v "./dist/packages/db/trivy/proj-db-migration-latest":/scan public.ecr.aws/aquasecurity/trivy:${CONTAINER_VERSIONS.trivy} image --input /scan/image-0.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q`,
           'docker save -o dist/packages/db/trivy/proj-db-migration-latest/image-1.tar proj-db-create-db-user:latest',
@@ -266,12 +266,46 @@ describe('py#rdb generator', () => {
     );
   });
 
+  it.each(['cdk', 'terraform'] as const)(
+    'should build and scan both images when iac is %s',
+    async (iac) => {
+      await pyRdbGenerator(tree, { ...defaultOptions, iac });
+
+      const projectConfig = readProjectConfigurationUnqualified(
+        tree,
+        'proj.db',
+      );
+
+      expect(projectConfig.targets['docker'].options.commands).toEqual([
+        expect.stringContaining('-t proj-db-migration:latest'),
+        expect.stringContaining('-t proj-db-create-db-user:latest'),
+      ]);
+      expect(projectConfig.targets['trivy'].dependsOn).toEqual(['docker']);
+      expect(tree.exists('packages/db/.trivyignore')).toBe(true);
+
+      // pip's vendored msgpack and setuptools carry HIGH findings, and nothing
+      // installs packages at runtime, so both images drop pip rather than
+      // suppressing the findings.
+      for (const dockerfile of [
+        'Dockerfile.migration',
+        'Dockerfile.create-db-user',
+      ]) {
+        expect(tree.read(`packages/db/${dockerfile}`, 'utf-8')).toContain(
+          'rm -rf /var/lang/lib/python*/site-packages/pip',
+        );
+      }
+    },
+  );
+
   it('should generate local database support without infrastructure', async () => {
     await pyRdbGenerator(tree, { ...defaultOptions, infra: 'none' });
 
     const projectConfig = readProjectConfigurationUnqualified(tree, 'proj.db');
     expect(projectConfig.targets['bundle-migration']).toBeUndefined();
     expect(projectConfig.targets['bundle-create-db-user']).toBeUndefined();
+    expect(projectConfig.targets['docker']).toBeUndefined();
+    expect(projectConfig.targets['trivy']).toBeUndefined();
+    expect(tree.exists('packages/db/.trivyignore')).toBe(false);
     expect(projectConfig.targets.dev).toBeDefined();
     expect(projectConfig.targets.migrate).toBeDefined();
     expect(tree.exists('packages/common/constructs')).toBe(false);

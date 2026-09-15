@@ -14,6 +14,15 @@ import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
 import { expect } from 'vitest';
 import { getDefaultBiomeConfig } from './format.js';
 
+/** Formatter configs Nx discovers and formats generated files with. */
+const NX_FORMATTER_CONFIG_FILES = [
+  '.oxfmtrc.json',
+  '.oxfmtrc.jsonc',
+  'oxfmt.config.ts',
+  'oxfmt.config.mts',
+  '.prettierrc',
+];
+
 /**
  * Create a workspace tree configured so that nx's `isUsingTsSolutionSetup`
  * reports `true`, matching the workspaces our preset generates. Rather than
@@ -26,6 +35,15 @@ import { getDefaultBiomeConfig } from './format.js';
  */
 export const createTreeUsingTsSolutionSetup = (): Tree => {
   const tree = createTreeWithEmptyWorkspace();
+
+  // `createTreeWithEmptyWorkspace` seeds a formatter config Nx then formats
+  // generated files with. Our workspaces select `formatter: 'none'` and format
+  // with biome, so remove it to match what the preset produces.
+  for (const config of NX_FORMATTER_CONFIG_FILES) {
+    if (tree.exists(config)) {
+      tree.delete(config);
+    }
+  }
 
   tree.write('pnpm-workspace.yaml', `packages:\n  - packages/*`);
 

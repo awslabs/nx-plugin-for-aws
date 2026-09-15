@@ -3,7 +3,9 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import Default from '@astrojs/starlight/components/MarkdownContent.astro';
+import StarlightBlogContent from 'starlight-blog/components/MarkdownContent.astro';
+import StarlightVideosContent from 'starlight-videos/components/MarkdownContent.astro';
+import { isBlogPostRoute } from '../lib/blog-route';
 import {
   postProcessGuide,
   renderExperimentalWarning,
@@ -13,8 +15,11 @@ import {
   buildGeneratorInfoList,
   findGeneratorsJsonEntry,
 } from '../../../packages/nx-plugin/src/utils/generators';
+import { parseMdx } from '../../../packages/nx-plugin/src/mcp-server/guide-pipeline';
+import { stripFrontmatterAndEsm } from '../../../packages/nx-plugin/src/mcp-server/mdx-ast';
 import ExperimentalBanner from './experimental-banner.astro';
-import OptionFilterBar from './option-filter-bar.astro';
+import PageOptions from './page-options.astro';
+import Snippet from './snippet.astro';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -55,12 +60,9 @@ if (!isSnippet && starlightRoute?.entry?.id) {
       const pluginDir = path.resolve(docsDir, '..', 'packages', 'nx-plugin');
       const generators = buildGeneratorInfoList(pluginDir);
 
-      // Strip frontmatter and imports from MDX content
-      const stripMdxPreamble = (content: string) =>
-        content
-          .replace(/^---\n[\s\S]*?\n---\n/, '')
-          .replace(/^import\s+.*$\n?/gm, '')
-          .trim();
+      // Strip frontmatter and ESM statements from MDX content
+      const stripMdxPreamble = async (content: string) =>
+        stripFrontmatterAndEsm(content, await parseMdx(content));
 
       // Create a local filesystem snippet provider (reads from en locale)
       const snippetsDir = path.join(docsContentDir, 'en', 'snippets');
@@ -73,16 +75,7 @@ if (!isSnippet && starlightRoute?.entry?.id) {
         }
       };
 
-      // Strip frontmatter
-      const frontmatterEnd = rawMdx.match(/^---\n[\s\S]*?\n---\n/);
-      const bodyWithoutFrontmatter = frontmatterEnd
-        ? rawMdx.slice(frontmatterEnd[0].length)
-        : rawMdx;
-
-      // Strip import statements
-      const bodyWithoutImports = bodyWithoutFrontmatter
-        .replace(/^import\s+.*$\n?/gm, '')
-        .trim();
+      const bodyWithoutImports = await stripMdxPreamble(rawMdx);
 
       // Run the same resolution as the MCP server
       const processed = await postProcessGuide(
@@ -114,11 +107,30 @@ if (!isSnippet && starlightRoute?.entry?.id) {
     // If anything fails, we just won't have the copy button
   }
 }
+
+// Generator guides assume a workspace with the plugin installed, so point
+// readers at the starting point if they don't have one yet.
+const showWorkspacePrerequisite =
+  starlightRoute?.id?.includes('/guides/') === true &&
+  (generatorFrontmatter !== undefined ||
+    rawMdxForFilter.includes('<RunGenerator'));
+
+// starlight-blog renders the post date and authors, starlight-videos the video
+// player and transcript; both fall back to Starlight's own content rendering.
+// starlight-blog resolves posts per locale, so a locale still awaiting its
+// translation renders the English body on its own.
+const isLocalisedBlogPost =
+  isBlogPostRoute(starlightRoute?.id ?? '') &&
+  starlightRoute?.isFallback !== true;
+const Content = isLocalisedBlogPost
+  ? StarlightBlogContent
+  : StarlightVideosContent;
 ---
 
 {resolvedMarkdown && <div data-copy-markdown={resolvedMarkdown} style="display:none" />}
 {generatorFrontmatter && <ExperimentalBanner generatorId={generatorFrontmatter} />}
 {generatorFrontmatter && rawMdxForFilter && (
-  <OptionFilterBar generatorId={generatorFrontmatter} rawMdx={rawMdxForFilter} />
+  <PageOptions generatorId={generatorFrontmatter} rawMdx={rawMdxForFilter} />
 )}
-<Default><slot /></Default>
+{showWorkspacePrerequisite && <Snippet name="workspace-prerequisite" />}
+<Content><slot /></Content>

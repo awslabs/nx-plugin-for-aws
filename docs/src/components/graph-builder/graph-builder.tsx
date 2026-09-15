@@ -17,6 +17,8 @@ import {
   type GraphNode,
   validate,
 } from '../../lib/graph-builder/model';
+import { reconcileNode } from '../../lib/graph-builder/node-options';
+import { readPackageManager } from '../../lib/package-manager';
 import { Canvas } from './canvas';
 import {
   NODE_HEIGHT,
@@ -92,8 +94,12 @@ export const GraphBuilder = () => {
   // Which way the graph flows. Swapping it re-lays the nodes rather than just
   // moving the ports, so the graph still reads along its new axis.
   const [orientation, setOrientation] = useState<Orientation>('horizontal');
-  const [emitOptions, setEmitOptions] =
-    useState<EmitOptions>(DEFAULT_EMIT_OPTIONS);
+  // The package manager the reader last picked anywhere on the site, so the
+  // commands here read in the one they use.
+  const [emitOptions, setEmitOptions] = useState<EmitOptions>(() => ({
+    ...DEFAULT_EMIT_OPTIONS,
+    packageManager: readPackageManager(DEFAULT_EMIT_OPTIONS.packageManager),
+  }));
 
   // Undo/redo stacks. Held in refs since they are never rendered directly and
   // shouldn't cause a re-render when pushed to.
@@ -310,7 +316,13 @@ export const GraphBuilder = () => {
         ...current,
         nodes: current.nodes.map((node) =>
           node.id === id
-            ? { ...node, options: { ...node.options, [option]: value } }
+            ? // Setting one option can rule another out — a gateway with no
+              // infrastructure has nothing to authenticate — so the rest are put
+              // right here, where the change lands.
+              reconcileNode(
+                { ...node, options: { ...node.options, [option]: value } },
+                nodeType(node.type),
+              )
             : node,
         ),
       }));
@@ -349,6 +361,19 @@ export const GraphBuilder = () => {
     },
     [commit, orientation],
   );
+
+  // A `?preset=` in the URL opens the builder on that example, so a page showing
+  // one can hand it over to be edited. Only on the first run — the canvas reports
+  // its width in its own mount effect, which flushes before this one, so the
+  // preset is laid out to fit, and a later orientation swap must not reload it
+  // over whatever the user has since built.
+  const urlPresetHandled = useRef(false);
+  useEffect(() => {
+    if (urlPresetHandled.current) return;
+    urlPresetHandled.current = true;
+    const requested = new URLSearchParams(window.location.search).get('preset');
+    if (requested) loadPreset(requested);
+  }, [loadPreset]);
 
   // Stable identity, so the canvas's resize observer isn't torn down and
   // re-established on every render.

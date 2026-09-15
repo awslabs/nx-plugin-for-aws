@@ -317,6 +317,8 @@ const VENDED_TEMPLATE_VARS = new Set([
   'jaegerVersion',
   'adotVersion',
   'prismaVersion',
+  'deepmergeTsVersion',
+  'mysql2Version',
   'rolldownVersion',
   'rolldownDtsVersion',
   'esmShimVersion',

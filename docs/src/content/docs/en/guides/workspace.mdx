@@ -2,7 +2,7 @@
 title: Workspace
 description: Reference documentation for workspaces
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { Aside, FileTree } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
@@ -27,8 +27,10 @@ When you create a new workspace with `@aws/nx-plugin`, the preset generator sets
   - package.json Root package.json for your monorepo
   - nx.json Nx configuration (common targets, sync generators, caching)
   - tsconfig.base.json Root TypeScript configuration
+  - biome.json Biome configuration for linting and formatting
   - aws-nx-plugin.config.mts Nx Plugin for AWS configuration
   - .git-secrets/ Vendored git-secrets bash script for credential scanning
+  - .gitallowed Patterns git-secrets treats as false positives
   - .husky/ Git hooks
   - .mcp.json Nx Plugin for AWS MCP server configuration for Claude Code
   - .cursor/mcp.json ...and for Cursor
@@ -71,7 +73,7 @@ For details on how TypeScript and Python projects are set up, refer to the <Link
 
 ### Caching
 
-Nx caches the output of previously executed targets and replays them when the inputs haven't changed. This dramatically speeds up builds, tests, and linting — especially in CI. If you encounter stale or unexpected behaviour, reset the cache with:
+Nx caches the output of previously executed targets and replays them when the inputs haven't changed. This dramatically speeds up builds, tests, and linting. If you encounter stale or unexpected behaviour, reset the cache with:
 
 <NxCommands commands={['reset']} />
 
@@ -87,15 +89,7 @@ New workspaces set `parallel` in `nx.json`, which controls how many tasks Nx run
 }
 ```
 
-Lower it if you're building on a machine with fewer cores or limited memory:
-
-```json title="nx.json"
-{
-  "parallel": 3
-}
-```
-
-You can also override it per-invocation:
+Lower it if you're building on a machine with fewer cores or limited memory. You can also override it per-invocation:
 
 <NxCommands commands={['run-many --target build --parallel=4']} />
 
@@ -165,23 +159,32 @@ This will run the chosen target as well as the targets it depends on.
 
 New workspaces are configured with [Biome](https://biomejs.dev/) for static analysis and code formatting. Running `lint` checks all projects for issues, and `lint --configuration=fix` auto-fixes them.
 
+### MCP Configuration
+
+The plugin's <Link path="get_started/building-with-ai">MCP server</Link> is configured as a project level MCP server for Claude Code, Cursor, Kiro, Gemini CLI, GitHub Copilot and OpenAI Codex, so your coding assistant can discover and run the plugin's generators without any setup. The configuration is committed with your workspace, giving everyone on your team the same setup. Remove any configurations for coding assistants you and your team do not use.
+
 ### Git Secrets
 
-New workspaces include [git-secrets](https://github.com/awslabs/git-secrets) pre-commit hooks that scan staged files for AWS credential patterns before each commit. This prevents accidentally committing access keys, secret keys, and other sensitive values.
+Workspaces are set up with [git-secrets](https://github.com/awslabs/git-secrets) pre-commit hooks that scan staged files for AWS credential patterns before each commit. This prevents accidentally committing access keys, secret keys, and other sensitive values.
+
+The script is vendored into the workspace at `.git-secrets/git-secrets` and run by the `.husky/pre-commit` hook, so there is nothing to install — but it is not on your `PATH`, so invoke it by path rather than as `git secrets`.
 
 #### Suppressing False Positives
 
 Patterns in git-secrets use [egrep-compatible regular expressions](https://github.com/awslabs/git-secrets#options-for-add). If git-secrets blocks a commit that does not contain real credentials:
 
 ```sh
-# Allow a specific regex pattern
-git secrets --add --allowed 'my-regex-pattern'
+# Allow a specific regex pattern (-a is the allowed flag)
+bash .git-secrets/git-secrets --add -a -- 'my-regex-pattern'
 
-# Allow a literal string (special characters are escaped)
-git secrets --add --allowed --literal 'my-literal+string'
+# Allow a literal string, escaping special characters (-l is the literal flag)
+bash .git-secrets/git-secrets --add -a -l -- 'my-literal+string'
+
+# List what is currently allowed
+git config --get-all secrets.allowed
 ```
 
-You can also create a `.gitallowed` file at the repository root with one egrep-compatible regex per line (shared with your team via version control):
+These are recorded in your local git config, so they apply only to your own clone. To share a suppression with your team, add it to the `.gitallowed` file at the repository root instead — one egrep-compatible regex per line, matched against `<path>:<line-number>:<line-contents>`:
 
 ```text title=".gitallowed"
 # Allow test fixtures
@@ -194,7 +197,7 @@ For full details on managing patterns, see the [git-secrets documentation](https
 
 ## Nx Plugin for AWS Configuration
 
-The workspace ships with an `aws-nx-plugin.config.mts` file at the root. Generators read this file to pick sensible defaults so you don't have to pass the same flags every time. Two settings are particularly useful:
+The workspace ships with an `aws-nx-plugin.config.mts` file at the root. Generators read this file to pick sensible defaults so you don't have to pass the same flags every time:
 
 ```typescript
 // aws-nx-plugin.config.mts
@@ -207,10 +210,16 @@ export default {
   containers: {
     engine: 'docker', // or 'finch'
   },
+  packageManager: {
+    catalogs: true, // or false
+  },
 } satisfies AwsNxPluginConfig;
 ```
 
 - **`iac.provider`** — the default infrastructure-as-code provider (`cdk` or `terraform`) used by generators that emit infrastructure (e.g. `ts#infra`, `ts#api`, `py#api`). Generators that accept an `--iac` flag default to `inherit`, which reads this value.
 - **`containers.engine`** — the container CLI (`docker` or `finch`) baked into generated build/push/login commands. CDK image-asset builds also pick this up via the `CDK_DOCKER` environment variable. See the <Link path="guides/docker-bundling">Docker bundling guide</Link> for details.
+- **`packageManager.catalogs`** — whether generators record dependency versions in the package manager's catalog and reference them with the `catalog:` protocol (see [Single Version Policy](#single-version-policy)). Set it to `false` to have generators write direct version ranges into each project's `package.json` instead. It has no effect on npm, which has no catalog.
 
-You can edit either setting at any time — subsequent generator runs will pick up the new value.
+The <Link path="guides/license">license generator</Link> adds a `license` key to this same file to configure its own behaviour.
+
+You can edit any setting at any time — subsequent generator runs will pick up the new value.

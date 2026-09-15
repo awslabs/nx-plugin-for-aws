@@ -242,6 +242,43 @@ export default defineConfig([
       expect(packageJson.devDependencies).toHaveProperty('rolldown');
     });
 
+    it('should ignore the transient config bundle rolldown writes', async () => {
+      await addTypeScriptBundleTarget(
+        tree,
+        project,
+        {
+          targetFilePath: 'src/index.ts',
+        },
+        declaration,
+      );
+
+      expect(
+        tree.read('apps/test-project/.gitignore', 'utf-8')?.split('\n'),
+      ).toContain('**/rolldown.config.*.*js');
+    });
+
+    it('should not duplicate the transient config bundle ignore', async () => {
+      await addTypeScriptBundleTarget(
+        tree,
+        project,
+        { targetFilePath: 'src/index.ts' },
+        declaration,
+      );
+      await addTypeScriptBundleTarget(
+        tree,
+        project,
+        { targetFilePath: 'src/other.ts' },
+        declaration,
+      );
+
+      expect(
+        tree
+          .read('apps/test-project/.gitignore', 'utf-8')
+          ?.split('\n')
+          .filter((line) => line === '**/rolldown.config.*.*js'),
+      ).toHaveLength(1);
+    });
+
     it('should not add duplicate config entry for same targetFilePath', async () => {
       // First call
       await addTypeScriptBundleTarget(

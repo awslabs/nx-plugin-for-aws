@@ -73,8 +73,8 @@ import { Agent, tool } from '@strands-agents/sdk';
 import { RemoteAgentClientStrands } from '@my-scope/agent-connection';
 import { z } from 'zod';
 
-export const getAgent = async (sessionId: string) => {
-  const remoteAgent = await RemoteAgentClientStrands.create(sessionId);
+export const getAgent = async () => {
+  const remoteAgent = await RemoteAgentClientStrands.create();
   const remoteAgentTool = tool({
     name: 'askRemoteAgent',
     description: 'Delegate a question to the remote RemoteAgent A2A agent and return its reply.',
@@ -88,9 +88,9 @@ export const getAgent = async (sessionId: string) => {
 };
 ```
 
-The `sessionId` parameter is plumbed through from the caller, ensuring consistency for [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
+The AgentCore session ID is propagated to the remote agent automatically via the `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id` header, so `create()` takes no arguments: the agent server binds the inbound request's session into an [`AsyncLocalStorage`](https://nodejs.org/api/async_context.html#class-asynclocalstorage) context (`enterSessionContext` in the generated `router.ts`, or `runWithSessionId` in the A2A/AG-UI session middleware), and the connection client's fetch in `agentcore-fetch.ts` stamps it on every outbound call — ensuring consistency for [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
 
-Under the hood, `RemoteAgentClientStrands.create(sessionId)` returns a Strands `A2AAgent` configured with a SigV4-signing `clientFactory` when deployed to AWS, and a plain `http://localhost:<port>/` endpoint when `LOCAL_DEV=true`. The signing and endpoint resolution live in the framework-agnostic `agentcore-a2a-client-config.ts`; only the thin `agentcore-a2a-client-strands.ts` depends on Strands.
+Under the hood, `RemoteAgentClientStrands.create()` returns a Strands `A2AAgent` configured with a SigV4-signing `clientFactory` when deployed to AWS, and a plain `http://localhost:<port>/` endpoint when `LOCAL_DEV=true`. The signing and endpoint resolution live in the framework-agnostic `agentcore-a2a-client-config.ts`; only the thin `agentcore-a2a-client-strands.ts` depends on Strands.
 
 ## Infrastructure
 

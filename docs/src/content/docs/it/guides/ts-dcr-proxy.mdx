@@ -28,7 +28,7 @@ I client MCP (come Claude Code, Kiro CLI o MCP Inspector) si aspettano di autent
 
 ## Output del generatore
 
-Il generatore crea un <Link path="/it/guides/typescript-project">progetto TypeScript</Link> autonomo contenente i Lambda handler e l'infrastruttura per distribuirli in base al tuo `iac` selezionato.
+Il generatore crea un <Link path="/guides/typescript-project">progetto TypeScript</Link> autonomo contenente i Lambda handler e l'infrastruttura per distribuirli in base al tuo `iac` selezionato.
 
 <FileTree>
 
@@ -41,6 +41,12 @@ Il generatore crea un <Link path="/it/guides/typescript-project">progetto TypeSc
       - authorize.ts Redirects to the Cognito Hosted UI
       - token.ts Injects the App Client secret and exchanges the token
       - mcp-proxy.ts Proxies `/mcp` requests to the upstream MCP server
+    - index.ts Project entry point
+  - rolldown.config.ts Bundle configuration, one entry per handler
+  - README.md Project README
+  - package.json Declares the handlers' dependencies
+  - project.json Adds a bundle target per handler
+  - tsconfig.json / tsconfig.lib.json / tsconfig.spec.json TypeScript configuration
 
 </FileTree>
 
@@ -103,7 +109,7 @@ Fornisci:
 Istanzia il costrutto generato nel tuo stack, passando le proprietà richieste:
 
 ```typescript
-import { DcrProxy } from ':my-scope/common-constructs';
+import { DcrProxy } from '@my-scope/common-constructs';
 
 new DcrProxy(this, 'DcrProxy', {
   userPoolId: userPool.userPoolId,
@@ -141,12 +147,12 @@ Il proxy `/mcp` utilizza le integrazioni API Gateway HTTP API, che hanno un time
 :::
 
 :::tip[Riutilizzare un User Pool esistente]
-Se hai già un User Pool dal generatore <Link path="it/guides/react-website-auth">`ts#website#auth`</Link>, puoi mettere davanti un server MCP per gli stessi utenti del sito web. Vedi <Link path="it/guides/ts-dcr-proxy#riutilizzare-un-useridentity-user-pool">Riutilizzare un UserIdentity User Pool</Link> di seguito.
+Se hai già un User Pool dal generatore <Link path="/guides/react-website-auth">`ts#website#auth`</Link>, puoi mettere davanti un server MCP per gli stessi utenti del sito web. Vedi <Link path="/guides/ts-dcr-proxy#riutilizzare-un-useridentity-user-pool">Riutilizzare un UserIdentity User Pool</Link> di seguito.
 :::
 
 ### Mettere davanti un MCP Server
 
-Per mettere davanti un server MCP generato con il generatore <Link path="it/guides/ts-mcp-server">`ts#mcp-server`</Link> (o <Link path="it/guides/py-mcp-server">`py#mcp-server`</Link>) usando `--auth cognito`, passa lo **stesso** User Pool e App Client sia al server MCP che al proxy, e usa l'`invocationUrl` del costrutto del server MCP come `upstreamUrl` del proxy.
+Per mettere davanti un server MCP generato con il generatore <Link path="/guides/ts-mcp-server">`ts#mcp-server`</Link> (o <Link path="/guides/py-mcp-server">`py#mcp-server`</Link>) usando `--auth cognito`, passa lo **stesso** User Pool e App Client sia al server MCP che al proxy, e usa l'`invocationUrl` del costrutto del server MCP come `upstreamUrl` del proxy.
 
 <Infrastructure>
 <Fragment slot="cdk">
@@ -155,8 +161,9 @@ import {
   DcrProxy,
   MyProjectMcpServer,
   UserIdentity,
-} from ':my-scope/common-constructs';
+} from '@my-scope/common-constructs';
 import { OAuthScope } from 'aws-cdk-lib/aws-cognito';
+import * as kms from 'aws-cdk-lib/aws-kms';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 
 const identity = new UserIdentity(this, 'Identity');
@@ -179,6 +186,9 @@ const proxyClient = identity.userPool.addClient('DcrProxyClient', {
 // Store the App Client secret in Secrets Manager for the token handler to read
 const clientSecret = new secretsmanager.Secret(this, 'ClientSecret', {
   secretStringValue: proxyClient.userPoolClientSecret,
+  encryptionKey: new kms.Key(this, 'ClientSecretKey', {
+    enableKeyRotation: true,
+  }),
 });
 
 // The MCP server, authorizing JWTs issued for the same App Client
@@ -254,7 +264,7 @@ module "dcr_proxy" {
 
 ### Mettere davanti un AgentCore Gateway
 
-Per mettere davanti un [AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) generato con il generatore <Link path="it/guides/agentcore-gateway">`agentcore-gateway`</Link> usando `--auth cognito`, passa lo **stesso** User Pool e App Client sia al gateway che al proxy, e usa il `gatewayUrl` del costrutto del gateway come `upstreamUrl` del proxy.
+Per mettere davanti un [AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) generato con il generatore <Link path="/guides/agentcore-gateway">`agentcore-gateway`</Link> usando `--auth cognito`, passa lo **stesso** User Pool e App Client sia al gateway che al proxy, e usa il `gatewayUrl` del costrutto del gateway come `upstreamUrl` del proxy.
 
 :::caution
 Il flusso OAuth del proxy richiede un gateway autenticato con Cognito. Genera il gateway con `--auth cognito`; il gateway predefinito autenticato con IAM non è compatibile con il proxy.
@@ -267,8 +277,9 @@ import {
   DcrProxy,
   MyGateway,
   UserIdentity,
-} from ':my-scope/common-constructs';
+} from '@my-scope/common-constructs';
 import { OAuthScope } from 'aws-cdk-lib/aws-cognito';
+import * as kms from 'aws-cdk-lib/aws-kms';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 
 const identity = new UserIdentity(this, 'Identity');
@@ -291,6 +302,9 @@ const proxyClient = identity.userPool.addClient('DcrProxyClient', {
 // Store the App Client secret in Secrets Manager for the token handler to read
 const clientSecret = new secretsmanager.Secret(this, 'ClientSecret', {
   secretStringValue: proxyClient.userPoolClientSecret,
+  encryptionKey: new kms.Key(this, 'ClientSecretKey', {
+    enableKeyRotation: true,
+  }),
 });
 
 // The gateway, authorizing JWTs issued for the same App Client
@@ -307,7 +321,7 @@ new DcrProxy(this, 'DcrProxy', {
   cognitoClientSecretArn: clientSecret.secretArn,
   cognitoHostedUiBase: identity.userPoolDomain.baseUrl(),
   // Use the gateway construct's URL rather than hardcoding it
-  upstreamUrl: gateway.gateway.gatewayUrl,
+  upstreamUrl: gateway.gatewayUrl,
 });
 ```
 </Fragment>
@@ -341,7 +355,7 @@ resource "aws_secretsmanager_secret_version" "client_secret" {
 
 # The gateway, authorizing JWTs issued for the same App Client
 module "my_gateway" {
-  source = "../../common/terraform/src/app/agentcore-gateway/my-gateway"
+  source = "../../common/terraform/src/app/gateways/my-gateway"
 
   user_pool_id         = module.user_identity.user_pool_id
   user_pool_client_ids = [aws_cognito_user_pool_client.dcr_proxy.id]
@@ -455,7 +469,7 @@ Qualsiasi client MCP che supporta il trasporto Streamable HTTP insieme all'autor
 
 ## Riutilizzare un UserIdentity User Pool
 
-Se hai già un User Pool dal generatore <Link path="it/guides/react-website-auth">`ts#website#auth`</Link> (il costrutto `UserIdentity`), puoi mettere davanti un server MCP per gli **stessi utenti** che accedono al tuo sito web. Riutilizza il suo `userPool`, ma aggiungi un **App Client separato** per il proxy: il client del sito web è un client pubblico senza secret, mentre il DCR proxy richiede un client confidenziale (`generateSecret: true`) il cui secret viene iniettato dal token handler durante lo scambio del token.
+Se hai già un User Pool dal generatore <Link path="/guides/react-website-auth">`ts#website#auth`</Link> (il costrutto `UserIdentity`), puoi mettere davanti un server MCP per gli **stessi utenti** che accedono al tuo sito web. Riutilizza il suo `userPool`, ma aggiungi un **App Client separato** per il proxy: il client del sito web è un client pubblico senza secret, mentre il DCR proxy richiede un client confidenziale (`generateSecret: true`) il cui secret viene iniettato dal token handler durante lo scambio del token.
 
 `UserIdentity` configura il dominio User Pool con [Managed Login (versione 2)](https://docs.aws.amazon.com/cognito/latest/developerguide/managed-login.html). Managed Login richiede uno **stile di branding per App Client**, quindi devi crearne uno per il nuovo client proxy — altrimenti la sua pagina di login ospitata restituisce `403`.
 
@@ -466,8 +480,9 @@ import {
   DcrProxy,
   MyProjectMcpServer,
   UserIdentity,
-} from ':my-scope/common-constructs';
+} from '@my-scope/common-constructs';
 import { OAuthScope, CfnManagedLoginBranding } from 'aws-cdk-lib/aws-cognito';
+import * as kms from 'aws-cdk-lib/aws-kms';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 
 // The user pool created by ts#website#auth for your website users
@@ -492,6 +507,9 @@ new CfnManagedLoginBranding(this, 'DcrProxyClientBranding', {
 
 const clientSecret = new secretsmanager.Secret(this, 'ClientSecret', {
   secretStringValue: proxyClient.userPoolClientSecret,
+  encryptionKey: new kms.Key(this, 'ClientSecretKey', {
+    enableKeyRotation: true,
+  }),
 });
 
 const mcpServer = new MyProjectMcpServer(this, 'MyProjectMcpServer', {

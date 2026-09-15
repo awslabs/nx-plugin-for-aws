@@ -61,6 +61,8 @@ import OptionFilter from '@components/option-filter.astro';
         - router.ts tRPC router with agent procedures
         - agent.ts Main agent definition with sample tools
         - session.ts Resolves the SessionManager used to persist conversation state
+        - schema/
+          - z-async-iterable.ts Zod schema for the router's streamed responses
         - client.ts Vended client for invoking your agent
         - agent-core-trpc-client.ts Client factory for connecting to agents on AgentCore Runtime
         - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
@@ -81,6 +83,8 @@ import OptionFilter from '@components/option-filter.astro';
         - index.ts A2A Express server entry point
         - agent.ts Main agent definition with sample tools
         - session.ts Resolves the SessionManager used to persist conversation state
+        - middleware/
+          - session-id-middleware.ts Binds the inbound AgentCore session ID for the request
         - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - package.json Updated with Strands and Express dependencies
     - project.json Updated with agent serve targets
@@ -99,6 +103,8 @@ import OptionFilter from '@components/option-filter.astro';
         - index.ts AG-UI server entry point (Express + SSE)
         - agent.ts Main agent definition with sample tools
         - session.ts Resolves the SessionManager used to persist conversation state
+        - middleware/
+          - session-id-middleware.ts Binds the inbound AgentCore session ID for the request
         - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - package.json Updated with Strands and AG-UI dependencies
     - project.json Updated with agent serve targets
@@ -280,7 +286,9 @@ Agent(및 연결된 모든 것)를 로컬에서 실행하려면 프로젝트의 
 
 <NxCommands commands={['agent-dev your-project']} />
 
-이는 `tsx --watch`를 사용하여 파일이 변경될 때 서버를 자동으로 재시작합니다. 에이전트는 `http://localhost:8081`(또는 여러 에이전트가 있는 경우 할당된 포트)에서 사용할 수 있습니다.
+이는 `tsx --watch`를 사용하여 파일이 변경될 때 서버를 자동으로 재시작합니다. 에이전트는 `http://localhost:8081`(또는 여러 에이전트가 있는 경우 할당된 포트 — 프로젝트의 `project.json`에서 `metadata.ports`를 읽으세요)에서 사용할 수 있습니다.
+
+`<your-agent-name>-serve` 타겟도 생성되며, 이는 배포된 인프라에 대해 에이전트를 실행하므로 `RUNTIME_CONFIG_APP_ID`를 설정해야 합니다. `dev`와 `serve`의 차이점은 <Link path="guides/local-development">Local Development</Link> 가이드를 참조하세요.
 
 ### Agent와 채팅
 
@@ -400,12 +408,16 @@ CloudWatch AWS 콘솔에서 메뉴의 "GenAI Observability"를 선택하여 추�
 
 ## Agent 호출
 
+<OptionFilter when={{ protocol: 'http' }} description="tRPC-over-WebSocket client factory invocation details">
 에이전트 통신은 WebSocket을 통한 tRPC를 통해 전송됩니다. 따라서 `client.ts`에서 생성된 타입 안전 클라이언트 팩토리를 사용하는 것이 좋습니다.
 
-<OptionFilter when={{ protocol: 'http' }} description="tRPC-over-WebSocket client factory invocation details">
 ### 로컬 서버 호출
 
-클라이언트 팩토리의 `.local` 팩토리 메서드를 사용하여 로컬에서 실행 중인 에이전트를 호출할 수 있습니다.
+`<your-agent-name>-dev` 타겟으로 에이전트를 시작하세요:
+
+<NxCommands commands={['agent-dev your-project']} />
+
+그런 다음 클라이언트 팩토리의 `.local` 팩토리 메서드를 사용하여 호출합니다.
 
 예를 들어 작업 공간에 클라이언트를 가져오는 `scripts/test.ts`라는 파일을 생성할 수 있습니다:
 
@@ -419,6 +431,8 @@ const client = MyAgentClient.local({ url: 'http://localhost:8081/ws' });
 
 client.invoke.subscribe({ prompt: 'what is 1 plus 1?' }, { onData: console.log });
 ```
+
+에이전트에 할당된 포트로 대체하세요 — 프로젝트의 `project.json`에서 `metadata.ports`를 읽으세요.
 
 :::tip[빠른 테스트]
 에이전트를 빠르게 테스트하는 방법으로 `tsx`로 실행하세요.

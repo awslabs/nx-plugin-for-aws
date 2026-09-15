@@ -138,6 +138,23 @@ Here's how to run a generator:
     expect(result).not.toContain('<RunGenerator');
   });
 
+  // The architecture diagram is artwork the docs site draws; the prose beside it
+  // carries the same description, so an agent reading a guide gets that instead
+  // of a tag it can make nothing of.
+  it('should drop ArchitectureDiagram components', async () => {
+    const input = `
+# Test Guide
+The deployed API has the following architecture:
+<ArchitectureDiagram options={{ infra: 'rest-lambda' }} />
+`;
+
+    const result = await postProcessGuide(input, generators);
+    expect(result).toContain(
+      'The deployed API has the following architecture:',
+    );
+    expect(result).not.toContain('ArchitectureDiagram');
+  });
+
   it('should transform RunGenerator components with package manager prefix', async () => {
     const input = `
 # Test Guide

@@ -31,8 +31,8 @@ import {
   type TsRdbGeneratorSchema,
   tsAgentGenerator,
   tsApiGenerator,
-  tsAstroDocsGenerator,
   tsDcrProxyGenerator,
+  tsDocsGenerator,
   tsDynamoDBGenerator,
   tsInfraGenerator,
   tsLambdaFunctionGenerator,
@@ -116,7 +116,7 @@ export const internalTestMatrixGenerator = async (
     iac: 'inherit',
     ...projectDefaults,
   });
-  await tsAstroDocsGenerator(tree, { name: 'docs-site', ...defaults });
+  await tsDocsGenerator(tree, { name: 'docs-site', ...defaults });
   await tsWebsiteAuthGenerator(tree, {
     project: ts('website'),
     cognitoDomain: 'test',

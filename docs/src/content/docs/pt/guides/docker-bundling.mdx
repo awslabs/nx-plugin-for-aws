@@ -5,6 +5,7 @@ description: Construa e implante imagens Docker para projetos TypeScript e Pytho
 
 import { FileTree, Tabs, TabItem, Code } from '@astrojs/starlight/components';
 import NxCommands from '@components/nx-commands.astro';
+import InstallCommand from '@components/install-command.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 import Link from '@components/link.astro';
 import Infrastructure from '@components/infrastructure.astro';
@@ -18,9 +19,9 @@ export const trivyTarget = `{
       "executor": "nx:run-commands",
       "options": {
         "commands": [
-          "rimraf dist/packages/my-project/trivy",
-          "make-dir dist/packages/my-project/trivy",
-          "ncp packages/my-project/.trivyignore dist/packages/my-project/trivy/.trivyignore",
+          "shx rm -rf dist/packages/my-project/trivy",
+          "shx mkdir -p dist/packages/my-project/trivy",
+          "shx cp packages/my-project/.trivyignore dist/packages/my-project/trivy/.trivyignore",
           "docker save -o dist/packages/my-project/trivy/image.tar my-scope-my-project:latest",
           "docker run --rm -v \\"./dist/packages/my-project/trivy\\":/scan public.ecr.aws/aquasecurity/trivy:${CONTAINER_VERSIONS.trivy} image --input /scan/image.tar --ignorefile /scan/.trivyignore --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress -q"
         ],
@@ -31,7 +32,7 @@ export const trivyTarget = `{
   }
 }`;
 
-Vários geradores (como <Link path="/pt/guides/ts-agent">`ts#agent`</Link> e <Link path="/pt/guides/py-agent">`py#agent`</Link>) produzem uma imagem Docker que é enviada para o Amazon ECR e consumida pela infraestrutura AWS. Este guia descreve o padrão que eles seguem para que você possa aplicá-lo a outros casos de uso — por exemplo, executar um projeto <Link path="/pt/guides/fastapi">FastAPI</Link> no Amazon ECS, ou implantar um servidor Express containerizado.
+Vários geradores (como <Link path="/guides/ts-agent">`ts#agent`</Link> e <Link path="/guides/py-agent">`py#agent`</Link>) produzem uma imagem Docker que é enviada para o Amazon ECR e consumida pela infraestrutura AWS. Este guia descreve o padrão que eles seguem para que você possa aplicá-lo a outros casos de uso — por exemplo, executar um projeto <Link path="/guides/fastapi">FastAPI</Link> no Amazon ECS, ou implantar um servidor Express containerizado.
 
 :::tip[Docker ou Finch]
 O mecanismo de contêiner usado para construir imagens é escolhido no momento da criação do workspace através da flag `--containers` (`docker`, `finch`, ou `infer` — o padrão — que detecta automaticamente o que está instalado). [Finch](https://runfinch.com/) é uma alternativa open-source e drop-in para o Docker. A seleção é registrada em `aws-nx-plugin.config.mts` e aplicada a todos os geradores que emitem comandos de construção de contêiner. As construções de image asset do CDK respeitam a escolha através da variável de ambiente `CDK_DOCKER`.
@@ -75,7 +76,7 @@ Manter a etapa de bundle no Nx (em vez de dentro do `Dockerfile`) significa:
 
 ### Bundle Target
 
-Configure um target `bundle` que invoca o Rolldown. Se você está começando de um <Link path="/pt/guides/typescript-project">`ts#project`</Link>, adicione o seguinte ao seu `project.json`:
+Configure um target `bundle` que invoca o Rolldown. Se você está começando de um <Link path="/guides/typescript-project">`ts#project`</Link>, adicione o seguinte ao seu `project.json`:
 
 ```json
 {
@@ -132,10 +133,17 @@ Alguns pacotes npm não podem ser empacotados porque dependem de `require` dinâ
 
 ### Dockerfile
 
-Crie um `Dockerfile` no diretório de origem do seu projeto. O arquivo não faz nada além de fazer `COPY` do bundle para uma imagem base Node, mais `npm install` de quaisquer pacotes `external` que não puderam ser empacotados. Coloque a etapa `RUN npm install` **antes** do `COPY`, para que o Docker possa fazer cache da camada `node_modules` instalada e só executá-la novamente quando a lista de dependências realmente mudar:
+Crie um `Dockerfile` no diretório de origem do seu projeto. O arquivo não faz nada além de [aplicar as atualizações de segurança da imagem base](#aplique-as-atualizações-de-segurança-da-distribuição), fazer `COPY` do bundle para uma imagem base Node, mais `npm install` de quaisquer pacotes `external` que não puderam ser empacotados. Coloque a etapa `RUN npm install` **antes** do `COPY`, para que o Docker possa fazer cache da camada `node_modules` instalada e só executá-la novamente quando a lista de dependências realmente mudar:
 
 ```dockerfile
 FROM public.ecr.aws/docker/library/node:lts
+
+# Apply the distribution's security updates: base image tags lag behind the
+# security suite, so their OS packages carry vulnerabilities that already have a
+# published fix.
+RUN apt-get update && \
+    apt-get upgrade -y --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -170,7 +178,7 @@ Adicione um target `docker` que:
       "executor": "nx:run-commands",
       "options": {
         "commands": [
-          "ncp packages/my-project/src/Dockerfile dist/packages/my-project/bundle/Dockerfile",
+          "shx cp packages/my-project/src/Dockerfile dist/packages/my-project/bundle/Dockerfile",
           "docker build --platform linux/arm64 -t my-scope-my-project:latest dist/packages/my-project/bundle"
         ],
         "parallel": false
@@ -186,7 +194,9 @@ Defina `"cache": false` em targets de construção de imagem. Uma imagem constru
 :::
 
 :::tip[Cópia de arquivo multiplataforma]
-O pacote `ncp` fornece um comando de cópia de arquivo/diretório multiplataforma, evitando `cp` (indisponível no Windows). Instale-o na raiz do seu workspace com `pnpm add -D -w ncp`.
+O pacote `shx` fornece comandos `cp`, `rm` e `mkdir` multiplataforma, evitando os builtins do shell (indisponíveis no Windows). Instale-o na raiz do seu workspace:
+
+<InstallCommand pkg="shx" dev />
 :::
 
 Executar este target produz uma imagem local com tag `my-scope-my-project:latest`, construída a partir do contexto mínimo em `dist/packages/my-project/bundle/`:
@@ -203,7 +213,7 @@ Para Terraform, a etapa `docker build` é necessária — o padrão `null_resour
 
 ### Bundle Target
 
-Configure um target `bundle` que usa `uv` para exportar e instalar dependências para sua plataforma alvo. O gerador <Link path="/pt/guides/python-project">`py#project`</Link> e o gerador <Link path="/pt/guides/python-lambda-function">`py#lambda-function`</Link> configuram isso para você. A configuração do target se parece com:
+Configure um target `bundle` que usa `uv` para exportar e instalar dependências para sua plataforma alvo. O gerador <Link path="/guides/python-project">`py#project`</Link> e o gerador <Link path="/guides/python-lambda-function">`py#lambda-function`</Link> configuram isso para você. A configuração do target se parece com:
 
 ```json
 {
@@ -233,10 +243,17 @@ Executar `nx bundle my-project` produz `dist/packages/my-project/bundle-arm/` co
 
 ### Dockerfile
 
-O `Dockerfile` simplesmente copia o bundle para uma imagem base Python. Como o `uv` já instalou todas as dependências no diretório do bundle, você não precisa executar `pip install` dentro da imagem:
+O `Dockerfile` [aplica as atualizações de segurança da imagem base](#aplique-as-atualizações-de-segurança-da-distribuição), e então copia o bundle para uma imagem base Python. Como o `uv` já instalou todas as dependências no diretório do bundle, você não precisa executar `pip install` dentro da imagem:
 
 ```dockerfile
 FROM public.ecr.aws/docker/library/python:3.14-slim
+
+# Apply the distribution's security updates: base image tags lag behind the
+# security suite, so their OS packages carry vulnerabilities that already have a
+# published fix.
+RUN apt-get update && \
+    apt-get upgrade -y --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -263,10 +280,10 @@ Adicione um target `docker` que copia o `Dockerfile` para o diretório de saída
       "executor": "nx:run-commands",
       "options": {
         "commands": [
-          "rimraf dist/packages/my-project/docker",
-          "make-dir dist/packages/my-project/docker",
-          "ncp dist/packages/my-project/bundle-arm dist/packages/my-project/docker",
-          "ncp packages/my-project/src/Dockerfile dist/packages/my-project/docker/Dockerfile",
+          "shx rm -rf dist/packages/my-project/docker",
+          "shx mkdir -p dist/packages/my-project/docker",
+          "shx cp -R dist/packages/my-project/bundle-arm/. dist/packages/my-project/docker",
+          "shx cp packages/my-project/src/Dockerfile dist/packages/my-project/docker/Dockerfile",
           "docker build --platform linux/arm64 -t my-scope-my-project:latest dist/packages/my-project/docker"
         ],
         "parallel": false
@@ -285,7 +302,13 @@ Isso limpa o diretório de saída, e então copia tanto o conteúdo do bundle qu
 
 É uma boa prática escanear suas imagens em busca de vulnerabilidades conhecidas. Os geradores que seguem este padrão adicionam um target `trivy` que escaneia a imagem construída com [Trivy](https://trivy.dev/), executando a partir da [imagem Trivy hospedada no ECR](https://gallery.ecr.aws/aquasecurity/trivy), e sai com código diferente de zero em descobertas `HIGH` ou `CRITICAL`.
 
-Adicione um target `trivy` que depende (`dependsOn`) do seu target `docker`. Ele salva a imagem construída em um tarball e a escaneia através de um bind mount relativo ao workspace, para que o mesmo comando funcione tanto com `docker` quanto com `finch`:
+O target copia um `.trivyignore` da raiz do seu projeto para o diretório de escaneamento e o passa para o Trivy com `--ignorefile`, então crie esse arquivo primeiro — um vazio está bom, e é onde você [suprime descobertas](#suprimindo-descobertas) mais tarde:
+
+```bash
+touch packages/my-project/.trivyignore
+```
+
+Então adicione um target `trivy` que depende (`dependsOn`) do seu target `docker`. Ele salva a imagem construída em um tarball e a escaneia através de um bind mount relativo ao workspace, para que o mesmo comando funcione tanto com `docker` quanto com `finch`:
 
 <Code lang="json" code={trivyTarget} />
 
@@ -367,7 +390,7 @@ const image = new DockerImageAsset(this, 'MyImage', {
 });
 ```
 
-O helper `findWorkspaceRoot` é gerado pelo gerador <Link path="/pt/guides/typescript-infrastructure">`ts#infra`</Link> e exportado de `@my-scope/common-constructs`. Se você não está usando constructs compartilhados, você pode codificar o caminho para o diretório `dist` relativo a onde `cdk` é invocado — tipicamente a raiz do workspace — e omitir completamente a chamada `findWorkspaceRoot`.
+O helper `findWorkspaceRoot` é gerado pelo gerador <Link path="/guides/typescript-infrastructure">`ts#infra`</Link> e exportado de `@my-scope/common-constructs`. Se você não está usando constructs compartilhados, você pode codificar o caminho para o diretório `dist` relativo a onde `cdk` é invocado — tipicamente a raiz do workspace — e omitir completamente a chamada `findWorkspaceRoot`.
 
 :::note[Executando bundle antes do synth]
 O CDK não executa os targets `bundle`/`docker` automaticamente — você deve executar `nx build my-project` (ou conectar o target deploy para depender de `build`) antes de `cdk deploy`. Os geradores que usam este padrão declaram `docker` e `bundle` como dependências de `build` para que isso aconteça de forma transparente.
@@ -466,8 +489,8 @@ O bloco `data.external.docker_digest` garante que o `null_resource` seja executa
 
 ## Leitura Adicional
 
-- <Link path="/pt/guides/ts-agent">Gerador `ts#agent`</Link> — um exemplo completo deste padrão para um agente TypeScript implantado no Bedrock AgentCore Runtime.
-- <Link path="/pt/guides/py-agent">Gerador `py#agent`</Link> — o equivalente para Python.
+- <Link path="/guides/ts-agent">Gerador `ts#agent`</Link> — um exemplo completo deste padrão para um agente TypeScript implantado no Bedrock AgentCore Runtime.
+- <Link path="/guides/py-agent">Gerador `py#agent`</Link> — o equivalente para Python.
 - [Documentação do Rolldown](https://rolldown.rs/) — referência de configuração para o bundler TypeScript.
 - [Documentação do `uv`](https://docs.astral.sh/uv/) — referência para exportação e instalação de dependências Python.
 

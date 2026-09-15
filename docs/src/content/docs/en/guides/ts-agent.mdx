@@ -61,6 +61,8 @@ The generator will add the following files to your existing TypeScript project. 
         - router.ts tRPC router with agent procedures
         - agent.ts Main agent definition with sample tools
         - session.ts Resolves the SessionManager used to persist conversation state
+        - schema/
+          - z-async-iterable.ts Zod schema for the router's streamed responses
         - client.ts Vended client for invoking your agent
         - agent-core-trpc-client.ts Client factory for connecting to agents on AgentCore Runtime
         - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
@@ -81,6 +83,8 @@ The entry point uses the [Strands A2A Express Server](https://strandsagents.com/
         - index.ts A2A Express server entry point
         - agent.ts Main agent definition with sample tools
         - session.ts Resolves the SessionManager used to persist conversation state
+        - middleware/
+          - session-id-middleware.ts Binds the inbound AgentCore session ID for the request
         - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - package.json Updated with Strands and Express dependencies
     - project.json Updated with agent serve targets
@@ -99,6 +103,8 @@ The entry point uses [`@ag-ui/aws-strands`](https://www.npmjs.com/package/@ag-ui
         - index.ts AG-UI server entry point (Express + SSE)
         - agent.ts Main agent definition with sample tools
         - session.ts Resolves the SessionManager used to persist conversation state
+        - middleware/
+          - session-id-middleware.ts Binds the inbound AgentCore session ID for the request
         - Dockerfile Container image definition (only when `infra` is `agentcore-ecr`)
     - package.json Updated with Strands and AG-UI dependencies
     - project.json Updated with agent serve targets
@@ -280,7 +286,9 @@ If you have added multiple components to your project (agents, MCP servers, etc.
 
 <NxCommands commands={['agent-dev your-project']} />
 
-This uses `tsx --watch` to automatically restart the server when files change. The agent will be available at `http://localhost:8081` (or the assigned port if you have multiple agents).
+This uses `tsx --watch` to automatically restart the server when files change. The agent will be available at `http://localhost:8081` (or the assigned port if you have multiple agents — read it from `metadata.ports` in the project's `project.json`).
+
+A `<your-agent-name>-serve` target is also generated, which runs the agent against your deployed infrastructure and therefore requires `RUNTIME_CONFIG_APP_ID` to be set. See the <Link path="guides/local-development">Local Development</Link> guide for the difference between `dev` and `serve`.
 
 ### Chat with Your Agent
 
@@ -400,12 +408,16 @@ Generate the session ID rather than deriving it from user-supplied values such a
 
 ## Invoking your Agent
 
+<OptionFilter when={{ protocol: 'http' }} description="tRPC-over-WebSocket client factory invocation details">
 Agent communication is transmitted via tRPC over WebSocket. As such, it's recommended to use the generated type-safe client factory in `client.ts`.
 
-<OptionFilter when={{ protocol: 'http' }} description="tRPC-over-WebSocket client factory invocation details">
 ### Invoke the Local Server
 
-You can invoke a locally running agent using the `.local` factory method from the client factory.
+Start your agent with the `<your-agent-name>-dev` target:
+
+<NxCommands commands={['agent-dev your-project']} />
+
+Then invoke it using the `.local` factory method from the client factory.
 
 You can, for example create a file named `scripts/test.ts` in your workspace which imports the client:
 
@@ -419,6 +431,8 @@ const client = MyAgentClient.local({ url: 'http://localhost:8081/ws' });
 
 client.invoke.subscribe({ prompt: 'what is 1 plus 1?' }, { onData: console.log });
 ```
+
+Substitute the port assigned to your agent — read it from `metadata.ports` in the project's `project.json`.
 
 :::tip[Quick Testing]
 Run with `tsx` as a quick way to test out your agent.

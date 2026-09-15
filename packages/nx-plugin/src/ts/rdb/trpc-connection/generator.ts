@@ -10,6 +10,11 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import camelCase from 'lodash.camelcase';
+import {
+  addDestructuredImport,
+  applyGritQL,
+  matchGritQL,
+} from '../../../utils/ast.js';
 import { formatFilesInSubtree } from '../../../utils/format.js';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics.js';
 import { kebabCase, pascalCase } from '../../../utils/names.js';
@@ -60,6 +65,31 @@ export const tsRdbTrpcConnectionGenerator = async (
     { rdbNameKebab, rdbNameCamel, rdbNamePascal, rdbPackageAlias, engine },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
+
+  // Widen the root context so procedures composed with the plugin typecheck.
+  const initPath = joinPathFragments(sourceProject.root, 'src', 'init.ts');
+  const contextInterface = `I${rdbNamePascal}Context`;
+  if (tree.exists(initPath)) {
+    await applyGritQL(
+      tree,
+      initPath,
+      `\`export type Context = $ctx;\` => \`export type Context = $ctx & ${contextInterface};\` where { $ctx <: not contains \`${contextInterface}\` }`,
+    );
+
+    const contextIncludesDb = await matchGritQL(
+      tree,
+      initPath,
+      `\`export type Context = $ctx;\` where { $ctx <: contains \`${contextInterface}\` }`,
+    );
+    if (contextIncludesDb) {
+      await addDestructuredImport(
+        tree,
+        initPath,
+        [contextInterface],
+        `./middleware/${rdbNameKebab}.js`,
+      );
+    }
+  }
 
   // Recorded so the version sync can identify this connection.
   addComponentGeneratorMetadata(

@@ -3,11 +3,35 @@ title: Python Projects
 description: Reference documentation for Python Projects
 generator: py#project
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { Code, FileTree } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
 import RunGenerator from '@components/run-generator.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import NxCommands from '@components/nx-commands.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
+import { LAMBDA_RUNTIME_VERSIONS } from '../../../../../../packages/nx-plugin/src/utils/versions';
+
+export const bundleTarget = `{
+  "targets": {
+    "bundle": {
+      "dependsOn": ["bundle-x86"]
+    },
+    "bundle-x86": {
+      "cache": true,
+      "inputs": ["production", "^production"],
+      "executor": "nx:run-commands",
+      "outputs": ["{workspaceRoot}/dist/{projectRoot}/bundle-x86"],
+      "options": {
+        "commands": [
+          "uv export --frozen --no-dev --no-editable --project {projectRoot} --package my_scope.my_library -o dist/{projectRoot}/bundle-x86/requirements.txt",
+          "uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform x86_64-manylinux_2_28 --python-version ${LAMBDA_RUNTIME_VERSIONS.python} --target dist/{projectRoot}/bundle-x86 -r dist/{projectRoot}/bundle-x86/requirements.txt"
+        ],
+        "parallel": false
+      },
+      "dependsOn": ["compile"]
+    }
+  }
+}`;
 
 The Python project generator can be used to create a modern [Python](https://www.python.org/) library or application configured with best practices, managed with [UV](https://docs.astral.sh/uv/), a single lockfile and virtual environment in an [UV workspace](https://docs.astral.sh/uv/concepts/projects/workspaces/), [pytest](https://docs.pytest.org/en/stable/) for running tests, [Ruff](https://docs.astral.sh/ruff/) for static analysis, and [ty](https://docs.astral.sh/ty/) for type checking.
 
@@ -87,30 +111,9 @@ This will add the dependency to your project's `pyproject.toml` file, and update
 
 #### Runtime Code
 
-When you use your Python project as runtime code (for example as the handler for an AWS lambda function), you will need to create a bundle of the source code and all its dependencies. You can achieve this by adding a target such as the following to your `project.json` file:
+When you use your Python project as runtime code (for example as the handler for an AWS lambda function), you will need to create a bundle of the source code and all its dependencies. The <Link path="guides/python-lambda-function">`py#lambda-function`</Link>, <Link path="guides/fastapi">`py#api`</Link> and <Link path="guides/py-mcp-server">`py#mcp-server`</Link> generators add this for you. To add one by hand, add targets such as the following to your `project.json` file, matching the shape those generators vend:
 
-```json title="project.json"
-{
-  ...
-  "targets": {
-    ...
-    "bundle": {
-      "cache": true,
-      "inputs": ["production", "^production"],
-      "executor": "nx:run-commands",
-      "outputs": ["{workspaceRoot}/dist/packages/my_library/bundle"],
-      "options": {
-        "commands": [
-          "uv export --frozen --no-dev --no-editable --project packages/my_library --package my_scope.my_library -o dist/packages/my_library/bundle/requirements.txt",
-          "uv pip install -n --no-deps --no-installer-metadata --no-compile-bytecode --python-platform x86_64-manylinux_2_28 --python `uv python pin` --target dist/packages/my_library/bundle -r dist/packages/my_library/bundle/requirements.txt"
-        ],
-        "parallel": false
-      },
-      "dependsOn": ["compile"]
-    },
-  },
-}
-```
+<Code lang="json" title="project.json" code={bundleTarget} />
 
 ### Installing
 
@@ -158,7 +161,7 @@ The deploy targets depend on `assemble`, so deploying builds only what it is abo
 
 ### Writing Tests
 
-Tests should be written in the `test` directory within your project, in python files prefixed with `test_`, for example:
+Tests should be written in the `tests` directory within your project, in python files prefixed with `test_`, for example:
 
 <FileTree>
   - my_library

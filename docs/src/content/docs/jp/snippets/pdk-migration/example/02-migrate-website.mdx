@@ -8,24 +8,25 @@ import Link from '@components/link.astro';
 import NxCommands from '@components/nx-commands.astro';
 import Drawer from '@components/drawer.astro';
 import InstallCommand from '@components/install-command.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
 
 ショッピングリストアプリケーションで使用されている `CloudscapeReactTsWebsiteProject` は、CloudScape と Cognito 認証が組み込まれた React ウェブサイトを構成していました。
 
-このプロジェクトタイプは [`create-react-app`](https://github.com/facebook/create-react-app) を活用していましたが、これは現在非推奨となっています。このガイドでウェブサイトを移行するために、より現代的でサポートされている技術、すなわち [Vite](https://vite.dev/) を使用する <Link path="/jp/guides/react-website">`ts#website` ジェネレーター</Link> を使用します。
+このプロジェクトタイプは [`create-react-app`](https://github.com/facebook/create-react-app) を活用していましたが、これは現在非推奨となっています。このガイドでウェブサイトを移行するために、より現代的でサポートされている技術、すなわち [Vite](https://vite.dev/) を使用する <Link path="/guides/react-website">`ts#website` ジェネレーター</Link> を使用します。
 
 移行の一環として、PDK で構成された React Router から [TanStack Router](https://tanstack.com/router) に移行します。これにより、ウェブサイトのルーティングに追加の型安全性が加わります。
 
 #### React Webサイトの生成
 
-<Link path="/jp/guides/react-website">`ts#website` ジェネレーター</Link> を `framework` を `react` に設定して実行し、`packages/website` にウェブサイトプロジェクトをセットアップします。ショッピングリストアプリケーションは CloudScape コンポーネントで構築されているため、`ux` を `cloudscape` に設定します（デフォルトは `shadcn` です）：
+<Link path="/guides/react-website">`ts#website` ジェネレーター</Link> を `framework` を `react` に設定して実行し、`packages/website` にウェブサイトプロジェクトをセットアップします。ショッピングリストアプリケーションは CloudScape コンポーネントで構築されているため、`ux` を `cloudscape` に設定します（デフォルトは `shadcn` です）：
 
-<RunGenerator generator="ts#website" noInteractive requiredParameters={{ name: 'website', framework: 'react', ux: 'cloudscape' }} />
+<RunGenerator generator="ts#website" noInteractive requiredParameters={{ name: 'website', framework: 'react', ux: 'cloudscape' }} noOptions />
 
 #### Cognito 認証の追加
 
-上記の React ウェブサイトジェネレーターは、`CloudscapeReactTsWebsiteProject` のようにデフォルトで cognito 認証をバンドルしていません。代わりに、<Link path="/jp/guides/react-website-auth">`ts#website#auth` ジェネレーター</Link> を介して明示的に追加されます。
+上記の React ウェブサイトジェネレーターは、`CloudscapeReactTsWebsiteProject` のようにデフォルトで cognito 認証をバンドルしていません。代わりに、<Link path="/guides/react-website-auth">`ts#website#auth` ジェネレーター</Link> を介して明示的に追加されます。
 
-<RunGenerator generator="ts#website#auth" noInteractive requiredParameters={{ project: 'website', cognitoDomain: 'shopping-list' }} />
+<RunGenerator generator="ts#website#auth" noInteractive requiredParameters={{ project: 'website', cognitoDomain: 'shopping-list' }} noOptions />
 
 これにより、Cognito ホストUI を使用してユーザーがログインするための適切なリダイレクトを管理する React コンポーネントが追加されます。また、`packages/common/constructs` に Cognito リソースをデプロイするための CDK コンストラクト（`UserIdentity` と呼ばれる）も追加されます。
 
@@ -33,13 +34,12 @@ import InstallCommand from '@components/install-command.astro';
 PDK の `CloudscapeReactTsWebsiteProject` は、アプリ内で Cognito ログインコンポーネントを提供するために `@aws-northstar/ui` に依存していました。ホストUI への移行ではなく、このアプローチを使用したい場合は、生成された `packages/common/constructs/src/core/user-identity.ts` を [PDK の実装](https://github.com/aws/aws-pdk/blob/mainline/packages/identity/src/user-identity.ts) に置き換え、`@aws-cdk/aws-cognito-identitypool-alpha` のコンストラクトを `aws-cdk-lib` が提供するものに置き換え、`RuntimeConfig` に関連する値を設定してください：
 
 ```ts
-RuntimeConfig.ensure(this).config = {
-  ...RuntimeConfig.ensure(this).config,
+RuntimeConfig.ensure(this).set('connection', 'cognitoProps', {
   region: Stack.of(this).region,
   identityPoolId: this.identityPool.identityPoolId,
   userPoolId: this.userPool.userPoolId,
   userPoolWebClientId: this.userPoolClient.userPoolClientId,
-};
+});
 ```
 
 その後、`CloudscapeReactTsWebsiteProject` の `Auth` コンポーネントを再利用できます。
@@ -49,9 +49,9 @@ RuntimeConfig.ensure(this).config = {
 
 PDK では、生成された Projen プロジェクトを相互に渡して統合コードを生成することができました。これは、ショッピングリストアプリケーションで、ウェブサイトが API と統合できるように構成するために使用されていました。
 
-Nx Plugin for AWS では、API 統合は <Link path="/jp/guides/connection">`connection` ジェネレーター</Link> を介してサポートされています。次に、このジェネレーターを使用して、ウェブサイトが Smithy API を呼び出せるようにします：
+Nx Plugin for AWS では、API 統合は <Link path="/guides/connection">`connection` ジェネレーター</Link> を介してサポートされています。次に、このジェネレーターを使用して、ウェブサイトが Smithy API を呼び出せるようにします：
 
-<RunGenerator generator="connection" noInteractive requiredParameters={{ sourceProject: 'website', targetProject: 'api' }} />
+<RunGenerator generator="connection" noInteractive requiredParameters={{ sourceProject: 'website', targetProject: 'api' }} noOptions />
 
 これにより、生成された TypeScript クライアントを介してウェブサイトが API を呼び出すために必要なクライアントプロバイダーとビルドターゲットが生成されます。
 
@@ -100,7 +100,7 @@ IDE でいくつかのビルドエラーが表示されるようになります�
 
 ローカルウェブサイトサーバーを起動しましょう：
 
-<NxCommands commands={["dev website"]} />
+<PackageManagerShortCommand commands={["dev"]} />
 
 :::tip
 ここでは `dev` ターゲットを使用しています。これは、`connection` で接続された API のローカルサーバーも起動し、ウェブサイト、モデル、またはバックエンドが変更された場合にホットリロードします！これにより、CDK コードを書く前に、API とウェブサイトをローカルでテストできます。

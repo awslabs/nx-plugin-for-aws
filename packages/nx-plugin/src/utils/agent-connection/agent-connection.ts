@@ -41,6 +41,7 @@ export const AGENT_CONNECTION_DEPENDENCIES = [
   { name: '@modelcontextprotocol/sdk' },
   { name: '@a2a-js/sdk' },
   { name: '@strands-agents/sdk' },
+  { name: '@aws-sdk/client-s3' },
 ] as const satisfies readonly { name: ITsDepVersion }[];
 
 /** Python dependencies a caller must declare to emit agent-connection clients. */
@@ -310,10 +311,10 @@ const TS_TEMPLATE_DEPS: Record<
     '@modelcontextprotocol/sdk',
   ],
   'core-a2a': ['@aws-sdk/credential-providers', '@a2a-js/sdk'],
-  'core-strands/base': ['@strands-agents/sdk'],
-  'core-strands/mcp': ['@strands-agents/sdk'],
-  'core-strands/gateway': ['@strands-agents/sdk'],
-  'core-strands/a2a': ['@strands-agents/sdk'],
+  'core-strands/base': ['@strands-agents/sdk', '@aws-sdk/client-s3'],
+  'core-strands/mcp': ['@strands-agents/sdk', '@aws-sdk/client-s3'],
+  'core-strands/gateway': ['@strands-agents/sdk', '@aws-sdk/client-s3'],
+  'core-strands/a2a': ['@strands-agents/sdk', '@aws-sdk/client-s3'],
 };
 
 const emitTs = (
@@ -961,7 +962,8 @@ export const PY_MCP_FAMILY_CONNECTIONS: Record<
 
 /**
  * Add a re-export to the Python agent-connection module's __init__.py.
- * Equivalent to addStarExport for TS.
+ * Equivalent to addStarExport for TS, including creating the file when it does
+ * not yet exist in the tree.
  * Uses `__all__` to mark re-exports as public (satisfies ruff F401).
  * Uses GritQL for AST-aware transforms where possible.
  */
@@ -978,6 +980,11 @@ export async function addPythonReExport(
 
   const importLine = `from ${fromModule} import ${importName}`;
   const allEntry = `"${importName}"`;
+
+  if (!tree.exists(initFilePath)) {
+    tree.write(initFilePath, `${importLine}\n\n__all__ = [${allEntry}]\n`);
+    return;
+  }
 
   // If there's already an import from the same module, merge into its name list
   // (ruff I001 rejects two `from X import ...` lines for the same module).

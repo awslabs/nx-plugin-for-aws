@@ -2,7 +2,7 @@
 title: 워크스페이스
 description: 워크스페이스에 대한 참조 문서
 ---
-import { FileTree } from '@astrojs/starlight/components';
+import { Aside, FileTree } from '@astrojs/starlight/components';
 import Link from '@components/link.astro';
 import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
 import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
@@ -27,8 +27,10 @@ import GeneratorParameters from '@components/generator-parameters.astro';
   - package.json Root package.json for your monorepo
   - nx.json Nx configuration (common targets, sync generators, caching)
   - tsconfig.base.json Root TypeScript configuration
+  - biome.json Biome configuration for linting and formatting
   - aws-nx-plugin.config.mts Nx Plugin for AWS configuration
   - .git-secrets/ Vendored git-secrets bash script for credential scanning
+  - .gitallowed Patterns git-secrets treats as false positives
   - .husky/ Git hooks
   - .mcp.json Nx Plugin for AWS MCP server configuration for Claude Code
   - .cursor/mcp.json ...and for Cursor
@@ -71,7 +73,7 @@ TypeScript 및 Python 프로젝트가 설정되는 방법에 대한 자세한 �
 
 ### 캐싱
 
-Nx는 이전에 실행된 타겟의 출력을 캐시하고 입력이 변경되지 않았을 때 이를 재생합니다. 이는 특히 CI에서 빌드, 테스트 및 린팅 속도를 크게 향상시킵니다. 오래되거나 예상치 못한 동작이 발생하면 다음 명령으로 캐시를 재설정하세요:
+Nx는 이전에 실행된 타겟의 출력을 캐시하고 입력이 변경되지 않았을 때 이를 재생합니다. 이는 빌드, 테스트 및 린팅 속도를 크게 향상시킵니다. 오래되거나 예상치 못한 동작이 발생하면 다음 명령으로 캐시를 재설정하세요:
 
 <NxCommands commands={['reset']} />
 
@@ -87,15 +89,7 @@ Nx는 이전에 실행된 타겟의 출력을 캐시하고 입력이 변경되�
 }
 ```
 
-코어가 적거나 메모리가 제한된 머신에서 빌드하는 경우 이를 낮추세요:
-
-```json title="nx.json"
-{
-  "parallel": 3
-}
-```
-
-호출당 재정의할 수도 있습니다:
+코어가 적거나 메모리가 제한된 머신에서 빌드하는 경우 이를 낮추세요. 호출당 재정의할 수도 있습니다:
 
 <NxCommands commands={['run-many --target build --parallel=4']} />
 
@@ -165,23 +159,32 @@ Python 관점에서 이는 모노레포의 루트에 단일 `.venv`가 있고 �
 
 새 워크스페이스는 정적 분석 및 코드 포맷팅을 위해 [Biome](https://biomejs.dev/)으로 구성됩니다. `lint`를 실행하면 모든 프로젝트에서 문제를 확인하고, `lint --configuration=fix`는 이를 자동으로 수정합니다.
 
+### MCP 구성
+
+플러그인의 <Link path="get_started/building-with-ai">MCP 서버</Link>는 Claude Code, Cursor, Kiro, Gemini CLI, GitHub Copilot 및 OpenAI Codex를 위한 프로젝트 수준 MCP 서버로 구성되어 있어, 코딩 어시스턴트가 별도의 설정 없이 플러그인의 제너레이터를 발견하고 실행할 수 있습니다. 구성은 워크스페이스와 함께 커밋되므로 팀의 모든 사람이 동일한 설정을 갖게 됩니다. 귀하와 귀하의 팀이 사용하지 않는 코딩 어시스턴트에 대한 구성은 제거하세요.
+
 ### Git Secrets
 
-새 워크스페이스에는 각 커밋 전에 스테이징된 파일에서 AWS 자격 증명 패턴을 스캔하는 [git-secrets](https://github.com/awslabs/git-secrets) 사전 커밋 훅이 포함되어 있습니다. 이는 액세스 키, 시크릿 키 및 기타 민감한 값을 실수로 커밋하는 것을 방지합니다.
+워크스페이스는 각 커밋 전에 스테이징된 파일에서 AWS 자격 증명 패턴을 스캔하는 [git-secrets](https://github.com/awslabs/git-secrets) 사전 커밋 훅으로 설정됩니다. 이는 액세스 키, 시크릿 키 및 기타 민감한 값을 실수로 커밋하는 것을 방지합니다.
+
+스크립트는 `.git-secrets/git-secrets`에 워크스페이스에 포함되어 있으며 `.husky/pre-commit` 훅에 의해 실행되므로 설치할 것이 없습니다. 하지만 `PATH`에 없으므로 `git secrets`가 아닌 경로로 호출하세요.
 
 #### 거짓 양성 억제
 
 git-secrets의 패턴은 [egrep 호환 정규 표현식](https://github.com/awslabs/git-secrets#options-for-add)을 사용합니다. git-secrets가 실제 자격 증명을 포함하지 않는 커밋을 차단하는 경우:
 
 ```sh
-# Allow a specific regex pattern
-git secrets --add --allowed 'my-regex-pattern'
+# Allow a specific regex pattern (-a is the allowed flag)
+bash .git-secrets/git-secrets --add -a -- 'my-regex-pattern'
 
-# Allow a literal string (special characters are escaped)
-git secrets --add --allowed --literal 'my-literal+string'
+# Allow a literal string, escaping special characters (-l is the literal flag)
+bash .git-secrets/git-secrets --add -a -l -- 'my-literal+string'
+
+# List what is currently allowed
+git config --get-all secrets.allowed
 ```
 
-리포지토리 루트에 `.gitallowed` 파일을 생성하여 한 줄에 하나의 egrep 호환 정규식을 작성할 수도 있습니다(버전 관리를 통해 팀과 공유됨):
+이들은 로컬 git 구성에 기록되므로 자신의 클론에만 적용됩니다. 팀과 억제를 공유하려면 대신 리포지토리 루트의 `.gitallowed` 파일에 추가하세요. 한 줄에 하나의 egrep 호환 정규식을 작성하며, `<path>:<line-number>:<line-contents>`와 일치합니다:
 
 ```text title=".gitallowed"
 # Allow test fixtures
@@ -194,7 +197,7 @@ EXAMPLE[A-Z]{16}
 
 ## Nx Plugin for AWS 구성
 
-워크스페이스는 루트에 `aws-nx-plugin.config.mts` 파일과 함께 제공됩니다. 제너레이터는 이 파일을 읽어 합리적인 기본값을 선택하므로 매번 동일한 플래그를 전달할 필요가 없습니다. 두 가지 설정이 특히 유용합니다:
+워크스페이스는 루트에 `aws-nx-plugin.config.mts` 파일과 함께 제공됩니다. 제너레이터는 이 파일을 읽어 합리적인 기본값을 선택하므로 매번 동일한 플래그를 전달할 필요가 없습니다:
 
 ```typescript
 // aws-nx-plugin.config.mts
@@ -207,10 +210,16 @@ export default {
   containers: {
     engine: 'docker', // or 'finch'
   },
+  packageManager: {
+    catalogs: true, // or false
+  },
 } satisfies AwsNxPluginConfig;
 ```
 
 - **`iac.provider`** — 인프라를 생성하는 제너레이터(예: `ts#infra`, `ts#api`, `py#api`)에서 사용하는 기본 Infrastructure-as-Code 공급자(`cdk` 또는 `terraform`). `--iac` 플래그를 허용하는 제너레이터는 기본적으로 `inherit`로 설정되며, 이 값을 읽습니다.
 - **`containers.engine`** — 생성된 빌드/푸시/로그인 명령에 포함되는 컨테이너 CLI(`docker` 또는 `finch`). CDK 이미지 자산 빌드도 `CDK_DOCKER` 환경 변수를 통해 이를 선택합니다. 자세한 내용은 <Link path="guides/docker-bundling">Docker 번들링 가이드</Link>를 참조하세요.
+- **`packageManager.catalogs`** — 제너레이터가 패키지 매니저의 카탈로그에 종속성 버전을 기록하고 `catalog:` 프로토콜로 참조할지 여부([단일 버전 정책](#단일-버전-정책) 참조). `false`로 설정하면 제너레이터가 각 프로젝트의 `package.json`에 직접 버전 범위를 작성합니다. 카탈로그가 없는 npm에는 영향을 미치지 않습니다.
 
-언제든지 두 설정을 편집할 수 있으며, 이후 제너레이터 실행 시 새 값을 선택합니다.
+<Link path="guides/license">license 제너레이터</Link>는 자체 동작을 구성하기 위해 이 동일한 파일에 `license` 키를 추가합니다.
+
+언제든지 모든 설정을 편집할 수 있으며, 이후 제너레이터 실행 시 새 값을 선택합니다.

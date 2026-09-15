@@ -16,24 +16,28 @@ import tailwindcss from '@tailwindcss/vite';
 import react from '@astrojs/react';
 import * as fs from 'fs';
 
+import remarkLinkValidator from './src/plugins/remark-link-validator.ts';
 import remarkOptionFilter from './src/plugins/remark-option-filter.ts';
 import remarkTabFilter from './src/plugins/remark-tab-filter.ts';
 
 /**
- * Load Smithy syntax highlighting
+ * Load a grammar Shiki doesn't bundle.
  */
-const smithySyntax = () => ({
+const syntax = (name) => ({
   ...JSON.parse(
-    fs.readFileSync('./src/syntax/smithy/smithy.tmLanguage.json', 'utf-8'),
+    fs.readFileSync(`./src/syntax/${name}/${name}.tmLanguage.json`, 'utf-8'),
   ),
-  name: 'smithy',
+  name,
 });
 
 const basePath = process.env.DOCS_BASE_PATH || '/nx-plugin-for-aws';
+const site = 'https://awslabs.github.io';
+/** Absolute, since a link preview is fetched by a crawler with no page to resolve against. */
+const previewImage = `${site}${basePath}/og-image.png`;
 
 // https://astro.build/config
 export default defineConfig({
-  site: 'https://awslabs.github.io',
+  site,
   base: basePath,
   redirects: {
     '/': `${basePath}/en`,
@@ -44,13 +48,14 @@ export default defineConfig({
   outDir: './dist',
   markdown: {
     shikiConfig: {
-      langs: [smithySyntax()],
+      langs: [syntax('smithy'), syntax('cedar'), syntax('ejs')],
     },
-    remarkPlugins: [remarkOptionFilter, remarkTabFilter],
+    remarkPlugins: [remarkLinkValidator, remarkOptionFilter, remarkTabFilter],
   },
   integrations: [
     starlight({
       title: '@aws/nx-plugin',
+      favicon: '/favicon.png',
       social: [
         {
           icon: 'slack',
@@ -65,11 +70,41 @@ export default defineConfig({
       ],
       head: [
         {
+          tag: 'link',
+          attrs: {
+            rel: 'icon',
+            type: 'image/svg+xml',
+            sizes: 'any',
+            href: `${basePath}/favicon.svg`,
+          },
+        },
+        {
+          tag: 'meta',
+          attrs: { property: 'og:image', content: previewImage },
+        },
+        {
+          tag: 'meta',
+          attrs: { property: 'og:image:width', content: '1200' },
+        },
+        {
+          tag: 'meta',
+          attrs: { property: 'og:image:height', content: '630' },
+        },
+        {
           tag: 'meta',
           attrs: {
-            property: 'og:image',
-            content: `${basePath}/favicon.svg`,
+            property: 'og:image:alt',
+            content:
+              'The three steps from creating a workspace to an AI assistant running the generators, and the diagram of the workspace they build.',
           },
+        },
+        {
+          tag: 'meta',
+          attrs: { name: 'twitter:card', content: 'summary_large_image' },
+        },
+        {
+          tag: 'meta',
+          attrs: { name: 'twitter:image', content: previewImage },
         },
       ],
       components: {
@@ -77,6 +112,7 @@ export default defineConfig({
         PageSidebar: './src/components/page-sidebar.astro',
         MarkdownContent: './src/components/markdown-content.astro',
         PageTitle: './src/components/page-title.astro',
+        ThemeProvider: './src/components/theme-provider.astro',
       },
       tableOfContents: {
         minHeadingLevel: 2,

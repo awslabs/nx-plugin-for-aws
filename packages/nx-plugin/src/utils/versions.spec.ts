@@ -9,8 +9,10 @@ import {
   declareDependencies,
 } from './declared-dependencies.js';
 import {
+  LOCKSTEP_GROUPS,
   NX_PACKAGES,
   NX_VERSION,
+  PY_VERSIONS,
   TS_VERSIONS,
   withVersions,
 } from './versions.js';
@@ -105,4 +107,39 @@ describe('versions utils', () => {
       }
     });
   });
+});
+
+describe('LOCKSTEP_GROUPS', () => {
+  // A group's members are only correct at the same version, and the version
+  // update holds them together. If one is bumped by hand the group has to move
+  // with it, so assert they agree rather than waiting for a generated project to
+  // fail to build.
+  const manifest = PluginPackageJson as {
+    dependencies?: Record<string, string>;
+    devDependencies?: Record<string, string>;
+  };
+  const bare = (version: string) => version.replace(/^[=~^]+/, '');
+  const versionOf = (name: string): string | undefined => {
+    const pinned =
+      (TS_VERSIONS as Record<string, string>)[name] ??
+      (PY_VERSIONS as Record<string, string>)[name] ??
+      manifest.dependencies?.[name] ??
+      manifest.devDependencies?.[name];
+    return pinned === undefined ? undefined : bare(pinned);
+  };
+
+  it.each(LOCKSTEP_GROUPS.map((group) => [group.join(', '), group] as const))(
+    'pins every member of [%s] at the same version',
+    (_label, group) => {
+      const versions = group.map((name) => {
+        const version = versionOf(name);
+        expect(version, `${name} is not pinned anywhere`).toBeDefined();
+        return [name, version] as const;
+      });
+      const [, expected] = versions[0];
+      for (const [name, version] of versions) {
+        expect(version, `${name} disagrees with ${group[0]}`).toBe(expected);
+      }
+    },
+  );
 });

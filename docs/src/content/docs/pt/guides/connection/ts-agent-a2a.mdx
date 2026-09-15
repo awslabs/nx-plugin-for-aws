@@ -73,8 +73,8 @@ import { Agent, tool } from '@strands-agents/sdk';
 import { RemoteAgentClientStrands } from '@my-scope/agent-connection';
 import { z } from 'zod';
 
-export const getAgent = async (sessionId: string) => {
-  const remoteAgent = await RemoteAgentClientStrands.create(sessionId);
+export const getAgent = async () => {
+  const remoteAgent = await RemoteAgentClientStrands.create();
   const remoteAgentTool = tool({
     name: 'askRemoteAgent',
     description: 'Delegate a question to the remote RemoteAgent A2A agent and return its reply.',
@@ -88,9 +88,9 @@ export const getAgent = async (sessionId: string) => {
 };
 ```
 
-O parâmetro `sessionId` é propagado a partir do chamador, garantindo consistência para a [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
+O ID de sessão do AgentCore é propagado para o agente remoto automaticamente através do cabeçalho `X-Amzn-Bedrock-AgentCore-Runtime-Session-Id`, então `create()` não recebe argumentos: o servidor do agente vincula a sessão da requisição de entrada em um contexto [`AsyncLocalStorage`](https://nodejs.org/api/async_context.html#class-asynclocalstorage) (`enterSessionContext` no `router.ts` gerado, ou `runWithSessionId` no middleware de sessão A2A/AG-UI), e o fetch do cliente de conexão em `agentcore-fetch.ts` o carimba em cada chamada de saída — garantindo consistência para a [Bedrock AgentCore Observability](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability.html).
 
-Internamente, `RemoteAgentClientStrands.create(sessionId)` retorna um `A2AAgent` do Strands configurado com um `clientFactory` que assina com SigV4 quando implantado na AWS, e um endpoint simples `http://localhost:<port>/` quando `LOCAL_DEV=true`. A assinatura e a resolução de endpoint residem no `agentcore-a2a-client-config.ts` agnóstico de framework; apenas o fino `agentcore-a2a-client-strands.ts` depende do Strands.
+Internamente, `RemoteAgentClientStrands.create()` retorna um `A2AAgent` do Strands configurado com um `clientFactory` que assina com SigV4 quando implantado na AWS, e um endpoint simples `http://localhost:<port>/` quando `LOCAL_DEV=true`. A assinatura e a resolução de endpoint residem no `agentcore-a2a-client-config.ts` agnóstico de framework; apenas o fino `agentcore-a2a-client-strands.ts` depende do Strands.
 
 ## Infraestrutura
 
@@ -107,3 +107,4 @@ Execute o agente localmente com:
 <NxCommands commands={["<agent-name>-dev <project-name>"]} />
 
 Isso iniciará tanto o agente host quanto todos os agentes A2A conectados, com o agente host chamando os agentes remotos via HTTP simples em suas portas locais atribuídas.
+
