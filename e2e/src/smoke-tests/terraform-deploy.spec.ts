@@ -31,6 +31,7 @@ import {
   pingWebsite,
 } from './deploy-invocations';
 import { ensureRdsServiceLinkedRole } from './deploy-prerequisites';
+import { applyInfra } from './terraform-apply';
 import { runTerraformSmokeTest } from './terraform-smoke-test';
 import {
   type AgentSpec,
@@ -198,7 +199,7 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
       try {
         await runCLI(`sync`, opts);
         await runCLI(`bootstrap infra --output-style=stream`, opts);
-        await runCLI(`apply infra --output-style=stream`, opts);
+        await applyInfra(opts);
 
         if (config.variant === 'terraform-deploy') {
           const outputs = readTerraformOutputs(opts.cwd);
