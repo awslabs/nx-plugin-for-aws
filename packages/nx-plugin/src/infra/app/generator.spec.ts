@@ -8,7 +8,7 @@ import {
   readProjectConfiguration,
   type Tree,
 } from '@nx/devkit';
-import { expectHasMetricTags } from '../../utils/metrics.spec.js';
+import { expectHasMetricTags } from '../../utils/metrics-assertions.js';
 import { toKebabCase } from '../../utils/names.js';
 import {
   createTreeUsingTsSolutionSetup,

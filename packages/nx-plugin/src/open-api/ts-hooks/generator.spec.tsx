@@ -19,7 +19,7 @@ import type { Mock } from 'vitest';
 import { importTypeScriptModule } from '../../utils/js.js';
 import { TypeScriptVerifier } from '../../utils/test/ts.spec.js';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
-import { PET_STORE_SPEC } from '../ts-client/generator.petstore.spec.js';
+import { PET_STORE_SPEC } from '../ts-client/petstore-spec.js';
 import type { Spec } from '../utils/types.js';
 import { openApiTsHooksGenerator } from './generator.js';
 

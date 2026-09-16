@@ -17,7 +17,7 @@ import NxPluginForAwsProjectJson from '../../../project.json' with {
   type: 'json',
 };
 import { declareDependencies } from '../../utils/declared-dependencies.js';
-import { expectHasMetricTags } from '../../utils/metrics.spec.js';
+import { expectHasMetricTags } from '../../utils/metrics-assertions.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,

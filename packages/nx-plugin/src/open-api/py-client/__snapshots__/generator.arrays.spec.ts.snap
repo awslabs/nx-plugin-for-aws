@@ -1,0 +1,1750 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`openApiPyClientGenerator - arrays > should handle dictionary (additionalProperties) responses > client.py 1`] = `
+""""TestApi — AUTO-GENERATED synchronous client."""
+
+from __future__ import annotations
+
+import datetime
+from dataclasses import dataclass, field
+from typing import Any, TypeVar
+from urllib.parse import quote
+
+import httpx
+from pydantic import BaseModel, TypeAdapter, ValidationError
+
+from . import types
+from .errors import (
+    ApiError as ApiError,
+)
+from .errors import (
+    GetCountsApiError as GetCountsApiError,
+)
+
+_ErrorT = TypeVar("_ErrorT", bound=BaseModel)
+
+
+@dataclass
+class TestApiConfig:
+    """Client configuration for TestApi."""
+
+    #: Base URL for the API.
+    url: str
+    #: Client used for every request. Supply your own to add authentication or
+    #: any other middleware — an \`\`httpx.Auth\`\` (e.g. a SigV4 signer), an event
+    #: hook, a custom transport, timeouts, retries or a proxy all apply, and the
+    #: client's own headers and query params are sent alongside each operation's.
+    #: A supplied client is never closed by this one, so it can be shared.
+    httpx_client: httpx.Client | None = None
+    #: Headers added to every request, where the operation sets none itself.
+    headers: dict[str, str] = field(default_factory=dict)
+    #: By default the client sends a Content-Type header set to the media type
+    #: the OpenAPI specification declares for the request. Set this to omit it.
+    omit_content_type_header: bool = False
+
+
+class TestApi:
+    """Synchronous API client for TestApi."""
+
+    def __init__(self, config: TestApiConfig) -> None:
+        self._config = config
+        self._client = config.httpx_client or httpx.Client()
+        self._owns_client = config.httpx_client is None
+        self._base_url = config.url.rstrip("/")
+
+    def __enter__(self) -> TestApi:
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()
+
+    def close(self) -> None:
+        if self._owns_client:
+            self._client.close()
+
+    def _url(
+        self,
+        path: str,
+        path_params: dict[str, Any],
+        path_styles: dict[str, tuple[str, bool]] | None = None,
+    ) -> str:
+        for key, value in path_params.items():
+            style, explode = (path_styles or {}).get(key, ("simple", False))
+            # An object expands to its key,value members; a list to its items.
+            # Each is encoded on its own so the separators between them stay
+            # literal, as RFC 6570 requires.
+            dumped = self._dump(value)
+            if isinstance(dumped, dict):
+                values = [
+                    part
+                    for k, v in dumped.items()
+                    if v is not None
+                    for part in (k, self._scalar(v))
+                ]
+            elif isinstance(dumped, list):
+                values = list(dumped)
+            else:
+                values = [value]
+            if style == "matrix":
+                # RFC 6570 path-style expansion: ;key=a,b (explode: ;key=a;key=b)
+                if explode:
+                    rendered = "".join(
+                        ";" + key + "=" + quote(self._scalar(v), safe="")
+                        for v in values
+                    )
+                else:
+                    rendered = (
+                        ";"
+                        + key
+                        + "="
+                        + ",".join(quote(self._scalar(v), safe="") for v in values)
+                    )
+            elif style == "label":
+                # RFC 6570 label expansion: .a,b (explode: .a.b)
+                rendered = "." + ("." if explode else ",").join(
+                    quote(self._scalar(v), safe="") for v in values
+                )
+            else:
+                # RFC 6570 simple expansion: a list renders comma-separated.
+                rendered = ",".join(quote(self._scalar(v), safe="") for v in values)
+            path = path.replace("{" + key + "}", rendered)
+        return self._base_url + path
+
+    def _deep_object(self, key: str, value: Any, out: dict[str, Any]) -> None:
+        if isinstance(value, BaseModel):
+            value = value.model_dump(mode="json", by_alias=True, exclude_unset=True)
+        if isinstance(value, dict):
+            for prop, v in value.items():
+                self._deep_object(f"{key}[{prop}]", v, out)
+        elif value is not None:
+            out[key] = value
+
+    _COLLECTION_DELIMITERS = {"csv": ",", "ssv": " ", "pipes": "|"}
+
+    #: Characters left literal in a cookie value: every RFC 6265 cookie-octet
+    #: except the \`,\` and \`;\` this client joins members on. A \`=\` stays literal
+    #: too — only the first one separates a cookie's name from its value.
+    _COOKIE_SAFE = "!#$%&'()*+-./:<>?@[]^_\`{|}~="
+
+    def _scalar(self, value: Any) -> str:
+        # The wire form of a single parameter value: JSON spellings for bools,
+        # ISO-8601 for dates, and the model's own wire shape for anything else.
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value, (datetime.date, datetime.datetime)):
+            return value.isoformat()
+        dumped = self._dump(value)
+        if isinstance(dumped, str):
+            return dumped
+        # RFC 6570 renders a list as its comma-joined members and an object as
+        # comma-joined key,value pairs. Python's own \`str\` would emit a repr —
+        # \`['a', 'b']\`, quotes and spaces included.
+        if isinstance(dumped, list):
+            return ",".join(self._scalar(v) for v in dumped)
+        if isinstance(dumped, dict):
+            return ",".join(
+                f"{k},{self._scalar(v)}" for k, v in dumped.items() if v is not None
+            )
+        if dumped is None:
+            return ""
+        return str(dumped)
+
+    def _query(
+        self,
+        query_params: dict[str, Any],
+        collection_formats: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        for key, value in query_params.items():
+            if value is None:
+                continue
+            fmt = (collection_formats or {}).get(key)
+            if fmt == "deepObject":
+                self._deep_object(key, value, out)
+            elif isinstance(value, list):
+                delimiter = self._COLLECTION_DELIMITERS.get(fmt or "multi")
+                if delimiter is None:
+                    out[key] = [self._scalar(v) for v in value]
+                else:
+                    out[key] = delimiter.join(self._scalar(v) for v in value)
+            elif self._is_object(value):
+                # OpenAPI's default query style is form/explode, under which an
+                # object expands to one parameter per property rather than
+                # being stringified.
+                for prop, prop_value in self._as_dict(value).items():
+                    if prop_value is not None:
+                        out[prop] = self._scalar(prop_value)
+            else:
+                out[key] = self._scalar(value)
+        return out
+
+    def _is_object(self, value: Any) -> bool:
+        return isinstance(value, (dict, BaseModel))
+
+    def _as_dict(self, value: Any) -> dict[str, Any]:
+        if isinstance(value, BaseModel):
+            return value.model_dump(mode="json", by_alias=True, exclude_unset=True)
+        return dict(value)
+
+    def _headers(
+        self,
+        header_params: dict[str, Any] | None = None,
+        collection_formats: dict[str, str] | None = None,
+        cookie_params: dict[str, Any] | None = None,
+    ) -> list[tuple[str, str]]:
+        out: list[tuple[str, str]] = []
+        for key, value in (header_params or {}).items():
+            if value is None:
+                continue
+            if isinstance(value, list):
+                fmt = (collection_formats or {}).get(key, "csv")
+                delimiter = self._COLLECTION_DELIMITERS.get(fmt)
+                if delimiter is None:
+                    for item in value:
+                        out.append((key, self._scalar(item)))
+                else:
+                    out.append((key, delimiter.join(self._scalar(v) for v in value)))
+            else:
+                out.append((key, self._scalar(value)))
+        # A config header only applies where the operation didn't set one:
+        # httpx comma-joins repeated names, which would corrupt the value.
+        operation_headers = {key.lower() for key, _ in out}
+        out.extend(
+            (key, value)
+            for key, value in self._config.headers.items()
+            if key.lower() not in operation_headers
+        )
+        # The operation's cookies are merged into one \`Cookie\` header alongside
+        # every other source. Passing them to httpx's \`cookies=\` instead would
+        # drop them outright whenever a \`Cookie\` header is present, since
+        # http.cookiejar skips a request that already carries one — and setting
+        # the header here would in turn shadow the caller's own jar and header,
+        # which httpx resolves in favour of the more specific value.
+        cookies = self._cookies(cookie_params or {})
+        if cookies:
+            pairs = [
+                *(
+                    value
+                    for source in (self._client.headers, dict(out))
+                    for key, value in source.items()
+                    if key.lower() == "cookie"
+                ),
+                *(f"{key}={value}" for key, value in self._client.cookies.items()),
+                *(f"{key}={value}" for key, value in cookies.items()),
+            ]
+            out = [(key, value) for key, value in out if key.lower() != "cookie"]
+            out.append(("Cookie", "; ".join(pairs)))
+        return out
+
+    def _default_content_type(
+        self, header_params: dict[str, Any], media_type: str
+    ) -> None:
+        # The media type the specification declares, applied unless the operation
+        # takes a Content-Type of its own and the caller supplied one. Header
+        # names are case-insensitive, and a declared header the caller omitted is
+        # present holding \`None\` — neither counts as the caller setting it.
+        if any(
+            key.lower() == "content-type" and value is not None
+            for key, value in header_params.items()
+        ):
+            return
+        for key in list(header_params):
+            if key.lower() == "content-type":
+                header_params[key] = media_type
+                return
+        header_params["Content-Type"] = media_type
+
+    def _cookies(self, cookie_params: dict[str, Any]) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for key, value in cookie_params.items():
+            if value is None:
+                continue
+            dumped = self._dump(value)
+            # A cookie uses form-style expansion, so a list joins on \`,\` and an
+            # object on \`,\` between each key and value. Members are encoded so a
+            # \`;\` or \`,\` inside one can't be read as a delimiter, while the
+            # joining commas stay literal.
+            if isinstance(dumped, list):
+                rendered = ",".join(self._cookie_value(v) for v in dumped)
+            elif isinstance(dumped, dict):
+                rendered = ",".join(
+                    self._cookie_value(k) + "," + self._cookie_value(v)
+                    for k, v in dumped.items()
+                    if v is not None
+                )
+            else:
+                rendered = self._cookie_value(value)
+            out[key] = rendered
+        return out
+
+    def _cookie_value(self, value: Any) -> str:
+        # Only the characters a cookie parser treats as structure are escaped, so
+        # a timestamp keeps its colons and a base64 token its \`=\` padding. Servers
+        # do not URL-decode cookies, so anything escaped here arrives escaped.
+        return quote(self._scalar(value), safe=self._COOKIE_SAFE)
+
+    def _dump(self, value: Any) -> Any:
+        if value is None:
+            return None
+        if isinstance(value, BaseModel):
+            return value.model_dump(mode="json", by_alias=True, exclude_unset=True)
+        if isinstance(value, (list, tuple)):
+            return [self._dump(v) for v in value]
+        if isinstance(value, dict):
+            return {k: self._dump(v) for k, v in value.items()}
+        if isinstance(value, (datetime.date, datetime.datetime)):
+            return value.isoformat()
+        return value
+
+    def _error_payload(self, response: httpx.Response) -> Any:
+        # An error body is whatever the server actually sent, which need not be
+        # the JSON the spec declares (a proxy's HTML page, say).
+        try:
+            return response.json()
+        except ValueError:
+            return response.text
+
+    def _error(self, wrapper: type[_ErrorT], status: int, payload: Any) -> _ErrorT:
+        # Coerce to the declared error type, falling back to the raw payload so
+        # a body that doesn't match the spec still raises the typed exception.
+        try:
+            return wrapper.model_validate({"status": status, "error": payload})
+        except ValidationError:
+            return wrapper.model_construct(status=status, error=payload)
+
+    def get_counts(
+        self,
+    ) -> types.GetCounts200Response:
+        request_kwargs: dict[str, Any] = {}
+        _request_url = self._url("/counts", {})
+        response = self._client.request(
+            "GET",
+            _request_url,
+            headers=self._headers(),
+            **request_kwargs,
+        )
+        if response.status_code == 200:
+            return TypeAdapter(types.GetCounts200Response).validate_python(
+                response.json()
+            )
+        raise GetCountsApiError(response.status_code, None)
+"
+`;
+
+exports[`openApiPyClientGenerator - arrays > should handle dictionary (additionalProperties) responses > types.py 1`] = `
+""""Types for TestApi — AUTO-GENERATED, do not edit."""
+
+from __future__ import annotations
+
+from typing import Never
+
+GetCounts200Response = dict[str, int]
+
+GetCountsError = Never
+"
+`;
+
+exports[`openApiPyClientGenerator - arrays > should handle operation which accepts an array of objects > client.py 1`] = `
+""""TestApi — AUTO-GENERATED synchronous client."""
+
+from __future__ import annotations
+
+import datetime
+from dataclasses import dataclass, field
+from typing import Any, TypeVar
+from urllib.parse import quote
+
+import httpx
+from pydantic import BaseModel, TypeAdapter, ValidationError
+
+from . import types
+from .errors import (
+    ApiError as ApiError,
+)
+from .errors import (
+    CreateUsersApiError as CreateUsersApiError,
+)
+
+_ErrorT = TypeVar("_ErrorT", bound=BaseModel)
+
+
+@dataclass
+class TestApiConfig:
+    """Client configuration for TestApi."""
+
+    #: Base URL for the API.
+    url: str
+    #: Client used for every request. Supply your own to add authentication or
+    #: any other middleware — an \`\`httpx.Auth\`\` (e.g. a SigV4 signer), an event
+    #: hook, a custom transport, timeouts, retries or a proxy all apply, and the
+    #: client's own headers and query params are sent alongside each operation's.
+    #: A supplied client is never closed by this one, so it can be shared.
+    httpx_client: httpx.Client | None = None
+    #: Headers added to every request, where the operation sets none itself.
+    headers: dict[str, str] = field(default_factory=dict)
+    #: By default the client sends a Content-Type header set to the media type
+    #: the OpenAPI specification declares for the request. Set this to omit it.
+    omit_content_type_header: bool = False
+
+
+class TestApi:
+    """Synchronous API client for TestApi."""
+
+    def __init__(self, config: TestApiConfig) -> None:
+        self._config = config
+        self._client = config.httpx_client or httpx.Client()
+        self._owns_client = config.httpx_client is None
+        self._base_url = config.url.rstrip("/")
+
+    def __enter__(self) -> TestApi:
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()
+
+    def close(self) -> None:
+        if self._owns_client:
+            self._client.close()
+
+    def _url(
+        self,
+        path: str,
+        path_params: dict[str, Any],
+        path_styles: dict[str, tuple[str, bool]] | None = None,
+    ) -> str:
+        for key, value in path_params.items():
+            style, explode = (path_styles or {}).get(key, ("simple", False))
+            # An object expands to its key,value members; a list to its items.
+            # Each is encoded on its own so the separators between them stay
+            # literal, as RFC 6570 requires.
+            dumped = self._dump(value)
+            if isinstance(dumped, dict):
+                values = [
+                    part
+                    for k, v in dumped.items()
+                    if v is not None
+                    for part in (k, self._scalar(v))
+                ]
+            elif isinstance(dumped, list):
+                values = list(dumped)
+            else:
+                values = [value]
+            if style == "matrix":
+                # RFC 6570 path-style expansion: ;key=a,b (explode: ;key=a;key=b)
+                if explode:
+                    rendered = "".join(
+                        ";" + key + "=" + quote(self._scalar(v), safe="")
+                        for v in values
+                    )
+                else:
+                    rendered = (
+                        ";"
+                        + key
+                        + "="
+                        + ",".join(quote(self._scalar(v), safe="") for v in values)
+                    )
+            elif style == "label":
+                # RFC 6570 label expansion: .a,b (explode: .a.b)
+                rendered = "." + ("." if explode else ",").join(
+                    quote(self._scalar(v), safe="") for v in values
+                )
+            else:
+                # RFC 6570 simple expansion: a list renders comma-separated.
+                rendered = ",".join(quote(self._scalar(v), safe="") for v in values)
+            path = path.replace("{" + key + "}", rendered)
+        return self._base_url + path
+
+    def _deep_object(self, key: str, value: Any, out: dict[str, Any]) -> None:
+        if isinstance(value, BaseModel):
+            value = value.model_dump(mode="json", by_alias=True, exclude_unset=True)
+        if isinstance(value, dict):
+            for prop, v in value.items():
+                self._deep_object(f"{key}[{prop}]", v, out)
+        elif value is not None:
+            out[key] = value
+
+    _COLLECTION_DELIMITERS = {"csv": ",", "ssv": " ", "pipes": "|"}
+
+    #: Characters left literal in a cookie value: every RFC 6265 cookie-octet
+    #: except the \`,\` and \`;\` this client joins members on. A \`=\` stays literal
+    #: too — only the first one separates a cookie's name from its value.
+    _COOKIE_SAFE = "!#$%&'()*+-./:<>?@[]^_\`{|}~="
+
+    def _scalar(self, value: Any) -> str:
+        # The wire form of a single parameter value: JSON spellings for bools,
+        # ISO-8601 for dates, and the model's own wire shape for anything else.
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value, (datetime.date, datetime.datetime)):
+            return value.isoformat()
+        dumped = self._dump(value)
+        if isinstance(dumped, str):
+            return dumped
+        # RFC 6570 renders a list as its comma-joined members and an object as
+        # comma-joined key,value pairs. Python's own \`str\` would emit a repr —
+        # \`['a', 'b']\`, quotes and spaces included.
+        if isinstance(dumped, list):
+            return ",".join(self._scalar(v) for v in dumped)
+        if isinstance(dumped, dict):
+            return ",".join(
+                f"{k},{self._scalar(v)}" for k, v in dumped.items() if v is not None
+            )
+        if dumped is None:
+            return ""
+        return str(dumped)
+
+    def _query(
+        self,
+        query_params: dict[str, Any],
+        collection_formats: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        for key, value in query_params.items():
+            if value is None:
+                continue
+            fmt = (collection_formats or {}).get(key)
+            if fmt == "deepObject":
+                self._deep_object(key, value, out)
+            elif isinstance(value, list):
+                delimiter = self._COLLECTION_DELIMITERS.get(fmt or "multi")
+                if delimiter is None:
+                    out[key] = [self._scalar(v) for v in value]
+                else:
+                    out[key] = delimiter.join(self._scalar(v) for v in value)
+            elif self._is_object(value):
+                # OpenAPI's default query style is form/explode, under which an
+                # object expands to one parameter per property rather than
+                # being stringified.
+                for prop, prop_value in self._as_dict(value).items():
+                    if prop_value is not None:
+                        out[prop] = self._scalar(prop_value)
+            else:
+                out[key] = self._scalar(value)
+        return out
+
+    def _is_object(self, value: Any) -> bool:
+        return isinstance(value, (dict, BaseModel))
+
+    def _as_dict(self, value: Any) -> dict[str, Any]:
+        if isinstance(value, BaseModel):
+            return value.model_dump(mode="json", by_alias=True, exclude_unset=True)
+        return dict(value)
+
+    def _headers(
+        self,
+        header_params: dict[str, Any] | None = None,
+        collection_formats: dict[str, str] | None = None,
+        cookie_params: dict[str, Any] | None = None,
+    ) -> list[tuple[str, str]]:
+        out: list[tuple[str, str]] = []
+        for key, value in (header_params or {}).items():
+            if value is None:
+                continue
+            if isinstance(value, list):
+                fmt = (collection_formats or {}).get(key, "csv")
+                delimiter = self._COLLECTION_DELIMITERS.get(fmt)
+                if delimiter is None:
+                    for item in value:
+                        out.append((key, self._scalar(item)))
+                else:
+                    out.append((key, delimiter.join(self._scalar(v) for v in value)))
+            else:
+                out.append((key, self._scalar(value)))
+        # A config header only applies where the operation didn't set one:
+        # httpx comma-joins repeated names, which would corrupt the value.
+        operation_headers = {key.lower() for key, _ in out}
+        out.extend(
+            (key, value)
+            for key, value in self._config.headers.items()
+            if key.lower() not in operation_headers
+        )
+        # The operation's cookies are merged into one \`Cookie\` header alongside
+        # every other source. Passing them to httpx's \`cookies=\` instead would
+        # drop them outright whenever a \`Cookie\` header is present, since
+        # http.cookiejar skips a request that already carries one — and setting
+        # the header here would in turn shadow the caller's own jar and header,
+        # which httpx resolves in favour of the more specific value.
+        cookies = self._cookies(cookie_params or {})
+        if cookies:
+            pairs = [
+                *(
+                    value
+                    for source in (self._client.headers, dict(out))
+                    for key, value in source.items()
+                    if key.lower() == "cookie"
+                ),
+                *(f"{key}={value}" for key, value in self._client.cookies.items()),
+                *(f"{key}={value}" for key, value in cookies.items()),
+            ]
+            out = [(key, value) for key, value in out if key.lower() != "cookie"]
+            out.append(("Cookie", "; ".join(pairs)))
+        return out
+
+    def _default_content_type(
+        self, header_params: dict[str, Any], media_type: str
+    ) -> None:
+        # The media type the specification declares, applied unless the operation
+        # takes a Content-Type of its own and the caller supplied one. Header
+        # names are case-insensitive, and a declared header the caller omitted is
+        # present holding \`None\` — neither counts as the caller setting it.
+        if any(
+            key.lower() == "content-type" and value is not None
+            for key, value in header_params.items()
+        ):
+            return
+        for key in list(header_params):
+            if key.lower() == "content-type":
+                header_params[key] = media_type
+                return
+        header_params["Content-Type"] = media_type
+
+    def _cookies(self, cookie_params: dict[str, Any]) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for key, value in cookie_params.items():
+            if value is None:
+                continue
+            dumped = self._dump(value)
+            # A cookie uses form-style expansion, so a list joins on \`,\` and an
+            # object on \`,\` between each key and value. Members are encoded so a
+            # \`;\` or \`,\` inside one can't be read as a delimiter, while the
+            # joining commas stay literal.
+            if isinstance(dumped, list):
+                rendered = ",".join(self._cookie_value(v) for v in dumped)
+            elif isinstance(dumped, dict):
+                rendered = ",".join(
+                    self._cookie_value(k) + "," + self._cookie_value(v)
+                    for k, v in dumped.items()
+                    if v is not None
+                )
+            else:
+                rendered = self._cookie_value(value)
+            out[key] = rendered
+        return out
+
+    def _cookie_value(self, value: Any) -> str:
+        # Only the characters a cookie parser treats as structure are escaped, so
+        # a timestamp keeps its colons and a base64 token its \`=\` padding. Servers
+        # do not URL-decode cookies, so anything escaped here arrives escaped.
+        return quote(self._scalar(value), safe=self._COOKIE_SAFE)
+
+    def _dump(self, value: Any) -> Any:
+        if value is None:
+            return None
+        if isinstance(value, BaseModel):
+            return value.model_dump(mode="json", by_alias=True, exclude_unset=True)
+        if isinstance(value, (list, tuple)):
+            return [self._dump(v) for v in value]
+        if isinstance(value, dict):
+            return {k: self._dump(v) for k, v in value.items()}
+        if isinstance(value, (datetime.date, datetime.datetime)):
+            return value.isoformat()
+        return value
+
+    def _error_payload(self, response: httpx.Response) -> Any:
+        # An error body is whatever the server actually sent, which need not be
+        # the JSON the spec declares (a proxy's HTML page, say).
+        try:
+            return response.json()
+        except ValueError:
+            return response.text
+
+    def _error(self, wrapper: type[_ErrorT], status: int, payload: Any) -> _ErrorT:
+        # Coerce to the declared error type, falling back to the raw payload so
+        # a body that doesn't match the spec still raises the typed exception.
+        try:
+            return wrapper.model_validate({"status": status, "error": payload})
+        except ValidationError:
+            return wrapper.model_construct(status=status, error=payload)
+
+    def create_users(
+        self,
+        body: list[types.User],
+    ) -> list[types.User]:
+        header_params: dict[str, Any] = {}
+        body = self._dump(body)
+        request_kwargs: dict[str, Any] = {"json": body}
+        if body is not None and not self._config.omit_content_type_header:
+            self._default_content_type(header_params, "application/json")
+        _request_url = self._url("/create-users", {})
+        response = self._client.request(
+            "POST",
+            _request_url,
+            headers=self._headers(header_params),
+            **request_kwargs,
+        )
+        if response.status_code == 200:
+            return TypeAdapter(list[types.User]).validate_python(response.json())
+        raise CreateUsersApiError(response.status_code, None)
+"
+`;
+
+exports[`openApiPyClientGenerator - arrays > should handle operation which accepts an array of objects > types.py 1`] = `
+""""Types for TestApi — AUTO-GENERATED, do not edit."""
+
+from __future__ import annotations
+
+from typing import Never, TypedDict
+
+from pydantic import BaseModel, ConfigDict
+
+
+class User(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    username: str
+    email: str | None = None
+
+
+class CreateUsersRequest(TypedDict):
+    body: list[User]
+
+
+CreateUsersError = Never
+"
+`;
+
+exports[`openApiPyClientGenerator - arrays > should handle operation which accepts an array of strings > client.py 1`] = `
+""""TestApi — AUTO-GENERATED synchronous client."""
+
+from __future__ import annotations
+
+import datetime
+from dataclasses import dataclass, field
+from typing import Any, TypeVar
+from urllib.parse import quote
+
+import httpx
+from pydantic import BaseModel, ValidationError
+
+from . import types
+from .errors import (
+    ApiError as ApiError,
+)
+from .errors import (
+    ProcessTagsApiError as ProcessTagsApiError,
+)
+
+_ErrorT = TypeVar("_ErrorT", bound=BaseModel)
+
+
+@dataclass
+class TestApiConfig:
+    """Client configuration for TestApi."""
+
+    #: Base URL for the API.
+    url: str
+    #: Client used for every request. Supply your own to add authentication or
+    #: any other middleware — an \`\`httpx.Auth\`\` (e.g. a SigV4 signer), an event
+    #: hook, a custom transport, timeouts, retries or a proxy all apply, and the
+    #: client's own headers and query params are sent alongside each operation's.
+    #: A supplied client is never closed by this one, so it can be shared.
+    httpx_client: httpx.Client | None = None
+    #: Headers added to every request, where the operation sets none itself.
+    headers: dict[str, str] = field(default_factory=dict)
+    #: By default the client sends a Content-Type header set to the media type
+    #: the OpenAPI specification declares for the request. Set this to omit it.
+    omit_content_type_header: bool = False
+
+
+class TestApi:
+    """Synchronous API client for TestApi."""
+
+    def __init__(self, config: TestApiConfig) -> None:
+        self._config = config
+        self._client = config.httpx_client or httpx.Client()
+        self._owns_client = config.httpx_client is None
+        self._base_url = config.url.rstrip("/")
+
+    def __enter__(self) -> TestApi:
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()
+
+    def close(self) -> None:
+        if self._owns_client:
+            self._client.close()
+
+    def _url(
+        self,
+        path: str,
+        path_params: dict[str, Any],
+        path_styles: dict[str, tuple[str, bool]] | None = None,
+    ) -> str:
+        for key, value in path_params.items():
+            style, explode = (path_styles or {}).get(key, ("simple", False))
+            # An object expands to its key,value members; a list to its items.
+            # Each is encoded on its own so the separators between them stay
+            # literal, as RFC 6570 requires.
+            dumped = self._dump(value)
+            if isinstance(dumped, dict):
+                values = [
+                    part
+                    for k, v in dumped.items()
+                    if v is not None
+                    for part in (k, self._scalar(v))
+                ]
+            elif isinstance(dumped, list):
+                values = list(dumped)
+            else:
+                values = [value]
+            if style == "matrix":
+                # RFC 6570 path-style expansion: ;key=a,b (explode: ;key=a;key=b)
+                if explode:
+                    rendered = "".join(
+                        ";" + key + "=" + quote(self._scalar(v), safe="")
+                        for v in values
+                    )
+                else:
+                    rendered = (
+                        ";"
+                        + key
+                        + "="
+                        + ",".join(quote(self._scalar(v), safe="") for v in values)
+                    )
+            elif style == "label":
+                # RFC 6570 label expansion: .a,b (explode: .a.b)
+                rendered = "." + ("." if explode else ",").join(
+                    quote(self._scalar(v), safe="") for v in values
+                )
+            else:
+                # RFC 6570 simple expansion: a list renders comma-separated.
+                rendered = ",".join(quote(self._scalar(v), safe="") for v in values)
+            path = path.replace("{" + key + "}", rendered)
+        return self._base_url + path
+
+    def _deep_object(self, key: str, value: Any, out: dict[str, Any]) -> None:
+        if isinstance(value, BaseModel):
+            value = value.model_dump(mode="json", by_alias=True, exclude_unset=True)
+        if isinstance(value, dict):
+            for prop, v in value.items():
+                self._deep_object(f"{key}[{prop}]", v, out)
+        elif value is not None:
+            out[key] = value
+
+    _COLLECTION_DELIMITERS = {"csv": ",", "ssv": " ", "pipes": "|"}
+
+    #: Characters left literal in a cookie value: every RFC 6265 cookie-octet
+    #: except the \`,\` and \`;\` this client joins members on. A \`=\` stays literal
+    #: too — only the first one separates a cookie's name from its value.
+    _COOKIE_SAFE = "!#$%&'()*+-./:<>?@[]^_\`{|}~="
+
+    def _scalar(self, value: Any) -> str:
+        # The wire form of a single parameter value: JSON spellings for bools,
+        # ISO-8601 for dates, and the model's own wire shape for anything else.
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value, (datetime.date, datetime.datetime)):
+            return value.isoformat()
+        dumped = self._dump(value)
+        if isinstance(dumped, str):
+            return dumped
+        # RFC 6570 renders a list as its comma-joined members and an object as
+        # comma-joined key,value pairs. Python's own \`str\` would emit a repr —
+        # \`['a', 'b']\`, quotes and spaces included.
+        if isinstance(dumped, list):
+            return ",".join(self._scalar(v) for v in dumped)
+        if isinstance(dumped, dict):
+            return ",".join(
+                f"{k},{self._scalar(v)}" for k, v in dumped.items() if v is not None
+            )
+        if dumped is None:
+            return ""
+        return str(dumped)
+
+    def _query(
+        self,
+        query_params: dict[str, Any],
+        collection_formats: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        for key, value in query_params.items():
+            if value is None:
+                continue
+            fmt = (collection_formats or {}).get(key)
+            if fmt == "deepObject":
+                self._deep_object(key, value, out)
+            elif isinstance(value, list):
+                delimiter = self._COLLECTION_DELIMITERS.get(fmt or "multi")
+                if delimiter is None:
+                    out[key] = [self._scalar(v) for v in value]
+                else:
+                    out[key] = delimiter.join(self._scalar(v) for v in value)
+            elif self._is_object(value):
+                # OpenAPI's default query style is form/explode, under which an
+                # object expands to one parameter per property rather than
+                # being stringified.
+                for prop, prop_value in self._as_dict(value).items():
+                    if prop_value is not None:
+                        out[prop] = self._scalar(prop_value)
+            else:
+                out[key] = self._scalar(value)
+        return out
+
+    def _is_object(self, value: Any) -> bool:
+        return isinstance(value, (dict, BaseModel))
+
+    def _as_dict(self, value: Any) -> dict[str, Any]:
+        if isinstance(value, BaseModel):
+            return value.model_dump(mode="json", by_alias=True, exclude_unset=True)
+        return dict(value)
+
+    def _headers(
+        self,
+        header_params: dict[str, Any] | None = None,
+        collection_formats: dict[str, str] | None = None,
+        cookie_params: dict[str, Any] | None = None,
+    ) -> list[tuple[str, str]]:
+        out: list[tuple[str, str]] = []
+        for key, value in (header_params or {}).items():
+            if value is None:
+                continue
+            if isinstance(value, list):
+                fmt = (collection_formats or {}).get(key, "csv")
+                delimiter = self._COLLECTION_DELIMITERS.get(fmt)
+                if delimiter is None:
+                    for item in value:
+                        out.append((key, self._scalar(item)))
+                else:
+                    out.append((key, delimiter.join(self._scalar(v) for v in value)))
+            else:
+                out.append((key, self._scalar(value)))
+        # A config header only applies where the operation didn't set one:
+        # httpx comma-joins repeated names, which would corrupt the value.
+        operation_headers = {key.lower() for key, _ in out}
+        out.extend(
+            (key, value)
+            for key, value in self._config.headers.items()
+            if key.lower() not in operation_headers
+        )
+        # The operation's cookies are merged into one \`Cookie\` header alongside
+        # every other source. Passing them to httpx's \`cookies=\` instead would
+        # drop them outright whenever a \`Cookie\` header is present, since
+        # http.cookiejar skips a request that already carries one — and setting
+        # the header here would in turn shadow the caller's own jar and header,
+        # which httpx resolves in favour of the more specific value.
+        cookies = self._cookies(cookie_params or {})
+        if cookies:
+            pairs = [
+                *(
+                    value
+                    for source in (self._client.headers, dict(out))
+                    for key, value in source.items()
+                    if key.lower() == "cookie"
+                ),
+                *(f"{key}={value}" for key, value in self._client.cookies.items()),
+                *(f"{key}={value}" for key, value in cookies.items()),
+            ]
+            out = [(key, value) for key, value in out if key.lower() != "cookie"]
+            out.append(("Cookie", "; ".join(pairs)))
+        return out
+
+    def _default_content_type(
+        self, header_params: dict[str, Any], media_type: str
+    ) -> None:
+        # The media type the specification declares, applied unless the operation
+        # takes a Content-Type of its own and the caller supplied one. Header
+        # names are case-insensitive, and a declared header the caller omitted is
+        # present holding \`None\` — neither counts as the caller setting it.
+        if any(
+            key.lower() == "content-type" and value is not None
+            for key, value in header_params.items()
+        ):
+            return
+        for key in list(header_params):
+            if key.lower() == "content-type":
+                header_params[key] = media_type
+                return
+        header_params["Content-Type"] = media_type
+
+    def _cookies(self, cookie_params: dict[str, Any]) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for key, value in cookie_params.items():
+            if value is None:
+                continue
+            dumped = self._dump(value)
+            # A cookie uses form-style expansion, so a list joins on \`,\` and an
+            # object on \`,\` between each key and value. Members are encoded so a
+            # \`;\` or \`,\` inside one can't be read as a delimiter, while the
+            # joining commas stay literal.
+            if isinstance(dumped, list):
+                rendered = ",".join(self._cookie_value(v) for v in dumped)
+            elif isinstance(dumped, dict):
+                rendered = ",".join(
+                    self._cookie_value(k) + "," + self._cookie_value(v)
+                    for k, v in dumped.items()
+                    if v is not None
+                )
+            else:
+                rendered = self._cookie_value(value)
+            out[key] = rendered
+        return out
+
+    def _cookie_value(self, value: Any) -> str:
+        # Only the characters a cookie parser treats as structure are escaped, so
+        # a timestamp keeps its colons and a base64 token its \`=\` padding. Servers
+        # do not URL-decode cookies, so anything escaped here arrives escaped.
+        return quote(self._scalar(value), safe=self._COOKIE_SAFE)
+
+    def _dump(self, value: Any) -> Any:
+        if value is None:
+            return None
+        if isinstance(value, BaseModel):
+            return value.model_dump(mode="json", by_alias=True, exclude_unset=True)
+        if isinstance(value, (list, tuple)):
+            return [self._dump(v) for v in value]
+        if isinstance(value, dict):
+            return {k: self._dump(v) for k, v in value.items()}
+        if isinstance(value, (datetime.date, datetime.datetime)):
+            return value.isoformat()
+        return value
+
+    def _error_payload(self, response: httpx.Response) -> Any:
+        # An error body is whatever the server actually sent, which need not be
+        # the JSON the spec declares (a proxy's HTML page, say).
+        try:
+            return response.json()
+        except ValueError:
+            return response.text
+
+    def _error(self, wrapper: type[_ErrorT], status: int, payload: Any) -> _ErrorT:
+        # Coerce to the declared error type, falling back to the raw payload so
+        # a body that doesn't match the spec still raises the typed exception.
+        try:
+            return wrapper.model_validate({"status": status, "error": payload})
+        except ValidationError:
+            return wrapper.model_construct(status=status, error=payload)
+
+    def process_tags(
+        self,
+        body: list[str],
+    ) -> types.ProcessTags200Response:
+        header_params: dict[str, Any] = {}
+        body = self._dump(body)
+        request_kwargs: dict[str, Any] = {"json": body}
+        if body is not None and not self._config.omit_content_type_header:
+            self._default_content_type(header_params, "application/json")
+        _request_url = self._url("/process-tags", {})
+        response = self._client.request(
+            "POST",
+            _request_url,
+            headers=self._headers(header_params),
+            **request_kwargs,
+        )
+        if response.status_code == 200:
+            return types.ProcessTags200Response.model_validate(response.json())
+        raise ProcessTagsApiError(response.status_code, None)
+"
+`;
+
+exports[`openApiPyClientGenerator - arrays > should handle operation which accepts an array of strings > types.py 1`] = `
+""""Types for TestApi — AUTO-GENERATED, do not edit."""
+
+from __future__ import annotations
+
+from typing import Never, TypedDict
+
+from pydantic import BaseModel, ConfigDict
+
+
+class ProcessTags200Response(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    processed: int
+
+
+class ProcessTagsRequest(TypedDict):
+    body: list[str]
+
+
+ProcessTagsError = Never
+"
+`;
+
+exports[`openApiPyClientGenerator - arrays > should handle operation which returns a nested array of strings > client.py 1`] = `
+""""TestApi — AUTO-GENERATED synchronous client."""
+
+from __future__ import annotations
+
+import datetime
+from dataclasses import dataclass, field
+from typing import Any, TypeVar
+from urllib.parse import quote
+
+import httpx
+from pydantic import BaseModel, TypeAdapter, ValidationError
+
+from .errors import (
+    ApiError as ApiError,
+)
+from .errors import (
+    GetMatrixApiError as GetMatrixApiError,
+)
+
+_ErrorT = TypeVar("_ErrorT", bound=BaseModel)
+
+
+@dataclass
+class TestApiConfig:
+    """Client configuration for TestApi."""
+
+    #: Base URL for the API.
+    url: str
+    #: Client used for every request. Supply your own to add authentication or
+    #: any other middleware — an \`\`httpx.Auth\`\` (e.g. a SigV4 signer), an event
+    #: hook, a custom transport, timeouts, retries or a proxy all apply, and the
+    #: client's own headers and query params are sent alongside each operation's.
+    #: A supplied client is never closed by this one, so it can be shared.
+    httpx_client: httpx.Client | None = None
+    #: Headers added to every request, where the operation sets none itself.
+    headers: dict[str, str] = field(default_factory=dict)
+    #: By default the client sends a Content-Type header set to the media type
+    #: the OpenAPI specification declares for the request. Set this to omit it.
+    omit_content_type_header: bool = False
+
+
+class TestApi:
+    """Synchronous API client for TestApi."""
+
+    def __init__(self, config: TestApiConfig) -> None:
+        self._config = config
+        self._client = config.httpx_client or httpx.Client()
+        self._owns_client = config.httpx_client is None
+        self._base_url = config.url.rstrip("/")
+
+    def __enter__(self) -> TestApi:
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()
+
+    def close(self) -> None:
+        if self._owns_client:
+            self._client.close()
+
+    def _url(
+        self,
+        path: str,
+        path_params: dict[str, Any],
+        path_styles: dict[str, tuple[str, bool]] | None = None,
+    ) -> str:
+        for key, value in path_params.items():
+            style, explode = (path_styles or {}).get(key, ("simple", False))
+            # An object expands to its key,value members; a list to its items.
+            # Each is encoded on its own so the separators between them stay
+            # literal, as RFC 6570 requires.
+            dumped = self._dump(value)
+            if isinstance(dumped, dict):
+                values = [
+                    part
+                    for k, v in dumped.items()
+                    if v is not None
+                    for part in (k, self._scalar(v))
+                ]
+            elif isinstance(dumped, list):
+                values = list(dumped)
+            else:
+                values = [value]
+            if style == "matrix":
+                # RFC 6570 path-style expansion: ;key=a,b (explode: ;key=a;key=b)
+                if explode:
+                    rendered = "".join(
+                        ";" + key + "=" + quote(self._scalar(v), safe="")
+                        for v in values
+                    )
+                else:
+                    rendered = (
+                        ";"
+                        + key
+                        + "="
+                        + ",".join(quote(self._scalar(v), safe="") for v in values)
+                    )
+            elif style == "label":
+                # RFC 6570 label expansion: .a,b (explode: .a.b)
+                rendered = "." + ("." if explode else ",").join(
+                    quote(self._scalar(v), safe="") for v in values
+                )
+            else:
+                # RFC 6570 simple expansion: a list renders comma-separated.
+                rendered = ",".join(quote(self._scalar(v), safe="") for v in values)
+            path = path.replace("{" + key + "}", rendered)
+        return self._base_url + path
+
+    def _deep_object(self, key: str, value: Any, out: dict[str, Any]) -> None:
+        if isinstance(value, BaseModel):
+            value = value.model_dump(mode="json", by_alias=True, exclude_unset=True)
+        if isinstance(value, dict):
+            for prop, v in value.items():
+                self._deep_object(f"{key}[{prop}]", v, out)
+        elif value is not None:
+            out[key] = value
+
+    _COLLECTION_DELIMITERS = {"csv": ",", "ssv": " ", "pipes": "|"}
+
+    #: Characters left literal in a cookie value: every RFC 6265 cookie-octet
+    #: except the \`,\` and \`;\` this client joins members on. A \`=\` stays literal
+    #: too — only the first one separates a cookie's name from its value.
+    _COOKIE_SAFE = "!#$%&'()*+-./:<>?@[]^_\`{|}~="
+
+    def _scalar(self, value: Any) -> str:
+        # The wire form of a single parameter value: JSON spellings for bools,
+        # ISO-8601 for dates, and the model's own wire shape for anything else.
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value, (datetime.date, datetime.datetime)):
+            return value.isoformat()
+        dumped = self._dump(value)
+        if isinstance(dumped, str):
+            return dumped
+        # RFC 6570 renders a list as its comma-joined members and an object as
+        # comma-joined key,value pairs. Python's own \`str\` would emit a repr —
+        # \`['a', 'b']\`, quotes and spaces included.
+        if isinstance(dumped, list):
+            return ",".join(self._scalar(v) for v in dumped)
+        if isinstance(dumped, dict):
+            return ",".join(
+                f"{k},{self._scalar(v)}" for k, v in dumped.items() if v is not None
+            )
+        if dumped is None:
+            return ""
+        return str(dumped)
+
+    def _query(
+        self,
+        query_params: dict[str, Any],
+        collection_formats: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        for key, value in query_params.items():
+            if value is None:
+                continue
+            fmt = (collection_formats or {}).get(key)
+            if fmt == "deepObject":
+                self._deep_object(key, value, out)
+            elif isinstance(value, list):
+                delimiter = self._COLLECTION_DELIMITERS.get(fmt or "multi")
+                if delimiter is None:
+                    out[key] = [self._scalar(v) for v in value]
+                else:
+                    out[key] = delimiter.join(self._scalar(v) for v in value)
+            elif self._is_object(value):
+                # OpenAPI's default query style is form/explode, under which an
+                # object expands to one parameter per property rather than
+                # being stringified.
+                for prop, prop_value in self._as_dict(value).items():
+                    if prop_value is not None:
+                        out[prop] = self._scalar(prop_value)
+            else:
+                out[key] = self._scalar(value)
+        return out
+
+    def _is_object(self, value: Any) -> bool:
+        return isinstance(value, (dict, BaseModel))
+
+    def _as_dict(self, value: Any) -> dict[str, Any]:
+        if isinstance(value, BaseModel):
+            return value.model_dump(mode="json", by_alias=True, exclude_unset=True)
+        return dict(value)
+
+    def _headers(
+        self,
+        header_params: dict[str, Any] | None = None,
+        collection_formats: dict[str, str] | None = None,
+        cookie_params: dict[str, Any] | None = None,
+    ) -> list[tuple[str, str]]:
+        out: list[tuple[str, str]] = []
+        for key, value in (header_params or {}).items():
+            if value is None:
+                continue
+            if isinstance(value, list):
+                fmt = (collection_formats or {}).get(key, "csv")
+                delimiter = self._COLLECTION_DELIMITERS.get(fmt)
+                if delimiter is None:
+                    for item in value:
+                        out.append((key, self._scalar(item)))
+                else:
+                    out.append((key, delimiter.join(self._scalar(v) for v in value)))
+            else:
+                out.append((key, self._scalar(value)))
+        # A config header only applies where the operation didn't set one:
+        # httpx comma-joins repeated names, which would corrupt the value.
+        operation_headers = {key.lower() for key, _ in out}
+        out.extend(
+            (key, value)
+            for key, value in self._config.headers.items()
+            if key.lower() not in operation_headers
+        )
+        # The operation's cookies are merged into one \`Cookie\` header alongside
+        # every other source. Passing them to httpx's \`cookies=\` instead would
+        # drop them outright whenever a \`Cookie\` header is present, since
+        # http.cookiejar skips a request that already carries one — and setting
+        # the header here would in turn shadow the caller's own jar and header,
+        # which httpx resolves in favour of the more specific value.
+        cookies = self._cookies(cookie_params or {})
+        if cookies:
+            pairs = [
+                *(
+                    value
+                    for source in (self._client.headers, dict(out))
+                    for key, value in source.items()
+                    if key.lower() == "cookie"
+                ),
+                *(f"{key}={value}" for key, value in self._client.cookies.items()),
+                *(f"{key}={value}" for key, value in cookies.items()),
+            ]
+            out = [(key, value) for key, value in out if key.lower() != "cookie"]
+            out.append(("Cookie", "; ".join(pairs)))
+        return out
+
+    def _default_content_type(
+        self, header_params: dict[str, Any], media_type: str
+    ) -> None:
+        # The media type the specification declares, applied unless the operation
+        # takes a Content-Type of its own and the caller supplied one. Header
+        # names are case-insensitive, and a declared header the caller omitted is
+        # present holding \`None\` — neither counts as the caller setting it.
+        if any(
+            key.lower() == "content-type" and value is not None
+            for key, value in header_params.items()
+        ):
+            return
+        for key in list(header_params):
+            if key.lower() == "content-type":
+                header_params[key] = media_type
+                return
+        header_params["Content-Type"] = media_type
+
+    def _cookies(self, cookie_params: dict[str, Any]) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for key, value in cookie_params.items():
+            if value is None:
+                continue
+            dumped = self._dump(value)
+            # A cookie uses form-style expansion, so a list joins on \`,\` and an
+            # object on \`,\` between each key and value. Members are encoded so a
+            # \`;\` or \`,\` inside one can't be read as a delimiter, while the
+            # joining commas stay literal.
+            if isinstance(dumped, list):
+                rendered = ",".join(self._cookie_value(v) for v in dumped)
+            elif isinstance(dumped, dict):
+                rendered = ",".join(
+                    self._cookie_value(k) + "," + self._cookie_value(v)
+                    for k, v in dumped.items()
+                    if v is not None
+                )
+            else:
+                rendered = self._cookie_value(value)
+            out[key] = rendered
+        return out
+
+    def _cookie_value(self, value: Any) -> str:
+        # Only the characters a cookie parser treats as structure are escaped, so
+        # a timestamp keeps its colons and a base64 token its \`=\` padding. Servers
+        # do not URL-decode cookies, so anything escaped here arrives escaped.
+        return quote(self._scalar(value), safe=self._COOKIE_SAFE)
+
+    def _dump(self, value: Any) -> Any:
+        if value is None:
+            return None
+        if isinstance(value, BaseModel):
+            return value.model_dump(mode="json", by_alias=True, exclude_unset=True)
+        if isinstance(value, (list, tuple)):
+            return [self._dump(v) for v in value]
+        if isinstance(value, dict):
+            return {k: self._dump(v) for k, v in value.items()}
+        if isinstance(value, (datetime.date, datetime.datetime)):
+            return value.isoformat()
+        return value
+
+    def _error_payload(self, response: httpx.Response) -> Any:
+        # An error body is whatever the server actually sent, which need not be
+        # the JSON the spec declares (a proxy's HTML page, say).
+        try:
+            return response.json()
+        except ValueError:
+            return response.text
+
+    def _error(self, wrapper: type[_ErrorT], status: int, payload: Any) -> _ErrorT:
+        # Coerce to the declared error type, falling back to the raw payload so
+        # a body that doesn't match the spec still raises the typed exception.
+        try:
+            return wrapper.model_validate({"status": status, "error": payload})
+        except ValidationError:
+            return wrapper.model_construct(status=status, error=payload)
+
+    def get_matrix(
+        self,
+    ) -> list[list[str]]:
+        request_kwargs: dict[str, Any] = {}
+        _request_url = self._url("/matrix", {})
+        response = self._client.request(
+            "GET",
+            _request_url,
+            headers=self._headers(),
+            **request_kwargs,
+        )
+        if response.status_code == 200:
+            return TypeAdapter(list[list[str]]).validate_python(response.json())
+        raise GetMatrixApiError(response.status_code, None)
+"
+`;
+
+exports[`openApiPyClientGenerator - arrays > should handle operation which returns a nested array of strings > types.py 1`] = `
+""""Types for TestApi — AUTO-GENERATED, do not edit."""
+
+from __future__ import annotations
+
+from typing import Never
+
+GetMatrixError = Never
+"
+`;
+
+exports[`openApiPyClientGenerator - arrays > should handle operation which returns an array of objects > client.py 1`] = `
+""""TestApi — AUTO-GENERATED synchronous client."""
+
+from __future__ import annotations
+
+import datetime
+from dataclasses import dataclass, field
+from typing import Any, TypeVar
+from urllib.parse import quote
+
+import httpx
+from pydantic import BaseModel, TypeAdapter, ValidationError
+
+from . import types
+from .errors import (
+    ApiError as ApiError,
+)
+from .errors import (
+    ListUsersApiError as ListUsersApiError,
+)
+
+_ErrorT = TypeVar("_ErrorT", bound=BaseModel)
+
+
+@dataclass
+class TestApiConfig:
+    """Client configuration for TestApi."""
+
+    #: Base URL for the API.
+    url: str
+    #: Client used for every request. Supply your own to add authentication or
+    #: any other middleware — an \`\`httpx.Auth\`\` (e.g. a SigV4 signer), an event
+    #: hook, a custom transport, timeouts, retries or a proxy all apply, and the
+    #: client's own headers and query params are sent alongside each operation's.
+    #: A supplied client is never closed by this one, so it can be shared.
+    httpx_client: httpx.Client | None = None
+    #: Headers added to every request, where the operation sets none itself.
+    headers: dict[str, str] = field(default_factory=dict)
+    #: By default the client sends a Content-Type header set to the media type
+    #: the OpenAPI specification declares for the request. Set this to omit it.
+    omit_content_type_header: bool = False
+
+
+class TestApi:
+    """Synchronous API client for TestApi."""
+
+    def __init__(self, config: TestApiConfig) -> None:
+        self._config = config
+        self._client = config.httpx_client or httpx.Client()
+        self._owns_client = config.httpx_client is None
+        self._base_url = config.url.rstrip("/")
+
+    def __enter__(self) -> TestApi:
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()
+
+    def close(self) -> None:
+        if self._owns_client:
+            self._client.close()
+
+    def _url(
+        self,
+        path: str,
+        path_params: dict[str, Any],
+        path_styles: dict[str, tuple[str, bool]] | None = None,
+    ) -> str:
+        for key, value in path_params.items():
+            style, explode = (path_styles or {}).get(key, ("simple", False))
+            # An object expands to its key,value members; a list to its items.
+            # Each is encoded on its own so the separators between them stay
+            # literal, as RFC 6570 requires.
+            dumped = self._dump(value)
+            if isinstance(dumped, dict):
+                values = [
+                    part
+                    for k, v in dumped.items()
+                    if v is not None
+                    for part in (k, self._scalar(v))
+                ]
+            elif isinstance(dumped, list):
+                values = list(dumped)
+            else:
+                values = [value]
+            if style == "matrix":
+                # RFC 6570 path-style expansion: ;key=a,b (explode: ;key=a;key=b)
+                if explode:
+                    rendered = "".join(
+                        ";" + key + "=" + quote(self._scalar(v), safe="")
+                        for v in values
+                    )
+                else:
+                    rendered = (
+                        ";"
+                        + key
+                        + "="
+                        + ",".join(quote(self._scalar(v), safe="") for v in values)
+                    )
+            elif style == "label":
+                # RFC 6570 label expansion: .a,b (explode: .a.b)
+                rendered = "." + ("." if explode else ",").join(
+                    quote(self._scalar(v), safe="") for v in values
+                )
+            else:
+                # RFC 6570 simple expansion: a list renders comma-separated.
+                rendered = ",".join(quote(self._scalar(v), safe="") for v in values)
+            path = path.replace("{" + key + "}", rendered)
+        return self._base_url + path
+
+    def _deep_object(self, key: str, value: Any, out: dict[str, Any]) -> None:
+        if isinstance(value, BaseModel):
+            value = value.model_dump(mode="json", by_alias=True, exclude_unset=True)
+        if isinstance(value, dict):
+            for prop, v in value.items():
+                self._deep_object(f"{key}[{prop}]", v, out)
+        elif value is not None:
+            out[key] = value
+
+    _COLLECTION_DELIMITERS = {"csv": ",", "ssv": " ", "pipes": "|"}
+
+    #: Characters left literal in a cookie value: every RFC 6265 cookie-octet
+    #: except the \`,\` and \`;\` this client joins members on. A \`=\` stays literal
+    #: too — only the first one separates a cookie's name from its value.
+    _COOKIE_SAFE = "!#$%&'()*+-./:<>?@[]^_\`{|}~="
+
+    def _scalar(self, value: Any) -> str:
+        # The wire form of a single parameter value: JSON spellings for bools,
+        # ISO-8601 for dates, and the model's own wire shape for anything else.
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value, (datetime.date, datetime.datetime)):
+            return value.isoformat()
+        dumped = self._dump(value)
+        if isinstance(dumped, str):
+            return dumped
+        # RFC 6570 renders a list as its comma-joined members and an object as
+        # comma-joined key,value pairs. Python's own \`str\` would emit a repr —
+        # \`['a', 'b']\`, quotes and spaces included.
+        if isinstance(dumped, list):
+            return ",".join(self._scalar(v) for v in dumped)
+        if isinstance(dumped, dict):
+            return ",".join(
+                f"{k},{self._scalar(v)}" for k, v in dumped.items() if v is not None
+            )
+        if dumped is None:
+            return ""
+        return str(dumped)
+
+    def _query(
+        self,
+        query_params: dict[str, Any],
+        collection_formats: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        for key, value in query_params.items():
+            if value is None:
+                continue
+            fmt = (collection_formats or {}).get(key)
+            if fmt == "deepObject":
+                self._deep_object(key, value, out)
+            elif isinstance(value, list):
+                delimiter = self._COLLECTION_DELIMITERS.get(fmt or "multi")
+                if delimiter is None:
+                    out[key] = [self._scalar(v) for v in value]
+                else:
+                    out[key] = delimiter.join(self._scalar(v) for v in value)
+            elif self._is_object(value):
+                # OpenAPI's default query style is form/explode, under which an
+                # object expands to one parameter per property rather than
+                # being stringified.
+                for prop, prop_value in self._as_dict(value).items():
+                    if prop_value is not None:
+                        out[prop] = self._scalar(prop_value)
+            else:
+                out[key] = self._scalar(value)
+        return out
+
+    def _is_object(self, value: Any) -> bool:
+        return isinstance(value, (dict, BaseModel))
+
+    def _as_dict(self, value: Any) -> dict[str, Any]:
+        if isinstance(value, BaseModel):
+            return value.model_dump(mode="json", by_alias=True, exclude_unset=True)
+        return dict(value)
+
+    def _headers(
+        self,
+        header_params: dict[str, Any] | None = None,
+        collection_formats: dict[str, str] | None = None,
+        cookie_params: dict[str, Any] | None = None,
+    ) -> list[tuple[str, str]]:
+        out: list[tuple[str, str]] = []
+        for key, value in (header_params or {}).items():
+            if value is None:
+                continue
+            if isinstance(value, list):
+                fmt = (collection_formats or {}).get(key, "csv")
+                delimiter = self._COLLECTION_DELIMITERS.get(fmt)
+                if delimiter is None:
+                    for item in value:
+                        out.append((key, self._scalar(item)))
+                else:
+                    out.append((key, delimiter.join(self._scalar(v) for v in value)))
+            else:
+                out.append((key, self._scalar(value)))
+        # A config header only applies where the operation didn't set one:
+        # httpx comma-joins repeated names, which would corrupt the value.
+        operation_headers = {key.lower() for key, _ in out}
+        out.extend(
+            (key, value)
+            for key, value in self._config.headers.items()
+            if key.lower() not in operation_headers
+        )
+        # The operation's cookies are merged into one \`Cookie\` header alongside
+        # every other source. Passing them to httpx's \`cookies=\` instead would
+        # drop them outright whenever a \`Cookie\` header is present, since
+        # http.cookiejar skips a request that already carries one — and setting
+        # the header here would in turn shadow the caller's own jar and header,
+        # which httpx resolves in favour of the more specific value.
+        cookies = self._cookies(cookie_params or {})
+        if cookies:
+            pairs = [
+                *(
+                    value
+                    for source in (self._client.headers, dict(out))
+                    for key, value in source.items()
+                    if key.lower() == "cookie"
+                ),
+                *(f"{key}={value}" for key, value in self._client.cookies.items()),
+                *(f"{key}={value}" for key, value in cookies.items()),
+            ]
+            out = [(key, value) for key, value in out if key.lower() != "cookie"]
+            out.append(("Cookie", "; ".join(pairs)))
+        return out
+
+    def _default_content_type(
+        self, header_params: dict[str, Any], media_type: str
+    ) -> None:
+        # The media type the specification declares, applied unless the operation
+        # takes a Content-Type of its own and the caller supplied one. Header
+        # names are case-insensitive, and a declared header the caller omitted is
+        # present holding \`None\` — neither counts as the caller setting it.
+        if any(
+            key.lower() == "content-type" and value is not None
+            for key, value in header_params.items()
+        ):
+            return
+        for key in list(header_params):
+            if key.lower() == "content-type":
+                header_params[key] = media_type
+                return
+        header_params["Content-Type"] = media_type
+
+    def _cookies(self, cookie_params: dict[str, Any]) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for key, value in cookie_params.items():
+            if value is None:
+                continue
+            dumped = self._dump(value)
+            # A cookie uses form-style expansion, so a list joins on \`,\` and an
+            # object on \`,\` between each key and value. Members are encoded so a
+            # \`;\` or \`,\` inside one can't be read as a delimiter, while the
+            # joining commas stay literal.
+            if isinstance(dumped, list):
+                rendered = ",".join(self._cookie_value(v) for v in dumped)
+            elif isinstance(dumped, dict):
+                rendered = ",".join(
+                    self._cookie_value(k) + "," + self._cookie_value(v)
+                    for k, v in dumped.items()
+                    if v is not None
+                )
+            else:
+                rendered = self._cookie_value(value)
+            out[key] = rendered
+        return out
+
+    def _cookie_value(self, value: Any) -> str:
+        # Only the characters a cookie parser treats as structure are escaped, so
+        # a timestamp keeps its colons and a base64 token its \`=\` padding. Servers
+        # do not URL-decode cookies, so anything escaped here arrives escaped.
+        return quote(self._scalar(value), safe=self._COOKIE_SAFE)
+
+    def _dump(self, value: Any) -> Any:
+        if value is None:
+            return None
+        if isinstance(value, BaseModel):
+            return value.model_dump(mode="json", by_alias=True, exclude_unset=True)
+        if isinstance(value, (list, tuple)):
+            return [self._dump(v) for v in value]
+        if isinstance(value, dict):
+            return {k: self._dump(v) for k, v in value.items()}
+        if isinstance(value, (datetime.date, datetime.datetime)):
+            return value.isoformat()
+        return value
+
+    def _error_payload(self, response: httpx.Response) -> Any:
+        # An error body is whatever the server actually sent, which need not be
+        # the JSON the spec declares (a proxy's HTML page, say).
+        try:
+            return response.json()
+        except ValueError:
+            return response.text
+
+    def _error(self, wrapper: type[_ErrorT], status: int, payload: Any) -> _ErrorT:
+        # Coerce to the declared error type, falling back to the raw payload so
+        # a body that doesn't match the spec still raises the typed exception.
+        try:
+            return wrapper.model_validate({"status": status, "error": payload})
+        except ValidationError:
+            return wrapper.model_construct(status=status, error=payload)
+
+    def list_users(
+        self,
+    ) -> list[types.User]:
+        request_kwargs: dict[str, Any] = {}
+        _request_url = self._url("/users", {})
+        response = self._client.request(
+            "GET",
+            _request_url,
+            headers=self._headers(),
+            **request_kwargs,
+        )
+        if response.status_code == 200:
+            return TypeAdapter(list[types.User]).validate_python(response.json())
+        raise ListUsersApiError(response.status_code, None)
+"
+`;
+
+exports[`openApiPyClientGenerator - arrays > should handle operation which returns an array of objects > types.py 1`] = `
+""""Types for TestApi — AUTO-GENERATED, do not edit."""
+
+from __future__ import annotations
+
+from typing import Never
+
+from pydantic import BaseModel, ConfigDict
+
+
+class User(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
+    id: int
+
+
+ListUsersError = Never
+"
+`;
