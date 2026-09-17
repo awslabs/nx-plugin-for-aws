@@ -304,17 +304,19 @@ dependencies = ["strands-agents"]
     );
   });
 
-  it('rejects non-IAM agent', async () => {
+  // The agent's auth governs inbound requests to it; its outbound call to the
+  // gateway is signed with SigV4 from its execution role either way.
+  it('connects a cognito agent', async () => {
     setupProjects();
     await expect(
       pyAgentGatewayConnectionGenerator(tree, {
         ...fullOptions(),
         sourceComponent: {
           ...fullOptions().sourceComponent,
-          auth: 'Cognito',
+          auth: 'cognito',
         } as any,
       }),
-    ).rejects.toThrow(/Only IAM-authenticated agents/);
+    ).resolves.toBeDefined();
   });
 
   it('should match snapshot for agent-connection core files', async () => {
