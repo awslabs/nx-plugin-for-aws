@@ -34,12 +34,20 @@ const outputOf = (e: unknown): string => {
 };
 
 /**
+ * Pause between apply attempts. The service asks the caller to "try again
+ * later", and an immediate re-run lands while the delivery configuration is
+ * still being updated.
+ */
+const RETRY_DELAY_MS = 30_000;
+
+/**
  * Runs `nx apply infra`, re-running it when the failure is the transient
  * delivery-source race. Any other failure is rethrown immediately.
  */
 export const applyInfra = async (
   opts: RunCmdOpts,
   maxAttempts = 3,
+  retryDelayMs = RETRY_DELAY_MS,
 ): Promise<void> => {
   for (let attempt = 1; ; attempt++) {
     try {
@@ -50,8 +58,9 @@ export const applyInfra = async (
         throw e;
       }
       console.log(
-        `${APPLY_RETRY_MARKER} apply attempt ${attempt} of ${maxAttempts} hit the CloudWatch Logs delivery-source ConflictException; re-running apply`,
+        `${APPLY_RETRY_MARKER} apply attempt ${attempt} of ${maxAttempts} hit the CloudWatch Logs delivery-source ConflictException; re-running apply in ${retryDelayMs / 1000}s`,
       );
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
     }
   }
 };
