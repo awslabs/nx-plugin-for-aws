@@ -2,6 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+import type { ConnectionConstraint } from '../../../../packages/nx-plugin/src/connection/scaffold-catalog';
 import { kebabCase } from '../../../../packages/nx-plugin/src/utils/names';
 import {
   type EdgeType,
@@ -58,6 +59,23 @@ export const effectiveOption = (
 };
 
 /**
+ * Whether a conditional constraint applies to these endpoints. An unconditional
+ * constraint always does.
+ */
+const constraintApplies = (
+  constraint: ConnectionConstraint,
+  source: GraphNode,
+  target: GraphNode,
+): boolean => {
+  if (!constraint.when) return true;
+  const node = constraint.when.side === 'source' ? source : target;
+  return (
+    effectiveOption(node, nodeType(node.type), constraint.when.option) ===
+    constraint.when.equals
+  );
+};
+
+/**
  * Check an edge's constraints against the option values on its endpoints,
  * mirroring the guards the connection generators enforce so the user learns
  * about a conflict while drawing rather than when the generator throws.
@@ -70,6 +88,7 @@ const checkConstraints = (
 ): Issue[] => {
   const issues: Issue[] = [];
   for (const constraint of edgeType.constraints) {
+    if (!constraintApplies(constraint, source, target)) continue;
     const node = constraint.side === 'source' ? source : target;
     const type = nodeType(node.type);
     const value = effectiveOption(node, type, constraint.option);
@@ -339,10 +358,13 @@ export const autoFixesForConnection = (
   // A constraint pinning one value says what the option must be; a preference
   // says what it should be. A `notEquals` constraint rules a value out without
   // naming a replacement, so it cannot drive a fix — the validator reports it.
+  // A conditional constraint only fixes when its condition holds, so a rule
+  // covering one configuration never rewrites the others.
   const wanted: { side: 'source' | 'target'; option: string; value: string }[] =
     [
       ...edgeType.constraints.flatMap((constraint) =>
-        constraint.equals === undefined
+        constraint.equals === undefined ||
+        !constraintApplies(constraint, source, target)
           ? []
           : [
               {

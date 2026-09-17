@@ -17,6 +17,7 @@ describe('agentcore-gateway#agent-connection generator', () => {
     name = 'my-gateway',
     rc = 'MyGateway',
     protocol = 'http',
+    auth = 'iam',
   ) => {
     addProjectConfiguration(tree, `@proj/${name}`, {
       name: `@proj/${name}`,
@@ -36,7 +37,7 @@ describe('agentcore-gateway#agent-connection generator', () => {
         name,
         rc,
         protocol,
-        auth: 'iam',
+        auth,
         port: 8100,
       } as any,
     });
@@ -229,7 +230,22 @@ describe('agentcore-gateway#agent-connection generator', () => {
     ).resolves.toBeDefined();
   });
 
-  it('connects a cognito agent (fronted via JWT passthrough)', async () => {
+  it('connects a cognito agent behind a cognito gateway (JWT passthrough)', async () => {
+    const gw = addGateway('my-gateway', 'MyGateway', 'http', 'cognito');
+    const project = addAgentProject();
+
+    await expect(
+      agentcoreGatewayAgentConnectionGenerator(tree, {
+        sourceProject: `@proj/${gw.name}`,
+        targetProject: project,
+        targetComponent: agentComponent({ auth: 'cognito' }) as any,
+      }),
+    ).resolves.toBeDefined();
+  });
+
+  // An IAM gateway authenticates callers with SigV4, so it has no bearer token
+  // to forward to a Cognito agent's runtime.
+  it('throws for a cognito agent behind an iam gateway', async () => {
     const gw = addGateway();
     const project = addAgentProject();
 
@@ -238,6 +254,19 @@ describe('agentcore-gateway#agent-connection generator', () => {
         sourceProject: `@proj/${gw.name}`,
         targetProject: project,
         targetComponent: agentComponent({ auth: 'cognito' }) as any,
+      }),
+    ).rejects.toThrow(/only a Cognito gateway receives/);
+  });
+
+  it('connects an iam agent behind a cognito gateway', async () => {
+    const gw = addGateway('my-gateway', 'MyGateway', 'http', 'cognito');
+    const project = addAgentProject();
+
+    await expect(
+      agentcoreGatewayAgentConnectionGenerator(tree, {
+        sourceProject: `@proj/${gw.name}`,
+        targetProject: project,
+        targetComponent: agentComponent({ auth: 'iam' }) as any,
       }),
     ).resolves.toBeDefined();
   });
