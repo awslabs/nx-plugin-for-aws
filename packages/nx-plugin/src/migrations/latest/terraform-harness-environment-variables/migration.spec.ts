@@ -105,6 +105,23 @@ describe('terraform-harness-environment-variables migration', () => {
     expect(nextSteps).toEqual([expect.stringContaining(TF_MODULE_PATH)]);
   });
 
+  it('ignores a directory that is not a harness module', async () => {
+    await generateWithOldShape(tree, 'my-harness');
+    // A directory whose `<name>.tf` does not exist, eg a stray or partially
+    // removed module.
+    tree.write(
+      'packages/common/terraform/src/app/harnesses/stray/notes.md',
+      'left behind',
+    );
+
+    const { nextSteps } = await migration(tree);
+
+    expect(tree.read(tfModulePath('my-harness'), 'utf-8')).toContain(
+      COALESCED_ASSIGNMENT,
+    );
+    expect(nextSteps).toEqual([]);
+  });
+
   it('does nothing in a workspace with no Terraform harness modules', async () => {
     const { nextSteps } = await migration(tree);
 
