@@ -5,7 +5,7 @@
 import type { Tree } from '@nx/devkit';
 import { resolveContainers } from '../../utils/containers.js';
 import { declareDependencies } from '../../utils/declared-dependencies.js';
-import { expectHasMetricTags } from '../../utils/metrics.spec.js';
+import { expectHasMetricTags } from '../../utils/metrics-assertions.js';
 import { readProjectConfigurationUnqualified } from '../../utils/nx.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,

@@ -7,7 +7,7 @@ import {
   ensureAwsNxPluginConfig,
   updateAwsNxPluginConfig,
 } from '../../utils/config/utils.js';
-import { expectHasMetricTags } from '../../utils/metrics.spec.js';
+import { expectHasMetricTags } from '../../utils/metrics-assertions.js';
 import { TypeScriptVerifier } from '../../utils/test/ts.spec.js';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
 import { terraformLambdaRuntime } from '../../utils/versions.js';

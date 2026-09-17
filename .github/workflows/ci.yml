@@ -28,22 +28,6 @@ permissions:
   id-token: write
 
 jobs:
-  # The smoke tests exercise generated projects, which a docs only change cannot
-  # affect, so they are skipped for one.
-  changes:
-    name: Detect Changes
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      actions: read
-    outputs:
-      docs_only: ${{ steps.docs_only.outputs.docs-only }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          fetch-depth: 0
-      - id: docs_only
-        uses: ./.github/actions/docs-only-change
   package:
     name: Package
     runs-on: codebuild-nx-plugin-for-aws-runner-${{ github.run_id }}-${{ github.run_attempt }}-large
@@ -115,8 +99,7 @@ jobs:
   smoke_tests:
     name: Smoke Tests - ${{matrix.smoke_test}}
     runs-on: codebuild-nx-plugin-for-aws-runner-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.size }}
-    needs: [changes, package]
-    if: ${{ needs.changes.outputs.docs_only != 'true' }}
+    needs: package
     strategy:
       fail-fast: false
       matrix:
@@ -214,8 +197,7 @@ jobs:
   smoke_tests_migrate:
     name: Smoke Tests - migrate (${{matrix.shard}}/5)
     runs-on: codebuild-nx-plugin-for-aws-runner-${{ github.run_id }}-${{ github.run_attempt }}-xlarge
-    needs: [changes, package]
-    if: ${{ needs.changes.outputs.docs_only != 'true' }}
+    needs: package
     strategy:
       fail-fast: false
       matrix:
@@ -244,8 +226,7 @@ jobs:
   smoke_tests_standalone:
     name: Smoke Tests - standalone (${{matrix.shard}}/6)
     runs-on: codebuild-nx-plugin-for-aws-runner-${{ github.run_id }}-${{ github.run_attempt }}-2xlarge
-    needs: [changes, package]
-    if: ${{ needs.changes.outputs.docs_only != 'true' }}
+    needs: package
     strategy:
       fail-fast: false
       matrix:
@@ -273,8 +254,7 @@ jobs:
   smoke_tests_macos_standalone:
     name: macOS Smoke Tests - standalone (${{matrix.shard}}/6)
     runs-on: macos-latest
-    needs: [changes, package]
-    if: ${{ needs.changes.outputs.docs_only != 'true' }}
+    needs: package
     strategy:
       fail-fast: false
       matrix:
@@ -305,8 +285,7 @@ jobs:
   smoke_tests_windows:
     name: Windows Smoke Tests - ${{matrix.smoke_test}}
     runs-on: windows-latest
-    needs: [changes, package]
-    if: ${{ needs.changes.outputs.docs_only != 'true' }}
+    needs: package
     strategy:
       fail-fast: false
       matrix:
@@ -344,8 +323,7 @@ jobs:
   smoke_tests_windows_standalone:
     name: Windows Smoke Tests - standalone (${{matrix.shard}}/6)
     runs-on: codebuild-nx-plugin-for-aws-windows-runner-${{ github.run_id }}-${{ github.run_attempt }}
-    needs: [changes, package]
-    if: ${{ needs.changes.outputs.docs_only != 'true' }}
+    needs: package
     strategy:
       fail-fast: false
       matrix:
@@ -379,15 +357,13 @@ jobs:
           NX_E2E_SHARD: ${{ matrix.shard }}/6
           NX_E2E_CODEBUILD_WINDOWS: "true"
         run: pnpm nx run @aws/nx-plugin-e2e:smoke-test --name=standalone
-  # The context `main` requires in place of the individual legs, since a skipped
-  # matrix job reports one check under its unexpanded name rather than one per leg.
-  # Passes when every smoke test and everything they need succeeded or was skipped.
-  smoke_tests_complete:
-    name: Smoke Tests Complete
+  release:
+    name: Release
     needs:
       [
-        changes,
         package,
+        build,
+        unit_tests,
         smoke_tests,
         smoke_tests_migrate,
         smoke_tests_standalone,
@@ -395,31 +371,6 @@ jobs:
         smoke_tests_windows,
         smoke_tests_windows_standalone,
       ]
-    if: ${{ !cancelled() }}
-    runs-on: ubuntu-latest
-    permissions: {}
-    steps:
-      - name: Check smoke test results
-        env:
-          RESULTS: ${{ join(needs.*.result, ' ') }}
-        run: |
-          echo "Smoke test results: $RESULTS"
-          for result in $RESULTS; do
-            case "$result" in
-              success | skipped) ;;
-              *)
-                echo "::error::A smoke test job did not pass ($result)"
-                exit 1
-                ;;
-            esac
-          done
-  release:
-    name: Release
-    needs: [changes, package, build, unit_tests, smoke_tests_complete]
-    # A docs only change releases nothing. It also skips the smoke tests, and a
-    # skip propagates to every job downstream of it unless that job opts out with
-    # a status function of its own.
-    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') }}
     runs-on: ubuntu-22.04
     outputs:
       latest_commit: ${{ steps.git_remote.outputs.latest_commit }}
@@ -454,11 +405,8 @@ jobs:
   deploy_docs:
     name: Deploy Docs
     runs-on: ubuntu-latest
-    # Deploys once everything the docs ride on is green. The release job holds the
-    # "still the tip of main" check, so that guard applies only when it ran - a
-    # docs only push skips it.
-    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && (needs.release.result == 'skipped' || needs.release.outputs.latest_commit == github.sha) }}
-    needs: [build, unit_tests, smoke_tests_complete, release]
+    if: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.release.outputs.latest_commit == github.sha }}
+    needs: [release]
     steps:
       - name: Download docs artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8

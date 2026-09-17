@@ -35,15 +35,26 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      actions: read
     outputs:
       docs_only: ${{ steps.docs_only.outputs.docs-only }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
-      - id: docs_only
-        uses: ./.github/actions/docs-only-change
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Detect docs only change
+        id: docs_only
+        # Passed as environment variables rather than interpolated into the script.
+        env:
+          # The checked out commit is a merge of the branch into the base, so diff
+          # the branch head to leave out commits that landed on the base since the
+          # branch forked.
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        # Node strips the types, so this job needs no dependencies installed.
+        run: node ./scripts/docs-only-change.mts
   package:
     name: Package
     runs-on: codebuild-nx-plugin-for-aws-runner-${{ github.run_id }}-${{ github.run_attempt }}-large

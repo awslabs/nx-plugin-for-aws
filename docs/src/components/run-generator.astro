@@ -19,12 +19,13 @@ import {
   createSchemaLookup,
   resolveGeneratorsJson,
 } from '../../../packages/nx-plugin/src/mcp-server/schema-registry';
-import { emittedValues, type GeneratorCardConfig } from '../lib/command-card';
+import {
+  resolveCardOptions,
+  type GeneratorCardConfig,
+} from '../lib/command-card';
 import { commandCardStrings } from '../lib/command-card-strings';
 import {
   effectiveValues,
-  isApplicable,
-  isValueApplicable,
   readGeneratorOptions,
   type GeneratorOption,
 } from '../lib/generator-options';
@@ -121,16 +122,10 @@ const forced = effectiveValues(
   ),
   options.filter((option) => locked.has(option.key)),
 );
-const applicable = options
-  .filter((option) => isApplicable(option, forced))
-  // A value the guide has ruled out is no choice at all: `http-lambda` can't
-  // apply on a guide written for the Smithy framework.
-  .map((option) => ({
-    ...option,
-    values: option.values.filter((value) =>
-      isValueApplicable(option, value, forced),
-    ),
-  }));
+// An option the guide's own values rule out is not one the reader can reach, and
+// nor is a value they rule out — `http-lambda` can't apply on a guide written for
+// the Smithy framework.
+const { applicable, values } = resolveCardOptions(options, forced, initial);
 
 const config: GeneratorCardConfig = {
   kind: 'generator',
@@ -151,17 +146,6 @@ const config: GeneratorCardConfig = {
     }),
   ),
 };
-const inapplicable = new Set(
-  options
-    .filter((option) => !applicable.includes(option))
-    .map((option) => option.key),
-);
-const values = emittedValues(
-  Object.fromEntries(
-    Object.entries(initial).filter(([key]) => !inapplicable.has(key)),
-  ),
-  applicable,
-);
 
 const vscodeStrings = {
   installPlugin: {

@@ -55,6 +55,7 @@ export default defineConfig({
   integrations: [
     starlight({
       title: '@aws/nx-plugin',
+      favicon: '/favicon.png',
       social: [
         {
           icon: 'slack',
@@ -68,6 +69,15 @@ export default defineConfig({
         },
       ],
       head: [
+        {
+          tag: 'link',
+          attrs: {
+            rel: 'icon',
+            type: 'image/svg+xml',
+            sizes: 'any',
+            href: `${basePath}/favicon.svg`,
+          },
+        },
         {
           tag: 'meta',
           attrs: { property: 'og:image', content: previewImage },

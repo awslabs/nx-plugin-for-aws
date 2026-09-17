@@ -590,4 +590,108 @@ describe('normaliseOpenApiSpecForCodeGen', () => {
       $ref: '#/components/schemas/CustomTitle',
     });
   });
+
+  // A `discriminator.mapping` value is a bare reference string rather than a
+  // `$ref` object. Left un-rewritten it no longer resolves after a schema is
+  // renamed, and a tagged union silently degrades to an untagged one — which can
+  // parse a payload into the wrong branch instead of failing. FastAPI hits this
+  // for any model appearing in both request and response position, since it then
+  // names the schemas `Foo-Input`/`Foo-Output`.
+  it('rewrites discriminator mapping refs when a schema is renamed', () => {
+    const spec: Spec = {
+      openapi: '3.1.0',
+      info: { title: 'T', version: '1' },
+      paths: {},
+      components: {
+        schemas: {
+          'Cat-Input': {
+            type: 'object',
+            required: ['kind'],
+            properties: { kind: { type: 'string', enum: ['cat'] } },
+          },
+          Dog: {
+            type: 'object',
+            required: ['kind'],
+            properties: { kind: { type: 'string', enum: ['dog'] } },
+          },
+          Pet: {
+            oneOf: [
+              { $ref: '#/components/schemas/Cat-Input' },
+              { $ref: '#/components/schemas/Dog' },
+            ],
+            discriminator: {
+              propertyName: 'kind',
+              mapping: {
+                cat: '#/components/schemas/Cat-Input',
+                dog: '#/components/schemas/Dog',
+              },
+            },
+          },
+        },
+      },
+    } as any;
+
+    const result = normaliseOpenApiSpecForCodeGen(spec);
+
+    // The schema was renamed, so the mapping must point at the new name.
+    expect(result.components?.schemas?.CatInput).toBeDefined();
+    expect((result.components!.schemas!.Pet as any).discriminator).toEqual({
+      propertyName: 'kind',
+      mapping: {
+        cat: '#/components/schemas/CatInput',
+        dog: '#/components/schemas/Dog',
+      },
+    });
+  });
+
+  /**
+   * A Responses Object key becomes a status branch and names the classes for that
+   * status. Anything that is not a status code was emitted as a bare name: a key
+   * containing punctuation did not parse, and an alphabetic one parsed and
+   * imported, then raised `NameError` from the emitted comparison once that
+   * status arrived.
+   */
+  describe('response keys', () => {
+    const specWithResponseKey = (
+      key: string,
+      value: unknown = { description: 'd' },
+    ) =>
+      ({
+        openapi: '3.1.0',
+        info: { title: 'TestApi', version: '1.0.0' },
+        paths: {
+          '/x': {
+            get: {
+              operationId: 'getX',
+              responses: { '200': { description: 'OK' }, [key]: value },
+            },
+          },
+        },
+      }) as unknown as Spec;
+
+    it.each(['unknown', '200 OK', '20X', 'default '])(
+      'rejects a response keyed %s',
+      (key) => {
+        expect(() =>
+          normaliseOpenApiSpecForCodeGen(specWithResponseKey(key)),
+        ).toThrow(/declares a response keyed "/);
+      },
+    );
+
+    it.each(['200', '404', '5XX', 'default'])('accepts %s', (key) => {
+      const result = normaliseOpenApiSpecForCodeGen(specWithResponseKey(key));
+      const responses = (result.paths['/x'] as any).get.responses;
+      expect(Object.keys(responses)).toContain(key);
+    });
+
+    // A `x-` extension is legal on the Responses Object and describes nothing to
+    // generate, so it is dropped rather than rejected.
+    it('drops a spec extension', () => {
+      const result = normaliseOpenApiSpecForCodeGen(
+        specWithResponseKey('x-vendor-note', 'a spec extension'),
+      );
+      const responses = (result.paths['/x'] as any).get.responses;
+      expect(Object.keys(responses)).toEqual(['200']);
+    });
+  });
 });

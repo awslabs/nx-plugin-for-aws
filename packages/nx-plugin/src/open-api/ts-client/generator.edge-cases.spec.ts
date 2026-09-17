@@ -1282,4 +1282,63 @@ describe('openApiTsClientGenerator - edge cases', () => {
     });
     expect('walkAt' in response).toBe(false);
   });
+
+  // A lower-case wildcard response code is the same range as its upper-case
+  // spelling, but was previously taken for a literal status code and emitted as
+  // one — `if (response.status === 5xx)`, which does not parse.
+  it('I. accepts a lower-case wildcard response code', async () => {
+    const { client } = await generate({
+      openapi: '3.0.0',
+      info: { title: 'TestApi', version: '1.0.0' },
+      paths: {
+        '/thing': {
+          get: {
+            operationId: 'getThing',
+            responses: {
+              '200': {
+                description: 'OK',
+                content: { 'application/json': { schema: { type: 'string' } } },
+              },
+              '5xx': {
+                description: 'Boom',
+                content: { 'application/json': { schema: { type: 'string' } } },
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(client).toContain('response.status >= 500 && response.status < 600');
+    expect(client).not.toContain('5xx');
+  });
+
+  // Both spellings name the same range, so one would silently overwrite the
+  // other and which survived would depend on key order.
+  it('I. rejects a spec declaring both cases of one wildcard', async () => {
+    tree.write(
+      'openapi.json',
+      JSON.stringify({
+        openapi: '3.0.0',
+        info: { title: 'TestApi', version: '1.0.0' },
+        paths: {
+          '/thing': {
+            get: {
+              operationId: 'getThing',
+              responses: {
+                '200': { description: 'OK' },
+                '5xx': { description: 'lower' },
+                '5XX': { description: 'upper' },
+              },
+            },
+          },
+        },
+      }),
+    );
+    await expect(
+      openApiTsClientGenerator(tree, {
+        openApiSpecPath: 'openapi.json',
+        outputPath: 'src/generated',
+      }),
+    ).rejects.toThrow(/describe the same status range/);
+  });
 });

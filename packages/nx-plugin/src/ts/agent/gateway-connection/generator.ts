@@ -88,11 +88,6 @@ export const tsAgentGatewayConnectionGenerator = async (
       `Gateway '${gateway.name}' uses auth='${gateway.auth}'. Agent connections currently require the gateway to use IAM authentication.`,
     );
   }
-  if (agentComponent.auth && agentComponent.auth !== 'iam') {
-    throw new Error(
-      `Agent '${agentComponent.name}' uses auth='${agentComponent.auth}'. Only IAM-authenticated agents can connect to IAM gateways.`,
-    );
-  }
 
   const gatewayClassName = gateway.rc;
   const gatewayKebabCase = kebabCase(gatewayClassName);
