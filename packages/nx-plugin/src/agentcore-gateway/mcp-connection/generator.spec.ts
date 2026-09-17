@@ -4,7 +4,7 @@
  */
 import { addProjectConfiguration, type Tree } from '@nx/devkit';
 import { declareDependencies } from '../../utils/declared-dependencies.js';
-import { expectHasMetricTags } from '../../utils/metrics.spec.js';
+import { expectHasMetricTags } from '../../utils/metrics-assertions.js';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
 import {
   AGENTCORE_GATEWAY_MCP_CONNECTION_GENERATOR_INFO,

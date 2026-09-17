@@ -2,9 +2,19 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+
+import { describeWhen } from '../../lib/generator-options';
 import { nodeType } from '../../lib/graph-builder/catalog';
 import type { GraphNode, Issue } from '../../lib/graph-builder/model';
+import {
+  effectiveNodeOptions,
+  propertyApplies,
+  propertyValueApplies,
+} from '../../lib/graph-builder/node-options';
 import { NodeLogo } from './node-logo';
+
+/** What a condition badge says when the pointer rests on it. */
+const APPLIES_WHEN = 'Only applies with these option values';
 
 interface Props {
   node: GraphNode | undefined;
@@ -39,6 +49,9 @@ export const Inspector = ({
 
   const type = nodeType(node.type);
   const nodeIssues = issues.filter((issue) => issue.nodeId === node.id);
+  // What a run of this node's generator would use, which is what its options'
+  // conditions are read against.
+  const values = effectiveNodeOptions(type, node.options);
   // Important options first — the generator marks the ones that change what it
   // produces — then the rest, so the panel opens on what matters.
   const properties = [
@@ -94,12 +107,19 @@ export const Inspector = ({
       )}
 
       <div className="gb-field">
-        <label htmlFor={`gb-name-${node.id}`}>Name</label>
+        <label
+          className="command-card-field-name"
+          htmlFor={`gb-name-${node.id}`}
+        >
+          name
+        </label>
         <input
           id={`gb-name-${node.id}`}
+          className="command-card-input"
           type="text"
           value={node.name}
           spellCheck={false}
+          autoComplete="off"
           onChange={(event) => onChange({ name: event.target.value })}
         />
         <p className="gb-field-hint">
@@ -111,12 +131,19 @@ export const Inspector = ({
 
       {type.kind === 'component' && type.host && (
         <div className="gb-field">
-          <label htmlFor={`gb-host-${node.id}`}>Host project</label>
+          <label
+            className="command-card-field-name"
+            htmlFor={`gb-host-${node.id}`}
+          >
+            hostProject
+          </label>
           <input
             id={`gb-host-${node.id}`}
+            className="command-card-input"
             type="text"
             value={node.hostName ?? ''}
             spellCheck={false}
+            autoComplete="off"
             onChange={(event) => onChange({ hostName: event.target.value })}
           />
           <p className="gb-field-hint">
@@ -129,20 +156,39 @@ export const Inspector = ({
       {properties.map((property) => {
         const id = `gb-${node.id}-${property.name}`;
         const value = node.options[property.name] ?? property.default ?? '';
+        const applies = propertyApplies(property, values);
+        const fieldClass = `gb-field${applies ? '' : ' is-inapplicable'}`;
+        const condition = property.when && (
+          <span
+            className="command-card-field-when doc-tooltip"
+            role="note"
+            data-tooltip={APPLIES_WHEN}
+            aria-label={`${APPLIES_WHEN}: ${describeWhen(
+              property.when as Record<string, string[]>,
+            )}`}
+          >
+            {describeWhen(property.when as Record<string, string[]>)}
+          </span>
+        );
 
         if (property.type === 'boolean') {
           return (
-            <div className="gb-field gb-field--switch" key={property.name}>
-              <label htmlFor={id}>
+            <div
+              className={`${fieldClass} gb-field--switch`}
+              key={property.name}
+            >
+              <label className="command-card-check" htmlFor={id}>
                 <input
                   id={id}
                   type="checkbox"
                   checked={value === true}
+                  disabled={!applies}
                   onChange={(event) =>
                     onOptionChange(property.name, event.target.checked)
                   }
                 />
-                <span>{property.name}</span>
+                <span className="command-card-field-name">{property.name}</span>
+                {condition}
               </label>
               {property.description && (
                 <p className="gb-field-hint">{property.description}</p>
@@ -156,20 +202,52 @@ export const Inspector = ({
           // a select, and takes the same vertical space.
           if (property.enum.length <= 3) {
             return (
-              <div className="gb-field" key={property.name}>
-                <span className="gb-field-label">{property.name}</span>
-                <fieldset className="gb-segmented" aria-label={property.name}>
-                  {property.enum.map((option) => (
-                    <button
-                      key={option}
-                      type="button"
-                      className={`gb-segment${value === option ? ' is-active' : ''}`}
-                      aria-pressed={value === option}
-                      onClick={() => onOptionChange(property.name, option)}
-                    >
-                      {option}
-                    </button>
-                  ))}
+              <div className={fieldClass} key={property.name}>
+                <p className="gb-field-head">
+                  <span className="command-card-field-name">
+                    {property.name}
+                  </span>
+                  {condition}
+                </p>
+                <fieldset
+                  className="command-card-pills"
+                  aria-label={property.name}
+                >
+                  {property.enum.map((option) => {
+                    const valueApplies = propertyValueApplies(
+                      property,
+                      option,
+                      values,
+                    );
+                    return (
+                      <button
+                        key={option}
+                        type="button"
+                        className={[
+                          'command-card-pill',
+                          option === property.default ? 'is-default' : '',
+                          valueApplies ? '' : 'is-inapplicable',
+                        ]
+                          .filter(Boolean)
+                          .join(' ')}
+                        aria-pressed={value === option}
+                        disabled={!applies || !valueApplies}
+                        title={
+                          valueApplies
+                            ? undefined
+                            : `${APPLIES_WHEN}: ${describeWhen(
+                                (property.valueWhen?.[option] ?? {}) as Record<
+                                  string,
+                                  string[]
+                                >,
+                              )}`
+                        }
+                        onClick={() => onOptionChange(property.name, option)}
+                      >
+                        {option}
+                      </button>
+                    );
+                  })}
                 </fieldset>
                 {property.description && (
                   <p className="gb-field-hint">{property.description}</p>
@@ -178,20 +256,31 @@ export const Inspector = ({
             );
           }
           return (
-            <div className="gb-field" key={property.name}>
-              <label htmlFor={id}>{property.name}</label>
+            <div className={fieldClass} key={property.name}>
+              <p className="gb-field-head">
+                <label className="command-card-field-name" htmlFor={id}>
+                  {property.name}
+                </label>
+                {condition}
+              </p>
               <select
                 id={id}
+                className="gb-select"
                 value={String(value)}
+                disabled={!applies}
                 onChange={(event) =>
                   onOptionChange(property.name, event.target.value)
                 }
               >
-                {property.enum.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
+                {property.enum
+                  .filter((option) =>
+                    propertyValueApplies(property, option, values),
+                  )
+                  .map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
               </select>
               {property.description && (
                 <p className="gb-field-hint">{property.description}</p>
@@ -201,13 +290,21 @@ export const Inspector = ({
         }
 
         return (
-          <div className="gb-field" key={property.name}>
-            <label htmlFor={id}>{property.name}</label>
+          <div className={fieldClass} key={property.name}>
+            <p className="gb-field-head">
+              <label className="command-card-field-name" htmlFor={id}>
+                {property.name}
+              </label>
+              {condition}
+            </p>
             <input
               id={id}
+              className="command-card-input"
               type="text"
               value={String(value)}
               spellCheck={false}
+              autoComplete="off"
+              readOnly={!applies}
               placeholder={
                 property.default !== undefined ? String(property.default) : ''
               }

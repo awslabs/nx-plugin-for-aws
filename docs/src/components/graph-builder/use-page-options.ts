@@ -5,14 +5,15 @@
 import { useEffect, useState } from 'react';
 
 /**
- * The generator option values the page's filter bar has selected.
+ * The generator option values the page is being read under.
  *
  * A guide's diagram is not itself configurable — the reader picks option values
- * once, in the filter bar at the top of the page, and every part of the guide
- * follows. The bar publishes its selection on the element itself and announces
- * each change, so a diagram redraws with the architecture those options deploy.
+ * once, in the run-generator card's command, and every part of the guide follows.
+ * The page's option controller publishes the selection on its own element and
+ * announces each change, so a diagram redraws with the architecture those options
+ * deploy.
  *
- * Pages without a filter bar simply never see a selection.
+ * Pages that track no options simply never see a selection.
  */
 export const usePageOptions = (
   enabled: boolean,
@@ -23,10 +24,10 @@ export const usePageOptions = (
 
   useEffect(() => {
     if (!enabled) return;
-    const bar = document.querySelector<HTMLElement>('[data-option-filter-bar]');
-    if (bar?.dataset.selection) {
+    const root = document.querySelector<HTMLElement>('[data-page-options]');
+    if (root?.dataset.selection) {
       try {
-        setSelected(JSON.parse(bar.dataset.selection));
+        setSelected(JSON.parse(root.dataset.selection));
       } catch {
         // A malformed selection is nothing to act on; the next change re-reads it.
       }

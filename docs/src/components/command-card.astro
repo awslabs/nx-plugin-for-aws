@@ -30,6 +30,11 @@ interface Props {
   /** Options whose controls state their value without offering to change it. */
   locked: Set<string>;
   strings: CommandCardStrings;
+  /**
+   * Whether this card's values are the page's: the guide shows the sections that
+   * apply to what the reader enters here.
+   */
+  ownsPage?: boolean;
   /** Offered where the command supports it, which the create wrapper doesn't. */
   showDryRun?: boolean;
 }
@@ -42,6 +47,7 @@ const {
   target,
   locked,
   strings,
+  ownsPage = false,
   showDryRun = false,
 } = Astro.props as Props;
 
@@ -67,7 +73,12 @@ const shown = options.filter(
 const isPinned = shown.every((option) => locked.has(option.key));
 ---
 
-<div class="command-card not-content" data-command-card data-config={JSON.stringify(config)}>
+<div
+  class="command-card not-content"
+  data-command-card
+  data-command-card-owns-page={ownsPage ? '' : undefined}
+  data-config={JSON.stringify(config)}
+>
   <p class="command-card-head">
     <span class="command-card-mark" aria-hidden="true">
       <svg
@@ -140,7 +151,7 @@ const isPinned = shown.every((option) => locked.has(option.key));
               <input type="checkbox" data-command-card-dry-run />
               <code>--dry-run</code>
             </label>
-            <span class="command-card-dry-run-help">
+            <span class="command-card-footer-help">
               {strings.dryRunSummary}
             </span>
           </p>
@@ -157,13 +168,18 @@ const isPinned = shown.every((option) => locked.has(option.key));
     type CardConfig,
     type CommandToken,
   } from '../lib/command-card';
+  import {
+    effectiveValues,
+    isApplicable,
+    isValueApplicable,
+  } from '../lib/generator-options';
+  import { readPageSelection } from '../lib/page-options';
 
   /**
    * Rebuilds a card's command from its controls, on every keystroke and click.
    *
-   * Enum options the page's filter bar also exposes are kept in step with it, so
-   * picking a value here narrows the guide and picking one there lands in the
-   * command.
+   * The card of the generator a guide is about also owns the option values the
+   * page is read under: what the reader enters here is what the guide shows.
    */
   const wire = (card: HTMLElement) => {
     let config: CardConfig;
@@ -185,6 +201,17 @@ const isPinned = shown.every((option) => locked.has(option.key));
     const pills = Array.from(
       card.querySelectorAll<HTMLButtonElement>('[data-option-pill]'),
     );
+    const fields = new Map(
+      Array.from(
+        card.querySelectorAll<HTMLElement>('[data-command-card-field]'),
+      ).map((field) => [field.dataset.commandCardField!, field]),
+    );
+    // The controls the guide itself fixes, which stay that way whatever applies.
+    const locked = new Set<HTMLInputElement | HTMLButtonElement>([
+      ...inputs.filter((input) => input.readOnly),
+      ...checks.filter((check) => check.disabled),
+      ...pills.filter((pill) => pill.disabled),
+    ]);
     const dryRun = card.querySelector<HTMLInputElement>(
       '[data-command-card-dry-run]',
     );
@@ -202,15 +229,14 @@ const isPinned = shown.every((option) => locked.has(option.key));
       pills: pills.map((pill) => pill.getAttribute('aria-pressed') === 'true'),
     };
 
-    const filterBar = document.querySelector<HTMLElement>(
-      '[data-option-filter-bar]',
+    // The page's option selection, which this card owns when it runs the
+    // generator the guide is about.
+    const pageOptions = document.querySelector<HTMLElement>(
+      '[data-page-options]',
     );
+    const owns = card.dataset.commandCardOwnsPage !== undefined;
     const filterKeys = new Set(
-      Array.from(
-        filterBar?.querySelectorAll<HTMLElement>(
-          '[data-option-filter-control]',
-        ) ?? [],
-      ).map((control) => control.dataset.key),
+      (pageOptions?.dataset.keys ?? '').split(',').filter(Boolean),
     );
 
     const entered = (): Record<string, string> => {
@@ -267,8 +293,79 @@ const isPinned = shown.every((option) => locked.has(option.key));
       }
     };
 
+    // An option only applies under some values of another — a gateway's `auth`
+    // under an `infra` that hosts something. While another choice rules it out its
+    // controls are disabled rather than removed, so the reader can see the
+    // condition they'd have to change, and whatever was entered in it leaves the
+    // command.
+    const applyApplicability = () => {
+      // Read against the values a run would use, so a condition on an option the
+      // reader hasn't touched is read against that option's own default.
+      const context = effectiveValues(entered(), config.options);
+      const dropped = new Set<string>();
+
+      for (const option of config.options) {
+        const applies = isApplicable(option, context);
+        const field = fields.get(option.key);
+        field?.classList.toggle('is-inapplicable', !applies);
+        for (const control of field?.querySelectorAll<
+          HTMLInputElement | HTMLButtonElement
+        >('[data-option-pill], [data-option-check], [data-option-input]') ?? []) {
+          const fixed = locked.has(control);
+          if (control instanceof HTMLInputElement && control.type === 'text') {
+            control.readOnly = fixed || !applies;
+          } else {
+            control.disabled = fixed || !applies;
+          }
+        }
+        if (!applies) dropped.add(option.key);
+      }
+
+      // One of an option's values can be ruled out on its own — an API's
+      // `http-lambda` under the Smithy framework.
+      for (const option of config.options) {
+        if (!option.valueWhen || dropped.has(option.key)) continue;
+        const owned = pills.filter(
+          (pill) => pill.dataset.optionPill === option.key,
+        );
+        const applicable = owned.filter((pill) =>
+          isValueApplicable(option, pill.dataset.value!, context),
+        );
+        for (const pill of owned) {
+          const applies = applicable.includes(pill);
+          pill.classList.toggle('is-inapplicable', !applies);
+          if (!locked.has(pill)) pill.disabled = !applies;
+          // A value that has just stopped applying is let go rather than left to
+          // make a command the generator would refuse.
+          if (!applies && pill.getAttribute('aria-pressed') === 'true') {
+            setPill(option.key, '');
+          }
+        }
+        // Where the value a run would fall back to is a ruled-out one, the command
+        // has to name a value that isn't, or the generator refuses it.
+        const chosen = owned.find(
+          (pill) => pill.getAttribute('aria-pressed') === 'true',
+        );
+        const fallback = chosen?.dataset.value ?? option.default ?? '';
+        if (
+          !locked.has(owned[0]) &&
+          applicable.length > 0 &&
+          fallback &&
+          !isValueApplicable(option, fallback, context)
+        ) {
+          setPill(option.key, applicable[0].dataset.value!);
+        }
+      }
+
+      return Object.fromEntries(
+        Object.entries(emittedValues(entered(), config.options)).filter(
+          ([key]) => !dropped.has(key),
+        ),
+      );
+    };
+
     const render = () => {
-      const values = emittedValues(entered(), config.options);
+      const values = applyApplicability();
       for (const block of blocks) {
         paint(
           block,
@@ -292,6 +389,8 @@ const isPinned = shown.every((option) => locked.has(option.key));
         }
       }
 
+      if (owns) publish(values);
+
       if (reset) {
         const changed =
           inputs.some((input, i) => input.value !== initial.inputs[i]) ||
@@ -304,6 +403,22 @@ const isPinned = shown.every((option) => locked.has(option.key));
           dryRun?.checked === true;
         reset.hidden = !changed;
       }
+    };
+
+    // What the rest of the page reads. `values` is everything the controls hold,
+    // so a flag left at its default still counts as a choice for the sections
+    // written around it; `command` is what the command actually carries, which is
+    // what the options panel highlights.
+    let published = '';
+    const publish = (command: Record<string, string>) => {
+      const detail = { values: entered(), command };
+      const payload = JSON.stringify(detail);
+      if (payload === published) return;
+      published = payload;
+      card.dataset.pageOptions = payload;
+      document.dispatchEvent(
+        new CustomEvent('npfa:page-options', { detail }),
+      );
     };
 
     const setPill = (key: string, value: string) => {
@@ -343,13 +458,6 @@ const isPinned = shown.every((option) => locked.has(option.key));
             : pill.dataset.value!;
         setPill(key, value);
         render();
-        if (filterKeys.has(key)) {
-          document.dispatchEvent(
-            new CustomEvent('npfa:option-filter-set', {
-              detail: { key, value },
-            }),
-          );
-        }
       });
     }
 
@@ -406,33 +514,36 @@ const isPinned = shown.every((option) => locked.has(option.key));
       });
     }
 
-    // A value picked in the filter bar (or in the options panel that drives it)
-    // belongs in the command too — except where this guide pins the option, whose
-    // value the guide's prose is written around.
+    // A shared link or a reload arrives with a selection already made, which the
+    // card picks up — except where this guide pins the option, whose value the
+    // guide's prose is written around.
     const pinned = new Set(config.prescribed);
-    const applyFilterSelection = (selected: Record<string, string>) => {
-      let changed = false;
+    const restore = (selected: Record<string, string>) => {
       for (const [key, value] of Object.entries(selected)) {
         if (!filterKeys.has(key) || pinned.has(key)) continue;
         const owned = pills.filter((pill) => pill.dataset.optionPill === key);
         if (!owned.some((pill) => pill.dataset.value === value)) continue;
         setPill(key, value);
-        changed = true;
       }
-      if (changed) render();
     };
+    if (owns && pageOptions) {
+      restore(readPageSelection(pageOptions.dataset.storageKey!, filterKeys));
+    }
 
-    document.addEventListener('npfa:option-filter-change', (event) => {
-      applyFilterSelection(
-        ((event as CustomEvent).detail ?? {}) as Record<string, string>,
-      );
-    });
-    if (filterBar?.dataset.selection) {
-      try {
-        applyFilterSelection(JSON.parse(filterBar.dataset.selection));
-      } catch {
-        // A malformed selection is nothing to act on.
-      }
+    // The options panel is the other way into the same values: it asks for a
+    // change, this card makes it, and the page follows from here as usual.
+    if (owns) {
+      document.addEventListener('npfa:option-set', (event) => {
+        const { key, value } = (event as CustomEvent).detail ?? {};
+        if (typeof key !== 'string' || typeof value !== 'string') return;
+        const owned = pills.filter((pill) => pill.dataset.optionPill === key);
+        if (owned.length === 0 || owned.some((pill) => pill.disabled)) return;
+        if (value !== '' && !owned.some((pill) => pill.dataset.value === value)) {
+          return;
+        }
+        setPill(key, value);
+        render();
+      });
     }
 
     render();

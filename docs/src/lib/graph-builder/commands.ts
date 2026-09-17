@@ -17,6 +17,11 @@ import {
 } from '../../../../packages/nx-plugin/src/utils/names';
 import { INFRA_PROJECT_NAME, type NodeType, nodeType } from './catalog';
 import type { Graph, GraphEdge, GraphNode } from './model';
+import {
+  effectiveNodeOptions,
+  propertyApplies,
+  propertyValueApplies,
+} from './node-options';
 
 /**
  * Turn a graph into the commands that scaffold it: one to create the workspace,
@@ -105,6 +110,18 @@ const shouldEmit = (
   if (option in type.variantOptions) return true;
   if (!(option in options)) return false;
   const property = type.properties.find((p) => p.name === option);
+  // An option the rest of the values rule out would make a command the generator
+  // refuses. The builder puts a node's options right as they change, so this only
+  // catches what a preset carries in.
+  if (property) {
+    const values = effectiveNodeOptions(type, options);
+    if (
+      !propertyApplies(property, values) ||
+      !propertyValueApplies(property, String(options[option]), values)
+    ) {
+      return false;
+    }
+  }
   return options[option] !== property?.default;
 };
 

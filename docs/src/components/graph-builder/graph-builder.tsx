@@ -17,6 +17,8 @@ import {
   type GraphNode,
   validate,
 } from '../../lib/graph-builder/model';
+import { reconcileNode } from '../../lib/graph-builder/node-options';
+import { readPackageManager } from '../../lib/package-manager';
 import { Canvas } from './canvas';
 import {
   NODE_HEIGHT,
@@ -92,8 +94,12 @@ export const GraphBuilder = () => {
   // Which way the graph flows. Swapping it re-lays the nodes rather than just
   // moving the ports, so the graph still reads along its new axis.
   const [orientation, setOrientation] = useState<Orientation>('horizontal');
-  const [emitOptions, setEmitOptions] =
-    useState<EmitOptions>(DEFAULT_EMIT_OPTIONS);
+  // The package manager the reader last picked anywhere on the site, so the
+  // commands here read in the one they use.
+  const [emitOptions, setEmitOptions] = useState<EmitOptions>(() => ({
+    ...DEFAULT_EMIT_OPTIONS,
+    packageManager: readPackageManager(DEFAULT_EMIT_OPTIONS.packageManager),
+  }));
 
   // Undo/redo stacks. Held in refs since they are never rendered directly and
   // shouldn't cause a re-render when pushed to.
@@ -310,7 +316,13 @@ export const GraphBuilder = () => {
         ...current,
         nodes: current.nodes.map((node) =>
           node.id === id
-            ? { ...node, options: { ...node.options, [option]: value } }
+            ? // Setting one option can rule another out — a gateway with no
+              // infrastructure has nothing to authenticate — so the rest are put
+              // right here, where the change lands.
+              reconcileNode(
+                { ...node, options: { ...node.options, [option]: value } },
+                nodeType(node.type),
+              )
             : node,
         ),
       }));

@@ -8,7 +8,7 @@ import {
   declareDependencies,
   declaredNames,
 } from '../../utils/declared-dependencies.js';
-import { expectHasMetricTags } from '../../utils/metrics.spec.js';
+import { expectHasMetricTags } from '../../utils/metrics-assertions.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,

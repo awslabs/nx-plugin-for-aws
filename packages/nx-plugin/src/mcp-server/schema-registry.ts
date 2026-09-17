@@ -48,7 +48,7 @@ export const filterableValuesForProperty = (
 /**
  * Pull out every filterable property (enum or boolean valued) as a
  * `FilterableOption`. Shared between the MCP server (deriving options from a
- * generator's schema) and the docs filter bar (mapping user-referenced keys
+ * generator's schema) and the docs site (mapping user-referenced keys
  * onto their values).
  */
 export const filterableOptionsFromSchema = (
@@ -71,7 +71,7 @@ export const filterableOptionsFromSchema = (
 
 /**
  * Locate the monorepo's `packages/nx-plugin/generators.json` by walking
- * upward from the caller's directory. Used by the docs filter bar and
+ * upward from the caller's directory. Used by the docs site and
  * remark-option-filter; the MCP server resolves schema paths per-generator
  * via `NxGeneratorInfo.resolvedSchemaPath` instead.
  */

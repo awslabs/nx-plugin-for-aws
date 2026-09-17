@@ -5,9 +5,9 @@
 import { defineEcConfig } from '@astrojs/starlight/expressive-code';
 
 import {
+  applySiteStyleOverrides,
   codeThemeDark,
   codeThemeLight,
-  restoreMarkerColors,
 } from './src/syntax/code-theme.ts';
 
 /**
@@ -20,7 +20,9 @@ export default defineEcConfig({
   themes: [codeThemeDark, codeThemeLight],
   /** Keeps the frames, tab bars and scrollbars on the site's own tokens. */
   useStarlightUiThemeColors: true,
-  customizeTheme: restoreMarkerColors,
+  customizeTheme: applySiteStyleOverrides,
+  /** The icon on the copy button, matching the command cards'. */
+  styleOverrides: { frames: { copyIcon: 'var(--copy-btn-icon)' } },
   /**
    * The palette is built to clear 4.6:1 against each mode's code background; the
    * default floor of 5.5 would lighten the deeper colours back out of the range

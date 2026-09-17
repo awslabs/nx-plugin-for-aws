@@ -95,6 +95,10 @@ export type GeneratorSchema = {
       enum?: string[];
       default?: unknown;
       'x-priority'?: string;
+      /** The option values this option applies under. */
+      'x-when'?: Record<string, string | string[]>;
+      /** The same, per value, where one of an option's values applies sometimes. */
+      'x-value-when'?: Record<string, Record<string, string | string[]>>;
     }
   >;
   required?: string[];
@@ -344,13 +348,10 @@ const AGENT_TO_MCP: readonly ConnectionConstraint[] = [
   },
 ];
 
+// The agent's own `auth` governs inbound requests to it, so it places no
+// requirement here — the agent signs its outbound call to the gateway with
+// SigV4 from its execution role either way.
 const AGENT_TO_GATEWAY: readonly ConnectionConstraint[] = [
-  {
-    side: 'source',
-    option: 'auth',
-    equals: 'iam',
-    reason: 'Only an IAM-authenticated agent can reach an IAM gateway.',
-  },
   {
     side: 'target',
     option: 'auth',

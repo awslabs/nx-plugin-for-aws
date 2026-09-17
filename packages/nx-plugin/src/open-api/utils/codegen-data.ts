@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { createHash } from 'node:crypto';
 import orderBy from 'lodash.orderby';
 import trim from 'lodash.trim';
 import uniqBy from 'lodash.uniqby';
@@ -15,8 +16,12 @@ import {
   upperFirst,
 } from '../../utils/names.js';
 import {
+  qualifyPythonType,
+  toPythonAnnotation,
+  toPythonClassName,
   toPythonName,
   toPythonType,
+  toPythonTypeTree,
   toTypeScriptModelName,
   toTypeScriptName,
   toTypeScriptType,
@@ -28,12 +33,16 @@ import {
   type CollectionFormat,
   createModel,
   DEFAULT_SERVICE_NAME,
+  type ErrorShape,
   indexModelsByName,
   type Model,
   type ModelsByName,
   type Operation,
   type PatternPropertyModel,
   PRIMITIVE_TYPES,
+  type PythonType,
+  type RequestInput,
+  type RequestShape,
   type Service,
   STREAMING_CONTENT_TYPES,
   VENDOR_EXTENSIONS,
@@ -72,10 +81,14 @@ export const buildOpenApiCodeGenData = (inSpec: Spec): CodeGenData => {
   );
 
   // A model per operation request parameter position (query/path/body/...).
+  // Named against the schemas already declared, since a spec may declare one
+  // called `FooRequestQueryParameters` itself — emitting that name twice made the
+  // second definition win and silently retyped every reference to the first.
+  const takenModelNames = new Set(data.models.map((model) => model.name));
   data.models = [
     ...data.models,
     ...allOperations.flatMap((op) =>
-      buildRequestParameterModels(op, modelsByName),
+      buildRequestParameterModels(op, modelsByName, takenModelNames),
     ),
   ];
 
@@ -105,7 +118,12 @@ export const buildOpenApiCodeGenData = (inSpec: Spec): CodeGenData => {
   const { operationsByTag, untaggedOperations } =
     groupOperationsByTag(allOperations);
 
-  return {
+  annotateAllOfFlattening(data.models);
+  for (const op of allOperations) {
+    annotateRequestAndErrorShapes(op, modelsByName);
+  }
+
+  const result: CodeGenData = {
     ...data,
     operationsByTag,
     untaggedOperations,
@@ -114,6 +132,530 @@ export const buildOpenApiCodeGenData = (inSpec: Spec): CodeGenData => {
     vendorExtensions: vendorExtensionsOf(spec),
     className: toClassName(spec.info.title),
   };
+
+  return result;
+};
+
+/**
+ * For each `all-of` composite: precompute the flat property list templates
+ * that flatten composition will emit (`effectiveProperties`), and mark
+ * hoisted (normaliser-synthesised) components the parent inlines
+ * (`isInlinedByAllOf`) so templates can skip emitting them separately.
+ */
+const annotateAllOfFlattening = (models: Model[]): void => {
+  /**
+   * Collect a composed model's own properties, recursing through a member that
+   * is itself an `all-of` so a nested composition contributes the leaf
+   * properties rather than the composite itself (which has no property name).
+   * `visiting` breaks a cycle in a self-referential composition.
+   */
+  const collect = (
+    model: Model,
+    into: Model[],
+    seen: Map<string, Model>,
+    visiting: Set<Model>,
+  ): void => {
+    if (visiting.has(model)) return;
+    visiting.add(model);
+    for (const composed of model.composedModels ?? []) {
+      // Only a member whose properties this flattening actually absorbs may be
+      // marked inlined. A hoisted `oneOf` member has no named properties, so
+      // marking it would have templates skip it while nothing carried its
+      // constraint — the union would silently disappear.
+      const isFlattenable =
+        composed.export === 'interface' || composed.export === 'all-of';
+      if (composed.vendorExtensions?.['x-aws-nx-hoisted'] && isFlattenable) {
+        composed.isInlinedByAllOf = model.name;
+      }
+      if (composed.export === 'all-of') {
+        collect(composed, into, seen, visiting);
+        continue;
+      }
+      for (const prop of composed.properties ?? []) {
+        if (!prop.name) continue;
+        const existing = seen.get(prop.name);
+        if (existing) {
+          // `allOf` is a conjunction, so a property any branch requires is
+          // required — taking only the first branch's flag would make it
+          // optional because of the order the branches happen to appear in.
+          existing.isRequired = existing.isRequired || prop.isRequired;
+          continue;
+        }
+        // Copied, so raising `isRequired` above describes this composition
+        // rather than mutating the composed schema every user of it shares.
+        const flattenedProp = { ...prop };
+        seen.set(prop.name, flattenedProp);
+        into.push(flattenedProp);
+      }
+    }
+    visiting.delete(model);
+  };
+
+  for (const model of models) {
+    if (model.export !== 'all-of') continue;
+    const flattened: Model[] = [];
+    collect(model, flattened, new Map<string, Model>(), new Set<Model>());
+    model.effectiveProperties = flattened;
+  }
+};
+
+/**
+ * The object-shaped properties a body model exposes for flattening, walking
+ * allOf composition via `effectiveProperties` when present.
+ */
+const flattenableBodyProperties = (bodyModel: Model | undefined): Model[] => {
+  if (!bodyModel) return [];
+  if (bodyModel.export === 'interface' && !bodyModel.hasAdditionalProperties) {
+    return bodyModel.properties ?? [];
+  }
+  if (bodyModel.export === 'all-of') {
+    return bodyModel.effectiveProperties ?? [];
+  }
+  return [];
+};
+
+/**
+ * Whether a body's fields can be flattened into the call signature without
+ * clashing with path/query/header/cookie parameters. Only object-shaped
+ * bodies (references to an interface or allOf) are eligible; discriminated
+ * bases stay whole so marshalling can dispatch on the discriminator.
+ */
+const canFlattenBodyIntoRequest = (
+  op: Operation,
+  bodyParam: Model | undefined,
+  bodyModel: Model | undefined,
+): boolean => {
+  if (!bodyParam || bodyParam.export !== 'reference') return false;
+  if (bodyModel?.discriminator) return false;
+  const props = flattenableBodyProperties(bodyModel);
+  if (props.length === 0) return false;
+  const otherNames = new Set(
+    (op.parameters ?? []).filter((p) => p.in !== 'body').map((p) => p.name),
+  );
+  return props.every((prop) => !otherNames.has(prop.name));
+};
+
+/**
+ * Whether a response code always describes a successful response: a concrete
+ * 2xx code, or the `2XX` range.
+ *
+ * `default` is excluded — it covers whatever the spec did not enumerate, which
+ * spans both success and failure, so whether it is a success depends on the
+ * operation's other responses. See {@link successResponsesOf}.
+ */
+const isSuccessCode = (code: number | string): boolean =>
+  typeof code === 'number' ? code >= 200 && code < 300 : code === '2XX';
+
+/**
+ * Every response the operation returns rather than raises for, in the order a
+ * client checks them: concrete codes, then `2XX`, then `default`.
+ *
+ * An operation declaring `200` and `2XX` has two, since a 201 is described by
+ * the range and is still a success. A `default` is only a success when the
+ * operation declares no other — as the sole response it must describe the
+ * success case, whereas alongside one it is the fallback for everything else.
+ */
+const successResponsesOf = (responses: Model[]): Model[] => {
+  const declared = responses.filter((r) => isSuccessCode(r.code!));
+  if (declared.length > 0) return declared;
+  return responses.filter((r) => r.code === 'default');
+};
+
+/**
+ * Build a language-agnostic description of an operation's inputs. Each input
+ * carries its source (where in the HTTP request it is placed) plus the
+ * underlying model — language templates decide how to translate that into
+ * their idiomatic call signature (kwargs, a wrapper interface, etc).
+ */
+const buildRequestShape = (
+  op: Operation,
+  modelsByName: ModelsByName,
+): RequestShape => {
+  const nonBody = (op.parameters ?? []).filter((p) => p.in !== 'body');
+  const inputs: RequestInput[] = nonBody.map((p) => ({
+    source: {
+      kind: p.in as 'path' | 'query' | 'header' | 'cookie',
+      wireName: p.prop ?? p.name,
+      ...(p.collectionFormat ? { collectionFormat: p.collectionFormat } : {}),
+    },
+    model: p,
+    isRequired: !!p.isRequired,
+    isNullable: !!p.isNullable,
+    description: p.description,
+    specName: p.prop ?? p.name,
+  }));
+
+  const shape: RequestShape = { inputs, isSingleBodyInput: false };
+  const bodyParam = op.parametersBody ?? undefined;
+  if (bodyParam) {
+    const mediaType =
+      bodyParam.mediaType ??
+      (bodyParam.mediaTypes ? bodyParam.mediaTypes[0] : undefined) ??
+      undefined;
+    const bodyModel = modelsByName[bodyParam.type];
+    if (canFlattenBodyIntoRequest(op, bodyParam, bodyModel)) {
+      for (const prop of flattenableBodyProperties(bodyModel)) {
+        inputs.push({
+          source: { kind: 'body-field', fieldName: prop.name },
+          model: prop,
+          isRequired: !!prop.isRequired,
+          isNullable: !!prop.isNullable,
+          description: prop.description,
+          specName: prop.name,
+        });
+      }
+      shape.bodyFromFields = { model: bodyModel, mediaType };
+    } else {
+      inputs.push({
+        source: { kind: 'body', wireName: 'body' },
+        model: bodyParam,
+        isRequired: !!bodyParam.isRequired,
+        isNullable: !!bodyParam.isNullable,
+        description: bodyParam.description,
+        specName: 'body',
+      });
+      shape.bodyAsSingleInput = { model: bodyParam, mediaType };
+      if (nonBody.length === 0) shape.isSingleBodyInput = true;
+    }
+  }
+  return shape;
+};
+
+/**
+ * Build a language-agnostic error taxonomy for the operation: one entry per
+ * non-success response bucket. Language templates turn these into typed
+ * exception / error union shapes as appropriate.
+ */
+const buildErrorShape = (op: Operation): ErrorShape => ({
+  // A response that can describe a success is not an error, even when it isn't
+  // the one whose type the operation returns: raising on a declared `2XX` or
+  // `default` would turn a 201 into an exception.
+  entries: (op.responses ?? [])
+    .filter((r) => !(op.successResponses ?? []).includes(r))
+    .map((resp) => ({
+      code: resp.code!,
+      responseModel: resp,
+    })),
+});
+
+/**
+ * Annotate a typed entry (response, parameter, result) with whether the type
+ * it references resolves to a module-level alias — a collection
+ * (`list[...]` / `dict[str, ...]`), union or literal — rather than a class.
+ * Python templates read `referencedCollectionKind` to pick pydantic's
+ * `TypeAdapter(X)` over `X.model_validate(...)`.
+ */
+const annotateReferencedCollectionKind = (
+  entry: Model | undefined,
+  modelsByName: ModelsByName,
+): void => {
+  if (!entry?.type) return;
+  const referenced = modelsByName[entry.type];
+  if (!referenced) return;
+  if (referenced.export === 'dictionary') {
+    entry.referencedCollectionKind = 'dictionary';
+  } else if (referenced.export === 'array') {
+    entry.referencedCollectionKind = 'array';
+  } else if (
+    referenced.export === 'one-of' ||
+    referenced.export === 'any-of' ||
+    referenced.export === 'enum' ||
+    referenced.export === 'tuple'
+  ) {
+    entry.referencedCollectionKind = 'alias';
+  }
+};
+
+/**
+ * Attach the request shape, error shape and referenced-collection-kind
+ * annotations to an operation.
+ */
+const annotateRequestAndErrorShapes = (
+  op: Operation,
+  modelsByName: ModelsByName,
+): void => {
+  for (const parameter of op.parameters ?? []) {
+    annotateReferencedCollectionKind(parameter, modelsByName);
+  }
+  annotateReferencedCollectionKind(
+    op.parametersBody ?? undefined,
+    modelsByName,
+  );
+  for (const response of op.responses ?? []) {
+    annotateReferencedCollectionKind(response, modelsByName);
+  }
+  annotateReferencedCollectionKind(op.result, modelsByName);
+
+  op.requestShape = buildRequestShape(op, modelsByName);
+  op.errorShape = buildErrorShape(op);
+};
+
+const TYPES_GEN_PREFIX = 'types.';
+
+/**
+ * Attributes and methods the generated Python client defines on itself. An
+ * operation or tag whose name would land on one of these is suffixed, so a
+ * spec can't silently replace the client's own plumbing — an operation called
+ * `close` would otherwise shadow the method that releases the httpx client.
+ */
+export const PYTHON_CLIENT_MEMBERS = new Set([
+  'aclose',
+  'close',
+  'config',
+  'url',
+  'query',
+  'query_string',
+  'headers',
+  'cookies',
+  'deep_object',
+  'dump',
+  // Every remaining private helper the client template emits. A name missing
+  // here is not merely shadowed: the operation replaces the helper, so every
+  // *other* operation that calls it fails.
+  'as_dict',
+  'cookie_value',
+  'default_content_type',
+  'error',
+  'error_payload',
+  'is_file_part',
+  'is_object',
+  'json_body',
+  'multipart',
+  'part_text',
+  'scalar',
+  'send_with_url',
+  'stream_with_url',
+  'client',
+  'base_url',
+  'owns_client',
+  'parent',
+]);
+
+/**
+ * A Python member name for an operation or tag that cannot collide with the
+ * client's own members, nor with another operation or tag on the same client.
+ */
+const uniquePythonMemberName = (
+  name: string,
+  taken: Set<string>,
+  fallback: string,
+): string => {
+  // A leading underscore is how the client marks its own internals, so an
+  // operation that snake-cases onto one is pushed out of that namespace too.
+  let candidate = PYTHON_CLIENT_MEMBERS.has(name.replace(/^_+/, ''))
+    ? `${name.replace(/^_+/, '')}_op`
+    : name;
+  // snake_case strips everything that isn't alphanumeric, so a name written
+  // entirely in another script yields the empty string, and one starting with a
+  // digit isn't a valid identifier. Either would emit code that doesn't parse.
+  if (!candidate) {
+    candidate = fallback;
+  } else if (/^\d/.test(candidate)) {
+    candidate = `${fallback}_${candidate}`;
+  }
+  while (taken.has(candidate)) {
+    candidate = `${candidate}_`;
+  }
+  taken.add(candidate);
+  return candidate;
+};
+
+/**
+ * Resolve the Python member name of every operation and tag, keeping them
+ * distinct from each other and from the client's own members.
+ */
+const annotatePythonMemberNames = (data: CodeGenData): void => {
+  const taken = new Set<string>();
+  data.pythonTagNames = Object.fromEntries(
+    Object.keys(data.operationsByTag).map((tag, index) => [
+      tag,
+      uniquePythonMemberName(
+        toPythonName('property', tag),
+        taken,
+        `tag_${index + 1}`,
+      ),
+    ]),
+  );
+  data.allOperations.forEach((op, index) => {
+    op.pythonMethodName = uniquePythonMemberName(
+      op.operationIdSnakeCase ?? toPythonName('operation', op.name),
+      taken,
+      `operation_${index + 1}`,
+    );
+  });
+};
+
+/**
+ * Attach `pythonClientType` to a typed entry — the bare `pythonType`
+ * qualified with `types.` so client templates can reference model
+ * classes through a single import.
+ */
+const annotatePythonClientType = (entry: Model | undefined): void => {
+  if (!entry) return;
+  entry.pythonTypeTree ??= toPythonTypeTree(entry);
+  entry.pythonClientType = qualifyPythonType(
+    entry.pythonTypeTree,
+    TYPES_GEN_PREFIX,
+  );
+};
+
+/**
+ * A name for a generated class that no schema and no other generated class has
+ * taken, recording it so later ones see it. The suffix keeps the name
+ * recognisable rather than renaming it to something positional, and is a digit
+ * rather than an underscore because class-name normalisation strips a trailing
+ * one — so `FooError_` collapsed back onto `FooError`.
+ */
+const uniqueGeneratedName = (candidate: string, taken: Set<string>): string => {
+  let name = candidate;
+  for (let suffix = 2; taken.has(name); suffix++) {
+    name = `${candidate}${suffix}`;
+  }
+  taken.add(name);
+  return name;
+};
+
+/**
+ * Final pass over all models + operation payloads to re-derive python type
+ * annotations after links/composites are resolved, and to add the
+ * python-specific annotations the py-client templates consume:
+ *  - `pythonType` / `pythonAnnotation` (refreshed — necessary for collection
+ *    aliases whose element type wasn't available first time through)
+ *  - `pythonClassName` / `pythonClientType`
+ *  - `requestShape.inputs[*].pythonName` / `.pythonAnnotation` (kwargs)
+ *  - `errorShape.exceptionClassName` / `.unionTypeName` / per-entry names
+ *  - `pythonMethodName` per operation and `pythonTagNames` per tag, escaped
+ *    clear of the members the generated client defines
+ *
+ * Called by the py-client generator rather than from the shared pipeline, so a
+ * TypeScript consumer of the same spec never pays for fields only the Python
+ * templates read — the same split as {@link assertNoClashingPythonNames}.
+ */
+export const annotatePythonData = (data: CodeGenData): void => {
+  const modelsByName = indexModelsByName(data.models);
+  annotatePythonMemberNames(data);
+  // Every class `types.py` declares for a schema. The names derived per operation
+  // below share that module, so they are checked against it rather than assumed
+  // free — taking one emitted the same class twice and Python kept the last,
+  // silently retyping every reference to the schema it replaced.
+  const takenClassNames = new Set(
+    data.models.map((model) => toPythonClassName(model.name)),
+  );
+  for (const model of data.models) {
+    model.pythonClassName = toPythonClassName(model.name);
+    model.pythonTypeTree = toPythonTypeTree(model);
+    model.pythonType = toPythonType(model);
+    model.pythonAnnotation = toPythonAnnotation(model);
+    annotatePythonClientType(model);
+    for (const prop of model.properties ?? []) {
+      prop.pythonTypeTree = toPythonTypeTree(prop);
+      prop.pythonType = toPythonType(prop);
+      prop.pythonAnnotation = toPythonAnnotation(prop);
+      annotatePythonClientType(prop);
+    }
+    for (const prop of model.effectiveProperties ?? []) {
+      prop.pythonTypeTree = toPythonTypeTree(prop);
+      prop.pythonType = toPythonType(prop);
+      prop.pythonAnnotation = toPythonAnnotation(prop);
+      annotatePythonClientType(prop);
+    }
+    annotatePythonClientType(model.additionalPropertiesModel);
+  }
+
+  for (const op of data.allOperations) {
+    for (const parameter of op.parameters ?? []) {
+      parameter.pythonTypeTree = toPythonTypeTree(parameter);
+      parameter.pythonType = toPythonType(parameter);
+      parameter.pythonAnnotation = toPythonAnnotation(parameter);
+      annotatePythonClientType(parameter);
+    }
+    annotatePythonClientType(op.parametersBody ?? undefined);
+    annotatePythonClientType(op.result);
+    for (const response of op.responses ?? []) {
+      annotatePythonClientType(response);
+      annotatePythonClientType(response.itemSchemaModel);
+    }
+
+    const requestShape = op.requestShape;
+    if (requestShape) {
+      const seenNames = new Set<string>();
+      for (const input of requestShape.inputs) {
+        const rawName = input.model.pythonName || input.specName;
+        // An operation input becomes a keyword argument, so it is escaped clear
+        // of the locals and builtins the method body uses as well.
+        const base = toPythonName('argument', rawName);
+        let pythonName = base;
+        if (seenNames.has(pythonName)) {
+          // Qualify by where the input goes, then keep suffixing until the name
+          // is free: the qualified form can itself collide (a header
+          // `fooBarHeader` next to a query `fooBar` and a header `foo_bar` all
+          // reach `foo_bar_header`), which would emit a duplicate argument.
+          pythonName = `${base}_${input.source.kind.replace('-', '_')}`;
+          while (seenNames.has(pythonName)) {
+            pythonName = `${pythonName}_`;
+          }
+        }
+        seenNames.add(pythonName);
+        const baseType =
+          input.model.pythonTypeTree ?? toPythonTypeTree(input.model);
+        // An optional or nullable input may be left unset, so its annotation
+        // admits None. Built as a tree so nothing has to unwrap it by name.
+        const annotationType: PythonType =
+          input.isRequired && !input.isNullable
+            ? baseType
+            : { kind: 'optional', inner: baseType };
+        input.pythonName = pythonName;
+        input.pythonTypeTree = annotationType;
+        input.pythonAnnotation = qualifyPythonType(
+          annotationType,
+          TYPES_GEN_PREFIX,
+        );
+      }
+      // Required-first so the generated keyword-only signature reads naturally.
+      requestShape.inputs.sort(
+        (a, b) => Number(b.isRequired) - Number(a.isRequired),
+      );
+    }
+
+    if (op.requestTypeName) {
+      op.pythonRequestTypeName = uniqueGeneratedName(
+        toPythonClassName(op.requestTypeName),
+        takenClassNames,
+      );
+    }
+
+    const errorShape = op.errorShape;
+    if (errorShape) {
+      // The pascal-cased operation id is shared with TypeScript, where a leading
+      // digit is legal; a Python class name beginning with one does not parse.
+      const opPascal = toPythonClassName(op.operationIdPascalCase!);
+      errorShape.exceptionClassName = `${opPascal}ApiError`;
+      // Always a valid class name: templates emit `<name> = Never` for an
+      // operation with no error responses, so the name is needed either way.
+      errorShape.unionTypeName = uniqueGeneratedName(
+        `${opPascal}Error`,
+        takenClassNames,
+      );
+      errorShape.hasErrorEntries = errorShape.entries.length > 0;
+      for (const entry of errorShape.entries) {
+        const suffix =
+          entry.code === 'default'
+            ? 'Default'
+            : String(entry.code).toUpperCase();
+        entry.className = uniqueGeneratedName(
+          `${opPascal}${suffix}Error`,
+          takenClassNames,
+        );
+        entry.isExactCode = typeof entry.code === 'number';
+        // Only collapse to a Literal for exact numeric codes — ranges like
+        // 5XX expand to 100 codes, which produce a massive, unreadable
+        // Literal and don't narrow `response.status_code` usefully anyway.
+        entry.statusAnnotation = entry.isExactCode
+          ? `Literal[${entry.code}]`
+          : 'int';
+      }
+    }
+  }
 };
 
 /**
@@ -159,13 +701,23 @@ const augmentOperation = (
   ];
 
   op.responses.forEach(addLanguageTypes);
-  op.responses = orderBy(op.responses, (r) => r.code);
+  // Concrete codes first, then wildcard ranges, then `default` — templates emit
+  // the checks in this order, and `default` renders as an unconditional branch
+  // that would shadow anything after it. Sorting on `code` alone would leave
+  // that to how the spec happened to enumerate its keys.
+  op.responses = orderBy(op.responses, [
+    (r) => (r.code === 'default' ? 2 : typeof r.code === 'number' ? 0 : 1),
+    (r) => r.code,
+  ]);
 
   // Result is the lowest successful response, otherwise the 2XX or default.
   op.result =
     op.responses.find(
       (r) => typeof r.code === 'number' && r.code >= 200 && r.code < 300,
     ) ?? op.responses.find((r) => r.code === '2XX' || r.code === 'default');
+  // Already ordered concrete → wildcard → `default` by the sort above, which is
+  // the order a client must check them in.
+  op.successResponses = successResponsesOf(op.responses);
 
   op.operationIdPascalCase = pascalCase(op.uniqueName);
   op.operationIdSnakeCase = toPythonName('operation', op.uniqueName);
@@ -211,6 +763,81 @@ const assignOperationNames = (
  * void responses and streaming item schemas. Returns the response model names
  * to import.
  */
+/**
+ * A short, stable digest of a string. Each level of {@link schemaShapeKey} is
+ * reduced to one of these rather than carrying its children's text upwards: a
+ * deeply nested schema in a large document otherwise built a key past the
+ * maximum string length, and the biggest published specs failed outright.
+ */
+const digest = (value: string): string =>
+  createHash('sha1').update(value).digest('base64');
+
+/**
+ * A key identifying a schema by its shape rather than by how it is written, so
+ * two schemas can be compared for equivalence.
+ *
+ * Normalisation hoists only the preferred media type's inline schema into
+ * `components`, and does so at any depth, so the same shape reaches here as a
+ * `$ref` under one media type and inline under another — following references is
+ * what lets those compare equal.
+ *
+ * Each reference is expanded once and its key reused: a large document shares a
+ * handful of schemas across thousands of sites, and expanding every occurrence
+ * exhausted the heap on the biggest published specs. `seen` breaks a cycle in a
+ * self-referential schema by keying the reference itself, and such a schema is
+ * left out of the cache since its key depends on where it was reached from.
+ */
+const schemaShapeKey = (
+  spec: Spec,
+  schema: unknown,
+  cache: Map<string, string>,
+  seen: ReadonlySet<string> = new Set(),
+): string => {
+  if (!schema || typeof schema !== 'object') return JSON.stringify(schema);
+  if (Array.isArray(schema)) {
+    return digest(
+      `[${schema.map((member) => schemaShapeKey(spec, member, cache, seen)).join(',')}]`,
+    );
+  }
+  if (isRef(schema)) {
+    const ref = (schema as OpenAPIV3.ReferenceObject).$ref;
+    if (seen.has(ref)) return `cycle:${ref}`;
+    const cached = cache.get(ref);
+    if (cached !== undefined) return cached;
+    const nested = new Set(seen).add(ref);
+    const key = schemaShapeKey(spec, resolveIfRef(spec, schema), cache, nested);
+    if (!key.startsWith('cycle:')) {
+      cache.set(ref, key);
+    }
+    return key;
+  }
+  return digest(
+    `{${Object.entries(schema)
+      // Bookkeeping the normaliser adds to what it hoists, not part of the shape.
+      .filter(([key]) => !key.startsWith('x-aws-nx-'))
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(
+        ([key, value]) => `${key}:${schemaShapeKey(spec, value, cache, seen)}`,
+      )
+      .join(',')}}`,
+  );
+};
+
+/**
+ * Keyed by the document, since its schemas recur across every operation and a
+ * cache shared between documents would answer for the wrong one. Held weakly so
+ * a spec's entries go when the spec does.
+ */
+const schemaShapeCaches = new WeakMap<Spec, Map<string, string>>();
+const schemaShapeCacheFor = (spec: Spec): Map<string, string> => {
+  let cache = schemaShapeCaches.get(spec);
+  if (!cache) {
+    cache = new Map<string, string>();
+    schemaShapeCaches.set(spec, cache);
+  }
+  return cache;
+};
+
 const augmentResponses = (
   spec: Spec,
   op: Operation,
@@ -230,7 +857,15 @@ const augmentResponses = (
     ) {
       const composedPrimitives = (
         modelsByName[response.type].composedPrimitives ?? []
-      ).filter((p) => !COLLECTION_TYPES.has(p.export));
+      ).filter(
+        (p) =>
+          !COLLECTION_TYPES.has(p.export) &&
+          // `null` is the one primitive a runtime CAN tell from the others, and
+          // it is how OpenAPI 3.1 spells an optional: FastAPI emits
+          // `anyOf: [X, {type: 'null'}]` for `Optional[X]`. Counting it here
+          // failed generation outright for an idiomatic optional response.
+          p.type !== 'null',
+      );
       if (composedPrimitives.length > 0) {
         throw new Error(
           `Operation "${op.method} ${op.path}" returns a composite schema of primitives with ${camelCase(modelsByName[response.type].export)}, which cannot be distinguished at runtime`,
@@ -252,11 +887,68 @@ const augmentResponses = (
     const mediaTypes = Object.keys(specResponse.content);
     response.mediaTypes = mediaTypes;
 
+    // One status can only be parsed one way: the response's type comes from the
+    // first media type, and nothing inspects the response's Content-Type to pick
+    // between them. Where the schemas agree that is harmless (a `string` served
+    // as either JSON or text), but where they differ the client would coerce one
+    // wire form into the other's type and raise deep inside pydantic. Rejected
+    // here for the same reason a composite of primitives is: it cannot be told
+    // apart at runtime.
+    // A streaming media type describes each item of the stream rather than the
+    // whole body, so it is compared through `itemSchema` elsewhere and excluded
+    // here — a JSONL response legitimately pairs with an `application/json`
+    // declaration of the same item type.
+    // Compared through their resolved form, and only where both declare one:
+    // normalisation hoists just the preferred media type's inline schema into
+    // `components` and leaves the others inline, so comparing as written pitted a
+    // `$ref` against the very schema it was hoisted from and never matched. An
+    // absent `schema` means unconstrained rather than different (a Media Type
+    // Object may omit it), so it does not count as a distinct shape.
+    const bodySchemas = new Set(
+      mediaTypes
+        .filter((mediaType) => !STREAMING_CONTENT_TYPES.has(mediaType))
+        .map((mediaType) => specResponse.content![mediaType]?.schema)
+        .filter((schema) => schema !== undefined)
+        .map((schema) =>
+          schemaShapeKey(spec, schema, schemaShapeCacheFor(spec)),
+        ),
+    );
+    if (bodySchemas.size > 1) {
+      throw new Error(
+        `Operation "${op.method} ${op.path}" declares response ${response.code} with different schemas per media type (${mediaTypes.join(', ')}), which cannot be distinguished at runtime. Declare one schema for the status, or split the media types across separate operations.`,
+      );
+    }
+
     for (const mediaType of mediaTypes) {
       const responseContent = specResponse.content[mediaType];
+      const declaredSchema = responseContent.schema as
+        | { nullable?: boolean }
+        | undefined;
+      // A composite whose members include `null` — how OpenAPI 3.1 spells an
+      // optional — is nullable, even though the `null` member itself is dropped
+      // from the composite so it stays distinguishable at runtime.
+      const composedModel = modelsByName[response.type];
+      const hasNullMember = (composedModel?.composedPrimitives ?? []).some(
+        (member) => member.type === 'null',
+      );
       const responseSchema = resolveIfRef(spec, responseContent.schema);
       if (responseSchema) {
         augmentModelFromSchema(spec, response, responseSchema, modelsByName);
+        // A response body the spec marks nullable may arrive as JSON `null`, so
+        // the flag is carried onto the response for the templates that parse it.
+        // Set here rather than in `augmentModelFromSchema`, which every property
+        // also goes through: doing it there would change how a property
+        // referencing a nullable schema is typed.
+        //
+        // Read from the declared schema as well as the resolved one: `nullable`
+        // may sit beside a `$ref`, which resolution replaces wholesale.
+        if (
+          declaredSchema?.nullable ||
+          hasNullMember ||
+          (responseSchema as { nullable?: boolean }).nullable
+        ) {
+          response.isNullable = true;
+        }
       }
       if (
         STREAMING_CONTENT_TYPES.has(mediaType) &&
@@ -359,12 +1051,31 @@ const augmentBodyParameter = (
   if (!specBody) return;
 
   if (parameter.mediaType) {
+    const declaredSchema = specBody.content?.[parameter.mediaType]?.schema as
+      | { nullable?: boolean }
+      | undefined;
     const bodySchema = resolveIfRef(
       spec,
       specBody.content?.[parameter.mediaType]?.schema,
     );
     if (bodySchema) {
       augmentModelFromSchema(spec, parameter, bodySchema, modelsByName);
+      // A body the spec marks nullable may legitimately be sent as JSON `null`.
+      // Read from the declared schema too: `nullable` may sit beside a `$ref`,
+      // which resolution replaces wholesale.
+      // A composite whose members include `null` is the 3.1 spelling of an
+      // optional, and reaches here as a reference to a hoisted schema.
+      const referenced = modelsByName[parameter.type];
+      const hasNullMember = (referenced?.composedPrimitives ?? []).some(
+        (member) => member.type === 'null',
+      );
+      if (
+        declaredSchema?.nullable ||
+        hasNullMember ||
+        (bodySchema as { nullable?: boolean }).nullable
+      ) {
+        parameter.isNullable = true;
+      }
     }
   }
   // Track all the media types that can be accepted in the request body
@@ -414,6 +1125,7 @@ const getCollectionFormat = (
 const buildRequestParameterModels = (
   op: Operation,
   modelsByName: ModelsByName,
+  takenModelNames: Set<string>,
 ): Model[] => {
   if (!op.parameters || op.parameters.length === 0) {
     return [];
@@ -452,7 +1164,10 @@ const buildRequestParameterModels = (
   op.explicitRequestBodyParameter = parametersByPosition['body']?.[0];
 
   return Object.entries(parametersByPosition).map(([position, parameters]) => {
-    const name = `${op.operationIdPascalCase}Request${upperFirst(position)}Parameters`;
+    const name = uniqueGeneratedName(
+      `${op.operationIdPascalCase}Request${upperFirst(position)}Parameters`,
+      takenModelNames,
+    );
     return createModel({
       description: op.description,
       export: 'interface',
@@ -492,9 +1207,13 @@ const augmentModel = (
 
   model.properties.forEach(addLanguageTypes);
 
-  // Resolve the discriminator's TypeScript property name for marshalling.
+  // Resolve the discriminator's language property names for marshalling.
   if (model.discriminator) {
     model.discriminator.typescriptPropertyName = toTypeScriptName(
+      model.discriminator.propertyName,
+    );
+    model.discriminator.pythonPropertyName = toPythonName(
+      'property',
       model.discriminator.propertyName,
     );
   }
@@ -519,6 +1238,38 @@ const assertNoClashingPropertyNames = (model: Model): void => {
       );
     }
     seen.set(property.typescriptName!, property.name);
+  }
+};
+
+/**
+ * The Python counterpart of {@link assertNoClashingPropertyNames}, run over the
+ * flattened property list an `all-of` composite emits. Called by the Python
+ * generator rather than the shared pipeline, so a TypeScript consumer is never
+ * failed by a Python-specific name clash. Two members whose wire
+ * names snake_case alike (`fooBar` and `foo_bar`) would emit the same field
+ * twice, silently keeping only the last, so fail fast instead.
+ *
+ * A model's own properties are checked as well as the flattened list. The
+ * TypeScript assertion does not cover them: escaping a keyword makes `from` and
+ * `var_from` distinct in TypeScript (`from`/`varFrom`) but identical in Python,
+ * so the class emitted the same field twice and pydantic kept only the last —
+ * binding the wire value to the wrong type.
+ */
+export const assertNoClashingPythonNames = (model: Model): void => {
+  const seen = new Map<string, string>();
+  for (const property of [
+    ...(model.effectiveProperties ?? []),
+    ...(model.properties ?? []),
+  ]) {
+    if (!property.name) continue;
+    const pythonName = toPythonName('property', property.name);
+    const existing = seen.get(pythonName);
+    if (existing !== undefined && existing !== property.name) {
+      throw new Error(
+        `Property name conflict in "${model.name}": "${existing}" and "${property.name}" both map to the Python name "${pythonName}". Please rename one of these in your OpenAPI specification.`,
+      );
+    }
+    seen.set(pythonName, property.name);
   }
 };
 
@@ -558,10 +1309,16 @@ const marshallingKey = (
         .sort();
       return `union<${[...new Set(members)].join('|')}>`;
     }
-    if (referenced.export === 'interface') {
+    if (referenced.export === 'interface' || referenced.export === 'all-of') {
       // Keyed on the shape too, for the same reason: two members declaring an
-      // identical inline object property are hoisted to different names.
-      const fields = (referenced.properties ?? [])
+      // identical inline object property are hoisted to different names, and
+      // keying on the name alone rejected a union whose members convert the same
+      // way. `all-of` composes first, so its flattened properties are used.
+      const properties =
+        referenced.export === 'all-of'
+          ? (referenced.effectiveProperties ?? [])
+          : (referenced.properties ?? []);
+      const fields = properties
         .filter((property) => property.name)
         .map(
           (property) =>
@@ -570,9 +1327,6 @@ const marshallingKey = (
         .sort();
       return `object<${fields.join(',')}>`;
     }
-    // An `all-of` composes members that are resolved later, so it keeps its name
-    // as its key rather than a shape this pass cannot see yet.
-    if (referenced.export === 'all-of') return `ref:${m.type}`;
     return marshallingKey(referenced, modelsByName, nested);
   }
   return 'plain';
@@ -634,7 +1388,10 @@ const assertEncodableUrlEncodedBody = (op: Operation): void => {
     mediaTypes.find(
       (mt) => mt === 'application/json' || mt.endsWith('+json'),
     ) ?? mediaTypes[0];
-  if (chosenMediaType !== 'application/x-www-form-urlencoded') return;
+  if (chosenMediaType !== 'application/x-www-form-urlencoded') {
+    assertEncodableNonJsonBody(op, chosenMediaType, body);
+    return;
+  }
   if (body.isPrimitive) return;
   if (body.export === 'array' || body.export === 'tuple') {
     throw new Error(
@@ -642,6 +1399,36 @@ const assertEncodableUrlEncodedBody = (op: Operation): void => {
     );
   }
 };
+
+/**
+ * A structured body under a media type that is neither JSON nor a form has no
+ * defined encoding. Both generators JSON-encoded it while asserting the declared
+ * Content-Type, so an object went out as JSON bytes labelled `text/plain` — which
+ * a conforming server rejects or mis-parses. Fail fast instead of shipping a wire
+ * form that cannot be right.
+ *
+ * A scalar body is fine: it has a text form of its own and is sent verbatim.
+ */
+const assertEncodableNonJsonBody = (
+  op: Operation,
+  mediaType: string,
+  body: Model,
+): void => {
+  const base = mediaType.split(';')[0];
+  if (base === 'application/json' || base.endsWith('+json')) return;
+  if (FORM_BODY_MEDIA_TYPES.has(base)) return;
+  // Binary bodies are sent as raw content, and a scalar as its text form.
+  if (body.type === 'binary' || body.isPrimitive || body.isEnum) return;
+  if (body.export === 'enum' || body.export === 'generic') return;
+  throw new Error(
+    `Operation ${op.method} ${op.path} declares a "${mediaType}" request body whose schema is an object or array, which has no defined encoding for that media type — it would be sent as JSON under a "${mediaType}" header. Declare the body as "application/json", or use a scalar schema which is sent verbatim.`,
+  );
+};
+
+const FORM_BODY_MEDIA_TYPES = new Set([
+  'multipart/form-data',
+  'application/x-www-form-urlencoded',
+]);
 
 /**
  * Group operations by their (camelCased) tags, collecting any untagged

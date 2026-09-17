@@ -2,9 +2,19 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+
+import { execFileSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
-import { toPythonName, toPythonType, toTypeScriptType } from './languages.js';
-import type { Model } from './types.js';
+import {
+  PYTHON_CLASS_CASED_BUILTINS,
+  qualifyPythonType,
+  toPythonAnnotation,
+  toPythonClassName,
+  toPythonName,
+  toPythonType,
+  toTypeScriptType,
+} from './languages.js';
+import type { Model, PythonType } from './types.js';
 
 const createModel = (partial: Partial<Model>): Model => ({
   $refs: [],
@@ -93,7 +103,7 @@ describe('languages', () => {
 
       expect(toPythonType(stringModel)).toBe('str');
       expect(toPythonType(boolModel)).toBe('bool');
-      expect(toPythonType(anyModel)).toBe('object');
+      expect(toPythonType(anyModel)).toBe('Any');
     });
 
     it('should handle date formats', () => {
@@ -108,8 +118,8 @@ describe('languages', () => {
         export: 'generic',
       });
 
-      expect(toPythonType(dateModel)).toBe('date');
-      expect(toPythonType(dateTimeModel)).toBe('datetime');
+      expect(toPythonType(dateModel)).toBe('datetime.date');
+      expect(toPythonType(dateTimeModel)).toBe('datetime.datetime');
     });
 
     it('should handle number types', () => {
@@ -140,7 +150,7 @@ describe('languages', () => {
         export: 'array',
         link: createModel({ type: 'string', export: 'generic' }),
       });
-      expect(toPythonType(model)).toBe('List[str]');
+      expect(toPythonType(model)).toBe('list[str]');
     });
 
     it('should handle dictionary types', () => {
@@ -149,7 +159,110 @@ describe('languages', () => {
         export: 'dictionary',
         link: createModel({ type: 'string', export: 'generic' }),
       });
-      expect(toPythonType(model)).toBe('Dict[str, str]');
+      expect(toPythonType(model)).toBe('dict[str, str]');
+    });
+
+    it('should render enums as Literal', () => {
+      const model = createModel({
+        type: 'string',
+        export: 'enum',
+        enum: [{ value: 'a' }, { value: 'b' }],
+      });
+      expect(toPythonType(model)).toBe('Literal["a", "b"]');
+    });
+
+    it('should escape model names that shadow generated imports', () => {
+      expect(
+        toPythonType(createModel({ type: 'Field', export: 'reference' })),
+      ).toBe('_Field');
+      expect(
+        toPythonType(createModel({ type: 'Error', export: 'reference' })),
+      ).toBe('_Error');
+    });
+  });
+
+  describe('toPythonAnnotation', () => {
+    it('returns bare types for built-ins', () => {
+      expect(
+        toPythonAnnotation(createModel({ type: 'string', export: 'generic' })),
+      ).toBe('str');
+      expect(
+        toPythonAnnotation(createModel({ type: 'integer', export: 'generic' })),
+      ).toBe('int');
+    });
+
+    it('forward-refs user-defined model names', () => {
+      expect(
+        toPythonAnnotation(createModel({ type: 'Pet', export: 'reference' })),
+      ).toBe('"Pet"');
+    });
+
+    it('forward-refs nested model references in collections', () => {
+      const listOfPets = createModel({
+        type: 'Pet',
+        export: 'array',
+        link: createModel({ type: 'Pet', export: 'reference' }),
+      });
+      expect(toPythonAnnotation(listOfPets)).toBe('list["Pet"]');
+
+      const dictOfPets = createModel({
+        type: 'Pet',
+        export: 'dictionary',
+        link: createModel({ type: 'Pet', export: 'reference' }),
+      });
+      expect(toPythonAnnotation(dictOfPets)).toBe('dict[str, "Pet"]');
+    });
+  });
+
+  describe('qualifyPythonType', () => {
+    const pet: PythonType = { kind: 'reference', name: 'Pet' };
+    const str: PythonType = { kind: 'builtin', name: 'str' };
+
+    it('prefixes class references, at any depth', () => {
+      expect(qualifyPythonType(pet, 'types.')).toBe('types.Pet');
+      expect(qualifyPythonType({ kind: 'list', element: pet }, 'types.')).toBe(
+        'list[types.Pet]',
+      );
+      expect(qualifyPythonType({ kind: 'dict', value: pet }, 'types.')).toBe(
+        'dict[str, types.Pet]',
+      );
+      expect(
+        qualifyPythonType(
+          { kind: 'optional', inner: { kind: 'list', element: pet } },
+          'types.',
+        ),
+      ).toBe('list[types.Pet] | None');
+      expect(
+        qualifyPythonType({ kind: 'tuple', members: [str, pet] }, 'types.'),
+      ).toBe('tuple[str, types.Pet]');
+    });
+
+    it('leaves built-ins and literals untouched', () => {
+      expect(qualifyPythonType(str, 'types.')).toBe('str');
+      expect(
+        qualifyPythonType(
+          { kind: 'list', element: { kind: 'builtin', name: 'int' } },
+          'types.',
+        ),
+      ).toBe('list[int]');
+      expect(
+        qualifyPythonType({ kind: 'literal', values: ['"a"'] }, 'types.'),
+      ).toBe('Literal["a"]');
+    });
+
+    // A literal's text is data, not something to parse: a value containing a
+    // bracket or a class name must survive untouched.
+    it('never rewrites the inside of a literal', () => {
+      expect(
+        qualifyPythonType(
+          { kind: 'literal', values: ['"list[Pet]"', '"Pet"'] },
+          'types.',
+        ),
+      ).toBe('Literal["list[Pet]", "Pet"]');
+    });
+
+    it('renders Any for a missing type', () => {
+      expect(qualifyPythonType(undefined, 'types.')).toBe('Any');
     });
   });
 
@@ -178,6 +291,43 @@ describe('languages', () => {
     it('should handle already escaped names', () => {
       expect(toPythonName('model', '_class')).toBe('model_class');
       expect(toPythonName('property', '_import')).toBe('var_import');
+    });
+  });
+
+  /**
+   * A schema named after a class-cased builtin is emitted as a class that shadows
+   * it only from its own definition onwards. `types.py` carries `from __future__
+   * import annotations`, so an annotation rendered above that class resolves to
+   * the builtin and pydantic rejects the module — and whether it happens at all
+   * depends on where the schema sorts. A published spec with a schema named
+   * `Exception` produced a `types.py` that could not be imported.
+   */
+  describe('toPythonClassName', () => {
+    it.each(['Exception', 'ValueError', 'Warning', 'KeyError', 'None'])(
+      'escapes a schema named %s',
+      (name) => {
+        expect(toPythonClassName(name)).toBe(`_${name}`);
+      },
+    );
+
+    // Checked against the interpreter rather than maintained by hand, so a
+    // builtin this list misses fails here instead of in generated output. A
+    // superset assertion: the list is built from the newest Python the generated
+    // projects target, and the interpreter running the tests may be older —
+    // escaping a name that is not yet a builtin is harmless, missing one is not.
+    it('covers every class-cased builtin the interpreter has', () => {
+      const actual = execFileSync(
+        'python3',
+        [
+          '-c',
+          "import builtins;print('\\n'.join(sorted(n for n in dir(builtins) if not n.startswith('_') and n[0].isupper())))",
+        ],
+        { encoding: 'utf-8' },
+      )
+        .trim()
+        .split('\n');
+      const listed = new Set(PYTHON_CLASS_CASED_BUILTINS);
+      expect(actual.filter((name) => !listed.has(name))).toEqual([]);
     });
   });
 });

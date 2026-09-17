@@ -11,6 +11,8 @@
  *
  * `readonly` marks a walkthrough step whose prose is written around the values it
  * passes, leaving `editable` the options the reader still chooses for themselves.
+ * `noOptions` drops the option controls altogether, for a command recorded at a
+ * point in time — a migration write-up — which shouldn't follow later renames.
  */
 import {
   createSchemaLookup,
@@ -34,6 +36,7 @@ const {
   values: pinnedValues = {},
   readonly = false,
   editable = [],
+  noOptions = false,
 } = Astro.props;
 const locale = Astro.currentLocale || 'en';
 const strings = commandCardStrings(locale);
@@ -48,17 +51,17 @@ const NAME_OPTION: GeneratorOption = {
   required: true,
 };
 
-let options: GeneratorOption[] = [NAME_OPTION];
+let options: GeneratorOption[] = noOptions ? [] : [NAME_OPTION];
 try {
   const generatorsJson = resolveGeneratorsJson(process.cwd());
-  if (generatorsJson) {
+  if (generatorsJson && !noOptions) {
     options = [
       NAME_OPTION,
       ...readGeneratorOptions(createSchemaLookup(generatorsJson)('preset')),
     ];
   }
 } catch {
-  options = [NAME_OPTION];
+  options = noOptions ? [] : [NAME_OPTION];
 }
 
 const prescribed: Record<string, string> = Object.fromEntries(
@@ -66,13 +69,18 @@ const prescribed: Record<string, string> = Object.fromEntries(
     .filter(([, value]) => value !== undefined)
     .map(([key, value]) => [key, String(value)]),
 );
-const initial: Record<string, string> = Object.fromEntries(
-  options.map((option) => [
-    option.key,
-    prescribed[option.key] ??
-      (option.control === 'boolean' ? option.default ?? 'false' : ''),
-  ]),
-);
+const initial: Record<string, string> = {
+  // A pinned value still makes the command where the card offers no control for
+  // it — the workspace name on a point-in-time command.
+  ...prescribed,
+  ...Object.fromEntries(
+    options.map((option) => [
+      option.key,
+      prescribed[option.key] ??
+        (option.control === 'boolean' ? (option.default ?? 'false') : ''),
+    ]),
+  ),
+};
 const locked = new Set(
   readonly
     ? options

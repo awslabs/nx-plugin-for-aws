@@ -11,18 +11,25 @@
  * flags, shortening the command without changing what the Nx Console lists.
  * `readonly` marks a walkthrough step whose prose is written around the values it
  * passes, leaving `editable` the options the reader still chooses for themselves.
+ * `noOptions` drops the option controls altogether, for a command recorded at a
+ * point in time — a migration write-up — which shouldn't follow later renames.
  */
 import { Steps, TabItem, Tabs } from '@astrojs/starlight/components';
 import {
   createSchemaLookup,
   resolveGeneratorsJson,
 } from '../../../packages/nx-plugin/src/mcp-server/schema-registry';
-import { emittedValues, type GeneratorCardConfig } from '../lib/command-card';
+import {
+  resolveCardOptions,
+  type GeneratorCardConfig,
+} from '../lib/command-card';
 import { commandCardStrings } from '../lib/command-card-strings';
 import {
+  effectiveValues,
   readGeneratorOptions,
   type GeneratorOption,
 } from '../lib/generator-options';
+import { pinnedPageOptions, type PageWhen } from '../lib/page-options';
 import CommandCard from './command-card.astro';
 import CommandCardTerminals from './command-card-terminals.astro';
 
@@ -34,6 +41,7 @@ const {
   noInteractive = false,
   readonly = false,
   editable = [],
+  noOptions = false,
 } = Astro.props;
 const locale = Astro.currentLocale || 'en';
 const strings = commandCardStrings(locale);
@@ -43,7 +51,7 @@ const strings = commandCardStrings(locale);
 let options: GeneratorOption[] = [];
 try {
   const generatorsJson = resolveGeneratorsJson(process.cwd());
-  if (generatorsJson && namespace === '@aws/nx-plugin') {
+  if (generatorsJson && namespace === '@aws/nx-plugin' && !noOptions) {
     options = readGeneratorOptions(
       createSchemaLookup(generatorsJson)(generator),
     );
@@ -60,20 +68,64 @@ const prescribed: Record<string, string> = Object.fromEntries(
     String(value),
   ]),
 );
-const initial: Record<string, string> = Object.fromEntries(
-  options.map((option) => [
-    option.key,
-    prescribed[option.key] ??
-      (option.control === 'boolean' ? option.default ?? 'false' : ''),
-  ]),
+const initial: Record<string, string> = {
+  // A page can pass an option the schema doesn't declare, which still makes the
+  // command even though there's no control for it.
+  ...prescribed,
+  ...Object.fromEntries(
+    options.map((option) => [
+      option.key,
+      prescribed[option.key] ??
+        (option.control === 'boolean' ? (option.default ?? 'false') : ''),
+    ]),
+  ),
+};
+
+// The guide's own generator, whose card the reader picks the page's option values
+// in: its controls drive the sections the guide shows. A page runs other
+// generators too (the connections at the end of an agent guide), which speak only
+// for their own command.
+const pageGenerator = (
+  Astro.locals.starlightRoute?.entry?.data as { generator?: string } | undefined
+)?.generator;
+const pageOwnerSymbol = Symbol.for('npfa:page-options-owner');
+const ownerLocals = Astro.locals as Record<symbol, boolean>;
+const ownsPage = generator === pageGenerator && !ownerLocals[pageOwnerSymbol];
+if (ownsPage) ownerLocals[pageOwnerSymbol] = true;
+
+// A guide written for one variant of a generator — the tRPC guide's
+// `when: framework: [trpc]` — is that variant: readers come for its command, so
+// an option the page both fixes and passes is shown rather than offered.
+const pinnedByPage = pinnedPageOptions(
+  (Astro.locals.starlightRoute?.entry?.data as { when?: PageWhen } | undefined)
+    ?.when,
 );
 const locked = new Set(
-  readonly
-    ? options
-        .map((option) => option.key)
-        .filter((key) => !editable.includes(key))
-    : [],
+  options
+    .map((option) => option.key)
+    .filter(
+      (key) =>
+        (readonly && !editable.includes(key)) ||
+        (pinnedByPage[key] !== undefined && prescribed[key] !== undefined),
+    ),
 );
+
+// An option that can't apply, because the guide fixes the value it depends on,
+// has nothing to contribute — the Smithy namespace on the tRPC guide. One that
+// depends on a value the reader can still change stays, and the card disables it
+// while it doesn't apply.
+// Only the options the guide fixes count as forced: the rest are the reader's to
+// choose, and the card follows along as they do.
+const forced = effectiveValues(
+  Object.fromEntries(
+    [...locked].map((key) => [key, initial[key]]).filter(([, value]) => !!value),
+  ),
+  options.filter((option) => locked.has(option.key)),
+);
+// An option the guide's own values rule out is not one the reader can reach, and
+// nor is a value they rule out — `http-lambda` can't apply on a guide written for
+// the Smithy framework.
+const { applicable, values } = resolveCardOptions(options, forced, initial);
 
 const config: GeneratorCardConfig = {
   kind: 'generator',
@@ -81,16 +133,19 @@ const config: GeneratorCardConfig = {
   generator,
   positional,
   noInteractive,
-  order: options.map((option) => option.key),
-  // The options this guide pins, which a filter-bar selection must not overwrite.
+  order: applicable.map((option) => option.key),
+  // The options this guide pins, which a restored selection must not overwrite.
   prescribed: Object.keys(prescribed),
-  options: options.map(({ key, control, default: fallback }) => ({
-    key,
-    control,
-    default: fallback,
-  })),
+  options: applicable.map(
+    ({ key, control, default: fallback, when, valueWhen }) => ({
+      key,
+      control,
+      default: fallback,
+      when,
+      valueWhen,
+    }),
+  ),
 };
-const values = emittedValues(initial, options);
 
 const vscodeStrings = {
   installPlugin: {
@@ -177,12 +232,13 @@ const vscodeString = (name) =>
 
 <CommandCard
   config={config}
-  options={options}
+  options={applicable}
   initial={initial}
   title={strings.runTitle}
   target={`${namespace}:${generator}`}
   locked={locked}
   strings={strings}
+  ownsPage={ownsPage}
   showDryRun
 >
   <Tabs syncKey="generator-usage">
