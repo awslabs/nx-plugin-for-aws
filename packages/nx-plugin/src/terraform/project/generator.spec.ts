@@ -91,6 +91,7 @@ describe('terraformProjectGenerator', () => {
         'lint',
         'output',
         'plan',
+        'terraform-init',
         'test',
         'validate',
       ]);
@@ -129,11 +130,12 @@ describe('terraformProjectGenerator', () => {
       );
       const testTarget = projectConfig.targets['test'];
 
-      // `init`, `validate`, `plan` and `destroy` share `src/.terraform`.
-      // Initialising the tests into that same directory races them, so the test
-      // data dir is relocated out of the source tree.
+      // `init`, `plan` and `destroy` share `src/.terraform`. Initialising the
+      // tests into that same directory races them, so the data dir `test` runs
+      // against — the one `terraform-init` prepares — sits outside the source
+      // tree.
       expect(testTarget.options.env.TF_DATA_DIR).toContain(
-        'dist/{projectRoot}/terraform-test',
+        'dist/{projectRoot}/terraform-init',
       );
       expect(testTarget.options.cwd).toBe('{projectRoot}/src');
 
@@ -163,16 +165,18 @@ describe('terraformProjectGenerator', () => {
         forwardAllArgs: false,
       };
 
-      // `test` cleans its `TF_DATA_DIR` out of `dist` on every miss, so without
-      // a persistent cache it re-downloads every provider each time it runs.
-      const testTarget = projectConfig.targets['test'];
-      expect(testTarget.options.env.TF_PLUGIN_CACHE_DIR).toBe(pluginCacheDir);
+      // `terraform-init` cleans its `TF_DATA_DIR` out of `dist` on every miss, so
+      // without a persistent cache it re-downloads every provider each run.
+      const initProviders = projectConfig.targets['terraform-init'];
+      expect(initProviders.options.env.TF_PLUGIN_CACHE_DIR).toBe(
+        pluginCacheDir,
+      );
       // Terraform errors and falls back to downloading when the directory does
       // not exist, so it is created before `terraform init` reads it.
-      expect(testTarget.options.commands[0]).toEqual(makeDir);
-      expect(testTarget.options.parallel).toBe(false);
+      expect(initProviders.options.commands[0]).toEqual(makeDir);
+      expect(initProviders.options.parallel).toBe(false);
       // `shx mkdir` takes no terraform flags, so args are not forwarded to it.
-      expect(testTarget.options.forwardAllArgs).toBe(true);
+      expect(initProviders.options.forwardAllArgs).toBe(true);
 
       // An application's `init` delegates to the vended script, which resolves
       // the cache itself rather than reading it from the target.
@@ -182,21 +186,50 @@ describe('terraformProjectGenerator', () => {
       ]);
     });
 
-    it('should give each project its own cache so the targets stay parallel', async () => {
+    it('should give the provider cache a single writer', async () => {
       await terraformProjectGenerator(tree, applicationSchema);
 
       const { targets } = readProjectConfiguration(
         tree,
         '@proj/my-terraform-project',
       );
+      const pluginCacheDir = '../../../.terraform/plugin-cache/{projectRoot}';
 
       // Two `terraform init` runs filling one cache concurrently fail the run:
       // the provider hash covers a directory the other is still writing, and
-      // terraform rejects the mismatch against the lock file. A directory per
-      // project means no two writers ever meet, so nothing has to serialise.
-      expect(targets.test.options.env.TF_PLUGIN_CACHE_DIR).toContain(
+      // terraform rejects the mismatch against the lock file. Nx schedules the
+      // targets needing the providers concurrently — `plan` depends on both
+      // `init` and `validate` — so one target inits ahead of them all.
+      const initDataDir = '../../../dist/{projectRoot}/terraform-init';
+      const terraformInit = targets['terraform-init'];
+      expect(terraformInit.options.commands).toEqual([
+        { command: `shx mkdir -p ${pluginCacheDir}`, forwardAllArgs: false },
+        'terraform init -backend=false',
+      ]);
+      expect(terraformInit.options.env).toEqual({
+        TF_DATA_DIR: initDataDir,
+        TF_PLUGIN_CACHE_DIR: pluginCacheDir,
+      });
+      expect(terraformInit.options.cwd).toBe('{projectRoot}/src');
+      expect(terraformInit.options.parallel).toBe(false);
+      // A cache hit on another machine would report success over an empty cache
+      // and hand the race back to the targets that depend on it.
+      expect(terraformInit.cache).toBeUndefined();
+
+      // A cache per project too, so the projects themselves stay parallel.
+      expect(terraformInit.options.env.TF_PLUGIN_CACHE_DIR).toContain(
         '{projectRoot}',
       );
+      // `test` and `validate` run against the data dir it prepared rather than
+      // initialising their own, so it is the only `terraform init` of the three.
+      for (const verb of ['test', 'validate'] as const) {
+        expect(targets[verb].options.command).toBe(`terraform ${verb}`);
+        expect(targets[verb].options.commands).toBeUndefined();
+        expect(targets[verb].options.env).toEqual({ TF_DATA_DIR: initDataDir });
+      }
+      for (const targetName of ['init', 'test', 'validate']) {
+        expect(targets[targetName].dependsOn).toContain('terraform-init');
+      }
       for (const targetName of ['init', 'test', 'validate', 'plan', 'format']) {
         expect(targets[targetName]).toBeDefined();
         expect(targets[targetName].parallelism).toBeUndefined();
@@ -427,7 +460,9 @@ describe('terraformProjectGenerator', () => {
       ]);
       expect(initTarget.options.cwd).toBe('{workspaceRoot}');
       expect(initTarget.configurations.dev.env.TF_ENV).toBe('dev');
-      expect(initTarget.dependsOn).toEqual(['^init']);
+      // `terraform-init` fills the plugin cache this then reads, so the two
+      // never write it at once.
+      expect(initTarget.dependsOn).toEqual(['terraform-init', '^init']);
     });
 
     it('should configure destroy target correctly', async () => {
@@ -507,16 +542,13 @@ describe('terraformProjectGenerator', () => {
       expect(validateTarget.executor).toBe('nx:run-commands');
       expect(validateTarget.cache).toBe(true);
       expect(validateTarget.options.cwd).toBe('{projectRoot}/src');
-      // Runs its own backendless init rather than depending on the
-      // backend-configured `init`, which needs a bootstrapped state bucket — so
-      // this works on a fresh workspace.
-      expect(validateTarget.options.commands).toContain(
-        'terraform init -backend=false',
-      );
-      expect(validateTarget.options.commands).toContain('terraform validate');
-      expect(validateTarget.dependsOn).toBeUndefined();
+      // Runs against the backendless `TF_DATA_DIR` `terraform-init` prepared,
+      // rather than the backend-configured `init`, which needs a bootstrapped
+      // state bucket — so this works on a fresh workspace.
+      expect(validateTarget.options.command).toBe('terraform validate');
+      expect(validateTarget.dependsOn).toEqual(['terraform-init']);
       expect(validateTarget.options.env.TF_DATA_DIR).toContain(
-        'terraform-validate',
+        'terraform-init',
       );
 
       // Test checkov target, which carries the security scan
@@ -530,18 +562,11 @@ describe('terraformProjectGenerator', () => {
       expect(testTarget.executor).toBe('nx:run-commands');
       expect(testTarget.cache).toBe(true);
       expect(testTarget.options.cwd).toBe('{projectRoot}/src');
-      // Providers are installed without configuring the S3 backend, which
-      // would need a bootstrapped bucket — so `build` works before bootstrap.
-      expect(testTarget.options.commands).toEqual([
-        {
-          command:
-            'shx mkdir -p ../../../.terraform/plugin-cache/{projectRoot}',
-          forwardAllArgs: false,
-        },
-        'terraform init -backend=false',
-        'terraform test',
-      ]);
-      expect(testTarget.dependsOn).toBeUndefined();
+      // Providers are installed by `terraform-init` without configuring the S3
+      // backend, which would need a bootstrapped bucket — so `build` works
+      // before bootstrap.
+      expect(testTarget.options.command).toBe('terraform test');
+      expect(testTarget.dependsOn).toEqual(['terraform-init']);
     });
 
     it("should share provider downloads from a library's init", async () => {
