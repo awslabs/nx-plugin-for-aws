@@ -563,6 +563,18 @@ describe('agentcore-harness generator', () => {
       expect(tf).toContain('source  = "hashicorp/time"');
     });
 
+    it('sends an empty map rather than null when no environment variables are set', () => {
+      // The service stores no environment variables as an empty map and returns
+      // one. Sending `null` creates the Harness and then fails the apply with
+      // "inconsistent values for sensitive attribute", leaving it tainted.
+      expect(tf).toContain(
+        'environment_variables = coalesce(var.environment_variables, {})',
+      );
+      expect(tf).not.toContain(
+        'environment_variables = var.environment_variables',
+      );
+    });
+
     it('declares exactly the retained input variables', () => {
       // Set equality, so a variable added or removed here is deliberate. The
       // system prompt stays a file read rather than a variable.
