@@ -487,12 +487,23 @@ resource "aws_iam_role_policy" "managed_memory" {
   })
 }
 
+locals {
+  # Only readable once the service has provisioned managed memory; null for
+  # externally-owned memory or memory disabled.
+  memory_arn = local.has_managed_memory ? aws_bedrockagentcore_harness.this.memory_actual[0].managed_memory_configuration[0].arn : null
+}
+
 module "add_harness_arn_to_runtime_config" {
   source = "../../../core/runtime-config/entry"
 
   namespace = "agentcore"
   key       = "harnesses"
-  value     = { "<%- nameClassName %>" = aws_bedrockagentcore_harness.this.arn }
+  value = {
+    "<%- nameClassName %>" = {
+      arn       = aws_bedrockagentcore_harness.this.arn
+      memoryArn = local.memory_arn
+    }
+  }
 }
 
 output "harness_id" {
@@ -503,6 +514,11 @@ output "harness_id" {
 output "harness_arn" {
   description = "ARN of the Amazon Bedrock AgentCore Harness"
   value       = aws_bedrockagentcore_harness.this.arn
+}
+
+output "memory_arn" {
+  description = "ARN of the Harness's managed Memory resource. Null when memory is externally owned or disabled."
+  value       = local.memory_arn
 }
 
 output "execution_role_arn" {
