@@ -11,7 +11,11 @@ module.exports = {
     }
     return 'minor'; // Upgrade stable to latest minor
   },
-  reject: [],
+  // agent-chat-cli 0.4.x depends on @a2a-js/sdk 1.x, which speaks A2A protocol
+  // v1 (`SendStreamingMessage`). The vended A2A server SDK (@a2a-js/sdk in
+  // versions.ts) is 0.3.x and rejects that with "Method not found", so hold the
+  // CLI until the server SDK moves to 1.x, then remove this entry.
+  reject: ['agent-chat-cli'],
   packageFile: '{package.json,packages/**/package.json}',
   cooldown: 1, // Only latest versions published for at least 1 day are updated to
   dep: ['prod', 'dev', 'optional', 'packageManager', 'peer'],
