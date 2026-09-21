@@ -22,15 +22,13 @@ export const MIGRATIONS_DIR = join(__dirname, '..', 'migrations');
  */
 export const migrationDir = (name: string): string => {
   const folderName = new RegExp(`^(\\d+-)?${name}$`);
-  for (const group of readdirSync(MIGRATIONS_DIR, { withFileTypes: true })) {
-    if (!group.isDirectory()) {
-      continue;
-    }
-    const match = readdirSync(join(MIGRATIONS_DIR, group.name)).find((entry) =>
+  // `src/migrations` holds only `latest/` and `v<version>/` folders.
+  for (const group of readdirSync(MIGRATIONS_DIR)) {
+    const match = readdirSync(join(MIGRATIONS_DIR, group)).find((entry) =>
       folderName.test(entry),
     );
     if (match) {
-      return join(MIGRATIONS_DIR, group.name, match);
+      return join(MIGRATIONS_DIR, group, match);
     }
   }
   throw new Error(`No migration named ${name} under ${MIGRATIONS_DIR}`);
