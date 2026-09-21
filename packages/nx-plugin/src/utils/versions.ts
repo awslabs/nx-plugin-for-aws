@@ -71,7 +71,7 @@ export const TS_VERSIONS = {
   '@ag-ui/client': '0.0.59',
   '@ag-ui/core': '0.0.59',
   '@ag-ui/encoder': '0.0.59',
-  'agent-chat-cli': '0.4.0',
+  'agent-chat-cli': '0.3.0',
   '@copilotkit/react-core': '1.73.0',
   rxjs: '7.8.2',
   '@strands-agents/sdk': '1.18.0',
