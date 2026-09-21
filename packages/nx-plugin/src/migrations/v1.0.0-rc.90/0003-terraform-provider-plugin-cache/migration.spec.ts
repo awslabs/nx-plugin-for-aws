@@ -5,12 +5,16 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  getProjects,
   readProjectConfiguration,
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { terraformProjectGenerator } from '../../../terraform/project/generator.js';
+import {
+  TERRAFORM_PROJECT_GENERATOR_INFO,
+  terraformProjectGenerator,
+} from '../../../terraform/project/generator.js';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
 import migration from './migration.js';
 
@@ -56,19 +60,33 @@ const generatePreFixProject = async (
     directory: 'packages',
   });
 
-  const config = readProjectConfiguration(tree, PROJECT);
+  // Every terraform project in the workspace is on the pre-fix version, the
+  // shared library the generator creates alongside the project included.
+  for (const [name, project] of getProjects(tree)) {
+    if (
+      (project.metadata as { generator?: string } | undefined)?.generator !==
+      TERRAFORM_PROJECT_GENERATOR_INFO.id
+    ) {
+      continue;
+    }
+    // Pre-fix, `test` ran its own backendless init into a data dir of its own,
+    // which was a self-contained tree worth caching.
+    project.targets.test.options.commands = [
+      'terraform init -backend=false',
+      'terraform test',
+    ];
+    delete project.targets.test.options.command;
+    project.targets.test.options.env = {
+      TF_DATA_DIR: '../../../dist/{projectRoot}/terraform-test',
+    };
+    project.targets.test.outputs = [
+      '{workspaceRoot}/dist/{projectRoot}/terraform-test',
+    ];
+    delete project.targets.test.dependsOn;
+    updateProjectConfiguration(tree, name, project);
+  }
 
-  config.targets.test.options.commands = [
-    'terraform init -backend=false',
-    'terraform test',
-  ];
-  config.targets.test.options.env = {
-    TF_DATA_DIR: '../../../dist/{projectRoot}/terraform-test',
-  };
-  // Pre-fix, the data dir was a self-contained tree worth caching.
-  config.targets.test.outputs = [
-    '{workspaceRoot}/dist/{projectRoot}/terraform-test',
-  ];
+  const config = readProjectConfiguration(tree, PROJECT);
 
   if (type === 'library') {
     // A library's `init` ran `terraform init` inline as a single `command`.
@@ -346,7 +364,7 @@ describe('terraform-provider-plugin-cache migration', () => {
     expect(result.nextSteps).toEqual([]);
   });
 
-  it('should be a no-op on a project generated with the cache already', async () => {
+  it('should not touch a project generated with the cache already', async () => {
     await terraformProjectGenerator(tree, {
       name: 'infra',
       type: 'application',
@@ -357,6 +375,13 @@ describe('terraform-provider-plugin-cache migration', () => {
     const result = await migration(tree);
 
     expect(readProjectConfiguration(tree, PROJECT)).toEqual(before);
-    expect(result.nextSteps).toEqual([]);
+    // `test` and `validate` no longer run a `terraform init` of their own — the
+    // later `terraform-init` migration hands that to one target — so this one
+    // reports rather than rewrites them. `nx migrate` runs it only on a
+    // workspace predating that change, where the init is still there.
+    expect(result.nextSteps).toEqual([
+      expect.stringContaining("its 'test' target no longer matches"),
+      expect.stringContaining("its 'test' target no longer matches"),
+    ]);
   });
 });
