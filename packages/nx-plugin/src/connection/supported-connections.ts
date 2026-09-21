@@ -17,6 +17,7 @@ export const SUPPORTED_PROJECT_TYPES = [
   'ts#dynamodb',
   'py#dynamodb',
   'agentcore-gateway',
+  'agentcore-harness',
 ] as const;
 
 // The single source of truth for supported connections, in a dependency-free
@@ -52,6 +53,7 @@ export const SUPPORTED_CONNECTIONS = [
   { source: 'agentcore-gateway', target: 'ts#mcp-server' },
   { source: 'agentcore-gateway', target: 'py#mcp-server' },
   { source: 'agentcore-gateway', target: 'agentcore-gateway' },
+  { source: 'ts#trpc-api', target: 'agentcore-harness' },
   { source: 'py#fast-api', target: 'py#dynamodb' },
   { source: 'py#agent', target: 'py#dynamodb' },
   { source: 'py#mcp-server', target: 'py#dynamodb' },

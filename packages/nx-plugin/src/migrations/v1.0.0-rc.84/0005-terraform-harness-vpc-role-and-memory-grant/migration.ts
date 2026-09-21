@@ -274,6 +274,23 @@ const SECURITY_GROUP_OUTPUT_TEXT = `output "security_group_id" {
 }`;
 
 /**
+ * The managed-memory ARN, read from the deployed Harness, in its own `locals`
+ * block beside the runtime-config module it feeds so a connected consumer (an
+ * AG-UI route) can read it back from runtime configuration.
+ */
+const MEMORY_ARN_LOCALS_TEXT = `locals {
+  # Only readable once the service has provisioned managed memory; null for
+  # externally-owned memory or memory disabled.
+  memory_arn = local.has_managed_memory ? aws_bedrockagentcore_harness.this.memory_actual[0].managed_memory_configuration[0].arn : null
+}`;
+
+/** The managed-memory ARN output, exposed for wiring into consuming modules. */
+const MEMORY_ARN_OUTPUT_TEXT = `output "memory_arn" {
+  description = "ARN of the Harness's managed Memory resource. Null when memory is externally owned or disabled."
+  value       = local.memory_arn
+}`;
+
+/**
  * The baseline policy, replaced whole: the managed-memory statement leaves it
  * for a policy of its own, and the resource gains a `count`. Rewriting the
  * statement list in place would strand the comment and comma around the
@@ -629,6 +646,25 @@ export default async function migration(
       MANAGED_MEMORY_POLICY_TEXT,
     );
 
+    // The managed-memory ARN local, beside the runtime-config module, and the
+    // runtime-config value grown from the bare ARN to an object carrying both
+    // the harness ARN and that memory ARN so a connected consumer can read it.
+    await insertViaGritQL(
+      tree,
+      filePath,
+      hcl(
+        `\`module "add_harness_arn_to_runtime_config" { $body }\` => \`${GRIT_INSERT_PLACEHOLDER}\n\nmodule "add_harness_arn_to_runtime_config" {\n  $body\n}\``,
+      ),
+      MEMORY_ARN_LOCALS_TEXT,
+    );
+    await applyGritQL(
+      tree,
+      filePath,
+      hcl(
+        '`value = { $key = aws_bedrockagentcore_harness.this.arn }` => `value = {\n    $key = {\n      arn       = aws_bedrockagentcore_harness.this.arn\n      memoryArn = local.memory_arn\n    }\n  }`',
+      ),
+    );
+
     // The role ARN output follows whichever role is in use, and the security
     // group is exposed for ingress rules on resources the Harness reaches.
     await applyGritQL(
@@ -645,6 +681,16 @@ export default async function migration(
         `\`output "execution_role_arn" { $body }\` => \`output "execution_role_arn" {\n  $body\n}\n\n${GRIT_INSERT_PLACEHOLDER}\``,
       ),
       SECURITY_GROUP_OUTPUT_TEXT,
+    );
+
+    // The managed-memory ARN output, after the harness ARN output.
+    await insertViaGritQL(
+      tree,
+      filePath,
+      hcl(
+        `\`output "harness_arn" { $body }\` => \`output "harness_arn" {\n  $body\n}\n\n${GRIT_INSERT_PLACEHOLDER}\``,
+      ),
+      MEMORY_ARN_OUTPUT_TEXT,
     );
   }
 

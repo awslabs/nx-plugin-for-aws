@@ -66,6 +66,11 @@ describe('scaffold catalog', () => {
         generator: 'agentcore-gateway',
         kind: 'project',
       },
+      'agentcore-harness': {
+        label: 'AgentCore Harness',
+        generator: 'agentcore-harness',
+        kind: 'project',
+      },
       'ts#trpc-api': {
         label: 'tRPC API',
         generator: 'ts#api',

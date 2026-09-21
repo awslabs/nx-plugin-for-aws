@@ -88,6 +88,34 @@ export const runGeneratorMatrix = async (
     opts,
   );
 
+  // AgentCore Harness — standalone invocation project + native Harness
+  // infrastructure (inherited IaC provider, so both the CDK and Terraform
+  // smoke tests compile/validate the generated output). Harness -> Gateway
+  // and Harness -> MCP connections are follow-up generators and intentionally
+  // not part of the matrix yet.
+  await runCLI(
+    `generate @aws/nx-plugin:agentcore-harness --name=my-harness --no-interactive${deferFlag}`,
+    opts,
+  );
+
+  // tRPC API -> AgentCore Harness connections — both auth modes the API
+  // supports (iam via my-api, cognito via a dedicated cognito-auth api), so
+  // the generated /agui route and history procedure are exercised under each.
+  // Server-side only: the website's chat wiring is documented rather than
+  // generated, so this connection touches no website project.
+  await runCLI(
+    `generate @aws/nx-plugin:ts#api --name=my-api-cognito --infra=rest-lambda --auth=cognito --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=my-api --targetProject=@e2e-test/my-harness --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:connection --sourceProject=my-api-cognito --targetProject=@e2e-test/my-harness --no-interactive${deferFlag}`,
+    opts,
+  );
+
   // Website -> tRPC API connections
   await runCLI(
     `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/website --targetProject=@e2e-test/my-api --no-interactive${deferFlag}`,
@@ -350,16 +378,6 @@ export const runGeneratorMatrix = async (
   );
   await runCLI(
     `generate @aws/nx-plugin:connection --sourceProject=@e2e-test/parent-gateway --targetProject=@e2e-test/my-gateway --no-interactive${deferFlag}`,
-    opts,
-  );
-
-  // AgentCore Harness — standalone invocation project + native Harness
-  // infrastructure (inherited IaC provider, so both the CDK and Terraform
-  // smoke tests compile/validate the generated output). Harness -> Gateway
-  // and Harness -> MCP connections are follow-up generators and intentionally
-  // not part of the matrix yet.
-  await runCLI(
-    `generate @aws/nx-plugin:agentcore-harness --name=my-harness --no-interactive${deferFlag}`,
     opts,
   );
 
