@@ -5,7 +5,7 @@
 import type { Tree } from '@nx/devkit';
 import { agentcoreHarnessGenerator } from '../../../agentcore-harness/generator.js';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
-import environmentVariablesMigration from '../../latest/terraform-harness-environment-variables/migration.js';
+import { importMigration } from '../../../utils/test-migration.js';
 import migration from './migration.js';
 
 const APP_MODULE_FILE =
@@ -548,6 +548,9 @@ describe('terraform-harness-vpc-role-and-memory-grant migration', () => {
     // same module run too, as `nx migrate` runs them in order.
     tree.write(APP_MODULE_FILE, oldAppModule);
     await migration(tree);
+    const environmentVariablesMigration = await importMigration(
+      'terraform-harness-environment-variables',
+    );
     await environmentVariablesMigration(tree);
 
     const fresh = createTreeUsingTsSolutionSetup();
