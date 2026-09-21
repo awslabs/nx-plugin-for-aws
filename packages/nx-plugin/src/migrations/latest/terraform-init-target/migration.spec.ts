@@ -237,6 +237,47 @@ describe('terraform-init-target migration', () => {
     });
   });
 
+  it('should report a target whose env a user has removed', async () => {
+    await generatePreFixProject(tree);
+    const config = readProjectConfiguration(tree, PROJECT);
+    delete config.targets.validate.options.env;
+    updateProjectConfiguration(tree, PROJECT, config);
+
+    const result = await migration(tree);
+
+    const { validate } = readProjectConfiguration(tree, PROJECT).targets;
+    expect(validate.dependsOn).toBeUndefined();
+    expect(validate.options.env).toBeUndefined();
+    expect(result.nextSteps).toEqual([
+      expect.stringContaining("its 'validate' target no longer matches"),
+    ]);
+  });
+
+  it('should order init after terraform-init when its dependsOn was removed', async () => {
+    await generatePreFixProject(tree);
+    const config = readProjectConfiguration(tree, PROJECT);
+    delete config.targets.init.dependsOn;
+    updateProjectConfiguration(tree, PROJECT, config);
+
+    await migration(tree);
+
+    const { init } = readProjectConfiguration(tree, PROJECT).targets;
+    expect(init.dependsOn).toEqual([TERRAFORM_INIT]);
+  });
+
+  it('should add the target to a project stripped of its targets', async () => {
+    await generatePreFixProject(tree);
+    const config = readProjectConfiguration(tree, PROJECT);
+    delete config.targets;
+    updateProjectConfiguration(tree, PROJECT, config);
+
+    const result = await migration(tree);
+
+    const { targets } = readProjectConfiguration(tree, PROJECT);
+    expect(Object.keys(targets)).toEqual([TERRAFORM_INIT]);
+    expect(result.nextSteps).toEqual([]);
+  });
+
   it('should be idempotent', async () => {
     await generatePreFixProject(tree);
 

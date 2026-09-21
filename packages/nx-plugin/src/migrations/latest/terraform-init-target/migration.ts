@@ -41,10 +41,7 @@ const divergedStep = (projectName: string, targetName: string) =>
 
 /** Path from a target running in `{projectRoot}/src` back to the workspace root. */
 const rootRelativePath = (projectRoot: string) =>
-  (relative(joinPathFragments(projectRoot, 'src'), '.') || '.').replace(
-    /\\/g,
-    '/',
-  );
+  relative(joinPathFragments(projectRoot, 'src'), '.').replace(/\\/g, '/');
 
 const pluginCacheDirFor = (toRoot: string) =>
   joinPathFragments(toRoot, '.terraform', 'plugin-cache', '{projectRoot}');
