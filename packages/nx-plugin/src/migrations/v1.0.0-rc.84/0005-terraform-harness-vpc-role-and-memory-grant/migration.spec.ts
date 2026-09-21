@@ -6,7 +6,6 @@ import type { Tree } from '@nx/devkit';
 import { agentcoreHarnessGenerator } from '../../../agentcore-harness/generator.js';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
 import environmentVariablesMigration from '../../latest/terraform-harness-environment-variables/migration.js';
-import rolePropagationMigration from '../../latest/terraform-harness-role-propagation/migration.js';
 import migration from './migration.js';
 
 const APP_MODULE_FILE =
@@ -545,12 +544,11 @@ describe('terraform-harness-vpc-role-and-memory-grant migration', () => {
 
   it('converges on what the generator writes today', async () => {
     // The migration's contract: an upgraded workspace ends up with the module a
-    // workspace generated today would have. `nx migrate` runs every later
-    // migration too, so each one that touches this module joins the chain.
+    // workspace generated today would have. Later migrations that touch this
+    // same module run too, as `nx migrate` runs them in order.
     tree.write(APP_MODULE_FILE, oldAppModule);
     await migration(tree);
     await environmentVariablesMigration(tree);
-    await rolePropagationMigration(tree);
 
     const fresh = createTreeUsingTsSolutionSetup();
     await agentcoreHarnessGenerator(fresh, {
