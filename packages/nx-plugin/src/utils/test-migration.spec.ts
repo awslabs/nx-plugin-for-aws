@@ -6,8 +6,8 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  MIGRATIONS_DIR,
   importMigration,
+  MIGRATIONS_DIR,
   migrationDir,
 } from './test-migration.js';
 

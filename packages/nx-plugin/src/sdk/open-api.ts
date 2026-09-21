@@ -5,14 +5,13 @@
 
 export { openApiJsonMetadataGenerator } from '../open-api/json-metadata/generator.js';
 export type { OpenApiJsonMetadataGeneratorSchema } from '../open-api/json-metadata/schema';
+export { openApiPyClientGenerator } from '../open-api/py-client/generator.js';
+export type { OpenApiPyClientGeneratorSchema } from '../open-api/py-client/schema';
 export {
   buildOpenApiCodeGenerationData,
   openApiTsClientGenerator,
 } from '../open-api/ts-client/generator.js';
 export type { OpenApiTsClientGeneratorSchema } from '../open-api/ts-client/schema';
-
-export { openApiPyClientGenerator } from '../open-api/py-client/generator.js';
-export type { OpenApiPyClientGeneratorSchema } from '../open-api/py-client/schema';
 
 export { openApiTsHooksGenerator } from '../open-api/ts-hooks/generator.js';
 export type { OpenApiTsHooksGeneratorSchema } from '../open-api/ts-hooks/schema';
