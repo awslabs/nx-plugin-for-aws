@@ -1,0 +1,80 @@
+---
+title: Domínio personalizado
+---
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import OptionFilter from '@components/option-filter.astro';
+
+Por padrão, sua API é servida a partir do endpoint que o API Gateway gera para ela (`https://<id>.execute-api.<region>.amazonaws.com/...`). Para servi-la a partir do seu próprio domínio, forneça o nome do seu domínio e um [certificado ACM](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html) para ele. O domínio personalizado usa um endpoint regional, portanto o certificado deve estar na mesma região que sua API. Uma versão mínima de TLS 1.2 é aplicada.
+
+Quando um domínio personalizado é configurado, a URL da API na <Link path="guides/runtime-config">Configuração de Runtime</Link> é a URL do domínio personalizado, então seu website e outros clientes chamam seu domínio em vez do endpoint gerado.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Passe o domínio através de `super` no arquivo gerado `packages/common/constructs/src/app/apis/my-api.ts`:
+
+<OptionFilter when={{ infra: 'rest-lambda' }} description="Custom domain for a REST API in CDK">
+```ts {1, 6-13} title="packages/common/constructs/src/app/apis/my-api.ts"
+import { Certificate } from 'aws-cdk-lib/aws-certificatemanager';
+
+super(scope, id, {
+  apiName: 'MyApi',
+  // ...
+  domainName: {
+    domainName: 'api.example.com',
+    certificate: Certificate.fromCertificateArn(
+      scope,
+      'MyApiCertificate',
+      'arn:aws:acm:<region>:123456789012:certificate/...',
+    ),
+  },
+  ...props,
+});
+```
+
+A API é servida na raiz do domínio, sem o prefixo de caminho do estágio (`/prod/`). Para servi-la sob um caminho, defina `basePath` em `domainName`; a URL na configuração de runtime o inclui.
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-lambda' }} description="Custom domain for an HTTP API in CDK">
+```ts {1-2, 7-16} title="packages/common/constructs/src/app/apis/my-api.ts"
+import { DomainName } from 'aws-cdk-lib/aws-apigatewayv2';
+import { Certificate } from 'aws-cdk-lib/aws-certificatemanager';
+
+super(scope, id, {
+  apiName: 'MyApi',
+  // ...
+  defaultDomainMapping: {
+    domainName: new DomainName(scope, 'MyApiDomainName', {
+      domainName: 'api.example.com',
+      certificate: Certificate.fromCertificateArn(
+        scope,
+        'MyApiCertificate',
+        'arn:aws:acm:<region>:123456789012:certificate/...',
+      ),
+    }),
+  },
+  ...props,
+});
+```
+</OptionFilter>
+
+Quando um domínio personalizado é configurado, a stack gera as saídas `MyApiDomainNameAlias`, o nome de domínio regional para apontar seu registro DNS, e `MyApiDomainNameAliasHostedZoneId`.
+</Fragment>
+<Fragment slot="terraform">
+Defina as variáveis `custom_domain_name` e `acm_certificate_arn` no módulo da API:
+
+```hcl {5-6} title="packages/infra/src/main.tf"
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+  # ...
+
+  custom_domain_name  = "api.example.com"
+  acm_certificate_arn = "arn:aws:acm:<region>:123456789012:certificate/..."
+}
+```
+
+O módulo gera as saídas `custom_domain_target_domain_name`, o nome de domínio regional para apontar seu registro DNS, e `custom_domain_hosted_zone_id`. Sua saída `api_url` é a URL que os clientes devem chamar: a URL do domínio personalizado quando um está configurado, caso contrário a URL de invocação do estágio.
+</Fragment>
+</Infrastructure>
+
+Por fim, crie um registro DNS para seu domínio. Com qualquer provedor de DNS, crie um registro `CNAME` apontando seu domínio para o nome de domínio regional gerado acima. Se seu domínio estiver hospedado no Route 53, você pode criar um registro alias em vez disso, usando a saída do ID da zona hospedada, que também funciona no ápice da zona (por exemplo, `example.com`).

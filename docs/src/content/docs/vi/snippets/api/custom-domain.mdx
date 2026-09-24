@@ -1,0 +1,80 @@
+---
+title: Tên miền tùy chỉnh
+---
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import OptionFilter from '@components/option-filter.astro';
+
+Theo mặc định, API của bạn được phục vụ từ endpoint mà API Gateway tạo ra cho nó (`https://<id>.execute-api.<region>.amazonaws.com/...`). Để phục vụ nó từ tên miền của riêng bạn, hãy cung cấp tên miền của bạn và một [chứng chỉ ACM](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html) cho nó. Tên miền tùy chỉnh sử dụng endpoint khu vực, vì vậy chứng chỉ phải ở cùng khu vực với API của bạn. Phiên bản TLS tối thiểu là 1.2 được áp dụng.
+
+Khi tên miền tùy chỉnh được cấu hình, URL của API trong <Link path="guides/runtime-config">Runtime Configuration</Link> là URL tên miền tùy chỉnh, vì vậy trang web và các client khác của bạn sẽ gọi tên miền của bạn thay vì endpoint được tạo ra.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Truyền tên miền qua `super` trong file `packages/common/constructs/src/app/apis/my-api.ts` được tạo ra:
+
+<OptionFilter when={{ infra: 'rest-lambda' }} description="Custom domain for a REST API in CDK">
+```ts {1, 6-13} title="packages/common/constructs/src/app/apis/my-api.ts"
+import { Certificate } from 'aws-cdk-lib/aws-certificatemanager';
+
+super(scope, id, {
+  apiName: 'MyApi',
+  // ...
+  domainName: {
+    domainName: 'api.example.com',
+    certificate: Certificate.fromCertificateArn(
+      scope,
+      'MyApiCertificate',
+      'arn:aws:acm:<region>:123456789012:certificate/...',
+    ),
+  },
+  ...props,
+});
+```
+
+API được phục vụ tại gốc của tên miền, không có tiền tố đường dẫn stage (`/prod/`). Để phục vụ nó dưới một đường dẫn thay thế, hãy đặt `basePath` trên `domainName`; URL trong runtime configuration sẽ bao gồm nó.
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-lambda' }} description="Custom domain for an HTTP API in CDK">
+```ts {1-2, 7-16} title="packages/common/constructs/src/app/apis/my-api.ts"
+import { DomainName } from 'aws-cdk-lib/aws-apigatewayv2';
+import { Certificate } from 'aws-cdk-lib/aws-certificatemanager';
+
+super(scope, id, {
+  apiName: 'MyApi',
+  // ...
+  defaultDomainMapping: {
+    domainName: new DomainName(scope, 'MyApiDomainName', {
+      domainName: 'api.example.com',
+      certificate: Certificate.fromCertificateArn(
+        scope,
+        'MyApiCertificate',
+        'arn:aws:acm:<region>:123456789012:certificate/...',
+      ),
+    }),
+  },
+  ...props,
+});
+```
+</OptionFilter>
+
+Khi tên miền tùy chỉnh được cấu hình, stack sẽ xuất ra `MyApiDomainNameAlias`, tên miền khu vực để trỏ bản ghi DNS của bạn đến, và `MyApiDomainNameAliasHostedZoneId`.
+</Fragment>
+<Fragment slot="terraform">
+Đặt các biến `custom_domain_name` và `acm_certificate_arn` trên module API:
+
+```hcl {5-6} title="packages/infra/src/main.tf"
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+  # ...
+
+  custom_domain_name  = "api.example.com"
+  acm_certificate_arn = "arn:aws:acm:<region>:123456789012:certificate/..."
+}
+```
+
+Module xuất ra `custom_domain_target_domain_name`, tên miền khu vực để trỏ bản ghi DNS của bạn đến, và `custom_domain_hosted_zone_id`. Output `api_url` của nó là URL mà các client nên gọi: URL tên miền tùy chỉnh khi được cấu hình, nếu không thì là stage invoke URL.
+</Fragment>
+</Infrastructure>
+
+Cuối cùng, tạo một bản ghi DNS cho tên miền của bạn. Với bất kỳ nhà cung cấp DNS nào, hãy tạo một bản ghi `CNAME` trỏ tên miền của bạn đến tên miền khu vực được xuất ra ở trên. Nếu tên miền của bạn được lưu trữ trong Route 53, bạn có thể tạo một bản ghi alias thay thế, sử dụng hosted zone ID được xuất ra, cũng hoạt động tại zone apex (ví dụ: `example.com`).

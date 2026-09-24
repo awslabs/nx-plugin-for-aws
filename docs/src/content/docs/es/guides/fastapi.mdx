@@ -42,7 +42,7 @@ Selecciona `rest-lambda` (predeterminado) como tu `infra` si tienes la intenció
 :::
 
 :::tip[Patrón de Integración]
-La opción `integrationPattern` tiene como valor predeterminado `isolated`, que crea una Lambda por operación de FastAPI. Selecciona `shared` si prefieres un único manejador Lambda compartido para toda la API, con anulaciones opcionales por operación.
+La opción `integrationPattern` tiene como valor predeterminado `isolated`, que crea un Lambda por operación de FastAPI. Selecciona `shared` si prefieres un único Lambda handler compartido para toda la API, con anulaciones opcionales por operación.
 :::
 
 ## Salida del Generador
@@ -102,7 +102,7 @@ El generador configura varias características automáticamente:
 3. Correlación de solicitud/respuesta
 4. Recopilación de métricas
 5. Despliegue de AWS Lambda a través de [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) con uvicorn
-6. Streaming con seguridad de tipos (solo API REST)
+6. Streaming con seguridad de tipos (solo REST API)
 
 ### Observabilidad con AWS Lambda Powertools
 
@@ -189,10 +189,10 @@ Se recomienda especificar modelos de respuesta para tus operaciones de API para 
 
 Cuando tu API está protegida por autenticación, tus manejadores de ruta a menudo necesitan saber quién está llamando. La FastAPI generada se ejecuta dentro de AWS Lambda a través del [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter), que reenvía el contexto de solicitud de API Gateway como JSON en el encabezado `x-amzn-request-context`. Puedes leerlo desde el `Request` de FastAPI para extraer la identidad del llamador.
 
-Como ejemplo, agreguemos un endpoint `/me` que devuelva detalles sobre el usuario que llama. Implementaremos la extracción como una [dependencia de FastAPI](https://fastapi.tiangolo.com/tutorial/dependencies/) para que pueda reutilizarse en todas las rutas. La forma del contexto de solicitud — y por lo tanto cómo extraes la identidad — depende tanto de tu método `auth` seleccionado como de si desplegaste una API REST o HTTP.
+Como ejemplo, agreguemos un endpoint `/me` que devuelva detalles sobre el usuario que llama. Implementaremos la extracción como una [dependencia de FastAPI](https://fastapi.tiangolo.com/tutorial/dependencies/) para que pueda reutilizarse en todas las rutas. La forma del contexto de solicitud — y por lo tanto cómo extraes la identidad — depende tanto de tu método `auth` seleccionado como de si desplegaste una REST o HTTP API.
 
 <OptionFilter when={{ auth: 'iam' }} description="Extracción de identidad para APIs autenticadas con IAM">
-Para autenticación `IAM`, buscamos al llamador en Cognito usando el sub extraído del contexto de solicitud de API Gateway, lo cual requiere `boto3`. Agrégalo a tu proyecto de API:
+Para autenticación `IAM`, buscamos al llamador en Cognito usando el sub extraído del contexto de solicitud de API Gateway, lo que requiere `boto3`. Agrégalo a tu proyecto de API:
 
 <NxCommands commands={[`run my-api:add boto3${PY_VERSIONS.boto3}`]} />
 
@@ -303,7 +303,7 @@ CurrentUser = Annotated[Identity, Depends(get_identity)]
 </OptionFilter>
 
 <OptionFilter when={{ auth: 'cognito' }} description="Extracción de identidad para APIs autenticadas con Cognito">
-Con `auth: 'cognito'`, el autorizador de Cognito User Pools de API Gateway verifica el JWT que el llamador proporciona en el encabezado `Authorization` y coloca las reclamaciones verificadas en el contexto de solicitud.
+Con `auth: 'cognito'`, el autorizador de Cognito User Pools de API Gateway verifica el JWT que el llamador proporciona en el encabezado `Authorization` y coloca los claims verificados en el contexto de solicitud.
 
 Crea `identity.py` junto a `main.py`:
 
@@ -344,7 +344,7 @@ CurrentUser = Annotated[Identity, Depends(get_identity)]
 ```
 </TabItem>
 <TabItem label="HTTP API" _filter={{ infra: 'http-lambda' }}>
-Las APIs HTTP usan un autorizador JWT que coloca las reclamaciones verificadas bajo `authorizer.jwt.claims`:
+Las HTTP APIs usan un autorizador JWT que coloca los claims verificados bajo `authorizer.jwt.claims`:
 
 ```python
 import json
@@ -383,7 +383,7 @@ CurrentUser = Annotated[Identity, Depends(get_identity)]
 </Tabs>
 
 :::tip[No se requiere verificación de token]
-No necesitas ninguna biblioteca de verificación JWT aquí — el autorizador de Cognito User Pools de API Gateway ya ha verificado la firma, el emisor, los alcances y la expiración para cuando se ejecuta tu Lambda. Si alguna de esas verificaciones falla, API Gateway devuelve `401 Unauthorized` y tu manejador nunca se invoca.
+No necesitas ninguna biblioteca de verificación JWT aquí — el autorizador de Cognito User Pools de API Gateway ya ha verificado la firma, el emisor, los scopes y la expiración para cuando se ejecuta tu Lambda. Si alguna de esas verificaciones falla, API Gateway devuelve `401 Unauthorized` y tu manejador nunca se invoca.
 :::
 </OptionFilter>
 
@@ -399,14 +399,14 @@ def me(identity: CurrentUser) -> Identity:
     return identity
 ```
 
-<OptionFilter when={{ infra: 'rest-lambda' }} description="Streaming — solo API REST">
+<OptionFilter when={{ infra: 'rest-lambda' }} description="Streaming — solo REST API">
 ### Streaming
 
-La FastAPI generada admite respuestas de streaming de forma predeterminada cuando se usa una API REST. La infraestructura está configurada para usar el [AWS Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) para ejecutar tu FastAPI a través de uvicorn dentro de Lambda, con `ResponseTransferMode.STREAM` en API Gateway para todas las operaciones de API REST, lo que permite que el streaming funcione junto con operaciones que no son de streaming.
+La FastAPI generada admite respuestas de streaming de forma predeterminada cuando se usa una REST API. La infraestructura está configurada para usar el [AWS Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) para ejecutar tu FastAPI a través de uvicorn dentro de Lambda, con `ResponseTransferMode.STREAM` en API Gateway para todas las operaciones de REST API, lo que permite que el streaming funcione junto con operaciones que no son de streaming.
 
 #### Usar `JsonStreamingResponse`
 
-El `init.py` generado exporta una clase `JsonStreamingResponse` que proporciona streaming con seguridad de tipos y generación adecuada de esquema OpenAPI. Esto asegura que el <Link path="guides/connection/react-fastapi">generador `connection`</Link> pueda producir métodos de cliente de streaming correctamente tipados.
+El `init.py` generado exporta una clase `JsonStreamingResponse` que proporciona streaming con seguridad de tipos con generación adecuada de esquema OpenAPI. Esto asegura que el <Link path="guides/connection/react-fastapi">generador `connection`</Link> pueda producir métodos de cliente de streaming correctamente tipados.
 
 ```python
 from pydantic import BaseModel
@@ -435,7 +435,7 @@ La clase `JsonStreamingResponse`:
 
 #### Consumo
 
-Para consumir un flujo de respuestas, puedes hacer uso del <Link path="guides/connection/react-fastapi#consuming-a-stream">generador `connection`</Link> que proporcionará un método con seguridad de tipos para iterar sobre tus fragmentos transmitidos.
+Para consumir un stream de respuestas, puedes hacer uso del <Link path="guides/connection/react-fastapi#consuming-a-stream">generador `connection`</Link> que proporcionará un método con seguridad de tipos para iterar sobre tus chunks transmitidos.
 </OptionFilter>
 
 ## Desplegar tu FastAPI
@@ -462,17 +462,17 @@ export class ExampleStack extends Stack {
 Esto configura:
 
 1. Una función AWS Lambda para cada operación en la aplicación FastAPI
-2. API Gateway HTTP/REST API como disparador de la función
-3. Roles y permisos de IAM
+2. API Gateway HTTP/REST API como el disparador de la función
+3. Roles IAM y permisos
 4. Grupo de logs de CloudWatch
 5. Configuración de trazado de X-Ray
-6. Espacio de nombres de métricas de CloudWatch
+6. Namespace de métricas de CloudWatch
 
 <Snippet name="api/cors-configuration-cdk-note" />
 
 <OptionFilter when={{ auth: 'cognito' }} description="Conexión del constructo de identidad Cognito">
 :::note[Autenticación Cognito]
-Si seleccionaste usar autenticación `Cognito`, necesitarás proporcionar la propiedad `identity` al constructo de la API:
+Si seleccionaste usar autenticación `Cognito`, necesitarás proporcionar la propiedad `identity` al constructo de API:
 
 ```ts {9}
 import { MyApi, UserIdentity } from '@my-scope/common-constructs';
@@ -489,11 +489,11 @@ export class ExampleStack extends Stack {
 }
 ```
 
-El constructo `UserIdentity` se puede generar usando el <Link path="/guides/react-website-auth">generador `ts#website#auth`</Link>
+El constructo `UserIdentity` puede ser generado usando el <Link path="/guides/react-website-auth">generador `ts#website#auth`</Link>
 :::
 </OptionFilter>
 
-<OptionFilter when={{ auth: 'custom' }} description="Uso de CDK con Lambda Authorizer personalizado">
+<OptionFilter when={{ auth: 'custom' }} description="Uso de Lambda Authorizer personalizado con CDK">
 :::caution[Lambda Authorizer Personalizado]
 Cuando se usa autenticación `Custom`, el constructo crea un Lambda Authorizer internamente desde el archivo `authorizer.py` generado, que **deniega todas las solicitudes por defecto**. Debes implementar tu lógica de autorización en ese archivo antes de que tu API acepte cualquier tráfico.
 
@@ -502,9 +502,9 @@ Los resultados del autorizador se almacenan en caché durante 5 minutos, con cla
 </OptionFilter>
 </Fragment>
 <Fragment slot="terraform">
-Los módulos de Terraform para desplegar tu API están en la carpeta `common/terraform`. Puedes usar esto en una configuración de Terraform.
+Los módulos Terraform para desplegar tu API están en la carpeta `common/terraform`. Puedes usar esto en una configuración Terraform.
 
-El módulo de API almacena su zip de despliegue de Lambda en un bucket S3 de activos compartido — consulta la <Link path="/guides/terraform-project">guía de infraestructura de Terraform</Link> para más detalles. Instancia el módulo `core/asset-bucket` una vez por despliegue y pasa su salida `bucket_name` a cada módulo de API / Lambda a través de la entrada `asset_bucket_name`:
+El módulo de API almacena su zip de despliegue Lambda en un bucket S3 de activos compartido — consulta la <Link path="/guides/terraform-project">guía de infraestructura Terraform</Link> para más detalles. Instancia el módulo `core/asset-bucket` una vez por despliegue y pasa su salida `bucket_name` a cada módulo de API / Lambda a través de la entrada `asset_bucket_name`:
 
 ```hcl {1-3, 8}
 module "asset_bucket" {
@@ -533,9 +533,9 @@ module "my_api" {
 
 Esto configura:
 
-1. Una función AWS Lambda que sirve todas las rutas de FastAPI
-2. API Gateway HTTP/REST API como disparador de la función
-3. Roles y permisos de IAM
+1. Una función AWS Lambda que sirve todas las rutas FastAPI
+2. API Gateway HTTP/REST API como el disparador de la función
+3. Roles IAM y permisos
 4. Grupo de logs de CloudWatch
 5. Configuración de trazado de X-Ray
 6. Configuración de CORS
@@ -564,16 +564,16 @@ module "my_api" {
 }
 ```
 
-Puedes configurar Cognito User Pool y Client usando los recursos o módulos apropiados de Terraform.
+Puedes configurar Cognito User Pool y Client usando los recursos o módulos Terraform apropiados.
 :::
 </OptionFilter>
 
-El módulo de Terraform proporciona varias salidas que puedes usar:
+El módulo Terraform proporciona varias salidas que puedes usar:
 
 ```hcl
-# Access the API endpoint
+# Access the API endpoint (the custom domain URL, if one is configured)
 output "api_url" {
-  value = module.my_api.stage_invoke_url
+  value = module.my_api.api_url
 }
 
 # Access Lambda function details
@@ -618,17 +618,21 @@ Los resultados del autorizador se almacenan en caché durante 5 minutos, con cla
 </Fragment>
 </Infrastructure>
 
-<OptionFilter when={{ infra: 'rest-lambda' }} description="WAF — las APIs REST obtienen un Web ACL de WAF por defecto">
+<OptionFilter when={{ infra: 'rest-lambda' }} description="WAF — Las REST APIs obtienen un Web ACL de WAF por defecto">
 ### WAF
 
 <Snippet name="api/waf-configuration" parentHeading="WAF" />
 </OptionFilter>
 
-<OptionFilter when={{ infra: 'rest-lambda' }} description="Registro de acceso — las APIs REST registran solicitudes en CloudWatch por defecto">
+<OptionFilter when={{ infra: 'rest-lambda' }} description="Registro de acceso — Las REST APIs registran solicitudes en CloudWatch por defecto">
 ### Registro de acceso
 
 <Snippet name="api/access-logging" parentHeading="Registro de acceso" />
 </OptionFilter>
+
+### Dominio personalizado
+
+<Snippet name="api/custom-domain" parentHeading="Dominio personalizado" />
 
 ### Integraciones
 
@@ -638,7 +642,7 @@ Los resultados del autorizador se almacenan en caché durante 5 minutos, con cla
 
 <Infrastructure>
 <Fragment slot="cdk">
-Dado que las operaciones en FastAPI se definen en Python y la infraestructura CDK en TypeScript, instrumentamos la generación de código para proporcionar metadatos al constructo CDK y proporcionar una interfaz con seguridad de tipos para las integraciones.
+Dado que las operaciones en FastAPI se definen en Python y la infraestructura CDK en TypeScript, instrumentamos la generación de código para suministrar metadatos al constructo CDK para proporcionar una interfaz con seguridad de tipos para las integraciones.
 
 Se agrega un objetivo `generate:<ApiName>-metadata` al `project.json` de los constructos comunes para facilitar esta generación de código, que emite un archivo como `packages/common/constructs/src/generated/my-api/metadata.gen.ts`. Dado que esto se genera en tiempo de compilación, se ignora en el control de versiones.
 
@@ -658,7 +662,7 @@ Si estás trabajando activamente tanto en tu infraestructura CDK como en FastAPI
   ]}
 />
 
-`nx watch` requiere el [demonio Nx](https://nx.dev/concepts/nx-daemon), que está habilitado por defecto pero se desactiva dentro de CI, contenedores Docker y entornos aislados. Donde está desactivado, el comando sale con `Daemon is not running` — establece `NX_DAEMON=true` para habilitarlo.
+`nx watch` requiere el [demonio Nx](https://nx.dev/concepts/nx-daemon), que está habilitado por defecto pero desactivado dentro de CI, contenedores Docker y entornos aislados. Donde está desactivado, el comando sale con `Daemon is not running` — establece `NX_DAEMON=true` para habilitarlo.
 :::
 </Fragment>
 <Fragment slot="terraform">
@@ -711,7 +715,7 @@ resource "aws_iam_role_policy_attachment" "api_invoke_access_existing" {
 }
 ```
 
-Las salidas clave del módulo de API que puedes usar para políticas de IAM son:
+Las salidas clave del módulo de API que puedes usar para políticas IAM son:
 
 - `module.my_api.api_execution_arn` - Para conceder permisos execute-api:Invoke
 - `module.my_api.api_arn` - El ARN de API Gateway
@@ -726,14 +730,14 @@ El generador configura un servidor de desarrollo local que puedes ejecutar con:
 
 <NxCommands commands={['serve <project-name>']} />
 
-Esto inicia un servidor de desarrollo local de FastAPI con:
+Esto inicia un servidor de desarrollo FastAPI local con:
 
 - Recarga automática en cambios de código
-- Documentación interactiva de la API en `/docs` o `/redoc`
+- Documentación interactiva de API en `/docs` o `/redoc`
 - Esquema OpenAPI en `/openapi.json`
 
 :::note[Nombres de Proyecto]
-Los nombres de proyectos Python usan guiones bajos, por lo que una API generada con `--name=MyApi` se direcciona como `my_api` (o por su nombre completo, `<scope>.my_api`). El puerto en el que escucha el servidor se asigna por proyecto — léelo del objetivo `serve` en el `project.json` de tu proyecto.
+Los nombres de proyecto Python usan guiones bajos, por lo que una API generada con `--name=MyApi` se direcciona como `my_api` (o por su nombre completamente calificado, `<scope>.my_api`). El puerto en el que escucha el servidor se asigna por proyecto — léelo del objetivo `serve` en el `project.json` de tu proyecto.
 :::
 
 ## Invocar tu FastAPI
@@ -746,18 +750,19 @@ Usa el generador <Link path="guides/connection">`connection`</Link> para integra
 
 <CardGrid>
   <ConnectionCard
-    title="React a FastAPI"
-    description="Llamar a una FastAPI de Python desde un sitio web React"
+    title="React to FastAPI"
+    description="Call a Python FastAPI from a React website"
     href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-fastapi`}
     source="react"
     target="fastapi"
   />
   <ConnectionCard
-    title="FastAPI a Python DynamoDB"
-    description="Conectar una FastAPI a una tabla DynamoDB"
+    title="FastAPI to Python DynamoDB"
+    description="Connect a FastAPI to a DynamoDB table"
     href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-fast-api-dynamodb`}
     source="fastapi"
     target="dynamodb"
     targetBadge="python"
   />
 </CardGrid>
+

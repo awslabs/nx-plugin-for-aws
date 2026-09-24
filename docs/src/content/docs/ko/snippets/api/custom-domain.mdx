@@ -1,0 +1,80 @@
+---
+title: 사용자 정의 도메인
+---
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import OptionFilter from '@components/option-filter.astro';
+
+기본적으로 API는 API Gateway가 생성한 엔드포인트(`https://<id>.execute-api.<region>.amazonaws.com/...`)에서 제공됩니다. 대신 자체 도메인에서 제공하려면 도메인 이름과 해당 도메인의 [ACM 인증서](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html)를 제공하세요. 사용자 정의 도메인은 리전별 엔드포인트를 사용하므로 인증서는 API와 동일한 리전에 있어야 합니다. 최소 TLS 버전 1.2가 적용됩니다.
+
+사용자 정의 도메인이 구성되면 <Link path="guides/runtime-config">런타임 구성</Link>의 API URL은 사용자 정의 도메인 URL이 되므로 웹사이트 및 기타 클라이언트는 생성된 엔드포인트 대신 사용자의 도메인을 호출합니다.
+
+<Infrastructure>
+<Fragment slot="cdk">
+생성된 `packages/common/constructs/src/app/apis/my-api.ts`에서 `super`로 도메인을 전달하세요:
+
+<OptionFilter when={{ infra: 'rest-lambda' }} description="Custom domain for a REST API in CDK">
+```ts {1, 6-13} title="packages/common/constructs/src/app/apis/my-api.ts"
+import { Certificate } from 'aws-cdk-lib/aws-certificatemanager';
+
+super(scope, id, {
+  apiName: 'MyApi',
+  // ...
+  domainName: {
+    domainName: 'api.example.com',
+    certificate: Certificate.fromCertificateArn(
+      scope,
+      'MyApiCertificate',
+      'arn:aws:acm:<region>:123456789012:certificate/...',
+    ),
+  },
+  ...props,
+});
+```
+
+API는 스테이지 경로 접두사(`/prod/`) 없이 도메인의 루트에서 제공됩니다. 대신 경로 아래에서 제공하려면 `domainName`에 `basePath`를 설정하세요. 런타임 구성의 URL에는 이것이 포함됩니다.
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-lambda' }} description="Custom domain for an HTTP API in CDK">
+```ts {1-2, 7-16} title="packages/common/constructs/src/app/apis/my-api.ts"
+import { DomainName } from 'aws-cdk-lib/aws-apigatewayv2';
+import { Certificate } from 'aws-cdk-lib/aws-certificatemanager';
+
+super(scope, id, {
+  apiName: 'MyApi',
+  // ...
+  defaultDomainMapping: {
+    domainName: new DomainName(scope, 'MyApiDomainName', {
+      domainName: 'api.example.com',
+      certificate: Certificate.fromCertificateArn(
+        scope,
+        'MyApiCertificate',
+        'arn:aws:acm:<region>:123456789012:certificate/...',
+      ),
+    }),
+  },
+  ...props,
+});
+```
+</OptionFilter>
+
+사용자 정의 도메인이 구성되면 스택은 DNS 레코드가 가리켜야 하는 리전별 도메인 이름인 `MyApiDomainNameAlias`와 `MyApiDomainNameAliasHostedZoneId`를 출력합니다.
+</Fragment>
+<Fragment slot="terraform">
+API 모듈에서 `custom_domain_name` 및 `acm_certificate_arn` 변수를 설정하세요:
+
+```hcl {5-6} title="packages/infra/src/main.tf"
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+  # ...
+
+  custom_domain_name  = "api.example.com"
+  acm_certificate_arn = "arn:aws:acm:<region>:123456789012:certificate/..."
+}
+```
+
+모듈은 DNS 레코드가 가리켜야 하는 리전별 도메인 이름인 `custom_domain_target_domain_name`과 `custom_domain_hosted_zone_id`를 출력합니다. `api_url` 출력은 클라이언트가 호출해야 하는 URL입니다: 구성된 경우 사용자 정의 도메인 URL, 그렇지 않으면 스테이지 호출 URL입니다.
+</Fragment>
+</Infrastructure>
+
+마지막으로 도메인에 대한 DNS 레코드를 생성하세요. 모든 DNS 공급자에서 위의 리전별 도메인 이름 출력을 가리키는 `CNAME` 레코드를 생성하세요. 도메인이 Route 53에서 호스팅되는 경우 호스팅 영역 ID 출력을 사용하여 별칭 레코드를 대신 생성할 수 있으며, 이는 영역 정점(예: `example.com`)에서도 작동합니다.

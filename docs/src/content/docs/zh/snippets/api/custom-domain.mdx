@@ -1,0 +1,80 @@
+---
+title: 自定义域名
+---
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import OptionFilter from '@components/option-filter.astro';
+
+默认情况下，您的 API 从 API Gateway 为其生成的端点提供服务（`https://<id>.execute-api.<region>.amazonaws.com/...`）。要改为从您自己的域名提供服务，请提供您的域名和相应的 [ACM 证书](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html)。自定义域名使用区域端点，因此证书必须与您的 API 位于同一区域。强制执行最低 TLS 版本 1.2。
+
+配置自定义域名后，<Link path="guides/runtime-config">运行时配置</Link>中的 API URL 将是自定义域名 URL，因此您的网站和其他客户端将调用您的域名而不是生成的端点。
+
+<Infrastructure>
+<Fragment slot="cdk">
+在生成的 `packages/common/constructs/src/app/apis/my-api.ts` 中将域名传递给 `super`：
+
+<OptionFilter when={{ infra: 'rest-lambda' }} description="Custom domain for a REST API in CDK">
+```ts {1, 6-13} title="packages/common/constructs/src/app/apis/my-api.ts"
+import { Certificate } from 'aws-cdk-lib/aws-certificatemanager';
+
+super(scope, id, {
+  apiName: 'MyApi',
+  // ...
+  domainName: {
+    domainName: 'api.example.com',
+    certificate: Certificate.fromCertificateArn(
+      scope,
+      'MyApiCertificate',
+      'arn:aws:acm:<region>:123456789012:certificate/...',
+    ),
+  },
+  ...props,
+});
+```
+
+API 在域名的根路径提供服务，不带阶段路径前缀（`/prod/`）。要改为在路径下提供服务，请在 `domainName` 上设置 `basePath`；运行时配置中的 URL 将包含它。
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-lambda' }} description="Custom domain for an HTTP API in CDK">
+```ts {1-2, 7-16} title="packages/common/constructs/src/app/apis/my-api.ts"
+import { DomainName } from 'aws-cdk-lib/aws-apigatewayv2';
+import { Certificate } from 'aws-cdk-lib/aws-certificatemanager';
+
+super(scope, id, {
+  apiName: 'MyApi',
+  // ...
+  defaultDomainMapping: {
+    domainName: new DomainName(scope, 'MyApiDomainName', {
+      domainName: 'api.example.com',
+      certificate: Certificate.fromCertificateArn(
+        scope,
+        'MyApiCertificate',
+        'arn:aws:acm:<region>:123456789012:certificate/...',
+      ),
+    }),
+  },
+  ...props,
+});
+```
+</OptionFilter>
+
+配置自定义域名后，堆栈会输出 `MyApiDomainNameAlias`（要将 DNS 记录指向的区域域名）和 `MyApiDomainNameAliasHostedZoneId`。
+</Fragment>
+<Fragment slot="terraform">
+在 API 模块上设置 `custom_domain_name` 和 `acm_certificate_arn` 变量：
+
+```hcl {5-6} title="packages/infra/src/main.tf"
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+  # ...
+
+  custom_domain_name  = "api.example.com"
+  acm_certificate_arn = "arn:aws:acm:<region>:123456789012:certificate/..."
+}
+```
+
+该模块输出 `custom_domain_target_domain_name`（要将 DNS 记录指向的区域域名）和 `custom_domain_hosted_zone_id`。其 `api_url` 输出是客户端应调用的 URL：配置自定义域名时为自定义域名 URL，否则为阶段调用 URL。
+</Fragment>
+</Infrastructure>
+
+最后，为您的域名创建 DNS 记录。使用任何 DNS 提供商，创建一个 `CNAME` 记录，将您的域名指向上面输出的区域域名。如果您的域名托管在 Route 53 中，您可以改为创建别名记录，使用托管区域 ID 输出，这也适用于区域顶点（例如 `example.com`）。
