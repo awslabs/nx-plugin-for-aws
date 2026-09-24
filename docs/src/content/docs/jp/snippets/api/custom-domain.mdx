@@ -1,0 +1,80 @@
+---
+title: カスタムドメイン
+---
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import OptionFilter from '@components/option-filter.astro';
+
+デフォルトでは、APIはAPI Gatewayが生成するエンドポイント（`https://<id>.execute-api.<region>.amazonaws.com/...`）から提供されます。代わりに独自のドメインから提供するには、ドメイン名とその[ACM証明書](https://docs.aws.amazon.com/acm/latest/userguide/acm-overview.html)を指定します。カスタムドメインはリージョナルエンドポイントを使用するため、証明書はAPIと同じリージョンにある必要があります。最小TLSバージョン1.2が適用されます。
+
+カスタムドメインが設定されている場合、<Link path="guides/runtime-config">ランタイム設定</Link>のAPIのURLはカスタムドメインURLになるため、ウェブサイトや他のクライアントは生成されたエンドポイントではなく、あなたのドメインを呼び出します。
+
+<Infrastructure>
+<Fragment slot="cdk">
+生成された`packages/common/constructs/src/app/apis/my-api.ts`で、ドメインを`super`に渡します：
+
+<OptionFilter when={{ infra: 'rest-lambda' }} description="Custom domain for a REST API in CDK">
+```ts {1, 6-13} title="packages/common/constructs/src/app/apis/my-api.ts"
+import { Certificate } from 'aws-cdk-lib/aws-certificatemanager';
+
+super(scope, id, {
+  apiName: 'MyApi',
+  // ...
+  domainName: {
+    domainName: 'api.example.com',
+    certificate: Certificate.fromCertificateArn(
+      scope,
+      'MyApiCertificate',
+      'arn:aws:acm:<region>:123456789012:certificate/...',
+    ),
+  },
+  ...props,
+});
+```
+
+APIはステージパスプレフィックス（`/prod/`）なしで、ドメインのルートから提供されます。代わりにパスの下で提供するには、`domainName`に`basePath`を設定します。ランタイム設定のURLにはそれが含まれます。
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'http-lambda' }} description="Custom domain for an HTTP API in CDK">
+```ts {1-2, 7-16} title="packages/common/constructs/src/app/apis/my-api.ts"
+import { DomainName } from 'aws-cdk-lib/aws-apigatewayv2';
+import { Certificate } from 'aws-cdk-lib/aws-certificatemanager';
+
+super(scope, id, {
+  apiName: 'MyApi',
+  // ...
+  defaultDomainMapping: {
+    domainName: new DomainName(scope, 'MyApiDomainName', {
+      domainName: 'api.example.com',
+      certificate: Certificate.fromCertificateArn(
+        scope,
+        'MyApiCertificate',
+        'arn:aws:acm:<region>:123456789012:certificate/...',
+      ),
+    }),
+  },
+  ...props,
+});
+```
+</OptionFilter>
+
+カスタムドメインが設定されている場合、スタックは`MyApiDomainNameAlias`（DNSレコードを指すリージョナルドメイン名）と`MyApiDomainNameAliasHostedZoneId`を出力します。
+</Fragment>
+<Fragment slot="terraform">
+APIモジュールに`custom_domain_name`と`acm_certificate_arn`変数を設定します：
+
+```hcl {5-6} title="packages/infra/src/main.tf"
+module "my_api" {
+  source = "../../common/terraform/src/app/apis/my-api"
+  # ...
+
+  custom_domain_name  = "api.example.com"
+  acm_certificate_arn = "arn:aws:acm:<region>:123456789012:certificate/..."
+}
+```
+
+モジュールは`custom_domain_target_domain_name`（DNSレコードを指すリージョナルドメイン名）と`custom_domain_hosted_zone_id`を出力します。その`api_url`出力は、クライアントが呼び出すべきURLです：カスタムドメインが設定されている場合はカスタムドメインURL、それ以外の場合はステージ呼び出しURLです。
+</Fragment>
+</Infrastructure>
+
+最後に、ドメインのDNSレコードを作成します。任意のDNSプロバイダーで、上記のリージョナルドメイン名を指す`CNAME`レコードを作成します。ドメインがRoute 53でホストされている場合は、代わりにホストゾーンID出力を使用してエイリアスレコードを作成できます。これはゾーンapex（例：`example.com`）でも機能します。

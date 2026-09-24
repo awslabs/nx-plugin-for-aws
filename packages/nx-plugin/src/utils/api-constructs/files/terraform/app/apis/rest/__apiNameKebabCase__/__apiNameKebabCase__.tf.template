@@ -121,6 +121,19 @@ variable "tags" {
   default     = {}
 }
 
+# Custom Domain Configuration
+variable "custom_domain_name" {
+  description = "Custom domain name for the API. Requires acm_certificate_arn."
+  type        = string
+  default     = null
+}
+
+variable "acm_certificate_arn" {
+  description = "ARN of an ACM certificate (in the API's region) for the custom domain name."
+  type        = string
+  default     = null
+}
+
 # Get current AWS region and account ID
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
@@ -1139,9 +1152,36 @@ module "add_url_to_runtime_config" {
 
   namespace = "connection"
   key       = "apis"
-  value     = { "<%- apiNameClassName %>" = "${aws_api_gateway_stage.api_stage.invoke_url}/" }
+  value     = { "<%- apiNameClassName %>" = local.api_url }
 
   depends_on = [aws_api_gateway_stage.api_stage]
+}
+
+# Custom domain for the API, served without the stage path prefix
+resource "aws_api_gateway_domain_name" "custom_domain" {
+  count = var.custom_domain_name == null ? 0 : 1
+
+  domain_name              = var.custom_domain_name
+  regional_certificate_arn = var.acm_certificate_arn
+  security_policy          = "TLS_1_2"
+
+  endpoint_configuration {
+    types = ["REGIONAL"]
+  }
+
+  tags = var.tags
+}
+
+resource "aws_api_gateway_base_path_mapping" "custom_domain" {
+  count = var.custom_domain_name == null ? 0 : 1
+
+  api_id      = module.rest_api.api_id
+  stage_name  = aws_api_gateway_stage.api_stage.stage_name
+  domain_name = aws_api_gateway_domain_name.custom_domain[0].domain_name
+}
+
+locals {
+  api_url = var.custom_domain_name == null ? "${aws_api_gateway_stage.api_stage.invoke_url}/" : "https://${var.custom_domain_name}/"
 }
 
 # Outputs
@@ -1170,6 +1210,21 @@ output "api_execution_arn" {
 output "stage_invoke_url" {
   description = "Invoke URL of the API Gateway stage"
   value       = aws_api_gateway_stage.api_stage.invoke_url
+}
+
+output "api_url" {
+  description = "URL clients should call: the custom domain if configured, otherwise the stage invoke URL"
+  value       = local.api_url
+}
+
+output "custom_domain_target_domain_name" {
+  description = "Target domain name to point a DNS alias or CNAME record at for the custom domain"
+  value       = var.custom_domain_name == null ? null : aws_api_gateway_domain_name.custom_domain[0].regional_domain_name
+}
+
+output "custom_domain_hosted_zone_id" {
+  description = "Hosted zone ID to use for a Route 53 alias record for the custom domain"
+  value       = var.custom_domain_name == null ? null : aws_api_gateway_domain_name.custom_domain[0].regional_zone_id
 }
 
 output "stage_arn" {
