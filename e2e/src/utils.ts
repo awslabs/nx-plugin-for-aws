@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { execSync, spawn } from 'node:child_process';
+import { type ChildProcess, execSync, spawn } from 'node:child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -415,3 +415,64 @@ export const assertWorkspaceUsesPackageManager = (
 // read the agent's conversation history.
 export const getDungeonAdventureElectroDbDependencies = () =>
   `@aws-sdk/client-s3@${TS_VERSIONS['@aws-sdk/client-s3']}`;
+
+/** Send `signal` to a pid (or a process group when negative), ignoring exited ones. */
+function signalProcess(pid: number, signal: NodeJS.Signals | 0): boolean {
+  try {
+    process.kill(pid, signal);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Every descendant of `rootPid`, found through the parent links in `ps`.
+ * Tools such as `uv` start their child in a new process group, so the
+ * descendants are not all in the root's group.
+ */
+function listDescendants(rootPid: number): number[] {
+  let rows: number[][];
+  try {
+    rows = execSync('ps -A -o pid=,ppid=', { encoding: 'utf-8' })
+      .trim()
+      .split('\n')
+      .map((line) => line.trim().split(/\s+/).map(Number));
+  } catch {
+    return [];
+  }
+  const children = new Map<number, number[]>();
+  for (const [pid, ppid] of rows) {
+    children.set(ppid, [...(children.get(ppid) ?? []), pid]);
+  }
+  const descendants: number[] = [];
+  const pending = [...(children.get(rootPid) ?? [])];
+  while (pending.length > 0) {
+    const pid = pending.pop()!;
+    descendants.push(pid);
+    pending.push(...(children.get(pid) ?? []));
+  }
+  return descendants;
+}
+
+/**
+ * Stop a detached child process, its process group and all its descendants.
+ * `pnpm` can exit before the servers it started (e.g. a `uvicorn --reload`
+ * supervisor still holding its port), so wait for every process rather than
+ * the direct child, and SIGKILL whatever is left after the grace period.
+ */
+export async function killProcess(child: ChildProcess): Promise<void> {
+  const pgid = child.pid;
+  if (!pgid) return;
+  // Listed before signalling: once a parent exits, its children are
+  // re-parented and can no longer be traced back to `pgid`.
+  const descendants = listDescendants(pgid);
+  const signalAll = (signal: NodeJS.Signals | 0) =>
+    [-pgid, ...descendants].filter((pid) => signalProcess(pid, signal));
+  signalAll('SIGTERM');
+  const deadline = Date.now() + 5000;
+  while (signalAll(0).length > 0 && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  signalAll('SIGKILL');
+}

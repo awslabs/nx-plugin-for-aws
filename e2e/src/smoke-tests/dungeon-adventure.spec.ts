@@ -13,6 +13,7 @@ import {
   buildPackageManagerShortCommand,
   createTestWorkspace,
   getDungeonAdventureElectroDbDependencies,
+  killProcess,
   runCLI,
   tmpProjPath,
 } from '../utils';
@@ -134,32 +135,6 @@ function startServer(
     process.stderr.write(`[${target}] ${d}`),
   );
   return child;
-}
-
-function killProcess(child: ChildProcess): Promise<void> {
-  return new Promise((resolve) => {
-    if (!child.pid) {
-      resolve();
-      return;
-    }
-    try {
-      process.kill(-child.pid, 'SIGTERM');
-    } catch {
-      // already dead
-    }
-    const timeout = setTimeout(() => {
-      try {
-        process.kill(-child.pid!, 'SIGKILL');
-      } catch {
-        // already dead
-      }
-      resolve();
-    }, 5000);
-    child.on('exit', () => {
-      clearTimeout(timeout);
-      resolve();
-    });
-  });
 }
 
 function getPortFromProjectJson(
