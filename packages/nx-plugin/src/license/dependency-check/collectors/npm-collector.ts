@@ -4,6 +4,10 @@
  */
 import { existsSync, readFileSync } from 'fs';
 import * as licenseChecker from 'license-checker-rseidelsohn';
+// license-checker's own license-from-text detection, which it applies to
+// packages that declare no license. Reused here so a `SEE LICENSE IN <file>`
+// package resolves the same way, rather than through a second implementation.
+import { getLicenseTitle } from 'license-checker-rseidelsohn/lib/getLicenseTitle.js';
 import { join } from 'path';
 
 export interface NpmDependency {
@@ -37,6 +41,44 @@ const flattenLicense = (raw: string | string[] | undefined | null): string => {
     return `(${raw.join(' OR ')})`;
   }
   return raw;
+};
+
+/**
+ * A license that names a file instead of a license: the SPDX form
+ * `SEE LICENSE IN <file>`, or the `Custom: <file>` license-checker reports it
+ * as.
+ */
+const FILE_REFERENCE_RE = /^(?:custom:|see\s+license\s+in)\s+(.+)$/i;
+
+/**
+ * Resolve a license that only names a file into the license that file grants.
+ *
+ * license-checker reads a package's license file only when the package declares
+ * no license, so a package declaring `SEE LICENSE IN LICENSE` is reported as
+ * `Custom: LICENSE` and evaluates to UNKNOWN even when the file grants a
+ * pre-approved license. Read the file license-checker already located and run
+ * its text detection over it, which returns an SPDX id with the trailing `*`
+ * marking a license guessed from text.
+ *
+ * The reference is kept when the file can't be read, or when detection can't
+ * name a license, so the dependency is still reported as UNKNOWN.
+ */
+export const resolveFileReferencedLicense = (
+  rawLicense: string,
+  licenseFile: string | undefined,
+): string => {
+  if (!licenseFile || !FILE_REFERENCE_RE.test(rawLicense.trim())) {
+    return rawLicense;
+  }
+  let detected: string | null = null;
+  try {
+    detected = getLicenseTitle(readFileSync(licenseFile, 'utf-8'));
+  } catch {
+    return rawLicense;
+  }
+  if (!detected || detected === 'Undefined' || FILE_REFERENCE_RE.test(detected))
+    return rawLicense;
+  return detected;
 };
 
 export const collectNpmDependencies = async (
@@ -83,7 +125,10 @@ export const collectNpmDependencies = async (
     out.push({
       name,
       version,
-      rawLicense: flattenLicense(info.licenses),
+      rawLicense: resolveFileReferencedLicense(
+        flattenLicense(info.licenses),
+        info.licenseFile,
+      ),
       path: info.path,
     });
   }
