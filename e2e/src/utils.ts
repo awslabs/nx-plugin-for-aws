@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { execSync, spawn } from 'node:child_process';
+import { type ChildProcess, execSync, spawn } from 'node:child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -415,3 +415,38 @@ export const assertWorkspaceUsesPackageManager = (
 // read the agent's conversation history.
 export const getDungeonAdventureElectroDbDependencies = () =>
   `@aws-sdk/client-s3@${TS_VERSIONS['@aws-sdk/client-s3']}`;
+
+/** Whether any process in the group led by `pgid` is still running. */
+function isProcessGroupAlive(pgid: number): boolean {
+  try {
+    process.kill(-pgid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Stop a detached child process along with its whole process group.
+ * `pnpm` can exit before the servers it started (e.g. a `uvicorn --reload`
+ * supervisor still holding its port), so wait for the group rather than the
+ * direct child, and SIGKILL whatever is left after the grace period.
+ */
+export async function killProcess(child: ChildProcess): Promise<void> {
+  const pgid = child.pid;
+  if (!pgid) return;
+  try {
+    process.kill(-pgid, 'SIGTERM');
+  } catch {
+    // already dead
+  }
+  const deadline = Date.now() + 5000;
+  while (isProcessGroupAlive(pgid) && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  try {
+    process.kill(-pgid, 'SIGKILL');
+  } catch {
+    // already dead
+  }
+}
