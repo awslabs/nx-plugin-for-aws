@@ -80,8 +80,19 @@ describe('smoke test - test-matrix', () => {
     await runCLI('sync', opts);
     await runInstall(opts);
 
+    // Build serially (`--parallel=1`). Unlike the package-manager lanes, this
+    // lane composes every generator into one workspace, so a parallel build
+    // runs several compile tasks at once. Some of those tasks fetch a tool
+    // on demand with `npx`, which populates the shared npm cache at
+    // `~/.npm/_npx`. Two tasks resolving the same tool target the same cache
+    // directory and race on its write lock, which fails intermittently with
+    // `npm error code ECOMPROMISED` ("Lock compromised") or an ENOENT reading a
+    // half-written `_npx/<hash>/package.json`. Serialising the tasks removes
+    // the concurrent writes. The build is serial-bound anyway (a measured
+    // parallel run beat its own critical path by ~1%), and the 120 minute test
+    // timeout leaves headroom.
     const buildOutput = await runCLI(
-      'run-many --target build --all --output-style=stream --skip-nx-cache',
+      'run-many --target build --all --output-style=stream --skip-nx-cache --parallel=1',
       opts,
     );
     expect(buildOutput).toContain('Successfully ran target build');
