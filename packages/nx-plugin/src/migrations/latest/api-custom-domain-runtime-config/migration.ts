@@ -85,12 +85,12 @@ const REST_DOMAIN_OUTPUTS = `// Target for the custom domain's DNS record
       new CfnOutput(this, \`\${apiName}DomainNameAlias\`, {
         value: this.api.domainName!.domainNameAliasDomainName,
         description:
-          'Regional domain name to point a CNAME record at for the custom domain, with any DNS provider',
+          'Domain name of the API Gateway endpoint (regional or edge) to point a CNAME record at for the custom domain, with any DNS provider',
       });
       new CfnOutput(this, \`\${apiName}DomainNameAliasHostedZoneId\`, {
         value: this.api.domainName!.domainNameAliasHostedZoneId,
         description:
-          'Hosted zone ID of the regional domain name, needed only for a Route 53 alias record',
+          'Hosted zone ID of that domain name, needed only for a Route 53 alias record',
       });
     }`;
 
@@ -179,30 +179,44 @@ const migrateRestApiConstruct = async (tree: Tree, nextSteps: string[]) => {
   }
 };
 
+const HTTP_API_URL_FIELD = `/** The URL clients call: the custom domain's if one is mapped, otherwise the stage's */
+  private readonly apiUrl: string`;
+
+const HTTP_API_URL_ASSIGNMENT = `this.apiUrl = defaultDomainMapping
+      ? this.defaultStage.domainUrl
+      : this.defaultStage.url!;`;
+
+/** Matches the vended `url` getter, returning the stage URL. */
+const HTTP_URL_GETTER =
+  'method_definition(name=$name, body=$body) where { $name <: `url`, $body <: contains `return this.defaultStage.url` }';
+
 const migrateHttpApiConstruct = async (tree: Tree, nextSteps: string[]) => {
   const file = HTTP_API_CONSTRUCT;
   if (!tree.exists(file)) {
     return;
   }
 
-  if (
-    await matchGritQL(tree, file, '`[apiName]: defaultDomainMapping ? $_ : $_`')
-  ) {
+  if (await matchGritQL(tree, file, '`[apiName]: this.apiUrl`')) {
     return; // Already migrated.
   }
 
   const shape = [
     'interface_declaration(name=$name, body=$body) as $interface where { $name <: `HttpApiProps`, $interface <: contains extends_type_clause() as $extends, $extends <: contains `_HttpApiProps`, $extends <: not contains `Omit`, $body <: contains `readonly throttle?: ThrottleSettings`, $body <: not contains `defaultDomainMapping` }',
+    "`import { $names } from 'aws-cdk-lib/aws-apigatewayv2'` where { $names <: contains `HttpApi as _HttpApi`, $names <: contains `HttpStage`, $names <: not contains `DomainMappingOptions`, $names <: not contains `IDomainName` }",
+    '`public readonly defaultStage: HttpStage`',
     '`{ $params }: HttpApiProps<$_, $_>` where { $params <: contains `...props`, $params <: not contains `defaultDomainMapping` }',
-    "`new HttpStage(this, 'DefaultStage', { $props })` where { $props <: contains `httpApi: this.api`, $props <: not contains `domainMapping` }",
+    "`this.defaultStage = new HttpStage(this, 'DefaultStage', { $props })` where { $props <: contains `httpApi: this.api`, $props <: not contains `domainMapping` }",
+    '`new CfnOutput(this, $_, { $props })` where { $props <: contains `value: this.defaultStage.url!` }',
     "`rc.set('connection', 'apis', { $entries })` where { $entries <: contains `[apiName]: this.defaultStage.url!` }",
+    HTTP_URL_GETTER,
   ];
   if (
     !(await matchesAll(tree, file, shape)) ||
-    (await matchGritQL(tree, file, DOMAIN_ALIAS_OUTPUT))
+    (await matchGritQL(tree, file, DOMAIN_ALIAS_OUTPUT)) ||
+    (await matchGritQL(tree, file, '`this.apiUrl`'))
   ) {
     nextSteps.push(
-      `${file}: has diverged from the generated shape - left untouched. To support a custom domain, destructure \`defaultDomainMapping\` from the constructor props (so it is not passed to the CDK HttpApi, which rejects it when the default stage is disabled), pass it as \`domainMapping\` to the \`DefaultStage\` HttpStage, register \`this.defaultStage.domainUrl\` under \`[apiName]\` in runtime config when it is set, and output \`defaultDomainMapping.domainName.regionalDomainName\` / \`regionalHostedZoneId\` for the DNS record.`,
+      `${file}: has diverged from the generated shape - left untouched. To support a custom domain, destructure \`defaultDomainMapping\` from the constructor props (so it is not passed to the CDK HttpApi, which rejects it when the default stage is disabled) and pass it as \`domainMapping\` to the \`DefaultStage\` HttpStage; use \`this.defaultStage.domainUrl\` instead of \`this.defaultStage.url\` when it is set, for the \`<apiName>Url\` output, runtime config and the \`url\` getter; and output \`defaultDomainMapping.domainName.regionalDomainName\` / \`regionalHostedZoneId\` for the DNS record.`,
     );
     return;
   }
@@ -220,11 +234,22 @@ const migrateHttpApiConstruct = async (tree: Tree, nextSteps: string[]) => {
     file,
     "interface_declaration(name=$name) as $interface where { $name <: `HttpApiProps`, $interface <: contains extends_type_clause() as $extends, $extends <: contains `_HttpApiProps` as $base, $base => `Omit<_HttpApiProps, 'defaultDomainMapping'>` }",
   );
-  await addDestructuredImport(
+  // Inserted in sorted position, as the generator vends them.
+  await applyGritQL(
     tree,
     file,
-    ['DomainMappingOptions', 'IDomainName'],
-    'aws-cdk-lib/aws-apigatewayv2',
+    "`import { $names } from 'aws-cdk-lib/aws-apigatewayv2'` where { $names <: contains `HttpApi as _HttpApi` as $httpApi, $httpApi => `DomainMappingOptions,\n  HttpApi as _HttpApi` }",
+  );
+  await applyGritQL(
+    tree,
+    file,
+    "`import { $names } from 'aws-cdk-lib/aws-apigatewayv2'` where { $names <: contains `HttpStage` as $stage, $stage => `HttpStage,\n  IDomainName` }",
+  );
+  await insertViaGritQL(
+    tree,
+    file,
+    '`public readonly defaultStage: HttpStage` as $field => `public readonly defaultStage: HttpStage;\n\n  __GRIT_INSERT_PLACEHOLDER__`',
+    HTTP_API_URL_FIELD,
   );
   // Taken out of `props` so it isn't passed to the CDK HttpApi.
   await applyGritQL(
@@ -237,15 +262,35 @@ const migrateHttpApiConstruct = async (tree: Tree, nextSteps: string[]) => {
     file,
     "`new HttpStage(this, 'DefaultStage', { $props })` where { $props <: contains `httpApi: this.api` as $httpApi, $httpApi => `httpApi: this.api,\n      domainMapping: defaultDomainMapping` }",
   );
+  // Computed once, for the stack output, runtime config and the `url` getter.
+  await insertViaGritQL(
+    tree,
+    file,
+    `expression_statement() as $statement where {
+  $statement <: contains \`this.defaultStage = new HttpStage($_, $_, $_)\` as $assignment,
+  $statement => \`$assignment;\n    ${GRIT_INSERT_PLACEHOLDER}\`
+}`,
+    HTTP_API_URL_ASSIGNMENT,
+  );
   await applyGritQL(
     tree,
     file,
-    "`rc.set('connection', 'apis', { $entries })` where { $entries <: contains `[apiName]: this.defaultStage.url!` as $url, $url => `[apiName]: defaultDomainMapping ? this.defaultStage.domainUrl : this.defaultStage.url!` }",
+    '`new CfnOutput(this, $_, { $props })` where { $props <: contains `value: this.defaultStage.url!` as $value, $value => `value: this.apiUrl` }',
+  );
+  await applyGritQL(
+    tree,
+    file,
+    "`rc.set('connection', 'apis', { $entries })` where { $entries <: contains `[apiName]: this.defaultStage.url!` as $url, $url => `[apiName]: this.apiUrl` }",
+  );
+  await applyGritQL(
+    tree,
+    file,
+    'method_definition(name=$name, body=$body) where { $name <: `url`, $body <: contains `return this.defaultStage.url` as $return, $return => `return this.apiUrl` }',
   );
   await insertViaGritQL(tree, file, AFTER_RUNTIME_CONFIG, HTTP_DOMAIN_OUTPUTS);
 };
 
-const TERRAFORM_VARIABLES = `# Custom Domain Configuration
+const TERRAFORM_VARIABLES = `# Custom domain configuration
 variable "custom_domain_name" {
   description = "Custom domain name for the API. Requires acm_certificate_arn."
   type        = string
@@ -268,6 +313,8 @@ interface TerraformApi {
   /** Types of the custom domain and mapping resources this migration adds. */
   domainResourceTypes: [string, string];
   domainResources: string;
+  /** The `api_url` local, published in runtime config. */
+  apiUrlLocal: string;
   outputs: string;
 }
 
@@ -293,6 +340,13 @@ resource "aws_api_gateway_domain_name" "custom_domain" {
   }
 
   tags = var.tags
+
+  lifecycle {
+    precondition {
+      condition     = var.acm_certificate_arn != null
+      error_message = "acm_certificate_arn is required when custom_domain_name is set."
+    }
+  }
 }
 
 resource "aws_api_gateway_base_path_mapping" "custom_domain" {
@@ -301,9 +355,8 @@ resource "aws_api_gateway_base_path_mapping" "custom_domain" {
   api_id      = module.rest_api.api_id
   stage_name  = aws_api_gateway_stage.api_stage.stage_name
   domain_name = aws_api_gateway_domain_name.custom_domain[0].domain_name
-}
-
-locals {
+}`,
+  apiUrlLocal: `locals {
   api_url = var.custom_domain_name == null ? "\${aws_api_gateway_stage.api_stage.invoke_url}/" : "https://\${var.custom_domain_name}/"
 }`,
   outputs: `output "api_url" {
@@ -343,6 +396,13 @@ resource "aws_apigatewayv2_domain_name" "custom_domain" {
   }
 
   tags = var.tags
+
+  lifecycle {
+    precondition {
+      condition     = var.acm_certificate_arn != null
+      error_message = "acm_certificate_arn is required when custom_domain_name is set."
+    }
+  }
 }
 
 resource "aws_apigatewayv2_api_mapping" "custom_domain" {
@@ -350,10 +410,9 @@ resource "aws_apigatewayv2_api_mapping" "custom_domain" {
 
   api_id      = module.http_api.api_id
   stage       = module.http_api.stage_id
-  domain_name = aws_apigatewayv2_domain_name.custom_domain[0].id
-}
-
-locals {
+  domain_name = aws_apigatewayv2_domain_name.custom_domain[0].domain_name
+}`,
+  apiUrlLocal: `locals {
   api_url = var.custom_domain_name == null ? module.http_api.stage_invoke_url : "https://\${var.custom_domain_name}/"
 }`,
   outputs: `output "api_url" {
@@ -373,6 +432,10 @@ output "custom_domain_hosted_zone_id" {
 };
 
 const RUNTIME_CONFIG_MODULE = '`module "add_url_to_runtime_config" { $body }`';
+
+/** The `locals` block every vended API app module declares its IAM policy statements in. */
+const POLICY_LOCALS =
+  '`locals { $body }` where { $body <: contains `lambda_policy_statements = $_` }';
 
 /** Rewrite matching the block's text back unchanged, then the placeholder after it. */
 const appendAfterBlock = (header: string) =>
@@ -440,6 +503,7 @@ const migrateTerraformApi = async (
   const shape = [
     hcl('`variable "tags" { $_ }`'),
     hcl(runtimeConfigValue),
+    hcl(POLICY_LOCALS),
     hcl('`output "stage_invoke_url" { $_ }`'),
   ];
   if (!(await matchesAll(tree, file, shape))) {
@@ -462,6 +526,15 @@ const migrateTerraformApi = async (
     hcl(
       `${RUNTIME_CONFIG_MODULE} where { $body <: contains \`value = { $_ = $v }\`, ${api.runtimeConfigUrl}, $v => \`local.api_url\` }`,
     ),
+  );
+  // Alongside the module's other locals.
+  await insertViaGritQL(
+    tree,
+    file,
+    hcl(
+      `${POLICY_LOCALS} => \`locals {\n  $body\n}\n\n${GRIT_INSERT_PLACEHOLDER}\``,
+    ),
+    api.apiUrlLocal,
   );
   await insertViaGritQL(
     tree,

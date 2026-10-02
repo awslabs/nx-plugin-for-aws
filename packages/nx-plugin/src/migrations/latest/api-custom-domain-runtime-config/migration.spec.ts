@@ -81,9 +81,16 @@ const generatePreviousShape = async (
       [/\n\s*defaultDomainMapping,/, ''],
       [/\n\s*domainMapping: defaultDomainMapping,/, ''],
       [
-        /\[apiName\]: defaultDomainMapping[\s\S]*?: this\.defaultStage\.url!/,
-        '[apiName]: this.defaultStage.url!',
+        /\n\n\s*\/\*\* The URL clients call[^\n]*\n\s*private readonly apiUrl: string;/,
+        '',
       ],
+      [
+        /\n\s*this\.apiUrl = defaultDomainMapping[\s\S]*?this\.defaultStage\.url!;/,
+        '',
+      ],
+      ['value: this.apiUrl,', 'value: this.defaultStage.url!,'],
+      ['[apiName]: this.apiUrl,', '[apiName]: this.defaultStage.url!,'],
+      ['return this.apiUrl;', 'return this.defaultStage.url;'],
       domainOutputs('defaultDomainMapping'),
       [
         /\n\s*\/\*\*\n\s*\* Custom domain mapped to the API's default stage[\s\S]*?\};/,
@@ -93,16 +100,18 @@ const generatePreviousShape = async (
         "extends Omit<_HttpApiProps, 'defaultDomainMapping'>",
         'extends _HttpApiProps',
       ],
-      [/\n\s*DomainMappingOptions,\n\s*IDomainName,/, ''],
+      [/\n\s*DomainMappingOptions,/, ''],
+      [/\n\s*IDomainName,/, ''],
     ]);
   } else {
     const common: [RegExp, string][] = [
       [
-        /\n# Custom Domain Configuration\n[\s\S]*?variable "acm_certificate_arn" \{[\s\S]*?\n\}\n/,
+        /\n# Custom domain configuration\n[\s\S]*?variable "acm_certificate_arn" \{[\s\S]*?\n\}\n/,
         '',
       ],
+      [/\nlocals \{\n {2}api_url = [^\n]*\n\}\n/, ''],
       [
-        /\n# Custom domain for the API[\s\S]*?\nlocals \{\n {2}api_url = [^\n]*\n\}\n/,
+        /\n# Custom domain for the API[\s\S]*?\nresource "\w+" "custom_domain" \{[\s\S]*?\n\}\n\nresource "\w+" "custom_domain" \{[\s\S]*?\n\}\n/,
         '',
       ],
       [
@@ -238,6 +247,36 @@ describe('api-custom-domain-runtime-config migration', () => {
       expect(result.nextSteps[0]).toContain(file);
     },
   );
+
+  it('should use the custom domain URL for the HTTP stack output, runtime config and url getter', async () => {
+    await generatePreviousShape(tree, 'cdk');
+
+    await migration(tree);
+
+    const contents = tree.read(HTTP_API_CONSTRUCT, 'utf-8')!;
+    expect(contents).toContain('value: this.apiUrl,');
+    expect(contents).toContain('[apiName]: this.apiUrl,');
+    expect(contents).toMatch(/get url\(\) \{\s*return this\.apiUrl;\s*\}/);
+    // The stage URL is only read to compute apiUrl.
+    expect(contents.match(/this\.defaultStage\.url!?/g)).toHaveLength(1);
+  });
+
+  it('should leave the HTTP construct untouched when the url getter has diverged', async () => {
+    await generatePreviousShape(tree, 'cdk');
+    rewrite(tree, HTTP_API_CONSTRUCT, [
+      [
+        'return this.defaultStage.url;',
+        'return `${this.defaultStage.url}v1/`;',
+      ],
+    ]);
+    const before = tree.read(HTTP_API_CONSTRUCT, 'utf-8');
+
+    const result = await migration(tree);
+
+    expect(tree.read(HTTP_API_CONSTRUCT, 'utf-8')).toEqual(before);
+    expect(result.nextSteps).toHaveLength(1);
+    expect(result.nextSteps[0]).toContain(HTTP_API_CONSTRUCT);
+  });
 
   it('should keep additional base interfaces of HttpApiProps', async () => {
     const generated = await generatePreviousShape(tree, 'cdk');

@@ -125,7 +125,7 @@ variable "tags" {
   default     = {}
 }
 
-# Custom Domain Configuration
+# Custom domain configuration
 variable "custom_domain_name" {
   description = "Custom domain name for the API. Requires acm_certificate_arn."
   type        = string
@@ -444,6 +444,10 @@ locals {
 <%_ } _%>
 }
 
+locals {
+  api_url = var.custom_domain_name == null ? module.http_api.stage_invoke_url : "https://${var.custom_domain_name}/"
+}
+
 # CloudWatch Log Group for Lambda
 resource "aws_cloudwatch_log_group" "lambda_logs" {
   #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
@@ -705,6 +709,13 @@ resource "aws_apigatewayv2_domain_name" "custom_domain" {
   }
 
   tags = var.tags
+
+  lifecycle {
+    precondition {
+      condition     = var.acm_certificate_arn != null
+      error_message = "acm_certificate_arn is required when custom_domain_name is set."
+    }
+  }
 }
 
 resource "aws_apigatewayv2_api_mapping" "custom_domain" {
@@ -712,11 +723,7 @@ resource "aws_apigatewayv2_api_mapping" "custom_domain" {
 
   api_id      = module.http_api.api_id
   stage       = module.http_api.stage_id
-  domain_name = aws_apigatewayv2_domain_name.custom_domain[0].id
-}
-
-locals {
-  api_url = var.custom_domain_name == null ? module.http_api.stage_invoke_url : "https://${var.custom_domain_name}/"
+  domain_name = aws_apigatewayv2_domain_name.custom_domain[0].domain_name
 }
 
 # Lambda permission for API Gateway to invoke the function<% if (backend.type === 'fastapi') { %> via alias<% } %>
