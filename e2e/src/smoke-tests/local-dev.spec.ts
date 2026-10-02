@@ -10,7 +10,12 @@ import { ensureDirSync } from 'fs-extra';
 import type { MockServer } from 'llm-mock-server';
 import { createConnection } from 'net';
 import * as pty from 'node-pty';
-import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
+import {
+  createTestWorkspace,
+  killProcess,
+  runCLI,
+  tmpProjPath,
+} from '../utils';
 import { startLlmMock } from '../utils/llm-mock';
 import {
   type AgentSpec,
@@ -387,32 +392,6 @@ function chatStreamsReply(
       }
     });
     term.onExit(() => finish(new Error(`Chat target ${target} exited early`)));
-  });
-}
-
-function killProcess(child: ChildProcess): Promise<void> {
-  return new Promise((resolve) => {
-    if (!child.pid) {
-      resolve();
-      return;
-    }
-    try {
-      process.kill(-child.pid, 'SIGTERM');
-    } catch {
-      // already dead
-    }
-    const timeout = setTimeout(() => {
-      try {
-        process.kill(-child.pid!, 'SIGKILL');
-      } catch {
-        // already dead
-      }
-      resolve();
-    }, 5000);
-    child.on('exit', () => {
-      clearTimeout(timeout);
-      resolve();
-    });
   });
 }
 

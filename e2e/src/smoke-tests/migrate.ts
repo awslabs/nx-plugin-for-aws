@@ -272,8 +272,16 @@ export const runMigrateTest = async (
   // 6. The core contract: the migrated workspace still syncs and builds.
   await runCLI('sync', opts);
   await runInstall(opts);
+  // Build serially (`--parallel=1`). This lane scaffolds the full generator
+  // matrix, which includes two Smithy projects. Their compile tasks fetch the
+  // Smithy CLI on demand with `npx`, populating the shared npm cache at
+  // `~/.npm/_npx`. Run in parallel, both resolve the same tool and race on the
+  // same cache directory's write lock, failing intermittently with
+  // `npm error code ECOMPROMISED` ("Lock compromised") or an ENOENT on a
+  // half-written `_npx/<hash>/package.json`. Serialising removes the concurrent
+  // writes. The 120 minute test timeout leaves headroom.
   const buildOutput = await runCLI(
-    'run-many --target build --all --output-style=stream --skip-nx-cache',
+    'run-many --target build --all --output-style=stream --skip-nx-cache --parallel=1',
     opts,
   );
   expect(buildOutput).toContain('Successfully ran target build');
