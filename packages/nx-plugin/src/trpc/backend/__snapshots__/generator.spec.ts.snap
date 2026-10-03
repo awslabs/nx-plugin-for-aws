@@ -1224,10 +1224,12 @@ import {
 } from './utils.js';
 import { CfnOutput, Stack } from 'aws-cdk-lib';
 import {
+  DomainMappingOptions,
   HttpApi as _HttpApi,
   HttpApiProps as _HttpApiProps,
   HttpMethod,
   HttpStage,
+  IDomainName,
   LogGroupLogDestination,
   ThrottleSettings,
 } from 'aws-cdk-lib/aws-apigatewayv2';
@@ -1245,7 +1247,7 @@ import { suppressRules } from '../checkov.js';
 export interface HttpApiProps<
   TIntegrations extends ApiIntegrations<TOperation, HttpApiIntegration>,
   TOperation extends string,
-> extends _HttpApiProps {
+> extends Omit<_HttpApiProps, 'defaultDomainMapping'> {
   /**
    * Unique name for the API, used in runtime configuration
    */
@@ -1264,6 +1266,12 @@ export interface HttpApiProps<
    * @default { rateLimit: 10000, burstLimit: 5000 }
    */
   readonly throttle?: ThrottleSettings;
+  /**
+   * Custom domain mapped to the API's default stage
+   */
+  readonly defaultDomainMapping?: DomainMappingOptions & {
+    readonly domainName: IDomainName;
+  };
 }
 
 /**
@@ -1287,6 +1295,9 @@ export class HttpApi<
   /** Default auto-deployed stage */
   public readonly defaultStage: HttpStage;
 
+  /** The URL clients call: the custom domain's if one is mapped, otherwise the stage's */
+  private readonly apiUrl: string;
+
   /** Map of operation names to their API Gateway integrations */
   public readonly integrations: TIntegrations;
 
@@ -1298,6 +1309,7 @@ export class HttpApi<
       operations,
       integrations,
       throttle = { rateLimit: 10000, burstLimit: 5000 },
+      defaultDomainMapping,
       ...props
     }: HttpApiProps<TIntegrations, TOperation>,
   ) {
@@ -1330,12 +1342,16 @@ export class HttpApi<
 
     this.defaultStage = new HttpStage(this, 'DefaultStage', {
       httpApi: this.api,
+      domainMapping: defaultDomainMapping,
       autoDeploy: true,
       throttle,
       accessLogSettings: {
         destination: new LogGroupLogDestination(accessLogGroup),
       },
     });
+    this.apiUrl = defaultDomainMapping
+      ? this.defaultStage.domainUrl
+      : this.defaultStage.url!;
 
     // Resolve the integration for a given operation.
     // If the operation has a dedicated integration, use it; otherwise fall back to $router.
@@ -1368,22 +1384,36 @@ export class HttpApi<
     );
 
     new CfnOutput(this, \`\${apiName}Url\`, {
-      value: this.defaultStage.url!,
+      value: this.apiUrl,
     });
 
     // Register the API URL in runtime configuration for client discovery
     const rc = RuntimeConfig.ensure(this);
     rc.set('connection', 'apis', {
       ...rc.get('connection').apis,
-      [apiName]: this.defaultStage.url!,
+      [apiName]: this.apiUrl,
     });
+
+    // Target for the custom domain's DNS record
+    if (defaultDomainMapping) {
+      new CfnOutput(this, \`\${apiName}DomainNameAlias\`, {
+        value: defaultDomainMapping.domainName.regionalDomainName,
+        description:
+          'Regional domain name to point a CNAME record at for the custom domain, with any DNS provider',
+      });
+      new CfnOutput(this, \`\${apiName}DomainNameAliasHostedZoneId\`, {
+        value: defaultDomainMapping.domainName.regionalHostedZoneId,
+        description:
+          'Hosted zone ID of the regional domain name, needed only for a Route 53 alias record',
+      });
+    }
   }
 
   /**
    * Return the API url
    */
   public get url() {
-    return this.defaultStage.url;
+    return this.apiUrl;
   }
 }
 "
@@ -2122,7 +2152,7 @@ import {
   Stage,
   ThrottleSettings,
 } from 'aws-cdk-lib/aws-apigateway';
-import { IAspect, RemovalPolicy, Stack } from 'aws-cdk-lib';
+import { CfnOutput, IAspect, RemovalPolicy, Stack } from 'aws-cdk-lib';
 import {
   CfnLoggingConfiguration,
   CfnWebACL,
@@ -2211,6 +2241,7 @@ export class RestApi<
       integrations,
       enableWaf = true,
       throttle = { rateLimit: 10000, burstLimit: 5000 },
+      domainName,
       ...props
     }: RestApiProps<TIntegrations, TOperation>,
   ) {
@@ -2236,6 +2267,7 @@ export class RestApi<
     // Create the API Gateway REST API
     this.api = new _RestApi(this, 'Api', {
       ...props,
+      domainName,
       deployOptions: {
         accessLogDestination: new LogGroupLogDestination(accessLogs),
         accessLogFormat: AccessLogFormat.jsonWithStandardFields(),
@@ -2377,8 +2409,24 @@ export class RestApi<
     const rc = RuntimeConfig.ensure(this);
     rc.set('connection', 'apis', {
       ...rc.get('connection').apis,
-      [apiName]: this.api.url!,
+      [apiName]: domainName
+        ? \`https://\${domainName.domainName}/\${domainName.basePath ? \`\${domainName.basePath}/\` : ''}\`
+        : this.api.url!,
     });
+
+    // Target for the custom domain's DNS record
+    if (domainName) {
+      new CfnOutput(this, \`\${apiName}DomainNameAlias\`, {
+        value: this.api.domainName!.domainNameAliasDomainName,
+        description:
+          'Domain name of the API Gateway endpoint (regional or edge) to point a CNAME record at for the custom domain, with any DNS provider',
+      });
+      new CfnOutput(this, \`\${apiName}DomainNameAliasHostedZoneId\`, {
+        value: this.api.domainName!.domainNameAliasHostedZoneId,
+        description:
+          'Hosted zone ID of that domain name, needed only for a Route 53 alias record',
+      });
+    }
   }
 
   /**
@@ -3541,6 +3589,19 @@ variable "tags" {
   default     = {}
 }
 
+# Custom domain configuration
+variable "custom_domain_name" {
+  description = "Custom domain name for the API. Requires acm_certificate_arn."
+  type        = string
+  default     = null
+}
+
+variable "acm_certificate_arn" {
+  description = "ARN of an ACM certificate (in the API's region) for the custom domain name."
+  type        = string
+  default     = null
+}
+
 # Get current AWS region and account ID
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
@@ -3783,6 +3844,10 @@ locals {
   ]
 }
 
+locals {
+  api_url = var.custom_domain_name == null ? module.http_api.stage_invoke_url : "https://\${var.custom_domain_name}/"
+}
+
 # CloudWatch Log Group for Lambda
 resource "aws_cloudwatch_log_group" "lambda_logs" {
   #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
@@ -3842,9 +3907,39 @@ module "add_url_to_runtime_config" {
 
   namespace = "connection"
   key       = "apis"
-  value     = { "TestApi" = module.http_api.stage_invoke_url }
+  value     = { "TestApi" = local.api_url }
 
   depends_on = [module.http_api]
+}
+
+# Custom domain for the API
+resource "aws_apigatewayv2_domain_name" "custom_domain" {
+  count = var.custom_domain_name == null ? 0 : 1
+
+  domain_name = var.custom_domain_name
+
+  domain_name_configuration {
+    certificate_arn = var.acm_certificate_arn
+    endpoint_type   = "REGIONAL"
+    security_policy = "TLS_1_2"
+  }
+
+  tags = var.tags
+
+  lifecycle {
+    precondition {
+      condition     = var.acm_certificate_arn != null
+      error_message = "acm_certificate_arn is required when custom_domain_name is set."
+    }
+  }
+}
+
+resource "aws_apigatewayv2_api_mapping" "custom_domain" {
+  count = var.custom_domain_name == null ? 0 : 1
+
+  api_id      = module.http_api.api_id
+  stage       = module.http_api.stage_id
+  domain_name = aws_apigatewayv2_domain_name.custom_domain[0].domain_name
 }
 
 # Lambda permission for API Gateway to invoke the function
@@ -3886,6 +3981,21 @@ output "api_execution_arn" {
 output "stage_invoke_url" {
   description = "Invoke URL of the API Gateway stage"
   value       = module.http_api.stage_invoke_url
+}
+
+output "api_url" {
+  description = "URL clients should call: the custom domain if configured, otherwise the stage invoke URL"
+  value       = local.api_url
+}
+
+output "custom_domain_target_domain_name" {
+  description = "Target domain name to point a DNS alias or CNAME record at for the custom domain"
+  value       = var.custom_domain_name == null ? null : aws_apigatewayv2_domain_name.custom_domain[0].domain_name_configuration[0].target_domain_name
+}
+
+output "custom_domain_hosted_zone_id" {
+  description = "Hosted zone ID to use for a Route 53 alias record for the custom domain"
+  value       = var.custom_domain_name == null ? null : aws_apigatewayv2_domain_name.custom_domain[0].domain_name_configuration[0].hosted_zone_id
 }
 
 output "stage_arn" {
@@ -4346,6 +4456,19 @@ variable "tags" {
   default     = {}
 }
 
+# Custom domain configuration
+variable "custom_domain_name" {
+  description = "Custom domain name for the API. Requires acm_certificate_arn."
+  type        = string
+  default     = null
+}
+
+variable "acm_certificate_arn" {
+  description = "ARN of an ACM certificate (in the API's region) for the custom domain name."
+  type        = string
+  default     = null
+}
+
 # Get current AWS region and account ID
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
@@ -4588,6 +4711,10 @@ locals {
   ]
 }
 
+locals {
+  api_url = var.custom_domain_name == null ? module.http_api.stage_invoke_url : "https://\${var.custom_domain_name}/"
+}
+
 # CloudWatch Log Group for Lambda
 resource "aws_cloudwatch_log_group" "lambda_logs" {
   #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
@@ -4730,9 +4857,39 @@ module "add_url_to_runtime_config" {
 
   namespace = "connection"
   key       = "apis"
-  value     = { "TestApi" = module.http_api.stage_invoke_url }
+  value     = { "TestApi" = local.api_url }
 
   depends_on = [module.http_api]
+}
+
+# Custom domain for the API
+resource "aws_apigatewayv2_domain_name" "custom_domain" {
+  count = var.custom_domain_name == null ? 0 : 1
+
+  domain_name = var.custom_domain_name
+
+  domain_name_configuration {
+    certificate_arn = var.acm_certificate_arn
+    endpoint_type   = "REGIONAL"
+    security_policy = "TLS_1_2"
+  }
+
+  tags = var.tags
+
+  lifecycle {
+    precondition {
+      condition     = var.acm_certificate_arn != null
+      error_message = "acm_certificate_arn is required when custom_domain_name is set."
+    }
+  }
+}
+
+resource "aws_apigatewayv2_api_mapping" "custom_domain" {
+  count = var.custom_domain_name == null ? 0 : 1
+
+  api_id      = module.http_api.api_id
+  stage       = module.http_api.stage_id
+  domain_name = aws_apigatewayv2_domain_name.custom_domain[0].domain_name
 }
 
 # Lambda permission for API Gateway to invoke the function
@@ -4774,6 +4931,21 @@ output "api_execution_arn" {
 output "stage_invoke_url" {
   description = "Invoke URL of the API Gateway stage"
   value       = module.http_api.stage_invoke_url
+}
+
+output "api_url" {
+  description = "URL clients should call: the custom domain if configured, otherwise the stage invoke URL"
+  value       = local.api_url
+}
+
+output "custom_domain_target_domain_name" {
+  description = "Target domain name to point a DNS alias or CNAME record at for the custom domain"
+  value       = var.custom_domain_name == null ? null : aws_apigatewayv2_domain_name.custom_domain[0].domain_name_configuration[0].target_domain_name
+}
+
+output "custom_domain_hosted_zone_id" {
+  description = "Hosted zone ID to use for a Route 53 alias record for the custom domain"
+  value       = var.custom_domain_name == null ? null : aws_apigatewayv2_domain_name.custom_domain[0].domain_name_configuration[0].hosted_zone_id
 }
 
 output "stage_arn" {
@@ -5234,6 +5406,19 @@ variable "tags" {
   default     = {}
 }
 
+# Custom domain configuration
+variable "custom_domain_name" {
+  description = "Custom domain name for the API. Requires acm_certificate_arn."
+  type        = string
+  default     = null
+}
+
+variable "acm_certificate_arn" {
+  description = "ARN of an ACM certificate (in the API's region) for the custom domain name."
+  type        = string
+  default     = null
+}
+
 # Get current AWS region and account ID
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
@@ -5476,6 +5661,10 @@ locals {
   ]
 }
 
+locals {
+  api_url = var.custom_domain_name == null ? module.http_api.stage_invoke_url : "https://\${var.custom_domain_name}/"
+}
+
 # CloudWatch Log Group for Lambda
 resource "aws_cloudwatch_log_group" "lambda_logs" {
   #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
@@ -5522,9 +5711,39 @@ module "add_url_to_runtime_config" {
 
   namespace = "connection"
   key       = "apis"
-  value     = { "TestApi" = module.http_api.stage_invoke_url }
+  value     = { "TestApi" = local.api_url }
 
   depends_on = [module.http_api]
+}
+
+# Custom domain for the API
+resource "aws_apigatewayv2_domain_name" "custom_domain" {
+  count = var.custom_domain_name == null ? 0 : 1
+
+  domain_name = var.custom_domain_name
+
+  domain_name_configuration {
+    certificate_arn = var.acm_certificate_arn
+    endpoint_type   = "REGIONAL"
+    security_policy = "TLS_1_2"
+  }
+
+  tags = var.tags
+
+  lifecycle {
+    precondition {
+      condition     = var.acm_certificate_arn != null
+      error_message = "acm_certificate_arn is required when custom_domain_name is set."
+    }
+  }
+}
+
+resource "aws_apigatewayv2_api_mapping" "custom_domain" {
+  count = var.custom_domain_name == null ? 0 : 1
+
+  api_id      = module.http_api.api_id
+  stage       = module.http_api.stage_id
+  domain_name = aws_apigatewayv2_domain_name.custom_domain[0].domain_name
 }
 
 # Lambda permission for API Gateway to invoke the function
@@ -5566,6 +5785,21 @@ output "api_execution_arn" {
 output "stage_invoke_url" {
   description = "Invoke URL of the API Gateway stage"
   value       = module.http_api.stage_invoke_url
+}
+
+output "api_url" {
+  description = "URL clients should call: the custom domain if configured, otherwise the stage invoke URL"
+  value       = local.api_url
+}
+
+output "custom_domain_target_domain_name" {
+  description = "Target domain name to point a DNS alias or CNAME record at for the custom domain"
+  value       = var.custom_domain_name == null ? null : aws_apigatewayv2_domain_name.custom_domain[0].domain_name_configuration[0].target_domain_name
+}
+
+output "custom_domain_hosted_zone_id" {
+  description = "Hosted zone ID to use for a Route 53 alias record for the custom domain"
+  value       = var.custom_domain_name == null ? null : aws_apigatewayv2_domain_name.custom_domain[0].domain_name_configuration[0].hosted_zone_id
 }
 
 output "stage_arn" {
@@ -6094,6 +6328,19 @@ variable "tags" {
   default     = {}
 }
 
+# Custom domain configuration
+variable "custom_domain_name" {
+  description = "Custom domain name for the API. Requires acm_certificate_arn."
+  type        = string
+  default     = null
+}
+
+variable "acm_certificate_arn" {
+  description = "ARN of an ACM certificate (in the API's region) for the custom domain name."
+  type        = string
+  default     = null
+}
+
 # Get current AWS region and account ID
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
@@ -6536,6 +6783,10 @@ locals {
   ]
 }
 
+locals {
+  api_url = var.custom_domain_name == null ? "\${aws_api_gateway_stage.api_stage.invoke_url}/" : "https://\${var.custom_domain_name}/"
+}
+
 # CloudWatch Log Group for Lambda
 resource "aws_cloudwatch_log_group" "lambda_logs" {
   #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
@@ -6838,9 +7089,39 @@ module "add_url_to_runtime_config" {
 
   namespace = "connection"
   key       = "apis"
-  value     = { "TestApi" = "\${aws_api_gateway_stage.api_stage.invoke_url}/" }
+  value     = { "TestApi" = local.api_url }
 
   depends_on = [aws_api_gateway_stage.api_stage]
+}
+
+# Custom domain for the API, served without the stage path prefix
+resource "aws_api_gateway_domain_name" "custom_domain" {
+  count = var.custom_domain_name == null ? 0 : 1
+
+  domain_name              = var.custom_domain_name
+  regional_certificate_arn = var.acm_certificate_arn
+  security_policy          = "TLS_1_2"
+
+  endpoint_configuration {
+    types = ["REGIONAL"]
+  }
+
+  tags = var.tags
+
+  lifecycle {
+    precondition {
+      condition     = var.acm_certificate_arn != null
+      error_message = "acm_certificate_arn is required when custom_domain_name is set."
+    }
+  }
+}
+
+resource "aws_api_gateway_base_path_mapping" "custom_domain" {
+  count = var.custom_domain_name == null ? 0 : 1
+
+  api_id      = module.rest_api.api_id
+  stage_name  = aws_api_gateway_stage.api_stage.stage_name
+  domain_name = aws_api_gateway_domain_name.custom_domain[0].domain_name
 }
 
 # Outputs
@@ -6869,6 +7150,21 @@ output "api_execution_arn" {
 output "stage_invoke_url" {
   description = "Invoke URL of the API Gateway stage"
   value       = aws_api_gateway_stage.api_stage.invoke_url
+}
+
+output "api_url" {
+  description = "URL clients should call: the custom domain if configured, otherwise the stage invoke URL"
+  value       = local.api_url
+}
+
+output "custom_domain_target_domain_name" {
+  description = "Target domain name to point a DNS alias or CNAME record at for the custom domain"
+  value       = var.custom_domain_name == null ? null : aws_api_gateway_domain_name.custom_domain[0].regional_domain_name
+}
+
+output "custom_domain_hosted_zone_id" {
+  description = "Hosted zone ID to use for a Route 53 alias record for the custom domain"
+  value       = var.custom_domain_name == null ? null : aws_api_gateway_domain_name.custom_domain[0].regional_zone_id
 }
 
 output "stage_arn" {
@@ -7398,6 +7694,19 @@ variable "tags" {
   default     = {}
 }
 
+# Custom domain configuration
+variable "custom_domain_name" {
+  description = "Custom domain name for the API. Requires acm_certificate_arn."
+  type        = string
+  default     = null
+}
+
+variable "acm_certificate_arn" {
+  description = "ARN of an ACM certificate (in the API's region) for the custom domain name."
+  type        = string
+  default     = null
+}
+
 # Get current AWS region and account ID
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
@@ -7840,6 +8149,10 @@ locals {
   ]
 }
 
+locals {
+  api_url = var.custom_domain_name == null ? "\${aws_api_gateway_stage.api_stage.invoke_url}/" : "https://\${var.custom_domain_name}/"
+}
+
 # CloudWatch Log Group for Lambda
 resource "aws_cloudwatch_log_group" "lambda_logs" {
   #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
@@ -8141,9 +8454,39 @@ module "add_url_to_runtime_config" {
 
   namespace = "connection"
   key       = "apis"
-  value     = { "TestApi" = "\${aws_api_gateway_stage.api_stage.invoke_url}/" }
+  value     = { "TestApi" = local.api_url }
 
   depends_on = [aws_api_gateway_stage.api_stage]
+}
+
+# Custom domain for the API, served without the stage path prefix
+resource "aws_api_gateway_domain_name" "custom_domain" {
+  count = var.custom_domain_name == null ? 0 : 1
+
+  domain_name              = var.custom_domain_name
+  regional_certificate_arn = var.acm_certificate_arn
+  security_policy          = "TLS_1_2"
+
+  endpoint_configuration {
+    types = ["REGIONAL"]
+  }
+
+  tags = var.tags
+
+  lifecycle {
+    precondition {
+      condition     = var.acm_certificate_arn != null
+      error_message = "acm_certificate_arn is required when custom_domain_name is set."
+    }
+  }
+}
+
+resource "aws_api_gateway_base_path_mapping" "custom_domain" {
+  count = var.custom_domain_name == null ? 0 : 1
+
+  api_id      = module.rest_api.api_id
+  stage_name  = aws_api_gateway_stage.api_stage.stage_name
+  domain_name = aws_api_gateway_domain_name.custom_domain[0].domain_name
 }
 
 # Outputs
@@ -8172,6 +8515,21 @@ output "api_execution_arn" {
 output "stage_invoke_url" {
   description = "Invoke URL of the API Gateway stage"
   value       = aws_api_gateway_stage.api_stage.invoke_url
+}
+
+output "api_url" {
+  description = "URL clients should call: the custom domain if configured, otherwise the stage invoke URL"
+  value       = local.api_url
+}
+
+output "custom_domain_target_domain_name" {
+  description = "Target domain name to point a DNS alias or CNAME record at for the custom domain"
+  value       = var.custom_domain_name == null ? null : aws_api_gateway_domain_name.custom_domain[0].regional_domain_name
+}
+
+output "custom_domain_hosted_zone_id" {
+  description = "Hosted zone ID to use for a Route 53 alias record for the custom domain"
+  value       = var.custom_domain_name == null ? null : aws_api_gateway_domain_name.custom_domain[0].regional_zone_id
 }
 
 output "stage_arn" {
@@ -8701,6 +9059,19 @@ variable "tags" {
   default     = {}
 }
 
+# Custom domain configuration
+variable "custom_domain_name" {
+  description = "Custom domain name for the API. Requires acm_certificate_arn."
+  type        = string
+  default     = null
+}
+
+variable "acm_certificate_arn" {
+  description = "ARN of an ACM certificate (in the API's region) for the custom domain name."
+  type        = string
+  default     = null
+}
+
 # Get current AWS region and account ID
 data "aws_region" "current" {}
 data "aws_caller_identity" "current" {}
@@ -9143,6 +9514,10 @@ locals {
   ]
 }
 
+locals {
+  api_url = var.custom_domain_name == null ? "\${aws_api_gateway_stage.api_stage.invoke_url}/" : "https://\${var.custom_domain_name}/"
+}
+
 # CloudWatch Log Group for Lambda
 resource "aws_cloudwatch_log_group" "lambda_logs" {
   #checkov:skip=CKV_AWS_158:Using default CloudWatch log encryption
@@ -9527,9 +9902,39 @@ module "add_url_to_runtime_config" {
 
   namespace = "connection"
   key       = "apis"
-  value     = { "TestApi" = "\${aws_api_gateway_stage.api_stage.invoke_url}/" }
+  value     = { "TestApi" = local.api_url }
 
   depends_on = [aws_api_gateway_stage.api_stage]
+}
+
+# Custom domain for the API, served without the stage path prefix
+resource "aws_api_gateway_domain_name" "custom_domain" {
+  count = var.custom_domain_name == null ? 0 : 1
+
+  domain_name              = var.custom_domain_name
+  regional_certificate_arn = var.acm_certificate_arn
+  security_policy          = "TLS_1_2"
+
+  endpoint_configuration {
+    types = ["REGIONAL"]
+  }
+
+  tags = var.tags
+
+  lifecycle {
+    precondition {
+      condition     = var.acm_certificate_arn != null
+      error_message = "acm_certificate_arn is required when custom_domain_name is set."
+    }
+  }
+}
+
+resource "aws_api_gateway_base_path_mapping" "custom_domain" {
+  count = var.custom_domain_name == null ? 0 : 1
+
+  api_id      = module.rest_api.api_id
+  stage_name  = aws_api_gateway_stage.api_stage.stage_name
+  domain_name = aws_api_gateway_domain_name.custom_domain[0].domain_name
 }
 
 # Outputs
@@ -9558,6 +9963,21 @@ output "api_execution_arn" {
 output "stage_invoke_url" {
   description = "Invoke URL of the API Gateway stage"
   value       = aws_api_gateway_stage.api_stage.invoke_url
+}
+
+output "api_url" {
+  description = "URL clients should call: the custom domain if configured, otherwise the stage invoke URL"
+  value       = local.api_url
+}
+
+output "custom_domain_target_domain_name" {
+  description = "Target domain name to point a DNS alias or CNAME record at for the custom domain"
+  value       = var.custom_domain_name == null ? null : aws_api_gateway_domain_name.custom_domain[0].regional_domain_name
+}
+
+output "custom_domain_hosted_zone_id" {
+  description = "Hosted zone ID to use for a Route 53 alias record for the custom domain"
+  value       = var.custom_domain_name == null ? null : aws_api_gateway_domain_name.custom_domain[0].regional_zone_id
 }
 
 output "stage_arn" {

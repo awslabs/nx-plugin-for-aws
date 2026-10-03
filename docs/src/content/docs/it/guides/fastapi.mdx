@@ -42,7 +42,7 @@ Seleziona `rest-lambda` (predefinito) come `infra` se intendi creare operazioni 
 :::
 
 :::tip[Pattern di integrazione]
-L'opzione `integrationPattern` è impostata su `isolated` per impostazione predefinita, che crea un Lambda per ogni operazione FastAPI. Seleziona `shared` se preferisci un singolo handler Lambda condiviso per l'intera API, con override opzionali per operazione.
+L'opzione `integrationPattern` è predefinita su `isolated`, che crea un Lambda per operazione FastAPI. Seleziona `shared` se preferisci un singolo handler Lambda condiviso per l'intera API, con override opzionali per operazione.
 :::
 
 ## Output del generatore
@@ -75,7 +75,7 @@ Il generatore creerà la seguente struttura di progetto nella directory `<direct
 
 ## Implementare la tua FastAPI
 
-L'implementazione principale dell'API si trova in `main.py`. Qui è dove definisci le tue route API e le loro implementazioni. Ecco un esempio:
+L'implementazione principale dell'API si trova in `main.py`. Qui è dove definisci le route dell'API e le loro implementazioni. Ecco un esempio:
 
 ```python
 from pydantic import BaseModel
@@ -97,10 +97,10 @@ def create_item(item: Item) -> Item:
 
 Il generatore configura automaticamente diverse funzionalità:
 
-1. Integrazione di AWS Lambda Powertools per l'osservabilità
+1. Integrazione AWS Lambda Powertools per l'osservabilità
 2. Middleware per la gestione degli errori
 3. Correlazione richiesta/risposta
-4. Raccolta di metriche
+4. Raccolta delle metriche
 5. Deployment AWS Lambda tramite [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter) con uvicorn
 6. Streaming type-safe (solo REST API)
 
@@ -187,9 +187,9 @@ Si consiglia di specificare modelli di risposta per le operazioni API per una mi
 
 ### Accedere all'utente chiamante
 
-Quando la tua API è protetta da autenticazione, i tuoi handler di route spesso devono sapere chi sta chiamando. La FastAPI generata viene eseguita all'interno di AWS Lambda tramite il [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter), che inoltra il contesto della richiesta API Gateway come JSON nell'header `x-amzn-request-context`. Puoi leggerlo dalla `Request` FastAPI per estrarre l'identità del chiamante.
+Quando la tua API è protetta da autenticazione, i tuoi gestori di route spesso devono sapere chi sta chiamando. La FastAPI generata viene eseguita all'interno di AWS Lambda tramite il [Lambda Web Adapter](https://github.com/awslabs/aws-lambda-web-adapter), che inoltra il contesto della richiesta API Gateway come JSON nell'header `x-amzn-request-context`. Puoi leggerlo dalla `Request` FastAPI per estrarre l'identità del chiamante.
 
-Come esempio, aggiungiamo un endpoint `/me` che restituisce i dettagli sull'utente chiamante. Implementeremo l'estrazione come una [dipendenza FastAPI](https://fastapi.tiangolo.com/tutorial/dependencies/) in modo che possa essere riutilizzata tra le route. La forma del contesto della richiesta — e quindi come estrarre l'identità — dipende sia dal metodo `auth` selezionato sia dal fatto che tu abbia distribuito una REST o HTTP API.
+Come esempio, aggiungiamo un endpoint `/me` che restituisce dettagli sull'utente chiamante. Implementeremo l'estrazione come una [dipendenza FastAPI](https://fastapi.tiangolo.com/tutorial/dependencies/) in modo che possa essere riutilizzata tra le route. La forma del contesto della richiesta — e quindi come estrarre l'identità — dipende sia dal metodo `auth` selezionato sia dal fatto che tu abbia distribuito una REST o HTTP API.
 
 <OptionFilter when={{ auth: 'iam' }} description="Estrazione dell'identità per API autenticate con IAM">
 Per l'autenticazione `IAM`, cerchiamo il chiamante in Cognito utilizzando il sub estratto dal contesto della richiesta API Gateway, che richiede `boto3`. Aggiungilo al tuo progetto API:
@@ -383,7 +383,7 @@ CurrentUser = Annotated[Identity, Depends(get_identity)]
 </Tabs>
 
 :::tip[Nessuna verifica del token richiesta]
-Non hai bisogno di alcuna libreria di verifica JWT qui — l'autorizzatore Cognito User Pools di API Gateway ha già verificato la firma, l'emittente, gli scope e la scadenza nel momento in cui il tuo Lambda viene eseguito. Se uno di questi controlli fallisce, API Gateway restituisce `401 Unauthorized` e il tuo handler non viene mai invocato.
+Non hai bisogno di alcuna libreria di verifica JWT qui — l'autorizzatore Cognito User Pools di API Gateway ha già verificato la firma, l'emittente, gli scope e la scadenza prima che il tuo Lambda venga eseguito. Se uno di questi controlli fallisce, API Gateway restituisce `401 Unauthorized` e il tuo handler non viene mai invocato.
 :::
 </OptionFilter>
 
@@ -440,11 +440,11 @@ Per consumare uno stream di risposte, puoi utilizzare il <Link path="guides/conn
 
 ## Distribuire la tua FastAPI
 
-Il generatore FastAPI crea infrastruttura come codice CDK o Terraform in base al tuo `iac` selezionato. Puoi usarlo per distribuire la tua FastAPI.
+Il generatore FastAPI crea infrastruttura come codice CDK o Terraform in base al tuo `iac` selezionato. Puoi utilizzarla per distribuire la tua FastAPI.
 
 <Infrastructure>
 <Fragment slot="cdk">
-Il costrutto CDK per distribuire la tua API nella cartella `common/constructs`. Puoi usarlo in un'applicazione CDK:
+Il costrutto CDK per distribuire la tua API nella cartella `common/constructs`. Puoi utilizzarlo in un'applicazione CDK:
 
 ```ts {6-8}
 import { MyApi } from '@my-scope/common-constructs';
@@ -493,16 +493,16 @@ Il costrutto `UserIdentity` può essere generato utilizzando il <Link path="/gui
 :::
 </OptionFilter>
 
-<OptionFilter when={{ auth: 'custom' }} description="Utilizzo CDK dell'autorizzatore Lambda personalizzato">
-:::caution[Autorizzatore Lambda personalizzato]
+<OptionFilter when={{ auth: 'custom' }} description="Utilizzo del Lambda Authorizer personalizzato con CDK">
+:::caution[Lambda Authorizer personalizzato]
 Quando si utilizza l'autenticazione `Custom`, il costrutto crea internamente un Lambda Authorizer dal file `authorizer.py` generato, che **nega tutte le richieste per impostazione predefinita**. Devi implementare la tua logica di autorizzazione in quel file prima che la tua API accetti qualsiasi traffico.
 
-I risultati dell'autorizzatore vengono memorizzati nella cache per 5 minuti, indicizzati sull'header `Authorization`, quindi un token revocato potrebbe essere accettato fino alla scadenza del risultato memorizzato nella cache. Riduci la durata della cache nell'infrastruttura generata se hai bisogno di una revoca più rapida.
+I risultati dell'autorizzatore vengono memorizzati nella cache per 5 minuti, con chiave sull'header `Authorization`, quindi un token revocato potrebbe essere accettato fino alla scadenza del risultato memorizzato nella cache. Riduci la durata della cache nell'infrastruttura generata se hai bisogno di una revoca più rapida.
 :::
 </OptionFilter>
 </Fragment>
 <Fragment slot="terraform">
-I moduli Terraform per distribuire la tua API si trovano nella cartella `common/terraform`. Puoi usarli in una configurazione Terraform.
+I moduli Terraform per distribuire la tua API si trovano nella cartella `common/terraform`. Puoi utilizzarli in una configurazione Terraform.
 
 Il modulo API prepara il suo zip di deployment Lambda in un bucket S3 di asset condiviso — vedi la <Link path="/guides/terraform-project">guida all'infrastruttura Terraform</Link> per i dettagli. Istanzia il modulo `core/asset-bucket` una volta per deployment e passa il suo output `bucket_name` in ogni modulo API / Lambda tramite l'input `asset_bucket_name`:
 
@@ -571,9 +571,9 @@ Puoi configurare Cognito User Pool e Client utilizzando le risorse o i moduli Te
 Il modulo Terraform fornisce diversi output che puoi utilizzare:
 
 ```hcl
-# Access the API endpoint
+# Access the API endpoint (the custom domain URL, if one is configured)
 output "api_url" {
-  value = module.my_api.stage_invoke_url
+  value = module.my_api.api_url
 }
 
 # Access Lambda function details
@@ -608,11 +608,11 @@ module "my_api" {
 }
 ```
 
-<OptionFilter when={{ auth: 'custom' }} description="Utilizzo dell'autorizzatore Lambda personalizzato con Terraform">
-:::caution[Autorizzatore Lambda personalizzato]
+<OptionFilter when={{ auth: 'custom' }} description="Utilizzo del Lambda Authorizer personalizzato con Terraform">
+:::caution[Lambda Authorizer personalizzato]
 Quando si utilizza l'autenticazione `Custom`, la tua API è protetta da un Lambda Authorizer che **nega tutte le richieste per impostazione predefinita**. Devi implementare la tua logica di autorizzazione nel file `authorizer.py` generato prima che la tua API accetti qualsiasi traffico.
 
-I risultati dell'autorizzatore vengono memorizzati nella cache per 5 minuti, indicizzati sull'header `Authorization`, quindi un token revocato potrebbe essere accettato fino alla scadenza del risultato memorizzato nella cache. Riduci la durata della cache nell'infrastruttura generata se hai bisogno di una revoca più rapida.
+I risultati dell'autorizzatore vengono memorizzati nella cache per 5 minuti, con chiave sull'header `Authorization`, quindi un token revocato potrebbe essere accettato fino alla scadenza del risultato memorizzato nella cache. Riduci la durata della cache nell'infrastruttura generata se hai bisogno di una revoca più rapida.
 :::
 </OptionFilter>
 </Fragment>
@@ -629,6 +629,10 @@ I risultati dell'autorizzatore vengono memorizzati nella cache per 5 minuti, ind
 
 <Snippet name="api/access-logging" parentHeading="Logging degli accessi" />
 </OptionFilter>
+
+### Dominio personalizzato
+
+<Snippet name="api/custom-domain" parentHeading="Dominio personalizzato" />
 
 ### Integrazioni
 
@@ -669,7 +673,7 @@ Non supportiamo integrazioni type-safe per Terraform, e quindi nessun target di 
 </Infrastructure>
 
 <OptionFilter when={{ auth: 'iam' }} description="Solo API autenticate con IAM">
-### Concessione dell'accesso (solo IAM)
+### Concedere l'accesso (solo IAM)
 
 Se hai scelto di utilizzare l'autenticazione `IAM`, puoi utilizzare il metodo `grantInvokeAccess` per concedere l'accesso alla tua API:
 
@@ -711,7 +715,7 @@ resource "aws_iam_role_policy_attachment" "api_invoke_access_existing" {
 }
 ```
 
-Gli output chiave del modulo API che puoi utilizzare per le policy IAM sono:
+Gli output chiave dal modulo API che puoi utilizzare per le policy IAM sono:
 
 - `module.my_api.api_execution_arn` - Per concedere permessi execute-api:Invoke
 - `module.my_api.api_arn` - L'ARN di API Gateway
@@ -733,7 +737,7 @@ Questo avvia un server di sviluppo FastAPI locale con:
 - Schema OpenAPI su `/openapi.json`
 
 :::note[Nomi dei progetti]
-I nomi dei progetti Python utilizzano underscore, quindi un'API generata con `--name=MyApi` viene indirizzata come `my_api` (o con il suo nome completo, `<scope>.my_api`). La porta su cui il server è in ascolto viene assegnata per progetto — leggila dal target `serve` nel `project.json` del tuo progetto.
+I nomi dei progetti Python utilizzano underscore, quindi un'API generata con `--name=MyApi` viene indirizzata come `my_api` (o con il suo nome completamente qualificato, `<scope>.my_api`). La porta su cui il server ascolta viene assegnata per progetto — leggila dal target `serve` nel `project.json` del tuo progetto.
 :::
 
 ## Invocare la tua FastAPI
@@ -748,14 +752,14 @@ Usa il generatore <Link path="guides/connection">`connection`</Link> per integra
   <ConnectionCard
     title="React to FastAPI"
     description="Chiamare una FastAPI Python da un sito web React"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'it'}/guides/connection/react-fastapi`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-fastapi`}
     source="react"
     target="fastapi"
   />
   <ConnectionCard
     title="FastAPI to Python DynamoDB"
     description="Connettere una FastAPI a una tabella DynamoDB"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'it'}/guides/connection/py-fast-api-dynamodb`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/py-fast-api-dynamodb`}
     source="fastapi"
     target="dynamodb"
     targetBadge="python"

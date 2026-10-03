@@ -7,10 +7,12 @@ import {
 } from './utils<% if (esm) { %>.js<% } %>';
 import { CfnOutput, Stack } from 'aws-cdk-lib';
 import {
+  DomainMappingOptions,
   HttpApi as _HttpApi,
   HttpApiProps as _HttpApiProps,
   HttpMethod,
   HttpStage,
+  IDomainName,
   LogGroupLogDestination,
   ThrottleSettings,
 } from 'aws-cdk-lib/aws-apigatewayv2';
@@ -28,7 +30,7 @@ import { suppressRules } from '../checkov<% if (esm) { %>.js<% } %>';
 export interface HttpApiProps<
   TIntegrations extends ApiIntegrations<TOperation, HttpApiIntegration>,
   TOperation extends string,
-> extends _HttpApiProps {
+> extends Omit<_HttpApiProps, 'defaultDomainMapping'> {
   /**
    * Unique name for the API, used in runtime configuration
    */
@@ -47,6 +49,12 @@ export interface HttpApiProps<
    * @default { rateLimit: 10000, burstLimit: 5000 }
    */
   readonly throttle?: ThrottleSettings;
+  /**
+   * Custom domain mapped to the API's default stage
+   */
+  readonly defaultDomainMapping?: DomainMappingOptions & {
+    readonly domainName: IDomainName;
+  };
 }
 
 /**
@@ -70,6 +78,9 @@ export class HttpApi<
   /** Default auto-deployed stage */
   public readonly defaultStage: HttpStage;
 
+  /** The URL clients call: the custom domain's if one is mapped, otherwise the stage's */
+  private readonly apiUrl: string;
+
   /** Map of operation names to their API Gateway integrations */
   public readonly integrations: TIntegrations;
 
@@ -81,6 +92,7 @@ export class HttpApi<
       operations,
       integrations,
       throttle = { rateLimit: 10000, burstLimit: 5000 },
+      defaultDomainMapping,
       ...props
     }: HttpApiProps<TIntegrations, TOperation>,
   ) {
@@ -113,12 +125,16 @@ export class HttpApi<
 
     this.defaultStage = new HttpStage(this, 'DefaultStage', {
       httpApi: this.api,
+      domainMapping: defaultDomainMapping,
       autoDeploy: true,
       throttle,
       accessLogSettings: {
         destination: new LogGroupLogDestination(accessLogGroup),
       },
     });
+    this.apiUrl = defaultDomainMapping
+      ? this.defaultStage.domainUrl
+      : this.defaultStage.url!;
 
     // Resolve the integration for a given operation.
     // If the operation has a dedicated integration, use it; otherwise fall back to $router.
@@ -151,21 +167,35 @@ export class HttpApi<
     );
 
     new CfnOutput(this, `${apiName}Url`, {
-      value: this.defaultStage.url!,
+      value: this.apiUrl,
     });
 
     // Register the API URL in runtime configuration for client discovery
     const rc = RuntimeConfig.ensure(this);
     rc.set('connection', 'apis', {
       ...rc.get('connection').apis,
-      [apiName]: this.defaultStage.url!,
+      [apiName]: this.apiUrl,
     });
+
+    // Target for the custom domain's DNS record
+    if (defaultDomainMapping) {
+      new CfnOutput(this, `${apiName}DomainNameAlias`, {
+        value: defaultDomainMapping.domainName.regionalDomainName,
+        description:
+          'Regional domain name to point a CNAME record at for the custom domain, with any DNS provider',
+      });
+      new CfnOutput(this, `${apiName}DomainNameAliasHostedZoneId`, {
+        value: defaultDomainMapping.domainName.regionalHostedZoneId,
+        description:
+          'Hosted zone ID of the regional domain name, needed only for a Route 53 alias record',
+      });
+    }
   }
 
   /**
    * Return the API url
    */
   public get url() {
-    return this.defaultStage.url;
+    return this.apiUrl;
   }
 }

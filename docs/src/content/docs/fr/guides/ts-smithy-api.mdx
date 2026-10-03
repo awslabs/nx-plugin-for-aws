@@ -24,7 +24,7 @@ import ArchitectureDiagram from '@components/architecture-diagram.astro';
 
 [Smithy](https://smithy.io/) est un langage de définition d'interface indépendant du protocole pour créer des API de manière pilotée par modèle.
 
-Le générateur d'API TypeScript Smithy crée une nouvelle API utilisant Smithy pour la définition du service, et le [Smithy TypeScript Server SDK](https://github.com/awslabs/smithy-typescript) pour l'implémentation. Le générateur fournit une infrastructure en tant que code CDK ou Terraform pour déployer votre service sur AWS Lambda, exposé via une API REST AWS API Gateway. Il offre un développement d'API type-safe avec génération automatique de code à partir des modèles Smithy. Le gestionnaire généré utilise [AWS Lambda Powertools pour TypeScript](https://docs.powertools.aws.dev/lambda/typescript/latest/) pour l'observabilité, incluant la journalisation, le traçage AWS X-Ray et les métriques CloudWatch
+Le générateur d'API TypeScript Smithy crée une nouvelle API utilisant Smithy pour la définition du service, et le [Smithy TypeScript Server SDK](https://github.com/awslabs/smithy-typescript) pour l'implémentation. Le générateur fournit une infrastructure en tant que code CDK ou Terraform pour déployer votre service sur AWS Lambda, exposé via une API REST AWS API Gateway. Il offre un développement d'API type-safe avec génération automatique de code à partir des modèles Smithy. Le gestionnaire généré utilise [AWS Lambda Powertools for TypeScript](https://docs.powertools.aws.dev/lambda/typescript/latest/) pour l'observabilité, incluant la journalisation, le traçage AWS X-Ray et les métriques CloudWatch
 
 ## Utilisation
 
@@ -39,7 +39,7 @@ Vous pouvez générer une nouvelle API TypeScript Smithy de deux manières :
 <GeneratorParameters generator="ts#api" />
 
 :::tip[Modèle d'intégration]
-L'option `integrationPattern` est définie par défaut sur `isolated`, ce qui crée un Lambda par opération Smithy. Sélectionnez `shared` si vous préférez un gestionnaire Lambda partagé unique pour toute l'API, avec des remplacements optionnels par opération.
+L'option `integrationPattern` est définie par défaut sur `isolated`, ce qui crée un Lambda par opération Smithy. Sélectionnez `shared` si vous préférez un seul gestionnaire Lambda partagé pour toute l'API, avec des remplacements optionnels par opération.
 :::
 
 ## Sortie du générateur
@@ -192,7 +192,7 @@ Vous pouvez modifier la structure des dossiers comme vous le souhaitez - tous le
 Pour plus de détails sur Smithy et sa syntaxe, consultez la [spécification Smithy](https://smithy.io/2.0/spec/index.html).
 :::
 
-### Ajout d'une bibliothèque de formes
+### Ajouter une bibliothèque de formes
 
 Si vous avez plusieurs API Smithy qui partagent les mêmes types de données, vous pouvez définir ces types une fois dans une bibliothèque de formes plutôt que de les dupliquer dans chaque modèle. Une bibliothèque de formes est un projet Smithy sans service — juste des formes réutilisables — dont n'importe quel nombre de projets Smithy peuvent dépendre.
 
@@ -215,7 +215,7 @@ structure GetCustomerOutput {
 }
 ```
 
-Consultez le <Link path="guides/smithy-project">guide du projet Smithy</Link> pour savoir comment créer une bibliothèque de formes et la configurer comme dépendance du modèle de votre API.
+Consultez le <Link path="guides/smithy-project">guide du projet Smithy</Link> pour savoir comment créer une bibliothèque de formes et la connecter en tant que dépendance du modèle de votre API.
 
 ### Implémenter des opérations en TypeScript
 
@@ -264,10 +264,10 @@ export interface ServiceContext {
 }
 ```
 
-Ce contexte est passé à toutes les implémentations d'opérations et peut être utilisé pour partager des ressources comme des connexions de base de données, de la configuration ou des utilitaires de journalisation.
+Ce contexte est transmis à toutes les implémentations d'opérations et peut être utilisé pour partager des ressources comme des connexions de base de données, de la configuration ou des utilitaires de journalisation.
 
 :::caution[Contexte manuel requis]
-Vous devez construire le contexte vous-même à la fois dans `handler.ts` (le point d'entrée de la fonction Lambda) et `local-server.ts` (le point d'entrée pour l'exécution locale via la cible `serve`).
+Vous devez construire le contexte vous-même dans `handler.ts` (le point d'entrée de la fonction Lambda) et `local-server.ts` (le point d'entrée pour l'exécution locale via la cible `serve`).
 :::
 
 ### Observabilité avec AWS Lambda Powertools
@@ -285,7 +285,7 @@ export const handler = middy<APIGatewayProxyEvent, APIGatewayProxyResult>()
   .handler(lambdaHandler);
 ```
 
-Vous pouvez accéder au logger depuis vos implémentations d'opérations via le contexte :
+Vous pouvez référencer le logger depuis vos implémentations d'opérations via le contexte :
 
 ```typescript {6}
 // operations/echo.ts
@@ -417,7 +417,7 @@ structure UnauthorizedError {
 }
 ```
 
-Tout d'abord, exposez l'identité résolue sur le contexte du service dans `src/context.ts`. Nous la fournissons en tant que fonction afin que l'`UnauthorizedError` soit levée depuis une opération (où le Server SDK la sérialise en un `403`), plutôt que depuis le gestionnaire :
+Tout d'abord, exposez l'identité résolue sur le contexte du service dans `src/context.ts`. Nous la fournissons sous forme de fonction afin que l'`UnauthorizedError` soit levée depuis une opération (où le Server SDK la sérialise en un `403`), plutôt que depuis le gestionnaire :
 
 ```ts {5-8,17} ins={5-8,17}
 import { Logger } from '@aws-lambda-powertools/logger';
@@ -442,8 +442,8 @@ export interface ServiceContext {
 
 Ensuite, écrivez le résolveur dans `src/identity.ts`. Il lève `UnauthorizedError` lorsque l'appelant ne peut pas être déterminé. L'implémentation dépend de votre méthode `auth` sélectionnée :
 
-<OptionFilter when={{ auth: 'iam' }} description="Résolution d'identité pour les API authentifiées par IAM">
-Pour l'authentification `IAM`, nous recherchons l'appelant dans Cognito en utilisant le sub extrait de l'événement API Gateway. La recherche utilise le client Cognito Identity Provider, qui n'est pas une dépendance d'un backend Smithy généré, donc installez-le d'abord dans le projet backend :
+<OptionFilter when={{ auth: 'iam' }} description="Résolution d'identité pour les API authentifiées IAM">
+Pour l'authentification `IAM`, nous recherchons l'appelant dans Cognito en utilisant le sub extrait de l'événement API Gateway. La recherche utilise le client Cognito Identity Provider, qui n'est pas une dépendance d'un backend Smithy généré, alors installez-le d'abord dans le projet backend :
 
 <InstallCommand pkg={`@aws-sdk/client-cognito-identity-provider@${TS_VERSIONS['@aws-sdk/client-cognito-identity-provider']}`} project="@my-scope/my-api" projectDir="packages/my-api/backend" />
 
@@ -491,7 +491,7 @@ export const getIdentity = async (
 ```
 </OptionFilter>
 
-<OptionFilter when={{ auth: 'cognito' }} description="Résolution d'identité pour les API authentifiées par Cognito">
+<OptionFilter when={{ auth: 'cognito' }} description="Résolution d'identité pour les API authentifiées Cognito">
 Avec `auth: 'cognito'`, l'autorisateur Cognito User Pools d'API Gateway vérifie le JWT que l'appelant fournit dans l'en-tête `Authorization` et place les revendications vérifiées sur l'événement à `event.requestContext.authorizer.claims` :
 
 ```ts
@@ -538,7 +538,7 @@ const httpResponse = await serviceHandler.handle(httpRequest, {
 });
 ```
 
-`getIdentity` est un champ requis sur `ServiceContext`, et comme la [mise en garde ci-dessus](#contexte-du-service) le note, le contexte est construit dans **les deux** points d'entrée — donc `src/local-server.ts` en a également besoin. Il n'y a pas d'autorisateur API Gateway devant le serveur local, donc fournissez une identité factice pour le développement local :
+`getIdentity` est un champ requis sur `ServiceContext`, et comme la [mise en garde ci-dessus](#contexte-du-service) le note, le contexte est construit dans **les deux** points d'entrée — donc `src/local-server.ts` en a également besoin. Il n'y a pas d'autorisateur API Gateway devant le serveur local, alors fournissez une identité stub pour le développement local :
 
 ```ts {5} ins={5}
 const httpResponse = await serviceHandler.handle(httpRequest, {
@@ -588,9 +588,9 @@ Le projet backend copie automatiquement le SDK généré pendant la compilation 
 Parce que la CLI est installée globalement plutôt qu'épinglée dans votre espace de travail, la mise à niveau de l'espace de travail avec `nx migrate` ne la met **pas** à niveau. Lorsqu'une migration fait avancer les dépendances Smithy, mettez à niveau votre CLI Smithy globale vers une version correspondante vous-même.
 :::
 
-Alternativement, développez dans [WSL](https://learn.microsoft.com/en-us/windows/wsl/install), où le build exécute le chemin Linux et `mise` résout la CLI pour vous — rien à installer.
+Alternativement, développez à l'intérieur de [WSL](https://learn.microsoft.com/en-us/windows/wsl/install), où le build exécute le chemin Linux et `mise` résout la CLI pour vous — rien à installer.
 
-Un projet généré sur Windows commit une cible `compile` qui invoque `smithy` directement, donc toute autre personne travaillant dessus — y compris sur macOS ou Linux — a besoin de la CLI Smithy dans son `PATH` également. Pour que ces machines résolvent la CLI via `mise` à la place, basculez la cible vers la commande `mise` comme [décrit ci-dessous](#choisir-comment-la-cli-est-résolue).
+Un projet généré sur Windows valide une cible `compile` qui invoque `smithy` directement, donc toute autre personne travaillant dessus — y compris sur macOS ou Linux — a besoin de la CLI Smithy dans son `PATH` également. Pour que ces machines résolvent la CLI via `mise` à la place, basculez la cible vers la commande `mise` comme [décrit ci-dessous](#choisir-comment-la-cli-est-résolue).
 
 ### Choisir comment la CLI est résolue
 
@@ -624,7 +624,7 @@ Le générateur configure un serveur de développement local avec rechargement �
 <NxCommands commands={['serve <backend-project>']} />
 
 :::tip[Rechargement à chaud]
-Le serveur local se rechargera non seulement lorsque vous apportez des modifications TypeScript à votre code backend, mais se rechargera également lorsque vous apportez des modifications à votre projet de modèle Smithy, vous permettant d'itérer en continu sur votre modèle Smithy et votre serveur ensemble.
+Le serveur local se rechargera non seulement lorsque vous apportez des modifications TypeScript à votre code backend, mais se rechargera également lorsque vous apportez des modifications à votre projet de modèle Smithy, vous permettant d'itérer continuellement sur votre modèle Smithy et votre serveur ensemble.
 :::
 
 ## Déployer votre API Smithy
@@ -652,15 +652,15 @@ Cela configure :
 
 1. Une fonction AWS Lambda pour le service Smithy
 2. Une API REST API Gateway comme déclencheur de fonction
-3. Des rôles IAM et des permissions
+3. Les rôles et permissions IAM
 4. Un groupe de logs CloudWatch
-5. Une configuration de traçage X-Ray
+5. La configuration de traçage X-Ray
 
 <Snippet name="api/cors-configuration-cdk-note" />
 
-<OptionFilter when={{ auth: 'cognito' }} description="Cognito identity construct wiring">
+<OptionFilter when={{ auth: 'cognito' }} description="Câblage du construct d'identité Cognito">
 :::note[Authentification Cognito]
-Si vous avez sélectionné l'authentification `Cognito`, vous devrez fournir la propriété `identity` au construct API :
+Si vous avez sélectionné l'authentification `Cognito`, vous devrez fournir la propriété `identity` au construct de l'API :
 
 ```ts {9}
 import { MyApi, UserIdentity } from '@my-scope/common-constructs';
@@ -677,22 +677,22 @@ export class ExampleStack extends Stack {
 }
 ```
 
-Le construct `UserIdentity` peut être généré avec le générateur <Link path="/guides/react-website-auth">`ts#website#auth`</Link>
+Le construct `UserIdentity` peut être généré en utilisant le <Link path="/guides/react-website-auth">générateur `ts#website#auth`</Link>
 :::
 </OptionFilter>
-</Fragment>
 
 <OptionFilter when={{ auth: 'custom' }} description="Utilisation CDK de l'autorisateur Lambda personnalisé">
 :::caution[Autorisateur Lambda personnalisé]
-Lors de l'utilisation de l'authentification `Custom`, le construct crée un Lambda Authorizer en interne à partir du fichier `src/authorizer.ts` généré, qui **refuse toutes les requêtes par défaut**. Vous devez implémenter votre logique d'autorisation dans ce fichier avant que votre API n'accepte du trafic.
+Lors de l'utilisation de l'authentification `Custom`, le construct crée un autorisateur Lambda en interne à partir du fichier `src/authorizer.ts` généré, qui **refuse toutes les requêtes par défaut**. Vous devez implémenter votre logique d'autorisation dans ce fichier avant que votre API n'accepte du trafic.
 
 Les résultats de l'autorisateur sont mis en cache pendant 5 minutes, indexés sur l'en-tête `Authorization`, donc un jeton révoqué peut être accepté jusqu'à ce que son résultat en cache expire. Réduisez la durée du cache dans l'infrastructure générée si vous avez besoin d'une révocation plus rapide.
 :::
 </OptionFilter>
+</Fragment>
 <Fragment slot="terraform">
 Les modules Terraform pour déployer votre API se trouvent dans le dossier `common/terraform`.
 
-Le module API stocke son zip de déploiement Lambda dans un bucket S3 d'actifs partagé — consultez le <Link path="/guides/terraform-project">guide d'infrastructure Terraform</Link> pour plus de détails. Instanciez le module `core/asset-bucket` une fois par déploiement et transmettez sa sortie `bucket_name` dans chaque module API / Lambda via l'entrée `asset_bucket_name` :
+Le module API met en scène son zip de déploiement Lambda dans un bucket S3 d'actifs partagé — consultez le <Link path="/guides/terraform-project">guide d'infrastructure Terraform</Link> pour plus de détails. Instanciez le module `core/asset-bucket` une fois par déploiement et transmettez sa sortie `bucket_name` dans chaque module API / Lambda via l'entrée `asset_bucket_name` :
 
 ```hcl {1-3, 8}
 module "asset_bucket" {
@@ -723,14 +723,14 @@ Cela configure :
 
 1. Une fonction AWS Lambda qui sert l'API Smithy
 2. Une API REST API Gateway comme déclencheur de fonction
-3. Des rôles IAM et des permissions
+3. Les rôles et permissions IAM
 4. Un groupe de logs CloudWatch
-5. Une configuration de traçage X-Ray
-6. Une configuration CORS
+5. La configuration de traçage X-Ray
+6. La configuration CORS
 
 <Snippet name="api/cors-configuration-terraform-note" />
 
-<OptionFilter when={{ auth: 'cognito' }} description="Cognito module wiring">
+<OptionFilter when={{ auth: 'cognito' }} description="Câblage du module Cognito">
 :::note[Authentification Cognito]
 Si vous avez sélectionné l'authentification `Cognito`, vous devrez fournir la configuration Cognito :
 
@@ -756,7 +756,7 @@ module "my_api" {
 
 <OptionFilter when={{ auth: 'custom' }} description="Utilisation de l'autorisateur Lambda personnalisé avec Terraform">
 :::caution[Autorisateur Lambda personnalisé]
-Lors de l'utilisation de l'authentification `Custom`, votre API est protégée par un Lambda Authorizer qui **refuse toutes les requêtes par défaut**. Vous devez implémenter votre logique d'autorisation dans le fichier `src/authorizer.ts` généré avant que votre API n'accepte du trafic.
+Lors de l'utilisation de l'authentification `Custom`, votre API est protégée par un autorisateur Lambda qui **refuse toutes les requêtes par défaut**. Vous devez implémenter votre logique d'autorisation dans le fichier `src/authorizer.ts` généré avant que votre API n'accepte du trafic.
 
 Les résultats de l'autorisateur sont mis en cache pendant 5 minutes, indexés sur l'en-tête `Authorization`, donc un jeton révoqué peut être accepté jusqu'à ce que son résultat en cache expire. Réduisez la durée du cache dans l'infrastructure générée si vous avez besoin d'une révocation plus rapide.
 :::
@@ -765,9 +765,9 @@ Les résultats de l'autorisateur sont mis en cache pendant 5 minutes, indexés s
 Le module Terraform fournit plusieurs sorties :
 
 ```hcl
-# Access the API endpoint
+# Access the API endpoint (the custom domain URL, if one is configured)
 output "api_url" {
-  value = module.my_api.stage_invoke_url
+  value = module.my_api.api_url
 }
 
 # Access Lambda function details
@@ -785,6 +785,10 @@ output "lambda_function_name" {
 ### Journalisation des accès
 
 <Snippet name="api/access-logging" parentHeading="Journalisation des accès" />
+
+### Domaine personnalisé
+
+<Snippet name="api/custom-domain" parentHeading="Domaine personnalisé" />
 
 ### Intégrations
 
@@ -848,7 +852,7 @@ Vous devrez exécuter un build chaque fois que vous modifiez votre modèle Smith
 :::
 
 :::tip[Rechargement à chaud]
-Si vous travaillez activement à la fois sur votre infrastructure CDK et votre API Smithy ensemble, vous pouvez utiliser [`nx watch`](https://nx.dev/nx-api/nx/documents/watch) pour régénérer ces types chaque fois que vous apportez des modifications au modèle :
+Si vous travaillez activement à la fois sur votre infrastructure CDK et votre API Smithy ensemble, vous pouvez utiliser [`nx watch`](https://nx.dev/nx-api/nx/documents/watch) pour régénérer ces types à chaque fois que vous apportez des modifications au modèle :
 
 <NxCommands
   commands={[
@@ -859,13 +863,13 @@ Si vous travaillez activement à la fois sur votre infrastructure CDK et votre A
 :::
 </Fragment>
 <Fragment slot="terraform">
-:::note[Limitations Terraform]
+:::note[Limitations de Terraform]
 Nous ne prenons pas en charge les intégrations type-safe pour Terraform, et par conséquent aucune cible de génération de code n'est configurée si vous avez sélectionné Terraform pour votre `iac`.
 :::
 </Fragment>
 </Infrastructure>
 
-<OptionFilter when={{ auth: 'iam' }} description="API authentifiées par IAM uniquement">
+<OptionFilter when={{ auth: 'iam' }} description="API authentifiées IAM uniquement">
 ### Accorder l'accès (IAM uniquement)
 
 Si vous avez sélectionné l'authentification `IAM`, vous pouvez utiliser la méthode `grantInvokeAccess` pour accorder l'accès à votre API :
@@ -917,21 +921,21 @@ Utilisez le générateur <Link path="guides/connection">`connection`</Link> pour
   <ConnectionCard
     title="React vers API Smithy"
     description="Appeler une API Smithy depuis un site web React"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'fr'}/guides/connection/react-smithy`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/react-smithy`}
     source="react"
     target="smithy"
   />
   <ConnectionCard
     title="API Smithy vers base de données relationnelle"
     description="Connecter une API Smithy à une base de données relationnelle Aurora"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'fr'}/guides/connection/smithy-rdb`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/smithy-rdb`}
     source="smithy"
     target="aurora"
   />
   <ConnectionCard
     title="API Smithy vers TypeScript DynamoDB"
     description="Connecter une API Smithy à une table DynamoDB"
-    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'fr'}/guides/connection/smithy-dynamodb`}
+    href={`/nx-plugin-for-aws/${Astro.currentLocale || 'en'}/guides/connection/smithy-dynamodb`}
     source="smithy"
     target="dynamodb"
   />

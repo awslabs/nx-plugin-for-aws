@@ -20,6 +20,40 @@ import { runCLI } from '../utils';
  * The wiring is the same `main.tf` the terraform-deploy smoke test applies, so
  * this exercises the identical module graph without deploying anything.
  */
+/**
+ * Plan-only instances of the generated REST and HTTP API modules with a custom
+ * domain, which the deploy smoke test can't apply without a real certificate.
+ */
+const CUSTOM_DOMAIN_APIS = `module "my_api_custom_domain" {
+  source = "../../common/terraform/src/app/apis/my-api"
+
+  asset_bucket_name   = module.asset_bucket.bucket_name
+  custom_domain_name  = "rest.example.com"
+  acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/plantest"
+}
+
+module "my_api_http_custom_domain" {
+  source = "../../common/terraform/src/app/apis/my-api-http"
+
+  asset_bucket_name   = module.asset_bucket.bucket_name
+  custom_domain_name  = "http.example.com"
+  acm_certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/plantest"
+}
+`;
+
+/** Each API publishes its custom domain URL in runtime config when one is configured. */
+const CUSTOM_DOMAIN_ASSERTIONS = `
+  assert {
+    condition     = module.my_api_custom_domain.api_url == "https://rest.example.com/"
+    error_message = "REST API with a custom domain should publish https://rest.example.com/"
+  }
+
+  assert {
+    condition     = module.my_api_http_custom_domain.api_url == "https://http.example.com/"
+    error_message = "HTTP API with a custom domain should publish https://http.example.com/"
+  }
+`;
+
 export const runTerraformPlanTest = async (opts: {
   cwd: string;
   env: Record<string, string>;
@@ -38,7 +72,7 @@ export const runTerraformPlanTest = async (opts: {
     join(__dirname, '../files/terraform-deploy/main.tf.template'),
     'utf-8',
   ).replace(/<% TEST_RUN_ID %>/g, 'plantest');
-  writeFileSync(join(infraSrc, 'main.tf'), mainTf);
+  writeFileSync(join(infraSrc, 'main.tf'), `${mainTf}\n${CUSTOM_DOMAIN_APIS}`);
 
   // `-backend=false` so `terraform init` doesn't try to configure the S3
   // backend (which would need credentials); the test framework keeps state
@@ -90,7 +124,7 @@ export const runTerraformPlanTest = async (opts: {
   ].join('\n');
   writeFileSync(
     join(infraSrc, 'plan.tftest.hcl'),
-    `${mocks}\n\nvariables {\n  environment = "test"\n  aws_region  = "us-east-1"\n}\n\nrun "plan" {\n  command = plan\n}\n`,
+    `${mocks}\n\nvariables {\n  environment = "test"\n  aws_region  = "us-east-1"\n}\n\nrun "plan" {\n  command = plan\n${CUSTOM_DOMAIN_ASSERTIONS}}\n`,
   );
 
   await runCLI('terraform test -no-color', {
