@@ -15,7 +15,12 @@ module.exports = {
   // v1 (`SendStreamingMessage`). The vended A2A server SDK (@a2a-js/sdk in
   // versions.ts) is 0.3.x and rejects that with "Method not found", so hold the
   // CLI until the server SDK moves to 1.x, then remove this entry.
-  reject: ['agent-chat-cli'],
+  //
+  // @copilotkit/react-core 1.77+ pins @ag-ui/client and @ag-ui/core to exactly
+  // 1.0.1. @ag-ui/aws-strands@0.3.0 imports InterruptSchema from the
+  // @ag-ui/core root, which 1.x doesn't export, so hold CopilotKit (and @ag-ui
+  // at 0.0.59) until aws-strands supports core 1.x, then remove this entry.
+  reject: ['agent-chat-cli', '@copilotkit/react-core'],
   packageFile: '{package.json,packages/**/package.json}',
   cooldown: 1, // Only latest versions published for at least 1 day are updated to
   dep: ['prod', 'dev', 'optional', 'packageManager', 'peer'],
