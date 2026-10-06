@@ -102,6 +102,7 @@ pnpm nx g @aws/nx-plugin:ts#infra
 | `ts#mcp-server`      | MCP server (TypeScript)                                                                                                                  |
 | `ts#dcr-proxy`       | OAuth DCR proxy construct for Cognito-authenticated MCP servers                                                                          |
 | `ts#agent`           | [Strands Agent](https://strandsagents.com/) (TypeScript)                                                                                 |
+| `ts#agent-eval`      | Evaluation harness for a TypeScript Agent (experimental)                                                                                 |
 | `ts#nx-generator`    | Nx generator scaffold                                                                                                                    |
 | `ts#docs`            | Documentation site (Astro + Starlight)                                                                                                   |
 | `smithy#project`     | Smithy model project — a service model, or a shape library shared between Smithy projects                                                |

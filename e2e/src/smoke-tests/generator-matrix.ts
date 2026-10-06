@@ -216,6 +216,10 @@ export const runGeneratorMatrix = async (
     opts,
   );
   await runCLI(
+    `generate @aws/nx-plugin:ts#agent-eval --project=ts-project --agent=my-ts-agent --no-interactive`,
+    opts,
+  );
+  await runCLI(
     `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-agui-agent --protocol=ag-ui --infra=agentcore --no-interactive${deferFlag}`,
     opts,
   );

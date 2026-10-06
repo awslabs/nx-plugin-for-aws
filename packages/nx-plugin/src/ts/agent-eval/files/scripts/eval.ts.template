@@ -1,0 +1,122 @@
+// Eval runner for <%- agentNameClassName %>. Runs each case in `<%- casesFile %>`
+// against the agent in-process and exits non-zero if any case fails.
+import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { AfterToolCallEvent } from '@strands-agents/sdk';
+import { runWithSessionId } from '<%- agentConnectionImport %>';
+import { getAgent } from '<%- relativeAgentImport %>/agent<% if (esm) { %>.js<% } %>';
+
+type Check =
+  | { contains: string }
+  | { notContains: string }
+  | { regex: string }
+  | { toolCalled: string };
+
+interface EvalCase {
+  name: string;
+  prompt: string;
+  expect: Check[];
+}
+
+interface Result {
+  response: string;
+  // Tool names in call order.
+  toolCalls: string[];
+}
+
+const CASES_FILE = process.env.CASES ?? '<%- casesFile %>';
+const TIMEOUT_MS = Number(process.env.EVAL_TIMEOUT_MS ?? 60_000);
+
+// AgentCore session ids must be at least 33 characters.
+const newSessionId = () => randomUUID().replaceAll('-', '').padEnd(33, '0');
+
+const invoke = (prompt: string): Promise<Result> =>
+  runWithSessionId(newSessionId(), async () => {
+    const agent = await getAgent();
+    const toolCalls: string[] = [];
+    agent.addHook(AfterToolCallEvent, (event) => {
+      toolCalls.push(event.toolUse.name);
+    });
+    let response = '';
+    for await (const event of agent.stream(prompt)) {
+      if (
+        event.type === 'modelStreamUpdateEvent' &&
+        event.event.type === 'modelContentBlockDeltaEvent' &&
+        event.event.delta.type === 'textDelta'
+      ) {
+        response += event.event.delta.text;
+      } else if (event.type === 'modelMessageEvent') {
+        response += '\n';
+      }
+    }
+    return { response: response.trim(), toolCalls };
+  });
+
+const withTimeout = <T>(promise: Promise<T>): Promise<T> =>
+  Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`Timed out after ${TIMEOUT_MS}ms`)),
+        TIMEOUT_MS,
+      ).unref(),
+    ),
+  ]);
+
+// Returns a failure reason, or undefined when the check passes.
+const grade = (
+  check: Check,
+  { response, toolCalls }: Result,
+): string | undefined => {
+  const text = response.toLowerCase();
+  if ('contains' in check) {
+    return text.includes(check.contains.toLowerCase())
+      ? undefined
+      : `expected to contain "${check.contains}"`;
+  }
+  if ('notContains' in check) {
+    return text.includes(check.notContains.toLowerCase())
+      ? `expected not to contain "${check.notContains}"`
+      : undefined;
+  }
+  if ('regex' in check) {
+    return new RegExp(check.regex, 'i').test(response)
+      ? undefined
+      : `expected to match /${check.regex}/`;
+  }
+  if ('toolCalled' in check) {
+    return toolCalls.includes(check.toolCalled)
+      ? undefined
+      : `expected tool "${check.toolCalled}" to be called (called: ${toolCalls.join(', ') || 'none'})`;
+  }
+  return `unknown check ${JSON.stringify(check)}`;
+};
+
+const { cases } = JSON.parse(readFileSync(CASES_FILE, 'utf-8')) as {
+  cases: EvalCase[];
+};
+
+console.log(`Running ${cases.length} eval case(s) against <%- agentNameClassName %>\n`);
+
+let passed = 0;
+for (const evalCase of cases) {
+  let result: Result = { response: '', toolCalls: [] };
+  let failures: string[];
+  try {
+    result = await withTimeout(invoke(evalCase.prompt));
+    failures = evalCase.expect.flatMap((check) => grade(check, result) ?? []);
+  } catch (err) {
+    failures = [`invocation failed: ${(err as Error).message}`];
+  }
+  if (failures.length === 0) {
+    passed++;
+    console.log(`\n✓ ${evalCase.name}`);
+  } else {
+    console.log(`\n✗ ${evalCase.name}`);
+    failures.forEach((f) => console.log(`    - ${f}`));
+    console.log(`    response: ${JSON.stringify(result.response)}`);
+  }
+}
+
+console.log(`\nScore: ${passed}/${cases.length}`);
+process.exit(passed === cases.length ? 0 : 1);
