@@ -154,6 +154,7 @@ Add capabilities to existing projects:
 | `ts#website`         | Generates a website application                                                                                    |
 | `ts#website#auth`    | Adds auth to an existing website                                                                                   |
 | `ts#agent`           | Add an AI Agent to a TypeScript project                                                                            |
+| `ts#agent-eval`      | Add an evaluation harness to a TypeScript Agent (experimental)                                                     |
 | `ts#api`             | Create a TypeScript API                                                                                            |
 | `ts#rdb`             | Create a relational database project                                                                               |
 | `ts#dynamodb`        | Create a TypeScript DynamoDB project                                                                               |
