@@ -9,6 +9,9 @@ export type { TsInfraGeneratorSchema } from '../infra/app/schema';
 // TypeScript Agent Generator
 export { tsAgentGenerator } from '../ts/agent/generator.js';
 export type { TsAgentGeneratorSchema } from '../ts/agent/schema';
+// TypeScript Agent Evaluation Generator
+export { tsAgentEvalGenerator } from '../ts/agent-eval/generator.js';
+export type { TsAgentEvalGeneratorSchema } from '../ts/agent-eval/schema';
 // TypeScript API
 export { tsApiGenerator } from '../ts/api/generator.js';
 export type { TsApiGeneratorSchema } from '../ts/api/schema';
