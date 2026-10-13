@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import type { Tree } from '@nx/devkit';
+import { readJson, type Tree } from '@nx/devkit';
 import { declareDependencies } from '../../../utils/declared-dependencies.js';
 import { expectHasMetricTags } from '../../../utils/metrics-assertions.js';
 import {
@@ -186,6 +186,40 @@ export const getAgent = async (sessionId: string) =>
       'utf-8',
     );
     expect(indexContent).toContain('inventory-mcp-client-strands');
+  });
+
+  it('should declare express alongside @strands-agents/sdk in the agent-connection project', async () => {
+    setupProjects();
+
+    await tsAgentMcpConnectionGenerator(tree, {
+      sourceProject: '@test/my-api',
+      targetProject: '@test/my-api',
+      sourceComponent: {
+        generator: 'ts#agent',
+        name: 'my-agent',
+        path: 'src/my-agent',
+        port: 8081,
+      },
+      targetComponent: {
+        generator: 'ts#mcp-server',
+        name: 'inventory-mcp',
+        path: 'src/inventory-mcp',
+        port: 8082,
+        rc: 'InventoryMcp',
+      },
+    });
+
+    const agentConnectionPackageJson = readJson(
+      tree,
+      'packages/common/agent-connection/package.json',
+    );
+    expect(
+      agentConnectionPackageJson.dependencies['@strands-agents/sdk'],
+    ).toBeDefined();
+    // express is strands' optional peer; declaring it here keeps the strands
+    // instance emitted into agent-connection resolving the same express as
+    // every other importer.
+    expect(agentConnectionPackageJson.dependencies.express).toBeDefined();
   });
 
   it('should transform agent.ts to add MCP client', async () => {

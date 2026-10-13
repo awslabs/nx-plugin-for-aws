@@ -29,6 +29,7 @@ describe('ts#astro-docs generator', () => {
     'simple-git',
     'fast-glob',
     '@strands-agents/sdk',
+    'express',
   ]);
 
   beforeEach(() => {
@@ -117,6 +118,11 @@ describe('ts#astro-docs generator', () => {
     expect(deps).toHaveProperty('starlight-blog');
     // Translation on by default — its scripts import these at runtime.
     expect(deps).toHaveProperty('@strands-agents/sdk');
+    // express and @aws-sdk/client-s3 are strands' optional peers, declared
+    // alongside it so this project's strands instance resolves the same
+    // peers as other strands importers in the workspace.
+    expect(deps).toHaveProperty('express');
+    expect(deps).toHaveProperty('@aws-sdk/client-s3');
     expect(deps).toHaveProperty('commander');
     expect(deps).toHaveProperty('fast-glob');
     expect(deps).toHaveProperty('fs-extra');
@@ -234,6 +240,8 @@ describe('ts#astro-docs generator', () => {
       ...(packageJson.devDependencies ?? {}),
     };
     expect(deps).not.toHaveProperty('@strands-agents/sdk');
+    expect(deps).not.toHaveProperty('express');
+    expect(deps).not.toHaveProperty('@aws-sdk/client-s3');
     expect(deps).not.toHaveProperty('commander');
   });
 
