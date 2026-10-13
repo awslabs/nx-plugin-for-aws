@@ -3,7 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  copyFileSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Tree } from '@nx/devkit';
@@ -92,6 +99,94 @@ ${body}`,
     result: JSON.parse(child.stdout.trim().split('\n').pop() ?? '{}'),
     stderr: child.stderr,
   };
+};
+
+/**
+ * The `nobody` account's uid/gid, used to prove the fail-open path from a
+ * root test run without relying on root ignoring the chmod. `nobody` has no
+ * access to this repo's checkout or to the invoking user's home directory,
+ * so everything the dropped-privilege child needs (the node binary and the
+ * rendered template) is copied into a fresh, world-readable directory under
+ * the OS temp dir first.
+ */
+const UNPRIVILEGED_UID = 65_534;
+const UNPRIVILEGED_GID = 65_534;
+
+/**
+ * Whether a process running as that uid can start Node at all. False on a
+ * system without the `nobody` account at that id, or one where even a
+ * world-readable temp copy of the node binary cannot be executed by it.
+ */
+const canDropPrivileges = (): boolean => {
+  try {
+    const sandbox = mkdtempSync(join(tmpdir(), 'failopen-probe-'));
+    chmodSync(sandbox, 0o755);
+    const nodeCopy = join(sandbox, 'node');
+    copyFileSync(process.execPath, nodeCopy);
+    chmodSync(nodeCopy, 0o755);
+    execFileSync(nodeCopy, ['-e', 'process.exit(0)'], {
+      uid: UNPRIVILEGED_UID,
+      gid: UNPRIVILEGED_GID,
+    });
+    rmSync(sandbox, { recursive: true, force: true });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Runs the chmod-based driver as the unprivileged `nobody` account so root
+ * cannot bypass the permission check the way it would running as itself. The
+ * node binary, the rendered template and the driver all live under a
+ * world-readable copy outside the repo and the invoker's home directory, so
+ * `nobody`'s lack of access to either does not matter.
+ */
+const runDriverAsNobody = (
+  body: string,
+): { result: Record<string, unknown>; stderr: string } => {
+  const sandbox = mkdtempSync(join(tmpdir(), 'failopen-sandbox-'));
+  chmodSync(sandbox, 0o755);
+  const nodeCopy = join(sandbox, 'node');
+  copyFileSync(process.execPath, nodeCopy);
+  chmodSync(nodeCopy, 0o755);
+  // Keep the .ts extension so Node's built-in type stripping still applies.
+  const setupPath = join(sandbox, 'global-setup.ts');
+  writeFileSync(setupPath, renderCdkTestGlobalSetup());
+  chmodSync(setupPath, 0o644);
+  const driverPath = join(sandbox, 'driver.mjs');
+  writeFileSync(
+    driverPath,
+    `const { default: setup } = await import(${JSON.stringify(setupPath)});
+${body}`,
+  );
+  chmodSync(driverPath, 0o644);
+
+  // mkdtemp's directory and its parent must both be writable by `nobody`:
+  // the driver creates the per-run directory under it, and the chmod in
+  // `body` toggles the parent's own mode.
+  const scratch = mkdtempSync(join(tmpdir(), 'failopen-scratch-'));
+  chmodSync(scratch, 0o755);
+  execFileSync('chown', [`${UNPRIVILEGED_UID}:${UNPRIVILEGED_GID}`, scratch]);
+
+  try {
+    const child = spawnSync(nodeCopy, [driverPath], {
+      env: { ...process.env, TMPDIR: scratch, TEMP: scratch, TMP: scratch },
+      uid: UNPRIVILEGED_UID,
+      gid: UNPRIVILEGED_GID,
+      encoding: 'utf-8',
+    });
+    if (child.status !== 0) {
+      throw new Error(`driver failed (${child.status}): ${child.stderr}`);
+    }
+    return {
+      result: JSON.parse(child.stdout.trim().split('\n').pop() ?? '{}'),
+      stderr: child.stderr,
+    };
+  } finally {
+    rmSync(sandbox, { recursive: true, force: true });
+    rmSync(scratch, { recursive: true, force: true });
+  }
 };
 
 describe('cdk test global setup', () => {
@@ -196,12 +291,23 @@ console.log(JSON.stringify({ left }));
       expect(result).toEqual({ left: 0 });
     });
 
-    it.skipIf(process.getuid?.() === 0)(
-      'should warn once, naming the directory, instead of failing when it cannot be removed',
+    const isRoot = process.getuid?.() === 0;
+    const isWindows = process.platform === 'win32';
+    const dropPrivilegesWorks = isRoot && canDropPrivileges();
+    // chmod does not block deletes on win32, so the test cannot pass there.
+    // As root, chmod has no effect on the invoking account itself, so the
+    // scenario must run as an unprivileged account instead; skip only if
+    // that account cannot even start Node on this machine.
+    const skipReason = isWindows
+      ? 'chmod does not block deletes on win32'
+      : isRoot && !dropPrivilegesWorks
+        ? 'root and the unprivileged probe account cannot start Node here'
+        : undefined;
+
+    it.skipIf(skipReason !== undefined)(
+      `should warn once, naming the directory, instead of failing when it cannot be removed${skipReason ? ` (skipped: ${skipReason})` : ''}`,
       () => {
-        const { result, stderr } = runDriver(
-          scratch,
-          `import { chmodSync, existsSync } from 'node:fs';
+        const driverBody = `import { chmodSync, existsSync } from 'node:fs';
 import { dirname } from 'node:path';
 const teardown = await setup();
 const dir = process.env.TMPDIR;
@@ -213,8 +319,10 @@ try {
   chmodSync(dirname(dir), 0o755);
 }
 console.log(JSON.stringify({ dir, exists: existsSync(dir), ms: Date.now() - start }));
-`,
-        );
+`;
+        const { result, stderr } = isRoot
+          ? runDriverAsNobody(driverBody)
+          : runDriver(scratch, driverBody);
 
         expect(result.exists).toBe(true);
         expect(result.ms).toBeGreaterThanOrEqual(1500);
