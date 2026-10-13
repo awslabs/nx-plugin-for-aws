@@ -41,7 +41,12 @@ import {
  * under the OS temp dir, which nothing removed, so a workspace's tests leaked
  * into the shared `/tmp`. The vended `tests/global-setup.ts` points `TMPDIR`,
  * `TEMP` and `TMP` at a directory of its own for the run and removes it in
- * teardown. It also merges `aws:cdk:bundling-stacks: []` into
+ * teardown. aws-cdk-lib deletes the `cdk.out*` directories an `App` created
+ * from a `process.on('exit')` handler, and vitest runs the global teardown
+ * while its forked workers are still exiting, so a single `rmSync` can race
+ * that delete and return with the directory still there. The teardown
+ * therefore retries every 50 ms for up to 2 s, and warns (naming the
+ * directory) rather than failing the run if it is still there. It also merges `aws:cdk:bundling-stacks: []` into
  * `CDK_CONTEXT_JSON`, which only affects user-written bundling constructs
  * (`NodejsFunction`, `PythonFunction`); the vended constructs read prebuilt
  * bundles. The setup is registered in the infra project's and the shared
@@ -50,7 +55,7 @@ import {
  * Only the exact shape the generator wrote before is changed. A `test` target,
  * a `globalSetup`, a vitest config or a `tests/global-setup.ts` that differs is
  * left untouched and reported, and a setup file the plugin did not write is
- * never registered. The template has no comments, so a migrated project is
+ * never registered. The migration writes the generator's own template, so a migrated project is
  * byte-identical to a freshly generated one. Infra READMEs are left alone: the
  * generator writes them `KeepExisting`, and users edit them.
  */

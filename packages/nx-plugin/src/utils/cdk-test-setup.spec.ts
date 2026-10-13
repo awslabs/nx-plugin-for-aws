@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -65,6 +65,35 @@ console.log(JSON.stringify({ during, after, dirExistsAfter: existsSync(during.TM
   return JSON.parse(stdout.trim().split('\n').pop() ?? '{}');
 };
 
+/**
+ * Runs a driver script against the vended global setup in a child process
+ * (see runSetup) and returns its last stdout line as JSON, plus its stderr.
+ */
+const runDriver = (
+  dir: string,
+  body: string,
+): { result: Record<string, unknown>; stderr: string } => {
+  const setupPath = join(dir, 'global-setup.mts');
+  writeFileSync(setupPath, renderCdkTestGlobalSetup());
+  const driverPath = join(dir, 'driver.mjs');
+  writeFileSync(
+    driverPath,
+    `const { default: setup } = await import(${JSON.stringify(setupPath)});
+${body}`,
+  );
+  const child = spawnSync(process.execPath, [driverPath], {
+    env: { ...process.env, TMPDIR: dir, TEMP: dir, TMP: dir },
+    encoding: 'utf-8',
+  });
+  if (child.status !== 0) {
+    throw new Error(`driver failed (${child.status}): ${child.stderr}`);
+  }
+  return {
+    result: JSON.parse(child.stdout.trim().split('\n').pop() ?? '{}'),
+    stderr: child.stderr,
+  };
+};
+
 describe('cdk test global setup', () => {
   let scratch: string;
 
@@ -124,6 +153,78 @@ describe('cdk test global setup', () => {
       // TMP was unset before, so it is unset again.
       expect(run.after).toEqual(env);
     });
+
+    /**
+     * aws-cdk-lib registers `process.on('exit')` cleanup of the `cdk.out*`
+     * directories an `App` creates (`@aws-cdk/cloud-assembly-api`). vitest runs
+     * the global teardown while the forked worker is still exiting, so the
+     * worker deletes its `cdk.out*` inside the per-run directory at the same
+     * moment the teardown deletes the directory. A single `rmSync` can then
+     * return without an error while the directory is still there. This
+     * reproduces that with a second process deleting a `cdk.out` tree just as
+     * the teardown starts.
+     */
+    it('should remove the directory while another process is deleting inside it', () => {
+      const { result } = runDriver(
+        scratch,
+        `import { spawn } from 'node:child_process';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+let left = 0;
+for (let i = 0; i < 20; i++) {
+  const teardown = await setup();
+  const dir = process.env.TMPDIR;
+  const out = join(dir, 'cdk.out');
+  for (let a = 0; a < 40; a++) {
+    mkdirSync(join(out, 'asset.' + a), { recursive: true });
+    for (let f = 0; f < 50; f++) writeFileSync(join(out, 'asset.' + a, f + '.js'), '');
+  }
+  const deleter = spawn(process.execPath, ['-e', "process.stdout.write('go'); require('node:fs').rmSync(" + JSON.stringify(out) + ", { recursive: true, force: true })"], { stdio: ['ignore', 'pipe', 'inherit'] });
+  const exited = new Promise((resolve) => deleter.once('exit', resolve));
+  await new Promise((resolve) => deleter.stdout.once('data', resolve));
+  await teardown();
+  await exited;
+  if (existsSync(dir)) {
+    left++;
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+console.log(JSON.stringify({ left }));
+`,
+      );
+
+      expect(result).toEqual({ left: 0 });
+    });
+
+    it.skipIf(process.getuid?.() === 0)(
+      'should warn once, naming the directory, instead of failing when it cannot be removed',
+      () => {
+        const { result, stderr } = runDriver(
+          scratch,
+          `import { chmodSync, existsSync } from 'node:fs';
+import { dirname } from 'node:path';
+const teardown = await setup();
+const dir = process.env.TMPDIR;
+chmodSync(dirname(dir), 0o555);
+const start = Date.now();
+try {
+  await teardown();
+} finally {
+  chmodSync(dirname(dir), 0o755);
+}
+console.log(JSON.stringify({ dir, exists: existsSync(dir), ms: Date.now() - start }));
+`,
+        );
+
+        expect(result.exists).toBe(true);
+        expect(result.ms).toBeGreaterThanOrEqual(1500);
+        const warnings = stderr
+          .split('\n')
+          .filter((line) => line.includes(String(result.dir)));
+        expect(warnings).toHaveLength(1);
+      },
+      10_000,
+    );
   });
 
   describe('addCdkTestGlobalSetup', () => {
