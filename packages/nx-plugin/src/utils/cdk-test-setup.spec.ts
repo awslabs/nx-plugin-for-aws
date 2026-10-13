@@ -284,6 +284,18 @@ console.log(JSON.stringify({ dir, exists: existsSync(dir), ms: Date.now() - star
       expect(config()).toBe(before);
     });
 
+    it('should write the setup file without creating a config for a project that has no vitest config', async () => {
+      tree.delete(`${root}/vitest.config.mts`);
+
+      await expect(addCdkTestGlobalSetup(tree, root)).resolves.toBeUndefined();
+
+      expect(tree.read(`${root}/${CDK_TEST_GLOBAL_SETUP}`, 'utf-8')).toBe(
+        renderCdkTestGlobalSetup(),
+      );
+      expect(tree.exists(`${root}/vitest.config.mts`)).toBe(false);
+      expect(tree.exists(`${root}/vite.config.mts`)).toBe(false);
+    });
+
     it('should keep the infra vitest config well formed', async () => {
       const infra = createTreeUsingTsSolutionSetup();
       await tsInfraGenerator(infra, { name: 'infra', directory: 'packages' });

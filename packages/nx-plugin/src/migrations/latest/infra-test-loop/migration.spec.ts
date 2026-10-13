@@ -272,6 +272,28 @@ describe('infra-test-loop migration', () => {
       );
       expect(result.nextSteps).toEqual([expect.stringContaining(configPath)]);
     });
+
+    it('should report an infrastructure project without a vitest config and vend no setup for it', async () => {
+      const { fresh } = await generatePreFixWorkspace(tree);
+      tree.delete('packages/infra/vitest.config.mts');
+
+      const result = await migration(tree);
+
+      expect(tree.exists('packages/infra/tests/global-setup.ts')).toBe(false);
+      expect(tree.exists('packages/infra/vitest.config.mts')).toBe(false);
+      expect(result.nextSteps).toEqual([
+        expect.stringMatching(
+          /^@proj\/infra: no vitest config found in packages\/infra - add `globalSetup: \['\.\/tests\/global-setup\.ts'\]`/,
+        ),
+      ]);
+      // The rest of the project and common-constructs are still migrated.
+      expect(
+        readProjectConfiguration(tree, '@proj/infra').targets.test,
+      ).toEqual({ dependsOn: ['^assemble'] });
+      for (const path of touchedFiles(CONSTRUCTS_ROOT)) {
+        expect(tree.read(path, 'utf-8')).toBe(fresh[path]);
+      }
+    });
   });
 
   it('should be a no-op when the workspace has no infrastructure project', async () => {
