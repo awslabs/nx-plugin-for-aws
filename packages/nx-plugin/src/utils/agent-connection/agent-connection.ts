@@ -33,6 +33,36 @@ import {
   withVersions,
 } from '../versions.js';
 
+/**
+ * `@strands-agents/sdk` and its optional peers that are vended in
+ * `versions.ts` and reachable at a floating version via a transitive
+ * dependency (e.g. `@modelcontextprotocol/sdk` floats `express: ^5.2.1`).
+ * pnpm suffixes each installed copy of a package by the versions of its
+ * resolved peers, so an importer that declares strands without also
+ * declaring every one of these can resolve a peer to a different version
+ * than the pin every other importer uses — splitting `@strands-agents/sdk`
+ * into two peer-suffixed instances of the same version. Anything importing
+ * both instances then sees two nominal identities of every SDK type and
+ * fails to compile with TS2322/TS2345.
+ *
+ * `@strands-agents/sdk`'s other optional peers (`@a2a-js/sdk`,
+ * `@smithy/types`) are vended too, but nothing outside strands' own peer
+ * declaration pulls either one in at a floating version, so they are not
+ * part of this set — see `strands-optional-peer-drift.md`'s reachability
+ * check.
+ *
+ * Every site that declares `@strands-agents/sdk` must declare this whole
+ * tuple alongside it, in whichever shape that site expresses dependencies
+ * (a plain `{ name }` entry, a `when`/`root`-qualified declaration, or a
+ * `TS_TEMPLATE_DEPS`-style name array) — this is the one place the three
+ * names are listed.
+ */
+export const STRANDS_PEER_DEPENDENCY_NAMES = [
+  '@strands-agents/sdk',
+  'express',
+  '@aws-sdk/client-s3',
+] as const satisfies readonly ITsDepVersion[];
+
 /** TypeScript dependencies a caller must declare to emit agent-connection clients. */
 export const AGENT_CONNECTION_DEPENDENCIES = [
   { name: '@aws-lambda-powertools/parameters' },
@@ -40,8 +70,7 @@ export const AGENT_CONNECTION_DEPENDENCIES = [
   { name: 'aws4fetch' },
   { name: '@modelcontextprotocol/sdk' },
   { name: '@a2a-js/sdk' },
-  { name: '@strands-agents/sdk' },
-  { name: '@aws-sdk/client-s3' },
+  ...STRANDS_PEER_DEPENDENCY_NAMES.map((name) => ({ name })),
 ] as const satisfies readonly { name: ITsDepVersion }[];
 
 /** Python dependencies a caller must declare to emit agent-connection clients. */
@@ -311,10 +340,14 @@ const TS_TEMPLATE_DEPS: Record<
     '@modelcontextprotocol/sdk',
   ],
   'core-a2a': ['@aws-sdk/credential-providers', '@a2a-js/sdk'],
-  'core-strands/base': ['@strands-agents/sdk', '@aws-sdk/client-s3'],
-  'core-strands/mcp': ['@strands-agents/sdk', '@aws-sdk/client-s3'],
-  'core-strands/gateway': ['@strands-agents/sdk', '@aws-sdk/client-s3'],
-  'core-strands/a2a': ['@strands-agents/sdk', '@aws-sdk/client-s3'],
+  // Every core-strands/* template declares the full strands peer set (see
+  // STRANDS_PEER_DEPENDENCY_NAMES) even though these templates only import
+  // @strands-agents/sdk — declaring the peers here keeps the whole strands
+  // subgraph on one pnpm instance.
+  'core-strands/base': [...STRANDS_PEER_DEPENDENCY_NAMES],
+  'core-strands/mcp': [...STRANDS_PEER_DEPENDENCY_NAMES],
+  'core-strands/gateway': [...STRANDS_PEER_DEPENDENCY_NAMES],
+  'core-strands/a2a': [...STRANDS_PEER_DEPENDENCY_NAMES],
 };
 
 const emitTs = (

@@ -46,6 +46,16 @@ export const DEPENDENCIES = declareDependencies()({
   ts: [
     { name: '@modelcontextprotocol/sdk' },
     { name: '@strands-agents/sdk' },
+    // express is strands' optional peer (see STRANDS_PEER_DEPENDENCY_NAMES in
+    // agent-connection.ts). Declared here too, even though it is redundant
+    // with ts#agent's own unconditional declaration on the same project, so
+    // this generator is self-sufficient. @aws-sdk/client-s3, strands' other
+    // required peer, is deliberately NOT added here: ts#agent only declares
+    // it when session: 's3' (see generator.ts), and adding it unconditionally
+    // from this connection would install an unused S3 client into an
+    // in-memory-session agent — a user-visible change outside this fix's
+    // scope.
+    { name: 'express' },
     { name: '@aws-lambda-powertools/parameters' },
     { name: '@aws-sdk/client-appconfigdata' },
     { name: 'aws4fetch' },

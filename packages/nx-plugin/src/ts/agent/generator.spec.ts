@@ -1232,6 +1232,25 @@ describe('ts#agent generator', () => {
     expect(projectConfig.metadata.components[0].protocol).toBe('http');
   });
 
+  it('should declare express alongside @strands-agents/sdk for the default HTTP protocol', async () => {
+    await tsAgentGenerator(tree, {
+      project: 'test-project',
+      infra: 'none',
+      iac: 'cdk',
+    });
+
+    const projectPackageJson = JSON.parse(
+      tree.read('apps/test-project/package.json', 'utf-8'),
+    );
+    expect(
+      projectPackageJson.dependencies['@strands-agents/sdk'],
+    ).toBeDefined();
+    // express is strands' optional peer. The HTTP protocol runs tRPC/WebSocket,
+    // not express, but still needs the pin declared so its strands instance
+    // resolves the same express as every other importer.
+    expect(projectPackageJson.dependencies.express).toBeDefined();
+  });
+
   it('should pass A2A protocol to CDK infrastructure', async () => {
     await tsAgentGenerator(tree, {
       project: 'test-project',

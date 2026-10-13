@@ -16,6 +16,7 @@ import {
   AGENT_CONNECTION_PROJECT_DIR,
   addTypeScriptCoreClient,
   ensureTypeScriptAgentConnectionProject,
+  STRANDS_PEER_DEPENDENCY_NAMES,
 } from '../../../utils/agent-connection/agent-connection.js';
 import {
   addDestructuredImport,
@@ -51,7 +52,11 @@ import type { TsAgentA2aConnectionGeneratorSchema } from './schema';
 export const DEPENDENCIES = declareDependencies()({
   ts: [
     { name: '@a2a-js/sdk', root: true },
-    { name: '@strands-agents/sdk', root: true },
+    // @strands-agents/sdk and its peers (STRANDS_PEER_DEPENDENCY_NAMES),
+    // pinned at the root so the root strands copy resolves the same peers as
+    // every other importer (see agent-connection.ts's TS_TEMPLATE_DEPS for
+    // the same reasoning).
+    ...STRANDS_PEER_DEPENDENCY_NAMES.map((name) => ({ name, root: true })),
     { name: '@aws-lambda-powertools/parameters', root: true },
     { name: '@aws-sdk/client-appconfigdata', root: true },
     { name: 'aws4fetch', root: true },

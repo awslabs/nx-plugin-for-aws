@@ -12,6 +12,7 @@ import {
   type Tree,
 } from '@nx/devkit';
 import { addTsDependencies } from '../../utils/add-dependencies.js';
+import { STRANDS_PEER_DEPENDENCY_NAMES } from '../../utils/agent-connection/agent-connection.js';
 import { declareDependencies } from '../../utils/declared-dependencies.js';
 import { formatFilesInSubtree } from '../../utils/format.js';
 import { installDependencies } from '../../utils/install.js';
@@ -48,7 +49,15 @@ export const DEPENDENCIES = declareDependencies<TsAstroDocsMetadata>()({
     { name: 'cookie' },
     { name: '@astrojs/starlight' },
     { name: 'starlight-blog', when: (m) => m.includeBlog },
-    { name: '@strands-agents/sdk', when: (m) => m.includeTranslation },
+    // @strands-agents/sdk and its peers (STRANDS_PEER_DEPENDENCY_NAMES),
+    // under the same includeTranslation guard — translate.ts imports strands
+    // directly, and pnpm's peer-suffixing bug (see
+    // STRANDS_PEER_DEPENDENCY_NAMES) needs every peer declared alongside it,
+    // not just the one translate.ts happens to import.
+    ...STRANDS_PEER_DEPENDENCY_NAMES.map((name) => ({
+      name,
+      when: (m: TsAstroDocsMetadata) => m.includeTranslation,
+    })),
     { name: 'commander', when: (m) => m.includeTranslation },
     { name: 'fast-glob', when: (m) => m.includeTranslation },
     { name: 'fs-extra', when: (m) => m.includeTranslation },
