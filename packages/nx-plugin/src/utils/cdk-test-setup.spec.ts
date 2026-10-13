@@ -5,6 +5,7 @@
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
   chmodSync,
+  chownSync,
   copyFileSync,
   mkdtempSync,
   realpathSync,
@@ -12,9 +13,9 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { Tree } from '@nx/devkit';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tsInfraGenerator } from '../infra/app/generator.js';
 import tsProjectGenerator from '../ts/lib/generator.js';
 import {
@@ -113,13 +114,19 @@ const UNPRIVILEGED_UID = 65_534;
 const UNPRIVILEGED_GID = 65_534;
 
 /**
- * Whether a process running as that uid can start Node at all. False on a
- * system without the `nobody` account at that id, or one where even a
- * world-readable temp copy of the node binary cannot be executed by it.
+ * Copies the node binary into a fresh, world-readable directory under the OS
+ * temp dir and checks that a process running as that uid can start it.
+ * Returns the copy's path, or undefined on a system without the `nobody`
+ * account at that id, or one where even that copy cannot be executed by it.
+ * On success the caller owns the copy's directory and must remove it; on
+ * failure it is removed here, because the copy is about the size of the node
+ * binary.
  */
-const canDropPrivileges = (): boolean => {
+const prepareUnprivilegedNode = (): string | undefined => {
+  let sandbox: string | undefined;
+  let handedOver = false;
   try {
-    const sandbox = mkdtempSync(join(tmpdir(), 'failopen-probe-'));
+    sandbox = mkdtempSync(join(tmpdir(), 'failopen-node-'));
     chmodSync(sandbox, 0o755);
     const nodeCopy = join(sandbox, 'node');
     copyFileSync(process.execPath, nodeCopy);
@@ -128,28 +135,32 @@ const canDropPrivileges = (): boolean => {
       uid: UNPRIVILEGED_UID,
       gid: UNPRIVILEGED_GID,
     });
-    rmSync(sandbox, { recursive: true, force: true });
-    return true;
+    handedOver = true;
+    return nodeCopy;
   } catch {
-    return false;
+    return undefined;
+  } finally {
+    // Keep the directory only when its node copy is handed to the caller.
+    if (sandbox !== undefined && !handedOver) {
+      rmSync(sandbox, { recursive: true, force: true });
+    }
   }
 };
 
 /**
  * Runs the chmod-based driver as the unprivileged `nobody` account so root
- * cannot bypass the permission check the way it would running as itself. The
- * node binary, the rendered template and the driver all live under a
- * world-readable copy outside the repo and the invoker's home directory, so
- * `nobody`'s lack of access to either does not matter.
+ * cannot bypass the permission check the way it would running as itself.
+ * `nodeCopy` comes from prepareUnprivilegedNode. The rendered template and
+ * the driver live under a world-readable copy outside the repo and the
+ * invoker's home directory, so `nobody`'s lack of access to either does not
+ * matter.
  */
 const runDriverAsNobody = (
+  nodeCopy: string,
   body: string,
 ): { result: Record<string, unknown>; stderr: string } => {
   const sandbox = mkdtempSync(join(tmpdir(), 'failopen-sandbox-'));
   chmodSync(sandbox, 0o755);
-  const nodeCopy = join(sandbox, 'node');
-  copyFileSync(process.execPath, nodeCopy);
-  chmodSync(nodeCopy, 0o755);
   // Keep the .ts extension so Node's built-in type stripping still applies.
   const setupPath = join(sandbox, 'global-setup.ts');
   writeFileSync(setupPath, renderCdkTestGlobalSetup());
@@ -167,7 +178,7 @@ ${body}`,
   // `body` toggles the parent's own mode.
   const scratch = mkdtempSync(join(tmpdir(), 'failopen-scratch-'));
   chmodSync(scratch, 0o755);
-  execFileSync('chown', [`${UNPRIVILEGED_UID}:${UNPRIVILEGED_GID}`, scratch]);
+  chownSync(scratch, UNPRIVILEGED_UID, UNPRIVILEGED_GID);
 
   try {
     const child = spawnSync(nodeCopy, [driverPath], {
@@ -293,14 +304,22 @@ console.log(JSON.stringify({ left }));
 
     const isRoot = process.getuid?.() === 0;
     const isWindows = process.platform === 'win32';
-    const dropPrivilegesWorks = isRoot && canDropPrivileges();
+    // One node copy per root run, shared by the probe and the test, so the
+    // binary is copied once even though the skip decision is made here at
+    // collection time.
+    const unprivilegedNode = isRoot ? prepareUnprivilegedNode() : undefined;
+    afterAll(() => {
+      if (unprivilegedNode !== undefined) {
+        rmSync(dirname(unprivilegedNode), { recursive: true, force: true });
+      }
+    });
     // chmod does not block deletes on win32, so the test cannot pass there.
     // As root, chmod has no effect on the invoking account itself, so the
     // scenario must run as an unprivileged account instead; skip only if
     // that account cannot even start Node on this machine.
     const skipReason = isWindows
       ? 'chmod does not block deletes on win32'
-      : isRoot && !dropPrivilegesWorks
+      : isRoot && unprivilegedNode === undefined
         ? 'root and the unprivileged probe account cannot start Node here'
         : undefined;
 
@@ -320,9 +339,10 @@ try {
 }
 console.log(JSON.stringify({ dir, exists: existsSync(dir), ms: Date.now() - start }));
 `;
-        const { result, stderr } = isRoot
-          ? runDriverAsNobody(driverBody)
-          : runDriver(scratch, driverBody);
+        const { result, stderr } =
+          unprivilegedNode !== undefined
+            ? runDriverAsNobody(unprivilegedNode, driverBody)
+            : runDriver(scratch, driverBody);
 
         expect(result.exists).toBe(true);
         expect(result.ms).toBeGreaterThanOrEqual(1500);
