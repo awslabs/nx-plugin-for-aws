@@ -163,7 +163,10 @@ export const smithyCompileOutputs = (
 
 /**
  * What a Smithy build target hashes: its own sources plus the outputs of the
- * tasks it depends on, which is how a consumed shape library is hashed.
+ * tasks it depends on. That covers a consumed shape library's output only
+ * when nx.json's `default` named input carries the `dependentTasksOutputFiles`
+ * entry, which only ts/lib/generator.ts writes - a Smithy-only workspace has
+ * no such entry, so `default` falls back to Nx's `{projectRoot}/**\/*`.
  */
 export const SMITHY_TARGET_INPUTS = ['default'];
 

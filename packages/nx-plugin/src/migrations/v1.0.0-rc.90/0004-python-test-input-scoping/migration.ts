@@ -13,7 +13,6 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { PYTHON_TEST_FILE_EXCLUSIONS } from '../../../py/project/generator.js';
-import { DEPENDENT_TASKS_OUTPUT_FILES_INPUT } from '../../../ts/lib/generator.js';
 import { formatFilesInSubtree } from '../../../utils/format.js';
 
 /**
@@ -46,6 +45,15 @@ const PREVIOUS_INPUTS = ['default', '^production'];
  * to the current one; anything else is the user's own scoping decision.
  */
 const PREVIOUSLY_VENDED_GLOBS = ['**/*', 'dist/**'];
+
+/**
+ * The dependent-task-output glob this migration shipped with at release. A
+ * released migration's output must not change, so this is the literal value
+ * rather than a reference to ts/lib/generator.ts's current constant, which a
+ * later migration (cache-inputs-outputs) widens further and reports through
+ * its own stale-pass advisory.
+ */
+const RELEASED_DEPENDENT_TASKS_OUTPUT_GLOB = '!{reports,coverage}/**';
 
 const isPythonProject = (project: ProjectConfiguration): boolean =>
   Object.values(project.targets ?? {}).some((target) =>
@@ -96,7 +104,7 @@ const migrateNamedInputs = (tree: Tree, nextSteps: string[]): void => {
   const defaultInput = nxJson.namedInputs?.default;
   let nextDefault = defaultInput;
   if (defaultInput) {
-    const glob = DEPENDENT_TASKS_OUTPUT_FILES_INPUT.dependentTasksOutputFiles;
+    const glob = RELEASED_DEPENDENT_TASKS_OUTPUT_GLOB;
     // Only an entry this plugin vended is rewritten; a different glob is the
     // user's own scoping decision.
     nextDefault = defaultInput.map((input) =>

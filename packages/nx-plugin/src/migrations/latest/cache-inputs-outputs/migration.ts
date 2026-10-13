@@ -35,7 +35,10 @@ import { formatFilesInSubtree } from '../../../utils/format.js';
  *   rewrites them, which missed every dependent task.
  * - A Smithy project's `compile` and `generate-ssdk` declare `["default"]`,
  *   their own sources plus the outputs of the tasks they depend on, rather
- *   than relying on whatever target default applies.
+ *   than relying on whatever target default applies. That hashes a consumed
+ *   shape library's output only in a workspace where nx.json's `default`
+ *   carries the `dependentTasksOutputFiles` entry, which only
+ *   ts/lib/generator.ts writes.
  * - A ts#rdb project's `generate` (`prisma generate`) is cached on
  *   `["default"]`, which covers the Prisma schema and config. The Prisma
  *   version is hashed through the lockfile.
@@ -80,6 +83,24 @@ const migrateGlob = (tree: Tree, nextSteps: string[]): boolean => {
   const defaultInputs = nxJson?.namedInputs?.default;
   if (!nxJson || !Array.isArray(defaultInputs)) return false;
 
+  // A dependentTasksOutputFiles entry is "vended" if it is already current or
+  // is one of the globs this plugin has shipped (and so would be rewritten to
+  // the current one below). An extra entry a user added beside it - neither
+  // current nor vended - is their own scoping decision and is reported only
+  // when no vended-or-current entry exists; otherwise it would be reported on
+  // every run with advice that could widen hashing.
+  const hasVendedOrCurrentEntry = defaultInputs.some(
+    (input) =>
+      typeof input === 'object' &&
+      input !== null &&
+      'dependentTasksOutputFiles' in input &&
+      (input.dependentTasksOutputFiles === CURRENT_GLOB ||
+        (input.transitive &&
+          VENDED_DEPENDENT_TASKS_OUTPUT_GLOBS.includes(
+            input.dependentTasksOutputFiles,
+          ))),
+  );
+
   let rewrote = false;
   nxJson.namedInputs.default = defaultInputs.map((input) => {
     if (typeof input !== 'object' || !('dependentTasksOutputFiles' in input)) {
@@ -94,9 +115,11 @@ const migrateGlob = (tree: Tree, nextSteps: string[]): boolean => {
       rewrote = true;
       return { ...input, dependentTasksOutputFiles: CURRENT_GLOB };
     }
-    nextSteps.push(
-      `nx.json: the 'default' input's dependentTasksOutputFiles '${glob}' has diverged from the generated shape - left untouched. Consider excluding checkov reports and vitest coverage ('${CURRENT_GLOB}'), which otherwise miss every dependent task whenever a scan or coverage run rewrites them.`,
-    );
+    if (!hasVendedOrCurrentEntry) {
+      nextSteps.push(
+        `nx.json: the 'default' input's dependentTasksOutputFiles '${glob}' has diverged from the generated shape - left untouched. Consider excluding checkov reports and vitest coverage ('${CURRENT_GLOB}'), which otherwise miss every dependent task whenever a scan or coverage run rewrites them.`,
+      );
+    }
     return input;
   });
 

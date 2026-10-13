@@ -26,6 +26,7 @@ import {
 } from '../../../ts/rdb/generator.js';
 import { formatFilesInSubtree } from '../../../utils/format.js';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
+import { importMigration } from '../../../utils/test-migration.js';
 import migration from './migration.js';
 
 /** The dependent task output glob 1.0.6 and earlier vended. */
@@ -292,6 +293,36 @@ describe('cache-inputs-outputs migration', () => {
     expect(stalePassAdvisory(nextSteps)).toEqual([]);
   });
 
+  it('should rewrite the vended entry, leave an extra custom entry untouched, and not report the extra entry as diverged', async () => {
+    await generateWorkspace(tree);
+    await revertToPreFix(tree);
+    const nxJson = readNxJson(tree);
+    nxJson.namedInputs.default = [
+      '{projectRoot}/**/*',
+      { dependentTasksOutputFiles: PRE_FIX_GLOB, transitive: true },
+      { dependentTasksOutputFiles: '**/*.d.ts' },
+    ];
+    updateNxJson(tree, nxJson);
+    await formatFilesInSubtree(tree);
+
+    const { nextSteps } = await migration(tree);
+
+    expect(readNxJson(tree).namedInputs.default).toEqual([
+      '{projectRoot}/**/*',
+      DEPENDENT_TASKS_OUTPUT_FILES_INPUT,
+      { dependentTasksOutputFiles: '**/*.d.ts' },
+    ]);
+    expect(nextSteps.some((step) => step.includes('**/*.d.ts'))).toBe(false);
+    expect(stalePassAdvisory(nextSteps)).toHaveLength(1);
+
+    // A second run settles: nothing left to rewrite or report, and the tree
+    // does not change at all.
+    const before = snapshotTree(tree);
+    const second = await migration(tree);
+    expect(second.nextSteps).toEqual([]);
+    expect(snapshotTree(tree)).toEqual(before);
+  });
+
   describe('diverged targets', () => {
     const divergeAndMigrate = async (
       projectName: string,
@@ -438,5 +469,41 @@ describe('cache-inputs-outputs migration', () => {
     expect(readNxJson(tree).namedInputs.default).toContainEqual(
       DEPENDENT_TASKS_OUTPUT_FILES_INPUT,
     );
+  });
+
+  it('should report the stale-pass advisory on a pre-rc.90 upgrade chained through rc.90/0004', async () => {
+    // A workspace from before rc.90: the dependent-task-output glob is the
+    // original `dist/**`, which rc.90/0004 rewrites to whatever
+    // DEPENDENT_TASKS_OUTPUT_FILES_INPUT held at the time it ran. On a real
+    // `nx migrate`, that is this plugin's *current* constant, since rc.90/0004
+    // is a released migration that reads it live rather than a frozen value.
+    const fresh = createTreeUsingTsSolutionSetup();
+    await generateWorkspace(fresh);
+
+    await generateWorkspace(tree);
+    await revertToPreFix(tree);
+    const nxJson = readNxJson(tree);
+    nxJson.namedInputs.default = nxJson.namedInputs.default.map((input) =>
+      typeof input === 'object' && 'dependentTasksOutputFiles' in input
+        ? { ...input, dependentTasksOutputFiles: 'dist/**' }
+        : input,
+    );
+    updateNxJson(tree, nxJson);
+    await formatFilesInSubtree(tree);
+
+    const rc90PythonTestInputScoping = await importMigration(
+      'python-test-input-scoping',
+    );
+    await rc90PythonTestInputScoping(tree);
+
+    const { nextSteps } = await migration(tree);
+
+    expect(readNxJson(tree).namedInputs.default).toContainEqual(
+      DEPENDENT_TASKS_OUTPUT_FILES_INPUT,
+    );
+    expect(readNxJson(tree).namedInputs.default).toEqual(
+      readNxJson(fresh).namedInputs.default,
+    );
+    expect(stalePassAdvisory(nextSteps)).toHaveLength(1);
   });
 });
