@@ -5,9 +5,11 @@
 import {
   getProjects,
   readJson,
+  readNxJson,
   readProjectConfiguration,
   type Tree,
 } from '@nx/devkit';
+import { matchGlobPaths } from 'nx/src/native';
 import { expectHasMetricTags } from '../../utils/metrics-assertions.js';
 import { toKebabCase } from '../../utils/names.js';
 import {
@@ -696,6 +698,34 @@ export class ApplicationStage extends Stage {
     expect(readProjectConfiguration(tree, '@proj/test')).toBeDefined();
     expect(readProjectConfiguration(tree, '@proj/other')).toBeDefined();
     expect(tree.exists('packages/other/cdk.json')).toBeTruthy();
+  });
+
+  // Ties the dependent task output glob to the report path the vended
+  // checkov.yml writes, so renaming the report breaks this test rather than
+  // silently hashing the report into every downstream task again.
+  it('should keep the checkov report out of dependent task hashes', async () => {
+    await tsInfraGenerator(tree, options);
+
+    const checkovConfig = tree.read('packages/test/checkov.yml', 'utf-8') ?? '';
+    const reportPath = checkovConfig.match(
+      /^output-file-path: console,(.+)$/m,
+    )?.[1];
+    expect(reportPath).toBe('dist/packages/test/checkov/checkov_report.json');
+
+    const glob = readNxJson(tree)
+      .namedInputs.default.filter(
+        (input) =>
+          typeof input === 'object' && 'dependentTasksOutputFiles' in input,
+      )
+      .map(
+        (input) =>
+          (input as { dependentTasksOutputFiles: string })
+            .dependentTasksOutputFiles,
+      );
+    expect(matchGlobPaths(glob, [reportPath])).toEqual([false]);
+    expect(
+      matchGlobPaths(glob, ['dist/packages/test/cdk.out/manifest.json']),
+    ).toEqual([true]);
   });
 
   describe('assemble target', () => {

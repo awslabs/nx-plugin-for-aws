@@ -233,10 +233,10 @@ export async function terraformProjectGenerator(
       },
       dependsOn: ['terraform-init', '^init'],
     },
+    // Reads remote state, which no input can hash.
     output: {
       executor: 'nx:run-commands',
-      cache: true,
-      inputs: ['default'],
+      cache: false,
       options: {
         command: 'terraform output -json',
         forwardAllArgs: true,

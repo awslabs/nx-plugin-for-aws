@@ -4,6 +4,7 @@
  */
 import { readJson, readNxJson, type Tree, writeJson } from '@nx/devkit';
 import uniqBy from 'lodash.uniqby';
+import { matchGlobPaths } from 'nx/src/native';
 import {
   declareDependencies,
   declaredNames,
@@ -143,11 +144,91 @@ describe('ts lib generator', () => {
     expect(namedInputs?.default).toBeDefined();
 
     expect(namedInputs.default).toContainEqual({
-      dependentTasksOutputFiles: '!{reports,coverage}/**',
+      dependentTasksOutputFiles:
+        '!{reports/**,coverage/**,dist/**/checkov/checkov_report.json,dist/**/test-output/vitest/coverage/**}',
       transitive: true,
     });
 
     expect(tree.read('nx.json', 'utf-8')).toMatchSnapshot();
+  });
+
+  // Checkov reports and vitest coverage are reports nothing downstream reads,
+  // and an uncached scan or coverage run rewrites them, so hashing them would
+  // miss every dependent task. Build outputs at any depth must stay hashed.
+  it('should keep checkov reports and vitest coverage out of dependent task hashes', async () => {
+    await tsProjectGenerator(tree, {
+      name: 'test-1',
+      preferInstallDependencies: false,
+    });
+
+    const glob = readNxJson(tree)
+      .namedInputs.default.filter(
+        (input) =>
+          typeof input === 'object' && 'dependentTasksOutputFiles' in input,
+      )
+      .map(
+        (input) =>
+          (input as { dependentTasksOutputFiles: string })
+            .dependentTasksOutputFiles,
+      );
+    expect(glob).toHaveLength(1);
+
+    const excluded = [
+      'reports/packages/py_api/unittests/junit.xml',
+      'coverage/packages/py_api/coverage.xml',
+      'dist/infra/checkov/checkov_report.json',
+      'dist/packages/infra/checkov/checkov_report.json',
+      'dist/apps/deep/nested/infra/checkov/checkov_report.json',
+      'dist/packages/tf/checkov/checkov_report.json',
+      'dist/packages/infra/test-output/vitest/coverage/index.html',
+      'dist/packages/common/constructs/test-output/vitest/coverage/lcov.info',
+    ];
+    const hashed = [
+      'dist/packages/infra/cdk.out/manifest.json',
+      'dist/packages/infra/cdk.out/checkov/x.json',
+      'dist/packages/api/bundle/index.js',
+      'dist/packages/api/tsc/index.js',
+      'dist/packages/checkov/bundle/index.js',
+      'packages/web/src/generated/client.gen.ts',
+      'dist/packages/smithy/build/openapi/openapi.json',
+      'packages/rdb/generated/prisma/client.ts',
+    ];
+    expect(matchGlobPaths(glob, excluded)).toEqual(excluded.map(() => false));
+    expect(matchGlobPaths(glob, hashed)).toEqual(hashed.map(() => true));
+  });
+
+  it('should replace a previously vended dependent task output glob', async () => {
+    const nxJson = readNxJson(tree);
+    writeJson(tree, 'nx.json', {
+      ...nxJson,
+      namedInputs: {
+        ...nxJson.namedInputs,
+        default: [
+          ...(nxJson.namedInputs?.default ?? []),
+          {
+            dependentTasksOutputFiles: '!{reports,coverage}/**',
+            transitive: true,
+          },
+        ],
+      },
+    });
+
+    await tsProjectGenerator(tree, {
+      name: 'test-1',
+      preferInstallDependencies: false,
+    });
+
+    const entries = readNxJson(tree).namedInputs.default.filter(
+      (input) =>
+        typeof input === 'object' && 'dependentTasksOutputFiles' in input,
+    );
+    expect(entries).toEqual([
+      {
+        dependentTasksOutputFiles:
+          '!{reports/**,coverage/**,dist/**/checkov/checkov_report.json,dist/**/test-output/vitest/coverage/**}',
+        transitive: true,
+      },
+    ]);
   });
 
   it('should not duplicate named inputs in nx.json', async () => {

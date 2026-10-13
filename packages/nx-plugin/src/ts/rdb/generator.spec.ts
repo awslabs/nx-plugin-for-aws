@@ -125,6 +125,8 @@ describe('ts#rdb generator', () => {
     });
     expect(projectConfig.targets.generate).toEqual({
       executor: 'nx:run-commands',
+      cache: true,
+      inputs: ['default'],
       outputs: ['{projectRoot}/generated/prisma'],
       options: {
         command: 'prisma generate',

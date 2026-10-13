@@ -102,12 +102,18 @@ describe('python-test-input-scoping migration', () => {
   it('should exclude only test reports from the dependent task output input', async () => {
     await migration(tree);
 
-    expect(dependentTasksGlob(tree)).toBe('!{reports,coverage}/**');
+    expect(dependentTasksGlob(tree)).toBe(
+      '!{reports/**,coverage/**,dist/**/checkov/checkov_report.json,dist/**/test-output/vitest/coverage/**}',
+    );
     // The rest of the `default` input is left as it was.
     expect(readNxJson(tree)?.namedInputs?.default).toEqual([
       '{projectRoot}/**/*',
       'sharedGlobals',
-      { dependentTasksOutputFiles: '!{reports,coverage}/**', transitive: true },
+      {
+        dependentTasksOutputFiles:
+          '!{reports/**,coverage/**,dist/**/checkov/checkov_report.json,dist/**/test-output/vitest/coverage/**}',
+        transitive: true,
+      },
     ]);
   });
 
