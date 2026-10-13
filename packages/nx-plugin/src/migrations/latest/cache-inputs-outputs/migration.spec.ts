@@ -11,10 +11,19 @@ import {
   updateProjectConfiguration,
 } from '@nx/devkit';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { smithyProjectGenerator } from '../../../smithy/project/generator.js';
-import { terraformProjectGenerator } from '../../../terraform/project/generator.js';
+import {
+  SMITHY_PROJECT_GENERATOR_INFO,
+  smithyProjectGenerator,
+} from '../../../smithy/project/generator.js';
+import {
+  TERRAFORM_PROJECT_GENERATOR_INFO,
+  terraformProjectGenerator,
+} from '../../../terraform/project/generator.js';
 import { DEPENDENT_TASKS_OUTPUT_FILES_INPUT } from '../../../ts/lib/generator.js';
-import { tsRdbGenerator } from '../../../ts/rdb/generator.js';
+import {
+  TS_RDB_GENERATOR_INFO,
+  tsRdbGenerator,
+} from '../../../ts/rdb/generator.js';
 import { formatFilesInSubtree } from '../../../utils/format.js';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
 import migration from './migration.js';
@@ -214,6 +223,54 @@ describe('cache-inputs-outputs migration', () => {
 
     expect(snapshotTree(tree)).toEqual(snapshotTree(fresh));
   });
+
+  it('should rewrite the vended glob in place and keep plain string inputs around it', async () => {
+    await generateWorkspace(tree);
+    await revertToPreFix(tree);
+    const nxJson = readNxJson(tree);
+    nxJson.namedInputs.default = [
+      '{projectRoot}/**/*',
+      { dependentTasksOutputFiles: PRE_FIX_GLOB, transitive: true },
+      'sharedGlobals',
+    ];
+    updateNxJson(tree, nxJson);
+    await formatFilesInSubtree(tree);
+
+    const { nextSteps } = await migration(tree);
+
+    expect(readNxJson(tree).namedInputs.default).toEqual([
+      '{projectRoot}/**/*',
+      DEPENDENT_TASKS_OUTPUT_FILES_INPUT,
+      'sharedGlobals',
+    ]);
+    expect(stalePassAdvisory(nextSteps)).toHaveLength(1);
+  });
+
+  it.each([
+    [SMITHY_PROJECT_GENERATOR_INFO.id, 'smithy'],
+    [TS_RDB_GENERATOR_INFO.id, 'rdb'],
+    [TERRAFORM_PROJECT_GENERATOR_INFO.id, 'terraform'],
+  ])(
+    'should leave a %s project that has no targets alone',
+    async (generator, name) => {
+      // Projects are matched on metadata.generator, so targets may be absent.
+      tree.write(
+        `packages/${name}/project.json`,
+        JSON.stringify({
+          name: `@proj/${name}`,
+          root: `packages/${name}`,
+          metadata: { generator },
+        }),
+      );
+      await formatFilesInSubtree(tree);
+      const before = snapshotTree(tree);
+
+      const { nextSteps } = await migration(tree);
+
+      expect(snapshotTree(tree)).toEqual(before);
+      expect(nextSteps).toEqual([]);
+    },
+  );
 
   it('should leave a customised dependent task output glob untouched and report it', async () => {
     await generateWorkspace(tree);
