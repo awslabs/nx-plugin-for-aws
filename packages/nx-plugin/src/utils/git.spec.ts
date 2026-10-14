@@ -106,6 +106,38 @@ describe('git utils', () => {
       const content = tree.read('nested/dir/.gitignore', 'utf-8');
       expect(content).toBe('*.log');
     });
+
+    it('should not pass the trailing newline to the update as a blank pattern', () => {
+      tree.write('.gitignore', '*.log\nnode_modules/\n');
+
+      updateGitIgnore(tree, '.', (patterns) => {
+        expect(patterns).toEqual(['*.log', 'node_modules/']);
+        return patterns;
+      });
+    });
+
+    it('should keep the trailing newline when adding a pattern', () => {
+      tree.write('.gitignore', '*.log\n\nnode_modules/\n');
+
+      updateGitIgnore(tree, '.', (patterns) => [...patterns, 'dist/']);
+
+      expect(tree.read('.gitignore', 'utf-8')).toBe(
+        '*.log\n\nnode_modules/\ndist/\n',
+      );
+    });
+
+    // The shape Nx's vitest-5 migration leaves: a blank line earlier in the
+    // file, a newline-terminated `.vitest` last line, and the pattern this
+    // plugin manages already present.
+    it('should leave the file untouched when the pattern is already there', () => {
+      const content = 'node_modules\n\n# Grit\n.grit\n\n.vitest\n';
+      tree.write('.gitignore', content);
+
+      updateGitIgnore(tree, '.', (patterns) => [...patterns, '.grit']);
+      updateGitIgnore(tree, '.', (patterns) => [...patterns, '.grit']);
+
+      expect(tree.read('.gitignore', 'utf-8')).toBe(content);
+    });
   });
 
   describe('isWithinGitRepo', () => {
