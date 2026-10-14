@@ -5,6 +5,7 @@
 import { addProjectConfiguration, type Tree } from '@nx/devkit';
 import { PY_AGENT_GENERATOR_INFO } from '../../../py/agent/generator.js';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
+import { PY_VERSIONS } from '../../../utils/versions.js';
 import migration from './migration.js';
 
 // Registers a project with the ComponentMetadata the py#agent generator
@@ -383,9 +384,11 @@ dependencies = []
       'utf-8',
     );
     expect(migratedPyprojectToml).toContain(
-      'langgraph-checkpoint-sqlite==3.1.1',
+      `langgraph-checkpoint-sqlite${PY_VERSIONS['langgraph-checkpoint-sqlite']}`,
     );
-    expect(migratedPyprojectToml).toContain('aiosqlite==0.22.1');
+    expect(migratedPyprojectToml).toContain(
+      `aiosqlite${PY_VERSIONS.aiosqlite}`,
+    );
 
     const migratedAgent = tree.read(lcAgentPath, 'utf-8');
     const migratedSession = tree.read(
