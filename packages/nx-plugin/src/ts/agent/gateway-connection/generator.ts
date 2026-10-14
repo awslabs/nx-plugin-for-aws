@@ -56,6 +56,8 @@ export const DEPENDENCIES = declareDependencies()({
     // in-memory-session agent — a user-visible change outside this fix's
     // scope.
     { name: 'express' },
+    // strands' required peer, pinned for the same self-sufficiency.
+    { name: '@modelcontextprotocol/client' },
     { name: '@aws-lambda-powertools/parameters' },
     { name: '@aws-sdk/client-appconfigdata' },
     { name: 'aws4fetch' },

@@ -19,14 +19,18 @@ import { createTreeUsingTsSolutionSetup } from '../test.js';
 
 const STRANDS_SDK = '@strands-agents/sdk';
 /**
- * The optional peers of `@strands-agents/sdk` that are also vended in
+ * The peers of `@strands-agents/sdk` that are also vended in
  * `versions.ts` and reachable at a floating version via a transitive
- * dependency (see `STRANDS_PEER_DEPENDENCY_NAMES` in
+ * dependency or pnpm's peer auto-install (see `STRANDS_PEER_DEPENDENCY_NAMES` in
  * `agent-connection.ts` for the full explanation). Any package.json that
  * declares strands without also declaring these splits `@strands-agents/sdk`
  * into two peer-suffixed pnpm instances.
  */
-const REQUIRED_STRANDS_PEERS = ['express', '@aws-sdk/client-s3'] as const;
+const REQUIRED_STRANDS_PEERS = [
+  'express',
+  '@aws-sdk/client-s3',
+  '@modelcontextprotocol/client',
+] as const;
 
 /** `ts#agent` declares `@aws-sdk/client-s3` only for its `session: 's3'`
  * branch (the only branch that actually uses S3), so the in-memory session

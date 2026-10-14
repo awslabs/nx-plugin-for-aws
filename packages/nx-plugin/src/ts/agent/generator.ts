@@ -116,6 +116,9 @@ export const DEPENDENCIES = declareDependencies<TsAgentMetadata>()({
     // @strands-agents/sdk into two instances. Declared unconditionally,
     // matching @strands-agents/sdk itself.
     { name: 'express' },
+    // strands' required peer (see STRANDS_PEER_DEPENDENCY_NAMES), pinned so
+    // it doesn't float to its latest.
+    { name: '@modelcontextprotocol/client' },
     { name: '@a2a-js/sdk', when: (m) => m.protocol === 'a2a' },
     { name: '@ag-ui/aws-strands', when: (m) => m.protocol === 'ag-ui' },
     // @ag-ui/aws-strands declares these as peer dependencies but statically
