@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import type { Tree } from '@nx/devkit';
+import { type Tree, visitNotIgnoredFiles } from '@nx/devkit';
 import { resolveContainers } from '../../utils/containers.js';
 import { declareDependencies } from '../../utils/declared-dependencies.js';
 import { expectHasMetricTags } from '../../utils/metrics-assertions.js';
@@ -11,10 +11,13 @@ import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
 } from '../../utils/shared-constructs.js';
+import { PythonVerifier } from '../../utils/test/py.spec.js';
+import { PY_DYNAMODB_VERIFIER_DEPENDENCIES } from '../../utils/test/python-dependencies.js';
 import {
   createTreeUsingTsSolutionSetup,
   snapshotTreeDir,
 } from '../../utils/test.js';
+import { pyenvPythonVersion } from '../../utils/versions.js';
 import {
   PY_DYNAMODB_GENERATOR_INFO,
   pyDynamoDBGenerator,
@@ -110,6 +113,32 @@ describe('py#dynamodb generator', () => {
     expect(pyprojectToml).toContain('pynamodb');
     expect(pyprojectToml).toContain('boto3');
     expect(pyprojectToml).toContain('aws-lambda-powertools');
+  });
+
+  // The generated project's `typecheck` target runs `ty`, so the package is
+  // held to the same check here, against the versions the generator vends.
+  // `infra` only adds the shared TS infrastructure, so the package is the same
+  // without it.
+  it('should generate a package that imports and type checks', async () => {
+    const verifier = new PythonVerifier(PY_DYNAMODB_VERIFIER_DEPENDENCIES, {
+      python: pyenvPythonVersion(),
+    });
+    try {
+      await pyDynamoDBGenerator(tree, { ...defaultOptions, infra: 'none' });
+
+      const packageDir = 'packages/my_table/proj_my_table';
+      const paths: string[] = [];
+      visitNotIgnoredFiles(tree, packageDir, (path) => {
+        if (path.endsWith('.py')) paths.push(path);
+      });
+      expect(paths).toContain(`${packageDir}/entities/base.py`);
+
+      await verifier.expectPythonToCompile(tree, paths, packageDir, {
+        pkg: 'proj_my_table',
+      });
+    } finally {
+      await verifier.shutdown();
+    }
   });
 
   it('should generate scripts for finch engine', async () => {

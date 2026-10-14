@@ -3,8 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { execFileSync } from 'child_process';
+import { pyenvPythonVersion } from '../versions.js';
 import {
   PY_CLIENT_VERIFIER_DEPENDENCIES,
+  PY_DYNAMODB_VERIFIER_DEPENDENCIES,
   PY_VERIFIER_TYPE_CHECKER,
 } from './python-dependencies.js';
 
@@ -26,19 +28,31 @@ import {
  * cold one, which is the startup failure this exists to prevent.
  */
 export default function setup() {
-  // The same set the verifier installs, so the warm cache is the one it hits.
-  const deps = [
-    ...PY_CLIENT_VERIFIER_DEPENDENCIES,
-    PY_VERIFIER_TYPE_CHECKER,
-  ].flatMap((spec) => ['--with', spec]);
-  try {
-    execFileSync('uv', ['run', ...deps, 'python', '-c', ''], {
-      stdio: 'ignore',
-    });
-  } catch (error) {
-    console.warn(
-      `Could not warm uv's cache, so each Python worker will install its own ` +
-        `dependencies and may time out starting up: ${error}`,
-    );
+  // The same sets the verifiers install, on the same interpreters, so the warm
+  // cache is the one they hit. Wheels can be interpreter-specific, so each set
+  // is warmed on the interpreter its verifier runs.
+  const environments: { dependencies: string[]; python?: string }[] = [
+    { dependencies: PY_CLIENT_VERIFIER_DEPENDENCIES },
+    {
+      dependencies: PY_DYNAMODB_VERIFIER_DEPENDENCIES,
+      python: pyenvPythonVersion(),
+    },
+  ];
+  for (const { dependencies, python } of environments) {
+    const deps = [...dependencies, PY_VERIFIER_TYPE_CHECKER].flatMap((spec) => [
+      '--with',
+      spec,
+    ]);
+    const interpreter = python ? ['--python', python] : [];
+    try {
+      execFileSync('uv', ['run', ...interpreter, ...deps, 'python', '-c', ''], {
+        stdio: 'ignore',
+      });
+    } catch (error) {
+      console.warn(
+        `Could not warm uv's cache, so each Python worker will install its own ` +
+          `dependencies and may time out starting up: ${error}`,
+      );
+    }
   }
 }

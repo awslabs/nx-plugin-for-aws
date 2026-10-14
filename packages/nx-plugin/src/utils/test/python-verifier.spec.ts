@@ -4,6 +4,7 @@
  */
 import type { Tree } from '@nx/devkit';
 import { createTreeUsingTsSolutionSetup } from '../test.js';
+import { pyenvPythonVersion } from '../versions.js';
 import { PythonVerifier } from './py.spec.js';
 import { PY_CLIENT_VERIFIER_DEPENDENCIES } from './python-dependencies.js';
 
@@ -111,6 +112,39 @@ describe('PythonVerifier', () => {
         ).rejects.toThrow(/httpx/);
       } finally {
         await bare.shutdown();
+      }
+    });
+  });
+
+  // Generated projects require the vended Python, so a worker can be pinned to
+  // it rather than to whichever interpreter uv would pick by default.
+  describe('python', () => {
+    const defaultPython = process.env.UV_PYTHON;
+    afterEach(() => {
+      if (defaultPython === undefined) {
+        delete process.env.UV_PYTHON;
+      } else {
+        process.env.UV_PYTHON = defaultPython;
+      }
+    });
+
+    it('should run the interpreter it was asked for', async () => {
+      const python = pyenvPythonVersion();
+      // A different default, so only an explicit request yields `python`.
+      process.env.UV_PYTHON = python === '3.12' ? '3.13' : '3.12';
+      const pinned = new PythonVerifier(PY_CLIENT_VERIFIER_DEPENDENCIES, {
+        python,
+      });
+      try {
+        const paths = writePackage(
+          `import sys\n\nassert f"{sys.version_info[0]}.{sys.version_info[1]}" == "${python}", sys.version\n`,
+        );
+        await pinned.expectPythonToCompile(tree, paths, 'pkg', {
+          pkg: 'pkg',
+          typeCheck: false,
+        });
+      } finally {
+        await pinned.shutdown();
       }
     });
   });

@@ -148,15 +148,22 @@ export class PythonVerifier {
   private queue: Array<(r: InvokeResult) => void> = [];
   private started = false;
   private readonly dependencies: string[];
+  private readonly python?: string;
 
   /**
    * @param dependencies packages the worker installs, as fully-qualified
    * specifiers (e.g. `httpx==0.28.1`). `ty` is always added, since the worker
    * type checks with it rather than it being a dependency of the code under
    * test.
+   * @param options.python the interpreter version the worker runs, for code
+   * that requires the vended Python. Defaults to whichever uv picks.
    */
-  constructor(dependencies: string[] = []) {
+  constructor(
+    dependencies: string[] = [],
+    { python }: { python?: string } = {},
+  ) {
     this.dependencies = dependencies;
+    this.python = python;
   }
 
   private ensureStarted(): ChildProcessWithoutNullStreams {
@@ -166,9 +173,12 @@ export class PythonVerifier {
     const deps = [...this.dependencies, PY_VERIFIER_TYPE_CHECKER].flatMap(
       (spec) => ['--with', spec],
     );
-    const proc = spawn('uv', ['run', ...deps, 'python', '-u', WORKER_PATH], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    const python = this.python ? ['--python', this.python] : [];
+    const proc = spawn(
+      'uv',
+      ['run', ...python, ...deps, 'python', '-u', WORKER_PATH],
+      { stdio: ['pipe', 'pipe', 'pipe'] },
+    );
     this.process = proc;
     this.stdout = createInterface({ input: proc.stdout });
     this.stdout.on('line', (line) => {
