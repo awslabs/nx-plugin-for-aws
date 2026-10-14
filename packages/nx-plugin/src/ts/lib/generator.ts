@@ -55,21 +55,33 @@ export const TS_LIB_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
  * generators emit generated sources outside `dist` (an OpenAPI client under a
  * website's `src/generated`, a Smithy SSDK, the Prisma client) and add them to
  * `.gitignore`, which keeps them out of the project's own fileset — so this
- * input is the only thing that hashes them. `reports/` and `coverage/` hold
- * pytest's JUnit and coverage XML, which carry a wall-clock timestamp and so
- * mint a fresh hash on every test run that would cascade through the graph.
+ * input is the only thing that hashes them.
+ *
+ * The excluded paths are reports nothing downstream reads, and each is
+ * rewritten on every run that produces it, which would mint a fresh hash that
+ * cascades through the graph:
+ * - `reports/` and `coverage/` hold pytest's JUnit and coverage XML, which
+ *   carry a wall-clock timestamp.
+ * - `dist/<project>/checkov/checkov_report.json` is the report a CDK or Terraform
+ *   project's checkov scan writes, rewritten whenever the scan is uncached.
+ * - `dist/<project>/test-output/vitest/coverage/` is vitest's coverage output.
+ *
+ * Each report is matched by its full path, so a project whose path contains a
+ * `checkov` or `coverage` segment keeps its build output hashed.
  */
 export const DEPENDENT_TASKS_OUTPUT_FILES_INPUT = {
-  dependentTasksOutputFiles: '!{reports,coverage}/**',
+  dependentTasksOutputFiles:
+    '!{reports/**,coverage/**,dist/**/checkov/checkov_report.json,dist/**/test-output/vitest/coverage/**}',
   transitive: true,
 };
 
 // Globs this generator has vended for the dependent-task-output input. Any of
-// them is replaced in place, so the entry is neither duplicated nor left at a
-// different scope when a generator re-runs.
-const VENDED_DEPENDENT_TASKS_OUTPUT_GLOBS = [
+// them is replaced, so the entry is neither duplicated nor left at a different
+// scope when a generator or migration re-runs.
+export const VENDED_DEPENDENT_TASKS_OUTPUT_GLOBS = [
   '**/*',
   'dist/**',
+  '!{reports,coverage}/**',
   DEPENDENT_TASKS_OUTPUT_FILES_INPUT.dependentTasksOutputFiles,
 ];
 

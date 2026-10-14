@@ -162,11 +162,21 @@ export const smithyCompileOutputs = (
 ];
 
 /**
+ * What a Smithy build target hashes: its own sources plus the outputs of the
+ * tasks it depends on. That covers a consumed shape library's output only
+ * when nx.json's `default` named input carries the `dependentTasksOutputFiles`
+ * entry, which only ts/lib/generator.ts writes - a Smithy-only workspace has
+ * no such entry, so `default` falls back to Nx's `{projectRoot}/**\/*`.
+ */
+export const SMITHY_TARGET_INPUTS = ['default'];
+
+/**
  * The target that builds a service's Server SDK, shared with the migration moving
  * an existing project onto it.
  */
 export const smithyGenerateSsdkTarget = () => ({
   cache: true,
+  inputs: [...SMITHY_TARGET_INPUTS],
   outputs: [`{workspaceRoot}/${BUILD_DIR}/ssdk`],
   executor: 'nx:run-commands',
   dependsOn: ['compile'],
@@ -225,6 +235,7 @@ export const smithyProjectGenerator = async (
         },
         compile: {
           cache: true,
+          inputs: [...SMITHY_TARGET_INPUTS],
           outputs: smithyCompileOutputs(type),
           executor: 'nx:run-commands',
           options: {

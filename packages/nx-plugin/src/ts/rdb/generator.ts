@@ -297,6 +297,8 @@ export const tsRdbGenerator = async (
 
   projectConfig.targets.generate = {
     executor: 'nx:run-commands',
+    cache: true,
+    inputs: ['default'],
     outputs: ['{projectRoot}/generated/prisma'],
     options: {
       command: 'prisma generate',

@@ -322,6 +322,18 @@ describe('smithyProjectGenerator', () => {
     expect(projectConfig.targets.compile.cache).toBe(true);
   });
 
+  it('should declare the inputs its build targets hash', async () => {
+    await smithyProjectGenerator(tree, { name: 'test-api' });
+    await smithyProjectGenerator(tree, { name: 'test-shapes', type: 'shapes' });
+
+    const service = readJson(tree, 'test-api/project.json');
+    expect(service.targets.compile.inputs).toEqual(['default']);
+    expect(service.targets['generate-ssdk'].inputs).toEqual(['default']);
+
+    const shapes = readJson(tree, 'test-shapes/project.json');
+    expect(shapes.targets.compile.inputs).toEqual(['default']);
+  });
+
   it('should handle empty service name by using project name', async () => {
     await smithyProjectGenerator(tree, {
       name: 'my-service',

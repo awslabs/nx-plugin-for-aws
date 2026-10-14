@@ -2,6 +2,8 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+
+import { posix } from 'node:path';
 import {
   getProjects,
   readNxJson,
@@ -9,6 +11,7 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
+import { matchGlobPaths } from 'nx/src/native';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { licenseGenerator } from '../../license/generator.js';
 import * as tsLibGenerator from '../../ts/lib/generator.js';
@@ -480,6 +483,52 @@ describe('terraformProjectGenerator', () => {
         'terraform destroy -var-file=env/dev.tfvars',
       );
       expect(destroyTarget.dependsOn).toEqual(['init']);
+    });
+
+    // `terraform output` reads remote state, which no input can hash, so a
+    // cached result could replay stale values after an apply.
+    it('should not cache terraform output', async () => {
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      const { targets } = readProjectConfiguration(
+        tree,
+        '@proj/my-terraform-project',
+      );
+      expect(targets.output.cache).toBe(false);
+      expect(targets.output.inputs).toBeUndefined();
+    });
+
+    it('should keep the checkov report out of dependent task hashes', async () => {
+      await terraformProjectGenerator(tree, applicationSchema);
+
+      const { root, targets } = readProjectConfiguration(
+        tree,
+        '@proj/my-terraform-project',
+      );
+      const { command, cwd } = targets.checkov.options;
+      const reportPath = (command as string).match(
+        /--output-file-path console,(\S+)/,
+      )?.[1];
+      // Nx interpolates `{projectRoot}` in both the cwd and the command.
+      const workspaceRelative = posix.join(
+        cwd.replaceAll('{projectRoot}', root),
+        reportPath.replaceAll('{projectRoot}', root),
+      );
+      expect(workspaceRelative).toBe(
+        'dist/packages/my-terraform-project/checkov/checkov_report.json',
+      );
+
+      // A Terraform project writes no named inputs of its own; the TS projects
+      // in the same workspace write this shared input into nx.json.
+      expect(
+        matchGlobPaths(
+          [
+            tsLibGenerator.DEPENDENT_TASKS_OUTPUT_FILES_INPUT
+              .dependentTasksOutputFiles,
+          ],
+          [workspaceRelative],
+        ),
+      ).toEqual([false]);
     });
   });
 
