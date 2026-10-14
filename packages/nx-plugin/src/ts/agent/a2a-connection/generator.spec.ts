@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import type { Tree } from '@nx/devkit';
+import { readJson, type Tree } from '@nx/devkit';
 import { declareDependencies } from '../../../utils/declared-dependencies.js';
 import { expectHasMetricTags } from '../../../utils/metrics-assertions.js';
 import {
@@ -160,6 +160,24 @@ export const getAgent = async (sessionId: string) =>
       'utf-8',
     )!;
     expect(index).toContain('remote-client-strands');
+  });
+
+  it('should declare its optional peers alongside @strands-agents/sdk at the workspace root', async () => {
+    setupProjects();
+    await tsAgentA2aConnectionGenerator(tree, {
+      sourceProject: '@test/ts-host',
+      targetProject: '@test/ts-remote',
+      sourceComponent: HOST,
+      targetComponent: REMOTE,
+    });
+
+    const root = readJson(tree, 'package.json');
+    expect(root.dependencies['@strands-agents/sdk']).toBeDefined();
+    // express and @aws-sdk/client-s3 are strands' optional peers; declaring
+    // them at the root keeps the root's strands copy resolving the same
+    // peers as every other importer.
+    expect(root.dependencies.express).toBeDefined();
+    expect(root.dependencies['@aws-sdk/client-s3']).toBeDefined();
   });
 
   it('should transform agent.ts to wire the remote as a tool', async () => {
