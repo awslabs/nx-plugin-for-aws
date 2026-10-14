@@ -143,7 +143,7 @@ export const TS_VERSIONS = {
   rolldown: '1.2.12',
   'rolldown-plugin-dts': '0.28.6',
   shx: '0.4.0',
-  'simple-git': '3.36.0',
+  'simple-git': '4.0.2',
   'source-map-support': '0.5.21',
   'starlight-blog': '0.30.0',
   tailwindcss: '4.3.3',

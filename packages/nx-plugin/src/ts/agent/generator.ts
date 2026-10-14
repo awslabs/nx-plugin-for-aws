@@ -99,8 +99,23 @@ export const DEPENDENCIES = declareDependencies<TsAgentMetadata>()({
     { name: '@aws-sdk/client-appconfigdata' },
     { name: '@aws-lambda-powertools/parameters' },
     { name: '@modelcontextprotocol/sdk' },
+    // @aws-sdk/client-s3 is one of @strands-agents/sdk's peers in
+    // STRANDS_PEER_DEPENDENCY_NAMES, but this project only actually uses S3
+    // when session storage is backed by it — an in-memory session installs
+    // no S3 client at all (see generator.spec.ts's "should not add the
+    // @aws-sdk/client-s3 dependency when session is in-memory"). That is a
+    // deliberate, tested exception to the peer rule for this one site; the
+    // in-memory branch does not reach pnpm's peer-suffixing bug because no
+    // other project in a workspace with only in-memory agents declares
+    // client-s3 at a floating version either.
     { name: '@aws-sdk/client-s3', when: (m) => m.session === 's3' },
-    { name: 'express', when: (m) => m.protocol !== 'http' },
+    // express is strands' optional peer (see STRANDS_PEER_DEPENDENCY_NAMES);
+    // pnpm suffixes a package by its resolved peer versions, so leaving it
+    // undeclared on a protocol that doesn't use express can resolve a
+    // different express than every other importer and split
+    // @strands-agents/sdk into two instances. Declared unconditionally,
+    // matching @strands-agents/sdk itself.
+    { name: 'express' },
     { name: '@a2a-js/sdk', when: (m) => m.protocol === 'a2a' },
     { name: '@ag-ui/aws-strands', when: (m) => m.protocol === 'ag-ui' },
     // @ag-ui/aws-strands declares these as peer dependencies but statically
