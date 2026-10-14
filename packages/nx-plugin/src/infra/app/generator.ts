@@ -16,6 +16,7 @@ import path from 'path';
 import tsProjectGenerator, { getTsLibDetails } from '../../ts/lib/generator.js';
 import { mergeTsReferences } from '../../ts/lib/ts-project-utils.js';
 import { addTsDependencies } from '../../utils/add-dependencies.js';
+import { addCdkTestGlobalSetup } from '../../utils/cdk-test-setup.js';
 import { resolveContainers } from '../../utils/containers.js';
 import {
   declareDependencies,
@@ -148,8 +149,11 @@ export async function tsInfraGenerator(
 
   // `tsProjectGenerator` scaffolds a library `src`, which the CDK app layout
   // replaces. Only on creation — on a re-run this is the user's infrastructure.
+  // Likewise its generic README, which would otherwise keep the infra README
+  // below from being written (it is generated `KeepExisting`).
   if (isNewProject) {
     tree.delete(joinPathFragments(libraryRoot, 'src'));
+    tree.delete(joinPathFragments(libraryRoot, 'README.md'));
   }
 
   // The guide walks through declaring resources in
@@ -175,6 +179,8 @@ export async function tsInfraGenerator(
     },
   );
 
+  await addCdkTestGlobalSetup(tree, libraryRoot);
+
   updateJson(
     tree,
     `${libraryRoot}/project.json`,
@@ -184,6 +190,9 @@ export async function tsInfraGenerator(
       // is a quality gate, so it stays on `build` alone.
       addArtifactDependencyToTargets(config, 'synth');
       addDependencyToTargetIfNotPresent(config, 'build', 'checkov');
+      // Infra tests read the deployed projects' artifacts, not their quality
+      // gates, so they replace the `^build` target default with `^assemble`.
+      addDependencyToTargetIfNotPresent(config, 'test', '^assemble');
       config.targets.compile.outputs = [
         '{workspaceRoot}/dist/{projectRoot}/tsc',
       ];

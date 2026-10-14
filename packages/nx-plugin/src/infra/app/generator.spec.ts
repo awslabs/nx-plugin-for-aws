@@ -10,6 +10,7 @@ import {
   type Tree,
 } from '@nx/devkit';
 import { matchGlobPaths } from 'nx/src/native';
+import { renderCdkTestGlobalSetup } from '../../utils/cdk-test-setup.js';
 import { expectHasMetricTags } from '../../utils/metrics-assertions.js';
 import { toKebabCase } from '../../utils/names.js';
 import {
@@ -752,17 +753,77 @@ export class ApplicationStage extends Stage {
       }
     });
 
+    it('should test against assembled artifacts, not upstream builds', async () => {
+      await tsInfraGenerator(tree, options);
+      const config = readProjectConfiguration(tree, '@proj/test');
+
+      // Stacks read the deployed projects' bundles, so the tests need those
+      // artifacts, not every upstream lint, test and type-check gate that the
+      // `^build` target default would schedule.
+      expect(config.targets.test.dependsOn).toEqual(['^assemble']);
+      expect(config.targets.test.dependsOn).not.toContain('^build');
+    });
+
     it('should not grow either target on a re-run', async () => {
       await tsInfraGenerator(tree, options);
       const first = readProjectConfiguration(tree, '@proj/test');
       const build = [...first.targets.build.dependsOn];
       const assemble = [...first.targets.assemble.dependsOn];
+      const test = [...first.targets.test.dependsOn];
 
       await tsInfraGenerator(tree, options);
       const second = readProjectConfiguration(tree, '@proj/test');
 
       expect(second.targets.build.dependsOn).toEqual(build);
       expect(second.targets.assemble.dependsOn).toEqual(assemble);
+      expect(second.targets.test.dependsOn).toEqual(test);
+    });
+  });
+
+  describe('test global setup', () => {
+    it('should vend the global setup and register it once across runs', async () => {
+      await tsInfraGenerator(tree, options);
+      await tsInfraGenerator(tree, options);
+
+      expect(tree.read('packages/test/tests/global-setup.ts', 'utf-8')).toBe(
+        renderCdkTestGlobalSetup(),
+      );
+      const config = tree.read('packages/test/vitest.config.mts', 'utf-8');
+      expect(
+        config.split("globalSetup: ['./tests/global-setup.ts']"),
+      ).toHaveLength(2);
+    });
+
+    it('should keep a global setup the user edited on a re-run', async () => {
+      await tsInfraGenerator(tree, options);
+      const edited = 'export default function setup() {}\n';
+      tree.write('packages/test/tests/global-setup.ts', edited);
+
+      await tsInfraGenerator(tree, options);
+
+      expect(tree.read('packages/test/tests/global-setup.ts', 'utf-8')).toBe(
+        edited,
+      );
+    });
+
+    it('should document skipped bundling and the synth check in the README', async () => {
+      await tsInfraGenerator(tree, options);
+      const readme = tree.read('packages/test/README.md', 'utf-8');
+
+      expect(readme).toContain('aws:cdk:bundling-stacks');
+      expect(readme).toContain('postCliContext');
+      expect(readme).toMatch(/`synth`[^\n]*every/);
+    });
+
+    it('should keep a README the user edited on a re-run', async () => {
+      await tsInfraGenerator(tree, options);
+      tree.write('packages/test/README.md', '# My infra\n');
+
+      await tsInfraGenerator(tree, options);
+
+      expect(tree.read('packages/test/README.md', 'utf-8')).toBe(
+        '# My infra\n',
+      );
     });
   });
 });
