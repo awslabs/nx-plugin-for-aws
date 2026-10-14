@@ -49,6 +49,10 @@ import {
   TS_VERSIONS,
   VENDORED_VERSIONS,
 } from '../packages/nx-plugin/src/utils/versions';
+import {
+  holdPinnedVersions,
+  PY_VERSION_HOLDS,
+} from '../packages/nx-plugin/src/utils/version-lockstep/hold';
 import { holdGroupsInLockstep } from '../packages/nx-plugin/src/utils/version-lockstep/lockstep';
 import { refreshShadcnTemplates } from './update-versions/shadcn';
 
@@ -667,6 +671,11 @@ const main = async () => {
     const updatedPyVersions = getUpdatedPythonVersions(tmpDir);
 
     // Applied before the rewrites so a held version is never written.
+    const holdNotes = holdPinnedVersions(
+      PY_VERSION_HOLDS,
+      PY_VERSIONS,
+      updatedPyVersions,
+    );
     const lockstepNotes = holdGroupsInLockstep(
       LOCKSTEP_GROUPS,
       updatedTsVersions,
@@ -695,7 +704,7 @@ const main = async () => {
       'packages/nx-plugin/src/utils/versions.ts',
       'PY_VERSIONS',
     );
-    pyChanges.push(...lockstepNotes);
+    pyChanges.push(...holdNotes, ...lockstepNotes);
 
     // Get updated Terraform provider versions
     const updatedTerraformVersions = await getUpdatedTerraformVersions();
