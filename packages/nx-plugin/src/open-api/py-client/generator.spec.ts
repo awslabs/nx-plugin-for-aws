@@ -114,8 +114,8 @@ describe('openApiPyClientGenerator', () => {
         clientType,
       });
       const errors = tree.read('src/generated/errors.py', 'utf-8') ?? '';
-      expect(errors).toContain('class ApiError(Exception)');
-      expect(errors).toContain('class PingApiError(ApiError)');
+      expect(errors).toContain('class ApiError[ErrorT](Exception)');
+      expect(errors).toContain('class PingApiError(ApiError[Never])');
     },
   );
 
