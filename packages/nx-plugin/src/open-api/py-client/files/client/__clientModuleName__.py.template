@@ -46,12 +46,23 @@ const clientClassName = `${asyncPrefix}${className}`;
 const streamType = (item) => `${isAsync ? 'AsyncGenerator' : 'Iterator'}[${item}]`;
 
 /**
- * The `collections.abc` names the module imports. Async needs two — a
- * `AsyncGenerator` for an operation's stream and a separate `AsyncIterator` for
- * the `_stream_with_url` yield type — where sync spells both `Iterator`.
+ * The `collections.abc` names the module imports. `_stream_with_url` is
+ * decorated `@contextmanager`/`@asynccontextmanager`, which must be annotated
+ * `Generator`/`AsyncGenerator` rather than `Iterator`/`AsyncIterator` — a type
+ * checker (e.g. `ty`) rejects the iterator form on a context-manager function.
+ * Async spells both names `AsyncGenerator`; sync needs both `Iterator` (an
+ * operation's stream) and `Generator` (the context manager).
  */
 const streamAbc = isAsync ? 'AsyncGenerator' : 'Iterator';
-const contextAbc = isAsync ? 'AsyncIterator' : 'Iterator';
+const contextAbcName = isAsync ? 'AsyncGenerator' : 'Generator';
+
+/**
+ * The declared return type of a `@contextmanager`/`@asynccontextmanager`
+ * function. `AsyncGenerator` takes a send type, `Generator` also takes a
+ * return type — both left as `None` since nothing here uses either.
+ */
+const contextReturnType = (item) =>
+  isAsync ? `AsyncGenerator[${item}, None]` : `Generator[${item}, None, None]`;
 
 const resultTypeFor = (op) => {
   if (op.isStreaming) {
@@ -329,7 +340,7 @@ const tagGroups = operationsByTag;
 const hasContentJsonParams = allOperations.some(op => (op.parameters || []).some(p => p.in !== 'body' && p.mediaType === 'application/json'));
 const hasPartContentTypes = allOperations.some(op => op.parametersBody && op.parametersBody.partContentTypes);
 const hasAllowReservedParams = allOperations.some(op => (op.parameters || []).some(p => p.in === 'query' && p.allowReserved));
-const abcImports = [...new Set([streamAbc, ...(hasAllowReservedParams ? [contextAbc] : [])])].join(', ');
+const abcImports = [...new Set([streamAbc, ...(hasAllowReservedParams ? [contextAbcName] : [])])].join(', ');
 // A response declaring several media types is read through `_json_body`.
 const hasMultiMediaResponse = allOperations.some(op => (op.responses || []).some(r => (r.mediaTypes || []).length > 1));
 // An untyped streamed item is decoded with `json.loads`, which needs the import.
@@ -681,7 +692,7 @@ class <%- clientClassName %>:
     @<%- contextManager %>
     <%- kw.def %> _stream_with_url(
         self, final_url: str, **kwargs: Any
-    ) -> <%- contextAbc %>[httpx.Response]:
+    ) -> <%- contextReturnType('httpx.Response') %>:
         # The streaming counterpart of `_send_with_url`: `stream()` would rebuild
         # the query from the client's params and percent-encode a hand-built one.
         request = self._client.build_request(**kwargs)
