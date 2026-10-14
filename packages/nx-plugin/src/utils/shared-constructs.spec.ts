@@ -5,6 +5,7 @@
 
 import { joinPathFragments, type Tree } from '@nx/devkit';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { renderCdkTestGlobalSetup } from './cdk-test-setup.js';
 import { declareDependencies } from './declared-dependencies.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
@@ -43,6 +44,33 @@ describe('shared-constructs utils', () => {
   });
 
   describe('sharedConstructsGenerator', () => {
+    it('should run the CDK constructs tests with the per-run global setup', async () => {
+      await sharedConstructsGenerator(tree, { iac: 'cdk' }, declaration);
+
+      const root = joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR);
+      expect(tree.read(`${root}/tests/global-setup.ts`, 'utf-8')).toBe(
+        renderCdkTestGlobalSetup(),
+      );
+      expect(tree.read(`${root}/vitest.config.mts`, 'utf-8')).toContain(
+        "globalSetup: ['./tests/global-setup.ts']",
+      );
+    });
+
+    it('should not vend the CDK global setup for terraform', async () => {
+      await sharedConstructsGenerator(tree, { iac: 'terraform' }, declaration);
+
+      expect(
+        tree.exists(
+          joinPathFragments(
+            PACKAGES_DIR,
+            SHARED_CONSTRUCTS_DIR,
+            'tests',
+            'global-setup.ts',
+          ),
+        ),
+      ).toBe(false);
+    });
+
     it('should generate shared constructs when they do not exist', async () => {
       await sharedConstructsGenerator(tree, { iac: 'cdk' }, declaration);
 

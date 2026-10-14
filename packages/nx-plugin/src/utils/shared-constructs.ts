@@ -12,6 +12,7 @@ import {
 } from '@nx/devkit';
 import terraformProjectGenerator from '../terraform/project/generator.js';
 import tsProjectGenerator from '../ts/lib/generator.js';
+import { addCdkTestGlobalSetup } from './cdk-test-setup.js';
 import { readAwsNxPluginConfig } from './config/utils.js';
 import type {
   DependencyDeclaration,
@@ -115,6 +116,10 @@ export async function sharedConstructsGenerator<
           joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR),
           'package.json',
         ),
+      );
+      await addCdkTestGlobalSetup(
+        tree,
+        joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR),
       );
       await formatFilesInSubtree(tree);
     }
