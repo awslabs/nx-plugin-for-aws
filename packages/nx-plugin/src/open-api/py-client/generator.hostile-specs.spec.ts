@@ -494,8 +494,8 @@ describe('openApiPyClientGenerator - hostile specs', () => {
     expect(classNames).toContain('ApiError');
     expect(new Set(classNames).size).toBe(classNames.length);
     // The base is the only class deriving from `Exception`; the rest extend it.
-    expect(errors).toMatch(/^class ApiError\(Exception\)/m);
-    expect(errors).not.toMatch(/^class ApiError\(ApiError\)/m);
+    expect(errors).toMatch(/^class ApiError\[\w+\]\(Exception\)/m);
+    expect(errors).not.toMatch(/^class ApiError\(ApiError\[/m);
   });
 
   // An object schema with no properties and no `additionalProperties` parsed as
