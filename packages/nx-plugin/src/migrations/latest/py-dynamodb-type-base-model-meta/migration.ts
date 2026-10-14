@@ -12,16 +12,19 @@ import { PY_DYNAMODB_GENERATOR_INFO } from '../../../py/dynamodb/generator.js';
 import { formatFilesInSubtree } from '../../../utils/format.js';
 
 /**
- * Type the `Meta` class of the `BaseModel` that py#dynamodb vends in
- * `<module>/entities/base.py` as a subclass of pynamodb's `MetaProtocol`.
+ * Type the `Meta` of the `BaseModel` that py#dynamodb vends in
+ * `<module>/entities/base.py` as pynamodb's `MetaProtocol`.
  *
- * pynamodb declares `Model.Meta: MetaProtocol`. The vended nested `class Meta:`
- * defines only some of the protocol's members, and infers `region` as `str`
- * where the protocol declares a mutable `Optional[str]`. From ty 0.0.86 that
- * makes the project's `typecheck` target fail with `invalid-attribute-override`.
- * Subclassing the protocol declares every member with the protocol's type.
- * The members it only annotates are not set on the class, so pynamodb's
- * runtime defaults apply as before.
+ * pynamodb declares `Model.Meta: MetaProtocol`, a mutable attribute. A nested
+ * `class Meta:` defines only some of the protocol's members, which ty reports
+ * as `invalid-attribute-override`; and any nested `class Meta`, even one
+ * subclassing the protocol, declares `Meta` with the narrower type of that
+ * class, which ty 0.0.87 reports as `invalid-mutable-override`. So the block is
+ * declared as `class _Meta(MetaProtocol):` and bound with
+ * `Meta: MetaProtocol = _Meta`, keeping the inherited type. Subclassing the
+ * protocol declares every member with the protocol's type; the members it only
+ * annotates are not set on the class, so pynamodb's runtime defaults apply as
+ * before, and `Meta` is the same class object it was.
  *
  * The generator writes base.py once and keeps the user's copy, so this brings
  * existing workspaces up to date. A base.py is edited only where its import
@@ -33,7 +36,10 @@ const OLD_IMPORT = '\nfrom pynamodb.models import Model\n';
 const NEW_IMPORT = '\nfrom pynamodb.models import MetaProtocol, Model\n';
 
 const OLD_META_HEADER = '    class Meta:\n';
-const NEW_META_HEADER = '    class Meta(MetaProtocol):\n';
+const NEW_META_HEADER = '    class _Meta(MetaProtocol):\n';
+
+/** Binds `Meta` to the block while keeping pynamodb's declared type. */
+const META_BINDING = '    Meta: MetaProtocol = _Meta\n';
 
 /**
  * The helper the vended `host` line reads the local port through. Workspaces
@@ -47,18 +53,19 @@ const LOCAL_DEV_HELPERS = ['_local_dev', '_serve_local'];
  */
 const QUOTES = ['"', "'"];
 
-/** The vended `BaseModel.Meta` block, up to the blank line that ends it. */
+/** The vended `BaseModel` Meta block, up to the blank line that ends it. */
 const metaBlock = (
   header: string,
   localDevHelper: string,
   quote: string,
+  binding = '',
 ): string =>
   `${header}        table_name: str
         region = os.environ.get("AWS_REGION", ${quote}us-east-1${quote})
         host = f"http://localhost:{${localDevHelper}()['port']}" if is_local() else None
         aws_access_key_id = ${quote}UNUSED${quote} if is_local() else None
         aws_secret_access_key = ${quote}UNUSED${quote} if is_local() else None
-
+${binding ? `\n${binding}` : ''}
 `;
 
 /** Every shape of the block the generator has written. */
@@ -67,7 +74,7 @@ const OLD_META_SHAPES = LOCAL_DEV_HELPERS.flatMap((helper) =>
 );
 
 const divergedNextStep = (filePath: string): string =>
-  `${filePath}: its BaseModel Meta class or its pynamodb.models import has been customised, so it was left unchanged. If \`ty check\` reports invalid-attribute-override for it, declare it as \`class Meta(MetaProtocol):\`, importing MetaProtocol from pynamodb.models.`;
+  `${filePath}: its BaseModel Meta class or its pynamodb.models import has been customised, so it was left unchanged. If \`ty check\` reports invalid-attribute-override or invalid-mutable-override for it, declare the class as \`class _Meta(MetaProtocol):\` followed by \`Meta: MetaProtocol = _Meta\`, importing MetaProtocol from pynamodb.models.`;
 
 /**
  * Rewrite a base.py still in the generated shape. Already migrated and missing
@@ -83,7 +90,7 @@ const migrateBasePy = (
   }
 
   const content = tree.read(filePath, 'utf-8') ?? '';
-  if (content.includes(NEW_META_HEADER)) {
+  if (content.includes(META_BINDING)) {
     return; // Already migrated (or user-added).
   }
 
@@ -101,7 +108,7 @@ const migrateBasePy = (
       .replace(OLD_IMPORT, NEW_IMPORT)
       .replace(
         metaBlock(OLD_META_HEADER, shape.helper, shape.quote),
-        metaBlock(NEW_META_HEADER, shape.helper, shape.quote),
+        metaBlock(NEW_META_HEADER, shape.helper, shape.quote, META_BINDING),
       ),
   );
 };

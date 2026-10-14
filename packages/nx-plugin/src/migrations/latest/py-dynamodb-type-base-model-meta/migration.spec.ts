@@ -22,7 +22,8 @@ const rollBack = (vended: string): string =>
       'from pynamodb.models import MetaProtocol, Model',
       'from pynamodb.models import Model',
     )
-    .replace('class Meta(MetaProtocol):', 'class Meta:');
+    .replace('class _Meta(MetaProtocol):', 'class Meta:')
+    .replace('\n    Meta: MetaProtocol = _Meta\n', '');
 
 describe('py-dynamodb-type-base-model-meta migration', () => {
   let tree: Tree;
@@ -42,7 +43,8 @@ describe('py-dynamodb-type-base-model-meta migration', () => {
   it('should converge a generated workspace on exactly what the generator vends today', async () => {
     await generate();
     const vended = tree.read(BASE_PY, 'utf-8') ?? '';
-    expect(vended).toContain('class Meta(MetaProtocol):');
+    expect(vended).toContain('class _Meta(MetaProtocol):');
+    expect(vended).toContain('    Meta: MetaProtocol = _Meta\n');
     const old = rollBack(vended);
     expect(old).not.toContain('MetaProtocol');
     tree.write(BASE_PY, old);
@@ -120,7 +122,27 @@ describe('py-dynamodb-type-base-model-meta migration', () => {
     expect(tree.read(BASE_PY, 'utf-8')).toBe(customised);
     expect(nextSteps).toHaveLength(1);
     expect(nextSteps[0]).toContain(BASE_PY);
-    expect(nextSteps[0]).toContain('class Meta(MetaProtocol):');
+    expect(nextSteps[0]).toContain('Meta: MetaProtocol = _Meta');
+  });
+
+  // A nested `class Meta(MetaProtocol):` still narrows the mutable `Meta`, so
+  // it is reported rather than taken as already migrated.
+  it('should leave a Meta that subclasses MetaProtocol in place untouched and report it', async () => {
+    await generate();
+    const vended = tree.read(BASE_PY, 'utf-8') ?? '';
+    const nestedProtocol = vended
+      .replace('class _Meta(MetaProtocol):', 'class Meta(MetaProtocol):')
+      .replace('\n    Meta: MetaProtocol = _Meta\n', '');
+    expect(nestedProtocol).toContain('class Meta(MetaProtocol):');
+    expect(nestedProtocol).not.toContain('_Meta');
+    tree.write(BASE_PY, nestedProtocol);
+
+    const { nextSteps } = await migration(tree);
+
+    expect(tree.read(BASE_PY, 'utf-8')).toBe(nestedProtocol);
+    expect(nextSteps).toHaveLength(1);
+    expect(nextSteps[0]).toContain(BASE_PY);
+    expect(nextSteps[0]).toContain('invalid-mutable-override');
   });
 
   // Rewriting only the Meta block would reference MetaProtocol without
@@ -141,7 +163,7 @@ describe('py-dynamodb-type-base-model-meta migration', () => {
     expect(nextSteps).toHaveLength(1);
     expect(nextSteps[0]).toContain(BASE_PY);
     expect(nextSteps[0]).toContain('pynamodb.models import');
-    expect(nextSteps[0]).toContain('class Meta(MetaProtocol):');
+    expect(nextSteps[0]).toContain('Meta: MetaProtocol = _Meta');
   });
 
   describe('with two py#dynamodb projects', () => {
