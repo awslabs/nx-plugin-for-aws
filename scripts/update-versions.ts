@@ -57,6 +57,7 @@ import {
 import {
   holdPinnedVersions,
   PY_VERSION_HOLDS,
+  TERRAFORM_VERSION_HOLDS,
 } from '../packages/nx-plugin/src/utils/version-lockstep/hold';
 import { holdGroupsInLockstep } from '../packages/nx-plugin/src/utils/version-lockstep/lockstep';
 import { refreshShadcnTemplates } from './update-versions/shadcn';
@@ -743,14 +744,22 @@ const main = async () => {
     // Get updated Terraform provider versions
     const updatedTerraformVersions = await getUpdatedTerraformVersions();
 
+    // Applied before the rewrite so a held version is never written.
+    const terraformHoldNotes = holdPinnedVersions(
+      TERRAFORM_VERSION_HOLDS,
+      TERRAFORM_VERSIONS,
+      updatedTerraformVersions,
+    );
+
     // Apply updated Terraform provider versions to the versions file
-    const terraformChanges = await applyUpdatedVersions(
+    const terraformChanges: ReportChange[] = await applyUpdatedVersions(
       tree,
       TERRAFORM_VERSIONS,
       updatedTerraformVersions,
       'packages/nx-plugin/src/utils/versions.ts',
       'TERRAFORM_VERSIONS',
     );
+    terraformChanges.push(...terraformHoldNotes);
 
     // Get updated Java versions from Maven Central
     const updatedJavaVersions = await getUpdatedJavaVersions();

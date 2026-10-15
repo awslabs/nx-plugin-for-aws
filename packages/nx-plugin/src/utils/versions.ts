@@ -492,7 +492,7 @@ export const terraformLambdaRuntimeVars = () => ({
  * Pinned exactly (no range operator) so generated infrastructure is reproducible.
  */
 export const TERRAFORM_VERSIONS = {
-  aws: '6.69.0',
+  aws: '6.68.0',
   random: '3.9.1',
   null: '3.3.2',
   archive: '2.8.1',
