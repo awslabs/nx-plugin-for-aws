@@ -180,6 +180,30 @@ export const LOCKSTEP_GROUPS = [
 ] as const satisfies readonly (readonly [string, string, ...string[]])[];
 
 /**
+ * Pins the version update sets to the exact `dependencies` of another vended
+ * package, as published for the version of it being written. Followers' lockstep
+ * group mates move with them. If a peer's published `peerDependencies` reject the
+ * result, or a manifest can't be read, all of these pins stay where they are.
+ *
+ * Use this rather than a lockstep group when the packages don't share a version
+ * line.
+ */
+export const EXACT_DEPENDENCY_PINS = [
+  {
+    source: '@copilotkit/react-core',
+    followers: ['@ag-ui/client', '@ag-ui/core'],
+    peers: ['@ag-ui/aws-strands', '@ag-ui/a2ui-toolkit'],
+    reason:
+      'a second @ag-ui/client copy fails every generated website with TS2322',
+  },
+] as const satisfies readonly {
+  source: ITsDepVersion;
+  followers: readonly [ITsDepVersion, ...ITsDepVersion[]];
+  peers: readonly ITsDepVersion[];
+  reason: string;
+}[];
+
+/**
  * Add versions to the given dependencies, which the declaration must own.
  *
  * @param declaration the calling generator's `DEPENDENCIES`

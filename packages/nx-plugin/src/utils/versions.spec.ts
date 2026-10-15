@@ -10,6 +10,7 @@ import {
   declareDependencies,
 } from './declared-dependencies.js';
 import {
+  EXACT_DEPENDENCY_PINS,
   type ITsDepVersion,
   LOCKSTEP_GROUPS,
   NX_PACKAGES,
@@ -163,6 +164,48 @@ describe('AG-UI compatibility', () => {
       '@ag-ui/aws-strands',
     ] as const) {
       expect(major(versionOf(name)), name).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  /**
+   * The `@ag-ui` entries of the vended CopilotKit release's `dependencies`, from
+   * https://registry.npmjs.org/@copilotkit/react-core/1.79.0 (fetched 2026-10-15).
+   *
+   * Update this fixture whenever the `@copilotkit/react-core` pin moves: copy the
+   * new release's `@ag-ui/client` and `@ag-ui/core` entries from
+   * `curl -s https://registry.npmjs.org/@copilotkit/react-core/<version> | jq .dependencies`.
+   */
+  const COPILOTKIT_AG_UI_DEPENDENCIES = {
+    version: '1.79.0',
+    dependencies: { '@ag-ui/client': '1.0.2', '@ag-ui/core': '1.0.2' },
+  } as const;
+
+  it('pins @ag-ui at exactly the versions the vended CopilotKit depends on', () => {
+    // A different pin installs a second @ag-ui/client and fails every
+    // generated website with TS2322.
+    expect(
+      TS_VERSIONS['@copilotkit/react-core'],
+      'the CopilotKit pin moved: update COPILOTKIT_AG_UI_DEPENDENCIES',
+    ).toBe(COPILOTKIT_AG_UI_DEPENDENCIES.version);
+    for (const [name, version] of Object.entries(
+      COPILOTKIT_AG_UI_DEPENDENCIES.dependencies,
+    )) {
+      expect(TS_VERSIONS[name as ITsDepVersion], name).toBe(version);
+    }
+    expect(TS_VERSIONS['@ag-ui/encoder']).toBe(TS_VERSIONS['@ag-ui/core']);
+  });
+
+  it('has the version update keep @ag-ui on the exact versions CopilotKit depends on', () => {
+    expect(EXACT_DEPENDENCY_PINS).toContainEqual(
+      expect.objectContaining({
+        source: '@copilotkit/react-core',
+        followers: Object.keys(COPILOTKIT_AG_UI_DEPENDENCIES.dependencies),
+      }),
+    );
+    for (const { source, followers, peers } of EXACT_DEPENDENCY_PINS) {
+      for (const name of [source, ...followers, ...peers]) {
+        expect(TS_VERSIONS[name], `${name} is not a vended pin`).toBeDefined();
+      }
     }
   });
 });
