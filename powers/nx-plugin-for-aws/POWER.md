@@ -29,7 +29,7 @@ Key capabilities:
 #### Required
 
 - [Git](https://git-scm.com/book/en/v2/Getting-Started-Installing-Git)
-- [Node >= 22](https://nodejs.org/en/download) (We recommend using something like [NVM](https://github.com/nvm-sh/nvm) to manage your node versions)
+- [Node >= 22.13](https://nodejs.org/en/download) (We recommend using something like [NVM](https://github.com/nvm-sh/nvm) to manage your node versions)
   - verify by running `node --version`
 - [UV >= 0.5.29](https://docs.astral.sh/uv/getting-started/installation/)
   1. install Python 3.14 by running: `uv python install 3.14`
