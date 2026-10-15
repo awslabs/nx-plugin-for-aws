@@ -473,6 +473,34 @@ dependencies = [
     );
   });
 
+  // Nx 23.3.0's migrate-to-vitest-5 appends a newline-terminated `.vitest`
+  // after this migration's first run; the second run must leave it alone.
+  it('should leave a newline-terminated .gitignore unchanged when re-run', async () => {
+    tree.write(
+      METRICS_ASPECT_FILE_PATH,
+      `export class MetricsAspect implements IAspect {
+  public visit(node: IConstruct): void {
+    const version = '0.1.0';
+  }
+}
+`,
+    );
+    tree.write('.gitignore', 'node_modules\n\n# Grit\n.grit\n');
+
+    await syncVendedVersions(tree);
+    expect(tree.read('.gitignore', 'utf-8')).toBe(
+      'node_modules\n\n# Grit\n.grit\n',
+    );
+
+    tree.write('.gitignore', 'node_modules\n\n# Grit\n.grit\n.vitest\n');
+    await syncVendedVersions(tree);
+    await syncVendedVersions(tree);
+
+    expect(tree.read('.gitignore', 'utf-8')).toBe(
+      'node_modules\n\n# Grit\n.grit\n.vitest\n',
+    );
+  });
+
   it('should update the tracked plugin version in the metrics files', async () => {
     tree.write(
       METRICS_ASPECT_FILE_PATH,

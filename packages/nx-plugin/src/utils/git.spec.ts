@@ -12,6 +12,7 @@ import {
   isWithinGitRepo,
   updateGitIgnore,
 } from './git.js';
+import { ignoreRuntimeConfig } from './shared-constructs.js';
 import { createTreeUsingTsSolutionSetup } from './test.js';
 import { initTestGitRepo, runGit, useIsolatedGitEnv } from './test-git.js';
 
@@ -105,6 +106,77 @@ describe('git utils', () => {
 
       const content = tree.read('nested/dir/.gitignore', 'utf-8');
       expect(content).toBe('*.log');
+    });
+
+    it('should not pass the trailing newline to the update as a blank pattern', () => {
+      tree.write('.gitignore', '*.log\nnode_modules/\n');
+
+      updateGitIgnore(tree, '.', (patterns) => {
+        expect(patterns).toEqual(['*.log', 'node_modules/']);
+        return patterns;
+      });
+    });
+
+    it('should keep the trailing newline when adding a pattern', () => {
+      tree.write('.gitignore', '*.log\n\nnode_modules/\n');
+
+      updateGitIgnore(tree, '.', (patterns) => [...patterns, 'dist/']);
+
+      expect(tree.read('.gitignore', 'utf-8')).toBe(
+        '*.log\n\nnode_modules/\ndist/\n',
+      );
+    });
+
+    // The shape Nx's vitest-5 migration leaves: a blank line earlier in the
+    // file, a newline-terminated `.vitest` last line, and the pattern this
+    // plugin manages already present.
+    it('should leave the file untouched when the pattern is already there', () => {
+      const content = 'node_modules\n\n# Grit\n.grit\n\n.vitest\n';
+      tree.write('.gitignore', content);
+
+      updateGitIgnore(tree, '.', (patterns) => [...patterns, '.grit']);
+      updateGitIgnore(tree, '.', (patterns) => [...patterns, '.grit']);
+
+      expect(tree.read('.gitignore', 'utf-8')).toBe(content);
+    });
+
+    it('should keep every blank line when adding a pattern', () => {
+      tree.write('.gitignore', 'node_modules\n\n# Grit\n.grit\n\n.vitest\n');
+
+      updateGitIgnore(tree, '.', (patterns) => [...patterns, 'dist/']);
+
+      expect(tree.read('.gitignore', 'utf-8')).toBe(
+        'node_modules\n\n# Grit\n.grit\n\n.vitest\ndist/\n',
+      );
+    });
+
+    // The order the react-website generator writes the root .gitignore in:
+    // Nx's vitest entries, `.grit` from `ensureGritDir`, `runtime-config.json`
+    // from the shared constructs, then `.grit` again from a later GritQL edit.
+    it('should not add blank lines across the generator sequence', () => {
+      tree.write(
+        '.gitignore',
+        'vite.config.*.timestamp*\nvitest.config.*.timestamp*\n.vitest\n',
+      );
+
+      updateGitIgnore(tree, '.', (patterns) => [...patterns, '.grit']);
+      ignoreRuntimeConfig(tree);
+      updateGitIgnore(tree, '.', (patterns) => [...patterns, '.grit']);
+      ignoreRuntimeConfig(tree);
+
+      expect(tree.read('.gitignore', 'utf-8')).toBe(
+        'vite.config.*.timestamp*\nvitest.config.*.timestamp*\n.vitest\n.grit\nruntime-config.json\n',
+      );
+    });
+
+    it('should not ignore runtime-config.json twice', () => {
+      tree.write('.gitignore', 'node_modules\n**/runtime-config.json\n');
+
+      ignoreRuntimeConfig(tree);
+
+      expect(tree.read('.gitignore', 'utf-8')).toBe(
+        'node_modules\n**/runtime-config.json\n',
+      );
     });
   });
 

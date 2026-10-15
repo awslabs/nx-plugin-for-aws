@@ -51,16 +51,23 @@ import {
  * part of this set — see `strands-optional-peer-drift.md`'s reachability
  * check.
  *
+ * `@modelcontextprotocol/client` is a required peer (since strands 1.20.0)
+ * that nothing else pins: left undeclared, pnpm auto-installs whatever its
+ * `latest` is, while `@modelcontextprotocol/inspector` pulls its own exact
+ * version into the same graph. Declaring it at the `versions.ts` pin keeps
+ * every strands importer on one version of it.
+ *
  * Every site that declares `@strands-agents/sdk` must declare this whole
  * tuple alongside it, in whichever shape that site expresses dependencies
  * (a plain `{ name }` entry, a `when`/`root`-qualified declaration, or a
- * `TS_TEMPLATE_DEPS`-style name array) — this is the one place the three
+ * `TS_TEMPLATE_DEPS`-style name array) — this is the one place the
  * names are listed.
  */
 export const STRANDS_PEER_DEPENDENCY_NAMES = [
   '@strands-agents/sdk',
   'express',
   '@aws-sdk/client-s3',
+  '@modelcontextprotocol/client',
 ] as const satisfies readonly ITsDepVersion[];
 
 /** TypeScript dependencies a caller must declare to emit agent-connection clients. */
