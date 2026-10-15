@@ -2,6 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+import { coerce, gte, major } from 'semver';
 import { describe, expect, it } from 'vitest';
 import PluginPackageJson from '../../package.json' with { type: 'json' };
 import {
@@ -9,6 +10,7 @@ import {
   declareDependencies,
 } from './declared-dependencies.js';
 import {
+  type ITsDepVersion,
   LOCKSTEP_GROUPS,
   NX_PACKAGES,
   NX_VERSION,
@@ -142,4 +144,25 @@ describe('LOCKSTEP_GROUPS', () => {
       }
     },
   );
+});
+
+describe('AG-UI compatibility', () => {
+  // @copilotkit/react-core 1.76.0 is the first release that depends on @ag-ui 1.x,
+  // at an exact version. @ag-ui/aws-strands 1.0.0 is the first release that
+  // imports its validators from @ag-ui/core/schemas, the only entry that exports
+  // them in @ag-ui/core 1.x.
+  const versionOf = (name: ITsDepVersion): string =>
+    coerce(TS_VERSIONS[name])?.version ?? TS_VERSIONS[name];
+
+  it('vends the AG-UI 1.x line to the website and the TypeScript AG-UI agent', () => {
+    expect(gte(versionOf('@copilotkit/react-core'), '1.76.0')).toBe(true);
+    for (const name of [
+      '@ag-ui/client',
+      '@ag-ui/core',
+      '@ag-ui/encoder',
+      '@ag-ui/aws-strands',
+    ] as const) {
+      expect(major(versionOf(name)), name).toBeGreaterThanOrEqual(1);
+    }
+  });
 });
