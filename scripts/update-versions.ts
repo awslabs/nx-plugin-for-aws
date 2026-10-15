@@ -36,6 +36,7 @@ import { isNxPackage } from '../packages/nx-plugin/src/utils/version-upgrade-mig
 import { registerNxPackageUpdates } from '../packages/nx-plugin/src/utils/version-upgrade-migration/register';
 import {
   AGENT_CORE_RUNTIME_VERSIONS,
+  EXACT_DEPENDENCY_PINS,
   type IJavaVersion,
   type IMiseVersion,
   JAVA_ARTIFACTS,
@@ -49,6 +50,10 @@ import {
   TS_VERSIONS,
   VENDORED_VERSIONS,
 } from '../packages/nx-plugin/src/utils/versions';
+import {
+  type DependencyLookup,
+  pinToExactDependencies,
+} from '../packages/nx-plugin/src/utils/version-lockstep/exact-dependency';
 import {
   holdPinnedVersions,
   PY_VERSION_HOLDS,
@@ -335,6 +340,22 @@ const getUpdatedTerraformVersions = async (): Promise<
 
   console.log('Updated Terraform versions:', updatedVersions);
   return updatedVersions;
+};
+
+/**
+ * Reads one field of a published npm release's manifest from the public
+ * registry. Rejects on any non-200 response, so the caller can hold its pins.
+ */
+const npmManifestField: DependencyLookup = async (name, version, field) => {
+  const url = `https://registry.npmjs.org/${name}/${version}`;
+  const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+  if (!response.ok) {
+    throw new Error(`${url} returned ${response.status}`);
+  }
+  const manifest = (await response.json()) as Partial<
+    Record<typeof field, Record<string, string>>
+  >;
+  return manifest[field] ?? {};
 };
 
 /**
@@ -682,6 +703,15 @@ const main = async () => {
       updatedTsVersions,
       updatedPyVersions,
     );
+    // After the lockstep, which can only hold a group back: this may move the
+    // @ag-ui group up to what the CopilotKit being written depends on.
+    const exactDependencyNotes = await pinToExactDependencies(
+      EXACT_DEPENDENCY_PINS,
+      LOCKSTEP_GROUPS,
+      TS_VERSIONS,
+      updatedTsVersions,
+      npmManifestField,
+    );
 
     // This repo's manifests, from the same pass as the vended pins.
     const manifestChanges = repoManifests().flatMap((manifestPath) =>
@@ -689,13 +719,17 @@ const main = async () => {
     );
 
     // Apply updated TypeScript versions to the versions file
-    const tsChanges = await applyUpdatedVersions(
+    const tsVersionChanges = await applyUpdatedVersions(
       tree,
       TS_VERSIONS,
       updatedTsVersions,
       'packages/nx-plugin/src/utils/versions.ts',
       'TS_VERSIONS',
     );
+    const tsChanges: ReportChange[] = [
+      ...tsVersionChanges,
+      ...exactDependencyNotes,
+    ];
 
     // Apply updated Python versions to the versions file
     const pyChanges: ReportChange[] = await applyUpdatedVersions(
@@ -815,7 +849,9 @@ const main = async () => {
     // The version comes from the change just applied rather than `NX_VERSION`:
     // rewriting `versions.ts` on the tree cannot change what this process
     // imported at load, so the constant still holds the version being replaced.
-    const nxChange = tsChanges.find((change) => isNxPackage(change.name));
+    const nxChange = tsVersionChanges.find((change) =>
+      isNxPackage(change.name),
+    );
     const migrationFiles = nxChange
       ? registerNxPackageUpdates(tree, nxChange.newVersion)
       : [];
