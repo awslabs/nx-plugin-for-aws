@@ -68,12 +68,12 @@ export const TS_VERSIONS = {
   '@modelcontextprotocol/client': '2.3.1',
   '@modelcontextprotocol/inspector': '2.10.1',
   '@ag-ui/a2ui-toolkit': '0.0.5',
-  '@ag-ui/aws-strands': '0.3.0',
-  '@ag-ui/client': '0.0.59',
-  '@ag-ui/core': '0.0.59',
-  '@ag-ui/encoder': '0.0.59',
+  '@ag-ui/aws-strands': '1.0.0',
+  '@ag-ui/client': '1.0.2',
+  '@ag-ui/core': '1.0.2',
+  '@ag-ui/encoder': '1.0.2',
   'agent-chat-cli': '0.3.0',
-  '@copilotkit/react-core': '1.74.0',
+  '@copilotkit/react-core': '1.79.0',
   rxjs: '7.8.2',
   '@strands-agents/sdk': '1.20.0',
   '@tanstack/react-router': '1.170.44',
@@ -178,6 +178,30 @@ export const LOCKSTEP_GROUPS = [
   ['@biomejs/wasm-nodejs', '@biomejs/biome'],
   ['@astral-sh/ruff-wasm-nodejs', 'ruff'],
 ] as const satisfies readonly (readonly [string, string, ...string[]])[];
+
+/**
+ * Pins the version update sets to the exact `dependencies` of another vended
+ * package, as published for the version of it being written. Followers' lockstep
+ * group mates move with them. If a peer's published `peerDependencies` reject the
+ * result, or a manifest can't be read, all of these pins stay where they are.
+ *
+ * Use this rather than a lockstep group when the packages don't share a version
+ * line.
+ */
+export const EXACT_DEPENDENCY_PINS = [
+  {
+    source: '@copilotkit/react-core',
+    followers: ['@ag-ui/client', '@ag-ui/core'],
+    peers: ['@ag-ui/aws-strands', '@ag-ui/a2ui-toolkit'],
+    reason:
+      'a second @ag-ui/client copy fails every generated website with TS2322',
+  },
+] as const satisfies readonly {
+  source: ITsDepVersion;
+  followers: readonly [ITsDepVersion, ...ITsDepVersion[]];
+  peers: readonly ITsDepVersion[];
+  reason: string;
+}[];
 
 /**
  * Add versions to the given dependencies, which the declaration must own.

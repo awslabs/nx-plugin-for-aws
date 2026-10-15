@@ -2,6 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+import { coerce, gte, major } from 'semver';
 import { describe, expect, it } from 'vitest';
 import PluginPackageJson from '../../package.json' with { type: 'json' };
 import {
@@ -9,6 +10,8 @@ import {
   declareDependencies,
 } from './declared-dependencies.js';
 import {
+  EXACT_DEPENDENCY_PINS,
+  type ITsDepVersion,
   LOCKSTEP_GROUPS,
   NX_PACKAGES,
   NX_VERSION,
@@ -142,4 +145,67 @@ describe('LOCKSTEP_GROUPS', () => {
       }
     },
   );
+});
+
+describe('AG-UI compatibility', () => {
+  // @copilotkit/react-core 1.76.0 is the first release that depends on @ag-ui 1.x,
+  // at an exact version. @ag-ui/aws-strands 1.0.0 is the first release that
+  // imports its validators from @ag-ui/core/schemas, the only entry that exports
+  // them in @ag-ui/core 1.x.
+  const versionOf = (name: ITsDepVersion): string =>
+    coerce(TS_VERSIONS[name])?.version ?? TS_VERSIONS[name];
+
+  it('vends the AG-UI 1.x line to the website and the TypeScript AG-UI agent', () => {
+    expect(gte(versionOf('@copilotkit/react-core'), '1.76.0')).toBe(true);
+    for (const name of [
+      '@ag-ui/client',
+      '@ag-ui/core',
+      '@ag-ui/encoder',
+      '@ag-ui/aws-strands',
+    ] as const) {
+      expect(major(versionOf(name)), name).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  /**
+   * The `@ag-ui` entries of the vended CopilotKit release's `dependencies`, from
+   * https://registry.npmjs.org/@copilotkit/react-core/1.79.0 (fetched 2026-10-15).
+   *
+   * Update this fixture whenever the `@copilotkit/react-core` pin moves: copy the
+   * new release's `@ag-ui/client` and `@ag-ui/core` entries from
+   * `curl -s https://registry.npmjs.org/@copilotkit/react-core/<version> | jq .dependencies`.
+   */
+  const COPILOTKIT_AG_UI_DEPENDENCIES = {
+    version: '1.79.0',
+    dependencies: { '@ag-ui/client': '1.0.2', '@ag-ui/core': '1.0.2' },
+  } as const;
+
+  it('pins @ag-ui at exactly the versions the vended CopilotKit depends on', () => {
+    // A different pin installs a second @ag-ui/client and fails every
+    // generated website with TS2322.
+    expect(
+      TS_VERSIONS['@copilotkit/react-core'],
+      'the CopilotKit pin moved: update COPILOTKIT_AG_UI_DEPENDENCIES',
+    ).toBe(COPILOTKIT_AG_UI_DEPENDENCIES.version);
+    for (const [name, version] of Object.entries(
+      COPILOTKIT_AG_UI_DEPENDENCIES.dependencies,
+    )) {
+      expect(TS_VERSIONS[name as ITsDepVersion], name).toBe(version);
+    }
+    expect(TS_VERSIONS['@ag-ui/encoder']).toBe(TS_VERSIONS['@ag-ui/core']);
+  });
+
+  it('has the version update keep @ag-ui on the exact versions CopilotKit depends on', () => {
+    expect(EXACT_DEPENDENCY_PINS).toContainEqual(
+      expect.objectContaining({
+        source: '@copilotkit/react-core',
+        followers: Object.keys(COPILOTKIT_AG_UI_DEPENDENCIES.dependencies),
+      }),
+    );
+    for (const { source, followers, peers } of EXACT_DEPENDENCY_PINS) {
+      for (const name of [source, ...followers, ...peers]) {
+        expect(TS_VERSIONS[name], `${name} is not a vended pin`).toBeDefined();
+      }
+    }
+  });
 });
