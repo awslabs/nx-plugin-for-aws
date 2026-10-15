@@ -7,6 +7,7 @@ import type {
   IJavaVersion,
   IMiseVersion,
   IPyDepVersion,
+  ITerraformProviderVersion,
   ITsDepVersion,
 } from '../versions.js';
 
@@ -15,7 +16,8 @@ export type IVersionedDep =
   | ITsDepVersion
   | IPyDepVersion
   | IJavaVersion
-  | IMiseVersion;
+  | IMiseVersion
+  | ITerraformProviderVersion;
 
 /** A pin the run deliberately did not take, and why. */
 export interface LockstepNote {
