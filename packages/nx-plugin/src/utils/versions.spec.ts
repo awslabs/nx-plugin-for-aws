@@ -2,7 +2,9 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { coerce, gte, major } from 'semver';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
+import { coerce, gte, major, minVersion } from 'semver';
 import { describe, expect, it } from 'vitest';
 import PluginPackageJson from '../../package.json' with { type: 'json' };
 import {
@@ -33,6 +35,15 @@ const declaration = declareDependencies()({
   ],
 });
 type SpecTsDep = DeclaredTs<typeof declaration>;
+
+const require = createRequire(import.meta.url);
+/** The vitest ranges `@nx/vitest`'s generators write into a new workspace. */
+const nxVitest = require(
+  join(
+    dirname(require.resolve('@nx/vitest/package.json')),
+    'dist/src/utils/versions.js',
+  ),
+) as { vitestVersion: string; vitestCoverageV8Version: string };
 
 describe('versions utils', () => {
   describe('withVersions', () => {
@@ -108,6 +119,41 @@ describe('versions utils', () => {
           expect(version).toBe(NX_VERSION);
         }
       }
+    });
+  });
+
+  describe('vitest versions', () => {
+    // A vended pin on an older major than the range @nx/vitest writes is
+    // dropped from the catalog, leaving the workspace on two vitest majors.
+    // Compare major and floor rather than `satisfies` so a later minor bump of
+    // the vended pin does not fail this.
+    it.each([
+      ['vitest', nxVitest.vitestVersion],
+      ['@vitest/coverage-v8', nxVitest.vitestCoverageV8Version],
+    ] as const)(
+      'pins %s on the major @nx/vitest writes (%s)',
+      (name, range) => {
+        const floor = minVersion(range)?.version;
+        expect(floor, `${range} has no minimum version`).toBeDefined();
+        const pinned = TS_VERSIONS[name];
+        expect(major(pinned)).toBe(major(floor ?? '0.0.0'));
+        expect(gte(pinned, floor ?? '0.0.0')).toBe(true);
+      },
+    );
+
+    it('holds vitest and the packages that peer it exactly in one lockstep group', () => {
+      const members = ['vitest', '@vitest/coverage-v8', '@vitest/ui'];
+      expect(
+        LOCKSTEP_GROUPS.some((group) =>
+          members.every((name) => (group as readonly string[]).includes(name)),
+        ),
+      ).toBe(true);
+    });
+
+    it("pins the plugin's own vitest dependency at the vended version", () => {
+      // The vended ts#nx-generator spec imports `@aws/nx-plugin/sdk/utils/test`,
+      // which imports vitest, so a mismatch installs a second vitest.
+      expect(PluginPackageJson.dependencies.vitest).toBe(TS_VERSIONS.vitest);
     });
   });
 });

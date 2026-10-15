@@ -100,8 +100,8 @@ export const TS_VERSIONS = {
   '@smithy/node-config-provider': '4.6.2',
   '@smithy/node-http-handler': '4.12.1',
   '@smithy/types': '4.19.0',
-  '@vitest/coverage-v8': '4.1.11',
-  '@vitest/ui': '4.1.11',
+  '@vitest/coverage-v8': '5.0.4',
+  '@vitest/ui': '5.0.4',
   '@astrojs/react': '6.0.6',
   '@astrojs/starlight': '0.42.6',
   astro: '7.3.8',
@@ -156,7 +156,7 @@ export const TS_VERSIONS = {
   'tw-animate-css': '1.4.0',
   vite: '8.3.4',
   typescript: '6.0.3',
-  vitest: '4.1.11',
+  vitest: '5.0.4',
   // The `testEnvironment` @nx/vitest writes into every generated config.
   jsdom: '29.1.1',
   zod: '4.6.7',
@@ -177,6 +177,8 @@ export const LOCKSTEP_GROUPS = [
   // The wasm bindings format generated files; the CLI checks them.
   ['@biomejs/wasm-nodejs', '@biomejs/biome'],
   ['@astral-sh/ruff-wasm-nodejs', 'ruff'],
+  // vitest pins its coverage provider and UI at its own exact version.
+  ['vitest', '@vitest/coverage-v8', '@vitest/ui'],
 ] as const satisfies readonly (readonly [string, string, ...string[]])[];
 
 /**
