@@ -4,7 +4,6 @@
  */
 import { joinPathFragments, type Tree } from '@nx/devkit';
 import { execSync } from 'child_process';
-import uniqBy from 'lodash.uniqby';
 
 /**
  * Returns all files from the tree root that are not gitignored (both tracked and untracked)
@@ -49,9 +48,9 @@ export const isWithinGitRepo = (tree: Tree): boolean => {
  * Update a .gitignore file. Will create a new .gitignore file if it does not exist
  *
  * A trailing newline is kept rather than handed to `doUpdate` as an empty
- * pattern, which the de-duplication below would otherwise merge into an
- * earlier blank line and drop. When the update adds and removes nothing the
- * file is left untouched, so re-running a caller is a no-op.
+ * pattern. Duplicate patterns are removed, but blank lines are kept where they
+ * are. When the update adds and removes nothing the file is left untouched, so
+ * re-running a caller is a no-op.
  */
 export const updateGitIgnore = (
   tree: Tree,
@@ -65,7 +64,17 @@ export const updateGitIgnore = (
     existing === null
       ? []
       : (hasTrailingNewline ? existing.slice(0, -1) : existing).split('\n');
-  const newPatterns = uniqBy(doUpdate([...existingPatterns]), (p) => p);
+  const seen = new Set<string>();
+  const newPatterns = doUpdate([...existingPatterns]).filter((p) => {
+    if (p.trim() === '') {
+      return true;
+    }
+    if (seen.has(p)) {
+      return false;
+    }
+    seen.add(p);
+    return true;
+  });
 
   if (existing !== null) {
     const existingSet = new Set(existingPatterns);

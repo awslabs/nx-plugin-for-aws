@@ -20,6 +20,7 @@ import type {
 } from './declared-dependencies.js';
 import { addDependenciesToPackageJson } from './dependencies.js';
 import { formatFilesInSubtree } from './format.js';
+import { updateGitIgnore } from './git.js';
 import type { Iac } from './iac.js';
 import { esmVars } from './module-format.js';
 import { getNpmScopePrefix } from './npm-scope.js';
@@ -50,7 +51,7 @@ export async function sharedConstructsGenerator<
 ) {
   const { iac } = options;
   const npmScopePrefix = getNpmScopePrefix(tree);
-  updateGitignore(tree);
+  ignoreRuntimeConfig(tree);
 
   if (iac === 'cdk') {
     if (
@@ -175,14 +176,14 @@ export async function sharedConstructsGenerator<
   }
 }
 
-const updateGitignore = (tree: Tree) => {
-  const gitignore = tree.exists('.gitignore')
-    ? tree.read('.gitignore', 'utf-8')
-    : '';
-  const regex = /runtime-config.json/gm;
-  const hasRuntimeConfig = regex.test(gitignore ?? '');
-  if (hasRuntimeConfig) {
-    return;
-  }
-  tree.write('.gitignore', `${gitignore}\n\nruntime-config.json`);
+/**
+ * Ignore the root `runtime-config.json`, unless an existing entry already
+ * covers it.
+ */
+export const ignoreRuntimeConfig = (tree: Tree) => {
+  updateGitIgnore(tree, '.', (patterns) =>
+    patterns.some((p) => p.includes('runtime-config.json'))
+      ? patterns
+      : [...patterns, 'runtime-config.json'],
+  );
 };
