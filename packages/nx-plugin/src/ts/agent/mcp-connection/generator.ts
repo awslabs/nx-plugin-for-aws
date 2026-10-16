@@ -159,13 +159,20 @@ export const tsAgentMcpConnectionGenerator = async (
   // 4. Set up dev target
   const agentName = agentComponent.name ?? 'agent';
   const devTargetName = `${agentName}-dev`;
+  const evalTargetName = `${agentName}-eval`;
   const mcpDevTargetName = `${mcpComponentName}-dev`;
 
-  if (sourceProject.targets?.[devTargetName]) {
-    addDependencyToTargetIfNotPresent(sourceProject, devTargetName, {
-      projects: [targetProject.name],
-      target: mcpDevTargetName,
-    });
+  let projectConfigChanged = false;
+  for (const targetName of [devTargetName, evalTargetName]) {
+    if (sourceProject.targets?.[targetName]) {
+      addDependencyToTargetIfNotPresent(sourceProject, targetName, {
+        projects: [targetProject.name],
+        target: mcpDevTargetName,
+      });
+      projectConfigChanged = true;
+    }
+  }
+  if (projectConfigChanged) {
     updateProjectConfiguration(tree, sourceProject.name, sourceProject);
   }
 

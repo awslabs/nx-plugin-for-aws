@@ -1,0 +1,97 @@
+---
+title: TypeScript Agent Evaluation
+description: Add an evaluation harness to a TypeScript Strands Agent
+generator: ts#agent#eval
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import RunGenerator from '@components/run-generator.astro';
+
+Add an evaluation harness to a <Link path="guides/ts-agent">TypeScript Agent</Link>. The harness runs a set of test cases against your agent and checks each response with deterministic scorers, so you can catch regressions in your agent's behaviour locally or in CI.
+
+## Usage
+
+### Generate an Agent Evaluation Harness
+
+You will need an existing TypeScript project containing an agent created with the `ts#agent` generator.
+
+<RunGenerator generator="ts#agent#eval" />
+
+### Options
+
+<GeneratorParameters generator="ts#agent#eval" />
+
+## Generator Output
+
+The generator adds the following files to your project, where `<agent>` is the name of your agent component (`agent` by default):
+
+<FileTree>
+  - \<your-project>/
+    - evals/\<agent>/
+      - cases.json Your evaluation cases
+    - scripts/\<agent>/
+      - eval.ts Runs each case against your agent and scores the response
+</FileTree>
+
+It also adds an `<agent>-eval` target to your project.
+
+## Writing Evaluation Cases
+
+Each case in `cases.json` has a `name`, a `prompt` sent to your agent, and a list of checks in `expect` that the agent's response must pass:
+
+```json title="evals/agent/cases.json"
+{
+  "cases": [
+    {
+      "name": "multiplies with its spellbook",
+      "prompt": "Please multiply 6 by 7",
+      "expect": [{ "regex": "\\b42\\b" }, { "toolCalled": "Multiply" }]
+    },
+    {
+      "name": "answers without its spellbook when no maths is needed",
+      "prompt": "What is the capital of France?",
+      "expect": [{ "toolNotCalled": "Multiply" }]
+    }
+  ]
+}
+```
+
+The following checks are supported:
+
+- `contains`: the response includes the given text (case-insensitive)
+- `notContains`: the response does not include the given text (case-insensitive)
+- `regex`: the response matches the given regular expression. Matching is case-insensitive unless you set `flags`, for example `{ "regex": "^OK", "flags": "" }`
+- `toolCalled`: the agent called the tool with the given name, and the call succeeded
+- `toolNotCalled`: the agent did not call the tool with the given name
+
+Each check sets exactly one of these. A case passes when all of its checks pass. Each case runs in a fresh session, so cases do not affect one another.
+
+The harness validates `cases.json` before invoking your agent, and exits with an error naming the case and field if a case is malformed.
+
+:::tip
+Include cases where your agent should decline or answer without a tool, using `toolNotCalled` or `notContains`, as well as cases where it should act.
+:::
+
+## Running Evaluations
+
+Run the evaluation target for your agent:
+
+<NxCommands commands={['run your-project:agent-eval']} />
+
+The harness creates your agent in-process using `getAgent()` from your agent's `agent.ts`, so your agent's own server does not need to be running. It uses whichever model your agent is configured with, so you need AWS credentials with access to that model in Amazon Bedrock.
+
+If your agent is connected to MCP servers, A2A agents or an AgentCore Gateway, the `<agent>-eval` target starts their local `-dev` targets, as `<agent>-dev` does. Nx does not wait for these servers to be ready, so a slow-starting server can fail the first case. If that happens, start the servers' `-dev` targets in a separate terminal before running evaluations.
+
+The harness prints a result for each case and a final score, and exits with a non-zero code if any case fails. This lets you run evaluations as a step in your CI pipeline.
+
+:::note
+Model responses can vary between runs. Prefer checks that express the behaviour you care about (such as a tool being called, or a number appearing in the answer) over exact wording.
+:::
+
+The following environment variables customise a run:
+
+- `EVAL_CASES`: the path to the cases file, relative to your project (default `evals/<agent>/cases.json`)
+- `EVAL_TIMEOUT_MS`: the time allowed for each case before it fails (default `60000`)

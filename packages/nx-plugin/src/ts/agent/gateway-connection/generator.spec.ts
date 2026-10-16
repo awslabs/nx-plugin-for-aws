@@ -226,6 +226,27 @@ export const getAgent = async (sessionId: string) =>
     );
   });
 
+  it('chains agent eval onto gateway dev when it exists', async () => {
+    setupProjects();
+    const before = JSON.parse(
+      tree.read('packages/my-api/project.json')!.toString(),
+    );
+    before.targets['my-agent-eval'] = {
+      executor: 'nx:run-commands',
+      options: { commands: ['echo eval'] },
+    };
+    tree.write('packages/my-api/project.json', JSON.stringify(before));
+
+    await tsAgentGatewayConnectionGenerator(tree, fullOptions());
+
+    const cfg = JSON.parse(
+      tree.read('packages/my-api/project.json')!.toString(),
+    );
+    expect(cfg.targets['my-agent-eval'].dependsOn).toEqual([
+      { projects: ['@test/my-gateway'], target: 'dev' },
+    ]);
+  });
+
   it('is idempotent: re-running does not duplicate client creation or tool list entries', async () => {
     setupProjects();
     await tsAgentGatewayConnectionGenerator(tree, fullOptions());

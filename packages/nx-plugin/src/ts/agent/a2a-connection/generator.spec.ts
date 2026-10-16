@@ -212,6 +212,43 @@ export const getAgent = async (sessionId: string) =>
     ]);
   });
 
+  it('should make the host eval depend on remote dev when it exists', async () => {
+    setupProjects();
+    const hostConfig = JSON.parse(
+      tree.read('apps/ts-host/project.json', 'utf-8')!,
+    );
+    hostConfig.targets['host-eval'] = {
+      executor: 'nx:run-commands',
+      options: { commands: ['echo eval'] },
+    };
+    tree.write('apps/ts-host/project.json', JSON.stringify(hostConfig));
+
+    await tsAgentA2aConnectionGenerator(tree, {
+      sourceProject: '@test/ts-host',
+      targetProject: '@test/ts-remote',
+      sourceComponent: HOST,
+      targetComponent: REMOTE,
+    });
+
+    const host = JSON.parse(tree.read('apps/ts-host/project.json', 'utf-8')!);
+    expect(host.targets['host-eval'].dependsOn).toEqual([
+      { projects: ['@test/ts-remote'], target: 'remote-dev' },
+    ]);
+  });
+
+  it('should not add an eval target to the host', async () => {
+    setupProjects();
+    await tsAgentA2aConnectionGenerator(tree, {
+      sourceProject: '@test/ts-host',
+      targetProject: '@test/ts-remote',
+      sourceComponent: HOST,
+      targetComponent: REMOTE,
+    });
+
+    const host = JSON.parse(tree.read('apps/ts-host/project.json', 'utf-8')!);
+    expect(host.targets['host-eval']).toBeUndefined();
+  });
+
   it('should throw when target is not an A2A agent', async () => {
     setupProjects();
     await expect(

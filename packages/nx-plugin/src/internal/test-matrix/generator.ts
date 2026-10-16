@@ -29,6 +29,7 @@ import {
   type TsApiGeneratorSchema,
   type TsNxMigrationGeneratorSchema,
   type TsRdbGeneratorSchema,
+  tsAgentEvalGenerator,
   tsAgentGenerator,
   tsApiGenerator,
   tsDcrProxyGenerator,
@@ -314,6 +315,10 @@ export const internalTestMatrixGenerator = async (
   for (const agent of tsAgents) {
     await tsAgentGenerator(tree, { ...agent, ...defaults });
   }
+  await tsAgentEvalGenerator(tree, {
+    project: 'ts-project',
+    agent: 'my-ts-agent',
+  });
 
   // Python agents: Strands across every protocol, plus LangChain in its own
   // project — langchain's dependency closure would push the zip-bundled Lambda
