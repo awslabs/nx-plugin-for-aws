@@ -6,22 +6,23 @@ import {
   addProjectConfiguration,
   readProjectConfiguration,
   type Tree,
+  updateProjectConfiguration,
   writeJson,
 } from '@nx/devkit';
-import { declareDependencies } from '../../utils/declared-dependencies.js';
-import { expectHasMetricTags } from '../../utils/metrics-assertions.js';
+import { declareDependencies } from '../../../utils/declared-dependencies.js';
+import { expectHasMetricTags } from '../../../utils/metrics-assertions.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
   sharedConstructsGenerator,
-} from '../../utils/shared-constructs.js';
-import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
-import { tsAgentGenerator } from '../agent/generator.js';
+} from '../../../utils/shared-constructs.js';
+import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
+import { tsAgentGenerator } from '../generator.js';
 import {
   TS_AGENT_EVAL_GENERATOR_INFO,
   tsAgentEvalGenerator,
 } from './generator.js';
 
-describe('ts#agent-eval generator', () => {
+describe('ts#agent#eval generator', () => {
   let tree: Tree;
 
   beforeEach(() => {
@@ -105,6 +106,85 @@ describe('ts#agent-eval generator', () => {
       'tsx ./scripts/my-agent/eval.ts',
     ]);
     expect(project.targets['agent-eval']).toBeUndefined();
+  });
+
+  it('should leave the first agent eval intact when adding a second', async () => {
+    await addAgent();
+    await addAgent('my-agent');
+    await tsAgentEvalGenerator(tree, {
+      project: 'test-project',
+      agent: 'agent',
+    });
+
+    const firstTarget = readProjectConfiguration(tree, 'test-project').targets[
+      'agent-eval'
+    ];
+    const firstScript = tree.read(
+      'apps/test-project/scripts/agent/eval.ts',
+      'utf-8',
+    );
+    const firstCases = tree.read(
+      'apps/test-project/evals/agent/cases.json',
+      'utf-8',
+    );
+
+    await tsAgentEvalGenerator(tree, {
+      project: 'test-project',
+      agent: 'my-agent',
+    });
+
+    const project = readProjectConfiguration(tree, 'test-project');
+    expect(project.targets['agent-eval']).toEqual(firstTarget);
+    expect(tree.read('apps/test-project/scripts/agent/eval.ts', 'utf-8')).toBe(
+      firstScript,
+    );
+    expect(tree.read('apps/test-project/evals/agent/cases.json', 'utf-8')).toBe(
+      firstCases,
+    );
+    expect(project.targets['my-agent-eval']).toBeDefined();
+    expect(project.metadata.components).toContainEqual({
+      generator: TS_AGENT_EVAL_GENERATOR_INFO.id,
+      path: 'evals/agent',
+      name: 'agent',
+    });
+    expect(project.metadata.components).toContainEqual({
+      generator: TS_AGENT_EVAL_GENERATOR_INFO.id,
+      path: 'evals/my-agent',
+      name: 'my-agent',
+    });
+  });
+
+  it("should depend on the servers the agent's dev target starts", async () => {
+    await addAgent();
+    const before = readProjectConfiguration(tree, 'test-project');
+    before.targets['agent-dev'].dependsOn = [
+      { projects: ['tools'], target: 'mcp-server-dev' },
+    ];
+    updateProjectConfiguration(tree, 'test-project', before);
+
+    await tsAgentEvalGenerator(tree, { project: 'test-project' });
+
+    expect(
+      readProjectConfiguration(tree, 'test-project').targets['agent-eval']
+        .dependsOn,
+    ).toEqual([{ projects: ['tools'], target: 'mcp-server-dev' }]);
+  });
+
+  it('should vend a runner that validates cases and supports toolNotCalled', async () => {
+    await addAgent();
+
+    await tsAgentEvalGenerator(tree, { project: 'test-project' });
+
+    const evalScript = tree.read(
+      'apps/test-project/scripts/agent/eval.ts',
+      'utf-8',
+    );
+    expect(evalScript).toContain('CasesFile.safeParse');
+    expect(evalScript).toContain('toolNotCalled');
+    expect(evalScript).toContain('process.env.EVAL_CASES');
+    expect(
+      tree.read('apps/test-project/evals/agent/cases.json', 'utf-8'),
+    ).toContain('"toolNotCalled": "Multiply"');
   });
 
   it('should import the session scope from the agent-connection package', async () => {

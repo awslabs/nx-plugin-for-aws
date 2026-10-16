@@ -1,0 +1,205 @@
+// Eval runner for <%- agentNameClassName %>. Runs each case in `<%- casesFile %>`
+// against the agent in-process and exits non-zero if any case fails.
+import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { AfterToolCallEvent } from '@strands-agents/sdk';
+import { z } from 'zod';
+import { runWithSessionId } from '<%- agentConnectionImport %>';
+import { getAgent } from '<%- relativeAgentImport %>/agent<% if (esm) { %>.js<% } %>';
+
+const CHECK_KINDS = [
+  'contains',
+  'notContains',
+  'regex',
+  'toolCalled',
+  'toolNotCalled',
+] as const;
+
+const Check = z
+  .object({
+    contains: z.string().min(1).optional(),
+    notContains: z.string().min(1).optional(),
+    regex: z.string().min(1).optional(),
+    // Regex flags, default "i". Use "" for a case-sensitive match.
+    flags: z.string().optional(),
+    toolCalled: z.string().min(1).optional(),
+    toolNotCalled: z.string().min(1).optional(),
+  })
+  .strict()
+  .superRefine((check, ctx) => {
+    const kinds = CHECK_KINDS.filter((kind) => check[kind] !== undefined);
+    if (kinds.length !== 1) {
+      ctx.addIssue({
+        code: 'custom',
+        message: `expected exactly one of ${CHECK_KINDS.join(', ')}`,
+      });
+    }
+    if (check.flags !== undefined && check.regex === undefined) {
+      ctx.addIssue({ code: 'custom', message: 'flags requires regex' });
+    }
+    if (check.regex !== undefined) {
+      try {
+        new RegExp(check.regex, check.flags ?? 'i');
+      } catch (err) {
+        ctx.addIssue({ code: 'custom', message: (err as Error).message });
+      }
+    }
+  });
+type Check = z.infer<typeof Check>;
+
+const CasesFile = z.object({
+  cases: z
+    .array(
+      z
+        .object({
+          name: z.string().min(1),
+          prompt: z.string().min(1),
+          expect: z.array(Check).min(1),
+        })
+        .strict(),
+    )
+    .min(1),
+});
+
+interface ToolCall {
+  name: string;
+  error?: string;
+}
+
+interface Result {
+  response: string;
+  // In call order.
+  toolCalls: ToolCall[];
+}
+
+const CASES_FILE = process.env.EVAL_CASES ?? '<%- casesFile %>';
+const TIMEOUT_MS = Number(process.env.EVAL_TIMEOUT_MS ?? 60_000);
+
+const loadCases = () => {
+  const json = JSON.parse(readFileSync(CASES_FILE, 'utf-8'));
+  const parsed = CasesFile.safeParse(json);
+  if (parsed.success) {
+    return parsed.data.cases;
+  }
+  console.error(`Invalid eval cases in ${CASES_FILE}:`);
+  for (const issue of parsed.error.issues) {
+    const [, index, ...rest] = issue.path;
+    const caseName =
+      typeof index === 'number' ? json.cases?.[index]?.name : undefined;
+    const location = [
+      typeof index === 'number' ? `case ${caseName ? `"${caseName}"` : index}` : 'file',
+      ...rest.map(String),
+    ].join(' > ');
+    console.error(`  - ${location}: ${issue.message}`);
+  }
+  process.exit(1);
+};
+
+// AgentCore session ids must be at least 33 characters.
+const newSessionId = () => randomUUID().replaceAll('-', '').padEnd(33, '0');
+
+const invoke = (prompt: string): Promise<Result> =>
+  runWithSessionId(newSessionId(), async () => {
+    const agent = await getAgent();
+    const toolCalls: ToolCall[] = [];
+    agent.addHook(AfterToolCallEvent, (event) => {
+      toolCalls.push({
+        name: event.toolUse.name,
+        error:
+          event.result.status === 'error'
+            ? (event.error?.message ?? 'tool returned an error')
+            : undefined,
+      });
+    });
+    let response = '';
+    for await (const event of agent.stream(prompt)) {
+      if (
+        event.type === 'modelStreamUpdateEvent' &&
+        event.event.type === 'modelContentBlockDeltaEvent' &&
+        event.event.delta.type === 'textDelta'
+      ) {
+        response += event.event.delta.text;
+      } else if (event.type === 'modelMessageEvent') {
+        response += '\n';
+      }
+    }
+    return { response: response.trim(), toolCalls };
+  });
+
+const withTimeout = <T>(promise: Promise<T>): Promise<T> =>
+  Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`Timed out after ${TIMEOUT_MS}ms`)),
+        TIMEOUT_MS,
+      ).unref(),
+    ),
+  ]);
+
+const describeCalls = (toolCalls: ToolCall[]) =>
+  toolCalls
+    .map(({ name, error }) => (error ? `${name} (failed: ${error})` : name))
+    .join(', ') || 'none';
+
+// Returns a failure reason, or undefined when the check passes.
+const grade = (
+  check: Check,
+  { response, toolCalls }: Result,
+): string | undefined => {
+  const text = response.toLowerCase();
+  // Calls that errored do not count as the agent having used the tool.
+  const succeeded = toolCalls.filter((c) => !c.error).map((c) => c.name);
+  if (check.contains !== undefined) {
+    return text.includes(check.contains.toLowerCase())
+      ? undefined
+      : `expected to contain "${check.contains}"`;
+  }
+  if (check.notContains !== undefined) {
+    return text.includes(check.notContains.toLowerCase())
+      ? `expected not to contain "${check.notContains}"`
+      : undefined;
+  }
+  if (check.regex !== undefined) {
+    const regex = new RegExp(check.regex, check.flags ?? 'i');
+    return regex.test(response) ? undefined : `expected to match ${regex}`;
+  }
+  if (check.toolCalled !== undefined) {
+    return succeeded.includes(check.toolCalled)
+      ? undefined
+      : `expected tool "${check.toolCalled}" to be called (called: ${describeCalls(toolCalls)})`;
+  }
+  if (check.toolNotCalled !== undefined) {
+    return toolCalls.some((c) => c.name === check.toolNotCalled)
+      ? `expected tool "${check.toolNotCalled}" not to be called (called: ${describeCalls(toolCalls)})`
+      : undefined;
+  }
+  return `unknown check ${JSON.stringify(check)}`;
+};
+
+const cases = loadCases();
+
+console.log(`Running ${cases.length} eval case(s) against <%- agentNameClassName %>\n`);
+
+let passed = 0;
+for (const evalCase of cases) {
+  let result: Result = { response: '', toolCalls: [] };
+  let failures: string[];
+  try {
+    result = await withTimeout(invoke(evalCase.prompt));
+    failures = evalCase.expect.flatMap((check) => grade(check, result) ?? []);
+  } catch (err) {
+    failures = [`invocation failed: ${(err as Error).message}`];
+  }
+  if (failures.length === 0) {
+    passed++;
+    console.log(`\n✓ ${evalCase.name}`);
+  } else {
+    console.log(`\n✗ ${evalCase.name}`);
+    failures.forEach((f) => console.log(`    - ${f}`));
+    console.log(`    response: ${JSON.stringify(result.response)}`);
+  }
+}
+
+console.log(`\nScore: ${passed}/${cases.length}`);
+process.exit(passed === cases.length ? 0 : 1);

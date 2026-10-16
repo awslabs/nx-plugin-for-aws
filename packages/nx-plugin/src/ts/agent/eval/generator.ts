@@ -9,20 +9,20 @@ import {
   type Tree,
   updateProjectConfiguration,
 } from '@nx/devkit';
-import { formatFilesInSubtree } from '../../utils/format.js';
-import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
-import { esmVars } from '../../utils/module-format.js';
-import { toClassName } from '../../utils/names.js';
-import { getNpmScope } from '../../utils/npm-scope.js';
+import { formatFilesInSubtree } from '../../../utils/format.js';
+import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics.js';
+import { esmVars } from '../../../utils/module-format.js';
+import { toClassName } from '../../../utils/names.js';
+import { getNpmScope } from '../../../utils/npm-scope.js';
 import {
   addComponentGeneratorMetadata,
   type ComponentMetadata,
   getGeneratorInfo,
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
-} from '../../utils/nx.js';
-import { sortObjectKeys } from '../../utils/object.js';
-import { TS_AGENT_GENERATOR_INFO } from '../agent/generator.js';
+} from '../../../utils/nx.js';
+import { sortObjectKeys } from '../../../utils/object.js';
+import { TS_AGENT_GENERATOR_INFO } from '../generator.js';
 import type { TsAgentEvalGeneratorSchema } from './schema';
 
 export const TS_AGENT_EVAL_GENERATOR_INFO: NxGeneratorInfo = getGeneratorInfo(
@@ -108,12 +108,17 @@ export const tsAgentEvalGenerator = async (
 
   const evalTargetName = `${agentTargetPrefix}-eval`;
   if (!project.targets?.[evalTargetName]) {
+    // Connected servers resolve to localhost under LOCAL_DEV, so the eval
+    // starts whatever the agent's dev target starts.
+    const devDependsOn =
+      project.targets?.[`${agentTargetPrefix}-dev`]?.dependsOn ?? [];
     updateProjectConfiguration(tree, project.name, {
       ...project,
       targets: sortObjectKeys({
         ...project.targets,
         [evalTargetName]: {
           executor: 'nx:run-commands',
+          ...(devDependsOn.length > 0 && { dependsOn: [...devDependsOn] }),
           options: {
             commands: [`tsx ./scripts/${agentTargetPrefix}/eval.ts`],
             cwd: '{projectRoot}',

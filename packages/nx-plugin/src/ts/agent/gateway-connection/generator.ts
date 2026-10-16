@@ -176,12 +176,14 @@ export const tsAgentGatewayConnectionGenerator = async (
     });
     projectConfigChanged = true;
   }
-  if (sourceProject.targets?.[devTargetName]) {
-    addDependencyToTargetIfNotPresent(sourceProject, devTargetName, {
-      projects: [targetProject.name],
-      target: gatewayDevTargetName,
-    });
-    projectConfigChanged = true;
+  for (const targetName of [devTargetName, `${agentName}-eval`]) {
+    if (sourceProject.targets?.[targetName]) {
+      addDependencyToTargetIfNotPresent(sourceProject, targetName, {
+        projects: [targetProject.name],
+        target: gatewayDevTargetName,
+      });
+      projectConfigChanged = true;
+    }
   }
   if (projectConfigChanged) {
     updateProjectConfiguration(tree, sourceProject.name, sourceProject);

@@ -216,7 +216,7 @@ export const runGeneratorMatrix = async (
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:ts#agent-eval --project=ts-project --agent=my-ts-agent --no-interactive`,
+    `generate @aws/nx-plugin:ts#agent#eval --project=ts-project --agent=my-ts-agent --no-interactive`,
     opts,
   );
   await runCLI(

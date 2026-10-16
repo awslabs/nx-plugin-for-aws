@@ -406,6 +406,7 @@ export default defineConfig({
               collapsed: true,
               items: [
                 { label: 'ts#agent', link: '/guides/ts-agent' },
+                { label: 'ts#agent#eval', link: '/guides/ts-agent-eval' },
                 { label: 'py#agent', link: '/guides/py-agent' },
                 { label: 'ts#mcp-server', link: '/guides/ts-mcp-server' },
                 { label: 'py#mcp-server', link: '/guides/py-mcp-server' },

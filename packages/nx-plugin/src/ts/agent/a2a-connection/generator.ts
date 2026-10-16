@@ -202,13 +202,20 @@ export const tsAgentA2aConnectionGenerator = async (
   //    so running the host's dev also spins up the remote A2A agent.
   const agentName = agentComponent.name ?? 'agent';
   const devTargetName = `${agentName}-dev`;
+  const evalTargetName = `${agentName}-eval`;
   const targetDevTargetName = `${targetAgentComponentName}-dev`;
 
-  if (sourceProject.targets?.[devTargetName]) {
-    addDependencyToTargetIfNotPresent(sourceProject, devTargetName, {
-      projects: [targetProject.name],
-      target: targetDevTargetName,
-    });
+  let projectConfigChanged = false;
+  for (const targetName of [devTargetName, evalTargetName]) {
+    if (sourceProject.targets?.[targetName]) {
+      addDependencyToTargetIfNotPresent(sourceProject, targetName, {
+        projects: [targetProject.name],
+        target: targetDevTargetName,
+      });
+      projectConfigChanged = true;
+    }
+  }
+  if (projectConfigChanged) {
     updateProjectConfiguration(tree, sourceProject.name, sourceProject);
   }
 
