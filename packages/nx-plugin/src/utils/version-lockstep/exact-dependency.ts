@@ -2,6 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+import { type Tree, writeJson } from '@nx/devkit';
 import { coerce, satisfies, valid } from 'semver';
 import type {
   IVersionedDep,
@@ -232,4 +233,118 @@ export const pinToExactDependencies = async (
   }
 
   return notes;
+};
+
+/** Reads each release's field once; a failed read fails the same way when repeated. */
+export const memoizeLookup = (lookup: DependencyLookup): DependencyLookup => {
+  const cache = new Map<string, Promise<Record<string, string>>>();
+  return async (name, version, field) => {
+    const key = `${name}@${version} ${field}`;
+    let cached = cache.get(key);
+    if (!cached) {
+      cached = lookup(name, version, field);
+      cache.set(key, cached);
+    }
+    return { ...(await cached) };
+  };
+};
+
+/** Where the update records what each rule's source release depends on. */
+export const EXACT_DEPENDENCY_SOURCES_PATH =
+  'packages/nx-plugin/exact-dependency-sources.json';
+
+/** Per rule source: the version pinned and the exact versions it depends on for its followers. */
+export type ExactDependencySources = Record<
+  string,
+  { version: string; dependencies: Record<string, string> }
+>;
+
+/**
+ * What each rule's source, at the version being written, depends on for its
+ * followers. Reuses `recorded` for a source that did not move and reads the
+ * registry otherwise. Throws when a follower being written is not that version,
+ * or when the source's dependencies can't be read or omit a follower.
+ */
+export const verifyExactDependencies = async (
+  rules: readonly ExactDependencyPin[],
+  versions: Readonly<ProposedVersions>,
+  recorded: Readonly<ExactDependencySources>,
+  lookup: DependencyLookup,
+): Promise<ExactDependencySources> => {
+  const sources: ExactDependencySources = {};
+  const written = (name: IVersionedDep): string | undefined => {
+    const version = versions[name];
+    return version === undefined ? undefined : bare(version);
+  };
+
+  for (const { source, followers, reason } of rules) {
+    const sourceVersion = written(source);
+    if (sourceVersion === undefined) continue;
+
+    let dependencies: Record<string, string>;
+    if (recorded[source]?.version === sourceVersion) {
+      dependencies = recorded[source].dependencies;
+    } else {
+      try {
+        dependencies = await lookup(source, sourceVersion, 'dependencies');
+      } catch (error) {
+        throw new Error(
+          `could not read the dependencies of ${source} ${sourceVersion} (${message(error)})`,
+        );
+      }
+    }
+
+    const missing = followers.filter((name) => !dependencies[name]);
+    if (missing.length > 0) {
+      throw new Error(
+        `${source} ${sourceVersion} does not depend on ${missing.join(', ')}`,
+      );
+    }
+
+    const expected = Object.fromEntries(
+      followers.map((name) => {
+        const declared = dependencies[name];
+        return [name, valid(declared) ?? bare(declared) ?? declared];
+      }),
+    );
+    const differing = followers.filter(
+      (name) => written(name) !== expected[name],
+    );
+    if (differing.length > 0) {
+      throw new Error(
+        `${differing.map((name) => `${name} ${written(name)}`).join(', ')} but ${source} ${sourceVersion} depends on ${differing.map((name) => `${name} ${expected[name]}`).join(', ')}: ${reason}`,
+      );
+    }
+
+    sources[source] = { version: sourceVersion, dependencies: expected };
+  }
+
+  return sources;
+};
+
+/**
+ * Record in `EXACT_DEPENDENCY_SOURCES_PATH` what the sources being written depend
+ * on, which `versions.spec.ts` checks the pins against. Throws as
+ * `verifyExactDependencies` does, before anything is written.
+ * @returns paths written, for the update report
+ */
+export const writeExactDependencySources = async (
+  tree: Tree,
+  rules: readonly ExactDependencyPin[],
+  versions: Readonly<ProposedVersions>,
+  lookup: DependencyLookup,
+): Promise<string[]> => {
+  const path = EXACT_DEPENDENCY_SOURCES_PATH;
+  const recorded: ExactDependencySources = tree.exists(path)
+    ? JSON.parse(tree.read(path, 'utf-8') ?? '{}')
+    : {};
+  const sources = await verifyExactDependencies(
+    rules,
+    versions,
+    recorded,
+    lookup,
+  );
+  if (JSON.stringify(sources) === JSON.stringify(recorded)) return [];
+  writeJson(tree, path, sources);
+  return [path];
 };

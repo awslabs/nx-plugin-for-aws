@@ -52,7 +52,9 @@ import {
 } from '../packages/nx-plugin/src/utils/versions';
 import {
   type DependencyLookup,
+  memoizeLookup,
   pinToExactDependencies,
+  writeExactDependencySources,
 } from '../packages/nx-plugin/src/utils/version-lockstep/exact-dependency';
 import {
   holdPinnedVersions,
@@ -344,19 +346,22 @@ const getUpdatedTerraformVersions = async (): Promise<
 
 /**
  * Reads one field of a published npm release's manifest from the public
- * registry. Rejects on any non-200 response, so the caller can hold its pins.
+ * registry, once per release and field. Rejects on any non-200 response, so the
+ * caller can hold its pins.
  */
-const npmManifestField: DependencyLookup = async (name, version, field) => {
-  const url = `https://registry.npmjs.org/${name}/${version}`;
-  const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
-  if (!response.ok) {
-    throw new Error(`${url} returned ${response.status}`);
-  }
-  const manifest = (await response.json()) as Partial<
-    Record<typeof field, Record<string, string>>
-  >;
-  return manifest[field] ?? {};
-};
+const npmManifestField: DependencyLookup = memoizeLookup(
+  async (name, version, field) => {
+    const url = `https://registry.npmjs.org/${name}/${version}`;
+    const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+    if (!response.ok) {
+      throw new Error(`${url} returned ${response.status}`);
+    }
+    const manifest = (await response.json()) as Partial<
+      Record<typeof field, Record<string, string>>
+    >;
+    return manifest[field] ?? {};
+  },
+);
 
 /**
  * Applies updated versions to the versions file
@@ -712,6 +717,13 @@ const main = async () => {
       updatedTsVersions,
       npmManifestField,
     );
+    // Fails the run rather than write a CopilotKit the @ag-ui pins don't match.
+    const exactDependencyFiles = await writeExactDependencySources(
+      tree,
+      EXACT_DEPENDENCY_PINS,
+      updatedTsVersions,
+      npmManifestField,
+    );
 
     // This repo's manifests, from the same pass as the vended pins.
     const manifestChanges = repoManifests().flatMap((manifestPath) =>
@@ -729,6 +741,7 @@ const main = async () => {
     const tsChanges: ReportChange[] = [
       ...tsVersionChanges,
       ...exactDependencyNotes,
+      ...exactDependencyFiles.map((path) => ({ path })),
     ];
 
     // Apply updated Python versions to the versions file
