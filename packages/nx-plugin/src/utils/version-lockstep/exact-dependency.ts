@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { type Tree, writeJson } from '@nx/devkit';
+import { readJson, type Tree, writeJson } from '@nx/devkit';
 import { coerce, satisfies, valid } from 'semver';
 import type {
   IVersionedDep,
@@ -336,7 +336,7 @@ export const writeExactDependencySources = async (
 ): Promise<string[]> => {
   const path = EXACT_DEPENDENCY_SOURCES_PATH;
   const recorded: ExactDependencySources = tree.exists(path)
-    ? JSON.parse(tree.read(path, 'utf-8') ?? '{}')
+    ? readJson(tree, path)
     : {};
   const sources = await verifyExactDependencies(
     rules,

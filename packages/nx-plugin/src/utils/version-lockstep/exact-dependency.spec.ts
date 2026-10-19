@@ -448,6 +448,45 @@ describe('verifyExactDependencies', () => {
     );
   });
 
+  it('throws when a follower is not being written', async () => {
+    const { '@ag-ui/core': _, ...versions } = VENDED;
+
+    await expect(
+      verifyExactDependencies(RULES, versions, RECORDED, offline),
+    ).rejects.toThrow(
+      '@ag-ui/core undefined but @copilotkit/react-core 1.79.0 depends on @ag-ui/core 1.0.2',
+    );
+  });
+
+  it('skips a rule whose source is not being written', async () => {
+    const { '@copilotkit/react-core': _, ...versions } = VENDED;
+    const read = vi.fn(offline);
+
+    await expect(
+      verifyExactDependencies(RULES, versions, {}, read),
+    ).resolves.toEqual({});
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('throws naming the declared string when CopilotKit declares a follower by a non-version', async () => {
+    const registry = {
+      ...REGISTRY,
+      '@copilotkit/react-core@1.79.1': {
+        dependencies: {
+          '@ag-ui/client': 'latest',
+          '@ag-ui/core': 'workspace:*',
+        },
+      },
+    };
+    const versions = { ...VENDED, '@copilotkit/react-core': '1.79.1' };
+
+    await expect(
+      verifyExactDependencies(RULES, versions, RECORDED, lookup(registry)),
+    ).rejects.toThrow(
+      '@ag-ui/client 1.0.2, @ag-ui/core 1.0.2 but @copilotkit/react-core 1.79.1 depends on @ag-ui/client latest, @ag-ui/core workspace:*',
+    );
+  });
+
   it('throws when CopilotKit does not depend on a follower', async () => {
     const registry = {
       ...REGISTRY,
@@ -529,6 +568,20 @@ describe('writeExactDependencySources', () => {
         dependencies: { '@ag-ui/client': '1.0.2', '@ag-ui/core': '1.0.2' },
       },
     });
+  });
+
+  it('creates the record when there is none yet', async () => {
+    tree.delete(EXACT_DEPENDENCY_SOURCES_PATH);
+
+    const written = await writeExactDependencySources(
+      tree,
+      RULES,
+      VENDED,
+      lookup(),
+    );
+
+    expect(written).toEqual([EXACT_DEPENDENCY_SOURCES_PATH]);
+    expect(JSON.parse(read() ?? '')).toEqual(RECORDED);
   });
 
   it('leaves the file as it is when nothing moved', async () => {
