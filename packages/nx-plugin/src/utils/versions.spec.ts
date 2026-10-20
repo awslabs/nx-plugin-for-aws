@@ -6,11 +6,15 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { coerce, gte, major, minVersion } from 'semver';
 import { describe, expect, it } from 'vitest';
+import ExactDependencySources from '../../exact-dependency-sources.json' with {
+  type: 'json',
+};
 import PluginPackageJson from '../../package.json' with { type: 'json' };
 import {
   type DeclaredTs,
   declareDependencies,
 } from './declared-dependencies.js';
+import type { ExactDependencySources as ExactDependencySourcesType } from './version-lockstep/exact-dependency.js';
 import {
   EXACT_DEPENDENCY_PINS,
   type ITsDepVersion,
@@ -213,39 +217,39 @@ describe('AG-UI compatibility', () => {
     }
   });
 
-  /**
-   * The `@ag-ui` entries of the vended CopilotKit release's `dependencies`, from
-   * https://registry.npmjs.org/@copilotkit/react-core/1.79.0 (fetched 2026-10-15).
-   *
-   * Update this fixture whenever the `@copilotkit/react-core` pin moves: copy the
-   * new release's `@ag-ui/client` and `@ag-ui/core` entries from
-   * `curl -s https://registry.npmjs.org/@copilotkit/react-core/<version> | jq .dependencies`.
-   */
-  const COPILOTKIT_AG_UI_DEPENDENCIES = {
-    version: '1.79.0',
-    dependencies: { '@ag-ui/client': '1.0.2', '@ag-ui/core': '1.0.2' },
-  } as const;
-
   it('pins @ag-ui at exactly the versions the vended CopilotKit depends on', () => {
     // A different pin installs a second @ag-ui/client and fails every
     // generated website with TS2322.
-    expect(
-      TS_VERSIONS['@copilotkit/react-core'],
-      'the CopilotKit pin moved: update COPILOTKIT_AG_UI_DEPENDENCIES',
-    ).toBe(COPILOTKIT_AG_UI_DEPENDENCIES.version);
-    for (const [name, version] of Object.entries(
-      COPILOTKIT_AG_UI_DEPENDENCIES.dependencies,
-    )) {
-      expect(TS_VERSIONS[name as ITsDepVersion], name).toBe(version);
+    for (const { source, followers } of EXACT_DEPENDENCY_PINS) {
+      const record = (ExactDependencySources as ExactDependencySourcesType)[
+        source
+      ];
+      expect(
+        record,
+        `${source} is not recorded in exact-dependency-sources.json`,
+      ).toBeDefined();
+      expect(
+        TS_VERSIONS[source],
+        `exact-dependency-sources.json records what ${source} ${record.version} depends on, and scripts/update-versions.ts rewrites it with the pin`,
+      ).toBe(record.version);
+      for (const name of followers) {
+        expect(TS_VERSIONS[name], name).toBe(record.dependencies[name]);
+      }
     }
     expect(TS_VERSIONS['@ag-ui/encoder']).toBe(TS_VERSIONS['@ag-ui/core']);
+  });
+
+  it('records the dependencies of exactly the rule sources', () => {
+    expect(Object.keys(ExactDependencySources).sort()).toEqual(
+      EXACT_DEPENDENCY_PINS.map(({ source }) => source).sort(),
+    );
   });
 
   it('has the version update keep @ag-ui on the exact versions CopilotKit depends on', () => {
     expect(EXACT_DEPENDENCY_PINS).toContainEqual(
       expect.objectContaining({
         source: '@copilotkit/react-core',
-        followers: Object.keys(COPILOTKIT_AG_UI_DEPENDENCIES.dependencies),
+        followers: ['@ag-ui/client', '@ag-ui/core'],
       }),
     );
     for (const { source, followers, peers } of EXACT_DEPENDENCY_PINS) {
