@@ -50,6 +50,10 @@ describe('holdPinnedVersions', () => {
 });
 
 describe('PY_VERSION_HOLDS', () => {
+  it('pins ty at ==0.0.89', () => {
+    expect(PY_VERSIONS.ty).toBe('==0.0.89');
+  });
+
   it('holds ty at the pinned version when a newer one is available', () => {
     const proposed: Record<string, string> = {
       ...PY_VERSIONS,

@@ -275,7 +275,7 @@ export const PY_VERSIONS = {
   'strands-agents': '==1.61.1',
   'strands-agents[a2a]': '==1.61.1',
   'strands-agents-tools': '==0.8.9',
-  ty: '==0.0.87',
+  ty: '==0.0.89',
   pynamodb: '==6.1.0',
   uvicorn: '==0.54.0',
   sqlmodel: '==0.0.48',
