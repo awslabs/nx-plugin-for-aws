@@ -31,15 +31,7 @@ export const PY_VERSION_HOLDS: readonly VersionHold<IPyDepVersion>[] = [
 
 /** Terraform providers the version update keeps at their current version. */
 export const TERRAFORM_VERSION_HOLDS: readonly VersionHold<ITerraformProviderVersion>[] =
-  [
-    {
-      name: 'aws',
-      reason:
-        'hashicorp/aws 6.69.0 moved to aws-sdk-go-base/v2 v2.0.0-beta.75, whose bufio.Scanner response logger fails reading aws_cognito_managed_login_branding with "token too long", so the vended Cognito user identity fails apply (terraform-provider-aws#50481)',
-      liftWhen:
-        "a hashicorp/aws release includes aws-sdk-go-base#1539 (fixes terraform-provider-aws#50481); check the provider's go.mod for aws-sdk-go-base/v2 > beta.75 or the changelog",
-    },
-  ];
+  [];
 
 /**
  * Put each held pin the run proposed moving back to its current version.

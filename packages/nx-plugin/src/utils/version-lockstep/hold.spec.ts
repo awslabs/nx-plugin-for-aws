@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { describe, expect, it } from 'vitest';
-import type { IPyDepVersion } from '../versions.js';
+import type { IPyDepVersion, ITerraformProviderVersion } from '../versions.js';
 import { PY_VERSIONS, TERRAFORM_VERSIONS } from '../versions.js';
 import {
   holdPinnedVersions,
@@ -47,6 +47,27 @@ describe('holdPinnedVersions', () => {
     );
     expect(proposed).toEqual({ boto3: '==3.0.0' });
   });
+
+  it('holds a Terraform provider at its current version and still moves the others', () => {
+    const terraformHolds: VersionHold<ITerraformProviderVersion>[] = [
+      { name: 'aws', reason: 'aws breaks things', liftWhen: 'it is fixed' },
+    ];
+    const proposed = { aws: '6.70.0', random: '3.10.0' };
+
+    const notes = holdPinnedVersions(
+      terraformHolds,
+      { aws: '6.69.1', random: '3.9.1' },
+      proposed,
+    );
+
+    expect(proposed).toEqual({ aws: '6.69.1', random: '3.10.0' });
+    expect(notes).toEqual([
+      {
+        name: 'aws',
+        note: 'aws held at 6.69.1 (6.70.0 available): aws breaks things. Lift when it is fixed',
+      },
+    ]);
+  });
 });
 
 describe('PY_VERSION_HOLDS', () => {
@@ -76,14 +97,10 @@ describe('PY_VERSION_HOLDS', () => {
 });
 
 describe('TERRAFORM_VERSION_HOLDS', () => {
-  it('pins hashicorp/aws at 6.68.0', () => {
-    expect(TERRAFORM_VERSIONS.aws).toBe('6.68.0');
-  });
-
-  it('keeps aws at the pinned version while the registry offers 6.69.0, and still moves the other providers', () => {
+  it('lets aws move when the registry offers a newer release, and still moves the other providers', () => {
     const proposed: Record<string, string> = {
       ...TERRAFORM_VERSIONS,
-      aws: '6.69.0',
+      aws: '6.70.0',
       random: '3.10.0',
     };
 
@@ -93,13 +110,12 @@ describe('TERRAFORM_VERSION_HOLDS', () => {
       proposed,
     );
 
-    expect(proposed).toEqual({ ...TERRAFORM_VERSIONS, random: '3.10.0' });
-    expect(notes).toHaveLength(1);
-    expect(notes[0].name).toBe('aws');
-    expect(notes[0].note).toContain('aws held at 6.68.0 (6.69.0 available)');
-    expect(notes[0].note).toContain('terraform-provider-aws#50481');
-    expect(notes[0].note).toContain('aws-sdk-go-base#1539');
-    expect(notes[0].note).toContain('Lift when');
+    expect(proposed).toEqual({
+      ...TERRAFORM_VERSIONS,
+      aws: '6.70.0',
+      random: '3.10.0',
+    });
+    expect(notes).toEqual([]);
   });
 
   it('gives every hold a pinned provider, a reason and a lift condition', () => {
