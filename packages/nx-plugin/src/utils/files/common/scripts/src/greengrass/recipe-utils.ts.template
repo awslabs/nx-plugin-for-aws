@@ -1,0 +1,356 @@
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import yaml from 'js-yaml';
+
+/**
+ * A narrow view of a Greengrass recipe: only the keys this vended toolchain
+ * reads. Every other key - including unknown lifecycle keys - is preserved
+ * untouched wherever a recipe is re-serialized, because the recipe is
+ * user-owned and this toolchain does not model the full recipe schema.
+ */
+export type GreengrassRecipe = Record<string, unknown>;
+
+export interface ResolvedComponent {
+  readonly componentName: string;
+  readonly componentVersion: string;
+  readonly recipe: GreengrassRecipe;
+}
+
+const COMPONENT_NAME_PATTERN = /^[a-zA-Z0-9-_.]+$/;
+const RESERVED_COMPONENT_NAME_PREFIX = 'aws.greengrass.';
+const MAX_COMPONENT_NAME_LENGTH = 128;
+// https://semver.org/#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string
+const SEMVER_PATTERN =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
+const STRICT_COMPONENT_VERSION_PATTERN =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+const DECOMPRESSED_PATH_TOKEN = '{artifacts:decompressedPath}';
+
+export const NEXT_VERSION_SENTINELS = [
+  'NEXT_PATCH',
+  'NEXT_MINOR',
+  'NEXT_MAJOR',
+] as const;
+
+export type NextVersionSentinel = (typeof NEXT_VERSION_SENTINELS)[number];
+
+/** Whether a value requests local deploy-time component version resolution. */
+export function isNextVersionSentinel(
+  value: unknown,
+): value is NextVersionSentinel {
+  return (
+    typeof value === 'string' &&
+    NEXT_VERSION_SENTINELS.includes(value as NextVersionSentinel)
+  );
+}
+
+/**
+ * Resolves a version sentinel on a device: bumps the highest strict M.m.p
+ * version among the installed version and the candidate versions the caller
+ * collected from the nucleus's package stores, or returns 1.0.0 when there is
+ * none. A candidate that is not strict M.m.p is ignored. An installed version
+ * that is not strict M.m.p is an error, because the sentinel cannot bump it.
+ */
+export function resolveLocalNextVersion(
+  installedVersion: string | undefined,
+  candidateVersions: readonly string[],
+  sentinel: NextVersionSentinel,
+): string {
+  if (
+    installedVersion !== undefined &&
+    !STRICT_COMPONENT_VERSION_PATTERN.test(installedVersion)
+  ) {
+    throw new Error(
+      `Installed component version "${installedVersion}" is not a strict M.m.p version, so ${sentinel} cannot resolve it.`,
+    );
+  }
+
+  const highest = [...candidateVersions, installedVersion]
+    .filter(
+      (version): version is string =>
+        version !== undefined && STRICT_COMPONENT_VERSION_PATTERN.test(version),
+    )
+    .reduce<string | undefined>((currentHighest, candidate) => {
+      if (currentHighest === undefined) {
+        return candidate;
+      }
+      const current = STRICT_COMPONENT_VERSION_PATTERN.exec(currentHighest)!;
+      const next = STRICT_COMPONENT_VERSION_PATTERN.exec(candidate)!;
+      for (let index = 1; index <= 3; index++) {
+        const difference = BigInt(next[index]) - BigInt(current[index]);
+        if (difference !== 0n) {
+          return difference > 0n ? candidate : currentHighest;
+        }
+      }
+      return currentHighest;
+    }, undefined);
+  if (highest === undefined) {
+    return '1.0.0';
+  }
+
+  const [, major, minor, patch] =
+    STRICT_COMPONENT_VERSION_PATTERN.exec(highest)!;
+  switch (sentinel) {
+    case 'NEXT_PATCH':
+      return `${major}.${minor}.${(BigInt(patch) + 1n).toString()}`;
+    case 'NEXT_MINOR':
+      return `${major}.${(BigInt(minor) + 1n).toString()}.0`;
+    case 'NEXT_MAJOR':
+      return `${(BigInt(major) + 1n).toString()}.0.0`;
+  }
+}
+
+/** Reads and parses a recipe.yaml. Throws with a clear message on failure. */
+export function loadRecipe(recipePath: string): GreengrassRecipe {
+  let raw: string;
+  try {
+    raw = readFileSync(recipePath, 'utf-8');
+  } catch {
+    throw new Error(`Cannot read recipe at "${recipePath}"`);
+  }
+  const parsed = yaml.load(raw);
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`"${recipePath}" is not a Greengrass recipe document`);
+  }
+  return parsed as GreengrassRecipe;
+}
+
+/**
+ * Validates only the recipe fields this vended toolchain consumes:
+ * `ComponentName`, `ComponentVersion`, and, for every entry in
+ * `artifactBaseNames`, the `{artifacts:decompressedPath}` reference the
+ * local-deploy lifecycle script must carry so that a deployed component can
+ * find its own artifact once Greengrass decompresses it.
+ *
+ * Throws a single `Error` listing every violation when the recipe is invalid.
+ */
+export function validateRecipe(
+  recipe: GreengrassRecipe,
+  artifactBaseNames: readonly string[],
+): ResolvedComponent {
+  const errors: string[] = [];
+
+  const componentName = recipe.ComponentName;
+  if (typeof componentName !== 'string' || componentName.length === 0) {
+    errors.push('ComponentName is required and must be a non-empty string');
+  } else {
+    if (componentName.length > MAX_COMPONENT_NAME_LENGTH) {
+      errors.push(
+        `ComponentName must be at most ${MAX_COMPONENT_NAME_LENGTH} characters, got ${componentName.length}`,
+      );
+    }
+    if (!COMPONENT_NAME_PATTERN.test(componentName)) {
+      errors.push(
+        'ComponentName may only contain letters, numbers, "-", "_" and "."',
+      );
+    }
+    if (componentName.startsWith(RESERVED_COMPONENT_NAME_PREFIX)) {
+      errors.push(
+        `ComponentName must not start with the reserved prefix "${RESERVED_COMPONENT_NAME_PREFIX}"`,
+      );
+    }
+  }
+
+  const componentVersion = recipe.ComponentVersion;
+  if (
+    typeof componentVersion !== 'string' ||
+    (!SEMVER_PATTERN.test(componentVersion) &&
+      !isNextVersionSentinel(componentVersion))
+  ) {
+    errors.push(
+      'ComponentVersion is required and must be a valid semver version (e.g. "1.0.0") or one of NEXT_PATCH, NEXT_MINOR, NEXT_MAJOR',
+    );
+  }
+
+  for (const baseName of artifactBaseNames) {
+    if (!referencesDecompressedComponentDir(recipe, baseName)) {
+      errors.push(
+        `No lifecycle script references "${DECOMPRESSED_PATH_TOKEN}/${baseName}/" - ` +
+          `the Run script path must match the artifact zip base name ("${baseName}.zip")`,
+      );
+    }
+    if (!declaresComponentZipArtifact(recipe, baseName)) {
+      errors.push(
+        `No manifest declares an artifact whose Uri ends in "/${baseName}.zip" - ` +
+          'Greengrass only unarchives a declared artifact, so ' +
+          `"${DECOMPRESSED_PATH_TOKEN}/${baseName}/" would never resolve on the device`,
+      );
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new Error(
+      `Invalid recipe:\n${errors.map((e) => `  - ${e}`).join('\n')}`,
+    );
+  }
+
+  return {
+    componentName: componentName as string,
+    componentVersion: componentVersion as string,
+    recipe,
+  };
+}
+
+/**
+ * Recursively searches every string value for a decompressedPath reference to
+ * `componentDirName`, wherever the recipe places its Lifecycle block (top
+ * level or per-manifest).
+ */
+function referencesDecompressedComponentDir(
+  value: unknown,
+  componentDirName: string,
+): boolean {
+  const needle = `${DECOMPRESSED_PATH_TOKEN}/${componentDirName}/`;
+  if (typeof value === 'string') {
+    return value.includes(needle);
+  }
+  if (Array.isArray(value)) {
+    return value.some((entry) =>
+      referencesDecompressedComponentDir(entry, componentDirName),
+    );
+  }
+  if (value !== null && typeof value === 'object') {
+    return Object.values(value).some((entry) =>
+      referencesDecompressedComponentDir(entry, componentDirName),
+    );
+  }
+  return false;
+}
+
+/**
+ * Whether any manifest declares an artifact whose Uri basename is
+ * `<componentDirName>.zip`, which is the name the artifact this toolchain
+ * writes actually carries.
+ */
+function declaresComponentZipArtifact(
+  recipe: GreengrassRecipe,
+  componentDirName: string,
+): boolean {
+  const manifests = Array.isArray(recipe.Manifests) ? recipe.Manifests : [];
+  return manifests.some((manifest) =>
+    manifestDeclaresZipArtifact(manifest, componentDirName),
+  );
+}
+
+/**
+ * Whether one manifest declares an artifact whose Uri basename is
+ * `<componentDirName>.zip`. Case-insensitive on the key so a recipe authored
+ * with `URI` (as some AWS samples spell it) still matches.
+ */
+function manifestDeclaresZipArtifact(
+  manifest: unknown,
+  componentDirName: string,
+): boolean {
+  const suffix = `/${componentDirName}.zip`;
+  const artifacts = (manifest as { Artifacts?: unknown })?.Artifacts;
+  if (!Array.isArray(artifacts)) {
+    return false;
+  }
+  return artifacts.some((artifact) => {
+    if (artifact === null || typeof artifact !== 'object') {
+      return false;
+    }
+    return Object.entries(artifact as Record<string, unknown>).some(
+      ([key, value]) =>
+        key.toLowerCase() === 'uri' &&
+        typeof value === 'string' &&
+        value.endsWith(suffix),
+    );
+  });
+}
+
+/**
+ * Multi-architecture only: checks that every manifest whose
+ * `Platform.architecture` names an architecture this build vendored pairs with
+ * THAT architecture's own artifact, both in its `Artifacts` and in the
+ * lifecycle that unarchives it.
+ *
+ * {@link validateRecipe}'s checks are global - they prove every built zip is
+ * declared and referenced somewhere in the recipe. A recipe that swaps two
+ * manifests' artifacts and Run paths satisfies them, and a swap sends one
+ * architecture's native wheels to the other, which fails only on the device.
+ * A swap is one paste mistake away, because adding a second manifest to an
+ * existing component is a hand edit of a user-owned recipe.
+ *
+ * A manifest with no `Platform.architecture`, or one naming an architecture
+ * this build did not vendor, is left alone: a recipe may carry manifests this
+ * toolchain does not build.
+ */
+export function validateManifestArchitectures(
+  recipe: GreengrassRecipe,
+  baseNameByArchitecture: Readonly<Record<string, string>>,
+): void {
+  const errors: string[] = [];
+  const manifests = Array.isArray(recipe.Manifests) ? recipe.Manifests : [];
+  manifests.forEach((manifest, index) => {
+    const architecture = (
+      manifest as { Platform?: { architecture?: unknown } } | null
+    )?.Platform?.architecture;
+    if (typeof architecture !== 'string') {
+      return;
+    }
+    const baseName = baseNameByArchitecture[architecture];
+    if (!baseName) {
+      return;
+    }
+    if (!manifestDeclaresZipArtifact(manifest, baseName)) {
+      errors.push(
+        `Manifest ${index + 1} declares "architecture: ${architecture}", so its own artifact Uri must end in "/${baseName}.zip" - ` +
+          `that is the zip this build writes for "${architecture}". Manifests must not carry another architecture's artifact`,
+      );
+    }
+    const lifecycle =
+      (manifest as { Lifecycle?: unknown }).Lifecycle ?? recipe.Lifecycle;
+    if (!referencesDecompressedComponentDir(lifecycle, baseName)) {
+      errors.push(
+        `Manifest ${index + 1} declares "architecture: ${architecture}", so its lifecycle must reference ` +
+          `"${DECOMPRESSED_PATH_TOKEN}/${baseName}/" - the directory that architecture's own artifact unarchives to`,
+      );
+    }
+  });
+
+  if (errors.length > 0) {
+    throw new Error(
+      `Invalid recipe:\n${errors.map((e) => `  - ${e}`).join('\n')}`,
+    );
+  }
+}
+
+/**
+ * Reads the single resolved recipe a prior `-artifact` run wrote under a
+ * `greengrass-build/recipes` directory, for scripts that only need to know
+ * which component and version were last built.
+ */
+export function readResolvedRecipe(recipesDir: string): ResolvedComponent {
+  let files: string[];
+  try {
+    files = readdirSync(recipesDir).filter(
+      (f) => f.endsWith('.yaml') || f.endsWith('.yml'),
+    );
+  } catch {
+    throw new Error(
+      `No resolved recipes found at "${recipesDir}" - run the component's "-artifact" target first`,
+    );
+  }
+  if (files.length !== 1) {
+    throw new Error(
+      `Expected exactly one resolved recipe in "${recipesDir}", found ${files.length}`,
+    );
+  }
+  const recipePath = join(recipesDir, files[0]);
+  const recipe = loadRecipe(recipePath);
+  const { ComponentName, ComponentVersion } = recipe;
+  if (
+    typeof ComponentName !== 'string' ||
+    typeof ComponentVersion !== 'string'
+  ) {
+    throw new Error(
+      `"${recipePath}" is missing ComponentName/ComponentVersion`,
+    );
+  }
+  return {
+    componentName: ComponentName,
+    componentVersion: ComponentVersion,
+    recipe,
+  };
+}
