@@ -8,6 +8,9 @@ export { tsInfraGenerator } from '../infra/app/generator.js';
 export type { TsInfraGeneratorSchema } from '../infra/app/schema';
 // TypeScript Agent Generator
 export { tsAgentGenerator } from '../ts/agent/generator.js';
+// TypeScript Agent Guardrails Generator
+export { tsAgentGuardrailsGenerator } from '../ts/agent/guardrails/generator.js';
+export type { TsAgentGuardrailsGeneratorSchema } from '../ts/agent/guardrails/schema';
 export type { TsAgentGeneratorSchema } from '../ts/agent/schema';
 // TypeScript API
 export { tsApiGenerator } from '../ts/api/generator.js';

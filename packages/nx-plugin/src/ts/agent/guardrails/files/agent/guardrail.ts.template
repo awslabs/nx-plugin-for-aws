@@ -1,0 +1,37 @@
+import { BedrockModel } from '@strands-agents/sdk';
+
+let warnedUnguarded = false;
+
+/**
+ * The Bedrock model with the guardrail named by GUARDRAIL_ID and GUARDRAIL_VERSION applied.
+ */
+export const getGuardrailedModel = (): BedrockModel => {
+  const guardrailIdentifier = process.env.GUARDRAIL_ID;
+  const guardrailVersion = process.env.GUARDRAIL_VERSION;
+
+  if (!guardrailIdentifier || !guardrailVersion) {
+    const missing = guardrailIdentifier ? 'GUARDRAIL_VERSION' : 'GUARDRAIL_ID';
+    if (process.env.LOCAL_DEV !== 'true') {
+      throw new Error(
+        `${missing} is not set. Pass the guardrail's GUARDRAIL_ID and GUARDRAIL_VERSION environment variables to the agent.`,
+      );
+    }
+    if (!warnedUnguarded) {
+      warnedUnguarded = true;
+      console.warn(
+        `${missing} is not set, so the agent is running without a guardrail (LOCAL_DEV=true).`,
+      );
+    }
+    return new BedrockModel();
+  }
+
+  if (!/^[1-9][0-9]*$/.test(guardrailVersion)) {
+    throw new Error(
+      `GUARDRAIL_VERSION must be a numbered guardrail version, but is ${guardrailVersion}.`,
+    );
+  }
+
+  return new BedrockModel({
+    guardrailConfig: { guardrailIdentifier, guardrailVersion, trace: 'enabled' },
+  });
+};
