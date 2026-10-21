@@ -1,0 +1,82 @@
+import { RemovalPolicy, Tags } from 'aws-cdk-lib';
+import { Grant, type IGrantable } from 'aws-cdk-lib/aws-iam';
+import { suppressRules } from '../checkov<% if (esm) { %>.js<% } %>';
+import {
+  BlockPublicAccess,
+  Bucket,
+  BucketEncryption,
+  type IBucket,
+} from 'aws-cdk-lib/aws-s3';
+import { Construct } from 'constructs';
+
+export interface GreengrassArtifactBucketProps {
+  /**
+   * Physical name for a new bucket; ignored when importing a bucket.
+   */
+  readonly bucketName?: string;
+
+  /**
+   * Import a bucket with its existing encryption, versioning and access settings.
+   */
+  readonly existingBucketName?: string;
+
+  /**
+   * Retention for the created repository; ignored when importing a bucket.
+   * @default RemovalPolicy.RETAIN
+   */
+  readonly removalPolicy?: RemovalPolicy;
+}
+
+/**
+ * Own a retained, versioned, encrypted, TLS-only artifact repository.
+ * Import it into other stacks with existingBucketName.
+ */
+export class GreengrassArtifactBucket extends Construct {
+  public readonly bucket: IBucket;
+
+  constructor(
+    scope: Construct,
+    id: string,
+    props: GreengrassArtifactBucketProps = {},
+  ) {
+    super(scope, id);
+
+    if (props.existingBucketName) {
+      this.bucket = Bucket.fromBucketName(
+        this,
+        'ImportedBucket',
+        props.existingBucketName,
+      );
+      return;
+    }
+
+    this.bucket = new Bucket(this, 'Bucket', {
+      bucketName: props.bucketName,
+      versioned: true,
+      encryption: BucketEncryption.S3_MANAGED,
+      enforceSSL: true,
+      blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+      removalPolicy: props.removalPolicy ?? RemovalPolicy.RETAIN,
+    });
+    suppressRules(
+      this.bucket,
+      ['CKV_AWS_18'],
+      'Server access logging would need a second retained log bucket; component artifacts are immutable published bytes and reads are auditable through CloudTrail data events',
+    );
+    // Mark retained repositories for inventory and deliberate cleanup.
+    Tags.of(this.bucket).add('greengrass-artifact-repository', 'true');
+    // Keep artifact keys until no published version needs them.
+  }
+
+  /**
+   * Grant artifact reads within keyPrefix, defaulting to the workspace namespace.
+   */
+  public grantReadTo(grantee: IGrantable, keyPrefix: string = '<%- componentKeyPrefix %>'): Grant {
+    return Grant.addToPrincipalOrResource({
+      grantee,
+      actions: ['s3:GetObject'],
+      resourceArns: [this.bucket.arnForObjects(keyPrefix)],
+      resource: this.bucket,
+    });
+  }
+}

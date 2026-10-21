@@ -35,6 +35,7 @@ export const TS_VERSIONS = {
   '@aws-sdk/client-iam': '3.1152.0',
   '@aws-sdk/client-bedrock-agentcore': '3.1152.0',
   '@aws-sdk/client-bedrock-runtime': '3.1152.0',
+  '@aws-sdk/client-greengrassv2': '3.1152.0',
   '@aws-sdk/client-s3': '3.1152.0',
   '@aws-sdk/client-sts': '3.1152.0',
   '@aws-sdk/client-cognito-identity-provider': '3.1152.0',
