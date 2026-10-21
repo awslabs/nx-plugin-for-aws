@@ -5,7 +5,7 @@
 export interface GreengrassComponentGeneratorSchema {
   project: string;
   name: string;
-  language?: 'python';
+  language?: 'typescript' | 'python';
   componentName?: string;
   componentVersion?: string;
   publisher?: string;

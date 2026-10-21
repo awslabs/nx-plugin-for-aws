@@ -1,0 +1,41 @@
+RecipeFormatVersion: '<%- recipeFormat %>'
+ComponentName: <%- componentName %>
+ComponentVersion: <%- version %>
+ComponentDescription: <%- componentDescription %>
+ComponentPublisher: <%- publisher %>
+<%_ if (ipc) { _%>
+ComponentConfiguration:
+  DefaultConfiguration:
+    accessControl:
+      aws.greengrass.ipc.pubsub:
+        <%- componentName %>:pubsub:1:
+          policyDescription: Allow publishing heartbeat messages to this component's own topic.
+          operations:
+            - aws.greengrass#PublishToTopic
+          resources:
+            - <%- componentName %>/heartbeat
+<%_ } _%>
+Manifests:
+<%_ manifests.forEach((m) => { _%>
+  - Platform:
+      os: <%- m.os %>
+      architecture: <%- m.architecture %>
+    Artifacts:
+      # Placeholders are substituted at publish time. The basename must stay
+      # <%- m.artifactBaseName %>.zip, which is what the Run script below unarchives to.
+      - Uri: s3://BUCKET_NAME/COMPONENT_NAME/COMPONENT_VERSION/<%- m.artifactBaseName %>.zip
+        Unarchive: ZIP
+    Lifecycle:
+<%_ if (ipc) { _%>
+      # aws-crt ships its native addon prebuilt for every platform it supports,
+      # so this component's build copies this architecture's copy into the
+      # artifact and aws-crt's own loader reads it from this path, resolved
+      # relative to index.js. There is no Install step: the decompressed
+      # artifact folder is read-only by contract, and nothing here writes to it.
+      Setenv:
+        AWS_CRT_NODEJS_BINARY_RELATIVE_PATH: native/aws-crt/<%- m.nodeCrtAddonDir %>/aws-crt-nodejs.node
+<%_ } _%>
+      # Requires a node binary on the device's PATH. The generated bundle was
+      # tested with Node.js 22; Greengrass uses the installed runtime.
+      Run: node {artifacts:decompressedPath}/<%- m.artifactBaseName %>/index.js
+<%_ }); _%>

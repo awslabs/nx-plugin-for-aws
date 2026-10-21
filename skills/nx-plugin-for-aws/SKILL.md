@@ -133,7 +133,7 @@ Add capabilities to existing projects:
 | `agentcore-gateway`    | Generate an AgentCore Gateway project                                                                              |
 | `agentcore-harness`    | Generate an AgentCore Harness project (experimental)                                                               |
 | `connection`           | Integrates a source project with a target project                                                                  |
-| `greengrass#component` | Add an AWS IoT Greengrass component to an existing Python project (experimental)                                   |
+| `greengrass#component` | Add an AWS IoT Greengrass component to an existing Python or TypeScript project (experimental)                     |
 | `license`              | Add LICENSE files and configure source code licence headers                                                        |
 | `py#api`               | Create a Python API                                                                                                |
 | `py#lambda-function`   | Adds a lambda function to a python project                                                                         |

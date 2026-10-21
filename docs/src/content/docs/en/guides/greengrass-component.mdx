@@ -1,10 +1,10 @@
 ---
 title: Greengrass Component
-description: Add an AWS IoT Greengrass v2 component to an existing Python project, with reusable CDK or Terraform building blocks for publishing and deploying it
+description: Add an AWS IoT Greengrass v2 component to an existing Python or TypeScript project, with reusable CDK or Terraform building blocks for publishing and deploying it
 generator: greengrass#component
 ---
 
-import { FileTree } from '@astrojs/starlight/components';
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
 import ArchitectureDiagram from '@components/architecture-diagram.astro';
 import GeneratorParameters from '@components/generator-parameters.astro';
 import Infrastructure from '@components/infrastructure.astro';
@@ -14,9 +14,9 @@ import OptionFilter from '@components/option-filter.astro';
 import RunGenerator from '@components/run-generator.astro';
 import Snippet from '@components/snippet.astro';
 
-The `greengrass#component` generator adds an [AWS IoT Greengrass v2](https://docs.aws.amazon.com/greengrass/v2/developerguide/what-is-iot-greengrass.html) component to an existing Python project. It creates the recipe, the entrypoint, a unit test for Python components, and the Nx targets that package the component for a core device. With the default `infra`, it also vends reusable CDK constructs or Terraform modules that publish the component version, own an artifact repository, and describe a deployment. You compose those building blocks in your own infrastructure code; the generator never creates a device, a fleet or a deployment on its own.
+The `greengrass#component` generator adds an [AWS IoT Greengrass v2](https://docs.aws.amazon.com/greengrass/v2/developerguide/what-is-iot-greengrass.html) component to an existing Python or TypeScript project. It creates the recipe, the entrypoint, a unit test for Python components, and the Nx targets that package the component for a core device. With the default `infra`, it also vends reusable CDK constructs or Terraform modules that publish the component version, own an artifact repository, and describe a deployment. You compose those building blocks in your own infrastructure code; the generator never creates a device, a fleet or a deployment on its own.
 
-The host project must already exist. Create one with <Link path="guides/python-project">`py#project`</Link> first.
+The host project must already exist. Create one with <Link path="guides/python-project">`py#project`</Link> or <Link path="guides/typescript-project">`ts#project`</Link> first.
 
 ## Usage
 
@@ -24,9 +24,9 @@ The host project must already exist. Create one with <Link path="guides/python-p
 
 <RunGenerator generator="greengrass#component" requiredParameters={{ project: 'telemetry', name: 'pulse', language: 'python' }} />
 
-Python is inferred from the selected project's `pyproject.toml`. Pass `--language=python` explicitly in scripts and documentation. The host must contain a `pyproject.toml`.
+Pass `language` explicitly in scripts and documentation. When it is omitted, the generator infers `typescript` from a `tsconfig.json` in the selected project, or `python` from a `pyproject.toml` there. A project with both files must pass `--language`; a project with neither is not a supported host.
 
-`ipc` defaults to `false`. Pass `--ipc=true` to add Greengrass IPC access.
+`ipc` defaults to `false` for both languages. Pass `--ipc=true` to add Greengrass IPC access or `--ipc=false` to keep it disabled.
 
 The recipe's `ComponentPublisher` defaults to the workspace npm scope. Pass `--publisher` to set another value. There is no Greengrass publisher setting in `aws-nx-plugin.config.mts`.
 
@@ -35,7 +35,7 @@ before running this generator. The Greengrass generator adds its `awscc`
 provider configuration to that application. If you create the Terraform
 application later, rerun `greengrass#component` so it can add the provider.
 
-`--project` accepts the unqualified project name. Generated projects are namespace-qualified, so `nx run` needs the full name: `<scope>.telemetry` for a Python project. The examples below write `<project>` for that name, and `@my-scope/infra` for an infrastructure project generated with `--name=infra` in a workspace whose npm scope is `my-scope`.
+`--project` accepts the unqualified project name. Generated projects are namespace-qualified, so `nx run` needs the full name: `<scope>.telemetry` for a Python project and `@<scope>/telemetry` for a TypeScript project. The examples below write `<project>` for that name, and `@my-scope/infra` for an infrastructure project generated with `--name=infra` in a workspace whose npm scope is `my-scope`.
 
 ### Hardware and operating systems
 
@@ -53,7 +53,7 @@ device**, not its board name. The current targets are 64-bit Linux with glibc:
 On a Raspberry Pi, check both `uname -m` and `getconf LONG_BIT`; this path needs
 `aarch64` and `64`. A 64-bit processor running a 32-bit userspace is not an
 ARM64 deployment target. The device also needs the Python interpreter named in
-the generated recipe plus the
+the generated recipe or Node.js for TypeScript, plus the
 [Greengrass nucleus prerequisites](https://docs.aws.amazon.com/greengrass/v2/developerguide/greengrass-nucleus-component.html).
 Python dependency vendoring targets `manylinux_2_28`, so use glibc 2.28 or later.
 GPIO libraries and custom native dependencies must provide compatible binaries
@@ -61,14 +61,15 @@ for the selected platform. The generator does not provision those peripherals.
 
 The generated Python recipe pins the interpreter to the host project's
 `requires-python` floor, for example `python3.14`. Install that interpreter on
-each core device that runs the component.
+each core device that runs the component. A TypeScript component needs Node.js
+on the core device.
 
 For `linux-amd64-arm64`, the recipe contains one manifest per architecture.
 Greengrass selects the first manifest whose `Platform` matches the core device,
 so keep each manifest's artifact and environment settings paired with its
 architecture.
 
-ESP32 firmware runs separately from these Python components.
+ESP32 firmware runs separately from these Python and TypeScript components.
 It can send MQTT messages to AWS IoT Core, or connect to a local Greengrass core
 using [client device support](https://docs.aws.amazon.com/greengrass/v2/developerguide/interact-with-local-iot-devices.html).
 The local route requires a broker, client authentication and MQTT bridge
@@ -83,6 +84,7 @@ not sufficient.
 
 ## Generator Output
 
+<OptionFilter when={{ language: 'python' }} description="Python component layout">
 <FileTree>
   - greengrass
     - pulse
@@ -94,14 +96,29 @@ not sufficient.
 </FileTree>
 
 The `pulse-vendor` target vendors the project's dependencies for the selected device platform with `uv pip install --only-binary :all:`. With `platform: linux-amd64-arm64`, it vendors once per architecture and the recipe carries one manifest per architecture.
+</OptionFilter>
 
-The recipe, the entrypoint and the test are yours from the first run: a rerun never rewrites them. The targets, metadata and dependency declarations are framework-managed and converge on every run. The shared packaging scripts under `packages/common/scripts/src/greengrass/` are created once; delete that directory and rerun the generator to refresh them.
+<OptionFilter when={{ language: 'typescript' }} description="TypeScript component layout">
+<FileTree>
+  - greengrass
+    - pulse
+      - recipe.yaml the component recipe
+  - src
+    - greengrass
+      - pulse
+        - main.ts the component entrypoint
+</FileTree>
+
+The project's `bundle` target bundles the entrypoint before packaging. With `ipc: true`, the `pulse-vendor` target also stages the `aws-crt` native addon for the selected architecture.
+</OptionFilter>
+
+The recipe, the entrypoint and, for Python, the test are yours from the first run: a rerun never rewrites them. The targets, metadata and dependency declarations are framework-managed and converge on every run. The shared packaging scripts under `packages/common/scripts/src/greengrass/` are created once; delete that directory and rerun the generator to refresh them.
 
 The targets use the kebab-case component name:
 
 | Target | Purpose |
 | --- | --- |
-| `<component>-vendor` | Vendors Python dependencies |
+| `<component>-vendor` | Vendors Python dependencies, or the TypeScript CRT addon when IPC is enabled |
 | `<component>-artifact` | Writes the resolved recipe and the deployable archive under `dist/<project-root>/greengrass/<component>/greengrass-build/` |
 | `<component>-deploy-local` | Creates a local deployment through `greengrass-cli` on a core device and waits for a settled component state |
 | `<component>-logs` | Tails the component log on a core device |
@@ -163,7 +180,7 @@ Build the artifact on your development machine:
 
 <NxCommands commands={['run <project>:pulse-artifact']} />
 
-The output under `dist/<project-root>/greengrass/pulse/greengrass-build/` holds `recipes/` with the resolved recipe and `artifacts/<ComponentName>/<ComponentVersion>/` with the archives. A Python component builds one archive per manifest, named `<component>-<architecture>.zip` when it targets both architectures. The `BUCKET_NAME`, `COMPONENT_NAME` and `COMPONENT_VERSION` placeholders in the recipe's artifact URI are substituted at publish time, and the archive basename must stay the one the `Run` step unarchives to.
+The output under `dist/<project-root>/greengrass/pulse/greengrass-build/` holds `recipes/` with the resolved recipe and `artifacts/<ComponentName>/<ComponentVersion>/` with the archives. A Python component builds one archive per manifest, named `<component>-<architecture>.zip` when it targets both architectures. A TypeScript component builds one archive that every manifest shares; with `ipc: true` it carries the `aws-crt` addon for each architecture and each manifest's `Setenv` selects its own. The `BUCKET_NAME`, `COMPONENT_NAME` and `COMPONENT_VERSION` placeholders in the recipe's artifact URI are substituted at publish time, and the archive basename must stay the one the `Run` step unarchives to.
 
 The next two targets run on a machine with the classic Greengrass nucleus and `greengrass-cli` installed, not on an ordinary workstation:
 
@@ -596,6 +613,8 @@ Use `<component>-logs` to inspect the process log if the device reports a broken
 
 ## Recipes and IPC
 
+<Tabs syncKey="greengrass-language">
+<TabItem label="Python" _filter={{ language: 'python' }}>
 With the default `ipc: false`, `main.py` logs a line every 30 seconds and the
 recipe has no IPC access control. With `ipc: true`, it publishes a heartbeat to
 the component's own local topic every 30 seconds through
@@ -614,6 +633,17 @@ reaches other components on the same core device, not AWS IoT Core. To publish
 to AWS IoT Core, call `publish_to_iot_core`, grant
 `aws.greengrass#PublishToIoTCore` under `aws.greengrass.ipc.mqttproxy` in the
 recipe, and give the device's IoT policy `iot:Publish` on the exact topic.
+</TabItem>
+<TabItem label="TypeScript" _filter={{ language: 'typescript' }}>
+With the default `ipc: false`, `main.ts` logs a line every 30 seconds and the
+recipe has no IPC access control. With `ipc: true`, it publishes a heartbeat to
+the component's own local topic through the AWS IoT Device SDK's Greengrass IPC
+client, and `pulse-vendor` stages the `aws-crt` native addon for the selected
+architecture. Publishing to AWS IoT Core uses the same client's
+`publishToIoTCore` operation, an `aws.greengrass.ipc.mqttproxy` authorization
+in the recipe, and `iot:Publish` in the device's IoT policy.
+</TabItem>
+</Tabs>
 
 Access control in the recipe is enforced by the nucleus on the device. Depending on the SDK alone authorizes nothing, so widen `operations` and `resources` as the component grows.
 

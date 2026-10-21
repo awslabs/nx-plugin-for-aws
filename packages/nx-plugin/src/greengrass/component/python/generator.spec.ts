@@ -27,7 +27,10 @@ const sharedConstructsSeedDeclaration = declareDependencies()({
   ts: [...SHARED_CONSTRUCTS_DEPENDENCIES],
 });
 
-/** Exercises the public generator with an explicit Python language. */
+/**
+ * Exercises the public unified generator with an explicit `language`, so this
+ * suite's scenarios read the same as before the python/typescript split.
+ */
 const generatePython = (
   tree: Tree,
   options: Omit<GreengrassComponentGeneratorSchema, 'language'>,

@@ -8,7 +8,10 @@ import {
   type ProjectConfiguration,
   type Tree,
 } from '@nx/devkit';
-import { addPyDependencies } from '../../utils/add-dependencies.js';
+import {
+  addPyDependencies,
+  addTsDependencies,
+} from '../../utils/add-dependencies.js';
 import {
   type DependencyDeclaration,
   forDependencies,
@@ -112,15 +115,43 @@ export const normalizeComponent = async (
   options: GreengrassComponentGeneratorSchema,
 ): Promise<NormalizedComponent> => {
   const project = readProjectConfigurationUnqualified(tree, options.project);
+  const hasTypeScript = tree.exists(
+    joinPathFragments(project.root, 'tsconfig.json'),
+  );
   const hasPython = tree.exists(
     joinPathFragments(project.root, 'pyproject.toml'),
   );
-  if (!hasPython) {
+  if (!hasTypeScript && !hasPython) {
     throw new Error(
-      `--language=python requires pyproject.toml in "${options.project}".`,
+      `Greengrass components require a supported host project. "${options.project}" has neither tsconfig.json nor pyproject.toml.`,
     );
   }
-  const language: Language = 'python';
+  let language: Language;
+  if (!options.language) {
+    if (hasTypeScript && hasPython) {
+      throw new Error(
+        `The project "${options.project}" has both tsconfig.json and pyproject.toml. Pass --language=typescript or --language=python.`,
+      );
+    }
+    language = hasTypeScript ? 'typescript' : 'python';
+  } else {
+    language = options.language;
+    if (language === 'typescript' && !hasTypeScript) {
+      throw new Error(
+        `--language=typescript requires tsconfig.json in "${options.project}".`,
+      );
+    }
+    if (language === 'python' && !hasPython) {
+      throw new Error(
+        `--language=python requires pyproject.toml in "${options.project}".`,
+      );
+    }
+  }
+  if (language === 'typescript' && !project.sourceRoot) {
+    throw new Error(
+      'This project does not have a source root. Please add a source root to the project configuration before running this generator.',
+    );
+  }
   const components =
     (
       project.metadata as {
@@ -204,7 +235,14 @@ export const assertUnchangedPlatform = (
   );
 };
 
-/** Record metadata, provision CDK infrastructure and install Python dependencies. */
+/**
+ * The shared tail every language adapter owes after it writes its
+ * language-specific templates and targets: record/update metadata (language
+ * always persisted, so a later rerun can refuse a language change under the
+ * same identity), provision the optional shared/app infrastructure, install the
+ * language's applicable dependencies, emit metrics and format. Called once,
+ * from each adapter, rather than duplicated in both.
+ */
 export const finalizeComponent = async <const D extends DependencyDeclaration>(
   tree: Tree,
   component: NormalizedComponent,
@@ -273,10 +311,17 @@ export const finalizeComponent = async <const D extends DependencyDeclaration>(
       forDependencies<typeof GREENGRASS_CONSTRUCTS_DEPENDENCIES>(dependencies),
     );
   }
-  addPyDependencies(tree, dependencies, {
-    metadata,
-    projectRoot: component.project.root,
-  });
+  if (component.language === 'python') {
+    addPyDependencies(tree, dependencies, {
+      metadata,
+      projectRoot: component.project.root,
+    });
+  } else {
+    addTsDependencies(tree, dependencies, {
+      metadata,
+      projectRoot: component.project.root,
+    });
+  }
   await addGeneratorMetricsIfApplicable(tree, [
     GREENGRASS_COMPONENT_GENERATOR_INFO,
   ]);
@@ -284,6 +329,9 @@ export const finalizeComponent = async <const D extends DependencyDeclaration>(
 
   return () =>
     installDependencies(tree, component.options.preferInstallDependencies, {
-      languages: ['typescript', 'python'],
+      languages:
+        component.language === 'python'
+          ? ['typescript', 'python']
+          : ['typescript'],
     });
 };
