@@ -22,11 +22,18 @@ const PLUGIN_ROOT = join(__dirname, '../../../packages/nx-plugin');
 // must have a schema default for the generator to be exercised here.
 const SATISFIABLE_ARGS = new Set(['name', 'project']);
 
-// Component generators that attach to a specific kind of project rather than a
-// plain ts#project / py#project.
-const COMPONENT_BASE_OVERRIDES: Record<string, string> = {
-  'ts#website#auth': 'ts#website',
+// Generators (with their arguments) that create the `base` project, run in
+// order, for component generators that need more than a plain ts#project /
+// py#project.
+const COMPONENT_BASE_OVERRIDES: Record<string, string[]> = {
+  'ts#website#auth': ['ts#website --name=base'],
+  'ts#agent#guardrails': ['ts#project --name=base', 'ts#agent --project=base'],
 };
+
+const baseSetup = (generator: string): string[] =>
+  COMPONENT_BASE_OVERRIDES[generator] ?? [
+    `${generator.startsWith('py') ? 'py#project' : 'ts#project'} --name=base`,
+  ];
 
 interface GeneratorCase {
   generator: string;
@@ -201,14 +208,12 @@ describe.skipIf(shardComponents.length === 0)(
         const cwd = await freshWorkspace(generator);
         const opts = { cwd, env: { NX_DAEMON: 'false' } };
 
-        const baseGenerator =
-          COMPONENT_BASE_OVERRIDES[generator] ??
-          (generator.startsWith('py') ? 'py#project' : 'ts#project');
-
-        await runCLI(
-          `generate @aws/nx-plugin:${baseGenerator} --name=base --no-interactive`,
-          opts,
-        );
+        for (const step of baseSetup(generator)) {
+          await runCLI(
+            `generate @aws/nx-plugin:${step} --no-interactive`,
+            opts,
+          );
+        }
         await runCLI(
           `generate @aws/nx-plugin:${generator} --project=base ${hasName ? '--name=test' : ''} --no-interactive`,
           opts,
