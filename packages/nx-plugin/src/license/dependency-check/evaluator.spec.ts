@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { createEvaluator } from './evaluator.js';
+import { PRE_APPROVED_LICENSES } from './pre-approved.js';
 import type { AllowlistEntry } from './types.js';
 
 const allow: AllowlistEntry[] = [
@@ -45,6 +46,27 @@ describe('SPDX evaluator', () => {
     expect(evaluator.evaluate('Mozilla Public License 2.0 (MPL 2.0)')).toBe(
       'PRE_APPROVED',
     );
+  });
+
+  it('recognizes the Python Apache classifier in the default allowlist', () => {
+    const defaultEvaluator = createEvaluator({
+      allow: PRE_APPROVED_LICENSES,
+    });
+    expect(
+      defaultEvaluator.evaluate(
+        'License :: OSI Approved :: Apache Software License',
+      ),
+    ).toBe('PRE_APPROVED');
+    expect(
+      defaultEvaluator.evaluate(
+        'License :: OSI Approved :: GNU General Public License (GPL)',
+      ),
+    ).toBe('NOT_APPROVED');
+    expect(
+      createEvaluator({ allow: [allow[0]] }).evaluate(
+        'License :: OSI Approved :: Apache Software License',
+      ),
+    ).toBe('NOT_APPROVED');
   });
 
   it('handles MIT* (license-checker guessed-from-text marker)', () => {

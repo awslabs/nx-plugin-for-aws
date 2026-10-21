@@ -91,6 +91,16 @@ describe('smoke test - infra-none', () => {
       opts,
     );
 
+    // Greengrass component with infra=none
+    await runCLI(
+      `generate @aws/nx-plugin:py#project --name=py-greengrass-project --type=application --no-interactive`,
+      opts,
+    );
+    await runCLI(
+      `generate @aws/nx-plugin:greengrass#component --project=e2e_test.py_greengrass_project --name=my-greengrass-component --language=python --infra=none --no-interactive`,
+      opts,
+    );
+
     await runCLI(`sync --verbose`, opts);
     await runInstall(opts);
     await runCLI(
@@ -152,6 +162,12 @@ describe('smoke test - infra-none', () => {
       opts,
     );
 
+    // Re-run the Greengrass component with infra=component-version
+    await runCLI(
+      `generate @aws/nx-plugin:greengrass#component --project=e2e_test.py_greengrass_project --name=my-greengrass-component --language=python --infra=component-version --no-interactive`,
+      opts,
+    );
+
     await runCLI(`sync --verbose`, opts);
     await runInstall(opts);
     await runCLI(
@@ -167,5 +183,17 @@ describe('smoke test - infra-none', () => {
         `${projectRoot}/packages/common/constructs/src/app/harnesses/my-harness/my-harness.ts`,
       ),
     ).toBe(true);
+    expect(
+      existsSync(
+        `${projectRoot}/packages/common/constructs/src/app/greengrass/my-greengrass-component.ts`,
+      ),
+    ).toBe(true);
+    // IPC stays disabled through infrastructure escalation.
+    expect(
+      readFileSync(
+        `${projectRoot}/packages/py_greengrass_project/greengrass/my-greengrass-component/main.py`,
+        'utf-8',
+      ),
+    ).not.toContain('awsiot.greengrasscoreipc');
   });
 });

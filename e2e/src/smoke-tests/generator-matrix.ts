@@ -560,4 +560,13 @@ export const runGeneratorMatrix = async (
     `generate @aws/nx-plugin:ts#nx-migration --project=@e2e-test/plugin --name=upgrade-framework --description="Upgrade the framework and reconcile call sites" --kind=hybrid --no-interactive${deferFlag}`,
     opts,
   );
+  // Dedicated Python host for architecture-specific Greengrass artifacts.
+  await runCLI(
+    `generate @aws/nx-plugin:py#project --name=py-greengrass-project --projectType=application --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:greengrass#component --project=e2e_test.py_greengrass_project --name=my-greengrass-component --language=python --platform=linux-amd64-arm64 --gdkConfig=true --infra=none --no-interactive${deferFlag}`,
+    opts,
+  );
 };

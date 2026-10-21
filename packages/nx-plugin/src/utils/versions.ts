@@ -260,6 +260,7 @@ export const PY_VERSIONS = {
   'aws-lambda-powertools[tracer]': '==3.36.0',
   'aws-lambda-powertools[parser]': '==3.36.0',
   'aws-opentelemetry-distro': '==0.21.0',
+  awsiotsdk: '==1.31.0',
   'bedrock-agentcore': '==1.24.2',
   boto3: '==1.43.115',
   checkov: '==3.3.29',

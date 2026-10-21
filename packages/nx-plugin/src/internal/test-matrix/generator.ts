@@ -9,6 +9,7 @@ import {
   type ConnectionGeneratorSchema,
   connectionGenerator,
 } from '../../sdk/connection.js';
+import { greengrassComponentGenerator } from '../../sdk/greengrass.js';
 import { licenseGenerator } from '../../sdk/license.js';
 import {
   type PyAgentGeneratorSchema,
@@ -224,6 +225,22 @@ export const internalTestMatrixGenerator = async (
     name: 'my-function',
     event: 'Any',
     iac: 'inherit',
+    ...defaults,
+  });
+
+  // Dedicated host avoids source-built workspace dependencies in device wheels.
+  await pyProjectGenerator(tree, {
+    name: 'py-greengrass-project',
+    type: 'application',
+    ...projectDefaults,
+  });
+  await greengrassComponentGenerator(tree, {
+    project: py('py-greengrass-project'),
+    name: 'my-greengrass-component',
+    language: 'python',
+    platform: 'linux-amd64-arm64',
+    gdkConfig: true,
+    infra: 'none',
     ...defaults,
   });
 
