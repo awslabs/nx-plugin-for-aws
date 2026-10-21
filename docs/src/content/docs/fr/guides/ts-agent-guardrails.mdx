@@ -1,0 +1,241 @@
+---
+title: Garde-fous d'agent TypeScript
+description: Attacher un garde-fou Amazon Bedrock à un agent Strands TypeScript
+generator: ts#agent#guardrails
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import RunGenerator from '@components/run-generator.astro';
+
+Attachez un [garde-fou Amazon Bedrock](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html) à un <Link path="guides/ts-agent">agent TypeScript</Link>. Un garde-fou est un ensemble de règles qu'Amazon Bedrock applique aux messages que votre agent envoie au modèle et aux réponses du modèle. Sans garde-fou, un utilisateur peut interroger votre agent sur n'importe quel sujet, et le modèle peut répéter des données personnelles telles que des adresses e-mail dans ses réponses.
+
+Le générateur ajoute un fichier de politique qui contient vos règles, le code qui applique le garde-fou au modèle de votre agent, et l'infrastructure qui crée le garde-fou dans votre compte AWS.
+
+## Comment cela fonctionne
+
+- `guardrail.json` à côté de votre `agent.ts` contient les règles : les sujets que votre agent doit refuser et les types de données personnelles (PII, informations personnellement identifiables) qu'il doit masquer ou bloquer.
+- Votre construct CDK ou module Terraform lit `guardrail.json` lorsque vous synthétisez ou planifiez. Il crée le garde-fou et une version numérotée de celui-ci. Une version de garde-fou est un instantané en lecture seule des règles.
+- L'infrastructure transmet l'ID et le numéro de version du garde-fou à votre agent dans les variables d'environnement `GUARDRAIL_ID` et `GUARDRAIL_VERSION`.
+- `guardrail.ts` lit ces variables et construit le modèle Bedrock avec le garde-fou appliqué. Votre appel `new Agent({...})` utilise ce modèle.
+
+## Utilisation
+
+### Générer des garde-fous d'agent
+
+Vous aurez besoin d'un projet TypeScript existant contenant un agent créé avec le générateur `ts#agent`.
+
+<RunGenerator generator="ts#agent#guardrails" />
+
+### Options
+
+<GeneratorParameters generator="ts#agent#guardrails" />
+
+## Sortie du générateur
+
+Le générateur ajoute les fichiers suivants à côté de votre agent, où `<agent>` est le nom de votre composant d'agent (`agent` par défaut) :
+
+<FileTree>
+  - \<your-project>/src/\<agent>/
+    - agent.ts Votre agent, maintenant créé avec `model: getGuardrailedModel()`
+    - guardrail.json Les règles que votre garde-fou applique
+    - guardrail.ts Construit le modèle Bedrock avec le garde-fou appliqué
+</FileTree>
+
+Il ajoute également l'infrastructure pour votre fournisseur `iac` sélectionné, où `<agent-name>` est le nom en kebab-case du construct ou module de votre agent :
+
+<Infrastructure>
+  <Fragment slot="cdk">
+    <FileTree>
+      - packages/common/constructs/src/app/guardrails/\<agent-name>/
+        - \<agent-name>-guardrail.ts Construct CDK contenant le garde-fou et sa version
+    </FileTree>
+  </Fragment>
+  <Fragment slot="terraform">
+    <FileTree>
+      - packages/common/terraform/src/app/guardrails/\<agent-name>/
+        - \<agent-name>-guardrail.tf Module Terraform contenant le garde-fou et sa version
+    </FileTree>
+  </Fragment>
+</Infrastructure>
+
+Le générateur modifie `agent.ts` comme ceci :
+
+```diff lang="ts"
++import { getGuardrailedModel } from './guardrail.js';
+ import { Agent, tool } from '@strands-agents/sdk';
+
+ export const getAgent = async () => {
+   const agent = new Agent({
++    model: getGuardrailedModel(),
+     systemPrompt: `You are a mathematical wizard.
+```
+
+Exécuter à nouveau le générateur sur le même agent ne modifie aucun fichier, et il conserve vos modifications de `guardrail.json`.
+
+Si votre agent a été généré avec `infra: none`, le générateur ajoute uniquement les fichiers de l'agent et affiche un avertissement. Vous créez alors le garde-fou vous-même et définissez `GUARDRAIL_ID` et `GUARDRAIL_VERSION` pour l'agent.
+
+### Un agent qui définit déjà un modèle
+
+Si votre appel `new Agent({...})` définit déjà `model`, le générateur laisse `agent.ts` inchangé. Il affiche le nom du fichier et les lignes à ajouter. Ajoutez plutôt le garde-fou à vos propres options de modèle, par exemple :
+
+```ts title="agent.ts"
+import { BedrockModel } from '@strands-agents/sdk';
+
+const agent = new Agent({
+  model: new BedrockModel({
+    modelId: 'my-model-id',
+    guardrailConfig: {
+      guardrailIdentifier: process.env.GUARDRAIL_ID!,
+      guardrailVersion: process.env.GUARDRAIL_VERSION!,
+    },
+  }),
+  // ...
+});
+```
+
+## Ce que le garde-fou vérifie
+
+Le garde-fou vérifie deux choses à chaque appel de modèle :
+
+- la conversation que votre agent envoie au modèle, y compris le dernier message de l'utilisateur
+- la réponse du modèle, avant que votre agent ne la diffuse à l'utilisateur
+
+Lorsque le garde-fou bloque le message d'un utilisateur, l'utilisateur reçoit le texte `blockedInputMessaging`, et le modèle n'est pas appelé. Strands remplace également le message bloqué dans l'historique de conversation de l'agent par `[User input redacted.]`. Lorsqu'il bloque une réponse, l'utilisateur reçoit le texte `blockedOutputsMessaging`. Lorsqu'une règle `ANONYMIZE` correspond, la réponse contient un espace réservé tel que `{EMAIL}` au lieu de la valeur.
+
+Le garde-fou ne vérifie pas les définitions d'outils, les arguments que le modèle transmet à vos outils, ou les résultats que vos outils renvoient. Par exemple, si un outil renvoie l'adresse e-mail d'un client depuis une base de données, le garde-fou ne la masque pas au modèle. Traitez les résultats des outils comme non fiables, comme le décrit le <Link path="guides/ts-agent">guide de l'agent TypeScript</Link> sous « Sécuriser votre agent ».
+
+## Modifier guardrail.json
+
+La politique fournie est un exemple pour l'agent mathématique généré. Elle refuse les conseils d'investissement et masque ou bloque trois types de données personnelles :
+
+```json title="guardrail.json"
+{
+  "blockedInputMessaging": "Sorry, I can't help with that request.",
+  "blockedOutputsMessaging": "Sorry, I can't share that answer.",
+  "deniedTopics": [
+    {
+      "name": "Investment advice",
+      "definition": "Recommendations about which specific stocks, funds or other investments to buy or sell.",
+      "examples": ["Which stocks should I buy this year?"]
+    }
+  ],
+  "piiEntities": [
+    { "type": "EMAIL", "action": "ANONYMIZE" },
+    { "type": "PHONE", "action": "ANONYMIZE" },
+    { "type": "US_SOCIAL_SECURITY_NUMBER", "action": "BLOCK" }
+  ]
+}
+```
+
+Les champs sont :
+
+- `blockedInputMessaging` : la réponse qu'un utilisateur reçoit lorsque le garde-fou bloque son message. 500 caractères maximum.
+- `blockedOutputsMessaging` : la réponse qu'un utilisateur reçoit lorsque le garde-fou bloque la réponse du modèle. 500 caractères maximum.
+- `deniedTopics` : sujets que votre agent doit refuser. Chaque sujet a un `name` (100 lettres, chiffres, espaces et caractères `-_!?.` maximum), une `definition` de 1000 caractères maximum qui décrit le sujet, et des `examples` optionnels de 100 caractères maximum chacun.
+- `piiEntities` : types de données personnelles sur lesquels agir. `type` est un [type d'information sensible](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails-sensitive-filters.html) tel que `EMAIL`, `PHONE` ou `US_SOCIAL_SECURITY_NUMBER`. `action` est `ANONYMIZE` pour remplacer la valeur par un espace réservé, ou `BLOCK` pour bloquer l'ensemble du message ou de la réponse.
+
+Écrivez une `definition` de sujet qui décrit le sujet lui-même. Par exemple, « Recommandations sur les actions spécifiques à acheter » fonctionne mieux que « Ne donnez pas de conseils d'investissement ».
+
+### Pourquoi la version est numérotée
+
+Chaque fois que vous modifiez `guardrail.json` et déployez, l'infrastructure crée une nouvelle version numérotée du garde-fou, et votre agent bascule vers celle-ci dans le même déploiement. La description de la version contient le hachage SHA-256 de `guardrail.json`, donc une modification du fichier change la description, et une nouvelle version remplace l'ancienne. Avec le construct CDK, le hachage couvre également tous les `props` que vous transmettez.
+
+Votre agent n'utilise jamais la version `DRAFT`. `DRAFT` contient toujours les dernières règles, donc une modification effectuée dans la console AWS atteindrait votre agent en cours d'exécution sans déploiement. `guardrail.ts` lève une erreur si `GUARDRAIL_VERSION` n'est pas un numéro de version.
+
+## Connecter le garde-fou à votre agent
+
+Le générateur ne modifie pas votre stack ou votre module Terraform racine, de la même manière que le générateur `ts#agent` vous laisse déployer l'agent. Lorsqu'il se termine, il affiche le code ci-dessous avec les noms de votre agent remplis. Ajoutez-le pour transmettre les variables d'environnement du garde-fou à votre agent et permettre à l'agent d'appliquer le garde-fou :
+
+<Infrastructure>
+  <Fragment slot="cdk">
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyAgent, MyAgentGuardrail } from '@my-scope/common-constructs';
+
+const guardrail = new MyAgentGuardrail(this, 'MyAgentGuardrail');
+const agent = new MyAgent(this, 'MyAgent', {
+  environmentVariables: guardrail.environmentVariables,
+});
+guardrail.grantApply(agent);
+```
+
+Si votre agent a déjà des variables d'environnement, décomposez les deux : `environmentVariables: { ...guardrail.environmentVariables, MY_SETTING: 'value' }`.
+
+Le construct expose :
+
+- `guardrail` (le `CfnGuardrail`) et `version` (le `CfnGuardrailVersion`)
+- `guardrailId`, `guardrailArn` et `guardrailVersion`
+- `environmentVariables`, qui renvoie `{ GUARDRAIL_ID, GUARDRAIL_VERSION }`
+- `grantApply(grantee)`, qui accorde `bedrock:ApplyGuardrail` sur le garde-fou
+
+Il ajoute également les sorties de stack `GuardrailId` et `GuardrailVersion`. Ses props sont toutes les propriétés `CfnGuardrail`, et elles ont la priorité sur `guardrail.json`. Par exemple, ajoutez des filtres de contenu :
+
+```ts
+new MyAgentGuardrail(this, 'MyAgentGuardrail', {
+  contentPolicyConfig: {
+    filtersConfig: [
+      { type: 'HATE', inputStrength: 'HIGH', outputStrength: 'HIGH' },
+    ],
+  },
+});
+```
+  </Fragment>
+  <Fragment slot="terraform">
+Ajoutez le module `my_agent_guardrail` comme indiqué. Ajoutez ses lignes `env` et `additional_iam_policy_statements` à votre bloc de module `my_agent` existant, dans le module racine où vous déployez votre agent. Si votre module racine ne déploie pas encore l'agent, ajoutez d'abord le module de l'agent, comme décrit dans <Link path="guides/ts-agent#infrastructure-as-code">le guide de l'agent TypeScript</Link>.
+
+```hcl title="packages/infra/src/main.tf"
+module "my_agent_guardrail" {
+  source = "../../common/terraform/src/app/guardrails/my-agent"
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+  # ...existing arguments...
+  env                              = module.my_agent_guardrail.env
+  additional_iam_policy_statements = module.my_agent_guardrail.iam_policy_statements
+}
+```
+
+Si votre module d'agent définit déjà ces arguments, combinez-les :
+
+```hcl
+  env                              = merge(module.my_agent_guardrail.env, { MY_SETTING = "value" })
+  additional_iam_policy_statements = concat(module.my_agent_guardrail.iam_policy_statements, local.my_statements)
+```
+
+Le module prend une variable `tags` et produit `guardrail_id`, `guardrail_arn`, `guardrail_version`, `env` et `iam_policy_statements`. Pour ajouter d'autres politiques de garde-fou, telles que des filtres de contenu, modifiez la ressource `aws_bedrock_guardrail` dans le module.
+
+Le module définit `create_before_destroy` sur la version du garde-fou, donc Terraform crée la nouvelle version avant de supprimer l'ancienne.
+  </Fragment>
+</Infrastructure>
+
+### Une variable d'environnement manquante
+
+Si vous oubliez le câblage, `getGuardrailedModel()` lève `GUARDRAIL_ID is not set` (ou `GUARDRAIL_VERSION is not set`), donc l'agent ne s'exécute pas sans son garde-fou. Un agent avec le protocole `http` ou `a2a` crée son `Agent` lorsqu'une requête arrive, donc chaque requête échoue avec cette erreur. Un agent avec le protocole `ag-ui` crée son `Agent` au démarrage, donc l'agent ne démarre pas.
+
+## Développement local
+
+La cible `<agent>-dev` définit `LOCAL_DEV=true`. Lorsque `LOCAL_DEV` est `true` et que l'une ou l'autre variable n'est pas définie, `guardrail.ts` affiche un avertissement une fois et l'agent s'exécute sans garde-fou :
+
+<NxCommands commands={['agent-dev your-project']} />
+
+Pour tester vos règles localement, déployez d'abord le garde-fou. Ensuite, transmettez les valeurs des sorties de stack `GuardrailId` et `GuardrailVersion` (CDK) ou des sorties de module (Terraform) :
+
+<NxCommands commands={['agent-dev your-project']} env={{ GUARDRAIL_ID: '<guardrail-id>', GUARDRAIL_VERSION: '<version>' }} />
+
+La cible `<agent>-serve` ne définit pas `LOCAL_DEV`, elle a donc besoin des deux variables, sinon l'agent échoue comme décrit ci-dessus. La cible `<agent>-chat` se connecte à un agent en cours d'exécution et n'a pas besoin de variables de garde-fou elle-même.
+
+## Coût et latence
+
+Amazon Bedrock facture pour chaque politique de garde-fou qui évalue du texte, à la fois sur l'entrée et sur la réponse. Voir [Tarification Amazon Bedrock](https://aws.amazon.com/bedrock/pricing/).
+
+Chaque appel de modèle prend également plus de temps, car le garde-fou vérifie la réponse avant que votre agent ne la diffuse à l'utilisateur.
+
+## Limitations
+
+- Ce générateur prend en charge les agents créés avec `ts#agent`. Il ne prend pas en charge le harnais AgentCore.
+- `guardrail.json` contient uniquement les sujets refusés et les entités PII. Ajoutez d'autres politiques, telles que les filtres de contenu et les filtres de mots, avec les props du construct (CDK) ou en modifiant le module (Terraform).
+- Le garde-fou ne vérifie pas les résultats des outils, comme décrit dans [Ce que le garde-fou vérifie](#ce-que-le-garde-fou-vérifie).

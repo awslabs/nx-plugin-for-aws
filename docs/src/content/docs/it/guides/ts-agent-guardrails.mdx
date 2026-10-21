@@ -1,0 +1,241 @@
+---
+title: TypeScript Agent Guardrails
+description: Collega un Amazon Bedrock Guardrail a un TypeScript Strands Agent
+generator: ts#agent#guardrails
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import RunGenerator from '@components/run-generator.astro';
+
+Collega un [Amazon Bedrock Guardrail](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html) a un <Link path="guides/ts-agent">TypeScript Agent</Link>. Un guardrail è un insieme di regole che Amazon Bedrock applica ai messaggi che il tuo agente invia al modello e alle risposte del modello. Senza uno, un utente può chiedere al tuo agente qualsiasi argomento e il modello può ripetere dati personali come indirizzi email nelle sue risposte.
+
+Il generatore aggiunge un file di policy che contiene le tue regole, il codice che applica il guardrail al modello del tuo agente e l'infrastruttura che crea il guardrail nel tuo account AWS.
+
+## Come funziona
+
+- `guardrail.json` accanto al tuo `agent.ts` contiene le regole: gli argomenti che il tuo agente deve rifiutare e i tipi di dati personali (PII, personally identifiable information) che deve nascondere o bloccare.
+- Il tuo costrutto CDK o modulo Terraform legge `guardrail.json` quando sintetizzi o pianifichi. Crea il guardrail e una versione numerata di esso. Una versione del guardrail è uno snapshot di sola lettura delle regole.
+- L'infrastruttura passa l'ID del guardrail e il numero di versione al tuo agente nelle variabili d'ambiente `GUARDRAIL_ID` e `GUARDRAIL_VERSION`.
+- `guardrail.ts` legge queste variabili e costruisce il modello Bedrock con il guardrail applicato. La tua chiamata `new Agent({...})` usa quel modello.
+
+## Utilizzo
+
+### Genera Agent Guardrails
+
+Avrai bisogno di un progetto TypeScript esistente contenente un agente creato con il generatore `ts#agent`.
+
+<RunGenerator generator="ts#agent#guardrails" />
+
+### Opzioni
+
+<GeneratorParameters generator="ts#agent#guardrails" />
+
+## Output del generatore
+
+Il generatore aggiunge i seguenti file accanto al tuo agente, dove `<agent>` è il nome del tuo componente agente (`agent` per impostazione predefinita):
+
+<FileTree>
+  - \<your-project>/src/\<agent>/
+    - agent.ts Your agent, now created with `model: getGuardrailedModel()`
+    - guardrail.json The rules your guardrail applies
+    - guardrail.ts Builds the Bedrock model with the guardrail applied
+</FileTree>
+
+Aggiunge anche l'infrastruttura per il tuo provider `iac` selezionato, dove `<agent-name>` è il nome in kebab-case del costrutto o modulo del tuo agente:
+
+<Infrastructure>
+  <Fragment slot="cdk">
+    <FileTree>
+      - packages/common/constructs/src/app/guardrails/\<agent-name>/
+        - \<agent-name>-guardrail.ts CDK construct containing the guardrail and its version
+    </FileTree>
+  </Fragment>
+  <Fragment slot="terraform">
+    <FileTree>
+      - packages/common/terraform/src/app/guardrails/\<agent-name>/
+        - \<agent-name>-guardrail.tf Terraform module containing the guardrail and its version
+    </FileTree>
+  </Fragment>
+</Infrastructure>
+
+Il generatore modifica `agent.ts` in questo modo:
+
+```diff lang="ts"
++import { getGuardrailedModel } from './guardrail.js';
+ import { Agent, tool } from '@strands-agents/sdk';
+
+ export const getAgent = async () => {
+   const agent = new Agent({
++    model: getGuardrailedModel(),
+     systemPrompt: `You are a mathematical wizard.
+```
+
+Eseguire nuovamente il generatore sullo stesso agente non modifica alcun file e mantiene le tue modifiche a `guardrail.json`.
+
+Se il tuo agente è stato generato con `infra: none`, il generatore aggiunge solo i file dell'agente e stampa un avviso. Dovrai quindi creare il guardrail tu stesso e impostare `GUARDRAIL_ID` e `GUARDRAIL_VERSION` per l'agente.
+
+### Un agente che imposta già un modello
+
+Se la tua chiamata `new Agent({...})` imposta già `model`, il generatore lascia `agent.ts` invariato. Stampa il nome del file e le righe da aggiungere. Aggiungi invece il guardrail alle opzioni del tuo modello, per esempio:
+
+```ts title="agent.ts"
+import { BedrockModel } from '@strands-agents/sdk';
+
+const agent = new Agent({
+  model: new BedrockModel({
+    modelId: 'my-model-id',
+    guardrailConfig: {
+      guardrailIdentifier: process.env.GUARDRAIL_ID!,
+      guardrailVersion: process.env.GUARDRAIL_VERSION!,
+    },
+  }),
+  // ...
+});
+```
+
+## Cosa controlla il guardrail
+
+Il guardrail controlla due cose ad ogni chiamata al modello:
+
+- la conversazione che il tuo agente invia al modello, incluso l'ultimo messaggio dell'utente
+- la risposta del modello, prima che il tuo agente la trasmetta all'utente
+
+Quando il guardrail blocca il messaggio di un utente, l'utente riceve il testo `blockedInputMessaging` e il modello non viene chiamato. Strands sostituisce anche il messaggio bloccato nella cronologia delle conversazioni dell'agente con `[User input redacted.]`. Quando blocca una risposta, l'utente riceve il testo `blockedOutputsMessaging`. Quando una regola `ANONYMIZE` corrisponde, la risposta contiene un segnaposto come `{EMAIL}` invece del valore.
+
+Il guardrail non controlla le definizioni degli strumenti, gli argomenti che il modello passa ai tuoi strumenti o i risultati che i tuoi strumenti restituiscono. Per esempio, se uno strumento restituisce l'indirizzo email di un cliente da un database, il guardrail non lo nasconde al modello. Tratta i risultati degli strumenti come non affidabili, come descrive la <Link path="guides/ts-agent">guida TypeScript Agent</Link> nella sezione "Securing your Agent".
+
+## Modifica di guardrail.json
+
+La policy fornita è un esempio per l'agente matematico generato. Rifiuta consigli sugli investimenti e nasconde o blocca tre tipi di dati personali:
+
+```json title="guardrail.json"
+{
+  "blockedInputMessaging": "Sorry, I can't help with that request.",
+  "blockedOutputsMessaging": "Sorry, I can't share that answer.",
+  "deniedTopics": [
+    {
+      "name": "Investment advice",
+      "definition": "Recommendations about which specific stocks, funds or other investments to buy or sell.",
+      "examples": ["Which stocks should I buy this year?"]
+    }
+  ],
+  "piiEntities": [
+    { "type": "EMAIL", "action": "ANONYMIZE" },
+    { "type": "PHONE", "action": "ANONYMIZE" },
+    { "type": "US_SOCIAL_SECURITY_NUMBER", "action": "BLOCK" }
+  ]
+}
+```
+
+I campi sono:
+
+- `blockedInputMessaging`: la risposta che un utente riceve quando il guardrail blocca il suo messaggio. Al massimo 500 caratteri.
+- `blockedOutputsMessaging`: la risposta che un utente riceve quando il guardrail blocca la risposta del modello. Al massimo 500 caratteri.
+- `deniedTopics`: argomenti che il tuo agente deve rifiutare. Ogni argomento ha un `name` (al massimo 100 lettere, cifre, spazi e i caratteri `-_!?.`), una `definition` di al massimo 1000 caratteri che descrive l'argomento ed `examples` opzionali di al massimo 100 caratteri ciascuno.
+- `piiEntities`: tipi di dati personali su cui agire. `type` è un [tipo di informazione sensibile](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails-sensitive-filters.html) come `EMAIL`, `PHONE` o `US_SOCIAL_SECURITY_NUMBER`. `action` è `ANONYMIZE` per sostituire il valore con un segnaposto, o `BLOCK` per bloccare l'intero messaggio o risposta.
+
+Scrivi una `definition` dell'argomento che descriva l'argomento stesso. Per esempio, "Recommendations about which specific stocks to buy" funziona meglio di "Do not give investment advice".
+
+### Perché la versione è numerata
+
+Ogni volta che modifichi `guardrail.json` e distribuisci, l'infrastruttura crea una nuova versione numerata del guardrail e il tuo agente passa ad essa nella stessa distribuzione. La descrizione della versione contiene l'hash SHA-256 di `guardrail.json`, quindi una modifica al file cambia la descrizione e una nuova versione sostituisce quella vecchia. Con il costrutto CDK, l'hash copre anche qualsiasi `props` che passi.
+
+Il tuo agente non usa mai la versione `DRAFT`. `DRAFT` contiene sempre le regole più recenti, quindi una modifica effettuata nella console AWS raggiungerebbe il tuo agente in esecuzione senza una distribuzione. `guardrail.ts` genera un errore se `GUARDRAIL_VERSION` non è un numero di versione.
+
+## Collegamento del guardrail al tuo agente
+
+Il generatore non modifica il tuo stack o il tuo modulo Terraform radice, allo stesso modo in cui il generatore `ts#agent` lascia a te la distribuzione dell'agente. Quando termina, stampa il codice qui sotto con i nomi del tuo agente compilati. Aggiungilo per passare le variabili d'ambiente del guardrail al tuo agente e consentire all'agente di applicare il guardrail:
+
+<Infrastructure>
+  <Fragment slot="cdk">
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyAgent, MyAgentGuardrail } from '@my-scope/common-constructs';
+
+const guardrail = new MyAgentGuardrail(this, 'MyAgentGuardrail');
+const agent = new MyAgent(this, 'MyAgent', {
+  environmentVariables: guardrail.environmentVariables,
+});
+guardrail.grantApply(agent);
+```
+
+Se il tuo agente ha già variabili d'ambiente, espandi entrambe: `environmentVariables: { ...guardrail.environmentVariables, MY_SETTING: 'value' }`.
+
+Il costrutto espone:
+
+- `guardrail` (il `CfnGuardrail`) e `version` (il `CfnGuardrailVersion`)
+- `guardrailId`, `guardrailArn` e `guardrailVersion`
+- `environmentVariables`, che restituisce `{ GUARDRAIL_ID, GUARDRAIL_VERSION }`
+- `grantApply(grantee)`, che concede `bedrock:ApplyGuardrail` sul guardrail
+
+Aggiunge anche gli output dello stack `GuardrailId` e `GuardrailVersion`. Le sue props sono qualsiasi proprietà `CfnGuardrail` e hanno la precedenza su `guardrail.json`. Per esempio, aggiungi filtri di contenuto:
+
+```ts
+new MyAgentGuardrail(this, 'MyAgentGuardrail', {
+  contentPolicyConfig: {
+    filtersConfig: [
+      { type: 'HATE', inputStrength: 'HIGH', outputStrength: 'HIGH' },
+    ],
+  },
+});
+```
+  </Fragment>
+  <Fragment slot="terraform">
+Aggiungi il modulo `my_agent_guardrail` come mostrato. Aggiungi le sue righe `env` e `additional_iam_policy_statements` al tuo blocco modulo `my_agent` esistente, nel modulo radice dove distribuisci il tuo agente. Se il tuo modulo radice non distribuisce ancora l'agente, aggiungi prima il modulo dell'agente, come descritto nella <Link path="guides/ts-agent#infrastructure-as-code">guida TypeScript Agent</Link>.
+
+```hcl title="packages/infra/src/main.tf"
+module "my_agent_guardrail" {
+  source = "../../common/terraform/src/app/guardrails/my-agent"
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+  # ...existing arguments...
+  env                              = module.my_agent_guardrail.env
+  additional_iam_policy_statements = module.my_agent_guardrail.iam_policy_statements
+}
+```
+
+Se il tuo modulo agente imposta già questi argomenti, combinali:
+
+```hcl
+  env                              = merge(module.my_agent_guardrail.env, { MY_SETTING = "value" })
+  additional_iam_policy_statements = concat(module.my_agent_guardrail.iam_policy_statements, local.my_statements)
+```
+
+Il modulo accetta una variabile `tags` e restituisce `guardrail_id`, `guardrail_arn`, `guardrail_version`, `env` e `iam_policy_statements`. Per aggiungere altre policy del guardrail, come filtri di contenuto, modifica la risorsa `aws_bedrock_guardrail` nel modulo.
+
+Il modulo imposta `create_before_destroy` sulla versione del guardrail, quindi Terraform crea la nuova versione prima di eliminare quella vecchia.
+  </Fragment>
+</Infrastructure>
+
+### Una variabile d'ambiente mancante
+
+Se dimentichi il collegamento, `getGuardrailedModel()` genera `GUARDRAIL_ID is not set` (o `GUARDRAIL_VERSION is not set`), quindi l'agente non viene eseguito senza il suo guardrail. Un agente con il protocollo `http` o `a2a` crea il suo `Agent` quando arriva una richiesta, quindi ogni richiesta fallisce con questo errore. Un agente con il protocollo `ag-ui` crea il suo `Agent` all'avvio, quindi l'agente non si avvia.
+
+## Sviluppo locale
+
+Il target `<agent>-dev` imposta `LOCAL_DEV=true`. Quando `LOCAL_DEV` è `true` e una delle due variabili non è impostata, `guardrail.ts` stampa un avviso una volta e l'agente viene eseguito senza guardrail:
+
+<NxCommands commands={['agent-dev your-project']} />
+
+Per testare le tue regole localmente, distribuisci prima il guardrail. Quindi passa i valori dagli output dello stack `GuardrailId` e `GuardrailVersion` (CDK) o dagli output del modulo (Terraform):
+
+<NxCommands commands={['agent-dev your-project']} env={{ GUARDRAIL_ID: '<guardrail-id>', GUARDRAIL_VERSION: '<version>' }} />
+
+Il target `<agent>-serve` non imposta `LOCAL_DEV`, quindi ha bisogno di entrambe le variabili, altrimenti l'agente fallisce come descritto sopra. Il target `<agent>-chat` si connette a un agente in esecuzione e non ha bisogno di variabili guardrail.
+
+## Costi e latenza
+
+Amazon Bedrock addebita per ogni policy del guardrail che valuta il testo, sia sull'input che sulla risposta. Vedi [Amazon Bedrock pricing](https://aws.amazon.com/bedrock/pricing/).
+
+Ogni chiamata al modello richiede anche più tempo, perché il guardrail controlla la risposta prima che il tuo agente la trasmetta all'utente.
+
+## Limitazioni
+
+- Questo generatore supporta agenti creati con `ts#agent`. Non supporta AgentCore Harness.
+- `guardrail.json` contiene solo argomenti negati ed entità PII. Aggiungi altre policy, come filtri di contenuto e filtri di parole, con le props del costrutto (CDK) o modificando il modulo (Terraform).
+- Il guardrail non controlla i risultati degli strumenti, come descritto in [Cosa controlla il guardrail](#cosa-controlla-il-guardrail).
