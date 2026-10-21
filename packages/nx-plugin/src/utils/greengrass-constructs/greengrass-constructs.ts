@@ -4,13 +4,15 @@
  */
 import {
   generateFiles,
+  getProjects,
   joinPathFragments,
+  logger,
   OverwriteStrategy,
   type ProjectConfiguration,
   type Tree,
   updateJson,
 } from '@nx/devkit';
-import { addStarExport } from '../ast.js';
+import { addStarExport, applyGritQL, matchGritQL } from '../ast.js';
 import type {
   DependencyDeclaration,
   MustDeclare,
@@ -25,10 +27,12 @@ import type { IacMetadata } from '../shared-constructs-constants.js';
 import {
   PACKAGES_DIR,
   SHARED_CONSTRUCTS_DIR,
+  SHARED_TERRAFORM_DIR,
 } from '../shared-constructs-constants.js';
 import {
   cdkLambdaRuntimeVars,
   type ITsDepVersion,
+  terraformProviderVersions,
   withVersions,
 } from '../versions.js';
 
@@ -65,15 +69,112 @@ const APP_GREENGRASS_DIR = joinPathFragments(
   'app',
   'greengrass',
 );
+const CORE_GREENGRASS_TERRAFORM_DIR = joinPathFragments(
+  PACKAGES_DIR,
+  SHARED_TERRAFORM_DIR,
+  'src',
+  'core',
+  'greengrass',
+);
+const APP_GREENGRASS_COMPONENT_TERRAFORM_DIR = joinPathFragments(
+  PACKAGES_DIR,
+  SHARED_TERRAFORM_DIR,
+  'src',
+  'app',
+  'greengrass-component',
+);
+/** Add the awscc requirement and default configuration to existing root modules. */
+const configureGreengrassTerraformProviders = async (
+  tree: Tree,
+): Promise<void> => {
+  const roots = [...getProjects(tree).values()]
+    .filter((project) => project.projectType === 'application')
+    .map(
+      (project) => project.sourceRoot ?? joinPathFragments(project.root, 'src'),
+    )
+    .filter((root) => tree.children(root).some((name) => name.endsWith('.tf')));
+  if (roots.length === 0) {
+    logger.warn(
+      'Create a terraform#project application and re-run greengrass#component to configure awscc, ' +
+        'or declare hashicorp/awscc and provider "awscc" { region = var.aws_region } in your root module.',
+    );
+  }
+  for (const root of roots) {
+    const paths = tree
+      .children(root)
+      .filter((name) => name.endsWith('.tf'))
+      .map((name) => joinPathFragments(root, name));
+    const requirement = `awscc = {
+      source  = "hashicorp/awscc"
+      version = "${terraformProviderVersions().awsccProviderVersion}"
+    }`;
+    let requirementPath: string | undefined;
+    let configured = false;
+    for (const path of paths) {
+      if (
+        await matchGritQL(
+          tree,
+          path,
+          'language hcl\n`required_providers { $_ }`',
+        )
+      ) {
+        requirementPath ??= path;
+      }
+      configured ||= await matchGritQL(
+        tree,
+        path,
+        'language hcl\n`provider "awscc" { $config }` where { $config <: not contains `alias = $_` }',
+      );
+    }
+    if (!requirementPath) {
+      requirementPath = joinPathFragments(root, 'greengrass-providers.tf');
+      if (tree.exists(requirementPath)) {
+        throw new Error(
+          `Cannot add awscc required_providers: ${requirementPath} already exists without a terraform block. Configure awscc in the root module.`,
+        );
+      }
+      tree.write(
+        requirementPath,
+        `terraform {\n  required_providers {\n    ${requirement}\n  }\n}\n`,
+      );
+    } else {
+      const filledEmptyBlock = await applyGritQL(
+        tree,
+        requirementPath,
+        `language hcl\n\`required_providers {}\` => \`required_providers {\n    ${requirement}\n  }\``,
+      );
+      if (!filledEmptyBlock) {
+        await applyGritQL(
+          tree,
+          requirementPath,
+          'language hcl\n`required_providers { $providers }` where { ' +
+            '$providers <: not contains `awscc = $_`, ' +
+            `$providers += \`\n    ${requirement}\` }`,
+        );
+      }
+    }
+    if (!configured) {
+      tree.write(
+        requirementPath,
+        `${tree.read(requirementPath, 'utf-8')!.trimEnd()}\n\nprovider "awscc" {\n  region = var.aws_region\n}\n`,
+      );
+    }
+  }
+};
 
-/** Registers `projectName`'s artifact target on the shared CDK project. */
+/** Registers `projectName`'s artifact target on the shared iac project the caller vended into. */
 const addArtifactProjectToSharedTargets = (
   tree: Tree,
+  iac: Iac,
   projectName: string,
 ): void => {
   updateJson(
     tree,
-    joinPathFragments(PACKAGES_DIR, SHARED_CONSTRUCTS_DIR, 'project.json'),
+    joinPathFragments(
+      PACKAGES_DIR,
+      iac === 'cdk' ? SHARED_CONSTRUCTS_DIR : SHARED_TERRAFORM_DIR,
+      'project.json',
+    ),
     (config: ProjectConfiguration) => {
       addArtifactProjectToTargets(config, projectName);
       return config;
@@ -82,9 +183,15 @@ const addArtifactProjectToSharedTargets = (
 };
 
 /**
- * Vends the shared artifact repository, component publication, deployment and
- * recipe-reader CDK constructs into common/constructs/src/core/greengrass/.
- * Existing core files are preserved and missing files are added on every run.
+ * Vends the shared `GreengrassArtifactBucket` / `GreengrassComponentVersion` /
+ * `GreengrassDeployment` / recipe-reader constructs (CDK) or modules
+ * (Terraform, via the `hashicorp/awscc` provider - neither
+ * `AWS::GreengrassV2::ComponentVersion` nor `AWS::GreengrassV2::Deployment`
+ * exists in the pinned `hashicorp/aws` provider) into
+ * `common/constructs/src/core/greengrass/` or
+ * `common/terraform/src/core/greengrass/`. Existing core files are preserved
+ * on later component runs; missing files are added. Idempotent: called from
+ * every component generator run.
  */
 export const addGreengrassCoreConstructs = async <
   const D extends DependencyDeclaration,
@@ -95,6 +202,23 @@ export const addGreengrassCoreConstructs = async <
 ): Promise<void> => {
   const componentName = buildDefaultComponentName(tree, 'Namespace');
   const componentKeyPrefix = `${componentName.slice(0, componentName.lastIndexOf('.'))}.*`;
+  if (iac === 'terraform') {
+    await configureGreengrassTerraformProviders(tree);
+    generateFiles(
+      tree,
+      joinPathFragments(
+        import.meta.dirname,
+        'files',
+        'terraform',
+        'core',
+        'greengrass',
+      ),
+      CORE_GREENGRASS_TERRAFORM_DIR,
+      { ...terraformProviderVersions(), componentKeyPrefix },
+      { overwriteStrategy: OverwriteStrategy.KeepExisting },
+    );
+    return;
+  }
   if (iac !== 'cdk') {
     throw new Error(`Unsupported iac ${iac}`);
   }
@@ -159,10 +283,15 @@ export interface AddGreengrassComponentAppConstructOptions {
 }
 
 /**
- * Vends a per-component GreengrassComponentVersion wrapper at
- * common/constructs/src/app/greengrass/<componentDirName>.ts, preserving edits.
- * Registers the host project on the shared CDK project's build/assemble targets
- * so infrastructure deployment always consumes a freshly built artifact.
+ * Vends the per-component app construct/module: a thin
+ * `GreengrassComponentVersion` wrapper pinning this component's build output
+ * paths, at `common/constructs/src/app/greengrass/<componentDirName>.ts`
+ * (CDK) or `common/terraform/src/app/greengrass-component/<componentDirName>/`
+ * (Terraform, taking the artifact bucket's name as a plain input variable so
+ * user IaC can own or import the shared artifact repository).
+ * `OverwriteStrategy.KeepExisting` either way. Registers the host project on
+ * the shared iac project's `build`/`assemble` targets so `nx run
+ * <infra>:deploy` always deploys a freshly built artifact.
  */
 export const addGreengrassComponentAppConstruct = async <
   const D extends DependencyDeclaration,
@@ -176,6 +305,28 @@ export const addGreengrassComponentAppConstruct = async <
     { iac: options.iac },
     forDependencies<typeof GREENGRASS_CONSTRUCTS_DEPENDENCIES>(declaration),
   );
+
+  if (options.iac === 'terraform') {
+    generateFiles(
+      tree,
+      joinPathFragments(
+        import.meta.dirname,
+        'files',
+        'terraform',
+        'app',
+        'greengrass-component',
+      ),
+      APP_GREENGRASS_COMPONENT_TERRAFORM_DIR,
+      options,
+      { overwriteStrategy: OverwriteStrategy.KeepExisting },
+    );
+    addArtifactProjectToSharedTargets(
+      tree,
+      'terraform',
+      options.hostProjectName,
+    );
+    return;
+  }
 
   generateFiles(
     tree,
@@ -208,5 +359,5 @@ export const addGreengrassComponentAppConstruct = async <
     './greengrass/index.js',
   );
 
-  addArtifactProjectToSharedTargets(tree, options.hostProjectName);
+  addArtifactProjectToSharedTargets(tree, 'cdk', options.hostProjectName);
 };

@@ -14,10 +14,24 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { generateFiles, type Tree } from '@nx/devkit';
+import {
+  addProjectConfiguration,
+  generateFiles,
+  logger,
+  type Tree,
+} from '@nx/devkit';
 import yaml from 'js-yaml';
 import ts from 'typescript';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
+import terraformProjectGenerator from '../../terraform/project/generator.js';
 import { declareDependencies } from '../declared-dependencies.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
@@ -1882,6 +1896,685 @@ describe('GreengrassDeployment', () => {
     expect(deployment.targetArn).toBe(
       'arn:aws:iot:us-east-1:111111111111:thinggroup/my-group',
     );
+  });
+});
+
+// Terraform has no `aws-cdk-lib`/`assertions` equivalent to synth against, so
+// these assert directly on the rendered `.tf` text `generateFiles` produces -
+// the same real EJS rendering path the generators use, just invoked here on a
+// bare `createTreeUsingTsSolutionSetup()` tree rather than through a full
+// component/deployment generator run.
+describe('terraform core modules (via hashicorp/awscc)', () => {
+  let tree: Tree;
+  const declaration = declareDependencies()({
+    ts: [...GREENGRASS_CONSTRUCTS_DEPENDENCIES],
+  });
+
+  beforeEach(() => {
+    tree = createTreeUsingTsSolutionSetup();
+  });
+
+  const readCore = (name: string): string =>
+    tree.read(
+      `packages/common/terraform/src/core/greengrass/${name}/main.tf`,
+      'utf-8',
+    )!;
+
+  const addRoot = (name: string, providers: string): string => {
+    const root = `packages/${name}`;
+    addProjectConfiguration(tree, name, {
+      root,
+      sourceRoot: `${root}/src`,
+      projectType: 'application',
+    });
+    const path = `${root}/src/providers.tf`;
+    tree.write(path, providers);
+    return path;
+  };
+
+  it('preserves multiline HCL blocks when adding awscc to a generated application', async () => {
+    await terraformProjectGenerator(tree, {
+      name: 'infra',
+      type: 'application',
+      directory: 'packages',
+    });
+    const path = 'packages/infra/src/providers.tf';
+    const original = tree.read(path, 'utf-8')!;
+    await addGreengrassCoreConstructs(tree, { iac: 'terraform' }, declaration);
+    const content = tree.read(path, 'utf-8')!;
+    // Multiline HCL blocks cannot put the first argument on the opening line.
+    expect(content).toMatch(/terraform \{\r?\n/);
+    expect(content).toMatch(/required_providers \{\r?\n/);
+    expect(content).toContain('required_version = ">= 1.0"');
+    expect(content).toContain(
+      original.slice(original.indexOf('provider "aws"')),
+    );
+    expect(content).toMatch(/source\s*=\s*"hashicorp\/awscc"/);
+    await addGreengrassCoreConstructs(tree, { iac: 'terraform' }, declaration);
+    expect(tree.read(path, 'utf-8')).toBe(content);
+  });
+
+  it('adds awscc to every existing application root once, preserving other provider settings', async () => {
+    const first = addRoot(
+      'first',
+      `terraform {
+      required_providers {
+        aws = { source = "hashicorp/aws", version = "6.0.0" }
+      }
+    }
+    provider "aws" { region = "eu-west-1" }
+    # provider "awscc" {} is documentation, not configuration
+    `,
+    );
+    const second = addRoot(
+      'second',
+      'provider "aws" { region = var.aws_region }',
+    );
+    await addGreengrassCoreConstructs(tree, { iac: 'terraform' }, declaration);
+    const contents = [first, 'packages/second/src/greengrass-providers.tf'].map(
+      (path) => tree.read(path, 'utf-8')!,
+    );
+    for (const content of contents) {
+      expect(content).toMatch(/source\s*=\s*"hashicorp\/awscc"/);
+      expect(content.match(/^provider "awscc"/gm)).toHaveLength(1);
+      expect(content).toContain('region = var.aws_region');
+    }
+    expect(tree.read(first, 'utf-8')).toContain(
+      'provider "aws" { region = "eu-west-1" }',
+    );
+    expect(tree.read(second, 'utf-8')).toBe(
+      'provider "aws" { region = var.aws_region }',
+    );
+    await addGreengrassCoreConstructs(tree, { iac: 'terraform' }, declaration);
+    expect(
+      [first, 'packages/second/src/greengrass-providers.tf'].map((path) =>
+        tree.read(path, 'utf-8'),
+      ),
+    ).toEqual(contents);
+  });
+
+  it('adds awscc to an empty required_providers block', async () => {
+    const path = addRoot('empty', 'terraform {\n  required_providers {}\n}\n');
+    await addGreengrassCoreConstructs(tree, { iac: 'terraform' }, declaration);
+    const content = tree.read(path, 'utf-8')!;
+    expect(content).toMatch(/source\s*=\s*"hashicorp\/awscc"/);
+    await addGreengrassCoreConstructs(tree, { iac: 'terraform' }, declaration);
+    expect(tree.read(path, 'utf-8')).toBe(content);
+  });
+
+  it('preserves custom awscc requirements and default configurations in separate root files', async () => {
+    const path = addRoot(
+      'custom',
+      `terraform {
+      required_providers {
+        awscc = { source = "hashicorp/awscc", version = "~> 1.0" }
+      }
+    }`,
+    );
+    const defaultConfig =
+      'provider "awscc" { region = "eu-west-1"\n profile = "deployment" }';
+    const aliasConfig =
+      'provider "awscc" { alias = "backup"\n region = "eu-west-2" }';
+    tree.write(
+      'packages/custom/src/custom-providers.tf',
+      `${defaultConfig}\n${aliasConfig}`,
+    );
+    const original = tree.read(path, 'utf-8');
+    await addGreengrassCoreConstructs(tree, { iac: 'terraform' }, declaration);
+    await addGreengrassCoreConstructs(tree, { iac: 'terraform' }, declaration);
+    expect(tree.read(path, 'utf-8')).toBe(original);
+    expect(tree.read('packages/custom/src/custom-providers.tf', 'utf-8')).toBe(
+      `${defaultConfig}\n${aliasConfig}`,
+    );
+  });
+
+  it('keeps aliases and creates a default awscc configuration when only an alias exists', async () => {
+    const path = addRoot(
+      'alias',
+      `terraform { required_providers { awscc = { source = "hashicorp/awscc" } } }
+provider "awscc" { alias = "backup"\n region = "eu-west-2" }`,
+    );
+    await addGreengrassCoreConstructs(tree, { iac: 'terraform' }, declaration);
+    const content = tree.read(path, 'utf-8')!;
+    expect(content).toContain('alias = "backup"');
+    expect(content.match(/provider "awscc"/g)).toHaveLength(2);
+    expect(content).toContain('region = var.aws_region');
+    await addGreengrassCoreConstructs(tree, { iac: 'terraform' }, declaration);
+    expect(tree.read(path, 'utf-8')).toBe(content);
+  });
+
+  it('logs how to configure a future root when no Terraform application exists', async () => {
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    try {
+      await addGreengrassCoreConstructs(
+        tree,
+        { iac: 'terraform' },
+        declaration,
+      );
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'Create a terraform#project application and re-run greengrass#component',
+        ),
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('vends the same sanitized workspace read prefix for both IaC paths', async () => {
+    const packageJson = JSON.parse(tree.read('package.json', 'utf-8')!);
+    tree.write(
+      'package.json',
+      JSON.stringify({ ...packageJson, name: '@My.Org~Team/workspace' }),
+    );
+    await addGreengrassCoreConstructs(tree, { iac: 'terraform' }, declaration);
+    tree.write(
+      'packages/common/constructs/package.json',
+      '{"name":"@proj/common-constructs"}',
+    );
+    await addGreengrassCoreConstructs(tree, { iac: 'cdk' }, declaration);
+    expect(readCore('artifact-bucket')).toContain(
+      'default     = "com.my.org-team.*"',
+    );
+    expect(
+      tree.read(
+        'packages/common/constructs/src/core/greengrass/artifact-bucket.ts',
+        'utf-8',
+      ),
+    ).toContain("keyPrefix: string = 'com.my.org-team.*'");
+  });
+
+  it('vends all three modules with pinned required_providers blocks', async () => {
+    await addGreengrassCoreConstructs(tree, { iac: 'terraform' }, declaration);
+
+    // Every provider a module uses must be declared in that module's own
+    // `required_providers` - one it uses but never declares is inherited from
+    // the root module UNPINNED, bypassing the versions vended here. Derived
+    // from the `resource`/`data` block types the way the
+    // `terraform-declare-used-providers` migration derives it, rather than
+    // hand-listed, so a module gaining a resource from a new provider fails
+    // here instead of shipping unpinned.
+    for (const name of ['artifact-bucket', 'component-version', 'deployment']) {
+      const content = readCore(name);
+      const used = new Set(
+        [
+          ...content.matchAll(
+            /^(?:resource|data) "([a-z0-9]+)(?:_[a-z0-9_]+)?"/gm,
+          ),
+        ]
+          .map((match) => match[1])
+          // `terraform_data` is built in to Terraform: no entry, no version.
+          .filter((provider) => provider !== 'terraform'),
+      );
+      expect(used.size).toBeGreaterThan(0);
+      for (const provider of used) {
+        expect(content).toContain(`source  = "hashicorp/${provider}"`);
+      }
+    }
+
+    expect(readCore('component-version')).toContain(
+      'resource "awscc_greengrassv2_component_version" "this"',
+    );
+    // The one the previous version of this test missed: `aws_s3_object` makes
+    // the component-version module an `aws` consumer as well as an `awscc` one.
+    expect(readCore('component-version')).toContain(
+      'resource "aws_s3_object" "artifact"',
+    );
+    expect(readCore('deployment')).toContain(
+      'resource "awscc_greengrassv2_deployment" "this"',
+    );
+    expect(readCore('deployment')).toContain(
+      'resource "aws_iot_thing_group" "this"',
+    );
+  });
+
+  it('preserves customized core and resolver files on later component runs', async () => {
+    await addGreengrassCoreConstructs(tree, { iac: 'terraform' }, declaration);
+    const terraformResolver =
+      'packages/common/terraform/src/core/greengrass/component-version/next-version.cjs';
+    expect(tree.exists(terraformResolver)).toBe(false);
+    const customizedCore =
+      'packages/common/terraform/src/core/greengrass/component-version/main.tf';
+    tree.write(customizedCore, '# custom component version module');
+    await addGreengrassCoreConstructs(tree, { iac: 'terraform' }, declaration);
+    expect(tree.exists(terraformResolver)).toBe(false);
+    expect(tree.read(customizedCore, 'utf-8')).toBe(
+      '# custom component version module',
+    );
+
+    tree.write(
+      'packages/common/constructs/package.json',
+      '{"name":"@proj/common-constructs","dependencies":{},"devDependencies":{}}',
+    );
+    await addGreengrassCoreConstructs(tree, { iac: 'cdk' }, declaration);
+    const cdkResolver =
+      'packages/common/constructs/src/core/greengrass/next-version/index.js';
+    expect(tree.exists(cdkResolver)).toBe(true);
+    expect(tree.read(cdkResolver, 'utf-8')).toContain(
+      'exports.resolveNextVersion',
+    );
+    tree.write(cdkResolver, 'stale cdk resolver');
+    await addGreengrassCoreConstructs(tree, { iac: 'cdk' }, declaration);
+    expect(tree.read(cdkResolver, 'utf-8')).toBe('stale cdk resolver');
+
+    const cdkNextVersion = tree.read(
+      'packages/common/constructs/src/core/greengrass/next-version.ts',
+      'utf-8',
+    )!;
+    expect(cdkNextVersion).toContain(`runtime: ${cdkLambdaRuntime('node')}`);
+    expect(cdkNextVersion).toContain('Custom::GreengrassNextVersion');
+    expect(cdkNextVersion).toContain('greengrass:ListComponentVersions');
+    expect(cdkNextVersion).toContain('greengrass:DescribeComponent');
+
+    const cdkComponentVersion = tree.read(
+      'packages/common/constructs/src/core/greengrass/component-version.ts',
+      'utf-8',
+    )!;
+    expect(cdkComponentVersion).toContain('NEXT_VERSION_STRATEGIES');
+    expect(cdkComponentVersion).toContain('NEXT_VERSION_TAG_KEY');
+    expect(cdkComponentVersion).toContain('new GreengrassNextVersion');
+
+    const cdkDeployment = tree.read(
+      'packages/common/constructs/src/core/greengrass/deployment.ts',
+      'utf-8',
+    )!;
+    expect(cdkDeployment).toContain('addComponent(');
+    expect(cdkDeployment).not.toContain('componentVersions');
+    expect(cdkDeployment).toContain('addValidation');
+    expect(cdkDeployment).toContain(
+      'this.deployment.components = this.renderComponents();',
+    );
+    expect(
+      tree.read(
+        'packages/common/constructs/src/core/greengrass/index.ts',
+        'utf-8',
+      ),
+    ).toContain("export * from './next-version.js';");
+  });
+
+  it('retains the artifact bucket, and orders replacements create-before-destroy', async () => {
+    await addGreengrassCoreConstructs(tree, { iac: 'terraform' }, declaration);
+
+    // The bucket is the only resource `RemovalPolicy.RETAIN` maps onto
+    // cleanly: nothing about it forces a replacement, so `prevent_destroy`
+    // only ever refuses a genuine teardown.
+    const bucket = readCore('artifact-bucket');
+    expect(
+      bucket.slice(bucket.indexOf('resource "aws_s3_bucket" "bucket"')),
+    ).toContain('prevent_destroy = true');
+
+    // On the component version and the deployment it would instead reject the
+    // replacement an ordinary version bump or deployment revision needs, so it
+    // must NOT be there. `create_before_destroy` is what keeps the safety
+    // property: the new version is published (and rejected by
+    // `CreateComponentVersion` if it reuses a version with different content)
+    // before the outgoing one is deleted.
+    for (const [name, resourceBlock] of [
+      [
+        'component-version',
+        'resource "awscc_greengrassv2_component_version" "this"',
+      ],
+      ['component-version', 'resource "aws_s3_object" "artifact"'],
+      ['deployment', 'resource "awscc_greengrassv2_deployment" "this"'],
+    ] as const) {
+      const content = readCore(name);
+      const afterResource = content.slice(content.indexOf(resourceBlock));
+      const lifecycle = afterResource.slice(
+        afterResource.indexOf('lifecycle {'),
+      );
+      expect(lifecycle).toContain('create_before_destroy = true');
+      expect(lifecycle.slice(0, lifecycle.indexOf('}'))).not.toContain(
+        'prevent_destroy',
+      );
+    }
+  });
+
+  it('component-version depends on the uploaded artifact object, not just the recipe reference', async () => {
+    await addGreengrassCoreConstructs(tree, { iac: 'terraform' }, declaration);
+
+    const content = readCore('component-version');
+    expect(content).toContain('depends_on = [aws_s3_object.artifact]');
+  });
+
+  it('requires an explicit strict version and has no plan-time AWS resolver', async () => {
+    await addGreengrassCoreConstructs(tree, { iac: 'terraform' }, declaration);
+    const content = readCore('component-version');
+    expect(content).toContain(
+      'Terraform requires an explicit ComponentVersion such as 1.0.0',
+    );
+    expect(content).toContain(
+      'NEXT_PATCH, NEXT_MINOR and NEXT_MAJOR are supported only by CDK',
+    );
+    expect(content).toContain('condition     = can(regex(');
+    expect(content).not.toContain('hashicorp/external');
+    expect(content).not.toContain('data "external"');
+    expect(content).not.toContain('next-version.cjs');
+    expect(content).toContain('value      = local.component_version');
+    expect(content).toContain(
+      'depends_on = [awscc_greengrassv2_component_version.this]',
+    );
+  });
+
+  it('uploads the artifact under a sha256-hashed key prefix, and substitutes only the GDK placeholder Uri', async () => {
+    await addGreengrassCoreConstructs(tree, { iac: 'terraform' }, declaration);
+
+    const content = readCore('component-version');
+    // The hash lives in the prefix, not the basename - see the doc comment on
+    // `destination_key_prefix`/`replacement_prefix`.
+    expect(content).toContain(
+      'destination_key_prefix = "${local.component_name}/${substr(local.sha256, 0, 32)}/"',
+    );
+    // for_each over the hash map - key names come from a `fileset`, always
+    // known at plan time.
+    expect(content).toContain('for_each = local.artifact_hashes');
+    expect(content).toContain(
+      'key         = "${local.destination_key_prefix}${each.key}"',
+    );
+    expect(content).toContain(
+      'placeholder_prefix = "s3://BUCKET_NAME/COMPONENT_NAME/COMPONENT_VERSION/"',
+    );
+    // Only the placeholder-prefixed Uri is rewritten; every other Uri (and
+    // every other field) passes through the `merge(...)` untouched.
+    expect(content).toContain(
+      'startswith(artifact.Uri, local.placeholder_prefix)',
+    );
+    expect(content).toContain(': artifact.Uri');
+  });
+
+  it('guards against a missing recipe or artifact, and basename mismatches in both directions', async () => {
+    await addGreengrassCoreConstructs(tree, { iac: 'terraform' }, declaration);
+
+    const content = readCore('component-version');
+    expect(content).toContain('resource "terraform_data" "guard"');
+    expect(content).toContain('length(local.recipe_files) == 1');
+    expect(content).toContain('length(local.artifact_files) >= 1');
+    expect(content).toContain('length(local.missing_basenames) == 0');
+    expect(content).toContain('length(local.unreferenced_artifacts) == 0');
+  });
+
+  it('keys every artifact set by the sorted name-and-hash digest', async () => {
+    await addGreengrassCoreConstructs(tree, { iac: 'terraform' }, declaration);
+
+    const content = readCore('component-version');
+    expect(content).not.toContain('length(local.artifact_basenames) == 1');
+    expect(content).toContain(
+      'sha256(join("\\n", [for f in local.artifact_basenames : "${f}:${local.artifact_hashes[f]}"]))',
+    );
+    expect(content).toContain(
+      'destination_key_prefix = "${local.component_name}/${substr(local.sha256, 0, 32)}/"',
+    );
+    expect(content).toContain(
+      'replacement_prefix     = "s3://${var.bucket_name}/${local.destination_key_prefix}"',
+    );
+    // Each object carries its own file's hash, so a change to one artifact
+    // replaces only that object - under a prefix the aggregate moved.
+    expect(content).toContain('source_hash = each.value');
+  });
+
+  it('deployment requires exactly one of thing_group_name, thing_name or target_arn', async () => {
+    await addGreengrassCoreConstructs(tree, { iac: 'terraform' }, declaration);
+
+    const content = readCore('deployment');
+    expect(content).toContain('length(local.target_inputs_provided) == 1');
+    expect(content).toContain(
+      'requires exactly one of thing_group_name, thing_name or target_arn',
+    );
+    expect(content).toContain('next_version_sentinel_components');
+    expect(content).toContain(
+      'Terraform requires explicit versions such as 1.0.0; automatic versioning is supported only by CDK',
+    );
+  });
+
+  it('cross-checks a literal target_arn against the caller identity, region and partition', async () => {
+    await addGreengrassCoreConstructs(tree, { iac: 'terraform' }, declaration);
+
+    // The CDK construct's `assertArnMatchesStack`. Verified against the real
+    // terraform CLI: the mocked identity reaches this precondition through a
+    // nested module from a root-level `mock_data "aws_caller_identity"`, which
+    // is exactly what the generated plan test writes.
+    const content = readCore('deployment');
+    expect(content).toContain('length(local.target_arn_mismatches) == 0');
+    expect(content).toContain('data.aws_caller_identity.current.account_id');
+    expect(content).toContain('data.aws_region.current.region');
+    expect(content).toContain('data.aws_partition.current.partition');
+    expect(content).toContain(
+      'looks like it belongs to a different environment',
+    );
+  });
+
+  it('leaves a recipe without Manifests, and a manifest without Artifacts, without those keys', async () => {
+    await addGreengrassCoreConstructs(tree, { iac: 'terraform' }, declaration);
+
+    // HCL forbids a conditional whose arms have different types, so "add the
+    // key only when the authored recipe had it" is expressed as a zero- or
+    // one-element list expanded into `merge`. An unconditional
+    // `merge(x, { Manifests = ... })` would add an empty list to every recipe
+    // that has no manifests.
+    const content = readCore('component-version');
+    expect(content).toContain('range(can(local.recipe.Manifests) ? 1 : 0)');
+    expect(content).toContain('range(can(manifest.Artifacts) ? 1 : 0)');
+    // The unconditional forms these replaced, which would add the key to every
+    // recipe. (`try(manifest.Artifacts, [])` is still correct in
+    // `substituted_basenames`, which only enumerates names.)
+    expect(content).not.toContain('merge(local.recipe, { Manifests');
+    expect(content).not.toContain('merge(manifest, {');
+  });
+
+  it('encodes the inline recipe as JSON, never as YAML', async () => {
+    await addGreengrassCoreConstructs(tree, { iac: 'terraform' }, declaration);
+
+    const content = readCore('component-version');
+    // CreateComponentVersion picks its parser from the document's first byte.
+    // `yamlencode` always quotes mapping keys, so its first byte is `"`, the
+    // service parses the YAML body as JSON, and every apply fails with
+    // `Invalid recipe format; line: 1, column: 1` - verified against the real
+    // API. This assertion is the only thing standing between that regression
+    // and every Terraform user's first deploy.
+    expect(content).toContain(
+      'inline_recipe = jsonencode(local.substituted_recipe)',
+    );
+    // The call form, not the bare word: the comment above that line names
+    // `yamlencode` precisely so nobody reintroduces it.
+    expect(content).not.toContain('yamlencode(');
+  });
+
+  it('grants s3:GetObject, scoped to the given prefix, when a token exchange role is configured', async () => {
+    await addGreengrassCoreConstructs(tree, { iac: 'terraform' }, declaration);
+
+    const content = readCore('artifact-bucket');
+    expect(content).toContain(
+      'resource "aws_iam_role_policy" "token_exchange_read"',
+    );
+    expect(content).toContain('Action   = "s3:GetObject"');
+    expect(content).toContain(
+      'Resource = "${local.bucket_arn}/${var.token_exchange_key_prefix}"',
+    );
+  });
+
+  it('orders the artifact-bucket module outputs after the bucket is hardened, not just created', async () => {
+    await addGreengrassCoreConstructs(tree, { iac: 'terraform' }, declaration);
+
+    // F3: `aws_s3_object.artifact` (in the component-version module) only
+    // ever receives this module's `bucket_name` output, a plain string with
+    // no dependency of its own - so the output itself must `depends_on` the
+    // four resources that harden the bucket, or an artifact can land before
+    // versioning, encryption, the public-access block or the policy exist.
+    const content = readCore('artifact-bucket');
+    const nameOutput = content.slice(content.indexOf('output "bucket_name"'));
+    for (const resource of [
+      'aws_s3_bucket_versioning.bucket',
+      'aws_s3_bucket_server_side_encryption_configuration.bucket',
+      'aws_s3_bucket_public_access_block.bucket',
+      'aws_s3_bucket_policy.bucket',
+    ]) {
+      expect(nameOutput.slice(0, nameOutput.indexOf('}'))).toContain(resource);
+    }
+  });
+
+  it('generates a bucket name derived from bucket_name_prefix, not an opaque AWS-generated one', async () => {
+    await addGreengrassCoreConstructs(tree, { iac: 'terraform' }, declaration);
+
+    // F7: leaving `bucket_name` unset must not fall through to an AWS-chosen
+    // "terraform-<random>" default - the generated name carries the
+    // caller's own prefix (typically the deployment's name) plus enough to
+    // stay globally unique.
+    const content = readCore('artifact-bucket');
+    expect(content).toContain('variable "bucket_name_prefix"');
+    expect(content).toContain(
+      'bucket = coalesce(var.bucket_name, local.generated_bucket_name)',
+    );
+    expect(content).toContain('resource "random_string" "bucket_suffix"');
+    expect(content).toContain('data.aws_caller_identity.current[0].account_id');
+    expect(content).toContain('data.aws_region.current[0].region');
+  });
+
+  it('preserves customized core modules while adding missing files', async () => {
+    await addGreengrassCoreConstructs(tree, { iac: 'terraform' }, declaration);
+    tree.write(
+      'packages/common/terraform/src/core/greengrass/deployment/main.tf',
+      '# user customization',
+    );
+    await addGreengrassCoreConstructs(tree, { iac: 'terraform' }, declaration);
+    expect(readCore('deployment')).toBe('# user customization');
+    expect(
+      tree.exists(
+        'packages/common/terraform/src/core/greengrass/artifact-bucket/main.tf',
+      ),
+    ).toBe(true);
+  });
+
+  it('keeps the resolver SDK in CDK constructs and adds none for Terraform', async () => {
+    await addGreengrassCoreConstructs(tree, { iac: 'terraform' }, declaration);
+    expect(tree.exists('packages/common/terraform/package.json')).toBe(false);
+    const rootPackageJson = JSON.parse(
+      tree.read('package.json', 'utf-8') ?? '{}',
+    );
+    expect(
+      rootPackageJson.devDependencies?.['@aws-sdk/client-greengrassv2'],
+    ).toBeUndefined();
+    expect(
+      rootPackageJson.devDependencies?.['@aws-sdk/client-sts'],
+    ).toBeUndefined();
+    const workspaceYaml = yaml.load(
+      tree.read('pnpm-workspace.yaml', 'utf-8') ?? '',
+    ) as { catalog?: Record<string, string> };
+    expect(
+      workspaceYaml.catalog?.['@aws-sdk/client-greengrassv2'],
+    ).toBeUndefined();
+    expect(workspaceYaml.catalog?.['@aws-sdk/client-sts']).toBeUndefined();
+    expect(rootPackageJson.dependencies?.['js-yaml']).toBeUndefined();
+    expect(rootPackageJson.devDependencies?.['js-yaml']).toBeUndefined();
+
+    const cdkTree = createTreeUsingTsSolutionSetup();
+    cdkTree.write(
+      'packages/common/constructs/package.json',
+      '{"name":"@proj/common-constructs","dependencies":{},"devDependencies":{}}',
+    );
+    await addGreengrassCoreConstructs(cdkTree, { iac: 'cdk' }, declaration);
+    const cdkRootPackageJson = JSON.parse(
+      cdkTree.read('package.json', 'utf-8') ?? '{}',
+    );
+    expect(
+      cdkRootPackageJson.devDependencies['@aws-sdk/client-greengrassv2'],
+    ).toBeUndefined();
+    expect(
+      cdkRootPackageJson.devDependencies?.['@aws-sdk/client-sts'],
+    ).toBeUndefined();
+    // The vended Lambda handler requires the Greengrass client, and the workspace's
+    // biome `noUndeclaredDependencies` rule checks them against this manifest.
+    const cdkConstructsPackageJson = JSON.parse(
+      cdkTree.read('packages/common/constructs/package.json', 'utf-8') ?? '{}',
+    );
+    expect(
+      cdkConstructsPackageJson.dependencies['@aws-sdk/client-greengrassv2'],
+    ).toBe('catalog:');
+    expect(
+      cdkConstructsPackageJson.dependencies['@aws-sdk/client-sts'],
+    ).toBeUndefined();
+  });
+
+  it('does not vend internal Terraform tests or fixtures', async () => {
+    await addGreengrassCoreConstructs(tree, { iac: 'terraform' }, declaration);
+    expect(tree.children('packages/common/terraform/src/tests')).toEqual([]);
+    expect(
+      tree.listChanges().some((file) => file.path.includes('FixtureComponent')),
+    ).toBe(false);
+  });
+});
+
+describe('terraform app modules', () => {
+  let tree: Tree;
+  const declaration = declareDependencies()({
+    ts: [...GREENGRASS_CONSTRUCTS_DEPENDENCIES],
+  });
+
+  beforeEach(async () => {
+    tree = createTreeUsingTsSolutionSetup();
+    // `addArtifactProjectToSharedTargets` updates this project's targets, so
+    // it must already exist - `sharedConstructsGenerator` is what creates it
+    // in the real generator flow.
+    await terraformProjectGenerator(tree, {
+      name: 'terraform',
+      directory: 'packages/common',
+      type: 'library',
+    });
+  });
+
+  it('vends a per-component module taking the bucket name as a plain variable', async () => {
+    await addGreengrassComponentAppConstruct(
+      tree,
+      {
+        iac: 'terraform',
+        componentNameClassName: 'MyComponent',
+        componentDisplayName: 'com.example.MyComponent',
+        componentDirName: 'my-component',
+        project: 'my-project',
+        hostProjectName: 'my-project',
+        recipesDirFromRoot:
+          'dist/apps/my-project/greengrass/my-component/greengrass-build/recipes',
+        artifactsDirFromRoot:
+          'dist/apps/my-project/greengrass/my-component/greengrass-build/artifacts',
+      },
+      declaration,
+    );
+
+    const modulePath =
+      'packages/common/terraform/src/app/greengrass-component/my-component/my-component.tf';
+    expect(tree.exists(modulePath)).toBe(true);
+    const content = tree.read(modulePath, 'utf-8')!;
+    expect(content).toContain('variable "bucket_name"');
+    expect(content).toContain(
+      'source = "../../../core/greengrass/component-version"',
+    );
+    expect(content).toContain(
+      'dist/apps/my-project/greengrass/my-component/greengrass-build/recipes',
+    );
+  });
+
+  it('is idempotent: re-running twice registers the artifact dependency exactly once', async () => {
+    const options = {
+      iac: 'terraform' as const,
+      componentNameClassName: 'MyComponent',
+      componentDisplayName: 'com.example.MyComponent',
+      componentDirName: 'my-component',
+      project: 'my-project',
+      hostProjectName: 'my-project',
+      recipesDirFromRoot:
+        'dist/apps/my-project/greengrass/my-component/greengrass-build/recipes',
+      artifactsDirFromRoot:
+        'dist/apps/my-project/greengrass/my-component/greengrass-build/artifacts',
+    };
+    await addGreengrassComponentAppConstruct(tree, options, declaration);
+    await addGreengrassComponentAppConstruct(tree, options, declaration);
+
+    const sharedTerraformConfig = JSON.parse(
+      tree.read('packages/common/terraform/project.json', 'utf-8') ?? '{}',
+    );
+    expect(
+      sharedTerraformConfig.targets.build.dependsOn.filter(
+        (d: string) => d === 'my-project:build',
+      ),
+    ).toHaveLength(1);
   });
 });
 

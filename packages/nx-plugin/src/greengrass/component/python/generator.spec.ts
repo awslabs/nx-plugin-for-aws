@@ -1153,6 +1153,98 @@ describe('greengrass#component generator (python)', () => {
       ).rejects.toThrow(/would leave that infrastructure orphaned/);
     });
 
+    it('vends the per-component terraform module for --iac terraform', async () => {
+      seedPythonProject(tree);
+
+      await generatePython(tree, {
+        project: 'test-project',
+        name: 'my-component',
+        iac: 'terraform',
+      });
+
+      const modulePath =
+        'packages/common/terraform/src/app/greengrass-component/my-component/my-component.tf';
+      expect(tree.exists(modulePath)).toBe(true);
+      const module = tree.read(modulePath, 'utf-8');
+      expect(module).toContain(
+        'source = "../../../core/greengrass/component-version"',
+      );
+      expect(module).toContain(
+        'apps/test_project/greengrass/my-component/greengrass-build/recipes',
+      );
+      expect(module).toContain(
+        'apps/test_project/greengrass/my-component/greengrass-build/artifacts',
+      );
+
+      for (const dir of [
+        'artifact-bucket',
+        'component-version',
+        'deployment',
+      ]) {
+        expect(
+          tree.exists(
+            `packages/common/terraform/src/core/greengrass/${dir}/main.tf`,
+          ),
+        ).toBe(true);
+      }
+
+      const sharedTerraformConfig = JSON.parse(
+        tree.read('packages/common/terraform/project.json', 'utf-8') ?? '{}',
+      );
+      expect(sharedTerraformConfig.targets.build.dependsOn).toContain(
+        'test-project:build',
+      );
+      expect(sharedTerraformConfig.targets.assemble.dependsOn).toContain(
+        'test-project:assemble',
+      );
+    });
+
+    it('escalates cleanly from --infra none to --infra component-version --iac terraform, adding the module exactly once', async () => {
+      seedPythonProject(tree);
+
+      await generatePython(tree, {
+        project: 'test-project',
+        name: 'my-component',
+        infra: 'none',
+      });
+      expect(tree.exists('packages/common/terraform')).toBe(false);
+
+      await generatePython(tree, {
+        project: 'test-project',
+        name: 'my-component',
+        infra: 'component-version',
+        iac: 'terraform',
+      });
+
+      const modulePath =
+        'packages/common/terraform/src/app/greengrass-component/my-component/my-component.tf';
+      expect(tree.exists(modulePath)).toBe(true);
+
+      // Re-running again must not duplicate the artifact dependency.
+      await generatePython(tree, {
+        project: 'test-project',
+        name: 'my-component',
+        infra: 'component-version',
+        iac: 'terraform',
+      });
+
+      const moduleAfterSecondRun = tree.read(modulePath, 'utf-8');
+      const sharedTerraformConfig = JSON.parse(
+        tree.read('packages/common/terraform/project.json', 'utf-8') ?? '{}',
+      );
+      expect(
+        sharedTerraformConfig.targets.build.dependsOn.filter(
+          (d: string) => d === 'test-project:build',
+        ),
+      ).toHaveLength(1);
+      expect(moduleAfterSecondRun).toBe(tree.read(modulePath, 'utf-8'));
+
+      const projectConfig = JSON.parse(
+        tree.read('apps/test_project/project.json', 'utf-8'),
+      );
+      expect(projectConfig.metadata.components[0].iac).toBe('terraform');
+    });
+
     it('records iac in component metadata', async () => {
       seedPythonProject(tree);
 

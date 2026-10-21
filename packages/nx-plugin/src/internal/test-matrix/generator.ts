@@ -240,7 +240,7 @@ export const internalTestMatrixGenerator = async (
     language: 'python',
     platform: 'linux-amd64-arm64',
     gdkConfig: true,
-    infra: 'none',
+    iac: 'inherit',
     ...defaults,
   });
 

@@ -59,17 +59,42 @@ describe('greengrassComponentGenerator preflight', () => {
     expect(tree.listChanges()).toEqual(before);
   });
 
-  it('rejects inherited Terraform before any generator mutation', async () => {
+  it('resolves inherited Terraform with an explicit semantic version', async () => {
     const tree = createTreeUsingTsSolutionSetup();
     seedPythonHost(tree);
     await ensureAwsNxPluginConfig(tree);
     await updateAwsNxPluginConfig(tree, { iac: { provider: 'terraform' } });
     const before = tree.listChanges();
     await expect(
-      greengrassComponentGenerator(tree, { project: 'host', name: 'pulse' }),
-    ).rejects.toThrow('infrastructure requires CDK');
+      normalizeComponent(tree, {
+        project: 'host',
+        name: 'pulse',
+        componentVersion: '1.2.3',
+      }),
+    ).resolves.toMatchObject({ iac: 'terraform', componentVersion: '1.2.3' });
     expect(tree.listChanges()).toEqual(before);
   });
+
+  it.each(['NEXT_PATCH', 'NEXT_MINOR', 'NEXT_MAJOR'])(
+    'rejects Terraform %s before any generator mutation',
+    async (componentVersion) => {
+      const tree = createTreeUsingTsSolutionSetup();
+      seedPythonHost(tree);
+      await ensureAwsNxPluginConfig(tree);
+      await updateAwsNxPluginConfig(tree, { iac: { provider: 'terraform' } });
+      const before = tree.listChanges();
+      await expect(
+        greengrassComponentGenerator(tree, {
+          project: 'host',
+          name: 'pulse',
+          componentVersion,
+        }),
+      ).rejects.toThrow(
+        'Terraform Greengrass components require an explicit semantic version',
+      );
+      expect(tree.listChanges()).toEqual(before);
+    },
+  );
 
   it('resolves inherited CDK without writes', async () => {
     const tree = createTreeUsingTsSolutionSetup();
@@ -166,11 +191,11 @@ describe('greengrass#component Python defaults', () => {
 
   it('advertises only the implemented language and provider', () => {
     expect(schema.properties.language.enum).toEqual(['python']);
-    expect(schema.properties.iac.enum).toEqual(['inherit', 'cdk']);
+    expect(schema.properties.iac.enum).toEqual(['inherit', 'cdk', 'terraform']);
     expect(schema.properties.ipc.default).toBe(false);
     expect(schema.properties.gdkConfig.default).toBe(false);
     expect(schema.properties.componentVersion.description).toContain(
-      'CDK resolves NEXT_*',
+      'Terraform requires an explicit semantic version',
     );
   });
 });

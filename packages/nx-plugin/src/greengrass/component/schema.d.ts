@@ -13,6 +13,6 @@ export interface GreengrassComponentGeneratorSchema {
   gdkConfig?: boolean;
   platform?: 'linux-amd64' | 'linux-arm64' | 'linux-amd64-arm64';
   infra?: 'component-version' | 'none';
-  iac?: 'inherit' | 'cdk';
+  iac?: 'inherit' | 'cdk' | 'terraform';
   preferInstallDependencies?: boolean;
 }

@@ -69,7 +69,7 @@ export interface NormalizedComponent {
   readonly platform: GreengrassPlatformSelection;
   readonly platforms: ReturnType<typeof resolvePlatforms>;
   readonly infra: 'component-version' | 'none';
-  readonly iac?: 'cdk';
+  readonly iac?: 'cdk' | 'terraform';
   readonly existingMetadata?: GreengrassComponentMetadata;
 }
 
@@ -156,19 +156,20 @@ export const normalizeComponent = async (
       `This project already has a Greengrass component named "${componentDirName}" with infrastructure provisioned (iac=${existingMetadata.iac}). Re-running with --infra=none would leave that infrastructure orphaned - remove it manually first, or keep --infra=component-version.`,
     );
   }
-  const resolvedIac =
+  const iac =
     infra === 'none'
       ? undefined
-      : await resolveIac(tree, options.iac ?? 'inherit');
-  if (resolvedIac && resolvedIac !== 'cdk') {
-    throw new Error(
-      'Greengrass component infrastructure requires CDK. Set --iac=cdk or use --infra=none for local development.',
-    );
-  }
-  const iac = resolvedIac === 'cdk' ? 'cdk' : undefined;
+      : ((await resolveIac(tree, options.iac ?? 'inherit')) as
+          | 'cdk'
+          | 'terraform');
   if (iac === 'cdk' && componentName.length > MAX_CDK_COMPONENT_NAME_LENGTH) {
     throw new Error(
       `ComponentName "${componentName}" is ${componentName.length} characters long, exceeding the ${MAX_CDK_COMPONENT_NAME_LENGTH}-character limit for CDK Greengrass component artifacts. Shorten --componentName to ${MAX_CDK_COMPONENT_NAME_LENGTH} characters or fewer.`,
+    );
+  }
+  if (iac === 'terraform' && componentVersion.startsWith('NEXT_')) {
+    throw new Error(
+      'Terraform Greengrass components require an explicit semantic version. Set --componentVersion to a value such as 1.0.0; NEXT_* versions are supported with CDK infrastructure.',
     );
   }
   const platform = options.platform ?? 'linux-arm64';

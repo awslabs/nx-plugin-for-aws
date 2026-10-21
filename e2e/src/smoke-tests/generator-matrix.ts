@@ -566,7 +566,7 @@ export const runGeneratorMatrix = async (
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:greengrass#component --project=e2e_test.py_greengrass_project --name=my-greengrass-component --language=python --platform=linux-amd64-arm64 --gdkConfig=true --infra=none --no-interactive${deferFlag}`,
+    `generate @aws/nx-plugin:greengrass#component --project=e2e_test.py_greengrass_project --name=my-greengrass-component --language=python --platform=linux-amd64-arm64 --gdkConfig=true --no-interactive${deferFlag}`,
     opts,
   );
 };

@@ -225,7 +225,7 @@ const BLUEPRINTS: Readonly<Record<string, Blueprint>> = {
   ...lambdaFunctionBlueprints('ts#lambda-function', 'py#lambda-function'),
 
   // This add-on vends the component version and artifact repository. Deployment
-  // composition stays in the user's CDK stack, so a
+  // composition stays in the user's CDK stack or Terraform root module, so a
   // component guide must not suggest that it creates a fleet.
   'greengrass#component': {
     label: 'Greengrass Component',
