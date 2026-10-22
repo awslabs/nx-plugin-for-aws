@@ -292,6 +292,19 @@ export const PY_VERSIONS = {
 export type IPyDepVersion = keyof typeof PY_VERSIONS;
 
 /**
+ * Entries for the workspace root `[tool.uv] override-dependencies`, keyed by
+ * the vended package whose own requirement they override. They are written
+ * whenever a project depends on the key.
+ */
+export const PY_UV_OVERRIDES = {
+  // strands-agents-tools caps pillow below 13.0.0, the release that fixes
+  // CVE-2026-112403 and other pillow CVEs. Remove this entry when the
+  // strands-agents-tools pin moves to a release that allows pillow 13
+  // (strands-agents/tools#626).
+  'strands-agents-tools': ['pillow>=13.0.0'],
+} as const satisfies Partial<Record<IPyDepVersion, readonly string[]>>;
+
+/**
  * Add versions to the given dependencies
  */
 export const withPyVersions = <D extends DependencyDeclaration>(
