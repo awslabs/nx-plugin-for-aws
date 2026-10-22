@@ -1,0 +1,241 @@
+---
+title: TypeScript Agent Guardrails
+description: Gắn Amazon Bedrock Guardrail vào TypeScript Strands Agent
+generator: ts#agent#guardrails
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import RunGenerator from '@components/run-generator.astro';
+
+Gắn một [Amazon Bedrock Guardrail](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html) vào <Link path="guides/ts-agent">TypeScript Agent</Link>. Guardrail là một tập hợp các quy tắc mà Amazon Bedrock áp dụng cho các tin nhắn mà agent của bạn gửi đến model và cho các câu trả lời của model. Nếu không có guardrail, người dùng có thể hỏi agent của bạn về bất kỳ chủ đề nào, và model có thể lặp lại dữ liệu cá nhân như địa chỉ email trong các câu trả lời của nó.
+
+Generator thêm một file chính sách chứa các quy tắc của bạn, code áp dụng guardrail cho model của agent, và cơ sở hạ tầng tạo guardrail trong tài khoản AWS của bạn.
+
+## Cách hoạt động
+
+- `guardrail.json` bên cạnh `agent.ts` của bạn chứa các quy tắc: các chủ đề mà agent của bạn phải từ chối và các loại dữ liệu cá nhân (PII, personally identifiable information) mà nó phải ẩn hoặc chặn.
+- CDK construct hoặc Terraform module của bạn đọc `guardrail.json` khi bạn synthesize hoặc plan. Nó tạo guardrail và một phiên bản được đánh số của nó. Phiên bản guardrail là một snapshot chỉ đọc của các quy tắc.
+- Cơ sở hạ tầng truyền ID và số phiên bản của guardrail cho agent của bạn trong các biến môi trường `GUARDRAIL_ID` và `GUARDRAIL_VERSION`.
+- `guardrail.ts` đọc các biến này và xây dựng Bedrock model với guardrail được áp dụng. Lệnh gọi `new Agent({...})` của bạn sử dụng model đó.
+
+## Cách sử dụng
+
+### Tạo Agent Guardrails
+
+Bạn sẽ cần một dự án TypeScript hiện có chứa một agent được tạo bằng generator `ts#agent`.
+
+<RunGenerator generator="ts#agent#guardrails" />
+
+### Tùy chọn
+
+<GeneratorParameters generator="ts#agent#guardrails" />
+
+## Kết quả từ Generator
+
+Generator thêm các file sau bên cạnh agent của bạn, trong đó `<agent>` là tên của agent component của bạn (mặc định là `agent`):
+
+<FileTree>
+  - \<your-project>/src/\<agent>/
+    - agent.ts Agent của bạn, giờ được tạo với `model: getGuardrailedModel()`
+    - guardrail.json Các quy tắc mà guardrail của bạn áp dụng
+    - guardrail.ts Xây dựng Bedrock model với guardrail được áp dụng
+</FileTree>
+
+Nó cũng thêm cơ sở hạ tầng cho nhà cung cấp `iac` mà bạn đã chọn, trong đó `<agent-name>` là tên kebab-case của construct hoặc module của agent:
+
+<Infrastructure>
+  <Fragment slot="cdk">
+    <FileTree>
+      - packages/common/constructs/src/app/guardrails/\<agent-name>/
+        - \<agent-name>-guardrail.ts CDK construct chứa guardrail và phiên bản của nó
+    </FileTree>
+  </Fragment>
+  <Fragment slot="terraform">
+    <FileTree>
+      - packages/common/terraform/src/app/guardrails/\<agent-name>/
+        - \<agent-name>-guardrail.tf Terraform module chứa guardrail và phiên bản của nó
+    </FileTree>
+  </Fragment>
+</Infrastructure>
+
+Generator chỉnh sửa `agent.ts` như sau:
+
+```diff lang="ts"
++import { getGuardrailedModel } from './guardrail.js';
+ import { Agent, tool } from '@strands-agents/sdk';
+
+ export const getAgent = async () => {
+   const agent = new Agent({
++    model: getGuardrailedModel(),
+     systemPrompt: `You are a mathematical wizard.
+```
+
+Chạy generator lại trên cùng một agent sẽ không thay đổi file nào, và nó giữ nguyên các chỉnh sửa của bạn đối với `guardrail.json`.
+
+Nếu agent của bạn được tạo với `infra: none`, generator chỉ thêm các file agent và in ra một cảnh báo. Sau đó bạn tự tạo guardrail và đặt `GUARDRAIL_ID` và `GUARDRAIL_VERSION` cho agent.
+
+### Agent đã đặt model
+
+Nếu lệnh gọi `new Agent({...})` của bạn đã đặt `model`, generator sẽ để `agent.ts` không thay đổi. Nó in ra tên file và các dòng cần thêm. Thay vào đó, hãy thêm guardrail vào các tùy chọn model của riêng bạn, ví dụ:
+
+```ts title="agent.ts"
+import { BedrockModel } from '@strands-agents/sdk';
+
+const agent = new Agent({
+  model: new BedrockModel({
+    modelId: 'my-model-id',
+    guardrailConfig: {
+      guardrailIdentifier: process.env.GUARDRAIL_ID!,
+      guardrailVersion: process.env.GUARDRAIL_VERSION!,
+    },
+  }),
+  // ...
+});
+```
+
+## Guardrail kiểm tra gì
+
+Guardrail kiểm tra hai thứ trên mỗi lệnh gọi model:
+
+- cuộc hội thoại mà agent của bạn gửi đến model, bao gồm tin nhắn mới nhất của người dùng
+- câu trả lời của model, trước khi agent của bạn stream nó trả lại cho người dùng
+
+Khi guardrail chặn tin nhắn của người dùng, người dùng nhận được văn bản `blockedInputMessaging`, và model không được gọi. Strands cũng thay thế tin nhắn bị chặn trong lịch sử hội thoại của agent bằng `[User input redacted.]`. Khi nó chặn một câu trả lời, người dùng nhận được văn bản `blockedOutputsMessaging`. Khi một quy tắc `ANONYMIZE` khớp, câu trả lời chứa một placeholder như `{EMAIL}` thay vì giá trị.
+
+Guardrail không kiểm tra các định nghĩa tool, các đối số mà model truyền cho các tool của bạn, hoặc các kết quả mà các tool của bạn trả về. Ví dụ, nếu một tool trả về địa chỉ email của khách hàng từ cơ sở dữ liệu, guardrail không ẩn nó khỏi model. Xử lý kết quả tool như không đáng tin cậy, như <Link path="guides/ts-agent">hướng dẫn TypeScript Agent</Link> mô tả trong phần "Securing your Agent".
+
+## Chỉnh sửa guardrail.json
+
+Chính sách được cung cấp là một ví dụ cho agent toán học được tạo. Nó từ chối lời khuyên đầu tư và ẩn hoặc chặn ba loại dữ liệu cá nhân:
+
+```json title="guardrail.json"
+{
+  "blockedInputMessaging": "Sorry, I can't help with that request.",
+  "blockedOutputsMessaging": "Sorry, I can't share that answer.",
+  "deniedTopics": [
+    {
+      "name": "Investment advice",
+      "definition": "Recommendations about which specific stocks, funds or other investments to buy or sell.",
+      "examples": ["Which stocks should I buy this year?"]
+    }
+  ],
+  "piiEntities": [
+    { "type": "EMAIL", "action": "ANONYMIZE" },
+    { "type": "PHONE", "action": "ANONYMIZE" },
+    { "type": "US_SOCIAL_SECURITY_NUMBER", "action": "BLOCK" }
+  ]
+}
+```
+
+Các trường là:
+
+- `blockedInputMessaging`: câu trả lời mà người dùng nhận được khi guardrail chặn tin nhắn của họ. Tối đa 500 ký tự.
+- `blockedOutputsMessaging`: câu trả lời mà người dùng nhận được khi guardrail chặn câu trả lời của model. Tối đa 500 ký tự.
+- `deniedTopics`: các chủ đề mà agent của bạn phải từ chối. Mỗi chủ đề có một `name` (tối đa 100 chữ cái, chữ số, khoảng trắng và các ký tự `-_!?.`), một `definition` tối đa 1000 ký tự mô tả chủ đề, và các `examples` tùy chọn tối đa 100 ký tự mỗi cái.
+- `piiEntities`: các loại dữ liệu cá nhân cần hành động. `type` là một [loại thông tin nhạy cảm](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails-sensitive-filters.html) như `EMAIL`, `PHONE` hoặc `US_SOCIAL_SECURITY_NUMBER`. `action` là `ANONYMIZE` để thay thế giá trị bằng một placeholder, hoặc `BLOCK` để chặn toàn bộ tin nhắn hoặc câu trả lời.
+
+Viết một `definition` chủ đề mô tả chính chủ đề đó. Ví dụ, "Recommendations about which specific stocks to buy" hoạt động tốt hơn "Do not give investment advice".
+
+### Tại sao phiên bản được đánh số
+
+Mỗi lần bạn thay đổi `guardrail.json` và triển khai, cơ sở hạ tầng tạo một phiên bản guardrail được đánh số mới, và agent của bạn chuyển sang nó trong cùng một lần triển khai. Mô tả của phiên bản chứa hash SHA-256 của `guardrail.json`, vì vậy một thay đổi đối với file sẽ thay đổi mô tả, và một phiên bản mới thay thế phiên bản cũ. Với CDK construct, hash cũng bao gồm bất kỳ `props` nào bạn truyền.
+
+Agent của bạn không bao giờ sử dụng phiên bản `DRAFT`. `DRAFT` luôn chứa các quy tắc mới nhất, vì vậy một chỉnh sửa được thực hiện trong AWS console sẽ đến agent đang chạy của bạn mà không cần triển khai. `guardrail.ts` ném ra một lỗi nếu `GUARDRAIL_VERSION` không phải là một số phiên bản.
+
+## Kết nối guardrail với agent của bạn
+
+Generator không thay đổi stack của bạn hoặc root Terraform module của bạn, theo cách tương tự như generator `ts#agent` để việc triển khai agent cho bạn. Khi nó hoàn thành, nó in ra code bên dưới với các tên agent của bạn được điền vào. Thêm nó để truyền các biến môi trường của guardrail cho agent của bạn và cho phép agent áp dụng guardrail:
+
+<Infrastructure>
+  <Fragment slot="cdk">
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyAgent, MyAgentGuardrail } from '@my-scope/common-constructs';
+
+const guardrail = new MyAgentGuardrail(this, 'MyAgentGuardrail');
+const agent = new MyAgent(this, 'MyAgent', {
+  environmentVariables: guardrail.environmentVariables,
+});
+guardrail.grantApply(agent);
+```
+
+Nếu agent của bạn đã có các biến môi trường, hãy spread cả hai: `environmentVariables: { ...guardrail.environmentVariables, MY_SETTING: 'value' }`.
+
+Construct expose:
+
+- `guardrail` (`CfnGuardrail`) và `version` (`CfnGuardrailVersion`)
+- `guardrailId`, `guardrailArn` và `guardrailVersion`
+- `environmentVariables`, trả về `{ GUARDRAIL_ID, GUARDRAIL_VERSION }`
+- `grantApply(grantee)`, cấp quyền `bedrock:ApplyGuardrail` trên guardrail
+
+Nó cũng thêm các stack output `GuardrailId` và `GuardrailVersion`. Props của nó là bất kỳ thuộc tính `CfnGuardrail` nào, và chúng được ưu tiên hơn `guardrail.json`. Ví dụ, thêm content filter:
+
+```ts
+new MyAgentGuardrail(this, 'MyAgentGuardrail', {
+  contentPolicyConfig: {
+    filtersConfig: [
+      { type: 'HATE', inputStrength: 'HIGH', outputStrength: 'HIGH' },
+    ],
+  },
+});
+```
+  </Fragment>
+  <Fragment slot="terraform">
+Thêm module `my_agent_guardrail` như được hiển thị. Thêm các dòng `env` và `additional_iam_policy_statements` của nó vào block module `my_agent` hiện có của bạn, trong root module nơi bạn triển khai agent của mình. Nếu root module của bạn chưa triển khai agent, hãy thêm module của agent trước, như được mô tả trong <Link path="guides/ts-agent#infrastructure-as-code">hướng dẫn TypeScript Agent</Link>.
+
+```hcl title="packages/infra/src/main.tf"
+module "my_agent_guardrail" {
+  source = "../../common/terraform/src/app/guardrails/my-agent"
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+  # ...existing arguments...
+  env                              = module.my_agent_guardrail.env
+  additional_iam_policy_statements = module.my_agent_guardrail.iam_policy_statements
+}
+```
+
+Nếu module agent của bạn đã đặt các đối số này, hãy kết hợp chúng:
+
+```hcl
+  env                              = merge(module.my_agent_guardrail.env, { MY_SETTING = "value" })
+  additional_iam_policy_statements = concat(module.my_agent_guardrail.iam_policy_statements, local.my_statements)
+```
+
+Module nhận một biến `tags` và output `guardrail_id`, `guardrail_arn`, `guardrail_version`, `env` và `iam_policy_statements`. Để thêm các chính sách guardrail khác, chẳng hạn như content filter, hãy chỉnh sửa resource `aws_bedrock_guardrail` trong module.
+
+Module đặt `create_before_destroy` trên phiên bản guardrail, vì vậy Terraform tạo phiên bản mới trước khi xóa phiên bản cũ.
+  </Fragment>
+</Infrastructure>
+
+### Biến môi trường bị thiếu
+
+Nếu bạn quên kết nối, `getGuardrailedModel()` ném ra `GUARDRAIL_ID is not set` (hoặc `GUARDRAIL_VERSION is not set`), vì vậy agent không chạy mà không có guardrail của nó. Một agent với giao thức `http` hoặc `a2a` tạo `Agent` của nó khi một request đến, vì vậy mọi request đều thất bại với lỗi này. Một agent với giao thức `ag-ui` tạo `Agent` của nó khi khởi động, vì vậy agent không khởi động được.
+
+## Phát triển cục bộ
+
+Target `<agent>-dev` đặt `LOCAL_DEV=true`. Khi `LOCAL_DEV` là `true` và một trong hai biến không được đặt, `guardrail.ts` in ra một cảnh báo một lần và agent chạy mà không có guardrail:
+
+<NxCommands commands={['agent-dev your-project']} />
+
+Để kiểm tra các quy tắc của bạn cục bộ, hãy triển khai guardrail trước. Sau đó truyền các giá trị từ các stack output `GuardrailId` và `GuardrailVersion` (CDK) hoặc các module output (Terraform):
+
+<NxCommands commands={['agent-dev your-project']} env={{ GUARDRAIL_ID: '<guardrail-id>', GUARDRAIL_VERSION: '<version>' }} />
+
+Target `<agent>-serve` không đặt `LOCAL_DEV`, vì vậy nó cần cả hai biến, nếu không agent sẽ thất bại như mô tả ở trên. Target `<agent>-chat` kết nối với một agent đang chạy và không cần các biến guardrail.
+
+## Chi phí và độ trễ
+
+Amazon Bedrock tính phí cho mỗi chính sách guardrail đánh giá văn bản, trên cả đầu vào và câu trả lời. Xem [giá Amazon Bedrock](https://aws.amazon.com/bedrock/pricing/).
+
+Mỗi lệnh gọi model cũng mất nhiều thời gian hơn, vì guardrail kiểm tra câu trả lời trước khi agent của bạn stream nó cho người dùng.
+
+## Hạn chế
+
+- Generator này hỗ trợ các agent được tạo bằng `ts#agent`. Nó không hỗ trợ AgentCore Harness.
+- `guardrail.json` chỉ chứa các chủ đề bị từ chối và các thực thể PII. Thêm các chính sách khác, chẳng hạn như content filter và word filter, với props của construct (CDK) hoặc bằng cách chỉnh sửa module (Terraform).
+- Guardrail không kiểm tra kết quả tool, như được mô tả trong [Guardrail kiểm tra gì](#guardrail-kiểm-tra-gì).

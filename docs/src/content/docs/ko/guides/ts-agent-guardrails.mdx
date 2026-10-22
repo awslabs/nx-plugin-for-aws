@@ -1,0 +1,241 @@
+---
+title: TypeScript Agent Guardrails
+description: TypeScript Strands Agent에 Amazon Bedrock Guardrail 연결하기
+generator: ts#agent#guardrails
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import RunGenerator from '@components/run-generator.astro';
+
+<Link path="guides/ts-agent">TypeScript Agent</Link>에 [Amazon Bedrock Guardrail](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html)을 연결합니다. 가드레일은 에이전트가 모델에 보내는 메시지와 모델의 답변에 Amazon Bedrock이 적용하는 규칙 집합입니다. 가드레일이 없으면 사용자가 에이전트에게 어떤 주제에 대해서든 질문할 수 있고, 모델이 이메일 주소와 같은 개인 데이터를 답변에 반복할 수 있습니다.
+
+제너레이터는 규칙을 담은 정책 파일, 에이전트의 모델에 가드레일을 적용하는 코드, 그리고 AWS 계정에 가드레일을 생성하는 인프라를 추가합니다.
+
+## 작동 방식
+
+- `agent.ts` 옆에 있는 `guardrail.json`은 규칙을 담고 있습니다: 에이전트가 거부해야 하는 주제와 숨기거나 차단해야 하는 개인 데이터(PII, 개인 식별 정보) 유형입니다.
+- CDK 구성 또는 Terraform 모듈은 합성 또는 계획 시 `guardrail.json`을 읽습니다. 가드레일과 번호가 매겨진 버전을 생성합니다. 가드레일 버전은 규칙의 읽기 전용 스냅샷입니다.
+- 인프라는 `GUARDRAIL_ID` 및 `GUARDRAIL_VERSION` 환경 변수를 통해 가드레일의 ID와 버전 번호를 에이전트에 전달합니다.
+- `guardrail.ts`는 이러한 변수를 읽고 가드레일이 적용된 Bedrock 모델을 빌드합니다. `new Agent({...})` 호출이 해당 모델을 사용합니다.
+
+## 사용법
+
+### Agent Guardrails 생성
+
+`ts#agent` 제너레이터로 생성된 에이전트를 포함하는 기존 TypeScript 프로젝트가 필요합니다.
+
+<RunGenerator generator="ts#agent#guardrails" />
+
+### 옵션
+
+<GeneratorParameters generator="ts#agent#guardrails" />
+
+## 제너레이터 출력
+
+제너레이터는 에이전트 옆에 다음 파일을 추가합니다. 여기서 `<agent>`는 에이전트 컴포넌트의 이름입니다(기본값은 `agent`):
+
+<FileTree>
+  - \<your-project>/src/\<agent>/
+    - agent.ts Your agent, now created with `model: getGuardrailedModel()`
+    - guardrail.json The rules your guardrail applies
+    - guardrail.ts Builds the Bedrock model with the guardrail applied
+</FileTree>
+
+또한 선택한 `iac` 제공자에 대한 인프라를 추가합니다. 여기서 `<agent-name>`은 에이전트의 구성 또는 모듈의 케밥 케이스 이름입니다:
+
+<Infrastructure>
+  <Fragment slot="cdk">
+    <FileTree>
+      - packages/common/constructs/src/app/guardrails/\<agent-name>/
+        - \<agent-name>-guardrail.ts CDK construct containing the guardrail and its version
+    </FileTree>
+  </Fragment>
+  <Fragment slot="terraform">
+    <FileTree>
+      - packages/common/terraform/src/app/guardrails/\<agent-name>/
+        - \<agent-name>-guardrail.tf Terraform module containing the guardrail and its version
+    </FileTree>
+  </Fragment>
+</Infrastructure>
+
+제너레이터는 다음과 같이 `agent.ts`를 편집합니다:
+
+```diff lang="ts"
++import { getGuardrailedModel } from './guardrail.js';
+ import { Agent, tool } from '@strands-agents/sdk';
+
+ export const getAgent = async () => {
+   const agent = new Agent({
++    model: getGuardrailedModel(),
+     systemPrompt: `You are a mathematical wizard.
+```
+
+동일한 에이전트에서 제너레이터를 다시 실행하면 파일이 변경되지 않으며, `guardrail.json`에 대한 편집 내용이 유지됩니다.
+
+에이전트가 `infra: none`으로 생성된 경우, 제너레이터는 에이전트 파일만 추가하고 경고를 출력합니다. 그런 다음 가드레일을 직접 생성하고 에이전트에 대해 `GUARDRAIL_ID` 및 `GUARDRAIL_VERSION`을 설정해야 합니다.
+
+### 이미 모델을 설정한 에이전트
+
+`new Agent({...})` 호출이 이미 `model`을 설정한 경우, 제너레이터는 `agent.ts`를 변경하지 않습니다. 파일 이름과 추가할 줄을 출력합니다. 대신 자체 모델 옵션에 가드레일을 추가하세요. 예를 들어:
+
+```ts title="agent.ts"
+import { BedrockModel } from '@strands-agents/sdk';
+
+const agent = new Agent({
+  model: new BedrockModel({
+    modelId: 'my-model-id',
+    guardrailConfig: {
+      guardrailIdentifier: process.env.GUARDRAIL_ID!,
+      guardrailVersion: process.env.GUARDRAIL_VERSION!,
+    },
+  }),
+  // ...
+});
+```
+
+## 가드레일이 확인하는 내용
+
+가드레일은 모든 모델 호출에서 두 가지를 확인합니다:
+
+- 사용자의 최신 메시지를 포함하여 에이전트가 모델에 보내는 대화
+- 에이전트가 사용자에게 스트리밍하기 전의 모델 답변
+
+가드레일이 사용자의 메시지를 차단하면 사용자는 `blockedInputMessaging` 텍스트를 받고 모델은 호출되지 않습니다. Strands는 또한 에이전트의 대화 기록에서 차단된 메시지를 `[User input redacted.]`로 대체합니다. 답변을 차단하면 사용자는 `blockedOutputsMessaging` 텍스트를 받습니다. `ANONYMIZE` 규칙이 일치하면 답변에 값 대신 `{EMAIL}`과 같은 자리 표시자가 포함됩니다.
+
+가드레일은 도구 정의, 모델이 도구에 전달하는 인수 또는 도구가 반환하는 결과를 확인하지 않습니다. 예를 들어, 도구가 데이터베이스에서 고객의 이메일 주소를 반환하는 경우 가드레일은 모델에서 이를 숨기지 않습니다. <Link path="guides/ts-agent">TypeScript Agent 가이드</Link>의 "Securing your Agent" 섹션에 설명된 대로 도구 결과를 신뢰할 수 없는 것으로 취급하세요.
+
+## guardrail.json 편집
+
+제공된 정책은 생성된 수학 에이전트의 예시입니다. 투자 조언을 거부하고 세 가지 유형의 개인 데이터를 숨기거나 차단합니다:
+
+```json title="guardrail.json"
+{
+  "blockedInputMessaging": "Sorry, I can't help with that request.",
+  "blockedOutputsMessaging": "Sorry, I can't share that answer.",
+  "deniedTopics": [
+    {
+      "name": "Investment advice",
+      "definition": "Recommendations about which specific stocks, funds or other investments to buy or sell.",
+      "examples": ["Which stocks should I buy this year?"]
+    }
+  ],
+  "piiEntities": [
+    { "type": "EMAIL", "action": "ANONYMIZE" },
+    { "type": "PHONE", "action": "ANONYMIZE" },
+    { "type": "US_SOCIAL_SECURITY_NUMBER", "action": "BLOCK" }
+  ]
+}
+```
+
+필드는 다음과 같습니다:
+
+- `blockedInputMessaging`: 가드레일이 메시지를 차단할 때 사용자가 받는 응답입니다. 최대 500자입니다.
+- `blockedOutputsMessaging`: 가드레일이 모델의 답변을 차단할 때 사용자가 받는 응답입니다. 최대 500자입니다.
+- `deniedTopics`: 에이전트가 거부해야 하는 주제입니다. 각 주제에는 `name`(최대 100자의 문자, 숫자, 공백 및 `-_!?.` 문자), 주제를 설명하는 최대 1000자의 `definition`, 그리고 각각 최대 100자의 선택적 `examples`가 있습니다.
+- `piiEntities`: 조치를 취할 개인 데이터 유형입니다. `type`은 `EMAIL`, `PHONE` 또는 `US_SOCIAL_SECURITY_NUMBER`와 같은 [민감한 정보 유형](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails-sensitive-filters.html)입니다. `action`은 값을 자리 표시자로 대체하는 `ANONYMIZE` 또는 전체 메시지나 답변을 차단하는 `BLOCK`입니다.
+
+주제 자체를 설명하는 주제 `definition`을 작성하세요. 예를 들어, "Recommendations about which specific stocks to buy"가 "Do not give investment advice"보다 더 잘 작동합니다.
+
+### 버전에 번호가 매겨지는 이유
+
+`guardrail.json`을 변경하고 배포할 때마다 인프라는 새로운 번호가 매겨진 가드레일 버전을 생성하고, 에이전트는 동일한 배포에서 해당 버전으로 전환합니다. 버전의 설명에는 `guardrail.json`의 SHA-256 해시가 포함되어 있으므로 파일을 변경하면 설명이 변경되고 새 버전이 이전 버전을 대체합니다. CDK 구성의 경우 해시는 전달하는 모든 `props`도 포함합니다.
+
+에이전트는 `DRAFT` 버전을 사용하지 않습니다. `DRAFT`는 항상 최신 규칙을 보유하므로 AWS 콘솔에서 수행한 편집이 배포 없이 실행 중인 에이전트에 도달할 수 있습니다. `guardrail.ts`는 `GUARDRAIL_VERSION`이 버전 번호가 아닌 경우 오류를 발생시킵니다.
+
+## 에이전트에 가드레일 연결
+
+제너레이터는 `ts#agent` 제너레이터가 에이전트 배포를 사용자에게 맡기는 것과 같은 방식으로 스택이나 루트 Terraform 모듈을 변경하지 않습니다. 완료되면 에이전트의 이름이 채워진 아래 코드를 출력합니다. 가드레일의 환경 변수를 에이전트에 전달하고 에이전트가 가드레일을 적용할 수 있도록 추가하세요:
+
+<Infrastructure>
+  <Fragment slot="cdk">
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyAgent, MyAgentGuardrail } from '@my-scope/common-constructs';
+
+const guardrail = new MyAgentGuardrail(this, 'MyAgentGuardrail');
+const agent = new MyAgent(this, 'MyAgent', {
+  environmentVariables: guardrail.environmentVariables,
+});
+guardrail.grantApply(agent);
+```
+
+에이전트에 이미 환경 변수가 있는 경우 둘 다 스프레드하세요: `environmentVariables: { ...guardrail.environmentVariables, MY_SETTING: 'value' }`.
+
+구성은 다음을 노출합니다:
+
+- `guardrail`(`CfnGuardrail`) 및 `version`(`CfnGuardrailVersion`)
+- `guardrailId`, `guardrailArn` 및 `guardrailVersion`
+- `{ GUARDRAIL_ID, GUARDRAIL_VERSION }`을 반환하는 `environmentVariables`
+- 가드레일에 대해 `bedrock:ApplyGuardrail`을 부여하는 `grantApply(grantee)`
+
+또한 `GuardrailId` 및 `GuardrailVersion` 스택 출력을 추가합니다. props는 모든 `CfnGuardrail` 속성이며 `guardrail.json`보다 우선합니다. 예를 들어, 콘텐츠 필터를 추가하세요:
+
+```ts
+new MyAgentGuardrail(this, 'MyAgentGuardrail', {
+  contentPolicyConfig: {
+    filtersConfig: [
+      { type: 'HATE', inputStrength: 'HIGH', outputStrength: 'HIGH' },
+    ],
+  },
+});
+```
+  </Fragment>
+  <Fragment slot="terraform">
+표시된 대로 `my_agent_guardrail` 모듈을 추가하세요. 에이전트를 배포하는 루트 모듈의 기존 `my_agent` 모듈 블록에 `env` 및 `additional_iam_policy_statements` 줄을 추가하세요. 루트 모듈이 아직 에이전트를 배포하지 않는 경우 <Link path="guides/ts-agent#infrastructure-as-code">TypeScript Agent 가이드</Link>에 설명된 대로 먼저 에이전트의 모듈을 추가하세요.
+
+```hcl title="packages/infra/src/main.tf"
+module "my_agent_guardrail" {
+  source = "../../common/terraform/src/app/guardrails/my-agent"
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+  # ...existing arguments...
+  env                              = module.my_agent_guardrail.env
+  additional_iam_policy_statements = module.my_agent_guardrail.iam_policy_statements
+}
+```
+
+에이전트 모듈이 이미 이러한 인수를 설정한 경우 결합하세요:
+
+```hcl
+  env                              = merge(module.my_agent_guardrail.env, { MY_SETTING = "value" })
+  additional_iam_policy_statements = concat(module.my_agent_guardrail.iam_policy_statements, local.my_statements)
+```
+
+모듈은 `tags` 변수를 받고 `guardrail_id`, `guardrail_arn`, `guardrail_version`, `env` 및 `iam_policy_statements`를 출력합니다. 콘텐츠 필터와 같은 다른 가드레일 정책을 추가하려면 모듈의 `aws_bedrock_guardrail` 리소스를 편집하세요.
+
+모듈은 가드레일 버전에 `create_before_destroy`를 설정하므로 Terraform은 이전 버전을 삭제하기 전에 새 버전을 생성합니다.
+  </Fragment>
+</Infrastructure>
+
+### 누락된 환경 변수
+
+연결을 잊어버린 경우 `getGuardrailedModel()`은 `GUARDRAIL_ID is not set`(또는 `GUARDRAIL_VERSION is not set`)을 발생시키므로 에이전트는 가드레일 없이 실행되지 않습니다. `http` 또는 `a2a` 프로토콜을 사용하는 에이전트는 요청이 도착할 때 `Agent`를 생성하므로 모든 요청이 이 오류로 실패합니다. `ag-ui` 프로토콜을 사용하는 에이전트는 시작 시 `Agent`를 생성하므로 에이전트가 시작되지 않습니다.
+
+## 로컬 개발
+
+`<agent>-dev` 대상은 `LOCAL_DEV=true`를 설정합니다. `LOCAL_DEV`가 `true`이고 두 변수 중 하나가 설정되지 않은 경우 `guardrail.ts`는 한 번 경고를 출력하고 에이전트는 가드레일 없이 실행됩니다:
+
+<NxCommands commands={['agent-dev your-project']} />
+
+로컬에서 규칙을 테스트하려면 먼저 가드레일을 배포하세요. 그런 다음 `GuardrailId` 및 `GuardrailVersion` 스택 출력(CDK) 또는 모듈 출력(Terraform)의 값을 전달하세요:
+
+<NxCommands commands={['agent-dev your-project']} env={{ GUARDRAIL_ID: '<guardrail-id>', GUARDRAIL_VERSION: '<version>' }} />
+
+`<agent>-serve` 대상은 `LOCAL_DEV`를 설정하지 않으므로 두 변수가 모두 필요합니다. 그렇지 않으면 위에서 설명한 대로 에이전트가 실패합니다. `<agent>-chat` 대상은 실행 중인 에이전트에 연결하며 가드레일 변수 자체가 필요하지 않습니다.
+
+## 비용 및 지연 시간
+
+Amazon Bedrock은 입력과 답변 모두에서 텍스트를 평가하는 각 가드레일 정책에 대해 요금을 부과합니다. [Amazon Bedrock 요금](https://aws.amazon.com/bedrock/pricing/)을 참조하세요.
+
+가드레일이 에이전트가 사용자에게 스트리밍하기 전에 답변을 확인하기 때문에 각 모델 호출도 더 오래 걸립니다.
+
+## 제한 사항
+
+- 이 제너레이터는 `ts#agent`로 생성된 에이전트를 지원합니다. AgentCore Harness는 지원하지 않습니다.
+- `guardrail.json`은 거부된 주제와 PII 엔터티만 보유합니다. 콘텐츠 필터 및 단어 필터와 같은 다른 정책은 구성의 props(CDK)를 사용하거나 모듈을 편집(Terraform)하여 추가하세요.
+- 가드레일은 [가드레일이 확인하는 내용](#가드레일이-확인하는-내용)에 설명된 대로 도구 결과를 확인하지 않습니다.

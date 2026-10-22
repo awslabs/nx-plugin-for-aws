@@ -1,0 +1,241 @@
+---
+title: TypeScript Agent Guardrails
+description: 将 Amazon Bedrock Guardrail 附加到 TypeScript Strands Agent
+generator: ts#agent#guardrails
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import RunGenerator from '@components/run-generator.astro';
+
+将 [Amazon Bedrock Guardrail](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html) 附加到 <Link path="guides/ts-agent">TypeScript Agent</Link>。guardrail 是 Amazon Bedrock 应用于您的 agent 发送给模型的消息以及模型答案的一组规则。如果没有 guardrail，用户可以向您的 agent 询问任何主题，模型可以在其答案中重复个人数据（如电子邮件地址）。
+
+该生成器添加一个包含您的规则的策略文件、将 guardrail 应用于您的 agent 模型的代码，以及在您的 AWS 账户中创建 guardrail 的基础设施。
+
+## 工作原理
+
+- 您的 `agent.ts` 旁边的 `guardrail.json` 包含规则：您的 agent 必须拒绝的主题以及必须隐藏或阻止的个人数据类型（PII，个人可识别信息）。
+- 您的 CDK construct 或 Terraform 模块在您合成或计划时读取 `guardrail.json`。它创建 guardrail 和一个编号版本。guardrail 版本是规则的只读快照。
+- 基础设施通过 `GUARDRAIL_ID` 和 `GUARDRAIL_VERSION` 环境变量将 guardrail 的 ID 和版本号传递给您的 agent。
+- `guardrail.ts` 读取这些变量并构建应用了 guardrail 的 Bedrock 模型。您的 `new Agent({...})` 调用使用该模型。
+
+## 用法
+
+### 生成 Agent Guardrails
+
+您需要一个现有的 TypeScript 项目，其中包含使用 `ts#agent` 生成器创建的 agent。
+
+<RunGenerator generator="ts#agent#guardrails" />
+
+### 选项
+
+<GeneratorParameters generator="ts#agent#guardrails" />
+
+## 生成器输出
+
+生成器在您的 agent 旁边添加以下文件，其中 `<agent>` 是您的 agent 组件的名称（默认为 `agent`）：
+
+<FileTree>
+  - \<your-project>/src/\<agent>/
+    - agent.ts 您的 agent，现在使用 `model: getGuardrailedModel()` 创建
+    - guardrail.json 您的 guardrail 应用的规则
+    - guardrail.ts 构建应用了 guardrail 的 Bedrock 模型
+</FileTree>
+
+它还为您选择的 `iac` 提供程序添加基础设施，其中 `<agent-name>` 是您的 agent 的 construct 或模块的 kebab-case 名称：
+
+<Infrastructure>
+  <Fragment slot="cdk">
+    <FileTree>
+      - packages/common/constructs/src/app/guardrails/\<agent-name>/
+        - \<agent-name>-guardrail.ts 包含 guardrail 及其版本的 CDK construct
+    </FileTree>
+  </Fragment>
+  <Fragment slot="terraform">
+    <FileTree>
+      - packages/common/terraform/src/app/guardrails/\<agent-name>/
+        - \<agent-name>-guardrail.tf 包含 guardrail 及其版本的 Terraform 模块
+    </FileTree>
+  </Fragment>
+</Infrastructure>
+
+生成器像这样编辑 `agent.ts`：
+
+```diff lang="ts"
++import { getGuardrailedModel } from './guardrail.js';
+ import { Agent, tool } from '@strands-agents/sdk';
+
+ export const getAgent = async () => {
+   const agent = new Agent({
++    model: getGuardrailedModel(),
+     systemPrompt: `You are a mathematical wizard.
+```
+
+在同一个 agent 上再次运行生成器不会更改任何文件，并且它会保留您对 `guardrail.json` 的编辑。
+
+如果您的 agent 是使用 `infra: none` 生成的，生成器只添加 agent 文件并打印警告。然后您自己创建 guardrail 并为 agent 设置 `GUARDRAIL_ID` 和 `GUARDRAIL_VERSION`。
+
+### 已经设置模型的 agent
+
+如果您的 `new Agent({...})` 调用已经设置了 `model`，生成器会保持 `agent.ts` 不变。它会打印文件名和要添加的行。请将 guardrail 添加到您自己的模型选项中，例如：
+
+```ts title="agent.ts"
+import { BedrockModel } from '@strands-agents/sdk';
+
+const agent = new Agent({
+  model: new BedrockModel({
+    modelId: 'my-model-id',
+    guardrailConfig: {
+      guardrailIdentifier: process.env.GUARDRAIL_ID!,
+      guardrailVersion: process.env.GUARDRAIL_VERSION!,
+    },
+  }),
+  // ...
+});
+```
+
+## guardrail 检查什么
+
+guardrail 在每次模型调用时检查两件事：
+
+- 您的 agent 发送给模型的对话，包括用户的最新消息
+- 模型的答案，在您的 agent 将其流式传输回用户之前
+
+当 guardrail 阻止用户的消息时，用户会收到 `blockedInputMessaging` 文本，并且不会调用模型。Strands 还会将 agent 对话历史记录中被阻止的消息替换为 `[User input redacted.]`。当它阻止答案时，用户会收到 `blockedOutputsMessaging` 文本。当 `ANONYMIZE` 规则匹配时，答案包含占位符（如 `{EMAIL}`）而不是值。
+
+guardrail 不检查工具定义、模型传递给您的工具的参数或您的工具返回的结果。例如，如果工具从数据库返回客户的电子邮件地址，guardrail 不会将其从模型中隐藏。将工具结果视为不受信任的，如 <Link path="guides/ts-agent">TypeScript Agent 指南</Link>在"保护您的 Agent"下所述。
+
+## 编辑 guardrail.json
+
+提供的策略是为生成的数学 agent 提供的示例。它拒绝投资建议并隐藏或阻止三种类型的个人数据：
+
+```json title="guardrail.json"
+{
+  "blockedInputMessaging": "Sorry, I can't help with that request.",
+  "blockedOutputsMessaging": "Sorry, I can't share that answer.",
+  "deniedTopics": [
+    {
+      "name": "Investment advice",
+      "definition": "Recommendations about which specific stocks, funds or other investments to buy or sell.",
+      "examples": ["Which stocks should I buy this year?"]
+    }
+  ],
+  "piiEntities": [
+    { "type": "EMAIL", "action": "ANONYMIZE" },
+    { "type": "PHONE", "action": "ANONYMIZE" },
+    { "type": "US_SOCIAL_SECURITY_NUMBER", "action": "BLOCK" }
+  ]
+}
+```
+
+字段为：
+
+- `blockedInputMessaging`：当 guardrail 阻止用户的消息时用户收到的回复。最多 500 个字符。
+- `blockedOutputsMessaging`：当 guardrail 阻止模型的答案时用户收到的回复。最多 500 个字符。
+- `deniedTopics`：您的 agent 必须拒绝的主题。每个主题都有一个 `name`（最多 100 个字母、数字、空格和字符 `-_!?.`）、一个最多 1000 个字符的 `definition` 来描述主题，以及可选的 `examples`，每个最多 100 个字符。
+- `piiEntities`：要采取行动的个人数据类型。`type` 是[敏感信息类型](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails-sensitive-filters.html)，如 `EMAIL`、`PHONE` 或 `US_SOCIAL_SECURITY_NUMBER`。`action` 是 `ANONYMIZE` 以用占位符替换值，或 `BLOCK` 以阻止整个消息或答案。
+
+编写描述主题本身的主题 `definition`。例如，"Recommendations about which specific stocks to buy" 比 "Do not give investment advice" 效果更好。
+
+### 为什么版本是编号的
+
+每次您更改 `guardrail.json` 并部署时，基础设施都会创建一个新的编号 guardrail 版本，并且您的 agent 在同一部署中切换到它。版本的描述包含 `guardrail.json` 的 SHA-256 哈希，因此对文件的更改会更改描述，新版本会替换旧版本。使用 CDK construct，哈希还涵盖您传递的任何 `props`。
+
+您的 agent 永远不会使用 `DRAFT` 版本。`DRAFT` 始终包含最新规则，因此在 AWS 控制台中进行的编辑将在没有部署的情况下到达您正在运行的 agent。如果 `GUARDRAIL_VERSION` 不是版本号，`guardrail.ts` 会抛出错误。
+
+## 将 guardrail 连接到您的 agent
+
+生成器不会更改您的堆栈或根 Terraform 模块，就像 `ts#agent` 生成器将部署 agent 留给您一样。完成后，它会打印下面的代码，其中填写了您的 agent 的名称。添加它以将 guardrail 的环境变量传递给您的 agent 并允许 agent 应用 guardrail：
+
+<Infrastructure>
+  <Fragment slot="cdk">
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyAgent, MyAgentGuardrail } from '@my-scope/common-constructs';
+
+const guardrail = new MyAgentGuardrail(this, 'MyAgentGuardrail');
+const agent = new MyAgent(this, 'MyAgent', {
+  environmentVariables: guardrail.environmentVariables,
+});
+guardrail.grantApply(agent);
+```
+
+如果您的 agent 已经有环境变量，请展开两者：`environmentVariables: { ...guardrail.environmentVariables, MY_SETTING: 'value' }`。
+
+construct 公开：
+
+- `guardrail`（`CfnGuardrail`）和 `version`（`CfnGuardrailVersion`）
+- `guardrailId`、`guardrailArn` 和 `guardrailVersion`
+- `environmentVariables`，返回 `{ GUARDRAIL_ID, GUARDRAIL_VERSION }`
+- `grantApply(grantee)`，在 guardrail 上授予 `bedrock:ApplyGuardrail`
+
+它还添加 `GuardrailId` 和 `GuardrailVersion` 堆栈输出。其 props 是任何 `CfnGuardrail` 属性，它们优先于 `guardrail.json`。例如，添加内容过滤器：
+
+```ts
+new MyAgentGuardrail(this, 'MyAgentGuardrail', {
+  contentPolicyConfig: {
+    filtersConfig: [
+      { type: 'HATE', inputStrength: 'HIGH', outputStrength: 'HIGH' },
+    ],
+  },
+});
+```
+  </Fragment>
+  <Fragment slot="terraform">
+如图所示添加 `my_agent_guardrail` 模块。将其 `env` 和 `additional_iam_policy_statements` 行添加到您现有的 `my_agent` 模块块中，在您部署 agent 的根模块中。如果您的根模块尚未部署 agent，请先添加 agent 的模块，如 <Link path="guides/ts-agent#infrastructure-as-code">TypeScript Agent 指南</Link>中所述。
+
+```hcl title="packages/infra/src/main.tf"
+module "my_agent_guardrail" {
+  source = "../../common/terraform/src/app/guardrails/my-agent"
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+  # ...existing arguments...
+  env                              = module.my_agent_guardrail.env
+  additional_iam_policy_statements = module.my_agent_guardrail.iam_policy_statements
+}
+```
+
+如果您的 agent 模块已经设置了这些参数，请组合它们：
+
+```hcl
+  env                              = merge(module.my_agent_guardrail.env, { MY_SETTING = "value" })
+  additional_iam_policy_statements = concat(module.my_agent_guardrail.iam_policy_statements, local.my_statements)
+```
+
+该模块接受 `tags` 变量并输出 `guardrail_id`、`guardrail_arn`、`guardrail_version`、`env` 和 `iam_policy_statements`。要添加其他 guardrail 策略（如内容过滤器），请编辑模块中的 `aws_bedrock_guardrail` 资源。
+
+该模块在 guardrail 版本上设置 `create_before_destroy`，因此 Terraform 在删除旧版本之前创建新版本。
+  </Fragment>
+</Infrastructure>
+
+### 缺少环境变量
+
+如果您忘记了连接，`getGuardrailedModel()` 会抛出 `GUARDRAIL_ID is not set`（或 `GUARDRAIL_VERSION is not set`），因此 agent 不会在没有其 guardrail 的情况下运行。具有 `http` 或 `a2a` 协议的 agent 在请求到达时创建其 `Agent`，因此每个请求都会因此错误而失败。具有 `ag-ui` 协议的 agent 在启动时创建其 `Agent`，因此 agent 无法启动。
+
+## 本地开发
+
+`<agent>-dev` 目标设置 `LOCAL_DEV=true`。当 `LOCAL_DEV` 为 `true` 且任一变量未设置时，`guardrail.ts` 会打印一次警告，agent 在没有 guardrail 的情况下运行：
+
+<NxCommands commands={['agent-dev your-project']} />
+
+要在本地测试您的规则，请先部署 guardrail。然后从 `GuardrailId` 和 `GuardrailVersion` 堆栈输出（CDK）或模块输出（Terraform）传递值：
+
+<NxCommands commands={['agent-dev your-project']} env={{ GUARDRAIL_ID: '<guardrail-id>', GUARDRAIL_VERSION: '<version>' }} />
+
+`<agent>-serve` 目标不设置 `LOCAL_DEV`，因此它需要两个变量，否则 agent 会如上所述失败。`<agent>-chat` 目标连接到正在运行的 agent，本身不需要 guardrail 变量。
+
+## 成本和延迟
+
+Amazon Bedrock 对评估文本的每个 guardrail 策略收费，包括输入和答案。请参阅 [Amazon Bedrock 定价](https://aws.amazon.com/bedrock/pricing/)。
+
+每次模型调用也需要更长时间，因为 guardrail 在您的 agent 将答案流式传输给用户之前检查答案。
+
+## 限制
+
+- 此生成器支持使用 `ts#agent` 创建的 agent。它不支持 AgentCore Harness。
+- `guardrail.json` 仅包含拒绝的主题和 PII 实体。使用 construct 的 props（CDK）或通过编辑模块（Terraform）添加其他策略，如内容过滤器和单词过滤器。
+- guardrail 不检查工具结果，如[guardrail 检查什么](#guardrail-检查什么)中所述。

@@ -215,6 +215,11 @@ export const runGeneratorMatrix = async (
     `generate @aws/nx-plugin:ts#agent --project=ts-project --name=my-ts-agui-agent --protocol=ag-ui --infra=agentcore --no-interactive${deferFlag}`,
     opts,
   );
+  // Guard the default agent, which has AgentCore infrastructure.
+  await runCLI(
+    `generate @aws/nx-plugin:ts#agent#guardrails --project=ts-project --agent=agent --no-interactive`,
+    opts,
+  );
   await runCLI(
     `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-agui-agent --protocol=ag-ui --infra=agentcore --no-interactive${deferFlag}`,
     opts,
