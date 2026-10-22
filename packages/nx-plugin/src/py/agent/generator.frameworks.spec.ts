@@ -3,10 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { parse } from '@iarna/toml';
-import { addProjectConfiguration, type Tree } from '@nx/devkit';
+import { parse, stringify } from '@iarna/toml';
+import { addProjectConfiguration, getProjects, type Tree } from '@nx/devkit';
 import type { UVPyprojectToml } from '../../utils/nxlv-python.js';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import { PY_UV_OVERRIDES } from '../../utils/versions.js';
+import { pyProjectGenerator } from '../project/generator.js';
 import { pyAgentGenerator } from './generator.js';
 
 describe('py#agent generator', () => {
@@ -654,5 +656,78 @@ dev-dependencies = []
       );
       expect(pyprojectToml).toMatchSnapshot('langchain-pyproject.toml');
     });
+  });
+});
+
+describe('py#agent generator uv override-dependencies', () => {
+  let tree: Tree;
+  let project: string;
+
+  const expected = [...PY_UV_OVERRIDES['strands-agents-tools']];
+  const rootText = () => tree.read('pyproject.toml', 'utf-8');
+  const readRoot = () => parse(rootText()) as UVPyprojectToml;
+
+  beforeEach(async () => {
+    tree = createTreeUsingTsSolutionSetup();
+    await pyProjectGenerator(tree, {
+      name: 'py_project',
+      directory: 'packages',
+      type: 'application',
+    });
+    project = [...getProjects(tree)].find(
+      ([, config]) => config.root === 'packages/py_project',
+    )[0];
+  });
+
+  it('should add the strands-agents-tools overrides for a strands agent', async () => {
+    await pyAgentGenerator(tree, { project, infra: 'none', iac: 'cdk' });
+
+    expect(readRoot().tool.uv['override-dependencies']).toEqual(expected);
+  });
+
+  it('should not duplicate the overrides when re-run', async () => {
+    await pyAgentGenerator(tree, { project, infra: 'none', iac: 'cdk' });
+    const afterFirst = rootText();
+
+    await pyAgentGenerator(tree, { project, infra: 'none', iac: 'cdk' });
+
+    expect(rootText()).toBe(afterFirst);
+  });
+
+  it('should merge with an existing user override list', async () => {
+    // An installed workspace has a uv.lock, so creating the agent-connection
+    // project does not regenerate the root pyproject.toml.
+    tree.write('uv.lock', '');
+    const root = readRoot();
+    root.tool.uv['override-dependencies'] = ['urllib3>=2.5.0'];
+    tree.write('pyproject.toml', stringify(root as any));
+
+    await pyAgentGenerator(tree, { project, infra: 'none', iac: 'cdk' });
+
+    expect(readRoot().tool.uv['override-dependencies']).toEqual([
+      'urllib3>=2.5.0',
+      ...expected,
+    ]);
+  });
+
+  it('should not add overrides for a langchain agent', async () => {
+    await pyAgentGenerator(tree, {
+      project,
+      framework: 'langchain',
+      infra: 'none',
+      iac: 'cdk',
+    });
+    const afterFirst = rootText();
+
+    expect(readRoot().tool.uv['override-dependencies']).toBeUndefined();
+
+    await pyAgentGenerator(tree, {
+      project,
+      framework: 'langchain',
+      infra: 'none',
+      iac: 'cdk',
+    });
+
+    expect(rootText()).toBe(afterFirst);
   });
 });
