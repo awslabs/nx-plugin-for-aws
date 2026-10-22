@@ -1,37 +1,86 @@
-import { BedrockModel } from '@strands-agents/sdk';
+import { BedrockModel, type BedrockGuardrailConfig } from '@strands-agents/sdk';
+import {
+  type AgentCoreRuntimeConfig,
+  getAgentCoreRuntimeConfig,
+} from '<%- agentConnectionImport %>';
+
+/**
+ * This agent's entry in runtime config, written by the
+ * <%- agentNameClassName %>Guardrail construct or the <%- nameKebabCase %> guardrail module.
+ */
+interface GuardrailEntry {
+  guardrailId?: string;
+  guardrailVersion?: string;
+}
+
+const RUNTIME_CONFIG_KEY = 'agentcore.guardrails.<%- agentNameClassName %>';
 
 let warnedUnguarded = false;
 
-/**
- * The Bedrock model with the guardrail named by GUARDRAIL_ID and GUARDRAIL_VERSION applied.
- */
-export const getGuardrailedModel = (): BedrockModel => {
-  const guardrailIdentifier = process.env.GUARDRAIL_ID;
-  const guardrailVersion = process.env.GUARDRAIL_VERSION;
+const readEntry = async (): Promise<GuardrailEntry | undefined> => {
+  const config: AgentCoreRuntimeConfig & {
+    guardrails?: Record<string, GuardrailEntry>;
+  } = await getAgentCoreRuntimeConfig();
+  return config.guardrails?.['<%- agentNameClassName %>'];
+};
 
-  if (!guardrailIdentifier || !guardrailVersion) {
-    const missing = guardrailIdentifier ? 'GUARDRAIL_VERSION' : 'GUARDRAIL_ID';
-    if (process.env.LOCAL_DEV !== 'true') {
+/**
+ * The guardrail to apply, read from runtime config on every model call
+ * (cached for 5 seconds).
+ */
+const resolveGuardrail = async (): Promise<
+  BedrockGuardrailConfig | undefined
+> => {
+  const localDev = process.env.LOCAL_DEV === 'true';
+  let entry: GuardrailEntry | undefined;
+  if (!localDev) {
+    entry = await readEntry();
+  } else if (process.env.RUNTIME_CONFIG_APP_ID) {
+    entry = await readEntry().catch(() => undefined);
+  }
+
+  if (!entry?.guardrailId || !entry.guardrailVersion) {
+    if (!localDev) {
       throw new Error(
-        `${missing} is not set. Pass the guardrail's GUARDRAIL_ID and GUARDRAIL_VERSION environment variables to the agent.`,
+        `No guardrail for this agent in runtime config at ${RUNTIME_CONFIG_KEY}. Add the <%- agentNameClassName %>Guardrail construct (CDK) or the guardrails/<%- nameKebabCase %> module (Terraform) to your infrastructure.`,
       );
     }
     if (!warnedUnguarded) {
       warnedUnguarded = true;
       console.warn(
-        `${missing} is not set, so the agent is running without a guardrail (LOCAL_DEV=true).`,
+        `No guardrail for this agent in runtime config at ${RUNTIME_CONFIG_KEY}, so the agent is running without a guardrail (LOCAL_DEV=true).`,
       );
     }
-    return new BedrockModel();
+    return undefined;
   }
 
-  if (!/^[1-9][0-9]*$/.test(guardrailVersion)) {
+  if (!/^[1-9][0-9]*$/.test(entry.guardrailVersion)) {
     throw new Error(
-      `GUARDRAIL_VERSION must be a numbered guardrail version, but is ${guardrailVersion}.`,
+      `The guardrail version in runtime config at ${RUNTIME_CONFIG_KEY} must be a numbered guardrail version, but is ${entry.guardrailVersion}.`,
     );
   }
 
-  return new BedrockModel({
-    guardrailConfig: { guardrailIdentifier, guardrailVersion, trace: 'enabled' },
-  });
+  return {
+    guardrailIdentifier: entry.guardrailId,
+    guardrailVersion: entry.guardrailVersion,
+    trace: 'enabled',
+  };
 };
+
+/**
+ * A Bedrock model that applies this agent's guardrail from runtime config
+ * before each model call, so a new guardrail version applies without a
+ * restart.
+ */
+export class GuardrailedBedrockModel extends BedrockModel {
+  override async *stream(...args: Parameters<BedrockModel['stream']>) {
+    this.updateConfig({ guardrailConfig: await resolveGuardrail() });
+    return yield* super.stream(...args);
+  }
+}
+
+/**
+ * The Bedrock model with this agent's guardrail applied.
+ */
+export const getGuardrailedModel = (): BedrockModel =>
+  new GuardrailedBedrockModel();

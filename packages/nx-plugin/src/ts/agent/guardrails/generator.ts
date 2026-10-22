@@ -135,7 +135,12 @@ export const tsAgentGuardrailsGenerator = async (
     tree,
     joinPathFragments(import.meta.dirname, 'files', 'agent'),
     agentDir,
-    { ...esmVars(tree) },
+    {
+      ...esmVars(tree),
+      agentConnectionImport: `@${getNpmScope(tree)}/agent-connection`,
+      agentNameClassName,
+      nameKebabCase,
+    },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
 
@@ -158,11 +163,10 @@ export const tsAgentGuardrailsGenerator = async (
       nameClassName: agentNameClassName,
       nameKebabCase,
       npmScope: getNpmScope(tree),
-      protocol: agent.protocol,
     });
   } else {
     logger.warn(
-      `Agent ${agentTargetPrefix} in project ${project.name} has no infrastructure, so no guardrail infrastructure was generated. Create the guardrail yourself and set GUARDRAIL_ID and GUARDRAIL_VERSION for the agent.`,
+      `Agent ${agentTargetPrefix} in project ${project.name} has no infrastructure, so no guardrail infrastructure was generated. Create the guardrail yourself and write its ID and version to runtime config at agentcore.guardrails.${agentNameClassName} as { guardrailId, guardrailVersion }.`,
     );
   }
 

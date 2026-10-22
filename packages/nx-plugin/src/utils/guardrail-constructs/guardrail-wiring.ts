@@ -14,8 +14,6 @@ export interface GuardrailWiringOptions {
   nameKebabCase: string;
   /** npm scope of the workspace without the `@`, eg `my-scope`. */
   npmScope: string;
-  /** Agent protocol, which decides whether a missing guardrail fails at startup or per request. */
-  protocol?: string;
 }
 
 /** The ts#agent guide section that shows how to deploy the agent's Terraform module. */
@@ -23,7 +21,7 @@ export const TS_AGENT_TERRAFORM_DEPLOY_GUIDE_URL =
   'https://awslabs.github.io/nx-plugin-for-aws/en/guides/ts-agent/#infrastructure-as-code';
 
 /**
- * The code a user adds to their CDK stack to pass the guardrail to the agent.
+ * The code a user adds to their CDK stack to guard the agent.
  * The guide shows the same code for `my-agent` in scope `my-scope`, which
  * generator.spec.ts checks.
  */
@@ -33,16 +31,14 @@ export const cdkGuardrailWiring = ({
 }: Pick<GuardrailWiringOptions, 'nameClassName' | 'npmScope'>): string =>
   `import { ${nameClassName}, ${nameClassName}Guardrail } from '@${npmScope}/${SHARED_CONSTRUCTS_NAME}';
 
-const guardrail = new ${nameClassName}Guardrail(this, '${nameClassName}Guardrail');
-const agent = new ${nameClassName}(this, '${nameClassName}', {
-  environmentVariables: guardrail.environmentVariables,
-});
-guardrail.grantApply(agent);`;
+const agent = new ${nameClassName}(this, '${nameClassName}');
+new ${nameClassName}Guardrail(this, '${nameClassName}Guardrail', { agent });`;
 
 /**
- * The code a user adds to their root Terraform module to pass the guardrail
- * to the agent's module, relative to `packages/infra/src`. The guide shows
- * the same code for `my-agent`, which generator.spec.ts checks.
+ * The code a user adds to their root Terraform module to grant the agent the
+ * guardrail and deploy its runtime-config entry, relative to
+ * `packages/infra/src`. The guide shows the same code for `my-agent`, which
+ * generator.spec.ts checks.
  */
 export const terraformGuardrailWiring = ({
   nameKebabCase,
@@ -56,8 +52,15 @@ export const terraformGuardrailWiring = ({
 module "${agentModule}" {
   source = "../../common/terraform/src/app/agents/${nameKebabCase}"
   # ...existing arguments...
-  env                              = module.${guardrailModule}.env
   additional_iam_policy_statements = module.${guardrailModule}.iam_policy_statements
+}
+
+module "runtime_config_appconfig_deployment" {
+  # ...existing arguments...
+  depends_on = [
+    # ...existing modules...
+    module.${guardrailModule},
+  ]
 }`;
 };
 
@@ -67,7 +70,7 @@ module "${agentModule}" {
  */
 const terraformSteps = (nameKebabCase: string): string => {
   const agentModule = snakeCase(nameKebabCase);
-  return `Add the module "${agentModule}_guardrail" block as printed below. Add its env and additional_iam_policy_statements lines to your existing module "${agentModule}" block. If your root module does not deploy the agent yet, add the agent's module first, as described in ${TS_AGENT_TERRAFORM_DEPLOY_GUIDE_URL}.`;
+  return `Add the module "${agentModule}_guardrail" block as printed below. Add its additional_iam_policy_statements line to your existing module "${agentModule}" block, and add module.${agentModule}_guardrail to the depends_on list of your runtime_config_appconfig_deployment module. If your root module does not deploy the agent yet, add the agent's module first, as described in ${TS_AGENT_TERRAFORM_DEPLOY_GUIDE_URL}.`;
 };
 
 /**
@@ -78,11 +81,7 @@ const terraformSteps = (nameKebabCase: string): string => {
 export const guardrailWiringMessage = (
   options: GuardrailWiringOptions,
 ): string => {
-  const failure =
-    options.protocol === 'ag-ui'
-      ? 'fails to start'
-      : 'fails on its first request';
-  const missing = `Until you add it, the deployed agent ${failure} with "GUARDRAIL_ID is not set", because the GUARDRAIL_ID and GUARDRAIL_VERSION environment variables are missing.`;
+  const missing = `Until you add it, the deployed agent fails on its first request, because runtime config has no guardrail at agentcore.guardrails.${options.nameClassName}.`;
   return options.iac === 'cdk'
     ? `Add the guardrail to your agent in your stack, for example packages/infra/src/stacks/application-stack.ts. ${missing}
 

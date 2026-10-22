@@ -6,6 +6,7 @@ import { CfnOutput, Names, Stack } from 'aws-cdk-lib';
 import * as bedrock from 'aws-cdk-lib/aws-bedrock';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
+import { RuntimeConfig } from '../../../core/runtime-config<% if (esm) { %>.js<% } %>';
 import { findWorkspaceRoot } from '../../../core/workspace<% if (esm) { %>.js<% } %>';
 
 interface GuardrailPolicy {
@@ -29,11 +30,15 @@ const policy: GuardrailPolicy = JSON.parse(policyFile.toString('utf-8'));
  * Properties for the <%- nameClassName %>Guardrail. Any CfnGuardrail property
  * supplied here takes precedence over guardrail.json.
  */
-export type <%- nameClassName %>GuardrailProps = Partial<bedrock.CfnGuardrailProps>;
+export type <%- nameClassName %>GuardrailProps = Partial<bedrock.CfnGuardrailProps> & {
+  /** The agent that applies this guardrail. It is granted bedrock:ApplyGuardrail. */
+  readonly agent: iam.IGrantable;
+};
 
 /**
  * An Amazon Bedrock Guardrail for <%- nameClassName %>, with a numbered version
- * that changes whenever its rules change.
+ * that changes whenever its rules change. Its ID and version are written to
+ * runtime config, where the agent reads them.
  */
 export class <%- nameClassName %>Guardrail extends Construct {
   public readonly guardrail: bedrock.CfnGuardrail;
@@ -45,9 +50,11 @@ export class <%- nameClassName %>Guardrail extends Construct {
   constructor(
     scope: Construct,
     id: string,
-    props?: <%- nameClassName %>GuardrailProps,
+    props: <%- nameClassName %>GuardrailProps,
   ) {
     super(scope, id);
+
+    const { agent, ...overrides } = props;
 
     const deniedTopics = policy.deniedTopics ?? [];
     const piiEntities = policy.piiEntities ?? [];
@@ -78,12 +85,12 @@ export class <%- nameClassName %>Guardrail extends Construct {
           })),
         },
       }),
-      ...props,
+      ...overrides,
     });
 
     const hash = createHash('sha256').update(policyFile);
-    if (props && Object.keys(props).length > 0) {
-      hash.update(JSON.stringify(Stack.of(this).resolve(props)));
+    if (Object.keys(overrides).length > 0) {
+      hash.update(JSON.stringify(Stack.of(this).resolve(overrides)));
     }
 
     this.version = new bedrock.CfnGuardrailVersion(this, 'Version', {
@@ -97,14 +104,17 @@ export class <%- nameClassName %>Guardrail extends Construct {
 
     new CfnOutput(this, 'GuardrailId', { value: this.guardrailId });
     new CfnOutput(this, 'GuardrailVersion', { value: this.guardrailVersion });
-  }
 
-  /** The environment variables the agent reads its guardrail from. */
-  public get environmentVariables(): Record<string, string> {
-    return {
-      GUARDRAIL_ID: this.guardrailId,
-      GUARDRAIL_VERSION: this.guardrailVersion,
-    };
+    const rc = RuntimeConfig.ensure(this);
+    rc.set('agentcore', 'guardrails', {
+      ...rc.get('agentcore').guardrails,
+      <%- nameClassName %>: {
+        guardrailId: this.guardrailId,
+        guardrailVersion: this.guardrailVersion,
+      },
+    });
+
+    this.grantApply(agent);
   }
 
   /** Grant permission to apply this guardrail. */
