@@ -17,6 +17,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 // eslint-disable-next-line
 import {
   CONTAINER_VERSIONS,
+  PY_UV_OVERRIDES,
   PY_VERSIONS,
   TS_VERSIONS,
 } from '../../../packages/nx-plugin/src/utils/versions';
@@ -167,6 +168,10 @@ describe('smoke test - audit', () => {
           !name.includes('ag-ui-strands'),
       )
       .map(([name, version]) => `"${name}${version}"`);
+    // The vended workspace root applies these overrides, so the audit does too.
+    const overrides = Object.values(PY_UV_OVERRIDES)
+      .flat()
+      .map((override) => `"${override}"`);
 
     writeFileSync(
       join(dir, 'pyproject.toml'),
@@ -177,6 +182,13 @@ describe('smoke test - audit', () => {
         'requires-python = ">=3.14,<3.15"',
         `dependencies = [${dependencies.join(', ')}]`,
         '',
+        ...(overrides.length > 0
+          ? [
+              '[tool.uv]',
+              `override-dependencies = [${overrides.join(', ')}]`,
+              '',
+            ]
+          : []),
       ].join('\n'),
     );
 

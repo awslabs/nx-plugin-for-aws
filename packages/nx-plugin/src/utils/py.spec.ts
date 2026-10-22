@@ -6,6 +6,7 @@
 import { parse, stringify } from '@iarna/toml';
 import type { Tree } from '@nx/devkit';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
+import { parsePipRequirementsLine } from 'pip-requirements-js';
 import {
   type DeclaredPy,
   declareDependencies,
@@ -13,8 +14,10 @@ import {
 import type { UVPyprojectToml } from './nxlv-python.js';
 import {
   addDependenciesToPyProjectToml,
+  addUvOverrideDependencies,
   addWorkspaceDependencyToPyProject,
 } from './py.js';
+import { PY_UV_OVERRIDES, PY_VERSIONS } from './versions.js';
 
 const declaration = declareDependencies()({
   py: [
@@ -605,5 +608,153 @@ describe('addWorkspaceDependencyToPyProject', () => {
 
     const toml = readToml();
     expect(toml.project.dependencies).toEqual(['scope-my-lib']);
+  });
+});
+
+describe('addUvOverrideDependencies', () => {
+  let tree: Tree;
+
+  const expected = [...PY_UV_OVERRIDES['strands-agents-tools']];
+  const [override] = PY_UV_OVERRIDES['strands-agents-tools'];
+  const overridden = parsePipRequirementsLine(override);
+  const overriddenName =
+    overridden?.type === 'ProjectName' ? overridden.name : '';
+  const strandsTools = `strands-agents-tools${PY_VERSIONS['strands-agents-tools']}`;
+
+  const writeRoot = (uv: Record<string, unknown> = {}) =>
+    tree.write(
+      'pyproject.toml',
+      stringify({
+        project: { name: 'proj', version: '0.1.0', dependencies: [] },
+        tool: { uv: { ...uv, workspace: { members: ['packages/p'] } } },
+      } as any),
+    );
+  const readRoot = () =>
+    parse(tree.read('pyproject.toml', 'utf-8')) as UVPyprojectToml;
+  const rootText = () => tree.read('pyproject.toml', 'utf-8');
+
+  beforeEach(() => {
+    tree = createTreeWithEmptyWorkspace();
+  });
+
+  it('should add the overrides for strands-agents-tools to the workspace root', () => {
+    writeRoot();
+
+    expect(addUvOverrideDependencies(tree, [strandsTools])).toBe(true);
+
+    const toml = readRoot();
+    expect(toml.tool.uv['override-dependencies']).toEqual(expected);
+    expect(toml.tool.uv.workspace.members).toEqual(['packages/p']);
+  });
+
+  it('should not duplicate the overrides when re-run', () => {
+    writeRoot();
+    addUvOverrideDependencies(tree, [strandsTools]);
+    const afterFirst = rootText();
+
+    expect(addUvOverrideDependencies(tree, [strandsTools])).toBe(false);
+
+    expect(rootText()).toBe(afterFirst);
+  });
+
+  it('should append to an existing user override list', () => {
+    writeRoot({ 'override-dependencies': ['urllib3>=2.5.0'] });
+
+    expect(addUvOverrideDependencies(tree, ['strands-agents-tools'])).toBe(
+      true,
+    );
+
+    expect(readRoot().tool.uv['override-dependencies']).toEqual([
+      'urllib3>=2.5.0',
+      ...expected,
+    ]);
+  });
+
+  it.each([`${overriddenName}==12.2.0`, `${overriddenName.toUpperCase()}<13`])(
+    'should leave an existing user override %s for the same package alone',
+    (userOverride) => {
+      writeRoot({ 'override-dependencies': [userOverride] });
+      const before = rootText();
+
+      expect(addUvOverrideDependencies(tree, [strandsTools])).toBe(false);
+
+      expect(rootText()).toBe(before);
+      expect(readRoot().tool.uv['override-dependencies']).toEqual([
+        userOverride,
+      ]);
+    },
+  );
+
+  it('should leave an override-dependencies that is not a list alone', () => {
+    writeRoot({ 'override-dependencies': 'not-a-list' });
+    const before = rootText();
+
+    expect(addUvOverrideDependencies(tree, [strandsTools])).toBe(false);
+
+    expect(rootText()).toBe(before);
+  });
+
+  it('should match strands-agents-tools by its normalised name', () => {
+    writeRoot();
+
+    expect(addUvOverrideDependencies(tree, ['Strands_Agents.Tools'])).toBe(
+      true,
+    );
+
+    expect(readRoot().tool.uv['override-dependencies']).toEqual(expected);
+  });
+
+  it('should not touch the root for requirements without an override', () => {
+    writeRoot();
+    const before = rootText();
+
+    expect(
+      addUvOverrideDependencies(tree, [
+        `fastapi${PY_VERSIONS.fastapi}`,
+        `strands-agents${PY_VERSIONS['strands-agents']}`,
+      ]),
+    ).toBe(false);
+
+    expect(rootText()).toBe(before);
+  });
+
+  it('should not create a root pyproject.toml', () => {
+    expect(addUvOverrideDependencies(tree, [strandsTools])).toBe(false);
+
+    expect(tree.exists('pyproject.toml')).toBe(false);
+  });
+
+  describe('through addDependenciesToPyProjectToml', () => {
+    const strandsDeclaration = declareDependencies()({
+      py: [{ name: 'strands-agents-tools' }, { name: 'fastapi' }],
+    });
+
+    beforeEach(() => {
+      writeRoot();
+      tree.write(
+        'packages/p/pyproject.toml',
+        stringify({
+          project: { name: 'p', version: '0.1.0', dependencies: [] },
+        } as UVPyprojectToml),
+      );
+    });
+
+    it('should write the override when strands-agents-tools is added', () => {
+      addDependenciesToPyProjectToml(tree, 'packages/p', strandsDeclaration, [
+        'strands-agents-tools',
+      ]);
+
+      expect(readRoot().tool.uv['override-dependencies']).toEqual(expected);
+    });
+
+    it('should leave the root unchanged when other dependencies are added', () => {
+      const before = rootText();
+
+      addDependenciesToPyProjectToml(tree, 'packages/p', strandsDeclaration, [
+        'fastapi',
+      ]);
+
+      expect(rootText()).toBe(before);
+    });
   });
 });

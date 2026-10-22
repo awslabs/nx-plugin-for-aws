@@ -9,8 +9,11 @@
  * Configuration lives in ./translate.config.json (sibling to this file).
  * Run from the repo root:
  *
- *   pnpm tsx ./scripts/translate.ts --all
- *   pnpm tsx ./scripts/translate.ts                # only files changed since last translate commit
+ *   pnpm tsx ./scripts/translate.mts --all
+ *   pnpm tsx ./scripts/translate.mts                # only files changed since last translate commit
+ *
+ * It runs as an ES module (.mts): some @strands-agents/sdk dependencies export
+ * subpaths for `import` only, which CommonJS cannot load.
  *
  * The driver works out which source docs to translate and spawns one Strands
  * agent per (file × target language). Each agent gets the `fileEditor` tool and
@@ -60,8 +63,8 @@ interface TranslateConfig {
   };
 }
 
-const PROJECT_ROOT = path.resolve(__dirname, '..');
-const CONFIG_PATH = path.resolve(__dirname, 'translate.config.json');
+const PROJECT_ROOT = path.resolve(import.meta.dirname, '..');
+const CONFIG_PATH = path.resolve(import.meta.dirname, 'translate.config.json');
 const config: TranslateConfig = JSON.parse(
   fs.readFileSync(CONFIG_PATH, 'utf-8'),
 );
@@ -129,10 +132,7 @@ const log = {
  */
 const DIFF_DIR = path.join(DOCS_DIR, '.translate-diffs');
 
-async function writeDiff(
-  relativePath: string,
-  diff: string,
-): Promise<string> {
+async function writeDiff(relativePath: string, diff: string): Promise<string> {
   const diffPath = path.join(DIFF_DIR, `${relativePath}.diff`);
   await fs.outputFile(diffPath, diff, 'utf-8');
   return diffPath;
@@ -804,7 +804,9 @@ async function pruneOrphanedTranslations(
       if (options.dryRun) {
         log.info(`[dry-run] would delete orphaned ${lang}/${rel}`);
       } else {
-        log.info(`Deleting orphaned ${lang}/${rel} (no ${config.sourceLanguage} source)`);
+        log.info(
+          `Deleting orphaned ${lang}/${rel} (no ${config.sourceLanguage} source)`,
+        );
         await fs.remove(abs);
       }
     }

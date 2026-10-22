@@ -2,7 +2,7 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { parse, stringify } from '@iarna/toml';
+import { type JsonMap, parse, stringify } from '@iarna/toml';
 import { joinPathFragments, type Tree } from '@nx/devkit';
 import { parsePipRequirementsLine } from 'pip-requirements-js';
 import type {
@@ -11,8 +11,13 @@ import type {
 } from './declared-dependencies.js';
 import { normalizeDistributionName } from './names.js';
 import type { UVPyprojectToml } from './nxlv-python.js';
-import { readToml, updateToml } from './toml.js';
-import { type IPyDepVersion, PY_VERSIONS, withPyVersions } from './versions.js';
+import { readToml, tryReadToml, updateToml } from './toml.js';
+import {
+  type IPyDepVersion,
+  PY_UV_OVERRIDES,
+  PY_VERSIONS,
+  withPyVersions,
+} from './versions.js';
 
 // Dedup key that distinguishes bare packages from the same package with
 // extras (e.g. `foo` vs `foo[bar]`), so adding a bare dep doesn't drop a
@@ -72,6 +77,76 @@ export const addDependenciesToPyProjectToml = <
     joinPathFragments(projectRoot, 'pyproject.toml'),
     stringify(projectToml),
   );
+  addUvOverrideDependencies(tree, projectToml.project.dependencies);
+};
+
+// PEP 503 name of a requirement, or undefined for one that names no package or
+// cannot be parsed.
+const requirementName = (requirement: unknown): string | undefined => {
+  if (typeof requirement !== 'string') {
+    return undefined;
+  }
+  try {
+    const parsed = parsePipRequirementsLine(requirement);
+    return parsed?.type === 'ProjectName' || parsed?.type === 'ProjectURL'
+      ? normalizeDistributionName(parsed.name)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+/**
+ * Add the `PY_UV_OVERRIDES` entries for the packages named in `requirements`
+ * to the workspace root `[tool.uv] override-dependencies`, which is the only
+ * place uv reads overrides from.
+ *
+ * Existing entries keep their order, and a package the list already overrides
+ * is left as the user wrote it. The root file is written only when an entry is
+ * added. Returns whether it was.
+ */
+export const addUvOverrideDependencies = (
+  tree: Tree,
+  requirements: readonly string[],
+): boolean => {
+  const rootPyprojectPath = 'pyproject.toml';
+  const toml = tryReadToml(tree, rootPyprojectPath) as
+    | UVPyprojectToml
+    | undefined;
+  if (!toml) {
+    return false;
+  }
+  const names = new Set(requirements.map(requirementName));
+  const overrides = Object.entries(PY_UV_OVERRIDES).flatMap(
+    ([dependency, entries]) =>
+      names.has(normalizeDistributionName(dependency)) ? entries : [],
+  );
+  if (overrides.length === 0) {
+    return false;
+  }
+
+  const existing = toml.tool?.uv?.['override-dependencies'];
+  if (existing !== undefined && !Array.isArray(existing)) {
+    return false;
+  }
+  const merged = [...(existing ?? [])];
+  const overridden = new Set(merged.map(requirementName));
+  for (const entry of overrides) {
+    const name = requirementName(entry);
+    if (!overridden.has(name)) {
+      merged.push(entry);
+      overridden.add(name);
+    }
+  }
+  if (merged.length === (existing ?? []).length) {
+    return false;
+  }
+
+  toml.tool ??= {};
+  toml.tool.uv ??= {};
+  toml.tool.uv['override-dependencies'] = merged;
+  tree.write(rootPyprojectPath, stringify(toml as JsonMap));
+  return true;
 };
 
 export const addDependenciesToDependencyGroupInPyProjectToml = <
