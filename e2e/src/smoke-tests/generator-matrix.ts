@@ -215,11 +215,9 @@ export const runGeneratorMatrix = async (
     `generate @aws/nx-plugin:ts#agent --project=ts-project --name=my-ts-agui-agent --protocol=ag-ui --infra=agentcore --no-interactive${deferFlag}`,
     opts,
   );
-  // Guard the default agent, which has AgentCore infrastructure.
-  await runCLI(
-    `generate @aws/nx-plugin:ts#agent#guardrails --project=ts-project --agent=agent --no-interactive`,
-    opts,
-  );
+  // ts#agent#guardrails is left out: the deploy smoke tests do not add the
+  // guardrail to their stacks, and a guarded agent without it fails every
+  // request. The standalone smoke test covers the generator.
   await runCLI(
     `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-agui-agent --protocol=ag-ui --infra=agentcore --no-interactive${deferFlag}`,
     opts,
