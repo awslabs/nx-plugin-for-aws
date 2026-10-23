@@ -25,9 +25,17 @@ interface RunCliOpts {
  * Pass `{ preferInstallDependencies: true }` to install after every generator
  * instead — the idempotency test needs this so lockfiles (including `uv.lock`)
  * are fully synced before it snapshots the workspace.
+ *
+ * In the deferred mode the manifests deliberately run ahead of the lockfile
+ * between generators. pnpm 11.24.0 through 11.28.2 checks that before every
+ * `pnpm exec nx` and, under CI, tries a frozen install that fails with
+ * ERR_PNPM_OUTDATED_LOCKFILE; pnpm 11.28.5 and later only warn. Disable that
+ * check for this function's own commands until the failing range is no longer
+ * supported. The caller's `opts` is copied, never mutated: its later explicit
+ * install, sync and build keep pnpm's default verification.
  */
 export const runGeneratorMatrix = async (
-  opts: RunCliOpts,
+  callerOpts: RunCliOpts,
   {
     preferInstallDependencies = false,
   }: { preferInstallDependencies?: boolean } = {},
@@ -35,6 +43,12 @@ export const runGeneratorMatrix = async (
   const deferFlag = preferInstallDependencies
     ? ''
     : ' --prefer-install-dependencies=false';
+  const opts: RunCliOpts = preferInstallDependencies
+    ? callerOpts
+    : {
+        ...callerOpts,
+        env: { ...callerOpts.env, PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN: 'false' },
+      };
   // Websites (with and without TanStack Router), plus auth on each.
   await runCLI(
     `generate @aws/nx-plugin:ts#website --name=website --no-interactive${deferFlag}`,

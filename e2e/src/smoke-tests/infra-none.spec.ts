@@ -4,7 +4,7 @@
  */
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { ensureDirSync } from 'fs-extra';
-import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
+import { createTestWorkspace, runCLI, runInstall, tmpProjPath } from '../utils';
 
 describe('smoke test - infra-none', () => {
   const pkgMgr = 'pnpm';
@@ -92,6 +92,7 @@ describe('smoke test - infra-none', () => {
     );
 
     await runCLI(`sync --verbose`, opts);
+    await runInstall(opts);
     await runCLI(
       `run-many --target build --all --output-style=stream --verbose`,
       opts,
@@ -152,6 +153,7 @@ describe('smoke test - infra-none', () => {
     );
 
     await runCLI(`sync --verbose`, opts);
+    await runInstall(opts);
     await runCLI(
       `run-many --target build --all --output-style=stream --verbose`,
       opts,
