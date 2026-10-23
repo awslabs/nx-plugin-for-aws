@@ -19,8 +19,8 @@ Generator thêm một file chính sách chứa các quy tắc của bạn, code 
 
 - `guardrail.json` bên cạnh `agent.ts` của bạn chứa các quy tắc: các chủ đề mà agent của bạn phải từ chối và các loại dữ liệu cá nhân (PII, personally identifiable information) mà nó phải ẩn hoặc chặn.
 - CDK construct hoặc Terraform module của bạn đọc `guardrail.json` khi bạn synthesize hoặc plan. Nó tạo guardrail và một phiên bản được đánh số của nó. Phiên bản guardrail là một snapshot chỉ đọc của các quy tắc.
-- Cơ sở hạ tầng truyền ID và số phiên bản của guardrail cho agent của bạn trong các biến môi trường `GUARDRAIL_ID` và `GUARDRAIL_VERSION`.
-- `guardrail.ts` đọc các biến này và xây dựng Bedrock model với guardrail được áp dụng. Lệnh gọi `new Agent({...})` của bạn sử dụng model đó.
+- Cơ sở hạ tầng ghi ID và số phiên bản của guardrail vào <Link path="guides/runtime-config">runtime config</Link>, ứng dụng AWS AppConfig nơi cơ sở hạ tầng của bạn lưu trữ các chi tiết của các tài nguyên đã triển khai. Entry là `agentcore.guardrails.<AgentClass>`, được đặt tên theo class của agent, ví dụ `agentcore.guardrails.MyAgent`. Mỗi agent được bảo vệ có entry riêng của nó.
+- `guardrail.ts` xây dựng Bedrock model mà lệnh gọi `new Agent({...})` của bạn sử dụng. Trước mỗi lệnh gọi model, model đọc entry của agent từ runtime config và áp dụng guardrail đó.
 
 ## Cách sử dụng
 
@@ -76,23 +76,17 @@ Generator chỉnh sửa `agent.ts` như sau:
 
 Chạy generator lại trên cùng một agent sẽ không thay đổi file nào, và nó giữ nguyên các chỉnh sửa của bạn đối với `guardrail.json`.
 
-Nếu agent của bạn được tạo với `infra: none`, generator chỉ thêm các file agent và in ra một cảnh báo. Sau đó bạn tự tạo guardrail và đặt `GUARDRAIL_ID` và `GUARDRAIL_VERSION` cho agent.
+Nếu agent của bạn được tạo với `infra: none`, generator chỉ thêm các file agent và in ra một cảnh báo. Sau đó bạn tự tạo guardrail và ghi ID và phiên bản của nó vào runtime config tại `agentcore.guardrails.<AgentClass>` dưới dạng `{ guardrailId, guardrailVersion }`.
 
 ### Agent đã đặt model
 
-Nếu lệnh gọi `new Agent({...})` của bạn đã đặt `model`, generator sẽ để `agent.ts` không thay đổi. Nó in ra tên file và các dòng cần thêm. Thay vào đó, hãy thêm guardrail vào các tùy chọn model của riêng bạn, ví dụ:
+Nếu lệnh gọi `new Agent({...})` của bạn đã đặt `model`, generator sẽ để `agent.ts` không thay đổi. Nó in ra tên file và các dòng cần thêm. Để giữ các tùy chọn model của riêng bạn, hãy tạo model của bạn với class `GuardrailedBedrockModel` từ `guardrail.ts`. Nó nhận các tùy chọn giống như `BedrockModel`, ví dụ:
 
 ```ts title="agent.ts"
-import { BedrockModel } from '@strands-agents/sdk';
+import { GuardrailedBedrockModel } from './guardrail.js';
 
 const agent = new Agent({
-  model: new BedrockModel({
-    modelId: 'my-model-id',
-    guardrailConfig: {
-      guardrailIdentifier: process.env.GUARDRAIL_ID!,
-      guardrailVersion: process.env.GUARDRAIL_VERSION!,
-    },
-  }),
+  model: new GuardrailedBedrockModel({ modelId: 'my-model-id' }),
   // ...
 });
 ```
@@ -142,39 +136,38 @@ Viết một `definition` chủ đề mô tả chính chủ đề đó. Ví dụ
 
 ### Tại sao phiên bản được đánh số
 
-Mỗi lần bạn thay đổi `guardrail.json` và triển khai, cơ sở hạ tầng tạo một phiên bản guardrail được đánh số mới, và agent của bạn chuyển sang nó trong cùng một lần triển khai. Mô tả của phiên bản chứa hash SHA-256 của `guardrail.json`, vì vậy một thay đổi đối với file sẽ thay đổi mô tả, và một phiên bản mới thay thế phiên bản cũ. Với CDK construct, hash cũng bao gồm bất kỳ `props` nào bạn truyền.
+Mỗi lần bạn thay đổi `guardrail.json` và triển khai, cơ sở hạ tầng tạo một phiên bản guardrail được đánh số mới và ghi nó vào runtime config. Mô tả của phiên bản chứa hash SHA-256 của `guardrail.json`, vì vậy một thay đổi đối với file sẽ thay đổi mô tả, và một phiên bản mới thay thế phiên bản cũ. Với CDK construct, hash cũng bao gồm bất kỳ thuộc tính guardrail nào bạn truyền.
 
-Agent của bạn không bao giờ sử dụng phiên bản `DRAFT`. `DRAFT` luôn chứa các quy tắc mới nhất, vì vậy một chỉnh sửa được thực hiện trong AWS console sẽ đến agent đang chạy của bạn mà không cần triển khai. `guardrail.ts` ném ra một lỗi nếu `GUARDRAIL_VERSION` không phải là một số phiên bản.
+Agent đang chạy của bạn không cần khởi động lại. Nó cache những gì nó đọc từ runtime config trong 5 giây, vì vậy nó sử dụng phiên bản mới trong vòng 5 giây sau khi triển khai AppConfig. Phiên bản cũ bị xóa sau khi triển khai AppConfig: CloudFormation xóa nó trong bước cleanup của nó, và Terraform xóa nó sau deployment module khi bạn thêm guardrail module vào `depends_on` của module đó, như được hiển thị trong [Kết nối guardrail với agent của bạn](#kết-nối-guardrail-với-agent-của-bạn).
+
+Agent của bạn không bao giờ sử dụng phiên bản `DRAFT`. `DRAFT` luôn chứa các quy tắc mới nhất, vì vậy một chỉnh sửa được thực hiện trong AWS console sẽ đến agent đang chạy của bạn mà không cần triển khai. `guardrail.ts` ném ra một lỗi nếu phiên bản trong runtime config không phải là một số phiên bản.
 
 ## Kết nối guardrail với agent của bạn
 
-Generator không thay đổi stack của bạn hoặc root Terraform module của bạn, theo cách tương tự như generator `ts#agent` để việc triển khai agent cho bạn. Khi nó hoàn thành, nó in ra code bên dưới với các tên agent của bạn được điền vào. Thêm nó để truyền các biến môi trường của guardrail cho agent của bạn và cho phép agent áp dụng guardrail:
+Generator không thay đổi stack của bạn hoặc root Terraform module của bạn, theo cách tương tự như generator `ts#agent` để việc triển khai agent cho bạn. Khi nó hoàn thành, nó in ra code bên dưới với các tên agent của bạn được điền vào. Thêm nó để tạo guardrail, ghi entry runtime-config của nó và cho phép agent áp dụng guardrail:
 
 <Infrastructure>
   <Fragment slot="cdk">
 ```ts title="packages/infra/src/stacks/application-stack.ts"
 import { MyAgent, MyAgentGuardrail } from '@my-scope/common-constructs';
 
-const guardrail = new MyAgentGuardrail(this, 'MyAgentGuardrail');
-const agent = new MyAgent(this, 'MyAgent', {
-  environmentVariables: guardrail.environmentVariables,
-});
-guardrail.grantApply(agent);
+const agent = new MyAgent(this, 'MyAgent');
+new MyAgentGuardrail(this, 'MyAgentGuardrail', { agent });
 ```
 
-Nếu agent của bạn đã có các biến môi trường, hãy spread cả hai: `environmentVariables: { ...guardrail.environmentVariables, MY_SETTING: 'value' }`.
+Construct ghi ID và phiên bản của guardrail vào runtime config tại `agentcore.guardrails.MyAgent`, và cấp quyền cho `agent` để áp dụng guardrail. Agent construct đã cho phép agent đọc runtime config.
 
 Construct expose:
 
 - `guardrail` (`CfnGuardrail`) và `version` (`CfnGuardrailVersion`)
 - `guardrailId`, `guardrailArn` và `guardrailVersion`
-- `environmentVariables`, trả về `{ GUARDRAIL_ID, GUARDRAIL_VERSION }`
-- `grantApply(grantee)`, cấp quyền `bedrock:ApplyGuardrail` trên guardrail
+- `grantApply(grantee)`, cấp quyền `bedrock:ApplyGuardrail` trên guardrail cho một principal khác
 
-Nó cũng thêm các stack output `GuardrailId` và `GuardrailVersion`. Props của nó là bất kỳ thuộc tính `CfnGuardrail` nào, và chúng được ưu tiên hơn `guardrail.json`. Ví dụ, thêm content filter:
+Nó cũng thêm các stack output `GuardrailId` và `GuardrailVersion`. Props của nó là `agent` và bất kỳ thuộc tính `CfnGuardrail` nào. Các thuộc tính `CfnGuardrail` được ưu tiên hơn `guardrail.json`. Ví dụ, thêm content filter:
 
 ```ts
 new MyAgentGuardrail(this, 'MyAgentGuardrail', {
+  agent,
   contentPolicyConfig: {
     filtersConfig: [
       { type: 'HATE', inputStrength: 'HIGH', outputStrength: 'HIGH' },
@@ -184,7 +177,7 @@ new MyAgentGuardrail(this, 'MyAgentGuardrail', {
 ```
   </Fragment>
   <Fragment slot="terraform">
-Thêm module `my_agent_guardrail` như được hiển thị. Thêm các dòng `env` và `additional_iam_policy_statements` của nó vào block module `my_agent` hiện có của bạn, trong root module nơi bạn triển khai agent của mình. Nếu root module của bạn chưa triển khai agent, hãy thêm module của agent trước, như được mô tả trong <Link path="guides/ts-agent#infrastructure-as-code">hướng dẫn TypeScript Agent</Link>.
+Thêm module `my_agent_guardrail` như được hiển thị, trong root module nơi bạn triển khai agent của mình. Thêm dòng `additional_iam_policy_statements` của nó vào block module `my_agent` hiện có của bạn. Thêm `module.my_agent_guardrail` vào danh sách `depends_on` của module `runtime_config_appconfig_deployment` của bạn, để triển khai bao gồm entry runtime-config của guardrail và Terraform chỉ xóa phiên bản guardrail cũ sau khi triển khai. Nếu root module của bạn chưa triển khai agent, hãy thêm module của agent trước, như được mô tả trong <Link path="guides/ts-agent#infrastructure-as-code">hướng dẫn TypeScript Agent</Link>.
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_agent_guardrail" {
@@ -194,39 +187,55 @@ module "my_agent_guardrail" {
 module "my_agent" {
   source = "../../common/terraform/src/app/agents/my-agent"
   # ...existing arguments...
-  env                              = module.my_agent_guardrail.env
   additional_iam_policy_statements = module.my_agent_guardrail.iam_policy_statements
+}
+
+module "runtime_config_appconfig_deployment" {
+  # ...existing arguments...
+  depends_on = [
+    # ...existing modules...
+    module.my_agent_guardrail,
+  ]
 }
 ```
 
-Nếu module agent của bạn đã đặt các đối số này, hãy kết hợp chúng:
+Nếu module agent của bạn đã đặt `additional_iam_policy_statements`, hãy kết hợp các danh sách:
 
 ```hcl
-  env                              = merge(module.my_agent_guardrail.env, { MY_SETTING = "value" })
   additional_iam_policy_statements = concat(module.my_agent_guardrail.iam_policy_statements, local.my_statements)
 ```
 
-Module nhận một biến `tags` và output `guardrail_id`, `guardrail_arn`, `guardrail_version`, `env` và `iam_policy_statements`. Để thêm các chính sách guardrail khác, chẳng hạn như content filter, hãy chỉnh sửa resource `aws_bedrock_guardrail` trong module.
+Module ghi ID và phiên bản của guardrail vào runtime config tại `agentcore.guardrails.MyAgent`. Namespace `agentcore` nằm trong `namespaces` mặc định của các runtime-config module, vì vậy bạn không cần thêm nó. Agent module đã cho phép agent đọc runtime config.
+
+Module nhận một biến `tags` và output `guardrail_id`, `guardrail_arn`, `guardrail_version` và `iam_policy_statements`. Để thêm các chính sách guardrail khác, chẳng hạn như content filter, hãy chỉnh sửa resource `aws_bedrock_guardrail` trong module.
 
 Module đặt `create_before_destroy` trên phiên bản guardrail, vì vậy Terraform tạo phiên bản mới trước khi xóa phiên bản cũ.
   </Fragment>
 </Infrastructure>
 
-### Biến môi trường bị thiếu
+### Entry runtime-config bị thiếu
 
-Nếu bạn quên kết nối, `getGuardrailedModel()` ném ra `GUARDRAIL_ID is not set` (hoặc `GUARDRAIL_VERSION is not set`), vì vậy agent không chạy mà không có guardrail của nó. Một agent với giao thức `http` hoặc `a2a` tạo `Agent` của nó khi một request đến, vì vậy mọi request đều thất bại với lỗi này. Một agent với giao thức `ag-ui` tạo `Agent` của nó khi khởi động, vì vậy agent không khởi động được.
+Nếu bạn quên kết nối, runtime config không có entry cho agent của bạn. Model sau đó ném ra một lỗi trước khi nó gọi Bedrock, vì vậy agent không chạy mà không có guardrail của nó. Đối với `MyAgent`, lỗi là:
+
+```
+No guardrail for this agent in runtime config at agentcore.guardrails.MyAgent. Add the MyAgentGuardrail construct (CDK) or the guardrails/my-agent module (Terraform) to your infrastructure.
+```
+
+Agent khởi động với mọi giao thức (`http`, `a2a` và `ag-ui`), và mỗi request thất bại với lỗi này.
 
 ## Phát triển cục bộ
 
-Target `<agent>-dev` đặt `LOCAL_DEV=true`. Khi `LOCAL_DEV` là `true` và một trong hai biến không được đặt, `guardrail.ts` in ra một cảnh báo một lần và agent chạy mà không có guardrail:
+Target `<agent>-dev` đặt `LOCAL_DEV=true`. Khi `LOCAL_DEV` là `true` và biến môi trường `RUNTIME_CONFIG_APP_ID` không được đặt, `guardrail.ts` không đọc runtime config. Nó in ra một cảnh báo một lần và agent chạy mà không có guardrail:
 
 <NxCommands commands={['agent-dev your-project']} />
 
-Để kiểm tra các quy tắc của bạn cục bộ, hãy triển khai guardrail trước. Sau đó truyền các giá trị từ các stack output `GuardrailId` và `GuardrailVersion` (CDK) hoặc các module output (Terraform):
+Để kiểm tra các quy tắc của bạn cục bộ, hãy triển khai guardrail trước. Sau đó đặt `RUNTIME_CONFIG_APP_ID` thành ID của ứng dụng runtime-config đã triển khai của bạn, từ stack output `RuntimeConfigApplicationId` (CDK) hoặc `module.runtime_config_appconfig.application_id` (Terraform). Shell của bạn cũng cần thông tin xác thực AWS có thể đọc AppConfig và áp dụng guardrail:
 
-<NxCommands commands={['agent-dev your-project']} env={{ GUARDRAIL_ID: '<guardrail-id>', GUARDRAIL_VERSION: '<version>' }} />
+<NxCommands commands={['agent-dev your-project']} env={{ RUNTIME_CONFIG_APP_ID: '<application-id>' }} />
 
-Target `<agent>-serve` không đặt `LOCAL_DEV`, vì vậy nó cần cả hai biến, nếu không agent sẽ thất bại như mô tả ở trên. Target `<agent>-chat` kết nối với một agent đang chạy và không cần các biến guardrail.
+Agent sau đó chỉ đọc entry của chính nó, vì vậy nhiều agent được bảo vệ có thể chạy cục bộ với cùng một ứng dụng. Nếu agent không thể đọc runtime config, hoặc entry bị thiếu, nó in ra cảnh báo một lần và chạy mà không có guardrail.
+
+Target `<agent>-serve` không đặt `LOCAL_DEV`, vì vậy nó cần `RUNTIME_CONFIG_APP_ID` và entry đã triển khai, nếu không mỗi request thất bại như mô tả ở trên. Target `<agent>-chat` kết nối với một agent đang chạy và không cần runtime config.
 
 ## Chi phí và độ trễ
 

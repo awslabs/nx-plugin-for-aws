@@ -50,6 +50,7 @@ import { CfnOutput, Names, Stack } from 'aws-cdk-lib';
 import * as bedrock from 'aws-cdk-lib/aws-bedrock';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
+import { RuntimeConfig } from '../../../core/runtime-config.js';
 import { findWorkspaceRoot } from '../../../core/workspace.js';
 
 interface GuardrailPolicy {
@@ -73,11 +74,16 @@ const policy: GuardrailPolicy = JSON.parse(policyFile.toString('utf-8'));
  * Properties for the TestProjectAgentGuardrail. Any CfnGuardrail property
  * supplied here takes precedence over guardrail.json.
  */
-export type TestProjectAgentGuardrailProps = Partial<bedrock.CfnGuardrailProps>;
+export type TestProjectAgentGuardrailProps =
+  Partial<bedrock.CfnGuardrailProps> & {
+    /** The agent that applies this guardrail. It is granted bedrock:ApplyGuardrail. */
+    readonly agent: iam.IGrantable;
+  };
 
 /**
  * An Amazon Bedrock Guardrail for TestProjectAgent, with a numbered version
- * that changes whenever its rules change.
+ * that changes whenever its rules change. Its ID and version are written to
+ * runtime config, where the agent reads them.
  */
 export class TestProjectAgentGuardrail extends Construct {
   public readonly guardrail: bedrock.CfnGuardrail;
@@ -89,9 +95,11 @@ export class TestProjectAgentGuardrail extends Construct {
   constructor(
     scope: Construct,
     id: string,
-    props?: TestProjectAgentGuardrailProps,
+    props: TestProjectAgentGuardrailProps,
   ) {
     super(scope, id);
+
+    const { agent, ...overrides } = props;
 
     const deniedTopics = policy.deniedTopics ?? [];
     const piiEntities = policy.piiEntities ?? [];
@@ -122,12 +130,12 @@ export class TestProjectAgentGuardrail extends Construct {
           })),
         },
       }),
-      ...props,
+      ...overrides,
     });
 
     const hash = createHash('sha256').update(policyFile);
-    if (props && Object.keys(props).length > 0) {
-      hash.update(JSON.stringify(Stack.of(this).resolve(props)));
+    if (Object.keys(overrides).length > 0) {
+      hash.update(JSON.stringify(Stack.of(this).resolve(overrides)));
     }
 
     this.version = new bedrock.CfnGuardrailVersion(this, 'Version', {
@@ -141,14 +149,17 @@ export class TestProjectAgentGuardrail extends Construct {
 
     new CfnOutput(this, 'GuardrailId', { value: this.guardrailId });
     new CfnOutput(this, 'GuardrailVersion', { value: this.guardrailVersion });
-  }
 
-  /** The environment variables the agent reads its guardrail from. */
-  public get environmentVariables(): Record<string, string> {
-    return {
-      GUARDRAIL_ID: this.guardrailId,
-      GUARDRAIL_VERSION: this.guardrailVersion,
-    };
+    const rc = RuntimeConfig.ensure(this);
+    rc.set('agentcore', 'guardrails', {
+      ...rc.get('agentcore').guardrails,
+      TestProjectAgent: {
+        guardrailId: this.guardrailId,
+        guardrailVersion: this.guardrailVersion,
+      },
+    });
+
+    this.grantApply(agent);
   }
 
   /** Grant permission to apply this guardrail. */
@@ -184,47 +195,92 @@ exports[`ts#agent#guardrails generator > protocol a2a > should generate the guar
 `;
 
 exports[`ts#agent#guardrails generator > protocol a2a > should generate the guardrail with cdk > guardrail.ts 1`] = `
-"import { BedrockModel } from '@strands-agents/sdk';
+"import { BedrockModel, type BedrockGuardrailConfig } from '@strands-agents/sdk';
+import {
+  type AgentCoreRuntimeConfig,
+  getAgentCoreRuntimeConfig,
+} from '@proj/agent-connection';
+
+/**
+ * This agent's entry in runtime config, written by the
+ * TestProjectAgentGuardrail construct or the test-project-agent guardrail module.
+ */
+interface GuardrailEntry {
+  guardrailId?: string;
+  guardrailVersion?: string;
+}
+
+const RUNTIME_CONFIG_KEY = 'agentcore.guardrails.TestProjectAgent';
 
 let warnedUnguarded = false;
 
-/**
- * The Bedrock model with the guardrail named by GUARDRAIL_ID and GUARDRAIL_VERSION applied.
- */
-export const getGuardrailedModel = (): BedrockModel => {
-  const guardrailIdentifier = process.env.GUARDRAIL_ID;
-  const guardrailVersion = process.env.GUARDRAIL_VERSION;
+const readEntry = async (): Promise<GuardrailEntry | undefined> => {
+  const config: AgentCoreRuntimeConfig & {
+    guardrails?: Record<string, GuardrailEntry>;
+  } = await getAgentCoreRuntimeConfig();
+  return config.guardrails?.['TestProjectAgent'];
+};
 
-  if (!guardrailIdentifier || !guardrailVersion) {
-    const missing = guardrailIdentifier ? 'GUARDRAIL_VERSION' : 'GUARDRAIL_ID';
-    if (process.env.LOCAL_DEV !== 'true') {
+/**
+ * The guardrail to apply, read from runtime config on every model call
+ * (cached for 5 seconds).
+ */
+const resolveGuardrail = async (): Promise<
+  BedrockGuardrailConfig | undefined
+> => {
+  const localDev = process.env.LOCAL_DEV === 'true';
+  let entry: GuardrailEntry | undefined;
+  if (!localDev) {
+    entry = await readEntry();
+  } else if (process.env.RUNTIME_CONFIG_APP_ID) {
+    entry = await readEntry().catch(() => undefined);
+  }
+
+  if (!entry?.guardrailId || !entry.guardrailVersion) {
+    if (!localDev) {
       throw new Error(
-        \`\${missing} is not set. Pass the guardrail's GUARDRAIL_ID and GUARDRAIL_VERSION environment variables to the agent.\`,
+        \`No guardrail for this agent in runtime config at \${RUNTIME_CONFIG_KEY}. Add the TestProjectAgentGuardrail construct (CDK) or the guardrails/test-project-agent module (Terraform) to your infrastructure.\`,
       );
     }
     if (!warnedUnguarded) {
       warnedUnguarded = true;
       console.warn(
-        \`\${missing} is not set, so the agent is running without a guardrail (LOCAL_DEV=true).\`,
+        \`No guardrail for this agent in runtime config at \${RUNTIME_CONFIG_KEY}, so the agent is running without a guardrail (LOCAL_DEV=true).\`,
       );
     }
-    return new BedrockModel();
+    return undefined;
   }
 
-  if (!/^[1-9][0-9]*$/.test(guardrailVersion)) {
+  if (!/^[1-9][0-9]*$/.test(entry.guardrailVersion)) {
     throw new Error(
-      \`GUARDRAIL_VERSION must be a numbered guardrail version, but is \${guardrailVersion}.\`,
+      \`The guardrail version in runtime config at \${RUNTIME_CONFIG_KEY} must be a numbered guardrail version, but is \${entry.guardrailVersion}.\`,
     );
   }
 
-  return new BedrockModel({
-    guardrailConfig: {
-      guardrailIdentifier,
-      guardrailVersion,
-      trace: 'enabled',
-    },
-  });
+  return {
+    guardrailIdentifier: entry.guardrailId,
+    guardrailVersion: entry.guardrailVersion,
+    trace: 'enabled',
+  };
 };
+
+/**
+ * A Bedrock model that applies this agent's guardrail from runtime config
+ * before each model call, so a new guardrail version applies without a
+ * restart.
+ */
+export class GuardrailedBedrockModel extends BedrockModel {
+  override async *stream(...args: Parameters<BedrockModel['stream']>) {
+    this.updateConfig({ guardrailConfig: await resolveGuardrail() });
+    return yield* super.stream(...args);
+  }
+}
+
+/**
+ * The Bedrock model with this agent's guardrail applied.
+ */
+export const getGuardrailedModel = (): BedrockModel =>
+  new GuardrailedBedrockModel();
 "
 `;
 
@@ -289,47 +345,92 @@ exports[`ts#agent#guardrails generator > protocol a2a > should generate the guar
 `;
 
 exports[`ts#agent#guardrails generator > protocol a2a > should generate the guardrail with terraform > guardrail.ts 1`] = `
-"import { BedrockModel } from '@strands-agents/sdk';
+"import { BedrockModel, type BedrockGuardrailConfig } from '@strands-agents/sdk';
+import {
+  type AgentCoreRuntimeConfig,
+  getAgentCoreRuntimeConfig,
+} from '@proj/agent-connection';
+
+/**
+ * This agent's entry in runtime config, written by the
+ * TestProjectAgentGuardrail construct or the test-project-agent guardrail module.
+ */
+interface GuardrailEntry {
+  guardrailId?: string;
+  guardrailVersion?: string;
+}
+
+const RUNTIME_CONFIG_KEY = 'agentcore.guardrails.TestProjectAgent';
 
 let warnedUnguarded = false;
 
-/**
- * The Bedrock model with the guardrail named by GUARDRAIL_ID and GUARDRAIL_VERSION applied.
- */
-export const getGuardrailedModel = (): BedrockModel => {
-  const guardrailIdentifier = process.env.GUARDRAIL_ID;
-  const guardrailVersion = process.env.GUARDRAIL_VERSION;
+const readEntry = async (): Promise<GuardrailEntry | undefined> => {
+  const config: AgentCoreRuntimeConfig & {
+    guardrails?: Record<string, GuardrailEntry>;
+  } = await getAgentCoreRuntimeConfig();
+  return config.guardrails?.['TestProjectAgent'];
+};
 
-  if (!guardrailIdentifier || !guardrailVersion) {
-    const missing = guardrailIdentifier ? 'GUARDRAIL_VERSION' : 'GUARDRAIL_ID';
-    if (process.env.LOCAL_DEV !== 'true') {
+/**
+ * The guardrail to apply, read from runtime config on every model call
+ * (cached for 5 seconds).
+ */
+const resolveGuardrail = async (): Promise<
+  BedrockGuardrailConfig | undefined
+> => {
+  const localDev = process.env.LOCAL_DEV === 'true';
+  let entry: GuardrailEntry | undefined;
+  if (!localDev) {
+    entry = await readEntry();
+  } else if (process.env.RUNTIME_CONFIG_APP_ID) {
+    entry = await readEntry().catch(() => undefined);
+  }
+
+  if (!entry?.guardrailId || !entry.guardrailVersion) {
+    if (!localDev) {
       throw new Error(
-        \`\${missing} is not set. Pass the guardrail's GUARDRAIL_ID and GUARDRAIL_VERSION environment variables to the agent.\`,
+        \`No guardrail for this agent in runtime config at \${RUNTIME_CONFIG_KEY}. Add the TestProjectAgentGuardrail construct (CDK) or the guardrails/test-project-agent module (Terraform) to your infrastructure.\`,
       );
     }
     if (!warnedUnguarded) {
       warnedUnguarded = true;
       console.warn(
-        \`\${missing} is not set, so the agent is running without a guardrail (LOCAL_DEV=true).\`,
+        \`No guardrail for this agent in runtime config at \${RUNTIME_CONFIG_KEY}, so the agent is running without a guardrail (LOCAL_DEV=true).\`,
       );
     }
-    return new BedrockModel();
+    return undefined;
   }
 
-  if (!/^[1-9][0-9]*$/.test(guardrailVersion)) {
+  if (!/^[1-9][0-9]*$/.test(entry.guardrailVersion)) {
     throw new Error(
-      \`GUARDRAIL_VERSION must be a numbered guardrail version, but is \${guardrailVersion}.\`,
+      \`The guardrail version in runtime config at \${RUNTIME_CONFIG_KEY} must be a numbered guardrail version, but is \${entry.guardrailVersion}.\`,
     );
   }
 
-  return new BedrockModel({
-    guardrailConfig: {
-      guardrailIdentifier,
-      guardrailVersion,
-      trace: 'enabled',
-    },
-  });
+  return {
+    guardrailIdentifier: entry.guardrailId,
+    guardrailVersion: entry.guardrailVersion,
+    trace: 'enabled',
+  };
 };
+
+/**
+ * A Bedrock model that applies this agent's guardrail from runtime config
+ * before each model call, so a new guardrail version applies without a
+ * restart.
+ */
+export class GuardrailedBedrockModel extends BedrockModel {
+  override async *stream(...args: Parameters<BedrockModel['stream']>) {
+    this.updateConfig({ guardrailConfig: await resolveGuardrail() });
+    return yield* super.stream(...args);
+  }
+}
+
+/**
+ * The Bedrock model with this agent's guardrail applied.
+ */
+export const getGuardrailedModel = (): BedrockModel =>
+  new GuardrailedBedrockModel();
 "
 `;
 
@@ -408,6 +509,14 @@ resource "aws_bedrock_guardrail_version" "this" {
   }
 }
 
+module "add_guardrail_to_runtime_config" {
+  source = "../../../core/runtime-config/entry"
+
+  namespace = "agentcore"
+  key       = "guardrails"
+  value     = { "TestProjectAgent" = { guardrailId = aws_bedrock_guardrail.this.guardrail_id, guardrailVersion = aws_bedrock_guardrail_version.this.version } }
+}
+
 output "guardrail_id" {
   description = "ID of the guardrail"
   value       = aws_bedrock_guardrail.this.guardrail_id
@@ -423,14 +532,6 @@ output "guardrail_version" {
   value       = aws_bedrock_guardrail_version.this.version
 }
 
-output "env" {
-  description = "Environment variables the agent reads its guardrail from"
-  value = {
-    GUARDRAIL_ID      = aws_bedrock_guardrail.this.guardrail_id
-    GUARDRAIL_VERSION = aws_bedrock_guardrail_version.this.version
-  }
-}
-
 output "iam_policy_statements" {
   description = "IAM policy statements that allow the agent to apply the guardrail"
   value = [
@@ -440,6 +541,7 @@ output "iam_policy_statements" {
       Resource = [aws_bedrock_guardrail.this.guardrail_arn]
     }
   ]
+  depends_on = [module.add_guardrail_to_runtime_config]
 }
 "
 `;
@@ -487,6 +589,7 @@ import { CfnOutput, Names, Stack } from 'aws-cdk-lib';
 import * as bedrock from 'aws-cdk-lib/aws-bedrock';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
+import { RuntimeConfig } from '../../../core/runtime-config.js';
 import { findWorkspaceRoot } from '../../../core/workspace.js';
 
 interface GuardrailPolicy {
@@ -510,11 +613,16 @@ const policy: GuardrailPolicy = JSON.parse(policyFile.toString('utf-8'));
  * Properties for the TestProjectAgentGuardrail. Any CfnGuardrail property
  * supplied here takes precedence over guardrail.json.
  */
-export type TestProjectAgentGuardrailProps = Partial<bedrock.CfnGuardrailProps>;
+export type TestProjectAgentGuardrailProps =
+  Partial<bedrock.CfnGuardrailProps> & {
+    /** The agent that applies this guardrail. It is granted bedrock:ApplyGuardrail. */
+    readonly agent: iam.IGrantable;
+  };
 
 /**
  * An Amazon Bedrock Guardrail for TestProjectAgent, with a numbered version
- * that changes whenever its rules change.
+ * that changes whenever its rules change. Its ID and version are written to
+ * runtime config, where the agent reads them.
  */
 export class TestProjectAgentGuardrail extends Construct {
   public readonly guardrail: bedrock.CfnGuardrail;
@@ -526,9 +634,11 @@ export class TestProjectAgentGuardrail extends Construct {
   constructor(
     scope: Construct,
     id: string,
-    props?: TestProjectAgentGuardrailProps,
+    props: TestProjectAgentGuardrailProps,
   ) {
     super(scope, id);
+
+    const { agent, ...overrides } = props;
 
     const deniedTopics = policy.deniedTopics ?? [];
     const piiEntities = policy.piiEntities ?? [];
@@ -559,12 +669,12 @@ export class TestProjectAgentGuardrail extends Construct {
           })),
         },
       }),
-      ...props,
+      ...overrides,
     });
 
     const hash = createHash('sha256').update(policyFile);
-    if (props && Object.keys(props).length > 0) {
-      hash.update(JSON.stringify(Stack.of(this).resolve(props)));
+    if (Object.keys(overrides).length > 0) {
+      hash.update(JSON.stringify(Stack.of(this).resolve(overrides)));
     }
 
     this.version = new bedrock.CfnGuardrailVersion(this, 'Version', {
@@ -578,14 +688,17 @@ export class TestProjectAgentGuardrail extends Construct {
 
     new CfnOutput(this, 'GuardrailId', { value: this.guardrailId });
     new CfnOutput(this, 'GuardrailVersion', { value: this.guardrailVersion });
-  }
 
-  /** The environment variables the agent reads its guardrail from. */
-  public get environmentVariables(): Record<string, string> {
-    return {
-      GUARDRAIL_ID: this.guardrailId,
-      GUARDRAIL_VERSION: this.guardrailVersion,
-    };
+    const rc = RuntimeConfig.ensure(this);
+    rc.set('agentcore', 'guardrails', {
+      ...rc.get('agentcore').guardrails,
+      TestProjectAgent: {
+        guardrailId: this.guardrailId,
+        guardrailVersion: this.guardrailVersion,
+      },
+    });
+
+    this.grantApply(agent);
   }
 
   /** Grant permission to apply this guardrail. */
@@ -621,47 +734,92 @@ exports[`ts#agent#guardrails generator > protocol ag-ui > should generate the gu
 `;
 
 exports[`ts#agent#guardrails generator > protocol ag-ui > should generate the guardrail with cdk > guardrail.ts 1`] = `
-"import { BedrockModel } from '@strands-agents/sdk';
+"import { BedrockModel, type BedrockGuardrailConfig } from '@strands-agents/sdk';
+import {
+  type AgentCoreRuntimeConfig,
+  getAgentCoreRuntimeConfig,
+} from '@proj/agent-connection';
+
+/**
+ * This agent's entry in runtime config, written by the
+ * TestProjectAgentGuardrail construct or the test-project-agent guardrail module.
+ */
+interface GuardrailEntry {
+  guardrailId?: string;
+  guardrailVersion?: string;
+}
+
+const RUNTIME_CONFIG_KEY = 'agentcore.guardrails.TestProjectAgent';
 
 let warnedUnguarded = false;
 
-/**
- * The Bedrock model with the guardrail named by GUARDRAIL_ID and GUARDRAIL_VERSION applied.
- */
-export const getGuardrailedModel = (): BedrockModel => {
-  const guardrailIdentifier = process.env.GUARDRAIL_ID;
-  const guardrailVersion = process.env.GUARDRAIL_VERSION;
+const readEntry = async (): Promise<GuardrailEntry | undefined> => {
+  const config: AgentCoreRuntimeConfig & {
+    guardrails?: Record<string, GuardrailEntry>;
+  } = await getAgentCoreRuntimeConfig();
+  return config.guardrails?.['TestProjectAgent'];
+};
 
-  if (!guardrailIdentifier || !guardrailVersion) {
-    const missing = guardrailIdentifier ? 'GUARDRAIL_VERSION' : 'GUARDRAIL_ID';
-    if (process.env.LOCAL_DEV !== 'true') {
+/**
+ * The guardrail to apply, read from runtime config on every model call
+ * (cached for 5 seconds).
+ */
+const resolveGuardrail = async (): Promise<
+  BedrockGuardrailConfig | undefined
+> => {
+  const localDev = process.env.LOCAL_DEV === 'true';
+  let entry: GuardrailEntry | undefined;
+  if (!localDev) {
+    entry = await readEntry();
+  } else if (process.env.RUNTIME_CONFIG_APP_ID) {
+    entry = await readEntry().catch(() => undefined);
+  }
+
+  if (!entry?.guardrailId || !entry.guardrailVersion) {
+    if (!localDev) {
       throw new Error(
-        \`\${missing} is not set. Pass the guardrail's GUARDRAIL_ID and GUARDRAIL_VERSION environment variables to the agent.\`,
+        \`No guardrail for this agent in runtime config at \${RUNTIME_CONFIG_KEY}. Add the TestProjectAgentGuardrail construct (CDK) or the guardrails/test-project-agent module (Terraform) to your infrastructure.\`,
       );
     }
     if (!warnedUnguarded) {
       warnedUnguarded = true;
       console.warn(
-        \`\${missing} is not set, so the agent is running without a guardrail (LOCAL_DEV=true).\`,
+        \`No guardrail for this agent in runtime config at \${RUNTIME_CONFIG_KEY}, so the agent is running without a guardrail (LOCAL_DEV=true).\`,
       );
     }
-    return new BedrockModel();
+    return undefined;
   }
 
-  if (!/^[1-9][0-9]*$/.test(guardrailVersion)) {
+  if (!/^[1-9][0-9]*$/.test(entry.guardrailVersion)) {
     throw new Error(
-      \`GUARDRAIL_VERSION must be a numbered guardrail version, but is \${guardrailVersion}.\`,
+      \`The guardrail version in runtime config at \${RUNTIME_CONFIG_KEY} must be a numbered guardrail version, but is \${entry.guardrailVersion}.\`,
     );
   }
 
-  return new BedrockModel({
-    guardrailConfig: {
-      guardrailIdentifier,
-      guardrailVersion,
-      trace: 'enabled',
-    },
-  });
+  return {
+    guardrailIdentifier: entry.guardrailId,
+    guardrailVersion: entry.guardrailVersion,
+    trace: 'enabled',
+  };
 };
+
+/**
+ * A Bedrock model that applies this agent's guardrail from runtime config
+ * before each model call, so a new guardrail version applies without a
+ * restart.
+ */
+export class GuardrailedBedrockModel extends BedrockModel {
+  override async *stream(...args: Parameters<BedrockModel['stream']>) {
+    this.updateConfig({ guardrailConfig: await resolveGuardrail() });
+    return yield* super.stream(...args);
+  }
+}
+
+/**
+ * The Bedrock model with this agent's guardrail applied.
+ */
+export const getGuardrailedModel = (): BedrockModel =>
+  new GuardrailedBedrockModel();
 "
 `;
 
@@ -719,47 +877,92 @@ exports[`ts#agent#guardrails generator > protocol ag-ui > should generate the gu
 `;
 
 exports[`ts#agent#guardrails generator > protocol ag-ui > should generate the guardrail with terraform > guardrail.ts 1`] = `
-"import { BedrockModel } from '@strands-agents/sdk';
+"import { BedrockModel, type BedrockGuardrailConfig } from '@strands-agents/sdk';
+import {
+  type AgentCoreRuntimeConfig,
+  getAgentCoreRuntimeConfig,
+} from '@proj/agent-connection';
+
+/**
+ * This agent's entry in runtime config, written by the
+ * TestProjectAgentGuardrail construct or the test-project-agent guardrail module.
+ */
+interface GuardrailEntry {
+  guardrailId?: string;
+  guardrailVersion?: string;
+}
+
+const RUNTIME_CONFIG_KEY = 'agentcore.guardrails.TestProjectAgent';
 
 let warnedUnguarded = false;
 
-/**
- * The Bedrock model with the guardrail named by GUARDRAIL_ID and GUARDRAIL_VERSION applied.
- */
-export const getGuardrailedModel = (): BedrockModel => {
-  const guardrailIdentifier = process.env.GUARDRAIL_ID;
-  const guardrailVersion = process.env.GUARDRAIL_VERSION;
+const readEntry = async (): Promise<GuardrailEntry | undefined> => {
+  const config: AgentCoreRuntimeConfig & {
+    guardrails?: Record<string, GuardrailEntry>;
+  } = await getAgentCoreRuntimeConfig();
+  return config.guardrails?.['TestProjectAgent'];
+};
 
-  if (!guardrailIdentifier || !guardrailVersion) {
-    const missing = guardrailIdentifier ? 'GUARDRAIL_VERSION' : 'GUARDRAIL_ID';
-    if (process.env.LOCAL_DEV !== 'true') {
+/**
+ * The guardrail to apply, read from runtime config on every model call
+ * (cached for 5 seconds).
+ */
+const resolveGuardrail = async (): Promise<
+  BedrockGuardrailConfig | undefined
+> => {
+  const localDev = process.env.LOCAL_DEV === 'true';
+  let entry: GuardrailEntry | undefined;
+  if (!localDev) {
+    entry = await readEntry();
+  } else if (process.env.RUNTIME_CONFIG_APP_ID) {
+    entry = await readEntry().catch(() => undefined);
+  }
+
+  if (!entry?.guardrailId || !entry.guardrailVersion) {
+    if (!localDev) {
       throw new Error(
-        \`\${missing} is not set. Pass the guardrail's GUARDRAIL_ID and GUARDRAIL_VERSION environment variables to the agent.\`,
+        \`No guardrail for this agent in runtime config at \${RUNTIME_CONFIG_KEY}. Add the TestProjectAgentGuardrail construct (CDK) or the guardrails/test-project-agent module (Terraform) to your infrastructure.\`,
       );
     }
     if (!warnedUnguarded) {
       warnedUnguarded = true;
       console.warn(
-        \`\${missing} is not set, so the agent is running without a guardrail (LOCAL_DEV=true).\`,
+        \`No guardrail for this agent in runtime config at \${RUNTIME_CONFIG_KEY}, so the agent is running without a guardrail (LOCAL_DEV=true).\`,
       );
     }
-    return new BedrockModel();
+    return undefined;
   }
 
-  if (!/^[1-9][0-9]*$/.test(guardrailVersion)) {
+  if (!/^[1-9][0-9]*$/.test(entry.guardrailVersion)) {
     throw new Error(
-      \`GUARDRAIL_VERSION must be a numbered guardrail version, but is \${guardrailVersion}.\`,
+      \`The guardrail version in runtime config at \${RUNTIME_CONFIG_KEY} must be a numbered guardrail version, but is \${entry.guardrailVersion}.\`,
     );
   }
 
-  return new BedrockModel({
-    guardrailConfig: {
-      guardrailIdentifier,
-      guardrailVersion,
-      trace: 'enabled',
-    },
-  });
+  return {
+    guardrailIdentifier: entry.guardrailId,
+    guardrailVersion: entry.guardrailVersion,
+    trace: 'enabled',
+  };
 };
+
+/**
+ * A Bedrock model that applies this agent's guardrail from runtime config
+ * before each model call, so a new guardrail version applies without a
+ * restart.
+ */
+export class GuardrailedBedrockModel extends BedrockModel {
+  override async *stream(...args: Parameters<BedrockModel['stream']>) {
+    this.updateConfig({ guardrailConfig: await resolveGuardrail() });
+    return yield* super.stream(...args);
+  }
+}
+
+/**
+ * The Bedrock model with this agent's guardrail applied.
+ */
+export const getGuardrailedModel = (): BedrockModel =>
+  new GuardrailedBedrockModel();
 "
 `;
 
@@ -838,6 +1041,14 @@ resource "aws_bedrock_guardrail_version" "this" {
   }
 }
 
+module "add_guardrail_to_runtime_config" {
+  source = "../../../core/runtime-config/entry"
+
+  namespace = "agentcore"
+  key       = "guardrails"
+  value     = { "TestProjectAgent" = { guardrailId = aws_bedrock_guardrail.this.guardrail_id, guardrailVersion = aws_bedrock_guardrail_version.this.version } }
+}
+
 output "guardrail_id" {
   description = "ID of the guardrail"
   value       = aws_bedrock_guardrail.this.guardrail_id
@@ -853,14 +1064,6 @@ output "guardrail_version" {
   value       = aws_bedrock_guardrail_version.this.version
 }
 
-output "env" {
-  description = "Environment variables the agent reads its guardrail from"
-  value = {
-    GUARDRAIL_ID      = aws_bedrock_guardrail.this.guardrail_id
-    GUARDRAIL_VERSION = aws_bedrock_guardrail_version.this.version
-  }
-}
-
 output "iam_policy_statements" {
   description = "IAM policy statements that allow the agent to apply the guardrail"
   value = [
@@ -870,6 +1073,7 @@ output "iam_policy_statements" {
       Resource = [aws_bedrock_guardrail.this.guardrail_arn]
     }
   ]
+  depends_on = [module.add_guardrail_to_runtime_config]
 }
 "
 `;
@@ -924,6 +1128,7 @@ import { CfnOutput, Names, Stack } from 'aws-cdk-lib';
 import * as bedrock from 'aws-cdk-lib/aws-bedrock';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
+import { RuntimeConfig } from '../../../core/runtime-config.js';
 import { findWorkspaceRoot } from '../../../core/workspace.js';
 
 interface GuardrailPolicy {
@@ -947,11 +1152,16 @@ const policy: GuardrailPolicy = JSON.parse(policyFile.toString('utf-8'));
  * Properties for the TestProjectAgentGuardrail. Any CfnGuardrail property
  * supplied here takes precedence over guardrail.json.
  */
-export type TestProjectAgentGuardrailProps = Partial<bedrock.CfnGuardrailProps>;
+export type TestProjectAgentGuardrailProps =
+  Partial<bedrock.CfnGuardrailProps> & {
+    /** The agent that applies this guardrail. It is granted bedrock:ApplyGuardrail. */
+    readonly agent: iam.IGrantable;
+  };
 
 /**
  * An Amazon Bedrock Guardrail for TestProjectAgent, with a numbered version
- * that changes whenever its rules change.
+ * that changes whenever its rules change. Its ID and version are written to
+ * runtime config, where the agent reads them.
  */
 export class TestProjectAgentGuardrail extends Construct {
   public readonly guardrail: bedrock.CfnGuardrail;
@@ -963,9 +1173,11 @@ export class TestProjectAgentGuardrail extends Construct {
   constructor(
     scope: Construct,
     id: string,
-    props?: TestProjectAgentGuardrailProps,
+    props: TestProjectAgentGuardrailProps,
   ) {
     super(scope, id);
+
+    const { agent, ...overrides } = props;
 
     const deniedTopics = policy.deniedTopics ?? [];
     const piiEntities = policy.piiEntities ?? [];
@@ -996,12 +1208,12 @@ export class TestProjectAgentGuardrail extends Construct {
           })),
         },
       }),
-      ...props,
+      ...overrides,
     });
 
     const hash = createHash('sha256').update(policyFile);
-    if (props && Object.keys(props).length > 0) {
-      hash.update(JSON.stringify(Stack.of(this).resolve(props)));
+    if (Object.keys(overrides).length > 0) {
+      hash.update(JSON.stringify(Stack.of(this).resolve(overrides)));
     }
 
     this.version = new bedrock.CfnGuardrailVersion(this, 'Version', {
@@ -1015,14 +1227,17 @@ export class TestProjectAgentGuardrail extends Construct {
 
     new CfnOutput(this, 'GuardrailId', { value: this.guardrailId });
     new CfnOutput(this, 'GuardrailVersion', { value: this.guardrailVersion });
-  }
 
-  /** The environment variables the agent reads its guardrail from. */
-  public get environmentVariables(): Record<string, string> {
-    return {
-      GUARDRAIL_ID: this.guardrailId,
-      GUARDRAIL_VERSION: this.guardrailVersion,
-    };
+    const rc = RuntimeConfig.ensure(this);
+    rc.set('agentcore', 'guardrails', {
+      ...rc.get('agentcore').guardrails,
+      TestProjectAgent: {
+        guardrailId: this.guardrailId,
+        guardrailVersion: this.guardrailVersion,
+      },
+    });
+
+    this.grantApply(agent);
   }
 
   /** Grant permission to apply this guardrail. */
@@ -1058,47 +1273,92 @@ exports[`ts#agent#guardrails generator > protocol http > should generate the gua
 `;
 
 exports[`ts#agent#guardrails generator > protocol http > should generate the guardrail with cdk > guardrail.ts 1`] = `
-"import { BedrockModel } from '@strands-agents/sdk';
+"import { BedrockModel, type BedrockGuardrailConfig } from '@strands-agents/sdk';
+import {
+  type AgentCoreRuntimeConfig,
+  getAgentCoreRuntimeConfig,
+} from '@proj/agent-connection';
+
+/**
+ * This agent's entry in runtime config, written by the
+ * TestProjectAgentGuardrail construct or the test-project-agent guardrail module.
+ */
+interface GuardrailEntry {
+  guardrailId?: string;
+  guardrailVersion?: string;
+}
+
+const RUNTIME_CONFIG_KEY = 'agentcore.guardrails.TestProjectAgent';
 
 let warnedUnguarded = false;
 
-/**
- * The Bedrock model with the guardrail named by GUARDRAIL_ID and GUARDRAIL_VERSION applied.
- */
-export const getGuardrailedModel = (): BedrockModel => {
-  const guardrailIdentifier = process.env.GUARDRAIL_ID;
-  const guardrailVersion = process.env.GUARDRAIL_VERSION;
+const readEntry = async (): Promise<GuardrailEntry | undefined> => {
+  const config: AgentCoreRuntimeConfig & {
+    guardrails?: Record<string, GuardrailEntry>;
+  } = await getAgentCoreRuntimeConfig();
+  return config.guardrails?.['TestProjectAgent'];
+};
 
-  if (!guardrailIdentifier || !guardrailVersion) {
-    const missing = guardrailIdentifier ? 'GUARDRAIL_VERSION' : 'GUARDRAIL_ID';
-    if (process.env.LOCAL_DEV !== 'true') {
+/**
+ * The guardrail to apply, read from runtime config on every model call
+ * (cached for 5 seconds).
+ */
+const resolveGuardrail = async (): Promise<
+  BedrockGuardrailConfig | undefined
+> => {
+  const localDev = process.env.LOCAL_DEV === 'true';
+  let entry: GuardrailEntry | undefined;
+  if (!localDev) {
+    entry = await readEntry();
+  } else if (process.env.RUNTIME_CONFIG_APP_ID) {
+    entry = await readEntry().catch(() => undefined);
+  }
+
+  if (!entry?.guardrailId || !entry.guardrailVersion) {
+    if (!localDev) {
       throw new Error(
-        \`\${missing} is not set. Pass the guardrail's GUARDRAIL_ID and GUARDRAIL_VERSION environment variables to the agent.\`,
+        \`No guardrail for this agent in runtime config at \${RUNTIME_CONFIG_KEY}. Add the TestProjectAgentGuardrail construct (CDK) or the guardrails/test-project-agent module (Terraform) to your infrastructure.\`,
       );
     }
     if (!warnedUnguarded) {
       warnedUnguarded = true;
       console.warn(
-        \`\${missing} is not set, so the agent is running without a guardrail (LOCAL_DEV=true).\`,
+        \`No guardrail for this agent in runtime config at \${RUNTIME_CONFIG_KEY}, so the agent is running without a guardrail (LOCAL_DEV=true).\`,
       );
     }
-    return new BedrockModel();
+    return undefined;
   }
 
-  if (!/^[1-9][0-9]*$/.test(guardrailVersion)) {
+  if (!/^[1-9][0-9]*$/.test(entry.guardrailVersion)) {
     throw new Error(
-      \`GUARDRAIL_VERSION must be a numbered guardrail version, but is \${guardrailVersion}.\`,
+      \`The guardrail version in runtime config at \${RUNTIME_CONFIG_KEY} must be a numbered guardrail version, but is \${entry.guardrailVersion}.\`,
     );
   }
 
-  return new BedrockModel({
-    guardrailConfig: {
-      guardrailIdentifier,
-      guardrailVersion,
-      trace: 'enabled',
-    },
-  });
+  return {
+    guardrailIdentifier: entry.guardrailId,
+    guardrailVersion: entry.guardrailVersion,
+    trace: 'enabled',
+  };
 };
+
+/**
+ * A Bedrock model that applies this agent's guardrail from runtime config
+ * before each model call, so a new guardrail version applies without a
+ * restart.
+ */
+export class GuardrailedBedrockModel extends BedrockModel {
+  override async *stream(...args: Parameters<BedrockModel['stream']>) {
+    this.updateConfig({ guardrailConfig: await resolveGuardrail() });
+    return yield* super.stream(...args);
+  }
+}
+
+/**
+ * The Bedrock model with this agent's guardrail applied.
+ */
+export const getGuardrailedModel = (): BedrockModel =>
+  new GuardrailedBedrockModel();
 "
 `;
 
@@ -1163,47 +1423,92 @@ exports[`ts#agent#guardrails generator > protocol http > should generate the gua
 `;
 
 exports[`ts#agent#guardrails generator > protocol http > should generate the guardrail with terraform > guardrail.ts 1`] = `
-"import { BedrockModel } from '@strands-agents/sdk';
+"import { BedrockModel, type BedrockGuardrailConfig } from '@strands-agents/sdk';
+import {
+  type AgentCoreRuntimeConfig,
+  getAgentCoreRuntimeConfig,
+} from '@proj/agent-connection';
+
+/**
+ * This agent's entry in runtime config, written by the
+ * TestProjectAgentGuardrail construct or the test-project-agent guardrail module.
+ */
+interface GuardrailEntry {
+  guardrailId?: string;
+  guardrailVersion?: string;
+}
+
+const RUNTIME_CONFIG_KEY = 'agentcore.guardrails.TestProjectAgent';
 
 let warnedUnguarded = false;
 
-/**
- * The Bedrock model with the guardrail named by GUARDRAIL_ID and GUARDRAIL_VERSION applied.
- */
-export const getGuardrailedModel = (): BedrockModel => {
-  const guardrailIdentifier = process.env.GUARDRAIL_ID;
-  const guardrailVersion = process.env.GUARDRAIL_VERSION;
+const readEntry = async (): Promise<GuardrailEntry | undefined> => {
+  const config: AgentCoreRuntimeConfig & {
+    guardrails?: Record<string, GuardrailEntry>;
+  } = await getAgentCoreRuntimeConfig();
+  return config.guardrails?.['TestProjectAgent'];
+};
 
-  if (!guardrailIdentifier || !guardrailVersion) {
-    const missing = guardrailIdentifier ? 'GUARDRAIL_VERSION' : 'GUARDRAIL_ID';
-    if (process.env.LOCAL_DEV !== 'true') {
+/**
+ * The guardrail to apply, read from runtime config on every model call
+ * (cached for 5 seconds).
+ */
+const resolveGuardrail = async (): Promise<
+  BedrockGuardrailConfig | undefined
+> => {
+  const localDev = process.env.LOCAL_DEV === 'true';
+  let entry: GuardrailEntry | undefined;
+  if (!localDev) {
+    entry = await readEntry();
+  } else if (process.env.RUNTIME_CONFIG_APP_ID) {
+    entry = await readEntry().catch(() => undefined);
+  }
+
+  if (!entry?.guardrailId || !entry.guardrailVersion) {
+    if (!localDev) {
       throw new Error(
-        \`\${missing} is not set. Pass the guardrail's GUARDRAIL_ID and GUARDRAIL_VERSION environment variables to the agent.\`,
+        \`No guardrail for this agent in runtime config at \${RUNTIME_CONFIG_KEY}. Add the TestProjectAgentGuardrail construct (CDK) or the guardrails/test-project-agent module (Terraform) to your infrastructure.\`,
       );
     }
     if (!warnedUnguarded) {
       warnedUnguarded = true;
       console.warn(
-        \`\${missing} is not set, so the agent is running without a guardrail (LOCAL_DEV=true).\`,
+        \`No guardrail for this agent in runtime config at \${RUNTIME_CONFIG_KEY}, so the agent is running without a guardrail (LOCAL_DEV=true).\`,
       );
     }
-    return new BedrockModel();
+    return undefined;
   }
 
-  if (!/^[1-9][0-9]*$/.test(guardrailVersion)) {
+  if (!/^[1-9][0-9]*$/.test(entry.guardrailVersion)) {
     throw new Error(
-      \`GUARDRAIL_VERSION must be a numbered guardrail version, but is \${guardrailVersion}.\`,
+      \`The guardrail version in runtime config at \${RUNTIME_CONFIG_KEY} must be a numbered guardrail version, but is \${entry.guardrailVersion}.\`,
     );
   }
 
-  return new BedrockModel({
-    guardrailConfig: {
-      guardrailIdentifier,
-      guardrailVersion,
-      trace: 'enabled',
-    },
-  });
+  return {
+    guardrailIdentifier: entry.guardrailId,
+    guardrailVersion: entry.guardrailVersion,
+    trace: 'enabled',
+  };
 };
+
+/**
+ * A Bedrock model that applies this agent's guardrail from runtime config
+ * before each model call, so a new guardrail version applies without a
+ * restart.
+ */
+export class GuardrailedBedrockModel extends BedrockModel {
+  override async *stream(...args: Parameters<BedrockModel['stream']>) {
+    this.updateConfig({ guardrailConfig: await resolveGuardrail() });
+    return yield* super.stream(...args);
+  }
+}
+
+/**
+ * The Bedrock model with this agent's guardrail applied.
+ */
+export const getGuardrailedModel = (): BedrockModel =>
+  new GuardrailedBedrockModel();
 "
 `;
 
@@ -1282,6 +1587,14 @@ resource "aws_bedrock_guardrail_version" "this" {
   }
 }
 
+module "add_guardrail_to_runtime_config" {
+  source = "../../../core/runtime-config/entry"
+
+  namespace = "agentcore"
+  key       = "guardrails"
+  value     = { "TestProjectAgent" = { guardrailId = aws_bedrock_guardrail.this.guardrail_id, guardrailVersion = aws_bedrock_guardrail_version.this.version } }
+}
+
 output "guardrail_id" {
   description = "ID of the guardrail"
   value       = aws_bedrock_guardrail.this.guardrail_id
@@ -1297,14 +1610,6 @@ output "guardrail_version" {
   value       = aws_bedrock_guardrail_version.this.version
 }
 
-output "env" {
-  description = "Environment variables the agent reads its guardrail from"
-  value = {
-    GUARDRAIL_ID      = aws_bedrock_guardrail.this.guardrail_id
-    GUARDRAIL_VERSION = aws_bedrock_guardrail_version.this.version
-  }
-}
-
 output "iam_policy_statements" {
   description = "IAM policy statements that allow the agent to apply the guardrail"
   value = [
@@ -1314,6 +1619,7 @@ output "iam_policy_statements" {
       Resource = [aws_bedrock_guardrail.this.guardrail_arn]
     }
   ]
+  depends_on = [module.add_guardrail_to_runtime_config]
 }
 "
 `;

@@ -19,8 +19,8 @@ import RunGenerator from '@components/run-generator.astro';
 
 - `agent.ts`の隣にある`guardrail.json`がルールを保持します：エージェントが拒否する必要があるトピックと、隠すかブロックする必要がある個人データ（PII、個人を特定できる情報）のタイプです。
 - CDKコンストラクトまたはTerraformモジュールは、合成または計画時に`guardrail.json`を読み取ります。ガードレールとその番号付きバージョンを作成します。ガードレールバージョンは、ルールの読み取り専用スナップショットです。
-- インフラストラクチャは、`GUARDRAIL_ID`および`GUARDRAIL_VERSION`環境変数でガードレールのIDとバージョン番号をエージェントに渡します。
-- `guardrail.ts`はこれらの変数を読み取り、ガードレールが適用されたBedrockモデルを構築します。`new Agent({...})`呼び出しはそのモデルを使用します。
+- インフラストラクチャは、ガードレールのIDとバージョン番号を<Link path="guides/runtime-config">runtime config</Link>に書き込みます。runtime configは、インフラストラクチャがデプロイされたリソースの詳細を保存するAWS AppConfigアプリケーションです。エントリは`agentcore.guardrails.<AgentClass>`で、エージェントのクラスにちなんで名付けられます。例えば`agentcore.guardrails.MyAgent`です。ガードされた各エージェントには独自のエントリがあります。
+- `guardrail.ts`は、`new Agent({...})`呼び出しが使用するBedrockモデルを構築します。各モデル呼び出しの前に、モデルはruntime configからエージェントのエントリを読み取り、そのガードレールを適用します。
 
 ## 使用方法
 
@@ -76,23 +76,17 @@ import RunGenerator from '@components/run-generator.astro';
 
 同じエージェントでジェネレーターを再度実行してもファイルは変更されず、`guardrail.json`への編集は保持されます。
 
-エージェントが`infra: none`で生成された場合、ジェネレーターはエージェントファイルのみを追加し、警告を出力します。その後、自分でガードレールを作成し、エージェントに`GUARDRAIL_ID`と`GUARDRAIL_VERSION`を設定します。
+エージェントが`infra: none`で生成された場合、ジェネレーターはエージェントファイルのみを追加し、警告を出力します。その後、自分でガードレールを作成し、そのIDとバージョンを`agentcore.guardrails.<AgentClass>`のruntime configに`{ guardrailId, guardrailVersion }`として書き込みます。
 
 ### すでにモデルを設定しているエージェント
 
-`new Agent({...})`呼び出しがすでに`model`を設定している場合、ジェネレーターは`agent.ts`を変更しません。ファイル名と追加する行を出力します。代わりに、独自のモデルオプションにガードレールを追加してください。例：
+`new Agent({...})`呼び出しがすでに`model`を設定している場合、ジェネレーターは`agent.ts`を変更しません。ファイル名と追加する行を出力します。独自のモデルオプションを保持するには、`guardrail.ts`の`GuardrailedBedrockModel`クラスでモデルを作成します。これは`BedrockModel`と同じオプションを受け取ります。例：
 
 ```ts title="agent.ts"
-import { BedrockModel } from '@strands-agents/sdk';
+import { GuardrailedBedrockModel } from './guardrail.js';
 
 const agent = new Agent({
-  model: new BedrockModel({
-    modelId: 'my-model-id',
-    guardrailConfig: {
-      guardrailIdentifier: process.env.GUARDRAIL_ID!,
-      guardrailVersion: process.env.GUARDRAIL_VERSION!,
-    },
-  }),
+  model: new GuardrailedBedrockModel({ modelId: 'my-model-id' }),
   // ...
 });
 ```
@@ -142,39 +136,38 @@ const agent = new Agent({
 
 ### バージョンが番号付けされている理由
 
-`guardrail.json`を変更してデプロイするたびに、インフラストラクチャは新しい番号付きガードレールバージョンを作成し、エージェントは同じデプロイメントでそれに切り替わります。バージョンの説明には`guardrail.json`のSHA-256ハッシュが保持されるため、ファイルへの変更は説明を変更し、新しいバージョンが古いバージョンを置き換えます。CDKコンストラクトでは、ハッシュは渡す`props`もカバーします。
+`guardrail.json`を変更してデプロイするたびに、インフラストラクチャは新しい番号付きガードレールバージョンを作成し、runtime configに書き込みます。バージョンの説明には`guardrail.json`のSHA-256ハッシュが保持されるため、ファイルへの変更は説明を変更し、新しいバージョンが古いバージョンを置き換えます。CDKコンストラクトでは、ハッシュは渡すガードレールプロパティもカバーします。
 
-エージェントは`DRAFT`バージョンを使用しません。`DRAFT`は常に最新のルールを保持するため、AWSコンソールで行われた編集は、デプロイメントなしで実行中のエージェントに到達します。`guardrail.ts`は、`GUARDRAIL_VERSION`がバージョン番号でない場合にエラーをスローします。
+実行中のエージェントは再起動する必要がありません。runtime configから読み取った内容を5秒間キャッシュするため、AppConfigデプロイメントから5秒以内に新しいバージョンを使用します。古いバージョンはAppConfigデプロイメント後に削除されます：CloudFormationはクリーンアップステップで削除し、Terraformは[ガードレールをエージェントに配線する](#ガードレールをエージェントに配線する)で示されているように、ガードレールモジュールをそのモジュールの`depends_on`に追加すると、デプロイメントモジュールの後に削除します。
+
+エージェントは`DRAFT`バージョンを使用しません。`DRAFT`は常に最新のルールを保持するため、AWSコンソールで行われた編集は、デプロイメントなしで実行中のエージェントに到達します。`guardrail.ts`は、runtime config内のバージョンがバージョン番号でない場合にエラーをスローします。
 
 ## ガードレールをエージェントに配線する
 
-ジェネレーターは、`ts#agent`ジェネレーターがエージェントのデプロイをユーザーに任せるのと同じように、スタックまたはルートTerraformモジュールを変更しません。完了すると、エージェントの名前が入力された以下のコードを出力します。これを追加して、ガードレールの環境変数をエージェントに渡し、エージェントがガードレールを適用できるようにします：
+ジェネレーターは、`ts#agent`ジェネレーターがエージェントのデプロイをユーザーに任せるのと同じように、スタックまたはルートTerraformモジュールを変更しません。完了すると、エージェントの名前が入力された以下のコードを出力します。これを追加して、ガードレールを作成し、そのruntime configエントリを書き込み、エージェントがガードレールを適用できるようにします：
 
 <Infrastructure>
   <Fragment slot="cdk">
 ```ts title="packages/infra/src/stacks/application-stack.ts"
 import { MyAgent, MyAgentGuardrail } from '@my-scope/common-constructs';
 
-const guardrail = new MyAgentGuardrail(this, 'MyAgentGuardrail');
-const agent = new MyAgent(this, 'MyAgent', {
-  environmentVariables: guardrail.environmentVariables,
-});
-guardrail.grantApply(agent);
+const agent = new MyAgent(this, 'MyAgent');
+new MyAgentGuardrail(this, 'MyAgentGuardrail', { agent });
 ```
 
-エージェントがすでに環境変数を持っている場合は、両方をスプレッドします：`environmentVariables: { ...guardrail.environmentVariables, MY_SETTING: 'value' }`。
+コンストラクトは、ガードレールのIDとバージョンを`agentcore.guardrails.MyAgent`のruntime configに書き込み、`agent`にガードレールを適用する権限を付与します。エージェントコンストラクトは、すでにエージェントがruntime configを読み取ることを許可しています。
 
 コンストラクトは以下を公開します：
 
 - `guardrail`（`CfnGuardrail`）および`version`（`CfnGuardrailVersion`）
 - `guardrailId`、`guardrailArn`、`guardrailVersion`
-- `environmentVariables`、`{ GUARDRAIL_ID, GUARDRAIL_VERSION }`を返します
-- `grantApply(grantee)`、ガードレールに対して`bedrock:ApplyGuardrail`を付与します
+- `grantApply(grantee)`、別のプリンシパルにガードレールに対して`bedrock:ApplyGuardrail`を付与します
 
-また、`GuardrailId`および`GuardrailVersion`スタック出力も追加します。そのpropsは任意の`CfnGuardrail`プロパティであり、`guardrail.json`よりも優先されます。たとえば、コンテンツフィルターを追加します：
+また、`GuardrailId`および`GuardrailVersion`スタック出力も追加します。そのpropsは`agent`と任意の`CfnGuardrail`プロパティです。`CfnGuardrail`プロパティは`guardrail.json`よりも優先されます。たとえば、コンテンツフィルターを追加します：
 
 ```ts
 new MyAgentGuardrail(this, 'MyAgentGuardrail', {
+  agent,
   contentPolicyConfig: {
     filtersConfig: [
       { type: 'HATE', inputStrength: 'HIGH', outputStrength: 'HIGH' },
@@ -184,7 +177,7 @@ new MyAgentGuardrail(this, 'MyAgentGuardrail', {
 ```
   </Fragment>
   <Fragment slot="terraform">
-示されているように`my_agent_guardrail`モジュールを追加します。エージェントをデプロイするルートモジュールで、既存の`my_agent`モジュールブロックにその`env`および`additional_iam_policy_statements`行を追加します。ルートモジュールがまだエージェントをデプロイしていない場合は、<Link path="guides/ts-agent#infrastructure-as-code">TypeScript Agentガイド</Link>で説明されているように、最初にエージェントのモジュールを追加してください。
+示されているように`my_agent_guardrail`モジュールを追加します。エージェントをデプロイするルートモジュールで、既存の`my_agent`モジュールブロックにその`additional_iam_policy_statements`行を追加します。`runtime_config_appconfig_deployment`モジュールの`depends_on`リストに`module.my_agent_guardrail`を追加して、デプロイメントにガードレールのruntime configエントリが含まれ、Terraformがデプロイメント後にのみ古いガードレールバージョンを削除するようにします。ルートモジュールがまだエージェントをデプロイしていない場合は、<Link path="guides/ts-agent#infrastructure-as-code">TypeScript Agentガイド</Link>で説明されているように、最初にエージェントのモジュールを追加してください。
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_agent_guardrail" {
@@ -194,39 +187,55 @@ module "my_agent_guardrail" {
 module "my_agent" {
   source = "../../common/terraform/src/app/agents/my-agent"
   # ...existing arguments...
-  env                              = module.my_agent_guardrail.env
   additional_iam_policy_statements = module.my_agent_guardrail.iam_policy_statements
+}
+
+module "runtime_config_appconfig_deployment" {
+  # ...existing arguments...
+  depends_on = [
+    # ...existing modules...
+    module.my_agent_guardrail,
+  ]
 }
 ```
 
-エージェントモジュールがすでにこれらの引数を設定している場合は、それらを組み合わせます：
+エージェントモジュールがすでに`additional_iam_policy_statements`を設定している場合は、リストを組み合わせます：
 
 ```hcl
-  env                              = merge(module.my_agent_guardrail.env, { MY_SETTING = "value" })
   additional_iam_policy_statements = concat(module.my_agent_guardrail.iam_policy_statements, local.my_statements)
 ```
 
-モジュールは`tags`変数を受け取り、`guardrail_id`、`guardrail_arn`、`guardrail_version`、`env`、`iam_policy_statements`を出力します。コンテンツフィルターなどの他のガードレールポリシーを追加するには、モジュール内の`aws_bedrock_guardrail`リソースを編集します。
+モジュールは、ガードレールのIDとバージョンを`agentcore.guardrails.MyAgent`のruntime configに書き込みます。`agentcore`名前空間は、runtime configモジュールのデフォルトの`namespaces`に含まれているため、追加する必要はありません。エージェントモジュールは、すでにエージェントがruntime configを読み取ることを許可しています。
+
+モジュールは`tags`変数を受け取り、`guardrail_id`、`guardrail_arn`、`guardrail_version`、`iam_policy_statements`を出力します。コンテンツフィルターなどの他のガードレールポリシーを追加するには、モジュール内の`aws_bedrock_guardrail`リソースを編集します。
 
 モジュールはガードレールバージョンに`create_before_destroy`を設定するため、Terraformは古いバージョンを削除する前に新しいバージョンを作成します。
   </Fragment>
 </Infrastructure>
 
-### 環境変数の欠落
+### runtime configエントリの欠落
 
-配線を忘れると、`getGuardrailedModel()`は`GUARDRAIL_ID is not set`（または`GUARDRAIL_VERSION is not set`）をスローするため、エージェントはガードレールなしでは実行されません。`http`または`a2a`プロトコルを持つエージェントは、リクエストが到着したときに`Agent`を作成するため、すべてのリクエストがこのエラーで失敗します。`ag-ui`プロトコルを持つエージェントは、起動時に`Agent`を作成するため、エージェントの起動に失敗します。
+配線を忘れると、runtime configにエージェントのエントリがありません。モデルはBedrockを呼び出す前にエラーをスローするため、エージェントはガードレールなしでは実行されません。`MyAgent`の場合、エラーは次のとおりです：
+
+```
+No guardrail for this agent in runtime config at agentcore.guardrails.MyAgent. Add the MyAgentGuardrail construct (CDK) or the guardrails/my-agent module (Terraform) to your infrastructure.
+```
+
+エージェントはすべてのプロトコル（`http`、`a2a`、`ag-ui`）で起動し、各リクエストはこのエラーで失敗します。
 
 ## ローカル開発
 
-`<agent>-dev`ターゲットは`LOCAL_DEV=true`を設定します。`LOCAL_DEV`が`true`でいずれかの変数が設定されていない場合、`guardrail.ts`は一度警告を出力し、エージェントはガードレールなしで実行されます：
+`<agent>-dev`ターゲットは`LOCAL_DEV=true`を設定します。`LOCAL_DEV`が`true`で`RUNTIME_CONFIG_APP_ID`環境変数が設定されていない場合、`guardrail.ts`はruntime configを読み取りません。一度警告を出力し、エージェントはガードレールなしで実行されます：
 
 <NxCommands commands={['agent-dev your-project']} />
 
-ルールをローカルでテストするには、最初にガードレールをデプロイします。次に、`GuardrailId`および`GuardrailVersion`スタック出力（CDK）またはモジュール出力（Terraform）から値を渡します：
+ルールをローカルでテストするには、最初にガードレールをデプロイします。次に、`RuntimeConfigApplicationId`スタック出力（CDK）または`module.runtime_config_appconfig.application_id`（Terraform）から、デプロイされたruntime configアプリケーションのIDに`RUNTIME_CONFIG_APP_ID`を設定します。シェルには、AppConfigを読み取り、ガードレールを適用できるAWS認証情報も必要です：
 
-<NxCommands commands={['agent-dev your-project']} env={{ GUARDRAIL_ID: '<guardrail-id>', GUARDRAIL_VERSION: '<version>' }} />
+<NxCommands commands={['agent-dev your-project']} env={{ RUNTIME_CONFIG_APP_ID: '<application-id>' }} />
 
-`<agent>-serve`ターゲットは`LOCAL_DEV`を設定しないため、両方の変数が必要です。そうでない場合、エージェントは上記のように失敗します。`<agent>-chat`ターゲットは実行中のエージェントに接続し、ガードレール変数自体は必要ありません。
+エージェントは自分のエントリのみを読み取るため、複数のガードされたエージェントが同じアプリケーションに対してローカルで実行できます。エージェントがruntime configを読み取れない場合、またはエントリが欠落している場合は、一度警告を出力し、ガードレールなしで実行されます。
+
+`<agent>-serve`ターゲットは`LOCAL_DEV`を設定しないため、`RUNTIME_CONFIG_APP_ID`とデプロイされたエントリが必要です。そうでない場合、各リクエストは上記のように失敗します。`<agent>-chat`ターゲットは実行中のエージェントに接続し、runtime config自体は必要ありません。
 
 ## コストとレイテンシ
 

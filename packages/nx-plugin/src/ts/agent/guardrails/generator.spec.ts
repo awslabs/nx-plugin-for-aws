@@ -18,6 +18,7 @@ import {
   terraformGuardrailWiring,
 } from '../../../utils/guardrail-constructs/guardrail-wiring.js';
 import { expectHasMetricTags } from '../../../utils/metrics-assertions.js';
+import { getNpmScope } from '../../../utils/npm-scope.js';
 import { TypeScriptVerifier } from '../../../utils/test/ts.spec.js';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
 import { tsAgentGenerator } from '../generator.js';
@@ -263,15 +264,55 @@ export const getAgent = async () => {
       'model: getGuardrailedModel()',
     );
     const messages = warn.mock.calls.map((c) => String(c[0]));
-    expect(
-      messages.some(
-        (m) =>
-          m.includes('has no infrastructure') &&
-          m.includes('GUARDRAIL_ID') &&
-          m.includes('GUARDRAIL_VERSION'),
-      ),
-    ).toBeTruthy();
+    const infraMessages = messages.filter((m) =>
+      m.includes('has no infrastructure'),
+    );
+    expect(infraMessages).toHaveLength(1);
+    expect(infraMessages[0]).toContain(
+      'write its ID and version to runtime config at agentcore.guardrails.TestProjectAgent as { guardrailId, guardrailVersion }.',
+    );
+    expect(infraMessages[0]).not.toContain('GUARDRAIL_ID');
   });
+
+  it.each(['cdk', 'terraform'] as const)(
+    "should write each agent's guardrail to its own runtime-config key with %s",
+    async (iac) => {
+      await addAgent({ name: 'my-agent', iac });
+      await addAgent({ name: 'other-agent', iac });
+
+      for (const agent of ['my-agent', 'other-agent']) {
+        await tsAgentGuardrailsGenerator(tree, {
+          project: 'test-project',
+          agent,
+        });
+      }
+
+      const file = (name: string) =>
+        tree.read(
+          iac === 'cdk'
+            ? `${CONSTRUCTS_APP}/guardrails/${name}/${name}-guardrail.ts`
+            : `${TERRAFORM_APP}/guardrails/${name}/${name}-guardrail.tf`,
+          'utf-8',
+        );
+      const mine = file('my-agent');
+      const other = file('other-agent');
+      if (iac === 'cdk') {
+        expect(mine).toContain("'agentcore', 'guardrails'");
+        expect(mine).toContain('MyAgent: {');
+        expect(other).toContain('OtherAgent: {');
+      } else {
+        expect(mine).toContain('key       = "guardrails"');
+        expect(mine).toContain('"MyAgent" =');
+        expect(other).toContain('"OtherAgent" =');
+      }
+      expect(mine).not.toContain('OtherAgent');
+      expect(other).not.toContain('MyAgent');
+      for (const contents of [mine, other]) {
+        expect(contents).not.toContain('GUARDRAIL_ID');
+        expect(contents).not.toContain('output "env"');
+      }
+    },
+  );
 
   it('should add and export the CDK construct, reading the agent policy', async () => {
     await addAgent({ iac: 'cdk' });
@@ -357,15 +398,12 @@ export const getAgent = async () => {
       await addAgent({ name: 'my-agent', iac: 'cdk' });
 
       expect(await runAndCaptureInfo()).toEqual([
-        `Add the guardrail to your agent in your stack, for example packages/infra/src/stacks/application-stack.ts. Until you add it, the deployed agent fails on its first request with "GUARDRAIL_ID is not set", because the GUARDRAIL_ID and GUARDRAIL_VERSION environment variables are missing.
+        `Add the guardrail to your agent in your stack, for example packages/infra/src/stacks/application-stack.ts. Until you add it, the deployed agent fails on its first request, because runtime config has no guardrail at agentcore.guardrails.MyAgent.
 
 import { MyAgent, MyAgentGuardrail } from '@gr-sandbox/common-constructs';
 
-const guardrail = new MyAgentGuardrail(this, 'MyAgentGuardrail');
-const agent = new MyAgent(this, 'MyAgent', {
-  environmentVariables: guardrail.environmentVariables,
-});
-guardrail.grantApply(agent);`,
+const agent = new MyAgent(this, 'MyAgent');
+new MyAgentGuardrail(this, 'MyAgentGuardrail', { agent });`,
       ]);
     });
 
@@ -373,7 +411,7 @@ guardrail.grantApply(agent);`,
       await addAgent({ name: 'my-agent', iac: 'terraform' });
 
       expect(await runAndCaptureInfo()).toEqual([
-        `Add the guardrail to your agent in the root Terraform module where you deploy the agent, for example packages/infra/src/main.tf. Until you add it, the deployed agent fails on its first request with "GUARDRAIL_ID is not set", because the GUARDRAIL_ID and GUARDRAIL_VERSION environment variables are missing. Add the module "my_agent_guardrail" block as printed below. Add its env and additional_iam_policy_statements lines to your existing module "my_agent" block. If your root module does not deploy the agent yet, add the agent's module first, as described in https://awslabs.github.io/nx-plugin-for-aws/en/guides/ts-agent/#infrastructure-as-code.
+        `Add the guardrail to your agent in the root Terraform module where you deploy the agent, for example packages/infra/src/main.tf. Until you add it, the deployed agent fails on its first request, because runtime config has no guardrail at agentcore.guardrails.MyAgent. Add the module "my_agent_guardrail" block as printed below. Add its additional_iam_policy_statements line to your existing module "my_agent" block, and add module.my_agent_guardrail to the depends_on list of your runtime_config_appconfig_deployment module. If your root module does not deploy the agent yet, add the agent's module first, as described in https://awslabs.github.io/nx-plugin-for-aws/en/guides/ts-agent/#infrastructure-as-code.
 
 module "my_agent_guardrail" {
   source = "../../common/terraform/src/app/guardrails/my-agent"
@@ -382,8 +420,15 @@ module "my_agent_guardrail" {
 module "my_agent" {
   source = "../../common/terraform/src/app/agents/my-agent"
   # ...existing arguments...
-  env                              = module.my_agent_guardrail.env
   additional_iam_policy_statements = module.my_agent_guardrail.iam_policy_statements
+}
+
+module "runtime_config_appconfig_deployment" {
+  # ...existing arguments...
+  depends_on = [
+    # ...existing modules...
+    module.my_agent_guardrail,
+  ]
 }`,
       ]);
     });
@@ -396,7 +441,8 @@ module "my_agent" {
           'module "other_agent_guardrail"',
           'app/guardrails/other-agent"',
           'module "other_agent"',
-          'module.other_agent_guardrail.env',
+          'module.other_agent_guardrail.iam_policy_statements',
+          'module.other_agent_guardrail,',
         ],
       ],
     ] as const)(
@@ -411,19 +457,23 @@ module "my_agent" {
         for (const text of expected) {
           expect(message).toContain(text);
         }
+        expect(message).not.toContain('.env');
         expect(message).not.toMatch(/MyAgent|my_agent|my-agent/);
       },
     );
 
-    it('should say an ag-ui agent fails to start', async () => {
-      await addAgent({ protocol: 'ag-ui', iac: 'cdk' });
+    it.each(['http', 'a2a', 'ag-ui'] as const)(
+      'should say a %s agent fails on its first request',
+      async (protocol) => {
+        await addAgent({ protocol, iac: 'cdk' });
 
-      const [message] = await runAndCaptureInfo();
+        const [message] = await runAndCaptureInfo();
 
-      expect(message).toContain(
-        'the deployed agent fails to start with "GUARDRAIL_ID is not set"',
-      );
-    });
+        expect(message).toContain(
+          'Until you add it, the deployed agent fails on its first request, because runtime config has no guardrail at agentcore.guardrails.TestProjectAgent.',
+        );
+      },
+    );
 
     it('should print the code again on a second run', async () => {
       await addAgent({ iac: 'cdk' });
@@ -509,6 +559,11 @@ export const getAgent = async () => new Agent({ model: 'x' });
     expect(module).toContain('create_before_destroy = true');
     expect(module).toContain('type       = "DENY"');
     expect(module).toContain('"test-project-agent-guardrail"');
+    expect(module).toContain('module "add_guardrail_to_runtime_config"');
+    expect(module).toContain('source = "../../../core/runtime-config/entry"');
+    expect(module).toContain(
+      'depends_on = [module.add_guardrail_to_runtime_config]',
+    );
     expect(tree.exists(`${CONSTRUCTS_APP}/guardrails`)).toBeFalsy();
   });
 
@@ -555,12 +610,34 @@ export const getAgent = async () => new Agent({ model: 'x' });
     expectHasMetricTags(tree, TS_AGENT_GUARDRAILS_GENERATOR_INFO.metric);
   });
 
+  /**
+   * Stand in for the workspace's @<scope>/agent-connection package with the
+   * vended runtime-config reader, so guardrail.ts type-checks against the real
+   * AgentCoreRuntimeConfig. Only the powertools import is replaced.
+   */
+  const stubAgentConnection = (): string => {
+    const reader = tree
+      .read(
+        'packages/common/agent-connection/src/core/runtime-config.ts',
+        'utf-8',
+      )
+      .replace(
+        /^import \{ getAppConfig \} from '@aws-lambda-powertools\/parameters\/appconfig';$/m,
+        'declare const getAppConfig: (...args: unknown[]) => Promise<unknown>;',
+      );
+    expect(reader).not.toContain('@aws-lambda-powertools');
+    const stub = `node_modules/@${getNpmScope(tree)}/agent-connection/index.ts`;
+    tree.write(stub, reader);
+    return stub;
+  };
+
   it('should generate agent.ts and guardrail.ts that compile (ag-ui)', async () => {
     await addAgent({ protocol: 'ag-ui', infra: 'none' });
 
     await tsAgentGuardrailsGenerator(tree, { project: 'test-project' });
 
     verifier.expectTypeScriptToCompile(tree, [
+      stubAgentConnection(),
       AGENT_FILE,
       `${AGENT_DIR}/guardrail.ts`,
     ]);
@@ -571,6 +648,9 @@ export const getAgent = async () => new Agent({ model: 'x' });
 
     await tsAgentGuardrailsGenerator(tree, { project: 'test-project' });
 
-    verifier.expectTypeScriptToCompile(tree, [`${AGENT_DIR}/guardrail.ts`]);
+    verifier.expectTypeScriptToCompile(tree, [
+      stubAgentConnection(),
+      `${AGENT_DIR}/guardrail.ts`,
+    ]);
   });
 });

@@ -19,8 +19,8 @@ import RunGenerator from '@components/run-generator.astro';
 
 - `agent.ts` 옆에 있는 `guardrail.json`은 규칙을 담고 있습니다: 에이전트가 거부해야 하는 주제와 숨기거나 차단해야 하는 개인 데이터(PII, 개인 식별 정보) 유형입니다.
 - CDK 구성 또는 Terraform 모듈은 합성 또는 계획 시 `guardrail.json`을 읽습니다. 가드레일과 번호가 매겨진 버전을 생성합니다. 가드레일 버전은 규칙의 읽기 전용 스냅샷입니다.
-- 인프라는 `GUARDRAIL_ID` 및 `GUARDRAIL_VERSION` 환경 변수를 통해 가드레일의 ID와 버전 번호를 에이전트에 전달합니다.
-- `guardrail.ts`는 이러한 변수를 읽고 가드레일이 적용된 Bedrock 모델을 빌드합니다. `new Agent({...})` 호출이 해당 모델을 사용합니다.
+- 인프라는 가드레일의 ID와 버전 번호를 <Link path="guides/runtime-config">runtime config</Link>에 씁니다. runtime config는 인프라가 배포된 리소스의 세부 정보를 저장하는 AWS AppConfig 애플리케이션입니다. 항목은 `agentcore.guardrails.<AgentClass>`이며, 에이전트의 클래스 이름을 따서 명명됩니다. 예를 들어 `agentcore.guardrails.MyAgent`입니다. 각 보호된 에이전트에는 자체 항목이 있습니다.
+- `guardrail.ts`는 `new Agent({...})` 호출이 사용하는 Bedrock 모델을 빌드합니다. 각 모델 호출 전에 모델은 runtime config에서 에이전트의 항목을 읽고 해당 가드레일을 적용합니다.
 
 ## 사용법
 
@@ -76,23 +76,17 @@ import RunGenerator from '@components/run-generator.astro';
 
 동일한 에이전트에서 제너레이터를 다시 실행하면 파일이 변경되지 않으며, `guardrail.json`에 대한 편집 내용이 유지됩니다.
 
-에이전트가 `infra: none`으로 생성된 경우, 제너레이터는 에이전트 파일만 추가하고 경고를 출력합니다. 그런 다음 가드레일을 직접 생성하고 에이전트에 대해 `GUARDRAIL_ID` 및 `GUARDRAIL_VERSION`을 설정해야 합니다.
+에이전트가 `infra: none`으로 생성된 경우, 제너레이터는 에이전트 파일만 추가하고 경고를 출력합니다. 그런 다음 가드레일을 직접 생성하고 `agentcore.guardrails.<AgentClass>`의 runtime config에 ID와 버전을 `{ guardrailId, guardrailVersion }`으로 작성해야 합니다.
 
 ### 이미 모델을 설정한 에이전트
 
-`new Agent({...})` 호출이 이미 `model`을 설정한 경우, 제너레이터는 `agent.ts`를 변경하지 않습니다. 파일 이름과 추가할 줄을 출력합니다. 대신 자체 모델 옵션에 가드레일을 추가하세요. 예를 들어:
+`new Agent({...})` 호출이 이미 `model`을 설정한 경우, 제너레이터는 `agent.ts`를 변경하지 않습니다. 파일 이름과 추가할 줄을 출력합니다. 자체 모델 옵션을 유지하려면 `guardrail.ts`의 `GuardrailedBedrockModel` 클래스로 모델을 생성하세요. `BedrockModel`과 동일한 옵션을 사용합니다. 예를 들어:
 
 ```ts title="agent.ts"
-import { BedrockModel } from '@strands-agents/sdk';
+import { GuardrailedBedrockModel } from './guardrail.js';
 
 const agent = new Agent({
-  model: new BedrockModel({
-    modelId: 'my-model-id',
-    guardrailConfig: {
-      guardrailIdentifier: process.env.GUARDRAIL_ID!,
-      guardrailVersion: process.env.GUARDRAIL_VERSION!,
-    },
-  }),
+  model: new GuardrailedBedrockModel({ modelId: 'my-model-id' }),
   // ...
 });
 ```
@@ -142,39 +136,38 @@ const agent = new Agent({
 
 ### 버전에 번호가 매겨지는 이유
 
-`guardrail.json`을 변경하고 배포할 때마다 인프라는 새로운 번호가 매겨진 가드레일 버전을 생성하고, 에이전트는 동일한 배포에서 해당 버전으로 전환합니다. 버전의 설명에는 `guardrail.json`의 SHA-256 해시가 포함되어 있으므로 파일을 변경하면 설명이 변경되고 새 버전이 이전 버전을 대체합니다. CDK 구성의 경우 해시는 전달하는 모든 `props`도 포함합니다.
+`guardrail.json`을 변경하고 배포할 때마다 인프라는 새로운 번호가 매겨진 가드레일 버전을 생성하고 runtime config에 씁니다. 버전의 설명에는 `guardrail.json`의 SHA-256 해시가 포함되어 있으므로 파일을 변경하면 설명이 변경되고 새 버전이 이전 버전을 대체합니다. CDK 구성의 경우 해시는 전달하는 모든 가드레일 속성도 포함합니다.
 
-에이전트는 `DRAFT` 버전을 사용하지 않습니다. `DRAFT`는 항상 최신 규칙을 보유하므로 AWS 콘솔에서 수행한 편집이 배포 없이 실행 중인 에이전트에 도달할 수 있습니다. `guardrail.ts`는 `GUARDRAIL_VERSION`이 버전 번호가 아닌 경우 오류를 발생시킵니다.
+실행 중인 에이전트는 재시작이 필요하지 않습니다. runtime config에서 읽은 내용을 5초 동안 캐시하므로 AppConfig 배포 후 5초 이내에 새 버전을 사용합니다. 이전 버전은 AppConfig 배포 후 삭제됩니다: CloudFormation은 정리 단계에서 삭제하고, Terraform은 [에이전트에 가드레일 연결](#에이전트에-가드레일-연결)에 표시된 대로 가드레일 모듈을 해당 모듈의 `depends_on`에 추가하면 배포 모듈 후에 삭제합니다.
+
+에이전트는 `DRAFT` 버전을 사용하지 않습니다. `DRAFT`는 항상 최신 규칙을 보유하므로 AWS 콘솔에서 수행한 편집이 배포 없이 실행 중인 에이전트에 도달할 수 있습니다. `guardrail.ts`는 runtime config의 버전이 버전 번호가 아닌 경우 오류를 발생시킵니다.
 
 ## 에이전트에 가드레일 연결
 
-제너레이터는 `ts#agent` 제너레이터가 에이전트 배포를 사용자에게 맡기는 것과 같은 방식으로 스택이나 루트 Terraform 모듈을 변경하지 않습니다. 완료되면 에이전트의 이름이 채워진 아래 코드를 출력합니다. 가드레일의 환경 변수를 에이전트에 전달하고 에이전트가 가드레일을 적용할 수 있도록 추가하세요:
+제너레이터는 `ts#agent` 제너레이터가 에이전트 배포를 사용자에게 맡기는 것과 같은 방식으로 스택이나 루트 Terraform 모듈을 변경하지 않습니다. 완료되면 에이전트의 이름이 채워진 아래 코드를 출력합니다. 가드레일을 생성하고, runtime-config 항목을 작성하고, 에이전트가 가드레일을 적용할 수 있도록 추가하세요:
 
 <Infrastructure>
   <Fragment slot="cdk">
 ```ts title="packages/infra/src/stacks/application-stack.ts"
 import { MyAgent, MyAgentGuardrail } from '@my-scope/common-constructs';
 
-const guardrail = new MyAgentGuardrail(this, 'MyAgentGuardrail');
-const agent = new MyAgent(this, 'MyAgent', {
-  environmentVariables: guardrail.environmentVariables,
-});
-guardrail.grantApply(agent);
+const agent = new MyAgent(this, 'MyAgent');
+new MyAgentGuardrail(this, 'MyAgentGuardrail', { agent });
 ```
 
-에이전트에 이미 환경 변수가 있는 경우 둘 다 스프레드하세요: `environmentVariables: { ...guardrail.environmentVariables, MY_SETTING: 'value' }`.
+구성은 가드레일의 ID와 버전을 `agentcore.guardrails.MyAgent`의 runtime config에 쓰고, `agent`에 가드레일을 적용할 수 있는 권한을 부여합니다. 에이전트 구성은 이미 에이전트가 runtime config를 읽을 수 있도록 허용합니다.
 
 구성은 다음을 노출합니다:
 
 - `guardrail`(`CfnGuardrail`) 및 `version`(`CfnGuardrailVersion`)
 - `guardrailId`, `guardrailArn` 및 `guardrailVersion`
-- `{ GUARDRAIL_ID, GUARDRAIL_VERSION }`을 반환하는 `environmentVariables`
-- 가드레일에 대해 `bedrock:ApplyGuardrail`을 부여하는 `grantApply(grantee)`
+- 다른 주체에게 가드레일에 대해 `bedrock:ApplyGuardrail`을 부여하는 `grantApply(grantee)`
 
-또한 `GuardrailId` 및 `GuardrailVersion` 스택 출력을 추가합니다. props는 모든 `CfnGuardrail` 속성이며 `guardrail.json`보다 우선합니다. 예를 들어, 콘텐츠 필터를 추가하세요:
+또한 `GuardrailId` 및 `GuardrailVersion` 스택 출력을 추가합니다. props는 `agent`와 모든 `CfnGuardrail` 속성입니다. `CfnGuardrail` 속성은 `guardrail.json`보다 우선합니다. 예를 들어, 콘텐츠 필터를 추가하세요:
 
 ```ts
 new MyAgentGuardrail(this, 'MyAgentGuardrail', {
+  agent,
   contentPolicyConfig: {
     filtersConfig: [
       { type: 'HATE', inputStrength: 'HIGH', outputStrength: 'HIGH' },
@@ -184,7 +177,7 @@ new MyAgentGuardrail(this, 'MyAgentGuardrail', {
 ```
   </Fragment>
   <Fragment slot="terraform">
-표시된 대로 `my_agent_guardrail` 모듈을 추가하세요. 에이전트를 배포하는 루트 모듈의 기존 `my_agent` 모듈 블록에 `env` 및 `additional_iam_policy_statements` 줄을 추가하세요. 루트 모듈이 아직 에이전트를 배포하지 않는 경우 <Link path="guides/ts-agent#infrastructure-as-code">TypeScript Agent 가이드</Link>에 설명된 대로 먼저 에이전트의 모듈을 추가하세요.
+에이전트를 배포하는 루트 모듈에 표시된 대로 `my_agent_guardrail` 모듈을 추가하세요. 기존 `my_agent` 모듈 블록에 `additional_iam_policy_statements` 줄을 추가하세요. `runtime_config_appconfig_deployment` 모듈의 `depends_on` 목록에 `module.my_agent_guardrail`을 추가하여 배포에 가드레일의 runtime-config 항목이 포함되고 Terraform이 배포 후에만 이전 가드레일 버전을 삭제하도록 하세요. 루트 모듈이 아직 에이전트를 배포하지 않는 경우 <Link path="guides/ts-agent#infrastructure-as-code">TypeScript Agent 가이드</Link>에 설명된 대로 먼저 에이전트의 모듈을 추가하세요.
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_agent_guardrail" {
@@ -194,39 +187,55 @@ module "my_agent_guardrail" {
 module "my_agent" {
   source = "../../common/terraform/src/app/agents/my-agent"
   # ...existing arguments...
-  env                              = module.my_agent_guardrail.env
   additional_iam_policy_statements = module.my_agent_guardrail.iam_policy_statements
+}
+
+module "runtime_config_appconfig_deployment" {
+  # ...existing arguments...
+  depends_on = [
+    # ...existing modules...
+    module.my_agent_guardrail,
+  ]
 }
 ```
 
-에이전트 모듈이 이미 이러한 인수를 설정한 경우 결합하세요:
+에이전트 모듈이 이미 `additional_iam_policy_statements`를 설정한 경우 목록을 결합하세요:
 
 ```hcl
-  env                              = merge(module.my_agent_guardrail.env, { MY_SETTING = "value" })
   additional_iam_policy_statements = concat(module.my_agent_guardrail.iam_policy_statements, local.my_statements)
 ```
 
-모듈은 `tags` 변수를 받고 `guardrail_id`, `guardrail_arn`, `guardrail_version`, `env` 및 `iam_policy_statements`를 출력합니다. 콘텐츠 필터와 같은 다른 가드레일 정책을 추가하려면 모듈의 `aws_bedrock_guardrail` 리소스를 편집하세요.
+모듈은 가드레일의 ID와 버전을 `agentcore.guardrails.MyAgent`의 runtime config에 씁니다. `agentcore` 네임스페이스는 runtime-config 모듈의 기본 `namespaces`에 있으므로 추가할 필요가 없습니다. 에이전트 모듈은 이미 에이전트가 runtime config를 읽을 수 있도록 허용합니다.
+
+모듈은 `tags` 변수를 받고 `guardrail_id`, `guardrail_arn`, `guardrail_version` 및 `iam_policy_statements`를 출력합니다. 콘텐츠 필터와 같은 다른 가드레일 정책을 추가하려면 모듈의 `aws_bedrock_guardrail` 리소스를 편집하세요.
 
 모듈은 가드레일 버전에 `create_before_destroy`를 설정하므로 Terraform은 이전 버전을 삭제하기 전에 새 버전을 생성합니다.
   </Fragment>
 </Infrastructure>
 
-### 누락된 환경 변수
+### 누락된 runtime-config 항목
 
-연결을 잊어버린 경우 `getGuardrailedModel()`은 `GUARDRAIL_ID is not set`(또는 `GUARDRAIL_VERSION is not set`)을 발생시키므로 에이전트는 가드레일 없이 실행되지 않습니다. `http` 또는 `a2a` 프로토콜을 사용하는 에이전트는 요청이 도착할 때 `Agent`를 생성하므로 모든 요청이 이 오류로 실패합니다. `ag-ui` 프로토콜을 사용하는 에이전트는 시작 시 `Agent`를 생성하므로 에이전트가 시작되지 않습니다.
+연결을 잊어버린 경우 runtime config에 에이전트에 대한 항목이 없습니다. 그러면 모델은 Bedrock을 호출하기 전에 오류를 발생시키므로 에이전트는 가드레일 없이 실행되지 않습니다. `MyAgent`의 경우 오류는 다음과 같습니다:
+
+```
+No guardrail for this agent in runtime config at agentcore.guardrails.MyAgent. Add the MyAgentGuardrail construct (CDK) or the guardrails/my-agent module (Terraform) to your infrastructure.
+```
+
+에이전트는 모든 프로토콜(`http`, `a2a` 및 `ag-ui`)로 시작되며, 각 요청은 이 오류로 실패합니다.
 
 ## 로컬 개발
 
-`<agent>-dev` 대상은 `LOCAL_DEV=true`를 설정합니다. `LOCAL_DEV`가 `true`이고 두 변수 중 하나가 설정되지 않은 경우 `guardrail.ts`는 한 번 경고를 출력하고 에이전트는 가드레일 없이 실행됩니다:
+`<agent>-dev` 대상은 `LOCAL_DEV=true`를 설정합니다. `LOCAL_DEV`가 `true`이고 `RUNTIME_CONFIG_APP_ID` 환경 변수가 설정되지 않은 경우 `guardrail.ts`는 runtime config를 읽지 않습니다. 한 번 경고를 출력하고 에이전트는 가드레일 없이 실행됩니다:
 
 <NxCommands commands={['agent-dev your-project']} />
 
-로컬에서 규칙을 테스트하려면 먼저 가드레일을 배포하세요. 그런 다음 `GuardrailId` 및 `GuardrailVersion` 스택 출력(CDK) 또는 모듈 출력(Terraform)의 값을 전달하세요:
+로컬에서 규칙을 테스트하려면 먼저 가드레일을 배포하세요. 그런 다음 `RuntimeConfigApplicationId` 스택 출력(CDK) 또는 `module.runtime_config_appconfig.application_id`(Terraform)에서 배포된 runtime-config 애플리케이션의 ID로 `RUNTIME_CONFIG_APP_ID`를 설정하세요. 셸에는 AppConfig를 읽고 가드레일을 적용할 수 있는 AWS 자격 증명도 필요합니다:
 
-<NxCommands commands={['agent-dev your-project']} env={{ GUARDRAIL_ID: '<guardrail-id>', GUARDRAIL_VERSION: '<version>' }} />
+<NxCommands commands={['agent-dev your-project']} env={{ RUNTIME_CONFIG_APP_ID: '<application-id>' }} />
 
-`<agent>-serve` 대상은 `LOCAL_DEV`를 설정하지 않으므로 두 변수가 모두 필요합니다. 그렇지 않으면 위에서 설명한 대로 에이전트가 실패합니다. `<agent>-chat` 대상은 실행 중인 에이전트에 연결하며 가드레일 변수 자체가 필요하지 않습니다.
+그러면 에이전트는 자체 항목만 읽으므로 여러 보호된 에이전트가 동일한 애플리케이션에 대해 로컬로 실행될 수 있습니다. 에이전트가 runtime config를 읽을 수 없거나 항목이 누락된 경우 한 번 경고를 출력하고 가드레일 없이 실행됩니다.
+
+`<agent>-serve` 대상은 `LOCAL_DEV`를 설정하지 않으므로 `RUNTIME_CONFIG_APP_ID`와 배포된 항목이 필요합니다. 그렇지 않으면 위에서 설명한 대로 각 요청이 실패합니다. `<agent>-chat` 대상은 실행 중인 에이전트에 연결하며 runtime config 자체가 필요하지 않습니다.
 
 ## 비용 및 지연 시간
 

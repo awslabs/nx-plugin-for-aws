@@ -19,8 +19,8 @@ The generator adds a policy file that holds your rules, the code that applies th
 
 - `guardrail.json` next to your `agent.ts` holds the rules: the topics your agent must refuse and the types of personal data (PII, personally identifiable information) it must hide or block.
 - Your CDK construct or Terraform module reads `guardrail.json` when you synthesize or plan. It creates the guardrail and a numbered version of it. A guardrail version is a read-only snapshot of the rules.
-- The infrastructure passes the guardrail's ID and version number to your agent in the `GUARDRAIL_ID` and `GUARDRAIL_VERSION` environment variables.
-- `guardrail.ts` reads these variables and builds the Bedrock model with the guardrail applied. Your `new Agent({...})` call uses that model.
+- The infrastructure writes the guardrail's ID and version number to <Link path="guides/runtime-config">runtime config</Link>, the AWS AppConfig application where your infrastructure stores the details of deployed resources. The entry is `agentcore.guardrails.<AgentClass>`, named after your agent's class, for example `agentcore.guardrails.MyAgent`. Each guarded agent has its own entry.
+- `guardrail.ts` builds the Bedrock model that your `new Agent({...})` call uses. Before each model call, the model reads the agent's entry from runtime config and applies that guardrail.
 
 ## Usage
 
@@ -76,23 +76,17 @@ The generator edits `agent.ts` like this:
 
 Running the generator again on the same agent changes no file, and it keeps your edits to `guardrail.json`.
 
-If your agent was generated with `infra: none`, the generator adds only the agent files and prints a warning. You then create the guardrail yourself and set `GUARDRAIL_ID` and `GUARDRAIL_VERSION` for the agent.
+If your agent was generated with `infra: none`, the generator adds only the agent files and prints a warning. You then create the guardrail yourself and write its ID and version to runtime config at `agentcore.guardrails.<AgentClass>` as `{ guardrailId, guardrailVersion }`.
 
 ### An agent that already sets a model
 
-If your `new Agent({...})` call already sets `model`, the generator leaves `agent.ts` unchanged. It prints the file name and the lines to add. Add the guardrail to your own model options instead, for example:
+If your `new Agent({...})` call already sets `model`, the generator leaves `agent.ts` unchanged. It prints the file name and the lines to add. To keep your own model options, create your model with the `GuardrailedBedrockModel` class from `guardrail.ts`. It takes the same options as `BedrockModel`, for example:
 
 ```ts title="agent.ts"
-import { BedrockModel } from '@strands-agents/sdk';
+import { GuardrailedBedrockModel } from './guardrail.js';
 
 const agent = new Agent({
-  model: new BedrockModel({
-    modelId: 'my-model-id',
-    guardrailConfig: {
-      guardrailIdentifier: process.env.GUARDRAIL_ID!,
-      guardrailVersion: process.env.GUARDRAIL_VERSION!,
-    },
-  }),
+  model: new GuardrailedBedrockModel({ modelId: 'my-model-id' }),
   // ...
 });
 ```
@@ -142,39 +136,38 @@ Write a topic `definition` that describes the topic itself. For example, "Recomm
 
 ### Why the version is numbered
 
-Each time you change `guardrail.json` and deploy, the infrastructure creates a new numbered guardrail version, and your agent switches to it in the same deployment. The version's description holds the SHA-256 hash of `guardrail.json`, so a change to the file changes the description, and a new version replaces the old one. With the CDK construct, the hash also covers any `props` you pass.
+Each time you change `guardrail.json` and deploy, the infrastructure creates a new numbered guardrail version and writes it to runtime config. The version's description holds the SHA-256 hash of `guardrail.json`, so a change to the file changes the description, and a new version replaces the old one. With the CDK construct, the hash also covers any guardrail properties you pass.
 
-Your agent never uses the `DRAFT` version. `DRAFT` always holds the latest rules, so an edit made in the AWS console would reach your running agent without a deployment. `guardrail.ts` throws an error if `GUARDRAIL_VERSION` is not a version number.
+Your running agent does not need a restart. It caches what it reads from runtime config for 5 seconds, so it uses the new version within 5 seconds of the AppConfig deployment. The old version is deleted after the AppConfig deployment: CloudFormation deletes it in its cleanup step, and Terraform deletes it after the deployment module when you add the guardrail module to that module's `depends_on`, as shown in [Wiring the guardrail to your agent](#wiring-the-guardrail-to-your-agent).
+
+Your agent never uses the `DRAFT` version. `DRAFT` always holds the latest rules, so an edit made in the AWS console would reach your running agent without a deployment. `guardrail.ts` throws an error if the version in runtime config is not a version number.
 
 ## Wiring the guardrail to your agent
 
-The generator does not change your stack or your root Terraform module, in the same way that the `ts#agent` generator leaves deploying the agent to you. When it finishes, it prints the code below with your agent's names filled in. Add it to pass the guardrail's environment variables to your agent and allow the agent to apply the guardrail:
+The generator does not change your stack or your root Terraform module, in the same way that the `ts#agent` generator leaves deploying the agent to you. When it finishes, it prints the code below with your agent's names filled in. Add it to create the guardrail, write its runtime-config entry and allow the agent to apply the guardrail:
 
 <Infrastructure>
   <Fragment slot="cdk">
 ```ts title="packages/infra/src/stacks/application-stack.ts"
 import { MyAgent, MyAgentGuardrail } from '@my-scope/common-constructs';
 
-const guardrail = new MyAgentGuardrail(this, 'MyAgentGuardrail');
-const agent = new MyAgent(this, 'MyAgent', {
-  environmentVariables: guardrail.environmentVariables,
-});
-guardrail.grantApply(agent);
+const agent = new MyAgent(this, 'MyAgent');
+new MyAgentGuardrail(this, 'MyAgentGuardrail', { agent });
 ```
 
-If your agent already has environment variables, spread both: `environmentVariables: { ...guardrail.environmentVariables, MY_SETTING: 'value' }`.
+The construct writes the guardrail's ID and version to runtime config at `agentcore.guardrails.MyAgent`, and grants the `agent` permission to apply the guardrail. The agent construct already allows the agent to read runtime config.
 
 The construct exposes:
 
 - `guardrail` (the `CfnGuardrail`) and `version` (the `CfnGuardrailVersion`)
 - `guardrailId`, `guardrailArn` and `guardrailVersion`
-- `environmentVariables`, which returns `{ GUARDRAIL_ID, GUARDRAIL_VERSION }`
-- `grantApply(grantee)`, which grants `bedrock:ApplyGuardrail` on the guardrail
+- `grantApply(grantee)`, which grants `bedrock:ApplyGuardrail` on the guardrail to another principal
 
-It also adds the `GuardrailId` and `GuardrailVersion` stack outputs. Its props are any `CfnGuardrail` properties, and they take precedence over `guardrail.json`. For example, add content filters:
+It also adds the `GuardrailId` and `GuardrailVersion` stack outputs. Its props are `agent` and any `CfnGuardrail` properties. The `CfnGuardrail` properties take precedence over `guardrail.json`. For example, add content filters:
 
 ```ts
 new MyAgentGuardrail(this, 'MyAgentGuardrail', {
+  agent,
   contentPolicyConfig: {
     filtersConfig: [
       { type: 'HATE', inputStrength: 'HIGH', outputStrength: 'HIGH' },
@@ -184,7 +177,7 @@ new MyAgentGuardrail(this, 'MyAgentGuardrail', {
 ```
   </Fragment>
   <Fragment slot="terraform">
-Add the `my_agent_guardrail` module as shown. Add its `env` and `additional_iam_policy_statements` lines to your existing `my_agent` module block, in the root module where you deploy your agent. If your root module does not deploy the agent yet, add the agent's module first, as described in <Link path="guides/ts-agent#infrastructure-as-code">the TypeScript Agent guide</Link>.
+Add the `my_agent_guardrail` module as shown, in the root module where you deploy your agent. Add its `additional_iam_policy_statements` line to your existing `my_agent` module block. Add `module.my_agent_guardrail` to the `depends_on` list of your `runtime_config_appconfig_deployment` module, so the deployment includes the guardrail's runtime-config entry and Terraform deletes an old guardrail version only after the deployment. If your root module does not deploy the agent yet, add the agent's module first, as described in <Link path="guides/ts-agent#infrastructure-as-code">the TypeScript Agent guide</Link>.
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_agent_guardrail" {
@@ -194,39 +187,55 @@ module "my_agent_guardrail" {
 module "my_agent" {
   source = "../../common/terraform/src/app/agents/my-agent"
   # ...existing arguments...
-  env                              = module.my_agent_guardrail.env
   additional_iam_policy_statements = module.my_agent_guardrail.iam_policy_statements
+}
+
+module "runtime_config_appconfig_deployment" {
+  # ...existing arguments...
+  depends_on = [
+    # ...existing modules...
+    module.my_agent_guardrail,
+  ]
 }
 ```
 
-If your agent module already sets these arguments, combine them:
+If your agent module already sets `additional_iam_policy_statements`, combine the lists:
 
 ```hcl
-  env                              = merge(module.my_agent_guardrail.env, { MY_SETTING = "value" })
   additional_iam_policy_statements = concat(module.my_agent_guardrail.iam_policy_statements, local.my_statements)
 ```
 
-The module takes a `tags` variable and outputs `guardrail_id`, `guardrail_arn`, `guardrail_version`, `env` and `iam_policy_statements`. To add other guardrail policies, such as content filters, edit the `aws_bedrock_guardrail` resource in the module.
+The module writes the guardrail's ID and version to runtime config at `agentcore.guardrails.MyAgent`. The `agentcore` namespace is in the default `namespaces` of the runtime-config modules, so you do not need to add it. The agent module already allows the agent to read runtime config.
+
+The module takes a `tags` variable and outputs `guardrail_id`, `guardrail_arn`, `guardrail_version` and `iam_policy_statements`. To add other guardrail policies, such as content filters, edit the `aws_bedrock_guardrail` resource in the module.
 
 The module sets `create_before_destroy` on the guardrail version, so Terraform creates the new version before it deletes the old one.
   </Fragment>
 </Infrastructure>
 
-### A missing environment variable
+### A missing runtime-config entry
 
-If you forget the wiring, `getGuardrailedModel()` throws `GUARDRAIL_ID is not set` (or `GUARDRAIL_VERSION is not set`), so the agent does not run without its guardrail. An agent with the `http` or `a2a` protocol creates its `Agent` when a request arrives, so every request fails with this error. An agent with the `ag-ui` protocol creates its `Agent` at startup, so the agent fails to start.
+If you forget the wiring, runtime config has no entry for your agent. The model then throws an error before it calls Bedrock, so the agent does not run without its guardrail. For `MyAgent`, the error is:
+
+```
+No guardrail for this agent in runtime config at agentcore.guardrails.MyAgent. Add the MyAgentGuardrail construct (CDK) or the guardrails/my-agent module (Terraform) to your infrastructure.
+```
+
+The agent starts with every protocol (`http`, `a2a` and `ag-ui`), and each request fails with this error.
 
 ## Local development
 
-The `<agent>-dev` target sets `LOCAL_DEV=true`. When `LOCAL_DEV` is `true` and either variable is not set, `guardrail.ts` prints a warning once and the agent runs without a guardrail:
+The `<agent>-dev` target sets `LOCAL_DEV=true`. When `LOCAL_DEV` is `true` and the `RUNTIME_CONFIG_APP_ID` environment variable is not set, `guardrail.ts` does not read runtime config. It prints a warning once and the agent runs without a guardrail:
 
 <NxCommands commands={['agent-dev your-project']} />
 
-To test your rules locally, deploy the guardrail first. Then pass the values from the `GuardrailId` and `GuardrailVersion` stack outputs (CDK) or the module outputs (Terraform):
+To test your rules locally, deploy the guardrail first. Then set `RUNTIME_CONFIG_APP_ID` to the ID of your deployed runtime-config application, from the `RuntimeConfigApplicationId` stack output (CDK) or `module.runtime_config_appconfig.application_id` (Terraform). Your shell also needs AWS credentials that can read AppConfig and apply the guardrail:
 
-<NxCommands commands={['agent-dev your-project']} env={{ GUARDRAIL_ID: '<guardrail-id>', GUARDRAIL_VERSION: '<version>' }} />
+<NxCommands commands={['agent-dev your-project']} env={{ RUNTIME_CONFIG_APP_ID: '<application-id>' }} />
 
-The `<agent>-serve` target does not set `LOCAL_DEV`, so it needs both variables, otherwise the agent fails as described above. The `<agent>-chat` target connects to a running agent and needs no guardrail variables itself.
+The agent then reads only its own entry, so several guarded agents can run locally against the same application. If the agent cannot read runtime config, or the entry is missing, it prints the warning once and runs without a guardrail.
+
+The `<agent>-serve` target does not set `LOCAL_DEV`, so it needs `RUNTIME_CONFIG_APP_ID` and the deployed entry, otherwise each request fails as described above. The `<agent>-chat` target connects to a running agent and needs no runtime config itself.
 
 ## Cost and latency
 
