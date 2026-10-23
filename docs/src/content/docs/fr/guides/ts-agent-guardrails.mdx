@@ -19,8 +19,8 @@ Le générateur ajoute un fichier de politique qui contient vos règles, le code
 
 - `guardrail.json` à côté de votre `agent.ts` contient les règles : les sujets que votre agent doit refuser et les types de données personnelles (PII, informations personnellement identifiables) qu'il doit masquer ou bloquer.
 - Votre construct CDK ou module Terraform lit `guardrail.json` lorsque vous synthétisez ou planifiez. Il crée le garde-fou et une version numérotée de celui-ci. Une version de garde-fou est un instantané en lecture seule des règles.
-- L'infrastructure transmet l'ID et le numéro de version du garde-fou à votre agent dans les variables d'environnement `GUARDRAIL_ID` et `GUARDRAIL_VERSION`.
-- `guardrail.ts` lit ces variables et construit le modèle Bedrock avec le garde-fou appliqué. Votre appel `new Agent({...})` utilise ce modèle.
+- L'infrastructure écrit l'ID et le numéro de version du garde-fou dans <Link path="guides/runtime-config">runtime config</Link>, l'application AWS AppConfig où votre infrastructure stocke les détails des ressources déployées. L'entrée est `agentcore.guardrails.<AgentClass>`, nommée d'après la classe de votre agent, par exemple `agentcore.guardrails.MyAgent`. Chaque agent gardé a sa propre entrée.
+- `guardrail.ts` construit le modèle Bedrock que votre appel `new Agent({...})` utilise. Avant chaque appel de modèle, le modèle lit l'entrée de l'agent depuis runtime config et applique ce garde-fou.
 
 ## Utilisation
 
@@ -76,23 +76,17 @@ Le générateur modifie `agent.ts` comme ceci :
 
 Exécuter à nouveau le générateur sur le même agent ne modifie aucun fichier, et il conserve vos modifications de `guardrail.json`.
 
-Si votre agent a été généré avec `infra: none`, le générateur ajoute uniquement les fichiers de l'agent et affiche un avertissement. Vous créez alors le garde-fou vous-même et définissez `GUARDRAIL_ID` et `GUARDRAIL_VERSION` pour l'agent.
+Si votre agent a été généré avec `infra: none`, le générateur ajoute uniquement les fichiers de l'agent et affiche un avertissement. Vous créez alors le garde-fou vous-même et écrivez son ID et sa version dans runtime config à `agentcore.guardrails.<AgentClass>` sous la forme `{ guardrailId, guardrailVersion }`.
 
 ### Un agent qui définit déjà un modèle
 
-Si votre appel `new Agent({...})` définit déjà `model`, le générateur laisse `agent.ts` inchangé. Il affiche le nom du fichier et les lignes à ajouter. Ajoutez plutôt le garde-fou à vos propres options de modèle, par exemple :
+Si votre appel `new Agent({...})` définit déjà `model`, le générateur laisse `agent.ts` inchangé. Il affiche le nom du fichier et les lignes à ajouter. Pour conserver vos propres options de modèle, créez votre modèle avec la classe `GuardrailedBedrockModel` de `guardrail.ts`. Elle prend les mêmes options que `BedrockModel`, par exemple :
 
 ```ts title="agent.ts"
-import { BedrockModel } from '@strands-agents/sdk';
+import { GuardrailedBedrockModel } from './guardrail.js';
 
 const agent = new Agent({
-  model: new BedrockModel({
-    modelId: 'my-model-id',
-    guardrailConfig: {
-      guardrailIdentifier: process.env.GUARDRAIL_ID!,
-      guardrailVersion: process.env.GUARDRAIL_VERSION!,
-    },
-  }),
+  model: new GuardrailedBedrockModel({ modelId: 'my-model-id' }),
   // ...
 });
 ```
@@ -142,39 +136,38 @@ Les champs sont :
 
 ### Pourquoi la version est numérotée
 
-Chaque fois que vous modifiez `guardrail.json` et déployez, l'infrastructure crée une nouvelle version numérotée du garde-fou, et votre agent bascule vers celle-ci dans le même déploiement. La description de la version contient le hachage SHA-256 de `guardrail.json`, donc une modification du fichier change la description, et une nouvelle version remplace l'ancienne. Avec le construct CDK, le hachage couvre également tous les `props` que vous transmettez.
+Chaque fois que vous modifiez `guardrail.json` et déployez, l'infrastructure crée une nouvelle version numérotée du garde-fou et l'écrit dans runtime config. La description de la version contient le hachage SHA-256 de `guardrail.json`, donc une modification du fichier change la description, et une nouvelle version remplace l'ancienne. Avec le construct CDK, le hachage couvre également toutes les propriétés de garde-fou que vous transmettez.
 
-Votre agent n'utilise jamais la version `DRAFT`. `DRAFT` contient toujours les dernières règles, donc une modification effectuée dans la console AWS atteindrait votre agent en cours d'exécution sans déploiement. `guardrail.ts` lève une erreur si `GUARDRAIL_VERSION` n'est pas un numéro de version.
+Votre agent en cours d'exécution n'a pas besoin de redémarrage. Il met en cache ce qu'il lit depuis runtime config pendant 5 secondes, donc il utilise la nouvelle version dans les 5 secondes suivant le déploiement AppConfig. L'ancienne version est supprimée après le déploiement AppConfig : CloudFormation la supprime dans son étape de nettoyage, et Terraform la supprime après le module de déploiement lorsque vous ajoutez le module de garde-fou au `depends_on` de ce module, comme indiqué dans [Connecter le garde-fou à votre agent](#connecter-le-garde-fou-à-votre-agent).
+
+Votre agent n'utilise jamais la version `DRAFT`. `DRAFT` contient toujours les dernières règles, donc une modification effectuée dans la console AWS atteindrait votre agent en cours d'exécution sans déploiement. `guardrail.ts` lève une erreur si la version dans runtime config n'est pas un numéro de version.
 
 ## Connecter le garde-fou à votre agent
 
-Le générateur ne modifie pas votre stack ou votre module Terraform racine, de la même manière que le générateur `ts#agent` vous laisse déployer l'agent. Lorsqu'il se termine, il affiche le code ci-dessous avec les noms de votre agent remplis. Ajoutez-le pour transmettre les variables d'environnement du garde-fou à votre agent et permettre à l'agent d'appliquer le garde-fou :
+Le générateur ne modifie pas votre stack ou votre module Terraform racine, de la même manière que le générateur `ts#agent` vous laisse déployer l'agent. Lorsqu'il se termine, il affiche le code ci-dessous avec les noms de votre agent remplis. Ajoutez-le pour créer le garde-fou, écrire son entrée runtime-config et permettre à l'agent d'appliquer le garde-fou :
 
 <Infrastructure>
   <Fragment slot="cdk">
 ```ts title="packages/infra/src/stacks/application-stack.ts"
 import { MyAgent, MyAgentGuardrail } from '@my-scope/common-constructs';
 
-const guardrail = new MyAgentGuardrail(this, 'MyAgentGuardrail');
-const agent = new MyAgent(this, 'MyAgent', {
-  environmentVariables: guardrail.environmentVariables,
-});
-guardrail.grantApply(agent);
+const agent = new MyAgent(this, 'MyAgent');
+new MyAgentGuardrail(this, 'MyAgentGuardrail', { agent });
 ```
 
-Si votre agent a déjà des variables d'environnement, décomposez les deux : `environmentVariables: { ...guardrail.environmentVariables, MY_SETTING: 'value' }`.
+Le construct écrit l'ID et la version du garde-fou dans runtime config à `agentcore.guardrails.MyAgent`, et accorde à l'`agent` la permission d'appliquer le garde-fou. Le construct de l'agent permet déjà à l'agent de lire runtime config.
 
 Le construct expose :
 
 - `guardrail` (le `CfnGuardrail`) et `version` (le `CfnGuardrailVersion`)
 - `guardrailId`, `guardrailArn` et `guardrailVersion`
-- `environmentVariables`, qui renvoie `{ GUARDRAIL_ID, GUARDRAIL_VERSION }`
-- `grantApply(grantee)`, qui accorde `bedrock:ApplyGuardrail` sur le garde-fou
+- `grantApply(grantee)`, qui accorde `bedrock:ApplyGuardrail` sur le garde-fou à un autre principal
 
-Il ajoute également les sorties de stack `GuardrailId` et `GuardrailVersion`. Ses props sont toutes les propriétés `CfnGuardrail`, et elles ont la priorité sur `guardrail.json`. Par exemple, ajoutez des filtres de contenu :
+Il ajoute également les sorties de stack `GuardrailId` et `GuardrailVersion`. Ses props sont `agent` et toutes les propriétés `CfnGuardrail`. Les propriétés `CfnGuardrail` ont la priorité sur `guardrail.json`. Par exemple, ajoutez des filtres de contenu :
 
 ```ts
 new MyAgentGuardrail(this, 'MyAgentGuardrail', {
+  agent,
   contentPolicyConfig: {
     filtersConfig: [
       { type: 'HATE', inputStrength: 'HIGH', outputStrength: 'HIGH' },
@@ -184,7 +177,7 @@ new MyAgentGuardrail(this, 'MyAgentGuardrail', {
 ```
   </Fragment>
   <Fragment slot="terraform">
-Ajoutez le module `my_agent_guardrail` comme indiqué. Ajoutez ses lignes `env` et `additional_iam_policy_statements` à votre bloc de module `my_agent` existant, dans le module racine où vous déployez votre agent. Si votre module racine ne déploie pas encore l'agent, ajoutez d'abord le module de l'agent, comme décrit dans <Link path="guides/ts-agent#infrastructure-as-code">le guide de l'agent TypeScript</Link>.
+Ajoutez le module `my_agent_guardrail` comme indiqué, dans le module racine où vous déployez votre agent. Ajoutez sa ligne `additional_iam_policy_statements` à votre bloc de module `my_agent` existant. Ajoutez `module.my_agent_guardrail` à la liste `depends_on` de votre module `runtime_config_appconfig_deployment`, afin que le déploiement inclue l'entrée runtime-config du garde-fou et que Terraform supprime une ancienne version du garde-fou uniquement après le déploiement. Si votre module racine ne déploie pas encore l'agent, ajoutez d'abord le module de l'agent, comme décrit dans <Link path="guides/ts-agent#infrastructure-as-code">le guide de l'agent TypeScript</Link>.
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_agent_guardrail" {
@@ -194,39 +187,55 @@ module "my_agent_guardrail" {
 module "my_agent" {
   source = "../../common/terraform/src/app/agents/my-agent"
   # ...existing arguments...
-  env                              = module.my_agent_guardrail.env
   additional_iam_policy_statements = module.my_agent_guardrail.iam_policy_statements
+}
+
+module "runtime_config_appconfig_deployment" {
+  # ...existing arguments...
+  depends_on = [
+    # ...existing modules...
+    module.my_agent_guardrail,
+  ]
 }
 ```
 
-Si votre module d'agent définit déjà ces arguments, combinez-les :
+Si votre module d'agent définit déjà `additional_iam_policy_statements`, combinez les listes :
 
 ```hcl
-  env                              = merge(module.my_agent_guardrail.env, { MY_SETTING = "value" })
   additional_iam_policy_statements = concat(module.my_agent_guardrail.iam_policy_statements, local.my_statements)
 ```
 
-Le module prend une variable `tags` et produit `guardrail_id`, `guardrail_arn`, `guardrail_version`, `env` et `iam_policy_statements`. Pour ajouter d'autres politiques de garde-fou, telles que des filtres de contenu, modifiez la ressource `aws_bedrock_guardrail` dans le module.
+Le module écrit l'ID et la version du garde-fou dans runtime config à `agentcore.guardrails.MyAgent`. L'espace de noms `agentcore` est dans les `namespaces` par défaut des modules runtime-config, vous n'avez donc pas besoin de l'ajouter. Le module de l'agent permet déjà à l'agent de lire runtime config.
+
+Le module prend une variable `tags` et produit `guardrail_id`, `guardrail_arn`, `guardrail_version` et `iam_policy_statements`. Pour ajouter d'autres politiques de garde-fou, telles que des filtres de contenu, modifiez la ressource `aws_bedrock_guardrail` dans le module.
 
 Le module définit `create_before_destroy` sur la version du garde-fou, donc Terraform crée la nouvelle version avant de supprimer l'ancienne.
   </Fragment>
 </Infrastructure>
 
-### Une variable d'environnement manquante
+### Une entrée runtime-config manquante
 
-Si vous oubliez le câblage, `getGuardrailedModel()` lève `GUARDRAIL_ID is not set` (ou `GUARDRAIL_VERSION is not set`), donc l'agent ne s'exécute pas sans son garde-fou. Un agent avec le protocole `http` ou `a2a` crée son `Agent` lorsqu'une requête arrive, donc chaque requête échoue avec cette erreur. Un agent avec le protocole `ag-ui` crée son `Agent` au démarrage, donc l'agent ne démarre pas.
+Si vous oubliez le câblage, runtime config n'a pas d'entrée pour votre agent. Le modèle lève alors une erreur avant d'appeler Bedrock, donc l'agent ne s'exécute pas sans son garde-fou. Pour `MyAgent`, l'erreur est :
+
+```
+No guardrail for this agent in runtime config at agentcore.guardrails.MyAgent. Add the MyAgentGuardrail construct (CDK) or the guardrails/my-agent module (Terraform) to your infrastructure.
+```
+
+L'agent démarre avec tous les protocoles (`http`, `a2a` et `ag-ui`), et chaque requête échoue avec cette erreur.
 
 ## Développement local
 
-La cible `<agent>-dev` définit `LOCAL_DEV=true`. Lorsque `LOCAL_DEV` est `true` et que l'une ou l'autre variable n'est pas définie, `guardrail.ts` affiche un avertissement une fois et l'agent s'exécute sans garde-fou :
+La cible `<agent>-dev` définit `LOCAL_DEV=true`. Lorsque `LOCAL_DEV` est `true` et que la variable d'environnement `RUNTIME_CONFIG_APP_ID` n'est pas définie, `guardrail.ts` ne lit pas runtime config. Il affiche un avertissement une fois et l'agent s'exécute sans garde-fou :
 
 <NxCommands commands={['agent-dev your-project']} />
 
-Pour tester vos règles localement, déployez d'abord le garde-fou. Ensuite, transmettez les valeurs des sorties de stack `GuardrailId` et `GuardrailVersion` (CDK) ou des sorties de module (Terraform) :
+Pour tester vos règles localement, déployez d'abord le garde-fou. Ensuite, définissez `RUNTIME_CONFIG_APP_ID` sur l'ID de votre application runtime-config déployée, depuis la sortie de stack `RuntimeConfigApplicationId` (CDK) ou `module.runtime_config_appconfig.application_id` (Terraform). Votre shell a également besoin d'informations d'identification AWS qui peuvent lire AppConfig et appliquer le garde-fou :
 
-<NxCommands commands={['agent-dev your-project']} env={{ GUARDRAIL_ID: '<guardrail-id>', GUARDRAIL_VERSION: '<version>' }} />
+<NxCommands commands={['agent-dev your-project']} env={{ RUNTIME_CONFIG_APP_ID: '<application-id>' }} />
 
-La cible `<agent>-serve` ne définit pas `LOCAL_DEV`, elle a donc besoin des deux variables, sinon l'agent échoue comme décrit ci-dessus. La cible `<agent>-chat` se connecte à un agent en cours d'exécution et n'a pas besoin de variables de garde-fou elle-même.
+L'agent lit alors uniquement sa propre entrée, donc plusieurs agents gardés peuvent s'exécuter localement contre la même application. Si l'agent ne peut pas lire runtime config, ou si l'entrée est manquante, il affiche l'avertissement une fois et s'exécute sans garde-fou.
+
+La cible `<agent>-serve` ne définit pas `LOCAL_DEV`, elle a donc besoin de `RUNTIME_CONFIG_APP_ID` et de l'entrée déployée, sinon chaque requête échoue comme décrit ci-dessus. La cible `<agent>-chat` se connecte à un agent en cours d'exécution et n'a pas besoin de runtime config elle-même.
 
 ## Coût et latence
 

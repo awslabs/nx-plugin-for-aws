@@ -19,8 +19,8 @@ import RunGenerator from '@components/run-generator.astro';
 
 - 您的 `agent.ts` 旁边的 `guardrail.json` 包含规则：您的 agent 必须拒绝的主题以及必须隐藏或阻止的个人数据类型（PII，个人可识别信息）。
 - 您的 CDK construct 或 Terraform 模块在您合成或计划时读取 `guardrail.json`。它创建 guardrail 和一个编号版本。guardrail 版本是规则的只读快照。
-- 基础设施通过 `GUARDRAIL_ID` 和 `GUARDRAIL_VERSION` 环境变量将 guardrail 的 ID 和版本号传递给您的 agent。
-- `guardrail.ts` 读取这些变量并构建应用了 guardrail 的 Bedrock 模型。您的 `new Agent({...})` 调用使用该模型。
+- 基础设施将 guardrail 的 ID 和版本号写入 <Link path="guides/runtime-config">runtime config</Link>，即您的基础设施存储已部署资源详细信息的 AWS AppConfig 应用程序。条目为 `agentcore.guardrails.<AgentClass>`，以您的 agent 的类命名，例如 `agentcore.guardrails.MyAgent`。每个受保护的 agent 都有自己的条目。
+- `guardrail.ts` 构建您的 `new Agent({...})` 调用使用的 Bedrock 模型。在每次模型调用之前，模型从 runtime config 读取 agent 的条目并应用该 guardrail。
 
 ## 用法
 
@@ -76,23 +76,17 @@ import RunGenerator from '@components/run-generator.astro';
 
 在同一个 agent 上再次运行生成器不会更改任何文件，并且它会保留您对 `guardrail.json` 的编辑。
 
-如果您的 agent 是使用 `infra: none` 生成的，生成器只添加 agent 文件并打印警告。然后您自己创建 guardrail 并为 agent 设置 `GUARDRAIL_ID` 和 `GUARDRAIL_VERSION`。
+如果您的 agent 是使用 `infra: none` 生成的，生成器只添加 agent 文件并打印警告。然后您自己创建 guardrail 并将其 ID 和版本写入 runtime config 的 `agentcore.guardrails.<AgentClass>`，格式为 `{ guardrailId, guardrailVersion }`。
 
 ### 已经设置模型的 agent
 
-如果您的 `new Agent({...})` 调用已经设置了 `model`，生成器会保持 `agent.ts` 不变。它会打印文件名和要添加的行。请将 guardrail 添加到您自己的模型选项中，例如：
+如果您的 `new Agent({...})` 调用已经设置了 `model`，生成器会保持 `agent.ts` 不变。它会打印文件名和要添加的行。要保留您自己的模型选项，请使用 `guardrail.ts` 中的 `GuardrailedBedrockModel` 类创建您的模型。它接受与 `BedrockModel` 相同的选项，例如：
 
 ```ts title="agent.ts"
-import { BedrockModel } from '@strands-agents/sdk';
+import { GuardrailedBedrockModel } from './guardrail.js';
 
 const agent = new Agent({
-  model: new BedrockModel({
-    modelId: 'my-model-id',
-    guardrailConfig: {
-      guardrailIdentifier: process.env.GUARDRAIL_ID!,
-      guardrailVersion: process.env.GUARDRAIL_VERSION!,
-    },
-  }),
+  model: new GuardrailedBedrockModel({ modelId: 'my-model-id' }),
   // ...
 });
 ```
@@ -142,39 +136,38 @@ guardrail 不检查工具定义、模型传递给您的工具的参数或您的�
 
 ### 为什么版本是编号的
 
-每次您更改 `guardrail.json` 并部署时，基础设施都会创建一个新的编号 guardrail 版本，并且您的 agent 在同一部署中切换到它。版本的描述包含 `guardrail.json` 的 SHA-256 哈希，因此对文件的更改会更改描述，新版本会替换旧版本。使用 CDK construct，哈希还涵盖您传递的任何 `props`。
+每次您更改 `guardrail.json` 并部署时，基础设施都会创建一个新的编号 guardrail 版本并将其写入 runtime config。版本的描述包含 `guardrail.json` 的 SHA-256 哈希，因此对文件的更改会更改描述，新版本会替换旧版本。使用 CDK construct，哈希还涵盖您传递的任何 guardrail 属性。
 
-您的 agent 永远不会使用 `DRAFT` 版本。`DRAFT` 始终包含最新规则，因此在 AWS 控制台中进行的编辑将在没有部署的情况下到达您正在运行的 agent。如果 `GUARDRAIL_VERSION` 不是版本号，`guardrail.ts` 会抛出错误。
+您正在运行的 agent 不需要重启。它缓存从 runtime config 读取的内容 5 秒，因此它在 AppConfig 部署后的 5 秒内使用新版本。旧版本在 AppConfig 部署后被删除：CloudFormation 在其清理步骤中删除它，当您将 guardrail 模块添加到该模块的 `depends_on` 时，Terraform 在部署模块之后删除它，如[将 guardrail 连接到您的 agent](#将-guardrail-连接到您的-agent) 中所示。
+
+您的 agent 永远不会使用 `DRAFT` 版本。`DRAFT` 始终包含最新规则，因此在 AWS 控制台中进行的编辑将在没有部署的情况下到达您正在运行的 agent。如果 runtime config 中的版本不是版本号，`guardrail.ts` 会抛出错误。
 
 ## 将 guardrail 连接到您的 agent
 
-生成器不会更改您的堆栈或根 Terraform 模块，就像 `ts#agent` 生成器将部署 agent 留给您一样。完成后，它会打印下面的代码，其中填写了您的 agent 的名称。添加它以将 guardrail 的环境变量传递给您的 agent 并允许 agent 应用 guardrail：
+生成器不会更改您的堆栈或根 Terraform 模块，就像 `ts#agent` 生成器将部署 agent 留给您一样。完成后，它会打印下面的代码，其中填写了您的 agent 的名称。添加它以创建 guardrail、写入其 runtime-config 条目并允许 agent 应用 guardrail：
 
 <Infrastructure>
   <Fragment slot="cdk">
 ```ts title="packages/infra/src/stacks/application-stack.ts"
 import { MyAgent, MyAgentGuardrail } from '@my-scope/common-constructs';
 
-const guardrail = new MyAgentGuardrail(this, 'MyAgentGuardrail');
-const agent = new MyAgent(this, 'MyAgent', {
-  environmentVariables: guardrail.environmentVariables,
-});
-guardrail.grantApply(agent);
+const agent = new MyAgent(this, 'MyAgent');
+new MyAgentGuardrail(this, 'MyAgentGuardrail', { agent });
 ```
 
-如果您的 agent 已经有环境变量，请展开两者：`environmentVariables: { ...guardrail.environmentVariables, MY_SETTING: 'value' }`。
+construct 将 guardrail 的 ID 和版本写入 runtime config 的 `agentcore.guardrails.MyAgent`，并授予 `agent` 应用 guardrail 的权限。agent construct 已经允许 agent 读取 runtime config。
 
 construct 公开：
 
 - `guardrail`（`CfnGuardrail`）和 `version`（`CfnGuardrailVersion`）
 - `guardrailId`、`guardrailArn` 和 `guardrailVersion`
-- `environmentVariables`，返回 `{ GUARDRAIL_ID, GUARDRAIL_VERSION }`
-- `grantApply(grantee)`，在 guardrail 上授予 `bedrock:ApplyGuardrail`
+- `grantApply(grantee)`，在 guardrail 上向另一个主体授予 `bedrock:ApplyGuardrail`
 
-它还添加 `GuardrailId` 和 `GuardrailVersion` 堆栈输出。其 props 是任何 `CfnGuardrail` 属性，它们优先于 `guardrail.json`。例如，添加内容过滤器：
+它还添加 `GuardrailId` 和 `GuardrailVersion` 堆栈输出。其 props 是 `agent` 和任何 `CfnGuardrail` 属性。`CfnGuardrail` 属性优先于 `guardrail.json`。例如，添加内容过滤器：
 
 ```ts
 new MyAgentGuardrail(this, 'MyAgentGuardrail', {
+  agent,
   contentPolicyConfig: {
     filtersConfig: [
       { type: 'HATE', inputStrength: 'HIGH', outputStrength: 'HIGH' },
@@ -184,7 +177,7 @@ new MyAgentGuardrail(this, 'MyAgentGuardrail', {
 ```
   </Fragment>
   <Fragment slot="terraform">
-如图所示添加 `my_agent_guardrail` 模块。将其 `env` 和 `additional_iam_policy_statements` 行添加到您现有的 `my_agent` 模块块中，在您部署 agent 的根模块中。如果您的根模块尚未部署 agent，请先添加 agent 的模块，如 <Link path="guides/ts-agent#infrastructure-as-code">TypeScript Agent 指南</Link>中所述。
+如图所示添加 `my_agent_guardrail` 模块，在您部署 agent 的根模块中。将其 `additional_iam_policy_statements` 行添加到您现有的 `my_agent` 模块块中。将 `module.my_agent_guardrail` 添加到您的 `runtime_config_appconfig_deployment` 模块的 `depends_on` 列表中，以便部署包含 guardrail 的 runtime-config 条目，并且 Terraform 仅在部署后删除旧的 guardrail 版本。如果您的根模块尚未部署 agent，请先添加 agent 的模块，如 <Link path="guides/ts-agent#infrastructure-as-code">TypeScript Agent 指南</Link>中所述。
 
 ```hcl title="packages/infra/src/main.tf"
 module "my_agent_guardrail" {
@@ -194,39 +187,55 @@ module "my_agent_guardrail" {
 module "my_agent" {
   source = "../../common/terraform/src/app/agents/my-agent"
   # ...existing arguments...
-  env                              = module.my_agent_guardrail.env
   additional_iam_policy_statements = module.my_agent_guardrail.iam_policy_statements
+}
+
+module "runtime_config_appconfig_deployment" {
+  # ...existing arguments...
+  depends_on = [
+    # ...existing modules...
+    module.my_agent_guardrail,
+  ]
 }
 ```
 
-如果您的 agent 模块已经设置了这些参数，请组合它们：
+如果您的 agent 模块已经设置了 `additional_iam_policy_statements`，请组合列表：
 
 ```hcl
-  env                              = merge(module.my_agent_guardrail.env, { MY_SETTING = "value" })
   additional_iam_policy_statements = concat(module.my_agent_guardrail.iam_policy_statements, local.my_statements)
 ```
 
-该模块接受 `tags` 变量并输出 `guardrail_id`、`guardrail_arn`、`guardrail_version`、`env` 和 `iam_policy_statements`。要添加其他 guardrail 策略（如内容过滤器），请编辑模块中的 `aws_bedrock_guardrail` 资源。
+该模块将 guardrail 的 ID 和版本写入 runtime config 的 `agentcore.guardrails.MyAgent`。`agentcore` 命名空间在 runtime-config 模块的默认 `namespaces` 中，因此您不需要添加它。agent 模块已经允许 agent 读取 runtime config。
+
+该模块接受 `tags` 变量并输出 `guardrail_id`、`guardrail_arn`、`guardrail_version` 和 `iam_policy_statements`。要添加其他 guardrail 策略（如内容过滤器），请编辑模块中的 `aws_bedrock_guardrail` 资源。
 
 该模块在 guardrail 版本上设置 `create_before_destroy`，因此 Terraform 在删除旧版本之前创建新版本。
   </Fragment>
 </Infrastructure>
 
-### 缺少环境变量
+### 缺少 runtime-config 条目
 
-如果您忘记了连接，`getGuardrailedModel()` 会抛出 `GUARDRAIL_ID is not set`（或 `GUARDRAIL_VERSION is not set`），因此 agent 不会在没有其 guardrail 的情况下运行。具有 `http` 或 `a2a` 协议的 agent 在请求到达时创建其 `Agent`，因此每个请求都会因此错误而失败。具有 `ag-ui` 协议的 agent 在启动时创建其 `Agent`，因此 agent 无法启动。
+如果您忘记了连接，runtime config 没有您的 agent 的条目。然后模型在调用 Bedrock 之前抛出错误，因此 agent 不会在没有其 guardrail 的情况下运行。对于 `MyAgent`，错误是：
+
+```
+No guardrail for this agent in runtime config at agentcore.guardrails.MyAgent. Add the MyAgentGuardrail construct (CDK) or the guardrails/my-agent module (Terraform) to your infrastructure.
+```
+
+agent 使用每个协议（`http`、`a2a` 和 `ag-ui`）启动，每个请求都会因此错误而失败。
 
 ## 本地开发
 
-`<agent>-dev` 目标设置 `LOCAL_DEV=true`。当 `LOCAL_DEV` 为 `true` 且任一变量未设置时，`guardrail.ts` 会打印一次警告，agent 在没有 guardrail 的情况下运行：
+`<agent>-dev` 目标设置 `LOCAL_DEV=true`。当 `LOCAL_DEV` 为 `true` 且未设置 `RUNTIME_CONFIG_APP_ID` 环境变量时，`guardrail.ts` 不读取 runtime config。它会打印一次警告，agent 在没有 guardrail 的情况下运行：
 
 <NxCommands commands={['agent-dev your-project']} />
 
-要在本地测试您的规则，请先部署 guardrail。然后从 `GuardrailId` 和 `GuardrailVersion` 堆栈输出（CDK）或模块输出（Terraform）传递值：
+要在本地测试您的规则，请先部署 guardrail。然后将 `RUNTIME_CONFIG_APP_ID` 设置为您已部署的 runtime-config 应用程序的 ID，从 `RuntimeConfigApplicationId` 堆栈输出（CDK）或 `module.runtime_config_appconfig.application_id`（Terraform）获取。您的 shell 还需要可以读取 AppConfig 和应用 guardrail 的 AWS 凭证：
 
-<NxCommands commands={['agent-dev your-project']} env={{ GUARDRAIL_ID: '<guardrail-id>', GUARDRAIL_VERSION: '<version>' }} />
+<NxCommands commands={['agent-dev your-project']} env={{ RUNTIME_CONFIG_APP_ID: '<application-id>' }} />
 
-`<agent>-serve` 目标不设置 `LOCAL_DEV`，因此它需要两个变量，否则 agent 会如上所述失败。`<agent>-chat` 目标连接到正在运行的 agent，本身不需要 guardrail 变量。
+然后 agent 只读取自己的条目，因此多个受保护的 agent 可以针对同一应用程序在本地运行。如果 agent 无法读取 runtime config，或者条目缺失，它会打印一次警告并在没有 guardrail 的情况下运行。
+
+`<agent>-serve` 目标不设置 `LOCAL_DEV`，因此它需要 `RUNTIME_CONFIG_APP_ID` 和已部署的条目，否则每个请求都会如上所述失败。`<agent>-chat` 目标连接到正在运行的 agent，本身不需要 runtime config。
 
 ## 成本和延迟
 
