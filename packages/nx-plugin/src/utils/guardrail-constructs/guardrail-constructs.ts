@@ -39,7 +39,9 @@ export interface AddGuardrailInfraOptions {
  *
  * Files are written with `KeepExisting`, so a re-run leaves them unchanged.
  * No build dependency is added on the agent's project, since the
- * infrastructure reads a source file and imports none of the agent's code.
+ * infrastructure reads a source file and imports none of the agent's code;
+ * for CDK the generator lists that file as a `synth` input instead, so the
+ * infrastructure's cached synth follows it.
  */
 export const addGuardrailInfra = async (
   tree: Tree,

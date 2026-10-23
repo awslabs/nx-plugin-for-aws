@@ -32,6 +32,7 @@ import {
 } from '../../../utils/nx.js';
 import { TS_AGENT_GENERATOR_INFO } from '../generator.js';
 import type { TsAgentGuardrailsGeneratorSchema } from './schema';
+import { addGuardrailPolicySynthInputs } from './synth-inputs.js';
 
 export const TS_AGENT_GUARDRAILS_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(import.meta.filename);
@@ -152,12 +153,18 @@ export const tsAgentGuardrailsGenerator = async (
   const iac = agent.iac as Iac | undefined;
   let wiringMessage: string | undefined;
   if (iac) {
+    const policyPath = joinPathFragments(agentDir, 'guardrail.json');
     await addGuardrailInfra(tree, {
       iac,
       nameClassName: agentNameClassName,
       nameKebabCase,
-      policyPath: joinPathFragments(agentDir, 'guardrail.json'),
+      policyPath,
     });
+    if (iac === 'cdk') {
+      for (const message of addGuardrailPolicySynthInputs(tree, [policyPath])) {
+        logger.warn(message);
+      }
+    }
     wiringMessage = guardrailWiringMessage({
       iac,
       nameClassName: agentNameClassName,

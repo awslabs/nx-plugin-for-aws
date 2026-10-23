@@ -7,11 +7,13 @@ import { join } from 'node:path';
 import {
   addProjectConfiguration,
   logger,
+  readJson,
   readProjectConfiguration,
   type Tree,
   updateJson,
   writeJson,
 } from '@nx/devkit';
+import { tsInfraGenerator } from '../../../infra/app/generator.js';
 import {
   cdkGuardrailWiring,
   TS_AGENT_TERRAFORM_DEPLOY_GUIDE_URL,
@@ -652,5 +654,108 @@ export const getAgent = async () => new Agent({ model: 'x' });
       stubAgentConnection(),
       `${AGENT_DIR}/guardrail.ts`,
     ]);
+  });
+
+  describe('synth inputs', () => {
+    const policyInput = (agentDir: string) =>
+      `{workspaceRoot}/${agentDir}/guardrail.json`;
+
+    const addInfra = (name = 'infra') =>
+      tsInfraGenerator(tree, {
+        name,
+        directory: 'packages',
+        preferInstallDependencies: false,
+      });
+
+    const infraProjectJson = (root = 'packages/infra') =>
+      `${root}/project.json`;
+
+    const synthInputs = (root = 'packages/infra') =>
+      readJson(tree, infraProjectJson(root)).targets.synth.inputs;
+
+    it('should add guardrail.json to the synth inputs of the CDK infrastructure', async () => {
+      await addInfra();
+      await addAgent({ iac: 'cdk' });
+
+      await tsAgentGuardrailsGenerator(tree, { project: 'test-project' });
+
+      expect(synthInputs()).toEqual(['default', policyInput(AGENT_DIR)]);
+    });
+
+    it("should add each guarded agent's guardrail.json once to every infrastructure project", async () => {
+      await addInfra();
+      await addInfra('infra-two');
+      await addAgent({ name: 'my-agent', iac: 'cdk' });
+      await addAgent({ name: 'other-agent', iac: 'cdk' });
+
+      for (let run = 0; run < 2; run++) {
+        for (const agent of ['my-agent', 'other-agent']) {
+          await tsAgentGuardrailsGenerator(tree, {
+            project: 'test-project',
+            agent,
+          });
+        }
+      }
+
+      const expected = [
+        'default',
+        policyInput('apps/test-project/src/my-agent'),
+        policyInput('apps/test-project/src/other-agent'),
+      ];
+      expect(synthInputs()).toEqual(expected);
+      expect(synthInputs('packages/infra-two')).toEqual(expected);
+    });
+
+    it("should keep the user's synth inputs and add the policy after them", async () => {
+      await addInfra();
+      updateJson(tree, infraProjectJson(), (config) => {
+        config.targets.synth.inputs = [
+          'default',
+          '{workspaceRoot}/custom.json',
+        ];
+        return config;
+      });
+      await addAgent({ iac: 'cdk' });
+
+      await tsAgentGuardrailsGenerator(tree, { project: 'test-project' });
+
+      expect(synthInputs()).toEqual([
+        'default',
+        '{workspaceRoot}/custom.json',
+        policyInput(AGENT_DIR),
+      ]);
+    });
+
+    it('should warn and leave a synth target without inputs unchanged', async () => {
+      await addInfra();
+      updateJson(tree, infraProjectJson(), (config) => {
+        delete config.targets.synth.inputs;
+        return config;
+      });
+      await addAgent({ iac: 'cdk' });
+      const warn = vi.spyOn(logger, 'warn');
+
+      await tsAgentGuardrailsGenerator(tree, { project: 'test-project' });
+
+      expect(
+        readJson(tree, infraProjectJson()).targets.synth,
+      ).not.toHaveProperty('inputs');
+      const warnings = warn.mock.calls
+        .map(([message]) => String(message))
+        .filter((message) => message.includes('synth'));
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain('@proj/infra');
+      expect(warnings[0]).toContain('packages/infra/project.json');
+      expect(warnings[0]).toContain(policyInput(AGENT_DIR));
+    });
+
+    it('should not add synth inputs for a Terraform guardrail', async () => {
+      await addInfra();
+      await addAgent({ iac: 'terraform' });
+
+      await tsAgentGuardrailsGenerator(tree, { project: 'test-project' });
+
+      expect(synthInputs()).toEqual(['default']);
+    });
   });
 });
