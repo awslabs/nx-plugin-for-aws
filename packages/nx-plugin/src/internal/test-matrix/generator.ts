@@ -16,6 +16,7 @@ import {
   type PyApiGeneratorSchema,
   type PyRdbGeneratorSchema,
   pyAgentGenerator,
+  pyAgentGuardrailsGenerator,
   pyApiGenerator,
   pyDynamoDBGenerator,
   pyLambdaFunctionGenerator,
@@ -406,6 +407,11 @@ export const internalTestMatrixGenerator = async (
   for (const agent of pyAgents) {
     await pyAgentGenerator(tree, { ...agent, ...defaults });
   }
+  // Guard the default Python agent, which has AgentCore infrastructure.
+  await pyAgentGuardrailsGenerator(tree, {
+    project: 'py_project',
+    agent: 'my-agent',
+  });
   await pyProjectGenerator(tree, {
     name: 'py-langchain-project',
     type: 'application',
