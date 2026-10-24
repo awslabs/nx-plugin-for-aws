@@ -8,6 +8,10 @@ terraform {
       source  = "hashicorp/random"
       version = "<%- randomProviderVersion %>"
     }
+    time = {
+      source  = "hashicorp/time"
+      version = "<%- timeProviderVersion %>"
+    }
   }
 }
 
@@ -72,12 +76,25 @@ resource "aws_bedrock_guardrail_version" "this" {
   }
 }
 
+resource "time_sleep" "version_retention" {
+  destroy_duration = "15s"
+
+  triggers = {
+    guardrail_id      = aws_bedrock_guardrail.this.guardrail_id
+    guardrail_version = aws_bedrock_guardrail_version.this.version
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
 module "add_guardrail_to_runtime_config" {
   source = "../../../core/runtime-config/entry"
 
   namespace = "agentcore"
   key       = "guardrails"
-  value     = { "<%= nameClassName %>" = { guardrailId = aws_bedrock_guardrail.this.guardrail_id, guardrailVersion = aws_bedrock_guardrail_version.this.version } }
+  value     = { "<%= nameClassName %>" = { guardrailId = time_sleep.version_retention.triggers.guardrail_id, guardrailVersion = time_sleep.version_retention.triggers.guardrail_version } }
 }
 
 output "guardrail_id" {

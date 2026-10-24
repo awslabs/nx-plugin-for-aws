@@ -138,7 +138,7 @@ Write a topic `definition` that describes the topic itself. For example, "Recomm
 
 Each time you change `guardrail.json` and deploy, the infrastructure creates a new numbered guardrail version and writes it to runtime config. The version's description holds the SHA-256 hash of `guardrail.json`, so a change to the file changes the description, and a new version replaces the old one. With the CDK construct, the hash also covers any guardrail properties you pass.
 
-Your running agent does not need a restart. It caches what it reads from runtime config for 5 seconds, so it uses the new version within 5 seconds of the AppConfig deployment. The old version is deleted after the AppConfig deployment: CloudFormation deletes it in its cleanup step, and Terraform deletes it after the deployment module when you add the guardrail module to that module's `depends_on`, as shown in [Wiring the guardrail to your agent](#wiring-the-guardrail-to-your-agent).
+Your running agent does not need a restart. It caches what it reads from runtime config for 5 seconds, so it uses the new version within 5 seconds of the AppConfig deployment. The old version is deleted after the AppConfig deployment. CloudFormation deletes it in its cleanup step, which in one measurement (2026-10-24, us-east-1) began about 7 seconds after the deployment completed. CloudFormation does not guarantee that delay. Terraform keeps the old version for about 15 seconds after the deployment module, so the 5-second cache never points at a deleted version. This works when you add the guardrail module to that module's `depends_on`, as shown in [Wiring the guardrail to your agent](#wiring-the-guardrail-to-your-agent).
 
 Your agent never uses the `DRAFT` version. `DRAFT` always holds the latest rules, so an edit made in the AWS console would reach your running agent without a deployment. `guardrail.ts` throws an error if the version in runtime config is not a version number.
 
@@ -209,7 +209,7 @@ The module writes the guardrail's ID and version to runtime config at `agentcore
 
 The module takes a `tags` variable and outputs `guardrail_id`, `guardrail_arn`, `guardrail_version` and `iam_policy_statements`. To add other guardrail policies, such as content filters, edit the `aws_bedrock_guardrail` resource in the module.
 
-The module sets `create_before_destroy` on the guardrail version, so Terraform creates the new version before it deletes the old one.
+The module sets `create_before_destroy` on the guardrail version, so Terraform creates the new version before it deletes the old one. A `time_sleep` resource from the `hashicorp/time` provider keeps the old version for about 15 seconds after the runtime-config deployment, and the runtime-config entry reads the guardrail ID and version from it. Because of this wait, `terraform destroy` also takes about 15 seconds longer.
   </Fragment>
 </Infrastructure>
 

@@ -23,6 +23,7 @@ import { expectHasMetricTags } from '../../../utils/metrics-assertions.js';
 import { getNpmScope } from '../../../utils/npm-scope.js';
 import { TypeScriptVerifier } from '../../../utils/test/ts.spec.js';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
+import { TERRAFORM_VERSIONS } from '../../../utils/versions.js';
 import { tsAgentGenerator } from '../generator.js';
 import type { AgentProtocol } from '../schema';
 import {
@@ -567,6 +568,26 @@ export const getAgent = async () => new Agent({ model: 'x' });
       'depends_on = [module.add_guardrail_to_runtime_config]',
     );
     expect(tree.exists(`${CONSTRUCTS_APP}/guardrails`)).toBeFalsy();
+  });
+
+  it('should keep a replaced Terraform guardrail version for 15 seconds after the runtime-config deployment', async () => {
+    await addAgent({ iac: 'terraform' });
+
+    await tsAgentGuardrailsGenerator(tree, { project: 'test-project' });
+
+    // Agents cache their runtime-config entry for 5 seconds. The entry reads
+    // the version through the time_sleep, so the deposed sleep (and its
+    // 15-second destroy_duration) runs after the runtime-config deployment,
+    // and the deposed version is destroyed after the sleep.
+    const module = tree.read(MODULE_FILE, 'utf-8');
+    expect(module).toContain('source  = "hashicorp/time"');
+    expect(module).toContain(`version = "${TERRAFORM_VERSIONS.time}"`);
+    expect(module).toMatch(
+      /resource "time_sleep" "version_retention" \{\n {2}destroy_duration = "15s"\n\n {2}triggers = \{\n {4}guardrail_id {6}= aws_bedrock_guardrail\.this\.guardrail_id\n {4}guardrail_version = aws_bedrock_guardrail_version\.this\.version\n {2}\}\n\n {2}lifecycle \{\n {4}create_before_destroy = true\n {2}\}\n\}/,
+    );
+    expect(module).toContain(
+      '{ "TestProjectAgent" = { guardrailId = time_sleep.version_retention.triggers.guardrail_id, guardrailVersion = time_sleep.version_retention.triggers.guardrail_version } }',
+    );
   });
 
   it('should vend a policy within the Bedrock guardrail limits', async () => {
