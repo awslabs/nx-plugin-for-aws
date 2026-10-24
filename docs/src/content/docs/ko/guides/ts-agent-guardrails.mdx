@@ -138,7 +138,7 @@ const agent = new Agent({
 
 `guardrail.json`을 변경하고 배포할 때마다 인프라는 새로운 번호가 매겨진 가드레일 버전을 생성하고 runtime config에 씁니다. 버전의 설명에는 `guardrail.json`의 SHA-256 해시가 포함되어 있으므로 파일을 변경하면 설명이 변경되고 새 버전이 이전 버전을 대체합니다. CDK 구성의 경우 해시는 전달하는 모든 가드레일 속성도 포함합니다.
 
-실행 중인 에이전트는 재시작이 필요하지 않습니다. runtime config에서 읽은 내용을 5초 동안 캐시하므로 AppConfig 배포 후 5초 이내에 새 버전을 사용합니다. 이전 버전은 AppConfig 배포 후 삭제됩니다: CloudFormation은 정리 단계에서 삭제하고, Terraform은 [에이전트에 가드레일 연결](#에이전트에-가드레일-연결)에 표시된 대로 가드레일 모듈을 해당 모듈의 `depends_on`에 추가하면 배포 모듈 후에 삭제합니다.
+실행 중인 에이전트는 재시작이 필요하지 않습니다. runtime config에서 읽은 내용을 5초 동안 캐시하므로 AppConfig 배포 후 5초 이내에 새 버전을 사용합니다. 이전 버전은 AppConfig 배포 후 삭제됩니다. CloudFormation은 정리 단계에서 삭제하며, 한 측정(2026-10-24, us-east-1)에서는 배포 완료 후 약 7초 후에 시작되었습니다. CloudFormation은 이 지연을 보장하지 않습니다. Terraform은 배포 모듈 후 약 15초 동안 이전 버전을 유지하므로 5초 캐시가 삭제된 버전을 가리키지 않습니다. 이는 [에이전트에 가드레일 연결](#에이전트에-가드레일-연결)에 표시된 대로 가드레일 모듈을 해당 모듈의 `depends_on`에 추가할 때 작동합니다.
 
 에이전트는 `DRAFT` 버전을 사용하지 않습니다. `DRAFT`는 항상 최신 규칙을 보유하므로 AWS 콘솔에서 수행한 편집이 배포 없이 실행 중인 에이전트에 도달할 수 있습니다. `guardrail.ts`는 runtime config의 버전이 버전 번호가 아닌 경우 오류를 발생시킵니다.
 
@@ -209,7 +209,7 @@ module "runtime_config_appconfig_deployment" {
 
 모듈은 `tags` 변수를 받고 `guardrail_id`, `guardrail_arn`, `guardrail_version` 및 `iam_policy_statements`를 출력합니다. 콘텐츠 필터와 같은 다른 가드레일 정책을 추가하려면 모듈의 `aws_bedrock_guardrail` 리소스를 편집하세요.
 
-모듈은 가드레일 버전에 `create_before_destroy`를 설정하므로 Terraform은 이전 버전을 삭제하기 전에 새 버전을 생성합니다.
+모듈은 가드레일 버전에 `create_before_destroy`를 설정하므로 Terraform은 이전 버전을 삭제하기 전에 새 버전을 생성합니다. `hashicorp/time` 제공자의 `time_sleep` 리소스는 runtime-config 배포 후 약 15초 동안 이전 버전을 유지하며, runtime-config 항목은 여기에서 가드레일 ID와 버전을 읽습니다. 이 대기 시간 때문에 `terraform destroy`도 약 15초 더 오래 걸립니다.
   </Fragment>
 </Infrastructure>
 

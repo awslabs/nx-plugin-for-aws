@@ -138,7 +138,7 @@ guardrail 不检查工具定义、模型传递给您的工具的参数或您的�
 
 每次您更改 `guardrail.json` 并部署时，基础设施都会创建一个新的编号 guardrail 版本并将其写入 runtime config。版本的描述包含 `guardrail.json` 的 SHA-256 哈希，因此对文件的更改会更改描述，新版本会替换旧版本。使用 CDK construct，哈希还涵盖您传递的任何 guardrail 属性。
 
-您正在运行的 agent 不需要重启。它缓存从 runtime config 读取的内容 5 秒，因此它在 AppConfig 部署后的 5 秒内使用新版本。旧版本在 AppConfig 部署后被删除：CloudFormation 在其清理步骤中删除它，当您将 guardrail 模块添加到该模块的 `depends_on` 时，Terraform 在部署模块之后删除它，如[将 guardrail 连接到您的 agent](#将-guardrail-连接到您的-agent) 中所示。
+您正在运行的 agent 不需要重启。它缓存从 runtime config 读取的内容 5 秒，因此它在 AppConfig 部署后的 5 秒内使用新版本。旧版本在 AppConfig 部署后被删除。CloudFormation 在其清理步骤中删除它，在一次测量中（2026-10-24，us-east-1）在部署完成后约 7 秒开始。CloudFormation 不保证该延迟。Terraform 在部署模块后约 15 秒保留旧版本，因此 5 秒缓存永远不会指向已删除的版本。当您将 guardrail 模块添加到该模块的 `depends_on` 时，这会起作用，如[将 guardrail 连接到您的 agent](#将-guardrail-连接到您的-agent) 中所示。
 
 您的 agent 永远不会使用 `DRAFT` 版本。`DRAFT` 始终包含最新规则，因此在 AWS 控制台中进行的编辑将在没有部署的情况下到达您正在运行的 agent。如果 runtime config 中的版本不是版本号，`guardrail.ts` 会抛出错误。
 
@@ -209,7 +209,7 @@ module "runtime_config_appconfig_deployment" {
 
 该模块接受 `tags` 变量并输出 `guardrail_id`、`guardrail_arn`、`guardrail_version` 和 `iam_policy_statements`。要添加其他 guardrail 策略（如内容过滤器），请编辑模块中的 `aws_bedrock_guardrail` 资源。
 
-该模块在 guardrail 版本上设置 `create_before_destroy`，因此 Terraform 在删除旧版本之前创建新版本。
+该模块在 guardrail 版本上设置 `create_before_destroy`，因此 Terraform 在删除旧版本之前创建新版本。来自 `hashicorp/time` 提供程序的 `time_sleep` 资源在 runtime-config 部署后约 15 秒保留旧版本，runtime-config 条目从中读取 guardrail ID 和版本。由于这种等待，`terraform destroy` 也需要约 15 秒更长的时间。
   </Fragment>
 </Infrastructure>
 

@@ -1,0 +1,306 @@
+---
+title: Garde-fous pour Agent Python
+description: Attacher un Amazon Bedrock Guardrail à un Agent Python Strands ou LangChain
+generator: py#agent#guardrails
+---
+
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import RunGenerator from '@components/run-generator.astro';
+
+Attachez un [Amazon Bedrock Guardrail](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html) à un <Link path="guides/py-agent">Agent Python</Link>. Un garde-fou est un ensemble de règles qu'Amazon Bedrock applique aux messages que votre agent envoie au modèle et aux réponses du modèle. Sans garde-fou, un utilisateur peut interroger votre agent sur n'importe quel sujet, et le modèle peut répéter des données personnelles telles que des adresses e-mail dans ses réponses.
+
+Le générateur ajoute un fichier de politique qui contient vos règles, le code qui applique le garde-fou au modèle de votre agent, et l'infrastructure qui crée le garde-fou dans votre compte AWS. Il prend en charge les deux frameworks `py#agent`, Strands et LangChain, avec tous les protocoles.
+
+## Comment cela fonctionne
+
+- `guardrail.json` à côté de votre `agent.py` contient les règles : les sujets que votre agent doit refuser et les types de données personnelles (PII, informations personnellement identifiables) qu'il doit masquer ou bloquer.
+- Votre construct CDK ou module Terraform lit `guardrail.json` lorsque vous synthétisez ou planifiez. Il crée le garde-fou et une version numérotée de celui-ci. Une version de garde-fou est un instantané en lecture seule des règles.
+- L'infrastructure écrit l'ID et le numéro de version du garde-fou dans la <Link path="guides/runtime-config">configuration d'exécution</Link>, l'application AWS AppConfig où votre infrastructure stocke les détails des ressources déployées. L'entrée est `agentcore.guardrails.<AgentClass>`, nommée d'après la classe de votre agent, par exemple `agentcore.guardrails.MyAgent`. Chaque agent protégé a sa propre entrée.
+- `guardrail.py` définit le modèle Bedrock que votre `agent.py` utilise. Avant chaque appel au modèle, le modèle lit l'entrée de l'agent depuis la configuration d'exécution et ajoute ce garde-fou à la requête.
+
+## Utilisation
+
+### Générer des garde-fous pour Agent
+
+Vous aurez besoin d'un projet Python existant contenant un agent créé avec le générateur `py#agent`.
+
+<RunGenerator generator="py#agent#guardrails" />
+
+### Options
+
+<GeneratorParameters generator="py#agent#guardrails" />
+
+## Sortie du générateur
+
+Le générateur ajoute les fichiers suivants à côté de votre agent, où `<module>` est le module Python de votre projet et `<agent>` est le nom en snake-case de votre composant agent (`agent` par défaut) :
+
+<FileTree>
+  - \<your-project>/\<module>/\<agent>/
+    - agent.py Votre agent, maintenant créé avec le modèle protégé
+    - guardrail.json Les règles que votre garde-fou applique
+    - guardrail.py Définit le modèle Bedrock avec le garde-fou appliqué
+</FileTree>
+
+Il ajoute également l'infrastructure pour le fournisseur `iac` de votre agent, où `<agent-name>` est le nom en kebab-case du construct ou module de votre agent :
+
+<Infrastructure>
+  <Fragment slot="cdk">
+    <FileTree>
+      - packages/common/constructs/src/app/guardrails/\<agent-name>/
+        - \<agent-name>-guardrail.ts Construct CDK contenant le garde-fou et sa version
+    </FileTree>
+  </Fragment>
+  <Fragment slot="terraform">
+    <FileTree>
+      - packages/common/terraform/src/app/guardrails/\<agent-name>/
+        - \<agent-name>-guardrail.tf Module Terraform contenant le garde-fou et sa version
+    </FileTree>
+  </Fragment>
+</Infrastructure>
+
+Le générateur modifie `agent.py` comme ceci :
+
+<Tabs syncKey="agent-framework">
+<TabItem label="Strands">
+```diff lang="python"
++from .guardrail import get_guardrailed_model
+ from .session import get_session_manager
+
+ @contextmanager
+ def get_agent():
+     yield Agent(
++        model=get_guardrailed_model(),
+         name="MyAgent",
+```
+
+`get_guardrailed_model()` retourne un `GuardrailedBedrockModel`, une sous-classe du `BedrockModel` de Strands. Il utilise le même modèle par défaut qu'un `Agent` créé sans `model`.
+</TabItem>
+<TabItem label="LangChain">
+```diff lang="python"
+-from langchain_aws import ChatBedrockConverse
+ from langchain_core.tools import tool
+
++from .guardrail import GuardrailedChatBedrockConverse
+ from .session import get_checkpointer
+
+ def get_agent():
+-    model = ChatBedrockConverse(model=MODEL_ID, region_name=REGION)
++    model = GuardrailedChatBedrockConverse(model=MODEL_ID, region_name=REGION)
+```
+
+`GuardrailedChatBedrockConverse` est une sous-classe de `ChatBedrockConverse`. Le générateur conserve les arguments de votre appel `ChatBedrockConverse(...)`.
+</TabItem>
+</Tabs>
+
+Exécuter le générateur à nouveau sur le même agent ne modifie aucun fichier, et il conserve vos modifications de `guardrail.json` et `guardrail.py`.
+
+Si votre agent a été généré avec `infra: none`, le générateur ajoute uniquement les fichiers de l'agent et affiche un avertissement. Vous créez alors le garde-fou vous-même et écrivez son ID et sa version dans la configuration d'exécution à `agentcore.guardrails.<AgentClass>` sous la forme `{ guardrailId, guardrailVersion }`.
+
+Si un agent TypeScript dans un autre projet a le même nom de classe et possède déjà un garde-fou, le générateur s'arrête avec une erreur et ne modifie aucun fichier. Les deux agents partageraient un construct d'exécution et un garde-fou. Donnez à l'un des agents un nom différent.
+
+### Un agent qui définit déjà un modèle
+
+Si `agent.py` n'a pas la forme attendue, le générateur le laisse inchangé. Il affiche le nom du fichier et les lignes à ajouter.
+
+<Tabs syncKey="agent-framework">
+<TabItem label="Strands">
+Cela se produit lorsque votre appel `Agent(...)` définit déjà `model`. Pour conserver vos propres options de modèle, créez votre modèle avec la classe `GuardrailedBedrockModel` de `guardrail.py`. Elle prend les mêmes options que `BedrockModel`, par exemple :
+
+```python title="agent.py"
+from .guardrail import GuardrailedBedrockModel
+
+agent = Agent(
+    model=GuardrailedBedrockModel(model_id="my-model-id"),
+    # ...
+)
+```
+</TabItem>
+<TabItem label="LangChain">
+Cela se produit lorsque `agent.py` n'a pas d'appel `ChatBedrockConverse(...)`, par exemple parce que vous créez votre modèle d'une autre manière. Créez votre modèle avec la classe `GuardrailedChatBedrockConverse` de `guardrail.py`. Elle prend les mêmes arguments que `ChatBedrockConverse`, par exemple :
+
+```python title="agent.py"
+from .guardrail import GuardrailedChatBedrockConverse
+
+model = GuardrailedChatBedrockConverse(model=MODEL_ID, region_name=REGION)
+```
+</TabItem>
+</Tabs>
+
+## Ce que le garde-fou vérifie
+
+Le garde-fou vérifie deux choses à chaque appel au modèle :
+
+- la conversation que votre agent envoie au modèle, y compris le dernier message de l'utilisateur
+- la réponse du modèle, avant que votre agent ne la diffuse en continu à l'utilisateur
+
+Lorsque le garde-fou bloque le message d'un utilisateur, le modèle n'est pas appelé. Lorsqu'une règle `ANONYMIZE` correspond, la réponse contient un espace réservé tel que `{EMAIL}` au lieu de la valeur. Lorsque le garde-fou bloque une réponse, l'utilisateur reçoit le texte `blockedOutputsMessaging`.
+
+<Tabs syncKey="agent-framework">
+<TabItem label="Strands">
+Lorsque le garde-fou bloque le message d'un utilisateur, l'utilisateur reçoit le texte `blockedInputMessaging`. Strands remplace également le message bloqué dans l'historique de conversation de l'agent par `[User input redacted.]`.
+</TabItem>
+<TabItem label="LangChain">
+Lorsque le garde-fou bloque le message d'un utilisateur, la réponse du modèle est le texte `blockedInputMessaging`, et l'utilisateur reçoit ce texte.
+
+Lors des appels ultérieurs au modèle dans la même session, `guardrail.py` envoie `[User input redacted.]` à la place de chaque message utilisateur dont le tour a été bloqué par le garde-fou, comme le fait Strands. Le garde-fou vérifie l'ensemble de la conversation à chaque appel, donc sans cela, le message bloqué bloquerait chaque message ultérieur dans la session. Le checkpointer enregistre toujours le message original.
+</TabItem>
+</Tabs>
+
+Le garde-fou ne vérifie pas les définitions d'outils, les arguments que le modèle transmet à vos outils, ou les résultats que vos outils retournent. Par exemple, si un outil retourne l'adresse e-mail d'un client depuis une base de données, le garde-fou ne la masque pas au modèle. Traitez les résultats des outils comme non fiables, comme le décrit le <Link path="guides/py-agent">guide Agent Python</Link> sous « Sécuriser votre Agent ».
+
+## Éditer guardrail.json
+
+La politique fournie est un exemple pour l'agent mathématique généré. Elle refuse les conseils d'investissement et masque ou bloque trois types de données personnelles :
+
+```json title="guardrail.json"
+{
+  "blockedInputMessaging": "Sorry, I can't help with that request.",
+  "blockedOutputsMessaging": "Sorry, I can't share that answer.",
+  "deniedTopics": [
+    {
+      "name": "Investment advice",
+      "definition": "Recommendations about which specific stocks, funds or other investments to buy or sell.",
+      "examples": ["Which stocks should I buy this year?"]
+    }
+  ],
+  "piiEntities": [
+    { "type": "EMAIL", "action": "ANONYMIZE" },
+    { "type": "PHONE", "action": "ANONYMIZE" },
+    { "type": "US_SOCIAL_SECURITY_NUMBER", "action": "BLOCK" }
+  ]
+}
+```
+
+Les champs sont :
+
+- `blockedInputMessaging` : la réponse qu'un utilisateur reçoit lorsque le garde-fou bloque son message. 500 caractères maximum.
+- `blockedOutputsMessaging` : la réponse qu'un utilisateur reçoit lorsque le garde-fou bloque la réponse du modèle. 500 caractères maximum.
+- `deniedTopics` : sujets que votre agent doit refuser. Chaque sujet a un `name` (100 lettres, chiffres, espaces et caractères `-_!?.` maximum), une `definition` de 1000 caractères maximum qui décrit le sujet, et des `examples` optionnels de 100 caractères maximum chacun.
+- `piiEntities` : types de données personnelles sur lesquels agir. `type` est un [type d'information sensible](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails-sensitive-filters.html) tel que `EMAIL`, `PHONE` ou `US_SOCIAL_SECURITY_NUMBER`. `action` est `ANONYMIZE` pour remplacer la valeur par un espace réservé, ou `BLOCK` pour bloquer l'ensemble du message ou de la réponse.
+
+Écrivez une `definition` de sujet qui décrit le sujet lui-même. Par exemple, « Recommandations sur quelles actions spécifiques acheter » fonctionne mieux que « Ne donnez pas de conseils d'investissement ».
+
+### Pourquoi la version est numérotée
+
+Chaque fois que vous modifiez `guardrail.json` et déployez, l'infrastructure crée une nouvelle version numérotée du garde-fou et l'écrit dans la configuration d'exécution. La description de la version contient le hachage SHA-256 de `guardrail.json`, donc une modification du fichier change la description, et une nouvelle version remplace l'ancienne. Avec le construct CDK, le hachage couvre également toutes les propriétés de garde-fou que vous transmettez.
+
+Votre agent en cours d'exécution n'a pas besoin de redémarrage. `guardrail.py` conserve ce qu'il lit de la configuration d'exécution pendant 5 secondes, donc l'agent utilise la nouvelle version dans les 5 secondes suivant le déploiement AppConfig. L'ancienne version est supprimée après le déploiement AppConfig. CloudFormation la supprime dans son étape de nettoyage, qui dans une mesure (2026-10-24, us-east-1) a commencé environ 7 secondes après la fin du déploiement. CloudFormation ne garantit pas ce délai. Terraform conserve l'ancienne version pendant environ 15 secondes après le module de déploiement, donc le cache de 5 secondes ne pointe jamais vers une version supprimée. Cela fonctionne lorsque vous ajoutez le module de garde-fou au `depends_on` de ce module, comme indiqué dans [Connecter le garde-fou à votre agent](#connecter-le-garde-fou-à-votre-agent).
+
+Votre agent n'utilise jamais la version `DRAFT`. `DRAFT` contient toujours les dernières règles, donc une modification effectuée dans la console AWS atteindrait votre agent en cours d'exécution sans déploiement. `guardrail.py` lève une erreur si la version dans la configuration d'exécution n'est pas un numéro de version.
+
+## Connecter le garde-fou à votre agent
+
+Le générateur ne modifie pas votre stack ou votre module Terraform racine, de la même manière que le générateur `py#agent` vous laisse déployer l'agent. Lorsqu'il se termine, il affiche le code ci-dessous avec les noms de votre agent remplis. Ajoutez-le pour créer le garde-fou, écrire son entrée de configuration d'exécution et autoriser l'agent à appliquer le garde-fou :
+
+<Infrastructure>
+  <Fragment slot="cdk">
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyAgent, MyAgentGuardrail } from '@my-scope/common-constructs';
+
+const agent = new MyAgent(this, 'MyAgent');
+new MyAgentGuardrail(this, 'MyAgentGuardrail', { agent });
+```
+
+Le construct écrit l'ID et la version du garde-fou dans la configuration d'exécution à `agentcore.guardrails.MyAgent`, et accorde à l'`agent` la permission d'appliquer le garde-fou. Le construct de l'agent autorise déjà l'agent à lire la configuration d'exécution.
+
+Le construct expose :
+
+- `guardrail` (le `CfnGuardrail`) et `version` (le `CfnGuardrailVersion`)
+- `guardrailId`, `guardrailArn` et `guardrailVersion`
+- `grantApply(grantee)`, qui accorde `bedrock:ApplyGuardrail` sur le garde-fou à un autre principal
+
+Il ajoute également les sorties de stack `GuardrailId` et `GuardrailVersion`. Ses props sont `agent` et toutes les propriétés `CfnGuardrail`. Les propriétés `CfnGuardrail` ont la priorité sur `guardrail.json`. Par exemple, ajoutez des filtres de contenu :
+
+```ts
+new MyAgentGuardrail(this, 'MyAgentGuardrail', {
+  agent,
+  contentPolicyConfig: {
+    filtersConfig: [
+      { type: 'HATE', inputStrength: 'HIGH', outputStrength: 'HIGH' },
+    ],
+  },
+});
+```
+
+Le générateur ajoute également `guardrail.json` aux entrées `synth` de chaque projet d'infrastructure CDK, donc une modification du fichier exécute à nouveau la synthèse au lieu d'utiliser le cache Nx.
+  </Fragment>
+  <Fragment slot="terraform">
+Ajoutez le module `my_agent_guardrail` comme indiqué, dans le module racine où vous déployez votre agent. Ajoutez sa ligne `additional_iam_policy_statements` à votre bloc de module `my_agent` existant. Ajoutez `module.my_agent_guardrail` à la liste `depends_on` de votre module `runtime_config_appconfig_deployment`, afin que le déploiement inclue l'entrée de configuration d'exécution du garde-fou et que Terraform supprime une ancienne version du garde-fou uniquement après le déploiement. Si votre module racine ne déploie pas encore l'agent, ajoutez d'abord le module de l'agent, comme décrit dans <Link path="guides/py-agent#infrastructure-as-code">le guide Agent Python</Link>.
+
+```hcl title="packages/infra/src/main.tf"
+module "my_agent_guardrail" {
+  source = "../../common/terraform/src/app/guardrails/my-agent"
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+  # ...existing arguments...
+  additional_iam_policy_statements = module.my_agent_guardrail.iam_policy_statements
+}
+
+module "runtime_config_appconfig_deployment" {
+  # ...existing arguments...
+  depends_on = [
+    # ...existing modules...
+    module.my_agent_guardrail,
+  ]
+}
+```
+
+Si votre module d'agent définit déjà `additional_iam_policy_statements`, combinez les listes :
+
+```hcl
+  additional_iam_policy_statements = concat(module.my_agent_guardrail.iam_policy_statements, local.my_statements)
+```
+
+Le module écrit l'ID et la version du garde-fou dans la configuration d'exécution à `agentcore.guardrails.MyAgent`. L'espace de noms `agentcore` est dans les `namespaces` par défaut des modules de configuration d'exécution, vous n'avez donc pas besoin de l'ajouter. Le module de l'agent autorise déjà l'agent à lire la configuration d'exécution.
+
+Le module prend une variable `tags` et produit `guardrail_id`, `guardrail_arn`, `guardrail_version` et `iam_policy_statements`. Pour ajouter d'autres politiques de garde-fou, telles que des filtres de contenu, modifiez la ressource `aws_bedrock_guardrail` dans le module.
+
+Le module définit `create_before_destroy` sur la version du garde-fou, donc Terraform crée la nouvelle version avant de supprimer l'ancienne. Une ressource `time_sleep` du fournisseur `hashicorp/time` conserve l'ancienne version pendant environ 15 secondes après le déploiement de la configuration d'exécution, et l'entrée de configuration d'exécution lit l'ID et la version du garde-fou à partir de celle-ci. En raison de cette attente, `terraform destroy` prend également environ 15 secondes de plus.
+  </Fragment>
+</Infrastructure>
+
+### Une entrée de configuration d'exécution manquante
+
+Si vous oubliez le câblage, la configuration d'exécution n'a pas d'entrée pour votre agent. Le modèle lève alors une erreur avant d'appeler Bedrock, donc l'agent ne s'exécute pas sans son garde-fou. Pour `MyAgent`, l'erreur est :
+
+```
+No guardrail for this agent in runtime config at agentcore.guardrails.MyAgent. Add the MyAgentGuardrail construct (CDK) or the guardrails/my-agent module (Terraform) to your infrastructure.
+```
+
+L'agent démarre avec tous les protocoles (`http`, `a2a` et `ag-ui`), et chaque requête échoue avec cette erreur. Si l'agent ne peut pas lire la configuration d'exécution du tout, par exemple parce que `RUNTIME_CONFIG_APP_ID` n'est pas défini, chaque requête échoue avec l'erreur du lecteur de configuration d'exécution de l'agent à la place.
+
+Avec le protocole `http`, l'agent a déjà commencé à diffuser sa réponse en continu lorsque le modèle lève l'erreur. L'appelant ne reçoit alors aucune réponse, et l'erreur n'apparaît que dans le journal de l'agent, pour un agent déployé dans son groupe de journaux d'exécution.
+
+## Développement local
+
+La cible `<agent>-dev` définit `LOCAL_DEV=true`. Lorsque `LOCAL_DEV` est `true` et que la variable d'environnement `RUNTIME_CONFIG_APP_ID` n'est pas définie, `guardrail.py` ne lit pas la configuration d'exécution. Il enregistre un avertissement une fois et l'agent s'exécute sans garde-fou :
+
+<NxCommands commands={['agent-dev your-project']} />
+
+Pour tester vos règles localement, déployez d'abord le garde-fou. Ensuite, définissez `RUNTIME_CONFIG_APP_ID` sur l'ID de votre application de configuration d'exécution déployée, à partir de la sortie de stack `RuntimeConfigApplicationId` (CDK) ou `module.runtime_config_appconfig.application_id` (Terraform). Votre shell a également besoin d'informations d'identification AWS qui peuvent lire AppConfig et appliquer le garde-fou :
+
+<NxCommands commands={['agent-dev your-project']} env={{ RUNTIME_CONFIG_APP_ID: '<application-id>' }} />
+
+L'agent lit alors uniquement sa propre entrée, donc plusieurs agents protégés peuvent s'exécuter localement contre la même application. Si l'agent ne peut pas lire la configuration d'exécution, ou si l'entrée est manquante, il enregistre l'avertissement une fois et s'exécute sans garde-fou.
+
+La cible `<agent>-serve` ne définit pas `LOCAL_DEV`, elle a donc besoin de `RUNTIME_CONFIG_APP_ID` et de l'entrée déployée, sinon chaque requête échoue comme décrit ci-dessus. La cible `<agent>-chat` se connecte à un agent en cours d'exécution et n'a pas besoin de configuration d'exécution elle-même.
+
+## Coût et latence
+
+Amazon Bedrock facture chaque politique de garde-fou qui évalue du texte, à la fois sur l'entrée et sur la réponse. Voir [Tarification Amazon Bedrock](https://aws.amazon.com/bedrock/pricing/).
+
+Chaque appel au modèle prend également plus de temps, car le garde-fou vérifie la réponse avant que votre agent ne la diffuse en continu à l'utilisateur.
+
+Pendant l'arrivée des requêtes, chaque processus d'agent lit la configuration d'exécution au maximum une fois toutes les 5 secondes. Chaque lecture effectue deux requêtes AppConfig.
+
+## Limitations
+
+- Ce générateur prend en charge les agents créés avec `py#agent`, avec les frameworks Strands et LangChain. Il ne prend pas en charge le AgentCore Harness.
+- `guardrail.json` contient uniquement les sujets refusés et les entités PII. Ajoutez d'autres politiques, telles que les filtres de contenu et les filtres de mots, avec les props du construct (CDK) ou en modifiant le module (Terraform).
+- Le garde-fou ne vérifie pas les résultats des outils, comme décrit dans [Ce que le garde-fou vérifie](#ce-que-le-garde-fou-vérifie).

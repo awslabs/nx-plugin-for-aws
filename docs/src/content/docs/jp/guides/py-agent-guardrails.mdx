@@ -1,0 +1,306 @@
+---
+title: Python Agent Guardrails
+description: Python StrandsまたはLangChain AgentにAmazon Bedrock Guardrailをアタッチする
+generator: py#agent#guardrails
+---
+
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import RunGenerator from '@components/run-generator.astro';
+
+<Link path="guides/py-agent">Python Agent</Link>に[Amazon Bedrock Guardrail](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html)をアタッチします。ガードレールは、エージェントがモデルに送信するメッセージとモデルの回答に対してAmazon Bedrockが適用する一連のルールです。ガードレールがない場合、ユーザーはエージェントに任意のトピックについて質問でき、モデルはメールアドレスなどの個人データを回答に含めて返すことができます。
+
+ジェネレーターは、ルールを保持するポリシーファイル、エージェントのモデルにガードレールを適用するコード、およびAWSアカウントにガードレールを作成するインフラストラクチャを追加します。すべてのプロトコルで、両方の`py#agent`フレームワーク（StrandsとLangChain）をサポートします。
+
+## 仕組み
+
+- `agent.py`の隣にある`guardrail.json`がルールを保持します：エージェントが拒否する必要があるトピックと、隠すかブロックする必要がある個人データ（PII、個人を特定できる情報）のタイプ。
+- CDKコンストラクトまたはTerraformモジュールは、合成または計画時に`guardrail.json`を読み取ります。ガードレールとその番号付きバージョンを作成します。ガードレールバージョンは、ルールの読み取り専用スナップショットです。
+- インフラストラクチャは、ガードレールのIDとバージョン番号を<Link path="guides/runtime-config">runtime config</Link>（インフラストラクチャがデプロイされたリソースの詳細を保存するAWS AppConfigアプリケーション）に書き込みます。エントリは`agentcore.guardrails.<AgentClass>`で、エージェントのクラスにちなんで名付けられます（例：`agentcore.guardrails.MyAgent`）。保護された各エージェントには独自のエントリがあります。
+- `guardrail.py`は、`agent.py`が使用するBedrockモデルを定義します。各モデル呼び出しの前に、モデルはruntime configからエージェントのエントリを読み取り、そのガードレールをリクエストに追加します。
+
+## 使用方法
+
+### Agent Guardrailsの生成
+
+`py#agent`ジェネレーターで作成されたエージェントを含む既存のPythonプロジェクトが必要です。
+
+<RunGenerator generator="py#agent#guardrails" />
+
+### オプション
+
+<GeneratorParameters generator="py#agent#guardrails" />
+
+## ジェネレーターの出力
+
+ジェネレーターは、エージェントの隣に以下のファイルを追加します。`<module>`はプロジェクトのPythonモジュール、`<agent>`はエージェントコンポーネントのスネークケース名（デフォルトは`agent`）です：
+
+<FileTree>
+  - \<your-project>/\<module>/\<agent>/
+    - agent.py ガードレール付きモデルで作成されたエージェント
+    - guardrail.json ガードレールが適用するルール
+    - guardrail.py ガードレールが適用されたBedrockモデルを定義
+</FileTree>
+
+また、エージェントの`iac`プロバイダーのインフラストラクチャも追加します。`<agent-name>`はエージェントのコンストラクトまたはモジュールのケバブケース名です：
+
+<Infrastructure>
+  <Fragment slot="cdk">
+    <FileTree>
+      - packages/common/constructs/src/app/guardrails/\<agent-name>/
+        - \<agent-name>-guardrail.ts ガードレールとそのバージョンを含むCDKコンストラクト
+    </FileTree>
+  </Fragment>
+  <Fragment slot="terraform">
+    <FileTree>
+      - packages/common/terraform/src/app/guardrails/\<agent-name>/
+        - \<agent-name>-guardrail.tf ガードレールとそのバージョンを含むTerraformモジュール
+    </FileTree>
+  </Fragment>
+</Infrastructure>
+
+ジェネレーターは`agent.py`を次のように編集します：
+
+<Tabs syncKey="agent-framework">
+<TabItem label="Strands">
+```diff lang="python"
++from .guardrail import get_guardrailed_model
+ from .session import get_session_manager
+
+ @contextmanager
+ def get_agent():
+     yield Agent(
++        model=get_guardrailed_model(),
+         name="MyAgent",
+```
+
+`get_guardrailed_model()`は、Strands `BedrockModel`のサブクラスである`GuardrailedBedrockModel`を返します。`model`なしで作成された`Agent`と同じデフォルトモデルを使用します。
+</TabItem>
+<TabItem label="LangChain">
+```diff lang="python"
+-from langchain_aws import ChatBedrockConverse
+ from langchain_core.tools import tool
+
++from .guardrail import GuardrailedChatBedrockConverse
+ from .session import get_checkpointer
+
+ def get_agent():
+-    model = ChatBedrockConverse(model=MODEL_ID, region_name=REGION)
++    model = GuardrailedChatBedrockConverse(model=MODEL_ID, region_name=REGION)
+```
+
+`GuardrailedChatBedrockConverse`は`ChatBedrockConverse`のサブクラスです。ジェネレーターは`ChatBedrockConverse(...)`呼び出しの引数を保持します。
+</TabItem>
+</Tabs>
+
+同じエージェントでジェネレーターを再度実行してもファイルは変更されず、`guardrail.json`と`guardrail.py`への編集は保持されます。
+
+エージェントが`infra: none`で生成された場合、ジェネレーターはエージェントファイルのみを追加し、警告を出力します。その後、ガードレールを自分で作成し、そのIDとバージョンを`agentcore.guardrails.<AgentClass>`のruntime configに`{ guardrailId, guardrailVersion }`として書き込みます。
+
+別のプロジェクトのTypeScriptエージェントが同じクラス名を持ち、すでにガードレールを持っている場合、ジェネレーターはエラーで停止し、ファイルを変更しません。両方のエージェントが1つのランタイムコンストラクトと1つのガードレールを共有することになります。エージェントの1つに別の名前を付けてください。
+
+### すでにモデルを設定しているエージェント
+
+`agent.py`が期待される形状でない場合、ジェネレーターはそれを変更せずに残します。ファイル名と追加する行を出力します。
+
+<Tabs syncKey="agent-framework">
+<TabItem label="Strands">
+これは、`Agent(...)`呼び出しがすでに`model`を設定している場合に発生します。独自のモデルオプションを保持するには、`guardrail.py`の`GuardrailedBedrockModel`クラスでモデルを作成します。これは`BedrockModel`と同じオプションを取ります。例：
+
+```python title="agent.py"
+from .guardrail import GuardrailedBedrockModel
+
+agent = Agent(
+    model=GuardrailedBedrockModel(model_id="my-model-id"),
+    # ...
+)
+```
+</TabItem>
+<TabItem label="LangChain">
+これは、`agent.py`に`ChatBedrockConverse(...)`呼び出しがない場合に発生します。例えば、別の方法でモデルを作成している場合です。`guardrail.py`の`GuardrailedChatBedrockConverse`クラスでモデルを作成します。これは`ChatBedrockConverse`と同じ引数を取ります。例：
+
+```python title="agent.py"
+from .guardrail import GuardrailedChatBedrockConverse
+
+model = GuardrailedChatBedrockConverse(model=MODEL_ID, region_name=REGION)
+```
+</TabItem>
+</Tabs>
+
+## ガードレールがチェックする内容
+
+ガードレールは、すべてのモデル呼び出しで2つのことをチェックします：
+
+- エージェントがモデルに送信する会話（ユーザーの最新メッセージを含む）
+- エージェントがユーザーにストリーミングバックする前のモデルの回答
+
+ガードレールがユーザーのメッセージをブロックすると、モデルは呼び出されません。`ANONYMIZE`ルールが一致すると、回答には値の代わりに`{EMAIL}`などのプレースホルダーが含まれます。ガードレールが回答をブロックすると、ユーザーは`blockedOutputsMessaging`テキストを受け取ります。
+
+<Tabs syncKey="agent-framework">
+<TabItem label="Strands">
+ガードレールがユーザーのメッセージをブロックすると、ユーザーは`blockedInputMessaging`テキストを受け取ります。Strandsは、エージェントの会話履歴内のブロックされたメッセージを`[User input redacted.]`に置き換えます。
+</TabItem>
+<TabItem label="LangChain">
+ガードレールがユーザーのメッセージをブロックすると、モデルの回答は`blockedInputMessaging`テキストになり、ユーザーはそのテキストを受け取ります。
+
+同じセッション内の後のモデル呼び出しでは、`guardrail.py`は、Strandsと同様に、ガードレールがブロックした各ユーザーメッセージの代わりに`[User input redacted.]`を送信します。ガードレールはすべての呼び出しで会話全体をチェックするため、これがないとブロックされたメッセージがセッション内の後のすべてのメッセージをブロックします。チェックポインターは元のメッセージを保存します。
+</TabItem>
+</Tabs>
+
+ガードレールは、ツール定義、モデルがツールに渡す引数、またはツールが返す結果をチェックしません。例えば、ツールがデータベースから顧客のメールアドレスを返す場合、ガードレールはそれをモデルから隠しません。<Link path="guides/py-agent">Python Agentガイド</Link>の「Securing your Agent」で説明されているように、ツールの結果を信頼できないものとして扱ってください。
+
+## guardrail.jsonの編集
+
+提供されるポリシーは、生成された数学エージェントの例です。投資アドバイスを拒否し、3種類の個人データを隠すかブロックします：
+
+```json title="guardrail.json"
+{
+  "blockedInputMessaging": "Sorry, I can't help with that request.",
+  "blockedOutputsMessaging": "Sorry, I can't share that answer.",
+  "deniedTopics": [
+    {
+      "name": "Investment advice",
+      "definition": "Recommendations about which specific stocks, funds or other investments to buy or sell.",
+      "examples": ["Which stocks should I buy this year?"]
+    }
+  ],
+  "piiEntities": [
+    { "type": "EMAIL", "action": "ANONYMIZE" },
+    { "type": "PHONE", "action": "ANONYMIZE" },
+    { "type": "US_SOCIAL_SECURITY_NUMBER", "action": "BLOCK" }
+  ]
+}
+```
+
+フィールドは次のとおりです：
+
+- `blockedInputMessaging`：ガードレールがメッセージをブロックしたときにユーザーが受け取る返信。最大500文字。
+- `blockedOutputsMessaging`：ガードレールがモデルの回答をブロックしたときにユーザーが受け取る返信。最大500文字。
+- `deniedTopics`：エージェントが拒否する必要があるトピック。各トピックには、`name`（最大100文字の英字、数字、スペース、および文字`-_!?.`）、トピックを説明する最大1000文字の`definition`、およびオプションで各最大100文字の`examples`があります。
+- `piiEntities`：アクションを実行する個人データのタイプ。`type`は`EMAIL`、`PHONE`、`US_SOCIAL_SECURITY_NUMBER`などの[機密情報タイプ](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails-sensitive-filters.html)です。`action`は、値をプレースホルダーに置き換える`ANONYMIZE`、またはメッセージまたは回答全体をブロックする`BLOCK`です。
+
+トピック`definition`は、トピック自体を説明するように記述してください。例えば、「Recommendations about which specific stocks to buy」は「Do not give investment advice」よりもうまく機能します。
+
+### バージョンが番号付けされている理由
+
+`guardrail.json`を変更してデプロイするたびに、インフラストラクチャは新しい番号付きガードレールバージョンを作成し、runtime configに書き込みます。バージョンの説明には`guardrail.json`のSHA-256ハッシュが保持されるため、ファイルへの変更は説明を変更し、新しいバージョンが古いバージョンを置き換えます。CDKコンストラクトでは、ハッシュは渡すガードレールプロパティもカバーします。
+
+実行中のエージェントは再起動する必要がありません。`guardrail.py`はruntime configから読み取った内容を5秒間保持するため、エージェントはAppConfigデプロイメントの5秒以内に新しいバージョンを使用します。古いバージョンはAppConfigデプロイメント後に削除されます。CloudFormationはクリーンアップステップでそれを削除します。これは、ある測定（2026-10-24、us-east-1）では、デプロイメント完了後約7秒で開始されました。CloudFormationはその遅延を保証しません。Terraformは、デプロイメントモジュール後約15秒間古いバージョンを保持するため、5秒のキャッシュが削除されたバージョンを指すことはありません。これは、[エージェントへのガードレールの配線](#wiring-the-guardrail-to-your-agent)で示されているように、ガードレールモジュールをそのモジュールの`depends_on`に追加すると機能します。
+
+エージェントは`DRAFT`バージョンを使用しません。`DRAFT`は常に最新のルールを保持するため、AWSコンソールで行われた編集は、デプロイメントなしで実行中のエージェントに到達します。runtime config内のバージョンがバージョン番号でない場合、`guardrail.py`はエラーを発生させます。
+
+## エージェントへのガードレールの配線
+
+ジェネレーターは、`py#agent`ジェネレーターがエージェントのデプロイをユーザーに任せるのと同じように、スタックまたはルートTerraformモジュールを変更しません。完了すると、エージェントの名前が入力された以下のコードを出力します。これを追加して、ガードレールを作成し、そのruntime configエントリを書き込み、エージェントがガードレールを適用できるようにします：
+
+<Infrastructure>
+  <Fragment slot="cdk">
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyAgent, MyAgentGuardrail } from '@my-scope/common-constructs';
+
+const agent = new MyAgent(this, 'MyAgent');
+new MyAgentGuardrail(this, 'MyAgentGuardrail', { agent });
+```
+
+コンストラクトは、ガードレールのIDとバージョンを`agentcore.guardrails.MyAgent`のruntime configに書き込み、`agent`にガードレールを適用する権限を付与します。エージェントコンストラクトは、すでにエージェントがruntime configを読み取ることを許可しています。
+
+コンストラクトは以下を公開します：
+
+- `guardrail`（`CfnGuardrail`）と`version`（`CfnGuardrailVersion`）
+- `guardrailId`、`guardrailArn`、`guardrailVersion`
+- `grantApply(grantee)`：別のプリンシパルにガードレールに対する`bedrock:ApplyGuardrail`を付与します
+
+また、`GuardrailId`と`GuardrailVersion`のスタック出力も追加します。そのプロパティは`agent`と任意の`CfnGuardrail`プロパティです。`CfnGuardrail`プロパティは`guardrail.json`よりも優先されます。例えば、コンテンツフィルターを追加します：
+
+```ts
+new MyAgentGuardrail(this, 'MyAgentGuardrail', {
+  agent,
+  contentPolicyConfig: {
+    filtersConfig: [
+      { type: 'HATE', inputStrength: 'HIGH', outputStrength: 'HIGH' },
+    ],
+  },
+});
+```
+
+ジェネレーターは、各CDKインフラストラクチャプロジェクトの`synth`入力に`guardrail.json`も追加するため、ファイルへの変更はNxキャッシュを使用する代わりに合成を再度実行します。
+  </Fragment>
+  <Fragment slot="terraform">
+エージェントをデプロイするルートモジュールに、示されているように`my_agent_guardrail`モジュールを追加します。既存の`my_agent`モジュールブロックに`additional_iam_policy_statements`行を追加します。`runtime_config_appconfig_deployment`モジュールの`depends_on`リストに`module.my_agent_guardrail`を追加して、デプロイメントにガードレールのruntime configエントリが含まれ、Terraformがデプロイメント後にのみ古いガードレールバージョンを削除するようにします。ルートモジュールがまだエージェントをデプロイしていない場合は、<Link path="guides/py-agent#infrastructure-as-code">Python Agentガイド</Link>で説明されているように、最初にエージェントのモジュールを追加してください。
+
+```hcl title="packages/infra/src/main.tf"
+module "my_agent_guardrail" {
+  source = "../../common/terraform/src/app/guardrails/my-agent"
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+  # ...existing arguments...
+  additional_iam_policy_statements = module.my_agent_guardrail.iam_policy_statements
+}
+
+module "runtime_config_appconfig_deployment" {
+  # ...existing arguments...
+  depends_on = [
+    # ...existing modules...
+    module.my_agent_guardrail,
+  ]
+}
+```
+
+エージェントモジュールがすでに`additional_iam_policy_statements`を設定している場合は、リストを結合します：
+
+```hcl
+  additional_iam_policy_statements = concat(module.my_agent_guardrail.iam_policy_statements, local.my_statements)
+```
+
+モジュールは、ガードレールのIDとバージョンを`agentcore.guardrails.MyAgent`のruntime configに書き込みます。`agentcore`名前空間は、runtime configモジュールのデフォルトの`namespaces`にあるため、追加する必要はありません。エージェントモジュールは、すでにエージェントがruntime configを読み取ることを許可しています。
+
+モジュールは`tags`変数を取り、`guardrail_id`、`guardrail_arn`、`guardrail_version`、`iam_policy_statements`を出力します。コンテンツフィルターなどの他のガードレールポリシーを追加するには、モジュール内の`aws_bedrock_guardrail`リソースを編集します。
+
+モジュールは、ガードレールバージョンに`create_before_destroy`を設定するため、Terraformは古いバージョンを削除する前に新しいバージョンを作成します。`hashicorp/time`プロバイダーの`time_sleep`リソースは、runtime configデプロイメント後約15秒間古いバージョンを保持し、runtime configエントリはそこからガードレールIDとバージョンを読み取ります。この待機のため、`terraform destroy`も約15秒長くかかります。
+  </Fragment>
+</Infrastructure>
+
+### runtime configエントリの欠落
+
+配線を忘れると、runtime configにエージェントのエントリがありません。その後、モデルはBedrockを呼び出す前にエラーを発生させるため、エージェントはガードレールなしでは実行されません。`MyAgent`の場合、エラーは次のとおりです：
+
+```
+No guardrail for this agent in runtime config at agentcore.guardrails.MyAgent. Add the MyAgentGuardrail construct (CDK) or the guardrails/my-agent module (Terraform) to your infrastructure.
+```
+
+エージェントはすべてのプロトコル（`http`、`a2a`、`ag-ui`）で起動し、各リクエストはこのエラーで失敗します。エージェントがruntime configをまったく読み取れない場合（例えば、`RUNTIME_CONFIG_APP_ID`が設定されていない場合）、各リクエストは代わりにエージェントのruntime configリーダーからのエラーで失敗します。
+
+`http`プロトコルでは、モデルがエラーを発生させたときにエージェントはすでに応答のストリーミングを開始しています。その後、呼び出し元は回答を受け取らず、エラーはエージェントのログにのみ表示されます。デプロイされたエージェントの場合は、そのランタイムログループに表示されます。
+
+## ローカル開発
+
+`<agent>-dev`ターゲットは`LOCAL_DEV=true`を設定します。`LOCAL_DEV`が`true`で、`RUNTIME_CONFIG_APP_ID`環境変数が設定されていない場合、`guardrail.py`はruntime configを読み取りません。警告を一度ログに記録し、エージェントはガードレールなしで実行されます：
+
+<NxCommands commands={['agent-dev your-project']} />
+
+ルールをローカルでテストするには、最初にガードレールをデプロイします。次に、`RUNTIME_CONFIG_APP_ID`を、`RuntimeConfigApplicationId`スタック出力（CDK）または`module.runtime_config_appconfig.application_id`（Terraform）から、デプロイされたruntime configアプリケーションのIDに設定します。シェルには、AppConfigを読み取り、ガードレールを適用できるAWS認証情報も必要です：
+
+<NxCommands commands={['agent-dev your-project']} env={{ RUNTIME_CONFIG_APP_ID: '<application-id>' }} />
+
+その後、エージェントは自身のエントリのみを読み取るため、複数の保護されたエージェントが同じアプリケーションに対してローカルで実行できます。エージェントがruntime configを読み取れない場合、またはエントリが欠落している場合、警告を一度ログに記録し、ガードレールなしで実行されます。
+
+`<agent>-serve`ターゲットは`LOCAL_DEV`を設定しないため、`RUNTIME_CONFIG_APP_ID`とデプロイされたエントリが必要です。そうでない場合、各リクエストは上記のように失敗します。`<agent>-chat`ターゲットは実行中のエージェントに接続し、runtime config自体は必要ありません。
+
+## コストとレイテンシー
+
+Amazon Bedrockは、入力と回答の両方でテキストを評価する各ガードレールポリシーに対して課金します。[Amazon Bedrock pricing](https://aws.amazon.com/bedrock/pricing/)を参照してください。
+
+各モデル呼び出しも、ガードレールがエージェントがユーザーにストリーミングする前に回答をチェックするため、時間がかかります。
+
+リクエストが到着している間、各エージェントプロセスは5秒ごとに最大1回runtime configを読み取ります。各読み取りは2つのAppConfigリクエストを行います。
+
+## 制限事項
+
+- このジェネレーターは、StrandsおよびLangChainフレームワークを使用して`py#agent`で作成されたエージェントをサポートします。AgentCore Harnessはサポートしていません。
+- `guardrail.json`は、拒否されたトピックとPIIエンティティのみを保持します。コンテンツフィルターやワードフィルターなどの他のポリシーは、コンストラクトのプロパティ（CDK）を使用するか、モジュールを編集（Terraform）して追加します。
+- ガードレールは、[ガードレールがチェックする内容](#what-the-guardrail-checks)で説明されているように、ツールの結果をチェックしません。

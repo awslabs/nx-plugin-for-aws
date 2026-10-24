@@ -138,7 +138,7 @@ Scrivi una `definition` dell'argomento che descriva l'argomento stesso. Per esem
 
 Ogni volta che modifichi `guardrail.json` e distribuisci, l'infrastruttura crea una nuova versione numerata del guardrail e la scrive nel runtime config. La descrizione della versione contiene l'hash SHA-256 di `guardrail.json`, quindi una modifica al file cambia la descrizione e una nuova versione sostituisce quella vecchia. Con il costrutto CDK, l'hash copre anche qualsiasi proprietà del guardrail che passi.
 
-Il tuo agente in esecuzione non ha bisogno di un riavvio. Memorizza nella cache ciò che legge dal runtime config per 5 secondi, quindi utilizza la nuova versione entro 5 secondi dalla distribuzione AppConfig. La vecchia versione viene eliminata dopo la distribuzione AppConfig: CloudFormation la elimina nella sua fase di pulizia e Terraform la elimina dopo il modulo di distribuzione quando aggiungi il modulo guardrail al `depends_on` di quel modulo, come mostrato in [Collegamento del guardrail al tuo agente](#collegamento-del-guardrail-al-tuo-agente).
+Il tuo agente in esecuzione non ha bisogno di un riavvio. Memorizza nella cache ciò che legge dal runtime config per 5 secondi, quindi utilizza la nuova versione entro 5 secondi dalla distribuzione AppConfig. La vecchia versione viene eliminata dopo la distribuzione AppConfig. CloudFormation la elimina nella sua fase di pulizia, che in una misurazione (2026-10-24, us-east-1) è iniziata circa 7 secondi dopo il completamento della distribuzione. CloudFormation non garantisce quel ritardo. Terraform mantiene la vecchia versione per circa 15 secondi dopo il modulo di distribuzione, quindi la cache di 5 secondi non punta mai a una versione eliminata. Questo funziona quando aggiungi il modulo guardrail al `depends_on` di quel modulo, come mostrato in [Collegamento del guardrail al tuo agente](#collegamento-del-guardrail-al-tuo-agente).
 
 Il tuo agente non usa mai la versione `DRAFT`. `DRAFT` contiene sempre le regole più recenti, quindi una modifica effettuata nella console AWS raggiungerebbe il tuo agente in esecuzione senza una distribuzione. `guardrail.ts` genera un errore se la versione nel runtime config non è un numero di versione.
 
@@ -209,7 +209,7 @@ Il modulo scrive l'ID del guardrail e la versione nel runtime config a `agentcor
 
 Il modulo accetta una variabile `tags` e restituisce `guardrail_id`, `guardrail_arn`, `guardrail_version` e `iam_policy_statements`. Per aggiungere altre policy del guardrail, come filtri di contenuto, modifica la risorsa `aws_bedrock_guardrail` nel modulo.
 
-Il modulo imposta `create_before_destroy` sulla versione del guardrail, quindi Terraform crea la nuova versione prima di eliminare quella vecchia.
+Il modulo imposta `create_before_destroy` sulla versione del guardrail, quindi Terraform crea la nuova versione prima di eliminare quella vecchia. Una risorsa `time_sleep` dal provider `hashicorp/time` mantiene la vecchia versione per circa 15 secondi dopo la distribuzione runtime-config, e la voce runtime-config legge l'ID del guardrail e la versione da essa. A causa di questa attesa, anche `terraform destroy` richiede circa 15 secondi in più.
   </Fragment>
 </Infrastructure>
 
