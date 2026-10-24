@@ -1,0 +1,156 @@
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "<%- awsProviderVersion %>"
+    }
+    awscc = {
+      source  = "hashicorp/awscc"
+      version = "<%- awsccProviderVersion %>"
+    }
+  }
+}
+
+variable "recipes_dir" {
+  description = "Directory holding the one resolved recipe YAML the <c>-artifact target writes (greengrass-build/recipes). Read at plan time."
+  type        = string
+}
+
+variable "artifacts_dir" {
+  description = "Directory holding the <c>-artifact target's artifact tree (greengrass-build/artifacts), containing one file per manifest platform at <artifacts_dir>/<ComponentName>/<ComponentVersion>/."
+  type        = string
+}
+
+variable "bucket_name" {
+  # Use the artifact-bucket module output to wait for bucket hardening.
+  description = "Name of the shared artifact bucket this version's artifact is uploaded to."
+  type        = string
+}
+
+locals {
+  placeholder_prefix = "s3://BUCKET_NAME/COMPONENT_NAME/COMPONENT_VERSION/"
+
+  recipe_files      = fileset(var.recipes_dir, "*.y*ml")
+  recipe_candidate  = try(tolist(local.recipe_files)[0], null)
+  recipe_path       = "${var.recipes_dir}/${coalesce(local.recipe_candidate, "__no_recipe_found__")}"
+  recipe            = try(yamldecode(file(local.recipe_path)), {})
+  component_name    = try(local.recipe.ComponentName, "")
+  component_version = try(local.recipe.ComponentVersion, "")
+
+  artifact_dir       = "${var.artifacts_dir}/${local.component_name}/${local.component_version}"
+  artifact_files     = try(fileset(local.artifact_dir, "*"), [])
+  artifact_basenames = sort(tolist(local.artifact_files))
+  artifact_hashes    = { for f in local.artifact_basenames : f => filesha256("${local.artifact_dir}/${f}") }
+
+  # Hash the sorted artifact names and their content digests on both IaC paths.
+  sha256 = sha256(join("\n", [for f in local.artifact_basenames : "${f}:${local.artifact_hashes[f]}"]))
+
+  destination_key_prefix = "${local.component_name}/${substr(local.sha256, 0, 32)}/"
+  replacement_prefix     = "s3://${var.bucket_name}/${local.destination_key_prefix}"
+
+  # Substitute only managed artifact URIs, preserving other recipe fields
+  # and manifests without artifacts.
+  substituted_manifests = [
+    for manifest in try(local.recipe.Manifests, []) : merge(manifest, [
+      for _ in range(can(manifest.Artifacts) ? 1 : 0) : {
+        Artifacts = [
+          for artifact in manifest.Artifacts : merge(artifact, {
+            Uri = (
+              startswith(artifact.Uri, local.placeholder_prefix)
+              ? "${local.replacement_prefix}${substr(artifact.Uri, length(local.placeholder_prefix), -1)}"
+              : artifact.Uri
+            )
+          })
+        ]
+      }
+    ]...)
+  ]
+  substituted_recipe = merge(local.recipe, [
+    for _ in range(can(local.recipe.Manifests) ? 1 : 0) : {
+      Manifests = local.substituted_manifests
+    }
+  ]...)
+
+  substituted_basenames = distinct(flatten([
+    for manifest in try(local.recipe.Manifests, []) : [
+      for artifact in try(manifest.Artifacts, []) : substr(artifact.Uri, length(local.placeholder_prefix), -1)
+      if startswith(artifact.Uri, local.placeholder_prefix)
+    ]
+  ]))
+  missing_basenames      = setsubtract(toset(local.substituted_basenames), toset(local.artifact_basenames))
+  unreferenced_artifacts = setsubtract(toset(local.artifact_basenames), toset(local.substituted_basenames))
+}
+
+# Validate the recipe and artifact set before uploading or publishing.
+resource "terraform_data" "guard" {
+  lifecycle {
+    precondition {
+      condition     = length(local.recipe_files) == 1
+      error_message = "Expected exactly one resolved recipe in \"${var.recipes_dir}\" - run the component's \"-artifact\" target first. Found ${length(local.recipe_files)}."
+    }
+    precondition {
+      condition     = length(local.artifact_files) >= 1
+      error_message = "Expected at least one artifact for ${local.component_name}@${local.component_version} in \"${local.artifact_dir}\" - run the component's \"-artifact\" target first. Found ${length(local.artifact_files)}."
+    }
+    precondition {
+      condition     = length(local.missing_basenames) == 0
+      error_message = "\"${local.recipe_path}\" references artifact(s) ${join(", ", local.missing_basenames)}, but the files built for ${local.component_name}@${local.component_version} are ${join(", ", local.artifact_basenames)}. Make each recipe artifact Uri end in one of those names."
+    }
+    precondition {
+      condition     = length(local.unreferenced_artifacts) == 0
+      error_message = "The build produced artifact(s) ${join(", ", local.unreferenced_artifacts)} for ${local.component_name}@${local.component_version} that no manifest references. Add a manifest whose artifact Uri ends in each name, then bump ComponentVersion before re-applying."
+    }
+    precondition {
+      condition     = can(regex("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$", local.component_version))
+      error_message = "Terraform requires an explicit ComponentVersion such as 1.0.0; NEXT_PATCH, NEXT_MINOR and NEXT_MAJOR are supported only by CDK. Set ComponentVersion in recipe.yaml, rebuild the artifact, and plan again."
+    }
+  }
+}
+
+# Changed artifact content replaces object keys and deletes the outgoing objects.
+# Retain the publishing module before staged rollouts; see the generator guide.
+resource "aws_s3_object" "artifact" {
+  for_each = local.artifact_hashes
+
+  bucket      = var.bucket_name
+  key         = "${local.destination_key_prefix}${each.key}"
+  source      = "${local.artifact_dir}/${each.key}"
+  source_hash = each.value
+
+  depends_on = [terraform_data.guard]
+
+  # Upload the incoming object before deleting the outgoing key.
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+# Recipe changes replace this immutable version; a reused version with changed
+# content fails creation before the outgoing version is deleted.
+resource "awscc_greengrassv2_component_version" "this" {
+  # JSON encoding keeps recipe field types intact.
+  inline_recipe = jsonencode(local.substituted_recipe)
+
+  # Publish only after all artifact uploads complete.
+  depends_on = [aws_s3_object.artifact]
+
+  # Create the new version before deleting the old one. Other fleets may still
+  # need the old version and objects; see the guide before a staged rollout.
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+output "component_name" {
+  value = local.component_name
+}
+
+output "component_version" {
+  # Consumers wait for the published version before revising a deployment.
+  value      = local.component_version
+  depends_on = [awscc_greengrassv2_component_version.this]
+}
+
+output "arn" {
+  value = awscc_greengrassv2_component_version.this.arn
+}

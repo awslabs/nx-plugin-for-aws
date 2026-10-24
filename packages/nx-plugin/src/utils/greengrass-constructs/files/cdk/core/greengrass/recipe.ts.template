@@ -1,0 +1,90 @@
+import yaml from 'js-yaml';
+
+/**
+ * The artifact fields read or rewritten during component publication.
+ */
+export interface GreengrassRecipeArtifact {
+  readonly Uri: string;
+  readonly [key: string]: unknown;
+}
+
+export interface GreengrassRecipeManifest {
+  readonly Artifacts?: readonly GreengrassRecipeArtifact[];
+  readonly [key: string]: unknown;
+}
+
+export interface GreengrassRecipeSummary {
+  readonly componentName: string;
+  readonly componentVersion: string;
+  /**
+   * Parsed recipe; artifact URI substitution preserves all other fields.
+   */
+  readonly raw: { Manifests?: GreengrassRecipeManifest[]; [key: string]: unknown };
+}
+
+/**
+ * Read the recipe's required ComponentName and ComponentVersion strings.
+ */
+export const readRecipeSummary = (
+  yamlSource: string,
+  recipePath: string,
+): GreengrassRecipeSummary => {
+  const raw = yaml.load(yamlSource);
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new Error(`"${recipePath}" is not a Greengrass recipe document`);
+  }
+  const { ComponentName, ComponentVersion } = raw as {
+    ComponentName?: unknown;
+    ComponentVersion?: unknown;
+  };
+  if (typeof ComponentName !== 'string' || ComponentName.length === 0) {
+    throw new Error(`"${recipePath}" is missing ComponentName`);
+  }
+  if (typeof ComponentVersion !== 'string' || ComponentVersion.length === 0) {
+    throw new Error(`"${recipePath}" is missing ComponentVersion`);
+  }
+  return {
+    componentName: ComponentName,
+    componentVersion: ComponentVersion,
+    raw: raw as GreengrassRecipeSummary['raw'],
+  };
+};
+
+/**
+ * GDK placeholder prefix identifying artifacts managed by this construct.
+ */
+const PLACEHOLDER_PREFIX = 's3://BUCKET_NAME/COMPONENT_NAME/COMPONENT_VERSION/';
+
+export interface ArtifactUriSubstitution {
+  readonly bucketName: string;
+  /**
+   * Uploaded artifact key prefix, including the trailing slash.
+   */
+  readonly keyPrefix: string;
+}
+
+/**
+ * Substitute managed artifact URIs in place, leaving other fields untouched.
+ * Return archive basenames; CDK resolves embedded bucket tokens at deployment.
+ */
+export const substituteArtifactUris = (
+  raw: GreengrassRecipeSummary['raw'],
+  substitution: ArtifactUriSubstitution,
+): string[] => {
+  const { bucketName, keyPrefix } = substitution;
+  const replacementPrefix = `s3://${bucketName}/${keyPrefix}`;
+  const substitutedBasenames: string[] = [];
+
+  for (const manifest of raw.Manifests ?? []) {
+    for (const artifact of manifest.Artifacts ?? []) {
+      const mutableArtifact = artifact as { Uri: string };
+      if (mutableArtifact.Uri.startsWith(PLACEHOLDER_PREFIX)) {
+        const basename = mutableArtifact.Uri.slice(PLACEHOLDER_PREFIX.length);
+        substitutedBasenames.push(basename);
+        mutableArtifact.Uri = `${replacementPrefix}${basename}`;
+      }
+    }
+  }
+
+  return substitutedBasenames;
+};

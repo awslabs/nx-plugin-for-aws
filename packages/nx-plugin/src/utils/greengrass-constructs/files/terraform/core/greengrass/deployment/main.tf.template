@@ -1,0 +1,186 @@
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "<%- awsProviderVersion %>"
+    }
+    awscc = {
+      source  = "hashicorp/awscc"
+      version = "<%- awsccProviderVersion %>"
+    }
+  }
+}
+
+variable "thing_group_name" {
+  description = "Creates a new aws_iot_thing_group and deploys to it. Mutually exclusive with thing_name and target_arn."
+  type        = string
+  default     = null
+}
+
+variable "thing_name" {
+  description = "Deploys to an existing thing, imported by name (not created). Mutually exclusive with thing_group_name and target_arn."
+  type        = string
+  default     = null
+}
+
+variable "target_arn" {
+  description = "Deploys to an existing thing or thing group, imported by ARN (not created). Mutually exclusive with thing_group_name and thing_name."
+  type        = string
+  default     = null
+}
+
+variable "parent_target_arn" {
+  description = "ARN of the parent deployment, for a subdeployment onto a nested thing group."
+  type        = string
+  default     = null
+}
+
+variable "deployment_name" {
+  type    = string
+  default = null
+}
+
+variable "components" {
+  description = "Components to deploy, keyed by ComponentName. `configuration_update.merge`, if set, must already be a JSON-encoded string (matching the awscc schema) - use jsonencode() when building this map."
+  type = map(object({
+    component_version = optional(string)
+    configuration_update = optional(object({
+      merge = optional(string)
+      reset = optional(list(string))
+    }))
+    run_with = optional(object({
+      posix_user   = optional(string)
+      windows_user = optional(string)
+      system_resource_limits = optional(object({
+        cpus   = optional(number)
+        memory = optional(number)
+      }))
+    }))
+  }))
+  default = {}
+}
+
+variable "deployment_policies" {
+  type = object({
+    failure_handling_policy = optional(string)
+    component_update_policy = optional(object({
+      timeout_in_seconds = optional(number)
+      action             = optional(string)
+    }))
+    configuration_validation_policy = optional(object({
+      timeout_in_seconds = optional(number)
+    }))
+  })
+  default = null
+}
+
+variable "iot_job_configuration" {
+  type    = any
+  default = null
+}
+
+variable "tags" {
+  type    = map(string)
+  default = {}
+}
+
+data "aws_partition" "current" {}
+data "aws_region" "current" {}
+data "aws_caller_identity" "current" {}
+
+locals {
+  target_inputs_provided = compact([
+    var.thing_group_name != null ? "thing_group_name" : "",
+    var.thing_name != null ? "thing_name" : "",
+    var.target_arn != null ? "target_arn" : "",
+  ])
+
+  creating_thing_group = var.thing_group_name != null
+
+  target_arn = (
+    var.thing_group_name != null ? aws_iot_thing_group.this[0].arn :
+    var.thing_name != null ? "arn:${data.aws_partition.current.partition}:iot:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:thing/${var.thing_name}" :
+    var.target_arn
+  )
+
+  # Validate literal target ARNs against this configuration's partition,
+  # account and region.
+  target_arn_display   = var.target_arn != null ? var.target_arn : ""
+  target_arn_fields    = var.target_arn != null ? split(":", var.target_arn) : []
+  target_arn_parsed    = length(local.target_arn_fields) > 5
+  target_arn_partition = local.target_arn_parsed ? local.target_arn_fields[1] : ""
+  target_arn_service   = local.target_arn_parsed ? local.target_arn_fields[2] : ""
+  target_arn_region    = local.target_arn_parsed ? local.target_arn_fields[3] : ""
+  target_arn_account   = local.target_arn_parsed ? local.target_arn_fields[4] : ""
+
+  target_arn_mismatches = !local.target_arn_parsed ? [] : compact([
+    local.target_arn_service != "iot" ? "service \"${local.target_arn_service}\" is not \"iot\"" : "",
+    local.target_arn_partition != "" && local.target_arn_partition != data.aws_partition.current.partition ? "partition \"${local.target_arn_partition}\" does not match \"${data.aws_partition.current.partition}\"" : "",
+    local.target_arn_account != "" && local.target_arn_account != data.aws_caller_identity.current.account_id ? "account \"${local.target_arn_account}\" does not match \"${data.aws_caller_identity.current.account_id}\"" : "",
+    local.target_arn_region != "" && local.target_arn_region != data.aws_region.current.region ? "region \"${local.target_arn_region}\" does not match \"${data.aws_region.current.region}\"" : "",
+  ])
+
+  # Allow configuration-only entries without a component version.
+  next_version_sentinel_components = [
+    for component_name, component in var.components : component_name
+    if contains(["NEXT_PATCH", "NEXT_MINOR", "NEXT_MAJOR"], component.component_version == null ? "" : component.component_version)
+  ]
+}
+
+resource "terraform_data" "guard" {
+  lifecycle {
+    precondition {
+      condition     = length(local.target_inputs_provided) == 1
+      error_message = "greengrass deployment requires exactly one of thing_group_name, thing_name or target_arn, got: ${length(local.target_inputs_provided) == 0 ? "(none)" : join(", ", local.target_inputs_provided)}."
+    }
+    # Validate before creating the deployment; a module dependency can defer
+    # identity reads and this check to apply.
+    precondition {
+      condition     = length(local.target_arn_mismatches) == 0
+      error_message = "target_arn \"${local.target_arn_display}\" looks like it belongs to a different environment than this configuration: ${join(", ", local.target_arn_mismatches)}."
+    }
+    precondition {
+      condition     = length(local.next_version_sentinel_components) == 0
+      error_message = "Component(s) ${join(", ", local.next_version_sentinel_components)} use NEXT_* version markers. Terraform requires explicit versions such as 1.0.0; automatic versioning is supported only by CDK."
+    }
+  }
+}
+
+resource "aws_iot_thing_group" "this" {
+  count = local.creating_thing_group ? 1 : 0
+  name  = var.thing_group_name
+  tags  = var.tags
+
+  depends_on = [terraform_data.guard]
+}
+
+# Deleting a deployment removes cloud management state; uninstall components
+# through a deployment revision first.
+resource "awscc_greengrassv2_deployment" "this" {
+  deployment_name       = var.deployment_name
+  target_arn            = local.target_arn
+  parent_target_arn     = var.parent_target_arn
+  components            = var.components
+  deployment_policies   = var.deployment_policies
+  iot_job_configuration = var.iot_job_configuration
+  tags                  = var.tags
+
+  depends_on = [terraform_data.guard]
+
+  # Create the new deployment revision before deleting the superseded resource.
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+output "target_arn" {
+  value = local.target_arn
+}
+
+output "deployment_id" {
+  value = awscc_greengrassv2_deployment.this.deployment_id
+}
+
+output "thing_group_arn" {
+  value = local.creating_thing_group ? aws_iot_thing_group.this[0].arn : null
+}

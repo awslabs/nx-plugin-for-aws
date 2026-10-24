@@ -224,6 +224,33 @@ const BLUEPRINTS: Readonly<Record<string, Blueprint>> = {
   // taking part in a connection, so they are named here.
   ...lambdaFunctionBlueprints('ts#lambda-function', 'py#lambda-function'),
 
+  // This add-on vends the component version and artifact repository. Deployment
+  // composition stays in the user's CDK stack or Terraform root module, so a
+  // component guide must not suggest that it creates a fleet.
+  'greengrass#component': {
+    label: 'Greengrass Component',
+    resources: [
+      {
+        id: 'artifact-repository',
+        label: 'S3',
+        detail: 'Artifact repository',
+        icon: 's3',
+        column: 0,
+        row: 0,
+        when: { infra: 'component-version' },
+      },
+      {
+        id: 'component',
+        label: 'IoT Greengrass',
+        detail: 'Published component',
+        column: 1,
+        row: 0,
+        when: { infra: 'component-version' },
+      },
+    ],
+    path: ['artifact-repository', 'component'],
+  },
+
   'ts#website#auth': {
     label: 'Authentication',
     resources: [

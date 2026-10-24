@@ -650,6 +650,16 @@ export default defineConfig({
                 },
               ],
             },
+            {
+              label: 'IoT',
+              collapsed: true,
+              items: [
+                {
+                  label: 'greengrass#component',
+                  link: '/guides/greengrass-component',
+                },
+              ],
+            },
           ],
         },
         {

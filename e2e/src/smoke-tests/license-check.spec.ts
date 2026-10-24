@@ -54,6 +54,7 @@ describe('smoke test - license-check', () => {
       '@modelcontextprotocol/inspector',
       '@prisma/engines',
       '@scarf/scarf',
+      'aws-crt',
       'mise',
       'prisma',
       'protobufjs',

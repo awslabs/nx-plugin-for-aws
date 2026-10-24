@@ -1,0 +1,115 @@
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join, resolve } from 'node:path';
+
+/*
+ * Usage: vendor-crt-addon.ts <project-root> <bundle-dir> <stage-dir> <addon-dir>[,<addon-dir>]
+ *
+ * Writes the deployable tree for an ipc=true TypeScript Greengrass component:
+ * every file from <bundle-dir> at the tree root, plus
+ * native/aws-crt/<addon-dir>/aws-crt-nodejs.node for each requested addon dir,
+ * copied out of the installed aws-crt. <stage-dir> is then the `bundle-dir`
+ * build-artifact.ts zips, so build-artifact.ts needs no knowledge of any of
+ * this. <addon-dir> is aws-crt's own
+ * `<platform>-<arch>-<cRuntime>` directory name, e.g. linux-arm64-glibc.
+ *
+ * aws-crt publishes its addon prebuilt for every platform it supports, so this
+ * is a file copy, never a compile, and the device never installs anything.
+ */
+
+const log = (msg: string): void => console.error(`[vendor-crt-addon] ${msg}`);
+
+function usage(): never {
+  log(
+    'Usage: vendor-crt-addon.ts <project-root> <bundle-dir> <stage-dir> <addon-dir>[,<addon-dir>]',
+  );
+  process.exit(1);
+}
+
+/**
+ * The directory of `specifier`'s package.json, resolved from `fromPath`. Falls
+ * back to walking up from the resolved entry point, because a package with an
+ * `exports` map need not expose its own package.json. Both the subpath
+ * resolve and the fallback can throw - a missing package fails the first and
+ * would otherwise crash uncaught out of the second - so both are covered by
+ * one exit path with one diagnostic.
+ *
+ * `fromPath` is made absolute first: `createRequire` accepts only an absolute
+ * path or a file URL, and Nx expands `{projectRoot}` to a workspace-relative
+ * path, so passing it through unchanged throws ERR_INVALID_ARG_VALUE before
+ * either branch below can run.
+ */
+function packageRoot(fromPath: string, specifier: string): string {
+  const from = resolve(fromPath);
+  const req = createRequire(from);
+  try {
+    return dirname(req.resolve(`${specifier}/package.json`));
+  } catch {
+    // Falls through to the walk-up fallback below.
+  }
+  try {
+    let dir = dirname(req.resolve(specifier));
+    while (!existsSync(join(dir, 'package.json'))) {
+      const parent = dirname(dir);
+      if (parent === dir) {
+        throw new Error('reached the filesystem root');
+      }
+      dir = parent;
+    }
+    return dir;
+  } catch {
+    log(`Cannot locate the package root of "${specifier}" from "${from}"`);
+    process.exit(1);
+  }
+}
+
+function main(): void {
+  const [projectRoot, bundleDir, stageDir, addonDirList] = process.argv.slice(2);
+  if (!projectRoot || !bundleDir || !stageDir || !addonDirList) usage();
+
+  const addonDirs = addonDirList
+    .split(',')
+    .map((a) => a.trim())
+    .filter((a) => a.length > 0);
+  if (addonDirs.length === 0) usage();
+
+  if (!existsSync(bundleDir)) {
+    log(`Bundle output "${bundleDir}" does not exist - run this project's "bundle" target first.`);
+    process.exit(1);
+  }
+
+  // Started empty every run: a stale addon dir from a deliberate platform
+  // change must never survive into the next artifact, because artifact bytes
+  // must depend only on the current source and the current pin.
+  rmSync(stageDir, { recursive: true, force: true });
+  mkdirSync(stageDir, { recursive: true });
+  cpSync(bundleDir, stageDir, { recursive: true });
+
+  // Two hops: pnpm's default isolated linker does not expose a transitive
+  // dependency to the host project, so aws-crt resolves from the SDK that
+  // pins it, never from here.
+  const sdkRoot = packageRoot(join(projectRoot, 'package.json'), 'aws-iot-device-sdk-v2');
+  const crtRoot = packageRoot(join(sdkRoot, 'package.json'), 'aws-crt');
+  const binDir = join(crtRoot, 'dist', 'bin');
+
+  for (const addonDir of addonDirs) {
+    const source = join(binDir, addonDir, 'aws-crt-nodejs.node');
+    if (!existsSync(source)) {
+      const available = existsSync(binDir) ? readdirSync(binDir).join(', ') : '<missing>';
+      log(
+        `aws-crt at "${crtRoot}" ships no prebuilt addon for "${addonDir}" (looked for "${source}"). Available: ${available}`,
+      );
+      process.exit(1);
+    }
+    const dest = join(stageDir, 'native', 'aws-crt', addonDir, 'aws-crt-nodejs.node');
+    if (existsSync(dest)) {
+      log(`Refusing to overwrite "${dest}" - the bundle already writes that path.`);
+      process.exit(1);
+    }
+    mkdirSync(dirname(dest), { recursive: true });
+    cpSync(source, dest);
+    log(`vendored ${addonDir}/aws-crt-nodejs.node`);
+  }
+}
+
+main();

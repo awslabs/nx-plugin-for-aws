@@ -713,6 +713,7 @@ export const PRE_APPROVED_LICENSES: AllowlistEntry[] = [
       'Apache',
       'Apache License',
       'OSI Approved :: Apache Software License',
+      'License :: OSI Approved :: Apache Software License',
     ],
   },
   {

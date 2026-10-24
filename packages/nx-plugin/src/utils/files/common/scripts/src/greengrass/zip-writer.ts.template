@@ -1,0 +1,121 @@
+import { writeFileSync } from 'node:fs';
+// crc32 from node:zlib requires Node >= 20.15 / 22.2.
+import { crc32, deflateRawSync } from 'node:zlib';
+
+/** One file to place in the archive, at a forward-slash relative path. */
+export interface ZipEntry {
+  readonly name: string;
+  readonly data: Buffer;
+}
+
+const LOCAL_FILE_HEADER_SIGNATURE = 0x04034b50;
+const CENTRAL_DIRECTORY_SIGNATURE = 0x02014b50;
+const END_OF_CENTRAL_DIRECTORY_SIGNATURE = 0x06054b50;
+// 20 = version 2.0, the lowest version that documents DEFLATE support.
+const VERSION_NEEDED = 20;
+const DEFLATE_METHOD = 8;
+const STORED_METHOD = 0;
+const MAX_ENTRIES = 65_535;
+
+/**
+ * Fixed MS-DOS timestamp fields (1980-01-01 00:00:00, the DOS epoch).
+ *
+ * The archive must be byte-reproducible: its sha256 keys the artifact's S3
+ * object and is substituted into the recipe, so a rebuild that produced
+ * different bytes for identical content would make CloudFormation try to
+ * replace an already-published, immutable component version and fail with
+ * AlreadyExists. Stamping the build time would do exactly that on every
+ * rebuild.
+ */
+const DOS_EPOCH_TIME = 0;
+const DOS_EPOCH_DATE = (1 << 5) | 1;
+
+/**
+ * Writes `entries` to a plain ZIP archive at `outPath` with no external
+ * dependency - only `node:zlib` for DEFLATE and CRC-32. Supports exactly what
+ * Greengrass artifact packaging needs: a flat set of files, no encryption, no
+ * zip64 (component artifacts are small). Cross-platform: no shell-out to a
+ * system `zip` binary.
+ */
+export function writeZip(entries: readonly ZipEntry[], outPath: string): void {
+  if (entries.length > MAX_ENTRIES) {
+    throw new RangeError(
+      `ZIP64 is not supported; this ZIP writer can store at most 65,535 entries, received ${entries.length}.`,
+    );
+  }
+
+  const fileChunks: Buffer[] = [];
+  const centralRecords: Buffer[] = [];
+  let offset = 0;
+  const time = DOS_EPOCH_TIME;
+  const date = DOS_EPOCH_DATE;
+
+  // Sorted so directory iteration order cannot change the archive's bytes.
+  const sortedEntries = [...entries].sort((a, b) =>
+    a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
+  );
+  for (const entry of sortedEntries) {
+    const nameBuf = Buffer.from(entry.name, 'utf-8');
+    const entryCrc32 = crc32(entry.data) >>> 0;
+    const compressed = deflateRawSync(entry.data);
+    const useDeflate = compressed.length < entry.data.length;
+    const method = useDeflate ? DEFLATE_METHOD : STORED_METHOD;
+    const payload = useDeflate ? compressed : entry.data;
+
+    const localHeader = Buffer.alloc(30);
+    localHeader.writeUInt32LE(LOCAL_FILE_HEADER_SIGNATURE, 0);
+    localHeader.writeUInt16LE(VERSION_NEEDED, 4);
+    localHeader.writeUInt16LE(0, 6); // general purpose flags
+    localHeader.writeUInt16LE(method, 8);
+    localHeader.writeUInt16LE(time, 10);
+    localHeader.writeUInt16LE(date, 12);
+    localHeader.writeUInt32LE(entryCrc32, 14);
+    localHeader.writeUInt32LE(payload.length, 18);
+    localHeader.writeUInt32LE(entry.data.length, 22);
+    localHeader.writeUInt16LE(nameBuf.length, 26);
+    localHeader.writeUInt16LE(0, 28); // extra field length
+
+    fileChunks.push(localHeader, nameBuf, payload);
+
+    const centralHeader = Buffer.alloc(46);
+    centralHeader.writeUInt32LE(CENTRAL_DIRECTORY_SIGNATURE, 0);
+    centralHeader.writeUInt16LE(VERSION_NEEDED, 4); // version made by
+    centralHeader.writeUInt16LE(VERSION_NEEDED, 6); // version needed to extract
+    centralHeader.writeUInt16LE(0, 8); // general purpose flags
+    centralHeader.writeUInt16LE(method, 10);
+    centralHeader.writeUInt16LE(time, 12);
+    centralHeader.writeUInt16LE(date, 14);
+    centralHeader.writeUInt32LE(entryCrc32, 16);
+    centralHeader.writeUInt32LE(payload.length, 20);
+    centralHeader.writeUInt32LE(entry.data.length, 24);
+    centralHeader.writeUInt16LE(nameBuf.length, 28);
+    centralHeader.writeUInt16LE(0, 30); // extra field length
+    centralHeader.writeUInt16LE(0, 32); // file comment length
+    centralHeader.writeUInt16LE(0, 34); // disk number start
+    centralHeader.writeUInt16LE(0, 36); // internal file attributes
+    centralHeader.writeUInt32LE(0, 38); // external file attributes
+    centralHeader.writeUInt32LE(offset, 42); // relative offset of local header
+
+    centralRecords.push(centralHeader, nameBuf);
+
+    offset += localHeader.length + nameBuf.length + payload.length;
+  }
+
+  const centralDirectory = Buffer.concat(centralRecords);
+  const centralDirectoryOffset = offset;
+
+  const endRecord = Buffer.alloc(22);
+  endRecord.writeUInt32LE(END_OF_CENTRAL_DIRECTORY_SIGNATURE, 0);
+  endRecord.writeUInt16LE(0, 4); // disk number
+  endRecord.writeUInt16LE(0, 6); // disk with central directory start
+  endRecord.writeUInt16LE(entries.length, 8); // entries on this disk
+  endRecord.writeUInt16LE(entries.length, 10); // total entries
+  endRecord.writeUInt32LE(centralDirectory.length, 12);
+  endRecord.writeUInt32LE(centralDirectoryOffset, 16);
+  endRecord.writeUInt16LE(0, 20); // comment length
+
+  writeFileSync(
+    outPath,
+    Buffer.concat([...fileChunks, centralDirectory, endRecord]),
+  );
+}

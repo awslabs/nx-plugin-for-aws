@@ -1,0 +1,80 @@
+#
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+
+# Greengrass wiring for the terraform PLAN test only.
+#
+# Deliberately separate from `terraform-deploy/main.tf.template`: that file is
+# applied for real in the maintainers' AWS account by the terraform-deploy
+# suite, and a Greengrass apply there would publish component versions and an
+# IoT job with no core device to receive them - the same reason the CDK path has
+# no cdk-deploy stack instantiating these constructs. Under `terraform test`
+# with every provider mocked, this wiring costs nothing and still expands the
+# full module graph, which is what catches a plan-time error.
+#
+# The component module names are retained labels from the generator matrix.
+# Deployment composition belongs in this root module, so it reads the component
+# outputs directly rather than going through a generated deployment wrapper.
+
+module "greengrass_artifact_bucket" {
+  source = "../../common/terraform/src/core/greengrass/artifact-bucket"
+}
+
+# Reads the resolved recipe and built artifact its `<c>-artifact` target wrote,
+# so this only plans after `nx run-many --target build`.
+module "greengrass_py_component" {
+  source      = "../../common/terraform/src/app/greengrass-component/my-greengrass-component"
+  bucket_name = module.greengrass_artifact_bucket.bucket_name
+}
+
+module "greengrass_ts_component" {
+  source      = "../../common/terraform/src/app/greengrass-component/my-ts-greengrass-component"
+  bucket_name = module.greengrass_artifact_bucket.bucket_name
+}
+
+# Two components in one fleet. Each `component_version` output carries the core
+# module's own `depends_on` on the published version, so this deployment is
+# ordered after both versions exist without a blanket `depends_on`.
+module "greengrass_deployment" {
+  source           = "../../common/terraform/src/core/greengrass/deployment"
+  thing_group_name = "terraform-plan-test"
+
+  components = {
+    (module.greengrass_py_component.component_name) = {
+      component_version = module.greengrass_py_component.component_version
+    }
+    (module.greengrass_ts_component.component_name) = {
+      component_version = module.greengrass_ts_component.component_version
+    }
+  }
+}
+
+# The same published component in a second fleet, named by its literal version
+# with a configuration override. A literal carries no dependency edge of its
+# own, so a version created in the same apply needs `depends_on` on the
+# deployment module; this defers the module's identity data reads and
+# target-ARN precondition to apply. An already-published version needs neither.
+module "greengrass_literal_deployment" {
+  source           = "../../common/terraform/src/core/greengrass/deployment"
+  thing_group_name = "terraform-plan-test-literal"
+
+  components = {
+    (module.greengrass_py_component.component_name) = {
+      component_version = "1.0.0"
+      configuration_update = {
+        merge = jsonencode({ intervalSeconds = 30 })
+      }
+    }
+  }
+
+  depends_on = [module.greengrass_py_component]
+}
+
+# Explicit recipe versions are forwarded to both deployments unchanged.
+output "greengrass_component_versions" {
+  value = {
+    (module.greengrass_py_component.component_name) = module.greengrass_py_component.component_version
+    (module.greengrass_ts_component.component_name) = module.greengrass_ts_component.component_version
+  }
+}

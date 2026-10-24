@@ -1,0 +1,195 @@
+/**
+ * Resolves a Greengrass component version from the registry at deployment
+ * time from the CDK stack.
+ * It computes a bucket-scoped content key, then inspects only the highest
+ * strict M.m.p version: reuse it only when its key matches and it is
+ * DEPLOYABLE; otherwise create the next version.
+ */
+
+const { createHash } = require('node:crypto');
+
+const NEXT_VERSION_TAG_KEY = 'nx:greengrass:content-sha256';
+const VERSIONING_TAG_KEY = 'nx:greengrass:versioning';
+
+const parseStrictVersion = (version) => {
+  if (typeof version !== 'string') {
+    return undefined;
+  }
+  const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(version);
+  if (!match) {
+    return undefined;
+  }
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+  };
+};
+
+const asParsedVersion = (version) =>
+  typeof version === 'string' ? parseStrictVersion(version) : version;
+
+const compareVersions = (left, right) => {
+  const a = asParsedVersion(left);
+  const b = asParsedVersion(right);
+  if (!a || !b) {
+    throw new Error('Versions must be strict M.m.p values');
+  }
+  for (const field of ['major', 'minor', 'patch']) {
+    if (a[field] !== b[field]) {
+      return a[field] - b[field];
+    }
+  }
+  return 0;
+};
+
+const bumpVersion = (version, strategy) => {
+  const parsed = parseStrictVersion(version);
+  if (!parsed) {
+    throw new Error(`Cannot bump non-strict version "${version}"`);
+  }
+  switch (strategy) {
+    case 'patch':
+      return `${parsed.major}.${parsed.minor}.${parsed.patch + 1}`;
+    case 'minor':
+      return `${parsed.major}.${parsed.minor + 1}.0`;
+    case 'major':
+      return `${parsed.major + 1}.0.0`;
+    default:
+      throw new Error(`Unsupported version strategy "${strategy}"`);
+  }
+};
+
+const versionFromArn = (versionArn) => versionArn.split(':').at(-1);
+
+const sha256hex = (value) =>
+  createHash('sha256').update(value).digest('hex');
+
+const resolveNextVersion = async (api, input) => {
+  if (!input.componentName) {
+    return { version: '', action: 'none', highest: '', contentKey: '' };
+  }
+
+  const contentKey = sha256hex(`${input.contentSha256}\n${input.bucketName}`);
+  const componentArn = `arn:${input.partition}:greengrass:${input.region}:${input.accountId}:components:${input.componentName}`;
+  const versionArns = await api.listVersions(componentArn);
+  const strictVersions = versionArns
+    .map((arn) => ({ arn, version: versionFromArn(arn) }))
+    .filter(({ version }) => parseStrictVersion(version));
+  const highestEntry = strictVersions.reduce(
+    (highest, candidate) =>
+      !highest || compareVersions(candidate.version, highest.version) > 0
+        ? candidate
+        : highest,
+    undefined,
+  );
+  const highest = highestEntry?.version ?? '';
+
+  if (highestEntry) {
+    const described = await api.describeVersion(highestEntry.arn);
+    if (
+      described.state === 'DEPLOYABLE' &&
+      described.tags?.[NEXT_VERSION_TAG_KEY] === contentKey
+    ) {
+      return { version: highest, action: 'reuse', highest, contentKey };
+    }
+  }
+
+  return {
+    version: highest ? bumpVersion(highest, input.strategy) : '1.0.0',
+    action: 'create',
+    highest,
+    contentKey,
+  };
+};
+
+const createGreengrassApi = ({ region }) => {
+  const {
+    DescribeComponentCommand,
+    GreengrassV2Client,
+    ListComponentVersionsCommand,
+  } = require('@aws-sdk/client-greengrassv2');
+  const client = new GreengrassV2Client({ region });
+
+  return {
+    listVersions: async (componentArn) => {
+      const versions = [];
+      let nextToken;
+      do {
+        const response = await client.send(
+          new ListComponentVersionsCommand({
+            arn: componentArn,
+            nextToken,
+          }),
+        );
+        versions.push(
+          ...(response.componentVersions ?? [])
+            .map((component) => component.arn)
+            .filter(Boolean),
+        );
+        nextToken = response.nextToken;
+      } while (nextToken);
+      return versions;
+    },
+    describeVersion: async (versionArn) => {
+      const response = await client.send(
+        new DescribeComponentCommand({ arn: versionArn }),
+      );
+      return {
+        state: response.status?.componentState,
+        tags: response.tags ?? {},
+      };
+    },
+  };
+};
+
+const stackIdentity = (stackId) => {
+  const fields = String(stackId).split(':');
+  return {
+    partition: fields[1],
+    region: fields[3],
+    accountId: fields[4],
+  };
+};
+
+exports.NEXT_VERSION_TAG_KEY = NEXT_VERSION_TAG_KEY;
+exports.VERSIONING_TAG_KEY = VERSIONING_TAG_KEY;
+exports.parseStrictVersion = parseStrictVersion;
+exports.compareVersions = compareVersions;
+exports.bumpVersion = bumpVersion;
+exports.resolveNextVersion = resolveNextVersion;
+exports.createGreengrassApi = createGreengrassApi;
+
+exports.handler = async (event) => {
+  if (event.RequestType === 'Delete') {
+    return { PhysicalResourceId: event.PhysicalResourceId };
+  }
+
+  const properties = event.ResourceProperties ?? {};
+  const identity = stackIdentity(event.StackId);
+  const input = {
+    componentName: properties.ComponentName,
+    strategy: properties.Strategy,
+    contentSha256: properties.ContentSha256,
+    bucketName: properties.BucketName,
+    region: identity.region,
+    accountId: identity.accountId,
+    partition: identity.partition,
+  };
+  const result = await resolveNextVersion(
+    input.componentName
+      ? createGreengrassApi({ region: process.env.AWS_REGION })
+      : undefined,
+    input,
+  );
+
+  return {
+    PhysicalResourceId: `${properties.ComponentName}/next-version`,
+    Data: {
+      Version: result.version,
+      Action: result.action,
+      Highest: result.highest,
+      ContentKey: result.contentKey,
+    },
+  };
+};

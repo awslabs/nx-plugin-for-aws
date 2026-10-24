@@ -202,6 +202,30 @@ export const expectTypeScriptToCompile = (
   verifier.expectTypeScriptToCompile(tree, paths, silent);
 };
 
+/**
+ * Verify that the given typescript files parse. Syntax only: nothing is
+ * resolved or type checked, so this reaches a generated file that imports a
+ * dependency only ever vended into a user workspace and never installed here.
+ * Prefer `expectTypeScriptToCompile` wherever the imports do resolve.
+ */
+export const expectTypeScriptToParse = (tree: Tree, paths: string[]) => {
+  for (const p of paths) {
+    const { diagnostics } = ts.transpileModule(tree.read(p, 'utf-8')!, {
+      fileName: p,
+      reportDiagnostics: true,
+      compilerOptions: {
+        target: ts.ScriptTarget.ES2022,
+        module: ts.ModuleKind.ESNext,
+      },
+    });
+    expect(
+      (diagnostics ?? []).map(
+        (d) => `${p}: ${ts.flattenDiagnosticMessageText(d.messageText, '\n')}`,
+      ),
+    ).toEqual([]);
+  }
+};
+
 // A couple of tests for the test utility as a sanity check
 describe('expectTypeScriptToCompile', () => {
   let tree: Tree;
@@ -238,5 +262,26 @@ describe('expectTypeScriptToCompile', () => {
     expect(() =>
       verifierWithDeps.expectTypeScriptToCompile(tree, ['test.ts'], true),
     ).toThrow();
+  });
+});
+
+describe('expectTypeScriptToParse', () => {
+  let tree: Tree;
+
+  beforeEach(() => {
+    tree = createTreeUsingTsSolutionSetup();
+  });
+
+  it('should not throw for an unresolvable import, unlike a compile check', () => {
+    tree.write(
+      'test.ts',
+      'import { thing } from "not-installed-anywhere";\nexport const x: number = thing;\n',
+    );
+    expectTypeScriptToParse(tree, ['test.ts']);
+  });
+
+  it('should throw for a syntax error', () => {
+    tree.write('test.ts', 'export function broken(: void {}\n');
+    expect(() => expectTypeScriptToParse(tree, ['test.ts'])).toThrow();
   });
 });

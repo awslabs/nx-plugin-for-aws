@@ -9,6 +9,7 @@ import {
   type ConnectionGeneratorSchema,
   connectionGenerator,
 } from '../../sdk/connection.js';
+import { greengrassComponentGenerator } from '../../sdk/greengrass.js';
 import { licenseGenerator } from '../../sdk/license.js';
 import {
   type PyAgentGeneratorSchema,
@@ -223,6 +224,48 @@ export const internalTestMatrixGenerator = async (
     project: 'ts-project',
     name: 'my-function',
     event: 'Any',
+    iac: 'inherit',
+    ...defaults,
+  });
+
+  // Greengrass: the `AWS::GreengrassV2` resources exist in the
+  // `hashicorp/awscc` Terraform provider (this workspace pins it), so both
+  // `--iac cdk` and `--iac terraform` are exercised here via `iac: 'inherit'`.
+  //
+  // A component with publication infrastructure and an app wrapper in the
+  // workspace's infrastructure project. Hosted on a dedicated project:
+  // vendoring's `--only-binary :all:` refuses the source-built workspace
+  // members other entries add to py-project, and one component per project is
+  // the documented production default.
+  await pyProjectGenerator(tree, {
+    name: 'py-greengrass-project',
+    type: 'application',
+    ...projectDefaults,
+  });
+  await greengrassComponentGenerator(tree, {
+    project: py('py-greengrass-project'),
+    name: 'my-greengrass-component',
+    language: 'python',
+    platform: 'linux-amd64-arm64',
+    gdkConfig: true,
+    iac: 'inherit',
+    ...defaults,
+  });
+  // The TypeScript component gets a dedicated host project for the same
+  // reason: the shared `bundle` target this generator wires rebuilds every
+  // bundled entrypoint in its project together, so hosting it alongside
+  // `ts-project`'s Lambda function would couple this device-oriented
+  // bundle's cache invalidation to an unrelated Lambda bundle's.
+  await tsProjectGenerator(tree, {
+    name: 'ts-greengrass-project',
+    ...projectDefaults,
+  });
+  await greengrassComponentGenerator(tree, {
+    project: 'ts-greengrass-project',
+    name: 'my-ts-greengrass-component',
+    language: 'typescript',
+    ipc: true,
+    componentVersion: '1.0.0',
     iac: 'inherit',
     ...defaults,
   });

@@ -35,6 +35,7 @@ export const TS_VERSIONS = {
   '@aws-sdk/client-iam': '3.1152.0',
   '@aws-sdk/client-bedrock-agentcore': '3.1152.0',
   '@aws-sdk/client-bedrock-runtime': '3.1152.0',
+  '@aws-sdk/client-greengrassv2': '3.1152.0',
   '@aws-sdk/client-s3': '3.1152.0',
   '@aws-sdk/client-sts': '3.1152.0',
   '@aws-sdk/client-cognito-identity-provider': '3.1152.0',
@@ -93,6 +94,7 @@ export const TS_VERSIONS = {
   '@types/node': '26.6.5',
   '@types/aws-lambda': '8.10.164',
   '@types/cors': '2.8.19',
+  '@types/js-yaml': '4.0.9',
   '@types/pg': '8.23.1',
   '@types/ws': '8.18.2',
   '@types/express': '5.0.6',
@@ -109,6 +111,7 @@ export const TS_VERSIONS = {
   aws4fetch: '1.0.20',
   'aws-cdk': '2.1145.0',
   'aws-cdk-lib': '2.273.0',
+  'aws-iot-device-sdk-v2': '1.28.0',
   'aws-xray-sdk-core': '3.12.0',
   constructs: '10.8.1',
   cors: '2.8.6',
@@ -131,6 +134,7 @@ export const TS_VERSIONS = {
   husky: '9.1.7',
   'fs-extra': '11.4.1',
   '@types/fs-extra': '11.0.4',
+  'js-yaml': '4.3.2',
   mariadb: '3.5.4',
   mise: '2026.10.14',
   npm: '12.2.1',
@@ -257,6 +261,7 @@ export const PY_VERSIONS = {
   'aws-lambda-powertools[tracer]': '==3.36.0',
   'aws-lambda-powertools[parser]': '==3.36.0',
   'aws-opentelemetry-distro': '==0.21.0',
+  awsiotsdk: '==1.31.0',
   'bedrock-agentcore': '==1.24.2',
   boto3: '==1.43.115',
   checkov: '==3.3.29',
@@ -508,6 +513,7 @@ export const terraformLambdaRuntimeVars = () => ({
  */
 export const TERRAFORM_VERSIONS = {
   aws: '6.69.1',
+  awscc: '1.100.0',
   random: '3.9.1',
   null: '3.3.2',
   archive: '2.8.1',
@@ -523,6 +529,7 @@ export type ITerraformProviderVersion = keyof typeof TERRAFORM_VERSIONS;
  */
 export const terraformProviderVersions = () => ({
   awsProviderVersion: TERRAFORM_VERSIONS.aws,
+  awsccProviderVersion: TERRAFORM_VERSIONS.awscc,
   randomProviderVersion: TERRAFORM_VERSIONS.random,
   nullProviderVersion: TERRAFORM_VERSIONS.null,
   archiveProviderVersion: TERRAFORM_VERSIONS.archive,

@@ -1,0 +1,276 @@
+import { Arn, ArnFormat, RemovalPolicy, Stack, Token } from 'aws-cdk-lib';
+import { CfnDeployment } from 'aws-cdk-lib/aws-greengrassv2';
+import { CfnThingGroup } from 'aws-cdk-lib/aws-iot';
+import { Construct } from 'constructs';
+import type { GreengrassComponentVersion } from './component-version<% if (esm) { %>.js<% } %>';
+
+/**
+ * A component entry; configurationUpdate.merge is JSON-encoded for CloudFormation.
+ */
+export interface GreengrassDeploymentComponent {
+  readonly componentVersion?: string;
+  readonly configurationUpdate?: {
+    readonly merge?: Record<string, unknown>;
+    readonly reset?: readonly string[];
+  };
+  readonly runWith?: CfnDeployment.ComponentRunWithProperty;
+}
+
+export interface GreengrassDeploymentProps {
+  /**
+   * Creates a new `AWS::IoT::ThingGroup` and deploys to it. Mutually
+   * exclusive with {@link thingName} and {@link targetArn}.
+   */
+  readonly thingGroupName?: string;
+
+  /**
+   * Deploys to an existing thing, imported by name (not created). Mutually
+   * exclusive with {@link thingGroupName} and {@link targetArn}.
+   */
+  readonly thingName?: string;
+
+  /**
+   * Deploy to an existing target ARN, exclusive with thingGroupName and thingName.
+   * Literal partition, account and region values must match the stack.
+   */
+  readonly targetArn?: string;
+
+  /** The parent deployment's ARN, for a subdeployment onto a nested group. */
+  readonly parentTargetArn?: string;
+
+  readonly deploymentName?: string;
+
+  /** Components to deploy, keyed by `ComponentName`. */
+  readonly components?: Record<string, GreengrassDeploymentComponent>;
+
+  readonly deploymentPolicies?: CfnDeployment.DeploymentPoliciesProperty;
+
+  readonly iotJobConfiguration?: CfnDeployment.DeploymentIoTJobConfigurationProperty;
+
+  /**
+   * Retention for deployment management state; deletion does not uninstall devices.
+   * @default RemovalPolicy.RETAIN
+   */
+  readonly removalPolicy?: RemovalPolicy;
+
+  readonly tags?: Record<string, string>;
+}
+
+const NEXT_VERSION_SENTINELS = ['NEXT_PATCH', 'NEXT_MINOR', 'NEXT_MAJOR'];
+
+const toCfnComponents = (
+  components: Record<string, GreengrassDeploymentComponent> | undefined,
+): Record<string, CfnDeployment.ComponentDeploymentSpecificationProperty> | undefined => {
+  if (!components) {
+    return undefined;
+  }
+  return Object.fromEntries(
+    Object.entries(components).map(([componentName, component]) => {
+      return [
+        componentName,
+        {
+          componentVersion: component.componentVersion,
+          runWith: component.runWith,
+          ...(component.configurationUpdate
+            ? {
+                configurationUpdate: {
+                  reset: component.configurationUpdate.reset as
+                    | string[]
+                    | undefined,
+                  ...(component.configurationUpdate.merge
+                    ? {
+                        merge: JSON.stringify(
+                          component.configurationUpdate.merge,
+                        ),
+                      }
+                    : {}),
+                },
+              }
+            : {}),
+        },
+      ];
+    }),
+  );
+};
+
+/** Throws unless exactly one of the three target props is set. */
+const resolveTargetInput = (
+  props: GreengrassDeploymentProps,
+): 'thingGroupName' | 'thingName' | 'targetArn' => {
+  const provided = (
+    ['thingGroupName', 'thingName', 'targetArn'] as const
+  ).filter((key) => props[key] !== undefined);
+  if (provided.length !== 1) {
+    throw new Error(
+      `GreengrassDeployment requires exactly one of thingGroupName, thingName or targetArn, got: ${
+        provided.length === 0 ? '(none)' : provided.join(', ')
+      }.`,
+    );
+  }
+  return provided[0];
+};
+
+/**
+ * Validate literal target ARNs against the stack's known environment values.
+ */
+const assertArnMatchesStack = (stack: Stack, arn: string): void => {
+  if (Token.isUnresolved(arn)) {
+    return;
+  }
+  const parsed = Arn.split(arn, ArnFormat.SLASH_RESOURCE_NAME);
+  const mismatches: string[] = [];
+  if (parsed.service !== 'iot') {
+    mismatches.push(`service "${parsed.service}" is not "iot"`);
+  }
+  // `stack.partition` is the `AWS::Partition` pseudo parameter, so it is
+  // unresolved even on a stack with an explicit `env` - partition isn't
+  // derivable from an account number alone.
+  if (
+    parsed.partition &&
+    !Token.isUnresolved(stack.partition) &&
+    parsed.partition !== stack.partition
+  ) {
+    mismatches.push(
+      `partition "${parsed.partition}" does not match stack partition "${stack.partition}"`,
+    );
+  }
+  if (
+    parsed.account &&
+    !Token.isUnresolved(stack.account) &&
+    parsed.account !== stack.account
+  ) {
+    mismatches.push(
+      `account "${parsed.account}" does not match stack account "${stack.account}"`,
+    );
+  }
+  if (
+    parsed.region &&
+    !Token.isUnresolved(stack.region) &&
+    parsed.region !== stack.region
+  ) {
+    mismatches.push(
+      `region "${parsed.region}" does not match stack region "${stack.region}"`,
+    );
+  }
+  if (mismatches.length > 0) {
+    throw new Error(
+      `targetArn "${arn}" looks like it belongs to a different environment than this stack: ${mismatches.join(', ')}.`,
+    );
+  }
+};
+
+/**
+ * Deploy components to one thing or thing group, optionally creating the group.
+ */
+export class GreengrassDeployment extends Construct {
+  public readonly thingGroup?: CfnThingGroup;
+  public readonly targetArn: string;
+  public readonly deployment: CfnDeployment;
+  private components:
+    | Record<string, GreengrassDeploymentComponent>
+    | undefined;
+  private readonly registeredComponents = new Map<
+    string,
+    GreengrassComponentVersion
+  >();
+
+  constructor(scope: Construct, id: string, props: GreengrassDeploymentProps) {
+    super(scope, id);
+
+    this.components = props.components
+      ? Object.fromEntries(
+          Object.entries(props.components).map(([name, component]) => [
+            name,
+            { ...component },
+          ]),
+        )
+      : undefined;
+
+    const target = resolveTargetInput(props);
+    const stack = Stack.of(this);
+
+    if (target === 'thingGroupName') {
+      this.thingGroup = new CfnThingGroup(this, 'ThingGroup', {
+        thingGroupName: props.thingGroupName,
+      });
+      this.targetArn = this.thingGroup.attrArn;
+    } else if (target === 'thingName') {
+      this.targetArn = stack.formatArn({
+        service: 'iot',
+        resource: 'thing',
+        resourceName: props.thingName,
+      });
+    } else {
+      assertArnMatchesStack(stack, props.targetArn!);
+      this.targetArn = props.targetArn!;
+    }
+
+    this.deployment = new CfnDeployment(this, 'Resource', {
+      targetArn: this.targetArn,
+      deploymentName: props.deploymentName,
+      components: this.renderComponents(),
+      deploymentPolicies: props.deploymentPolicies,
+      iotJobConfiguration: props.iotJobConfiguration,
+      parentTargetArn: props.parentTargetArn,
+      tags: props.tags,
+    });
+
+    this.deployment.applyRemovalPolicy(props.removalPolicy ?? RemovalPolicy.RETAIN);
+
+    this.node.addValidation({
+      validate: () =>
+        Object.entries(this.components ?? {}).flatMap(
+          ([componentName, component]) => {
+            const componentVersion = component.componentVersion;
+            if (
+              componentVersion === undefined ||
+              Token.isUnresolved(componentVersion) ||
+              !NEXT_VERSION_SENTINELS.includes(componentVersion)
+            ) {
+              return [];
+            }
+            return [
+              `Component "${componentName}" has sentinel version "${componentVersion}". ` +
+                `Register its component construct with deployment.addComponent(myComponent).`,
+            ];
+          },
+        ),
+    });
+  }
+
+  private renderComponents():
+    | Record<string, CfnDeployment.ComponentDeploymentSpecificationProperty>
+    | undefined {
+    return toCfnComponents(this.components);
+  }
+
+  /**
+   * Register a component version and wait for its publication before deployment.
+   * Raw versions created in this stack need an explicit dependency.
+   */
+  public addComponent(
+    component: GreengrassComponentVersion,
+    overrides?: Omit<GreengrassDeploymentComponent, 'componentVersion'>,
+  ): this {
+    const existing = this.registeredComponents.get(component.componentName);
+    if (existing && existing !== component) {
+      throw new Error(
+        `Component "${component.componentName}" is already registered with a different GreengrassComponentVersion.`,
+      );
+    }
+
+    this.components ??= {};
+    // An initial raw entry keeps its configuration and runWith; an override
+    // replaces that top-level field. The construct's version comes last, so
+    // an untyped caller cannot substitute one through `overrides`.
+    this.components[component.componentName] = {
+      ...this.components[component.componentName],
+      ...overrides,
+      componentVersion: component.componentVersion,
+    };
+    this.registeredComponents.set(component.componentName, component);
+    this.deployment.components = this.renderComponents();
+    this.deployment.node.addDependency(component);
+    return this;
+  }
+}

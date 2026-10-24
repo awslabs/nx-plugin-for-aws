@@ -218,6 +218,48 @@ export const addComponentGeneratorMetadata = (
 };
 
 /**
+ * Merge `patch` into the component metadata entry matched on generator id and
+ * name, leaving every other recorded value alone. A no-op when no entry matches
+ * or when the patch changes nothing.
+ *
+ * `addComponentGeneratorMetadata` leaves an existing entry untouched, so a
+ * generator whose options may legitimately change between runs pairs the two:
+ * the add records a first run, this converges the values a later run resolved
+ * differently.
+ */
+export const updateComponentGeneratorMetadata = (
+  tree: Tree,
+  projectName: string,
+  info: { id: string },
+  componentName: string | undefined,
+  patch: { [key: string]: any },
+) => {
+  const config = readProjectConfigurationUnqualified(tree, projectName);
+  const existingComponents: ComponentMetadata[] =
+    (config?.metadata as any)?.components ?? [];
+
+  const updated = existingComponents.map((component) =>
+    component.generator === info.id && component.name === componentName
+      ? { ...component, ...patch }
+      : component,
+  );
+  if (JSON.stringify(updated) === JSON.stringify(existingComponents)) {
+    return;
+  }
+
+  // Place metadata before targets for a stable serialized key order.
+  const { targets, ...rest } = config;
+  updateProjectConfiguration(tree, config.name, {
+    ...rest,
+    metadata: {
+      ...config?.metadata,
+      components: updated,
+    } as any,
+    ...(targets ? { targets } : {}),
+  });
+};
+
+/**
  * Merge a generator's own config into an `nx.json` `targetDefaults` value,
  * preserving whatever the workspace already had. `apply` receives the config to
  * layer onto and returns the merged config (e.g. `(base) => ({ cache: true,

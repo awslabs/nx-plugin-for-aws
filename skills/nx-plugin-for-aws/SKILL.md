@@ -127,38 +127,39 @@ Add capabilities to existing projects:
 
 ## Available Generators
 
-| Generator             | Description                                                                                                        |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `init`                | Configure an existing Nx workspace to use the @aws/nx-plugin                                                       |
-| `agentcore-gateway`   | Generate an AgentCore Gateway project                                                                              |
-| `agentcore-harness`   | Generate an AgentCore Harness project (experimental)                                                               |
-| `connection`          | Integrates a source project with a target project                                                                  |
-| `license`             | Add LICENSE files and configure source code licence headers                                                        |
-| `py#api`              | Create a Python API                                                                                                |
-| `py#lambda-function`  | Adds a lambda function to a python project                                                                         |
-| `py#mcp-server`       | Generate a Python Model Context Protocol (MCP) server for providing context to Large Language Models               |
-| `py#project`          | Generates a Python project                                                                                         |
-| `py#agent`            | Add an AI Agent to a Python project                                                                                |
-| `smithy#project`      | Generate a Smithy model project, either defining a service or a library of reusable shapes                         |
-| `terraform#project`   | Generates a Terraform project                                                                                      |
-| `ts#docs`             | Generates a documentation site                                                                                     |
-| `ts#infra`            | Generates a cdk application                                                                                        |
-| `ts#lambda-function`  | Generate a TypeScript lambda function                                                                              |
-| `ts#dcr-proxy`        | Generate an OAuth Dynamic Client Registration (DCR) proxy construct for Cognito-authenticated MCP servers          |
-| `ts#mcp-server`       | Generate a TypeScript Model Context Protocol (MCP) server for providing context to Large Language Models           |
-| `ts#nx-generator`     | Generator for adding an Nx Generator to an existing TypeScript project                                             |
-| `ts#nx-migration`     | Generator for adding an Nx Migration to an Nx Plugin, applied by nx migrate when users upgrade                     |
-| `ts#nx-plugin`        | Generate an Nx Plugin of your own! Build custom generators automatically made available for AI vibe-coding via MCP |
-| `ts#project`          | Generates a TypeScript project                                                                                     |
-| `ts#website`          | Generates a website application                                                                                    |
-| `ts#website#auth`     | Adds auth to an existing website                                                                                   |
-| `ts#agent`            | Add an AI Agent to a TypeScript project                                                                            |
-| `ts#agent#guardrails` | Add an Amazon Bedrock Guardrail to a TypeScript Agent (experimental)                                               |
-| `ts#api`              | Create a TypeScript API                                                                                            |
-| `ts#rdb`              | Create a relational database project                                                                               |
-| `ts#dynamodb`         | Create a TypeScript DynamoDB project                                                                               |
-| `py#dynamodb`         | Create a Python DynamoDB project                                                                                   |
-| `py#rdb`              | Create a Python relational database project                                                                        |
+| Generator              | Description                                                                                                        |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `init`                 | Configure an existing Nx workspace to use the @aws/nx-plugin                                                       |
+| `agentcore-gateway`    | Generate an AgentCore Gateway project                                                                              |
+| `agentcore-harness`    | Generate an AgentCore Harness project (experimental)                                                               |
+| `connection`           | Integrates a source project with a target project                                                                  |
+| `greengrass#component` | Add an AWS IoT Greengrass component to an existing Python or TypeScript project (experimental)                     |
+| `license`              | Add LICENSE files and configure source code licence headers                                                        |
+| `py#api`               | Create a Python API                                                                                                |
+| `py#lambda-function`   | Adds a lambda function to a python project                                                                         |
+| `py#mcp-server`        | Generate a Python Model Context Protocol (MCP) server for providing context to Large Language Models               |
+| `py#project`           | Generates a Python project                                                                                         |
+| `py#agent`             | Add an AI Agent to a Python project                                                                                |
+| `smithy#project`       | Generate a Smithy model project, either defining a service or a library of reusable shapes                         |
+| `terraform#project`    | Generates a Terraform project                                                                                      |
+| `ts#docs`              | Generates a documentation site                                                                                     |
+| `ts#infra`             | Generates a cdk application                                                                                        |
+| `ts#lambda-function`   | Generate a TypeScript lambda function                                                                              |
+| `ts#dcr-proxy`         | Generate an OAuth Dynamic Client Registration (DCR) proxy construct for Cognito-authenticated MCP servers          |
+| `ts#mcp-server`        | Generate a TypeScript Model Context Protocol (MCP) server for providing context to Large Language Models           |
+| `ts#nx-generator`      | Generator for adding an Nx Generator to an existing TypeScript project                                             |
+| `ts#nx-migration`      | Generator for adding an Nx Migration to an Nx Plugin, applied by nx migrate when users upgrade                     |
+| `ts#nx-plugin`         | Generate an Nx Plugin of your own! Build custom generators automatically made available for AI vibe-coding via MCP |
+| `ts#project`           | Generates a TypeScript project                                                                                     |
+| `ts#website`           | Generates a website application                                                                                    |
+| `ts#website#auth`      | Adds auth to an existing website                                                                                   |
+| `ts#agent`             | Add an AI Agent to a TypeScript project                                                                            |
+| `ts#agent#guardrails`  | Add an Amazon Bedrock Guardrail to a TypeScript Agent (experimental)                                               |
+| `ts#api`               | Create a TypeScript API                                                                                            |
+| `ts#rdb`               | Create a relational database project                                                                               |
+| `ts#dynamodb`          | Create a TypeScript DynamoDB project                                                                               |
+| `py#dynamodb`          | Create a Python DynamoDB project                                                                                   |
+| `py#rdb`               | Create a Python relational database project                                                                        |
 
 ## Best Practices
 
