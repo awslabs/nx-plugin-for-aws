@@ -32,6 +32,8 @@ from typing import Any
 ROOT, CONNECTION_ROOT, FAKE_AWS, FRAMEWORK, AGENT_PACKAGE, CONNECTION_MODULE = sys.argv[1:7]
 
 ENTRY = {"guardrailId": "grtest", "guardrailVersion": "1"}
+# fake_aws.py blocks a guarded request whose checked text contains "stocks".
+BLOCKED_PROMPT = "Which stocks should I buy this year?"
 
 # scenario: (LOCAL_DEV, RUNTIME_CONFIG_APP_ID, guardrail entry or None, number of calls)
 SCENARIOS: dict[str, tuple[bool, str | None, dict[str, str] | None, int]] = {
@@ -47,6 +49,8 @@ SCENARIOS: dict[str, tuple[bool, str | None, dict[str, str] | None, int]] = {
     "zero-local": (True, "fake-app", {**ENTRY, "guardrailVersion": "0"}, 1),
     "reread": (False, "fake-app", ENTRY, 0),
     "concurrent": (False, "fake-app", ENTRY, 0),
+    "blocked-session": (False, "fake-app", ENTRY, 0),
+    "blocked-session-stream": (False, "fake-app", ENTRY, 0),
 }
 
 
@@ -125,8 +129,8 @@ def run_scenario(name: str) -> dict[str, Any]:
                 with connection.session_id_context("s1"), agent_module.get_agent() as agent:
                     yield agent
 
-            async def call(agent: Any) -> None:
-                await agent.invoke_async("2+2?")
+            async def call(agent: Any, prompt: str = "2+2?") -> None:
+                await agent.invoke_async(prompt)
 
             if name == "concurrent":
                 from strands import Agent
@@ -141,14 +145,18 @@ def run_scenario(name: str) -> dict[str, Any]:
             graph = agent_module.get_agent()
             counter = iter(range(1000))
 
-            async def call(agent: Any) -> None:
-                thread = {"configurable": {"thread_id": f"t{next(counter)}"}}
-                await agent.ainvoke({"messages": [{"role": "user", "content": "2+2?"}]}, thread)
+            async def call(agent: Any, prompt: str | None = None) -> None:
+                # A call with a prompt continues one session; without, each call is a new session.
+                if name == "blocked-session-stream":
+                    await stream(agent, prompt)
+                    return
+                thread = {"configurable": {"thread_id": "session" if prompt else f"t{next(counter)}"}}
+                await agent.ainvoke({"messages": [{"role": "user", "content": prompt or "2+2?"}]}, thread)
 
-            async def stream(agent: Any) -> None:
-                thread = {"configurable": {"thread_id": f"t{next(counter)}"}}
+            async def stream(agent: Any, prompt: str | None = None) -> None:
+                thread = {"configurable": {"thread_id": "session" if prompt else f"t{next(counter)}"}}
                 async for _ in agent.astream(
-                    {"messages": [{"role": "user", "content": "2+2?"}]}, thread, stream_mode="messages"
+                    {"messages": [{"role": "user", "content": prompt or "2+2?"}]}, thread, stream_mode="messages"
                 ):
                     pass
 
@@ -161,6 +169,12 @@ def run_scenario(name: str) -> dict[str, Any]:
                 result["streamed"] = snapshot()["models"][-1:]
 
     async def run_calls(agent: Any, call: Any) -> None:
+        if name.startswith("blocked-session"):
+            # A blocked message, then a normal one, in the same session.
+            for prompt in (BLOCKED_PROMPT, "2+2?"):
+                await call(agent, prompt)
+                result["calls"].append(snapshot())
+            return
         if name == "reread":
             await call(agent)
             result["calls"].append(snapshot())

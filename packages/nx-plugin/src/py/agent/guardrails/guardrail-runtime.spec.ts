@@ -32,6 +32,8 @@ interface ModelRequest {
   path: string;
   modelId: string;
   guardrailConfig: Record<string, string> | null;
+  userTexts: string[];
+  intervened: boolean;
 }
 
 interface ScenarioResult {
@@ -307,6 +309,29 @@ describe('guardrail.py at runtime', { timeout: 600_000 }, () => {
         expect(request.guardrailConfig).toEqual(guarded('1'));
       }
     });
+
+    it.each(['blocked-session', 'blocked-session-stream'])(
+      'should answer a normal message after a blocked one in the same session (%s)',
+      (scenario) => {
+        const r = result(scenario);
+
+        expect(r.error).toBeUndefined();
+        const [blocked, next] = r.calls;
+        expect(blocked.models.at(-1).intervened).toBe(true);
+        const followUps = next.models.slice(blocked.models.length);
+        expect(followUps.length).toBeGreaterThan(0);
+        for (const request of followUps) {
+          expect(request.guardrailConfig).toEqual(guarded('1'));
+          // fake_aws.py blocks it as Bedrock would if the blocked message were still checked.
+          expect(request.intervened).toBe(false);
+        }
+        // The session keeps the earlier turn, with the blocked message redacted.
+        expect(followUps[0].userTexts).toEqual([
+          '[User input redacted.]',
+          '2+2?',
+        ]);
+      },
+    );
 
     it.each(['ty', 'ruffFormat', 'ruffCheck'])(
       'should pass %s on guardrail.py and agent.py',
