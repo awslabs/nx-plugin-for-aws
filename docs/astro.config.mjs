@@ -411,6 +411,10 @@ export default defineConfig({
                   link: '/guides/ts-agent-guardrails',
                 },
                 { label: 'py#agent', link: '/guides/py-agent' },
+                {
+                  label: 'py#agent#guardrails',
+                  link: '/guides/py-agent-guardrails',
+                },
                 { label: 'ts#mcp-server', link: '/guides/ts-mcp-server' },
                 { label: 'py#mcp-server', link: '/guides/py-mcp-server' },
                 {

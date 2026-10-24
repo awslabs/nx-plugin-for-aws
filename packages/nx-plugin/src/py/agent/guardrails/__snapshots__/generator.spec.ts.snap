@@ -1,0 +1,3489 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`py#agent#guardrails generator > framework langchain > protocol a2a > should generate the guardrail with cdk > agent.py 1`] = `
+"import os
+
+from langchain.agents import create_agent
+from langchain_core.tools import tool
+
+from .guardrail import GuardrailedChatBedrockConverse
+from .session import get_checkpointer
+
+REGION = os.environ.get("AWS_REGION", "us-east-1")
+MODEL_ID = os.environ.get("MODEL_ID", "global.anthropic.claude-haiku-4-5-20251001-v1:0")
+
+
+@tool
+def subtract(a: int, b: int) -> int:
+    """Subtract b from a."""
+    return a - b
+
+
+def get_agent():
+    model = GuardrailedChatBedrockConverse(model=MODEL_ID, region_name=REGION)
+    return create_agent(
+        model=model,
+        tools=[subtract],
+        system_prompt="""
+You are a mathematical wizard.
+Use your tools for mathematical tasks.
+Refer to tools as your 'spellbook'.
+""",
+        checkpointer=get_checkpointer(),
+    )
+"
+`;
+
+exports[`py#agent#guardrails generator > framework langchain > protocol a2a > should generate the guardrail with cdk > app/index.ts 1`] = `
+"export * from './guardrails/index.js';
+export * from './agents/index.js';
+"
+`;
+
+exports[`py#agent#guardrails generator > framework langchain > protocol a2a > should generate the guardrail with cdk > construct 1`] = `
+"import { createHash } from 'node:crypto';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as url from 'node:url';
+import { CfnOutput, Names, Stack } from 'aws-cdk-lib';
+import * as bedrock from 'aws-cdk-lib/aws-bedrock';
+import * as iam from 'aws-cdk-lib/aws-iam';
+import { Construct } from 'constructs';
+import { RuntimeConfig } from '../../../core/runtime-config.js';
+import { findWorkspaceRoot } from '../../../core/workspace.js';
+
+interface GuardrailPolicy {
+  blockedInputMessaging: string;
+  blockedOutputsMessaging: string;
+  deniedTopics?: { name: string; definition: string; examples?: string[] }[];
+  piiEntities?: { type: string; action: string }[];
+}
+
+// Read at synth time, anchored on the workspace root so it still resolves once
+// this file compiles to dist/.
+const policyFile = fs.readFileSync(
+  path.join(
+    findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+    'apps/test-project/proj_test_project/agent/guardrail.json',
+  ),
+);
+const policy: GuardrailPolicy = JSON.parse(policyFile.toString('utf-8'));
+
+/**
+ * Properties for the TestProjectAgentGuardrail. Any CfnGuardrail property
+ * supplied here takes precedence over guardrail.json.
+ */
+export type TestProjectAgentGuardrailProps =
+  Partial<bedrock.CfnGuardrailProps> & {
+    /** The agent that applies this guardrail. It is granted bedrock:ApplyGuardrail. */
+    readonly agent: iam.IGrantable;
+  };
+
+/**
+ * An Amazon Bedrock Guardrail for TestProjectAgent, with a numbered version
+ * that changes whenever its rules change. Its ID and version are written to
+ * runtime config, where the agent reads them.
+ */
+export class TestProjectAgentGuardrail extends Construct {
+  public readonly guardrail: bedrock.CfnGuardrail;
+  public readonly version: bedrock.CfnGuardrailVersion;
+  public readonly guardrailId: string;
+  public readonly guardrailArn: string;
+  public readonly guardrailVersion: string;
+
+  constructor(
+    scope: Construct,
+    id: string,
+    props: TestProjectAgentGuardrailProps,
+  ) {
+    super(scope, id);
+
+    const { agent, ...overrides } = props;
+
+    const deniedTopics = policy.deniedTopics ?? [];
+    const piiEntities = policy.piiEntities ?? [];
+
+    this.guardrail = new bedrock.CfnGuardrail(this, 'Guardrail', {
+      name: Names.uniqueResourceName(this, {
+        maxLength: 50,
+        separator: '-',
+        allowedSpecialCharacters: '-_',
+      }),
+      blockedInputMessaging: policy.blockedInputMessaging,
+      blockedOutputsMessaging: policy.blockedOutputsMessaging,
+      ...(deniedTopics.length > 0 && {
+        topicPolicyConfig: {
+          topicsConfig: deniedTopics.map(({ name, definition, examples }) => ({
+            name,
+            definition,
+            examples,
+            type: 'DENY',
+          })),
+        },
+      }),
+      ...(piiEntities.length > 0 && {
+        sensitiveInformationPolicyConfig: {
+          piiEntitiesConfig: piiEntities.map(({ type, action }) => ({
+            type,
+            action,
+          })),
+        },
+      }),
+      ...overrides,
+    });
+
+    const hash = createHash('sha256').update(policyFile);
+    if (Object.keys(overrides).length > 0) {
+      hash.update(JSON.stringify(Stack.of(this).resolve(overrides)));
+    }
+
+    this.version = new bedrock.CfnGuardrailVersion(this, 'Version', {
+      guardrailIdentifier: this.guardrail.attrGuardrailId,
+      description: \`guardrail.json sha256 \${hash.digest('hex')}\`,
+    });
+
+    this.guardrailId = this.guardrail.attrGuardrailId;
+    this.guardrailArn = this.guardrail.attrGuardrailArn;
+    this.guardrailVersion = this.version.attrVersion;
+
+    new CfnOutput(this, 'GuardrailId', { value: this.guardrailId });
+    new CfnOutput(this, 'GuardrailVersion', { value: this.guardrailVersion });
+
+    const rc = RuntimeConfig.ensure(this);
+    rc.set('agentcore', 'guardrails', {
+      ...rc.get('agentcore').guardrails,
+      TestProjectAgent: {
+        guardrailId: this.guardrailId,
+        guardrailVersion: this.guardrailVersion,
+      },
+    });
+
+    this.grantApply(agent);
+  }
+
+  /** Grant permission to apply this guardrail. */
+  public grantApply(grantee: iam.IGrantable): iam.Grant {
+    return iam.Grant.addToPrincipal({
+      grantee,
+      actions: ['bedrock:ApplyGuardrail'],
+      resourceArns: [this.guardrailArn],
+    });
+  }
+}
+"
+`;
+
+exports[`py#agent#guardrails generator > framework langchain > protocol a2a > should generate the guardrail with cdk > guardrail.json 1`] = `
+"{
+  "blockedInputMessaging": "Sorry, I can't help with that request.",
+  "blockedOutputsMessaging": "Sorry, I can't share that answer.",
+  "deniedTopics": [
+    {
+      "name": "Investment advice",
+      "definition": "Recommendations about which specific stocks, funds or other investments to buy or sell.",
+      "examples": ["Which stocks should I buy this year?"]
+    }
+  ],
+  "piiEntities": [
+    { "type": "EMAIL", "action": "ANONYMIZE" },
+    { "type": "PHONE", "action": "ANONYMIZE" },
+    { "type": "US_SOCIAL_SECURITY_NUMBER", "action": "BLOCK" }
+  ]
+}
+"
+`;
+
+exports[`py#agent#guardrails generator > framework langchain > protocol a2a > should generate the guardrail with cdk > guardrail.py 1`] = `
+"import logging
+import os
+import re
+import threading
+import time
+from collections.abc import Iterator
+from typing import Any, TypedDict
+
+from langchain_aws import ChatBedrockConverse
+from langchain_core.callbacks import CallbackManagerForLLMRun
+from langchain_core.messages import BaseMessage
+from langchain_core.outputs import ChatGenerationChunk, ChatResult
+from proj_agent_connection.core.runtime_config import get_agentcore_runtime_config
+
+logger = logging.getLogger(__name__)
+
+RUNTIME_CONFIG_KEY = "agentcore.guardrails.TestProjectAgent"
+CACHE_SECONDS = 5
+
+
+class GuardrailConfig(TypedDict):
+    guardrailIdentifier: str
+    guardrailVersion: str
+    trace: str
+
+
+_lock = threading.Lock()
+_cache: tuple[float, dict[str, Any] | None] | None = None
+_warned_unguarded = False
+
+
+def _read_entry() -> dict[str, Any] | None:
+    """This agent's entry in runtime config, written by the TestProjectAgentGuardrail
+    construct or the test-project-agent guardrail module, cached for CACHE_SECONDS."""
+    global _cache
+    with _lock:
+        if _cache is None or time.monotonic() - _cache[0] >= CACHE_SECONDS:
+            guardrails = get_agentcore_runtime_config().get("guardrails") or {}
+            _cache = (time.monotonic(), guardrails.get("TestProjectAgent"))
+        return _cache[1]
+
+
+def resolve_guardrail() -> GuardrailConfig | None:
+    """The guardrail to apply, read from runtime config on every model call (cached for 5 seconds)."""
+    global _warned_unguarded
+    local_dev = os.environ.get("LOCAL_DEV") == "true"
+    entry: dict[str, Any] | None = None
+    if not local_dev:
+        entry = _read_entry()
+    elif os.environ.get("RUNTIME_CONFIG_APP_ID"):
+        try:
+            entry = _read_entry()
+        except Exception:
+            entry = None
+
+    guardrail_id = (entry or {}).get("guardrailId")
+    guardrail_version = (entry or {}).get("guardrailVersion")
+    if not guardrail_id or not guardrail_version:
+        if not local_dev:
+            raise RuntimeError(
+                f"No guardrail for this agent in runtime config at {RUNTIME_CONFIG_KEY}. "
+                "Add the TestProjectAgentGuardrail construct (CDK) or the "
+                "guardrails/test-project-agent module (Terraform) to your infrastructure."
+            )
+        if not _warned_unguarded:
+            _warned_unguarded = True
+            logger.warning(
+                "No guardrail for this agent in runtime config at %s, "
+                "so the agent is running without a guardrail (LOCAL_DEV=true).",
+                RUNTIME_CONFIG_KEY,
+            )
+        return None
+
+    if not re.fullmatch(r"[1-9][0-9]*", str(guardrail_version)):
+        raise RuntimeError(
+            f"The guardrail version in runtime config at {RUNTIME_CONFIG_KEY} "
+            f"must be a numbered guardrail version, but is {guardrail_version}."
+        )
+    return {
+        "guardrailIdentifier": str(guardrail_id),
+        "guardrailVersion": str(guardrail_version),
+        "trace": "enabled",
+    }
+
+
+class GuardrailedChatBedrockConverse(ChatBedrockConverse):
+    """A ChatBedrockConverse model that applies this agent's guardrail from runtime config
+    to each model call, so a new guardrail version applies without a restart."""
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        kwargs["guardrail_config"] = resolve_guardrail()
+        return super()._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
+
+    def _stream(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> Iterator[ChatGenerationChunk]:
+        kwargs["guardrail_config"] = resolve_guardrail()
+        yield from super()._stream(
+            messages, stop=stop, run_manager=run_manager, **kwargs
+        )
+"
+`;
+
+exports[`py#agent#guardrails generator > framework langchain > protocol a2a > should generate the guardrail with cdk > guardrails/index.ts 1`] = `
+"export * from './test-project-agent/test-project-agent-guardrail.js';
+"
+`;
+
+exports[`py#agent#guardrails generator > framework langchain > protocol a2a > should generate the guardrail with terraform > agent.py 1`] = `
+"import os
+
+from langchain.agents import create_agent
+from langchain_core.tools import tool
+
+from .guardrail import GuardrailedChatBedrockConverse
+from .session import get_checkpointer
+
+REGION = os.environ.get("AWS_REGION", "us-east-1")
+MODEL_ID = os.environ.get("MODEL_ID", "global.anthropic.claude-haiku-4-5-20251001-v1:0")
+
+
+@tool
+def subtract(a: int, b: int) -> int:
+    """Subtract b from a."""
+    return a - b
+
+
+def get_agent():
+    model = GuardrailedChatBedrockConverse(model=MODEL_ID, region_name=REGION)
+    return create_agent(
+        model=model,
+        tools=[subtract],
+        system_prompt="""
+You are a mathematical wizard.
+Use your tools for mathematical tasks.
+Refer to tools as your 'spellbook'.
+""",
+        checkpointer=get_checkpointer(),
+    )
+"
+`;
+
+exports[`py#agent#guardrails generator > framework langchain > protocol a2a > should generate the guardrail with terraform > guardrail.json 1`] = `
+"{
+  "blockedInputMessaging": "Sorry, I can't help with that request.",
+  "blockedOutputsMessaging": "Sorry, I can't share that answer.",
+  "deniedTopics": [
+    {
+      "name": "Investment advice",
+      "definition": "Recommendations about which specific stocks, funds or other investments to buy or sell.",
+      "examples": ["Which stocks should I buy this year?"]
+    }
+  ],
+  "piiEntities": [
+    { "type": "EMAIL", "action": "ANONYMIZE" },
+    { "type": "PHONE", "action": "ANONYMIZE" },
+    { "type": "US_SOCIAL_SECURITY_NUMBER", "action": "BLOCK" }
+  ]
+}
+"
+`;
+
+exports[`py#agent#guardrails generator > framework langchain > protocol a2a > should generate the guardrail with terraform > guardrail.py 1`] = `
+"import logging
+import os
+import re
+import threading
+import time
+from collections.abc import Iterator
+from typing import Any, TypedDict
+
+from langchain_aws import ChatBedrockConverse
+from langchain_core.callbacks import CallbackManagerForLLMRun
+from langchain_core.messages import BaseMessage
+from langchain_core.outputs import ChatGenerationChunk, ChatResult
+from proj_agent_connection.core.runtime_config import get_agentcore_runtime_config
+
+logger = logging.getLogger(__name__)
+
+RUNTIME_CONFIG_KEY = "agentcore.guardrails.TestProjectAgent"
+CACHE_SECONDS = 5
+
+
+class GuardrailConfig(TypedDict):
+    guardrailIdentifier: str
+    guardrailVersion: str
+    trace: str
+
+
+_lock = threading.Lock()
+_cache: tuple[float, dict[str, Any] | None] | None = None
+_warned_unguarded = False
+
+
+def _read_entry() -> dict[str, Any] | None:
+    """This agent's entry in runtime config, written by the TestProjectAgentGuardrail
+    construct or the test-project-agent guardrail module, cached for CACHE_SECONDS."""
+    global _cache
+    with _lock:
+        if _cache is None or time.monotonic() - _cache[0] >= CACHE_SECONDS:
+            guardrails = get_agentcore_runtime_config().get("guardrails") or {}
+            _cache = (time.monotonic(), guardrails.get("TestProjectAgent"))
+        return _cache[1]
+
+
+def resolve_guardrail() -> GuardrailConfig | None:
+    """The guardrail to apply, read from runtime config on every model call (cached for 5 seconds)."""
+    global _warned_unguarded
+    local_dev = os.environ.get("LOCAL_DEV") == "true"
+    entry: dict[str, Any] | None = None
+    if not local_dev:
+        entry = _read_entry()
+    elif os.environ.get("RUNTIME_CONFIG_APP_ID"):
+        try:
+            entry = _read_entry()
+        except Exception:
+            entry = None
+
+    guardrail_id = (entry or {}).get("guardrailId")
+    guardrail_version = (entry or {}).get("guardrailVersion")
+    if not guardrail_id or not guardrail_version:
+        if not local_dev:
+            raise RuntimeError(
+                f"No guardrail for this agent in runtime config at {RUNTIME_CONFIG_KEY}. "
+                "Add the TestProjectAgentGuardrail construct (CDK) or the "
+                "guardrails/test-project-agent module (Terraform) to your infrastructure."
+            )
+        if not _warned_unguarded:
+            _warned_unguarded = True
+            logger.warning(
+                "No guardrail for this agent in runtime config at %s, "
+                "so the agent is running without a guardrail (LOCAL_DEV=true).",
+                RUNTIME_CONFIG_KEY,
+            )
+        return None
+
+    if not re.fullmatch(r"[1-9][0-9]*", str(guardrail_version)):
+        raise RuntimeError(
+            f"The guardrail version in runtime config at {RUNTIME_CONFIG_KEY} "
+            f"must be a numbered guardrail version, but is {guardrail_version}."
+        )
+    return {
+        "guardrailIdentifier": str(guardrail_id),
+        "guardrailVersion": str(guardrail_version),
+        "trace": "enabled",
+    }
+
+
+class GuardrailedChatBedrockConverse(ChatBedrockConverse):
+    """A ChatBedrockConverse model that applies this agent's guardrail from runtime config
+    to each model call, so a new guardrail version applies without a restart."""
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        kwargs["guardrail_config"] = resolve_guardrail()
+        return super()._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
+
+    def _stream(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> Iterator[ChatGenerationChunk]:
+        kwargs["guardrail_config"] = resolve_guardrail()
+        yield from super()._stream(
+            messages, stop=stop, run_manager=run_manager, **kwargs
+        )
+"
+`;
+
+exports[`py#agent#guardrails generator > framework langchain > protocol a2a > should generate the guardrail with terraform > module 1`] = `
+"terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "6.69.1"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "3.9.1"
+    }
+  }
+}
+
+variable "tags" {
+  description = "Tags to apply to resources"
+  type        = map(string)
+  default     = {}
+}
+
+locals {
+  policy_file = "\${path.module}/../../../../../../../apps/test-project/proj_test_project/agent/guardrail.json"
+  policy      = jsondecode(file(local.policy_file))
+  name_prefix = "test-project-agent-guardrail"
+}
+
+resource "random_id" "unique_suffix" {
+  byte_length = 4
+}
+
+resource "aws_bedrock_guardrail" "this" {
+  name                      = "\${local.name_prefix}-\${random_id.unique_suffix.hex}"
+  blocked_input_messaging   = local.policy.blockedInputMessaging
+  blocked_outputs_messaging = local.policy.blockedOutputsMessaging
+
+  dynamic "topic_policy_config" {
+    for_each = length(try(local.policy.deniedTopics, [])) > 0 ? [1] : []
+    content {
+      dynamic "topics_config" {
+        for_each = local.policy.deniedTopics
+        content {
+          name       = topics_config.value.name
+          definition = topics_config.value.definition
+          examples   = try(topics_config.value.examples, [])
+          type       = "DENY"
+        }
+      }
+    }
+  }
+
+  dynamic "sensitive_information_policy_config" {
+    for_each = length(try(local.policy.piiEntities, [])) > 0 ? [1] : []
+    content {
+      dynamic "pii_entities_config" {
+        for_each = local.policy.piiEntities
+        content {
+          type   = pii_entities_config.value.type
+          action = pii_entities_config.value.action
+        }
+      }
+    }
+  }
+
+  tags = var.tags
+}
+
+resource "aws_bedrock_guardrail_version" "this" {
+  guardrail_arn = aws_bedrock_guardrail.this.guardrail_arn
+  description   = "guardrail.json sha256 \${filesha256(local.policy_file)}"
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+module "add_guardrail_to_runtime_config" {
+  source = "../../../core/runtime-config/entry"
+
+  namespace = "agentcore"
+  key       = "guardrails"
+  value     = { "TestProjectAgent" = { guardrailId = aws_bedrock_guardrail.this.guardrail_id, guardrailVersion = aws_bedrock_guardrail_version.this.version } }
+}
+
+output "guardrail_id" {
+  description = "ID of the guardrail"
+  value       = aws_bedrock_guardrail.this.guardrail_id
+}
+
+output "guardrail_arn" {
+  description = "ARN of the guardrail"
+  value       = aws_bedrock_guardrail.this.guardrail_arn
+}
+
+output "guardrail_version" {
+  description = "Numbered version of the guardrail"
+  value       = aws_bedrock_guardrail_version.this.version
+}
+
+output "iam_policy_statements" {
+  description = "IAM policy statements that allow the agent to apply the guardrail"
+  value = [
+    {
+      Effect   = "Allow"
+      Action   = ["bedrock:ApplyGuardrail"]
+      Resource = [aws_bedrock_guardrail.this.guardrail_arn]
+    }
+  ]
+  depends_on = [module.add_guardrail_to_runtime_config]
+}
+"
+`;
+
+exports[`py#agent#guardrails generator > framework langchain > protocol ag-ui > should generate the guardrail with cdk > agent.py 1`] = `
+"import os
+
+from langchain.agents import create_agent
+from langchain_core.tools import tool
+
+from .guardrail import GuardrailedChatBedrockConverse
+from .session import get_checkpointer
+
+REGION = os.environ.get("AWS_REGION", "us-east-1")
+MODEL_ID = os.environ.get("MODEL_ID", "global.anthropic.claude-haiku-4-5-20251001-v1:0")
+
+
+@tool
+def subtract(a: int, b: int) -> int:
+    """Subtract b from a."""
+    return a - b
+
+
+def get_agent():
+    model = GuardrailedChatBedrockConverse(model=MODEL_ID, region_name=REGION)
+    return create_agent(
+        model=model,
+        tools=[subtract],
+        system_prompt="""
+You are a mathematical wizard.
+Use your tools for mathematical tasks.
+Refer to tools as your 'spellbook'.
+""",
+        checkpointer=get_checkpointer(),
+    )
+"
+`;
+
+exports[`py#agent#guardrails generator > framework langchain > protocol ag-ui > should generate the guardrail with cdk > app/index.ts 1`] = `
+"export * from './guardrails/index.js';
+export * from './agents/index.js';
+"
+`;
+
+exports[`py#agent#guardrails generator > framework langchain > protocol ag-ui > should generate the guardrail with cdk > construct 1`] = `
+"import { createHash } from 'node:crypto';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as url from 'node:url';
+import { CfnOutput, Names, Stack } from 'aws-cdk-lib';
+import * as bedrock from 'aws-cdk-lib/aws-bedrock';
+import * as iam from 'aws-cdk-lib/aws-iam';
+import { Construct } from 'constructs';
+import { RuntimeConfig } from '../../../core/runtime-config.js';
+import { findWorkspaceRoot } from '../../../core/workspace.js';
+
+interface GuardrailPolicy {
+  blockedInputMessaging: string;
+  blockedOutputsMessaging: string;
+  deniedTopics?: { name: string; definition: string; examples?: string[] }[];
+  piiEntities?: { type: string; action: string }[];
+}
+
+// Read at synth time, anchored on the workspace root so it still resolves once
+// this file compiles to dist/.
+const policyFile = fs.readFileSync(
+  path.join(
+    findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+    'apps/test-project/proj_test_project/agent/guardrail.json',
+  ),
+);
+const policy: GuardrailPolicy = JSON.parse(policyFile.toString('utf-8'));
+
+/**
+ * Properties for the TestProjectAgentGuardrail. Any CfnGuardrail property
+ * supplied here takes precedence over guardrail.json.
+ */
+export type TestProjectAgentGuardrailProps =
+  Partial<bedrock.CfnGuardrailProps> & {
+    /** The agent that applies this guardrail. It is granted bedrock:ApplyGuardrail. */
+    readonly agent: iam.IGrantable;
+  };
+
+/**
+ * An Amazon Bedrock Guardrail for TestProjectAgent, with a numbered version
+ * that changes whenever its rules change. Its ID and version are written to
+ * runtime config, where the agent reads them.
+ */
+export class TestProjectAgentGuardrail extends Construct {
+  public readonly guardrail: bedrock.CfnGuardrail;
+  public readonly version: bedrock.CfnGuardrailVersion;
+  public readonly guardrailId: string;
+  public readonly guardrailArn: string;
+  public readonly guardrailVersion: string;
+
+  constructor(
+    scope: Construct,
+    id: string,
+    props: TestProjectAgentGuardrailProps,
+  ) {
+    super(scope, id);
+
+    const { agent, ...overrides } = props;
+
+    const deniedTopics = policy.deniedTopics ?? [];
+    const piiEntities = policy.piiEntities ?? [];
+
+    this.guardrail = new bedrock.CfnGuardrail(this, 'Guardrail', {
+      name: Names.uniqueResourceName(this, {
+        maxLength: 50,
+        separator: '-',
+        allowedSpecialCharacters: '-_',
+      }),
+      blockedInputMessaging: policy.blockedInputMessaging,
+      blockedOutputsMessaging: policy.blockedOutputsMessaging,
+      ...(deniedTopics.length > 0 && {
+        topicPolicyConfig: {
+          topicsConfig: deniedTopics.map(({ name, definition, examples }) => ({
+            name,
+            definition,
+            examples,
+            type: 'DENY',
+          })),
+        },
+      }),
+      ...(piiEntities.length > 0 && {
+        sensitiveInformationPolicyConfig: {
+          piiEntitiesConfig: piiEntities.map(({ type, action }) => ({
+            type,
+            action,
+          })),
+        },
+      }),
+      ...overrides,
+    });
+
+    const hash = createHash('sha256').update(policyFile);
+    if (Object.keys(overrides).length > 0) {
+      hash.update(JSON.stringify(Stack.of(this).resolve(overrides)));
+    }
+
+    this.version = new bedrock.CfnGuardrailVersion(this, 'Version', {
+      guardrailIdentifier: this.guardrail.attrGuardrailId,
+      description: \`guardrail.json sha256 \${hash.digest('hex')}\`,
+    });
+
+    this.guardrailId = this.guardrail.attrGuardrailId;
+    this.guardrailArn = this.guardrail.attrGuardrailArn;
+    this.guardrailVersion = this.version.attrVersion;
+
+    new CfnOutput(this, 'GuardrailId', { value: this.guardrailId });
+    new CfnOutput(this, 'GuardrailVersion', { value: this.guardrailVersion });
+
+    const rc = RuntimeConfig.ensure(this);
+    rc.set('agentcore', 'guardrails', {
+      ...rc.get('agentcore').guardrails,
+      TestProjectAgent: {
+        guardrailId: this.guardrailId,
+        guardrailVersion: this.guardrailVersion,
+      },
+    });
+
+    this.grantApply(agent);
+  }
+
+  /** Grant permission to apply this guardrail. */
+  public grantApply(grantee: iam.IGrantable): iam.Grant {
+    return iam.Grant.addToPrincipal({
+      grantee,
+      actions: ['bedrock:ApplyGuardrail'],
+      resourceArns: [this.guardrailArn],
+    });
+  }
+}
+"
+`;
+
+exports[`py#agent#guardrails generator > framework langchain > protocol ag-ui > should generate the guardrail with cdk > guardrail.json 1`] = `
+"{
+  "blockedInputMessaging": "Sorry, I can't help with that request.",
+  "blockedOutputsMessaging": "Sorry, I can't share that answer.",
+  "deniedTopics": [
+    {
+      "name": "Investment advice",
+      "definition": "Recommendations about which specific stocks, funds or other investments to buy or sell.",
+      "examples": ["Which stocks should I buy this year?"]
+    }
+  ],
+  "piiEntities": [
+    { "type": "EMAIL", "action": "ANONYMIZE" },
+    { "type": "PHONE", "action": "ANONYMIZE" },
+    { "type": "US_SOCIAL_SECURITY_NUMBER", "action": "BLOCK" }
+  ]
+}
+"
+`;
+
+exports[`py#agent#guardrails generator > framework langchain > protocol ag-ui > should generate the guardrail with cdk > guardrail.py 1`] = `
+"import logging
+import os
+import re
+import threading
+import time
+from collections.abc import Iterator
+from typing import Any, TypedDict
+
+from langchain_aws import ChatBedrockConverse
+from langchain_core.callbacks import CallbackManagerForLLMRun
+from langchain_core.messages import BaseMessage
+from langchain_core.outputs import ChatGenerationChunk, ChatResult
+from proj_agent_connection.core.runtime_config import get_agentcore_runtime_config
+
+logger = logging.getLogger(__name__)
+
+RUNTIME_CONFIG_KEY = "agentcore.guardrails.TestProjectAgent"
+CACHE_SECONDS = 5
+
+
+class GuardrailConfig(TypedDict):
+    guardrailIdentifier: str
+    guardrailVersion: str
+    trace: str
+
+
+_lock = threading.Lock()
+_cache: tuple[float, dict[str, Any] | None] | None = None
+_warned_unguarded = False
+
+
+def _read_entry() -> dict[str, Any] | None:
+    """This agent's entry in runtime config, written by the TestProjectAgentGuardrail
+    construct or the test-project-agent guardrail module, cached for CACHE_SECONDS."""
+    global _cache
+    with _lock:
+        if _cache is None or time.monotonic() - _cache[0] >= CACHE_SECONDS:
+            guardrails = get_agentcore_runtime_config().get("guardrails") or {}
+            _cache = (time.monotonic(), guardrails.get("TestProjectAgent"))
+        return _cache[1]
+
+
+def resolve_guardrail() -> GuardrailConfig | None:
+    """The guardrail to apply, read from runtime config on every model call (cached for 5 seconds)."""
+    global _warned_unguarded
+    local_dev = os.environ.get("LOCAL_DEV") == "true"
+    entry: dict[str, Any] | None = None
+    if not local_dev:
+        entry = _read_entry()
+    elif os.environ.get("RUNTIME_CONFIG_APP_ID"):
+        try:
+            entry = _read_entry()
+        except Exception:
+            entry = None
+
+    guardrail_id = (entry or {}).get("guardrailId")
+    guardrail_version = (entry or {}).get("guardrailVersion")
+    if not guardrail_id or not guardrail_version:
+        if not local_dev:
+            raise RuntimeError(
+                f"No guardrail for this agent in runtime config at {RUNTIME_CONFIG_KEY}. "
+                "Add the TestProjectAgentGuardrail construct (CDK) or the "
+                "guardrails/test-project-agent module (Terraform) to your infrastructure."
+            )
+        if not _warned_unguarded:
+            _warned_unguarded = True
+            logger.warning(
+                "No guardrail for this agent in runtime config at %s, "
+                "so the agent is running without a guardrail (LOCAL_DEV=true).",
+                RUNTIME_CONFIG_KEY,
+            )
+        return None
+
+    if not re.fullmatch(r"[1-9][0-9]*", str(guardrail_version)):
+        raise RuntimeError(
+            f"The guardrail version in runtime config at {RUNTIME_CONFIG_KEY} "
+            f"must be a numbered guardrail version, but is {guardrail_version}."
+        )
+    return {
+        "guardrailIdentifier": str(guardrail_id),
+        "guardrailVersion": str(guardrail_version),
+        "trace": "enabled",
+    }
+
+
+class GuardrailedChatBedrockConverse(ChatBedrockConverse):
+    """A ChatBedrockConverse model that applies this agent's guardrail from runtime config
+    to each model call, so a new guardrail version applies without a restart."""
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        kwargs["guardrail_config"] = resolve_guardrail()
+        return super()._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
+
+    def _stream(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> Iterator[ChatGenerationChunk]:
+        kwargs["guardrail_config"] = resolve_guardrail()
+        yield from super()._stream(
+            messages, stop=stop, run_manager=run_manager, **kwargs
+        )
+"
+`;
+
+exports[`py#agent#guardrails generator > framework langchain > protocol ag-ui > should generate the guardrail with cdk > guardrails/index.ts 1`] = `
+"export * from './test-project-agent/test-project-agent-guardrail.js';
+"
+`;
+
+exports[`py#agent#guardrails generator > framework langchain > protocol ag-ui > should generate the guardrail with terraform > agent.py 1`] = `
+"import os
+
+from langchain.agents import create_agent
+from langchain_core.tools import tool
+
+from .guardrail import GuardrailedChatBedrockConverse
+from .session import get_checkpointer
+
+REGION = os.environ.get("AWS_REGION", "us-east-1")
+MODEL_ID = os.environ.get("MODEL_ID", "global.anthropic.claude-haiku-4-5-20251001-v1:0")
+
+
+@tool
+def subtract(a: int, b: int) -> int:
+    """Subtract b from a."""
+    return a - b
+
+
+def get_agent():
+    model = GuardrailedChatBedrockConverse(model=MODEL_ID, region_name=REGION)
+    return create_agent(
+        model=model,
+        tools=[subtract],
+        system_prompt="""
+You are a mathematical wizard.
+Use your tools for mathematical tasks.
+Refer to tools as your 'spellbook'.
+""",
+        checkpointer=get_checkpointer(),
+    )
+"
+`;
+
+exports[`py#agent#guardrails generator > framework langchain > protocol ag-ui > should generate the guardrail with terraform > guardrail.json 1`] = `
+"{
+  "blockedInputMessaging": "Sorry, I can't help with that request.",
+  "blockedOutputsMessaging": "Sorry, I can't share that answer.",
+  "deniedTopics": [
+    {
+      "name": "Investment advice",
+      "definition": "Recommendations about which specific stocks, funds or other investments to buy or sell.",
+      "examples": ["Which stocks should I buy this year?"]
+    }
+  ],
+  "piiEntities": [
+    { "type": "EMAIL", "action": "ANONYMIZE" },
+    { "type": "PHONE", "action": "ANONYMIZE" },
+    { "type": "US_SOCIAL_SECURITY_NUMBER", "action": "BLOCK" }
+  ]
+}
+"
+`;
+
+exports[`py#agent#guardrails generator > framework langchain > protocol ag-ui > should generate the guardrail with terraform > guardrail.py 1`] = `
+"import logging
+import os
+import re
+import threading
+import time
+from collections.abc import Iterator
+from typing import Any, TypedDict
+
+from langchain_aws import ChatBedrockConverse
+from langchain_core.callbacks import CallbackManagerForLLMRun
+from langchain_core.messages import BaseMessage
+from langchain_core.outputs import ChatGenerationChunk, ChatResult
+from proj_agent_connection.core.runtime_config import get_agentcore_runtime_config
+
+logger = logging.getLogger(__name__)
+
+RUNTIME_CONFIG_KEY = "agentcore.guardrails.TestProjectAgent"
+CACHE_SECONDS = 5
+
+
+class GuardrailConfig(TypedDict):
+    guardrailIdentifier: str
+    guardrailVersion: str
+    trace: str
+
+
+_lock = threading.Lock()
+_cache: tuple[float, dict[str, Any] | None] | None = None
+_warned_unguarded = False
+
+
+def _read_entry() -> dict[str, Any] | None:
+    """This agent's entry in runtime config, written by the TestProjectAgentGuardrail
+    construct or the test-project-agent guardrail module, cached for CACHE_SECONDS."""
+    global _cache
+    with _lock:
+        if _cache is None or time.monotonic() - _cache[0] >= CACHE_SECONDS:
+            guardrails = get_agentcore_runtime_config().get("guardrails") or {}
+            _cache = (time.monotonic(), guardrails.get("TestProjectAgent"))
+        return _cache[1]
+
+
+def resolve_guardrail() -> GuardrailConfig | None:
+    """The guardrail to apply, read from runtime config on every model call (cached for 5 seconds)."""
+    global _warned_unguarded
+    local_dev = os.environ.get("LOCAL_DEV") == "true"
+    entry: dict[str, Any] | None = None
+    if not local_dev:
+        entry = _read_entry()
+    elif os.environ.get("RUNTIME_CONFIG_APP_ID"):
+        try:
+            entry = _read_entry()
+        except Exception:
+            entry = None
+
+    guardrail_id = (entry or {}).get("guardrailId")
+    guardrail_version = (entry or {}).get("guardrailVersion")
+    if not guardrail_id or not guardrail_version:
+        if not local_dev:
+            raise RuntimeError(
+                f"No guardrail for this agent in runtime config at {RUNTIME_CONFIG_KEY}. "
+                "Add the TestProjectAgentGuardrail construct (CDK) or the "
+                "guardrails/test-project-agent module (Terraform) to your infrastructure."
+            )
+        if not _warned_unguarded:
+            _warned_unguarded = True
+            logger.warning(
+                "No guardrail for this agent in runtime config at %s, "
+                "so the agent is running without a guardrail (LOCAL_DEV=true).",
+                RUNTIME_CONFIG_KEY,
+            )
+        return None
+
+    if not re.fullmatch(r"[1-9][0-9]*", str(guardrail_version)):
+        raise RuntimeError(
+            f"The guardrail version in runtime config at {RUNTIME_CONFIG_KEY} "
+            f"must be a numbered guardrail version, but is {guardrail_version}."
+        )
+    return {
+        "guardrailIdentifier": str(guardrail_id),
+        "guardrailVersion": str(guardrail_version),
+        "trace": "enabled",
+    }
+
+
+class GuardrailedChatBedrockConverse(ChatBedrockConverse):
+    """A ChatBedrockConverse model that applies this agent's guardrail from runtime config
+    to each model call, so a new guardrail version applies without a restart."""
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        kwargs["guardrail_config"] = resolve_guardrail()
+        return super()._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
+
+    def _stream(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> Iterator[ChatGenerationChunk]:
+        kwargs["guardrail_config"] = resolve_guardrail()
+        yield from super()._stream(
+            messages, stop=stop, run_manager=run_manager, **kwargs
+        )
+"
+`;
+
+exports[`py#agent#guardrails generator > framework langchain > protocol ag-ui > should generate the guardrail with terraform > module 1`] = `
+"terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "6.69.1"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "3.9.1"
+    }
+  }
+}
+
+variable "tags" {
+  description = "Tags to apply to resources"
+  type        = map(string)
+  default     = {}
+}
+
+locals {
+  policy_file = "\${path.module}/../../../../../../../apps/test-project/proj_test_project/agent/guardrail.json"
+  policy      = jsondecode(file(local.policy_file))
+  name_prefix = "test-project-agent-guardrail"
+}
+
+resource "random_id" "unique_suffix" {
+  byte_length = 4
+}
+
+resource "aws_bedrock_guardrail" "this" {
+  name                      = "\${local.name_prefix}-\${random_id.unique_suffix.hex}"
+  blocked_input_messaging   = local.policy.blockedInputMessaging
+  blocked_outputs_messaging = local.policy.blockedOutputsMessaging
+
+  dynamic "topic_policy_config" {
+    for_each = length(try(local.policy.deniedTopics, [])) > 0 ? [1] : []
+    content {
+      dynamic "topics_config" {
+        for_each = local.policy.deniedTopics
+        content {
+          name       = topics_config.value.name
+          definition = topics_config.value.definition
+          examples   = try(topics_config.value.examples, [])
+          type       = "DENY"
+        }
+      }
+    }
+  }
+
+  dynamic "sensitive_information_policy_config" {
+    for_each = length(try(local.policy.piiEntities, [])) > 0 ? [1] : []
+    content {
+      dynamic "pii_entities_config" {
+        for_each = local.policy.piiEntities
+        content {
+          type   = pii_entities_config.value.type
+          action = pii_entities_config.value.action
+        }
+      }
+    }
+  }
+
+  tags = var.tags
+}
+
+resource "aws_bedrock_guardrail_version" "this" {
+  guardrail_arn = aws_bedrock_guardrail.this.guardrail_arn
+  description   = "guardrail.json sha256 \${filesha256(local.policy_file)}"
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+module "add_guardrail_to_runtime_config" {
+  source = "../../../core/runtime-config/entry"
+
+  namespace = "agentcore"
+  key       = "guardrails"
+  value     = { "TestProjectAgent" = { guardrailId = aws_bedrock_guardrail.this.guardrail_id, guardrailVersion = aws_bedrock_guardrail_version.this.version } }
+}
+
+output "guardrail_id" {
+  description = "ID of the guardrail"
+  value       = aws_bedrock_guardrail.this.guardrail_id
+}
+
+output "guardrail_arn" {
+  description = "ARN of the guardrail"
+  value       = aws_bedrock_guardrail.this.guardrail_arn
+}
+
+output "guardrail_version" {
+  description = "Numbered version of the guardrail"
+  value       = aws_bedrock_guardrail_version.this.version
+}
+
+output "iam_policy_statements" {
+  description = "IAM policy statements that allow the agent to apply the guardrail"
+  value = [
+    {
+      Effect   = "Allow"
+      Action   = ["bedrock:ApplyGuardrail"]
+      Resource = [aws_bedrock_guardrail.this.guardrail_arn]
+    }
+  ]
+  depends_on = [module.add_guardrail_to_runtime_config]
+}
+"
+`;
+
+exports[`py#agent#guardrails generator > framework langchain > protocol http > should generate the guardrail with cdk > agent.py 1`] = `
+"import os
+
+from langchain.agents import create_agent
+from langchain_core.tools import tool
+
+from .guardrail import GuardrailedChatBedrockConverse
+from .session import get_checkpointer
+
+REGION = os.environ.get("AWS_REGION", "us-east-1")
+MODEL_ID = os.environ.get("MODEL_ID", "global.anthropic.claude-haiku-4-5-20251001-v1:0")
+
+
+@tool
+def subtract(a: int, b: int) -> int:
+    """Subtract b from a."""
+    return a - b
+
+
+def get_agent():
+    model = GuardrailedChatBedrockConverse(model=MODEL_ID, region_name=REGION)
+    return create_agent(
+        model=model,
+        tools=[subtract],
+        system_prompt="""
+You are a mathematical wizard.
+Use your tools for mathematical tasks.
+Refer to tools as your 'spellbook'.
+""",
+        checkpointer=get_checkpointer(),
+    )
+"
+`;
+
+exports[`py#agent#guardrails generator > framework langchain > protocol http > should generate the guardrail with cdk > app/index.ts 1`] = `
+"export * from './guardrails/index.js';
+export * from './agents/index.js';
+"
+`;
+
+exports[`py#agent#guardrails generator > framework langchain > protocol http > should generate the guardrail with cdk > construct 1`] = `
+"import { createHash } from 'node:crypto';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as url from 'node:url';
+import { CfnOutput, Names, Stack } from 'aws-cdk-lib';
+import * as bedrock from 'aws-cdk-lib/aws-bedrock';
+import * as iam from 'aws-cdk-lib/aws-iam';
+import { Construct } from 'constructs';
+import { RuntimeConfig } from '../../../core/runtime-config.js';
+import { findWorkspaceRoot } from '../../../core/workspace.js';
+
+interface GuardrailPolicy {
+  blockedInputMessaging: string;
+  blockedOutputsMessaging: string;
+  deniedTopics?: { name: string; definition: string; examples?: string[] }[];
+  piiEntities?: { type: string; action: string }[];
+}
+
+// Read at synth time, anchored on the workspace root so it still resolves once
+// this file compiles to dist/.
+const policyFile = fs.readFileSync(
+  path.join(
+    findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+    'apps/test-project/proj_test_project/agent/guardrail.json',
+  ),
+);
+const policy: GuardrailPolicy = JSON.parse(policyFile.toString('utf-8'));
+
+/**
+ * Properties for the TestProjectAgentGuardrail. Any CfnGuardrail property
+ * supplied here takes precedence over guardrail.json.
+ */
+export type TestProjectAgentGuardrailProps =
+  Partial<bedrock.CfnGuardrailProps> & {
+    /** The agent that applies this guardrail. It is granted bedrock:ApplyGuardrail. */
+    readonly agent: iam.IGrantable;
+  };
+
+/**
+ * An Amazon Bedrock Guardrail for TestProjectAgent, with a numbered version
+ * that changes whenever its rules change. Its ID and version are written to
+ * runtime config, where the agent reads them.
+ */
+export class TestProjectAgentGuardrail extends Construct {
+  public readonly guardrail: bedrock.CfnGuardrail;
+  public readonly version: bedrock.CfnGuardrailVersion;
+  public readonly guardrailId: string;
+  public readonly guardrailArn: string;
+  public readonly guardrailVersion: string;
+
+  constructor(
+    scope: Construct,
+    id: string,
+    props: TestProjectAgentGuardrailProps,
+  ) {
+    super(scope, id);
+
+    const { agent, ...overrides } = props;
+
+    const deniedTopics = policy.deniedTopics ?? [];
+    const piiEntities = policy.piiEntities ?? [];
+
+    this.guardrail = new bedrock.CfnGuardrail(this, 'Guardrail', {
+      name: Names.uniqueResourceName(this, {
+        maxLength: 50,
+        separator: '-',
+        allowedSpecialCharacters: '-_',
+      }),
+      blockedInputMessaging: policy.blockedInputMessaging,
+      blockedOutputsMessaging: policy.blockedOutputsMessaging,
+      ...(deniedTopics.length > 0 && {
+        topicPolicyConfig: {
+          topicsConfig: deniedTopics.map(({ name, definition, examples }) => ({
+            name,
+            definition,
+            examples,
+            type: 'DENY',
+          })),
+        },
+      }),
+      ...(piiEntities.length > 0 && {
+        sensitiveInformationPolicyConfig: {
+          piiEntitiesConfig: piiEntities.map(({ type, action }) => ({
+            type,
+            action,
+          })),
+        },
+      }),
+      ...overrides,
+    });
+
+    const hash = createHash('sha256').update(policyFile);
+    if (Object.keys(overrides).length > 0) {
+      hash.update(JSON.stringify(Stack.of(this).resolve(overrides)));
+    }
+
+    this.version = new bedrock.CfnGuardrailVersion(this, 'Version', {
+      guardrailIdentifier: this.guardrail.attrGuardrailId,
+      description: \`guardrail.json sha256 \${hash.digest('hex')}\`,
+    });
+
+    this.guardrailId = this.guardrail.attrGuardrailId;
+    this.guardrailArn = this.guardrail.attrGuardrailArn;
+    this.guardrailVersion = this.version.attrVersion;
+
+    new CfnOutput(this, 'GuardrailId', { value: this.guardrailId });
+    new CfnOutput(this, 'GuardrailVersion', { value: this.guardrailVersion });
+
+    const rc = RuntimeConfig.ensure(this);
+    rc.set('agentcore', 'guardrails', {
+      ...rc.get('agentcore').guardrails,
+      TestProjectAgent: {
+        guardrailId: this.guardrailId,
+        guardrailVersion: this.guardrailVersion,
+      },
+    });
+
+    this.grantApply(agent);
+  }
+
+  /** Grant permission to apply this guardrail. */
+  public grantApply(grantee: iam.IGrantable): iam.Grant {
+    return iam.Grant.addToPrincipal({
+      grantee,
+      actions: ['bedrock:ApplyGuardrail'],
+      resourceArns: [this.guardrailArn],
+    });
+  }
+}
+"
+`;
+
+exports[`py#agent#guardrails generator > framework langchain > protocol http > should generate the guardrail with cdk > guardrail.json 1`] = `
+"{
+  "blockedInputMessaging": "Sorry, I can't help with that request.",
+  "blockedOutputsMessaging": "Sorry, I can't share that answer.",
+  "deniedTopics": [
+    {
+      "name": "Investment advice",
+      "definition": "Recommendations about which specific stocks, funds or other investments to buy or sell.",
+      "examples": ["Which stocks should I buy this year?"]
+    }
+  ],
+  "piiEntities": [
+    { "type": "EMAIL", "action": "ANONYMIZE" },
+    { "type": "PHONE", "action": "ANONYMIZE" },
+    { "type": "US_SOCIAL_SECURITY_NUMBER", "action": "BLOCK" }
+  ]
+}
+"
+`;
+
+exports[`py#agent#guardrails generator > framework langchain > protocol http > should generate the guardrail with cdk > guardrail.py 1`] = `
+"import logging
+import os
+import re
+import threading
+import time
+from collections.abc import Iterator
+from typing import Any, TypedDict
+
+from langchain_aws import ChatBedrockConverse
+from langchain_core.callbacks import CallbackManagerForLLMRun
+from langchain_core.messages import BaseMessage
+from langchain_core.outputs import ChatGenerationChunk, ChatResult
+from proj_agent_connection.core.runtime_config import get_agentcore_runtime_config
+
+logger = logging.getLogger(__name__)
+
+RUNTIME_CONFIG_KEY = "agentcore.guardrails.TestProjectAgent"
+CACHE_SECONDS = 5
+
+
+class GuardrailConfig(TypedDict):
+    guardrailIdentifier: str
+    guardrailVersion: str
+    trace: str
+
+
+_lock = threading.Lock()
+_cache: tuple[float, dict[str, Any] | None] | None = None
+_warned_unguarded = False
+
+
+def _read_entry() -> dict[str, Any] | None:
+    """This agent's entry in runtime config, written by the TestProjectAgentGuardrail
+    construct or the test-project-agent guardrail module, cached for CACHE_SECONDS."""
+    global _cache
+    with _lock:
+        if _cache is None or time.monotonic() - _cache[0] >= CACHE_SECONDS:
+            guardrails = get_agentcore_runtime_config().get("guardrails") or {}
+            _cache = (time.monotonic(), guardrails.get("TestProjectAgent"))
+        return _cache[1]
+
+
+def resolve_guardrail() -> GuardrailConfig | None:
+    """The guardrail to apply, read from runtime config on every model call (cached for 5 seconds)."""
+    global _warned_unguarded
+    local_dev = os.environ.get("LOCAL_DEV") == "true"
+    entry: dict[str, Any] | None = None
+    if not local_dev:
+        entry = _read_entry()
+    elif os.environ.get("RUNTIME_CONFIG_APP_ID"):
+        try:
+            entry = _read_entry()
+        except Exception:
+            entry = None
+
+    guardrail_id = (entry or {}).get("guardrailId")
+    guardrail_version = (entry or {}).get("guardrailVersion")
+    if not guardrail_id or not guardrail_version:
+        if not local_dev:
+            raise RuntimeError(
+                f"No guardrail for this agent in runtime config at {RUNTIME_CONFIG_KEY}. "
+                "Add the TestProjectAgentGuardrail construct (CDK) or the "
+                "guardrails/test-project-agent module (Terraform) to your infrastructure."
+            )
+        if not _warned_unguarded:
+            _warned_unguarded = True
+            logger.warning(
+                "No guardrail for this agent in runtime config at %s, "
+                "so the agent is running without a guardrail (LOCAL_DEV=true).",
+                RUNTIME_CONFIG_KEY,
+            )
+        return None
+
+    if not re.fullmatch(r"[1-9][0-9]*", str(guardrail_version)):
+        raise RuntimeError(
+            f"The guardrail version in runtime config at {RUNTIME_CONFIG_KEY} "
+            f"must be a numbered guardrail version, but is {guardrail_version}."
+        )
+    return {
+        "guardrailIdentifier": str(guardrail_id),
+        "guardrailVersion": str(guardrail_version),
+        "trace": "enabled",
+    }
+
+
+class GuardrailedChatBedrockConverse(ChatBedrockConverse):
+    """A ChatBedrockConverse model that applies this agent's guardrail from runtime config
+    to each model call, so a new guardrail version applies without a restart."""
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        kwargs["guardrail_config"] = resolve_guardrail()
+        return super()._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
+
+    def _stream(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> Iterator[ChatGenerationChunk]:
+        kwargs["guardrail_config"] = resolve_guardrail()
+        yield from super()._stream(
+            messages, stop=stop, run_manager=run_manager, **kwargs
+        )
+"
+`;
+
+exports[`py#agent#guardrails generator > framework langchain > protocol http > should generate the guardrail with cdk > guardrails/index.ts 1`] = `
+"export * from './test-project-agent/test-project-agent-guardrail.js';
+"
+`;
+
+exports[`py#agent#guardrails generator > framework langchain > protocol http > should generate the guardrail with terraform > agent.py 1`] = `
+"import os
+
+from langchain.agents import create_agent
+from langchain_core.tools import tool
+
+from .guardrail import GuardrailedChatBedrockConverse
+from .session import get_checkpointer
+
+REGION = os.environ.get("AWS_REGION", "us-east-1")
+MODEL_ID = os.environ.get("MODEL_ID", "global.anthropic.claude-haiku-4-5-20251001-v1:0")
+
+
+@tool
+def subtract(a: int, b: int) -> int:
+    """Subtract b from a."""
+    return a - b
+
+
+def get_agent():
+    model = GuardrailedChatBedrockConverse(model=MODEL_ID, region_name=REGION)
+    return create_agent(
+        model=model,
+        tools=[subtract],
+        system_prompt="""
+You are a mathematical wizard.
+Use your tools for mathematical tasks.
+Refer to tools as your 'spellbook'.
+""",
+        checkpointer=get_checkpointer(),
+    )
+"
+`;
+
+exports[`py#agent#guardrails generator > framework langchain > protocol http > should generate the guardrail with terraform > guardrail.json 1`] = `
+"{
+  "blockedInputMessaging": "Sorry, I can't help with that request.",
+  "blockedOutputsMessaging": "Sorry, I can't share that answer.",
+  "deniedTopics": [
+    {
+      "name": "Investment advice",
+      "definition": "Recommendations about which specific stocks, funds or other investments to buy or sell.",
+      "examples": ["Which stocks should I buy this year?"]
+    }
+  ],
+  "piiEntities": [
+    { "type": "EMAIL", "action": "ANONYMIZE" },
+    { "type": "PHONE", "action": "ANONYMIZE" },
+    { "type": "US_SOCIAL_SECURITY_NUMBER", "action": "BLOCK" }
+  ]
+}
+"
+`;
+
+exports[`py#agent#guardrails generator > framework langchain > protocol http > should generate the guardrail with terraform > guardrail.py 1`] = `
+"import logging
+import os
+import re
+import threading
+import time
+from collections.abc import Iterator
+from typing import Any, TypedDict
+
+from langchain_aws import ChatBedrockConverse
+from langchain_core.callbacks import CallbackManagerForLLMRun
+from langchain_core.messages import BaseMessage
+from langchain_core.outputs import ChatGenerationChunk, ChatResult
+from proj_agent_connection.core.runtime_config import get_agentcore_runtime_config
+
+logger = logging.getLogger(__name__)
+
+RUNTIME_CONFIG_KEY = "agentcore.guardrails.TestProjectAgent"
+CACHE_SECONDS = 5
+
+
+class GuardrailConfig(TypedDict):
+    guardrailIdentifier: str
+    guardrailVersion: str
+    trace: str
+
+
+_lock = threading.Lock()
+_cache: tuple[float, dict[str, Any] | None] | None = None
+_warned_unguarded = False
+
+
+def _read_entry() -> dict[str, Any] | None:
+    """This agent's entry in runtime config, written by the TestProjectAgentGuardrail
+    construct or the test-project-agent guardrail module, cached for CACHE_SECONDS."""
+    global _cache
+    with _lock:
+        if _cache is None or time.monotonic() - _cache[0] >= CACHE_SECONDS:
+            guardrails = get_agentcore_runtime_config().get("guardrails") or {}
+            _cache = (time.monotonic(), guardrails.get("TestProjectAgent"))
+        return _cache[1]
+
+
+def resolve_guardrail() -> GuardrailConfig | None:
+    """The guardrail to apply, read from runtime config on every model call (cached for 5 seconds)."""
+    global _warned_unguarded
+    local_dev = os.environ.get("LOCAL_DEV") == "true"
+    entry: dict[str, Any] | None = None
+    if not local_dev:
+        entry = _read_entry()
+    elif os.environ.get("RUNTIME_CONFIG_APP_ID"):
+        try:
+            entry = _read_entry()
+        except Exception:
+            entry = None
+
+    guardrail_id = (entry or {}).get("guardrailId")
+    guardrail_version = (entry or {}).get("guardrailVersion")
+    if not guardrail_id or not guardrail_version:
+        if not local_dev:
+            raise RuntimeError(
+                f"No guardrail for this agent in runtime config at {RUNTIME_CONFIG_KEY}. "
+                "Add the TestProjectAgentGuardrail construct (CDK) or the "
+                "guardrails/test-project-agent module (Terraform) to your infrastructure."
+            )
+        if not _warned_unguarded:
+            _warned_unguarded = True
+            logger.warning(
+                "No guardrail for this agent in runtime config at %s, "
+                "so the agent is running without a guardrail (LOCAL_DEV=true).",
+                RUNTIME_CONFIG_KEY,
+            )
+        return None
+
+    if not re.fullmatch(r"[1-9][0-9]*", str(guardrail_version)):
+        raise RuntimeError(
+            f"The guardrail version in runtime config at {RUNTIME_CONFIG_KEY} "
+            f"must be a numbered guardrail version, but is {guardrail_version}."
+        )
+    return {
+        "guardrailIdentifier": str(guardrail_id),
+        "guardrailVersion": str(guardrail_version),
+        "trace": "enabled",
+    }
+
+
+class GuardrailedChatBedrockConverse(ChatBedrockConverse):
+    """A ChatBedrockConverse model that applies this agent's guardrail from runtime config
+    to each model call, so a new guardrail version applies without a restart."""
+
+    def _generate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        kwargs["guardrail_config"] = resolve_guardrail()
+        return super()._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
+
+    def _stream(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> Iterator[ChatGenerationChunk]:
+        kwargs["guardrail_config"] = resolve_guardrail()
+        yield from super()._stream(
+            messages, stop=stop, run_manager=run_manager, **kwargs
+        )
+"
+`;
+
+exports[`py#agent#guardrails generator > framework langchain > protocol http > should generate the guardrail with terraform > module 1`] = `
+"terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "6.69.1"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "3.9.1"
+    }
+  }
+}
+
+variable "tags" {
+  description = "Tags to apply to resources"
+  type        = map(string)
+  default     = {}
+}
+
+locals {
+  policy_file = "\${path.module}/../../../../../../../apps/test-project/proj_test_project/agent/guardrail.json"
+  policy      = jsondecode(file(local.policy_file))
+  name_prefix = "test-project-agent-guardrail"
+}
+
+resource "random_id" "unique_suffix" {
+  byte_length = 4
+}
+
+resource "aws_bedrock_guardrail" "this" {
+  name                      = "\${local.name_prefix}-\${random_id.unique_suffix.hex}"
+  blocked_input_messaging   = local.policy.blockedInputMessaging
+  blocked_outputs_messaging = local.policy.blockedOutputsMessaging
+
+  dynamic "topic_policy_config" {
+    for_each = length(try(local.policy.deniedTopics, [])) > 0 ? [1] : []
+    content {
+      dynamic "topics_config" {
+        for_each = local.policy.deniedTopics
+        content {
+          name       = topics_config.value.name
+          definition = topics_config.value.definition
+          examples   = try(topics_config.value.examples, [])
+          type       = "DENY"
+        }
+      }
+    }
+  }
+
+  dynamic "sensitive_information_policy_config" {
+    for_each = length(try(local.policy.piiEntities, [])) > 0 ? [1] : []
+    content {
+      dynamic "pii_entities_config" {
+        for_each = local.policy.piiEntities
+        content {
+          type   = pii_entities_config.value.type
+          action = pii_entities_config.value.action
+        }
+      }
+    }
+  }
+
+  tags = var.tags
+}
+
+resource "aws_bedrock_guardrail_version" "this" {
+  guardrail_arn = aws_bedrock_guardrail.this.guardrail_arn
+  description   = "guardrail.json sha256 \${filesha256(local.policy_file)}"
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+module "add_guardrail_to_runtime_config" {
+  source = "../../../core/runtime-config/entry"
+
+  namespace = "agentcore"
+  key       = "guardrails"
+  value     = { "TestProjectAgent" = { guardrailId = aws_bedrock_guardrail.this.guardrail_id, guardrailVersion = aws_bedrock_guardrail_version.this.version } }
+}
+
+output "guardrail_id" {
+  description = "ID of the guardrail"
+  value       = aws_bedrock_guardrail.this.guardrail_id
+}
+
+output "guardrail_arn" {
+  description = "ARN of the guardrail"
+  value       = aws_bedrock_guardrail.this.guardrail_arn
+}
+
+output "guardrail_version" {
+  description = "Numbered version of the guardrail"
+  value       = aws_bedrock_guardrail_version.this.version
+}
+
+output "iam_policy_statements" {
+  description = "IAM policy statements that allow the agent to apply the guardrail"
+  value = [
+    {
+      Effect   = "Allow"
+      Action   = ["bedrock:ApplyGuardrail"]
+      Resource = [aws_bedrock_guardrail.this.guardrail_arn]
+    }
+  ]
+  depends_on = [module.add_guardrail_to_runtime_config]
+}
+"
+`;
+
+exports[`py#agent#guardrails generator > framework strands > protocol a2a > should generate the guardrail with cdk > agent.py 1`] = `
+"from contextlib import contextmanager
+
+from proj_agent_connection import log_model_errors, log_tool_errors
+from strands import Agent, tool
+from strands.hooks import HookCallback, HookProvider
+from strands_tools import current_time
+
+from .guardrail import get_guardrailed_model
+from .session import get_session_manager
+
+
+@tool
+def subtract(a: int, b: int) -> int:
+    return a - b
+
+
+AGENT_HOOKS: list[HookProvider | HookCallback] = [log_model_errors, log_tool_errors]
+
+
+@contextmanager
+def get_agent():
+    yield Agent(
+        model=get_guardrailed_model(),
+        name="TestProjectAgent",
+        description="TestProjectAgent Strands Agent",
+        system_prompt="""
+You are a mathematical wizard.
+Use your tools for mathematical tasks.
+Refer to tools as your 'spellbook'.
+""",
+        tools=[subtract, current_time],
+        hooks=AGENT_HOOKS,
+        session_manager=get_session_manager(),
+    )
+"
+`;
+
+exports[`py#agent#guardrails generator > framework strands > protocol a2a > should generate the guardrail with cdk > app/index.ts 1`] = `
+"export * from './guardrails/index.js';
+export * from './agents/index.js';
+"
+`;
+
+exports[`py#agent#guardrails generator > framework strands > protocol a2a > should generate the guardrail with cdk > construct 1`] = `
+"import { createHash } from 'node:crypto';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as url from 'node:url';
+import { CfnOutput, Names, Stack } from 'aws-cdk-lib';
+import * as bedrock from 'aws-cdk-lib/aws-bedrock';
+import * as iam from 'aws-cdk-lib/aws-iam';
+import { Construct } from 'constructs';
+import { RuntimeConfig } from '../../../core/runtime-config.js';
+import { findWorkspaceRoot } from '../../../core/workspace.js';
+
+interface GuardrailPolicy {
+  blockedInputMessaging: string;
+  blockedOutputsMessaging: string;
+  deniedTopics?: { name: string; definition: string; examples?: string[] }[];
+  piiEntities?: { type: string; action: string }[];
+}
+
+// Read at synth time, anchored on the workspace root so it still resolves once
+// this file compiles to dist/.
+const policyFile = fs.readFileSync(
+  path.join(
+    findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+    'apps/test-project/proj_test_project/agent/guardrail.json',
+  ),
+);
+const policy: GuardrailPolicy = JSON.parse(policyFile.toString('utf-8'));
+
+/**
+ * Properties for the TestProjectAgentGuardrail. Any CfnGuardrail property
+ * supplied here takes precedence over guardrail.json.
+ */
+export type TestProjectAgentGuardrailProps =
+  Partial<bedrock.CfnGuardrailProps> & {
+    /** The agent that applies this guardrail. It is granted bedrock:ApplyGuardrail. */
+    readonly agent: iam.IGrantable;
+  };
+
+/**
+ * An Amazon Bedrock Guardrail for TestProjectAgent, with a numbered version
+ * that changes whenever its rules change. Its ID and version are written to
+ * runtime config, where the agent reads them.
+ */
+export class TestProjectAgentGuardrail extends Construct {
+  public readonly guardrail: bedrock.CfnGuardrail;
+  public readonly version: bedrock.CfnGuardrailVersion;
+  public readonly guardrailId: string;
+  public readonly guardrailArn: string;
+  public readonly guardrailVersion: string;
+
+  constructor(
+    scope: Construct,
+    id: string,
+    props: TestProjectAgentGuardrailProps,
+  ) {
+    super(scope, id);
+
+    const { agent, ...overrides } = props;
+
+    const deniedTopics = policy.deniedTopics ?? [];
+    const piiEntities = policy.piiEntities ?? [];
+
+    this.guardrail = new bedrock.CfnGuardrail(this, 'Guardrail', {
+      name: Names.uniqueResourceName(this, {
+        maxLength: 50,
+        separator: '-',
+        allowedSpecialCharacters: '-_',
+      }),
+      blockedInputMessaging: policy.blockedInputMessaging,
+      blockedOutputsMessaging: policy.blockedOutputsMessaging,
+      ...(deniedTopics.length > 0 && {
+        topicPolicyConfig: {
+          topicsConfig: deniedTopics.map(({ name, definition, examples }) => ({
+            name,
+            definition,
+            examples,
+            type: 'DENY',
+          })),
+        },
+      }),
+      ...(piiEntities.length > 0 && {
+        sensitiveInformationPolicyConfig: {
+          piiEntitiesConfig: piiEntities.map(({ type, action }) => ({
+            type,
+            action,
+          })),
+        },
+      }),
+      ...overrides,
+    });
+
+    const hash = createHash('sha256').update(policyFile);
+    if (Object.keys(overrides).length > 0) {
+      hash.update(JSON.stringify(Stack.of(this).resolve(overrides)));
+    }
+
+    this.version = new bedrock.CfnGuardrailVersion(this, 'Version', {
+      guardrailIdentifier: this.guardrail.attrGuardrailId,
+      description: \`guardrail.json sha256 \${hash.digest('hex')}\`,
+    });
+
+    this.guardrailId = this.guardrail.attrGuardrailId;
+    this.guardrailArn = this.guardrail.attrGuardrailArn;
+    this.guardrailVersion = this.version.attrVersion;
+
+    new CfnOutput(this, 'GuardrailId', { value: this.guardrailId });
+    new CfnOutput(this, 'GuardrailVersion', { value: this.guardrailVersion });
+
+    const rc = RuntimeConfig.ensure(this);
+    rc.set('agentcore', 'guardrails', {
+      ...rc.get('agentcore').guardrails,
+      TestProjectAgent: {
+        guardrailId: this.guardrailId,
+        guardrailVersion: this.guardrailVersion,
+      },
+    });
+
+    this.grantApply(agent);
+  }
+
+  /** Grant permission to apply this guardrail. */
+  public grantApply(grantee: iam.IGrantable): iam.Grant {
+    return iam.Grant.addToPrincipal({
+      grantee,
+      actions: ['bedrock:ApplyGuardrail'],
+      resourceArns: [this.guardrailArn],
+    });
+  }
+}
+"
+`;
+
+exports[`py#agent#guardrails generator > framework strands > protocol a2a > should generate the guardrail with cdk > guardrail.json 1`] = `
+"{
+  "blockedInputMessaging": "Sorry, I can't help with that request.",
+  "blockedOutputsMessaging": "Sorry, I can't share that answer.",
+  "deniedTopics": [
+    {
+      "name": "Investment advice",
+      "definition": "Recommendations about which specific stocks, funds or other investments to buy or sell.",
+      "examples": ["Which stocks should I buy this year?"]
+    }
+  ],
+  "piiEntities": [
+    { "type": "EMAIL", "action": "ANONYMIZE" },
+    { "type": "PHONE", "action": "ANONYMIZE" },
+    { "type": "US_SOCIAL_SECURITY_NUMBER", "action": "BLOCK" }
+  ]
+}
+"
+`;
+
+exports[`py#agent#guardrails generator > framework strands > protocol a2a > should generate the guardrail with cdk > guardrail.py 1`] = `
+"import logging
+import os
+import re
+import threading
+import time
+from typing import Any, TypedDict
+
+from proj_agent_connection.core.runtime_config import get_agentcore_runtime_config
+from strands.models import BedrockModel
+
+logger = logging.getLogger(__name__)
+
+RUNTIME_CONFIG_KEY = "agentcore.guardrails.TestProjectAgent"
+CACHE_SECONDS = 5
+
+
+class GuardrailConfig(TypedDict):
+    guardrailIdentifier: str
+    guardrailVersion: str
+    trace: str
+
+
+_lock = threading.Lock()
+_cache: tuple[float, dict[str, Any] | None] | None = None
+_warned_unguarded = False
+
+
+def _read_entry() -> dict[str, Any] | None:
+    """This agent's entry in runtime config, written by the TestProjectAgentGuardrail
+    construct or the test-project-agent guardrail module, cached for CACHE_SECONDS."""
+    global _cache
+    with _lock:
+        if _cache is None or time.monotonic() - _cache[0] >= CACHE_SECONDS:
+            guardrails = get_agentcore_runtime_config().get("guardrails") or {}
+            _cache = (time.monotonic(), guardrails.get("TestProjectAgent"))
+        return _cache[1]
+
+
+def resolve_guardrail() -> GuardrailConfig | None:
+    """The guardrail to apply, read from runtime config on every model call (cached for 5 seconds)."""
+    global _warned_unguarded
+    local_dev = os.environ.get("LOCAL_DEV") == "true"
+    entry: dict[str, Any] | None = None
+    if not local_dev:
+        entry = _read_entry()
+    elif os.environ.get("RUNTIME_CONFIG_APP_ID"):
+        try:
+            entry = _read_entry()
+        except Exception:
+            entry = None
+
+    guardrail_id = (entry or {}).get("guardrailId")
+    guardrail_version = (entry or {}).get("guardrailVersion")
+    if not guardrail_id or not guardrail_version:
+        if not local_dev:
+            raise RuntimeError(
+                f"No guardrail for this agent in runtime config at {RUNTIME_CONFIG_KEY}. "
+                "Add the TestProjectAgentGuardrail construct (CDK) or the "
+                "guardrails/test-project-agent module (Terraform) to your infrastructure."
+            )
+        if not _warned_unguarded:
+            _warned_unguarded = True
+            logger.warning(
+                "No guardrail for this agent in runtime config at %s, "
+                "so the agent is running without a guardrail (LOCAL_DEV=true).",
+                RUNTIME_CONFIG_KEY,
+            )
+        return None
+
+    if not re.fullmatch(r"[1-9][0-9]*", str(guardrail_version)):
+        raise RuntimeError(
+            f"The guardrail version in runtime config at {RUNTIME_CONFIG_KEY} "
+            f"must be a numbered guardrail version, but is {guardrail_version}."
+        )
+    return {
+        "guardrailIdentifier": str(guardrail_id),
+        "guardrailVersion": str(guardrail_version),
+        "trace": "enabled",
+    }
+
+
+class GuardrailedBedrockModel(BedrockModel):
+    """A Bedrock model that applies this agent's guardrail from runtime config to each
+    model call, so a new guardrail version applies without a restart."""
+
+    def format_request(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        request = super().format_request(*args, **kwargs)
+        guardrail = resolve_guardrail()
+        if guardrail is not None:
+            request["guardrailConfig"] = guardrail
+        return request
+
+
+def get_guardrailed_model() -> BedrockModel:
+    """The Bedrock model with this agent's guardrail applied."""
+    return GuardrailedBedrockModel()
+"
+`;
+
+exports[`py#agent#guardrails generator > framework strands > protocol a2a > should generate the guardrail with cdk > guardrails/index.ts 1`] = `
+"export * from './test-project-agent/test-project-agent-guardrail.js';
+"
+`;
+
+exports[`py#agent#guardrails generator > framework strands > protocol a2a > should generate the guardrail with terraform > agent.py 1`] = `
+"from contextlib import contextmanager
+
+from proj_agent_connection import log_model_errors, log_tool_errors
+from strands import Agent, tool
+from strands.hooks import HookCallback, HookProvider
+from strands_tools import current_time
+
+from .guardrail import get_guardrailed_model
+from .session import get_session_manager
+
+
+@tool
+def subtract(a: int, b: int) -> int:
+    return a - b
+
+
+AGENT_HOOKS: list[HookProvider | HookCallback] = [log_model_errors, log_tool_errors]
+
+
+@contextmanager
+def get_agent():
+    yield Agent(
+        model=get_guardrailed_model(),
+        name="TestProjectAgent",
+        description="TestProjectAgent Strands Agent",
+        system_prompt="""
+You are a mathematical wizard.
+Use your tools for mathematical tasks.
+Refer to tools as your 'spellbook'.
+""",
+        tools=[subtract, current_time],
+        hooks=AGENT_HOOKS,
+        session_manager=get_session_manager(),
+    )
+"
+`;
+
+exports[`py#agent#guardrails generator > framework strands > protocol a2a > should generate the guardrail with terraform > guardrail.json 1`] = `
+"{
+  "blockedInputMessaging": "Sorry, I can't help with that request.",
+  "blockedOutputsMessaging": "Sorry, I can't share that answer.",
+  "deniedTopics": [
+    {
+      "name": "Investment advice",
+      "definition": "Recommendations about which specific stocks, funds or other investments to buy or sell.",
+      "examples": ["Which stocks should I buy this year?"]
+    }
+  ],
+  "piiEntities": [
+    { "type": "EMAIL", "action": "ANONYMIZE" },
+    { "type": "PHONE", "action": "ANONYMIZE" },
+    { "type": "US_SOCIAL_SECURITY_NUMBER", "action": "BLOCK" }
+  ]
+}
+"
+`;
+
+exports[`py#agent#guardrails generator > framework strands > protocol a2a > should generate the guardrail with terraform > guardrail.py 1`] = `
+"import logging
+import os
+import re
+import threading
+import time
+from typing import Any, TypedDict
+
+from proj_agent_connection.core.runtime_config import get_agentcore_runtime_config
+from strands.models import BedrockModel
+
+logger = logging.getLogger(__name__)
+
+RUNTIME_CONFIG_KEY = "agentcore.guardrails.TestProjectAgent"
+CACHE_SECONDS = 5
+
+
+class GuardrailConfig(TypedDict):
+    guardrailIdentifier: str
+    guardrailVersion: str
+    trace: str
+
+
+_lock = threading.Lock()
+_cache: tuple[float, dict[str, Any] | None] | None = None
+_warned_unguarded = False
+
+
+def _read_entry() -> dict[str, Any] | None:
+    """This agent's entry in runtime config, written by the TestProjectAgentGuardrail
+    construct or the test-project-agent guardrail module, cached for CACHE_SECONDS."""
+    global _cache
+    with _lock:
+        if _cache is None or time.monotonic() - _cache[0] >= CACHE_SECONDS:
+            guardrails = get_agentcore_runtime_config().get("guardrails") or {}
+            _cache = (time.monotonic(), guardrails.get("TestProjectAgent"))
+        return _cache[1]
+
+
+def resolve_guardrail() -> GuardrailConfig | None:
+    """The guardrail to apply, read from runtime config on every model call (cached for 5 seconds)."""
+    global _warned_unguarded
+    local_dev = os.environ.get("LOCAL_DEV") == "true"
+    entry: dict[str, Any] | None = None
+    if not local_dev:
+        entry = _read_entry()
+    elif os.environ.get("RUNTIME_CONFIG_APP_ID"):
+        try:
+            entry = _read_entry()
+        except Exception:
+            entry = None
+
+    guardrail_id = (entry or {}).get("guardrailId")
+    guardrail_version = (entry or {}).get("guardrailVersion")
+    if not guardrail_id or not guardrail_version:
+        if not local_dev:
+            raise RuntimeError(
+                f"No guardrail for this agent in runtime config at {RUNTIME_CONFIG_KEY}. "
+                "Add the TestProjectAgentGuardrail construct (CDK) or the "
+                "guardrails/test-project-agent module (Terraform) to your infrastructure."
+            )
+        if not _warned_unguarded:
+            _warned_unguarded = True
+            logger.warning(
+                "No guardrail for this agent in runtime config at %s, "
+                "so the agent is running without a guardrail (LOCAL_DEV=true).",
+                RUNTIME_CONFIG_KEY,
+            )
+        return None
+
+    if not re.fullmatch(r"[1-9][0-9]*", str(guardrail_version)):
+        raise RuntimeError(
+            f"The guardrail version in runtime config at {RUNTIME_CONFIG_KEY} "
+            f"must be a numbered guardrail version, but is {guardrail_version}."
+        )
+    return {
+        "guardrailIdentifier": str(guardrail_id),
+        "guardrailVersion": str(guardrail_version),
+        "trace": "enabled",
+    }
+
+
+class GuardrailedBedrockModel(BedrockModel):
+    """A Bedrock model that applies this agent's guardrail from runtime config to each
+    model call, so a new guardrail version applies without a restart."""
+
+    def format_request(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        request = super().format_request(*args, **kwargs)
+        guardrail = resolve_guardrail()
+        if guardrail is not None:
+            request["guardrailConfig"] = guardrail
+        return request
+
+
+def get_guardrailed_model() -> BedrockModel:
+    """The Bedrock model with this agent's guardrail applied."""
+    return GuardrailedBedrockModel()
+"
+`;
+
+exports[`py#agent#guardrails generator > framework strands > protocol a2a > should generate the guardrail with terraform > module 1`] = `
+"terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "6.69.1"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "3.9.1"
+    }
+  }
+}
+
+variable "tags" {
+  description = "Tags to apply to resources"
+  type        = map(string)
+  default     = {}
+}
+
+locals {
+  policy_file = "\${path.module}/../../../../../../../apps/test-project/proj_test_project/agent/guardrail.json"
+  policy      = jsondecode(file(local.policy_file))
+  name_prefix = "test-project-agent-guardrail"
+}
+
+resource "random_id" "unique_suffix" {
+  byte_length = 4
+}
+
+resource "aws_bedrock_guardrail" "this" {
+  name                      = "\${local.name_prefix}-\${random_id.unique_suffix.hex}"
+  blocked_input_messaging   = local.policy.blockedInputMessaging
+  blocked_outputs_messaging = local.policy.blockedOutputsMessaging
+
+  dynamic "topic_policy_config" {
+    for_each = length(try(local.policy.deniedTopics, [])) > 0 ? [1] : []
+    content {
+      dynamic "topics_config" {
+        for_each = local.policy.deniedTopics
+        content {
+          name       = topics_config.value.name
+          definition = topics_config.value.definition
+          examples   = try(topics_config.value.examples, [])
+          type       = "DENY"
+        }
+      }
+    }
+  }
+
+  dynamic "sensitive_information_policy_config" {
+    for_each = length(try(local.policy.piiEntities, [])) > 0 ? [1] : []
+    content {
+      dynamic "pii_entities_config" {
+        for_each = local.policy.piiEntities
+        content {
+          type   = pii_entities_config.value.type
+          action = pii_entities_config.value.action
+        }
+      }
+    }
+  }
+
+  tags = var.tags
+}
+
+resource "aws_bedrock_guardrail_version" "this" {
+  guardrail_arn = aws_bedrock_guardrail.this.guardrail_arn
+  description   = "guardrail.json sha256 \${filesha256(local.policy_file)}"
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+module "add_guardrail_to_runtime_config" {
+  source = "../../../core/runtime-config/entry"
+
+  namespace = "agentcore"
+  key       = "guardrails"
+  value     = { "TestProjectAgent" = { guardrailId = aws_bedrock_guardrail.this.guardrail_id, guardrailVersion = aws_bedrock_guardrail_version.this.version } }
+}
+
+output "guardrail_id" {
+  description = "ID of the guardrail"
+  value       = aws_bedrock_guardrail.this.guardrail_id
+}
+
+output "guardrail_arn" {
+  description = "ARN of the guardrail"
+  value       = aws_bedrock_guardrail.this.guardrail_arn
+}
+
+output "guardrail_version" {
+  description = "Numbered version of the guardrail"
+  value       = aws_bedrock_guardrail_version.this.version
+}
+
+output "iam_policy_statements" {
+  description = "IAM policy statements that allow the agent to apply the guardrail"
+  value = [
+    {
+      Effect   = "Allow"
+      Action   = ["bedrock:ApplyGuardrail"]
+      Resource = [aws_bedrock_guardrail.this.guardrail_arn]
+    }
+  ]
+  depends_on = [module.add_guardrail_to_runtime_config]
+}
+"
+`;
+
+exports[`py#agent#guardrails generator > framework strands > protocol ag-ui > should generate the guardrail with cdk > agent.py 1`] = `
+"from contextlib import contextmanager
+
+from proj_agent_connection import log_model_errors, log_tool_errors
+from strands import Agent, tool
+from strands.hooks import HookCallback, HookProvider
+from strands_tools import current_time
+
+from .guardrail import get_guardrailed_model
+
+
+@tool
+def subtract(a: int, b: int) -> int:
+    return a - b
+
+
+AGENT_HOOKS: list[HookProvider | HookCallback] = [log_model_errors, log_tool_errors]
+
+
+@contextmanager
+def get_agent():
+    yield Agent(
+        model=get_guardrailed_model(),
+        name="TestProjectAgent",
+        description="TestProjectAgent Strands Agent",
+        system_prompt="""
+You are a mathematical wizard.
+Use your tools for mathematical tasks.
+Refer to tools as your 'spellbook'.
+""",
+        tools=[subtract, current_time],
+        hooks=AGENT_HOOKS,
+    )
+"
+`;
+
+exports[`py#agent#guardrails generator > framework strands > protocol ag-ui > should generate the guardrail with cdk > app/index.ts 1`] = `
+"export * from './guardrails/index.js';
+export * from './agents/index.js';
+"
+`;
+
+exports[`py#agent#guardrails generator > framework strands > protocol ag-ui > should generate the guardrail with cdk > construct 1`] = `
+"import { createHash } from 'node:crypto';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as url from 'node:url';
+import { CfnOutput, Names, Stack } from 'aws-cdk-lib';
+import * as bedrock from 'aws-cdk-lib/aws-bedrock';
+import * as iam from 'aws-cdk-lib/aws-iam';
+import { Construct } from 'constructs';
+import { RuntimeConfig } from '../../../core/runtime-config.js';
+import { findWorkspaceRoot } from '../../../core/workspace.js';
+
+interface GuardrailPolicy {
+  blockedInputMessaging: string;
+  blockedOutputsMessaging: string;
+  deniedTopics?: { name: string; definition: string; examples?: string[] }[];
+  piiEntities?: { type: string; action: string }[];
+}
+
+// Read at synth time, anchored on the workspace root so it still resolves once
+// this file compiles to dist/.
+const policyFile = fs.readFileSync(
+  path.join(
+    findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+    'apps/test-project/proj_test_project/agent/guardrail.json',
+  ),
+);
+const policy: GuardrailPolicy = JSON.parse(policyFile.toString('utf-8'));
+
+/**
+ * Properties for the TestProjectAgentGuardrail. Any CfnGuardrail property
+ * supplied here takes precedence over guardrail.json.
+ */
+export type TestProjectAgentGuardrailProps =
+  Partial<bedrock.CfnGuardrailProps> & {
+    /** The agent that applies this guardrail. It is granted bedrock:ApplyGuardrail. */
+    readonly agent: iam.IGrantable;
+  };
+
+/**
+ * An Amazon Bedrock Guardrail for TestProjectAgent, with a numbered version
+ * that changes whenever its rules change. Its ID and version are written to
+ * runtime config, where the agent reads them.
+ */
+export class TestProjectAgentGuardrail extends Construct {
+  public readonly guardrail: bedrock.CfnGuardrail;
+  public readonly version: bedrock.CfnGuardrailVersion;
+  public readonly guardrailId: string;
+  public readonly guardrailArn: string;
+  public readonly guardrailVersion: string;
+
+  constructor(
+    scope: Construct,
+    id: string,
+    props: TestProjectAgentGuardrailProps,
+  ) {
+    super(scope, id);
+
+    const { agent, ...overrides } = props;
+
+    const deniedTopics = policy.deniedTopics ?? [];
+    const piiEntities = policy.piiEntities ?? [];
+
+    this.guardrail = new bedrock.CfnGuardrail(this, 'Guardrail', {
+      name: Names.uniqueResourceName(this, {
+        maxLength: 50,
+        separator: '-',
+        allowedSpecialCharacters: '-_',
+      }),
+      blockedInputMessaging: policy.blockedInputMessaging,
+      blockedOutputsMessaging: policy.blockedOutputsMessaging,
+      ...(deniedTopics.length > 0 && {
+        topicPolicyConfig: {
+          topicsConfig: deniedTopics.map(({ name, definition, examples }) => ({
+            name,
+            definition,
+            examples,
+            type: 'DENY',
+          })),
+        },
+      }),
+      ...(piiEntities.length > 0 && {
+        sensitiveInformationPolicyConfig: {
+          piiEntitiesConfig: piiEntities.map(({ type, action }) => ({
+            type,
+            action,
+          })),
+        },
+      }),
+      ...overrides,
+    });
+
+    const hash = createHash('sha256').update(policyFile);
+    if (Object.keys(overrides).length > 0) {
+      hash.update(JSON.stringify(Stack.of(this).resolve(overrides)));
+    }
+
+    this.version = new bedrock.CfnGuardrailVersion(this, 'Version', {
+      guardrailIdentifier: this.guardrail.attrGuardrailId,
+      description: \`guardrail.json sha256 \${hash.digest('hex')}\`,
+    });
+
+    this.guardrailId = this.guardrail.attrGuardrailId;
+    this.guardrailArn = this.guardrail.attrGuardrailArn;
+    this.guardrailVersion = this.version.attrVersion;
+
+    new CfnOutput(this, 'GuardrailId', { value: this.guardrailId });
+    new CfnOutput(this, 'GuardrailVersion', { value: this.guardrailVersion });
+
+    const rc = RuntimeConfig.ensure(this);
+    rc.set('agentcore', 'guardrails', {
+      ...rc.get('agentcore').guardrails,
+      TestProjectAgent: {
+        guardrailId: this.guardrailId,
+        guardrailVersion: this.guardrailVersion,
+      },
+    });
+
+    this.grantApply(agent);
+  }
+
+  /** Grant permission to apply this guardrail. */
+  public grantApply(grantee: iam.IGrantable): iam.Grant {
+    return iam.Grant.addToPrincipal({
+      grantee,
+      actions: ['bedrock:ApplyGuardrail'],
+      resourceArns: [this.guardrailArn],
+    });
+  }
+}
+"
+`;
+
+exports[`py#agent#guardrails generator > framework strands > protocol ag-ui > should generate the guardrail with cdk > guardrail.json 1`] = `
+"{
+  "blockedInputMessaging": "Sorry, I can't help with that request.",
+  "blockedOutputsMessaging": "Sorry, I can't share that answer.",
+  "deniedTopics": [
+    {
+      "name": "Investment advice",
+      "definition": "Recommendations about which specific stocks, funds or other investments to buy or sell.",
+      "examples": ["Which stocks should I buy this year?"]
+    }
+  ],
+  "piiEntities": [
+    { "type": "EMAIL", "action": "ANONYMIZE" },
+    { "type": "PHONE", "action": "ANONYMIZE" },
+    { "type": "US_SOCIAL_SECURITY_NUMBER", "action": "BLOCK" }
+  ]
+}
+"
+`;
+
+exports[`py#agent#guardrails generator > framework strands > protocol ag-ui > should generate the guardrail with cdk > guardrail.py 1`] = `
+"import logging
+import os
+import re
+import threading
+import time
+from typing import Any, TypedDict
+
+from proj_agent_connection.core.runtime_config import get_agentcore_runtime_config
+from strands.models import BedrockModel
+
+logger = logging.getLogger(__name__)
+
+RUNTIME_CONFIG_KEY = "agentcore.guardrails.TestProjectAgent"
+CACHE_SECONDS = 5
+
+
+class GuardrailConfig(TypedDict):
+    guardrailIdentifier: str
+    guardrailVersion: str
+    trace: str
+
+
+_lock = threading.Lock()
+_cache: tuple[float, dict[str, Any] | None] | None = None
+_warned_unguarded = False
+
+
+def _read_entry() -> dict[str, Any] | None:
+    """This agent's entry in runtime config, written by the TestProjectAgentGuardrail
+    construct or the test-project-agent guardrail module, cached for CACHE_SECONDS."""
+    global _cache
+    with _lock:
+        if _cache is None or time.monotonic() - _cache[0] >= CACHE_SECONDS:
+            guardrails = get_agentcore_runtime_config().get("guardrails") or {}
+            _cache = (time.monotonic(), guardrails.get("TestProjectAgent"))
+        return _cache[1]
+
+
+def resolve_guardrail() -> GuardrailConfig | None:
+    """The guardrail to apply, read from runtime config on every model call (cached for 5 seconds)."""
+    global _warned_unguarded
+    local_dev = os.environ.get("LOCAL_DEV") == "true"
+    entry: dict[str, Any] | None = None
+    if not local_dev:
+        entry = _read_entry()
+    elif os.environ.get("RUNTIME_CONFIG_APP_ID"):
+        try:
+            entry = _read_entry()
+        except Exception:
+            entry = None
+
+    guardrail_id = (entry or {}).get("guardrailId")
+    guardrail_version = (entry or {}).get("guardrailVersion")
+    if not guardrail_id or not guardrail_version:
+        if not local_dev:
+            raise RuntimeError(
+                f"No guardrail for this agent in runtime config at {RUNTIME_CONFIG_KEY}. "
+                "Add the TestProjectAgentGuardrail construct (CDK) or the "
+                "guardrails/test-project-agent module (Terraform) to your infrastructure."
+            )
+        if not _warned_unguarded:
+            _warned_unguarded = True
+            logger.warning(
+                "No guardrail for this agent in runtime config at %s, "
+                "so the agent is running without a guardrail (LOCAL_DEV=true).",
+                RUNTIME_CONFIG_KEY,
+            )
+        return None
+
+    if not re.fullmatch(r"[1-9][0-9]*", str(guardrail_version)):
+        raise RuntimeError(
+            f"The guardrail version in runtime config at {RUNTIME_CONFIG_KEY} "
+            f"must be a numbered guardrail version, but is {guardrail_version}."
+        )
+    return {
+        "guardrailIdentifier": str(guardrail_id),
+        "guardrailVersion": str(guardrail_version),
+        "trace": "enabled",
+    }
+
+
+class GuardrailedBedrockModel(BedrockModel):
+    """A Bedrock model that applies this agent's guardrail from runtime config to each
+    model call, so a new guardrail version applies without a restart."""
+
+    def format_request(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        request = super().format_request(*args, **kwargs)
+        guardrail = resolve_guardrail()
+        if guardrail is not None:
+            request["guardrailConfig"] = guardrail
+        return request
+
+
+def get_guardrailed_model() -> BedrockModel:
+    """The Bedrock model with this agent's guardrail applied."""
+    return GuardrailedBedrockModel()
+"
+`;
+
+exports[`py#agent#guardrails generator > framework strands > protocol ag-ui > should generate the guardrail with cdk > guardrails/index.ts 1`] = `
+"export * from './test-project-agent/test-project-agent-guardrail.js';
+"
+`;
+
+exports[`py#agent#guardrails generator > framework strands > protocol ag-ui > should generate the guardrail with terraform > agent.py 1`] = `
+"from contextlib import contextmanager
+
+from proj_agent_connection import log_model_errors, log_tool_errors
+from strands import Agent, tool
+from strands.hooks import HookCallback, HookProvider
+from strands_tools import current_time
+
+from .guardrail import get_guardrailed_model
+
+
+@tool
+def subtract(a: int, b: int) -> int:
+    return a - b
+
+
+AGENT_HOOKS: list[HookProvider | HookCallback] = [log_model_errors, log_tool_errors]
+
+
+@contextmanager
+def get_agent():
+    yield Agent(
+        model=get_guardrailed_model(),
+        name="TestProjectAgent",
+        description="TestProjectAgent Strands Agent",
+        system_prompt="""
+You are a mathematical wizard.
+Use your tools for mathematical tasks.
+Refer to tools as your 'spellbook'.
+""",
+        tools=[subtract, current_time],
+        hooks=AGENT_HOOKS,
+    )
+"
+`;
+
+exports[`py#agent#guardrails generator > framework strands > protocol ag-ui > should generate the guardrail with terraform > guardrail.json 1`] = `
+"{
+  "blockedInputMessaging": "Sorry, I can't help with that request.",
+  "blockedOutputsMessaging": "Sorry, I can't share that answer.",
+  "deniedTopics": [
+    {
+      "name": "Investment advice",
+      "definition": "Recommendations about which specific stocks, funds or other investments to buy or sell.",
+      "examples": ["Which stocks should I buy this year?"]
+    }
+  ],
+  "piiEntities": [
+    { "type": "EMAIL", "action": "ANONYMIZE" },
+    { "type": "PHONE", "action": "ANONYMIZE" },
+    { "type": "US_SOCIAL_SECURITY_NUMBER", "action": "BLOCK" }
+  ]
+}
+"
+`;
+
+exports[`py#agent#guardrails generator > framework strands > protocol ag-ui > should generate the guardrail with terraform > guardrail.py 1`] = `
+"import logging
+import os
+import re
+import threading
+import time
+from typing import Any, TypedDict
+
+from proj_agent_connection.core.runtime_config import get_agentcore_runtime_config
+from strands.models import BedrockModel
+
+logger = logging.getLogger(__name__)
+
+RUNTIME_CONFIG_KEY = "agentcore.guardrails.TestProjectAgent"
+CACHE_SECONDS = 5
+
+
+class GuardrailConfig(TypedDict):
+    guardrailIdentifier: str
+    guardrailVersion: str
+    trace: str
+
+
+_lock = threading.Lock()
+_cache: tuple[float, dict[str, Any] | None] | None = None
+_warned_unguarded = False
+
+
+def _read_entry() -> dict[str, Any] | None:
+    """This agent's entry in runtime config, written by the TestProjectAgentGuardrail
+    construct or the test-project-agent guardrail module, cached for CACHE_SECONDS."""
+    global _cache
+    with _lock:
+        if _cache is None or time.monotonic() - _cache[0] >= CACHE_SECONDS:
+            guardrails = get_agentcore_runtime_config().get("guardrails") or {}
+            _cache = (time.monotonic(), guardrails.get("TestProjectAgent"))
+        return _cache[1]
+
+
+def resolve_guardrail() -> GuardrailConfig | None:
+    """The guardrail to apply, read from runtime config on every model call (cached for 5 seconds)."""
+    global _warned_unguarded
+    local_dev = os.environ.get("LOCAL_DEV") == "true"
+    entry: dict[str, Any] | None = None
+    if not local_dev:
+        entry = _read_entry()
+    elif os.environ.get("RUNTIME_CONFIG_APP_ID"):
+        try:
+            entry = _read_entry()
+        except Exception:
+            entry = None
+
+    guardrail_id = (entry or {}).get("guardrailId")
+    guardrail_version = (entry or {}).get("guardrailVersion")
+    if not guardrail_id or not guardrail_version:
+        if not local_dev:
+            raise RuntimeError(
+                f"No guardrail for this agent in runtime config at {RUNTIME_CONFIG_KEY}. "
+                "Add the TestProjectAgentGuardrail construct (CDK) or the "
+                "guardrails/test-project-agent module (Terraform) to your infrastructure."
+            )
+        if not _warned_unguarded:
+            _warned_unguarded = True
+            logger.warning(
+                "No guardrail for this agent in runtime config at %s, "
+                "so the agent is running without a guardrail (LOCAL_DEV=true).",
+                RUNTIME_CONFIG_KEY,
+            )
+        return None
+
+    if not re.fullmatch(r"[1-9][0-9]*", str(guardrail_version)):
+        raise RuntimeError(
+            f"The guardrail version in runtime config at {RUNTIME_CONFIG_KEY} "
+            f"must be a numbered guardrail version, but is {guardrail_version}."
+        )
+    return {
+        "guardrailIdentifier": str(guardrail_id),
+        "guardrailVersion": str(guardrail_version),
+        "trace": "enabled",
+    }
+
+
+class GuardrailedBedrockModel(BedrockModel):
+    """A Bedrock model that applies this agent's guardrail from runtime config to each
+    model call, so a new guardrail version applies without a restart."""
+
+    def format_request(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        request = super().format_request(*args, **kwargs)
+        guardrail = resolve_guardrail()
+        if guardrail is not None:
+            request["guardrailConfig"] = guardrail
+        return request
+
+
+def get_guardrailed_model() -> BedrockModel:
+    """The Bedrock model with this agent's guardrail applied."""
+    return GuardrailedBedrockModel()
+"
+`;
+
+exports[`py#agent#guardrails generator > framework strands > protocol ag-ui > should generate the guardrail with terraform > module 1`] = `
+"terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "6.69.1"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "3.9.1"
+    }
+  }
+}
+
+variable "tags" {
+  description = "Tags to apply to resources"
+  type        = map(string)
+  default     = {}
+}
+
+locals {
+  policy_file = "\${path.module}/../../../../../../../apps/test-project/proj_test_project/agent/guardrail.json"
+  policy      = jsondecode(file(local.policy_file))
+  name_prefix = "test-project-agent-guardrail"
+}
+
+resource "random_id" "unique_suffix" {
+  byte_length = 4
+}
+
+resource "aws_bedrock_guardrail" "this" {
+  name                      = "\${local.name_prefix}-\${random_id.unique_suffix.hex}"
+  blocked_input_messaging   = local.policy.blockedInputMessaging
+  blocked_outputs_messaging = local.policy.blockedOutputsMessaging
+
+  dynamic "topic_policy_config" {
+    for_each = length(try(local.policy.deniedTopics, [])) > 0 ? [1] : []
+    content {
+      dynamic "topics_config" {
+        for_each = local.policy.deniedTopics
+        content {
+          name       = topics_config.value.name
+          definition = topics_config.value.definition
+          examples   = try(topics_config.value.examples, [])
+          type       = "DENY"
+        }
+      }
+    }
+  }
+
+  dynamic "sensitive_information_policy_config" {
+    for_each = length(try(local.policy.piiEntities, [])) > 0 ? [1] : []
+    content {
+      dynamic "pii_entities_config" {
+        for_each = local.policy.piiEntities
+        content {
+          type   = pii_entities_config.value.type
+          action = pii_entities_config.value.action
+        }
+      }
+    }
+  }
+
+  tags = var.tags
+}
+
+resource "aws_bedrock_guardrail_version" "this" {
+  guardrail_arn = aws_bedrock_guardrail.this.guardrail_arn
+  description   = "guardrail.json sha256 \${filesha256(local.policy_file)}"
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+module "add_guardrail_to_runtime_config" {
+  source = "../../../core/runtime-config/entry"
+
+  namespace = "agentcore"
+  key       = "guardrails"
+  value     = { "TestProjectAgent" = { guardrailId = aws_bedrock_guardrail.this.guardrail_id, guardrailVersion = aws_bedrock_guardrail_version.this.version } }
+}
+
+output "guardrail_id" {
+  description = "ID of the guardrail"
+  value       = aws_bedrock_guardrail.this.guardrail_id
+}
+
+output "guardrail_arn" {
+  description = "ARN of the guardrail"
+  value       = aws_bedrock_guardrail.this.guardrail_arn
+}
+
+output "guardrail_version" {
+  description = "Numbered version of the guardrail"
+  value       = aws_bedrock_guardrail_version.this.version
+}
+
+output "iam_policy_statements" {
+  description = "IAM policy statements that allow the agent to apply the guardrail"
+  value = [
+    {
+      Effect   = "Allow"
+      Action   = ["bedrock:ApplyGuardrail"]
+      Resource = [aws_bedrock_guardrail.this.guardrail_arn]
+    }
+  ]
+  depends_on = [module.add_guardrail_to_runtime_config]
+}
+"
+`;
+
+exports[`py#agent#guardrails generator > framework strands > protocol http > should generate the guardrail with cdk > agent.py 1`] = `
+"from contextlib import contextmanager
+
+from proj_agent_connection import log_model_errors, log_tool_errors
+from strands import Agent, tool
+from strands.hooks import HookCallback, HookProvider
+from strands_tools import current_time
+
+from .guardrail import get_guardrailed_model
+from .session import get_session_manager
+
+
+@tool
+def subtract(a: int, b: int) -> int:
+    return a - b
+
+
+AGENT_HOOKS: list[HookProvider | HookCallback] = [log_model_errors, log_tool_errors]
+
+
+@contextmanager
+def get_agent():
+    yield Agent(
+        model=get_guardrailed_model(),
+        name="TestProjectAgent",
+        description="TestProjectAgent Strands Agent",
+        system_prompt="""
+You are a mathematical wizard.
+Use your tools for mathematical tasks.
+Refer to tools as your 'spellbook'.
+""",
+        tools=[subtract, current_time],
+        hooks=AGENT_HOOKS,
+        session_manager=get_session_manager(),
+    )
+"
+`;
+
+exports[`py#agent#guardrails generator > framework strands > protocol http > should generate the guardrail with cdk > app/index.ts 1`] = `
+"export * from './guardrails/index.js';
+export * from './agents/index.js';
+"
+`;
+
+exports[`py#agent#guardrails generator > framework strands > protocol http > should generate the guardrail with cdk > construct 1`] = `
+"import { createHash } from 'node:crypto';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as url from 'node:url';
+import { CfnOutput, Names, Stack } from 'aws-cdk-lib';
+import * as bedrock from 'aws-cdk-lib/aws-bedrock';
+import * as iam from 'aws-cdk-lib/aws-iam';
+import { Construct } from 'constructs';
+import { RuntimeConfig } from '../../../core/runtime-config.js';
+import { findWorkspaceRoot } from '../../../core/workspace.js';
+
+interface GuardrailPolicy {
+  blockedInputMessaging: string;
+  blockedOutputsMessaging: string;
+  deniedTopics?: { name: string; definition: string; examples?: string[] }[];
+  piiEntities?: { type: string; action: string }[];
+}
+
+// Read at synth time, anchored on the workspace root so it still resolves once
+// this file compiles to dist/.
+const policyFile = fs.readFileSync(
+  path.join(
+    findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+    'apps/test-project/proj_test_project/agent/guardrail.json',
+  ),
+);
+const policy: GuardrailPolicy = JSON.parse(policyFile.toString('utf-8'));
+
+/**
+ * Properties for the TestProjectAgentGuardrail. Any CfnGuardrail property
+ * supplied here takes precedence over guardrail.json.
+ */
+export type TestProjectAgentGuardrailProps =
+  Partial<bedrock.CfnGuardrailProps> & {
+    /** The agent that applies this guardrail. It is granted bedrock:ApplyGuardrail. */
+    readonly agent: iam.IGrantable;
+  };
+
+/**
+ * An Amazon Bedrock Guardrail for TestProjectAgent, with a numbered version
+ * that changes whenever its rules change. Its ID and version are written to
+ * runtime config, where the agent reads them.
+ */
+export class TestProjectAgentGuardrail extends Construct {
+  public readonly guardrail: bedrock.CfnGuardrail;
+  public readonly version: bedrock.CfnGuardrailVersion;
+  public readonly guardrailId: string;
+  public readonly guardrailArn: string;
+  public readonly guardrailVersion: string;
+
+  constructor(
+    scope: Construct,
+    id: string,
+    props: TestProjectAgentGuardrailProps,
+  ) {
+    super(scope, id);
+
+    const { agent, ...overrides } = props;
+
+    const deniedTopics = policy.deniedTopics ?? [];
+    const piiEntities = policy.piiEntities ?? [];
+
+    this.guardrail = new bedrock.CfnGuardrail(this, 'Guardrail', {
+      name: Names.uniqueResourceName(this, {
+        maxLength: 50,
+        separator: '-',
+        allowedSpecialCharacters: '-_',
+      }),
+      blockedInputMessaging: policy.blockedInputMessaging,
+      blockedOutputsMessaging: policy.blockedOutputsMessaging,
+      ...(deniedTopics.length > 0 && {
+        topicPolicyConfig: {
+          topicsConfig: deniedTopics.map(({ name, definition, examples }) => ({
+            name,
+            definition,
+            examples,
+            type: 'DENY',
+          })),
+        },
+      }),
+      ...(piiEntities.length > 0 && {
+        sensitiveInformationPolicyConfig: {
+          piiEntitiesConfig: piiEntities.map(({ type, action }) => ({
+            type,
+            action,
+          })),
+        },
+      }),
+      ...overrides,
+    });
+
+    const hash = createHash('sha256').update(policyFile);
+    if (Object.keys(overrides).length > 0) {
+      hash.update(JSON.stringify(Stack.of(this).resolve(overrides)));
+    }
+
+    this.version = new bedrock.CfnGuardrailVersion(this, 'Version', {
+      guardrailIdentifier: this.guardrail.attrGuardrailId,
+      description: \`guardrail.json sha256 \${hash.digest('hex')}\`,
+    });
+
+    this.guardrailId = this.guardrail.attrGuardrailId;
+    this.guardrailArn = this.guardrail.attrGuardrailArn;
+    this.guardrailVersion = this.version.attrVersion;
+
+    new CfnOutput(this, 'GuardrailId', { value: this.guardrailId });
+    new CfnOutput(this, 'GuardrailVersion', { value: this.guardrailVersion });
+
+    const rc = RuntimeConfig.ensure(this);
+    rc.set('agentcore', 'guardrails', {
+      ...rc.get('agentcore').guardrails,
+      TestProjectAgent: {
+        guardrailId: this.guardrailId,
+        guardrailVersion: this.guardrailVersion,
+      },
+    });
+
+    this.grantApply(agent);
+  }
+
+  /** Grant permission to apply this guardrail. */
+  public grantApply(grantee: iam.IGrantable): iam.Grant {
+    return iam.Grant.addToPrincipal({
+      grantee,
+      actions: ['bedrock:ApplyGuardrail'],
+      resourceArns: [this.guardrailArn],
+    });
+  }
+}
+"
+`;
+
+exports[`py#agent#guardrails generator > framework strands > protocol http > should generate the guardrail with cdk > guardrail.json 1`] = `
+"{
+  "blockedInputMessaging": "Sorry, I can't help with that request.",
+  "blockedOutputsMessaging": "Sorry, I can't share that answer.",
+  "deniedTopics": [
+    {
+      "name": "Investment advice",
+      "definition": "Recommendations about which specific stocks, funds or other investments to buy or sell.",
+      "examples": ["Which stocks should I buy this year?"]
+    }
+  ],
+  "piiEntities": [
+    { "type": "EMAIL", "action": "ANONYMIZE" },
+    { "type": "PHONE", "action": "ANONYMIZE" },
+    { "type": "US_SOCIAL_SECURITY_NUMBER", "action": "BLOCK" }
+  ]
+}
+"
+`;
+
+exports[`py#agent#guardrails generator > framework strands > protocol http > should generate the guardrail with cdk > guardrail.py 1`] = `
+"import logging
+import os
+import re
+import threading
+import time
+from typing import Any, TypedDict
+
+from proj_agent_connection.core.runtime_config import get_agentcore_runtime_config
+from strands.models import BedrockModel
+
+logger = logging.getLogger(__name__)
+
+RUNTIME_CONFIG_KEY = "agentcore.guardrails.TestProjectAgent"
+CACHE_SECONDS = 5
+
+
+class GuardrailConfig(TypedDict):
+    guardrailIdentifier: str
+    guardrailVersion: str
+    trace: str
+
+
+_lock = threading.Lock()
+_cache: tuple[float, dict[str, Any] | None] | None = None
+_warned_unguarded = False
+
+
+def _read_entry() -> dict[str, Any] | None:
+    """This agent's entry in runtime config, written by the TestProjectAgentGuardrail
+    construct or the test-project-agent guardrail module, cached for CACHE_SECONDS."""
+    global _cache
+    with _lock:
+        if _cache is None or time.monotonic() - _cache[0] >= CACHE_SECONDS:
+            guardrails = get_agentcore_runtime_config().get("guardrails") or {}
+            _cache = (time.monotonic(), guardrails.get("TestProjectAgent"))
+        return _cache[1]
+
+
+def resolve_guardrail() -> GuardrailConfig | None:
+    """The guardrail to apply, read from runtime config on every model call (cached for 5 seconds)."""
+    global _warned_unguarded
+    local_dev = os.environ.get("LOCAL_DEV") == "true"
+    entry: dict[str, Any] | None = None
+    if not local_dev:
+        entry = _read_entry()
+    elif os.environ.get("RUNTIME_CONFIG_APP_ID"):
+        try:
+            entry = _read_entry()
+        except Exception:
+            entry = None
+
+    guardrail_id = (entry or {}).get("guardrailId")
+    guardrail_version = (entry or {}).get("guardrailVersion")
+    if not guardrail_id or not guardrail_version:
+        if not local_dev:
+            raise RuntimeError(
+                f"No guardrail for this agent in runtime config at {RUNTIME_CONFIG_KEY}. "
+                "Add the TestProjectAgentGuardrail construct (CDK) or the "
+                "guardrails/test-project-agent module (Terraform) to your infrastructure."
+            )
+        if not _warned_unguarded:
+            _warned_unguarded = True
+            logger.warning(
+                "No guardrail for this agent in runtime config at %s, "
+                "so the agent is running without a guardrail (LOCAL_DEV=true).",
+                RUNTIME_CONFIG_KEY,
+            )
+        return None
+
+    if not re.fullmatch(r"[1-9][0-9]*", str(guardrail_version)):
+        raise RuntimeError(
+            f"The guardrail version in runtime config at {RUNTIME_CONFIG_KEY} "
+            f"must be a numbered guardrail version, but is {guardrail_version}."
+        )
+    return {
+        "guardrailIdentifier": str(guardrail_id),
+        "guardrailVersion": str(guardrail_version),
+        "trace": "enabled",
+    }
+
+
+class GuardrailedBedrockModel(BedrockModel):
+    """A Bedrock model that applies this agent's guardrail from runtime config to each
+    model call, so a new guardrail version applies without a restart."""
+
+    def format_request(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        request = super().format_request(*args, **kwargs)
+        guardrail = resolve_guardrail()
+        if guardrail is not None:
+            request["guardrailConfig"] = guardrail
+        return request
+
+
+def get_guardrailed_model() -> BedrockModel:
+    """The Bedrock model with this agent's guardrail applied."""
+    return GuardrailedBedrockModel()
+"
+`;
+
+exports[`py#agent#guardrails generator > framework strands > protocol http > should generate the guardrail with cdk > guardrails/index.ts 1`] = `
+"export * from './test-project-agent/test-project-agent-guardrail.js';
+"
+`;
+
+exports[`py#agent#guardrails generator > framework strands > protocol http > should generate the guardrail with terraform > agent.py 1`] = `
+"from contextlib import contextmanager
+
+from proj_agent_connection import log_model_errors, log_tool_errors
+from strands import Agent, tool
+from strands.hooks import HookCallback, HookProvider
+from strands_tools import current_time
+
+from .guardrail import get_guardrailed_model
+from .session import get_session_manager
+
+
+@tool
+def subtract(a: int, b: int) -> int:
+    return a - b
+
+
+AGENT_HOOKS: list[HookProvider | HookCallback] = [log_model_errors, log_tool_errors]
+
+
+@contextmanager
+def get_agent():
+    yield Agent(
+        model=get_guardrailed_model(),
+        name="TestProjectAgent",
+        description="TestProjectAgent Strands Agent",
+        system_prompt="""
+You are a mathematical wizard.
+Use your tools for mathematical tasks.
+Refer to tools as your 'spellbook'.
+""",
+        tools=[subtract, current_time],
+        hooks=AGENT_HOOKS,
+        session_manager=get_session_manager(),
+    )
+"
+`;
+
+exports[`py#agent#guardrails generator > framework strands > protocol http > should generate the guardrail with terraform > guardrail.json 1`] = `
+"{
+  "blockedInputMessaging": "Sorry, I can't help with that request.",
+  "blockedOutputsMessaging": "Sorry, I can't share that answer.",
+  "deniedTopics": [
+    {
+      "name": "Investment advice",
+      "definition": "Recommendations about which specific stocks, funds or other investments to buy or sell.",
+      "examples": ["Which stocks should I buy this year?"]
+    }
+  ],
+  "piiEntities": [
+    { "type": "EMAIL", "action": "ANONYMIZE" },
+    { "type": "PHONE", "action": "ANONYMIZE" },
+    { "type": "US_SOCIAL_SECURITY_NUMBER", "action": "BLOCK" }
+  ]
+}
+"
+`;
+
+exports[`py#agent#guardrails generator > framework strands > protocol http > should generate the guardrail with terraform > guardrail.py 1`] = `
+"import logging
+import os
+import re
+import threading
+import time
+from typing import Any, TypedDict
+
+from proj_agent_connection.core.runtime_config import get_agentcore_runtime_config
+from strands.models import BedrockModel
+
+logger = logging.getLogger(__name__)
+
+RUNTIME_CONFIG_KEY = "agentcore.guardrails.TestProjectAgent"
+CACHE_SECONDS = 5
+
+
+class GuardrailConfig(TypedDict):
+    guardrailIdentifier: str
+    guardrailVersion: str
+    trace: str
+
+
+_lock = threading.Lock()
+_cache: tuple[float, dict[str, Any] | None] | None = None
+_warned_unguarded = False
+
+
+def _read_entry() -> dict[str, Any] | None:
+    """This agent's entry in runtime config, written by the TestProjectAgentGuardrail
+    construct or the test-project-agent guardrail module, cached for CACHE_SECONDS."""
+    global _cache
+    with _lock:
+        if _cache is None or time.monotonic() - _cache[0] >= CACHE_SECONDS:
+            guardrails = get_agentcore_runtime_config().get("guardrails") or {}
+            _cache = (time.monotonic(), guardrails.get("TestProjectAgent"))
+        return _cache[1]
+
+
+def resolve_guardrail() -> GuardrailConfig | None:
+    """The guardrail to apply, read from runtime config on every model call (cached for 5 seconds)."""
+    global _warned_unguarded
+    local_dev = os.environ.get("LOCAL_DEV") == "true"
+    entry: dict[str, Any] | None = None
+    if not local_dev:
+        entry = _read_entry()
+    elif os.environ.get("RUNTIME_CONFIG_APP_ID"):
+        try:
+            entry = _read_entry()
+        except Exception:
+            entry = None
+
+    guardrail_id = (entry or {}).get("guardrailId")
+    guardrail_version = (entry or {}).get("guardrailVersion")
+    if not guardrail_id or not guardrail_version:
+        if not local_dev:
+            raise RuntimeError(
+                f"No guardrail for this agent in runtime config at {RUNTIME_CONFIG_KEY}. "
+                "Add the TestProjectAgentGuardrail construct (CDK) or the "
+                "guardrails/test-project-agent module (Terraform) to your infrastructure."
+            )
+        if not _warned_unguarded:
+            _warned_unguarded = True
+            logger.warning(
+                "No guardrail for this agent in runtime config at %s, "
+                "so the agent is running without a guardrail (LOCAL_DEV=true).",
+                RUNTIME_CONFIG_KEY,
+            )
+        return None
+
+    if not re.fullmatch(r"[1-9][0-9]*", str(guardrail_version)):
+        raise RuntimeError(
+            f"The guardrail version in runtime config at {RUNTIME_CONFIG_KEY} "
+            f"must be a numbered guardrail version, but is {guardrail_version}."
+        )
+    return {
+        "guardrailIdentifier": str(guardrail_id),
+        "guardrailVersion": str(guardrail_version),
+        "trace": "enabled",
+    }
+
+
+class GuardrailedBedrockModel(BedrockModel):
+    """A Bedrock model that applies this agent's guardrail from runtime config to each
+    model call, so a new guardrail version applies without a restart."""
+
+    def format_request(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        request = super().format_request(*args, **kwargs)
+        guardrail = resolve_guardrail()
+        if guardrail is not None:
+            request["guardrailConfig"] = guardrail
+        return request
+
+
+def get_guardrailed_model() -> BedrockModel:
+    """The Bedrock model with this agent's guardrail applied."""
+    return GuardrailedBedrockModel()
+"
+`;
+
+exports[`py#agent#guardrails generator > framework strands > protocol http > should generate the guardrail with terraform > module 1`] = `
+"terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "6.69.1"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "3.9.1"
+    }
+  }
+}
+
+variable "tags" {
+  description = "Tags to apply to resources"
+  type        = map(string)
+  default     = {}
+}
+
+locals {
+  policy_file = "\${path.module}/../../../../../../../apps/test-project/proj_test_project/agent/guardrail.json"
+  policy      = jsondecode(file(local.policy_file))
+  name_prefix = "test-project-agent-guardrail"
+}
+
+resource "random_id" "unique_suffix" {
+  byte_length = 4
+}
+
+resource "aws_bedrock_guardrail" "this" {
+  name                      = "\${local.name_prefix}-\${random_id.unique_suffix.hex}"
+  blocked_input_messaging   = local.policy.blockedInputMessaging
+  blocked_outputs_messaging = local.policy.blockedOutputsMessaging
+
+  dynamic "topic_policy_config" {
+    for_each = length(try(local.policy.deniedTopics, [])) > 0 ? [1] : []
+    content {
+      dynamic "topics_config" {
+        for_each = local.policy.deniedTopics
+        content {
+          name       = topics_config.value.name
+          definition = topics_config.value.definition
+          examples   = try(topics_config.value.examples, [])
+          type       = "DENY"
+        }
+      }
+    }
+  }
+
+  dynamic "sensitive_information_policy_config" {
+    for_each = length(try(local.policy.piiEntities, [])) > 0 ? [1] : []
+    content {
+      dynamic "pii_entities_config" {
+        for_each = local.policy.piiEntities
+        content {
+          type   = pii_entities_config.value.type
+          action = pii_entities_config.value.action
+        }
+      }
+    }
+  }
+
+  tags = var.tags
+}
+
+resource "aws_bedrock_guardrail_version" "this" {
+  guardrail_arn = aws_bedrock_guardrail.this.guardrail_arn
+  description   = "guardrail.json sha256 \${filesha256(local.policy_file)}"
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+module "add_guardrail_to_runtime_config" {
+  source = "../../../core/runtime-config/entry"
+
+  namespace = "agentcore"
+  key       = "guardrails"
+  value     = { "TestProjectAgent" = { guardrailId = aws_bedrock_guardrail.this.guardrail_id, guardrailVersion = aws_bedrock_guardrail_version.this.version } }
+}
+
+output "guardrail_id" {
+  description = "ID of the guardrail"
+  value       = aws_bedrock_guardrail.this.guardrail_id
+}
+
+output "guardrail_arn" {
+  description = "ARN of the guardrail"
+  value       = aws_bedrock_guardrail.this.guardrail_arn
+}
+
+output "guardrail_version" {
+  description = "Numbered version of the guardrail"
+  value       = aws_bedrock_guardrail_version.this.version
+}
+
+output "iam_policy_statements" {
+  description = "IAM policy statements that allow the agent to apply the guardrail"
+  value = [
+    {
+      Effect   = "Allow"
+      Action   = ["bedrock:ApplyGuardrail"]
+      Resource = [aws_bedrock_guardrail.this.guardrail_arn]
+    }
+  ]
+  depends_on = [module.add_guardrail_to_runtime_config]
+}
+"
+`;

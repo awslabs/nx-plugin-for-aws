@@ -1,0 +1,93 @@
+import logging
+import os
+import re
+import threading
+import time
+from typing import Any, TypedDict
+
+from strands.models import BedrockModel
+
+from <%- agentConnectionModuleName %>.core.runtime_config import get_agentcore_runtime_config
+
+logger = logging.getLogger(__name__)
+
+RUNTIME_CONFIG_KEY = "agentcore.guardrails.<%- agentNameClassName %>"
+CACHE_SECONDS = 5
+
+
+class GuardrailConfig(TypedDict):
+    guardrailIdentifier: str
+    guardrailVersion: str
+    trace: str
+
+
+_lock = threading.Lock()
+_cache: tuple[float, dict[str, Any] | None] | None = None
+_warned_unguarded = False
+
+
+def _read_entry() -> dict[str, Any] | None:
+    """This agent's entry in runtime config, written by the <%- agentNameClassName %>Guardrail
+    construct or the <%- nameKebabCase %> guardrail module, cached for CACHE_SECONDS."""
+    global _cache
+    with _lock:
+        if _cache is None or time.monotonic() - _cache[0] >= CACHE_SECONDS:
+            guardrails = get_agentcore_runtime_config().get("guardrails") or {}
+            _cache = (time.monotonic(), guardrails.get("<%- agentNameClassName %>"))
+        return _cache[1]
+
+
+def resolve_guardrail() -> GuardrailConfig | None:
+    """The guardrail to apply, read from runtime config on every model call (cached for 5 seconds)."""
+    global _warned_unguarded
+    local_dev = os.environ.get("LOCAL_DEV") == "true"
+    entry: dict[str, Any] | None = None
+    if not local_dev:
+        entry = _read_entry()
+    elif os.environ.get("RUNTIME_CONFIG_APP_ID"):
+        try:
+            entry = _read_entry()
+        except Exception:
+            entry = None
+
+    guardrail_id = (entry or {}).get("guardrailId")
+    guardrail_version = (entry or {}).get("guardrailVersion")
+    if not guardrail_id or not guardrail_version:
+        if not local_dev:
+            raise RuntimeError(
+                f"No guardrail for this agent in runtime config at {RUNTIME_CONFIG_KEY}. "
+                "Add the <%- agentNameClassName %>Guardrail construct (CDK) or the "
+                "guardrails/<%- nameKebabCase %> module (Terraform) to your infrastructure."
+            )
+        if not _warned_unguarded:
+            _warned_unguarded = True
+            logger.warning(
+                "No guardrail for this agent in runtime config at %s, "
+                "so the agent is running without a guardrail (LOCAL_DEV=true).",
+                RUNTIME_CONFIG_KEY,
+            )
+        return None
+
+    if not re.fullmatch(r"[1-9][0-9]*", str(guardrail_version)):
+        raise RuntimeError(
+            f"The guardrail version in runtime config at {RUNTIME_CONFIG_KEY} "
+            f"must be a numbered guardrail version, but is {guardrail_version}."
+        )
+    return {"guardrailIdentifier": str(guardrail_id), "guardrailVersion": str(guardrail_version), "trace": "enabled"}
+
+
+class GuardrailedBedrockModel(BedrockModel):
+    """A Bedrock model that applies this agent's guardrail from runtime config to each
+    model call, so a new guardrail version applies without a restart."""
+
+    def format_request(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        request = super().format_request(*args, **kwargs)
+        guardrail = resolve_guardrail()
+        if guardrail is not None:
+            request["guardrailConfig"] = guardrail
+        return request
+
+
+def get_guardrailed_model() -> BedrockModel:
+    """The Bedrock model with this agent's guardrail applied."""
+    return GuardrailedBedrockModel()

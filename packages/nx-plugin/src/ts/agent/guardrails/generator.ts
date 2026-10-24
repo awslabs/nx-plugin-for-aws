@@ -16,7 +16,10 @@ import {
   matchGritQL,
 } from '../../../utils/ast.js';
 import { formatFilesInSubtree } from '../../../utils/format.js';
-import { addGuardrailInfra } from '../../../utils/guardrail-constructs/guardrail-constructs.js';
+import {
+  addGuardrailInfra,
+  addGuardrailPolicy,
+} from '../../../utils/guardrail-constructs/guardrail-constructs.js';
 import { guardrailWiringMessage } from '../../../utils/guardrail-constructs/guardrail-wiring.js';
 import type { Iac } from '../../../utils/iac.js';
 import { addGeneratorMetricsIfApplicable } from '../../../utils/metrics.js';
@@ -144,6 +147,7 @@ export const tsAgentGuardrailsGenerator = async (
     },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
+  addGuardrailPolicy(tree, agentDir);
 
   await addGuardrailedModelToAgent(
     tree,

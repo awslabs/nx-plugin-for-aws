@@ -32,6 +32,20 @@ export interface AddGuardrailInfraOptions {
 }
 
 /**
+ * Write the guardrail.json policy next to the agent. The policy is the
+ * user's to edit, so a re-run never touches an existing file.
+ */
+export const addGuardrailPolicy = (tree: Tree, agentDir: string): void => {
+  generateFiles(
+    tree,
+    joinPathFragments(import.meta.dirname, 'files', 'policy'),
+    agentDir,
+    {},
+    { overwriteStrategy: OverwriteStrategy.KeepExisting },
+  );
+};
+
+/**
  * Add the Amazon Bedrock Guardrail infrastructure for the selected IaC
  * provider: a CDK construct in the shared constructs project, or a Terraform
  * module in the shared Terraform project. Both read the policy file at synth

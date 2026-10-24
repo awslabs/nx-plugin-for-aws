@@ -113,6 +113,7 @@ pnpm nx g @aws/nx-plugin:ts#infra
 | `py#lambda-function`   | Python Lambda with type-safe event sources                                                                                               |
 | `py#mcp-server`        | MCP server (Python)                                                                                                                      |
 | `py#agent`             | [Strands Agent](https://strandsagents.com/) (Python)                                                                                     |
+| `py#agent#guardrails`  | Amazon Bedrock Guardrail for a Python Agent (experimental)                                                                               |
 | `agentcore-gateway`    | [AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) project                                  |
 | `greengrass#component` | [AWS IoT Greengrass](https://docs.aws.amazon.com/greengrass/v2/developerguide/) v2 component for Python or TypeScript (experimental) |
 | `agentcore-harness`    | [AgentCore Harness](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness.html) agent loop (experimental)                |

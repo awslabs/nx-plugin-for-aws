@@ -14,11 +14,20 @@ export interface GuardrailWiringOptions {
   nameKebabCase: string;
   /** npm scope of the workspace without the `@`, eg `my-scope`. */
   npmScope: string;
+  /**
+   * The agent guide section that shows how to deploy the agent's Terraform
+   * module. Defaults to the ts#agent guide.
+   */
+  deployGuideUrl?: string;
 }
 
 /** The ts#agent guide section that shows how to deploy the agent's Terraform module. */
 export const TS_AGENT_TERRAFORM_DEPLOY_GUIDE_URL =
   'https://awslabs.github.io/nx-plugin-for-aws/en/guides/ts-agent/#infrastructure-as-code';
+
+/** The py#agent guide section that shows how to deploy the agent's Terraform module. */
+export const PY_AGENT_TERRAFORM_DEPLOY_GUIDE_URL =
+  'https://awslabs.github.io/nx-plugin-for-aws/en/guides/py-agent/#infrastructure-as-code';
 
 /**
  * The code a user adds to their CDK stack to guard the agent.
@@ -65,12 +74,15 @@ module "runtime_config_appconfig_deployment" {
 };
 
 /**
- * How to add the printed Terraform code. `ts#agent` does not add the agent to
- * the root module, so its `module` block may not exist yet.
+ * How to add the printed Terraform code. The agent generators do not add the
+ * agent to the root module, so its `module` block may not exist yet.
  */
-const terraformSteps = (nameKebabCase: string): string => {
+const terraformSteps = (
+  nameKebabCase: string,
+  deployGuideUrl = TS_AGENT_TERRAFORM_DEPLOY_GUIDE_URL,
+): string => {
   const agentModule = snakeCase(nameKebabCase);
-  return `Add the module "${agentModule}_guardrail" block as printed below. Add its additional_iam_policy_statements line to your existing module "${agentModule}" block, and add module.${agentModule}_guardrail to the depends_on list of your runtime_config_appconfig_deployment module. If your root module does not deploy the agent yet, add the agent's module first, as described in ${TS_AGENT_TERRAFORM_DEPLOY_GUIDE_URL}.`;
+  return `Add the module "${agentModule}_guardrail" block as printed below. Add its additional_iam_policy_statements line to your existing module "${agentModule}" block, and add module.${agentModule}_guardrail to the depends_on list of your runtime_config_appconfig_deployment module. If your root module does not deploy the agent yet, add the agent's module first, as described in ${deployGuideUrl}.`;
 };
 
 /**
@@ -86,7 +98,7 @@ export const guardrailWiringMessage = (
     ? `Add the guardrail to your agent in your stack, for example packages/infra/src/stacks/application-stack.ts. ${missing}
 
 ${cdkGuardrailWiring(options)}`
-    : `Add the guardrail to your agent in the root Terraform module where you deploy the agent, for example packages/infra/src/main.tf. ${missing} ${terraformSteps(options.nameKebabCase)}
+    : `Add the guardrail to your agent in the root Terraform module where you deploy the agent, for example packages/infra/src/main.tf. ${missing} ${terraformSteps(options.nameKebabCase, options.deployGuideUrl)}
 
 ${terraformGuardrailWiring(options)}`;
 };
