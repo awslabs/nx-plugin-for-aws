@@ -1,0 +1,212 @@
+---
+title: ウェブサイトのアイデンティティプロバイダー
+description: Okta、Auth0、Microsoft Entra IDなどの外部OpenID Connectアイデンティティプロバイダーを通じてユーザーがウェブサイトにサインインできるようにします
+generator: ts#website#auth#idp
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+
+<Link path="guides/react-website-auth">ウェブサイト認証</Link>はAmazon Cognitoユーザープールを作成し、デフォルトではそのプールにユーザー名とパスワードを持つユーザーのみがサインインできます。スタッフや顧客がOkta、Auth0、Microsoft Entra IDなどのアイデンティティプロバイダー（IdP）に既にアカウントを持っている場合、ウェブサイト専用の2つ目のアカウントが必要になってしまいます。
+
+このジェネレーターは、外部の[OpenID Connect](https://openid.net/developers/how-connect-works/)（OIDC）アイデンティティプロバイダーをユーザープールに追加します。サインインページには、ユーザー名とパスワードフォームの横にアイデンティティプロバイダー用のボタンが表示されるようになります。
+
+## 仕組み
+
+- ウェブサイトは引き続きユーザーをCognitoサインインページに送信します。このページには、アイデンティティプロバイダーにちなんだ名前のボタンが表示されます。
+- ボタンを選択したユーザーは、アイデンティティプロバイダーでサインインします。アイデンティティプロバイダーは、リダイレクトURI `https://<cognito domain>/oauth2/idpresponse` でユーザーをCognitoに送り返します。
+- Cognitoは、ユーザープールにフェデレーテッドユーザーとしてユーザーを作成し、マッピングしたクレーム（例：`email`）をユーザーの属性にコピーします。
+- その後、Cognitoはローカルユーザーに発行するのと同じ種類のトークンを発行します。API、エージェント、アイデンティティプールは、変更なしでそれらを受け入れます。
+
+プールにユーザー名とパスワードを持つユーザーは、引き続きサインインできます。
+
+## 使用方法
+
+### アイデンティティプロバイダーの追加
+
+<Link path="guides/react-website-auth">`ts#website#auth`</Link>ジェネレーターから認証を持つウェブサイトが必要です。各アイデンティティプロバイダーに対して、このジェネレーターを1回実行します。
+
+<RunGenerator generator="ts#website#auth#idp" />
+
+ジェネレーターには、アイデンティティプロバイダーに登録されたアプリケーションのクライアントIDが必要です。クライアントシークレットはコードに含まれません。[アイデンティティプロバイダーの設定](#set-up-your-identity-provider)で説明されているように、AWS Secrets Managerに保存します。
+
+### オプション
+
+<GeneratorParameters generator="ts#website#auth#idp" />
+
+## ジェネレーターの出力
+
+ジェネレーターは、選択した`iac`プロバイダー用にこれらのファイルを追加します。`<name>`は`name`オプションのケバブケース形式です（`TestIdp`の場合は`test-idp`）：
+
+<Infrastructure>
+  <Fragment slot="cdk">
+    <FileTree>
+      - packages/common/constructs/src/core
+        - identity-providers
+          - \<name>.ts アイデンティティプロバイダーを含むCDKコンストラクト
+        - index.ts 新しいコンストラクトをエクスポート
+        - user-identity.ts アイデンティティプロバイダーを作成するようになりました
+    </FileTree>
+  </Fragment>
+  <Fragment slot="terraform">
+    <FileTree>
+      - packages/common/terraform/src/core/user-identity
+        - \<name>-identity-provider.tf identityモジュールからリダイレクトURI出力を渡します
+        - identity
+          - \<name>-identity-provider.tf アイデンティティプロバイダーと、そのクライアントシークレットを読み取るデータソース
+          - identity.tf Webクライアントにアイデンティティプロバイダーをリストするようになりました
+    </FileTree>
+  </Fragment>
+</Infrastructure>
+
+ジェネレーターは、ユーザープールのWebクライアント（ウェブサイトがサインインするCognitoアプリクライアント）も編集し、新しいアイデンティティプロバイダーを受け入れるようにします。`TestIdp`アイデンティティプロバイダーの場合、次の変更を行います：
+
+<Infrastructure>
+  <Fragment slot="cdk">
+```diff lang="ts" title="packages/common/constructs/src/core/user-identity.ts"
++import { TestIdpIdentityProvider } from './identity-providers/test-idp.js';
+     this.userPoolClient = this.createUserPoolClient(this.userPool);
++    new TestIdpIdentityProvider(this, 'TestIdpIdentityProvider', {
++      userPool: this.userPool,
++      userPoolClient: this.userPoolClient,
++      userPoolDomain: this.userPoolDomain,
++    });
+     this.identityPool = this.createIdentityPool(
+```
+  </Fragment>
+  <Fragment slot="terraform">
+```diff lang="hcl" title="packages/common/terraform/src/core/user-identity/identity/identity.tf"
+-  supported_identity_providers = ["COGNITO"]
++  supported_identity_providers = ["COGNITO", aws_cognito_identity_provider.test_idp.provider_name]
+```
+  </Fragment>
+</Infrastructure>
+
+2番目のアイデンティティプロバイダーは最初のものの後に追加されます。同じ`name`でジェネレーターを再度実行してもファイルは変更されず、ジェネレーターはアイデンティティプロバイダーファイルへの編集を上書きしません。名前は大文字小文字以上に異なる必要があります：`okta`の後の`Okta`は同じアイデンティティプロバイダーとしてカウントされるため、何も変更されません。
+
+`user-identity.ts`または`supported_identity_providers`リストを変更してジェネレーターが認識できなくなった場合、ジェネレーターはそのファイルを変更せずに残します。代わりに、手動で追加する行を出力します。
+
+## アイデンティティプロバイダーの設定
+
+ジェネレーターを実行した後の最初のデプロイでは、Secrets Managerからクライアントシークレットを読み取ります。シークレットが存在しない場合、デプロイは失敗します。この順序で次の手順に従ってください。ジェネレーターは、完了時にこれらも出力します。
+
+1. アイデンティティプロバイダーにアプリケーションを登録し、そのクライアントIDとクライアントシークレットをメモします。リダイレクトURIは手順4で追加します。クライアントIDを`--clientId`に設定してこのジェネレーターを実行します。
+2. クライアントシークレットをSecrets Managerに、`clientSecretName`オプションの名前（デフォルトでは`<name>-oidc-client-secret`）で保存します：
+
+   ```bash
+   aws secretsmanager create-secret --name TestIdp-oidc-client-secret --secret-string <client secret>
+   ```
+
+3. デプロイします。
+4. アイデンティティプロバイダーのアプリケーションにリダイレクトURIを追加します。
+
+<Infrastructure>
+  <Fragment slot="cdk">
+`UserIdentity`を含むスタックは、リダイレクトURIを`<Name>IdpRedirectUri`として出力します（例：`TestIdpIdpRedirectUri`）。デプロイ前に、`ts#website#auth`用に選択した`cognitoDomain`、AWSアカウントID、リージョンから計算することもできます：
+
+```
+https://<cognitoDomain>-<account>.auth.<region>.amazoncognito.com/oauth2/idpresponse
+```
+  </Fragment>
+  <Fragment slot="terraform">
+Cognitoドメインにはランダムなサフィックスがあるため、リダイレクトURIはデプロイ後にのみ判明します。`user-identity`モジュールは、それを`<name>_idp_redirect_uri`として出力します。それを確認するには、ルートモジュールに出力を追加します（例：`packages/infra/src/main.tf`）：
+
+```hcl
+output "test_idp_idp_redirect_uri" { value = module.user_identity.test_idp_idp_redirect_uri }
+```
+  </Fragment>
+</Infrastructure>
+
+アイデンティティプロバイダーには、この`/oauth2/idpresponse` URIのみを登録してください。ウェブサイト自体のURLは、アイデンティティプロバイダーではなくCognitoに登録されます。
+
+## 属性マッピング
+
+生成されたユーザープールには、`email`、`given_name`、`family_name`属性が必要です。Cognitoは、サインインのたびにアイデンティティプロバイダーのクレームからこれらを入力します。アイデンティティプロバイダーがそれらのいずれかを送信しない場合、ユーザーの最初のサインインは失敗します。したがって、ジェネレーターは3つのいずれかを省略した`attributeMapping`を拒否します。
+
+`attributeMapping`はJSONオブジェクトです。各キーはユーザープール属性で、各値はアイデンティティプロバイダーのクレームの名前です。デフォルトでは、各属性を同じ名前のクレームにマッピングします：
+
+```json
+{"email":"email","given_name":"given_name","family_name":"family_name"}
+```
+
+- キーは、`name`や`phone_number`などの[標準属性](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-settings-attributes.html#cognito-user-pools-standard-attributes)、または`custom:department`などのカスタム属性にすることができます。
+- Cognitoは、マッピングされたメールアドレスを未検証として扱います。メールアドレスを自身で検証するアイデンティティプロバイダーからのみ`email_verified`をマッピングしてください。そうしないと、ユーザーがアイデンティティプロバイダーで他人のアドレスを設定し、プールで検証済みとしてマークされる可能性があります。
+- ユーザーのメールアドレスがアイデンティティプロバイダーで変更された場合、Cognitoはユーザーの次回サインイン時に新しいアドレスをユーザープールに書き込みます。`email_verified`は`false`のままです。
+- カスタム属性は、ユーザープールに既に存在し、変更可能である必要があります。
+
+Terraformアイデンティティプロバイダーファイルは、Cognitoがアイデンティティプロバイダーを返すときに追加する2つの値も設定します：`attribute_mapping`の`"username" = "sub"`と`provider_details`の`attributes_url_add_attributes = "false"`。ファイルがこれらを設定するため、最初のデプロイ後の2回目の`terraform plan`では、アイデンティティプロバイダーへの変更は表示されません。別のアイデンティティプロバイダーで2回目のプランが`provider_details`の変更を表示する場合は、プランがCognitoが返すことを示す値でそのキーをファイルに追加してください。
+
+## アイデンティティプロバイダーに関する注意事項
+
+以下の設定は、各ベンダーのドキュメントから取得したものです。このジェネレーターでテストされたのは、アイデンティティプロバイダーとして機能するCognitoユーザープールのみです。そのテストは、このジェネレーターのリリースに必要なAWSチェックです。
+
+### Okta
+
+未テスト。OktaでOIDC Webアプリケーションを作成します。発行者はOktaドメイン`https://<your-org>.okta.com`、またはカスタム認証サーバー（例：`https://<your-org>.okta.com/oauth2/default`）です。デフォルトのスコープ`openid email profile`は、`email`、`given_name`、`family_name`を返すため、デフォルトのマッピングが機能します。
+
+### Auth0
+
+未テスト。Auth0でRegular Web Applicationを作成します。発行者は`https://<your-tenant>.auth0.com/`で、末尾のスラッシュを含みます。これは、Auth0トークンの`iss`クレームにスラッシュがあるためです。Auth0は、ユーザーの接続が提供する場合にのみ`given_name`と`family_name`を返します。それらのない接続のユーザーは、他のクレームをマッピングするまでサインインできません。
+
+### Microsoft Entra ID
+
+未テスト。Entra IDでシングルテナントアプリケーションを登録します。発行者は`https://login.microsoftonline.com/<tenant-id>/v2.0`です。ジェネレーターは、マルチテナント発行者（`/common/`、`/organizations/`、`/consumers/`）を拒否します。これらは任意のEntra IDテナントからのユーザーを受け入れるためです。Entra IDは、アプリケーションのIDトークンにオプションのクレームとして追加した場合にのみ`given_name`と`family_name`を送信します。その`email`クレームは検証されていないため、Entra IDから`email_verified`をマッピングしないでください。
+
+### Cognito user pool
+
+アイデンティティプロバイダーとして別のCognitoユーザープールでテストするには、発行者`https://cognito-idp.<region>.amazonaws.com/<user pool id>`を使用します。そのアプリクライアントに、クライアントシークレット、認証コードグラント、スコープ`openid email profile`を付与します。
+
+## セキュリティ
+
+- ユーザーを`sub`クレーム（ユーザープール内のユーザーの一意のID）で識別し、`email`では識別しないでください。フェデレーテッドユーザーは、メールがローカルユーザーと一致する場合でも、独自の`sub`を持つプール内の新しいユーザーです。プラグインが生成するコードは`sub`を使用します。
+- シングルテナント発行者を使用してください。マルチテナント発行者は、任意の組織からのユーザーのサインインを許可します。
+- <Link path="guides/react-website-auth">ウェブサイト認証</Link>で説明されているように、本番ステージから`http://localhost`コールバックURLを削除してください。フェデレーションはコールバックURLを追加しません。
+
+## フェデレーションが行わないこと
+
+- ユーザープールで必要なMFA（多要素認証）は、フェデレーテッドユーザーには適用されません。Cognitoは認証をアイデンティティプロバイダーに任せるため、アイデンティティプロバイダーでMFAを強制してください。
+- ウェブサイトからサインアウトすると、Cognitoセッションのみが終了します。OIDCアイデンティティプロバイダーでのユーザーのセッションは終了しないため、ボタンを介した次回のサインインはパスワードなしで完了できます。共有コンピューターでは、ユーザーはアイデンティティプロバイダーでもサインアウトする必要があります。
+- ユーザーメニューには、Cognitoユーザー名が表示されます。フェデレーテッドユーザーの場合、それはアイデンティティプロバイダー名、アンダースコア、アイデンティティプロバイダーでのユーザーの`sub`を小文字にしたものです（例：`testidp_00u1abcd`）。
+
+## クライアントシークレット
+
+Cognitoは、アイデンティティプロバイダーの設定にクライアントシークレットを保持します。ユーザープールで`cognito-idp:DescribeIdentityProvider`を呼び出すことが許可されている人は誰でもそれを読み取ることができます。これは、使用するIaCプロバイダーに関係なく、Cognitoの動作方法です。
+
+<Infrastructure>
+  <Fragment slot="cdk">
+コンストラクトは、シークレットを[動的参照](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/dynamic-references-secretsmanager.html)として`{{resolve:secretsmanager:<clientSecretName>:SecretString:::}}`でCloudFormationに渡します。合成されたテンプレートには、その参照のみが含まれます。CloudFormationは、アイデンティティプロバイダーを作成または更新するときにシークレットを読み取ります。シークレットをローテーションした場合、Cognitoは後のデプロイでアイデンティティプロバイダーリソースが変更されたときにのみ新しい値を取得します。
+  </Fragment>
+  <Fragment slot="terraform">
+モジュールは、`data "aws_secretsmanager_secret_version"`データソースでシークレットを読み取るため、`terraform plan`は`(sensitive value)`として表示します。Terraform stateは、データソース用に1回、アイデンティティプロバイダー用に1回、プレーンテキストでシークレットを保持します。ステートバケット内のステートオブジェクトを読み取ることができる人は誰でもシークレットを読み取ることができます。それに応じてステートバケットへの読み取りアクセスを制限してください。
+  </Fragment>
+</Infrastructure>
+
+このジェネレーターのAWSチェックでは、CDKを使用して、CloudFormationがアイデンティティプロバイダーの設定内の`{{resolve:secretsmanager:...}}`参照を埋めることを確認しました。フェデレーテッドサインインは機能し、デプロイされたテンプレートには参照のみが保持されます。シークレットがローテーションされた後、他の変更のないデプロイでは、CloudFormationはアイデンティティプロバイダーリソースが変更されたときにのみシークレットを読み取るため、古いシークレットがCognitoに残りました。
+
+ローテーションされたシークレットをCognitoに送信するには：
+
+<Infrastructure>
+  <Fragment slot="cdk">
+ローテーションに続くデプロイでアイデンティティプロバイダーリソースを変更します。1つの方法は、参照をシークレットの新しいバージョンに向けることです。アイデンティティプロバイダーコンストラクト`identity-providers/<name>.ts`で、`aws secretsmanager put-secret-value`が出力するバージョンIDを`SecretValue.secretsManager`呼び出しに追加し、その`.unsafeUnwrap()`を保持します：
+
+```ts
+SecretValue.secretsManager('TestIdp-oidc-client-secret', { versionId: '<version id>' })
+```
+
+テンプレート内の参照が変更されるため、CloudFormationはアイデンティティプロバイダーを更新し、そのバージョンのシークレットを読み取ります。ローテーションのたびにバージョンIDを再度変更します。これは、動的参照に関するCloudFormationドキュメントに従っており、AWSではテストされていません。
+  </Fragment>
+  <Fragment slot="terraform">
+ローテーション後に`terraform plan`と`terraform apply`を実行します。データソースはプランのたびにシークレットの現在のバージョンを読み取るため、プランはアイデンティティプロバイダーのインプレース更新を示し、`apply`は新しいシークレットをCognitoに送信します。これは、生成されたワークスペースが使用する`hashicorp/aws`プロバイダー6.69.1のソースから読み取られたものです：`provider_details`への変更は、アイデンティティプロバイダーをインプレースで更新し、置き換えません。AWSではテストされていません。
+  </Fragment>
+</Infrastructure>
+
+## その他のアプリクライアント
+
+アプリクライアントは、アプリケーションがサインインするCognito設定です。ジェネレーターは、ウェブサイトのアプリクライアント（Webクライアント）にのみアイデンティティプロバイダーを追加します。同じユーザープール内の別のアプリクライアントは、アイデンティティプロバイダーもそれに追加した場合にのみフェデレーテッドユーザーを受け入れます。たとえば、<Link path="guides/ts-dcr-proxy">DCRプロキシ</Link>用に作成するアプリクライアント（MCPクライアント、Model Context Protocolを使用するAIツールがCognitoを通じてサインインできるようにする）には、それが必要です。そうしないと、フェデレーテッドユーザーはMCPサーバーにサインインできません。CDKでは、アイデンティティプロバイダーの`provider.providerName`をそのクライアントの`supportedIdentityProviders`に追加します。
+
+## エージェントチャット用のトークン
+
+Cognito認証を使用する<Link path="guides/ts-agent">TypeScriptエージェント</Link>の`<agent>-chat`ターゲットは、`AGENT_ACCESS_TOKEN`環境変数からCognitoアクセストークンを読み取ります。フェデレーテッドユーザーにはCognitoパスワードがないため、`admin-initiate-auth`は機能しません。代わりに、ウェブサイトにサインインし、ブラウザーの開発者ツールを開き、セッションストレージの`oidc.user:...`エントリから`access_token`をコピーします。
