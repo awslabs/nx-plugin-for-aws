@@ -1,6 +1,7 @@
 # TypeScript Library Generator
 
 ## Overview
+
 This generator creates a new TypeScript library with modern configuration and best practices. It sets up a complete TypeScript project with ESM modules, proper build configuration, and optional linting and testing support. The generator is designed to create reusable TypeScript packages that can be shared across your organization's projects.
 
 ## Usage
@@ -38,14 +39,14 @@ Both methods will create a new TypeScript library in the specified directory wit
 
 ## Input Parameters
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| name* | string | - | Library name (required). Used to generate package name and file paths. |
-| directory | string | "packages" | Parent directory where the library is placed. |
-| linter | string | "eslint" | The tool to use for running lint checks. Options: eslint, none |
-| unitTestRunner | string | "none" | Test runner to use for unit tests. Options: jest, vitest, none |
-| scope | string | - | Scope for your package (e.g., @my-company). If omitted, this will be inferred from your project configuration. Must be in format @scope or @scope/subscope. |
-| subDirectory | string | library name | The sub directory the lib is placed in. By default, this is the library name. |
+| Parameter      | Type   | Default      | Description                                                                                                                                                 |
+| -------------- | ------ | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| name*          | string | -            | Library name (required). Used to generate package name and file paths.                                                                                      |
+| directory      | string | "packages"   | Parent directory where the library is placed.                                                                                                               |
+| linter         | string | "eslint"     | The tool to use for running lint checks. Options: eslint, none                                                                                              |
+| unitTestRunner | string | "none"       | Test runner to use for unit tests. Options: jest, vitest, none                                                                                              |
+| scope          | string | -            | Scope for your package (e.g., @my-company). If omitted, this will be inferred from your project configuration. Must be in format @scope or @scope/subscope. |
+| subDirectory   | string | library name | The sub directory the lib is placed in. By default, this is the library name.                                                                               |
 
 *Required parameter
 
@@ -100,10 +101,10 @@ describe('MyFeature', () => {
   it('should handle basic case', () => {
     // Arrange
     const input = 'test';
-    
+
     // Act
     const result = processInput(input);
-    
+
     // Assert
     expect(result).toBe('TEST');
   });
@@ -114,14 +115,14 @@ describe('MyFeature', () => {
 
 Add JSDoc comments to your public APIs:
 
-```typescript
+````typescript
 /**
  * Processes the input string according to business rules.
- * 
+ *
  * @param input - The string to process
  * @returns The processed string
  * @throws {ValidationError} If input is invalid
- * 
+ *
  * @example
  * ```ts
  * const result = processInput('test');
@@ -131,7 +132,7 @@ Add JSDoc comments to your public APIs:
 export function processInput(input: string): string {
   // Implementation
 }
-```
+````
 
 ### 5. Build Process
 
