@@ -1,0 +1,31 @@
+data "aws_secretsmanager_secret_version" "<%= nameSnakeCase %>_client_secret" {
+  secret_id = "<%= clientSecretName %>"
+}
+
+resource "aws_cognito_identity_provider" "<%= nameSnakeCase %>" {
+  user_pool_id  = aws_cognito_user_pool.user_pool.id
+  provider_name = "<%= name %>"
+  provider_type = "OIDC"
+
+  provider_details = {
+    client_id                     = "<%= clientId %>"
+    client_secret                 = data.aws_secretsmanager_secret_version.<%= nameSnakeCase %>_client_secret.secret_string
+    authorize_scopes              = "<%= scopes.join(' ') %>"
+    attributes_request_method     = "GET"
+    attributes_url_add_attributes = "false"
+    oidc_issuer                   = "<%= issuerUrl %>"
+  }
+
+  attribute_mapping = {
+<%- terraformAttributeMappingLines.join('\n') %>
+  }
+<% if (identifiers.length > 0) { -%>
+
+  idp_identifiers = [<%- identifiers.map((identifier) => `"${identifier}"`).join(', ') %>]
+<% } -%>
+}
+
+output "<%= nameSnakeCase %>_idp_redirect_uri" {
+  description = "Redirect URI to register at the <%= name %> identity provider"
+  value       = "https://${aws_cognito_user_pool_domain.user_pool_domain.domain}.auth.${data.aws_region.current.region}.amazoncognito.com/oauth2/idpresponse"
+}

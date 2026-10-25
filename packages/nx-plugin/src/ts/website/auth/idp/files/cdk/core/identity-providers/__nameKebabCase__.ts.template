@@ -1,0 +1,71 @@
+import { CfnOutput, SecretValue } from 'aws-cdk-lib';
+import {
+  type CfnUserPoolClient,
+  type IUserPool,
+  OidcAttributeRequestMethod,
+  ProviderAttribute,
+  type UserPoolClient,
+  type UserPoolDomain,
+  UserPoolIdentityProviderOidc,
+} from 'aws-cdk-lib/aws-cognito';
+import { Construct } from 'constructs';
+
+export interface <%= className %>IdentityProviderProps {
+  readonly userPool: IUserPool;
+  readonly userPoolClient: UserPoolClient;
+  readonly userPoolDomain: UserPoolDomain;
+}
+
+/**
+ * Lets users sign in through the <%= name %> OpenID Connect identity provider.
+ */
+export class <%= className %>IdentityProvider extends Construct {
+  public readonly provider: UserPoolIdentityProviderOidc;
+
+  constructor(
+    scope: Construct,
+    id: string,
+    { userPool, userPoolClient, userPoolDomain }: <%= className %>IdentityProviderProps,
+  ) {
+    super(scope, id);
+
+    this.provider = new UserPoolIdentityProviderOidc(this, 'Provider', {
+      userPool,
+      name: <%- JSON.stringify(name) %>,
+      issuerUrl: <%- JSON.stringify(issuerUrl) %>,
+      clientId: <%- JSON.stringify(clientId) %>,
+      clientSecret: SecretValue.secretsManager(<%- JSON.stringify(clientSecretName) %>).unsafeUnwrap(),
+      scopes: <%- JSON.stringify(scopes) %>,
+      attributeRequestMethod: OidcAttributeRequestMethod.GET,
+      attributeMapping: {
+<% cdkAttributeMapping.standard.forEach(([key, claim]) => { -%>
+        <%= key %>: ProviderAttribute.other(<%- JSON.stringify(claim) %>),
+<% }); -%>
+<% if (cdkAttributeMapping.custom.length > 0) { -%>
+        custom: {
+<% cdkAttributeMapping.custom.forEach(([key, claim]) => { -%>
+          <%- JSON.stringify(key) %>: ProviderAttribute.other(<%- JSON.stringify(claim) %>),
+<% }); -%>
+        },
+<% } -%>
+      },
+<% if (identifiers.length > 0) { -%>
+      identifiers: <%- JSON.stringify(identifiers) %>,
+<% } -%>
+    });
+
+    // The L2 client fixes its identity providers when it is created.
+    const client = userPoolClient.node.defaultChild as CfnUserPoolClient;
+    client.supportedIdentityProviders = [
+      ...(client.supportedIdentityProviders ?? []),
+      this.provider.providerName,
+    ];
+    userPoolClient.node.addDependency(this.provider);
+
+    new CfnOutput(this, 'RedirectUri', {
+      key: '<%= className %>IdpRedirectUri',
+      description: 'Redirect URI to register at the <%= name %> identity provider',
+      value: `${userPoolDomain.baseUrl()}/oauth2/idpresponse`,
+    });
+  }
+}

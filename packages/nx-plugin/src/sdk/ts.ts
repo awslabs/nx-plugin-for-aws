@@ -56,6 +56,9 @@ export { tsWebsiteGenerator } from '../ts/website/app/generator.js';
 export type { TsWebsiteGeneratorSchema } from '../ts/website/app/schema';
 // TypeScript Website Auth Generator
 export { tsWebsiteAuthGenerator } from '../ts/website/auth/generator.js';
+// TypeScript Website Auth Identity Provider Generator
+export { tsWebsiteAuthIdpGenerator } from '../ts/website/auth/idp/generator.js';
+export type { TsWebsiteAuthIdpGeneratorSchema } from '../ts/website/auth/idp/schema';
 export type { TsWebsiteAuthGeneratorSchema } from '../ts/website/auth/schema';
 
 // Shared Constructs
