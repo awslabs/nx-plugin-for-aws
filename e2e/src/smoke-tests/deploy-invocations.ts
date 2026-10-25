@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 // @ts-expect-error no types for virtual module
 import { AgentCoreTrpcClient } from 'virtual:ts-template/ts/agent/files/http/agent-core-trpc-client';
 import {
@@ -24,6 +26,39 @@ import { AwsClient } from 'aws4fetch';
  */
 
 const AGENT_CORE_SESSION_ID = 'abcdefghijklmnopqrstuvwxyz0123456789';
+
+/** A question on the denied topic of the vended guardrail policy. */
+export const DENIED_TOPIC_PROMPT = 'Which stocks should I buy this year?';
+
+/**
+ * The answer a guarded agent gives when its guardrail blocks the input: the
+ * `blockedInputMessaging` of the vended guardrail policy.
+ */
+export function readBlockedInputMessage(): string {
+  const policy = JSON.parse(
+    readFileSync(
+      resolve(
+        __dirname,
+        '../../../packages/nx-plugin/src/utils/guardrail-constructs/files/policy/guardrail.json.template',
+      ),
+      'utf-8',
+    ),
+  );
+  return policy.blockedInputMessaging;
+}
+
+export interface AgentInvocationOptions {
+  /**
+   * AgentCore runtime session ID. Defaults to the shared smoke-test session
+   * for HTTP agents and to a random one per call for tRPC agents.
+   */
+  sessionId?: string;
+  /**
+   * The exact answer expected, compared after trimming. A different answer is
+   * retried like a transient failure, then fails the assertion.
+   */
+  expectedAnswer?: string;
+}
 
 export const getRegion = (): string => process.env.AWS_REGION || 'us-west-2';
 
@@ -162,8 +197,14 @@ export async function invokeAgentCoreAgent(
   arn: string,
   agentName: string,
   prompt = 'what is 3 + 5 - 2?',
+  options: AgentInvocationOptions = {},
 ): Promise<string> {
-  return invokeAgentCoreAgentUrl(buildAgentCoreUrl(arn), agentName, prompt);
+  return invokeAgentCoreAgentUrl(
+    buildAgentCoreUrl(arn),
+    agentName,
+    prompt,
+    options,
+  );
 }
 
 /**
@@ -174,6 +215,10 @@ export async function invokeAgentCoreAgentUrl(
   url: string,
   agentName: string,
   prompt = 'what is 3 + 5 - 2?',
+  {
+    sessionId = AGENT_CORE_SESSION_ID,
+    expectedAnswer,
+  }: AgentInvocationOptions = {},
 ): Promise<string> {
   const aws = await createAwsClient('bedrock-agentcore');
   console.log(`Testing ${agentName} at ${url}`);
@@ -187,7 +232,7 @@ export async function invokeAgentCoreAgentUrl(
       body: JSON.stringify({ prompt }),
       headers: {
         'Content-Type': 'application/json',
-        'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id': AGENT_CORE_SESSION_ID,
+        'X-Amzn-Bedrock-AgentCore-Runtime-Session-Id': sessionId,
       },
     });
 
@@ -225,12 +270,28 @@ export async function invokeAgentCoreAgentUrl(
       }
     }
 
+    const answer = chunks.map((c) => c.content).join('');
+    if (
+      expectedAnswer !== undefined &&
+      answer.trim() !== expectedAnswer &&
+      attempt < maxAttempts
+    ) {
+      console.log(
+        `${agentName} attempt ${attempt}/${maxAttempts} answered ${JSON.stringify(answer)}; retrying in 15s.`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 15_000));
+      continue;
+    }
+
     console.log(`${agentName} response status:`, response.status);
     expect(response.status).toBe(200);
     expect(chunks.length).toBeGreaterThan(0);
     expect(chunks.every((c) => typeof c.content === 'string')).toBe(true);
+    if (expectedAnswer !== undefined) {
+      expect(answer.trim(), `${agentName} answer`).toBe(expectedAnswer);
+    }
     console.log(`Successfully invoked ${agentName}`);
-    return chunks.map((c) => c.content).join('');
+    return answer;
   }
   // Unreachable — the final attempt's expect() throws if it still fails.
   throw new Error(`Exhausted retries invoking ${agentName}`);
@@ -317,13 +378,67 @@ export async function invokeTrpcAgentCoreAgent(
   arn: string,
   agentName: string,
   prompt = 'what is 3 * 5 / 4?',
+  { sessionId, expectedAnswer }: AgentInvocationOptions = {},
 ): Promise<string> {
   console.log(`Testing ${agentName} with ARN ${arn}`);
 
-  // Dogfood our vended client
-  const client = AgentCoreTrpcClient.withIamAuth({ agentRuntimeArn: arn });
+  // Only a check for an exact answer retries, so that a transient AgentCore or
+  // Bedrock error does not fail it. Other calls subscribe once and fail on any
+  // error.
+  const maxAttempts = expectedAnswer === undefined ? 1 : 4;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    let response: string;
+    try {
+      response = await subscribeTrpcAgent(arn, prompt, sessionId);
+    } catch (e) {
+      if (attempt < maxAttempts) {
+        console.log(
+          `${agentName} attempt ${attempt}/${maxAttempts} failed; retrying in 15s. Error: ${e}`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 15_000));
+        continue;
+      }
+      throw e;
+    }
 
-  const response = await new Promise<string>((resolve, reject) => {
+    if (
+      expectedAnswer !== undefined &&
+      response.trim() !== expectedAnswer &&
+      attempt < maxAttempts
+    ) {
+      console.log(
+        `${agentName} attempt ${attempt}/${maxAttempts} answered ${JSON.stringify(response)}; retrying in 15s.`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 15_000));
+      continue;
+    }
+
+    console.log('Agent Response', response);
+    expect(response).not.toHaveLength(0);
+    if (expectedAnswer !== undefined) {
+      expect(response.trim(), `${agentName} answer`).toBe(expectedAnswer);
+    }
+    return response;
+  }
+  // Unreachable — the final attempt throws or returns.
+  throw new Error(`Exhausted retries invoking ${agentName}`);
+}
+
+/**
+ * Subscribe to a deployed tRPC agent's `invoke` and join the streamed chunks.
+ */
+async function subscribeTrpcAgent(
+  arn: string,
+  prompt: string,
+  sessionId?: string,
+): Promise<string> {
+  // Dogfood our vended client
+  const client = AgentCoreTrpcClient.withIamAuth({
+    agentRuntimeArn: arn,
+    sessionId,
+  });
+
+  return new Promise<string>((resolve, reject) => {
     let responseMessage = '';
 
     // NB the trpc api is generated code so we don't have a type-safe trpc client here
@@ -341,9 +456,6 @@ export async function invokeTrpcAgentCoreAgent(
       },
     );
   });
-  console.log('Agent Response', response);
-  expect(response).not.toHaveLength(0);
-  return response;
 }
 
 export async function invokeAgentCoreA2a(
