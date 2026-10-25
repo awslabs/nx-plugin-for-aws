@@ -36,6 +36,12 @@ DENIED_TERM = "stocks"
 BLOCKED_ANSWER = "Sorry, I can't help with that request."
 
 
+class FakeAwsServer(ThreadingHTTPServer):
+    """Queue concurrent SDK connection bursts while requests are accepted."""
+
+    request_queue_size = 128
+
+
 def _header(name: str, value: str) -> bytes:
     n, v = name.encode(), value.encode()
     return struct.pack("B", len(n)) + n + b"\x07" + struct.pack(">H", len(v)) + v
@@ -196,10 +202,10 @@ def _handler(config_file: str, log_file: str) -> type[BaseHTTPRequestHandler]:
 
 def start_server(config_file: str, log_file: str, port: int = 0) -> tuple[ThreadingHTTPServer, int]:
     """Serve on 127.0.0.1 in a daemon thread; port 0 picks a free port."""
-    server = ThreadingHTTPServer(("127.0.0.1", port), _handler(config_file, log_file))
+    server = FakeAwsServer(("127.0.0.1", port), _handler(config_file, log_file))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server, server.server_address[1]
 
 
 if __name__ == "__main__":
-    ThreadingHTTPServer(("127.0.0.1", int(sys.argv[2])), _handler(sys.argv[1], sys.argv[3])).serve_forever()
+    FakeAwsServer(("127.0.0.1", int(sys.argv[2])), _handler(sys.argv[1], sys.argv[3])).serve_forever()

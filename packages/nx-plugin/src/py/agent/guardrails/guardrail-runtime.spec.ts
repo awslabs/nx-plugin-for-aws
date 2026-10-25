@@ -122,7 +122,9 @@ describe('guardrail.py at runtime', { timeout: 600_000 }, () => {
       });
     }
 
-    workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'py-guardrail-'));
+    workDir = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), 'py-guardrail-')),
+    );
     const projectRoot = path.join(workDir, 'project');
     const connectionRoot = path.join(workDir, 'connection');
     const moduleName = path.basename(project.sourceRoot);
