@@ -413,6 +413,7 @@ dev-dependencies = []
       'shx cp -R dist/apps/test-project/bundle-arm/. dist/apps/test-project/package/test-project-agent',
       'shx cp -R apps/test-project/proj_test_project/. dist/apps/test-project/package/test-project-agent/proj_test_project',
       'shx cp apps/test-project/package/agent/main.py dist/apps/test-project/package/test-project-agent/main.py',
+      'shx cp apps/test-project/package/agent/agentcore_launcher.py dist/apps/test-project/package/test-project-agent/agentcore_launcher.py',
     ]);
   });
 
@@ -429,10 +430,36 @@ dev-dependencies = []
     );
     expect(construct).toContain('AgentRuntimeArtifact.fromCodeAsset');
     expect(construct).toContain('AgentCoreRuntime.PYTHON_3_14');
-    expect(construct).toContain(
-      "entrypoint: ['opentelemetry-instrument', 'main.py']",
-    );
+    expect(construct).toContain("entrypoint: ['agentcore_launcher.py']");
     expect(construct).not.toContain('Platform.LINUX_ARM64');
+  });
+
+  it('uses the managed-interpreter launcher for Terraform code packaging', async () => {
+    await pyAgentGenerator(tree, {
+      project: 'test-project',
+      infra: 'agentcore',
+      iac: 'terraform',
+    });
+    expect(
+      tree.read(
+        'apps/test-project/package/agent/agentcore_launcher.py',
+        'utf-8',
+      ),
+    ).toContain('sys.executable');
+    expect(
+      tree.read(
+        'packages/common/terraform/src/core/agent-core-code/runtime.tf',
+        'utf-8',
+      ),
+    ).toContain(
+      'var.code_entry_point == "agentcore_launcher.py" ? [var.code_entry_point] : ["opentelemetry-instrument", var.code_entry_point]',
+    );
+    expect(
+      tree.read(
+        'packages/common/terraform/src/app/agents/test-project-agent/test-project-agent.tf',
+        'utf-8',
+      ),
+    ).toContain('code_entry_point = "agentcore_launcher.py"');
   });
 
   it('should handle project name with dots correctly for docker image tag', async () => {
