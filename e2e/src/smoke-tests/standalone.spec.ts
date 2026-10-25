@@ -28,6 +28,7 @@ const SATISFIABLE_ARGS = new Set(['name', 'project']);
 const COMPONENT_BASE_OVERRIDES: Record<string, string[]> = {
   'ts#website#auth': ['ts#website --name=base'],
   'ts#agent#guardrails': ['ts#project --name=base', 'ts#agent --project=base'],
+  'py#agent#guardrails': ['py#project --name=base', 'py#agent --project=base'],
 };
 
 const baseSetup = (generator: string): string[] =>

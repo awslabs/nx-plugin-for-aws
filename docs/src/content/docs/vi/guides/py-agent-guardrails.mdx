@@ -1,0 +1,306 @@
+---
+title: Python Agent Guardrails
+description: Đính kèm Amazon Bedrock Guardrail vào Python Strands hoặc LangChain Agent
+generator: py#agent#guardrails
+---
+
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import RunGenerator from '@components/run-generator.astro';
+
+Đính kèm một [Amazon Bedrock Guardrail](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html) vào <Link path="guides/py-agent">Python Agent</Link>. Guardrail là một tập hợp các quy tắc mà Amazon Bedrock áp dụng cho các tin nhắn mà agent của bạn gửi đến model và cho các câu trả lời của model. Nếu không có guardrail, người dùng có thể hỏi agent của bạn về bất kỳ chủ đề nào, và model có thể lặp lại dữ liệu cá nhân như địa chỉ email trong các câu trả lời của nó.
+
+Generator thêm một tệp chính sách chứa các quy tắc của bạn, mã áp dụng guardrail cho model của agent, và cơ sở hạ tầng tạo guardrail trong tài khoản AWS của bạn. Nó hỗ trợ cả hai framework `py#agent`, Strands và LangChain, với mọi giao thức.
+
+## Cách hoạt động
+
+- `guardrail.json` bên cạnh `agent.py` của bạn chứa các quy tắc: các chủ đề mà agent của bạn phải từ chối và các loại dữ liệu cá nhân (PII, personally identifiable information) mà nó phải ẩn hoặc chặn.
+- CDK construct hoặc Terraform module của bạn đọc `guardrail.json` khi bạn synthesize hoặc plan. Nó tạo guardrail và một phiên bản được đánh số của nó. Phiên bản guardrail là một snapshot chỉ đọc của các quy tắc.
+- Cơ sở hạ tầng ghi ID và số phiên bản của guardrail vào <Link path="guides/runtime-config">runtime config</Link>, ứng dụng AWS AppConfig nơi cơ sở hạ tầng của bạn lưu trữ các chi tiết của các tài nguyên đã triển khai. Entry là `agentcore.guardrails.<AgentClass>`, được đặt tên theo class của agent, ví dụ `agentcore.guardrails.MyAgent`. Mỗi agent được bảo vệ có entry riêng của nó.
+- `guardrail.py` định nghĩa Bedrock model mà `agent.py` của bạn sử dụng. Trước mỗi lần gọi model, model đọc entry của agent từ runtime config và thêm guardrail đó vào request.
+
+## Cách sử dụng
+
+### Tạo Agent Guardrails
+
+Bạn sẽ cần một dự án Python hiện có chứa một agent được tạo bằng generator `py#agent`.
+
+<RunGenerator generator="py#agent#guardrails" />
+
+### Tùy chọn
+
+<GeneratorParameters generator="py#agent#guardrails" />
+
+## Đầu ra của Generator
+
+Generator thêm các tệp sau bên cạnh agent của bạn, trong đó `<module>` là Python module của dự án và `<agent>` là tên snake-case của agent component (`agent` theo mặc định):
+
+<FileTree>
+  - \<your-project>/\<module>/\<agent>/
+    - agent.py Agent của bạn, giờ được tạo với model có guardrail
+    - guardrail.json Các quy tắc mà guardrail của bạn áp dụng
+    - guardrail.py Định nghĩa Bedrock model với guardrail được áp dụng
+</FileTree>
+
+Nó cũng thêm cơ sở hạ tầng cho `iac` provider của agent, trong đó `<agent-name>` là tên kebab-case của construct hoặc module của agent:
+
+<Infrastructure>
+  <Fragment slot="cdk">
+    <FileTree>
+      - packages/common/constructs/src/app/guardrails/\<agent-name>/
+        - \<agent-name>-guardrail.ts CDK construct chứa guardrail và phiên bản của nó
+    </FileTree>
+  </Fragment>
+  <Fragment slot="terraform">
+    <FileTree>
+      - packages/common/terraform/src/app/guardrails/\<agent-name>/
+        - \<agent-name>-guardrail.tf Terraform module chứa guardrail và phiên bản của nó
+    </FileTree>
+  </Fragment>
+</Infrastructure>
+
+Generator chỉnh sửa `agent.py` như sau:
+
+<Tabs syncKey="agent-framework">
+<TabItem label="Strands">
+```diff lang="python"
++from .guardrail import get_guardrailed_model
+ from .session import get_session_manager
+
+ @contextmanager
+ def get_agent():
+     yield Agent(
++        model=get_guardrailed_model(),
+         name="MyAgent",
+```
+
+`get_guardrailed_model()` trả về một `GuardrailedBedrockModel`, một subclass của Strands `BedrockModel`. Nó sử dụng cùng model mặc định như một `Agent` được tạo mà không có `model`.
+</TabItem>
+<TabItem label="LangChain">
+```diff lang="python"
+-from langchain_aws import ChatBedrockConverse
+ from langchain_core.tools import tool
+
++from .guardrail import GuardrailedChatBedrockConverse
+ from .session import get_checkpointer
+
+ def get_agent():
+-    model = ChatBedrockConverse(model=MODEL_ID, region_name=REGION)
++    model = GuardrailedChatBedrockConverse(model=MODEL_ID, region_name=REGION)
+```
+
+`GuardrailedChatBedrockConverse` là một subclass của `ChatBedrockConverse`. Generator giữ nguyên các đối số của lời gọi `ChatBedrockConverse(...)` của bạn.
+</TabItem>
+</Tabs>
+
+Chạy generator lại trên cùng một agent không thay đổi tệp nào, và nó giữ nguyên các chỉnh sửa của bạn đối với `guardrail.json` và `guardrail.py`.
+
+Nếu agent của bạn được tạo với `infra: none`, generator chỉ thêm các tệp agent và in ra cảnh báo. Sau đó bạn tự tạo guardrail và ghi ID và phiên bản của nó vào runtime config tại `agentcore.guardrails.<AgentClass>` dưới dạng `{ guardrailId, guardrailVersion }`.
+
+Nếu một TypeScript agent trong dự án khác có cùng tên class và đã có guardrail, generator dừng lại với lỗi và không thay đổi tệp nào. Cả hai agent sẽ chia sẻ một runtime construct và một guardrail. Hãy đặt cho một trong các agent một tên khác.
+
+### Agent đã đặt model
+
+Nếu `agent.py` không có cấu trúc như mong đợi, generator để nguyên nó. Nó in ra tên tệp và các dòng cần thêm.
+
+<Tabs syncKey="agent-framework">
+<TabItem label="Strands">
+Điều này xảy ra khi lời gọi `Agent(...)` của bạn đã đặt `model`. Để giữ các tùy chọn model của riêng bạn, hãy tạo model của bạn với class `GuardrailedBedrockModel` từ `guardrail.py`. Nó nhận các tùy chọn giống như `BedrockModel`, ví dụ:
+
+```python title="agent.py"
+from .guardrail import GuardrailedBedrockModel
+
+agent = Agent(
+    model=GuardrailedBedrockModel(model_id="my-model-id"),
+    # ...
+)
+```
+</TabItem>
+<TabItem label="LangChain">
+Điều này xảy ra khi `agent.py` không có lời gọi `ChatBedrockConverse(...)`, ví dụ vì bạn tạo model của mình theo cách khác. Tạo model của bạn với class `GuardrailedChatBedrockConverse` từ `guardrail.py`. Nó nhận các đối số giống như `ChatBedrockConverse`, ví dụ:
+
+```python title="agent.py"
+from .guardrail import GuardrailedChatBedrockConverse
+
+model = GuardrailedChatBedrockConverse(model=MODEL_ID, region_name=REGION)
+```
+</TabItem>
+</Tabs>
+
+## Guardrail kiểm tra gì
+
+Guardrail kiểm tra hai thứ trên mỗi lần gọi model:
+
+- cuộc hội thoại mà agent của bạn gửi đến model, bao gồm tin nhắn mới nhất của người dùng
+- câu trả lời của model, trước khi agent của bạn stream nó trả lại cho người dùng
+
+Khi guardrail chặn tin nhắn của người dùng, model không được gọi. Khi một quy tắc `ANONYMIZE` khớp, câu trả lời chứa một placeholder như `{EMAIL}` thay vì giá trị. Khi guardrail chặn một câu trả lời, người dùng nhận được văn bản `blockedOutputsMessaging`.
+
+<Tabs syncKey="agent-framework">
+<TabItem label="Strands">
+Khi guardrail chặn tin nhắn của người dùng, người dùng nhận được văn bản `blockedInputMessaging`. Strands cũng thay thế tin nhắn bị chặn trong lịch sử hội thoại của agent bằng `[User input redacted.]`.
+</TabItem>
+<TabItem label="LangChain">
+Khi guardrail chặn tin nhắn của người dùng, câu trả lời của model là văn bản `blockedInputMessaging`, và người dùng nhận được văn bản đó.
+
+Trên các lần gọi model sau trong cùng một phiên, `guardrail.py` gửi `[User input redacted.]` thay cho mỗi tin nhắn người dùng mà lượt của nó bị guardrail chặn, như Strands làm. Guardrail kiểm tra toàn bộ cuộc hội thoại trên mỗi lần gọi, vì vậy nếu không có điều này, tin nhắn bị chặn sẽ chặn mọi tin nhắn sau trong phiên. Checkpointer vẫn lưu tin nhắn gốc.
+</TabItem>
+</Tabs>
+
+Guardrail không kiểm tra định nghĩa tool, các đối số mà model truyền cho các tool của bạn, hoặc kết quả mà các tool của bạn trả về. Ví dụ, nếu một tool trả về địa chỉ email của khách hàng từ cơ sở dữ liệu, guardrail không ẩn nó khỏi model. Hãy xử lý kết quả tool như không đáng tin cậy, như <Link path="guides/py-agent">hướng dẫn Python Agent</Link> mô tả trong "Securing your Agent".
+
+## Chỉnh sửa guardrail.json
+
+Chính sách được cung cấp là một ví dụ cho agent toán học được tạo. Nó từ chối lời khuyên đầu tư và ẩn hoặc chặn ba loại dữ liệu cá nhân:
+
+```json title="guardrail.json"
+{
+  "blockedInputMessaging": "Sorry, I can't help with that request.",
+  "blockedOutputsMessaging": "Sorry, I can't share that answer.",
+  "deniedTopics": [
+    {
+      "name": "Investment advice",
+      "definition": "Recommendations about which specific stocks, funds or other investments to buy or sell.",
+      "examples": ["Which stocks should I buy this year?"]
+    }
+  ],
+  "piiEntities": [
+    { "type": "EMAIL", "action": "ANONYMIZE" },
+    { "type": "PHONE", "action": "ANONYMIZE" },
+    { "type": "US_SOCIAL_SECURITY_NUMBER", "action": "BLOCK" }
+  ]
+}
+```
+
+Các trường là:
+
+- `blockedInputMessaging`: câu trả lời mà người dùng nhận được khi guardrail chặn tin nhắn của họ. Tối đa 500 ký tự.
+- `blockedOutputsMessaging`: câu trả lời mà người dùng nhận được khi guardrail chặn câu trả lời của model. Tối đa 500 ký tự.
+- `deniedTopics`: các chủ đề mà agent của bạn phải từ chối. Mỗi chủ đề có một `name` (tối đa 100 chữ cái, chữ số, khoảng trắng và các ký tự `-_!?.`), một `definition` tối đa 1000 ký tự mô tả chủ đề, và `examples` tùy chọn tối đa 100 ký tự mỗi cái.
+- `piiEntities`: các loại dữ liệu cá nhân cần hành động. `type` là một [loại thông tin nhạy cảm](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails-sensitive-filters.html) như `EMAIL`, `PHONE` hoặc `US_SOCIAL_SECURITY_NUMBER`. `action` là `ANONYMIZE` để thay thế giá trị bằng placeholder, hoặc `BLOCK` để chặn toàn bộ tin nhắn hoặc câu trả lời.
+
+Viết một `definition` chủ đề mô tả chính chủ đề đó. Ví dụ, "Recommendations about which specific stocks to buy" hoạt động tốt hơn "Do not give investment advice".
+
+### Tại sao phiên bản được đánh số
+
+Mỗi lần bạn thay đổi `guardrail.json` và triển khai, cơ sở hạ tầng tạo một phiên bản guardrail được đánh số mới và ghi nó vào runtime config. Mô tả của phiên bản chứa hash SHA-256 của `guardrail.json`, vì vậy một thay đổi đối với tệp sẽ thay đổi mô tả, và một phiên bản mới thay thế phiên bản cũ. Với CDK construct, hash cũng bao gồm bất kỳ thuộc tính guardrail nào bạn truyền.
+
+Agent đang chạy của bạn không cần khởi động lại. `guardrail.py` giữ những gì nó đọc từ runtime config trong 5 giây, vì vậy agent sử dụng phiên bản mới trong vòng 5 giây sau khi triển khai AppConfig. Phiên bản cũ bị xóa sau khi triển khai AppConfig. CloudFormation xóa nó trong bước dọn dẹp của nó, trong một phép đo (2026-10-24, us-east-1) bắt đầu khoảng 7 giây sau khi triển khai hoàn tất. CloudFormation không đảm bảo độ trễ đó. Terraform giữ phiên bản cũ khoảng 15 giây sau module triển khai, vì vậy cache 5 giây không bao giờ trỏ đến một phiên bản đã bị xóa. Điều này hoạt động khi bạn thêm module guardrail vào `depends_on` của module đó, như được hiển thị trong [Kết nối guardrail với agent của bạn](#kết-nối-guardrail-với-agent-của-bạn).
+
+Agent của bạn không bao giờ sử dụng phiên bản `DRAFT`. `DRAFT` luôn chứa các quy tắc mới nhất, vì vậy một chỉnh sửa được thực hiện trong AWS console sẽ đến agent đang chạy của bạn mà không cần triển khai. `guardrail.py` đưa ra lỗi nếu phiên bản trong runtime config không phải là số phiên bản.
+
+## Kết nối guardrail với agent của bạn
+
+Generator không thay đổi stack của bạn hoặc root Terraform module của bạn, theo cách tương tự như generator `py#agent` để việc triển khai agent cho bạn. Khi nó hoàn thành, nó in mã bên dưới với các tên agent của bạn được điền vào. Thêm nó để tạo guardrail, ghi entry runtime-config của nó và cho phép agent áp dụng guardrail:
+
+<Infrastructure>
+  <Fragment slot="cdk">
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyAgent, MyAgentGuardrail } from '@my-scope/common-constructs';
+
+const agent = new MyAgent(this, 'MyAgent');
+new MyAgentGuardrail(this, 'MyAgentGuardrail', { agent });
+```
+
+Construct ghi ID và phiên bản của guardrail vào runtime config tại `agentcore.guardrails.MyAgent`, và cấp quyền cho `agent` để áp dụng guardrail. Agent construct đã cho phép agent đọc runtime config.
+
+Construct expose:
+
+- `guardrail` (`CfnGuardrail`) và `version` (`CfnGuardrailVersion`)
+- `guardrailId`, `guardrailArn` và `guardrailVersion`
+- `grantApply(grantee)`, cấp `bedrock:ApplyGuardrail` trên guardrail cho principal khác
+
+Nó cũng thêm các stack output `GuardrailId` và `GuardrailVersion`. Props của nó là `agent` và bất kỳ thuộc tính `CfnGuardrail` nào. Các thuộc tính `CfnGuardrail` được ưu tiên hơn `guardrail.json`. Ví dụ, thêm content filter:
+
+```ts
+new MyAgentGuardrail(this, 'MyAgentGuardrail', {
+  agent,
+  contentPolicyConfig: {
+    filtersConfig: [
+      { type: 'HATE', inputStrength: 'HIGH', outputStrength: 'HIGH' },
+    ],
+  },
+});
+```
+
+Generator cũng thêm `guardrail.json` vào các input `synth` của mỗi dự án cơ sở hạ tầng CDK, vì vậy một thay đổi đối với tệp sẽ chạy lại synth thay vì sử dụng cache Nx.
+  </Fragment>
+  <Fragment slot="terraform">
+Thêm module `my_agent_guardrail` như được hiển thị, trong root module nơi bạn triển khai agent của mình. Thêm dòng `additional_iam_policy_statements` của nó vào block module `my_agent` hiện có của bạn. Thêm `module.my_agent_guardrail` vào danh sách `depends_on` của module `runtime_config_appconfig_deployment` của bạn, để triển khai bao gồm entry runtime-config của guardrail và Terraform chỉ xóa phiên bản guardrail cũ sau khi triển khai. Nếu root module của bạn chưa triển khai agent, hãy thêm module của agent trước, như được mô tả trong <Link path="guides/py-agent#infrastructure-as-code">hướng dẫn Python Agent</Link>.
+
+```hcl title="packages/infra/src/main.tf"
+module "my_agent_guardrail" {
+  source = "../../common/terraform/src/app/guardrails/my-agent"
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+  # ...existing arguments...
+  additional_iam_policy_statements = module.my_agent_guardrail.iam_policy_statements
+}
+
+module "runtime_config_appconfig_deployment" {
+  # ...existing arguments...
+  depends_on = [
+    # ...existing modules...
+    module.my_agent_guardrail,
+  ]
+}
+```
+
+Nếu module agent của bạn đã đặt `additional_iam_policy_statements`, hãy kết hợp các danh sách:
+
+```hcl
+  additional_iam_policy_statements = concat(module.my_agent_guardrail.iam_policy_statements, local.my_statements)
+```
+
+Module ghi ID và phiên bản của guardrail vào runtime config tại `agentcore.guardrails.MyAgent`. Namespace `agentcore` nằm trong `namespaces` mặc định của các module runtime-config, vì vậy bạn không cần thêm nó. Module agent đã cho phép agent đọc runtime config.
+
+Module nhận biến `tags` và output `guardrail_id`, `guardrail_arn`, `guardrail_version` và `iam_policy_statements`. Để thêm các chính sách guardrail khác, chẳng hạn như content filter, hãy chỉnh sửa resource `aws_bedrock_guardrail` trong module.
+
+Module đặt `create_before_destroy` trên phiên bản guardrail, vì vậy Terraform tạo phiên bản mới trước khi xóa phiên bản cũ. Resource `time_sleep` từ provider `hashicorp/time` giữ phiên bản cũ khoảng 15 giây sau khi triển khai runtime-config, và entry runtime-config đọc ID và phiên bản guardrail từ nó. Do thời gian chờ này, `terraform destroy` cũng mất khoảng 15 giây lâu hơn.
+  </Fragment>
+</Infrastructure>
+
+### Entry runtime-config bị thiếu
+
+Nếu bạn quên kết nối, runtime config không có entry cho agent của bạn. Model sau đó đưa ra lỗi trước khi nó gọi Bedrock, vì vậy agent không chạy mà không có guardrail của nó. Đối với `MyAgent`, lỗi là:
+
+```
+No guardrail for this agent in runtime config at agentcore.guardrails.MyAgent. Add the MyAgentGuardrail construct (CDK) or the guardrails/my-agent module (Terraform) to your infrastructure.
+```
+
+Agent khởi động với mọi giao thức (`http`, `a2a` và `ag-ui`), và mỗi request thất bại với lỗi này. Nếu agent không thể đọc runtime config hoàn toàn, ví dụ vì `RUNTIME_CONFIG_APP_ID` không được đặt, mỗi request thất bại với lỗi từ runtime-config reader của agent thay thế.
+
+Với giao thức `http`, agent đã bắt đầu streaming response của nó khi model đưa ra lỗi. Người gọi sau đó không nhận được câu trả lời, và lỗi chỉ xuất hiện trong log của agent, đối với agent đã triển khai trong runtime log group của nó.
+
+## Phát triển cục bộ
+
+Target `<agent>-dev` đặt `LOCAL_DEV=true`. Khi `LOCAL_DEV` là `true` và biến môi trường `RUNTIME_CONFIG_APP_ID` không được đặt, `guardrail.py` không đọc runtime config. Nó ghi một cảnh báo một lần và agent chạy mà không có guardrail:
+
+<NxCommands commands={['agent-dev your-project']} />
+
+Để kiểm tra các quy tắc của bạn cục bộ, hãy triển khai guardrail trước. Sau đó đặt `RUNTIME_CONFIG_APP_ID` thành ID của ứng dụng runtime-config đã triển khai của bạn, từ stack output `RuntimeConfigApplicationId` (CDK) hoặc `module.runtime_config_appconfig.application_id` (Terraform). Shell của bạn cũng cần thông tin xác thực AWS có thể đọc AppConfig và áp dụng guardrail:
+
+<NxCommands commands={['agent-dev your-project']} env={{ RUNTIME_CONFIG_APP_ID: '<application-id>' }} />
+
+Agent sau đó chỉ đọc entry của chính nó, vì vậy một số agent được bảo vệ có thể chạy cục bộ với cùng một ứng dụng. Nếu agent không thể đọc runtime config, hoặc entry bị thiếu, nó ghi cảnh báo một lần và chạy mà không có guardrail.
+
+Target `<agent>-serve` không đặt `LOCAL_DEV`, vì vậy nó cần `RUNTIME_CONFIG_APP_ID` và entry đã triển khai, nếu không mỗi request thất bại như được mô tả ở trên. Target `<agent>-chat` kết nối với agent đang chạy và không cần runtime config riêng.
+
+## Chi phí và độ trễ
+
+Amazon Bedrock tính phí cho mỗi chính sách guardrail đánh giá văn bản, trên cả input và câu trả lời. Xem [Amazon Bedrock pricing](https://aws.amazon.com/bedrock/pricing/).
+
+Mỗi lần gọi model cũng mất nhiều thời gian hơn, vì guardrail kiểm tra câu trả lời trước khi agent của bạn stream nó cho người dùng.
+
+Trong khi các request đến, mỗi tiến trình agent đọc runtime config nhiều nhất một lần mỗi 5 giây. Mỗi lần đọc thực hiện hai request AppConfig.
+
+## Hạn chế
+
+- Generator này hỗ trợ các agent được tạo bằng `py#agent`, với các framework Strands và LangChain. Nó không hỗ trợ AgentCore Harness.
+- `guardrail.json` chỉ chứa các chủ đề bị từ chối và các entity PII. Thêm các chính sách khác, chẳng hạn như content filter và word filter, với props của construct (CDK) hoặc bằng cách chỉnh sửa module (Terraform).
+- Guardrail không kiểm tra kết quả tool, như được mô tả trong [Guardrail kiểm tra gì](#guardrail-kiểm-tra-gì).

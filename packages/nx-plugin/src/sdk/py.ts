@@ -4,6 +4,8 @@
  */
 
 export { pyAgentGenerator } from '../py/agent/generator.js';
+export { pyAgentGuardrailsGenerator } from '../py/agent/guardrails/generator.js';
+export type { PyAgentGuardrailsGeneratorSchema } from '../py/agent/guardrails/schema';
 export type { PyAgentGeneratorSchema } from '../py/agent/schema';
 
 export { pyApiGenerator } from '../py/api/generator.js';

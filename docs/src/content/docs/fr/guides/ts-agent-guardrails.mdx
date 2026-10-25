@@ -138,7 +138,7 @@ Les champs sont :
 
 Chaque fois que vous modifiez `guardrail.json` et déployez, l'infrastructure crée une nouvelle version numérotée du garde-fou et l'écrit dans runtime config. La description de la version contient le hachage SHA-256 de `guardrail.json`, donc une modification du fichier change la description, et une nouvelle version remplace l'ancienne. Avec le construct CDK, le hachage couvre également toutes les propriétés de garde-fou que vous transmettez.
 
-Votre agent en cours d'exécution n'a pas besoin de redémarrage. Il met en cache ce qu'il lit depuis runtime config pendant 5 secondes, donc il utilise la nouvelle version dans les 5 secondes suivant le déploiement AppConfig. L'ancienne version est supprimée après le déploiement AppConfig : CloudFormation la supprime dans son étape de nettoyage, et Terraform la supprime après le module de déploiement lorsque vous ajoutez le module de garde-fou au `depends_on` de ce module, comme indiqué dans [Connecter le garde-fou à votre agent](#connecter-le-garde-fou-à-votre-agent).
+Votre agent en cours d'exécution n'a pas besoin de redémarrage. Il met en cache ce qu'il lit depuis runtime config pendant 5 secondes, donc il utilise la nouvelle version dans les 5 secondes suivant le déploiement AppConfig. L'ancienne version est supprimée après le déploiement AppConfig. CloudFormation la supprime dans son étape de nettoyage, qui dans une mesure (2026-10-24, us-east-1) a commencé environ 7 secondes après la fin du déploiement. CloudFormation ne garantit pas ce délai. Terraform conserve l'ancienne version pendant environ 15 secondes après le module de déploiement, de sorte que le cache de 5 secondes ne pointe jamais vers une version supprimée. Cela fonctionne lorsque vous ajoutez le module de garde-fou au `depends_on` de ce module, comme indiqué dans [Connecter le garde-fou à votre agent](#connecter-le-garde-fou-à-votre-agent).
 
 Votre agent n'utilise jamais la version `DRAFT`. `DRAFT` contient toujours les dernières règles, donc une modification effectuée dans la console AWS atteindrait votre agent en cours d'exécution sans déploiement. `guardrail.ts` lève une erreur si la version dans runtime config n'est pas un numéro de version.
 
@@ -209,7 +209,7 @@ Le module écrit l'ID et la version du garde-fou dans runtime config à `agentco
 
 Le module prend une variable `tags` et produit `guardrail_id`, `guardrail_arn`, `guardrail_version` et `iam_policy_statements`. Pour ajouter d'autres politiques de garde-fou, telles que des filtres de contenu, modifiez la ressource `aws_bedrock_guardrail` dans le module.
 
-Le module définit `create_before_destroy` sur la version du garde-fou, donc Terraform crée la nouvelle version avant de supprimer l'ancienne.
+Le module définit `create_before_destroy` sur la version du garde-fou, donc Terraform crée la nouvelle version avant de supprimer l'ancienne. Une ressource `time_sleep` du fournisseur `hashicorp/time` conserve l'ancienne version pendant environ 15 secondes après le déploiement runtime-config, et l'entrée runtime-config lit l'ID et la version du garde-fou à partir de celle-ci. En raison de cette attente, `terraform destroy` prend également environ 15 secondes de plus.
   </Fragment>
 </Infrastructure>
 

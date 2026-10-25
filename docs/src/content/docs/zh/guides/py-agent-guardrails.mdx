@@ -1,0 +1,306 @@
+---
+title: Python Agent Guardrails
+description: 将 Amazon Bedrock Guardrail 附加到 Python Strands 或 LangChain Agent
+generator: py#agent#guardrails
+---
+
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import RunGenerator from '@components/run-generator.astro';
+
+将 [Amazon Bedrock Guardrail](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html) 附加到 <Link path="guides/py-agent">Python Agent</Link>。guardrail 是一组规则，Amazon Bedrock 将其应用于您的 agent 发送给模型的消息以及模型的答案。如果没有 guardrail，用户可以向您的 agent 询问任何主题，并且模型可以在其答案中重复个人数据（例如电子邮件地址）。
+
+该生成器添加了一个包含您的规则的策略文件、将 guardrail 应用于您的 agent 模型的代码，以及在您的 AWS 账户中创建 guardrail 的基础设施。它支持两种 `py#agent` 框架，Strands 和 LangChain，以及所有协议。
+
+## 工作原理
+
+- 您的 `agent.py` 旁边的 `guardrail.json` 包含规则：您的 agent 必须拒绝的主题以及必须隐藏或阻止的个人数据类型（PII，个人身份信息）。
+- 您的 CDK construct 或 Terraform 模块在您合成或计划时读取 `guardrail.json`。它创建 guardrail 和一个编号版本。guardrail 版本是规则的只读快照。
+- 基础设施将 guardrail 的 ID 和版本号写入 <Link path="guides/runtime-config">runtime config</Link>，即您的基础设施存储已部署资源详细信息的 AWS AppConfig 应用程序。条目是 `agentcore.guardrails.<AgentClass>`，以您的 agent 的类命名，例如 `agentcore.guardrails.MyAgent`。每个受保护的 agent 都有自己的条目。
+- `guardrail.py` 定义您的 `agent.py` 使用的 Bedrock 模型。在每次模型调用之前，模型从 runtime config 读取 agent 的条目并将该 guardrail 添加到请求中。
+
+## 使用方法
+
+### 生成 Agent Guardrails
+
+您需要一个现有的 Python 项目，其中包含使用 `py#agent` 生成器创建的 agent。
+
+<RunGenerator generator="py#agent#guardrails" />
+
+### 选项
+
+<GeneratorParameters generator="py#agent#guardrails" />
+
+## 生成器输出
+
+生成器在您的 agent 旁边添加以下文件，其中 `<module>` 是您项目的 Python 模块，`<agent>` 是您的 agent 组件的 snake-case 名称（默认为 `agent`）：
+
+<FileTree>
+  - \<your-project>/\<module>/\<agent>/
+    - agent.py 您的 agent，现在使用受保护的模型创建
+    - guardrail.json 您的 guardrail 应用的规则
+    - guardrail.py 定义应用了 guardrail 的 Bedrock 模型
+</FileTree>
+
+它还为您的 agent 的 `iac` 提供程序添加基础设施，其中 `<agent-name>` 是您的 agent 的 construct 或模块的 kebab-case 名称：
+
+<Infrastructure>
+  <Fragment slot="cdk">
+    <FileTree>
+      - packages/common/constructs/src/app/guardrails/\<agent-name>/
+        - \<agent-name>-guardrail.ts 包含 guardrail 及其版本的 CDK construct
+    </FileTree>
+  </Fragment>
+  <Fragment slot="terraform">
+    <FileTree>
+      - packages/common/terraform/src/app/guardrails/\<agent-name>/
+        - \<agent-name>-guardrail.tf 包含 guardrail 及其版本的 Terraform 模块
+    </FileTree>
+  </Fragment>
+</Infrastructure>
+
+生成器像这样编辑 `agent.py`：
+
+<Tabs syncKey="agent-framework">
+<TabItem label="Strands">
+```diff lang="python"
++from .guardrail import get_guardrailed_model
+ from .session import get_session_manager
+
+ @contextmanager
+ def get_agent():
+     yield Agent(
++        model=get_guardrailed_model(),
+         name="MyAgent",
+```
+
+`get_guardrailed_model()` 返回一个 `GuardrailedBedrockModel`，它是 Strands `BedrockModel` 的子类。它使用与不带 `model` 创建的 `Agent` 相同的默认模型。
+</TabItem>
+<TabItem label="LangChain">
+```diff lang="python"
+-from langchain_aws import ChatBedrockConverse
+ from langchain_core.tools import tool
+
++from .guardrail import GuardrailedChatBedrockConverse
+ from .session import get_checkpointer
+
+ def get_agent():
+-    model = ChatBedrockConverse(model=MODEL_ID, region_name=REGION)
++    model = GuardrailedChatBedrockConverse(model=MODEL_ID, region_name=REGION)
+```
+
+`GuardrailedChatBedrockConverse` 是 `ChatBedrockConverse` 的子类。生成器保留您的 `ChatBedrockConverse(...)` 调用的参数。
+</TabItem>
+</Tabs>
+
+在同一个 agent 上再次运行生成器不会更改任何文件，并且它会保留您对 `guardrail.json` 和 `guardrail.py` 的编辑。
+
+如果您的 agent 是使用 `infra: none` 生成的，生成器只添加 agent 文件并打印警告。然后您自己创建 guardrail 并将其 ID 和版本写入 runtime config 的 `agentcore.guardrails.<AgentClass>`，格式为 `{ guardrailId, guardrailVersion }`。
+
+如果另一个项目中的 TypeScript agent 具有相同的类名并且已经有 guardrail，生成器会停止并显示错误，不会更改任何文件。两个 agent 将共享一个 runtime construct 和一个 guardrail。给其中一个 agent 一个不同的名称。
+
+### 已经设置模型的 agent
+
+如果 `agent.py` 没有预期的形状，生成器会保持不变。它会打印文件名和要添加的行。
+
+<Tabs syncKey="agent-framework">
+<TabItem label="Strands">
+当您的 `Agent(...)` 调用已经设置 `model` 时会发生这种情况。要保留您自己的模型选项，请使用 `guardrail.py` 中的 `GuardrailedBedrockModel` 类创建您的模型。它采用与 `BedrockModel` 相同的选项，例如：
+
+```python title="agent.py"
+from .guardrail import GuardrailedBedrockModel
+
+agent = Agent(
+    model=GuardrailedBedrockModel(model_id="my-model-id"),
+    # ...
+)
+```
+</TabItem>
+<TabItem label="LangChain">
+当 `agent.py` 没有 `ChatBedrockConverse(...)` 调用时会发生这种情况，例如因为您以另一种方式创建模型。使用 `guardrail.py` 中的 `GuardrailedChatBedrockConverse` 类创建您的模型。它采用与 `ChatBedrockConverse` 相同的参数，例如：
+
+```python title="agent.py"
+from .guardrail import GuardrailedChatBedrockConverse
+
+model = GuardrailedChatBedrockConverse(model=MODEL_ID, region_name=REGION)
+```
+</TabItem>
+</Tabs>
+
+## guardrail 检查的内容
+
+guardrail 在每次模型调用时检查两件事：
+
+- 您的 agent 发送给模型的对话，包括用户的最新消息
+- 模型的答案，在您的 agent 将其流式传输回用户之前
+
+当 guardrail 阻止用户的消息时，不会调用模型。当 `ANONYMIZE` 规则匹配时，答案包含占位符（例如 `{EMAIL}`）而不是值。当 guardrail 阻止答案时，用户会收到 `blockedOutputsMessaging` 文本。
+
+<Tabs syncKey="agent-framework">
+<TabItem label="Strands">
+当 guardrail 阻止用户的消息时，用户会收到 `blockedInputMessaging` 文本。Strands 还会将 agent 对话历史记录中被阻止的消息替换为 `[User input redacted.]`。
+</TabItem>
+<TabItem label="LangChain">
+当 guardrail 阻止用户的消息时，模型的答案是 `blockedInputMessaging` 文本，用户会收到该文本。
+
+在同一会话中的后续模型调用中，`guardrail.py` 会发送 `[User input redacted.]` 来代替 guardrail 阻止其回合的每条用户消息，就像 Strands 所做的那样。guardrail 在每次调用时检查整个对话，因此如果没有这个，被阻止的消息将阻止会话中的每条后续消息。checkpointer 仍然保存原始消息。
+</TabItem>
+</Tabs>
+
+guardrail 不检查工具定义、模型传递给您的工具的参数或您的工具返回的结果。例如，如果工具从数据库返回客户的电子邮件地址，guardrail 不会将其从模型中隐藏。将工具结果视为不受信任的，如 <Link path="guides/py-agent">Python Agent 指南</Link>在"保护您的 Agent"下所述。
+
+## 编辑 guardrail.json
+
+提供的策略是为生成的数学 agent 提供的示例。它拒绝投资建议并隐藏或阻止三种类型的个人数据：
+
+```json title="guardrail.json"
+{
+  "blockedInputMessaging": "Sorry, I can't help with that request.",
+  "blockedOutputsMessaging": "Sorry, I can't share that answer.",
+  "deniedTopics": [
+    {
+      "name": "Investment advice",
+      "definition": "Recommendations about which specific stocks, funds or other investments to buy or sell.",
+      "examples": ["Which stocks should I buy this year?"]
+    }
+  ],
+  "piiEntities": [
+    { "type": "EMAIL", "action": "ANONYMIZE" },
+    { "type": "PHONE", "action": "ANONYMIZE" },
+    { "type": "US_SOCIAL_SECURITY_NUMBER", "action": "BLOCK" }
+  ]
+}
+```
+
+字段为：
+
+- `blockedInputMessaging`：当 guardrail 阻止用户的消息时用户收到的回复。最多 500 个字符。
+- `blockedOutputsMessaging`：当 guardrail 阻止模型的答案时用户收到的回复。最多 500 个字符。
+- `deniedTopics`：您的 agent 必须拒绝的主题。每个主题都有一个 `name`（最多 100 个字母、数字、空格和字符 `-_!?.`）、一个最多 1000 个字符的 `definition` 来描述主题，以及可选的 `examples`，每个最多 100 个字符。
+- `piiEntities`：要采取行动的个人数据类型。`type` 是一个[敏感信息类型](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails-sensitive-filters.html)，例如 `EMAIL`、`PHONE` 或 `US_SOCIAL_SECURITY_NUMBER`。`action` 是 `ANONYMIZE` 以用占位符替换值，或 `BLOCK` 以阻止整个消息或答案。
+
+编写描述主题本身的主题 `definition`。例如，"关于购买哪些特定股票的建议"比"不要提供投资建议"效果更好。
+
+### 为什么版本是编号的
+
+每次您更改 `guardrail.json` 并部署时，基础设施都会创建一个新的编号 guardrail 版本并将其写入 runtime config。版本的描述包含 `guardrail.json` 的 SHA-256 哈希，因此对文件的更改会更改描述，新版本会替换旧版本。使用 CDK construct，哈希还涵盖您传递的任何 guardrail 属性。
+
+您正在运行的 agent 不需要重新启动。`guardrail.py` 将从 runtime config 读取的内容保留 5 秒，因此 agent 在 AppConfig 部署后的 5 秒内使用新版本。旧版本在 AppConfig 部署后被删除。CloudFormation 在其清理步骤中删除它，根据一次测量（2026-10-24，us-east-1），该步骤在部署完成后约 7 秒开始。CloudFormation 不保证该延迟。Terraform 在部署模块后将旧版本保留约 15 秒，因此 5 秒缓存永远不会指向已删除的版本。当您将 guardrail 模块添加到该模块的 `depends_on` 时，这会起作用，如[将 guardrail 连接到您的 agent](#wiring-the-guardrail-to-your-agent) 中所示。
+
+您的 agent 永远不会使用 `DRAFT` 版本。`DRAFT` 始终保存最新规则，因此在 AWS 控制台中进行的编辑将在没有部署的情况下到达您正在运行的 agent。如果 runtime config 中的版本不是版本号，`guardrail.py` 会引发错误。
+
+## 将 guardrail 连接到您的 agent
+
+生成器不会更改您的堆栈或根 Terraform 模块，就像 `py#agent` 生成器将部署 agent 留给您一样。完成后，它会打印下面的代码，并填写您的 agent 的名称。添加它以创建 guardrail，写入其 runtime-config 条目并允许 agent 应用 guardrail：
+
+<Infrastructure>
+  <Fragment slot="cdk">
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyAgent, MyAgentGuardrail } from '@my-scope/common-constructs';
+
+const agent = new MyAgent(this, 'MyAgent');
+new MyAgentGuardrail(this, 'MyAgentGuardrail', { agent });
+```
+
+construct 将 guardrail 的 ID 和版本写入 runtime config 的 `agentcore.guardrails.MyAgent`，并授予 `agent` 应用 guardrail 的权限。agent construct 已经允许 agent 读取 runtime config。
+
+construct 公开：
+
+- `guardrail`（`CfnGuardrail`）和 `version`（`CfnGuardrailVersion`）
+- `guardrailId`、`guardrailArn` 和 `guardrailVersion`
+- `grantApply(grantee)`，它向另一个主体授予 guardrail 上的 `bedrock:ApplyGuardrail`
+
+它还添加 `GuardrailId` 和 `GuardrailVersion` 堆栈输出。其 props 是 `agent` 和任何 `CfnGuardrail` 属性。`CfnGuardrail` 属性优先于 `guardrail.json`。例如，添加内容过滤器：
+
+```ts
+new MyAgentGuardrail(this, 'MyAgentGuardrail', {
+  agent,
+  contentPolicyConfig: {
+    filtersConfig: [
+      { type: 'HATE', inputStrength: 'HIGH', outputStrength: 'HIGH' },
+    ],
+  },
+});
+```
+
+生成器还将 `guardrail.json` 添加到每个 CDK 基础设施项目的 `synth` 输入中，因此对文件的更改会再次运行合成，而不是使用 Nx 缓存。
+  </Fragment>
+  <Fragment slot="terraform">
+如图所示添加 `my_agent_guardrail` 模块，在您部署 agent 的根模块中。将其 `additional_iam_policy_statements` 行添加到您现有的 `my_agent` 模块块中。将 `module.my_agent_guardrail` 添加到您的 `runtime_config_appconfig_deployment` 模块的 `depends_on` 列表中，以便部署包含 guardrail 的 runtime-config 条目，并且 Terraform 仅在部署后删除旧的 guardrail 版本。如果您的根模块尚未部署 agent，请先添加 agent 的模块，如 <Link path="guides/py-agent#infrastructure-as-code">Python Agent 指南</Link>中所述。
+
+```hcl title="packages/infra/src/main.tf"
+module "my_agent_guardrail" {
+  source = "../../common/terraform/src/app/guardrails/my-agent"
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+  # ...existing arguments...
+  additional_iam_policy_statements = module.my_agent_guardrail.iam_policy_statements
+}
+
+module "runtime_config_appconfig_deployment" {
+  # ...existing arguments...
+  depends_on = [
+    # ...existing modules...
+    module.my_agent_guardrail,
+  ]
+}
+```
+
+如果您的 agent 模块已经设置了 `additional_iam_policy_statements`，请组合列表：
+
+```hcl
+  additional_iam_policy_statements = concat(module.my_agent_guardrail.iam_policy_statements, local.my_statements)
+```
+
+模块将 guardrail 的 ID 和版本写入 runtime config 的 `agentcore.guardrails.MyAgent`。`agentcore` 命名空间在 runtime-config 模块的默认 `namespaces` 中，因此您不需要添加它。agent 模块已经允许 agent 读取 runtime config。
+
+模块采用 `tags` 变量并输出 `guardrail_id`、`guardrail_arn`、`guardrail_version` 和 `iam_policy_statements`。要添加其他 guardrail 策略（例如内容过滤器），请编辑模块中的 `aws_bedrock_guardrail` 资源。
+
+模块在 guardrail 版本上设置 `create_before_destroy`，因此 Terraform 在删除旧版本之前创建新版本。来自 `hashicorp/time` 提供程序的 `time_sleep` 资源在 runtime-config 部署后将旧版本保留约 15 秒，runtime-config 条目从中读取 guardrail ID 和版本。由于这种等待，`terraform destroy` 也需要大约 15 秒的时间。
+  </Fragment>
+</Infrastructure>
+
+### 缺少 runtime-config 条目
+
+如果您忘记了连接，runtime config 没有您的 agent 的条目。然后模型在调用 Bedrock 之前引发错误，因此 agent 不会在没有其 guardrail 的情况下运行。对于 `MyAgent`，错误是：
+
+```
+No guardrail for this agent in runtime config at agentcore.guardrails.MyAgent. Add the MyAgentGuardrail construct (CDK) or the guardrails/my-agent module (Terraform) to your infrastructure.
+```
+
+agent 使用每个协议（`http`、`a2a` 和 `ag-ui`）启动，每个请求都会失败并显示此错误。如果 agent 根本无法读取 runtime config，例如因为未设置 `RUNTIME_CONFIG_APP_ID`，则每个请求都会失败，并显示来自 agent 的 runtime-config 读取器的错误。
+
+使用 `http` 协议，当模型引发错误时，agent 已经开始流式传输其响应。然后调用者没有得到答案，错误仅出现在 agent 的日志中，对于已部署的 agent，出现在其运行时日志组中。
+
+## 本地开发
+
+`<agent>-dev` 目标设置 `LOCAL_DEV=true`。当 `LOCAL_DEV` 为 `true` 且未设置 `RUNTIME_CONFIG_APP_ID` 环境变量时，`guardrail.py` 不会读取 runtime config。它会记录一次警告，agent 在没有 guardrail 的情况下运行：
+
+<NxCommands commands={['agent-dev your-project']} />
+
+要在本地测试您的规则，请先部署 guardrail。然后将 `RUNTIME_CONFIG_APP_ID` 设置为已部署的 runtime-config 应用程序的 ID，从 `RuntimeConfigApplicationId` 堆栈输出（CDK）或 `module.runtime_config_appconfig.application_id`（Terraform）获取。您的 shell 还需要可以读取 AppConfig 和应用 guardrail 的 AWS 凭证：
+
+<NxCommands commands={['agent-dev your-project']} env={{ RUNTIME_CONFIG_APP_ID: '<application-id>' }} />
+
+然后 agent 只读取自己的条目，因此多个受保护的 agent 可以针对同一应用程序在本地运行。如果 agent 无法读取 runtime config，或者条目丢失，它会记录一次警告并在没有 guardrail 的情况下运行。
+
+`<agent>-serve` 目标不设置 `LOCAL_DEV`，因此它需要 `RUNTIME_CONFIG_APP_ID` 和已部署的条目，否则每个请求都会失败，如上所述。`<agent>-chat` 目标连接到正在运行的 agent，本身不需要 runtime config。
+
+## 成本和延迟
+
+Amazon Bedrock 对评估文本的每个 guardrail 策略收费，包括输入和答案。请参阅 [Amazon Bedrock 定价](https://aws.amazon.com/bedrock/pricing/)。
+
+每次模型调用也需要更长的时间，因为 guardrail 在您的 agent 将答案流式传输给用户之前检查答案。
+
+当请求到达时，每个 agent 进程最多每 5 秒读取一次 runtime config。每次读取都会发出两个 AppConfig 请求。
+
+## 限制
+
+- 此生成器支持使用 `py#agent` 创建的 agent，包括 Strands 和 LangChain 框架。它不支持 AgentCore Harness。
+- `guardrail.json` 仅包含拒绝的主题和 PII 实体。使用 construct 的 props（CDK）或通过编辑模块（Terraform）添加其他策略，例如内容过滤器和单词过滤器。
+- guardrail 不检查工具结果，如[guardrail 检查的内容](#what-the-guardrail-checks)中所述。

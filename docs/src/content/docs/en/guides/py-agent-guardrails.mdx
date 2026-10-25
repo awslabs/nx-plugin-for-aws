@@ -1,0 +1,306 @@
+---
+title: Python Agent Guardrails
+description: Attach an Amazon Bedrock Guardrail to a Python Strands or LangChain Agent
+generator: py#agent#guardrails
+---
+
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import RunGenerator from '@components/run-generator.astro';
+
+Attach an [Amazon Bedrock Guardrail](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html) to a <Link path="guides/py-agent">Python Agent</Link>. A guardrail is a set of rules that Amazon Bedrock applies to the messages your agent sends to the model and to the model's answers. Without one, a user can ask your agent about any topic, and the model can repeat personal data such as email addresses back in its answers.
+
+The generator adds a policy file that holds your rules, the code that applies the guardrail to your agent's model, and the infrastructure that creates the guardrail in your AWS account. It supports both `py#agent` frameworks, Strands and LangChain, with every protocol.
+
+## How this works
+
+- `guardrail.json` next to your `agent.py` holds the rules: the topics your agent must refuse and the types of personal data (PII, personally identifiable information) it must hide or block.
+- Your CDK construct or Terraform module reads `guardrail.json` when you synthesize or plan. It creates the guardrail and a numbered version of it. A guardrail version is a read-only snapshot of the rules.
+- The infrastructure writes the guardrail's ID and version number to <Link path="guides/runtime-config">runtime config</Link>, the AWS AppConfig application where your infrastructure stores the details of deployed resources. The entry is `agentcore.guardrails.<AgentClass>`, named after your agent's class, for example `agentcore.guardrails.MyAgent`. Each guarded agent has its own entry.
+- `guardrail.py` defines the Bedrock model that your `agent.py` uses. Before each model call, the model reads the agent's entry from runtime config and adds that guardrail to the request.
+
+## Usage
+
+### Generate Agent Guardrails
+
+You will need an existing Python project containing an agent created with the `py#agent` generator.
+
+<RunGenerator generator="py#agent#guardrails" />
+
+### Options
+
+<GeneratorParameters generator="py#agent#guardrails" />
+
+## Generator Output
+
+The generator adds the following files next to your agent, where `<module>` is your project's Python module and `<agent>` is the snake-case name of your agent component (`agent` by default):
+
+<FileTree>
+  - \<your-project>/\<module>/\<agent>/
+    - agent.py Your agent, now created with the guardrailed model
+    - guardrail.json The rules your guardrail applies
+    - guardrail.py Defines the Bedrock model with the guardrail applied
+</FileTree>
+
+It also adds the infrastructure for your agent's `iac` provider, where `<agent-name>` is the kebab-case name of your agent's construct or module:
+
+<Infrastructure>
+  <Fragment slot="cdk">
+    <FileTree>
+      - packages/common/constructs/src/app/guardrails/\<agent-name>/
+        - \<agent-name>-guardrail.ts CDK construct containing the guardrail and its version
+    </FileTree>
+  </Fragment>
+  <Fragment slot="terraform">
+    <FileTree>
+      - packages/common/terraform/src/app/guardrails/\<agent-name>/
+        - \<agent-name>-guardrail.tf Terraform module containing the guardrail and its version
+    </FileTree>
+  </Fragment>
+</Infrastructure>
+
+The generator edits `agent.py` like this:
+
+<Tabs syncKey="agent-framework">
+<TabItem label="Strands">
+```diff lang="python"
++from .guardrail import get_guardrailed_model
+ from .session import get_session_manager
+
+ @contextmanager
+ def get_agent():
+     yield Agent(
++        model=get_guardrailed_model(),
+         name="MyAgent",
+```
+
+`get_guardrailed_model()` returns a `GuardrailedBedrockModel`, a subclass of the Strands `BedrockModel`. It uses the same default model as an `Agent` created without a `model`.
+</TabItem>
+<TabItem label="LangChain">
+```diff lang="python"
+-from langchain_aws import ChatBedrockConverse
+ from langchain_core.tools import tool
+
++from .guardrail import GuardrailedChatBedrockConverse
+ from .session import get_checkpointer
+
+ def get_agent():
+-    model = ChatBedrockConverse(model=MODEL_ID, region_name=REGION)
++    model = GuardrailedChatBedrockConverse(model=MODEL_ID, region_name=REGION)
+```
+
+`GuardrailedChatBedrockConverse` is a subclass of `ChatBedrockConverse`. The generator keeps the arguments of your `ChatBedrockConverse(...)` call.
+</TabItem>
+</Tabs>
+
+Running the generator again on the same agent changes no file, and it keeps your edits to `guardrail.json` and `guardrail.py`.
+
+If your agent was generated with `infra: none`, the generator adds only the agent files and prints a warning. You then create the guardrail yourself and write its ID and version to runtime config at `agentcore.guardrails.<AgentClass>` as `{ guardrailId, guardrailVersion }`.
+
+If a TypeScript agent in another project has the same class name and already has a guardrail, the generator stops with an error and changes no file. Both agents would share one runtime construct and one guardrail. Give one of the agents a different name.
+
+### An agent that already sets a model
+
+If `agent.py` does not have the expected shape, the generator leaves it unchanged. It prints the file name and the lines to add.
+
+<Tabs syncKey="agent-framework">
+<TabItem label="Strands">
+This happens when your `Agent(...)` call already sets `model`. To keep your own model options, create your model with the `GuardrailedBedrockModel` class from `guardrail.py`. It takes the same options as `BedrockModel`, for example:
+
+```python title="agent.py"
+from .guardrail import GuardrailedBedrockModel
+
+agent = Agent(
+    model=GuardrailedBedrockModel(model_id="my-model-id"),
+    # ...
+)
+```
+</TabItem>
+<TabItem label="LangChain">
+This happens when `agent.py` has no `ChatBedrockConverse(...)` call, for example because you create your model another way. Create your model with the `GuardrailedChatBedrockConverse` class from `guardrail.py`. It takes the same arguments as `ChatBedrockConverse`, for example:
+
+```python title="agent.py"
+from .guardrail import GuardrailedChatBedrockConverse
+
+model = GuardrailedChatBedrockConverse(model=MODEL_ID, region_name=REGION)
+```
+</TabItem>
+</Tabs>
+
+## What the guardrail checks
+
+The guardrail checks two things on every model call:
+
+- the conversation your agent sends to the model, including the user's latest message
+- the model's answer, before your agent streams it back to the user
+
+When the guardrail blocks a user's message, the model is not called. When an `ANONYMIZE` rule matches, the answer contains a placeholder such as `{EMAIL}` instead of the value. When the guardrail blocks an answer, the user gets the `blockedOutputsMessaging` text.
+
+<Tabs syncKey="agent-framework">
+<TabItem label="Strands">
+When the guardrail blocks a user's message, the user gets the `blockedInputMessaging` text. Strands also replaces the blocked message in the agent's conversation history with `[User input redacted.]`.
+</TabItem>
+<TabItem label="LangChain">
+When the guardrail blocks a user's message, the model's answer is the `blockedInputMessaging` text, and the user gets that text.
+
+On later model calls in the same session, `guardrail.py` sends `[User input redacted.]` in place of each user message whose turn the guardrail blocked, as Strands does. The guardrail checks the whole conversation on every call, so without this the blocked message would block every later message in the session. The checkpointer still saves the original message.
+</TabItem>
+</Tabs>
+
+The guardrail does not check tool definitions, the arguments the model passes to your tools, or the results your tools return. For example, if a tool returns a customer's email address from a database, the guardrail does not hide it from the model. Treat tool results as untrusted, as the <Link path="guides/py-agent">Python Agent guide</Link> describes under "Securing your Agent".
+
+## Editing guardrail.json
+
+The vended policy is an example for the generated maths agent. It refuses investment advice and hides or blocks three types of personal data:
+
+```json title="guardrail.json"
+{
+  "blockedInputMessaging": "Sorry, I can't help with that request.",
+  "blockedOutputsMessaging": "Sorry, I can't share that answer.",
+  "deniedTopics": [
+    {
+      "name": "Investment advice",
+      "definition": "Recommendations about which specific stocks, funds or other investments to buy or sell.",
+      "examples": ["Which stocks should I buy this year?"]
+    }
+  ],
+  "piiEntities": [
+    { "type": "EMAIL", "action": "ANONYMIZE" },
+    { "type": "PHONE", "action": "ANONYMIZE" },
+    { "type": "US_SOCIAL_SECURITY_NUMBER", "action": "BLOCK" }
+  ]
+}
+```
+
+The fields are:
+
+- `blockedInputMessaging`: the reply a user gets when the guardrail blocks their message. At most 500 characters.
+- `blockedOutputsMessaging`: the reply a user gets when the guardrail blocks the model's answer. At most 500 characters.
+- `deniedTopics`: topics your agent must refuse. Each topic has a `name` (at most 100 letters, digits, spaces and the characters `-_!?.`), a `definition` of at most 1000 characters that describes the topic, and optional `examples` of at most 100 characters each.
+- `piiEntities`: types of personal data to act on. `type` is a [sensitive information type](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails-sensitive-filters.html) such as `EMAIL`, `PHONE` or `US_SOCIAL_SECURITY_NUMBER`. `action` is `ANONYMIZE` to replace the value with a placeholder, or `BLOCK` to block the whole message or answer.
+
+Write a topic `definition` that describes the topic itself. For example, "Recommendations about which specific stocks to buy" works better than "Do not give investment advice".
+
+### Why the version is numbered
+
+Each time you change `guardrail.json` and deploy, the infrastructure creates a new numbered guardrail version and writes it to runtime config. The version's description holds the SHA-256 hash of `guardrail.json`, so a change to the file changes the description, and a new version replaces the old one. With the CDK construct, the hash also covers any guardrail properties you pass.
+
+Your running agent does not need a restart. `guardrail.py` keeps what it reads from runtime config for 5 seconds, so the agent uses the new version within 5 seconds of the AppConfig deployment. The old version is deleted after the AppConfig deployment. CloudFormation deletes it in its cleanup step, which in one measurement (2026-10-24, us-east-1) began about 7 seconds after the deployment completed. CloudFormation does not guarantee that delay. Terraform keeps the old version for about 15 seconds after the deployment module, so the 5-second cache never points at a deleted version. This works when you add the guardrail module to that module's `depends_on`, as shown in [Wiring the guardrail to your agent](#wiring-the-guardrail-to-your-agent).
+
+Your agent never uses the `DRAFT` version. `DRAFT` always holds the latest rules, so an edit made in the AWS console would reach your running agent without a deployment. `guardrail.py` raises an error if the version in runtime config is not a version number.
+
+## Wiring the guardrail to your agent
+
+The generator does not change your stack or your root Terraform module, in the same way that the `py#agent` generator leaves deploying the agent to you. When it finishes, it prints the code below with your agent's names filled in. Add it to create the guardrail, write its runtime-config entry and allow the agent to apply the guardrail:
+
+<Infrastructure>
+  <Fragment slot="cdk">
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyAgent, MyAgentGuardrail } from '@my-scope/common-constructs';
+
+const agent = new MyAgent(this, 'MyAgent');
+new MyAgentGuardrail(this, 'MyAgentGuardrail', { agent });
+```
+
+The construct writes the guardrail's ID and version to runtime config at `agentcore.guardrails.MyAgent`, and grants the `agent` permission to apply the guardrail. The agent construct already allows the agent to read runtime config.
+
+The construct exposes:
+
+- `guardrail` (the `CfnGuardrail`) and `version` (the `CfnGuardrailVersion`)
+- `guardrailId`, `guardrailArn` and `guardrailVersion`
+- `grantApply(grantee)`, which grants `bedrock:ApplyGuardrail` on the guardrail to another principal
+
+It also adds the `GuardrailId` and `GuardrailVersion` stack outputs. Its props are `agent` and any `CfnGuardrail` properties. The `CfnGuardrail` properties take precedence over `guardrail.json`. For example, add content filters:
+
+```ts
+new MyAgentGuardrail(this, 'MyAgentGuardrail', {
+  agent,
+  contentPolicyConfig: {
+    filtersConfig: [
+      { type: 'HATE', inputStrength: 'HIGH', outputStrength: 'HIGH' },
+    ],
+  },
+});
+```
+
+The generator also adds `guardrail.json` to the `synth` inputs of each CDK infrastructure project, so a change to the file runs the synth again instead of using the Nx cache.
+  </Fragment>
+  <Fragment slot="terraform">
+Add the `my_agent_guardrail` module as shown, in the root module where you deploy your agent. Add its `additional_iam_policy_statements` line to your existing `my_agent` module block. Add `module.my_agent_guardrail` to the `depends_on` list of your `runtime_config_appconfig_deployment` module, so the deployment includes the guardrail's runtime-config entry and Terraform deletes an old guardrail version only after the deployment. If your root module does not deploy the agent yet, add the agent's module first, as described in <Link path="guides/py-agent#infrastructure-as-code">the Python Agent guide</Link>.
+
+```hcl title="packages/infra/src/main.tf"
+module "my_agent_guardrail" {
+  source = "../../common/terraform/src/app/guardrails/my-agent"
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+  # ...existing arguments...
+  additional_iam_policy_statements = module.my_agent_guardrail.iam_policy_statements
+}
+
+module "runtime_config_appconfig_deployment" {
+  # ...existing arguments...
+  depends_on = [
+    # ...existing modules...
+    module.my_agent_guardrail,
+  ]
+}
+```
+
+If your agent module already sets `additional_iam_policy_statements`, combine the lists:
+
+```hcl
+  additional_iam_policy_statements = concat(module.my_agent_guardrail.iam_policy_statements, local.my_statements)
+```
+
+The module writes the guardrail's ID and version to runtime config at `agentcore.guardrails.MyAgent`. The `agentcore` namespace is in the default `namespaces` of the runtime-config modules, so you do not need to add it. The agent module already allows the agent to read runtime config.
+
+The module takes a `tags` variable and outputs `guardrail_id`, `guardrail_arn`, `guardrail_version` and `iam_policy_statements`. To add other guardrail policies, such as content filters, edit the `aws_bedrock_guardrail` resource in the module.
+
+The module sets `create_before_destroy` on the guardrail version, so Terraform creates the new version before it deletes the old one. A `time_sleep` resource from the `hashicorp/time` provider keeps the old version for about 15 seconds after the runtime-config deployment, and the runtime-config entry reads the guardrail ID and version from it. Because of this wait, `terraform destroy` also takes about 15 seconds longer.
+  </Fragment>
+</Infrastructure>
+
+### A missing runtime-config entry
+
+If you forget the wiring, runtime config has no entry for your agent. The model then raises an error before it calls Bedrock, so the agent does not run without its guardrail. For `MyAgent`, the error is:
+
+```
+No guardrail for this agent in runtime config at agentcore.guardrails.MyAgent. Add the MyAgentGuardrail construct (CDK) or the guardrails/my-agent module (Terraform) to your infrastructure.
+```
+
+The agent starts with every protocol (`http`, `a2a` and `ag-ui`), and each request fails with this error. If the agent cannot read runtime config at all, for example because `RUNTIME_CONFIG_APP_ID` is not set, each request fails with the error from the agent's runtime-config reader instead.
+
+With the `http` protocol, the agent has already started streaming its response when the model raises the error. The caller then gets no answer, and the error appears only in the agent's log, for a deployed agent in its runtime log group.
+
+## Local development
+
+The `<agent>-dev` target sets `LOCAL_DEV=true`. When `LOCAL_DEV` is `true` and the `RUNTIME_CONFIG_APP_ID` environment variable is not set, `guardrail.py` does not read runtime config. It logs a warning once and the agent runs without a guardrail:
+
+<NxCommands commands={['agent-dev your-project']} />
+
+To test your rules locally, deploy the guardrail first. Then set `RUNTIME_CONFIG_APP_ID` to the ID of your deployed runtime-config application, from the `RuntimeConfigApplicationId` stack output (CDK) or `module.runtime_config_appconfig.application_id` (Terraform). Your shell also needs AWS credentials that can read AppConfig and apply the guardrail:
+
+<NxCommands commands={['agent-dev your-project']} env={{ RUNTIME_CONFIG_APP_ID: '<application-id>' }} />
+
+The agent then reads only its own entry, so several guarded agents can run locally against the same application. If the agent cannot read runtime config, or the entry is missing, it logs the warning once and runs without a guardrail.
+
+The `<agent>-serve` target does not set `LOCAL_DEV`, so it needs `RUNTIME_CONFIG_APP_ID` and the deployed entry, otherwise each request fails as described above. The `<agent>-chat` target connects to a running agent and needs no runtime config itself.
+
+## Cost and latency
+
+Amazon Bedrock charges for each guardrail policy that evaluates text, on both the input and the answer. See [Amazon Bedrock pricing](https://aws.amazon.com/bedrock/pricing/).
+
+Each model call also takes longer, because the guardrail checks the answer before your agent streams it to the user.
+
+While requests arrive, each agent process reads runtime config at most once every 5 seconds. Each read makes two AppConfig requests.
+
+## Limitations
+
+- This generator supports agents created with `py#agent`, with the Strands and LangChain frameworks. It does not support the AgentCore Harness.
+- `guardrail.json` holds denied topics and PII entities only. Add other policies, such as content filters and word filters, with the construct's props (CDK) or by editing the module (Terraform).
+- The guardrail does not check tool results, as described in [What the guardrail checks](#what-the-guardrail-checks).

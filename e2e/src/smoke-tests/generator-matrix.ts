@@ -159,6 +159,11 @@ export const runGeneratorMatrix = async (
     `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-ecr-agent --infra=agentcore-ecr --no-interactive${deferFlag}`,
     opts,
   );
+  // Guard the default Python agent, which has AgentCore infrastructure.
+  await runCLI(
+    `generate @aws/nx-plugin:py#agent#guardrails --project=py_project --agent=my-agent --no-interactive`,
+    opts,
+  );
 
   // TypeScript project + lambda function.
   await runCLI(

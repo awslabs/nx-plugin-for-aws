@@ -1,0 +1,306 @@
+---
+title: Python Agent Guardrails
+description: Python Strands 또는 LangChain Agent에 Amazon Bedrock Guardrail 연결하기
+generator: py#agent#guardrails
+---
+
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import RunGenerator from '@components/run-generator.astro';
+
+<Link path="guides/py-agent">Python Agent</Link>에 [Amazon Bedrock Guardrail](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html)을 연결합니다. 가드레일은 에이전트가 모델에 보내는 메시지와 모델의 답변에 Amazon Bedrock이 적용하는 규칙 세트입니다. 가드레일이 없으면 사용자는 에이전트에게 어떤 주제에 대해서든 질문할 수 있고, 모델은 이메일 주소와 같은 개인 데이터를 답변에 그대로 반복할 수 있습니다.
+
+제너레이터는 규칙을 담는 정책 파일, 에이전트의 모델에 가드레일을 적용하는 코드, 그리고 AWS 계정에 가드레일을 생성하는 인프라를 추가합니다. 모든 프로토콜과 함께 `py#agent` 프레임워크인 Strands와 LangChain을 모두 지원합니다.
+
+## 작동 방식
+
+- `agent.py` 옆에 있는 `guardrail.json`은 규칙을 담고 있습니다: 에이전트가 거부해야 하는 주제와 숨기거나 차단해야 하는 개인 데이터(PII, 개인 식별 정보) 유형.
+- CDK 구성 또는 Terraform 모듈은 합성 또는 계획 시 `guardrail.json`을 읽습니다. 가드레일과 번호가 매겨진 버전을 생성합니다. 가드레일 버전은 규칙의 읽기 전용 스냅샷입니다.
+- 인프라는 가드레일의 ID와 버전 번호를 <Link path="guides/runtime-config">runtime config</Link>에 씁니다. runtime config는 인프라가 배포된 리소스의 세부 정보를 저장하는 AWS AppConfig 애플리케이션입니다. 항목은 `agentcore.guardrails.<AgentClass>`이며, 에이전트의 클래스 이름을 따라 명명됩니다. 예를 들어 `agentcore.guardrails.MyAgent`입니다. 각 보호된 에이전트는 자체 항목을 가집니다.
+- `guardrail.py`는 `agent.py`가 사용하는 Bedrock 모델을 정의합니다. 각 모델 호출 전에 모델은 runtime config에서 에이전트의 항목을 읽고 해당 가드레일을 요청에 추가합니다.
+
+## 사용법
+
+### Agent Guardrails 생성
+
+`py#agent` 제너레이터로 생성된 에이전트를 포함하는 기존 Python 프로젝트가 필요합니다.
+
+<RunGenerator generator="py#agent#guardrails" />
+
+### 옵션
+
+<GeneratorParameters generator="py#agent#guardrails" />
+
+## 제너레이터 출력
+
+제너레이터는 에이전트 옆에 다음 파일을 추가합니다. 여기서 `<module>`은 프로젝트의 Python 모듈이고 `<agent>`는 에이전트 컴포넌트의 snake-case 이름입니다(기본값은 `agent`):
+
+<FileTree>
+  - \<your-project>/\<module>/\<agent>/
+    - agent.py 이제 가드레일이 적용된 모델로 생성된 에이전트
+    - guardrail.json 가드레일이 적용하는 규칙
+    - guardrail.py 가드레일이 적용된 Bedrock 모델 정의
+</FileTree>
+
+또한 에이전트의 `iac` 공급자에 대한 인프라를 추가합니다. 여기서 `<agent-name>`은 에이전트의 구성 또는 모듈의 kebab-case 이름입니다:
+
+<Infrastructure>
+  <Fragment slot="cdk">
+    <FileTree>
+      - packages/common/constructs/src/app/guardrails/\<agent-name>/
+        - \<agent-name>-guardrail.ts 가드레일과 그 버전을 포함하는 CDK 구성
+    </FileTree>
+  </Fragment>
+  <Fragment slot="terraform">
+    <FileTree>
+      - packages/common/terraform/src/app/guardrails/\<agent-name>/
+        - \<agent-name>-guardrail.tf 가드레일과 그 버전을 포함하는 Terraform 모듈
+    </FileTree>
+  </Fragment>
+</Infrastructure>
+
+제너레이터는 다음과 같이 `agent.py`를 편집합니다:
+
+<Tabs syncKey="agent-framework">
+<TabItem label="Strands">
+```diff lang="python"
++from .guardrail import get_guardrailed_model
+ from .session import get_session_manager
+
+ @contextmanager
+ def get_agent():
+     yield Agent(
++        model=get_guardrailed_model(),
+         name="MyAgent",
+```
+
+`get_guardrailed_model()`은 Strands `BedrockModel`의 서브클래스인 `GuardrailedBedrockModel`을 반환합니다. `model` 없이 생성된 `Agent`와 동일한 기본 모델을 사용합니다.
+</TabItem>
+<TabItem label="LangChain">
+```diff lang="python"
+-from langchain_aws import ChatBedrockConverse
+ from langchain_core.tools import tool
+
++from .guardrail import GuardrailedChatBedrockConverse
+ from .session import get_checkpointer
+
+ def get_agent():
+-    model = ChatBedrockConverse(model=MODEL_ID, region_name=REGION)
++    model = GuardrailedChatBedrockConverse(model=MODEL_ID, region_name=REGION)
+```
+
+`GuardrailedChatBedrockConverse`는 `ChatBedrockConverse`의 서브클래스입니다. 제너레이터는 `ChatBedrockConverse(...)` 호출의 인수를 유지합니다.
+</TabItem>
+</Tabs>
+
+동일한 에이전트에서 제너레이터를 다시 실행하면 파일이 변경되지 않으며, `guardrail.json` 및 `guardrail.py`에 대한 편집 내용이 유지됩니다.
+
+에이전트가 `infra: none`으로 생성된 경우, 제너레이터는 에이전트 파일만 추가하고 경고를 출력합니다. 그런 다음 가드레일을 직접 생성하고 그 ID와 버전을 `agentcore.guardrails.<AgentClass>`의 runtime config에 `{ guardrailId, guardrailVersion }`로 작성합니다.
+
+다른 프로젝트의 TypeScript 에이전트가 동일한 클래스 이름을 가지고 이미 가드레일을 가지고 있는 경우, 제너레이터는 오류와 함께 중지되고 파일을 변경하지 않습니다. 두 에이전트가 하나의 런타임 구성과 하나의 가드레일을 공유하게 됩니다. 에이전트 중 하나에 다른 이름을 지정하세요.
+
+### 이미 모델을 설정한 에이전트
+
+`agent.py`가 예상된 형태가 아닌 경우, 제너레이터는 변경하지 않고 그대로 둡니다. 파일 이름과 추가할 줄을 출력합니다.
+
+<Tabs syncKey="agent-framework">
+<TabItem label="Strands">
+이는 `Agent(...)` 호출이 이미 `model`을 설정한 경우에 발생합니다. 자체 모델 옵션을 유지하려면 `guardrail.py`의 `GuardrailedBedrockModel` 클래스로 모델을 생성하세요. `BedrockModel`과 동일한 옵션을 사용합니다. 예를 들어:
+
+```python title="agent.py"
+from .guardrail import GuardrailedBedrockModel
+
+agent = Agent(
+    model=GuardrailedBedrockModel(model_id="my-model-id"),
+    # ...
+)
+```
+</TabItem>
+<TabItem label="LangChain">
+이는 `agent.py`에 `ChatBedrockConverse(...)` 호출이 없는 경우에 발생합니다. 예를 들어 다른 방식으로 모델을 생성하는 경우입니다. `guardrail.py`의 `GuardrailedChatBedrockConverse` 클래스로 모델을 생성하세요. `ChatBedrockConverse`와 동일한 인수를 사용합니다. 예를 들어:
+
+```python title="agent.py"
+from .guardrail import GuardrailedChatBedrockConverse
+
+model = GuardrailedChatBedrockConverse(model=MODEL_ID, region_name=REGION)
+```
+</TabItem>
+</Tabs>
+
+## 가드레일이 확인하는 내용
+
+가드레일은 모든 모델 호출에서 두 가지를 확인합니다:
+
+- 사용자의 최신 메시지를 포함하여 에이전트가 모델에 보내는 대화
+- 에이전트가 사용자에게 스트리밍하기 전의 모델의 답변
+
+가드레일이 사용자의 메시지를 차단하면 모델이 호출되지 않습니다. `ANONYMIZE` 규칙이 일치하면 답변에 값 대신 `{EMAIL}`과 같은 플레이스홀더가 포함됩니다. 가드레일이 답변을 차단하면 사용자는 `blockedOutputsMessaging` 텍스트를 받습니다.
+
+<Tabs syncKey="agent-framework">
+<TabItem label="Strands">
+가드레일이 사용자의 메시지를 차단하면 사용자는 `blockedInputMessaging` 텍스트를 받습니다. Strands는 또한 에이전트의 대화 기록에서 차단된 메시지를 `[User input redacted.]`로 대체합니다.
+</TabItem>
+<TabItem label="LangChain">
+가드레일이 사용자의 메시지를 차단하면 모델의 답변은 `blockedInputMessaging` 텍스트이며, 사용자는 해당 텍스트를 받습니다.
+
+동일한 세션의 이후 모델 호출에서 `guardrail.py`는 Strands가 하는 것처럼 가드레일이 차단한 각 사용자 메시지 대신 `[User input redacted.]`를 보냅니다. 가드레일은 모든 호출에서 전체 대화를 확인하므로, 이것이 없으면 차단된 메시지가 세션의 모든 이후 메시지를 차단하게 됩니다. 체크포인터는 여전히 원본 메시지를 저장합니다.
+</TabItem>
+</Tabs>
+
+가드레일은 도구 정의, 모델이 도구에 전달하는 인수 또는 도구가 반환하는 결과를 확인하지 않습니다. 예를 들어, 도구가 데이터베이스에서 고객의 이메일 주소를 반환하는 경우, 가드레일은 모델로부터 이를 숨기지 않습니다. <Link path="guides/py-agent">Python Agent 가이드</Link>의 "Securing your Agent"에서 설명하는 것처럼 도구 결과를 신뢰할 수 없는 것으로 취급하세요.
+
+## guardrail.json 편집
+
+제공된 정책은 생성된 수학 에이전트의 예시입니다. 투자 조언을 거부하고 세 가지 유형의 개인 데이터를 숨기거나 차단합니다:
+
+```json title="guardrail.json"
+{
+  "blockedInputMessaging": "Sorry, I can't help with that request.",
+  "blockedOutputsMessaging": "Sorry, I can't share that answer.",
+  "deniedTopics": [
+    {
+      "name": "Investment advice",
+      "definition": "Recommendations about which specific stocks, funds or other investments to buy or sell.",
+      "examples": ["Which stocks should I buy this year?"]
+    }
+  ],
+  "piiEntities": [
+    { "type": "EMAIL", "action": "ANONYMIZE" },
+    { "type": "PHONE", "action": "ANONYMIZE" },
+    { "type": "US_SOCIAL_SECURITY_NUMBER", "action": "BLOCK" }
+  ]
+}
+```
+
+필드는 다음과 같습니다:
+
+- `blockedInputMessaging`: 가드레일이 메시지를 차단할 때 사용자가 받는 응답. 최대 500자.
+- `blockedOutputsMessaging`: 가드레일이 모델의 답변을 차단할 때 사용자가 받는 응답. 최대 500자.
+- `deniedTopics`: 에이전트가 거부해야 하는 주제. 각 주제는 `name`(최대 100자의 문자, 숫자, 공백 및 `-_!?.` 문자), 주제를 설명하는 최대 1000자의 `definition`, 그리고 각각 최대 100자의 선택적 `examples`를 가집니다.
+- `piiEntities`: 조치를 취할 개인 데이터 유형. `type`은 `EMAIL`, `PHONE` 또는 `US_SOCIAL_SECURITY_NUMBER`와 같은 [민감한 정보 유형](https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails-sensitive-filters.html)입니다. `action`은 값을 플레이스홀더로 대체하는 `ANONYMIZE` 또는 전체 메시지나 답변을 차단하는 `BLOCK`입니다.
+
+주제 자체를 설명하는 주제 `definition`을 작성하세요. 예를 들어, "Recommendations about which specific stocks to buy"가 "Do not give investment advice"보다 더 잘 작동합니다.
+
+### 버전이 번호가 매겨진 이유
+
+`guardrail.json`을 변경하고 배포할 때마다 인프라는 새로운 번호가 매겨진 가드레일 버전을 생성하고 이를 runtime config에 씁니다. 버전의 설명은 `guardrail.json`의 SHA-256 해시를 담고 있으므로, 파일의 변경은 설명을 변경하고 새 버전이 이전 버전을 대체합니다. CDK 구성의 경우, 해시는 전달하는 모든 가드레일 속성도 포함합니다.
+
+실행 중인 에이전트는 재시작이 필요하지 않습니다. `guardrail.py`는 runtime config에서 읽은 내용을 5초 동안 유지하므로, 에이전트는 AppConfig 배포 후 5초 이내에 새 버전을 사용합니다. 이전 버전은 AppConfig 배포 후 삭제됩니다. CloudFormation은 정리 단계에서 이를 삭제하며, 한 측정(2026-10-24, us-east-1)에서 배포 완료 후 약 7초 후에 시작되었습니다. CloudFormation은 이 지연을 보장하지 않습니다. Terraform은 배포 모듈 후 약 15초 동안 이전 버전을 유지하므로, 5초 캐시는 삭제된 버전을 가리키지 않습니다. 이는 [에이전트에 가드레일 연결하기](#wiring-the-guardrail-to-your-agent)에 표시된 대로 가드레일 모듈을 해당 모듈의 `depends_on`에 추가할 때 작동합니다.
+
+에이전트는 `DRAFT` 버전을 사용하지 않습니다. `DRAFT`는 항상 최신 규칙을 담고 있으므로, AWS 콘솔에서 수행한 편집이 배포 없이 실행 중인 에이전트에 도달할 수 있습니다. runtime config의 버전이 버전 번호가 아닌 경우 `guardrail.py`는 오류를 발생시킵니다.
+
+## 에이전트에 가드레일 연결하기
+
+제너레이터는 스택이나 루트 Terraform 모듈을 변경하지 않습니다. `py#agent` 제너레이터가 에이전트 배포를 사용자에게 맡기는 것과 같은 방식입니다. 완료되면 에이전트의 이름이 채워진 아래 코드를 출력합니다. 가드레일을 생성하고, runtime-config 항목을 작성하고, 에이전트가 가드레일을 적용할 수 있도록 허용하려면 이를 추가하세요:
+
+<Infrastructure>
+  <Fragment slot="cdk">
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import { MyAgent, MyAgentGuardrail } from '@my-scope/common-constructs';
+
+const agent = new MyAgent(this, 'MyAgent');
+new MyAgentGuardrail(this, 'MyAgentGuardrail', { agent });
+```
+
+구성은 가드레일의 ID와 버전을 `agentcore.guardrails.MyAgent`의 runtime config에 쓰고, `agent`에 가드레일을 적용할 권한을 부여합니다. 에이전트 구성은 이미 에이전트가 runtime config를 읽을 수 있도록 허용합니다.
+
+구성은 다음을 노출합니다:
+
+- `guardrail`(`CfnGuardrail`) 및 `version`(`CfnGuardrailVersion`)
+- `guardrailId`, `guardrailArn` 및 `guardrailVersion`
+- `grantApply(grantee)`, 다른 주체에게 가드레일에 대한 `bedrock:ApplyGuardrail`을 부여합니다
+
+또한 `GuardrailId` 및 `GuardrailVersion` 스택 출력을 추가합니다. props는 `agent`와 모든 `CfnGuardrail` 속성입니다. `CfnGuardrail` 속성은 `guardrail.json`보다 우선합니다. 예를 들어, 콘텐츠 필터를 추가합니다:
+
+```ts
+new MyAgentGuardrail(this, 'MyAgentGuardrail', {
+  agent,
+  contentPolicyConfig: {
+    filtersConfig: [
+      { type: 'HATE', inputStrength: 'HIGH', outputStrength: 'HIGH' },
+    ],
+  },
+});
+```
+
+제너레이터는 또한 각 CDK 인프라 프로젝트의 `synth` 입력에 `guardrail.json`을 추가하므로, 파일의 변경은 Nx 캐시를 사용하는 대신 synth를 다시 실행합니다.
+  </Fragment>
+  <Fragment slot="terraform">
+에이전트를 배포하는 루트 모듈에 표시된 대로 `my_agent_guardrail` 모듈을 추가하세요. 기존 `my_agent` 모듈 블록에 `additional_iam_policy_statements` 줄을 추가하세요. `runtime_config_appconfig_deployment` 모듈의 `depends_on` 목록에 `module.my_agent_guardrail`을 추가하여, 배포에 가드레일의 runtime-config 항목이 포함되고 Terraform이 배포 후에만 이전 가드레일 버전을 삭제하도록 합니다. 루트 모듈이 아직 에이전트를 배포하지 않는 경우, <Link path="guides/py-agent#infrastructure-as-code">Python Agent 가이드</Link>에 설명된 대로 먼저 에이전트의 모듈을 추가하세요.
+
+```hcl title="packages/infra/src/main.tf"
+module "my_agent_guardrail" {
+  source = "../../common/terraform/src/app/guardrails/my-agent"
+}
+
+module "my_agent" {
+  source = "../../common/terraform/src/app/agents/my-agent"
+  # ...existing arguments...
+  additional_iam_policy_statements = module.my_agent_guardrail.iam_policy_statements
+}
+
+module "runtime_config_appconfig_deployment" {
+  # ...existing arguments...
+  depends_on = [
+    # ...existing modules...
+    module.my_agent_guardrail,
+  ]
+}
+```
+
+에이전트 모듈이 이미 `additional_iam_policy_statements`를 설정한 경우, 목록을 결합하세요:
+
+```hcl
+  additional_iam_policy_statements = concat(module.my_agent_guardrail.iam_policy_statements, local.my_statements)
+```
+
+모듈은 가드레일의 ID와 버전을 `agentcore.guardrails.MyAgent`의 runtime config에 씁니다. `agentcore` 네임스페이스는 runtime-config 모듈의 기본 `namespaces`에 있으므로 추가할 필요가 없습니다. 에이전트 모듈은 이미 에이전트가 runtime config를 읽을 수 있도록 허용합니다.
+
+모듈은 `tags` 변수를 사용하고 `guardrail_id`, `guardrail_arn`, `guardrail_version` 및 `iam_policy_statements`를 출력합니다. 콘텐츠 필터와 같은 다른 가드레일 정책을 추가하려면 모듈의 `aws_bedrock_guardrail` 리소스를 편집하세요.
+
+모듈은 가드레일 버전에 `create_before_destroy`를 설정하므로, Terraform은 이전 버전을 삭제하기 전에 새 버전을 생성합니다. `hashicorp/time` 공급자의 `time_sleep` 리소스는 runtime-config 배포 후 약 15초 동안 이전 버전을 유지하며, runtime-config 항목은 이로부터 가드레일 ID와 버전을 읽습니다. 이 대기 때문에 `terraform destroy`도 약 15초 더 오래 걸립니다.
+  </Fragment>
+</Infrastructure>
+
+### 누락된 runtime-config 항목
+
+연결을 잊어버린 경우, runtime config에 에이전트에 대한 항목이 없습니다. 그러면 모델은 Bedrock을 호출하기 전에 오류를 발생시키므로, 에이전트는 가드레일 없이 실행되지 않습니다. `MyAgent`의 경우 오류는 다음과 같습니다:
+
+```
+No guardrail for this agent in runtime config at agentcore.guardrails.MyAgent. Add the MyAgentGuardrail construct (CDK) or the guardrails/my-agent module (Terraform) to your infrastructure.
+```
+
+에이전트는 모든 프로토콜(`http`, `a2a` 및 `ag-ui`)로 시작되며, 각 요청은 이 오류로 실패합니다. 에이전트가 runtime config를 전혀 읽을 수 없는 경우(예: `RUNTIME_CONFIG_APP_ID`가 설정되지 않은 경우), 각 요청은 대신 에이전트의 runtime-config 리더의 오류로 실패합니다.
+
+`http` 프로토콜의 경우, 모델이 오류를 발생시킬 때 에이전트는 이미 응답 스트리밍을 시작했습니다. 그러면 호출자는 답변을 받지 못하고, 오류는 에이전트의 로그에만 나타나며, 배포된 에이전트의 경우 런타임 로그 그룹에 나타납니다.
+
+## 로컬 개발
+
+`<agent>-dev` 대상은 `LOCAL_DEV=true`를 설정합니다. `LOCAL_DEV`가 `true`이고 `RUNTIME_CONFIG_APP_ID` 환경 변수가 설정되지 않은 경우, `guardrail.py`는 runtime config를 읽지 않습니다. 한 번 경고를 기록하고 에이전트는 가드레일 없이 실행됩니다:
+
+<NxCommands commands={['agent-dev your-project']} />
+
+규칙을 로컬에서 테스트하려면 먼저 가드레일을 배포하세요. 그런 다음 `RUNTIME_CONFIG_APP_ID`를 배포된 runtime-config 애플리케이션의 ID로 설정하세요. `RuntimeConfigApplicationId` 스택 출력(CDK) 또는 `module.runtime_config_appconfig.application_id`(Terraform)에서 가져옵니다. 셸에는 AppConfig를 읽고 가드레일을 적용할 수 있는 AWS 자격 증명도 필요합니다:
+
+<NxCommands commands={['agent-dev your-project']} env={{ RUNTIME_CONFIG_APP_ID: '<application-id>' }} />
+
+그러면 에이전트는 자체 항목만 읽으므로, 여러 보호된 에이전트가 동일한 애플리케이션에 대해 로컬에서 실행될 수 있습니다. 에이전트가 runtime config를 읽을 수 없거나 항목이 누락된 경우, 한 번 경고를 기록하고 가드레일 없이 실행됩니다.
+
+`<agent>-serve` 대상은 `LOCAL_DEV`를 설정하지 않으므로, `RUNTIME_CONFIG_APP_ID`와 배포된 항목이 필요합니다. 그렇지 않으면 위에서 설명한 대로 각 요청이 실패합니다. `<agent>-chat` 대상은 실행 중인 에이전트에 연결하며 자체적으로 runtime config가 필요하지 않습니다.
+
+## 비용 및 지연 시간
+
+Amazon Bedrock은 입력과 답변 모두에서 텍스트를 평가하는 각 가드레일 정책에 대해 요금을 부과합니다. [Amazon Bedrock 요금](https://aws.amazon.com/bedrock/pricing/)을 참조하세요.
+
+가드레일이 에이전트가 사용자에게 스트리밍하기 전에 답변을 확인하기 때문에 각 모델 호출도 더 오래 걸립니다.
+
+요청이 도착하는 동안 각 에이전트 프로세스는 5초마다 최대 한 번 runtime config를 읽습니다. 각 읽기는 두 개의 AppConfig 요청을 만듭니다.
+
+## 제한 사항
+
+- 이 제너레이터는 Strands 및 LangChain 프레임워크와 함께 `py#agent`로 생성된 에이전트를 지원합니다. AgentCore Harness는 지원하지 않습니다.
+- `guardrail.json`은 거부된 주제와 PII 엔티티만 담습니다. 콘텐츠 필터 및 단어 필터와 같은 다른 정책은 구성의 props(CDK) 또는 모듈 편집(Terraform)으로 추가하세요.
+- 가드레일은 [가드레일이 확인하는 내용](#what-the-guardrail-checks)에 설명된 대로 도구 결과를 확인하지 않습니다.

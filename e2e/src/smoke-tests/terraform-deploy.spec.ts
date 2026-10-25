@@ -10,6 +10,7 @@ import { ensureDirSync } from 'fs-extra';
 import { runCLI, tmpProjPath } from '../utils';
 import {
   buildGatewayTargetUrl,
+  DENIED_TOPIC_PROMPT,
   invokeAgentCoreA2a,
   invokeAgentCoreA2aUrl,
   invokeAgentCoreAgent,
@@ -29,6 +30,7 @@ import {
   invokeTrpcAgentCoreAgent,
   invokeTrpcApi,
   pingWebsite,
+  readBlockedInputMessage,
 } from './deploy-invocations';
 import { ensureRdsServiceLinkedRole } from './deploy-prerequisites';
 import { applyInfra } from './terraform-apply';
@@ -282,6 +284,28 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
           await invokeTrpcAgentCoreAgent(
             outputs.ts_agent_arn,
             'TypeScript Agent',
+          );
+          // Both agents are guarded, so a denied-topic question gets the
+          // blocked message. Each check has a session of its own, so the
+          // blocked turn stays out of the sessions the other invocations use.
+          const blockedInputMessage = readBlockedInputMessage();
+          await invokeAgentCoreAgent(
+            outputs.py_agent_arn,
+            'Python Agent (denied topic)',
+            DENIED_TOPIC_PROMPT,
+            {
+              sessionId: crypto.randomUUID(),
+              expectedAnswer: blockedInputMessage,
+            },
+          );
+          await invokeTrpcAgentCoreAgent(
+            outputs.ts_agent_arn,
+            'TypeScript Agent (denied topic)',
+            DENIED_TOPIC_PROMPT,
+            {
+              sessionId: crypto.randomUUID(),
+              expectedAnswer: blockedInputMessage,
+            },
           );
 
           // Container-packaged agents, proving `agentcore-ecr` still boots and

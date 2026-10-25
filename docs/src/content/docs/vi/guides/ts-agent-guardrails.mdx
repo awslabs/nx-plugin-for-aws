@@ -138,7 +138,7 @@ Viết một `definition` chủ đề mô tả chính chủ đề đó. Ví dụ
 
 Mỗi lần bạn thay đổi `guardrail.json` và triển khai, cơ sở hạ tầng tạo một phiên bản guardrail được đánh số mới và ghi nó vào runtime config. Mô tả của phiên bản chứa hash SHA-256 của `guardrail.json`, vì vậy một thay đổi đối với file sẽ thay đổi mô tả, và một phiên bản mới thay thế phiên bản cũ. Với CDK construct, hash cũng bao gồm bất kỳ thuộc tính guardrail nào bạn truyền.
 
-Agent đang chạy của bạn không cần khởi động lại. Nó cache những gì nó đọc từ runtime config trong 5 giây, vì vậy nó sử dụng phiên bản mới trong vòng 5 giây sau khi triển khai AppConfig. Phiên bản cũ bị xóa sau khi triển khai AppConfig: CloudFormation xóa nó trong bước cleanup của nó, và Terraform xóa nó sau deployment module khi bạn thêm guardrail module vào `depends_on` của module đó, như được hiển thị trong [Kết nối guardrail với agent của bạn](#kết-nối-guardrail-với-agent-của-bạn).
+Agent đang chạy của bạn không cần khởi động lại. Nó cache những gì nó đọc từ runtime config trong 5 giây, vì vậy nó sử dụng phiên bản mới trong vòng 5 giây sau khi triển khai AppConfig. Phiên bản cũ bị xóa sau khi triển khai AppConfig. CloudFormation xóa nó trong bước cleanup của nó, trong một phép đo (2026-10-24, us-east-1) bắt đầu khoảng 7 giây sau khi triển khai hoàn thành. CloudFormation không đảm bảo độ trễ đó. Terraform giữ phiên bản cũ trong khoảng 15 giây sau deployment module, vì vậy cache 5 giây không bao giờ trỏ đến một phiên bản đã bị xóa. Điều này hoạt động khi bạn thêm guardrail module vào `depends_on` của module đó, như được hiển thị trong [Kết nối guardrail với agent của bạn](#kết-nối-guardrail-với-agent-của-bạn).
 
 Agent của bạn không bao giờ sử dụng phiên bản `DRAFT`. `DRAFT` luôn chứa các quy tắc mới nhất, vì vậy một chỉnh sửa được thực hiện trong AWS console sẽ đến agent đang chạy của bạn mà không cần triển khai. `guardrail.ts` ném ra một lỗi nếu phiên bản trong runtime config không phải là một số phiên bản.
 
@@ -209,7 +209,7 @@ Module ghi ID và phiên bản của guardrail vào runtime config tại `agentc
 
 Module nhận một biến `tags` và output `guardrail_id`, `guardrail_arn`, `guardrail_version` và `iam_policy_statements`. Để thêm các chính sách guardrail khác, chẳng hạn như content filter, hãy chỉnh sửa resource `aws_bedrock_guardrail` trong module.
 
-Module đặt `create_before_destroy` trên phiên bản guardrail, vì vậy Terraform tạo phiên bản mới trước khi xóa phiên bản cũ.
+Module đặt `create_before_destroy` trên phiên bản guardrail, vì vậy Terraform tạo phiên bản mới trước khi xóa phiên bản cũ. Một resource `time_sleep` từ provider `hashicorp/time` giữ phiên bản cũ trong khoảng 15 giây sau khi triển khai runtime-config, và entry runtime-config đọc ID và phiên bản guardrail từ nó. Do thời gian chờ này, `terraform destroy` cũng mất khoảng 15 giây lâu hơn.
   </Fragment>
 </Infrastructure>
 
