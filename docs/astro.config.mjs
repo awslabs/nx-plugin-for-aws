@@ -547,6 +547,10 @@ export default defineConfig({
                       label: 'Authentication',
                       link: '/guides/react-website-auth',
                     },
+                    {
+                      label: 'Identity Providers',
+                      link: '/guides/react-website-auth-idp',
+                    },
                   ],
                 },
                 {
