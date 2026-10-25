@@ -97,6 +97,7 @@ pnpm nx g @aws/nx-plugin:ts#infra
 | `ts#dynamodb`          | Type-safe DynamoDB single-table design (TypeScript, ElectroDB)                                                                           |
 | `ts#website`           | React app (Vite)                                                                                                                         |
 | `ts#website#auth`      | Add Cognito auth to a website                                                                                                            |
+| `ts#website#auth#idp`  | Sign in to a website through an external OIDC identity provider (experimental)                                                           |
 | `ts#infra`             | AWS CDK infrastructure project                                                                                                           |
 | `ts#lambda-function`   | TypeScript Lambda with type-safe event sources                                                                                           |
 | `ts#mcp-server`        | MCP server (TypeScript)                                                                                                                  |

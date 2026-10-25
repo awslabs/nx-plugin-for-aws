@@ -154,6 +154,7 @@ Add capabilities to existing projects:
 | `ts#project`           | Generates a TypeScript project                                                                                     |
 | `ts#website`           | Generates a website application                                                                                    |
 | `ts#website#auth`      | Adds auth to an existing website                                                                                   |
+| `ts#website#auth#idp`  | Add an external OpenID Connect identity provider to a website's Cognito sign-in (experimental)                     |
 | `ts#agent`             | Add an AI Agent to a TypeScript project                                                                            |
 | `ts#agent#guardrails`  | Add an Amazon Bedrock Guardrail to a TypeScript Agent (experimental)                                               |
 | `ts#api`               | Create a TypeScript API                                                                                            |
