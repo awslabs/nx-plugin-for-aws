@@ -123,7 +123,7 @@ export const TS_VERSIONS = {
   esbuild: '0.28.2',
   'event-source-polyfill': '1.0.31',
   '@types/event-source-polyfill': '1.0.5',
-  '@biomejs/biome': '2.6.3',
+  '@biomejs/biome': '2.5.15',
   '@prisma/adapter-mariadb': '7.10.1',
   '@prisma/adapter-pg': '7.10.1',
   '@prisma/client': '7.10.1',

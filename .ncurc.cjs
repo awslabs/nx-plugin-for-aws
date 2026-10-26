@@ -15,7 +15,19 @@ module.exports = {
   // v1 (`SendStreamingMessage`). The vended A2A server SDK (@a2a-js/sdk in
   // versions.ts) is 0.3.x and rejects that with "Method not found", so hold the
   // CLI until the server SDK moves to 1.x, then remove this entry.
-  reject: ['agent-chat-cli'],
+  reject: [
+    'agent-chat-cli',
+    // Biome 2.6 turns on Markdown and YAML formatting by default. The vended
+    // `format` target (`biome format {projectRoot}`) then fails on generated
+    // README.md and YAML files, and `build` depends on it. js-api 6.1.0
+    // requires @biomejs/wasm-nodejs ^2.6.0, so all three are held together.
+    // Lift once a fix(ts#project) PR ships Biome 2.6 with the Markdown/YAML
+    // formatter (and the Markdown linter, if it is on by default) turned off
+    // in vended biome.json, plus a latest/ migration.
+    '@biomejs/biome',
+    '@biomejs/wasm-nodejs',
+    '@biomejs/js-api',
+  ],
   packageFile: '{package.json,packages/**/package.json}',
   cooldown: 1, // Only latest versions published for at least 1 day are updated to
   dep: ['prod', 'dev', 'optional', 'packageManager', 'peer'],
