@@ -1103,6 +1103,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
       '@local-dev-test/ts-project:my-agent-dev',
       ports.tsAgent,
     );
+    await waitForPort(ports.tsMcp, STARTUP_TIMEOUT_MS);
 
     const pingRes = await fetch(`http://127.0.0.1:${ports.tsAgent}/ping`);
     console.log('TS Agent /ping:', pingRes.status);
