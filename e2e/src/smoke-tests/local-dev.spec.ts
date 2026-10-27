@@ -341,15 +341,19 @@ function chatStreamsReply(
   message = 'What is 3 times 5?',
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    const term = pty.spawn('pnpm', ['exec', 'nx', 'run', target], {
-      cwd,
-      env: {
-        ...process.env,
-        NX_DAEMON: 'true',
-        RUNTIME_CONFIG_APP_ID: '',
-        NX_NATIVE_COMMAND_RUNNER: 'false',
+    const term = pty.spawn(
+      'pnpm',
+      ['exec', 'nx', 'run', target, '--output-style=stream'],
+      {
+        cwd,
+        env: {
+          ...process.env,
+          NX_DAEMON: 'true',
+          RUNTIME_CONFIG_APP_ID: '',
+          NX_NATIVE_COMMAND_RUNNER: 'false',
+        },
       },
-    });
+    );
     let out = '';
     let sent = false;
     let settled = false;
