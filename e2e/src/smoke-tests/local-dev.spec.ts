@@ -1202,6 +1202,9 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
       '@local-dev-test/ts-project:gw-agent-dev',
       ports.gwAgent,
     );
+    await waitForPort(ports.gateway, STARTUP_TIMEOUT_MS);
+    await waitForPort(ports.tsMcp, STARTUP_TIMEOUT_MS);
+    await waitForPort(ports.pyMcp, STARTUP_TIMEOUT_MS);
 
     const invokeGatewayTool = (tool: string) =>
       new Promise<string>((resolve, reject) => {
