@@ -1,0 +1,287 @@
+---
+title: "可选：使用 Greengrass 掷骰子"
+description: 让 Dungeon Adventure Story Agent 调用一个工具,该工具从 Greengrass 核心设备请求掷骰子并在故事中使用其结果。
+---
+
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
+import RunGenerator from '@components/run-generator.astro';
+import InstallCommand from '@components/install-command.astro';
+import E2ECode from '@components/e2e-code.astro';
+import E2EDiff from '@components/e2e-diff.astro';
+import { getDungeonDiceDependencies } from '../../../../../../../../e2e/src/utils';
+
+保留您在<Link path="get_started/tutorials/dungeon-game/4">模块 4</Link> 中部署的地牢。
+在销毁它之前,为其 Story Agent 添加一个骰子设备:
+
+> "我尝试撬锁。掷一个 d20 看看我是否成功。"
+
+代理调用 `roll-dice`。Greengrass 核心上的 Python 组件生成
+掷骰结果,MCP 工具将该设备结果返回给代理。回复
+然后可以说"d20: 17"并描述结果。
+
+此可选路径使用带有软件骰子模拟器的 EC2 核心。您可以
+稍后将其随机数函数替换为来自物理骰子托盘的输入。
+<Link path="get_started/tutorials/greengrass/overview">独立的 Greengrass 教程</Link>
+仍然是从空工作区学习组件生成的单独方式。
+
+## 您将添加的内容
+
+```d2
+direction: right
+player: Player
+agent: Story Agent
+tool: "Inventory MCP server\nroll-dice"
+dice_shadow: "AWS IoT Core\nnamed shadow: dungeon-dice"
+device: "Greengrass core\ncom.example.DungeonDice"
+player -> agent: "Attempt an action"
+agent -> tool: "roll-dice(sides=20)"
+tool -> dice_shadow: "Desired request + request ID"
+dice_shadow -> device: "MQTT delta through IPC"
+device -> dice_shadow: "Reported result + same ID"
+dice_shadow -> tool: "Correlated result"
+tool -> agent: "d20 = 17"
+agent -> player: "Result and consequence"
+```
+
+云影子保存一个待处理的请求和最近的结果。
+工具等待最多 12 秒;它从不生成后备掷骰。版本
+检查防止并发调用者替换活动请求。设备
+在发布之前存储其最后的结果,因此 MQTT 重新传递和组件
+重启不会重新掷同一个请求。
+
+此沙箱在玩家之间共享一个骰子设备。繁忙的设备返回
+错误。它不添加全队列或将个人设备与
+Cognito 用户关联。这些是多人产品的单独扩展。
+
+## 1. 在不拆除地牢的情况下配置核心
+
+使用与已部署地牢相同的 AWS 账户和区域。明确设置配置文件;
+为设备资源使用新前缀:
+
+```bash
+export TUTORIAL_AWS_PROFILE=<your-dungeon-profile>
+export TUTORIAL_AWS_REGION=<your-dungeon-region>
+export TUTORIAL_PREFIX=gg-dungeon-dice
+```
+
+从**地牢工作区**遵循<Link path="get_started/tutorials/greengrass/2">配置核心设备</Link>,
+包括删除临时安装程序策略。该页面创建实例并写入 `.greengrass-tutorial.env`。
+不要创建另一个 Nx 工作区或运行独立的心跳模块。
+设置脚本的现有默认值保持不变。
+
+```bash
+source .greengrass-tutorial.env
+export DICE_IOT_ENDPOINT=$(aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" \
+  iot describe-endpoint --endpoint-type iot:Data-ATS --query endpointAddress --output text)
+```
+
+在启用工具之前,初始化新设备的命名影子一次。不要
+对具有活动骰子请求的设备运行此重置:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" \
+  iot-data update-thing-shadow --endpoint-url "https://${DICE_IOT_ENDPOINT}" \
+  --thing-name "$TUTORIAL_THING_NAME" --shadow-name dungeon-dice \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"state":{"desired":{"command":null},"reported":{"command":null,"result":null}}}' \
+  /tmp/dungeon-dice-shadow.json
+```
+
+EC2 演练使用 x86_64 Linux。运行 64 位 Linux 的 Raspberry Pi 使用
+`linux-arm64`;生成的配方和本机依赖项都必须
+针对该架构。请参阅<Link path="guides/greengrass-component#硬件和操作系统">硬件支持</Link>。
+ESP32 可以向网关提供传感器输入,但无法运行此 Python 组件。
+
+## 2. 生成骰子组件
+
+创建一个单独的 Python 主机,以便设备工件不携带 Story
+Agent 的云依赖项:
+
+<RunGenerator generator="py#project" requiredParameters={{ name: 'edge' }} readonly />
+<RunGenerator generator="greengrass#component" requiredParameters={{ project: 'edge', name: 'dice', language: 'python', componentName: 'com.example.DungeonDice', componentVersion: 'NEXT_PATCH', platform: 'linux-amd64', ipc: true, infra: 'component-version', iac: 'cdk' }} readonly />
+
+替换 `packages/edge/greengrass/dice/main.py`:
+
+<E2ECode lang="python" path="dungeon-adventure/dice/main.py.template" />
+
+替换 `packages/edge/greengrass/dice/recipe.yaml`:
+
+<E2ECode lang="yaml" path="dungeon-adventure/dice/recipe.yaml.template" />
+
+将**每个** `REPLACE_WITH_CORE_THING_NAME` 替换为
+`TUTORIAL_THING_NAME` 的值。配方的 IPC 权限仅命名此设备的骰子
+影子主题。Python 在组件的可写
+工作目录中写入 `dice-result.json`,在其只读工件目录之外。
+
+替换 `packages/edge/tests/greengrass/test_dice.py`:
+
+<E2ECode lang="python" path="dungeon-adventure/dice/test_dice.py.template" />
+
+这些测试练习有效的掷骰、重复、重启恢复、过时请求、
+过期和持久性失败。默认生成器的心跳测试被
+替换,因为组件现在实现了不同的行为。
+
+## 3. 添加代理的骰子工具
+
+将 IoT 数据平面客户端添加到 Inventory MCP 项目:
+
+<InstallCommand pkg={getDungeonDiceDependencies()} project="@dungeon-adventure/inventory" />
+
+创建 `packages/inventory/src/mcp-server/roll-dice.ts`:
+
+<E2ECode lang="typescript" path="dungeon-adventure/dice/roll-dice.ts.template" />
+
+创建 `packages/inventory/src/mcp-server/register-dice.ts`:
+
+<E2ECode lang="typescript" path="dungeon-adventure/dice/register-dice.ts.template" />
+
+更新 `packages/inventory/src/mcp-server/server.ts`:
+
+<E2EDiff lang="typescript" before="dungeon-adventure/2/mcp/server.ts.template" after="dungeon-adventure/dice/server.ts.template" />
+
+保留所有三个库存工具。生成的 Story Agent 连接已经
+从此服务器发现工具,因此它也将发现 `roll-dice`。
+该工具仅接受骰子大小。设备标识和端点来自
+服务器的配置;模型无法选择另一个设备或 MQTT 主题。
+在本地开发期间,库存工具在没有 `DICE_*`
+环境变量的情况下仍然可用。调用 `roll-dice` 会返回未配置设备
+错误,直到设置 `DICE_THING_NAME`、`DICE_IOT_ENDPOINT` 和 `DICE_AWS_REGION`。
+
+更新 `packages/story/dungeon_adventure_story/agent/agent.py`:
+
+<E2EDiff lang="python" before="dungeon-adventure/3/agent.py.template" after="dungeon-adventure/dice/agent.py.template" />
+
+替换允许顺序调用,因此成功的掷骰可以跟随
+库存更新。它仍然每回合只允许一次掷骰,并明确
+在骰子工具失败时停止挑战。
+
+## 4. 将设备资源组合到现有应用程序中
+
+创建 `packages/infra/src/dice-resources.ts`:
+
+<E2ECode lang="typescript" path="dungeon-adventure/dice/dice-resources.ts.template" />
+
+更新 `packages/infra/src/stacks/application-stack.ts` 以将设备
+配置传递给 MCP 服务器并授予其运行时访问影子的权限:
+
+<E2EDiff lang="typescript" before="dungeon-adventure/2/stacks/application-stack.ts.template" after="dungeon-adventure/dice/application-stack.ts.template" />
+
+保留现有应用程序堆栈的其余部分。`DiceResources` 拥有
+设备参数、工件授权、组件及其
+部署。
+
+有三个权限边界:
+
+- 核心的现有 IoT 证书策略允许在 `$aws/things/<thing-name>/shadow/*` 上发布、订阅
+  和接收,其中已经包括
+  命名的 `dungeon-dice` 影子。不需要额外的证书策略。
+- 骰子配方通过 IPC 授予组件访问这些主题的权限。
+- Inventory MCP 运行时在
+  仅此物品的命名 `dungeon-dice` 影子上获取 `GetThingShadow` 和 `UpdateThingShadow`。
+
+工件授权让核心的令牌交换角色仅获取
+`com.example.DungeonDice/*`。部署依赖于组件发布。
+
+构建,然后使用所有四个参数值进行部署:
+
+<NxCommands commands={['sync']} />
+<InstallCommand />
+<PackageManagerShortCommand commands={['lint --skip-nx-cache']} />
+<NxCommands commands={['run-many --target build --all']} />
+
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @dungeon-adventure/infra:deploy -- "dungeon-adventure-infra-sandbox/**" --parameters dungeon-adventure-infra-sandbox-Application:DiceThingName="$TUTORIAL_THING_NAME" --parameters dungeon-adventure-infra-sandbox-Application:DiceEndpoint="$DICE_IOT_ENDPOINT" --parameters dungeon-adventure-infra-sandbox-Application:TokenExchangeRoleArn="$TUTORIAL_TOKEN_EXCHANGE_ROLE_ARN" --parameters dungeon-adventure-infra-sandbox-Application:ThingGroupArn="$TUTORIAL_THING_GROUP_ARN"']} />
+
+为应用程序堆栈限定参数,因为 WAF 堆栈未定义它们。
+
+对此演练使用 `deploy`。组件/版本更改替换
+CloudFormation 资源;<Link path="guides/greengrass-component#部署修订">部署修订</Link>
+解释了 `deploy-sandbox` 所需的额外回滚标志。
+
+等待组件为 `RUNNING`:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" \
+  greengrassv2 list-installed-components --core-device-thing-name "$TUTORIAL_THING_NAME" \
+  --query "installedComponents[?componentName=='com.example.DungeonDice'].[componentVersion,lifecycleState]" \
+  --output table
+```
+
+## 5. 让代理掷骰子
+
+打开已部署的游戏,开始新对话或重新加载现有对话,
+并询问:
+
+> "在骰子设备上掷一个 d20 来尝试撬开这把锁。"
+
+代理应该调用 `roll-dice` 并描述返回的值和
+后果。读取云影子以将其 `reported.result` 与
+工具结果和代理的回复进行比较:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" \
+  iot-data get-thing-shadow --endpoint-url "https://${DICE_IOT_ENDPOINT}" \
+  --thing-name "$TUTORIAL_THING_NAME" --shadow-name dungeon-dice \
+  /tmp/dungeon-dice-shadow.json
+cat /tmp/dungeon-dice-shadow.json
+```
+
+成功的结果包括 `requestId`、`sides`、`value` 和 `rolledAt`。
+`/greengrass/v2/logs/com.example.DungeonDice.log` 处的设备日志记录
+相同的请求 ID 和值。仅成功部署并不能证明此
+往返。
+
+要练习失败路径,请通过其 Systems Manager 终端在此一次性
+核心上停止 Greengrass 服务,请求另一次掷骰,并验证
+工具在其有界等待后报告错误。代理应该告诉
+您设备不可用,而不是决定挑战。在继续之前重新启动
+服务。过期的待处理请求在
+设备重新连接时不得掷骰;新的工具调用创建新请求。
+
+对于版本更新练习,更改组件的日志消息,重新构建并
+运行相同的部署命令。`NEXT_PATCH` 发布新版本。确认
+新的运行版本,然后请求另一次掷骰。
+
+## 6. 继续玩,或删除所有内容
+
+仅删除扩展:
+
+1. 从应用程序堆栈记录 `DiceArtifactBucket`、`DiceComponentArn` 和 `DiceDeploymentId`
+   输出。
+2. 从
+   `packages/infra/src/dice-resources.ts` 中删除 `this.deployment.addComponent(component)`。使用相同的参数重新部署。
+   这会发送一个空的部署修订;等待
+   `list-installed-components` 不再列出 `com.example.DungeonDice`。
+3. 恢复基本的 <Link path="get_started/tutorials/dungeon-game/3">Story Agent 提示</Link>,
+   删除 `registerDiceTool` 导入和调用,并恢复
+   <Link path="get_started/tutorials/dungeon-game/2#连接堆栈">模块 2 应用程序堆栈</Link>。
+   重新构建并部署地牢。这将删除 MCP 权限及其
+   骰子配置。
+4. 使用<Link path="get_started/tutorials/greengrass/cleanup#任务-3删除保留的-greengrass-资源">保留资源清理过程</Link>删除保留的 Greengrass 部署记录、组件版本和
+   工件存储桶。
+   将 `com.example.DungeonDice` 替换为 `com.example.Pulse` 并使用
+   记录的骰子输出。包括您的更新
+   练习创建的每个版本/修订。
+5. 删除命名影子,然后运行设置脚本的清理并删除
+   所有者管理的实例配置文件和角色,如
+   <Link path="get_started/tutorials/greengrass/cleanup">设备清理指南</Link>中所述。
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" \
+  iot-data delete-thing-shadow --endpoint-url "https://${DICE_IOT_ENDPOINT}" \
+  --thing-name "$TUTORIAL_THING_NAME" --shadow-name dungeon-dice \
+  /tmp/dungeon-dice-shadow-deleted.json
+```
+
+在这些步骤之后,地牢仍然保持部署。要删除整个应用程序,
+继续<Link path="get_started/tutorials/dungeon-game/wrap-up#销毁资源">销毁资源</Link>,
+包括其保留的用户池、SMS 角色和对话历史存储桶。
+
+## 进一步实验
+
+- 使用带有 64 位操作系统和物理传感器的 Raspberry Pi。保留请求 ID
+  和超时契约,同时替换 `secrets.randbelow`。
+- 使用 ESP32 读取传感器并将其结果发送到 Linux 网关。
+  这会添加固件和设备身份验证;它不是此 Python 组件的另一个 CPU 目标。
+- 将组件拆分为本地骰子引擎和通过 Greengrass pub/sub 连接的 MQTT 桥接。

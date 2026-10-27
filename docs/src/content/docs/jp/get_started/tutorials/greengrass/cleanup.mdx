@@ -1,0 +1,137 @@
+---
+title: 削除とクリーンアップ
+description: 空のデプロイメントリビジョンでデバイスからコンポーネントを削除し、スタックを破棄してから、保持されたGreengrassリソースとセットアップスクリプトが作成したすべてのものを削除します
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import E2EDiff from '@components/e2e-diff.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+クリーンアップは作成の逆順で実行されます。まずデバイスがコンポーネントの実行を停止し、次にスタックが削除され、その後スタックが保持したリソース、デバイスとそのアイデンティティ、最後にインスタンスプロファイルが削除されます。
+
+## タスク1: デバイスからコンポーネントを削除する
+
+デプロイメントリソースを削除すると、デプロイメント管理状態が削除されます。デバイスから何もアンインストールされません。デバイスは、コンポーネントがリストされなくなったデプロイメントリビジョンを受信したときにのみ、コンポーネントを削除します。公開されたバージョンは管理されたままで、デプロイメントがコンポーネントをリストしないようにスタックを変更します。
+
+<E2EDiff before="greengrass-tutorial/application-stack.ts.template" after="greengrass-tutorial/application-stack.ts.removed.template" lang="typescript" />
+
+リビジョンをデプロイします。
+
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @greengrass-tutorial/infra:deploy -- "greengrass-tutorial-infra-sandbox/**" --parameters TokenExchangeRoleArn="$TUTORIAL_TOKEN_EXCHANGE_ROLE_ARN" --parameters ThingGroupArn="$TUTORIAL_THING_GROUP_ARN"']} />
+
+コンポーネントがデバイスから消え、デバイスが正常な状態を維持するまで待ちます。
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 list-installed-components \
+  --core-device-thing-name "$TUTORIAL_THING_NAME" \
+  --query 'installedComponents[].componentName' --output text
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 get-core-device \
+  --core-device-thing-name "$TUTORIAL_THING_NAME" --query status --output text
+```
+
+最初のコマンドは`com.example.Pulse`をリストしなくなる必要があります。2番目のコマンドは`HEALTHY`を出力する必要があります。MQTTテストクライアントはハートビートの受信を停止します。
+
+## タスク2: スタックを破棄する
+
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @greengrass-tutorial/infra:destroy -- "greengrass-tutorial-infra-sandbox/**" --force']} />
+
+スタックは削除されましたが、コンポーネントバージョンは不変であり、単一のデプロイメントよりも長く存続するため、3種類のリソースが意図的に保持されます。
+
+- `com.example.Pulse`の両方のコンポーネントバージョン、`1.0.0`と`1.0.1`。
+- モノグループへの3つのデプロイメントリビジョン。
+- 公開されたバージョンごとに1つのアーカイブを含むアーティファクトバケット。
+
+CDKブートストラップスタック`CDKToolkit`も残ります。これはアカウントとリージョン内のすべてのCDKアプリケーションで共有されるため、このチュートリアルのために作成した場合を除き、そのままにしておきます。
+
+## タスク3: 保持されたGreengrassリソースを削除する
+
+モノグループへのデプロイメントをリストします。まだ`ACTIVE`なものをキャンセルしてから、それぞれを削除します。
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 list-deployments \
+  --target-arn "$TUTORIAL_THING_GROUP_ARN" --history-filter ALL \
+  --query 'deployments[].[deploymentId,deploymentStatus]' --output text
+
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 cancel-deployment \
+  --deployment-id <active-deployment-id>
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 delete-deployment \
+  --deployment-id <deployment-id>
+```
+
+コンポーネントの公開されたすべてのバージョンを削除します。
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 list-component-versions \
+  --arn "arn:aws:greengrass:${TUTORIAL_AWS_REGION}:${TUTORIAL_ACCOUNT_ID}:components:com.example.Pulse" \
+  --query 'componentVersions[].arn' --output text
+
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 delete-component \
+  --arn <component-version-arn>
+```
+
+コンストラクトが適用する所有権タグを通じてアーティファクトバケットを見つけ、リストにこのチュートリアルのバケットのみが含まれていることを確認してから、そのオブジェクトバージョンとバケットを削除します。
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" resourcegroupstaggingapi get-resources \
+  --tag-filters Key=greengrass-artifact-repository,Values=true \
+  --resource-type-filters s3:bucket \
+  --query 'ResourceTagMappingList[].ResourceARN' --output text
+
+export TUTORIAL_BUCKET=<bucket-name>
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" s3api list-object-versions \
+  --bucket "$TUTORIAL_BUCKET" \
+  --query '{Objects: Versions[].{Key: Key, VersionId: VersionId}}' --output json \
+  > /tmp/greengrass-tutorial-versions.json
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" s3api delete-objects \
+  --bucket "$TUTORIAL_BUCKET" --delete file:///tmp/greengrass-tutorial-versions.json
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" s3api delete-bucket \
+  --bucket "$TUTORIAL_BUCKET"
+```
+
+バケットはバージョン管理されているため、`delete-objects`は各バージョンを指定する必要があります。`list-object-versions`が`DeleteMarkers`も報告する場合は、バケットを削除する前にそれらのエントリで削除を繰り返します。
+
+## タスク4: コアデバイスとそのアイデンティティを削除する
+
+スクリプトの`cleanup`操作は`.greengrass-tutorial.env`を読み取り、同じアカウント、リージョン、プレフィックスに属していることを確認してから、インスタンスを終了し、証明書にアタッチされたすべてのポリシーとともに証明書をデタッチして削除し、コアデバイスレコード、モノとモノグループ、両方のIoTポリシー、ロールエイリアス、トークン交換ロールとそのアタッチメント、およびアクセスポリシーを削除します。
+
+```bash
+./setup-greengrass-tutorial.sh cleanup \
+  --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" --prefix "$TUTORIAL_PREFIX"
+```
+
+各ステップは`deleted`または`absent`を出力します。すでに削除されているオブジェクトはスキップされます。その他のエラーは実行を停止し、状態ファイルを保持するため、原因を修正して同じコマンドを再実行できます。
+
+<Aside type="note" title="ロールの順序が重要">
+クリーンアップを実行する前にスタックを破棄してください。スタックの読み取り許可は、トークン交換ロールのインラインポリシーです。クリーンアップは、ロールを削除できるように見つけたインラインポリシーを削除しますが、まだロールを参照しているスタックは、次の更新に失敗します。
+</Aside>
+
+## タスク5: インスタンスプロファイルを削除する
+
+インスタンスプロファイルはあなたのものだったため、スクリプトはそのままにしておきます。
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam remove-role-from-instance-profile \
+  --instance-profile-name "${TUTORIAL_PREFIX}-instance" --role-name "${TUTORIAL_PREFIX}-instance"
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam delete-instance-profile \
+  --instance-profile-name "${TUTORIAL_PREFIX}-instance"
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam delete-role-policy \
+  --role-name "${TUTORIAL_PREFIX}-instance" --policy-name greengrass-installer-bootstrap
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam detach-role-policy \
+  --role-name "${TUTORIAL_PREFIX}-instance" \
+  --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam delete-role \
+  --role-name "${TUTORIAL_PREFIX}-instance"
+rm -f .greengrass-tutorial.env
+```
+
+モジュール2でブートストラップポリシーをすでに削除している場合、`delete-role-policy`は`NoSuchEntity`で失敗します。これは予想される動作です。
+
+## 学んだこと
+
+- 生成されたコンポーネントは、デフォルトでローカルIPCを介して公開します。クラウドMQTTには、`publish_to_iot_core`、レシピ内の`aws.greengrass.ipc.mqttproxy`認可、およびデバイスのIoTポリシー内の`iot:Publish`が必要です。
+- ジェネレーターはビルディングブロックを提供します。CDKスタックはアーティファクトリポジトリ、読み取り許可、デプロイメントを所有し、`addComponent`は解決されたバージョンと順序エッジを運びます。
+- `NEXT_PATCH`はコンテンツからバージョンを割り当てます。ソースの変更により、通常の`deploy`を通じて次のパッチバージョンが公開されます。
+- コンポーネントの削除はデプロイメントリビジョンです。インフラストラクチャの削除は別の後続のステップであり、保持されたバージョン、デプロイメント、およびバケットを削除するために残します。
+
+バージョン管理とアーティファクトの保持については、コンポーネントガイドの<Link path="guides/greengrass-component#自動バージョニング">バージョン管理</Link>および<Link path="guides/greengrass-component#アーティファクトストレージと保持">アーティファクトストレージ</Link>セクションをお読みください。同じガイドには、より大規模なデプロイメントで考慮すべきサービス制限がリストされています。
