@@ -1,0 +1,131 @@
+---
+title: Triển khai, quan sát và cập nhật
+description: Soạn kho lưu trữ artifact, quyền đọc, phiên bản component và deployment trong CDK, theo dõi heartbeat đến AWS IoT Core, sau đó xuất bản bản cập nhật NEXT_PATCH
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import E2EDiff from '@components/e2e-diff.astro';
+import InstallCommand from '@components/install-command.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+## Nhiệm vụ 1: Soạn stack
+
+Generator cung cấp các khối xây dựng, không phải deployment. Stack của bạn quyết định nơi lưu trữ artifacts, role nào có thể đọc chúng, và fleet nào nhận component. Thay thế `packages/infra/src/stacks/application-stack.ts`:
+
+<E2EDiff before="greengrass-tutorial/application-stack.ts.original.template" after="greengrass-tutorial/application-stack.ts.template" lang="typescript" />
+
+Chức năng của từng phần:
+
+- `GreengrassArtifactBucket` tạo kho lưu trữ artifact được giữ lại, có phiên bản, chỉ dùng TLS. `grantReadTo` cấp cho token exchange role quyền `s3:GetObject` trên `com.example.Pulse/*`, bao gồm mọi artifact key mà resolver ghi cho component này.
+- `Pulse` mở rộng `GreengrassComponentVersion`. Nó đọc recipe và `pulse.zip` mà `pulse-artifact` đã build, tải lên archive dưới một key được hash nội dung, và xuất bản phiên bản component. Thuộc tính `bucket` của nó nhận chính construct `GreengrassArtifactBucket`.
+- `GreengrassDeployment` với `targetArn` triển khai đến thing group mà script thiết lập đã tạo. `addComponent(pulse)` đặt phiên bản đã resolve vào component map của deployment và thêm dependency CloudFormation vào tài nguyên phiên bản component, do đó IoT job không thể đến thiết bị trước khi phiên bản tồn tại.
+- Hai giá trị `CfnParameter` đến từ `.greengrass-tutorial.env`. Truyền chúng dưới dạng parameters giữ cho stack không có literals cụ thể theo tài khoản và cho phép bộ e2e suite tổng hợp cùng một file.
+
+## Nhiệm vụ 2: Bootstrap và triển khai
+
+Tải các giá trị đã ghi lại, đồng bộ hóa các tham chiếu dự án và dependency manifests, cài đặt các dependencies workspace đã cập nhật, và bootstrap CDK trong tài khoản và Region nếu bạn chưa làm trước đó:
+
+```bash
+source .greengrass-tutorial.env
+```
+
+<NxCommands commands={['sync']} />
+<InstallCommand />
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @greengrass-tutorial/infra:bootstrap']} />
+
+Triển khai stack. `packages/infra/src/main.ts` đặt stack trong stage `greengrass-tutorial-infra-sandbox`, và target `deploy` chạy `cdk deploy` mà không có stage riêng, do đó lệnh đặt tên cho stage đó và truyền các ARN của role và thing group dưới dạng parameters CloudFormation:
+
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @greengrass-tutorial/infra:deploy -- "greengrass-tutorial-infra-sandbox/**" --parameters TokenExchangeRoleArn="$TUTORIAL_TOKEN_EXCHANGE_ROLE_ARN" --parameters ThingGroupArn="$TUTORIAL_THING_GROUP_ARN"']} />
+
+`deploy` phụ thuộc vào `^assemble`, và dự án shared constructs phụ thuộc vào `assemble` của dự án telemetry, chạy `pulse-artifact`. Do đó, mỗi lần deploy đều xuất bản artifact khớp với source hiện tại của bạn. Target chạy `cdk deploy` mà không có express mode, do đó nó chấp nhận revision deployment sau này thay thế tài nguyên deployment. Đọc <Link path="guides/greengrass-component#bản-sửa-đổi-triển-khai">deployment revisions</Link> trước khi sử dụng `deploy-sandbox` cho Greengrass.
+
+Ở lần deploy đầu tiên, version resolver không tìm thấy phiên bản đã xuất bản nào của `com.example.Pulse` và xuất bản `1.0.0`. Deployment sau đó đến thing group, và core device tải xuống artifact với token exchange role và khởi động component. Cho phép một đến hai phút sau khi stack hoàn thành.
+
+## Nhiệm vụ 3: Theo dõi heartbeat
+
+Mở AWS IoT console trong `$TUTORIAL_AWS_REGION`, chọn **MQTT test client**, và đăng ký topic:
+
+```text
+tutorial/greengrass/heartbeat
+```
+
+Cứ mỗi 30 giây một message đến:
+
+```json
+{"sequence": 3, "greeting": "hello from pulse"}
+```
+
+AWS CLI không thể đăng ký các MQTT topics. Nếu bạn thích MQTT client của riêng mình, kết nối nó với data endpoint của tài khoản với certificate và policy riêng của nó, mà tutorial này không tạo:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iot describe-endpoint \
+  --endpoint-type iot:Data-ATS --query endpointAddress --output text
+```
+
+## Nhiệm vụ 4: Kiểm tra thiết bị
+
+Một deployment thành công chứng minh thiết bị đã áp dụng deployment document. Nó không chứng minh component chạy. Kiểm tra lifecycle state của component đã cài đặt:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 list-installed-components \
+  --core-device-thing-name "$TUTORIAL_THING_NAME" \
+  --query 'installedComponents[?componentName==`com.example.Pulse`].[componentVersion,lifecycleState]' \
+  --output text
+```
+
+Mong đợi `1.0.0` và `RUNNING`. Sau đó đọc log riêng của component trên instance với mẫu Systems Manager từ module 2:
+
+```bash
+cat > /tmp/greengrass-tutorial-command.json <<'EOF'
+{ "commands": ["#!/bin/bash", "tail -n 20 /greengrass/v2/logs/com.example.Pulse.log"] }
+EOF
+
+TUTORIAL_COMMAND_ID=$(aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" ssm send-command \
+  --instance-ids "$TUTORIAL_INSTANCE_ID" --document-name AWS-RunShellScript \
+  --parameters file:///tmp/greengrass-tutorial-command.json \
+  --query Command.CommandId --output text)
+sleep 5
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" ssm get-command-invocation \
+  --command-id "$TUTORIAL_COMMAND_ID" --instance-id "$TUTORIAL_INSTANCE_ID" \
+  --query StandardOutputContent --output text
+```
+
+Log hiển thị kết nối IPC và một dòng cho mỗi heartbeat:
+
+```text
+INFO:awsiot.eventstreamrpc:<Connection ...> /greengrass/v2/ipc.socket:0> connected
+INFO:com.example.Pulse:Published heartbeat 0 to tutorial/greengrass/heartbeat
+INFO:com.example.Pulse:Published heartbeat 1 to tutorial/greengrass/heartbeat
+```
+
+Nếu deployment báo cáo `SUCCEEDED` nhưng component là `BROKEN`, hoặc `get-core-device` báo cáo `UNHEALTHY`, hãy làm theo <Link path="guides/greengrass-component#khắc-phục-sự-cố-và-giới-hạn-dịch-vụ">các bước khắc phục sự cố component</Link>.
+
+## Nhiệm vụ 5: Cập nhật component
+
+Thay đổi greeting trong `packages/telemetry/greengrass/pulse/main.py`:
+
+<E2EDiff before="greengrass-tutorial/main.py.template" after="greengrass-tutorial/main.py.updated.template" lang="python" />
+
+Triển khai lại với cùng lệnh:
+
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @greengrass-tutorial/infra:deploy -- "greengrass-tutorial-infra-sandbox/**" --parameters TokenExchangeRoleArn="$TUTORIAL_TOKEN_EXCHANGE_ROLE_ARN" --parameters ThingGroupArn="$TUTORIAL_THING_GROUP_ARN"']} />
+
+Nx thấy source đã thay đổi và rebuild `pulse-artifact`. Content hash của archive thay đổi, do đó resolver phân bổ `1.0.1`, artifact được tải lên dưới một key mới, một phiên bản component mới được xuất bản, và một revision deployment mới hướng thing group đến nó. Recipe vẫn nói `NEXT_PATCH`; không có gì trong workspace ghi lại số.
+
+Xác minh cả phiên bản đã cài đặt và payload:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 list-installed-components \
+  --core-device-thing-name "$TUTORIAL_THING_NAME" \
+  --query 'installedComponents[?componentName==`com.example.Pulse`].[componentVersion,lifecycleState]' \
+  --output text
+```
+
+Mong đợi `1.0.1` và `RUNNING`. Trong MQTT test client, greeting thay đổi thành `hello from the updated pulse`, và sequence khởi động lại từ `0` vì process component đã được khởi động lại.
+
+<Aside type="tip" title="Triển khai lại không thay đổi">
+Triển khai lại mà không có thay đổi source hoặc recipe sẽ tái sử dụng `1.0.1`. Resolver so sánh content hash với tag trên phiên bản cao nhất đã xuất bản và trả về phiên bản đó thay vì phân bổ một phiên bản mới. Đọc <Link path="guides/greengrass-component#quản-lý-phiên-bản-tự-động">automatic versioning</Link> để biết các quy tắc và giới hạn của chúng.
+</Aside>
+
+Tiếp tục với <Link path="get_started/tutorials/greengrass/cleanup">Remove and clean up</Link>.

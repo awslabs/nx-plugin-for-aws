@@ -32,6 +32,9 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 ## リソースの破棄
 
+引き続きプレイして、まずエッジデバイスを追加したいですか？<Link path="get_started/tutorials/dungeon-game/greengrass-dice">オプション: Greengrass でサイコロを振る</Link>に進んでください。
+Story Agent はデバイスからロールをリクエストするツールを呼び出し、返された値をゲームで使用します。そのルートのためにデプロイされたダンジョンを保持してください。拡張機能のみを削除する方法、またはアプリケーション全体を削除する方法の手順が含まれています。
+
 1. 作成された AWS リソースを破棄するには、次のコマンドを実行します：
 
 <NxCommands commands={['destroy-sandbox infra']} />
@@ -40,11 +43,28 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 2. `y` を入力して続行します。CloudFormation がスタックを破棄します。
 
-:::caution[2つのリソースは意図的に保持されます]
-スタックを削除すると2つのリソースが残るため、ティアダウンによってユーザーやストーリーが失われることはありません：
+:::note[AppConfig の削除保護がスタックの削除をブロックする場合]
+チュートリアルアプリの使用を停止してください。失敗したスタックの **Resources** タブで、所有する AppConfig アプリケーションの正確な物理 ID と、削除に失敗した環境および構成プロファイルの ID のみを記録してください。
+
+最後の構成読み取り後にアカウントの[削除保護間隔](https://docs.aws.amazon.com/appconfig/2019-10-09/APIReference/API_DeletionProtectionSettings.html)を待ってから破棄を再試行するか、または破棄されたこれらのチュートリアルリソースのみを削除してください：
+`aws appconfig delete-environment` を `--application-id` と `--environment-id` と共に使用し、`aws appconfig delete-configuration-profile` を `--application-id` と `--configuration-profile-id` と共に使用します。記録した ID と `--deletion-protection-check BYPASS` を、明示的な `--profile` と `--region` と共に各呼び出しで指定してください。その後、destroy コマンドを再実行してください。
+:::
+
+:::caution[保持されるリソース]
+スタックの削除により、以下のリソースが個別のクリーンアップのために残されます：
 
 - **Cognito ユーザープール**：`ts#website#auth` が削除保護を有効にして作成します。
+- プールの **SMS IAM ロール**：プールと共に保持されるため、引き続き更新および削除できます。
 - **Story Agent のセッションバケット**：会話履歴を保持し、デフォルトで `RemovalPolicy.RETAIN` に設定されています。
+- **Game API アクセスログループ**。
+- ユーザープール WAF ログ、Game API ログ、Story Agent セッション、ウェブサイト用の 4 つの**カスタマー管理 KMS キー**。
+- **API Gateway CloudWatch IAM ロール**：そのリージョナルアカウント設定は REST API によって共有されます。
 
-これらが不要になったら手動で削除してください。ユーザープールの場合は、まず削除保護をオフにしてください。
+プールを削除する前に、ユーザープールの SMS 設定から SMS ロール ARN を記録してください。プールの削除保護をオフにし、プールを削除してから、このアプリケーションが所有する SMS ロールとアタッチされたポリシーを削除します。セッションバケットを削除する前に、オブジェクトバージョンと削除マーカーを含めて空にしてください。
+ログが不要になったら、Game API アクセスログループを削除してください。
+
+保持するデータを読み取るために必要な KMS キーは保持してください。このアプリケーションの未使用のキーの削除を、少なくとも 7 日間の待機期間でスケジュールしてください。
+キーはその期間が終了するまで `PendingDeletion` のままになります。
+
+他の REST API が使用している場合は、API Gateway ロールを保持してください。未使用のチュートリアル所有ロールを削除する前に、リージョナルアカウントの CloudWatch ロール設定と依存関係を確認し、削除する前にそのアカウント参照を更新してください。
 :::

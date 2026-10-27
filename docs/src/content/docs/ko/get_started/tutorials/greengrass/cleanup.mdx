@@ -1,0 +1,137 @@
+---
+title: 제거 및 정리
+description: 빈 배포 리비전으로 디바이스에서 컴포넌트를 제거하고, 스택을 삭제한 다음, 보존된 Greengrass 리소스와 설정 스크립트가 생성한 모든 것을 삭제합니다
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import E2EDiff from '@components/e2e-diff.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+정리는 생성의 역순으로 실행됩니다: 먼저 디바이스가 컴포넌트 실행을 중지하고, 그 다음 스택이 삭제되고, 스택이 보존한 리소스가 삭제되고, 디바이스와 그 자격 증명이 삭제되고, 마지막으로 인스턴스 프로파일이 삭제됩니다.
+
+## 작업 1: 디바이스에서 컴포넌트 제거
+
+배포 리소스를 삭제하면 배포 관리 상태가 제거됩니다. 디바이스에서 아무것도 제거하지 않습니다. 디바이스는 더 이상 컴포넌트를 나열하지 않는 배포 리비전을 받을 때만 컴포넌트를 제거합니다. 게시된 버전은 관리된 상태로 유지하면서 배포가 컴포넌트를 나열하지 않도록 스택을 변경합니다:
+
+<E2EDiff before="greengrass-tutorial/application-stack.ts.template" after="greengrass-tutorial/application-stack.ts.removed.template" lang="typescript" />
+
+리비전을 배포합니다:
+
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @greengrass-tutorial/infra:deploy -- "greengrass-tutorial-infra-sandbox/**" --parameters TokenExchangeRoleArn="$TUTORIAL_TOKEN_EXCHANGE_ROLE_ARN" --parameters ThingGroupArn="$TUTORIAL_THING_GROUP_ARN"']} />
+
+컴포넌트가 디바이스에서 사라지고 디바이스가 정상 상태를 유지할 때까지 기다립니다:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 list-installed-components \
+  --core-device-thing-name "$TUTORIAL_THING_NAME" \
+  --query 'installedComponents[].componentName' --output text
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 get-core-device \
+  --core-device-thing-name "$TUTORIAL_THING_NAME" --query status --output text
+```
+
+첫 번째 명령은 더 이상 `com.example.Pulse`를 나열하지 않아야 합니다. 두 번째 명령은 `HEALTHY`를 출력해야 합니다. MQTT 테스트 클라이언트는 하트비트 수신을 중지합니다.
+
+## 작업 2: 스택 삭제
+
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @greengrass-tutorial/infra:destroy -- "greengrass-tutorial-infra-sandbox/**" --force']} />
+
+스택은 사라졌지만, 컴포넌트 버전은 불변이며 단일 배포보다 오래 지속되기 때문에 세 가지 종류의 리소스가 의도적으로 보존됩니다:
+
+- `com.example.Pulse`의 두 컴포넌트 버전, `1.0.0`과 `1.0.1`.
+- 사물 그룹에 대한 세 개의 배포 리비전.
+- 게시된 버전당 하나의 아카이브가 있는 아티팩트 버킷.
+
+CDK 부트스트랩 스택 `CDKToolkit`도 남아 있습니다. 이는 계정과 리전의 모든 CDK 애플리케이션에서 공유되므로, 이 튜토리얼을 위해 생성한 경우가 아니면 그대로 두십시오.
+
+## 작업 3: 보존된 Greengrass 리소스 삭제
+
+사물 그룹에 대한 배포를 나열합니다. 여전히 `ACTIVE` 상태인 배포를 취소한 다음, 각각을 삭제합니다:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 list-deployments \
+  --target-arn "$TUTORIAL_THING_GROUP_ARN" --history-filter ALL \
+  --query 'deployments[].[deploymentId,deploymentStatus]' --output text
+
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 cancel-deployment \
+  --deployment-id <active-deployment-id>
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 delete-deployment \
+  --deployment-id <deployment-id>
+```
+
+컴포넌트의 게시된 모든 버전을 삭제합니다:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 list-component-versions \
+  --arn "arn:aws:greengrass:${TUTORIAL_AWS_REGION}:${TUTORIAL_ACCOUNT_ID}:components:com.example.Pulse" \
+  --query 'componentVersions[].arn' --output text
+
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 delete-component \
+  --arn <component-version-arn>
+```
+
+구성이 적용하는 소유권 태그를 통해 아티팩트 버킷을 찾고, 목록에 이 튜토리얼의 버킷만 있는지 확인한 다음, 객체 버전과 버킷을 삭제합니다:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" resourcegroupstaggingapi get-resources \
+  --tag-filters Key=greengrass-artifact-repository,Values=true \
+  --resource-type-filters s3:bucket \
+  --query 'ResourceTagMappingList[].ResourceARN' --output text
+
+export TUTORIAL_BUCKET=<bucket-name>
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" s3api list-object-versions \
+  --bucket "$TUTORIAL_BUCKET" \
+  --query '{Objects: Versions[].{Key: Key, VersionId: VersionId}}' --output json \
+  > /tmp/greengrass-tutorial-versions.json
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" s3api delete-objects \
+  --bucket "$TUTORIAL_BUCKET" --delete file:///tmp/greengrass-tutorial-versions.json
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" s3api delete-bucket \
+  --bucket "$TUTORIAL_BUCKET"
+```
+
+버킷은 버전 관리가 활성화되어 있으므로 `delete-objects`는 각 버전을 지정해야 합니다. `list-object-versions`가 `DeleteMarkers`도 보고하는 경우, 버킷을 삭제하기 전에 해당 항목으로 삭제를 반복합니다.
+
+## 작업 4: 코어 디바이스 및 자격 증명 제거
+
+스크립트의 `cleanup` 작업은 `.greengrass-tutorial.env`를 읽고, 동일한 계정, 리전 및 접두사에 속하는지 확인한 다음, 인스턴스를 종료하고, 인증서에 연결된 모든 정책과 함께 인증서를 분리 및 삭제하고, 코어 디바이스 레코드, 사물 및 사물 그룹, 두 IoT 정책, 역할 별칭, 토큰 교환 역할과 그 연결, 액세스 정책을 삭제합니다.
+
+```bash
+./setup-greengrass-tutorial.sh cleanup \
+  --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" --prefix "$TUTORIAL_PREFIX"
+```
+
+각 단계는 `deleted` 또는 `absent`를 출력합니다. 이미 사라진 객체는 건너뜁니다. 다른 오류가 발생하면 실행이 중지되고 상태 파일이 유지되므로, 원인을 수정하고 동일한 명령을 다시 실행할 수 있습니다.
+
+<Aside type="note" title="역할에 대한 순서가 중요합니다">
+정리를 실행하기 전에 스택을 삭제하십시오. 스택의 읽기 권한은 토큰 교환 역할의 인라인 정책입니다. 정리는 역할을 제거할 수 있도록 찾은 인라인 정책을 삭제하지만, 여전히 역할을 참조하는 스택은 다음 업데이트에서 실패합니다.
+</Aside>
+
+## 작업 5: 인스턴스 프로파일 제거
+
+인스턴스 프로파일은 사용자의 것이므로 스크립트는 그대로 둡니다:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam remove-role-from-instance-profile \
+  --instance-profile-name "${TUTORIAL_PREFIX}-instance" --role-name "${TUTORIAL_PREFIX}-instance"
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam delete-instance-profile \
+  --instance-profile-name "${TUTORIAL_PREFIX}-instance"
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam delete-role-policy \
+  --role-name "${TUTORIAL_PREFIX}-instance" --policy-name greengrass-installer-bootstrap
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam detach-role-policy \
+  --role-name "${TUTORIAL_PREFIX}-instance" \
+  --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam delete-role \
+  --role-name "${TUTORIAL_PREFIX}-instance"
+rm -f .greengrass-tutorial.env
+```
+
+모듈 2에서 부트스트랩 정책을 이미 제거한 경우 `delete-role-policy`는 `NoSuchEntity`로 실패합니다. 이는 예상된 동작입니다.
+
+## 학습한 내용
+
+- 생성된 컴포넌트는 기본적으로 로컬 IPC를 통해 게시합니다. 클라우드 MQTT에는 `publish_to_iot_core`, 레시피의 `aws.greengrass.ipc.mqttproxy` 권한 부여, 디바이스의 IoT 정책에 `iot:Publish`가 필요합니다.
+- 생성기는 빌딩 블록을 제공합니다. CDK 스택은 아티팩트 리포지토리, 읽기 권한 및 배포를 소유하며, `addComponent`는 해결된 버전과 순서 지정 에지를 전달합니다.
+- `NEXT_PATCH`는 콘텐츠에서 버전을 할당합니다. 소스 변경은 일반 `deploy`를 통해 다음 패치 버전을 게시합니다.
+- 컴포넌트 제거는 배포 리비전입니다. 인프라 삭제는 별도의 나중 단계이며, 보존된 버전, 배포 및 버킷을 사용자가 삭제하도록 남겨둡니다.
+
+버전 관리 및 아티팩트 보존에 대해서는 컴포넌트 가이드의 <Link path="guides/greengrass-component#자동-버전-관리">버전 관리</Link> 및 <Link path="guides/greengrass-component#아티팩트-스토리지-및-보존">아티팩트 스토리지</Link> 섹션을 참조하십시오. 동일한 가이드에는 더 큰 배포를 위해 고려해야 할 서비스 제한이 나열되어 있습니다.

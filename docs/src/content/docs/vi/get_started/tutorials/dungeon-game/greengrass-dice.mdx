@@ -1,0 +1,290 @@
+---
+title: "Tùy chọn: tung xúc xắc với Greengrass"
+description: Cho phép Dungeon Adventure Story Agent gọi một công cụ yêu cầu tung xúc xắc từ thiết bị lõi Greengrass và sử dụng kết quả của nó trong câu chuyện.
+---
+
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
+import RunGenerator from '@components/run-generator.astro';
+import InstallCommand from '@components/install-command.astro';
+import E2ECode from '@components/e2e-code.astro';
+import E2EDiff from '@components/e2e-diff.astro';
+import { getDungeonDiceDependencies } from '../../../../../../../../e2e/src/utils';
+
+Giữ nguyên dungeon mà bạn đã triển khai trong <Link path="get_started/tutorials/dungeon-game/4">Module 4</Link>.
+Trước khi hủy nó, hãy cung cấp cho Story Agent của nó một thiết bị xúc xắc:
+
+> "Tôi cố gắng mở khóa. Tung một d20 để xem liệu tôi có thành công không."
+
+Agent gọi `roll-dice`. Một thành phần Python trên lõi Greengrass tạo ra
+kết quả tung xúc xắc, và công cụ MCP trả về kết quả thiết bị đó cho agent. Phản hồi
+sau đó có thể nói "d20: 17" và mô tả kết quả.
+
+Tuyến đường tùy chọn này sử dụng lõi EC2 với trình mô phỏng xúc xắc phần mềm. Bạn có thể
+sau này thay thế hàm số ngẫu nhiên của nó bằng đầu vào từ khay xúc xắc vật lý.
+<Link path="get_started/tutorials/greengrass/overview">Hướng dẫn Greengrass độc lập</Link>
+vẫn là một cách riêng biệt để học cách tạo thành phần từ workspace trống.
+
+## Những gì bạn sẽ thêm vào
+
+```d2
+direction: right
+player: Player
+agent: Story Agent
+tool: "Inventory MCP server\nroll-dice"
+dice_shadow: "AWS IoT Core\nnamed shadow: dungeon-dice"
+device: "Greengrass core\ncom.example.DungeonDice"
+player -> agent: "Attempt an action"
+agent -> tool: "roll-dice(sides=20)"
+tool -> dice_shadow: "Desired request + request ID"
+dice_shadow -> device: "MQTT delta through IPC"
+device -> dice_shadow: "Reported result + same ID"
+dice_shadow -> tool: "Correlated result"
+tool -> agent: "d20 = 17"
+agent -> player: "Result and consequence"
+```
+
+Shadow đám mây giữ một yêu cầu đang chờ xử lý và kết quả gần nhất. Công cụ
+chờ tối đa 12 giây; nó không bao giờ tạo ra kết quả tung dự phòng. Kiểm tra phiên bản
+ngăn chặn các người gọi đồng thời thay thế một yêu cầu đang hoạt động. Thiết bị
+lưu trữ kết quả cuối cùng của nó trước khi xuất bản, vì vậy việc gửi lại MQTT và khởi động lại thành phần
+không tung lại cùng một yêu cầu.
+
+Sandbox này chia sẻ một thiết bị xúc xắc giữa các người chơi. Một thiết bị bận trả về
+lỗi. Nó không thêm hàng đợi trên toàn bộ đội và không liên kết các thiết bị cá nhân với
+người dùng Cognito. Đó là các phần mở rộng riêng biệt cho sản phẩm nhiều người chơi.
+
+## 1. Cung cấp lõi mà không phá hủy dungeon
+
+Sử dụng cùng tài khoản AWS và Region như dungeon đã triển khai. Đặt profile
+một cách rõ ràng; sử dụng tiền tố mới cho tài nguyên thiết bị:
+
+```bash
+export TUTORIAL_AWS_PROFILE=<your-dungeon-profile>
+export TUTORIAL_AWS_REGION=<your-dungeon-region>
+export TUTORIAL_PREFIX=gg-dungeon-dice
+```
+
+Làm theo <Link path="get_started/tutorials/greengrass/2">Cung cấp thiết bị lõi</Link>
+từ **workspace dungeon**, bao gồm việc xóa chính sách cài đặt tạm thời.
+Trang đó tạo instance và ghi `.greengrass-tutorial.env`.
+Không tạo workspace Nx khác hoặc chạy các module heartbeat độc lập.
+Các giá trị mặc định hiện có của script thiết lập không thay đổi.
+
+```bash
+source .greengrass-tutorial.env
+export DICE_IOT_ENDPOINT=$(aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" \
+  iot describe-endpoint --endpoint-type iot:Data-ATS --query endpointAddress --output text)
+```
+
+Khởi tạo named shadow của thiết bị mới một lần, trước khi bật công cụ. Không
+chạy lệnh reset này đối với thiết bị có yêu cầu xúc xắc đang hoạt động:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" \
+  iot-data update-thing-shadow --endpoint-url "https://${DICE_IOT_ENDPOINT}" \
+  --thing-name "$TUTORIAL_THING_NAME" --shadow-name dungeon-dice \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"state":{"desired":{"command":null},"reported":{"command":null,"result":null}}}' \
+  /tmp/dungeon-dice-shadow.json
+```
+
+Hướng dẫn EC2 sử dụng x86_64 Linux. Raspberry Pi chạy Linux 64-bit sử dụng
+`linux-arm64` thay thế; cả recipe được tạo và các phụ thuộc gốc đều phải
+nhắm đến kiến trúc đó. Xem <Link path="guides/greengrass-component#phần-cứng-và-hệ-điều-hành">hỗ trợ phần cứng</Link>.
+ESP32 có thể cung cấp đầu vào cảm biến cho gateway, nhưng không thể chạy thành phần Python này.
+
+## 2. Tạo thành phần xúc xắc
+
+Tạo một host Python riêng biệt để artifact thiết bị không mang theo các phụ thuộc
+đám mây của Story Agent:
+
+<RunGenerator generator="py#project" requiredParameters={{ name: 'edge' }} readonly />
+<RunGenerator generator="greengrass#component" requiredParameters={{ project: 'edge', name: 'dice', language: 'python', componentName: 'com.example.DungeonDice', componentVersion: 'NEXT_PATCH', platform: 'linux-amd64', ipc: true, infra: 'component-version', iac: 'cdk' }} readonly />
+
+Thay thế `packages/edge/greengrass/dice/main.py`:
+
+<E2ECode lang="python" path="dungeon-adventure/dice/main.py.template" />
+
+Thay thế `packages/edge/greengrass/dice/recipe.yaml`:
+
+<E2ECode lang="yaml" path="dungeon-adventure/dice/recipe.yaml.template" />
+
+Thay thế **mọi** `REPLACE_WITH_CORE_THING_NAME` bằng giá trị của
+`TUTORIAL_THING_NAME`. Quyền IPC của recipe chỉ đặt tên các chủ đề shadow xúc xắc của thiết bị này.
+Python ghi `dice-result.json` trong thư mục làm việc có thể ghi của thành phần,
+bên ngoài thư mục artifact chỉ đọc của nó.
+
+Thay thế `packages/edge/tests/greengrass/test_dice.py`:
+
+<E2ECode lang="python" path="dungeon-adventure/dice/test_dice.py.template" />
+
+Các bài kiểm tra này thực hiện các lần tung hợp lệ, trùng lặp, khôi phục khởi động lại, yêu cầu cũ,
+hết hạn và lỗi lưu trữ. Bài kiểm tra heartbeat mặc định của generator được
+thay thế vì thành phần hiện thực hiện một hành vi khác.
+
+## 3. Thêm công cụ xúc xắc của agent
+
+Thêm client data-plane IoT vào dự án Inventory MCP:
+
+<InstallCommand pkg={getDungeonDiceDependencies()} project="@dungeon-adventure/inventory" />
+
+Tạo `packages/inventory/src/mcp-server/roll-dice.ts`:
+
+<E2ECode lang="typescript" path="dungeon-adventure/dice/roll-dice.ts.template" />
+
+Tạo `packages/inventory/src/mcp-server/register-dice.ts`:
+
+<E2ECode lang="typescript" path="dungeon-adventure/dice/register-dice.ts.template" />
+
+Cập nhật `packages/inventory/src/mcp-server/server.ts`:
+
+<E2EDiff lang="typescript" before="dungeon-adventure/2/mcp/server.ts.template" after="dungeon-adventure/dice/server.ts.template" />
+
+Giữ cả ba công cụ inventory. Kết nối Story Agent được tạo đã
+khám phá các công cụ từ server này, vì vậy nó cũng sẽ khám phá `roll-dice`.
+Công cụ chỉ chấp nhận kích thước xúc xắc. Danh tính thiết bị và endpoint đến từ
+cấu hình của server; model không thể chọn thiết bị hoặc chủ đề MQTT khác.
+Trong quá trình phát triển cục bộ, các công cụ inventory vẫn có thể sử dụng mà không cần các biến
+môi trường `DICE_*`. Gọi `roll-dice` trả về lỗi thiết bị chưa được cấu hình
+cho đến khi `DICE_THING_NAME`, `DICE_IOT_ENDPOINT` và `DICE_AWS_REGION` được đặt.
+
+Cập nhật `packages/story/dungeon_adventure_story/agent/agent.py`:
+
+<E2EDiff lang="python" before="dungeon-adventure/3/agent.py.template" after="dungeon-adventure/dice/agent.py.template" />
+
+Việc thay thế cho phép các lần gọi tuần tự để một lần tung thành công có thể được theo sau
+bởi cập nhật inventory. Nó vẫn chỉ cho phép một lần tung mỗi lượt và rõ ràng
+dừng thử thách khi công cụ xúc xắc thất bại.
+
+## 4. Soạn tài nguyên thiết bị vào ứng dụng hiện có
+
+Tạo `packages/infra/src/dice-resources.ts`:
+
+<E2ECode lang="typescript" path="dungeon-adventure/dice/dice-resources.ts.template" />
+
+Cập nhật `packages/infra/src/stacks/application-stack.ts` để truyền cấu hình thiết bị
+cho MCP server và cấp quyền truy cập runtime vào shadow:
+
+<E2EDiff lang="typescript" before="dungeon-adventure/2/stacks/application-stack.ts.template" after="dungeon-adventure/dice/application-stack.ts.template" />
+
+Giữ phần còn lại của application stack hiện có. `DiceResources` sở hữu các
+tham số thiết bị, cấp phép artifact, thành phần và
+triển khai của nó.
+
+Có ba ranh giới quyền:
+
+- Chính sách chứng chỉ IoT hiện có của lõi cho phép xuất bản, đăng ký
+  và nhận trên `$aws/things/<thing-name>/shadow/*`, đã bao gồm
+  named shadow `dungeon-dice`. Không cần chính sách chứng chỉ bổ sung.
+- Recipe xúc xắc cấp cho thành phần quyền truy cập vào các chủ đề đó thông qua IPC.
+- Runtime Inventory MCP nhận `GetThingShadow` và `UpdateThingShadow` trên
+  chỉ named shadow `dungeon-dice` của thing này.
+
+Cấp phép artifact cho phép vai trò trao đổi token của lõi chỉ lấy
+`com.example.DungeonDice/*`. Triển khai phụ thuộc vào việc xuất bản thành phần.
+
+Build, sau đó triển khai với tất cả bốn giá trị tham số:
+
+<NxCommands commands={['sync']} />
+<InstallCommand />
+<PackageManagerShortCommand commands={['lint --skip-nx-cache']} />
+<NxCommands commands={['run-many --target build --all']} />
+
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @dungeon-adventure/infra:deploy -- "dungeon-adventure-infra-sandbox/**" --parameters dungeon-adventure-infra-sandbox-Application:DiceThingName="$TUTORIAL_THING_NAME" --parameters dungeon-adventure-infra-sandbox-Application:DiceEndpoint="$DICE_IOT_ENDPOINT" --parameters dungeon-adventure-infra-sandbox-Application:TokenExchangeRoleArn="$TUTORIAL_TOKEN_EXCHANGE_ROLE_ARN" --parameters dungeon-adventure-infra-sandbox-Application:ThingGroupArn="$TUTORIAL_THING_GROUP_ARN"']} />
+
+Chỉ định các tham số cho application stack vì WAF stack không định nghĩa chúng.
+
+Sử dụng `deploy` cho hướng dẫn này. Các thay đổi thành phần/phiên bản thay thế
+tài nguyên CloudFormation; <Link path="guides/greengrass-component#bản-sửa-đổi-triển-khai">deployment revisions</Link>
+giải thích cờ rollback bổ sung cần thiết với `deploy-sandbox`.
+
+Chờ cho đến khi thành phần là `RUNNING`:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" \
+  greengrassv2 list-installed-components --core-device-thing-name "$TUTORIAL_THING_NAME" \
+  --query "installedComponents[?componentName=='com.example.DungeonDice'].[componentVersion,lifecycleState]" \
+  --output table
+```
+
+## 5. Để agent tung xúc xắc
+
+Mở trò chơi đã triển khai, bắt đầu cuộc trò chuyện mới hoặc tải lại cuộc trò chuyện hiện có,
+và hỏi:
+
+> "Tung một d20 trên thiết bị xúc xắc cho nỗ lực mở khóa này của tôi."
+
+Agent nên gọi `roll-dice` và mô tả giá trị trả về và
+hậu quả. Đọc shadow đám mây để so sánh `reported.result` của nó với
+kết quả công cụ và phản hồi của agent:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" \
+  iot-data get-thing-shadow --endpoint-url "https://${DICE_IOT_ENDPOINT}" \
+  --thing-name "$TUTORIAL_THING_NAME" --shadow-name dungeon-dice \
+  /tmp/dungeon-dice-shadow.json
+cat /tmp/dungeon-dice-shadow.json
+```
+
+Kết quả thành công bao gồm `requestId`, `sides`, `value` và `rolledAt`.
+Log thiết bị tại `/greengrass/v2/logs/com.example.DungeonDice.log` ghi lại
+cùng request ID và giá trị. Một triển khai thành công đơn thuần không chứng minh
+vòng lặp này.
+
+Để thực hiện đường dẫn thất bại, dừng dịch vụ Greengrass trên lõi dùng một lần này
+thông qua terminal Systems Manager của nó, yêu cầu một lần tung khác, và xác minh
+rằng công cụ báo cáo lỗi sau thời gian chờ giới hạn của nó. Agent nên nói với
+bạn rằng thiết bị không khả dụng thay vì quyết định thử thách. Khởi động lại
+dịch vụ trước khi tiếp tục. Một yêu cầu đang chờ hết hạn không được tung khi
+thiết bị kết nối lại; một lần gọi công cụ mới tạo một yêu cầu mới.
+
+Để thực hiện bài tập cập nhật phiên bản, thay đổi thông báo log của thành phần, rebuild và
+chạy cùng lệnh deploy. `NEXT_PATCH` xuất bản một phiên bản mới. Xác nhận
+phiên bản đang chạy mới, sau đó yêu cầu một lần tung khác.
+
+## 6. Tiếp tục chơi, hoặc xóa mọi thứ
+
+Để chỉ xóa phần mở rộng:
+
+1. Ghi lại các output `DiceArtifactBucket`, `DiceComponentArn` và `DiceDeploymentId`
+   từ application stack.
+2. Xóa `this.deployment.addComponent(component)` khỏi
+   `packages/infra/src/dice-resources.ts`. Triển khai lại với cùng các tham số.
+   Điều này gửi một revision triển khai trống; chờ cho đến khi
+   `list-installed-components` không còn liệt kê `com.example.DungeonDice`.
+3. Khôi phục <Link path="get_started/tutorials/dungeon-game/3">prompt Story Agent cơ bản</Link>,
+   xóa import và lời gọi `registerDiceTool`, và khôi phục
+   <Link path="get_started/tutorials/dungeon-game/2#kết-nối-stack">application stack Module 2</Link>.
+   Rebuild và triển khai dungeon. Điều này xóa quyền MCP và
+   cấu hình xúc xắc của nó.
+4. Xóa các bản ghi triển khai Greengrass được giữ lại, các phiên bản thành phần và
+   artifact bucket bằng cách sử dụng <Link path="get_started/tutorials/greengrass/cleanup#nhiệm-vụ-3-xóa-các-tài-nguyên-greengrass-được-giữ-lại">quy trình dọn dẹp tài nguyên được giữ lại</Link>.
+   Thay thế `com.example.DungeonDice` cho `com.example.Pulse` và sử dụng các
+   output xúc xắc đã ghi lại. Bao gồm mọi phiên bản/revision được tạo bởi bài tập cập nhật
+   của bạn.
+5. Xóa named shadow, sau đó chạy dọn dẹp script thiết lập và xóa
+   instance profile và role được quản lý bởi chủ sở hữu như được mô tả trong
+   <Link path="get_started/tutorials/greengrass/cleanup">hướng dẫn dọn dẹp thiết bị</Link>.
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" \
+  iot-data delete-thing-shadow --endpoint-url "https://${DICE_IOT_ENDPOINT}" \
+  --thing-name "$TUTORIAL_THING_NAME" --shadow-name dungeon-dice \
+  /tmp/dungeon-dice-shadow-deleted.json
+```
+
+Dungeon vẫn được triển khai sau các bước đó. Để xóa toàn bộ ứng dụng,
+tiếp tục với <Link path="get_started/tutorials/dungeon-game/wrap-up#hủy-tài-nguyên">Hủy tài nguyên</Link>,
+bao gồm user pool được giữ lại, vai trò SMS và bucket lịch sử cuộc trò chuyện của nó.
+
+## Các thử nghiệm tiếp theo
+
+- Sử dụng Raspberry Pi với hệ điều hành 64-bit và cảm biến vật lý. Giữ request ID
+  và hợp đồng timeout trong khi thay thế `secrets.randbelow`.
+- Sử dụng ESP32 để đọc cảm biến và gửi kết quả của nó đến gateway Linux.
+  Điều đó thêm firmware và xác thực thiết bị; nó không phải là mục tiêu CPU khác
+  cho thành phần Python này.
+- Tách thành phần thành một engine xúc xắc cục bộ và một cầu nối MQTT được kết nối
+  thông qua pub/sub Greengrass.

@@ -1,0 +1,198 @@
+---
+title: Cung cấp thiết bị lõi
+description: Tạo instance profile do chủ sở hữu quản lý, chọn image Ubuntu 26.04 x86_64, và chạy script thiết lập để cung cấp thiết bị lõi EC2 với Greengrass nucleus cổ điển
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+
+export const setupScriptUrl = `${import.meta.env.SITE}${import.meta.env.BASE_URL.replace(/\/$/, '')}/greengrass/setup-tutorial.sh`;
+
+Script thiết lập tạo danh tính AWS IoT cho một thiết bị lõi, khởi chạy instance EC2 Ubuntu 26.04 x86_64, và cài đặt Greengrass nucleus cổ điển trên đó thông qua AWS Systems Manager. Nó ghi lại những gì đã tạo trong `.greengrass-tutorial.env`, liên kết với tài khoản, Region và prefix của bạn, để thao tác `cleanup` của nó xóa chính xác các tài nguyên đó sau này.
+
+| Tài nguyên | Tên | Được tạo bởi |
+| --- | --- | --- |
+| IoT thing group | `<prefix>-group` | Script |
+| IoT thing | `<prefix>-core` | Script |
+| Token exchange role và access policy của nó | `<prefix>-token-exchange`, `<prefix>-token-exchangeAccess` | Script |
+| IoT role alias | `<prefix>-alias` | Script |
+| Device IoT policy | `<prefix>-device-policy` | Script |
+| EC2 instance | Được gắn thẻ `Name=<prefix>-core` | Script |
+| Device certificate và private key | Được tạo trên instance | Nucleus installer |
+| IoT policy cho role alias | `GreengrassTESCertificatePolicy<prefix>-alias` | Nucleus installer |
+
+Trình cài đặt chạy trên instance với thông tin xác thực tạm thời của instance profile. Private key của thiết bị được tạo trên instance và lưu dưới `/greengrass/v2`. Lệnh từ xa mà script gửi qua Systems Manager chỉ chứa tên tài nguyên, vì vậy không có key hoặc thông tin xác thực nào vào lịch sử lệnh của Systems Manager.
+
+## Nhiệm vụ 1: Tạo instance profile
+
+Script không tạo instance profile. Bạn sở hữu nó, vì vậy bạn kiểm soát những gì trình cài đặt được phép làm. Role của nó cần `AmazonSSMManagedInstanceCore`, để Systems Manager có thể chạy lệnh cài đặt, cộng với một policy tạm thời cho đường dẫn `--provision true` của trình cài đặt.
+
+```bash
+export TUTORIAL_ACCOUNT_ID=$(aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" \
+  sts get-caller-identity --query Account --output text)
+
+cat > /tmp/greengrass-tutorial-ec2-trust.json <<'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Effect": "Allow", "Principal": { "Service": "ec2.amazonaws.com" }, "Action": "sts:AssumeRole" }
+  ]
+}
+EOF
+
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam create-role \
+  --role-name "${TUTORIAL_PREFIX}-instance" \
+  --assume-role-policy-document file:///tmp/greengrass-tutorial-ec2-trust.json
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam attach-role-policy \
+  --role-name "${TUTORIAL_PREFIX}-instance" \
+  --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+```
+
+Policy tạm thời của trình cài đặt tuân theo [minimal IAM policy for the installer](https://docs.aws.amazon.com/greengrass/v2/developerguide/provision-minimal-iam-policy.html). Statement `CreateIoTResources` là statement chính thức. Statement IAM hẹp hơn statement `CreateTokenExchangeRole` chính thức: script tạo token exchange role và policy `<role>Access` của nó trước khi trình cài đặt chạy, vì vậy trình cài đặt chỉ đọc chúng và không bao giờ cần `iam:CreateRole`, `iam:CreatePolicy` hoặc `iam:AttachRolePolicy`.
+
+```bash
+cat > /tmp/greengrass-tutorial-installer.json <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReuseTokenExchangeRole",
+      "Effect": "Allow",
+      "Action": ["iam:GetRole", "iam:PassRole", "iam:GetPolicy"],
+      "Resource": [
+        "arn:aws:iam::${TUTORIAL_ACCOUNT_ID}:role/${TUTORIAL_PREFIX}-token-exchange",
+        "arn:aws:iam::${TUTORIAL_ACCOUNT_ID}:policy/${TUTORIAL_PREFIX}-token-exchangeAccess",
+        "arn:aws:iam::aws:policy/${TUTORIAL_PREFIX}-token-exchangeAccess"
+      ]
+    },
+    {
+      "Sid": "CreateIoTResources",
+      "Effect": "Allow",
+      "Action": [
+        "iot:AddThingToThingGroup",
+        "iot:AttachPolicy",
+        "iot:AttachThingPrincipal",
+        "iot:CreateKeysAndCertificate",
+        "iot:CreatePolicy",
+        "iot:CreateRoleAlias",
+        "iot:CreateThing",
+        "iot:CreateThingGroup",
+        "iot:DescribeEndpoint",
+        "iot:DescribeRoleAlias",
+        "iot:DescribeThingGroup",
+        "iot:GetPolicy"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+EOF
+
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam put-role-policy \
+  --role-name "${TUTORIAL_PREFIX}-instance" \
+  --policy-name greengrass-installer-bootstrap \
+  --policy-document file:///tmp/greengrass-tutorial-installer.json
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam create-instance-profile \
+  --instance-profile-name "${TUTORIAL_PREFIX}-instance"
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam add-role-to-instance-profile \
+  --instance-profile-name "${TUTORIAL_PREFIX}-instance" \
+  --role-name "${TUTORIAL_PREFIX}-instance"
+```
+
+Nhiệm vụ 4 xóa `greengrass-installer-bootstrap` một lần nữa sau khi thiết bị được cung cấp.
+
+## Nhiệm vụ 2: Chọn image Ubuntu 26.04 x86_64
+
+Canonical công bố các ID image hiện tại của nó dưới dạng tham số Systems Manager công khai. Đọc tham số cho Ubuntu 26.04 trên amd64, sau đó xác nhận chủ sở hữu, kiến trúc và tên trước khi bạn sử dụng nó:
+
+```bash
+export TUTORIAL_AMI_ID=$(aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" ssm get-parameter \
+  --name /aws/service/canonical/ubuntu/server/26.04/stable/current/amd64/hvm/ebs-gp3/ami-id \
+  --query Parameter.Value --output text)
+
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" ec2 describe-images \
+  --image-ids "$TUTORIAL_AMI_ID" \
+  --query 'Images[0].[OwnerId,Architecture,Name]' --output text
+```
+
+Đầu ra phải hiển thị chủ sở hữu `099720109477` (Canonical), kiến trúc `x86_64`, và tên chứa `ubuntu-resolute-26.04-amd64-server`. Script kiểm tra ba giá trị giống nhau và từ chối bất kỳ image nào khác.
+
+Ubuntu 26.04 được sử dụng vì hai lý do. Nó đi kèm với `python3.14`, là trình thông dịch mà bước `Run` của recipe được tạo ra ghim. Nó cũng đi kèm với `sudo-rs` làm `sudo` mặc định, có thể ngăn các thành phần IPC khởi động dưới Nucleus 2.18.3 vì môi trường IPC bị mất. Script cài đặt `openjdk-21-jre-headless`, `unzip`, `python3.14` và gói `sudo` cổ điển, cung cấp `/usr/bin/sudo.ws`, sau đó chọn `/usr/bin/sudo.ws` làm `sudo` và xác minh lựa chọn trước khi cài đặt nucleus. Trên image Canonical, cả `sudo` và `sudo-rs` đều được cài đặt sẵn, vì vậy việc chuyển đổi alternatives là bước hiệu quả. Xem <Link path="guides/greengrass-component#khắc-phục-sự-cố-và-giới-hạn-dịch-vụ">ghi chú khắc phục sự cố component</Link>.
+
+## Nhiệm vụ 3: Tải xuống và chạy script thiết lập
+
+Tải xuống script từ trang tài liệu này, đọc nó, sau đó chạy nó từ thư mục gốc của workspace:
+
+<Code lang="bash" code={`curl -fsSLo setup-greengrass-tutorial.sh ${setupScriptUrl}\nchmod +x setup-greengrass-tutorial.sh\nless setup-greengrass-tutorial.sh`} />
+
+Cùng một file được kiểm tra vào repository tại `docs/public/greengrass/setup-tutorial.sh`.
+
+```bash
+./setup-greengrass-tutorial.sh setup \
+  --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" --prefix "$TUTORIAL_PREFIX" \
+  --ami-id "$TUTORIAL_AMI_ID" --instance-profile "${TUTORIAL_PREFIX}-instance"
+```
+
+Truyền `--subnet-id <subnet-id>` khi Region không có VPC mặc định. Truyền `--instance-type` để thay đổi `t3.small` mặc định.
+
+Script thực hiện các bước này theo thứ tự và ghi file trạng thái sau mỗi tài nguyên được tạo:
+
+1. Phân giải danh tính người gọi, xác thực image, và kiểm tra rằng instance profile tồn tại.
+2. Kiểm tra rằng không có tài nguyên nào trong bảng trên tồn tại. Một thing group, thing, role, policy hoặc role alias hiện có dưới prefix sẽ dừng script trước khi nó tạo bất cứ thứ gì.
+3. Tạo thing group và thing, token exchange role với access policy của nó, role alias, và device IoT policy. IoT policy là [minimal core device policy](https://docs.aws.amazon.com/greengrass/v2/developerguide/device-auth.html#greengrass-core-minimal-iot-policy) từ hướng dẫn dành cho nhà phát triển, cộng với `iot:Publish` trên `arn:aws:iot:<region>:<account-id>:topic/tutorial/greengrass/heartbeat`.
+4. Khởi chạy instance với instance profile và IMDSv2 được yêu cầu, đợi nó đăng ký với Systems Manager, và gửi một lệnh `AWS-RunShellScript` cài đặt các điều kiện tiên quyết, chuyển đổi `sudo`, tải xuống `greengrass-nucleus-latest.zip`, và chạy trình cài đặt với `--provision true --setup-system-service true`, các tên thing, group, policy, role và alias ở trên, và `--component-default-user ggc_user:ggc_group`.
+5. Thăm dò lệnh cho đến khi nó hoàn thành, sau đó ghi lại certificate mà trình cài đặt đã gắn vào thing và đợi thiết bị lõi xuất hiện trong Greengrass.
+
+Thiết lập mất khoảng mười phút. Khi hoàn thành, tải các giá trị đã ghi vào shell của bạn và giữ file trạng thái ra khỏi Git:
+
+```bash
+source .greengrass-tutorial.env
+echo .greengrass-tutorial.env >> .gitignore
+```
+
+File trạng thái xuất `TUTORIAL_THING_NAME`, `TUTORIAL_THING_GROUP_ARN`, `TUTORIAL_TOKEN_EXCHANGE_ROLE_ARN`, `TUTORIAL_INSTANCE_ID`, `TUTORIAL_CERTIFICATE_ARN` và danh tính mà nó được liên kết. Module 3 truyền hai trong số chúng cho CDK stack.
+
+<Aside type="note" title="Chạy lại và lỗi">
+Chạy `setup` lại sau khi chạy thành công sẽ báo cáo instance hiện có và không thay đổi gì. Nếu một lần chạy dừng giữa chừng, ví dụ vì lệnh cài đặt thất bại, file trạng thái ghi lại nó đã đi được bao xa và lần chạy lại từ chối tiếp tục. Chạy `cleanup` với cùng profile, Region và prefix, sửa nguyên nhân, sau đó chạy `setup` lại. Cleanup chỉ chạm vào các tài nguyên mà file trạng thái ghi lại, chấp nhận các đối tượng đã biến mất, và dừng lại khi có bất kỳ lỗi nào khác.
+</Aside>
+
+## Nhiệm vụ 4: Xóa quyền trình cài đặt tạm thời
+
+Trình cài đặt đã hoàn thành. Xóa policy bootstrap để instance chỉ giữ quyền truy cập Systems Manager:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam delete-role-policy \
+  --role-name "${TUTORIAL_PREFIX}-instance" \
+  --policy-name greengrass-installer-bootstrap
+```
+
+## Nhiệm vụ 5: Kiểm tra thiết bị
+
+Nucleus đăng ký thiết bị lõi khi khởi động lần đầu. Xác nhận nó từ cloud:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 get-core-device \
+  --core-device-thing-name "$TUTORIAL_THING_NAME" \
+  --query '{status: status, coreVersion: coreVersion, platform: platform, architecture: architecture}'
+```
+
+Mong đợi `HEALTHY`, `linux`, và `amd64`. Để đọc log trên instance, gửi lệnh Systems Manager với file tham số. Dòng đầu tiên là shebang, mà `AWS-RunShellScript` tôn trọng:
+
+```bash
+cat > /tmp/greengrass-tutorial-command.json <<'EOF'
+{ "commands": ["#!/bin/bash", "tail -n 20 /greengrass/v2/logs/greengrass.log"] }
+EOF
+
+TUTORIAL_COMMAND_ID=$(aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" ssm send-command \
+  --instance-ids "$TUTORIAL_INSTANCE_ID" --document-name AWS-RunShellScript \
+  --parameters file:///tmp/greengrass-tutorial-command.json \
+  --query Command.CommandId --output text)
+sleep 5
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" ssm get-command-invocation \
+  --command-id "$TUTORIAL_COMMAND_ID" --instance-id "$TUTORIAL_INSTANCE_ID" \
+  --query StandardOutputContent --output text
+```
+
+Module 3 sử dụng cùng một mẫu để đọc log riêng của component.
+
+Tiếp tục với <Link path="get_started/tutorials/greengrass/3">Deploy, observe and update</Link>.

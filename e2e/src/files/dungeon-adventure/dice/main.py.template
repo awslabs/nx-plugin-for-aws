@@ -1,0 +1,146 @@
+import argparse
+import json
+import logging
+import os
+import queue
+import secrets
+import time
+import uuid
+from pathlib import Path
+from typing import TypedDict
+
+SIDES = (4, 6, 8, 10, 12, 20)
+logger = logging.getLogger("com.example.DungeonDice")
+
+
+class DiceResult(TypedDict):
+    requestId: str
+    sides: int
+    value: int
+    rolledAt: int
+
+
+class SavedRoll(TypedDict):
+    version: int
+    result: DiceResult
+
+
+class Dice:
+    def __init__(self, state_path: Path):
+        self.state_path = state_path
+        self.last: SavedRoll | None = (
+            json.loads(state_path.read_text()) if state_path.exists() else None
+        )
+
+    def roll(self, command: dict, version: int, now: int) -> DiceResult | None:
+        try:
+            uuid.UUID(command["requestId"])
+            sides = command["sides"]
+            expires_at = command["expiresAt"]
+            if type(sides) is not int or sides not in SIDES:
+                return None
+            if type(expires_at) is not int or expires_at <= now:
+                return None
+            if type(version) is not int or version < 1:
+                return None
+        except (KeyError, TypeError, ValueError, AttributeError):
+            return None
+        if self.last:
+            if command["requestId"] == self.last["result"]["requestId"]:
+                return self.last["result"] if sides == self.last["result"]["sides"] else None
+            if version <= self.last["version"]:
+                logger.warning(
+                    "Ignoring stale shadow version %s; last processed version was %s",
+                    version,
+                    self.last["version"],
+                )
+                return None
+        result: DiceResult = {
+            "requestId": command["requestId"],
+            "sides": sides,
+            "value": secrets.randbelow(sides) + 1,
+            "rolledAt": now,
+        }
+        saved: SavedRoll = {"version": version, "result": result}
+        temporary = self.state_path.with_suffix(".tmp")
+        with temporary.open("w") as stream:
+            json.dump(saved, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, self.state_path)
+        self.last = saved
+        logger.info("Rolled d%s = %s, request %s", sides, result["value"], result["requestId"])
+        return result
+
+
+def main() -> None:
+    from awsiot.greengrasscoreipc.clientv2 import GreengrassCoreIPCClientV2
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--thing-name", required=True)
+    args = parser.parse_args()
+    logging.basicConfig(level=logging.INFO)
+    client = GreengrassCoreIPCClientV2()
+    base = f"$aws/things/{args.thing_name}/shadow/name/dungeon-dice"
+    events = queue.Queue()
+    dice = Dice(Path("dice-result.json"))
+    subscriptions = []
+
+    def publish(suffix: str, payload: dict) -> None:
+        client.publish_to_iot_core(
+            topic_name=f"{base}/{suffix}",
+            qos="1",
+            payload=json.dumps(payload).encode(),
+        )
+
+    def on_event(event) -> None:
+        events.put(event.message)
+
+    for suffix in ("get/accepted", "update/delta", "update/rejected"):
+        _, operation = client.subscribe_to_iot_core(
+            topic_name=f"{base}/{suffix}", qos="1", on_stream_event=on_event
+        )
+        subscriptions.append(operation)
+    next_read = 0.0
+    try:
+        while True:
+            try:
+                if time.monotonic() >= next_read:
+                    publish("get", {})
+                    next_read = time.monotonic() + 15
+                message = events.get(timeout=1)
+                document = json.loads(message.payload)
+                if message.topic_name.endswith("/update/rejected"):
+                    logger.warning("Shadow update rejected: %s", document.get("code"))
+                    next_read = 0
+                    continue
+                state = document.get("state", {})
+                if message.topic_name.endswith("/update/delta"):
+                    command = state.get("command")
+                else:
+                    command = state.get("desired", {}).get("command")
+                    reported = state.get("reported", {}).get("result", {})
+                    if command and reported.get("requestId") == command.get("requestId"):
+                        continue
+                if not isinstance(command, dict):
+                    continue
+                version = document.get("version")
+                result = dice.roll(command, version, int(time.time()))
+                if result:
+                    publish("update", {
+                        "version": version,
+                        "state": {"reported": {"command": command, "result": result}},
+                    })
+            except queue.Empty:
+                continue
+            except Exception:
+                logger.exception("Dice exchange failed; will read the shadow again")
+                next_read = time.monotonic() + 5
+    finally:
+        for operation in subscriptions:
+            operation.close()
+        client.close()
+
+
+if __name__ == "__main__":
+    main()

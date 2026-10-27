@@ -1,0 +1,116 @@
+---
+title: Créer le composant
+description: Créer l'espace de travail, un projet Python, le composant Greengrass et une application CDK, puis basculer le composant du pub/sub local vers AWS IoT Core MQTT
+---
+
+import { Aside, FileTree } from '@astrojs/starlight/components';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import E2EDiff from '@components/e2e-diff.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import RunGenerator from '@components/run-generator.astro';
+
+## Tâche 1 : Créer l'espace de travail
+
+Depuis le répertoire qui contiendra l'espace de travail, exécutez :
+
+<CreateNxWorkspaceCommand workspace="greengrass-tutorial" iac="cdk" readonly />
+
+Puis accédez-y :
+
+```bash
+cd greengrass-tutorial
+```
+
+Le nom de l'espace de travail définit le scope npm `@greengrass-tutorial` et l'espace de noms Python `greengrass_tutorial`. Les noms de projets générés portent ces préfixes, et `nx run` nécessite le nom complet, donc le reste de ce tutoriel utilise `greengrass_tutorial.telemetry` et `@greengrass-tutorial/infra`.
+
+## Tâche 2 : Générer les projets
+
+Créez le projet Python qui héberge le composant :
+
+<RunGenerator generator="py#project" requiredParameters={{ name: 'telemetry' }} noInteractive readonly />
+
+Cela crée le projet `greengrass_tutorial.telemetry` dans `packages/telemetry`.
+
+Ajoutez-y le composant Greengrass :
+
+<RunGenerator generator="greengrass#component" requiredParameters={{ project: 'telemetry', name: 'pulse', language: 'python', componentName: 'com.example.Pulse', componentVersion: 'NEXT_PATCH', platform: 'linux-amd64', ipc: true, infra: 'component-version', iac: 'cdk' }} noInteractive readonly />
+
+Chaque valeur est importante plus tard dans le tutoriel :
+
+- `platform: linux-amd64` correspond à l'instance x86_64 que vous provisionnez dans le module 2. La valeur par défaut est `linux-arm64`, et une recette construite pour une architecture ne fonctionne pas sur l'autre.
+- `componentVersion: NEXT_PATCH` alloue la version au moment du déploiement. Le premier déploiement publie `1.0.0` ; le module 3 publie `1.0.1` à partir d'un changement de source sans modifier la recette.
+- `ipc: true` est explicite car ce tutoriel modifie le composant pour publier via Greengrass IPC.
+- `infra: component-version` avec `iac: cdk` ajoute les constructs de base Greengrass réutilisables à `packages/common/constructs` et un construct d'application `Pulse` qui publie l'artefact de ce composant.
+
+Créez l'application CDK qui contiendra le déploiement :
+
+<RunGenerator generator="ts#infra" requiredParameters={{ name: 'infra' }} noInteractive readonly />
+
+Les fichiers que ce tutoriel modifie :
+
+<FileTree>
+- packages
+  - telemetry
+    - greengrass
+      - pulse
+        - main.py the component entrypoint
+        - recipe.yaml the component recipe
+    - tests
+      - greengrass
+        - test_pulse.py the component's unit test
+    - project.json `pulse-vendor`, `pulse-artifact`, `pulse-deploy-local` and `pulse-logs` targets
+  - common
+    - constructs
+      - src
+        - core/greengrass artifact bucket, component version, deployment and version resolver constructs
+        - app/greengrass/pulse.ts the `Pulse` construct
+  - infra
+    - src
+      - stacks
+        - application-stack.ts where module 3 composes the deployment
+</FileTree>
+
+## Tâche 3 : Publier vers AWS IoT Core au lieu du pub/sub local
+
+Le `main.py` généré publie un heartbeat avec `publish_to_topic`, qui atteint d'autres composants sur le même appareil de base via le service pub/sub local Greengrass. Il ne quitte jamais l'appareil. Pour voir le heartbeat dans AWS IoT Core, le composant doit utiliser `publish_to_iot_core` du client IPC, et la recette et la politique IoT de l'appareil doivent toutes deux l'autoriser.
+
+Remplacez le `packages/telemetry/greengrass/pulse/main.py` généré :
+
+<E2EDiff before="greengrass-tutorial/main.py.original.template" after="greengrass-tutorial/main.py.template" lang="python" />
+
+`publish_to_iot_core` prend le nom du topic, un QoS de `"1"` (au moins une fois), et une charge utile en octets. Le topic `tutorial/greengrass/heartbeat` apparaît à nouveau dans la recette, dans la politique IoT de l'appareil que le module 2 crée, et dans l'abonnement du client de test MQTT dans le module 3.
+
+Remplacez le bloc access-control dans `packages/telemetry/greengrass/pulse/recipe.yaml` :
+
+<E2EDiff before="greengrass-tutorial/recipe.yaml.original.template" after="greengrass-tutorial/recipe.yaml.template" lang="yaml" />
+
+Le service IPC pour AWS IoT Core MQTT est `aws.greengrass.ipc.mqttproxy`, et la publication est l'opération `aws.greengrass#PublishToIoTCore`. La ressource est le topic exact. Cette autorisation est appliquée par le nucleus sur l'appareil. La politique IoT attachée au certificat de l'appareil est appliquée par AWS IoT Core, et elle nécessite `iot:Publish` sur le même topic. Le module 2 crée cette politique.
+
+Mettez à jour le test généré, car le `build` du projet hôte l'exécute et la construction des constructs partagés dépend de la construction de l'hôte :
+
+<E2EDiff before="greengrass-tutorial/test_pulse.py.original.template" after="greengrass-tutorial/test_pulse.py.template" lang="python" />
+
+## Tâche 4 : Construire l'artefact
+
+Exécutez le test et construisez l'artefact du composant :
+
+<NxCommands commands={['run greengrass_tutorial.telemetry:test', 'run greengrass_tutorial.telemetry:pulse-artifact']} />
+
+`pulse-artifact` vend les dépendances Python pour `x86_64-manylinux_2_28`, empaquette `pulse.zip`, et écrit la recette résolue :
+
+<FileTree>
+- dist/packages/telemetry/greengrass/pulse/greengrass-build
+  - recipes
+    - com.example.Pulse-NEXT_PATCH.yaml the recipe with the mqttproxy authorization
+  - artifacts
+    - com.example.Pulse
+      - NEXT_PATCH
+        - pulse.zip
+</FileTree>
+
+<Aside type="caution" title="N'exécutez pas pulse-deploy-local ici">
+`pulse-deploy-local` et `pulse-logs` s'exécutent sur une machine qui a le nucleus Greengrass et `greengrass-cli` installés. Votre poste de travail n'est pas l'appareil de base dans ce tutoriel. Le module 2 provisionne l'appareil et le module 3 y déploie depuis le cloud.
+</Aside>
+
+Continuez avec <Link path="get_started/tutorials/greengrass/2">Provisionner l'appareil de base</Link>.
