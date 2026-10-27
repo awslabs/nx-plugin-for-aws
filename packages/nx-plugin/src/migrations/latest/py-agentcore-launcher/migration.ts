@@ -13,10 +13,6 @@ import {
 } from '@nx/devkit';
 import { PY_AGENT_GENERATOR_INFO } from '../../../py/agent/generator.js';
 import { PY_MCP_SERVER_GENERATOR_INFO } from '../../../py/mcp-server/generator.js';
-import {
-  PYTHON_AGENT_CORE_LAUNCHER,
-  pythonAgentCoreLauncher,
-} from '../../../utils/agent-core-packaging.js';
 import { applyGritQL, matchGritQL } from '../../../utils/ast.js';
 import { formatFilesInSubtree } from '../../../utils/format.js';
 import { kebabCase } from '../../../utils/names.js';
@@ -24,6 +20,22 @@ import type { ComponentMetadata } from '../../../utils/nx.js';
 
 const TERRAFORM_RUNTIME =
   'packages/common/terraform/src/core/agent-core-code/runtime.tf';
+const PYTHON_AGENT_CORE_LAUNCHER = 'agentcore_launcher.py';
+const launcher = `\
+import sys
+from pathlib import Path
+
+from opentelemetry.instrumentation.auto_instrumentation import run
+
+if __name__ == "__main__":
+    sys.argv = [
+        "opentelemetry-instrument",
+        sys.executable,
+        str(Path(__file__).with_name("main.py")),
+        *sys.argv[1:],
+    ]
+    run()
+`;
 const terraformEntry =
   'entry_point = var.code_entry_point == "agentcore_launcher.py" ? [var.code_entry_point] : ["opentelemetry-instrument", var.code_entry_point]';
 const oldTerraformEntry =
@@ -39,6 +51,23 @@ export default async function migration(
   tree: Tree,
 ): Promise<MigrationReturnObject> {
   const nextSteps: string[] = [];
+  if (
+    tree.exists(TERRAFORM_RUNTIME) &&
+    (await matchGritQL(
+      tree,
+      TERRAFORM_RUNTIME,
+      hcl(`\`${oldTerraformEntry}\``),
+    ))
+  ) {
+    await applyGritQL(
+      tree,
+      TERRAFORM_RUNTIME,
+      hcl(`\`${oldTerraformEntry}\` => \`${terraformEntry}\``),
+    );
+  }
+  const coreMigrated =
+    tree.exists(TERRAFORM_RUNTIME) &&
+    (await matchGritQL(tree, TERRAFORM_RUNTIME, hcl(`\`${terraformEntry}\``)));
   for (const project of getProjects(tree).values()) {
     const components: ComponentMetadata[] = project.metadata?.components ?? [];
     let changed = false;
@@ -69,7 +98,6 @@ export default async function migration(
         packageDir,
         PYTHON_AGENT_CORE_LAUNCHER,
       );
-      const launcher = pythonAgentCoreLauncher('main.py');
       const copyLauncher = `shx cp ${launcherPath} ${outputDir}/${PYTHON_AGENT_CORE_LAUNCHER}`;
       const commands = target?.options?.commands;
       const expectedCommands = [
@@ -115,32 +143,12 @@ export default async function migration(
         ? hcl(terraformInput(PYTHON_AGENT_CORE_LAUNCHER))
         : cdkInput("['agentcore_launcher.py']");
       const alreadyMigrated = await matchGritQL(tree, infraPath, newEntry);
-      const coreMigrated =
-        terraform &&
-        (await matchGritQL(
-          tree,
-          TERRAFORM_RUNTIME,
-          hcl(`\`${terraformEntry}\``),
-        ));
       if (
         (!alreadyMigrated && !(await matchGritQL(tree, infraPath, oldEntry))) ||
-        (terraform &&
-          !coreMigrated &&
-          !(await matchGritQL(
-            tree,
-            TERRAFORM_RUNTIME,
-            hcl(`\`${oldTerraformEntry}\``),
-          )))
+        (terraform && !coreMigrated)
       ) {
         report();
         continue;
-      }
-      if (terraform && !coreMigrated) {
-        await applyGritQL(
-          tree,
-          TERRAFORM_RUNTIME,
-          hcl(`\`${oldTerraformEntry}\` => \`${terraformEntry}\``),
-        );
       }
       if (!tree.exists(launcherPath)) tree.write(launcherPath, launcher);
       if (commands.length === 5) {
