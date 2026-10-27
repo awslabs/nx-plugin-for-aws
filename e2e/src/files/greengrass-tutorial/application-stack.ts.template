@@ -1,0 +1,48 @@
+import {
+  GreengrassArtifactBucket,
+  GreengrassDeployment,
+  Pulse,
+} from '@greengrass-tutorial/common-constructs';
+import { CfnParameter, Stack, type StackProps } from 'aws-cdk-lib';
+import { Role } from 'aws-cdk-lib/aws-iam';
+import type { Construct } from 'constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    // Both values are written to .greengrass-tutorial.env by the setup script
+    // and passed with --parameters on every deploy.
+    const tokenExchangeRoleArn = new CfnParameter(
+      this,
+      'TokenExchangeRoleArn',
+      {
+        type: 'String',
+        description: 'ARN of the core device token exchange role',
+      },
+    );
+    const thingGroupArn = new CfnParameter(this, 'ThingGroupArn', {
+      type: 'String',
+      description: 'ARN of the thing group that holds the core device',
+    });
+
+    // The retained artifact repository, and the read grant the core device
+    // needs to fetch this component's artifacts from it.
+    const artifacts = new GreengrassArtifactBucket(this, 'Artifacts');
+    const tokenExchangeRole = Role.fromRoleArn(
+      this,
+      'TokenExchangeRole',
+      tokenExchangeRoleArn.valueAsString,
+    );
+    artifacts.grantReadTo(tokenExchangeRole, 'com.example.Pulse/*');
+
+    // Publishes the artifact built by pulse-artifact, then deploys it to the
+    // existing thing group. addComponent carries the resolved NEXT_PATCH
+    // version and orders the deployment after the component version.
+    const pulse = new Pulse(this, 'Pulse', { bucket: artifacts });
+    const fleet = new GreengrassDeployment(this, 'Fleet', {
+      targetArn: thingGroupArn.valueAsString,
+    });
+    fleet.addComponent(pulse);
+  }
+}

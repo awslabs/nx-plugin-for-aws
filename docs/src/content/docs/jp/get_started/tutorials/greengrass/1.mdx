@@ -1,0 +1,116 @@
+---
+title: コンポーネントを作成する
+description: ワークスペース、Pythonプロジェクト、Greengrassコンポーネント、CDKアプリケーションを作成し、コンポーネントをローカルpub/subからAWS IoT Core MQTTに切り替える
+---
+
+import { Aside, FileTree } from '@astrojs/starlight/components';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import E2EDiff from '@components/e2e-diff.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import RunGenerator from '@components/run-generator.astro';
+
+## タスク1: ワークスペースを作成する
+
+ワークスペースを配置するディレクトリから、次のコマンドを実行します:
+
+<CreateNxWorkspaceCommand workspace="greengrass-tutorial" iac="cdk" readonly />
+
+次に、ディレクトリを移動します:
+
+```bash
+cd greengrass-tutorial
+```
+
+ワークスペース名は、npmスコープ `@greengrass-tutorial` とPython名前空間 `greengrass_tutorial` を設定します。生成されたプロジェクト名にはこれらのプレフィックスが付き、`nx run` には完全な名前が必要なため、このチュートリアルの残りの部分では `greengrass_tutorial.telemetry` と `@greengrass-tutorial/infra` を使用します。
+
+## タスク2: プロジェクトを生成する
+
+コンポーネントをホストするPythonプロジェクトを作成します:
+
+<RunGenerator generator="py#project" requiredParameters={{ name: 'telemetry' }} noInteractive readonly />
+
+これにより、`packages/telemetry` にプロジェクト `greengrass_tutorial.telemetry` が作成されます。
+
+Greengrassコンポーネントを追加します:
+
+<RunGenerator generator="greengrass#component" requiredParameters={{ project: 'telemetry', name: 'pulse', language: 'python', componentName: 'com.example.Pulse', componentVersion: 'NEXT_PATCH', platform: 'linux-amd64', ipc: true, infra: 'component-version', iac: 'cdk' }} noInteractive readonly />
+
+各値はチュートリアルの後半で重要になります:
+
+- `platform: linux-amd64` は、モジュール2でプロビジョニングするx86_64インスタンスと一致します。デフォルトは `linux-arm64` であり、あるアーキテクチャ用にビルドされたレシピは別のアーキテクチャでは実行されません。
+- `componentVersion: NEXT_PATCH` は、デプロイ時にバージョンを割り当てます。最初のデプロイでは `1.0.0` が公開され、モジュール3ではレシピを編集せずにソースの変更から `1.0.1` が公開されます。
+- `ipc: true` は、このチュートリアルがコンポーネントをGreengrass IPCを通じて公開するように変更するため、明示的に指定されています。
+- `infra: component-version` と `iac: cdk` は、再利用可能なGreengrass coreコンストラクトを `packages/common/constructs` に追加し、このコンポーネントのアーティファクトを公開する `Pulse` アプリコンストラクトを追加します。
+
+デプロイメントを保持するCDKアプリケーションを作成します:
+
+<RunGenerator generator="ts#infra" requiredParameters={{ name: 'infra' }} noInteractive readonly />
+
+このチュートリアルで触れるファイル:
+
+<FileTree>
+- packages
+  - telemetry
+    - greengrass
+      - pulse
+        - main.py コンポーネントのエントリーポイント
+        - recipe.yaml コンポーネントのレシピ
+    - tests
+      - greengrass
+        - test_pulse.py コンポーネントのユニットテスト
+    - project.json `pulse-vendor`、`pulse-artifact`、`pulse-deploy-local`、`pulse-logs` ターゲット
+  - common
+    - constructs
+      - src
+        - core/greengrass アーティファクトバケット、コンポーネントバージョン、デプロイメント、バージョンリゾルバーコンストラクト
+        - app/greengrass/pulse.ts `Pulse` コンストラクト
+  - infra
+    - src
+      - stacks
+        - application-stack.ts モジュール3でデプロイメントを構成する場所
+</FileTree>
+
+## タスク3: ローカルpub/subの代わりにAWS IoT Coreに公開する
+
+生成された `main.py` は `publish_to_topic` でハートビートを公開しますが、これはローカルのGreengrass pub/subサービスを通じて同じコアデバイス上の他のコンポーネントに到達します。デバイスから出ることはありません。AWS IoT Coreでハートビートを確認するには、コンポーネントはIPCクライアントから `publish_to_iot_core` を使用する必要があり、レシピとデバイスのIoTポリシーの両方がそれを許可する必要があります。
+
+生成された `packages/telemetry/greengrass/pulse/main.py` を置き換えます:
+
+<E2EDiff before="greengrass-tutorial/main.py.original.template" after="greengrass-tutorial/main.py.template" lang="python" />
+
+`publish_to_iot_core` は、トピック名、QoS `"1"`（少なくとも1回）、およびバイトペイロードを受け取ります。トピック `tutorial/greengrass/heartbeat` は、レシピ、モジュール2で作成されるデバイスIoTポリシー、およびモジュール3のMQTTテストクライアントサブスクリプションに再び表示されます。
+
+`packages/telemetry/greengrass/pulse/recipe.yaml` のアクセス制御ブロックを置き換えます:
+
+<E2EDiff before="greengrass-tutorial/recipe.yaml.original.template" after="greengrass-tutorial/recipe.yaml.template" lang="yaml" />
+
+AWS IoT Core MQTTのIPCサービスは `aws.greengrass.ipc.mqttproxy` であり、公開は操作 `aws.greengrass#PublishToIoTCore` です。リソースは正確なトピックです。この認可はデバイス上のnucleusによって強制されます。デバイス証明書に添付されたIoTポリシーはAWS IoT Coreによって強制され、同じトピックに対して `iot:Publish` が必要です。モジュール2でそのポリシーを作成します。
+
+生成されたテストを更新します。ホストプロジェクトの `build` がそれを実行し、共有コンストラクトのビルドはホストのビルドに依存するためです:
+
+<E2EDiff before="greengrass-tutorial/test_pulse.py.original.template" after="greengrass-tutorial/test_pulse.py.template" lang="python" />
+
+## タスク4: アーティファクトをビルドする
+
+テストを実行し、コンポーネントアーティファクトをビルドします:
+
+<NxCommands commands={['run greengrass_tutorial.telemetry:test', 'run greengrass_tutorial.telemetry:pulse-artifact']} />
+
+`pulse-artifact` は、`x86_64-manylinux_2_28` 用のPython依存関係をベンダー化し、`pulse.zip` をパッケージ化し、解決されたレシピを書き込みます:
+
+<FileTree>
+- dist/packages/telemetry/greengrass/pulse/greengrass-build
+  - recipes
+    - com.example.Pulse-NEXT_PATCH.yaml mqttproxy認可を含むレシピ
+  - artifacts
+    - com.example.Pulse
+      - NEXT_PATCH
+        - pulse.zip
+</FileTree>
+
+<Aside type="caution" title="ここではpulse-deploy-localを実行しないでください">
+`pulse-deploy-local` と `pulse-logs` は、Greengrass nucleusと `greengrass-cli` がインストールされているマシンで実行されます。このチュートリアルでは、ワークステーションはコアデバイスではありません。モジュール2でデバイスをプロビジョニングし、モジュール3でクラウドからデプロイします。
+</Aside>
+
+<Link path="get_started/tutorials/greengrass/2">コアデバイスをプロビジョニングする</Link>に進みます。

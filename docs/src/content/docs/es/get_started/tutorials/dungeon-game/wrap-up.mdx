@@ -32,6 +32,12 @@ Te recomendamos que intentes extender la base de código con las siguientes capa
 
 ## Destruyendo recursos
 
+¿Quieres seguir jugando y agregar primero un dispositivo de borde? Continúa con
+<Link path="get_started/tutorials/dungeon-game/greengrass-dice">Opcional: lanza dados con Greengrass</Link>.
+El Story Agent llama a una herramienta que solicita un lanzamiento desde un dispositivo y usa el
+valor devuelto en el juego. Mantén tu mazmorra desplegada para esa ruta; incluye
+instrucciones para eliminar solo la extensión o toda la aplicación.
+
 1. Para destruir los recursos de AWS que fueron creados, ejecuta el siguiente comando:
 
 <NxCommands commands={['destroy-sandbox infra']} />
@@ -40,11 +46,41 @@ Te recomendamos que intentes extender la base de código con las siguientes capa
 
 2. Ingresa `y` para continuar. CloudFormation destruirá tus pilas.
 
-:::caution[Dos recursos se mantienen intencionalmente]
-Eliminar las pilas deja dos recursos atrás, para que un desmontaje no pueda llevarse a tus usuarios o sus historias:
+:::note[Si la protección contra eliminación de AppConfig bloquea la eliminación de la pila]
+Deja de usar la aplicación del tutorial. En la pestaña **Resources** de la pila fallida, registra
+el ID físico exacto de su aplicación AppConfig y los IDs de solo
+el entorno y los perfiles de configuración cuya eliminación falló.
+
+Espera el [intervalo de protección contra eliminación](https://docs.aws.amazon.com/appconfig/2019-10-09/APIReference/API_DeletionProtectionSettings.html) de la cuenta después de la última lectura de configuración
+y reintenta la destrucción, o elimina solo estos recursos descartados del tutorial:
+usa `aws appconfig delete-environment` con `--application-id` y
+`--environment-id`, y `aws appconfig delete-configuration-profile` con
+`--application-id` y `--configuration-profile-id`. Proporciona los IDs registrados
+y `--deletion-protection-check BYPASS`, con `--profile` y
+`--region` explícitos, en cada llamada. Luego vuelve a ejecutar el comando de destrucción.
+:::
+
+:::caution[Recursos retenidos]
+La eliminación de pilas deja estos recursos para una limpieza separada:
 
 - El **grupo de usuarios de Cognito**, que `ts#website#auth` crea con protección contra eliminación habilitada.
+- El **rol IAM de SMS del grupo**, retenido con el grupo para que aún pueda ser actualizado y eliminado.
 - El **bucket de sesión del Story Agent**, que contiene el historial de conversación y tiene por defecto `RemovalPolicy.RETAIN`.
+- El **grupo de registros de acceso de Game API**.
+- Cuatro **claves KMS administradas por el cliente** para los registros WAF del grupo de usuarios, registros de Game API, sesiones del Story Agent y sitio web.
+- El **rol IAM de CloudWatch de API Gateway**, cuya configuración de cuenta regional es compartida por las APIs REST.
 
-Elimínalos manualmente una vez que ya no los necesites — para el grupo de usuarios, desactiva primero la protección contra eliminación.
+Registra el ARN del rol de SMS de la configuración de SMS del grupo de usuarios antes de eliminar
+el grupo. Desactiva la protección contra eliminación del grupo, elimina el grupo, luego elimina
+su rol de SMS y cualquier política adjunta que pertenezca a esta aplicación. Vacía el
+bucket de sesión, incluyendo versiones de objetos y marcadores de eliminación, antes de eliminarlo.
+Elimina el grupo de registros de acceso de Game API cuando ya no necesites sus registros.
+
+Conserva cualquier clave KMS necesaria para leer los datos que retienes. Programa la eliminación de las
+claves no utilizadas de esta aplicación con un período de espera de al menos siete días.
+Las claves permanecen en `PendingDeletion` hasta que finalice ese período.
+
+Preserva el rol de API Gateway si otras APIs REST lo utilizan. Verifica la configuración del rol de
+CloudWatch de la cuenta regional y las dependencias antes de eliminar un rol no utilizado
+propiedad del tutorial, y actualiza su referencia de cuenta antes de eliminarlo.
 :::

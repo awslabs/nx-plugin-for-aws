@@ -1,0 +1,131 @@
+---
+title: 배포, 관찰 및 업데이트
+description: CDK에서 아티팩트 리포지토리, 읽기 권한, 컴포넌트 버전 및 배포를 구성하고, AWS IoT Core에 도착하는 하트비트를 확인한 다음, NEXT_PATCH 업데이트를 게시합니다
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import E2EDiff from '@components/e2e-diff.astro';
+import InstallCommand from '@components/install-command.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+## 작업 1: 스택 구성
+
+생성기는 배포가 아닌 빌딩 블록을 제공했습니다. 스택은 아티팩트가 어디에 있는지, 어떤 역할이 읽을 수 있는지, 어떤 플릿이 컴포넌트를 받는지를 결정합니다. `packages/infra/src/stacks/application-stack.ts`를 교체하세요:
+
+<E2EDiff before="greengrass-tutorial/application-stack.ts.original.template" after="greengrass-tutorial/application-stack.ts.template" lang="typescript" />
+
+각 부분이 하는 일:
+
+- `GreengrassArtifactBucket`은 보존되고 버전이 지정된 TLS 전용 아티팩트 리포지토리를 생성합니다. `grantReadTo`는 토큰 교환 역할에 `com.example.Pulse/*`에 대한 `s3:GetObject`를 부여하며, 이는 리졸버가 이 컴포넌트에 대해 작성하는 모든 아티팩트 키를 포함합니다.
+- `Pulse`는 `GreengrassComponentVersion`을 확장합니다. `pulse-artifact`가 빌드한 레시피와 `pulse.zip`을 읽고, 콘텐츠 해시 키 아래에 아카이브를 업로드하고, 컴포넌트 버전을 게시합니다. `bucket` 속성은 `GreengrassArtifactBucket` 구성 자체를 사용합니다.
+- `targetArn`이 있는 `GreengrassDeployment`는 설정 스크립트가 생성한 사물 그룹에 배포합니다. `addComponent(pulse)`는 해결된 버전을 배포의 컴포넌트 맵에 넣고 컴포넌트 버전 리소스에 CloudFormation 종속성을 추가하므로, 버전이 존재하기 전에 IoT 작업이 디바이스에 도달할 수 없습니다.
+- 두 개의 `CfnParameter` 값은 `.greengrass-tutorial.env`에서 가져옵니다. 이를 매개변수로 전달하면 스택에 계정별 리터럴이 없고 e2e 스위트가 동일한 파일을 합성할 수 있습니다.
+
+## 작업 2: 부트스트랩 및 배포
+
+기록된 값을 로드하고, 프로젝트 참조 및 종속성 매니페스트를 동기화하고, 업데이트된 워크스페이스 종속성을 설치하고, 이전에 수행하지 않은 경우 계정 및 리전에서 CDK를 부트스트랩합니다:
+
+```bash
+source .greengrass-tutorial.env
+```
+
+<NxCommands commands={['sync']} />
+<InstallCommand />
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @greengrass-tutorial/infra:bootstrap']} />
+
+스택을 배포합니다. `packages/infra/src/main.ts`는 스택을 `greengrass-tutorial-infra-sandbox` 스테이지에 배치하고, `deploy` 타겟은 자체 스테이지 없이 `cdk deploy`를 실행하므로, 명령은 해당 스테이지를 지정하고 역할 및 사물 그룹 ARN을 CloudFormation 매개변수로 전달합니다:
+
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @greengrass-tutorial/infra:deploy -- "greengrass-tutorial-infra-sandbox/**" --parameters TokenExchangeRoleArn="$TUTORIAL_TOKEN_EXCHANGE_ROLE_ARN" --parameters ThingGroupArn="$TUTORIAL_THING_GROUP_ARN"']} />
+
+`deploy`는 `^assemble`에 의존하고, 공유 구성 프로젝트는 텔레메트리 프로젝트의 `assemble`에 의존하며, 이는 `pulse-artifact`를 실행합니다. 따라서 모든 배포는 현재 소스와 일치하는 아티팩트를 게시합니다. 타겟은 익스프레스 모드 없이 `cdk deploy`를 실행하므로, 배포 리소스를 교체하는 이후 배포 리비전을 수락합니다. Greengrass에 `deploy-sandbox`를 사용하기 전에 <Link path="guides/greengrass-component#배포-수정">배포 리비전</Link>을 읽어보세요.
+
+첫 번째 배포에서 버전 리졸버는 `com.example.Pulse`의 게시된 버전을 찾지 못하고 `1.0.0`을 게시합니다. 그런 다음 배포가 사물 그룹에 도달하고, 코어 디바이스는 토큰 교환 역할로 아티팩트를 다운로드하고 컴포넌트를 시작합니다. 스택이 완료된 후 1~2분을 기다리세요.
+
+## 작업 3: 하트비트 확인
+
+`$TUTORIAL_AWS_REGION`에서 AWS IoT 콘솔을 열고, **MQTT test client**를 선택한 다음, 토픽을 구독합니다:
+
+```text
+tutorial/greengrass/heartbeat
+```
+
+30초마다 메시지가 도착합니다:
+
+```json
+{"sequence": 3, "greeting": "hello from pulse"}
+```
+
+AWS CLI는 MQTT 토픽을 구독할 수 없습니다. 자체 MQTT 클라이언트를 선호하는 경우, 이 튜토리얼에서 생성하지 않는 자체 인증서 및 정책을 사용하여 계정의 데이터 엔드포인트에 연결하세요:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iot describe-endpoint \
+  --endpoint-type iot:Data-ATS --query endpointAddress --output text
+```
+
+## 작업 4: 디바이스 확인
+
+성공적인 배포는 디바이스가 배포 문서를 적용했음을 증명합니다. 컴포넌트가 실행 중임을 증명하지는 않습니다. 설치된 컴포넌트의 수명 주기 상태를 확인하세요:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 list-installed-components \
+  --core-device-thing-name "$TUTORIAL_THING_NAME" \
+  --query 'installedComponents[?componentName==`com.example.Pulse`].[componentVersion,lifecycleState]' \
+  --output text
+```
+
+`1.0.0` 및 `RUNNING`이 예상됩니다. 그런 다음 모듈 2의 Systems Manager 패턴을 사용하여 인스턴스에서 컴포넌트의 자체 로그를 읽으세요:
+
+```bash
+cat > /tmp/greengrass-tutorial-command.json <<'EOF'
+{ "commands": ["#!/bin/bash", "tail -n 20 /greengrass/v2/logs/com.example.Pulse.log"] }
+EOF
+
+TUTORIAL_COMMAND_ID=$(aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" ssm send-command \
+  --instance-ids "$TUTORIAL_INSTANCE_ID" --document-name AWS-RunShellScript \
+  --parameters file:///tmp/greengrass-tutorial-command.json \
+  --query Command.CommandId --output text)
+sleep 5
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" ssm get-command-invocation \
+  --command-id "$TUTORIAL_COMMAND_ID" --instance-id "$TUTORIAL_INSTANCE_ID" \
+  --query StandardOutputContent --output text
+```
+
+로그는 IPC 연결과 하트비트당 한 줄을 보여줍니다:
+
+```text
+INFO:awsiot.eventstreamrpc:<Connection ...> /greengrass/v2/ipc.socket:0> connected
+INFO:com.example.Pulse:Published heartbeat 0 to tutorial/greengrass/heartbeat
+INFO:com.example.Pulse:Published heartbeat 1 to tutorial/greengrass/heartbeat
+```
+
+배포가 `SUCCEEDED`를 보고하지만 컴포넌트가 `BROKEN`이거나, `get-core-device`가 `UNHEALTHY`를 보고하는 경우, <Link path="guides/greengrass-component#문제-해결-및-서비스-제한">컴포넌트 문제 해결 단계</Link>를 따르세요.
+
+## 작업 5: 컴포넌트 업데이트
+
+`packages/telemetry/greengrass/pulse/main.py`에서 인사말을 변경하세요:
+
+<E2EDiff before="greengrass-tutorial/main.py.template" after="greengrass-tutorial/main.py.updated.template" lang="python" />
+
+동일한 명령으로 다시 배포하세요:
+
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @greengrass-tutorial/infra:deploy -- "greengrass-tutorial-infra-sandbox/**" --parameters TokenExchangeRoleArn="$TUTORIAL_TOKEN_EXCHANGE_ROLE_ARN" --parameters ThingGroupArn="$TUTORIAL_THING_GROUP_ARN"']} />
+
+Nx는 변경된 소스를 확인하고 `pulse-artifact`를 다시 빌드합니다. 아카이브의 콘텐츠 해시가 변경되므로, 리졸버는 `1.0.1`을 할당하고, 아티팩트는 새 키 아래에 업로드되고, 새 컴포넌트 버전이 게시되며, 새 배포 리비전이 사물 그룹을 가리킵니다. 레시피는 여전히 `NEXT_PATCH`라고 표시합니다. 워크스페이스의 어떤 것도 번호를 기록하지 않습니다.
+
+설치된 버전과 페이로드를 모두 확인하세요:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 list-installed-components \
+  --core-device-thing-name "$TUTORIAL_THING_NAME" \
+  --query 'installedComponents[?componentName==`com.example.Pulse`].[componentVersion,lifecycleState]' \
+  --output text
+```
+
+`1.0.1` 및 `RUNNING`이 예상됩니다. MQTT 테스트 클라이언트에서 인사말이 `hello from the updated pulse`로 변경되고, 컴포넌트 프로세스가 재시작되었기 때문에 시퀀스가 `0`부터 다시 시작됩니다.
+
+<Aside type="tip" title="변경되지 않은 재배포">
+소스 또는 레시피 변경 없이 다시 배포하면 `1.0.1`을 재사용합니다. 리졸버는 콘텐츠 해시를 가장 높은 게시된 버전의 태그와 비교하고 새 버전을 할당하는 대신 해당 버전을 반환합니다. 규칙과 제한 사항은 <Link path="guides/greengrass-component#자동-버전-관리">자동 버전 관리</Link>를 읽어보세요.
+</Aside>
+
+<Link path="get_started/tutorials/greengrass/cleanup">제거 및 정리</Link>로 계속하세요.

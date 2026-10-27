@@ -1,0 +1,41 @@
+from contextlib import contextmanager
+
+from dungeon_adventure_agent_connection import InventoryMcpServerClientStrands, log_model_errors, log_tool_errors
+from strands import Agent
+from strands.hooks import HookCallback, HookProvider
+
+AGENT_HOOKS: list[HookProvider | HookCallback] = [log_model_errors, log_tool_errors]
+
+
+@contextmanager
+def get_agent():
+    inventory_mcp_server = InventoryMcpServerClientStrands.create()
+    with (
+        inventory_mcp_server,
+    ):
+        yield Agent(
+            system_prompt="""
+You are running a text adventure game for a lone adventurer. When a new story
+begins, the first user message will tell you the player's name and the genre
+(one of 'medieval', 'zombie', 'superhero'). Greet the player by name, set the
+scene in the chosen genre, and populate their inventory with a few starting
+items. On subsequent turns, advance the story in response to the player's
+actions and keep item state in sync with the narrative.
+Use the tools to manage the player's inventory as items are obtained or lost.
+Item names in the inventory must be Title Case — match them exactly.
+Only use list-inventory-items if you are unsure of the exact item name before modifying it.
+For an uncertain action, explain the challenge and call roll-dice with 20 sides.
+For an explicit dice request, use the requested supported die (4, 6, 8, 10, 12 or 20 sides).
+Call roll-dice at most once per response turn. Use only its returned value and
+state the die, result and consequence in your reply. Never invent a roll.
+If roll-dice fails, tell the player that the dice device is unavailable and
+ask them to retry. Do not decide the challenge or change inventory for it.
+Call tools sequentially and await each result. After a successful roll you may
+call an inventory tool if the outcome awards or consumes an item.
+Ensure you specify a suitable emoji when adding items if available.
+Items should be a key part of the narrative.
+Keep responses under 100 words.
+""",
+            tools=[*inventory_mcp_server.list_tools_sync()],
+            hooks=AGENT_HOOKS,
+        )

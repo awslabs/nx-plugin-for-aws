@@ -32,6 +32,10 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 ## 리소스 삭제
 
+계속 플레이하면서 먼저 엣지 디바이스를 추가하고 싶으신가요?
+<Link path="get_started/tutorials/dungeon-game/greengrass-dice">선택 사항: Greengrass로 주사위 굴리기</Link>를 계속 진행하세요.
+Story Agent는 디바이스에서 주사위 굴림을 요청하는 도구를 호출하고 게임에서 반환된 값을 사용합니다. 해당 경로를 위해 배포된 던전을 유지하세요. 확장 기능만 제거하거나 전체 애플리케이션을 제거하는 방법에 대한 지침이 포함되어 있습니다.
+
 1. 생성된 AWS 리소스를 삭제하려면 다음 명령을 실행하세요:
 
 <NxCommands commands={['destroy-sandbox infra']} />
@@ -40,12 +44,31 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 2. 계속하려면 `y`를 입력하세요. CloudFormation이 스택을 삭제합니다.
 
-:::caution[두 개의 리소스는 의도적으로 유지됩니다]
-스택을 삭제하면 두 개의 리소스가 남게 되므로, 제거 작업이 사용자나 그들의 스토리를 함께 삭제하지 않습니다:
+:::note[AppConfig 삭제 보호가 스택 삭제를 차단하는 경우]
+튜토리얼 앱 사용을 중지하세요. 실패한 스택의 **Resources** 탭에서 소유한 AppConfig 애플리케이션의 정확한 물리적 ID와 삭제가 실패한 환경 및 구성 프로필의 ID만 기록하세요.
 
-- **Cognito 사용자 풀**: `ts#website#auth`가 삭제 보호가 활성화된 상태로 생성합니다.
-- **Story Agent의 세션 버킷**: 대화 기록을 보관하며 기본적으로 `RemovalPolicy.RETAIN`으로 설정됩니다.
-
-더 이상 필요하지 않으면 수동으로 삭제하세요. 사용자 풀의 경우 먼저 삭제 보호를 해제해야 합니다.
+마지막 구성 읽기 후 계정의 [삭제 보호 간격](https://docs.aws.amazon.com/appconfig/2019-10-09/APIReference/API_DeletionProtectionSettings.html)을 기다린 후 삭제를 재시도하거나, 폐기된 튜토리얼 리소스만 삭제하세요:
+`--application-id` 및 `--environment-id`와 함께 `aws appconfig delete-environment`를 사용하고,
+`--application-id` 및 `--configuration-profile-id`와 함께 `aws appconfig delete-configuration-profile`을 사용하세요. 각 호출에서 기록된 ID와
+`--deletion-protection-check BYPASS`, 명시적인 `--profile` 및
+`--region`을 제공하세요. 그런 다음 destroy 명령을 다시 실행하세요.
 :::
 
+:::caution[유지되는 리소스]
+스택 삭제 시 별도로 정리해야 하는 리소스가 남습니다:
+
+- **Cognito 사용자 풀**: `ts#website#auth`가 삭제 보호가 활성화된 상태로 생성합니다.
+- 풀의 **SMS IAM 역할**: 풀과 함께 유지되어 여전히 업데이트 및 삭제할 수 있습니다.
+- **Story Agent의 세션 버킷**: 대화 기록을 보관하며 기본적으로 `RemovalPolicy.RETAIN`으로 설정됩니다.
+- **Game API 액세스 로그 그룹**.
+- 사용자 풀 WAF 로그, Game API 로그, Story Agent 세션 및 웹사이트를 위한 4개의 **고객 관리형 KMS 키**.
+- **API Gateway CloudWatch IAM 역할**: 리전 계정 설정이 REST API들에 의해 공유됩니다.
+
+풀을 삭제하기 전에 사용자 풀의 SMS 구성에서 SMS 역할 ARN을 기록하세요. 풀의 삭제 보호를 해제하고 풀을 삭제한 다음, 이 애플리케이션이 소유한 SMS 역할과 연결된 정책을 삭제하세요. 세션 버킷을 삭제하기 전에 객체 버전 및 삭제 마커를 포함하여 버킷을 비우세요.
+로그가 더 이상 필요하지 않으면 Game API 액세스 로그 그룹을 삭제하세요.
+
+보관하는 데이터를 읽는 데 필요한 KMS 키는 유지하세요. 이 애플리케이션의 사용하지 않는 키는 최소 7일의 대기 기간을 두고 삭제를 예약하세요.
+키는 해당 기간이 끝날 때까지 `PendingDeletion` 상태로 유지됩니다.
+
+다른 REST API가 사용하는 경우 API Gateway 역할을 보존하세요. 사용하지 않는 튜토리얼 소유 역할을 제거하기 전에 리전 계정의 CloudWatch 역할 설정과 종속성을 확인하고, 삭제하기 전에 계정 참조를 업데이트하세요.
+:::

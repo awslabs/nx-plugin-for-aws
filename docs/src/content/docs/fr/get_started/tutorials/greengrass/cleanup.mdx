@@ -1,0 +1,137 @@
+---
+title: Supprimer et nettoyer
+description: Supprimez le composant de l'appareil avec une révision de déploiement vide, détruisez la pile, puis supprimez les ressources Greengrass conservées et tout ce que le script de configuration a créé
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import E2EDiff from '@components/e2e-diff.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+Le nettoyage s'exécute dans l'ordre inverse de la création : d'abord l'appareil arrête d'exécuter le composant, puis la pile disparaît, puis les ressources que la pile a conservées, puis l'appareil et son identité, et enfin le profil d'instance.
+
+## Tâche 1 : Supprimer le composant de l'appareil
+
+La suppression d'une ressource de déploiement supprime l'état de gestion du déploiement. Elle ne désinstalle rien d'un appareil. L'appareil ne supprime un composant que lorsqu'il reçoit une révision de déploiement qui ne le liste plus. Modifiez la pile pour que le déploiement ne liste aucun composant tandis que la version publiée reste gérée :
+
+<E2EDiff before="greengrass-tutorial/application-stack.ts.template" after="greengrass-tutorial/application-stack.ts.removed.template" lang="typescript" />
+
+Déployez la révision :
+
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @greengrass-tutorial/infra:deploy -- "greengrass-tutorial-infra-sandbox/**" --parameters TokenExchangeRoleArn="$TUTORIAL_TOKEN_EXCHANGE_ROLE_ARN" --parameters ThingGroupArn="$TUTORIAL_THING_GROUP_ARN"']} />
+
+Attendez que le composant disparaisse de l'appareil et que l'appareil reste en bonne santé :
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 list-installed-components \
+  --core-device-thing-name "$TUTORIAL_THING_NAME" \
+  --query 'installedComponents[].componentName' --output text
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 get-core-device \
+  --core-device-thing-name "$TUTORIAL_THING_NAME" --query status --output text
+```
+
+La première commande ne doit plus lister `com.example.Pulse`. La seconde doit afficher `HEALTHY`. Le client de test MQTT cesse de recevoir des battements de cœur.
+
+## Tâche 2 : Détruire la pile
+
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @greengrass-tutorial/infra:destroy -- "greengrass-tutorial-infra-sandbox/**" --force']} />
+
+La pile a disparu, mais trois types de ressources sont conservés intentionnellement, car les versions de composants sont immuables et survivent à tout déploiement unique :
+
+- Les deux versions de composant de `com.example.Pulse`, `1.0.0` et `1.0.1`.
+- Les trois révisions de déploiement vers le groupe d'objets.
+- Le bucket d'artefacts, avec une archive par version publiée.
+
+La pile de bootstrap CDK `CDKToolkit` reste également. Elle est partagée par chaque application CDK dans le compte et la région, donc laissez-la sauf si vous l'avez créée pour ce tutoriel.
+
+## Tâche 3 : Supprimer les ressources Greengrass conservées
+
+Listez les déploiements vers le groupe d'objets. Annulez celui qui est encore `ACTIVE`, puis supprimez chacun d'eux :
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 list-deployments \
+  --target-arn "$TUTORIAL_THING_GROUP_ARN" --history-filter ALL \
+  --query 'deployments[].[deploymentId,deploymentStatus]' --output text
+
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 cancel-deployment \
+  --deployment-id <active-deployment-id>
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 delete-deployment \
+  --deployment-id <deployment-id>
+```
+
+Supprimez chaque version publiée du composant :
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 list-component-versions \
+  --arn "arn:aws:greengrass:${TUTORIAL_AWS_REGION}:${TUTORIAL_ACCOUNT_ID}:components:com.example.Pulse" \
+  --query 'componentVersions[].arn' --output text
+
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 delete-component \
+  --arn <component-version-arn>
+```
+
+Trouvez le bucket d'artefacts via la balise de propriété que le construct applique, confirmez que la liste ne contient que le bucket de ce tutoriel, puis supprimez ses versions d'objets et le bucket :
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" resourcegroupstaggingapi get-resources \
+  --tag-filters Key=greengrass-artifact-repository,Values=true \
+  --resource-type-filters s3:bucket \
+  --query 'ResourceTagMappingList[].ResourceARN' --output text
+
+export TUTORIAL_BUCKET=<bucket-name>
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" s3api list-object-versions \
+  --bucket "$TUTORIAL_BUCKET" \
+  --query '{Objects: Versions[].{Key: Key, VersionId: VersionId}}' --output json \
+  > /tmp/greengrass-tutorial-versions.json
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" s3api delete-objects \
+  --bucket "$TUTORIAL_BUCKET" --delete file:///tmp/greengrass-tutorial-versions.json
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" s3api delete-bucket \
+  --bucket "$TUTORIAL_BUCKET"
+```
+
+Le bucket est versionné, donc `delete-objects` doit nommer chaque version. Si `list-object-versions` signale également des `DeleteMarkers`, répétez la suppression avec ces entrées avant de supprimer le bucket.
+
+## Tâche 4 : Supprimer l'appareil principal et son identité
+
+L'opération `cleanup` du script lit `.greengrass-tutorial.env`, vérifie qu'il appartient au même compte, région et préfixe, puis termine l'instance, détache et supprime le certificat avec chaque politique qui lui est attachée, supprime l'enregistrement de l'appareil principal, l'objet et le groupe d'objets, les deux politiques IoT, l'alias de rôle, le rôle d'échange de jetons avec ses pièces jointes, et la politique d'accès.
+
+```bash
+./setup-greengrass-tutorial.sh cleanup \
+  --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" --prefix "$TUTORIAL_PREFIX"
+```
+
+Chaque étape affiche `deleted` ou `absent`. Un objet qui a déjà disparu est ignoré. Toute autre erreur arrête l'exécution et conserve le fichier d'état, afin que vous puissiez corriger la cause et réexécuter la même commande.
+
+<Aside type="note" title="L'ordre compte pour le rôle">
+Détruisez la pile avant d'exécuter le nettoyage. L'autorisation de lecture de la pile est une politique en ligne sur le rôle d'échange de jetons. Le nettoyage supprime les politiques en ligne qu'il trouve afin que le rôle puisse être supprimé, mais une pile qui référence toujours le rôle échouerait alors lors de sa prochaine mise à jour.
+</Aside>
+
+## Tâche 5 : Supprimer le profil d'instance
+
+Le profil d'instance était le vôtre, donc le script le laisse tranquille :
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam remove-role-from-instance-profile \
+  --instance-profile-name "${TUTORIAL_PREFIX}-instance" --role-name "${TUTORIAL_PREFIX}-instance"
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam delete-instance-profile \
+  --instance-profile-name "${TUTORIAL_PREFIX}-instance"
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam delete-role-policy \
+  --role-name "${TUTORIAL_PREFIX}-instance" --policy-name greengrass-installer-bootstrap
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam detach-role-policy \
+  --role-name "${TUTORIAL_PREFIX}-instance" \
+  --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam delete-role \
+  --role-name "${TUTORIAL_PREFIX}-instance"
+rm -f .greengrass-tutorial.env
+```
+
+`delete-role-policy` échoue avec `NoSuchEntity` si vous avez déjà supprimé la politique de bootstrap dans le module 2. C'est attendu.
+
+## Ce que vous avez appris
+
+- Un composant généré publie sur IPC local par défaut. Le MQTT cloud nécessite `publish_to_iot_core`, une autorisation `aws.greengrass.ipc.mqttproxy` dans la recette, et `iot:Publish` dans la politique IoT de l'appareil.
+- Le générateur fournit des blocs de construction. Votre pile CDK possède le référentiel d'artefacts, l'autorisation de lecture et le déploiement, et `addComponent` porte la version résolue et l'arête d'ordonnancement.
+- `NEXT_PATCH` alloue une version à partir du contenu. Un changement de source publie la prochaine version de correctif via le `deploy` normal.
+- La suppression d'un composant est une révision de déploiement. La suppression de l'infrastructure est une étape séparée et ultérieure qui laisse les versions conservées, les déploiements et le bucket à supprimer.
+
+Pour le versionnement et la conservation des artefacts, lisez les sections <Link path="guides/greengrass-component#versionnage-automatique">versionnement</Link> et <Link path="guides/greengrass-component#stockage-et-rétention-des-artefacts">stockage d'artefacts</Link> du guide des composants. Le même guide liste les limites de service à considérer pour les déploiements plus importants.

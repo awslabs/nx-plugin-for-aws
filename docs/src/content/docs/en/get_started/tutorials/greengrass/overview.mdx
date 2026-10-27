@@ -1,0 +1,65 @@
+---
+title: Greengrass MQTT tutorial
+description: Build a Python Greengrass component, run it on an EC2 core device, watch its heartbeat arrive in AWS IoT Core over MQTT, publish a NEXT_PATCH update, then remove everything
+---
+
+import Link from '@components/link.astro';
+import Snippet from '@components/snippet.astro';
+
+In this tutorial you build a Python [AWS IoT Greengrass v2](https://docs.aws.amazon.com/greengrass/v2/developerguide/what-is-iot-greengrass.html) component with `@aws/nx-plugin`, run it on an Ubuntu 26.04 x86_64 EC2 instance that acts as the core device, and watch its heartbeat arrive in AWS IoT Core over MQTT. You then change the source, publish the next version with `NEXT_PATCH`, remove the component from the device, and delete every resource you created.
+
+The tutorial uses CDK and the classic Greengrass nucleus. For TypeScript components, Terraform, or an existing fleet, read the <Link path="guides/greengrass-component">Greengrass component guide</Link>.
+
+## What you build
+
+| Piece | Where | Created by |
+| --- | --- | --- |
+| Python project `greengrass_tutorial.telemetry` | `packages/telemetry` | `py#project` |
+| Component `com.example.Pulse` | `packages/telemetry/greengrass/pulse` | `greengrass#component` |
+| Greengrass core constructs and the `Pulse` app construct | `packages/common/constructs/src/core/greengrass`, `packages/common/constructs/src/app/greengrass` | `greengrass#component` |
+| CDK application `@greengrass-tutorial/infra` | `packages/infra` | `ts#infra` |
+
+The generated component publishes over local Greengrass IPC. Module 1 changes it to publish to AWS IoT Core, which needs a different IPC operation, a different recipe authorization, and an IoT policy statement on the device. The API and access-control names come from the [AWS IoT Core MQTT IPC documentation](https://docs.aws.amazon.com/greengrass/v2/developerguide/ipc-iot-core-mqtt.html).
+
+## What it creates in AWS
+
+| Resource | Created by | Deleted by |
+| --- | --- | --- |
+| IoT thing group, thing, certificate, IoT policy, token exchange role, role alias, IAM access policy | The setup script and the nucleus installer | The script's `cleanup` operation |
+| EC2 `t3.small` instance with an SSM instance profile | The setup script (instance) and you (instance profile) | The script's `cleanup` operation and you |
+| Artifact bucket, component versions, deployment, artifact read grant | Your CDK stack | `destroy`, then manual deletion of the retained bucket, versions and deployments |
+
+The instance runs until you clean up. Use an AWS account and Region you can clean up completely.
+
+## Before you start
+
+<Snippet name="required-prerequisites" />
+
+You also need:
+
+- [AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) with a named profile for the target account.
+- Permissions in that account to create IAM roles and policies, IoT things and policies, EC2 instances, Systems Manager commands, S3 buckets, CloudFormation stacks and Greengrass resources.
+- A default VPC in the Region, or a subnet with outbound internet access that you pass to the setup script.
+
+Every AWS CLI command in this tutorial passes `--profile` and `--region` explicitly, and every CDK command receives `AWS_PROFILE` and `AWS_REGION`. Set the values once in your shell:
+
+```bash
+export TUTORIAL_AWS_PROFILE=<your-profile>
+export TUTORIAL_AWS_REGION=us-east-1
+export TUTORIAL_PREFIX=gg-tutorial
+```
+
+`TUTORIAL_PREFIX` names every resource the setup script creates. Pick a value that nothing else in the account uses.
+
+## What is verified automatically
+
+The commands, source edits, build and CDK synthesis of this tutorial are covered by the `greengrass-tutorial` smoke test in CI. The setup script's identity, refusal and cleanup behaviour runs against a recorded AWS CLI in the docs test suite.
+
+Provisioning, MQTT delivery, device updates and cleanup require an AWS account and remain outside the automated lane. Follow the device checks in each module to verify the deployment. The <Link path="guides/greengrass-component#hardware-and-operating-systems">hardware support table</Link> records the supported device platforms.
+
+## Modules
+
+1. <Link path="get_started/tutorials/greengrass/1">Create the component</Link>: workspace, Python project, component, CDK application, and the switch to AWS IoT Core MQTT.
+2. <Link path="get_started/tutorials/greengrass/2">Provision the core device</Link>: instance profile, image selection, the setup script, and what it creates.
+3. <Link path="get_started/tutorials/greengrass/3">Deploy, observe and update</Link>: the CDK stack, the first deployment, the MQTT heartbeat, and a `NEXT_PATCH` update.
+4. <Link path="get_started/tutorials/greengrass/cleanup">Remove and clean up</Link>: an empty deployment revision, stack destruction, and deletion of the retained and script-created resources.

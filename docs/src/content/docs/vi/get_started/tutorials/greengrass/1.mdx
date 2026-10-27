@@ -1,0 +1,116 @@
+---
+title: Tạo component
+description: Tạo workspace, một dự án Python, component Greengrass và một ứng dụng CDK, sau đó chuyển component từ pub/sub cục bộ sang AWS IoT Core MQTT
+---
+
+import { Aside, FileTree } from '@astrojs/starlight/components';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import E2EDiff from '@components/e2e-diff.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import RunGenerator from '@components/run-generator.astro';
+
+## Nhiệm vụ 1: Tạo workspace
+
+Từ thư mục sẽ chứa workspace, chạy:
+
+<CreateNxWorkspaceCommand workspace="greengrass-tutorial" iac="cdk" readonly />
+
+Sau đó chuyển vào đó:
+
+```bash
+cd greengrass-tutorial
+```
+
+Tên workspace đặt npm scope `@greengrass-tutorial` và Python namespace `greengrass_tutorial`. Tên dự án được tạo mang các tiền tố này, và `nx run` cần tên đầy đủ, vì vậy phần còn lại của hướng dẫn này sử dụng `greengrass_tutorial.telemetry` và `@greengrass-tutorial/infra`.
+
+## Nhiệm vụ 2: Tạo các dự án
+
+Tạo dự án Python chứa component:
+
+<RunGenerator generator="py#project" requiredParameters={{ name: 'telemetry' }} noInteractive readonly />
+
+Điều này tạo dự án `greengrass_tutorial.telemetry` tại `packages/telemetry`.
+
+Thêm component Greengrass vào đó:
+
+<RunGenerator generator="greengrass#component" requiredParameters={{ project: 'telemetry', name: 'pulse', language: 'python', componentName: 'com.example.Pulse', componentVersion: 'NEXT_PATCH', platform: 'linux-amd64', ipc: true, infra: 'component-version', iac: 'cdk' }} noInteractive readonly />
+
+Mỗi giá trị đều quan trọng trong hướng dẫn sau này:
+
+- `platform: linux-amd64` khớp với instance x86_64 mà bạn cung cấp trong module 2. Mặc định là `linux-arm64`, và một recipe được xây dựng cho một kiến trúc sẽ không chạy trên kiến trúc khác.
+- `componentVersion: NEXT_PATCH` phân bổ phiên bản tại thời điểm triển khai. Lần triển khai đầu tiên xuất bản `1.0.0`; module 3 xuất bản `1.0.1` từ thay đổi nguồn mà không cần chỉnh sửa recipe.
+- `ipc: true` được chỉ định rõ ràng vì hướng dẫn này thay đổi component để xuất bản thông qua Greengrass IPC.
+- `infra: component-version` với `iac: cdk` thêm các construct Greengrass core có thể tái sử dụng vào `packages/common/constructs` và một construct ứng dụng `Pulse` xuất bản artifact của component này.
+
+Tạo ứng dụng CDK sẽ chứa deployment:
+
+<RunGenerator generator="ts#infra" requiredParameters={{ name: 'infra' }} noInteractive readonly />
+
+Các tệp mà hướng dẫn này đề cập:
+
+<FileTree>
+- packages
+  - telemetry
+    - greengrass
+      - pulse
+        - main.py the component entrypoint
+        - recipe.yaml the component recipe
+    - tests
+      - greengrass
+        - test_pulse.py the component's unit test
+    - project.json `pulse-vendor`, `pulse-artifact`, `pulse-deploy-local` and `pulse-logs` targets
+  - common
+    - constructs
+      - src
+        - core/greengrass artifact bucket, component version, deployment and version resolver constructs
+        - app/greengrass/pulse.ts the `Pulse` construct
+  - infra
+    - src
+      - stacks
+        - application-stack.ts where module 3 composes the deployment
+</FileTree>
+
+## Nhiệm vụ 3: Xuất bản lên AWS IoT Core thay vì pub/sub cục bộ
+
+`main.py` được tạo xuất bản một heartbeat với `publish_to_topic`, điều này đến các component khác trên cùng một core device thông qua dịch vụ Greengrass pub/sub cục bộ. Nó không bao giờ rời khỏi thiết bị. Để xem heartbeat trong AWS IoT Core, component phải sử dụng `publish_to_iot_core` từ IPC client, và cả recipe và IoT policy của thiết bị đều phải cho phép nó.
+
+Thay thế `packages/telemetry/greengrass/pulse/main.py` được tạo:
+
+<E2EDiff before="greengrass-tutorial/main.py.original.template" after="greengrass-tutorial/main.py.template" lang="python" />
+
+`publish_to_iot_core` nhận tên topic, một QoS là `"1"` (ít nhất một lần), và một byte payload. Topic `tutorial/greengrass/heartbeat` xuất hiện lại trong recipe, trong IoT policy của thiết bị mà module 2 tạo, và trong subscription MQTT test client trong module 3.
+
+Thay thế khối access-control trong `packages/telemetry/greengrass/pulse/recipe.yaml`:
+
+<E2EDiff before="greengrass-tutorial/recipe.yaml.original.template" after="greengrass-tutorial/recipe.yaml.template" lang="yaml" />
+
+Dịch vụ IPC cho AWS IoT Core MQTT là `aws.greengrass.ipc.mqttproxy`, và xuất bản là operation `aws.greengrass#PublishToIoTCore`. Resource là topic chính xác. Ủy quyền này được thực thi bởi nucleus trên thiết bị. IoT policy được đính kèm với certificate thiết bị được thực thi bởi AWS IoT Core, và nó cần `iot:Publish` trên cùng một topic. Module 2 tạo policy đó.
+
+Cập nhật test được tạo, vì `build` của dự án host chạy nó và shared constructs build phụ thuộc vào host build:
+
+<E2EDiff before="greengrass-tutorial/test_pulse.py.original.template" after="greengrass-tutorial/test_pulse.py.template" lang="python" />
+
+## Nhiệm vụ 4: Xây dựng artifact
+
+Chạy test và xây dựng component artifact:
+
+<NxCommands commands={['run greengrass_tutorial.telemetry:test', 'run greengrass_tutorial.telemetry:pulse-artifact']} />
+
+`pulse-artifact` vendor các dependency Python cho `x86_64-manylinux_2_28`, đóng gói `pulse.zip`, và ghi recipe đã được resolve:
+
+<FileTree>
+- dist/packages/telemetry/greengrass/pulse/greengrass-build
+  - recipes
+    - com.example.Pulse-NEXT_PATCH.yaml the recipe with the mqttproxy authorization
+  - artifacts
+    - com.example.Pulse
+      - NEXT_PATCH
+        - pulse.zip
+</FileTree>
+
+<Aside type="caution" title="Không chạy pulse-deploy-local ở đây">
+`pulse-deploy-local` và `pulse-logs` chạy trên một máy có Greengrass nucleus và `greengrass-cli` được cài đặt. Workstation của bạn không phải là core device trong hướng dẫn này. Module 2 cung cấp thiết bị và module 3 triển khai nó từ cloud.
+</Aside>
+
+Tiếp tục với <Link path="get_started/tutorials/greengrass/2">Cung cấp core device</Link>.

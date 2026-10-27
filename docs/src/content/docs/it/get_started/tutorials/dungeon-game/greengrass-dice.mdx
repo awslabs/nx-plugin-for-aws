@@ -1,0 +1,290 @@
+---
+title: "Opzionale: lancia i dadi con Greengrass"
+description: Consenti al Dungeon Adventure Story Agent di chiamare uno strumento che richiede un lancio di dadi da un dispositivo core Greengrass e utilizza il suo risultato nella storia.
+---
+
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
+import RunGenerator from '@components/run-generator.astro';
+import InstallCommand from '@components/install-command.astro';
+import E2ECode from '@components/e2e-code.astro';
+import E2EDiff from '@components/e2e-diff.astro';
+import { getDungeonDiceDependencies } from '../../../../../../../../e2e/src/utils';
+
+Mantieni il dungeon che hai distribuito nel <Link path="get_started/tutorials/dungeon-game/4">Modulo 4</Link>.
+Prima di distruggerlo, fornisci al suo Story Agent un dispositivo per i dadi:
+
+> "Provo a scassinare la serratura. Lancia un d20 per vedere se ci riesco."
+
+L'agente chiama `roll-dice`. Un componente Python su un core Greengrass produce
+il lancio, e lo strumento MCP restituisce quel risultato del dispositivo all'agente. La risposta
+può quindi dire "d20: 17" e descrivere l'esito.
+
+Questo percorso opzionale utilizza un core EC2 con un simulatore di dadi software. Puoi
+successivamente sostituire la sua funzione di numeri casuali con input da un vassoio di dadi fisico.
+Il <Link path="get_started/tutorials/greengrass/overview">tutorial Greengrass autonomo</Link>
+rimane un modo separato per imparare la generazione di componenti da un workspace vuoto.
+
+## Cosa aggiungerai
+
+```d2
+direction: right
+player: Player
+agent: Story Agent
+tool: "Inventory MCP server\nroll-dice"
+dice_shadow: "AWS IoT Core\nnamed shadow: dungeon-dice"
+device: "Greengrass core\ncom.example.DungeonDice"
+player -> agent: "Attempt an action"
+agent -> tool: "roll-dice(sides=20)"
+tool -> dice_shadow: "Desired request + request ID"
+dice_shadow -> device: "MQTT delta through IPC"
+device -> dice_shadow: "Reported result + same ID"
+dice_shadow -> tool: "Correlated result"
+tool -> agent: "d20 = 17"
+agent -> player: "Result and consequence"
+```
+
+Lo shadow cloud contiene una richiesta in sospeso e il risultato più recente. Lo
+strumento attende fino a 12 secondi; non genera mai un lancio di fallback. Un controllo
+di versione impedisce ai chiamanti concorrenti di sostituire una richiesta attiva. Il dispositivo
+memorizza il suo ultimo risultato prima di pubblicare, quindi la riconsegna MQTT e un riavvio
+del componente non rilanciano la stessa richiesta.
+
+Questa sandbox condivide un dispositivo per i dadi tra i giocatori. Un dispositivo occupato restituisce un
+errore. Non aggiunge una coda a livello di flotta né associa dispositivi personali con
+utenti Cognito. Queste sono estensioni separate per un prodotto multi-giocatore.
+
+## 1. Provisiona un core senza smantellare il dungeon
+
+Utilizza lo stesso account AWS e la stessa Region del dungeon distribuito. Imposta il profilo
+esplicitamente; utilizza un nuovo prefisso per le risorse del dispositivo:
+
+```bash
+export TUTORIAL_AWS_PROFILE=<your-dungeon-profile>
+export TUTORIAL_AWS_REGION=<your-dungeon-region>
+export TUTORIAL_PREFIX=gg-dungeon-dice
+```
+
+Segui <Link path="get_started/tutorials/greengrass/2">Provisiona il dispositivo core</Link>
+dal **workspace del dungeon**, inclusa la rimozione della policy temporanea dell'installer.
+Quella pagina crea l'istanza e scrive `.greengrass-tutorial.env`.
+Non creare un altro workspace Nx né eseguire i moduli heartbeat autonomi.
+Le impostazioni predefinite esistenti dello script di setup rimangono invariate.
+
+```bash
+source .greengrass-tutorial.env
+export DICE_IOT_ENDPOINT=$(aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" \
+  iot describe-endpoint --endpoint-type iot:Data-ATS --query endpointAddress --output text)
+```
+
+Inizializza lo shadow nominato del nuovo dispositivo una volta, prima di abilitare lo strumento. Non
+eseguire questo reset su un dispositivo con una richiesta di dadi attiva:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" \
+  iot-data update-thing-shadow --endpoint-url "https://${DICE_IOT_ENDPOINT}" \
+  --thing-name "$TUTORIAL_THING_NAME" --shadow-name dungeon-dice \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"state":{"desired":{"command":null},"reported":{"command":null,"result":null}}}' \
+  /tmp/dungeon-dice-shadow.json
+```
+
+La procedura EC2 utilizza x86_64 Linux. Un Raspberry Pi con Linux a 64 bit utilizza
+`linux-arm64` invece; sia la ricetta generata che le dipendenze native devono
+targetizzare quell'architettura. Vedi <Link path="guides/greengrass-component#hardware-e-sistemi-operativi">supporto hardware</Link>.
+Un ESP32 può fornire input da sensori a un gateway, ma non può eseguire questo componente Python.
+
+## 2. Genera il componente dice
+
+Crea un host Python separato in modo che l'artifact del dispositivo non contenga le dipendenze
+cloud dello Story Agent:
+
+<RunGenerator generator="py#project" requiredParameters={{ name: 'edge' }} readonly />
+<RunGenerator generator="greengrass#component" requiredParameters={{ project: 'edge', name: 'dice', language: 'python', componentName: 'com.example.DungeonDice', componentVersion: 'NEXT_PATCH', platform: 'linux-amd64', ipc: true, infra: 'component-version', iac: 'cdk' }} readonly />
+
+Sostituisci `packages/edge/greengrass/dice/main.py`:
+
+<E2ECode lang="python" path="dungeon-adventure/dice/main.py.template" />
+
+Sostituisci `packages/edge/greengrass/dice/recipe.yaml`:
+
+<E2ECode lang="yaml" path="dungeon-adventure/dice/recipe.yaml.template" />
+
+Sostituisci **ogni** `REPLACE_WITH_CORE_THING_NAME` con il valore di
+`TUTORIAL_THING_NAME`. I permessi IPC della ricetta nominano solo i topic dello shadow dei dadi di questo dispositivo.
+Python scrive `dice-result.json` nella directory di lavoro scrivibile del componente,
+al di fuori della sua directory artifact di sola lettura.
+
+Sostituisci `packages/edge/tests/greengrass/test_dice.py`:
+
+<E2ECode lang="python" path="dungeon-adventure/dice/test_dice.py.template" />
+
+Questi test esercitano lanci validi, duplicati, recupero da riavvio, richieste obsolete,
+scadenza e fallimenti di persistenza. Il test heartbeat predefinito del generatore viene
+sostituito perché il componente ora implementa un comportamento diverso.
+
+## 3. Aggiungi lo strumento dice dell'agente
+
+Aggiungi il client del data-plane IoT al progetto Inventory MCP:
+
+<InstallCommand pkg={getDungeonDiceDependencies()} project="@dungeon-adventure/inventory" />
+
+Crea `packages/inventory/src/mcp-server/roll-dice.ts`:
+
+<E2ECode lang="typescript" path="dungeon-adventure/dice/roll-dice.ts.template" />
+
+Crea `packages/inventory/src/mcp-server/register-dice.ts`:
+
+<E2ECode lang="typescript" path="dungeon-adventure/dice/register-dice.ts.template" />
+
+Aggiorna `packages/inventory/src/mcp-server/server.ts`:
+
+<E2EDiff lang="typescript" before="dungeon-adventure/2/mcp/server.ts.template" after="dungeon-adventure/dice/server.ts.template" />
+
+Mantieni tutti e tre gli strumenti dell'inventario. La connessione dello Story Agent generata già
+scopre gli strumenti da questo server, quindi scoprirà anche `roll-dice`.
+Lo strumento accetta solo la dimensione del dado. L'identità del dispositivo e l'endpoint provengono dalla
+configurazione del server; il modello non può scegliere un altro dispositivo o topic MQTT.
+Durante lo sviluppo locale, gli strumenti dell'inventario rimangono utilizzabili senza le
+variabili d'ambiente `DICE_*`. Chiamare `roll-dice` restituisce un errore di dispositivo
+non configurato finché `DICE_THING_NAME`, `DICE_IOT_ENDPOINT` e `DICE_AWS_REGION` non sono impostati.
+
+Aggiorna `packages/story/dungeon_adventure_story/agent/agent.py`:
+
+<E2EDiff lang="python" before="dungeon-adventure/3/agent.py.template" after="dungeon-adventure/dice/agent.py.template" />
+
+La sostituzione consente chiamate sequenziali in modo che un lancio riuscito possa essere seguito
+da un aggiornamento dell'inventario. Consente ancora solo un lancio per turno ed esplicitamente
+interrompe la sfida quando lo strumento dice fallisce.
+
+## 4. Componi le risorse del dispositivo nell'applicazione esistente
+
+Crea `packages/infra/src/dice-resources.ts`:
+
+<E2ECode lang="typescript" path="dungeon-adventure/dice/dice-resources.ts.template" />
+
+Aggiorna `packages/infra/src/stacks/application-stack.ts` per passare la configurazione
+del dispositivo al server MCP e concedere al suo runtime l'accesso allo shadow:
+
+<E2EDiff lang="typescript" before="dungeon-adventure/2/stacks/application-stack.ts.template" after="dungeon-adventure/dice/application-stack.ts.template" />
+
+Mantieni il resto dello stack dell'applicazione esistente. `DiceResources` possiede i
+parametri del dispositivo, la concessione dell'artifact, il componente e il suo
+deployment.
+
+Ci sono tre confini di permessi:
+
+- La policy del certificato IoT esistente del core consente la pubblicazione, la sottoscrizione
+  e la ricezione su `$aws/things/<thing-name>/shadow/*`, che include già
+  lo shadow nominato `dungeon-dice`. Non è necessaria alcuna policy del certificato aggiuntiva.
+- La ricetta dice concede al componente l'accesso a quei topic tramite IPC.
+- Il runtime Inventory MCP ottiene `GetThingShadow` e `UpdateThingShadow` su
+  solo lo shadow nominato `dungeon-dice` di questa thing.
+
+La concessione dell'artifact consente al ruolo di scambio token del core di recuperare solo
+`com.example.DungeonDice/*`. Il deployment dipende dalla pubblicazione del componente.
+
+Compila, quindi distribuisci con tutti e quattro i valori dei parametri:
+
+<NxCommands commands={['sync']} />
+<InstallCommand />
+<PackageManagerShortCommand commands={['lint --skip-nx-cache']} />
+<NxCommands commands={['run-many --target build --all']} />
+
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @dungeon-adventure/infra:deploy -- "dungeon-adventure-infra-sandbox/**" --parameters dungeon-adventure-infra-sandbox-Application:DiceThingName="$TUTORIAL_THING_NAME" --parameters dungeon-adventure-infra-sandbox-Application:DiceEndpoint="$DICE_IOT_ENDPOINT" --parameters dungeon-adventure-infra-sandbox-Application:TokenExchangeRoleArn="$TUTORIAL_TOKEN_EXCHANGE_ROLE_ARN" --parameters dungeon-adventure-infra-sandbox-Application:ThingGroupArn="$TUTORIAL_THING_GROUP_ARN"']} />
+
+Qualifica i parametri per lo stack dell'applicazione perché lo stack WAF non li definisce.
+
+Utilizza `deploy` per questa procedura. Le modifiche al componente/versione sostituiscono
+le risorse CloudFormation; <Link path="guides/greengrass-component#revisioni-della-distribuzione">revisioni del deployment</Link>
+spiega il flag di rollback aggiuntivo necessario con `deploy-sandbox`.
+
+Attendi fino a quando il componente è `RUNNING`:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" \
+  greengrassv2 list-installed-components --core-device-thing-name "$TUTORIAL_THING_NAME" \
+  --query "installedComponents[?componentName=='com.example.DungeonDice'].[componentVersion,lifecycleState]" \
+  --output table
+```
+
+## 5. Lascia che l'agente lanci
+
+Apri il gioco distribuito, avvia una nuova conversazione o ricarica quella esistente,
+e chiedi:
+
+> "Lancia un d20 sul dispositivo dei dadi per il mio tentativo di scassinare questa serratura."
+
+L'agente dovrebbe invocare `roll-dice` e descrivere il valore restituito e la
+conseguenza. Leggi lo shadow cloud per confrontare il suo `reported.result` con il
+risultato dello strumento e la risposta dell'agente:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" \
+  iot-data get-thing-shadow --endpoint-url "https://${DICE_IOT_ENDPOINT}" \
+  --thing-name "$TUTORIAL_THING_NAME" --shadow-name dungeon-dice \
+  /tmp/dungeon-dice-shadow.json
+cat /tmp/dungeon-dice-shadow.json
+```
+
+Un risultato riuscito include `requestId`, `sides`, `value` e `rolledAt`.
+Il log del dispositivo in `/greengrass/v2/logs/com.example.DungeonDice.log` registra lo
+stesso ID di richiesta e valore. Un deployment riuscito da solo non prova questo
+round trip.
+
+Per esercitare il percorso di fallimento, ferma il servizio Greengrass su questo core usa e getta
+tramite il suo terminale Systems Manager, richiedi un altro lancio e verifica
+che lo strumento riporti un errore dopo la sua attesa limitata. L'agente dovrebbe dirti
+che il dispositivo non è disponibile invece di decidere la sfida. Riavvia il
+servizio prima di continuare. Una richiesta in sospeso scaduta non deve lanciare quando il
+dispositivo si riconnette; una nuova chiamata dello strumento crea una nuova richiesta.
+
+Per un esercizio di aggiornamento della versione, modifica il messaggio di log del componente, ricompila ed
+esegui lo stesso comando deploy. `NEXT_PATCH` pubblica una nuova versione. Conferma la
+nuova versione in esecuzione, quindi richiedi un altro lancio.
+
+## 6. Continua a giocare o rimuovi tutto
+
+Per rimuovere solo l'estensione:
+
+1. Registra gli output `DiceArtifactBucket`, `DiceComponentArn` e `DiceDeploymentId`
+   dallo stack dell'applicazione.
+2. Rimuovi `this.deployment.addComponent(component)` da
+   `packages/infra/src/dice-resources.ts`. Ridistribuisci con gli stessi parametri.
+   Questo invia una revisione del deployment vuota; attendi fino a quando
+   `list-installed-components` non elenca più `com.example.DungeonDice`.
+3. Ripristina il <Link path="get_started/tutorials/dungeon-game/3">prompt base dello Story Agent</Link>,
+   rimuovi l'import e la chiamata di `registerDiceTool`, e ripristina lo
+   <Link path="get_started/tutorials/dungeon-game/2#collegare-lo-stack">stack dell'applicazione del Modulo 2</Link>.
+   Ricompila e distribuisci il dungeon. Questo rimuove i permessi MCP e la sua
+   configurazione dei dadi.
+4. Elimina i record del deployment Greengrass conservati, le versioni dei componenti e
+   il bucket degli artifact utilizzando <Link path="get_started/tutorials/greengrass/cleanup#task-3-eliminare-le-risorse-greengrass-conservate">la procedura di pulizia delle risorse conservate</Link>.
+   Sostituisci `com.example.DungeonDice` con `com.example.Pulse` e utilizza gli
+   output dei dadi registrati. Includi ogni versione/revisione creata dal tuo esercizio
+   di aggiornamento.
+5. Elimina lo shadow nominato, quindi esegui la pulizia dello script di setup e rimuovi il
+   profilo dell'istanza e il ruolo gestiti dal proprietario come descritto nella
+   <Link path="get_started/tutorials/greengrass/cleanup">guida alla pulizia del dispositivo</Link>.
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" \
+  iot-data delete-thing-shadow --endpoint-url "https://${DICE_IOT_ENDPOINT}" \
+  --thing-name "$TUTORIAL_THING_NAME" --shadow-name dungeon-dice \
+  /tmp/dungeon-dice-shadow-deleted.json
+```
+
+Il dungeon rimane distribuito dopo questi passaggi. Per rimuovere l'intera applicazione,
+continua con <Link path="get_started/tutorials/dungeon-game/wrap-up#distruzione-delle-risorse">Distruzione delle risorse</Link>,
+incluso il suo user pool conservato, il ruolo SMS e il bucket della cronologia delle conversazioni.
+
+## Ulteriori esperimenti
+
+- Utilizza un Raspberry Pi con un OS a 64 bit e un sensore fisico. Mantieni l'ID di richiesta
+  e il contratto di timeout mentre sostituisci `secrets.randbelow`.
+- Utilizza un ESP32 per leggere il sensore e inviare il suo risultato al gateway Linux.
+  Questo aggiunge firmware e autenticazione del dispositivo; non è un altro target CPU
+  per questo componente Python.
+- Dividi il componente in un motore di dadi locale e un bridge MQTT connesso
+  tramite pub/sub Greengrass.

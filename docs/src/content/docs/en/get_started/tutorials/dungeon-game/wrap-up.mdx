@@ -32,6 +32,12 @@ We recommend you try your hand at extending the codebase with the following capa
 
 ## Destroying resources
 
+Want to keep playing and add an edge device first? Continue with
+<Link path="get_started/tutorials/dungeon-game/greengrass-dice">Optional: roll dice with Greengrass</Link>.
+The Story Agent calls a tool that requests a roll from a device and uses the
+returned value in the game. Keep your deployed dungeon for that route; it
+includes instructions to remove just the extension or the whole application.
+
 1. To destroy the AWS resources that were created, run the following command:
 
 <NxCommands commands={['destroy-sandbox infra']} />
@@ -40,11 +46,66 @@ We recommend you try your hand at extending the codebase with the following capa
 
 2. Enter `y` to continue. CloudFormation will destroy your stacks.
 
-:::caution[Two resources are kept on purpose]
-Deleting the stacks leaves two resources behind, so a teardown can't take your users or their stories with it:
+:::note[If AppConfig deletion protection blocks stack deletion]
+Stop using the tutorial app. In the failed stack's **Resources** tab, record
+the exact physical ID of its owned AppConfig application and the IDs of only
+the environment and configuration profiles whose deletion failed.
+
+Either wait the account's [deletion protection interval](https://docs.aws.amazon.com/appconfig/2019-10-09/APIReference/API_DeletionProtectionSettings.html) after the last configuration
+read and retry destruction, or delete only these discarded tutorial resources:
+use `aws appconfig delete-environment` with `--application-id` and
+`--environment-id`, and `aws appconfig delete-configuration-profile` with
+`--application-id` and `--configuration-profile-id`. Supply the recorded IDs
+and `--deletion-protection-check BYPASS`, with explicit `--profile` and
+`--region`, on each call. Then rerun the destroy command.
+
+Use only physical IDs from the failed stack's **Resources** tab. Set the
+profile and Region used to deploy the dungeon, the application ID, and the
+IDs of the specific failed resources:
+
+```bash
+export TUTORIAL_AWS_PROFILE=<your-dungeon-profile>
+export TUTORIAL_AWS_REGION=<your-dungeon-region>
+
+APP_CONFIG_APPLICATION_ID='application-id-from-failed-stack'
+APP_CONFIG_ENVIRONMENT_ID='environment-id-from-failed-stack'
+APP_CONFIG_CONFIGURATION_PROFILE_ID='configuration-profile-id-from-failed-stack'
+
+# Run this only if deletion of that environment failed.
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" appconfig delete-environment \
+  --application-id "$APP_CONFIG_APPLICATION_ID" \
+  --environment-id "$APP_CONFIG_ENVIRONMENT_ID" \
+  --deletion-protection-check BYPASS
+
+# Run this only if deletion of that configuration profile failed.
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" appconfig delete-configuration-profile \
+  --application-id "$APP_CONFIG_APPLICATION_ID" \
+  --configuration-profile-id "$APP_CONFIG_CONFIGURATION_PROFILE_ID" \
+  --deletion-protection-check BYPASS
+```
+:::
+
+:::caution[Retained resources]
+Stack deletion leaves these resources for separate cleanup:
 
 - The **Cognito user pool**, which `ts#website#auth` creates with deletion protection enabled.
+- The pool's **SMS IAM role**, retained with the pool so it can still be updated and deleted.
 - The **Story Agent's session bucket**, which holds the conversation history and defaults to `RemovalPolicy.RETAIN`.
+- The **Game API access log group**.
+- Four **customer-managed KMS keys** for the user-pool WAF logs, Game API logs, Story Agent sessions and website.
+- The **API Gateway CloudWatch IAM role**, whose regional account setting is shared by REST APIs.
 
-Delete them by hand once you no longer need them — for the user pool, turn deletion protection off first.
+Record the SMS role ARN from the user pool's SMS configuration before deleting
+the pool. Turn off the pool's deletion protection, delete the pool, then delete
+its SMS role and any attached policies owned by this application. Empty the
+session bucket, including object versions and delete markers, before deleting it.
+Delete the Game API access log group when you no longer need its logs.
+
+Keep any KMS key needed to read data you retain. Schedule deletion of this
+application's unused keys with a waiting period of at least seven days.
+The keys remain in `PendingDeletion` until that period ends.
+
+Preserve the API Gateway role if other REST APIs use it. Check the regional
+account's CloudWatch role setting and dependencies before removing an unused
+tutorial-owned role, and update its account reference before deleting it.
 :::

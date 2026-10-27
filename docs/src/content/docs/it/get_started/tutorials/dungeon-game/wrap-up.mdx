@@ -32,6 +32,12 @@ Ti consigliamo di provare ad estendere il codebase con le seguenti funzionalità
 
 ## Distruzione delle risorse
 
+Vuoi continuare a giocare e aggiungere prima un dispositivo edge? Continua con
+<Link path="get_started/tutorials/dungeon-game/greengrass-dice">Opzionale: lancia i dadi con Greengrass</Link>.
+Lo Story Agent chiama uno strumento che richiede un lancio da un dispositivo e utilizza il
+valore restituito nel gioco. Mantieni il tuo dungeon distribuito per quel percorso; esso
+include istruzioni per rimuovere solo l'estensione o l'intera applicazione.
+
 1. Per distruggere le risorse AWS che sono state create, esegui il seguente comando:
 
 <NxCommands commands={['destroy-sandbox infra']} />
@@ -40,11 +46,41 @@ Ti consigliamo di provare ad estendere il codebase con le seguenti funzionalità
 
 2. Inserisci `y` per continuare. CloudFormation distruggerà i tuoi stack.
 
-:::caution[Due risorse vengono mantenute intenzionalmente]
-L'eliminazione degli stack lascia due risorse, in modo che una rimozione non possa portare via i tuoi utenti o le loro storie:
+:::note[Se la protezione dall'eliminazione di AppConfig blocca l'eliminazione dello stack]
+Smetti di utilizzare l'app del tutorial. Nella scheda **Resources** dello stack fallito, registra
+l'ID fisico esatto della sua applicazione AppConfig di proprietà e gli ID solo
+dell'ambiente e dei profili di configurazione la cui eliminazione è fallita.
+
+Attendi l'[intervallo di protezione dall'eliminazione](https://docs.aws.amazon.com/appconfig/2019-10-09/APIReference/API_DeletionProtectionSettings.html) dell'account dopo l'ultima lettura della configurazione
+e riprova la distruzione, oppure elimina solo queste risorse del tutorial scartate:
+usa `aws appconfig delete-environment` con `--application-id` e
+`--environment-id`, e `aws appconfig delete-configuration-profile` con
+`--application-id` e `--configuration-profile-id`. Fornisci gli ID registrati
+e `--deletion-protection-check BYPASS`, con `--profile` e
+`--region` espliciti, su ogni chiamata. Quindi riesegui il comando destroy.
+:::
+
+:::caution[Risorse mantenute]
+L'eliminazione degli stack lascia queste risorse per una pulizia separata:
 
 - Il **pool di utenti Cognito**, che `ts#website#auth` crea con la protezione dall'eliminazione abilitata.
+- Il **ruolo IAM SMS del pool**, mantenuto con il pool in modo che possa ancora essere aggiornato ed eliminato.
 - Il **bucket di sessione dello Story Agent**, che contiene la cronologia delle conversazioni e ha come impostazione predefinita `RemovalPolicy.RETAIN`.
+- Il **gruppo di log di accesso della Game API**.
+- Quattro **chiavi KMS gestite dal cliente** per i log WAF del pool di utenti, i log della Game API, le sessioni dello Story Agent e il sito web.
+- Il **ruolo IAM CloudWatch di API Gateway**, la cui impostazione dell'account regionale è condivisa dalle REST API.
 
-Eliminali manualmente una volta che non ne hai più bisogno — per il pool di utenti, disattiva prima la protezione dall'eliminazione.
+Registra l'ARN del ruolo SMS dalla configurazione SMS del pool di utenti prima di eliminare
+il pool. Disattiva la protezione dall'eliminazione del pool, elimina il pool, quindi elimina
+il suo ruolo SMS e tutte le policy associate di proprietà di questa applicazione. Svuota il
+bucket di sessione, incluse le versioni degli oggetti e i marcatori di eliminazione, prima di eliminarlo.
+Elimina il gruppo di log di accesso della Game API quando non hai più bisogno dei suoi log.
+
+Conserva qualsiasi chiave KMS necessaria per leggere i dati che mantieni. Pianifica l'eliminazione delle
+chiavi inutilizzate di questa applicazione con un periodo di attesa di almeno sette giorni.
+Le chiavi rimangono in `PendingDeletion` fino alla fine di quel periodo.
+
+Preserva il ruolo di API Gateway se altre REST API lo utilizzano. Controlla l'impostazione del ruolo
+CloudWatch dell'account regionale e le dipendenze prima di rimuovere un ruolo inutilizzato
+di proprietà del tutorial e aggiorna il suo riferimento all'account prima di eliminarlo.
 :::

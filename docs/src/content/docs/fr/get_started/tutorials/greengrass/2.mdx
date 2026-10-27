@@ -1,0 +1,198 @@
+---
+title: Provisionner le périphérique principal
+description: Créez un profil d'instance géré par le propriétaire, sélectionnez l'image Ubuntu 26.04 x86_64 et exécutez le script de configuration qui provisionne un périphérique principal EC2 avec le noyau Greengrass classique
+---
+
+import { Aside, Code } from '@astrojs/starlight/components';
+import Link from '@components/link.astro';
+
+export const setupScriptUrl = `${import.meta.env.SITE}${import.meta.env.BASE_URL.replace(/\/$/, '')}/greengrass/setup-tutorial.sh`;
+
+Le script de configuration crée l'identité AWS IoT pour un périphérique principal, lance une instance EC2 Ubuntu 26.04 x86_64 et installe le noyau Greengrass classique dessus via AWS Systems Manager. Il enregistre ce qu'il a créé dans `.greengrass-tutorial.env`, lié à votre compte, Région et préfixe, de sorte que son opération `cleanup` supprime exactement ces ressources plus tard.
+
+| Ressource | Nom | Créé par |
+| --- | --- | --- |
+| Groupe de choses IoT | `<prefix>-group` | Script |
+| Chose IoT | `<prefix>-core` | Script |
+| Rôle d'échange de jetons et sa politique d'accès | `<prefix>-token-exchange`, `<prefix>-token-exchangeAccess` | Script |
+| Alias de rôle IoT | `<prefix>-alias` | Script |
+| Politique IoT du périphérique | `<prefix>-device-policy` | Script |
+| Instance EC2 | Étiquetée `Name=<prefix>-core` | Script |
+| Certificat de périphérique et clé privée | Générés sur l'instance | Programme d'installation du noyau |
+| Politique IoT pour l'alias de rôle | `GreengrassTESCertificatePolicy<prefix>-alias` | Programme d'installation du noyau |
+
+Le programme d'installation s'exécute sur l'instance avec les informations d'identification temporaires du profil d'instance. La clé privée du périphérique est créée sur l'instance et reste sous `/greengrass/v2`. La commande distante que le script envoie via Systems Manager contient uniquement des noms de ressources, donc aucune clé ou information d'identification n'entre dans l'historique des commandes Systems Manager.
+
+## Tâche 1 : Créer le profil d'instance
+
+Le script ne crée pas le profil d'instance. Vous en êtes propriétaire, vous contrôlez donc ce que le programme d'installation est autorisé à faire. Son rôle nécessite `AmazonSSMManagedInstanceCore`, afin que Systems Manager puisse exécuter la commande d'installation, plus une politique temporaire pour le chemin `--provision true` du programme d'installation.
+
+```bash
+export TUTORIAL_ACCOUNT_ID=$(aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" \
+  sts get-caller-identity --query Account --output text)
+
+cat > /tmp/greengrass-tutorial-ec2-trust.json <<'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Effect": "Allow", "Principal": { "Service": "ec2.amazonaws.com" }, "Action": "sts:AssumeRole" }
+  ]
+}
+EOF
+
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam create-role \
+  --role-name "${TUTORIAL_PREFIX}-instance" \
+  --assume-role-policy-document file:///tmp/greengrass-tutorial-ec2-trust.json
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam attach-role-policy \
+  --role-name "${TUTORIAL_PREFIX}-instance" \
+  --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+```
+
+La politique temporaire du programme d'installation suit la [politique IAM minimale pour le programme d'installation](https://docs.aws.amazon.com/greengrass/v2/developerguide/provision-minimal-iam-policy.html). L'instruction `CreateIoTResources` est celle officielle. L'instruction IAM est plus étroite que l'instruction officielle `CreateTokenExchangeRole` : le script crée le rôle d'échange de jetons et sa politique `<role>Access` avant l'exécution du programme d'installation, de sorte que le programme d'installation les lit uniquement et n'a jamais besoin de `iam:CreateRole`, `iam:CreatePolicy` ou `iam:AttachRolePolicy`.
+
+```bash
+cat > /tmp/greengrass-tutorial-installer.json <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReuseTokenExchangeRole",
+      "Effect": "Allow",
+      "Action": ["iam:GetRole", "iam:PassRole", "iam:GetPolicy"],
+      "Resource": [
+        "arn:aws:iam::${TUTORIAL_ACCOUNT_ID}:role/${TUTORIAL_PREFIX}-token-exchange",
+        "arn:aws:iam::${TUTORIAL_ACCOUNT_ID}:policy/${TUTORIAL_PREFIX}-token-exchangeAccess",
+        "arn:aws:iam::aws:policy/${TUTORIAL_PREFIX}-token-exchangeAccess"
+      ]
+    },
+    {
+      "Sid": "CreateIoTResources",
+      "Effect": "Allow",
+      "Action": [
+        "iot:AddThingToThingGroup",
+        "iot:AttachPolicy",
+        "iot:AttachThingPrincipal",
+        "iot:CreateKeysAndCertificate",
+        "iot:CreatePolicy",
+        "iot:CreateRoleAlias",
+        "iot:CreateThing",
+        "iot:CreateThingGroup",
+        "iot:DescribeEndpoint",
+        "iot:DescribeRoleAlias",
+        "iot:DescribeThingGroup",
+        "iot:GetPolicy"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+EOF
+
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam put-role-policy \
+  --role-name "${TUTORIAL_PREFIX}-instance" \
+  --policy-name greengrass-installer-bootstrap \
+  --policy-document file:///tmp/greengrass-tutorial-installer.json
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam create-instance-profile \
+  --instance-profile-name "${TUTORIAL_PREFIX}-instance"
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam add-role-to-instance-profile \
+  --instance-profile-name "${TUTORIAL_PREFIX}-instance" \
+  --role-name "${TUTORIAL_PREFIX}-instance"
+```
+
+La tâche 4 supprime à nouveau `greengrass-installer-bootstrap` une fois le périphérique provisionné.
+
+## Tâche 2 : Sélectionner l'image Ubuntu 26.04 x86_64
+
+Canonical publie ses ID d'image actuels en tant que paramètres publics Systems Manager. Lisez celui pour Ubuntu 26.04 sur amd64, puis confirmez le propriétaire, l'architecture et le nom avant de l'utiliser :
+
+```bash
+export TUTORIAL_AMI_ID=$(aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" ssm get-parameter \
+  --name /aws/service/canonical/ubuntu/server/26.04/stable/current/amd64/hvm/ebs-gp3/ami-id \
+  --query Parameter.Value --output text)
+
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" ec2 describe-images \
+  --image-ids "$TUTORIAL_AMI_ID" \
+  --query 'Images[0].[OwnerId,Architecture,Name]' --output text
+```
+
+La sortie doit afficher le propriétaire `099720109477` (Canonical), l'architecture `x86_64` et un nom contenant `ubuntu-resolute-26.04-amd64-server`. Le script vérifie les trois mêmes valeurs et refuse toute autre image.
+
+Ubuntu 26.04 est utilisé pour deux raisons. Il fournit `python3.14`, qui est l'interpréteur que l'étape `Run` de la recette générée épingle. Il fournit également `sudo-rs` comme `sudo` par défaut, ce qui peut empêcher les composants IPC de démarrer sous Nucleus 2.18.3 car l'environnement IPC est perdu. Le script installe `openjdk-21-jre-headless`, `unzip`, `python3.14` et le package `sudo` classique, qui fournit `/usr/bin/sudo.ws`, puis sélectionne `/usr/bin/sudo.ws` comme `sudo` et vérifie la sélection avant d'installer le noyau. Sur l'image Canonical, `sudo` et `sudo-rs` sont tous deux préinstallés, donc le changement d'alternatives est l'étape effective. Consultez les <Link path="guides/greengrass-component#dépannage-et-limites-de-service">notes de dépannage des composants</Link>.
+
+## Tâche 3 : Télécharger et exécuter le script de configuration
+
+Téléchargez le script depuis ce site de documentation, lisez-le, puis exécutez-le depuis la racine de l'espace de travail :
+
+<Code lang="bash" code={`curl -fsSLo setup-greengrass-tutorial.sh ${setupScriptUrl}\nchmod +x setup-greengrass-tutorial.sh\nless setup-greengrass-tutorial.sh`} />
+
+Le même fichier est enregistré dans le dépôt à `docs/public/greengrass/setup-tutorial.sh`.
+
+```bash
+./setup-greengrass-tutorial.sh setup \
+  --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" --prefix "$TUTORIAL_PREFIX" \
+  --ami-id "$TUTORIAL_AMI_ID" --instance-profile "${TUTORIAL_PREFIX}-instance"
+```
+
+Passez `--subnet-id <subnet-id>` lorsque la Région n'a pas de VPC par défaut. Passez `--instance-type` pour modifier le `t3.small` par défaut.
+
+Le script effectue ces étapes dans l'ordre et écrit le fichier d'état après chaque ressource créée :
+
+1. Résout l'identité de l'appelant, valide l'image et vérifie que le profil d'instance existe.
+2. Vérifie qu'aucune des ressources du tableau ci-dessus n'existe encore. Un groupe de choses, une chose, un rôle, une politique ou un alias de rôle existant sous le préfixe arrête le script avant qu'il ne crée quoi que ce soit.
+3. Crée le groupe de choses et la chose, le rôle d'échange de jetons avec sa politique d'accès, l'alias de rôle et la politique IoT du périphérique. La politique IoT est la [politique minimale de périphérique principal](https://docs.aws.amazon.com/greengrass/v2/developerguide/device-auth.html#greengrass-core-minimal-iot-policy) du guide du développeur, plus `iot:Publish` sur `arn:aws:iot:<region>:<account-id>:topic/tutorial/greengrass/heartbeat`.
+4. Lance l'instance avec le profil d'instance et IMDSv2 requis, attend qu'elle s'enregistre auprès de Systems Manager et envoie une commande `AWS-RunShellScript` qui installe les prérequis, change `sudo`, télécharge `greengrass-nucleus-latest.zip` et exécute le programme d'installation avec `--provision true --setup-system-service true`, les noms de chose, groupe, politique, rôle et alias ci-dessus, et `--component-default-user ggc_user:ggc_group`.
+5. Interroge la commande jusqu'à ce qu'elle se termine, puis enregistre le certificat que le programme d'installation a attaché à la chose et attend que le périphérique principal apparaisse dans Greengrass.
+
+La configuration prend environ dix minutes. Lorsqu'elle se termine, chargez les valeurs enregistrées dans votre shell et gardez le fichier d'état hors de Git :
+
+```bash
+source .greengrass-tutorial.env
+echo .greengrass-tutorial.env >> .gitignore
+```
+
+Le fichier d'état exporte `TUTORIAL_THING_NAME`, `TUTORIAL_THING_GROUP_ARN`, `TUTORIAL_TOKEN_EXCHANGE_ROLE_ARN`, `TUTORIAL_INSTANCE_ID`, `TUTORIAL_CERTIFICATE_ARN` et l'identité à laquelle il est lié. Le module 3 en transmet deux à la pile CDK.
+
+<Aside type="note" title="Réexécutions et échecs">
+L'exécution de `setup` à nouveau après une exécution réussie signale l'instance existante et ne change rien. Si une exécution s'arrête en cours de route, par exemple parce que la commande d'installation échoue, le fichier d'état enregistre jusqu'où elle est arrivée et une réexécution refuse de continuer. Exécutez `cleanup` avec le même profil, Région et préfixe, corrigez la cause, puis exécutez à nouveau `setup`. Le nettoyage ne touche que les ressources enregistrées dans le fichier d'état, tolère les objets qui ont déjà disparu et s'arrête sur toute autre erreur.
+</Aside>
+
+## Tâche 4 : Supprimer les autorisations temporaires du programme d'installation
+
+Le programme d'installation est terminé. Supprimez la politique de démarrage afin que l'instance conserve uniquement l'accès Systems Manager :
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam delete-role-policy \
+  --role-name "${TUTORIAL_PREFIX}-instance" \
+  --policy-name greengrass-installer-bootstrap
+```
+
+## Tâche 5 : Vérifier le périphérique
+
+Le noyau enregistre le périphérique principal lors de son premier démarrage. Confirmez-le depuis le cloud :
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 get-core-device \
+  --core-device-thing-name "$TUTORIAL_THING_NAME" \
+  --query '{status: status, coreVersion: coreVersion, platform: platform, architecture: architecture}'
+```
+
+Attendez-vous à `HEALTHY`, `linux` et `amd64`. Pour lire un journal sur l'instance, envoyez une commande Systems Manager avec un fichier de paramètres. La première ligne est un shebang, que `AWS-RunShellScript` respecte :
+
+```bash
+cat > /tmp/greengrass-tutorial-command.json <<'EOF'
+{ "commands": ["#!/bin/bash", "tail -n 20 /greengrass/v2/logs/greengrass.log"] }
+EOF
+
+TUTORIAL_COMMAND_ID=$(aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" ssm send-command \
+  --instance-ids "$TUTORIAL_INSTANCE_ID" --document-name AWS-RunShellScript \
+  --parameters file:///tmp/greengrass-tutorial-command.json \
+  --query Command.CommandId --output text)
+sleep 5
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" ssm get-command-invocation \
+  --command-id "$TUTORIAL_COMMAND_ID" --instance-id "$TUTORIAL_INSTANCE_ID" \
+  --query StandardOutputContent --output text
+```
+
+Le module 3 utilise le même modèle pour lire le journal du composant lui-même.
+
+Continuez avec <Link path="get_started/tutorials/greengrass/3">Déployer, observer et mettre à jour</Link>.
