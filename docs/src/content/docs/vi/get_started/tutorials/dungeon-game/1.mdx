@@ -130,13 +130,14 @@ Dưới đây là danh sách tất cả các tệp đã được tạo bởi gen
       - local-server.ts được dùng khi chạy tRPC server cục bộ
       - **router.ts** định nghĩa tRPC router và tất cả các procedure
     - project.json
+    - vitest.config.mts cấu hình kiểm thử
     - ...
-- vitest.workspace.ts
+- vitest.config.mts cấu hình kiểm thử gốc khám phá các bài kiểm thử của mọi dự án
 </FileTree>
 
 Hãy xem xét các tệp quan trọng này:
 
-```ts {7}
+```ts {8}
 // packages/game-api/src/router.ts
 import { echo } from './procedures/echo.js';
 import { t } from './init.js';
@@ -151,7 +152,7 @@ export type AppRouter = typeof appRouter;
 ```
 Router định nghĩa tRPC router cho API của bạn và là nơi bạn sẽ khai báo tất cả các phương thức API. Như bạn có thể thấy ở trên, chúng ta có một phương thức gọi là `echo` với triển khai của nó trong tệp `./procedures/echo.ts`. Điểm vào Lambda handler nằm trong `handler.ts`, được cấu hình tự động bởi generator.
 
-```ts {7-10}
+```ts {5-7}
 // packages/game-api/src/procedures/echo.ts
 import { publicProcedure } from '../init.js';
 import { EchoInputSchema, EchoOutputSchema } from '../schema/index.js';
@@ -454,7 +455,6 @@ Bạn sẽ thấy một số tệp mới xuất hiện trong cây tệp của m�
         - session.py giải quyết SessionManager để duy trì trạng thái hội thoại
         - middleware/
           - session_id_middleware.py liên kết session ID AgentCore đến cho yêu cầu
-        - Dockerfile định nghĩa docker image để triển khai lên AgentCore Runtime
   - common/constructs/
     - src
       - app/agents/story-agent/
@@ -702,7 +702,7 @@ export class StoryAgent extends Construct implements IGrantable, IConnectable {
     this.code = AgentRuntimeArtifact.fromCodeAsset({
       path: bundleDir,
       runtime: AgentCoreRuntime.PYTHON_3_14,
-      entrypoint: ['opentelemetry-instrument', 'main.py'],
+      entrypoint: ['agentcore_launcher.py'],
     });
 
     const {
@@ -904,9 +904,7 @@ export class StoryAgent extends Construct implements IGrantable, IConnectable {
 }
 ```
 
-Điều này cấu hình một CDK `AgentRuntimeArtifact` tải lên Docker image của agent lên ECR và lưu trữ nó bằng AgentCore Runtime. Vì chúng ta đã chọn `--auth=cognito`, construct yêu cầu danh tính user pool/client và ủy quyền các lời gọi AgentCore Runtime thông qua Cognito, chuyển tiếp header `Authorization` của người gọi. Nó cũng cung cấp session bucket mà `session.py` của Story Agent đọc lại tại runtime — một S3 bucket được mã hóa KMS với server access logs được gửi đến CloudWatch Logs — cấp cho agent quyền đọc/ghi vào nó, cấp cho nó quyền gọi các model Bedrock, và đăng ký ARN và tên bucket của nó trong `RuntimeConfig` để cả agent (tại runtime, thông qua AppConfig) và Game API (tại thời điểm synth, thông qua `invocationUrl`) đều có thể tìm thấy nó.
-
-Bạn có thể nhận thấy một `Dockerfile` bổ sung, tham chiếu Docker image từ dự án `story`, cho phép chúng ta đặt Dockerfile và mã nguồn agent cùng vị trí.
+Điều này cấu hình một CDK `AgentRuntimeArtifact` đóng gói mã agent của bạn dưới dạng một zip asset và lưu trữ nó bằng AgentCore Runtime. Vì chúng ta đã chọn `--auth=cognito`, construct yêu cầu danh tính user pool/client và ủy quyền các lời gọi AgentCore Runtime thông qua Cognito, chuyển tiếp header `Authorization` của người gọi. Nó cũng cung cấp session bucket mà `session.py` của Story Agent đọc lại tại runtime — một S3 bucket được mã hóa KMS với server access logs được gửi đến CloudWatch Logs — cấp cho agent quyền đọc/ghi vào nó, cấp cho nó quyền gọi các model Bedrock, và đăng ký ARN và tên bucket của nó trong `RuntimeConfig` để cả agent (tại runtime, thông qua AppConfig) và Game API (tại thời điểm synth, thông qua `invocationUrl`) đều có thể tìm thấy nó.
 
 </details>
 
@@ -966,7 +964,6 @@ Generator `ts#mcp-server` tạo ra các tệp sau.
         - sample-guidance.ts tài nguyên ví dụ
       - stdio.ts điểm vào cho MCP với STDIO transport
       - http.ts điểm vào cho MCP với Streamable HTTP transport
-      - Dockerfile xây dựng image cho AgentCore Runtime
     - rolldown.config.ts cấu hình để đóng gói MCP server để triển khai lên AgentCore
   - common/constructs/
     - src
@@ -1578,7 +1575,7 @@ Yes, sync the changes and run the tasks
 No, run the tasks without syncing the changes
 ```
 
-Thông báo này cho biết NX đã phát hiện một số tệp có thể được cập nhật tự động cho bạn. Trong trường hợp này, nó đề cập đến các tệp `tsconfig.json` không có Typescript references được thiết lập trên các dự án được tham chiếu.
+Thông báo này cho biết NX đã phát hiện một số tệp có thể được cập nhật tự động cho bạn. Trong trường hợp này, nó đề cập đến các tệp `tsconfig.json` không có Typescript references được thiết lập trên các dự án được tham chiếu, và đến các phụ thuộc workspace mà generator sync `@aws/nx-plugin` khai báo cho bạn.
 
 Chọn tùy chọn **Yes, sync the changes and run the tasks** để tiếp tục. Bạn sẽ nhận thấy tất cả các lỗi import liên quan đến IDE của bạn được tự động giải quyết khi generator sync sẽ tự động thêm các typescript references còn thiếu!
 
