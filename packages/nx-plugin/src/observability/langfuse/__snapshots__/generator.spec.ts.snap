@@ -1,0 +1,544 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`observability#langfuse generator > switches to CloudWatch and back without duplicate wiring > CloudWatch config 1`] = `
+"import type { Runtime } from 'aws-cdk-lib/aws-bedrockagentcore';
+
+// Configure with observability#langfuse.
+export const langfuseObservability = {
+  entrypoint: ['agentcore_launcher.py'],
+  environmentVariables: {},
+};
+
+export const configureLangfuseRuntime = (_runtime: Runtime): void => {};
+"
+`;
+
+exports[`observability#langfuse generator > wires only the selected agent with in-memory sessions > Langfuse config 1`] = `
+"import type { Runtime } from 'aws-cdk-lib/aws-bedrockagentcore';
+import type { CfnRuntime } from 'aws-cdk-lib/aws-bedrockagentcore';
+import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
+
+// Configure with observability#langfuse.
+export const langfuseObservability = {
+  entrypoint: ['langfuse_main.py'],
+  environmentVariables: {
+    DISABLE_ADOT_OBSERVABILITY: 'true',
+    LANGFUSE_HOST: 'https://cloud.langfuse.com',
+    LANGFUSE_SECRET_ARN:
+      'arn:aws:secretsmanager:us-east-1:123456789012:secret:langfuse-abcdef',
+  },
+};
+
+export const configureLangfuseRuntime = (runtime: Runtime): void => {
+  const resource = runtime.node.defaultChild as CfnRuntime;
+  resource.platformVersion ??= 'V1';
+  runtime.node.addValidation({
+    validate: () =>
+      resource.platformVersion === 'V1'
+        ? []
+        : [
+            'Experimental Langfuse export requires AgentCore platform V1. V2 startup snapshots are not supported.',
+          ],
+  });
+  runtime.addToRolePolicy(
+    new PolicyStatement({
+      sid: 'LangfuseTraceExport',
+      actions: ['secretsmanager:GetSecretValue'],
+      resources: [
+        'arn:aws:secretsmanager:us-east-1:123456789012:secret:langfuse-abcdef',
+      ],
+    }),
+  );
+};
+"
+`;
+
+exports[`observability#langfuse generator > wires only the selected agent with in-memory sessions > wired construct 1`] = `
+"import {
+  langfuseObservability,
+  configureLangfuseRuntime,
+} from './langfuse-observability.js';
+import { Fn, Lazy, Names, Stack } from 'aws-cdk-lib';
+import { Connections, IConnectable } from 'aws-cdk-lib/aws-ec2';
+import { Construct } from 'constructs';
+import * as path from 'path';
+import * as url from 'url';
+import {
+  AgentCoreRuntime,
+  AgentRuntimeArtifact,
+  ProtocolType,
+  Runtime,
+  RuntimeProps,
+} from 'aws-cdk-lib/aws-bedrockagentcore';
+import {
+  PolicyStatement,
+  IGrantable,
+  IPrincipal,
+  Grant,
+} from 'aws-cdk-lib/aws-iam';
+import { RuntimeConfig } from '../../../core/runtime-config.js';
+import { findWorkspaceRoot } from '../../../core/workspace.js';
+
+export type TestProjectAgentProps = Omit<
+  RuntimeProps,
+  | 'runtimeName'
+  | 'protocolConfiguration'
+  | 'agentRuntimeArtifact'
+  | 'authorizerConfiguration'
+>;
+
+export class TestProjectAgent
+  extends Construct
+  implements IGrantable, IConnectable
+{
+  public readonly code: AgentRuntimeArtifact;
+  public readonly agentCoreRuntime: Runtime;
+  /** Default Gateway target name for this agent. */
+  public readonly agentName = 'test-project-agent';
+  /** Inbound auth — a fronting Gateway uses this to pick its outbound credential. */
+  public readonly auth = 'iam';
+
+  constructor(scope: Construct, id: string, props?: TestProjectAgentProps) {
+    super(scope, id);
+
+    const rc = RuntimeConfig.ensure(this);
+
+    // Resolve the packaged code directory, uploaded as a zip asset
+    const bundleDir = path.join(
+      findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+      'dist/apps/test-project/package/test-project-agent',
+    );
+
+    // The \`opentelemetry-instrument\` prefix auto-instruments with the AWS Distro
+    // for OpenTelemetry packaged alongside the code.
+    // https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html
+    this.code = AgentRuntimeArtifact.fromCodeAsset({
+      path: bundleDir,
+      runtime: AgentCoreRuntime.PYTHON_3_14,
+      entrypoint: langfuseObservability.entrypoint,
+    });
+
+    this.agentCoreRuntime = new Runtime(this, 'TestProjectAgent', {
+      runtimeName: Lazy.string({
+        produce: () =>
+          Names.uniqueResourceName(this.agentCoreRuntime, { maxLength: 40 }),
+      }),
+      protocolConfiguration: ProtocolType.HTTP,
+      agentRuntimeArtifact: this.code,
+      ...props,
+      environmentVariables: {
+        RUNTIME_CONFIG_APP_ID: rc.appConfigApplicationId,
+        ...props?.environmentVariables,
+        ...langfuseObservability.environmentVariables,
+      },
+    });
+    configureLangfuseRuntime(this.agentCoreRuntime);
+
+    // Grant access for the agent to invoke bedrock models
+    this.agentCoreRuntime.addToRolePolicy(
+      new PolicyStatement({
+        actions: [
+          'bedrock:InvokeModel',
+          'bedrock:InvokeModelWithResponseStream',
+        ],
+        resources: [
+          'arn:aws:bedrock:*:*:foundation-model/*',
+          'arn:aws:bedrock:*:*:inference-profile/*',
+        ],
+      }),
+    );
+
+    rc.grantReadAppConfig(this.agentCoreRuntime);
+
+    rc.set('agentcore', 'agentRuntimes', {
+      ...rc.get('agentcore').agentRuntimes,
+      TestProjectAgent: {
+        arn: this.agentCoreRuntime.agentRuntimeArn,
+      },
+    });
+  }
+
+  /**
+   * The principal to grant permissions to.
+   */
+  public get grantPrincipal(): IPrincipal {
+    return this.agentCoreRuntime.grantPrincipal;
+  }
+
+  /**
+   * Network connections for this agent runtime.
+   */
+  public get connections(): Connections {
+    return this.agentCoreRuntime.connections;
+  }
+
+  /**
+   * The HTTPS invocation URL of the runtime.
+   */
+  public get invocationUrl(): string {
+    // The URL must URL-encode the runtime ARN (':' -> '%3A', '/' -> '%2F').
+    // The ARN is a CDK token, so encode at deploy time via Fn.join/Fn.split.
+    const encodedArn = Fn.join(
+      '%2F',
+      Fn.split(
+        '/',
+        Fn.join('%3A', Fn.split(':', this.agentCoreRuntime.agentRuntimeArn)),
+      ),
+    );
+    return \`https://bedrock-agentcore.\${Stack.of(this).region}.amazonaws.com/runtimes/\${encodedArn}/invocations?qualifier=DEFAULT\`;
+  }
+
+  /**
+   * Grants IAM permissions to invoke this agent runtime.
+   *
+   * @param grantee - The IAM principal to grant permissions to
+   */
+  public grantInvokeAccess(grantee: IGrantable) {
+    this.agentCoreRuntime.grantInvoke(grantee);
+
+    Grant.addToPrincipal({
+      grantee,
+      actions: ['bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream'],
+      resourceArns: [
+        this.agentCoreRuntime.agentRuntimeArn,
+        \`\${this.agentCoreRuntime.agentRuntimeArn}/*\`,
+      ],
+    });
+  }
+}
+"
+`;
+
+exports[`observability#langfuse generator > wires only the selected agent with s3 sessions > Langfuse config 1`] = `
+"import type { Runtime } from 'aws-cdk-lib/aws-bedrockagentcore';
+import type { CfnRuntime } from 'aws-cdk-lib/aws-bedrockagentcore';
+import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
+
+// Configure with observability#langfuse.
+export const langfuseObservability = {
+  entrypoint: ['langfuse_main.py'],
+  environmentVariables: {
+    DISABLE_ADOT_OBSERVABILITY: 'true',
+    LANGFUSE_HOST: 'https://cloud.langfuse.com',
+    LANGFUSE_SECRET_ARN:
+      'arn:aws:secretsmanager:us-east-1:123456789012:secret:langfuse-abcdef',
+  },
+};
+
+export const configureLangfuseRuntime = (runtime: Runtime): void => {
+  const resource = runtime.node.defaultChild as CfnRuntime;
+  resource.platformVersion ??= 'V1';
+  runtime.node.addValidation({
+    validate: () =>
+      resource.platformVersion === 'V1'
+        ? []
+        : [
+            'Experimental Langfuse export requires AgentCore platform V1. V2 startup snapshots are not supported.',
+          ],
+  });
+  runtime.addToRolePolicy(
+    new PolicyStatement({
+      sid: 'LangfuseTraceExport',
+      actions: ['secretsmanager:GetSecretValue'],
+      resources: [
+        'arn:aws:secretsmanager:us-east-1:123456789012:secret:langfuse-abcdef',
+      ],
+    }),
+  );
+};
+"
+`;
+
+exports[`observability#langfuse generator > wires only the selected agent with s3 sessions > wired construct 1`] = `
+"import {
+  langfuseObservability,
+  configureLangfuseRuntime,
+} from './langfuse-observability.js';
+import { Fn, Lazy, Names, RemovalPolicy, Stack } from 'aws-cdk-lib';
+import { Connections, IConnectable } from 'aws-cdk-lib/aws-ec2';
+import {
+  BlockPublicAccess,
+  Bucket,
+  BucketEncryption,
+} from 'aws-cdk-lib/aws-s3';
+import { Key } from 'aws-cdk-lib/aws-kms';
+import {
+  CfnDelivery,
+  CfnDeliveryDestination,
+  CfnDeliverySource,
+  LogGroup,
+  RetentionDays,
+} from 'aws-cdk-lib/aws-logs';
+import { Construct } from 'constructs';
+import * as path from 'path';
+import * as url from 'url';
+import {
+  AgentCoreRuntime,
+  AgentRuntimeArtifact,
+  ProtocolType,
+  Runtime,
+  RuntimeProps,
+} from 'aws-cdk-lib/aws-bedrockagentcore';
+import {
+  PolicyStatement,
+  Effect,
+  ServicePrincipal,
+  IGrantable,
+  IPrincipal,
+  Grant,
+} from 'aws-cdk-lib/aws-iam';
+import { suppressRules } from '../../../core/checkov.js';
+import { RuntimeConfig } from '../../../core/runtime-config.js';
+import { findWorkspaceRoot } from '../../../core/workspace.js';
+
+export type TestProjectAgentProps = Omit<
+  RuntimeProps,
+  | 'runtimeName'
+  | 'protocolConfiguration'
+  | 'agentRuntimeArtifact'
+  | 'authorizerConfiguration'
+> & {
+  /**
+   * Removal policy for the session bucket holding the agent's conversation
+   * history. Defaults to retaining it so a stack \`destroy\` doesn't silently
+   * delete session data — set to \`RemovalPolicy.DESTROY\` for sandbox/CI teardown.
+   *
+   * @default RemovalPolicy.RETAIN
+   */
+  readonly sessionBucketRemovalPolicy?: RemovalPolicy;
+};
+
+export class TestProjectAgent
+  extends Construct
+  implements IGrantable, IConnectable
+{
+  public readonly code: AgentRuntimeArtifact;
+  public readonly agentCoreRuntime: Runtime;
+  /** Default Gateway target name for this agent. */
+  public readonly agentName = 'test-project-agent';
+  /** Inbound auth — a fronting Gateway uses this to pick its outbound credential. */
+  public readonly auth = 'iam';
+
+  constructor(scope: Construct, id: string, props?: TestProjectAgentProps) {
+    super(scope, id);
+
+    const rc = RuntimeConfig.ensure(this);
+
+    // Resolve the packaged code directory, uploaded as a zip asset
+    const bundleDir = path.join(
+      findWorkspaceRoot(url.fileURLToPath(new URL(import.meta.url))),
+      'dist/apps/test-project/package/test-project-agent',
+    );
+
+    // The \`opentelemetry-instrument\` prefix auto-instruments with the AWS Distro
+    // for OpenTelemetry packaged alongside the code.
+    // https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/observability-configure.html
+    this.code = AgentRuntimeArtifact.fromCodeAsset({
+      path: bundleDir,
+      runtime: AgentCoreRuntime.PYTHON_3_14,
+      entrypoint: langfuseObservability.entrypoint,
+    });
+
+    const { sessionBucketRemovalPolicy = RemovalPolicy.RETAIN, ...restProps } =
+      props ?? {};
+
+    const sessionKey = new Key(this, 'SessionKey', {
+      enableKeyRotation: true,
+    });
+
+    // Allow CloudWatch Logs to use the session key for server access log delivery.
+    const stack = Stack.of(this);
+    sessionKey.addToResourcePolicy(
+      new PolicyStatement({
+        effect: Effect.ALLOW,
+        principals: [
+          new ServicePrincipal(\`logs.\${stack.region}.amazonaws.com\`),
+        ],
+        actions: [
+          'kms:Encrypt',
+          'kms:Decrypt',
+          'kms:ReEncrypt*',
+          'kms:GenerateDataKey*',
+          'kms:DescribeKey',
+        ],
+        resources: ['*'],
+        conditions: {
+          ArnLike: {
+            'kms:EncryptionContext:aws:logs:arn': \`arn:aws:logs:\${stack.region}:\${stack.account}:log-group:*\`,
+          },
+        },
+      }),
+    );
+
+    const sessionAccessLogs = new LogGroup(this, 'SessionAccessLogs', {
+      retention: RetentionDays.ONE_YEAR,
+      encryptionKey: sessionKey,
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+
+    const sessionBucket = new Bucket(this, 'SessionBucket', {
+      enforceSSL: true,
+      removalPolicy: sessionBucketRemovalPolicy,
+      encryption: BucketEncryption.KMS,
+      encryptionKey: sessionKey,
+      blockPublicAccess: BlockPublicAccess.BLOCK_ALL,
+    });
+    suppressRules(
+      sessionBucket,
+      ['CKV_AWS_21'],
+      'Session data does not need versioning enabled',
+    );
+    suppressRules(
+      sessionBucket,
+      ['CKV2_AWS_61'],
+      'Lifecycle configuration not required for session data',
+    );
+    suppressRules(
+      sessionBucket,
+      ['CKV_AWS_144'],
+      'Cross-region replication not required for session data',
+    );
+    suppressRules(
+      sessionBucket,
+      ['CKV2_AWS_62'],
+      'Event notifications not required for session data',
+    );
+    suppressRules(
+      sessionBucket,
+      ['CKV_AWS_18'],
+      'Server access logs are delivered to CloudWatch Logs',
+    );
+
+    const sessionAccessLogsSource: CfnDeliverySource = new CfnDeliverySource(
+      this,
+      'SessionAccessLogsSource',
+      {
+        name: Lazy.string({
+          produce: () =>
+            Names.uniqueResourceName(sessionAccessLogsSource, {
+              maxLength: 60,
+            }),
+        }),
+        logType: 'S3_SERVER_ACCESS_LOGS',
+        resourceArn: sessionBucket.bucketArn,
+      },
+    );
+    const sessionBucketPolicy = sessionBucket.policy;
+    if (sessionBucketPolicy) {
+      sessionAccessLogsSource.node.addDependency(sessionBucketPolicy);
+    }
+    const sessionAccessLogsDestination: CfnDeliveryDestination =
+      new CfnDeliveryDestination(this, 'SessionAccessLogsDestination', {
+        name: Lazy.string({
+          produce: () =>
+            Names.uniqueResourceName(sessionAccessLogsDestination, {
+              maxLength: 60,
+            }),
+        }),
+        destinationResourceArn: sessionAccessLogs.logGroupArn,
+      });
+    const sessionAccessLogsDelivery = new CfnDelivery(
+      this,
+      'SessionAccessLogsDelivery',
+      {
+        deliverySourceName: sessionAccessLogsSource.name,
+        deliveryDestinationArn: sessionAccessLogsDestination.attrArn,
+      },
+    );
+    sessionAccessLogsDelivery.addDependency(sessionAccessLogsSource);
+
+    this.agentCoreRuntime = new Runtime(this, 'TestProjectAgent', {
+      runtimeName: Lazy.string({
+        produce: () =>
+          Names.uniqueResourceName(this.agentCoreRuntime, { maxLength: 40 }),
+      }),
+      protocolConfiguration: ProtocolType.HTTP,
+      agentRuntimeArtifact: this.code,
+      ...restProps,
+      environmentVariables: {
+        RUNTIME_CONFIG_APP_ID: rc.appConfigApplicationId,
+        ...restProps?.environmentVariables,
+        ...langfuseObservability.environmentVariables,
+      },
+    });
+    configureLangfuseRuntime(this.agentCoreRuntime);
+
+    // Grant access for the agent to invoke bedrock models
+    this.agentCoreRuntime.addToRolePolicy(
+      new PolicyStatement({
+        actions: [
+          'bedrock:InvokeModel',
+          'bedrock:InvokeModelWithResponseStream',
+        ],
+        resources: [
+          'arn:aws:bedrock:*:*:foundation-model/*',
+          'arn:aws:bedrock:*:*:inference-profile/*',
+        ],
+      }),
+    );
+
+    sessionBucket.grantReadWrite(this.agentCoreRuntime);
+
+    rc.grantReadAppConfig(this.agentCoreRuntime);
+
+    rc.set('agentcore', 'agentRuntimes', {
+      ...rc.get('agentcore').agentRuntimes,
+      TestProjectAgent: {
+        arn: this.agentCoreRuntime.agentRuntimeArn,
+        session: {
+          bucketName: sessionBucket.bucketName,
+        },
+      },
+    });
+  }
+
+  /**
+   * The principal to grant permissions to.
+   */
+  public get grantPrincipal(): IPrincipal {
+    return this.agentCoreRuntime.grantPrincipal;
+  }
+
+  /**
+   * Network connections for this agent runtime.
+   */
+  public get connections(): Connections {
+    return this.agentCoreRuntime.connections;
+  }
+
+  /**
+   * The HTTPS invocation URL of the runtime.
+   */
+  public get invocationUrl(): string {
+    // The URL must URL-encode the runtime ARN (':' -> '%3A', '/' -> '%2F').
+    // The ARN is a CDK token, so encode at deploy time via Fn.join/Fn.split.
+    const encodedArn = Fn.join(
+      '%2F',
+      Fn.split(
+        '/',
+        Fn.join('%3A', Fn.split(':', this.agentCoreRuntime.agentRuntimeArn)),
+      ),
+    );
+    return \`https://bedrock-agentcore.\${Stack.of(this).region}.amazonaws.com/runtimes/\${encodedArn}/invocations?qualifier=DEFAULT\`;
+  }
+
+  /**
+   * Grants IAM permissions to invoke this agent runtime.
+   *
+   * @param grantee - The IAM principal to grant permissions to
+   */
+  public grantInvokeAccess(grantee: IGrantable) {
+    this.agentCoreRuntime.grantInvoke(grantee);
+
+    Grant.addToPrincipal({
+      grantee,
+      actions: ['bedrock-agentcore:InvokeAgentRuntimeWithWebSocketStream'],
+      resourceArns: [
+        this.agentCoreRuntime.agentRuntimeArn,
+        \`\${this.agentCoreRuntime.agentRuntimeArn}/*\`,
+      ],
+    });
+  }
+}
+"
+`;

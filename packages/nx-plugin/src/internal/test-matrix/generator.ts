@@ -11,6 +11,7 @@ import {
 } from '../../sdk/connection.js';
 import { greengrassComponentGenerator } from '../../sdk/greengrass.js';
 import { licenseGenerator } from '../../sdk/license.js';
+import { observabilityLangfuseGenerator } from '../../sdk/observability.js';
 import {
   type PyAgentGeneratorSchema,
   type PyApiGeneratorSchema,
@@ -406,6 +407,35 @@ export const internalTestMatrixGenerator = async (
   ];
   for (const agent of pyAgents) {
     await pyAgentGenerator(tree, { ...agent, ...defaults });
+  }
+  if (options.infra !== 'terraform') {
+    await pyProjectGenerator(tree, {
+      name: 'py-langfuse-project',
+      type: 'application',
+      ...projectDefaults,
+    });
+    await pyAgentGenerator(tree, {
+      project: py('py-langfuse-project'),
+      framework: 'strands',
+      protocol: 'http',
+      infra: 'agentcore',
+      iac: 'cdk',
+      auth: 'iam',
+      session: 'in-memory',
+      ...defaults,
+    });
+    await observabilityLangfuseGenerator(tree, {
+      project: py('py-langfuse-project'),
+      secretArn:
+        'arn:aws:secretsmanager:us-east-1:123456789012:secret:langfuse-abcdef',
+      ...defaults,
+    });
+    // Deployable matrices use CloudWatch; the generated exporter test runs offline.
+    await observabilityLangfuseGenerator(tree, {
+      project: py('py-langfuse-project'),
+      mode: 'cloudwatch',
+      ...defaults,
+    });
   }
   // Guard the default Python agent, which has AgentCore infrastructure.
   await pyAgentGuardrailsGenerator(tree, {

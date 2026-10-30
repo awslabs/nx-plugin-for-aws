@@ -1,0 +1,220 @@
+import asyncio
+import base64
+import json
+import logging
+import os
+from collections.abc import Sequence
+from typing import Any
+from urllib.parse import urlsplit
+from uuid import uuid4
+
+import boto3
+from langfuse import Langfuse, propagate_attributes
+from langfuse.types import TraceContext
+from opentelemetry import context, propagate, trace
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.propagators.aws import AwsXRayPropagator
+from opentelemetry.propagators.composite import CompositePropagator
+from opentelemetry.sdk.extension.aws.trace import AwsXRayIdGenerator
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
+from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
+from opentelemetry.sdk.trace.sampling import ALWAYS_ON
+from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+from starlette.datastructures import Headers
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+_client: Langfuse | None = None
+_provider: TracerProvider | None = None
+_CONTENT_LIMIT = 1024 * 1024
+_SESSION_HEADER = "x-amzn-bedrock-agentcore-runtime-session-id"
+logger = logging.getLogger(__name__)
+
+
+class LangfuseContentExporter(SpanExporter):
+    def __init__(self, exporter: SpanExporter) -> None:
+        self.exporter = exporter
+
+    def export(self, spans: Sequence[ReadableSpan]) -> SpanExportResult:
+        mapped = []
+        for span in spans:
+            attributes = dict(span.attributes or {})
+            for source, destination in (
+                ("gen_ai.input.messages", "langfuse.observation.input"),
+                ("gen_ai.output.messages", "langfuse.observation.output"),
+                ("gen_ai.tool.call.arguments", "langfuse.observation.input"),
+                ("gen_ai.tool.call.result", "langfuse.observation.output"),
+            ):
+                if source in attributes:
+                    attributes.setdefault(destination, attributes[source])
+            observation_type = {
+                "invoke_agent": "agent",
+                "execute_tool": "tool",
+                "chat": "generation",
+                "text_completion": "generation",
+            }.get(str(attributes.get("gen_ai.operation.name")))
+            if observation_type:
+                attributes["langfuse.observation.type"] = observation_type
+            mapped.append(
+                ReadableSpan(
+                    name=span.name,
+                    context=span.context,
+                    parent=span.parent,
+                    resource=span.resource,
+                    attributes=attributes,
+                    events=span.events,
+                    links=span.links,
+                    kind=span.kind,
+                    status=span.status,
+                    start_time=span.start_time,
+                    end_time=span.end_time,
+                    instrumentation_scope=span.instrumentation_scope,
+                )
+            )
+        return self.exporter.export(mapped)
+
+    def shutdown(self) -> None:
+        self.exporter.shutdown()
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        return self.exporter.force_flush(timeout_millis)
+
+
+def initialize(service_name: str = "agent") -> None:
+    global _client, _provider
+    if _client is not None:
+        return
+    if not isinstance(trace.get_tracer_provider(), trace.ProxyTracerProvider):
+        raise RuntimeError("Langfuse requires the plain entrypoint and DISABLE_ADOT_OBSERVABILITY=true.")
+    try:
+        arn = os.environ["LANGFUSE_SECRET_ARN"]
+        host = os.environ["LANGFUSE_HOST"].rstrip("/")
+        url = urlsplit(host)
+        if url.scheme != "https" or not url.hostname or url.username or url.password or url.query or url.fragment:
+            raise ValueError("Invalid Langfuse host")
+        region = arn.split(":")[3]
+        response = boto3.client("secretsmanager", region_name=region).get_secret_value(SecretId=arn)
+        secret = json.loads(response["SecretString"])
+        public_key, secret_key = secret["LANGFUSE_PUBLIC_KEY"], secret["LANGFUSE_SECRET_KEY"]
+        if not isinstance(public_key, str) or not public_key or not isinstance(secret_key, str) or not secret_key:
+            raise ValueError("Missing Langfuse keys")
+        authorization = "Basic " + base64.b64encode(f"{public_key}:{secret_key}".encode()).decode()
+    except Exception:  # noqa: BLE001
+        raise RuntimeError("Could not load Langfuse credentials. Check the secret ARN, IAM access, and JSON field names.") from None
+
+    os.environ["OTEL_SEMCONV_STABILITY_OPT_IN"] = (
+        "gen_ai_latest_experimental,gen_ai_span_attributes_only,gen_ai_use_latest_invocation_tokens"
+    )
+    logging.getLogger("opentelemetry.exporter.otlp.proto.http.trace_exporter").setLevel(logging.CRITICAL)
+    logging.getLogger("langfuse").setLevel(logging.CRITICAL)
+    provider = TracerProvider(
+        resource=Resource.create({"service.name": service_name}),
+        sampler=ALWAYS_ON,
+        id_generator=AwsXRayIdGenerator(),
+    )
+    trace.set_tracer_provider(provider)
+    if trace.get_tracer_provider() is not provider:
+        raise RuntimeError("Could not register the Langfuse tracing provider.")
+    propagate.set_global_textmap(CompositePropagator([AwsXRayPropagator(), TraceContextTextMapPropagator()]))
+    exporter = OTLPSpanExporter(
+        endpoint=host + "/api/public/otel/v1/traces",
+        headers={"Authorization": authorization, "x-langfuse-ingestion-version": "4"},
+        timeout=5,
+    )
+    _client = Langfuse(
+        public_key=public_key,
+        secret_key=secret_key,
+        base_url=host,
+        tracer_provider=provider,
+        span_exporter=LangfuseContentExporter(exporter),
+        should_export_span=lambda span: True,
+        timeout=5,
+        debug=False,
+    )
+    _provider = provider
+
+
+def langfuse_fastapi_options() -> dict[str, Any]:
+    if _client is None:
+        return {}
+    return {"telemetry": {"tracing": False, "auto_configure": False}}
+
+
+class LangfuseMiddleware:
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope["path"] != "/invocations":
+            await self.app(scope, receive, send)
+            return
+        if _client is None or _provider is None:
+            raise RuntimeError("Initialize Langfuse before importing the agent application.")
+        headers = Headers(scope=scope)
+        session_id = headers.get(_SESSION_HEADER) or str(uuid4())
+        if not 33 <= len(session_id) <= 200:
+            await send({"type": "http.response.start", "status": 400, "headers": []})
+            await send({"type": "http.response.body", "body": b"Langfuse session IDs must contain 33-200 characters."})
+            return
+        extracted = propagate.extract(headers)
+        parent = trace.get_current_span(extracted).get_span_context()
+        trace_context: TraceContext | None = (
+            {"trace_id": trace.format_trace_id(parent.trace_id), "parent_span_id": trace.format_span_id(parent.span_id)}
+            if parent.is_valid
+            else None
+        )
+        token = context.attach(extracted)
+        request_body, response_body = bytearray(), bytearray()
+        final_messages: list[Message] = []
+        truncated = False
+
+        def capture(buffer: bytearray, chunk: bytes) -> None:
+            nonlocal truncated
+            remaining = _CONTENT_LIMIT - len(buffer)
+            buffer.extend(chunk[:remaining])
+            truncated = truncated or len(chunk) > remaining
+
+        async def capture_receive() -> Message:
+            message = await receive()
+            if message["type"] == "http.request":
+                capture(request_body, message.get("body", b""))
+            return message
+
+        async def capture_send(message: Message) -> None:
+            if message["type"] == "http.response.body":
+                capture(response_body, message.get("body", b""))
+                if not message.get("more_body", False):
+                    final_messages.append(message)
+                    return
+            await send(message)
+
+        try:
+            with (
+                propagate_attributes(session_id=session_id),
+                _client.start_as_current_observation(name="Agent invocation", trace_context=trace_context) as observation,
+            ):
+                try:
+                    await self.app(scope, capture_receive, capture_send)
+                finally:
+                    output = []
+                    for line in response_body.splitlines():
+                        try:
+                            item = json.loads(line)
+                            output.append(item.get("content", "") if isinstance(item, dict) else str(item))
+                        except ValueError:
+                            output.append(line.decode(errors="replace"))
+                    observation.update(
+                        input=request_body.decode(errors="replace"),
+                        output="".join(output).strip(),
+                        metadata={"content_truncated": truncated},
+                    )
+        finally:
+            context.detach(token)
+            try:
+                flushed = await asyncio.wait_for(asyncio.to_thread(_provider.force_flush, 8000), timeout=10)
+                if not flushed:
+                    logger.warning("Langfuse trace flush did not complete within its deadline.")
+            except TimeoutError:
+                logger.warning("Langfuse trace flush timed out.")
+        for message in final_messages:
+            await send(message)
