@@ -1,0 +1,34 @@
+import type { Runtime } from 'aws-cdk-lib/aws-bedrockagentcore';
+<%_ if (mode === 'langfuse') { _%>
+import type { CfnRuntime } from 'aws-cdk-lib/aws-bedrockagentcore';
+import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
+<%_ } _%>
+
+// Configure with observability#langfuse.
+export const langfuseObservability = {
+  entrypoint: ['<%= mode === 'langfuse' ? 'langfuse_main.py' : 'agentcore_launcher.py' %>'],
+  environmentVariables: {
+<%_ if (mode === 'langfuse') { _%>
+    DISABLE_ADOT_OBSERVABILITY: 'true',
+    LANGFUSE_HOST: <%- host %>,
+    LANGFUSE_SECRET_ARN: <%- secretArn %>,
+<%_ } _%>
+  },
+};
+
+export const configureLangfuseRuntime = (<%= mode === 'langfuse' ? 'runtime' : '_runtime' %>: Runtime): void => {
+<%_ if (mode === 'langfuse') { _%>
+  const resource = runtime.node.defaultChild as CfnRuntime;
+  resource.platformVersion ??= 'V1';
+  runtime.node.addValidation({
+    validate: () => resource.platformVersion === 'V1'
+      ? []
+      : ['Experimental Langfuse export requires AgentCore platform V1. V2 startup snapshots are not supported.'],
+  });
+  runtime.addToRolePolicy(new PolicyStatement({
+    sid: 'LangfuseTraceExport',
+    actions: ['secretsmanager:GetSecretValue'],
+    resources: [<%- secretArn %>],
+  }));
+<%_ } _%>
+};
