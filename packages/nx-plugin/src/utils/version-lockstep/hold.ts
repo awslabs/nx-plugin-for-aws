@@ -20,6 +20,20 @@ export interface VersionHold<Name extends IVersionedDep = IVersionedDep> {
 
 /** Python pins the version update keeps at their current version. */
 export const PY_VERSION_HOLDS: readonly VersionHold<IPyDepVersion>[] = [
+  ...(
+    [
+      'langfuse',
+      'opentelemetry-api',
+      'opentelemetry-sdk',
+      'opentelemetry-exporter-otlp-proto-http',
+    ] as const
+  ).map((name) => ({
+    name,
+    reason:
+      'the generated ADOT distribution pins OpenTelemetry 1.44; Langfuse 4.16+ requires 1.45',
+    liftWhen:
+      'the vended ADOT distribution and Langfuse resolve together and the Python Langfuse runtime tests pass',
+  })),
   {
     name: 'ty',
     reason:
