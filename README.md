@@ -117,6 +117,7 @@ pnpm nx g @aws/nx-plugin:ts#infra
 | `agentcore-gateway`    | [AgentCore Gateway](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/gateway.html) project                                  |
 | `greengrass#component` | [AWS IoT Greengrass](https://docs.aws.amazon.com/greengrass/v2/developerguide/) v2 component for Python or TypeScript (experimental) |
 | `agentcore-harness`    | [AgentCore Harness](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness.html) agent loop (experimental)                |
+| `observability#langfuse` | Langfuse trace export for Python Strands HTTP agents on AgentCore zip with CDK (experimental) |
 | `connection`           | Connect projects together (e.g. frontend to API)                                                                                         |
 | `terraform#project`    | Terraform project                                                                                                                        |
 | `license`              | Manage LICENSE files and source headers                                                                                                  |

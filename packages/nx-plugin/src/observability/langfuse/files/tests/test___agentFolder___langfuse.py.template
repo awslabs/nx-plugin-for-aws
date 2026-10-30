@@ -1,0 +1,176 @@
+import asyncio
+import json
+import subprocess
+import sys
+from uuid import uuid4
+
+import pytest
+from fastapi import FastAPI, Request
+from fastapi.responses import StreamingResponse
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+from <%- agentModule %> import langfuse_telemetry as telemetry
+
+
+def test_langfuse_invocation_lifecycle():
+    subprocess.run([sys.executable, __file__], check=True)
+
+
+def check_invocation_lifecycle(monkeypatch):
+    exported = InMemorySpanExporter()
+    credentials = {
+        "LANGFUSE_PUBLIC_KEY": uuid4().hex,
+        "LANGFUSE_SECRET_KEY": uuid4().hex,
+    }
+    secret_reads = []
+
+    class SecretClient:
+        def get_secret_value(self, *, SecretId):
+            secret_reads.append(SecretId)
+            return {"SecretString": json.dumps(credentials)}
+
+    monkeypatch.setenv("LANGFUSE_SECRET_ARN", "arn:aws:secretsmanager:us-east-1:123456789012:secret:trace-test-abcdef")
+    monkeypatch.setenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
+    monkeypatch.setattr(telemetry.boto3, "client", lambda *args, **kwargs: SecretClient())
+    exporter_options = {}
+
+    def make_exporter(**kwargs):
+        exporter_options.update(kwargs)
+        return exported
+
+    monkeypatch.setattr(telemetry, "OTLPSpanExporter", make_exporter)
+    with pytest.MonkeyPatch.context() as failed_start:
+        def unavailable(*args, **kwargs):
+            raise ValueError(credentials["LANGFUSE_SECRET_KEY"])
+
+        failed_start.setattr(telemetry.boto3, "client", unavailable)
+        with pytest.raises(RuntimeError, match="Could not load Langfuse credentials") as error:
+            telemetry.initialize()
+        assert credentials["LANGFUSE_SECRET_KEY"] not in str(error.value)
+        assert isinstance(trace.get_tracer_provider(), trace.ProxyTracerProvider)
+    assert telemetry.langfuse_fastapi_options() == {}
+    telemetry.initialize()
+    provider = trace.get_tracer_provider()
+    assert isinstance(provider, TracerProvider)
+    telemetry.initialize()
+    assert trace.get_tracer_provider() is provider
+    assert len(secret_reads) == 1
+    assert exporter_options["endpoint"] == "https://cloud.langfuse.com/api/public/otel/v1/traces"
+    assert exporter_options["headers"]["x-langfuse-ingestion-version"] == "4"
+    with pytest.MonkeyPatch.context() as duplicate:
+        duplicate.setattr(telemetry, "_client", None)
+        with pytest.raises(RuntimeError, match="plain entrypoint"):
+            telemetry.initialize()
+    app = FastAPI(**telemetry.langfuse_fastapi_options())
+    native = trace.get_tracer("strands.telemetry.tracer")
+
+    @app.post("/invocations")
+    async def invoke(request: Request):
+        payload = await request.json()
+        async def stream():
+            with native.start_as_current_span("invoke_agent", attributes={"gen_ai.operation.name": "invoke_agent"}):
+                with native.start_as_current_span(
+                    "chat",
+                    attributes={
+                        "gen_ai.operation.name": "chat",
+                        "gen_ai.input.messages": payload["prompt"],
+                        "gen_ai.output.messages": "call add_numbers",
+                        "gen_ai.usage.input_tokens": 4,
+                        "gen_ai.usage.output_tokens": 1,
+                    },
+                ):
+                    pass
+                with native.start_as_current_span(
+                    "add_numbers",
+                    attributes={
+                        "gen_ai.operation.name": "execute_tool",
+                        "gen_ai.tool.call.arguments": '{"a":2,"b":3}',
+                        "gen_ai.tool.call.result": "5",
+                    },
+                ):
+                    yield b'{"content":"5"}\n'
+        return StreamingResponse(stream(), media_type="application/jsonl")
+
+    middleware = telemetry.LangfuseMiddleware(app)
+    sessions = [str(uuid4()), str(uuid4())]
+
+    async def run():
+        for index in range(3):
+            before = len(exported.get_finished_spans())
+            trace_id = uuid4().hex
+            parent_id = uuid4().hex[:16]
+            session = sessions[0 if index < 2 else 1]
+            trace_header = (
+                (b"x-amzn-trace-id", f"Root=1-{trace_id[:8]}-{trace_id[8:]};Parent={parent_id};Sampled=1".encode())
+                if index != 1
+                else (b"traceparent", f"00-{trace_id}-{parent_id}-01".encode())
+            )
+            scope = {
+                "type": "http", "asgi": {"version": "3.0", "spec_version": "2.4"},
+                "method": "POST", "scheme": "http", "path": "/invocations", "raw_path": b"/invocations",
+                "root_path": "", "query_string": b"", "server": ("test", 80), "client": ("test", 1234),
+                "headers": [(b"x-amzn-bedrock-agentcore-runtime-session-id", session.encode()), trace_header],
+            }
+            sent = []
+
+            async def receive():
+                return {"type": "http.request", "body": b'{"prompt":"Add 2 and 3"}', "more_body": False}
+
+            async def send(message, before=before, sent=sent):
+                if message["type"] == "http.response.body" and not message.get("more_body", False):
+                    assert len(exported.get_finished_spans()) == before + 4
+                sent.append(message)
+
+            await middleware(scope, receive, send)
+            spans = exported.get_finished_spans()[before:]
+            assert len(spans) == 4
+            root = next(span for span in spans if span.name == "Agent invocation")
+            assert root.context.trace_id == int(trace_id, 16)
+            assert root.parent is not None
+            assert root.parent.span_id == int(parent_id, 16)
+            assert root.attributes is not None
+            root_input = root.attributes["langfuse.observation.input"]
+            assert isinstance(root_input, str)
+            assert json.loads(root_input)["prompt"] == "Add 2 and 3"
+            assert root.attributes["langfuse.observation.output"] == "5"
+            ids = {span.context.span_id for span in spans}
+            assert len(ids) == 4
+            assert all(span.parent is not None and span.parent.span_id in ids for span in spans if span is not root)
+            assert all(span.attributes is not None and span.attributes.get("session.id") == session for span in spans)
+            model = next(span for span in spans if span.name == "chat")
+            assert model.attributes is not None
+            assert model.attributes["langfuse.observation.type"] == "generation"
+            assert model.attributes["langfuse.observation.input"] == "Add 2 and 3"
+            assert model.attributes["gen_ai.usage.input_tokens"] == 4
+            assert sent[-1]["type"] == "http.response.body"
+        assert trace.get_tracer_provider() is provider
+
+        before = len(exported.get_finished_spans())
+        invalid = {**scope, "headers": [(b"x-amzn-bedrock-agentcore-runtime-session-id", b"too-short")]}
+        messages = []
+
+        async def collect(message):
+            messages.append(message)
+
+        await middleware(invalid, receive, collect)
+        assert messages[0]["status"] == 400
+        assert len(exported.get_finished_spans()) == before
+
+        async def cancelled_app(scope, receive, send):
+            await receive()
+            raise asyncio.CancelledError()
+
+        with pytest.raises(asyncio.CancelledError):
+            await telemetry.LangfuseMiddleware(cancelled_app)(scope, receive, collect)
+        assert len(exported.get_finished_spans()) == before + 1
+        assert trace.get_tracer_provider() is provider
+
+    asyncio.run(run())
+    provider.shutdown()
+
+
+if __name__ == "__main__":
+    with pytest.MonkeyPatch.context() as patch:
+        check_invocation_lifecycle(patch)
