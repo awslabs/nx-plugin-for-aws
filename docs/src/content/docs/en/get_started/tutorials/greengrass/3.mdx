@@ -1,0 +1,131 @@
+---
+title: Deploy, observe and update
+description: Compose the artifact repository, read grant, component version and deployment in CDK, watch the heartbeat arrive in AWS IoT Core, then publish a NEXT_PATCH update
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import E2EDiff from '@components/e2e-diff.astro';
+import InstallCommand from '@components/install-command.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+## Task 1: Compose the stack
+
+The generator vended building blocks, not a deployment. Your stack decides where artifacts live, which role may read them, and which fleet receives the component. Replace `packages/infra/src/stacks/application-stack.ts`:
+
+<E2EDiff before="greengrass-tutorial/application-stack.ts.original.template" after="greengrass-tutorial/application-stack.ts.template" lang="typescript" />
+
+What each part does:
+
+- `GreengrassArtifactBucket` creates the retained, versioned, TLS-only artifact repository. `grantReadTo` gives the token exchange role `s3:GetObject` on `com.example.Pulse/*`, which covers every artifact key the resolver writes for this component.
+- `Pulse` extends `GreengrassComponentVersion`. It reads the recipe and `pulse.zip` that `pulse-artifact` built, uploads the archive under a content-hashed key, and publishes the component version. Its `bucket` property takes the `GreengrassArtifactBucket` construct itself.
+- `GreengrassDeployment` with `targetArn` deploys to the thing group the setup script created. `addComponent(pulse)` puts the resolved version into the deployment's component map and adds a CloudFormation dependency on the component version resource, so the IoT job cannot reach the device before the version exists.
+- The two `CfnParameter` values come from `.greengrass-tutorial.env`. Passing them as parameters keeps the stack free of account-specific literals and lets the e2e suite synthesize the same file.
+
+## Task 2: Bootstrap and deploy
+
+Load the recorded values, synchronize project references and dependency manifests, install the updated workspace dependencies, and bootstrap CDK in the account and Region if you have not done so before:
+
+```bash
+source .greengrass-tutorial.env
+```
+
+<NxCommands commands={['sync']} />
+<InstallCommand />
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @greengrass-tutorial/infra:bootstrap']} />
+
+Deploy the stack. `packages/infra/src/main.ts` places the stack in the stage `greengrass-tutorial-infra-sandbox`, and the `deploy` target runs `cdk deploy` without a stage of its own, so the command names that stage and passes the role and thing group ARNs as CloudFormation parameters:
+
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @greengrass-tutorial/infra:deploy -- "greengrass-tutorial-infra-sandbox/**" --parameters TokenExchangeRoleArn="$TUTORIAL_TOKEN_EXCHANGE_ROLE_ARN" --parameters ThingGroupArn="$TUTORIAL_THING_GROUP_ARN"']} />
+
+`deploy` depends on `^assemble`, and the shared constructs project depends on the telemetry project's `assemble`, which runs `pulse-artifact`. Every deploy therefore publishes the artifact that matches your current source. The target runs `cdk deploy` without express mode, so it accepts a later deployment revision that replaces the deployment resource. Read <Link path="guides/greengrass-component#deployment-revisions">deployment revisions</Link> before using `deploy-sandbox` for Greengrass.
+
+On the first deploy the version resolver finds no published version of `com.example.Pulse` and publishes `1.0.0`. The deployment then reaches the thing group, and the core device downloads the artifact with the token exchange role and starts the component. Allow one to two minutes after the stack completes.
+
+## Task 3: Watch the heartbeat
+
+Open the AWS IoT console in `$TUTORIAL_AWS_REGION`, choose **MQTT test client**, and subscribe to the topic:
+
+```text
+tutorial/greengrass/heartbeat
+```
+
+Every 30 seconds a message arrives:
+
+```json
+{"sequence": 3, "greeting": "hello from pulse"}
+```
+
+The AWS CLI cannot subscribe to MQTT topics. If you prefer your own MQTT client, connect it to the account's data endpoint with its own certificate and policy, which this tutorial does not create:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iot describe-endpoint \
+  --endpoint-type iot:Data-ATS --query endpointAddress --output text
+```
+
+## Task 4: Check the device
+
+A successful deployment proves the device applied the deployment document. It does not prove the component runs. Check the installed component's lifecycle state:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 list-installed-components \
+  --core-device-thing-name "$TUTORIAL_THING_NAME" \
+  --query 'installedComponents[?componentName==`com.example.Pulse`].[componentVersion,lifecycleState]' \
+  --output text
+```
+
+Expect `1.0.0` and `RUNNING`. Then read the component's own log on the instance with the Systems Manager pattern from module 2:
+
+```bash
+cat > /tmp/greengrass-tutorial-command.json <<'EOF'
+{ "commands": ["#!/bin/bash", "tail -n 20 /greengrass/v2/logs/com.example.Pulse.log"] }
+EOF
+
+TUTORIAL_COMMAND_ID=$(aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" ssm send-command \
+  --instance-ids "$TUTORIAL_INSTANCE_ID" --document-name AWS-RunShellScript \
+  --parameters file:///tmp/greengrass-tutorial-command.json \
+  --query Command.CommandId --output text)
+sleep 5
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" ssm get-command-invocation \
+  --command-id "$TUTORIAL_COMMAND_ID" --instance-id "$TUTORIAL_INSTANCE_ID" \
+  --query StandardOutputContent --output text
+```
+
+The log shows the IPC connection and one line per heartbeat:
+
+```text
+INFO:awsiot.eventstreamrpc:<Connection ...> /greengrass/v2/ipc.socket:0> connected
+INFO:com.example.Pulse:Published heartbeat 0 to tutorial/greengrass/heartbeat
+INFO:com.example.Pulse:Published heartbeat 1 to tutorial/greengrass/heartbeat
+```
+
+If the deployment reports `SUCCEEDED` but the component is `BROKEN`, or `get-core-device` reports `UNHEALTHY`, follow the <Link path="guides/greengrass-component#troubleshooting-and-service-limits">component troubleshooting steps</Link>.
+
+## Task 5: Update the component
+
+Change the greeting in `packages/telemetry/greengrass/pulse/main.py`:
+
+<E2EDiff before="greengrass-tutorial/main.py.template" after="greengrass-tutorial/main.py.updated.template" lang="python" />
+
+Deploy again with the same command:
+
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @greengrass-tutorial/infra:deploy -- "greengrass-tutorial-infra-sandbox/**" --parameters TokenExchangeRoleArn="$TUTORIAL_TOKEN_EXCHANGE_ROLE_ARN" --parameters ThingGroupArn="$TUTORIAL_THING_GROUP_ARN"']} />
+
+Nx sees the changed source and rebuilds `pulse-artifact`. The archive's content hash changes, so the resolver allocates `1.0.1`, the artifact is uploaded under a new key, a new component version is published, and a new deployment revision points the thing group at it. The recipe still says `NEXT_PATCH`; nothing in the workspace records the number.
+
+Verify both the installed version and the payload:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 list-installed-components \
+  --core-device-thing-name "$TUTORIAL_THING_NAME" \
+  --query 'installedComponents[?componentName==`com.example.Pulse`].[componentVersion,lifecycleState]' \
+  --output text
+```
+
+Expect `1.0.1` and `RUNNING`. In the MQTT test client the greeting changes to `hello from the updated pulse`, and the sequence restarts from `0` because the component process was restarted.
+
+<Aside type="tip" title="Unchanged redeploys">
+Deploying again without a source or recipe change reuses `1.0.1`. The resolver compares the content hash with the tag on the highest published version and returns that version instead of allocating a new one. Read <Link path="guides/greengrass-component#automatic-versioning">automatic versioning</Link> for the rules and their limits.
+</Aside>
+
+Continue with <Link path="get_started/tutorials/greengrass/cleanup">Remove and clean up</Link>.

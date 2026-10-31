@@ -1,0 +1,65 @@
+---
+title: Hướng dẫn Greengrass MQTT
+description: Xây dựng một component Greengrass bằng Python, chạy nó trên thiết bị lõi EC2, theo dõi nhịp tim của nó đến AWS IoT Core qua MQTT, xuất bản bản cập nhật NEXT_PATCH, sau đó xóa mọi thứ
+---
+
+import Link from '@components/link.astro';
+import Snippet from '@components/snippet.astro';
+
+Trong hướng dẫn này, bạn sẽ xây dựng một component [AWS IoT Greengrass v2](https://docs.aws.amazon.com/greengrass/v2/developerguide/what-is-iot-greengrass.html) bằng Python với `@aws/nx-plugin`, chạy nó trên một instance EC2 Ubuntu 26.04 x86_64 đóng vai trò là thiết bị lõi, và theo dõi nhịp tim của nó đến AWS IoT Core qua MQTT. Sau đó, bạn thay đổi mã nguồn, xuất bản phiên bản tiếp theo với `NEXT_PATCH`, xóa component khỏi thiết bị, và xóa mọi tài nguyên bạn đã tạo.
+
+Hướng dẫn này sử dụng CDK và Greengrass nucleus cổ điển. Đối với các component TypeScript, Terraform, hoặc một fleet hiện có, hãy đọc <Link path="guides/greengrass-component">hướng dẫn component Greengrass</Link>.
+
+## Những gì bạn xây dựng
+
+| Phần | Vị trí | Được tạo bởi |
+| --- | --- | --- |
+| Dự án Python `greengrass_tutorial.telemetry` | `packages/telemetry` | `py#project` |
+| Component `com.example.Pulse` | `packages/telemetry/greengrass/pulse` | `greengrass#component` |
+| Các construct lõi Greengrass và construct ứng dụng `Pulse` | `packages/common/constructs/src/core/greengrass`, `packages/common/constructs/src/app/greengrass` | `greengrass#component` |
+| Ứng dụng CDK `@greengrass-tutorial/infra` | `packages/infra` | `ts#infra` |
+
+Component được tạo ra xuất bản qua Greengrass IPC cục bộ. Module 1 thay đổi nó để xuất bản lên AWS IoT Core, điều này cần một thao tác IPC khác, một ủy quyền recipe khác, và một câu lệnh IoT policy trên thiết bị. Các tên API và kiểm soát truy cập đến từ [tài liệu AWS IoT Core MQTT IPC](https://docs.aws.amazon.com/greengrass/v2/developerguide/ipc-iot-core-mqtt.html).
+
+## Những gì nó tạo ra trong AWS
+
+| Tài nguyên | Được tạo bởi | Được xóa bởi |
+| --- | --- | --- |
+| IoT thing group, thing, certificate, IoT policy, token exchange role, role alias, IAM access policy | Script thiết lập và trình cài đặt nucleus | Thao tác `cleanup` của script |
+| Instance EC2 `t3.small` với SSM instance profile | Script thiết lập (instance) và bạn (instance profile) | Thao tác `cleanup` của script và bạn |
+| Artifact bucket, component versions, deployment, artifact read grant | Stack CDK của bạn | `destroy`, sau đó xóa thủ công bucket được giữ lại, versions và deployments |
+
+Instance chạy cho đến khi bạn dọn dẹp. Sử dụng một tài khoản AWS và Region mà bạn có thể dọn dẹp hoàn toàn.
+
+## Trước khi bắt đầu
+
+<Snippet name="required-prerequisites" />
+
+Bạn cũng cần:
+
+- [AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) với một profile được đặt tên cho tài khoản đích.
+- Quyền trong tài khoản đó để tạo IAM roles và policies, IoT things và policies, EC2 instances, Systems Manager commands, S3 buckets, CloudFormation stacks và Greengrass resources.
+- Một VPC mặc định trong Region, hoặc một subnet có quyền truy cập internet đi ra mà bạn truyền cho script thiết lập.
+
+Mọi lệnh AWS CLI trong hướng dẫn này đều truyền `--profile` và `--region` một cách rõ ràng, và mọi lệnh CDK đều nhận `AWS_PROFILE` và `AWS_REGION`. Đặt các giá trị một lần trong shell của bạn:
+
+```bash
+export TUTORIAL_AWS_PROFILE=<your-profile>
+export TUTORIAL_AWS_REGION=us-east-1
+export TUTORIAL_PREFIX=gg-tutorial
+```
+
+`TUTORIAL_PREFIX` đặt tên cho mọi tài nguyên mà script thiết lập tạo ra. Chọn một giá trị mà không có gì khác trong tài khoản sử dụng.
+
+## Những gì được xác minh tự động
+
+Các lệnh, chỉnh sửa mã nguồn, build và CDK synthesis của hướng dẫn này được bao phủ bởi smoke test `greengrass-tutorial` trong CI. Hành vi identity, refusal và cleanup của script thiết lập chạy với một AWS CLI được ghi lại trong bộ test tài liệu.
+
+Provisioning, MQTT delivery, device updates và cleanup yêu cầu một tài khoản AWS và vẫn nằm ngoài làn đường tự động. Làm theo các kiểm tra thiết bị trong mỗi module để xác minh deployment. <Link path="guides/greengrass-component#phần-cứng-và-hệ-điều-hành">Bảng hỗ trợ phần cứng</Link> ghi lại các nền tảng thiết bị được hỗ trợ.
+
+## Các module
+
+1. <Link path="get_started/tutorials/greengrass/1">Tạo component</Link>: workspace, dự án Python, component, ứng dụng CDK, và chuyển sang AWS IoT Core MQTT.
+2. <Link path="get_started/tutorials/greengrass/2">Cung cấp thiết bị lõi</Link>: instance profile, lựa chọn image, script thiết lập, và những gì nó tạo ra.
+3. <Link path="get_started/tutorials/greengrass/3">Deploy, quan sát và cập nhật</Link>: stack CDK, deployment đầu tiên, nhịp tim MQTT, và bản cập nhật `NEXT_PATCH`.
+4. <Link path="get_started/tutorials/greengrass/cleanup">Xóa và dọn dẹp</Link>: một revision deployment trống, phá hủy stack, và xóa các tài nguyên được giữ lại và được tạo bởi script.

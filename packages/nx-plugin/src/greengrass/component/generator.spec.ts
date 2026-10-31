@@ -221,7 +221,7 @@ describe('greengrassComponentGenerator preflight', () => {
         iac: 'cdk',
       }),
     ).rejects.toThrow(
-      /68-character limit.*Shorten --componentName to 68 characters or fewer/,
+      /68-character limit.*shorter --name or set --componentName to 68 characters or fewer/,
     );
 
     tree.write(

@@ -41,10 +41,9 @@ const restoreBackup = (path: string) => {
 
 export default async function () {
   try {
-    // Every smoke test installs the build this run publishes to verdaccio
-    // seconds earlier, which pnpm's release-age cutoff hides. Scoped to this
-    // process — which every spawned command inherits — so the cutoff still
-    // applies to anything installing from the public registry.
+    // The local smoke build is published to Verdaccio seconds before install,
+    // so pnpm's release-age cutoff hides it. The process-wide setting also
+    // sets the cutoff to zero in NX_E2E_PUBLIC_VERSION runs.
     process.env.PNPM_CONFIG_MINIMUM_RELEASE_AGE = '0';
 
     // Skip the registry audit on every install these tests run. The advisory
@@ -52,6 +51,23 @@ export default async function () {
     // throwaway workspaces whose dependencies the `audit` lane already covers.
     process.env.npm_config_audit = 'false';
     process.env.npm_config_fund = 'false';
+
+    const publicVersion = process.env.NX_E2E_PUBLIC_VERSION;
+    if (publicVersion) {
+      if (!/^\d+\.\d+\.\d+$/.test(publicVersion)) {
+        throw new Error(
+          'NX_E2E_PUBLIC_VERSION must be an exact release version',
+        );
+      }
+      process.env.NX_E2E_PRESET_VERSION = publicVersion;
+      delete process.env.NX_E2E_LOCAL_REGISTRY;
+      process.env.npm_config_registry = PUBLIC_REGISTRY;
+      process.env.BUN_CONFIG_REGISTRY = PUBLIC_REGISTRY;
+      process.env.YARN_REGISTRY = PUBLIC_REGISTRY;
+      process.env.YARN_NPM_REGISTRY_SERVER = PUBLIC_REGISTRY;
+      console.info(`Using public @aws packages at ${publicVersion}`);
+      return;
+    }
 
     // On shared Windows runners the verdaccio storage outlives the process
     // and `clearStorage: true` below doesn't fully reset it, so publishes

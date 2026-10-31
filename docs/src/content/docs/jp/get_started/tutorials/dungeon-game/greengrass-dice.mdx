@@ -1,0 +1,225 @@
+---
+title: "オプション: Greengrassでサイコロを振る"
+description: Dungeon Adventure Story Agentに、Greengrassコアデバイスからサイコロロールをリクエストし、その結果をストーリーで使用するツールを呼び出させます。
+---
+
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
+import RunGenerator from '@components/run-generator.astro';
+import InstallCommand from '@components/install-command.astro';
+import E2ECode from '@components/e2e-code.astro';
+import E2EDiff from '@components/e2e-diff.astro';
+import { getDungeonDiceDependencies } from '../../../../../../../../e2e/src/utils';
+
+<Link path="get_started/tutorials/dungeon-game/4">モジュール4</Link>でデプロイしたダンジョンを維持してください。
+破棄する前に、Story Agentにサイコロデバイスを与えます：
+
+> "I try to pick the lock. Roll a d20 to see whether I succeed."
+
+エージェントは`roll-dice`を呼び出します。Greengrassコア上のPythonコンポーネントがロールを生成し、MCPツールはそのデバイスの結果をエージェントに返します。返信は「d20: 17」と言い、結果を説明できます。
+
+このオプションルートは、ソフトウェアサイコロシミュレーターを備えたEC2コアを使用します。後で、その乱数関数を物理的なサイコロトレイからの入力に置き換えることができます。
+<Link path="get_started/tutorials/greengrass/overview">スタンドアロンのGreengrassチュートリアル</Link>は、空のワークスペースからコンポーネント生成を学ぶための別の方法として残ります。
+
+## 追加する内容
+
+```d2
+direction: right
+player: Player
+agent: Story Agent
+tool: "Inventory MCP server\nroll-dice"
+dice_shadow: "AWS IoT Core\nnamed shadow: dungeon-dice"
+device: "Greengrass core\ncom.example.DungeonDice"
+player -> agent: "Attempt an action"
+agent -> tool: "roll-dice(sides=20)"
+tool -> dice_shadow: "Desired request + request ID"
+dice_shadow -> device: "MQTT delta through IPC"
+device -> dice_shadow: "Reported result + same ID"
+dice_shadow -> tool: "Correlated result"
+tool -> agent: "d20 = 17"
+agent -> player: "Result and consequence"
+```
+
+クラウドシャドウは、1つの保留中のリクエストと最新の結果を保持します。ツールは最大12秒待機します。フォールバックロールは生成しません。バージョンチェックにより、同時呼び出し元がアクティブなリクエストを置き換えることを防ぎます。デバイスは公開前に最後の結果を保存するため、MQTTの再配信とコンポーネントの再起動は同じリクエストを再ロールしません。
+
+このサンドボックスは、プレイヤー間で1つのサイコロデバイスを共有します。ビジーなデバイスはエラーを返します。フリート全体のキューを追加したり、個人用デバイスをCognitoユーザーに関連付けたりしません。これらは、マルチプレイヤー製品のための別の拡張です。
+
+## 1. ダンジョンを破棄せずにコアをプロビジョニングする
+
+デプロイされたダンジョンと同じAWSアカウントとリージョンを使用します。プロファイルを明示的に設定し、デバイスリソースに新しいプレフィックスを使用します：
+
+```bash
+export TUTORIAL_AWS_PROFILE=<your-dungeon-profile>
+export TUTORIAL_AWS_REGION=<your-dungeon-region>
+export TUTORIAL_PREFIX=gg-dungeon-dice
+```
+
+**ダンジョンワークスペース**から<Link path="get_started/tutorials/greengrass/2">コアデバイスのプロビジョニング</Link>に従ってください。一時的なインストーラーポリシーの削除も含みます。そのページはインスタンスを作成し、`.greengrass-tutorial.env`を書き込みます。
+別のNxワークスペースを作成したり、スタンドアロンのハートビートモジュールを実行したりしないでください。
+セットアップスクリプトの既存のデフォルトは変更されません。
+
+```bash
+source .greengrass-tutorial.env
+export DICE_IOT_ENDPOINT=$(aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" \
+  iot describe-endpoint --endpoint-type iot:Data-ATS --query endpointAddress --output text)
+```
+
+ツールを有効にする前に、新しいデバイスの名前付きシャドウを一度初期化します。アクティブなサイコロリクエストを持つデバイスに対してこのリセットを実行しないでください：
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" \
+  iot-data update-thing-shadow --endpoint-url "https://${DICE_IOT_ENDPOINT}" \
+  --thing-name "$TUTORIAL_THING_NAME" --shadow-name dungeon-dice \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"state":{"desired":{"command":null},"reported":{"command":null,"result":null}}}' \
+  /tmp/dungeon-dice-shadow.json
+```
+
+EC2ウォークスルーはx86_64 Linuxを使用します。64ビットLinuxを実行するRaspberry Piは代わりに`linux-arm64`を使用します。生成されたレシピとネイティブ依存関係の両方がそのアーキテクチャをターゲットにする必要があります。<Link path="guides/greengrass-component#ハードウェアとオペレーティングシステム">ハードウェアサポート</Link>を参照してください。
+ESP32はゲートウェイにセンサー入力を供給できますが、このPythonコンポーネントを実行することはできません。
+
+## 2. サイコロコンポーネントを生成する
+
+デバイスアーティファクトがStory Agentのクラウド依存関係を持たないように、別のPythonホストを作成します：
+
+<RunGenerator generator="py#project" requiredParameters={{ name: 'edge' }} readonly />
+<RunGenerator generator="greengrass#component" requiredParameters={{ project: 'edge', name: 'dice', language: 'python', componentName: 'com.example.DungeonDice', componentVersion: 'NEXT_PATCH', platform: 'linux-amd64', ipc: true, infra: 'component-version', iac: 'cdk' }} readonly />
+
+`packages/edge/greengrass/dice/main.py`を置き換えます：
+
+<E2ECode lang="python" path="dungeon-adventure/dice/main.py.template" />
+
+`packages/edge/greengrass/dice/recipe.yaml`を置き換えます：
+
+<E2ECode lang="yaml" path="dungeon-adventure/dice/recipe.yaml.template" />
+
+**すべての**`REPLACE_WITH_CORE_THING_NAME`を`TUTORIAL_THING_NAME`の値に置き換えます。レシピのIPCパーミッションは、このデバイスのサイコロシャドウトピックのみを指定します。Pythonは、読み取り専用のアーティファクトディレクトリの外側にある、コンポーネントの書き込み可能な作業ディレクトリに`dice-result.json`を書き込みます。
+
+`packages/edge/tests/greengrass/test_dice.py`を置き換えます：
+
+<E2ECode lang="python" path="dungeon-adventure/dice/test_dice.py.template" />
+
+これらのテストは、有効なロール、重複、再起動リカバリ、古いリクエスト、有効期限、および永続化の失敗を実行します。コンポーネントが異なる動作を実装するようになったため、デフォルトジェネレーターのハートビートテストは置き換えられます。
+
+## 3. エージェントのサイコロツールを追加する
+
+Inventory MCPプロジェクトにIoTデータプレーンクライアントを追加します：
+
+<InstallCommand pkg={getDungeonDiceDependencies()} project="@dungeon-adventure/inventory" />
+
+`packages/inventory/src/mcp-server/roll-dice.ts`を作成します：
+
+<E2ECode lang="typescript" path="dungeon-adventure/dice/roll-dice.ts.template" />
+
+`packages/inventory/src/mcp-server/register-dice.ts`を作成します：
+
+<E2ECode lang="typescript" path="dungeon-adventure/dice/register-dice.ts.template" />
+
+`packages/inventory/src/mcp-server/server.ts`を更新します：
+
+<E2EDiff lang="typescript" before="dungeon-adventure/2/mcp/server.ts.template" after="dungeon-adventure/dice/server.ts.template" />
+
+3つのインベントリツールすべてを保持します。生成されたStory Agent接続は、すでにこのサーバーからツールを検出しているため、`roll-dice`も検出します。
+ツールはサイコロのサイズのみを受け入れます。デバイスIDとエンドポイントはサーバーの設定から取得されます。モデルは別のデバイスやMQTTトピックを選択できません。
+ローカル開発中、インベントリツールは`DICE_*`環境変数なしでも使用可能なままです。`roll-dice`を呼び出すと、`DICE_THING_NAME`、`DICE_IOT_ENDPOINT`、`DICE_AWS_REGION`が設定されるまで、未設定デバイスエラーが返されます。
+
+`packages/story/dungeon_adventure_story/agent/agent.py`を更新します：
+
+<E2EDiff lang="python" before="dungeon-adventure/3/agent.py.template" after="dungeon-adventure/dice/agent.py.template" />
+
+この置き換えにより、成功したロールの後にインベントリの更新が続くように、順次呼び出しが許可されます。ターンごとに1つのロールのみを許可し、サイコロツールが失敗したときにチャレンジを明示的に停止します。
+
+## 4. デバイスリソースを既存のアプリケーションに構成する
+
+`packages/infra/src/dice-resources.ts`を作成します：
+
+<E2ECode lang="typescript" path="dungeon-adventure/dice/dice-resources.ts.template" />
+
+`packages/infra/src/stacks/application-stack.ts`を更新して、デバイス設定をMCPサーバーに渡し、ランタイムにシャドウへのアクセスを許可します：
+
+<E2EDiff lang="typescript" before="dungeon-adventure/2/stacks/application-stack.ts.template" after="dungeon-adventure/dice/application-stack.ts.template" />
+
+既存のアプリケーションスタックの残りを保持します。`DiceResources`は、デバイスパラメータ、アーティファクト許可、コンポーネントとそのデプロイメントを所有します。
+
+3つのパーミッション境界があります：
+
+- コアの既存のIoT証明書ポリシーは、`$aws/things/<thing-name>/shadow/*`での公開、サブスクライブ、受信を許可しており、これには名前付き`dungeon-dice`シャドウがすでに含まれています。追加の証明書ポリシーは必要ありません。
+- サイコロレシピは、IPCを通じてこれらのトピックへのアクセスをコンポーネントに許可します。
+- Inventory MCPランタイムは、このモノの名前付き`dungeon-dice`シャドウのみに対して`GetThingShadow`と`UpdateThingShadow`を取得します。
+
+アーティファクト許可により、コアのトークン交換ロールは`com.example.DungeonDice/*`のみをフェッチできます。デプロイメントはコンポーネントの公開に依存します。
+
+ビルドしてから、4つのパラメータ値すべてを使用してデプロイします：
+
+<NxCommands commands={['sync']} />
+<InstallCommand />
+<PackageManagerShortCommand commands={['lint --skip-nx-cache']} />
+<NxCommands commands={['run-many --target build --all']} />
+
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @dungeon-adventure/infra:deploy -- "dungeon-adventure-infra-sandbox/**" --parameters dungeon-adventure-infra-sandbox-Application:DiceThingName="$TUTORIAL_THING_NAME" --parameters dungeon-adventure-infra-sandbox-Application:DiceEndpoint="$DICE_IOT_ENDPOINT" --parameters dungeon-adventure-infra-sandbox-Application:TokenExchangeRoleArn="$TUTORIAL_TOKEN_EXCHANGE_ROLE_ARN" --parameters dungeon-adventure-infra-sandbox-Application:ThingGroupArn="$TUTORIAL_THING_GROUP_ARN"']} />
+
+WAFスタックがパラメータを定義していないため、アプリケーションスタックのパラメータを修飾します。
+
+このウォークスルーには`deploy`を使用します。コンポーネント/バージョンの変更はCloudFormationリソースを置き換えます。<Link path="guides/greengrass-component#デプロイメントリビジョン">デプロイメントリビジョン</Link>は、`deploy-sandbox`で必要な追加のロールバックフラグを説明しています。
+
+コンポーネントが`RUNNING`になるまで待ちます：
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" \
+  greengrassv2 list-installed-components --core-device-thing-name "$TUTORIAL_THING_NAME" \
+  --query "installedComponents[?componentName=='com.example.DungeonDice'].[componentVersion,lifecycleState]" \
+  --output table
+```
+
+## 5. エージェントにロールさせる
+
+デプロイされたゲームを開き、新しい会話を開始するか既存の会話をリロードして、次のように尋ねます：
+
+> "Roll a d20 on the dice device for my attempt to pick this lock."
+
+エージェントは`roll-dice`を呼び出し、返された値と結果を説明するはずです。クラウドシャドウを読み取って、その`reported.result`をツールの結果とエージェントの返信と比較します：
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" \
+  iot-data get-thing-shadow --endpoint-url "https://${DICE_IOT_ENDPOINT}" \
+  --thing-name "$TUTORIAL_THING_NAME" --shadow-name dungeon-dice \
+  /tmp/dungeon-dice-shadow.json
+cat /tmp/dungeon-dice-shadow.json
+```
+
+成功した結果には、`requestId`、`sides`、`value`、`rolledAt`が含まれます。
+`/greengrass/v2/logs/com.example.DungeonDice.log`のデバイスログは、同じリクエストIDと値を記録します。デプロイメントの成功だけでは、このラウンドトリップを証明しません。
+
+失敗パスを実行するには、この使い捨てコアのGreengrassサービスをSystems Managerターミナルから停止し、別のロールをリクエストし、ツールが制限された待機後にエラーを報告することを確認します。エージェントは、チャレンジを決定する代わりに、デバイスが利用できないことを伝えるはずです。続行する前にサービスを再起動します。期限切れの保留中のリクエストは、デバイスが再接続したときにロールしてはいけません。新しいツール呼び出しは新しいリクエストを作成します。
+
+バージョン更新の演習として、コンポーネントのログメッセージを変更し、リビルドして同じdeployコマンドを実行します。`NEXT_PATCH`は新しいバージョンを公開します。新しい実行中のバージョンを確認してから、別のロールをリクエストします。
+
+## 6. プレイを続けるか、すべてを削除する
+
+拡張機能のみを削除するには：
+
+1. アプリケーションスタックから`DiceArtifactBucket`、`DiceComponentArn`、`DiceDeploymentId`の出力を記録します。
+2. `packages/infra/src/dice-resources.ts`から`this.deployment.addComponent(component)`を削除します。同じパラメータで再デプロイします。
+   これにより空のデプロイメントリビジョンが送信されます。`list-installed-components`が`com.example.DungeonDice`をリストしなくなるまで待ちます。
+3. ベースの<Link path="get_started/tutorials/dungeon-game/3">Story Agentプロンプト</Link>を復元し、`registerDiceTool`のインポートと呼び出しを削除し、<Link path="get_started/tutorials/dungeon-game/2#スタックの接続">モジュール2のアプリケーションスタック</Link>を復元します。
+   ダンジョンをリビルドしてデプロイします。これにより、MCPパーミッションとそのサイコロ設定が削除されます。
+4. <Link path="get_started/tutorials/greengrass/cleanup#タスク3-保持されたgreengrassリソースを削除する">保持されたリソースのクリーンアップ手順</Link>を使用して、保持されたGreengrassデプロイメントレコード、コンポーネントバージョン、およびアーティファクトバケットを削除します。
+   `com.example.Pulse`を`com.example.DungeonDice`に置き換え、記録されたサイコロの出力を使用します。更新演習で作成されたすべてのバージョン/リビジョンを含めます。
+5. 名前付きシャドウを削除してから、<Link path="get_started/tutorials/greengrass/cleanup">デバイスクリーンアップガイド</Link>に記載されているように、セットアップスクリプトのクリーンアップを実行し、所有者管理のインスタンスプロファイルとロールを削除します。
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" \
+  iot-data delete-thing-shadow --endpoint-url "https://${DICE_IOT_ENDPOINT}" \
+  --thing-name "$TUTORIAL_THING_NAME" --shadow-name dungeon-dice \
+  /tmp/dungeon-dice-shadow-deleted.json
+```
+
+これらの手順の後、ダンジョンはデプロイされたままです。アプリケーション全体を削除するには、保持されたユーザープール、SMSロール、会話履歴バケットを含む<Link path="get_started/tutorials/dungeon-game/wrap-up#リソースの破棄">リソースの破棄</Link>に進みます。
+
+## さらなる実験
+
+- 64ビットOSと物理センサーを備えたRaspberry Piを使用します。`secrets.randbelow`を置き換えながら、リクエストIDとタイムアウト契約を維持します。
+- ESP32を使用してセンサーを読み取り、その結果をLinuxゲートウェイに送信します。
+  これにより、ファームウェアとデバイス認証が追加されます。このPythonコンポーネントの別のCPUターゲットではありません。
+- コンポーネントを、ローカルサイコロエンジンとGreengrass pub/subを介して接続されたMQTTブリッジに分割します。

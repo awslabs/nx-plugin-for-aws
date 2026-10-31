@@ -32,6 +32,12 @@ Chúng tôi khuyên bạn nên thử mở rộng codebase với các khả năng
 
 ## Hủy tài nguyên
 
+Muốn tiếp tục chơi và thêm một thiết bị edge trước? Tiếp tục với
+<Link path="get_started/tutorials/dungeon-game/greengrass-dice">Tùy chọn: tung xúc xắc với Greengrass</Link>.
+Story Agent gọi một công cụ yêu cầu tung xúc xắc từ một thiết bị và sử dụng
+giá trị trả về trong trò chơi. Giữ lại dungeon đã triển khai của bạn cho tuyến đường đó; nó
+bao gồm hướng dẫn để chỉ xóa phần mở rộng hoặc toàn bộ ứng dụng.
+
 1. Để hủy các tài nguyên AWS đã được tạo, chạy lệnh sau:
 
 <NxCommands commands={['destroy-sandbox infra']} />
@@ -40,11 +46,41 @@ Chúng tôi khuyên bạn nên thử mở rộng codebase với các khả năng
 
 2. Nhập `y` để tiếp tục. CloudFormation sẽ hủy các stack của bạn.
 
-:::caution[Hai tài nguyên được giữ lại có chủ đích]
-Việc xóa các stack sẽ để lại hai tài nguyên, do đó quá trình dọn dẹp không thể xóa người dùng hoặc câu chuyện của họ:
+:::note[Nếu bảo vệ xóa AppConfig chặn việc xóa stack]
+Ngừng sử dụng ứng dụng tutorial. Trong tab **Resources** của stack bị lỗi, ghi lại
+physical ID chính xác của ứng dụng AppConfig thuộc sở hữu của nó và các ID của chỉ
+các environment và configuration profiles có việc xóa bị lỗi.
+
+Hoặc là đợi [khoảng thời gian bảo vệ xóa](https://docs.aws.amazon.com/appconfig/2019-10-09/APIReference/API_DeletionProtectionSettings.html) của tài khoản sau lần đọc cấu hình cuối cùng
+và thử lại việc hủy, hoặc chỉ xóa các tài nguyên tutorial bị loại bỏ này:
+sử dụng `aws appconfig delete-environment` với `--application-id` và
+`--environment-id`, và `aws appconfig delete-configuration-profile` với
+`--application-id` và `--configuration-profile-id`. Cung cấp các ID đã ghi lại
+và `--deletion-protection-check BYPASS`, với `--profile` và
+`--region` rõ ràng, trên mỗi lệnh gọi. Sau đó chạy lại lệnh destroy.
+:::
+
+:::caution[Tài nguyên được giữ lại]
+Việc xóa stack sẽ để lại các tài nguyên này để dọn dẹp riêng:
 
 - **Cognito user pool**, được tạo bởi `ts#website#auth` với tính năng bảo vệ xóa được bật.
+- **SMS IAM role** của pool, được giữ lại cùng với pool để nó vẫn có thể được cập nhật và xóa.
 - **Story Agent's session bucket**, chứa lịch sử hội thoại và mặc định là `RemovalPolicy.RETAIN`.
+- **Game API access log group**.
+- Bốn **customer-managed KMS keys** cho user-pool WAF logs, Game API logs, Story Agent sessions và website.
+- **API Gateway CloudWatch IAM role**, có cài đặt tài khoản khu vực được chia sẻ bởi các REST API.
 
-Xóa chúng bằng tay khi bạn không còn cần chúng nữa — đối với user pool, hãy tắt tính năng bảo vệ xóa trước.
+Ghi lại SMS role ARN từ cấu hình SMS của user pool trước khi xóa
+pool. Tắt tính năng bảo vệ xóa của pool, xóa pool, sau đó xóa
+SMS role của nó và bất kỳ policy đính kèm nào thuộc sở hữu của ứng dụng này. Làm trống
+session bucket, bao gồm các phiên bản đối tượng và delete markers, trước khi xóa nó.
+Xóa Game API access log group khi bạn không còn cần logs của nó nữa.
+
+Giữ lại bất kỳ KMS key nào cần thiết để đọc dữ liệu bạn giữ lại. Lên lịch xóa các
+key không sử dụng của ứng dụng này với thời gian chờ ít nhất bảy ngày.
+Các key sẽ ở trạng thái `PendingDeletion` cho đến khi kết thúc thời gian đó.
+
+Giữ lại API Gateway role nếu các REST API khác đang sử dụng nó. Kiểm tra cài đặt
+CloudWatch role của tài khoản khu vực và các phụ thuộc trước khi xóa một role
+thuộc sở hữu của tutorial không sử dụng, và cập nhật tham chiếu tài khoản của nó trước khi xóa.
 :::

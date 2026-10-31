@@ -1,0 +1,131 @@
+---
+title: Implantar, observar e atualizar
+description: Componha o repositório de artefatos, concessão de leitura, versão do componente e implantação no CDK, observe a chegada do heartbeat no AWS IoT Core e publique uma atualização NEXT_PATCH
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import E2EDiff from '@components/e2e-diff.astro';
+import InstallCommand from '@components/install-command.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+## Tarefa 1: Compor a pilha
+
+O gerador forneceu blocos de construção, não uma implantação. Sua pilha decide onde os artefatos residem, qual função pode lê-los e qual frota recebe o componente. Substitua `packages/infra/src/stacks/application-stack.ts`:
+
+<E2EDiff before="greengrass-tutorial/application-stack.ts.original.template" after="greengrass-tutorial/application-stack.ts.template" lang="typescript" />
+
+O que cada parte faz:
+
+- `GreengrassArtifactBucket` cria o repositório de artefatos retido, versionado e somente TLS. `grantReadTo` concede à função de troca de token `s3:GetObject` em `com.example.Pulse/*`, que cobre todas as chaves de artefato que o resolvedor escreve para este componente.
+- `Pulse` estende `GreengrassComponentVersion`. Ele lê a receita e `pulse.zip` que `pulse-artifact` construiu, faz upload do arquivo sob uma chave com hash de conteúdo e publica a versão do componente. Sua propriedade `bucket` recebe o próprio construto `GreengrassArtifactBucket`.
+- `GreengrassDeployment` com `targetArn` implanta no grupo de coisas que o script de configuração criou. `addComponent(pulse)` coloca a versão resolvida no mapa de componentes da implantação e adiciona uma dependência CloudFormation no recurso de versão do componente, para que o trabalho IoT não possa alcançar o dispositivo antes que a versão exista.
+- Os dois valores `CfnParameter` vêm de `.greengrass-tutorial.env`. Passá-los como parâmetros mantém a pilha livre de literais específicos da conta e permite que o conjunto e2e sintetize o mesmo arquivo.
+
+## Tarefa 2: Inicializar e implantar
+
+Carregue os valores gravados, sincronize as referências do projeto e os manifestos de dependência, instale as dependências atualizadas do workspace e inicialize o CDK na conta e Região se você ainda não o fez:
+
+```bash
+source .greengrass-tutorial.env
+```
+
+<NxCommands commands={['sync']} />
+<InstallCommand />
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @greengrass-tutorial/infra:bootstrap']} />
+
+Implante a pilha. `packages/infra/src/main.ts` coloca a pilha no estágio `greengrass-tutorial-infra-sandbox`, e o destino `deploy` executa `cdk deploy` sem um estágio próprio, então o comando nomeia esse estágio e passa os ARNs da função e do grupo de coisas como parâmetros CloudFormation:
+
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @greengrass-tutorial/infra:deploy -- "greengrass-tutorial-infra-sandbox/**" --parameters TokenExchangeRoleArn="$TUTORIAL_TOKEN_EXCHANGE_ROLE_ARN" --parameters ThingGroupArn="$TUTORIAL_THING_GROUP_ARN"']} />
+
+`deploy` depende de `^assemble`, e o projeto de construtos compartilhados depende do `assemble` do projeto de telemetria, que executa `pulse-artifact`. Cada implantação, portanto, publica o artefato que corresponde ao seu código-fonte atual. O destino executa `cdk deploy` sem modo expresso, então aceita uma revisão de implantação posterior que substitui o recurso de implantação. Leia <Link path="guides/greengrass-component#revisões-de-implantação">revisões de implantação</Link> antes de usar `deploy-sandbox` para Greengrass.
+
+Na primeira implantação, o resolvedor de versão não encontra nenhuma versão publicada de `com.example.Pulse` e publica `1.0.0`. A implantação então alcança o grupo de coisas, e o dispositivo principal baixa o artefato com a função de troca de token e inicia o componente. Aguarde de um a dois minutos após a conclusão da pilha.
+
+## Tarefa 3: Observar o heartbeat
+
+Abra o console AWS IoT em `$TUTORIAL_AWS_REGION`, escolha **MQTT test client** e assine o tópico:
+
+```text
+tutorial/greengrass/heartbeat
+```
+
+A cada 30 segundos uma mensagem chega:
+
+```json
+{"sequence": 3, "greeting": "hello from pulse"}
+```
+
+A AWS CLI não pode assinar tópicos MQTT. Se você preferir seu próprio cliente MQTT, conecte-o ao endpoint de dados da conta com seu próprio certificado e política, que este tutorial não cria:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iot describe-endpoint \
+  --endpoint-type iot:Data-ATS --query endpointAddress --output text
+```
+
+## Tarefa 4: Verificar o dispositivo
+
+Uma implantação bem-sucedida prova que o dispositivo aplicou o documento de implantação. Não prova que o componente está em execução. Verifique o estado do ciclo de vida do componente instalado:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 list-installed-components \
+  --core-device-thing-name "$TUTORIAL_THING_NAME" \
+  --query 'installedComponents[?componentName==`com.example.Pulse`].[componentVersion,lifecycleState]' \
+  --output text
+```
+
+Espere `1.0.0` e `RUNNING`. Em seguida, leia o próprio log do componente na instância com o padrão Systems Manager do módulo 2:
+
+```bash
+cat > /tmp/greengrass-tutorial-command.json <<'EOF'
+{ "commands": ["#!/bin/bash", "tail -n 20 /greengrass/v2/logs/com.example.Pulse.log"] }
+EOF
+
+TUTORIAL_COMMAND_ID=$(aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" ssm send-command \
+  --instance-ids "$TUTORIAL_INSTANCE_ID" --document-name AWS-RunShellScript \
+  --parameters file:///tmp/greengrass-tutorial-command.json \
+  --query Command.CommandId --output text)
+sleep 5
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" ssm get-command-invocation \
+  --command-id "$TUTORIAL_COMMAND_ID" --instance-id "$TUTORIAL_INSTANCE_ID" \
+  --query StandardOutputContent --output text
+```
+
+O log mostra a conexão IPC e uma linha por heartbeat:
+
+```text
+INFO:awsiot.eventstreamrpc:<Connection ...> /greengrass/v2/ipc.socket:0> connected
+INFO:com.example.Pulse:Published heartbeat 0 to tutorial/greengrass/heartbeat
+INFO:com.example.Pulse:Published heartbeat 1 to tutorial/greengrass/heartbeat
+```
+
+Se a implantação relatar `SUCCEEDED` mas o componente estiver `BROKEN`, ou `get-core-device` relatar `UNHEALTHY`, siga as <Link path="guides/greengrass-component#solução-de-problemas-e-limites-de-serviço">etapas de solução de problemas do componente</Link>.
+
+## Tarefa 5: Atualizar o componente
+
+Altere a saudação em `packages/telemetry/greengrass/pulse/main.py`:
+
+<E2EDiff before="greengrass-tutorial/main.py.template" after="greengrass-tutorial/main.py.updated.template" lang="python" />
+
+Implante novamente com o mesmo comando:
+
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @greengrass-tutorial/infra:deploy -- "greengrass-tutorial-infra-sandbox/**" --parameters TokenExchangeRoleArn="$TUTORIAL_TOKEN_EXCHANGE_ROLE_ARN" --parameters ThingGroupArn="$TUTORIAL_THING_GROUP_ARN"']} />
+
+Nx vê o código-fonte alterado e reconstrói `pulse-artifact`. O hash de conteúdo do arquivo muda, então o resolvedor aloca `1.0.1`, o artefato é carregado sob uma nova chave, uma nova versão do componente é publicada e uma nova revisão de implantação aponta o grupo de coisas para ela. A receita ainda diz `NEXT_PATCH`; nada no workspace registra o número.
+
+Verifique tanto a versão instalada quanto o payload:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 list-installed-components \
+  --core-device-thing-name "$TUTORIAL_THING_NAME" \
+  --query 'installedComponents[?componentName==`com.example.Pulse`].[componentVersion,lifecycleState]' \
+  --output text
+```
+
+Espere `1.0.1` e `RUNNING`. No cliente de teste MQTT, a saudação muda para `hello from the updated pulse`, e a sequência reinicia de `0` porque o processo do componente foi reiniciado.
+
+<Aside type="tip" title="Reimplantações sem alterações">
+Implantar novamente sem uma alteração de código-fonte ou receita reutiliza `1.0.1`. O resolvedor compara o hash de conteúdo com a tag na versão publicada mais alta e retorna essa versão em vez de alocar uma nova. Leia <Link path="guides/greengrass-component#versionamento-automático">versionamento automático</Link> para as regras e seus limites.
+</Aside>
+
+Continue com <Link path="get_started/tutorials/greengrass/cleanup">Remover e limpar</Link>.

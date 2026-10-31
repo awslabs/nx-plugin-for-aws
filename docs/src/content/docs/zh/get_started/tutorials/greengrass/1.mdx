@@ -1,0 +1,116 @@
+---
+title: 创建组件
+description: 创建工作区、Python 项目、Greengrass 组件和 CDK 应用程序，然后将组件从本地 pub/sub 切换到 AWS IoT Core MQTT
+---
+
+import { Aside, FileTree } from '@astrojs/starlight/components';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import E2EDiff from '@components/e2e-diff.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import RunGenerator from '@components/run-generator.astro';
+
+## 任务 1：创建工作区
+
+从将要保存工作区的目录运行：
+
+<CreateNxWorkspaceCommand workspace="greengrass-tutorial" iac="cdk" readonly />
+
+然后进入该目录：
+
+```bash
+cd greengrass-tutorial
+```
+
+工作区名称设置了 npm 作用域 `@greengrass-tutorial` 和 Python 命名空间 `greengrass_tutorial`。生成的项目名称带有这些前缀，`nx run` 需要完整名称，因此本教程的其余部分使用 `greengrass_tutorial.telemetry` 和 `@greengrass-tutorial/infra`。
+
+## 任务 2：生成项目
+
+创建托管组件的 Python 项目：
+
+<RunGenerator generator="py#project" requiredParameters={{ name: 'telemetry' }} noInteractive readonly />
+
+这将在 `packages/telemetry` 创建项目 `greengrass_tutorial.telemetry`。
+
+向其添加 Greengrass 组件：
+
+<RunGenerator generator="greengrass#component" requiredParameters={{ project: 'telemetry', name: 'pulse', language: 'python', componentName: 'com.example.Pulse', componentVersion: 'NEXT_PATCH', platform: 'linux-amd64', ipc: true, infra: 'component-version', iac: 'cdk' }} noInteractive readonly />
+
+每个值在教程后面都很重要：
+
+- `platform: linux-amd64` 与您在模块 2 中配置的 x86_64 实例匹配。默认值是 `linux-arm64`，为一种架构构建的配方无法在另一种架构上运行。
+- `componentVersion: NEXT_PATCH` 在部署时分配版本。第一次部署发布 `1.0.0`；模块 3 从源代码更改发布 `1.0.1`，无需编辑配方。
+- `ipc: true` 是显式的，因为本教程将组件更改为通过 Greengrass IPC 发布。
+- `infra: component-version` 与 `iac: cdk` 将可重用的 Greengrass 核心构造添加到 `packages/common/constructs`，并添加一个发布此组件工件的 `Pulse` 应用程序构造。
+
+创建将保存部署的 CDK 应用程序：
+
+<RunGenerator generator="ts#infra" requiredParameters={{ name: 'infra' }} noInteractive readonly />
+
+本教程涉及的文件：
+
+<FileTree>
+- packages
+  - telemetry
+    - greengrass
+      - pulse
+        - main.py the component entrypoint
+        - recipe.yaml the component recipe
+    - tests
+      - greengrass
+        - test_pulse.py the component's unit test
+    - project.json `pulse-vendor`, `pulse-artifact`, `pulse-deploy-local` and `pulse-logs` targets
+  - common
+    - constructs
+      - src
+        - core/greengrass artifact bucket, component version, deployment and version resolver constructs
+        - app/greengrass/pulse.ts the `Pulse` construct
+  - infra
+    - src
+      - stacks
+        - application-stack.ts where module 3 composes the deployment
+</FileTree>
+
+## 任务 3：发布到 AWS IoT Core 而不是本地 pub/sub
+
+生成的 `main.py` 使用 `publish_to_topic` 发布心跳，它通过本地 Greengrass pub/sub 服务到达同一核心设备上的其他组件。它永远不会离开设备。要在 AWS IoT Core 中查看心跳，组件必须使用 IPC 客户端的 `publish_to_iot_core`，并且配方和设备的 IoT 策略都必须允许它。
+
+替换生成的 `packages/telemetry/greengrass/pulse/main.py`：
+
+<E2EDiff before="greengrass-tutorial/main.py.original.template" after="greengrass-tutorial/main.py.template" lang="python" />
+
+`publish_to_iot_core` 接受主题名称、QoS 为 `"1"`（至少一次）和字节负载。主题 `tutorial/greengrass/heartbeat` 再次出现在配方中、模块 2 创建的设备 IoT 策略中以及模块 3 中的 MQTT 测试客户端订阅中。
+
+替换 `packages/telemetry/greengrass/pulse/recipe.yaml` 中的访问控制块：
+
+<E2EDiff before="greengrass-tutorial/recipe.yaml.original.template" after="greengrass-tutorial/recipe.yaml.template" lang="yaml" />
+
+AWS IoT Core MQTT 的 IPC 服务是 `aws.greengrass.ipc.mqttproxy`，发布是操作 `aws.greengrass#PublishToIoTCore`。资源是确切的主题。此授权由设备上的核心强制执行。附加到设备证书的 IoT 策略由 AWS IoT Core 强制执行，它需要在同一主题上具有 `iot:Publish`。模块 2 创建该策略。
+
+更新生成的测试，因为宿主项目的 `build` 会运行它，并且共享构造构建依赖于宿主构建：
+
+<E2EDiff before="greengrass-tutorial/test_pulse.py.original.template" after="greengrass-tutorial/test_pulse.py.template" lang="python" />
+
+## 任务 4：构建工件
+
+运行测试并构建组件工件：
+
+<NxCommands commands={['run greengrass_tutorial.telemetry:test', 'run greengrass_tutorial.telemetry:pulse-artifact']} />
+
+`pulse-artifact` 为 `x86_64-manylinux_2_28` 打包 Python 依赖项，打包 `pulse.zip`，并写入解析的配方：
+
+<FileTree>
+- dist/packages/telemetry/greengrass/pulse/greengrass-build
+  - recipes
+    - com.example.Pulse-NEXT_PATCH.yaml the recipe with the mqttproxy authorization
+  - artifacts
+    - com.example.Pulse
+      - NEXT_PATCH
+        - pulse.zip
+</FileTree>
+
+<Aside type="caution" title="不要在此处运行 pulse-deploy-local">
+`pulse-deploy-local` 和 `pulse-logs` 在安装了 Greengrass 核心和 `greengrass-cli` 的机器上运行。在本教程中，您的工作站不是核心设备。模块 2 配置设备，模块 3 从云端部署到它。
+</Aside>
+
+继续 <Link path="get_started/tutorials/greengrass/2">配置核心设备</Link>。

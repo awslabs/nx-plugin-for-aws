@@ -1,0 +1,131 @@
+---
+title: 部署、观察和更新
+description: 在 CDK 中组合工件仓库、读取授权、组件版本和部署，观察心跳到达 AWS IoT Core，然后发布 NEXT_PATCH 更新
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import E2EDiff from '@components/e2e-diff.astro';
+import InstallCommand from '@components/install-command.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+## 任务 1：组合堆栈
+
+生成器提供了构建块，而不是部署。您的堆栈决定工件存放位置、哪个角色可以读取它们以及哪个设备组接收组件。替换 `packages/infra/src/stacks/application-stack.ts`：
+
+<E2EDiff before="greengrass-tutorial/application-stack.ts.original.template" after="greengrass-tutorial/application-stack.ts.template" lang="typescript" />
+
+各部分的作用：
+
+- `GreengrassArtifactBucket` 创建保留的、版本化的、仅 TLS 的工件仓库。`grantReadTo` 为令牌交换角色授予 `com.example.Pulse/*` 上的 `s3:GetObject` 权限，这涵盖了解析器为此组件写入的每个工件键。
+- `Pulse` 扩展了 `GreengrassComponentVersion`。它读取 `pulse-artifact` 构建的配方和 `pulse.zip`，在内容哈希键下上传存档，并发布组件版本。其 `bucket` 属性接受 `GreengrassArtifactBucket` 构造本身。
+- 带有 `targetArn` 的 `GreengrassDeployment` 部署到设置脚本创建的物品组。`addComponent(pulse)` 将解析的版本放入部署的组件映射中，并在组件版本资源上添加 CloudFormation 依赖项，因此 IoT 作业在版本存在之前无法到达设备。
+- 两个 `CfnParameter` 值来自 `.greengrass-tutorial.env`。将它们作为参数传递可使堆栈不包含特定于账户的字面量，并让 e2e 套件合成相同的文件。
+
+## 任务 2：引导和部署
+
+加载记录的值，同步项目引用和依赖清单，安装更新的工作区依赖项，如果之前未执行过，则在账户和区域中引导 CDK：
+
+```bash
+source .greengrass-tutorial.env
+```
+
+<NxCommands commands={['sync']} />
+<InstallCommand />
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @greengrass-tutorial/infra:bootstrap']} />
+
+部署堆栈。`packages/infra/src/main.ts` 将堆栈放置在阶段 `greengrass-tutorial-infra-sandbox` 中，`deploy` 目标运行 `cdk deploy` 时没有自己的阶段，因此命令命名该阶段并将角色和物品组 ARN 作为 CloudFormation 参数传递：
+
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @greengrass-tutorial/infra:deploy -- "greengrass-tutorial-infra-sandbox/**" --parameters TokenExchangeRoleArn="$TUTORIAL_TOKEN_EXCHANGE_ROLE_ARN" --parameters ThingGroupArn="$TUTORIAL_THING_GROUP_ARN"']} />
+
+`deploy` 依赖于 `^assemble`，共享构造项目依赖于遥测项目的 `assemble`，后者运行 `pulse-artifact`。因此，每次部署都会发布与当前源匹配的工件。该目标在没有快速模式的情况下运行 `cdk deploy`，因此它接受替换部署资源的后续部署修订版。在将 `deploy-sandbox` 用于 Greengrass 之前，请阅读<Link path="guides/greengrass-component#部署修订">部署修订版</Link>。
+
+在首次部署时，版本解析器找不到 `com.example.Pulse` 的已发布版本，并发布 `1.0.0`。然后部署到达物品组，核心设备使用令牌交换角色下载工件并启动组件。堆栈完成后等待一到两分钟。
+
+## 任务 3：观察心跳
+
+在 `$TUTORIAL_AWS_REGION` 中打开 AWS IoT 控制台，选择 **MQTT 测试客户端**，并订阅主题：
+
+```text
+tutorial/greengrass/heartbeat
+```
+
+每 30 秒会收到一条消息：
+
+```json
+{"sequence": 3, "greeting": "hello from pulse"}
+```
+
+AWS CLI 无法订阅 MQTT 主题。如果您更喜欢使用自己的 MQTT 客户端，请使用其自己的证书和策略将其连接到账户的数据端点，本教程不会创建这些内容：
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iot describe-endpoint \
+  --endpoint-type iot:Data-ATS --query endpointAddress --output text
+```
+
+## 任务 4：检查设备
+
+成功的部署证明设备应用了部署文档。它不能证明组件正在运行。检查已安装组件的生命周期状态：
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 list-installed-components \
+  --core-device-thing-name "$TUTORIAL_THING_NAME" \
+  --query 'installedComponents[?componentName==`com.example.Pulse`].[componentVersion,lifecycleState]' \
+  --output text
+```
+
+期望看到 `1.0.0` 和 `RUNNING`。然后使用模块 2 中的 Systems Manager 模式读取实例上组件自己的日志：
+
+```bash
+cat > /tmp/greengrass-tutorial-command.json <<'EOF'
+{ "commands": ["#!/bin/bash", "tail -n 20 /greengrass/v2/logs/com.example.Pulse.log"] }
+EOF
+
+TUTORIAL_COMMAND_ID=$(aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" ssm send-command \
+  --instance-ids "$TUTORIAL_INSTANCE_ID" --document-name AWS-RunShellScript \
+  --parameters file:///tmp/greengrass-tutorial-command.json \
+  --query Command.CommandId --output text)
+sleep 5
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" ssm get-command-invocation \
+  --command-id "$TUTORIAL_COMMAND_ID" --instance-id "$TUTORIAL_INSTANCE_ID" \
+  --query StandardOutputContent --output text
+```
+
+日志显示 IPC 连接和每个心跳的一行：
+
+```text
+INFO:awsiot.eventstreamrpc:<Connection ...> /greengrass/v2/ipc.socket:0> connected
+INFO:com.example.Pulse:Published heartbeat 0 to tutorial/greengrass/heartbeat
+INFO:com.example.Pulse:Published heartbeat 1 to tutorial/greengrass/heartbeat
+```
+
+如果部署报告 `SUCCEEDED` 但组件为 `BROKEN`，或者 `get-core-device` 报告 `UNHEALTHY`，请遵循<Link path="guides/greengrass-component#故障排除和服务限制">组件故障排除步骤</Link>。
+
+## 任务 5：更新组件
+
+更改 `packages/telemetry/greengrass/pulse/main.py` 中的问候语：
+
+<E2EDiff before="greengrass-tutorial/main.py.template" after="greengrass-tutorial/main.py.updated.template" lang="python" />
+
+使用相同的命令再次部署：
+
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @greengrass-tutorial/infra:deploy -- "greengrass-tutorial-infra-sandbox/**" --parameters TokenExchangeRoleArn="$TUTORIAL_TOKEN_EXCHANGE_ROLE_ARN" --parameters ThingGroupArn="$TUTORIAL_THING_GROUP_ARN"']} />
+
+Nx 看到更改的源并重新构建 `pulse-artifact`。存档的内容哈希发生变化，因此解析器分配 `1.0.1`，工件在新键下上传，发布新的组件版本，新的部署修订版将物品组指向它。配方仍然显示 `NEXT_PATCH`；工作区中没有任何内容记录该数字。
+
+验证已安装的版本和有效负载：
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 list-installed-components \
+  --core-device-thing-name "$TUTORIAL_THING_NAME" \
+  --query 'installedComponents[?componentName==`com.example.Pulse`].[componentVersion,lifecycleState]' \
+  --output text
+```
+
+期望看到 `1.0.1` 和 `RUNNING`。在 MQTT 测试客户端中，问候语更改为 `hello from the updated pulse`，序列从 `0` 重新开始，因为组件进程已重新启动。
+
+<Aside type="tip" title="未更改的重新部署">
+在没有源或配方更改的情况下再次部署会重用 `1.0.1`。解析器将内容哈希与最高已发布版本上的标签进行比较，并返回该版本而不是分配新版本。阅读<Link path="guides/greengrass-component#自动版本控制">自动版本控制</Link>了解规则及其限制。
+</Aside>
+
+继续<Link path="get_started/tutorials/greengrass/cleanup">删除和清理</Link>。

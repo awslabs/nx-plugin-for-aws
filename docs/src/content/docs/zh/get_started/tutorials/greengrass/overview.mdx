@@ -1,0 +1,65 @@
+---
+title: Greengrass MQTT 教程
+description: 构建一个 Python Greengrass 组件，在 EC2 核心设备上运行它，观察其心跳通过 MQTT 到达 AWS IoT Core，发布 NEXT_PATCH 更新，然后删除所有内容
+---
+
+import Link from '@components/link.astro';
+import Snippet from '@components/snippet.astro';
+
+在本教程中，您将使用 `@aws/nx-plugin` 构建一个 Python [AWS IoT Greengrass v2](https://docs.aws.amazon.com/greengrass/v2/developerguide/what-is-iot-greengrass.html) 组件，在充当核心设备的 Ubuntu 26.04 x86_64 EC2 实例上运行它，并观察其心跳通过 MQTT 到达 AWS IoT Core。然后您将更改源代码，使用 `NEXT_PATCH` 发布下一个版本，从设备中删除组件，并删除您创建的所有资源。
+
+本教程使用 CDK 和经典的 Greengrass nucleus。对于 TypeScript 组件、Terraform 或现有集群，请阅读 <Link path="guides/greengrass-component">Greengrass 组件指南</Link>。
+
+## 您将构建什么
+
+| 部分 | 位置 | 创建者 |
+| --- | --- | --- |
+| Python 项目 `greengrass_tutorial.telemetry` | `packages/telemetry` | `py#project` |
+| 组件 `com.example.Pulse` | `packages/telemetry/greengrass/pulse` | `greengrass#component` |
+| Greengrass 核心构造和 `Pulse` 应用构造 | `packages/common/constructs/src/core/greengrass`, `packages/common/constructs/src/app/greengrass` | `greengrass#component` |
+| CDK 应用程序 `@greengrass-tutorial/infra` | `packages/infra` | `ts#infra` |
+
+生成的组件通过本地 Greengrass IPC 发布。模块 1 将其更改为发布到 AWS IoT Core，这需要不同的 IPC 操作、不同的配方授权以及设备上的 IoT 策略语句。API 和访问控制名称来自 [AWS IoT Core MQTT IPC 文档](https://docs.aws.amazon.com/greengrass/v2/developerguide/ipc-iot-core-mqtt.html)。
+
+## 它在 AWS 中创建什么
+
+| 资源 | 创建者 | 删除者 |
+| --- | --- | --- |
+| IoT 事物组、事物、证书、IoT 策略、令牌交换角色、角色别名、IAM 访问策略 | 设置脚本和 nucleus 安装程序 | 脚本的 `cleanup` 操作 |
+| 带有 SSM 实例配置文件的 EC2 `t3.small` 实例 | 设置脚本（实例）和您（实例配置文件） | 脚本的 `cleanup` 操作和您 |
+| 工件存储桶、组件版本、部署、工件读取授权 | 您的 CDK 堆栈 | `destroy`，然后手动删除保留的存储桶、版本和部署 |
+
+实例将一直运行，直到您清理为止。使用您可以完全清理的 AWS 账户和区域。
+
+## 开始之前
+
+<Snippet name="required-prerequisites" />
+
+您还需要：
+
+- [AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)，带有目标账户的命名配置文件。
+- 该账户中创建 IAM 角色和策略、IoT 事物和策略、EC2 实例、Systems Manager 命令、S3 存储桶、CloudFormation 堆栈和 Greengrass 资源的权限。
+- 区域中的默认 VPC，或具有出站互联网访问权限的子网，您可以将其传递给设置脚本。
+
+本教程中的每个 AWS CLI 命令都显式传递 `--profile` 和 `--region`，每个 CDK 命令都接收 `AWS_PROFILE` 和 `AWS_REGION`。在您的 shell 中设置一次值：
+
+```bash
+export TUTORIAL_AWS_PROFILE=<your-profile>
+export TUTORIAL_AWS_REGION=us-east-1
+export TUTORIAL_PREFIX=gg-tutorial
+```
+
+`TUTORIAL_PREFIX` 命名设置脚本创建的每个资源。选择账户中没有其他内容使用的值。
+
+## 自动验证的内容
+
+本教程的命令、源代码编辑、构建和 CDK 合成由 CI 中的 `greengrass-tutorial` 冒烟测试覆盖。设置脚本的身份、拒绝和清理行为针对文档测试套件中记录的 AWS CLI 运行。
+
+配置、MQTT 传递、设备更新和清理需要 AWS 账户，并且仍在自动化通道之外。按照每个模块中的设备检查来验证部署。<Link path="guides/greengrass-component#硬件和操作系统">硬件支持表</Link>记录了支持的设备平台。
+
+## 模块
+
+1. <Link path="get_started/tutorials/greengrass/1">创建组件</Link>：工作区、Python 项目、组件、CDK 应用程序以及切换到 AWS IoT Core MQTT。
+2. <Link path="get_started/tutorials/greengrass/2">配置核心设备</Link>：实例配置文件、镜像选择、设置脚本及其创建的内容。
+3. <Link path="get_started/tutorials/greengrass/3">部署、观察和更新</Link>：CDK 堆栈、首次部署、MQTT 心跳和 `NEXT_PATCH` 更新。
+4. <Link path="get_started/tutorials/greengrass/cleanup">删除和清理</Link>：空部署修订版、堆栈销毁以及删除保留的和脚本创建的资源。

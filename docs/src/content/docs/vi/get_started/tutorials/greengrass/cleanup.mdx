@@ -1,0 +1,137 @@
+---
+title: Xóa và dọn dẹp
+description: Xóa component khỏi thiết bị bằng một revision triển khai trống, hủy stack, sau đó xóa các tài nguyên Greengrass được giữ lại và mọi thứ mà script thiết lập đã tạo
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import E2EDiff from '@components/e2e-diff.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+Quá trình dọn dẹp chạy theo thứ tự ngược lại của việc tạo: đầu tiên thiết bị ngừng chạy component, sau đó stack bị xóa, tiếp theo là các tài nguyên mà stack giữ lại, sau đó là thiết bị và danh tính của nó, và cuối cùng là instance profile.
+
+## Nhiệm vụ 1: Xóa component khỏi thiết bị
+
+Việc xóa một tài nguyên deployment sẽ xóa trạng thái quản lý triển khai. Nó không gỡ cài đặt bất cứ thứ gì khỏi thiết bị. Thiết bị chỉ xóa một component khi nó nhận được một revision triển khai không còn liệt kê nó nữa. Thay đổi stack để deployment không liệt kê component nào trong khi phiên bản đã xuất bản vẫn được quản lý:
+
+<E2EDiff before="greengrass-tutorial/application-stack.ts.template" after="greengrass-tutorial/application-stack.ts.removed.template" lang="typescript" />
+
+Triển khai revision:
+
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @greengrass-tutorial/infra:deploy -- "greengrass-tutorial-infra-sandbox/**" --parameters TokenExchangeRoleArn="$TUTORIAL_TOKEN_EXCHANGE_ROLE_ARN" --parameters ThingGroupArn="$TUTORIAL_THING_GROUP_ARN"']} />
+
+Đợi cho đến khi component biến mất khỏi thiết bị và thiết bị vẫn khỏe mạnh:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 list-installed-components \
+  --core-device-thing-name "$TUTORIAL_THING_NAME" \
+  --query 'installedComponents[].componentName' --output text
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 get-core-device \
+  --core-device-thing-name "$TUTORIAL_THING_NAME" --query status --output text
+```
+
+Lệnh đầu tiên không được liệt kê `com.example.Pulse` nữa. Lệnh thứ hai phải in ra `HEALTHY`. MQTT test client ngừng nhận heartbeat.
+
+## Nhiệm vụ 2: Hủy stack
+
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @greengrass-tutorial/infra:destroy -- "greengrass-tutorial-infra-sandbox/**" --force']} />
+
+Stack đã biến mất, nhưng ba loại tài nguyên được giữ lại có chủ đích, vì các phiên bản component là bất biến và tồn tại lâu hơn bất kỳ deployment đơn lẻ nào:
+
+- Cả hai phiên bản component của `com.example.Pulse`, `1.0.0` và `1.0.1`.
+- Ba revision triển khai đến thing group.
+- Artifact bucket, với một archive cho mỗi phiên bản đã xuất bản.
+
+CDK bootstrap stack `CDKToolkit` cũng vẫn còn. Nó được chia sẻ bởi mọi ứng dụng CDK trong tài khoản và Region, vì vậy hãy để nguyên trừ khi bạn đã tạo nó cho hướng dẫn này.
+
+## Nhiệm vụ 3: Xóa các tài nguyên Greengrass được giữ lại
+
+Liệt kê các deployment đến thing group. Hủy deployment vẫn còn `ACTIVE`, sau đó xóa từng deployment:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 list-deployments \
+  --target-arn "$TUTORIAL_THING_GROUP_ARN" --history-filter ALL \
+  --query 'deployments[].[deploymentId,deploymentStatus]' --output text
+
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 cancel-deployment \
+  --deployment-id <active-deployment-id>
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 delete-deployment \
+  --deployment-id <deployment-id>
+```
+
+Xóa mọi phiên bản đã xuất bản của component:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 list-component-versions \
+  --arn "arn:aws:greengrass:${TUTORIAL_AWS_REGION}:${TUTORIAL_ACCOUNT_ID}:components:com.example.Pulse" \
+  --query 'componentVersions[].arn' --output text
+
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 delete-component \
+  --arn <component-version-arn>
+```
+
+Tìm artifact bucket thông qua ownership tag mà construct áp dụng, xác nhận rằng danh sách chỉ chứa bucket của hướng dẫn này, sau đó xóa các phiên bản object của nó và bucket:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" resourcegroupstaggingapi get-resources \
+  --tag-filters Key=greengrass-artifact-repository,Values=true \
+  --resource-type-filters s3:bucket \
+  --query 'ResourceTagMappingList[].ResourceARN' --output text
+
+export TUTORIAL_BUCKET=<bucket-name>
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" s3api list-object-versions \
+  --bucket "$TUTORIAL_BUCKET" \
+  --query '{Objects: Versions[].{Key: Key, VersionId: VersionId}}' --output json \
+  > /tmp/greengrass-tutorial-versions.json
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" s3api delete-objects \
+  --bucket "$TUTORIAL_BUCKET" --delete file:///tmp/greengrass-tutorial-versions.json
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" s3api delete-bucket \
+  --bucket "$TUTORIAL_BUCKET"
+```
+
+Bucket được phiên bản hóa, vì vậy `delete-objects` phải đặt tên cho từng phiên bản. Nếu `list-object-versions` cũng báo cáo `DeleteMarkers`, hãy lặp lại việc xóa với các mục đó trước khi xóa bucket.
+
+## Nhiệm vụ 4: Xóa core device và danh tính của nó
+
+Thao tác `cleanup` của script đọc `.greengrass-tutorial.env`, kiểm tra rằng nó thuộc về cùng một tài khoản, Region và prefix, sau đó chấm dứt instance, tách và xóa certificate với mọi policy được đính kèm vào nó, xóa bản ghi core device, thing và thing group, cả hai IoT policy, role alias, token exchange role với các attachment của nó, và access policy.
+
+```bash
+./setup-greengrass-tutorial.sh cleanup \
+  --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" --prefix "$TUTORIAL_PREFIX"
+```
+
+Mỗi bước in ra `deleted` hoặc `absent`. Một object đã biến mất sẽ được bỏ qua. Bất kỳ lỗi nào khác sẽ dừng quá trình chạy và giữ file trạng thái, để bạn có thể sửa nguyên nhân và chạy lại cùng một lệnh.
+
+<Aside type="note" title="Thứ tự quan trọng đối với role">
+Hủy stack trước khi chạy cleanup. Read grant của stack là một inline policy trên token exchange role. Cleanup xóa các inline policy mà nó tìm thấy để role có thể được xóa, nhưng một stack vẫn tham chiếu đến role sẽ thất bại trong lần cập nhật tiếp theo của nó.
+</Aside>
+
+## Nhiệm vụ 5: Xóa instance profile
+
+Instance profile là của bạn, vì vậy script để nguyên nó:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam remove-role-from-instance-profile \
+  --instance-profile-name "${TUTORIAL_PREFIX}-instance" --role-name "${TUTORIAL_PREFIX}-instance"
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam delete-instance-profile \
+  --instance-profile-name "${TUTORIAL_PREFIX}-instance"
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam delete-role-policy \
+  --role-name "${TUTORIAL_PREFIX}-instance" --policy-name greengrass-installer-bootstrap
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam detach-role-policy \
+  --role-name "${TUTORIAL_PREFIX}-instance" \
+  --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam delete-role \
+  --role-name "${TUTORIAL_PREFIX}-instance"
+rm -f .greengrass-tutorial.env
+```
+
+`delete-role-policy` thất bại với `NoSuchEntity` nếu bạn đã xóa bootstrap policy trong module 2. Điều đó là mong đợi.
+
+## Những gì bạn đã học
+
+- Một component được tạo ra xuất bản qua local IPC theo mặc định. Cloud MQTT cần `publish_to_iot_core`, một authorization `aws.greengrass.ipc.mqttproxy` trong recipe, và `iot:Publish` trong IoT policy của thiết bị.
+- Generator cung cấp các khối xây dựng. CDK stack của bạn sở hữu artifact repository, read grant, và deployment, và `addComponent` mang phiên bản đã giải quyết và ordering edge.
+- `NEXT_PATCH` phân bổ một phiên bản từ nội dung. Một thay đổi nguồn xuất bản phiên bản patch tiếp theo thông qua `deploy` bình thường.
+- Xóa một component là một revision triển khai. Xóa cơ sở hạ tầng là một bước riêng biệt, sau đó để lại các phiên bản được giữ lại, deployment và bucket cho bạn xóa.
+
+Để biết về phiên bản hóa và giữ lại artifact, hãy đọc các phần <Link path="guides/greengrass-component#quản-lý-phiên-bản-tự-động">versioning</Link> và <Link path="guides/greengrass-component#lưu-trữ-và-giữ-lại-artifact">artifact storage</Link> của hướng dẫn component. Cùng một hướng dẫn liệt kê các giới hạn dịch vụ cần xem xét cho các deployment lớn hơn.

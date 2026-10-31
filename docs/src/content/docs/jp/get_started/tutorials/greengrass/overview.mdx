@@ -1,0 +1,65 @@
+---
+title: Greengrass MQTTチュートリアル
+description: Python Greengrassコンポーネントを構築し、EC2コアデバイス上で実行し、AWS IoT Core経由でMQTTでハートビートが到着するのを確認し、NEXT_PATCH更新を公開してから、すべてを削除します
+---
+
+import Link from '@components/link.astro';
+import Snippet from '@components/snippet.astro';
+
+このチュートリアルでは、`@aws/nx-plugin`を使用してPython [AWS IoT Greengrass v2](https://docs.aws.amazon.com/greengrass/v2/developerguide/what-is-iot-greengrass.html)コンポーネントを構築し、コアデバイスとして機能するUbuntu 26.04 x86_64 EC2インスタンス上で実行し、MQTT経由でAWS IoT Coreにハートビートが到着するのを確認します。その後、ソースを変更し、`NEXT_PATCH`で次のバージョンを公開し、デバイスからコンポーネントを削除し、作成したすべてのリソースを削除します。
+
+このチュートリアルでは、CDKとクラシックGreengrass nucleusを使用します。TypeScriptコンポーネント、Terraform、または既存のフリートについては、<Link path="guides/greengrass-component">Greengrassコンポーネントガイド</Link>をお読みください。
+
+## 構築するもの
+
+| 項目 | 場所 | 作成者 |
+| --- | --- | --- |
+| Pythonプロジェクト `greengrass_tutorial.telemetry` | `packages/telemetry` | `py#project` |
+| コンポーネント `com.example.Pulse` | `packages/telemetry/greengrass/pulse` | `greengrass#component` |
+| Greengrassコアコンストラクトと`Pulse`アプリコンストラクト | `packages/common/constructs/src/core/greengrass`, `packages/common/constructs/src/app/greengrass` | `greengrass#component` |
+| CDKアプリケーション `@greengrass-tutorial/infra` | `packages/infra` | `ts#infra` |
+
+生成されたコンポーネントは、ローカルGreengrass IPC経由で公開します。モジュール1では、AWS IoT Coreに公開するように変更します。これには、異なるIPC操作、異なるレシピ認可、およびデバイス上のIoTポリシーステートメントが必要です。APIとアクセス制御の名前は、[AWS IoT Core MQTT IPCドキュメント](https://docs.aws.amazon.com/greengrass/v2/developerguide/ipc-iot-core-mqtt.html)から取得されています。
+
+## AWSで作成されるもの
+
+| リソース | 作成者 | 削除者 |
+| --- | --- | --- |
+| IoTシンググループ、シング、証明書、IoTポリシー、トークン交換ロール、ロールエイリアス、IAMアクセスポリシー | セットアップスクリプトとnucleusインストーラー | スクリプトの`cleanup`操作 |
+| SSMインスタンスプロファイルを持つEC2 `t3.small`インスタンス | セットアップスクリプト（インスタンス）とあなた（インスタンスプロファイル） | スクリプトの`cleanup`操作とあなた |
+| アーティファクトバケット、コンポーネントバージョン、デプロイメント、アーティファクト読み取り権限 | あなたのCDKスタック | `destroy`、その後保持されたバケット、バージョン、デプロイメントの手動削除 |
+
+インスタンスはクリーンアップするまで実行されます。完全にクリーンアップできるAWSアカウントとリージョンを使用してください。
+
+## 始める前に
+
+<Snippet name="required-prerequisites" />
+
+また、以下も必要です：
+
+- ターゲットアカウント用の名前付きプロファイルを持つ[AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)。
+- そのアカウントでIAMロールとポリシー、IoTシングとポリシー、EC2インスタンス、Systems Managerコマンド、S3バケット、CloudFormationスタック、Greengrassリソースを作成する権限。
+- リージョン内のデフォルトVPC、またはセットアップスクリプトに渡すアウトバウンドインターネットアクセスを持つサブネット。
+
+このチュートリアルのすべてのAWS CLIコマンドは`--profile`と`--region`を明示的に渡し、すべてのCDKコマンドは`AWS_PROFILE`と`AWS_REGION`を受け取ります。シェルで一度値を設定してください：
+
+```bash
+export TUTORIAL_AWS_PROFILE=<your-profile>
+export TUTORIAL_AWS_REGION=us-east-1
+export TUTORIAL_PREFIX=gg-tutorial
+```
+
+`TUTORIAL_PREFIX`は、セットアップスクリプトが作成するすべてのリソースに名前を付けます。アカウント内の他のものが使用していない値を選択してください。
+
+## 自動的に検証されるもの
+
+このチュートリアルのコマンド、ソース編集、ビルド、CDK合成は、CIの`greengrass-tutorial`スモークテストでカバーされています。セットアップスクリプトのID、拒否、クリーンアップの動作は、docsテストスイートで記録されたAWS CLIに対して実行されます。
+
+プロビジョニング、MQTT配信、デバイス更新、クリーンアップにはAWSアカウントが必要であり、自動化レーンの外に残ります。各モジュールのデバイスチェックに従ってデプロイメントを検証してください。<Link path="guides/greengrass-component#ハードウェアとオペレーティングシステム">ハードウェアサポートテーブル</Link>には、サポートされているデバイスプラットフォームが記録されています。
+
+## モジュール
+
+1. <Link path="get_started/tutorials/greengrass/1">コンポーネントの作成</Link>：ワークスペース、Pythonプロジェクト、コンポーネント、CDKアプリケーション、およびAWS IoT Core MQTTへの切り替え。
+2. <Link path="get_started/tutorials/greengrass/2">コアデバイスのプロビジョニング</Link>：インスタンスプロファイル、イメージ選択、セットアップスクリプト、およびそれが作成するもの。
+3. <Link path="get_started/tutorials/greengrass/3">デプロイ、観察、更新</Link>：CDKスタック、最初のデプロイメント、MQTTハートビート、および`NEXT_PATCH`更新。
+4. <Link path="get_started/tutorials/greengrass/cleanup">削除とクリーンアップ</Link>：空のデプロイメントリビジョン、スタックの破棄、および保持されたリソースとスクリプトで作成されたリソースの削除。

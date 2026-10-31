@@ -32,6 +32,12 @@ Recomendamos que você tente estender a base de código com as seguintes capacid
 
 ## Destruindo recursos
 
+Quer continuar jogando e adicionar um dispositivo de borda primeiro? Continue com
+<Link path="get_started/tutorials/dungeon-game/greengrass-dice">Opcional: role dados com Greengrass</Link>.
+O Story Agent chama uma ferramenta que solicita uma rolagem de um dispositivo e usa o
+valor retornado no jogo. Mantenha sua masmorra implantada para essa rota; ela
+inclui instruções para remover apenas a extensão ou toda a aplicação.
+
 1. Para destruir os recursos da AWS que foram criados, execute o seguinte comando:
 
 <NxCommands commands={['destroy-sandbox infra']} />
@@ -40,11 +46,41 @@ Recomendamos que você tente estender a base de código com as seguintes capacid
 
 2. Digite `y` para continuar. O CloudFormation destruirá seus stacks.
 
-:::caution[Dois recursos são mantidos propositalmente]
-Excluir os stacks deixa dois recursos para trás, para que uma desmontagem não leve seus usuários ou suas histórias junto:
+:::note[Se a proteção contra exclusão do AppConfig bloquear a exclusão do stack]
+Pare de usar o aplicativo do tutorial. Na aba **Resources** do stack com falha, registre
+o ID físico exato de sua aplicação AppConfig e os IDs apenas
+do ambiente e perfis de configuração cuja exclusão falhou.
+
+Aguarde o [intervalo de proteção contra exclusão](https://docs.aws.amazon.com/appconfig/2019-10-09/APIReference/API_DeletionProtectionSettings.html) da conta após a última leitura de configuração
+e tente novamente a destruição, ou exclua apenas esses recursos descartados do tutorial:
+use `aws appconfig delete-environment` com `--application-id` e
+`--environment-id`, e `aws appconfig delete-configuration-profile` com
+`--application-id` e `--configuration-profile-id`. Forneça os IDs registrados
+e `--deletion-protection-check BYPASS`, com `--profile` e
+`--region` explícitos, em cada chamada. Em seguida, execute novamente o comando destroy.
+:::
+
+:::caution[Recursos retidos]
+A exclusão de stacks deixa estes recursos para limpeza separada:
 
 - O **pool de usuários do Cognito**, que `ts#website#auth` cria com proteção contra exclusão habilitada.
+- A **função IAM de SMS do pool**, retida com o pool para que ainda possa ser atualizada e excluída.
 - O **bucket de sessão do Story Agent**, que armazena o histórico de conversas e tem como padrão `RemovalPolicy.RETAIN`.
+- O **grupo de logs de acesso do Game API**.
+- Quatro **chaves KMS gerenciadas pelo cliente** para os logs WAF do pool de usuários, logs do Game API, sessões do Story Agent e website.
+- A **função IAM do CloudWatch do API Gateway**, cuja configuração de conta regional é compartilhada por REST APIs.
 
-Exclua-os manualmente quando não precisar mais deles — para o pool de usuários, desative a proteção contra exclusão primeiro.
+Registre o ARN da função de SMS da configuração de SMS do pool de usuários antes de excluir
+o pool. Desative a proteção contra exclusão do pool, exclua o pool e, em seguida, exclua
+sua função de SMS e quaisquer políticas anexadas pertencentes a esta aplicação. Esvazie o
+bucket de sessão, incluindo versões de objetos e marcadores de exclusão, antes de excluí-lo.
+Exclua o grupo de logs de acesso do Game API quando você não precisar mais de seus logs.
+
+Mantenha qualquer chave KMS necessária para ler dados que você retém. Agende a exclusão das
+chaves não utilizadas desta aplicação com um período de espera de pelo menos sete dias.
+As chaves permanecem em `PendingDeletion` até que esse período termine.
+
+Preserve a função do API Gateway se outras REST APIs a utilizarem. Verifique a configuração
+da função do CloudWatch da conta regional e as dependências antes de remover uma função
+não utilizada pertencente ao tutorial, e atualize sua referência de conta antes de excluí-la.
 :::

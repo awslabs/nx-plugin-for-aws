@@ -32,6 +32,10 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 ## 销毁资源
 
+想要继续游戏并首先添加边缘设备？请继续
+<Link path="get_started/tutorials/dungeon-game/greengrass-dice">可选：使用 Greengrass 掷骰子</Link>。
+Story Agent 调用一个工具，该工具从设备请求掷骰子并在游戏中使用返回的值。为该路线保留您已部署的地牢；它包含仅删除扩展或整个应用程序的说明。
+
 1. 要销毁已创建的 AWS 资源，请运行以下命令：
 
 <NxCommands commands={['destroy-sandbox infra']} />
@@ -40,11 +44,32 @@ import gameConversationPng from '@assets/game-conversation.png'
 
 2. 输入 `y` 继续。CloudFormation 将销毁您的堆栈。
 
-:::caution[有两个资源被故意保留]
-删除堆栈会留下两个资源，因此拆除不会带走您的用户或他们的故事：
+:::note[如果 AppConfig 删除保护阻止堆栈删除]
+停止使用教程应用程序。在失败堆栈的 **Resources** 选项卡中，记录其拥有的 AppConfig 应用程序的确切物理 ID，以及仅删除失败的环境和配置配置文件的 ID。
+
+在最后一次配置读取后，等待账户的[删除保护间隔](https://docs.aws.amazon.com/appconfig/2019-10-09/APIReference/API_DeletionProtectionSettings.html)并重试销毁，或者仅删除这些废弃的教程资源：
+使用 `aws appconfig delete-environment` 配合 `--application-id` 和
+`--environment-id`，以及使用 `aws appconfig delete-configuration-profile` 配合
+`--application-id` 和 `--configuration-profile-id`。在每次调用时提供记录的 ID
+和 `--deletion-protection-check BYPASS`，以及明确的 `--profile` 和
+`--region`。然后重新运行销毁命令。
+:::
+
+:::caution[保留的资源]
+堆栈删除会保留这些资源以供单独清理：
 
 - **Cognito 用户池**，由 `ts#website#auth` 创建并启用了删除保护。
+- 用户池的 **SMS IAM 角色**，与用户池一起保留，以便仍然可以更新和删除。
 - **Story Agent 的会话存储桶**，它保存对话历史记录并默认为 `RemovalPolicy.RETAIN`。
+- **Game API 访问日志组**。
+- 四个**客户管理的 KMS 密钥**，用于用户池 WAF 日志、Game API 日志、Story Agent 会话和网站。
+- **API Gateway CloudWatch IAM 角色**，其区域账户设置由 REST API 共享。
 
-一旦您不再需要它们，请手动删除它们——对于用户池，请先关闭删除保护。
+在删除用户池之前，从用户池的 SMS 配置中记录 SMS 角色 ARN。关闭用户池的删除保护，删除用户池，然后删除其 SMS 角色以及此应用程序拥有的任何附加策略。在删除会话存储桶之前，清空它，包括对象版本和删除标记。
+当您不再需要日志时，删除 Game API 访问日志组。
+
+保留读取您保留的数据所需的任何 KMS 密钥。安排删除此应用程序未使用的密钥，等待期至少为七天。
+密钥在该期限结束之前保持在 `PendingDeletion` 状态。
+
+如果其他 REST API 使用 API Gateway 角色，请保留该角色。在删除未使用的教程拥有的角色之前，检查区域账户的 CloudWatch 角色设置和依赖关系，并在删除之前更新其账户引用。
 :::
