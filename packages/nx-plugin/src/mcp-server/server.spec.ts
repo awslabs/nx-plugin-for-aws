@@ -9,7 +9,9 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import fs from 'fs';
 import { join } from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { camelCase } from '../utils/names.js';
 import { listGenerators } from '../utils/nx.js';
+import { filterableValuesForProperty } from './schema-registry.js';
 import { createServer } from './server.js';
 
 // Generator ids in `nx g @aws/nx-plugin:<id>` commands or as `<lang>#<name>` in backticks.
@@ -25,6 +27,70 @@ const unlisted = (ids: string[]): string[] => {
   const listed = new Set(listGenerators().map((g) => g.id));
   return ids.filter((id) => !listed.has(id));
 };
+
+// Flags Nx's CLI accepts for every generator, which no generator schema declares.
+const NX_CLI_FLAGS = new Set(['interactive', 'dryRun', 'verbose', 'quiet']);
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+// A listed generator's options by camelCase name and alias, mapped to their allowed values.
+const schemaOptions = (
+  generatorId: string,
+): Map<string, string[] | undefined> | undefined => {
+  const info = listGenerators().find((g) => g.id === generatorId);
+  if (!info) return undefined;
+  const schema: unknown = JSON.parse(
+    fs.readFileSync(info.resolvedSchemaPath, 'utf-8'),
+  );
+  const properties =
+    isRecord(schema) && isRecord(schema.properties) ? schema.properties : {};
+  const options = new Map<string, string[] | undefined>();
+  for (const [name, prop] of Object.entries(properties)) {
+    if (!isRecord(prop)) continue;
+    const values = filterableValuesForProperty({
+      type: typeof prop.type === 'string' ? prop.type : undefined,
+      enum: Array.isArray(prop.enum) ? prop.enum : undefined,
+    });
+    options.set(camelCase(name), values);
+    if (typeof prop.alias === 'string') {
+      options.set(camelCase(prop.alias), values);
+    }
+  }
+  return options;
+};
+
+// Undeclared options or disallowed values in each `nx g @aws/nx-plugin:<id>` command.
+const invalidGeneratorOptions = (text: string): string[] =>
+  [...text.matchAll(/nx g @aws\/nx-plugin:([\w#-]+)([^`\n&]*)/g)].flatMap(
+    ([, generatorId, args]) => {
+      const options = schemaOptions(generatorId);
+      if (!options) return [`${generatorId}: not a listed generator`];
+      return [...args.matchAll(/--([\w-]+)(?:[= ]([^\s\\-]\S*))?/g)].flatMap(
+        ([arg, flag, explicitValue]) => {
+          const negated = flag.startsWith('no-');
+          const option = camelCase(negated ? flag.slice(3) : flag);
+          const value = negated ? 'false' : explicitValue;
+          if (NX_CLI_FLAGS.has(option)) return [];
+          if (!options.has(option)) {
+            return [`${generatorId} ${arg}: not a declared option`];
+          }
+          const accepted = options.get(option);
+          return accepted && value !== undefined && !accepted.includes(value)
+            ? [`${generatorId} ${arg}: expected one of ${accepted.join('|')}`]
+            : [];
+        },
+      );
+    },
+  );
+
+const GENERATED_SKILL_FILES = [
+  'skills/nx-plugin-for-aws/SKILL.md',
+  'powers/nx-plugin-for-aws/POWER.md',
+];
+
+const readRepoFile = (file: string): string =>
+  fs.readFileSync(join(__dirname, '../../../..', file), 'utf-8');
 
 describe('MCP Server', () => {
   let client: Client;
@@ -128,35 +194,51 @@ describe('MCP Server', () => {
     expect(result.content[0].text).toContain('General Instructions');
   });
 
-  it('should only reference generators listed by the MCP server in general-guidance', async () => {
+  // General guidance up to the inlined guide pages, which aren't checked.
+  const generalGuidance = async (): Promise<string> => {
     const result = await client.callTool({
       name: 'general-guidance',
       arguments: {},
     });
+    const text = result.content[0].text as string;
+    expect(text).toContain('## Detailed Guides');
+    const [guidance] = text.split('## Detailed Guides');
+    return guidance;
+  };
 
-    // Inlined guide pages follow this heading and aren't checked here.
-    const [guidance] = (result.content[0].text as string).split(
-      '## Detailed Guides',
-    );
-    const referenced = referencedGenerators(guidance);
-
-    expect(referenced.length).toBeGreaterThan(0);
-    expect(unlisted(referenced)).toEqual([]);
-  });
-
-  it('should only reference generators listed by the MCP server in the skill template', () => {
-    const template = fs.readFileSync(
-      join(
-        __dirname,
-        '../../../../scripts/skill-templates/__fileName__.template',
-      ),
-      'utf-8',
-    );
-    const referenced = referencedGenerators(template);
+  it('should only reference generators listed by the MCP server in general-guidance', async () => {
+    const referenced = referencedGenerators(await generalGuidance());
 
     expect(referenced.length).toBeGreaterThan(0);
     expect(unlisted(referenced)).toEqual([]);
   });
+
+  it('should only pass declared generator options in general-guidance', async () => {
+    const guidance = await generalGuidance();
+
+    expect(guidance).toContain('nx g @aws/nx-plugin:');
+    expect(invalidGeneratorOptions(guidance)).toEqual([]);
+  });
+
+  it.each(GENERATED_SKILL_FILES)(
+    'should only reference generators listed by the MCP server in %s',
+    (file) => {
+      const referenced = referencedGenerators(readRepoFile(file));
+
+      expect(referenced.length).toBeGreaterThan(0);
+      expect(unlisted(referenced)).toEqual([]);
+    },
+  );
+
+  it.each(GENERATED_SKILL_FILES)(
+    'should only pass declared generator options in %s',
+    (file) => {
+      const skill = readRepoFile(file);
+
+      expect(skill).toContain('nx g @aws/nx-plugin:');
+      expect(invalidGeneratorOptions(skill)).toEqual([]);
+    },
+  );
 
   it('should execute generator-guide tool with valid generator', async () => {
     const result = await client.callTool({
