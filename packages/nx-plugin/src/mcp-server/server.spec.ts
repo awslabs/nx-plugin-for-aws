@@ -9,7 +9,22 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import fs from 'fs';
 import { join } from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { listGenerators } from '../utils/nx.js';
 import { createServer } from './server.js';
+
+// Generator ids in `nx g @aws/nx-plugin:<id>` commands or as `<lang>#<name>` in backticks.
+const referencedGenerators = (text: string): string[] => [
+  ...new Set(
+    [...text.matchAll(/@aws\/nx-plugin:([\w#-]+)|`([a-z]+#[\w#-]+)`/g)].map(
+      ([, command, quoted]) => command ?? quoted,
+    ),
+  ),
+];
+
+const unlisted = (ids: string[]): string[] => {
+  const listed = new Set(listGenerators().map((g) => g.id));
+  return ids.filter((id) => !listed.has(id));
+};
 
 describe('MCP Server', () => {
   let client: Client;
@@ -111,6 +126,36 @@ describe('MCP Server', () => {
     expect(result.content[0].text).toContain('Getting Started');
     expect(result.content[0].text).toContain('Nx Primer');
     expect(result.content[0].text).toContain('General Instructions');
+  });
+
+  it('should only reference generators listed by the MCP server in general-guidance', async () => {
+    const result = await client.callTool({
+      name: 'general-guidance',
+      arguments: {},
+    });
+
+    // Inlined guide pages follow this heading and aren't checked here.
+    const [guidance] = (result.content[0].text as string).split(
+      '## Detailed Guides',
+    );
+    const referenced = referencedGenerators(guidance);
+
+    expect(referenced.length).toBeGreaterThan(0);
+    expect(unlisted(referenced)).toEqual([]);
+  });
+
+  it('should only reference generators listed by the MCP server in the skill template', () => {
+    const template = fs.readFileSync(
+      join(
+        __dirname,
+        '../../../../scripts/skill-templates/__fileName__.template',
+      ),
+      'utf-8',
+    );
+    const referenced = referencedGenerators(template);
+
+    expect(referenced.length).toBeGreaterThan(0);
+    expect(unlisted(referenced)).toEqual([]);
   });
 
   it('should execute generator-guide tool with valid generator', async () => {
