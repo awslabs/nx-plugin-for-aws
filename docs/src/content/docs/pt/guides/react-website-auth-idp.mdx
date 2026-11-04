@@ -1,0 +1,212 @@
+---
+title: Provedores de Identidade para Website
+description: Permita que os usuários façam login no seu website através de um provedor de identidade OpenID Connect externo, como Okta, Auth0 ou Microsoft Entra ID
+generator: ts#website#auth#idp
+---
+
+import { FileTree } from '@astrojs/starlight/components';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import RunGenerator from '@components/run-generator.astro';
+
+<Link path="guides/react-website-auth">Autenticação de website</Link> cria um user pool do Amazon Cognito, e por padrão apenas usuários que têm um nome de usuário e senha nesse pool podem fazer login. Se sua equipe ou clientes já têm contas em um provedor de identidade (IdP), como Okta, Auth0 ou Microsoft Entra ID, eles precisariam de uma segunda conta apenas para o seu website.
+
+Este gerador adiciona um provedor de identidade [OpenID Connect](https://openid.net/developers/how-connect-works/) (OIDC) externo ao user pool. A página de login então mostra um botão para o provedor de identidade ao lado do formulário de nome de usuário e senha.
+
+## Como isso funciona
+
+- Seu website ainda envia usuários para a página de login do Cognito. A página agora tem um botão nomeado após o provedor de identidade.
+- Um usuário que escolhe o botão faz login no provedor de identidade. O provedor de identidade os envia de volta ao Cognito em seu URI de redirecionamento, `https://<cognito domain>/oauth2/idpresponse`.
+- O Cognito cria um usuário no seu user pool para eles, um usuário federado, e copia as claims que você mapeia (por exemplo `email`) nos atributos do usuário.
+- O Cognito então emite o mesmo tipo de tokens que emite para um usuário local. Suas APIs, agentes e identity pool os aceitam sem nenhuma alteração.
+
+Usuários com um nome de usuário e senha no pool ainda podem fazer login.
+
+## Uso
+
+### Adicionar um provedor de identidade
+
+Você precisará de um website que tenha autenticação do gerador <Link path="guides/react-website-auth">`ts#website#auth`</Link>. Execute este gerador uma vez para cada provedor de identidade.
+
+<RunGenerator generator="ts#website#auth#idp" />
+
+O gerador precisa do client ID de uma aplicação registrada no provedor de identidade. O client secret nunca vai para o seu código: você o armazena no AWS Secrets Manager, conforme [Configurar seu provedor de identidade](#configurar-seu-provedor-de-identidade) descreve.
+
+### Opções
+
+<GeneratorParameters generator="ts#website#auth#idp" />
+
+## Saída do Gerador
+
+O gerador adiciona estes arquivos para o seu provedor `iac` selecionado, onde `<name>` é a forma kebab-case da opção `name` (`test-idp` para `TestIdp`):
+
+<Infrastructure>
+  <Fragment slot="cdk">
+    <FileTree>
+      - packages/common/constructs/src/core
+        - identity-providers
+          - \<name>.ts CDK construct contendo o provedor de identidade
+        - index.ts Exporta o novo construct
+        - user-identity.ts Agora cria o provedor de identidade
+    </FileTree>
+  </Fragment>
+  <Fragment slot="terraform">
+    <FileTree>
+      - packages/common/terraform/src/core/user-identity
+        - \<name>-identity-provider.tf Passa a saída do URI de redirecionamento do módulo identity
+        - identity
+          - \<name>-identity-provider.tf O provedor de identidade e a data source que lê seu client secret
+          - identity.tf Agora lista o provedor de identidade no web client
+    </FileTree>
+  </Fragment>
+</Infrastructure>
+
+O gerador também edita o web client do user pool, o app client do Cognito através do qual seu website faz login, para que ele aceite o novo provedor de identidade. Para o provedor de identidade `TestIdp`, ele faz estas alterações:
+
+<Infrastructure>
+  <Fragment slot="cdk">
+```diff lang="ts" title="packages/common/constructs/src/core/user-identity.ts"
++import { TestIdpIdentityProvider } from './identity-providers/test-idp.js';
+     this.userPoolClient = this.createUserPoolClient(this.userPool);
++    new TestIdpIdentityProvider(this, 'TestIdpIdentityProvider', {
++      userPool: this.userPool,
++      userPoolClient: this.userPoolClient,
++      userPoolDomain: this.userPoolDomain,
++    });
+     this.identityPool = this.createIdentityPool(
+```
+  </Fragment>
+  <Fragment slot="terraform">
+```diff lang="hcl" title="packages/common/terraform/src/core/user-identity/identity/identity.tf"
+-  supported_identity_providers = ["COGNITO"]
++  supported_identity_providers = ["COGNITO", aws_cognito_identity_provider.test_idp.provider_name]
+```
+  </Fragment>
+</Infrastructure>
+
+Um segundo provedor de identidade é adicionado após o primeiro. Executar o gerador novamente com o mesmo `name` não altera nenhum arquivo, e o gerador não sobrescreve suas edições no arquivo do provedor de identidade. Os nomes devem diferir por mais do que maiúsculas e minúsculas: `Okta` após `okta` conta como o mesmo provedor de identidade, então nada muda.
+
+Se você alterou `user-identity.ts` ou a lista `supported_identity_providers` de modo que o gerador não a reconheça mais, o gerador deixa esse arquivo inalterado. Ele imprime as linhas para adicionar manualmente.
+
+## Configurar seu provedor de identidade
+
+O primeiro deploy após executar o gerador lê o client secret do Secrets Manager. Se o secret não existir, o deploy falha. Siga estas etapas nesta ordem. O gerador também as imprime quando termina.
+
+1. Registre uma aplicação no provedor de identidade e anote seu client ID e client secret. Você adiciona seu URI de redirecionamento na etapa 4. Execute este gerador com `--clientId` definido como o client ID.
+2. Armazene o client secret no Secrets Manager, sob o nome na opção `clientSecretName` (`<name>-oidc-client-secret` por padrão):
+
+   ```bash
+   aws secretsmanager create-secret --name TestIdp-oidc-client-secret --secret-string <client secret>
+   ```
+
+3. Faça o deploy.
+4. Adicione o URI de redirecionamento à aplicação no provedor de identidade.
+
+<Infrastructure>
+  <Fragment slot="cdk">
+A stack que contém `UserIdentity` produz o URI de redirecionamento como `<Name>IdpRedirectUri`, por exemplo `TestIdpIdpRedirectUri`. Você também pode calculá-lo antes de fazer o deploy, a partir do `cognitoDomain` que você escolheu para `ts#website#auth`, seu ID de conta AWS e sua região:
+
+```
+https://<cognitoDomain>-<account>.auth.<region>.amazoncognito.com/oauth2/idpresponse
+```
+  </Fragment>
+  <Fragment slot="terraform">
+O domínio do Cognito tem um sufixo aleatório, então o URI de redirecionamento é conhecido apenas após o deploy. O módulo `user-identity` o produz como `<name>_idp_redirect_uri`. Para vê-lo, adicione uma saída ao seu módulo raiz, por exemplo `packages/infra/src/main.tf`:
+
+```hcl
+output "test_idp_idp_redirect_uri" { value = module.user_identity.test_idp_idp_redirect_uri }
+```
+  </Fragment>
+</Infrastructure>
+
+Registre apenas este URI `/oauth2/idpresponse` no provedor de identidade. As URLs do seu próprio website são registradas com o Cognito, não com o provedor de identidade.
+
+## Mapeamento de atributos
+
+O user pool gerado requer os atributos `email`, `given_name` e `family_name`. O Cognito os preenche a partir das claims do provedor de identidade em cada login. Se o provedor de identidade não enviar um deles, o primeiro login do usuário falha. Portanto, o gerador recusa um `attributeMapping` que deixe de fora qualquer um dos três.
+
+`attributeMapping` é um objeto JSON. Cada chave é um atributo do user pool, e cada valor é o nome da claim do provedor de identidade. O padrão mapeia cada atributo para a claim com o mesmo nome:
+
+```json
+{"email":"email","given_name":"given_name","family_name":"family_name"}
+```
+
+- Uma chave pode ser qualquer [atributo padrão](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-settings-attributes.html#cognito-user-pools-standard-attributes), como `name` ou `phone_number`, ou um atributo personalizado como `custom:department`.
+- O Cognito trata um endereço de email mapeado como não verificado. Mapeie `email_verified` apenas de um provedor de identidade que verifica endereços de email por si só. Caso contrário, um usuário poderia definir o endereço de outra pessoa no provedor de identidade e tê-lo marcado como verificado no seu pool.
+- Se o endereço de email de um usuário mudar no provedor de identidade, o Cognito escreve o novo endereço no user pool no próximo login do usuário. `email_verified` permanece `false`.
+- Um atributo personalizado já deve existir no user pool, e deve ser mutável.
+
+O arquivo do provedor de identidade Terraform também define dois valores que o Cognito adiciona quando retorna o provedor de identidade: `"username" = "sub"` em `attribute_mapping` e `attributes_url_add_attributes = "false"` em `provider_details`. Como o arquivo os define, um segundo `terraform plan` após o primeiro deploy não mostra nenhuma alteração no provedor de identidade. Se um segundo plan ainda mostrar uma alteração em `provider_details` com outro provedor de identidade, adicione essa chave ao arquivo com o valor que o plan mostra o Cognito retornando.
+
+## Notas sobre provedores de identidade
+
+As configurações abaixo vêm da documentação de cada fornecedor. Apenas um user pool do Cognito atuando como provedor de identidade foi testado com este gerador. Esse teste é a verificação AWS que um lançamento deste gerador precisa.
+
+### Okta
+
+Não testado. Crie uma aplicação web OIDC no Okta. O issuer é seu domínio Okta, `https://<your-org>.okta.com`, ou um servidor de autorização personalizado como `https://<your-org>.okta.com/oauth2/default`. Os escopos padrão, `openid email profile`, retornam `email`, `given_name` e `family_name`, então o mapeamento padrão funciona.
+
+### Auth0
+
+Não testado. Crie uma Regular Web Application no Auth0. O issuer é `https://<your-tenant>.auth0.com/`, incluindo a barra final, porque a claim `iss` nos tokens Auth0 tem uma. O Auth0 retorna `given_name` e `family_name` apenas quando a conexão do usuário os fornece. Usuários de uma conexão sem eles não podem fazer login até que você mapeie outras claims.
+
+### Microsoft Entra ID
+
+Não testado. Registre uma aplicação single-tenant no Entra ID. O issuer é `https://login.microsoftonline.com/<tenant-id>/v2.0`. O gerador recusa os issuers multi-tenant (`/common/`, `/organizations/` e `/consumers/`), porque eles aceitam usuários de qualquer tenant do Entra ID. O Entra ID envia `given_name` e `family_name` apenas se você os adicionar como claims opcionais ao token ID da aplicação. Sua claim `email` não é verificada, então não mapeie `email_verified` do Entra ID.
+
+### User pool do Cognito
+
+Para testar com outro user pool do Cognito como provedor de identidade, use o issuer `https://cognito-idp.<region>.amazonaws.com/<user pool id>`. Dê ao seu app client um client secret, o authorization code grant e os escopos `openid email profile`.
+
+## Segurança
+
+- Identifique usuários pela claim `sub` (o ID único do usuário no seu user pool), nunca por `email`. Um usuário federado é um novo usuário no seu pool com seu próprio `sub`, mesmo quando seu email corresponde a um usuário local. O código que o plugin gera usa `sub`.
+- Use um issuer single-tenant. Um issuer multi-tenant permite que usuários de qualquer organização façam login.
+- Remova as URLs de callback `http://localhost` dos estágios de produção, conforme <Link path="guides/react-website-auth">autenticação de website</Link> descreve. A federação não adiciona nenhuma URL de callback.
+
+## O que a federação não faz
+
+- MFA (autenticação multifator) exigida no seu user pool não se aplica a usuários federados. O Cognito deixa sua autenticação para o provedor de identidade, então imponha MFA no provedor de identidade.
+- Fazer logout do seu website encerra apenas a sessão do Cognito. Não encerra a sessão do usuário no provedor de identidade OIDC, então o próximo login através do botão pode ser concluído sem uma senha. Em um computador compartilhado, os usuários também devem fazer logout no provedor de identidade.
+- O menu do usuário mostra o nome de usuário do Cognito. Para um usuário federado, é o nome do provedor de identidade, um underscore e o `sub` do usuário no provedor de identidade, em minúsculas, por exemplo `testidp_00u1abcd`.
+
+## O client secret
+
+O Cognito mantém o client secret nas configurações do provedor de identidade. Qualquer pessoa autorizada a chamar `cognito-idp:DescribeIdentityProvider` no seu user pool pode lê-lo. É assim que o Cognito funciona, qualquer que seja o provedor IaC que você use.
+
+<Infrastructure>
+  <Fragment slot="cdk">
+O construct passa o secret para o CloudFormation como uma [referência dinâmica](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/dynamic-references-secretsmanager.html), `{{resolve:secretsmanager:<clientSecretName>:SecretString:::}}`. O template sintetizado contém apenas essa referência. O CloudFormation lê o secret quando cria ou atualiza o provedor de identidade. Se você rotacionar o secret, o Cognito obtém o novo valor apenas quando o recurso do provedor de identidade muda em um deploy posterior.
+  </Fragment>
+  <Fragment slot="terraform">
+O módulo lê o secret com uma data source `data "aws_secretsmanager_secret_version"`, então `terraform plan` o mostra como `(sensitive value)`. O state do Terraform ainda mantém o secret em texto simples, uma vez para a data source e uma vez para o provedor de identidade. Qualquer pessoa que possa ler o objeto de state no seu bucket de state pode ler o secret. Limite o acesso de leitura ao bucket de state adequadamente.
+  </Fragment>
+</Infrastructure>
+
+A verificação AWS para este gerador confirmou com CDK que o CloudFormation preenche a referência `{{resolve:secretsmanager:...}}` dentro das configurações do provedor de identidade. O login federado funciona, e o template implantado mantém apenas a referência. Após o secret ser rotacionado, um deploy sem nenhuma outra alteração deixou o secret antigo no Cognito, porque o CloudFormation lê o secret apenas quando o recurso do provedor de identidade muda.
+
+Para enviar um secret rotacionado ao Cognito:
+
+<Infrastructure>
+  <Fragment slot="cdk">
+Altere o recurso do provedor de identidade no deploy que segue a rotação. Uma maneira é apontar a referência para a nova versão do secret. No construct do provedor de identidade, `identity-providers/<name>.ts`, adicione o ID de versão que `aws secretsmanager put-secret-value` imprime à chamada `SecretValue.secretsManager`, e mantenha seu `.unsafeUnwrap()`:
+
+```ts
+SecretValue.secretsManager('TestIdp-oidc-client-secret', { versionId: '<version id>' })
+```
+
+A referência no template então muda, então o CloudFormation atualiza o provedor de identidade e lê essa versão do secret. Altere o ID de versão novamente em cada rotação. Isso segue a documentação do CloudFormation para referências dinâmicas e não foi testado na AWS.
+  </Fragment>
+  <Fragment slot="terraform">
+Execute `terraform plan` e `terraform apply` após a rotação. A data source lê a versão atual do secret em cada plan, então o plan mostra uma atualização in-place do provedor de identidade, e `apply` envia o novo secret ao Cognito. Isso é lido do código-fonte do provider `hashicorp/aws` 6.69.1, que o workspace gerado usa: uma alteração em `provider_details` atualiza o provedor de identidade in-place e não o substitui. Não foi testado na AWS.
+  </Fragment>
+</Infrastructure>
+
+## Outros app clients
+
+Um app client é a configuração do Cognito através da qual uma aplicação faz login. O gerador adiciona o provedor de identidade apenas ao app client do website, o web client. Outro app client no mesmo user pool aceita usuários federados apenas se você adicionar o provedor de identidade a ele também. Por exemplo, o app client que você cria para um <Link path="guides/ts-dcr-proxy">DCR proxy</Link> (que permite que clientes MCP, as ferramentas de IA que usam o Model Context Protocol, façam login através do Cognito) precisa dele. Caso contrário, usuários federados não podem fazer login no seu servidor MCP. No CDK, adicione o `provider.providerName` do provedor de identidade aos `supportedIdentityProviders` desse client.
+
+## Tokens para o chat do agente
+
+O target `<agent>-chat` de um <Link path="guides/ts-agent">agente TypeScript</Link> com autenticação Cognito lê um access token do Cognito da variável de ambiente `AGENT_ACCESS_TOKEN`. Um usuário federado não tem senha do Cognito, então `admin-initiate-auth` não funciona para eles. Em vez disso, faça login no seu website, abra as ferramentas de desenvolvedor do navegador e copie `access_token` da entrada `oidc.user:...` no session storage.
