@@ -7,7 +7,6 @@ import { parse, stringify } from '@iarna/toml';
 import { addProjectConfiguration, getProjects, type Tree } from '@nx/devkit';
 import type { UVPyprojectToml } from '../../utils/nxlv-python.js';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
-import { PY_UV_OVERRIDES } from '../../utils/versions.js';
 import { pyProjectGenerator } from '../project/generator.js';
 import { pyAgentGenerator } from './generator.js';
 
@@ -663,7 +662,6 @@ describe('py#agent generator uv override-dependencies', () => {
   let tree: Tree;
   let project: string;
 
-  const expected = [...PY_UV_OVERRIDES['strands-agents-tools']];
   const rootText = () => tree.read('pyproject.toml', 'utf-8');
   const readRoot = () => parse(rootText()) as UVPyprojectToml;
 
@@ -679,22 +677,13 @@ describe('py#agent generator uv override-dependencies', () => {
     )[0];
   });
 
-  it('should add the strands-agents-tools overrides for a strands agent', async () => {
+  it('should not add overrides for a strands agent', async () => {
     await pyAgentGenerator(tree, { project, infra: 'none', iac: 'cdk' });
 
-    expect(readRoot().tool.uv['override-dependencies']).toEqual(expected);
+    expect(readRoot().tool.uv['override-dependencies']).toBeUndefined();
   });
 
-  it('should not duplicate the overrides when re-run', async () => {
-    await pyAgentGenerator(tree, { project, infra: 'none', iac: 'cdk' });
-    const afterFirst = rootText();
-
-    await pyAgentGenerator(tree, { project, infra: 'none', iac: 'cdk' });
-
-    expect(rootText()).toBe(afterFirst);
-  });
-
-  it('should merge with an existing user override list', async () => {
+  it('should leave an existing user override list alone', async () => {
     // An installed workspace has a uv.lock, so creating the agent-connection
     // project does not regenerate the root pyproject.toml.
     tree.write('uv.lock', '');
@@ -706,7 +695,6 @@ describe('py#agent generator uv override-dependencies', () => {
 
     expect(readRoot().tool.uv['override-dependencies']).toEqual([
       'urllib3>=2.5.0',
-      ...expected,
     ]);
   });
 
@@ -717,17 +705,7 @@ describe('py#agent generator uv override-dependencies', () => {
       infra: 'none',
       iac: 'cdk',
     });
-    const afterFirst = rootText();
 
     expect(readRoot().tool.uv['override-dependencies']).toBeUndefined();
-
-    await pyAgentGenerator(tree, {
-      project,
-      framework: 'langchain',
-      infra: 'none',
-      iac: 'cdk',
-    });
-
-    expect(rootText()).toBe(afterFirst);
   });
 });

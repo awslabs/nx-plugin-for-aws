@@ -9,12 +9,14 @@ import { pyAgentGenerator } from '../../../py/agent/generator.js';
 import { pyProjectGenerator } from '../../../py/project/generator.js';
 import type { UVPyprojectToml } from '../../../utils/nxlv-python.js';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
-import { PY_UV_OVERRIDES, PY_VERSIONS } from '../../../utils/versions.js';
+import { PY_VERSIONS } from '../../../utils/versions.js';
 import migration from './migration.js';
 
 const ROOT = 'pyproject.toml';
-const expected = [...PY_UV_OVERRIDES['strands-agents-tools']];
-const [override] = PY_UV_OVERRIDES['strands-agents-tools'];
+// The override this migration wrote when it shipped in v1.0.15. Pinned here
+// because the generators no longer write it.
+const expected = ['pillow>=13.0.0'];
+const [override] = expected;
 const overridden = parsePipRequirementsLine(override);
 const overriddenName =
   overridden?.type === 'ProjectName' ? overridden.name : '';
@@ -45,13 +47,14 @@ describe('py-agent-pillow-override migration', () => {
     });
   };
 
-  // The root pyproject.toml as @aws/nx-plugin 1.0.14 generates it, which has
-  // no override-dependencies.
-  const toReleasedShape = (userOverrides?: string[]) => {
+  // Set the root override-dependencies, or remove them. The generators write
+  // none, as @aws/nx-plugin 1.0.14 did; 1.0.15 up to the pillow lift wrote
+  // `expected`.
+  const setRootOverrides = (overrides?: string[]) => {
     const toml = readRoot();
     delete toml.tool.uv['override-dependencies'];
-    if (userOverrides) {
-      toml.tool.uv['override-dependencies'] = userOverrides;
+    if (overrides) {
+      toml.tool.uv['override-dependencies'] = overrides;
     }
     tree.write(ROOT, stringify(toml as any));
   };
@@ -81,32 +84,33 @@ describe('py-agent-pillow-override migration', () => {
     tree = createTreeUsingTsSolutionSetup();
   });
 
-  it('should converge on what the generator writes today', async () => {
+  it('should converge on what the generator wrote in v1.0.15', async () => {
     await generateWorkspace();
-    const generated = rootText();
-    toReleasedShape();
-    expect(rootText()).not.toBe(generated);
+    expect(readRoot().tool.uv['override-dependencies']).toBeUndefined();
+    setRootOverrides(expected);
+    const shipped = rootText();
+    setRootOverrides();
 
     const { nextSteps } = await migration(tree);
 
-    expect(rootText()).toBe(generated);
+    expect(rootText()).toBe(shipped);
     expect(nextSteps).toHaveLength(1);
     expect(nextSteps[0]).toContain('uv sync');
   });
 
-  it('should be a no-op on a freshly generated workspace', async () => {
+  it('should be a no-op on a workspace that already has the override', async () => {
     await generateWorkspace();
-    const generated = rootText();
+    setRootOverrides(expected);
+    const before = rootText();
 
     const { nextSteps } = await migration(tree);
 
-    expect(rootText()).toBe(generated);
+    expect(rootText()).toBe(before);
     expect(nextSteps).toEqual([]);
   });
 
   it('should be idempotent', async () => {
     await generateWorkspace();
-    toReleasedShape();
     await migration(tree);
     const afterFirst = tree
       .listChanges()
@@ -122,7 +126,7 @@ describe('py-agent-pillow-override migration', () => {
 
   it('should merge with an existing user override list', async () => {
     await generateWorkspace();
-    toReleasedShape(['urllib3>=2.5.0']);
+    setRootOverrides(['urllib3>=2.5.0']);
 
     await migration(tree);
 
@@ -134,7 +138,7 @@ describe('py-agent-pillow-override migration', () => {
 
   it('should leave a user override for the same package alone', async () => {
     await generateWorkspace();
-    toReleasedShape([`${overriddenName}==12.2.0`]);
+    setRootOverrides([`${overriddenName}==12.2.0`]);
     const before = rootText();
 
     const { nextSteps } = await migration(tree);
@@ -154,6 +158,20 @@ describe('py-agent-pillow-override migration', () => {
     await migration(tree);
 
     expect(readRoot().tool.uv['override-dependencies']).toEqual(expected);
+  });
+
+  it('should leave an override-dependencies that is not a list alone', async () => {
+    await generateWorkspace();
+    const toml = readRoot();
+    (toml.tool.uv as Record<string, unknown>)['override-dependencies'] =
+      'not-a-list';
+    tree.write(ROOT, stringify(toml as any));
+    const before = rootText();
+
+    const { nextSteps } = await migration(tree);
+
+    expect(rootText()).toBe(before);
+    expect(nextSteps).toEqual([]);
   });
 
   it('should be a no-op without a root pyproject.toml', async () => {
