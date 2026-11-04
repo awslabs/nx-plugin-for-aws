@@ -101,8 +101,8 @@ When scaffolding several projects in one go, chain generators to avoid a slow de
 
 ${PACKAGE_MANAGERS.map(
   (pm) => `  \`\`\`bash
-  ${buildNxCommand('g @aws/nx-plugin:ts#trpc-api --no-interactive --name=my-app-api --auth=iam --prefer-install-dependencies=false', pm)} && \\
-    ${buildNxCommand('g @aws/nx-plugin:ts#react-website --no-interactive --name=my-app-website --prefer-install-dependencies=false', pm)} && \\
+  ${buildNxCommand('g @aws/nx-plugin:ts#api --no-interactive --name=my-app-api --framework=trpc --auth=iam --prefer-install-dependencies=false', pm)} && \\
+    ${buildNxCommand('g @aws/nx-plugin:ts#website --no-interactive --name=my-app-website --prefer-install-dependencies=false', pm)} && \\
     ${buildNxCommand('g @aws/nx-plugin:connection --no-interactive --sourceProject=@my-app/my-app-website --targetProject=@my-app/my-app-api --prefer-install-dependencies=false', pm)} && \\
     ${buildNxCommand('g @aws/nx-plugin:ts#infra --no-interactive --name=infra', pm)} && \\
     ${buildNxCommand('sync', pm)}
