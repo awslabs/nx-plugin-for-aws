@@ -1,0 +1,137 @@
+---
+title: 移除和清理
+description: 通过空部署修订版从设备中移除组件，销毁堆栈，然后删除保留的 Greengrass 资源以及设置脚本创建的所有内容
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import E2EDiff from '@components/e2e-diff.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+清理按照创建的相反顺序运行：首先设备停止运行组件，然后是堆栈，接着是堆栈保留的资源，然后是设备及其身份，最后是实例配置文件。
+
+## 任务 1：从设备中移除组件
+
+删除部署资源会移除部署管理状态。它不会从设备上卸载任何内容。设备仅在收到不再列出该组件的部署修订版时才会移除组件。更改堆栈，使部署不列出任何组件，同时保持已发布的版本受管理：
+
+<E2EDiff before="greengrass-tutorial/application-stack.ts.template" after="greengrass-tutorial/application-stack.ts.removed.template" lang="typescript" />
+
+部署修订版：
+
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @greengrass-tutorial/infra:deploy -- "greengrass-tutorial-infra-sandbox/**" --parameters TokenExchangeRoleArn="$TUTORIAL_TOKEN_EXCHANGE_ROLE_ARN" --parameters ThingGroupArn="$TUTORIAL_THING_GROUP_ARN"']} />
+
+等待组件从设备上消失并且设备保持健康状态：
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 list-installed-components \
+  --core-device-thing-name "$TUTORIAL_THING_NAME" \
+  --query 'installedComponents[].componentName' --output text
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 get-core-device \
+  --core-device-thing-name "$TUTORIAL_THING_NAME" --query status --output text
+```
+
+第一个命令不能再列出 `com.example.Pulse`。第二个命令必须打印 `HEALTHY`。MQTT 测试客户端停止接收心跳。
+
+## 任务 2：销毁堆栈
+
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @greengrass-tutorial/infra:destroy -- "greengrass-tutorial-infra-sandbox/**" --force']} />
+
+堆栈已消失，但有三种资源被有意保留，因为组件版本是不可变的，并且比任何单个部署的生命周期都长：
+
+- `com.example.Pulse` 的两个组件版本，`1.0.0` 和 `1.0.1`。
+- 对物品组的三个部署修订版。
+- 工件存储桶，每个已发布版本有一个归档文件。
+
+CDK 引导堆栈 `CDKToolkit` 也会保留。它由账户和区域中的每个 CDK 应用程序共享，因此除非您为本教程创建了它，否则请保留它。
+
+## 任务 3：删除保留的 Greengrass 资源
+
+列出对物品组的部署。取消仍然 `ACTIVE` 的部署，然后删除每个部署：
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 list-deployments \
+  --target-arn "$TUTORIAL_THING_GROUP_ARN" --history-filter ALL \
+  --query 'deployments[].[deploymentId,deploymentStatus]' --output text
+
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 cancel-deployment \
+  --deployment-id <active-deployment-id>
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 delete-deployment \
+  --deployment-id <deployment-id>
+```
+
+删除组件的每个已发布版本：
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 list-component-versions \
+  --arn "arn:aws:greengrass:${TUTORIAL_AWS_REGION}:${TUTORIAL_ACCOUNT_ID}:components:com.example.Pulse" \
+  --query 'componentVersions[].arn' --output text
+
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 delete-component \
+  --arn <component-version-arn>
+```
+
+通过构造应用的所有权标签查找工件存储桶，确认列表仅包含本教程的存储桶，然后删除其对象版本和存储桶：
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" resourcegroupstaggingapi get-resources \
+  --tag-filters Key=greengrass-artifact-repository,Values=true \
+  --resource-type-filters s3:bucket \
+  --query 'ResourceTagMappingList[].ResourceARN' --output text
+
+export TUTORIAL_BUCKET=<bucket-name>
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" s3api list-object-versions \
+  --bucket "$TUTORIAL_BUCKET" \
+  --query '{Objects: Versions[].{Key: Key, VersionId: VersionId}}' --output json \
+  > /tmp/greengrass-tutorial-versions.json
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" s3api delete-objects \
+  --bucket "$TUTORIAL_BUCKET" --delete file:///tmp/greengrass-tutorial-versions.json
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" s3api delete-bucket \
+  --bucket "$TUTORIAL_BUCKET"
+```
+
+存储桶已启用版本控制，因此 `delete-objects` 必须命名每个版本。如果 `list-object-versions` 还报告 `DeleteMarkers`，请在删除存储桶之前使用这些条目重复删除操作。
+
+## 任务 4：移除核心设备及其身份
+
+脚本的 `cleanup` 操作读取 `.greengrass-tutorial.env`，检查它是否属于同一账户、区域和前缀，然后终止实例，分离并删除证书及其附加的每个策略，删除核心设备记录、物品和物品组、两个 IoT 策略、角色别名、令牌交换角色及其附件以及访问策略。
+
+```bash
+./setup-greengrass-tutorial.sh cleanup \
+  --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" --prefix "$TUTORIAL_PREFIX"
+```
+
+每个步骤都会打印 `deleted` 或 `absent`。已经消失的对象会被跳过。任何其他错误都会停止运行并保留状态文件，以便您可以修复原因并重新运行相同的命令。
+
+<Aside type="note" title="角色的顺序很重要">
+在运行清理之前销毁堆栈。堆栈的读取授权是令牌交换角色上的内联策略。清理会删除它找到的内联策略，以便可以移除角色，但仍然引用该角色的堆栈在下次更新时会失败。
+</Aside>
+
+## 任务 5：移除实例配置文件
+
+实例配置文件是您的，因此脚本不会管它：
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam remove-role-from-instance-profile \
+  --instance-profile-name "${TUTORIAL_PREFIX}-instance" --role-name "${TUTORIAL_PREFIX}-instance"
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam delete-instance-profile \
+  --instance-profile-name "${TUTORIAL_PREFIX}-instance"
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam delete-role-policy \
+  --role-name "${TUTORIAL_PREFIX}-instance" --policy-name greengrass-installer-bootstrap
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam detach-role-policy \
+  --role-name "${TUTORIAL_PREFIX}-instance" \
+  --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iam delete-role \
+  --role-name "${TUTORIAL_PREFIX}-instance"
+rm -f .greengrass-tutorial.env
+```
+
+如果您已经在模块 2 中移除了引导策略，`delete-role-policy` 会失败并显示 `NoSuchEntity`。这是预期的。
+
+## 您学到的内容
+
+- 生成的组件默认通过本地 IPC 发布。云 MQTT 需要 `publish_to_iot_core`、配方中的 `aws.greengrass.ipc.mqttproxy` 授权以及设备的 IoT 策略中的 `iot:Publish`。
+- 生成器提供构建块。您的 CDK 堆栈拥有工件存储库、读取授权和部署，而 `addComponent` 携带解析的版本和排序边。
+- `NEXT_PATCH` 从内容分配版本。源代码更改通过正常的 `deploy` 发布下一个补丁版本。
+- 移除组件是一个部署修订版。删除基础设施是一个单独的、稍后的步骤，它会保留版本、部署和存储桶供您删除。
+
+有关版本控制和工件保留的信息，请阅读组件指南的<Link path="guides/greengrass-component#自动版本控制">版本控制</Link>和<Link path="guides/greengrass-component#工件存储和保留">工件存储</Link>部分。同一指南列出了在更大规模部署时需要考虑的服务限制。

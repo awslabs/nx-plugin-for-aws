@@ -1,0 +1,131 @@
+---
+title: デプロイ、監視、更新
+description: CDKでアーティファクトリポジトリ、読み取り権限、コンポーネントバージョン、デプロイメントを構成し、AWS IoT Coreにハートビートが到着するのを監視してから、NEXT_PATCH更新を公開します
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import E2EDiff from '@components/e2e-diff.astro';
+import InstallCommand from '@components/install-command.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+## タスク1: スタックを構成する
+
+ジェネレーターはビルディングブロックを提供しましたが、デプロイメントではありません。スタックは、アーティファクトの保存場所、どのロールがそれらを読み取れるか、どのフリートがコンポーネントを受け取るかを決定します。`packages/infra/src/stacks/application-stack.ts`を置き換えます:
+
+<E2EDiff before="greengrass-tutorial/application-stack.ts.original.template" after="greengrass-tutorial/application-stack.ts.template" lang="typescript" />
+
+各部分の役割:
+
+- `GreengrassArtifactBucket`は、保持され、バージョン管理され、TLSのみのアーティファクトリポジトリを作成します。`grantReadTo`は、トークン交換ロールに`com.example.Pulse/*`に対する`s3:GetObject`を付与します。これは、リゾルバーがこのコンポーネントに対して書き込むすべてのアーティファクトキーをカバーします。
+- `Pulse`は`GreengrassComponentVersion`を拡張します。これは、`pulse-artifact`がビルドしたレシピと`pulse.zip`を読み取り、コンテンツハッシュ化されたキーの下にアーカイブをアップロードし、コンポーネントバージョンを公開します。その`bucket`プロパティは、`GreengrassArtifactBucket`コンストラクト自体を受け取ります。
+- `targetArn`を持つ`GreengrassDeployment`は、セットアップスクリプトが作成したモノのグループにデプロイします。`addComponent(pulse)`は、解決されたバージョンをデプロイメントのコンポーネントマップに配置し、コンポーネントバージョンリソースにCloudFormation依存関係を追加するため、バージョンが存在する前にIoTジョブがデバイスに到達することはありません。
+- 2つの`CfnParameter`値は`.greengrass-tutorial.env`から取得されます。これらをパラメータとして渡すことで、スタックをアカウント固有のリテラルから解放し、e2eスイートが同じファイルを合成できるようにします。
+
+## タスク2: ブートストラップとデプロイ
+
+記録された値を読み込み、プロジェクト参照と依存関係マニフェストを同期し、更新されたワークスペース依存関係をインストールし、まだ行っていない場合はアカウントとリージョンでCDKをブートストラップします:
+
+```bash
+source .greengrass-tutorial.env
+```
+
+<NxCommands commands={['sync']} />
+<InstallCommand />
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @greengrass-tutorial/infra:bootstrap']} />
+
+スタックをデプロイします。`packages/infra/src/main.ts`は、スタックをステージ`greengrass-tutorial-infra-sandbox`に配置し、`deploy`ターゲットは独自のステージなしで`cdk deploy`を実行するため、コマンドはそのステージに名前を付け、ロールとモノのグループARNをCloudFormationパラメータとして渡します:
+
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @greengrass-tutorial/infra:deploy -- "greengrass-tutorial-infra-sandbox/**" --parameters TokenExchangeRoleArn="$TUTORIAL_TOKEN_EXCHANGE_ROLE_ARN" --parameters ThingGroupArn="$TUTORIAL_THING_GROUP_ARN"']} />
+
+`deploy`は`^assemble`に依存し、共有コンストラクトプロジェクトはテレメトリプロジェクトの`assemble`に依存し、これは`pulse-artifact`を実行します。したがって、すべてのデプロイは現在のソースに一致するアーティファクトを公開します。ターゲットはエクスプレスモードなしで`cdk deploy`を実行するため、デプロイメントリソースを置き換える後のデプロイメントリビジョンを受け入れます。Greengrassで`deploy-sandbox`を使用する前に、<Link path="guides/greengrass-component#デプロイメントリビジョン">デプロイメントリビジョン</Link>を読んでください。
+
+最初のデプロイでは、バージョンリゾルバーは`com.example.Pulse`の公開されたバージョンを見つけられず、`1.0.0`を公開します。その後、デプロイメントがモノのグループに到達し、コアデバイスはトークン交換ロールでアーティファクトをダウンロードし、コンポーネントを起動します。スタックが完了してから1〜2分待ちます。
+
+## タスク3: ハートビートを監視する
+
+`$TUTORIAL_AWS_REGION`でAWS IoTコンソールを開き、**MQTTテストクライアント**を選択し、トピックをサブスクライブします:
+
+```text
+tutorial/greengrass/heartbeat
+```
+
+30秒ごとにメッセージが到着します:
+
+```json
+{"sequence": 3, "greeting": "hello from pulse"}
+```
+
+AWS CLIはMQTTトピックをサブスクライブできません。独自のMQTTクライアントを使用する場合は、独自の証明書とポリシーを使用してアカウントのデータエンドポイントに接続してください。このチュートリアルではこれらを作成しません:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iot describe-endpoint \
+  --endpoint-type iot:Data-ATS --query endpointAddress --output text
+```
+
+## タスク4: デバイスを確認する
+
+デプロイメントが成功したことは、デバイスがデプロイメントドキュメントを適用したことを証明します。コンポーネントが実行されていることを証明するものではありません。インストールされたコンポーネントのライフサイクル状態を確認します:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 list-installed-components \
+  --core-device-thing-name "$TUTORIAL_THING_NAME" \
+  --query 'installedComponents[?componentName==`com.example.Pulse`].[componentVersion,lifecycleState]' \
+  --output text
+```
+
+`1.0.0`と`RUNNING`が表示されるはずです。次に、モジュール2のSystems Managerパターンを使用して、インスタンス上のコンポーネント自身のログを読み取ります:
+
+```bash
+cat > /tmp/greengrass-tutorial-command.json <<'EOF'
+{ "commands": ["#!/bin/bash", "tail -n 20 /greengrass/v2/logs/com.example.Pulse.log"] }
+EOF
+
+TUTORIAL_COMMAND_ID=$(aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" ssm send-command \
+  --instance-ids "$TUTORIAL_INSTANCE_ID" --document-name AWS-RunShellScript \
+  --parameters file:///tmp/greengrass-tutorial-command.json \
+  --query Command.CommandId --output text)
+sleep 5
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" ssm get-command-invocation \
+  --command-id "$TUTORIAL_COMMAND_ID" --instance-id "$TUTORIAL_INSTANCE_ID" \
+  --query StandardOutputContent --output text
+```
+
+ログには、IPC接続とハートビートごとに1行が表示されます:
+
+```text
+INFO:awsiot.eventstreamrpc:<Connection ...> /greengrass/v2/ipc.socket:0> connected
+INFO:com.example.Pulse:Published heartbeat 0 to tutorial/greengrass/heartbeat
+INFO:com.example.Pulse:Published heartbeat 1 to tutorial/greengrass/heartbeat
+```
+
+デプロイメントが`SUCCEEDED`を報告しているのにコンポーネントが`BROKEN`である場合、または`get-core-device`が`UNHEALTHY`を報告する場合は、<Link path="guides/greengrass-component#トラブルシューティングとサービス制限">コンポーネントのトラブルシューティング手順</Link>に従ってください。
+
+## タスク5: コンポーネントを更新する
+
+`packages/telemetry/greengrass/pulse/main.py`の挨拶を変更します:
+
+<E2EDiff before="greengrass-tutorial/main.py.template" after="greengrass-tutorial/main.py.updated.template" lang="python" />
+
+同じコマンドで再度デプロイします:
+
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @greengrass-tutorial/infra:deploy -- "greengrass-tutorial-infra-sandbox/**" --parameters TokenExchangeRoleArn="$TUTORIAL_TOKEN_EXCHANGE_ROLE_ARN" --parameters ThingGroupArn="$TUTORIAL_THING_GROUP_ARN"']} />
+
+Nxは変更されたソースを検出し、`pulse-artifact`を再ビルドします。アーカイブのコンテンツハッシュが変更されるため、リゾルバーは`1.0.1`を割り当て、アーティファクトは新しいキーの下にアップロードされ、新しいコンポーネントバージョンが公開され、新しいデプロイメントリビジョンがモノのグループをそれに向けます。レシピはまだ`NEXT_PATCH`と言っています。ワークスペースには番号は記録されません。
+
+インストールされたバージョンとペイロードの両方を確認します:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 list-installed-components \
+  --core-device-thing-name "$TUTORIAL_THING_NAME" \
+  --query 'installedComponents[?componentName==`com.example.Pulse`].[componentVersion,lifecycleState]' \
+  --output text
+```
+
+`1.0.1`と`RUNNING`が表示されるはずです。MQTTテストクライアントでは、挨拶が`hello from the updated pulse`に変更され、コンポーネントプロセスが再起動されたため、シーケンスが`0`から再開されます。
+
+<Aside type="tip" title="変更なしの再デプロイ">
+ソースまたはレシピの変更なしで再度デプロイすると、`1.0.1`が再利用されます。リゾルバーは、コンテンツハッシュを最高の公開バージョンのタグと比較し、新しいバージョンを割り当てる代わりにそのバージョンを返します。ルールとその制限については、<Link path="guides/greengrass-component#自動バージョニング">自動バージョニング</Link>を読んでください。
+</Aside>
+
+<Link path="get_started/tutorials/greengrass/cleanup">削除とクリーンアップ</Link>に進みます。

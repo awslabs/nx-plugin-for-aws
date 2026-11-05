@@ -3,18 +3,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 // @ts-check
-import { defineConfig, passthroughImageService } from 'astro/config';
+
+import react from '@astrojs/react';
 
 import starlight from '@astrojs/starlight';
+import tailwindcss from '@tailwindcss/vite';
+import { defineConfig, passthroughImageService } from 'astro/config';
 import astroD2 from 'astro-d2';
+import * as fs from 'fs';
 import starlightBlog from 'starlight-blog';
 import starlightLinksValidator from 'starlight-links-validator';
 import starlightVideos from 'starlight-videos';
-
-import tailwindcss from '@tailwindcss/vite';
-
-import react from '@astrojs/react';
-import * as fs from 'fs';
 
 import remarkLinkValidator from './src/plugins/remark-link-validator.ts';
 import remarkOptionFilter from './src/plugins/remark-option-filter.ts';
@@ -345,6 +344,20 @@ export default defineConfig({
                       link: '/get_started/tutorials/dungeon-game/4',
                     },
                     {
+                      label: 'Optional: Greengrass dice',
+                      translations: {
+                        jp: 'オプション: Greengrassでサイコロを振る',
+                        ko: '선택 사항: Greengrass로 주사위 굴리기',
+                        fr: 'Optionnel : lancer des dés avec Greengrass',
+                        it: 'Opzionale: lancia i dadi con Greengrass',
+                        es: 'Opcional: lanza dados con Greengrass',
+                        pt: 'Opcional: role dados com Greengrass',
+                        zh: '可选：使用 Greengrass 掷骰子',
+                        vi: 'Tùy chọn: tung xúc xắc với Greengrass',
+                      },
+                      link: '/get_started/tutorials/dungeon-game/greengrass-dice',
+                    },
+                    {
                       label: 'Wrap up',
                       translations: {
                         jp: 'まとめ',
@@ -373,6 +386,92 @@ export default defineConfig({
                     vi: 'Đóng góp trình tạo',
                   },
                   link: '/get_started/tutorials/contribute-generator',
+                },
+                {
+                  label: 'Greengrass MQTT',
+                  translations: {
+                    jp: 'Greengrass MQTT',
+                    ko: 'Greengrass MQTT',
+                    fr: 'MQTT Greengrass',
+                    it: 'MQTT Greengrass',
+                    es: 'MQTT de Greengrass',
+                    pt: 'MQTT do Greengrass',
+                    zh: 'Greengrass MQTT',
+                    vi: 'MQTT Greengrass',
+                  },
+                  collapsed: true,
+                  items: [
+                    {
+                      label: 'Overview',
+                      translations: {
+                        jp: '概要',
+                        ko: '개요',
+                        fr: 'Aperçu',
+                        it: 'Panoramica',
+                        es: 'Visión general',
+                        pt: 'Visão geral',
+                        zh: '概述',
+                        vi: 'Tổng quan',
+                      },
+                      link: '/get_started/tutorials/greengrass/overview',
+                    },
+                    {
+                      label: '1. Create the component',
+                      translations: {
+                        jp: '1. コンポーネントを作成する',
+                        ko: '1. 컴포넌트 생성',
+                        fr: '1. Créer le composant',
+                        it: '1. Creare il componente',
+                        es: '1. Crear el componente',
+                        pt: '1. Criar o componente',
+                        zh: '1. 创建组件',
+                        vi: '1. Tạo component',
+                      },
+                      link: '/get_started/tutorials/greengrass/1',
+                    },
+                    {
+                      label: '2. Provision the core device',
+                      translations: {
+                        jp: '2. コアデバイスのプロビジョニング',
+                        ko: '2. 코어 디바이스 프로비저닝',
+                        fr: '2. Provisionner le périphérique principal',
+                        it: '2. Provisioning del dispositivo core',
+                        es: '2. Aprovisionar el dispositivo central',
+                        pt: '2. Provisionar o dispositivo central',
+                        zh: '2. 配置核心设备',
+                        vi: '2. Cung cấp thiết bị lõi',
+                      },
+                      link: '/get_started/tutorials/greengrass/2',
+                    },
+                    {
+                      label: '3. Deploy, observe and update',
+                      translations: {
+                        jp: '3. デプロイ、監視、更新',
+                        ko: '3. 배포, 관찰 및 업데이트',
+                        fr: '3. Déployer, observer et mettre à jour',
+                        it: '3. Distribuire, osservare e aggiornare',
+                        es: '3. Desplegar, observar y actualizar',
+                        pt: '3. Implantar, observar e atualizar',
+                        zh: '3. 部署、观察和更新',
+                        vi: '3. Triển khai, quan sát và cập nhật',
+                      },
+                      link: '/get_started/tutorials/greengrass/3',
+                    },
+                    {
+                      label: '4. Remove and clean up',
+                      translations: {
+                        jp: '4. 削除とクリーンアップ',
+                        ko: '4. 제거 및 정리',
+                        fr: '4. Supprimer et nettoyer',
+                        it: '4. Rimuovere e pulire',
+                        es: '4. Eliminar y limpiar',
+                        pt: '4. Remover e limpar',
+                        zh: '4. 移除和清理',
+                        vi: '4. Xóa và dọn dẹp',
+                      },
+                      link: '/get_started/tutorials/greengrass/cleanup',
+                    },
+                  ],
                 },
               ],
             },
@@ -656,6 +755,16 @@ export default defineConfig({
             },
             {
               label: 'IoT',
+              translations: {
+                jp: 'モノのインターネット',
+                ko: '사물 인터넷',
+                fr: 'Internet des objets',
+                it: 'Internet delle cose',
+                es: 'Internet de las cosas',
+                pt: 'Internet das Coisas',
+                zh: '物联网',
+                vi: 'Internet vạn vật',
+              },
               collapsed: true,
               items: [
                 {

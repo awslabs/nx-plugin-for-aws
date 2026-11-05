@@ -32,6 +32,12 @@ Nous vous recommandons d'essayer d'étendre la base de code avec les capacités 
 
 ## Destruction des ressources
 
+Vous voulez continuer à jouer et ajouter d'abord un périphérique de périphérie ? Continuez avec
+<Link path="get_started/tutorials/dungeon-game/greengrass-dice">Optionnel : lancer les dés avec Greengrass</Link>.
+Le Story Agent appelle un outil qui demande un lancer à partir d'un appareil et utilise la
+valeur retournée dans le jeu. Conservez votre donjon déployé pour cette route ; il
+inclut des instructions pour supprimer uniquement l'extension ou l'application entière.
+
 1. Pour détruire les ressources AWS qui ont été créées, exécutez la commande suivante :
 
 <NxCommands commands={['destroy-sandbox infra']} />
@@ -40,11 +46,41 @@ Nous vous recommandons d'essayer d'étendre la base de code avec les capacités 
 
 2. Entrez `y` pour continuer. CloudFormation détruira vos piles.
 
-:::caution[Deux ressources sont conservées intentionnellement]
-La suppression des piles laisse deux ressources derrière elle, de sorte qu'un démontage ne peut pas emporter vos utilisateurs ou leurs histoires avec lui :
+:::note[Si la protection contre la suppression AppConfig bloque la suppression de la pile]
+Arrêtez d'utiliser l'application du tutoriel. Dans l'onglet **Resources** de la pile ayant échoué, enregistrez
+l'ID physique exact de son application AppConfig détenue et les ID uniquement
+de l'environnement et des profils de configuration dont la suppression a échoué.
+
+Attendez soit l'[intervalle de protection contre la suppression](https://docs.aws.amazon.com/appconfig/2019-10-09/APIReference/API_DeletionProtectionSettings.html) du compte après la dernière lecture de configuration
+et réessayez la destruction, ou supprimez uniquement ces ressources de tutoriel abandonnées :
+utilisez `aws appconfig delete-environment` avec `--application-id` et
+`--environment-id`, et `aws appconfig delete-configuration-profile` avec
+`--application-id` et `--configuration-profile-id`. Fournissez les ID enregistrés
+et `--deletion-protection-check BYPASS`, avec `--profile` et
+`--region` explicites, à chaque appel. Ensuite, réexécutez la commande de destruction.
+:::
+
+:::caution[Ressources conservées]
+La suppression de la pile laisse ces ressources pour un nettoyage séparé :
 
 - Le **pool d'utilisateurs Cognito**, que `ts#website#auth` crée avec la protection contre la suppression activée.
+- Le **rôle IAM SMS du pool**, conservé avec le pool afin qu'il puisse toujours être mis à jour et supprimé.
 - Le **bucket de session du Story Agent**, qui contient l'historique des conversations et utilise par défaut `RemovalPolicy.RETAIN`.
+- Le **groupe de journaux d'accès de l'API Game**.
+- Quatre **clés KMS gérées par le client** pour les journaux WAF du pool d'utilisateurs, les journaux de l'API Game, les sessions du Story Agent et le site web.
+- Le **rôle IAM CloudWatch d'API Gateway**, dont le paramètre de compte régional est partagé par les API REST.
 
-Supprimez-les manuellement une fois que vous n'en avez plus besoin — pour le pool d'utilisateurs, désactivez d'abord la protection contre la suppression.
+Enregistrez l'ARN du rôle SMS à partir de la configuration SMS du pool d'utilisateurs avant de supprimer
+le pool. Désactivez la protection contre la suppression du pool, supprimez le pool, puis supprimez
+son rôle SMS et toutes les politiques attachées appartenant à cette application. Videz le
+bucket de session, y compris les versions d'objets et les marqueurs de suppression, avant de le supprimer.
+Supprimez le groupe de journaux d'accès de l'API Game lorsque vous n'avez plus besoin de ses journaux.
+
+Conservez toute clé KMS nécessaire pour lire les données que vous conservez. Planifiez la suppression des
+clés inutilisées de cette application avec une période d'attente d'au moins sept jours.
+Les clés restent dans `PendingDeletion` jusqu'à la fin de cette période.
+
+Préservez le rôle API Gateway si d'autres API REST l'utilisent. Vérifiez le paramètre de rôle CloudWatch
+du compte régional et les dépendances avant de supprimer un rôle inutilisé appartenant au
+tutoriel, et mettez à jour sa référence de compte avant de le supprimer.
 :::

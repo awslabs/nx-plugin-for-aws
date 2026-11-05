@@ -1,0 +1,284 @@
+---
+title: "선택 사항: Greengrass로 주사위 굴리기"
+description: Dungeon Adventure Story Agent가 Greengrass 코어 디바이스에서 주사위 굴림을 요청하고 그 결과를 스토리에 사용하는 도구를 호출하도록 합니다.
+---
+
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import PackageManagerShortCommand from '@components/package-manager-short-command.astro';
+import RunGenerator from '@components/run-generator.astro';
+import InstallCommand from '@components/install-command.astro';
+import E2ECode from '@components/e2e-code.astro';
+import E2EDiff from '@components/e2e-diff.astro';
+import { getDungeonDiceDependencies } from '../../../../../../../../e2e/src/utils';
+
+<Link path="get_started/tutorials/dungeon-game/4">모듈 4</Link>에서 배포한 던전을 유지하세요.
+파괴하기 전에 Story Agent에 주사위 디바이스를 제공하세요:
+
+> "자물쇠를 따려고 합니다. 성공 여부를 확인하기 위해 d20을 굴려주세요."
+
+에이전트는 `roll-dice`를 호출합니다. Greengrass 코어의 Python 컴포넌트가
+주사위 굴림을 생성하고, MCP 도구가 해당 디바이스 결과를 에이전트에 반환합니다. 응답은
+"d20: 17"이라고 말하고 결과를 설명할 수 있습니다.
+
+이 선택적 경로는 소프트웨어 주사위 시뮬레이터가 있는 EC2 코어를 사용합니다. 나중에
+난수 함수를 물리적 주사위 트레이의 입력으로 교체할 수 있습니다.
+<Link path="get_started/tutorials/greengrass/overview">독립형 Greengrass 튜토리얼</Link>은
+빈 워크스페이스에서 컴포넌트 생성을 배우는 별도의 방법으로 남아 있습니다.
+
+## 추가할 내용
+
+```d2
+direction: right
+player: Player
+agent: Story Agent
+tool: "Inventory MCP server\nroll-dice"
+dice_shadow: "AWS IoT Core\nnamed shadow: dungeon-dice"
+device: "Greengrass core\ncom.example.DungeonDice"
+player -> agent: "Attempt an action"
+agent -> tool: "roll-dice(sides=20)"
+tool -> dice_shadow: "Desired request + request ID"
+dice_shadow -> device: "MQTT delta through IPC"
+device -> dice_shadow: "Reported result + same ID"
+dice_shadow -> tool: "Correlated result"
+tool -> agent: "d20 = 17"
+agent -> player: "Result and consequence"
+```
+
+클라우드 섀도우는 하나의 대기 중인 요청과 가장 최근 결과를 보유합니다. 도구는
+최대 12초 동안 대기하며, 대체 굴림을 생성하지 않습니다. 버전 확인은
+동시 호출자가 활성 요청을 교체하는 것을 방지합니다. 디바이스는
+게시하기 전에 마지막 결과를 저장하므로 MQTT 재전송 및 컴포넌트
+재시작이 동일한 요청을 다시 굴리지 않습니다.
+
+이 샌드박스는 플레이어 간에 하나의 주사위 디바이스를 공유합니다. 사용 중인 디바이스는
+오류를 반환합니다. 플릿 전체 큐를 추가하거나 개인 디바이스를
+Cognito 사용자와 연결하지 않습니다. 이는 멀티플레이어 제품을 위한 별도의 확장입니다.
+
+## 1. 던전을 해체하지 않고 코어 프로비저닝
+
+배포된 던전과 동일한 AWS 계정 및 리전을 사용하세요. 프로필을
+명시적으로 설정하고, 디바이스 리소스에 새 접두사를 사용하세요:
+
+```bash
+export TUTORIAL_AWS_PROFILE=<your-dungeon-profile>
+export TUTORIAL_AWS_REGION=<your-dungeon-region>
+export TUTORIAL_PREFIX=gg-dungeon-dice
+```
+
+임시 설치 프로그램 정책 제거를 포함하여 **던전 워크스페이스**에서
+<Link path="get_started/tutorials/greengrass/2">코어 디바이스 프로비저닝</Link>을 따르세요.
+해당 페이지는 인스턴스를 생성하고 `.greengrass-tutorial.env`를 작성합니다.
+다른 Nx 워크스페이스를 생성하거나 독립형 하트비트 모듈을 실행하지 마세요.
+설정 스크립트의 기존 기본값은 변경되지 않습니다.
+
+```bash
+source .greengrass-tutorial.env
+export DICE_IOT_ENDPOINT=$(aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" \
+  iot describe-endpoint --endpoint-type iot:Data-ATS --query endpointAddress --output text)
+```
+
+도구를 활성화하기 전에 새 디바이스의 명명된 섀도우를 한 번 초기화하세요. 활성 주사위 요청이 있는
+디바이스에 대해 이 재설정을 실행하지 마세요:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" \
+  iot-data update-thing-shadow --endpoint-url "https://${DICE_IOT_ENDPOINT}" \
+  --thing-name "$TUTORIAL_THING_NAME" --shadow-name dungeon-dice \
+  --cli-binary-format raw-in-base64-out \
+  --payload '{"state":{"desired":{"command":null},"reported":{"command":null,"result":null}}}' \
+  /tmp/dungeon-dice-shadow.json
+```
+
+EC2 워크스루는 x86_64 Linux를 사용합니다. 64비트 Linux를 실행하는 Raspberry Pi는
+대신 `linux-arm64`를 사용합니다. 생성된 레시피와 네이티브 종속성 모두
+해당 아키텍처를 대상으로 해야 합니다. <Link path="guides/greengrass-component#하드웨어-및-운영-체제">하드웨어 지원</Link>을 참조하세요.
+ESP32는 게이트웨이에 센서 입력을 제공할 수 있지만 이 Python 컴포넌트를 실행할 수 없습니다.
+
+## 2. 주사위 컴포넌트 생성
+
+디바이스 아티팩트가 Story Agent의 클라우드 종속성을 포함하지 않도록
+별도의 Python 호스트를 생성하세요:
+
+<RunGenerator generator="py#project" requiredParameters={{ name: 'edge' }} readonly />
+<RunGenerator generator="greengrass#component" requiredParameters={{ project: 'edge', name: 'dice', language: 'python', componentName: 'com.example.DungeonDice', componentVersion: 'NEXT_PATCH', platform: 'linux-amd64', ipc: true, infra: 'component-version', iac: 'cdk' }} readonly />
+
+`packages/edge/greengrass/dice/main.py`를 교체하세요:
+
+<E2ECode lang="python" path="dungeon-adventure/dice/main.py.template" />
+
+`packages/edge/greengrass/dice/recipe.yaml`을 교체하세요:
+
+<E2ECode lang="yaml" path="dungeon-adventure/dice/recipe.yaml.template" />
+
+**모든** `REPLACE_WITH_CORE_THING_NAME`을 `TUTORIAL_THING_NAME` 값으로 교체하세요.
+레시피의 IPC 권한은 이 디바이스의 주사위 섀도우 주제만 지정합니다.
+Python은 읽기 전용 아티팩트 디렉터리 외부의 컴포넌트 쓰기 가능 작업 디렉터리에
+`dice-result.json`을 작성합니다.
+
+`packages/edge/tests/greengrass/test_dice.py`를 교체하세요:
+
+<E2ECode lang="python" path="dungeon-adventure/dice/test_dice.py.template" />
+
+이러한 테스트는 유효한 굴림, 중복, 재시작 복구, 오래된 요청,
+만료 및 지속성 실패를 실행합니다. 컴포넌트가 이제 다른 동작을 구현하므로
+기본 생성기의 하트비트 테스트가 교체됩니다.
+
+## 3. 에이전트의 주사위 도구 추가
+
+Inventory MCP 프로젝트에 IoT 데이터 플레인 클라이언트를 추가하세요:
+
+<InstallCommand pkg={getDungeonDiceDependencies()} project="@dungeon-adventure/inventory" />
+
+`packages/inventory/src/mcp-server/roll-dice.ts`를 생성하세요:
+
+<E2ECode lang="typescript" path="dungeon-adventure/dice/roll-dice.ts.template" />
+
+`packages/inventory/src/mcp-server/register-dice.ts`를 생성하세요:
+
+<E2ECode lang="typescript" path="dungeon-adventure/dice/register-dice.ts.template" />
+
+`packages/inventory/src/mcp-server/server.ts`를 업데이트하세요:
+
+<E2EDiff lang="typescript" before="dungeon-adventure/2/mcp/server.ts.template" after="dungeon-adventure/dice/server.ts.template" />
+
+세 가지 인벤토리 도구를 모두 유지하세요. 생성된 Story Agent 연결은 이미
+이 서버에서 도구를 검색하므로 `roll-dice`도 검색합니다.
+도구는 주사위 크기만 허용합니다. 디바이스 ID와 엔드포인트는
+서버 구성에서 가져오며, 모델은 다른 디바이스나 MQTT 주제를 선택할 수 없습니다.
+로컬 개발 중에는 `DICE_*` 환경 변수 없이도 인벤토리 도구를 사용할 수 있습니다.
+`DICE_THING_NAME`, `DICE_IOT_ENDPOINT` 및 `DICE_AWS_REGION`이 설정될 때까지
+`roll-dice`를 호출하면 구성되지 않은 디바이스 오류가 반환됩니다.
+
+`packages/story/dungeon_adventure_story/agent/agent.py`를 업데이트하세요:
+
+<E2EDiff lang="python" before="dungeon-adventure/3/agent.py.template" after="dungeon-adventure/dice/agent.py.template" />
+
+교체는 순차 호출을 허용하므로 성공적인 굴림 다음에
+인벤토리 업데이트가 올 수 있습니다. 여전히 턴당 하나의 굴림만 허용하고
+주사위 도구가 실패할 때 챌린지를 명시적으로 중지합니다.
+
+## 4. 디바이스 리소스를 기존 애플리케이션에 구성
+
+`packages/infra/src/dice-resources.ts`를 생성하세요:
+
+<E2ECode lang="typescript" path="dungeon-adventure/dice/dice-resources.ts.template" />
+
+`packages/infra/src/stacks/application-stack.ts`를 업데이트하여 디바이스
+구성을 MCP 서버에 전달하고 런타임에 섀도우에 대한 액세스 권한을 부여하세요:
+
+<E2EDiff lang="typescript" before="dungeon-adventure/2/stacks/application-stack.ts.template" after="dungeon-adventure/dice/application-stack.ts.template" />
+
+기존 애플리케이션 스택의 나머지 부분을 유지하세요. `DiceResources`는
+디바이스 매개변수, 아티팩트 권한 부여, 컴포넌트 및 그
+배포를 소유합니다.
+
+세 가지 권한 경계가 있습니다:
+
+- 코어의 기존 IoT 인증서 정책은 `$aws/things/<thing-name>/shadow/*`에 대한 게시, 구독
+  및 수신을 허용하며, 여기에는 이미 명명된 `dungeon-dice` 섀도우가 포함됩니다.
+  추가 인증서 정책이 필요하지 않습니다.
+- 주사위 레시피는 IPC를 통해 해당 주제에 대한 컴포넌트 액세스 권한을 부여합니다.
+- Inventory MCP 런타임은 이 사물의 명명된 `dungeon-dice` 섀도우에만
+  `GetThingShadow` 및 `UpdateThingShadow`를 받습니다.
+
+아티팩트 권한 부여는 코어의 토큰 교환 역할이 `com.example.DungeonDice/*`만
+가져올 수 있도록 합니다. 배포는 컴포넌트 게시에 따라 달라집니다.
+
+빌드한 다음 네 가지 매개변수 값으로 모두 배포하세요:
+
+<NxCommands commands={['sync']} />
+<InstallCommand />
+<PackageManagerShortCommand commands={['lint --skip-nx-cache']} />
+<NxCommands commands={['run-many --target build --all']} />
+
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @dungeon-adventure/infra:deploy -- "dungeon-adventure-infra-sandbox/**" --parameters dungeon-adventure-infra-sandbox-Application:DiceThingName="$TUTORIAL_THING_NAME" --parameters dungeon-adventure-infra-sandbox-Application:DiceEndpoint="$DICE_IOT_ENDPOINT" --parameters dungeon-adventure-infra-sandbox-Application:TokenExchangeRoleArn="$TUTORIAL_TOKEN_EXCHANGE_ROLE_ARN" --parameters dungeon-adventure-infra-sandbox-Application:ThingGroupArn="$TUTORIAL_THING_GROUP_ARN"']} />
+
+WAF 스택이 매개변수를 정의하지 않으므로 애플리케이션 스택에 대한 매개변수를 한정하세요.
+
+이 워크스루에는 `deploy`를 사용하세요. 컴포넌트/버전 변경은
+CloudFormation 리소스를 교체합니다. <Link path="guides/greengrass-component#배포-수정">배포 수정</Link>은
+`deploy-sandbox`에 필요한 추가 롤백 플래그를 설명합니다.
+
+컴포넌트가 `RUNNING`이 될 때까지 기다리세요:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" \
+  greengrassv2 list-installed-components --core-device-thing-name "$TUTORIAL_THING_NAME" \
+  --query "installedComponents[?componentName=='com.example.DungeonDice'].[componentVersion,lifecycleState]" \
+  --output table
+```
+
+## 5. 에이전트가 굴리도록 하기
+
+배포된 게임을 열고 새 대화를 시작하거나 기존 대화를 다시 로드한 다음
+물어보세요:
+
+> "이 자물쇠를 따려는 시도를 위해 주사위 디바이스에서 d20을 굴려주세요."
+
+에이전트는 `roll-dice`를 호출하고 반환된 값과 결과를 설명해야 합니다.
+클라우드 섀도우를 읽어 `reported.result`를 도구 결과 및 에이전트의 응답과 비교하세요:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" \
+  iot-data get-thing-shadow --endpoint-url "https://${DICE_IOT_ENDPOINT}" \
+  --thing-name "$TUTORIAL_THING_NAME" --shadow-name dungeon-dice \
+  /tmp/dungeon-dice-shadow.json
+cat /tmp/dungeon-dice-shadow.json
+```
+
+성공적인 결과에는 `requestId`, `sides`, `value` 및 `rolledAt`이 포함됩니다.
+`/greengrass/v2/logs/com.example.DungeonDice.log`의 디바이스 로그는
+동일한 요청 ID와 값을 기록합니다. 성공적인 배포만으로는 이 왕복을 증명하지 못합니다.
+
+실패 경로를 실행하려면 Systems Manager 터미널을 통해 이 일회용 코어에서
+Greengrass 서비스를 중지하고, 다른 굴림을 요청하고, 제한된 대기 후
+도구가 오류를 보고하는지 확인하세요. 에이전트는 챌린지를 결정하는 대신
+디바이스를 사용할 수 없다고 알려야 합니다. 계속하기 전에 서비스를 다시 시작하세요.
+만료된 대기 중인 요청은 디바이스가 다시 연결될 때 굴려서는 안 됩니다.
+새 도구 호출은 새 요청을 생성합니다.
+
+버전 업데이트 실습을 위해 컴포넌트의 로그 메시지를 변경하고 다시 빌드한 다음
+동일한 배포 명령을 실행하세요. `NEXT_PATCH`는 새 버전을 게시합니다.
+새로 실행 중인 버전을 확인한 다음 다른 굴림을 요청하세요.
+
+## 6. 계속 플레이하거나 모두 제거
+
+확장만 제거하려면:
+
+1. 애플리케이션 스택에서 `DiceArtifactBucket`, `DiceComponentArn` 및 `DiceDeploymentId`
+   출력을 기록하세요.
+2. `packages/infra/src/dice-resources.ts`에서 `this.deployment.addComponent(component)`를 제거하세요.
+   동일한 매개변수로 재배포하세요. 이렇게 하면 빈 배포 수정이 전송됩니다.
+   `list-installed-components`가 더 이상 `com.example.DungeonDice`를 나열하지 않을 때까지 기다리세요.
+3. 기본 <Link path="get_started/tutorials/dungeon-game/3">Story Agent 프롬프트</Link>를 복원하고,
+   `registerDiceTool` import 및 호출을 제거하고,
+   <Link path="get_started/tutorials/dungeon-game/2#스택-연결">모듈 2 애플리케이션 스택</Link>을 복원하세요.
+   던전을 다시 빌드하고 배포하세요. 이렇게 하면 MCP 권한 및 주사위 구성이 제거됩니다.
+4. <Link path="get_started/tutorials/greengrass/cleanup#작업-3-보존된-greengrass-리소스-삭제">보존된 리소스 정리 절차</Link>를 사용하여
+   보존된 Greengrass 배포 레코드, 컴포넌트 버전 및 아티팩트 버킷을 삭제하세요.
+   `com.example.Pulse`를 `com.example.DungeonDice`로 대체하고 기록된 주사위 출력을 사용하세요.
+   업데이트 실습으로 생성된 모든 버전/수정을 포함하세요.
+5. 명명된 섀도우를 삭제한 다음 설정 스크립트의 정리를 실행하고
+   <Link path="get_started/tutorials/greengrass/cleanup">디바이스 정리 가이드</Link>에 설명된 대로
+   소유자 관리 인스턴스 프로필 및 역할을 제거하세요.
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" \
+  iot-data delete-thing-shadow --endpoint-url "https://${DICE_IOT_ENDPOINT}" \
+  --thing-name "$TUTORIAL_THING_NAME" --shadow-name dungeon-dice \
+  /tmp/dungeon-dice-shadow-deleted.json
+```
+
+이러한 단계 후에도 던전은 배포된 상태로 유지됩니다. 전체 애플리케이션을 제거하려면
+보존된 사용자 풀, SMS 역할 및 대화 기록 버킷을 포함하여
+<Link path="get_started/tutorials/dungeon-game/wrap-up#리소스-삭제">리소스 파괴</Link>를 계속하세요.
+
+## 추가 실험
+
+- 64비트 OS와 물리적 센서가 있는 Raspberry Pi를 사용하세요. `secrets.randbelow`를 교체하는 동안
+  요청 ID 및 시간 초과 계약을 유지하세요.
+- ESP32를 사용하여 센서를 읽고 그 결과를 Linux 게이트웨이로 보내세요.
+  이렇게 하면 펌웨어 및 디바이스 인증이 추가됩니다. 이 Python 컴포넌트의 다른 CPU 대상이 아닙니다.
+- 컴포넌트를 로컬 주사위 엔진과 Greengrass pub/sub를 통해 연결된
+  MQTT 브리지로 분할하세요.

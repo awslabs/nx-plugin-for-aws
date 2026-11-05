@@ -1796,10 +1796,10 @@ describe('greengrass deploy-local.ts', () => {
       ],
     });
 
-    const result = runDeployLocal(1);
+    const result = runDeployLocal(5);
 
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('did not settle within 1s');
+    expect(result.status, result.stderr).toBe(1);
+    expect(result.stderr).toContain('did not settle within 5s');
     expect(result.stderr).toContain('last reported state STARTING');
   }, 30000);
 

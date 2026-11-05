@@ -1284,9 +1284,8 @@ describe('GreengrassComponentVersion', () => {
       thrown = error as Error;
     }
 
-    // Names the ComponentName and ComponentVersion driving the overflow, the
-    // resulting prefix length (103), and the limit it exceeds (102) - not a
-    // bare `BucketDeployment` tag-key error.
+    // The error identifies ComponentName, the 103-character prefix, and the
+    // 102-character limit.
     expect(thrown).toBeDefined();
     const message = thrown?.message ?? '';
     expect(message).toContain(`ComponentName "${componentName}"`);

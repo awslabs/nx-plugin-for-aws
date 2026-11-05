@@ -1,0 +1,116 @@
+---
+title: Create the component
+description: Create the workspace, a Python project, the Greengrass component and a CDK application, then switch the component from local pub/sub to AWS IoT Core MQTT
+---
+
+import { Aside, FileTree } from '@astrojs/starlight/components';
+import CreateNxWorkspaceCommand from '@components/create-nx-workspace-command.astro';
+import E2EDiff from '@components/e2e-diff.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import RunGenerator from '@components/run-generator.astro';
+
+## Task 1: Create the workspace
+
+From the directory that will hold the workspace, run:
+
+<CreateNxWorkspaceCommand workspace="greengrass-tutorial" iac="cdk" readonly />
+
+Then change into it:
+
+```bash
+cd greengrass-tutorial
+```
+
+The workspace name sets the npm scope `@greengrass-tutorial` and the Python namespace `greengrass_tutorial`. Generated project names carry those prefixes, and `nx run` needs the full name, so the rest of this tutorial uses `greengrass_tutorial.telemetry` and `@greengrass-tutorial/infra`.
+
+## Task 2: Generate the projects
+
+Create the Python project that hosts the component:
+
+<RunGenerator generator="py#project" requiredParameters={{ name: 'telemetry' }} noInteractive readonly />
+
+This creates the project `greengrass_tutorial.telemetry` at `packages/telemetry`.
+
+Add the Greengrass component to it:
+
+<RunGenerator generator="greengrass#component" requiredParameters={{ project: 'telemetry', name: 'pulse', language: 'python', componentName: 'com.example.Pulse', componentVersion: 'NEXT_PATCH', platform: 'linux-amd64', ipc: true, infra: 'component-version', iac: 'cdk' }} noInteractive readonly />
+
+Each value matters later in the tutorial:
+
+- `platform: linux-amd64` matches the x86_64 instance you provision in module 2. The default is `linux-arm64`, and a recipe built for one architecture does not run on the other.
+- `componentVersion: NEXT_PATCH` allocates the version at deploy time. The first deployment publishes `1.0.0`; module 3 publishes `1.0.1` from a source change without editing the recipe.
+- `ipc: true` is explicit because this tutorial changes the component to publish through Greengrass IPC.
+- `infra: component-version` with `iac: cdk` adds the reusable Greengrass core constructs to `packages/common/constructs` and a `Pulse` app construct that publishes this component's artifact.
+
+Create the CDK application that will hold the deployment:
+
+<RunGenerator generator="ts#infra" requiredParameters={{ name: 'infra' }} noInteractive readonly />
+
+The files this tutorial touches:
+
+<FileTree>
+- packages
+  - telemetry
+    - greengrass
+      - pulse
+        - main.py the component entrypoint
+        - recipe.yaml the component recipe
+    - tests
+      - greengrass
+        - test_pulse.py the component's unit test
+    - project.json `pulse-vendor`, `pulse-artifact`, `pulse-deploy-local` and `pulse-logs` targets
+  - common
+    - constructs
+      - src
+        - core/greengrass artifact bucket, component version, deployment and version resolver constructs
+        - app/greengrass/pulse.ts the `Pulse` construct
+  - infra
+    - src
+      - stacks
+        - application-stack.ts where module 3 composes the deployment
+</FileTree>
+
+## Task 3: Publish to AWS IoT Core instead of local pub/sub
+
+The generated `main.py` publishes a heartbeat with `publish_to_topic`, which reaches other components on the same core device through the local Greengrass pub/sub service. It never leaves the device. To see the heartbeat in AWS IoT Core, the component must use `publish_to_iot_core` from the IPC client, and both the recipe and the device's IoT policy must allow it.
+
+Replace the generated `packages/telemetry/greengrass/pulse/main.py`:
+
+<E2EDiff before="greengrass-tutorial/main.py.original.template" after="greengrass-tutorial/main.py.template" lang="python" />
+
+`publish_to_iot_core` takes the topic name, a QoS of `"1"` (at least once), and a byte payload. The topic `tutorial/greengrass/heartbeat` appears again in the recipe, in the device IoT policy that module 2 creates, and in the MQTT test client subscription in module 3.
+
+Replace the access-control block in `packages/telemetry/greengrass/pulse/recipe.yaml`:
+
+<E2EDiff before="greengrass-tutorial/recipe.yaml.original.template" after="greengrass-tutorial/recipe.yaml.template" lang="yaml" />
+
+The IPC service for AWS IoT Core MQTT is `aws.greengrass.ipc.mqttproxy`, and publishing is the operation `aws.greengrass#PublishToIoTCore`. The resource is the exact topic. This authorization is enforced by the nucleus on the device. The IoT policy attached to the device certificate is enforced by AWS IoT Core, and it needs `iot:Publish` on the same topic. Module 2 creates that policy.
+
+Update the generated test, because the host project's `build` runs it and the shared constructs build depends on the host build:
+
+<E2EDiff before="greengrass-tutorial/test_pulse.py.original.template" after="greengrass-tutorial/test_pulse.py.template" lang="python" />
+
+## Task 4: Build the artifact
+
+Run the test and build the component artifact:
+
+<NxCommands commands={['run greengrass_tutorial.telemetry:test', 'run greengrass_tutorial.telemetry:pulse-artifact']} />
+
+`pulse-artifact` vendors the Python dependencies for `x86_64-manylinux_2_28`, packages `pulse.zip`, and writes the resolved recipe:
+
+<FileTree>
+- dist/packages/telemetry/greengrass/pulse/greengrass-build
+  - recipes
+    - com.example.Pulse-NEXT_PATCH.yaml the recipe with the mqttproxy authorization
+  - artifacts
+    - com.example.Pulse
+      - NEXT_PATCH
+        - pulse.zip
+</FileTree>
+
+<Aside type="caution" title="Do not run pulse-deploy-local here">
+`pulse-deploy-local` and `pulse-logs` run on a machine that has the Greengrass nucleus and `greengrass-cli` installed. Your workstation is not the core device in this tutorial. Module 2 provisions the device and module 3 deploys to it from the cloud.
+</Aside>
+
+Continue with <Link path="get_started/tutorials/greengrass/2">Provision the core device</Link>.
