@@ -23,7 +23,7 @@ export const TS_VERSIONS = {
   // brace-expansion 5.x, the only line Trivy's `< 5.0.8` advisory range treats
   // as fixed. Overriding brace-expansion directly is not viable — 5.x drops the
   // CommonJS default export that minimatch 9 calls.
-  minimatch: '10.2.6',
+  minimatch: '11.0.1',
   // Both overridden in the vended RDB migration image build, which installs the
   // prisma CLI to run migrations: its own ranges resolve deepmerge-ts below the
   // CVE-2026-40345 fix (HIGH) and mysql2 below the GHSA-3f6p-5ww8-9rcr fix
