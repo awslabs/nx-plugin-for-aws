@@ -2,6 +2,7 @@ import type { Runtime } from 'aws-cdk-lib/aws-bedrockagentcore';
 <%_ if (mode === 'langfuse') { _%>
 import type { CfnRuntime } from 'aws-cdk-lib/aws-bedrockagentcore';
 import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
+import { RuntimeConfig } from '../../../core/runtime-config.js';
 <%_ } _%>
 
 // Configure with observability#langfuse.
@@ -9,15 +10,22 @@ export const langfuseObservability = {
   entrypoint: ['<%= mode === 'langfuse' ? 'langfuse_main.py' : 'agentcore_launcher.py' %>'],
   environmentVariables: {
 <%_ if (mode === 'langfuse') { _%>
+    // Disable managed ADOT so the application can configure its tracing provider.
     DISABLE_ADOT_OBSERVABILITY: 'true',
-    LANGFUSE_HOST: <%- host %>,
-    LANGFUSE_SECRET_ARN: <%- secretArn %>,
 <%_ } _%>
   },
 };
 
 export const configureLangfuseRuntime = (<%= mode === 'langfuse' ? 'runtime' : '_runtime' %>: Runtime): void => {
 <%_ if (mode === 'langfuse') { _%>
+  const rc = RuntimeConfig.ensure(runtime);
+  rc.set('agentcore', 'langfuse', {
+    ...rc.get('agentcore').langfuse,
+    <%- agentNameClassName %>: {
+      host: <%- host %>,
+      secretArn: <%- secretArn %>,
+    },
+  });
   const resource = runtime.node.defaultChild as CfnRuntime;
   resource.platformVersion ??= 'V1';
   runtime.node.addValidation({

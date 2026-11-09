@@ -102,6 +102,11 @@ describe('observability#langfuse generator', () => {
       );
       const config = tree.read(CONFIG, 'utf-8');
       expect(config).toContain(SECRET);
+      expect(config).toContain("rc.set('agentcore', 'langfuse', {");
+      expect(config).toContain("...rc.get('agentcore').langfuse");
+      expect(config).toContain('TestProjectAgent: {');
+      expect(config).not.toContain('LANGFUSE_HOST');
+      expect(config).not.toContain('LANGFUSE_SECRET_ARN');
       expect(config).toContain("actions: ['secretsmanager:GetSecretValue']");
       expect(config).not.toContain('LANGFUSE_PUBLIC_KEY');
       expect(config).not.toContain('LANGFUSE_SECRET_KEY');
@@ -169,6 +174,7 @@ describe('observability#langfuse generator', () => {
     expect(tree.read(CONFIG, 'utf-8')).not.toContain(
       'DISABLE_ADOT_OBSERVABILITY',
     );
+    expect(tree.read(CONFIG, 'utf-8')).not.toContain('rc.set(');
     expect(tree.read(CONFIG, 'utf-8')).toMatchSnapshot('CloudWatch config');
     const disabled = files(tree);
     await observabilityLangfuseGenerator(tree, {
@@ -267,6 +273,18 @@ describe('observability#langfuse generator', () => {
     const second = tree.read(`${MODULE}/second/init.py`, 'utf-8');
     await observabilityLangfuseGenerator(tree, { ...options, agent: 'first' });
     expect(tree.read(`${MODULE}/second/init.py`, 'utf-8')).toBe(second);
+    const firstConfig = tree.read(
+      'packages/common/constructs/src/app/agents/first/langfuse-observability.ts',
+      'utf-8',
+    );
+    const secondConfig = tree.read(
+      'packages/common/constructs/src/app/agents/second/langfuse-observability.ts',
+      'utf-8',
+    );
+    expect(firstConfig).toContain('First: {');
+    expect(firstConfig).not.toContain('Second: {');
+    expect(secondConfig).toContain('Second: {');
+    expect(secondConfig).not.toContain('First: {');
   });
 
   it.each([

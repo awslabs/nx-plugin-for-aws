@@ -79,6 +79,7 @@ export const internalTestMatrixGenerator = async (
   tree: Tree,
   options: InternalTestMatrixGeneratorSchema = {},
 ): Promise<GeneratorCallback> => {
+  const iac = options.infra ?? 'cdk';
   const preferInstallDependencies = options.preferInstallDependencies ?? false;
   const defaults = { preferInstallDependencies };
   const projectDefaults = { ...defaults, directory: 'packages' };
@@ -92,7 +93,7 @@ export const internalTestMatrixGenerator = async (
   // The infrastructure project every other generator deploys into. Which
   // generator owns it depends on the workspace's IaC provider, so the caller
   // asks for the one matching the workspace it created.
-  if (options.infra === 'terraform') {
+  if (iac === 'terraform') {
     await terraformProjectGenerator(tree, {
       name: 'infra',
       type: 'application',
@@ -408,7 +409,7 @@ export const internalTestMatrixGenerator = async (
   for (const agent of pyAgents) {
     await pyAgentGenerator(tree, { ...agent, ...defaults });
   }
-  if (options.infra !== 'terraform') {
+  if (iac === 'cdk') {
     await pyProjectGenerator(tree, {
       name: 'py-langfuse-project',
       type: 'application',

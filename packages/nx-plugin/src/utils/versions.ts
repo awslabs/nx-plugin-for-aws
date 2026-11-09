@@ -285,7 +285,6 @@ export const PY_VERSIONS = {
   'pip-licenses': '==5.5.5',
   pydantic: '==2.14.3',
   ruff: '==0.17.4',
-  starlette: '==1.10.0',
   'strands-agents': '==1.64.0',
   'strands-agents[a2a]': '==1.64.0',
   'strands-agents-tools': '==0.8.11',
