@@ -74,6 +74,8 @@ pnpm nx g @aws/nx-plugin:observability#langfuse \
 
 Here `LANGFUSE_SECRET_ARN` contains only the ARN, not a key. CDK grants `secretsmanager:GetSecretValue` on exactly that ARN. The application loads both keys once at process startup and constructs Basic authentication in memory. Arrange a runtime restart when rotating keys; an unchanged CDK deployment does not refresh running processes.
 
+The CDK helper writes the host and secret ARN to AppConfig at `agentcore.langfuse.<AgentClass>`, preserving entries for other agents. Startup reads this entry through `get_agentcore_runtime_config()`, using the agent's existing AppConfig read grant. The generated runtime sets `DISABLE_ADOT_OBSERVABILITY=true` so AgentCore's managed ADOT pipeline leaves tracing to the application; host and secret ARN are not runtime environment variables.
+
 The default host is Langfuse Cloud EU (`https://cloud.langfuse.com`). Set the host for your Langfuse region, such as `https://us.cloud.langfuse.com`, or an existing self-hosted HTTPS endpoint. Path prefixes are supported. Provide the base URL, without `/api/public/otel`; credentials, query parameters, and fragments in the URL are rejected. Repeat runs retain the previous host and secret unless you supply replacements.
 
 The exporter uses OTLP/HTTP with `x-langfuse-ingestion-version: 4`. Self-hosted installations must support that ingestion contract. Consult Langfuse's [OpenTelemetry integration](https://langfuse.com/integrations/native/opentelemetry) and [v4 migration guide](https://langfuse.com/integrations/native/opentelemetry/migration-to-v4) when choosing an endpoint.
@@ -84,7 +86,7 @@ Run your workspace's `build` and infrastructure `deploy` targets as described in
 
 Invoke the deployed agent with a prompt that calls a tool. In Langfuse, verify an invocation root, agent/model/tool children, token usage, content, and the AgentCore session ID. Repeat a short request in the same session to check flushing and grouping. The application root retains the upstream AWS trace and parent IDs; the Langfuse SDK marks it as the logical application root even though the AWS service parent is not exported to Langfuse.
 
-Use session IDs between 33 and 200 characters. This version rejects longer IDs because Langfuse cannot group them as sessions. The generated client uses UUIDs within this limit.
+Use session IDs between 33 and 200 characters. A missing ID or one shorter than 33 characters gets a new UUID for that invocation. This version rejects longer IDs because Langfuse cannot group them as sessions. The generated client uses UUIDs within this limit.
 
 The generated `dev` target remains local and does not initialize Langfuse or fetch its secret. Local Langfuse export is not part of this version. The generated Python test uses an in-memory exporter and synthetic credentials to check propagation, session grouping, and flush ordering without network access.
 
@@ -96,7 +98,7 @@ The generator adds `langfuse_telemetry.py` beside the agent, a separate `package
 
 The Langfuse entrypoint creates one provider before importing the agent. FastAPI's overlapping tracing is disabled only in that process; native Strands spans use the same provider. The Langfuse SDK's public observation API supplies the application root and session attributes. Invocation input/output capture is bounded to 1 MiB each; the root records `content_truncated` when that limit is exceeded.
 
-The initial dependency set holds Langfuse at 4.15.0 and OpenTelemetry at 1.44.0 to remain compatible with the generated ADOT distribution. Upgrade these together after compatibility testing; upgrading Langfuse alone can introduce an incompatible OpenTelemetry requirement.
+The dependency set holds Langfuse at 4.15.0, ADOT at 0.22.0, and the OpenTelemetry packages ADOT requires, including API/SDK/HTTP exporter 1.45.1. Upgrade these together after compatibility testing. Starlette follows FastAPI's dependency requirements.
 
 Repeating the generator with the same inputs does not duplicate wiring or overwrite your runtime edits. Changing host, secret, or mode updates the generated CDK configuration. If you edit that configuration or remove its wiring, the generator asks you to reconcile it before changing options. This prevents an option change from silently replacing custom infrastructure.
 
@@ -111,5 +113,7 @@ pnpm nx g @aws/nx-plugin:observability#langfuse \
 ```
 
 Rebuild and redeploy the agent's CDK stack, then invoke it with a new session and verify new application traces in CloudWatch. This restores the generated ADOT entrypoint, removes the Langfuse runtime settings and secret-read grant, and leaves your added source files available for later reuse. Switching back before Langfuse has ever been enabled is a no-op.
+
+The Python dependencies remain in `pyproject.toml` so the preserved files and their offline test continue to work.
 
 The secret remains yours to manage. Switching modes does not copy, delete, or move historical traces between backends. To enable Langfuse again, run the generator with `--mode=langfuse`; the previously selected host and secret ARN are retained.
