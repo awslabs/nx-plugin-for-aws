@@ -135,12 +135,7 @@ export const TS_VERSIONS = {
   'fs-extra': '11.4.1',
   '@types/fs-extra': '11.0.4',
   'js-yaml': '4.3.2',
-  // Held at 3.5.4 by the `reject` entry in .ncurc.cjs. From 3.5.5,
-  // Pool.escape() throws "(conn:-1, no: 45066) Cannot escape value: the pool
-  // has no connection", and the vended ts#rdb create-db-user handler calls
-  // pool.escape before opening a connection. A follow-up PR switches the
-  // handler to conn.escape on an open connection.
-  mariadb: '3.5.4',
+  mariadb: '3.5.5',
   mise: '2026.11.4',
   npm: '12.2.2',
   'npm-check-updates': '23.1.1',
