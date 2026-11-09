@@ -27,6 +27,13 @@ export const PY_VERSION_HOLDS: readonly VersionHold<IPyDepVersion>[] = [
     liftWhen:
       'a newer ty has been checked against all vended Python templates (run the py-client, py#dynamodb and other Python-typecheck specs with it)',
   },
+  {
+    name: 'strands-agents-tools',
+    reason:
+      'strands-agents-tools 0.9.0 removed current_time, which the vended py#agent strands template imports and passes as a tool',
+    liftWhen:
+      'the py#agent strands template injects the current time with ContextInjector and a migration moves existing agent.py files off current_time',
+  },
 ];
 
 /** Terraform providers the version update keeps at their current version. */

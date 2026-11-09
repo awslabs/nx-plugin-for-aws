@@ -87,6 +87,19 @@ describe('PY_VERSION_HOLDS', () => {
     expect(notes[0].note).toContain('Lift when');
   });
 
+  it('holds strands-agents-tools below 0.9.0, which removed current_time', () => {
+    const proposed: Record<string, string> = {
+      ...PY_VERSIONS,
+      'strands-agents-tools': '==0.9.0',
+    };
+
+    const notes = holdPinnedVersions(PY_VERSION_HOLDS, PY_VERSIONS, proposed);
+
+    expect(proposed).toEqual(PY_VERSIONS);
+    expect(notes.map(({ name }) => name)).toEqual(['strands-agents-tools']);
+    expect(notes[0].note).toContain('==0.9.0 available');
+  });
+
   it('gives every hold a pinned package, a reason and a lift condition', () => {
     for (const { name, reason, liftWhen } of PY_VERSION_HOLDS) {
       expect(PY_VERSIONS[name]).toMatch(/^==/);
