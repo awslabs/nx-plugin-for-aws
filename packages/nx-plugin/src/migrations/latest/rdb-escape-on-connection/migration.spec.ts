@@ -183,6 +183,48 @@ describe('rdb-escape-on-connection migration', () => {
     expect(tree.read(HANDLER, 'utf-8')).toBe(customised);
   });
 
+  it('should report a handler whose pool escape arguments were edited', async () => {
+    addProjectConfiguration(tree, 'db', tsRdbProject());
+    // Still exactly three pool escape calls, but the host no longer matches.
+    const edited = OLD_HANDLER.replace(
+      "const quotedHost = pool.escape('%');",
+      "const quotedHost = pool.escape('10.0.%');",
+    );
+    tree.write(HANDLER, edited);
+
+    const { nextSteps } = await migration(tree);
+
+    expect(nextSteps).toHaveLength(1);
+    expect(nextSteps[0]).toContain(HANDLER);
+    expect(nextSteps[0]).toContain('pool.getConnection()');
+    expect(tree.read(HANDLER, 'utf-8')).toBe(edited);
+  });
+
+  it('should report a handler that opens its connection differently', async () => {
+    addProjectConfiguration(tree, 'db', tsRdbProject());
+    // The vended escape declarations, but no vended getConnection() call.
+    const edited = OLD_HANDLER.replace(
+      GET_CONNECTION,
+      '    connection = await pool.getConnection({ timeout: 1000 });\n',
+    );
+    tree.write(HANDLER, edited);
+
+    const { nextSteps } = await migration(tree);
+
+    expect(nextSteps).toHaveLength(1);
+    expect(nextSteps[0]).toContain(HANDLER);
+    expect(tree.read(HANDLER, 'utf-8')).toBe(edited);
+  });
+
+  it('should skip a ts#rdb project without a create-db-user handler', async () => {
+    addProjectConfiguration(tree, 'db', tsRdbProject());
+
+    const { nextSteps } = await migration(tree);
+
+    expect(nextSteps).toHaveLength(0);
+    expect(tree.exists(HANDLER)).toBe(false);
+  });
+
   it('should be a no-op in a workspace without any ts#rdb project', async () => {
     const { nextSteps } = await migration(tree);
 
