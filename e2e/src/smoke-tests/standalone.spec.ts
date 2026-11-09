@@ -29,6 +29,15 @@ const COMPONENT_BASE_OVERRIDES: Record<string, string[]> = {
   'ts#website#auth': ['ts#website --name=base'],
   'ts#agent#guardrails': ['ts#project --name=base', 'ts#agent --project=base'],
   'py#agent#guardrails': ['py#project --name=base', 'py#agent --project=base'],
+  'observability#langfuse': [
+    'py#project --name=base',
+    'py#agent --project=base --framework=strands --protocol=http --infra=agentcore --iac=cdk --auth=iam --session=in-memory',
+  ],
+};
+
+const COMPONENT_ARGS: Record<string, string> = {
+  'observability#langfuse':
+    '--secretArn=arn:aws:secretsmanager:us-east-1:123456789012:secret:langfuse-abcdef',
 };
 
 const baseSetup = (generator: string): string[] =>
@@ -216,7 +225,7 @@ describe.skipIf(shardComponents.length === 0)(
           );
         }
         await runCLI(
-          `generate @aws/nx-plugin:${generator} --project=base ${hasName ? '--name=test' : ''} --no-interactive`,
+          `generate @aws/nx-plugin:${generator} --project=base ${hasName ? '--name=test' : ''} ${COMPONENT_ARGS[generator] ?? ''} --no-interactive`,
           opts,
         );
         await syncAndBuild(cwd);

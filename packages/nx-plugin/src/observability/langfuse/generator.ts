@@ -14,6 +14,7 @@ import {
 } from '@nx/devkit';
 import { PY_AGENT_GENERATOR_INFO } from '../../py/agent/generator.js';
 import { addPyDependencies } from '../../utils/add-dependencies.js';
+import { getPythonAgentConnectionModuleName } from '../../utils/agent-connection/agent-connection.js';
 import {
   addDestructuredImport,
   addPythonDestructuredImport,
@@ -37,6 +38,10 @@ import {
   readProjectConfigurationUnqualified,
   updateComponentGeneratorMetadata,
 } from '../../utils/nx.js';
+import {
+  PACKAGES_DIR,
+  SHARED_CONSTRUCTS_DIR,
+} from '../../utils/shared-constructs-constants.js';
 import type { ObservabilityLangfuseGeneratorSchema } from './schema';
 
 export const OBSERVABILITY_LANGFUSE_GENERATOR_INFO: NxGeneratorInfo =
@@ -60,7 +65,6 @@ export const DEPENDENCIES = declareDependencies<LangfuseMetadata>()({
     { name: 'opentelemetry-exporter-otlp-proto-http' },
     { name: 'opentelemetry-sdk-extension-aws' },
     { name: 'opentelemetry-propagator-aws-xray' },
-    { name: 'starlette' },
   ],
 });
 
@@ -166,7 +170,11 @@ export const observabilityLangfuseGenerator = async (
   const agentModule = agent.path.split('/').join('.');
   const agentFolder = agent.path.split('/').pop();
   const constructDir = joinPathFragments(
-    'packages/common/constructs/src/app/agents',
+    PACKAGES_DIR,
+    SHARED_CONSTRUCTS_DIR,
+    'src',
+    'app',
+    'agents',
     kebabCase(agent.rc),
   );
   const construct = joinPathFragments(
@@ -280,21 +288,24 @@ export const observabilityLangfuseGenerator = async (
     tree,
     joinPathFragments(import.meta.dirname, 'files', 'runtime'),
     agentDir,
-    {},
+    {
+      agentConnectionModuleName: getPythonAgentConnectionModuleName(tree),
+      agentNameClassName: agent.rc,
+    },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
   generateFiles(
     tree,
     joinPathFragments(import.meta.dirname, 'files', 'package'),
     packageDir,
-    { agentModule },
+    { agentModule, port: 8080 },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
   generateFiles(
     tree,
     joinPathFragments(import.meta.dirname, 'files', 'tests'),
     joinPathFragments(project.root, 'tests'),
-    { agentModule, agentFolder },
+    { agentModule, agentFolder, agentNameClassName: agent.rc },
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
   if (!unchanged) {
@@ -306,6 +317,7 @@ export const observabilityLangfuseGenerator = async (
         mode,
         host: JSON.stringify(host),
         secretArn: JSON.stringify(secretArn),
+        agentNameClassName: agent.rc,
       },
     );
   }

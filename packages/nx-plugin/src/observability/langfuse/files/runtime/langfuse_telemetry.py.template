@@ -3,12 +3,14 @@ import base64
 import json
 import logging
 import os
+import re
 from collections.abc import Sequence
 from typing import Any
 from urllib.parse import urlsplit
 from uuid import uuid4
 
 import boto3
+from botocore.exceptions import ClientError
 from langfuse import Langfuse, propagate_attributes
 from langfuse.types import TraceContext
 from opentelemetry import context, propagate, trace
@@ -23,6 +25,8 @@ from opentelemetry.sdk.trace.sampling import ALWAYS_ON
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+from <%- agentConnectionModuleName %>.core.runtime_config import get_agentcore_runtime_config
 
 _client: Langfuse | None = None
 _provider: TracerProvider | None = None
@@ -87,8 +91,9 @@ def initialize(service_name: str = "agent") -> None:
     if not isinstance(trace.get_tracer_provider(), trace.ProxyTracerProvider):
         raise RuntimeError("Langfuse requires the plain entrypoint and DISABLE_ADOT_OBSERVABILITY=true.")
     try:
-        arn = os.environ["LANGFUSE_SECRET_ARN"]
-        host = os.environ["LANGFUSE_HOST"].rstrip("/")
+        entry = get_agentcore_runtime_config()["langfuse"]["<%- agentNameClassName %>"]
+        arn = entry["secretArn"]
+        host = entry["host"].rstrip("/")
         url = urlsplit(host)
         if url.scheme != "https" or not url.hostname or url.username or url.password or url.query or url.fragment:
             raise ValueError("Invalid Langfuse host")
@@ -99,14 +104,21 @@ def initialize(service_name: str = "agent") -> None:
         if not isinstance(public_key, str) or not public_key or not isinstance(secret_key, str) or not secret_key:
             raise ValueError("Missing Langfuse keys")
         authorization = "Basic " + base64.b64encode(f"{public_key}:{secret_key}".encode()).decode()
-    except Exception:  # noqa: BLE001
-        raise RuntimeError("Could not load Langfuse credentials. Check the secret ARN, IAM access, and JSON field names.") from None
+    except Exception as error:  # noqa: BLE001
+        aws_code = error.response.get("Error", {}).get("Code") if isinstance(error, ClientError) else None
+        if not isinstance(aws_code, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9]{0,127}", aws_code):
+            aws_code = "unavailable"
+        logger.warning("Langfuse startup failed (%s, AWS error code: %s).", type(error).__name__, aws_code)
+        raise RuntimeError(
+            "Could not load Langfuse credentials. Check runtime config at agentcore.langfuse.<%- agentNameClassName %>, "
+            "the secret ARN, IAM access, and JSON field names."
+        ) from None
 
     os.environ["OTEL_SEMCONV_STABILITY_OPT_IN"] = (
         "gen_ai_latest_experimental,gen_ai_span_attributes_only,gen_ai_use_latest_invocation_tokens"
     )
-    logging.getLogger("opentelemetry.exporter.otlp.proto.http.trace_exporter").setLevel(logging.CRITICAL)
-    logging.getLogger("langfuse").setLevel(logging.CRITICAL)
+    logging.getLogger("opentelemetry.exporter.otlp.proto.http.trace_exporter").setLevel(logging.WARNING)
+    logging.getLogger("langfuse").setLevel(logging.WARNING)
     provider = TracerProvider(
         resource=Resource.create({"service.name": service_name}),
         sampler=ALWAYS_ON,
@@ -152,9 +164,11 @@ class LangfuseMiddleware:
             raise RuntimeError("Initialize Langfuse before importing the agent application.")
         headers = Headers(scope=scope)
         session_id = headers.get(_SESSION_HEADER) or str(uuid4())
-        if not 33 <= len(session_id) <= 200:
+        if len(session_id) < 33:
+            session_id = str(uuid4())
+        if len(session_id) > 200:
             await send({"type": "http.response.start", "status": 400, "headers": []})
-            await send({"type": "http.response.body", "body": b"Langfuse session IDs must contain 33-200 characters."})
+            await send({"type": "http.response.body", "body": b"Langfuse session IDs must contain at most 200 characters."})
             return
         extracted = propagate.extract(headers)
         parent = trace.get_current_span(extracted).get_span_context()

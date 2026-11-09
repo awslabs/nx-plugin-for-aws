@@ -1,10 +1,13 @@
 import asyncio
 import json
+import logging
 import subprocess
 import sys
-from uuid import uuid4
+from io import StringIO
+from uuid import UUID, uuid4
 
 import pytest
+from botocore.exceptions import ClientError
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 from opentelemetry import trace
@@ -31,8 +34,15 @@ def check_invocation_lifecycle(monkeypatch):
             secret_reads.append(SecretId)
             return {"SecretString": json.dumps(credentials)}
 
-    monkeypatch.setenv("LANGFUSE_SECRET_ARN", "arn:aws:secretsmanager:us-east-1:123456789012:secret:trace-test-abcdef")
-    monkeypatch.setenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
+    secret_arn = "arn:aws:secretsmanager:us-east-1:123456789012:secret:trace-test-abcdef"
+    monkeypatch.setattr(
+        telemetry,
+        "get_agentcore_runtime_config",
+        lambda: {"langfuse": {
+            "<%- agentNameClassName %>": {"host": "https://cloud.langfuse.com", "secretArn": secret_arn},
+            "AnotherAgent": {"host": "https://other.example.com", "secretArn": "another-agent"},
+        }},
+    )
     monkeypatch.setattr(telemetry.boto3, "client", lambda *args, **kwargs: SecretClient())
     exporter_options = {}
 
@@ -41,24 +51,41 @@ def check_invocation_lifecycle(monkeypatch):
         return exported
 
     monkeypatch.setattr(telemetry, "OTLPSpanExporter", make_exporter)
-    with pytest.MonkeyPatch.context() as failed_start:
-        def unavailable(*args, **kwargs):
-            raise ValueError(credentials["LANGFUSE_SECRET_KEY"])
+    diagnostics = StringIO()
+    handler = logging.StreamHandler(diagnostics)
+    telemetry.logger.addHandler(handler)
+    try:
+        failures: list[Exception] = [
+            ClientError({"Error": {"Code": code, "Message": credentials["LANGFUSE_SECRET_KEY"]}}, "GetSecretValue")
+            for code in ("AccessDeniedException", "ResourceNotFoundException")
+        ]
+        failures.append(json.JSONDecodeError(credentials["LANGFUSE_SECRET_KEY"], credentials["LANGFUSE_PUBLIC_KEY"], 0))
+        for failure in failures:
+            with pytest.MonkeyPatch.context() as failed_start:
+                def unavailable(*args, failure=failure, **kwargs):
+                    raise failure
 
-        failed_start.setattr(telemetry.boto3, "client", unavailable)
-        with pytest.raises(RuntimeError, match="Could not load Langfuse credentials") as error:
-            telemetry.initialize()
-        assert credentials["LANGFUSE_SECRET_KEY"] not in str(error.value)
-        assert isinstance(trace.get_tracer_provider(), trace.ProxyTracerProvider)
+                failed_start.setattr(telemetry.boto3, "client", unavailable)
+                with pytest.raises(RuntimeError, match="Could not load Langfuse credentials") as error:
+                    telemetry.initialize()
+                assert credentials["LANGFUSE_SECRET_KEY"] not in str(error.value)
+                assert isinstance(trace.get_tracer_provider(), trace.ProxyTracerProvider)
+    finally:
+        telemetry.logger.removeHandler(handler)
+    diagnostic_text = diagnostics.getvalue()
+    assert all(value not in diagnostic_text for value in credentials.values())
+    assert all(value in diagnostic_text for value in ("ClientError", "AccessDeniedException", "ResourceNotFoundException", "JSONDecodeError"))
     assert telemetry.langfuse_fastapi_options() == {}
     telemetry.initialize()
     provider = trace.get_tracer_provider()
     assert isinstance(provider, TracerProvider)
     telemetry.initialize()
     assert trace.get_tracer_provider() is provider
-    assert len(secret_reads) == 1
+    assert secret_reads == [secret_arn]
     assert exporter_options["endpoint"] == "https://cloud.langfuse.com/api/public/otel/v1/traces"
     assert exporter_options["headers"]["x-langfuse-ingestion-version"] == "4"
+    assert logging.getLogger("opentelemetry.exporter.otlp.proto.http.trace_exporter").isEnabledFor(logging.WARNING)
+    assert logging.getLogger("langfuse").isEnabledFor(logging.WARNING)
     with pytest.MonkeyPatch.context() as duplicate:
         duplicate.setattr(telemetry, "_client", None)
         with pytest.raises(RuntimeError, match="plain entrypoint"):
@@ -148,7 +175,7 @@ def check_invocation_lifecycle(monkeypatch):
         assert trace.get_tracer_provider() is provider
 
         before = len(exported.get_finished_spans())
-        invalid = {**scope, "headers": [(b"x-amzn-bedrock-agentcore-runtime-session-id", b"too-short")]}
+        invalid = {**scope, "headers": [(b"x-amzn-bedrock-agentcore-runtime-session-id", b"x" * 201)]}
         messages = []
 
         async def collect(message):
@@ -158,6 +185,21 @@ def check_invocation_lifecycle(monkeypatch):
         assert messages[0]["status"] == 400
         assert len(exported.get_finished_spans()) == before
 
+        for headers in ([(b"x-amzn-bedrock-agentcore-runtime-session-id", b"too-short")], []):
+            before = len(exported.get_finished_spans())
+            messages.clear()
+            await middleware({**scope, "headers": headers}, receive, collect)
+            assert messages[0]["status"] == 200
+            spans = exported.get_finished_spans()[before:]
+            assert len(spans) == 4
+            root = next(span for span in spans if span.name == "Agent invocation")
+            assert root.attributes is not None
+            session_id = root.attributes.get("session.id")
+            assert isinstance(session_id, str)
+            assert str(UUID(session_id)) == session_id
+            assert all(span.attributes is not None and span.attributes.get("session.id") == session_id for span in spans)
+
+        before = len(exported.get_finished_spans())
         async def cancelled_app(scope, receive, send):
             await receive()
             raise asyncio.CancelledError()
