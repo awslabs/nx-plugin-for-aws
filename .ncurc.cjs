@@ -15,7 +15,11 @@ module.exports = {
   // v1 (`SendStreamingMessage`). The vended A2A server SDK (@a2a-js/sdk in
   // versions.ts) is 0.3.x and rejects that with "Method not found", so hold the
   // CLI until the server SDK moves to 1.x, then remove this entry.
-  reject: ['agent-chat-cli'],
+  // mariadb 3.5.5 Pool.escape() throws 45066 when the pool has no connection,
+  // which fails the vended ts#rdb create-db-user handler (see the mariadb pin
+  // in versions.ts). Remove this entry once the handler escapes with
+  // conn.escape on an open connection.
+  reject: ['agent-chat-cli', 'mariadb'],
   packageFile: '{package.json,packages/**/package.json}',
   cooldown: 1, // Only latest versions published for at least 1 day are updated to
   dep: ['prod', 'dev', 'optional', 'packageManager', 'peer'],
