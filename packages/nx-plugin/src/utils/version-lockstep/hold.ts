@@ -18,54 +18,38 @@ export interface VersionHold<Name extends IVersionedDep = IVersionedDep> {
   liftWhen: string;
 }
 
+const ADOT_DEPENDENCY_LIFT_WHEN =
+  'the vended ADOT distribution and Langfuse resolve together and the Python Langfuse runtime tests pass';
+
 /** Python pins the version update keeps at their current version. */
 export const PY_VERSION_HOLDS: readonly VersionHold<IPyDepVersion>[] = [
   {
-    name: 'aws-opentelemetry-distro',
-    reason:
-      'the generated Langfuse exporter pins the OpenTelemetry packages required by ADOT 0.22.0',
-    liftWhen:
-      'the vended ADOT distribution and Langfuse resolve together and the Python Langfuse runtime tests pass',
-  },
-  {
-    name: 'langfuse',
-    reason:
-      'the generated Langfuse runtime is qualified against this SDK and the OpenTelemetry packages required by ADOT',
-    liftWhen:
-      'the vended ADOT distribution and Langfuse resolve together and the Python Langfuse runtime tests pass',
-  },
-  {
     name: 'opentelemetry-api',
     reason: 'the generated ADOT distribution requires opentelemetry-api 1.45.1',
-    liftWhen:
-      'the vended ADOT distribution and Langfuse resolve together and the Python Langfuse runtime tests pass',
+    liftWhen: ADOT_DEPENDENCY_LIFT_WHEN,
   },
   {
     name: 'opentelemetry-exporter-otlp-proto-http',
     reason:
       'the generated ADOT distribution requires opentelemetry-exporter-otlp-proto-http 1.45.1',
-    liftWhen:
-      'the vended ADOT distribution and Langfuse resolve together and the Python Langfuse runtime tests pass',
+    liftWhen: ADOT_DEPENDENCY_LIFT_WHEN,
   },
   {
     name: 'opentelemetry-propagator-aws-xray',
     reason:
       'the generated ADOT distribution requires opentelemetry-propagator-aws-xray 1.0.2',
-    liftWhen:
-      'the vended ADOT distribution and Langfuse resolve together and the Python Langfuse runtime tests pass',
+    liftWhen: ADOT_DEPENDENCY_LIFT_WHEN,
   },
   {
     name: 'opentelemetry-sdk',
     reason: 'the generated ADOT distribution requires opentelemetry-sdk 1.45.1',
-    liftWhen:
-      'the vended ADOT distribution and Langfuse resolve together and the Python Langfuse runtime tests pass',
+    liftWhen: ADOT_DEPENDENCY_LIFT_WHEN,
   },
   {
     name: 'opentelemetry-sdk-extension-aws',
     reason:
       'the generated ADOT distribution requires opentelemetry-sdk-extension-aws 2.1.0',
-    liftWhen:
-      'the vended ADOT distribution and Langfuse resolve together and the Python Langfuse runtime tests pass',
+    liftWhen: ADOT_DEPENDENCY_LIFT_WHEN,
   },
   {
     name: 'ty',
