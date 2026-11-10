@@ -167,14 +167,15 @@ AG-UI 에이전트는 <Link path="/guides/connection/react-agui">`connection` �
 
 <Tabs syncKey="agent-framework">
 <TabItem label="Strands" _filter={{ framework: 'strands' }}>
-```python title="packages/my-project/my_module/agent/agent.py" {18-22,39}
+```python title="packages/my-project/my_module/agent/agent.py" {19-23,62}
 from contextlib import contextmanager
 from datetime import UTC, datetime
 
 from strands import Agent, tool
 from strands.hooks import HookCallback, HookProvider
+from strands.middleware import InvokeModelContext, InvokeModelStage
 from strands.plugins import Plugin
-from strands.vended_plugins.context_injector import ContextInjector
+from strands.types.content import SystemContentBlock
 from my_scope_agent_connection import log_model_errors, log_tool_errors
 
 from .session import get_session_manager
@@ -194,10 +195,32 @@ def get_weather(city: str) -> str:
 
 AGENT_HOOKS: list[HookProvider | HookCallback] = [log_model_errors, log_tool_errors]
 
-# Gives the model the current time with each user message
-AGENT_PLUGINS: list[Plugin] = [
-    ContextInjector(lambda _: f"<current_time>{datetime.now(UTC).isoformat()}</current_time>"),
-]
+
+class CurrentTimePlugin(Plugin):
+    """Gives the model the current UTC time by adding it to the system prompt
+    before each model call, without changing the user's message text."""
+
+    name = "current-time"
+
+    def init_agent(self, agent: Agent) -> None:
+        async def add_current_time(context: InvokeModelContext) -> InvokeModelContext:
+            time_block: SystemContentBlock = {
+                "text": f"<current_time>{datetime.now(UTC).isoformat()}</current_time>"
+            }
+            system_prompt = context.system_prompt
+            if isinstance(system_prompt, str):
+                blocks: list[SystemContentBlock] = [{"text": system_prompt}, time_block]
+            elif system_prompt is None:
+                blocks = [time_block]
+            else:
+                blocks = [*system_prompt, time_block]
+            return context.replace(system_prompt=blocks)
+
+        agent.add_middleware(InvokeModelStage.Input, add_current_time)
+
+
+# Gives the model the current time with each model call
+AGENT_PLUGINS: list[Plugin] = [CurrentTimePlugin()]
 
 
 @contextmanager
@@ -276,7 +299,7 @@ def get_agent():
     )
 ```
 
-생성된 에이전트는 시간을 알려주는 도구가 필요하지 않습니다. `AGENT_PLUGINS`는 `ContextInjector` 플러그인을 보유하며, 이는 각 사용자 메시지와 함께 현재 UTC 시간을 모델 입력에 추가합니다. `strands-agents-tools` 패키지는 더 이상 사용되지 않으며, 버전 0.9.0부터 해당 도구를 임포트하면 `ImportError`가 발생하므로 생성기는 이를 `pyproject.toml`에 추가하지 않습니다. 프로젝트에 이미 나열되어 있는 경우 0.9 미만으로 고정하거나 사용하지 않는다면 제거하세요. [Strands 마이그레이션 가이드](https://strandsagents.com/docs/user-guide/migrate/strands-agents-tools/)에는 각 도구의 대체 항목이 나열되어 있습니다.
+생성된 에이전트는 시간을 알려주는 도구가 필요하지 않습니다. `AGENT_PLUGINS`는 각 모델 호출 전에 현재 UTC 시간을 시스템 프롬프트에 추가하는 플러그인을 보유하므로, 모델은 항상 시간을 알고 있으며 시간이 사용자의 메시지 텍스트를 변경하지 않습니다. `strands-agents-tools` 패키지는 더 이상 사용되지 않으며, 버전 0.9.0부터 해당 도구를 임포트하면 `ImportError`가 발생하므로 생성기는 이를 `pyproject.toml`에 추가하지 않습니다. 프로젝트에 이미 나열되어 있는 경우 0.9 미만으로 고정하거나 사용하지 않는다면 제거하세요. [Strands 마이그레이션 가이드](https://strandsagents.com/docs/user-guide/migrate/strands-agents-tools/)에는 각 도구의 대체 항목이 나열되어 있습니다.
 </TabItem>
 <TabItem label="LangChain" _filter={{ framework: 'langchain' }}>
 LangChain은 방대한 [도구 및 통합 생태계](https://docs.langchain.com/oss/python/integrations/tools)를 제공하며, 각각 자체 패키지로 배포됩니다. 생성기는 이를 추가하지 않으므로 먼저 필요한 것을 설치하세요 — 예를 들어 아래 검색 도구가 포함된 `langchain-community`:

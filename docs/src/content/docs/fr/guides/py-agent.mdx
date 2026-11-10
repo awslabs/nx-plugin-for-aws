@@ -167,14 +167,15 @@ Définissez l'outil, puis ajoutez-le à la liste `tools` dans `get_agent()` :
 
 <Tabs syncKey="agent-framework">
 <TabItem label="Strands" _filter={{ framework: 'strands' }}>
-```python title="packages/my-project/my_module/agent/agent.py" {18-22,39}
+```python title="packages/my-project/my_module/agent/agent.py" {19-23,62}
 from contextlib import contextmanager
 from datetime import UTC, datetime
 
 from strands import Agent, tool
 from strands.hooks import HookCallback, HookProvider
+from strands.middleware import InvokeModelContext, InvokeModelStage
 from strands.plugins import Plugin
-from strands.vended_plugins.context_injector import ContextInjector
+from strands.types.content import SystemContentBlock
 from my_scope_agent_connection import log_model_errors, log_tool_errors
 
 from .session import get_session_manager
@@ -194,10 +195,32 @@ def get_weather(city: str) -> str:
 
 AGENT_HOOKS: list[HookProvider | HookCallback] = [log_model_errors, log_tool_errors]
 
-# Gives the model the current time with each user message
-AGENT_PLUGINS: list[Plugin] = [
-    ContextInjector(lambda _: f"<current_time>{datetime.now(UTC).isoformat()}</current_time>"),
-]
+
+class CurrentTimePlugin(Plugin):
+    """Gives the model the current UTC time by adding it to the system prompt
+    before each model call, without changing the user's message text."""
+
+    name = "current-time"
+
+    def init_agent(self, agent: Agent) -> None:
+        async def add_current_time(context: InvokeModelContext) -> InvokeModelContext:
+            time_block: SystemContentBlock = {
+                "text": f"<current_time>{datetime.now(UTC).isoformat()}</current_time>"
+            }
+            system_prompt = context.system_prompt
+            if isinstance(system_prompt, str):
+                blocks: list[SystemContentBlock] = [{"text": system_prompt}, time_block]
+            elif system_prompt is None:
+                blocks = [time_block]
+            else:
+                blocks = [*system_prompt, time_block]
+            return context.replace(system_prompt=blocks)
+
+        agent.add_middleware(InvokeModelStage.Input, add_current_time)
+
+
+# Gives the model the current time with each model call
+AGENT_PLUGINS: list[Plugin] = [CurrentTimePlugin()]
 
 
 @contextmanager
@@ -276,7 +299,7 @@ def get_agent():
     )
 ```
 
-L'agent généré n'a pas besoin d'un outil pour indiquer l'heure. `AGENT_PLUGINS` contient un plugin `ContextInjector`, qui ajoute l'heure UTC actuelle à l'entrée du modèle avec chaque message utilisateur. Le package `strands-agents-tools` est déprécié, et à partir de la version 0.9.0, l'importation de l'un de ses outils lève une `ImportError`, donc le générateur ne l'ajoute pas au `pyproject.toml`. Si votre projet le liste déjà, gardez-le épinglé en dessous de 0.9 ou supprimez-le si vous ne l'utilisez pas. Le [guide de migration Strands](https://strandsagents.com/docs/user-guide/migrate/strands-agents-tools/) liste le remplacement pour chacun de ses outils.
+L'agent généré n'a pas besoin d'un outil pour indiquer l'heure. `AGENT_PLUGINS` contient un plugin qui ajoute l'heure UTC actuelle au prompt système avant chaque appel de modèle, de sorte que le modèle connaît toujours l'heure et que l'heure ne modifie jamais le texte du message de l'utilisateur. Le package `strands-agents-tools` est déprécié, et à partir de la version 0.9.0, l'importation de l'un de ses outils lève une `ImportError`, donc le générateur ne l'ajoute pas au `pyproject.toml`. Si votre projet le liste déjà, gardez-le épinglé en dessous de 0.9 ou supprimez-le si vous ne l'utilisez pas. Le [guide de migration Strands](https://strandsagents.com/docs/user-guide/migrate/strands-agents-tools/) liste le remplacement pour chacun de ses outils.
 </TabItem>
 <TabItem label="LangChain" _filter={{ framework: 'langchain' }}>
 LangChain fournit un large écosystème d'[outils et intégrations](https://docs.langchain.com/oss/python/integrations/tools), chacun distribué dans son propre package. Le générateur ne les ajoute pas, donc installez d'abord celui dont vous avez besoin — par exemple `langchain-community`, d'où provient l'outil de recherche ci-dessous :

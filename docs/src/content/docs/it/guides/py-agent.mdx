@@ -167,14 +167,15 @@ Definisci lo strumento, quindi aggiungilo alla lista `tools` all'interno di `get
 
 <Tabs syncKey="agent-framework">
 <TabItem label="Strands" _filter={{ framework: 'strands' }}>
-```python title="packages/my-project/my_module/agent/agent.py" {18-22,39}
+```python title="packages/my-project/my_module/agent/agent.py" {19-23,62}
 from contextlib import contextmanager
 from datetime import UTC, datetime
 
 from strands import Agent, tool
 from strands.hooks import HookCallback, HookProvider
+from strands.middleware import InvokeModelContext, InvokeModelStage
 from strands.plugins import Plugin
-from strands.vended_plugins.context_injector import ContextInjector
+from strands.types.content import SystemContentBlock
 from my_scope_agent_connection import log_model_errors, log_tool_errors
 
 from .session import get_session_manager
@@ -194,10 +195,32 @@ def get_weather(city: str) -> str:
 
 AGENT_HOOKS: list[HookProvider | HookCallback] = [log_model_errors, log_tool_errors]
 
-# Gives the model the current time with each user message
-AGENT_PLUGINS: list[Plugin] = [
-    ContextInjector(lambda _: f"<current_time>{datetime.now(UTC).isoformat()}</current_time>"),
-]
+
+class CurrentTimePlugin(Plugin):
+    """Gives the model the current UTC time by adding it to the system prompt
+    before each model call, without changing the user's message text."""
+
+    name = "current-time"
+
+    def init_agent(self, agent: Agent) -> None:
+        async def add_current_time(context: InvokeModelContext) -> InvokeModelContext:
+            time_block: SystemContentBlock = {
+                "text": f"<current_time>{datetime.now(UTC).isoformat()}</current_time>"
+            }
+            system_prompt = context.system_prompt
+            if isinstance(system_prompt, str):
+                blocks: list[SystemContentBlock] = [{"text": system_prompt}, time_block]
+            elif system_prompt is None:
+                blocks = [time_block]
+            else:
+                blocks = [*system_prompt, time_block]
+            return context.replace(system_prompt=blocks)
+
+        agent.add_middleware(InvokeModelStage.Input, add_current_time)
+
+
+# Gives the model the current time with each model call
+AGENT_PLUGINS: list[Plugin] = [CurrentTimePlugin()]
 
 
 @contextmanager
@@ -276,7 +299,7 @@ def get_agent():
     )
 ```
 
-L'agente generato non ha bisogno di uno strumento per indicare l'ora. `AGENT_PLUGINS` contiene un plugin `ContextInjector`, che aggiunge l'ora UTC corrente all'input del modello con ogni messaggio utente. Il pacchetto `strands-agents-tools` è deprecato e dalla versione 0.9.0 l'importazione di uno qualsiasi dei suoi strumenti genera un `ImportError`, quindi il generatore non lo aggiunge a `pyproject.toml`. Se il tuo progetto lo elenca già, mantienilo bloccato sotto la versione 0.9 o rimuovilo se non lo usi. La [guida alla migrazione di Strands](https://strandsagents.com/docs/user-guide/migrate/strands-agents-tools/) elenca la sostituzione per ciascuno dei suoi strumenti.
+L'agente generato non ha bisogno di uno strumento per indicare l'ora. `AGENT_PLUGINS` contiene un plugin che aggiunge l'ora UTC corrente al prompt di sistema prima di ogni chiamata al modello, quindi il modello conosce sempre l'ora e l'ora non modifica mai il testo del messaggio dell'utente. Il pacchetto `strands-agents-tools` è deprecato e dalla versione 0.9.0 l'importazione di uno qualsiasi dei suoi strumenti genera un `ImportError`, quindi il generatore non lo aggiunge a `pyproject.toml`. Se il tuo progetto lo elenca già, mantienilo bloccato sotto la versione 0.9 o rimuovilo se non lo usi. La [guida alla migrazione di Strands](https://strandsagents.com/docs/user-guide/migrate/strands-agents-tools/) elenca la sostituzione per ciascuno dei suoi strumenti.
 </TabItem>
 <TabItem label="LangChain" _filter={{ framework: 'langchain' }}>
 LangChain fornisce un ampio ecosistema di [strumenti e integrazioni](https://docs.langchain.com/oss/python/integrations/tools), ciascuno distribuito nel proprio pacchetto. Il generatore non li aggiunge, quindi installa prima quello di cui hai bisogno — ad esempio `langchain-community`, da cui proviene lo strumento di ricerca qui sotto:

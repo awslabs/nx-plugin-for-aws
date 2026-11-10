@@ -167,14 +167,15 @@ Defina a ferramenta e, em seguida, adicione-a à lista `tools` dentro de `get_ag
 
 <Tabs syncKey="agent-framework">
 <TabItem label="Strands" _filter={{ framework: 'strands' }}>
-```python title="packages/my-project/my_module/agent/agent.py" {18-22,39}
+```python title="packages/my-project/my_module/agent/agent.py" {19-23,62}
 from contextlib import contextmanager
 from datetime import UTC, datetime
 
 from strands import Agent, tool
 from strands.hooks import HookCallback, HookProvider
+from strands.middleware import InvokeModelContext, InvokeModelStage
 from strands.plugins import Plugin
-from strands.vended_plugins.context_injector import ContextInjector
+from strands.types.content import SystemContentBlock
 from my_scope_agent_connection import log_model_errors, log_tool_errors
 
 from .session import get_session_manager
@@ -194,10 +195,32 @@ def get_weather(city: str) -> str:
 
 AGENT_HOOKS: list[HookProvider | HookCallback] = [log_model_errors, log_tool_errors]
 
-# Gives the model the current time with each user message
-AGENT_PLUGINS: list[Plugin] = [
-    ContextInjector(lambda _: f"<current_time>{datetime.now(UTC).isoformat()}</current_time>"),
-]
+
+class CurrentTimePlugin(Plugin):
+    """Gives the model the current UTC time by adding it to the system prompt
+    before each model call, without changing the user's message text."""
+
+    name = "current-time"
+
+    def init_agent(self, agent: Agent) -> None:
+        async def add_current_time(context: InvokeModelContext) -> InvokeModelContext:
+            time_block: SystemContentBlock = {
+                "text": f"<current_time>{datetime.now(UTC).isoformat()}</current_time>"
+            }
+            system_prompt = context.system_prompt
+            if isinstance(system_prompt, str):
+                blocks: list[SystemContentBlock] = [{"text": system_prompt}, time_block]
+            elif system_prompt is None:
+                blocks = [time_block]
+            else:
+                blocks = [*system_prompt, time_block]
+            return context.replace(system_prompt=blocks)
+
+        agent.add_middleware(InvokeModelStage.Input, add_current_time)
+
+
+# Gives the model the current time with each model call
+AGENT_PLUGINS: list[Plugin] = [CurrentTimePlugin()]
 
 
 @contextmanager
@@ -276,7 +299,7 @@ def get_agent():
     )
 ```
 
-O agente gerado não precisa de uma ferramenta para informar a hora. `AGENT_PLUGINS` contém um plugin `ContextInjector`, que adiciona a hora UTC atual à entrada do modelo com cada mensagem do usuário. O pacote `strands-agents-tools` está obsoleto, e a partir da versão 0.9.0 importar qualquer uma de suas ferramentas gera um `ImportError`, então o gerador não o adiciona ao `pyproject.toml`. Se seu projeto já o lista, mantenha-o fixado abaixo de 0.9 ou remova-o se você não o usar. O [guia de migração do Strands](https://strandsagents.com/docs/user-guide/migrate/strands-agents-tools/) lista a substituição para cada uma de suas ferramentas.
+O agente gerado não precisa de uma ferramenta para informar a hora. `AGENT_PLUGINS` contém um plugin que adiciona a hora UTC atual ao prompt do sistema antes de cada chamada do modelo, então o modelo sempre sabe a hora e a hora nunca altera o texto da mensagem do usuário. O pacote `strands-agents-tools` está obsoleto, e a partir da versão 0.9.0 importar qualquer uma de suas ferramentas gera um `ImportError`, então o gerador não o adiciona ao `pyproject.toml`. Se seu projeto já o lista, mantenha-o fixado abaixo de 0.9 ou remova-o se você não o usar. O [guia de migração do Strands](https://strandsagents.com/docs/user-guide/migrate/strands-agents-tools/) lista a substituição para cada uma de suas ferramentas.
 </TabItem>
 <TabItem label="LangChain" _filter={{ framework: 'langchain' }}>
 LangChain fornece um grande ecossistema de [ferramentas e integrações](https://docs.langchain.com/oss/python/integrations/tools), cada uma distribuída em seu próprio pacote. O gerador não adiciona esses pacotes, então instale o que você precisa primeiro — por exemplo `langchain-community`, de onde vem a ferramenta de pesquisa abaixo:
