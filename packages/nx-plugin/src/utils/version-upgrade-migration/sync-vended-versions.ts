@@ -89,7 +89,10 @@ const REFERENCE_PROTOCOL =
  * Without one it rewrites the reference to a literal version, severing the
  * catalog — so those references are synced directly instead.
  */
-const isSyncableSpecifier = (tree: Tree, declared: unknown): boolean => {
+const isSyncableSpecifier = (
+  tree: Tree,
+  declared: unknown,
+): declared is string => {
   // A manifest is the user's file and may hold anything. A version that isn't a
   // string is not one this can reason about, and throwing here would abort the
   // whole `nx migrate` over a file the sync only meant to skip.
@@ -138,6 +141,26 @@ const alreadyPermitsVended = (
 };
 
 /**
+ * Version the sync moves a declared TypeScript dependency to, or undefined when
+ * it leaves the declaration as it is.
+ *
+ * Devkit then writes it only when it is higher than the declared version.
+ */
+export const syncedTsVersion = (
+  tree: Tree,
+  owned: OwnedDependencies,
+  name: string,
+  declared: unknown,
+): string | undefined => {
+  const vended = vendedTsVersion(owned, name);
+  return vended &&
+    isSyncableSpecifier(tree, declared) &&
+    !alreadyPermitsVended(tree, name, declared, vended)
+    ? vended
+    : undefined;
+};
+
+/**
  * Vended packages a manifest already declares, and the version to move each to.
  *
  * Only packages already present are named: devkit adds whatever it is given, so
@@ -156,12 +179,8 @@ const declaredVendedPackages = (
     Object.fromEntries(
       Object.entries((json[field] ?? {}) as Record<string, string>).flatMap(
         ([name, declared]) => {
-          const vended = vendedTsVersion(owned, name);
-          return vended &&
-            isSyncableSpecifier(tree, declared) &&
-            !alreadyPermitsVended(tree, name, declared, vended)
-            ? [[name, vended] as const]
-            : [];
+          const vended = syncedTsVersion(tree, owned, name, declared);
+          return vended ? [[name, vended] as const] : [];
         },
       ),
     );

@@ -23,6 +23,7 @@ import {
   agentCorePythonRuntime,
   isAgentCoreHosted,
   isContainerHosted,
+  PYTHON_AGENT_CORE_LAUNCHER,
 } from '../../utils/agent-core-packaging.js';
 import { addPythonBundleTarget } from '../../utils/bundle/bundle.js';
 import { resolveContainers } from '../../utils/containers.js';
@@ -286,7 +287,7 @@ export const pyMcpServerGenerator = async (
         type: 'code',
         outputDir: packageOutputDir,
         runtime: agentCorePythonRuntime(),
-        entryPoint: 'main.py',
+        entryPoint: PYTHON_AGENT_CORE_LAUNCHER,
       };
     }
 

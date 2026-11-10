@@ -239,6 +239,16 @@ describe('infrastructure view', () => {
     ]);
   });
 
+  it('should draw the unified component without implying a fleet deployment', () => {
+    expect(labelsOf(single('greengrass#component'))).toEqual([
+      'S3 (Artifact repository)',
+      'IoT Greengrass (Published component)',
+    ]);
+    expect(labelsOf(single('greengrass#component', { infra: 'none' }))).toEqual(
+      ['No infrastructure'],
+    );
+  });
+
   it('should take the box label from the blueprint where there is no node type', () => {
     const [box] = buildInfrastructureLayout(
       single('py#lambda-function'),

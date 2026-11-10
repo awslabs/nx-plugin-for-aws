@@ -35,8 +35,8 @@ export const addGeneratorGuideTool = (
         'and avoids suggesting configuration from a different branch. The filterable keys ' +
         'and their valid values for each generator are listed by the `list-generators` ' +
         'tool; call it first if you are not sure which keys to pass. When the combination ' +
-        'you pick is not supported by the generator (e.g. connection from ts#trpc-api ' +
-        'to smithy), the tool returns an "Unsupported combination" warning with the ' +
+        'you pick is not supported by the generator (e.g. connection from a tRPC ' +
+        'ts#api to a Smithy ts#api), the tool returns an "Unsupported combination" warning with the ' +
         'list of supported pairs. When `options` is omitted, every conditional section ' +
         'is included and prefixed with a `> [!NOTE] Only when …` marker so you can see ' +
         'the branching condition.',

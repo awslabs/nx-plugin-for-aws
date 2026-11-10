@@ -1,0 +1,1279 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`sharedGreengrassScriptsGenerator > should vend the greengrass scripts into packages/common/scripts > packages/common/scripts/src/greengrass/build-artifact.ts 1`] = `
+"import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { join, relative } from 'node:path';
+import yaml from 'js-yaml';
+import { loadRecipe, validateManifestArchitectures, validateRecipe } from './recipe-utils.js';
+import { writeZip, type ZipEntry } from './zip-writer.js';
+
+/*
+ * Usage: build-artifact.ts <project-root> <component-dir> <dist> [bundle-dir] [--platforms=<arch>,<arch>]
+ *
+ * <project-root>  path to the host project (e.g. a Python project root)
+ * <component-dir> the component's directory name under <project-root>/greengrass/,
+ *                  which also becomes the artifact zip's base name
+ * <dist>           the component's dist root: reads <dist>/vendor (produced by
+ *                  the "-vendor" target this target depends on) and writes
+ *                  <dist>/greengrass-build/{recipes,artifacts}
+ * <bundle-dir>     optional: a directory of already-bundled deployable code
+ *                  (e.g. a TypeScript rolldown bundle output). When given and
+ *                  it exists, its contents are zipped at the archive root
+ *                  INSTEAD of <project-root>/greengrass/<component-dir>/ and
+ *                  <dist>/vendor - a compiled bundle is the deployable
+ *                  content, so the TypeScript source that produced it must
+ *                  not also ship. <project-root>/greengrass/<component-dir>/package.json,
+ *                  when present, is included too (the minimal manifest an
+ *                  Install lifecycle step's \`npm install\` needs for a native
+ *                  dependency the bundle marked external).
+ * --platforms      optional: a comma-separated list of manifest architecture
+ *                  tokens (e.g. "amd64,aarch64"). When given, <dist>/vendor/<arch>
+ *                  is read per architecture and one <component-dir>-<arch>.zip
+ *                  is written per architecture, and every recipe manifest
+ *                  declaring one of these architectures must pair with that
+ *                  architecture's own zip. Cannot be combined with
+ *                  <bundle-dir>. Without it, behaviour is exactly as before:
+ *                  flat <dist>/vendor, one <component-dir>.zip.
+ *
+ * Without <bundle-dir>, everything under <project-root>/greengrass/<component-dir>/
+ * is packaged except recipe.yaml and gdk-config.json, which are framework
+ * metadata, not deployed code, and __pycache__ and .lock, which are tool
+ * staging output.
+ */
+
+const log = (msg: string): void => console.error(\`[build-artifact] \${msg}\`);
+
+function usage(): never {
+  log(
+    'Usage: build-artifact.ts <project-root> <component-dir> <dist> [bundle-dir] [--platforms=<arch>,<arch>]',
+  );
+  process.exit(1);
+}
+
+/**
+ * Every file under \`dir\`, recursively, excluding top-level names in \`exclude\`
+ * and \`__pycache__\` directories at any depth.
+ */
+function collectFiles(dir: string, exclude: ReadonlySet<string>): string[] {
+  const results: string[] = [];
+  const walk = (current: string, isRoot: boolean): void => {
+    for (const entry of readdirSync(current)) {
+      if (entry === '__pycache__' || (isRoot && exclude.has(entry))) continue;
+      const fullPath = join(current, entry);
+      if (statSync(fullPath).isDirectory()) {
+        walk(fullPath, false);
+      } else {
+        results.push(fullPath);
+      }
+    }
+  };
+  walk(dir, true);
+  return results;
+}
+
+/** Zip entries for every file under \`dir\`, named relative to \`dir\` with forward slashes. */
+function entriesFrom(dir: string, exclude: ReadonlySet<string>): ZipEntry[] {
+  return collectFiles(dir, exclude).map((filePath) => ({
+    name: relative(dir, filePath).split('\\\\').join('/'),
+    data: readFileSync(filePath),
+  }));
+}
+
+function main(): void {
+  const argv = process.argv.slice(2);
+  const PLATFORMS_FLAG = '--platforms=';
+  const platforms = argv
+    .filter((a) => a.startsWith(PLATFORMS_FLAG))
+    .flatMap((a) => a.slice(PLATFORMS_FLAG.length).split(','))
+    .map((a) => a.trim())
+    .filter((a) => a.length > 0);
+  const [projectRoot, componentDirName, dist, bundleDir] = argv.filter(
+    (a) => !a.startsWith(PLATFORMS_FLAG),
+  );
+  if (!projectRoot || !componentDirName || !dist) {
+    usage();
+  }
+
+  if (platforms.length > 0 && bundleDir) {
+    log(
+      '--platforms cannot be combined with a bundle-dir: per-architecture copies of one bundle would all hold identical bytes. Drop --platforms and serve both architectures from a single artifact with two manifests.',
+    );
+    process.exit(1);
+    return;
+  }
+
+  const componentDir = join(projectRoot, 'greengrass', componentDirName);
+  const recipePath = join(componentDir, 'recipe.yaml');
+  const baseNameByArchitecture = Object.fromEntries(
+    platforms.map((arch) => [arch, \`\${componentDirName}-\${arch}\`]),
+  );
+  const artifactBaseNames =
+    platforms.length === 0
+      ? [componentDirName]
+      : platforms.map((arch) => baseNameByArchitecture[arch]);
+
+  let componentName: string;
+  let componentVersion: string;
+  let recipe: ReturnType<typeof loadRecipe>;
+  try {
+    recipe = loadRecipe(recipePath);
+    ({ componentName, componentVersion } = validateRecipe(
+      recipe,
+      artifactBaseNames,
+    ));
+    // Only meaningful per architecture, so only checked when this build knows
+    // which architecture each zip is for.
+    if (platforms.length > 0) {
+      validateManifestArchitectures(recipe, baseNameByArchitecture);
+    }
+  } catch (e) {
+    log((e as Error).message);
+    process.exit(1);
+    return;
+  }
+
+  const vendorDir = join(dist, 'vendor');
+  // Recipe and artifact paths are named by version, so a rebuild after a
+  // version bump would otherwise accumulate stale siblings - and the
+  // GreengrassComponentVersion construct requires exactly one resolved
+  // recipe. Start from an empty greengrass-build every run.
+  rmSync(join(dist, 'greengrass-build'), { recursive: true, force: true });
+  const artifactDir = join(
+    dist,
+    'greengrass-build',
+    'artifacts',
+    componentName,
+    componentVersion,
+  );
+  const recipesDir = join(dist, 'greengrass-build', 'recipes');
+  mkdirSync(artifactDir, { recursive: true });
+  mkdirSync(recipesDir, { recursive: true });
+
+  if (platforms.length > 0) {
+    // Multi-architecture: one zip per architecture, each holding the
+    // component's own files plus that architecture's own vendored wheels.
+    for (const arch of platforms) {
+      const archVendorDir = join(vendorDir, arch);
+      if (!existsSync(archVendorDir)) {
+        log(
+          \`Missing vendored dependencies for "\${arch}" at "\${archVendorDir}" - run the component's "-vendor" target first (it writes one directory per architecture when the component targets more than one).\`,
+        );
+        process.exit(1);
+        return;
+      }
+      const entries = [
+        ...entriesFrom(
+          componentDir,
+          new Set(['recipe.yaml', 'gdk-config.json', '.lock']),
+        ),
+        ...entriesFrom(archVendorDir, new Set(['.lock'])),
+      ];
+      if (entries.length === 0) {
+        log(
+          \`Nothing to package for "\${arch}": "\${componentDir}" has no deployable files and "\${archVendorDir}" has no vendored dependencies\`,
+        );
+        process.exit(1);
+        return;
+      }
+      const zipPath = join(artifactDir, \`\${componentDirName}-\${arch}.zip\`);
+      writeZip(entries, zipPath);
+      log(\`wrote \${zipPath}\`);
+    }
+  } else {
+    let entries: ZipEntry[];
+    if (bundleDir && existsSync(bundleDir)) {
+      // A pre-bundled language (e.g. TypeScript via rolldown): the bundle
+      // output is the deployable content, so the source that produced it is
+      // never packaged.
+      entries = entriesFrom(bundleDir, new Set(['.lock']));
+      const packageJsonPath = join(componentDir, 'package.json');
+      if (existsSync(packageJsonPath)) {
+        // Ships alongside the bundle only when an Install lifecycle step needs
+        // it (e.g. \`npm install\` for a native dependency the bundle marked
+        // external) - absent for a fully self-contained bundle.
+        entries.push({
+          name: 'package.json',
+          data: readFileSync(packageJsonPath),
+        });
+      }
+    } else {
+      // Framework metadata that ships alongside the recipe but never inside
+      // the deployed artifact. A package.json here is the user's own, so it is
+      // packaged like any other source file - only bundle mode treats one as
+      // framework metadata.
+      entries = entriesFrom(
+        componentDir,
+        new Set(['recipe.yaml', 'gdk-config.json', '.lock']),
+      );
+      if (existsSync(vendorDir)) {
+        // requirements.txt is the "-vendor" target's own intermediate, not
+        // something the device needs.
+        entries.push(
+          ...entriesFrom(vendorDir, new Set(['requirements.txt', '.lock'])),
+        );
+      }
+    }
+    if (entries.length === 0) {
+      log(
+        \`Nothing to package: "\${bundleDir && existsSync(bundleDir) ? bundleDir : componentDir}" has no deployable files and "\${vendorDir}" does not exist\`,
+      );
+      process.exit(1);
+      return;
+    }
+
+    const zipPath = join(artifactDir, \`\${componentDirName}.zip\`);
+    writeZip(entries, zipPath);
+    log(\`wrote \${zipPath}\`);
+  }
+
+  // The BUCKET_NAME/COMPONENT_NAME/COMPONENT_VERSION artifact URI placeholders
+  // are left exactly as authored - a later IaC step substitutes them.
+  const recipeOutPath = join(
+    recipesDir,
+    \`\${componentName}-\${componentVersion}.yaml\`,
+  );
+  writeFileSync(recipeOutPath, yaml.dump(recipe, { lineWidth: -1 }));
+  log(\`wrote \${recipeOutPath}\`);
+}
+
+main();
+"
+`;
+
+exports[`sharedGreengrassScriptsGenerator > should vend the greengrass scripts into packages/common/scripts > packages/common/scripts/src/greengrass/component-logs.ts 1`] = `
+"import { spawn } from 'node:child_process';
+import { join } from 'node:path';
+
+/*
+ * Usage: component-logs.ts <component-name>
+ *
+ * <component-name> the recipe's ComponentName, e.g. "com.example.MyComponent"
+ *
+ * Tails <GREENGRASS_ROOT>/logs/<component-name>.log in follow mode. Ctrl-C
+ * (SIGINT) stops it - this target never exits on its own.
+ */
+
+const log = (msg: string): void => console.error(\`[component-logs] \${msg}\`);
+
+function usage(): never {
+  log('Usage: component-logs.ts <component-name>');
+  process.exit(1);
+}
+
+function main(): void {
+  const [componentName] = process.argv.slice(2);
+  if (!componentName) {
+    usage();
+  }
+
+  const greengrassRoot = process.env.GREENGRASS_ROOT || '/greengrass/v2';
+  const logPath = join(greengrassRoot, 'logs', \`\${componentName}.log\`);
+
+  log(\`Tailing \${logPath} - Ctrl-C to stop\`);
+  const tail = spawn('tail', ['-n', '200', '-f', logPath], {
+    stdio: 'inherit',
+  });
+
+  const stop = (): void => {
+    tail.kill();
+    process.exit(0);
+  };
+  process.on('SIGINT', stop);
+  process.on('SIGTERM', stop);
+
+  tail.on('exit', (code) => process.exit(code ?? 0));
+  tail.on('error', (err) => {
+    log(\`Failed to start tail: \${err.message}\`);
+    process.exit(1);
+  });
+}
+
+main();
+"
+`;
+
+exports[`sharedGreengrassScriptsGenerator > should vend the greengrass scripts into packages/common/scripts > packages/common/scripts/src/greengrass/deploy-local.ts 1`] = `
+"import { type SpawnSyncReturns, spawnSync } from 'node:child_process';
+import {
+  closeSync,
+  cpSync,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  readSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { join } from 'node:path';
+import yaml from 'js-yaml';
+import {
+  isNextVersionSentinel,
+  readResolvedRecipe,
+  resolveLocalNextVersion,
+} from './recipe-utils.js';
+
+/*
+ * Usage: deploy-local.ts <dist>
+ *
+ * <dist> the component's dist root written by the "-artifact" target. Reads
+ *        <dist>/greengrass-build/{recipes,artifacts}. A NEXT_* recipe stages
+ *        the resolved recipe and artifact under greengrass-build/local/.
+ *
+ * Creates one local deployment via greengrass-cli, then polls the component's
+ * own lifecycle state until it settles. A deployment the nucleus reports as
+ * SUCCEEDED is not evidence the component runs, so this exits non-zero when the
+ * component ends up BROKEN or ERRORED, or never settles inside the timeout -
+ * printing the state it reached and the tail of its log.
+ *
+ * GREENGRASS_ROOT overrides the /greengrass/v2 nucleus root, and
+ * GREENGRASS_DEPLOY_TIMEOUT_SECONDS the 120 second poll bound.
+ *
+ * A NEXT_* ComponentVersion resolves on the device, not against the cloud
+ * registry: the next version above the highest of the installed version and
+ * the version directories the nucleus keeps under
+ * <GREENGRASS_ROOT>/packages/{artifacts,artifacts-unarchived}/<ComponentName>/.
+ *
+ * Re-deploying a concrete ComponentVersion already RUNNING on this device can
+ * read the outgoing instance's state, so bump that version in recipe.yaml to
+ * keep this check meaningful. A NEXT_* version resolves a new local version,
+ * so this warning does not apply to it.
+ */
+
+const log = (msg: string): void => console.error(\`[deploy-local] \${msg}\`);
+
+const POLL_INTERVAL_MS = 2000;
+const DEFAULT_TIMEOUT_SECONDS = 120;
+
+/**
+ * How many consecutive checks a running state must survive before this script
+ * calls the deployment good. The nucleus reports RUNNING the moment it starts
+ * the Run lifecycle, so a component that dies seconds later - the usual shape
+ * of a missing dependency or a failed IPC connect - is RUNNING at the first
+ * check and BROKEN by the third. One check is not evidence.
+ */
+const REQUIRED_STABLE_CHECKS = 3;
+
+const LOG_TAIL_LINES = 40;
+/** Read from the END of the log file, so a large log cannot exhaust memory. */
+const LOG_TAIL_BYTES = 64 * 1024;
+/** Room for \`component list\` on a device carrying many components. */
+const CLI_MAX_BUFFER_BYTES = 8 * 1024 * 1024;
+
+/**
+ * A component that started. FINISHED counts: a one-shot component that ran to
+ * completion is a success, and the nucleus never moves it to RUNNING. It is
+ * reported explicitly, because a generated component is not one-shot.
+ */
+const SETTLED_RUNNING_STATES = ['RUNNING', 'FINISHED'];
+/** BROKEN follows three failed restarts, ERRORED a single failed one. */
+const SETTLED_FAILED_STATES = ['BROKEN', 'ERRORED'];
+
+/**
+ * Log lines a component leaves when the device's \`sudo\` is sudo-rs, which
+ * accepts the nucleus's \`sudo -E\` and then discards the environment.
+ */
+const SUDO_RS_LOG_SIGNATURES = [
+  'AWS_GG_NUCLEUS_DOMAIN_SOCKET_FILEPATH_FOR_COMPONENT',
+  'preserving the entire environment is not supported',
+];
+
+interface ComponentStatus {
+  version?: string;
+  state?: string;
+}
+
+function usage(): never {
+  log('Usage: deploy-local.ts <dist>');
+  process.exit(1);
+}
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Seconds to wait for the component to settle, from the environment. */
+const resolveTimeoutSeconds = (): number => {
+  const raw = process.env.GREENGRASS_DEPLOY_TIMEOUT_SECONDS;
+  if (raw === undefined || raw.trim() === '') {
+    return DEFAULT_TIMEOUT_SECONDS;
+  }
+  const parsed = Number(raw);
+  // Rejects Infinity (which would poll forever) and anything <= 0 (which would
+  // skip polling and report a timeout the deployment never had).
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    log(
+      \`Ignoring GREENGRASS_DEPLOY_TIMEOUT_SECONDS="\${raw}": it must be a \` +
+        \`finite number of seconds greater than 0. Waiting \` +
+        \`\${DEFAULT_TIMEOUT_SECONDS}s instead.\`,
+    );
+    return DEFAULT_TIMEOUT_SECONDS;
+  }
+  return parsed;
+};
+
+/**
+ * Runs greengrass-cli, bounded: a wedged nucleus must not outlive the caller's
+ * deadline, and its output must not overflow the default 1 MB pipe buffer.
+ */
+const runCli = (
+  cli: string,
+  args: string[],
+  timeoutMs: number,
+): SpawnSyncReturns<string> =>
+  spawnSync(cli, args, {
+    encoding: 'utf-8',
+    timeout: Math.max(1000, Math.trunc(timeoutMs)),
+    maxBuffer: CLI_MAX_BUFFER_BYTES,
+  });
+
+/**
+ * Pulls one component's Version and State out of \`greengrass-cli component
+ * list\` output. Deliberately tolerant of indentation and of extra fields: the
+ * CLI's report is human-facing text with no documented layout, so anything
+ * unrecognised is skipped rather than parsed. First value wins for each field,
+ * so a later \`State:\` line inside the same block's serialized Configuration
+ * cannot overwrite the component's own state.
+ */
+const parseComponentStatus = (
+  output: string,
+  componentName: string,
+): ComponentStatus | undefined => {
+  let found: ComponentStatus | undefined;
+  let inTargetBlock = false;
+  for (const line of output.split('\\n')) {
+    const name = /^\\s*Component Name:\\s*(\\S+)\\s*$/.exec(line);
+    if (name) {
+      inTargetBlock = name[1] === componentName;
+      if (inTargetBlock) {
+        found = found ?? {};
+      }
+      continue;
+    }
+    if (!inTargetBlock || !found) {
+      continue;
+    }
+    const version = /^\\s*Version:\\s*(\\S+)\\s*$/.exec(line);
+    if (version && found.version === undefined) {
+      found.version = version[1];
+      continue;
+    }
+    const state = /^\\s*State:\\s*(\\S+)\\s*$/.exec(line);
+    if (state && found.state === undefined) {
+      found.state = state[1];
+    }
+  }
+  return found;
+};
+
+/** The nucleus package stores that keep one directory per component version. */
+const LOCAL_VERSION_STORES = ['artifacts', 'artifacts-unarchived'];
+
+/**
+ * Versions this device has held for the component: the directory names under
+ * <GREENGRASS_ROOT>/packages/{artifacts,artifacts-unarchived}/<ComponentName>/.
+ * The recipe store (packages/recipes) is not read - it is root-only and names
+ * its files by a hashed component name. The nucleus garbage-collects unused
+ * versions, so this history is best-effort; the caller always counts the
+ * installed version too. A store that is missing or unreadable is skipped with
+ * one log line.
+ */
+const readLocalVersionHistory = (
+  greengrassRoot: string,
+  componentName: string,
+): string[] => {
+  const versions: string[] = [];
+  for (const store of LOCAL_VERSION_STORES) {
+    const dir = join(greengrassRoot, 'packages', store, componentName);
+    try {
+      versions.push(
+        ...readdirSync(dir, { withFileTypes: true })
+          .filter((entry) => entry.isDirectory())
+          .map((entry) => entry.name),
+      );
+    } catch (e) {
+      log(\`Skipping \${dir}: \${(e as Error).message}\`);
+    }
+  }
+  return versions;
+};
+
+/**
+ * Reads the last {@link LOG_TAIL_BYTES} of the component's log, returning
+ * undefined when it cannot be read.
+ */
+const readComponentLogTail = (logPath: string): string | undefined => {
+  let fd: number | undefined;
+  try {
+    fd = openSync(logPath, 'r');
+    const { size } = fstatSync(fd);
+    const length = Math.min(size, LOG_TAIL_BYTES);
+    const buffer = Buffer.alloc(length);
+    readSync(fd, buffer, 0, length, size - length);
+    const text = buffer.toString('utf-8');
+    // A truncated window starts mid-line, and possibly mid-character.
+    return size > length ? text.slice(text.indexOf('\\n') + 1) : text;
+  } catch (e) {
+    log(
+      \`Cannot read \${logPath}: \${(e as Error).message}. Run the component's \` +
+        '"-logs" target on this device to tail it.',
+    );
+    return undefined;
+  } finally {
+    if (fd !== undefined) {
+      closeSync(fd);
+    }
+  }
+};
+
+/** Prints the last {@link LOG_TAIL_LINES} lines, plus any recognised remedy. */
+const reportComponentLog = (
+  greengrassRoot: string,
+  componentName: string,
+): void => {
+  const logPath = join(greengrassRoot, 'logs', \`\${componentName}.log\`);
+  const content = readComponentLogTail(logPath);
+  if (content === undefined) {
+    return;
+  }
+  const lines = content.split('\\n').filter((line) => line.length > 0);
+  const tail = lines.slice(-LOG_TAIL_LINES);
+  log(\`Last \${tail.length} line(s) of \${logPath}:\`);
+  for (const line of tail) {
+    console.error(line);
+  }
+  if (SUDO_RS_LOG_SIGNATURES.some((signature) => content.includes(signature))) {
+    log(
+      'This log matches sudo-rs discarding the component environment. The ' +
+        'nucleus launches every component through "sudo -E" to pass ' +
+        'AWS_GG_NUCLEUS_DOMAIN_SOCKET_FILEPATH_FOR_COMPONENT and SVCUID, and ' +
+        'sudo-rs (the default sudo on Ubuntu 25.10 and later) accepts -E and ' +
+        'then discards the environment, so an IPC component never receives ' +
+        'them. Classic sudo is already installed - select it and restart the ' +
+        'nucleus: sudo update-alternatives --set sudo /usr/bin/sudo.ws && ' +
+        'sudo systemctl restart greengrass',
+    );
+  }
+};
+
+/** Reports a component that started, then exits 0. */
+const exitStarted = (
+  componentName: string,
+  componentVersion: string,
+  state: string,
+): never => {
+  log(\`\${componentName}=\${componentVersion} is \${state}.\`);
+  if (state === 'FINISHED') {
+    log(
+      'FINISHED means the Run lifecycle exited 0 rather than staying up. A ' +
+        'generated component subscribes to IPC and runs until it is stopped, ' +
+        'so unless you made this one deliberately one-shot, read its log with ' +
+        "the component's \\"-logs\\" target.",
+    );
+  }
+  process.exit(0);
+};
+
+async function main(): Promise<void> {
+  const [dist] = process.argv.slice(2);
+  if (!dist) {
+    usage();
+  }
+
+  const greengrassRoot = process.env.GREENGRASS_ROOT || '/greengrass/v2';
+  let recipeDir = join(dist, 'greengrass-build', 'recipes');
+  let artifactDir = join(dist, 'greengrass-build', 'artifacts');
+
+  let componentName: string;
+  let componentVersion: string;
+  let recipe: Record<string, unknown>;
+  try {
+    ({ componentName, componentVersion, recipe } = readResolvedRecipe(recipeDir));
+  } catch (e) {
+    log((e as Error).message);
+    process.exit(1);
+    return;
+  }
+
+  const timeoutSeconds = resolveTimeoutSeconds();
+  const timeoutMs = timeoutSeconds * 1000;
+  const cli = join(greengrassRoot, 'bin', 'greengrass-cli');
+
+  // Read BEFORE submitting. The state read afterwards can only be attributed
+  // to this deployment if the device was not already running this exact
+  // version - \`component list\` reports no instance identity to tell the
+  // incoming instance from the outgoing one.
+  const before = runCli(cli, ['component', 'list'], timeoutMs);
+  const installed =
+    !before.error && before.status === 0
+      ? parseComponentStatus(before.stdout ?? '', componentName)
+      : undefined;
+
+  if (isNextVersionSentinel(componentVersion)) {
+    const sentinel = componentVersion;
+    if (before.error || before.status !== 0) {
+      const detail = (before.error?.message ?? before.stderr ?? '').trim();
+      log(
+        \`Cannot resolve \${sentinel} locally because "\${cli} component list" failed\${detail ? \`: \${detail}\` : ''}. Local NEXT_VERSION resolution needs the installed component version.\`,
+      );
+      process.exit(1);
+      return;
+    }
+
+    const history = readLocalVersionHistory(greengrassRoot, componentName);
+    let resolved: string;
+    try {
+      resolved = resolveLocalNextVersion(installed?.version, history, sentinel);
+    } catch (e) {
+      log((e as Error).message);
+      process.exit(1);
+      return;
+    }
+
+    const localDir = join(dist, 'greengrass-build', 'local');
+    const localRecipeDir = join(localDir, 'recipes');
+    const localArtifactDir = join(
+      localDir,
+      'artifacts',
+      componentName,
+      resolved,
+    );
+    const sourceArtifactDir = join(
+      artifactDir,
+      componentName,
+      componentVersion,
+    );
+    try {
+      rmSync(localDir, { recursive: true, force: true });
+      mkdirSync(localRecipeDir, { recursive: true });
+      mkdirSync(localArtifactDir, { recursive: true });
+      writeFileSync(
+        join(localRecipeDir, \`\${componentName}-\${resolved}.yaml\`),
+        yaml.dump(
+          { ...recipe, ComponentVersion: resolved },
+          { lineWidth: -1 },
+        ),
+      );
+      for (const artifact of readdirSync(sourceArtifactDir)) {
+        cpSync(
+          join(sourceArtifactDir, artifact),
+          join(localArtifactDir, artifact),
+          { recursive: true },
+        );
+      }
+    } catch (e) {
+      log(
+        \`Cannot stage \${sentinel} as \${resolved} for local deployment: \${(e as Error).message}\`,
+      );
+      process.exit(1);
+      return;
+    }
+
+    log(
+      \`Resolved \${sentinel} to \${resolved} (installed: \${installed?.version ?? 'none'}; package stores: \${history.length > 0 ? history.join(', ') : 'none'}).\`,
+    );
+    componentVersion = resolved;
+    recipeDir = localRecipeDir;
+    artifactDir = join(localDir, 'artifacts');
+  } else if (installed?.version === componentVersion) {
+    log(
+      \`This device already reports \${componentName}=\${componentVersion}. The \` +
+        'state check below can then read the outgoing instance and pass while ' +
+        'the incoming one fails - bump ComponentVersion in recipe.yaml before ' +
+        're-deploying.',
+    );
+  }
+
+  const args = [
+    'deployment',
+    'create',
+    '--recipeDir',
+    recipeDir,
+    '--artifactDir',
+    artifactDir,
+    '--merge',
+    \`\${componentName}=\${componentVersion}\`,
+  ];
+
+  log(\`Deploying \${componentName}=\${componentVersion} via \${cli}\`);
+  const result = runCli(cli, args, timeoutMs);
+  process.stdout.write(result.stdout ?? '');
+  process.stderr.write(result.stderr ?? '');
+  if (result.error) {
+    log(
+      (result.error as NodeJS.ErrnoException).code === 'ETIMEDOUT'
+        ? \`"\${cli} deployment create" did not return within \${timeoutSeconds}s.\`
+        : \`Cannot run "\${cli}": \${result.error.message}. Run this target on \` +
+            'the Greengrass core device, and set GREENGRASS_ROOT when the ' +
+            'nucleus is not installed at /greengrass/v2.',
+    );
+    process.exit(1);
+  }
+  if (result.status !== 0) {
+    log(\`greengrass-cli exited with \${result.status ?? 'no status'}.\`);
+    process.exit(result.status ?? 1);
+  }
+
+  log(
+    \`Deployment submitted. Waiting up to \${timeoutSeconds}s for \` +
+      \`\${componentName} to hold \${SETTLED_RUNNING_STATES.join(' or ')} across \` +
+      \`\${REQUIRED_STABLE_CHECKS} checks.\`,
+  );
+
+  const deadline = Date.now() + timeoutMs;
+  let lastState: string | undefined;
+  let stableChecks = 0;
+  let listFailureReported = false;
+  while (Date.now() < deadline) {
+    const list = runCli(cli, ['component', 'list'], deadline - Date.now());
+    if (list.error || list.status !== 0) {
+      if (!listFailureReported) {
+        listFailureReported = true;
+        log(
+          \`"\${cli} component list" failed: \${(
+            list.error?.message ??
+            list.stderr ??
+            ''
+          ).trim()} - retrying until the timeout.\`,
+        );
+      }
+    } else {
+      const listed = parseComponentStatus(list.stdout ?? '', componentName);
+      // Only a report of the version just deployed counts. An entry still
+      // carrying the previous version means the nucleus has not applied the
+      // deployment yet.
+      if (listed?.version === componentVersion && listed.state) {
+        lastState = listed.state;
+        if (SETTLED_FAILED_STATES.includes(lastState)) {
+          log(
+            \`\${componentName}=\${componentVersion} is \${lastState} - the \` +
+              'component did not start. The local deployment itself can still ' +
+              'report success, so this state is the evidence that matters.',
+          );
+          reportComponentLog(greengrassRoot, componentName);
+          process.exit(1);
+        }
+        if (SETTLED_RUNNING_STATES.includes(lastState)) {
+          stableChecks += 1;
+          if (stableChecks >= REQUIRED_STABLE_CHECKS) {
+            exitStarted(componentName, componentVersion, lastState);
+          }
+        } else {
+          // STARTING, NEW, INSTALLED, STOPPING: on its way somewhere.
+          stableChecks = 0;
+        }
+      }
+    }
+    await sleep(POLL_INTERVAL_MS);
+  }
+
+  // The deadline caught a component that started and never went bad. That is a
+  // pass: only the stability window is unfinished, and waiting longer is the
+  // caller's choice to make.
+  if (lastState !== undefined && SETTLED_RUNNING_STATES.includes(lastState)) {
+    log(
+      \`The \${timeoutSeconds}s timeout ended after \${stableChecks} of \` +
+        \`\${REQUIRED_STABLE_CHECKS} stable checks. Raise \` +
+        'GREENGRASS_DEPLOY_TIMEOUT_SECONDS to confirm the state holds.',
+    );
+    exitStarted(componentName, componentVersion, lastState);
+  }
+
+  log(
+    \`\${componentName}=\${componentVersion} did not settle within \` +
+      \`\${timeoutSeconds}s - last reported state \${
+        lastState ?? 'none (the component was not listed at this version)'
+      }. Raise GREENGRASS_DEPLOY_TIMEOUT_SECONDS if this component is slow to \` +
+      'start.',
+  );
+  reportComponentLog(greengrassRoot, componentName);
+  process.exit(1);
+}
+
+void main();
+"
+`;
+
+exports[`sharedGreengrassScriptsGenerator > should vend the greengrass scripts into packages/common/scripts > packages/common/scripts/src/greengrass/recipe-utils.ts 1`] = `
+"import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import yaml from 'js-yaml';
+
+/**
+ * A narrow view of a Greengrass recipe: only the keys this vended toolchain
+ * reads. Every other key - including unknown lifecycle keys - is preserved
+ * untouched wherever a recipe is re-serialized, because the recipe is
+ * user-owned and this toolchain does not model the full recipe schema.
+ */
+export type GreengrassRecipe = Record<string, unknown>;
+
+export interface ResolvedComponent {
+  readonly componentName: string;
+  readonly componentVersion: string;
+  readonly recipe: GreengrassRecipe;
+}
+
+const COMPONENT_NAME_PATTERN = /^[a-zA-Z0-9-_.]+$/;
+const RESERVED_COMPONENT_NAME_PREFIX = 'aws.greengrass.';
+const MAX_COMPONENT_NAME_LENGTH = 128;
+// https://semver.org/#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string
+const SEMVER_PATTERN =
+  /^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9]\\d*|\\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$/;
+const STRICT_COMPONENT_VERSION_PATTERN =
+  /^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$/;
+const DECOMPRESSED_PATH_TOKEN = '{artifacts:decompressedPath}';
+
+export const NEXT_VERSION_SENTINELS = [
+  'NEXT_PATCH',
+  'NEXT_MINOR',
+  'NEXT_MAJOR',
+] as const;
+
+export type NextVersionSentinel = (typeof NEXT_VERSION_SENTINELS)[number];
+
+/** Whether a value requests local deploy-time component version resolution. */
+export function isNextVersionSentinel(
+  value: unknown,
+): value is NextVersionSentinel {
+  return (
+    typeof value === 'string' &&
+    NEXT_VERSION_SENTINELS.includes(value as NextVersionSentinel)
+  );
+}
+
+/**
+ * Resolves a version sentinel on a device: bumps the highest strict M.m.p
+ * version among the installed version and the candidate versions the caller
+ * collected from the nucleus's package stores, or returns 1.0.0 when there is
+ * none. A candidate that is not strict M.m.p is ignored. An installed version
+ * that is not strict M.m.p is an error, because the sentinel cannot bump it.
+ */
+export function resolveLocalNextVersion(
+  installedVersion: string | undefined,
+  candidateVersions: readonly string[],
+  sentinel: NextVersionSentinel,
+): string {
+  if (
+    installedVersion !== undefined &&
+    !STRICT_COMPONENT_VERSION_PATTERN.test(installedVersion)
+  ) {
+    throw new Error(
+      \`Installed component version "\${installedVersion}" is not a strict M.m.p version, so \${sentinel} cannot resolve it.\`,
+    );
+  }
+
+  const highest = [...candidateVersions, installedVersion]
+    .filter(
+      (version): version is string =>
+        version !== undefined && STRICT_COMPONENT_VERSION_PATTERN.test(version),
+    )
+    .reduce<string | undefined>((currentHighest, candidate) => {
+      if (currentHighest === undefined) {
+        return candidate;
+      }
+      const current = STRICT_COMPONENT_VERSION_PATTERN.exec(currentHighest)!;
+      const next = STRICT_COMPONENT_VERSION_PATTERN.exec(candidate)!;
+      for (let index = 1; index <= 3; index++) {
+        const difference = BigInt(next[index]) - BigInt(current[index]);
+        if (difference !== 0n) {
+          return difference > 0n ? candidate : currentHighest;
+        }
+      }
+      return currentHighest;
+    }, undefined);
+  if (highest === undefined) {
+    return '1.0.0';
+  }
+
+  const [, major, minor, patch] =
+    STRICT_COMPONENT_VERSION_PATTERN.exec(highest)!;
+  switch (sentinel) {
+    case 'NEXT_PATCH':
+      return \`\${major}.\${minor}.\${(BigInt(patch) + 1n).toString()}\`;
+    case 'NEXT_MINOR':
+      return \`\${major}.\${(BigInt(minor) + 1n).toString()}.0\`;
+    case 'NEXT_MAJOR':
+      return \`\${(BigInt(major) + 1n).toString()}.0.0\`;
+  }
+}
+
+/** Reads and parses a recipe.yaml. Throws with a clear message on failure. */
+export function loadRecipe(recipePath: string): GreengrassRecipe {
+  let raw: string;
+  try {
+    raw = readFileSync(recipePath, 'utf-8');
+  } catch {
+    throw new Error(\`Cannot read recipe at "\${recipePath}"\`);
+  }
+  const parsed = yaml.load(raw);
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error(\`"\${recipePath}" is not a Greengrass recipe document\`);
+  }
+  return parsed as GreengrassRecipe;
+}
+
+/**
+ * Validates only the recipe fields this vended toolchain consumes:
+ * \`ComponentName\`, \`ComponentVersion\`, and, for every entry in
+ * \`artifactBaseNames\`, the \`{artifacts:decompressedPath}\` reference the
+ * local-deploy lifecycle script must carry so that a deployed component can
+ * find its own artifact once Greengrass decompresses it.
+ *
+ * Throws a single \`Error\` listing every violation when the recipe is invalid.
+ */
+export function validateRecipe(
+  recipe: GreengrassRecipe,
+  artifactBaseNames: readonly string[],
+): ResolvedComponent {
+  const errors: string[] = [];
+
+  const componentName = recipe.ComponentName;
+  if (typeof componentName !== 'string' || componentName.length === 0) {
+    errors.push('ComponentName is required and must be a non-empty string');
+  } else {
+    if (componentName.length > MAX_COMPONENT_NAME_LENGTH) {
+      errors.push(
+        \`ComponentName must be at most \${MAX_COMPONENT_NAME_LENGTH} characters, got \${componentName.length}\`,
+      );
+    }
+    if (!COMPONENT_NAME_PATTERN.test(componentName)) {
+      errors.push(
+        'ComponentName may only contain letters, numbers, "-", "_" and "."',
+      );
+    }
+    if (componentName.startsWith(RESERVED_COMPONENT_NAME_PREFIX)) {
+      errors.push(
+        \`ComponentName must not start with the reserved prefix "\${RESERVED_COMPONENT_NAME_PREFIX}"\`,
+      );
+    }
+  }
+
+  const componentVersion = recipe.ComponentVersion;
+  if (
+    typeof componentVersion !== 'string' ||
+    (!SEMVER_PATTERN.test(componentVersion) &&
+      !isNextVersionSentinel(componentVersion))
+  ) {
+    errors.push(
+      'ComponentVersion is required and must be a valid semver version (e.g. "1.0.0") or one of NEXT_PATCH, NEXT_MINOR, NEXT_MAJOR',
+    );
+  }
+
+  for (const baseName of artifactBaseNames) {
+    if (!referencesDecompressedComponentDir(recipe, baseName)) {
+      errors.push(
+        \`No lifecycle script references "\${DECOMPRESSED_PATH_TOKEN}/\${baseName}/" - \` +
+          \`the Run script path must match the artifact zip base name ("\${baseName}.zip")\`,
+      );
+    }
+    if (!declaresComponentZipArtifact(recipe, baseName)) {
+      errors.push(
+        \`No manifest declares an artifact whose Uri ends in "/\${baseName}.zip" - \` +
+          'Greengrass only unarchives a declared artifact, so ' +
+          \`"\${DECOMPRESSED_PATH_TOKEN}/\${baseName}/" would never resolve on the device\`,
+      );
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new Error(
+      \`Invalid recipe:\\n\${errors.map((e) => \`  - \${e}\`).join('\\n')}\`,
+    );
+  }
+
+  return {
+    componentName: componentName as string,
+    componentVersion: componentVersion as string,
+    recipe,
+  };
+}
+
+/**
+ * Recursively searches every string value for a decompressedPath reference to
+ * \`componentDirName\`, wherever the recipe places its Lifecycle block (top
+ * level or per-manifest).
+ */
+function referencesDecompressedComponentDir(
+  value: unknown,
+  componentDirName: string,
+): boolean {
+  const needle = \`\${DECOMPRESSED_PATH_TOKEN}/\${componentDirName}/\`;
+  if (typeof value === 'string') {
+    return value.includes(needle);
+  }
+  if (Array.isArray(value)) {
+    return value.some((entry) =>
+      referencesDecompressedComponentDir(entry, componentDirName),
+    );
+  }
+  if (value !== null && typeof value === 'object') {
+    return Object.values(value).some((entry) =>
+      referencesDecompressedComponentDir(entry, componentDirName),
+    );
+  }
+  return false;
+}
+
+/**
+ * Whether any manifest declares an artifact whose Uri basename is
+ * \`<componentDirName>.zip\`, which is the name the artifact this toolchain
+ * writes actually carries.
+ */
+function declaresComponentZipArtifact(
+  recipe: GreengrassRecipe,
+  componentDirName: string,
+): boolean {
+  const manifests = Array.isArray(recipe.Manifests) ? recipe.Manifests : [];
+  return manifests.some((manifest) =>
+    manifestDeclaresZipArtifact(manifest, componentDirName),
+  );
+}
+
+/**
+ * Whether one manifest declares an artifact whose Uri basename is
+ * \`<componentDirName>.zip\`. Case-insensitive on the key so a recipe authored
+ * with \`URI\` (as some AWS samples spell it) still matches.
+ */
+function manifestDeclaresZipArtifact(
+  manifest: unknown,
+  componentDirName: string,
+): boolean {
+  const suffix = \`/\${componentDirName}.zip\`;
+  const artifacts = (manifest as { Artifacts?: unknown })?.Artifacts;
+  if (!Array.isArray(artifacts)) {
+    return false;
+  }
+  return artifacts.some((artifact) => {
+    if (artifact === null || typeof artifact !== 'object') {
+      return false;
+    }
+    return Object.entries(artifact as Record<string, unknown>).some(
+      ([key, value]) =>
+        key.toLowerCase() === 'uri' &&
+        typeof value === 'string' &&
+        value.endsWith(suffix),
+    );
+  });
+}
+
+/**
+ * Multi-architecture only: checks that every manifest whose
+ * \`Platform.architecture\` names an architecture this build vendored pairs with
+ * THAT architecture's own artifact, both in its \`Artifacts\` and in the
+ * lifecycle that unarchives it.
+ *
+ * {@link validateRecipe}'s checks are global - they prove every built zip is
+ * declared and referenced somewhere in the recipe. A recipe that swaps two
+ * manifests' artifacts and Run paths satisfies them, and a swap sends one
+ * architecture's native wheels to the other, which fails only on the device.
+ * A swap is one paste mistake away, because adding a second manifest to an
+ * existing component is a hand edit of a user-owned recipe.
+ *
+ * A manifest with no \`Platform.architecture\`, or one naming an architecture
+ * this build did not vendor, is left alone: a recipe may carry manifests this
+ * toolchain does not build.
+ */
+export function validateManifestArchitectures(
+  recipe: GreengrassRecipe,
+  baseNameByArchitecture: Readonly<Record<string, string>>,
+): void {
+  const errors: string[] = [];
+  const manifests = Array.isArray(recipe.Manifests) ? recipe.Manifests : [];
+  manifests.forEach((manifest, index) => {
+    const architecture = (
+      manifest as { Platform?: { architecture?: unknown } } | null
+    )?.Platform?.architecture;
+    if (typeof architecture !== 'string') {
+      return;
+    }
+    const baseName = baseNameByArchitecture[architecture];
+    if (!baseName) {
+      return;
+    }
+    if (!manifestDeclaresZipArtifact(manifest, baseName)) {
+      errors.push(
+        \`Manifest \${index + 1} declares "architecture: \${architecture}", so its own artifact Uri must end in "/\${baseName}.zip" - \` +
+          \`that is the zip this build writes for "\${architecture}". Manifests must not carry another architecture's artifact\`,
+      );
+    }
+    const lifecycle =
+      (manifest as { Lifecycle?: unknown }).Lifecycle ?? recipe.Lifecycle;
+    if (!referencesDecompressedComponentDir(lifecycle, baseName)) {
+      errors.push(
+        \`Manifest \${index + 1} declares "architecture: \${architecture}", so its lifecycle must reference \` +
+          \`"\${DECOMPRESSED_PATH_TOKEN}/\${baseName}/" - the directory that architecture's own artifact unarchives to\`,
+      );
+    }
+  });
+
+  if (errors.length > 0) {
+    throw new Error(
+      \`Invalid recipe:\\n\${errors.map((e) => \`  - \${e}\`).join('\\n')}\`,
+    );
+  }
+}
+
+/**
+ * Reads the single resolved recipe a prior \`-artifact\` run wrote under a
+ * \`greengrass-build/recipes\` directory, for scripts that only need to know
+ * which component and version were last built.
+ */
+export function readResolvedRecipe(recipesDir: string): ResolvedComponent {
+  let files: string[];
+  try {
+    files = readdirSync(recipesDir).filter(
+      (f) => f.endsWith('.yaml') || f.endsWith('.yml'),
+    );
+  } catch {
+    throw new Error(
+      \`No resolved recipes found at "\${recipesDir}" - run the component's "-artifact" target first\`,
+    );
+  }
+  if (files.length !== 1) {
+    throw new Error(
+      \`Expected exactly one resolved recipe in "\${recipesDir}", found \${files.length}\`,
+    );
+  }
+  const recipePath = join(recipesDir, files[0]);
+  const recipe = loadRecipe(recipePath);
+  const { ComponentName, ComponentVersion } = recipe;
+  if (
+    typeof ComponentName !== 'string' ||
+    typeof ComponentVersion !== 'string'
+  ) {
+    throw new Error(
+      \`"\${recipePath}" is missing ComponentName/ComponentVersion\`,
+    );
+  }
+  return {
+    componentName: ComponentName,
+    componentVersion: ComponentVersion,
+    recipe,
+  };
+}
+"
+`;
+
+exports[`sharedGreengrassScriptsGenerator > should vend the greengrass scripts into packages/common/scripts > packages/common/scripts/src/greengrass/zip-writer.ts 1`] = `
+"import { writeFileSync } from 'node:fs';
+// crc32 from node:zlib requires Node >= 20.15 / 22.2.
+import { crc32, deflateRawSync } from 'node:zlib';
+
+/** One file to place in the archive, at a forward-slash relative path. */
+export interface ZipEntry {
+  readonly name: string;
+  readonly data: Buffer;
+}
+
+const LOCAL_FILE_HEADER_SIGNATURE = 0x04034b50;
+const CENTRAL_DIRECTORY_SIGNATURE = 0x02014b50;
+const END_OF_CENTRAL_DIRECTORY_SIGNATURE = 0x06054b50;
+// 20 = version 2.0, the lowest version that documents DEFLATE support.
+const VERSION_NEEDED = 20;
+const DEFLATE_METHOD = 8;
+const STORED_METHOD = 0;
+const MAX_ENTRIES = 65_535;
+
+/**
+ * Fixed MS-DOS timestamp fields (1980-01-01 00:00:00, the DOS epoch).
+ *
+ * The archive must be byte-reproducible: its sha256 keys the artifact's S3
+ * object and is substituted into the recipe, so a rebuild that produced
+ * different bytes for identical content would make CloudFormation try to
+ * replace an already-published, immutable component version and fail with
+ * AlreadyExists. Stamping the build time would do exactly that on every
+ * rebuild.
+ */
+const DOS_EPOCH_TIME = 0;
+const DOS_EPOCH_DATE = (1 << 5) | 1;
+
+/**
+ * Writes \`entries\` to a plain ZIP archive at \`outPath\` with no external
+ * dependency - only \`node:zlib\` for DEFLATE and CRC-32. Supports exactly what
+ * Greengrass artifact packaging needs: a flat set of files, no encryption, no
+ * zip64 (component artifacts are small). Cross-platform: no shell-out to a
+ * system \`zip\` binary.
+ */
+export function writeZip(entries: readonly ZipEntry[], outPath: string): void {
+  if (entries.length > MAX_ENTRIES) {
+    throw new RangeError(
+      \`ZIP64 is not supported; this ZIP writer can store at most 65,535 entries, received \${entries.length}.\`,
+    );
+  }
+
+  const fileChunks: Buffer[] = [];
+  const centralRecords: Buffer[] = [];
+  let offset = 0;
+  const time = DOS_EPOCH_TIME;
+  const date = DOS_EPOCH_DATE;
+
+  // Sorted so directory iteration order cannot change the archive's bytes.
+  const sortedEntries = [...entries].sort((a, b) =>
+    a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
+  );
+  for (const entry of sortedEntries) {
+    const nameBuf = Buffer.from(entry.name, 'utf-8');
+    const entryCrc32 = crc32(entry.data) >>> 0;
+    const compressed = deflateRawSync(entry.data);
+    const useDeflate = compressed.length < entry.data.length;
+    const method = useDeflate ? DEFLATE_METHOD : STORED_METHOD;
+    const payload = useDeflate ? compressed : entry.data;
+
+    const localHeader = Buffer.alloc(30);
+    localHeader.writeUInt32LE(LOCAL_FILE_HEADER_SIGNATURE, 0);
+    localHeader.writeUInt16LE(VERSION_NEEDED, 4);
+    localHeader.writeUInt16LE(0, 6); // general purpose flags
+    localHeader.writeUInt16LE(method, 8);
+    localHeader.writeUInt16LE(time, 10);
+    localHeader.writeUInt16LE(date, 12);
+    localHeader.writeUInt32LE(entryCrc32, 14);
+    localHeader.writeUInt32LE(payload.length, 18);
+    localHeader.writeUInt32LE(entry.data.length, 22);
+    localHeader.writeUInt16LE(nameBuf.length, 26);
+    localHeader.writeUInt16LE(0, 28); // extra field length
+
+    fileChunks.push(localHeader, nameBuf, payload);
+
+    const centralHeader = Buffer.alloc(46);
+    centralHeader.writeUInt32LE(CENTRAL_DIRECTORY_SIGNATURE, 0);
+    centralHeader.writeUInt16LE(VERSION_NEEDED, 4); // version made by
+    centralHeader.writeUInt16LE(VERSION_NEEDED, 6); // version needed to extract
+    centralHeader.writeUInt16LE(0, 8); // general purpose flags
+    centralHeader.writeUInt16LE(method, 10);
+    centralHeader.writeUInt16LE(time, 12);
+    centralHeader.writeUInt16LE(date, 14);
+    centralHeader.writeUInt32LE(entryCrc32, 16);
+    centralHeader.writeUInt32LE(payload.length, 20);
+    centralHeader.writeUInt32LE(entry.data.length, 24);
+    centralHeader.writeUInt16LE(nameBuf.length, 28);
+    centralHeader.writeUInt16LE(0, 30); // extra field length
+    centralHeader.writeUInt16LE(0, 32); // file comment length
+    centralHeader.writeUInt16LE(0, 34); // disk number start
+    centralHeader.writeUInt16LE(0, 36); // internal file attributes
+    centralHeader.writeUInt32LE(0, 38); // external file attributes
+    centralHeader.writeUInt32LE(offset, 42); // relative offset of local header
+
+    centralRecords.push(centralHeader, nameBuf);
+
+    offset += localHeader.length + nameBuf.length + payload.length;
+  }
+
+  const centralDirectory = Buffer.concat(centralRecords);
+  const centralDirectoryOffset = offset;
+
+  const endRecord = Buffer.alloc(22);
+  endRecord.writeUInt32LE(END_OF_CENTRAL_DIRECTORY_SIGNATURE, 0);
+  endRecord.writeUInt16LE(0, 4); // disk number
+  endRecord.writeUInt16LE(0, 6); // disk with central directory start
+  endRecord.writeUInt16LE(entries.length, 8); // entries on this disk
+  endRecord.writeUInt16LE(entries.length, 10); // total entries
+  endRecord.writeUInt32LE(centralDirectory.length, 12);
+  endRecord.writeUInt32LE(centralDirectoryOffset, 16);
+  endRecord.writeUInt16LE(0, 20); // comment length
+
+  writeFileSync(
+    outPath,
+    Buffer.concat([...fileChunks, centralDirectory, endRecord]),
+  );
+}
+"
+`;

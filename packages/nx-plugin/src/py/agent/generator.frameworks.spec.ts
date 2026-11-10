@@ -3,10 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { parse } from '@iarna/toml';
-import { addProjectConfiguration, type Tree } from '@nx/devkit';
+import { parse, stringify } from '@iarna/toml';
+import { addProjectConfiguration, getProjects, type Tree } from '@nx/devkit';
 import type { UVPyprojectToml } from '../../utils/nxlv-python.js';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import { pyProjectGenerator } from '../project/generator.js';
 import { pyAgentGenerator } from './generator.js';
 
 describe('py#agent generator', () => {
@@ -654,5 +655,57 @@ dev-dependencies = []
       );
       expect(pyprojectToml).toMatchSnapshot('langchain-pyproject.toml');
     });
+  });
+});
+
+describe('py#agent generator uv override-dependencies', () => {
+  let tree: Tree;
+  let project: string;
+
+  const rootText = () => tree.read('pyproject.toml', 'utf-8');
+  const readRoot = () => parse(rootText()) as UVPyprojectToml;
+
+  beforeEach(async () => {
+    tree = createTreeUsingTsSolutionSetup();
+    await pyProjectGenerator(tree, {
+      name: 'py_project',
+      directory: 'packages',
+      type: 'application',
+    });
+    project = [...getProjects(tree)].find(
+      ([, config]) => config.root === 'packages/py_project',
+    )[0];
+  });
+
+  it('should not add overrides for a strands agent', async () => {
+    await pyAgentGenerator(tree, { project, infra: 'none', iac: 'cdk' });
+
+    expect(readRoot().tool.uv['override-dependencies']).toBeUndefined();
+  });
+
+  it('should leave an existing user override list alone', async () => {
+    // An installed workspace has a uv.lock, so creating the agent-connection
+    // project does not regenerate the root pyproject.toml.
+    tree.write('uv.lock', '');
+    const root = readRoot();
+    root.tool.uv['override-dependencies'] = ['urllib3>=2.5.0'];
+    tree.write('pyproject.toml', stringify(root as any));
+
+    await pyAgentGenerator(tree, { project, infra: 'none', iac: 'cdk' });
+
+    expect(readRoot().tool.uv['override-dependencies']).toEqual([
+      'urllib3>=2.5.0',
+    ]);
+  });
+
+  it('should not add overrides for a langchain agent', async () => {
+    await pyAgentGenerator(tree, {
+      project,
+      framework: 'langchain',
+      infra: 'none',
+      iac: 'cdk',
+    });
+
+    expect(readRoot().tool.uv['override-dependencies']).toBeUndefined();
   });
 });

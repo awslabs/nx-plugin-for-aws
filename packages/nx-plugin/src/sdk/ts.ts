@@ -11,6 +11,9 @@ export { tsAgentEvalGenerator } from '../ts/agent/eval/generator.js';
 export type { TsAgentEvalGeneratorSchema } from '../ts/agent/eval/schema';
 // TypeScript Agent Generator
 export { tsAgentGenerator } from '../ts/agent/generator.js';
+// TypeScript Agent Guardrails Generator
+export { tsAgentGuardrailsGenerator } from '../ts/agent/guardrails/generator.js';
+export type { TsAgentGuardrailsGeneratorSchema } from '../ts/agent/guardrails/schema';
 export type { TsAgentGeneratorSchema } from '../ts/agent/schema';
 // TypeScript API
 export { tsApiGenerator } from '../ts/api/generator.js';

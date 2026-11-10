@@ -1,0 +1,497 @@
+import { type SpawnSyncReturns, spawnSync } from 'node:child_process';
+import {
+  closeSync,
+  cpSync,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  readSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { join } from 'node:path';
+import yaml from 'js-yaml';
+import {
+  isNextVersionSentinel,
+  readResolvedRecipe,
+  resolveLocalNextVersion,
+} from './recipe-utils<% if (esm) { %>.js<% } %>';
+
+/*
+ * Usage: deploy-local.ts <dist>
+ *
+ * <dist> the component's dist root written by the "-artifact" target. Reads
+ *        <dist>/greengrass-build/{recipes,artifacts}. A NEXT_* recipe stages
+ *        the resolved recipe and artifact under greengrass-build/local/.
+ *
+ * Creates one local deployment via greengrass-cli, then polls the component's
+ * own lifecycle state until it settles. A deployment the nucleus reports as
+ * SUCCEEDED is not evidence the component runs, so this exits non-zero when the
+ * component ends up BROKEN or ERRORED, or never settles inside the timeout -
+ * printing the state it reached and the tail of its log.
+ *
+ * GREENGRASS_ROOT overrides the /greengrass/v2 nucleus root, and
+ * GREENGRASS_DEPLOY_TIMEOUT_SECONDS the 120 second poll bound.
+ *
+ * A NEXT_* ComponentVersion resolves on the device, not against the cloud
+ * registry: the next version above the highest of the installed version and
+ * the version directories the nucleus keeps under
+ * <GREENGRASS_ROOT>/packages/{artifacts,artifacts-unarchived}/<ComponentName>/.
+ *
+ * Re-deploying a concrete ComponentVersion already RUNNING on this device can
+ * read the outgoing instance's state, so bump that version in recipe.yaml to
+ * keep this check meaningful. A NEXT_* version resolves a new local version,
+ * so this warning does not apply to it.
+ */
+
+const log = (msg: string): void => console.error(`[deploy-local] ${msg}`);
+
+const POLL_INTERVAL_MS = 2000;
+const DEFAULT_TIMEOUT_SECONDS = 120;
+
+/**
+ * How many consecutive checks a running state must survive before this script
+ * calls the deployment good. The nucleus reports RUNNING the moment it starts
+ * the Run lifecycle, so a component that dies seconds later - the usual shape
+ * of a missing dependency or a failed IPC connect - is RUNNING at the first
+ * check and BROKEN by the third. One check is not evidence.
+ */
+const REQUIRED_STABLE_CHECKS = 3;
+
+const LOG_TAIL_LINES = 40;
+/** Read from the END of the log file, so a large log cannot exhaust memory. */
+const LOG_TAIL_BYTES = 64 * 1024;
+/** Room for `component list` on a device carrying many components. */
+const CLI_MAX_BUFFER_BYTES = 8 * 1024 * 1024;
+
+/**
+ * A component that started. FINISHED counts: a one-shot component that ran to
+ * completion is a success, and the nucleus never moves it to RUNNING. It is
+ * reported explicitly, because a generated component is not one-shot.
+ */
+const SETTLED_RUNNING_STATES = ['RUNNING', 'FINISHED'];
+/** BROKEN follows three failed restarts, ERRORED a single failed one. */
+const SETTLED_FAILED_STATES = ['BROKEN', 'ERRORED'];
+
+/**
+ * Log lines a component leaves when the device's `sudo` is sudo-rs, which
+ * accepts the nucleus's `sudo -E` and then discards the environment.
+ */
+const SUDO_RS_LOG_SIGNATURES = [
+  'AWS_GG_NUCLEUS_DOMAIN_SOCKET_FILEPATH_FOR_COMPONENT',
+  'preserving the entire environment is not supported',
+];
+
+interface ComponentStatus {
+  version?: string;
+  state?: string;
+}
+
+function usage(): never {
+  log('Usage: deploy-local.ts <dist>');
+  process.exit(1);
+}
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Seconds to wait for the component to settle, from the environment. */
+const resolveTimeoutSeconds = (): number => {
+  const raw = process.env.GREENGRASS_DEPLOY_TIMEOUT_SECONDS;
+  if (raw === undefined || raw.trim() === '') {
+    return DEFAULT_TIMEOUT_SECONDS;
+  }
+  const parsed = Number(raw);
+  // Rejects Infinity (which would poll forever) and anything <= 0 (which would
+  // skip polling and report a timeout the deployment never had).
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    log(
+      `Ignoring GREENGRASS_DEPLOY_TIMEOUT_SECONDS="${raw}": it must be a ` +
+        `finite number of seconds greater than 0. Waiting ` +
+        `${DEFAULT_TIMEOUT_SECONDS}s instead.`,
+    );
+    return DEFAULT_TIMEOUT_SECONDS;
+  }
+  return parsed;
+};
+
+/**
+ * Runs greengrass-cli, bounded: a wedged nucleus must not outlive the caller's
+ * deadline, and its output must not overflow the default 1 MB pipe buffer.
+ */
+const runCli = (
+  cli: string,
+  args: string[],
+  timeoutMs: number,
+): SpawnSyncReturns<string> =>
+  spawnSync(cli, args, {
+    encoding: 'utf-8',
+    timeout: Math.max(1000, Math.trunc(timeoutMs)),
+    maxBuffer: CLI_MAX_BUFFER_BYTES,
+  });
+
+/**
+ * Pulls one component's Version and State out of `greengrass-cli component
+ * list` output. Deliberately tolerant of indentation and of extra fields: the
+ * CLI's report is human-facing text with no documented layout, so anything
+ * unrecognised is skipped rather than parsed. First value wins for each field,
+ * so a later `State:` line inside the same block's serialized Configuration
+ * cannot overwrite the component's own state.
+ */
+const parseComponentStatus = (
+  output: string,
+  componentName: string,
+): ComponentStatus | undefined => {
+  let found: ComponentStatus | undefined;
+  let inTargetBlock = false;
+  for (const line of output.split('\n')) {
+    const name = /^\s*Component Name:\s*(\S+)\s*$/.exec(line);
+    if (name) {
+      inTargetBlock = name[1] === componentName;
+      if (inTargetBlock) {
+        found = found ?? {};
+      }
+      continue;
+    }
+    if (!inTargetBlock || !found) {
+      continue;
+    }
+    const version = /^\s*Version:\s*(\S+)\s*$/.exec(line);
+    if (version && found.version === undefined) {
+      found.version = version[1];
+      continue;
+    }
+    const state = /^\s*State:\s*(\S+)\s*$/.exec(line);
+    if (state && found.state === undefined) {
+      found.state = state[1];
+    }
+  }
+  return found;
+};
+
+/** The nucleus package stores that keep one directory per component version. */
+const LOCAL_VERSION_STORES = ['artifacts', 'artifacts-unarchived'];
+
+/**
+ * Versions this device has held for the component: the directory names under
+ * <GREENGRASS_ROOT>/packages/{artifacts,artifacts-unarchived}/<ComponentName>/.
+ * The recipe store (packages/recipes) is not read - it is root-only and names
+ * its files by a hashed component name. The nucleus garbage-collects unused
+ * versions, so this history is best-effort; the caller always counts the
+ * installed version too. A store that is missing or unreadable is skipped with
+ * one log line.
+ */
+const readLocalVersionHistory = (
+  greengrassRoot: string,
+  componentName: string,
+): string[] => {
+  const versions: string[] = [];
+  for (const store of LOCAL_VERSION_STORES) {
+    const dir = join(greengrassRoot, 'packages', store, componentName);
+    try {
+      versions.push(
+        ...readdirSync(dir, { withFileTypes: true })
+          .filter((entry) => entry.isDirectory())
+          .map((entry) => entry.name),
+      );
+    } catch (e) {
+      log(`Skipping ${dir}: ${(e as Error).message}`);
+    }
+  }
+  return versions;
+};
+
+/**
+ * Reads the last {@link LOG_TAIL_BYTES} of the component's log, returning
+ * undefined when it cannot be read.
+ */
+const readComponentLogTail = (logPath: string): string | undefined => {
+  let fd: number | undefined;
+  try {
+    fd = openSync(logPath, 'r');
+    const { size } = fstatSync(fd);
+    const length = Math.min(size, LOG_TAIL_BYTES);
+    const buffer = Buffer.alloc(length);
+    readSync(fd, buffer, 0, length, size - length);
+    const text = buffer.toString('utf-8');
+    // A truncated window starts mid-line, and possibly mid-character.
+    return size > length ? text.slice(text.indexOf('\n') + 1) : text;
+  } catch (e) {
+    log(
+      `Cannot read ${logPath}: ${(e as Error).message}. Run the component's ` +
+        '"-logs" target on this device to tail it.',
+    );
+    return undefined;
+  } finally {
+    if (fd !== undefined) {
+      closeSync(fd);
+    }
+  }
+};
+
+/** Prints the last {@link LOG_TAIL_LINES} lines, plus any recognised remedy. */
+const reportComponentLog = (
+  greengrassRoot: string,
+  componentName: string,
+): void => {
+  const logPath = join(greengrassRoot, 'logs', `${componentName}.log`);
+  const content = readComponentLogTail(logPath);
+  if (content === undefined) {
+    return;
+  }
+  const lines = content.split('\n').filter((line) => line.length > 0);
+  const tail = lines.slice(-LOG_TAIL_LINES);
+  log(`Last ${tail.length} line(s) of ${logPath}:`);
+  for (const line of tail) {
+    console.error(line);
+  }
+  if (SUDO_RS_LOG_SIGNATURES.some((signature) => content.includes(signature))) {
+    log(
+      'This log matches sudo-rs discarding the component environment. The ' +
+        'nucleus launches every component through "sudo -E" to pass ' +
+        'AWS_GG_NUCLEUS_DOMAIN_SOCKET_FILEPATH_FOR_COMPONENT and SVCUID, and ' +
+        'sudo-rs (the default sudo on Ubuntu 25.10 and later) accepts -E and ' +
+        'then discards the environment, so an IPC component never receives ' +
+        'them. Classic sudo is already installed - select it and restart the ' +
+        'nucleus: sudo update-alternatives --set sudo /usr/bin/sudo.ws && ' +
+        'sudo systemctl restart greengrass',
+    );
+  }
+};
+
+/** Reports a component that started, then exits 0. */
+const exitStarted = (
+  componentName: string,
+  componentVersion: string,
+  state: string,
+): never => {
+  log(`${componentName}=${componentVersion} is ${state}.`);
+  if (state === 'FINISHED') {
+    log(
+      'FINISHED means the Run lifecycle exited 0 rather than staying up. A ' +
+        'generated component subscribes to IPC and runs until it is stopped, ' +
+        'so unless you made this one deliberately one-shot, read its log with ' +
+        "the component's \"-logs\" target.",
+    );
+  }
+  process.exit(0);
+};
+
+async function main(): Promise<void> {
+  const [dist] = process.argv.slice(2);
+  if (!dist) {
+    usage();
+  }
+
+  const greengrassRoot = process.env.GREENGRASS_ROOT || '/greengrass/v2';
+  let recipeDir = join(dist, 'greengrass-build', 'recipes');
+  let artifactDir = join(dist, 'greengrass-build', 'artifacts');
+
+  let componentName: string;
+  let componentVersion: string;
+  let recipe: Record<string, unknown>;
+  try {
+    ({ componentName, componentVersion, recipe } = readResolvedRecipe(recipeDir));
+  } catch (e) {
+    log((e as Error).message);
+    process.exit(1);
+    return;
+  }
+
+  const timeoutSeconds = resolveTimeoutSeconds();
+  const timeoutMs = timeoutSeconds * 1000;
+  const cli = join(greengrassRoot, 'bin', 'greengrass-cli');
+
+  // Read BEFORE submitting. The state read afterwards can only be attributed
+  // to this deployment if the device was not already running this exact
+  // version - `component list` reports no instance identity to tell the
+  // incoming instance from the outgoing one.
+  const before = runCli(cli, ['component', 'list'], timeoutMs);
+  const installed =
+    !before.error && before.status === 0
+      ? parseComponentStatus(before.stdout ?? '', componentName)
+      : undefined;
+
+  if (isNextVersionSentinel(componentVersion)) {
+    const sentinel = componentVersion;
+    if (before.error || before.status !== 0) {
+      const detail = (before.error?.message ?? before.stderr ?? '').trim();
+      log(
+        `Cannot resolve ${sentinel} locally because "${cli} component list" failed${detail ? `: ${detail}` : ''}. Local NEXT_VERSION resolution needs the installed component version.`,
+      );
+      process.exit(1);
+      return;
+    }
+
+    const history = readLocalVersionHistory(greengrassRoot, componentName);
+    let resolved: string;
+    try {
+      resolved = resolveLocalNextVersion(installed?.version, history, sentinel);
+    } catch (e) {
+      log((e as Error).message);
+      process.exit(1);
+      return;
+    }
+
+    const localDir = join(dist, 'greengrass-build', 'local');
+    const localRecipeDir = join(localDir, 'recipes');
+    const localArtifactDir = join(
+      localDir,
+      'artifacts',
+      componentName,
+      resolved,
+    );
+    const sourceArtifactDir = join(
+      artifactDir,
+      componentName,
+      componentVersion,
+    );
+    try {
+      rmSync(localDir, { recursive: true, force: true });
+      mkdirSync(localRecipeDir, { recursive: true });
+      mkdirSync(localArtifactDir, { recursive: true });
+      writeFileSync(
+        join(localRecipeDir, `${componentName}-${resolved}.yaml`),
+        yaml.dump(
+          { ...recipe, ComponentVersion: resolved },
+          { lineWidth: -1 },
+        ),
+      );
+      for (const artifact of readdirSync(sourceArtifactDir)) {
+        cpSync(
+          join(sourceArtifactDir, artifact),
+          join(localArtifactDir, artifact),
+          { recursive: true },
+        );
+      }
+    } catch (e) {
+      log(
+        `Cannot stage ${sentinel} as ${resolved} for local deployment: ${(e as Error).message}`,
+      );
+      process.exit(1);
+      return;
+    }
+
+    log(
+      `Resolved ${sentinel} to ${resolved} (installed: ${installed?.version ?? 'none'}; package stores: ${history.length > 0 ? history.join(', ') : 'none'}).`,
+    );
+    componentVersion = resolved;
+    recipeDir = localRecipeDir;
+    artifactDir = join(localDir, 'artifacts');
+  } else if (installed?.version === componentVersion) {
+    log(
+      `This device already reports ${componentName}=${componentVersion}. The ` +
+        'state check below can then read the outgoing instance and pass while ' +
+        'the incoming one fails - bump ComponentVersion in recipe.yaml before ' +
+        're-deploying.',
+    );
+  }
+
+  const args = [
+    'deployment',
+    'create',
+    '--recipeDir',
+    recipeDir,
+    '--artifactDir',
+    artifactDir,
+    '--merge',
+    `${componentName}=${componentVersion}`,
+  ];
+
+  log(`Deploying ${componentName}=${componentVersion} via ${cli}`);
+  const result = runCli(cli, args, timeoutMs);
+  process.stdout.write(result.stdout ?? '');
+  process.stderr.write(result.stderr ?? '');
+  if (result.error) {
+    log(
+      (result.error as NodeJS.ErrnoException).code === 'ETIMEDOUT'
+        ? `"${cli} deployment create" did not return within ${timeoutSeconds}s.`
+        : `Cannot run "${cli}": ${result.error.message}. Run this target on ` +
+            'the Greengrass core device, and set GREENGRASS_ROOT when the ' +
+            'nucleus is not installed at /greengrass/v2.',
+    );
+    process.exit(1);
+  }
+  if (result.status !== 0) {
+    log(`greengrass-cli exited with ${result.status ?? 'no status'}.`);
+    process.exit(result.status ?? 1);
+  }
+
+  log(
+    `Deployment submitted. Waiting up to ${timeoutSeconds}s for ` +
+      `${componentName} to hold ${SETTLED_RUNNING_STATES.join(' or ')} across ` +
+      `${REQUIRED_STABLE_CHECKS} checks.`,
+  );
+
+  const deadline = Date.now() + timeoutMs;
+  let lastState: string | undefined;
+  let stableChecks = 0;
+  let listFailureReported = false;
+  while (Date.now() < deadline) {
+    const list = runCli(cli, ['component', 'list'], deadline - Date.now());
+    if (list.error || list.status !== 0) {
+      if (!listFailureReported) {
+        listFailureReported = true;
+        log(
+          `"${cli} component list" failed: ${(
+            list.error?.message ??
+            list.stderr ??
+            ''
+          ).trim()} - retrying until the timeout.`,
+        );
+      }
+    } else {
+      const listed = parseComponentStatus(list.stdout ?? '', componentName);
+      // Only a report of the version just deployed counts. An entry still
+      // carrying the previous version means the nucleus has not applied the
+      // deployment yet.
+      if (listed?.version === componentVersion && listed.state) {
+        lastState = listed.state;
+        if (SETTLED_FAILED_STATES.includes(lastState)) {
+          log(
+            `${componentName}=${componentVersion} is ${lastState} - the ` +
+              'component did not start. The local deployment itself can still ' +
+              'report success, so this state is the evidence that matters.',
+          );
+          reportComponentLog(greengrassRoot, componentName);
+          process.exit(1);
+        }
+        if (SETTLED_RUNNING_STATES.includes(lastState)) {
+          stableChecks += 1;
+          if (stableChecks >= REQUIRED_STABLE_CHECKS) {
+            exitStarted(componentName, componentVersion, lastState);
+          }
+        } else {
+          // STARTING, NEW, INSTALLED, STOPPING: on its way somewhere.
+          stableChecks = 0;
+        }
+      }
+    }
+    await sleep(POLL_INTERVAL_MS);
+  }
+
+  // The deadline caught a component that started and never went bad. That is a
+  // pass: only the stability window is unfinished, and waiting longer is the
+  // caller's choice to make.
+  if (lastState !== undefined && SETTLED_RUNNING_STATES.includes(lastState)) {
+    log(
+      `The ${timeoutSeconds}s timeout ended after ${stableChecks} of ` +
+        `${REQUIRED_STABLE_CHECKS} stable checks. Raise ` +
+        'GREENGRASS_DEPLOY_TIMEOUT_SECONDS to confirm the state holds.',
+    );
+    exitStarted(componentName, componentVersion, lastState);
+  }
+
+  log(
+    `${componentName}=${componentVersion} did not settle within ` +
+      `${timeoutSeconds}s - last reported state ${
+        lastState ?? 'none (the component was not listed at this version)'
+      }. Raise GREENGRASS_DEPLOY_TIMEOUT_SECONDS if this component is slow to ` +
+      'start.',
+  );
+  reportComponentLog(greengrassRoot, componentName);
+  process.exit(1);
+}
+
+void main();

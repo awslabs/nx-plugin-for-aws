@@ -3,6 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { parse } from '@iarna/toml';
 import {
   getProjects,
@@ -11,10 +14,10 @@ import {
   type Tree,
   updateNxJson,
 } from '@nx/devkit';
-import { readFileSync } from 'fs';
+import { FsTree, flushChanges } from 'nx/src/generators/tree';
 import { getPromptsForSchema } from 'nx/src/utils/params';
-import { join } from 'path';
 import { declareDependencies } from '../../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../../utils/format.js';
 import { expectHasMetricTags } from '../../utils/metrics-assertions.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
@@ -460,6 +463,55 @@ describe('python project generator', () => {
       'test',
       'typecheck',
     ]);
+  });
+
+  it('should preserve Biome formatting on a rerun across filesystem trees', async () => {
+    const workspaceDir = mkdtempSync(join(tmpdir(), 'py-project-format-'));
+    try {
+      const firstTree = createTreeUsingTsSolutionSetup();
+      const projectJsonPath = 'apps/test_project/project.json';
+      const options = {
+        name: 'test-project',
+        directory: 'apps',
+        type: 'application' as const,
+      };
+      await pyProjectGenerator(firstTree, options);
+
+      const projectConfig = JSON.parse(
+        firstTree.read(projectJsonPath, 'utf-8'),
+      );
+      projectConfig.targets['custom-target'] = {
+        executor: 'nx:run-commands',
+        options: { command: 'echo custom' },
+      };
+      projectConfig.metadata = {
+        ...projectConfig.metadata,
+        customSetting: 'preserved',
+      };
+      firstTree.write(projectJsonPath, JSON.stringify(projectConfig));
+      await formatFilesInSubtree(firstTree, projectJsonPath);
+      flushChanges(workspaceDir, firstTree.listChanges());
+
+      const formattedBeforeRerun = readFileSync(
+        join(workspaceDir, projectJsonPath),
+        'utf-8',
+      );
+      expect(formattedBeforeRerun).toContain('"ignorePaths": [\n');
+
+      const rerunTree = new FsTree(workspaceDir, false);
+      await pyProjectGenerator(rerunTree, options);
+
+      const afterRerun = rerunTree.read(projectJsonPath, 'utf-8') ?? '';
+      await formatFilesInSubtree(rerunTree, projectJsonPath);
+      expect(afterRerun).toBe(rerunTree.read(projectJsonPath, 'utf-8'));
+      expect(JSON.parse(afterRerun).targets['custom-target']).toEqual({
+        executor: 'nx:run-commands',
+        options: { command: 'echo custom' },
+      });
+      expect(JSON.parse(afterRerun).metadata.customSetting).toBe('preserved');
+    } finally {
+      rmSync(workspaceDir, { recursive: true, force: true });
+    }
   });
 
   it('should create an independent project with a different name', async () => {

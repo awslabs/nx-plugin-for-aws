@@ -1,0 +1,125 @@
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "<%- awsProviderVersion %>"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "<%- randomProviderVersion %>"
+    }
+    time = {
+      source  = "hashicorp/time"
+      version = "<%- timeProviderVersion %>"
+    }
+  }
+}
+
+variable "tags" {
+  description = "Tags to apply to resources"
+  type        = map(string)
+  default     = {}
+}
+
+locals {
+  policy_file = "${path.module}/../../../../../../../<%- policyPath %>"
+  policy      = jsondecode(file(local.policy_file))
+  name_prefix = "<%- guardrailNamePrefix %>"
+}
+
+resource "random_id" "unique_suffix" {
+  byte_length = 4
+}
+
+resource "aws_bedrock_guardrail" "this" {
+  name                      = "${local.name_prefix}-${random_id.unique_suffix.hex}"
+  blocked_input_messaging   = local.policy.blockedInputMessaging
+  blocked_outputs_messaging = local.policy.blockedOutputsMessaging
+
+  dynamic "topic_policy_config" {
+    for_each = length(try(local.policy.deniedTopics, [])) > 0 ? [1] : []
+    content {
+      dynamic "topics_config" {
+        for_each = local.policy.deniedTopics
+        content {
+          name       = topics_config.value.name
+          definition = topics_config.value.definition
+          examples   = try(topics_config.value.examples, [])
+          type       = "DENY"
+        }
+      }
+    }
+  }
+
+  dynamic "sensitive_information_policy_config" {
+    for_each = length(try(local.policy.piiEntities, [])) > 0 ? [1] : []
+    content {
+      dynamic "pii_entities_config" {
+        for_each = local.policy.piiEntities
+        content {
+          type   = pii_entities_config.value.type
+          action = pii_entities_config.value.action
+        }
+      }
+    }
+  }
+
+  tags = var.tags
+}
+
+resource "aws_bedrock_guardrail_version" "this" {
+  guardrail_arn = aws_bedrock_guardrail.this.guardrail_arn
+  description   = "guardrail.json sha256 ${filesha256(local.policy_file)}"
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "time_sleep" "version_retention" {
+  destroy_duration = "15s"
+
+  triggers = {
+    guardrail_id      = aws_bedrock_guardrail.this.guardrail_id
+    guardrail_version = aws_bedrock_guardrail_version.this.version
+  }
+
+  lifecycle {
+    create_before_destroy = true
+  }
+}
+
+module "add_guardrail_to_runtime_config" {
+  source = "../../../core/runtime-config/entry"
+
+  namespace = "agentcore"
+  key       = "guardrails"
+  value     = { "<%= nameClassName %>" = { guardrailId = time_sleep.version_retention.triggers.guardrail_id, guardrailVersion = time_sleep.version_retention.triggers.guardrail_version } }
+}
+
+output "guardrail_id" {
+  description = "ID of the guardrail"
+  value       = aws_bedrock_guardrail.this.guardrail_id
+}
+
+output "guardrail_arn" {
+  description = "ARN of the guardrail"
+  value       = aws_bedrock_guardrail.this.guardrail_arn
+}
+
+output "guardrail_version" {
+  description = "Numbered version of the guardrail"
+  value       = aws_bedrock_guardrail_version.this.version
+}
+
+output "iam_policy_statements" {
+  description = "IAM policy statements that allow the agent to apply the guardrail"
+  value = [
+    {
+      Effect   = "Allow"
+      Action   = ["bedrock:ApplyGuardrail"]
+      Resource = [aws_bedrock_guardrail.this.guardrail_arn]
+    }
+  ]
+  depends_on = [module.add_guardrail_to_runtime_config]
+}

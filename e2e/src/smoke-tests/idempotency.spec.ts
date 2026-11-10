@@ -5,7 +5,7 @@
 import { execSync } from 'node:child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { ensureDirSync } from 'fs-extra';
-import { createTestWorkspace, runCLI, tmpProjPath } from '../utils';
+import { createTestWorkspace, runCLI, runInstall, tmpProjPath } from '../utils';
 import { runGeneratorMatrix } from './generator-matrix';
 
 /**
@@ -250,6 +250,7 @@ describe('smoke test - idempotency', () => {
     // The compiler is the real arbiter: a sparse array fails to typecheck, and a
     // clobbered Prisma schema or Python model fails to build.
     await runCLI(`sync`, opts);
+    await runInstall(opts);
     await runCLI(`run-many --target build --all --output-style=stream`, opts);
   });
 });

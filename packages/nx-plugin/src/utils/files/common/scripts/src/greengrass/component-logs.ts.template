@@ -1,0 +1,48 @@
+import { spawn } from 'node:child_process';
+import { join } from 'node:path';
+
+/*
+ * Usage: component-logs.ts <component-name>
+ *
+ * <component-name> the recipe's ComponentName, e.g. "com.example.MyComponent"
+ *
+ * Tails <GREENGRASS_ROOT>/logs/<component-name>.log in follow mode. Ctrl-C
+ * (SIGINT) stops it - this target never exits on its own.
+ */
+
+const log = (msg: string): void => console.error(`[component-logs] ${msg}`);
+
+function usage(): never {
+  log('Usage: component-logs.ts <component-name>');
+  process.exit(1);
+}
+
+function main(): void {
+  const [componentName] = process.argv.slice(2);
+  if (!componentName) {
+    usage();
+  }
+
+  const greengrassRoot = process.env.GREENGRASS_ROOT || '/greengrass/v2';
+  const logPath = join(greengrassRoot, 'logs', `${componentName}.log`);
+
+  log(`Tailing ${logPath} - Ctrl-C to stop`);
+  const tail = spawn('tail', ['-n', '200', '-f', logPath], {
+    stdio: 'inherit',
+  });
+
+  const stop = (): void => {
+    tail.kill();
+    process.exit(0);
+  };
+  process.on('SIGINT', stop);
+  process.on('SIGTERM', stop);
+
+  tail.on('exit', (code) => process.exit(code ?? 0));
+  tail.on('error', (err) => {
+    log(`Failed to start tail: ${err.message}`);
+    process.exit(1);
+  });
+}
+
+main();

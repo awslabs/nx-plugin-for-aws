@@ -76,6 +76,9 @@ export const getDefaultBiomeConfig = (tree: Tree) => ({
       enabled: false,
     },
   },
+  // Markdown and YAML files are left as written.
+  markdown: { formatter: { enabled: false } },
+  yaml: { formatter: { enabled: false } },
   linter: {
     enabled: true,
     rules: {

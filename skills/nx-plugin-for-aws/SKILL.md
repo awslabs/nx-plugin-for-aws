@@ -60,10 +60,10 @@ To create a new workspace and scaffold a React website with a tRPC API:
 pnpm create @aws/nx-workspace my-app --no-interactive
 
 # Generate a tRPC API
-pnpm nx g @aws/nx-plugin:ts#trpc-api --no-interactive --name=my-api
+pnpm nx g @aws/nx-plugin:ts#api --no-interactive --name=my-api --framework=trpc
 
 # Generate a React website
-pnpm nx g @aws/nx-plugin:ts#react-website --no-interactive --name=my-website
+pnpm nx g @aws/nx-plugin:ts#website --no-interactive --name=my-website
 
 # Connect the website to the API
 pnpm nx g @aws/nx-plugin:connection --no-interactive --sourceProject=my-website --targetProject=my-api
@@ -110,11 +110,11 @@ Use the `generator_guide` tool with a specific generator name to get in-depth do
 A typical full-stack app involves:
 
 1. Create workspace
-2. Generate a backend API (`ts#trpc-api`, `ts#smithy-api`, or `py#fast-api`)
-3. Generate a React frontend (`ts#react-website`)
+2. Generate a backend API (`ts#api` with `--framework=trpc` or `--framework=smithy`, or `py#api`)
+3. Generate a React frontend (`ts#website`)
 4. Connect frontend to backend (`connection`)
 5. Generate CDK infrastructure (`ts#infra`)
-6. Optionally add auth (`ts#react-website#auth`)
+6. Optionally add auth (`ts#website#auth`)
 
 ### Workflow 5: Add Components to Existing Projects
 
@@ -127,38 +127,41 @@ Add capabilities to existing projects:
 
 ## Available Generators
 
-| Generator            | Description                                                                                                        |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `init`               | Configure an existing Nx workspace to use the @aws/nx-plugin                                                       |
-| `agentcore-gateway`  | Generate an AgentCore Gateway project                                                                              |
-| `agentcore-harness`  | Generate an AgentCore Harness project (experimental)                                                               |
-| `connection`         | Integrates a source project with a target project                                                                  |
-| `license`            | Add LICENSE files and configure source code licence headers                                                        |
-| `py#api`             | Create a Python API                                                                                                |
-| `py#lambda-function` | Adds a lambda function to a python project                                                                         |
-| `py#mcp-server`      | Generate a Python Model Context Protocol (MCP) server for providing context to Large Language Models               |
-| `py#project`         | Generates a Python project                                                                                         |
-| `py#agent`           | Add an AI Agent to a Python project                                                                                |
-| `smithy#project`     | Generate a Smithy model project, either defining a service or a library of reusable shapes                         |
-| `terraform#project`  | Generates a Terraform project                                                                                      |
-| `ts#docs`            | Generates a documentation site                                                                                     |
-| `ts#infra`           | Generates a cdk application                                                                                        |
-| `ts#lambda-function` | Generate a TypeScript lambda function                                                                              |
-| `ts#dcr-proxy`       | Generate an OAuth Dynamic Client Registration (DCR) proxy construct for Cognito-authenticated MCP servers          |
-| `ts#mcp-server`      | Generate a TypeScript Model Context Protocol (MCP) server for providing context to Large Language Models           |
-| `ts#nx-generator`    | Generator for adding an Nx Generator to an existing TypeScript project                                             |
-| `ts#nx-migration`    | Generator for adding an Nx Migration to an Nx Plugin, applied by nx migrate when users upgrade                     |
-| `ts#nx-plugin`       | Generate an Nx Plugin of your own! Build custom generators automatically made available for AI vibe-coding via MCP |
-| `ts#project`         | Generates a TypeScript project                                                                                     |
-| `ts#website`         | Generates a website application                                                                                    |
-| `ts#website#auth`    | Adds auth to an existing website                                                                                   |
-| `ts#agent`           | Add an AI Agent to a TypeScript project                                                                            |
-| `ts#agent#eval`      | Add an evaluation harness to a TypeScript Agent (experimental)                                                     |
-| `ts#api`             | Create a TypeScript API                                                                                            |
-| `ts#rdb`             | Create a relational database project                                                                               |
-| `ts#dynamodb`        | Create a TypeScript DynamoDB project                                                                               |
-| `py#dynamodb`        | Create a Python DynamoDB project                                                                                   |
-| `py#rdb`             | Create a Python relational database project                                                                        |
+| Generator              | Description                                                                                                        |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `init`                 | Configure an existing Nx workspace to use the @aws/nx-plugin                                                       |
+| `agentcore-gateway`    | Generate an AgentCore Gateway project                                                                              |
+| `agentcore-harness`    | Generate an AgentCore Harness project (experimental)                                                               |
+| `connection`           | Integrates a source project with a target project                                                                  |
+| `greengrass#component` | Add an AWS IoT Greengrass component to an existing Python or TypeScript project (experimental)                     |
+| `license`              | Add LICENSE files and configure source code licence headers                                                        |
+| `py#api`               | Create a Python API                                                                                                |
+| `py#lambda-function`   | Adds a lambda function to a python project                                                                         |
+| `py#mcp-server`        | Generate a Python Model Context Protocol (MCP) server for providing context to Large Language Models               |
+| `py#project`           | Generates a Python project                                                                                         |
+| `py#agent`             | Add an AI Agent to a Python project                                                                                |
+| `py#agent#guardrails`  | Add an Amazon Bedrock Guardrail to a Python Agent (experimental)                                                   |
+| `smithy#project`       | Generate a Smithy model project, either defining a service or a library of reusable shapes                         |
+| `terraform#project`    | Generates a Terraform project                                                                                      |
+| `ts#docs`              | Generates a documentation site                                                                                     |
+| `ts#infra`             | Generates a cdk application                                                                                        |
+| `ts#lambda-function`   | Generate a TypeScript lambda function                                                                              |
+| `ts#dcr-proxy`         | Generate an OAuth Dynamic Client Registration (DCR) proxy construct for Cognito-authenticated MCP servers          |
+| `ts#mcp-server`        | Generate a TypeScript Model Context Protocol (MCP) server for providing context to Large Language Models           |
+| `ts#nx-generator`      | Generator for adding an Nx Generator to an existing TypeScript project                                             |
+| `ts#nx-migration`      | Generator for adding an Nx Migration to an Nx Plugin, applied by nx migrate when users upgrade                     |
+| `ts#nx-plugin`         | Generate an Nx Plugin of your own! Build custom generators automatically made available for AI vibe-coding via MCP |
+| `ts#project`           | Generates a TypeScript project                                                                                     |
+| `ts#website`           | Generates a website application                                                                                    |
+| `ts#website#auth`      | Adds auth to an existing website                                                                                   |
+| `ts#agent`             | Add an AI Agent to a TypeScript project                                                                            |
+| `ts#agent#eval`        | Add an evaluation harness to a TypeScript Agent (experimental)                                                     |
+| `ts#agent#guardrails`  | Add an Amazon Bedrock Guardrail to a TypeScript Agent (experimental)                                               |
+| `ts#api`               | Create a TypeScript API                                                                                            |
+| `ts#rdb`               | Create a relational database project                                                                               |
+| `ts#dynamodb`          | Create a TypeScript DynamoDB project                                                                               |
+| `py#dynamodb`          | Create a Python DynamoDB project                                                                                   |
+| `py#rdb`               | Create a Python relational database project                                                                        |
 
 ## Best Practices
 
@@ -180,16 +183,16 @@ When the user wants a full workspace created in one go, you can chain generators
 - **Workspace creation** pass `--no-interactive` to avoid interactive prompts
 
   ```bash
-  pnpm create @aws/nx-workspace my-app --iacProvider=CDK --no-interactive
+  pnpm create @aws/nx-workspace my-app --iac=cdk --no-interactive
   ```
 
 - **Chain generators** with `&&` in a single Bash call after workspace creation. Pass `--prefer-install-dependencies=false` on each generator except the last so dependencies install once at the end, for example:
 
   ```bash
   cd my-app && \
-    pnpm nx g @aws/nx-plugin:ts#trpc-api --no-interactive --name=my-app-api --auth=IAM --prefer-install-dependencies=false && \
-    pnpm nx g @aws/nx-plugin:ts#react-website --no-interactive --name=my-app-website --uxProvider=Shadcn --prefer-install-dependencies=false && \
-    pnpm nx g @aws/nx-plugin:ts#react-website#auth --no-interactive --project=@my-app/my-app-website --cognitoDomain=my-app-auth --prefer-install-dependencies=false && \
+    pnpm nx g @aws/nx-plugin:ts#api --no-interactive --name=my-app-api --framework=trpc --auth=iam --prefer-install-dependencies=false && \
+    pnpm nx g @aws/nx-plugin:ts#website --no-interactive --name=my-app-website --ux=shadcn --prefer-install-dependencies=false && \
+    pnpm nx g @aws/nx-plugin:ts#website#auth --no-interactive --project=@my-app/my-app-website --cognitoDomain=my-app-auth --prefer-install-dependencies=false && \
     pnpm nx g @aws/nx-plugin:connection --no-interactive --sourceProject=@my-app/my-app-website --targetProject=@my-app/my-app-api --prefer-install-dependencies=false && \
     pnpm nx g @aws/nx-plugin:ts#infra --no-interactive --name=infra && \
     pnpm nx sync && \

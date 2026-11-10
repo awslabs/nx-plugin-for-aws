@@ -2,12 +2,19 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { describe, expect, it } from 'vitest';
+import { type Tree, writeJson } from '@nx/devkit';
+import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { EXACT_DEPENDENCY_PINS, LOCKSTEP_GROUPS } from '../versions.js';
 import {
   type DependencyLookup,
+  EXACT_DEPENDENCY_SOURCES_PATH,
+  type ExactDependencySources,
   type ManifestField,
+  memoizeLookup,
   pinToExactDependencies,
+  verifyExactDependencies,
+  writeExactDependencySources,
 } from './exact-dependency.js';
 
 /**
@@ -39,6 +46,15 @@ const REGISTRY: Record<string, Partial<Record<ManifestField, object>>> = {
       '@ag-ui/core': '1.0.2',
       '@ag-ui/client': '1.0.2',
       '@copilotkit/core': '1.79.0',
+      rxjs: '7.8.1',
+    },
+  },
+  // https://registry.npmjs.org/@copilotkit/react-core/1.79.1 (fetched 2026-10-19)
+  '@copilotkit/react-core@1.79.1': {
+    dependencies: {
+      '@ag-ui/core': '1.0.2',
+      '@ag-ui/client': '1.0.2',
+      '@copilotkit/core': '1.79.1',
       rxjs: '7.8.1',
     },
   },
@@ -100,6 +116,19 @@ const AG_UI_0X = {
 };
 
 const REASON = RULES[0].reason;
+
+/** What `exact-dependency-sources.json` records for the vended pins. */
+const RECORDED: ExactDependencySources = {
+  '@copilotkit/react-core': {
+    version: '1.79.0',
+    dependencies: { '@ag-ui/client': '1.0.2', '@ag-ui/core': '1.0.2' },
+  },
+};
+
+/** A lookup for a run that must not read the registry. */
+const offline: DependencyLookup = async (name, version) => {
+  throw new Error(`unexpected read of ${name}@${version}`);
+};
 
 describe('pinToExactDependencies', () => {
   it('puts the @ag-ui pins back to what CopilotKit depends on when only @ag-ui moved (drift 1)', async () => {
@@ -357,5 +386,266 @@ describe('pinToExactDependencies', () => {
     expect(notes[0].note).toContain(
       '@copilotkit/react-core 1.79.0 does not depend on @ag-ui/core',
     );
+  });
+});
+
+describe('verifyExactDependencies', () => {
+  const MISMATCH = {
+    ...VENDED,
+    '@ag-ui/client': '1.0.1',
+    '@ag-ui/core': '1.0.1',
+    '@ag-ui/encoder': '1.0.1',
+  };
+
+  it('reuses the recorded dependencies when CopilotKit did not move', async () => {
+    await expect(
+      verifyExactDependencies(RULES, VENDED, RECORDED, offline),
+    ).resolves.toEqual(RECORDED);
+  });
+
+  it('records the new release when CopilotKit moved and its @ag-ui dependencies did not', async () => {
+    const versions = { ...VENDED, '@copilotkit/react-core': '1.79.1' };
+
+    await expect(
+      verifyExactDependencies(RULES, versions, RECORDED, lookup()),
+    ).resolves.toEqual({
+      '@copilotkit/react-core': {
+        version: '1.79.1',
+        dependencies: { '@ag-ui/client': '1.0.2', '@ag-ui/core': '1.0.2' },
+      },
+    });
+  });
+
+  it('records the new release when @ag-ui moved with CopilotKit', async () => {
+    const recorded: ExactDependencySources = {
+      '@copilotkit/react-core': {
+        version: '1.77.0',
+        dependencies: { '@ag-ui/client': '1.0.1', '@ag-ui/core': '1.0.1' },
+      },
+    };
+
+    await expect(
+      verifyExactDependencies(RULES, VENDED, recorded, lookup()),
+    ).resolves.toEqual(RECORDED);
+  });
+
+  it('throws when an @ag-ui pin differs from what CopilotKit depends on', async () => {
+    const result = verifyExactDependencies(RULES, MISMATCH, RECORDED, offline);
+
+    await expect(result).rejects.toThrow(
+      '@ag-ui/client 1.0.1, @ag-ui/core 1.0.1 but @copilotkit/react-core 1.79.0 depends on @ag-ui/client 1.0.2, @ag-ui/core 1.0.2',
+    );
+    await expect(result).rejects.toThrow(REASON);
+  });
+
+  it('throws when the dependencies of a CopilotKit it has not recorded cannot be read', async () => {
+    const versions = { ...VENDED, '@copilotkit/react-core': '1.80.0' };
+
+    await expect(
+      verifyExactDependencies(RULES, versions, RECORDED, lookup()),
+    ).rejects.toThrow(
+      /could not read the dependencies of @copilotkit\/react-core 1\.80\.0/,
+    );
+  });
+
+  it('throws when a follower is not being written', async () => {
+    const { '@ag-ui/core': _, ...versions } = VENDED;
+
+    await expect(
+      verifyExactDependencies(RULES, versions, RECORDED, offline),
+    ).rejects.toThrow(
+      '@ag-ui/core undefined but @copilotkit/react-core 1.79.0 depends on @ag-ui/core 1.0.2',
+    );
+  });
+
+  it('skips a rule whose source is not being written', async () => {
+    const { '@copilotkit/react-core': _, ...versions } = VENDED;
+    const read = vi.fn(offline);
+
+    await expect(
+      verifyExactDependencies(RULES, versions, {}, read),
+    ).resolves.toEqual({});
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('throws naming the declared string when CopilotKit declares a follower by a non-version', async () => {
+    const registry = {
+      ...REGISTRY,
+      '@copilotkit/react-core@1.79.1': {
+        dependencies: {
+          '@ag-ui/client': 'latest',
+          '@ag-ui/core': 'workspace:*',
+        },
+      },
+    };
+    const versions = { ...VENDED, '@copilotkit/react-core': '1.79.1' };
+
+    await expect(
+      verifyExactDependencies(RULES, versions, RECORDED, lookup(registry)),
+    ).rejects.toThrow(
+      '@ag-ui/client 1.0.2, @ag-ui/core 1.0.2 but @copilotkit/react-core 1.79.1 depends on @ag-ui/client latest, @ag-ui/core workspace:*',
+    );
+  });
+
+  it('throws when CopilotKit does not depend on a follower', async () => {
+    const registry = {
+      ...REGISTRY,
+      '@copilotkit/react-core@1.79.1': {
+        dependencies: { '@ag-ui/client': '1.0.2' },
+      },
+    };
+    const versions = { ...VENDED, '@copilotkit/react-core': '1.79.1' };
+
+    await expect(
+      verifyExactDependencies(RULES, versions, RECORDED, lookup(registry)),
+    ).rejects.toThrow(
+      '@copilotkit/react-core 1.79.1 does not depend on @ag-ui/core',
+    );
+  });
+
+  it('takes the bare version when CopilotKit declares a range', async () => {
+    const registry = {
+      ...REGISTRY,
+      '@copilotkit/react-core@1.79.1': {
+        dependencies: { '@ag-ui/core': '^1.0.2', '@ag-ui/client': '~1.0.2' },
+      },
+    };
+    const versions = { ...VENDED, '@copilotkit/react-core': '1.79.1' };
+
+    const sources = await verifyExactDependencies(
+      RULES,
+      versions,
+      RECORDED,
+      lookup(registry),
+    );
+
+    expect(sources['@copilotkit/react-core'].dependencies).toEqual({
+      '@ag-ui/client': '1.0.2',
+      '@ag-ui/core': '1.0.2',
+    });
+  });
+
+  it('passes the pins a held rule leaves at current', async () => {
+    const proposed = {
+      ...VENDED,
+      '@copilotkit/react-core': '1.80.0',
+      '@ag-ui/client': '1.0.3',
+      '@ag-ui/core': '1.0.3',
+      '@ag-ui/encoder': '1.0.3',
+    };
+    await pinToExactDependencies(RULES, GROUPS, VENDED, proposed, lookup());
+
+    await expect(
+      verifyExactDependencies(RULES, proposed, RECORDED, offline),
+    ).resolves.toEqual(RECORDED);
+  });
+});
+
+describe('writeExactDependencySources', () => {
+  let tree: Tree;
+
+  beforeEach(() => {
+    tree = createTreeWithEmptyWorkspace();
+    writeJson(tree, EXACT_DEPENDENCY_SOURCES_PATH, RECORDED);
+  });
+
+  const read = () => tree.read(EXACT_DEPENDENCY_SOURCES_PATH, 'utf-8');
+
+  it('writes the record when CopilotKit moved', async () => {
+    const versions = { ...VENDED, '@copilotkit/react-core': '1.79.1' };
+
+    const written = await writeExactDependencySources(
+      tree,
+      RULES,
+      versions,
+      lookup(),
+    );
+
+    expect(written).toEqual([EXACT_DEPENDENCY_SOURCES_PATH]);
+    expect(JSON.parse(read() ?? '')).toEqual({
+      '@copilotkit/react-core': {
+        version: '1.79.1',
+        dependencies: { '@ag-ui/client': '1.0.2', '@ag-ui/core': '1.0.2' },
+      },
+    });
+  });
+
+  it('creates the record when there is none yet', async () => {
+    tree.delete(EXACT_DEPENDENCY_SOURCES_PATH);
+
+    const written = await writeExactDependencySources(
+      tree,
+      RULES,
+      VENDED,
+      lookup(),
+    );
+
+    expect(written).toEqual([EXACT_DEPENDENCY_SOURCES_PATH]);
+    expect(JSON.parse(read() ?? '')).toEqual(RECORDED);
+  });
+
+  it('leaves the file as it is when nothing moved', async () => {
+    const before = read();
+
+    const written = await writeExactDependencySources(
+      tree,
+      RULES,
+      VENDED,
+      offline,
+    );
+
+    expect(written).toEqual([]);
+    expect(read()).toBe(before);
+  });
+
+  it('writes nothing when the pins do not match', async () => {
+    const before = read();
+    const versions = {
+      ...VENDED,
+      '@ag-ui/client': '1.0.1',
+      '@ag-ui/core': '1.0.1',
+      '@ag-ui/encoder': '1.0.1',
+    };
+
+    await expect(
+      writeExactDependencySources(tree, RULES, versions, offline),
+    ).rejects.toThrow('but @copilotkit/react-core 1.79.0 depends on');
+    expect(read()).toBe(before);
+  });
+});
+
+describe('memoizeLookup', () => {
+  it("reads each release's field once", async () => {
+    const inner = vi.fn(lookup());
+    const memoized = memoizeLookup(inner);
+
+    const first = await memoized(
+      '@copilotkit/react-core',
+      '1.79.0',
+      'dependencies',
+    );
+    const second = await memoized(
+      '@copilotkit/react-core',
+      '1.79.0',
+      'dependencies',
+    );
+    await memoized('@copilotkit/react-core', '1.79.0', 'peerDependencies');
+
+    expect(inner).toHaveBeenCalledTimes(2);
+    expect(second).toEqual(first);
+    expect(second).not.toBe(first);
+  });
+
+  it('fails a repeated read the way the first failed', async () => {
+    const inner = vi.fn(lookup());
+    const memoized = memoizeLookup(inner);
+
+    await expect(
+      memoized('@copilotkit/react-core', '1.80.0', 'dependencies'),
+    ).rejects.toThrow('404 Not Found: @copilotkit/react-core@1.80.0');
+    await expect(
+      memoized('@copilotkit/react-core', '1.80.0', 'dependencies'),
+    ).rejects.toThrow('404 Not Found: @copilotkit/react-core@1.80.0');
+    expect(inner).toHaveBeenCalledTimes(1);
   });
 });

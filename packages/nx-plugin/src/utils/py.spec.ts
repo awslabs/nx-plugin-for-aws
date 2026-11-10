@@ -607,3 +607,39 @@ describe('addWorkspaceDependencyToPyProject', () => {
     expect(toml.project.dependencies).toEqual(['scope-my-lib']);
   });
 });
+
+describe('addDependenciesToPyProjectToml uv override-dependencies', () => {
+  let tree: Tree;
+
+  const strandsDeclaration = declareDependencies()({
+    py: [{ name: 'strands-agents-tools' }],
+  });
+  const rootText = () => tree.read('pyproject.toml', 'utf-8');
+
+  beforeEach(() => {
+    tree = createTreeWithEmptyWorkspace();
+    tree.write(
+      'pyproject.toml',
+      stringify({
+        project: { name: 'proj', version: '0.1.0', dependencies: [] },
+        tool: { uv: { workspace: { members: ['packages/p'] } } },
+      } as any),
+    );
+    tree.write(
+      'packages/p/pyproject.toml',
+      stringify({
+        project: { name: 'p', version: '0.1.0', dependencies: [] },
+      } as UVPyprojectToml),
+    );
+  });
+
+  it('should leave the workspace root unchanged when strands-agents-tools is added', () => {
+    const before = rootText();
+
+    addDependenciesToPyProjectToml(tree, 'packages/p', strandsDeclaration, [
+      'strands-agents-tools',
+    ]);
+
+    expect(rootText()).toBe(before);
+  });
+});

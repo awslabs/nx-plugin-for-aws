@@ -341,15 +341,19 @@ function chatStreamsReply(
   message = 'What is 3 times 5?',
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    const term = pty.spawn('pnpm', ['exec', 'nx', 'run', target], {
-      cwd,
-      env: {
-        ...process.env,
-        NX_DAEMON: 'true',
-        RUNTIME_CONFIG_APP_ID: '',
-        NX_NATIVE_COMMAND_RUNNER: 'false',
+    const term = pty.spawn(
+      'pnpm',
+      ['exec', 'nx', 'run', target, '--output-style=stream'],
+      {
+        cwd,
+        env: {
+          ...process.env,
+          NX_DAEMON: 'true',
+          RUNTIME_CONFIG_APP_ID: '',
+          NX_NATIVE_COMMAND_RUNNER: 'false',
+        },
       },
-    });
+    );
     let out = '';
     let sent = false;
     let settled = false;
@@ -1103,6 +1107,7 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
       '@local-dev-test/ts-project:my-agent-dev',
       ports.tsAgent,
     );
+    await waitForPort(ports.tsMcp, STARTUP_TIMEOUT_MS);
 
     const pingRes = await fetch(`http://127.0.0.1:${ports.tsAgent}/ping`);
     console.log('TS Agent /ping:', pingRes.status);
@@ -1201,6 +1206,9 @@ def list_examples_by_category(category: str) -> list[ExampleItem]:
       '@local-dev-test/ts-project:gw-agent-dev',
       ports.gwAgent,
     );
+    await waitForPort(ports.gateway, STARTUP_TIMEOUT_MS);
+    await waitForPort(ports.tsMcp, STARTUP_TIMEOUT_MS);
+    await waitForPort(ports.pyMcp, STARTUP_TIMEOUT_MS);
 
     const invokeGatewayTool = (tool: string) =>
       new Promise<string>((resolve, reject) => {

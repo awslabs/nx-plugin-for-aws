@@ -563,7 +563,7 @@ Bedrock AgentCore Runtime을 위해 에이전트를 빌드하기 위해 프로�
 - 대상 플랫폼(`aarch64-manylinux_2_28`)용 의존성을 `uv pip install`로 설치합니다
 
 <OptionFilter when={{ infra: 'agentcore' }} description="Code package target">
-`<your-agent-name>-package` 타겟도 추가되며, 배포 가능한 코드 패키지를 조립합니다: `aarch64` 의존성 번들, Python 모듈 트리, 그리고 루트 `main.py` 엔트리 포인트. 생성된 인프라는 이 디렉토리를 `.zip`으로 업로드합니다 — CDK에서는 `AgentRuntimeArtifact.fromCodeAsset`을 통해, Terraform에서는 공유 자산 버킷에 아카이브됩니다.
+`<your-agent-name>-package` 타겟도 추가되며, 배포 가능한 코드 패키지를 조립합니다: `aarch64` 의존성 번들, Python 모듈 트리, 루트 `main.py` 엔트리 포인트, 그리고 OpenTelemetry 계측으로 실행하기 위한 `agentcore_launcher.py`. 생성된 인프라는 이 디렉토리를 `.zip`으로 업로드합니다 - CDK에서는 `AgentRuntimeArtifact.fromCodeAsset`을 통해, Terraform에서는 공유 자산 버킷에 아카이브됩니다.
 </OptionFilter>
 
 <OptionFilter when={{ infra: 'agentcore-ecr' }} description="Container image build and scan">
@@ -736,40 +736,25 @@ React 웹사이트에서 AG-UI 에이전트를 호출하려면 <Link path="/guid
 
 <Snippet name="agent/securing-your-agent" parentHeading="에이전트 보안" />
 
+<Link path="guides/py-agent-guardrails">`py#agent#guardrails` 생성기</Link>가 이를 대신 수행합니다. `guardrail.json` 정책 파일과 가드레일을 생성하는 CDK 구성 요소 또는 Terraform 모듈을 추가하고, 가드레일이 적용된 모델로 에이전트를 생성합니다:
+
 <Tabs syncKey="agent-framework">
 <TabItem label="Strands" _filter={{ framework: 'strands' }}>
 ```python
 # agent.py
-import os
+from .guardrail import get_guardrailed_model
 
-from strands import Agent
-from strands.models import BedrockModel
-
-model = BedrockModel(
-    model_id=os.environ.get("MODEL_ID"),
-    guardrail_id=os.environ["GUARDRAIL_ID"],
-    guardrail_version=os.environ.get("GUARDRAIL_VERSION", "DRAFT"),
-)
-
-agent = Agent(model=model)
+agent = Agent(model=get_guardrailed_model(), ...)
 ```
 
-자세한 내용은 Strands [가드레일](https://strandsagents.com/docs/user-guide/safety-security/guardrails/) 가이드를 참조하세요.
+자세한 내용은 Strands [Guardrails](https://strandsagents.com/docs/user-guide/safety-security/guardrails/) 가이드를 참조하세요.
 </TabItem>
 <TabItem label="LangChain" _filter={{ framework: 'langchain' }}>
 ```python
 # agent.py
-import os
+from .guardrail import GuardrailedChatBedrockConverse
 
-from langchain_aws import ChatBedrockConverse
-
-model = ChatBedrockConverse(
-    model=os.environ.get("MODEL_ID"),
-    guardrail_config={
-        "guardrailIdentifier": os.environ["GUARDRAIL_ID"],
-        "guardrailVersion": os.environ.get("GUARDRAIL_VERSION", "DRAFT"),
-    },
-)
+model = GuardrailedChatBedrockConverse(model=MODEL_ID, region_name=REGION)
 ```
 
 `guardrail_config` 필드에 대한 자세한 내용은 [`ChatBedrockConverse`](https://docs.langchain.com/oss/python/integrations/chat/bedrock_converse) 문서를 참조하세요.

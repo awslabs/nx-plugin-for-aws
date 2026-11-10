@@ -1,0 +1,370 @@
+import { createHash } from 'node:crypto';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { RemovalPolicy, Token } from 'aws-cdk-lib';
+import { CfnComponentVersion } from 'aws-cdk-lib/aws-greengrassv2';
+import { BucketDeployment, Source } from 'aws-cdk-lib/aws-s3-deployment';
+import { Construct } from 'constructs';
+import yaml from 'js-yaml';
+import type { GreengrassArtifactBucket } from './artifact-bucket<% if (esm) { %>.js<% } %>';
+import { GreengrassNextVersion } from './next-version<% if (esm) { %>.js<% } %>';
+import {
+  readRecipeSummary,
+  substituteArtifactUris,
+} from './recipe<% if (esm) { %>.js<% } %>';
+
+const NEXT_VERSION_STRATEGIES = {
+  NEXT_PATCH: 'patch',
+  NEXT_MINOR: 'minor',
+  NEXT_MAJOR: 'major',
+} as const;
+const NEXT_VERSION_TAG_KEY = 'nx:greengrass:content-sha256';
+const VERSIONING_TAG_KEY = 'nx:greengrass:versioning';
+
+/**
+ * Publication inputs; NEXT_* versions resolve at deploy time.
+ */
+export interface GreengrassComponentVersionProps {
+  /**
+   * Directory holding the resolved recipe YAML, read at synth time.
+   */
+  readonly recipesDir: string;
+
+  /**
+   * Built archives under <artifactsDir>/<ComponentName>/<ComponentVersion>/.
+   * Sentinel versions keep their literal directory name.
+   */
+  readonly artifactsDir: string;
+
+  /** The shared artifact bucket this version's artifact is uploaded to. */
+  readonly bucket: GreengrassArtifactBucket;
+
+  /**
+   * Retention for the published version and uploaded artifacts.
+   * @default RemovalPolicy.RETAIN
+   */
+  readonly removalPolicy?: RemovalPolicy;
+}
+
+/** Reads `dir`, returning the single file whose name passes `predicate`. */
+const findSingleFile = (
+  dir: string,
+  description: string,
+  predicate: (name: string) => boolean = () => true,
+): string => {
+  let entries: string[];
+  try {
+    entries = readdirSync(dir).filter(predicate);
+  } catch {
+    throw new Error(
+      `No ${description} found at "${dir}" - run the component's "-artifact" target first.`,
+    );
+  }
+  if (entries.length !== 1) {
+    throw new Error(
+      `Expected exactly one ${description} in "${dir}", found ${entries.length}.`,
+    );
+  }
+  return join(dir, entries[0]);
+};
+
+/** Reads `dir`, returning every file name sorted, throwing when it holds none. */
+const listFilesSorted = (dir: string, description: string): string[] => {
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    throw new Error(
+      `No ${description} found at "${dir}" - run the component's "-artifact" target first.`,
+    );
+  }
+  if (entries.length === 0) {
+    throw new Error(
+      `Expected at least one ${description} in "${dir}", found 0 - run the component's "-artifact" target first.`,
+    );
+  }
+  return entries.sort();
+};
+
+/**
+ * Reject different content claiming the same component and version in one synth.
+ */
+const publishedHashesByVersion = new Map<string, string>();
+
+const assertNoSynthTimeVersionDrift = (
+  componentName: string,
+  componentVersion: string,
+  sha256: string,
+  recipePath: string,
+): void => {
+  const key = `${componentName}@${componentVersion}`;
+  const previousHash = publishedHashesByVersion.get(key);
+  if (previousHash !== undefined && previousHash !== sha256) {
+    const sentinelMode = componentVersion in NEXT_VERSION_STRATEGIES;
+    throw new Error(
+      sentinelMode
+        ? `Two constructs publish the same sentinel-versioned component ${key} with different content in one synth ` +
+            `("${recipePath}" hashes to ${sha256}, a previous construct hashed to ${previousHash}).`
+        : `Two different artifacts both claim to be ${key} in this synth ` +
+            `("${recipePath}" hashes to ${sha256}, a previous construct hashed to ${previousHash}). ` +
+            `Component versions are immutable - bump ComponentVersion in recipe.yaml before rebuilding.`,
+    );
+  }
+  publishedHashesByVersion.set(key, sha256);
+};
+
+/** Maximum prefix length allowed by BucketDeployment's bucket ownership tag. */
+const MAX_DESTINATION_KEY_PREFIX_LENGTH = 102;
+
+/** Report oversized artifact prefixes before BucketDeployment creates its tag. */
+const assertArtifactKeyPrefixFits = (
+  componentName: string,
+  destinationKeyPrefix: string,
+): void => {
+  if (destinationKeyPrefix.length <= MAX_DESTINATION_KEY_PREFIX_LENGTH) {
+    return;
+  }
+  const overBy =
+    destinationKeyPrefix.length - MAX_DESTINATION_KEY_PREFIX_LENGTH;
+  throw new Error(
+    `ComponentName "${componentName}" (${componentName.length} characters) produces an artifact key prefix "${destinationKeyPrefix}" that is ${destinationKeyPrefix.length} ` +
+      `characters long, exceeding the ${MAX_DESTINATION_KEY_PREFIX_LENGTH} character limit CDK's ` +
+      `BucketDeployment enforces on it (the prefix always carries a fixed 32-character content hash ` +
+      `plus two "/" separators). Shorten ComponentName ` +
+      `by at least ${overBy} character(s).`,
+  );
+};
+
+/** Maximum serialized InlineRecipe size accepted by CreateComponentVersion. */
+const MAX_INLINE_RECIPE_BYTES = 16 * 1024;
+
+/** Shortest bucket name S3 accepts, and so the shortest a token can become. */
+const MIN_S3_BUCKET_NAME_LENGTH = 3;
+
+/** Reject oversized recipes using minimum resolved lengths for deploy-time tokens. */
+const assertInlineRecipeFits = (
+  componentName: string,
+  componentVersion: string,
+  recipePath: string,
+  inlineRecipe: string,
+  bucketName: string,
+  versionToken?: string,
+): void => {
+  const bytes = Buffer.byteLength(inlineRecipe, 'utf-8');
+  let minimumInlineRecipe = inlineRecipe;
+  const unresolvedInputs: string[] = [];
+  if (Token.isUnresolved(bucketName)) {
+    minimumInlineRecipe = minimumInlineRecipe
+      .split(bucketName)
+      .join('x'.repeat(MIN_S3_BUCKET_NAME_LENGTH));
+    unresolvedInputs.push(
+      `the ${MIN_S3_BUCKET_NAME_LENGTH}-character minimum S3 allows for the artifact bucket name`,
+    );
+  }
+  if (versionToken !== undefined && Token.isUnresolved(versionToken)) {
+    minimumInlineRecipe = minimumInlineRecipe
+      .split(versionToken)
+      .join('0.0.0');
+    unresolvedInputs.push('0.0.0 for the resolved ComponentVersion');
+  }
+  const minimumBytes = Buffer.byteLength(minimumInlineRecipe, 'utf-8');
+  if (minimumBytes <= MAX_INLINE_RECIPE_BYTES) {
+    return;
+  }
+  const overBy = minimumBytes - MAX_INLINE_RECIPE_BYTES;
+  const sizeClause =
+    minimumBytes === bytes
+      ? `serializes to ${bytes} bytes`
+      : unresolvedInputs.length === 1 &&
+          Token.isUnresolved(bucketName) &&
+          versionToken === undefined
+        ? `serializes to ${bytes} bytes, of which ${minimumBytes} do not depend on the artifact ` +
+          `bucket's name (still an unresolved token here, so this counts it as the ` +
+          `${MIN_S3_BUCKET_NAME_LENGTH}-character minimum S3 allows)`
+        : `serializes to ${bytes} bytes, of which ${minimumBytes} count unresolved values as ` +
+          `${unresolvedInputs.join(' and ')}`;
+  throw new Error(
+    `The resolved recipe for ${componentName}@${componentVersion} ("${recipePath}") ${sizeClause}, ` +
+      `exceeding the ${MAX_INLINE_RECIPE_BYTES} byte limit CreateComponentVersion ` +
+      `enforces on InlineRecipe, by ${overBy} byte(s). The whole recipe crosses the API as one ` +
+      `document, so the total counts rather than any one field. Two things realistically consume ` +
+      `that budget: a large ComponentConfiguration.DefaultConfiguration block, which is yours to ` +
+      `author and which nothing here bounds, and one manifest per architecture under ` +
+      `"platform: linux-amd64-arm64". Shrink DefaultConfiguration (move bulk configuration into ` +
+      `an artifact the component reads at runtime) by at least ${overBy} byte(s), or split the ` +
+      `component so each architecture publishes its own single-manifest version.`,
+  );
+};
+
+/**
+ * Upload built artifacts and publish the recipe, resolving NEXT_* at deploy time.
+ */
+export class GreengrassComponentVersion extends Construct {
+  public readonly componentName: string;
+  /**
+   * Recipe version, or the published resource's version token in NEXT_* mode.
+   */
+  public readonly componentVersion: string;
+  public readonly cfnComponentVersion: CfnComponentVersion;
+
+  constructor(
+    scope: Construct,
+    id: string,
+    props: GreengrassComponentVersionProps,
+  ) {
+    super(scope, id);
+
+    const removalPolicy = props.removalPolicy ?? RemovalPolicy.RETAIN;
+
+    const recipePath = findSingleFile(
+      props.recipesDir,
+      'resolved recipe',
+      (name) => name.endsWith('.yaml') || name.endsWith('.yml'),
+    );
+    const { componentName, componentVersion, raw } = readRecipeSummary(
+      readFileSync(recipePath, 'utf-8'),
+      recipePath,
+    );
+    const strategy =
+      NEXT_VERSION_STRATEGIES[
+        componentVersion as keyof typeof NEXT_VERSION_STRATEGIES
+      ];
+
+    const artifactDir = join(
+      props.artifactsDir,
+      componentName,
+      componentVersion,
+    );
+    const artifactFileNames = listFilesSorted(
+      artifactDir,
+      `artifact for ${componentName}@${componentVersion}`,
+    );
+    const sha256ByName = new Map(
+      artifactFileNames.map((name) => [
+        name,
+        createHash('sha256')
+          .update(readFileSync(join(artifactDir, name)))
+          .digest('hex'),
+      ]),
+    );
+    // Hash the sorted artifact names and their content digests on both IaC paths.
+    const sha256 = createHash('sha256')
+      .update(
+        artifactFileNames
+          .map((name) => `${name}:${sha256ByName.get(name)!}`)
+          .join('\n'),
+      )
+      .digest('hex');
+    const rawWithoutVersion = { ...raw };
+    delete rawWithoutVersion.ComponentVersion;
+    const contentSha256 = strategy
+      ? createHash('sha256')
+          .update(
+            `${yaml.dump(rawWithoutVersion, { lineWidth: -1 })}\n${sha256}`,
+          )
+          .digest('hex')
+      : undefined;
+
+    assertNoSynthTimeVersionDrift(
+      componentName,
+      componentVersion,
+      strategy ? contentSha256! : sha256,
+      recipePath,
+    );
+
+    const destinationKeyPrefix = `${componentName}/${sha256.slice(0, 32)}/`;
+
+    assertArtifactKeyPrefixFits(
+      componentName,
+      destinationKeyPrefix,
+    );
+
+    // Sync the artifact directory to preserve archive basenames. Retain uploads
+    // with retained versions and leave other prefixes untouched.
+    const artifactUpload = new BucketDeployment(this, 'ArtifactUpload', {
+      sources: [Source.asset(artifactDir)],
+      destinationBucket: props.bucket.bucket,
+      destinationKeyPrefix,
+      prune: false,
+      retainOnDelete: removalPolicy === RemovalPolicy.RETAIN,
+    });
+
+    const next = strategy
+      ? new GreengrassNextVersion(this, 'NextVersion', {
+          componentName,
+          strategy,
+          contentSha256: contentSha256!,
+          bucketName: props.bucket.bucket.bucketName,
+        })
+      : undefined;
+    if (next) {
+      // CDK resolves this version token inside the serialized recipe at deployment.
+      raw.ComponentVersion = next.version;
+    }
+
+    // CDK resolves the bucket name inside the serialized recipe at deployment.
+    const substitutedBasenames = substituteArtifactUris(raw, {
+      bucketName: props.bucket.bucket.bucketName,
+      keyPrefix: destinationKeyPrefix,
+    });
+
+    // Require every managed artifact URI and built file to match.
+    const builtNames = new Set(artifactFileNames);
+    // Several manifests can reference the same architecture-independent archive.
+    const referencedNames = new Set(substitutedBasenames);
+    const missing = [...referencedNames].filter((name) => !builtNames.has(name));
+    if (missing.length > 0) {
+      throw new Error(
+        `"${recipePath}" references artifact ${missing
+          .map((name) => `"${name}"`)
+          .join(', ')}, but the files built for ${componentName}@${componentVersion} are ${artifactFileNames
+          .map((name) => `"${name}"`)
+          .join(', ')}. Make the recipe's artifact URI end in one of those names.`,
+      );
+    }
+    const unreferenced = artifactFileNames.filter(
+      (name) => !referencedNames.has(name),
+    );
+    if (unreferenced.length > 0) {
+      throw new Error(
+        `The build produced ${unreferenced
+          .map((name) => `"${name}"`)
+          .join(', ')} for ${componentName}@${componentVersion}, which no manifest in "${recipePath}" references. Add a manifest whose artifact URI ends in each name, then bump ComponentVersion before re-deploying.`,
+      );
+    }
+
+    // Serialized once and measured, so the string the guard sizes is byte for
+    // byte the string submitted as `InlineRecipe`.
+    const inlineRecipe = yaml.dump(raw, { lineWidth: -1 });
+    assertInlineRecipeFits(
+      componentName,
+      componentVersion,
+      recipePath,
+      inlineRecipe,
+      props.bucket.bucket.bucketName,
+      next?.version,
+    );
+
+    this.cfnComponentVersion = new CfnComponentVersion(this, 'Resource', {
+      inlineRecipe,
+      tags: strategy
+        ? {
+            [NEXT_VERSION_TAG_KEY]: next!.contentKey,
+            [VERSIONING_TAG_KEY]: componentVersion,
+          }
+        : undefined,
+    });
+
+    // Publish only after the artifact upload completes.
+    this.cfnComponentVersion.node.addDependency(artifactUpload);
+
+    // Apply retention to deletions and recipe-triggered replacements.
+    this.cfnComponentVersion.applyRemovalPolicy(removalPolicy);
+
+    this.componentName = componentName;
+    // Reference the published resource so deployments wait for version creation.
+    this.componentVersion = next
+      ? this.cfnComponentVersion.attrComponentVersion
+      : componentVersion;
+  }
+}

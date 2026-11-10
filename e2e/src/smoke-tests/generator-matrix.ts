@@ -25,9 +25,17 @@ interface RunCliOpts {
  * Pass `{ preferInstallDependencies: true }` to install after every generator
  * instead — the idempotency test needs this so lockfiles (including `uv.lock`)
  * are fully synced before it snapshots the workspace.
+ *
+ * In the deferred mode the manifests deliberately run ahead of the lockfile
+ * between generators. pnpm 11.24.0 through 11.28.2 checks that before every
+ * `pnpm exec nx` and, under CI, tries a frozen install that fails with
+ * ERR_PNPM_OUTDATED_LOCKFILE; pnpm 11.28.5 and later only warn. Disable that
+ * check for this function's own commands until the failing range is no longer
+ * supported. The caller's `opts` is copied, never mutated: its later explicit
+ * install, sync and build keep pnpm's default verification.
  */
 export const runGeneratorMatrix = async (
-  opts: RunCliOpts,
+  callerOpts: RunCliOpts,
   {
     preferInstallDependencies = false,
   }: { preferInstallDependencies?: boolean } = {},
@@ -35,6 +43,12 @@ export const runGeneratorMatrix = async (
   const deferFlag = preferInstallDependencies
     ? ''
     : ' --prefer-install-dependencies=false';
+  const opts: RunCliOpts = preferInstallDependencies
+    ? callerOpts
+    : {
+        ...callerOpts,
+        env: { ...callerOpts.env, PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN: 'false' },
+      };
   // Websites (with and without TanStack Router), plus auth on each.
   await runCLI(
     `generate @aws/nx-plugin:ts#website --name=website --no-interactive${deferFlag}`,
@@ -145,6 +159,11 @@ export const runGeneratorMatrix = async (
     `generate @aws/nx-plugin:py#agent --project=py_project --name=my-py-ecr-agent --infra=agentcore-ecr --no-interactive${deferFlag}`,
     opts,
   );
+  // Guard the default Python agent, which has AgentCore infrastructure.
+  await runCLI(
+    `generate @aws/nx-plugin:py#agent#guardrails --project=py_project --agent=my-agent --no-interactive`,
+    opts,
+  );
 
   // TypeScript project + lambda function.
   await runCLI(
@@ -213,6 +232,11 @@ export const runGeneratorMatrix = async (
   // AG-UI protocol agents (TypeScript Strands, Python Strands, Python LangChain).
   await runCLI(
     `generate @aws/nx-plugin:ts#agent --project=ts-project --name=my-ts-agui-agent --protocol=ag-ui --infra=agentcore --no-interactive${deferFlag}`,
+    opts,
+  );
+  // Guard the default agent, which has AgentCore infrastructure.
+  await runCLI(
+    `generate @aws/nx-plugin:ts#agent#guardrails --project=ts-project --agent=agent --no-interactive`,
     opts,
   );
   await runCLI(
@@ -543,6 +567,24 @@ export const runGeneratorMatrix = async (
   );
   await runCLI(
     `generate @aws/nx-plugin:ts#nx-migration --project=@e2e-test/plugin --name=upgrade-framework --description="Upgrade the framework and reconcile call sites" --kind=hybrid --no-interactive${deferFlag}`,
+    opts,
+  );
+  // Dedicated Python host for architecture-specific Greengrass artifacts.
+  await runCLI(
+    `generate @aws/nx-plugin:py#project --name=py-greengrass-project --type=application --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:greengrass#component --project=e2e_test.py_greengrass_project --name=my-greengrass-component --language=python --platform=linux-amd64-arm64 --gdkConfig=true --no-interactive${deferFlag}`,
+    opts,
+  );
+  // A dedicated host keeps device bundles independent from Lambda entrypoints.
+  await runCLI(
+    `generate @aws/nx-plugin:ts#project --name=ts-greengrass-project --no-interactive${deferFlag}`,
+    opts,
+  );
+  await runCLI(
+    `generate @aws/nx-plugin:greengrass#component --project=ts-greengrass-project --name=my-ts-greengrass-component --language=typescript --ipc=true --platform=linux-amd64-arm64 --componentVersion=1.0.0 --no-interactive${deferFlag}`,
     opts,
   );
 };

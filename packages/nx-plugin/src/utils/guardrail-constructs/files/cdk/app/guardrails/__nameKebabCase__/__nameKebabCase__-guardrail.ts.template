@@ -1,0 +1,128 @@
+import { createHash } from 'node:crypto';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as url from 'node:url';
+import { CfnOutput, Names, Stack } from 'aws-cdk-lib';
+import * as bedrock from 'aws-cdk-lib/aws-bedrock';
+import * as iam from 'aws-cdk-lib/aws-iam';
+import { Construct } from 'constructs';
+import { RuntimeConfig } from '../../../core/runtime-config<% if (esm) { %>.js<% } %>';
+import { findWorkspaceRoot } from '../../../core/workspace<% if (esm) { %>.js<% } %>';
+
+interface GuardrailPolicy {
+  blockedInputMessaging: string;
+  blockedOutputsMessaging: string;
+  deniedTopics?: { name: string; definition: string; examples?: string[] }[];
+  piiEntities?: { type: string; action: string }[];
+}
+
+// Read at synth time, anchored on the workspace root so it still resolves once
+// this file compiles to dist/.
+const policyFile = fs.readFileSync(
+  path.join(
+    findWorkspaceRoot(url.fileURLToPath(new URL(<% if (esm) { %>import.meta.url<% } else { %>require('url').pathToFileURL(__filename).href<% } %>))),
+    '<%- policyPath %>',
+  ),
+);
+const policy: GuardrailPolicy = JSON.parse(policyFile.toString('utf-8'));
+
+/**
+ * Properties for the <%- nameClassName %>Guardrail. Any CfnGuardrail property
+ * supplied here takes precedence over guardrail.json.
+ */
+export type <%- nameClassName %>GuardrailProps = Partial<bedrock.CfnGuardrailProps> & {
+  /** The agent that applies this guardrail. It is granted bedrock:ApplyGuardrail. */
+  readonly agent: iam.IGrantable;
+};
+
+/**
+ * An Amazon Bedrock Guardrail for <%- nameClassName %>, with a numbered version
+ * that changes whenever its rules change. Its ID and version are written to
+ * runtime config, where the agent reads them.
+ */
+export class <%- nameClassName %>Guardrail extends Construct {
+  public readonly guardrail: bedrock.CfnGuardrail;
+  public readonly version: bedrock.CfnGuardrailVersion;
+  public readonly guardrailId: string;
+  public readonly guardrailArn: string;
+  public readonly guardrailVersion: string;
+
+  constructor(
+    scope: Construct,
+    id: string,
+    props: <%- nameClassName %>GuardrailProps,
+  ) {
+    super(scope, id);
+
+    const { agent, ...overrides } = props;
+
+    const deniedTopics = policy.deniedTopics ?? [];
+    const piiEntities = policy.piiEntities ?? [];
+
+    this.guardrail = new bedrock.CfnGuardrail(this, 'Guardrail', {
+      name: Names.uniqueResourceName(this, {
+        maxLength: 50,
+        separator: '-',
+        allowedSpecialCharacters: '-_',
+      }),
+      blockedInputMessaging: policy.blockedInputMessaging,
+      blockedOutputsMessaging: policy.blockedOutputsMessaging,
+      ...(deniedTopics.length > 0 && {
+        topicPolicyConfig: {
+          topicsConfig: deniedTopics.map(({ name, definition, examples }) => ({
+            name,
+            definition,
+            examples,
+            type: 'DENY',
+          })),
+        },
+      }),
+      ...(piiEntities.length > 0 && {
+        sensitiveInformationPolicyConfig: {
+          piiEntitiesConfig: piiEntities.map(({ type, action }) => ({
+            type,
+            action,
+          })),
+        },
+      }),
+      ...overrides,
+    });
+
+    const hash = createHash('sha256').update(policyFile);
+    if (Object.keys(overrides).length > 0) {
+      hash.update(JSON.stringify(Stack.of(this).resolve(overrides)));
+    }
+
+    this.version = new bedrock.CfnGuardrailVersion(this, 'Version', {
+      guardrailIdentifier: this.guardrail.attrGuardrailId,
+      description: `guardrail.json sha256 ${hash.digest('hex')}`,
+    });
+
+    this.guardrailId = this.guardrail.attrGuardrailId;
+    this.guardrailArn = this.guardrail.attrGuardrailArn;
+    this.guardrailVersion = this.version.attrVersion;
+
+    new CfnOutput(this, 'GuardrailId', { value: this.guardrailId });
+    new CfnOutput(this, 'GuardrailVersion', { value: this.guardrailVersion });
+
+    const rc = RuntimeConfig.ensure(this);
+    rc.set('agentcore', 'guardrails', {
+      ...rc.get('agentcore').guardrails,
+      <%- nameClassName %>: {
+        guardrailId: this.guardrailId,
+        guardrailVersion: this.guardrailVersion,
+      },
+    });
+
+    this.grantApply(agent);
+  }
+
+  /** Grant permission to apply this guardrail. */
+  public grantApply(grantee: iam.IGrantable): iam.Grant {
+    return iam.Grant.addToPrincipal({
+      grantee,
+      actions: ['bedrock:ApplyGuardrail'],
+      resourceArns: [this.guardrailArn],
+    });
+  }
+}

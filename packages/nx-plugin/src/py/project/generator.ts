@@ -21,6 +21,7 @@ import {
   addTsDependencies,
 } from '../../utils/add-dependencies.js';
 import { declareDependencies } from '../../utils/declared-dependencies.js';
+import { formatFilesInSubtree } from '../../utils/format.js';
 import { updateGitIgnore } from '../../utils/git.js';
 import { installDependencies } from '../../utils/install.js';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
@@ -412,6 +413,8 @@ export const pyProjectGenerator = async (
   // the license generator wires up existing projects itself, so the dependency
   // is added regardless of which generator runs first.
   addLicenseCheckToLintTarget(tree, fullyQualifiedName);
+
+  await formatFilesInSubtree(tree, joinPathFragments(dir, 'project.json'));
 
   return () =>
     installDependencies(tree, schema.preferInstallDependencies, {

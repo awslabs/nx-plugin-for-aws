@@ -569,16 +569,16 @@ To translate documentation locally:
 
 ```bash
 # Translate only changed files
-pnpm tsx ./scripts/translate.ts
+pnpm tsx ./scripts/translate.mts
 
 # Translate all files
-pnpm tsx ./scripts/translate.ts --all
+pnpm tsx ./scripts/translate.mts --all
 
 # Translate to specific languages
-pnpm tsx ./scripts/translate.ts --languages jp,fr,es
+pnpm tsx ./scripts/translate.mts --languages jp,fr,es
 
 # Show what would be translated without actually translating
-pnpm tsx ./scripts/translate.ts --dry-run
+pnpm tsx ./scripts/translate.mts --dry-run
 ```
 
 #### GitHub Workflow

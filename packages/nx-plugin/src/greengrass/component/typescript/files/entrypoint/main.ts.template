@@ -1,0 +1,58 @@
+<%_ if (ipc) { _%>
+import { greengrasscoreipc } from 'aws-iot-device-sdk-v2';
+
+const TOPIC = '<%- componentName %>/heartbeat';
+const PUBLISH_INTERVAL_MS = 30_000;
+
+async function getIpcClient(): Promise<greengrasscoreipc.Client> {
+  const client = greengrasscoreipc.createClient();
+  await client.connect();
+  return client;
+}
+
+export async function publishHeartbeat(
+  client: greengrasscoreipc.Client,
+  sequence: number,
+): Promise<void> {
+  const request: greengrasscoreipc.model.PublishToTopicRequest = {
+    topic: TOPIC,
+    publishMessage: { jsonMessage: { message: { sequence } } },
+  };
+  await client.publishToTopic(request);
+  console.log(`Published heartbeat ${sequence} to ${TOPIC}`);
+}
+
+async function main(): Promise<void> {
+  const client = await getIpcClient();
+  let sequence = 0;
+  for (;;) {
+    await publishHeartbeat(client, sequence);
+    sequence += 1;
+    await new Promise((resolve) => setTimeout(resolve, PUBLISH_INTERVAL_MS));
+  }
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
+<%_ } else { _%>
+const RUN_INTERVAL_MS = 30_000;
+
+export function runOnce(sequence: number): void {
+  console.log(
+    `[<%- componentName %>] heartbeat ${sequence} at ${new Date().toISOString()}`,
+  );
+}
+
+async function main(): Promise<void> {
+  let sequence = 0;
+  for (;;) {
+    runOnce(sequence);
+    sequence += 1;
+    await new Promise((resolve) => setTimeout(resolve, RUN_INTERVAL_MS));
+  }
+}
+
+main();
+<%_ } _%>

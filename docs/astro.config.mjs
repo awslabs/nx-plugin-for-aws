@@ -407,7 +407,15 @@ export default defineConfig({
               items: [
                 { label: 'ts#agent', link: '/guides/ts-agent' },
                 { label: 'ts#agent#eval', link: '/guides/ts-agent-eval' },
+                {
+                  label: 'ts#agent#guardrails',
+                  link: '/guides/ts-agent-guardrails',
+                },
                 { label: 'py#agent', link: '/guides/py-agent' },
+                {
+                  label: 'py#agent#guardrails',
+                  link: '/guides/py-agent-guardrails',
+                },
                 { label: 'ts#mcp-server', link: '/guides/ts-mcp-server' },
                 { label: 'py#mcp-server', link: '/guides/py-mcp-server' },
                 {
@@ -644,6 +652,16 @@ export default defineConfig({
                 {
                   label: 'Local Development',
                   link: '/guides/local-development',
+                },
+              ],
+            },
+            {
+              label: 'IoT',
+              collapsed: true,
+              items: [
+                {
+                  label: 'greengrass#component',
+                  link: '/guides/greengrass-component',
                 },
               ],
             },

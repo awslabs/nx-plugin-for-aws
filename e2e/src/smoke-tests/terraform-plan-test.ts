@@ -2,8 +2,11 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { generateFiles } from '@nx/devkit';
+import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
+import { buildDefaultComponentName } from '../../../packages/nx-plugin/src/utils/greengrass/naming';
 import { runCLI } from '../utils';
 
 /**
@@ -18,7 +21,10 @@ import { runCLI } from '../utils';
  * the full module graph — so a plan-time error fails the test.
  *
  * The wiring is the same `main.tf` the terraform-deploy smoke test applies, so
- * this exercises the identical module graph without deploying anything.
+ * this exercises the identical module graph without deploying anything, plus
+ * the Greengrass composition from `files/terraform-plan/greengrass.tf.template`
+ * (core artifact-bucket and deployment modules wired to the generated component
+ * module), which is plan-only and absent from the applied fixture.
  */
 /**
  * Plan-only instances of the generated REST and HTTP API modules with a custom
@@ -73,6 +79,15 @@ export const runTerraformPlanTest = async (opts: {
     'utf-8',
   ).replace(/<% TEST_RUN_ID %>/g, 'plantest');
   writeFileSync(join(infraSrc, 'main.tf'), `${mainTf}\n${CUSTOM_DOMAIN_APIS}`);
+
+  // Greengrass modules are wired only in the plan fixture.
+  writeFileSync(
+    join(infraSrc, 'greengrass.tf'),
+    readFileSync(
+      join(__dirname, '../files/terraform-plan/greengrass.tf.template'),
+      'utf-8',
+    ),
+  );
 
   // `-backend=false` so `terraform init` doesn't try to configure the S3
   // backend (which would need credentials); the test framework keeps state
@@ -129,6 +144,39 @@ export const runTerraformPlanTest = async (opts: {
 
   await runCLI('terraform test -no-color', {
     ...rawOpts,
+    redirectStderr: true,
+  });
+
+  // Internal module tests belong only in the e2e workspace.
+  const moduleSrc = join(opts.cwd, 'packages/common/terraform/src');
+  const tree = createTreeWithEmptyWorkspace();
+  tree.write(
+    'package.json',
+    readFileSync(join(opts.cwd, 'package.json'), 'utf-8'),
+  );
+  const componentName = buildDefaultComponentName(tree, 'Namespace');
+  generateFiles(
+    tree,
+    join(__dirname, '../files/terraform-plan/greengrass-tests'),
+    'tests',
+    {
+      componentKeyPrefix: `${componentName.slice(0, componentName.lastIndexOf('.'))}.*`,
+    },
+  );
+  for (const file of tree
+    .listChanges()
+    .filter((file) => file.path.startsWith('tests/'))) {
+    const target = join(moduleSrc, file.path);
+    if (file.content === null) {
+      throw new Error(`Terraform fixture has no content: ${file.path}`);
+    }
+    mkdirSync(join(target, '..'), { recursive: true });
+    writeFileSync(target, file.content);
+  }
+  const moduleOpts = { ...rawOpts, cwd: moduleSrc };
+  await runCLI('terraform init -backend=false -no-color', moduleOpts);
+  await runCLI('terraform test -filter=tests/greengrass.tftest.hcl -no-color', {
+    ...moduleOpts,
     redirectStderr: true,
   });
 };

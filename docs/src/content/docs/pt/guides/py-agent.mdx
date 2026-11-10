@@ -563,7 +563,7 @@ Para construir seu Agente para o Bedrock AgentCore Runtime, um target `bundle` �
 - Instala dependências para a plataforma de destino (`aarch64-manylinux_2_28`) usando `uv pip install`
 
 <OptionFilter when={{ infra: 'agentcore' }} description="Code package target">
-Um target `<your-agent-name>-package` também é adicionado, que monta o pacote de código implantável: o bundle de dependências `aarch64`, sua árvore de módulos Python e um ponto de entrada `main.py` raiz. A infraestrutura gerada faz upload deste diretório como um `.zip` — via `AgentRuntimeArtifact.fromCodeAsset` no CDK, ou arquivado no bucket de ativos compartilhado no Terraform.
+Um target `<your-agent-name>-package` também é adicionado, que monta o pacote de código implantável: o bundle de dependências `aarch64`, sua árvore de módulos Python, um ponto de entrada `main.py` raiz, e `agentcore_launcher.py` para executá-lo com instrumentação OpenTelemetry. A infraestrutura gerada faz upload deste diretório como um `.zip` - via `AgentRuntimeArtifact.fromCodeAsset` no CDK, ou arquivado no bucket de ativos compartilhado no Terraform.
 </OptionFilter>
 
 <OptionFilter when={{ infra: 'agentcore-ecr' }} description="Container image build and scan">
@@ -736,22 +736,15 @@ Consulte o <Link path="/guides/connection/react-agui">guia do gerador `connectio
 
 <Snippet name="agent/securing-your-agent" parentHeading="Protegendo seu Agente" />
 
+O <Link path="guides/py-agent-guardrails">gerador `py#agent#guardrails`</Link> faz isso por você. Ele adiciona um arquivo de política `guardrail.json` e o construto CDK ou módulo Terraform que cria o guardrail, e cria seu agente com o modelo protegido:
+
 <Tabs syncKey="agent-framework">
 <TabItem label="Strands" _filter={{ framework: 'strands' }}>
 ```python
 # agent.py
-import os
+from .guardrail import get_guardrailed_model
 
-from strands import Agent
-from strands.models import BedrockModel
-
-model = BedrockModel(
-    model_id=os.environ.get("MODEL_ID"),
-    guardrail_id=os.environ["GUARDRAIL_ID"],
-    guardrail_version=os.environ.get("GUARDRAIL_VERSION", "DRAFT"),
-)
-
-agent = Agent(model=model)
+agent = Agent(model=get_guardrailed_model(), ...)
 ```
 
 Consulte o guia de [Guardrails](https://strandsagents.com/docs/user-guide/safety-security/guardrails/) do Strands para mais detalhes.
@@ -759,17 +752,9 @@ Consulte o guia de [Guardrails](https://strandsagents.com/docs/user-guide/safety
 <TabItem label="LangChain" _filter={{ framework: 'langchain' }}>
 ```python
 # agent.py
-import os
+from .guardrail import GuardrailedChatBedrockConverse
 
-from langchain_aws import ChatBedrockConverse
-
-model = ChatBedrockConverse(
-    model=os.environ.get("MODEL_ID"),
-    guardrail_config={
-        "guardrailIdentifier": os.environ["GUARDRAIL_ID"],
-        "guardrailVersion": os.environ.get("GUARDRAIL_VERSION", "DRAFT"),
-    },
-)
+model = GuardrailedChatBedrockConverse(model=MODEL_ID, region_name=REGION)
 ```
 
 Consulte a documentação [`ChatBedrockConverse`](https://docs.langchain.com/oss/python/integrations/chat/bedrock_converse) para os campos `guardrail_config`.

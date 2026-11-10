@@ -410,9 +410,35 @@ dev-dependencies = []
     );
     expect(construct).toContain('AgentRuntimeArtifact.fromCodeAsset');
     expect(construct).toContain('AgentCoreRuntime.PYTHON_3_14');
-    expect(construct).toContain(
-      "entrypoint: ['opentelemetry-instrument', 'main.py']",
+    expect(construct).toContain("entrypoint: ['agentcore_launcher.py']");
+  });
+
+  it('uses the managed-interpreter launcher for Terraform code packaging', async () => {
+    await pyMcpServerGenerator(tree, {
+      project: 'test-project',
+      infra: 'agentcore',
+      iac: 'terraform',
+    });
+    expect(
+      tree.read(
+        'apps/test-project/package/mcp_server/agentcore_launcher.py',
+        'utf-8',
+      ),
+    ).toContain('sys.executable');
+    expect(
+      tree.read(
+        'packages/common/terraform/src/core/agent-core-code/runtime.tf',
+        'utf-8',
+      ),
+    ).toContain(
+      'var.code_entry_point == "agentcore_launcher.py" ? [var.code_entry_point] : ["opentelemetry-instrument", var.code_entry_point]',
     );
+    expect(
+      tree.read(
+        'packages/common/terraform/src/app/mcp-servers/test-project-mcp-server/test-project-mcp-server.tf',
+        'utf-8',
+      ),
+    ).toContain('code_entry_point = "agentcore_launcher.py"');
   });
 
   it('should generate MCP server with BedrockAgentCoreRuntime and default name', async () => {

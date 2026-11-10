@@ -2,6 +2,8 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+
+import { dirname } from 'node:path';
 import {
   joinPathFragments,
   type ProjectConfiguration,
@@ -50,6 +52,27 @@ export const agentCoreNodeRuntime = (): string => agentCoreRuntime('node');
 
 /** The AgentCore managed runtime a Python component targets. */
 export const agentCorePythonRuntime = (): string => agentCoreRuntime('python');
+
+export const PYTHON_AGENT_CORE_LAUNCHER = 'agentcore_launcher.py';
+
+/** Run instrumentation with the managed interpreter, independent of console-script shebangs. */
+export const pythonAgentCoreLauncher = (
+  entryPointFileName: string,
+): string => `\
+import sys
+from pathlib import Path
+
+from opentelemetry.instrumentation.auto_instrumentation import run
+
+if __name__ == "__main__":
+    sys.argv = [
+        "opentelemetry-instrument",
+        sys.executable,
+        str(Path(__file__).with_name(${JSON.stringify(entryPointFileName)})),
+        *sys.argv[1:],
+    ]
+    run()
+`;
 
 /**
  * Dependencies a caller must declare to add a code (`.zip`) packaging target.
@@ -214,10 +237,10 @@ export interface AddPythonCodePackageTargetOptions {
  * Add a target assembling the deployable code package for a Python AgentCore
  * Runtime.
  *
- * The package is the arm64 dependency bundle (which already carries
- * `bin/opentelemetry-instrument` from `aws-opentelemetry-distro`, satisfying
- * AgentCore's requirement that OpenTelemetry be present), the project's own
- * module tree, and a root entry point script.
+ * The package contains the arm64 dependency bundle with `aws-opentelemetry-distro`,
+ * the project's module tree, its root entry point and an instrumentation launcher.
+ * The launcher calls OpenTelemetry's `run()` with `sys.executable` and the original
+ * entry point, so a console-script shebang cannot select the build machine's Python.
  *
  * The entry point sits at the package root rather than inside the module:
  * AgentCore runs it as a file path, and Python gives a script run that way no
@@ -250,6 +273,14 @@ export const addPythonCodePackageTarget = <
     forDependencies<typeof FS_DEPENDENCIES>(declaration),
   );
 
+  const launcherPath = joinPathFragments(
+    dirname(entryPointPath),
+    PYTHON_AGENT_CORE_LAUNCHER,
+  );
+  if (!tree.exists(launcherPath)) {
+    tree.write(launcherPath, pythonAgentCoreLauncher(entryPointFileName));
+  }
+
   project.targets ??= {};
   project.targets[targetName] = normalizeTargetKeyOrder({
     cache: true,
@@ -265,6 +296,10 @@ export const addPythonCodePackageTarget = <
         fs.cpFile(
           entryPointPath,
           joinPathFragments(packageOutputDir, entryPointFileName),
+        ),
+        fs.cpFile(
+          launcherPath,
+          joinPathFragments(packageOutputDir, PYTHON_AGENT_CORE_LAUNCHER),
         ),
       ],
       parallel: false,

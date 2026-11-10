@@ -1,0 +1,768 @@
+---
+title: Greengrass Component
+description: Thêm một component AWS IoT Greengrass v2 vào một dự án Python hoặc TypeScript hiện có, với các khối xây dựng CDK hoặc Terraform có thể tái sử dụng để xuất bản và triển khai nó
+generator: greengrass#component
+---
+
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import ArchitectureDiagram from '@components/architecture-diagram.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import OptionFilter from '@components/option-filter.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Snippet from '@components/snippet.astro';
+
+Generator `greengrass#component` thêm một component [AWS IoT Greengrass v2](https://docs.aws.amazon.com/greengrass/v2/developerguide/what-is-iot-greengrass.html) vào một dự án Python hoặc TypeScript hiện có. Nó tạo recipe, entrypoint, một unit test cho các component Python, và các target Nx để đóng gói component cho một core device. Với `infra` mặc định, nó cũng cung cấp các construct CDK hoặc module Terraform có thể tái sử dụng để xuất bản phiên bản component, sở hữu một artifact repository, và mô tả một deployment. Bạn kết hợp các khối xây dựng đó trong code infrastructure của riêng mình; generator không bao giờ tự tạo một device, một fleet hoặc một deployment.
+
+Dự án host phải đã tồn tại. Tạo một dự án với <Link path="guides/python-project">`py#project`</Link> hoặc <Link path="guides/typescript-project">`ts#project`</Link> trước.
+
+## Cách sử dụng
+
+### Tạo một component
+
+<RunGenerator generator="greengrass#component" requiredParameters={{ project: 'telemetry', name: 'pulse', language: 'python' }} />
+
+Truyền `language` một cách rõ ràng trong các script và tài liệu. Khi nó bị bỏ qua, generator suy ra `typescript` từ một `tsconfig.json` trong dự án được chọn, hoặc `python` từ một `pyproject.toml` ở đó. Một dự án có cả hai file phải truyền `--language`; một dự án không có file nào không phải là một host được hỗ trợ.
+
+`ipc` mặc định là `false` cho cả hai ngôn ngữ. Truyền `--ipc=true` để thêm quyền truy cập Greengrass IPC hoặc `--ipc=false` để giữ nó bị vô hiệu hóa.
+
+`ComponentPublisher` của recipe mặc định là npm scope của workspace. Truyền `--publisher` để đặt một giá trị khác. Không có cài đặt Greengrass publisher trong `aws-nx-plugin.config.mts`.
+
+Đối với `iac: terraform`, tạo một ứng dụng Terraform với `terraform#project`
+trước khi chạy generator này. Generator Greengrass thêm cấu hình provider `awscc`
+của nó vào ứng dụng đó. Nếu bạn tạo ứng dụng Terraform
+sau, chạy lại `greengrass#component` để nó có thể thêm provider.
+
+`--project` chấp nhận tên dự án không đủ điều kiện. Các dự án được tạo có namespace-qualified, vì vậy `nx run` cần tên đầy đủ: `<scope>.telemetry` cho một dự án Python và `@<scope>/telemetry` cho một dự án TypeScript. Các ví dụ dưới đây viết `<project>` cho tên đó, và `@my-scope/infra` cho một dự án infrastructure được tạo với `--name=infra` trong một workspace có npm scope là `my-scope`.
+
+### Phần cứng và hệ điều hành
+
+`platform` chọn hệ điều hành và kiến trúc CPU của **core
+device**, không phải tên board của nó. Các target hiện tại là Linux 64-bit với glibc:
+
+| Device | Generator target | Trạng thái |
+| --- | --- | --- |
+| Linux PC, industrial gateway hoặc EC2 x86_64 instance | `linux-amd64` | Được hỗ trợ; đã xác thực trên một EC2 core |
+| Raspberry Pi với CPU 64-bit và Linux 64-bit, hoặc một Linux ARM64 gateway khác | `linux-arm64` | Đóng gói được hỗ trợ; phần cứng Raspberry Pi chưa được xác thực |
+| Một fleet chứa cả hai loại trên | `linux-amd64-arm64` | Một phiên bản component với các manifest cụ thể theo kiến trúc |
+| Raspberry Pi chạy Linux 32-bit / ARMv7 | None | Không được hỗ trợ bởi generator này, mặc dù classic Greengrass nucleus hỗ trợ ARMv7 |
+| Raspberry Pi Pico, ESP32 hoặc một microcontroller khác | None | Sử dụng như một IoT client hoặc peripheral của một core device |
+
+Trên Raspberry Pi, kiểm tra cả `uname -m` và `getconf LONG_BIT`; đường dẫn này cần
+`aarch64` và `64`. Một bộ xử lý 64-bit chạy một userspace 32-bit không phải là một
+target triển khai ARM64. Device cũng cần trình thông dịch Python được đặt tên trong
+recipe được tạo hoặc Node.js cho TypeScript, cộng với
+[các điều kiện tiên quyết của Greengrass nucleus](https://docs.aws.amazon.com/greengrass/v2/developerguide/greengrass-nucleus-component.html).
+Vendoring dependency Python nhắm đến `manylinux_2_28`, vì vậy hãy sử dụng glibc 2.28 hoặc mới hơn.
+Các thư viện GPIO và các dependency native tùy chỉnh phải cung cấp các binary tương thích
+cho platform được chọn. Generator không cung cấp các peripheral đó.
+
+Recipe Python được tạo ghim trình thông dịch vào
+floor `requires-python` của dự án host, ví dụ `python3.14`. Cài đặt trình thông dịch đó trên
+mỗi core device chạy component. Một component TypeScript cần Node.js
+trên core device.
+
+Đối với `linux-amd64-arm64`, recipe chứa một manifest cho mỗi kiến trúc.
+Greengrass chọn manifest đầu tiên có `Platform` khớp với core device,
+vì vậy hãy giữ artifact và cài đặt environment của mỗi manifest được ghép nối với
+kiến trúc của nó.
+
+Firmware ESP32 chạy riêng biệt với các component Python và TypeScript này.
+Nó có thể gửi các message MQTT đến AWS IoT Core, hoặc kết nối với một Greengrass core cục bộ
+bằng cách sử dụng [hỗ trợ client device](https://docs.aws.amazon.com/greengrass/v2/developerguide/interact-with-local-iot-devices.html).
+Tuyến đường cục bộ yêu cầu một broker, xác thực client và cấu hình MQTT bridge;
+generator này không scaffold chúng hoặc firmware.
+ARMv7, Windows, musl Linux và các kiến trúc CPU khác yêu cầu công việc
+đóng gói và runtime bổ sung. Chỉ thay đổi nhãn kiến trúc của recipe là
+không đủ.
+
+### Tùy chọn
+
+<GeneratorParameters generator="greengrass#component" />
+
+## Đầu ra của Generator
+
+<OptionFilter when={{ language: 'python' }} description="Python component layout">
+<FileTree>
+  - greengrass
+    - pulse
+      - recipe.yaml the component recipe
+      - main.py the component entrypoint
+  - tests
+    - greengrass
+      - test_pulse.py a unit test that loads main.py by path
+</FileTree>
+
+Target `pulse-vendor` vendor các dependency của dự án cho platform device được chọn với `uv pip install --only-binary :all:`. Với `platform: linux-amd64-arm64`, nó vendor một lần cho mỗi kiến trúc và recipe mang một manifest cho mỗi kiến trúc.
+</OptionFilter>
+
+<OptionFilter when={{ language: 'typescript' }} description="TypeScript component layout">
+<FileTree>
+  - greengrass
+    - pulse
+      - recipe.yaml the component recipe
+  - src
+    - greengrass
+      - pulse
+        - main.ts the component entrypoint
+</FileTree>
+
+Target `bundle` của dự án bundle entrypoint trước khi đóng gói. Với `ipc: true`, target `pulse-vendor` cũng stage addon native `aws-crt` cho kiến trúc được chọn.
+</OptionFilter>
+
+Recipe, entrypoint và, đối với Python, test là của bạn từ lần chạy đầu tiên: một lần chạy lại không bao giờ viết lại chúng. Các target, metadata và khai báo dependency được framework quản lý và hội tụ ở mỗi lần chạy. Các script đóng gói được chia sẻ dưới `packages/common/scripts/src/greengrass/` được tạo một lần; xóa thư mục đó và chạy lại generator để làm mới chúng.
+
+Các target sử dụng tên component kebab-case:
+
+| Target | Mục đích |
+| --- | --- |
+| `<component>-vendor` | Vendor các dependency Python, hoặc addon TypeScript CRT khi IPC được bật |
+| `<component>-artifact` | Ghi recipe đã resolve và archive có thể triển khai dưới `dist/<project-root>/greengrass/<component>/greengrass-build/` |
+| `<component>-deploy-local` | Tạo một deployment cục bộ thông qua `greengrass-cli` trên một core device và chờ một trạng thái component đã ổn định |
+| `<component>-logs` | Tail log component trên một core device |
+
+`<component>-artifact` là một dependency của các target `build` và `assemble` của dự án host, vì vậy một build bình thường tạo ra artifact.
+
+## Infrastructure
+
+<OptionFilter when={{ infra: 'component-version' }} description="Building blocks vended with infra=component-version">
+<Snippet name="shared-constructs" />
+
+`infra: component-version` mặc định thêm các file core Greengrass bên dưới khi chúng bị thiếu và một app wrapper cho mỗi component. Các file core hiện có được bảo tồn, vì vậy các chỉnh sửa cục bộ tồn tại qua các lần chạy sau. Nó không tạo một device, một thing group hoặc một deployment.
+
+<Infrastructure>
+<Fragment slot="cdk">
+<FileTree>
+  - packages/common/constructs/src
+    - core/greengrass
+      - artifact-bucket.ts `GreengrassArtifactBucket`: a retained, versioned, TLS-only repository with `grantReadTo`
+      - component-version.ts `GreengrassComponentVersion`: uploads the artifact and publishes the version
+      - deployment.ts `GreengrassDeployment`: the deployment, an optional thing group, and `addComponent`
+      - next-version.ts the deploy-time resolver for `NEXT_PATCH`, `NEXT_MINOR` and `NEXT_MAJOR`
+      - recipe.ts recipe reading and artifact URI substitution at synth time
+    - app/greengrass
+      - pulse.ts `Pulse`, a `GreengrassComponentVersion` pinned to this component's build output
+</FileTree>
+
+Các target `build` và `assemble` của dự án shared constructs phụ thuộc vào dự án host, vì vậy một infrastructure build hoặc deploy luôn đọc một artifact mới.
+</Fragment>
+<Fragment slot="terraform">
+<FileTree>
+  - packages/common/terraform/src
+    - core/greengrass
+      - artifact-bucket a retained, versioned, TLS-only repository with an optional token exchange role grant
+      - component-version uploads the artifact and publishes the version through `awscc_greengrassv2_component_version`
+      - deployment `awscc_greengrassv2_deployment` with an optional `aws_iot_thing_group`
+    - app/greengrass-component
+      - pulse a module wrapping `component-version` with this component's build paths and a `bucket_name` input
+</FileTree>
+
+Không có resource Greengrass nào tồn tại trong provider `hashicorp/aws`. Các module sử dụng [`hashicorp/awscc`](https://registry.terraform.io/providers/hashicorp/awscc/latest/docs). Khi `iac: terraform` được chọn, generator Greengrass thêm required provider `awscc` và `provider "awscc" { region = var.aws_region }` vào root ứng dụng Terraform nếu chúng bị thiếu. Cấu hình provider hiện có được bảo tồn.
+</Fragment>
+</Infrastructure>
+
+#### Kiến trúc
+
+Phiên bản component xuất bản một artifact đã build vào một repository được sở hữu rõ ràng. Stack hoặc root module của bạn cấp cho token exchange role của các core device quyền truy cập đọc và thêm phiên bản vào một hoặc nhiều deployment. Grant đọc mặc định được giới hạn trong namespace component của workspace; thu hẹp nó hơn nữa khi các device của một role chỉ cần một tập con của các component đó.
+
+<ArchitectureDiagram />
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'none' }} description="Local-only component">
+`infra: none` chỉ tạo recipe, entrypoint, test Python, các target và các script được chia sẻ. Không có dự án infrastructure hoặc shared construct nào được tạo hoặc thay đổi. Chạy lại với `infra: component-version` sau để thêm infrastructure. Một lần chạy lại không thể chuyển một component đã sở hữu infrastructure trở lại `none`.
+</OptionFilter>
+
+## Build và chạy cục bộ
+
+Build artifact trên máy phát triển của bạn:
+
+<NxCommands commands={['run <project>:pulse-artifact']} />
+
+Đầu ra dưới `dist/<project-root>/greengrass/pulse/greengrass-build/` chứa `recipes/` với recipe đã resolve và `artifacts/<ComponentName>/<ComponentVersion>/` với các archive. Một component Python build một archive cho mỗi manifest, được đặt tên `<component>-<architecture>.zip` khi nó nhắm đến cả hai kiến trúc. Một component TypeScript build một archive mà mọi manifest chia sẻ; với `ipc: true` nó mang addon `aws-crt` cho mỗi kiến trúc và `Setenv` của mỗi manifest chọn của riêng nó. Các placeholder `BUCKET_NAME`, `COMPONENT_NAME` và `COMPONENT_VERSION` trong artifact URI của recipe được thay thế tại thời điểm xuất bản, và basename của archive phải giữ nguyên cái mà bước `Run` giải nén.
+
+Hai target tiếp theo chạy trên một máy có classic Greengrass nucleus và `greengrass-cli` được cài đặt, không phải trên một workstation thông thường:
+
+<NxCommands commands={['run <project>:pulse-deploy-local', 'run <project>:pulse-logs']} />
+
+`GREENGRASS_ROOT` mặc định là `/greengrass/v2`. `pulse-deploy-local` gửi một deployment cục bộ, sau đó poll trạng thái lifecycle của component và thoát non-zero trừ khi nó giữ `RUNNING` hoặc `FINISHED` qua ba lần kiểm tra. Một deployment cục bộ ghim phiên bản đó trên device và xung đột với một deployment cloud sau đó của một phiên bản khác; xem [triển khai cục bộ và trên đám mây](#triển-khai-cục-bộ-và-trên-đám-mây).
+
+<OptionFilter when={{ infra: 'component-version' }} description="Composing the vended building blocks into a deployment">
+## Triển khai
+
+Composition deployment nằm trong dự án infrastructure của bạn. Luồng bình thường là một repository, một read grant, một app wrapper cho mỗi component, và một deployment cho mỗi target. Sử dụng một deployment cho một thing group hoặc thing hiện có và đặt `targetArn` của nó; tạo một deployment khác cho một target khác.
+
+<Infrastructure>
+<Fragment slot="cdk">
+Tạo một ứng dụng CDK nếu workspace không có:
+
+<RunGenerator generator="ts#infra" requiredParameters={{ name: 'infra' }} />
+
+Token exchange role và target thing group đã tồn tại trong tài khoản: role là những gì các core device của bạn assume, và group là nơi chúng được đăng ký. Stack import cả hai thông qua các tham số CloudFormation.
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import {
+  GreengrassArtifactBucket,
+  GreengrassDeployment,
+  Pulse,
+} from '@my-scope/common-constructs';
+import { CfnParameter, Stack, type StackProps } from 'aws-cdk-lib';
+import { Role } from 'aws-cdk-lib/aws-iam';
+import type { Construct } from 'constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    const tokenExchangeRoleArn = new CfnParameter(
+      this,
+      'TokenExchangeRoleArn',
+      { type: 'String' },
+    );
+    const thingGroupArn = new CfnParameter(this, 'ThingGroupArn', {
+      type: 'String',
+    });
+
+    // One explicitly owned repository, and the grant the devices need.
+    const artifacts = new GreengrassArtifactBucket(this, 'Artifacts');
+    const tokenExchangeRole = Role.fromRoleArn(
+      this,
+      'TokenExchangeRole',
+      tokenExchangeRoleArn.valueAsString,
+    );
+    artifacts.grantReadTo(tokenExchangeRole);
+
+    // The generated wrapper takes the repository construct itself.
+    const pulse = new Pulse(this, 'Pulse', { bucket: artifacts });
+
+    // addComponent records the resolved version and orders the deployment
+    // resource after the component version resource.
+    const fleet = new GreengrassDeployment(this, 'Fleet', {
+      targetArn: thingGroupArn.valueAsString,
+    });
+    fleet.addComponent(pulse);
+  }
+}
+```
+
+Đồng bộ hóa các tham chiếu dự án, bootstrap tài khoản và Region một lần, sau đó deploy. Target `deploy` chạy `cdk deploy --require-approval=never` trong dự án infrastructure sau `^assemble`, cái mà rebuild artifact component trước. `main.ts` được tạo đặt mọi stack trong một stage được đặt tên theo dự án, `my-scope-infra-sandbox` cho `@my-scope/infra`, vì vậy `cdk deploy` cần một selector cho stage đó. Lấy tên stage từ `packages/infra/src/main.ts` và truyền nó với `/**` sau `--`, cùng với các giá trị tham số:
+
+<NxCommands env={{ AWS_PROFILE: '<profile>', AWS_REGION: '<region>' }} commands={['sync', 'run @my-scope/infra:bootstrap', "run @my-scope/infra:deploy -- 'my-scope-infra-sandbox/**' --parameters TokenExchangeRoleArn=<role-arn> --parameters ThingGroupArn=<thing-group-arn>"]} />
+
+`deploy` chờ ổn định hoàn toàn và chấp nhận các bản cập nhật thay thế. `deploy-sandbox` sử dụng chế độ express, cái mà từ chối một bản cập nhật thay thế trừ khi bạn truyền `--rollback`. Sử dụng `deploy` cho các sửa đổi thường xuyên, hoặc truyền `--rollback` khi sử dụng `deploy-sandbox`.
+
+`fleet.addComponent(pulse)` là bắt buộc, không phải trang trí. Với một `ComponentVersion` cố định, component map của deployment chứa một chuỗi literal, vì vậy CloudFormation không thấy dependency giữa deployment và phiên bản component và tạo chúng song song. IoT job sau đó có thể đến các device trước khi phiên bản tồn tại, và chúng thất bại với `FAILED_NO_STATE_CHANGE`. Với `NEXT_PATCH`, map chứa thuộc tính `ComponentVersion` của resource phiên bản component, và synth thất bại với một message đặt tên `addComponent` nếu một chuỗi `NEXT_*` thô đến deployment.
+
+#### Hai component trong một fleet
+
+Tạo một component thứ hai vào cùng một dự án hoặc một dự án khác, sau đó thêm cả hai vào một deployment. Overrides thay thế trường cấp cao nhất được đặt tên của entry component đó; phiên bản luôn đến từ construct.
+
+```ts
+const pulse = new Pulse(this, 'Pulse', { bucket: artifacts });
+const uploader = new Uploader(this, 'Uploader', { bucket: artifacts });
+
+const cameras = new GreengrassDeployment(this, 'Cameras', {
+  thingGroupName: 'cameras',
+});
+cameras.addComponent(pulse);
+cameras.addComponent(uploader, {
+  configurationUpdate: { merge: { uploadIntervalSeconds: 60 } },
+});
+```
+
+`thingGroupName` tạo một `AWS::IoT::ThingGroup` mới. Nó không đăng ký các device; một device tham gia một group thông qua quy trình provisioning của nó. Sử dụng `targetArn` hoặc `thingName` cho một group hoặc thing đã tồn tại.
+
+#### Một component trong hai fleet
+
+Đăng ký cùng một construct với hai deployment. Mỗi deployment mang cấu hình riêng của nó:
+
+```ts
+new GreengrassDeployment(this, 'WestFleet', {
+  thingGroupName: 'west-fleet',
+}).addComponent(pulse);
+
+new GreengrassDeployment(this, 'EastFleet', {
+  thingGroupName: 'east-fleet',
+}).addComponent(pulse, {
+  configurationUpdate: { merge: { sampleIntervalSeconds: 60 } },
+});
+```
+
+Thêm cùng một construct hai lần vào một deployment là một no-op trừ khi lần gọi thứ hai cung cấp overrides, cái mà cập nhật entry. Thêm một construct khác dưới cùng một tên component vào một deployment thất bại tại thời điểm construction.
+
+#### Các component công khai và các entry thô
+
+Các component bạn không build trong workspace này đi vào map `components`. Một component công khai đã xuất bản không cần dependency, vì nó đã tồn tại. Một entry thô cho một phiên bản được tạo trong cùng một stack, ví dụ một `CfnComponentVersion` viết tay, cần cạnh ordering mà bạn sẽ nhận được từ `addComponent`:
+
+```ts
+import { CfnComponentVersion } from 'aws-cdk-lib/aws-greengrassv2';
+
+const fleet = new GreengrassDeployment(this, 'Fleet', {
+  targetArn: thingGroupArn.valueAsString,
+  components: {
+    // Published by AWS; pick a version from
+    // `aws greengrassv2 list-component-versions`.
+    'aws.greengrass.LogManager': {
+      componentVersion: '2.3.8',
+      configurationUpdate: {
+        merge: {
+          logsUploaderConfiguration: {
+            systemLogsConfiguration: { uploadToCloudWatch: 'true' },
+          },
+        },
+      },
+    },
+    // Created in this stack, so the deployment must wait for it.
+    'com.example.Handwritten': { componentVersion: '1.2.0' },
+  },
+});
+fleet.addComponent(pulse);
+
+const handwritten = new CfnComponentVersion(this, 'Handwritten', {
+  inlineRecipe: handwrittenRecipe,
+});
+fleet.deployment.node.addDependency(handwritten);
+```
+
+`configurationUpdate.merge` là một object đơn giản ở đây. Construct serialize nó thành chuỗi JSON mà CloudFormation mong đợi.
+
+#### Import một repository hiện có
+
+Một stack sở hữu repository. Mọi stack khác import nó theo tên và thêm grant riêng của nó trong stack sở hữu, hoặc đính kèm một policy `s3:GetObject` tương đương vào chính token exchange role:
+
+```ts
+const artifacts = new GreengrassArtifactBucket(this, 'Artifacts', {
+  existingBucketName: 'central-greengrass-artifacts',
+});
+const pulse = new Pulse(this, 'Pulse', { bucket: artifacts });
+```
+
+Một bucket được import giữ các cài đặt mã hóa, versioning và truy cập riêng của nó. Resolver bao gồm tên bucket trong content identity của một phiên bản `NEXT_*`, vì vậy việc di chuyển một component sang một repository khác phân bổ một phiên bản mới cho các byte không thay đổi.
+</Fragment>
+<Fragment slot="terraform">
+Sử dụng ứng dụng Terraform được tạo trước khi chạy `greengrass#component`.
+Nếu bạn tạo nó ở đây thay vào đó, chạy lại generator component Greengrass trước khi
+tiếp tục để nó có thể thêm cấu hình provider `awscc`.
+
+<RunGenerator generator="terraform#project" requiredParameters={{ name: 'infra', type: 'application' }} />
+
+Khai báo token exchange role như một input và đặt giá trị của nó trong file environment mà target `plan` được cung cấp đọc với `-var-file=env/dev.tfvars`. Role là những gì các core device của bạn assume, và nó tồn tại trước khi cấu hình này chạy:
+
+```hcl title="packages/infra/src/variables.tf"
+variable "token_exchange_role_arn" {
+  description = "ARN of the IAM role the core devices assume"
+  type        = string
+}
+
+variable "thing_group_arn" {
+  description = "ARN of the existing thing group to deploy to"
+  type        = string
+}
+```
+
+```hcl title="packages/infra/src/env/dev.tfvars"
+environment            = "dev"
+token_exchange_role_arn = "arn:aws:iam::123456789012:role/GreengrassCoreTokenExchangeRole"
+thing_group_arn         = "arn:aws:iot:us-east-1:123456789012:thinggroup/pumps"
+```
+
+Tham chiếu các output của component module trực tiếp trong map `components` của core deployment module. Output `component_version` mang một `depends_on` vào resource phiên bản component, vì vậy deployment chờ phiên bản tồn tại ngay cả khi số của nó được biết tại thời điểm plan. Không cần `depends_on` cấp module cho luồng này.
+
+```hcl title="packages/infra/src/main.tf"
+module "artifacts" {
+  source                  = "../../common/terraform/src/core/greengrass/artifact-bucket"
+  token_exchange_role_arn = var.token_exchange_role_arn
+}
+
+module "pulse" {
+  source      = "../../common/terraform/src/app/greengrass-component/pulse"
+  bucket_name = module.artifacts.bucket_name
+}
+
+module "fleet" {
+  source     = "../../common/terraform/src/core/greengrass/deployment"
+  target_arn = var.thing_group_arn
+  components = {
+    (module.pulse.component_name) = {
+      component_version = module.pulse.component_version
+    }
+  }
+}
+```
+
+Bootstrap remote state một lần, sau đó plan và apply. `plan` phụ thuộc vào `init`, `validate` và `assemble`, cái mà rebuild artifact component trước, và `apply` áp dụng file plan mà `plan` đã viết:
+
+<NxCommands env={{ AWS_PROFILE: '<profile>', AWS_REGION: '<region>' }} commands={['run @my-scope/infra:bootstrap', 'run @my-scope/infra:plan', 'run @my-scope/infra:apply']} />
+
+`thing_group_name` tạo một `aws_iot_thing_group` mới; nó không đăng ký các device. Sử dụng `target_arn` cho một group hoặc thing đã tồn tại, hoặc `thing_name` cho một thing. Một `target_arn` literal được kiểm tra với partition, tài khoản và Region hiện tại tại thời điểm plan.
+
+Terraform sử dụng một phiên bản semantic rõ ràng trong recipe component. Chọn một
+phiên bản mới cho mỗi component đã thay đổi vì các phiên bản đã xuất bản là
+bất biến. Terraform không resolve các sentinel `NEXT_*` của plugin hoặc gọi
+các API Greengrass để chọn một phiên bản; provider `awscc` của nó sử dụng các credentials
+và Region được cấu hình cho Terraform.
+
+Target `plan` chạy `assemble` và ghi lại các digest artifact đã lên kế hoạch.
+Giữ recipe và build output không thay đổi giữa `plan` và `apply`. Nếu
+một trong hai thay đổi, chạy lại `plan` và áp dụng plan mới để các byte đã xuất bản
+khớp với phiên bản đã lên kế hoạch và object key.
+
+#### Staged rollout và các phiên bản được giữ lại
+
+Tăng phiên bản recipe thay thế phiên bản component được quản lý của Terraform và
+xóa phiên bản đi ra khỏi registry Greengrass. Nội dung artifact đã thay đổi
+cũng thay thế các key S3 của nó và xóa các object đi ra. Một phiên bản
+hoặc thay đổi recipe với các byte artifact không thay đổi có thể tái sử dụng cùng các key.
+Các deployment vẫn tham chiếu một phiên bản đã xóa thất bại, bao gồm một
+thing group thứ hai còn lại ở phiên bản trước. `create_before_destroy` sắp xếp
+tạo resource; nó không giữ lại các phiên bản cũ hoặc chờ mọi device
+hoàn thành rollout của nó.
+
+Giữ lại toàn bộ publishing module trước một staged rollout, bao gồm
+phiên bản component và các resource object S3 của nó. Chỉ giữ lại phiên bản để lại
+các artifact của nó có thể bị xóa. `prevent_destroy` không phải là một thay thế:
+nó từ chối các thay thế phiên bản thay vì giữ phiên bản đi ra.
+
+Đầu tiên xóa block `module "pulse"` hiện có và thay thế mọi
+tham chiếu deployment đến các output của nó bằng tên và phiên bản hiện đang được xuất bản.
+Giữ module `artifacts` được chia sẻ, các địa chỉ deployment, các component khác và
+cấu hình fleet. Ví dụ, hai group hiện có này vẫn ở `1.0.0`
+trong khi publisher rời khỏi quản lý Terraform:
+
+```hcl title="packages/infra/src/main.tf"
+removed {
+  from = module.pulse
+  lifecycle {
+    destroy = false
+  }
+}
+
+module "fleet" {
+  source     = "../../common/terraform/src/core/greengrass/deployment"
+  target_arn = var.thing_group_arn
+  components = {
+    "com.my-scope.Pulse" = { component_version = "1.0.0" }
+  }
+}
+
+module "stable_fleet" {
+  source     = "../../common/terraform/src/core/greengrass/deployment"
+  target_arn = "arn:aws:iot:us-east-1:123456789012:thinggroup/stable"
+  components = {
+    "com.my-scope.Pulse" = { component_version = "1.0.0" }
+  }
+}
+```
+
+Sử dụng tên component, phiên bản và các ARN group hiện có thực tế của bạn. Plan và
+apply bước retention này riêng biệt. Plan phải quên
+các resource phiên bản và object của publisher mà không phá hủy chúng hoặc sửa đổi các fleet:
+
+<NxCommands env={{ AWS_PROFILE: '<profile>', AWS_REGION: '<region>' }} commands={['run @my-scope/infra:plan', 'run @my-scope/infra:apply']} />
+
+Chỉ sau apply đó, thay đổi `ComponentVersion` trong recipe do người dùng sở hữu thành một
+phiên bản rõ ràng mới như `1.0.1`. Thêm một publisher dưới một địa chỉ module
+mới và nâng cấp pilot fleet; giữ entry literal
+`1.0.0` của stable fleet từ trên:
+
+```hcl title="packages/infra/src/main.tf"
+module "pulse_v2" {
+  source      = "../../common/terraform/src/app/greengrass-component/pulse"
+  bucket_name = module.artifacts.bucket_name
+}
+
+module "fleet" {
+  source     = "../../common/terraform/src/core/greengrass/deployment"
+  target_arn = var.thing_group_arn
+  components = {
+    (module.pulse_v2.component_name) = {
+      component_version = module.pulse_v2.component_version
+    }
+  }
+}
+```
+
+Plan lại để rebuild artifact và xuất bản phiên bản mới, sau đó apply.
+Sau khi xác minh các pilot device, cập nhật `stable_fleet` thành cùng các output publisher
+và plan/apply promotion đó. Wrapper được tạo đọc
+build output hiện tại; thêm một instance khác của nó không bảo tồn một build cũ hơn.
+
+Lặp lại bước retention riêng biệt cho `pulse_v2` trước khi thay thế hoặc xóa
+nó trong khi bất kỳ group hoặc rollback nào có thể cần phiên bản của nó. Các byte không thay đổi có thể chia sẻ
+các key S3 qua các phiên bản được giữ lại, vì vậy một publisher sau có thể quản lý một object
+mà một phiên bản cũ hơn vẫn tham chiếu. Giữ một inventory của các phiên bản được giữ lại
+và các key artifact của chúng; xóa một key chỉ khi không có phiên bản được giữ lại, deployment
+hoặc rollback nào cần nó. Quên các resource giữ chúng có sẵn nhưng chuyển
+việc dọn dẹp của chúng cho bạn.
+
+#### Hai component trong một fleet
+
+```hcl
+module "uploader" {
+  source      = "../../common/terraform/src/app/greengrass-component/uploader"
+  bucket_name = module.artifacts.bucket_name
+}
+
+module "cameras" {
+  source           = "../../common/terraform/src/core/greengrass/deployment"
+  thing_group_name = "cameras"
+  components = {
+    (module.pulse.component_name) = {
+      component_version = module.pulse.component_version
+    }
+    (module.uploader.component_name) = {
+      component_version = module.uploader.component_version
+      configuration_update = {
+        merge = jsonencode({ uploadIntervalSeconds = 60 })
+      }
+    }
+  }
+}
+```
+
+`configuration_update.merge` phải đã là một chuỗi JSON, vì vậy bọc nó trong `jsonencode`. Điều này khác với construct CDK, cái mà nhận một object.
+
+#### Một component trong hai fleet
+
+Hai deployment module tham chiếu cùng các output component:
+
+```hcl
+module "west_fleet" {
+  source           = "../../common/terraform/src/core/greengrass/deployment"
+  thing_group_name = "west-fleet"
+  components = {
+    (module.pulse.component_name) = {
+      component_version = module.pulse.component_version
+    }
+  }
+}
+
+module "east_fleet" {
+  source           = "../../common/terraform/src/core/greengrass/deployment"
+  thing_group_name = "east-fleet"
+  components = {
+    (module.pulse.component_name) = {
+      component_version = module.pulse.component_version
+      configuration_update = {
+        merge = jsonencode({ sampleIntervalSeconds = 60 })
+      }
+    }
+  }
+}
+```
+
+#### Các component công khai và các phiên bản literal
+
+Một component công khai đã xuất bản là một entry literal và không cần dependency. Một phiên bản literal cho một resource được tạo trong cùng một apply, ví dụ một `awscc_greengrassv2_component_version` viết tay, là trường hợp duy nhất cho một `depends_on` cấp module. Với `depends_on`, Terraform không thể đọc các data source identity của deployment module cho đến khi dependency tồn tại, vì vậy các kiểm tra target của nó được hoãn lại từ plan đến apply. Chúng vẫn thất bại trước khi deployment được tạo.
+
+```hcl
+module "fleet" {
+  source     = "../../common/terraform/src/core/greengrass/deployment"
+  target_arn = var.thing_group_arn
+  components = {
+    "aws.greengrass.LogManager" = {
+      component_version = "2.3.8"
+      configuration_update = {
+        merge = jsonencode({
+          logsUploaderConfiguration = {
+            systemLogsConfiguration = { uploadToCloudWatch = "true" }
+          }
+        })
+      }
+    }
+    "com.example.Handwritten" = {
+      component_version = "1.2.0"
+    }
+    (module.pulse.component_name) = {
+      component_version = module.pulse.component_version
+    }
+  }
+
+  # Only for the literal version created by awscc_greengrassv2_component_version.handwritten.
+  depends_on = [awscc_greengrassv2_component_version.handwritten]
+}
+```
+
+#### Import một repository hiện có
+
+Đặt `existing_bucket_name` trên module `artifact-bucket`. Module sau đó không quản lý cả cài đặt của bucket cũng như policy của nó, vì vậy cấp cho token exchange role `s3:GetObject` trên prefix artifact trong cấu hình sở hữu bucket:
+
+```hcl
+module "artifacts" {
+  source               = "../../common/terraform/src/core/greengrass/artifact-bucket"
+  existing_bucket_name = "central-greengrass-artifacts"
+}
+```
+</Fragment>
+</Infrastructure>
+
+### Xác minh trên device
+
+Một bản cập nhật stack hoặc apply hoàn thành chứng minh rằng resource deployment tồn tại. Một deployment và IoT job của nó có thể cả hai báo cáo `SUCCEEDED` trong khi component trên device là `BROKEN`. Kiểm tra device và trạng thái component sau mỗi deployment:
+
+```bash
+aws --profile <profile> --region <region> greengrassv2 get-core-device \
+  --core-device-thing-name <thing-name> --query status
+aws --profile <profile> --region <region> greengrassv2 list-installed-components \
+  --core-device-thing-name <thing-name>
+```
+
+Sử dụng `<component>-logs` để kiểm tra log process nếu device báo cáo một trạng thái broken.
+</OptionFilter>
+
+## Recipe và IPC
+
+<Tabs syncKey="greengrass-language">
+<TabItem label="Python" _filter={{ language: 'python' }}>
+Với `ipc: false` mặc định, `main.py` ghi một dòng mỗi 30 giây và
+recipe không có kiểm soát truy cập IPC. Với `ipc: true`, nó xuất bản một heartbeat đến
+topic cục bộ của chính component mỗi 30 giây thông qua
+`GreengrassCoreIPCClientV2`:
+
+```python title="greengrass/pulse/main.py"
+client.publish_to_topic(
+    topic=TOPIC,
+    publish_message=PublishMessage(json_message=JsonMessage(message={"sequence": sequence})),
+)
+```
+
+Recipe cấp `aws.greengrass#PublishToTopic` trên
+`<ComponentName>/heartbeat` dưới `aws.greengrass.ipc.pubsub`. Pub/sub cục bộ
+đến các component khác trên cùng một core device, không phải AWS IoT Core. Để xuất bản
+đến AWS IoT Core, gọi `publish_to_iot_core`, cấp
+`aws.greengrass#PublishToIoTCore` dưới `aws.greengrass.ipc.mqttproxy` trong
+recipe, và cung cấp cho IoT policy của device `iot:Publish` trên topic chính xác.
+</TabItem>
+<TabItem label="TypeScript" _filter={{ language: 'typescript' }}>
+Với `ipc: false` mặc định, `main.ts` ghi một dòng mỗi 30 giây và
+recipe không có kiểm soát truy cập IPC. Với `ipc: true`, nó xuất bản một heartbeat đến
+topic cục bộ của chính component thông qua client Greengrass IPC của AWS IoT Device SDK,
+và `pulse-vendor` stage addon native `aws-crt` cho kiến trúc được chọn.
+Xuất bản đến AWS IoT Core sử dụng operation `publishToIoTCore` của cùng client,
+một authorization `aws.greengrass.ipc.mqttproxy`
+trong recipe, và `iot:Publish` trong IoT policy của device.
+</TabItem>
+</Tabs>
+
+Kiểm soát truy cập trong recipe được thực thi bởi nucleus trên device. Chỉ phụ thuộc vào SDK không authorize gì cả, vì vậy hãy mở rộng `operations` và `resources` khi component phát triển.
+
+Các recipe được tạo nhắm đến classic `aws.greengrass.Nucleus`. [Nucleus Lite](https://docs.aws.amazon.com/greengrass/v2/developerguide/greengrass-nucleus-lite-component.html) triển khai một tập con của các operation IPC, không chạy các plugin component, và chỉ có được hỗ trợ container trong v2.15. Xác minh recipe với nucleus mà fleet của bạn chạy; generator không phát hiện các khả năng nucleus.
+
+Trên Ubuntu 25.10 và sau đó, `sudo-rs` có thể ngăn các component IPC khởi động với Greengrass Nucleus 2.18.3 vì môi trường IPC bị mất. Generator không thay đổi cấu hình bảo mật `sudo` của host. Sử dụng một thiết lập device cung cấp hành vi `sudo` classic khi IPC được yêu cầu.
+
+## Quản lý phiên bản tự động
+
+Đối với các deployment CDK, đặt `ComponentVersion` trong `recipe.yaml` thành `NEXT_PATCH`,
+`NEXT_MINOR` hoặc `NEXT_MAJOR` để yêu cầu resolver của plugin phân bổ một phiên bản
+từ phiên bản semantic nghiêm ngặt cao nhất đã được xuất bản trong tài khoản và
+Region:
+
+| Giá trị chỉ định | Phiên bản cao nhất đã xuất bản `1.4.2` trở thành | Chưa xuất bản phiên bản nào |
+| --- | --- | --- |
+| `NEXT_PATCH` | `1.4.3` | `1.0.0` |
+| `NEXT_MINOR` | `1.5.0` | `1.0.0` |
+| `NEXT_MAJOR` | `2.0.0` | `1.0.0` |
+
+Phiên bản đầu tiên là `1.0.0`. Resolver tái sử dụng phiên bản đã xuất bản cao nhất
+khi tag nội dung của nó khớp và phiên bản có thể triển khai; nếu không nó
+xuất bản phiên bản tiếp theo được chọn bởi sentinel. Tag bao gồm recipe
+không có dòng phiên bản của nó, các byte artifact, và tên bucket artifact.
+Do đó nội dung không thay đổi tái sử dụng một phiên bản, trong khi thay đổi nội dung hoặc
+bucket xuất bản một phiên bản mới. Generator không bao giờ viết lại `recipe.yaml`.
+
+`NEXT_*` là một quy ước plugin Nx, không phải một phiên bản Greengrass. CDK resolve
+sentinel trong quá trình deployment, và `<project>:pulse-deploy-local` resolve nó
+với các phiên bản có sẵn trên device. GDK sử dụng `NEXT_PATCH` như một cài đặt trong
+`gdk-config.json`, không phải như một trường recipe, và không hỗ trợ `NEXT_MINOR` hoặc
+`NEXT_MAJOR`. Plugin không gọi GDK.
+
+Terraform yêu cầu một phiên bản semantic rõ ràng. Mỗi artifact đã thay đổi cần một
+`ComponentVersion` mới vì các phiên bản Greengrass là bất biến. Terraform
+không resolve `NEXT_*`.
+
+Resolver CDK chạy trong quá trình deployment CloudFormation dưới một Lambda
+execution role được tạo, giới hạn trong các tên component của stack. Không chạy các publish đồng thời cho cùng một component:
+các deployment có thể chọn cùng một phiên bản tiếp theo, gây ra một publish thất bại.
+
+## Lưu trữ và giữ lại artifact
+
+Sử dụng một artifact repository cho mỗi tài khoản và Region, được sở hữu bởi một stack hoặc root
+module. Import nó ở nơi khác với `existingBucketName` trong CDK hoặc
+`existing_bucket_name` trong Terraform. Bucket được tạo được versioned,
+mã hóa với SSE-S3, private, và yêu cầu TLS. Các artifact Greengrass không phải là
+các asset CDK; `cdk gc` có thể xóa một asset vẫn cần bởi một phiên bản component.
+
+Cả hai đường dẫn IaC sử dụng cùng một bố cục key object S3:
+`<ComponentName>/<first 32 hex characters of sha256>/<file>`. Digest hash
+các tên artifact đã sắp xếp và các hash SHA-256 đầy đủ của chúng, sử dụng cùng một công thức
+cho một hoặc nhiều artifact. Chỉ prefix key được rút ngắn; các digest artifact
+và các identity phiên bản tự động giữ lại các hash đầy đủ.
+Tag bucket-deployment của CDK giới hạn prefix đến 102 ký tự, để lại 68
+ký tự cho tên component. Generator kiểm tra giới hạn đó khi
+infrastructure CDK được chọn, và synthesis kiểm tra các chỉnh sửa cho recipe.
+Các upload object của Terraform không có giới hạn CDK này.
+
+Giữ các artifact đã xuất bản có sẵn trong khi một deployment hoặc rollback có thể cần
+các phiên bản component của chúng. CDK giữ lại các phiên bản component đã thay thế và
+các upload của chúng theo mặc định. Terraform xóa các phiên bản đã thay thế và các
+key object đi ra; xem [staged rollouts and retained versions](#staged-rollout-và-các-phiên-bản-được-giữ-lại)
+trước khi tăng một phiên bản được sử dụng bởi nhiều group. Xóa một phiên bản registry
+không gỡ cài đặt các component đã chạy trên các device.
+Repository của Terraform đặt `prevent_destroy`; xóa cài đặt lifecycle literal đó
+chỉ cho việc teardown có chủ ý sau khi các artifact của nó không còn cần thiết nữa.
+
+Grant token exchange role mặc định cho phép `s3:GetObject` trong
+namespace component của workspace. Đối với một grant hẹp hơn, đặt `keyPrefix` trong CDK hoặc
+`token_exchange_key_prefix` trong Terraform. Một bucket được import giữ
+policy riêng của nó, vì vậy hãy quản lý grant nơi bucket hoặc role được sở hữu.
+
+## Bản sửa đổi triển khai
+
+Thay đổi một phiên bản component hoặc cấu hình deployment thay thế
+resource deployment. CloudFormation cho phép tối đa 10 resource deployment được
+thêm hoặc xóa trong một operation stack; chia một rollout lớn thành các batch.
+Sử dụng target `deploy` thông thường cho các thay thế. `deploy-sandbox` sử dụng
+chế độ express CloudFormation, cái mà yêu cầu `--rollback` cho một bản cập nhật thay thế.
+
+Xóa resource deployment loại bỏ trạng thái quản lý cloud nhưng không
+gỡ cài đặt component khỏi một device. Đầu tiên deploy một revision bỏ qua
+component, chờ nó biến mất khỏi `list-installed-components`, và sau đó
+xóa các resource IaC của nó.
+
+## Triển khai cục bộ và trên đám mây
+
+Một deployment cục bộ từ `<component>-deploy-local` ghim một phiên bản component trên
+device đó. Một deployment cloud yêu cầu một phiên bản khác không thể
+thỏa mãn pin. Xóa deployment cục bộ trước khi cập nhật device đó từ
+cloud:
+
+```bash
+sudo /greengrass/v2/bin/greengrass-cli deployment create --remove com.example.Pulse
+```
+
+Sử dụng các deployment cục bộ cho các device phát triển và các deployment cloud cho các
+target fleet.
+
+## Khắc phục sự cố và giới hạn dịch vụ
+
+Sau một deployment cloud, kiểm tra cả trạng thái deployment Greengrass và
+trạng thái device của component:
+
+```bash
+aws --profile <profile> --region <region> greengrassv2 get-core-device \
+  --core-device-thing-name <thing-name> --query status
+aws --profile <profile> --region <region> greengrassv2 list-installed-components \
+  --core-device-thing-name <thing-name>
+```
+
+Một job có thể báo cáo `SUCCEEDED` trong khi một component là `BROKEN`. Sử dụng
+`<component>-logs` để kiểm tra log process của nó. Các component IPC trên Ubuntu 25.10
+và sau đó cũng có thể thất bại dưới `sudo-rs` với Nucleus 2.18.3; generator
+để lại các cài đặt bảo mật của host một mình.
+
+Greengrass giới hạn một component đến 5,000 phiên bản cho mỗi Region và
+`CreateComponentVersion` đến một request mỗi giây cho mỗi Region. Một recipe bị
+giới hạn đến 16 KB, và một deployment document đến 31 KB cho một thing group hoặc 7 KB
+cho một thing đơn lẻ. Tránh sử dụng các phiên bản mới như heartbeat và chia các
+deployment lớn thành các batch nhỏ hơn.

@@ -23,6 +23,8 @@ import {
 import fastGlob from 'fast-glob';
 import { parseDocument } from 'yaml';
 import { applyGritQL } from '../packages/nx-plugin/src/utils/ast';
+import conventional from '@commitlint/config-conventional';
+import commitlintConfig from '../commitlint.config.js';
 import {
   resolveAgentCoreRuntimes,
   unresolvedAgentCoreRuntimeWarning,
@@ -52,7 +54,9 @@ import {
 } from '../packages/nx-plugin/src/utils/versions';
 import {
   type DependencyLookup,
+  memoizeLookup,
   pinToExactDependencies,
+  writeExactDependencySources,
 } from '../packages/nx-plugin/src/utils/version-lockstep/exact-dependency';
 import {
   holdPinnedVersions,
@@ -60,29 +64,14 @@ import {
   TERRAFORM_VERSION_HOLDS,
 } from '../packages/nx-plugin/src/utils/version-lockstep/hold';
 import { holdGroupsInLockstep } from '../packages/nx-plugin/src/utils/version-lockstep/lockstep';
+import {
+  type ChangeGroup,
+  commitMessageLineLimit,
+  formatReport,
+  type ReportChange,
+  type VersionChange,
+} from '../packages/nx-plugin/src/utils/version-lockstep/report';
 import { refreshShadcnTemplates } from './update-versions/shadcn';
-
-interface VersionChange {
-  name: string;
-  oldVersion: string;
-  newVersion: string;
-}
-
-interface TemplateChange {
-  path: string;
-}
-
-/** Something the run could not do, reported so it reaches the PR body. */
-interface ReportNote {
-  note: string;
-}
-
-type ReportChange = VersionChange | TemplateChange | ReportNote;
-
-interface ChangeGroup {
-  title: string;
-  changes: ReportChange[];
-}
 
 /**
  * Manifests whose npm dependencies are resolved alongside the vended pins: the
@@ -344,19 +333,22 @@ const getUpdatedTerraformVersions = async (): Promise<
 
 /**
  * Reads one field of a published npm release's manifest from the public
- * registry. Rejects on any non-200 response, so the caller can hold its pins.
+ * registry, once per release and field. Rejects on any non-200 response, so the
+ * caller can hold its pins.
  */
-const npmManifestField: DependencyLookup = async (name, version, field) => {
-  const url = `https://registry.npmjs.org/${name}/${version}`;
-  const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
-  if (!response.ok) {
-    throw new Error(`${url} returned ${response.status}`);
-  }
-  const manifest = (await response.json()) as Partial<
-    Record<typeof field, Record<string, string>>
-  >;
-  return manifest[field] ?? {};
-};
+const npmManifestField: DependencyLookup = memoizeLookup(
+  async (name, version, field) => {
+    const url = `https://registry.npmjs.org/${name}/${version}`;
+    const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+    if (!response.ok) {
+      throw new Error(`${url} returned ${response.status}`);
+    }
+    const manifest = (await response.json()) as Partial<
+      Record<typeof field, Record<string, string>>
+    >;
+    return manifest[field] ?? {};
+  },
+);
 
 /**
  * Applies updated versions to the versions file
@@ -414,35 +406,12 @@ const writeReport = (changeGroups: ChangeGroup[]): void => {
   mkdirSync(reportDir, { recursive: true });
 
   const reportPath = join(reportDir, 'report.txt');
-  let reportContent = '';
-
-  // Process each change group
-  changeGroups.forEach((group, index) => {
-    if (group.changes.length > 0) {
-      // Add separator between groups
-      if (index > 0) {
-        reportContent += '\n';
-      }
-
-      reportContent += `${group.title}\n`;
-      group.changes.forEach((change) => {
-        if ('oldVersion' in change) {
-          reportContent += `- ${change.name} ${change.oldVersion} -> ${change.newVersion}\n`;
-          return;
-        }
-        if ('note' in change) {
-          reportContent += `- ${change.note}\n`;
-          return;
-        }
-        reportContent += `- ${change.path}\n`;
-      });
-    }
-  });
-
-  // If no changes at all
-  if (reportContent.length === 0) {
-    reportContent = 'No version updates required.\n';
-  }
+  // The report is the bot commit's body, so its lines are wrapped to the line
+  // limit the commit-msg hook's commitlint enforces.
+  const reportContent = formatReport(
+    changeGroups,
+    commitMessageLineLimit(conventional.rules, commitlintConfig.rules),
+  );
 
   writeFileSync(reportPath, reportContent);
   console.log(`Report written to ${reportPath}`);
@@ -712,6 +681,13 @@ const main = async () => {
       updatedTsVersions,
       npmManifestField,
     );
+    // Fails the run rather than write a CopilotKit the @ag-ui pins don't match.
+    const exactDependencyFiles = await writeExactDependencySources(
+      tree,
+      EXACT_DEPENDENCY_PINS,
+      updatedTsVersions,
+      npmManifestField,
+    );
 
     // This repo's manifests, from the same pass as the vended pins.
     const manifestChanges = repoManifests().flatMap((manifestPath) =>
@@ -729,6 +705,7 @@ const main = async () => {
     const tsChanges: ReportChange[] = [
       ...tsVersionChanges,
       ...exactDependencyNotes,
+      ...exactDependencyFiles.map((path) => ({ path })),
     ];
 
     // Apply updated Python versions to the versions file

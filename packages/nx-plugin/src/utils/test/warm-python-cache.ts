@@ -5,6 +5,7 @@
 import { execFileSync } from 'child_process';
 import { pyenvPythonVersion } from '../versions.js';
 import {
+  PY_AGENT_GUARDRAIL_VERIFIER_DEPENDENCIES,
   PY_CLIENT_VERIFIER_DEPENDENCIES,
   PY_DYNAMODB_VERIFIER_DEPENDENCIES,
   PY_VERIFIER_TYPE_CHECKER,
@@ -35,6 +36,10 @@ export default function setup() {
     { dependencies: PY_CLIENT_VERIFIER_DEPENDENCIES },
     {
       dependencies: PY_DYNAMODB_VERIFIER_DEPENDENCIES,
+      python: pyenvPythonVersion(),
+    },
+    {
+      dependencies: PY_AGENT_GUARDRAIL_VERIFIER_DEPENDENCIES,
       python: pyenvPythonVersion(),
     },
   ];

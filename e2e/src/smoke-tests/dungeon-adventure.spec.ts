@@ -15,6 +15,7 @@ import {
   getDungeonAdventureElectroDbDependencies,
   killProcess,
   runCLI,
+  runInstall,
   tmpProjPath,
 } from '../utils';
 import { startLlmMock } from '../utils/llm-mock';
@@ -304,6 +305,7 @@ describe('smoke test - dungeon-adventure', () => {
     // here is what makes the Module 2 "before" templates below match the state a
     // reader following the guide actually has on disk.
     await runCLI(`sync --verbose`, opts);
+    await runInstall(opts);
     await runCLI(`${buildPackageManagerShortCommand(pkgMgr, 'lint')}`, {
       ...opts,
       prefixWithPackageManagerCmd: false,
@@ -399,6 +401,7 @@ describe('smoke test - dungeon-adventure', () => {
     );
 
     await runCLI(`sync --verbose`, opts);
+    await runInstall(opts);
     await runCLI(`${buildPackageManagerShortCommand(pkgMgr, 'lint')}`, {
       ...opts,
       prefixWithPackageManagerCmd: false,
@@ -422,6 +425,7 @@ describe('smoke test - dungeon-adventure', () => {
     writeFromTemplate(agentPyPath, '3/agent.py.template');
 
     await runCLI(`sync --verbose`, opts);
+    await runInstall(opts);
     await runCLI(`${buildPackageManagerShortCommand(pkgMgr, 'lint')}`, {
       ...opts,
       prefixWithPackageManagerCmd: false,
@@ -458,6 +462,7 @@ describe('smoke test - dungeon-adventure', () => {
     writeFromTemplate(routesIndexPath, '4/routes/index.tsx.template');
 
     await runCLI(`sync --verbose`, opts);
+    await runInstall(opts);
     await runCLI(`${buildPackageManagerShortCommand(pkgMgr, 'lint')}`, {
       ...opts,
       prefixWithPackageManagerCmd: false,

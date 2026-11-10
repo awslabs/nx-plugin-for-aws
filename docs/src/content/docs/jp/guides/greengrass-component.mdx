@@ -1,0 +1,636 @@
+---
+title: Greengrass Component
+description: 既存のPythonまたはTypeScriptプロジェクトにAWS IoT Greengrass v2コンポーネントを追加し、公開とデプロイのための再利用可能なCDKまたはTerraformビルディングブロックを提供します
+generator: greengrass#component
+---
+
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import ArchitectureDiagram from '@components/architecture-diagram.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import OptionFilter from '@components/option-filter.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Snippet from '@components/snippet.astro';
+
+`greengrass#component`ジェネレーターは、既存のPythonまたはTypeScriptプロジェクトに[AWS IoT Greengrass v2](https://docs.aws.amazon.com/greengrass/v2/developerguide/what-is-iot-greengrass.html)コンポーネントを追加します。レシピ、エントリーポイント、Pythonコンポーネント用のユニットテスト、およびコアデバイス用にコンポーネントをパッケージ化するNxターゲットを作成します。デフォルトの`infra`では、コンポーネントバージョンを公開し、アーティファクトリポジトリを所有し、デプロイメントを記述する再利用可能なCDKコンストラクトまたはTerraformモジュールも提供します。これらのビルディングブロックを独自のインフラストラクチャコードで構成します。ジェネレーターは、デバイス、フリート、またはデプロイメントを単独で作成することはありません。
+
+ホストプロジェクトは既に存在している必要があります。まず<Link path="guides/python-project">`py#project`</Link>または<Link path="guides/typescript-project">`ts#project`</Link>で作成してください。
+
+## 使用方法
+
+### コンポーネントの生成
+
+<RunGenerator generator="greengrass#component" requiredParameters={{ project: 'telemetry', name: 'pulse', language: 'python' }} />
+
+スクリプトやドキュメントでは`language`を明示的に渡してください。省略された場合、ジェネレーターは選択されたプロジェクト内の`tsconfig.json`から`typescript`を、または`pyproject.toml`から`python`を推測します。両方のファイルを持つプロジェクトは`--language`を渡す必要があります。どちらのファイルも持たないプロジェクトはサポートされていません。
+
+`ipc`は両方の言語でデフォルトで`false`です。Greengrass IPCアクセスを追加するには`--ipc=true`を、無効のままにするには`--ipc=false`を渡してください。
+
+レシピの`ComponentPublisher`はワークスペースのnpmスコープをデフォルトとします。別の値を設定するには`--publisher`を渡してください。`aws-nx-plugin.config.mts`にはGreengrassパブリッシャー設定はありません。
+
+`iac: terraform`の場合、このジェネレーターを実行する前に`terraform#project`でTerraformアプリケーションを作成してください。Greengrassジェネレーターは、そのアプリケーションに`awscc`プロバイダー設定を追加します。後でTerraformアプリケーションを作成する場合は、プロバイダーを追加できるように`greengrass#component`を再実行してください。
+
+`--project`は非修飾プロジェクト名を受け入れます。生成されたプロジェクトは名前空間修飾されているため、`nx run`には完全な名前が必要です。Pythonプロジェクトの場合は`<scope>.telemetry`、TypeScriptプロジェクトの場合は`@<scope>/telemetry`です。以下の例では、その名前を`<project>`と記述し、npmスコープが`my-scope`のワークスペースで`--name=infra`で生成されたインフラストラクチャプロジェクトを`@my-scope/infra`と記述します。
+
+### ハードウェアとオペレーティングシステム
+
+`platform`は、ボード名ではなく、**コアデバイス**のオペレーティングシステムとCPUアーキテクチャを選択します。現在のターゲットは、glibcを使用した64ビットLinuxです。
+
+| デバイス | ジェネレーターターゲット | ステータス |
+| --- | --- | --- |
+| Linux PC、産業用ゲートウェイ、またはEC2 x86_64インスタンス | `linux-amd64` | サポート済み。EC2コアで検証済み |
+| 64ビットCPUと64ビットLinuxを搭載したRaspberry Pi、または別のLinux ARM64ゲートウェイ | `linux-arm64` | パッケージングはサポート済み。Raspberry Piハードウェアは未検証 |
+| 上記の両方を含むフリート | `linux-amd64-arm64` | アーキテクチャ固有のマニフェストを持つ1つのコンポーネントバージョン |
+| 32ビットLinux / ARMv7を実行しているRaspberry Pi | なし | このジェネレーターではサポートされていませんが、クラシックGreengrassヌクレウスはARMv7をサポートしています |
+| Raspberry Pi Pico、ESP32、または別のマイクロコントローラー | なし | コアデバイスのIoTクライアントまたは周辺機器として使用 |
+
+Raspberry Piでは、`uname -m`と`getconf LONG_BIT`の両方を確認してください。このパスには`aarch64`と`64`が必要です。32ビットユーザースペースを実行している64ビットプロセッサは、ARM64デプロイメントターゲットではありません。デバイスには、生成されたレシピで指定されたPythonインタープリター、またはTypeScript用のNode.js、および[Greengrassヌクレウスの前提条件](https://docs.aws.amazon.com/greengrass/v2/developerguide/greengrass-nucleus-component.html)も必要です。Python依存関係のベンダリングは`manylinux_2_28`をターゲットとしているため、glibc 2.28以降を使用してください。GPIOライブラリとカスタムネイティブ依存関係は、選択されたプラットフォーム用の互換性のあるバイナリを提供する必要があります。ジェネレーターはこれらの周辺機器をプロビジョニングしません。
+
+生成されたPythonレシピは、インタープリターをホストプロジェクトの`requires-python`フロア（例：`python3.14`）に固定します。コンポーネントを実行する各コアデバイスにそのインタープリターをインストールしてください。TypeScriptコンポーネントには、コアデバイスにNode.jsが必要です。
+
+`linux-amd64-arm64`の場合、レシピにはアーキテクチャごとに1つのマニフェストが含まれます。Greengrassは、`Platform`がコアデバイスと一致する最初のマニフェストを選択するため、各マニフェストのアーティファクトと環境設定をそのアーキテクチャとペアにしてください。
+
+ESP32ファームウェアは、これらのPythonおよびTypeScriptコンポーネントとは別に実行されます。AWS IoT CoreにMQTTメッセージを送信するか、[クライアントデバイスサポート](https://docs.aws.amazon.com/greengrass/v2/developerguide/interact-with-local-iot-devices.html)を使用してローカルGreengrassコアに接続できます。ローカルルートには、ブローカー、クライアント認証、MQTTブリッジ設定が必要です。このジェネレーターは、これらやファームウェアをスキャフォールドしません。ARMv7、Windows、musl Linux、およびその他のCPUアーキテクチャには、追加のパッケージングとランタイム作業が必要です。レシピのアーキテクチャラベルを変更するだけでは不十分です。
+
+### オプション
+
+<GeneratorParameters generator="greengrass#component" />
+
+## ジェネレーター出力
+
+<OptionFilter when={{ language: 'python' }} description="Python component layout">
+<FileTree>
+  - greengrass
+    - pulse
+      - recipe.yaml コンポーネントレシピ
+      - main.py コンポーネントエントリーポイント
+  - tests
+    - greengrass
+      - test_pulse.py パスでmain.pyをロードするユニットテスト
+</FileTree>
+
+`pulse-vendor`ターゲットは、`uv pip install --only-binary :all:`を使用して、選択されたデバイスプラットフォーム用にプロジェクトの依存関係をベンダリングします。`platform: linux-amd64-arm64`の場合、アーキテクチャごとに1回ベンダリングし、レシピはアーキテクチャごとに1つのマニフェストを保持します。
+</OptionFilter>
+
+<OptionFilter when={{ language: 'typescript' }} description="TypeScript component layout">
+<FileTree>
+  - greengrass
+    - pulse
+      - recipe.yaml コンポーネントレシピ
+  - src
+    - greengrass
+      - pulse
+        - main.ts コンポーネントエントリーポイント
+</FileTree>
+
+プロジェクトの`bundle`ターゲットは、パッケージング前にエントリーポイントをバンドルします。`ipc: true`の場合、`pulse-vendor`ターゲットは選択されたアーキテクチャ用の`aws-crt`ネイティブアドオンもステージングします。
+</OptionFilter>
+
+レシピ、エントリーポイント、およびPythonの場合はテストは、最初の実行から自分のものです。再実行しても書き換えられることはありません。ターゲット、メタデータ、依存関係宣言はフレームワーク管理であり、実行ごとに収束します。`packages/common/scripts/src/greengrass/`の下の共有パッケージングスクリプトは一度作成されます。そのディレクトリを削除してジェネレーターを再実行すると、更新されます。
+
+ターゲットはケバブケースのコンポーネント名を使用します。
+
+| ターゲット | 目的 |
+| --- | --- |
+| `<component>-vendor` | Python依存関係、またはIPCが有効な場合はTypeScript CRTアドオンをベンダリング |
+| `<component>-artifact` | `dist/<project-root>/greengrass/<component>/greengrass-build/`の下に解決されたレシピとデプロイ可能なアーカイブを書き込み |
+| `<component>-deploy-local` | コアデバイス上で`greengrass-cli`を通じてローカルデプロイメントを作成し、安定したコンポーネント状態を待機 |
+| `<component>-logs` | コアデバイス上のコンポーネントログをテール |
+
+`<component>-artifact`はホストプロジェクトの`build`および`assemble`ターゲットの依存関係であるため、通常のビルドでアーティファクトが生成されます。
+
+## インフラストラクチャ
+
+<OptionFilter when={{ infra: 'component-version' }} description="Building blocks vended with infra=component-version">
+<Snippet name="shared-constructs" />
+
+デフォルトの`infra: component-version`は、欠落している場合に以下のGreengrassコアファイルと、コンポーネントごとに1つのアプリラッパーを追加します。既存のコアファイルは保持されるため、ローカル編集は後の実行でも残ります。デバイス、シンググループ、またはデプロイメントは作成しません。
+
+<Infrastructure>
+<Fragment slot="cdk">
+<FileTree>
+  - packages/common/constructs/src
+    - core/greengrass
+      - artifact-bucket.ts `GreengrassArtifactBucket`: `grantReadTo`を持つ保持された、バージョン管理された、TLSのみのリポジトリ
+      - component-version.ts `GreengrassComponentVersion`: アーティファクトをアップロードしてバージョンを公開
+      - deployment.ts `GreengrassDeployment`: デプロイメント、オプションのシンググループ、および`addComponent`
+      - next-version.ts `NEXT_PATCH`、`NEXT_MINOR`、`NEXT_MAJOR`のデプロイ時リゾルバー
+      - recipe.ts シンス時のレシピ読み取りとアーティファクトURI置換
+    - app/greengrass
+      - pulse.ts `Pulse`、このコンポーネントのビルド出力に固定された`GreengrassComponentVersion`
+</FileTree>
+
+共有コンストラクトプロジェクトの`build`および`assemble`ターゲットはホストプロジェクトに依存しているため、インフラストラクチャのビルドまたはデプロイは常に新しいアーティファクトを読み取ります。
+</Fragment>
+<Fragment slot="terraform">
+<FileTree>
+  - packages/common/terraform/src
+    - core/greengrass
+      - artifact-bucket オプションのトークン交換ロール付与を持つ保持された、バージョン管理された、TLSのみのリポジトリ
+      - component-version `awscc_greengrassv2_component_version`を通じてアーティファクトをアップロードしてバージョンを公開
+      - deployment オプションの`aws_iot_thing_group`を持つ`awscc_greengrassv2_deployment`
+    - app/greengrass-component
+      - pulse このコンポーネントのビルドパスと`bucket_name`入力で`component-version`をラップするモジュール
+</FileTree>
+
+Greengrassリソースは`hashicorp/aws`プロバイダーには存在しません。モジュールは[`hashicorp/awscc`](https://registry.terraform.io/providers/hashicorp/awscc/latest/docs)を使用します。`iac: terraform`が選択されている場合、Greengrassジェネレーターは、欠落している場合にTerraformアプリケーションルートに`awscc`必須プロバイダーと`provider "awscc" { region = var.aws_region }`を追加します。既存のプロバイダー設定は保持されます。
+</Fragment>
+</Infrastructure>
+
+#### アーキテクチャ
+
+コンポーネントバージョンは、ビルドされたアーティファクトを明示的に所有されたリポジトリに公開します。スタックまたはルートモジュールは、コアデバイスのトークン交換ロールに読み取りアクセスを付与し、1つ以上のデプロイメントにバージョンを追加します。デフォルトの読み取り付与は、ワークスペースのコンポーネント名前空間にスコープされています。ロールのデバイスがそれらのコンポーネントのサブセットのみを必要とする場合は、さらに絞り込んでください。
+
+<ArchitectureDiagram />
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'none' }} description="Local-only component">
+`infra: none`は、レシピ、エントリーポイント、Pythonテスト、ターゲット、および共有スクリプトのみを作成します。インフラストラクチャプロジェクトや共有コンストラクトは作成または変更されません。後で`infra: component-version`で再実行してインフラストラクチャを追加できます。既にインフラストラクチャを所有しているコンポーネントを`none`に戻すことはできません。
+</OptionFilter>
+
+## ローカルでのビルドと実行
+
+開発マシンでアーティファクトをビルドします。
+
+<NxCommands commands={['run <project>:pulse-artifact']} />
+
+`dist/<project-root>/greengrass/pulse/greengrass-build/`の下の出力には、解決されたレシピを含む`recipes/`と、アーカイブを含む`artifacts/<ComponentName>/<ComponentVersion>/`があります。Pythonコンポーネントは、マニフェストごとに1つのアーカイブをビルドし、両方のアーキテクチャをターゲットとする場合は`<component>-<architecture>.zip`という名前になります。TypeScriptコンポーネントは、すべてのマニフェストが共有する1つのアーカイブをビルドします。`ipc: true`の場合、各アーキテクチャ用の`aws-crt`アドオンを保持し、各マニフェストの`Setenv`が独自のものを選択します。レシピのアーティファクトURIの`BUCKET_NAME`、`COMPONENT_NAME`、`COMPONENT_VERSION`プレースホルダーは公開時に置換され、アーカイブのベース名は`Run`ステップが解凍するものと同じである必要があります。
+
+次の2つのターゲットは、通常のワークステーションではなく、クラシックGreengrassヌクレウスと`greengrass-cli`がインストールされたマシンで実行されます。
+
+<NxCommands commands={['run <project>:pulse-deploy-local', 'run <project>:pulse-logs']} />
+
+`GREENGRASS_ROOT`はデフォルトで`/greengrass/v2`です。`pulse-deploy-local`はローカルデプロイメントを送信し、コンポーネントのライフサイクル状態をポーリングし、3回のチェックで`RUNNING`または`FINISHED`のままでない限り、ゼロ以外で終了します。ローカルデプロイメントは、デバイス上でそのバージョンを固定し、異なるバージョンの後のクラウドデプロイメントと競合します。[ローカルおよびクラウドデプロイメント](#ローカルおよびクラウドデプロイメント)を参照してください。
+
+<OptionFilter when={{ infra: 'component-version' }} description="Composing the vended building blocks into a deployment">
+## デプロイ
+
+デプロイメント構成は、インフラストラクチャプロジェクトに存在します。通常のフローは、1つのリポジトリ、1つの読み取り付与、コンポーネントごとに1つのアプリラッパー、ターゲットごとに1つのデプロイメントです。既存のシンググループまたはシングに1つのデプロイメントを使用し、その`targetArn`を設定します。別のターゲット用に別のデプロイメントを作成します。
+
+<Infrastructure>
+<Fragment slot="cdk">
+ワークスペースにCDKアプリケーションがない場合は作成します。
+
+<RunGenerator generator="ts#infra" requiredParameters={{ name: 'infra' }} />
+
+トークン交換ロールとターゲットシンググループは、アカウントに既に存在します。ロールはコアデバイスが引き受けるものであり、グループはそれらが登録されている場所です。スタックは、CloudFormationパラメーターを通じて両方をインポートします。
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import {
+  GreengrassArtifactBucket,
+  GreengrassDeployment,
+  Pulse,
+} from '@my-scope/common-constructs';
+import { CfnParameter, Stack, type StackProps } from 'aws-cdk-lib';
+import { Role } from 'aws-cdk-lib/aws-iam';
+import type { Construct } from 'constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    const tokenExchangeRoleArn = new CfnParameter(
+      this,
+      'TokenExchangeRoleArn',
+      { type: 'String' },
+    );
+    const thingGroupArn = new CfnParameter(this, 'ThingGroupArn', {
+      type: 'String',
+    });
+
+    // One explicitly owned repository, and the grant the devices need.
+    const artifacts = new GreengrassArtifactBucket(this, 'Artifacts');
+    const tokenExchangeRole = Role.fromRoleArn(
+      this,
+      'TokenExchangeRole',
+      tokenExchangeRoleArn.valueAsString,
+    );
+    artifacts.grantReadTo(tokenExchangeRole);
+
+    // The generated wrapper takes the repository construct itself.
+    const pulse = new Pulse(this, 'Pulse', { bucket: artifacts });
+
+    // addComponent records the resolved version and orders the deployment
+    // resource after the component version resource.
+    const fleet = new GreengrassDeployment(this, 'Fleet', {
+      targetArn: thingGroupArn.valueAsString,
+    });
+    fleet.addComponent(pulse);
+  }
+}
+```
+
+プロジェクト参照を同期し、アカウントとリージョンを一度ブートストラップしてから、デプロイします。`deploy`ターゲットは、`^assemble`の後にインフラストラクチャプロジェクトで`cdk deploy --require-approval=never`を実行し、最初にコンポーネントアーティファクトを再ビルドします。生成された`main.ts`は、すべてのスタックをプロジェクトにちなんで名付けられたステージに配置します。`@my-scope/infra`の場合は`my-scope-infra-sandbox`なので、`cdk deploy`にはそのステージのセレクターが必要です。`packages/infra/src/main.ts`からステージ名を取得し、パラメーター値とともに`--`の後に`/**`を付けて渡します。
+
+<NxCommands env={{ AWS_PROFILE: '<profile>', AWS_REGION: '<region>' }} commands={['sync', 'run @my-scope/infra:bootstrap', "run @my-scope/infra:deploy -- 'my-scope-infra-sandbox/**' --parameters TokenExchangeRoleArn=<role-arn> --parameters ThingGroupArn=<thing-group-arn>"]} />
+
+`deploy`は完全な安定化を待ち、置換更新を受け入れます。`deploy-sandbox`はエクスプレスモードを使用し、`--rollback`を渡さない限り置換更新を拒否します。定期的な改訂には`deploy`を使用するか、`deploy-sandbox`を使用する場合は`--rollback`を渡してください。
+
+`fleet.addComponent(pulse)`は必須であり、装飾的なものではありません。固定の`ComponentVersion`では、デプロイメントのコンポーネントマップはリテラル文字列を保持するため、CloudFormationはデプロイメントとコンポーネントバージョンの間に依存関係を認識せず、それらを並行して作成します。その後、IoTジョブはバージョンが存在する前にデバイスに到達し、`FAILED_NO_STATE_CHANGE`で失敗します。`NEXT_PATCH`では、マップはコンポーネントバージョンリソースの`ComponentVersion`属性を保持し、生の`NEXT_*`文字列がデプロイメントに到達すると、`addComponent`を指定したメッセージでシンスが失敗します。
+
+#### 1つのフリートに2つのコンポーネント
+
+同じまたは別のプロジェクトに2番目のコンポーネントを生成し、両方を1つのデプロイメントに追加します。オーバーライドは、そのコンポーネントのエントリの名前付きトップレベルフィールドを置き換えます。バージョンは常にコンストラクトから取得されます。
+
+```ts
+const pulse = new Pulse(this, 'Pulse', { bucket: artifacts });
+const uploader = new Uploader(this, 'Uploader', { bucket: artifacts });
+
+const cameras = new GreengrassDeployment(this, 'Cameras', {
+  thingGroupName: 'cameras',
+});
+cameras.addComponent(pulse);
+cameras.addComponent(uploader, {
+  configurationUpdate: { merge: { uploadIntervalSeconds: 60 } },
+});
+```
+
+`thingGroupName`は新しい`AWS::IoT::ThingGroup`を作成します。デバイスを登録しません。デバイスは、プロビジョニングプロセスを通じてグループに参加します。既に存在するグループまたはシングには、`targetArn`または`thingName`を使用してください。
+
+#### 2つのフリートに1つのコンポーネント
+
+同じコンストラクトを2つのデプロイメントに登録します。各デプロイメントは独自の設定を保持します。
+
+```ts
+new GreengrassDeployment(this, 'WestFleet', {
+  thingGroupName: 'west-fleet',
+}).addComponent(pulse);
+
+new GreengrassDeployment(this, 'EastFleet', {
+  thingGroupName: 'east-fleet',
+}).addComponent(pulse, {
+  configurationUpdate: { merge: { sampleIntervalSeconds: 60 } },
+});
+```
+
+同じコンストラクトを1つのデプロイメントに2回追加することは、2回目の呼び出しがオーバーライドを提供しない限り、何もしません。オーバーライドはエントリを更新します。同じコンポーネント名で異なるコンストラクトを1つのデプロイメントに追加すると、構築時に失敗します。
+
+#### パブリックコンポーネントと生のエントリ
+
+このワークスペースでビルドしなかったコンポーネントは、`components`マップに入ります。公開されたパブリックコンポーネントは、既に存在するため依存関係を必要としません。同じスタックで作成されたバージョンの生のエントリ（例：手書きの`CfnComponentVersion`）には、`addComponent`から取得する順序エッジが必要です。
+
+```ts
+import { CfnComponentVersion } from 'aws-cdk-lib/aws-greengrassv2';
+
+const fleet = new GreengrassDeployment(this, 'Fleet', {
+  targetArn: thingGroupArn.valueAsString,
+  components: {
+    // Published by AWS; pick a version from
+    // `aws greengrassv2 list-component-versions`.
+    'aws.greengrass.LogManager': {
+      componentVersion: '2.3.8',
+      configurationUpdate: {
+        merge: {
+          logsUploaderConfiguration: {
+            systemLogsConfiguration: { uploadToCloudWatch: 'true' },
+          },
+        },
+      },
+    },
+    // Created in this stack, so the deployment must wait for it.
+    'com.example.Handwritten': { componentVersion: '1.2.0' },
+  },
+});
+fleet.addComponent(pulse);
+
+const handwritten = new CfnComponentVersion(this, 'Handwritten', {
+  inlineRecipe: handwrittenRecipe,
+});
+fleet.deployment.node.addDependency(handwritten);
+```
+
+`configurationUpdate.merge`はここではプレーンオブジェクトです。コンストラクトは、CloudFormationが期待するJSON文字列にシリアル化します。
+
+#### 既存のリポジトリのインポート
+
+1つのスタックがリポジトリを所有します。他のすべてのスタックは名前でインポートし、所有スタックに独自の付与を追加するか、トークン交換ロール自体に同等の`s3:GetObject`ポリシーをアタッチします。
+
+```ts
+const artifacts = new GreengrassArtifactBucket(this, 'Artifacts', {
+  existingBucketName: 'central-greengrass-artifacts',
+});
+const pulse = new Pulse(this, 'Pulse', { bucket: artifacts });
+```
+
+インポートされたバケットは、独自の暗号化、バージョン管理、アクセス設定を保持します。リゾルバーは、`NEXT_*`バージョンのコンテンツIDにバケット名を含めるため、コンポーネントを別のリポジトリに移動すると、変更されていないバイトに対して新しいバージョンが割り当てられます。
+</Fragment>
+<Fragment slot="terraform">
+`greengrass#component`を実行する前に作成したTerraformアプリケーションを使用します。代わりにここで作成する場合は、`awscc`プロバイダー設定を追加できるように、続行する前にGreengrassコンポーネントジェネレーターを再実行してください。
+
+<RunGenerator generator="terraform#project" requiredParameters={{ name: 'infra', type: 'application' }} />
+
+トークン交換ロールを入力として宣言し、提供された`plan`ターゲットが`-var-file=env/dev.tfvars`で読み取る環境ファイルにその値を設定します。ロールはコアデバイスが引き受けるものであり、この設定が実行される前に存在します。
+
+```hcl title="packages/infra/src/variables.tf"
+variable "token_exchange_role_arn" {
+  description = "ARN of the IAM role the core devices assume"
+  type        = string
+}
+
+variable "thing_group_arn" {
+  description = "ARN of the existing thing group to deploy to"
+  type        = string
+}
+```
+
+```hcl title="packages/infra/src/env/dev.tfvars"
+environment            = "dev"
+token_exchange_role_arn = "arn:aws:iam::123456789012:role/GreengrassCoreTokenExchangeRole"
+thing_group_arn         = "arn:aws:iot:us-east-1:123456789012:thinggroup/pumps"
+```
+
+コアデプロイメントモジュールの`components`マップで、コンポーネントモジュールの出力を直接参照します。`component_version`出力は、コンポーネントバージョンリソースへの`depends_on`を保持するため、デプロイメントは、その番号がプラン時に既知であっても、バージョンが存在するまで待機します。このフローには、モジュールレベルの`depends_on`は必要ありません。
+
+```hcl title="packages/infra/src/main.tf"
+module "artifacts" {
+  source                  = "../../common/terraform/src/core/greengrass/artifact-bucket"
+  token_exchange_role_arn = var.token_exchange_role_arn
+}
+
+module "pulse" {
+  source      = "../../common/terraform/src/app/greengrass-component/pulse"
+  bucket_name = module.artifacts.bucket_name
+}
+
+module "fleet" {
+  source     = "../../common/terraform/src/core/greengrass/deployment"
+  target_arn = var.thing_group_arn
+  components = {
+    (module.pulse.component_name) = {
+      component_version = module.pulse.component_version
+    }
+  }
+}
+```
+
+リモート状態を一度ブートストラップしてから、プランと適用を行います。`plan`は`init`、`validate`、`assemble`に依存し、最初にコンポーネントアーティファクトを再ビルドし、`apply`は`plan`が書き込んだプランファイルを適用します。
+
+<NxCommands env={{ AWS_PROFILE: '<profile>', AWS_REGION: '<region>' }} commands={['run @my-scope/infra:bootstrap', 'run @my-scope/infra:plan', 'run @my-scope/infra:apply']} />
+
+`thing_group_name`は新しい`aws_iot_thing_group`を作成します。デバイスを登録しません。既に存在するグループまたはシングには`target_arn`を、1つのシングには`thing_name`を使用してください。リテラルの`target_arn`は、プラン時に現在のパーティション、アカウント、リージョンに対してチェックされます。
+
+Terraformは、コンポーネントレシピで明示的なセマンティックバージョンを使用します。公開されたバージョンは不変であるため、変更されたコンポーネントごとに新しいバージョンを選択してください。Terraformは、プラグインの`NEXT_*`センチネルを解決したり、Greengrass APIを呼び出してバージョンを選択したりしません。その`awscc`プロバイダーは、Terraform用に設定された認証情報とリージョンを使用します。
+
+`plan`ターゲットは`assemble`を実行し、計画されたアーティファクトダイジェストを記録します。`plan`と`apply`の間でレシピとビルド出力を変更しないでください。いずれかが変更された場合は、`plan`を再実行し、公開されたバイトが計画されたバージョンとオブジェクトキーと一致するように新しいプランを適用してください。
+
+#### 段階的ロールアウトと保持されたバージョン
+
+レシピバージョンをバンプすると、Terraformの管理されたコンポーネントバージョンが置き換えられ、Greengrassレジストリから置き換え前のバージョンが削除されます。変更されたアーティファクトコンテンツも、そのS3キーを置き換え、置き換え前のオブジェクトを削除します。変更されていないアーティファクトバイトを持つバージョンまたはレシピの変更は、同じキーを再利用できます。削除されたバージョンをまだ参照しているデプロイメントは、以前のバージョンに残された2番目のシンググループを含めて失敗します。`create_before_destroy`はリソースの作成を順序付けます。古いバージョンを保持したり、すべてのデバイスがロールアウトを完了するのを待ったりしません。
+
+段階的ロールアウトの前に、コンポーネントバージョンとS3オブジェクトリソースを含む公開モジュール全体を保持します。バージョンのみを保持すると、そのアーティファクトは削除の対象になります。`prevent_destroy`は代替ではありません。置き換え前のバージョンを保持する代わりに、バージョンの置換を拒否します。
+
+まず、既存の`module "pulse"`ブロックを削除し、その出力へのすべてのデプロイメント参照を現在公開されている名前とバージョンに置き換えます。共有`artifacts`モジュール、デプロイメントアドレス、その他のコンポーネント、フリート設定を保持します。たとえば、これらの2つの既存のグループは、パブリッシャーがTerraform管理を離れる間、`1.0.0`のままです。
+
+```hcl title="packages/infra/src/main.tf"
+removed {
+  from = module.pulse
+  lifecycle {
+    destroy = false
+  }
+}
+
+module "fleet" {
+  source     = "../../common/terraform/src/core/greengrass/deployment"
+  target_arn = var.thing_group_arn
+  components = {
+    "com.my-scope.Pulse" = { component_version = "1.0.0" }
+  }
+}
+
+module "stable_fleet" {
+  source     = "../../common/terraform/src/core/greengrass/deployment"
+  target_arn = "arn:aws:iot:us-east-1:123456789012:thinggroup/stable"
+  components = {
+    "com.my-scope.Pulse" = { component_version = "1.0.0" }
+  }
+}
+```
+
+実際のコンポーネント名、バージョン、既存のグループARNを使用してください。この保持ステップを個別にプランして適用します。プランは、パブリッシャーのバージョンとオブジェクトリソースを破壊したり、フリートを改訂したりせずに忘れる必要があります。
+
+<NxCommands env={{ AWS_PROFILE: '<profile>', AWS_REGION: '<region>' }} commands={['run @my-scope/infra:plan', 'run @my-scope/infra:apply']} />
+
+その適用後にのみ、ユーザー所有のレシピの`ComponentVersion`を`1.0.1`などの新しい明示的なバージョンに変更します。新しいモジュールアドレスの下にパブリッシャーを追加し、パイロットフリートを進めます。上記の安定したフリートのリテラル`1.0.0`エントリを保持します。
+
+```hcl title="packages/infra/src/main.tf"
+module "pulse_v2" {
+  source      = "../../common/terraform/src/app/greengrass-component/pulse"
+  bucket_name = module.artifacts.bucket_name
+}
+
+module "fleet" {
+  source     = "../../common/terraform/src/core/greengrass/deployment"
+  target_arn = var.thing_group_arn
+  components = {
+    (module.pulse_v2.component_name) = {
+      component_version = module.pulse_v2.component_version
+    }
+  }
+}
+```
+
+再度プランしてアーティファクトを再ビルドし、新しいバージョンを公開してから適用します。パイロットデバイスを確認した後、`stable_fleet`を同じパブリッシャー出力に更新し、そのプロモーションをプラン/適用します。生成されたラッパーは現在のビルド出力を読み取ります。別のインスタンスを追加しても、古いビルドは保持されません。
+
+グループまたはロールバックがそのバージョンを必要とする可能性がある間に`pulse_v2`を置き換えたり削除したりする前に、個別の保持ステップを繰り返します。変更されていないバイトは、保持されたバージョン間でS3キーを共有できるため、後のパブリッシャーは、古いバージョンがまだ参照しているオブジェクトを管理できます。保持されたバージョンとそのアーティファクトキーのインベントリを保持します。保持されたバージョン、デプロイメント、またはロールバックが必要としない場合にのみ、キーを削除してください。リソースを忘れると、それらは利用可能なままですが、クリーンアップはあなたに転送されます。
+
+#### 1つのフリートに2つのコンポーネント
+
+```hcl
+module "uploader" {
+  source      = "../../common/terraform/src/app/greengrass-component/uploader"
+  bucket_name = module.artifacts.bucket_name
+}
+
+module "cameras" {
+  source           = "../../common/terraform/src/core/greengrass/deployment"
+  thing_group_name = "cameras"
+  components = {
+    (module.pulse.component_name) = {
+      component_version = module.pulse.component_version
+    }
+    (module.uploader.component_name) = {
+      component_version = module.uploader.component_version
+      configuration_update = {
+        merge = jsonencode({ uploadIntervalSeconds = 60 })
+      }
+    }
+  }
+}
+```
+
+`configuration_update.merge`は既にJSON文字列である必要があるため、`jsonencode`でラップします。これは、オブジェクトを受け取るCDKコンストラクトとは異なります。
+
+#### 2つのフリートに1つのコンポーネント
+
+2つのデプロイメントモジュールが同じコンポーネント出力を参照します。
+
+```hcl
+module "west_fleet" {
+  source           = "../../common/terraform/src/core/greengrass/deployment"
+  thing_group_name = "west-fleet"
+  components = {
+    (module.pulse.component_name) = {
+      component_version = module.pulse.component_version
+    }
+  }
+}
+
+module "east_fleet" {
+  source           = "../../common/terraform/src/core/greengrass/deployment"
+  thing_group_name = "east-fleet"
+  components = {
+    (module.pulse.component_name) = {
+      component_version = module.pulse.component_version
+      configuration_update = {
+        merge = jsonencode({ sampleIntervalSeconds = 60 })
+      }
+    }
+  }
+}
+```
+
+#### パブリックコンポーネントとリテラルバージョン
+
+公開されたパブリックコンポーネントはリテラルエントリであり、依存関係を必要としません。同じ適用で作成されたリソースのリテラルバージョン（例：手書きの`awscc_greengrassv2_component_version`）は、モジュールレベルの`depends_on`の1つのケースです。`depends_on`を使用すると、Terraformは依存関係が存在するまでデプロイメントモジュールのIDデータソースを読み取ることができないため、そのターゲットチェックはプランから適用に延期されます。デプロイメントが作成される前に失敗します。
+
+```hcl
+module "fleet" {
+  source     = "../../common/terraform/src/core/greengrass/deployment"
+  target_arn = var.thing_group_arn
+  components = {
+    "aws.greengrass.LogManager" = {
+      component_version = "2.3.8"
+      configuration_update = {
+        merge = jsonencode({
+          logsUploaderConfiguration = {
+            systemLogsConfiguration = { uploadToCloudWatch = "true" }
+          }
+        })
+      }
+    }
+    "com.example.Handwritten" = {
+      component_version = "1.2.0"
+    }
+    (module.pulse.component_name) = {
+      component_version = module.pulse.component_version
+    }
+  }
+
+  # Only for the literal version created by awscc_greengrassv2_component_version.handwritten.
+  depends_on = [awscc_greengrassv2_component_version.handwritten]
+}
+```
+
+#### 既存のリポジトリのインポート
+
+`artifact-bucket`モジュールに`existing_bucket_name`を設定します。その後、モジュールはバケットの設定もポリシーも管理しないため、バケットを所有する設定でアーティファクトプレフィックスに対してトークン交換ロールに`s3:GetObject`を付与します。
+
+```hcl
+module "artifacts" {
+  source               = "../../common/terraform/src/core/greengrass/artifact-bucket"
+  existing_bucket_name = "central-greengrass-artifacts"
+}
+```
+</Fragment>
+</Infrastructure>
+
+### デバイスでの確認
+
+完了したスタック更新または適用は、デプロイメントリソースが存在することを証明します。デプロイメントとそのIoTジョブの両方が`SUCCEEDED`を報告する一方で、デバイス上のコンポーネントが`BROKEN`である可能性があります。すべてのデプロイメント後にデバイスとコンポーネントの状態を確認してください。
+
+```bash
+aws --profile <profile> --region <region> greengrassv2 get-core-device \
+  --core-device-thing-name <thing-name> --query status
+aws --profile <profile> --region <region> greengrassv2 list-installed-components \
+  --core-device-thing-name <thing-name>
+```
+
+デバイスが壊れた状態を報告する場合は、`<component>-logs`を使用してプロセスログを検査してください。
+</OptionFilter>
+
+## レシピとIPC
+
+<Tabs syncKey="greengrass-language">
+<TabItem label="Python" _filter={{ language: 'python' }}>
+デフォルトの`ipc: false`では、`main.py`は30秒ごとに1行をログに記録し、レシピにはIPCアクセス制御がありません。`ipc: true`では、`GreengrassCoreIPCClientV2`を通じて30秒ごとにコンポーネント自身のローカルトピックにハートビートを公開します。
+
+```python title="greengrass/pulse/main.py"
+client.publish_to_topic(
+    topic=TOPIC,
+    publish_message=PublishMessage(json_message=JsonMessage(message={"sequence": sequence})),
+)
+```
+
+レシピは、`aws.greengrass.ipc.pubsub`の下で`<ComponentName>/heartbeat`に対して`aws.greengrass#PublishToTopic`を付与します。ローカルpub/subは、AWS IoT Coreではなく、同じコアデバイス上の他のコンポーネントに到達します。AWS IoT Coreに公開するには、`publish_to_iot_core`を呼び出し、レシピの`aws.greengrass.ipc.mqttproxy`の下で`aws.greengrass#PublishToIoTCore`を付与し、デバイスのIoTポリシーで正確なトピックに対して`iot:Publish`を付与します。
+</TabItem>
+<TabItem label="TypeScript" _filter={{ language: 'typescript' }}>
+デフォルトの`ipc: false`では、`main.ts`は30秒ごとに1行をログに記録し、レシピにはIPCアクセス制御がありません。`ipc: true`では、AWS IoT Device SDKのGreengrass IPCクライアントを通じてコンポーネント自身のローカルトピックにハートビートを公開し、`pulse-vendor`は選択されたアーキテクチャ用の`aws-crt`ネイティブアドオンをステージングします。AWS IoT Coreへの公開には、同じクライアントの`publishToIoTCore`操作、レシピの`aws.greengrass.ipc.mqttproxy`認証、およびデバイスのIoTポリシーの`iot:Publish`を使用します。
+</TabItem>
+</Tabs>
+
+レシピのアクセス制御は、デバイス上のヌクレウスによって強制されます。SDK単独に依存しても何も承認されないため、コンポーネントが成長するにつれて`operations`と`resources`を拡大してください。
+
+生成されたレシピは、クラシック`aws.greengrass.Nucleus`をターゲットとしています。[Nucleus Lite](https://docs.aws.amazon.com/greengrass/v2/developerguide/greengrass-nucleus-lite-component.html)は、IPC操作のサブセットを実装し、プラグインコンポーネントを実行せず、v2.15でのみコンテナサポートを獲得しました。フリートが実行するヌクレウスに対してレシピを確認してください。ジェネレーターはヌクレウスの機能を検出しません。
+
+Ubuntu 25.10以降では、`sudo-rs`がIPC環境が失われるため、Greengrass Nucleus 2.18.3でIPCコンポーネントの起動を妨げる可能性があります。ジェネレーターは、ホストの`sudo`セキュリティ設定を変更しません。IPCが必要な場合は、クラシック`sudo`動作を提供するデバイスセットアップを使用してください。
+
+## 自動バージョニング
+
+CDKデプロイメントの場合、`recipe.yaml`の`ComponentVersion`を`NEXT_PATCH`、`NEXT_MINOR`、または`NEXT_MAJOR`に設定して、プラグインのリゾルバーにアカウントとリージョンで既に公開されている最高の厳密なセマンティックバージョンからバージョンを割り当てるように依頼します。
+
+| センチネル | 最高公開`1.4.2`が次になる | まだ何も公開されていない |
+| --- | --- | --- |
+| `NEXT_PATCH` | `1.4.3` | `1.0.0` |
+| `NEXT_MINOR` | `1.5.0` | `1.0.0` |
+| `NEXT_MAJOR` | `2.0.0` | `1.0.0` |
+
+最初のバージョンは`1.0.0`です。リゾルバーは、コンテンツタグが一致し、バージョンがデプロイ可能な場合、最高公開バージョンを再利用します。それ以外の場合は、センチネルによって選択された次のバージョンを公開します。タグは、バージョン行のないレシピ、アーティファクトバイト、およびアーティファクトバケット名をカバーします。したがって、変更されていないコンテンツはバージョンを再利用し、コンテンツまたはバケットを変更すると新しいバージョンが公開されます。ジェネレーターは`recipe.yaml`を書き換えることはありません。
+
+`NEXT_*`はNxプラグインの規約であり、Greengrassバージョンではありません。CDKはデプロイメント中にセンチネルを解決し、`<project>:pulse-deploy-local`はデバイスで利用可能なバージョンに対して解決します。GDKは`gdk-config.json`の設定として`NEXT_PATCH`を使用し、レシピフィールドとしては使用せず、`NEXT_MINOR`または`NEXT_MAJOR`をサポートしていません。プラグインはGDKを呼び出しません。
+
+Terraformには明示的なセマンティックバージョンが必要です。Greengrassバージョンは不変であるため、変更されたアーティファクトごとに新しい`ComponentVersion`が必要です。Terraformは`NEXT_*`を解決しません。
+
+CDKリゾルバーは、生成されたLambda実行ロールの下でCloudFormationデプロイメント中に実行され、スタックのコンポーネント名にスコープされます。同じコンポーネントに対して同時公開を実行しないでください。デプロイメントが同じ次のバージョンを選択し、1つの公開が失敗する可能性があります。
+
+## アーティファクトストレージと保持
+
+アカウントとリージョンごとに1つのアーティファクトリポジトリを使用し、1つのスタックまたはルートモジュールが所有します。CDKの`existingBucketName`またはTerraformの`existing_bucket_name`を使用して、他の場所でインポートします。生成されたバケットは、バージョン管理され、SSE-S3で暗号化され、プライベートであり、TLSを必要とします。GreengrassアーティファクトはCDKアセットではありません。`cdk gc`は、コンポーネントバージョンがまだ必要とするアセットを削除できます。
+
+両方のIaCパスは同じS3オブジェクトキーレイアウトを使用します。`<ComponentName>/<first 32 hex characters of sha256>/<file>`。ダイジェストは、ソートされたアーティファクト名とその完全なSHA-256ハッシュをハッシュし、1つまたは複数のアーティファクトに同じ式を使用します。キープレフィックスのみが短縮されます。アーティファクトダイジェストと自動バージョンIDは完全なハッシュを保持します。CDKのバケットデプロイメントタグは、プレフィックスを102文字に制限し、コンポーネント名に68文字を残します。ジェネレーターは、CDKインフラストラクチャが選択されたときにその制限をチェックし、シンセシスはレシピへの編集をチェックします。Terraformのオブジェクトアップロードには、このCDK制限はありません。
+
+デプロイメントまたはロールバックがコンポーネントバージョンを必要とする可能性がある間、公開されたアーティファクトを利用可能に保ちます。CDKは、デフォルトで置き換えられたコンポーネントバージョンとそのアップロードを保持します。Terraformは、置き換えられたバージョンと置き換え前のオブジェクトキーを削除します。複数のグループで使用されるバージョンをバンプする前に、[段階的ロールアウトと保持されたバージョン](#段階的ロールアウトと保持されたバージョン)を参照してください。レジストリバージョンを削除しても、デバイスで既に実行されているコンポーネントはアンインストールされません。Terraformのリポジトリは`prevent_destroy`を設定します。そのアーティファクトが不要になった後の意図的な解体のためにのみ、そのリテラルライフサイクル設定を削除してください。
+
+デフォルトのトークン交換ロール付与は、ワークスペースのコンポーネント名前空間で`s3:GetObject`を許可します。より狭い付与の場合は、CDKで`keyPrefix`を、Terraformで`token_exchange_key_prefix`を設定します。インポートされたバケットは独自のポリシーを保持するため、バケットまたはロールが所有されている場所で付与を管理します。
+
+## デプロイメントリビジョン
+
+コンポーネントバージョンまたはデプロイメント設定を変更すると、デプロイメントリソースが置き換えられます。CloudFormationは、1つのスタック操作で最大10個のデプロイメントリソースを追加または削除できます。大規模なロールアウトをバッチに分割します。置換には通常の`deploy`ターゲットを使用してください。`deploy-sandbox`はCloudFormationエクスプレスモードを使用し、置換更新には`--rollback`が必要です。
+
+デプロイメントリソースを削除すると、クラウド管理状態が削除されますが、デバイスからコンポーネントはアンインストールされません。まず、コンポーネントを省略したリビジョンをデプロイし、`list-installed-components`から消えるのを待ってから、そのIaCリソースを削除してください。
+
+## ローカルおよびクラウドデプロイメント
+
+`<component>-deploy-local`からのローカルデプロイメントは、そのデバイス上でコンポーネントバージョンを固定します。異なるバージョンを要求するクラウドデプロイメントは、ピンを満たすことができません。クラウドからそのデバイスを更新する前に、ローカルデプロイメントを削除してください。
+
+```bash
+sudo /greengrass/v2/bin/greengrass-cli deployment create --remove com.example.Pulse
+```
+
+開発デバイスにはローカルデプロイメントを、フリートターゲットにはクラウドデプロイメントを使用してください。
+
+## トラブルシューティングとサービス制限
+
+クラウドデプロイメント後、Greengrassデプロイメントステータスとコンポーネントのデバイス状態の両方を確認してください。
+
+```bash
+aws --profile <profile> --region <region> greengrassv2 get-core-device \
+  --core-device-thing-name <thing-name> --query status
+aws --profile <profile> --region <region> greengrassv2 list-installed-components \
+  --core-device-thing-name <thing-name>
+```
+
+ジョブが`SUCCEEDED`を報告する一方で、コンポーネントが`BROKEN`である可能性があります。`<component>-logs`を使用してプロセスログを検査してください。Ubuntu 25.10以降のIPCコンポーネントも、Nucleus 2.18.3で`sudo-rs`の下で失敗する可能性があります。ジェネレーターは、ホストのセキュリティ設定をそのままにします。
+
+Greengrassは、リージョンごとに1つのコンポーネントを5,000バージョンに制限し、`CreateComponentVersion`をリージョンごとに1秒あたり1リクエストに制限します。レシピは16 KBに制限され、デプロイメントドキュメントはシンググループの場合は31 KB、単一のシングの場合は7 KBに制限されます。ハートビートとして新しいバージョンを使用することを避け、大規模なデプロイメントを小さなバッチに分割してください。

@@ -2,14 +2,27 @@
  * Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
  * SPDX-License-Identifier: Apache-2.0
  */
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import type { Tree } from '@nx/devkit';
+import yaml from 'js-yaml';
 import { declareDependencies } from '../../utils/declared-dependencies.js';
 import { expectTypeScriptToCompile } from '../../utils/test/ts.spec.js';
 import { createTreeUsingTsSolutionSetup } from '../../utils/test.js';
+import { TS_VERSIONS } from '../../utils/versions.js';
 import tsProjectGenerator from './generator.js';
 import { configureVitest, VITEST_DEPENDENCIES } from './vitest.js';
 
 const declaration = declareDependencies()({ ts: [...VITEST_DEPENDENCIES] });
+
+const require = createRequire(import.meta.url);
+/** The vitest ranges `@nx/vitest`'s generators write into a new workspace. */
+const nxVitest = require(
+  join(
+    dirname(require.resolve('@nx/vitest/package.json')),
+    'dist/src/utils/versions.js',
+  ),
+) as { vitestVersion: string; vitestCoverageV8Version: string };
 
 // A local defineConfig stub keeps the generated config self-contained so it can
 // be type-checked without loading the vite/vitest dependencies. The grit
@@ -208,5 +221,34 @@ describe('vitest utils', () => {
     const content = tree.read('test/vitest.config.mts', 'utf8')!;
     expect(content.match(/passWithNoTests/g)).toHaveLength(1);
     expectTypeScriptToCompile(tree, ['test/vitest.config.mts']);
+  });
+
+  it('should replace the vitest range @nx/vitest writes with the vended pin', async () => {
+    // The catalog only takes a vended pin that upgrades the existing entry, so
+    // a pin below the range @nx/vitest init writes is dropped and the workspace
+    // ends up with two vitest majors.
+    const freshTree = createTreeUsingTsSolutionSetup();
+    freshTree.write(
+      'pnpm-workspace.yaml',
+      `packages:
+  - packages/*
+catalog:
+  vitest: '${nxVitest.vitestVersion}'
+  '@vitest/coverage-v8': '${nxVitest.vitestCoverageV8Version}'
+`,
+    );
+
+    await tsProjectGenerator(freshTree, {
+      name: 'other',
+      preferInstallDependencies: false,
+    });
+
+    const { catalog } = yaml.load(
+      freshTree.read('pnpm-workspace.yaml', 'utf-8') ?? '',
+    ) as { catalog: Record<string, string> };
+    expect(catalog.vitest).toBe(TS_VERSIONS.vitest);
+    expect(catalog['@vitest/coverage-v8']).toBe(
+      TS_VERSIONS['@vitest/coverage-v8'],
+    );
   });
 });

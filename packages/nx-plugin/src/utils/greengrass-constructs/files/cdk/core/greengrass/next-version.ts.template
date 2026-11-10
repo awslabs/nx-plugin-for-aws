@@ -1,0 +1,119 @@
+import { Construct } from 'constructs';
+import * as url from 'node:url';
+import { CustomResource, Duration, Stack } from 'aws-cdk-lib';
+import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
+import { Code, Function, Runtime } from 'aws-cdk-lib/aws-lambda';
+import { Provider } from 'aws-cdk-lib/custom-resources';
+
+const GreengrassNextVersionProviderKey = '__GreengrassNextVersionProvider__';
+
+export interface GreengrassNextVersionProps {
+  /** Name of the Greengrass component whose next version is resolved. */
+  readonly componentName: string;
+  /** Part of the highest published strict M.m.p version to increment. */
+  readonly strategy: 'patch' | 'minor' | 'major';
+  /** Opaque digest of the submitted recipe and built artifact content. */
+  readonly contentSha256: string;
+  /** Artifact bucket name, which can be a deploy-time CloudFormation token. */
+  readonly bucketName: string;
+}
+
+/**
+ * Share one resolver Lambda and provider across a stack's components.
+ */
+class GreengrassNextVersionProvider extends Construct {
+  static ensure(scope: Construct): GreengrassNextVersionProvider {
+    const stack = Stack.of(scope);
+    return (
+      (stack.node.tryFindChild(
+        GreengrassNextVersionProviderKey,
+      ) as GreengrassNextVersionProvider) ??
+      new GreengrassNextVersionProvider(
+        stack,
+        GreengrassNextVersionProviderKey,
+      )
+    );
+  }
+
+  public readonly serviceToken: string;
+  private readonly onEvent: Function;
+  private readonly componentNames = new Set<string>();
+
+  public allowComponent(componentName: string): void {
+    if (this.componentNames.has(componentName)) {
+      return;
+    }
+    this.componentNames.add(componentName);
+    const stack = Stack.of(this);
+    const componentArn = `arn:${stack.partition}:greengrass:${stack.region}:${stack.account}:components:${componentName}`;
+    this.onEvent.addToRolePolicy(
+      new PolicyStatement({
+        actions: ['greengrass:ListComponentVersions'],
+        resources: [componentArn],
+      }),
+    );
+    this.onEvent.addToRolePolicy(
+      new PolicyStatement({
+        actions: ['greengrass:DescribeComponent'],
+        resources: [`${componentArn}:versions:*`],
+      }),
+    );
+  }
+
+  private constructor(scope: Construct, id: string) {
+    super(scope, id);
+
+    this.onEvent = new Function(this, 'OnEvent', {
+      runtime: <%- nodeRuntime %>,
+      handler: 'index.handler',
+      timeout: Duration.minutes(2),
+      code: Code.fromAsset(
+        url.fileURLToPath(
+          new URL('./next-version', <% if (esm) { %>import.meta.url<% } else { %>require('url').pathToFileURL(__filename).href<% } %>),
+        ),
+      ),
+    });
+    const provider = new Provider(this, 'Provider', {
+      onEventHandler: this.onEvent,
+    });
+    this.serviceToken = provider.serviceToken;
+  }
+}
+
+/**
+ * Resolve the version and content identity when its properties change.
+ * Deletion leaves the resolved component version in the registry.
+ */
+export class GreengrassNextVersion extends Construct {
+  /** The deploy-time version resolved from the Greengrass registry. */
+  public readonly version: string;
+
+  /** Bucket-scoped content identity returned by the shared resolver. */
+  public readonly contentKey: string;
+
+  constructor(
+    scope: Construct,
+    id: string,
+    props: GreengrassNextVersionProps,
+  ) {
+    super(scope, id);
+
+    if (!/^[a-zA-Z0-9-_.]+$/.test(props.componentName)) {
+      throw new Error('componentName must contain only letters, digits, hyphens, underscores and dots.');
+    }
+    const provider = GreengrassNextVersionProvider.ensure(this);
+    provider.allowComponent(props.componentName);
+    const resource = new CustomResource(this, 'Resource', {
+      serviceToken: provider.serviceToken,
+      resourceType: 'Custom::GreengrassNextVersion',
+      properties: {
+        ComponentName: props.componentName,
+        Strategy: props.strategy,
+        ContentSha256: props.contentSha256,
+        BucketName: props.bucketName,
+      },
+    });
+    this.version = resource.getAttString('Version');
+    this.contentKey = resource.getAttString('ContentKey');
+  }
+}

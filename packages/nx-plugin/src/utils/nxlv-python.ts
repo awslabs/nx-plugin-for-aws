@@ -71,6 +71,7 @@ export type UVPyprojectToml = {
         };
       };
       index?: UVPyprojectTomlIndex[];
+      'override-dependencies'?: string[];
       workspace?: {
         members: string[];
       };

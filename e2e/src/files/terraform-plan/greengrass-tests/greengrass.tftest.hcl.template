@@ -1,0 +1,309 @@
+# Exercises the vended core/greengrass modules directly (via `module {
+# source = ... }` in each run block), with every provider mocked - so no AWS
+# credentials, and not one AWS API call. The preceding `terraform init` still
+# fetches the aws, awscc and random providers, from the shared plugin cache
+# when it already holds them and from the registry otherwise. Run with
+# `terraform test` from `packages/common/terraform/src` (the `test` target
+# does this). These fixtures are copied only by the e2e plan test.
+#
+# `command = plan` wherever the asserted attribute is computed from local
+# variables and file reads, so it is already fully known at plan time. The
+# created bucket's own name is the exception: it carries `random_string`'s
+# result, which no plan knows, so those runs use `command = apply` against the
+# mocks - still not one AWS call.
+mock_provider "aws" {}
+mock_provider "awscc" {}
+mock_provider "random" {}
+
+# --- core/greengrass/component-version ------------------------------------
+# Fixture recipe/artifact under tests/fixtures/component-version/ - a real
+# component's recipe.yaml and built artifact are not available here, so this
+# is the smallest pair that exercises the same substitution and hashing code.
+
+run "component_version_publishes_json_recipe" {
+  command = plan
+
+  module {
+    source = "./core/greengrass/component-version"
+  }
+
+  variables {
+    recipes_dir   = "tests/fixtures/component-version/recipes"
+    artifacts_dir = "tests/fixtures/component-version/artifacts"
+    bucket_name   = "test-bucket"
+  }
+
+  assert {
+    condition     = substr(awscc_greengrassv2_component_version.this.inline_recipe, 0, 1) == "{"
+    error_message = "inline_recipe must be JSON (start with '{') - yamlencode's leading quote fails CreateComponentVersion"
+  }
+}
+
+run "artifact_key_carries_sha256" {
+  command = plan
+
+  module {
+    source = "./core/greengrass/component-version"
+  }
+
+  variables {
+    recipes_dir   = "tests/fixtures/component-version/recipes"
+    artifacts_dir = "tests/fixtures/component-version/artifacts"
+    bucket_name   = "test-bucket"
+  }
+
+  assert {
+    condition     = aws_s3_object.artifact["fixture-artifact.txt"].key == "com.test.FixtureComponent/${substr(sha256("fixture-artifact.txt:${filesha256("tests/fixtures/component-version/artifacts/com.test.FixtureComponent/1.0.0/fixture-artifact.txt")}"), 0, 32)}/fixture-artifact.txt"
+    error_message = "the artifact's S3 key must carry the first 32 hex characters of the artifact-set digest"
+  }
+
+  assert {
+    condition     = aws_s3_object.artifact["fixture-artifact.txt"].key == trimspace(file("tests/fixtures/component-version/expected-key.txt"))
+    error_message = "CDK and Terraform must publish the fixture at the same S3 key"
+  }
+
+  assert {
+    condition     = jsondecode(awscc_greengrassv2_component_version.this.inline_recipe).Manifests[0].Artifacts[0].Uri == "s3://test-bucket/${aws_s3_object.artifact["fixture-artifact.txt"].key}"
+    error_message = "the recipe must reference the uploaded artifact key"
+  }
+
+  assert {
+    condition     = jsondecode(awscc_greengrassv2_component_version.this.inline_recipe).Manifests[0].Artifacts[0].Digest == filebase64sha256("tests/fixtures/component-version/artifacts/com.test.FixtureComponent/1.0.0/fixture-artifact.txt")
+    error_message = "the recipe must retain the full artifact digest"
+  }
+}
+
+run "component_version_rejects_next_version" {
+  command = plan
+
+  module {
+    source = "./core/greengrass/component-version"
+  }
+
+  variables {
+    recipes_dir   = "tests/fixtures/component-version-next/recipes"
+    artifacts_dir = "tests/fixtures/component-version-next/artifacts"
+    bucket_name   = "test-bucket"
+  }
+
+  expect_failures = [terraform_data.guard]
+}
+
+# --- core/greengrass/deployment -------------------------------------------
+
+run "deployment_target_rejects_none" {
+  command = plan
+
+  module {
+    source = "./core/greengrass/deployment"
+  }
+
+  expect_failures = [terraform_data.guard]
+}
+
+run "deployment_target_rejects_more_than_one" {
+  command = plan
+
+  module {
+    source = "./core/greengrass/deployment"
+  }
+
+  variables {
+    thing_group_name = "my-group"
+    thing_name       = "my-thing"
+  }
+
+  expect_failures = [terraform_data.guard]
+}
+
+run "deployment_target_accepts_exactly_one" {
+  command = plan
+
+  module {
+    source = "./core/greengrass/deployment"
+  }
+
+  variables {
+    thing_group_name = "my-group"
+  }
+}
+
+# An entry carrying only configuration_update has a null component_version;
+# the sentinel guard must not choke on it.
+run "deployment_accepts_component_without_version" {
+  command = plan
+
+  module {
+    source = "./core/greengrass/deployment"
+  }
+
+  variables {
+    thing_group_name = "my-group"
+    components = {
+      "com.test.ConfigOnly" = {
+        configuration_update = {
+          merge = "{\"key\":\"value\"}"
+        }
+      }
+    }
+  }
+}
+
+run "deployment_rejects_next_version_sentinel" {
+  command = plan
+
+  module {
+    source = "./core/greengrass/deployment"
+  }
+
+  variables {
+    thing_group_name = "my-group"
+    components = {
+      "com.test.X" = {
+        component_version = "NEXT_PATCH"
+      }
+    }
+  }
+
+  expect_failures = [terraform_data.guard]
+}
+
+# --- core/greengrass/artifact-bucket ---------------------------------------
+# existing_bucket_name (a data source), not bucket_name (a created resource):
+# a data source's attributes are fully known at plan time even when mocked,
+# where a newly created resource's computed attributes (e.g. an S3 bucket's
+# own arn) are not known until apply.
+
+run "grant_defaults_to_workspace_namespace" {
+  command = plan
+
+  module {
+    source = "./core/greengrass/artifact-bucket"
+  }
+
+  variables {
+    existing_bucket_name = "test-bucket"
+    # checkov flags any assignment whose name contains "token" as a possible
+    # secret - this is a fixture ARN, not a credential.
+    #checkov:skip=CKV_SECRET_6:An IAM role ARN is not a secret
+    token_exchange_role_arn = "arn:aws:iam::123456789012:role/TestRole"
+  }
+
+  override_data {
+    target = data.aws_s3_bucket.existing[0]
+    values = {
+      arn = "arn:aws:s3:::test-bucket"
+    }
+  }
+
+  assert {
+    condition     = jsondecode(aws_iam_role_policy.token_exchange_read[0].policy).Statement[0].Resource == "arn:aws:s3:::test-bucket/<%- componentKeyPrefix %>"
+    error_message = "the default grant must be scoped to the workspace component namespace"
+  }
+}
+
+run "grant_narrows_to_key_prefix" {
+  command = plan
+
+  module {
+    source = "./core/greengrass/artifact-bucket"
+  }
+
+  variables {
+    existing_bucket_name = "test-bucket"
+    #checkov:skip=CKV_SECRET_6:An IAM role ARN is not a secret
+    token_exchange_role_arn   = "arn:aws:iam::123456789012:role/TestRole"
+    token_exchange_key_prefix = "com.example.MyComponent/*"
+  }
+
+  override_data {
+    target = data.aws_s3_bucket.existing[0]
+    values = {
+      arn = "arn:aws:s3:::test-bucket"
+    }
+  }
+
+  assert {
+    condition     = jsondecode(aws_iam_role_policy.token_exchange_read[0].policy).Statement[0].Resource == "arn:aws:s3:::test-bucket/com.example.MyComponent/*"
+    error_message = "token_exchange_key_prefix must narrow the grant's resource scope"
+  }
+}
+
+# The created-bucket arm. A bucket's name cannot change in place, and
+# `prevent_destroy` refuses the replacement a changed name plans - so the name
+# this module derives has to be right the first time, and stable afterwards.
+# The prefix here is longer than the 20 characters the name keeps, so the same
+# run covers the truncation.
+run "created_bucket_name_carries_prefix_account_and_region" {
+  command = apply
+
+  module {
+    source = "./core/greengrass/artifact-bucket"
+  }
+
+  variables {
+    bucket_name_prefix = "abcdefghij-klmnopqr-artifacts"
+  }
+
+  override_data {
+    target = data.aws_caller_identity.current[0]
+    values = {
+      account_id = "123456789012"
+    }
+  }
+
+  override_data {
+    target = data.aws_region.current[0]
+    values = {
+      region = "us-east-1"
+    }
+  }
+
+  # Truncated to 20 characters, with the hyphen that truncation landed on
+  # trimmed rather than doubling the separator.
+  assert {
+    condition     = startswith(aws_s3_bucket.bucket[0].bucket, "abcdefghij-klmnopqr-123456789012-us-east-1-")
+    error_message = "the created bucket's name must carry its prefix, account and region: got ${aws_s3_bucket.bucket[0].bucket}"
+  }
+
+  assert {
+    condition     = length(aws_s3_bucket.bucket[0].bucket) <= 63
+    error_message = "an S3 bucket name is capped at 63 characters: got ${aws_s3_bucket.bucket[0].bucket}"
+  }
+}
+
+run "explicit_bucket_name_wins_over_the_derived_one" {
+  command = apply
+
+  module {
+    source = "./core/greengrass/artifact-bucket"
+  }
+
+  variables {
+    bucket_name        = "my-fixed-bucket"
+    bucket_name_prefix = "ignored"
+  }
+
+  # Naming the existing bucket explicitly is the documented way out of the
+  # replacement a changed derived name would plan, so it must take precedence.
+  assert {
+    condition     = aws_s3_bucket.bucket[0].bucket == "my-fixed-bucket"
+    error_message = "an explicit bucket_name must win over bucket_name_prefix"
+  }
+}
+
+# `plan`, not `apply`: a variable validation fails during planning, which a
+# failed `apply` run reports as a test failure even when expected.
+run "rejects_a_bucket_name_prefix_no_bucket_could_carry" {
+  command = plan
+
+  module {
+    source = "./core/greengrass/artifact-bucket"
+  }
+
+  variables {
+    bucket_name_prefix = "Bad_Prefix"
+  }
+
+  expect_failures = [var.bucket_name_prefix]
+}

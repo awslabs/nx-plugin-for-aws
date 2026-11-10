@@ -1,0 +1,236 @@
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { join, relative } from 'node:path';
+import yaml from 'js-yaml';
+import { loadRecipe, validateManifestArchitectures, validateRecipe } from './recipe-utils<% if (esm) { %>.js<% } %>';
+import { writeZip, type ZipEntry } from './zip-writer<% if (esm) { %>.js<% } %>';
+
+/*
+ * Usage: build-artifact.ts <project-root> <component-dir> <dist> [bundle-dir] [--platforms=<arch>,<arch>]
+ *
+ * <project-root>  path to the host project (e.g. a Python project root)
+ * <component-dir> the component's directory name under <project-root>/greengrass/,
+ *                  which also becomes the artifact zip's base name
+ * <dist>           the component's dist root: reads <dist>/vendor (produced by
+ *                  the "-vendor" target this target depends on) and writes
+ *                  <dist>/greengrass-build/{recipes,artifacts}
+ * <bundle-dir>     optional: a directory of already-bundled deployable code
+ *                  (e.g. a TypeScript rolldown bundle output). When given and
+ *                  it exists, its contents are zipped at the archive root
+ *                  INSTEAD of <project-root>/greengrass/<component-dir>/ and
+ *                  <dist>/vendor - a compiled bundle is the deployable
+ *                  content, so the TypeScript source that produced it must
+ *                  not also ship. <project-root>/greengrass/<component-dir>/package.json,
+ *                  when present, is included too (the minimal manifest an
+ *                  Install lifecycle step's `npm install` needs for a native
+ *                  dependency the bundle marked external).
+ * --platforms      optional: a comma-separated list of manifest architecture
+ *                  tokens (e.g. "amd64,aarch64"). When given, <dist>/vendor/<arch>
+ *                  is read per architecture and one <component-dir>-<arch>.zip
+ *                  is written per architecture, and every recipe manifest
+ *                  declaring one of these architectures must pair with that
+ *                  architecture's own zip. Cannot be combined with
+ *                  <bundle-dir>. Without it, behaviour is exactly as before:
+ *                  flat <dist>/vendor, one <component-dir>.zip.
+ *
+ * Without <bundle-dir>, everything under <project-root>/greengrass/<component-dir>/
+ * is packaged except recipe.yaml and gdk-config.json, which are framework
+ * metadata, not deployed code, and __pycache__ and .lock, which are tool
+ * staging output.
+ */
+
+const log = (msg: string): void => console.error(`[build-artifact] ${msg}`);
+
+function usage(): never {
+  log(
+    'Usage: build-artifact.ts <project-root> <component-dir> <dist> [bundle-dir] [--platforms=<arch>,<arch>]',
+  );
+  process.exit(1);
+}
+
+/**
+ * Every file under `dir`, recursively, excluding top-level names in `exclude`
+ * and `__pycache__` directories at any depth.
+ */
+function collectFiles(dir: string, exclude: ReadonlySet<string>): string[] {
+  const results: string[] = [];
+  const walk = (current: string, isRoot: boolean): void => {
+    for (const entry of readdirSync(current)) {
+      if (entry === '__pycache__' || (isRoot && exclude.has(entry))) continue;
+      const fullPath = join(current, entry);
+      if (statSync(fullPath).isDirectory()) {
+        walk(fullPath, false);
+      } else {
+        results.push(fullPath);
+      }
+    }
+  };
+  walk(dir, true);
+  return results;
+}
+
+/** Zip entries for every file under `dir`, named relative to `dir` with forward slashes. */
+function entriesFrom(dir: string, exclude: ReadonlySet<string>): ZipEntry[] {
+  return collectFiles(dir, exclude).map((filePath) => ({
+    name: relative(dir, filePath).split('\\').join('/'),
+    data: readFileSync(filePath),
+  }));
+}
+
+function main(): void {
+  const argv = process.argv.slice(2);
+  const PLATFORMS_FLAG = '--platforms=';
+  const platforms = argv
+    .filter((a) => a.startsWith(PLATFORMS_FLAG))
+    .flatMap((a) => a.slice(PLATFORMS_FLAG.length).split(','))
+    .map((a) => a.trim())
+    .filter((a) => a.length > 0);
+  const [projectRoot, componentDirName, dist, bundleDir] = argv.filter(
+    (a) => !a.startsWith(PLATFORMS_FLAG),
+  );
+  if (!projectRoot || !componentDirName || !dist) {
+    usage();
+  }
+
+  if (platforms.length > 0 && bundleDir) {
+    log(
+      '--platforms cannot be combined with a bundle-dir: per-architecture copies of one bundle would all hold identical bytes. Drop --platforms and serve both architectures from a single artifact with two manifests.',
+    );
+    process.exit(1);
+    return;
+  }
+
+  const componentDir = join(projectRoot, 'greengrass', componentDirName);
+  const recipePath = join(componentDir, 'recipe.yaml');
+  const baseNameByArchitecture = Object.fromEntries(
+    platforms.map((arch) => [arch, `${componentDirName}-${arch}`]),
+  );
+  const artifactBaseNames =
+    platforms.length === 0
+      ? [componentDirName]
+      : platforms.map((arch) => baseNameByArchitecture[arch]);
+
+  let componentName: string;
+  let componentVersion: string;
+  let recipe: ReturnType<typeof loadRecipe>;
+  try {
+    recipe = loadRecipe(recipePath);
+    ({ componentName, componentVersion } = validateRecipe(
+      recipe,
+      artifactBaseNames,
+    ));
+    // Only meaningful per architecture, so only checked when this build knows
+    // which architecture each zip is for.
+    if (platforms.length > 0) {
+      validateManifestArchitectures(recipe, baseNameByArchitecture);
+    }
+  } catch (e) {
+    log((e as Error).message);
+    process.exit(1);
+    return;
+  }
+
+  const vendorDir = join(dist, 'vendor');
+  // Recipe and artifact paths are named by version, so a rebuild after a
+  // version bump would otherwise accumulate stale siblings - and the
+  // GreengrassComponentVersion construct requires exactly one resolved
+  // recipe. Start from an empty greengrass-build every run.
+  rmSync(join(dist, 'greengrass-build'), { recursive: true, force: true });
+  const artifactDir = join(
+    dist,
+    'greengrass-build',
+    'artifacts',
+    componentName,
+    componentVersion,
+  );
+  const recipesDir = join(dist, 'greengrass-build', 'recipes');
+  mkdirSync(artifactDir, { recursive: true });
+  mkdirSync(recipesDir, { recursive: true });
+
+  if (platforms.length > 0) {
+    // Multi-architecture: one zip per architecture, each holding the
+    // component's own files plus that architecture's own vendored wheels.
+    for (const arch of platforms) {
+      const archVendorDir = join(vendorDir, arch);
+      if (!existsSync(archVendorDir)) {
+        log(
+          `Missing vendored dependencies for "${arch}" at "${archVendorDir}" - run the component's "-vendor" target first (it writes one directory per architecture when the component targets more than one).`,
+        );
+        process.exit(1);
+        return;
+      }
+      const entries = [
+        ...entriesFrom(
+          componentDir,
+          new Set(['recipe.yaml', 'gdk-config.json', '.lock']),
+        ),
+        ...entriesFrom(archVendorDir, new Set(['.lock'])),
+      ];
+      if (entries.length === 0) {
+        log(
+          `Nothing to package for "${arch}": "${componentDir}" has no deployable files and "${archVendorDir}" has no vendored dependencies`,
+        );
+        process.exit(1);
+        return;
+      }
+      const zipPath = join(artifactDir, `${componentDirName}-${arch}.zip`);
+      writeZip(entries, zipPath);
+      log(`wrote ${zipPath}`);
+    }
+  } else {
+    let entries: ZipEntry[];
+    if (bundleDir && existsSync(bundleDir)) {
+      // A pre-bundled language (e.g. TypeScript via rolldown): the bundle
+      // output is the deployable content, so the source that produced it is
+      // never packaged.
+      entries = entriesFrom(bundleDir, new Set(['.lock']));
+      const packageJsonPath = join(componentDir, 'package.json');
+      if (existsSync(packageJsonPath)) {
+        // Ships alongside the bundle only when an Install lifecycle step needs
+        // it (e.g. `npm install` for a native dependency the bundle marked
+        // external) - absent for a fully self-contained bundle.
+        entries.push({
+          name: 'package.json',
+          data: readFileSync(packageJsonPath),
+        });
+      }
+    } else {
+      // Framework metadata that ships alongside the recipe but never inside
+      // the deployed artifact. A package.json here is the user's own, so it is
+      // packaged like any other source file - only bundle mode treats one as
+      // framework metadata.
+      entries = entriesFrom(
+        componentDir,
+        new Set(['recipe.yaml', 'gdk-config.json', '.lock']),
+      );
+      if (existsSync(vendorDir)) {
+        // requirements.txt is the "-vendor" target's own intermediate, not
+        // something the device needs.
+        entries.push(
+          ...entriesFrom(vendorDir, new Set(['requirements.txt', '.lock'])),
+        );
+      }
+    }
+    if (entries.length === 0) {
+      log(
+        `Nothing to package: "${bundleDir && existsSync(bundleDir) ? bundleDir : componentDir}" has no deployable files and "${vendorDir}" does not exist`,
+      );
+      process.exit(1);
+      return;
+    }
+
+    const zipPath = join(artifactDir, `${componentDirName}.zip`);
+    writeZip(entries, zipPath);
+    log(`wrote ${zipPath}`);
+  }
+
+  // The BUCKET_NAME/COMPONENT_NAME/COMPONENT_VERSION artifact URI placeholders
+  // are left exactly as authored - a later IaC step substitutes them.
+  const recipeOutPath = join(
+    recipesDir,
+    `${componentName}-${componentVersion}.yaml`,
+  );
+  writeFileSync(recipeOutPath, yaml.dump(recipe, { lineWidth: -1 }));
+  log(`wrote ${recipeOutPath}`);
+}
+
+main();

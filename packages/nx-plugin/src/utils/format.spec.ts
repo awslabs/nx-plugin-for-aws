@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   BIOME_WASM_VERSION,
   formatFilesInSubtree,
+  getDefaultBiomeConfig,
   requiresPythonToRuffTarget,
 } from './format.js';
 import { createTreeUsingTsSolutionSetup } from './test.js';
@@ -22,6 +23,16 @@ describe('biome wasm version', () => {
     // Files formatted by the bindings are checked by the vended CLI, so a drift
     // between the two fails `biome check` on a formatting change.
     expect(BIOME_WASM_VERSION).toBe(TS_VERSIONS['@biomejs/biome']);
+  });
+});
+
+describe('getDefaultBiomeConfig', () => {
+  it('should leave Markdown and YAML files unformatted', () => {
+    // Biome 2.6 formats Markdown and YAML by default, which fails the vended
+    // `format` target on generated README.md and recipe.yaml files.
+    const config = getDefaultBiomeConfig(createTreeUsingTsSolutionSetup());
+    expect(config.markdown).toEqual({ formatter: { enabled: false } });
+    expect(config.yaml).toEqual({ formatter: { enabled: false } });
   });
 });
 

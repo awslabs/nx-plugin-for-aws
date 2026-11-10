@@ -1,0 +1,204 @@
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "<%- awsProviderVersion %>"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "<%- randomProviderVersion %>"
+    }
+  }
+}
+
+variable "bucket_name" {
+  description = "Physical name for a newly created bucket. Leave unset (null) to derive one from bucket_name_prefix instead. Ignored when existing_bucket_name is set."
+  type        = string
+  default     = null
+}
+
+variable "bucket_name_prefix" {
+  description = "Prefix for the bucket name generated when bucket_name is left unset - typically the owning deployment's own name, so the created bucket carries workspace/deployment identity instead of an opaque AWS-generated name. Ignored when bucket_name or existing_bucket_name is set."
+  type        = string
+  default     = "greengrass-artifacts"
+
+  # Validate the prefix before it becomes part of an S3 bucket name.
+  validation {
+    condition     = can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", var.bucket_name_prefix))
+    error_message = "bucket_name_prefix must be lowercase letters, digits and hyphens only, starting and ending with a letter or digit - it becomes the leading segment of an S3 bucket name."
+  }
+}
+
+variable "existing_bucket_name" {
+  description = "Name of an existing S3 bucket to import instead of creating one. When set, every other creation setting on this module is ignored - the imported bucket's encryption, versioning and public-access settings are whatever they already are."
+  type        = string
+  default     = null
+}
+
+variable "token_exchange_role_arn" {
+  description = "ARN of a Greengrass core device token exchange role to grant s3:GetObject on this bucket, scoped to token_exchange_key_prefix. Leave unset to skip the grant - the guide documents the policy to attach by hand."
+  type        = string
+  default     = null
+}
+
+variable "token_exchange_key_prefix" {
+  description = "Key prefix (glob) the token exchange role grant is scoped to. Defaults to the workspace component namespace; override for custom component names. Only used when token_exchange_role_arn is set."
+  type        = string
+  default     = "<%- componentKeyPrefix %>"
+}
+
+variable "tags" {
+  description = "Tags to apply to the created bucket."
+  type        = map(string)
+  default     = {}
+}
+
+locals {
+  creating        = var.existing_bucket_name == null
+  generating_name = local.creating && var.bucket_name == null
+  bucket_name     = local.creating ? aws_s3_bucket.bucket[0].id : var.existing_bucket_name
+  bucket_arn      = local.creating ? aws_s3_bucket.bucket[0].arn : data.aws_s3_bucket.existing[0].arn
+
+  # The account, region and stable random suffix fit within S3's 63-character
+  # limit after truncating the prefix to 20 characters.
+  generated_bucket_name = local.generating_name ? "${trimsuffix(substr(var.bucket_name_prefix, 0, 20), "-")}-${data.aws_caller_identity.current[0].account_id}-${data.aws_region.current[0].region}-${random_string.bucket_suffix[0].result}" : null
+
+  # Derive the imported role name from its ARN.
+  token_exchange_role_name_parts = var.token_exchange_role_arn != null ? split("/", var.token_exchange_role_arn) : []
+  token_exchange_role_name       = length(local.token_exchange_role_name_parts) > 0 ? local.token_exchange_role_name_parts[length(local.token_exchange_role_name_parts) - 1] : null
+}
+
+data "aws_s3_bucket" "existing" {
+  count  = local.creating ? 0 : 1
+  bucket = var.existing_bucket_name
+}
+
+# Read identity only when generating a bucket name.
+data "aws_caller_identity" "current" {
+  count = local.generating_name ? 1 : 0
+}
+
+data "aws_region" "current" {
+  count = local.generating_name ? 1 : 0
+}
+
+resource "random_string" "bucket_suffix" {
+  count   = local.generating_name ? 1 : 0
+  length  = 8
+  special = false
+  upper   = false
+}
+
+# Own one private, versioned, encrypted, TLS-only repository per account and
+# region; import it elsewhere with existing_bucket_name.
+resource "aws_s3_bucket" "bucket" {
+  count = local.creating ? 1 : 0
+  #checkov:skip=CKV_AWS_18:Server access logs are not configured; artifacts are immutable published bytes and reads are auditable through CloudTrail data events
+  #checkov:skip=CKV2_AWS_61:No lifecycle configuration; a published component version's artifact must stay retrievable for as long as any deployment can reference it - see the guide's documented inventory/cleanup policy instead
+  #checkov:skip=CKV2_AWS_62:Event notifications not required for an artifact repository nothing subscribes to
+  #checkov:skip=CKV_AWS_144:Cross-region replication not required - component artifacts are published once per region they are deployed into
+  #checkov:skip=CKV_AWS_145:AES256 (S3-managed) encryption is sufficient for published component artifacts
+  bucket = coalesce(var.bucket_name, local.generated_bucket_name)
+
+  tags = merge(var.tags, { "greengrass-artifact-repository" = "true" })
+
+  # Protect the repository against replacement or teardown. Remove this literal
+  # lifecycle setting only for deliberate cleanup.
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+resource "aws_s3_bucket_versioning" "bucket" {
+  count  = local.creating ? 1 : 0
+  bucket = aws_s3_bucket.bucket[0].id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "bucket" {
+  count  = local.creating ? 1 : 0
+  bucket = aws_s3_bucket.bucket[0].id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_public_access_block" "bucket" {
+  count  = local.creating ? 1 : 0
+  bucket = aws_s3_bucket.bucket[0].id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_policy" "bucket" {
+  count  = local.creating ? 1 : 0
+  bucket = aws_s3_bucket.bucket[0].id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "DenyInsecureConnections"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = "s3:*"
+        Resource = [
+          aws_s3_bucket.bucket[0].arn,
+          "${aws_s3_bucket.bucket[0].arn}/*"
+        ]
+        Condition = {
+          Bool = { "aws:SecureTransport" = "false" }
+        }
+      }
+    ]
+  })
+}
+
+# Grant the imported token exchange role read access to the selected key prefix.
+resource "aws_iam_role_policy" "token_exchange_read" {
+  count = var.token_exchange_role_arn != null ? 1 : 0
+
+  name = "greengrass-artifact-read"
+  role = local.token_exchange_role_name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid      = "GreengrassArtifactRead"
+        Effect   = "Allow"
+        Action   = "s3:GetObject"
+        Resource = "${local.bucket_arn}/${var.token_exchange_key_prefix}"
+      }
+    ]
+  })
+}
+
+# Order consumers after the repository's hardening resources.
+output "bucket_name" {
+  value = local.bucket_name
+  depends_on = [
+    aws_s3_bucket_versioning.bucket,
+    aws_s3_bucket_server_side_encryption_configuration.bucket,
+    aws_s3_bucket_public_access_block.bucket,
+    aws_s3_bucket_policy.bucket,
+  ]
+}
+
+output "bucket_arn" {
+  value = local.bucket_arn
+  depends_on = [
+    aws_s3_bucket_versioning.bucket,
+    aws_s3_bucket_server_side_encryption_configuration.bucket,
+    aws_s3_bucket_public_access_block.bucket,
+    aws_s3_bucket_policy.bucket,
+  ]
+}

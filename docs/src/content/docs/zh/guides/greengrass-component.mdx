@@ -1,0 +1,636 @@
+---
+title: Greengrass Component
+description: 向现有的 Python 或 TypeScript 项目添加 AWS IoT Greengrass v2 组件,并提供可重用的 CDK 或 Terraform 构建块用于发布和部署
+generator: greengrass#component
+---
+
+import { FileTree, Tabs, TabItem } from '@astrojs/starlight/components';
+import ArchitectureDiagram from '@components/architecture-diagram.astro';
+import GeneratorParameters from '@components/generator-parameters.astro';
+import Infrastructure from '@components/infrastructure.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+import OptionFilter from '@components/option-filter.astro';
+import RunGenerator from '@components/run-generator.astro';
+import Snippet from '@components/snippet.astro';
+
+`greengrass#component` 生成器向现有的 Python 或 TypeScript 项目添加 [AWS IoT Greengrass v2](https://docs.aws.amazon.com/greengrass/v2/developerguide/what-is-iot-greengrass.html) 组件。它创建配方、入口点、Python 组件的单元测试,以及为核心设备打包组件的 Nx 目标。使用默认的 `infra`,它还提供可重用的 CDK 构造或 Terraform 模块,用于发布组件版本、拥有工件存储库并描述部署。您可以在自己的基础设施代码中组合这些构建块;生成器本身从不创建设备、车队或部署。
+
+宿主项目必须已经存在。首先使用 <Link path="guides/python-project">`py#project`</Link> 或 <Link path="guides/typescript-project">`ts#project`</Link> 创建一个。
+
+## 用法
+
+### 生成组件
+
+<RunGenerator generator="greengrass#component" requiredParameters={{ project: 'telemetry', name: 'pulse', language: 'python' }} />
+
+在脚本和文档中明确传递 `language`。当省略时,生成器会从所选项目中的 `tsconfig.json` 推断为 `typescript`,或从 `pyproject.toml` 推断为 `python`。同时包含两个文件的项目必须传递 `--language`;两者都没有的项目不是受支持的宿主。
+
+`ipc` 对两种语言默认为 `false`。传递 `--ipc=true` 以添加 Greengrass IPC 访问,或传递 `--ipc=false` 以保持禁用。
+
+配方的 `ComponentPublisher` 默认为工作区的 npm 作用域。传递 `--publisher` 以设置其他值。`aws-nx-plugin.config.mts` 中没有 Greengrass 发布者设置。
+
+对于 `iac: terraform`,在运行此生成器之前,使用 `terraform#project` 创建 Terraform 应用程序。Greengrass 生成器会将其 `awscc` 提供程序配置添加到该应用程序。如果您稍后创建 Terraform 应用程序,请重新运行 `greengrass#component` 以便它可以添加提供程序。
+
+`--project` 接受非限定的项目名称。生成的项目是命名空间限定的,因此 `nx run` 需要完整名称:Python 项目为 `<scope>.telemetry`,TypeScript 项目为 `@<scope>/telemetry`。下面的示例将该名称写为 `<project>`,并将在 npm 作用域为 `my-scope` 的工作区中使用 `--name=infra` 生成的基础设施项目写为 `@my-scope/infra`。
+
+### 硬件和操作系统
+
+`platform` 选择**核心设备**的操作系统和 CPU 架构,而不是其板名称。当前目标是带有 glibc 的 64 位 Linux:
+
+| 设备 | 生成器目标 | 状态 |
+| --- | --- | --- |
+| Linux PC、工业网关或 EC2 x86_64 实例 | `linux-amd64` | 支持;已在 EC2 核心上验证 |
+| 具有 64 位 CPU 和 64 位 Linux 的 Raspberry Pi,或另一个 Linux ARM64 网关 | `linux-arm64` | 支持打包;Raspberry Pi 硬件尚未验证 |
+| 包含上述两者的车队 | `linux-amd64-arm64` | 一个组件版本,具有特定于架构的清单 |
+| 运行 32 位 Linux / ARMv7 的 Raspberry Pi | 无 | 此生成器不支持,尽管经典 Greengrass 核心支持 ARMv7 |
+| Raspberry Pi Pico、ESP32 或另一个微控制器 | 无 | 用作核心设备的 IoT 客户端或外围设备 |
+
+在 Raspberry Pi 上,检查 `uname -m` 和 `getconf LONG_BIT`;此路径需要 `aarch64` 和 `64`。运行 32 位用户空间的 64 位处理器不是 ARM64 部署目标。设备还需要生成的配方中命名的 Python 解释器或 TypeScript 的 Node.js,以及 [Greengrass 核心先决条件](https://docs.aws.amazon.com/greengrass/v2/developerguide/greengrass-nucleus-component.html)。Python 依赖项供应目标为 `manylinux_2_28`,因此请使用 glibc 2.28 或更高版本。GPIO 库和自定义本机依赖项必须为所选平台提供兼容的二进制文件。生成器不会配置这些外围设备。
+
+生成的 Python 配方将解释器固定到宿主项目的 `requires-python` 下限,例如 `python3.14`。在运行组件的每个核心设备上安装该解释器。TypeScript 组件需要核心设备上的 Node.js。
+
+对于 `linux-amd64-arm64`,配方包含每个架构一个清单。Greengrass 选择其 `Platform` 与核心设备匹配的第一个清单,因此请保持每个清单的工件和环境设置与其架构配对。
+
+ESP32 固件与这些 Python 和 TypeScript 组件分开运行。它可以向 AWS IoT Core 发送 MQTT 消息,或使用[客户端设备支持](https://docs.aws.amazon.com/greengrass/v2/developerguide/interact-with-local-iot-devices.html)连接到本地 Greengrass 核心。本地路由需要代理、客户端身份验证和 MQTT 桥接配置;此生成器不会为它们或固件搭建脚手架。ARMv7、Windows、musl Linux 和其他 CPU 架构需要额外的打包和运行时工作。仅更改配方的架构标签是不够的。
+
+### 选项
+
+<GeneratorParameters generator="greengrass#component" />
+
+## 生成器输出
+
+<OptionFilter when={{ language: 'python' }} description="Python component layout">
+<FileTree>
+  - greengrass
+    - pulse
+      - recipe.yaml 组件配方
+      - main.py 组件入口点
+  - tests
+    - greengrass
+      - test_pulse.py 通过路径加载 main.py 的单元测试
+</FileTree>
+
+`pulse-vendor` 目标使用 `uv pip install --only-binary :all:` 为所选设备平台供应项目的依赖项。使用 `platform: linux-amd64-arm64`,它为每个架构供应一次,配方为每个架构携带一个清单。
+</OptionFilter>
+
+<OptionFilter when={{ language: 'typescript' }} description="TypeScript component layout">
+<FileTree>
+  - greengrass
+    - pulse
+      - recipe.yaml 组件配方
+  - src
+    - greengrass
+      - pulse
+        - main.ts 组件入口点
+</FileTree>
+
+项目的 `bundle` 目标在打包之前捆绑入口点。使用 `ipc: true`,`pulse-vendor` 目标还会为所选架构暂存 `aws-crt` 本机插件。
+</OptionFilter>
+
+配方、入口点以及(对于 Python)测试从第一次运行开始就是您的:重新运行永远不会重写它们。目标、元数据和依赖项声明由框架管理,并在每次运行时收敛。`packages/common/scripts/src/greengrass/` 下的共享打包脚本创建一次;删除该目录并重新运行生成器以刷新它们。
+
+目标使用短横线命名的组件名称:
+
+| 目标 | 目的 |
+| --- | --- |
+| `<component>-vendor` | 供应 Python 依赖项,或在启用 IPC 时供应 TypeScript CRT 插件 |
+| `<component>-artifact` | 在 `dist/<project-root>/greengrass/<component>/greengrass-build/` 下写入已解析的配方和可部署的存档 |
+| `<component>-deploy-local` | 通过核心设备上的 `greengrass-cli` 创建本地部署并等待稳定的组件状态 |
+| `<component>-logs` | 在核心设备上跟踪组件日志 |
+
+`<component>-artifact` 是宿主项目的 `build` 和 `assemble` 目标的依赖项,因此正常构建会生成工件。
+
+## 基础设施
+
+<OptionFilter when={{ infra: 'component-version' }} description="Building blocks vended with infra=component-version">
+<Snippet name="shared-constructs" />
+
+默认的 `infra: component-version` 在缺少时添加下面的 Greengrass 核心文件,并为每个组件添加一个应用包装器。现有的核心文件会被保留,因此本地编辑在以后的运行中幸存。它不会创建设备、事物组或部署。
+
+<Infrastructure>
+<Fragment slot="cdk">
+<FileTree>
+  - packages/common/constructs/src
+    - core/greengrass
+      - artifact-bucket.ts `GreengrassArtifactBucket`:保留的、版本化的、仅 TLS 的存储库,带有 `grantReadTo`
+      - component-version.ts `GreengrassComponentVersion`:上传工件并发布版本
+      - deployment.ts `GreengrassDeployment`:部署、可选的事物组和 `addComponent`
+      - next-version.ts `NEXT_PATCH`、`NEXT_MINOR` 和 `NEXT_MAJOR` 的部署时解析器
+      - recipe.ts 在合成时读取配方和工件 URI 替换
+    - app/greengrass
+      - pulse.ts `Pulse`,固定到此组件构建输出的 `GreengrassComponentVersion`
+</FileTree>
+
+共享构造项目的 `build` 和 `assemble` 目标依赖于宿主项目的,因此基础设施构建或部署始终读取新的工件。
+</Fragment>
+<Fragment slot="terraform">
+<FileTree>
+  - packages/common/terraform/src
+    - core/greengrass
+      - artifact-bucket 保留的、版本化的、仅 TLS 的存储库,带有可选的令牌交换角色授权
+      - component-version 通过 `awscc_greengrassv2_component_version` 上传工件并发布版本
+      - deployment 带有可选 `aws_iot_thing_group` 的 `awscc_greengrassv2_deployment`
+    - app/greengrass-component
+      - pulse 使用此组件的构建路径和 `bucket_name` 输入包装 `component-version` 的模块
+</FileTree>
+
+`hashicorp/aws` 提供程序中不存在 Greengrass 资源。模块使用 [`hashicorp/awscc`](https://registry.terraform.io/providers/hashicorp/awscc/latest/docs)。当选择 `iac: terraform` 时,如果缺少,Greengrass 生成器会将 `awscc` 所需的提供程序和 `provider "awscc" { region = var.aws_region }` 添加到 Terraform 应用程序根目录。现有的提供程序配置会被保留。
+</Fragment>
+</Infrastructure>
+
+#### 架构
+
+组件版本将构建的工件发布到明确拥有的存储库中。您的堆栈或根模块授予核心设备的令牌交换角色读取访问权限,并将版本添加到一个或多个部署中。默认的读取授权范围限定为工作区的组件命名空间;当角色的设备只需要这些组件的子集时,进一步缩小范围。
+
+<ArchitectureDiagram />
+</OptionFilter>
+
+<OptionFilter when={{ infra: 'none' }} description="Local-only component">
+`infra: none` 仅创建配方、入口点、Python 测试、目标和共享脚本。不会创建或更改基础设施项目或共享构造。稍后使用 `infra: component-version` 重新运行以添加基础设施。重新运行无法将已经拥有基础设施的组件切换回 `none`。
+</OptionFilter>
+
+## 本地构建和运行
+
+在开发机器上构建工件:
+
+<NxCommands commands={['run <project>:pulse-artifact']} />
+
+`dist/<project-root>/greengrass/pulse/greengrass-build/` 下的输出包含带有已解析配方的 `recipes/` 和带有存档的 `artifacts/<ComponentName>/<ComponentVersion>/`。Python 组件为每个清单构建一个存档,当它针对两个架构时命名为 `<component>-<architecture>.zip`。TypeScript 组件构建一个所有清单共享的存档;使用 `ipc: true`,它为每个架构携带 `aws-crt` 插件,每个清单的 `Setenv` 选择自己的。配方的工件 URI 中的 `BUCKET_NAME`、`COMPONENT_NAME` 和 `COMPONENT_VERSION` 占位符在发布时被替换,存档基本名称必须保持 `Run` 步骤解压缩到的名称。
+
+接下来的两个目标在安装了经典 Greengrass 核心和 `greengrass-cli` 的机器上运行,而不是在普通工作站上:
+
+<NxCommands commands={['run <project>:pulse-deploy-local', 'run <project>:pulse-logs']} />
+
+`GREENGRASS_ROOT` 默认为 `/greengrass/v2`。`pulse-deploy-local` 提交本地部署,然后轮询组件的生命周期状态,除非它在三次检查中保持 `RUNNING` 或 `FINISHED`,否则以非零退出。本地部署将该版本固定在设备上,并与稍后对不同版本的云部署冲突;请参阅[本地和云部署](#本地和云部署)。
+
+<OptionFilter when={{ infra: 'component-version' }} description="Composing the vended building blocks into a deployment">
+## 部署
+
+部署组合存在于您的基础设施项目中。正常流程是每个目标一个存储库、一个读取授权、每个组件一个应用包装器和一个部署。对现有的事物组或事物使用一个部署并设置其 `targetArn`;为不同的目标创建另一个部署。
+
+<Infrastructure>
+<Fragment slot="cdk">
+如果工作区没有 CDK 应用程序,请创建一个:
+
+<RunGenerator generator="ts#infra" requiredParameters={{ name: 'infra' }} />
+
+令牌交换角色和目标事物组已经存在于账户中:该角色是您的核心设备承担的角色,该组是它们注册的位置。堆栈通过 CloudFormation 参数导入两者。
+
+```ts title="packages/infra/src/stacks/application-stack.ts"
+import {
+  GreengrassArtifactBucket,
+  GreengrassDeployment,
+  Pulse,
+} from '@my-scope/common-constructs';
+import { CfnParameter, Stack, type StackProps } from 'aws-cdk-lib';
+import { Role } from 'aws-cdk-lib/aws-iam';
+import type { Construct } from 'constructs';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    const tokenExchangeRoleArn = new CfnParameter(
+      this,
+      'TokenExchangeRoleArn',
+      { type: 'String' },
+    );
+    const thingGroupArn = new CfnParameter(this, 'ThingGroupArn', {
+      type: 'String',
+    });
+
+    // One explicitly owned repository, and the grant the devices need.
+    const artifacts = new GreengrassArtifactBucket(this, 'Artifacts');
+    const tokenExchangeRole = Role.fromRoleArn(
+      this,
+      'TokenExchangeRole',
+      tokenExchangeRoleArn.valueAsString,
+    );
+    artifacts.grantReadTo(tokenExchangeRole);
+
+    // The generated wrapper takes the repository construct itself.
+    const pulse = new Pulse(this, 'Pulse', { bucket: artifacts });
+
+    // addComponent records the resolved version and orders the deployment
+    // resource after the component version resource.
+    const fleet = new GreengrassDeployment(this, 'Fleet', {
+      targetArn: thingGroupArn.valueAsString,
+    });
+    fleet.addComponent(pulse);
+  }
+}
+```
+
+同步项目引用,引导账户和区域一次,然后部署。`deploy` 目标在 `^assemble` 之后在基础设施项目中运行 `cdk deploy --require-approval=never`,它首先重建组件工件。生成的 `main.ts` 将每个堆栈放在以项目命名的阶段中,`@my-scope/infra` 为 `my-scope-infra-sandbox`,因此 `cdk deploy` 需要该阶段的选择器。从 `packages/infra/src/main.ts` 获取阶段名称,并在 `--` 之后与参数值一起传递 `/**`:
+
+<NxCommands env={{ AWS_PROFILE: '<profile>', AWS_REGION: '<region>' }} commands={['sync', 'run @my-scope/infra:bootstrap', "run @my-scope/infra:deploy -- 'my-scope-infra-sandbox/**' --parameters TokenExchangeRoleArn=<role-arn> --parameters ThingGroupArn=<thing-group-arn>"]} />
+
+`deploy` 等待完全稳定并接受替换更新。`deploy-sandbox` 使用快速模式,除非您传递 `--rollback`,否则拒绝替换更新。对常规修订使用 `deploy`,或在使用 `deploy-sandbox` 时传递 `--rollback`。
+
+`fleet.addComponent(pulse)` 是必需的,而不是装饰性的。使用固定的 `ComponentVersion`,部署的组件映射保存文字字符串,因此 CloudFormation 看不到部署和组件版本之间的依赖关系,并并行创建它们。然后 IoT 作业可以在版本存在之前到达设备,它们会失败并显示 `FAILED_NO_STATE_CHANGE`。使用 `NEXT_PATCH`,映射保存组件版本资源的 `ComponentVersion` 属性,如果原始 `NEXT_*` 字符串到达部署,合成会失败并显示命名 `addComponent` 的消息。
+
+#### 一个车队中的两个组件
+
+将第二个组件生成到同一个或另一个项目中,然后将两者添加到一个部署中。覆盖替换该组件条目的命名顶级字段;版本始终来自构造。
+
+```ts
+const pulse = new Pulse(this, 'Pulse', { bucket: artifacts });
+const uploader = new Uploader(this, 'Uploader', { bucket: artifacts });
+
+const cameras = new GreengrassDeployment(this, 'Cameras', {
+  thingGroupName: 'cameras',
+});
+cameras.addComponent(pulse);
+cameras.addComponent(uploader, {
+  configurationUpdate: { merge: { uploadIntervalSeconds: 60 } },
+});
+```
+
+`thingGroupName` 创建一个新的 `AWS::IoT::ThingGroup`。它不会注册设备;设备通过其配置过程加入组。对已经存在的组或事物使用 `targetArn` 或 `thingName`。
+
+#### 两个车队中的一个组件
+
+向两个部署注册相同的构造。每个部署都有自己的配置:
+
+```ts
+new GreengrassDeployment(this, 'WestFleet', {
+  thingGroupName: 'west-fleet',
+}).addComponent(pulse);
+
+new GreengrassDeployment(this, 'EastFleet', {
+  thingGroupName: 'east-fleet',
+}).addComponent(pulse, {
+  configurationUpdate: { merge: { sampleIntervalSeconds: 60 } },
+});
+```
+
+将相同的构造两次添加到一个部署是无操作的,除非第二次调用提供覆盖,这会更新条目。将同一组件名称下的不同构造添加到一个部署在构造时失败。
+
+#### 公共组件和原始条目
+
+您未在此工作区中构建的组件进入 `components` 映射。已发布的公共组件不需要依赖项,因为它已经存在。在同一堆栈中创建的版本的原始条目,例如手写的 `CfnComponentVersion`,需要您从 `addComponent` 获得的排序边:
+
+```ts
+import { CfnComponentVersion } from 'aws-cdk-lib/aws-greengrassv2';
+
+const fleet = new GreengrassDeployment(this, 'Fleet', {
+  targetArn: thingGroupArn.valueAsString,
+  components: {
+    // Published by AWS; pick a version from
+    // `aws greengrassv2 list-component-versions`.
+    'aws.greengrass.LogManager': {
+      componentVersion: '2.3.8',
+      configurationUpdate: {
+        merge: {
+          logsUploaderConfiguration: {
+            systemLogsConfiguration: { uploadToCloudWatch: 'true' },
+          },
+        },
+      },
+    },
+    // Created in this stack, so the deployment must wait for it.
+    'com.example.Handwritten': { componentVersion: '1.2.0' },
+  },
+});
+fleet.addComponent(pulse);
+
+const handwritten = new CfnComponentVersion(this, 'Handwritten', {
+  inlineRecipe: handwrittenRecipe,
+});
+fleet.deployment.node.addDependency(handwritten);
+```
+
+`configurationUpdate.merge` 在这里是一个普通对象。构造将其序列化为 CloudFormation 期望的 JSON 字符串。
+
+#### 导入现有存储库
+
+一个堆栈拥有存储库。每个其他堆栈按名称导入它,并在拥有堆栈中添加自己的授权,或将等效的 `s3:GetObject` 策略附加到令牌交换角色本身:
+
+```ts
+const artifacts = new GreengrassArtifactBucket(this, 'Artifacts', {
+  existingBucketName: 'central-greengrass-artifacts',
+});
+const pulse = new Pulse(this, 'Pulse', { bucket: artifacts });
+```
+
+导入的存储桶保留其自己的加密、版本控制和访问设置。解析器在 `NEXT_*` 版本的内容标识中包含存储桶名称,因此将组件移动到另一个存储库会为未更改的字节分配新版本。
+</Fragment>
+<Fragment slot="terraform">
+使用在运行 `greengrass#component` 之前创建的 Terraform 应用程序。如果您在这里创建它,请在继续之前重新运行 Greengrass 组件生成器,以便它可以添加 `awscc` 提供程序配置。
+
+<RunGenerator generator="terraform#project" requiredParameters={{ name: 'infra', type: 'application' }} />
+
+将令牌交换角色声明为输入,并在提供的 `plan` 目标使用 `-var-file=env/dev.tfvars` 读取的环境文件中设置其值。该角色是您的核心设备承担的角色,它在此配置运行之前就存在:
+
+```hcl title="packages/infra/src/variables.tf"
+variable "token_exchange_role_arn" {
+  description = "ARN of the IAM role the core devices assume"
+  type        = string
+}
+
+variable "thing_group_arn" {
+  description = "ARN of the existing thing group to deploy to"
+  type        = string
+}
+```
+
+```hcl title="packages/infra/src/env/dev.tfvars"
+environment            = "dev"
+token_exchange_role_arn = "arn:aws:iam::123456789012:role/GreengrassCoreTokenExchangeRole"
+thing_group_arn         = "arn:aws:iot:us-east-1:123456789012:thinggroup/pumps"
+```
+
+在核心部署模块的 `components` 映射中直接引用组件模块的输出。`component_version` 输出在组件版本资源上携带 `depends_on`,因此即使在计划时知道其编号,部署也会等待版本存在。此流程不需要模块级 `depends_on`。
+
+```hcl title="packages/infra/src/main.tf"
+module "artifacts" {
+  source                  = "../../common/terraform/src/core/greengrass/artifact-bucket"
+  token_exchange_role_arn = var.token_exchange_role_arn
+}
+
+module "pulse" {
+  source      = "../../common/terraform/src/app/greengrass-component/pulse"
+  bucket_name = module.artifacts.bucket_name
+}
+
+module "fleet" {
+  source     = "../../common/terraform/src/core/greengrass/deployment"
+  target_arn = var.thing_group_arn
+  components = {
+    (module.pulse.component_name) = {
+      component_version = module.pulse.component_version
+    }
+  }
+}
+```
+
+引导远程状态一次,然后计划和应用。`plan` 依赖于 `init`、`validate` 和 `assemble`,它首先重建组件工件,`apply` 应用 `plan` 写入的计划文件:
+
+<NxCommands env={{ AWS_PROFILE: '<profile>', AWS_REGION: '<region>' }} commands={['run @my-scope/infra:bootstrap', 'run @my-scope/infra:plan', 'run @my-scope/infra:apply']} />
+
+`thing_group_name` 创建一个新的 `aws_iot_thing_group`;它不会注册设备。对已经存在的组或事物使用 `target_arn`,或对一个事物使用 `thing_name`。在计划时,会根据当前分区、账户和区域检查文字 `target_arn`。
+
+Terraform 在组件配方中使用显式语义版本。为每个更改的组件选择一个新版本,因为已发布的版本是不可变的。Terraform 不解析插件的 `NEXT_*` 哨兵或调用 Greengrass API 来选择版本;其 `awscc` 提供程序使用为 Terraform 配置的凭证和区域。
+
+`plan` 目标运行 `assemble` 并记录计划的工件摘要。在 `plan` 和 `apply` 之间保持配方和构建输出不变。如果任一更改,请重新运行 `plan` 并应用新计划,以便发布的字节与计划的版本和对象键匹配。
+
+#### 分阶段推出和保留版本
+
+提升配方版本会替换 Terraform 管理的组件版本,并从 Greengrass 注册表中删除旧版本。更改的工件内容也会替换其 S3 键并删除旧对象。具有未更改工件字节的版本或配方更改可以重用相同的键。仍然引用已删除版本的部署失败,包括留在先前版本上的第二个事物组。`create_before_destroy` 控制资源的创建顺序;它不保留旧版本或等待每个设备完成其推出。
+
+在分阶段推出之前保留整个发布模块,包括其组件版本和 S3 对象资源。仅保留版本会使其工件受到删除的影响。`prevent_destroy` 不是替代品:它拒绝版本替换而不是保留旧版本。
+
+首先删除现有的 `module "pulse"` 块,并将对其输出的每个部署引用替换为当前发布的名称和版本。保留共享的 `artifacts` 模块、部署地址、其他组件和车队配置。例如,当发布者离开 Terraform 管理时,这两个现有组保持在 `1.0.0`:
+
+```hcl title="packages/infra/src/main.tf"
+removed {
+  from = module.pulse
+  lifecycle {
+    destroy = false
+  }
+}
+
+module "fleet" {
+  source     = "../../common/terraform/src/core/greengrass/deployment"
+  target_arn = var.thing_group_arn
+  components = {
+    "com.my-scope.Pulse" = { component_version = "1.0.0" }
+  }
+}
+
+module "stable_fleet" {
+  source     = "../../common/terraform/src/core/greengrass/deployment"
+  target_arn = "arn:aws:iot:us-east-1:123456789012:thinggroup/stable"
+  components = {
+    "com.my-scope.Pulse" = { component_version = "1.0.0" }
+  }
+}
+```
+
+使用您的实际组件名称、版本和现有组 ARN。单独计划和应用此保留步骤。计划必须忘记发布者的版本和对象资源,而不破坏它们或修改车队:
+
+<NxCommands env={{ AWS_PROFILE: '<profile>', AWS_REGION: '<region>' }} commands={['run @my-scope/infra:plan', 'run @my-scope/infra:apply']} />
+
+仅在该应用之后,将用户拥有的配方中的 `ComponentVersion` 更改为新的显式版本,例如 `1.0.1`。在新模块地址下添加发布者并推进试点车队;保留上面的稳定车队的文字 `1.0.0` 条目:
+
+```hcl title="packages/infra/src/main.tf"
+module "pulse_v2" {
+  source      = "../../common/terraform/src/app/greengrass-component/pulse"
+  bucket_name = module.artifacts.bucket_name
+}
+
+module "fleet" {
+  source     = "../../common/terraform/src/core/greengrass/deployment"
+  target_arn = var.thing_group_arn
+  components = {
+    (module.pulse_v2.component_name) = {
+      component_version = module.pulse_v2.component_version
+    }
+  }
+}
+```
+
+再次计划以重建工件并发布新版本,然后应用。验证试点设备后,将 `stable_fleet` 更新为相同的发布者输出并计划/应用该提升。生成的包装器读取当前构建输出;添加它的另一个实例不会保留较旧的构建。
+
+在任何组或回滚可能需要其版本时,在替换或删除 `pulse_v2` 之前重复单独的保留步骤。未更改的字节可以跨保留版本共享 S3 键,因此较新的发布者可以管理较旧版本仍然引用的对象。保留保留版本及其工件键的清单;仅当没有保留版本、部署或回滚需要它时才删除键。忘记资源使它们可用,但将其清理转移给您。
+
+#### 一个车队中的两个组件
+
+```hcl
+module "uploader" {
+  source      = "../../common/terraform/src/app/greengrass-component/uploader"
+  bucket_name = module.artifacts.bucket_name
+}
+
+module "cameras" {
+  source           = "../../common/terraform/src/core/greengrass/deployment"
+  thing_group_name = "cameras"
+  components = {
+    (module.pulse.component_name) = {
+      component_version = module.pulse.component_version
+    }
+    (module.uploader.component_name) = {
+      component_version = module.uploader.component_version
+      configuration_update = {
+        merge = jsonencode({ uploadIntervalSeconds = 60 })
+      }
+    }
+  }
+}
+```
+
+`configuration_update.merge` 必须已经是 JSON 字符串,因此将其包装在 `jsonencode` 中。这与采用对象的 CDK 构造不同。
+
+#### 两个车队中的一个组件
+
+两个部署模块引用相同的组件输出:
+
+```hcl
+module "west_fleet" {
+  source           = "../../common/terraform/src/core/greengrass/deployment"
+  thing_group_name = "west-fleet"
+  components = {
+    (module.pulse.component_name) = {
+      component_version = module.pulse.component_version
+    }
+  }
+}
+
+module "east_fleet" {
+  source           = "../../common/terraform/src/core/greengrass/deployment"
+  thing_group_name = "east-fleet"
+  components = {
+    (module.pulse.component_name) = {
+      component_version = module.pulse.component_version
+      configuration_update = {
+        merge = jsonencode({ sampleIntervalSeconds = 60 })
+      }
+    }
+  }
+}
+```
+
+#### 公共组件和文字版本
+
+已发布的公共组件是文字条目,不需要依赖项。在同一应用中创建的资源的文字版本,例如手写的 `awscc_greengrassv2_component_version`,是模块级 `depends_on` 的一种情况。使用 `depends_on`,Terraform 无法读取部署模块的身份数据源,直到依赖项存在,因此其目标检查从计划推迟到应用。它们仍然在创建部署之前失败。
+
+```hcl
+module "fleet" {
+  source     = "../../common/terraform/src/core/greengrass/deployment"
+  target_arn = var.thing_group_arn
+  components = {
+    "aws.greengrass.LogManager" = {
+      component_version = "2.3.8"
+      configuration_update = {
+        merge = jsonencode({
+          logsUploaderConfiguration = {
+            systemLogsConfiguration = { uploadToCloudWatch = "true" }
+          }
+        })
+      }
+    }
+    "com.example.Handwritten" = {
+      component_version = "1.2.0"
+    }
+    (module.pulse.component_name) = {
+      component_version = module.pulse.component_version
+    }
+  }
+
+  # Only for the literal version created by awscc_greengrassv2_component_version.handwritten.
+  depends_on = [awscc_greengrassv2_component_version.handwritten]
+}
+```
+
+#### 导入现有存储库
+
+在 `artifact-bucket` 模块上设置 `existing_bucket_name`。然后,模块既不管理存储桶的设置也不管理其策略,因此在拥有存储桶的配置中授予令牌交换角色对工件前缀的 `s3:GetObject`:
+
+```hcl
+module "artifacts" {
+  source               = "../../common/terraform/src/core/greengrass/artifact-bucket"
+  existing_bucket_name = "central-greengrass-artifacts"
+}
+```
+</Fragment>
+</Infrastructure>
+
+### 在设备上验证
+
+完成的堆栈更新或应用证明部署资源存在。部署及其 IoT 作业都可以报告 `SUCCEEDED`,而设备上的组件是 `BROKEN`。在每次部署后检查设备和组件状态:
+
+```bash
+aws --profile <profile> --region <region> greengrassv2 get-core-device \
+  --core-device-thing-name <thing-name> --query status
+aws --profile <profile> --region <region> greengrassv2 list-installed-components \
+  --core-device-thing-name <thing-name>
+```
+
+如果设备报告损坏状态,请使用 `<component>-logs` 检查进程日志。
+</OptionFilter>
+
+## 配方和 IPC
+
+<Tabs syncKey="greengrass-language">
+<TabItem label="Python" _filter={{ language: 'python' }}>
+使用默认的 `ipc: false`,`main.py` 每 30 秒记录一行,配方没有 IPC 访问控制。使用 `ipc: true`,它通过 `GreengrassCoreIPCClientV2` 每 30 秒向组件自己的本地主题发布心跳:
+
+```python title="greengrass/pulse/main.py"
+client.publish_to_topic(
+    topic=TOPIC,
+    publish_message=PublishMessage(json_message=JsonMessage(message={"sequence": sequence})),
+)
+```
+
+配方在 `aws.greengrass.ipc.pubsub` 下授予 `<ComponentName>/heartbeat` 上的 `aws.greengrass#PublishToTopic`。本地发布/订阅到达同一核心设备上的其他组件,而不是 AWS IoT Core。要发布到 AWS IoT Core,请调用 `publish_to_iot_core`,在配方中的 `aws.greengrass.ipc.mqttproxy` 下授予 `aws.greengrass#PublishToIoTCore`,并在设备的 IoT 策略中授予确切主题的 `iot:Publish`。
+</TabItem>
+<TabItem label="TypeScript" _filter={{ language: 'typescript' }}>
+使用默认的 `ipc: false`,`main.ts` 每 30 秒记录一行,配方没有 IPC 访问控制。使用 `ipc: true`,它通过 AWS IoT Device SDK 的 Greengrass IPC 客户端向组件自己的本地主题发布心跳,`pulse-vendor` 为所选架构暂存 `aws-crt` 本机插件。发布到 AWS IoT Core 使用同一客户端的 `publishToIoTCore` 操作、配方中的 `aws.greengrass.ipc.mqttproxy` 授权以及设备的 IoT 策略中的 `iot:Publish`。
+</TabItem>
+</Tabs>
+
+配方中的访问控制由设备上的核心强制执行。仅依赖 SDK 不授权任何内容,因此随着组件的增长扩大 `operations` 和 `resources`。
+
+生成的配方针对经典的 `aws.greengrass.Nucleus`。[Nucleus Lite](https://docs.aws.amazon.com/greengrass/v2/developerguide/greengrass-nucleus-lite-component.html) 实现了 IPC 操作的子集,不运行插件组件,并且仅在 v2.15 中获得容器支持。根据您的车队运行的核心验证配方;生成器不检测核心功能。
+
+在 Ubuntu 25.10 及更高版本上,`sudo-rs` 可以阻止 IPC 组件使用 Greengrass Nucleus 2.18.3 启动,因为 IPC 环境丢失。生成器不会更改主机的 `sudo` 安全配置。当需要 IPC 时,使用提供经典 `sudo` 行为的设备设置。
+
+## 自动版本控制
+
+对于 CDK 部署,将 `recipe.yaml` 中的 `ComponentVersion` 设置为 `NEXT_PATCH`、`NEXT_MINOR` 或 `NEXT_MAJOR`,以要求插件的解析器从账户和区域中已发布的最高严格语义版本分配版本:
+
+| 哨兵 | 最高发布的 `1.4.2` 变为 | 尚未发布任何内容 |
+| --- | --- | --- |
+| `NEXT_PATCH` | `1.4.3` | `1.0.0` |
+| `NEXT_MINOR` | `1.5.0` | `1.0.0` |
+| `NEXT_MAJOR` | `2.0.0` | `1.0.0` |
+
+第一个版本是 `1.0.0`。当其内容标签匹配且版本可部署时,解析器重用最高发布的版本;否则它发布由哨兵选择的下一个版本。标签涵盖没有版本行的配方、工件字节和工件存储桶名称。因此,未更改的内容重用版本,而更改内容或存储桶会发布新版本。生成器永远不会重写 `recipe.yaml`。
+
+`NEXT_*` 是 Nx 插件约定,而不是 Greengrass 版本。CDK 在部署期间解析哨兵,`<project>:pulse-deploy-local` 针对设备上可用的版本解析它。GDK 在 `gdk-config.json` 中使用 `NEXT_PATCH` 作为设置,而不是作为配方字段,并且不支持 `NEXT_MINOR` 或 `NEXT_MAJOR`。插件不调用 GDK。
+
+Terraform 需要显式语义版本。每个更改的工件都需要一个新的 `ComponentVersion`,因为 Greengrass 版本是不可变的。Terraform 不解析 `NEXT_*`。
+
+CDK 解析器在生成的 Lambda 执行角色下的 CloudFormation 部署期间运行,范围限定为堆栈的组件名称。不要为同一组件运行并发发布:部署可以选择相同的下一个版本,导致一个发布失败。
+
+## 工件存储和保留
+
+每个账户和区域使用一个工件存储库,由一个堆栈或根模块拥有。在 CDK 中使用 `existingBucketName` 或在 Terraform 中使用 `existing_bucket_name` 在其他地方导入它。生成的存储桶是版本化的、使用 SSE-S3 加密的、私有的,并且需要 TLS。Greengrass 工件不是 CDK 资产;`cdk gc` 可以删除组件版本仍然需要的资产。
+
+两个 IaC 路径使用相同的 S3 对象键布局:`<ComponentName>/<first 32 hex characters of sha256>/<file>`。摘要对排序的工件名称及其完整的 SHA-256 哈希进行哈希,对一个或多个工件使用相同的公式。仅缩短键前缀;工件摘要和自动版本标识保留完整哈希。CDK 的存储桶部署标签将前缀限制为 102 个字符,为组件名称留下 68 个字符。当选择 CDK 基础设施时,生成器会检查该限制,合成会检查对配方的编辑。Terraform 的对象上传没有此 CDK 限制。
+
+在部署或回滚可能需要其组件版本时,保持已发布的工件可用。CDK 默认保留替换的组件版本及其上传。Terraform 删除替换的版本和旧对象键;在提升多个组使用的版本之前,请参阅[分阶段推出和保留版本](#分阶段推出和保留版本)。删除注册表版本不会从已在设备上运行的组件中卸载组件。Terraform 的存储库设置 `prevent_destroy`;仅在其工件不再需要后进行故意拆除时才删除该文字生命周期设置。
+
+默认令牌交换角色授权允许工作区组件命名空间中的 `s3:GetObject`。对于更窄的授权,在 CDK 中设置 `keyPrefix` 或在 Terraform 中设置 `token_exchange_key_prefix`。导入的存储桶保留其自己的策略,因此在拥有存储桶或角色的地方管理授权。
+
+## 部署修订
+
+更改组件版本或部署配置会替换部署资源。CloudFormation 允许在一个堆栈操作中添加或删除最多 10 个部署资源;将大型推出拆分为批次。对替换使用常规 `deploy` 目标。`deploy-sandbox` 使用 CloudFormation 快速模式,对于替换更新需要 `--rollback`。
+
+删除部署资源会删除云管理状态,但不会从设备卸载组件。首先部署省略组件的修订,等待它从 `list-installed-components` 中消失,然后删除其 IaC 资源。
+
+## 本地和云部署
+
+来自 `<component>-deploy-local` 的本地部署将组件版本固定在该设备上。请求不同版本的云部署无法满足固定。在从云更新该设备之前删除本地部署:
+
+```bash
+sudo /greengrass/v2/bin/greengrass-cli deployment create --remove com.example.Pulse
+```
+
+对开发设备使用本地部署,对车队目标使用云部署。
+
+## 故障排除和服务限制
+
+云部署后,检查 Greengrass 部署状态和组件的设备状态:
+
+```bash
+aws --profile <profile> --region <region> greengrassv2 get-core-device \
+  --core-device-thing-name <thing-name> --query status
+aws --profile <profile> --region <region> greengrassv2 list-installed-components \
+  --core-device-thing-name <thing-name>
+```
+
+作业可以报告 `SUCCEEDED`,而组件是 `BROKEN`。使用 `<component>-logs` 检查其进程日志。Ubuntu 25.10 及更高版本上的 IPC 组件也可能在 Nucleus 2.18.3 下使用 `sudo-rs` 失败;生成器不会更改主机的安全设置。
+
+Greengrass 将一个组件限制为每个区域 5,000 个版本,将 `CreateComponentVersion` 限制为每个区域每秒一个请求。配方限制为 16 KB,部署文档限制为事物组 31 KB 或单个事物 7 KB。避免使用新版本作为心跳,并将大型部署拆分为较小的批次。
