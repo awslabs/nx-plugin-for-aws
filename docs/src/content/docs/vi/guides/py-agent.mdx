@@ -167,18 +167,21 @@ Công cụ là các hàm mà AI agent có thể gọi để thực hiện các h
 
 <Tabs syncKey="agent-framework">
 <TabItem label="Strands" _filter={{ framework: 'strands' }}>
-```python title="packages/my-project/my_module/agent/agent.py" {19-23,62}
+```python title="packages/my-project/my_module/agent/agent.py" {22-26,38}
 from contextlib import contextmanager
 from datetime import UTC, datetime
 
 from strands import Agent, tool
 from strands.hooks import HookCallback, HookProvider
-from strands.middleware import InvokeModelContext, InvokeModelStage
-from strands.plugins import Plugin
-from strands.types.content import SystemContentBlock
 from my_scope_agent_connection import log_model_errors, log_tool_errors
 
 from .session import get_session_manager
+
+
+@tool
+def current_time() -> str:
+    """Get the current date and time in UTC (ISO 8601)."""
+    return datetime.now(UTC).isoformat()
 
 
 @tool
@@ -196,42 +199,14 @@ def get_weather(city: str) -> str:
 AGENT_HOOKS: list[HookProvider | HookCallback] = [log_model_errors, log_tool_errors]
 
 
-class CurrentTimePlugin(Plugin):
-    """Gives the model the current UTC time by adding it to the system prompt
-    before each model call, without changing the user's message text."""
-
-    name = "current-time"
-
-    def init_agent(self, agent: Agent) -> None:
-        async def add_current_time(context: InvokeModelContext) -> InvokeModelContext:
-            time_block: SystemContentBlock = {
-                "text": f"<current_time>{datetime.now(UTC).isoformat()}</current_time>"
-            }
-            system_prompt = context.system_prompt
-            if isinstance(system_prompt, str):
-                blocks: list[SystemContentBlock] = [{"text": system_prompt}, time_block]
-            elif system_prompt is None:
-                blocks = [time_block]
-            else:
-                blocks = [*system_prompt, time_block]
-            return context.replace(system_prompt=blocks)
-
-        agent.add_middleware(InvokeModelStage.Input, add_current_time)
-
-
-# Gives the model the current time with each model call
-AGENT_PLUGINS: list[Plugin] = [CurrentTimePlugin()]
-
-
 @contextmanager
 def get_agent():
     yield Agent(
         name="MyAgent",
         description="MyAgent Strands Agent",
         system_prompt="You are a helpful assistant with access to various tools.",
-        tools=[subtract, get_weather],
+        tools=[subtract, current_time, get_weather],
         hooks=AGENT_HOOKS,
-        plugins=AGENT_PLUGINS,
         session_manager=get_session_manager(),
     )
 ```
@@ -292,14 +267,13 @@ def get_agent():
         name="MyAgent",
         description="MyAgent Strands Agent",
         system_prompt="You are a helpful assistant.",
-        tools=[read, http_request],
+        tools=[current_time, read, http_request],
         hooks=AGENT_HOOKS,
-        plugins=AGENT_PLUGINS,
         session_manager=get_session_manager(),
     )
 ```
 
-Agent được tạo ra không cần công cụ để cho biết thời gian. `AGENT_PLUGINS` chứa một plugin thêm thời gian UTC hiện tại vào system prompt trước mỗi lần gọi mô hình, vì vậy mô hình luôn biết thời gian và thời gian không bao giờ thay đổi văn bản tin nhắn của người dùng. Gói `strands-agents-tools` đã bị deprecated, và từ phiên bản 0.9.0, việc import bất kỳ công cụ nào của nó sẽ gây ra `ImportError`, vì vậy generator không thêm nó vào `pyproject.toml`. Nếu dự án của bạn đã liệt kê nó, hãy giữ nó được ghim dưới 0.9 hoặc xóa nó nếu bạn không sử dụng. [Hướng dẫn di chuyển Strands](https://strandsagents.com/docs/user-guide/migrate/strands-agents-tools/) liệt kê sự thay thế cho từng công cụ của nó.
+Công cụ `current_time` trong danh sách này là công cụ mà generator định nghĩa trong `agent.py`. Mô hình gọi nó khi cần ngày hoặc giờ, và nó trả về thời gian UTC hiện tại. Generator không thêm gói `strands-agents-tools` đã bị deprecated vào `pyproject.toml`: từ phiên bản 0.9.0, việc import bất kỳ công cụ nào của nó sẽ gây ra `ImportError`. Nếu dự án của bạn đã liệt kê nó, hãy giữ nó được ghim dưới 0.9 hoặc xóa nó nếu bạn không sử dụng. [Hướng dẫn di chuyển Strands](https://strandsagents.com/docs/user-guide/migrate/strands-agents-tools/) liệt kê sự thay thế cho từng công cụ của nó.
 </TabItem>
 <TabItem label="LangChain" _filter={{ framework: 'langchain' }}>
 LangChain cung cấp một hệ sinh thái lớn các [công cụ và tích hợp](https://docs.langchain.com/oss/python/integrations/tools), mỗi công cụ được phân phối trong gói riêng của nó. Generator không thêm những công cụ này, vì vậy hãy cài đặt công cụ bạn cần trước — ví dụ `langchain-community`, nơi công cụ tìm kiếm bên dưới đến từ:
@@ -349,9 +323,8 @@ def get_agent():
         name="MyAgent",
         description="MyAgent Strands Agent",
         system_prompt="You are a helpful assistant.",
-        tools=[subtract],
+        tools=[subtract, current_time],
         hooks=AGENT_HOOKS,
-        plugins=AGENT_PLUGINS,
         session_manager=get_session_manager(),
     )
 ```

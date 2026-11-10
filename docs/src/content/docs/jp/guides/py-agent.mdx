@@ -167,18 +167,21 @@ AG-UIエージェントは <Link path="/guides/connection/react-agui">`connectio
 
 <Tabs syncKey="agent-framework">
 <TabItem label="Strands" _filter={{ framework: 'strands' }}>
-```python title="packages/my-project/my_module/agent/agent.py" {19-23,62}
+```python title="packages/my-project/my_module/agent/agent.py" {22-26,38}
 from contextlib import contextmanager
 from datetime import UTC, datetime
 
 from strands import Agent, tool
 from strands.hooks import HookCallback, HookProvider
-from strands.middleware import InvokeModelContext, InvokeModelStage
-from strands.plugins import Plugin
-from strands.types.content import SystemContentBlock
 from my_scope_agent_connection import log_model_errors, log_tool_errors
 
 from .session import get_session_manager
+
+
+@tool
+def current_time() -> str:
+    """Get the current date and time in UTC (ISO 8601)."""
+    return datetime.now(UTC).isoformat()
 
 
 @tool
@@ -196,42 +199,14 @@ def get_weather(city: str) -> str:
 AGENT_HOOKS: list[HookProvider | HookCallback] = [log_model_errors, log_tool_errors]
 
 
-class CurrentTimePlugin(Plugin):
-    """Gives the model the current UTC time by adding it to the system prompt
-    before each model call, without changing the user's message text."""
-
-    name = "current-time"
-
-    def init_agent(self, agent: Agent) -> None:
-        async def add_current_time(context: InvokeModelContext) -> InvokeModelContext:
-            time_block: SystemContentBlock = {
-                "text": f"<current_time>{datetime.now(UTC).isoformat()}</current_time>"
-            }
-            system_prompt = context.system_prompt
-            if isinstance(system_prompt, str):
-                blocks: list[SystemContentBlock] = [{"text": system_prompt}, time_block]
-            elif system_prompt is None:
-                blocks = [time_block]
-            else:
-                blocks = [*system_prompt, time_block]
-            return context.replace(system_prompt=blocks)
-
-        agent.add_middleware(InvokeModelStage.Input, add_current_time)
-
-
-# Gives the model the current time with each model call
-AGENT_PLUGINS: list[Plugin] = [CurrentTimePlugin()]
-
-
 @contextmanager
 def get_agent():
     yield Agent(
         name="MyAgent",
         description="MyAgent Strands Agent",
         system_prompt="You are a helpful assistant with access to various tools.",
-        tools=[subtract, get_weather],
+        tools=[subtract, current_time, get_weather],
         hooks=AGENT_HOOKS,
-        plugins=AGENT_PLUGINS,
         session_manager=get_session_manager(),
     )
 ```
@@ -292,14 +267,13 @@ def get_agent():
         name="MyAgent",
         description="MyAgent Strands Agent",
         system_prompt="You are a helpful assistant.",
-        tools=[read, http_request],
+        tools=[current_time, read, http_request],
         hooks=AGENT_HOOKS,
-        plugins=AGENT_PLUGINS,
         session_manager=get_session_manager(),
     )
 ```
 
-生成されたエージェントは時刻を伝えるツールを必要としません。`AGENT_PLUGINS` は各モデル呼び出しの前にシステムプロンプトに現在のUTC時刻を追加するプラグインを保持しているため、モデルは常に時刻を知っており、時刻がユーザーのメッセージテキストを変更することはありません。`strands-agents-tools` パッケージは非推奨となっており、バージョン0.9.0以降ではそのツールをインポートすると `ImportError` が発生するため、ジェネレーターはこれを `pyproject.toml` に追加しません。プロジェクトに既にリストされている場合は、0.9未満にピン留めするか、使用していない場合は削除してください。[Strandsマイグレーションガイド](https://strandsagents.com/docs/user-guide/migrate/strands-agents-tools/) には各ツールの代替が記載されています。
+このリストの `current_time` ツールは、ジェネレーターが `agent.py` で定義するものです。モデルは日付や時刻が必要なときにこれを呼び出し、現在のUTC時刻を返します。ジェネレーターは非推奨の `strands-agents-tools` パッケージを `pyproject.toml` に追加しません: バージョン0.9.0以降、そのツールをインポートすると `ImportError` が発生します。プロジェクトに既にリストされている場合は、0.9未満にピン留めするか、使用していない場合は削除してください。[Strandsマイグレーションガイド](https://strandsagents.com/docs/user-guide/migrate/strands-agents-tools/) には各ツールの代替が記載されています。
 </TabItem>
 <TabItem label="LangChain" _filter={{ framework: 'langchain' }}>
 LangChainは大規模な [ツールと統合](https://docs.langchain.com/oss/python/integrations/tools) のエコシステムを提供しており、それぞれが独自のパッケージで配布されています。ジェネレーターはこれらを追加しないため、まず必要なものをインストールしてください — 例えば、以下の検索ツールが含まれる `langchain-community`:
@@ -349,9 +323,8 @@ def get_agent():
         name="MyAgent",
         description="MyAgent Strands Agent",
         system_prompt="You are a helpful assistant.",
-        tools=[subtract],
+        tools=[subtract, current_time],
         hooks=AGENT_HOOKS,
-        plugins=AGENT_PLUGINS,
         session_manager=get_session_manager(),
     )
 ```
