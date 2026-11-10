@@ -74,6 +74,10 @@ interface Result {
 
 const CASES_FILE = process.env.EVAL_CASES ?? '<%- casesFile %>';
 const TIMEOUT_MS = Number(process.env.EVAL_TIMEOUT_MS ?? 60_000);
+// Connected servers started by Nx may not be listening yet, so connection
+// errors are retried until this long after startup.
+const STARTUP_TIMEOUT_MS = Number(process.env.EVAL_STARTUP_TIMEOUT_MS ?? 30_000);
+const startedAt = Date.now();
 
 const loadCases = () => {
   const json = JSON.parse(readFileSync(CASES_FILE, 'utf-8'));
@@ -137,6 +141,28 @@ const withTimeout = <T>(promise: Promise<T>): Promise<T> =>
     ),
   ]);
 
+const isConnectionError = (err: unknown): boolean => {
+  for (let e: any = err, depth = 0; e && depth < 5; e = e.cause, depth++) {
+    if (e.code === 'ECONNREFUSED' || /fetch failed|ECONNREFUSED/.test(String(e.message))) {
+      return true;
+    }
+  }
+  return false;
+};
+
+const invokeWhenReady = async (prompt: string): Promise<Result> => {
+  for (;;) {
+    try {
+      return await withTimeout(invoke(prompt));
+    } catch (err) {
+      if (!isConnectionError(err) || Date.now() - startedAt > STARTUP_TIMEOUT_MS) {
+        throw err;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+    }
+  }
+};
+
 const describeCalls = (toolCalls: ToolCall[]) =>
   toolCalls
     .map(({ name, error }) => (error ? `${name} (failed: ${error})` : name))
@@ -186,7 +212,7 @@ for (const evalCase of cases) {
   let result: Result = { response: '', toolCalls: [] };
   let failures: string[];
   try {
-    result = await withTimeout(invoke(evalCase.prompt));
+    result = await invokeWhenReady(evalCase.prompt);
     failures = evalCase.expect.flatMap((check) => grade(check, result) ?? []);
   } catch (err) {
     failures = [`invocation failed: ${(err as Error).message}`];
