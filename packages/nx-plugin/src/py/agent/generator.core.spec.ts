@@ -83,6 +83,20 @@ dev-dependencies = []
     expect(acInit).toContain('log_model_errors');
     expect(acInit).toContain('log_tool_errors');
 
+    // strands-agents-tools 0.9.0 removed current_time, so the agent is told
+    // the time by a ContextInjector plugin instead of a time tool.
+    const agentPy = tree.read(
+      'apps/test-project/proj_test_project/agent/agent.py',
+      'utf-8',
+    )!;
+    expect(agentPy).not.toContain('strands_tools');
+    expect(agentPy).not.toContain('current_time,');
+    expect(agentPy).toContain(
+      'from strands.vended_plugins.context_injector import ContextInjector',
+    );
+    expect(agentPy).toContain('datetime.now(UTC).isoformat()');
+    expect(agentPy).toContain('plugins=AGENT_PLUGINS,');
+
     // Check that pyproject.toml was updated with strands agent dependencies
     const pyprojectToml = parse(
       tree.read('apps/test-project/pyproject.toml', 'utf-8'),
