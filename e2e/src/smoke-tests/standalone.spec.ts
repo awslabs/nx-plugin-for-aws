@@ -37,7 +37,7 @@ const COMPONENT_BASE_OVERRIDES: Record<string, string[]> = {
 
 const COMPONENT_ARGS: Record<string, string> = {
   'observability#langfuse':
-    '--secretArn=arn:aws:secretsmanager:us-east-1:123456789012:secret:langfuse-abcdef',
+    '--host=https://langfuse.example.com --secretArn=arn:aws:secretsmanager:us-east-1:123456789012:secret:langfuse-abcdef',
 };
 
 const baseSetup = (generator: string): string[] =>

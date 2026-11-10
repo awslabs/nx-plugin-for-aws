@@ -427,16 +427,12 @@ export const internalTestMatrixGenerator = async (
     });
     await observabilityLangfuseGenerator(tree, {
       project: py('py-langfuse-project'),
+      host: 'https://langfuse.example.com',
       secretArn:
         'arn:aws:secretsmanager:us-east-1:123456789012:secret:langfuse-abcdef',
       ...defaults,
     });
-    // Deployable matrices use CloudWatch; the generated exporter test runs offline.
-    await observabilityLangfuseGenerator(tree, {
-      project: py('py-langfuse-project'),
-      mode: 'cloudwatch',
-      ...defaults,
-    });
+    // The application stack does not instantiate this build-only agent.
   }
   // Guard the default Python agent, which has AgentCore infrastructure.
   await pyAgentGuardrailsGenerator(tree, {

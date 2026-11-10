@@ -29,6 +29,7 @@ const SECRET =
   'arn:aws:secretsmanager:us-east-1:123456789012:secret:langfuse-abcdef';
 const options = {
   project: 'test-project',
+  host: 'https://cloud.langfuse.com',
   secretArn: SECRET,
   preferInstallDependencies: false,
 };
@@ -128,13 +129,12 @@ describe('observability#langfuse generator', () => {
     },
   );
 
-  it('is a byte-for-byte no-op when retaining CloudWatch on an untouched agent', async () => {
+  it('requires an explicit endpoint before changing the stock CloudWatch setup', async () => {
     await addAgent();
     const before = files(tree);
-    await observabilityLangfuseGenerator(tree, {
-      project: options.project,
-      mode: 'cloudwatch',
-    });
+    await expect(
+      observabilityLangfuseGenerator(tree, { ...options, host: undefined }),
+    ).rejects.toThrow('Provide --host');
     expect(files(tree)).toEqual(before);
     expect(tree.read(`${AGENT}/init.py`, 'utf-8')).not.toContain('langfuse');
   });
@@ -204,37 +204,18 @@ describe('observability#langfuse generator', () => {
     ).toHaveLength(1);
   });
 
-  it('switches to CloudWatch and back without duplicate wiring', async () => {
-    await addAgent();
-    await observabilityLangfuseGenerator(tree, options);
-    const construct = tree.read(CONSTRUCT, 'utf-8');
-    await observabilityLangfuseGenerator(tree, {
-      project: options.project,
-      mode: 'cloudwatch',
-      preferInstallDependencies: false,
-    });
-    expect(tree.read(CONFIG, 'utf-8')).toContain('agentcore_launcher.py');
-    expect(tree.read(CONFIG, 'utf-8')).not.toContain(
-      'secretsmanager:GetSecretValue',
-    );
-    expect(tree.read(CONFIG, 'utf-8')).not.toContain(
-      'DISABLE_ADOT_OBSERVABILITY',
-    );
-    expect(tree.read(CONFIG, 'utf-8')).not.toContain('rc.set(');
-    expect(tree.read(CONFIG, 'utf-8')).toMatchSnapshot('CloudWatch config');
-    const disabled = files(tree);
-    await observabilityLangfuseGenerator(tree, {
-      project: options.project,
-      mode: 'cloudwatch',
-    });
-    expect(files(tree)).toEqual(disabled);
-    await observabilityLangfuseGenerator(tree, {
-      project: options.project,
-      preferInstallDependencies: false,
-    });
-    expect(tree.read(CONFIG, 'utf-8')).toContain(SECRET);
-    expect(tree.read(CONSTRUCT, 'utf-8')).toBe(construct);
-  });
+  it.each(['cloudwatch', 'langfuse'])(
+    'rejects --mode=%s before changing files',
+    async (mode) => {
+      await addAgent();
+      const before = files(tree);
+      const removedOption = { ...options, mode };
+      await expect(
+        observabilityLangfuseGenerator(tree, removedOption),
+      ).rejects.toThrow('does not accept --mode');
+      expect(files(tree)).toEqual(before);
+    },
+  );
 
   it('restores packaging after re-running the agent generator', async () => {
     await addAgent();
@@ -302,7 +283,10 @@ describe('observability#langfuse generator', () => {
     tree.write(CONFIG, `${tree.read(CONFIG, 'utf-8')}\n// User change\n`);
     const before = files(tree);
     await expect(
-      observabilityLangfuseGenerator(tree, { ...options, mode: 'cloudwatch' }),
+      observabilityLangfuseGenerator(tree, {
+        ...options,
+        host: 'https://other.example.com',
+      }),
     ).rejects.toThrow('customized or removed');
     expect(files(tree)).toEqual(before);
   });
@@ -372,7 +356,10 @@ describe('observability#langfuse generator', () => {
     await addAgent();
     const before = files(tree);
     await expect(
-      observabilityLangfuseGenerator(tree, { project: options.project }),
+      observabilityLangfuseGenerator(tree, {
+        project: options.project,
+        host: options.host,
+      }),
     ).rejects.toThrow('complete ARN');
     expect(files(tree)).toEqual(before);
   });

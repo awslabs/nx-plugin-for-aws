@@ -7,7 +7,6 @@ import {
   type GeneratorCallback,
   generateFiles,
   joinPathFragments,
-  logger,
   OverwriteStrategy,
   type Tree,
   updateProjectConfiguration,
@@ -49,7 +48,7 @@ export const OBSERVABILITY_LANGFUSE_GENERATOR_INFO: NxGeneratorInfo =
   getGeneratorInfo(import.meta.filename);
 
 export interface LangfuseMetadata {
-  readonly mode: 'langfuse' | 'cloudwatch';
+  readonly mode: 'langfuse';
   readonly host: string;
   readonly secretArn: string;
   readonly configHash: string;
@@ -127,6 +126,11 @@ export const observabilityLangfuseGenerator = async (
   tree: Tree,
   options: ObservabilityLangfuseGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  if ('mode' in options) {
+    throw new Error(
+      'observability#langfuse does not accept --mode. To restore CloudWatch, revert the Langfuse setup commit, then rebuild and redeploy.',
+    );
+  }
   const project = readProjectConfigurationUnqualified(tree, options.project);
   const { esm } = esmVars(tree);
   const components = (project.metadata?.components ??
@@ -137,21 +141,13 @@ export const observabilityLangfuseGenerator = async (
       component.generator === OBSERVABILITY_LANGFUSE_GENERATOR_INFO.id &&
       component.name === agent.name,
   ) as (ComponentMetadata & LangfuseMetadata) | undefined;
-  const mode = options.mode ?? 'langfuse';
-  if (!['langfuse', 'cloudwatch'].includes(mode)) {
+  const selectedHost = options.host ?? previous?.host;
+  if (!selectedHost) {
     throw new Error(
-      'Supported modes are langfuse and cloudwatch; dual export is not supported.',
+      'Provide --host with the HTTPS base URL of an existing Langfuse installation. There is no default destination.',
     );
   }
-  if (mode === 'cloudwatch' && !previous) {
-    logger.info(
-      'This agent already uses its generated CloudWatch configuration.',
-    );
-    return () => {};
-  }
-  const host = normalizeHost(
-    options.host ?? previous?.host ?? 'https://cloud.langfuse.com',
-  );
+  const host = normalizeHost(selectedHost);
   const secretArn = options.secretArn ?? previous?.secretArn;
   if (
     !secretArn ||
@@ -164,7 +160,7 @@ export const observabilityLangfuseGenerator = async (
     );
   }
   const unchanged =
-    previous?.mode === mode &&
+    previous?.mode === 'langfuse' &&
     previous.host === host &&
     previous.secretArn === secretArn;
 
@@ -318,7 +314,6 @@ export const observabilityLangfuseGenerator = async (
       constructDir,
       {
         esm,
-        mode,
         host: JSON.stringify(host),
         secretArn: JSON.stringify(secretArn),
         agentNameClassName: agent.rc,
@@ -372,7 +367,7 @@ export const observabilityLangfuseGenerator = async (
     // Hash formatted configuration so later runs can detect user edits.
     await formatFilesInSubtree(tree, constructDir);
     const metadata: LangfuseMetadata = {
-      mode,
+      mode: 'langfuse',
       host,
       secretArn,
       configHash: digest(tree.read(config, 'utf-8')),
