@@ -1,7 +1,6 @@
 import logging
 import uuid
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
 
 from ag_ui.core import EventType, RunAgentInput, RunErrorEvent
 from ag_ui.encoder import EventEncoder
@@ -9,10 +8,6 @@ from ag_ui_strands import StrandsAgent, StrandsAgentConfig
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from strands import Agent
-from strands.middleware import InvokeModelContext, InvokeModelStage
-from strands.plugins import Plugin
-from strands.types.content import SystemContentBlock
 from <%- agentConnectionModuleName %> import get_current_session_id, session_id_context
 
 from .agent import AGENT_HOOKS, get_agent
@@ -20,35 +15,6 @@ from .middleware.session_id_middleware import SESSION_ID_HEADER, SessionIdMiddle
 from .session import get_session_manager
 
 logging.basicConfig(level=logging.INFO)
-
-
-class CurrentTimePlugin(Plugin):
-    """Gives the model the current UTC time by adding it to the system prompt
-    before each model call, without changing the user's message text."""
-
-    name = "current-time"
-
-    def init_agent(self, agent: Agent) -> None:
-        async def add_current_time(context: InvokeModelContext) -> InvokeModelContext:
-            time_block: SystemContentBlock = {
-                "text": f"<current_time>{datetime.now(UTC).isoformat()}</current_time>"
-            }
-            system_prompt = context.system_prompt
-            if isinstance(system_prompt, str):
-                blocks: list[SystemContentBlock] = [{"text": system_prompt}, time_block]
-            elif system_prompt is None:
-                blocks = [time_block]
-            else:
-                blocks = [*system_prompt, time_block]
-            return context.replace(system_prompt=blocks)
-
-        agent.add_middleware(InvokeModelStage.Input, add_current_time)
-
-
-# Gives the model the current time with each model call. Defined here, not in
-# agent.py, because AG-UI reads plugins off this adapter rather than the
-# template Agent, and agent.py is the file users rewrite for their own agent.
-AGENT_PLUGINS: list[Plugin] = [CurrentTimePlugin()]
 
 
 @asynccontextmanager
@@ -65,8 +31,6 @@ async def lifespan(app: FastAPI):
             # built HookRegistry, so hooks it can't read back are never
             # registered and model/tool failures go unreported.
             hooks=AGENT_HOOKS,
-            # AG-UI does not copy plugins from the template Agent either.
-            plugins=AGENT_PLUGINS,
         )
         yield
 

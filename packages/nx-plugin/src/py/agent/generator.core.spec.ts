@@ -83,19 +83,18 @@ dev-dependencies = []
     expect(acInit).toContain('log_model_errors');
     expect(acInit).toContain('log_tool_errors');
 
-    // strands-agents-tools 0.9.0 removed current_time, so the agent is told
-    // the time by a plugin that adds it to the system prompt instead of a tool.
+    // strands-agents-tools 0.9.0 removed current_time, so the agent defines
+    // its own current_time tool and the system prompt stays the same.
     const agentPy = tree.read(
       'apps/test-project/proj_test_project/agent/agent.py',
       'utf-8',
     )!;
     expect(agentPy).not.toContain('strands_tools');
-    expect(agentPy).not.toContain('current_time,');
-    expect(agentPy).toContain(
-      'from strands.middleware import InvokeModelContext, InvokeModelStage',
-    );
-    expect(agentPy).toContain('datetime.now(UTC).isoformat()');
-    expect(agentPy).toContain('plugins=AGENT_PLUGINS,');
+    expect(agentPy).toContain('from datetime import UTC, datetime');
+    expect(agentPy).toContain('@tool\ndef current_time() -> str:');
+    expect(agentPy).toContain('return datetime.now(UTC).isoformat()');
+    expect(agentPy).toContain('tools=[subtract, current_time],');
+    expect(agentPy).not.toContain('plugins=');
 
     // Check that pyproject.toml was updated with strands agent dependencies
     const pyprojectToml = parse(

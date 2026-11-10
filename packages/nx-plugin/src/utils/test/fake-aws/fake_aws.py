@@ -21,7 +21,7 @@ or, in-process: start_server(config_file, log_file) returns (server, port).
 
 Every request appends one JSON line to <requests.log>: AppConfigData requests
 as {"path": "StartConfigurationSession" | "GetLatestConfiguration"}, model
-requests as {"path", "modelId", "guardrailConfig", "userTexts", "systemTexts", "intervened"}.
+requests as {"path", "modelId", "guardrailConfig", "userTexts", "intervened"}.
 """
 
 import binascii
@@ -166,7 +166,6 @@ def _handler(config_file: str, log_file: str) -> type[BaseHTTPRequestHandler]:
                             if message.get("role") == "user"
                             for text in _texts(message.get("content", []))
                         ],
-                        "systemTexts": _texts(request.get("system", [])),
                         "intervened": intervened,
                     }
                 )

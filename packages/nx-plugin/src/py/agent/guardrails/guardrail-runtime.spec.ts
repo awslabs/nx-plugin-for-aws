@@ -33,7 +33,6 @@ interface ModelRequest {
   modelId: string;
   guardrailConfig: Record<string, string> | null;
   userTexts: string[];
-  systemTexts: string[];
   intervened: boolean;
 }
 
@@ -328,19 +327,11 @@ describe('guardrail.py at runtime', { timeout: 600_000 }, () => {
           // fake_aws.py blocks it as Bedrock would if the blocked message were still checked.
           expect(request.intervened).toBe(false);
         }
-        // The session keeps the earlier turn, with the blocked message
-        // redacted. A Strands agent adds the current time to the system
-        // prompt, not the user message, so the user turn is unchanged and the
-        // time never enters the stored session.
+        // The session keeps the earlier turn, with the blocked message redacted.
         expect(followUps[0].userTexts).toEqual([
           '[User input redacted.]',
           '2+2?',
         ]);
-        if (framework === 'strands') {
-          expect(followUps[0].systemTexts.at(-1)).toMatch(
-            /^\s*<current_time>\d{4}-\d{2}-\d{2}T[^<]+\+00:00<\/current_time>$/,
-          );
-        }
       },
     );
 

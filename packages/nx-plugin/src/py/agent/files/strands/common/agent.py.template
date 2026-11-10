@@ -1,15 +1,8 @@
 from contextlib import contextmanager
-<%_ if (protocol !== 'ag-ui') { _%>
 from datetime import UTC, datetime
-<%_ } _%>
 
 from strands import Agent, tool
 from strands.hooks import HookCallback, HookProvider
-<%_ if (protocol !== 'ag-ui') { _%>
-from strands.middleware import InvokeModelContext, InvokeModelStage
-from strands.plugins import Plugin
-from strands.types.content import SystemContentBlock
-<%_ } _%>
 from <%- agentConnectionModuleName %> import log_model_errors, log_tool_errors
 <%_ if (protocol !== 'ag-ui') { _%>
 
@@ -18,40 +11,17 @@ from .session import get_session_manager
 
 
 @tool
+def current_time() -> str:
+    """Get the current date and time in UTC (ISO 8601)."""
+    return datetime.now(UTC).isoformat()
+
+
+@tool
 def subtract(a: int, b: int) -> int:
     return a - b
 
 
 AGENT_HOOKS: list[HookProvider | HookCallback] = [log_model_errors, log_tool_errors]
-<%_ if (protocol !== 'ag-ui') { _%>
-
-
-class CurrentTimePlugin(Plugin):
-    """Gives the model the current UTC time by adding it to the system prompt
-    before each model call, without changing the user's message text."""
-
-    name = "current-time"
-
-    def init_agent(self, agent: Agent) -> None:
-        async def add_current_time(context: InvokeModelContext) -> InvokeModelContext:
-            time_block: SystemContentBlock = {
-                "text": f"<current_time>{datetime.now(UTC).isoformat()}</current_time>"
-            }
-            system_prompt = context.system_prompt
-            if isinstance(system_prompt, str):
-                blocks: list[SystemContentBlock] = [{"text": system_prompt}, time_block]
-            elif system_prompt is None:
-                blocks = [time_block]
-            else:
-                blocks = [*system_prompt, time_block]
-            return context.replace(system_prompt=blocks)
-
-        agent.add_middleware(InvokeModelStage.Input, add_current_time)
-
-
-# Gives the model the current time with each model call
-AGENT_PLUGINS: list[Plugin] = [CurrentTimePlugin()]
-<%_ } _%>
 
 
 @contextmanager
@@ -64,10 +34,9 @@ You are a mathematical wizard.
 Use your tools for mathematical tasks.
 Refer to tools as your 'spellbook'.
 """,
-        tools=[subtract],
+        tools=[subtract, current_time],
         hooks=AGENT_HOOKS,
 <%_ if (protocol !== 'ag-ui') { _%>
-        plugins=AGENT_PLUGINS,
         session_manager=get_session_manager(),
 <%_ } _%>
     )
