@@ -5,7 +5,6 @@
 export interface ObservabilityLangfuseGeneratorSchema {
   project: string;
   agent?: string;
-  mode?: 'langfuse' | 'cloudwatch';
   host?: string;
   secretArn?: string;
   preferInstallDependencies?: boolean;

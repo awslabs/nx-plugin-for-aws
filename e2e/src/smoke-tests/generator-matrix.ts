@@ -277,14 +277,10 @@ export const runGeneratorMatrix = async (
       opts,
     );
     await runCLI(
-      `generate @aws/nx-plugin:observability#langfuse --project=py_langfuse_project --secretArn=arn:aws:secretsmanager:us-east-1:123456789012:secret:langfuse-abcdef --no-interactive${deferFlag}`,
+      `generate @aws/nx-plugin:observability#langfuse --project=py_langfuse_project --host=https://langfuse.example.com --secretArn=arn:aws:secretsmanager:us-east-1:123456789012:secret:langfuse-abcdef --no-interactive${deferFlag}`,
       opts,
     );
-    // Deployable matrices use CloudWatch; the generated exporter test runs offline.
-    await runCLI(
-      `generate @aws/nx-plugin:observability#langfuse --project=py_langfuse_project --mode=cloudwatch --no-interactive${deferFlag}`,
-      opts,
-    );
+    // The application stack does not instantiate this build-only agent.
   }
 
   // Website <-> FastAPI connection
