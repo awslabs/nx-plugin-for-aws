@@ -29,6 +29,7 @@ import { formatFilesInSubtree } from '../../utils/format.js';
 import { FS_DEPENDENCIES, FsCommands } from '../../utils/fs.js';
 import { installDependencies } from '../../utils/install.js';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
+import { esmVars } from '../../utils/module-format.js';
 import { kebabCase } from '../../utils/names.js';
 import {
   addComponentGeneratorMetadata,
@@ -127,6 +128,7 @@ export const observabilityLangfuseGenerator = async (
   options: ObservabilityLangfuseGeneratorSchema,
 ): Promise<GeneratorCallback> => {
   const project = readProjectConfigurationUnqualified(tree, options.project);
+  const { esm } = esmVars(tree);
   const components = (project.metadata?.components ??
     []) as ComponentMetadata[];
   const agent = resolveAgent(components, options.agent);
@@ -166,9 +168,10 @@ export const observabilityLangfuseGenerator = async (
     previous.host === host &&
     previous.secretArn === secretArn;
 
-  const agentDir = joinPathFragments(project.root, agent.path);
-  const agentModule = agent.path.split('/').join('.');
-  const agentFolder = agent.path.split('/').pop();
+  const agentPathParts = agent.path.split(/[\\/]/);
+  const agentDir = joinPathFragments(project.root, ...agentPathParts);
+  const agentModule = agentPathParts.join('.');
+  const agentFolder = agentPathParts.pop();
   const constructDir = joinPathFragments(
     PACKAGES_DIR,
     SHARED_CONSTRUCTS_DIR,
@@ -314,6 +317,7 @@ export const observabilityLangfuseGenerator = async (
       joinPathFragments(import.meta.dirname, 'files', 'cdk'),
       constructDir,
       {
+        esm,
         mode,
         host: JSON.stringify(host),
         secretArn: JSON.stringify(secretArn),
@@ -326,7 +330,7 @@ export const observabilityLangfuseGenerator = async (
       tree,
       construct,
       ['langfuseObservability', 'configureLangfuseRuntime'],
-      './langfuse-observability.js',
+      `./langfuse-observability${esm ? '.js' : ''}`,
     );
     await applyGritQL(
       tree,
@@ -364,43 +368,40 @@ export const observabilityLangfuseGenerator = async (
     packageTarget.options.commands.push(copy);
     updateProjectConfiguration(tree, project.name, project);
   }
-  if (unchanged) {
-    await formatFilesInSubtree(tree, undefined, { ignore: preservedFiles });
-    return () =>
-      installDependencies(tree, options.preferInstallDependencies, {
-        languages: ['python'],
-      });
+  if (!unchanged) {
+    // Hash formatted configuration so later runs can detect user edits.
+    await formatFilesInSubtree(tree, constructDir);
+    const metadata: LangfuseMetadata = {
+      mode,
+      host,
+      secretArn,
+      configHash: digest(tree.read(config, 'utf-8')),
+      packageCommand: copy,
+    };
+    addPyDependencies(tree, DEPENDENCIES, {
+      metadata,
+      projectRoot: project.root,
+    });
+    // Add creates missing metadata; update also applies changes on repeat runs.
+    addComponentGeneratorMetadata(
+      tree,
+      project.name,
+      OBSERVABILITY_LANGFUSE_GENERATOR_INFO,
+      agent.path,
+      agent.name,
+      metadata,
+    );
+    updateComponentGeneratorMetadata(
+      tree,
+      project.name,
+      OBSERVABILITY_LANGFUSE_GENERATOR_INFO,
+      agent.name,
+      metadata,
+    );
+    await addGeneratorMetricsIfApplicable(tree, [
+      OBSERVABILITY_LANGFUSE_GENERATOR_INFO,
+    ]);
   }
-  await formatFilesInSubtree(tree, undefined, { ignore: preservedFiles });
-  const metadata: LangfuseMetadata = {
-    mode,
-    host,
-    secretArn,
-    configHash: digest(tree.read(config, 'utf-8')),
-    packageCommand: copy,
-  };
-  addPyDependencies(tree, DEPENDENCIES, {
-    metadata,
-    projectRoot: project.root,
-  });
-  addComponentGeneratorMetadata(
-    tree,
-    project.name,
-    OBSERVABILITY_LANGFUSE_GENERATOR_INFO,
-    agent.path,
-    agent.name,
-    metadata,
-  );
-  updateComponentGeneratorMetadata(
-    tree,
-    project.name,
-    OBSERVABILITY_LANGFUSE_GENERATOR_INFO,
-    agent.name,
-    metadata,
-  );
-  await addGeneratorMetricsIfApplicable(tree, [
-    OBSERVABILITY_LANGFUSE_GENERATOR_INFO,
-  ]);
   await formatFilesInSubtree(tree, undefined, { ignore: preservedFiles });
   return () =>
     installDependencies(tree, options.preferInstallDependencies, {
