@@ -167,12 +167,14 @@ AG-UIエージェントは <Link path="/guides/connection/react-agui">`connectio
 
 <Tabs syncKey="agent-framework">
 <TabItem label="Strands" _filter={{ framework: 'strands' }}>
-```python title="packages/my-project/my_module/agent/agent.py" {16-20,32}
+```python title="packages/my-project/my_module/agent/agent.py" {18-22,39}
 from contextlib import contextmanager
+from datetime import UTC, datetime
 
 from strands import Agent, tool
 from strands.hooks import HookCallback, HookProvider
-from strands_tools import current_time
+from strands.plugins import Plugin
+from strands.vended_plugins.context_injector import ContextInjector
 from my_scope_agent_connection import log_model_errors, log_tool_errors
 
 from .session import get_session_manager
@@ -192,6 +194,11 @@ def get_weather(city: str) -> str:
 
 AGENT_HOOKS: list[HookProvider | HookCallback] = [log_model_errors, log_tool_errors]
 
+# Gives the model the current time with each user message
+AGENT_PLUGINS: list[Plugin] = [
+    ContextInjector(lambda _: f"<current_time>{datetime.now(UTC).isoformat()}</current_time>"),
+]
+
 
 @contextmanager
 def get_agent():
@@ -199,8 +206,9 @@ def get_agent():
         name="MyAgent",
         description="MyAgent Strands Agent",
         system_prompt="You are a helpful assistant with access to various tools.",
-        tools=[subtract, current_time, get_weather],
+        tools=[subtract, get_weather],
         hooks=AGENT_HOOKS,
+        plugins=AGENT_PLUGINS,
         session_manager=get_session_manager(),
     )
 ```
@@ -248,10 +256,10 @@ def get_agent():
 
 <Tabs syncKey="agent-framework">
 <TabItem label="Strands" _filter={{ framework: 'strands' }}>
-Strandsは `strands-agents-tools` パッケージを通じて事前構築済みツールのコレクションを提供しています。ジェネレーターはすでにこれをプロジェクトの `pyproject.toml` に追加しています。必要なツールをインポートして `get_agent()` に追加します:
+Strands SDKは `strands.vended_tools` に事前構築済みツールを含んでいるため、追加のパッケージは不要です。必要なツールをインポートして `get_agent()` に追加します:
 
 ```python title="packages/my-project/my_module/agent/agent.py" {1,11}
-from strands_tools import current_time, file_read, http_request
+from strands.vended_tools import http_request, read
 
 # ...
 
@@ -261,11 +269,14 @@ def get_agent():
         name="MyAgent",
         description="MyAgent Strands Agent",
         system_prompt="You are a helpful assistant.",
-        tools=[current_time, file_read, http_request],
+        tools=[read, http_request],
         hooks=AGENT_HOOKS,
+        plugins=AGENT_PLUGINS,
         session_manager=get_session_manager(),
     )
 ```
+
+生成されたエージェントは時刻を伝えるツールを必要としません。`AGENT_PLUGINS` は `ContextInjector` プラグインを保持しており、これは各ユーザーメッセージでモデル入力に現在のUTC時刻を追加します。`strands-agents-tools` パッケージは非推奨となっており、バージョン0.9.0以降ではそのツールをインポートすると `ImportError` が発生するため、ジェネレーターはこれを `pyproject.toml` に追加しません。プロジェクトに既にリストされている場合は、0.9未満にピン留めするか、使用していない場合は削除してください。[Strandsマイグレーションガイド](https://strandsagents.com/docs/user-guide/migrate/strands-agents-tools/) には各ツールの代替が記載されています。
 </TabItem>
 <TabItem label="LangChain" _filter={{ framework: 'langchain' }}>
 LangChainは大規模な [ツールと統合](https://docs.langchain.com/oss/python/integrations/tools) のエコシステムを提供しており、それぞれが独自のパッケージで配布されています。ジェネレーターはこれらを追加しないため、まず必要なものをインストールしてください — 例えば、以下の検索ツールが含まれる `langchain-community`:
@@ -315,8 +326,9 @@ def get_agent():
         name="MyAgent",
         description="MyAgent Strands Agent",
         system_prompt="You are a helpful assistant.",
-        tools=[subtract, current_time],
+        tools=[subtract],
         hooks=AGENT_HOOKS,
+        plugins=AGENT_PLUGINS,
         session_manager=get_session_manager(),
     )
 ```

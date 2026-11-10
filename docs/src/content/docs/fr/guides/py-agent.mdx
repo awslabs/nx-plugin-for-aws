@@ -167,12 +167,14 @@ Définissez l'outil, puis ajoutez-le à la liste `tools` dans `get_agent()` :
 
 <Tabs syncKey="agent-framework">
 <TabItem label="Strands" _filter={{ framework: 'strands' }}>
-```python title="packages/my-project/my_module/agent/agent.py" {16-20,32}
+```python title="packages/my-project/my_module/agent/agent.py" {18-22,39}
 from contextlib import contextmanager
+from datetime import UTC, datetime
 
 from strands import Agent, tool
 from strands.hooks import HookCallback, HookProvider
-from strands_tools import current_time
+from strands.plugins import Plugin
+from strands.vended_plugins.context_injector import ContextInjector
 from my_scope_agent_connection import log_model_errors, log_tool_errors
 
 from .session import get_session_manager
@@ -192,6 +194,11 @@ def get_weather(city: str) -> str:
 
 AGENT_HOOKS: list[HookProvider | HookCallback] = [log_model_errors, log_tool_errors]
 
+# Gives the model the current time with each user message
+AGENT_PLUGINS: list[Plugin] = [
+    ContextInjector(lambda _: f"<current_time>{datetime.now(UTC).isoformat()}</current_time>"),
+]
+
 
 @contextmanager
 def get_agent():
@@ -199,8 +206,9 @@ def get_agent():
         name="MyAgent",
         description="MyAgent Strands Agent",
         system_prompt="You are a helpful assistant with access to various tools.",
-        tools=[subtract, current_time, get_weather],
+        tools=[subtract, get_weather],
         hooks=AGENT_HOOKS,
+        plugins=AGENT_PLUGINS,
         session_manager=get_session_manager(),
     )
 ```
@@ -248,10 +256,10 @@ def get_agent():
 
 <Tabs syncKey="agent-framework">
 <TabItem label="Strands" _filter={{ framework: 'strands' }}>
-Strands fournit une collection d'outils pré-construits via le package `strands-agents-tools`, que le générateur ajoute déjà au `pyproject.toml` de votre projet. Importez les outils que vous souhaitez et ajoutez-les à `get_agent()` :
+Le SDK Strands inclut des outils pré-construits dans `strands.vended_tools`, ils ne nécessitent donc aucun package supplémentaire. Importez les outils que vous souhaitez et ajoutez-les à `get_agent()` :
 
 ```python title="packages/my-project/my_module/agent/agent.py" {1,11}
-from strands_tools import current_time, file_read, http_request
+from strands.vended_tools import http_request, read
 
 # ...
 
@@ -261,11 +269,14 @@ def get_agent():
         name="MyAgent",
         description="MyAgent Strands Agent",
         system_prompt="You are a helpful assistant.",
-        tools=[current_time, file_read, http_request],
+        tools=[read, http_request],
         hooks=AGENT_HOOKS,
+        plugins=AGENT_PLUGINS,
         session_manager=get_session_manager(),
     )
 ```
+
+L'agent généré n'a pas besoin d'un outil pour indiquer l'heure. `AGENT_PLUGINS` contient un plugin `ContextInjector`, qui ajoute l'heure UTC actuelle à l'entrée du modèle avec chaque message utilisateur. Le package `strands-agents-tools` est déprécié, et à partir de la version 0.9.0, l'importation de l'un de ses outils lève une `ImportError`, donc le générateur ne l'ajoute pas au `pyproject.toml`. Si votre projet le liste déjà, gardez-le épinglé en dessous de 0.9 ou supprimez-le si vous ne l'utilisez pas. Le [guide de migration Strands](https://strandsagents.com/docs/user-guide/migrate/strands-agents-tools/) liste le remplacement pour chacun de ses outils.
 </TabItem>
 <TabItem label="LangChain" _filter={{ framework: 'langchain' }}>
 LangChain fournit un large écosystème d'[outils et intégrations](https://docs.langchain.com/oss/python/integrations/tools), chacun distribué dans son propre package. Le générateur ne les ajoute pas, donc installez d'abord celui dont vous avez besoin — par exemple `langchain-community`, d'où provient l'outil de recherche ci-dessous :
@@ -315,8 +326,9 @@ def get_agent():
         name="MyAgent",
         description="MyAgent Strands Agent",
         system_prompt="You are a helpful assistant.",
-        tools=[subtract, current_time],
+        tools=[subtract],
         hooks=AGENT_HOOKS,
+        plugins=AGENT_PLUGINS,
         session_manager=get_session_manager(),
     )
 ```

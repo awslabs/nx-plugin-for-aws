@@ -167,12 +167,14 @@ Defina a ferramenta e, em seguida, adicione-a à lista `tools` dentro de `get_ag
 
 <Tabs syncKey="agent-framework">
 <TabItem label="Strands" _filter={{ framework: 'strands' }}>
-```python title="packages/my-project/my_module/agent/agent.py" {16-20,32}
+```python title="packages/my-project/my_module/agent/agent.py" {18-22,39}
 from contextlib import contextmanager
+from datetime import UTC, datetime
 
 from strands import Agent, tool
 from strands.hooks import HookCallback, HookProvider
-from strands_tools import current_time
+from strands.plugins import Plugin
+from strands.vended_plugins.context_injector import ContextInjector
 from my_scope_agent_connection import log_model_errors, log_tool_errors
 
 from .session import get_session_manager
@@ -192,6 +194,11 @@ def get_weather(city: str) -> str:
 
 AGENT_HOOKS: list[HookProvider | HookCallback] = [log_model_errors, log_tool_errors]
 
+# Gives the model the current time with each user message
+AGENT_PLUGINS: list[Plugin] = [
+    ContextInjector(lambda _: f"<current_time>{datetime.now(UTC).isoformat()}</current_time>"),
+]
+
 
 @contextmanager
 def get_agent():
@@ -199,8 +206,9 @@ def get_agent():
         name="MyAgent",
         description="MyAgent Strands Agent",
         system_prompt="You are a helpful assistant with access to various tools.",
-        tools=[subtract, current_time, get_weather],
+        tools=[subtract, get_weather],
         hooks=AGENT_HOOKS,
+        plugins=AGENT_PLUGINS,
         session_manager=get_session_manager(),
     )
 ```
@@ -248,10 +256,10 @@ def get_agent():
 
 <Tabs syncKey="agent-framework">
 <TabItem label="Strands" _filter={{ framework: 'strands' }}>
-Strands fornece uma coleção de ferramentas pré-construídas através do pacote `strands-agents-tools`, que o gerador já adiciona ao `pyproject.toml` do seu projeto. Importe as ferramentas que você deseja e adicione-as a `get_agent()`:
+O Strands SDK inclui ferramentas pré-construídas em `strands.vended_tools`, então elas não precisam de pacote extra. Importe as ferramentas que você deseja e adicione-as a `get_agent()`:
 
 ```python title="packages/my-project/my_module/agent/agent.py" {1,11}
-from strands_tools import current_time, file_read, http_request
+from strands.vended_tools import http_request, read
 
 # ...
 
@@ -261,11 +269,14 @@ def get_agent():
         name="MyAgent",
         description="MyAgent Strands Agent",
         system_prompt="You are a helpful assistant.",
-        tools=[current_time, file_read, http_request],
+        tools=[read, http_request],
         hooks=AGENT_HOOKS,
+        plugins=AGENT_PLUGINS,
         session_manager=get_session_manager(),
     )
 ```
+
+O agente gerado não precisa de uma ferramenta para informar a hora. `AGENT_PLUGINS` contém um plugin `ContextInjector`, que adiciona a hora UTC atual à entrada do modelo com cada mensagem do usuário. O pacote `strands-agents-tools` está obsoleto, e a partir da versão 0.9.0 importar qualquer uma de suas ferramentas gera um `ImportError`, então o gerador não o adiciona ao `pyproject.toml`. Se seu projeto já o lista, mantenha-o fixado abaixo de 0.9 ou remova-o se você não o usar. O [guia de migração do Strands](https://strandsagents.com/docs/user-guide/migrate/strands-agents-tools/) lista a substituição para cada uma de suas ferramentas.
 </TabItem>
 <TabItem label="LangChain" _filter={{ framework: 'langchain' }}>
 LangChain fornece um grande ecossistema de [ferramentas e integrações](https://docs.langchain.com/oss/python/integrations/tools), cada uma distribuída em seu próprio pacote. O gerador não adiciona esses pacotes, então instale o que você precisa primeiro — por exemplo `langchain-community`, de onde vem a ferramenta de pesquisa abaixo:
@@ -315,8 +326,9 @@ def get_agent():
         name="MyAgent",
         description="MyAgent Strands Agent",
         system_prompt="You are a helpful assistant.",
-        tools=[subtract, current_time],
+        tools=[subtract],
         hooks=AGENT_HOOKS,
+        plugins=AGENT_PLUGINS,
         session_manager=get_session_manager(),
     )
 ```
