@@ -20,7 +20,11 @@ const [override] = expected;
 const overridden = parsePipRequirementsLine(override);
 const overriddenName =
   overridden?.type === 'ProjectName' ? overridden.name : '';
-const strandsTools = `strands-agents-tools${PY_VERSIONS['strands-agents-tools']}`;
+// The last strands-agents-tools pin the generators vended. They no longer add
+// the package, so the tests add it where v1.0.15 had it. The migration matches
+// the package by name, so the version is not significant.
+const STRANDS_TOOLS_PIN = '==0.8.11';
+const strandsTools = `strands-agents-tools${STRANDS_TOOLS_PIN}`;
 
 describe('py-agent-pillow-override migration', () => {
   let tree: Tree;
@@ -45,6 +49,13 @@ describe('py-agent-pillow-override migration', () => {
       infra: 'none',
       iac: 'cdk',
     });
+    // A v1.0.15 Strands agent listed strands-agents-tools.
+    if (framework === 'strands') {
+      const path = 'packages/py_project/pyproject.toml';
+      const toml = parse(tree.read(path, 'utf-8') ?? '') as UVPyprojectToml;
+      toml.project.dependencies.push(strandsTools);
+      tree.write(path, stringify(toml as any));
+    }
   };
 
   // Set the root override-dependencies, or remove them. The generators write
@@ -147,18 +158,18 @@ describe('py-agent-pillow-override migration', () => {
     expect(nextSteps).toEqual([]);
   });
 
-  it.each([
-    strandsTools,
-    `Strands_Agents_Tools${PY_VERSIONS['strands-agents-tools']}`,
-  ])('should detect %s in any member project', async (dependency) => {
-    writeRoot();
-    addPyProject('a', pyproject('a', [`fastapi${PY_VERSIONS.fastapi}`]));
-    addPyProject('b', pyproject('b', [dependency]));
+  it.each([strandsTools, `Strands_Agents_Tools${STRANDS_TOOLS_PIN}`])(
+    'should detect %s in any member project',
+    async (dependency) => {
+      writeRoot();
+      addPyProject('a', pyproject('a', [`fastapi${PY_VERSIONS.fastapi}`]));
+      addPyProject('b', pyproject('b', [dependency]));
 
-    await migration(tree);
+      await migration(tree);
 
-    expect(readRoot().tool.uv['override-dependencies']).toEqual(expected);
-  });
+      expect(readRoot().tool.uv['override-dependencies']).toEqual(expected);
+    },
+  );
 
   it('should leave an override-dependencies that is not a list alone', async () => {
     await generateWorkspace();

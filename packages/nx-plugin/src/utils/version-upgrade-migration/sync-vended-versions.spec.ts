@@ -688,6 +688,33 @@ dependencies = [ "some-other-package==1.0.0" ]
     );
   });
 
+  // py#agent stopped vending strands-agents-tools (0.9.0 removed every tool),
+  // so a Strands agent's existing pin must stay where it is.
+  it('should leave the strands-agents-tools pin of a Strands agent alone', async () => {
+    addProjectConfiguration(tree, 'agent', {
+      root: 'packages/agent',
+      metadata: {
+        components: [
+          { generator: 'py#agent', framework: 'strands', protocol: 'http' },
+        ],
+      } as never,
+    });
+    tree.write(
+      'packages/agent/pyproject.toml',
+      `[project]
+dependencies = [ "strands-agents==1.0.0", "strands-agents-tools==0.8.11" ]
+`,
+    );
+
+    await syncVendedVersions(tree);
+
+    const pyProject = tree.read('packages/agent/pyproject.toml', 'utf-8');
+    expect(pyProject).toContain(
+      `"strands-agents${PY_VERSIONS['strands-agents']}"`,
+    );
+    expect(pyProject).toContain('"strands-agents-tools==0.8.11"');
+  });
+
   it('should not downgrade a terraform provider or rewrite an unvended one', async () => {
     tree.write('packages/infra/src/providers.tf', requiredProviders('99.0.0'));
     tree.write(

@@ -379,6 +379,45 @@ with get_agent() as agent:
     expect(tree.read(AGENT_PY, 'utf-8')).toBe(NEW_AGENT_PY);
   });
 
+  it.each(['strands-agents-tools==0.8.11', 'Strands_Agents_Tools>=0.8,<0.9'])(
+    'should keep %s in pyproject.toml and add a next step about it',
+    async (requirement) => {
+      setUpProject(tree);
+      tree.write(AGENT_PY, OLD_AGENT_PY);
+      const pyproject = `${PROJECT_ROOT}/pyproject.toml`;
+      const pyprojectContent = `[project]
+name = "proj.test_project"
+version = "0.1.0"
+dependencies = ["strands-agents==1.20.0", "${requirement}"]
+`;
+      tree.write(pyproject, pyprojectContent);
+
+      const { nextSteps } = await migration(tree);
+
+      expect(nextSteps).toEqual([
+        `${pyproject}: it lists strands-agents-tools, which the py#agent generator no longer adds. strands-agents-tools 0.9.0 is a tombstone release (importing any of its tools raises ImportError); keep it pinned below 0.9 or remove it if unused.`,
+      ]);
+      expect(tree.read(pyproject, 'utf-8')).toBe(pyprojectContent);
+      expect(tree.read(AGENT_PY, 'utf-8')).toBe(NEW_AGENT_PY);
+    },
+  );
+
+  it('should not add the strands-agents-tools next step outside py#agent projects', async () => {
+    addProjectConfiguration(tree, 'other', { root: 'apps/other' });
+    tree.write(
+      'apps/other/pyproject.toml',
+      `[project]
+name = "other"
+version = "0.1.0"
+dependencies = ["strands-agents-tools==0.8.11"]
+`,
+    );
+
+    const { nextSteps } = await migration(tree);
+
+    expect(nextSteps).toEqual([]);
+  });
+
   it('should be a no-op in a workspace without any py#agent project', async () => {
     const other = 'apps/other/other/agent.py';
     addProjectConfiguration(tree, 'other', { root: 'apps/other' });

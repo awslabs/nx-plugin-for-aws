@@ -44,7 +44,6 @@ export const PY_AGENT_GUARDRAIL_VERIFIER_DEPENDENCIES: string[] = [
     'aws-lambda-powertools',
     'boto3',
     'strands-agents',
-    'strands-agents-tools',
     'langchain',
     'langchain-aws',
     'langgraph',

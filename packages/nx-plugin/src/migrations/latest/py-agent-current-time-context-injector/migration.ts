@@ -9,6 +9,7 @@ import {
   type Tree,
   visitNotIgnoredFiles,
 } from '@nx/devkit';
+import { parsePipRequirementsLine } from 'pip-requirements-js';
 import { PY_AGENT_GENERATOR_INFO } from '../../../py/agent/generator.js';
 import {
   addPythonDestructuredImport,
@@ -18,7 +19,10 @@ import {
   matchGritQL,
 } from '../../../utils/ast.js';
 import { formatFilesInSubtree } from '../../../utils/format.js';
+import { normalizeDistributionName } from '../../../utils/names.js';
 import type { ComponentMetadata } from '../../../utils/nx.js';
+import type { UVPyprojectToml } from '../../../utils/nxlv-python.js';
+import { tryReadToml } from '../../../utils/toml.js';
 
 /**
  * Tell py#agent Strands agents the current time with a `ContextInjector`
@@ -39,6 +43,10 @@ import type { ComponentMetadata } from '../../../utils/nx.js';
  *
  * Every other Python file in a py#agent project that uses
  * `strands_tools`'s `current_time` is left unchanged and listed in `nextSteps`.
+ *
+ * The generator no longer adds strands-agents-tools, but this migration leaves
+ * the dependency in place: a py#agent project whose `[project].dependencies`
+ * lists it gets a `nextSteps` note to keep it below 0.9 or remove it.
  */
 
 const OLD_IMPORT = 'from strands_tools import current_time';
@@ -95,6 +103,35 @@ const usesStrandsCurrentTime = (content: string): boolean =>
 
 const divergedNextStep = (filePath: string): string =>
   `${filePath}: it uses current_time from strands-agents-tools in a shape this migration does not recognise, so it was left unchanged. strands-agents-tools 0.9.0 removed current_time (importing it raises ImportError). Remove the tool and give the agent the time with the ContextInjector plugin instead, as the py#agent generator does: https://strandsagents.com/docs/user-guide/migrate/strands-agents-tools/`;
+
+const STRANDS_TOOLS = 'strands-agents-tools';
+
+/** True when a requirement names strands-agents-tools, in any PEP 503 spelling. */
+const isStrandsToolsRequirement = (requirement: unknown): boolean => {
+  if (typeof requirement !== 'string') return false;
+  try {
+    const parsed = parsePipRequirementsLine(requirement);
+    return (
+      (parsed?.type === 'ProjectName' || parsed?.type === 'ProjectURL') &&
+      normalizeDistributionName(parsed.name) === STRANDS_TOOLS
+    );
+  } catch {
+    return false;
+  }
+};
+
+/** True when the pyproject.toml's `[project].dependencies` lists strands-agents-tools. */
+const listsStrandsTools = (tree: Tree, pyprojectPath: string): boolean => {
+  const dependencies = (
+    tryReadToml(tree, pyprojectPath) as UVPyprojectToml | undefined
+  )?.project?.dependencies;
+  return (
+    Array.isArray(dependencies) && dependencies.some(isStrandsToolsRequirement)
+  );
+};
+
+const strandsToolsNextStep = (pyprojectPath: string): string =>
+  `${pyprojectPath}: it lists strands-agents-tools, which the py#agent generator no longer adds. strands-agents-tools 0.9.0 is a tombstone release (importing any of its tools raises ImportError); keep it pinned below 0.9 or remove it if unused.`;
 
 /** True when agent.py still has exactly the shape the generator wrote. */
 const hasVendedAgentShape = async (
@@ -231,6 +268,12 @@ export default async function migration(
         nextSteps.push(divergedNextStep(filePath));
       }
     });
+
+    // The dependency stays; only point out that 0.9.0 must not be installed.
+    const pyprojectPath = joinPathFragments(project.root, 'pyproject.toml');
+    if (listsStrandsTools(tree, pyprojectPath)) {
+      nextSteps.push(strandsToolsNextStep(pyprojectPath));
+    }
   }
 
   await formatFilesInSubtree(tree);

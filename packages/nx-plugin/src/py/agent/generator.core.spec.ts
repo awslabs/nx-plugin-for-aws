@@ -111,11 +111,12 @@ dev-dependencies = []
         dep.startsWith('strands-agents=='),
       ),
     ).toBe(true);
+    // strands-agents-tools 0.9.0 removed every tool, so it is not vended.
     expect(
       pyprojectToml.project.dependencies.some((dep) =>
-        dep.startsWith('strands-agents-tools=='),
+        dep.startsWith('strands-agents-tools'),
       ),
-    ).toBe(true);
+    ).toBe(false);
 
     // Check that project configuration was updated with serve target
     const projectConfig = JSON.parse(
@@ -427,11 +428,12 @@ dev-dependencies = []
         dep.startsWith('strands-agents=='),
       ),
     ).toBe(true);
+    // strands-agents-tools 0.9.0 removed every tool, so it is not vended.
     expect(
       pyprojectToml.project.dependencies.some((dep) =>
-        dep.startsWith('strands-agents-tools=='),
+        dep.startsWith('strands-agents-tools'),
       ),
-    ).toBe(true);
+    ).toBe(false);
 
     // Check that project configuration was updated with serve target only
     const projectConfig = JSON.parse(
