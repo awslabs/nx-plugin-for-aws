@@ -33,6 +33,7 @@ interface ModelRequest {
   modelId: string;
   guardrailConfig: Record<string, string> | null;
   userTexts: string[];
+  systemTexts: string[];
   intervened: boolean;
 }
 
@@ -328,20 +329,18 @@ describe('guardrail.py at runtime', { timeout: 600_000 }, () => {
           expect(request.intervened).toBe(false);
         }
         // The session keeps the earlier turn, with the blocked message
-        // redacted. A Strands agent's ContextInjector plugin adds the current
-        // time to the latest user message only, and never stores it in the
-        // session, so the earlier turn has no time.
-        const [redacted, ask, ...injected] = followUps[0].userTexts;
-        expect([redacted, ask]).toEqual(['[User input redacted.]', '2+2?']);
-        expect(injected).toEqual(
-          framework === 'strands'
-            ? [
-                expect.stringMatching(
-                  /^\s*<current_time>\d{4}-\d{2}-\d{2}T[^<]+\+00:00<\/current_time>$/,
-                ),
-              ]
-            : [],
-        );
+        // redacted. A Strands agent adds the current time to the system
+        // prompt, not the user message, so the user turn is unchanged and the
+        // time never enters the stored session.
+        expect(followUps[0].userTexts).toEqual([
+          '[User input redacted.]',
+          '2+2?',
+        ]);
+        if (framework === 'strands') {
+          expect(followUps[0].systemTexts.at(-1)).toMatch(
+            /^\s*<current_time>\d{4}-\d{2}-\d{2}T[^<]+\+00:00<\/current_time>$/,
+          );
+        }
       },
     );
 

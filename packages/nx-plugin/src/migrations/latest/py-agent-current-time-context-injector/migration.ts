@@ -25,13 +25,14 @@ import type { UVPyprojectToml } from '../../../utils/nxlv-python.js';
 import { tryReadToml } from '../../../utils/toml.js';
 
 /**
- * Tell py#agent Strands agents the current time with a `ContextInjector`
- * plugin instead of the `current_time` tool.
+ * Tell py#agent Strands agents the current time with a `CurrentTimePlugin`
+ * instead of the `current_time` tool.
  *
  * strands-agents-tools 0.9.0 removed every tool: importing `current_time`
- * raises ImportError. Its migration guide replaces `current_time` with the
- * SDK's `ContextInjector` plugin, which adds the time to the model input
- * before each user message so the model does not need to call a tool.
+ * raises ImportError. In its place the generator vends a small plugin that
+ * adds the current UTC time to the system prompt before each model call, so
+ * the model knows the time without a tool and without the time ever landing
+ * in the user's message text.
  *
  * An `agent.py` is rewritten only when it still has the shape the generator
  * wrote: the single `from strands_tools import current_time` line,
@@ -51,11 +52,52 @@ import { tryReadToml } from '../../../utils/toml.js';
 
 const OLD_IMPORT = 'from strands_tools import current_time';
 
-/** The constant inserted after `AGENT_HOOKS`, as the generator vends it. */
-const AGENT_PLUGINS_CONSTANT = `# Gives the model the current time with each user message
-AGENT_PLUGINS: list[Plugin] = [
-    ContextInjector(lambda _: f"<current_time>{datetime.now(UTC).isoformat()}</current_time>"),
-]`;
+/** The `CurrentTimePlugin` class the generator vends, shared by agent.py and
+ * (for AG-UI) main.py. */
+const CURRENT_TIME_PLUGIN_CLASS = `class CurrentTimePlugin(Plugin):
+    """Gives the model the current UTC time by adding it to the system prompt
+    before each model call, without changing the user's message text."""
+
+    name = "current-time"
+
+    def init_agent(self, agent: Agent) -> None:
+        async def add_current_time(context: InvokeModelContext) -> InvokeModelContext:
+            time_block: SystemContentBlock = {
+                "text": f"<current_time>{datetime.now(UTC).isoformat()}</current_time>"
+            }
+            system_prompt = context.system_prompt
+            if isinstance(system_prompt, str):
+                blocks: list[SystemContentBlock] = [{"text": system_prompt}, time_block]
+            elif system_prompt is None:
+                blocks = [time_block]
+            else:
+                blocks = [*system_prompt, time_block]
+            return context.replace(system_prompt=blocks)
+
+        agent.add_middleware(InvokeModelStage.Input, add_current_time)`;
+
+/** The plugin and constant inserted after `AGENT_HOOKS` in a non-AG-UI agent.py. */
+const AGENT_PLUGINS_CONSTANT = `${CURRENT_TIME_PLUGIN_CLASS}
+
+
+# Gives the model the current time with each model call
+AGENT_PLUGINS: list[Plugin] = [CurrentTimePlugin()]`;
+
+/**
+ * The plugin and constant inserted into an AG-UI main.py. AG-UI reads plugins
+ * off the adapter rather than the template Agent, and agent.py is the file
+ * users rewrite, so the plugin lives here instead of in agent.py.
+ */
+const MAIN_PLUGINS_CONSTANT = `${CURRENT_TIME_PLUGIN_CLASS}
+
+
+# Gives the model the current time with each model call. Defined here, not in
+# agent.py, because AG-UI reads plugins off this adapter rather than the
+# template Agent, and agent.py is the file users rewrite for their own agent.
+AGENT_PLUGINS: list[Plugin] = [CurrentTimePlugin()]`;
+
+/** The logging line an AG-UI main.py carries; the plugin is inserted after it. */
+const MAIN_LOGGING_LINE = 'logging.basicConfig(level=logging.INFO)';
 
 /** The comment the generator vends above `plugins=` in an AG-UI main.py. */
 const AGUI_PLUGINS_COMMENT =
@@ -64,8 +106,11 @@ const AGUI_PLUGINS_COMMENT =
 /** Names the rewrite adds to agent.py, which must not already be in use. */
 const ADDED_NAMES = [
   'AGENT_PLUGINS',
-  'ContextInjector',
+  'CurrentTimePlugin',
+  'InvokeModelContext',
+  'InvokeModelStage',
   'Plugin',
+  'SystemContentBlock',
   'UTC',
   'datetime',
 ];
@@ -102,7 +147,7 @@ const usesStrandsCurrentTime = (content: string): boolean =>
   content.includes('strands_tools') && countWord(content, 'current_time') > 0;
 
 const divergedNextStep = (filePath: string): string =>
-  `${filePath}: it uses current_time from strands-agents-tools in a shape this migration does not recognise, so it was left unchanged. strands-agents-tools 0.9.0 removed current_time (importing it raises ImportError). Remove the tool and give the agent the time with the ContextInjector plugin instead, as the py#agent generator does: https://strandsagents.com/docs/user-guide/migrate/strands-agents-tools/`;
+  `${filePath}: it uses current_time from strands-agents-tools in a shape this migration does not recognise, so it was left unchanged. strands-agents-tools 0.9.0 removed current_time (importing it raises ImportError). Remove the tool and give the agent the time with a context plugin instead, as the py#agent generator does: https://strandsagents.com/docs/user-guide/migrate/strands-agents-tools/`;
 
 const STRANDS_TOOLS = 'strands-agents-tools';
 
@@ -155,13 +200,54 @@ const hasVendedAgentShape = async (
   );
 };
 
-/** Rewrite agent.py from the current_time tool to the ContextInjector plugin. */
-const rewriteAgent = async (tree: Tree, agentPath: string): Promise<void> => {
+/** The strands imports the CurrentTimePlugin needs, added to a file. */
+const addPluginImports = async (
+  tree: Tree,
+  filePath: string,
+): Promise<void> => {
+  await addPythonDestructuredImport(
+    tree,
+    filePath,
+    ['UTC', 'datetime'],
+    'datetime',
+  );
+  await addPythonDestructuredImport(
+    tree,
+    filePath,
+    ['InvokeModelContext', 'InvokeModelStage'],
+    'strands.middleware',
+  );
+  await addPythonDestructuredImport(
+    tree,
+    filePath,
+    ['Plugin'],
+    'strands.plugins',
+  );
+  await addPythonDestructuredImport(
+    tree,
+    filePath,
+    ['SystemContentBlock'],
+    'strands.types.content',
+  );
+};
+
+/** Drop the current_time tool entry and its import from agent.py. */
+const dropCurrentTime = async (
+  tree: Tree,
+  agentPath: string,
+): Promise<void> => {
   await applyGritQL(tree, agentPath, DROP_CURRENT_TIME_TOOL);
   tree.write(
     agentPath,
     (tree.read(agentPath, 'utf-8') ?? '').replace(`${OLD_IMPORT}\n`, ''),
   );
+};
+
+/** Add the CurrentTimePlugin, AGENT_PLUGINS and its imports to agent.py. */
+const addPluginToAgent = async (
+  tree: Tree,
+  agentPath: string,
+): Promise<void> => {
   await insertViaGritQL(
     tree,
     agentPath,
@@ -169,24 +255,25 @@ const rewriteAgent = async (tree: Tree, agentPath: string): Promise<void> => {
     AGENT_PLUGINS_CONSTANT,
   );
   await applyGritQL(tree, agentPath, ADD_AGENT_PLUGINS_KWARG);
-  await addPythonDestructuredImport(
-    tree,
-    agentPath,
-    ['UTC', 'datetime'],
-    'datetime',
+  await addPluginImports(tree, agentPath);
+};
+
+/**
+ * Add the CurrentTimePlugin, AGENT_PLUGINS, its imports and the `plugins=`
+ * kwarg to an AG-UI main.py. The plugin lives here, not in agent.py, because
+ * AG-UI reads plugins off the adapter rather than the template Agent.
+ */
+const addPluginToMain = async (tree: Tree, mainPath: string): Promise<void> => {
+  tree.write(
+    mainPath,
+    (tree.read(mainPath, 'utf-8') ?? '').replace(
+      `${MAIN_LOGGING_LINE}\n`,
+      `${MAIN_LOGGING_LINE}\n\n\n${MAIN_PLUGINS_CONSTANT}\n`,
+    ),
   );
-  await addPythonDestructuredImport(
-    tree,
-    agentPath,
-    ['Plugin'],
-    'strands.plugins',
-  );
-  await addPythonDestructuredImport(
-    tree,
-    agentPath,
-    ['ContextInjector'],
-    'strands.vended_plugins.context_injector',
-  );
+  await applyGritQL(tree, mainPath, AGUI_ADD_PLUGINS_KWARG);
+  await addPythonDestructuredImport(tree, mainPath, ['Agent'], 'strands');
+  await addPluginImports(tree, mainPath);
 };
 
 /**
@@ -215,15 +302,13 @@ const migrateAgent = async (
     return [agentPath];
   }
 
-  await rewriteAgent(tree, agentPath);
+  await dropCurrentTime(tree, agentPath);
+  // AG-UI reads plugins off the adapter, not the template Agent, and agent.py
+  // is the file users rewrite, so the plugin goes in main.py there.
   if (isAgUi) {
-    await applyGritQL(tree, mainPath, AGUI_ADD_PLUGINS_KWARG);
-    await addPythonDestructuredImport(
-      tree,
-      mainPath,
-      ['AGENT_PLUGINS'],
-      '.agent',
-    );
+    await addPluginToMain(tree, mainPath);
+  } else {
+    await addPluginToAgent(tree, agentPath);
   }
   return [agentPath];
 };

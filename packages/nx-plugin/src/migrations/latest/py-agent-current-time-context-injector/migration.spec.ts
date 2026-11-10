@@ -82,8 +82,9 @@ from datetime import UTC, datetime
 from proj_agent_connection import log_model_errors, log_tool_errors
 from strands import Agent, tool
 from strands.hooks import HookCallback, HookProvider
+from strands.middleware import InvokeModelContext, InvokeModelStage
 from strands.plugins import Plugin
-from strands.vended_plugins.context_injector import ContextInjector
+from strands.types.content import SystemContentBlock
 
 from .session import get_session_manager
 
@@ -95,12 +96,32 @@ def subtract(a: int, b: int) -> int:
 
 AGENT_HOOKS: list[HookProvider | HookCallback] = [log_model_errors, log_tool_errors]
 
-# Gives the model the current time with each user message
-AGENT_PLUGINS: list[Plugin] = [
-    ContextInjector(
-        lambda _: f"<current_time>{datetime.now(UTC).isoformat()}</current_time>"
-    ),
-]
+
+class CurrentTimePlugin(Plugin):
+    """Gives the model the current UTC time by adding it to the system prompt
+    before each model call, without changing the user's message text."""
+
+    name = "current-time"
+
+    def init_agent(self, agent: Agent) -> None:
+        async def add_current_time(context: InvokeModelContext) -> InvokeModelContext:
+            time_block: SystemContentBlock = {
+                "text": f"<current_time>{datetime.now(UTC).isoformat()}</current_time>"
+            }
+            system_prompt = context.system_prompt
+            if isinstance(system_prompt, str):
+                blocks: list[SystemContentBlock] = [{"text": system_prompt}, time_block]
+            elif system_prompt is None:
+                blocks = [time_block]
+            else:
+                blocks = [*system_prompt, time_block]
+            return context.replace(system_prompt=blocks)
+
+        agent.add_middleware(InvokeModelStage.Input, add_current_time)
+
+
+# Gives the model the current time with each model call
+AGENT_PLUGINS: list[Plugin] = [CurrentTimePlugin()]
 
 
 @contextmanager
@@ -124,22 +145,46 @@ Refer to tools as your 'spellbook'.
  * Roll a freshly generated agent back to the shape the generator wrote before
  * this change.
  */
-const rollBackAgentPy = (vended: string): string =>
-  vended
+const rollBackAgentPy = (vended: string): string => {
+  const withoutPlugin = vended
     .replace('from datetime import UTC, datetime\n', '')
     .replace(
-      'from strands.plugins import Plugin\nfrom strands.vended_plugins.context_injector import ContextInjector\n',
-      'from strands_tools import current_time\n',
+      'from strands.middleware import InvokeModelContext, InvokeModelStage\n',
+      '',
     )
-    .replace(/\n# Gives the model the current time[\s\S]*?\n\]\n/, '')
+    .replace(
+      /class CurrentTimePlugin\(Plugin\):[\s\S]*?AGENT_PLUGINS: list\[Plugin\] = \[CurrentTimePlugin\(\)\]\n\n\n/,
+      '',
+    )
     .replace('tools=[subtract]', 'tools=[subtract, current_time]')
     .replace('        plugins=AGENT_PLUGINS,\n', '');
+  // Non-AG-UI agents import the plugin's strands types; swap them for the old
+  // strands_tools import. AG-UI agents keep no plugin in agent.py, so add the
+  // old import after strands.hooks instead.
+  return withoutPlugin.includes('from strands.plugins import Plugin\n')
+    ? withoutPlugin.replace(
+        'from strands.plugins import Plugin\nfrom strands.types.content import SystemContentBlock\n',
+        'from strands_tools import current_time\n',
+      )
+    : withoutPlugin.replace(
+        'from strands.hooks import HookCallback, HookProvider\n',
+        'from strands.hooks import HookCallback, HookProvider\nfrom strands_tools import current_time\n',
+      );
+};
 
 const rollBackAgUiMainPy = (vended: string): string =>
   vended
+    .replace('from datetime import UTC, datetime\n', '')
+    .replace('from strands import Agent\n', '')
     .replace(
-      'from .agent import AGENT_HOOKS, AGENT_PLUGINS, get_agent',
-      'from .agent import AGENT_HOOKS, get_agent',
+      'from strands.middleware import InvokeModelContext, InvokeModelStage\n',
+      '',
+    )
+    .replace('from strands.plugins import Plugin\n', '')
+    .replace('from strands.types.content import SystemContentBlock\n', '')
+    .replace(
+      /class CurrentTimePlugin\(Plugin\):[\s\S]*?AGENT_PLUGINS: list\[Plugin\] = \[CurrentTimePlugin\(\)\]\n\n\n/,
+      '',
     )
     .replace(
       '            # AG-UI does not copy plugins from the template Agent either.\n            plugins=AGENT_PLUGINS,\n',
@@ -182,7 +227,7 @@ describe('py-agent-current-time-context-injector migration', () => {
     tree = createTreeUsingTsSolutionSetup();
   });
 
-  it('should replace the current_time tool with the ContextInjector plugin', async () => {
+  it('should replace the current_time tool with the time plugin', async () => {
     setUpProject(tree);
     tree.write(AGENT_PY, OLD_AGENT_PY);
 
@@ -282,7 +327,7 @@ describe('py-agent-current-time-context-injector migration', () => {
 
     expect(nextSteps).toHaveLength(1);
     expect(nextSteps[0]).toContain(AGENT_PY);
-    expect(nextSteps[0]).toContain('ContextInjector');
+    expect(nextSteps[0]).toContain('context plugin');
     expect(tree.read(AGENT_PY, 'utf-8')).toBe(edited);
   });
 
