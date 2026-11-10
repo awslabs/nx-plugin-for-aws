@@ -178,12 +178,12 @@ const listsStrandsTools = (tree: Tree, pyprojectPath: string): boolean => {
 const strandsToolsNextStep = (pyprojectPath: string): string =>
   `${pyprojectPath}: it lists strands-agents-tools, which the py#agent generator no longer adds. strands-agents-tools 0.9.0 is a tombstone release (importing any of its tools raises ImportError); keep it pinned below 0.9 or remove it if unused.`;
 
-/** True when agent.py still has exactly the shape the generator wrote. */
+/** True when agent.py, holding `content`, still has exactly the shape the generator wrote. */
 const hasVendedAgentShape = async (
   tree: Tree,
   agentPath: string,
+  content: string,
 ): Promise<boolean> => {
-  const content = tree.read(agentPath, 'utf-8') ?? '';
   const importLines = content
     .split('\n')
     .filter((line) => line.includes('strands_tools'));
@@ -291,11 +291,12 @@ const migrateAgent = async (
 
   const agentPath = joinPathFragments(agentDir, 'agent.py');
   const mainPath = joinPathFragments(agentDir, 'main.py');
-  if (!usesStrandsCurrentTime(tree.read(agentPath, 'utf-8') ?? '')) return [];
+  const agentContent = tree.read(agentPath, 'utf-8') ?? '';
+  if (!usesStrandsCurrentTime(agentContent)) return [];
 
   const isAgUi = component.protocol === 'ag-ui';
   if (
-    !(await hasVendedAgentShape(tree, agentPath)) ||
+    !(await hasVendedAgentShape(tree, agentPath, agentContent)) ||
     (isAgUi && !(await matchGritQL(tree, mainPath, AGUI_HOOKS_KWARG)))
   ) {
     nextSteps.push(divergedNextStep(agentPath));

@@ -8,6 +8,7 @@ import {
   pyAgentGenerator,
 } from '../../../py/agent/generator.js';
 import { createTreeUsingTsSolutionSetup } from '../../../utils/test.js';
+import { tryReadToml } from '../../../utils/toml.js';
 import migration from './migration.js';
 
 const PROJECT_ROOT = 'apps/test-project';
@@ -20,8 +21,15 @@ type Protocol = 'http' | 'a2a' | 'ag-ui';
 /** Register a py#agent component as the generator records it. */
 const setUpProject = (
   tree: Tree,
-  options: { protocol?: Protocol; framework?: 'strands' | 'langchain' } = {},
+  options: {
+    protocol?: Protocol;
+    framework?: 'strands' | 'langchain';
+    /** The recorded component path; `null` records none. */
+    path?: string | null;
+  } = {},
 ) => {
+  const path =
+    options.path === undefined ? 'proj_test_project/agent' : options.path;
   addProjectConfiguration(tree, 'test-project', {
     root: PROJECT_ROOT,
     sourceRoot: `${PROJECT_ROOT}/proj_test_project`,
@@ -30,7 +38,7 @@ const setUpProject = (
       components: [
         {
           generator: PY_AGENT_GENERATOR_INFO.id,
-          path: 'proj_test_project/agent',
+          ...(path === null ? {} : { path }),
           protocol: options.protocol ?? 'http',
           framework: options.framework ?? 'strands',
           name: 'agent',
@@ -424,7 +432,49 @@ with get_agent() as agent:
     expect(tree.read(AGENT_PY, 'utf-8')).toBe(NEW_AGENT_PY);
   });
 
-  it.each(['strands-agents-tools==0.8.11', 'Strands_Agents_Tools>=0.8,<0.9'])(
+  it('should rewrite an agent recorded with a legacy agent.py component path', async () => {
+    // Older releases recorded the component path as the agent.py file itself.
+    setUpProject(tree, { path: 'proj_test_project/agent/agent.py' });
+    tree.write(AGENT_PY, OLD_AGENT_PY);
+
+    const { nextSteps } = await migration(tree);
+
+    // Rewritten once, and not listed again by the project-wide scan.
+    expect(nextSteps).toEqual([]);
+    expect(tree.read(AGENT_PY, 'utf-8')).toBe(NEW_AGENT_PY);
+  });
+
+  it('should list an agent.py whose component has no path instead of rewriting it', async () => {
+    setUpProject(tree, { path: null });
+    tree.write(AGENT_PY, OLD_AGENT_PY);
+
+    const { nextSteps } = await migration(tree);
+
+    expect(nextSteps).toHaveLength(1);
+    expect(nextSteps[0]).toContain(AGENT_PY);
+    expect(nextSteps[0]).toContain('left unchanged');
+    expect(tree.read(AGENT_PY, 'utf-8')).toBe(OLD_AGENT_PY);
+  });
+
+  it('should list current_time use elsewhere when the agent.py is missing', async () => {
+    setUpProject(tree);
+    // The user moved the agent out of agent.py into a module of their own.
+    const moved = `${AGENT_DIR}/core.py`;
+    tree.write(moved, OLD_AGENT_PY);
+
+    const { nextSteps } = await migration(tree);
+
+    expect(tree.exists(AGENT_PY)).toBe(false);
+    expect(nextSteps).toHaveLength(1);
+    expect(nextSteps[0]).toContain(moved);
+    expect(tree.read(moved, 'utf-8')).toBe(OLD_AGENT_PY);
+  });
+
+  it.each([
+    'strands-agents-tools==0.8.11',
+    'Strands_Agents_Tools>=0.8,<0.9',
+    'strands-agents-tools @ https://github.com/strands-agents/tools/archive/v0.8.11.zip',
+  ])(
     'should keep %s in pyproject.toml and add a next step about it',
     async (requirement) => {
       setUpProject(tree);
@@ -443,6 +493,35 @@ dependencies = ["strands-agents==1.20.0", "${requirement}"]
         `${pyproject}: it lists strands-agents-tools, which the py#agent generator no longer adds. strands-agents-tools 0.9.0 is a tombstone release (importing any of its tools raises ImportError); keep it pinned below 0.9 or remove it if unused.`,
       ]);
       expect(tree.read(pyproject, 'utf-8')).toBe(pyprojectContent);
+      expect(tree.read(AGENT_PY, 'utf-8')).toBe(NEW_AGENT_PY);
+    },
+  );
+
+  it.each([
+    // An invalid requirement string that names the package.
+    '["strands-agents==1.20.0", "strands-agents-tools ==="]',
+    // Entries that are not requirement strings at all.
+    '[{ name = "strands-agents-tools" }]',
+  ])(
+    'should skip dependencies it cannot read as requirements: %s',
+    async (dependencies) => {
+      setUpProject(tree);
+      tree.write(AGENT_PY, OLD_AGENT_PY);
+      const pyproject = `${PROJECT_ROOT}/pyproject.toml`;
+      tree.write(
+        pyproject,
+        `[project]
+name = "proj.test_project"
+version = "0.1.0"
+dependencies = ${dependencies}
+`,
+      );
+      // The file itself parses, so the entries are what the migration skips.
+      expect(tryReadToml(tree, pyproject)).toBeDefined();
+
+      const { nextSteps } = await migration(tree);
+
+      expect(nextSteps).toEqual([]);
       expect(tree.read(AGENT_PY, 'utf-8')).toBe(NEW_AGENT_PY);
     },
   );
