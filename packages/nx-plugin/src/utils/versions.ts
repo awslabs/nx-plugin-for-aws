@@ -271,7 +271,7 @@ export const PY_VERSIONS = {
   langchain: '==1.5.0',
   'langchain-aws': '==1.9.3',
   'langchain-mcp-adapters': '==0.3.2',
-  langfuse: '==4.15.0',
+  langfuse: '==4.18.0',
   langgraph: '==1.2.22',
   'langgraph-checkpoint-aws': '==1.2.7',
   'langgraph-checkpoint-sqlite': '==3.1.3',
