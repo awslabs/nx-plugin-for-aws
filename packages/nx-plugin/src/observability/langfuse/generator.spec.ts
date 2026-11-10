@@ -6,6 +6,7 @@ import {
   addProjectConfiguration,
   readProjectConfiguration,
   type Tree,
+  updateJson,
   updateProjectConfiguration,
 } from '@nx/devkit';
 import ts from 'typescript';
@@ -136,6 +137,51 @@ describe('observability#langfuse generator', () => {
     });
     expect(files(tree)).toEqual(before);
     expect(tree.read(`${AGENT}/init.py`, 'utf-8')).not.toContain('langfuse');
+  });
+
+  it('generates Python imports and filenames from Windows agent paths', async () => {
+    await addAgent();
+    const project = readProjectConfiguration(tree, options.project);
+    const agent = (
+      project.metadata.components as { generator: string; path: string }[]
+    ).find((component) => component.generator === 'py#agent');
+    if (!agent) {
+      throw new Error('Expected generated Python agent metadata');
+    }
+    agent.path = agent.path.replaceAll('/', '\\');
+    updateProjectConfiguration(tree, project.name, project);
+
+    await observabilityLangfuseGenerator(tree, options);
+
+    expect(
+      tree.read(`${ROOT}/package/agent/langfuse_main.py`, 'utf-8'),
+    ).toContain('from test_project.agent.langfuse_telemetry import ');
+    expect(
+      tree.read(`${ROOT}/tests/test_agent_langfuse.py`, 'utf-8'),
+    ).toContain('from test_project.agent import langfuse_telemetry');
+    expect(tree.exists(`${AGENT}/langfuse_telemetry.py`)).toBe(true);
+    const generated = files(tree);
+    await observabilityLangfuseGenerator(tree, options);
+    expect(files(tree)).toEqual(generated);
+  });
+
+  it.each([
+    ['module', '.js'],
+    ['commonjs', ''],
+  ])('uses %s imports for CDK wiring', async (type, suffix) => {
+    updateJson(tree, 'package.json', (json) => ({ ...json, type }));
+    await addAgent();
+    await observabilityLangfuseGenerator(tree, options);
+
+    expect(tree.read(CONSTRUCT, 'utf-8')).toContain(
+      `from './langfuse-observability${suffix}'`,
+    );
+    expect(tree.read(CONFIG, 'utf-8')).toContain(
+      `from '../../../core/runtime-config${suffix}'`,
+    );
+    const generated = files(tree);
+    await observabilityLangfuseGenerator(tree, options);
+    expect(files(tree)).toEqual(generated);
   });
 
   it('is idempotent and preserves user edits', async () => {

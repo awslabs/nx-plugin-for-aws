@@ -3,6 +3,7 @@ import json
 import logging
 import subprocess
 import sys
+from hashlib import sha256
 from io import StringIO
 from uuid import UUID, uuid4
 
@@ -174,16 +175,29 @@ def check_invocation_lifecycle(monkeypatch):
             assert sent[-1]["type"] == "http.response.body"
         assert trace.get_tracer_provider() is provider
 
-        before = len(exported.get_finished_spans())
-        invalid = {**scope, "headers": [(b"x-amzn-bedrock-agentcore-runtime-session-id", b"x" * 201)]}
         messages = []
 
         async def collect(message):
             messages.append(message)
 
-        await middleware(invalid, receive, collect)
-        assert messages[0]["status"] == 400
-        assert len(exported.get_finished_spans()) == before
+        grouped_sessions = []
+        for session in ("x" * 200, "x" * 201, "x" * 256, "y" * 201, "x" * 201):
+            before = len(exported.get_finished_spans())
+            messages.clear()
+            headers = [(b"x-amzn-bedrock-agentcore-runtime-session-id", session.encode())]
+            await middleware({**scope, "headers": headers}, receive, collect)
+            assert messages[0]["status"] == 200
+            spans = exported.get_finished_spans()[before:]
+            assert len(spans) == 4
+            root = next(span for span in spans if span.name == "Agent invocation")
+            assert root.attributes is not None
+            session_id = root.attributes["session.id"]
+            grouped_sessions.append(session_id)
+            assert all(span.attributes is not None and span.attributes.get("session.id") == session_id for span in spans)
+        assert grouped_sessions[0] == "x" * 200
+        assert grouped_sessions[1] == grouped_sessions[4] == sha256(b"x" * 201).hexdigest()
+        assert grouped_sessions[2] == sha256(b"x" * 256).hexdigest()
+        assert len(set(grouped_sessions[:4])) == 4
 
         for headers in ([(b"x-amzn-bedrock-agentcore-runtime-session-id", b"too-short")], []):
             before = len(exported.get_finished_spans())
