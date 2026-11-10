@@ -41,7 +41,7 @@ Prompts, completions, model usage, and tool inputs/outputs are sent to the confi
 
 CloudWatch/X-Ray usage charges associated with the switched-off application traces decrease; runtime metrics and log charges remain. Langfuse has its own plan or hosting costs, and Secrets Manager and outbound transfer may add charges. There is no dual-export cost in this version.
 
-The exporter batches spans and attempts a bounded flush before each invocation's final response frame. This adds request-tail latency. Export failures or an interrupted process can still lose telemetry; traces are not a durable audit log.
+The exporter batches spans and attempts a flush before each invocation's final response frame, with an 8-second flush timeout inside a 10-second guard. This can add up to 10 seconds of latency before the final response frame. Export failures or an interrupted process can still lose telemetry; traces are not a durable audit log.
 
 </OptionFilter>
 
@@ -63,7 +63,7 @@ Create a Secrets Manager secret in the agent's AWS account and region. Its JSON 
 
 Use the AWS managed Secrets Manager encryption key for this first version. A secret encrypted with a customer-managed KMS key needs an additional, explicitly scoped decrypt grant that this generator does not create.
 
-Pass the secret's **complete ARN**, including its six-character suffix, and your Langfuse base URL:
+Pass the secret's **complete ARN**, including its six-character suffix, and your Langfuse base URL. This experimental generator accepts ARNs in the `aws`, `aws-us-gov`, and `aws-cn` partitions; ISO partitions are not supported.
 
 ```sh
 pnpm nx g @aws/nx-plugin:observability#langfuse \
@@ -88,7 +88,7 @@ Invoke the deployed agent with a prompt that calls a tool. Open its trace detail
 
 The application root retains the upstream AWS trace and parent IDs; the Langfuse SDK marks it as the logical application root even though the AWS service parent is not exported to Langfuse.
 
-Use session IDs between 33 and 200 characters. A missing ID or one shorter than 33 characters gets a new UUID for that invocation. This version rejects longer IDs because Langfuse cannot group them as sessions. The generated client uses UUIDs within this limit.
+Session IDs between 33 and 200 characters appear unchanged in Langfuse. Longer IDs use their 64-character SHA-256 hex digest as the Langfuse session ID, so repeated requests still appear in the same session. This mapping changes only Langfuse grouping; the AgentCore session ID sent to the application is unchanged. A missing ID or one shorter than 33 characters gets a new UUID for that invocation. The generated client uses UUIDs within these limits.
 
 The generated `dev` target remains local and does not initialize Langfuse or fetch its secret. Local Langfuse export is not part of this version. The generated Python test uses an in-memory exporter and synthetic credentials to check propagation, session grouping, and flush ordering without network access.
 
@@ -100,7 +100,7 @@ The generator adds `langfuse_telemetry.py` beside the agent, a separate `package
 
 The Langfuse entrypoint creates one provider before importing the agent. FastAPI's overlapping tracing is disabled only in that process; native Strands spans use the same provider. The Langfuse SDK's public observation API supplies the application root and session attributes. Invocation input/output capture is bounded to 1 MiB each; the root records `content_truncated` when that limit is exceeded.
 
-The dependency set holds Langfuse at 4.15.0, ADOT at 0.22.0, and the OpenTelemetry packages ADOT requires, including API/SDK/HTTP exporter 1.45.1. Upgrade these together after compatibility testing. Starlette follows FastAPI's dependency requirements.
+The dependency set uses Langfuse 4.18.0 and ADOT 0.22.0. The vended OpenTelemetry pins match ADOT's requirements, including API/SDK/HTTP exporter 1.45.1, and are held to preserve that compatibility. ADOT and Langfuse remain eligible for the repository's regular dependency updates; check their compatibility and adjust the OpenTelemetry pins when upgrading. Starlette follows FastAPI's dependency requirements.
 
 Repeating the generator with the same inputs does not duplicate wiring or overwrite your runtime edits. Changing host, secret, or mode updates the generated CDK configuration. If you edit that configuration or remove its wiring, the generator asks you to reconcile it before changing options. This prevents an option change from silently replacing custom infrastructure.
 
