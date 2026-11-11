@@ -23,6 +23,16 @@ import RunGenerator from '@components/run-generator.astro';
 
 在池中拥有用户名和密码的用户仍然可以登录。
 
+## 谁可以登录
+
+添加身份提供商可能会让比您预期更多的人进入您的网站。`ts#website#auth` 的 `allowSignup` 选项不适用于联合用户。Cognito 在某人首次通过身份提供商登录时创建联合用户，即使用户池不允许用户自行注册。每个联合用户还会获得身份池的已认证角色，因此他们可以像任何已登录用户一样调用您的 API 和代理。
+
+因此，身份提供商决定谁可以登录。设置它以便仅让需要您网站的人登录：
+
+- Microsoft Entra ID：在应用程序的企业应用程序属性中，将"需要分配？"设置为"是"，并仅分配需要访问的用户或组。使用默认值"否"时，租户中的每个用户都可以登录。
+- Okta：仅将应用程序分配给需要访问的组。
+- Auth0：在应用程序使用的每个连接上禁用注册，并仅为应用程序启用其用户需要访问的连接。否则，任何通过已启用连接（例如社交连接）注册的人都可以登录。
+
 ## 使用方法
 
 ### 添加身份提供商
@@ -85,7 +95,7 @@ import RunGenerator from '@components/run-generator.astro';
   </Fragment>
 </Infrastructure>
 
-第二个身份提供商会添加在第一个之后。使用相同的 `name` 再次运行生成器不会更改任何文件，生成器也不会覆盖您对身份提供商文件的编辑。名称必须在字母大小写之外有所不同：`okta` 之后的 `Okta` 算作同一个身份提供商，因此不会有任何更改。
+第二个身份提供商会添加在第一个之后。使用相同的 `name` 和选项再次运行生成器不会更改任何文件，生成器也不会覆盖您对身份提供商文件的编辑。如果您使用相同的 `name` 但其他选项再次运行它，生成器会保留现有文件并警告新选项未应用。要更改身份提供商，请编辑其文件。仅在字母大小写或连字符上不同的名称（如 `TestIdp` 和 `Test-Idp`）使用相同的文件，因此生成器拒绝第二个名称。
 
 如果您更改了 `user-identity.ts` 或 `supported_identity_providers` 列表，使得生成器无法再识别它，生成器会保持该文件不变。它会打印出需要手动添加的行。
 
@@ -141,7 +151,7 @@ Terraform 身份提供商文件还设置了 Cognito 在返回身份提供商时�
 
 ## 身份提供商说明
 
-以下设置来自各供应商的文档。只有作为身份提供商的 Cognito 用户池已使用此生成器进行了测试。该测试是此生成器发布所需的 AWS 检查。
+以下设置来自各供应商的文档。只有作为身份提供商的 Cognito 用户池已使用此生成器进行了测试。
 
 ### Okta
 
@@ -170,6 +180,14 @@ Terraform 身份提供商文件还设置了 Cognito 在返回身份提供商时�
 - 用户池中要求的 MFA（多因素身份验证）不适用于联合用户。Cognito 将他们的身份验证留给身份提供商，因此在身份提供商处强制执行 MFA。
 - 从您的网站注销仅结束 Cognito 会话。它不会结束用户在 OIDC 身份提供商处的会话，因此通过按钮的下一次登录可以在没有密码的情况下完成。在共享计算机上，用户还必须在身份提供商处注销。
 - 用户菜单显示 Cognito 用户名。对于联合用户，它是身份提供商名称、下划线和用户在身份提供商处的 `sub`，小写，例如 `testidp_00u1abcd`。
+- 在身份提供商处删除或禁用用户仅会阻止他们通过它的下一次登录。Cognito 使用自己的刷新令牌续订令牌，不会询问身份提供商，网站在用户不注意的情况下续订令牌。因此，用户可以保持访问权限，直到刷新令牌过期，最多在他们上次登录后 30 天。要立即结束用户的访问权限，还要将他们从每个会话中注销并在用户池中禁用他们。他们的用户名是 `<identity provider name in lowercase>_<sub>`：
+
+  ```bash
+  aws cognito-idp admin-user-global-sign-out --user-pool-id <user pool id> --username testidp_<sub>
+  aws cognito-idp admin-disable-user --user-pool-id <user pool id> --username testidp_<sub>
+  ```
+
+  Web 客户端上较短的刷新令牌有效期（CDK 中的 `refreshTokenValidity`，Terraform 中的 `refresh_token_validity`）会缩短被删除用户保持访问权限的时间。这尚未在 AWS 上测试。
 
 ## 客户端密钥
 
@@ -178,13 +196,13 @@ Cognito 在身份提供商的设置中保存客户端密钥。任何被允许在
 <Infrastructure>
   <Fragment slot="cdk">
 构造将密钥作为[动态引用](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/dynamic-references-secretsmanager.html)传递给 CloudFormation，`{{resolve:secretsmanager:<clientSecretName>:SecretString:::}}`。合成的模板仅包含该引用。CloudFormation 在创建或更新身份提供商时读取密钥。如果您轮换密钥，Cognito 仅在稍后部署中身份提供商资源更改时才获得新值。
+
+CloudFormation 在身份提供商的设置（`ProviderDetails`）内解析引用，因此联合登录使用存储的密钥有效，部署的模板仍然仅保存引用。轮换后，没有其他更改的部署在 Cognito 中保留了旧密钥。两者都已在 AWS 上检查。
   </Fragment>
   <Fragment slot="terraform">
 模块使用 `data "aws_secretsmanager_secret_version"` 数据源读取密钥，因此 `terraform plan` 将其显示为 `(sensitive value)`。Terraform 状态仍然以纯文本形式保存密钥，一次用于数据源，一次用于身份提供商。任何可以读取状态存储桶中状态对象的人都可以读取密钥。相应地限制对状态存储桶的读取访问。
   </Fragment>
 </Infrastructure>
-
-此生成器的 AWS 检查通过 CDK 确认 CloudFormation 在身份提供商的设置中填充了 `{{resolve:secretsmanager:...}}` 引用。联合登录有效，部署的模板仅保存引用。密钥轮换后，没有其他更改的部署在 Cognito 中保留了旧密钥，因为 CloudFormation 仅在身份提供商资源更改时读取密钥。
 
 要将轮换的密钥发送到 Cognito：
 
@@ -199,7 +217,7 @@ SecretValue.secretsManager('TestIdp-oidc-client-secret', { versionId: '<version 
 然后模板中的引用会更改，因此 CloudFormation 更新身份提供商并读取该版本的密钥。在每次轮换时再次更改版本 ID。这遵循 CloudFormation 动态引用文档，尚未在 AWS 上测试。
   </Fragment>
   <Fragment slot="terraform">
-在轮换后运行 `terraform plan` 和 `terraform apply`。数据源在每次计划时读取密钥的当前版本，因此计划显示身份提供商的就地更新，`apply` 将新密钥发送到 Cognito。这是从生成的工作区使用的 `hashicorp/aws` 提供商 6.69.1 的源代码中读取的：对 `provider_details` 的更改会就地更新身份提供商，而不会替换它。尚未在 AWS 上测试。
+在轮换后运行 `terraform plan` 和 `terraform apply`。数据源在每次计划时读取密钥的当前版本，因此计划显示身份提供商的就地更新，`apply` 将新密钥发送到 Cognito。在 `hashicorp/aws` 提供商源代码中，对 `provider_details` 的更改会就地更新身份提供商，而不会替换它。尚未在 AWS 上测试。
   </Fragment>
 </Infrastructure>
 

@@ -23,6 +23,16 @@ Generator này thêm một nhà cung cấp danh tính [OpenID Connect](https://o
 
 Người dùng có tên người dùng và mật khẩu trong pool vẫn có thể đăng nhập.
 
+## Ai có thể đăng nhập
+
+Thêm một nhà cung cấp danh tính có thể cho phép nhiều người vào website của bạn hơn bạn mong đợi. Tùy chọn `allowSignup` của `ts#website#auth` không áp dụng cho federated users. Cognito tạo một federated user lần đầu tiên ai đó đăng nhập thông qua nhà cung cấp danh tính, ngay cả khi user pool không cho phép người dùng tự đăng ký. Mỗi federated user cũng nhận được authenticated role của identity pool, vì vậy họ có thể gọi các API và agent của bạn như bất kỳ người dùng đã đăng nhập nào.
+
+Do đó nhà cung cấp danh tính quyết định ai có thể đăng nhập. Thiết lập nó sao cho nó chỉ cho phép đăng nhập những người cần website của bạn:
+
+- Microsoft Entra ID: trong thuộc tính enterprise application của ứng dụng, đặt "Assignment required?" thành Yes, và chỉ gán những người dùng hoặc nhóm cần quyền truy cập. Với mặc định, No, mọi người dùng trong tenant của bạn đều có thể đăng nhập.
+- Okta: chỉ gán ứng dụng cho các nhóm cần quyền truy cập.
+- Auth0: vô hiệu hóa sign-ups trên mỗi connection mà ứng dụng sử dụng, và chỉ bật cho ứng dụng những connection mà người dùng của chúng cần quyền truy cập. Nếu không, bất kỳ ai đăng ký thông qua một connection đã bật, ví dụ như một social connection, đều có thể đăng nhập.
+
 ## Sử dụng
 
 ### Thêm nhà cung cấp danh tính
@@ -85,7 +95,7 @@ Generator cũng chỉnh sửa web client của user pool, Cognito app client mà
   </Fragment>
 </Infrastructure>
 
-Nhà cung cấp danh tính thứ hai được thêm sau nhà cung cấp đầu tiên. Chạy lại generator với cùng `name` không thay đổi file nào, và generator không ghi đè các chỉnh sửa của bạn đối với file nhà cung cấp danh tính. Tên phải khác nhau nhiều hơn chỉ chữ hoa chữ thường: `Okta` sau `okta` được tính là cùng một nhà cung cấp danh tính, nên không có gì thay đổi.
+Nhà cung cấp danh tính thứ hai được thêm sau nhà cung cấp đầu tiên. Chạy lại generator với cùng `name` và các tùy chọn không thay đổi file nào, và generator không ghi đè các chỉnh sửa của bạn đối với file nhà cung cấp danh tính. Nếu bạn chạy lại nó với cùng `name` nhưng các tùy chọn khác, generator giữ file hiện có và cảnh báo rằng các tùy chọn mới không được áp dụng. Để thay đổi nhà cung cấp danh tính, hãy chỉnh sửa file của nó. Các tên chỉ khác nhau về chữ hoa chữ thường hoặc dấu gạch ngang, chẳng hạn như `TestIdp` và `Test-Idp`, sử dụng cùng một file, vì vậy generator từ chối tên thứ hai.
 
 Nếu bạn đã thay đổi `user-identity.ts` hoặc danh sách `supported_identity_providers` sao cho generator không còn nhận ra nó, generator sẽ để file đó không thay đổi. Thay vào đó, nó in ra các dòng cần thêm bằng tay.
 
@@ -141,7 +151,7 @@ File nhà cung cấp danh tính Terraform cũng đặt hai giá trị mà Cognit
 
 ## Ghi chú về nhà cung cấp danh tính
 
-Các cài đặt dưới đây đến từ tài liệu của mỗi nhà cung cấp. Chỉ có Cognito user pool hoạt động như nhà cung cấp danh tính đã được kiểm tra với generator này. Kiểm tra đó là kiểm tra AWS mà một bản phát hành của generator này cần.
+Các cài đặt dưới đây đến từ tài liệu của mỗi nhà cung cấp. Chỉ có Cognito user pool hoạt động như nhà cung cấp danh tính đã được kiểm tra với generator này.
 
 ### Okta
 
@@ -170,6 +180,14 @@ Chưa được kiểm tra. Đăng ký một ứng dụng single-tenant trong Ent
 - MFA (xác thực đa yếu tố) được yêu cầu trong user pool của bạn không áp dụng cho federated users. Cognito để xác thực của họ cho nhà cung cấp danh tính, vì vậy hãy thực thi MFA tại nhà cung cấp danh tính.
 - Đăng xuất khỏi website của bạn chỉ kết thúc phiên Cognito. Nó không kết thúc phiên của người dùng tại nhà cung cấp danh tính OIDC, vì vậy lần đăng nhập tiếp theo thông qua nút có thể hoàn thành mà không cần mật khẩu. Trên máy tính dùng chung, người dùng cũng phải đăng xuất tại nhà cung cấp danh tính.
 - Menu người dùng hiển thị tên người dùng Cognito. Đối với federated user, đó là tên nhà cung cấp danh tính, một dấu gạch dưới và `sub` của người dùng tại nhà cung cấp danh tính, ở dạng chữ thường, ví dụ `testidp_00u1abcd`.
+- Xóa hoặc vô hiệu hóa người dùng tại nhà cung cấp danh tính chỉ ngăn lần đăng nhập tiếp theo của họ thông qua nó. Cognito gia hạn token bằng refresh token riêng của nó và không hỏi nhà cung cấp danh tính, và website gia hạn token mà người dùng không nhận thấy. Do đó người dùng có thể giữ quyền truy cập cho đến khi refresh token hết hạn, tối đa 30 ngày sau lần đăng nhập cuối cùng của họ. Để kết thúc quyền truy cập của người dùng ngay lập tức, cũng đăng xuất họ khỏi mọi phiên và vô hiệu hóa họ trong user pool. Tên người dùng của họ là `<identity provider name in lowercase>_<sub>`:
+
+  ```bash
+  aws cognito-idp admin-user-global-sign-out --user-pool-id <user pool id> --username testidp_<sub>
+  aws cognito-idp admin-disable-user --user-pool-id <user pool id> --username testidp_<sub>
+  ```
+
+  Thời hạn refresh token ngắn hơn trên web client (`refreshTokenValidity` trong CDK, `refresh_token_validity` trong Terraform) rút ngắn thời gian người dùng bị xóa giữ quyền truy cập. Điều này chưa được kiểm tra trên AWS.
 
 ## Client secret
 
@@ -178,13 +196,13 @@ Cognito giữ client secret trong cài đặt của nhà cung cấp danh tính. 
 <Infrastructure>
   <Fragment slot="cdk">
 Construct truyền secret cho CloudFormation dưới dạng [dynamic reference](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/dynamic-references-secretsmanager.html), `{{resolve:secretsmanager:<clientSecretName>:SecretString:::}}`. Template được tổng hợp chỉ chứa tham chiếu đó. CloudFormation đọc secret khi nó tạo hoặc cập nhật nhà cung cấp danh tính. Nếu bạn xoay secret, Cognito chỉ nhận giá trị mới khi tài nguyên nhà cung cấp danh tính thay đổi trong một lần deploy sau.
+
+CloudFormation giải quyết tham chiếu bên trong cài đặt của nhà cung cấp danh tính (`ProviderDetails`), vì vậy đăng nhập federated hoạt động với secret được lưu trữ, và template đã deploy vẫn chỉ giữ tham chiếu. Sau khi xoay, một lần deploy không có thay đổi nào khác để lại secret cũ trong Cognito. Cả hai đều đã được kiểm tra trên AWS.
   </Fragment>
   <Fragment slot="terraform">
 Module đọc secret với data source `data "aws_secretsmanager_secret_version"`, vì vậy `terraform plan` hiển thị nó là `(sensitive value)`. Terraform state vẫn giữ secret ở dạng văn bản thuần túy, một lần cho data source và một lần cho nhà cung cấp danh tính. Bất kỳ ai có thể đọc state object trong state bucket của bạn đều có thể đọc secret. Hạn chế quyền truy cập đọc vào state bucket cho phù hợp.
   </Fragment>
 </Infrastructure>
-
-Kiểm tra AWS cho generator này đã xác nhận với CDK rằng CloudFormation điền tham chiếu `{{resolve:secretsmanager:...}}` bên trong cài đặt của nhà cung cấp danh tính. Đăng nhập federated hoạt động, và template đã deploy chỉ giữ tham chiếu. Sau khi secret được xoay, một lần deploy không có thay đổi nào khác để lại secret cũ trong Cognito, vì CloudFormation chỉ đọc secret khi tài nguyên nhà cung cấp danh tính thay đổi.
 
 Để gửi secret đã xoay đến Cognito:
 
@@ -199,7 +217,7 @@ SecretValue.secretsManager('TestIdp-oidc-client-secret', { versionId: '<version 
 Tham chiếu trong template sau đó thay đổi, vì vậy CloudFormation cập nhật nhà cung cấp danh tính và đọc phiên bản đó của secret. Thay đổi version ID lại ở mỗi lần xoay. Điều này tuân theo tài liệu CloudFormation cho dynamic references và chưa được kiểm tra trên AWS.
   </Fragment>
   <Fragment slot="terraform">
-Chạy `terraform plan` và `terraform apply` sau khi xoay. Data source đọc phiên bản hiện tại của secret ở mỗi plan, vì vậy plan hiển thị một cập nhật tại chỗ của nhà cung cấp danh tính, và `apply` gửi secret mới đến Cognito. Điều này được đọc từ nguồn của nhà cung cấp `hashicorp/aws` 6.69.1, mà workspace được tạo sử dụng: một thay đổi đối với `provider_details` cập nhật nhà cung cấp danh tính tại chỗ và không thay thế nó. Nó chưa được kiểm tra trên AWS.
+Chạy `terraform plan` và `terraform apply` sau khi xoay. Data source đọc phiên bản hiện tại của secret ở mỗi plan, vì vậy plan hiển thị một cập nhật tại chỗ của nhà cung cấp danh tính, và `apply` gửi secret mới đến Cognito. Trong nguồn của nhà cung cấp `hashicorp/aws`, một thay đổi đối với `provider_details` cập nhật nhà cung cấp danh tính tại chỗ và không thay thế nó. Điều này chưa được kiểm tra trên AWS.
   </Fragment>
 </Infrastructure>
 
