@@ -166,10 +166,99 @@ describe('ts#website#auth#idp generator (cdk)', () => {
       { identifiers: `example.com, ${'a'.repeat(41)}` },
       /identifiers must/,
     ],
-  ])('should refuse %s', async (_, override, message) => {
+    // Values that would end or interpolate a TypeScript or HCL string.
+    [
+      'an issuer with a double quote',
+      { issuerUrl: 'https://idp.example.com/a"b' },
+      /issuerUrl must not contain/,
+    ],
+    [
+      'an issuer with ${',
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the test needs a literal ${
+      { issuerUrl: 'https://idp.example.com/${path.cwd}' },
+      /issuerUrl must not contain/,
+    ],
+    [
+      'an issuer with }',
+      { issuerUrl: 'https://idp.example.com/a}' },
+      /issuerUrl must not contain/,
+    ],
+    [
+      'scopes with a double quote',
+      { scopes: 'openid email"x' },
+      /scopes must not contain/,
+    ],
+    [
+      'a claim with ${',
+      {
+        attributeMapping:
+          // biome-ignore lint/suspicious/noTemplateCurlyInString: the test needs a literal ${
+          '{"email":"${x}","given_name":"given_name","family_name":"family_name"}',
+      },
+      /attributeMapping must map email to a claim name/,
+    ],
+    [
+      'a client secret name with a double quote',
+      { clientSecretName: 'a"b' },
+      /clientSecretName must/,
+    ],
+    [
+      'the type saml',
+      { type: 'saml' as TsWebsiteAuthIdpGeneratorSchema['type'] },
+      'type must be oidc, but is saml',
+    ],
+    // Other shapes the option checks refuse.
+    [
+      'an issuer that is not a URL',
+      { issuerUrl: 'not a url' },
+      'issuerUrl must be a URL, but is not a url',
+    ],
+    [
+      'a mapping that is a JSON array',
+      { attributeMapping: '["email"]' },
+      /attributeMapping must be a JSON object/,
+    ],
+    [
+      'a claim that is not a string',
+      {
+        attributeMapping:
+          '{"email":1,"given_name":"given_name","family_name":"family_name"}',
+      },
+      /attributeMapping must map email to a claim name/,
+    ],
+    [
+      'a claim longer than 128 characters',
+      {
+        attributeMapping: JSON.stringify({
+          email: 'e'.repeat(129),
+          given_name: 'given_name',
+          family_name: 'family_name',
+        }),
+      },
+      /attributeMapping must map email to a claim name/,
+    ],
+    [
+      'more than 50 identifiers',
+      {
+        identifiers: Array.from({ length: 51 }, (_, i) => `d${i}.com`).join(
+          ',',
+        ),
+      },
+      /identifiers must/,
+    ],
+    [
+      'an identifier with a double quote',
+      { identifiers: 'a"b' },
+      /identifiers must/,
+    ],
+  ])('should refuse %s and change no file', async (_, override, message) => {
+    const before = contents(tree);
+
     await expect(
       tsWebsiteAuthIdpGenerator(tree, { ...options, ...override }),
     ).rejects.toThrow(message);
+
+    expect(contents(tree)).toEqual(before);
   });
 
   it('should generate the identity provider construct and wire it in', async () => {
