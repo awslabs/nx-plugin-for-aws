@@ -1,0 +1,73 @@
+import {
+  DungeonDb,
+  GameApi,
+  GameUI,
+  InventoryMcpServer,
+  StoryAgent,
+  UserIdentity,
+  suppressRules,
+} from '@dungeon-adventure/common-constructs';
+import { Stack, StackProps, CfnOutput, RemovalPolicy } from 'aws-cdk-lib';
+import { TableEncryption } from 'aws-cdk-lib/aws-dynamodb';
+import { Construct } from 'constructs';
+import { DiceResources } from '../dice-resources.js';
+
+export class ApplicationStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
+    super(scope, id, props);
+
+    const userIdentity = new UserIdentity(this, 'UserIdentity');
+
+    // Sandbox-friendly: allow the table to be deleted with the stack.
+    const dungeonDb = new DungeonDb(this, 'DungeonDb', {
+      deletionProtection: false,
+      removalPolicy: RemovalPolicy.DESTROY,
+      encryption: TableEncryption.DEFAULT,
+    });
+    suppressRules(
+      dungeonDb.table,
+      ['CKV_AWS_119'],
+      'Sandbox stack uses the AWS owned key so it can be torn down and recreated freely',
+    );
+
+    const gameApi = new GameApi(this, 'GameApi', {
+      integrations: GameApi.defaultIntegrations(this).build(),
+    });
+
+    dungeonDb.grantReadData(gameApi.integrations['games.query'].handler);
+    dungeonDb.grantReadData(gameApi.integrations['inventory.query'].handler);
+    dungeonDb.grantReadWriteData(gameApi.integrations['games.save'].handler);
+
+    const dice = new DiceResources(this, 'DiceResources');
+    const mcpServer = new InventoryMcpServer(this, 'InventoryMcpServer', {
+      environmentVariables: dice.environmentVariables,
+    });
+    dice.grantShadowAccess(mcpServer.agentCoreRuntime);
+    dungeonDb.grantReadWriteData(mcpServer.agentCoreRuntime);
+
+    // Use Cognito for user authentication with the agent
+    const storyAgent = new StoryAgent(this, 'StoryAgent', {
+      identity: userIdentity,
+    });
+    // The agent's own session bucket already persists conversation history via
+    // S3SessionManager; grant the Game API read access so it can replay it.
+    storyAgent.sessionBucket.grantRead(
+      gameApi.integrations['actions.query'].handler,
+    );
+
+    new CfnOutput(this, 'StoryAgentArn', {
+      value: storyAgent.agentCoreRuntime.agentRuntimeArn,
+    });
+    new CfnOutput(this, 'InventoryMcpArn', {
+      value: mcpServer.agentCoreRuntime.agentRuntimeArn,
+    });
+
+    // Grant the agent permissions to invoke our mcp server
+    mcpServer.grantInvokeAccess(storyAgent);
+
+    // Grant the authenticated role access to invoke the api
+    gameApi.grantInvokeAccess(userIdentity.identityPool.authenticatedRole);
+
+    new GameUI(this, 'GameUI');
+  }
+}

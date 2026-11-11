@@ -1,0 +1,131 @@
+---
+title: Desplegar, observar y actualizar
+description: Componer el repositorio de artefactos, la concesión de lectura, la versión del componente y el despliegue en CDK, observar la llegada del latido en AWS IoT Core, y luego publicar una actualización NEXT_PATCH
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import E2EDiff from '@components/e2e-diff.astro';
+import InstallCommand from '@components/install-command.astro';
+import Link from '@components/link.astro';
+import NxCommands from '@components/nx-commands.astro';
+
+## Tarea 1: Componer el stack
+
+El generador proporcionó bloques de construcción, no un despliegue. Tu stack decide dónde viven los artefactos, qué rol puede leerlos y qué flota recibe el componente. Reemplaza `packages/infra/src/stacks/application-stack.ts`:
+
+<E2EDiff before="greengrass-tutorial/application-stack.ts.original.template" after="greengrass-tutorial/application-stack.ts.template" lang="typescript" />
+
+Lo que hace cada parte:
+
+- `GreengrassArtifactBucket` crea el repositorio de artefactos retenido, versionado y solo TLS. `grantReadTo` otorga al rol de intercambio de tokens `s3:GetObject` en `com.example.Pulse/*`, que cubre cada clave de artefacto que el resolvedor escribe para este componente.
+- `Pulse` extiende `GreengrassComponentVersion`. Lee la receta y `pulse.zip` que `pulse-artifact` construyó, sube el archivo bajo una clave con hash de contenido y publica la versión del componente. Su propiedad `bucket` toma el constructo `GreengrassArtifactBucket` en sí.
+- `GreengrassDeployment` con `targetArn` despliega al grupo de cosas que el script de configuración creó. `addComponent(pulse)` coloca la versión resuelta en el mapa de componentes del despliegue y agrega una dependencia de CloudFormation en el recurso de versión del componente, por lo que el trabajo de IoT no puede alcanzar el dispositivo antes de que exista la versión.
+- Los dos valores `CfnParameter` provienen de `.greengrass-tutorial.env`. Pasarlos como parámetros mantiene el stack libre de literales específicos de la cuenta y permite que la suite e2e sintetice el mismo archivo.
+
+## Tarea 2: Inicializar y desplegar
+
+Carga los valores registrados, sincroniza las referencias del proyecto y los manifiestos de dependencias, instala las dependencias actualizadas del espacio de trabajo e inicializa CDK en la cuenta y Región si no lo has hecho antes:
+
+```bash
+source .greengrass-tutorial.env
+```
+
+<NxCommands commands={['sync']} />
+<InstallCommand />
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @greengrass-tutorial/infra:bootstrap']} />
+
+Despliega el stack. `packages/infra/src/main.ts` coloca el stack en el stage `greengrass-tutorial-infra-sandbox`, y el objetivo `deploy` ejecuta `cdk deploy` sin un stage propio, por lo que el comando nombra ese stage y pasa los ARN del rol y del grupo de cosas como parámetros de CloudFormation:
+
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @greengrass-tutorial/infra:deploy -- "greengrass-tutorial-infra-sandbox/**" --parameters TokenExchangeRoleArn="$TUTORIAL_TOKEN_EXCHANGE_ROLE_ARN" --parameters ThingGroupArn="$TUTORIAL_THING_GROUP_ARN"']} />
+
+`deploy` depende de `^assemble`, y el proyecto de constructos compartidos depende del `assemble` del proyecto de telemetría, que ejecuta `pulse-artifact`. Por lo tanto, cada despliegue publica el artefacto que coincide con tu fuente actual. El objetivo ejecuta `cdk deploy` sin modo express, por lo que acepta una revisión de despliegue posterior que reemplaza el recurso de despliegue. Lee <Link path="guides/greengrass-component#revisiones-de-implementación">revisiones de despliegue</Link> antes de usar `deploy-sandbox` para Greengrass.
+
+En el primer despliegue, el resolvedor de versiones no encuentra ninguna versión publicada de `com.example.Pulse` y publica `1.0.0`. El despliegue luego alcanza el grupo de cosas, y el dispositivo central descarga el artefacto con el rol de intercambio de tokens e inicia el componente. Permite de uno a dos minutos después de que se complete el stack.
+
+## Tarea 3: Observar el latido
+
+Abre la consola de AWS IoT en `$TUTORIAL_AWS_REGION`, elige **MQTT test client** y suscríbete al tema:
+
+```text
+tutorial/greengrass/heartbeat
+```
+
+Cada 30 segundos llega un mensaje:
+
+```json
+{"sequence": 3, "greeting": "hello from pulse"}
+```
+
+La AWS CLI no puede suscribirse a temas MQTT. Si prefieres tu propio cliente MQTT, conéctalo al endpoint de datos de la cuenta con su propio certificado y política, que este tutorial no crea:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" iot describe-endpoint \
+  --endpoint-type iot:Data-ATS --query endpointAddress --output text
+```
+
+## Tarea 4: Verificar el dispositivo
+
+Un despliegue exitoso demuestra que el dispositivo aplicó el documento de despliegue. No demuestra que el componente se ejecute. Verifica el estado del ciclo de vida del componente instalado:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 list-installed-components \
+  --core-device-thing-name "$TUTORIAL_THING_NAME" \
+  --query 'installedComponents[?componentName==`com.example.Pulse`].[componentVersion,lifecycleState]' \
+  --output text
+```
+
+Espera `1.0.0` y `RUNNING`. Luego lee el registro propio del componente en la instancia con el patrón de Systems Manager del módulo 2:
+
+```bash
+cat > /tmp/greengrass-tutorial-command.json <<'EOF'
+{ "commands": ["#!/bin/bash", "tail -n 20 /greengrass/v2/logs/com.example.Pulse.log"] }
+EOF
+
+TUTORIAL_COMMAND_ID=$(aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" ssm send-command \
+  --instance-ids "$TUTORIAL_INSTANCE_ID" --document-name AWS-RunShellScript \
+  --parameters file:///tmp/greengrass-tutorial-command.json \
+  --query Command.CommandId --output text)
+sleep 5
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" ssm get-command-invocation \
+  --command-id "$TUTORIAL_COMMAND_ID" --instance-id "$TUTORIAL_INSTANCE_ID" \
+  --query StandardOutputContent --output text
+```
+
+El registro muestra la conexión IPC y una línea por latido:
+
+```text
+INFO:awsiot.eventstreamrpc:<Connection ...> /greengrass/v2/ipc.socket:0> connected
+INFO:com.example.Pulse:Published heartbeat 0 to tutorial/greengrass/heartbeat
+INFO:com.example.Pulse:Published heartbeat 1 to tutorial/greengrass/heartbeat
+```
+
+Si el despliegue reporta `SUCCEEDED` pero el componente está `BROKEN`, o `get-core-device` reporta `UNHEALTHY`, sigue los <Link path="guides/greengrass-component#solución-de-problemas-y-límites-de-servicio">pasos de solución de problemas del componente</Link>.
+
+## Tarea 5: Actualizar el componente
+
+Cambia el saludo en `packages/telemetry/greengrass/pulse/main.py`:
+
+<E2EDiff before="greengrass-tutorial/main.py.template" after="greengrass-tutorial/main.py.updated.template" lang="python" />
+
+Despliega nuevamente con el mismo comando:
+
+<NxCommands env={{ AWS_PROFILE: '"$TUTORIAL_AWS_PROFILE"', AWS_REGION: '"$TUTORIAL_AWS_REGION"' }} commands={['run @greengrass-tutorial/infra:deploy -- "greengrass-tutorial-infra-sandbox/**" --parameters TokenExchangeRoleArn="$TUTORIAL_TOKEN_EXCHANGE_ROLE_ARN" --parameters ThingGroupArn="$TUTORIAL_THING_GROUP_ARN"']} />
+
+Nx ve la fuente cambiada y reconstruye `pulse-artifact`. El hash de contenido del archivo cambia, por lo que el resolvedor asigna `1.0.1`, el artefacto se sube bajo una nueva clave, se publica una nueva versión del componente y una nueva revisión de despliegue apunta el grupo de cosas a ella. La receta todavía dice `NEXT_PATCH`; nada en el espacio de trabajo registra el número.
+
+Verifica tanto la versión instalada como la carga útil:
+
+```bash
+aws --profile "$TUTORIAL_AWS_PROFILE" --region "$TUTORIAL_AWS_REGION" greengrassv2 list-installed-components \
+  --core-device-thing-name "$TUTORIAL_THING_NAME" \
+  --query 'installedComponents[?componentName==`com.example.Pulse`].[componentVersion,lifecycleState]' \
+  --output text
+```
+
+Espera `1.0.1` y `RUNNING`. En el cliente de prueba MQTT, el saludo cambia a `hello from the updated pulse`, y la secuencia se reinicia desde `0` porque el proceso del componente fue reiniciado.
+
+<Aside type="tip" title="Redespliegues sin cambios">
+Desplegar nuevamente sin un cambio de fuente o receta reutiliza `1.0.1`. El resolvedor compara el hash de contenido con la etiqueta en la versión publicada más alta y devuelve esa versión en lugar de asignar una nueva. Lee <Link path="guides/greengrass-component#versionado-automático">versionado automático</Link> para conocer las reglas y sus límites.
+</Aside>
+
+Continúa con <Link path="get_started/tutorials/greengrass/cleanup">Eliminar y limpiar</Link>.
