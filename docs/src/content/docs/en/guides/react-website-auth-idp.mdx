@@ -151,7 +151,7 @@ The Terraform identity provider file also sets two values that Cognito adds when
 
 ## Identity provider notes
 
-The settings below come from each vendor's documentation. Only a Cognito user pool acting as the identity provider has been tested with this generator. That test is the AWS check that a release of this generator needs.
+The settings below come from each vendor's documentation. Only a Cognito user pool acting as the identity provider has been tested with this generator.
 
 ### Okta
 
@@ -180,6 +180,14 @@ To test with another Cognito user pool as the identity provider, use the issuer 
 - MFA (multi-factor authentication) required in your user pool does not apply to federated users. Cognito leaves their authentication to the identity provider, so enforce MFA at the identity provider.
 - Signing out of your website ends the Cognito session only. It does not end the user's session at an OIDC identity provider, so the next sign-in through the button can complete without a password. On a shared computer, users must also sign out at the identity provider.
 - The user menu shows the Cognito username. For a federated user it is the identity provider name, an underscore and the user's `sub` at the identity provider, in lowercase, for example `testidp_00u1abcd`.
+- Removing or disabling a user at the identity provider stops only their next sign-in through it. Cognito renews tokens with its own refresh token and does not ask the identity provider, and the website renews tokens without the user noticing. The user can therefore keep access until the refresh token expires, up to 30 days after their last sign-in. To end the user's access at once, also sign them out of every session and disable them in the user pool. Their username is `<identity provider name in lowercase>_<sub>`:
+
+  ```bash
+  aws cognito-idp admin-user-global-sign-out --user-pool-id <user pool id> --username testidp_<sub>
+  aws cognito-idp admin-disable-user --user-pool-id <user pool id> --username testidp_<sub>
+  ```
+
+  A shorter refresh token validity on the web client (`refreshTokenValidity` in CDK, `refresh_token_validity` in Terraform) shortens the time a removed user keeps access. This has not been tested on AWS.
 
 ## The client secret
 
@@ -188,13 +196,13 @@ Cognito holds the client secret in the identity provider's settings. Anyone allo
 <Infrastructure>
   <Fragment slot="cdk">
 The construct passes the secret to CloudFormation as a [dynamic reference](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/dynamic-references-secretsmanager.html), `{{resolve:secretsmanager:<clientSecretName>:SecretString:::}}`. The synthesized template contains only that reference. CloudFormation reads the secret when it creates or updates the identity provider. If you rotate the secret, Cognito gets the new value only when the identity provider resource changes in a later deploy.
+
+CloudFormation resolves the reference inside the identity provider's settings (`ProviderDetails`), so federated sign-in works with the stored secret, and the deployed template still holds only the reference. After a rotation, a deploy with no other change leaves the old secret in Cognito. Both have been checked on AWS.
   </Fragment>
   <Fragment slot="terraform">
 The module reads the secret with a `data "aws_secretsmanager_secret_version"` data source, so `terraform plan` shows it as `(sensitive value)`. Terraform state still holds the secret in plain text, once for the data source and once for the identity provider. Anyone who can read the state object in your state bucket can read the secret. Limit read access to the state bucket accordingly.
   </Fragment>
 </Infrastructure>
-
-The AWS check for this generator confirmed with CDK that CloudFormation fills in the `{{resolve:secretsmanager:...}}` reference inside the identity provider's settings. Federated sign-in works, and the deployed template holds only the reference. After the secret was rotated, a deploy with no other change left the old secret in Cognito, because CloudFormation reads the secret only when the identity provider resource changes.
 
 To send a rotated secret to Cognito:
 
