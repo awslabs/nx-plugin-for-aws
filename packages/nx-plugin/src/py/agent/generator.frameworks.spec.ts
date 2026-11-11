@@ -81,6 +81,11 @@ dev-dependencies = []
     expect(aguiAgentContent).toContain('hooks=AGENT_HOOKS,');
     expect(mainContent).toContain('from .agent import AGENT_HOOKS, get_agent');
     expect(mainContent).toContain('hooks=AGENT_HOOKS,');
+    // The time comes from a current_time tool on the template Agent, so the
+    // adapter needs no plugins.
+    expect(aguiAgentContent).toContain('def current_time() -> str:');
+    expect(aguiAgentContent).toContain('tools=[subtract, current_time],');
+    expect(mainContent).not.toContain('plugins=');
 
     // AG-UI must bind the inbound AgentCore session ID into the ContextVar
     // so downstream MCP / A2A connection clients forward it on outbound

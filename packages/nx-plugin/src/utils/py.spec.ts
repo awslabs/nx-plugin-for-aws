@@ -612,7 +612,7 @@ describe('addDependenciesToPyProjectToml uv override-dependencies', () => {
   let tree: Tree;
 
   const strandsDeclaration = declareDependencies()({
-    py: [{ name: 'strands-agents-tools' }],
+    py: [{ name: 'strands-agents' }],
   });
   const rootText = () => tree.read('pyproject.toml', 'utf-8');
 
@@ -633,11 +633,11 @@ describe('addDependenciesToPyProjectToml uv override-dependencies', () => {
     );
   });
 
-  it('should leave the workspace root unchanged when strands-agents-tools is added', () => {
+  it('should leave the workspace root unchanged when a dependency is added', () => {
     const before = rootText();
 
     addDependenciesToPyProjectToml(tree, 'packages/p', strandsDeclaration, [
-      'strands-agents-tools',
+      'strands-agents',
     ]);
 
     expect(rootText()).toBe(before);

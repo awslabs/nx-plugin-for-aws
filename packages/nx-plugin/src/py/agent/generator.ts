@@ -185,10 +185,6 @@ export const DEPENDENCIES = declareDependencies<PyAgentMetadata>()({
       name: 'strands-agents',
       when: (m) => m.framework === 'strands' && m.protocol !== 'a2a',
     },
-    {
-      name: 'strands-agents-tools',
-      when: (m) => m.framework === 'strands',
-    },
     // Declared again here so a Strands AG-UI agent lists it in the same order
     // the generated pyproject.toml had before.
     {

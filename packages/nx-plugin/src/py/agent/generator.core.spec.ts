@@ -83,6 +83,19 @@ dev-dependencies = []
     expect(acInit).toContain('log_model_errors');
     expect(acInit).toContain('log_tool_errors');
 
+    // strands-agents-tools 0.9.0 removed current_time, so the agent defines
+    // its own current_time tool and the system prompt stays the same.
+    const agentPy = tree.read(
+      'apps/test-project/proj_test_project/agent/agent.py',
+      'utf-8',
+    )!;
+    expect(agentPy).not.toContain('strands_tools');
+    expect(agentPy).toContain('from datetime import UTC, datetime');
+    expect(agentPy).toContain('@tool\ndef current_time() -> str:');
+    expect(agentPy).toContain('return datetime.now(UTC).isoformat()');
+    expect(agentPy).toContain('tools=[subtract, current_time],');
+    expect(agentPy).not.toContain('plugins=');
+
     // Check that pyproject.toml was updated with strands agent dependencies
     const pyprojectToml = parse(
       tree.read('apps/test-project/pyproject.toml', 'utf-8'),
@@ -97,11 +110,12 @@ dev-dependencies = []
         dep.startsWith('strands-agents=='),
       ),
     ).toBe(true);
+    // strands-agents-tools 0.9.0 removed every tool, so it is not vended.
     expect(
       pyprojectToml.project.dependencies.some((dep) =>
-        dep.startsWith('strands-agents-tools=='),
+        dep.startsWith('strands-agents-tools'),
       ),
-    ).toBe(true);
+    ).toBe(false);
 
     // Check that project configuration was updated with serve target
     const projectConfig = JSON.parse(
@@ -413,11 +427,12 @@ dev-dependencies = []
         dep.startsWith('strands-agents=='),
       ),
     ).toBe(true);
+    // strands-agents-tools 0.9.0 removed every tool, so it is not vended.
     expect(
       pyprojectToml.project.dependencies.some((dep) =>
-        dep.startsWith('strands-agents-tools=='),
+        dep.startsWith('strands-agents-tools'),
       ),
-    ).toBe(true);
+    ).toBe(false);
 
     // Check that project configuration was updated with serve target only
     const projectConfig = JSON.parse(

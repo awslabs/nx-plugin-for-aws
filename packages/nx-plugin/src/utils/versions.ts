@@ -281,7 +281,6 @@ export const PY_VERSIONS = {
   ruff: '==0.17.4',
   'strands-agents': '==1.64.0',
   'strands-agents[a2a]': '==1.64.0',
-  'strands-agents-tools': '==0.8.11',
   ty: '==0.0.89',
   pynamodb: '==6.1.0',
   uvicorn: '==0.54.0',
