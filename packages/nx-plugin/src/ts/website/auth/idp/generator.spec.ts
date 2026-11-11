@@ -518,6 +518,9 @@ describe('ts#website#auth#idp generator (cdk)', () => {
     expect(message.indexOf('create-secret')).toBeLessThan(
       message.indexOf('TestIdpIdpRedirectUri'),
     );
+    expect(message).toContain(
+      "Anyone TestIdp signs in for this application can sign in to your website and gets the identity pool's authenticated role, whatever allowSignup says. Limit who can sign in at TestIdp, as https://awslabs.github.io/nx-plugin-for-aws/en/guides/react-website-auth-idp/#who-can-sign-in describes.",
+    );
   });
 
   it('should record the metric', async () => {

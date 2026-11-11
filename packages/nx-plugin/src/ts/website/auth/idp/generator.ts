@@ -185,6 +185,8 @@ const nextSteps = (iac: Iac, idp: IdpOptions): string => {
   3. Deploy.
   4. Add the redirect URI to the application at ${idp.name}. It is ${redirectUri}
 
+Anyone ${idp.name} signs in for this application can sign in to your website and gets the identity pool's authenticated role, whatever allowSignup says. Limit who can sign in at ${idp.name}, as ${GUIDE_URL}#who-can-sign-in describes.
+
 See ${GUIDE_URL}`;
 };
 
