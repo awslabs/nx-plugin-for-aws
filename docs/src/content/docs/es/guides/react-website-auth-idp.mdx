@@ -23,6 +23,16 @@ Este generador agrega un proveedor de identidad [OpenID Connect](https://openid.
 
 Los usuarios con un nombre de usuario y contraseña en el grupo aún pueden iniciar sesión.
 
+## Quién puede iniciar sesión
+
+Agregar un proveedor de identidad puede permitir que muchas más personas entren a tu sitio web de lo que esperas. La opción `allowSignup` de `ts#website#auth` no se aplica a usuarios federados. Cognito crea un usuario federado la primera vez que alguien inicia sesión a través del proveedor de identidad, incluso cuando el grupo de usuarios no permite que los usuarios se registren por sí mismos. Cada usuario federado también obtiene el rol autenticado del grupo de identidades, por lo que pueden llamar a tus APIs y agentes como cualquier usuario que haya iniciado sesión puede hacerlo.
+
+El proveedor de identidad, por lo tanto, decide quién puede iniciar sesión. Configúralo para que solo inicie sesión las personas que necesitan tu sitio web:
+
+- Microsoft Entra ID: en las propiedades de la aplicación empresarial de la aplicación, establece "Assignment required?" en Yes, y asigna solo los usuarios o grupos que necesitan acceso. Con el valor predeterminado, No, cada usuario en tu inquilino puede iniciar sesión.
+- Okta: asigna la aplicación solo a los grupos que necesitan acceso.
+- Auth0: deshabilita los registros en cada conexión que la aplicación usa, y habilita para la aplicación solo las conexiones cuyos usuarios necesitan acceso. De lo contrario, cualquiera que se registre a través de una conexión habilitada, por ejemplo una conexión social, puede iniciar sesión.
+
 ## Uso
 
 ### Agregar un proveedor de identidad
@@ -85,7 +95,7 @@ El generador también edita el cliente web del grupo de usuarios, el cliente de 
   </Fragment>
 </Infrastructure>
 
-Un segundo proveedor de identidad se agrega después del primero. Ejecutar el generador nuevamente con el mismo `name` no cambia ningún archivo, y el generador no sobrescribe tus ediciones al archivo del proveedor de identidad. Los nombres deben diferir por más que mayúsculas y minúsculas: `Okta` después de `okta` cuenta como el mismo proveedor de identidad, así que nada cambia.
+Un segundo proveedor de identidad se agrega después del primero. Ejecutar el generador nuevamente con el mismo `name` y opciones no cambia ningún archivo, y el generador no sobrescribe tus ediciones al archivo del proveedor de identidad. Si lo ejecutas nuevamente con el mismo `name` pero otras opciones, el generador mantiene el archivo existente y advierte que las nuevas opciones no se aplicaron. Para cambiar el proveedor de identidad, edita su archivo. Los nombres que difieren solo en mayúsculas y minúsculas o guiones, como `TestIdp` y `Test-Idp`, usan el mismo archivo, por lo que el generador rechaza el segundo nombre.
 
 Si has cambiado `user-identity.ts` o la lista `supported_identity_providers` de modo que el generador ya no la reconoce, el generador deja ese archivo sin cambios. En su lugar, imprime las líneas para agregar manualmente.
 
@@ -141,7 +151,7 @@ El archivo del proveedor de identidad de Terraform también establece dos valore
 
 ## Notas sobre proveedores de identidad
 
-La configuración a continuación proviene de la documentación de cada proveedor. Solo se ha probado con este generador un grupo de usuarios de Cognito actuando como proveedor de identidad. Esa prueba es la verificación de AWS que necesita un lanzamiento de este generador.
+La configuración a continuación proviene de la documentación de cada proveedor. Solo se ha probado con este generador un grupo de usuarios de Cognito actuando como proveedor de identidad.
 
 ### Okta
 
@@ -170,6 +180,14 @@ Para probar con otro grupo de usuarios de Cognito como proveedor de identidad, u
 - MFA (autenticación multifactor) requerida en tu grupo de usuarios no se aplica a usuarios federados. Cognito deja su autenticación al proveedor de identidad, así que aplica MFA en el proveedor de identidad.
 - Cerrar sesión en tu sitio web termina solo la sesión de Cognito. No termina la sesión del usuario en un proveedor de identidad OIDC, por lo que el próximo inicio de sesión a través del botón puede completarse sin una contraseña. En una computadora compartida, los usuarios también deben cerrar sesión en el proveedor de identidad.
 - El menú de usuario muestra el nombre de usuario de Cognito. Para un usuario federado es el nombre del proveedor de identidad, un guion bajo y el `sub` del usuario en el proveedor de identidad, en minúsculas, por ejemplo `testidp_00u1abcd`.
+- Eliminar o deshabilitar un usuario en el proveedor de identidad detiene solo su próximo inicio de sesión a través de él. Cognito renueva los tokens con su propio token de actualización y no consulta al proveedor de identidad, y el sitio web renueva los tokens sin que el usuario lo note. Por lo tanto, el usuario puede mantener el acceso hasta que expire el token de actualización, hasta 30 días después de su último inicio de sesión. Para terminar el acceso del usuario de inmediato, también cierra su sesión en todas las sesiones y deshabilítalo en el grupo de usuarios. Su nombre de usuario es `<identity provider name in lowercase>_<sub>`:
+
+  ```bash
+  aws cognito-idp admin-user-global-sign-out --user-pool-id <user pool id> --username testidp_<sub>
+  aws cognito-idp admin-disable-user --user-pool-id <user pool id> --username testidp_<sub>
+  ```
+
+  Una validez de token de actualización más corta en el cliente web (`refreshTokenValidity` en CDK, `refresh_token_validity` en Terraform) acorta el tiempo que un usuario eliminado mantiene el acceso. Esto no ha sido probado en AWS.
 
 ## El secreto de cliente
 
@@ -178,13 +196,13 @@ Cognito mantiene el secreto de cliente en la configuración del proveedor de ide
 <Infrastructure>
   <Fragment slot="cdk">
 El construct pasa el secreto a CloudFormation como una [referencia dinámica](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/dynamic-references-secretsmanager.html), `{{resolve:secretsmanager:<clientSecretName>:SecretString:::}}`. La plantilla sintetizada contiene solo esa referencia. CloudFormation lee el secreto cuando crea o actualiza el proveedor de identidad. Si rotas el secreto, Cognito obtiene el nuevo valor solo cuando el recurso del proveedor de identidad cambia en un despliegue posterior.
+
+CloudFormation resuelve la referencia dentro de la configuración del proveedor de identidad (`ProviderDetails`), por lo que el inicio de sesión federado funciona con el secreto almacenado, y la plantilla desplegada aún contiene solo la referencia. Después de una rotación, un despliegue sin ningún otro cambio deja el secreto antiguo en Cognito. Ambos han sido verificados en AWS.
   </Fragment>
   <Fragment slot="terraform">
 El módulo lee el secreto con una fuente de datos `data "aws_secretsmanager_secret_version"`, por lo que `terraform plan` lo muestra como `(sensitive value)`. El estado de Terraform aún mantiene el secreto en texto plano, una vez para la fuente de datos y una vez para el proveedor de identidad. Cualquiera que pueda leer el objeto de estado en tu bucket de estado puede leer el secreto. Limita el acceso de lectura al bucket de estado en consecuencia.
   </Fragment>
 </Infrastructure>
-
-La verificación de AWS para este generador confirmó con CDK que CloudFormation completa la referencia `{{resolve:secretsmanager:...}}` dentro de la configuración del proveedor de identidad. El inicio de sesión federado funciona, y la plantilla desplegada contiene solo la referencia. Después de que el secreto fue rotado, un despliegue sin ningún otro cambio dejó el secreto antiguo en Cognito, porque CloudFormation lee el secreto solo cuando el recurso del proveedor de identidad cambia.
 
 Para enviar un secreto rotado a Cognito:
 
@@ -199,7 +217,7 @@ SecretValue.secretsManager('TestIdp-oidc-client-secret', { versionId: '<version 
 La referencia en la plantilla entonces cambia, por lo que CloudFormation actualiza el proveedor de identidad y lee esa versión del secreto. Cambia el ID de versión nuevamente en cada rotación. Esto sigue la documentación de CloudFormation para referencias dinámicas y no ha sido probado en AWS.
   </Fragment>
   <Fragment slot="terraform">
-Ejecuta `terraform plan` y `terraform apply` después de la rotación. La fuente de datos lee la versión actual del secreto en cada plan, por lo que el plan muestra una actualización in situ del proveedor de identidad, y `apply` envía el nuevo secreto a Cognito. Esto se lee del código fuente del proveedor `hashicorp/aws` 6.69.1, que usa el espacio de trabajo generado: un cambio en `provider_details` actualiza el proveedor de identidad in situ y no lo reemplaza. No ha sido probado en AWS.
+Ejecuta `terraform plan` y `terraform apply` después de la rotación. La fuente de datos lee la versión actual del secreto en cada plan, por lo que el plan muestra una actualización in situ del proveedor de identidad, y `apply` envía el nuevo secreto a Cognito. En el código fuente del proveedor `hashicorp/aws`, un cambio en `provider_details` actualiza el proveedor de identidad in situ y no lo reemplaza. Esto no ha sido probado en AWS.
   </Fragment>
 </Infrastructure>
 

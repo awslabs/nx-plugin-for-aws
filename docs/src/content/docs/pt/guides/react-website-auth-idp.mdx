@@ -23,6 +23,16 @@ Este gerador adiciona um provedor de identidade [OpenID Connect](https://openid.
 
 Usuários com um nome de usuário e senha no pool ainda podem fazer login.
 
+## Quem pode fazer login
+
+Adicionar um provedor de identidade pode permitir que muito mais pessoas entrem no seu website do que você espera. A opção `allowSignup` de `ts#website#auth` não se aplica a usuários federados. O Cognito cria um usuário federado na primeira vez que alguém faz login através do provedor de identidade, mesmo quando o user pool não permite que os usuários se cadastrem. Cada usuário federado também recebe a função autenticada do identity pool, para que possam chamar suas APIs e agentes como qualquer usuário conectado pode.
+
+O provedor de identidade, portanto, decide quem pode fazer login. Configure-o para que faça login apenas das pessoas que precisam do seu website:
+
+- Microsoft Entra ID: nas propriedades da aplicação empresarial da aplicação, defina "Assignment required?" como Yes e atribua apenas os usuários ou grupos que precisam de acesso. Com o padrão, No, todos os usuários no seu tenant podem fazer login.
+- Okta: atribua a aplicação apenas aos grupos que precisam de acesso.
+- Auth0: desabilite cadastros em cada conexão que a aplicação usa e habilite para a aplicação apenas as conexões cujos usuários precisam de acesso. Caso contrário, qualquer pessoa que se cadastre através de uma conexão habilitada, por exemplo uma conexão social, pode fazer login.
+
 ## Uso
 
 ### Adicionar um provedor de identidade
@@ -85,7 +95,7 @@ O gerador também edita o web client do user pool, o app client do Cognito atrav
   </Fragment>
 </Infrastructure>
 
-Um segundo provedor de identidade é adicionado após o primeiro. Executar o gerador novamente com o mesmo `name` não altera nenhum arquivo, e o gerador não sobrescreve suas edições no arquivo do provedor de identidade. Os nomes devem diferir por mais do que maiúsculas e minúsculas: `Okta` após `okta` conta como o mesmo provedor de identidade, então nada muda.
+Um segundo provedor de identidade é adicionado após o primeiro. Executar o gerador novamente com o mesmo `name` e opções não altera nenhum arquivo, e o gerador não sobrescreve suas edições no arquivo do provedor de identidade. Se você executá-lo novamente com o mesmo `name` mas outras opções, o gerador mantém o arquivo existente e avisa que as novas opções não foram aplicadas. Para alterar o provedor de identidade, edite seu arquivo. Nomes que diferem apenas em maiúsculas e minúsculas ou hífens, como `TestIdp` e `Test-Idp`, usam o mesmo arquivo, então o gerador recusa o segundo nome.
 
 Se você alterou `user-identity.ts` ou a lista `supported_identity_providers` de modo que o gerador não a reconheça mais, o gerador deixa esse arquivo inalterado. Ele imprime as linhas para adicionar manualmente.
 
@@ -141,7 +151,7 @@ O arquivo do provedor de identidade Terraform também define dois valores que o 
 
 ## Notas sobre provedores de identidade
 
-As configurações abaixo vêm da documentação de cada fornecedor. Apenas um user pool do Cognito atuando como provedor de identidade foi testado com este gerador. Esse teste é a verificação AWS que um lançamento deste gerador precisa.
+As configurações abaixo vêm da documentação de cada fornecedor. Apenas um user pool do Cognito atuando como provedor de identidade foi testado com este gerador.
 
 ### Okta
 
@@ -170,6 +180,14 @@ Para testar com outro user pool do Cognito como provedor de identidade, use o is
 - MFA (autenticação multifator) exigida no seu user pool não se aplica a usuários federados. O Cognito deixa sua autenticação para o provedor de identidade, então imponha MFA no provedor de identidade.
 - Fazer logout do seu website encerra apenas a sessão do Cognito. Não encerra a sessão do usuário no provedor de identidade OIDC, então o próximo login através do botão pode ser concluído sem uma senha. Em um computador compartilhado, os usuários também devem fazer logout no provedor de identidade.
 - O menu do usuário mostra o nome de usuário do Cognito. Para um usuário federado, é o nome do provedor de identidade, um underscore e o `sub` do usuário no provedor de identidade, em minúsculas, por exemplo `testidp_00u1abcd`.
+- Remover ou desabilitar um usuário no provedor de identidade interrompe apenas o próximo login dele através dele. O Cognito renova tokens com seu próprio refresh token e não pergunta ao provedor de identidade, e o website renova tokens sem que o usuário perceba. O usuário pode, portanto, manter o acesso até que o refresh token expire, até 30 dias após seu último login. Para encerrar o acesso do usuário imediatamente, também desconecte-o de todas as sessões e desabilite-o no user pool. Seu nome de usuário é `<identity provider name in lowercase>_<sub>`:
+
+  ```bash
+  aws cognito-idp admin-user-global-sign-out --user-pool-id <user pool id> --username testidp_<sub>
+  aws cognito-idp admin-disable-user --user-pool-id <user pool id> --username testidp_<sub>
+  ```
+
+  Uma validade de refresh token mais curta no web client (`refreshTokenValidity` no CDK, `refresh_token_validity` no Terraform) reduz o tempo que um usuário removido mantém o acesso. Isso não foi testado na AWS.
 
 ## O client secret
 
@@ -178,13 +196,13 @@ O Cognito mantém o client secret nas configurações do provedor de identidade.
 <Infrastructure>
   <Fragment slot="cdk">
 O construct passa o secret para o CloudFormation como uma [referência dinâmica](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/dynamic-references-secretsmanager.html), `{{resolve:secretsmanager:<clientSecretName>:SecretString:::}}`. O template sintetizado contém apenas essa referência. O CloudFormation lê o secret quando cria ou atualiza o provedor de identidade. Se você rotacionar o secret, o Cognito obtém o novo valor apenas quando o recurso do provedor de identidade muda em um deploy posterior.
+
+O CloudFormation resolve a referência dentro das configurações do provedor de identidade (`ProviderDetails`), então o login federado funciona com o secret armazenado, e o template implantado ainda mantém apenas a referência. Após uma rotação, um deploy sem nenhuma outra alteração deixa o secret antigo no Cognito. Ambos foram verificados na AWS.
   </Fragment>
   <Fragment slot="terraform">
 O módulo lê o secret com uma data source `data "aws_secretsmanager_secret_version"`, então `terraform plan` o mostra como `(sensitive value)`. O state do Terraform ainda mantém o secret em texto simples, uma vez para a data source e uma vez para o provedor de identidade. Qualquer pessoa que possa ler o objeto de state no seu bucket de state pode ler o secret. Limite o acesso de leitura ao bucket de state adequadamente.
   </Fragment>
 </Infrastructure>
-
-A verificação AWS para este gerador confirmou com CDK que o CloudFormation preenche a referência `{{resolve:secretsmanager:...}}` dentro das configurações do provedor de identidade. O login federado funciona, e o template implantado mantém apenas a referência. Após o secret ser rotacionado, um deploy sem nenhuma outra alteração deixou o secret antigo no Cognito, porque o CloudFormation lê o secret apenas quando o recurso do provedor de identidade muda.
 
 Para enviar um secret rotacionado ao Cognito:
 
@@ -199,7 +217,7 @@ SecretValue.secretsManager('TestIdp-oidc-client-secret', { versionId: '<version 
 A referência no template então muda, então o CloudFormation atualiza o provedor de identidade e lê essa versão do secret. Altere o ID de versão novamente em cada rotação. Isso segue a documentação do CloudFormation para referências dinâmicas e não foi testado na AWS.
   </Fragment>
   <Fragment slot="terraform">
-Execute `terraform plan` e `terraform apply` após a rotação. A data source lê a versão atual do secret em cada plan, então o plan mostra uma atualização in-place do provedor de identidade, e `apply` envia o novo secret ao Cognito. Isso é lido do código-fonte do provider `hashicorp/aws` 6.69.1, que o workspace gerado usa: uma alteração em `provider_details` atualiza o provedor de identidade in-place e não o substitui. Não foi testado na AWS.
+Execute `terraform plan` e `terraform apply` após a rotação. A data source lê a versão atual do secret em cada plan, então o plan mostra uma atualização in-place do provedor de identidade, e `apply` envia o novo secret ao Cognito. No código-fonte do provider `hashicorp/aws`, uma alteração em `provider_details` atualiza o provedor de identidade in-place e não o substitui. Isso não foi testado na AWS.
   </Fragment>
 </Infrastructure>
 
