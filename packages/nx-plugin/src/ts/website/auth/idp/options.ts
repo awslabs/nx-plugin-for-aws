@@ -90,6 +90,12 @@ const resolveIssuerUrl = (issuerUrl: string): string => {
   if (url.protocol !== 'https:') {
     throw new Error('issuerUrl must use https://');
   }
+  // OpenID Connect Discovery requires an issuer without a query or fragment.
+  if (url.search || url.hash || url.username || url.password) {
+    throw new Error(
+      'issuerUrl must not have a query, fragment, user name or password',
+    );
+  }
   if (UNSAFE_CHARACTERS.test(issuerUrl)) {
     throw new Error(
       'issuerUrl must not contain whitespace, quotes, backticks, backslashes, $, { or }',

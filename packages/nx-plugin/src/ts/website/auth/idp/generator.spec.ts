@@ -207,6 +207,27 @@ describe('ts#website#auth#idp generator (cdk)', () => {
       { type: 'saml' as TsWebsiteAuthIdpGeneratorSchema['type'] },
       'type must be oidc, but is saml',
     ],
+    // Issuers OpenID Connect Discovery does not allow.
+    [
+      'an issuer with a query',
+      { issuerUrl: 'https://idp.example.com/a?b=1' },
+      /issuerUrl must not have a query, fragment, user name or password/,
+    ],
+    [
+      'an issuer with a fragment',
+      { issuerUrl: 'https://idp.example.com/a#frag' },
+      /issuerUrl must not have a query, fragment, user name or password/,
+    ],
+    [
+      'an issuer with a user name',
+      { issuerUrl: 'https://user@idp.example.com' },
+      /issuerUrl must not have a query, fragment, user name or password/,
+    ],
+    [
+      'an issuer with a password',
+      { issuerUrl: 'https://:secret@idp.example.com' },
+      /issuerUrl must not have a query, fragment, user name or password/,
+    ],
     // Other shapes the option checks refuse.
     [
       'an issuer that is not a URL',

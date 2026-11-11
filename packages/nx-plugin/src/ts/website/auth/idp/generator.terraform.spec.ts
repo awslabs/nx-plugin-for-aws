@@ -178,6 +178,17 @@ describe('ts#website#auth#idp generator (terraform)', () => {
     );
   });
 
+  it('should write the issuer into HCL without HTML escaping', async () => {
+    await tsWebsiteAuthIdpGenerator(tree, {
+      ...options,
+      issuerUrl: 'https://idp.example.com/a&b',
+    });
+
+    expect(tree.read(IDP_TF, 'utf-8')).toMatch(
+      /oidc_issuer\s+= "https:\/\/idp\.example\.com\/a&b"/,
+    );
+  });
+
   it('should render identifiers only when given', async () => {
     await tsWebsiteAuthIdpGenerator(tree, options);
     expect(tree.read(IDP_TF, 'utf-8')).not.toContain('idp_identifiers');
