@@ -175,6 +175,16 @@ describe('ts#website#auth#idp generator (terraform)', () => {
     );
   });
 
+  it("should keep a user's edits to the identity provider file", async () => {
+    await tsWebsiteAuthIdpGenerator(tree, options);
+    const edited = `${tree.read(IDP_TF, 'utf-8')}\n# my edit\n`;
+    tree.write(IDP_TF, edited);
+
+    await tsWebsiteAuthIdpGenerator(tree, options);
+
+    expect(tree.read(IDP_TF, 'utf-8')).toBe(edited);
+  });
+
   it('should leave a diverged identity.tf unchanged and print the line to add', async () => {
     const diverged = tree
       .read(IDENTITY_TF, 'utf-8')

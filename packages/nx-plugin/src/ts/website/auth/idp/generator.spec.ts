@@ -399,6 +399,16 @@ describe('ts#website#auth#idp generator (cdk)', () => {
     );
   });
 
+  it("should keep a user's edits to the identity provider file", async () => {
+    await tsWebsiteAuthIdpGenerator(tree, options);
+    const edited = `${tree.read(IDP_FILE, 'utf-8')}\n// my edit\n`;
+    tree.write(IDP_FILE, edited);
+
+    await tsWebsiteAuthIdpGenerator(tree, options);
+
+    expect(tree.read(IDP_FILE, 'utf-8')).toBe(edited);
+  });
+
   it('should keep a rewritten identity provider file and warn', async () => {
     await tsWebsiteAuthIdpGenerator(tree, options);
     tree.write(IDP_FILE, '// my own identity provider\n');
