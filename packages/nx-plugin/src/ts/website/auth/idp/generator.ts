@@ -39,23 +39,96 @@ export const TS_WEBSITE_AUTH_IDP_GENERATOR_INFO: NxGeneratorInfo =
 const GUIDE_URL =
   'https://awslabs.github.io/nx-plugin-for-aws/en/guides/react-website-auth-idp/';
 
-const addCdkIdentityProvider = async (tree: Tree, idp: IdpOptions) => {
-  const coreDir = joinPathFragments(
-    PACKAGES_DIR,
-    SHARED_CONSTRUCTS_DIR,
-    'src',
-    'core',
+const CDK_CORE_DIR = joinPathFragments(
+  PACKAGES_DIR,
+  SHARED_CONSTRUCTS_DIR,
+  'src',
+  'core',
+);
+const TERRAFORM_CORE_DIR = joinPathFragments(
+  PACKAGES_DIR,
+  SHARED_TERRAFORM_DIR,
+  'src',
+  'core',
+);
+
+/** The vended file that holds the identity provider. */
+const identityProviderFile = (iac: Iac, idp: IdpOptions): string =>
+  iac === 'cdk'
+    ? joinPathFragments(
+        CDK_CORE_DIR,
+        'identity-providers',
+        `${idp.nameKebabCase}.ts`,
+      )
+    : joinPathFragments(
+        TERRAFORM_CORE_DIR,
+        'user-identity',
+        'identity',
+        `${idp.nameKebabCase}-identity-provider.tf`,
+      );
+
+/**
+ * The string values the identity provider file holds for these options. A
+ * file that lacks one of them was generated with other options or edited.
+ */
+const renderedValues = (iac: Iac, idp: IdpOptions): string[] => [
+  idp.issuerUrl,
+  idp.clientId,
+  idp.clientSecretName,
+  ...(iac === 'cdk' ? idp.scopes : [idp.scopes.join(' ')]),
+  ...[
+    ...idp.cdkAttributeMapping.standard,
+    ...idp.cdkAttributeMapping.custom,
+  ].map(([, claim]) => claim),
+  ...idp.identifiers,
+];
+
+/**
+ * The generator keeps an existing identity provider file, so a re-run never
+ * overwrites the user's edits. Refuse a name that maps to the file of another
+ * identity provider, and say when the given options were not applied.
+ */
+const checkExistingIdentityProvider = (
+  tree: Tree,
+  iac: Iac,
+  idp: IdpOptions,
+): void => {
+  const filePath = identityProviderFile(iac, idp);
+  if (!tree.exists(filePath)) {
+    return;
+  }
+  const content = tree.read(filePath, 'utf-8');
+  const existingName = content.match(
+    iac === 'cdk'
+      ? /^\s*name:\s*['"]([^'"]+)['"]/m
+      : /^\s*provider_name\s*=\s*"([^"]+)"/m,
+  )?.[1];
+  if (existingName !== undefined && existingName !== idp.name) {
+    throw new Error(
+      `${idp.nameKebabCase} is already used by ${existingName} (${filePath}), choose another name`,
+    );
+  }
+  const applied = renderedValues(iac, idp).every(
+    (value) => content.includes(`'${value}'`) || content.includes(`"${value}"`),
   );
+  if (!applied) {
+    logger.warn(
+      `${filePath} already exists, so it was kept and the new options were not applied. Edit the file to change the ${idp.name} identity provider.`,
+    );
+  }
+};
+
+const addCdkIdentityProvider = async (tree: Tree, idp: IdpOptions) => {
   generateFiles(
     tree,
     joinPathFragments(import.meta.dirname, 'files', 'cdk', 'core'),
-    coreDir,
+    CDK_CORE_DIR,
     idp,
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
   await addStarExport(
     tree,
-    joinPathFragments(coreDir, 'index.ts'),
+    joinPathFragments(CDK_CORE_DIR, 'index.ts'),
     `./identity-providers/${idp.nameKebabCase}.js`,
   );
 
@@ -81,7 +154,7 @@ const addTerraformIdentityProvider = async (tree: Tree, idp: IdpOptions) => {
   generateFiles(
     tree,
     joinPathFragments(import.meta.dirname, 'files', 'terraform', 'core'),
-    joinPathFragments(PACKAGES_DIR, SHARED_TERRAFORM_DIR, 'src', 'core'),
+    TERRAFORM_CORE_DIR,
     idp,
     { overwriteStrategy: OverwriteStrategy.KeepExisting },
   );
@@ -129,6 +202,7 @@ export const tsWebsiteAuthIdpGenerator = async (
       `No user identity found at ${userIdentityFile}. Run the ts#website#auth generator first.`,
     );
   }
+  checkExistingIdentityProvider(tree, iac, idp);
 
   if (iac === 'cdk') {
     await addCdkIdentityProvider(tree, idp);

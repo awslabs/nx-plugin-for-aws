@@ -373,6 +373,44 @@ describe('ts#website#auth#idp generator (cdk)', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
+  it('should refuse a name that uses the file of another identity provider', async () => {
+    await tsWebsiteAuthIdpGenerator(tree, options);
+    const before = contents(tree);
+
+    await expect(
+      tsWebsiteAuthIdpGenerator(tree, { ...options, name: 'Test-Idp' }),
+    ).rejects.toThrow(
+      `test-idp is already used by TestIdp (${IDP_FILE}), choose another name`,
+    );
+    expect(contents(tree)).toEqual(before);
+  });
+
+  it('should keep the existing file and warn when run again with other options', async () => {
+    await tsWebsiteAuthIdpGenerator(tree, options);
+    const before = contents(tree);
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+    await tsWebsiteAuthIdpGenerator(tree, { ...options, clientId: 'other' });
+
+    expect(contents(tree)).toEqual(before);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toBe(
+      `${IDP_FILE} already exists, so it was kept and the new options were not applied. Edit the file to change the TestIdp identity provider.`,
+    );
+  });
+
+  it('should keep a rewritten identity provider file and warn', async () => {
+    await tsWebsiteAuthIdpGenerator(tree, options);
+    tree.write(IDP_FILE, '// my own identity provider\n');
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+
+    await tsWebsiteAuthIdpGenerator(tree, options);
+
+    expect(tree.read(IDP_FILE, 'utf-8')).toBe('// my own identity provider\n');
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain('the new options were not applied');
+  });
+
   it('should leave a diverged user-identity.ts unchanged and print the lines to add', async () => {
     const diverged = tree
       .read(USER_IDENTITY, 'utf-8')
