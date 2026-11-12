@@ -30,6 +30,7 @@ import {
   type NxGeneratorInfo,
   projectExists,
 } from '../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import { sortObjectKeys } from '../../utils/object.js';
 import { getPackageManagerDisplayCommands } from '../../utils/pkg-manager.js';
 import type { TsProjectGeneratorSchema } from './schema';
@@ -121,6 +122,7 @@ export const tsProjectGenerator = async (
   tree: Tree,
   schema: TsProjectGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  assertSupportedNxVersion(tree);
   const { fullyQualifiedName, dir } = getTsLibDetails(tree, schema);
   // The module format is workspace-wide, established by the preset when the
   // workspace is created, so vending generators always infer it from the tree.

@@ -6,6 +6,7 @@ import { generateFiles, type Tree } from '@nx/devkit';
 import path from 'path';
 import { formatFilesInSubtree } from '../../utils/format.js';
 import { esmVars } from '../../utils/module-format.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import {
   buildOpenApiCodeGenerationData,
   generateOpenApiTsClient,
@@ -20,6 +21,7 @@ export const openApiTsHooksGenerator = async (
   tree: Tree,
   options: OpenApiTsHooksGeneratorSchema,
 ) => {
+  assertSupportedNxVersion(tree);
   const data = await buildOpenApiCodeGenerationData(
     tree,
     options.openApiSpecPath,

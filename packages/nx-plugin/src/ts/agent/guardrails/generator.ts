@@ -33,6 +33,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../../utils/nx-version.js';
 import { TS_AGENT_GENERATOR_INFO } from '../generator.js';
 import type { TsAgentGuardrailsGeneratorSchema } from './schema';
 import { addGuardrailPolicySynthInputs } from './synth-inputs.js';
@@ -121,6 +122,7 @@ export const tsAgentGuardrailsGenerator = async (
   tree: Tree,
   options: TsAgentGuardrailsGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  assertSupportedNxVersion(tree);
   const project = readProjectConfigurationUnqualified(tree, options.project);
   const agent = resolveAgent(
     project.name,

@@ -13,6 +13,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import { attachUpstreamToLocalGateway } from '../attach-upstream.js';
 import { readAgentCoreGatewayMetadata } from '../generator.js';
 import type { AgentcoreGatewayMcpConnectionGeneratorSchema } from './schema';
@@ -33,6 +34,7 @@ export const agentcoreGatewayMcpConnectionGenerator = async (
   tree: Tree,
   options: AgentcoreGatewayMcpConnectionGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  assertSupportedNxVersion(tree);
   const sourceProject = readProjectConfigurationUnqualified(
     tree,
     options.sourceProject,

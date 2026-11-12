@@ -50,6 +50,7 @@ import {
   getGeneratorInfo,
   type NxGeneratorInfo,
 } from '../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import { getRelativePathToRootByDirectory } from '../../utils/paths.js';
 import { registerPnpmBuiltDependencies } from '../../utils/pnpm-workspace.js';
 import { assignPort } from '../../utils/port.js';
@@ -112,6 +113,7 @@ export const tsRdbGenerator = async (
   tree: Tree,
   options: TsRdbGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  assertSupportedNxVersion(tree);
   const nameKebabCase = kebabCase(options.name);
   const nameClassName = toClassName(options.name);
   const databaseUser = options.databaseUser ?? 'dbadmin';

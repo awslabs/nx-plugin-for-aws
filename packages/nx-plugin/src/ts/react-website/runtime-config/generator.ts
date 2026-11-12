@@ -23,6 +23,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../../utils/nx-version.js';
 import { toProjectRelativePath } from '../../../utils/paths.js';
 import type { RuntimeConfigGeneratorSchema } from './schema';
 
@@ -34,6 +35,7 @@ export async function runtimeConfigGenerator(
   tree: Tree,
   options: RuntimeConfigGeneratorSchema,
 ) {
+  assertSupportedNxVersion(tree);
   const projectConfig = readProjectConfigurationUnqualified(
     tree,
     options.project,

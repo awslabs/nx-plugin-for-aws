@@ -32,6 +32,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import { sortObjectKeys } from '../../utils/object.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
@@ -66,6 +67,7 @@ export const tsLambdaFunctionGenerator = async (
   tree: Tree,
   schema: TsLambdaFunctionGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  assertSupportedNxVersion(tree);
   const projectConfig = readProjectConfigurationUnqualified(
     tree,
     schema.project,

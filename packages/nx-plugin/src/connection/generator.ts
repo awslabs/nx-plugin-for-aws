@@ -48,6 +48,7 @@ import {
   type ComponentMetadata,
   readProjectConfigurationUnqualified,
 } from '../utils/nx.js';
+import { assertSupportedNxVersion } from '../utils/nx-version.js';
 import { readToml } from '../utils/toml.js';
 import type { ConnectionGeneratorSchema } from './schema';
 import {
@@ -186,6 +187,7 @@ export const connectionGenerator = async (
   tree: Tree,
   options: ConnectionGeneratorSchema,
 ) => {
+  assertSupportedNxVersion(tree);
   const resolved = await resolveConnection(tree, options);
 
   const connectionKey =

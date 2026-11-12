@@ -4,6 +4,7 @@
  */
 import type { GeneratorCallback, Tree } from '@nx/devkit';
 import { getGeneratorInfo, type NxGeneratorInfo } from '../../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../../utils/nx-version.js';
 import { tsReactWebsiteGenerator } from '../../react-website/app/generator.js';
 import type { TsWebsiteGeneratorSchema } from './schema';
 
@@ -15,6 +16,7 @@ export const tsWebsiteGenerator = async (
   tree: Tree,
   schema: TsWebsiteGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  assertSupportedNxVersion(tree);
   const { framework: _framework, ...rest } = schema;
   return tsReactWebsiteGenerator(tree, rest);
 };

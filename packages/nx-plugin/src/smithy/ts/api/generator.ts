@@ -44,6 +44,7 @@ import {
   normalizeTargetKeyOrder,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../../utils/nx-version.js';
 import { assignPort } from '../../../utils/port.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
@@ -93,6 +94,7 @@ export const tsSmithyApiGenerator = async (
   tree: Tree,
   options: TsSmithyApiGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  assertSupportedNxVersion(tree);
   if (
     (options.infra as string) !== 'rest-lambda' &&
     (options.infra as string) !== 'none'

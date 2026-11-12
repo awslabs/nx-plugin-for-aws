@@ -17,6 +17,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../../utils/nx-version.js';
 import { addWorkspaceDependencyToPyProject } from '../../../utils/py.js';
 import type { PyDynamoDBFastApiConnectionGeneratorSchema } from './schema';
 
@@ -27,6 +28,7 @@ export const pyDynamoDBFastApiConnectionGenerator = async (
   tree: Tree,
   options: PyDynamoDBFastApiConnectionGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  assertSupportedNxVersion(tree);
   const sourceProject = readProjectConfigurationUnqualified(
     tree,
     options.sourceProject,

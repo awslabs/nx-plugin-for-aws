@@ -34,6 +34,7 @@ import {
   type NxGeneratorInfo,
   projectExists,
 } from '../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import type { UVPyprojectToml } from '../../utils/nxlv-python.js';
 import {
   migrateToSharedVenvGenerator,
@@ -181,6 +182,7 @@ export const pyProjectGenerator = async (
   tree: Tree,
   schema: PyProjectGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  assertSupportedNxVersion(tree);
   const { dir, normalizedModuleName, fullyQualifiedName, distributionName } =
     getPyProjectDetails(tree, schema);
 

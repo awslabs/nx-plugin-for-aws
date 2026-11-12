@@ -61,6 +61,7 @@ import {
   normalizeTargetKeyOrder,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import { sortObjectKeys } from '../../utils/object.js';
 import { registerPnpmBuiltDependencies } from '../../utils/pnpm-workspace.js';
 import { assignPort } from '../../utils/port.js';
@@ -114,6 +115,7 @@ export const tsMcpServerGenerator = async (
   tree: Tree,
   options: TsMcpServerGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  assertSupportedNxVersion(tree);
   const project = readProjectConfigurationUnqualified(tree, options.project);
 
   if (!tree.exists(joinPathFragments(project.root, 'tsconfig.json'))) {

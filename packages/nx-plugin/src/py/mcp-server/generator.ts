@@ -52,6 +52,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import { toProjectRelativePath } from '../../utils/paths.js';
 import { registerPnpmBuiltDependencies } from '../../utils/pnpm-workspace.js';
 import { assignPort } from '../../utils/port.js';
@@ -101,6 +102,7 @@ export const pyMcpServerGenerator = async (
   tree: Tree,
   options: PyMcpServerGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  assertSupportedNxVersion(tree);
   const project = readProjectConfigurationUnqualified(tree, options.project);
 
   const pyProjectPath = joinPathFragments(project.root, 'pyproject.toml');
