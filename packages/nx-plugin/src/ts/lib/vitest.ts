@@ -5,6 +5,8 @@
 import {
   joinPathFragments,
   readNxJson,
+  type TargetConfiguration,
+  type TargetDefaults,
   type Tree,
   updateNxJson,
 } from '@nx/devkit';
@@ -17,6 +19,7 @@ import {
   type MustDeclare,
 } from '../../utils/declared-dependencies.js';
 import { addDependenciesToPackageJson } from '../../utils/dependencies.js';
+import { mergePluginTargetDefault } from '../../utils/nx.js';
 import { type ITsDepVersion, withVersions } from '../../utils/versions.js';
 import type { ConfigureProjectOptions } from './types.js';
 
@@ -98,6 +101,41 @@ export const VITEST_DEPENDENCIES = [
   root?: boolean;
 }[];
 
+/** The nx.json plugin that infers each vitest project's `test` target. */
+export const VITEST_PLUGIN = '@nx/vitest';
+
+/**
+ * Add the vitest test defaults (caching, inputs and the `update-snapshot`
+ * configuration) to `targetDefaults.test`, in an entry filtered to the
+ * `test` targets {@link VITEST_PLUGIN} infers. Python projects also name their
+ * test target `test`, and pytest has no `--update` flag, so an unfiltered
+ * default would break `nx run-many -t test -c update-snapshot` for them.
+ *
+ * Later values win: the vended defaults, then `carried` (values a migration
+ * moves from an older key), then whatever the entry already holds.
+ */
+export const withVitestTestTargetDefaults = (
+  targetDefaults: TargetDefaults | undefined,
+  carried?: Partial<TargetConfiguration>,
+): TargetDefaults => ({
+  ...targetDefaults,
+  test: mergePluginTargetDefault(
+    targetDefaults?.test,
+    VITEST_PLUGIN,
+    (base) => ({
+      cache: true,
+      inputs: ['default', '^production'],
+      configurations: {
+        'update-snapshot': {
+          args: '--update',
+        },
+      },
+      ...carried,
+      ...base,
+    }),
+  ),
+});
+
 export const configureVitest = async <const D extends DependencyDeclaration>(
   tree: Tree,
   options: ConfigureProjectOptions,
@@ -127,19 +165,7 @@ export const configureVitest = async <const D extends DependencyDeclaration>(
     const nxJson = readNxJson(tree);
     updateNxJson(tree, {
       ...nxJson,
-      targetDefaults: {
-        ...(nxJson.targetDefaults ?? {}),
-        '@nx/vitest:test': {
-          cache: true,
-          inputs: ['default', '^production'],
-          configurations: {
-            'update-snapshot': {
-              args: '--update',
-            },
-          },
-          ...nxJson.targetDefaults['@nx/vitest:test'],
-        },
-      },
+      targetDefaults: withVitestTestTargetDefaults(nxJson.targetDefaults),
     });
   }
 

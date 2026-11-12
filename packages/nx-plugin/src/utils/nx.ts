@@ -8,6 +8,7 @@ import {
   readJson,
   readProjectConfiguration,
   type TargetConfiguration,
+  type TargetDefaultArrayEntry,
   type TargetDefaultValue,
   type Tree,
   updateProjectConfiguration,
@@ -286,6 +287,42 @@ export const mergeTargetDefault = (
   return value.map((entry, index) =>
     index === catchAllIndex ? apply(entry) : entry,
   );
+};
+
+/**
+ * Merge a generator's own config into the entry of an `nx.json`
+ * `targetDefaults` value that is filtered to the targets `plugin` infers
+ * (`{ filter: { plugin } }`), preserving whatever the workspace already had.
+ * `apply` receives the entry's config without its filter and returns the merged
+ * config; it must be idempotent so re-running the generator is a no-op.
+ *
+ * The result is always the array form: an object value becomes the catch-all
+ * first entry, and an entry filtered to exactly `plugin` is merged in place or
+ * appended. Other entries keep their content and order (Nx layers later matches
+ * on top, so the catch-all stays before the plugin's entry).
+ */
+export const mergePluginTargetDefault = (
+  value: TargetDefaultValue | undefined,
+  plugin: string,
+  apply: (base: Partial<TargetConfiguration>) => Partial<TargetConfiguration>,
+): TargetDefaultArrayEntry[] => {
+  const entries: TargetDefaultArrayEntry[] =
+    value === undefined ? [] : Array.isArray(value) ? value : [value];
+  const isPluginEntry = ({ filter }: TargetDefaultArrayEntry) =>
+    filter !== undefined &&
+    Object.keys(filter).length === 1 &&
+    filter.plugin === plugin;
+  const pluginIndex = entries.findIndex(isPluginEntry);
+  if (pluginIndex === -1) {
+    return [...entries, { filter: { plugin }, ...apply({}) }];
+  }
+  return entries.map((entry, index) => {
+    if (index !== pluginIndex) {
+      return entry;
+    }
+    const { filter, ...base } = entry;
+    return { filter, ...apply(base) };
+  });
 };
 
 /**
