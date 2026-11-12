@@ -95,7 +95,9 @@ The generator also edits the user pool's web client, the Cognito app client your
   </Fragment>
 </Infrastructure>
 
-A second identity provider is added after the first. Running the generator again with the same `name` and options changes no file, and the generator does not overwrite your edits to the identity provider file. If you run it again with the same `name` but other options, the generator keeps the existing file and warns that the new options were not applied. To change the identity provider, edit its file. Names that differ only in letter case or hyphens, such as `TestIdp` and `Test-Idp`, use the same file, so the generator refuses the second name.
+A second identity provider is added after the first. Running the generator again with the same `name` and options changes no file, and the generator does not overwrite your edits to the identity provider file. If you run it again with the same `name` but other options, the generator keeps the existing file and warns that the new options were not applied. To change the identity provider, edit its file. Names with the same kebab-case form use the same file, so the generator refuses the second name. For example, `TestIdp` and `Test-Idp` both use `test-idp`, and `Okta` and `OKTA` both use `okta`.
+
+The generator does not detect names whose kebab-case forms differ, such as `Okta` (`okta`) and `Ok-ta` (`ok-ta`), or `TestIdp` (`test-idp`) and `testidp` (`testidp`). It adds a second identity provider with its own file and its own secret name, even when the issuer and client ID are the same. Choose clearly distinct names.
 
 If you have changed `user-identity.ts` or the `supported_identity_providers` list so that the generator no longer recognizes it, the generator leaves that file unchanged. It prints the lines to add by hand instead.
 
@@ -107,8 +109,10 @@ The first deploy after you run the generator reads the client secret from Secret
 2. Store the client secret in Secrets Manager, under the name in the `clientSecretName` option (`<name>-oidc-client-secret` by default):
 
    ```bash
-   aws secretsmanager create-secret --name TestIdp-oidc-client-secret --secret-string <client secret>
+   aws secretsmanager create-secret --name TestIdp-oidc-client-secret --secret-string <client secret> --region <region>
    ```
+
+   Set `--region` to your stack's region. The secret must exist in that region before the first deploy. Store the secret as a plain string, not JSON, because Cognito receives the whole secret value as the client secret. In the Secrets Manager console, choose Plaintext, not Key/value.
 
 3. Deploy.
 4. Add the redirect URI to the application at the identity provider.
@@ -151,19 +155,27 @@ The Terraform identity provider file also sets two values that Cognito adds when
 
 ## Identity provider notes
 
-The settings below come from each vendor's documentation. Only a Cognito user pool acting as the identity provider has been tested with this generator.
+The settings below come from each vendor's documentation. Okta has been tested on AWS with both CDK and Terraform. The Auth0 and Microsoft Entra ID settings were checked against each vendor's published OpenID discovery document, but not with a live sign-in.
 
 ### Okta
 
-Not tested. Create an OIDC web application in Okta. The issuer is your Okta domain, `https://<your-org>.okta.com`, or a custom authorization server such as `https://<your-org>.okta.com/oauth2/default`. The default scopes, `openid email profile`, return `email`, `given_name` and `family_name`, so the default mapping works.
+Tested on AWS with CDK and Terraform. Create an OIDC Web Application in Okta, with the Authorization Code grant and a client secret. Set its sign-in redirect URI to the `/oauth2/idpresponse` redirect URI from step 4 of [Set up your identity provider](#set-up-your-identity-provider). It needs no sign-out redirect URI. The issuer is your Okta domain, `https://<your-org>.okta.com`, which is the form that was tested. A custom authorization server, such as `https://<your-org>.okta.com/oauth2/default`, also has an issuer, but that form has not been tested. The default scopes, `openid email profile`, return `email`, `given_name` and `family_name`, so the default mapping works. Each user needs an email, a first name and a last name set in Okta. Assign the application only to the users or groups who need access.
 
 ### Auth0
 
-Not tested. Create a Regular Web Application in Auth0. The issuer is `https://<your-tenant>.auth0.com/`, including the trailing slash, because the `iss` claim in Auth0 tokens has one. Auth0 returns `given_name` and `family_name` only when the user's connection provides them. Users of a connection without them cannot sign in until you map other claims.
+Checked against Auth0's discovery document, not tested with a live sign-in. Create a Regular Web Application in Auth0. The issuer is `https://<your-tenant>.auth0.com/`, including the trailing slash.
+
+**Warning:** the generator also accepts the issuer without the trailing slash, but sign-in then fails, because the `iss` claim in Auth0 tokens has the slash.
+
+Auth0 returns `given_name` and `family_name` only when the user's connection provides them. Users of a connection without them cannot sign in until you map other claims.
 
 ### Microsoft Entra ID
 
-Not tested. Register a single-tenant application in Entra ID. The issuer is `https://login.microsoftonline.com/<tenant-id>/v2.0`. The generator refuses the multi-tenant issuers (`/common/`, `/organizations/` and `/consumers/`), because they accept users from any Entra ID tenant. Entra ID sends `given_name` and `family_name` only if you add them as optional claims to the application's ID token. Its `email` claim is not verified, so do not map `email_verified` from Entra ID.
+Checked against Microsoft's discovery document, not tested with a live sign-in. Register a single-tenant application in Entra ID. The issuer is `https://login.microsoftonline.com/<tenant-id>/v2.0`. The generator refuses the multi-tenant issuers (`/common/`, `/organizations/` and `/consumers/`), because they accept users from any Entra ID tenant.
+
+**Warning:** the issuer must not end with a slash. Use `/v2.0`, not `/v2.0/`. The generator accepts the form with the slash, but sign-in then fails, because the `iss` claim in Entra ID tokens has no slash.
+
+Add `email`, `given_name` and `family_name` as optional claims to the application's ID token. Entra ID sends them only if you do. Each user needs the Mail field set. Otherwise the `email` claim is empty, and the user's first sign-in fails, because the user pool requires `email`. Entra ID's `email` claim is not verified, so do not map `email_verified` from Entra ID.
 
 ### Cognito user pool
 
@@ -187,6 +199,8 @@ To test with another Cognito user pool as the identity provider, use the issuer 
   aws cognito-idp admin-disable-user --user-pool-id <user pool id> --username testidp_<sub>
   ```
 
+  This has been tested on AWS. After `admin-user-global-sign-out` and `admin-disable-user`, the identity provider still signs the user in, but Cognito refuses them.
+
   A shorter refresh token validity on the web client (`refreshTokenValidity` in CDK, `refresh_token_validity` in Terraform) shortens the time a removed user keeps access. This has not been tested on AWS.
 
 ## The client secret
@@ -201,6 +215,8 @@ CloudFormation resolves the reference inside the identity provider's settings (`
   </Fragment>
   <Fragment slot="terraform">
 The module reads the secret with a `data "aws_secretsmanager_secret_version"` data source, so `terraform plan` shows it as `(sensitive value)`. Terraform state still holds the secret in plain text, once for the data source and once for the identity provider. Anyone who can read the state object in your state bucket can read the secret. Limit read access to the state bucket accordingly.
+
+A saved plan file, for example from `terraform plan -out`, also holds the secret in plain text. If your state bucket has versioning turned on, old versions of the state keep the secret after `terraform destroy`. Delete those versions too when you remove the stack. After a test, rotate the client secret at the identity provider.
   </Fragment>
 </Infrastructure>
 
