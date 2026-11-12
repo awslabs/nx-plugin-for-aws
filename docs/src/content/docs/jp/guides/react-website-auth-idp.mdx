@@ -95,7 +95,9 @@ import RunGenerator from '@components/run-generator.astro';
   </Fragment>
 </Infrastructure>
 
-2番目のアイデンティティプロバイダーは最初のものの後に追加されます。同じ`name`とオプションでジェネレーターを再度実行してもファイルは変更されず、ジェネレーターはアイデンティティプロバイダーファイルへの編集を上書きしません。同じ`name`で異なるオプションを使用して再度実行すると、ジェネレーターは既存のファイルを保持し、新しいオプションが適用されなかったことを警告します。アイデンティティプロバイダーを変更するには、そのファイルを編集してください。`TestIdp`と`Test-Idp`のように、大文字小文字やハイフンのみが異なる名前は同じファイルを使用するため、ジェネレーターは2番目の名前を拒否します。
+2番目のアイデンティティプロバイダーは最初のものの後に追加されます。同じ`name`とオプションでジェネレーターを再度実行してもファイルは変更されず、ジェネレーターはアイデンティティプロバイダーファイルへの編集を上書きしません。同じ`name`で異なるオプションを使用して再度実行すると、ジェネレーターは既存のファイルを保持し、新しいオプションが適用されなかったことを警告します。アイデンティティプロバイダーを変更するには、そのファイルを編集してください。同じケバブケース形式を持つ名前は同じファイルを使用するため、ジェネレーターは2番目の名前を拒否します。例えば、`TestIdp`と`Test-Idp`はどちらも`test-idp`を使用し、`Okta`と`OKTA`はどちらも`okta`を使用します。
+
+ジェネレーターは、`Okta`（`okta`）と`Ok-ta`（`ok-ta`）、または`TestIdp`（`test-idp`）と`testidp`（`testidp`）のように、ケバブケース形式が異なる名前を検出しません。発行者とクライアントIDが同じ場合でも、独自のファイルと独自のシークレット名を持つ2番目のアイデンティティプロバイダーを追加します。明確に異なる名前を選択してください。
 
 `user-identity.ts`または`supported_identity_providers`リストを変更してジェネレーターが認識できなくなった場合、ジェネレーターはそのファイルを変更せずに残します。代わりに、手動で追加する行を出力します。
 
@@ -107,8 +109,10 @@ import RunGenerator from '@components/run-generator.astro';
 2. クライアントシークレットをSecrets Managerに、`clientSecretName`オプションの名前（デフォルトでは`<name>-oidc-client-secret`）で保存します：
 
    ```bash
-   aws secretsmanager create-secret --name TestIdp-oidc-client-secret --secret-string <client secret>
+   aws secretsmanager create-secret --name TestIdp-oidc-client-secret --secret-string <client secret> --region <region>
    ```
+
+   `--region`をスタックのリージョンに設定します。最初のデプロイの前に、そのリージョンにシークレットが存在する必要があります。Cognitoはシークレット値全体をクライアントシークレットとして受け取るため、シークレットをJSONではなくプレーン文字列として保存してください。Secrets Managerコンソールでは、Key/valueではなくPlaintextを選択してください。
 
 3. デプロイします。
 4. アイデンティティプロバイダーのアプリケーションにリダイレクトURIを追加します。
@@ -151,19 +155,27 @@ Terraformアイデンティティプロバイダーファイルは、Cognitoが�
 
 ## アイデンティティプロバイダーに関する注意事項
 
-以下の設定は、各ベンダーのドキュメントから取得したものです。このジェネレーターでテストされたのは、アイデンティティプロバイダーとして機能するCognitoユーザープールのみです。
+以下の設定は、各ベンダーのドキュメントから取得したものです。OktaはCDKとTerraformの両方でAWSでテストされています。Auth0とMicrosoft Entra IDの設定は、各ベンダーが公開しているOpenIDディスカバリードキュメントに対して確認されましたが、実際のサインインではテストされていません。
 
 ### Okta
 
-未テスト。OktaでOIDC Webアプリケーションを作成します。発行者はOktaドメイン`https://<your-org>.okta.com`、またはカスタム認証サーバー（例：`https://<your-org>.okta.com/oauth2/default`）です。デフォルトのスコープ`openid email profile`は、`email`、`given_name`、`family_name`を返すため、デフォルトのマッピングが機能します。
+CDKとTerraformでAWSでテストされています。Oktaで、Authorization Codeグラントとクライアントシークレットを持つOIDC Web Applicationを作成します。サインインリダイレクトURIを、[アイデンティティプロバイダーの設定](#set-up-your-identity-provider)の手順4の`/oauth2/idpresponse`リダイレクトURIに設定します。サインアウトリダイレクトURIは不要です。発行者はOktaドメイン`https://<your-org>.okta.com`で、これがテストされた形式です。`https://<your-org>.okta.com/oauth2/default`などのカスタム認証サーバーにも発行者がありますが、その形式はテストされていません。デフォルトのスコープ`openid email profile`は、`email`、`given_name`、`family_name`を返すため、デフォルトのマッピングが機能します。各ユーザーには、Oktaでメール、名、姓が設定されている必要があります。アクセスが必要なユーザーまたはグループにのみアプリケーションを割り当ててください。
 
 ### Auth0
 
-未テスト。Auth0でRegular Web Applicationを作成します。発行者は`https://<your-tenant>.auth0.com/`で、末尾のスラッシュを含みます。これは、Auth0トークンの`iss`クレームにスラッシュがあるためです。Auth0は、ユーザーの接続が提供する場合にのみ`given_name`と`family_name`を返します。それらのない接続のユーザーは、他のクレームをマッピングするまでサインインできません。
+Auth0のディスカバリードキュメントに対して確認されましたが、実際のサインインではテストされていません。Auth0でRegular Web Applicationを作成します。発行者は`https://<your-tenant>.auth0.com/`で、末尾のスラッシュを含みます。
+
+**警告：** ジェネレーターは末尾のスラッシュなしの発行者も受け入れますが、Auth0トークンの`iss`クレームにはスラッシュがあるため、サインインは失敗します。
+
+Auth0は、ユーザーの接続が提供する場合にのみ`given_name`と`family_name`を返します。それらのない接続のユーザーは、他のクレームをマッピングするまでサインインできません。
 
 ### Microsoft Entra ID
 
-未テスト。Entra IDでシングルテナントアプリケーションを登録します。発行者は`https://login.microsoftonline.com/<tenant-id>/v2.0`です。ジェネレーターは、マルチテナント発行者（`/common/`、`/organizations/`、`/consumers/`）を拒否します。これらは任意のEntra IDテナントからのユーザーを受け入れるためです。Entra IDは、アプリケーションのIDトークンにオプションのクレームとして追加した場合にのみ`given_name`と`family_name`を送信します。その`email`クレームは検証されていないため、Entra IDから`email_verified`をマッピングしないでください。
+Microsoftのディスカバリードキュメントに対して確認されましたが、実際のサインインではテストされていません。Entra IDでシングルテナントアプリケーションを登録します。発行者は`https://login.microsoftonline.com/<tenant-id>/v2.0`です。ジェネレーターは、マルチテナント発行者（`/common/`、`/organizations/`、`/consumers/`）を拒否します。これらは任意のEntra IDテナントからのユーザーを受け入れるためです。
+
+**警告：** 発行者は末尾にスラッシュを付けてはいけません。`/v2.0/`ではなく`/v2.0`を使用してください。ジェネレーターはスラッシュ付きの形式を受け入れますが、Entra IDトークンの`iss`クレームにはスラッシュがないため、サインインは失敗します。
+
+アプリケーションのIDトークンにオプションのクレームとして`email`、`given_name`、`family_name`を追加します。Entra IDは、追加した場合にのみそれらを送信します。各ユーザーにはMailフィールドが設定されている必要があります。そうしないと、`email`クレームが空になり、ユーザープールが`email`を必要とするため、ユーザーの最初のサインインは失敗します。Entra IDの`email`クレームは検証されていないため、Entra IDから`email_verified`をマッピングしないでください。
 
 ### Cognito user pool
 
@@ -187,6 +199,8 @@ Terraformアイデンティティプロバイダーファイルは、Cognitoが�
   aws cognito-idp admin-disable-user --user-pool-id <user pool id> --username testidp_<sub>
   ```
 
+  これはAWSでテストされています。`admin-user-global-sign-out`と`admin-disable-user`の後、アイデンティティプロバイダーは依然としてユーザーをサインインさせますが、Cognitoはそれらを拒否します。
+
   Webクライアントのリフレッシュトークン有効期間を短くする（CDKでは`refreshTokenValidity`、Terraformでは`refresh_token_validity`）と、削除されたユーザーがアクセスを維持する時間が短縮されます。これはAWSではテストされていません。
 
 ## クライアントシークレット
@@ -201,6 +215,8 @@ CloudFormationは、アイデンティティプロバイダーの設定（`Provi
   </Fragment>
   <Fragment slot="terraform">
 モジュールは、`data "aws_secretsmanager_secret_version"`データソースでシークレットを読み取るため、`terraform plan`は`(sensitive value)`として表示します。Terraform stateは、データソース用に1回、アイデンティティプロバイダー用に1回、プレーンテキストでシークレットを保持します。ステートバケット内のステートオブジェクトを読み取ることができる人は誰でもシークレットを読み取ることができます。それに応じてステートバケットへの読み取りアクセスを制限してください。
+
+`terraform plan -out`などの保存されたプランファイルも、プレーンテキストでシークレットを保持します。ステートバケットでバージョニングが有効になっている場合、`terraform destroy`後も古いバージョンのステートにシークレットが保持されます。スタックを削除するときは、それらのバージョンも削除してください。テスト後は、アイデンティティプロバイダーでクライアントシークレットをローテーションしてください。
   </Fragment>
 </Infrastructure>
 

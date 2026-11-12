@@ -95,7 +95,9 @@ import RunGenerator from '@components/run-generator.astro';
   </Fragment>
 </Infrastructure>
 
-第二个身份提供商会添加在第一个之后。使用相同的 `name` 和选项再次运行生成器不会更改任何文件，生成器也不会覆盖您对身份提供商文件的编辑。如果您使用相同的 `name` 但其他选项再次运行它，生成器会保留现有文件并警告新选项未应用。要更改身份提供商，请编辑其文件。仅在字母大小写或连字符上不同的名称（如 `TestIdp` 和 `Test-Idp`）使用相同的文件，因此生成器拒绝第二个名称。
+第二个身份提供商会添加在第一个之后。使用相同的 `name` 和选项再次运行生成器不会更改任何文件，生成器也不会覆盖您对身份提供商文件的编辑。如果您使用相同的 `name` 但其他选项再次运行它，生成器会保留现有文件并警告新选项未应用。要更改身份提供商，请编辑其文件。具有相同 kebab-case 形式的名称使用相同的文件，因此生成器拒绝第二个名称。例如，`TestIdp` 和 `Test-Idp` 都使用 `test-idp`，`Okta` 和 `OKTA` 都使用 `okta`。
+
+生成器不会检测 kebab-case 形式不同的名称，例如 `Okta`（`okta`）和 `Ok-ta`（`ok-ta`），或 `TestIdp`（`test-idp`）和 `testidp`（`testidp`）。即使颁发者和客户端 ID 相同，它也会添加第二个身份提供商及其自己的文件和密钥名称。请选择明显不同的名称。
 
 如果您更改了 `user-identity.ts` 或 `supported_identity_providers` 列表，使得生成器无法再识别它，生成器会保持该文件不变。它会打印出需要手动添加的行。
 
@@ -107,8 +109,10 @@ import RunGenerator from '@components/run-generator.astro';
 2. 将客户端密钥存储在 Secrets Manager 中，使用 `clientSecretName` 选项中的名称（默认为 `<name>-oidc-client-secret`）：
 
    ```bash
-   aws secretsmanager create-secret --name TestIdp-oidc-client-secret --secret-string <client secret>
+   aws secretsmanager create-secret --name TestIdp-oidc-client-secret --secret-string <client secret> --region <region>
    ```
+
+   将 `--region` 设置为您的堆栈区域。在第一次部署之前，密钥必须存在于该区域。将密钥存储为纯字符串，而不是 JSON，因为 Cognito 接收整个密钥值作为客户端密钥。在 Secrets Manager 控制台中，选择 Plaintext，而不是 Key/value。
 
 3. 部署。
 4. 将重定向 URI 添加到身份提供商的应用程序中。
@@ -151,19 +155,27 @@ Terraform 身份提供商文件还设置了 Cognito 在返回身份提供商时�
 
 ## 身份提供商说明
 
-以下设置来自各供应商的文档。只有作为身份提供商的 Cognito 用户池已使用此生成器进行了测试。
+以下设置来自各供应商的文档。Okta 已在 AWS 上使用 CDK 和 Terraform 进行了测试。Auth0 和 Microsoft Entra ID 设置已根据各供应商发布的 OpenID 发现文档进行了检查，但未进行实际登录测试。
 
 ### Okta
 
-未测试。在 Okta 中创建一个 OIDC Web 应用程序。颁发者是您的 Okta 域名，`https://<your-org>.okta.com`，或自定义授权服务器，如 `https://<your-org>.okta.com/oauth2/default`。默认范围 `openid email profile` 返回 `email`、`given_name` 和 `family_name`，因此默认映射有效。
+已在 AWS 上使用 CDK 和 Terraform 进行测试。在 Okta 中创建一个 OIDC Web 应用程序，使用授权码授予和客户端密钥。将其登录重定向 URI 设置为[设置您的身份提供商](#set-up-your-identity-provider)第 4 步中的 `/oauth2/idpresponse` 重定向 URI。它不需要注销重定向 URI。颁发者是您的 Okta 域名，`https://<your-org>.okta.com`，这是经过测试的形式。自定义授权服务器（如 `https://<your-org>.okta.com/oauth2/default`）也有颁发者，但该形式尚未经过测试。默认范围 `openid email profile` 返回 `email`、`given_name` 和 `family_name`，因此默认映射有效。每个用户需要在 Okta 中设置电子邮件、名字和姓氏。仅将应用程序分配给需要访问的用户或组。
 
 ### Auth0
 
-未测试。在 Auth0 中创建一个常规 Web 应用程序。颁发者是 `https://<your-tenant>.auth0.com/`，包括尾部斜杠，因为 Auth0 令牌中的 `iss` 声明有一个。Auth0 仅在用户的连接提供 `given_name` 和 `family_name` 时才返回它们。没有它们的连接的用户在您映射其他声明之前无法登录。
+已根据 Auth0 的发现文档进行检查，未进行实际登录测试。在 Auth0 中创建一个常规 Web 应用程序。颁发者是 `https://<your-tenant>.auth0.com/`，包括尾部斜杠。
+
+**警告：**生成器也接受不带尾部斜杠的颁发者，但登录会失败，因为 Auth0 令牌中的 `iss` 声明有斜杠。
+
+Auth0 仅在用户的连接提供 `given_name` 和 `family_name` 时才返回它们。没有它们的连接的用户在您映射其他声明之前无法登录。
 
 ### Microsoft Entra ID
 
-未测试。在 Entra ID 中注册一个单租户应用程序。颁发者是 `https://login.microsoftonline.com/<tenant-id>/v2.0`。生成器拒绝多租户颁发者（`/common/`、`/organizations/` 和 `/consumers/`），因为它们接受来自任何 Entra ID 租户的用户。Entra ID 仅在您将 `given_name` 和 `family_name` 作为可选声明添加到应用程序的 ID 令牌时才发送它们。其 `email` 声明未经验证，因此不要从 Entra ID 映射 `email_verified`。
+已根据 Microsoft 的发现文档进行检查，未进行实际登录测试。在 Entra ID 中注册一个单租户应用程序。颁发者是 `https://login.microsoftonline.com/<tenant-id>/v2.0`。生成器拒绝多租户颁发者（`/common/`、`/organizations/` 和 `/consumers/`），因为它们接受来自任何 Entra ID 租户的用户。
+
+**警告：**颁发者不得以斜杠结尾。使用 `/v2.0`，而不是 `/v2.0/`。生成器接受带斜杠的形式，但登录会失败，因为 Entra ID 令牌中的 `iss` 声明没有斜杠。
+
+将 `email`、`given_name` 和 `family_name` 作为可选声明添加到应用程序的 ID 令牌。Entra ID 仅在您这样做时才发送它们。每个用户需要设置 Mail 字段。否则 `email` 声明为空，用户的首次登录将失败，因为用户池需要 `email`。Entra ID 的 `email` 声明未经验证，因此不要从 Entra ID 映射 `email_verified`。
 
 ### Cognito 用户池
 
@@ -187,6 +199,8 @@ Terraform 身份提供商文件还设置了 Cognito 在返回身份提供商时�
   aws cognito-idp admin-disable-user --user-pool-id <user pool id> --username testidp_<sub>
   ```
 
+  这已在 AWS 上进行了测试。在 `admin-user-global-sign-out` 和 `admin-disable-user` 之后，身份提供商仍然会让用户登录，但 Cognito 会拒绝他们。
+
   Web 客户端上较短的刷新令牌有效期（CDK 中的 `refreshTokenValidity`，Terraform 中的 `refresh_token_validity`）会缩短被删除用户保持访问权限的时间。这尚未在 AWS 上测试。
 
 ## 客户端密钥
@@ -201,6 +215,8 @@ CloudFormation 在身份提供商的设置（`ProviderDetails`）内解析引用
   </Fragment>
   <Fragment slot="terraform">
 模块使用 `data "aws_secretsmanager_secret_version"` 数据源读取密钥，因此 `terraform plan` 将其显示为 `(sensitive value)`。Terraform 状态仍然以纯文本形式保存密钥，一次用于数据源，一次用于身份提供商。任何可以读取状态存储桶中状态对象的人都可以读取密钥。相应地限制对状态存储桶的读取访问。
+
+保存的计划文件（例如来自 `terraform plan -out`）也以纯文本形式保存密钥。如果您的状态存储桶启用了版本控制，则在 `terraform destroy` 之后，状态的旧版本会保留密钥。删除堆栈时也要删除这些版本。测试后，在身份提供商处轮换客户端密钥。
   </Fragment>
 </Infrastructure>
 

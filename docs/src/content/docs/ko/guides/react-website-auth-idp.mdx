@@ -95,7 +95,9 @@ import RunGenerator from '@components/run-generator.astro';
   </Fragment>
 </Infrastructure>
 
-두 번째 아이덴티티 프로바이더는 첫 번째 이후에 추가됩니다. 동일한 `name`과 옵션으로 생성기를 다시 실행하면 파일이 변경되지 않으며, 생성기는 아이덴티티 프로바이더 파일에 대한 편집 내용을 덮어쓰지 않습니다. 동일한 `name`이지만 다른 옵션으로 다시 실행하면 생성기는 기존 파일을 유지하고 새 옵션이 적용되지 않았다고 경고합니다. 아이덴티티 프로바이더를 변경하려면 해당 파일을 편집하세요. `TestIdp`와 `Test-Idp`처럼 대소문자나 하이픈만 다른 이름은 동일한 파일을 사용하므로 생성기는 두 번째 이름을 거부합니다.
+두 번째 아이덴티티 프로바이더는 첫 번째 이후에 추가됩니다. 동일한 `name`과 옵션으로 생성기를 다시 실행하면 파일이 변경되지 않으며, 생성기는 아이덴티티 프로바이더 파일에 대한 편집 내용을 덮어쓰지 않습니다. 동일한 `name`이지만 다른 옵션으로 다시 실행하면 생성기는 기존 파일을 유지하고 새 옵션이 적용되지 않았다고 경고합니다. 아이덴티티 프로바이더를 변경하려면 해당 파일을 편집하세요. 케밥 케이스 형식이 동일한 이름은 동일한 파일을 사용하므로 생성기는 두 번째 이름을 거부합니다. 예를 들어 `TestIdp`와 `Test-Idp`는 모두 `test-idp`를 사용하고, `Okta`와 `OKTA`는 모두 `okta`를 사용합니다.
+
+생성기는 케밥 케이스 형식이 다른 이름은 감지하지 않습니다. 예를 들어 `Okta`(`okta`)와 `Ok-ta`(`ok-ta`), 또는 `TestIdp`(`test-idp`)와 `testidp`(`testidp`)입니다. 발급자와 클라이언트 ID가 동일하더라도 자체 파일과 자체 시크릿 이름을 가진 두 번째 아이덴티티 프로바이더를 추가합니다. 명확하게 구별되는 이름을 선택하세요.
 
 `user-identity.ts` 또는 `supported_identity_providers` 목록을 변경하여 생성기가 더 이상 인식하지 못하는 경우, 생성기는 해당 파일을 변경하지 않고 그대로 둡니다. 대신 수동으로 추가할 줄을 출력합니다.
 
@@ -107,8 +109,10 @@ import RunGenerator from '@components/run-generator.astro';
 2. `clientSecretName` 옵션의 이름(기본값은 `<name>-oidc-client-secret`)으로 Secrets Manager에 클라이언트 시크릿을 저장합니다:
 
    ```bash
-   aws secretsmanager create-secret --name TestIdp-oidc-client-secret --secret-string <client secret>
+   aws secretsmanager create-secret --name TestIdp-oidc-client-secret --secret-string <client secret> --region <region>
    ```
+
+   `--region`을 스택의 리전으로 설정하세요. 첫 번째 배포 전에 해당 리전에 시크릿이 존재해야 합니다. Cognito가 전체 시크릿 값을 클라이언트 시크릿으로 받기 때문에 시크릿을 JSON이 아닌 일반 문자열로 저장하세요. Secrets Manager 콘솔에서 Key/value가 아닌 Plaintext를 선택하세요.
 
 3. 배포합니다.
 4. 아이덴티티 프로바이더의 애플리케이션에 리디렉션 URI를 추가합니다.
@@ -151,19 +155,27 @@ Terraform 아이덴티티 프로바이더 파일은 또한 Cognito가 아이덴�
 
 ## 아이덴티티 프로바이더 참고 사항
 
-아래 설정은 각 공급업체의 문서에서 가져온 것입니다. 아이덴티티 프로바이더 역할을 하는 Cognito 사용자 풀만 이 생성기로 테스트되었습니다.
+아래 설정은 각 공급업체의 문서에서 가져온 것입니다. Okta는 CDK와 Terraform 모두를 사용하여 AWS에서 테스트되었습니다. Auth0 및 Microsoft Entra ID 설정은 각 공급업체의 게시된 OpenID 검색 문서와 대조하여 확인되었지만 실제 로그인으로는 테스트되지 않았습니다.
 
 ### Okta
 
-테스트되지 않음. Okta에서 OIDC 웹 애플리케이션을 생성합니다. 발급자는 Okta 도메인인 `https://<your-org>.okta.com` 또는 `https://<your-org>.okta.com/oauth2/default`와 같은 사용자 정의 권한 부여 서버입니다. 기본 범위인 `openid email profile`은 `email`, `given_name` 및 `family_name`을 반환하므로 기본 매핑이 작동합니다.
+CDK와 Terraform을 사용하여 AWS에서 테스트되었습니다. Okta에서 Authorization Code 부여 및 클라이언트 시크릿을 사용하는 OIDC Web Application을 생성하세요. [아이덴티티 프로바이더 설정](#set-up-your-identity-provider)의 4단계에서 제공하는 `/oauth2/idpresponse` 리디렉션 URI로 로그인 리디렉션 URI를 설정하세요. 로그아웃 리디렉션 URI는 필요하지 않습니다. 발급자는 Okta 도메인인 `https://<your-org>.okta.com`이며, 이것이 테스트된 형식입니다. `https://<your-org>.okta.com/oauth2/default`와 같은 사용자 정의 권한 부여 서버도 발급자를 가지고 있지만 해당 형식은 테스트되지 않았습니다. 기본 범위인 `openid email profile`은 `email`, `given_name` 및 `family_name`을 반환하므로 기본 매핑이 작동합니다. 각 사용자는 Okta에 이메일, 이름 및 성이 설정되어 있어야 합니다. 액세스가 필요한 사용자 또는 그룹에만 애플리케이션을 할당하세요.
 
 ### Auth0
 
-테스트되지 않음. Auth0에서 Regular Web Application을 생성합니다. 발급자는 `https://<your-tenant>.auth0.com/`이며, Auth0 토큰의 `iss` 클레임에 슬래시가 있으므로 후행 슬래시를 포함합니다. Auth0은 사용자의 연결이 제공하는 경우에만 `given_name` 및 `family_name`을 반환합니다. 이를 제공하지 않는 연결의 사용자는 다른 클레임을 매핑할 때까지 로그인할 수 없습니다.
+Auth0의 검색 문서와 대조하여 확인되었으며, 실제 로그인으로는 테스트되지 않았습니다. Auth0에서 Regular Web Application을 생성하세요. 발급자는 후행 슬래시를 포함하여 `https://<your-tenant>.auth0.com/`입니다.
+
+**경고:** 생성기는 후행 슬래시 없이도 발급자를 수락하지만, Auth0 토큰의 `iss` 클레임에 슬래시가 있기 때문에 로그인이 실패합니다.
+
+Auth0은 사용자의 연결이 제공하는 경우에만 `given_name` 및 `family_name`을 반환합니다. 이를 제공하지 않는 연결의 사용자는 다른 클레임을 매핑할 때까지 로그인할 수 없습니다.
 
 ### Microsoft Entra ID
 
-테스트되지 않음. Entra ID에서 단일 테넌트 애플리케이션을 등록합니다. 발급자는 `https://login.microsoftonline.com/<tenant-id>/v2.0`입니다. 생성기는 모든 Entra ID 테넌트의 사용자를 수락하기 때문에 다중 테넌트 발급자(`/common/`, `/organizations/` 및 `/consumers/`)를 거부합니다. Entra ID는 애플리케이션의 ID 토큰에 선택적 클레임으로 추가한 경우에만 `given_name` 및 `family_name`을 보냅니다. `email` 클레임은 확인되지 않으므로 Entra ID에서 `email_verified`를 매핑하지 마세요.
+Microsoft의 검색 문서와 대조하여 확인되었으며, 실제 로그인으로는 테스트되지 않았습니다. Entra ID에서 단일 테넌트 애플리케이션을 등록하세요. 발급자는 `https://login.microsoftonline.com/<tenant-id>/v2.0`입니다. 생성기는 모든 Entra ID 테넌트의 사용자를 수락하기 때문에 다중 테넌트 발급자(`/common/`, `/organizations/` 및 `/consumers/`)를 거부합니다.
+
+**경고:** 발급자는 슬래시로 끝나지 않아야 합니다. `/v2.0/`이 아닌 `/v2.0`을 사용하세요. 생성기는 슬래시가 있는 형식을 수락하지만, Entra ID 토큰의 `iss` 클레임에 슬래시가 없기 때문에 로그인이 실패합니다.
+
+애플리케이션의 ID 토큰에 `email`, `given_name` 및 `family_name`을 선택적 클레임으로 추가하세요. Entra ID는 추가한 경우에만 이를 보냅니다. 각 사용자는 Mail 필드가 설정되어 있어야 합니다. 그렇지 않으면 `email` 클레임이 비어 있고, 사용자 풀이 `email`을 요구하기 때문에 사용자의 첫 번째 로그인이 실패합니다. Entra ID의 `email` 클레임은 확인되지 않으므로 Entra ID에서 `email_verified`를 매핑하지 마세요.
 
 ### Cognito user pool
 
@@ -187,6 +199,8 @@ Terraform 아이덴티티 프로바이더 파일은 또한 Cognito가 아이덴�
   aws cognito-idp admin-disable-user --user-pool-id <user pool id> --username testidp_<sub>
   ```
 
+  이는 AWS에서 테스트되었습니다. `admin-user-global-sign-out` 및 `admin-disable-user` 후에도 아이덴티티 프로바이더는 여전히 사용자를 로그인시키지만 Cognito는 거부합니다.
+
   웹 클라이언트의 더 짧은 리프레시 토큰 유효 기간(CDK의 `refreshTokenValidity`, Terraform의 `refresh_token_validity`)은 제거된 사용자가 액세스를 유지하는 시간을 단축합니다. 이는 AWS에서 테스트되지 않았습니다.
 
 ## 클라이언트 시크릿
@@ -201,6 +215,8 @@ CloudFormation은 아이덴티티 프로바이더의 설정(`ProviderDetails`) �
   </Fragment>
   <Fragment slot="terraform">
 모듈은 `data "aws_secretsmanager_secret_version"` 데이터 소스로 시크릿을 읽으므로 `terraform plan`은 이를 `(sensitive value)`로 표시합니다. Terraform 상태는 여전히 데이터 소스에 대해 한 번, 아이덴티티 프로바이더에 대해 한 번 시크릿을 일반 텍스트로 보관합니다. 상태 버킷의 상태 객체를 읽을 수 있는 사람은 누구나 시크릿을 읽을 수 있습니다. 이에 따라 상태 버킷에 대한 읽기 액세스를 제한하세요.
+
+예를 들어 `terraform plan -out`의 저장된 플랜 파일도 시크릿을 일반 텍스트로 보관합니다. 상태 버킷에 버전 관리가 켜져 있으면 `terraform destroy` 후에도 상태의 이전 버전이 시크릿을 유지합니다. 스택을 제거할 때 해당 버전도 삭제하세요. 테스트 후 아이덴티티 프로바이더에서 클라이언트 시크릿을 교체하세요.
   </Fragment>
 </Infrastructure>
 

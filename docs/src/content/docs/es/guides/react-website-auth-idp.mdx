@@ -95,7 +95,9 @@ El generador también edita el cliente web del grupo de usuarios, el cliente de 
   </Fragment>
 </Infrastructure>
 
-Un segundo proveedor de identidad se agrega después del primero. Ejecutar el generador nuevamente con el mismo `name` y opciones no cambia ningún archivo, y el generador no sobrescribe tus ediciones al archivo del proveedor de identidad. Si lo ejecutas nuevamente con el mismo `name` pero otras opciones, el generador mantiene el archivo existente y advierte que las nuevas opciones no se aplicaron. Para cambiar el proveedor de identidad, edita su archivo. Los nombres que difieren solo en mayúsculas y minúsculas o guiones, como `TestIdp` y `Test-Idp`, usan el mismo archivo, por lo que el generador rechaza el segundo nombre.
+Un segundo proveedor de identidad se agrega después del primero. Ejecutar el generador nuevamente con el mismo `name` y opciones no cambia ningún archivo, y el generador no sobrescribe tus ediciones al archivo del proveedor de identidad. Si lo ejecutas nuevamente con el mismo `name` pero otras opciones, el generador mantiene el archivo existente y advierte que las nuevas opciones no se aplicaron. Para cambiar el proveedor de identidad, edita su archivo. Los nombres con la misma forma kebab-case usan el mismo archivo, por lo que el generador rechaza el segundo nombre. Por ejemplo, `TestIdp` y `Test-Idp` ambos usan `test-idp`, y `Okta` y `OKTA` ambos usan `okta`.
+
+El generador no detecta nombres cuyas formas kebab-case difieren, como `Okta` (`okta`) y `Ok-ta` (`ok-ta`), o `TestIdp` (`test-idp`) y `testidp` (`testidp`). Agrega un segundo proveedor de identidad con su propio archivo y su propio nombre de secreto, incluso cuando el emisor y el ID de cliente son los mismos. Elige nombres claramente distintos.
 
 Si has cambiado `user-identity.ts` o la lista `supported_identity_providers` de modo que el generador ya no la reconoce, el generador deja ese archivo sin cambios. En su lugar, imprime las líneas para agregar manualmente.
 
@@ -107,8 +109,10 @@ El primer despliegue después de ejecutar el generador lee el secreto de cliente
 2. Almacena el secreto de cliente en Secrets Manager, bajo el nombre en la opción `clientSecretName` (`<name>-oidc-client-secret` por defecto):
 
    ```bash
-   aws secretsmanager create-secret --name TestIdp-oidc-client-secret --secret-string <client secret>
+   aws secretsmanager create-secret --name TestIdp-oidc-client-secret --secret-string <client secret> --region <region>
    ```
+
+   Establece `--region` a la región de tu stack. El secreto debe existir en esa región antes del primer despliegue. Almacena el secreto como una cadena simple, no JSON, porque Cognito recibe el valor completo del secreto como el secreto de cliente. En la consola de Secrets Manager, elige Plaintext, no Key/value.
 
 3. Despliega.
 4. Agrega el URI de redirección a la aplicación en el proveedor de identidad.
@@ -151,19 +155,27 @@ El archivo del proveedor de identidad de Terraform también establece dos valore
 
 ## Notas sobre proveedores de identidad
 
-La configuración a continuación proviene de la documentación de cada proveedor. Solo se ha probado con este generador un grupo de usuarios de Cognito actuando como proveedor de identidad.
+La configuración a continuación proviene de la documentación de cada proveedor. Okta ha sido probado en AWS con CDK y Terraform. La configuración de Auth0 y Microsoft Entra ID fue verificada contra el documento de descubrimiento OpenID publicado por cada proveedor, pero no con un inicio de sesión en vivo.
 
 ### Okta
 
-No probado. Crea una aplicación web OIDC en Okta. El emisor es tu dominio de Okta, `https://<your-org>.okta.com`, o un servidor de autorización personalizado como `https://<your-org>.okta.com/oauth2/default`. Los ámbitos predeterminados, `openid email profile`, devuelven `email`, `given_name` y `family_name`, por lo que el mapeo predeterminado funciona.
+Probado en AWS con CDK y Terraform. Crea una OIDC Web Application en Okta, con el flujo Authorization Code y un secreto de cliente. Establece su URI de redirección de inicio de sesión al URI de redirección `/oauth2/idpresponse` del paso 4 de [Configurar tu proveedor de identidad](#configurar-tu-proveedor-de-identidad). No necesita URI de redirección de cierre de sesión. El emisor es tu dominio de Okta, `https://<your-org>.okta.com`, que es la forma que fue probada. Un servidor de autorización personalizado, como `https://<your-org>.okta.com/oauth2/default`, también tiene un emisor, pero esa forma no ha sido probada. Los ámbitos predeterminados, `openid email profile`, devuelven `email`, `given_name` y `family_name`, por lo que el mapeo predeterminado funciona. Cada usuario necesita un correo electrónico, un nombre y un apellido establecidos en Okta. Asigna la aplicación solo a los usuarios o grupos que necesitan acceso.
 
 ### Auth0
 
-No probado. Crea una Regular Web Application en Auth0. El emisor es `https://<your-tenant>.auth0.com/`, incluyendo la barra diagonal final, porque la reclamación `iss` en los tokens de Auth0 tiene una. Auth0 devuelve `given_name` y `family_name` solo cuando la conexión del usuario los proporciona. Los usuarios de una conexión sin ellos no pueden iniciar sesión hasta que mapees otras reclamaciones.
+Verificado contra el documento de descubrimiento de Auth0, no probado con un inicio de sesión en vivo. Crea una Regular Web Application en Auth0. El emisor es `https://<your-tenant>.auth0.com/`, incluyendo la barra diagonal final.
+
+**Advertencia:** el generador también acepta el emisor sin la barra diagonal final, pero el inicio de sesión entonces falla, porque la reclamación `iss` en los tokens de Auth0 tiene la barra.
+
+Auth0 devuelve `given_name` y `family_name` solo cuando la conexión del usuario los proporciona. Los usuarios de una conexión sin ellos no pueden iniciar sesión hasta que mapees otras reclamaciones.
 
 ### Microsoft Entra ID
 
-No probado. Registra una aplicación de un solo inquilino en Entra ID. El emisor es `https://login.microsoftonline.com/<tenant-id>/v2.0`. El generador rechaza los emisores multi-inquilino (`/common/`, `/organizations/` y `/consumers/`), porque aceptan usuarios de cualquier inquilino de Entra ID. Entra ID envía `given_name` y `family_name` solo si los agregas como reclamaciones opcionales al token de ID de la aplicación. Su reclamación `email` no está verificada, así que no mapees `email_verified` desde Entra ID.
+Verificado contra el documento de descubrimiento de Microsoft, no probado con un inicio de sesión en vivo. Registra una aplicación de un solo inquilino en Entra ID. El emisor es `https://login.microsoftonline.com/<tenant-id>/v2.0`. El generador rechaza los emisores multi-inquilino (`/common/`, `/organizations/` y `/consumers/`), porque aceptan usuarios de cualquier inquilino de Entra ID.
+
+**Advertencia:** el emisor no debe terminar con una barra diagonal. Usa `/v2.0`, no `/v2.0/`. El generador acepta la forma con la barra, pero el inicio de sesión entonces falla, porque la reclamación `iss` en los tokens de Entra ID no tiene barra.
+
+Agrega `email`, `given_name` y `family_name` como reclamaciones opcionales al token de ID de la aplicación. Entra ID los envía solo si lo haces. Cada usuario necesita el campo Mail establecido. De lo contrario, la reclamación `email` está vacía, y el primer inicio de sesión del usuario falla, porque el grupo de usuarios requiere `email`. La reclamación `email` de Entra ID no está verificada, así que no mapees `email_verified` desde Entra ID.
 
 ### Cognito user pool
 
@@ -187,6 +199,8 @@ Para probar con otro grupo de usuarios de Cognito como proveedor de identidad, u
   aws cognito-idp admin-disable-user --user-pool-id <user pool id> --username testidp_<sub>
   ```
 
+  Esto ha sido probado en AWS. Después de `admin-user-global-sign-out` y `admin-disable-user`, el proveedor de identidad aún inicia sesión al usuario, pero Cognito los rechaza.
+
   Una validez de token de actualización más corta en el cliente web (`refreshTokenValidity` en CDK, `refresh_token_validity` en Terraform) acorta el tiempo que un usuario eliminado mantiene el acceso. Esto no ha sido probado en AWS.
 
 ## El secreto de cliente
@@ -201,6 +215,8 @@ CloudFormation resuelve la referencia dentro de la configuración del proveedor 
   </Fragment>
   <Fragment slot="terraform">
 El módulo lee el secreto con una fuente de datos `data "aws_secretsmanager_secret_version"`, por lo que `terraform plan` lo muestra como `(sensitive value)`. El estado de Terraform aún mantiene el secreto en texto plano, una vez para la fuente de datos y una vez para el proveedor de identidad. Cualquiera que pueda leer el objeto de estado en tu bucket de estado puede leer el secreto. Limita el acceso de lectura al bucket de estado en consecuencia.
+
+Un archivo de plan guardado, por ejemplo de `terraform plan -out`, también mantiene el secreto en texto plano. Si tu bucket de estado tiene el versionado activado, las versiones antiguas del estado mantienen el secreto después de `terraform destroy`. Elimina esas versiones también cuando elimines el stack. Después de una prueba, rota el secreto de cliente en el proveedor de identidad.
   </Fragment>
 </Infrastructure>
 
