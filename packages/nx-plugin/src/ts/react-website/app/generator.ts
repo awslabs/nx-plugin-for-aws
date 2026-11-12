@@ -202,9 +202,6 @@ export async function tsReactWebsiteGenerator(
       unitTestRunner: 'vitest',
       useProjectJson: true,
       style: 'css',
-      // Register the @nx/vite and @nx/vitest plugins so build/serve/test
-      // targets are inferred rather than emitting deprecated executor targets.
-      addPlugin: true,
     });
 
     // Pin the inferred target names. The vite production build is exposed as

@@ -137,9 +137,6 @@ export const tsProjectGenerator = async (
       bundler: 'tsc', // TODO: consider supporting others
       linter: 'none',
       unitTestRunner: 'vitest',
-      // Register the @nx/vitest plugin so the test target is inferred rather
-      // than emitting the deprecated @nx/vitest:test executor target.
-      addPlugin: true,
     });
 
     // Replace with simpler sample source code
