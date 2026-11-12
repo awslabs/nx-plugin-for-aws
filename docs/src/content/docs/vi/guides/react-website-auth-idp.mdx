@@ -95,7 +95,9 @@ Generator cũng chỉnh sửa web client của user pool, Cognito app client mà
   </Fragment>
 </Infrastructure>
 
-Nhà cung cấp danh tính thứ hai được thêm sau nhà cung cấp đầu tiên. Chạy lại generator với cùng `name` và các tùy chọn không thay đổi file nào, và generator không ghi đè các chỉnh sửa của bạn đối với file nhà cung cấp danh tính. Nếu bạn chạy lại nó với cùng `name` nhưng các tùy chọn khác, generator giữ file hiện có và cảnh báo rằng các tùy chọn mới không được áp dụng. Để thay đổi nhà cung cấp danh tính, hãy chỉnh sửa file của nó. Các tên chỉ khác nhau về chữ hoa chữ thường hoặc dấu gạch ngang, chẳng hạn như `TestIdp` và `Test-Idp`, sử dụng cùng một file, vì vậy generator từ chối tên thứ hai.
+Nhà cung cấp danh tính thứ hai được thêm sau nhà cung cấp đầu tiên. Chạy lại generator với cùng `name` và các tùy chọn không thay đổi file nào, và generator không ghi đè các chỉnh sửa của bạn đối với file nhà cung cấp danh tính. Nếu bạn chạy lại nó với cùng `name` nhưng các tùy chọn khác, generator giữ file hiện có và cảnh báo rằng các tùy chọn mới không được áp dụng. Để thay đổi nhà cung cấp danh tính, hãy chỉnh sửa file của nó. Các tên có cùng dạng kebab-case sử dụng cùng một file, vì vậy generator từ chối tên thứ hai. Ví dụ, `TestIdp` và `Test-Idp` đều sử dụng `test-idp`, và `Okta` và `OKTA` đều sử dụng `okta`.
+
+Generator không phát hiện các tên có dạng kebab-case khác nhau, chẳng hạn như `Okta` (`okta`) và `Ok-ta` (`ok-ta`), hoặc `TestIdp` (`test-idp`) và `testidp` (`testidp`). Nó thêm một nhà cung cấp danh tính thứ hai với file riêng và tên secret riêng, ngay cả khi issuer và client ID giống nhau. Hãy chọn các tên rõ ràng khác biệt.
 
 Nếu bạn đã thay đổi `user-identity.ts` hoặc danh sách `supported_identity_providers` sao cho generator không còn nhận ra nó, generator sẽ để file đó không thay đổi. Thay vào đó, nó in ra các dòng cần thêm bằng tay.
 
@@ -107,8 +109,10 @@ Lần deploy đầu tiên sau khi bạn chạy generator sẽ đọc client secr
 2. Lưu trữ client secret trong Secrets Manager, dưới tên trong tùy chọn `clientSecretName` (`<name>-oidc-client-secret` theo mặc định):
 
    ```bash
-   aws secretsmanager create-secret --name TestIdp-oidc-client-secret --secret-string <client secret>
+   aws secretsmanager create-secret --name TestIdp-oidc-client-secret --secret-string <client secret> --region <region>
    ```
+
+   Đặt `--region` thành region của stack của bạn. Secret phải tồn tại trong region đó trước lần deploy đầu tiên. Lưu trữ secret dưới dạng chuỗi thuần túy, không phải JSON, vì Cognito nhận toàn bộ giá trị secret làm client secret. Trong bảng điều khiển Secrets Manager, chọn Plaintext, không phải Key/value.
 
 3. Deploy.
 4. Thêm redirect URI vào ứng dụng tại nhà cung cấp danh tính.
@@ -151,19 +155,27 @@ File nhà cung cấp danh tính Terraform cũng đặt hai giá trị mà Cognit
 
 ## Ghi chú về nhà cung cấp danh tính
 
-Các cài đặt dưới đây đến từ tài liệu của mỗi nhà cung cấp. Chỉ có Cognito user pool hoạt động như nhà cung cấp danh tính đã được kiểm tra với generator này.
+Các cài đặt dưới đây đến từ tài liệu của mỗi nhà cung cấp. Okta đã được kiểm tra trên AWS với cả CDK và Terraform. Các cài đặt Auth0 và Microsoft Entra ID đã được kiểm tra với OpenID discovery document đã xuất bản của mỗi nhà cung cấp, nhưng không được kiểm tra với đăng nhập thực tế.
 
 ### Okta
 
-Chưa được kiểm tra. Tạo một ứng dụng web OIDC trong Okta. Issuer là domain Okta của bạn, `https://<your-org>.okta.com`, hoặc một authorization server tùy chỉnh như `https://<your-org>.okta.com/oauth2/default`. Các scope mặc định, `openid email profile`, trả về `email`, `given_name` và `family_name`, nên ánh xạ mặc định hoạt động.
+Đã được kiểm tra trên AWS với CDK và Terraform. Tạo một OIDC Web Application trong Okta, với Authorization Code grant và một client secret. Đặt sign-in redirect URI của nó thành redirect URI `/oauth2/idpresponse` từ bước 4 của [Thiết lập nhà cung cấp danh tính của bạn](#set-up-your-identity-provider). Nó không cần sign-out redirect URI. Issuer là domain Okta của bạn, `https://<your-org>.okta.com`, đây là dạng đã được kiểm tra. Một custom authorization server, chẳng hạn như `https://<your-org>.okta.com/oauth2/default`, cũng có một issuer, nhưng dạng đó chưa được kiểm tra. Các scope mặc định, `openid email profile`, trả về `email`, `given_name` và `family_name`, nên ánh xạ mặc định hoạt động. Mỗi người dùng cần có email, first name và last name được đặt trong Okta. Chỉ gán ứng dụng cho những người dùng hoặc nhóm cần quyền truy cập.
 
 ### Auth0
 
-Chưa được kiểm tra. Tạo một Regular Web Application trong Auth0. Issuer là `https://<your-tenant>.auth0.com/`, bao gồm dấu gạch chéo cuối, vì claim `iss` trong token Auth0 có một dấu. Auth0 chỉ trả về `given_name` và `family_name` khi connection của người dùng cung cấp chúng. Người dùng của một connection không có chúng không thể đăng nhập cho đến khi bạn ánh xạ các claim khác.
+Đã được kiểm tra với discovery document của Auth0, chưa được kiểm tra với đăng nhập thực tế. Tạo một Regular Web Application trong Auth0. Issuer là `https://<your-tenant>.auth0.com/`, bao gồm dấu gạch chéo cuối.
+
+**Cảnh báo:** generator cũng chấp nhận issuer không có dấu gạch chéo cuối, nhưng đăng nhập sau đó sẽ thất bại, vì claim `iss` trong token Auth0 có dấu gạch chéo.
+
+Auth0 chỉ trả về `given_name` và `family_name` khi connection của người dùng cung cấp chúng. Người dùng của một connection không có chúng không thể đăng nhập cho đến khi bạn ánh xạ các claim khác.
 
 ### Microsoft Entra ID
 
-Chưa được kiểm tra. Đăng ký một ứng dụng single-tenant trong Entra ID. Issuer là `https://login.microsoftonline.com/<tenant-id>/v2.0`. Generator từ chối các issuer multi-tenant (`/common/`, `/organizations/` và `/consumers/`), vì chúng chấp nhận người dùng từ bất kỳ tenant Entra ID nào. Entra ID chỉ gửi `given_name` và `family_name` nếu bạn thêm chúng làm optional claims vào ID token của ứng dụng. Claim `email` của nó không được xác minh, vì vậy đừng ánh xạ `email_verified` từ Entra ID.
+Đã được kiểm tra với discovery document của Microsoft, chưa được kiểm tra với đăng nhập thực tế. Đăng ký một ứng dụng single-tenant trong Entra ID. Issuer là `https://login.microsoftonline.com/<tenant-id>/v2.0`. Generator từ chối các issuer multi-tenant (`/common/`, `/organizations/` và `/consumers/`), vì chúng chấp nhận người dùng từ bất kỳ tenant Entra ID nào.
+
+**Cảnh báo:** issuer không được kết thúc bằng dấu gạch chéo. Sử dụng `/v2.0`, không phải `/v2.0/`. Generator chấp nhận dạng có dấu gạch chéo, nhưng đăng nhập sau đó sẽ thất bại, vì claim `iss` trong token Entra ID không có dấu gạch chéo.
+
+Thêm `email`, `given_name` và `family_name` làm optional claims vào ID token của ứng dụng. Entra ID chỉ gửi chúng nếu bạn làm vậy. Mỗi người dùng cần có trường Mail được đặt. Nếu không, claim `email` sẽ trống, và lần đăng nhập đầu tiên của người dùng sẽ thất bại, vì user pool yêu cầu `email`. Claim `email` của Entra ID không được xác minh, vì vậy đừng ánh xạ `email_verified` từ Entra ID.
 
 ### Cognito user pool
 
@@ -187,6 +199,8 @@ Chưa được kiểm tra. Đăng ký một ứng dụng single-tenant trong Ent
   aws cognito-idp admin-disable-user --user-pool-id <user pool id> --username testidp_<sub>
   ```
 
+  Điều này đã được kiểm tra trên AWS. Sau `admin-user-global-sign-out` và `admin-disable-user`, nhà cung cấp danh tính vẫn đăng nhập người dùng, nhưng Cognito từ chối họ.
+
   Thời hạn refresh token ngắn hơn trên web client (`refreshTokenValidity` trong CDK, `refresh_token_validity` trong Terraform) rút ngắn thời gian người dùng bị xóa giữ quyền truy cập. Điều này chưa được kiểm tra trên AWS.
 
 ## Client secret
@@ -201,6 +215,8 @@ CloudFormation giải quyết tham chiếu bên trong cài đặt của nhà cun
   </Fragment>
   <Fragment slot="terraform">
 Module đọc secret với data source `data "aws_secretsmanager_secret_version"`, vì vậy `terraform plan` hiển thị nó là `(sensitive value)`. Terraform state vẫn giữ secret ở dạng văn bản thuần túy, một lần cho data source và một lần cho nhà cung cấp danh tính. Bất kỳ ai có thể đọc state object trong state bucket của bạn đều có thể đọc secret. Hạn chế quyền truy cập đọc vào state bucket cho phù hợp.
+
+File plan đã lưu, ví dụ từ `terraform plan -out`, cũng giữ secret ở dạng văn bản thuần túy. Nếu state bucket của bạn bật versioning, các phiên bản cũ của state giữ secret sau `terraform destroy`. Xóa các phiên bản đó khi bạn xóa stack. Sau khi kiểm tra, hãy xoay client secret tại nhà cung cấp danh tính.
   </Fragment>
 </Infrastructure>
 

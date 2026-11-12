@@ -95,7 +95,9 @@ Le générateur modifie également le client web du pool d'utilisateurs, le clie
   </Fragment>
 </Infrastructure>
 
-Un deuxième fournisseur d'identité est ajouté après le premier. Exécuter le générateur à nouveau avec le même `name` et les mêmes options ne modifie aucun fichier, et le générateur n'écrase pas vos modifications du fichier du fournisseur d'identité. Si vous l'exécutez à nouveau avec le même `name` mais d'autres options, le générateur conserve le fichier existant et avertit que les nouvelles options n'ont pas été appliquées. Pour modifier le fournisseur d'identité, modifiez son fichier. Les noms qui ne diffèrent que par la casse des lettres ou les traits d'union, tels que `TestIdp` et `Test-Idp`, utilisent le même fichier, donc le générateur refuse le deuxième nom.
+Un deuxième fournisseur d'identité est ajouté après le premier. Exécuter le générateur à nouveau avec le même `name` et les mêmes options ne modifie aucun fichier, et le générateur n'écrase pas vos modifications du fichier du fournisseur d'identité. Si vous l'exécutez à nouveau avec le même `name` mais d'autres options, le générateur conserve le fichier existant et avertit que les nouvelles options n'ont pas été appliquées. Pour modifier le fournisseur d'identité, modifiez son fichier. Les noms avec la même forme kebab-case utilisent le même fichier, donc le générateur refuse le deuxième nom. Par exemple, `TestIdp` et `Test-Idp` utilisent tous deux `test-idp`, et `Okta` et `OKTA` utilisent tous deux `okta`.
+
+Le générateur ne détecte pas les noms dont les formes kebab-case diffèrent, tels que `Okta` (`okta`) et `Ok-ta` (`ok-ta`), ou `TestIdp` (`test-idp`) et `testidp` (`testidp`). Il ajoute un deuxième fournisseur d'identité avec son propre fichier et son propre nom de secret, même lorsque l'émetteur et l'ID client sont les mêmes. Choisissez des noms clairement distincts.
 
 Si vous avez modifié `user-identity.ts` ou la liste `supported_identity_providers` de sorte que le générateur ne la reconnaît plus, le générateur laisse ce fichier inchangé. Il affiche les lignes à ajouter manuellement à la place.
 
@@ -107,8 +109,10 @@ Le premier déploiement après l'exécution du générateur lit le secret client
 2. Stockez le secret client dans Secrets Manager, sous le nom dans l'option `clientSecretName` (`<name>-oidc-client-secret` par défaut) :
 
    ```bash
-   aws secretsmanager create-secret --name TestIdp-oidc-client-secret --secret-string <client secret>
+   aws secretsmanager create-secret --name TestIdp-oidc-client-secret --secret-string <client secret> --region <region>
    ```
+
+   Définissez `--region` sur la région de votre pile. Le secret doit exister dans cette région avant le premier déploiement. Stockez le secret sous forme de chaîne simple, pas JSON, car Cognito reçoit la valeur entière du secret comme secret client. Dans la console Secrets Manager, choisissez Plaintext, pas Key/value.
 
 3. Déployez.
 4. Ajoutez l'URI de redirection à l'application chez le fournisseur d'identité.
@@ -151,19 +155,27 @@ Le fichier du fournisseur d'identité Terraform définit également deux valeurs
 
 ## Notes sur les fournisseurs d'identité
 
-Les paramètres ci-dessous proviennent de la documentation de chaque fournisseur. Seul un pool d'utilisateurs Cognito agissant comme fournisseur d'identité a été testé avec ce générateur.
+Les paramètres ci-dessous proviennent de la documentation de chaque fournisseur. Okta a été testé sur AWS avec CDK et Terraform. Les paramètres Auth0 et Microsoft Entra ID ont été vérifiés par rapport au document de découverte OpenID publié par chaque fournisseur, mais pas avec une connexion en direct.
 
 ### Okta
 
-Non testé. Créez une application web OIDC dans Okta. L'émetteur est votre domaine Okta, `https://<your-org>.okta.com`, ou un serveur d'autorisation personnalisé tel que `https://<your-org>.okta.com/oauth2/default`. Les portées par défaut, `openid email profile`, retournent `email`, `given_name` et `family_name`, donc le mappage par défaut fonctionne.
+Testé sur AWS avec CDK et Terraform. Créez une OIDC Web Application dans Okta, avec l'octroi Authorization Code et un secret client. Définissez son URI de redirection de connexion sur l'URI de redirection `/oauth2/idpresponse` de l'étape 4 de [Configurer votre fournisseur d'identité](#configurer-votre-fournisseur-didentité). Il n'a pas besoin d'URI de redirection de déconnexion. L'émetteur est votre domaine Okta, `https://<your-org>.okta.com`, qui est la forme qui a été testée. Un serveur d'autorisation personnalisé, tel que `https://<your-org>.okta.com/oauth2/default`, a également un émetteur, mais cette forme n'a pas été testée. Les portées par défaut, `openid email profile`, retournent `email`, `given_name` et `family_name`, donc le mappage par défaut fonctionne. Chaque utilisateur a besoin d'un e-mail, d'un prénom et d'un nom de famille définis dans Okta. Assignez l'application uniquement aux utilisateurs ou groupes qui ont besoin d'accès.
 
 ### Auth0
 
-Non testé. Créez une Regular Web Application dans Auth0. L'émetteur est `https://<your-tenant>.auth0.com/`, y compris la barre oblique finale, car la revendication `iss` dans les jetons Auth0 en a une. Auth0 retourne `given_name` et `family_name` uniquement lorsque la connexion de l'utilisateur les fournit. Les utilisateurs d'une connexion sans eux ne peuvent pas se connecter jusqu'à ce que vous mappiez d'autres revendications.
+Vérifié par rapport au document de découverte d'Auth0, non testé avec une connexion en direct. Créez une Regular Web Application dans Auth0. L'émetteur est `https://<your-tenant>.auth0.com/`, y compris la barre oblique finale.
+
+**Avertissement :** le générateur accepte également l'émetteur sans la barre oblique finale, mais la connexion échoue alors, car la revendication `iss` dans les jetons Auth0 a la barre oblique.
+
+Auth0 retourne `given_name` et `family_name` uniquement lorsque la connexion de l'utilisateur les fournit. Les utilisateurs d'une connexion sans eux ne peuvent pas se connecter jusqu'à ce que vous mappiez d'autres revendications.
 
 ### Microsoft Entra ID
 
-Non testé. Enregistrez une application mono-locataire dans Entra ID. L'émetteur est `https://login.microsoftonline.com/<tenant-id>/v2.0`. Le générateur refuse les émetteurs multi-locataires (`/common/`, `/organizations/` et `/consumers/`), car ils acceptent les utilisateurs de n'importe quel locataire Entra ID. Entra ID envoie `given_name` et `family_name` uniquement si vous les ajoutez comme revendications optionnelles au jeton d'ID de l'application. Sa revendication `email` n'est pas vérifiée, donc ne mappez pas `email_verified` depuis Entra ID.
+Vérifié par rapport au document de découverte de Microsoft, non testé avec une connexion en direct. Enregistrez une application mono-locataire dans Entra ID. L'émetteur est `https://login.microsoftonline.com/<tenant-id>/v2.0`. Le générateur refuse les émetteurs multi-locataires (`/common/`, `/organizations/` et `/consumers/`), car ils acceptent les utilisateurs de n'importe quel locataire Entra ID.
+
+**Avertissement :** l'émetteur ne doit pas se terminer par une barre oblique. Utilisez `/v2.0`, pas `/v2.0/`. Le générateur accepte la forme avec la barre oblique, mais la connexion échoue alors, car la revendication `iss` dans les jetons Entra ID n'a pas de barre oblique.
+
+Ajoutez `email`, `given_name` et `family_name` comme revendications optionnelles au jeton d'ID de l'application. Entra ID les envoie uniquement si vous le faites. Chaque utilisateur a besoin du champ Mail défini. Sinon, la revendication `email` est vide, et la première connexion de l'utilisateur échoue, car le pool d'utilisateurs nécessite `email`. La revendication `email` d'Entra ID n'est pas vérifiée, donc ne mappez pas `email_verified` depuis Entra ID.
 
 ### Pool d'utilisateurs Cognito
 
@@ -187,6 +199,8 @@ Pour tester avec un autre pool d'utilisateurs Cognito comme fournisseur d'identi
   aws cognito-idp admin-disable-user --user-pool-id <user pool id> --username testidp_<sub>
   ```
 
+  Cela a été testé sur AWS. Après `admin-user-global-sign-out` et `admin-disable-user`, le fournisseur d'identité connecte toujours l'utilisateur, mais Cognito les refuse.
+
   Une validité de jeton de rafraîchissement plus courte sur le client web (`refreshTokenValidity` dans CDK, `refresh_token_validity` dans Terraform) raccourcit le temps pendant lequel un utilisateur supprimé conserve l'accès. Cela n'a pas été testé sur AWS.
 
 ## Le secret client
@@ -201,6 +215,8 @@ CloudFormation résout la référence à l'intérieur des paramètres du fournis
   </Fragment>
   <Fragment slot="terraform">
 Le module lit le secret avec une source de données `data "aws_secretsmanager_secret_version"`, donc `terraform plan` l'affiche comme `(sensitive value)`. L'état Terraform conserve toujours le secret en texte brut, une fois pour la source de données et une fois pour le fournisseur d'identité. Toute personne qui peut lire l'objet d'état dans votre bucket d'état peut lire le secret. Limitez l'accès en lecture au bucket d'état en conséquence.
+
+Un fichier de plan enregistré, par exemple depuis `terraform plan -out`, contient également le secret en texte brut. Si votre bucket d'état a la gestion des versions activée, les anciennes versions de l'état conservent le secret après `terraform destroy`. Supprimez également ces versions lorsque vous retirez la pile. Après un test, faites pivoter le secret client chez le fournisseur d'identité.
   </Fragment>
 </Infrastructure>
 

@@ -95,7 +95,9 @@ O gerador também edita o web client do user pool, o app client do Cognito atrav
   </Fragment>
 </Infrastructure>
 
-Um segundo provedor de identidade é adicionado após o primeiro. Executar o gerador novamente com o mesmo `name` e opções não altera nenhum arquivo, e o gerador não sobrescreve suas edições no arquivo do provedor de identidade. Se você executá-lo novamente com o mesmo `name` mas outras opções, o gerador mantém o arquivo existente e avisa que as novas opções não foram aplicadas. Para alterar o provedor de identidade, edite seu arquivo. Nomes que diferem apenas em maiúsculas e minúsculas ou hífens, como `TestIdp` e `Test-Idp`, usam o mesmo arquivo, então o gerador recusa o segundo nome.
+Um segundo provedor de identidade é adicionado após o primeiro. Executar o gerador novamente com o mesmo `name` e opções não altera nenhum arquivo, e o gerador não sobrescreve suas edições no arquivo do provedor de identidade. Se você executá-lo novamente com o mesmo `name` mas outras opções, o gerador mantém o arquivo existente e avisa que as novas opções não foram aplicadas. Para alterar o provedor de identidade, edite seu arquivo. Nomes com a mesma forma kebab-case usam o mesmo arquivo, então o gerador recusa o segundo nome. Por exemplo, `TestIdp` e `Test-Idp` ambos usam `test-idp`, e `Okta` e `OKTA` ambos usam `okta`.
+
+O gerador não detecta nomes cujas formas kebab-case diferem, como `Okta` (`okta`) e `Ok-ta` (`ok-ta`), ou `TestIdp` (`test-idp`) e `testidp` (`testidp`). Ele adiciona um segundo provedor de identidade com seu próprio arquivo e seu próprio nome de secret, mesmo quando o issuer e o client ID são os mesmos. Escolha nomes claramente distintos.
 
 Se você alterou `user-identity.ts` ou a lista `supported_identity_providers` de modo que o gerador não a reconheça mais, o gerador deixa esse arquivo inalterado. Ele imprime as linhas para adicionar manualmente.
 
@@ -107,8 +109,10 @@ O primeiro deploy após executar o gerador lê o client secret do Secrets Manage
 2. Armazene o client secret no Secrets Manager, sob o nome na opção `clientSecretName` (`<name>-oidc-client-secret` por padrão):
 
    ```bash
-   aws secretsmanager create-secret --name TestIdp-oidc-client-secret --secret-string <client secret>
+   aws secretsmanager create-secret --name TestIdp-oidc-client-secret --secret-string <client secret> --region <region>
    ```
+
+   Defina `--region` para a região da sua stack. O secret deve existir nessa região antes do primeiro deploy. Armazene o secret como uma string simples, não JSON, porque o Cognito recebe o valor inteiro do secret como o client secret. No console do Secrets Manager, escolha Plaintext, não Key/value.
 
 3. Faça o deploy.
 4. Adicione o URI de redirecionamento à aplicação no provedor de identidade.
@@ -151,19 +155,27 @@ O arquivo do provedor de identidade Terraform também define dois valores que o 
 
 ## Notas sobre provedores de identidade
 
-As configurações abaixo vêm da documentação de cada fornecedor. Apenas um user pool do Cognito atuando como provedor de identidade foi testado com este gerador.
+As configurações abaixo vêm da documentação de cada fornecedor. Okta foi testado na AWS com CDK e Terraform. As configurações de Auth0 e Microsoft Entra ID foram verificadas contra o documento de descoberta OpenID publicado por cada fornecedor, mas não com um login ao vivo.
 
 ### Okta
 
-Não testado. Crie uma aplicação web OIDC no Okta. O issuer é seu domínio Okta, `https://<your-org>.okta.com`, ou um servidor de autorização personalizado como `https://<your-org>.okta.com/oauth2/default`. Os escopos padrão, `openid email profile`, retornam `email`, `given_name` e `family_name`, então o mapeamento padrão funciona.
+Testado na AWS com CDK e Terraform. Crie uma OIDC Web Application no Okta, com o Authorization Code grant e um client secret. Defina seu URI de redirecionamento de login para o URI de redirecionamento `/oauth2/idpresponse` da etapa 4 de [Configurar seu provedor de identidade](#configurar-seu-provedor-de-identidade). Ele não precisa de URI de redirecionamento de logout. O issuer é seu domínio Okta, `https://<your-org>.okta.com`, que é a forma que foi testada. Um servidor de autorização personalizado, como `https://<your-org>.okta.com/oauth2/default`, também tem um issuer, mas essa forma não foi testada. Os escopos padrão, `openid email profile`, retornam `email`, `given_name` e `family_name`, então o mapeamento padrão funciona. Cada usuário precisa de um email, um primeiro nome e um sobrenome definidos no Okta. Atribua a aplicação apenas aos usuários ou grupos que precisam de acesso.
 
 ### Auth0
 
-Não testado. Crie uma Regular Web Application no Auth0. O issuer é `https://<your-tenant>.auth0.com/`, incluindo a barra final, porque a claim `iss` nos tokens Auth0 tem uma. O Auth0 retorna `given_name` e `family_name` apenas quando a conexão do usuário os fornece. Usuários de uma conexão sem eles não podem fazer login até que você mapeie outras claims.
+Verificado contra o documento de descoberta do Auth0, não testado com um login ao vivo. Crie uma Regular Web Application no Auth0. O issuer é `https://<your-tenant>.auth0.com/`, incluindo a barra final.
+
+**Aviso:** o gerador também aceita o issuer sem a barra final, mas o login então falha, porque a claim `iss` nos tokens Auth0 tem a barra.
+
+O Auth0 retorna `given_name` e `family_name` apenas quando a conexão do usuário os fornece. Usuários de uma conexão sem eles não podem fazer login até que você mapeie outras claims.
 
 ### Microsoft Entra ID
 
-Não testado. Registre uma aplicação single-tenant no Entra ID. O issuer é `https://login.microsoftonline.com/<tenant-id>/v2.0`. O gerador recusa os issuers multi-tenant (`/common/`, `/organizations/` e `/consumers/`), porque eles aceitam usuários de qualquer tenant do Entra ID. O Entra ID envia `given_name` e `family_name` apenas se você os adicionar como claims opcionais ao token ID da aplicação. Sua claim `email` não é verificada, então não mapeie `email_verified` do Entra ID.
+Verificado contra o documento de descoberta da Microsoft, não testado com um login ao vivo. Registre uma aplicação single-tenant no Entra ID. O issuer é `https://login.microsoftonline.com/<tenant-id>/v2.0`. O gerador recusa os issuers multi-tenant (`/common/`, `/organizations/` e `/consumers/`), porque eles aceitam usuários de qualquer tenant do Entra ID.
+
+**Aviso:** o issuer não deve terminar com uma barra. Use `/v2.0`, não `/v2.0/`. O gerador aceita a forma com a barra, mas o login então falha, porque a claim `iss` nos tokens do Entra ID não tem barra.
+
+Adicione `email`, `given_name` e `family_name` como claims opcionais ao token ID da aplicação. O Entra ID os envia apenas se você fizer isso. Cada usuário precisa ter o campo Mail definido. Caso contrário, a claim `email` fica vazia, e o primeiro login do usuário falha, porque o user pool requer `email`. A claim `email` do Entra ID não é verificada, então não mapeie `email_verified` do Entra ID.
 
 ### User pool do Cognito
 
@@ -187,6 +199,8 @@ Para testar com outro user pool do Cognito como provedor de identidade, use o is
   aws cognito-idp admin-disable-user --user-pool-id <user pool id> --username testidp_<sub>
   ```
 
+  Isso foi testado na AWS. Após `admin-user-global-sign-out` e `admin-disable-user`, o provedor de identidade ainda faz o login do usuário, mas o Cognito os recusa.
+
   Uma validade de refresh token mais curta no web client (`refreshTokenValidity` no CDK, `refresh_token_validity` no Terraform) reduz o tempo que um usuário removido mantém o acesso. Isso não foi testado na AWS.
 
 ## O client secret
@@ -201,6 +215,8 @@ O CloudFormation resolve a referência dentro das configurações do provedor de
   </Fragment>
   <Fragment slot="terraform">
 O módulo lê o secret com uma data source `data "aws_secretsmanager_secret_version"`, então `terraform plan` o mostra como `(sensitive value)`. O state do Terraform ainda mantém o secret em texto simples, uma vez para a data source e uma vez para o provedor de identidade. Qualquer pessoa que possa ler o objeto de state no seu bucket de state pode ler o secret. Limite o acesso de leitura ao bucket de state adequadamente.
+
+Um arquivo de plan salvo, por exemplo de `terraform plan -out`, também mantém o secret em texto simples. Se o seu bucket de state tiver versionamento ativado, versões antigas do state mantêm o secret após `terraform destroy`. Exclua essas versões também quando remover a stack. Após um teste, rotacione o client secret no provedor de identidade.
   </Fragment>
 </Infrastructure>
 
