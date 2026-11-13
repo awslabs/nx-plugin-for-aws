@@ -879,6 +879,129 @@ describe('openApiTsHooksGenerator', () => {
     );
   });
 
+  it('should give an infinite query a different query key from its plain query', async () => {
+    const spec: Spec = {
+      openapi: '3.0.0',
+      info: { title, version: '1.0.0' },
+      paths: {
+        '/items': {
+          get: {
+            operationId: 'getItems',
+            parameters: [
+              {
+                name: 'cursor',
+                in: 'query',
+                required: false,
+                schema: { type: 'string' },
+              },
+              {
+                name: 'limit',
+                in: 'query',
+                required: false,
+                schema: { type: 'integer' },
+              },
+            ],
+            responses: {
+              '200': {
+                description: 'List of items',
+                content: {
+                  'application/json': {
+                    schema: {
+                      type: 'object',
+                      properties: {
+                        items: { type: 'array', items: { type: 'string' } },
+                        nextCursor: { type: 'string' },
+                      },
+                      required: ['items'],
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+
+    tree.write('openapi.json', JSON.stringify(spec));
+
+    await openApiTsHooksGenerator(tree, {
+      openApiSpecPath: 'openapi.json',
+      outputPath: 'src/generated',
+    });
+
+    validateTypeScript([
+      'src/generated/client.gen.ts',
+      'src/generated/types.gen.ts',
+      'src/generated/options-proxy.gen.ts',
+    ]);
+
+    const page = { items: ['a', 'b'] };
+    const mockFetch = vi.fn().mockImplementation(async () => ({
+      status: 200,
+      json: async () => page,
+    }));
+
+    const optionsProxyInstance = await configureOptionsProxy(
+      tree.read('src/generated/client.gen.ts', 'utf-8'),
+      tree.read('src/generated/options-proxy.gen.ts', 'utf-8'),
+      mockFetch,
+    );
+
+    const input = { limit: 5 };
+    const queryKey = optionsProxyInstance.getItems.queryKey(input);
+    const queryOptions = optionsProxyInstance.getItems.queryOptions(input);
+    const infiniteQueryOptions =
+      optionsProxyInstance.getItems.infiniteQueryOptions(input, {
+        getNextPageParam: (lastPage) => lastPage.nextCursor,
+      });
+
+    // Infinite and plain queries cache different shapes, so must not share a key
+    expect(queryOptions.queryKey).toEqual(queryKey);
+    expect(infiniteQueryOptions.queryKey).not.toEqual(queryKey);
+    expect(infiniteQueryOptions.queryKey).toEqual([...queryKey, 'pages']);
+
+    // Both queries for the same input, sharing one query client
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const queryStates: UseQueryResult<unknown>[] = [];
+    const infiniteStates: UseInfiniteQueryResult<unknown>[] = [];
+    const Component = () => {
+      queryStates.push(useQuery(queryOptions));
+      infiniteStates.push(useInfiniteQuery(infiniteQueryOptions));
+      return <div>Query Component</div>;
+    };
+    render(
+      <QueryClientProvider client={queryClient}>
+        <Component />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(queryStates[queryStates.length - 1].isSuccess).toBe(true);
+      expect(infiniteStates[infiniteStates.length - 1].isSuccess).toBe(true);
+    });
+
+    expect(queryStates[queryStates.length - 1].data).toEqual(page);
+    expect(infiniteStates[infiniteStates.length - 1].data).toEqual({
+      pages: [page],
+      pageParams: [undefined],
+    });
+
+    // The operation's query filter for this input matches both, so invalidation reaches both
+    const matchedKeys = (filterInput: { limit: number }) =>
+      queryClient
+        .getQueryCache()
+        .findAll(optionsProxyInstance.getItems.queryFilter(filterInput))
+        .map((query) => query.queryKey);
+    expect(matchedKeys(input)).toHaveLength(2);
+    expect(matchedKeys(input)).toEqual(
+      expect.arrayContaining([queryKey, infiniteQueryOptions.queryKey]),
+    );
+    expect(matchedKeys({ limit: 6 })).toEqual([]);
+  });
+
   it('should handle GET operation with x-mutation: true correctly', async () => {
     const spec: Spec = {
       openapi: '3.0.0',
