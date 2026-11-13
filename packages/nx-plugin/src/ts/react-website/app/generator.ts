@@ -38,6 +38,7 @@ import {
   getGeneratorInfo,
   type NxGeneratorInfo,
 } from '../../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../../utils/nx-version.js';
 import { sortObjectKeys } from '../../../utils/object.js';
 import { getRelativePathToRoot } from '../../../utils/paths.js';
 import { getPackageManagerDisplayCommands } from '../../../utils/pkg-manager.js';
@@ -166,6 +167,7 @@ export async function tsReactWebsiteGenerator(
   tree: Tree,
   schema: TsReactWebsiteGeneratorSchema,
 ) {
+  assertSupportedNxVersion(tree);
   const tailwind = schema.tailwind ?? true;
   const tanstackRouter = schema.tanstackRouter ?? true;
   const ux: Ux = schema.ux ?? 'shadcn';
@@ -202,9 +204,6 @@ export async function tsReactWebsiteGenerator(
       unitTestRunner: 'vitest',
       useProjectJson: true,
       style: 'css',
-      // Register the @nx/vite and @nx/vitest plugins so build/serve/test
-      // targets are inferred rather than emitting deprecated executor targets.
-      addPlugin: true,
     });
 
     // Pin the inferred target names. The vite production build is exposed as

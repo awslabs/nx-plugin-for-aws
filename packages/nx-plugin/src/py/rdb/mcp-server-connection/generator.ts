@@ -19,6 +19,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../../utils/nx-version.js';
 import { addWorkspaceDependencyToPyProject } from '../../../utils/py.js';
 import { injectRdsCaBundleIntoDockerfile } from '../utils.js';
 import type { PyRdbMcpServerConnectionGeneratorSchema } from './schema';
@@ -30,6 +31,7 @@ export const pyRdbMcpServerConnectionGenerator = async (
   tree: Tree,
   options: PyRdbMcpServerConnectionGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  assertSupportedNxVersion(tree);
   const sourceProject = readProjectConfigurationUnqualified(
     tree,
     options.sourceProject,

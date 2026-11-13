@@ -44,6 +44,7 @@ import {
   type NxGeneratorInfo,
   projectExists,
 } from '../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import { assignPort } from '../../utils/port.js';
 import { addRdbInfra } from '../../utils/rdb-constructs/rdb-constructs.js';
 import {
@@ -110,6 +111,7 @@ export const pyRdbGenerator = async (
   tree: Tree,
   options: PyRdbGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  assertSupportedNxVersion(tree);
   const nameClassName = toClassName(options.name);
   const databaseUser = options.databaseUser ?? 'dbadmin';
   const databaseName = snakeCase(options.databaseName ?? options.name);

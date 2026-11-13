@@ -65,6 +65,7 @@ import {
   normalizeTargetKeyOrder,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import { sortObjectKeys } from '../../utils/object.js';
 import { openApiCodegenTarget } from '../../utils/open-api-codegen-target.js';
 import {
@@ -211,6 +212,7 @@ export const pyAgentGenerator = async (
   tree: Tree,
   options: PyAgentGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  assertSupportedNxVersion(tree);
   const project = readProjectConfigurationUnqualified(tree, options.project);
 
   const pyProjectPath = joinPathFragments(project.root, 'pyproject.toml');

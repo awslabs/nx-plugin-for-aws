@@ -38,6 +38,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../../utils/nx-version.js';
 import { sortObjectKeys } from '../../../utils/object.js';
 import { toProjectRelativePath } from '../../../utils/paths.js';
 import {
@@ -78,6 +79,7 @@ export const pyAgentReactConnectionGenerator = async (
   tree: Tree,
   options: ResolvedConnectionOptions & { gatewayRoute?: AgentGatewayRoute },
 ) => {
+  assertSupportedNxVersion(tree);
   const frontendProjectConfig = readProjectConfigurationUnqualified(
     tree,
     options.sourceProject,

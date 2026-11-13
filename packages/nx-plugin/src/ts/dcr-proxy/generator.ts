@@ -37,6 +37,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import { sortObjectKeys } from '../../utils/object.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
@@ -63,6 +64,7 @@ export const tsDcrProxyGenerator = async (
   tree: Tree,
   options: TsDcrProxyGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  assertSupportedNxVersion(tree);
   const name = kebabCase(options.name ? options.name : 'dcr-proxy');
   const nameClassName = toClassName(name);
 

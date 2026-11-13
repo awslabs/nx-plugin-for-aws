@@ -3,8 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { addProjectConfiguration, readNxJson, type Tree } from '@nx/devkit';
+import {
+  addProjectConfiguration,
+  readNxJson,
+  type Tree,
+  writeJson,
+} from '@nx/devkit';
 import { createTreeWithEmptyWorkspace } from '@nx/devkit/testing';
+import { major } from 'semver';
 import {
   AWS_NX_PLUGIN_CONFIG_FILE_NAME,
   readAwsNxPluginConfig,
@@ -16,6 +22,7 @@ import {
   sharedConstructsGenerator,
 } from '../utils/shared-constructs.js';
 import { createTreeUsingTsSolutionSetup } from '../utils/test.js';
+import { NX_VERSION } from '../utils/versions.js';
 import { LICENSE_GENERATOR_INFO, licenseGenerator } from './generator.js';
 import type { LicenseGeneratorSchema } from './schema';
 import { SYNC_GENERATOR_NAME } from './sync/generator.js';
@@ -43,6 +50,23 @@ describe('license generator', () => {
     expect(tree.read(AWS_NX_PLUGIN_CONFIG_FILE_NAME, 'utf-8')).toContain(
       'Copyright Test Inc. or its affiliates.',
     );
+  });
+
+  it('should refuse an older nx major before writing a file', async () => {
+    const older = `${major(NX_VERSION) - 1}.0.0`;
+    writeJson(tree, 'node_modules/nx/package.json', {
+      name: 'nx',
+      version: older,
+    });
+    const before = tree.listChanges().map((c) => `${c.type} ${c.path}`);
+
+    await expect(licenseGenerator(tree, options)).rejects.toThrow(
+      `this workspace has Nx ${older}`,
+    );
+    expect(tree.listChanges().map((c) => `${c.type} ${c.path}`)).toEqual(
+      before,
+    );
+    expect(tree.exists(AWS_NX_PLUGIN_CONFIG_FILE_NAME)).toBe(false);
   });
 
   it('should register the sync generator', async () => {

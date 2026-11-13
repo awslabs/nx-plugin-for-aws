@@ -35,6 +35,7 @@ import {
   getGeneratorInfo,
   type NxGeneratorInfo,
 } from '../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import { sortObjectKeys } from '../../utils/object.js';
 import { assignPort } from '../../utils/port.js';
 import {
@@ -88,6 +89,7 @@ export const pyFastApiProjectGenerator = async (
   tree: Tree,
   schema: PyFastApiProjectGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  assertSupportedNxVersion(tree);
   const integrationPattern = getIntegrationPattern(schema);
 
   const { dir, normalizedModuleName, fullyQualifiedName } = getPyProjectDetails(

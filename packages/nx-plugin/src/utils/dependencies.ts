@@ -33,7 +33,7 @@ export const detectWorkspacePackageManager = (tree: Tree): PackageManager =>
 
 // Coerce a single simple range to a version. Rejects compound ranges
 // (whitespace / `||`), which coerce would silently reduce, plus tags/protocols.
-const parseSimpleRange = (version: string) => {
+export const parseSimpleRange = (version: string) => {
   const trimmed = version.trim();
   if (/\s|\|\|/.test(trimmed)) {
     return undefined;

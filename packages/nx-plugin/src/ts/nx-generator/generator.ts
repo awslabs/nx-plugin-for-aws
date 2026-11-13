@@ -25,6 +25,7 @@ import {
   getGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import { sortObjectKeys } from '../../utils/object.js';
 import { getRelativePathToRootByDirectory } from '../../utils/paths.js';
 import {
@@ -45,6 +46,7 @@ export const tsNxGeneratorGenerator = async (
   tree: Tree,
   options: TsNxGeneratorGeneratorSchema,
 ): Promise<GeneratorCallback | void> => {
+  assertSupportedNxVersion(tree);
   const { name, directory, project: pluginProject, description } = options;
 
   const plugin = readProjectConfigurationUnqualified(tree, pluginProject);

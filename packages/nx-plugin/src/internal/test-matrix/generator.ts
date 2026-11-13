@@ -51,6 +51,7 @@ import {
 import { installDependencies } from '../../utils/install.js';
 import { toSnakeCase } from '../../utils/names.js';
 import { getNpmScope, getNpmScopePrefix } from '../../utils/npm-scope.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import type { InternalTestMatrixGeneratorSchema } from './schema';
 
 /**
@@ -78,6 +79,7 @@ export const internalTestMatrixGenerator = async (
   tree: Tree,
   options: InternalTestMatrixGeneratorSchema = {},
 ): Promise<GeneratorCallback> => {
+  assertSupportedNxVersion(tree);
   const preferInstallDependencies = options.preferInstallDependencies ?? false;
   const defaults = { preferInstallDependencies };
   const projectDefaults = { ...defaults, directory: 'packages' };

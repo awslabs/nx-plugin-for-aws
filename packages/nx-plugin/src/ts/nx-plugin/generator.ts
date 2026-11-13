@@ -23,6 +23,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import { sortObjectKeys } from '../../utils/object.js';
 import tsProjectGenerator, { getTsLibDetails } from '../lib/generator.js';
 import tsMcpServerGenerator from '../mcp-server/generator.js';
@@ -45,6 +46,7 @@ export const tsNxPluginGenerator = async (
   tree: Tree,
   options: TsNxPluginGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  assertSupportedNxVersion(tree);
   // Generate a TypeScript project as the base
   const { fullyQualifiedName, dir } = getTsLibDetails(tree, options);
   await tsProjectGenerator(tree, {

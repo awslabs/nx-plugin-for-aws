@@ -9,6 +9,7 @@ import { formatFilesInSubtree } from '../../utils/format.js';
 import { updateGitIgnore } from '../../utils/git.js';
 import { addGeneratorMetricsIfApplicable } from '../../utils/metrics.js';
 import { getGeneratorInfo, type NxGeneratorInfo } from '../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import { buildOpenApiCodeGenerationData } from '../ts-client/generator.js';
 import {
   toPythonClassName,
@@ -69,6 +70,7 @@ export const openApiPyClientGenerator = async (
   tree: Tree,
   options: OpenApiPyClientGeneratorSchema,
 ) => {
+  assertSupportedNxVersion(tree);
   const data = await buildOpenApiCodeGenerationData(
     tree,
     options.openApiSpecPath,

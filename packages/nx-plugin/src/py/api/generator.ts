@@ -4,6 +4,7 @@
  */
 import type { Tree } from '@nx/devkit';
 import { getGeneratorInfo, type NxGeneratorInfo } from '../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import { pyFastApiProjectGenerator } from '../fast-api/generator.js';
 import type { PyApiGeneratorSchema } from './schema';
 
@@ -15,6 +16,7 @@ export async function pyApiGenerator(
   tree: Tree,
   options: PyApiGeneratorSchema,
 ) {
+  assertSupportedNxVersion(tree);
   const framework = options.framework ?? 'fastapi';
 
   switch (framework) {

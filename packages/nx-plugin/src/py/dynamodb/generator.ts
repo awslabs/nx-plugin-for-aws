@@ -37,6 +37,7 @@ import {
   type NxGeneratorInfo,
   projectExists,
 } from '../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import { assignSharedPort } from '../../utils/port.js';
 import {
   SHARED_CONSTRUCTS_DEPENDENCIES,
@@ -76,6 +77,7 @@ export const pyDynamoDBGenerator = async (
   tree: Tree,
   options: PyDynamoDBGeneratorSchema,
 ): Promise<GeneratorCallback> => {
+  assertSupportedNxVersion(tree);
   const nameClassName = toClassName(options.name);
   const localTableName = `${getNpmScope(tree)}-${kebabCase(options.tableName ?? options.name)}`;
   const containerEngine = await resolveContainers(tree, 'inherit');

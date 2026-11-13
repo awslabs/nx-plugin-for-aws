@@ -16,6 +16,7 @@ import PackageJson from '../../../package.json' with { type: 'json' };
 import { AWS_NX_PLUGIN_CONFIG_FILE_NAME } from '../../utils/config/utils.js';
 import { getGitIncludedFiles, isWithinGitRepo } from '../../utils/git.js';
 import { getGeneratorInfo } from '../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import { LANGUAGE_COMMENT_SYNTAX, readLicenseConfig } from '../config.js';
 import type {
   CommentSyntax,
@@ -38,6 +39,7 @@ interface ProjectFile {
 export async function licenseSyncGenerator(
   tree: Tree,
 ): Promise<SyncGeneratorResult> {
+  assertSupportedNxVersion(tree);
   const source = (await readLicenseConfig(tree))?.source;
 
   if (!source) {

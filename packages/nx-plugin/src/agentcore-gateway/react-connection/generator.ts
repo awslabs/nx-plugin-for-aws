@@ -20,6 +20,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import { AGENTCORE_GATEWAY_AGENT_CONNECTION_GENERATOR_INFO } from '../agent-connection/generator.js';
 import { readAgentCoreGatewayMetadata } from '../generator.js';
 import type { AgentcoreGatewayReactConnectionGeneratorSchema } from './schema';
@@ -48,6 +49,7 @@ export const agentcoreGatewayReactConnectionGenerator = async (
   tree: Tree,
   options: AgentcoreGatewayReactConnectionGeneratorSchema,
 ) => {
+  assertSupportedNxVersion(tree);
   const frontendProject = readProjectConfigurationUnqualified(
     tree,
     options.sourceProject,

@@ -27,6 +27,7 @@ import {
   isNxPluginForAwsWorkspace,
   type NxGeneratorInfo,
 } from '../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import { sortObjectKeys } from '../../utils/object.js';
 import {
   addNxPluginDependencies,
@@ -63,6 +64,7 @@ export const tsNxMigrationGenerator = async (
   tree: Tree,
   options: TsNxMigrationGeneratorSchema,
 ): Promise<GeneratorCallback | void> => {
+  assertSupportedNxVersion(tree);
   const name = kebabCase(options.name);
   // Shown by `nx migrate` when the migration runs, so it needs to say something
   const description =

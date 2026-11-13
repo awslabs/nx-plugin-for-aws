@@ -12,6 +12,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../../utils/nx-version.js';
 import type { TsDynamoDBTrpcConnectionGeneratorSchema } from './schema';
 
 export const TS_DYNAMODB_TRPC_CONNECTION_GENERATOR_INFO: NxGeneratorInfo =
@@ -21,6 +22,7 @@ export const tsDynamoDBTrpcConnectionGenerator = async (
   tree: Tree,
   options: TsDynamoDBTrpcConnectionGeneratorSchema,
 ): Promise<void> => {
+  assertSupportedNxVersion(tree);
   const sourceProject = readProjectConfigurationUnqualified(
     tree,
     options.sourceProject,

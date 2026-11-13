@@ -24,6 +24,7 @@ import {
   type NxGeneratorInfo,
   readProjectConfigurationUnqualified,
 } from '../../utils/nx.js';
+import { assertSupportedNxVersion } from '../../utils/nx-version.js';
 import { toProjectRelativePath } from '../../utils/paths.js';
 import type { ReactGeneratorSchema } from './schema';
 
@@ -70,6 +71,7 @@ export async function reactGenerator(
   tree: Tree,
   options: ReactGeneratorSchema,
 ) {
+  assertSupportedNxVersion(tree);
   const frontendProjectConfig = readProjectConfigurationUnqualified(
     tree,
     options.frontendProjectName,

@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   BIOME_WASM_VERSION,
   formatFilesInSubtree,
+  formatFilesWithBiome,
   getDefaultBiomeConfig,
   requiresPythonToRuffTarget,
 } from './format.js';
@@ -454,6 +455,47 @@ describe('format utils', () => {
       expect(tree.read('src/styles.css')?.toString()).toBe(
         '.a {\n  color: red;\n}\n',
       );
+    });
+  });
+
+  describe('formatFilesWithBiome', () => {
+    let workspaceDir: string;
+    beforeEach(() => {
+      workspaceDir = mkdtempSync(path.join(tmpdir(), 'nx-plugin-format-'));
+    });
+    afterEach(() => {
+      rmSync(workspaceDir, { recursive: true, force: true });
+    });
+    it('should format a file the tree holds no change for', () => {
+      // Setup - written to disk by another tool, so the tree sees no change
+      // and formatFilesInSubtree would skip it.
+      mkdirSync(path.join(workspaceDir, 'src'));
+      writeFileSync(path.join(workspaceDir, 'src/test.ts'), 'const x=1;');
+      writeFileSync(path.join(workspaceDir, 'src/other.ts'), 'const y=2;');
+      const diskTree = new FsTree(workspaceDir, false);
+      // Execute
+      formatFilesWithBiome(diskTree, ['src/test.ts']);
+      // Verify - only the listed file is formatted
+      expect(diskTree.read('src/test.ts')?.toString()).toBe('const x = 1;\n');
+      expect(diskTree.read('src/other.ts')?.toString()).toBe('const y=2;');
+    });
+    it('should record no change for a file that is already formatted', () => {
+      // Setup
+      writeFileSync(path.join(workspaceDir, 'test.ts'), 'const x = 1;\n');
+      const diskTree = new FsTree(workspaceDir, false);
+      // Execute
+      formatFilesWithBiome(diskTree, ['test.ts']);
+      // Verify
+      expect(diskTree.listChanges()).toEqual([]);
+    });
+    it('should skip missing files and files biome does not format', () => {
+      // Setup
+      tree.write('README.md', '# Title\n\n\n\ntext');
+      // Execute
+      formatFilesWithBiome(tree, ['README.md', 'missing.ts']);
+      // Verify
+      expect(tree.read('README.md')?.toString()).toBe('# Title\n\n\n\ntext');
+      expect(tree.exists('missing.ts')).toBe(false);
     });
   });
 
