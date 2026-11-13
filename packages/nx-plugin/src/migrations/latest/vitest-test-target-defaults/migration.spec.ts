@@ -217,6 +217,18 @@ describe('vitest-test-target-defaults migration', () => {
       expect(targetDefaults.test).toEqual([TEST_CATCH_ALL, VITEST_ENTRY]);
     });
 
+    it('should add the vitest entry as the only test default when there is no test default', async () => {
+      writeTargetDefaults(tree, { build: { cache: true } });
+
+      const { nextSteps } = await migration(tree);
+
+      expect(nextSteps).toEqual([]);
+      expect(readNxJson(tree).targetDefaults).toEqual({
+        build: { cache: true },
+        test: [VITEST_ENTRY],
+      });
+    });
+
     it('should detect a project with a vite.config.mts', async () => {
       tree.delete('packages/lib/vitest.config.mts');
       tree.write('packages/lib/vite.config.mts', 'export default {};\n');

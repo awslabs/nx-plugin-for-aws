@@ -116,6 +116,14 @@ describe('nx version guard', () => {
     );
   });
 
+  it('should pass when the catalog has no nx entry', () => {
+    writeCatalog(tree, { typescript: '5.9.3' });
+    setDeclaredNx(tree, 'catalog:');
+
+    expect(readWorkspaceNxVersion(tree)).toBeUndefined();
+    expect(() => assertSupportedNxVersion(tree)).not.toThrow();
+  });
+
   it('should pass when no nx version is installed or declared', () => {
     expect(readWorkspaceNxVersion(tree)).toBeUndefined();
     expect(() => assertSupportedNxVersion(tree)).not.toThrow();
