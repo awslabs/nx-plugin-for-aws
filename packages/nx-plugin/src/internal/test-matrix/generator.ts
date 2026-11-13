@@ -31,6 +31,7 @@ import {
   type TsApiGeneratorSchema,
   type TsNxMigrationGeneratorSchema,
   type TsRdbGeneratorSchema,
+  tsAgentEvalGenerator,
   tsAgentGenerator,
   tsAgentGuardrailsGenerator,
   tsApiGenerator,
@@ -359,6 +360,10 @@ export const internalTestMatrixGenerator = async (
   for (const agent of tsAgents) {
     await tsAgentGenerator(tree, { ...agent, ...defaults });
   }
+  await tsAgentEvalGenerator(tree, {
+    project: 'ts-project',
+    agent: 'my-ts-agent',
+  });
   // Guard the default agent, which has AgentCore infrastructure.
   await tsAgentGuardrailsGenerator(tree, {
     project: 'ts-project',

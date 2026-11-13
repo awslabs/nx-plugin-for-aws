@@ -359,6 +359,43 @@ export const getAgent = async (sessionId: string) => {
     // LOCAL_DEV env var is set by the agent generator's dev target, not the connection generator
   });
 
+  it('should update eval target with MCP dependency when it exists', async () => {
+    setupProjects();
+    const before = JSON.parse(
+      tree.read('packages/my-api/project.json', 'utf-8')!,
+    );
+    before.targets['my-agent-eval'] = {
+      executor: 'nx:run-commands',
+      options: { commands: ['echo eval'] },
+    };
+    tree.write('packages/my-api/project.json', JSON.stringify(before));
+
+    await tsAgentMcpConnectionGenerator(tree, {
+      sourceProject: '@test/my-api',
+      targetProject: '@test/my-api',
+      sourceComponent: {
+        generator: 'ts#agent',
+        name: 'my-agent',
+        path: 'src/my-agent',
+        port: 8081,
+      },
+      targetComponent: {
+        generator: 'ts#mcp-server',
+        name: 'inventory-mcp',
+        path: 'src/inventory-mcp',
+        port: 8082,
+        rc: 'InventoryMcp',
+      },
+    });
+
+    const config = JSON.parse(
+      tree.read('packages/my-api/project.json', 'utf-8')!,
+    );
+    expect(config.targets['my-agent-eval'].dependsOn).toEqual([
+      { projects: ['@test/my-api'], target: 'inventory-mcp-dev' },
+    ]);
+  });
+
   it('should not duplicate imports on second run', async () => {
     setupProjects();
 

@@ -406,6 +406,7 @@ export default defineConfig({
               collapsed: true,
               items: [
                 { label: 'ts#agent', link: '/guides/ts-agent' },
+                { label: 'ts#agent#eval', link: '/guides/ts-agent-eval' },
                 {
                   label: 'ts#agent#guardrails',
                   link: '/guides/ts-agent-guardrails',
