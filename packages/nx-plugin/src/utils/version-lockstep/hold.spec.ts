@@ -71,6 +71,40 @@ describe('holdPinnedVersions', () => {
 });
 
 describe('PY_VERSION_HOLDS', () => {
+  it.each([
+    'opentelemetry-api',
+    'opentelemetry-exporter-otlp-proto-http',
+    'opentelemetry-propagator-aws-xray',
+    'opentelemetry-sdk',
+    'opentelemetry-sdk-extension-aws',
+  ] as const)(
+    'keeps %s compatible when the update proposes a newer version',
+    (name) => {
+      const proposed = { ...PY_VERSIONS, [name]: '==999.0.0' };
+      const notes = holdPinnedVersions(PY_VERSION_HOLDS, PY_VERSIONS, proposed);
+
+      expect(proposed).toEqual(PY_VERSIONS);
+      expect(notes.map((note) => note.name)).toEqual([name]);
+    },
+  );
+
+  it('allows ADOT and Langfuse updates while retaining ADOT dependency pins', () => {
+    const upgrades = {
+      'aws-opentelemetry-distro': '==999.0.0',
+      langfuse: '==999.0.0',
+    };
+    const proposed = {
+      ...PY_VERSIONS,
+      ...upgrades,
+      'opentelemetry-api': '==999.0.0',
+    };
+
+    const notes = holdPinnedVersions(PY_VERSION_HOLDS, PY_VERSIONS, proposed);
+
+    expect(proposed).toEqual({ ...PY_VERSIONS, ...upgrades });
+    expect(notes.map(({ name }) => name)).toEqual(['opentelemetry-api']);
+  });
+
   it('holds ty at the pinned version when a newer one is available', () => {
     const proposed: Record<string, string> = {
       ...PY_VERSIONS,

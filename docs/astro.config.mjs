@@ -412,6 +412,10 @@ export default defineConfig({
                 },
                 { label: 'py#agent', link: '/guides/py-agent' },
                 {
+                  label: 'observability#langfuse',
+                  link: '/guides/observability-langfuse',
+                },
+                {
                   label: 'py#agent#guardrails',
                   link: '/guides/py-agent-guardrails',
                 },

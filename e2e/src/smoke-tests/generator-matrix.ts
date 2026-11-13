@@ -38,7 +38,8 @@ export const runGeneratorMatrix = async (
   callerOpts: RunCliOpts,
   {
     preferInstallDependencies = false,
-  }: { preferInstallDependencies?: boolean } = {},
+    iac = 'cdk',
+  }: { preferInstallDependencies?: boolean; iac?: 'cdk' | 'terraform' } = {},
 ) => {
   const deferFlag = preferInstallDependencies
     ? ''
@@ -265,6 +266,22 @@ export const runGeneratorMatrix = async (
     `generate @aws/nx-plugin:py#agent --project=py_langchain_project --name=my-py-langchain-a2a-agent --framework=langchain --protocol=a2a --infra=agentcore --no-interactive${deferFlag}`,
     opts,
   );
+
+  if (iac === 'cdk') {
+    await runCLI(
+      `generate @aws/nx-plugin:py#project --name=py-langfuse-project --type=application --no-interactive${deferFlag}`,
+      opts,
+    );
+    await runCLI(
+      `generate @aws/nx-plugin:py#agent --project=py_langfuse_project --framework=strands --protocol=http --infra=agentcore --iac=cdk --auth=iam --session=in-memory --no-interactive${deferFlag}`,
+      opts,
+    );
+    await runCLI(
+      `generate @aws/nx-plugin:observability#langfuse --project=py_langfuse_project --host=https://langfuse.example.com --secretArn=arn:aws:secretsmanager:us-east-1:123456789012:secret:langfuse-abcdef --no-interactive${deferFlag}`,
+      opts,
+    );
+    // The application stack does not instantiate this build-only agent.
+  }
 
   // Website <-> FastAPI connection
   await runCLI(
