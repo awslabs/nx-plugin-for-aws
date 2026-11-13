@@ -9,9 +9,12 @@ import {
   type Tree,
 } from '@nx/devkit';
 import {
+  addDestructuredImport,
   addStarExport,
   appendToArrayViaGritQL,
   applyGritQL,
+  GRIT_INSERT_PLACEHOLDER,
+  insertViaGritQL,
   matchGritQL,
 } from '../ast.js';
 import type { DeclaredPyDependency } from '../declared-dependencies.js';
@@ -147,6 +150,120 @@ const addLocalCallbackUrlToTerraform = async (
       ` \`local_callback_urls = []\` => \`local_callback_urls = [\n    ${url}\n  ]\`,` +
       ` \`local_callback_urls = [$items]\` where { $items <: not contains \`${url}\`, $items <: [$..., $last], $last => \`$last,\n    ${url}\` }` +
       ` }`,
+  );
+};
+
+/** The vended CDK construct that creates the user pool and its web client. */
+export const USER_IDENTITY_CDK_FILE = joinPathFragments(
+  PACKAGES_DIR,
+  SHARED_CONSTRUCTS_DIR,
+  'src',
+  'core',
+  'user-identity.ts',
+);
+
+/** The vended Terraform module file that declares the user pool and its web client. */
+export const USER_IDENTITY_TERRAFORM_FILE = joinPathFragments(
+  PACKAGES_DIR,
+  SHARED_TERRAFORM_DIR,
+  'src',
+  'core',
+  'user-identity',
+  'identity',
+  'identity.tf',
+);
+
+const GRIT_IDENTITY_PROVIDER = (variable: string) =>
+  `\`new ${variable}(this, $_, $_);\` where { ${variable} <: r"[A-Za-z0-9_]+IdentityProvider" }`;
+const GRIT_CREATE_USER_POOL_CLIENT =
+  '`this.userPoolClient = this.createUserPoolClient(this.userPool);`';
+
+export interface AddIdentityProviderToCdkOptions {
+  /** Class name prefix of the vended `<className>IdentityProvider` construct */
+  className: string;
+  constructId: string;
+  nameKebabCase: string;
+}
+
+/**
+ * Idempotently add an identity provider construct to the vended
+ * `UserIdentity`, so it is created with the user pool and added to the web
+ * client. The construct goes after the web client is created, after any
+ * identity providers already added there, and is imported from
+ * `./identity-providers/<nameKebabCase>.js`.
+ *
+ * Returns whether the construct ended up in `UserIdentity` (already was, or
+ * now is). `false` means the file doesn't exist or has diverged from the
+ * shape this can recognise, and the caller tells the user what to add.
+ */
+export const addIdentityProviderToCdkUserIdentity = async (
+  tree: Tree,
+  { className, constructId, nameKebabCase }: AddIdentityProviderToCdkOptions,
+): Promise<boolean> => {
+  const filePath = USER_IDENTITY_CDK_FILE;
+  const constructClass = `${className}IdentityProvider`;
+  if (!tree.exists(filePath)) {
+    return false;
+  }
+  if (await matchGritQL(tree, filePath, `\`new ${constructClass}($_)\``)) {
+    return true;
+  }
+  const original = tree.read(filePath, 'utf-8');
+  const inserted = await insertViaGritQL(
+    tree,
+    filePath,
+    `or { ${GRIT_CREATE_USER_POOL_CLIENT}, ${GRIT_IDENTITY_PROVIDER('$c')} as $i where { $i <: after or { ${GRIT_CREATE_USER_POOL_CLIENT}, ${GRIT_IDENTITY_PROVIDER('$p')} } } } as $s where { $s <: not before ${GRIT_IDENTITY_PROVIDER('$n')}, $s += \`\n${GRIT_INSERT_PLACEHOLDER}\` }`,
+    `new ${constructClass}(this, '${constructId}', { userPool: this.userPool, userPoolClient: this.userPoolClient, userPoolDomain: this.userPoolDomain });`,
+  );
+  // More than one insertion point means the shape is not the vended one.
+  if (
+    !inserted ||
+    tree.read(filePath, 'utf-8').includes(GRIT_INSERT_PLACEHOLDER)
+  ) {
+    tree.write(filePath, original);
+    return false;
+  }
+  await addDestructuredImport(
+    tree,
+    filePath,
+    [constructClass],
+    `./identity-providers/${nameKebabCase}.js`,
+  );
+  return true;
+};
+
+/**
+ * Idempotently add an `aws_cognito_identity_provider` to the web client's
+ * `supported_identity_providers` in the vended `identity.tf`, after the
+ * providers already listed. Referencing the provider also makes Terraform
+ * create it before it updates the client.
+ *
+ * Returns whether the provider ended up listed (already was, or now is).
+ * `false` means the file doesn't exist or the list is not a literal, and the
+ * caller tells the user what to add.
+ */
+export const addIdentityProviderToTerraformClient = async (
+  tree: Tree,
+  { nameSnakeCase }: { nameSnakeCase: string },
+): Promise<boolean> => {
+  const filePath = USER_IDENTITY_TERRAFORM_FILE;
+  const reference = `aws_cognito_identity_provider.${nameSnakeCase}.provider_name`;
+  if (!tree.exists(filePath)) {
+    return false;
+  }
+  if (
+    await matchGritQL(
+      tree,
+      filePath,
+      `language hcl\n\`supported_identity_providers = [$items]\` where { $items <: contains \`${reference}\` }`,
+    )
+  ) {
+    return true;
+  }
+  return applyGritQL(
+    tree,
+    filePath,
+    `language hcl\n\`supported_identity_providers = [$items]\` where { $items <: not contains \`${reference}\`, $items <: [$..., $last], $last => \`$last, ${reference}\` }`,
   );
 };
 

@@ -46,6 +46,7 @@ import {
   tsProjectGenerator,
   tsRdbGenerator,
   tsWebsiteAuthGenerator,
+  tsWebsiteAuthIdpGenerator,
   tsWebsiteGenerator,
 } from '../../sdk/ts.js';
 import { installDependencies } from '../../utils/install.js';
@@ -133,6 +134,17 @@ export const internalTestMatrixGenerator = async (
     allowSignup: true,
     iac: 'inherit',
     ...defaults,
+  });
+  // Built only: the deployed e2e matrix would need a real identity provider and secret.
+  await tsWebsiteAuthIdpGenerator(tree, {
+    type: 'oidc',
+    name: 'TestIdp',
+    issuerUrl: 'https://cognito-idp.us-east-1.amazonaws.com/us-east-1_EXAMPLE',
+    clientId: 'example',
+    scopes: 'openid email profile',
+    attributeMapping:
+      '{"email":"email","given_name":"given_name","family_name":"family_name"}',
+    iac: 'inherit',
   });
 
   // tRPC APIs — REST + HTTP, with Cognito and custom auth.
