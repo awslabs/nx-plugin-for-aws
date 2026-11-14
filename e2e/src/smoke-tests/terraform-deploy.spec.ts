@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { ensureDirSync } from 'fs-extra';
 
 import { runCLI, tmpProjPath } from '../utils';
+import { renderIdpPlaceholders, SAMPLE_IDP } from '../utils/idp-placeholders';
 import {
   buildGatewayTargetUrl,
   DENIED_TOPIC_PROMPT,
@@ -134,7 +135,10 @@ const runTerraformDeployVariant = (config: TerraformDeployVariant) => {
       );
       writeFileSync(
         `${opts.cwd}/packages/infra/src/main.tf`,
-        mainTfTemplate.replace(/<% TEST_RUN_ID %>/g, testRunId),
+        renderIdpPlaceholders(
+          mainTfTemplate.replace(/<% TEST_RUN_ID %>/g, testRunId),
+          SAMPLE_IDP,
+        ),
       );
 
       // Per-run Terraform state key — the generated `init.ts` uses the

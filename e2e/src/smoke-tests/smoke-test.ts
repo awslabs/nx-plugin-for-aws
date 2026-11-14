@@ -15,6 +15,7 @@ import {
   runInstall,
   tmpProjPath,
 } from '../utils';
+import { renderIdpPlaceholders, SAMPLE_IDP } from '../utils/idp-placeholders';
 import { runGeneratorMatrix } from './generator-matrix';
 
 export const runSmokeTest = async (
@@ -65,12 +66,16 @@ export const runSmokeTest = async (
     opts,
   );
 
-  // Wire up website, cognito and trpc api
+  // Wire up website, cognito and trpc api. The build only synthesises, so the
+  // identity provider gets sample values; cdk-deploy re-renders it with real ones.
   writeFileSync(
     `${opts.cwd}/packages/infra/src/stacks/application-stack.ts`,
-    readFileSync(
-      join(__dirname, '../files/application-stack.ts.template'),
-      'utf-8',
+    renderIdpPlaceholders(
+      readFileSync(
+        join(__dirname, '../files/application-stack.ts.template'),
+        'utf-8',
+      ),
+      SAMPLE_IDP,
     ),
   );
 

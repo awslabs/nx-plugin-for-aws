@@ -67,7 +67,7 @@ export const runGeneratorMatrix = async (
     opts,
   );
   await runCLI(
-    `generate @aws/nx-plugin:ts#website#auth --project=@e2e-test/website-no-router --cognitoDomain=test-no-router --no-interactive${deferFlag}`,
+    `generate @aws/nx-plugin:ts#website#auth --project=@e2e-test/website-no-router --cognitoDomain=test-no-router --federation=oidc --no-interactive${deferFlag}`,
     opts,
   );
 
